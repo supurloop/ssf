@@ -47,6 +47,7 @@ static uint8_t _sbfBuffers[SBF_TEST_NUM_FIFOS][SSF_TEST_BFIFO_SIZE + (1UL)];
 #if SSF_BFIFO_MULTI_BYTE_ENABLE == 1
 static uint8_t _sbfReadBuf[SSF_TEST_BFIFO_SIZE];
 #endif /* SSF_BFIFO_MULTI_BYTE_ENABLE */
+
 /* --------------------------------------------------------------------------------------------- */
 /* Performs unit test on ssfbfifo's external interface.                                          */
 /* --------------------------------------------------------------------------------------------- */

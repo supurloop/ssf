@@ -488,9 +488,6 @@ bool SSFJsonGetBase64(const char* js, const char** path, uint8_t* out, size_t ou
     size_t end;
     size_t index;
     SSFJsonType_t jt;
-    size_t i;
-    size_t j;
-    uint8_t len;
 
     SSF_REQUIRE(js != NULL);
     SSF_REQUIRE(path != NULL);
@@ -501,14 +498,7 @@ bool SSFJsonGetBase64(const char* js, const char** path, uint8_t* out, size_t ou
     if (jt != SSF_JSON_TYPE_STRING) return false;
     start++; end--;
 
-    if ((end - start + 1) & 0x03) return false; /* Not mult of 4 */
-    *outLen = 0;
-    for (i = 0, j = 0; (i < (end - start + 1)) && (j < outSize); i += 4, j += 3)
-    {
-        if ((len = SSFBase64Dec32To24(&js[start + i], &out[j], outSize - j)) == 0) return false;
-        *outLen += len;
-    }
-    return true;
+    return SSFBase64Decode(&js[start], (end - start + 1), out, outSize, outLen);
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -633,7 +623,7 @@ bool SSFJsonPrintHex(char* js, size_t size, size_t start, size_t* end, const uin
 bool SSFJsonPrintBase64(char* js, size_t size, size_t start, size_t* end, const uint8_t* in,
                               size_t inLen, bool *comma)
 {
-    char b32[5] = "    ";
+    size_t outLen;
 
     SSF_REQUIRE(js != NULL);
     SSF_REQUIRE(end != NULL);
@@ -642,13 +632,8 @@ bool SSFJsonPrintBase64(char* js, size_t size, size_t start, size_t* end, const 
 
     SSF_JSON_COMMA(comma);
     if (!SSFJsonPrintUnescChar(js, size, start, &start, '"')) return false;
-    while (inLen > 0)
-    {
-        SSFBase64Enc24To32(in, inLen, b32, sizeof(b32));
-        if (!SSFJsonPrintCString(js, size, start, &start, b32, false)) return false;
-        if ((inLen - 3) > inLen) break;
-        inLen -= 3; in += 3;
-    }
+    if (!SSFBase64Encode(in, inLen, &js[start], size - start, &outLen)) return false;
+    start += outLen;
     if (!SSFJsonPrintUnescChar(js, size, start, &start, '"')) return false;
     *end = start;
     return true;

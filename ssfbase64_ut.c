@@ -84,7 +84,9 @@ void SSFBase64UnitTest(void)
     uint8_t b24[3];
     char b32[4];
     char encodedStr[5];
+    char decodedBin[3];
     char encodedBigStr[128];
+    char decodedBigBin[128];
     size_t outLen;
 
     for (i = 0; i < (sizeof(_b64BlockUT) / sizeof(SSBase64UT_t)); i++) 
@@ -105,6 +107,10 @@ void SSFBase64UnitTest(void)
         SSF_ASSERT(outLen == strlen(encodedStr));
         SSF_ASSERT(outLen == strlen(_b64BlockUT[i].encoded));
         SSF_ASSERT(memcmp(_b64BlockUT[i].encoded, encodedStr, outLen + 1) == 0);
+
+        SSF_ASSERT(SSFBase64Decode(_b64BlockUT[i].encoded, strlen(_b64BlockUT[i].encoded), decodedBin, sizeof(decodedBin), &outLen));
+        SSF_ASSERT(outLen == _b64BlockUT[i].unencodedLen);
+        SSF_ASSERT(memcmp(_b64BlockUT[i].unencoded, decodedBin, outLen) == 0);
     }
 
     for (i = 0; i < (sizeof(_b64StringUT) / sizeof(SSBase64UT_t)); i++)
@@ -113,6 +119,10 @@ void SSFBase64UnitTest(void)
         SSF_ASSERT(outLen == strlen(encodedBigStr));
         SSF_ASSERT(outLen == strlen(_b64StringUT[i].encoded));
         SSF_ASSERT(memcmp(_b64StringUT[i].encoded, encodedBigStr, outLen + 1) == 0);
+
+        SSF_ASSERT(SSFBase64Decode(_b64StringUT[i].encoded, strlen(_b64StringUT[i].encoded), decodedBigBin, sizeof(decodedBigBin), &outLen));
+        SSF_ASSERT(outLen == _b64StringUT[i].unencodedLen);
+        SSF_ASSERT(memcmp(_b64StringUT[i].unencoded, decodedBigBin, outLen) == 0);
     }
 
     printf("SSF BASE64 UNIT TEST DONE!\r\n");

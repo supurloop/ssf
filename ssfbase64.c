@@ -132,6 +132,22 @@ bool SSFBase64Encode(const uint8_t *in, size_t inLen, char *out, size_t outSize,
 /* --------------------------------------------------------------------------------------------- */
 bool SSFBase64Decode(const char *in, size_t inLen, uint8_t *out, size_t outSize, size_t *outLen)
 {
+    uint8_t len;
+
     SSF_REQUIRE(in != NULL);
-    return true;
+    SSF_REQUIRE(out != NULL);
+    SSF_REQUIRE(outLen != NULL);
+
+    if ((inLen & 0x03) != 0) return false;
+    *outLen = 0;
+    while (inLen >= 4)
+    {
+        if ((len = SSFBase64Dec32To24(in, out, outSize)) == 0) return false;
+        inLen -= 4;
+        in += 4;
+        out += len;
+        *outLen += len;
+        if (outSize >= len) outSize -= len; else outSize = 0;
+    }
+    return inLen == 0;
 }

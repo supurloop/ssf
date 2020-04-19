@@ -618,7 +618,7 @@ bool SSFJsonPrintHex(char* js, size_t size, size_t start, size_t* end, const uin
     if (!SSFJsonPrintUnescChar(js, size, start, &start, '"')) return false;
     while (inLen--)
     {
-        if (rev) snprintf(hex, sizeof(hex), "%02X", (unsigned int) &in[inLen]);
+        if (rev) snprintf(hex, sizeof(hex), "%02X", (unsigned int) in[inLen]);
         else { snprintf(hex, sizeof(hex), "%02X", *in); in++; }
         if (!SSFJsonPrintCString(js, size, start, &start, hex, false)) return false;
     }

@@ -65,6 +65,7 @@
 #define SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE_POW2_MINUS1 (2u)
 
 #define SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE (SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE_255)
+#define SSF_BFIFO_MULTI_BYTE_ENABLE                     (1u)
 
 /* --------------------------------------------------------------------------------------------- */
 /* Configure ssfmpool's memory pool interface                                                    */

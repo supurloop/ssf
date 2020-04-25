@@ -35,6 +35,10 @@
 #include "ssfbase64.h"
 #include "ssfassert.h"
 
+/* Low level block encode/decode */
+uint8_t SSFBase64Dec32To24(const uint8_t* b32, uint8_t* b24out, size_t b24outSize);
+void SSFBase64Enc24To32(const uint8_t* b24, size_t b24len, char* b32out, size_t b32outSize);
+
 typedef struct SSBase64UT
 {
     uint8_t *unencoded;

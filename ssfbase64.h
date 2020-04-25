@@ -36,11 +36,11 @@
 #include <stdbool.h>
 #include "ssfport.h"
 
+/* --------------------------------------------------------------------------------------------- */
+/* External Interface                                                                            */
+/* --------------------------------------------------------------------------------------------- */
 bool SSFBase64Encode(const uint8_t *in, size_t inLen, char *out, size_t outSize, size_t *outLen);
-bool SSFBase64Decode(const char *in, size_t inLen, uint8_t *out, size_t outSize, size_t *outLen);
-
-uint8_t SSFBase64Dec32To24(const uint8_t *b32, uint8_t *b24out, size_t b24outSize);
-void SSFBase64Enc24To32(const uint8_t* b24, size_t b24len, char* b32out, size_t b32outSize);
+bool SSFBase64Decode(const char *in, size_t inLenLim, uint8_t *out, size_t outSize, size_t *outLen);
 
 /* --------------------------------------------------------------------------------------------- */
 /* Unit test                                                                                     */

@@ -58,6 +58,9 @@ SSFHexUT_t _hexUTPass[] =
     {"A1f51234567890abcdefABCDEF", "A1F51234567890ABCDEFABCDEF", "a1f51234567890abcdefabcdef", "EFCDABEFCDAB9078563412F5A1", "efcdabefcdab9078563412f5a1","\xA1\xF5\x12\x34\x56\x78\x90\xab\xcd\xef\xAB\xCD\xEF","\xef\xcd\xab\xef\xcd\xab\x90\x78\x56\x34\x12\xF5\xA1", 13},
 };
 
+/* --------------------------------------------------------------------------------------------- */
+/* Performs unit test on ASCII Hex external interface.                                           */
+/* --------------------------------------------------------------------------------------------- */
 void SSFHexUnitTest(void)
 {
     uint32_t i;

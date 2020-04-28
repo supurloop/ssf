@@ -82,6 +82,9 @@ SSBase64UT_t _b64StringUT[] = {
 };
 
 #if SSF_CONFIG_BASE64_UNIT_TEST == 1
+/* --------------------------------------------------------------------------------------------- */
+/* Performs unit test on Base64 external interface.                                              */
+/* --------------------------------------------------------------------------------------------- */
 void SSFBase64UnitTest(void)
 {
     uint32_t i;

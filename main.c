@@ -8,6 +8,7 @@
 #include "ssfjson.h"
 #include "ssfbase64.h"
 #include "ssfhex.h"
+#include "ssffcsum.h"
 
 void* ssfUnused;
 
@@ -93,6 +94,9 @@ void main(void)
     SSFHexUnitTest();
 #endif /* SSF_CONFIG_BASE64_UNIT_TEST */
 
+#if SSF_CONFIG_FCSUM_UNIT_TEST == 1
+    SSFFCSumUnitTest();
+#endif /* SSF_CONFIG_FCSUM_UNIT_TEST */
 
 #if 0
     SSFSMInit(SSF_SM_TEST1, TestHandler1, 10, 1);

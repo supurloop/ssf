@@ -189,7 +189,7 @@ ssfbf_uint_t SSFBFifoLen(const SSFBFifo_t *fifo)
 /* --------------------------------------------------------------------------------------------- */
 /* Puts bytes into the fifo.                                                                     */
 /* --------------------------------------------------------------------------------------------- */
-void SSFBFifoPutBytes(SSFBFifo_t *fifo, uint8_t *inBytes, uint32_t inBytesLen)
+void SSFBFifoPutBytes(SSFBFifo_t *fifo, const uint8_t *inBytes, uint32_t inBytesLen)
 {
     SSF_REQUIRE(fifo != NULL);
     SSF_REQUIRE(inBytes != NULL);

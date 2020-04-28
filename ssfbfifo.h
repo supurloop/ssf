@@ -80,7 +80,7 @@ ssfbf_uint_t SSFBFifoSize(const SSFBFifo_t *fifo);
 ssfbf_uint_t SSFBFifoLen(const SSFBFifo_t *fifo);
 
 #if SSF_BFIFO_MULTI_BYTE_ENABLE == 1
-void SSFBFifoPutBytes(SSFBFifo_t *fifo, uint8_t *inBytes, uint32_t inBytesLen);
+void SSFBFifoPutBytes(SSFBFifo_t *fifo, const uint8_t *inBytes, uint32_t inBytesLen);
 bool SSFBFifoPeekBytes(const SSFBFifo_t *fifo, uint8_t *outBytes, uint32_t outBytesSize, 
                        uint32_t *outBytesLen);
 bool SSFBFifoGetBytes(SSFBFifo_t* fifo, uint8_t *outBytes, uint32_t outBytesSize, 

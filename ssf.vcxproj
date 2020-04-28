@@ -144,6 +144,7 @@
     <ClCompile Include="ssfbfifo.c" />
     <ClCompile Include="ssfbfifo_ut.c" />
     <ClCompile Include="ssfhex.c" />
+    <ClCompile Include="ssfhex_ut.c" />
     <ClCompile Include="ssfjson.c" />
     <ClCompile Include="ssfjson_ut.c" />
     <ClCompile Include="ssfll.c" />

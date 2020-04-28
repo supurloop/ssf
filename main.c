@@ -7,6 +7,7 @@
 #include "ssfport.h"
 #include "ssfjson.h"
 #include "ssfbase64.h"
+#include "ssfhex.h"
 
 void* ssfUnused;
 
@@ -66,9 +67,6 @@ void TestHandler2(SSFSMEventId_t eid, const SSFSMData_t* data, SSFSMDataLen_t da
     }
 }
 
-SSFMPool_t pool;
-void SSFJsonInit(void);
-void SSFJsonFindOpenRootHandler(SSFSMEventId_t eid, const SSFSMData_t* data, SSFSMDataLen_t dataLen);
 void main(void)
 {
 #if SSF_CONFIG_BFIFO_UNIT_TEST == 1
@@ -91,15 +89,10 @@ void main(void)
     SSFBase64UnitTest();
 #endif /* SSF_CONFIG_BASE64_UNIT_TEST */
 
-#if 0
-    SSFSMInit(SSF_SM_JSON, SSFJsonFindOpenRootHandler, 10, 1);
-    SSFSMPutEvent(SSF_SM_JSON, SSF_SM_JSON_BYTE);
-    while (1)
-    {
-        SSFSMTask();
-        Sleep(1);
-    }
-#endif
+#if SSF_CONFIG_HEX_UNIT_TEST == 1
+    SSFHexUnitTest();
+#endif /* SSF_CONFIG_BASE64_UNIT_TEST */
+
 
 #if 0
     SSFSMInit(SSF_SM_TEST1, TestHandler1, 10, 1);

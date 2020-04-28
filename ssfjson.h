@@ -38,8 +38,8 @@
 
 /* --------------------------------------------------------------------------------------------- */
 /* Limitations                                                                                   */
-/* Parser will accept inputs with duplicate object keys.                                         */
-/* Parser will only match first of more than one duplicate object keys.                          */
+/* Parser considers inputs with duplicate object keys valid.                                     */
+/* Parser will only match the first of more than one duplicate object key.                       */
 /* Parser only performs literal path match on object keys.                                       */
 // Parser only accepts 8-bit ASCII encoded strings, embedded NULL/0 values terminate input.      */
 /* --------------------------------------------------------------------------------------------- */
@@ -59,6 +59,25 @@ typedef enum SSFJsonType
     SSF_JSON_TYPE_NULL,
     SSF_JSON_TYPE_MAX,
 } SSFJsonType_t;
+
+#if SSF_JSON_CONFIG_ENABLE_FLOAT_GEN == 1
+typedef enum SSFJsonFltFmt
+{
+    SSF_JSON_FLT_FMT_PREC_0,
+    SSF_JSON_FLT_FMT_PREC_1,
+    SSF_JSON_FLT_FMT_PREC_2,
+    SSF_JSON_FLT_FMT_PREC_3,
+    SSF_JSON_FLT_FMT_PREC_4,
+    SSF_JSON_FLT_FMT_PREC_5,
+    SSF_JSON_FLT_FMT_PREC_6,
+    SSF_JSON_FLT_FMT_PREC_7,
+    SSF_JSON_FLT_FMT_PREC_8,
+    SSF_JSON_FLT_FMT_PREC_9,
+    SSF_JSON_FLT_FMT_STD,
+    SSF_JSON_FLT_FMT_SHORT,
+    SSF_JSON_FLT_FMT_MAX,
+} SSFJsonFltFmt_t;
+#endif /* SSF_JSON_CONFIG_ENABLE_FLOAT_GEN */
 
 typedef bool (*SSFJsonPrintFn_t)(char* js, size_t size, size_t start, size_t* end, void* in);
 
@@ -94,7 +113,8 @@ bool SSFJsonPrintHex(char* js, size_t size, size_t start, size_t* end, const uin
 bool SSFJsonPrintBase64(char* jstr, size_t size, size_t start, size_t* end, const uint8_t* in,
                               size_t inLen, bool *comma);
 #if SSF_JSON_CONFIG_ENABLE_FLOAT_GEN == 1
-bool SSFJsonPrintDouble(char* js, size_t size, size_t start, size_t* end, double in, bool *comma);
+bool SSFJsonPrintDouble(char* js, size_t size, size_t start, size_t* end, double in,
+                        SSFJsonFltFmt_t fmt, bool *comma);
 #endif /* SSF_JSON_CONFIG_ENABLE_FLOAT_GEN */
 bool SSFJsonPrintInt(char* js, size_t size, size_t start, size_t* end, int32_t in, bool *comma);
 bool SSFJsonPrintUInt(char* js, size_t size, size_t start, size_t* end, uint32_t in, bool *comma);
@@ -105,7 +125,9 @@ bool SSFJsonPrintUInt(char* js, size_t size, size_t start, size_t* end, uint32_t
 bool SSFJsonPrintCString(char* js, size_t size, size_t start, size_t* end, const char* in, bool *comma);
 bool SSFJsonPrint(char* js, size_t size, size_t start, size_t* end, SSFJsonPrintFn_t fn, void* in,
                     const char *oc, bool *comma);
+#if SSF_JSON_CONFIG_ENABLE_UPDATE == 1
 bool SSFJsonUpdate(char* js, size_t size, const char** path, SSFJsonPrintFn_t fn);
+#endif /* SSF_JSON_CONFIG_ENABLE_UPDATE */
 
 /* --------------------------------------------------------------------------------------------- */
 /* Unit test                                                                                     */

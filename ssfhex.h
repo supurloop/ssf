@@ -2,7 +2,7 @@
 /* Small System Framework                                                                        */
 /*                                                                                               */
 /* ssfhex.h                                                                                      */
-/* Provides hex encoder/decoder interface.                                                       */
+/* Provides ASCII hex encoder/decoder interface.                                                 */
 /*                                                                                               */
 /* BSD-3-Clause License                                                                          */
 /* Copyright 2020 Supurloop Software LLC                                                         */
@@ -35,13 +35,35 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+/* --------------------------------------------------------------------------------------------- */
+/* Defines                                                                                       */
+/* --------------------------------------------------------------------------------------------- */
+typedef enum SSFHexCase
+{
+    SSF_HEX_CASE_LOWER,
+    SSF_HEX_CASE_UPPER,
+    SSF_HEX_CASE_MAX,
+} SSFHexCase_t;
+
 #define SSFIsHex(h) (((h) >= 'a' && (h) <= 'f') || ((h) >= 'A' && (h) <= 'F') || \
                      ((h) >= '0' && (h) <= '9'))
 
-bool SSFHexBinToByte(char *out, size_t outSize, uint8_t in);
-bool SSFHexByteToBin(char hex0, char hex1, uint8_t *out);
+/* --------------------------------------------------------------------------------------------- */
+/* External Interface                                                                            */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFHexBinToByte(uint8_t in, char *out, size_t outSize, SSFHexCase_t hcase);
+bool SSFHexByteToBin(const char *hex, uint8_t *out);
 
-bool SSFHexBytesToBin(const char *in, uint8_t *out, size_t outSize, size_t *outLen);
-bool SSFHexBinToBytes(const uint8_t *in, size_t inLen, char *out, size_t outSize, size_t *outLen);
+bool SSFHexBytesToBin(const char *in, size_t inLenLim, uint8_t *out, size_t outSize, 
+                      size_t *outLen, bool rev);
+bool SSFHexBinToBytes(const uint8_t *in, size_t inLen, char *out, size_t outSize, size_t *outLen,
+                      bool rev, SSFHexCase_t hcase);
+
+/* --------------------------------------------------------------------------------------------- */
+/* Unit test                                                                                     */
+/* --------------------------------------------------------------------------------------------- */
+#if SSF_CONFIG_HEX_UNIT_TEST == 1
+void SSFHexUnitTest(void);
+#endif /* SSF_CONFIG_HEX_UNIT_TEST */
 
 #endif /* SSF_HEX_H_INCLUDE */

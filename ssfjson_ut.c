@@ -338,7 +338,18 @@ bool p2fna(char* js, size_t size, size_t start, size_t* end, void* in)
     if (!SSFJsonPrintFalse(js, size, start, &start, &comma)) return false;
     if (!SSFJsonPrintNull(js, size, start, &start, &comma)) return false;
 #if SSF_JSON_CONFIG_ENABLE_FLOAT_GEN == 1
-    if (!SSFJsonPrintDouble(js, size, start, &start, -9.8e3, &comma)) return false;
+    if (!SSFJsonPrintDouble(js, size, start, &start, -92.8123456789123e3, SSF_JSON_FLT_FMT_STD, &comma)) return false;
+    if (!SSFJsonPrintDouble(js, size, start, &start, -92.8123456789123e3, SSF_JSON_FLT_FMT_SHORT, &comma)) return false;
+    if (!SSFJsonPrintDouble(js, size, start, &start, -92.8123456789123e3, SSF_JSON_FLT_FMT_PREC_0, &comma)) return false;
+    if (!SSFJsonPrintDouble(js, size, start, &start, -92.8123456789123e3, SSF_JSON_FLT_FMT_PREC_1, &comma)) return false;
+    if (!SSFJsonPrintDouble(js, size, start, &start, -92.8123456789123e3, SSF_JSON_FLT_FMT_PREC_2, &comma)) return false;
+    if (!SSFJsonPrintDouble(js, size, start, &start, -92.8123456789123e3, SSF_JSON_FLT_FMT_PREC_3, &comma)) return false;
+    if (!SSFJsonPrintDouble(js, size, start, &start, -92.8123456789123e3, SSF_JSON_FLT_FMT_PREC_4, &comma)) return false;
+    if (!SSFJsonPrintDouble(js, size, start, &start, -92.8123456789123e3, SSF_JSON_FLT_FMT_PREC_5, &comma)) return false;
+    if (!SSFJsonPrintDouble(js, size, start, &start, -92.8123456789123e3, SSF_JSON_FLT_FMT_PREC_6, &comma)) return false;
+    if (!SSFJsonPrintDouble(js, size, start, &start, -92.8123456789123e3, SSF_JSON_FLT_FMT_PREC_7, &comma)) return false;
+    if (!SSFJsonPrintDouble(js, size, start, &start, -92.8123456789123e3, SSF_JSON_FLT_FMT_PREC_8, &comma)) return false;
+    if (!SSFJsonPrintDouble(js, size, start, &start, -92.8123456789123e3, SSF_JSON_FLT_FMT_PREC_9, &comma)) return false;
 #endif /* SSF_JSON_CONFIG_ENABLE_FLOAT_GEN */
     *end = start;
     return true;
@@ -361,7 +372,7 @@ bool p3fn(char* js, size_t size, size_t start, size_t* end, void* in)
     if (!SSFJsonPrintBase64(js, size, start, &start, (uint8_t*)i, sizeof(uint32_t), false)) return false;
 #if SSF_JSON_CONFIG_ENABLE_FLOAT_GEN == 1
     if (!SSFJsonPrintLabel(js, size, start, &start, "double", &comma)) return false;
-    if (!SSFJsonPrintDouble(js, size, start, &start, *i, false)) return false;
+    if (!SSFJsonPrintDouble(js, size, start, &start, *i, SSF_JSON_FLT_FMT_STD, false)) return false;
 #endif /* SSF_JSON_CONFIG_ENABLE_FLOAT_GEN */
     if (!SSFJsonPrintLabel(js, size, start, &start, "int", &comma)) return false;
     if (!SSFJsonPrintInt(js, size, start, &start, *i, false)) return false;
@@ -386,7 +397,8 @@ bool p4fn(char* js, size_t size, size_t start, size_t* end, void* in)
     return true;
 }
 
-void SSFJsonUnitTestUpdate(char* out, size_t outSize, char *path0, char *path1, char *path2, 
+#if SSF_JSON_CONFIG_ENABLE_UPDATE == 1
+void SSFJsonUnitTestUpdate(char* out, size_t outSize, char *path0, char *path1, char *path2,
                            const char* initial, const char* expected)
 {
     char* path[SSF_JSON_CONFIG_MAX_IN_DEPTH + 1];
@@ -401,6 +413,7 @@ void SSFJsonUnitTestUpdate(char* out, size_t outSize, char *path0, char *path1, 
     SSF_ASSERT(SSFJsonIsValid(out) == true);
     if (expected != NULL) SSF_ASSERT(strncmp(out, expected, outSize) == 0);
 }
+#endif /* SSF_JSON_CONFIG_ENABLE_UPDATE */
 
 /* --------------------------------------------------------------------------------------------- */
 /* Performs unit test on ssfjson's external interface.                                           */
@@ -758,7 +771,7 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(SSFJsonGetHex(_jtsComplex[i], path, binOut, sizeof(binOut), &binOutLen, false) == false);
         SSF_ASSERT(SSFJsonGetBase64(_jtsComplex[i], path, binOut, sizeof(binOut), &binOutLen) == true);
         SSF_ASSERT(binOutLen == 1);
-        SSF_ASSERT(binOut[0] = 'a');
+        SSF_ASSERT(binOut[0] == 'a');
         jtype = SSF_JSON_TYPE_MAX;
         SSF_ASSERT(SSFJsonObject(_jtsComplex[i], &index, &start, &end, path, 0, &jtype) == true);
         SSF_ASSERT(jtype == SSF_JSON_TYPE_STRING);
@@ -1160,6 +1173,7 @@ void SSFJsonUnitTest(void)
     SSF_ASSERT(SSFJsonIsValid(_jsOut));
     SSF_ASSERT(i == 0xabcdef90);
 
+#if SSF_JSON_CONFIG_ENABLE_UPDATE == 1
     SSFJsonUnitTestUpdate(_jsOut, sizeof(_jsOut), "l1", NULL, NULL,
         "{}",
         "{\"l1\":\"mynewvalue\"}");
@@ -1199,6 +1213,7 @@ void SSFJsonUnitTest(void)
     SSFJsonUnitTestUpdate(_jsOut, sizeof(_jsOut), "l1", "l2", "l3", _jtsComplex[1], NULL);
     SSFJsonUnitTestUpdate(_jsOut, sizeof(_jsOut), "obj2", "objdeep", "NUMFAR", _jtsComplex[1], NULL);
     SSFJsonUnitTestUpdate(_jsOut, sizeof(_jsOut), "obj2", "objdeep", "hex3", _jtsComplex[1], NULL);
+#endif /* SSF_JSON_CONFIG_ENABLE_UPDATE */
 
     printf("SSF JSON UNIT TEST DONE!\r\n");
     return;

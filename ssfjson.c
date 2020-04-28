@@ -41,12 +41,8 @@
 #include <math.h> /* round() */
 #endif /* SSF_JSON_CONFIG_ENABLE_FLOAT_PARSE */
 
-// #define to enable/disable update support
 // use _ for static vars and functions
-// add simple format specifiers for float printing.
-// update needs to be able to add non-existant field
-// return error if get int or uint would overflow
-
+// SSFJsonGetString escaped len is wrong.
 /* --------------------------------------------------------------------------------------------- */
 /* Defines                                                                                       */
 /* --------------------------------------------------------------------------------------------- */
@@ -89,7 +85,7 @@ static void SSFJsonWhitespace(const char *js, size_t *index)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true and start/end index if 1 or more digits 0-9 found in JSON string, else false.    */
 /* --------------------------------------------------------------------------------------------- */
-static bool SSFJsonNumberIsDigits(const char *js, size_t *index, size_t *start, size_t *end)
+static bool SSFJsonNumberIsDigits(const char *js, size_t *index, size_t *end)
 {
     bool foundDig = false;
     while ((js[*index] >= '0') && (js[*index] <= '9')) { (*index)++; foundDig = true; }
@@ -110,15 +106,15 @@ static bool SSFJsonNumber(const char *js, size_t *index, size_t *start, size_t *
     if ((js[*index] != '-') && !((js[*index] >= '0') && (js[*index] <= '9'))) return false;
     *start = *index;
     if (js[*index] == '-') (*index)++;
-    if (js[*index] != '0') { if (!SSFJsonNumberIsDigits(js, index, start, end)) return false; }
+    if (js[*index] != '0') { if (!SSFJsonNumberIsDigits(js, index, end)) return false; }
     else { (*index)++; }
     if (js[*index] == '.')
-    { (*index)++; if (!SSFJsonNumberIsDigits(js, index, start, end)) return false; }
+    { (*index)++; if (!SSFJsonNumberIsDigits(js, index, end)) return false; }
     if ((js[*index] == 'e') || (js[*index] == 'E'))
     {
         (*index)++;
         if ((js[*index] == '-') || (js[*index] == '+')) (*index)++;
-        return SSFJsonNumberIsDigits(js, index, start, end);
+        return SSFJsonNumberIsDigits(js, index, end);
     }
     *end = *index - 1;
     return true;
@@ -185,21 +181,19 @@ static bool SSFJsonArray(const char* js, size_t* index, size_t* start, size_t* e
     if (path != NULL && path[depth] == NULL) *start = *index;
     (*index)++;
 
-    if (js[*index] != ']')
+    if (path != NULL && path[depth] != NULL) pindex = *((const size_t *)path[depth]);
+    while (SSFJsonValue(js, index, &valStart, &valEnd, path, depth, &djt) == true)
     {
-        if (path != NULL && path[depth] != NULL) pindex = *((const size_t *)path[depth]);
-        while (SSFJsonValue(js, index, &valStart, &valEnd, path, depth, &djt) == true)
-        {
-            if (pindex == curIndex) { *start = valStart; *end = valEnd; *jt = djt; }
-            SSFJsonWhitespace(js, index);
-            if (js[*index] == ']') break;
-            if (js[*index] != ',') return false;
-            (*index)++;
-            curIndex++;
-        }
-        if ((pindex != -1) && (pindex > curIndex)) *jt = SSF_JSON_TYPE_ERROR;
-        if (js[*index] != ']') return false;
+        if (pindex == curIndex) { *start = valStart; *end = valEnd; *jt = djt; }
+        SSFJsonWhitespace(js, index);
+        if (js[*index] == ']') break;
+        if (js[*index] != ',') return false;
+        (*index)++;
+        curIndex++;
     }
+    if ((pindex != -1) && (pindex > curIndex)) *jt = SSF_JSON_TYPE_ERROR;
+    if (js[*index] != ']') return false;
+
     if (path != NULL && path[depth] == NULL) { *end = *index; *jt = SSF_JSON_TYPE_ARRAY; }
     (*index)++;
     return true;
@@ -395,10 +389,9 @@ bool SSFJsonGetString(const char* js, const char **path, char* out, size_t outSi
             start++; len--;
             if (len < 4) return false;
             if (index >= (outSize - 1 - 2)) return false;
-
-            if (!SSFHexByteToBin(js[start], js[start + 1], &out[index])) return false;
+            if (!SSFHexByteToBin(&js[start], &out[index])) return false;
             index++;
-            if (!SSFHexByteToBin(js[start + 2], js[start + 3], &out[index])) return false;
+            if (!SSFHexByteToBin(&js[start + 2], &out[index])) return false;
             start += 3; len -= 3;
         }
         else out[index] = js[start];
@@ -439,11 +432,6 @@ bool SSFJsonGetLong(const char* js, const char **path, long int *out)
 {
     double dout;
 
-    SSF_REQUIRE(js != NULL);
-    SSF_REQUIRE(path != NULL);
-    SSF_REQUIRE(path[SSF_JSON_CONFIG_MAX_IN_DEPTH] == NULL);
-    SSF_REQUIRE(out != NULL);
-
     if (!SSFJsonGetDouble(js, path, &dout)) return false;
     *out = (int32_t) round(dout);
     return true;
@@ -455,11 +443,6 @@ bool SSFJsonGetLong(const char* js, const char **path, long int *out)
 bool SSFJsonGetULong(const char* js, const char** path, unsigned long int* out)
 {
     double dout;
-
-    SSF_REQUIRE(js != NULL);
-    SSF_REQUIRE(path != NULL);
-    SSF_REQUIRE(path[SSF_JSON_CONFIG_MAX_IN_DEPTH] == NULL);
-    SSF_REQUIRE(out != NULL);
 
     if (!SSFJsonGetDouble(js, path, &dout)) return false;
     if (dout < 0) return false;
@@ -522,7 +505,6 @@ bool SSFJsonGetHex(const char* js, const char** path, uint8_t* out, size_t outSi
     size_t end;
     size_t index;
     SSFJsonType_t jt;
-    size_t i;
 
     SSF_REQUIRE(js != NULL);
     SSF_REQUIRE(path != NULL);
@@ -533,25 +515,7 @@ bool SSFJsonGetHex(const char* js, const char** path, uint8_t* out, size_t outSi
     if (!SSFJsonObject(js, &index, &start, &end, path, 0, &jt)) return false;
     if (jt != SSF_JSON_TYPE_STRING) return false;
     start++; end--;
-
-    if ((end - start + 1) & 0x01) return false; /* Odd number len string */
-    *outLen = (end - start + 1) >> 1;
-    if (outSize < (*outLen)) return false; /* Buffer too small */
-
-    for (i = 0; i < *outLen; i++)
-    {
-        if (rev)
-        { 
-            if (!SSFHexByteToBin(js[end - (i << 1) - 1], js[end - (i << 1)], &out[i]))
-            { return false; }
-        }
-        else 
-        { 
-            if (!SSFHexByteToBin(js[start + (i << 1)], js[start + (i << 1) + 1], &out[i])) 
-            { return false; } 
-        }
-    }
-    return true;
+    return SSFHexBytesToBin(&js[start], (end - start + 1), out, outSize, outLen, rev);
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -670,9 +634,9 @@ bool SSFJsonPrintLabel(char* js, size_t size, size_t start, size_t* end, const c
 /* Returns true if in data added successfully as quoted ASCII hex string, else false.            */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFJsonPrintHex(char* js, size_t size, size_t start, size_t* end, const uint8_t * in, size_t inLen,
-                           bool rev, bool *comma)
+                     bool rev, bool *comma)
 {
-    uint8_t hex[3] = "  ";
+    size_t outLen;
 
     SSF_REQUIRE(js != NULL);
     SSF_REQUIRE(end != NULL);
@@ -682,12 +646,9 @@ bool SSFJsonPrintHex(char* js, size_t size, size_t start, size_t* end, const uin
 
     SSF_JSON_COMMA(comma);
     if (!SSFJsonPrintUnescChar(js, size, start, &start, '"')) return false;
-    while (inLen--)
-    {
-        if (rev) snprintf(hex, sizeof(hex), "%02X", (unsigned int) in[inLen]);
-        else { snprintf(hex, sizeof(hex), "%02X", *in); in++; }
-        if (!SSFJsonPrintCString(js, size, start, &start, hex, false)) return false;
-    }
+    if (!SSFHexBinToBytes(in, inLen, &js[start], size - start, &outLen, rev, SSF_HEX_CASE_UPPER))
+    { return false; }
+    start += outLen;
     if (!SSFJsonPrintUnescChar(js, size, start, &start, '"')) return false;
     *end = start;
     return true;
@@ -719,17 +680,26 @@ bool SSFJsonPrintBase64(char* js, size_t size, size_t start, size_t* end, const 
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if in double added successfully to JSON string, else false.                      */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFJsonPrintDouble(char* js, size_t size, size_t start, size_t* end, double in, bool *comma)
+bool SSFJsonPrintDouble(char* js, size_t size, size_t start, size_t* end, double in,
+                        SSFJsonFltFmt_t fmt, bool *comma)
 {
     int len;
 
     SSF_REQUIRE(js != NULL);
     SSF_REQUIRE(start <= size);
     SSF_REQUIRE(end != NULL);
+    SSF_REQUIRE(fmt < SSF_JSON_FLT_FMT_MAX);
     SSF_REQUIRE((comma == NULL) || (comma != (bool*)true));
 
     SSF_JSON_COMMA(comma);
-    len = snprintf(&js[start], size - start, "%g", in);
+    if (fmt == SSF_JSON_FLT_FMT_SHORT) len = snprintf(&js[start], size - start, "%g", in);
+    else if (fmt == SSF_JSON_FLT_FMT_STD) len = snprintf(&js[start], size - start, "%f", in);
+    else
+    {
+        char fstr[] = "%.0f";
+        fstr[2] = (char) (fmt + '0');
+        len = snprintf(&js[start], size - start, fstr, in);
+    }
     if ((len < 0) || (((size_t) len) >= (size - start))) return false;
     *end = start + len;
     return true;
@@ -794,6 +764,7 @@ bool SSFJsonPrint(char* js, size_t size, size_t start, size_t* end, SSFJsonPrint
     return true;
 }
 
+#if SSF_JSON_CONFIG_ENABLE_UPDATE == 1
 /* --------------------------------------------------------------------------------------------- */
 /* Printer function for SSFJsonUpdate() when adding paths is required.                           */
 /* --------------------------------------------------------------------------------------------- */
@@ -882,3 +853,4 @@ bool SSFJsonUpdate(char* js, size_t size, const char** path, SSFJsonPrintFn_t fn
     memmove(&js[start + (end - startn + 1)], &js[size - len], len);
     return true;
 }
+#endif

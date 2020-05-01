@@ -49,21 +49,23 @@ typedef enum SSF_LL_LOC
 } SSF_LL_LOC_t;
 
 typedef struct SSFLLItem SSFLLItem_t;
+typedef struct SSFLL SSFLL_t;
 
 struct SSFLLItem
 {
     SSFLLItem_t* next;
     SSFLLItem_t* prev;
+    SSFLL_t* ll;
 };
 
-typedef struct SSFLL
+struct SSFLL
 {
     SSFLLItem_t *head;
     SSFLLItem_t *tail;
     uint32_t items;
     uint32_t size;
     uint32_t magic;
-} SSFLL_t;
+};
 
 /* --------------------------------------------------------------------------------------------- */
 /* External interface                                                                            */

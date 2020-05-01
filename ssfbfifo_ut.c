@@ -94,6 +94,9 @@ void SSFBFifoUnitTest(void)
     SSF_ASSERT_TEST(SSFBFifoLen(NULL));
     SSF_ASSERT_TEST(SSFBFifoLen(&_sbfFifos[0]));
 
+    SSF_ASSERT_TEST(SSFBFifoUnused(NULL));
+    SSF_ASSERT_TEST(SSFBFifoUnused(&_sbfFifos[0]));
+
 #if SSF_BFIFO_MULTI_BYTE_ENABLE == 1
     SSF_ASSERT_TEST(SSFBFifoPutBytes(&_sbfFifos[0], "a", 1));
     SSF_ASSERT_TEST(SSFBFifoPeekBytes(&_sbfFifos[0], _sbfReadBuf, 0, &outLen));
@@ -113,6 +116,7 @@ void SSFBFifoUnitTest(void)
         SSF_ASSERT(SSF_BFIFO_IS_FULL(&_sbfFifos[i]) == false);
         SSF_ASSERT(SSFBFifoSize(&_sbfFifos[i]) == SSF_TEST_BFIFO_SIZE);
         SSF_ASSERT(SSFBFifoLen(&_sbfFifos[i]) == 0);
+        SSF_ASSERT(SSFBFifoUnused(&_sbfFifos[i]) == SSF_TEST_BFIFO_SIZE);
     }
 
     /* Put and get one byte until wrap occurs */
@@ -128,6 +132,7 @@ void SSFBFifoUnitTest(void)
             SSF_ASSERT(SSF_BFIFO_IS_FULL(&_sbfFifos[i]) == false);
             SSF_ASSERT(SSFBFifoSize(&_sbfFifos[i]) == SSF_TEST_BFIFO_SIZE);
             SSF_ASSERT(SSFBFifoLen(&_sbfFifos[i]) == 0);
+            SSF_ASSERT(SSFBFifoUnused(&_sbfFifos[i]) == SSF_TEST_BFIFO_SIZE);
 
             if (i == 0) SSFBFifoPutByte(&_sbfFifos[i], (uint8_t) (j + 1));
             else SSF_BFIFO_PUT_BYTE(&_sbfFifos[i], (uint8_t)(j + 1));
@@ -138,10 +143,12 @@ void SSFBFifoUnitTest(void)
             SSF_ASSERT(SSF_BFIFO_IS_FULL(&_sbfFifos[i]) == false);
             SSF_ASSERT(SSFBFifoSize(&_sbfFifos[i]) == SSF_TEST_BFIFO_SIZE);
             SSF_ASSERT(SSFBFifoLen(&_sbfFifos[i]) == 1);
+            SSF_ASSERT(SSFBFifoUnused(&_sbfFifos[i]) == (SSF_TEST_BFIFO_SIZE - 1));
             outByte = (uint8_t) j;
             SSF_ASSERT(SSFBFifoPeekByte(&_sbfFifos[i], &outByte) == true);
             SSF_ASSERT(outByte == (uint8_t) (j + 1));
             SSF_ASSERT(SSFBFifoLen(&_sbfFifos[i]) == 1);
+            SSF_ASSERT(SSFBFifoUnused(&_sbfFifos[i]) == (SSF_TEST_BFIFO_SIZE - 1));
             outByte = (uint8_t) j;
             if (i == 0) SSF_ASSERT(SSFBFifoGetByte(&_sbfFifos[i], &outByte) == true);
             else SSF_BFIFO_GET_BYTE(&_sbfFifos[i], outByte);
@@ -161,6 +168,7 @@ void SSFBFifoUnitTest(void)
         SSF_ASSERT(SSF_BFIFO_IS_FULL(&_sbfFifos[i]) == false);
         SSF_ASSERT(SSFBFifoSize(&_sbfFifos[i]) == SSF_TEST_BFIFO_SIZE);
         SSF_ASSERT(SSFBFifoLen(&_sbfFifos[i]) == 0);
+        SSF_ASSERT(SSFBFifoUnused(&_sbfFifos[i]) == SSF_TEST_BFIFO_SIZE);
         SSF_ASSERT_TEST(SSF_BFIFO_GET_BYTE(&_sbfFifos[i], outByte));
 
         /* Fill */
@@ -174,6 +182,7 @@ void SSFBFifoUnitTest(void)
             SSF_ASSERT(SSF_BFIFO_IS_FULL(&_sbfFifos[i]) == false);
             SSF_ASSERT(SSFBFifoSize(&_sbfFifos[i]) == SSF_TEST_BFIFO_SIZE);
             SSF_ASSERT(SSFBFifoLen(&_sbfFifos[i]) == (j + 1));
+            SSF_ASSERT(SSFBFifoUnused(&_sbfFifos[i]) == (SSF_TEST_BFIFO_SIZE - (j + 1)));
         }
         if (i == 0) SSFBFifoPutByte(&_sbfFifos[i], (uint8_t)(j + 1));
         else SSF_BFIFO_PUT_BYTE(&_sbfFifos[i], (uint8_t)(j + 1));
@@ -185,10 +194,12 @@ void SSFBFifoUnitTest(void)
         SSF_ASSERT(SSF_BFIFO_IS_FULL(&_sbfFifos[i]) == true);
         SSF_ASSERT(SSFBFifoSize(&_sbfFifos[i]) == SSF_TEST_BFIFO_SIZE);
         SSF_ASSERT(SSFBFifoLen(&_sbfFifos[i]) == SSF_TEST_BFIFO_SIZE);
+        SSF_ASSERT(SSFBFifoUnused(&_sbfFifos[i]) == 0);
         outByte = (uint8_t)j;
         SSF_ASSERT(SSFBFifoPeekByte(&_sbfFifos[i], &outByte) == true);
         SSF_ASSERT(outByte == 1);
         SSF_ASSERT(SSFBFifoLen(&_sbfFifos[i]) == SSF_TEST_BFIFO_SIZE);
+        SSF_ASSERT(SSFBFifoUnused(&_sbfFifos[i]) == 0);
 
         /* Empty */
         for (j = 0; j < SSF_TEST_BFIFO_SIZE - 1; j++)
@@ -203,6 +214,7 @@ void SSFBFifoUnitTest(void)
             SSF_ASSERT(SSF_BFIFO_IS_FULL(&_sbfFifos[i]) == false);
             SSF_ASSERT(SSFBFifoSize(&_sbfFifos[i]) == SSF_TEST_BFIFO_SIZE);
             SSF_ASSERT(SSFBFifoLen(&_sbfFifos[i]) == (SSF_TEST_BFIFO_SIZE - j - 1));
+            SSF_ASSERT(SSFBFifoUnused(&_sbfFifos[i]) == (j + 1));
         }
         if (i == 0) SSF_ASSERT(SSFBFifoGetByte(&_sbfFifos[i], &outByte) == true);
         else SSF_BFIFO_GET_BYTE(&_sbfFifos[i], outByte);
@@ -216,6 +228,7 @@ void SSFBFifoUnitTest(void)
         SSF_ASSERT(SSF_BFIFO_IS_FULL(&_sbfFifos[i]) == false);
         SSF_ASSERT(SSFBFifoSize(&_sbfFifos[i]) == SSF_TEST_BFIFO_SIZE);
         SSF_ASSERT(SSFBFifoLen(&_sbfFifos[i]) == 0);
+        SSF_ASSERT(SSFBFifoUnused(&_sbfFifos[i]) == SSF_TEST_BFIFO_SIZE);
         SSF_ASSERT_TEST(SSF_BFIFO_GET_BYTE(&_sbfFifos[i], outByte));
     }
 

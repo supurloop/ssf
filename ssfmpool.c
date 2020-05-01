@@ -37,7 +37,18 @@
 #include "ssfmpool.h"
 #include "ssfassert.h"
 
+/* --------------------------------------------------------------------------------------------- */
+/* Defines                                                                                       */
+/* --------------------------------------------------------------------------------------------- */
 #define SSF_MPOOL_INIT_MAGIC (0x43130817ul)
+
+#if SSF_MPOOL_DEBUG == 1
+typedef struct SSFMPoolDebug
+{
+    SSFLLItem_t item;
+    SSFLLItem_t *block;
+} SSFMPoolDebug_t;
+#endif
 
 /* --------------------------------------------------------------------------------------------- */
 /* Initializes a memory pool.                                                                    */
@@ -46,6 +57,9 @@ void SSFMPoolInit(SSFMPool_t *pool, uint32_t blocks, uint32_t blockSize)
 {
     uint32_t memSize = blockSize + sizeof(SSFLLItem_t) + sizeof(uint32_t);
     uint32_t i;
+#if SSF_MPOOL_DEBUG == 1
+    SSFMPoolDebug_t* w;
+#endif /* SSF_MPOOL_DEBUG */
 
     SSF_REQUIRE(pool != NULL);
     SSF_REQUIRE(blocks > 0);
@@ -61,10 +75,14 @@ void SSFMPoolInit(SSFMPool_t *pool, uint32_t blocks, uint32_t blockSize)
     {
         uint8_t *mem;
         SSF_ASSERT((mem = malloc(memSize)) != NULL);
+        memset(mem, 0, memSize);
         memcpy(mem + blockSize + sizeof(SSFLLItem_t), "\x12\x34\x56\xff", sizeof(uint32_t));
         SSF_LL_FIFO_PUSH(&(pool->avail), mem);
 #if SSF_MPOOL_DEBUG == 1
-        SSF_LL_FIFO_PUSH(&(pool->world), mem);
+        SSF_ASSERT((w = (SSFMPoolDebug_t *) malloc(sizeof(SSFMPoolDebug_t))) != NULL);
+        memset(w, 0, sizeof(SSFMPoolDebug_t));
+        w->block = (SSFLLItem_t *) mem;
+        SSF_LL_FIFO_PUSH(&(pool->world), w);
 #endif /* SSF_MPOOL_DEBUG */
     }
     pool->blocks = blocks;

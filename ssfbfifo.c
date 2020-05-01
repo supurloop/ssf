@@ -185,6 +185,14 @@ ssfbf_uint_t SSFBFifoLen(const SSFBFifo_t *fifo)
     return used;
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Returns the number of unused bytes in the fifo.                                               */
+/* --------------------------------------------------------------------------------------------- */
+ssfbf_uint_t SSFBFifoUnused(const SSFBFifo_t* fifo)
+{
+    return SSFBFifoSize(fifo) - SSFBFifoLen(fifo);
+}
+
 #if SSF_BFIFO_MULTI_BYTE_ENABLE == 1
 /* --------------------------------------------------------------------------------------------- */
 /* Puts bytes into the fifo.                                                                     */

@@ -70,7 +70,7 @@
 /* --------------------------------------------------------------------------------------------- */
 #define SSF_BFIFO_CONFIG_MAX_BFIFO_SIZE (255UL)
 
-#define SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE_ANY         (0u) /* Can this be defined differently? */
+#define SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE_ANY         (0u)
 #define SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE_255         (1u)
 #define SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE_POW2_MINUS1 (2u)
 

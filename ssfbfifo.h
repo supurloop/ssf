@@ -78,6 +78,7 @@ bool SSFBFifoIsEmpty(const SSFBFifo_t *fifo);
 bool SSFBFifoIsFull(const SSFBFifo_t* fifo);
 ssfbf_uint_t SSFBFifoSize(const SSFBFifo_t *fifo);
 ssfbf_uint_t SSFBFifoLen(const SSFBFifo_t *fifo);
+ssfbf_uint_t SSFBFifoUnused(const SSFBFifo_t* fifo);
 
 #if SSF_BFIFO_MULTI_BYTE_ENABLE == 1
 void SSFBFifoPutBytes(SSFBFifo_t *fifo, const uint8_t *inBytes, uint32_t inBytesLen);
@@ -112,32 +113,29 @@ bool SSFBFifoGetBytes(SSFBFifo_t* fifo, uint8_t *outBytes, uint32_t outBytesSize
     ob = (fp)->buffer[(fp)->tail]; \
     (fp)->tail++; } while(0)
 #elif SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE == SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE_POW2_MINUS1
-#define SSF_BFIFO_PUT_BYTE(fifo, inByte) { \
+#define SSF_BFIFO_PUT_BYTE(fifo, inByte) do { \
     (fifo)->buffer[(fifo)->head] = inByte; \
     (fifo)->head++; \
     (fifo)->head &= (fifo)->mask; \
-    SSF_ENSURE((fifo)->head != (fifo)->tail); \
-}
+    SSF_ENSURE((fifo)->head != (fifo)->tail); } while (0)
 
-#define SSF_BFIFO_GET_BYTE(fifo, outByte) { \
+#define SSF_BFIFO_GET_BYTE(fifo, outByte) do { \
     SSF_REQUIRE((fifo)->head != (fifo)->tail); \
     outByte = (fifo)->buffer[(fifo)->tail]; \
     (fifo)->tail++; \
-    (fifo)->tail &= (fifo)->mask; \
-}
+    (fifo)->tail &= (fifo)->mask; } while (0)
 #else
-#define SSF_BFIFO_PUT_BYTE(fifo, inByte) { \
+#define SSF_BFIFO_PUT_BYTE(fifo, inByte) do { \
     (fifo)->buffer[(fifo)->head] = inByte; \
     (fifo)->head++; \
     if ((fifo)->head == (fifo)->size) (fifo)->head = 0; \
-    SSF_ENSURE((fifo)->head != (fifo)->tail); \
-}
-#define SSF_BFIFO_GET_BYTE(fifo, outByte) { \
+    SSF_ENSURE((fifo)->head != (fifo)->tail); } while (0)
+
+#define SSF_BFIFO_GET_BYTE(fifo, outByte) do { \
     SSF_REQUIRE((fifo)->head != (fifo)->tail); \
     outByte = (fifo)->buffer[(fifo)->tail]; \
     (fifo)->tail++; \
-    if ((fifo)->tail == (fifo)->size) (fifo)->tail = 0; \
-}
+    if ((fifo)->tail == (fifo)->size) (fifo)->tail = 0; } while (0)
 #endif
 
 /* --------------------------------------------------------------------------------------------- */

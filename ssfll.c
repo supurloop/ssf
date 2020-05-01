@@ -35,21 +35,6 @@
 #define SSF_LL_INIT_MAGIC (0x44140918ul)
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if item is already in list, else false.                                          */
-/* --------------------------------------------------------------------------------------------- */
-static bool _SSFLLIsLinked(const SSFLL_t* ll, const SSFLLItem_t* item)
-{
-    const SSFLLItem_t *li = ll->head;
-
-    while (li != NULL)
-    {
-        if (li == item) return true;
-        li = li->next;
-    }
-    return false;
-}
-
-/* --------------------------------------------------------------------------------------------- */
 /* Initializes a new linked list.                                                                */
 /* --------------------------------------------------------------------------------------------- */
 void SSFLLInit(SSFLL_t *ll, uint32_t maxSize)
@@ -77,7 +62,7 @@ void SSFLLPutItem(SSFLL_t *ll, SSFLLItem_t *inItem, SSF_LL_LOC_t loc, SSFLLItem_
                 (loc == SSF_LL_LOC_ITEM));
     SSF_ASSERT(ll->magic == SSF_LL_INIT_MAGIC);
     SSF_ASSERT(ll->items < ll->size);
-    SSF_ASSERT(_SSFLLIsLinked(ll, inItem) == false);
+    SSF_ASSERT(inItem->ll == NULL);
 
     if (ll->head == NULL) 
     {
@@ -106,12 +91,13 @@ void SSFLLPutItem(SSFLL_t *ll, SSFLLItem_t *inItem, SSF_LL_LOC_t loc, SSFLLItem_
     else if (loc == SSF_LL_LOC_ITEM)
     {
         /* Insert inItem after locItem */
-        SSF_ASSERT(_SSFLLIsLinked(ll, locItem) == true);
+        SSF_ASSERT(locItem->ll == ll);
         inItem->next = locItem->next;
         locItem->next = inItem;
         inItem->prev = locItem;
         if (inItem->next == NULL) ll->tail = inItem;
     }
+    inItem->ll = ll;
     ll->items++;
 }
 
@@ -148,7 +134,7 @@ bool SSFLLGetItem(SSFLL_t *ll, SSFLLItem_t **outItem, SSF_LL_LOC_t loc, SSFLLIte
             break;
         case SSF_LL_LOC_ITEM:
             /* Remove locItem, return in outItem */
-            SSF_ASSERT(_SSFLLIsLinked(ll, locItem) == true);
+            SSF_ASSERT(locItem->ll == ll);
             *outItem = locItem;
             if (locItem->prev) locItem->prev->next = locItem->next;
             else ll->head = locItem->next;
@@ -160,6 +146,7 @@ bool SSFLLGetItem(SSFLL_t *ll, SSFLLItem_t **outItem, SSF_LL_LOC_t loc, SSFLLIte
         }
         (*outItem)->next = NULL;
         (*outItem)->prev = NULL;
+        (*outItem)->ll = NULL;
         ll->items--;
         return true;
     }
@@ -205,4 +192,3 @@ uint32_t SSFLLLen(const SSFLL_t *ll)
     SSF_ASSERT(ll->magic == SSF_LL_INIT_MAGIC);
     return (ll->items);
 }
-

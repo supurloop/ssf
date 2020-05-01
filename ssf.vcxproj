@@ -155,6 +155,7 @@
     <ClCompile Include="ssfmpool_ut.c" />
     <ClCompile Include="ssfport.c" />
     <ClCompile Include="ssfsm.c" />
+    <ClCompile Include="ssfsm_ut.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="ssfassert.h" />

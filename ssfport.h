@@ -36,6 +36,12 @@
 #include "ssfassert.h"
 
 /* --------------------------------------------------------------------------------------------- */
+/* Platform specific tick configuration                                                          */
+/* --------------------------------------------------------------------------------------------- */
+typedef uint64_t SSFPortTick_t;
+#define SSF_TICKS_PER_SEC (1000u)
+
+/* --------------------------------------------------------------------------------------------- */
 /* MAX/MIN macros                                                                                */
 /* --------------------------------------------------------------------------------------------- */
 #define SSF_MAX(x, y) (((x) > (y)) ? (x) : (y))
@@ -51,6 +57,7 @@
 #define SSF_CONFIG_BASE64_UNIT_TEST (1u)
 #define SSF_CONFIG_HEX_UNIT_TEST (1u)
 #define SSF_CONFIG_FCSUM_UNIT_TEST (1u)
+#define SSF_CONFIG_SM_UNIT_TEST (1u)
 
 /* If any unit test is enabled then enable unit test mode */
 #if SSF_CONFIG_BFIFO_UNIT_TEST == 1 || \
@@ -59,7 +66,8 @@
     SSF_CONFIG_JSON_UNIT_TEST == 1 || \
     SSF_CONFIG_BASE64_UNIT_TEST == 1 || \
     SSF_CONFIG_HEX_UNIT_TEST == 1 || \
-    SSF_CONFIG_FCSUM_UNIT_TEST == 1
+    SSF_CONFIG_FCSUM_UNIT_TEST == 1 || \
+    SSF_CONFIG_SM_UNIT_TEST == 1
 #define SSF_CONFIG_UNIT_TEST (1u)
 #else
 #define SSF_CONFIG_UNIT_TEST (0u)
@@ -99,8 +107,10 @@
 
 enum SSFSMList
 {
-    SSF_SM_TEST1,
-    SSF_SM_JSON,
+#if SSF_CONFIG_SM_UNIT_TEST == 1
+    SSF_SM_UNIT_TEST_1,
+    SSF_SM_UNIT_TEST_2,
+#endif /* SSF_CONFIG_SM_UNIT_TEST */
     SSF_SM_END
 };
 
@@ -108,9 +118,14 @@ enum SSFSMEventList
 {
     SSF_SM_EVENT_ENTRY,
     SSF_SM_EVENT_EXIT,
-    SSF_SM_EVENT_1,
-    SSF_SM_EVENT_2,
-    SSF_SM_JSON_BYTE,
+#if SSF_CONFIG_SM_UNIT_TEST == 1
+    SSF_SM_EVENT_UT1_1,
+    SSF_SM_EVENT_UT1_2,
+    SSF_SM_EVENT_UT2_1,
+    SSF_SM_EVENT_UT2_2,
+    SSF_SM_EVENT_UTX_1,
+    SSF_SM_EVENT_UTX_2,
+#endif /* SSF_CONFIG_SM_UNIT_TEST */
     SSF_SM_EVENT_END
 };
 

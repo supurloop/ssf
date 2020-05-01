@@ -1,3 +1,34 @@
+/* --------------------------------------------------------------------------------------------- */
+/* Small System Framework                                                                        */
+/*                                                                                               */
+/* main.c                                                                                        */
+/* Entry point for unit testing SSF components.                                                  */
+/*                                                                                               */
+/* BSD-3-Clause License                                                                          */
+/* Copyright 2020 Supurloop Software LLC                                                         */
+/*                                                                                               */
+/* Redistribution and use in source and binary forms, with or without modification, are          */
+/* permitted provided that the following conditions are met:                                     */
+/*                                                                                               */
+/* 1. Redistributions of source code must retain the above copyright notice, this list of        */
+/* conditions and the following disclaimer.                                                      */
+/* 2. Redistributions in binary form must reproduce the above copyright notice, this list of     */
+/* conditions and the following disclaimer in the documentation and/or other materials provided  */
+/* with the distribution.                                                                        */
+/* 3. Neither the name of the copyright holder nor the names of its contributors may be used to  */
+/* endorse or promote products derived from this software without specific prior written         */
+/* permission.                                                                                   */
+/*                                                                                               */
+/* THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS   */
+/* OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF               */
+/* MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE    */
+/* COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL      */
+/* EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE */
+/* GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED    */
+/* AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING     */
+/* NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISE   */
+/* OF THE POSSIBILITY OF SUCH DAMAGE.                                                            */
+/* --------------------------------------------------------------------------------------------- */
 #include <stdio.h>
 #include "ssfassert.h"
 #include "ssfbfifo.h"
@@ -10,64 +41,9 @@
 #include "ssfhex.h"
 #include "ssffcsum.h"
 
-void* ssfUnused;
-
-#define LL_MAX_SIZE 30
-SSFLLItem_t items[LL_MAX_SIZE];
-
-void TestHandler2(SSFSMEventId_t eid, const SSFSMData_t* data, SSFSMDataLen_t dataLen);
-
-void TestHandler1(SSFSMEventId_t eid, const SSFSMData_t* data, SSFSMDataLen_t dataLen)
-{
-    SSF_UNUSED(data);
-    SSF_UNUSED(dataLen);
-    switch (eid)
-    {
-        case SSF_SM_EVENT_ENTRY:
-            printf("ENTRY1\r\n");
-            SSFSMStartTimer(SSF_SM_EVENT_2, 2000);
-            break;
-        case SSF_SM_EVENT_EXIT:
-            printf("EXIT1\r\n");
-            break;
-        case SSF_SM_EVENT_1:
-            printf("EVENT 1\r\n");
-            break;
-        case SSF_SM_EVENT_2:
-            printf("EVENT 2\r\n");
-            SSFSMTran(TestHandler2);
-            break;
-        default:
-            break;
-    }
-}
-
-void TestHandler2(SSFSMEventId_t eid, const SSFSMData_t* data, SSFSMDataLen_t dataLen)
-{
-    SSF_UNUSED(data);
-    SSF_UNUSED(dataLen);
-    switch (eid)
-    {
-    case SSF_SM_EVENT_ENTRY:
-        printf("ENTRY2\r\n");
-        SSFSMStartTimer(SSF_SM_EVENT_1, 1000);
-        break;
-    case SSF_SM_EVENT_EXIT:
-        printf("EXIT2\r\n");
-        break;
-    case SSF_SM_EVENT_1:
-        printf("EVENT 1\r\n");
-        SSFSMTran(TestHandler1);
-        break;
-    case SSF_SM_EVENT_2:
-        printf("EVENT 2\r\n");
-        SSFSMTran(TestHandler1);
-        break;
-    default:
-        break;
-    }
-}
-
+/* --------------------------------------------------------------------------------------------- */
+/* SSF unit test entry point.                                                                    */
+/* --------------------------------------------------------------------------------------------- */
 void main(void)
 {
 #if SSF_CONFIG_BFIFO_UNIT_TEST == 1
@@ -82,10 +58,6 @@ void main(void)
     SSFMPoolUnitTest();
 #endif /* SSF_CONFIG_MPOOL_UNIT_TEST */
 
-#if SSF_CONFIG_JSON_UNIT_TEST == 1
-    SSFJsonUnitTest();
-#endif /* SSF_CONFIG_JSON_UNIT_TEST */
-
 #if SSF_CONFIG_BASE64_UNIT_TEST == 1
     SSFBase64UnitTest();
 #endif /* SSF_CONFIG_BASE64_UNIT_TEST */
@@ -94,24 +66,15 @@ void main(void)
     SSFHexUnitTest();
 #endif /* SSF_CONFIG_BASE64_UNIT_TEST */
 
+#if SSF_CONFIG_JSON_UNIT_TEST == 1
+    SSFJsonUnitTest();
+#endif /* SSF_CONFIG_JSON_UNIT_TEST */
+
 #if SSF_CONFIG_FCSUM_UNIT_TEST == 1
     SSFFCSumUnitTest();
 #endif /* SSF_CONFIG_FCSUM_UNIT_TEST */
 
-#if 0
-    SSFSMInit(SSF_SM_TEST1, TestHandler1, 10, 1);
-    SSFSMPutEvent(SSF_SM_TEST1, SSF_SM_EVENT_1);
-    while (1) 
-    {
-        SSFSMTask();
-        Sleep(1);
-    }
-    SSFSMPutEvent(SSF_SM_TEST1, SSF_SM_EVENT_2);
-    SSFSMTask();
-    SSFSMPutEvent(SSF_SM_TEST1, SSF_SM_EVENT_1);
-    SSFSMTask();
-    SSFSMPutEvent(SSF_SM_TEST1, SSF_SM_EVENT_2);
-    SSFSMTask();
-#endif
+#if SSF_CONFIG_SM_UNIT_TEST == 1
+    SSFSMUnitTest();
+#endif /* SSF_CONFIG_SM_UNIT_TEST */
 }
-

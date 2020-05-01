@@ -32,6 +32,8 @@
 #include <stdio.h>
 #include "ssfport.h"
 
+void* ssfUnused;
+
 #if SSF_CONFIG_UNIT_TEST == 1
 jmp_buf ssfUnitTestMark;
 jmp_buf ssfUnitTestZeroMark;

@@ -192,3 +192,11 @@ uint32_t SSFLLLen(const SSFLL_t *ll)
     SSF_ASSERT(ll->magic == SSF_LL_INIT_MAGIC);
     return (ll->items);
 }
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns the number of unused spots in list.                                                   */
+/* --------------------------------------------------------------------------------------------- */
+uint32_t SSFLLUnused(const SSFLL_t* ll)
+{
+    return SSFLLSize(ll) - SSFLLLen(ll);
+}

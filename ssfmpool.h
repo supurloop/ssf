@@ -62,15 +62,11 @@ uint32_t SSFMPoolLen(const SSFMPool_t* pool);
 bool SSFMPoolIsEmpty(const SSFMPool_t* pool);
 bool SSFMPoolIsFull(const SSFMPool_t* pool);
 
-#if SSF_CONFIG_MPOOL_UNIT_TEST == 1
-void SSFMPoolUnitTest(void);
-#endif /* SSF_CONFIG_LL_UNIT_TEST */
-
 /* --------------------------------------------------------------------------------------------- */
 /* Unit test                                                                                     */
 /* --------------------------------------------------------------------------------------------- */
 #if SSF_CONFIG_MPOOL_UNIT_TEST == 1
-void SSFBMPoolUnitTest(void);
+void SSFMPoolUnitTest(void);
 #endif /* SSF_CONFIG_MPOOL_UNIT_TEST */
 
 #endif /* SSF_MEMPOOL_INCLUDE_H */

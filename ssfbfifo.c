@@ -36,14 +36,14 @@
 /* --------------------------------------------------------------------------------------------- */
 /* Initializes a byte fifo.                                                                      */
 /* --------------------------------------------------------------------------------------------- */
-void SSFBFifoInit(SSFBFifo_t *fifo, uint32_t fifoSize, uint8_t* buffer, uint32_t bufferSize)
+void SSFBFifoInit(SSFBFifo_t *fifo, uint32_t fifoSize, uint8_t *buffer, uint32_t bufferSize)
 {
     SSF_REQUIRE(fifo != NULL);
 #if SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE == SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE_255
     SSF_REQUIRE(fifoSize == SSF_BFIFO_255);
 #elif SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE == SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE_POW2_MINUS1
     SSF_REQUIRE(fifoSize > 0);
-    SSF_REQUIRE((fifoSize & (((uint32_t) fifoSize) + 1)) == 0);
+    SSF_REQUIRE((fifoSize & (((uint32_t)fifoSize) + 1)) == 0);
     SSF_REQUIRE(fifoSize <= SSF_BFIFO_CONFIG_MAX_BFIFO_SIZE);
 #else
     SSF_REQUIRE(fifoSize > 0);
@@ -133,7 +133,7 @@ bool SSFBFifoIsEmpty(const SSFBFifo_t *fifo)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if fifo is full, else false.                                                     */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFBFifoIsFull(const SSFBFifo_t* fifo)
+bool SSFBFifoIsFull(const SSFBFifo_t *fifo)
 {
     ssfbf_uint_t newHead;
 
@@ -176,9 +176,9 @@ ssfbf_uint_t SSFBFifoLen(const SSFBFifo_t *fifo)
 
     if (fifo->head < fifo->tail)
 #if SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE == SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE_255
-    { used = SSF_BFIFO_255 - (fifo->tail - fifo->head) + 1; }
+    {used = SSF_BFIFO_255 - (fifo->tail - fifo->head) + 1; }
 #else
-    { used = fifo->size - (fifo->tail - fifo->head); }
+    {used = fifo->size - (fifo->tail - fifo->head); }
 #endif
     else used = fifo->head - fifo->tail;
 
@@ -188,7 +188,7 @@ ssfbf_uint_t SSFBFifoLen(const SSFBFifo_t *fifo)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns the number of unused bytes in the fifo.                                               */
 /* --------------------------------------------------------------------------------------------- */
-ssfbf_uint_t SSFBFifoUnused(const SSFBFifo_t* fifo)
+ssfbf_uint_t SSFBFifoUnused(const SSFBFifo_t *fifo)
 {
     return SSFBFifoSize(fifo) - SSFBFifoLen(fifo);
 }
@@ -203,14 +203,15 @@ void SSFBFifoPutBytes(SSFBFifo_t *fifo, const uint8_t *inBytes, uint32_t inBytes
     SSF_REQUIRE(inBytes != NULL);
     SSF_ASSERT(fifo->magic == SSF_BFIFO_INIT_MAGIC);
 
-    while (inBytesLen) {
+    while (inBytesLen)
+    {
         fifo->buffer[fifo->head] = *inBytes;
         fifo->head++;
-    #if SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE == SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE_POW2_MINUS1
+#if SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE == SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE_POW2_MINUS1
         fifo->head &= fifo->mask;
-    #elif SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE == SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE_ANY
+#elif SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE == SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE_ANY
         if (fifo->head == fifo->size) fifo->head = 0;
-    #endif
+#endif
         SSF_ENSURE(fifo->head != fifo->tail);
         inBytesLen--;
         inBytes++;
@@ -220,7 +221,7 @@ void SSFBFifoPutBytes(SSFBFifo_t *fifo, const uint8_t *inBytes, uint32_t inBytes
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if bytes avail, copy up to size to out, update len, else false; fifo not changed.*/
 /* --------------------------------------------------------------------------------------------- */
-bool SSFBFifoPeekBytes(const SSFBFifo_t *fifo, uint8_t *outBytes, uint32_t outBytesSize, 
+bool SSFBFifoPeekBytes(const SSFBFifo_t *fifo, uint8_t *outBytes, uint32_t outBytesSize,
                        uint32_t *outBytesLen)
 {
     ssfbf_uint_t head;
@@ -240,11 +241,11 @@ bool SSFBFifoPeekBytes(const SSFBFifo_t *fifo, uint8_t *outBytes, uint32_t outBy
     {
         *outBytes = fifo->buffer[tail];
         tail++;
-    #if SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE == SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE_POW2_MINUS1
+#if SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE == SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE_POW2_MINUS1
         tail &= fifo->mask;
-    #elif SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE == SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE_ANY
+#elif SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE == SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE_ANY
         if (tail == fifo->size) tail = 0;
-    #endif
+#endif
         outBytesSize--;
         outBytes++;
         (*outBytesLen)++;
@@ -255,7 +256,7 @@ bool SSFBFifoPeekBytes(const SSFBFifo_t *fifo, uint8_t *outBytes, uint32_t outBy
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if bytes avail, removes up to size into out, updates len, else false.            */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFBFifoGetBytes(SSFBFifo_t* fifo, uint8_t *outBytes, uint32_t outBytesSize, 
+bool SSFBFifoGetBytes(SSFBFifo_t *fifo, uint8_t *outBytes, uint32_t outBytesSize,
                       uint32_t *outBytesLen)
 {
     SSF_REQUIRE(fifo != NULL);
@@ -266,14 +267,15 @@ bool SSFBFifoGetBytes(SSFBFifo_t* fifo, uint8_t *outBytes, uint32_t outBytesSize
     if (fifo->head == fifo->tail) return false;
 
     *outBytesLen = 0;
-    while (outBytesSize && (fifo->head != fifo->tail)) {
+    while (outBytesSize && (fifo->head != fifo->tail))
+    {
         *outBytes = fifo->buffer[fifo->tail];
         fifo->tail++;
-    #if SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE == SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE_POW2_MINUS1
+#if SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE == SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE_POW2_MINUS1
         fifo->tail &= fifo->mask;
-    #elif SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE == SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE_ANY
+#elif SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE == SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE_ANY
         if (fifo->tail == fifo->size) fifo->tail = 0;
-    #endif
+#endif
         outBytesSize--;
         outBytes++;
         (*outBytesLen)++;
@@ -281,3 +283,4 @@ bool SSFBFifoGetBytes(SSFBFifo_t* fifo, uint8_t *outBytes, uint32_t outBytesSize
     return true;
 }
 #endif /* SSF_BFIFO_MULTI_BYTE_ENABLE */
+

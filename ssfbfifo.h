@@ -46,11 +46,11 @@
 
 #if (SSF_BFIFO_CONFIG_MAX_BFIFO_SIZE <= SSF_BFIFO_255) || \
     (SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE == SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE_255)
-    typedef uint8_t ssfbf_uint_t;
+typedef uint8_t ssfbf_uint_t;
 #elif SSF_BFIFO_CONFIG_MAX_BFIFO_SIZE <= SSF_BFIFO_65535
-    typedef uint16_t ssfbf_uint_t;
+typedef uint16_t ssfbf_uint_t;
 #else
-    typedef uint32_t ssfbf_uint_t;
+typedef uint32_t ssfbf_uint_t;
 #endif
 
 typedef struct SSFBFifo
@@ -73,18 +73,18 @@ typedef struct SSFBFifo
 void SSFBFifoInit(SSFBFifo_t *fifo, uint32_t fifoSize, uint8_t *buffer, uint32_t bufferSize);
 void SSFBFifoPutByte(SSFBFifo_t *fifo, uint8_t inByte);
 bool SSFBFifoPeekByte(const SSFBFifo_t *fifo, uint8_t *outByte);
-bool SSFBFifoGetByte(SSFBFifo_t* fifo, uint8_t* outByte);
+bool SSFBFifoGetByte(SSFBFifo_t *fifo, uint8_t *outByte);
 bool SSFBFifoIsEmpty(const SSFBFifo_t *fifo);
-bool SSFBFifoIsFull(const SSFBFifo_t* fifo);
+bool SSFBFifoIsFull(const SSFBFifo_t *fifo);
 ssfbf_uint_t SSFBFifoSize(const SSFBFifo_t *fifo);
 ssfbf_uint_t SSFBFifoLen(const SSFBFifo_t *fifo);
-ssfbf_uint_t SSFBFifoUnused(const SSFBFifo_t* fifo);
+ssfbf_uint_t SSFBFifoUnused(const SSFBFifo_t *fifo);
 
 #if SSF_BFIFO_MULTI_BYTE_ENABLE == 1
 void SSFBFifoPutBytes(SSFBFifo_t *fifo, const uint8_t *inBytes, uint32_t inBytesLen);
-bool SSFBFifoPeekBytes(const SSFBFifo_t *fifo, uint8_t *outBytes, uint32_t outBytesSize, 
+bool SSFBFifoPeekBytes(const SSFBFifo_t *fifo, uint8_t *outBytes, uint32_t outBytesSize,
                        uint32_t *outBytesLen);
-bool SSFBFifoGetBytes(SSFBFifo_t* fifo, uint8_t *outBytes, uint32_t outBytesSize, 
+bool SSFBFifoGetBytes(SSFBFifo_t *fifo, uint8_t *outBytes, uint32_t outBytesSize,
                       uint32_t *outBytesLen);
 #endif /* SSF_BFIFO_MULTI_BYTE_ENABLE */
 
@@ -95,43 +95,43 @@ bool SSFBFifoGetBytes(SSFBFifo_t* fifo, uint8_t *outBytes, uint32_t outBytesSize
 
 /* --------------------------------------------------------------------------------------------- */
 #if SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE == SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE_255
-#define SSF_BFIFO_IS_FULL(fp) (((ssfbf_uint_t)((fp)->head + 1)) == (fp)->tail)
+    #define SSF_BFIFO_IS_FULL(fp) (((ssfbf_uint_t)((fp)->head + 1)) == (fp)->tail)
 #else
-#define SSF_BFIFO_IS_FULL(fp) (((ssfbf_uint_t)((fp)->head + 1) == (fp)->size) ? \
+    #define SSF_BFIFO_IS_FULL(fp) (((ssfbf_uint_t)((fp)->head + 1) == (fp)->size) ? \
                                 (fp)->tail == 0 : (fp)->tail == (ssfbf_uint_t)((fp)->head + 1))
 #endif
 
 /* --------------------------------------------------------------------------------------------- */
 #if SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE == SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE_255
-#define SSF_BFIFO_PUT_BYTE(fifo, inByte) do { \
+    #define SSF_BFIFO_PUT_BYTE(fifo, inByte) do { \
     (fifo)->buffer[(fifo)->head] = inByte; \
     (fifo)->head++; \
     SSF_ENSURE((fifo)->head != (fifo)->tail); } while (0)
 
-#define SSF_BFIFO_GET_BYTE(fp, ob) do { \
+    #define SSF_BFIFO_GET_BYTE(fp, ob) do { \
     SSF_REQUIRE((fp)->head != (fp)->tail); \
     ob = (fp)->buffer[(fp)->tail]; \
     (fp)->tail++; } while(0)
 #elif SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE == SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE_POW2_MINUS1
-#define SSF_BFIFO_PUT_BYTE(fifo, inByte) do { \
+    #define SSF_BFIFO_PUT_BYTE(fifo, inByte) do { \
     (fifo)->buffer[(fifo)->head] = inByte; \
     (fifo)->head++; \
     (fifo)->head &= (fifo)->mask; \
     SSF_ENSURE((fifo)->head != (fifo)->tail); } while (0)
 
-#define SSF_BFIFO_GET_BYTE(fifo, outByte) do { \
+    #define SSF_BFIFO_GET_BYTE(fifo, outByte) do { \
     SSF_REQUIRE((fifo)->head != (fifo)->tail); \
     outByte = (fifo)->buffer[(fifo)->tail]; \
     (fifo)->tail++; \
     (fifo)->tail &= (fifo)->mask; } while (0)
 #else
-#define SSF_BFIFO_PUT_BYTE(fifo, inByte) do { \
+    #define SSF_BFIFO_PUT_BYTE(fifo, inByte) do { \
     (fifo)->buffer[(fifo)->head] = inByte; \
     (fifo)->head++; \
     if ((fifo)->head == (fifo)->size) (fifo)->head = 0; \
     SSF_ENSURE((fifo)->head != (fifo)->tail); } while (0)
 
-#define SSF_BFIFO_GET_BYTE(fifo, outByte) do { \
+    #define SSF_BFIFO_GET_BYTE(fifo, outByte) do { \
     SSF_REQUIRE((fifo)->head != (fifo)->tail); \
     outByte = (fifo)->buffer[(fifo)->tail]; \
     (fifo)->tail++; \

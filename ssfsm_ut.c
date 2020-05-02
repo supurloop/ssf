@@ -399,6 +399,6 @@ void SSFSMUnitTest()
     SSF_ASSERT(_SSFSMFlagsAreCleared());
     SSF_ASSERT(SSFSMTask(&nextTimeout) == false);
 
-    printf("SSF MPOOL UNIT TEST DONE!\r\n");
+    printf("SSF SM UNIT TEST DONE!\r\n");
 }
 #endif /* SSF_CONFIG_SM_UNIT_TEST */

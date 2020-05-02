@@ -34,20 +34,20 @@
 #include "ssfport.h"
 
 #if SSF_CONFIG_BFIFO_UNIT_TEST == 1
-#if SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE == SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE_255
-#define SSF_TEST_BFIFO_SIZE (SSF_BFIFO_255)
-#elif SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE == SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE_POW2_MINUS1
-#define SSF_TEST_BFIFO_SIZE (511UL)
-#elif SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE == SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE_ANY
-#define SSF_TEST_BFIFO_SIZE (333667UL)
-#endif /* SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE */
+    #if SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE == SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE_255
+        #define SSF_TEST_BFIFO_SIZE (SSF_BFIFO_255)
+    #elif SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE == SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE_POW2_MINUS1
+        #define SSF_TEST_BFIFO_SIZE (511UL)
+    #elif SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE == SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE_ANY
+        #define SSF_TEST_BFIFO_SIZE (333667UL)
+    #endif /* SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE */
 
-#define SBF_TEST_NUM_FIFOS (2u)
+    #define SBF_TEST_NUM_FIFOS (2u)
 static SSFBFifo_t _sbfFifos[SBF_TEST_NUM_FIFOS];
-static uint8_t _sbfBuffers[SBF_TEST_NUM_FIFOS][SSF_TEST_BFIFO_SIZE + (1UL)];
-#if SSF_BFIFO_MULTI_BYTE_ENABLE == 1
+static uint8_t _sbfBuffers[SBF_TEST_NUM_FIFOS][SSF_TEST_BFIFO_SIZE +(1UL)];
+    #if SSF_BFIFO_MULTI_BYTE_ENABLE == 1
 static uint8_t _sbfReadBuf[SSF_TEST_BFIFO_SIZE];
-#endif /* SSF_BFIFO_MULTI_BYTE_ENABLE */
+    #endif /* SSF_BFIFO_MULTI_BYTE_ENABLE */
 
 /* --------------------------------------------------------------------------------------------- */
 /* Performs unit test on ssfbfifo's external interface.                                          */
@@ -62,15 +62,19 @@ void SSFBFifoUnitTest(void)
 #endif /* SSF_BFIFO_MULTI_BYTE_ENABLE */
 
     /* Test assertions */
-    SSF_ASSERT_TEST(SSFBFifoInit(NULL, SSF_TEST_BFIFO_SIZE, _sbfBuffers[0], SSF_TEST_BFIFO_SIZE + (1UL)));
+    SSF_ASSERT_TEST(SSFBFifoInit(NULL, SSF_TEST_BFIFO_SIZE, _sbfBuffers[0],
+                                 SSF_TEST_BFIFO_SIZE + (1UL)));
 #if SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE != SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE_ANY
-    SSF_ASSERT_TEST(SSFBFifoInit(&_sbfFifos[0], SSF_TEST_BFIFO_SIZE - 1, _sbfBuffers[0], SSF_TEST_BFIFO_SIZE + (1UL)));
+    SSF_ASSERT_TEST(SSFBFifoInit(&_sbfFifos[0], SSF_TEST_BFIFO_SIZE - 1, _sbfBuffers[0],
+                                 SSF_TEST_BFIFO_SIZE + (1UL)));
 #endif /* SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE */
     SSF_ASSERT_TEST(SSFBFifoInit(&_sbfFifos[0], 0, _sbfBuffers[0], SSF_TEST_BFIFO_SIZE + (1UL)));
-    SSF_ASSERT_TEST(SSFBFifoInit(&_sbfFifos[0], SSF_TEST_BFIFO_SIZE, NULL, SSF_TEST_BFIFO_SIZE + (1UL)));
-    SSF_ASSERT_TEST(SSFBFifoInit(&_sbfFifos[0], SSF_TEST_BFIFO_SIZE, _sbfBuffers[0], SSF_TEST_BFIFO_SIZE));
+    SSF_ASSERT_TEST(SSFBFifoInit(&_sbfFifos[0], SSF_TEST_BFIFO_SIZE, NULL,
+                                 SSF_TEST_BFIFO_SIZE + (1UL)));
+    SSF_ASSERT_TEST(SSFBFifoInit(&_sbfFifos[0], SSF_TEST_BFIFO_SIZE, _sbfBuffers[0],
+                                 SSF_TEST_BFIFO_SIZE));
     SSF_ASSERT_TEST(SSFBFifoInit(&_sbfFifos[0], SSF_TEST_BFIFO_SIZE, _sbfBuffers[0], 0));
-    
+
     SSF_ASSERT_TEST(SSFBFifoPutByte(NULL, 0));
     SSF_ASSERT_TEST(SSFBFifoPutByte(&_sbfFifos[0], 0));
 
@@ -106,8 +110,10 @@ void SSFBFifoUnitTest(void)
     /* Initialization */
     for (i = 0; i < SBF_TEST_NUM_FIFOS; i++)
     {
-        SSFBFifoInit(&_sbfFifos[i], SSF_TEST_BFIFO_SIZE, _sbfBuffers[i], SSF_TEST_BFIFO_SIZE + (1UL));
-        SSF_ASSERT_TEST(SSFBFifoInit(&_sbfFifos[i], SSF_TEST_BFIFO_SIZE, _sbfBuffers[i], SSF_TEST_BFIFO_SIZE + (1UL)));
+        SSFBFifoInit(&_sbfFifos[i], SSF_TEST_BFIFO_SIZE, _sbfBuffers[i],
+                     SSF_TEST_BFIFO_SIZE + (1UL));
+        SSF_ASSERT_TEST(SSFBFifoInit(&_sbfFifos[i], SSF_TEST_BFIFO_SIZE, _sbfBuffers[i],
+                                     SSF_TEST_BFIFO_SIZE + (1UL)));
         SSF_ASSERT(SSFBFifoPeekByte(&_sbfFifos[i], &outByte) == false);
         SSF_ASSERT(SSFBFifoGetByte(&_sbfFifos[i], &outByte) == false);
         SSF_ASSERT(SSFBFifoIsEmpty(&_sbfFifos[i]) == true);
@@ -134,7 +140,7 @@ void SSFBFifoUnitTest(void)
             SSF_ASSERT(SSFBFifoLen(&_sbfFifos[i]) == 0);
             SSF_ASSERT(SSFBFifoUnused(&_sbfFifos[i]) == SSF_TEST_BFIFO_SIZE);
 
-            if (i == 0) SSFBFifoPutByte(&_sbfFifos[i], (uint8_t) (j + 1));
+            if (i == 0) SSFBFifoPutByte(&_sbfFifos[i], (uint8_t)(j + 1));
             else SSF_BFIFO_PUT_BYTE(&_sbfFifos[i], (uint8_t)(j + 1));
 
             SSF_ASSERT(SSFBFifoIsEmpty(&_sbfFifos[i]) == false);
@@ -144,15 +150,15 @@ void SSFBFifoUnitTest(void)
             SSF_ASSERT(SSFBFifoSize(&_sbfFifos[i]) == SSF_TEST_BFIFO_SIZE);
             SSF_ASSERT(SSFBFifoLen(&_sbfFifos[i]) == 1);
             SSF_ASSERT(SSFBFifoUnused(&_sbfFifos[i]) == (SSF_TEST_BFIFO_SIZE - 1));
-            outByte = (uint8_t) j;
+            outByte = (uint8_t)j;
             SSF_ASSERT(SSFBFifoPeekByte(&_sbfFifos[i], &outByte) == true);
-            SSF_ASSERT(outByte == (uint8_t) (j + 1));
+            SSF_ASSERT(outByte == (uint8_t)(j + 1));
             SSF_ASSERT(SSFBFifoLen(&_sbfFifos[i]) == 1);
             SSF_ASSERT(SSFBFifoUnused(&_sbfFifos[i]) == (SSF_TEST_BFIFO_SIZE - 1));
-            outByte = (uint8_t) j;
+            outByte = (uint8_t)j;
             if (i == 0) SSF_ASSERT(SSFBFifoGetByte(&_sbfFifos[i], &outByte) == true);
             else SSF_BFIFO_GET_BYTE(&_sbfFifos[i], outByte);
-            SSF_ASSERT(outByte == (uint8_t) (j + 1));
+            SSF_ASSERT(outByte == (uint8_t)(j + 1));
         }
     }
 
@@ -286,18 +292,18 @@ void SSFBFifoUnitTest(void)
     SSF_ASSERT(outLen == 6);
     SSF_ASSERT(memcmp(_sbfReadBuf, "23456", outLen) == 0);
 
-    for (i = 0; i < sizeof(_sbfReadBuf); i++) _sbfReadBuf[i] = (uint8_t) i;
+    for (i = 0; i < sizeof(_sbfReadBuf); i++) _sbfReadBuf[i] = (uint8_t)i;
     SSFBFifoPutBytes(&_sbfFifos[0], _sbfReadBuf, sizeof(_sbfReadBuf));
     outLen = 0x12345678;
     memset(_sbfReadBuf, 0xcc, sizeof(_sbfReadBuf));
-    SSF_ASSERT(SSFBFifoPeekBytes(&_sbfFifos[0], _sbfReadBuf, sizeof(_sbfReadBuf), &outLen) == true);
+    SSF_ASSERT(SSFBFifoPeekBytes(&_sbfFifos[0], _sbfReadBuf, sizeof(_sbfReadBuf), &outLen));
     SSF_ASSERT(outLen == sizeof(_sbfReadBuf));
-    for (i = 0; i < sizeof(_sbfReadBuf); i++) SSF_ASSERT(_sbfReadBuf[i] == (uint8_t) i);
+    for (i = 0; i < sizeof(_sbfReadBuf); i++) SSF_ASSERT(_sbfReadBuf[i] == (uint8_t)i);
     outLen = 0x12345678;
     memset(_sbfReadBuf, 0xcc, sizeof(_sbfReadBuf));
-    SSF_ASSERT(SSFBFifoGetBytes(&_sbfFifos[0], _sbfReadBuf, sizeof(_sbfReadBuf), &outLen) == true);
+    SSF_ASSERT(SSFBFifoGetBytes(&_sbfFifos[0], _sbfReadBuf, sizeof(_sbfReadBuf), &outLen));
     SSF_ASSERT(outLen == sizeof(_sbfReadBuf));
-    for (i = 0; i < sizeof(_sbfReadBuf); i++) SSF_ASSERT(_sbfReadBuf[i] == (uint8_t) i);
+    for (i = 0; i < sizeof(_sbfReadBuf); i++) SSF_ASSERT(_sbfReadBuf[i] == (uint8_t)i);
 
     for (i = 0; i < (sizeof(_sbfReadBuf) << 1); i++)
     {
@@ -314,8 +320,6 @@ void SSFBFifoUnitTest(void)
         SSF_ASSERT(memcmp(_sbfReadBuf, "123456", outLen) == 0);
     }
 #endif /* SSF_BFIFO_MULTI_BYTE_ENABLE */
-
-    printf("SSF BFIFO UNIT TEST DONE!\r\n");
 }
 #endif /* SSF_CONFIG_BFIFO_UNIT_TEST */
 

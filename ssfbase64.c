@@ -47,7 +47,7 @@ static uint8_t SSFBase64GetEncoding(uint8_t e)
     const uint8_t *p = _b64;
 
     while ((*p != e) && (*p != 0)) p++;
-    return (uint8_t) (p - _b64);
+    return (uint8_t)(p - _b64);
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -85,7 +85,7 @@ uint8_t SSFBase64Dec32To24(const uint8_t *b32, uint8_t *b24out, size_t b24outSiz
 /* --------------------------------------------------------------------------------------------- */
 /* Encodes 24-bit input block as 32-bit output.                                                  */
 /* --------------------------------------------------------------------------------------------- */
-void SSFBase64Enc24To32(const uint8_t* b24in, size_t b24len, char* b32out, size_t b32outSize)
+void SSFBase64Enc24To32(const uint8_t *b24in, size_t b24len, char *b32out, size_t b32outSize)
 {
     uint8_t b24[3];
 
@@ -95,8 +95,10 @@ void SSFBase64Enc24To32(const uint8_t* b24in, size_t b24len, char* b32out, size_
     SSF_REQUIRE(b32outSize >= 4);
 
     b24[0] = b24in[0];
-    if (b24len >= 2)  b24[1] = b24in[1]; else b24[1] = 0;
-    if (b24len >= 3) b24[2] = b24in[2]; else b24[2] = 0;
+    if (b24len >= 2)  b24[1] = b24in[1];
+    else b24[1] = 0;
+    if (b24len >= 3) b24[2] = b24in[2];
+    else b24[2] = 0;
     *b32out = _b64[*b24 >> 2];
     *(b32out + 1) = _b64[((*b24 << 4) & 0x3f) | (*(b24 + 1) >> 4)];
     if (b24len >= 2) *(b32out + 2) = _b64[((*(b24 + 1) << 2) & 0x3f) | (*(b24 + 2) >> 6)];
@@ -108,7 +110,8 @@ void SSFBase64Enc24To32(const uint8_t* b24in, size_t b24len, char* b32out, size_
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if input successfully encoded as C string output, else false.                    */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFBase64Encode(const uint8_t *in, size_t inLen, char *out, size_t outSize, size_t *outLen)
+bool SSFBase64Encode(const uint8_t *in, size_t inLen, SSFCStrOut_t out, size_t outSize,
+                     size_t *outLen)
 {
     SSF_REQUIRE(in != NULL);
     SSF_REQUIRE(out != NULL);
@@ -118,7 +121,8 @@ bool SSFBase64Encode(const uint8_t *in, size_t inLen, char *out, size_t outSize,
     {
         SSFBase64Enc24To32(in, inLen, out, outSize);
         in += 3;
-        if (inLen >= 3) inLen -= 3; else inLen = 0;
+        if (inLen >= 3) inLen -= 3;
+        else inLen = 0;
         out += 4;
         outSize -= 4;
         if (outLen != NULL) *outLen += 4;
@@ -130,7 +134,8 @@ bool SSFBase64Encode(const uint8_t *in, size_t inLen, char *out, size_t outSize,
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if C string input successfully decoded as output, else false.                    */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFBase64Decode(const char *in, size_t inLenLim, uint8_t *out, size_t outSize, size_t *outLen)
+bool SSFBase64Decode(SSFCStrIn_t in, size_t inLenLim, uint8_t *out, size_t outSize,
+                     size_t *outLen)
 {
     uint8_t len;
 
@@ -147,7 +152,9 @@ bool SSFBase64Decode(const char *in, size_t inLenLim, uint8_t *out, size_t outSi
         in += 4;
         out += len;
         *outLen += len;
-        if (outSize >= len) outSize -= len; else outSize = 0;
+        if (outSize >= len) outSize -= len;
+        else outSize = 0;
     }
     return inLenLim == 0;
 }
+

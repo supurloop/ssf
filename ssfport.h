@@ -47,6 +47,9 @@ typedef uint64_t SSFPortTick_t;
 #define SSF_MAX(x, y) (((x) > (y)) ? (x) : (y))
 #define SSF_MIN(x, y) (((x) < (y)) ? (x) : (y))
 
+typedef const char * SSFCStrIn_t;
+typedef char * SSFCStrOut_t;
+
 /* --------------------------------------------------------------------------------------------- */
 /* Enable/disable unit tests                                                                     */
 /* --------------------------------------------------------------------------------------------- */

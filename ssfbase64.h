@@ -39,8 +39,10 @@
 /* --------------------------------------------------------------------------------------------- */
 /* External Interface                                                                            */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFBase64Encode(const uint8_t *in, size_t inLen, char *out, size_t outSize, size_t *outLen);
-bool SSFBase64Decode(const char *in, size_t inLenLim, uint8_t *out, size_t outSize, size_t *outLen);
+bool SSFBase64Encode(const uint8_t *in, size_t inLen, SSFCStrOut_t out, size_t outSize,
+                     size_t *outLen);
+bool SSFBase64Decode(SSFCStrIn_t in, size_t inLenLim, uint8_t *out, size_t outSize,
+                     size_t *outLen);
 
 /* --------------------------------------------------------------------------------------------- */
 /* Unit test                                                                                     */
@@ -50,3 +52,4 @@ void SSFBase64UnitTest(void);
 #endif /* SSF_CONFIG_BASE64_UNIT_TEST */
 
 #endif /* SSF_BASE64_H_INCLUDE */
+

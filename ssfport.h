@@ -35,6 +35,15 @@
 #include "Windows.h"
 #include "ssfassert.h"
 
+
+// TODOS
+// use _ for static vars and functions
+// SSFJsonGetString escaped len is wrong
+// Make SSFJsonWhitespace() a macro?
+// Get rid of gotos in json.
+// Break out non-port code into ssf.h file.
+
+
 /* --------------------------------------------------------------------------------------------- */
 /* Platform specific tick configuration                                                          */
 /* --------------------------------------------------------------------------------------------- */
@@ -158,3 +167,4 @@ extern int ssfUnitTestJmpRet;
 #endif /* SSF_CONFIG_UNIT_TEST */
 
 #endif /* SSF_PORT_H_INCLUDE */
+

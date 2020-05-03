@@ -79,54 +79,62 @@ typedef enum SSFJsonFltFmt
 } SSFJsonFltFmt_t;
 #endif /* SSF_JSON_CONFIG_ENABLE_FLOAT_GEN */
 
-typedef bool (*SSFJsonPrintFn_t)(char* js, size_t size, size_t start, size_t* end, void* in);
+typedef bool (*SSFJsonPrintFn_t)(char *js, size_t size, size_t start, size_t *end, void *in);
 
 /* --------------------------------------------------------------------------------------------- */
 /* External interface                                                                            */
 /* --------------------------------------------------------------------------------------------- */
 /* Parser */
-bool SSFJsonIsValid(const char* js);
-SSFJsonType_t SSFJsonGetType(const char* js, const char** path);
-bool SSFJsonGetString(const char* js, const char** path, char* out, size_t outSize, size_t* outLen);
+bool SSFJsonIsValid(SSFCStrIn_t js);
+SSFJsonType_t SSFJsonGetType(SSFCStrIn_t js, SSFCStrIn_t *path);
+bool SSFJsonGetString(SSFCStrIn_t js, SSFCStrIn_t *path, SSFCStrOut_t out, size_t outSize,
+                      size_t *outLen);
 #if SSF_JSON_CONFIG_ENABLE_FLOAT_PARSE == 1
-bool SSFJsonGetDouble(const char* js, const char** path, double* out);
+bool SSFJsonGetDouble(SSFCStrIn_t js, SSFCStrIn_t *path, double *out);
 #endif /* SSF_JSON_CONFIG_ENABLE_FLOAT_PARSE */
-bool SSFJsonGetLong(const char* js, const char** path, long int* out);
-bool SSFJsonGetULong(const char* js, const char** path, unsigned long int* out);
-bool SSFJsonGetHex(const char* js, const char** path, uint8_t* out, size_t outSize, size_t* outLen,
-                   bool rev);
-bool SSFJsonGetBase64(const char* js, const char** path, uint8_t* out, size_t outSize, size_t* outLen);
-bool SSFJsonObject(const char* js, size_t* index, size_t* start, size_t* end, const char** path,
-                   uint8_t depth, SSFJsonType_t* jt);
+bool SSFJsonGetLong(SSFCStrIn_t js, SSFCStrIn_t *path, long int *out);
+bool SSFJsonGetULong(SSFCStrIn_t js, SSFCStrIn_t *path, unsigned long int *out);
+bool SSFJsonGetHex(SSFCStrIn_t js, SSFCStrIn_t *path, uint8_t *out, size_t outSize,
+                   size_t *outLen, bool rev);
+bool SSFJsonGetBase64(SSFCStrIn_t js, SSFCStrIn_t *path, uint8_t *out, size_t outSize,
+                      size_t *outLen);
+bool SSFJsonObject(SSFCStrIn_t js, size_t *index, size_t *start, size_t *end, SSFCStrIn_t *path,
+                   uint8_t depth, SSFJsonType_t *jt);
 
 /* Generator */
-bool SSFJsonPrintString(char* js, size_t size, size_t start, size_t* end, const char* in, bool *comma);
+bool SSFJsonPrintString(SSFCStrOut_t js, size_t size, size_t start, size_t *end, SSFCStrIn_t in,
+                        bool *comma);
 #define SSFJsonPrintTrue(js, size, start, end, comma) \
         SSFJsonPrintCString(js, size, start, end, "true", comma)
 #define SSFJsonPrintFalse(js, size, start, end, comma) \
         SSFJsonPrintCString(js, size, start, end, "false", comma)
 #define SSFJsonPrintNull(js, size, start, end, comma) \
         SSFJsonPrintCString(js, size, start, end, "null", comma)
-bool SSFJsonPrintLabel(char* js, size_t size, size_t start, size_t* end, const char* in, bool *comma);
-bool SSFJsonPrintHex(char* js, size_t size, size_t start, size_t* end, const uint8_t* in, size_t inLen,
-                           bool rev, bool *comma);
-bool SSFJsonPrintBase64(char* jstr, size_t size, size_t start, size_t* end, const uint8_t* in,
-                              size_t inLen, bool *comma);
+bool SSFJsonPrintLabel(SSFCStrOut_t js, size_t size, size_t start, size_t *end, SSFCStrIn_t in,
+                       bool *comma);
+bool SSFJsonPrintHex(SSFCStrOut_t js, size_t size, size_t start, size_t *end, const uint8_t *in,
+                     size_t inLen,
+                     bool rev, bool *comma);
+bool SSFJsonPrintBase64(SSFCStrOut_t jstr, size_t size, size_t start, size_t *end,
+                        const uint8_t *in, size_t inLen, bool *comma);
 #if SSF_JSON_CONFIG_ENABLE_FLOAT_GEN == 1
-bool SSFJsonPrintDouble(char* js, size_t size, size_t start, size_t* end, double in,
+bool SSFJsonPrintDouble(SSFCStrOut_t js, size_t size, size_t start, size_t *end, double in,
                         SSFJsonFltFmt_t fmt, bool *comma);
 #endif /* SSF_JSON_CONFIG_ENABLE_FLOAT_GEN */
-bool SSFJsonPrintInt(char* js, size_t size, size_t start, size_t* end, int32_t in, bool *comma);
-bool SSFJsonPrintUInt(char* js, size_t size, size_t start, size_t* end, uint32_t in, bool *comma);
+bool SSFJsonPrintInt(SSFCStrOut_t js, size_t size, size_t start, size_t *end, int32_t in,
+                     bool *comma);
+bool SSFJsonPrintUInt(SSFCStrOut_t js, size_t size, size_t start, size_t *end, uint32_t in,
+                      bool *comma);
 #define SSFJsonPrintObject(js, size, start, end, fn, in, comma) \
         SSFJsonPrint(js, size, start, end, fn, in, "{}", comma)
 #define SSFJsonPrintArray(js, size, start, end, fn, in, comma) \
         SSFJsonPrint(js, size, start, end, fn, in, "[]", comma)
-bool SSFJsonPrintCString(char* js, size_t size, size_t start, size_t* end, const char* in, bool *comma);
-bool SSFJsonPrint(char* js, size_t size, size_t start, size_t* end, SSFJsonPrintFn_t fn, void* in,
-                    const char *oc, bool *comma);
+bool SSFJsonPrintCString(SSFCStrOut_t js, size_t size, size_t start, size_t *end, SSFCStrIn_t in,
+                         bool *comma);
+bool SSFJsonPrint(SSFCStrOut_t js, size_t size, size_t start, size_t *end, SSFJsonPrintFn_t fn,
+                  void *in, const char *oc, bool *comma);
 #if SSF_JSON_CONFIG_ENABLE_UPDATE == 1
-bool SSFJsonUpdate(char* js, size_t size, const char** path, SSFJsonPrintFn_t fn);
+bool SSFJsonUpdate(SSFCStrOut_t js, size_t size, SSFCStrIn_t *path, SSFJsonPrintFn_t fn);
 #endif /* SSF_JSON_CONFIG_ENABLE_UPDATE */
 
 /* --------------------------------------------------------------------------------------------- */
@@ -137,3 +145,4 @@ void SSFJsonUnitTest(void);
 #endif /* SSF_CONFIG_JSON_UNIT_TEST */
 
 #endif /* SSF_JSON_H_INCLUDE */
+

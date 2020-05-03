@@ -37,7 +37,7 @@
 #include "ssfport.h"
 
 #if SSF_CONFIG_JSON_UNIT_TEST == 1
-#define JTS_NUM_ITEMS(x, s) (sizeof((x)) / (s))
+    #define JTS_NUM_ITEMS(x, s) (sizeof((x)) / (s))
 const char *_jtsIsValid[] =
 {
     "{}",
@@ -103,7 +103,7 @@ const char *_jtsIsValid[] =
     "{\"name\":[\"value\",\n\r\t [\n\r\t \"astr\"\n\r\t ]\n\r\t ,\n\r\t {\"name2\":1,\"name3\":\"\"\n\r\t }\n\r\t ,\n\r\t -12345678.09e+02,2]\n\r\t }",
 };
 
-const char* _jtsIsInvalid[] =
+const char *_jtsIsInvalid[] =
 {
     "{\"name\":{\"name2\":1,}}",
     "{\"name\":{\"name2\"}}",
@@ -173,7 +173,7 @@ const char* _jtsIsInvalid[] =
     "{\"name\":{\"name2\":1,\"name3\":[],}}",
 };
 
-const char *_jtsTypeNumber[] = 
+const char *_jtsTypeNumber[] =
 {
     "{\"n\":1}",
     "{\"n\":1.0}",
@@ -185,8 +185,8 @@ const char *_jtsTypeNumber[] =
     "{\"n\":-987654321}",
 };
 
-const char *_jtsTypeString[] = 
-{ 
+const char *_jtsTypeString[] =
+{
     "{\"s\":\"\"}",
     "{\"s\":\" \"}",
     "{\"s\":\"value\"}",
@@ -197,7 +197,7 @@ const char *_jtsTypeString[] =
     "{\"s\":\"`~|!@#$%^&*()-987654321\"}",
 };
 
-const char* _jtsTypeTrue[] =
+const char *_jtsTypeTrue[] =
 {
     "{\"t\":true}",
     "{\"t\": true}",
@@ -206,7 +206,7 @@ const char* _jtsTypeTrue[] =
     "{\"t\":\n\r\ttrue\n\r\t}",
 };
 
-const char* _jtsTypeFalse[] =
+const char *_jtsTypeFalse[] =
 {
     "{\"f\":false}",
     "{\"f\": false}",
@@ -215,7 +215,7 @@ const char* _jtsTypeFalse[] =
     "{\"f\":\n\r\tfalse\n\r\t}",
 };
 
-const char* _jtsTypeNull[] =
+const char *_jtsTypeNull[] =
 {
     "{\"N\":null}",
     "{\"N\": null}",
@@ -224,7 +224,7 @@ const char* _jtsTypeNull[] =
     "{\"N\":\n\r\tnull\n\r\t}",
 };
 
-const char* _jtsTypeEmptyObject[] =
+const char *_jtsTypeEmptyObject[] =
 {
     "{}",
     " {}",
@@ -235,7 +235,7 @@ const char* _jtsTypeEmptyObject[] =
     "\n \r\t{\n\r \t}\n\r\t ",
 };
 
-const char* _jtsTypeObject[] =
+const char *_jtsTypeObject[] =
 {
     "{\"a\":{}}",
     "{\"a\": {}}",
@@ -260,15 +260,15 @@ const char* _jtsTypeObject[] =
     "{\"a\":{\"b\":1.0,\"c\":\"str\",\"d\":true,\"e\":false,\"f\":null,\"\":[],\"g\":{}}}",
     "{\"a\":{\"b\":1.0, \"c\":\"str\", \"d\":true, \"e\":false, \"f\":null, \"\":[], \"g\":{}}}",
     "{\"a\":{\n\r\t\"b\"\n\r\t:\n\r\t1.0,\n\r\t\"c\"\n\r\t:\n\r\t\"str\"\n\r\t,\n\r\t\"d\"\n\r\t:"
-        "\n\r\ttrue\n\r\t,\n\r\t\"e\"\n\r\t:\n\r\tfalse\n\r\t, \"f\"\n\r\t:\n\r\tnull\n\r\t,\n\r\t"
-         " \"\"\n\r\t:\n\r\t[\n \r\t], \n\r\t\"g\"\n\r\t:\n\r\t{\n\r\t}\n\r\t}\n\r\t}\n\r\t",
+    "\n\r\ttrue\n\r\t,\n\r\t\"e\"\n\r\t:\n\r\tfalse\n\r\t, \"f\"\n\r\t:\n\r\tnull\n\r\t,\n\r\t"
+    " \"\"\n\r\t:\n\r\t[\n \r\t], \n\r\t\"g\"\n\r\t:\n\r\t{\n\r\t}\n\r\t}\n\r\t}\n\r\t",
     "{\"a\":{\"b\":1.0,\"c\":\"str\",\"d\":true,\"e\":false,\"f\":null,\"\":[1\n\r\t ],\"g\":{}}}",
     "{\"a\":{\"b\":1.0,\"c\":\"str\",\"d\":true,\"e\":false,\"f\":null,\"\":[1],\"g\":{}}}",
     "{\"a\":{\"b\":1.0,\"c\":\"str\",\"d\":true,\"e\":false,\"f\":null,\"\":[1,\"\",true\n\r\t],"
-        "\"g\":{}}}",
+    "\"g\":{}}}",
 };
 
-const char* _jtsTypeArray[] =
+const char *_jtsTypeArray[] =
 {
     "{\"a\":[]}",
     "{\"a\": []}",
@@ -282,32 +282,35 @@ const char* _jtsTypeArray[] =
     "{\"a\":[1,2,true,false,null,\"\",[],{}]}",
     "{\"a\":[-1.0,2e+4,true,false,null,\"abc\\u1234\\n\",[1],{\"b\":[]}]}",
     "{\"a\": \n\r\t[ \n\r\t-1.0,2e+4 \n\r\t, \n\r\ttrue \n\r\t, \n\r\tfalse \n\r\t, \n\r\tnull "
-        "\n\r\t, \n\r\t\"abc\\u1234\\n\" \n\r\t, \n\r\t[ \n\r\t1 \n\r\t] \n\r\t, \n\r\t{ \n\r\t"
-        "\"b\" \n\r\t: \n\r\t[ \n\r\t] \n\r\t} \n\r\t] \n\r\t} \n\r\t",
+    "\n\r\t, \n\r\t\"abc\\u1234\\n\" \n\r\t, \n\r\t[ \n\r\t1 \n\r\t] \n\r\t, \n\r\t{ \n\r\t"
+    "\"b\" \n\r\t: \n\r\t[ \n\r\t] \n\r\t} \n\r\t] \n\r\t} \n\r\t",
 };
 
-const char* _jtsComplex[] = 
+const char *_jtsComplex[] =
 {
     "{\"b1\":true,\"b2\":false,\"nil1\":null,\"n1\":-1.2e+03,\"s1-\":\"level0\",\"a1\":[],\"a2\":"
-        "[true,false,null,1234567890,-98765432,\"\",\"YQ==\",[],{},[1,2,3],{\"hex1\":\"12\","
-        "\"hex2\":\"1234567890ABCDEFabcdef\"}],\"obj1\":{},\"obj2\":{\"b64_1\":\"YWI=\","
-        "\"b64_2\":\"YWJj\",\"b64_3\":\"MTIzNDU2Nzg5MGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6QUJDREVGR0"
-        "hJSktMTU5PUFFSU1RVVldYWVohQCMkJV4mKigpYH4tXys9e31bXTo7JyI8PiwuLz98XA==\",\"b3\":true,"
-        "\"b4\":false,\"nil2\":null,\"array\":[\"A\",\"Z\"],\"objdeep\":{\"hex3\":\"1029384756a1b2"
-        "c3d4e5f6\",\"NUMFAR\":-42}}}",
+    "[true,false,null,1234567890,-98765432,\"\",\"YQ==\",[],{},[1,2,3],{\"hex1\":\"12\","
+    "\"hex2\":\"1234567890ABCDEFabcdef\"}],\"obj1\":{},\"obj2\":{\"b64_1\":\"YWI=\","
+    "\"b64_2\":\"YWJj\",\"b64_3\":\"MTIzNDU2Nzg5MGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6QUJDREVGR0"
+    "hJSktMTU5PUFFSU1RVVldYWVohQCMkJV4mKigpYH4tXys9e31bXTo7JyI8PiwuLz98XA==\",\"b3\":true,"
+    "\"b4\":false,\"nil2\":null,\"array\":[\"A\",\"Z\"],\"objdeep\":{\"hex3\":\"1029384756a1b2"
+    "c3d4e5f6\",\"NUMFAR\":-42}}}",
     "\n\r\t {\n\r\t \"b1\"\n\r\t :true,\"b2\":false\n\r\t ,\"nil1\":null,\"n1\":-1.2e+03,\"s1-\":\"level0\",\"a1\":\n\r\t [\n\r\t ]\n\r\t ,\n\r\t \"a2\":"
-        "[true,false,\n\r\t null\n\r\t ,1234567890,-98765432,\"\",\"YQ==\",[],{},[1,2,3],{\"hex1\":\"12\","
-        "\"hex2\":\"1234567890ABCDEFabcdef\"\n\r\t }\n\r\t ]\n\r\t ,\"obj1\":{},\"obj2\":{\"b64_1\":\"YWI=\","
-        "\"b64_2\":\"YWJj\",\"b64_3\":\"MTIzNDU2Nzg5MGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6QUJDREVGR0"
-        "hJSktMTU5PUFFSU1RVVldYWVohQCMkJV4mKigpYH4tXys9e31bXTo7JyI8PiwuLz98XA==\"\n\r\t ,\n\r\t \"b3\":true,\n\r\t "
-        "\"b4\":false,\"nil2\":\n\r\t null,\"array\":[\"A\",\"Z\"],\"objdeep\":{\"hex3\":\n\r\t \"1029384756a1b2"
-        "c3d4e5f6\",\"NUMFAR\":\n\r\t -42\n\r\t }\n\r\t }\n\r\t }\n\r\t ",
+    "[true,false,\n\r\t null\n\r\t ,1234567890,-98765432,\"\",\"YQ==\",[],{},[1,2,3],{\"hex1\":\"12\","
+    "\"hex2\":\"1234567890ABCDEFabcdef\"\n\r\t }\n\r\t ]\n\r\t ,\"obj1\":{},\"obj2\":{\"b64_1\":\"YWI=\","
+    "\"b64_2\":\"YWJj\",\"b64_3\":\"MTIzNDU2Nzg5MGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6QUJDREVGR0"
+    "hJSktMTU5PUFFSU1RVVldYWVohQCMkJV4mKigpYH4tXys9e31bXTo7JyI8PiwuLz98XA==\"\n\r\t ,\n\r\t \"b3\":true,\n\r\t "
+    "\"b4\":false,\"nil2\":\n\r\t null,\"array\":[\"A\",\"Z\"],\"objdeep\":{\"hex3\":\n\r\t \"1029384756a1b2"
+    "c3d4e5f6\",\"NUMFAR\":\n\r\t -42\n\r\t }\n\r\t }\n\r\t }\n\r\t ",
 };
 
 char _jsOut[1024];
 
-bool p1fn(char* js, size_t size, size_t start, size_t* end, void* in)
-{    
+/* --------------------------------------------------------------------------------------------- */
+/* Printer function.                                                                             */
+/* --------------------------------------------------------------------------------------------- */
+bool p1fn(char *js, size_t size, size_t start, size_t *end, void *in)
+{
     SSF_UNUSED(js);
     SSF_UNUSED(size);
     SSF_UNUSED(start);
@@ -316,7 +319,10 @@ bool p1fn(char* js, size_t size, size_t start, size_t* end, void* in)
     return true;
 }
 
-bool p2fn(char* js, size_t size, size_t start, size_t* end, void* in)
+/* --------------------------------------------------------------------------------------------- */
+/* Printer function.                                                                             */
+/* --------------------------------------------------------------------------------------------- */
+bool p2fn(char *js, size_t size, size_t start, size_t *end, void *in)
 {
     bool comma = false;
 
@@ -327,7 +333,10 @@ bool p2fn(char* js, size_t size, size_t start, size_t* end, void* in)
     return true;
 }
 
-bool p2fna(char* js, size_t size, size_t start, size_t* end, void* in)
+/* --------------------------------------------------------------------------------------------- */
+/* Printer function.                                                                             */
+/* --------------------------------------------------------------------------------------------- */
+bool p2fna(char *js, size_t size, size_t start, size_t *end, void *in)
 {
     bool comma = false;
 
@@ -338,24 +347,39 @@ bool p2fna(char* js, size_t size, size_t start, size_t* end, void* in)
     if (!SSFJsonPrintFalse(js, size, start, &start, &comma)) return false;
     if (!SSFJsonPrintNull(js, size, start, &start, &comma)) return false;
 #if SSF_JSON_CONFIG_ENABLE_FLOAT_GEN == 1
-    if (!SSFJsonPrintDouble(js, size, start, &start, -92.8123456789123e3, SSF_JSON_FLT_FMT_STD, &comma)) return false;
-    if (!SSFJsonPrintDouble(js, size, start, &start, -92.8123456789123e3, SSF_JSON_FLT_FMT_SHORT, &comma)) return false;
-    if (!SSFJsonPrintDouble(js, size, start, &start, -92.8123456789123e3, SSF_JSON_FLT_FMT_PREC_0, &comma)) return false;
-    if (!SSFJsonPrintDouble(js, size, start, &start, -92.8123456789123e3, SSF_JSON_FLT_FMT_PREC_1, &comma)) return false;
-    if (!SSFJsonPrintDouble(js, size, start, &start, -92.8123456789123e3, SSF_JSON_FLT_FMT_PREC_2, &comma)) return false;
-    if (!SSFJsonPrintDouble(js, size, start, &start, -92.8123456789123e3, SSF_JSON_FLT_FMT_PREC_3, &comma)) return false;
-    if (!SSFJsonPrintDouble(js, size, start, &start, -92.8123456789123e3, SSF_JSON_FLT_FMT_PREC_4, &comma)) return false;
-    if (!SSFJsonPrintDouble(js, size, start, &start, -92.8123456789123e3, SSF_JSON_FLT_FMT_PREC_5, &comma)) return false;
-    if (!SSFJsonPrintDouble(js, size, start, &start, -92.8123456789123e3, SSF_JSON_FLT_FMT_PREC_6, &comma)) return false;
-    if (!SSFJsonPrintDouble(js, size, start, &start, -92.8123456789123e3, SSF_JSON_FLT_FMT_PREC_7, &comma)) return false;
-    if (!SSFJsonPrintDouble(js, size, start, &start, -92.8123456789123e3, SSF_JSON_FLT_FMT_PREC_8, &comma)) return false;
-    if (!SSFJsonPrintDouble(js, size, start, &start, -92.8123456789123e3, SSF_JSON_FLT_FMT_PREC_9, &comma)) return false;
+    if (!SSFJsonPrintDouble(js, size, start, &start, -92.8123456789123e3, SSF_JSON_FLT_FMT_STD,
+                            &comma)) return false;
+    if (!SSFJsonPrintDouble(js, size, start, &start, -92.8123456789123e3, SSF_JSON_FLT_FMT_SHORT,
+                            &comma)) return false;
+    if (!SSFJsonPrintDouble(js, size, start, &start, -92.8123456789123e3, SSF_JSON_FLT_FMT_PREC_0,
+                            &comma)) return false;
+    if (!SSFJsonPrintDouble(js, size, start, &start, -92.8123456789123e3, SSF_JSON_FLT_FMT_PREC_1,
+                            &comma)) return false;
+    if (!SSFJsonPrintDouble(js, size, start, &start, -92.8123456789123e3, SSF_JSON_FLT_FMT_PREC_2,
+                            &comma)) return false;
+    if (!SSFJsonPrintDouble(js, size, start, &start, -92.8123456789123e3, SSF_JSON_FLT_FMT_PREC_3,
+                            &comma)) return false;
+    if (!SSFJsonPrintDouble(js, size, start, &start, -92.8123456789123e3, SSF_JSON_FLT_FMT_PREC_4,
+                            &comma)) return false;
+    if (!SSFJsonPrintDouble(js, size, start, &start, -92.8123456789123e3, SSF_JSON_FLT_FMT_PREC_5,
+                            &comma)) return false;
+    if (!SSFJsonPrintDouble(js, size, start, &start, -92.8123456789123e3, SSF_JSON_FLT_FMT_PREC_6,
+                            &comma)) return false;
+    if (!SSFJsonPrintDouble(js, size, start, &start, -92.8123456789123e3, SSF_JSON_FLT_FMT_PREC_7,
+                            &comma)) return false;
+    if (!SSFJsonPrintDouble(js, size, start, &start, -92.8123456789123e3, SSF_JSON_FLT_FMT_PREC_8,
+                            &comma)) return false;
+    if (!SSFJsonPrintDouble(js, size, start, &start, -92.8123456789123e3, SSF_JSON_FLT_FMT_PREC_9,
+                            &comma)) return false;
 #endif /* SSF_JSON_CONFIG_ENABLE_FLOAT_GEN */
     *end = start;
     return true;
 }
 
-bool p3fn(char* js, size_t size, size_t start, size_t* end, void* in)
+/* --------------------------------------------------------------------------------------------- */
+/* Printer function.                                                                             */
+/* --------------------------------------------------------------------------------------------- */
+bool p3fn(char *js, size_t size, size_t start, size_t *end, void *in)
 {
     bool comma = false;
     uint32_t *i = (uint32_t *)in;
@@ -365,11 +389,11 @@ bool p3fn(char* js, size_t size, size_t start, size_t* end, void* in)
     if (!SSFJsonPrintLabel(js, size, start, &start, "object1", &comma)) return false;
     if (!SSFJsonPrintObject(js, size, start, &start, p2fn, in, false)) return false;
     if (!SSFJsonPrintLabel(js, size, start, &start, "hexrev", &comma)) return false;
-    if (!SSFJsonPrintHex(js, size, start, &start, (uint8_t*)i, sizeof(uint32_t), true, false)) return false;
+    if (!SSFJsonPrintHex(js, size, start, &start, (uint8_t *)i, sizeof(uint32_t), true, false)) return false;
     if (!SSFJsonPrintLabel(js, size, start, &start, "hex", &comma)) return false;
-    if (!SSFJsonPrintHex(js, size, start, &start, (uint8_t*)i, sizeof(uint32_t), false, false)) return false;
+    if (!SSFJsonPrintHex(js, size, start, &start, (uint8_t *)i, sizeof(uint32_t), false, false)) return false;
     if (!SSFJsonPrintLabel(js, size, start, &start, "b64", &comma)) return false;
-    if (!SSFJsonPrintBase64(js, size, start, &start, (uint8_t*)i, sizeof(uint32_t), false)) return false;
+    if (!SSFJsonPrintBase64(js, size, start, &start, (uint8_t *)i, sizeof(uint32_t), false)) return false;
 #if SSF_JSON_CONFIG_ENABLE_FLOAT_GEN == 1
     if (!SSFJsonPrintLabel(js, size, start, &start, "double", &comma)) return false;
     if (!SSFJsonPrintDouble(js, size, start, &start, *i, SSF_JSON_FLT_FMT_STD, false)) return false;
@@ -389,7 +413,10 @@ bool p3fn(char* js, size_t size, size_t start, size_t* end, void* in)
     return true;
 }
 
-bool p4fn(char* js, size_t size, size_t start, size_t* end, void* in)
+/* --------------------------------------------------------------------------------------------- */
+/* Printer function.                                                                             */
+/* --------------------------------------------------------------------------------------------- */
+bool p4fn(char *js, size_t size, size_t start, size_t *end, void *in)
 {
     SSF_UNUSED(in);
     if (!SSFJsonPrintString(js, size, start, &start, "mynewvalue", false)) return false;
@@ -397,11 +424,14 @@ bool p4fn(char* js, size_t size, size_t start, size_t* end, void* in)
     return true;
 }
 
-#if SSF_JSON_CONFIG_ENABLE_UPDATE == 1
-void SSFJsonUnitTestUpdate(char* out, size_t outSize, char *path0, char *path1, char *path2,
-                           const char* initial, const char* expected)
+    #if SSF_JSON_CONFIG_ENABLE_UPDATE == 1
+/* --------------------------------------------------------------------------------------------- */
+/* Printer function.                                                                             */
+/* --------------------------------------------------------------------------------------------- */
+void SSFJsonUnitTestUpdate(char *out, size_t outSize, char *path0, char *path1, char *path2,
+                           const char *initial, const char *expected)
 {
-    char* path[SSF_JSON_CONFIG_MAX_IN_DEPTH + 1];
+    char *path[SSF_JSON_CONFIG_MAX_IN_DEPTH + 1];
 
     memset(out, 0xff, outSize);
     memcpy(out, initial, SSF_MIN(outSize, strlen(initial) + 1));
@@ -413,7 +443,7 @@ void SSFJsonUnitTestUpdate(char* out, size_t outSize, char *path0, char *path1, 
     SSF_ASSERT(SSFJsonIsValid(out) == true);
     if (expected != NULL) SSF_ASSERT(strncmp(out, expected, outSize) == 0);
 }
-#endif /* SSF_JSON_CONFIG_ENABLE_UPDATE */
+    #endif /* SSF_JSON_CONFIG_ENABLE_UPDATE */
 
 /* --------------------------------------------------------------------------------------------- */
 /* Performs unit test on ssfjson's external interface.                                           */
@@ -434,7 +464,7 @@ void SSFJsonUnitTest(void)
     }
 
     /* Validate parser on invalid JSON strings */
-    for (i = 0; i < JTS_NUM_ITEMS(_jtsIsInvalid, sizeof(char*)); i++)
+    for (i = 0; i < JTS_NUM_ITEMS(_jtsIsInvalid, sizeof(char *)); i++)
     {
         SSF_ASSERT(!SSFJsonIsValid(_jtsIsInvalid[i]));
     }
@@ -442,7 +472,7 @@ void SSFJsonUnitTest(void)
     /* Validate parser on number types */
     memset(path, 0, sizeof(path));
     path[0] = "n";
-    for (i = 0; i < JTS_NUM_ITEMS(_jtsTypeNumber, sizeof(char*)); i++)
+    for (i = 0; i < JTS_NUM_ITEMS(_jtsTypeNumber, sizeof(char *)); i++)
     {
         SSF_ASSERT(SSFJsonGetType(_jtsTypeNumber[i], path) == SSF_JSON_TYPE_NUMBER);
     }
@@ -450,7 +480,7 @@ void SSFJsonUnitTest(void)
     /* Validate parser on string types */
     memset(path, 0, sizeof(path));
     path[0] = "s";
-    for (i = 0; i < JTS_NUM_ITEMS(_jtsTypeString, sizeof(char*)); i++)
+    for (i = 0; i < JTS_NUM_ITEMS(_jtsTypeString, sizeof(char *)); i++)
     {
         SSF_ASSERT(SSFJsonGetType(_jtsTypeString[i], path) == SSF_JSON_TYPE_STRING);
     }
@@ -458,7 +488,7 @@ void SSFJsonUnitTest(void)
     /* Validate parser on true types */
     memset(path, 0, sizeof(path));
     path[0] = "t";
-    for (i = 0; i < JTS_NUM_ITEMS(_jtsTypeTrue, sizeof(char*)); i++)
+    for (i = 0; i < JTS_NUM_ITEMS(_jtsTypeTrue, sizeof(char *)); i++)
     {
         SSF_ASSERT(SSFJsonGetType(_jtsTypeTrue[i], path) == SSF_JSON_TYPE_TRUE);
     }
@@ -466,7 +496,7 @@ void SSFJsonUnitTest(void)
     /* Validate parser on false types */
     memset(path, 0, sizeof(path));
     path[0] = "f";
-    for (i = 0; i < JTS_NUM_ITEMS(_jtsTypeFalse, sizeof(char*)); i++)
+    for (i = 0; i < JTS_NUM_ITEMS(_jtsTypeFalse, sizeof(char *)); i++)
     {
         SSF_ASSERT(SSFJsonGetType(_jtsTypeFalse[i], path) == SSF_JSON_TYPE_FALSE);
     }
@@ -474,14 +504,14 @@ void SSFJsonUnitTest(void)
     /* Validate parser on null types */
     memset(path, 0, sizeof(path));
     path[0] = "N";
-    for (i = 0; i < JTS_NUM_ITEMS(_jtsTypeNull, sizeof(char*)); i++)
+    for (i = 0; i < JTS_NUM_ITEMS(_jtsTypeNull, sizeof(char *)); i++)
     {
         SSF_ASSERT(SSFJsonGetType(_jtsTypeNull[i], path) == SSF_JSON_TYPE_NULL);
     }
 
     /* Validate parser on empty objects types */
     memset(path, 0, sizeof(path));
-    for (i = 0; i < JTS_NUM_ITEMS(_jtsTypeEmptyObject, sizeof(char*)); i++)
+    for (i = 0; i < JTS_NUM_ITEMS(_jtsTypeEmptyObject, sizeof(char *)); i++)
     {
         SSF_ASSERT(SSFJsonGetType(_jtsTypeEmptyObject[i], path) == SSF_JSON_TYPE_OBJECT);
     }
@@ -489,7 +519,7 @@ void SSFJsonUnitTest(void)
     /* Validate parser on object types */
     memset(path, 0, sizeof(path));
     path[0] = "a";
-    for (i = 0; i < JTS_NUM_ITEMS(_jtsTypeObject, sizeof(char*)); i++)
+    for (i = 0; i < JTS_NUM_ITEMS(_jtsTypeObject, sizeof(char *)); i++)
     {
         SSF_ASSERT(SSFJsonGetType(_jtsTypeObject[i], path) == SSF_JSON_TYPE_OBJECT);
     }
@@ -497,14 +527,14 @@ void SSFJsonUnitTest(void)
     /* Validate parser on array types */
     memset(path, 0, sizeof(path));
     path[0] = "a";
-    for (i = 0; i < JTS_NUM_ITEMS(_jtsTypeArray, sizeof(char*)); i++)
+    for (i = 0; i < JTS_NUM_ITEMS(_jtsTypeArray, sizeof(char *)); i++)
     {
         SSF_ASSERT(SSFJsonGetType(_jtsTypeArray[i], path) == SSF_JSON_TYPE_ARRAY);
     }
 
     /* Validate parser on complex nested JSON */
     memset(path, 0, sizeof(path));
-    for (i = 0; i < JTS_NUM_ITEMS(_jtsComplex, sizeof(char*)); i++)
+    for (i = 0; i < JTS_NUM_ITEMS(_jtsComplex, sizeof(char *)); i++)
     {
         char strOut[256];
         size_t strOutLen;
@@ -641,12 +671,12 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(SSFJsonObject(_jtsComplex[i], &index, &start, &end, path, 0, &jtype) == true);
         SSF_ASSERT(jtype == SSF_JSON_TYPE_ARRAY);
         if (i == 0) SSF_ASSERT(memcmp(&_jtsComplex[i][start],
-                   "[true,false,null,1234567890,-98765432,\"\",\"YQ==\",[],{},[1,2,3],{\"hex1\":\"12\",\"hex2\":\"1234567890ABCDEFabcdef\"}]",
-                   (end - start + 1)) == 0);
+                                      "[true,false,null,1234567890,-98765432,\"\",\"YQ==\",[],{},[1,2,3],{\"hex1\":\"12\",\"hex2\":\"1234567890ABCDEFabcdef\"}]",
+                                      (end - start + 1)) == 0);
 
         memset(path, 0, sizeof(path));
         path[0] = "a2";
-        path[1] = (char *) &aidx1;
+        path[1] = (char *)&aidx1;
         aidx1 = 0;
         SSF_ASSERT(SSFJsonGetType(_jtsComplex[i], path) == SSF_JSON_TYPE_TRUE);
         SSF_ASSERT(SSFJsonGetString(_jtsComplex[i], path, strOut, sizeof(strOut), &strOutLen) == false);
@@ -661,7 +691,7 @@ void SSFJsonUnitTest(void)
         jtype = SSF_JSON_TYPE_MAX;
         SSF_ASSERT(SSFJsonObject(_jtsComplex[i], &index, &start, &end, path, 0, &jtype) == true);
         SSF_ASSERT(jtype == SSF_JSON_TYPE_TRUE);
-        SSF_ASSERT(memcmp(&_jtsComplex[i][start],"true",(end - start + 1)) == 0);
+        SSF_ASSERT(memcmp(&_jtsComplex[i][start], "true", (end - start + 1)) == 0);
 
         aidx1 = 1;
         SSF_ASSERT(SSFJsonGetType(_jtsComplex[i], path) == SSF_JSON_TYPE_FALSE);
@@ -825,11 +855,11 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(jtype == SSF_JSON_TYPE_ARRAY);
         if (i == 0) SSF_ASSERT(memcmp(&_jtsComplex[i][start], "[1,2,3]", (end - start + 1)) == 0);
 
-        path[2] = (char*)&aidx2;
+        path[2] = (char *)&aidx2;
         aidx2 = 0;
         while (true)
         {
-            char *anum1[] = {"1","2","3"};
+            char *anum1[] = { "1", "2", "3" };
 
             if (SSFJsonGetType(_jtsComplex[i], path) == SSF_JSON_TYPE_ERROR) break;
             SSF_ASSERT(SSFJsonGetType(_jtsComplex[i], path) == SSF_JSON_TYPE_NUMBER);
@@ -934,11 +964,11 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(SSFJsonObject(_jtsComplex[i], &index, &start, &end, path, 0, &jtype) == true);
         SSF_ASSERT(jtype == SSF_JSON_TYPE_OBJECT);
         if (i == 0) SSF_ASSERT(memcmp(&_jtsComplex[i][start],
-            "{\"b64_1\":\"YWI=\","
-            "\"b64_2\":\"YWJj\",\"b64_3\":\"MTIzNDU2Nzg5MGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6QUJDREVGR0"
-            "hJSktMTU5PUFFSU1RVVldYWVohQCMkJV4mKigpYH4tXys9e31bXTo7JyI8PiwuLz98XA==\",\"b3\":true,"
-            "\"b4\":false,\"nil2\":null,\"array\":[\"A\",\"Z\"],\"objdeep\":{\"hex3\":\"1029384756a1b2"
-            "c3d4e5f6\",\"NUMFAR\":-42}}", (end - start + 1)) == 0);
+                                      "{\"b64_1\":\"YWI=\","
+                                      "\"b64_2\":\"YWJj\",\"b64_3\":\"MTIzNDU2Nzg5MGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6QUJDREVGR0"
+                                      "hJSktMTU5PUFFSU1RVVldYWVohQCMkJV4mKigpYH4tXys9e31bXTo7JyI8PiwuLz98XA==\",\"b3\":true,"
+                                      "\"b4\":false,\"nil2\":null,\"array\":[\"A\",\"Z\"],\"objdeep\":{\"hex3\":\"1029384756a1b2"
+                                      "c3d4e5f6\",\"NUMFAR\":-42}}", (end - start + 1)) == 0);
 
         path[1] = "b64_1";
         SSF_ASSERT(SSFJsonGetType(_jtsComplex[i], path) == SSF_JSON_TYPE_STRING);
@@ -1067,12 +1097,12 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(jtype == SSF_JSON_TYPE_ARRAY);
         if (i == 0) SSF_ASSERT(memcmp(&_jtsComplex[i][start], "[\"A\",\"Z\"]", (end - start + 1)) == 0);
 
-        path[2] = (char *) &aidx1;
+        path[2] = (char *)&aidx1;
         aidx1 = 0;
         while (true)
         {
-            char* strs[] = { "A", "Z" };
-            char* strsq[] = { "\"A\"", "\"Z\"" };
+            char *strs[] = { "A", "Z" };
+            char *strsq[] = { "\"A\"", "\"Z\"" };
 
             if (SSFJsonGetType(_jtsComplex[i], path) == SSF_JSON_TYPE_ERROR) break;
             SSF_ASSERT(SSFJsonGetType(_jtsComplex[i], path) == SSF_JSON_TYPE_STRING);
@@ -1175,47 +1205,45 @@ void SSFJsonUnitTest(void)
 
 #if SSF_JSON_CONFIG_ENABLE_UPDATE == 1
     SSFJsonUnitTestUpdate(_jsOut, sizeof(_jsOut), "l1", NULL, NULL,
-        "{}",
-        "{\"l1\":\"mynewvalue\"}");
+                          "{}",
+                          "{\"l1\":\"mynewvalue\"}");
     SSFJsonUnitTestUpdate(_jsOut, sizeof(_jsOut), "l1", NULL, NULL,
-        "{\"l1\":{\"l2\":123}}",
-        "{\"l1\":\"mynewvalue\"}");
+                          "{\"l1\":{\"l2\":123}}",
+                          "{\"l1\":\"mynewvalue\"}");
     SSFJsonUnitTestUpdate(_jsOut, sizeof(_jsOut), "l1", NULL, NULL,
-        "{\"l2\":123}",
-        "{\"l1\":\"mynewvalue\",\"l2\":123}");
+                          "{\"l2\":123}",
+                          "{\"l1\":\"mynewvalue\",\"l2\":123}");
     SSFJsonUnitTestUpdate(_jsOut, sizeof(_jsOut), "l1", "l2", NULL,
-        "{\"l1\":{\"l2\":\"old\"}}",
-        "{\"l1\":{\"l2\":\"mynewvalue\"}}");
+                          "{\"l1\":{\"l2\":\"old\"}}",
+                          "{\"l1\":{\"l2\":\"mynewvalue\"}}");
     SSFJsonUnitTestUpdate(_jsOut, sizeof(_jsOut), "l1", "l2", NULL,
-        "{\"l1\":{\"l2\":\"oldvalueislongerthannew\"}}",
-        "{\"l1\":{\"l2\":\"mynewvalue\"}}");
+                          "{\"l1\":{\"l2\":\"oldvalueislongerthannew\"}}",
+                          "{\"l1\":{\"l2\":\"mynewvalue\"}}");
     SSFJsonUnitTestUpdate(_jsOut, sizeof(_jsOut), "l1", "l2", NULL,
-        "{\"l1\":{\"l2a\":\"notreplaced\"}}",
-        "{\"l1\":{\"l2\":\"mynewvalue\",\"l2a\":\"notreplaced\"}}");
+                          "{\"l1\":{\"l2a\":\"notreplaced\"}}",
+                          "{\"l1\":{\"l2\":\"mynewvalue\",\"l2a\":\"notreplaced\"}}");
     SSFJsonUnitTestUpdate(_jsOut, sizeof(_jsOut), "l1", "l2", NULL,
-        "{\"l1a\":{\"l2a\":\"notreplaced\"}}",
-        "{\"l1\":{\"l2\":\"mynewvalue\"},\"l1a\":{\"l2a\":\"notreplaced\"}}");
+                          "{\"l1a\":{\"l2a\":\"notreplaced\"}}",
+                          "{\"l1\":{\"l2\":\"mynewvalue\"},\"l1a\":{\"l2a\":\"notreplaced\"}}");
     SSFJsonUnitTestUpdate(_jsOut, sizeof(_jsOut), "l1", "l2", NULL,
-        "{\"l1\":{\"l2a\":123,\"l2\":{\"l3\":\"replaced\"},\"l2b\":456},\"l1a\":789}",
-        "{\"l1\":{\"l2a\":123,\"l2\":\"mynewvalue\",\"l2b\":456},\"l1a\":789}");
+                          "{\"l1\":{\"l2a\":123,\"l2\":{\"l3\":\"replaced\"},\"l2b\":456},\"l1a\":789}",
+                          "{\"l1\":{\"l2a\":123,\"l2\":\"mynewvalue\",\"l2b\":456},\"l1a\":789}");
     SSFJsonUnitTestUpdate(_jsOut, sizeof(_jsOut), "l1", "l2", "l3",
-        "{\"l1\":{\"l2a\":123,\"l2\":{\"l3\":\"replaced\"},\"l2b\":456},\"l1a\":789}",
-        "{\"l1\":{\"l2a\":123,\"l2\":{\"l3\":\"mynewvalue\"},\"l2b\":456},\"l1a\":789}");
+                          "{\"l1\":{\"l2a\":123,\"l2\":{\"l3\":\"replaced\"},\"l2b\":456},\"l1a\":789}",
+                          "{\"l1\":{\"l2a\":123,\"l2\":{\"l3\":\"mynewvalue\"},\"l2b\":456},\"l1a\":789}");
     SSFJsonUnitTestUpdate(_jsOut, sizeof(_jsOut), "l1", "l2", "l3",
-        "{\"l1\":{\"l2a\":123,\"l2\":{},\"l2b\":456},\"l1a\":789}",
-        "{\"l1\":{\"l2a\":123,\"l2\":{\"l3\":\"mynewvalue\"},\"l2b\":456},\"l1a\":789}");
+                          "{\"l1\":{\"l2a\":123,\"l2\":{},\"l2b\":456},\"l1a\":789}",
+                          "{\"l1\":{\"l2a\":123,\"l2\":{\"l3\":\"mynewvalue\"},\"l2b\":456},\"l1a\":789}");
     SSFJsonUnitTestUpdate(_jsOut, sizeof(_jsOut), "l1", "l2", "l3",
-        "{\"l1\":{\"l2a\":123,\"l2b\":456},\"l1a\":789}",
-        "{\"l1\":{\"l2\":{\"l3\":\"mynewvalue\"},\"l2a\":123,\"l2b\":456},\"l1a\":789}");
+                          "{\"l1\":{\"l2a\":123,\"l2b\":456},\"l1a\":789}",
+                          "{\"l1\":{\"l2\":{\"l3\":\"mynewvalue\"},\"l2a\":123,\"l2b\":456},\"l1a\":789}");
     SSFJsonUnitTestUpdate(_jsOut, sizeof(_jsOut), "l1", "l2", "l3",
-        "{\"l1A\":{\"l2a\":123,\"l2b\":456},\"l1a\":789}",
-        "{\"l1\":{\"l2\":{\"l3\":\"mynewvalue\"}},\"l1A\":{\"l2a\":123,\"l2b\":456},\"l1a\":789}");
+                          "{\"l1A\":{\"l2a\":123,\"l2b\":456},\"l1a\":789}",
+                          "{\"l1\":{\"l2\":{\"l3\":\"mynewvalue\"}},\"l1A\":{\"l2a\":123,\"l2b\":456},\"l1a\":789}");
     SSFJsonUnitTestUpdate(_jsOut, sizeof(_jsOut), "l1", "l2", "l3", _jtsComplex[1], NULL);
     SSFJsonUnitTestUpdate(_jsOut, sizeof(_jsOut), "obj2", "objdeep", "NUMFAR", _jtsComplex[1], NULL);
     SSFJsonUnitTestUpdate(_jsOut, sizeof(_jsOut), "obj2", "objdeep", "hex3", _jtsComplex[1], NULL);
 #endif /* SSF_JSON_CONFIG_ENABLE_UPDATE */
-
-    printf("SSF JSON UNIT TEST DONE!\r\n");
-    return;
 }
 #endif /* SSF_CONFIG_JSON_UNIT_TEST */
+

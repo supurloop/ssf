@@ -44,8 +44,8 @@ typedef uint8_t SSFSMEventId_t;
 typedef uint8_t SSFSMData_t;
 typedef uint16_t SSFSMDataLen_t;
 typedef SSFPortTick_t SSFSMTimeout_t;
-typedef void (*SSFSMHandler_t)(SSFSMEventId_t eid, const SSFSMData_t *data, \
-                               SSFSMDataLen_t dataLen);
+typedef void (*SSFSMHandler_t)(SSFSMEventId_t eid, const SSFSMData_t *data,\
+                                   SSFSMDataLen_t dataLen);
 
 #define SSF_SM_MAX_TIMEOUT ((SSFSMTimeout_t) (-1))
 #define SSF_SM_EVENT_DATA_ALIGN(v) { \
@@ -60,7 +60,7 @@ void SSFSMInitHandler(SSFSMId_t smid, SSFSMHandler_t initial);
 void SSFSMPutEventData(SSFSMId_t smid, SSFSMEventId_t eid, const SSFSMData_t *data,
                        SSFSMDataLen_t dataLen);
 #define SSFSMPutEvent(smid, eid) SSFSMPutEventData(smid, eid, NULL, 0)
-bool SSFSMTask(SSFSMTimeout_t* nextTimeout);
+bool SSFSMTask(SSFSMTimeout_t *nextTimeout);
 
 /* --------------------------------------------------------------------------------------------- */
 /* External interface only for state handlers                                                    */
@@ -79,3 +79,4 @@ void SSFSMUnitTest(void);
 #endif /* SSF_CONFIG_SM_UNIT_TEST */
 
 #endif /* SSF_SM_INCLUDE_H */
+

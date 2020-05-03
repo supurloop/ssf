@@ -64,7 +64,7 @@ void SSFLLPutItem(SSFLL_t *ll, SSFLLItem_t *inItem, SSF_LL_LOC_t loc, SSFLLItem_
     SSF_ASSERT(ll->items < ll->size);
     SSF_ASSERT(inItem->ll == NULL);
 
-    if (ll->head == NULL) 
+    if (ll->head == NULL)
     {
         SSF_ASSERT(ll->items == 0);
         SSF_ASSERT(ll->tail == NULL);
@@ -73,22 +73,19 @@ void SSFLLPutItem(SSFLL_t *ll, SSFLLItem_t *inItem, SSF_LL_LOC_t loc, SSFLLItem_
         ll->tail = inItem;
         inItem->next = NULL;
         inItem->prev = NULL;
-    }
-    else if ((loc == SSF_LL_LOC_HEAD) || ((loc == SSF_LL_LOC_ITEM) && (locItem == NULL)))
+    } else if ((loc == SSF_LL_LOC_HEAD) || ((loc == SSF_LL_LOC_ITEM) && (locItem == NULL)))
     {
         inItem->next = ll->head;
         inItem->prev = NULL;
         ll->head->prev = inItem;
         ll->head = inItem;
-    }
-    else if (loc == SSF_LL_LOC_TAIL)
+    } else if (loc == SSF_LL_LOC_TAIL)
     {
         inItem->next = NULL;
         inItem->prev = ll->tail;
         ll->tail->next = inItem;
         ll->tail = inItem;
-    }
-    else if (loc == SSF_LL_LOC_ITEM)
+    } else if (loc == SSF_LL_LOC_ITEM)
     {
         /* Insert inItem after locItem */
         SSF_ASSERT(locItem->ll == ll);
@@ -113,7 +110,7 @@ bool SSFLLGetItem(SSFLL_t *ll, SSFLLItem_t **outItem, SSF_LL_LOC_t loc, SSFLLIte
                 ((loc == SSF_LL_LOC_ITEM) && (locItem != NULL)));
     SSF_ASSERT(ll->magic == SSF_LL_INIT_MAGIC);
 
-    if (ll->head != NULL) 
+    if (ll->head != NULL)
     {
         SSF_ASSERT(ll->items > 0);
         SSF_ASSERT(ll->tail != NULL);
@@ -164,9 +161,9 @@ bool SSFLLIsEmpty(const SSFLL_t *ll)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if list full, else false.                                                       */
+/* Returns true if list full, else false.                                                        */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFLLIsFull(const SSFLL_t* ll)
+bool SSFLLIsFull(const SSFLL_t *ll)
 {
     SSF_REQUIRE(ll != NULL);
     SSF_ASSERT(ll->magic == SSF_LL_INIT_MAGIC);
@@ -196,7 +193,8 @@ uint32_t SSFLLLen(const SSFLL_t *ll)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns the number of unused spots in list.                                                   */
 /* --------------------------------------------------------------------------------------------- */
-uint32_t SSFLLUnused(const SSFLL_t* ll)
+uint32_t SSFLLUnused(const SSFLL_t *ll)
 {
     return SSFLLSize(ll) - SSFLLLen(ll);
 }
+

@@ -53,9 +53,9 @@ typedef struct SSFLL SSFLL_t;
 
 struct SSFLLItem
 {
-    SSFLLItem_t* next;
-    SSFLLItem_t* prev;
-    SSFLL_t* ll;
+    SSFLLItem_t *next;
+    SSFLLItem_t *prev;
+    SSFLL_t *ll;
 };
 
 struct SSFLL
@@ -74,20 +74,24 @@ void SSFLLInit(SSFLL_t *ll, uint32_t maxSize);
 void SSFLLPutItem(SSFLL_t *ll, SSFLLItem_t *inItem, SSF_LL_LOC_t loc, SSFLLItem_t *locItem);
 bool SSFLLGetItem(SSFLL_t *ll, SSFLLItem_t **outItem, SSF_LL_LOC_t loc, SSFLLItem_t *locItem);
 bool SSFLLIsEmpty(const SSFLL_t *ll);
-bool SSFLLIsFull(const SSFLL_t* ll);
+bool SSFLLIsFull(const SSFLL_t *ll);
 uint32_t SSFLLSize(const SSFLL_t *ll);
-uint32_t SSFLLLen(const SSFLL_t* ll);
-uint32_t SSFLLUnused(const SSFLL_t* ll);
+uint32_t SSFLLLen(const SSFLL_t *ll);
+uint32_t SSFLLUnused(const SSFLL_t *ll);
 
 #define SSF_LL_PUT(ll, inItem, locItem) \
     SSFLLPutItem(ll, (SSFLLItem_t *)inItem, SSF_LL_LOC_ITEM, (SSFLLItem_t *)locItem)
 #define SSF_LL_GET(ll, outItem, locItem) \
     SSFLLGetItem(ll, (SSFLLItem_t **)outItem, SSF_LL_LOC_ITEM, (SSFLLItem_t *)locItem)
 
-#define SSF_LL_STACK_PUSH(ll, inItem) SSFLLPutItem(ll, (SSFLLItem_t *)inItem, SSF_LL_LOC_HEAD, NULL)
-#define SSF_LL_STACK_POP(ll, outItem) SSFLLGetItem(ll, (SSFLLItem_t **)outItem, SSF_LL_LOC_HEAD, NULL)
-#define SSF_LL_FIFO_PUSH(ll, inItem) SSFLLPutItem(ll, (SSFLLItem_t *)inItem, SSF_LL_LOC_HEAD, NULL)
-#define SSF_LL_FIFO_POP(ll, outItem) SSFLLGetItem(ll, (SSFLLItem_t **)outItem, SSF_LL_LOC_TAIL, NULL)
+#define SSF_LL_STACK_PUSH(ll, inItem) SSFLLPutItem(ll, (SSFLLItem_t *)inItem, SSF_LL_LOC_HEAD, \
+                                                   NULL)
+#define SSF_LL_STACK_POP(ll, outItem) SSFLLGetItem(ll, (SSFLLItem_t **)outItem, SSF_LL_LOC_HEAD, \
+                                                   NULL)
+#define SSF_LL_FIFO_PUSH(ll, inItem) SSFLLPutItem(ll, (SSFLLItem_t *)inItem, SSF_LL_LOC_HEAD, \
+                                                  NULL)
+#define SSF_LL_FIFO_POP(ll, outItem) SSFLLGetItem(ll, (SSFLLItem_t **)outItem, SSF_LL_LOC_TAIL, \
+                                                  NULL)
 
 #define SSF_LL_HEAD(ll) ((ll)->head)
 #define SSF_LL_TAIL(ll) ((ll)->tail)
@@ -99,3 +103,4 @@ void SSFLLUnitTest(void);
 #endif /* SSF_CONFIG_LL_UNIT_TEST */
 
 #endif
+

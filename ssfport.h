@@ -35,29 +35,21 @@
 #include "Windows.h"
 #include "ssfassert.h"
 
-
 // TODOS
 // use _ for static vars and functions
 // SSFJsonGetString escaped len is wrong
 // Make SSFJsonWhitespace() a macro?
 // Get rid of gotos in json.
-// Break out non-port code into ssf.h file.
-
 
 /* --------------------------------------------------------------------------------------------- */
 /* Platform specific tick configuration                                                          */
 /* --------------------------------------------------------------------------------------------- */
+
+/* Define SSFPortTick_t as unsigned 64-bit integer */
 typedef uint64_t SSFPortTick_t;
+
+/* Define the number of system ticks per second */
 #define SSF_TICKS_PER_SEC (1000u)
-
-/* --------------------------------------------------------------------------------------------- */
-/* MAX/MIN macros                                                                                */
-/* --------------------------------------------------------------------------------------------- */
-#define SSF_MAX(x, y) (((x) > (y)) ? (x) : (y))
-#define SSF_MIN(x, y) (((x) < (y)) ? (x) : (y))
-
-typedef const char * SSFCStrIn_t;
-typedef char * SSFCStrOut_t;
 
 /* --------------------------------------------------------------------------------------------- */
 /* Enable/disable unit tests                                                                     */
@@ -88,13 +80,23 @@ typedef char * SSFCStrOut_t;
 /* --------------------------------------------------------------------------------------------- */
 /* Configure ssfbfifo's byte fifo interface                                                      */
 /* --------------------------------------------------------------------------------------------- */
+
+/* Define the maximum fifo size. */
 #define SSF_BFIFO_CONFIG_MAX_BFIFO_SIZE (255UL)
 
 #define SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE_ANY         (0u)
 #define SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE_255         (1u)
 #define SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE_POW2_MINUS1 (2u)
 
+/* Define the allowed runtime fifo size. */
+/* SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE_ANY allows any fifo size up to
+   SSF_BFIFO_CONFIG_MAX_BFIFO_SIZE. */
+/* SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE_255 allows only fifo sizes of 255. */
+/* SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE_POW2_MINUS1 allows fifo sizes that are power of 2 minus 1
+   up to SSF_BFIFO_CONFIG_MAX_BFIFO_SIZE. */
 #define SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE (SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE_255)
+
+/* Enable or disable the multi-byte fifo interface. */
 #define SSF_BFIFO_MULTI_BYTE_ENABLE                     (1u)
 
 /* --------------------------------------------------------------------------------------------- */
@@ -105,18 +107,31 @@ typedef char * SSFCStrOut_t;
 /* --------------------------------------------------------------------------------------------- */
 /* Configure ssfjson's parser limits                                                             */
 /* --------------------------------------------------------------------------------------------- */
+/* Define the maximum parse depth, each opening { or [ starts a new depth level. */
 #define SSF_JSON_CONFIG_MAX_IN_DEPTH (4u)
+
+/* Define the maximum JSON string length to be parsed. */
 #define SSF_JSON_CONFIG_MAX_IN_LEN  (2047u)
+
+/* Allow parser to se floating point to convert numbers. */
 #define SSF_JSON_CONFIG_ENABLE_FLOAT_PARSE (1u)
+
+/* Allow generator to print floats. */
 #define SSF_JSON_CONFIG_ENABLE_FLOAT_GEN (1u)
+
+/* Enable interface that can update specific fields in a JSON string. */
 #define SSF_JSON_CONFIG_ENABLE_UPDATE (1u)
 
 /* --------------------------------------------------------------------------------------------- */
 /* Configure ssfsm's state machine interface                                                     */
 /* --------------------------------------------------------------------------------------------- */
+/* Maximum number of simultaneously queued events for all state machines. */
 #define SSF_SM_MAX_ACTIVE_EVENTS (3u)
+
+/* Maximum number of simultaneously running timers for all state machines. */
 #define SSF_SM_MAX_ACTIVE_TIMERS (3u)
 
+/* Defines the state machine identifers. */
 enum SSFSMList
 {
 #if SSF_CONFIG_SM_UNIT_TEST == 1
@@ -126,6 +141,7 @@ enum SSFSMList
     SSF_SM_END
 };
 
+/* Defines the event identifiers for all state machines. */
 enum SSFSMEventList
 {
     SSF_SM_EVENT_ENTRY,
@@ -147,24 +163,5 @@ enum SSFSMEventList
 __declspec(noreturn) void SSFPortAssert(const char* file, uint32_t line);
 #define SSFSMGetTick64() GetTickCount64()
 
-/* Use to suppress unused parameter warnings */
-#define SSF_UNUSED(x) ssfUnused = (void *)x
-extern void* ssfUnused;
-
-#if SSF_CONFIG_UNIT_TEST == 1
-#include <setjmp.h>
-extern jmp_buf ssfUnitTestMark;
-extern int ssfUnitTestJmpRet;
-
-#define SSF_ASSERT_TEST(t) do { \
-    ssfUnitTestJmpRet = setjmp(ssfUnitTestMark); \
-    if (ssfUnitTestJmpRet == 0) {t;} \
-    if (ssfUnitTestJmpRet != -1) { \
-        printf("SSF Assertion: %s:%u\r\n", __FILE__, __LINE__); \
-        for(;;); } \
-    memset(ssfUnitTestMark, 0, sizeof(ssfUnitTestMark)); } while (0)
-
-#endif /* SSF_CONFIG_UNIT_TEST */
-
+#include "ssf.h"
 #endif /* SSF_PORT_H_INCLUDE */
-

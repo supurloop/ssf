@@ -1,8 +1,8 @@
 /* --------------------------------------------------------------------------------------------- */
 /* Small System Framework                                                                        */
 /*                                                                                               */
-/* ssfport.c                                                                                     */
-/* Provides port interface.                                                                      */
+/* ssf.h                                                                                         */
+/* Provides core framework definitions.                                                          */
 /*                                                                                               */
 /* BSD-3-Clause License                                                                          */
 /* Copyright 2020 Supurloop Software LLC                                                         */
@@ -29,30 +29,35 @@
 /* NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISE   */
 /* OF THE POSSIBILITY OF SUCH DAMAGE.                                                            */
 /* --------------------------------------------------------------------------------------------- */
-#include <stdio.h>
-#include "ssfport.h"
+#ifndef SSF_H_INCLUDE
+#define SSF_H_INCLUDE
 
 /* --------------------------------------------------------------------------------------------- */
-/* Variables.                                                                                    */
+/* Macros and typedefs                                                                           */
 /* --------------------------------------------------------------------------------------------- */
-void *ssfUnused;
+#define SSF_MAX(x, y) (((x) > (y)) ? (x) : (y))
+#define SSF_MIN(x, y) (((x) < (y)) ? (x) : (y))
+
+typedef const char *SSFCStrIn_t;
+typedef char *SSFCStrOut_t;
+
+/* Use to suppress unused parameter warnings */
+#define SSF_UNUSED(x) ssfUnused = (void *)x
+extern void *ssfUnused;
 
 #if SSF_CONFIG_UNIT_TEST == 1
-jmp_buf ssfUnitTestMark;
-jmp_buf ssfUnitTestZeroMark;
-int ssfUnitTestJmpRet;
-#endif /* SSF_CONFIG_UNIT_TEST */
+    #include <setjmp.h>
+extern jmp_buf ssfUnitTestMark;
+extern int ssfUnitTestJmpRet;
 
-/* --------------------------------------------------------------------------------------------- */
-/* Never returns (except for unit testing), reports assertion failure.                           */
-/* --------------------------------------------------------------------------------------------- */
-__declspec(noreturn)void SSFPortAssert(const char* file, uint32_t line)
-{
-#if SSF_CONFIG_UNIT_TEST == 1
-    if (memcmp(ssfUnitTestMark, ssfUnitTestZeroMark, sizeof(ssfUnitTestMark)) != 0)
-    {longjmp(ssfUnitTestMark, -1); } else
+    #define SSF_ASSERT_TEST(t) do { \
+    ssfUnitTestJmpRet = setjmp(ssfUnitTestMark); \
+    if (ssfUnitTestJmpRet == 0) {t;} \
+    if (ssfUnitTestJmpRet != -1) { \
+        printf("SSF Assertion: %s:%u\r\n", __FILE__, __LINE__); \
+        for(;;); } \
+    memset(ssfUnitTestMark, 0, sizeof(ssfUnitTestMark)); } while (0)
+
 #endif /* SSF_CONFIG_UNIT_TEST */
-    {printf("SSF Assertion: %s:%u\r\n", file, line); }
-    for (;;) Sleep(100);
-}
+#endif /* SSF_H_INCLUDE */
 

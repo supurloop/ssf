@@ -158,6 +158,7 @@
     <ClCompile Include="ssfsm_ut.c" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="ssf.h" />
     <ClInclude Include="ssfassert.h" />
     <ClInclude Include="ssfbase64.h" />
     <ClInclude Include="ssfbfifo.h" />

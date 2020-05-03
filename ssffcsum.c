@@ -37,11 +37,11 @@
 /* --------------------------------------------------------------------------------------------- */
 /* Returns the 16-bit Fletcher checksum on inLen bytes of in starting with initial value.        */
 /* --------------------------------------------------------------------------------------------- */
-uint16_t SSFFCSum16(const uint8_t* in, size_t inLen, uint16_t initial)
+uint16_t SSFFCSum16(const uint8_t *in, size_t inLen, uint16_t initial)
 {
     uint16_t s1 = initial & 0xff;
     uint16_t s2 = initial >> 8;
-    
+
     SSF_ASSERT(in != NULL);
 
     while (inLen)
@@ -55,3 +55,4 @@ uint16_t SSFFCSum16(const uint8_t* in, size_t inLen, uint16_t initial)
     }
     return (s2 << 8) | s1;
 }
+

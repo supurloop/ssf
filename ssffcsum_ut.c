@@ -64,9 +64,6 @@ void SSFFCSumUnitTest(void)
     fc = SSFFCSum16("a", 1, SSF_FCSUM_INITIAL);
     fc = SSFFCSum16("bcd", 3, fc);
     SSF_ASSERT(SSFFCSum16("efgh", 4, fc) == 0x0627);
-
-    printf("SSF FLETCHER UNIT TEST DONE!\r\n");
 }
-
 #endif /* SSF_CONFIG_FCSUM_UNIT_TEST */
 

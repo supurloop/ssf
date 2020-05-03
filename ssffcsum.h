@@ -35,12 +35,19 @@
 #include <stdint.h>
 #include "ssfport.h"
 
+/* --------------------------------------------------------------------------------------------- */
+/* Defines and typedefs                                                                          */
+/* --------------------------------------------------------------------------------------------- */
 #define SSF_FCSUM_INITIAL ((uint16_t) 0u)
 
-uint16_t SSFFCSum16(const uint8_t* in, size_t inLen, uint16_t initial);
+/* --------------------------------------------------------------------------------------------- */
+/* External interface                                                                            */
+/* --------------------------------------------------------------------------------------------- */
+uint16_t SSFFCSum16(const uint8_t *in, size_t inLen, uint16_t initial);
 
 #if SSF_CONFIG_FCSUM_UNIT_TEST == 1
 void SSFFCSumUnitTest(void);
 #endif /* SSF_CONFIG_FCSUM_UNIT_TEST */
 
 #endif /* SSFFCSUM_H_INCLUDE */
+

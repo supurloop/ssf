@@ -38,8 +38,8 @@
 
 #if SSF_CONFIG_MPOOL_UNIT_TEST == 1
 
-#define SMP_TEST_BLOCK_SIZE (42UL)
-#define SMP_TEST_BLOCKS (10UL)
+    #define SMP_TEST_BLOCK_SIZE (42UL)
+    #define SMP_TEST_BLOCKS (10UL)
 
 SSFMPool_t smpTestPool;
 void *smpTestPtrs[SMP_TEST_BLOCKS];
@@ -56,7 +56,7 @@ void SSFMPoolUnitTest()
     SSF_ASSERT_TEST(SSFMPoolInit(&smpTestPool, 0, SMP_TEST_BLOCK_SIZE));
     SSF_ASSERT_TEST(SSFMPoolInit(&smpTestPool, SMP_TEST_BLOCKS, 0));
     SSF_ASSERT_TEST(SSFMPoolAlloc(&smpTestPool, SMP_TEST_BLOCK_SIZE, 0));
-    SSF_ASSERT_TEST(SSFMPoolFree(&smpTestPool, (void *) 1));
+    SSF_ASSERT_TEST(SSFMPoolFree(&smpTestPool, (void *)1));
     SSF_ASSERT_TEST(SSFMPoolBlockSize(&smpTestPool));
     SSF_ASSERT_TEST(SSFMPoolSize(&smpTestPool));
     SSF_ASSERT_TEST(SSFMPoolLen(&smpTestPool));
@@ -70,10 +70,10 @@ void SSFMPoolUnitTest()
     SSF_ASSERT(SSFMPoolLen(&smpTestPool) == SMP_TEST_BLOCKS);
     SSF_ASSERT(SSFMPoolIsEmpty(&smpTestPool) == false);
     SSF_ASSERT(SSFMPoolIsFull(&smpTestPool) == true);
-    
+
     SSF_ASSERT_TEST(SSFMPoolAlloc(NULL, SMP_TEST_BLOCK_SIZE, 0));
-    SSF_ASSERT_TEST(SSFMPoolAlloc(&smpTestPool, SMP_TEST_BLOCK_SIZE+1, 0));
-    SSF_ASSERT_TEST(SSFMPoolFree(NULL, (void*)1));
+    SSF_ASSERT_TEST(SSFMPoolAlloc(&smpTestPool, SMP_TEST_BLOCK_SIZE + 1, 0));
+    SSF_ASSERT_TEST(SSFMPoolFree(NULL, (void *)1));
     SSF_ASSERT_TEST(SSFMPoolFree(&smpTestPool, NULL));
     SSF_ASSERT_TEST(SSFMPoolBlockSize(NULL));
     SSF_ASSERT_TEST(SSFMPoolSize(NULL));
@@ -84,7 +84,7 @@ void SSFMPoolUnitTest()
     /* Alloc all the blocks */
     for (i = 0; i < SMP_TEST_BLOCKS - 1; i++)
     {
-        smpTestPtrs[i] = SSFMPoolAlloc(&smpTestPool, i % SMP_TEST_BLOCK_SIZE, (uint8_t) i);
+        smpTestPtrs[i] = SSFMPoolAlloc(&smpTestPool, i % SMP_TEST_BLOCK_SIZE, (uint8_t)i);
         SSF_ASSERT(smpTestPtrs[i] != NULL);
         SSF_ASSERT(SSFMPoolBlockSize(&smpTestPool) == SMP_TEST_BLOCK_SIZE);
         SSF_ASSERT(SSFMPoolSize(&smpTestPool) == SMP_TEST_BLOCKS);
@@ -104,7 +104,7 @@ void SSFMPoolUnitTest()
     /* Free all the blocks */
     for (i = 0; i < SMP_TEST_BLOCKS - 1; i++)
     {
-        smpTestPtrs[i] = SSFMPoolFree(&smpTestPool, smpTestPtrs[i]);        
+        smpTestPtrs[i] = SSFMPoolFree(&smpTestPool, smpTestPtrs[i]);
         SSF_ASSERT(smpTestPtrs[i] == NULL);
         SSF_ASSERT(SSFMPoolBlockSize(&smpTestPool) == SMP_TEST_BLOCK_SIZE);
         SSF_ASSERT(SSFMPoolSize(&smpTestPool) == SMP_TEST_BLOCKS);
@@ -121,7 +121,6 @@ void SSFMPoolUnitTest()
     SSF_ASSERT(SSFMPoolIsEmpty(&smpTestPool) == false);
     SSF_ASSERT(SSFMPoolIsFull(&smpTestPool) == true);
     SSF_ASSERT_TEST(SSFMPoolFree(&smpTestPool, testPtr));
-
-    printf("SSF MPOOL UNIT TEST DONE!\r\n");
 }
 #endif /* SSF_CONFIG_MPOOL_UNIT_TEST */
+

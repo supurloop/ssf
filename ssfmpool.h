@@ -54,13 +54,13 @@ typedef struct SSFMPool
 /* External interface                                                                            */
 /* --------------------------------------------------------------------------------------------- */
 void SSFMPoolInit(SSFMPool_t *pool, uint32_t blocks, uint32_t blockSize);
-void *SSFMPoolAlloc(SSFMPool_t *pool, uint32_t size, uint8_t owner);
-void *SSFMPoolFree(SSFMPool_t *pool, void *mpool);
-uint32_t SSFMPoolBlockSize(const SSFMPool_t* pool);
-uint32_t SSFMPoolSize(const SSFMPool_t* pool);
-uint32_t SSFMPoolLen(const SSFMPool_t* pool);
-bool SSFMPoolIsEmpty(const SSFMPool_t* pool);
-bool SSFMPoolIsFull(const SSFMPool_t* pool);
+void* SSFMPoolAlloc(SSFMPool_t *pool, uint32_t size, uint8_t owner);
+void* SSFMPoolFree(SSFMPool_t *pool, void *mpool);
+uint32_t SSFMPoolBlockSize(const SSFMPool_t *pool);
+uint32_t SSFMPoolSize(const SSFMPool_t *pool);
+uint32_t SSFMPoolLen(const SSFMPool_t *pool);
+bool SSFMPoolIsEmpty(const SSFMPool_t *pool);
+bool SSFMPoolIsFull(const SSFMPool_t *pool);
 
 /* --------------------------------------------------------------------------------------------- */
 /* Unit test                                                                                     */

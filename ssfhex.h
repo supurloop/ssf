@@ -34,6 +34,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include "ssfport.h"
 
 /* --------------------------------------------------------------------------------------------- */
 /* Defines                                                                                       */
@@ -54,10 +55,10 @@ typedef enum SSFHexCase
 bool SSFHexBinToByte(uint8_t in, char *out, size_t outSize, SSFHexCase_t hcase);
 bool SSFHexByteToBin(const char *hex, uint8_t *out);
 
-bool SSFHexBytesToBin(const char *in, size_t inLenLim, uint8_t *out, size_t outSize, 
+bool SSFHexBytesToBin(SSFCStrIn_t in, size_t inLenLim, uint8_t *out, size_t outSize,
                       size_t *outLen, bool rev);
-bool SSFHexBinToBytes(const uint8_t *in, size_t inLen, char *out, size_t outSize, size_t *outLen,
-                      bool rev, SSFHexCase_t hcase);
+bool SSFHexBinToBytes(const uint8_t *in, size_t inLen, SSFCStrOut_t out, size_t outSize,
+                      size_t *outLen, bool rev, SSFHexCase_t hcase);
 
 /* --------------------------------------------------------------------------------------------- */
 /* Unit test                                                                                     */
@@ -67,3 +68,4 @@ void SSFHexUnitTest(void);
 #endif /* SSF_CONFIG_HEX_UNIT_TEST */
 
 #endif /* SSF_HEX_H_INCLUDE */
+

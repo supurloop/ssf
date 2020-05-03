@@ -44,10 +44,10 @@ bool SSFHexBinToByte(uint8_t in, char *out, size_t outSize, SSFHexCase_t hcase)
     int n;
 
     SSF_REQUIRE(out != NULL);
-    
+
     if (hcase == SSF_HEX_CASE_UPPER) n = snprintf(out, outSize, "%02X", (unsigned int)in);
     else n = snprintf(out, outSize, "%02x", (unsigned int)in);
-    
+
     return ((n >= 2) && (n < outSize));
 }
 
@@ -72,7 +72,8 @@ bool SSFHexByteToBin(const char *hex, uint8_t *out)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if ASCII hex byte string converted successfully to binary bytes, else false.     */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFHexBytesToBin(const char *in, size_t inLenLim, uint8_t *out, size_t outSize, size_t *outLen, bool rev)
+bool SSFHexBytesToBin(SSFCStrIn_t in, size_t inLenLim, uint8_t *out, size_t outSize,
+                      size_t *outLen, bool rev)
 {
     SSF_REQUIRE(in != NULL);
     SSF_REQUIRE(out != NULL);
@@ -82,8 +83,8 @@ bool SSFHexBytesToBin(const char *in, size_t inLenLim, uint8_t *out, size_t outS
     *outLen = 0;
     while ((inLenLim >= 2) && (outSize != 0))
     {
-        if (rev) { if (!SSFHexByteToBin(&in[inLenLim - 2], out)) return false; }
-        else 
+        if (rev)
+        {if (!SSFHexByteToBin(&in[inLenLim - 2], out)) return false; } else
         {
             if (!SSFHexByteToBin(in, out)) return false;
             in += 2;
@@ -99,13 +100,13 @@ bool SSFHexBytesToBin(const char *in, size_t inLenLim, uint8_t *out, size_t outS
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if binary bytes converted successfully to ASCII hex byte string, else false.     */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFHexBinToBytes(const uint8_t *in, size_t inLen, char *out, size_t outSize, size_t *outLen, 
-                      bool rev, SSFHexCase_t hcase)
+bool SSFHexBinToBytes(const uint8_t *in, size_t inLen, SSFCStrOut_t out, size_t outSize,
+                      size_t *outLen, bool rev, SSFHexCase_t hcase)
 {
     SSF_REQUIRE(in != NULL);
     SSF_REQUIRE(out != NULL);
     SSF_REQUIRE(outSize >= 1);
-    SSF_REQUIRE(hcase < SSF_HEX_CASE_MAX);    
+    SSF_REQUIRE(hcase < SSF_HEX_CASE_MAX);
 
     *out = 0;
     if (outLen != NULL) *outLen = 0;
@@ -113,11 +114,13 @@ bool SSFHexBinToBytes(const uint8_t *in, size_t inLen, char *out, size_t outSize
     while ((inLen > 0) && (outSize >= 3))
     {
         if (!SSFHexBinToByte(*in, out, outSize, hcase)) return false;
-        if (rev) in--; else in++;
+        if (rev) in--;
+        else in++;
         inLen--;
-        out+=2;
+        out += 2;
         outSize -= 2;
         if (outLen != NULL) *outLen += 2;
     }
     return inLen == 0;
 }
+

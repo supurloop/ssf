@@ -42,7 +42,7 @@ static const uint8_t _b64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvw
 /* --------------------------------------------------------------------------------------------- */
 /* Returns encoding of 0-63 for valid encoded char, 64 for '=' pad, else 65 for invalid.         */
 /* --------------------------------------------------------------------------------------------- */
-static uint8_t SSFBase64GetEncoding(uint8_t e)
+static uint8_t _SSFBase64GetEncoding(uint8_t e)
 {
     const uint8_t *p = _b64;
 
@@ -64,10 +64,10 @@ uint8_t SSFBase64Dec32To24(const uint8_t *b32, uint8_t *b24out, size_t b24outSiz
     SSF_REQUIRE(b24out != NULL);
     SSF_REQUIRE(b24outSize >= 3);
 
-    a = SSFBase64GetEncoding(*b32);
-    b = SSFBase64GetEncoding(*(b32 + 1));
-    c = SSFBase64GetEncoding(*(b32 + 2));
-    d = SSFBase64GetEncoding(*(b32 + 3));
+    a = _SSFBase64GetEncoding(*b32);
+    b = _SSFBase64GetEncoding(*(b32 + 1));
+    c = _SSFBase64GetEncoding(*(b32 + 2));
+    d = _SSFBase64GetEncoding(*(b32 + 3));
 
     if (b24outSize == 0) return 0;
     if (a >= 64 || b >= 64 || c >= 65 || d >= 65) return 0;

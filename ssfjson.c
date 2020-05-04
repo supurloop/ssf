@@ -218,31 +218,23 @@ static bool SSFJsonValue(SSFCStrIn_t js, size_t *index, size_t *start, size_t *e
     SSF_REQUIRE(jt != NULL);
 
     SSFJsonWhitespace(js, index); i = *index;
-    if (SSFJsonString(js, &i, start, end))
-    {*jt = SSF_JSON_TYPE_STRING; goto VALRET; }
+    if (SSFJsonString(js, &i, start, end)) {*jt = SSF_JSON_TYPE_STRING; *index = i; return true; }
     i = *index;
-    if (SSFJsonObject(js, &i, start, end, path, depth + 1, jt))
-    {goto VALRET; }
+    if (SSFJsonObject(js, &i, start, end, path, depth + 1, jt)) {*index = i; return true; }
     i = *index;
-    if (SSFJsonArray(js, &i, start, end, path, depth + 1, jt))
-    {goto VALRET; }
+    if (SSFJsonArray(js, &i, start, end, path, depth + 1, jt)) {*index = i; return true; }
     i = *index;
-    if (SSFJsonNumber(js, &i, start, end))
-    {*jt = SSF_JSON_TYPE_NUMBER; goto VALRET; }
+    if (SSFJsonNumber(js, &i, start, end)) {*jt = SSF_JSON_TYPE_NUMBER; *index = i; return true; }
     i = *index;
     if (strncmp(&js[i], "true", 4) == 0)
-    {*jt = SSF_JSON_TYPE_TRUE; *start = i; i += 4; *end = i - 1; goto VALRET; }
+    {*jt = SSF_JSON_TYPE_TRUE; *start = i; i += 4; *end = i - 1; *index = i; return true; }
     i = *index;
     if (strncmp(&js[i], "false", 5) == 0)
-    {*jt = SSF_JSON_TYPE_FALSE; *start = i; i += 5; *end = i - 1; goto VALRET; }
+    {*jt = SSF_JSON_TYPE_FALSE; *start = i; i += 5; *end = i - 1; *index = i; return true; }
     i = *index;
     if (strncmp(&js[i], "null", 4) == 0)
-    {*jt = SSF_JSON_TYPE_NULL; *start = i; i += 4; *end = i - 1; goto VALRET; }
+    {*jt = SSF_JSON_TYPE_NULL; *start = i; i += 4; *end = i - 1; *index = i; return true; }
     return false;
-
-VALRET:
-    *index = i;
-    return true;
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -363,7 +355,8 @@ SSFJsonType_t SSFJsonGetType(SSFCStrIn_t js, SSFCStrIn_t *path)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if found and is unescaped completely into buffer w/NULL term., else false.       */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFJsonGetString(SSFCStrIn_t js, SSFCStrIn_t *path, char *out, size_t outSize, size_t *outLen)
+bool SSFJsonGetString(SSFCStrIn_t js, SSFCStrIn_t *path, char *out, size_t outSize,
+                      size_t *outLen)
 {
     size_t start;
     size_t end;
@@ -382,9 +375,9 @@ bool SSFJsonGetString(SSFCStrIn_t js, SSFCStrIn_t *path, char *out, size_t outSi
 
     index = 0;
     len = end - start + 1;
-    if (outLen != NULL) *outLen = len;
+    if (outLen != NULL) *outLen = 0;
 
-    while (len && (index < (outSize - 1)))
+    while ((len != 0) && (index < (outSize - 1)))
     {
         if (js[start] == '\\')
         {
@@ -392,13 +385,15 @@ bool SSFJsonGetString(SSFCStrIn_t js, SSFCStrIn_t *path, char *out, size_t outSi
             if (len == 0) return false;
             /* Potential escape sequence */
             if (js[start] == '"' || js[start] == '\\' || js[start] == '/')
-            {out[index] = js[start]; } else if (js[start] == 'n') out[index] = '\x0a';
+            {out[index] = js[start]; }
+            else if (js[start] == 'n') out[index] = '\x0a';
             else if (js[start] == 'r') out[index] = '\x0d';
             else if (js[start] == 't') out[index] = '\x09';
             else if (js[start] == 'f') out[index] = '\x0c';
             else if (js[start] == 'b') out[index] = '\x08';
             else if (js[start] != 'u') return false;
 
+            if (outLen != NULL) (*outLen)++;
             start++; len--;
             if (len < 4) return false;
             if (index >= (outSize - 1 - 2)) return false;
@@ -406,7 +401,9 @@ bool SSFJsonGetString(SSFCStrIn_t js, SSFCStrIn_t *path, char *out, size_t outSi
             index++;
             if (!SSFHexByteToBin(&js[start + 2], &out[index])) return false;
             start += 3; len -= 3;
-        } else out[index] = js[start];
+        }
+        else { out[index] = js[start]; }
+        if (outLen != NULL) (*outLen)++;
         start++; index++; len--;
     }
     if (index < outSize) out[index] = 0;

@@ -37,9 +37,6 @@
 
 // TODOS
 // use _ for static vars and functions
-// SSFJsonGetString escaped len is wrong
-// Make SSFJsonWhitespace() a macro?
-// Get rid of gotos in json.
 
 /* --------------------------------------------------------------------------------------------- */
 /* Platform specific tick configuration                                                          */

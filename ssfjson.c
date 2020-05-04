@@ -30,6 +30,7 @@
 /* OF THE POSSIBILITY OF SUCH DAMAGE.                                                            */
 /* --------------------------------------------------------------------------------------------- */
 #include <stdio.h>
+#include <stdlib.h>
 #include "ssfsm.h"
 #include "ssfll.h"
 #include "ssfmpool.h"

@@ -48,7 +48,7 @@ bool SSFHexBinToByte(uint8_t in, char *out, size_t outSize, SSFHexCase_t hcase)
     if (hcase == SSF_HEX_CASE_UPPER) n = snprintf(out, outSize, "%02X", (unsigned int)in);
     else n = snprintf(out, outSize, "%02x", (unsigned int)in);
 
-    return ((n >= 2) && (n < outSize));
+    return ((n >= 2) && (((size_t) n) < outSize));
 }
 
 /* --------------------------------------------------------------------------------------------- */

@@ -32,7 +32,11 @@
 #ifndef SSF_PORT_H_INCLUDE
 #define SSF_PORT_H_INCLUDE
 
+#ifdef _WIN32
 #include "Windows.h"
+#else /* _WIN32 */
+#include <time.h>
+#endif /* _WIN32 */
 #include "ssfassert.h"
 
 /* --------------------------------------------------------------------------------------------- */
@@ -154,8 +158,16 @@ enum SSFSMEventList
 /* --------------------------------------------------------------------------------------------- */
 /* External interface                                                                            */
 /* --------------------------------------------------------------------------------------------- */
-__declspec(noreturn) void SSFPortAssert(const char* file, uint32_t line);
-#define SSFSMGetTick64() GetTickCount64()
+#ifdef _WIN32
+__declspec(noreturn)
+#endif
+void SSFPortAssert(const char* file, uint32_t line);
+
+#ifdef _WIN32
+#define SSFPortGetTick64() GetTickCount64()
+#else /* _WIN32 */
+SSFPortTick_t SSFPortGetTick64(void);
+#endif /* _WIN32 */
 
 #include "ssf.h"
 #endif /* SSF_PORT_H_INCLUDE */

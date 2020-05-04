@@ -46,13 +46,25 @@ int ssfUnitTestJmpRet;
 /* --------------------------------------------------------------------------------------------- */
 /* Never returns (except for unit testing), reports assertion failure.                           */
 /* --------------------------------------------------------------------------------------------- */
-__declspec(noreturn)void SSFPortAssert(const char* file, uint32_t line)
+#ifdef _WIN32
+__declspec(noreturn)
+#endif /* _WIN32 */
+void SSFPortAssert(const char* file, uint32_t line)
 {
 #if SSF_CONFIG_UNIT_TEST == 1
     if (memcmp(ssfUnitTestMark, ssfUnitTestZeroMark, sizeof(ssfUnitTestMark)) != 0)
     {longjmp(ssfUnitTestMark, -1); } else
 #endif /* SSF_CONFIG_UNIT_TEST */
     {printf("SSF Assertion: %s:%u\r\n", file, line); }
-    for (;;) Sleep(100);
+    for (;;);
 }
+
+#ifndef _WIN32
+SSFPortTick_t SSFPortGetTick64(void)
+{
+    struct timespec ticks;
+    clock_gettime(CLOCK_MONOTONIC, &ticks);
+    return (SSFPortTick_t) ((((SSFPortTick_t)ticks.tv_sec) * 1000) + (ticks.tv_nsec / 1000000));
+}
+#endif /* _WIN32 */
 

@@ -266,7 +266,7 @@ void SSFSMStartTimerData(SSFSMEventId_t eid, SSFSMTimeout_t interval, const SSFS
     if (t != NULL)
     {
         /* Yes, update it with new timer request. */
-        t->to = interval + SSFSMGetTick64();
+        t->to = interval + SSFPortGetTick64();
         if ((t->event->data) && (t->event->dataLen > sizeof(SSFSMData_t *)))
         {_SSFSMFreeEventData(t->event->data); }
         _SSFSMAllocEventData(t->event, data, dataLen);
@@ -275,7 +275,7 @@ void SSFSMStartTimerData(SSFSMEventId_t eid, SSFSMTimeout_t interval, const SSFS
         /* No, create new timer. */
         t = (SSFSMTimer_t *)SSFMPoolAlloc(&_ssfsmTimerPool, sizeof(SSFSMTimer_t), 0x22);
         t->event = (SSFSMEvent_t *)SSFMPoolAlloc(&_ssfsmEventPool, sizeof(SSFSMEvent_t), 0x33);
-        t->to = interval + SSFSMGetTick64();
+        t->to = interval + SSFPortGetTick64();
         t->event->smid = _ssfsmActive;
         t->event->eid = eid;
         _SSFSMAllocEventData(t->event, data, dataLen);
@@ -312,7 +312,7 @@ bool SSFSMTask(SSFSMTimeout_t *nextTimeout)
     SSFSMEvent_t *e;
     SSFSMTimer_t *t;
     SSFSMTimer_t *next;
-    SSFSMTimeout_t current = SSFSMGetTick64();
+    SSFSMTimeout_t current = SSFPortGetTick64();
 
     SSF_ASSERT(_ssfsmActive >= SSF_SM_END);
     SSF_ASSERT(_ssfsmIsInited);

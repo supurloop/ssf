@@ -346,7 +346,7 @@ void SSFSMUnitTest()
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_1, 1, SSF_SM_EVENT_EXIT);
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_1, 0, SSF_SM_EVENT_ENTRY);
     SSF_ASSERT(_SSFSMFlagsAreCleared());
-    start = SSFSMGetTick64();
+    start = SSFPortGetTick64();
     SSFSMPutEventData(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_UTX_1, "t", 1);
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_1, 0, SSF_SM_EVENT_UTX_1);
     SSF_ASSERT(_SSFSMFlagsAreCleared());
@@ -370,7 +370,7 @@ void SSFSMUnitTest()
         nextTimeout = 0;
         SSFSMTask(&nextTimeout);
     }
-    delta = SSFSMGetTick64() - start;
+    delta = SSFPortGetTick64() - start;
     SSF_ASSERT((delta > (1.9 * SSF_TICKS_PER_SEC)) && (delta < (2.1 * SSF_TICKS_PER_SEC)));
     SSF_ASSERT(SSFSMTask(&nextTimeout) == false);
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_1, 0, SSF_SM_EVENT_UTX_2);
@@ -379,7 +379,7 @@ void SSFSMUnitTest()
     SSF_ASSERT(_SSFSMFlagsAreCleared());
     SSF_ASSERT(SSFSMTask(&nextTimeout) == false);
     SSF_ASSERT(_SSFSMFlagsAreCleared());
-    start = SSFSMGetTick64();
+    start = SSFPortGetTick64();
     SSFSMPutEventData(SSF_SM_UNIT_TEST_2, SSF_SM_EVENT_UTX_2, "t", 1);
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_2, 0, SSF_SM_EVENT_UTX_2);
     SSF_ASSERT(_SSFSMFlagsAreCleared());
@@ -398,7 +398,7 @@ void SSFSMUnitTest()
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_2, 0, SSF_SM_EVENT_UTX_1);
     SSF_ASSERT(_SSFSMFlagsAreCleared());
     SSF_ASSERT(SSFSMTask(&nextTimeout) == false);
-    start = SSFSMGetTick64();
+    start = SSFPortGetTick64();
     SSFSMPutEventData(SSF_SM_UNIT_TEST_2, SSF_SM_EVENT_UT2_1, "d", 1);
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_2, 0, SSF_SM_EVENT_UT2_1);
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_2, 0, SSF_SM_EVENT_EXIT);

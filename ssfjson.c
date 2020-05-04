@@ -330,7 +330,7 @@ bool SSFJsonIsValid(SSFCStrIn_t js)
     SSF_REQUIRE(js != NULL);
 
     memset(path, 0, sizeof(path));
-    if (!SSFJsonObject(js, &index, &start, &end, path, 0, &jt)) return false;
+    if (!SSFJsonObject(js, &index, &start, &end, (SSFCStrIn_t *)path, 0, &jt)) return false;
     return jt != SSF_JSON_TYPE_ERROR;
 }
 
@@ -832,7 +832,7 @@ bool SSFJsonUpdate(SSFCStrOut_t js, size_t size, SSFCStrIn_t *path, SSFJsonPrint
     memcpy(path2, path, sizeof(path2));
     do
     {
-        if (!SSFJsonObject(js, &index, &start, &end, path2, 0, &jt)) return false;
+        if (!SSFJsonObject(js, &index, &start, &end, (SSFCStrIn_t *)path2, 0, &jt)) return false;
         if (jt != SSF_JSON_TYPE_ERROR) break;
         for (i = SSF_JSON_CONFIG_MAX_IN_DEPTH; (path2[i] == NULL) && (i >= 1); i--);
         path2[i] = NULL;

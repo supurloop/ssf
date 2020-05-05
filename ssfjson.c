@@ -180,10 +180,10 @@ static bool _SSFJsonArray(SSFCStrIn_t js, size_t *index, size_t *start, size_t *
     if (depth >= SSF_JSON_CONFIG_MAX_IN_DEPTH) return false;
     _SSFJsonWhitespace(js, index);
     if (js[*index] != '[') return false;
-    if (path != NULL && path[depth] == NULL) *start = *index;
+    if ((path != NULL) && (path[depth] == NULL)) *start = *index;
     (*index)++;
 
-    if (path != NULL && path[depth] != NULL) pindex = *((const size_t *)path[depth]);
+    if ((path != NULL) && (path[depth] != NULL)) memcpy(&pindex, path[depth], sizeof(size_t));
     while (_SSFJsonValue(js, index, &valStart, &valEnd, path, depth, &djt) == true)
     {
         if (pindex == curIndex)
@@ -197,8 +197,7 @@ static bool _SSFJsonArray(SSFCStrIn_t js, size_t *index, size_t *start, size_t *
     if ((pindex != -1) && (pindex > curIndex)) *jt = SSF_JSON_TYPE_ERROR;
     if (js[*index] != ']') return false;
 
-    if (path != NULL && path[depth] == NULL)
-    {*end = *index; *jt = SSF_JSON_TYPE_ARRAY; }
+    if ((path != NULL) && (path[depth] == NULL)) {*end = *index; *jt = SSF_JSON_TYPE_ARRAY; }
     (*index)++;
     return true;
 }

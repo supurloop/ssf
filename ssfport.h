@@ -111,8 +111,8 @@ typedef uint64_t SSFPortTick_t;
 /* Define the maximum JSON string length to be parsed. */
 #define SSF_JSON_CONFIG_MAX_IN_LEN  (2047u)
 
-/* Allow parser to se floating point to convert numbers. */
-#define SSF_JSON_CONFIG_ENABLE_FLOAT_PARSE (1u)
+/* Allow parser to use floating point to convert numbers. */
+#define SSF_JSON_CONFIG_ENABLE_FLOAT_PARSE (0u)
 
 /* Allow generator to print floats. */
 #define SSF_JSON_CONFIG_ENABLE_FLOAT_GEN (1u)

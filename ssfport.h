@@ -161,7 +161,7 @@ enum SSFSMEventList
 #ifdef _WIN32
 __declspec(noreturn)
 #endif
-void SSFPortAssert(const char* file, uint32_t line);
+void SSFPortAssert(const char* file, unsigned int line);
 
 #ifdef _WIN32
 #define SSFPortGetTick64() GetTickCount64()

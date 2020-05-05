@@ -53,7 +53,7 @@ static uint8_t _SSFBase64GetEncoding(uint8_t e)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns 1-3 on successful 32-bit block decode into 24-bit output, else 0 on decode error.     */
 /* --------------------------------------------------------------------------------------------- */
-uint8_t SSFBase64Dec32To24(const uint8_t *b32, uint8_t *b24out, size_t b24outSize)
+uint8_t SSFBase64Dec32To24(const char *b32, uint8_t *b24out, size_t b24outSize)
 {
     uint8_t a;
     uint8_t b;

@@ -68,7 +68,7 @@ void SSFHexUnitTest(void)
 {
     uint32_t i;
     uint8_t binout[32];
-    uint8_t hexout[65];
+    char hexout[65];
     size_t outlen;
 
     SSF_ASSERT_TEST(SSFHexBytesToBin(NULL, strlen(_hexUTPass[0].ascii), binout, sizeof(binout),

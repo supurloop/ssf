@@ -387,7 +387,7 @@ void SSFSMUnitTest()
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_1, 1, SSF_SM_EVENT_UT1_1);
     SSF_ASSERT(_SSFSMFlagsAreCleared());
     delta = nextTimeout - start;
-    SSF_ASSERT((delta > (0.9 * SSF_TICKS_PER_SEC)) && (delta <= SSF_TICKS_PER_SEC));
+    SSF_ASSERT((delta > (SSF_TICKS_PER_SEC * 0.9)) && (delta < (SSF_TICKS_PER_SEC * 1.1)));
     lastTimeout = nextTimeout;
     while (lastTimeout == nextTimeout)
     {
@@ -406,7 +406,7 @@ void SSFSMUnitTest()
     SSF_ASSERT(_SSFSMFlagsAreCleared());
     SSF_ASSERT(SSFSMTask(&nextTimeout) == true);
     delta = nextTimeout - start;
-    SSF_ASSERT((delta > (1.9 * SSF_TICKS_PER_SEC)) && (delta <= (SSF_TICKS_PER_SEC * 2)));
+    SSF_ASSERT((delta > (SSF_TICKS_PER_SEC * 1.9)) && (delta < (SSF_TICKS_PER_SEC * 2.1)));
     lastTimeout = nextTimeout;
     while (lastTimeout == nextTimeout)
     {

@@ -772,13 +772,13 @@ void SSFJsonUnitTest(void)
 #endif /* SSF_JSON_CONFIG_ENABLE_FLOAT_PARSE */
         SSF_ASSERT(SSFJsonGetLong(_jtsComplex[i], (SSFCStrIn_t *)path, &si) == false);
         SSF_ASSERT(SSFJsonGetULong(_jtsComplex[i], (SSFCStrIn_t *)path, &ui) == false);
-        binOutLen = -1;
+        binOutLen = (size_t)-1;
         SSF_ASSERT(SSFJsonGetHex(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen, true) == true);
         SSF_ASSERT(binOutLen == 0);
-        binOutLen = -1;
+        binOutLen = (size_t)-1;
         SSF_ASSERT(SSFJsonGetHex(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen, false) == true);
         SSF_ASSERT(binOutLen == 0);
-        binOutLen = -1;
+        binOutLen = (size_t)-1;
         SSF_ASSERT(SSFJsonGetBase64(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen) == true);
         SSF_ASSERT(binOutLen == 0);
         jtype = SSF_JSON_TYPE_MAX;

@@ -92,9 +92,9 @@ void SSFBase64UnitTest(void)
     uint8_t b24[3];
     char b32[4];
     char encodedStr[5];
-    char decodedBin[3];
+    uint8_t decodedBin[3];
     char encodedBigStr[128];
-    char decodedBigBin[128];
+    uint8_t decodedBigBin[128];
     size_t outLen;
 
     for (i = 0; i < (sizeof(_b64BlockUT) / sizeof(SSBase64UT_t)); i++)

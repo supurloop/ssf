@@ -1,6 +1,8 @@
 # ssf
 Small System Framework
 
+A collection of production ready software for small memory embedded systems.
+
 ## Overview
 
 This code framework was designed:
@@ -53,8 +55,16 @@ The framework is fairly stack friendly, although the JSON parser will recursivel
 
 The most important step is to run the unit tests for the interfaces you intend to use on your platform. This will detect porting problems very quickly and avoid many future debugging headaches.
 
-## Design Principles
+### SSFPortAssert()
 
+For a production ready embedded system you should probably do something additional with SSFPortAssert() besides nothing.
+
+First, I recommend that it should somehow safely record the file and line number where the assertion occurred so that it can be reported on the next boot.
+
+Second, the system should be automatically reset rather than sitting forever in a loop.
+
+## Design Principles
+### Design by Contract
 To help ensure correctness the framework uses Design by Contract techniques to immediately common errors that tend to creep into systems and cause problems at the worst possible times. 
 
 Design by Contract uses assertions, conditional code that ensures that the state of the system at runtime is operating within the allowable tolerances. The assertion interface uses several macros that hint at the assertions purpose. SSF_REQUIRE() is used to check function input parameters. SSF_ENSURE() is used to check the return result of a function. SSF_ASSERT() is used to check any other system state. SSF_ERROR() always forces an assertion.
@@ -63,6 +73,7 @@ The framework goes to great lengths to minimize and detect the potential for buf
 
 The framework will also detect common errors like using interfaces before they have been properly initialized.
 
+### RTOS Support
 You may have heard the terms bare-metal or superloop to describe single thread of execution systems that lack an OS.
 This library is designed to primarily* run in a single thread of execution which avoids much of the overhead and pitfalls associated with RTOSes.
 (*See Byte FIFO Interface for an explanation of how to deal with interrupts.)
@@ -78,14 +89,6 @@ This means that calls into those interfaces from different execution contexts wi
 For example, you can have linked list object A in task 1 and linked list object B in task 2 and they will be managed independently and correctly, so long as they are only accessed from the context of their respective task.
 
 In contrast the finite state machine framework requires that all event generation and state handler execution for all state machines occur in the same execution context.
-
-### SSFPortAssert()
-
-For a production ready embedded system you should probably do something additional with SSFPortAssert() besides nothing.
-
-First, I recommend that it should somehow safely record the file and line number where the assertion occurred so that it can be reported on the next boot.
-
-Second, the system should be automatically reset rather than sitting forever in a loop.
 
 ## Interfaces
 ### Byte FIFO Interface

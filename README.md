@@ -32,12 +32,12 @@ Microprocessors with >4KB RAM and >32KB program memory should easily be able to 
 
 ## Porting
 
-This framework has been successfully ported and unit tested on the following platforms: Windows Visual Studio, Linux (GCC), PIC32 (XC32), PIC24 (XC16), and MSP430 (TI 15.12.3.LTS).
+This framework has been successfully ported and unit tested on the following platforms: Windows Visual Studio 32/64-bit, Linux 32/64-bit (GCC), PIC32 (XC32), PIC24 (XC16), and MSP430 (TI 15.12.3.LTS). You should only need to change ssfport.c and ssfport.h to implement a successful port.
 
 The code will compile cleanly under Windows in Visual Studio using the ssf.sln solution file.
 The code will compile cleanly under Linux. ./build.sh will create the ssf executable in the source directory.
 
-For other platforms there are only a few essential tasks must be completed:
+For other platforms there are only a few essential tasks that must be completed:
   - Copy all the SSF C and H source files, except main.c, into your project sources and add them to your build environment.
   - In ssfport.h make sure SSF_TICKS_PER_SEC is set to the number of system ticks per second on your platform.
   - Map SSFPortGetTick64() to an existing function that returns the number of system ticks since boot, or
@@ -46,9 +46,10 @@ For other platforms there are only a few essential tasks must be completed:
 
 Only the finite state machine framework uses system ticks, so you can stub out SSFPortGetTick64() if it is not needed.
 
-Only the memory pool and finite state machine use dynamic memory. The memory pool only does so when a pool is created. The finite state machine only uses malloc when an event has data whose size is bigger than the sizeof a pointer.
+### Heap and Stack Memory
+Only the memory pool and finite state machine use dynamic memory, aka heap. The memory pool only does so when a pool is created. The finite state machine only uses malloc when an event has data whose size is bigger than the sizeof a pointer.
 
-The framework is fairly stack friendly, although the JSON parser will recursively call functions for nested JSON objects and arrays. SSF_JSON_CONFIG_MAX_IN_DEPTH in ssfport.h can be used to control the maximum depth the JSON parser will recurse to prevent the stack from blowing up due to bad inputs.
+The framework is fairly stack friendly, although the JSON parser will recursively call functions for nested JSON objects and arrays. SSF_JSON_CONFIG_MAX_IN_DEPTH in ssfport.h can be used to control the maximum depth the JSON parser will recurse to prevent the stack from blowing up due to bad inputs. If the unit test for the JSON interface is failing weirdly then increase your system stack.
 
 The most important step is to run the unit tests for the interfaces you intend to use on your platform. This will detect porting problems very quickly and avoid many future debugging headaches.
 
@@ -56,14 +57,14 @@ The most important step is to run the unit tests for the interfaces you intend t
 
 To help ensure correctness the framework uses Design by Contract techniques to immediately common errors that tend to creep into systems and cause problems at the worst possible times. 
 
-Design by Contract uses assertions, simply condition code that ensures that the state of the system at runtime is operating within the allowable tolerances. The assertion interface uses several macros that hint at the assertions purpose. SSF_REQUIRE() is used to check function input parameters. SSF_ENSURE() is used to check the return result of a function. SSF_ASSERT() is used to check any other system state. SSF_ERROR() always forces an assertion.
+Design by Contract uses assertions, conditional code that ensures that the state of the system at runtime is operating within the allowable tolerances. The assertion interface uses several macros that hint at the assertions purpose. SSF_REQUIRE() is used to check function input parameters. SSF_ENSURE() is used to check the return result of a function. SSF_ASSERT() is used to check any other system state. SSF_ERROR() always forces an assertion.
 
 The framework goes to great lengths to minimize and detect the potential for buffer overruns and prevent problems with unterminated C strings.
 
 The framework will also detect common errors like using interfaces before they have been properly initialized.
 
-The other key principle is that the library is designed to primarily* run in a single threaded context.
 You may have heard the terms bare-metal or superloop to describe single thread of execution systems that lack an OS.
+This library is designed to primarily* run in a single thread of execution which avoids much of the overhead and pitfalls associated with RTOSes.
 (*See Byte FIFO Interface for an explanation of how to deal with interrupts.)
 
 Very few small memory systems need to have a threaded/tasked/real-time capable OS.

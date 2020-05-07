@@ -128,13 +128,49 @@ if (SSF_BFIFO_IS_EMPTY(&bf) == false)
 
 The linked list interface allows the creation of FIFOs and STACKs for more managing more complex data structures.
 The key to using the Linked List interface is that when you create the data structure that you want to track place a SSFLLItem_t called item at the top of the struct. For example:
-
+```
+#define MYLL_MAX_ITEMS (3u)
 typedef struct SSFLLMyData
 {
     SSFLLItem_t item;
     uint32_t mydata;
 } SSFLLMyData_t;
 
+SSFLL_t myll;
+SSFLLMyData_t *item;
+uint32_t i;
+
+/* Initialize the linked list with maximum of three items */
+SSFLLInit(&myll, MYLL_MAX_ITEMS);
+
+/* Create items and push then onto stack */
+for (i = 0; i < MYLL_MAX_ITEMS; i++)
+{
+    item = (SSFLLMyData_t *) malloc(sizeof(SSFLLMyData_t));
+    SSF_ASSERT(item != NULL);
+    item->mydata = i + 100;
+    SSF_LL_STACK_PUSH(&myll, item);
+}
+
+/* Pop items from stack and free them */
+if (SSF_LL_STACK_POP(&myll, &item))
+{
+    /* item->mydata == 102 */
+    free(item);
+}
+
+if (SSF_LL_STACK_POP(&myll, &item))
+{
+    /* item->mydata == 101 */
+    free(item);
+}
+
+if (SSF_LL_STACK_POP(&myll, &item))
+{
+    /* item->mydata == 100 */
+    free(item);
+}
+```
 ### Memory Pool Interface
 
 The memory pool interface creates a pool of fixed sized memory blocks that can be efficiently allocated and freed without making dynamic memory calls.

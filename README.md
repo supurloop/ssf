@@ -98,7 +98,32 @@ Most embedded systems need to send and receive data. The idea behind the byte FI
 But wait, the interrupt is a different execution context so we have a race condition that can cause the byte FIFO interface to misbehave. The exact solution will vary between platforms, but the general idea is to disable interrupts in the main execution thread while checking *and* pulling the byte out of the RX FIFO.
 
 There are MACROs defined in ssfbfifo.h that avoid the overhead of a function call to minimize the amount of time with interrupts off.
+```
+SSFBFifo_t bf;
+uint8_t bf;
+uint8_t bfBuffer[SSF_BFIFO_255 + (1UL)];
+uint8_t x = 101;
+uint8_t y = 0;
 
+/* Initialize the fifo */
+SSFBFifoInit(&bf, SSF_BFIFO_255, bfBuffer, sizeof(bfBuffer));
+
+...
+/* Fill the fifo using the low overhead MACROs */
+if (SSF_BFIFO_IS_FULL(&bf) == false)
+{
+    SSF_BFIFO_PUT_BYTE(&bf, x);
+}
+
+...
+/* Empty the fifo using the low overhead MACROs */
+if (SSF_BFIFO_IS_EMPTY(&bf) == false)
+{
+    /* y == 0 */
+    SSF_BFIFO_GET_BYTE(&bf, y);
+    /* y == 101 */
+}
+```
 ### Linked List Interface
 
 The linked list interface allows the creation of FIFOs and STACKs for more managing more complex data structures.
@@ -134,6 +159,20 @@ On the generator side it does away with varargs and opts for an interface that c
 
 Every embedded system needs to use a checksum somewhere, somehow. The 16-bit Fletcher checksum has many of the error detecting properties of a 16-bit CRC, but at the computational cost of an arithmetic checksum. For 88 bytes of program memory how can you go wrong?
 
+The API can compute the checksum of data incrementally.
+
+For example, the first call to SSFFCSum16() results in the same checksum as the following three calls.
+```
+uint16_t fc;
+
+fc = SSFFCSum16("abcde", 5, SSF_FCSUM_INITIAL);
+/* fc == 0xc8f0 */
+
+fc = SSFFCSum16("a", 1, SSF_FCSUM_INITIAL);
+fc = SSFFCSum16("bcd", 3, fc);
+fc = SSFFCSum16("e", 1, fc);
+/* fc == 0xc8f0 */
+```
 ### Finite State Machine Framework
 
 The state machine framework allows you to create reliable and efficient state machines.

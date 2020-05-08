@@ -215,11 +215,52 @@ The memory pool interface creates a pool of fixed sized memory blocks that can b
 ### Base64 Encoder/Decoder Interface
 
 This interface allows you to encode a binary data stream into a Base64 string, or do the reverse.
+```
+char encodedStr[16];
+char decodedBin[16];
+uint8_t binOut[2];
+size_t binLen;
 
+/* Encode arbitrary binary data */
+if (SSFBase64Encode("a", 1, encodedStr, sizeof(encodedStr), NULL))
+{
+    /* Encode successful */
+    printf("%s", encodedStr);
+    /* output is "YQ==" */
+}
+
+/* Decode Base64 string into binary data */
+if (SSFBase64Decode(encodedStr, strlen(encodedStr), decodedBin, sizeof(decodedBin), &binLen))
+{
+    /* Decode successful */
+    /* binLen == 1 */
+    /* decodedBin[0] == 'a' */
+}
+```
 ### Binary to Hex ASCII Encoder/Decoder Interface
 
 This interface allows you to encode a binary data stream into an ASCII hexadecimal string, or do the reverse.
+```
+uint8_t binOut[2];
+char strOut[5];
+size_t binLen;
 
+if (SSFHexBytesToBin("A1F5", 4, binOut, sizeof(binOut), &binLen, false))
+{
+    /* Encode successful */
+    /* binLen == 2 */
+    /* binOut[0] = '\xA1' */
+    /* binOut[1] = '\xF5' */
+}
+
+if (SSFHexBinToBytes(binOut, binLen, strOut, sizeof(strOut), NULL, false, SSF_HEX_CASE_LOWER))
+{
+  /* Decode in reverse successful */
+  printf("%s", strOut);
+  /* prints "a1f5" */
+}
+```
+Another convienience feature is the API allows reversal of the byte ordering either for encoding or decoding.
 ### JSON Parser/Generator Interface
 
 Having searched for used many JSON parser/generators on small embedded platforms I never found exactly the right mix of attributes. the mjson project came the closest on the parser side, but relied on varargs for the generator, which provides a potential breeding ground for bugs.

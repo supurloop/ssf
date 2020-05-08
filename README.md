@@ -211,7 +211,29 @@ This prevents the linked list chain from being corrupted which can cause resourc
 ### Memory Pool Interface
 
 The memory pool interface creates a pool of fixed sized memory blocks that can be efficiently allocated and freed without making dynamic memory calls.
+```
+#define BLOCK_SIZE (42UL)
+#define BLOCKS (10UL)
+SSFMPool_t pool;
 
+#define MSG_FRAME_OWNER (0x11u)
+MsgFrame_t *buf;
+
+SSFMPoolInit(&pool, BLOCKS, BLOCK_SIZE);
+
+/* If pool not empty then allocate block, use it, and free it. */
+if (SSFMPoolIsEmpty(&pool) == false)
+{
+    buf = (MsgFrame_t *)SSFMPoolAlloc(&pool, sizeof(MsgFrame_t), MSG_FRAME_OWNER);
+    /* buf now points to a memory pool block */
+    buf->header = 1;
+    ...
+    
+    /* Free the block */
+    buf = free(&pool, buf);
+    /* buf == NULL */
+}
+```
 ### Base64 Encoder/Decoder Interface
 
 This interface allows you to encode a binary data stream into a Base64 string, or do the reverse.
@@ -263,11 +285,83 @@ if (SSFHexBinToBytes(binOut, binLen, strOut, sizeof(strOut), NULL, false, SSF_HE
 Another convienience feature is the API allows reversal of the byte ordering either for encoding or decoding.
 ### JSON Parser/Generator Interface
 
-Having searched for used many JSON parser/generators on small embedded platforms I never found exactly the right mix of attributes. the mjson project came the closest on the parser side, but relied on varargs for the generator, which provides a potential breeding ground for bugs.
+Having searched for and used many JSON parser/generators on small embedded platforms I never found exactly the right mix of attributes. The mjson project came the closest on the parser side, but relied on varargs for the generator, which provides a potential breeding ground for bugs.
 
-Like mjson (a SAX-like parser) this parser operates on the JSON string in place and only consumes modest stack in proportion to the maximum nesting depth. Since the JSON string is parsed from the start each time a data element is accessed it is computationally inefficient, but most embedded systems are RAM constrained not performance constrained.
+Like mjson (a SAX-like parser) this parser operates on the JSON string in place and only consumes modest stack in proportion to the maximum nesting depth. Since the JSON string is parsed from the start each time a data element is accessed it is computationally inefficient; that's ok since most embedded systems are RAM constrained not performance constrained.
 
 On the generator side it does away with varargs and opts for an interface that can be verified at compilation time to be called correctly.
+
+Here are some simple parser examples:
+```
+char json1Str[] = "{\"name\":\"value\"}";
+char json2Str[] = "{\"obj\":{\"name\":\"value\",\"array\":[1,2,3]}}";
+char *path[SSF_JSON_CONFIG_MAX_IN_DEPTH + 1];
+char strOut[32];
+size_t idx;
+
+/* Must zero out path variable before use */
+memset(path, 0, sizeof(path));
+
+/* Get the value of a top level element */
+path[0] = "name";
+if (SSFJsonGetString(json1Str, (SSFCStrIn_t *)path, strOut, sizeof(strOut), NULL))
+{
+    printf("%s", strOut);
+    /* Prints "name" excluding double quotes */
+}
+
+/* Get the value of a nested element */
+path[0] = "obj";
+path[1] = "name";
+if (SSFJsonGetString(json2Str, (SSFCStrIn_t *)path, strOut, sizeof(strOut), NULL))
+{
+    printf("%s", strOut);
+    /* Prints "name" excluding double quotes */
+}
+
+path[0] = "obj";
+path[1] = "array";
+path[2] = (char *)&idx;
+/* Iterate over a nested array */
+for (idx = 0;;idx++)
+{
+    long si;
+    
+    if (SSFJsonGetLong(json2Str, (SSFCStrIn_t *)path, &si))
+    {
+        if (i != 0) print(", ");
+        printf("%ld", si);
+    }
+    else break;
+}
+/* Prints "1, 2, 3" */
+```
+Here is a simple generation example:
+```
+bool printFn(char *js, size_t size, size_t start, size_t *end, void *in)
+{
+    bool comma = false;
+    
+    if (!SSFJsonPrintLabel(js, size, start, &start, "label1", &comma)) return false;
+    if (!SSFJsonPrintString(js, size, start, &start, "value1", false)) return false;
+    if (!SSFJsonPrintLabel(js, size, start, &start, "label2", &comma)) return false;
+    if (!SSFJsonPrintString(js, size, start, &start, "value2", false)) return false;
+    
+    *end = start;
+    return true;
+}
+...
+
+char jsonStr[128];
+size_t end;
+
+/* JSON is contained within an object {}, so to create a JSON string call SSFJsonPrintObject() */
+if (SSFJsonPrintObject(jsonStr, sizeof(jsonStr), 0, &end, printFn, NULL, false))
+{
+    /* jsonStr == "{\"name1\":\"value1\",\"name2\":\"value2\"}" */
+}
+```
+Object and array nesting is achieved by calling SSFJsonPrintObject() or SSFJsonPrintArray() from within a printer function.
 
 ### 16-bit Fletcher Checksum Interface
 

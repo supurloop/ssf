@@ -124,6 +124,39 @@ if (SSF_BFIFO_IS_EMPTY(&bf) == false)
     /* y == 101 */
 }
 ```
+
+Here's how synchronize access to the RX FIFO if it is being filled in an interrupt and emptied in the main loop:
+```
+__interrupt__ void RXInterrupt(void)
+{
+    /* Fill the fifo using the low overhead MACROs */
+    if (SSF_BFIFO_IS_FULL(&bf) == false)
+    {
+        SSF_BFIFO_PUT_BYTE(&bf, RXBUF_REG);
+    }
+}
+
+/* Main loop */
+while (true)
+{
+    uint8_t in;
+
+    /* Empty the fifo using the low overhead MACROs */
+    CRITICAL_SECTION_ENTER();
+    if (SSF_BFIFO_IS_EMPTY(&bf) == false)
+    {
+        SSF_BFIFO_GET_BYTE(&bf, in);
+        CRITICAL_SECTION_EXIT();        
+        ProcessRX(in);
+    }
+    else
+    {
+        CRITICAL_SECTION_EXIT();
+    }
+}
+```
+Notice that the main loop disables interrupts while accessing the FIFO and immediately turns them back on once the FIFO access has been completed and before the main loop processes the RXed byte.
+
 ### Linked List Interface
 
 The linked list interface allows the creation of FIFOs and STACKs for more managing more complex data structures.
@@ -171,6 +204,10 @@ if (SSF_LL_STACK_POP(&myll, &item))
     free(item);
 }
 ```
+Besides treating the linked list as a STACK or FIFO there are interfaces to insert an item at a specific point within an existing list.
+Before an item is added to a list it cannot be part of a another list otherwise an assertion will be triggered.
+This prevents the linked list chain from being corrupted which can cause resource leaks and other logic errors to occur.
+
 ### Memory Pool Interface
 
 The memory pool interface creates a pool of fixed sized memory blocks that can be efficiently allocated and freed without making dynamic memory calls.

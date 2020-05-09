@@ -65,7 +65,7 @@ Second, the system should be automatically reset rather than sitting forever in 
 
 ## Design Principles
 ### Design by Contract
-To help ensure correctness the framework uses Design by Contract techniques to immediately common errors that tend to creep into systems and cause problems at the worst possible times. 
+To help ensure correctness the framework uses Design by Contract techniques to immediately catch common errors that tend to creep into systems and cause problems at the worst possible times. 
 
 Design by Contract uses assertions, conditional code that ensures that the state of the system at runtime is operating within the allowable tolerances. The assertion interface uses several macros that hint at the assertions purpose. SSF_REQUIRE() is used to check function input parameters. SSF_ENSURE() is used to check the return result of a function. SSF_ASSERT() is used to check any other system state. SSF_ERROR() always forces an assertion.
 
@@ -384,9 +384,119 @@ fc = SSFFCSum16("e", 1, fc);
 ### Finite State Machine Framework
 
 The state machine framework allows you to create reliable and efficient state machines.
+
 All event generation and execution of task handlers for ALL state machines must be done in a single thread of execution.
 Calling into the state machine interface from two difference execution contexts is not supported and will eventually lead to problems.
 There is a lot that can be said about state machines in general and this one specifically, and I will continue to add to this documentation in the future.
+
+Here's a simple example:
+```
+/* ssfport.h */
+...
+
+/* --------------------------------------------------------------------------------------------- */
+/* Configure ssfsm's state machine interface                                                     */
+/* --------------------------------------------------------------------------------------------- */
+/* Maximum number of simultaneously queued events for all state machines. */
+#define SSF_SM_MAX_ACTIVE_EVENTS (5u)
+
+/* Maximum number of simultaneously running timers for all state machines. */
+#define SSF_SM_MAX_ACTIVE_TIMERS (2u)
+
+/* Defines the state machine identifers. */
+enum SSFSMList
+{
+    SSF_SM_STATUS_LED,
+    SSF_SM_END
+};
+
+/* Defines the event identifiers for all state machines. */
+enum SSFSMEventList
+{
+    SSF_SM_EVENT_ENTRY,
+    SSF_SM_EVENT_EXIT,
+    SSF_SM_EVENT_STATUS_RX_DATA,
+    SSF_SM_EVENT_STATUS_LED_TIMER_TOGGLE,
+    SSF_SM_EVENT_STATUS_LED_TIMER_IDLE,
+    SSF_SM_EVENT_END
+};
+
+/* main.c */
+...
+
+/* State handler prototypes */
+static void StatusLEDIdleHandler(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen);
+static void StatusLEDBlinkHandler(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen);
+
+static void StatusLEDIdleHandler(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen)
+{
+    switch (eid)
+    {
+    case SSF_SM_EVENT_ENTRY:
+        STATUS_LED_OFF();
+        break;
+    case SSF_SM_EVENT_EXIT:
+        break;
+    case SSF_SM_EVENT_STATUS_RX_DATA:
+        SSFSMTran(StatusLEDBlinkHandler);
+        break;
+    default:
+        break;
+    }
+}
+
+static void StatusLEDBlinkHandler(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen)
+{
+    switch (eid)
+    {
+    case SSF_SM_EVENT_ENTRY:
+        SSFSMStartTimer(SSF_SM_EVENT_STATUS_LED_TIMER_TOGGLE, 0);
+        SSFSMStartTimer(SSF_SM_EVENT_STATUS_LED_TIMER_IDLE, SSF_TICKS_PER_SEC * 10);
+        break;
+    case SSF_SM_EVENT_EXIT:
+        break;
+    case SSF_SM_EVENT_STATUS_LED_TIMER_TOGGLE:
+        STATUS_LED_TOGGLE();
+        SSFSMStartTimer(SSF_SM_EVENT_STATUS_LED_TIMER_TOGGLE, SSF_TICKS_PER_SEC);        
+        break;
+    case SSF_SM_EVENT_STATUS_LED_TIMER_IDLE:
+        SSFSMTran(StatusLEDIdleHandler);
+        break;
+    default:
+        break;
+    }
+}
+
+void main(void)
+{
+...
+    /* Initialize state machine framework */
+    SSFSMInit(SSF_SM_MAX_ACTIVE_EVENTS, SSF_SM_MAX_ACTIVE_TIMERS);
+    
+    /* Initialize status LED state machine */
+    SSFSMInitHandler(SSF_SM_STATUS_LED, StatusLEDIdleHandler);
+
+    while (true)
+    {
+        if (ReceivedMessage())
+        {
+            SSFSMPutEventData(SSF_SM_STATUS_LED, SSF_SM_EVENT_STATUS_RX_DATA);
+        }
+        SSFSMTask(NULL);
+    }
+...
+```
+The state machine framework is first initialized. Then the state machine for the Status LED is initialized, which causes the ENTRY action of the StatusLEDIdleHandler() to be executed, this turns off the LED.
+
+Then main goes into its superloop that checks for a message begin received. When a message is received it will signal SSF_SM_EVENT_STATUS_RX_DATA. The idle handler will trigger a state transition to the StatusLEDBlinkHandler(). The state transition causes an EXIT event for the idle handler, AND an entry event for the blink handler.
+
+On ENTRY the blink handler starts two timers. The SSF_SM_EVENT_STATUS_LED_TIMER_TOGGLE timer is set to go off immediately, and the SSF_SM_EVENT_STATUS_LED_TIMER_IDLE timer is set to go off in 10 seconds. When the SSF_SM_EVENT_STATUS_LED_TIMER_TOGGLE expires the status LED is toggled and the SSF_SM_EVENT_STATUS_LED_TIMER_TOGGLE timer is setup to fire again in 1 second. This cause the LED to blink.
+
+If additional SSF_SM_EVENT_STATUS_RX_DATA events are signaled while in the toggle state they are ignored.
+
+After 10 seconds the SSF_SM_EVENT_STATUS_LED_TIMER_IDLE timer expires and triggers a state transition to the idle state. First the EXIT event in the blink handler is executed automatically by the framework, followed by the ENTRY event in the idle handler that turns off the status LED.
+
+The framework automatically stops all timers associated with a state machine when a state transition occurs. This is why it is not necessary to explicitly stop the SSF_SM_EVENT_STATUS_LED_TIMER_TOGGLE timer.
 
 ## Conclusion
 

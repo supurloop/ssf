@@ -72,13 +72,13 @@ uint8_t SSFBase64Dec32To24(const char *b32, uint8_t *b24out, size_t b24outSize)
     if (b24outSize == 0) return 0;
     if (a >= 64 || b >= 64 || c >= 65 || d >= 65) return 0;
     if (c == 64 && d != 64) return 0;
-    *b24out = (a << 2) | (b >> 4);
+    *b24out = (uint8_t)((a << 2) | (b >> 4));
     if (c == 64) return 1;
     if (b24outSize == 1) return 0;
-    *(b24out + 1) = (b << 4) | (c >> 2);
+    *(b24out + 1) = (uint8_t)((b << 4) | (c >> 2));
     if (d == 64) return 2;
     if (b24outSize == 2) return 0;
-    *(b24out + 2) = (c << 6) | d;
+    *(b24out + 2) = (uint8_t)((c << 6) | d);
     return 3;
 }
 

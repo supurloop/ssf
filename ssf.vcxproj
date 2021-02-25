@@ -154,6 +154,8 @@
     <ClCompile Include="ssfmpool.c" />
     <ClCompile Include="ssfmpool_ut.c" />
     <ClCompile Include="ssfport.c" />
+    <ClCompile Include="ssfrs.c" />
+    <ClCompile Include="ssfrs_ut.c" />
     <ClCompile Include="ssfsm.c" />
     <ClCompile Include="ssfsm_ut.c" />
   </ItemGroup>
@@ -168,6 +170,7 @@
     <ClInclude Include="ssfll.h" />
     <ClInclude Include="ssfmpool.h" />
     <ClInclude Include="ssfport.h" />
+    <ClInclude Include="ssfrs.h" />
     <ClInclude Include="ssfsm.h" />
     <ClInclude Include="ssfversion.h" />
   </ItemGroup>

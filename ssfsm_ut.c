@@ -419,4 +419,3 @@ void SSFSMUnitTest()
     SSF_ASSERT(SSFSMTask(&nextTimeout) == false);
 }
 #endif /* SSF_CONFIG_SM_UNIT_TEST */
-

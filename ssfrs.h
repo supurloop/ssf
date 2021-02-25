@@ -1,11 +1,21 @@
 /* --------------------------------------------------------------------------------------------- */
 /* Small System Framework                                                                        */
 /*                                                                                               */
-/* main.c                                                                                        */
-/* Entry point for unit testing SSF components.                                                  */
+/* ssfrs.c                                                                                       */
+/* Provides Reed-Solomon FEC encoder/decoder interface.                                          */
+/*                                                                                               */
+/* Limitations:                                                                                  */
+/*     Decode interface does not support erasure corrections, only error corrections.            */
+/*     Eraseure corrections are only useful if the location of an error is known.                */
+/*                                                                                               */
+/* Reed-Solomon algorithms and code inspired and adapted from:                                   */
+/*     https://en.wikiversity.org/wiki/Reed-Solomon_codes_for_coders                             */
+/*                                                                                               */
+/* MOD255 macro algorithm inspired and adapted from:                                             */
+/*     http://homepage.cs.uiowa.edu/~jones/bcd/mod.shtml                                         */
 /*                                                                                               */
 /* BSD-3-Clause License                                                                          */
-/* Copyright 2020 Supurloop Software LLC                                                         */
+/* Copyright 2021 Supurloop Software LLC                                                         */
 /*                                                                                               */
 /* Redistribution and use in source and binary forms, with or without modification, are          */
 /* permitted provided that the following conditions are met:                                     */
@@ -29,57 +39,31 @@
 /* NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISE   */
 /* OF THE POSSIBILITY OF SUCH DAMAGE.                                                            */
 /* --------------------------------------------------------------------------------------------- */
-#include <stdio.h>
-#include "ssfassert.h"
-#include "ssfbfifo.h"
-#include "ssfll.h"
-#include "ssfsm.h"
-#include "ssfmpool.h"
+#ifndef SSF_RS_INCLUDE_H
+#define SSF_RS_INCLUDE_H
+
+#include <stdint.h>
+#include <stdbool.h>
 #include "ssfport.h"
-#include "ssfjson.h"
-#include "ssfbase64.h"
-#include "ssfhex.h"
-#include "ssffcsum.h"
-#include "ssfrs.h"
 
 /* --------------------------------------------------------------------------------------------- */
-/* SSF unit test entry point.                                                                    */
+/* Defines                                                                                       */
 /* --------------------------------------------------------------------------------------------- */
-void main(void)
-{
-#if SSF_CONFIG_BFIFO_UNIT_TEST == 1
-    SSFBFifoUnitTest();
-#endif /* SSF_CONFIG_BFIFO_UNIT_TEST */
 
-#if SSF_CONFIG_LL_UNIT_TEST == 1
-    SSFLLUnitTest();
-#endif  /* SSF_CONFIG_LL_UNIT_TEST */
+/* --------------------------------------------------------------------------------------------- */
+/* External interface                                                                            */
+/* --------------------------------------------------------------------------------------------- */
+void SSFRSEncode(const uint8_t *msg, uint16_t msgLen, uint8_t* eccBuf, uint16_t eccBufSize,
+                 uint16_t *eccBufLen, uint8_t eccNumBytes, uint8_t chunkSize);
+bool SSFRSDecode(uint8_t *msg, uint16_t msgSize, uint16_t *msgLen, uint8_t chunkSyms,
+                 uint8_t chunkSize);
 
-#if SSF_CONFIG_MPOOL_UNIT_TEST == 1
-    SSFMPoolUnitTest();
-#endif /* SSF_CONFIG_MPOOL_UNIT_TEST */
-
-#if SSF_CONFIG_BASE64_UNIT_TEST == 1
-    SSFBase64UnitTest();
-#endif /* SSF_CONFIG_BASE64_UNIT_TEST */
-
-#if SSF_CONFIG_HEX_UNIT_TEST == 1
-    SSFHexUnitTest();
-#endif /* SSF_CONFIG_BASE64_UNIT_TEST */
-
-#if SSF_CONFIG_JSON_UNIT_TEST == 1
-    SSFJsonUnitTest();
-#endif /* SSF_CONFIG_JSON_UNIT_TEST */
-
-#if SSF_CONFIG_FCSUM_UNIT_TEST == 1
-    SSFFCSumUnitTest();
-#endif /* SSF_CONFIG_FCSUM_UNIT_TEST */
-
-#if SSF_CONFIG_SM_UNIT_TEST == 1
-    SSFSMUnitTest();
-#endif /* SSF_CONFIG_SM_UNIT_TEST */
-
+/* --------------------------------------------------------------------------------------------- */
+/* Unit test                                                                                     */
+/* --------------------------------------------------------------------------------------------- */
 #if SSF_CONFIG_RS_UNIT_TEST == 1
-    SSFRSUnitTest();
-#endif /* SSF_CONFIG_SM_UNIT_TEST */
-}
+void SSFRSUnitTest(void);
+#endif /* SSF_CONFIG_RS_UNIT_TEST */
+
+#endif /* SSF_RS_INCLUDE_H */
+

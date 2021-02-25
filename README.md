@@ -18,6 +18,7 @@ The framework implements a number of common embedded system functions:
   6. A JSON parser/generator interface.
   7. A 16-bit Fletcher checksum interface.
   8. A finite state machine framework.
+  9. A Reed-Solomon FEC encoder/decoder interface.
 
 To give you an idea of the framework size here are some program memory estimates for each component compiled on an MSP430 with Level 3 optimization:
 Byte FIFO, linked list, memory pool, Base64, Hex ASCII are each about 1000 bytes.
@@ -25,12 +26,15 @@ JSON parser/generator is about 7300-8800 bytes depending on configuration.
 Finite state machine is about 2000 bytes.
 Fletcher checksum is about 88 bytes.
 
-The complete framework, assuming every function of every interface is used, is about 15000 bytes of program memory.
+The Reed-Solomon encoder will run on an 8-bit PIC (4KB Code/256 bytes RAM) w/radio transmitter using only about half of its available memory.
+
+The complete framework, assuming every function of every interface is used, is about 20000 bytes of program memory.
 Many programs will only use a fraction of the functions in all the interfaces and should see the amount of program memory reduced further.
 
 Little RAM is used internally by the framework, most RAM usage occurs outside the framwork when declaring or initializing different objects.
 
 Microprocessors with >4KB RAM and >32KB program memory should easily be able to utilize this framework.
+As noted above, portions of the framework will work on much smaller micros.
 
 ## Porting
 
@@ -140,6 +144,18 @@ The state machine framework allows you to create reliable and efficient state ma
 All event generation and execution of task handlers for ALL state machines must be done in a single thread of execution.
 Calling into the state machine interface from two difference execution contexts is not supported and will eventually lead to problems.
 There is a lot that can be said about state machines in general and this one specifically, and I will continue to add to this documentation in the future.
+
+### Reed-Solomon FEC Encoder/Decoder Interface
+
+The Reed-Solomon FEC encoder/decoder interface is a memory efficient (both program and RAM) implementation of the same error correction algorithm that the Voyager probes use to communicate reliably with Earth.
+
+Reed-Solomon is very useful to increase the effective receive sensitivity of radios purely with software!
+
+The encoder takes a message and outputs a block of Reed-Solomom ECC bytes. To use, simply transmit the original message followed by the ECC bytes.
+The decoder takes a received message, that includes both the message and ECC bytes, and then attempts to correct back to the original message.
+
+The implementation allows larger messages to be processed in chunks which allows trade offs between RAM utilization and encoding/decoding speed.
+Using Reed-Solomon still requires the use of CRCs to verify the integrity of the original message after error correction is applied because the error correction can "successfully" correct to the wrong message.
 
 ## Conclusion
 

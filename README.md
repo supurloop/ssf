@@ -18,7 +18,6 @@ The framework implements a number of common embedded system functions:
   6. A JSON parser/generator interface.
   7. A 16-bit Fletcher checksum interface.
   8. A finite state machine framework.
-  9. A Reed-Solomon FEC encoder/decoder interface.
 
 To give you an idea of the framework size here are some program memory estimates for each component compiled on an MSP430 with Level 3 optimization:
 Byte FIFO, linked list, memory pool, Base64, Hex ASCII are each about 1000 bytes.
@@ -26,15 +25,12 @@ JSON parser/generator is about 7300-8800 bytes depending on configuration.
 Finite state machine is about 2000 bytes.
 Fletcher checksum is about 88 bytes.
 
-The Reed-Solomon encoder will run on an 8-bit PIC (4KB Code/256 bytes RAM) w/radio transmitter using only about half of its available memory.
-
-The complete framework, assuming every function of every interface is used, is about 20000 bytes of program memory.
+The complete framework, assuming every function of every interface is used, is about 15000 bytes of program memory.
 Many programs will only use a fraction of the functions in all the interfaces and should see the amount of program memory reduced further.
 
 Little RAM is used internally by the framework, most RAM usage occurs outside the framwork when declaring or initializing different objects.
 
 Microprocessors with >4KB RAM and >32KB program memory should easily be able to utilize this framework.
-As noted above, portions of the framework will work on much smaller micros.
 
 ## Porting
 
@@ -69,7 +65,7 @@ Second, the system should be automatically reset rather than sitting forever in 
 
 ## Design Principles
 ### Design by Contract
-To help ensure correctness the framework uses Design by Contract techniques to immediately common errors that tend to creep into systems and cause problems at the worst possible times. 
+To help ensure correctness the framework uses Design by Contract techniques to immediately catch common errors that tend to creep into systems and cause problems at the worst possible times. 
 
 Design by Contract uses assertions, conditional code that ensures that the state of the system at runtime is operating within the allowable tolerances. The assertion interface uses several macros that hint at the assertions purpose. SSF_REQUIRE() is used to check function input parameters. SSF_ENSURE() is used to check the return result of a function. SSF_ASSERT() is used to check any other system state. SSF_ERROR() always forces an assertion.
 
@@ -102,60 +98,405 @@ Most embedded systems need to send and receive data. The idea behind the byte FI
 But wait, the interrupt is a different execution context so we have a race condition that can cause the byte FIFO interface to misbehave. The exact solution will vary between platforms, but the general idea is to disable interrupts in the main execution thread while checking *and* pulling the byte out of the RX FIFO.
 
 There are MACROs defined in ssfbfifo.h that avoid the overhead of a function call to minimize the amount of time with interrupts off.
+```
+SSFBFifo_t bf;
+uint8_t bf;
+uint8_t bfBuffer[SSF_BFIFO_255 + (1UL)];
+uint8_t x = 101;
+uint8_t y = 0;
+
+/* Initialize the fifo */
+SSFBFifoInit(&bf, SSF_BFIFO_255, bfBuffer, sizeof(bfBuffer));
+
+...
+/* Fill the fifo using the low overhead MACROs */
+if (SSF_BFIFO_IS_FULL(&bf) == false)
+{
+    SSF_BFIFO_PUT_BYTE(&bf, x);
+}
+
+...
+/* Empty the fifo using the low overhead MACROs */
+if (SSF_BFIFO_IS_EMPTY(&bf) == false)
+{
+    /* y == 0 */
+    SSF_BFIFO_GET_BYTE(&bf, y);
+    /* y == 101 */
+}
+```
+
+Here's how synchronize access to the RX FIFO if it is being filled in an interrupt and emptied in the main loop:
+```
+__interrupt__ void RXInterrupt(void)
+{
+    /* Fill the fifo using the low overhead MACROs */
+    if (SSF_BFIFO_IS_FULL(&bf) == false)
+    {
+        SSF_BFIFO_PUT_BYTE(&bf, RXBUF_REG);
+    }
+}
+
+/* Main loop */
+while (true)
+{
+    uint8_t in;
+
+    /* Empty the fifo using the low overhead MACROs */
+    CRITICAL_SECTION_ENTER();
+    if (SSF_BFIFO_IS_EMPTY(&bf) == false)
+    {
+        SSF_BFIFO_GET_BYTE(&bf, in);
+        CRITICAL_SECTION_EXIT();        
+        ProcessRX(in);
+    }
+    else
+    {
+        CRITICAL_SECTION_EXIT();
+    }
+}
+```
+Notice that the main loop disables interrupts while accessing the FIFO and immediately turns them back on once the FIFO access has been completed and before the main loop processes the RXed byte.
 
 ### Linked List Interface
 
 The linked list interface allows the creation of FIFOs and STACKs for more managing more complex data structures.
 The key to using the Linked List interface is that when you create the data structure that you want to track place a SSFLLItem_t called item at the top of the struct. For example:
-
+```
+#define MYLL_MAX_ITEMS (3u)
 typedef struct SSFLLMyData
 {
     SSFLLItem_t item;
     uint32_t mydata;
 } SSFLLMyData_t;
 
+SSFLL_t myll;
+SSFLLMyData_t *item;
+uint32_t i;
+
+/* Initialize the linked list with maximum of three items */
+SSFLLInit(&myll, MYLL_MAX_ITEMS);
+
+/* Create items and push then onto stack */
+for (i = 0; i < MYLL_MAX_ITEMS; i++)
+{
+    item = (SSFLLMyData_t *) malloc(sizeof(SSFLLMyData_t));
+    SSF_ASSERT(item != NULL);
+    item->mydata = i + 100;
+    SSF_LL_STACK_PUSH(&myll, item);
+}
+
+/* Pop items from stack and free them */
+if (SSF_LL_STACK_POP(&myll, &item))
+{
+    /* item->mydata == 102 */
+    free(item);
+}
+
+if (SSF_LL_STACK_POP(&myll, &item))
+{
+    /* item->mydata == 101 */
+    free(item);
+}
+
+if (SSF_LL_STACK_POP(&myll, &item))
+{
+    /* item->mydata == 100 */
+    free(item);
+}
+```
+Besides treating the linked list as a STACK or FIFO there are interfaces to insert an item at a specific point within an existing list.
+Before an item is added to a list it cannot be part of a another list otherwise an assertion will be triggered.
+This prevents the linked list chain from being corrupted which can cause resource leaks and other logic errors to occur.
+
 ### Memory Pool Interface
 
 The memory pool interface creates a pool of fixed sized memory blocks that can be efficiently allocated and freed without making dynamic memory calls.
+```
+#define BLOCK_SIZE (42UL)
+#define BLOCKS (10UL)
+SSFMPool_t pool;
 
+#define MSG_FRAME_OWNER (0x11u)
+MsgFrame_t *buf;
+
+SSFMPoolInit(&pool, BLOCKS, BLOCK_SIZE);
+
+/* If pool not empty then allocate block, use it, and free it. */
+if (SSFMPoolIsEmpty(&pool) == false)
+{
+    buf = (MsgFrame_t *)SSFMPoolAlloc(&pool, sizeof(MsgFrame_t), MSG_FRAME_OWNER);
+    /* buf now points to a memory pool block */
+    buf->header = 1;
+    ...
+    
+    /* Free the block */
+    buf = free(&pool, buf);
+    /* buf == NULL */
+}
+```
 ### Base64 Encoder/Decoder Interface
 
 This interface allows you to encode a binary data stream into a Base64 string, or do the reverse.
+```
+char encodedStr[16];
+char decodedBin[16];
+uint8_t binOut[2];
+size_t binLen;
 
+/* Encode arbitrary binary data */
+if (SSFBase64Encode("a", 1, encodedStr, sizeof(encodedStr), NULL))
+{
+    /* Encode successful */
+    printf("%s", encodedStr);
+    /* output is "YQ==" */
+}
+
+/* Decode Base64 string into binary data */
+if (SSFBase64Decode(encodedStr, strlen(encodedStr), decodedBin, sizeof(decodedBin), &binLen))
+{
+    /* Decode successful */
+    /* binLen == 1 */
+    /* decodedBin[0] == 'a' */
+}
+```
 ### Binary to Hex ASCII Encoder/Decoder Interface
 
 This interface allows you to encode a binary data stream into an ASCII hexadecimal string, or do the reverse.
+```
+uint8_t binOut[2];
+char strOut[5];
+size_t binLen;
 
+if (SSFHexBytesToBin("A1F5", 4, binOut, sizeof(binOut), &binLen, false))
+{
+    /* Encode successful */
+    /* binLen == 2 */
+    /* binOut[0] = '\xA1' */
+    /* binOut[1] = '\xF5' */
+}
+
+if (SSFHexBinToBytes(binOut, binLen, strOut, sizeof(strOut), NULL, false, SSF_HEX_CASE_LOWER))
+{
+  /* Decode in reverse successful */
+  printf("%s", strOut);
+  /* prints "a1f5" */
+}
+```
+Another convienience feature is the API allows reversal of the byte ordering either for encoding or decoding.
 ### JSON Parser/Generator Interface
 
-Having searched for used many JSON parser/generators on small embedded platforms I never found exactly the right mix of attributes. the mjson project came the closest on the parser side, but relied on varargs for the generator, which provides a potential breeding ground for bugs.
+Having searched for and used many JSON parser/generators on small embedded platforms I never found exactly the right mix of attributes. The mjson project came the closest on the parser side, but relied on varargs for the generator, which provides a potential breeding ground for bugs.
 
-Like mjson (a SAX-like parser) this parser operates on the JSON string in place and only consumes modest stack in proportion to the maximum nesting depth. Since the JSON string is parsed from the start each time a data element is accessed it is computationally inefficient, but most embedded systems are RAM constrained not performance constrained.
+Like mjson (a SAX-like parser) this parser operates on the JSON string in place and only consumes modest stack in proportion to the maximum nesting depth. Since the JSON string is parsed from the start each time a data element is accessed it is computationally inefficient; that's ok since most embedded systems are RAM constrained not performance constrained.
 
 On the generator side it does away with varargs and opts for an interface that can be verified at compilation time to be called correctly.
+
+Here are some simple parser examples:
+```
+char json1Str[] = "{\"name\":\"value\"}";
+char json2Str[] = "{\"obj\":{\"name\":\"value\",\"array\":[1,2,3]}}";
+char *path[SSF_JSON_CONFIG_MAX_IN_DEPTH + 1];
+char strOut[32];
+size_t idx;
+
+/* Must zero out path variable before use */
+memset(path, 0, sizeof(path));
+
+/* Get the value of a top level element */
+path[0] = "name";
+if (SSFJsonGetString(json1Str, (SSFCStrIn_t *)path, strOut, sizeof(strOut), NULL))
+{
+    printf("%s", strOut);
+    /* Prints "name" excluding double quotes */
+}
+
+/* Get the value of a nested element */
+path[0] = "obj";
+path[1] = "name";
+if (SSFJsonGetString(json2Str, (SSFCStrIn_t *)path, strOut, sizeof(strOut), NULL))
+{
+    printf("%s", strOut);
+    /* Prints "name" excluding double quotes */
+}
+
+path[0] = "obj";
+path[1] = "array";
+path[2] = (char *)&idx;
+/* Iterate over a nested array */
+for (idx = 0;;idx++)
+{
+    long si;
+    
+    if (SSFJsonGetLong(json2Str, (SSFCStrIn_t *)path, &si))
+    {
+        if (i != 0) print(", ");
+        printf("%ld", si);
+    }
+    else break;
+}
+/* Prints "1, 2, 3" */
+```
+Here is a simple generation example:
+```
+bool printFn(char *js, size_t size, size_t start, size_t *end, void *in)
+{
+    bool comma = false;
+    
+    if (!SSFJsonPrintLabel(js, size, start, &start, "label1", &comma)) return false;
+    if (!SSFJsonPrintString(js, size, start, &start, "value1", false)) return false;
+    if (!SSFJsonPrintLabel(js, size, start, &start, "label2", &comma)) return false;
+    if (!SSFJsonPrintString(js, size, start, &start, "value2", false)) return false;
+    
+    *end = start;
+    return true;
+}
+...
+
+char jsonStr[128];
+size_t end;
+
+/* JSON is contained within an object {}, so to create a JSON string call SSFJsonPrintObject() */
+if (SSFJsonPrintObject(jsonStr, sizeof(jsonStr), 0, &end, printFn, NULL, false))
+{
+    /* jsonStr == "{\"name1\":\"value1\",\"name2\":\"value2\"}" */
+}
+```
+Object and array nesting is achieved by calling SSFJsonPrintObject() or SSFJsonPrintArray() from within a printer function.
 
 ### 16-bit Fletcher Checksum Interface
 
 Every embedded system needs to use a checksum somewhere, somehow. The 16-bit Fletcher checksum has many of the error detecting properties of a 16-bit CRC, but at the computational cost of an arithmetic checksum. For 88 bytes of program memory how can you go wrong?
 
+The API can compute the checksum of data incrementally.
+
+For example, the first call to SSFFCSum16() results in the same checksum as the following three calls.
+```
+uint16_t fc;
+
+fc = SSFFCSum16("abcde", 5, SSF_FCSUM_INITIAL);
+/* fc == 0xc8f0 */
+
+fc = SSFFCSum16("a", 1, SSF_FCSUM_INITIAL);
+fc = SSFFCSum16("bcd", 3, fc);
+fc = SSFFCSum16("e", 1, fc);
+/* fc == 0xc8f0 */
+```
 ### Finite State Machine Framework
 
 The state machine framework allows you to create reliable and efficient state machines.
+
 All event generation and execution of task handlers for ALL state machines must be done in a single thread of execution.
 Calling into the state machine interface from two difference execution contexts is not supported and will eventually lead to problems.
 There is a lot that can be said about state machines in general and this one specifically, and I will continue to add to this documentation in the future.
 
-### Reed-Solomon FEC Encoder/Decoder Interface
+Here's a simple example:
+```
+/* ssfport.h */
+...
 
-The Reed-Solomon FEC encoder/decoder interface is a memory efficient (both program and RAM) implementation of the same error correction algorithm that the Voyager probes use to communicate reliably with Earth.
+/* --------------------------------------------------------------------------------------------- */
+/* Configure ssfsm's state machine interface                                                     */
+/* --------------------------------------------------------------------------------------------- */
+/* Maximum number of simultaneously queued events for all state machines. */
+#define SSF_SM_MAX_ACTIVE_EVENTS (5u)
 
-Reed-Solomon is very useful to increase the effective receive sensitivity of radios purely with software!
+/* Maximum number of simultaneously running timers for all state machines. */
+#define SSF_SM_MAX_ACTIVE_TIMERS (2u)
 
-The encoder takes a message and outputs a block of Reed-Solomom ECC bytes. To use, simply transmit the original message followed by the ECC bytes.
-The decoder takes a received message, that includes both the message and ECC bytes, and then attempts to correct back to the original message.
+/* Defines the state machine identifers. */
+enum SSFSMList
+{
+    SSF_SM_STATUS_LED,
+    SSF_SM_END
+};
 
-The implementation allows larger messages to be processed in chunks which allows trade offs between RAM utilization and encoding/decoding speed.
-Using Reed-Solomon still requires the use of CRCs to verify the integrity of the original message after error correction is applied because the error correction can "successfully" correct to the wrong message.
+/* Defines the event identifiers for all state machines. */
+enum SSFSMEventList
+{
+    SSF_SM_EVENT_ENTRY,
+    SSF_SM_EVENT_EXIT,
+    SSF_SM_EVENT_STATUS_RX_DATA,
+    SSF_SM_EVENT_STATUS_LED_TIMER_TOGGLE,
+    SSF_SM_EVENT_STATUS_LED_TIMER_IDLE,
+    SSF_SM_EVENT_END
+};
+
+/* main.c */
+...
+
+/* State handler prototypes */
+static void StatusLEDIdleHandler(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen);
+static void StatusLEDBlinkHandler(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen);
+
+static void StatusLEDIdleHandler(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen)
+{
+    switch (eid)
+    {
+    case SSF_SM_EVENT_ENTRY:
+        STATUS_LED_OFF();
+        break;
+    case SSF_SM_EVENT_EXIT:
+        break;
+    case SSF_SM_EVENT_STATUS_RX_DATA:
+        SSFSMTran(StatusLEDBlinkHandler);
+        break;
+    default:
+        break;
+    }
+}
+
+static void StatusLEDBlinkHandler(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen)
+{
+    switch (eid)
+    {
+    case SSF_SM_EVENT_ENTRY:
+        SSFSMStartTimer(SSF_SM_EVENT_STATUS_LED_TIMER_TOGGLE, 0);
+        SSFSMStartTimer(SSF_SM_EVENT_STATUS_LED_TIMER_IDLE, SSF_TICKS_PER_SEC * 10);
+        break;
+    case SSF_SM_EVENT_EXIT:
+        break;
+    case SSF_SM_EVENT_STATUS_LED_TIMER_TOGGLE:
+        STATUS_LED_TOGGLE();
+        SSFSMStartTimer(SSF_SM_EVENT_STATUS_LED_TIMER_TOGGLE, SSF_TICKS_PER_SEC);        
+        break;
+    case SSF_SM_EVENT_STATUS_LED_TIMER_IDLE:
+        SSFSMTran(StatusLEDIdleHandler);
+        break;
+    default:
+        break;
+    }
+}
+
+void main(void)
+{
+...
+    /* Initialize state machine framework */
+    SSFSMInit(SSF_SM_MAX_ACTIVE_EVENTS, SSF_SM_MAX_ACTIVE_TIMERS);
+    
+    /* Initialize status LED state machine */
+    SSFSMInitHandler(SSF_SM_STATUS_LED, StatusLEDIdleHandler);
+
+    while (true)
+    {
+        if (ReceivedMessage())
+        {
+            SSFSMPutEventData(SSF_SM_STATUS_LED, SSF_SM_EVENT_STATUS_RX_DATA);
+        }
+        SSFSMTask(NULL);
+    }
+...
+```
+The state machine framework is first initialized. Then the state machine for the Status LED is initialized, which causes the ENTRY action of the StatusLEDIdleHandler() to be executed, this turns off the LED.
+
+Then main goes into its superloop that checks for a message begin received. When a message is received it will signal SSF_SM_EVENT_STATUS_RX_DATA. The idle handler will trigger a state transition to the StatusLEDBlinkHandler(). The state transition causes an EXIT event for the idle handler, AND an entry event for the blink handler.
+
+On ENTRY the blink handler starts two timers. The SSF_SM_EVENT_STATUS_LED_TIMER_TOGGLE timer is set to go off immediately, and the SSF_SM_EVENT_STATUS_LED_TIMER_IDLE timer is set to go off in 10 seconds. When the SSF_SM_EVENT_STATUS_LED_TIMER_TOGGLE expires the status LED is toggled and the SSF_SM_EVENT_STATUS_LED_TIMER_TOGGLE timer is setup to fire again in 1 second. This cause the LED to blink.
+
+If additional SSF_SM_EVENT_STATUS_RX_DATA events are signaled while in the toggle state they are ignored.
+
+After 10 seconds the SSF_SM_EVENT_STATUS_LED_TIMER_IDLE timer expires and triggers a state transition to the idle state. First the EXIT event in the blink handler is executed automatically by the framework, followed by the ENTRY event in the idle handler that turns off the status LED.
+
+The framework automatically stops all timers associated with a state machine when a state transition occurs. This is why it is not necessary to explicitly stop the SSF_SM_EVENT_STATUS_LED_TIMER_TOGGLE timer.
 
 ## Conclusion
 

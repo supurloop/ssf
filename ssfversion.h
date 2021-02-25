@@ -36,7 +36,8 @@
 /* Version History                                                                               */
 /*                                                                                               */
 /* 0.0.1 - Initial beta release.                                                                 */
+/* 0.0.2 - Add Reed-Solomon GF(2^8) implementation.                                              */
 /* --------------------------------------------------------------------------------------------- */
-#define SSF_VERSION "0.0.1"
+#define SSF_VERSION "0.0.2"
 
 #endif /* SSF_VERSION_H_INCLUDE */

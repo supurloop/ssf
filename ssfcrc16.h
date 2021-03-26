@@ -1,11 +1,11 @@
 /* --------------------------------------------------------------------------------------------- */
 /* Small System Framework                                                                        */
 /*                                                                                               */
-/* main.c                                                                                        */
-/* Entry point for unit testing SSF components.                                                  */
+/* ssfcrc16.h                                                                                    */
+/* Provides 16-bit XMODEM/CCITT-16 0x1021 CRC interface.                                         */
 /*                                                                                               */
 /* BSD-3-Clause License                                                                          */
-/* Copyright 2020 Supurloop Software LLC                                                         */
+/* Copyright 2021 Supurloop Software LLC                                                         */
 /*                                                                                               */
 /* Redistribution and use in source and binary forms, with or without modification, are          */
 /* permitted provided that the following conditions are met:                                     */
@@ -29,62 +29,25 @@
 /* NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISE   */
 /* OF THE POSSIBILITY OF SUCH DAMAGE.                                                            */
 /* --------------------------------------------------------------------------------------------- */
-#include <stdio.h>
-#include "ssfassert.h"
-#include "ssfbfifo.h"
-#include "ssfll.h"
-#include "ssfsm.h"
-#include "ssfmpool.h"
+#ifndef SSFCRC16_H_INCLUDE
+#define SSFCRC16_H_INCLUDE
+
+#include <stdint.h>
 #include "ssfport.h"
-#include "ssfjson.h"
-#include "ssfbase64.h"
-#include "ssfhex.h"
-#include "ssffcsum.h"
-#include "ssfrs.h"
-#include "ssfcrc16.h"
 
 /* --------------------------------------------------------------------------------------------- */
-/* SSF unit test entry point.                                                                    */
+/* Defines and typedefs                                                                          */
 /* --------------------------------------------------------------------------------------------- */
-void main(void)
-{
-#if SSF_CONFIG_BFIFO_UNIT_TEST == 1
-    SSFBFifoUnitTest();
-#endif /* SSF_CONFIG_BFIFO_UNIT_TEST */
+#define SSF_CRC16_INITIAL ((uint16_t) 0u)
 
-#if SSF_CONFIG_LL_UNIT_TEST == 1
-    SSFLLUnitTest();
-#endif  /* SSF_CONFIG_LL_UNIT_TEST */
-
-#if SSF_CONFIG_MPOOL_UNIT_TEST == 1
-    SSFMPoolUnitTest();
-#endif /* SSF_CONFIG_MPOOL_UNIT_TEST */
-
-#if SSF_CONFIG_BASE64_UNIT_TEST == 1
-    SSFBase64UnitTest();
-#endif /* SSF_CONFIG_BASE64_UNIT_TEST */
-
-#if SSF_CONFIG_HEX_UNIT_TEST == 1
-    SSFHexUnitTest();
-#endif /* SSF_CONFIG_BASE64_UNIT_TEST */
-
-#if SSF_CONFIG_JSON_UNIT_TEST == 1
-    SSFJsonUnitTest();
-#endif /* SSF_CONFIG_JSON_UNIT_TEST */
-
-#if SSF_CONFIG_FCSUM_UNIT_TEST == 1
-    SSFFCSumUnitTest();
-#endif /* SSF_CONFIG_FCSUM_UNIT_TEST */
-
-#if SSF_CONFIG_SM_UNIT_TEST == 1
-    SSFSMUnitTest();
-#endif /* SSF_CONFIG_SM_UNIT_TEST */
-
-#if SSF_CONFIG_RS_UNIT_TEST == 1
-    SSFRSUnitTest();
-#endif /* SSF_CONFIG_SM_UNIT_TEST */
+/* --------------------------------------------------------------------------------------------- */
+/* External interface                                                                            */
+/* --------------------------------------------------------------------------------------------- */
+uint16_t SSFCRC16(const uint8_t *in, uint16_t inLen, uint16_t crc);
 
 #if SSF_CONFIG_CRC16_UNIT_TEST == 1
-    SSFCRC16UnitTest();
+void SSFCRC16UnitTest(void);
 #endif /* SSF_CONFIG_CRC16_UNIT_TEST */
-}
+
+#endif /* SSFCRC16_H_INCLUDE */
+

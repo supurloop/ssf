@@ -19,6 +19,7 @@ The framework implements a number of common embedded system functions:
   7. A 16-bit Fletcher checksum interface.
   8. A finite state machine framework.
   9. A Reed-Solomon FEC encoder/decoder interface.
+  10. A 16-bit XMODEM/CCITT-16 0x1021 CRC interface.
 
 To give you an idea of the framework size here are some program memory estimates for each component compiled on an MSP430 with Level 3 optimization:
 Byte FIFO, linked list, memory pool, Base64, Hex ASCII are each about 1000 bytes.
@@ -587,6 +588,26 @@ After the decode completes the first byte is restored to 0xaa, and msgLen is SSF
 
 For clarity, the example omits integrity checking the message after error correction occurs.
 In a real system check the message integrity after error correction is applied because the Reed-Solomon algorithm can "successfully" find the wrong solution.
+
+### 16-bit XMODEM/CCITT-16 CRC Interface
+
+This 16-bit CRC uses the 0x1021 polynomial. It uses a table lookup to reduce execution time at the expense of 512 bytes of program memory.
+Use if you need compatability with the XMODEM CRC and/or can spare the extra program memory for a little bit better error detection than the 16-bit Fletcher.
+
+The API can compute the CRC of data incrementally.
+
+For example, the first call to SSFCRC16() results in the same CRC as the following three calls.
+```
+uint16_t crc;
+
+crc = SSFCRC16("abcde", 5, SSF_CRC16_INITIAL);
+/* crc == 0x3EE1 */
+
+crc = SSFCRC16("a", 1, SSF_CRC16_INITIAL);
+crc = SSFCRC16("bcd", 3, crc);
+crc = SSFCRC16("e", 1, crc);
+/* crc == 0x3EE1 */
+```
 
 ## Conclusion
 

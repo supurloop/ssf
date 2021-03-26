@@ -61,6 +61,7 @@ typedef uint64_t SSFPortTick_t;
 #define SSF_CONFIG_FCSUM_UNIT_TEST (1u)
 #define SSF_CONFIG_SM_UNIT_TEST (1u)
 #define SSF_CONFIG_RS_UNIT_TEST (1u)
+#define SSF_CONFIG_CRC16_UNIT_TEST (1u)
 
 /* If any unit test is enabled then enable unit test mode */
 #if SSF_CONFIG_BFIFO_UNIT_TEST == 1 || \
@@ -70,7 +71,9 @@ typedef uint64_t SSFPortTick_t;
     SSF_CONFIG_BASE64_UNIT_TEST == 1 || \
     SSF_CONFIG_HEX_UNIT_TEST == 1 || \
     SSF_CONFIG_FCSUM_UNIT_TEST == 1 || \
-    SSF_CONFIG_SM_UNIT_TEST == 1
+    SSF_CONFIG_SM_UNIT_TEST == 1 || \
+    SSF_CONFIG_RS_UNIT_TEST == 1 || \
+    SSF_CONFIG_CRC16_UNIT_TEST == 1
 #define SSF_CONFIG_UNIT_TEST (1u)
 #else
 #define SSF_CONFIG_UNIT_TEST (0u)

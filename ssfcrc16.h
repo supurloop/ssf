@@ -50,4 +50,3 @@ void SSFCRC16UnitTest(void);
 #endif /* SSF_CONFIG_CRC16_UNIT_TEST */
 
 #endif /* SSFCRC16_H_INCLUDE */
-

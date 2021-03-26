@@ -66,4 +66,3 @@ void SSFFCSumUnitTest(void)
     SSF_ASSERT(SSFFCSum16("efgh", 4, fc) == 0x0627);
 }
 #endif /* SSF_CONFIG_FCSUM_UNIT_TEST */
-

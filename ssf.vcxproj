@@ -145,6 +145,8 @@
     <ClCompile Include="ssfbfifo_ut.c" />
     <ClCompile Include="ssfcrc16.c" />
     <ClCompile Include="ssfcrc16_ut.c" />
+    <ClCompile Include="ssfcrc32.c" />
+    <ClCompile Include="ssfcrc32_ut.c" />
     <ClCompile Include="ssffcsum.c" />
     <ClCompile Include="ssffcsum_ut.c" />
     <ClCompile Include="ssfhex.c" />
@@ -167,6 +169,7 @@
     <ClInclude Include="ssfbase64.h" />
     <ClInclude Include="ssfbfifo.h" />
     <ClInclude Include="ssfcrc16.h" />
+    <ClInclude Include="ssfcrc32.h" />
     <ClInclude Include="ssffcsum.h" />
     <ClInclude Include="ssfhex.h" />
     <ClInclude Include="ssfjson.h" />

@@ -42,6 +42,7 @@
 #include "ssffcsum.h"
 #include "ssfrs.h"
 #include "ssfcrc16.h"
+#include "ssfcrc32.h"
 
 /* --------------------------------------------------------------------------------------------- */
 /* SSF unit test entry point.                                                                    */
@@ -87,4 +88,8 @@ void main(void)
 #if SSF_CONFIG_CRC16_UNIT_TEST == 1
     SSFCRC16UnitTest();
 #endif /* SSF_CONFIG_CRC16_UNIT_TEST */
+
+#if SSF_CONFIG_CRC32_UNIT_TEST == 1
+    SSFCRC32UnitTest();
+#endif /* SSF_CONFIG_CRC32_UNIT_TEST */
 }

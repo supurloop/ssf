@@ -37,7 +37,8 @@
 /*                                                                                               */
 /* 0.0.1 - Initial beta release.                                                                 */
 /* 0.0.2 - Add Reed-Solomon GF(2^8) implementation.                                              */
+/* 0.0.3 - Add XMODEM/CCITT-16 CRC16 and CCITT-32 CRC32 implementations.                         */
 /* --------------------------------------------------------------------------------------------- */
-#define SSF_VERSION "0.0.2"
+#define SSF_VERSION "0.0.3"
 
 #endif /* SSF_VERSION_H_INCLUDE */

@@ -1,8 +1,8 @@
 /* --------------------------------------------------------------------------------------------- */
 /* Small System Framework                                                                        */
 /*                                                                                               */
-/* ssfcrc16_ut.c                                                                                 */
-/* Provides 16-bit XMODEM/CCITT-16 0x1021 CRC interface unit test.                               */
+/* ssfcrc32.h                                                                                    */
+/* Provides 32-bit CCITT-32 0x04C11DB7 Poly CRC interface.                                       */
 /*                                                                                               */
 /* BSD-3-Clause License                                                                          */
 /* Copyright 2021 Supurloop Software LLC                                                         */
@@ -29,63 +29,24 @@
 /* NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISE   */
 /* OF THE POSSIBILITY OF SUCH DAMAGE.                                                            */
 /* --------------------------------------------------------------------------------------------- */
+#ifndef SSFCRC32_H_INCLUDE
+#define SSFCRC32_H_INCLUDE
+
 #include <stdint.h>
 #include "ssfport.h"
-#include "ssfassert.h"
-#include "ssfcrc16.h"
-
-#if SSF_CONFIG_CRC16_UNIT_TEST == 1
-
-typedef struct SSFCRC16UT
-{
-    const uint8_t *in;
-    uint16_t inLen;
-    uint16_t crc;
-} SSFCRC16UT_t;
-
-static const SSFCRC16UT_t _SSFCRC16UT[] =
-{
-    {"helloworldZ", 11, 0xA131},
-    {"helloworld!", 11, 0x6ECD},
-    {"abcde", 5, 0x3EE1},
-    {"1", 1, 0x2672},
-    {"123456789", 9, 0x31C3},
-    {"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09", 10, 0x2378},
-    {"\xf0\xf1\xf2\xf3\xf4\x05\x00\x30\x41\x65\x07\xf8\xff", 13, 0x512B},
-    {"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 100, 0xd748},
-    {"1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890"
-     "1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890"
-     "1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890", 300, 0xF099}
-};
 
 /* --------------------------------------------------------------------------------------------- */
-/* Units tests the 16-bit XMODEM/CCITT-16 CRC external interface.                                */
+/* Defines and typedefs                                                                          */
 /* --------------------------------------------------------------------------------------------- */
-void SSFCRC16UnitTest(void)
-{
-    uint16_t i, j;
-    uint16_t crc;
+#define SSF_CRC32_INITIAL ((uint32_t) 0ul)
 
-    /* Check 0 length cases */
-    SSF_ASSERT(SSFCRC16((uint8_t*)"1", 0, SSF_CRC16_INITIAL) == SSF_CRC16_INITIAL);
-    SSF_ASSERT(SSFCRC16((uint8_t*)"1", 0, 0xAA55) == 0xAA55);
+/* --------------------------------------------------------------------------------------------- */
+/* External interface                                                                            */
+/* --------------------------------------------------------------------------------------------- */
+uint32_t SSFCRC32(const uint8_t *in, uint32_t inLen, uint32_t crc);
 
-    /* Check single pass cases */
-    for (i = 0; i < sizeof(_SSFCRC16UT) / sizeof(SSFCRC16UT_t); i++)
-    {
-        SSF_ASSERT(SSFCRC16(_SSFCRC16UT[i].in, _SSFCRC16UT[i].inLen, SSF_CRC16_INITIAL) ==
-                            _SSFCRC16UT[i].crc);
-    }
+#if SSF_CONFIG_CRC32_UNIT_TEST == 1
+void SSFCRC32UnitTest(void);
+#endif /* SSF_CONFIG_CRC32_UNIT_TEST */
 
-    /* Check multi pass cases */
-    for (i = 0; i < sizeof(_SSFCRC16UT) / sizeof(SSFCRC16UT_t); i++)
-    {
-        for (j = 1; j <= _SSFCRC16UT[i].inLen; j++)
-        {
-            crc = SSFCRC16(_SSFCRC16UT[i].in, j, SSF_CRC16_INITIAL);
-            SSF_ASSERT(SSFCRC16(_SSFCRC16UT[i].in + j, _SSFCRC16UT[i].inLen - j, crc) ==
-                       _SSFCRC16UT[i].crc);
-        }
-    }
-}
-#endif /* SSF_CONFIG_CRC16_UNIT_TEST */
+#endif /* SSFCRC32_H_INCLUDE */

@@ -19,7 +19,8 @@ The framework implements a number of common embedded system functions:
   7. A 16-bit Fletcher checksum interface.
   8. A finite state machine framework.
   9. A Reed-Solomon FEC encoder/decoder interface.
-  10. A 16-bit XMODEM/CCITT-16 0x1021 CRC interface.
+  10. A 16-bit XMODEM/CCITT-16 CRC interface.
+  11. A 32-bit CCITT-32 CRC interface.
 
 To give you an idea of the framework size here are some program memory estimates for each component compiled on an MSP430 with Level 3 optimization:
 Byte FIFO, linked list, memory pool, Base64, Hex ASCII are each about 1000 bytes.
@@ -609,10 +610,30 @@ crc = SSFCRC16("e", 1, crc);
 /* crc == 0x3EE1 */
 ```
 
+### 32-bit CCITT-32 CRC Interface
+
+This 32-bit CRC uses the 0x04C11DB7 polynomial. It uses a table lookup to reduce execution time at the expense of 1024 bytes of program memory.
+Use if you need more error detection than provided by CRC16 and/or in conjunction with Reed-Solomon to detect wrong solutions.
+
+The API can compute the CRC of data incrementally.
+
+For example, the first call to SSFCRC32() results in the same CRC as the following three calls.
+```
+uint32_t crc;
+
+crc = SSFCRC32("abcde", 5, SSF_CRC32_INITIAL);
+/* crc == 0x8587D865 */
+
+crc = SSFCRC32("a", 1, SSF_CRC32_INITIAL);
+crc = SSFCRC32("bcd", 3, crc);
+crc = SSFCRC32("e", 1, crc);
+/* crc == 0x8587D865 */
+```
+
 ## Conclusion
 
 I built this framework for primarily myself, although I hope you can find a good use for it.
-In the future I plan to add example documentation, CRCs, and possibly de-init interfaces.
+In the future I plan to add additional documentation, cryptographic hashes, and possibly de-init interfaces.
 
 Drop me a line if you have a question or comment.
 

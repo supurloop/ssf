@@ -64,5 +64,8 @@ void SSFFCSumUnitTest(void)
     fc = SSFFCSum16("a", 1, SSF_FCSUM_INITIAL);
     fc = SSFFCSum16("bcd", 3, fc);
     SSF_ASSERT(SSFFCSum16("efgh", 4, fc) == 0x0627);
+
+    SSF_ASSERT(SSFFCSum16("\x01\xfe", 2, SSF_FCSUM_INITIAL) == 0x0100);
+    SSF_ASSERT(SSFFCSum16("\xff", 1, SSF_FCSUM_INITIAL) == 0x0000);
 }
 #endif /* SSF_CONFIG_FCSUM_UNIT_TEST */

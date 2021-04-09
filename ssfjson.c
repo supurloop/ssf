@@ -258,7 +258,7 @@ static bool _SSFJsonNameValue(SSFCStrIn_t js, size_t *index, size_t *start, size
     (*index)++;
     if ((path != NULL) && (path[depth] != NULL) &&
         (strncmp(path[depth], &js[valStart + 1],
-                 SSF_MAX(valEnd - valStart - 1, (int)strlen(path[depth]))) == 0))
+                 SSF_MAX(valEnd - valStart - 1, (size_t)strlen(path[depth]))) == 0))
     {return _SSFJsonValue(js, index, start, end, path, depth, jt); }
     else return _SSFJsonValue(js, index, &valStart, &valEnd, NULL, 0, &djt);
 }

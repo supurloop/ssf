@@ -366,7 +366,7 @@ static bool _RSCheck(const GFPoly_t *msg, uint8_t nsym)
     uint16_t i;
 
     _RSCalcSyndromes(msg, nsym, &synd);
-    for(i = 1; i < nsym + 1; i++)
+    for(i = 1; i <= nsym; i++)
     {
         if (synd.array[i] != 0) return false;
     }
@@ -381,7 +381,7 @@ static bool _RSCheckSynd(const GFPoly_t* msg, uint8_t nsym, GFPoly_t *synd)
     uint16_t i;
 
     _RSCalcSyndromes(msg, nsym, synd);
-    for (i = 1; i < nsym + 1; i++)
+    for (i = 1; i <= nsym; i++)
     {
         if (synd->array[i] != 0) return false;
     }

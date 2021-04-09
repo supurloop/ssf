@@ -49,7 +49,7 @@
 /* --------------------------------------------------------------------------------------------- */
 /* SSF unit test entry point.                                                                    */
 /* --------------------------------------------------------------------------------------------- */
-void main(void)
+int main(void)
 {
 #if SSF_CONFIG_BFIFO_UNIT_TEST == 1
     SSFBFifoUnitTest();
@@ -102,4 +102,6 @@ void main(void)
 #if SSF_CONFIG_TLV_UNIT_TEST == 1
     SSFTLVUnitTest();
 #endif /* SSF_CONFIG_TLV_UNIT_TEST */
+
+    return 0;
 }

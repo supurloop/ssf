@@ -26,7 +26,7 @@
 /* EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE */
 /* GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED    */
 /* AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING     */
-/* NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISE   */
+/* NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED  */
 /* OF THE POSSIBILITY OF SUCH DAMAGE.                                                            */
 /* --------------------------------------------------------------------------------------------- */
 #ifndef SSF_PORT_H_INCLUDE
@@ -50,6 +50,41 @@ typedef uint64_t SSFPortTick_t;
 #define SSF_TICKS_PER_SEC (1000u)
 
 /* --------------------------------------------------------------------------------------------- */
+/* Platform specific byte swapping macros                                                        */
+/* --------------------------------------------------------------------------------------------- */
+/* If your platform has byte order macros include the header file here and set */
+/* SSF_CONFIG_BYTE_ORDER_MACROS to 0. Else set SSF_CONFIG_BYTE_ORDER_MACROS to 1 and set */
+/* SSF_CONFIG_LITTLE_ENDIAN to 1 for little endian systems, else 0. */
+#define SSF_CONFIG_BYTE_ORDER_MACROS (1u)
+#define SSF_CONFIG_LITTLE_ENDIAN (1u)
+
+#if SSF_CONFIG_BYTE_ORDER_MACROS == 1
+#if SSF_CONFIG_LITTLE_ENDIAN == 0
+    #define htonl(x) (x)
+    #define ntohl(x) htonl(x)
+
+    #define htonll(x) (x)
+    #define ntohll(x) htonll(x)
+#else /* SSF_CONFIG_LITTLE_ENDIAN */
+    #define htonl(x) ((((x) & 0xff000000u) >> 24) | \
+                      (((x) & 0x00ff0000u) >> 8) | \
+                      (((x) & 0x0000ff00u) << 8) | \
+                      (((x) & 0x000000ffu) << 24))
+    #define ntohl(x) htonl(x)
+
+    #define htonll(x) ((((x) & 0xff00000000000000u) >> 56) | \
+                       (((x) & 0x00ff000000000000u) >> 40) | \
+                       (((x) & 0x0000ff0000000000u) >> 24) | \
+                       (((x) & 0x000000ff00000000u) >> 8) | \
+                       (((x) & 0x00000000ff000000u) << 8) | \
+                       (((x) & 0x0000000000ff0000u) << 24) | \
+                       (((x) & 0x000000000000ff00u) << 40) | \
+                       (((x) & 0x00000000000000ffu) << 56))
+    #define ntohll(x) htonll(x)
+#endif /* SSF_CONFIG_LITTLE_ENDIAN */
+#endif /* SSF_CONFIG_BYTE_ORDER_MACROS */
+
+/* --------------------------------------------------------------------------------------------- */
 /* Enable/disable unit tests                                                                     */
 /* --------------------------------------------------------------------------------------------- */
 #define SSF_CONFIG_BFIFO_UNIT_TEST (1u)
@@ -63,6 +98,8 @@ typedef uint64_t SSFPortTick_t;
 #define SSF_CONFIG_RS_UNIT_TEST (1u)
 #define SSF_CONFIG_CRC16_UNIT_TEST (1u)
 #define SSF_CONFIG_CRC32_UNIT_TEST (1u)
+#define SSF_CONFIG_SHA2_UNIT_TEST (1u)
+#define SSF_CONFIG_TLV_UNIT_TEST (1u)
 
 /* If any unit test is enabled then enable unit test mode */
 #if SSF_CONFIG_BFIFO_UNIT_TEST == 1 || \
@@ -75,7 +112,9 @@ typedef uint64_t SSFPortTick_t;
     SSF_CONFIG_SM_UNIT_TEST == 1 || \
     SSF_CONFIG_RS_UNIT_TEST == 1 || \
     SSF_CONFIG_CRC16_UNIT_TEST == 1 || \
-    SSF_CONFIG_CRC32_UNIT_TEST == 1
+    SSF_CONFIG_CRC32_UNIT_TEST == 1 || \
+    SSF_CONFIG_SHA2_UNIT_TEST == 1 || \
+    SSF_CONFIG_TLV_UNIT_TEST == 1
 #define SSF_CONFIG_UNIT_TEST (1u)
 #else
 #define SSF_CONFIG_UNIT_TEST (0u)
@@ -106,7 +145,7 @@ typedef uint64_t SSFPortTick_t;
 /* --------------------------------------------------------------------------------------------- */
 /* Configure ssfmpool's memory pool interface                                                    */
 /* --------------------------------------------------------------------------------------------- */
-#define SSF_MPOOL_DEBUG (1u)
+#define SSF_MPOOL_DEBUG (0u)
 
 /* --------------------------------------------------------------------------------------------- */
 /* Configure ssfjson's parser limits                                                             */
@@ -213,6 +252,14 @@ enum SSFSMEventList
 #if (SSF_RS_MAX_SYMBOLS * SSF_RS_MAX_CHUNKS) + SSF_RS_MAX_MESSAGE_SIZE > 61440ul
 #error SSFRS total of SSF_RS_MAX_CHUNK_SIZE + SSF_RS_MAX_SYMBOLS not supported.
 #endif
+
+/* --------------------------------------------------------------------------------------------- */
+/* Configure ssftlv interface                                                                    */
+/* --------------------------------------------------------------------------------------------- */
+/* 1 to use 1 byte TAG and LEN fields, else 0 for variable 1-4 byte TAG and LEN fields */
+/* 1 allows 2^8 unique TAGs and VALUE fields < 2^8 bytes in length */
+/* 0 allows 2^30 unique TAGs and VALUE fields < 2^30 bytes in length */
+#define SSF_TLV_ENABLE_FIXED_MODE (0u)
 
 /* --------------------------------------------------------------------------------------------- */
 /* External interface                                                                            */

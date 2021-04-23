@@ -1,11 +1,11 @@
 /* --------------------------------------------------------------------------------------------- */
 /* Small System Framework                                                                        */
 /*                                                                                               */
-/* ssffcsum.c                                                                                    */
-/* Provides Fletcher checksum interface.                                                         */
+/* ssftlv.h                                                                                      */
+/* Provides encode/decoder interface for TAG/LENGTH/VALUE (aka TLV) data structures.             */
 /*                                                                                               */
 /* BSD-3-Clause License                                                                          */
-/* Copyright 2020 Supurloop Software LLC                                                         */
+/* Copyright 2021 Supurloop Software LLC                                                         */
 /*                                                                                               */
 /* Redistribution and use in source and binary forms, with or without modification, are          */
 /* permitted provided that the following conditions are met:                                     */
@@ -29,30 +29,41 @@
 /* NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED  */
 /* OF THE POSSIBILITY OF SUCH DAMAGE.                                                            */
 /* --------------------------------------------------------------------------------------------- */
+#ifndef SSFTLV_H_INCLUDE
+#define SSFTLV_H_INCLUDE
+
 #include <stdint.h>
-#include "ssffcsum.h"
+#include <stdbool.h>
 #include "ssfport.h"
-#include "ssfassert.h"
 
-/* --------------------------------------------------------------------------------------------- */
-/* Returns the 16-bit Fletcher checksum on inLen bytes of in starting with initial value.        */
-/* --------------------------------------------------------------------------------------------- */
-uint16_t SSFFCSum16(const uint8_t *in, size_t inLen, uint16_t initial)
+#if SSF_TLV_ENABLE_FIXED_MODE == 1
+typedef uint8_t SSFTLVVar_t;
+#else
+typedef uint32_t SSFTLVVar_t;
+#endif
+
+typedef struct SSFTLV
 {
-    uint16_t s1 = initial & 0xff;
-    uint16_t s2 = initial >> 8;
+    uint8_t* buf;
+    uint32_t bufSize;
+    uint32_t bufLen;
+} SSFTLV_t;
 
-    SSF_ASSERT(in != NULL);
+#define SSFTLVGet(tlv, tag, instance, val, valSize, valLen) \
+       SSFTLVRead(tlv, tag, instance, val, valSize, NULL, valLen)
+#define SSFTLVFind(tlv, tag, instance, valPtr, valLen) \
+        SSFTLVRead(tlv, tag, instance, NULL, 0, valPtr, valLen)
 
-    while (inLen)
-    {
-        s1 = (s1 + *in);
-        if (s1 & 0xff00) s1 = (s1 & 0xff) + 1;
-        s2 = (s1 + s2);
-        if (s2 & 0xff00) s2 = (s2 & 0xff) + 1;
-        inLen--;
-        in++;
-    }
-    return (s2 << 8) | s1;
-}
+void SSFTLVInit(SSFTLV_t* tlv, uint8_t* buf, uint32_t bufSize, uint32_t bufLen);
+bool SSFTLVPut(SSFTLV_t* tlv, SSFTLVVar_t tag, const uint8_t* val, SSFTLVVar_t valLen);
+bool SSFTLVRead(const SSFTLV_t* tlv, SSFTLVVar_t tag, uint16_t instance, uint8_t* val,
+                uint32_t valSize, uint8_t** valPtr, SSFTLVVar_t* valLen);
 
+/* --------------------------------------------------------------------------------------------- */
+/* Unit test                                                                                     */
+/* --------------------------------------------------------------------------------------------- */
+#if SSF_CONFIG_TLV_UNIT_TEST == 1
+void SSFTLVUnitTest(void);
+#endif /* SSF_CONFIG_TLV_UNIT_TEST */
+
+#endif /* SSFTLV_H_INCLUDE */

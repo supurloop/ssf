@@ -21,15 +21,14 @@ The framework implements a number of common embedded system functions:
   9. A Reed-Solomon FEC encoder/decoder interface.
   10. A 16-bit XMODEM/CCITT-16 CRC interface.
   11. A 32-bit CCITT-32 CRC interface.
+  12. A SHA-2 hash interface.
+  13. A TLV encoder/decoder interface.
 
 To give you an idea of the framework size here are some program memory estimates for each component compiled on an MSP430 with Level 3 optimization:
 Byte FIFO, linked list, memory pool, Base64, Hex ASCII are each about 1000 bytes.
 JSON parser/generator is about 7300-8800 bytes depending on configuration.
 Finite state machine is about 2000 bytes.
 Fletcher checksum is about 88 bytes.
-
-The complete framework, assuming every function of every interface is used, is about 20000 bytes of program memory.
-Many programs will only use a fraction of the functions in all the interfaces and should see the amount of program memory reduced further.
 
 Little RAM is used internally by the framework, most RAM usage occurs outside the framwork when declaring or initializing different objects.
 
@@ -48,6 +47,7 @@ For other platforms there are only a few essential tasks that must be completed:
   - In ssfport.h make sure SSF_TICKS_PER_SEC is set to the number of system ticks per second on your platform.
   - Map SSFPortGetTick64() to an existing function that returns the number of system ticks since boot, or
     implement SSFPortGetTick64() in ssfport.c if a simple mapping is not possible.
+  - In ssfport.h make sure to follow the instructions for the byte order macros.
   - Run the unit tests.
 
 Only the finite state machine framework uses system ticks, so you can stub out SSFPortGetTick64() if it is not needed.
@@ -630,10 +630,69 @@ crc = SSFCRC32("e", 1, crc);
 /* crc == 0x8587D865 */
 ```
 
+### SHA-2 Hash Interface
+
+The SHA-2 hash interface supports SHA256, SHA224, SHA512, SHA384, SHA512/224, and SHA512/256. There are two base functions that provide the ability to compute the six supported hashes. There are macros provided to simplify the calling interface to the base functions.
+
+For example, to compute the SHA256 hash of "abc".
+```
+uint8_t out[SSF_SHA2_256_BYTE_SIZE];
+
+SSFSHA256("abc", 3, out, sizeof(out));
+/* out == "\xe3\xb0\xc4\x42\x98\xfc\x1c\x14\x9a\xfb\xf4\xc8\x99\x6f\xb9\x24\x27\xae\x41\xe4\x64\x9b\x93\x4c\xa4\x95\x99\x1b\x78\x52\xb8\x55" */
+```
+
+### TLV Encoder/Decoder Interface
+
+The TLV interface encodes and decodes data into tag, length, value data streams. TLV is a compact alternative to JSON when the size of the data matters, such as when using a metered data connection or sending data over a bandwidth constrained wireless connection.
+
+For small data sets the interface can be compiled in fixed mode that limits the maximum number of tags to 256 and the length of each field to 255 bytes. For larger data sets the variable mode independently uses the 2 most significant bits to encode the byte size of the tag and length fields so they are 1 to 4 bytes in length. This allows many more tags and larger values to be encoded while still maintaining a compact encoding.
+
+For initialization, a user supplied buffer is passed in. If the buffer already has TLV data then the total length of the TLV can be set as well.
+When encoding the same tag can be used multiple times. On decode the interface allow simple iteration over all of the duplicate tags.
+The decode interface allows a value to be copied to a user supplied buffer, or it can simply pass back the a pointer and length of the value within the TLV data.
+```
+#define TAG_NAME 1
+#define TAG_HOBBY 2
+
+SSFTLV_t tlv;
+uint8_t buf[100];
+
+SSFTLVInit(&tlv, buf, sizeof(buf), 0);
+SSFTLVPut(&tlv, TAG_NAME, "Jimmy", 5);
+SSFTLVPut(&tlv, TAG_HOBBY, "Coding", 6);
+/* tlv.bufLen is the total length of the TLV data encoded */
+
+... Transmit tlv.bufLen bytes of tlv.buf to another system ...
+
+#define TAG_NAME 1
+#define TAG_HOBBY 2
+
+SSFTLV_t tlv;
+uint8_t rxbuf[100];
+uint8_t val[100];
+SSFTLVVar_t valLen;
+uint8_t *valPtr;
+
+/* rxbuf contains rxlen bytes of received data */
+SSFTLVInit(&tlv, rxbuf, sizeof(rxbuf), rxlen);
+
+SSFTLVGet(&tlv, TAG_NAME, 0, val, sizeof(val), &valLen);
+/* val == "Jimmy", valLen == 5 */
+
+SSFTLVGet(&tlv, TAG_HOBBY, 0, val, sizeof(val), &valLen);
+/* val == "Coding", valLen == 6 */
+
+SSFTLVFind(&tlv, TAG_NAME, 0, &valPtr,  &valLen);
+/* valPtr == "Jimmy", valLen == 5 */
+```
+
 ## Conclusion
 
 I built this framework for primarily myself, although I hope you can find a good use for it.
-In the future I plan to add additional documentation, cryptographic hashes, and possibly de-init interfaces.
+In the future I plan to add additional documentation, some encryption, and possibly de-init interfaces.
+
+Special thanks to my son, Calvin, for helping write some units tests!
 
 Drop me a line if you have a question or comment.
 

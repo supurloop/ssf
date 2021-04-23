@@ -1,11 +1,11 @@
 /* --------------------------------------------------------------------------------------------- */
 /* Small System Framework                                                                        */
 /*                                                                                               */
-/* ssffcsum.c                                                                                    */
-/* Provides Fletcher checksum interface.                                                         */
+/* ssfsha2.h                                                                                     */
+/* Provides SHA2 interface: SHA256, SHA224, SHA512, SHA384, SHA512/224, or SHA512/256            */
 /*                                                                                               */
 /* BSD-3-Clause License                                                                          */
-/* Copyright 2020 Supurloop Software LLC                                                         */
+/* Copyright 2021 Supurloop Software LLC                                                         */
 /*                                                                                               */
 /* Redistribution and use in source and binary forms, with or without modification, are          */
 /* permitted provided that the following conditions are met:                                     */
@@ -29,30 +29,41 @@
 /* NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED  */
 /* OF THE POSSIBILITY OF SUCH DAMAGE.                                                            */
 /* --------------------------------------------------------------------------------------------- */
+#ifndef SSF_SHA2_H_INCLUDE
+#define SSF_SHA2_H_INCLUDE
+
+#include <stdio.h>
 #include <stdint.h>
-#include "ssffcsum.h"
 #include "ssfport.h"
-#include "ssfassert.h"
+
+#define SSF_SHA2_224_BYTE_SIZE (28u)
+#define SSF_SHA2_256_BYTE_SIZE (32u)
+#define SSF_SHA2_512_BYTE_SIZE (64u)
+#define SSF_SHA2_384_BYTE_SIZE (48u)
+#define SSF_SHA2_512_224_BYTE_SIZE (28u)
+#define SSF_SHA2_512_256_BYTE_SIZE (32u)
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns the 16-bit Fletcher checksum on inLen bytes of in starting with initial value.        */
+/* External Interface                                                                            */
 /* --------------------------------------------------------------------------------------------- */
-uint16_t SSFFCSum16(const uint8_t *in, size_t inLen, uint16_t initial)
-{
-    uint16_t s1 = initial & 0xff;
-    uint16_t s2 = initial >> 8;
+void SSFSHA2_32(const uint8_t* in, uint32_t inLen, uint8_t* out, uint32_t outSize,
+                uint16_t hashBitSize);
+#define SSFSHA256(in, inLen, out, outSize) SSFSHA2_32(in, inLen, out, outSize, 256)
+#define SSFSHA224(in, inLen, out, outSize) SSFSHA2_32(in, inLen, out, outSize, 224)
 
-    SSF_ASSERT(in != NULL);
+void SSFSHA2_64(const uint8_t* in, uint32_t inLen, uint8_t* out, uint32_t outSize,
+    uint16_t hashBitSize, uint16_t truncationBitSize);
 
-    while (inLen)
-    {
-        s1 = (s1 + *in);
-        if (s1 & 0xff00) s1 = (s1 & 0xff) + 1;
-        s2 = (s1 + s2);
-        if (s2 & 0xff00) s2 = (s2 & 0xff) + 1;
-        inLen--;
-        in++;
-    }
-    return (s2 << 8) | s1;
-}
+#define SSFSHA512(in, inLen, out, outSize) SSFSHA2_64(in, inLen, out, outSize, 512, 0)
+#define SSFSHA512_256(in, inLen, out, outSize) SSFSHA2_64(in, inLen, out, outSize, 512, 256)
+#define SSFSHA512_224(in, inLen, out, outSize) SSFSHA2_64(in, inLen, out, outSize, 512, 224)
+#define SSFSHA384(in, inLen, out, outSize) SSFSHA2_64(in, inLen, out, outSize, 384, 0)
 
+/* --------------------------------------------------------------------------------------------- */
+/* Unit test                                                                                     */
+/* --------------------------------------------------------------------------------------------- */
+#if SSF_CONFIG_SHA2_UNIT_TEST == 1
+void SSFSHA2UnitTest(void);
+#endif /* SSF_CONFIG_SHA2_UNIT_TEST */
+
+#endif /* SSF_SHA2_H_INCLUDE */

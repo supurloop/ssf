@@ -26,10 +26,11 @@
 /* EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE */
 /* GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED    */
 /* AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING     */
-/* NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISE   */
+/* NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED  */
 /* OF THE POSSIBILITY OF SUCH DAMAGE.                                                            */
 /* --------------------------------------------------------------------------------------------- */
 #include <stdint.h>
+#include <stdio.h>
 #include "ssfport.h"
 #include "ssfassert.h"
 #include "ssfcrc16.h"
@@ -65,6 +66,9 @@ void SSFCRC16UnitTest(void)
 {
     uint16_t i, j;
     uint16_t crc;
+
+    /* Check NULL string case */
+    SSF_ASSERT_TEST(SSFCRC16(NULL, 0, SSF_CRC16_INITIAL));
 
     /* Check 0 length cases */
     SSF_ASSERT(SSFCRC16((uint8_t*)"1", 0, SSF_CRC16_INITIAL) == SSF_CRC16_INITIAL);

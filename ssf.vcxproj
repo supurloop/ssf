@@ -160,8 +160,12 @@
     <ClCompile Include="ssfport.c" />
     <ClCompile Include="ssfrs.c" />
     <ClCompile Include="ssfrs_ut.c" />
+    <ClCompile Include="ssfsha2.c" />
+    <ClCompile Include="ssfsha2_ut.c" />
     <ClCompile Include="ssfsm.c" />
     <ClCompile Include="ssfsm_ut.c" />
+    <ClCompile Include="ssftlv.c" />
+    <ClCompile Include="ssftlv_ut.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="ssf.h" />
@@ -177,7 +181,9 @@
     <ClInclude Include="ssfmpool.h" />
     <ClInclude Include="ssfport.h" />
     <ClInclude Include="ssfrs.h" />
+    <ClInclude Include="ssfsha2.h" />
     <ClInclude Include="ssfsm.h" />
+    <ClInclude Include="ssftlv.h" />
     <ClInclude Include="ssfversion.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

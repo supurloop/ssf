@@ -26,7 +26,7 @@
 /* EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE */
 /* GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED    */
 /* AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING     */
-/* NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISE   */
+/* NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED  */
 /* OF THE POSSIBILITY OF SUCH DAMAGE.                                                            */
 /* --------------------------------------------------------------------------------------------- */
 #include <stdint.h>
@@ -96,6 +96,30 @@ void SSFBase64UnitTest(void)
     char encodedBigStr[128];
     uint8_t decodedBigBin[128];
     size_t outLen;
+
+    /* Check NULL pointer cases */
+    SSF_ASSERT_TEST(SSFBase64Dec32To24(NULL, b24, sizeof(b24)));
+    SSF_ASSERT_TEST(SSFBase64Dec32To24(_b64BlockUT[1].encoded, NULL, sizeof(b24)));
+
+    SSF_ASSERT_TEST(SSFBase64Enc24To32(NULL, _b64BlockUT[1].unencodedLen, b32, sizeof(b32)));
+    SSF_ASSERT_TEST(SSFBase64Enc24To32(_b64BlockUT[1].unencoded, _b64BlockUT[1].unencodedLen, NULL, sizeof(b32)));
+
+    SSF_ASSERT_TEST(SSFBase64Encode(NULL, _b64BlockUT[1].unencodedLen,
+                                   _b64BlockUT[1].encoded, sizeof(_b64BlockUT[1].encoded), &outLen));
+
+    SSF_ASSERT_TEST(SSFBase64Decode(NULL, strlen(_b64BlockUT[1].encoded),
+                                   decodedBin, sizeof(decodedBin), &outLen));
+    SSF_ASSERT_TEST(SSFBase64Decode(_b64BlockUT[1].encoded, strlen(_b64BlockUT[1].encoded),
+                                   NULL, sizeof(decodedBin), &outLen));
+    SSF_ASSERT_TEST(SSFBase64Decode(_b64BlockUT[1].encoded, strlen(_b64BlockUT[1].encoded),
+                                   decodedBin, sizeof(decodedBin), NULL));    
+
+    /* Check length constraints */
+    SSF_ASSERT_TEST(SSFBase64Dec32To24(_b64BlockUT[1].encoded, b24, 2));
+
+    SSF_ASSERT_TEST(SSFBase64Enc24To32(_b64BlockUT[1].unencoded, 0, b32, sizeof(b32)));
+    SSF_ASSERT_TEST(SSFBase64Enc24To32(_b64BlockUT[1].unencoded, _b64BlockUT[1].unencodedLen, b32, 3));
+
 
     for (i = 0; i < (sizeof(_b64BlockUT) / sizeof(SSBase64UT_t)); i++)
     {

@@ -36,9 +36,11 @@
 /* Version History                                                                               */
 /*                                                                                               */
 /* 0.0.1 - Initial beta release.                                                                 */
-/* 0.0.2 - Add Reed-Solomon GF(2^8) implementation.                                              */
-/* 0.0.3 - Add XMODEM/CCITT-16 CRC16 and CCITT-32 CRC32 implementations.                         */
+/* 0.0.2 - Add Reed-Solomon GF(2^8) interface.                                                   */
+/* 0.0.3 - Add XMODEM/CCITT-16 CRC16 and CCITT-32 CRC32 interfaces.                              */
+/* 0.0.4 - Add SHA-2 and TLV encoder/decoder interfaces.                                         */
+/*         Increased Windows and Linux build warning levels and fixed warnings.                  */
 /* --------------------------------------------------------------------------------------------- */
-#define SSF_VERSION "0.0.3"
+#define SSF_VERSION "0.0.4"
 
 #endif /* SSF_VERSION_H_INCLUDE */

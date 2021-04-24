@@ -138,6 +138,7 @@ bool SSFLLGetItem(SSFLL_t *ll, SSFLLItem_t **outItem, SSF_LL_LOC_t loc, SSFLLIte
             if (locItem->next) locItem->next->prev = locItem->prev;
             else ll->tail = locItem->prev;
             break;
+        case SSF_LL_LOC_MAX:
         default:
             SSF_ERROR();
         }

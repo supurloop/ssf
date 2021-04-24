@@ -46,26 +46,26 @@ void SSFFCSumUnitTest(void)
 
     SSF_ASSERT_TEST(SSFFCSum16(NULL, 2, SSF_FCSUM_INITIAL));
 
-    SSF_ASSERT(SSFFCSum16("\x01\x02", 2, SSF_FCSUM_INITIAL) == 0x0403);
-    fc = SSFFCSum16("\x01", 1, SSF_FCSUM_INITIAL);
-    SSF_ASSERT(SSFFCSum16("\x02", 1, fc) == 0x0403);
+    SSF_ASSERT(SSFFCSum16((uint8_t *)"\x01\x02", 2, SSF_FCSUM_INITIAL) == 0x0403);
+    fc = SSFFCSum16((uint8_t *)"\x01", 1, SSF_FCSUM_INITIAL);
+    SSF_ASSERT(SSFFCSum16((uint8_t *)"\x02", 1, fc) == 0x0403);
 
-    SSF_ASSERT(SSFFCSum16("abcde", 5, SSF_FCSUM_INITIAL) == 0xC8F0);
-    fc = SSFFCSum16("a", 1, SSF_FCSUM_INITIAL);
-    fc = SSFFCSum16("bcd", 3, fc);
-    SSF_ASSERT(SSFFCSum16("e", 1, fc) == 0xC8F0);
+    SSF_ASSERT(SSFFCSum16((uint8_t *)"abcde", 5, SSF_FCSUM_INITIAL) == 0xC8F0);
+    fc = SSFFCSum16((uint8_t *)"a", 1, SSF_FCSUM_INITIAL);
+    fc = SSFFCSum16((uint8_t *)"bcd", 3, fc);
+    SSF_ASSERT(SSFFCSum16((uint8_t *)"e", 1, fc) == 0xC8F0);
 
-    SSF_ASSERT(SSFFCSum16("abcdef", 6, SSF_FCSUM_INITIAL) == 0x2057);
-    fc = SSFFCSum16("a", 1, SSF_FCSUM_INITIAL);
-    fc = SSFFCSum16("bcd", 3, fc);
-    SSF_ASSERT(SSFFCSum16("ef", 2, fc) == 0x2057);
+    SSF_ASSERT(SSFFCSum16((uint8_t *)"abcdef", 6, SSF_FCSUM_INITIAL) == 0x2057);
+    fc = SSFFCSum16((uint8_t *)"a", 1, SSF_FCSUM_INITIAL);
+    fc = SSFFCSum16((uint8_t *)"bcd", 3, fc);
+    SSF_ASSERT(SSFFCSum16((uint8_t *)"ef", 2, fc) == 0x2057);
 
-    SSF_ASSERT(SSFFCSum16("abcdefgh", 8, SSF_FCSUM_INITIAL) == 0x0627);
-    fc = SSFFCSum16("a", 1, SSF_FCSUM_INITIAL);
-    fc = SSFFCSum16("bcd", 3, fc);
-    SSF_ASSERT(SSFFCSum16("efgh", 4, fc) == 0x0627);
+    SSF_ASSERT(SSFFCSum16((uint8_t *)"abcdefgh", 8, SSF_FCSUM_INITIAL) == 0x0627);
+    fc = SSFFCSum16((uint8_t *)"a", 1, SSF_FCSUM_INITIAL);
+    fc = SSFFCSum16((uint8_t *)"bcd", 3, fc);
+    SSF_ASSERT(SSFFCSum16((uint8_t *)"efgh", 4, fc) == 0x0627);
 
-    SSF_ASSERT(SSFFCSum16("\x01\xfe", 2, SSF_FCSUM_INITIAL) == 0x0100);
-    SSF_ASSERT(SSFFCSum16("\xff", 1, SSF_FCSUM_INITIAL) == 0x0000);
+    SSF_ASSERT(SSFFCSum16((uint8_t *)"\x01\xfe", 2, SSF_FCSUM_INITIAL) == 0x0100);
+    SSF_ASSERT(SSFFCSum16((uint8_t *)"\xff", 1, SSF_FCSUM_INITIAL) == 0x0000);
 }
 #endif /* SSF_CONFIG_FCSUM_UNIT_TEST */

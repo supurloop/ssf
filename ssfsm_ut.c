@@ -108,7 +108,8 @@ void UT1TestHandler1(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t
             if (ed == 't')
             {
                 SSFSMStartTimer(SSF_SM_EVENT_UT1_1, SSF_TICKS_PER_SEC);
-                SSFSMStartTimerData(SSF_SM_EVENT_UTX_2, SSF_TICKS_PER_SEC << 1, "a", 1);
+                SSFSMStartTimerData(SSF_SM_EVENT_UTX_2, SSF_TICKS_PER_SEC << 1,
+                                    (SSFSMData_t *)"a", 1);
                 SSF_ASSERT_TEST(SSFSMStartTimer(SSF_SM_EVENT_UT1_2, SSF_TICKS_PER_SEC << 1));
             }
         }
@@ -183,8 +184,10 @@ void UT2TestHandler1(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t
             SSF_SM_EVENT_DATA_ALIGN(ed);
             if (ed == 'd')
             {
-                SSFSMStartTimerData(SSF_SM_EVENT_UTX_1, SSF_TICKS_PER_SEC * 4, "1234567890", 10);
-                SSFSMStartTimerData(SSF_SM_EVENT_UTX_2, SSF_TICKS_PER_SEC * 4, "1234567890", 10);
+                SSFSMStartTimerData(SSF_SM_EVENT_UTX_1, SSF_TICKS_PER_SEC * 4,
+                                    (SSFSMData_t *)"1234567890", 10);
+                SSFSMStartTimerData(SSF_SM_EVENT_UTX_2, SSF_TICKS_PER_SEC * 4,
+                                    (SSFSMData_t *)"1234567890", 10);
                 SSFSMTran(UT2TestHandler2);
             }
         }
@@ -202,15 +205,16 @@ void UT2TestHandler1(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t
             if (ed == 't')
             {
                 SSFSMStartTimer(SSF_SM_EVENT_UT1_1, SSF_TICKS_PER_SEC * 2);
-                SSFSMStartTimerData(SSF_SM_EVENT_UTX_1, SSF_TICKS_PER_SEC, "a", 1);
-                SSFSMStartTimerData(SSF_SM_EVENT_UTX_1, SSF_TICKS_PER_SEC * 2, "b", 1);
-                SSFSMStartTimerData(SSF_SM_EVENT_UTX_1, SSF_TICKS_PER_SEC * 3, "c", 1);
-                SSFSMStartTimerData(SSF_SM_EVENT_UTX_1, SSF_TICKS_PER_SEC * 4, "1234567890", 10);
+                SSFSMStartTimerData(SSF_SM_EVENT_UTX_1, SSF_TICKS_PER_SEC, (SSFSMData_t *)"a", 1);
+                SSFSMStartTimerData(SSF_SM_EVENT_UTX_1, SSF_TICKS_PER_SEC * 2, (SSFSMData_t *)"b", 1);
+                SSFSMStartTimerData(SSF_SM_EVENT_UTX_1, SSF_TICKS_PER_SEC * 3, (SSFSMData_t *)"c", 1);
+                SSFSMStartTimerData(SSF_SM_EVENT_UTX_1, SSF_TICKS_PER_SEC * 4,
+                                    (SSFSMData_t *)"1234567890", 10);
                 SSFSMStartTimerData(SSF_SM_EVENT_UTX_1, SSF_TICKS_PER_SEC * 5,
-                                    "12345678901234567890", 20);
+                                    (SSFSMData_t *)"12345678901234567890", 20);
                 SSFSMStartTimerData(SSF_SM_EVENT_UTX_1, SSF_TICKS_PER_SEC,
-                                    "123456789012345678901234567890", 30);
-                SSFSMPutEventData(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_UT1_1, "p", 1);
+                                    (SSFSMData_t *)"123456789012345678901234567890", 30);
+                SSFSMPutEventData(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_UT1_1, (SSFSMData_t *)"p", 1);
                 SSF_ASSERT_TEST(SSFSMStartTimer(SSF_SM_EVENT_UT1_2, SSF_TICKS_PER_SEC << 1));
             }
         }
@@ -231,7 +235,8 @@ void UT2TestHandler2(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t
     switch (eid)
     {
     case SSF_SM_EVENT_ENTRY:
-        SSFSMStartTimerData(SSF_SM_EVENT_UT2_2, SSF_TICKS_PER_SEC * 2, "12345678901234567890", 20);
+        SSFSMStartTimerData(SSF_SM_EVENT_UT2_2, SSF_TICKS_PER_SEC * 2,
+                            (SSFSMData_t *)"12345678901234567890", 20);
         break;
     case SSF_SM_EVENT_EXIT:
         break;
@@ -242,7 +247,7 @@ void UT2TestHandler2(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t
         {
             char ed[20];
             SSF_SM_EVENT_DATA_ALIGN(ed);
-            SSF_ASSERT(memcmp(ed, "12345678901234567890", 10) == 0);
+            SSF_ASSERT(memcmp(ed, (SSFSMData_t *)"12345678901234567890", 10) == 0);
             SSFSMPutEvent(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_UT2_2);
         }
         break;
@@ -258,7 +263,7 @@ void UT2TestHandler2(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t
 /* --------------------------------------------------------------------------------------------- */
 /* Performs unit test on ssfll's external interface.                                             */
 /* --------------------------------------------------------------------------------------------- */
-void SSFSMUnitTest()
+void SSFSMUnitTest(void)
 {
     SSFSMTimeout_t nextTimeout;
     SSFSMTimeout_t lastTimeout;
@@ -287,7 +292,7 @@ void SSFSMUnitTest()
     SSF_ASSERT(_SSFSMFlagsAreCleared());
 
     SSF_ASSERT_TEST(SSFSMTran(UT1TestHandler2));
-    SSF_ASSERT_TEST(SSFSMStartTimerData(SSF_SM_EVENT_UT1_1, 1, "a", 1));
+    SSF_ASSERT_TEST(SSFSMStartTimerData(SSF_SM_EVENT_UT1_1, 1, (SSFSMData_t *)"a", 1));
     SSF_ASSERT_TEST(SSFSMStartTimer(SSF_SM_EVENT_UT1_1, 1));
     SSF_ASSERT_TEST(SSFSMStopTimer(SSF_SM_EVENT_UT1_1));
     SSF_ASSERT_TEST(SSFSMPutEvent(SSF_SM_END, SSF_SM_EVENT_UT1_1));
@@ -298,16 +303,20 @@ void SSFSMUnitTest()
     SSF_ASSERT_TEST(SSFSMPutEventData(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_END, NULL, 0));
     SSF_ASSERT_TEST(SSFSMPutEventData(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_ENTRY, NULL, 0));
     SSF_ASSERT_TEST(SSFSMPutEventData(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_EXIT, NULL, 0));
-    SSF_ASSERT_TEST(SSFSMPutEventData(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_UT1_1, "a", 0));
+    SSF_ASSERT_TEST(SSFSMPutEventData(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_UT1_1, (SSFSMData_t *)"a", 0));
     SSF_ASSERT_TEST(SSFSMPutEventData(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_UT1_1, NULL, 1));
-    SSF_ASSERT_TEST(SSFSMPutEventData(SSF_SM_END, SSF_SM_EVENT_UT1_1, "a", 1));
-    SSF_ASSERT_TEST(SSFSMPutEventData(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_END, "a", 1));
-    SSF_ASSERT_TEST(SSFSMPutEventData(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_ENTRY, "a", 1));
-    SSF_ASSERT_TEST(SSFSMPutEventData(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_EXIT, "a", 1));
-    SSF_ASSERT_TEST(SSFSMPutEventData(SSF_SM_END, SSF_SM_EVENT_UT1_1, "1234567890", 10));
-    SSF_ASSERT_TEST(SSFSMPutEventData(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_END, "1234567890", 10));
-    SSF_ASSERT_TEST(SSFSMPutEventData(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_ENTRY, "1234567890", 10));
-    SSF_ASSERT_TEST(SSFSMPutEventData(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_EXIT, "1234567890", 10));
+    SSF_ASSERT_TEST(SSFSMPutEventData(SSF_SM_END, SSF_SM_EVENT_UT1_1, (SSFSMData_t *)"a", 1));
+    SSF_ASSERT_TEST(SSFSMPutEventData(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_END, (SSFSMData_t *)"a", 1));
+    SSF_ASSERT_TEST(SSFSMPutEventData(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_ENTRY, (SSFSMData_t *)"a", 1));
+    SSF_ASSERT_TEST(SSFSMPutEventData(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_EXIT, (SSFSMData_t *)"a", 1));
+    SSF_ASSERT_TEST(SSFSMPutEventData(SSF_SM_END, SSF_SM_EVENT_UT1_1,
+                                      (SSFSMData_t *)"1234567890", 10));
+    SSF_ASSERT_TEST(SSFSMPutEventData(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_END,
+                                      (SSFSMData_t *)"1234567890", 10));
+    SSF_ASSERT_TEST(SSFSMPutEventData(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_ENTRY,
+                                      (SSFSMData_t *)"1234567890", 10));
+    SSF_ASSERT_TEST(SSFSMPutEventData(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_EXIT,
+                                      (SSFSMData_t *)"1234567890", 10));
     SSF_ASSERT(SSFSMTask(NULL) == false);
     nextTimeout = 0;
     SSF_ASSERT(SSFSMTask(&nextTimeout) == false);
@@ -330,7 +339,7 @@ void SSFSMUnitTest()
     SSFSMPutEventData(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_UTX_2, NULL, 0);
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_1, 0, SSF_SM_EVENT_UTX_2);
     SSF_ASSERT(_SSFSMFlagsAreCleared());
-    SSFSMPutEventData(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_UTX_2, "a", 1);
+    SSFSMPutEventData(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_UTX_2, (SSFSMData_t *)"a", 1);
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_1, 0, SSF_SM_EVENT_UTX_2);
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_1, 0, SSF_SM_EVENT_EXIT);
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_1, 1, SSF_SM_EVENT_ENTRY);
@@ -338,16 +347,16 @@ void SSFSMUnitTest()
     SSFSMPutEventData(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_UTX_2, NULL, 0);
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_1, 1, SSF_SM_EVENT_UTX_2);
     SSF_ASSERT(_SSFSMFlagsAreCleared());
-    SSFSMPutEventData(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_UTX_2, "a", 1);
+    SSFSMPutEventData(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_UTX_2, (SSFSMData_t *)"a", 1);
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_1, 1, SSF_SM_EVENT_UTX_2);
     SSF_ASSERT(_SSFSMFlagsAreCleared());
-    SSFSMPutEventData(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_UTX_2, "1234567890", 10);
+    SSFSMPutEventData(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_UTX_2, (SSFSMData_t *)"1234567890", 10);
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_1, 1, SSF_SM_EVENT_UTX_2);
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_1, 1, SSF_SM_EVENT_EXIT);
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_1, 0, SSF_SM_EVENT_ENTRY);
     SSF_ASSERT(_SSFSMFlagsAreCleared());
     start = SSFPortGetTick64();
-    SSFSMPutEventData(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_UTX_1, "t", 1);
+    SSFSMPutEventData(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_UTX_1, (SSFSMData_t *)"t", 1);
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_1, 0, SSF_SM_EVENT_UTX_1);
     SSF_ASSERT(_SSFSMFlagsAreCleared());
     nextTimeout = 0;
@@ -380,7 +389,7 @@ void SSFSMUnitTest()
     SSF_ASSERT(SSFSMTask(&nextTimeout) == false);
     SSF_ASSERT(_SSFSMFlagsAreCleared());
     start = SSFPortGetTick64();
-    SSFSMPutEventData(SSF_SM_UNIT_TEST_2, SSF_SM_EVENT_UTX_2, "t", 1);
+    SSFSMPutEventData(SSF_SM_UNIT_TEST_2, SSF_SM_EVENT_UTX_2, (SSFSMData_t *)"t", 1);
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_2, 0, SSF_SM_EVENT_UTX_2);
     SSF_ASSERT(_SSFSMFlagsAreCleared());
     SSF_ASSERT(SSFSMTask(&nextTimeout) == true);
@@ -399,7 +408,7 @@ void SSFSMUnitTest()
     SSF_ASSERT(_SSFSMFlagsAreCleared());
     SSF_ASSERT(SSFSMTask(&nextTimeout) == false);
     start = SSFPortGetTick64();
-    SSFSMPutEventData(SSF_SM_UNIT_TEST_2, SSF_SM_EVENT_UT2_1, "d", 1);
+    SSFSMPutEventData(SSF_SM_UNIT_TEST_2, SSF_SM_EVENT_UT2_1, (SSFSMData_t *)"d", 1);
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_2, 0, SSF_SM_EVENT_UT2_1);
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_2, 0, SSF_SM_EVENT_EXIT);
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_2, 1, SSF_SM_EVENT_ENTRY);

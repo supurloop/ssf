@@ -102,7 +102,7 @@ void SSFBFifoUnitTest(void)
     SSF_ASSERT_TEST(SSFBFifoUnused(&_sbfFifos[0]));
 
 #if SSF_BFIFO_MULTI_BYTE_ENABLE == 1
-    SSF_ASSERT_TEST(SSFBFifoPutBytes(&_sbfFifos[0], "a", 1));
+    SSF_ASSERT_TEST(SSFBFifoPutBytes(&_sbfFifos[0], (uint8_t *)"a", 1));
     SSF_ASSERT_TEST(SSFBFifoPeekBytes(&_sbfFifos[0], _sbfReadBuf, 0, &outLen));
     SSF_ASSERT_TEST(SSFBFifoGetBytes(&_sbfFifos[0], _sbfReadBuf, 0, &outLen));
 #endif /* SSF_BFIFO_MULTI_BYTE_ENABLE */
@@ -239,7 +239,7 @@ void SSFBFifoUnitTest(void)
     }
 
 #if SSF_BFIFO_MULTI_BYTE_ENABLE == 1
-    SSF_ASSERT_TEST(SSFBFifoPutBytes(NULL, "a", 1));
+    SSF_ASSERT_TEST(SSFBFifoPutBytes(NULL, (uint8_t *)"a", 1));
     SSF_ASSERT_TEST(SSFBFifoPutBytes(&_sbfFifos[0], NULL, 1));
     SSF_ASSERT_TEST(SSFBFifoPeekBytes(NULL, _sbfReadBuf, 0, &outLen));
     SSF_ASSERT_TEST(SSFBFifoPeekBytes(&_sbfFifos[0], NULL, 0, &outLen));
@@ -248,7 +248,7 @@ void SSFBFifoUnitTest(void)
     SSF_ASSERT_TEST(SSFBFifoGetBytes(&_sbfFifos[0], NULL, 0, &outLen));
     SSF_ASSERT_TEST(SSFBFifoGetBytes(&_sbfFifos[0], _sbfReadBuf, 0, NULL));
 
-    SSFBFifoPutBytes(&_sbfFifos[0], "a", 1);
+    SSFBFifoPutBytes(&_sbfFifos[0], (uint8_t *)"a", 1);
     outLen = 0x12345678;
     memset(_sbfReadBuf, 0xcc, sizeof(_sbfReadBuf));
     SSF_ASSERT(SSFBFifoPeekBytes(&_sbfFifos[0], _sbfReadBuf, 0, &outLen) == true);
@@ -270,7 +270,7 @@ void SSFBFifoUnitTest(void)
     SSF_ASSERT(SSFBFifoPeekBytes(&_sbfFifos[0], _sbfReadBuf, 1, &outLen) == false);
     SSF_ASSERT(SSFBFifoGetBytes(&_sbfFifos[0], _sbfReadBuf, 1, &outLen) == false);
 
-    SSFBFifoPutBytes(&_sbfFifos[0], "123456", 7);
+    SSFBFifoPutBytes(&_sbfFifos[0], (uint8_t *)"123456", 7);
     outLen = 0x12345678;
     memset(_sbfReadBuf, 0xcc, sizeof(_sbfReadBuf));
     SSF_ASSERT(SSFBFifoPeekBytes(&_sbfFifos[0], _sbfReadBuf, 1, &outLen) == true);
@@ -307,7 +307,7 @@ void SSFBFifoUnitTest(void)
 
     for (i = 0; i < (sizeof(_sbfReadBuf) << 1); i++)
     {
-        SSFBFifoPutBytes(&_sbfFifos[0], "123456", 7);
+        SSFBFifoPutBytes(&_sbfFifos[0], (uint8_t *)"123456", 7);
         outLen = 0x12345678;
         memset(_sbfReadBuf, 0xcc, sizeof(_sbfReadBuf));
         SSF_ASSERT(SSFBFifoPeekBytes(&_sbfFifos[0], _sbfReadBuf, 8, &outLen) == true);

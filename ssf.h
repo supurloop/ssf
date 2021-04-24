@@ -55,7 +55,7 @@ extern int ssfUnitTestJmpRet;
     ssfUnitTestJmpRet = setjmp(ssfUnitTestMark); \
     if (ssfUnitTestJmpRet == 0) {t;} \
     if (ssfUnitTestJmpRet != -1) { \
-        printf("SSF Assertion: %s:%u\r\n", __FILE__, __LINE__); \
+        printf("SSF Assertion: %s:%u\r\n", __FILE__, (unsigned int)__LINE__); \
         for(;;); } \
     memset(ssfUnitTestMark, 0, sizeof(ssfUnitTestMark)); } while (0)
 

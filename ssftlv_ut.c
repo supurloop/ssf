@@ -50,17 +50,17 @@ typedef struct SSFTLVUT
 #if SSF_TLV_ENABLE_FIXED_MODE == 1
 static const SSFTLVUT_t _SSFTLVUT[] = 
 {
-    {0, "hello", 5, 7},
-    {64, "world", 5, 7},
-    {127, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 84, 86}
+    {0, (uint8_t *)"hello", 5, 7},
+    {64, (uint8_t *)"world", 5, 7},
+    {127, (uint8_t *)"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 84, 86}
 };
 #else /* SSF_TLV_ENABLE_FIXED_MODE */
 static const SSFTLVUT_t _SSFTLVUT[] = 
 {
-    {0, "hello", 5, 7},
-    {64, "world", 5, 8},
-    {16384, "!", 1, 5},
-    {4194304, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 71, 77}
+    {0, (uint8_t *)"hello", 5, 7},
+    {64, (uint8_t *)"world", 5, 8},
+    {16384, (uint8_t *)"!", 1, 5},
+    {4194304, (uint8_t *)"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 71, 77}
 };
 #endif /* SSF_TLV_ENABLE_FIXED_MODE */
 
@@ -92,12 +92,12 @@ void SSFTLVUnitTest(void)
     SSF_ASSERT_TEST(SSFTLVPut(NULL, 0, (const uint8_t*)"error", 5));
     SSF_ASSERT_TEST(SSFTLVPut(&tlv, 0, NULL, 0));
     
-    valLen = -1;
+    valLen = (SSFTLVVar_t)-1;
     SSF_ASSERT_TEST(SSFTLVGet(NULL, 0, 0, val, sizeof(val), &valLen));
     SSF_ASSERT_TEST(SSFTLVGet(&tlv, 0, 0, NULL, sizeof(val), &valLen));
     SSF_ASSERT_TEST(SSFTLVGet(&tlv, 0, 0, val, sizeof(val), NULL));
 
-    valLen = -1;
+    valLen = (SSFTLVVar_t)-1;
     SSF_ASSERT_TEST(SSFTLVFind(NULL, 0, 0, &valPtr, &valLen));
     SSF_ASSERT_TEST(SSFTLVFind(&tlv, 0, 0, NULL, &valLen));
     SSF_ASSERT_TEST(SSFTLVFind(&tlv, 0, 0, &valPtr, NULL));
@@ -109,6 +109,27 @@ void SSFTLVUnitTest(void)
     SSF_ASSERT_TEST(SSFTLVGet(&tlv, 1073741825ul, 0, val, sizeof(val), &valLen));
 #endif /* SSF_TLV_ENABLE_FIXED_MODE */
 
+    SSF_ASSERT(SSFTLVPut(&tlv, 7, (uint8_t *)"one", 3));
+    SSF_ASSERT(SSFTLVPut(&tlv, 8, (uint8_t *)"two", 3));
+    SSF_ASSERT(SSFTLVPut(&tlv, 7, (uint8_t *)"three", 5));
+
+    SSF_ASSERT(SSFTLVFind(&tlv, 7, 0, &valPtr, &valLen));
+    SSF_ASSERT(valLen == 3);
+    SSF_ASSERT(memcmp("one", valPtr, 3) == 0);
+    SSF_ASSERT(SSFTLVFind(&tlv, 7, 1, &valPtr, &valLen));
+    SSF_ASSERT(valLen == 5);
+    SSF_ASSERT(memcmp("three", valPtr, 3) == 0);
+    SSF_ASSERT(SSFTLVFind(&tlv, 7, 2, &valPtr, &valLen) == false);
+
+    SSF_ASSERT(SSFTLVGet(&tlv, 7, 0, val, sizeof(val), &valLen));
+    SSF_ASSERT(valLen == 3);
+    SSF_ASSERT(memcmp("one", val, 3) == 0);
+    SSF_ASSERT(SSFTLVGet(&tlv, 7, 1, val, sizeof(val), &valLen));
+    SSF_ASSERT(valLen == 5);
+    SSF_ASSERT(memcmp("three", val, 3) == 0);
+    SSF_ASSERT(SSFTLVGet(&tlv, 7, 2, val, sizeof(val), &valLen) == false);
+    tlv.bufLen = 0;
+
     expectedBufLen = 0;
     for (i = 0; i < sizeof(_SSFTLVUT) / sizeof(SSFTLVUT_t); i++) 
     {
@@ -116,12 +137,12 @@ void SSFTLVUnitTest(void)
         expectedBufLen += _SSFTLVUT[i].bufLenChange;
         SSF_ASSERT(tlv.bufLen == expectedBufLen);
 
-        valLen = -1;
+        valLen = (SSFTLVVar_t)-1;
         SSF_ASSERT(SSFTLVFind(&tlv, _SSFTLVUT[i].tag, 0, &valPtr, &valLen));
         SSF_ASSERT(memcmp(valPtr, _SSFTLVUT[i].val, _SSFTLVUT[i].valLen) == 0);
         SSF_ASSERT(valLen == _SSFTLVUT[i].valLen);
 
-        valLen = -1;
+        valLen = (SSFTLVVar_t)-1;
         SSF_ASSERT(SSFTLVGet(&tlv, _SSFTLVUT[i].tag, 0, val, sizeof(val), &valLen));
         SSF_ASSERT(memcmp(val, _SSFTLVUT[i].val, _SSFTLVUT[i].valLen) == 0);
         SSF_ASSERT(valLen == _SSFTLVUT[i].valLen);
@@ -151,12 +172,12 @@ void SSFTLVUnitTest(void)
     SSF_ASSERT(SSFTLVPut(&tlvLong, 1, valLong, 4194304));
     SSF_ASSERT(tlvLong.bufLen == 4210697);
 
-    valLen = -1;
+    valLen = (SSFTLVVar_t)-1;
     SSF_ASSERT(SSFTLVFind(&tlvLong, 0, 0, &valPtr, &valLen));
     SSF_ASSERT(memcmp(valPtr, valLong, 16384) == 0);
     SSF_ASSERT(valLen == 16384);
 
-    valLen = -1;
+    valLen = (SSFTLVVar_t)-1;
     SSF_ASSERT(SSFTLVFind(&tlvLong, 1, 0, &valPtr, &valLen));
     SSF_ASSERT(memcmp(valPtr, valLong, 4194304) == 0);
     SSF_ASSERT(valLen == 4194304);

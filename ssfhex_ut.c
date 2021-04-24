@@ -51,14 +51,14 @@ typedef struct SSFHex64UT
 
 SSFHexUT_t _hexUTPass[] =
 {
-    { "", "", "", "", "", "", "", 0 },
-    { "a1", "A1", "a1", "A1", "a1", "\xa1", "\xa1", 1 },
-    { "A1", "A1", "a1", "A1", "a1", "\xA1", "\xA1", 1 },
-    { "A1f5", "A1F5", "a1f5", "F5A1", "f5A1", "\xA1\xF5", "\xF5\xA1", 2 },
+    { "", "", "", "", "", (uint8_t *)"", (uint8_t *)"", 0 },
+    { "a1", "A1", "a1", "A1", "a1", (uint8_t *)"\xa1", (uint8_t *)"\xa1", 1 },
+    { "A1", "A1", "a1", "A1", "a1", (uint8_t *)"\xA1", (uint8_t *)"\xA1", 1 },
+    { "A1f5", "A1F5", "a1f5", "F5A1", "f5A1", (uint8_t *)"\xA1\xF5", (uint8_t *)"\xF5\xA1", 2 },
     { "A1f51234567890abcdefABCDEF", "A1F51234567890ABCDEFABCDEF", "a1f51234567890abcdefabcdef",
         "EFCDABEFCDAB9078563412F5A1", "efcdabefcdab9078563412f5a1",
-        "\xA1\xF5\x12\x34\x56\x78\x90\xab\xcd\xef\xAB\xCD\xEF",
-        "\xef\xcd\xab\xef\xcd\xab\x90\x78\x56\x34\x12\xF5\xA1", 13 },
+        (uint8_t *)"\xA1\xF5\x12\x34\x56\x78\x90\xab\xcd\xef\xAB\xCD\xEF",
+        (uint8_t *)"\xef\xcd\xab\xef\xcd\xab\x90\x78\x56\x34\x12\xF5\xA1", 13 },
 };
 
 /* --------------------------------------------------------------------------------------------- */
@@ -101,10 +101,10 @@ void SSFHexUnitTest(void)
         SSF_ASSERT(SSFHexBytesToBin("1234", strlen("1234"), binout, 2, &outlen, (bool)i) == true);
 
         memset(hexout, 0xff, sizeof(hexout));
-        SSF_ASSERT(SSFHexBinToBytes("\x12\x34", 2, hexout, 4, &outlen, (bool)i,
+        SSF_ASSERT(SSFHexBinToBytes((uint8_t *)"\x12\x34", 2, hexout, 4, &outlen, (bool)i,
                                     SSF_HEX_CASE_UPPER) == false);
         memset(hexout, 0xff, sizeof(hexout));
-        SSF_ASSERT(SSFHexBinToBytes("\x12\x34", 2, hexout, 5, &outlen, (bool)i,
+        SSF_ASSERT(SSFHexBinToBytes((uint8_t *)"\x12\x34", 2, hexout, 5, &outlen, (bool)i,
                                     SSF_HEX_CASE_UPPER) == true);
         SSF_ASSERT(strlen(hexout) == 4);
     }

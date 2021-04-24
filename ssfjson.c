@@ -697,7 +697,7 @@ bool SSFJsonPrintDouble(SSFCStrOut_t js, size_t size, size_t start, size_t *end,
     SSF_REQUIRE(js != NULL);
     SSF_REQUIRE(start <= size);
     SSF_REQUIRE(end != NULL);
-    SSF_REQUIRE(fmt < SSF_JSON_FLT_FMT_MAX);
+    SSF_REQUIRE((fmt >= 0) && (fmt < SSF_JSON_FLT_FMT_MAX));
     SSF_REQUIRE((comma == NULL) || (comma != (bool *)true));
 
     SSF_JSON_COMMA(comma);
@@ -705,9 +705,27 @@ bool SSFJsonPrintDouble(SSFCStrOut_t js, size_t size, size_t start, size_t *end,
     else if (fmt == SSF_JSON_FLT_FMT_STD) len = snprintf(&js[start], size - start, "%f", in);
     else
     {
-        char fstr[] = "%.0f";
-        fstr[2] = (char)(fmt + '0');
-        len = snprintf(&js[start], size - start, fstr, in);
+        size_t delta = size - start;
+        char *ptr = &js[start];
+
+        switch (fmt)
+        {
+            case 0: len = snprintf(ptr, delta, "%.0f", in); break;
+            case 1: len = snprintf(ptr, delta, "%.1f", in); break;
+            case 2: len = snprintf(ptr, delta, "%.2f", in); break;
+            case 3: len = snprintf(ptr, delta, "%.3f", in); break;
+            case 4: len = snprintf(ptr, delta, "%.4f", in); break;
+            case 5: len = snprintf(ptr, delta, "%.5f", in); break;
+            case 6: len = snprintf(ptr, delta, "%.6f", in); break;
+            case 7: len = snprintf(ptr, delta, "%.7f", in); break;
+            case 8: len = snprintf(ptr, delta, "%.8f", in); break;
+            case 9: len = snprintf(ptr, delta, "%.9f", in); break;
+            case SSF_JSON_FLT_FMT_SHORT:
+            case SSF_JSON_FLT_FMT_STD:
+            case SSF_JSON_FLT_FMT_MAX:
+            default:
+                SSF_ERROR(); break;
+        }
     }
     if ((len < 0) || (((size_t)len) >= (size - start))) return false;
     *end = start + len;
@@ -866,4 +884,3 @@ bool SSFJsonUpdate(SSFCStrOut_t js, size_t size, SSFCStrIn_t *path, SSFJsonPrint
     return true;
 }
 #endif
-

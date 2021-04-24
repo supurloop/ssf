@@ -243,8 +243,11 @@ void SSFLLUnitTest(void)
     /* Remove item tests from list with 1 item */
     _SSFLLUnitTestFillAtHead(1);
     SSF_ASSERT(SSFLLIsEmpty(&_sllTest) == false);
-    if (SLL_TEST_MAX_SIZE == 1) SSF_ASSERT(SSFLLIsFull(&_sllTest) == true);
-    else SSF_ASSERT(SSFLLIsFull(&_sllTest) == false);
+ #if SLL_TEST_MAX_SIZE == 1
+    SSF_ASSERT(SSFLLIsFull(&_sllTest) == true);
+ #else 
+    SSF_ASSERT(SSFLLIsFull(&_sllTest) == false);
+#endif
     SSF_ASSERT(SSFLLSize(&_sllTest) == SLL_TEST_MAX_SIZE);
     SSF_ASSERT(SSFLLLen(&_sllTest) == 1);
     SSF_ASSERT(SSFLLUnused(&_sllTest) == SLL_TEST_MAX_SIZE - 1);
@@ -267,8 +270,11 @@ void SSFLLUnitTest(void)
 #if SLL_TEST_MAX_SIZE >= 2
     _SSFLLUnitTestFillAtHead(2);
     SSF_ASSERT(SSFLLIsEmpty(&_sllTest) == false);
-    if (SLL_TEST_MAX_SIZE == 2) SSF_ASSERT(SSFLLIsFull(&_sllTest) == true);
-    else SSF_ASSERT(SSFLLIsFull(&_sllTest) == false);
+#if SLL_TEST_MAX_SIZE == 2
+    SSF_ASSERT(SSFLLIsFull(&_sllTest) == true);
+#else
+    SSF_ASSERT(SSFLLIsFull(&_sllTest) == false);
+#endif
     SSF_ASSERT(SSFLLSize(&_sllTest) == SLL_TEST_MAX_SIZE);
     SSF_ASSERT(SSFLLLen(&_sllTest) == 2);
     SSF_ASSERT(SSFLLUnused(&_sllTest) == (SLL_TEST_MAX_SIZE - 2));
@@ -290,8 +296,11 @@ void SSFLLUnitTest(void)
 
     SSFLLPutItem(&_sllTest, (SSFLLItem_t *)&_sllItems[0], SSF_LL_LOC_ITEM, NULL);
     SSF_ASSERT(SSFLLIsEmpty(&_sllTest) == false);
-    if (SLL_TEST_MAX_SIZE == 2) SSF_ASSERT(SSFLLIsFull(&_sllTest) == true);
-    else SSF_ASSERT(SSFLLIsFull(&_sllTest) == false);
+#if SLL_TEST_MAX_SIZE == 2
+    SSF_ASSERT(SSFLLIsFull(&_sllTest) == true);
+#else
+    SSF_ASSERT(SSFLLIsFull(&_sllTest) == false);
+#endif
     SSF_ASSERT(SSFLLSize(&_sllTest) == SLL_TEST_MAX_SIZE);
     SSF_ASSERT(SSFLLLen(&_sllTest) == 2);
     SSF_ASSERT(SSFLLUnused(&_sllTest) == (SLL_TEST_MAX_SIZE - 2));
@@ -316,8 +325,11 @@ void SSFLLUnitTest(void)
     SSF_ASSERT_TEST(SSFLLPutItem(&_sllTest, (SSFLLItem_t *)&_sllItems[2], SSF_LL_LOC_ITEM,
                                  (SSFLLItem_t *)&_sllItems[3]));
     SSF_ASSERT(SSFLLIsEmpty(&_sllTest) == false);
-    if (SLL_TEST_MAX_SIZE == 2) SSF_ASSERT(SSFLLIsFull(&_sllTest) == true);
-    else SSF_ASSERT(SSFLLIsFull(&_sllTest) == false);
+#if SLL_TEST_MAX_SIZE == 2
+    SSF_ASSERT(SSFLLIsFull(&_sllTest) == true);
+#else
+    SSF_ASSERT(SSFLLIsFull(&_sllTest) == false);
+#endif
     SSF_ASSERT(SSFLLSize(&_sllTest) == SLL_TEST_MAX_SIZE);
     SSF_ASSERT(SSFLLLen(&_sllTest) == 2);
     SSF_ASSERT(SSFLLUnused(&_sllTest) == (SLL_TEST_MAX_SIZE - 2));
@@ -329,8 +341,11 @@ void SSFLLUnitTest(void)
     SSFLLPutItem(&_sllTest, (SSFLLItem_t *)&_sllItems[2], SSF_LL_LOC_ITEM,
                  (SSFLLItem_t *)&_sllItems[1]);
     SSF_ASSERT(SSFLLIsEmpty(&_sllTest) == false);
-    if (SLL_TEST_MAX_SIZE == 3) SSF_ASSERT(SSFLLIsFull(&_sllTest) == true);
-    else SSF_ASSERT(SSFLLIsFull(&_sllTest) == false);
+#if SLL_TEST_MAX_SIZE == 3
+    SSF_ASSERT(SSFLLIsFull(&_sllTest) == true);
+#else
+    SSF_ASSERT(SSFLLIsFull(&_sllTest) == false);
+#endif
     SSF_ASSERT(SSFLLSize(&_sllTest) == SLL_TEST_MAX_SIZE);
     SSF_ASSERT(SSFLLLen(&_sllTest) == 3);
     SSF_ASSERT(SSFLLUnused(&_sllTest) == (SLL_TEST_MAX_SIZE - 3));
@@ -351,8 +366,11 @@ void SSFLLUnitTest(void)
     SSFLLPutItem(&_sllTest, (SSFLLItem_t *)&_sllItems[1], SSF_LL_LOC_ITEM,
                  (SSFLLItem_t *)&_sllItems[0]);
     SSF_ASSERT(SSFLLIsEmpty(&_sllTest) == false);
-    if (SLL_TEST_MAX_SIZE == 3) SSF_ASSERT(SSFLLIsFull(&_sllTest) == true);
-    else SSF_ASSERT(SSFLLIsFull(&_sllTest) == false);
+#if SLL_TEST_MAX_SIZE == 3
+    SSF_ASSERT(SSFLLIsFull(&_sllTest) == true);
+#else
+    SSF_ASSERT(SSFLLIsFull(&_sllTest) == false);
+#endif
     SSF_ASSERT(SSFLLSize(&_sllTest) == SLL_TEST_MAX_SIZE);
     SSF_ASSERT(SSFLLLen(&_sllTest) == 3);
     SSF_ASSERT(SSFLLUnused(&_sllTest) == (SLL_TEST_MAX_SIZE - 3));

@@ -46,15 +46,16 @@ typedef struct SSFCRC16UT
 
 static const SSFCRC16UT_t _SSFCRC16UT[] =
 {
-    {"helloworldZ", 11, 0xA131},
-    {"helloworld!", 11, 0x6ECD},
-    {"abcde", 5, 0x3EE1},
-    {"1", 1, 0x2672},
-    {"123456789", 9, 0x31C3},
-    {"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09", 10, 0x2378},
-    {"\xf0\xf1\xf2\xf3\xf4\x05\x00\x30\x41\x65\x07\xf8\xff", 13, 0x512B},
-    {"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 100, 0xd748},
-    {"1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890"
+    {(uint8_t *)"helloworldZ", 11, 0xA131},
+    {(uint8_t *)"helloworld!", 11, 0x6ECD},
+    {(uint8_t *)"abcde", 5, 0x3EE1},
+    {(uint8_t *)"1", 1, 0x2672},
+    {(uint8_t *)"123456789", 9, 0x31C3},
+    {(uint8_t *)"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09", 10, 0x2378},
+    {(uint8_t *)"\xf0\xf1\xf2\xf3\xf4\x05\x00\x30\x41\x65\x07\xf8\xff", 13, 0x512B},
+    {(uint8_t *)"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 100, 0xd748},
+    {(uint8_t *)
+     "1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890"
      "1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890"
      "1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890", 300, 0xF099}
 };
@@ -71,8 +72,8 @@ void SSFCRC16UnitTest(void)
     SSF_ASSERT_TEST(SSFCRC16(NULL, 0, SSF_CRC16_INITIAL));
 
     /* Check 0 length cases */
-    SSF_ASSERT(SSFCRC16((uint8_t*)"1", 0, SSF_CRC16_INITIAL) == SSF_CRC16_INITIAL);
-    SSF_ASSERT(SSFCRC16((uint8_t*)"1", 0, 0xAA55) == 0xAA55);
+    SSF_ASSERT(SSFCRC16((uint8_t *)"1", 0, SSF_CRC16_INITIAL) == SSF_CRC16_INITIAL);
+    SSF_ASSERT(SSFCRC16((uint8_t *)"1", 0, 0xAA55) == 0xAA55);
 
     /* Check single pass cases */
     for (i = 0; i < sizeof(_SSFCRC16UT) / sizeof(SSFCRC16UT_t); i++)

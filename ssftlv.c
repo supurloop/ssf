@@ -64,7 +64,7 @@
 #define _SSF_TLV_PUT_VAR_FIELD(tlv, v, vLen) \
     tlv->buf[tlv->bufLen] = ((vLen - 1) << 6); \
     if (v < 64ul) { \
-        tlv->buf[tlv->bufLen] += v; } \
+        tlv->buf[tlv->bufLen] += (uint8_t)(v & 0xff); } \
     else if (v < 16384ul) { \
         tlv->buf[tlv->bufLen] += (v >> 8) & 0xff; \
         tlv->buf[tlv->bufLen + 1] = v & 0xff; } \

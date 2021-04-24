@@ -180,8 +180,6 @@ static void _SSFSMFreeEventData(SSFSMData_t *data)
 void SSFSMInit(uint32_t maxEvents, uint32_t maxTimers)
 {
     SSF_ASSERT(_ssfsmIsInited == false);
-    SSF_ASSERT(SSF_SM_EVENT_ENTRY == 0);
-    SSF_ASSERT(SSF_SM_EVENT_EXIT == 1);
 
     SSFMPoolInit(&_ssfsmEventPool, maxEvents, sizeof(SSFSMEvent_t));
     SSFMPoolInit(&_ssfsmTimerPool, maxTimers, sizeof(SSFSMTimer_t));

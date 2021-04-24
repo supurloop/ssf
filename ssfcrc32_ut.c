@@ -46,15 +46,16 @@ typedef struct SSFCRC32UT
 
 static const SSFCRC32UT_t _SSFCRC32UT[] =
 {
-    {"helloworldZ", 11, 0xF1226312},
-    {"helloworld!", 11, 0x36F5CBA6},
-    {"abcde", 5, 0x8587D865},
-    {"1", 1, 0x83DCEFB7},
-    {"123456789", 9, 0xCBF43926},
-    {"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09", 10, 0x456CD746},
-    {"\xf0\xf1\xf2\xf3\xf4\x05\x00\x30\x41\x65\x07\xf8\xff", 13, 0xFAD52B77},
-    {"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 100, 0xAF707A64},
-    {"1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890"
+    {(uint8_t *)"helloworldZ", 11, 0xF1226312},
+    {(uint8_t *)"helloworld!", 11, 0x36F5CBA6},
+    {(uint8_t *)"abcde", 5, 0x8587D865},
+    {(uint8_t *)"1", 1, 0x83DCEFB7},
+    {(uint8_t *)"123456789", 9, 0xCBF43926},
+    {(uint8_t *)"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09", 10, 0x456CD746},
+    {(uint8_t *)"\xf0\xf1\xf2\xf3\xf4\x05\x00\x30\x41\x65\x07\xf8\xff", 13, 0xFAD52B77},
+    {(uint8_t *)"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 100, 0xAF707A64},
+    {(uint8_t *)
+     "1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890"
      "1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890"
      "1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890", 300, 0xFA2DD4AA}
 };
@@ -71,8 +72,8 @@ void SSFCRC32UnitTest(void)
     SSF_ASSERT_TEST(SSFCRC32(NULL, 0, SSF_CRC32_INITIAL));
 
     /* Check 0 length cases */
-    SSF_ASSERT(SSFCRC32((uint8_t*)"1", 0, SSF_CRC32_INITIAL) == SSF_CRC32_INITIAL);
-    SSF_ASSERT(SSFCRC32((uint8_t*)"1", 0, (0xAA553366ul)) == (0xAA553366ul));
+    SSF_ASSERT(SSFCRC32((uint8_t *)"1", 0, SSF_CRC32_INITIAL) == SSF_CRC32_INITIAL);
+    SSF_ASSERT(SSFCRC32((uint8_t *)"1", 0, (0xAA553366ul)) == (0xAA553366ul));
 
     /* Check single pass cases */
     for (i = 0; i < sizeof(_SSFCRC32UT) / sizeof(SSFCRC32UT_t); i++)

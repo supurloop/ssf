@@ -47,7 +47,7 @@ void *smpTestPtrs[SMP_TEST_BLOCKS];
 /* --------------------------------------------------------------------------------------------- */
 /* Performs unit test on ssfll's external interface.                                             */
 /* --------------------------------------------------------------------------------------------- */
-void SSFMPoolUnitTest()
+void SSFMPoolUnitTest(void)
 {
     uint32_t i;
     void *testPtr;

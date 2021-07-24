@@ -692,7 +692,7 @@ bool SSFJsonPrintBase64(SSFCStrOut_t js, size_t size, size_t start, size_t *end,
 bool SSFJsonPrintDouble(SSFCStrOut_t js, size_t size, size_t start, size_t *end, double in,
                         SSFJsonFltFmt_t fmt, bool *comma)
 {
-    int len;
+    int len = 0;
 
     SSF_REQUIRE(js != NULL);
     SSF_REQUIRE(start <= size);

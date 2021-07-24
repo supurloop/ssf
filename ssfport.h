@@ -55,8 +55,14 @@ typedef uint64_t SSFPortTick_t;
 /* If your platform has byte order macros include the header file here and set */
 /* SSF_CONFIG_BYTE_ORDER_MACROS to 0. Else set SSF_CONFIG_BYTE_ORDER_MACROS to 1 and set */
 /* SSF_CONFIG_LITTLE_ENDIAN to 1 for little endian systems, else 0. */
+#ifdef __APPLE__
+#include <arpa/inet.h>
+#define SSF_CONFIG_BYTE_ORDER_MACROS (0u)
+#define SSF_CONFIG_LITTLE_ENDIAN (1u)
+#else
 #define SSF_CONFIG_BYTE_ORDER_MACROS (1u)
 #define SSF_CONFIG_LITTLE_ENDIAN (1u)
+#endif
 
 #if SSF_CONFIG_BYTE_ORDER_MACROS == 1
 #if SSF_CONFIG_LITTLE_ENDIAN == 0

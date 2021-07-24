@@ -31,7 +31,7 @@
 /* --------------------------------------------------------------------------------------------- */
 #include <stdint.h>
 #include <stdio.h>
-#include <malloc.h>
+#include <stdlib.h>
 #include "ssftlv.h"
 #include "ssfassert.h"
 

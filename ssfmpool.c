@@ -73,10 +73,10 @@ void SSFMPoolInit(SSFMPool_t *pool, uint32_t blocks, uint32_t blockSize)
 
     for (i = 0; i < blocks; i++)
     {
-        uint8_t *mem;
+        SSFLLItem_t *mem;
         SSF_ASSERT((mem = malloc(memSize)) != NULL);
         memset(mem, 0, memSize);
-        memcpy(mem + blockSize + sizeof(SSFLLItem_t), "\x12\x34\x56\xff", sizeof(uint32_t));
+        memcpy(((uint8_t *)mem) + blockSize + sizeof(SSFLLItem_t), "\x12\x34\x56\xff", sizeof(uint32_t));
         SSF_LL_FIFO_PUSH(&(pool->avail), mem);
 #if SSF_MPOOL_DEBUG == 1
         SSF_ASSERT((w = (SSFMPoolDebug_t *)malloc(sizeof(SSFMPoolDebug_t))) != NULL);
@@ -123,7 +123,7 @@ void* SSFMPoolFree(SSFMPool_t *pool, void *mpool)
 
     SSF_ASSERT(memcmp(((uint8_t *)mpool) + pool->blockSize, "\x12\x34\x56",
                       sizeof(uint32_t) - 1) == 0);
-    SSF_LL_FIFO_PUSH(&(pool->avail), (SSFLLItem_t *)(((uint8_t *)mpool) - sizeof(SSFLLItem_t)));
+    SSF_LL_FIFO_PUSH(&(pool->avail), ((SSFLLItem_t *) mpool) - 1);
     return NULL;
 }
 

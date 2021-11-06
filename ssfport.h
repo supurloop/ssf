@@ -106,6 +106,8 @@ typedef uint64_t SSFPortTick_t;
 #define SSF_CONFIG_CRC32_UNIT_TEST (1u)
 #define SSF_CONFIG_SHA2_UNIT_TEST (1u)
 #define SSF_CONFIG_TLV_UNIT_TEST (1u)
+#define SSF_CONFIG_AES_UNIT_TEST (1u)
+#define SSF_CONFIG_AESGCM_UNIT_TEST (1u)
 
 /* If any unit test is enabled then enable unit test mode */
 #if SSF_CONFIG_BFIFO_UNIT_TEST == 1 || \
@@ -120,7 +122,9 @@ typedef uint64_t SSFPortTick_t;
     SSF_CONFIG_CRC16_UNIT_TEST == 1 || \
     SSF_CONFIG_CRC32_UNIT_TEST == 1 || \
     SSF_CONFIG_SHA2_UNIT_TEST == 1 || \
-    SSF_CONFIG_TLV_UNIT_TEST == 1
+    SSF_CONFIG_TLV_UNIT_TEST == 1 || \
+    SSF_CONFIG_AES_UNIT_TEST == 1 || \
+    SSF_CONFIG_AESGCM_UNIT_TEST == 1 
 #define SSF_CONFIG_UNIT_TEST (1u)
 #else
 #define SSF_CONFIG_UNIT_TEST (0u)

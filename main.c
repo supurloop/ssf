@@ -45,6 +45,8 @@
 #include "ssfcrc32.h"
 #include "ssfsha2.h"
 #include "ssftlv.h"
+#include "ssfaes.h"
+#include "ssfaesgcm.h"
 
 /* --------------------------------------------------------------------------------------------- */
 /* SSF unit test entry point.                                                                    */
@@ -101,6 +103,14 @@ int main(void)
 
 #if SSF_CONFIG_TLV_UNIT_TEST == 1
     SSFTLVUnitTest();
+#endif /* SSF_CONFIG_TLV_UNIT_TEST */
+
+#if SSF_CONFIG_AES_TEST == 1
+    SSFAESUnitTest();
+#endif /* SSF_CONFIG_TLV_UNIT_TEST */
+
+#if SSF_CONFIG_AESGCM_UNIT_TEST == 1
+    SSFAESGCMUnitTest();
 #endif /* SSF_CONFIG_TLV_UNIT_TEST */
 
     return 0;

@@ -687,6 +687,73 @@ SSFTLVFind(&tlv, TAG_NAME, 0, &valPtr,  &valLen);
 /* valPtr == "Jimmy", valLen == 5 */
 ```
 
+## AES Block Interface
+
+The AES block interface encrypts and decrypts 16 byte blocks of data with the AES cipher. The generic interface supports 128, 192 and 256 bit keys. Macros are supplied for these key sizes. This implementation *SHOULD NOT* be used in production systems. It *IS* vulnerable to timing attacks. Instead, processor specific AES instructions should be preferred.
+
+```
+uint8_t pt[16];
+uint8_t ct[16];
+uint8_t key[16];
+
+/* Initialize the plaintext and key here */
+
+/* Encrypt the plaintext */
+SSFAESBlockEncrypt128(pt, sizeof(pt), ct, sizeof(ct), key, sizeof(key));
+
+/* Decrypt the ciphertext */
+SSFAESBlockDecrypt128(ct, sizeof(ct), pt, sizeof(pt), key, sizeof(key));
+
+/* If the key size is unknown */
+
+/* Encrypt the plaintext */
+SSFAESBlockEncryptXXX(pt, sizeof(pt), ct, sizeof(ct), key, sizeof(key));
+
+/* Decrypt the ciphertext */
+SSFAESBlockDecryptXXX(ct, sizeof(ct), pt, sizeof(pt), key, sizeof(key));
+```
+
+## AES-GCM Interface
+
+The AES-GCM interface provides encryption and authentication for arbitary length data. The generic AES-GCM encrypt/decrypt functions support 128, 196 and 256 bit keys. There are four available modes: authentication, authenticated data, authenticated encryption and authenticated encryption with authenticated data. Examples of these are provided below. See the AES-GCM specification for details on how to generate valid IVs without. Note that the AES-GCM implementation relies on the *TIMING ATTACK VULNERABLE* AES block cipher implementation. 
+
+```
+uint8_t pt[100];
+uint8_t iv[16];
+uint8_t auth[200];
+uint8_t key[16];
+uint8_t tag[16];
+uint8_t ct[100];
+
+/* Initialize pt, iv, auth and key here */
+
+/* Authentication */
+SSFAESGCMEncrypt(NULL, 0, iv, sizeof(iv), NULL, 0, key, sizeof(key), tag, sizeof(tag), NULL, 0);
+
+bool isValid = SSFAESGCMDecrypt(NULL, 0, iv, sizeof(iv), NULL, 0, key, sizeof(key), tag, 
+                                sizeof(tag), NULL, 0);
+
+
+/* Authenticated data */
+SSFAESGCMEncrypt(NULL, 0, iv, sizeof(iv), auth, sizeof(auth), key, sizeof(key), tag, sizeof(tag), 
+                 NULL, 0);
+bool isValid = SSFAESGCMDecrypt(NULL, 0, iv, sizeof(iv), auth, sizeof(auth), key, sizeof(key), tag, 
+                                sizeof(tag), NULL, 0);
+
+
+/* Authenticated encryption */
+SSFAESGCMEncrypt(pt, sizeof(pt), iv, sizeof(iv), NULL, 0, key, sizeof(key), tag, sizeof(tag), 
+                 ct, sizeof(ct));
+bool isValid = SSFAESGCMDecrypt(ct, sizeof(ct), iv, sizeof(iv), NULL, 0, key, sizeof(key), tag, 
+                                sizeof(tag), pt, sizeof(pt));
+
+/* Authenticated encryption and authenticated data */
+SSFAESGCMEncrypt(pt, sizeof(pt), iv, sizeof(iv), auth, sizeof(auth), key, sizeof(key), tag, 
+                 sizeof(tag), ct, sizeof(ct));
+bool isValid = SSFAESGCMDecrypt(ct, sizeof(ct), iv, sizeof(iv), auth, sizeof(auth), key, 
+                                sizeof(key), tag, sizeof(tag), pt, sizeof(pt));
+```
+
 ## Conclusion
 
 I built this framework for primarily myself, although I hope you can find a good use for it.

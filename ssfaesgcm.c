@@ -36,14 +36,14 @@
 /* --------------------------------------------------------------------------------------------- */
 /* Per US export restrictions for open source cryptographic software the Department of Commerce  */
 /* has been notified of the inclusion of cryptographic software in the SSF. This is a copy of    */
-/* the notice:                                                                                   */
+/* the notice emailed on Nov 11, 2021:                                                           */
 /* --------------------------------------------------------------------------------------------- */
 /* Unrestricted Encryption Source Code Notification                                              */
-/* To : crypt@bxa.doc.gov                                                                        */
+/* To : crypt@bis.doc.gov; enc@nsa.gov                                                           */
 /* Subject : Addition to SSF Source Code                                                         */
 /* Department of Commerce                                                                        */
 /* Bureau of Export Administration                                                               */
-/* Office of Strategic Tradeand Foreign Policy Controls                                          */
+/* Office of Strategic Trade and Foreign Policy Controls                                         */
 /* 14th Street and Pennsylvania Ave., N.W.                                                       */
 /* Room 2705                                                                                     */
 /* Washington, DC 20230                                                                          */

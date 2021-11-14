@@ -759,7 +759,7 @@ bool isValid = SSFAESGCMDecrypt(ct, sizeof(ct), iv, sizeof(iv), auth, sizeof(aut
 I built this framework for primarily myself, although I hope you can find a good use for it.
 In the future I plan to add additional documentation, some encryption, and possibly de-init interfaces.
 
-Special thanks to my son, Calvin, for helping write some units tests!
+Special thanks to my son, Calvin, for researching, implementing, and debugging the AES Block and AES-GCM interfaces!
 
 Drop me a line if you have a question or comment.
 

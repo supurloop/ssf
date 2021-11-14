@@ -105,7 +105,7 @@ int main(void)
     SSFTLVUnitTest();
 #endif /* SSF_CONFIG_TLV_UNIT_TEST */
 
-#if SSF_CONFIG_AES_TEST == 1
+#if SSF_CONFIG_AES_UNIT_TEST == 1
     SSFAESUnitTest();
 #endif /* SSF_CONFIG_TLV_UNIT_TEST */
 

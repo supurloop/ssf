@@ -221,8 +221,8 @@ static void _SSFAESKeyExpansion(uint32_t *w, size_t wSize, const uint8_t *key, s
     SSF_ASSERT(w != NULL);
     SSF_ASSERT(key != NULL);
 
-    SSF_ASSERT((uint8_t)wSize == (4 * (nr + 1)));
-    SSF_ASSERT(keyLen == (4 * nk));
+    SSF_ASSERT(wSize == ((((size_t) nr) + 1) << 2));
+    SSF_ASSERT(keyLen == (((size_t) nk) << 2));
 
     SSF_ASSERT(((nr == 10) && (nk == 4)) ||
                ((nr == 12) && (nk == 6)) ||
@@ -230,7 +230,7 @@ static void _SSFAESKeyExpansion(uint32_t *w, size_t wSize, const uint8_t *key, s
 
     for (i = 0; i < nk; i++)
     {
-        t = 4 * i;
+        t = i << 2;
         w[i] = (key[t]) ^ (key[t + 1] << 8) ^ (key[t + 2] << 16) ^ (key[t + 3] << 24);
     }
 
@@ -262,7 +262,7 @@ void SSFAESBlockEncrypt(const uint8_t *pt, size_t ptLen, uint8_t *ct, size_t ctS
     uint8_t s[4][4];
     uint8_t i;
 
-    size_t wSize = (nr + 1) * 4;
+    size_t wSize = (((size_t) nr) + 1) << 2;
 
     SSF_ASSERT(pt != NULL);
     SSF_ASSERT(ct != NULL);
@@ -270,7 +270,7 @@ void SSFAESBlockEncrypt(const uint8_t *pt, size_t ptLen, uint8_t *ct, size_t ctS
 
     SSF_ASSERT(ptLen == 16);
     SSF_ASSERT(ctSize == 16);
-    SSF_ASSERT(keyLen == (4 * nk));
+    SSF_ASSERT(keyLen == (((size_t) nk) << 2));
 
     SSF_ASSERT(((nr == 10) && (nk == 4)) ||
                ((nr == 12) && (nk == 6)) ||
@@ -285,12 +285,12 @@ void SSFAESBlockEncrypt(const uint8_t *pt, size_t ptLen, uint8_t *ct, size_t ctS
         SBOX_STATE(s);
         SHIFT_ROWS(s, t[0]);
         MIX_COLUMNS(s, t);
-        ADD_KEY(s, w, i * 4);
+        ADD_KEY(s, w, (i << 2));
     }
 
     SBOX_STATE(s);
     SHIFT_ROWS(s, t[0]);
-    ADD_KEY(s, w, nr * 4);
+    ADD_KEY(s, w, (nr << 2));
 
     STATE_TO_ARRAY(s, ct);
 }
@@ -306,7 +306,7 @@ void SSFAESBlockDecrypt(const uint8_t *ct, size_t ctLen, uint8_t *pt, size_t ptS
     uint8_t s[4][4];
     uint8_t i;
 
-    size_t wSize = (nr + 1) * 4;
+    size_t wSize = (((size_t) nr) + 1) << 2;
 
     SSF_ASSERT(ct != NULL);
     SSF_ASSERT(pt != NULL);
@@ -314,7 +314,7 @@ void SSFAESBlockDecrypt(const uint8_t *ct, size_t ctLen, uint8_t *pt, size_t ptS
 
     SSF_ASSERT(ctLen == 16);
     SSF_ASSERT(ptSize == 16);
-    SSF_ASSERT(keyLen == (4 * nk));
+    SSF_ASSERT(keyLen == (((size_t) nk) << 2));
 
     SSF_ASSERT(((nr == 10) && (nk == 4)) ||
                ((nr == 12) && (nk == 6)) ||
@@ -322,13 +322,13 @@ void SSFAESBlockDecrypt(const uint8_t *ct, size_t ctLen, uint8_t *pt, size_t ptS
 
     ARRAY_TO_STATE(s, ct);
     _SSFAESKeyExpansion(w, wSize, key, keyLen, nr, nk);
-    ADD_KEY(s, w, nr * 4);
+    ADD_KEY(s, w, (nr << 2));
 
     for (i = nr - 1; i > 0; i--)
     {
         INV_SHIFT_ROWS(s, t[0]);
         INV_SBOX_STATE(s);
-        ADD_KEY(s, w, i * 4);
+        ADD_KEY(s, w, (i << 2));
         INV_MIX_COLUMNS(s, t);
     }
 

@@ -65,16 +65,20 @@ bool SSFHexBinToByte(uint8_t in, char *out, size_t outSize, SSFHexCase_t hcase)
 /* --------------------------------------------------------------------------------------------- */
 bool SSFHexByteToBin(const char *hex, uint8_t *out)
 {
-    char tmp[3] = "  ";
+    #define SSF_HEX_TO_BIN(n, i) \
+        if ((i >= '0') && (i <= '9')) n = i - 0x30; \
+        else if ((i >= 'A') && (i <= 'F')) n = i - 0x37; \
+        else if ((i >= 'a') && (i <= 'f')) n = i - 0x57; \
+        else return false;
+    uint8_t un;
+    uint8_t ln;
 
     SSF_REQUIRE(hex != NULL);
-    SSF_ASSERT(out != NULL);
+    SSF_REQUIRE(out != NULL);
 
-    tmp[0] = hex[0];
-    if (!SSFIsHex(tmp[0])) return false;
-    tmp[1] = hex[1];
-    if (!SSFIsHex(tmp[1])) return false;
-    *out = (uint8_t)strtol(tmp, NULL, 16);
+    SSF_HEX_TO_BIN(un, hex[0]);
+    SSF_HEX_TO_BIN(ln, hex[1]);
+    *out = (un << 4) + ln;
     return true;
 }
 

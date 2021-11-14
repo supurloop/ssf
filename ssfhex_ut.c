@@ -54,7 +54,7 @@ SSFHexUT_t _hexUTPass[] =
     { "", "", "", "", "", (uint8_t *)"", (uint8_t *)"", 0 },
     { "a1", "A1", "a1", "A1", "a1", (uint8_t *)"\xa1", (uint8_t *)"\xa1", 1 },
     { "A1", "A1", "a1", "A1", "a1", (uint8_t *)"\xA1", (uint8_t *)"\xA1", 1 },
-    { "A1f5", "A1F5", "a1f5", "F5A1", "f5A1", (uint8_t *)"\xA1\xF5", (uint8_t *)"\xF5\xA1", 2 },
+    { "A1f5", "A1F5", "a1f5", "F5A1", "f5a1", (uint8_t *)"\xA1\xF5", (uint8_t *)"\xF5\xA1", 2 },
     { "A1f51234567890abcdefABCDEF", "A1F51234567890ABCDEFABCDEF", "a1f51234567890abcdefabcdef",
         "EFCDABEFCDAB9078563412F5A1", "efcdabefcdab9078563412f5a1",
         (uint8_t *)"\xA1\xF5\x12\x34\x56\x78\x90\xab\xcd\xef\xAB\xCD\xEF",
@@ -126,7 +126,7 @@ void SSFHexUnitTest(void)
         SSF_ASSERT(outlen == (_hexUTPass[i].binlen << 1));
         SSF_ASSERT(outlen == strlen(_hexUTPass[i].asciilow));
         SSF_ASSERT(outlen == strlen(hexout));
-        SSF_ASSERT(memcpy(hexout, _hexUTPass[i].asciilow, outlen + 1));
+        SSF_ASSERT(memcmp(hexout, _hexUTPass[i].asciilow, outlen + 1) == 0);
 
         memset(hexout, 0xff, sizeof(hexout));
         SSF_ASSERT(SSFHexBinToBytes(_hexUTPass[i].bin, _hexUTPass[i].binlen, hexout,
@@ -134,7 +134,7 @@ void SSFHexUnitTest(void)
         SSF_ASSERT(outlen == (_hexUTPass[i].binlen << 1));
         SSF_ASSERT(outlen == strlen(_hexUTPass[i].asciiup));
         SSF_ASSERT(outlen == strlen(hexout));
-        SSF_ASSERT(memcpy(hexout, _hexUTPass[i].asciiup, outlen + 1));
+        SSF_ASSERT(memcmp(hexout, _hexUTPass[i].asciiup, outlen + 1) == 0);
 
         memset(hexout, 0xff, sizeof(hexout));
         SSF_ASSERT(SSFHexBinToBytes(_hexUTPass[i].bin, _hexUTPass[i].binlen, hexout,
@@ -142,7 +142,7 @@ void SSFHexUnitTest(void)
         SSF_ASSERT(outlen == (_hexUTPass[i].binlen << 1));
         SSF_ASSERT(outlen == strlen(_hexUTPass[i].asciirevlow));
         SSF_ASSERT(outlen == strlen(hexout));
-        SSF_ASSERT(memcpy(hexout, _hexUTPass[i].asciirevlow, outlen + 1));
+        SSF_ASSERT(memcmp(hexout, _hexUTPass[i].asciirevlow, outlen + 1) == 0);
 
         memset(hexout, 0xff, sizeof(hexout));
         SSF_ASSERT(SSFHexBinToBytes(_hexUTPass[i].bin, _hexUTPass[i].binlen, hexout,
@@ -150,7 +150,7 @@ void SSFHexUnitTest(void)
         SSF_ASSERT(outlen == (_hexUTPass[i].binlen << 1));
         SSF_ASSERT(outlen == strlen(_hexUTPass[i].asciirevup));
         SSF_ASSERT(outlen == strlen(hexout));
-        SSF_ASSERT(memcpy(hexout, _hexUTPass[i].asciirevup, outlen + 1));
+        SSF_ASSERT(memcmp(hexout, _hexUTPass[i].asciirevup, outlen + 1) == 0);
     }
 }
 #endif /* SSF_CONFIG_HEX_UNIT_TEST */

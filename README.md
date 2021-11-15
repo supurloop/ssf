@@ -692,66 +692,132 @@ SSFTLVFind(&tlv, TAG_NAME, 0, &valPtr,  &valLen);
 The AES block interface encrypts and decrypts 16 byte blocks of data with the AES cipher. The generic interface supports 128, 192 and 256 bit keys. Macros are supplied for these key sizes. This implementation *SHOULD NOT* be used in production systems. It *IS* vulnerable to timing attacks. Instead, processor specific AES instructions should be preferred.
 
 ```
-uint8_t pt[16];
-uint8_t ct[16];
-uint8_t key[16];
+    uint8_t pt[16];
+    uint8_t dpt[16];
+    uint8_t ct[16];
+    uint8_t key[16];
 
-/* Initialize the plaintext and key here */
+    /* Initialize the plaintext and key here */
+    memcpy(pt, "1234567890abcdef", sizeof(pt));
+    memcpy(key, "secretkey1234567", sizeof(key));
 
-/* Encrypt the plaintext */
-SSFAESBlockEncrypt128(pt, sizeof(pt), ct, sizeof(ct), key, sizeof(key));
+    /* Encrypt the plaintext */
+    SSFAES128BlockEncrypt(pt, sizeof(pt), ct, sizeof(ct), key, sizeof(key));
+    
+    /* ct = "\xdc\xc9\x32\xee\xfa\x94\x00\x0d\xfb\x97\x3f\xd4\x3d\x52\x6c\x45" */
 
-/* Decrypt the ciphertext */
-SSFAESBlockDecrypt128(ct, sizeof(ct), pt, sizeof(pt), key, sizeof(key));
+    /* Decrypt the ciphertext */
+    SSFAES128BlockDecrypt(ct, sizeof(ct), dpt, sizeof(dpt), key, sizeof(key));
 
-/* If the key size is unknown */
+    /* dpt = "1234567890abcdef" */
 
-/* Encrypt the plaintext */
-SSFAESBlockEncryptXXX(pt, sizeof(pt), ct, sizeof(ct), key, sizeof(key));
+    /* If the key size is variable use the generic interface */
 
-/* Decrypt the ciphertext */
-SSFAESBlockDecryptXXX(ct, sizeof(ct), pt, sizeof(pt), key, sizeof(key));
+    /* Encrypt the plaintext */
+    SSFAESXXXBlockEncrypt(pt, sizeof(pt), ct, sizeof(ct), key, sizeof(key));
+
+    /* ct = "\xdc\xc9\x32\xee\xfa\x94\x00\x0d\xfb\x97\x3f\xd4\x3d\x52\x6c\x45" */
+
+    /* Decrypt the ciphertext */
+    SSFAESXXXBlockDecrypt(ct, sizeof(ct), dpt, sizeof(dpt), key, sizeof(key));
+
+    /* dpt = "1234567890abcdef" */
 ```
 
 ## AES-GCM Interface
 
-The AES-GCM interface provides encryption and authentication for arbitary length data. The generic AES-GCM encrypt/decrypt functions support 128, 196 and 256 bit keys. There are four available modes: authentication, authenticated data, authenticated encryption and authenticated encryption with authenticated data. Examples of these are provided below. See the AES-GCM specification for details on how to generate valid IVs without. Note that the AES-GCM implementation relies on the *TIMING ATTACK VULNERABLE* AES block cipher implementation. 
+The AES-GCM interface provides encryption and authentication for arbitary length data. The generic AES-GCM encrypt/decrypt functions support 128, 196 and 256 bit keys. There are four available modes: authentication, authenticated data, authenticated encryption and authenticated encryption with authenticated data. Examples of these are provided below. See the AES-GCM specification for details on how to generate valid IVs, example below. Note that the AES-GCM implementation relies on the *TIMING ATTACK VULNERABLE* AES block cipher implementation. 
 
 ```
-uint8_t pt[100];
-uint8_t iv[16];
-uint8_t auth[200];
-uint8_t key[16];
-uint8_t tag[16];
-uint8_t ct[100];
+    /* This shows a 128-bit IV generation, although a 96-bit is OK and slightly more efficient */
+    #define AES_GCM_MAKE_IV(iv, eui, fc) { \
+        uint32_t befc = htonl(fc); \
+        memcpy(iv, eui, 8); \
+        memcpy(&iv[8], &befc, 4); \
+        befc = ~befc; \
+        memcpy(&iv[12], &befc, 4); \
+    }
+    size_t ptLen;
+    uint8_t pt[100];
+    uint8_t dpt[100];
+    uint8_t iv[16];
+    size_t authLen;
+    uint8_t auth[100];
+    uint8_t key[16];
+    uint8_t tag[16];
+    uint8_t ct[100];
+    uint8_t eui64[8];
+    uint32_t frameCounter;
 
-/* Initialize pt, iv, auth and key here */
+    /* Initialize pt, iv, auth and key here */
+    memcpy(eui64, "\x12\x34\x45\x67\x89\xab\xcd\xef", sizeof(eui64));
+    frameCounter = 0;
+    memcpy(pt, "1234567890abcdef", 16);
+    ptLen = sizeof(pt);
+    memcpy(key, "secretkey1234567", sizeof(key));
+    memcpy(auth, "unencrypted auth data", 21);
+    authLen = 21;
 
-/* Authentication */
-SSFAESGCMEncrypt(NULL, 0, iv, sizeof(iv), NULL, 0, key, sizeof(key), tag, sizeof(tag), NULL, 0);
+    /* Authentication */
+    AES_GCM_MAKE_IV(iv, eui64, frameCounter);
+    frameCounter++;
+    SSFAESGCMEncrypt(NULL, 0, iv, sizeof(iv), NULL, 0, key, sizeof(key), tag, sizeof(tag), NULL, 0);
 
-bool isValid = SSFAESGCMDecrypt(NULL, 0, iv, sizeof(iv), NULL, 0, key, sizeof(key), tag, 
-                                sizeof(tag), NULL, 0);
+    /* Pass values of iv, tag to receiver so they can verify with their copy of private key */
+    if (!SSFAESGCMDecrypt(NULL, 0, iv, sizeof(iv), NULL, 0, key, sizeof(key), tag,
+                          sizeof(tag), NULL, 0))
+    { 
+        printf("Authentication failed.\r\n");
+        return;
+    }
+    /* Also verify that frameCounter value used in IV has increased, otherwise message is replayed. */
 
 
-/* Authenticated data */
-SSFAESGCMEncrypt(NULL, 0, iv, sizeof(iv), auth, sizeof(auth), key, sizeof(key), tag, sizeof(tag), 
-                 NULL, 0);
-bool isValid = SSFAESGCMDecrypt(NULL, 0, iv, sizeof(iv), auth, sizeof(auth), key, sizeof(key), tag, 
-                                sizeof(tag), NULL, 0);
+    /* Authenticated data */
+    AES_GCM_MAKE_IV(iv, eui64, frameCounter);
+    frameCounter++;
+    SSFAESGCMEncrypt(NULL, 0, iv, sizeof(iv), auth, authLen, key, sizeof(key), tag, sizeof(tag),
+                     NULL, 0);
+
+    /* Pass values of iv, auth, tag to receiver so they can verify with their copy of private key */
+    if (!SSFAESGCMDecrypt(NULL, 0, iv, sizeof(iv), auth, authLen, key, sizeof(key), tag,
+                          sizeof(tag), NULL, 0))
+    {
+        printf("Authentication of unencrypted data failed.\r\n");
+        return;
+    }
+    /* Also verify that frameCounter value used in IV has increased, otherwise message is replayed. */
 
 
-/* Authenticated encryption */
-SSFAESGCMEncrypt(pt, sizeof(pt), iv, sizeof(iv), NULL, 0, key, sizeof(key), tag, sizeof(tag), 
-                 ct, sizeof(ct));
-bool isValid = SSFAESGCMDecrypt(ct, sizeof(ct), iv, sizeof(iv), NULL, 0, key, sizeof(key), tag, 
-                                sizeof(tag), pt, sizeof(pt));
+    /* Authenticated encryption */
+    AES_GCM_MAKE_IV(iv, eui64, frameCounter);
+    frameCounter++;
+    SSFAESGCMEncrypt(pt, ptLen, iv, sizeof(iv), NULL, 0, key, sizeof(key), tag, sizeof(tag),
+                     ct, sizeof(ct));
 
-/* Authenticated encryption and authenticated data */
-SSFAESGCMEncrypt(pt, sizeof(pt), iv, sizeof(iv), auth, sizeof(auth), key, sizeof(key), tag, 
-                 sizeof(tag), ct, sizeof(ct));
-bool isValid = SSFAESGCMDecrypt(ct, sizeof(ct), iv, sizeof(iv), auth, sizeof(auth), key, 
-                                sizeof(key), tag, sizeof(tag), pt, sizeof(pt));
+    /* Pass values of iv, ct, tag to receiver so they can verify with their copy of private key */
+    if (!SSFAESGCMDecrypt(ct, ptLen, iv, sizeof(iv), NULL, 0, key, sizeof(key), tag,
+                          sizeof(tag), dpt, sizeof(dpt)))
+    {
+        printf("Authentication of encrypted data failed.\r\n");
+        return; 
+    }
+    /* Also verify that frameCounter value used in IV has increased, otherwise message is replayed. */
+
+
+    /* Authenticated encryption and authenticated data */
+    AES_GCM_MAKE_IV(iv, eui64, frameCounter);
+    frameCounter++;
+    SSFAESGCMEncrypt(pt, ptLen, iv, sizeof(iv), auth, authLen, key, sizeof(key), tag,
+                     sizeof(tag), ct, sizeof(ct));
+
+    if (!SSFAESGCMDecrypt(ct, ptLen, iv, sizeof(iv), auth, authLen, key,
+                          sizeof(key), tag, sizeof(tag), dpt, sizeof(dpt)))
+    {
+        printf("Authentication of encrypted and unencrypted data failed.\r\n");
+        return;
+    }
+    /* Also verify that frameCounter value used in IV has increased, otherwise message is replayed. */
 ```
 
 ## Conclusion

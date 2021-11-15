@@ -3268,7 +3268,7 @@ void SSFAESGCMUnitTest(void)
                                        _AESGCMUT[i].keyLen, _AESGCMUT[i].tag,
                                        _AESGCMUT[i].tagLen, pt, _AESGCMUT[i].ptLen);
 
-            SSF_ASSERT((pf != 0) == (_AESGCMUT[i].pf != 0));
+            SSF_ASSERT((pf) == (_AESGCMUT[i].pf == 0));
             SSF_ASSERT((_AESGCMUT[i].pf != 0) 
                        || (memcmp(pt, _AESGCMUT[i].pt, _AESGCMUT[i].ptLen) == 0));
         }

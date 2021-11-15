@@ -399,7 +399,7 @@ static void _SSFAESGCMGCTR(const uint8_t *in, size_t inLen, const uint8_t *key, 
 
     SSF_ASSERT((keyLen == 16) || (keyLen == 24) || (keyLen == 32));
     SSF_ASSERT(icbLen == 16);
-    SSF_ASSERT(inLen == outSize);
+    SSF_ASSERT(inLen <= outSize);
 
     memcpy(cb, icb, sizeof(cb));
     memcpy(out, in, outSize);
@@ -442,7 +442,7 @@ void SSFAESGCMEncrypt(const uint8_t *pt, size_t ptLen, const uint8_t *iv, size_t
     SSF_ASSERT(key != NULL);
     SSF_ASSERT(tag != NULL);
 
-    SSF_ASSERT(ptLen == ctSize);
+    SSF_ASSERT(ptLen <= ctSize);
     SSF_ASSERT(ivLen > 0);
     SSF_ASSERT((keyLen == 16) || (keyLen == 24) || (keyLen == 32));
     SSF_ASSERT(((tagSize >= 12) && (tagSize <= 16)) || (tagSize == 8) || (tagSize == 4));
@@ -465,15 +465,15 @@ void SSFAESGCMEncrypt(const uint8_t *pt, size_t ptLen, const uint8_t *iv, size_t
     memcpy(j1, j0, sizeof(j1));
     _SSFAESGCMBlockInc32(j1);
 
-    _SSFAESGCMGCTR(pt, ptLen, key, keyLen, j1, sizeof(j1), ct, ctSize);
+    _SSFAESGCMGCTR(pt, ptLen, key, keyLen, j1, sizeof(j1), ct, ptLen);
 
     t = ((uint32_t)authLen << 3);
     PUT_64_LE(buf, t);
-    t = ((uint32_t)ctSize << 3);
+    t = ((uint32_t)ptLen << 3);
     PUT_64_LE(&buf[8], t);
 
     _SSFAESGCMGHASH(auth, authLen, h, sizeof(h), s, sizeof(s));
-    _SSFAESGCMGHASH(ct, ctSize, h, sizeof(h), s, sizeof(s));
+    _SSFAESGCMGHASH(ct, ptLen, h, sizeof(h), s, sizeof(s));
     _SSFAESGCMGHASH(buf, sizeof(buf), h, sizeof(h), s, sizeof(s));
 
     _SSFAESGCMGCTR(s, sizeof(s), key, keyLen, j0, sizeof(j0), s, sizeof(s));
@@ -500,7 +500,7 @@ bool SSFAESGCMDecrypt(const uint8_t* ct, size_t ctLen, const uint8_t* iv, size_t
     SSF_ASSERT(key != NULL);
     SSF_ASSERT(tag != NULL);
 
-    SSF_ASSERT(ctLen == ptSize);
+    SSF_ASSERT(ctLen <= ptSize);
     SSF_ASSERT(ivLen > 0);
     SSF_ASSERT((keyLen == 16) || (keyLen == 24) || (keyLen == 32));
     SSF_ASSERT(((tagLen >= 12) && (tagLen <= 16)) || (tagLen == 8) || (tagLen == 4));
@@ -536,6 +536,6 @@ bool SSFAESGCMDecrypt(const uint8_t* ct, size_t ctLen, const uint8_t* iv, size_t
 
     _SSFAESGCMGCTR(s, sizeof(s), key, keyLen, j0, sizeof(j0), s, sizeof(s));
 
-    return memcmp(s, tag, tagLen) != 0;
+    return memcmp(s, tag, tagLen) == 0;
 }
 

@@ -42,7 +42,7 @@
 /* --------------------------------------------------------------------------------------------- */
 bool SSFHexBinToByte(uint8_t in, char *out, size_t outSize, SSFHexCase_t hcase)
 {
-    #define SSF_HEX_BIN_TO_HEX(n, o, u) if (n <= 9) o = n + 0x30; else o = n + u + 0x37;
+    #define SSF_HEX_BIN_TO_HEX(n, o, u) if (n <= 9) o = n + 0x30; else o = n + u;
     uint8_t un;
     uint8_t ln;
     uint8_t up;
@@ -52,7 +52,7 @@ bool SSFHexBinToByte(uint8_t in, char *out, size_t outSize, SSFHexCase_t hcase)
 
     un = in >> 4;
     ln = in & 0x0f;
-    up = (hcase == SSF_HEX_CASE_UPPER) ? 0 : 0x20;
+    up = (hcase == SSF_HEX_CASE_UPPER) ? 0x37 : 0x57;
     SSF_HEX_BIN_TO_HEX(un, out[0], up);
     SSF_HEX_BIN_TO_HEX(ln, out[1], up);
     if (outSize >= 3) out[2] = 0;

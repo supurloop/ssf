@@ -264,8 +264,8 @@ const char *_jtsTypeObject[] =
     " \"\"\n\r\t:\n\r\t[\n \r\t], \n\r\t\"g\"\n\r\t:\n\r\t{\n\r\t}\n\r\t}\n\r\t}\n\r\t",
     "{\"a\":{\"b\":1.0,\"c\":\"str\",\"d\":true,\"e\":false,\"f\":null,\"\":[1\n\r\t ],\"g\":{}}}",
     "{\"a\":{\"b\":1.0,\"c\":\"str\",\"d\":true,\"e\":false,\"f\":null,\"\":[1],\"g\":{}}}",
-    "{\"a\":{\"b\":1.0,\"c\":\"str\",\"d\":true,\"e\":false,\"f\":null,\"\":[1,\"\",true\n\r\t],"
-    "\"g\":{}}}",
+    ("{\"a\":{\"b\":1.0,\"c\":\"str\",\"d\":true,\"e\":false,\"f\":null,\"\":[1,\"\",true\n\r\t],"
+    "\"g\":{}}}"),
 };
 
 const char *_jtsTypeArray[] =

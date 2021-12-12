@@ -40,7 +40,11 @@
 /* 0.0.3 - Add XMODEM/CCITT-16 CRC16 and CCITT-32 CRC32 interfaces.                              */
 /* 0.0.4 - Add SHA-2 and TLV encoder/decoder interfaces.                                         */
 /*         Increased Windows and Linux build warning levels and fixed warnings.                  */
+/* 0.0.5 - Add AES and AES-GCM interfaces.                                                       */
+/*         Add build script for OS X.                                                            */
+/*         Fix some build warnings for OS X.                                                     */
+/*         Optimized bin to hex interface.                                                       */
 /* --------------------------------------------------------------------------------------------- */
-#define SSF_VERSION "0.0.4"
+#define SSF_VERSION "0.0.5"
 
 #endif /* SSF_VERSION_H_INCLUDE */

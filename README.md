@@ -826,7 +826,6 @@ The AES-GCM interface provides encryption and authentication for arbitary length
 ## Conclusion
 
 I built this framework for primarily myself, although I hope you can find a good use for it.
-In the future I plan to add additional documentation, some encryption, and possibly de-init interfaces.
 
 Special thanks to my son, Calvin, for researching, implementing, and debugging the AES Block and AES-GCM interfaces!
 

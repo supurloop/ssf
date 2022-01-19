@@ -187,10 +187,8 @@ typedef uint64_t SSFPortTick_t;
 /* Defines the state machine identifers. */
 enum SSFSMList
 {
-#if SSF_CONFIG_SM_UNIT_TEST == 1
     SSF_SM_UNIT_TEST_1,
     SSF_SM_UNIT_TEST_2,
-#endif /* SSF_CONFIG_SM_UNIT_TEST */
     SSF_SM_END
 };
 

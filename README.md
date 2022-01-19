@@ -23,6 +23,8 @@ The framework implements a number of common embedded system functions:
   11. A 32-bit CCITT-32 CRC interface.
   12. A SHA-2 hash interface.
   13. A TLV encoder/decoder interface.
+  14. An AES block encryption interface.
+  15. An AES-GCM authenticated encryption interface.
 
 To give you an idea of the framework size here are some program memory estimates for each component compiled on an MSP430 with Level 3 optimization:
 Byte FIFO, linked list, memory pool, Base64, Hex ASCII are each about 1000 bytes.
@@ -32,15 +34,16 @@ Fletcher checksum is about 88 bytes.
 
 Little RAM is used internally by the framework, most RAM usage occurs outside the framwork when declaring or initializing different objects.
 
-Microprocessors with >4KB RAM and >32KB program memory should easily be able to utilize all of this framework.
+Microprocessors with >4KB RAM and >32KB program memory should easily be able to utilize this framework.
 And, as noted above, portions of the framework will work on much smaller micros.
 
 ## Porting
 
-This framework has been successfully ported and unit tested on the following platforms: Windows Visual Studio 32/64-bit, Linux 32/64-bit (GCC), PIC32 (XC32), PIC24 (XC16), and MSP430 (TI 15.12.3.LTS). You should only need to change ssfport.c and ssfport.h to implement a successful port.
+This framework has been successfully ported and unit tested on the following platforms: Windows Visual Studio 32/64-bit, Linux 32/64-bit (GCC), MAC OS X, PIC32 (XC32), PIC24 (XC16), and MSP430 (TI 15.12.3.LTS). You should only need to change ssfport.c and ssfport.h to implement a successful port.
 
 The code will compile cleanly under Windows in Visual Studio using the ssf.sln solution file.
 The code will compile cleanly under Linux. ./build.sh will create the ssf executable in the source directory.
+The code will compile cleanly under OS X. ./build-osx.sh will create the ssf executable in the source directory.
 
 For other platforms there are only a few essential tasks that must be completed:
   - Copy all the SSF C and H source files, except main.c, into your project sources and add them to your build environment.
@@ -209,7 +212,7 @@ if (SSF_LL_STACK_POP(&myll, &item))
 }
 ```
 Besides treating the linked list as a STACK or FIFO there are interfaces to insert an item at a specific point within an existing list.
-Before an item is added to a list it cannot be part of a another list otherwise an assertion will be triggered.
+Before an item is added to a list it cannot be part of another list otherwise an assertion will be triggered.
 This prevents the linked list chain from being corrupted which can cause resource leaks and other logic errors to occur.
 
 ### Memory Pool Interface
@@ -729,7 +732,7 @@ The AES block interface encrypts and decrypts 16 byte blocks of data with the AE
 The AES-GCM interface provides encryption and authentication for arbitary length data. The generic AES-GCM encrypt/decrypt functions support 128, 196 and 256 bit keys. There are four available modes: authentication, authenticated data, authenticated encryption and authenticated encryption with authenticated data. Examples of these are provided below. See the AES-GCM specification for details on how to generate valid IVs, example below. Note that the AES-GCM implementation relies on the *TIMING ATTACK VULNERABLE* AES block cipher implementation. 
 
 ```
-    /* This shows a 128-bit IV generation, although a 96-bit is OK and slightly more efficient */
+    /* This shows a 128-bit IV generation, although a 96-bit IV is recommended and slightly more efficient */
     #define AES_GCM_MAKE_IV(iv, eui, fc) { \
         uint32_t befc = htonl(fc); \
         memcpy(iv, eui, 8); \

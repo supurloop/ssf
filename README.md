@@ -393,7 +393,7 @@ fc = SSFFCSum16("e", 1, fc);
 
 The state machine framework allows you to create reliable and efficient state machines.
 
-All event generation and execution of task handlers for ALL state machines must be done in a single thread of execution.
+Unless SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT is enabled, all event generation and execution of task handlers for ALL state machines must be done in a single thread of execution.
 Calling into the state machine interface from two difference execution contexts is not supported and will eventually lead to problems.
 There is a lot that can be said about state machines in general and this one specifically, and I will continue to add to this documentation in the future.
 
@@ -506,14 +506,14 @@ After 10 seconds the SSF_SM_EVENT_STATUS_LED_TIMER_IDLE timer expires and trigge
 
 The framework automatically stops all timers associated with a state machine when a state transition occurs. This is why it is not necessary to explicitly stop the SSF_SM_EVENT_STATUS_LED_TIMER_TOGGLE timer.
 
-If you need to run the framework in a multi-threaded environment do the following:
+####If you need to run the framework in a multi-threaded environment do the following:
 
-  a. Enable SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT in ssfport.h
-  b. Implement the SSF_SM_THREAD_SYNC_* macros using an OS mutext primitive.
-  c. Implement the SSF_SM_WAKE_SYNC_* macros using an OS counting semaphore primitive. The unit test expects the maximum count to be capped at 1.
-  d. Implement an OS exection context (a task, thread, process, etc.) that initializes the framework and all the state machines. Then call SSFSMTask() throttled by SSF_SM_THREAD_WAKE_WAIT() with the timeout returned from SSFSMTask().
-  e. SSFSMTask() should normally execute as a high priority system task since it will execute quickly and block until a timer expires or an event is signalled.
-  d. Only SSFSMPutEventData() and SSFSMPutEvent() may be safely invoked from other execution contexts. Event signalling is allowed from interrupts when the OS synchronization primitives support such use.
+  - Enable SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT in ssfport.h
+  - Implement the SSF_SM_THREAD_SYNC_* macros using an OS mutext primitive.
+  - Implement the SSF_SM_WAKE_SYNC_* macros using an OS counting semaphore primitive. The unit test expects the maximum count to be capped at 1.
+  - Implement an OS exection context (a task, thread, process, etc.) that initializes the framework and all the state machines. Then call SSFSMTask() throttled by SSF_SM_THREAD_WAKE_WAIT() with the timeout returned from SSFSMTask().
+  - SSFSMTask() should normally execute as a high priority system task since it will execute quickly and block until a timer expires or an event is signalled.
+  - Only SSFSMPutEventData() and SSFSMPutEvent() may be safely invoked from other execution contexts. Event signalling is allowed from interrupts when the OS synchronization primitives support such use.
 
 Here's pseudocode for an OS thread initializing and running the framework, and demonstrating event generation from a different thread:
 ```

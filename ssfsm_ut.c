@@ -38,14 +38,18 @@
 
 #if SSF_CONFIG_SM_UNIT_TEST == 1
 
-    #define SSFSM_UT_MAX_EVENTS (4u)
-    #define SSFSM_UT_MAX_TIMERS (2u)
-    #define SSFSM_UT_NUM_SMS (SSF_SM_UNIT_TEST_2 + 1u)
-    #define SSFSM_UT_NUM_HANDLERS (2u)
-    #define SSFSM_UT_NUM_EVENTS (SSF_SM_EVENT_UTX_2 + 1u)
-    #define SSF_ASSERT_CLEAR(sm, sh, ev) SSF_ASSERT(_ssfsmFlags[sm][sh][ev]); \
-                                     _ssfsmFlags[sm][sh][ev] = false;
-
+#if SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT == 1
+#define SSFSM_UT_MAX_EVENTS (5u)
+#else
+#define SSFSM_UT_MAX_EVENTS (4u)
+#endif
+#define SSFSM_UT_MAX_TIMERS (2u)
+#define SSFSM_UT_NUM_SMS (SSF_SM_UNIT_TEST_2 + 1u)
+#define SSFSM_UT_NUM_HANDLERS (2u)
+#define SSFSM_UT_NUM_EVENTS (SSF_SM_EVENT_UTX_2 + 1u)
+#define SSF_ASSERT_CLEAR(sm, sh, ev) \
+    SSF_ASSERT(_ssfsmFlags[sm][sh][ev]); \
+    _ssfsmFlags[sm][sh][ev] = false;
 
 static bool _ssfsmFlags[SSFSM_UT_NUM_SMS][SSFSM_UT_NUM_HANDLERS][SSFSM_UT_NUM_EVENTS];
 
@@ -279,12 +283,37 @@ void SSFSMUnitTest(void)
     SSF_ASSERT_TEST(SSFSMTask(&nextTimeout));
 
     SSFSMInit(SSFSM_UT_MAX_EVENTS, SSFSM_UT_MAX_TIMERS);
+
+#if SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT == 1
+    start = SSFPortGetTick64();
+    SSF_SM_THREAD_WAKE_WAIT(SSF_TICKS_PER_SEC);
+    delta = SSFPortGetTick64() - start;
+    SSF_ASSERT((delta > (SSF_TICKS_PER_SEC * 0.9)) && (delta < (SSF_TICKS_PER_SEC * 1.1)));
+#endif
+
     SSF_ASSERT_TEST(SSFSMInit(SSFSM_UT_MAX_EVENTS, SSFSM_UT_MAX_TIMERS));
     SSF_ASSERT(_SSFSMFlagsAreCleared());
     SSFSMInitHandler(SSF_SM_UNIT_TEST_1, UT1TestHandler1);
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_1, 0, SSF_SM_EVENT_ENTRY);
     SSF_ASSERT(_SSFSMFlagsAreCleared());
     SSFSMPutEvent(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_UT1_1);
+
+#if SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT == 1
+    start = SSFPortGetTick64();
+    SSF_SM_THREAD_WAKE_WAIT(SSF_TICKS_PER_SEC);
+    delta = SSFPortGetTick64() - start;
+    SSF_ASSERT(delta < (SSF_TICKS_PER_SEC * 0.1));
+
+    start = SSFPortGetTick64();
+    SSF_SM_THREAD_WAKE_WAIT(SSF_TICKS_PER_SEC);
+    delta = SSFPortGetTick64() - start;
+    SSF_ASSERT((delta > (SSF_TICKS_PER_SEC * 0.9)) && (delta < (SSF_TICKS_PER_SEC * 1.1)));
+#endif
+
+#if SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT == 1
+    while (SSFSMTask(NULL));
+#endif
+
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_1, 0, SSF_SM_EVENT_UT1_1);
     SSF_ASSERT(_SSFSMFlagsAreCleared());
     SSFSMInitHandler(SSF_SM_UNIT_TEST_2, UT2TestHandler1);
@@ -323,40 +352,85 @@ void SSFSMUnitTest(void)
     SSF_ASSERT(nextTimeout == SSF_SM_MAX_TIMEOUT);
     SSF_ASSERT(_SSFSMFlagsAreCleared());
     SSFSMPutEvent(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_UT1_2);
+
+#if SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT == 1
+    while (SSFSMTask(NULL));
+#endif
+
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_1, 0, SSF_SM_EVENT_UT1_2);
+
+#if SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT == 1
+    while (SSFSMTask(NULL));
+#else
     SSF_ASSERT(_SSFSMFlagsAreCleared());
     nextTimeout = 0;
     SSF_ASSERT(SSFSMTask(&nextTimeout) == false);
     SSF_ASSERT(nextTimeout == SSF_SM_MAX_TIMEOUT);
+#endif
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_1, 0, SSF_SM_EVENT_UT1_1);
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_1, 0, SSF_SM_EVENT_UTX_1);
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_2, 0, SSF_SM_EVENT_UT1_1);
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_2, 0, SSF_SM_EVENT_UT1_2);
     SSF_ASSERT(_SSFSMFlagsAreCleared());
     SSFSMPutEvent(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_UTX_2);
+
+#if SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT == 1
+    while (SSFSMTask(NULL));
+#endif
+
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_1, 0, SSF_SM_EVENT_UTX_2);
     SSF_ASSERT(_SSFSMFlagsAreCleared());
     SSFSMPutEventData(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_UTX_2, NULL, 0);
+
+#if SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT == 1
+    while (SSFSMTask(NULL));
+#endif
+
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_1, 0, SSF_SM_EVENT_UTX_2);
     SSF_ASSERT(_SSFSMFlagsAreCleared());
     SSFSMPutEventData(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_UTX_2, (SSFSMData_t *)"a", 1);
+
+#if SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT == 1
+    while (SSFSMTask(NULL));
+#endif
+
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_1, 0, SSF_SM_EVENT_UTX_2);
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_1, 0, SSF_SM_EVENT_EXIT);
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_1, 1, SSF_SM_EVENT_ENTRY);
     SSF_ASSERT(_SSFSMFlagsAreCleared());
     SSFSMPutEventData(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_UTX_2, NULL, 0);
+
+#if SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT == 1
+    while (SSFSMTask(NULL));
+#endif
+
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_1, 1, SSF_SM_EVENT_UTX_2);
     SSF_ASSERT(_SSFSMFlagsAreCleared());
     SSFSMPutEventData(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_UTX_2, (SSFSMData_t *)"a", 1);
+
+#if SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT == 1
+    while (SSFSMTask(NULL));
+#endif
+
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_1, 1, SSF_SM_EVENT_UTX_2);
     SSF_ASSERT(_SSFSMFlagsAreCleared());
     SSFSMPutEventData(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_UTX_2, (SSFSMData_t *)"1234567890", 10);
+
+#if SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT == 1
+    while (SSFSMTask(NULL));
+#endif
+
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_1, 1, SSF_SM_EVENT_UTX_2);
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_1, 1, SSF_SM_EVENT_EXIT);
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_1, 0, SSF_SM_EVENT_ENTRY);
     SSF_ASSERT(_SSFSMFlagsAreCleared());
     start = SSFPortGetTick64();
     SSFSMPutEventData(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_UTX_1, (SSFSMData_t *)"t", 1);
+
+#if SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT == 1
+    SSFSMTask(NULL);
+#endif
+
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_1, 0, SSF_SM_EVENT_UTX_1);
     SSF_ASSERT(_SSFSMFlagsAreCleared());
     nextTimeout = 0;
@@ -390,11 +464,20 @@ void SSFSMUnitTest(void)
     SSF_ASSERT(_SSFSMFlagsAreCleared());
     start = SSFPortGetTick64();
     SSFSMPutEventData(SSF_SM_UNIT_TEST_2, SSF_SM_EVENT_UTX_2, (SSFSMData_t *)"t", 1);
+
+#if SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT == 1
+    SSFSMTask(&nextTimeout);
+    SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_2, 0, SSF_SM_EVENT_UTX_2);
+    SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_1, 1, SSF_SM_EVENT_UT1_1);
+    SSF_ASSERT(_SSFSMFlagsAreCleared());
+#else
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_2, 0, SSF_SM_EVENT_UTX_2);
     SSF_ASSERT(_SSFSMFlagsAreCleared());
     SSF_ASSERT(SSFSMTask(&nextTimeout) == true);
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_1, 1, SSF_SM_EVENT_UT1_1);
     SSF_ASSERT(_SSFSMFlagsAreCleared());
+#endif
+
     delta = nextTimeout - start;
     SSF_ASSERT((delta > (SSF_TICKS_PER_SEC * 0.9)) && (delta < (SSF_TICKS_PER_SEC * 1.1)));
     lastTimeout = nextTimeout;
@@ -409,6 +492,9 @@ void SSFSMUnitTest(void)
     SSF_ASSERT(SSFSMTask(&nextTimeout) == false);
     start = SSFPortGetTick64();
     SSFSMPutEventData(SSF_SM_UNIT_TEST_2, SSF_SM_EVENT_UT2_1, (SSFSMData_t *)"d", 1);
+#if SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT == 1
+    SSFSMTask(&nextTimeout);
+#endif
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_2, 0, SSF_SM_EVENT_UT2_1);
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_2, 0, SSF_SM_EVENT_EXIT);
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_2, 1, SSF_SM_EVENT_ENTRY);
@@ -426,5 +512,17 @@ void SSFSMUnitTest(void)
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_1, 1, SSF_SM_EVENT_UT2_2);
     SSF_ASSERT(_SSFSMFlagsAreCleared());
     SSF_ASSERT(SSFSMTask(&nextTimeout) == false);
+
+#if SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT == 1
+    start = SSFPortGetTick64();
+    SSF_SM_THREAD_WAKE_WAIT(SSF_TICKS_PER_SEC);
+    delta = SSFPortGetTick64() - start;
+    SSF_ASSERT(delta < (SSF_TICKS_PER_SEC * 0.1));
+
+    start = SSFPortGetTick64();
+    SSF_SM_THREAD_WAKE_WAIT(SSF_TICKS_PER_SEC);
+    delta = SSFPortGetTick64() - start;
+    SSF_ASSERT((delta > (SSF_TICKS_PER_SEC * 0.9)) && (delta < (SSF_TICKS_PER_SEC * 1.1)));
+#endif
 }
 #endif /* SSF_CONFIG_SM_UNIT_TEST */

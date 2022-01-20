@@ -54,6 +54,7 @@ For other platforms there are only a few essential tasks that must be completed:
   - Run the unit tests.
 
 Only the finite state machine framework uses system ticks, so you can stub out SSFPortGetTick64() if it is not needed.
+When the finite state machine framework runs in a multi-threaded environment some OS synchronization primitives must be implemented.
 
 ### Heap and Stack Memory
 Only the memory pool and finite state machine use dynamic memory, aka heap. The memory pool only does so when a pool is created. The finite state machine only uses malloc when an event has data whose size is bigger than the sizeof a pointer.
@@ -95,7 +96,7 @@ This means that calls into those interfaces from different execution contexts wi
 
 For example, you can have linked list object A in task 1 and linked list object B in task 2 and they will be managed independently and correctly, so long as they are only accessed from the context of their respective task.
 
-In contrast the finite state machine framework requires that all event generation and state handler execution for all state machines occur in the same execution context.
+To properly run the finite state machine framework in a multi-threaded system SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT must be enabled and synchronization macros must be implemented. For more details see below.
 
 ## Interfaces
 ### Byte FIFO Interface
@@ -487,7 +488,7 @@ void main(void)
     {
         if (ReceivedMessage())
         {
-            SSFSMPutEventData(SSF_SM_STATUS_LED, SSF_SM_EVENT_STATUS_RX_DATA);
+            SSFSMPutEvent(SSF_SM_STATUS_LED, SSF_SM_EVENT_STATUS_RX_DATA);
         }
         SSFSMTask(NULL);
     }
@@ -504,6 +505,50 @@ If additional SSF_SM_EVENT_STATUS_RX_DATA events are signaled while in the toggl
 After 10 seconds the SSF_SM_EVENT_STATUS_LED_TIMER_IDLE timer expires and triggers a state transition to the idle state. First the EXIT event in the blink handler is executed automatically by the framework, followed by the ENTRY event in the idle handler that turns off the status LED.
 
 The framework automatically stops all timers associated with a state machine when a state transition occurs. This is why it is not necessary to explicitly stop the SSF_SM_EVENT_STATUS_LED_TIMER_TOGGLE timer.
+
+If you need to run the framework in a multi-threaded environment do the following:
+
+  a. Enable SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT in ssfport.h
+  b. Implement the SSF_SM_THREAD_SYNC_* macros using an OS mutext primitive.
+  c. Implement the SSF_SM_WAKE_SYNC_* macros using an OS counting semaphore primitive. The unit test expects the maximum count to be capped at 1.
+  d. Implement an OS exection context (a task, thread, process, etc.) that initializes the framework and all the state machines. Then call SSFSMTask() throttled by SSF_SM_THREAD_WAKE_WAIT() with the timeout returned from SSFSMTask().
+  e. SSFSMTask() should normally execute as a high priority system task since it will execute quickly and block until a timer expires or an event is signalled.
+  d. Only SSFSMPutEventData() and SSFSMPutEvent() may be safely invoked from other execution contexts. Event signalling is allowed from interrupts when the OS synchronization primitives support such use.
+
+Here's pseudocode for an OS thread initializing and running the framework, and demonstrating event generation from a different thread:
+```
+void OSThreadSSFSM(void *arg)
+{
+    SSFSMTimeout_t to;
+
+    /* Initialize state machine framework */
+    SSFSMInit(SSF_SM_MAX_ACTIVE_EVENTS, SSF_SM_MAX_ACTIVE_TIMERS);
+
+    /* Initialize status LED state machine */
+    SSFSMInitHandler(SSF_SM_STATUS_LED, StatusLEDIdleHandler);
+
+    while (true)
+    {
+        SSFSMTask(&to);
+        SSF_SM_THREAD_WAKE_WAIT(to);
+    }
+}
+
+...
+
+void OSThreadEventGenerator(void *arg)
+{
+    ...
+
+    while (true)
+    {
+        if (ReceivedMessage())
+        {
+            SSFSMPutEvent(SSF_SM_STATUS_LED, SSF_SM_EVENT_STATUS_RX_DATA);
+        }
+    }
+}
+```    
 
 ### Reed-Solomon FEC Encoder/Decoder Interface
 

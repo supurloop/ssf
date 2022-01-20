@@ -178,6 +178,47 @@ typedef uint64_t SSFPortTick_t;
 /* --------------------------------------------------------------------------------------------- */
 /* Configure ssfsm's state machine interface                                                     */
 /* --------------------------------------------------------------------------------------------- */
+/* 0, API calls must be made in same context; 1, events may be signalled from other contexts. */
+#define SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT (0u)
+
+/* To synchronize event signals from other contexts the following macros must be implemented. */
+#if SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT == 1
+#ifdef _WIN32
+#define SSF_SM_THREAD_SYNC_DECLARATION static HANDLE _ssfsmSyncMutex
+#define SSF_SM_THREAD_SYNC_INIT() { \
+    _ssfsmSyncMutex = CreateMutex(NULL, FALSE, NULL); \
+    SSF_ASSERT(_ssfsmSyncMutex != NULL); \
+}
+#define SSF_SM_THREAD_SYNC_ACQUIRE() { \
+    SSF_ASSERT(WaitForSingleObject(_ssfsmSyncMutex, INFINITE) == WAIT_OBJECT_0); \
+}
+#define SSF_SM_THREAD_SYNC_RELEASE() { SSF_ASSERT(ReleaseMutex(_ssfsmSyncMutex)); }
+
+#define SSF_SM_THREAD_WAKE_DECLARATION HANDLE gssfsmWakeSem
+#define SSF_SM_THREAD_WAKE_INIT() { \
+    gssfsmWakeSem = CreateSemaphore(NULL, 0, 1, NULL); \
+    SSF_ASSERT(gssfsmWakeSem != NULL); \
+}
+#define SSF_SM_THREAD_WAKE_POST() { ReleaseSemaphore(gssfsmWakeSem, 1, NULL); }
+#define SSF_SM_THREAD_WAKE_WAIT(timeout) { \
+    DWORD waitResult; \
+    waitResult = WaitForSingleObject(gssfsmWakeSem, timeout); \
+    SSF_ASSERT((waitResult == WAIT_OBJECT_0) || (waitResult == WAIT_TIMEOUT)); \
+}
+extern HANDLE gssfsmWakeSem;
+#else /* _WIN32 */
+#define SSF_SM_THREAD_SYNC_DECLARATION
+#define SSF_SM_THREAD_SYNC_INIT() { }
+#define SSF_SM_THREAD_SYNC_ACQUIRE() { }
+#define SSF_SM_THREAD_SYNC_RELEASE() { }
+
+#define SSF_SM_THREAD_WAKE_DECLARATION
+#define SSF_SM_THREAD_WAKE_INIT() { }
+#define SSF_SM_THREAD_WAKE_POST() { }
+#define SSF_SM_THREAD_WAKE_WAIT(timeout) { }
+#endif /*_WIN32 */
+#endif /* SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT */
+
 /* Maximum number of simultaneously queued events for all state machines. */
 #define SSF_SM_MAX_ACTIVE_EVENTS (3u)
 

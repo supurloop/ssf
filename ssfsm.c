@@ -75,6 +75,11 @@ static bool _ssfsmIsInited;
 static uint64_t _ssfsmMallocs;
 static uint64_t _ssfsmFrees;
 
+#if SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT == 1
+SSF_SM_THREAD_SYNC_DECLARATION;
+SSF_SM_THREAD_WAKE_DECLARATION;
+#endif
+
 /* --------------------------------------------------------------------------------------------- */
 /* Stops all timers for active state machine.                                                    */
 /* --------------------------------------------------------------------------------------------- */
@@ -151,7 +156,8 @@ static void _SSFSMAllocEventData(SSFSMEvent_t *event, const SSFSMData_t *data,
 
     event->dataLen = dataLen;
     if (event->dataLen == 0) event->data = NULL;
-    else if (event->dataLen <= sizeof(SSFSMData_t *)) memcpy(&(event->data), data, event->dataLen);
+    else if (event->dataLen <= sizeof(SSFSMData_t *))
+    { memcpy(&(event->data), data, event->dataLen); }
     else
     {
         SSF_ASSERT((event->data = (SSFSMData_t *)malloc(event->dataLen)) != NULL);
@@ -185,6 +191,12 @@ void SSFSMInit(uint32_t maxEvents, uint32_t maxTimers)
     SSFMPoolInit(&_ssfsmTimerPool, maxTimers, sizeof(SSFSMTimer_t));
     SSFLLInit(&_ssfsmEvents, maxEvents);
     SSFLLInit(&_ssfsmTimers, maxTimers);
+
+#if SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT == 1
+    SSF_SM_THREAD_WAKE_INIT();
+    SSF_SM_THREAD_SYNC_INIT();
+#endif
+
     _ssfsmIsInited = true;
 }
 
@@ -219,16 +231,26 @@ void SSFSMPutEventData(SSFSMId_t smid, SSFSMEventId_t eid, const SSFSMData_t *da
     SSF_ASSERT(_ssfsmIsInited);
     SSF_ASSERT(_SSFSMStates[smid].current != NULL);
 
+#if SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT == 0
     /* In state handler or there are pending events? */
     if ((_ssfsmActive < SSF_SM_END) || (SSFLLIsEmpty(&_ssfsmEvents) == false))
     {
-        /* Must queue event */
+#endif
+#if SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT == 1
+        SSF_SM_THREAD_SYNC_ACQUIRE();
+#endif
+        /* Queue event */
         e = (SSFSMEvent_t *)SSFMPoolAlloc(&_ssfsmEventPool, sizeof(SSFSMEvent_t), 0x11);
         e->smid = smid;
         e->eid = eid;
         _SSFSMAllocEventData(e, data, dataLen);
         SSF_LL_FIFO_PUSH(&_ssfsmEvents, e);
+#if SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT == 1
+        SSF_SM_THREAD_WAKE_POST();
+        SSF_SM_THREAD_SYNC_RELEASE();
+#else
     } else _SSFSMProcessEvent(smid, eid, data, dataLen);
+#endif
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -311,20 +333,21 @@ bool SSFSMTask(SSFSMTimeout_t *nextTimeout)
     SSFSMTimer_t *t;
     SSFSMTimer_t *next;
     SSFSMTimeout_t current = SSFPortGetTick64();
+    bool retVal;
 
     SSF_ASSERT(_ssfsmActive >= SSF_SM_END);
     SSF_ASSERT(_ssfsmIsInited);
 
-    if (nextTimeout != NULL) *nextTimeout = SSF_SM_MAX_TIMEOUT;
+#if SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT == 1
+    SSF_SM_THREAD_SYNC_ACQUIRE();
+#endif
 
     /* Process timers. */
     t = (SSFSMTimer_t *)SSF_LL_HEAD(&_ssfsmTimers);
     while (t != NULL)
     {
         next = (SSFSMTimer_t *)SSF_LL_NEXT_ITEM((SSFLLItem_t *)t);
-        if ((nextTimeout != NULL) && (t->to < (*nextTimeout))) *nextTimeout = t->to;
-        if (t->to > current)
-        {t = next; continue; }
+        if (t->to > current) { t = next; continue; }
         SSFLLGetItem(&_ssfsmTimers, (SSFLLItem_t **)&t, SSF_LL_LOC_ITEM, (SSFLLItem_t *)t);
         SSF_LL_FIFO_PUSH(&_ssfsmEvents, (SSFLLItem_t *)t->event);
         SSFMPoolFree(&_ssfsmTimerPool, t);
@@ -341,6 +364,24 @@ bool SSFSMTask(SSFSMTimeout_t *nextTimeout)
         {_SSFSMFreeEventData(e->data); }
         SSFMPoolFree(&_ssfsmEventPool, e);
     }
-    return !SSFLLIsEmpty(&_ssfsmTimers);
+
+    /* If necessary determine next timer expiration */
+    if (nextTimeout != NULL)
+    {
+        *nextTimeout = SSF_SM_MAX_TIMEOUT;
+        t = (SSFSMTimer_t*)SSF_LL_HEAD(&_ssfsmTimers);
+        while (t != NULL)
+        {
+            next = (SSFSMTimer_t*)SSF_LL_NEXT_ITEM((SSFLLItem_t*)t);
+            if (t->to < (*nextTimeout)) *nextTimeout = t->to;
+            t = next;
+        }
+    }
+    retVal = !SSFLLIsEmpty(&_ssfsmTimers);
+
+#if SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT == 1
+    SSF_SM_THREAD_SYNC_RELEASE();
+#endif
+    return retVal;
 }
 

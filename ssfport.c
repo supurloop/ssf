@@ -53,9 +53,9 @@ void SSFPortAssert(const char* file, unsigned int line)
 {
 #if SSF_CONFIG_UNIT_TEST == 1
     if (memcmp(ssfUnitTestMark, ssfUnitTestZeroMark, sizeof(ssfUnitTestMark)) != 0)
-    {longjmp(ssfUnitTestMark, -1); } else
+    { longjmp(ssfUnitTestMark, -1); } else
 #endif /* SSF_CONFIG_UNIT_TEST */
-    {printf("SSF Assertion: %s:%u\r\n", file, line); }
+    { printf("SSF Assertion: %s:%u\r\n", file, line); }
     for (;;);
 }
 

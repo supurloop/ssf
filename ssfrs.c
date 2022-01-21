@@ -133,7 +133,7 @@ static const uint8_t _gfInv[256] =
 #define GF_MUL(x, y) ((x == 0) || (y == 0) ? 0 : _gfExp[_gfLog[x] + _gfLog[y]])
 #define MOD255(m) ((m) % 255)
 #define GF_DIV(x, y) ((x == 0) ? 0 : _gfExp[MOD255(_gfLog[x] + 255 - _gfLog[y])])
-#define GF_POW(x, p) (_gfExp[MOD255(_gfLog[x] * p)])
+#define GF_POW(x, p) (_gfExp[MOD255(((uint32_t) _gfLog[x]) * (p))])
 #define GF_INV(x) (_gfInv[x])
 
 /* --------------------------------------------------------------------------------------------- */

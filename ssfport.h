@@ -207,7 +207,9 @@ typedef uint64_t SSFPortTick_t;
 }
 extern HANDLE gssfsmWakeSem;
 #else /* WIN32 */
-/* Assume no CLOCK_MONOTONIC support for pthread_cond_timedwait() */
+/* 0, no CLOCK_MONOTONIC support for pthread_cond_timedwait(), potential timeouts bugs */
+/* 1, CLOCK_MONOTONIC support for pthread_cond_timedwait(), recommended */
+#define SSF_SM_THREAD_PTHREAD_CLOCK_MONOTONIC (1u)
 #include <pthread.h>
 #include <errno.h>
 #include <stdbool.h>
@@ -228,27 +230,43 @@ extern bool gssfsmIsWakeSignalled;
 extern pthread_cond_t gssfsmWakeCond;
 extern pthread_mutex_t gssfsmWakeMutex;
 
+#if SSF_SM_THREAD_PTHREAD_CLOCK_MONOTONIC == 1
+#define SSF_SM_THREAD_PTHREAD_CLOCK CLOCK_MONOTONIC
+#define SSF_SM_THREAD_WAKE_INIT() { \
+    pthread_condattr_t attr; \
+    SSF_ASSERT(pthread_condattr_init(&attr) == 0); \
+    SSF_ASSERT(pthread_condattr_setclock(&attr, CLOCK_MONOTONIC) == 0); \
+    SSF_ASSERT(pthread_cond_init(&gssfsmWakeCond, &attr) == 0); \
+    SSF_ASSERT(pthread_mutex_init(&gssfsmWakeMutex, NULL) == 0); \
+}
+#else
+#define SSF_SM_THREAD_PTHREAD_CLOCK CLOCK_REALTIME
 #define SSF_SM_THREAD_WAKE_INIT() { \
     SSF_ASSERT(pthread_cond_init(&gssfsmWakeCond, NULL) == 0); \
     SSF_ASSERT(pthread_mutex_init(&gssfsmWakeMutex, NULL) == 0); \
 }
+#endif
 #define SSF_SM_THREAD_WAKE_POST() { \
     SSF_ASSERT(pthread_mutex_lock(&gssfsmWakeMutex) == 0); \
     gssfsmIsWakeSignalled = true; \
     SSF_ASSERT(pthread_cond_signal(&gssfsmWakeCond) == 0); \
     SSF_ASSERT(pthread_mutex_unlock(&gssfsmWakeMutex) == 0); \
 }
+
+/* On a cond_timedwait() timeout OS X has errno set to ETIMEDOUT + 256! */
+/* On a cond_timedwait() timeout a recent version of Debian Linux has errno set to 0! */
+/* Based on documentation a cond_timedwait() timeout should set errno to ETIMEDOUT. */
 #define SSF_SM_THREAD_WAKE_WAIT(timeout) { \
     SSF_ASSERT(pthread_mutex_lock(&gssfsmWakeMutex) == 0); \
     if (gssfsmIsWakeSignalled == false) { \
         struct timespec ts; \
-        SSF_ASSERT(clock_gettime(CLOCK_REALTIME, &ts) == 0); \
+        SSF_ASSERT(clock_gettime(SSF_SM_THREAD_PTHREAD_CLOCK, &ts) == 0); \
         ts.tv_nsec += (((timeout * 1000ul) / SSF_TICKS_PER_SEC) * 1000000ul); \
         while (ts.tv_nsec >= 1000000000l) { \
             ts.tv_nsec -= 1000000000l; \
             ts.tv_sec++; } \
         if (pthread_cond_timedwait(&gssfsmWakeCond, &gssfsmWakeMutex, &ts) != 0) { \
-            SSF_ASSERT((errno & 0xff) == ETIMEDOUT); } } \
+            SSF_ASSERT(((errno & 0xff) == ETIMEDOUT) || (errno == 0)); } } \
     gssfsmIsWakeSignalled = false; \
     SSF_ASSERT(pthread_mutex_unlock(&gssfsmWakeMutex) == 0); \
 }

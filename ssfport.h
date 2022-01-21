@@ -206,17 +206,52 @@ typedef uint64_t SSFPortTick_t;
     SSF_ASSERT((waitResult == WAIT_OBJECT_0) || (waitResult == WAIT_TIMEOUT)); \
 }
 extern HANDLE gssfsmWakeSem;
-#else /* _WIN32 */
-#define SSF_SM_THREAD_SYNC_DECLARATION
-#define SSF_SM_THREAD_SYNC_INIT() { }
-#define SSF_SM_THREAD_SYNC_ACQUIRE() { }
-#define SSF_SM_THREAD_SYNC_RELEASE() { }
+#endif /* WIN32 */
+/* Assume no CLOCK_MONOTONIC support for pthread_cond_timedwait() */
+#include <pthread.h>
+#include <errno.h>
+#include <stdbool.h>
 
-#define SSF_SM_THREAD_WAKE_DECLARATION
-#define SSF_SM_THREAD_WAKE_INIT() { }
-#define SSF_SM_THREAD_WAKE_POST() { }
-#define SSF_SM_THREAD_WAKE_WAIT(timeout) { }
-#endif /*_WIN32 */
+#define SSF_SM_THREAD_SYNC_DECLARATION pthread_mutex_t _ssfsmSyncMutex
+#define SSF_SM_THREAD_SYNC_INIT() { \
+    pthread_mutexattr_t attr; \
+    SSF_ASSERT(pthread_mutexattr_init(&attr) == 0); \
+    SSF_ASSERT(pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE) == 0); \
+    SSF_ASSERT(pthread_mutex_init(&_ssfsmSyncMutex, &attr) == 0); \
+}
+#define SSF_SM_THREAD_SYNC_ACQUIRE() { SSF_ASSERT(pthread_mutex_lock(&_ssfsmSyncMutex) == 0); }
+#define SSF_SM_THREAD_SYNC_RELEASE() { SSF_ASSERT(pthread_mutex_unlock(&_ssfsmSyncMutex) == 0); }
+
+#define SSF_SM_THREAD_WAKE_DECLARATION \
+    bool gssfsmIsWakeSignalled; pthread_cond_t gssfsmWakeCond; pthread_mutex_t gssfsmWakeMutex
+extern bool gssfsmIsWakeSignalled;
+extern pthread_cond_t gssfsmWakeCond;
+extern pthread_mutex_t gssfsmWakeMutex;
+
+#define SSF_SM_THREAD_WAKE_INIT() { \
+    SSF_ASSERT(pthread_cond_init(&gssfsmWakeCond, NULL) == 0); \
+    SSF_ASSERT(pthread_mutex_init(&gssfsmWakeMutex, NULL) == 0); \
+}
+#define SSF_SM_THREAD_WAKE_POST() { \
+    SSF_ASSERT(pthread_mutex_lock(&gssfsmWakeMutex) == 0); \
+    gssfsmIsWakeSignalled = true; \
+    SSF_ASSERT(pthread_cond_signal(&gssfsmWakeCond) == 0); \
+    SSF_ASSERT(pthread_mutex_unlock(&gssfsmWakeMutex) == 0); \
+}
+#define SSF_SM_THREAD_WAKE_WAIT(timeout) { \
+    SSF_ASSERT(pthread_mutex_lock(&gssfsmWakeMutex) == 0); \
+    if (gssfsmIsWakeSignalled == false) { \
+        struct timespec ts; \
+        SSF_ASSERT(clock_gettime(CLOCK_REALTIME, &ts) == 0); \
+        ts.tv_nsec += (((timeout * 1000ul) / SSF_TICKS_PER_SEC) * 1000000ul); \
+        while (ts.tv_nsec >= 1000000000l) { \
+            ts.tv_nsec -= 1000000000l; \
+            ts.tv_sec++; } \
+        if (pthread_cond_timedwait(&gssfsmWakeCond, &gssfsmWakeMutex, &ts) != 0) { \
+            SSF_ASSERT((errno & 0xff) == ETIMEDOUT); } } \
+    gssfsmIsWakeSignalled = false; \
+    SSF_ASSERT(pthread_mutex_unlock(&gssfsmWakeMutex) == 0); \
+}
 #endif /* SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT */
 
 /* Maximum number of simultaneously queued events for all state machines. */

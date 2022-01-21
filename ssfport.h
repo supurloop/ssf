@@ -206,7 +206,7 @@ typedef uint64_t SSFPortTick_t;
     SSF_ASSERT((waitResult == WAIT_OBJECT_0) || (waitResult == WAIT_TIMEOUT)); \
 }
 extern HANDLE gssfsmWakeSem;
-#endif /* WIN32 */
+#else /* WIN32 */
 /* Assume no CLOCK_MONOTONIC support for pthread_cond_timedwait() */
 #include <pthread.h>
 #include <errno.h>
@@ -252,6 +252,7 @@ extern pthread_mutex_t gssfsmWakeMutex;
     gssfsmIsWakeSignalled = false; \
     SSF_ASSERT(pthread_mutex_unlock(&gssfsmWakeMutex) == 0); \
 }
+#endif /* WIN32 */
 #endif /* SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT */
 
 /* Maximum number of simultaneously queued events for all state machines. */

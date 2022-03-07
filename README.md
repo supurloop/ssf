@@ -506,7 +506,8 @@ After 10 seconds the SSF_SM_EVENT_STATUS_LED_TIMER_IDLE timer expires and trigge
 
 The framework automatically stops all timers associated with a state machine when a state transition occurs. This is why it is not necessary to explicitly stop the SSF_SM_EVENT_STATUS_LED_TIMER_TOGGLE timer.
 
-####If you need to run the framework in a multi-threaded environment do the following:
+
+If you need to run the framework in a multi-threaded environment do the following:
 
   - Enable SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT in ssfport.h
   - Implement the SSF_SM_THREAD_SYNC_* macros using an OS mutext primitive.
@@ -514,6 +515,11 @@ The framework automatically stops all timers associated with a state machine whe
   - Implement an OS exection context (a task, thread, process, etc.) that initializes the framework and all the state machines. Then call SSFSMTask() throttled by SSF_SM_THREAD_WAKE_WAIT() with the timeout returned from SSFSMTask().
   - SSFSMTask() should normally execute as a high priority system task since it will execute quickly and block until a timer expires or an event is signalled.
   - Only SSFSMPutEventData() and SSFSMPutEvent() may be safely invoked from other execution contexts. Event signalling is allowed from interrupts when the OS synchronization primitives support such use.
+
+Out of the box Windows supports the state machine framework in multi-threaded environments.
+And, there is a pthread implementation for OS X and Linux that supports the state machine framework in multi-threaded environments.
+OS X does not support CLOCK_MONOTONIC for pthread_cond_timedwait() so set SSF_SM_THREAD_PTHREAD_CLOCK_MONOTONIC to 0. Be aware that a system time change could cause unexpected behavior.
+Another note on the pthread port: Contrary to standard pthreads docs, neither OS X or Linux return ETIMEDOUT from pthread_cond_timedwait() when a timeout occurred, this is something I intend to investigate.
 
 Here's pseudocode for an OS thread initializing and running the framework, and demonstrating event generation from a different thread:
 ```

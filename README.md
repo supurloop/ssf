@@ -25,6 +25,7 @@ The framework implements a number of common embedded system functions:
   13. A TLV encoder/decoder interface.
   14. An AES block encryption interface.
   15. An AES-GCM authenticated encryption interface.
+  16. A version controlled interface for reliably storing configuration to NV storage.
 
 To give you an idea of the framework size here are some program memory estimates for each component compiled on an MSP430 with Level 3 optimization:
 Byte FIFO, linked list, memory pool, Base64, Hex ASCII are each about 1000 bytes.
@@ -872,6 +873,38 @@ The AES-GCM interface provides encryption and authentication for arbitary length
         return;
     }
     /* Also verify that frameCounter value used in IV has increased, otherwise message is replayed. */
+```
+
+### Version Controlled Configuration Storage Interface
+
+Most embedded systems need to read and write configuration data to non-volatile memory such as NOR flash. This cfg interface handles all the details of reliably storing versioned data to the flash and prevents redundant writes.
+
+```
+#define MY_CONFIG_ID (0u) /* 32-bit number uniquely each type of config in the system */
+#define MY_CONFIG_VER_1 (1u) /* Version number 1 of my config data */
+#define MY_CONFIG_VER_2 (2u) /* Version number 2 of my config data */
+
+uint8_t myConfigData[SSF_MAX_CFG_DATA_SIZE_LIMIT]; /* Can be any arbitrary data or structure */ 
+uint16_t myConfigDataLen;
+
+/* Bootstrap config */
+if (SSFCfgRead(myConfigData, &myConfigDataLen, sizeof(myConfigData), MY_CONFIG_ID) == MY_CONFIG_VER_1)
+{
+    /* Successfully read version 1 of my config data, myConfigDataLen is actual config data len */
+    ...
+}
+if (SSFCfgRead(myConfigData, &myConfigDataLen, sizeof(myConfigData), MY_CONFIG_ID) == MY_CONFIG_VER_2)
+{
+    /* Successfully read version 2 of my config data, myConfigDataLen is actual config data len */
+    ...
+}
+else
+{
+    /* Set my config to defaults */
+    memset(myConfigData, 0, sizeof(myConfigData));
+    SSFCfgWrite(myConfigData, 5, MY_CONFIG_ID, MY_CONFIG_VER_2);
+}
+
 ```
 
 ## Conclusion

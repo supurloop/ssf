@@ -108,6 +108,7 @@ typedef uint64_t SSFPortTick_t;
 #define SSF_CONFIG_TLV_UNIT_TEST (1u)
 #define SSF_CONFIG_AES_UNIT_TEST (1u)
 #define SSF_CONFIG_AESGCM_UNIT_TEST (1u)
+#define SSF_CONFIG_CFG_UNIT_TEST (1u)
 
 /* If any unit test is enabled then enable unit test mode */
 #if SSF_CONFIG_BFIFO_UNIT_TEST == 1 || \
@@ -124,7 +125,8 @@ typedef uint64_t SSFPortTick_t;
     SSF_CONFIG_SHA2_UNIT_TEST == 1 || \
     SSF_CONFIG_TLV_UNIT_TEST == 1 || \
     SSF_CONFIG_AES_UNIT_TEST == 1 || \
-    SSF_CONFIG_AESGCM_UNIT_TEST == 1 
+    SSF_CONFIG_AESGCM_UNIT_TEST == 1 || \
+    SSF_CONFIG_CFG_UNIT_TEST == 1 
 #define SSF_CONFIG_UNIT_TEST (1u)
 #else
 #define SSF_CONFIG_UNIT_TEST (0u)
@@ -363,6 +365,33 @@ enum SSFSMEventList
 /* 1 allows 2^8 unique TAGs and VALUE fields < 2^8 bytes in length */
 /* 0 allows 2^30 unique TAGs and VALUE fields < 2^30 bytes in length */
 #define SSF_TLV_ENABLE_FIXED_MODE (0u)
+
+/* --------------------------------------------------------------------------------------------- */
+/* Configure ssfcfg interface                                                                    */
+/* --------------------------------------------------------------------------------------------- */
+#define SSF_CFG_MAX_STORAGE_SIZE (4096u) /* Max size of erasable NV storage sector */
+#define SSF_MAX_CFG_DATA_SIZE_LIMIT (32u) /* Max size of data */
+#define SSF_CFG_WRITE_CHECK_CHUNK_SIZE (32u) /* Max size of tmp stack buffer for write checking */
+
+/* 1 to use RAM as storage, 0 to specific another storage interface */
+#define SSF_CFG_ENABLE_STOARGE_RAM (1u)
+#if SSF_CFG_ENABLE_STOARGE_RAM == 0
+#define SSF_CFG_ERASE_STORAGE(dataId)
+#define SSF_CFG_WRITE_STORAGE(data, dataSize, dataId, dataOffset)
+#define SSF_CFG_READ_STORAGE(data, dataSize, dataId, dataOffset)
+#else
+#define SSF_MAX_CFG_RAM_SECTORS (3u)
+#define SSF_MAX_CFG_RAM_SECTOR_SIZE (SSF_MAX_CFG_DATA_SIZE_LIMIT + 32u)
+#define SSF_CFG_ERASE_STORAGE(dataId) { \
+    memset(&_ssfCfgStorageRAM[dataId], 0xff, SSF_MAX_CFG_RAM_SECTOR_SIZE); \
+}
+#define SSF_CFG_WRITE_STORAGE(data, dataLen, dataId, dataOffset) { \
+    memcpy(&_ssfCfgStorageRAM[dataId][dataOffset], data, dataLen); \
+}
+#define SSF_CFG_READ_STORAGE(data, dataSize, dataId, dataOffset) { \
+    memcpy(data, &_ssfCfgStorageRAM[dataId][dataOffset], dataSize); \
+}
+#endif
 
 /* --------------------------------------------------------------------------------------------- */
 /* External interface                                                                            */

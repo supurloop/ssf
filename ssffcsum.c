@@ -33,6 +33,7 @@
 #include "ssffcsum.h"
 #include "ssfport.h"
 #include "ssfassert.h"
+#include "ssffcsum.h"
 
 /* Mod 255 where 0 <= a <= 510 */
 #define MOD255(a) ((((a) > 255) && ((a) != 510)) ? (uint8_t)(((a) >> 8) + ((a) & 0xff)) : \

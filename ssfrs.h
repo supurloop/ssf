@@ -42,13 +42,13 @@
 #ifndef SSF_RS_INCLUDE_H
 #define SSF_RS_INCLUDE_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdint.h>
 #include <stdbool.h>
 #include "ssfport.h"
-
-/* --------------------------------------------------------------------------------------------- */
-/* Defines                                                                                       */
-/* --------------------------------------------------------------------------------------------- */
 
 /* --------------------------------------------------------------------------------------------- */
 /* External interface                                                                            */
@@ -64,6 +64,10 @@ bool SSFRSDecode(uint8_t *msg, uint16_t msgSize, uint16_t *msgLen, uint8_t chunk
 #if SSF_CONFIG_RS_UNIT_TEST == 1
 void SSFRSUnitTest(void);
 #endif /* SSF_CONFIG_RS_UNIT_TEST */
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* SSF_RS_INCLUDE_H */
 

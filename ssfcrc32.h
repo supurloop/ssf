@@ -32,6 +32,10 @@
 #ifndef SSFCRC32_H_INCLUDE
 #define SSFCRC32_H_INCLUDE
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdint.h>
 #include "ssfport.h"
 
@@ -48,5 +52,9 @@ uint32_t SSFCRC32(const uint8_t *in, uint32_t inLen, uint32_t crc);
 #if SSF_CONFIG_CRC32_UNIT_TEST == 1
 void SSFCRC32UnitTest(void);
 #endif /* SSF_CONFIG_CRC32_UNIT_TEST */
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* SSFCRC32_H_INCLUDE */

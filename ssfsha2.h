@@ -32,6 +32,10 @@
 #ifndef SSF_SHA2_H_INCLUDE
 #define SSF_SHA2_H_INCLUDE
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdio.h>
 #include <stdint.h>
 #include "ssfport.h"
@@ -65,5 +69,9 @@ void SSFSHA2_64(const uint8_t* in, uint32_t inLen, uint8_t* out, uint32_t outSiz
 #if SSF_CONFIG_SHA2_UNIT_TEST == 1
 void SSFSHA2UnitTest(void);
 #endif /* SSF_CONFIG_SHA2_UNIT_TEST */
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* SSF_SHA2_H_INCLUDE */

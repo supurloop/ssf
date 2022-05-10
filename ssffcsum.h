@@ -32,6 +32,10 @@
 #ifndef SSFFCSUM_H_INCLUDE
 #define SSFFCSUM_H_INCLUDE
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdint.h>
 #include "ssfport.h"
 
@@ -48,6 +52,10 @@ uint16_t SSFFCSum16(const uint8_t *in, size_t inLen, uint16_t initial);
 #if SSF_CONFIG_FCSUM_UNIT_TEST == 1
 void SSFFCSumUnitTest(void);
 #endif /* SSF_CONFIG_FCSUM_UNIT_TEST */
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* SSFFCSUM_H_INCLUDE */
 

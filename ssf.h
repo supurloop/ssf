@@ -31,6 +31,11 @@
 /* --------------------------------------------------------------------------------------------- */
 #ifndef SSF_H_INCLUDE
 #define SSF_H_INCLUDE
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <string.h>
 
 /* --------------------------------------------------------------------------------------------- */
@@ -60,4 +65,9 @@ extern int ssfUnitTestJmpRet;
     memset(ssfUnitTestMark, 0, sizeof(ssfUnitTestMark)); } while (0)
 
 #endif /* SSF_CONFIG_UNIT_TEST */
+
+#ifdef __cplusplus
+}
+#endif
+
 #endif /* SSF_H_INCLUDE */

@@ -79,6 +79,7 @@
 #include <stdbool.h>
 #include "ssfport.h"
 #include "ssfassert.h"
+#include "ssfaes.h"
 
 #define FGFM2(x) ((x<<1) ^ (0x1b & -(x>>7)))
 
@@ -268,8 +269,8 @@ void SSFAESBlockEncrypt(const uint8_t *pt, size_t ptLen, uint8_t *ct, size_t ctS
     SSF_ASSERT(ct != NULL);
     SSF_ASSERT(key != NULL);
 
-    SSF_ASSERT(ptLen == 16);
-    SSF_ASSERT(ctSize == 16);
+    SSF_ASSERT(ptLen == SSF_AES_BLOCK_SIZE);
+    SSF_ASSERT(ctSize == SSF_AES_BLOCK_SIZE);
     SSF_ASSERT(keyLen == (((size_t) nk) << 2));
 
     SSF_ASSERT(((nr == 10) && (nk == 4)) ||
@@ -312,8 +313,8 @@ void SSFAESBlockDecrypt(const uint8_t *ct, size_t ctLen, uint8_t *pt, size_t ptS
     SSF_ASSERT(pt != NULL);
     SSF_ASSERT(key != NULL);
 
-    SSF_ASSERT(ctLen == 16);
-    SSF_ASSERT(ptSize == 16);
+    SSF_ASSERT(ctLen == SSF_AES_BLOCK_SIZE);
+    SSF_ASSERT(ptSize == SSF_AES_BLOCK_SIZE);
     SSF_ASSERT(keyLen == (((size_t) nk) << 2));
 
     SSF_ASSERT(((nr == 10) && (nk == 4)) ||

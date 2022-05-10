@@ -32,6 +32,10 @@
 #ifndef SSF_BASE64_H_INCLUDE
 #define SSF_BASE64_H_INCLUDE
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdint.h>
 #include <stdbool.h>
 #include "ssfport.h"
@@ -50,6 +54,10 @@ bool SSFBase64Decode(SSFCStrIn_t in, size_t inLenLim, uint8_t *out, size_t outSi
 #if SSF_CONFIG_BASE64_UNIT_TEST == 1
 void SSFBase64UnitTest(void);
 #endif /* SSF_CONFIG_BASE64_UNIT_TEST */
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* SSF_BASE64_H_INCLUDE */
 

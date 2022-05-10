@@ -32,6 +32,10 @@
 #ifndef SSFCFG_H_INCLUDE
 #define SSFCFG_H_INCLUDE
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdint.h>
 #include <stdbool.h>
 #include "ssfport.h"
@@ -53,6 +57,10 @@ dataVersion_t SSFCfgRead(uint8_t *data, uint16_t *datalen, size_t dataSize, data
 #if SSF_CONFIG_CFG_UNIT_TEST == 1
 void SSFCfgUnitTest(void);
 #endif /* SSF_CONFIG_CFG_UNIT_TEST */
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* SSFCFG_H_INCLUDE */
 

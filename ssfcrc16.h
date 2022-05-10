@@ -32,6 +32,10 @@
 #ifndef SSFCRC16_H_INCLUDE
 #define SSFCRC16_H_INCLUDE
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdint.h>
 #include "ssfport.h"
 
@@ -48,5 +52,9 @@ uint16_t SSFCRC16(const uint8_t *in, uint16_t inLen, uint16_t crc);
 #if SSF_CONFIG_CRC16_UNIT_TEST == 1
 void SSFCRC16UnitTest(void);
 #endif /* SSF_CONFIG_CRC16_UNIT_TEST */
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* SSFCRC16_H_INCLUDE */

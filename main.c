@@ -48,6 +48,7 @@
 #include "ssfaes.h"
 #include "ssfaesgcm.h"
 #include "ssfcfg.h"
+#include "ssfprng.h"
 
 /* --------------------------------------------------------------------------------------------- */
 /* SSF unit test entry point.                                                                    */
@@ -116,6 +117,10 @@ int main(void)
 
 #if SSF_CONFIG_AESGCM_UNIT_TEST == 1
     SSFCfgUnitTest();
+#endif /* SSF_CONFIG_TLV_UNIT_TEST */
+
+#if SSF_CONFIG_PRNG_UNIT_TEST == 1
+    SSFPRNGUnitTest();
 #endif /* SSF_CONFIG_TLV_UNIT_TEST */
 
     return 0;

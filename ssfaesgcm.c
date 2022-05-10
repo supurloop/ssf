@@ -82,6 +82,7 @@
 #include "ssfport.h"
 #include "ssfassert.h"
 #include "ssfaes.h"
+#include "ssfaesgcm.h"
 
 /* --------------------------------------------------------------------------------------------- */
 /* Local Helper Functions and Macros                                                             */

@@ -32,6 +32,10 @@
 #ifndef SSF_SM_INCLUDE_H
 #define SSF_SM_INCLUDE_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdint.h>
 #include <stdbool.h>
 #include "ssfport.h"
@@ -77,6 +81,10 @@ void SSFSMStopTimer(SSFSMEventId_t eid);
 #if SSF_CONFIG_SM_UNIT_TEST == 1
 void SSFSMUnitTest(void);
 #endif /* SSF_CONFIG_SM_UNIT_TEST */
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* SSF_SM_INCLUDE_H */
 

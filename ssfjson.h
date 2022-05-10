@@ -32,6 +32,10 @@
 #ifndef SSF_JSON_H_INCLUDE
 #define SSF_JSON_H_INCLUDE
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdint.h>
 #include <stdbool.h>
 #include "ssfport.h"
@@ -143,6 +147,10 @@ bool SSFJsonUpdate(SSFCStrOut_t js, size_t size, SSFCStrIn_t *path, SSFJsonPrint
 #if SSF_CONFIG_JSON_UNIT_TEST == 1
 void SSFJsonUnitTest(void);
 #endif /* SSF_CONFIG_JSON_UNIT_TEST */
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* SSF_JSON_H_INCLUDE */
 

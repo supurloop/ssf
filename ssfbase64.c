@@ -33,6 +33,7 @@
 #include <stdbool.h>
 #include "ssfport.h"
 #include "ssfassert.h"
+#include "ssfbase64.h"
 
 /* --------------------------------------------------------------------------------------------- */
 /* Local vars                                                                                    */

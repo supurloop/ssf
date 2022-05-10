@@ -32,6 +32,10 @@
 #ifndef SSF_MPOOL_INCLUDE_H
 #define SSF_MPOOL_INCLUDE_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdint.h>
 #include "ssfport.h"
 #include "ssfll.h"
@@ -68,6 +72,10 @@ bool SSFMPoolIsFull(const SSFMPool_t *pool);
 #if SSF_CONFIG_MPOOL_UNIT_TEST == 1
 void SSFMPoolUnitTest(void);
 #endif /* SSF_CONFIG_MPOOL_UNIT_TEST */
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* SSF_MEMPOOL_INCLUDE_H */
 

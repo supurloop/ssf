@@ -32,6 +32,10 @@
 #ifndef SSF_ASSERT_INCLUDE_H
 #define SSF_ASSERT_INCLUDE_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdint.h>
 #include "ssfport.h"
 
@@ -39,5 +43,9 @@
 #define SSF_REQUIRE(x) SSF_ASSERT(x)
 #define SSF_ENSURE(x) SSF_ASSERT(x)
 #define SSF_ERROR() SSF_ASSERT(0)
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* SSF_ASSERT_INCLUDE_H */

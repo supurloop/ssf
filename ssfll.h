@@ -32,6 +32,10 @@
 #ifndef SSF_LL_INCLUDE_H
 #define SSF_LL_INCLUDE_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -102,5 +106,9 @@ uint32_t SSFLLUnused(const SSFLL_t *ll);
 void SSFLLUnitTest(void);
 #endif /* SSF_CONFIG_LL_UNIT_TEST */
 
+#ifdef __cplusplus
+}
 #endif
+
+#endif /* SSF_LL_INCLUDE_H */
 

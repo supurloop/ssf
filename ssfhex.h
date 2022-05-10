@@ -32,6 +32,10 @@
 #ifndef SSF_HEX_H_INCLUDE
 #define SSF_HEX_H_INCLUDE
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdint.h>
 #include <stdbool.h>
 #include "ssfport.h"
@@ -66,6 +70,10 @@ bool SSFHexBinToBytes(const uint8_t *in, size_t inLen, SSFCStrOut_t out, size_t 
 #if SSF_CONFIG_HEX_UNIT_TEST == 1
 void SSFHexUnitTest(void);
 #endif /* SSF_CONFIG_HEX_UNIT_TEST */
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* SSF_HEX_H_INCLUDE */
 

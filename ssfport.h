@@ -32,6 +32,10 @@
 #ifndef SSF_PORT_H_INCLUDE
 #define SSF_PORT_H_INCLUDE
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #ifdef _WIN32
 #include "Windows.h"
 #else /* _WIN32 */
@@ -109,6 +113,7 @@ typedef uint64_t SSFPortTick_t;
 #define SSF_CONFIG_AES_UNIT_TEST (1u)
 #define SSF_CONFIG_AESGCM_UNIT_TEST (1u)
 #define SSF_CONFIG_CFG_UNIT_TEST (1u)
+#define SSF_CONFIG_PRNG_UNIT_TEST (1u)
 
 /* If any unit test is enabled then enable unit test mode */
 #if SSF_CONFIG_BFIFO_UNIT_TEST == 1 || \
@@ -126,7 +131,8 @@ typedef uint64_t SSFPortTick_t;
     SSF_CONFIG_TLV_UNIT_TEST == 1 || \
     SSF_CONFIG_AES_UNIT_TEST == 1 || \
     SSF_CONFIG_AESGCM_UNIT_TEST == 1 || \
-    SSF_CONFIG_CFG_UNIT_TEST == 1 
+    SSF_CONFIG_CFG_UNIT_TEST == 1 || \
+    SSF_CONFIG_PRNG_UNIT_TEST == 1
 #define SSF_CONFIG_UNIT_TEST (1u)
 #else
 #define SSF_CONFIG_UNIT_TEST (0u)
@@ -369,6 +375,7 @@ enum SSFSMEventList
 /* --------------------------------------------------------------------------------------------- */
 /* Configure ssfcfg interface                                                                    */
 /* --------------------------------------------------------------------------------------------- */
+#define SSF_CFG_TYPEDEF_STRUCT typedef struct /* Optionally add packed struct attribute here */
 #define SSF_CFG_MAX_STORAGE_SIZE (4096u) /* Max size of erasable NV storage sector */
 #define SSF_MAX_CFG_DATA_SIZE_LIMIT (32u) /* Max size of data */
 #define SSF_CFG_WRITE_CHECK_CHUNK_SIZE (32u) /* Max size of tmp stack buffer for write checking */
@@ -408,4 +415,9 @@ SSFPortTick_t SSFPortGetTick64(void);
 #endif /* _WIN32 */
 
 #include "ssf.h"
+
+#ifdef __cplusplus
+}
+#endif
+
 #endif /* SSF_PORT_H_INCLUDE */

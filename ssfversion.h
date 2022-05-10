@@ -44,7 +44,15 @@
 /*         Add build script for OS X.                                                            */
 /*         Fix some build warnings for OS X.                                                     */
 /*         Optimized bin to hex interface.                                                       */
+/* 0.0.6 - Upgraded Visual Studio solution and project to Community 2022 version.                */
+/*         Optimized Reed Solomon performance.                                                   */
+/*         Added optional multi-thread support to FSM framework.                                 */
+/*         Fixed bug in FSM framework where nextTimeout was computed incorrectly.                */
+/*         Implemented Configuration Storage interface.                                          */
+/*         Added PRNG interface which can generate cryptographically secure random numbers.      */
+/*         Added macros to support SSF use from C++ modules.                                     */
+/*         Minor formatting changes and compiler warning fixes.                                  */
 /* --------------------------------------------------------------------------------------------- */
-#define SSF_VERSION "0.0.5"
+#define SSF_VERSION "0.0.6"
 
 #endif /* SSF_VERSION_H_INCLUDE */

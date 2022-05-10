@@ -78,9 +78,18 @@
 #ifndef SSFAES_H_INCLUDE
 #define SSFAES_H_INCLUDE
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdint.h>
 #include <stdbool.h>
 #include "ssfport.h"
+
+/* --------------------------------------------------------------------------------------------- */
+/* Defines                                                                                       */
+/* --------------------------------------------------------------------------------------------- */
+#define SSF_AES_BLOCK_SIZE (16u)
 
 /* --------------------------------------------------------------------------------------------- */
 /* External interface                                                                            */
@@ -116,6 +125,10 @@ void SSFAESBlockDecrypt(const uint8_t *ct, size_t ctLen, uint8_t *pt, size_t ptS
 #if SSF_CONFIG_AES_UNIT_TEST == 1
 void SSFAESUnitTest(void);
 #endif /* SSF_CONFIG_AES_UNIT_TEST */
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* SSFAES_H_INCLUDE */
 

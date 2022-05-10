@@ -32,6 +32,10 @@
 #ifndef SSF_BFIFO_INCLUDE_H
 #define SSF_BFIFO_INCLUDE_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -144,5 +148,9 @@ bool SSFBFifoGetBytes(SSFBFifo_t *fifo, uint8_t *outBytes, uint32_t outBytesSize
 #if SSF_CONFIG_BFIFO_UNIT_TEST == 1
 void SSFBFifoUnitTest(void);
 #endif /* SSF_CONFIG_BFIFO_UNIT_TEST */
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* SSF_BFIFO_INCLUDE_H */

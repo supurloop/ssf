@@ -26,6 +26,7 @@ The framework implements a number of common embedded system functions:
   14. An AES block encryption interface.
   15. An AES-GCM authenticated encryption interface.
   16. A version controlled interface for reliably storing configuration to NV storage.
+  17. A cryptograpically secure capable pseudo random number generator (PRNG).
 
 To give you an idea of the framework size here are some program memory estimates for each component compiled on an MSP430 with Level 3 optimization:
 Byte FIFO, linked list, memory pool, Base64, Hex ASCII are each about 1000 bytes.
@@ -905,6 +906,39 @@ else
     SSFCfgWrite(myConfigData, 5, MY_CONFIG_ID, MY_CONFIG_VER_2);
 }
 
+```
+
+### Cryptographically Secure Capable PRNG Interface
+
+The strength of many cryptographically secure algorithms and protocols is derived from a source of cryptographically secure random numbers. This interface provides a pseudo random number generator (PRNG) that CAN generate a cryptographically secure sequence of random numbers when properly seeded with 128-bits of entropy. The interface is allowed to re-init with new entropy at any time...useful in case the system needs to generate trillions of random numbers and there is a concern that the 64-bit counter might wrap :) After initing, 1-16 bytes of random data can be read on each invocation.
+
+```
+uint8_t entropy[SSF_PRNG_ENTROPY_SIZE];
+uint8_t random[SSF_PRNG_RANDOM_MAX_SIZE];
+
+    ... To be cryptographically secure 128-bits of entropy from a true random source must be
+        staged to the entropy buffer;
+        Otherwise it is easier to predict the random number sequence which can compromise
+        secure algorithms and protocols.
+
+    entropy <----random source
+    SSFPRNGInitContext(&context, entropy, sizeof(entropy));
+
+    while (true)
+    {
+        ...
+        SSFPRNGGetRandom(&context, random, sizeof(random));
+        /* random now contains 16 bytes of pseudo random data */
+        ...
+
+        /* Should we reseed after trillons and trillions of loops? */
+        if (reseed)
+        {
+            /* Yes, reseed */
+            entropy <----random source
+            SSFPRNGInitContext(&context, entropy, sizeof(entropy));
+        }
+    }
 ```
 
 ## Conclusion

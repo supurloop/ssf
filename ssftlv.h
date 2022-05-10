@@ -32,6 +32,10 @@
 #ifndef SSFTLV_H_INCLUDE
 #define SSFTLV_H_INCLUDE
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdint.h>
 #include <stdbool.h>
 #include "ssfport.h"
@@ -65,5 +69,9 @@ bool SSFTLVRead(const SSFTLV_t* tlv, SSFTLVVar_t tag, uint16_t instance, uint8_t
 #if SSF_CONFIG_TLV_UNIT_TEST == 1
 void SSFTLVUnitTest(void);
 #endif /* SSF_CONFIG_TLV_UNIT_TEST */
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* SSFTLV_H_INCLUDE */

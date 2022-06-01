@@ -380,9 +380,9 @@ enum SSFSMEventList
 #define SSF_MAX_CFG_DATA_SIZE_LIMIT (32u) /* Max size of data */
 #define SSF_CFG_WRITE_CHECK_CHUNK_SIZE (32u) /* Max size of tmp stack buffer for write checking */
 
-/* 1 to use RAM as storage, 0 to specific another storage interface */
-#define SSF_CFG_ENABLE_STOARGE_RAM (1u)
-#if SSF_CFG_ENABLE_STOARGE_RAM == 0
+/* 1 to use RAM as storage, 0 to specify another storage interface */
+#define SSF_CFG_ENABLE_STORAGE_RAM (1u)
+#if SSF_CFG_ENABLE_STORAGE_RAM == 0
 #define SSF_CFG_ERASE_STORAGE(dataId)
 #define SSF_CFG_WRITE_STORAGE(data, dataSize, dataId, dataOffset)
 #define SSF_CFG_READ_STORAGE(data, dataSize, dataId, dataOffset)

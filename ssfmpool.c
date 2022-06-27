@@ -74,7 +74,7 @@ void SSFMPoolInit(SSFMPool_t *pool, uint32_t blocks, uint32_t blockSize)
     for (i = 0; i < blocks; i++)
     {
         SSFLLItem_t *mem;
-        SSF_ASSERT((mem = malloc(memSize)) != NULL);
+        SSF_ASSERT((mem = (SSFLLItem_t*)malloc(memSize)) != NULL);
         memset(mem, 0, memSize);
         memcpy(((uint8_t *)mem) + blockSize + sizeof(SSFLLItem_t), "\x12\x34\x56\xff", sizeof(uint32_t));
         SSF_LL_FIFO_PUSH(&(pool->avail), mem);

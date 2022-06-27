@@ -59,7 +59,7 @@ SSF_CFG_TYPEDEF_STRUCT SSFCfgHeader
 /* --------------------------------------------------------------------------------------------- */
 /* Virtual NV Storage in RAM                                                                     */
 /* --------------------------------------------------------------------------------------------- */
-#if SSF_CFG_ENABLE_STOARGE_RAM == 1
+#if SSF_CFG_ENABLE_STORAGE_RAM == 1
 uint8_t _ssfCfgStorageRAM[SSF_MAX_CFG_RAM_SECTORS][SSF_MAX_CFG_RAM_SECTOR_SIZE];
 #endif
 

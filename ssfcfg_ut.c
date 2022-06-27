@@ -36,10 +36,10 @@
 #include "ssfcfg.h"
 #include "ssfcrc16.h"
 
-#if SSF_CFG_ENABLE_STOARGE_RAM == 1
+#if SSF_CFG_ENABLE_STORAGE_RAM == 1
 extern uint8_t _ssfCfgStorageRAM[SSF_MAX_CFG_RAM_SECTORS][SSF_MAX_CFG_DATA_SIZE_LIMIT];
 #else
-#error ssfcfg_ut.c requires that SSF_CFG_ENABLE_STOARGE_RAM set to 1.
+#error ssfcfg_ut.c requires that SSF_CFG_ENABLE_STORAGE_RAM set to 1.
 #endif
 
 #if SSF_MAX_CFG_RAM_SECTORS < 2

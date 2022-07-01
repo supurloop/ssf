@@ -66,6 +66,8 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdbool.h>
+#include <ctype.h>
+#include <stdlib.h>
 #include "ssfport.h"
 #include "ssfini.h"
 
@@ -662,7 +664,7 @@ bool SSFINIPrintNameLongValue(SSFCStrOut_t ini, size_t iniSize, size_t* iniLen, 
 
     len = snprintf(nstr, sizeof(nstr), "%ld", value);
     if (len < 0) return false;
-    if (len >= sizeof(nstr)) return false;
+    if (len >= ((int)sizeof(nstr))) return false;
     return SSFINIPrintNameStrValue(ini, iniSize, iniLen, name, nstr, lineEnding);
 }
 

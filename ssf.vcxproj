@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
@@ -157,6 +157,8 @@
     <ClCompile Include="ssffcsum_ut.c" />
     <ClCompile Include="ssfhex.c" />
     <ClCompile Include="ssfhex_ut.c" />
+    <ClCompile Include="ssfini.c" />
+    <ClCompile Include="ssfini_ut.c" />
     <ClCompile Include="ssfjson.c" />
     <ClCompile Include="ssfjson_ut.c" />
     <ClCompile Include="ssfll.c" />
@@ -189,6 +191,7 @@
     <ClInclude Include="ssfcrc32.h" />
     <ClInclude Include="ssffcsum.h" />
     <ClInclude Include="ssfhex.h" />
+    <ClInclude Include="ssfini.h" />
     <ClInclude Include="ssfjson.h" />
     <ClInclude Include="ssfll.h" />
     <ClInclude Include="ssfmpool.h" />

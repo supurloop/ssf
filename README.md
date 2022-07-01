@@ -27,6 +27,7 @@ The framework implements a number of common embedded system functions:
   15. An AES-GCM authenticated encryption interface.
   16. A version controlled interface for reliably storing configuration to NV storage.
   17. A cryptograpically secure capable pseudo random number generator (PRNG).
+  18. A INI parser/generator interface.
 
 To give you an idea of the framework size here are some program memory estimates for each component compiled on an MSP430 with Level 3 optimization:
 Byte FIFO, linked list, memory pool, Base64, Hex ASCII are each about 1000 bytes.
@@ -317,7 +318,7 @@ path[0] = "name";
 if (SSFJsonGetString(json1Str, (SSFCStrIn_t *)path, strOut, sizeof(strOut), NULL))
 {
     printf("%s", strOut);
-    /* Prints "name" excluding double quotes */
+    /* Prints "value" excluding double quotes */
 }
 
 /* Get the value of a nested element */
@@ -326,7 +327,7 @@ path[1] = "name";
 if (SSFJsonGetString(json2Str, (SSFCStrIn_t *)path, strOut, sizeof(strOut), NULL))
 {
     printf("%s", strOut);
-    /* Prints "name" excluding double quotes */
+    /* Prints "value" excluding double quotes */
 }
 
 path[0] = "obj";
@@ -372,6 +373,8 @@ if (SSFJsonPrintObject(jsonStr, sizeof(jsonStr), 0, &end, printFn, NULL, false))
 }
 ```
 Object and array nesting is achieved by calling SSFJsonPrintObject() or SSFJsonPrintArray() from within a printer function.
+
+There is also an interface, SSFJsonUpdate(), for updating a JSON object with a new value or element.
 
 ### 16-bit Fletcher Checksum Interface
 
@@ -939,6 +942,45 @@ uint8_t random[SSF_PRNG_RANDOM_MAX_SIZE];
             SSFPRNGInitContext(&context, entropy, sizeof(entropy));
         }
     }
+```
+
+### INI Parser/Generator Interface
+
+Sad that we still need this, but we still sometimes need to parse and generate INI files. Natively supports string, boolean, and long int types. The parser is forgiving and the main limitation is that it does not support quoted strings, so values cannot have whitespace.
+
+```
+    char iniParse[] = "; comment\r\nname=value1\r\n[section]\r\nname=yes\r\nname=0\r\nfoo=bar\r\nX=\r\n";
+    char outStr[16];
+    bool outBool;
+    long int outLong;
+    char iniGen[256];
+    size_t iniGenLen;
+
+    /* Parse */
+    SSFINIIsSectionPresent(iniParse, "section"); /* Returns true */
+    SSFINIIsSectionPresent(iniParse, "Section"); /* Returns false */
+
+    SSFIsNameValuePresent(iniParse, NULL, "name", 0); /* Returns true */
+    SSFIsNameValuePresent(iniParse, NULL, "name", 1); /* Returns false */
+    SSFIsNameValuePresent(iniParse, "section", "name", 0); /* Returns true */
+    SSFIsNameValuePresent(iniParse, "section", "name", 1); /* Returns true */
+    SSFIsNameValuePresent(iniParse, "section", "name", 2); /* Returns false */
+    SSFIsNameValuePresent(iniParse, "section", "foo", 0); /* Returns true */
+    SSFIsNameValuePresent(iniParse, "section", "X", 0); /* Returns true */
+
+    SSFINIGetStrValue(iniParse, "section", name, 1, outStr, sizeof(outStr), NULL); /* Returns true, outStr = "0" */
+    SSFINIGetBoolValue(iniParse, "section", name, 1, &outBool); /* Returns true, outBool = false */
+    SSFINIGetLongValue(iniParse, "section", name, 1, &outLong); /* Returns true, outLong = 0 */
+
+    /* Generate */
+    iniGenLen = 0;
+    SSFINIPrintComment(iniGen, sizeof(iniGen), &iniGenLen, " comment", SSF_INI_COMMENT_HASH, SSF_INI_CRLF);
+    SSFINIPrintSection(iniGen, sizeof(iniGen), &iniGenLen, "section", SSF_INI_CRLF);
+    SSFINIPrintNameStrValue(iniGen, sizeof(iniGen), &iniGenLen, "strName", "value", SSF_INI_CRLF);
+    SSFINIPrintNameBoolValue(iniGen, sizeof(iniGen), &iniGenLen, "boolName", true, SSF_INI_BOOL_YES_NO, SSF_INI_CRLF);
+    SSFINIPrintNameStrValue(iniGen, sizeof(iniGen), &iniGenLen, "longName", -1234567890l, SSF_INI_CRLF);
+
+    /* iniGen = "# comment\r\n[section]\r\nstrName=value\r\nboolName=yes\r\nlongName=-1234567890\r\n" */
 ```
 
 ## Conclusion

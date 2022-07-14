@@ -269,12 +269,14 @@ extern pthread_mutex_t gssfsmWakeMutex;
 #define SSF_SM_THREAD_WAKE_WAIT(timeout) { \
     SSF_ASSERT(pthread_mutex_lock(&gssfsmWakeMutex) == 0); \
     if (gssfsmIsWakeSignalled == false) { \
+        uint64_t ns; \
         struct timespec ts; \
         SSF_ASSERT(clock_gettime(SSF_SM_THREAD_PTHREAD_CLOCK, &ts) == 0); \
-        ts.tv_nsec += (((timeout * 1000ul) / SSF_TICKS_PER_SEC) * 1000000ul); \
-        while (ts.tv_nsec >= 1000000000l) { \
-            ts.tv_nsec -= 1000000000l; \
+        ns = ((uint64_t) ts.tv_nsec) + (((timeout * 1000ul) / SSF_TICKS_PER_SEC) * 1000000ul); \
+        while (ns >= 1000000000l) { \
+            ns -= 1000000000l; \
             ts.tv_sec++; } \
+        ts.tv_nsec = (long int) ns; \
         if (pthread_cond_timedwait(&gssfsmWakeCond, &gssfsmWakeMutex, &ts) != 0) { \
             SSF_ASSERT(((errno & 0xff) == ETIMEDOUT) || (errno == 0)); } } \
     gssfsmIsWakeSignalled = false; \

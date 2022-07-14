@@ -326,6 +326,7 @@ void SSFSMStopTimer(SSFSMEventId_t eid)
 
 /* --------------------------------------------------------------------------------------------- */
 /* Call periodically from main loop. Returns true if timers are pending, else false.             */
+/* Optionally reports delta to next timer expiration in SSF_TICKS_PER_SEC units.                 */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFSMTask(SSFSMTimeout_t *nextTimeout)
 {
@@ -376,6 +377,7 @@ bool SSFSMTask(SSFSMTimeout_t *nextTimeout)
             if (t->to < (*nextTimeout)) *nextTimeout = t->to;
             t = next;
         }
+        if (*nextTimeout != SSF_SM_MAX_TIMEOUT) *nextTimeout -= current;
     }
     retVal = !SSFLLIsEmpty(&_ssfsmTimers);
 

@@ -435,21 +435,29 @@ void SSFSMUnitTest(void)
     SSF_ASSERT(_SSFSMFlagsAreCleared());
     nextTimeout = 0;
     SSF_ASSERT(SSFSMTask(&nextTimeout) == true);
-    delta = nextTimeout - start;
+    delta = nextTimeout;
     SSF_ASSERT((delta > (0.9 * SSF_TICKS_PER_SEC)) && (delta <= SSF_TICKS_PER_SEC));
     lastTimeout = nextTimeout;
-    while (lastTimeout == nextTimeout)
+    while (lastTimeout >= nextTimeout)
     {
+        lastTimeout = nextTimeout;
         nextTimeout = 0;
         SSF_ASSERT(SSFSMTask(&nextTimeout) == true);
     }
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_1, 0, SSF_SM_EVENT_UT1_1);
     SSF_ASSERT(_SSFSMFlagsAreCleared());
-    delta = nextTimeout - start;
-    SSF_ASSERT((delta > (1.9 * SSF_TICKS_PER_SEC)) && (delta < (2.1 * SSF_TICKS_PER_SEC)));
-    lastTimeout = nextTimeout;
-    while (lastTimeout == nextTimeout)
+    delta = nextTimeout;
+    SSF_ASSERT((delta > (0.9 * SSF_TICKS_PER_SEC)) && (delta < (1.1 * SSF_TICKS_PER_SEC)));
+    while (lastTimeout >= nextTimeout)
     {
+        lastTimeout = nextTimeout;
+        nextTimeout = 0;
+        SSFSMTask(&nextTimeout);
+    }
+    lastTimeout = nextTimeout;
+    while (lastTimeout >= nextTimeout)
+    {
+        lastTimeout = nextTimeout;
         nextTimeout = 0;
         SSFSMTask(&nextTimeout);
     }
@@ -478,11 +486,12 @@ void SSFSMUnitTest(void)
     SSF_ASSERT(_SSFSMFlagsAreCleared());
 #endif
 
-    delta = nextTimeout - start;
+    delta = nextTimeout;
     SSF_ASSERT((delta > (SSF_TICKS_PER_SEC * 0.9)) && (delta < (SSF_TICKS_PER_SEC * 1.1)));
     lastTimeout = nextTimeout;
-    while (lastTimeout == nextTimeout)
+    while (lastTimeout >= nextTimeout)
     {
+        lastTimeout = nextTimeout;
         nextTimeout = 0;
         SSFSMTask(&nextTimeout);
     }
@@ -500,11 +509,12 @@ void SSFSMUnitTest(void)
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_2, 1, SSF_SM_EVENT_ENTRY);
     SSF_ASSERT(_SSFSMFlagsAreCleared());
     SSF_ASSERT(SSFSMTask(&nextTimeout) == true);
-    delta = nextTimeout - start;
+    delta = nextTimeout;
     SSF_ASSERT((delta > (SSF_TICKS_PER_SEC * 1.9)) && (delta < (SSF_TICKS_PER_SEC * 2.1)));
     lastTimeout = nextTimeout;
-    while (lastTimeout == nextTimeout)
+    while (lastTimeout >= nextTimeout)
     {
+        lastTimeout = nextTimeout;
         nextTimeout = 0;
         SSFSMTask(&nextTimeout);
     }

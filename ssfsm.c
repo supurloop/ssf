@@ -85,43 +85,47 @@ SSF_SM_THREAD_WAKE_DECLARATION;
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFSMStopAllTimers(void)
 {
-    SSFSMTimer_t *t;
-    SSFSMTimer_t *next;
+    SSFLLItem_t *item;
+    SSFLLItem_t *next;
+    SSFSMTimer_t t;
 
     SSF_ASSERT(_ssfsmActive < SSF_SM_END);
 
-    t = (SSFSMTimer_t *)SSF_LL_HEAD(&_ssfsmTimers);
-    while (t != NULL)
+    item = SSF_LL_HEAD(&_ssfsmTimers);
+    while (item != NULL)
     {
-        next = (SSFSMTimer_t *)SSF_LL_NEXT_ITEM((SSFLLItem_t *)t);
-        if (t->event->smid == _ssfsmActive)
+        next = SSF_LL_NEXT_ITEM(item);
+        memcpy(&t, item, sizeof(t));
+        if (t.event->smid == _ssfsmActive)
         {
-            SSFLLGetItem(&_ssfsmTimers, (SSFLLItem_t **)&t, SSF_LL_LOC_ITEM, (SSFLLItem_t *)t);
-            SSFMPoolFree(&_ssfsmEventPool, t->event);
-            SSFMPoolFree(&_ssfsmTimerPool, t);
+            SSFLLGetItem(&_ssfsmTimers, &item, SSF_LL_LOC_ITEM, item);
+            SSFMPoolFree(&_ssfsmEventPool, t.event);
+            SSFMPoolFree(&_ssfsmTimerPool, item);
         }
-        t = next;
+        item = next;
     }
 }
 
 /* --------------------------------------------------------------------------------------------- */
 /* Returns timer if timer with event ID found in active state machine, else NULL.                */
 /* --------------------------------------------------------------------------------------------- */
-static SSFSMTimer_t* _SSFSMFindTimer(SSFSMEventId_t eid)
+static SSFLLItem_t *_SSFSMFindTimer(SSFSMEventId_t eid)
 {
-    SSFSMTimer_t *t;
-    SSFSMTimer_t *next;
+    SSFLLItem_t *item;
+    SSFLLItem_t *next;
+    SSFSMTimer_t t;
 
     SSF_ASSERT(_ssfsmActive < SSF_SM_END);
 
-    t = (SSFSMTimer_t *)SSF_LL_HEAD(&_ssfsmTimers);
-    while (t != NULL)
+    item = SSF_LL_HEAD(&_ssfsmTimers);
+    while (item != NULL)
     {
-        next = (SSFSMTimer_t *)SSF_LL_NEXT_ITEM((SSFLLItem_t *)t);
-        if ((t->event->smid == _ssfsmActive) && (t->event->eid == eid)) break;
-        t = next;
+        next = SSF_LL_NEXT_ITEM(item);
+        memcpy(&t, item, sizeof(t));
+        if ((t.event->smid == _ssfsmActive) && (t.event->eid == eid)) break;
+        item = next;
     }
-    return t;
+    return item;
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -274,7 +278,9 @@ void SSFSMTran(SSFSMHandler_t next)
 void SSFSMStartTimerData(SSFSMEventId_t eid, SSFSMTimeout_t interval, const SSFSMData_t *data,
                          SSFSMDataLen_t dataLen)
 {
-    SSFSMTimer_t *t;
+    SSFLLItem_t *item;
+    SSFSMTimer_t t;
+    SSFSMTimer_t *tp;
 
     SSF_REQUIRE((eid > SSF_SM_EVENT_EXIT) && (eid < SSF_SM_EVENT_END));
     SSF_REQUIRE(((data == NULL) && (dataLen == 0)) || ((data != NULL) && (dataLen > 0)));
@@ -282,24 +288,25 @@ void SSFSMStartTimerData(SSFSMEventId_t eid, SSFSMTimeout_t interval, const SSFS
     SSF_ASSERT(_ssfsmIsInited);
 
     /* Does timer already exist? */
-    t = _SSFSMFindTimer(eid);
-    if (t != NULL)
+    item = _SSFSMFindTimer(eid);
+    if (item != NULL)
     {
         /* Yes, update it with new timer request. */
-        t->to = interval + SSFPortGetTick64();
-        if ((t->event->data) && (t->event->dataLen > sizeof(SSFSMData_t *)))
-        {_SSFSMFreeEventData(t->event->data); }
-        _SSFSMAllocEventData(t->event, data, dataLen);
+        memcpy(&t, item, sizeof(t));
+        t.to = interval + SSFPortGetTick64();
+        if ((t.event->data) && (t.event->dataLen > sizeof(SSFSMData_t *)))
+        {_SSFSMFreeEventData(t.event->data); }
+        _SSFSMAllocEventData(t.event, data, dataLen);
     } else
     {
         /* No, create new timer. */
-        t = (SSFSMTimer_t *)SSFMPoolAlloc(&_ssfsmTimerPool, sizeof(SSFSMTimer_t), 0x22);
-        t->event = (SSFSMEvent_t *)SSFMPoolAlloc(&_ssfsmEventPool, sizeof(SSFSMEvent_t), 0x33);
-        t->to = interval + SSFPortGetTick64();
-        t->event->smid = _ssfsmActive;
-        t->event->eid = eid;
-        _SSFSMAllocEventData(t->event, data, dataLen);
-        SSF_LL_FIFO_PUSH(&_ssfsmTimers, t);
+        tp = (SSFSMTimer_t *)SSFMPoolAlloc(&_ssfsmTimerPool, sizeof(SSFSMTimer_t), 0x22);
+        tp->event = (SSFSMEvent_t *)SSFMPoolAlloc(&_ssfsmEventPool, sizeof(SSFSMEvent_t), 0x33);
+        tp->to = interval + SSFPortGetTick64();
+        tp->event->smid = _ssfsmActive;
+        tp->event->eid = eid;
+        _SSFSMAllocEventData(tp->event, data, dataLen);
+        SSF_LL_FIFO_PUSH(&_ssfsmTimers, tp);
     }
 }
 
@@ -308,19 +315,21 @@ void SSFSMStartTimerData(SSFSMEventId_t eid, SSFSMTimeout_t interval, const SSFS
 /* --------------------------------------------------------------------------------------------- */
 void SSFSMStopTimer(SSFSMEventId_t eid)
 {
-    SSFSMTimer_t *t;
+    SSFLLItem_t *item;
+    SSFSMTimer_t t;
 
     SSF_ASSERT(_ssfsmActive < SSF_SM_END);
     SSF_ASSERT(_ssfsmIsInited);
 
-    t = _SSFSMFindTimer(eid);
-    if (t != NULL)
+    item = _SSFSMFindTimer(eid);
+    if (item != NULL)
     {
-        SSFLLGetItem(&_ssfsmTimers, (SSFLLItem_t **)&t, SSF_LL_LOC_ITEM, (SSFLLItem_t *)t);
-        if ((t->event->data) && (t->event->dataLen > sizeof(SSFSMData_t *)))
-        {_SSFSMFreeEventData(t->event->data); }
-        SSFMPoolFree(&_ssfsmEventPool, t->event);
-        SSFMPoolFree(&_ssfsmTimerPool, t);
+        SSFLLGetItem(&_ssfsmTimers, &item, SSF_LL_LOC_ITEM, item);
+        memcpy(&t, item, sizeof(t));
+        if ((t.event->data) && (t.event->dataLen > sizeof(SSFSMData_t *)))
+        {_SSFSMFreeEventData(t.event->data); }
+        SSFMPoolFree(&_ssfsmEventPool, t.event);
+        SSFMPoolFree(&_ssfsmTimerPool, item);
     }
 }
 
@@ -331,8 +340,9 @@ void SSFSMStopTimer(SSFSMEventId_t eid)
 bool SSFSMTask(SSFSMTimeout_t *nextTimeout)
 {
     SSFSMEvent_t *e;
-    SSFSMTimer_t *t;
-    SSFSMTimer_t *next;
+    SSFLLItem_t *item;
+    SSFLLItem_t *next;
+    SSFSMTimer_t t;
     SSFSMTimeout_t current = SSFPortGetTick64();
     bool retVal;
 
@@ -344,15 +354,16 @@ bool SSFSMTask(SSFSMTimeout_t *nextTimeout)
 #endif
 
     /* Process timers. */
-    t = (SSFSMTimer_t *)SSF_LL_HEAD(&_ssfsmTimers);
-    while (t != NULL)
+    item = SSF_LL_HEAD(&_ssfsmTimers);
+    while (item != NULL)
     {
-        next = (SSFSMTimer_t *)SSF_LL_NEXT_ITEM((SSFLLItem_t *)t);
-        if (t->to > current) { t = next; continue; }
-        SSFLLGetItem(&_ssfsmTimers, (SSFLLItem_t **)&t, SSF_LL_LOC_ITEM, (SSFLLItem_t *)t);
-        SSF_LL_FIFO_PUSH(&_ssfsmEvents, (SSFLLItem_t *)t->event);
-        SSFMPoolFree(&_ssfsmTimerPool, t);
-        t = next;
+        next =  SSF_LL_NEXT_ITEM(item);
+        memcpy(&t, item, sizeof(t));
+        if (t.to > current) { item = next; continue; }
+        SSFLLGetItem(&_ssfsmTimers, &item, SSF_LL_LOC_ITEM, item);
+        SSF_LL_FIFO_PUSH(&_ssfsmEvents, (SSFLLItem_t *)t.event);
+        SSFMPoolFree(&_ssfsmTimerPool, item);
+        item = next;
     }
 
     /* Process all pending events. */
@@ -370,12 +381,13 @@ bool SSFSMTask(SSFSMTimeout_t *nextTimeout)
     if (nextTimeout != NULL)
     {
         *nextTimeout = SSF_SM_MAX_TIMEOUT;
-        t = (SSFSMTimer_t*)SSF_LL_HEAD(&_ssfsmTimers);
-        while (t != NULL)
+        item = SSF_LL_HEAD(&_ssfsmTimers);
+        while (item != NULL)
         {
-            next = (SSFSMTimer_t*)SSF_LL_NEXT_ITEM((SSFLLItem_t*)t);
-            if (t->to < (*nextTimeout)) *nextTimeout = t->to;
-            t = next;
+            next = SSF_LL_NEXT_ITEM(item);
+            memcpy(&t, item, sizeof(t));
+            if (t.to < (*nextTimeout)) *nextTimeout = t.to;
+            item = next;
         }
         if (*nextTimeout != SSF_SM_MAX_TIMEOUT) *nextTimeout -= current;
     }

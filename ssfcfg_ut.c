@@ -60,10 +60,21 @@ void SSFCfgUnitTest(void)
     SSF_ASSERT_TEST(SSFCfgWrite(NULL, 1, 0, 0));
     SSF_ASSERT_TEST(SSFCfgWrite(data1, 65535, 0, 0));
     SSF_ASSERT_TEST(SSFCfgWrite(data1, 1, 0, SSF_CFG_DATA_VERSION_INVALID));
+#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
+    SSF_ASSERT_TEST(SSFCfgWrite(data1, 1, 0, 0));
+#endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
 
     /* Check SSFCfgRead requirements */
     SSF_ASSERT_TEST(SSFCfgRead(NULL, &data1Len, sizeof(data1), 0));
     SSF_ASSERT_TEST(SSFCfgRead(data1, NULL, sizeof(data1), 0));
+#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
+    SSF_ASSERT_TEST(SSFCfgRead(data1, &data1Len, sizeof(data1), 0));
+#endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
+
+#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
+    SSFCfgInit();
+    SSF_ASSERT_TEST(SSFCfgInit());
+#endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
 
     /* Check basic write then read cases */
     memset(data1, 0x01, sizeof(data1));

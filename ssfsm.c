@@ -75,7 +75,7 @@ static bool _ssfsmIsInited;
 static uint64_t _ssfsmMallocs;
 static uint64_t _ssfsmFrees;
 
-#if SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT == 1
+#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
 SSF_SM_THREAD_SYNC_DECLARATION;
 SSF_SM_THREAD_WAKE_DECLARATION;
 #endif
@@ -196,7 +196,7 @@ void SSFSMInit(uint32_t maxEvents, uint32_t maxTimers)
     SSFLLInit(&_ssfsmEvents, maxEvents);
     SSFLLInit(&_ssfsmTimers, maxTimers);
 
-#if SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT == 1
+#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
     SSF_SM_THREAD_WAKE_INIT();
     SSF_SM_THREAD_SYNC_INIT();
 #endif
@@ -235,12 +235,12 @@ void SSFSMPutEventData(SSFSMId_t smid, SSFSMEventId_t eid, const SSFSMData_t *da
     SSF_ASSERT(_ssfsmIsInited);
     SSF_ASSERT(_SSFSMStates[smid].current != NULL);
 
-#if SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT == 0
+#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 0
     /* In state handler or there are pending events? */
     if ((_ssfsmActive < SSF_SM_END) || (SSFLLIsEmpty(&_ssfsmEvents) == false))
     {
 #endif
-#if SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT == 1
+#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
         SSF_SM_THREAD_SYNC_ACQUIRE();
 #endif
         /* Queue event */
@@ -249,7 +249,7 @@ void SSFSMPutEventData(SSFSMId_t smid, SSFSMEventId_t eid, const SSFSMData_t *da
         e->eid = eid;
         _SSFSMAllocEventData(e, data, dataLen);
         SSF_LL_FIFO_PUSH(&_ssfsmEvents, e);
-#if SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT == 1
+#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
         SSF_SM_THREAD_WAKE_POST();
         SSF_SM_THREAD_SYNC_RELEASE();
 #else
@@ -349,7 +349,7 @@ bool SSFSMTask(SSFSMTimeout_t *nextTimeout)
     SSF_ASSERT(_ssfsmActive >= SSF_SM_END);
     SSF_ASSERT(_ssfsmIsInited);
 
-#if SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT == 1
+#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
     SSF_SM_THREAD_SYNC_ACQUIRE();
 #endif
 
@@ -393,7 +393,7 @@ bool SSFSMTask(SSFSMTimeout_t *nextTimeout)
     }
     retVal = !SSFLLIsEmpty(&_ssfsmTimers);
 
-#if SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT == 1
+#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
     SSF_SM_THREAD_SYNC_RELEASE();
 #endif
     return retVal;

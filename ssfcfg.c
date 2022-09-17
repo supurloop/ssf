@@ -63,6 +63,23 @@ SSF_CFG_TYPEDEF_STRUCT SSFCfgHeader
 uint8_t _ssfCfgStorageRAM[SSF_MAX_CFG_RAM_SECTORS][SSF_MAX_CFG_RAM_SECTOR_SIZE];
 #endif
 
+#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
+bool _ssfcfgIsInited; 
+SSF_CFG_THREAD_SYNC_DECLARATION;
+#endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
+
+#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
+/* --------------------------------------------------------------------------------------------- */
+/* Initializes the ssfcfg interface.                                                             */
+/* --------------------------------------------------------------------------------------------- */
+void SSFCfgInit(void)
+{
+    SSF_ASSERT(_ssfcfgIsInited == false);
+    SSF_CFG_THREAD_SYNC_INIT();
+    _ssfcfgIsInited = true;
+}
+#endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
+
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if data written to storage, else false if data matched existing storage.         */
 /* --------------------------------------------------------------------------------------------- */
@@ -76,10 +93,16 @@ bool SSFCfgWrite(uint8_t *data, uint16_t dataLen, dataId_t dataId, dataVersion_t
     size_t offset = 0;
     uint16_t crcStorage = SSF_CRC16_INITIAL;
     uint16_t crcData;
+    bool retVal = true;
 
     SSF_REQUIRE(data != NULL);
     SSF_REQUIRE(dataLen <= SSF_MAX_CFG_DATA_SIZE);
     SSF_REQUIRE(dataVersion >= 0);
+
+#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
+    SSF_ASSERT(_ssfcfgIsInited);
+    SSF_CFG_THREAD_SYNC_ACQUIRE();
+#endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
 
     /* Is data already stored as expected in normal location? */
     SSF_CFG_READ_STORAGE((uint8_t *)&header, sizeof(header), dataId, offset);
@@ -108,7 +131,10 @@ bool SSFCfgWrite(uint8_t *data, uint16_t dataLen, dataId_t dataId, dataVersion_t
 
         /* If computed CRC matches data then nothing to do */
         if (crcData == crcStorage)
-        { return false; }
+        { 
+            retVal = false;
+            goto _ssfcfgReadExit;
+        }
     }
 
     /* New data, write data to storage */
@@ -120,7 +146,12 @@ bool SSFCfgWrite(uint8_t *data, uint16_t dataLen, dataId_t dataId, dataVersion_t
     SSF_CFG_ERASE_STORAGE(dataId);
     SSF_CFG_WRITE_STORAGE((uint8_t *)&header, sizeof(header), dataId, 0);
     SSF_CFG_WRITE_STORAGE(data, dataLen, dataId, sizeof(header));
-    return true;
+
+_ssfcfgReadExit:
+#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
+    SSF_CFG_THREAD_SYNC_RELEASE();
+#endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
+    return retVal;
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -134,6 +165,11 @@ dataVersion_t SSFCfgRead(uint8_t *data, uint16_t *dataLen, size_t dataSize, data
 
     SSF_REQUIRE(data != NULL);
     SSF_REQUIRE(dataLen != NULL);
+
+#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
+    SSF_ASSERT(_ssfcfgIsInited);
+    SSF_CFG_THREAD_SYNC_ACQUIRE();
+#endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
 
     /* Read Header */
     SSF_CFG_READ_STORAGE((uint8_t *)&header, sizeof(header), dataId, 0);
@@ -159,6 +195,9 @@ dataVersion_t SSFCfgRead(uint8_t *data, uint16_t *dataLen, size_t dataSize, data
         }
     }
 
+#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
+    SSF_CFG_THREAD_SYNC_RELEASE();
+#endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
     return dataVersion;
 }
 

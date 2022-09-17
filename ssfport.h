@@ -140,6 +140,41 @@ typedef uint64_t SSFPortTick_t;
 #define SSF_CONFIG_UNIT_TEST (0u)
 #endif
 
+/* SSF_CONFIG_ENABLE_THREAD_SUPPORT allows ssfsm events to be safely signalled from mulitple */
+/* contexts and optimizes when the state machine thread runs. */
+/* SSF_CONFIG_ENABLE_THREAD_SUPPORT allows the ssfcfg module to be safely called from multiple
+   contexts. */
+/* 0, disable thread synchronization; 1, enable thread synchronization. */
+#define SSF_CONFIG_ENABLE_THREAD_SUPPORT (0u)
+
+#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
+#ifdef _WIN32
+#define SSF_MUTEX_DECLARATION(mutex) static HANDLE mutex
+#define SSF_MUTEX_INIT(mutex) { \
+    mutex = CreateMutex(NULL, FALSE, NULL); \
+    SSF_ASSERT(mutex != NULL); \
+}
+#define SSF_MUTEX_ACQUIRE(mutex) { \
+    SSF_ASSERT(WaitForSingleObject(mutex, INFINITE) == WAIT_OBJECT_0); \
+}
+#define SSF_MUTEX_RELEASE(mutex) { SSF_ASSERT(ReleaseMutex(mutex)); }
+#else /* _WIN32 */
+#include <pthread.h>
+#include <errno.h>
+#include <stdbool.h>
+
+#define SSF_MUTEX_DECLARATION(mutex) pthread_mutex_t mutex
+#define SSF_MUTEX_INIT(mutex) { \
+    pthread_mutexattr_t attr; \
+    SSF_ASSERT(pthread_mutexattr_init(&attr) == 0); \
+    SSF_ASSERT(pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE) == 0); \
+    SSF_ASSERT(pthread_mutex_init(&mutex, &attr) == 0); \
+}
+#define SSF_MUTEX_ACQUIRE(mutex) { SSF_ASSERT(pthread_mutex_lock(&mutex) == 0); }
+#define SSF_MUTEX_RELEASE(mutex) { SSF_ASSERT(pthread_mutex_unlock(&mutex) == 0); }
+#endif /* _WIN32 */
+#endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
+
 /* --------------------------------------------------------------------------------------------- */
 /* Configure ssfbfifo's byte fifo interface                                                      */
 /* --------------------------------------------------------------------------------------------- */
@@ -188,22 +223,14 @@ typedef uint64_t SSFPortTick_t;
 /* --------------------------------------------------------------------------------------------- */
 /* Configure ssfsm's state machine interface                                                     */
 /* --------------------------------------------------------------------------------------------- */
-/* 0, API calls must be made in same context; 1, events may be signalled from other contexts. */
-#define SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT (0u)
-
 /* To synchronize event signals from other contexts the following macros must be implemented. */
-#if SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT == 1
-#ifdef _WIN32
-#define SSF_SM_THREAD_SYNC_DECLARATION static HANDLE _ssfsmSyncMutex
-#define SSF_SM_THREAD_SYNC_INIT() { \
-    _ssfsmSyncMutex = CreateMutex(NULL, FALSE, NULL); \
-    SSF_ASSERT(_ssfsmSyncMutex != NULL); \
-}
-#define SSF_SM_THREAD_SYNC_ACQUIRE() { \
-    SSF_ASSERT(WaitForSingleObject(_ssfsmSyncMutex, INFINITE) == WAIT_OBJECT_0); \
-}
-#define SSF_SM_THREAD_SYNC_RELEASE() { SSF_ASSERT(ReleaseMutex(_ssfsmSyncMutex)); }
+#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
+#define SSF_SM_THREAD_SYNC_DECLARATION SSF_MUTEX_DECLARATION(_ssfsmSyncMutex)
+#define SSF_SM_THREAD_SYNC_INIT() SSF_MUTEX_INIT(_ssfsmSyncMutex)
+#define SSF_SM_THREAD_SYNC_ACQUIRE() SSF_MUTEX_ACQUIRE(_ssfsmSyncMutex)
+#define SSF_SM_THREAD_SYNC_RELEASE() SSF_MUTEX_RELEASE(_ssfsmSyncMutex)
 
+#ifdef _WIN32
 #define SSF_SM_THREAD_WAKE_DECLARATION HANDLE gssfsmWakeSem
 #define SSF_SM_THREAD_WAKE_INIT() { \
     gssfsmWakeSem = CreateSemaphore(NULL, 0, 1, NULL); \
@@ -217,23 +244,6 @@ typedef uint64_t SSFPortTick_t;
 }
 extern HANDLE gssfsmWakeSem;
 #else /* WIN32 */
-/* 0, no CLOCK_MONOTONIC support for pthread_cond_timedwait(), potential timeouts bugs */
-/* 1, CLOCK_MONOTONIC support for pthread_cond_timedwait(), recommended */
-#define SSF_SM_THREAD_PTHREAD_CLOCK_MONOTONIC (1u)
-#include <pthread.h>
-#include <errno.h>
-#include <stdbool.h>
-
-#define SSF_SM_THREAD_SYNC_DECLARATION pthread_mutex_t _ssfsmSyncMutex
-#define SSF_SM_THREAD_SYNC_INIT() { \
-    pthread_mutexattr_t attr; \
-    SSF_ASSERT(pthread_mutexattr_init(&attr) == 0); \
-    SSF_ASSERT(pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE) == 0); \
-    SSF_ASSERT(pthread_mutex_init(&_ssfsmSyncMutex, &attr) == 0); \
-}
-#define SSF_SM_THREAD_SYNC_ACQUIRE() { SSF_ASSERT(pthread_mutex_lock(&_ssfsmSyncMutex) == 0); }
-#define SSF_SM_THREAD_SYNC_RELEASE() { SSF_ASSERT(pthread_mutex_unlock(&_ssfsmSyncMutex) == 0); }
-
 #define SSF_SM_THREAD_WAKE_DECLARATION \
     bool gssfsmIsWakeSignalled; pthread_cond_t gssfsmWakeCond; pthread_mutex_t gssfsmWakeMutex
 extern bool gssfsmIsWakeSignalled;
@@ -283,7 +293,7 @@ extern pthread_mutex_t gssfsmWakeMutex;
     SSF_ASSERT(pthread_mutex_unlock(&gssfsmWakeMutex) == 0); \
 }
 #endif /* WIN32 */
-#endif /* SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT */
+#endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
 
 /* Maximum number of simultaneously queued events for all state machines. */
 #define SSF_SM_MAX_ACTIVE_EVENTS (3u)
@@ -403,6 +413,13 @@ enum SSFSMEventList
     memcpy(data, &_ssfCfgStorageRAM[dataId][dataOffset], dataSize); \
 }
 #endif
+
+#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
+#define SSF_CFG_THREAD_SYNC_DECLARATION SSF_MUTEX_DECLARATION(_ssfcfgSyncMutex)
+#define SSF_CFG_THREAD_SYNC_INIT() SSF_MUTEX_INIT(_ssfcfgSyncMutex)
+#define SSF_CFG_THREAD_SYNC_ACQUIRE() SSF_MUTEX_ACQUIRE(_ssfcfgSyncMutex)
+#define SSF_CFG_THREAD_SYNC_RELEASE() SSF_MUTEX_RELEASE(_ssfcfgSyncMutex)
+#endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
 
 /* --------------------------------------------------------------------------------------------- */
 /* External interface                                                                            */

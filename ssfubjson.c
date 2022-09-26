@@ -803,7 +803,7 @@ bool SSFUBJsonPrintLabel(uint8_t *js, size_t size, size_t start, size_t *end, SS
 bool SSFUBJsonPrintInt(uint8_t *js, size_t size, size_t start, size_t *end, int64_t in)
 {
     uint8_t type;
-    size_t len;
+    size_t len = 0;
     uint8_t *pi;
     int8_t i8;
     uint8_t ui8;

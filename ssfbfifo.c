@@ -51,7 +51,7 @@ void SSFBFifoInit(SSFBFifo_t *fifo, uint32_t fifoSize, uint8_t *buffer, uint32_t
 #endif
     SSF_REQUIRE(buffer != NULL);
     SSF_REQUIRE(bufferSize > fifoSize);
-    SSF_ASSERT(fifo->magic != SSF_BFIFO_INIT_MAGIC);
+    SSF_REQUIRE(fifo->magic != SSF_BFIFO_INIT_MAGIC);
 
     fifo->head = 0;
     fifo->tail = 0;
@@ -67,12 +67,23 @@ void SSFBFifoInit(SSFBFifo_t *fifo, uint32_t fifoSize, uint8_t *buffer, uint32_t
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Deinitializes a byte fifo.                                                                    */
+/* --------------------------------------------------------------------------------------------- */
+void SSFBFifoDeInit(SSFBFifo_t *fifo)
+{
+    SSF_REQUIRE(fifo != NULL);
+    SSF_REQUIRE(fifo->magic == SSF_BFIFO_INIT_MAGIC);
+
+    memset(fifo, 0, sizeof(SSFBFifo_t));
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Put a byte into the fifo.                                                                     */
 /* --------------------------------------------------------------------------------------------- */
 void SSFBFifoPutByte(SSFBFifo_t *fifo, uint8_t inByte)
 {
     SSF_REQUIRE(fifo != NULL);
-    SSF_ASSERT(fifo->magic == SSF_BFIFO_INIT_MAGIC);
+    SSF_REQUIRE(fifo->magic == SSF_BFIFO_INIT_MAGIC);
 
     fifo->buffer[fifo->head] = inByte;
     fifo->head++;
@@ -91,7 +102,7 @@ bool SSFBFifoPeekByte(const SSFBFifo_t *fifo, uint8_t *outByte)
 {
     SSF_REQUIRE(fifo != NULL);
     SSF_REQUIRE(outByte != NULL);
-    SSF_ASSERT(fifo->magic == SSF_BFIFO_INIT_MAGIC);
+    SSF_REQUIRE(fifo->magic == SSF_BFIFO_INIT_MAGIC);
 
     if (fifo->head == fifo->tail) return false;
     *outByte = fifo->buffer[fifo->tail];
@@ -105,7 +116,7 @@ bool SSFBFifoGetByte(SSFBFifo_t *fifo, uint8_t *outByte)
 {
     SSF_REQUIRE(fifo != NULL);
     SSF_REQUIRE(outByte != NULL);
-    SSF_ASSERT(fifo->magic == SSF_BFIFO_INIT_MAGIC);
+    SSF_REQUIRE(fifo->magic == SSF_BFIFO_INIT_MAGIC);
 
     if (fifo->head == fifo->tail) return false;
 
@@ -125,7 +136,7 @@ bool SSFBFifoGetByte(SSFBFifo_t *fifo, uint8_t *outByte)
 bool SSFBFifoIsEmpty(const SSFBFifo_t *fifo)
 {
     SSF_REQUIRE(fifo != NULL);
-    SSF_ASSERT(fifo->magic == SSF_BFIFO_INIT_MAGIC);
+    SSF_REQUIRE(fifo->magic == SSF_BFIFO_INIT_MAGIC);
 
     return fifo->head == fifo->tail;
 }
@@ -138,7 +149,7 @@ bool SSFBFifoIsFull(const SSFBFifo_t *fifo)
     ssfbf_uint_t newHead;
 
     SSF_REQUIRE(fifo != NULL);
-    SSF_ASSERT(fifo->magic == SSF_BFIFO_INIT_MAGIC);
+    SSF_REQUIRE(fifo->magic == SSF_BFIFO_INIT_MAGIC);
 
     newHead = fifo->head + 1;
 #if SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE == SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE_POW2_MINUS1
@@ -155,7 +166,7 @@ bool SSFBFifoIsFull(const SSFBFifo_t *fifo)
 ssfbf_uint_t SSFBFifoSize(const SSFBFifo_t *fifo)
 {
     SSF_REQUIRE(fifo != NULL);
-    SSF_ASSERT(fifo->magic == SSF_BFIFO_INIT_MAGIC);
+    SSF_REQUIRE(fifo->magic == SSF_BFIFO_INIT_MAGIC);
 
 #if SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE == SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE_255
     return SSF_BFIFO_255;
@@ -172,7 +183,7 @@ ssfbf_uint_t SSFBFifoLen(const SSFBFifo_t *fifo)
     ssfbf_uint_t used;
 
     SSF_REQUIRE(fifo != NULL);
-    SSF_ASSERT(fifo->magic == SSF_BFIFO_INIT_MAGIC);
+    SSF_REQUIRE(fifo->magic == SSF_BFIFO_INIT_MAGIC);
 
     if (fifo->head < fifo->tail)
 #if SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE == SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE_255
@@ -201,7 +212,7 @@ void SSFBFifoPutBytes(SSFBFifo_t *fifo, const uint8_t *inBytes, uint32_t inBytes
 {
     SSF_REQUIRE(fifo != NULL);
     SSF_REQUIRE(inBytes != NULL);
-    SSF_ASSERT(fifo->magic == SSF_BFIFO_INIT_MAGIC);
+    SSF_REQUIRE(fifo->magic == SSF_BFIFO_INIT_MAGIC);
 
     while (inBytesLen)
     {
@@ -230,7 +241,7 @@ bool SSFBFifoPeekBytes(const SSFBFifo_t *fifo, uint8_t *outBytes, uint32_t outBy
     SSF_REQUIRE(fifo != NULL);
     SSF_REQUIRE(outBytes != NULL);
     SSF_REQUIRE(outBytesLen != NULL);
-    SSF_ASSERT(fifo->magic == SSF_BFIFO_INIT_MAGIC);
+    SSF_REQUIRE(fifo->magic == SSF_BFIFO_INIT_MAGIC);
 
     if (fifo->head == fifo->tail) return false;
 
@@ -262,7 +273,7 @@ bool SSFBFifoGetBytes(SSFBFifo_t *fifo, uint8_t *outBytes, uint32_t outBytesSize
     SSF_REQUIRE(fifo != NULL);
     SSF_REQUIRE(outBytes != NULL);
     SSF_REQUIRE(outBytesLen != NULL);
-    SSF_ASSERT(fifo->magic == SSF_BFIFO_INIT_MAGIC);
+    SSF_REQUIRE(fifo->magic == SSF_BFIFO_INIT_MAGIC);
 
     if (fifo->head == fifo->tail) return false;
 

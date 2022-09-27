@@ -102,7 +102,9 @@ void UT1TestHandler1(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t
         SSFSMPutEvent(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_UTX_1);
         SSFSMPutEvent(SSF_SM_UNIT_TEST_2, SSF_SM_EVENT_UT1_1);
         SSFSMPutEvent(SSF_SM_UNIT_TEST_2, SSF_SM_EVENT_UT1_2);
+#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 0
         SSF_ASSERT_TEST(SSFSMPutEvent(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_UT1_1));
+#endif        
         break;
     case SSF_SM_EVENT_UTX_1:
         if ((data != NULL) && (dataLen == 1))
@@ -274,6 +276,7 @@ void SSFSMUnitTest(void)
     SSFSMTimeout_t start;
     SSFSMTimeout_t delta;
 
+    SSF_ASSERT_TEST(SSFSMDeInit());
     memset(_ssfsmFlags, 0, sizeof(_ssfsmFlags));
     SSF_ASSERT(_SSFSMFlagsAreCleared());
     SSF_ASSERT_TEST(SSFSMInitHandler(SSF_SM_UNIT_TEST_1, UT1TestHandler1));
@@ -534,5 +537,12 @@ void SSFSMUnitTest(void)
     delta = SSFPortGetTick64() - start;
     SSF_ASSERT((delta > (SSF_TICKS_PER_SEC * 0.9)) && (delta < (SSF_TICKS_PER_SEC * 1.1)));
 #endif
+    SSF_ASSERT_TEST(SSFSMInit(SSFSM_UT_MAX_EVENTS, SSFSM_UT_MAX_TIMERS));
+    SSFSMDeInit();
+    SSF_ASSERT_TEST(SSFSMDeInit());
+    SSFSMInit(SSFSM_UT_MAX_EVENTS, SSFSM_UT_MAX_TIMERS);
+    SSF_ASSERT_TEST(SSFSMInit(SSFSM_UT_MAX_EVENTS, SSFSM_UT_MAX_TIMERS));
+    SSFSMDeInit();
+    SSF_ASSERT_TEST(SSFSMDeInit());
 }
 #endif /* SSF_CONFIG_SM_UNIT_TEST */

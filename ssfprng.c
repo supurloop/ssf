@@ -57,6 +57,17 @@ void SSFPRNGInitContext(SSFPRNGContext_t *context, const uint8_t *entropy, size_
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Deinits a PRNG context.                                                                       */
+/* --------------------------------------------------------------------------------------------- */
+void SSFPRNGDeInitContext(SSFPRNGContext_t *context)
+{
+	SSF_REQUIRE(context != NULL);
+    SSF_REQUIRE(context->magic == SSF_PRNG_MAGIC);
+
+	memset(context, 0, sizeof(SSFPRNGContext_t));
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Copies 1 to SSF_PRNG_RANDOM_MAX_SIZE bytes of random numbers into user buffer.                */
 /* --------------------------------------------------------------------------------------------- */
 void SSFPRNGGetRandom(SSFPRNGContext_t *context, uint8_t *random, size_t randomSize)

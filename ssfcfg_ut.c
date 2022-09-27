@@ -72,6 +72,7 @@ void SSFCfgUnitTest(void)
 #endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
 
 #if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
+    SSF_ASSERT_TEST(SSFCfgDeInit());
     SSFCfgInit();
     SSF_ASSERT_TEST(SSFCfgInit());
 #endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
@@ -144,4 +145,11 @@ void SSFCfgUnitTest(void)
     SSF_ASSERT(SSFCfgWrite(data1, sizeof(data1), 0, 1) == false);
     memset(data1, 0x11, sizeof(data1));
     SSF_ASSERT(SSFCfgWrite(data1, sizeof(data1), 1, 2) == false);
+#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
+    SSF_ASSERT_TEST(SSFCfgInit());
+    SSFCfgDeInit();
+    SSF_ASSERT_TEST(SSFCfgDeInit());
+    SSFCfgInit();
+    SSFCfgDeInit();
+#endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
 }

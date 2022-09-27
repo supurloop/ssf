@@ -50,6 +50,7 @@ typedef int16_t dataVersion_t;
 /* --------------------------------------------------------------------------------------------- */
 #if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
 void SSFCfgInit(void);
+void SSFCfgDeInit(void);
 #endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
 bool SSFCfgWrite(uint8_t *data, uint16_t dataLen, dataId_t dataId, dataVersion_t dataVersion);
 dataVersion_t SSFCfgRead(uint8_t *data, uint16_t *datalen, size_t dataSize, dataId_t dataId);

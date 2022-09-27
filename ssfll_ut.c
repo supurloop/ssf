@@ -215,6 +215,11 @@ void SSFLLUnitTest(void)
     SSF_ASSERT_TEST(SSFLLUnused(NULL));
 
     /* Initialize list */
+    SSF_ASSERT_TEST(SSFLLDeInit(&_sllTest));
+    SSFLLInit(&_sllTest, SLL_TEST_MAX_SIZE);
+    SSF_ASSERT_TEST(SSFLLInit(&_sllTest, SLL_TEST_MAX_SIZE));
+    SSFLLDeInit(&_sllTest);
+    SSF_ASSERT_TEST(SSFLLDeInit(&_sllTest));
     SSFLLInit(&_sllTest, SLL_TEST_MAX_SIZE);
     SSF_ASSERT_TEST(SSFLLInit(&_sllTest, SLL_TEST_MAX_SIZE));
     SSF_ASSERT(SSFLLGetItem(&_sllTest, (SSFLLItem_t **)&outItem, SSF_LL_LOC_HEAD, NULL) == false);

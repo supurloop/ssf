@@ -57,6 +57,7 @@ void SSFLLDeInit(SSFLL_t *ll)
 {
     SSF_REQUIRE(ll != NULL);
     SSF_REQUIRE(ll->magic == SSF_LL_INIT_MAGIC);
+    SSF_REQUIRE(SSFLLIsEmpty(ll));
 
     memset(ll, 0, sizeof(SSFLL_t));
 }

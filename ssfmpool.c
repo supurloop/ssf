@@ -100,6 +100,7 @@ void SSFMPoolDeInit(SSFMPool_t *pool)
 
     SSF_REQUIRE(pool != NULL);
     SSF_REQUIRE(pool->magic == SSF_MPOOL_INIT_MAGIC);
+    SSF_REQUIRE(SSFMPoolIsFull(pool));
 
     memSize = pool->blockSize + sizeof(SSFLLItem_t) + sizeof(uint32_t);
     for (i = 0; i < pool->blocks; i++)

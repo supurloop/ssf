@@ -60,6 +60,7 @@ typedef void (*SSFSMHandler_t)(SSFSMEventId_t eid, const SSFSMData_t *data,\
 /* External interface                                                                            */
 /* --------------------------------------------------------------------------------------------- */
 void SSFSMInit(uint32_t maxEvents, uint32_t maxTimers);
+void SSFSMDeInit(void);
 void SSFSMInitHandler(SSFSMId_t smid, SSFSMHandler_t initial);
 void SSFSMPutEventData(SSFSMId_t smid, SSFSMEventId_t eid, const SSFSMData_t *data,
                        SSFSMDataLen_t dataLen);

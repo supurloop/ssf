@@ -91,6 +91,44 @@ void SSFMPoolInit(SSFMPool_t *pool, uint32_t blocks, uint32_t blockSize)
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Deinitializes a memory pool.                                                                  */
+/* --------------------------------------------------------------------------------------------- */
+void SSFMPoolDeInit(SSFMPool_t *pool)
+{
+    uint32_t i;
+    uint32_t memSize;
+
+    SSF_REQUIRE(pool != NULL);
+    SSF_REQUIRE(pool->magic == SSF_MPOOL_INIT_MAGIC);
+
+    memSize = pool->blockSize + sizeof(SSFLLItem_t) + sizeof(uint32_t);
+    for (i = 0; i < pool->blocks; i++)
+    {
+        SSFLLItem_t *mem = NULL;
+#if SSF_MPOOL_DEBUG == 1
+    SSFMPoolDebug_t *w = NULL;
+#endif /* SSF_MPOOL_DEBUG */
+
+        SSF_LL_FIFO_POP(&(pool->avail), &mem);
+        SSF_ASSERT(mem != NULL);
+        memset(mem, 0, memSize);
+        free(mem);
+#if SSF_MPOOL_DEBUG == 1
+        SSF_LL_FIFO_POP(&(pool->world), &w);
+        SSF_ASSERT(w != NULL);
+        memset(w, 0, sizeof(SSFMPoolDebug_t));
+        free(w);
+#endif /* SSF_MPOOL_DEBUG */
+    }
+
+#if SSF_MPOOL_DEBUG == 1
+    SSFLLDeInit(&(pool->world));
+#endif /* SSF_MPOOL_DEBUG */
+    SSFLLDeInit(&(pool->avail));
+    memset(pool, 0, sizeof(SSFMPool_t));
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Allocates a block from the pool.                                                              */
 /* --------------------------------------------------------------------------------------------- */
 void* SSFMPoolAlloc(SSFMPool_t *pool, uint32_t size, uint8_t owner)
@@ -100,7 +138,7 @@ void* SSFMPoolAlloc(SSFMPool_t *pool, uint32_t size, uint8_t owner)
 
     SSF_REQUIRE(pool != NULL);
     SSF_REQUIRE(size <= pool->blockSize);
-    SSF_ASSERT(pool->magic == SSF_MPOOL_INIT_MAGIC);
+    SSF_REQUIRE(pool->magic == SSF_MPOOL_INIT_MAGIC);
 
     SSF_ASSERT(SSF_LL_FIFO_POP(&(pool->avail), &mem) == true);
 
@@ -119,7 +157,7 @@ void* SSFMPoolFree(SSFMPool_t *pool, void *mpool)
 {
     SSF_REQUIRE(pool != NULL);
     SSF_REQUIRE(mpool != NULL);
-    SSF_ASSERT(pool->magic == SSF_MPOOL_INIT_MAGIC);
+    SSF_REQUIRE(pool->magic == SSF_MPOOL_INIT_MAGIC);
 
     SSF_ASSERT(memcmp(((uint8_t *)mpool) + pool->blockSize, "\x12\x34\x56",
                       sizeof(uint32_t) - 1) == 0);
@@ -133,7 +171,7 @@ void* SSFMPoolFree(SSFMPool_t *pool, void *mpool)
 uint32_t SSFMPoolBlockSize(const SSFMPool_t *pool)
 {
     SSF_REQUIRE(pool != NULL);
-    SSF_ASSERT(pool->magic == SSF_MPOOL_INIT_MAGIC);
+    SSF_REQUIRE(pool->magic == SSF_MPOOL_INIT_MAGIC);
 
     return pool->blockSize;
 }
@@ -144,7 +182,7 @@ uint32_t SSFMPoolBlockSize(const SSFMPool_t *pool)
 uint32_t SSFMPoolSize(const SSFMPool_t *pool)
 {
     SSF_REQUIRE(pool != NULL);
-    SSF_ASSERT(pool->magic == SSF_MPOOL_INIT_MAGIC);
+    SSF_REQUIRE(pool->magic == SSF_MPOOL_INIT_MAGIC);
 
     return pool->blocks;
 }
@@ -155,7 +193,7 @@ uint32_t SSFMPoolSize(const SSFMPool_t *pool)
 uint32_t SSFMPoolLen(const SSFMPool_t *pool)
 {
     SSF_REQUIRE(pool != NULL);
-    SSF_ASSERT(pool->magic == SSF_MPOOL_INIT_MAGIC);
+    SSF_REQUIRE(pool->magic == SSF_MPOOL_INIT_MAGIC);
 
     return SSFLLLen(&(pool->avail));
 }
@@ -166,7 +204,7 @@ uint32_t SSFMPoolLen(const SSFMPool_t *pool)
 bool SSFMPoolIsEmpty(const SSFMPool_t *pool)
 {
     SSF_REQUIRE(pool != NULL);
-    SSF_ASSERT(pool->magic == SSF_MPOOL_INIT_MAGIC);
+    SSF_REQUIRE(pool->magic == SSF_MPOOL_INIT_MAGIC);
 
     return SSFLLIsEmpty(&(pool->avail));
 }
@@ -177,7 +215,7 @@ bool SSFMPoolIsEmpty(const SSFMPool_t *pool)
 bool SSFMPoolIsFull(const SSFMPool_t *pool)
 {
     SSF_REQUIRE(pool != NULL);
-    SSF_ASSERT(pool->magic == SSF_MPOOL_INIT_MAGIC);
+    SSF_REQUIRE(pool->magic == SSF_MPOOL_INIT_MAGIC);
 
     return SSFLLIsFull(&(pool->avail));
 }

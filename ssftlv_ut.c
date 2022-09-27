@@ -83,11 +83,14 @@ void SSFTLVUnitTest(void)
     uint8_t *valPtr;
     uint32_t i, expectedBufLen;
 
+    memset(&tlv, 0, sizeof(tlv));
     SSF_ASSERT_TEST(SSFTLVInit(NULL, buf, sizeof(buf), 0));
     SSF_ASSERT_TEST(SSFTLVInit(&tlv, NULL, sizeof(buf), 0));
     SSF_ASSERT_TEST(SSFTLVInit(&tlv, buf, sizeof(buf), sizeof(buf) + 1));
 
+    SSF_ASSERT_TEST(SSFTLVDeInit(&tlv));
     SSFTLVInit(&tlv, buf, sizeof(buf), 0);
+    SSF_ASSERT_TEST(SSFTLVInit(&tlv, buf, sizeof(buf), 0));
 
     SSF_ASSERT_TEST(SSFTLVPut(NULL, 0, (const uint8_t*)"error", 5));
     SSF_ASSERT_TEST(SSFTLVPut(&tlv, 0, NULL, 0));
@@ -185,4 +188,10 @@ void SSFTLVUnitTest(void)
     if (valLong != NULL) { free(valLong); }
     if (bufLong != NULL) { free(bufLong); }
 #endif /* SSF_TLV_ENABLE_EXTENDED_UNIT_TEST */
+
+    SSFTLVDeInit(&tlv);
+    SSF_ASSERT_TEST(SSFTLVDeInit(&tlv));
+    SSFTLVInit(&tlv, buf, sizeof(buf), 0);
+    SSF_ASSERT_TEST(SSFTLVInit(&tlv, buf, sizeof(buf), 0));
+    SSFTLVDeInit(&tlv);
 }

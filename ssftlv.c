@@ -88,6 +88,7 @@
 
 #define _SSF_TLV_FIELD_CALC_LEN(v) (v < 64ul) ? 1 : ((v < 16384ul) ? 2: ((v < 4194304ul) ? 3 : 4))
 #define _SSF_TLV_FIELD_READ_LEN(tlv, index, v) v = (tlv->buf[index] >> 6) + 1
+#define _SSF_TLV_MAGIC (0x544C5621ul)
 
 /* --------------------------------------------------------------------------------------------- */
 /* Initializes a TLV data structure.                                                             */
@@ -95,12 +96,25 @@
 void SSFTLVInit(SSFTLV_t *tlv, uint8_t *buf, uint32_t bufSize, uint32_t bufLen)
 {
     SSF_REQUIRE(tlv != NULL);
+    SSF_REQUIRE(tlv->magic != _SSF_TLV_MAGIC);
     SSF_REQUIRE(buf != NULL);
     SSF_REQUIRE(bufLen < bufSize);
 
     tlv->buf = buf;
     tlv->bufSize = bufSize;
     tlv->bufLen = bufLen;
+    tlv->magic = _SSF_TLV_MAGIC;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Deinitializes a TLV data structure.                                                           */
+/* --------------------------------------------------------------------------------------------- */
+void SSFTLVDeInit(SSFTLV_t *tlv)
+{
+    SSF_REQUIRE(tlv != NULL);
+    SSF_REQUIRE(tlv->magic == _SSF_TLV_MAGIC);
+
+    memset(tlv, 0, sizeof(SSFTLV_t));
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -113,6 +127,7 @@ bool SSFTLVPut(SSFTLV_t *tlv, SSFTLVVar_t tag, const uint8_t *val, SSFTLVVar_t v
     uint8_t lenLen;
 
     SSF_REQUIRE(tlv != NULL);
+    SSF_REQUIRE(tlv->magic == _SSF_TLV_MAGIC);
     SSF_REQUIRE(val != NULL);
 
 #if SSF_TLV_ENABLE_FIXED_MODE == 0
@@ -172,6 +187,7 @@ bool SSFTLVRead(const SSFTLV_t *tlv, SSFTLVVar_t tag, uint16_t instance, uint8_t
     uint32_t index = 0;
 
     SSF_REQUIRE(tlv != NULL);
+    SSF_REQUIRE(tlv->magic == _SSF_TLV_MAGIC);
     SSF_REQUIRE(((val != NULL) && (valPtr == NULL)) ||
                 ((val == NULL) && (valSize == 0) && (valPtr != NULL)));
     SSF_REQUIRE(valLen != NULL);

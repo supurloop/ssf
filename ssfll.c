@@ -70,6 +70,7 @@ bool SSFLLIsInited(SSFLL_t* ll)
     SSF_REQUIRE(ll != NULL);
 
     return(ll->magic == SSF_LL_INIT_MAGIC);
+}
 
 /* --------------------------------------------------------------------------------------------- */
 /* Put item into linked list.                                                                    */

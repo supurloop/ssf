@@ -57,11 +57,6 @@
 /* --------------------------------------------------------------------------------------------- */
 int main(void)
 {
-#if SSF_CONFIG_UBJSON_UNIT_TEST == 1
-    SSFUBJsonUnitTest();
-#endif /* SSF_CONFIG_UBJSON_UNIT_TEST */
-    return 0;
-
 #if SSF_CONFIG_BFIFO_UNIT_TEST == 1
     SSFBFifoUnitTest();
 #endif /* SSF_CONFIG_BFIFO_UNIT_TEST */
@@ -134,5 +129,8 @@ int main(void)
     SSFINIUnitTest();
 #endif /* SSF_CONFIG_INI_UNIT_TEST */
 
+#if SSF_CONFIG_UBJSON_UNIT_TEST == 1
+    SSFUBJsonUnitTest();
+#endif /* SSF_CONFIG_UBJSON_UNIT_TEST */
     return 0;
 }

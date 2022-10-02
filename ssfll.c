@@ -63,6 +63,16 @@ void SSFLLDeInit(SSFLL_t *ll)
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Returns true if linked list inited, else false.                                               */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFLLIsInited(SSFLL_t* ll)
+{
+    SSF_REQUIRE(ll != NULL);
+
+    return(ll->magic == SSF_LL_INIT_MAGIC);
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Put item into linked list.                                                                    */
 /* --------------------------------------------------------------------------------------------- */
 void SSFLLPutItem(SSFLL_t *ll, SSFLLItem_t *inItem, SSF_LL_LOC_t loc, SSFLLItem_t *locItem)

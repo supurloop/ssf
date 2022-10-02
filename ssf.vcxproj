@@ -180,6 +180,8 @@
     <ClCompile Include="ssfaes_ut.c" />
     <ClCompile Include="ssfaesgcm.c" />
     <ClCompile Include="ssfaesgcm_ut.c" />
+    <ClCompile Include="ssfubjson.c" />
+    <ClCompile Include="ssfubjson_ut.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="ssf.h" />
@@ -203,6 +205,7 @@
     <ClInclude Include="ssftlv.h" />
     <ClInclude Include="ssfaes.h" />
     <ClInclude Include="ssfaesgcm.h" />
+    <ClInclude Include="ssfubjson.h" />
     <ClInclude Include="ssfversion.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

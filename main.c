@@ -50,6 +50,7 @@
 #include "ssfcfg.h"
 #include "ssfprng.h"
 #include "ssfini.h"
+#include "ssfubjson.h"
 
 /* --------------------------------------------------------------------------------------------- */
 /* SSF unit test entry point.                                                                    */
@@ -128,5 +129,8 @@ int main(void)
     SSFINIUnitTest();
 #endif /* SSF_CONFIG_INI_UNIT_TEST */
 
+#if SSF_CONFIG_UBJSON_UNIT_TEST == 1
+    SSFUBJsonUnitTest();
+#endif /* SSF_CONFIG_UBJSON_UNIT_TEST */
     return 0;
 }

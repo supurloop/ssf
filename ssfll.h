@@ -76,6 +76,7 @@ struct SSFLL
 /* --------------------------------------------------------------------------------------------- */
 void SSFLLInit(SSFLL_t *ll, uint32_t maxSize);
 void SSFLLDeInit(SSFLL_t *ll);
+bool SSFLLIsInited(SSFLL_t* ll);
 void SSFLLPutItem(SSFLL_t *ll, SSFLLItem_t *inItem, SSF_LL_LOC_t loc, SSFLLItem_t *locItem);
 bool SSFLLGetItem(SSFLL_t *ll, SSFLLItem_t **outItem, SSF_LL_LOC_t loc, SSFLLItem_t *locItem);
 bool SSFLLIsEmpty(const SSFLL_t *ll);

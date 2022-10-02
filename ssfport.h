@@ -70,12 +70,19 @@ typedef uint64_t SSFPortTick_t;
 
 #if SSF_CONFIG_BYTE_ORDER_MACROS == 1
 #if SSF_CONFIG_LITTLE_ENDIAN == 0
+    #define htons(x) (x)
+    #define ntohs(x) htons(x)
+
     #define htonl(x) (x)
     #define ntohl(x) htonl(x)
 
     #define htonll(x) (x)
     #define ntohll(x) htonll(x)
 #else /* SSF_CONFIG_LITTLE_ENDIAN */
+    #define htons(x) ((((x) & 0xff00u) >> 8) | \
+                      (((x) & 0x00ffu) << 8))
+    #define ntohs(x) htons(x)
+
     #define htonl(x) ((((x) & 0xff000000u) >> 24) | \
                       (((x) & 0x00ff0000u) >> 8) | \
                       (((x) & 0x0000ff00u) << 8) | \
@@ -115,6 +122,7 @@ typedef uint64_t SSFPortTick_t;
 #define SSF_CONFIG_CFG_UNIT_TEST (1u)
 #define SSF_CONFIG_PRNG_UNIT_TEST (1u)
 #define SSF_CONFIG_INI_UNIT_TEST (1u)
+#define SSF_CONFIG_UBJSON_UNIT_TEST (1u)
 
 /* If any unit test is enabled then enable unit test mode */
 #if SSF_CONFIG_BFIFO_UNIT_TEST == 1 || \
@@ -134,7 +142,8 @@ typedef uint64_t SSFPortTick_t;
     SSF_CONFIG_AESGCM_UNIT_TEST == 1 || \
     SSF_CONFIG_CFG_UNIT_TEST == 1 || \
     SSF_CONFIG_PRNG_UNIT_TEST == 1 || \
-    SSF_CONFIG_INI_UNIT_TEST == 1
+    SSF_CONFIG_INI_UNIT_TEST == 1 || \
+    SSF_CONFIG_UBJSON_UNIT_TEST == 1
 #define SSF_CONFIG_UNIT_TEST (1u)
 #else
 #define SSF_CONFIG_UNIT_TEST (0u)
@@ -439,6 +448,26 @@ enum SSFSMEventList
 #define SSF_CFG_THREAD_SYNC_ACQUIRE() SSF_MUTEX_ACQUIRE(_ssfcfgSyncMutex)
 #define SSF_CFG_THREAD_SYNC_RELEASE() SSF_MUTEX_RELEASE(_ssfcfgSyncMutex)
 #endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
+
+/* --------------------------------------------------------------------------------------------- */
+/* Configure ssfubjson's parser limits                                                           */
+/* --------------------------------------------------------------------------------------------- */
+/* Define the maximum parse depth, each opening { or [ starts a new depth level. */
+#define SSF_UBJSON_CONFIG_MAX_IN_DEPTH (4u)
+
+/* Define the maximum JSON string length to be parsed. */
+#define SSF_UBJSON_CONFIG_MAX_IN_LEN  (2047u)
+
+#define SSF_UBJSON_TYPEDEF_STRUCT typedef struct /* Optionally add packed struct attribute here */
+
+/* Allow parser to return HPN type as a string instead of considering parse invalid. */
+#define SSF_UBJSON_CONFIG_HANDLE_HPN_AS_STRING (1u)
+
+/* Allow parser to use floating point to convert numbers. */
+#define SSF_UBJSON_CONFIG_ENABLE_FLOAT_PARSE (1u)
+
+/* Allow generator to print floats. */
+#define SSF_UBJSON_CONFIG_ENABLE_FLOAT_GEN (0u)
 
 /* --------------------------------------------------------------------------------------------- */
 /* External interface                                                                            */

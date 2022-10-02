@@ -91,9 +91,6 @@ SSFUBJSONUT_t _ubjs[] = {
     { (uint8_t *)"{i\x05hello[i\x03i\x04Si\x05world[]]}", 25, true }, /* {"hello":[3,4,"world",[]]} */
     { (uint8_t *)"{i\x05hello[i\x03i\x04Si\x05world{}]}", 25, true }, /* {"hello":[3,4,"world",{}]} */
     { (uint8_t *)"{i\x05hello[i\x03i\x04Si\x05world{i\x03" "abcT}]}", 31, true }, /* {"hello":[3,4,"world",{"abc":true}]} */
-    //{ (uint8_t*)"{i\x02l1{i\x02l2iAi\x02lbiBi\x02la[C1C2C3[]]}i\x02m1Si\x03xyz}", 44, true } /*  */
-   // { (uint8_t*)"{i\x02l1Si\x03xyzi\x02l2Si\x03" "abc}", 22, true } /*  */
-    //{ (uint8_t*)"{i\x02l1Si\x03xyzi\x02l2{i\x02l3iM}}", 24, true } /*  */
     { (uint8_t*)"{i\x01xiXi\x01" "a{i\x01" "b{i\x01" "ciCi\x01" "diDi\x01w{}}i\x01" "eiE}i\x01" "fiFi\x01I[iP{i\x01qiQ}iSiT]}", 60, true } /*  */
 };
 
@@ -225,27 +222,16 @@ void SSFUBJsonUnitTest(void)
 
     memcpy(ubjson, (uint8_t*)"{i\x01xiXi\x01" "a{i\x01" "b{i\x01" "ciCi\x01" "diDi\x01w{}}i\x01" "eiE}i\x01" "fiFi\x01I[iP{i\x01qiQ}iSiT]i\x08MMMMMMMMSi\x08" "12345678}", 81);
     SSF_ASSERT(SSFUBJsonContextInitParse(&context, ubjson, 81));
-    //memset(ubjson, 0, sizeof(ubjson));
-    //PrintRoot(context.roots[0]);
-    //uint8_t jsOut[128];
-    //size_t jsOutStart;
-    //size_t jsOutEnd;
 
     SSF_ASSERT(SSFUBJsonContextGenerate(&context, jsOut, sizeof(jsOut), &jsOutEnd));
     SSF_ASSERT(jsOutEnd == 81);
     SSF_ASSERT(memcmp(jsOut, ubjson, jsOutEnd) == 0);
 
     SSF_ASSERT_TEST(SSFUBJsonIsValid(NULL, 0));
-
-
     SSFUBJsonContextIterate(&context, MyIterate, NULL);
 
     SSF_ASSERT(SSFUBJsonContextGenerate(&context, jsOut, sizeof(jsOut), &jsOutEnd));
-    //SSF_ASSERT(jsOutEnd == 81);
-    //SSF_ASSERT(memcmp(jsOut, ubjson, jsOutEnd) == 0);
-
     SSF_ASSERT(SSFUBJsonIsValid(jsOut, jsOutEnd));
-
 
     SSFUBJsonContextDeInitParse(&context);
     SSFUBJsonDeInitContext(&context);
@@ -254,7 +240,6 @@ void SSFUBJsonUnitTest(void)
     for (i = 0; i < (sizeof(_ubjs) / sizeof(SSFUBJSONUT_t)); i++)
     {
         SSF_ASSERT(SSFUBJsonIsValid(_ubjs[i].js, _ubjs[i].jsLen) == _ubjs[i].isValid);
-#if 1
         if (_ubjs[i].isValid)
         {
             SSF_ASSERT(SSFUBJsonIsValid(_ubjs[i].js, _ubjs[i].jsLen + 1) == false);
@@ -263,11 +248,7 @@ void SSFUBJsonUnitTest(void)
                 SSF_ASSERT(SSFUBJsonIsValid(_ubjs[i].js, _ubjs[i].jsLen - 1) == false);
             }
         }
-#endif
     }
-    //return;
-
-#if 1
 
     /* Validate parser on number types */
     memset(path, 0, sizeof(path));
@@ -276,7 +257,6 @@ void SSFUBJsonUnitTest(void)
     {
         SSF_ASSERT(SSFUBJsonGetType(_ubjtsTypeNumber[i].js, _ubjtsTypeNumber[i].jsLen, (SSFCStrIn_t *)path) == _ubjtsTypeNumber[i].type);
     }
-
 
     /* Validate parser on string types */
     memset(path, 0, sizeof(path));
@@ -344,7 +324,6 @@ void SSFUBJsonUnitTest(void)
     SSF_ASSERT(outStrLen == 0);
     SSF_ASSERT(outStr[outStrLen] == 0);
 
-    // jlh need more test cases for atr esc sequences.
     memset(outStr, 0xff, sizeof(outStr));
     outStrLen = sizeof(outStr) + 1;
     SSF_ASSERT(SSFUBJsonGetString((uint8_t *)"{i\x01sSi\x05w\trld}", 13, (SSFCStrIn_t *)path, outStr, sizeof(outStr),
@@ -492,7 +471,5 @@ void SSFUBJsonUnitTest(void)
     jsOutStart = 0;
     jsOutEnd = (size_t)-1;
     SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)-1));
-#endif
-
 }
 

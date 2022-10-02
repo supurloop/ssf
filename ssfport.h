@@ -441,14 +441,14 @@ enum SSFSMEventList
 
 #define SSF_UBJSON_TYPEDEF_STRUCT typedef struct /* Optionally add packed struct attribute here */
 
+/* Allow parser to return HPN type as a string instead of considering parse invalid. */
+#define SSF_UBJSON_CONFIG_HANDLE_HPN_AS_STRING (1u)
+
 /* Allow parser to use floating point to convert numbers. */
-//#define SSF_JSON_CONFIG_ENABLE_FLOAT_PARSE (0u)
+#define SSF_UBJSON_CONFIG_ENABLE_FLOAT_PARSE (1u)
 
 /* Allow generator to print floats. */
-//#define SSF_JSON_CONFIG_ENABLE_FLOAT_GEN (1u)
-
-/* Enable interface that can update specific fields in a JSON string. */
-//#define SSF_JSON_CONFIG_ENABLE_UPDATE (1u)
+#define SSF_UBJSON_CONFIG_ENABLE_FLOAT_GEN (0u)
 
 /* --------------------------------------------------------------------------------------------- */
 /* External interface                                                                            */

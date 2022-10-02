@@ -48,6 +48,9 @@ SSFUBJSONUT_t _ubjs[] = {
     { (uint8_t *)"{", 1, false }, /* { */
     { (uint8_t *)"{}", 2, true },  /* {} */
     { (uint8_t *)"{}1", 3, false }, /* {}1 */
+#if SSF_UBJSON_CONFIG_HANDLE_HPN_AS_STRING == 0
+    { (uint8_t*)"{i\x01sHi\x05" "12345}", 13, false }, /* {"s":"12345"} */
+#endif
     { (uint8_t *)"{i\x05helloSi\x05world}", 17, true }, /* {"hello":"world"} */
     { (uint8_t *)"{i\x05helloSi\x05world}1", 18, false }, /* {"hello":"world"}1 */
     { (uint8_t *)"{i\x05helloSi\x05world}", 16, false }, /* {"hello":"world"} */
@@ -104,7 +107,7 @@ SSFUBJSONNUM_t _ubjtsTypeNumber[] =
 {
     { (uint8_t *)"{i\x01ni\x7f}", 7, SSF_UBJSON_TYPE_NUMBER_INT8 }, /* {"n":127} */
     { (uint8_t *)"{i\x01nU\x81}", 7, SSF_UBJSON_TYPE_NUMBER_UINT8 }, /* {"n":129} */
-    { (uint8_t *)"{i\x01nC4}", 7, SSF_UBJSON_TYPE_NUMBER_CHAR }, /* {"n":"4"} */
+    { (uint8_t *)"{i\x01nC4}", 7, SSF_UBJSON_TYPE_STRING }, /* {"n":"4"} */
     { (uint8_t *)"{i\x01nI\x01\x00}", 8, SSF_UBJSON_TYPE_NUMBER_INT16 }, /* {"n":256} */
     { (uint8_t *)"{i\x01nl\x00\x00\x80\x00}", 10, SSF_UBJSON_TYPE_NUMBER_INT32 }, /* {"n":32768} */
     { (uint8_t *)"{i\x01nL\x00\x00\x00\x00\x80\x00\x00\x00}", 14, SSF_UBJSON_TYPE_NUMBER_INT64 }, /* {"n":2147483648} */
@@ -120,6 +123,10 @@ typedef struct SSFUBJSONGEN {
 typedef SSFUBJSONGEN_t SSFUBJSONSTR_t;
 SSFUBJSONSTR_t _ubjtsTypeString[] =
 {
+#if SSF_UBJSON_CONFIG_HANDLE_HPN_AS_STRING == 1
+    { (uint8_t*)"{i\x01sHi\x05" "12345}", 13 }, /* {"s":"12345"} */
+#endif
+    { (uint8_t*)"{i\x01sC4}", 7 }, /* {"s":"4"} */
     { (uint8_t *)"{i\x01sSi\x00}", 8 }, /* {"s":""} */
     { (uint8_t *)"{i\x01sSi\x01z}", 9 }, /* {"s":"z"} */
     { (uint8_t *)"{i\x01sSi\x05world}", 13 } /* {"s":"world"} */
@@ -153,11 +160,12 @@ bool _SSFUBJsonPrintFn1(uint8_t *js, size_t size, size_t start, size_t *end, voi
 
 bool MyIterate(SSFCStrIn_t* path, void* data, bool* trim)
 {
-    uint8_t i;
+    //uint8_t i;
 
     data = data;
     trim = trim;
-    
+    path = path;
+#if 0    
     for (i = 0; i < SSF_UBJSON_CONFIG_MAX_IN_DEPTH; i++)
     {
         if (path[i] == NULL) break;
@@ -165,6 +173,7 @@ bool MyIterate(SSFCStrIn_t* path, void* data, bool* trim)
         printf("%s", path[i]);
     }
     printf("\b\r\n");
+#endif
     return true;
 }
 
@@ -337,7 +346,7 @@ void SSFUBJsonUnitTest(void)
     // jlh need more test cases for atr esc sequences.
     memset(outStr, 0xff, sizeof(outStr));
     outStrLen = sizeof(outStr) + 1;
-    SSF_ASSERT(SSFUBJsonGetString((uint8_t *)"{i\x01sSi\x06w\\trld}", 14, (SSFCStrIn_t *)path, outStr, sizeof(outStr),
+    SSF_ASSERT(SSFUBJsonGetString((uint8_t *)"{i\x01sSi\x05w\trld}", 13, (SSFCStrIn_t *)path, outStr, sizeof(outStr),
                                   &outStrLen));
     SSF_ASSERT(outStrLen == 5);
     SSF_ASSERT(memcmp(outStr, "w\trld", outStrLen) == 0);

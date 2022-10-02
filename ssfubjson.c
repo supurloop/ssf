@@ -37,20 +37,14 @@
 #include "ssfubjson.h"
 #include "ssfhex.h"
 
-/* TODO - Address NOOP type */
-/* TODO - Address CHAR type, 1 byte STRING */
-/* TODO - Address code duplication with SSFJsonEsc is escaping even a thing with UBJSON???*/
-/* TODO - Address code duplication with escape sequence processing */
-/* TODO - Reduce code duplication in GetInt*() functions */
+/* Limitation - NOOP type not supported */
+/* Limitation - Unicode string encoding/decoding & strings embedded with NULLs not supported */
+
 /* TODO - Add printer for float and double */
 /* TODO - Add printer for ASCII Hex and Base64 */
 /* TODO - Add decoders for ASCII Hex and Base64 */
-/* TODO - Anything to do to cleanly not support HPNs? */
 /* TODO - Parse optimized formatting. */
 /* TODO - Print optimized array formatting. */
-/* TODO - Generate dynamic data struct from parse. */
-/* TODO - Update data struct interface */
-/* TODO - Print data struct */
 /* TODO - Write more unit tests */
 /* TODO - Rework path definition to allow for 0 values in names, defined array indexes */
 
@@ -66,6 +60,7 @@
 #define UBJ_TYPE_FLOAT32 'd'
 #define UBJ_TYPE_FLOAT64 'D'
 #define UBJ_TYPE_CHAR 'C'
+#define UBJ_TYPE_HPN 'H'
 #define UBJ_TYPE_STRING 'S'
 #define UBJ_TYPE_OBJ_OPEN '{'
 #define UBJ_TYPE_ARRAY_OPEN '['
@@ -74,9 +69,10 @@
 #define SSF_UBJSON_MAGIC 0x55424A53ul
 
 // dup?
+#if 0
 #define SSFJsonEsc(j, b) do { j[start] = '\\'; start++; if (start >= size) return false; \
                               j[start] = b;} while (0)
-
+#endif
 static bool _SSFUBJsonValue(SSFUBJSONContext_t * context, uint8_t *js, size_t jsLen, size_t *index, size_t *start, size_t *end,
     SSFCStrIn_t * path, uint8_t depth, SSFUBJsonType_t *jt);
 
@@ -223,7 +219,7 @@ static void _SSFUBJSONPushNameValue(SSFUBJSONContext_t* context, uint8_t *name, 
         memset(&node->children, 0, sizeof(SSFLL_t));
         node->parent = NULL;
     }
-
+#if 0    
     printf("-");
     while (nameLen)
     {
@@ -239,8 +235,10 @@ static void _SSFUBJSONPushNameValue(SSFUBJSONContext_t* context, uint8_t *name, 
         value++;
     }
     printf("-%d-D%d\r\n", type, depth);
+#endif
 }
 
+#if 0
 void PrintPath(SSFLLItem_t* parent)
 {
     char* p;
@@ -345,7 +343,7 @@ void PrintRoot(SSFLL_t root)
     }
 }
 
-
+#endif
 
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if array found, else false; If true returns type/start/end on path index match.  */
@@ -436,20 +434,26 @@ static bool _SSFJsonTypeField(uint8_t *js, size_t jsLen, size_t *index, size_t *
         *fjt = SSF_UBJSON_TYPE_NUMBER_INT64; len = sizeof(int64_t);
         goto _ssfubParseInt;
     case UBJ_TYPE_CHAR:
-        *fjt = SSF_UBJSON_TYPE_NUMBER_CHAR; len = sizeof(uint8_t);
+        *fjt = SSF_UBJSON_TYPE_STRING;
+        len = sizeof(uint8_t);
         goto _ssfubParseInt;
     case UBJ_TYPE_UINT8:
         *fjt = SSF_UBJSON_TYPE_NUMBER_UINT8; len = sizeof(uint8_t);
         goto _ssfubParseInt;
     case UBJ_TYPE_INT8:
         *fjt = SSF_UBJSON_TYPE_NUMBER_INT8; len = sizeof(int8_t);
-
+        /* Fall through on purpose */
     _ssfubParseInt:
         (*index)++; if (*index >= jsLen) return false;
         *fstart = *index;
         (*index) += len; if (*index >= jsLen) return false;
         *fend = *index;
         return true;
+    case UBJ_TYPE_HPN:
+#if SSF_UBJSON_CONFIG_HANDLE_HPN_AS_STRING == 0
+        return false;
+#endif
+        /* Fallthough, treat HPN as a string */
     case UBJ_TYPE_STRING:
         {
             size_t tstart;
@@ -714,7 +718,7 @@ SSFUBJsonType_t SSFUBJsonGetType(uint8_t* js, size_t jsLen, SSFCStrIn_t *path)
 }
 #if 1
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if found and is unescaped completely into buffer w/NULL term., else false.       */
+/* Returns true if found and copied into buffer w/NULL term., else false.                        */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFUBJsonGetString(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, SSFCStrOut_t out,
                         size_t outSize, size_t *outLen)
@@ -741,6 +745,7 @@ bool SSFUBJsonGetString(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, SSFCStrOut
 
     while ((len != 0) && (index < (outSize - 1)))
     {
+#if 0
         if (js[start] == '\\')
         {
             start++; len--;
@@ -772,8 +777,9 @@ bool SSFUBJsonGetString(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, SSFCStrOut
             start += 3; len -= 3;
         }
         else
+#endif
         {out[index] = js[start]; }
-    nextesc:
+   // nextesc:
         if (outLen != NULL) (*outLen)++;
         start++; index++; len--;
     }
@@ -985,7 +991,7 @@ bool SSFUBJsonPrint(uint8_t *js, size_t jsSize, size_t start, size_t *end, SSFUB
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if in string added successfully as escaped string, else false.                   */
+/* Returns true if in string added successfully as string, else false.                           */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFUBJsonPrintCString(uint8_t *js, size_t size, size_t start, size_t *end, SSFCStrIn_t in)
 {
@@ -1006,28 +1012,29 @@ bool SSFUBJsonPrintCString(uint8_t *js, size_t size, size_t start, size_t *end, 
 
     while (start < size)
     {
-        if (*in == '\\') SSFJsonEsc(js, '\\');
-        else if (*in == '\"') SSFJsonEsc(js, '\"');
-        else if (*in == '/') SSFJsonEsc(js, '/');
-        else if (*in == '\r') SSFJsonEsc(js, 'r');
-        else if (*in == '\n') SSFJsonEsc(js, 'n');
-        else if (*in == '\t') SSFJsonEsc(js, 't');
-        else if (*in == '\b') SSFJsonEsc(js, 'b');
-        else if (*in == '\f') SSFJsonEsc(js, 'f');
-        else if (((*in > 0x1f) && (*in < 0x7f)) || (*in == 0))
+//        if (*in == '\\') SSFJsonEsc(js, '\\');
+//        else if (*in == '\"') SSFJsonEsc(js, '\"');
+//        else if (*in == '/') SSFJsonEsc(js, '/');
+//        else if (*in == '\r') SSFJsonEsc(js, 'r');
+//        else if (*in == '\n') SSFJsonEsc(js, 'n');
+//        else if (*in == '\t') SSFJsonEsc(js, 't');
+//        else if (*in == '\b') SSFJsonEsc(js, 'b');
+//        else if (*in == '\f') SSFJsonEsc(js, 'f');
+        //else 
+//        if (((*in > 0x1f) && (*in < 0x7f)) || (*in == 0))
         {
             js[start] = *in;
         } /* Normal ASCII character */
-        else
-        {
-            if (start + 6 >= size) return false;
-            js[start] = '\\'; start++;
-            js[start] = 'u'; start++;
-            js[start] = '0'; start++;
-            js[start] = '0'; start++;
-            snprintf((char *)&js[start], 3, "%02X", (uint8_t)*in);
-            start++;
-        }
+  //      else
+  //      {
+  //          if (start + 6 >= size) return false;
+  //          js[start] = '\\'; start++;
+  //          js[start] = 'u'; start++;
+  //          js[start] = '0'; start++;
+  //          js[start] = '0'; start++;
+  //          snprintf((char *)&js[start], 3, "%02X", (uint8_t)*in);
+  //          start++;
+  //      }
         if (*in == 0)
         {
             *end = start; return true;
@@ -1039,7 +1046,7 @@ bool SSFUBJsonPrintCString(uint8_t *js, size_t size, size_t start, size_t *end, 
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if in string added successfully as quoted escaped string, else false.            */
+/* Returns true if in string added successfully as string, else false.                           */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFUBJsonPrintString(uint8_t *js, size_t size, size_t start, size_t *end, SSFCStrIn_t in)
 {
@@ -1054,7 +1061,7 @@ bool SSFUBJsonPrintString(uint8_t *js, size_t size, size_t start, size_t *end, S
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if in label added successfully as escaped string, else false.                    */
+/* Returns true if in label added successfully as string, else false.                            */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFUBJsonPrintLabel(uint8_t *js, size_t size, size_t start, size_t *end, SSFCStrIn_t label)
 {

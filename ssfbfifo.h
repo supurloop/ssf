@@ -75,6 +75,7 @@ typedef struct SSFBFifo
 /* External interface                                                                            */
 /* --------------------------------------------------------------------------------------------- */
 void SSFBFifoInit(SSFBFifo_t *fifo, uint32_t fifoSize, uint8_t *buffer, uint32_t bufferSize);
+void SSFBFifoDeInit(SSFBFifo_t *fifo);
 void SSFBFifoPutByte(SSFBFifo_t *fifo, uint8_t inByte);
 bool SSFBFifoPeekByte(const SSFBFifo_t *fifo, uint8_t *outByte);
 bool SSFBFifoGetByte(SSFBFifo_t *fifo, uint8_t *outByte);

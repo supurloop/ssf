@@ -40,14 +40,26 @@
 void SSFLLInit(SSFLL_t *ll, uint32_t maxSize)
 {
     SSF_REQUIRE(ll != NULL);
-    SSF_ASSERT(ll->magic != SSF_LL_INIT_MAGIC);
-    SSF_ASSERT(maxSize > 0);
+    SSF_REQUIRE(ll->magic != SSF_LL_INIT_MAGIC);
+    SSF_REQUIRE(maxSize > 0);
 
     ll->head = NULL;
     ll->tail = NULL;
     ll->items = 0;
     ll->size = maxSize;
     ll->magic = SSF_LL_INIT_MAGIC;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Deinitializes a linked list.                                                                  */
+/* --------------------------------------------------------------------------------------------- */
+void SSFLLDeInit(SSFLL_t *ll)
+{
+    SSF_REQUIRE(ll != NULL);
+    SSF_REQUIRE(ll->magic == SSF_LL_INIT_MAGIC);
+    SSF_REQUIRE(SSFLLIsEmpty(ll));
+
+    memset(ll, 0, sizeof(SSFLL_t));
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -58,7 +70,6 @@ bool SSFLLIsInited(SSFLL_t* ll)
     SSF_REQUIRE(ll != NULL);
 
     return(ll->magic == SSF_LL_INIT_MAGIC);
-}
 
 /* --------------------------------------------------------------------------------------------- */
 /* Put item into linked list.                                                                    */
@@ -70,9 +81,9 @@ void SSFLLPutItem(SSFLL_t *ll, SSFLLItem_t *inItem, SSF_LL_LOC_t loc, SSFLLItem_
     SSF_REQUIRE(loc < SSF_LL_LOC_MAX);
     SSF_REQUIRE((((loc == SSF_LL_LOC_HEAD) || (loc == SSF_LL_LOC_TAIL)) && (locItem == NULL)) ||
                 (loc == SSF_LL_LOC_ITEM));
-    SSF_ASSERT(ll->magic == SSF_LL_INIT_MAGIC);
-    SSF_ASSERT(ll->items < ll->size);
-    SSF_ASSERT(inItem->ll == NULL);
+    SSF_REQUIRE(ll->magic == SSF_LL_INIT_MAGIC);
+    SSF_REQUIRE(ll->items < ll->size);
+    SSF_REQUIRE(inItem->ll == NULL);
 
     if (ll->head == NULL)
     {
@@ -118,7 +129,7 @@ bool SSFLLGetItem(SSFLL_t *ll, SSFLLItem_t **outItem, SSF_LL_LOC_t loc, SSFLLIte
     SSF_REQUIRE(loc < SSF_LL_LOC_MAX);
     SSF_REQUIRE((((loc == SSF_LL_LOC_HEAD) || (loc == SSF_LL_LOC_TAIL)) && (locItem == NULL)) ||
                 ((loc == SSF_LL_LOC_ITEM) && (locItem != NULL)));
-    SSF_ASSERT(ll->magic == SSF_LL_INIT_MAGIC);
+    SSF_REQUIRE(ll->magic == SSF_LL_INIT_MAGIC);
 
     if (ll->head != NULL)
     {
@@ -167,7 +178,7 @@ bool SSFLLGetItem(SSFLL_t *ll, SSFLLItem_t **outItem, SSF_LL_LOC_t loc, SSFLLIte
 bool SSFLLIsEmpty(const SSFLL_t *ll)
 {
     SSF_REQUIRE(ll != NULL);
-    SSF_ASSERT(ll->magic == SSF_LL_INIT_MAGIC);
+    SSF_REQUIRE(ll->magic == SSF_LL_INIT_MAGIC);
     return (ll->items == 0);
 }
 
@@ -177,7 +188,7 @@ bool SSFLLIsEmpty(const SSFLL_t *ll)
 bool SSFLLIsFull(const SSFLL_t *ll)
 {
     SSF_REQUIRE(ll != NULL);
-    SSF_ASSERT(ll->magic == SSF_LL_INIT_MAGIC);
+    SSF_REQUIRE(ll->magic == SSF_LL_INIT_MAGIC);
     return (ll->items == ll->size);
 }
 
@@ -187,7 +198,7 @@ bool SSFLLIsFull(const SSFLL_t *ll)
 uint32_t SSFLLSize(const SSFLL_t *ll)
 {
     SSF_REQUIRE(ll != NULL);
-    SSF_ASSERT(ll->magic == SSF_LL_INIT_MAGIC);
+    SSF_REQUIRE(ll->magic == SSF_LL_INIT_MAGIC);
     return (ll->size);
 }
 
@@ -197,7 +208,7 @@ uint32_t SSFLLSize(const SSFLL_t *ll)
 uint32_t SSFLLLen(const SSFLL_t *ll)
 {
     SSF_REQUIRE(ll != NULL);
-    SSF_ASSERT(ll->magic == SSF_LL_INIT_MAGIC);
+    SSF_REQUIRE(ll->magic == SSF_LL_INIT_MAGIC);
     return (ll->items);
 }
 

@@ -48,9 +48,10 @@ typedef uint32_t SSFTLVVar_t;
 
 typedef struct SSFTLV
 {
-    uint8_t* buf;
+    uint8_t *buf;
     uint32_t bufSize;
     uint32_t bufLen;
+    uint32_t magic;
 } SSFTLV_t;
 
 #define SSFTLVGet(tlv, tag, instance, val, valSize, valLen) \
@@ -58,10 +59,11 @@ typedef struct SSFTLV
 #define SSFTLVFind(tlv, tag, instance, valPtr, valLen) \
         SSFTLVRead(tlv, tag, instance, NULL, 0, valPtr, valLen)
 
-void SSFTLVInit(SSFTLV_t* tlv, uint8_t* buf, uint32_t bufSize, uint32_t bufLen);
-bool SSFTLVPut(SSFTLV_t* tlv, SSFTLVVar_t tag, const uint8_t* val, SSFTLVVar_t valLen);
-bool SSFTLVRead(const SSFTLV_t* tlv, SSFTLVVar_t tag, uint16_t instance, uint8_t* val,
-                uint32_t valSize, uint8_t** valPtr, SSFTLVVar_t* valLen);
+void SSFTLVInit(SSFTLV_t *tlv, uint8_t *buf, uint32_t bufSize, uint32_t bufLen);
+void SSFTLVDeInit(SSFTLV_t *tlv);
+bool SSFTLVPut(SSFTLV_t *tlv, SSFTLVVar_t tag, const uint8_t *val, SSFTLVVar_t valLen);
+bool SSFTLVRead(const SSFTLV_t *tlv, SSFTLVVar_t tag, uint16_t instance, uint8_t *val,
+                uint32_t valSize, uint8_t **valPtr, SSFTLVVar_t *valLen);
 
 /* --------------------------------------------------------------------------------------------- */
 /* Unit test                                                                                     */

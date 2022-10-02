@@ -55,6 +55,8 @@ typedef struct
 /* External Interface                                                                            */
 /* --------------------------------------------------------------------------------------------- */
 void SSFPRNGInitContext(SSFPRNGContext_t *context, const uint8_t *entropy, size_t entropyLen);
+#define SSFPRNGReInitContext SSFPRNGInitContext
+void SSFPRNGDeInitContext(SSFPRNGContext_t *context);
 void SSFPRNGGetRandom(SSFPRNGContext_t* context, uint8_t* random, size_t randomSize);
 
 /* --------------------------------------------------------------------------------------------- */

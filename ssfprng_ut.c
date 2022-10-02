@@ -41,6 +41,7 @@
 void SSFPRNGUnitTest(void)
 {
     SSFPRNGContext_t context;
+    SSFPRNGContext_t contextZero;
     uint8_t entropy[SSF_PRNG_ENTROPY_SIZE] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14,
                                                15 };
     uint8_t random[SSF_PRNG_RANDOM_MAX_SIZE];
@@ -52,6 +53,10 @@ void SSFPRNGUnitTest(void)
     SSF_ASSERT_TEST(SSFPRNGInitContext(&context, entropy, sizeof(entropy) - 1));
     SSF_ASSERT_TEST(SSFPRNGInitContext(&context, entropy, sizeof(entropy) + 1));
     SSF_ASSERT_TEST(SSFPRNGInitContext(&context, entropy, 0));
+
+    SSF_ASSERT_TEST(SSFPRNGDeInitContext(NULL));
+    memset(&context, 0, sizeof(context));
+    SSF_ASSERT_TEST(SSFPRNGDeInitContext(&context));
 
     SSF_ASSERT_TEST(SSFPRNGGetRandom(NULL, random, sizeof(random)));
     SSF_ASSERT_TEST(SSFPRNGGetRandom(&context, NULL, sizeof(random)));
@@ -67,4 +72,8 @@ void SSFPRNGUnitTest(void)
         SSFPRNGGetRandom(&context, random, i);
         SSF_ASSERT((lastCount + 1) == context.count);
     }
+
+    SSFPRNGDeInitContext(&context);
+    memset(&contextZero, 0, sizeof(contextZero));
+    SSF_ASSERT(memcmp(&context, &contextZero, sizeof(context)) == 0);
 }

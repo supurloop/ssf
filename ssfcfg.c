@@ -78,6 +78,15 @@ void SSFCfgInit(void)
     SSF_CFG_THREAD_SYNC_INIT();
     _ssfcfgIsInited = true;
 }
+/* --------------------------------------------------------------------------------------------- */
+/* Deinitializes the ssfcfg interface.                                                           */
+/* --------------------------------------------------------------------------------------------- */
+void SSFCfgDeInit(void)
+{
+    SSF_ASSERT(_ssfcfgIsInited);
+    _ssfcfgIsInited = false;
+    SSF_CFG_THREAD_SYNC_DEINIT();
+}
 #endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
 
 /* --------------------------------------------------------------------------------------------- */

@@ -52,6 +52,8 @@ void SSFMPoolUnitTest(void)
     uint32_t i;
     void *testPtr;
 
+    SSF_ASSERT_TEST(SSFMPoolDeInit(NULL));
+    SSF_ASSERT_TEST(SSFMPoolDeInit(&smpTestPool));
     SSF_ASSERT_TEST(SSFMPoolInit(NULL, SMP_TEST_BLOCKS, SMP_TEST_BLOCK_SIZE));
     SSF_ASSERT_TEST(SSFMPoolInit(&smpTestPool, 0, SMP_TEST_BLOCK_SIZE));
     SSF_ASSERT_TEST(SSFMPoolInit(&smpTestPool, SMP_TEST_BLOCKS, 0));
@@ -121,6 +123,14 @@ void SSFMPoolUnitTest(void)
     SSF_ASSERT(SSFMPoolIsEmpty(&smpTestPool) == false);
     SSF_ASSERT(SSFMPoolIsFull(&smpTestPool) == true);
     SSF_ASSERT_TEST(SSFMPoolFree(&smpTestPool, testPtr));
+
+    SSF_ASSERT_TEST(SSFMPoolInit(&smpTestPool, SMP_TEST_BLOCKS, SMP_TEST_BLOCK_SIZE));
+    SSFMPoolDeInit(&smpTestPool);
+    SSF_ASSERT_TEST(SSFMPoolDeInit(&smpTestPool));
+    SSFMPoolInit(&smpTestPool, SMP_TEST_BLOCKS, SMP_TEST_BLOCK_SIZE);
+    SSF_ASSERT_TEST(SSFMPoolInit(&smpTestPool, SMP_TEST_BLOCKS, SMP_TEST_BLOCK_SIZE));
+    SSFMPoolDeInit(&smpTestPool);
+    SSF_ASSERT_TEST(SSFMPoolDeInit(&smpTestPool));
 }
 #endif /* SSF_CONFIG_MPOOL_UNIT_TEST */
 

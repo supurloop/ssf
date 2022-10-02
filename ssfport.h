@@ -154,7 +154,7 @@ typedef uint64_t SSFPortTick_t;
 /* SSF_CONFIG_ENABLE_THREAD_SUPPORT allows the ssfcfg module to be safely called from multiple
    contexts. */
 /* 0, disable thread synchronization; 1, enable thread synchronization. */
-#define SSF_CONFIG_ENABLE_THREAD_SUPPORT (0u)
+#define SSF_CONFIG_ENABLE_THREAD_SUPPORT (1u)
 
 #if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
 #ifdef _WIN32
@@ -162,6 +162,11 @@ typedef uint64_t SSFPortTick_t;
 #define SSF_MUTEX_INIT(mutex) { \
     mutex = CreateMutex(NULL, FALSE, NULL); \
     SSF_ASSERT(mutex != NULL); \
+}
+#define SSF_MUTEX_DEINIT(mutex) { \
+    SSF_ASSERT(mutex != NULL); \
+    CloseHandle(mutex); \
+    mutex = NULL; \
 }
 #define SSF_MUTEX_ACQUIRE(mutex) { \
     SSF_ASSERT(WaitForSingleObject(mutex, INFINITE) == WAIT_OBJECT_0); \
@@ -178,6 +183,9 @@ typedef uint64_t SSFPortTick_t;
     SSF_ASSERT(pthread_mutexattr_init(&attr) == 0); \
     SSF_ASSERT(pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE) == 0); \
     SSF_ASSERT(pthread_mutex_init(&mutex, &attr) == 0); \
+}
+#define SSF_MUTEX_DEINIT(mutex) { \
+    SSF_ASSERT(pthread_mutex_destroy(&mutex) == 0); \
 }
 #define SSF_MUTEX_ACQUIRE(mutex) { SSF_ASSERT(pthread_mutex_lock(&mutex) == 0); }
 #define SSF_MUTEX_RELEASE(mutex) { SSF_ASSERT(pthread_mutex_unlock(&mutex) == 0); }
@@ -209,6 +217,7 @@ typedef uint64_t SSFPortTick_t;
 /* --------------------------------------------------------------------------------------------- */
 /* Configure ssfmpool's memory pool interface                                                    */
 /* --------------------------------------------------------------------------------------------- */
+/* Enable pool debug struct that tracks all blocks and who allocated them                        */
 #define SSF_MPOOL_DEBUG (0u)
 
 /* --------------------------------------------------------------------------------------------- */
@@ -236,6 +245,7 @@ typedef uint64_t SSFPortTick_t;
 #if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
 #define SSF_SM_THREAD_SYNC_DECLARATION SSF_MUTEX_DECLARATION(_ssfsmSyncMutex)
 #define SSF_SM_THREAD_SYNC_INIT() SSF_MUTEX_INIT(_ssfsmSyncMutex)
+#define SSF_SM_THREAD_SYNC_DEINIT() SSF_MUTEX_DEINIT(_ssfsmSyncMutex)
 #define SSF_SM_THREAD_SYNC_ACQUIRE() SSF_MUTEX_ACQUIRE(_ssfsmSyncMutex)
 #define SSF_SM_THREAD_SYNC_RELEASE() SSF_MUTEX_RELEASE(_ssfsmSyncMutex)
 
@@ -244,6 +254,10 @@ typedef uint64_t SSFPortTick_t;
 #define SSF_SM_THREAD_WAKE_INIT() { \
     gssfsmWakeSem = CreateSemaphore(NULL, 0, 1, NULL); \
     SSF_ASSERT(gssfsmWakeSem != NULL); \
+}
+#define SSF_SM_THREAD_WAKE_DEINIT() { \
+    CloseHandle(gssfsmWakeSem); \
+    gssfsmWakeSem = NULL; \
 }
 #define SSF_SM_THREAD_WAKE_POST() { ReleaseSemaphore(gssfsmWakeSem, 1, NULL); }
 #define SSF_SM_THREAD_WAKE_WAIT(timeout) { \
@@ -275,6 +289,10 @@ extern pthread_mutex_t gssfsmWakeMutex;
     SSF_ASSERT(pthread_mutex_init(&gssfsmWakeMutex, NULL) == 0); \
 }
 #endif
+#define SSF_SM_THREAD_WAKE_DEINIT() { \
+    SSF_ASSERT(pthread_mutex_destroy(&gssfsmWakeMutex) == 0); \
+    SSF_ASSERT(pthread_cond_destroy(&gssfsmWakeCond) == 0); \
+}
 #define SSF_SM_THREAD_WAKE_POST() { \
     SSF_ASSERT(pthread_mutex_lock(&gssfsmWakeMutex) == 0); \
     gssfsmIsWakeSignalled = true; \
@@ -426,6 +444,7 @@ enum SSFSMEventList
 #if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
 #define SSF_CFG_THREAD_SYNC_DECLARATION SSF_MUTEX_DECLARATION(_ssfcfgSyncMutex)
 #define SSF_CFG_THREAD_SYNC_INIT() SSF_MUTEX_INIT(_ssfcfgSyncMutex)
+#define SSF_CFG_THREAD_SYNC_DEINIT() SSF_MUTEX_DEINIT(_ssfcfgSyncMutex)
 #define SSF_CFG_THREAD_SYNC_ACQUIRE() SSF_MUTEX_ACQUIRE(_ssfcfgSyncMutex)
 #define SSF_CFG_THREAD_SYNC_RELEASE() SSF_MUTEX_RELEASE(_ssfcfgSyncMutex)
 #endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */

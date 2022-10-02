@@ -84,7 +84,7 @@ void SSFUBJsonDeInitContext(SSFUBJSONContext_t* context);
 bool SSFUBJsonContextInitParse(SSFUBJSONContext_t* context, uint8_t* js, size_t jsLen);
 void SSFUBJsonContextDeInitParse(SSFUBJSONContext_t* context);
 
-typedef bool (*SSFUBJsonIterateFn_t)(SSFCStrIn_t* path, void* data, bool *trim);
+typedef bool (*SSFUBJsonIterateFn_t)(char ** path, void* data, bool *trim);
 
 bool SSFUBJsonContextIterate(SSFUBJSONContext_t* context, SSFUBJsonIterateFn_t callback, void *data);
 bool SSFUBJsonContextGenerate(SSFUBJSONContext_t* context, uint8_t* js, size_t jsSize, size_t *jsLen);

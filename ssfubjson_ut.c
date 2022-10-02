@@ -158,13 +158,14 @@ bool _SSFUBJsonPrintFn1(uint8_t *js, size_t size, size_t start, size_t *end, voi
     return true;
 }
 
-bool MyIterate(SSFCStrIn_t* path, void* data, bool* trim)
+bool MyIterate(char ** path, void* data, bool* trim)
 {
     //uint8_t i;
 
-    data = data;
-    trim = trim;
-    path = path;
+    SSF_UNUSED(data);
+    SSF_UNUSED(trim);
+    SSF_UNUSED(path);
+
 #if 0    
     for (i = 0; i < SSF_UBJSON_CONFIG_MAX_IN_DEPTH; i++)
     {

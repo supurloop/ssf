@@ -33,6 +33,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include "ssfport.h"
 #include "ssfubjson.h"
 #include "ssfhex.h"
@@ -132,7 +133,7 @@ static void _SSFUBJSONPushNameValue(SSFUBJSONContext_t* context, uint8_t *name, 
     SSF_REQUIRE(depth < SSF_UBJSON_CONFIG_MAX_IN_DEPTH);
 
     /* Create a new node */
-    SSFUBJsonMalloc(&context->mallocs, &context->mallocTotal, &node, sizeof(SSFUBJSONNode_t));
+    SSFUBJsonMalloc(&context->mallocs, &context->mallocTotal, (void **)&node, sizeof(SSFUBJSONNode_t));
     //node = (SSFUBJSONNode_t*)malloc(sizeof(SSFUBJSONNode_t));
     //SSF_ASSERT(node != NULL);
     memset(node, 0, sizeof(SSFUBJSONNode_t));
@@ -141,7 +142,7 @@ static void _SSFUBJSONPushNameValue(SSFUBJSONContext_t* context, uint8_t *name, 
     if (nameLen > sizeof(void*))
     {
         /* Yes, allocate space to save the name */
-        SSFUBJsonMalloc(&context->mallocs, &context->mallocTotal, &node->name, nameLen);
+        SSFUBJsonMalloc(&context->mallocs, &context->mallocTotal, (void **)&node->name, nameLen);
         memcpy(node->name, name, nameLen);
     }
     else
@@ -158,7 +159,7 @@ static void _SSFUBJSONPushNameValue(SSFUBJSONContext_t* context, uint8_t *name, 
         if (valueLen > sizeof(void*))
         {
             /* Yes, allocate space to save the value */
-            SSFUBJsonMalloc(&context->mallocs, &context->mallocTotal, &node->value, valueLen);
+            SSFUBJsonMalloc(&context->mallocs, &context->mallocTotal, (void **)&node->value, valueLen);
             memcpy(node->value, value, valueLen);
 
         }
@@ -1182,7 +1183,7 @@ bool SSFUBJsonIsContextInited(SSFUBJSONContext_t* context)
     return context->magic == SSF_UBJSON_MAGIC;
 }
 
-bool _SSFUBJsonContextIterate(SSFLL_t *root, SSFCStrIn_t* path, uint8_t depth, SSFUBJsonIterateFn_t callback, void* data)
+bool _SSFUBJsonContextIterate(SSFLL_t *root, char** path, uint8_t depth, SSFUBJsonIterateFn_t callback, void* data)
 {
     SSFLLItem_t* item;
 //    char pathName[sizeof(void*) + 1];

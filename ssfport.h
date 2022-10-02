@@ -439,6 +439,8 @@ enum SSFSMEventList
 /* Define the maximum JSON string length to be parsed. */
 #define SSF_UBJSON_CONFIG_MAX_IN_LEN  (2047u)
 
+#define SSF_UBJSON_TYPEDEF_STRUCT typedef struct /* Optionally add packed struct attribute here */
+
 /* Allow parser to use floating point to convert numbers. */
 //#define SSF_JSON_CONFIG_ENABLE_FLOAT_PARSE (0u)
 

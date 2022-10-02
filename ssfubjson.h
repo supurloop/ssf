@@ -40,6 +40,7 @@ extern "C"
 #include <stdint.h>
 #include <stdbool.h>
 #include "ssfport.h"
+#include "ssfll.h"
 
 /* --------------------------------------------------------------------------------------------- */
 /* Defines                                                                                       */
@@ -65,16 +66,37 @@ typedef enum SSFUBJsonType
     SSF_UBJSON_TYPE_MAX,
 } SSFUBJsonType_t;
 
+typedef struct {
+    SSFLL_t roots[SSF_UBJSON_CONFIG_MAX_IN_DEPTH];
+    uint32_t mallocs;
+    uint32_t mallocTotal;
+    uint32_t frees;
+    uint32_t magic;
+} SSFUBJSONContext_t;
+
 /* Parser */
-bool SSFUBJsonIsValid(uint8_t *js, size_t jsLen);
-SSFUBJsonType_t SSFUBJsonGetType(uint8_t *js, size_t jsLen, SSFCStrIn_t *path);
+
+void PrintRoot(SSFLL_t root);
+
+void SSFUBJsonInitContext(SSFUBJSONContext_t* context);
+bool SSFUBJsonIsContextInited(SSFUBJSONContext_t* context);
+void SSFUBJsonDeInitContext(SSFUBJSONContext_t* context);
+bool SSFUBJsonContextInitParse(SSFUBJSONContext_t* context, uint8_t* js, size_t jsLen);
+void SSFUBJsonContextDeInitParse(SSFUBJSONContext_t* context);
+
+typedef bool (*SSFUBJsonIterateFn_t)(SSFCStrIn_t* path, void* data, bool *trim);
+
+bool SSFUBJsonContextIterate(SSFUBJSONContext_t* context, SSFUBJsonIterateFn_t callback, void *data);
+bool SSFUBJsonContextGenerate(SSFUBJSONContext_t* context, uint8_t* js, size_t jsSize, size_t *jsLen);
+
+bool SSFUBJsonIsValid(uint8_t* js, size_t jsLen);
+SSFUBJsonType_t SSFUBJsonGetType(uint8_t* js, size_t jsLen, SSFCStrIn_t *path);
 bool SSFUBJsonGetString(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, SSFCStrOut_t out,
                         size_t outSize, size_t *outLen);
 bool SSFUBJsonGetFloat(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, float *out);
 bool SSFUBJsonGetDouble(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, double *out);
-bool SSFUBJsonObject(uint8_t *js, size_t jsLen, size_t *index, size_t *start, size_t *end,
-                     size_t *ostart, size_t *oend, SSFCStrIn_t *path, uint8_t depth,
-                     SSFUBJsonType_t *jt);
+bool SSFUBJsonObject(SSFUBJSONContext_t* context, uint8_t *js, size_t jsLen, size_t *index, size_t *start, size_t *end,
+    SSFCStrIn_t* path, uint8_t depth, SSFUBJsonType_t *jt); //?
 bool SSFUBJsonGetInt8(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, int8_t *out);
 bool SSFUBJsonGetUInt8(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, uint8_t *out);
 bool SSFUBJsonGetInt16(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, int16_t *out);

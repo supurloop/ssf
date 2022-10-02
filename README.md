@@ -28,6 +28,7 @@ The framework implements a number of common embedded system functions:
   16. A version controlled interface for reliably storing configuration to NV storage.
   17. A cryptograpically secure capable pseudo random number generator (PRNG).
   18. A INI parser/generator interface.
+  19. An Experimental Universal Binary JSON (UBJSON) parser/generator interface.
 
 To give you an idea of the framework size here are some program memory estimates for each component compiled on an MSP430 with Level 3 optimization:
 Byte FIFO, linked list, memory pool, Base64, Hex ASCII are each about 1000 bytes.
@@ -100,6 +101,9 @@ This means that calls into those interfaces from different execution contexts wi
 For example, you can have linked list object A in task 1 and linked list object B in task 2 and they will be managed independently and correctly, so long as they are only accessed from the context of their respective task.
 
 To properly run the finite state machine framework in a multi-threaded system SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT must be enabled and synchronization macros must be implemented. For more details see below.
+
+### Deinitialization
+This library has added support to deinitialize interfaces that have initialization functions. Primarily deinitialization was added to allow the library to better integrate with unit test frameworks.
 
 ## Interfaces
 ### Byte FIFO Interface
@@ -982,6 +986,10 @@ Sad that we still need this, but we still sometimes need to parse and generate I
 
     /* iniGen = "# comment\r\n[section]\r\nstrName=value\r\nboolName=yes\r\nlongName=-1234567890\r\n" */
 ```
+
+### Universal Binary JSON (UBJSON) Parser/Generator Interface
+
+There is experimental support for Universal Binary JSON (UBJSON). Once it reaches the level of a release some examples will be provided.
 
 ## Conclusion
 

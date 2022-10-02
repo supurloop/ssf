@@ -52,7 +52,8 @@
 /*         Added PRNG interface which can generate cryptographically secure random numbers.      */
 /*         Added macros to support SSF use from C++ modules.                                     */
 /*         Minor formatting changes and compiler warning fixes.                                  */
+/* 0.0.7 - Added deinitialization support. Fixed ssfsm timer w/data memory leak. Prelim. UBJSON. */
 /* --------------------------------------------------------------------------------------------- */
-#define SSF_VERSION "0.0.6"
+#define SSF_VERSION "0.0.7"
 
 #endif /* SSF_VERSION_H_INCLUDE */

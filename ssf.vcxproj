@@ -88,6 +88,7 @@
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <DisableSpecificWarnings>4820;5045;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+      <AdditionalIncludeDirectories>./;./_struct;./_storage;./_fsm;./_edc;./_ecc;./_codec;./_crypto</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -143,70 +144,70 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="main.c" />
-    <ClCompile Include="ssfbase64.c" />
-    <ClCompile Include="ssfbase64_ut.c" />
-    <ClCompile Include="ssfbfifo.c" />
-    <ClCompile Include="ssfbfifo_ut.c" />
-    <ClCompile Include="ssfcfg.c" />
-    <ClCompile Include="ssfcfg_ut.c" />
-    <ClCompile Include="ssfcrc16.c" />
-    <ClCompile Include="ssfcrc16_ut.c" />
-    <ClCompile Include="ssfcrc32.c" />
-    <ClCompile Include="ssfcrc32_ut.c" />
-    <ClCompile Include="ssffcsum.c" />
-    <ClCompile Include="ssffcsum_ut.c" />
-    <ClCompile Include="ssfhex.c" />
-    <ClCompile Include="ssfhex_ut.c" />
-    <ClCompile Include="ssfini.c" />
-    <ClCompile Include="ssfini_ut.c" />
-    <ClCompile Include="ssfjson.c" />
-    <ClCompile Include="ssfjson_ut.c" />
-    <ClCompile Include="ssfll.c" />
-    <ClCompile Include="ssfll_ut.c" />
-    <ClCompile Include="ssfmpool.c" />
-    <ClCompile Include="ssfmpool_ut.c" />
     <ClCompile Include="ssfport.c" />
-    <ClCompile Include="ssfprng.c" />
-    <ClCompile Include="ssfprng_ut.c" />
-    <ClCompile Include="ssfrs.c" />
-    <ClCompile Include="ssfrs_ut.c" />
-    <ClCompile Include="ssfsha2.c" />
-    <ClCompile Include="ssfsha2_ut.c" />
-    <ClCompile Include="ssfsm.c" />
-    <ClCompile Include="ssfsm_ut.c" />
-    <ClCompile Include="ssftlv.c" />
-    <ClCompile Include="ssftlv_ut.c" />
-    <ClCompile Include="ssfaes.c" />
-    <ClCompile Include="ssfaes_ut.c" />
-    <ClCompile Include="ssfaesgcm.c" />
-    <ClCompile Include="ssfaesgcm_ut.c" />
-    <ClCompile Include="ssfubjson.c" />
-    <ClCompile Include="ssfubjson_ut.c" />
+    <ClCompile Include="_codec\ssfbase64.c" />
+    <ClCompile Include="_codec\ssfbase64_ut.c" />
+    <ClCompile Include="_codec\ssfhex.c" />
+    <ClCompile Include="_codec\ssfhex_ut.c" />
+    <ClCompile Include="_codec\ssfini.c" />
+    <ClCompile Include="_codec\ssfini_ut.c" />
+    <ClCompile Include="_codec\ssfjson.c" />
+    <ClCompile Include="_codec\ssfjson_ut.c" />
+    <ClCompile Include="_codec\ssftlv.c" />
+    <ClCompile Include="_codec\ssftlv_ut.c" />
+    <ClCompile Include="_codec\ssfubjson.c" />
+    <ClCompile Include="_codec\ssfubjson_ut.c" />
+    <ClCompile Include="_crypto\ssfaes.c" />
+    <ClCompile Include="_crypto\ssfaesgcm.c" />
+    <ClCompile Include="_crypto\ssfaesgcm_ut.c" />
+    <ClCompile Include="_crypto\ssfaes_ut.c" />
+    <ClCompile Include="_crypto\ssfprng.c" />
+    <ClCompile Include="_crypto\ssfprng_ut.c" />
+    <ClCompile Include="_crypto\ssfsha2.c" />
+    <ClCompile Include="_crypto\ssfsha2_ut.c" />
+    <ClCompile Include="_ecc\ssfrs.c" />
+    <ClCompile Include="_ecc\ssfrs_ut.c" />
+    <ClCompile Include="_edc\ssfcrc16.c" />
+    <ClCompile Include="_edc\ssfcrc16_ut.c" />
+    <ClCompile Include="_edc\ssfcrc32.c" />
+    <ClCompile Include="_edc\ssfcrc32_ut.c" />
+    <ClCompile Include="_edc\ssffcsum.c" />
+    <ClCompile Include="_edc\ssffcsum_ut.c" />
+    <ClCompile Include="_fsm\ssfsm.c" />
+    <ClCompile Include="_fsm\ssfsm_ut.c" />
+    <ClCompile Include="_storage\ssfcfg.c" />
+    <ClCompile Include="_storage\ssfcfg_ut.c" />
+    <ClCompile Include="_struct\ssfbfifo.c" />
+    <ClCompile Include="_struct\ssfbfifo_ut.c" />
+    <ClCompile Include="_struct\ssfll.c" />
+    <ClCompile Include="_struct\ssfll_ut.c" />
+    <ClCompile Include="_struct\ssfmpool.c" />
+    <ClCompile Include="_struct\ssfmpool_ut.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="ssf.h" />
     <ClInclude Include="ssfassert.h" />
-    <ClInclude Include="ssfbase64.h" />
-    <ClInclude Include="ssfbfifo.h" />
-    <ClInclude Include="ssfcfg.h" />
-    <ClInclude Include="ssfcrc16.h" />
-    <ClInclude Include="ssfcrc32.h" />
-    <ClInclude Include="ssffcsum.h" />
-    <ClInclude Include="ssfhex.h" />
-    <ClInclude Include="ssfini.h" />
-    <ClInclude Include="ssfjson.h" />
-    <ClInclude Include="ssfll.h" />
-    <ClInclude Include="ssfmpool.h" />
     <ClInclude Include="ssfport.h" />
-    <ClInclude Include="ssfprng.h" />
-    <ClInclude Include="ssfrs.h" />
-    <ClInclude Include="ssfsha2.h" />
-    <ClInclude Include="ssfsm.h" />
-    <ClInclude Include="ssftlv.h" />
-    <ClInclude Include="ssfaes.h" />
-    <ClInclude Include="ssfaesgcm.h" />
-    <ClInclude Include="ssfubjson.h" />
     <ClInclude Include="ssfversion.h" />
+    <ClInclude Include="_codec\ssfbase64.h" />
+    <ClInclude Include="_codec\ssfhex.h" />
+    <ClInclude Include="_codec\ssfini.h" />
+    <ClInclude Include="_codec\ssfjson.h" />
+    <ClInclude Include="_codec\ssftlv.h" />
+    <ClInclude Include="_codec\ssfubjson.h" />
+    <ClInclude Include="_crypto\ssfaes.h" />
+    <ClInclude Include="_crypto\ssfaesgcm.h" />
+    <ClInclude Include="_crypto\ssfprng.h" />
+    <ClInclude Include="_crypto\ssfsha2.h" />
+    <ClInclude Include="_ecc\ssfrs.h" />
+    <ClInclude Include="_edc\ssfcrc16.h" />
+    <ClInclude Include="_edc\ssfcrc32.h" />
+    <ClInclude Include="_edc\ssffcsum.h" />
+    <ClInclude Include="_fsm\ssfsm.h" />
+    <ClInclude Include="_storage\ssfcfg.h" />
+    <ClInclude Include="_struct\ssfbfifo.h" />
+    <ClInclude Include="_struct\ssfll.h" />
+    <ClInclude Include="_struct\ssfmpool.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

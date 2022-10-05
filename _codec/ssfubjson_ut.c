@@ -47,6 +47,16 @@ SSFUBJSONUT_t _ubjs[] = {
     { (uint8_t *)"", 0, false }, /* { */
     { (uint8_t *)"{", 1, false }, /* { */
     { (uint8_t *)"{}", 2, true },  /* {} */
+    { (uint8_t *)"{N}", 3, true },  /* {} */
+    { (uint8_t *)"{i\x05helloSi\x05worldN}", 18, true },  /* {} */
+    { (uint8_t *)"{NN}", 4, true },  /* {} */
+    { (uint8_t *)"{NNN}", 5, true },  /* {} */
+    { (uint8_t *)"{i\x01y[N]}", 8, true },  /* {} */
+    { (uint8_t *)"{i\x01y[i5N]}", 10, true },  /* {} */
+    { (uint8_t *)"{i\x01y[Ni6]}", 10, true },  /* {} */
+    { (uint8_t *)"{i\x01y[i5Ni6]}", 12, true },  /* {} */
+    { (uint8_t *)"{i\x01y[i5NNi6]}", 13, true },  /* {} */
+    { (uint8_t *)"{Ni\x01y[Ni5NNi6N]N}", 17, true },  /* {} */
     { (uint8_t *)"{}1", 3, false }, /* {}1 */
 #if SSF_UBJSON_CONFIG_HANDLE_HPN_AS_STRING == 0
     { (uint8_t*)"{i\x01sHi\x05" "12345}", 13, false }, /* {"s":"12345"} */

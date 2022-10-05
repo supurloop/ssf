@@ -39,7 +39,6 @@
 #include "ssfhex.h"
 #include "ssfll.h"
 
-/* Limitation - NOOP type not supported */
 /* Limitation - Unicode string encoding/decoding & strings embedded with NULLs not supported */
 
 /* TODO - Add printer for float and double */
@@ -305,6 +304,11 @@ static bool _SSFJsonTypeField(uint8_t *js, size_t jsLen, size_t *index, size_t *
     SSF_REQUIRE(fend != NULL);
     SSF_REQUIRE(fjt != NULL);
 
+    while (js[*index] == UBJ_TYPE_NOOP)
+    {
+        (*index)++; if (*index >= jsLen) return false;
+    }
+
     switch (js[*index])
     {
     case UBJ_TYPE_FLOAT32:
@@ -538,12 +542,22 @@ bool SSFUBJsonObject(SSFUBJSONContext_t *context, uint8_t *js, size_t jsLen, siz
     if ((depth != 0) || ((depth == 0) && (path != NULL) && (path[0] == NULL))) *start = *index;
     (*index)++; if (*index >= jsLen) return false;
 
+    while (js[*index] == UBJ_TYPE_NOOP)
+    {
+        (*index)++; if (*index >= jsLen) return false;
+    }
+
     if (js[*index] != '}')
     {
         if (!_SSFJsonNameValue(context, js, jsLen, index, start, end, path, depth, jt))
         { return false; }
         do
         {
+            while (js[*index] == UBJ_TYPE_NOOP)
+            {
+                (*index)++; if (*index >= jsLen) return false;
+            }
+
             if (js[*index] == '}') break;
             if (!_SSFJsonNameValue(context, js, jsLen, index, start, end, path, depth, jt))
             { return false; }

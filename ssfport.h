@@ -54,6 +54,12 @@ typedef uint64_t SSFPortTick_t;
 #define SSF_TICKS_PER_SEC (1000u)
 
 /* --------------------------------------------------------------------------------------------- */
+/* Platform specific heap configuration                                                          */
+/* --------------------------------------------------------------------------------------------- */
+#define SSF_MALLOC malloc
+#define SSF_FREE free
+
+/* --------------------------------------------------------------------------------------------- */
 /* Platform specific byte swapping macros                                                        */
 /* --------------------------------------------------------------------------------------------- */
 /* If your platform has byte order macros include the header file here and set */

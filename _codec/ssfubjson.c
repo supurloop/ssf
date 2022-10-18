@@ -106,7 +106,7 @@ void SSFUBJsonMalloc(uint32_t *ctr, uint32_t *total, void **ptr, size_t len)
     SSF_REQUIRE(ctr != NULL);
     SSF_REQUIRE(ptr != NULL);
 
-    *ptr = malloc(len);
+    *ptr = SSF_MALLOC(len);
     SSF_ASSERT(*ptr != NULL);
     (*ctr)++;
     (*total) += len;
@@ -120,7 +120,7 @@ void SSFUBJsonFree(uint32_t *ctr, uint32_t *total, void *ptr, size_t len)
     SSF_REQUIRE(ctr != NULL);
     SSF_REQUIRE(ptr != NULL);
 
-    free(ptr);
+    SSF_FREE(ptr);
     (*ctr)++;
     (*total) -= len;
 }

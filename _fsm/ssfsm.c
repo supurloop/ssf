@@ -86,7 +86,7 @@ SSF_SM_THREAD_WAKE_DECLARATION;
 static void _SSFSMFreeEventData(SSFSMData_t *data)
 {
     SSF_REQUIRE(data != NULL);
-    free(data);
+    SSF_FREE(data);
     _ssfsmFrees++;
     SSF_ENSURE(_ssfsmFrees <= _ssfsmMallocs);
     SSF_ENSURE((_ssfsmMallocs - _ssfsmFrees) <= SSFMPoolSize(&_ssfsmEventPool));
@@ -178,7 +178,7 @@ static void _SSFSMAllocEventData(SSFSMEvent_t *event, const SSFSMData_t *data,
     { memcpy(&(event->data), data, event->dataLen); }
     else
     {
-        SSF_ASSERT((event->data = (SSFSMData_t *)malloc(event->dataLen)) != NULL);
+        SSF_ASSERT((event->data = (SSFSMData_t *)SSF_MALLOC(event->dataLen)) != NULL);
         _ssfsmMallocs++;
         memcpy(event->data, data, event->dataLen);
         SSF_ENSURE(_ssfsmFrees <= _ssfsmMallocs);

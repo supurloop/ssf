@@ -46,12 +46,15 @@ typedef struct SSFUBJSONUT {
 SSFUBJSONUT_t _ubjs[] = {
     { (uint8_t *)"", 0, false }, /* { */
     { (uint8_t *)"{", 1, false }, /* { */
+    { (uint8_t *)"{i\x01" "a[$i#i\x0a\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a}", 21, true },  /* */
+    { (uint8_t *)"{i\x01" "a[#i\x0ai\x01i\x02i\x03i\x04i\x05i\x06i\x07i\x08i\x09i\x0a}", 29, true },  /* */
     { (uint8_t *)"{}", 2, true },  /* {} */
     { (uint8_t *)"{N}", 3, true },  /* {} */
     { (uint8_t *)"{i\x05helloSi\x05worldN}", 18, true },  /* {} */
     { (uint8_t *)"{NN}", 4, true },  /* {} */
     { (uint8_t *)"{NNN}", 5, true },  /* {} */
-    { (uint8_t *)"{i\x01y[N]}", 8, true },  /* {} */
+    { (uint8_t*)"{i\x01y[]}", 7, true },  /* {} */
+    { (uint8_t*)"{i\x01y[N]}", 8, true },  /* {} */
     { (uint8_t *)"{i\x01y[i5N]}", 10, true },  /* {} */
     { (uint8_t *)"{i\x01y[Ni6]}", 10, true },  /* {} */
     { (uint8_t *)"{i\x01y[i5Ni6]}", 12, true },  /* {} */
@@ -153,6 +156,12 @@ SSFUBJSONARR_t _ubjtsTypeArray[] =
     { (uint8_t *)"{i\x01" "a[Si\x02" "a2]}", 12 } /* {"a":["a2"]}} */
 };
 
+uint8_t _ubjOptArray1[] = "{i\x01" "a[#i\x0ai\x01i\x02i\x03i\x04i\x05i\x06i\x07i\x08i\x09i\x0a}";
+size_t _ubjOptArray1Len = 29;
+uint8_t _ubjOptArray2[] = "{i\x01" "a[$i#i\x0a\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a}";
+size_t _ubjOptArray2Len = 21;
+uint8_t _ubjOptArray3[] = "{i\x01" "a[$I#i\x0a\x01\x01\x01\x02\x01\x03\x01\x04\x01\x05\x01\x06\x01\x07\x01\x08\x01\x09\x01\x0a}";
+size_t _ubjOptArray3Len = 31;
 
 bool _SSFUBJsonPrintFn1(uint8_t *js, size_t size, size_t start, size_t *end, void *in)
 {
@@ -162,6 +171,42 @@ bool _SSFUBJsonPrintFn1(uint8_t *js, size_t size, size_t start, size_t *end, voi
     if (!SSFUBJsonPrintLabel(js, size, start, &start, "hello")) return false;
     if (!SSFUBJsonPrintString(js, size, start, &start, s)) return false;
     *end = start;
+    return true;
+}
+
+bool _SSFUBJsonPrintOptArray(uint8_t* js, size_t size, size_t start, size_t* end, void* in)
+{
+    size_t *alen = (size_t *)in;
+    size_t i;
+
+    for (i = 0; i < *alen; i++)
+    {
+        if (!SSFUBJsonPrintInt(js, size, start, &start, (int64_t) (i + 1), false)) return false;
+        *end = start;
+    }
+    return true;
+}
+
+bool _SSFUBJsonPrintFn2(uint8_t* js, size_t size, size_t start, size_t* end, void* in)
+{
+    size_t* alen = (size_t*)in;
+
+    if (!SSFUBJsonPrintLabel(js, size, start, &start, "a")) return false;
+    if (!SSFUBJsonPrintArrayOpt(js, size, start, &start,
+        _SSFUBJsonPrintOptArray, alen, SSF_UBJSON_TYPE_NUMBER_UINT8, *alen)) return false;
+    *end = start;
+    return true;
+}
+
+bool _SSFUBJsonPrintFn3(uint8_t* js, size_t size, size_t start, size_t* end, void* in)
+{
+    size_t* alen = (size_t*)in;
+
+    SSF_ASSERT(alen != NULL);
+    if (!SSFUBJsonPrintLabel(js, size, start, &start, "h")) return false;
+    if (!SSFUBJsonPrintHex(js, size, start, &start, (uint8_t *)"\x00\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff",
+        16, false)) return false;
+        *end = start;
     return true;
 }
 
@@ -191,6 +236,7 @@ bool MyIterate(char ** path, void* data, bool* trim)
 void SSFUBJsonUnitTest(void)
 {
     uint16_t i;
+    uint16_t j;
     char *path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH + 1];
     size_t aidx1;
     char outStr[16];
@@ -207,6 +253,7 @@ void SSFUBJsonUnitTest(void)
     size_t jsOutEnd;
     uint8_t ubjson[200];
     SSFUBJSONContext_t context;
+    size_t alen;
 
     memset(&context, 0, sizeof(context));
     SSF_ASSERT_TEST(SSFUBJsonIsContextInited(NULL));
@@ -246,6 +293,37 @@ void SSFUBJsonUnitTest(void)
     SSFUBJsonContextDeInitParse(&context);
     SSFUBJsonDeInitContext(&context);
 
+    /* Parse opt integer arrays */
+    memset(path, 0, sizeof(path));
+    path[0] = "a";
+    path[1] = (char *)&aidx1;
+    for (aidx1 = 0;; aidx1++)
+    {
+        if (SSFUBJsonGetInt8(_ubjOptArray1, _ubjOptArray1Len, (SSFCStrIn_t *)path, &outI8) == false) break;
+        SSF_ASSERT(outI8 == (int8_t) (aidx1 + 1));
+    }
+    SSF_ASSERT(aidx1 == 10);
+
+    memset(path, 0, sizeof(path));
+    path[0] = "a";
+    path[1] = (char *)&aidx1;
+    for (aidx1 = 0;; aidx1++)
+    {
+        if (SSFUBJsonGetInt8(_ubjOptArray2, _ubjOptArray2Len, (SSFCStrIn_t *)path, &outI8) == false) break;
+        SSF_ASSERT(outI8 == (int8_t) (aidx1 + 1));
+    }
+    SSF_ASSERT(aidx1 == 10);
+
+    memset(path, 0, sizeof(path));
+    path[0] = "a";
+    path[1] = (char*)&aidx1;
+    for (aidx1 = 0;; aidx1++)
+    {
+        if (SSFUBJsonGetInt16(_ubjOptArray3, _ubjOptArray3Len, (SSFCStrIn_t*)path, &outI16) == false) break;
+        SSF_ASSERT(outI16 == (int16_t)(aidx1 + 1 + 256));
+    }
+    SSF_ASSERT(aidx1 == 10);
+
     /* Validate parser can determine if valid */
     for (i = 0; i < (sizeof(_ubjs) / sizeof(SSFUBJSONUT_t)); i++)
     {
@@ -255,7 +333,10 @@ void SSFUBJsonUnitTest(void)
             SSF_ASSERT(SSFUBJsonIsValid(_ubjs[i].js, _ubjs[i].jsLen + 1) == false);
             if (_ubjs[i].jsLen >= 1)
             {
-                SSF_ASSERT(SSFUBJsonIsValid(_ubjs[i].js, _ubjs[i].jsLen - 1) == false);
+                for (j = 0; j < _ubjs[i].jsLen; j++)
+                {
+                    SSF_ASSERT(SSFUBJsonIsValid(_ubjs[i].js, j) == false);
+                }
             }
         }
     }
@@ -447,39 +528,66 @@ void SSFUBJsonUnitTest(void)
     memset(jsOut, 0xff, sizeof(jsOut));
     jsOutStart = 0;
     jsOutEnd = (size_t)-1;
-    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)0));
+    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)0, false));
     jsOutStart = 0;
     jsOutEnd = (size_t)-1;
-    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)1));
+    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)1, false));
     jsOutStart = 0;
     jsOutEnd = (size_t)-1;
-    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)127l));
+    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)127l, false));
     jsOutStart = 0;
     jsOutEnd = (size_t)-1;
-    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)128l));
+    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)128l, false));
     jsOutStart = 0;
     jsOutEnd = (size_t)-1;
-    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)255l));
+    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)255l, false));
     jsOutStart = 0;
     jsOutEnd = (size_t)-1;
-    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)256l));
+    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)256l, false));
     jsOutStart = 0;
     jsOutEnd = (size_t)-1;
-    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)32767l));
+    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)32767l, false));
     jsOutStart = 0;
     jsOutEnd = (size_t)-1;
-    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)32768l));
+    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)32768l, false));
     jsOutStart = 0;
     jsOutEnd = (size_t)-1;
-    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)2147483647l));
+    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)2147483647l, false));
     jsOutStart = 0;
     jsOutEnd = (size_t)-1;
-    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)2147483648l));
+    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)2147483648l, false));
     jsOutStart = 0;
     jsOutEnd = (size_t)-1;
-    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)4294967296l));
+    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)4294967296l, false));
     jsOutStart = 0;
     jsOutEnd = (size_t)-1;
-    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)-1));
+    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)-1, false));
+
+    jsOutStart = 0;
+    jsOutEnd = (size_t)-1;
+    alen = 10;
+    SSF_ASSERT(SSFUBJsonPrintObject(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, _SSFUBJsonPrintFn2, &alen));
+    SSF_ASSERT(SSFUBJsonIsValid(jsOut, jsOutEnd));
+
+    memset(path, 0, sizeof(path));
+    path[0] = "h";
+    SSF_ASSERT(SSFUBJsonGetHex((uint8_t *)"{U\x01hSU\x0c" "11AA22BB99FE}", 20, (SSFCStrIn_t*) path, jsOut,
+        sizeof(jsOut), &outStrLen, false));
+    SSF_ASSERT(outStrLen == 6);
+    SSF_ASSERT(memcmp(jsOut, "\x11\xAA\x22\xBB\x99\xFE", outStrLen) == 0);
+
+    SSF_ASSERT(SSFUBJsonGetHex((uint8_t*)"{U\x01hSU\x0c" "11AA22BB99FE}", 20, (SSFCStrIn_t*)path, jsOut,
+        sizeof(jsOut), &outStrLen, true));
+    SSF_ASSERT(outStrLen == 6);
+    SSF_ASSERT(memcmp(jsOut, "\xFE\x99\xBB\x22\xAA\x11", outStrLen) == 0);
+
+    SSF_ASSERT(SSFUBJsonGetHex((uint8_t*)"{U\x01hSU\x0c" "11AA22BB99F}", 19, (SSFCStrIn_t*)path, jsOut,
+        sizeof(jsOut), &outStrLen, true) == false);
+
+    jsOutStart = 0;
+    jsOutEnd = (size_t)-1;
+    alen = 10;
+    SSF_ASSERT(SSFUBJsonPrintObject(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, _SSFUBJsonPrintFn3, &alen));
+    SSF_ASSERT(SSFUBJsonIsValid(jsOut, jsOutEnd));
 }
 

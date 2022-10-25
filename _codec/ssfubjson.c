@@ -39,12 +39,11 @@
 #include "ssfhex.h"
 #include "ssfll.h"
 #include "ssfhex.h"
+#include "ssfbase64.h"
 
 /* Limitation - Unicode string encoding/decoding & strings embedded with NULLs not supported */
 
 /* TODO - Add printer for float and double */
-/* TODO - Add printer for Base64 */
-/* TODO - Add decoders for Base64 */
 /* TODO - Parse all optimized formatting, currently only optimized integer arrays are supported. */
 /* TODO - Write more unit tests */
 /* TODO - Make SSF_UBJSON_SIZE_t a config option */
@@ -742,6 +741,37 @@ bool SSFUBJsonGetHex(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, uint8_t *out,
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Returns true if found and converted Base64 string to binary string, else false.               */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFUBJsonGetBase64(uint8_t* js, size_t jsLen, SSFCStrIn_t* path, uint8_t* out,
+    size_t outSize, size_t* outLen)
+{
+    size_t start;
+    size_t end;
+    size_t index;
+    size_t len;
+    SSFUBJsonType_t jt;
+
+    SSF_REQUIRE(js != NULL);
+    SSF_REQUIRE(path != NULL);
+    SSF_REQUIRE(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH] == NULL);
+    SSF_REQUIRE(out != NULL);
+
+    if (!SSFUBJsonObject(NULL, js, jsLen, &index, &start, &end, path, 0, &jt))
+    {
+        return false;
+    }
+    if (jt != SSF_UBJSON_TYPE_STRING) return false;
+    end--;
+
+    index = 0;
+    len = end - start + 1;
+    if (outLen != NULL) *outLen = 0;
+
+    return SSFBase64Decode((SSFCStrIn_t)&js[start], (end - start + 1), out, outSize, outLen);
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Returns true if found and is converted to float, else false.                                  */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFUBJsonGetFloat(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, float *out)
@@ -1061,6 +1091,30 @@ bool SSFUBJsonPrintHex(uint8_t *js, size_t size, size_t start, size_t *end, uint
         return false;
     }
     *end = start + (inLen << 1);
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if in binary string added successfully as Base64 string, else false.             */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFUBJsonPrintBase64(uint8_t *js, size_t size, size_t start, size_t *end, uint8_t *in,
+                       size_t inLen)
+{
+    size_t outLen;
+    size_t lenIndex;
+
+    SSF_REQUIRE(js != NULL);
+    SSF_REQUIRE(end != NULL);
+    SSF_REQUIRE(in != NULL);
+
+    if (!SSFUBJsonPrintUnescChar(js, size, start, &start, 'S')) return false;
+    if (!SSFUBJsonPrintUnescChar(js, size, start, &start, 'U')) return false;
+    if (!SSFUBJsonPrintUnescChar(js, size, start, &start, (char)(inLen << 1))) return false;
+    lenIndex = start - 1;
+    if (!SSFBase64Encode(in, inLen, (SSFCStrOut_t) &js[start], size - start, &outLen)) return false;
+    SSF_ASSERT(outLen <= 255);
+    js[lenIndex] = (uint8_t) outLen;
+    *end = start + outLen;
     return true;
 }
 

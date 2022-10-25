@@ -210,6 +210,18 @@ bool _SSFUBJsonPrintFn3(uint8_t* js, size_t size, size_t start, size_t* end, voi
     return true;
 }
 
+bool _SSFUBJsonPrintFn4(uint8_t* js, size_t size, size_t start, size_t* end, void* in)
+{
+    size_t* alen = (size_t*)in;
+
+    SSF_ASSERT(alen != NULL);
+    if (!SSFUBJsonPrintLabel(js, size, start, &start, "b")) return false;
+    if (!SSFUBJsonPrintBase64(js, size, start, &start, (uint8_t *)"\x00\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff",
+        16)) return false;
+        *end = start;
+    return true;
+}
+
 bool MyIterate(char ** path, void* data, bool* trim)
 {
     //uint8_t i;
@@ -569,6 +581,7 @@ void SSFUBJsonUnitTest(void)
     SSF_ASSERT(SSFUBJsonPrintObject(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, _SSFUBJsonPrintFn2, &alen));
     SSF_ASSERT(SSFUBJsonIsValid(jsOut, jsOutEnd));
 
+    /* ASCII Hex */
     memset(path, 0, sizeof(path));
     path[0] = "h";
     SSF_ASSERT(SSFUBJsonGetHex((uint8_t *)"{U\x01hSU\x0c" "11AA22BB99FE}", 20, (SSFCStrIn_t*) path, jsOut,
@@ -588,6 +601,20 @@ void SSFUBJsonUnitTest(void)
     jsOutEnd = (size_t)-1;
     alen = 10;
     SSF_ASSERT(SSFUBJsonPrintObject(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, _SSFUBJsonPrintFn3, &alen));
+    SSF_ASSERT(SSFUBJsonIsValid(jsOut, jsOutEnd));
+
+    /* Base64 */
+    memset(path, 0, sizeof(path));
+    path[0] = "b";
+    SSF_ASSERT(SSFUBJsonGetBase64((uint8_t *)"{U\x01" "bSU\x08" "aGVsbG8=}", 16, (SSFCStrIn_t*) path, jsOut,
+        sizeof(jsOut), &outStrLen));
+    SSF_ASSERT(outStrLen == 5);
+    SSF_ASSERT(memcmp(jsOut, "hello", outStrLen) == 0);
+
+    jsOutStart = 0;
+    jsOutEnd = (size_t)-1;
+    alen = 10;
+    SSF_ASSERT(SSFUBJsonPrintObject(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, _SSFUBJsonPrintFn4, &alen));
     SSF_ASSERT(SSFUBJsonIsValid(jsOut, jsOutEnd));
 }
 

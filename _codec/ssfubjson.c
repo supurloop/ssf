@@ -41,10 +41,12 @@
 #include "ssfhex.h"
 #include "ssfbase64.h"
 
-/* Limitation - Unicode string encoding/decoding & strings embedded with NULLs not supported */
+/* Limitations */
+/* The number of elements in an array, characters in a string, or name field is limited to 255 */
+/* Optimized arrays containing integer types are supported, other types not supported. */
+/* Optimized objects are not supported. */
+/* Name fields may not contain NULL values. */
 
-/* TODO - Add printer for float and double */
-/* TODO - Parse all optimized formatting, currently only optimized integer arrays are supported. */
 /* TODO - Write more unit tests */
 /* TODO - Make SSF_UBJSON_SIZE_t a config option */
 /* TODO - Make context interface compile time option */
@@ -1179,6 +1181,38 @@ bool SSFUBJsonPrintInt(uint8_t *js, size_t size, size_t start, size_t *end, int6
     if ((start + len) >= size) return false;
     memcpy(&js[start], pi, len);
     *end = start + len;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if in float added successfully to JSON string, else false.                       */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFUBJsonPrintFloat(uint8_t *js, size_t size, size_t start, size_t *end, float in)
+{
+    SSF_REQUIRE(js != NULL);
+    SSF_REQUIRE(start <= size);
+    SSF_REQUIRE(end != NULL);
+
+    if (!SSFUBJsonPrintUnescChar(js, size, start, &start, UBJ_TYPE_FLOAT32)) return false;
+    if ((start + sizeof(float)) >= size) return false;
+    memcpy(&js[start], &in, sizeof(float));
+    *end = start + sizeof(float);
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if in double added successfully to JSON string, else false.                      */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFUBJsonPrintDouble(uint8_t *js, size_t size, size_t start, size_t *end, double in)
+{
+    SSF_REQUIRE(js != NULL);
+    SSF_REQUIRE(start <= size);
+    SSF_REQUIRE(end != NULL);
+
+    if (!SSFUBJsonPrintUnescChar(js, size, start, &start, UBJ_TYPE_FLOAT64)) return false;
+    if ((start + sizeof(float)) >= size) return false;
+    memcpy(&js[start], &in, sizeof(float));
+    *end = start + sizeof(float);
     return true;
 }
 

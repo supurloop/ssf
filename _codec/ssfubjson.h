@@ -137,6 +137,8 @@ bool SSFUBJsonPrintBase64(uint8_t* js, size_t size, size_t start, size_t* end, u
 
 bool SSFUBJsonPrintLabel(uint8_t *js, size_t size, size_t start, size_t *end, SSFCStrIn_t label);
 bool SSFUBJsonPrintInt(uint8_t *js, size_t size, size_t start, size_t *end, int64_t in, bool opt);
+bool SSFUBJsonPrintFloat(uint8_t *js, size_t size, size_t start, size_t *end, float in);
+bool SSFUBJsonPrintDouble(uint8_t *js, size_t size, size_t start, size_t *end, double in);
 
 /* --------------------------------------------------------------------------------------------- */
 /* Unit test                                                                                     */

@@ -998,51 +998,51 @@ This parser operates on the UBJSON message in place and only consumes modest sta
 
 Here are some simple parser examples:
 ```
-uint8_t ubjson1[] = "{i\x04nameSi\x05value}";
-size_t ubjson1Len = 16;
-uint8_t ubjson2[] = "{i\x03obj{i\x04nameSi\x05valuei\x05" "array[$i#i\x03" "123}}";
-size_t ubjson2Len = 39;
-char* path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH + 1];
-char strOut[32];
-size_t idx;
+    uint8_t ubjson1[] = "{i\x04nameSi\x05value}";
+    size_t ubjson1Len = 16;
+    uint8_t ubjson2[] = "{i\x03obj{i\x04nameSi\x05valuei\x05" "array[$i#i\x03" "123}}";
+    size_t ubjson2Len = 39;
+    char* path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH + 1];
+    char strOut[32];
+    size_t idx;
 
-/* Must zero out path variable before use */
-memset(path, 0, sizeof(path));
+    /* Must zero out path variable before use */
+    memset(path, 0, sizeof(path));
 
-/* Get the value of a top level element */
-path[0] = "name";
-if (SSFUBJsonGetString(ubjson1, ubjson1Len, (SSFCStrIn_t*)path, strOut, sizeof(strOut), NULL))
-{
-    printf("%s\r\n", strOut);
-    /* Prints "value" excluding double quotes */
-}
-
-/* Get the value of a nested element */
-path[0] = "obj";
-path[1] = "name";
-if (SSFUBJsonGetString(ubjson2, ubjson2Len, (SSFCStrIn_t*)path, strOut, sizeof(strOut), NULL))
-{
-    printf("%s\r\n", strOut);
-    /* Prints "value" excluding double quotes */
-}
-
-path[0] = "obj";
-path[1] = "array";
-path[2] = (char*)&idx;
-/* Iterate over a nested array */
-for (idx = 0;; idx++)
-{
-    int8_t si;
-
-    if (SSFUBJsonGetInt8(ubjson2, ubjson2Len, (SSFCStrIn_t*)path, &si))
+    /* Get the value of a top level element */
+    path[0] = "name";
+    if (SSFUBJsonGetString(ubjson1, ubjson1Len, (SSFCStrIn_t*)path, strOut, sizeof(strOut), NULL))
     {
-        if (idx != 0) printf(", ");
-        printf("%ld", si);
+        printf("%s\r\n", strOut);
+        /* Prints "value" excluding double quotes */
     }
-    else break;
-}
-printf("\r\n");
-/* Prints "1, 2, 3" */
+
+    /* Get the value of a nested element */
+    path[0] = "obj";
+    path[1] = "name";
+    if (SSFUBJsonGetString(ubjson2, ubjson2Len, (SSFCStrIn_t*)path, strOut, sizeof(strOut), NULL))
+    {
+        printf("%s\r\n", strOut);
+        /* Prints "value" excluding double quotes */
+    }
+
+    path[0] = "obj";
+    path[1] = "array";
+    path[2] = (char*)&idx;
+    /* Iterate over a nested array */
+    for (idx = 0;; idx++)
+    {
+        int8_t si;
+
+        if (SSFUBJsonGetInt8(ubjson2, ubjson2Len, (SSFCStrIn_t*)path, &si))
+        {
+            if (idx != 0) printf(", ");
+            printf("%ld", si);
+        }
+        else break;
+    }
+    printf("\r\n");
+    /* Prints "1, 2, 3" */
 ```
 Here is a simple generation example:
 ```
@@ -1061,23 +1061,25 @@ bool printFn(uint8_t* js, size_t size, size_t start, size_t* end, void* in)
 
 ...
 
-uint8_t ubjson[128];
-size_t end;
+    uint8_t ubjson[128];
+    size_t end;
 
-/* JSON is contained within an object {}, so to create a JSON string call SSFJsonPrintObject() */
-if (SSFUBJsonPrintObject(ubjson, sizeof(ubjson), 0, &end, printFn, NULL))
-{
-    /* ubjson == "{U\x06label1SU\x06value1U\x06label2SU\x06value2}", end == 36 */
-    memset(path, 0, sizeof(path));
-    path[0] = "label2";
-    if (SSFUBJsonGetString(ubjson, end, (SSFCStrIn_t*)path, strOut, sizeof(strOut), NULL))
+    /* JSON is contained within an object {}, so to create a JSON string call SSFJsonPrintObject() */
+    if (SSFUBJsonPrintObject(ubjson, sizeof(ubjson), 0, &end, printFn, NULL))
     {
-        printf("%s\r\n", strOut);
-        /* Prints "value2" excluding double quotes */
+        /* ubjson == "{U\x06label1SU\x06value1U\x06label2SU\x06value2}", end == 36 */
+        memset(path, 0, sizeof(path));
+        path[0] = "label2";
+        if (SSFUBJsonGetString(ubjson, end, (SSFCStrIn_t*)path, strOut, sizeof(strOut), NULL))
+        {
+            printf("%s\r\n", strOut);
+            /* Prints "value2" excluding double quotes */
+        }
     }
-}
 ```
-Object and array nesting is achieved by calling SSFJsonPrintObject() or SSFJsonPrintArray() from within a printer function.
+Object and array nesting is achieved by calling SSFUBJsonPrintObject() or SSFUBJsonPrintArray() from within a printer function.
+
+Parsing and generation of optimized integer arrays is supported.
 
 ## Conclusion
 

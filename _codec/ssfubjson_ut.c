@@ -576,7 +576,7 @@ void SSFUBJsonUnitTest(void)
     SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)-1, false));
     jsOutStart = 0;
     jsOutEnd = (size_t)-1;
-    outFloat = 1.23;
+    outFloat = (float)1.23;
     SSF_ASSERT(SSFUBJsonPrintFloat(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, outFloat));
     jsOutStart = 0;
     jsOutEnd = (size_t)-1;

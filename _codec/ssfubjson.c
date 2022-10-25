@@ -1194,9 +1194,9 @@ bool SSFUBJsonPrintFloat(uint8_t *js, size_t size, size_t start, size_t *end, fl
     SSF_REQUIRE(end != NULL);
 
     if (!SSFUBJsonPrintUnescChar(js, size, start, &start, UBJ_TYPE_FLOAT32)) return false;
-    if ((start + sizeof(float)) >= size) return false;
-    memcpy(&js[start], &in, sizeof(float));
-    *end = start + sizeof(float);
+    if ((start + sizeof(in)) >= size) return false;
+    memcpy(&js[start], &in, sizeof(in));
+    *end = start + sizeof(in);
     return true;
 }
 
@@ -1210,9 +1210,9 @@ bool SSFUBJsonPrintDouble(uint8_t *js, size_t size, size_t start, size_t *end, d
     SSF_REQUIRE(end != NULL);
 
     if (!SSFUBJsonPrintUnescChar(js, size, start, &start, UBJ_TYPE_FLOAT64)) return false;
-    if ((start + sizeof(float)) >= size) return false;
-    memcpy(&js[start], &in, sizeof(float));
-    *end = start + sizeof(float);
+    if ((start + sizeof(in)) >= size) return false;
+    memcpy(&js[start], &in, sizeof(in));
+    *end = start + sizeof(in);
     return true;
 }
 

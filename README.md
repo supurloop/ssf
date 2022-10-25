@@ -29,6 +29,7 @@ The framework implements a number of common embedded system functions:
   17. A cryptograpically secure capable pseudo random number generator (PRNG).
   18. A INI parser/generator interface.
   19. An Experimental Universal Binary JSON (UBJSON) parser/generator interface.
+  20. A Universal Binary JSON parser/generator interface.
 
 To give you an idea of the framework size here are some program memory estimates for each component compiled on an MSP430 with Level 3 optimization:
 Byte FIFO, linked list, memory pool, Base64, Hex ASCII are each about 1000 bytes.
@@ -63,7 +64,7 @@ When the finite state machine framework runs in a multi-threaded environment som
 ### Heap and Stack Memory
 Only the memory pool and finite state machine use dynamic memory, aka heap. The memory pool only does so when a pool is created. The finite state machine only uses malloc when an event has data whose size is bigger than the sizeof a pointer.
 
-The framework is fairly stack friendly, although the JSON parser will recursively call functions for nested JSON objects and arrays. SSF_JSON_CONFIG_MAX_IN_DEPTH in ssfport.h can be used to control the maximum depth the JSON parser will recurse to prevent the stack from blowing up due to bad inputs. If the unit test for the JSON interface is failing weirdly then increase your system stack.
+The framework is fairly stack friendly, although the JSON/UBJSON parsers will recursively call functions for nested JSON objects and arrays. SSF_[UB]JSON_CONFIG_MAX_IN_DEPTH in ssfport.h can be used to control the maximum depth the parser will recurse to prevent the stack from blowing up due to bad inputs. If the unit test for the JSON/UBJSON interface is failing weirdly then increase your system stack.
 
 The most important step is to run the unit tests for the interfaces you intend to use on your platform. This will detect porting problems very quickly and avoid many future debugging headaches.
 
@@ -989,7 +990,94 @@ Sad that we still need this, but we still sometimes need to parse and generate I
 
 ### Universal Binary JSON (UBJSON) Parser/Generator Interface
 
-There is experimental support for Universal Binary JSON (UBJSON). Once it reaches the level of a release some examples will be provided.
+The UBJSON specification can be found at https://ubjson.org/.
+
+It does appear that work on the specification has stalled, which is unfortunate since a lighter weight JSON encoding that is 1:1 compatible with JSON data types is a great idea.
+
+This parser operates on the UBJSON message in place and only consumes modest stack in proportion to the maximum nesting depth. Since the UBJSON string is parsed from the start each time a data element is accessed it is computationally inefficient; that's ok since most embedded systems are RAM constrained not performance constrained.
+
+Here are some simple parser examples:
+```
+uint8_t ubjson1[] = "{i\x04nameSi\x05value}";
+size_t ubjson1Len = 16;
+uint8_t ubjson2[] = "{i\x03obj{i\x04nameSi\x05valuei\x05" "array[$i#i\x03" "123}}";
+size_t ubjson2Len = 39;
+char* path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH + 1];
+char strOut[32];
+size_t idx;
+
+/* Must zero out path variable before use */
+memset(path, 0, sizeof(path));
+
+/* Get the value of a top level element */
+path[0] = "name";
+if (SSFUBJsonGetString(ubjson1, ubjson1Len, (SSFCStrIn_t*)path, strOut, sizeof(strOut), NULL))
+{
+    printf("%s\r\n", strOut);
+    /* Prints "value" excluding double quotes */
+}
+
+/* Get the value of a nested element */
+path[0] = "obj";
+path[1] = "name";
+if (SSFUBJsonGetString(ubjson2, ubjson2Len, (SSFCStrIn_t*)path, strOut, sizeof(strOut), NULL))
+{
+    printf("%s\r\n", strOut);
+    /* Prints "value" excluding double quotes */
+}
+
+path[0] = "obj";
+path[1] = "array";
+path[2] = (char*)&idx;
+/* Iterate over a nested array */
+for (idx = 0;; idx++)
+{
+    int8_t si;
+
+    if (SSFUBJsonGetInt8(ubjson2, ubjson2Len, (SSFCStrIn_t*)path, &si))
+    {
+        if (idx != 0) printf(", ");
+        printf("%ld", si);
+    }
+    else break;
+}
+printf("\r\n");
+/* Prints "1, 2, 3" */
+```
+Here is a simple generation example:
+```
+bool printFn(uint8_t* js, size_t size, size_t start, size_t* end, void* in)
+{
+    SSF_ASSERT(in == NULL);
+
+    if (!SSFUBJsonPrintLabel(js, size, start, &start, "label1")) return false;
+    if (!SSFUBJsonPrintString(js, size, start, &start, "value1")) return false;
+    if (!SSFUBJsonPrintLabel(js, size, start, &start, "label2")) return false;
+    if (!SSFUBJsonPrintString(js, size, start, &start, "value2")) return false;
+
+    *end = start;
+    return true;
+}
+
+...
+
+uint8_t ubjson[128];
+size_t end;
+
+/* JSON is contained within an object {}, so to create a JSON string call SSFJsonPrintObject() */
+if (SSFUBJsonPrintObject(ubjson, sizeof(ubjson), 0, &end, printFn, NULL))
+{
+    /* ubjson == "{U\x06label1SU\x06value1U\x06label2SU\x06value2}", end == 36 */
+    memset(path, 0, sizeof(path));
+    path[0] = "label2";
+    if (SSFUBJsonGetString(ubjson, end, (SSFCStrIn_t*)path, strOut, sizeof(strOut), NULL))
+    {
+        printf("%s\r\n", strOut);
+        /* Prints "value2" excluding double quotes */
+    }
+}
+```
+Object and array nesting is achieved by calling SSFJsonPrintObject() or SSFJsonPrintArray() from within a printer function.
 
 ## Conclusion
 

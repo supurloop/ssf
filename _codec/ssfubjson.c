@@ -48,8 +48,6 @@
 /* Name fields may not contain NULL values. */
 
 /* TODO - Write more unit tests */
-/* TODO - Make SSF_UBJSON_SIZE_t a config option */
-/* TODO - Make context interface compile time option */
 
 /* --------------------------------------------------------------------------------------------- */
 /* Local Defines                                                                                 */
@@ -74,7 +72,7 @@
 #define UBJ_TYPE_ARRAY_CLOSE ']'
 #define UBJ_TYPE_ARRAY_OPT '$'
 #define UBJ_TYPE_ARRAY_NUM '#'
-#define SSF_UBJSON_MAGIC 0x55424A53ul
+#define SSF_UBJSON_MAGIC (0x55424A53ul)
 
 typedef uint8_t SSF_UBJSON_SIZE_t;
 SSF_UBJSON_TYPEDEF_STRUCT
@@ -95,7 +93,7 @@ SSFUBJSONNode_t;
 /* --------------------------------------------------------------------------------------------- */
 /* Local Prototypes.                                                                             */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFUBJsonValue(SSFUBJSONContext_t *context, uint8_t *js, size_t jsLen,
+static bool _SSFUBJsonValue(uint8_t *js, size_t jsLen,
                             size_t *index, size_t *start, size_t *end, SSFCStrIn_t *path,
                             uint8_t depth, SSFUBJsonType_t *jt, uint8_t override);
 
@@ -103,144 +101,9 @@ static bool _SSFJsonTypeField(uint8_t *js, size_t jsLen, size_t *index, size_t *
                               size_t *fend, SSFUBJsonType_t *fjt, uint8_t override);
 
 /* --------------------------------------------------------------------------------------------- */
-/* Allocates memory from heap, tracks allocation.                                                */
-/* --------------------------------------------------------------------------------------------- */
-void SSFUBJsonMalloc(uint32_t *ctr, uint32_t *total, void **ptr, size_t len)
-{
-    SSF_REQUIRE(ctr != NULL);
-    SSF_REQUIRE(ptr != NULL);
-
-    *ptr = SSF_MALLOC(len);
-    SSF_ASSERT(*ptr != NULL);
-    (*ctr)++;
-    (*total) += len;
-}
-
-/* --------------------------------------------------------------------------------------------- */
-/* Frees memory from heap, tracks allocation.                                                    */
-/* --------------------------------------------------------------------------------------------- */
-void SSFUBJsonFree(uint32_t *ctr, uint32_t *total, void *ptr, size_t len)
-{
-    SSF_REQUIRE(ctr != NULL);
-    SSF_REQUIRE(ptr != NULL);
-
-    SSF_FREE(ptr);
-    (*ctr)++;
-    (*total) -= len;
-}
-
-/* --------------------------------------------------------------------------------------------- */
-/* Records a new name/value pair into context tree.                                              */
-/* --------------------------------------------------------------------------------------------- */
-static void _SSFUBJSONPushNameValue(SSFUBJSONContext_t *context, uint8_t *name, size_t nameLen,
-                                    uint8_t *value, size_t valueLen, SSFUBJsonType_t type,
-                                    uint8_t depth)
-{
-    SSFUBJSONNode_t *node;
-    static uint8_t lastDepth = 0;
-    uint8_t i;
-    SSFLLItem_t *item;
-    size_t index;
-
-    SSF_REQUIRE(context != NULL);
-    SSF_REQUIRE(value != NULL);
-    SSF_REQUIRE((name != NULL) || ((name == NULL) && (nameLen == 0)));
-    SSF_REQUIRE((type < SSF_UBJSON_TYPE_MAX) && (type != SSF_UBJSON_TYPE_ERROR));
-    SSF_REQUIRE(depth < SSF_UBJSON_CONFIG_MAX_IN_DEPTH);
-
-    /* Create a new node */
-    SSFUBJsonMalloc(&context->mallocs, &context->mallocTotal, (void **)&node,
-                    sizeof(SSFUBJSONNode_t));
-    memset(node, 0, sizeof(SSFUBJSONNode_t));
-
-    /* Name bigger than a pointer? */
-    if (nameLen > sizeof(void *))
-    {
-        /* Yes, allocate space to save the name */
-        SSFUBJsonMalloc(&context->mallocs, &context->mallocTotal, (void **)&node->name,
-                        nameLen);
-        memcpy(node->name, name, nameLen);
-    }
-    else
-    {
-        /* No, store value of name in name pointer */
-        memcpy(&node->name, name, nameLen);
-    }
-    node->nameLen = (SSF_UBJSON_SIZE_t)nameLen;
-
-    /* TODO Skip saving values of objects and arrays */
-    if (!((type == SSF_UBJSON_TYPE_OBJECT) || (type == SSF_UBJSON_TYPE_ARRAY)))
-    {
-        /* Name bigger than a pointer? */
-        if (valueLen > sizeof(void *))
-        {
-            /* Yes, allocate space to save the value */
-            SSFUBJsonMalloc(&context->mallocs, &context->mallocTotal,
-                            (void **)&node->value, valueLen);
-            memcpy(node->value, value, valueLen);
-        }
-        else
-        {
-            /* No, store value of name in name pointer */
-            memcpy(&node->value, value, valueLen);
-        }
-        node->valueLen = (SSF_UBJSON_SIZE_t)valueLen;
-    }
-    else
-    {
-        node->valueLen = 0;
-    }
-    node->type = type;
-
-    if ((type == SSF_UBJSON_TYPE_ARRAY) || (type == SSF_UBJSON_TYPE_OBJECT))
-    {
-        /* Add node to list */
-        SSF_LL_FIFO_PUSH(&context->roots[depth], (SSFLLItem_t *)&(node->item));
-
-        /* Roll up children */
-        memcpy(&node->children, &context->roots[depth + 1], sizeof(SSFLL_t));
-        memset(&context->roots[depth + 1], 0, sizeof(SSFLL_t));
-
-        item = SSF_LL_TAIL(&node->children);
-        index = 0;
-        while (item != NULL)
-        {
-            SSFUBJSONNode_t *child;
-
-            child = (SSFUBJSONNode_t *)item;
-            child->parent = &node->item;
-            child->index = (SSF_UBJSON_SIZE_t)index;
-            if (type == SSF_UBJSON_TYPE_ARRAY)
-            {
-                index++;
-            }
-            item = SSF_LL_PREV_ITEM(item);
-        }
-    }
-    else
-    {
-        /* Init roots to depth */
-        for (i = 0; i <= depth; i++)
-        {
-            if (SSFLLIsInited(&context->roots[i]) == false)
-            {
-                SSFLLInit(&context->roots[i], 20);
-            }
-        }
-
-        /* Add node to list */
-        SSF_LL_FIFO_PUSH(&context->roots[depth], (SSFLLItem_t *)&(node->item));
-
-        /* No children, no parent */
-        memset(&node->children, 0, sizeof(SSFLL_t));
-        node->parent = NULL;
-    }
-}
-
-/* --------------------------------------------------------------------------------------------- */
 /* Returns true if array found, else false; If true returns type/start/end on path index match.  */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFUBJsonArray(SSFUBJSONContext_t *context, uint8_t *js, size_t jsLen, size_t *index,
+static bool _SSFUBJsonArray(uint8_t *js, size_t jsLen, size_t *index,
                             size_t *start, size_t *end, size_t *astart, size_t *aend,
                             SSFCStrIn_t *path, uint8_t depth, SSFUBJsonType_t *jt)
 {
@@ -303,14 +166,8 @@ static bool _SSFUBJsonArray(SSFUBJSONContext_t *context, uint8_t *js, size_t jsL
 
     if ((path != NULL) && (path[depth] != NULL)) memcpy(&pindex, path[depth], sizeof(size_t));
 
-    while (_SSFUBJsonValue(context, js, jsLen, index, &valStart, &valEnd, path, depth, &djt, t))
+    while (_SSFUBJsonValue(js, jsLen, index, &valStart, &valEnd, path, depth, &djt, t))
     {
-        if (context != NULL)
-        {
-            _SSFUBJSONPushNameValue(context, NULL, 0, &js[valStart], valEnd - valStart, djt,
-                                    depth);
-        }
-
         if (pindex == curIndex)
         {
             *start = valStart; *end = valEnd; *jt = djt;
@@ -452,7 +309,7 @@ static bool _SSFJsonTypeField(uint8_t *js, size_t jsLen, size_t *index, size_t *
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if value found, else false; If true returns type/start/end on path match.        */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFUBJsonValue(SSFUBJSONContext_t *context, uint8_t *js, size_t jsLen, size_t *index,
+static bool _SSFUBJsonValue(uint8_t *js, size_t jsLen, size_t *index,
                             size_t *start, size_t *end, SSFCStrIn_t *path, uint8_t depth,
                             SSFUBJsonType_t *jt, uint8_t override)
 {
@@ -473,14 +330,14 @@ static bool _SSFUBJsonValue(SSFUBJSONContext_t *context, uint8_t *js, size_t jsL
     switch (*jt)
     {
         case SSF_UBJSON_TYPE_OBJECT:
-        if (SSFUBJsonObject(context, js, jsLen, &i, start, end, path, depth + 1, jt))
+        if (SSFUBJsonObject(js, jsLen, &i, start, end, path, depth + 1, jt))
         {
             *index = i;
             return true;
         }
         break;
         case SSF_UBJSON_TYPE_ARRAY:
-        if (_SSFUBJsonArray(context, js, jsLen, &i, start, end, &astart, &aend, path, depth + 1, jt))
+        if (_SSFUBJsonArray(js, jsLen, &i, start, end, &astart, &aend, path, depth + 1, jt))
         {
             if ((path != NULL)&&(path[depth] == NULL))
             {
@@ -513,7 +370,7 @@ static bool _SSFUBJsonValue(SSFUBJSONContext_t *context, uint8_t *js, size_t jsL
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if name/value found, else false; If true returns type/start/end on path match.   */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFJsonNameValue(SSFUBJSONContext_t *context, uint8_t *js, size_t jsLen,
+static bool _SSFJsonNameValue(uint8_t *js, size_t jsLen,
                               size_t *index, size_t *start, size_t *end, SSFCStrIn_t *path,
                               uint8_t depth, SSFUBJsonType_t *jt)
 {
@@ -555,17 +412,12 @@ static bool _SSFJsonNameValue(SSFUBJSONContext_t *context, uint8_t *js, size_t j
                  SSF_MAX(fend - fstart, (size_t)strlen(path[depth]))) == 0))
     {
         /* Yes, keep matching */
-        retVal = _SSFUBJsonValue(context, js, jsLen, index, start, end, path, depth, jt, 0);
+        retVal = _SSFUBJsonValue(js, jsLen, index, start, end, path, depth, jt, 0);
     }
     else
     {
         /* No, keep parsing */
-        retVal = _SSFUBJsonValue(context, js, jsLen, index, &valStart, &valEnd, path, depth, &djt, 0);
-        if (retVal && (context != NULL))
-        {
-            _SSFUBJSONPushNameValue(context, &js[fstart], len, &js[valStart], valEnd - valStart,
-                                    djt, depth);
-        }
+        retVal = _SSFUBJsonValue(js, jsLen, index, &valStart, &valEnd, path, depth, &djt, 0);
     }
 
     return retVal;
@@ -574,7 +426,7 @@ static bool _SSFJsonNameValue(SSFUBJSONContext_t *context, uint8_t *js, size_t j
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if object found, else false; If true returns type/start/end on path match.       */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFUBJsonObject(SSFUBJSONContext_t *context, uint8_t *js, size_t jsLen, size_t *index,
+bool SSFUBJsonObject(uint8_t *js, size_t jsLen, size_t *index,
                      size_t *start, size_t *end, SSFCStrIn_t *path, uint8_t depth,
                      SSFUBJsonType_t *jt)
 {
@@ -603,7 +455,7 @@ bool SSFUBJsonObject(SSFUBJSONContext_t *context, uint8_t *js, size_t jsLen, siz
 
     if (js[*index] != '}')
     {
-        if (!_SSFJsonNameValue(context, js, jsLen, index, start, end, path, depth, jt))
+        if (!_SSFJsonNameValue(js, jsLen, index, start, end, path, depth, jt))
         {return false; }
         do
         {
@@ -613,7 +465,7 @@ bool SSFUBJsonObject(SSFUBJSONContext_t *context, uint8_t *js, size_t jsLen, siz
             }
 
             if (js[*index] == '}') break;
-            if (!_SSFJsonNameValue(context, js, jsLen, index, start, end, path, depth, jt))
+            if (!_SSFJsonNameValue(js, jsLen, index, start, end, path, depth, jt))
             {return false; }
         } while (true);
         if (js[*index] != '}') return false;
@@ -623,7 +475,6 @@ bool SSFUBJsonObject(SSFUBJSONContext_t *context, uint8_t *js, size_t jsLen, siz
     {
         (*index)++; *end = *index; *jt = SSF_UBJSON_TYPE_OBJECT;
     }
-    if (context != NULL) *end = *index;
     if (((path != NULL) && (path[depth] == NULL)) ||
         ((depth == 0) && (path != NULL) && (path[0] == NULL)))
     {
@@ -648,7 +499,7 @@ bool SSFUBJsonIsValid(uint8_t *js, size_t jsLen)
     SSF_REQUIRE(js != NULL);
 
     memset(path, 0, sizeof(path));
-    if (!SSFUBJsonObject(NULL, js, jsLen, &index, &start, &end, (SSFCStrIn_t *)path, 0,
+    if (!SSFUBJsonObject(js, jsLen, &index, &start, &end, (SSFCStrIn_t *)path, 0,
                          &jt)) return false;
 
     return jt != SSF_UBJSON_TYPE_ERROR;
@@ -668,7 +519,7 @@ SSFUBJsonType_t SSFUBJsonGetType(uint8_t *js, size_t jsLen, SSFCStrIn_t *path)
     SSF_REQUIRE(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH] == NULL);
     SSF_REQUIRE(path != NULL);
 
-    if (!SSFUBJsonObject(NULL, js, jsLen, &index, &start, &end, path, 0, &jt))
+    if (!SSFUBJsonObject(js, jsLen, &index, &start, &end, path, 0, &jt))
     {
         jt = SSF_UBJSON_TYPE_ERROR;
     }
@@ -692,7 +543,7 @@ bool SSFUBJsonGetString(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, SSFCStrOut
     SSF_REQUIRE(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH] == NULL);
     SSF_REQUIRE(out != NULL);
 
-    if (!SSFUBJsonObject(NULL, js, jsLen, &index, &start, &end, path, 0, &jt))
+    if (!SSFUBJsonObject(js, jsLen, &index, &start, &end, path, 0, &jt))
     {return false; }
     if (jt != SSF_UBJSON_TYPE_STRING) return false;
     end--;
@@ -728,7 +579,7 @@ bool SSFUBJsonGetHex(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, uint8_t *out,
     SSF_REQUIRE(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH] == NULL);
     SSF_REQUIRE(out != NULL);
 
-    if (!SSFUBJsonObject(NULL, js, jsLen, &index, &start, &end, path, 0, &jt))
+    if (!SSFUBJsonObject(js, jsLen, &index, &start, &end, path, 0, &jt))
     {
         return false;
     }
@@ -759,7 +610,7 @@ bool SSFUBJsonGetBase64(uint8_t* js, size_t jsLen, SSFCStrIn_t* path, uint8_t* o
     SSF_REQUIRE(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH] == NULL);
     SSF_REQUIRE(out != NULL);
 
-    if (!SSFUBJsonObject(NULL, js, jsLen, &index, &start, &end, path, 0, &jt))
+    if (!SSFUBJsonObject(js, jsLen, &index, &start, &end, path, 0, &jt))
     {
         return false;
     }
@@ -789,7 +640,7 @@ bool SSFUBJsonGetFloat(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, float *out)
     SSF_REQUIRE(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH] == NULL);
     SSF_REQUIRE(out != NULL);
 
-    if (!SSFUBJsonObject(NULL, js, jsLen, &index, &start, &end, path, 0, &jt))
+    if (!SSFUBJsonObject(js, jsLen, &index, &start, &end, path, 0, &jt))
     {return false; }
     if (jt != SSF_UBJSON_TYPE_NUMBER_FLOAT32) return false;
     if ((end - start) != sizeof(u32)) return false;
@@ -815,7 +666,7 @@ bool SSFUBJsonGetDouble(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, double *ou
     SSF_REQUIRE(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH] == NULL);
     SSF_REQUIRE(out != NULL);
 
-    if (!SSFUBJsonObject(NULL, js, jsLen, &index, &start, &end, path, 0, &jt)) return false;
+    if (!SSFUBJsonObject(js, jsLen, &index, &start, &end, path, 0, &jt)) return false;
     if (jt != SSF_UBJSON_TYPE_NUMBER_FLOAT64) return false;
     if ((end - start) != sizeof(u64)) return false;
     memcpy(&u64, &js[start], sizeof(u64));
@@ -839,7 +690,7 @@ bool SSFUBJsonGetInt8(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, int8_t *out)
     SSF_REQUIRE(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH] == NULL);
     SSF_REQUIRE(out != NULL);
 
-    if (!SSFUBJsonObject(NULL, js, jsLen, &index, &start, &end, path, 0, &jt))
+    if (!SSFUBJsonObject(js, jsLen, &index, &start, &end, path, 0, &jt))
     {return false; }
     if (jt != SSF_UBJSON_TYPE_NUMBER_INT8) return false;
     if ((end - start) != sizeof(int8_t)) return false;
@@ -862,7 +713,7 @@ bool SSFUBJsonGetUInt8(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, uint8_t *ou
     SSF_REQUIRE(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH] == NULL);
     SSF_REQUIRE(out != NULL);
 
-    if (!SSFUBJsonObject(NULL, js, jsLen, &index, &start, &end, path, 0, &jt))
+    if (!SSFUBJsonObject(js, jsLen, &index, &start, &end, path, 0, &jt))
     {return false; }
     if (jt != SSF_UBJSON_TYPE_NUMBER_UINT8) return false;
     if ((end - start) != sizeof(uint8_t)) return false;
@@ -885,7 +736,7 @@ bool SSFUBJsonGetInt16(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, int16_t *ou
     SSF_REQUIRE(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH] == NULL);
     SSF_REQUIRE(out != NULL);
 
-    if (!SSFUBJsonObject(NULL, js, jsLen, &index, &start, &end, path, 0, &jt)) return false;
+    if (!SSFUBJsonObject(js, jsLen, &index, &start, &end, path, 0, &jt)) return false;
     if (jt != SSF_UBJSON_TYPE_NUMBER_INT16) return false;
     if ((end - start) != sizeof(u16)) return false;
     memcpy(&u16, &js[start], sizeof(u16));
@@ -910,7 +761,7 @@ bool SSFUBJsonGetInt32(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, int32_t *ou
     SSF_REQUIRE(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH] == NULL);
     SSF_REQUIRE(out != NULL);
 
-    if (!SSFUBJsonObject(NULL, js, jsLen, &index, &start, &end, path, 0, &jt))
+    if (!SSFUBJsonObject(js, jsLen, &index, &start, &end, path, 0, &jt))
     {return false; }
     if (jt != SSF_UBJSON_TYPE_NUMBER_INT32) return false;
     if ((end - start) != sizeof(u32)) return false;
@@ -935,7 +786,7 @@ bool SSFUBJsonGetInt64(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, int64_t *ou
     SSF_REQUIRE(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH] == NULL);
     SSF_REQUIRE(out != NULL);
 
-    if (!SSFUBJsonObject(NULL, js, jsLen, &index, &start, &end, path, 0, &jt))
+    if (!SSFUBJsonObject(js, jsLen, &index, &start, &end, path, 0, &jt))
     {return false; }
     if (jt != SSF_UBJSON_TYPE_NUMBER_INT64) return false;
     if ((end - start) != sizeof(u64)) return false;
@@ -1217,164 +1068,6 @@ bool SSFUBJsonPrintDouble(uint8_t *js, size_t size, size_t start, size_t *end, d
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if UBJSON string is valid, else false.                                           */
-/* --------------------------------------------------------------------------------------------- */
-bool SSFUBJsonContextInitParse(SSFUBJSONContext_t *context, uint8_t *js, size_t jsLen)
-{
-    size_t start;
-    size_t end;
-    size_t index;
-    SSFUBJsonType_t jt;
-
-    SSF_REQUIRE(context != NULL);
-    SSF_REQUIRE(js != NULL);
-    SSF_REQUIRE(jsLen <= SSF_UBJSON_CONFIG_MAX_IN_LEN);
-    SSF_REQUIRE(context->magic == SSF_UBJSON_MAGIC);
-    SSF_REQUIRE(SSFLLIsInited(&context->roots[0]) == false);
-
-    if (!SSFUBJsonObject(context, js, jsLen, &index, &start, &end, NULL, 0, &jt)) return false;
-    return jsLen == index;
-}
-
-/* --------------------------------------------------------------------------------------------- */
-/* Initializes a context.                                                                        */
-/* --------------------------------------------------------------------------------------------- */
-void SSFUBJsonInitContext(SSFUBJSONContext_t *context)
-{
-    SSF_REQUIRE(context != NULL);
-    SSF_REQUIRE(context->magic != SSF_UBJSON_MAGIC);
-
-    memset(context, 0, sizeof(SSFUBJSONContext_t));
-    context->magic = SSF_UBJSON_MAGIC;
-}
-
-/* --------------------------------------------------------------------------------------------- */
-/* Returns true if context inited else false.                                                    */
-/* --------------------------------------------------------------------------------------------- */
-bool SSFUBJsonIsContextInited(SSFUBJSONContext_t *context)
-{
-    SSF_REQUIRE(context != NULL);
-
-    return context->magic == SSF_UBJSON_MAGIC;
-}
-
-/* --------------------------------------------------------------------------------------------- */
-/* Iterates a context.                                                                           */
-/* --------------------------------------------------------------------------------------------- */
-static bool _SSFUBJsonContextIterate(SSFLL_t *root, char **path, uint8_t depth,
-                                     SSFUBJsonIterateFn_t callback, void *data)
-{
-    SSFLLItem_t *item;
-
-    if (SSFLLIsInited(root))
-    {
-        item = SSF_LL_TAIL(root);
-        while (item != NULL)
-        {
-            SSFUBJSONNode_t *node;
-            node = (SSFUBJSONNode_t *)item;
-
-            if (node->nameLen > sizeof(void *))
-            {
-                path[depth] = (char *)node->name;
-            }
-            else
-            {
-                path[depth] = (char *)&(node->name);
-            }
-            if (SSFLLIsInited(&node->children))
-            {
-                _SSFUBJsonContextIterate(&node->children, path, depth + 1, callback, data);
-            }
-            callback(path, data, &node->trim);
-            item = SSF_LL_PREV_ITEM(item);
-        }
-    }
-    path[depth] = NULL;
-    return true;
-}
-
-/* --------------------------------------------------------------------------------------------- */
-/* Iterates a context.                                                                           */
-/* --------------------------------------------------------------------------------------------- */
-bool SSFUBJsonContextIterate(SSFUBJSONContext_t *context, SSFUBJsonIterateFn_t callback,
-                             void *data)
-{
-    char *path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH + 1];
-    uint8_t depth = 0;
-
-    SSF_REQUIRE(context != NULL);
-    SSF_REQUIRE(context->magic == SSF_UBJSON_MAGIC);
-
-    memset(path, 0, sizeof(path));
-    _SSFUBJsonContextIterate(&context->roots[0], path, depth, callback, data);
-    return true;
-}
-
-/* --------------------------------------------------------------------------------------------- */
-/* Deinitializes a parse.                                                                        */
-/* --------------------------------------------------------------------------------------------- */
-static void _SSFUBJsonContextDeInitParse(SSFLL_t *root, uint8_t depth, uint32_t *cnt,
-                                         uint32_t *total)
-{
-    SSFLLItem_t *item;
-    SSFLLItem_t *next;
-
-    if (SSFLLIsInited(root))
-    {
-        item = SSF_LL_TAIL(root);
-        while (item != NULL)
-        {
-            SSFUBJSONNode_t *node;
-
-            node = (SSFUBJSONNode_t *)item;
-            next = SSF_LL_PREV_ITEM(item);
-
-            if (SSFLLIsInited(&node->children))
-            {
-                _SSFUBJsonContextDeInitParse(&node->children, depth, cnt, total);
-            }
-            SSF_LL_FIFO_POP(root, &item);
-            if (node->nameLen > sizeof(void *))
-            {
-                SSFUBJsonFree(cnt, total, node->name, node->nameLen);
-            }
-            if (node->valueLen > sizeof(void *))
-            {
-                SSFUBJsonFree(cnt, total, node->value, node->valueLen);
-            }
-            SSFUBJsonFree(cnt, total, node, sizeof(SSFUBJSONNode_t));
-            item = next;
-        }
-    }
-}
-
-/* --------------------------------------------------------------------------------------------- */
-/* Deinitializes a parse.                                                                        */
-/* --------------------------------------------------------------------------------------------- */
-void SSFUBJsonContextDeInitParse(SSFUBJSONContext_t *context)
-{
-    SSF_REQUIRE(context != NULL);
-    SSF_REQUIRE(context->magic == SSF_UBJSON_MAGIC);
-
-    _SSFUBJsonContextDeInitParse(&context->roots[0], 0, &context->frees, &context->mallocTotal);
-    SSF_ASSERT(context->mallocs == context->frees);
-    SSF_ASSERT(context->mallocTotal == 0);
-}
-
-/* --------------------------------------------------------------------------------------------- */
-/* Deinitializes a context.                                                                      */
-/* --------------------------------------------------------------------------------------------- */
-void SSFUBJsonDeInitContext(SSFUBJSONContext_t *context)
-{
-    SSF_REQUIRE(context != NULL);
-    SSF_REQUIRE(context->magic == SSF_UBJSON_MAGIC);
-
-    SSFUBJsonContextDeInitParse(context);
-    memset(context, 0, sizeof(SSFUBJSONContext_t));
-}
-
-/* --------------------------------------------------------------------------------------------- */
 /* Prints bytes to buffer.                                                                       */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFUBJsonPrintUnescBytes(uint8_t *js, size_t size, size_t start, size_t *end, uint8_t *in,
@@ -1395,127 +1088,3 @@ bool SSFUBJsonPrintUnescBytes(uint8_t *js, size_t size, size_t start, size_t *en
     *end = start;
     return true;
 }
-
-/* --------------------------------------------------------------------------------------------- */
-/* Generates UBJSON from a context.                                                              */
-/* --------------------------------------------------------------------------------------------- */
-static bool _SSFUBJsonContextGenerate(SSFLL_t root, uint8_t *js, size_t size, size_t *start)
-{
-    SSFLLItem_t *item;
-    uint8_t *p;
-    uint8_t len;
-
-    item = SSF_LL_TAIL(&root);
-    while (item != NULL)
-    {
-        SSFUBJSONNode_t *node;
-
-        node = (SSFUBJSONNode_t *)item;
-        if (node->trim) goto trimit;
-        if (node->name != NULL)
-        {
-            if (node->nameLen > sizeof(void *))
-            {
-                p = node->name;
-            }
-            else
-            {
-                p =  (uint8_t *)&node->name;
-            }
-
-            len = node->nameLen;
-            if (!SSFUBJsonPrintUnescBytes(js, size, *start, start, (uint8_t *)"i", 1)) return false;
-            if (!SSFUBJsonPrintUnescBytes(js, size, *start, start, &len, 1)) return false;
-            if (!SSFUBJsonPrintUnescBytes(js, size, *start, start, p, node->nameLen)) return false;
-        }
-        if (node->valueLen > sizeof(void *))
-        {
-            p = node->value;
-        }
-        else
-        {
-            p = (uint8_t *)&node->value;
-        }
-        len = node->valueLen;
-        switch (node->type)
-        {
-        case SSF_UBJSON_TYPE_STRING:
-            if (!SSFUBJsonPrintUnescBytes(js, size, *start, start, (uint8_t *)"Si", 2)) return false;
-            if (!SSFUBJsonPrintUnescBytes(js, size, *start, start, &len, 1)) return false;
-            if (!SSFUBJsonPrintUnescBytes(js, size, *start, start, p, node->valueLen)) return false;
-            break;
-        case SSF_UBJSON_TYPE_NUMBER_INT8:
-            if (!SSFUBJsonPrintUnescBytes(js, size, *start, start, (uint8_t *)"i", 1)) return false;
-            if (!SSFUBJsonPrintUnescBytes(js, size, *start, start, p, node->valueLen)) return false;
-            break;
-        case SSF_UBJSON_TYPE_NUMBER_UINT8:
-            if (!SSFUBJsonPrintUnescBytes(js, size, *start, start, (uint8_t *)"U", 1)) return false;
-            if (!SSFUBJsonPrintUnescBytes(js, size, *start, start, p, node->valueLen)) return false;
-            break;
-        case SSF_UBJSON_TYPE_NUMBER_CHAR:
-            if (!SSFUBJsonPrintUnescBytes(js, size, *start, start, (uint8_t *)"C", 1)) return false;
-            if (!SSFUBJsonPrintUnescBytes(js, size, *start, start, p, node->valueLen)) return false;
-            break;
-        case SSF_UBJSON_TYPE_NUMBER_INT16:
-            if (!SSFUBJsonPrintUnescBytes(js, size, *start, start, (uint8_t *)"I", 1)) return false;
-            if (!SSFUBJsonPrintUnescBytes(js, size, *start, start, p, node->valueLen)) return false;
-            break;
-        case SSF_UBJSON_TYPE_NUMBER_INT32:
-            if (!SSFUBJsonPrintUnescBytes(js, size, *start, start, (uint8_t *)"l", 1)) return false;
-            if (!SSFUBJsonPrintUnescBytes(js, size, *start, start, p, node->valueLen)) return false;
-            break;
-        case SSF_UBJSON_TYPE_NUMBER_INT64:
-            if (!SSFUBJsonPrintUnescBytes(js, size, *start, start, (uint8_t *)"L", 1)) return false;
-            if (!SSFUBJsonPrintUnescBytes(js, size, *start, start, p, node->valueLen)) return false;
-            break;
-        case SSF_UBJSON_TYPE_NUMBER_FLOAT32:
-            SSF_ERROR();
-            break;
-        case SSF_UBJSON_TYPE_NUMBER_FLOAT64:
-            SSF_ERROR();
-            break;
-        case SSF_UBJSON_TYPE_OBJECT:
-            if (!SSFUBJsonPrintUnescBytes(js, size, *start, start, (uint8_t *)"{", 1)) return false;
-            if (!_SSFUBJsonContextGenerate(node->children, js, size, start)) return false;
-            if (!SSFUBJsonPrintUnescBytes(js, size, *start, start, (uint8_t *)"}", 1)) return false;
-            break;
-        case SSF_UBJSON_TYPE_ARRAY:
-            if (!SSFUBJsonPrintUnescBytes(js, size, *start, start, (uint8_t *)"[", 1)) return false;
-            if (!_SSFUBJsonContextGenerate(node->children, js, size, start)) return false;
-            if (!SSFUBJsonPrintUnescBytes(js, size, *start, start, (uint8_t *)"]", 1)) return false;
-            break;
-        case SSF_UBJSON_TYPE_TRUE:
-            if (SSFUBJsonPrintTrue(js, size, *start, start)) return false;
-            break;
-        case SSF_UBJSON_TYPE_FALSE:
-            if (SSFUBJsonPrintFalse(js, size, *start, start)) return false;
-            break;
-        case SSF_UBJSON_TYPE_NULL:
-            if (SSFUBJsonPrintNull(js, size, *start, start)) return false;
-            break;
-        default:
-            SSF_ERROR();
-        }
-    trimit:
-        item = SSF_LL_PREV_ITEM(item);
-    }
-    return true;
-}
-
-/* --------------------------------------------------------------------------------------------- */
-/* Generates UBJSON from a context.                                                              */
-/* --------------------------------------------------------------------------------------------- */
-bool SSFUBJsonContextGenerate(SSFUBJSONContext_t *context, uint8_t *js, size_t size, size_t *jsLen)
-{
-    SSF_REQUIRE(context != NULL);
-    SSF_REQUIRE(context->magic == SSF_UBJSON_MAGIC);
-    SSF_REQUIRE(js != NULL);
-    SSF_REQUIRE(jsLen != NULL);
-
-    *jsLen = 0;
-    if (!SSFUBJsonPrintUnescBytes(js, size, *jsLen, jsLen, (uint8_t *)"{", 1)) return false;
-    if (!_SSFUBJsonContextGenerate(context->roots[0], js, size, jsLen)) return false;
-    if (!SSFUBJsonPrintUnescBytes(js, size, *jsLen, jsLen, (uint8_t *)"}", 1)) return false;
-    return true;
-}
-

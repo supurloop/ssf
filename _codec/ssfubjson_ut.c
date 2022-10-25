@@ -264,46 +264,7 @@ void SSFUBJsonUnitTest(void)
     size_t jsOutStart;
     size_t jsOutEnd;
     uint8_t ubjson[200];
-    SSFUBJSONContext_t context;
     size_t alen;
-
-    memset(&context, 0, sizeof(context));
-    SSF_ASSERT_TEST(SSFUBJsonIsContextInited(NULL));
-    SSF_ASSERT(SSFUBJsonIsContextInited(&context) == false);
-
-    SSF_ASSERT_TEST(SSFUBJsonInitContext(NULL));
-
-    SSF_ASSERT_TEST(SSFUBJsonDeInitContext(NULL));
-    SSF_ASSERT_TEST(SSFUBJsonDeInitContext(&context));
-
-    SSFUBJsonInitContext(&context);
-    SSF_ASSERT_TEST(SSFUBJsonInitContext(&context));
-    SSF_ASSERT(SSFUBJsonIsContextInited(&context));
-    SSFUBJsonDeInitContext(&context);
-    SSF_ASSERT_TEST(SSFUBJsonDeInitContext(&context));
-    SSF_ASSERT(SSFUBJsonIsContextInited(&context) == false);
-
-    SSF_ASSERT_TEST(SSFUBJsonContextInitParse(&context, (uint8_t *)"{}", 2));
-    SSFUBJsonInitContext(&context);
-    SSF_ASSERT_TEST(SSFUBJsonContextInitParse(NULL, (uint8_t*)"{}", 2));
-    SSF_ASSERT_TEST(SSFUBJsonContextInitParse(&context, NULL, 2));
-    SSF_ASSERT_TEST(SSFUBJsonContextInitParse(&context, (uint8_t*)"{}", SSF_UBJSON_CONFIG_MAX_IN_LEN + 1));
-
-    memcpy(ubjson, (uint8_t*)"{i\x01xiXi\x01" "a{i\x01" "b{i\x01" "ciCi\x01" "diDi\x01w{}}i\x01" "eiE}i\x01" "fiFi\x01I[iP{i\x01qiQ}iSiT]i\x08MMMMMMMMSi\x08" "12345678}", 81);
-    SSF_ASSERT(SSFUBJsonContextInitParse(&context, ubjson, 81));
-
-    SSF_ASSERT(SSFUBJsonContextGenerate(&context, jsOut, sizeof(jsOut), &jsOutEnd));
-    SSF_ASSERT(jsOutEnd == 81);
-    SSF_ASSERT(memcmp(jsOut, ubjson, jsOutEnd) == 0);
-
-    SSF_ASSERT_TEST(SSFUBJsonIsValid(NULL, 0));
-    SSFUBJsonContextIterate(&context, MyIterate, NULL);
-
-    SSF_ASSERT(SSFUBJsonContextGenerate(&context, jsOut, sizeof(jsOut), &jsOutEnd));
-    SSF_ASSERT(SSFUBJsonIsValid(jsOut, jsOutEnd));
-
-    SSFUBJsonContextDeInitParse(&context);
-    SSFUBJsonDeInitContext(&context);
 
     /* Parse opt integer arrays */
     memset(path, 0, sizeof(path));

@@ -66,29 +66,9 @@ typedef enum SSFUBJsonType
     SSF_UBJSON_TYPE_MAX,
 } SSFUBJsonType_t;
 
-typedef struct {
-    SSFLL_t roots[SSF_UBJSON_CONFIG_MAX_IN_DEPTH];
-    uint32_t mallocs;
-    uint32_t mallocTotal;
-    uint32_t frees;
-    uint32_t magic;
-} SSFUBJSONContext_t;
-
-/* Context */
-void SSFUBJsonInitContext(SSFUBJSONContext_t *context);
-bool SSFUBJsonIsContextInited(SSFUBJSONContext_t *context);
-void SSFUBJsonDeInitContext(SSFUBJSONContext_t *context);
-bool SSFUBJsonContextInitParse(SSFUBJSONContext_t *context, uint8_t *js, size_t jsLen);
-void SSFUBJsonContextDeInitParse(SSFUBJSONContext_t *context);
-typedef bool (*SSFUBJsonIterateFn_t)(char **path, void *data, bool *trim);
-bool SSFUBJsonContextIterate(SSFUBJSONContext_t *context, SSFUBJsonIterateFn_t callback,
-                             void *data);
-bool SSFUBJsonContextGenerate(SSFUBJSONContext_t *context, uint8_t *js, size_t jsSize,
-                              size_t *jsLen);
-
 /* Parser */
 bool SSFUBJsonIsValid(uint8_t *js, size_t jsLen);
-bool SSFUBJsonObject(SSFUBJSONContext_t *context, uint8_t *js, size_t jsLen, size_t *index,
+bool SSFUBJsonObject(uint8_t *js, size_t jsLen, size_t *index,
                      size_t *start, size_t *end, SSFCStrIn_t *path, uint8_t depth,
                      SSFUBJsonType_t *jt);
 SSFUBJsonType_t SSFUBJsonGetType(uint8_t *js, size_t jsLen, SSFCStrIn_t *path);

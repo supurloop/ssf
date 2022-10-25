@@ -222,26 +222,6 @@ bool _SSFUBJsonPrintFn4(uint8_t* js, size_t size, size_t start, size_t* end, voi
     return true;
 }
 
-bool MyIterate(char ** path, void* data, bool* trim)
-{
-    //uint8_t i;
-
-    SSF_UNUSED(data);
-    SSF_UNUSED(trim);
-    SSF_UNUSED(path);
-
-#if 0    
-    for (i = 0; i < SSF_UBJSON_CONFIG_MAX_IN_DEPTH; i++)
-    {
-        if (path[i] == NULL) break;
-        if (i != 0) printf(".");
-        printf("%s", path[i]);
-    }
-    printf("\b\r\n");
-#endif
-    return true;
-}
-
 /* --------------------------------------------------------------------------------------------- */
 /* ssfubjson unit test.                                                                          */
 /* --------------------------------------------------------------------------------------------- */
@@ -263,7 +243,6 @@ void SSFUBJsonUnitTest(void)
     uint8_t jsOut[128];
     size_t jsOutStart;
     size_t jsOutEnd;
-    uint8_t ubjson[200];
     size_t alen;
 
     /* Parse opt integer arrays */

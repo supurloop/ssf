@@ -411,6 +411,9 @@ enum SSFSMEventList
 #error SSFRS total of SSF_RS_MAX_CHUNK_SIZE + SSF_RS_MAX_SYMBOLS not supported.
 #endif
 
+/* 1 to enable GF_MUL optimization, else 0 to reduce code space. */
+#define SSF_RS_ENABLE_GF_MUL_OPT (1u)
+
 /* --------------------------------------------------------------------------------------------- */
 /* Configure ssftlv interface                                                                    */
 /* --------------------------------------------------------------------------------------------- */

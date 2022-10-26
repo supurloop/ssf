@@ -78,11 +78,17 @@ bool SSFUBJsonGetBase64(uint8_t* js, size_t jsLen, SSFCStrIn_t* path, uint8_t* o
                         size_t* outLen);
 bool SSFUBJsonGetFloat(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, float *out);
 bool SSFUBJsonGetDouble(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, double *out);
-bool SSFUBJsonGetInt8(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, int8_t *out);
-bool SSFUBJsonGetUInt8(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, uint8_t *out);
-bool SSFUBJsonGetInt16(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, int16_t *out);
-bool SSFUBJsonGetInt32(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, int32_t *out);
-bool SSFUBJsonGetInt64(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, int64_t *out);
+
+#define SSFUBJsonGetInt8(js, jsLen, path, out) SSFUBJsonGetInt(js, jsLen, path, out, 1, true)
+#define SSFUBJsonGetUInt8(js, jsLen, path, out) SSFUBJsonGetInt(js, jsLen, path, out, 1, false)
+#define SSFUBJsonGetInt16(js, jsLen, path, out) SSFUBJsonGetInt(js, jsLen, path, out, 2, true)
+#define SSFUBJsonGetUInt16(js, jsLen, path, out) SSFUBJsonGetInt(js, jsLen, path, out, 2, false)
+#define SSFUBJsonGetInt32(js, jsLen, path, out) SSFUBJsonGetInt(js, jsLen, path, out, 4, true)
+#define SSFUBJsonGetUInt32(js, jsLen, path, out) SSFUBJsonGetInt(js, jsLen, path, out, 4, false)
+#define SSFUBJsonGetInt64(js, jsLen, path, out) SSFUBJsonGetInt(js, jsLen, path, out, 8, true)
+#define SSFUBJsonGetUInt64(js, jsLen, path, out) SSFUBJsonGetInt(js, jsLen, path, out, 8, false)
+bool SSFUBJsonGetInt(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, void *out, uint8_t size,
+                     bool isSigned);
 
 /* Generator */
 bool SSFUBJsonPrintUnescChar(uint8_t *js, size_t size, size_t start, size_t *end,

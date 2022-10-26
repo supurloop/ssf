@@ -621,117 +621,140 @@ bool SSFUBJsonGetDouble(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, double *ou
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if found and is converted to int type, else false.                               */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFUBJsonGetInt8(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, int8_t *out)
-{
-    size_t index;
-    size_t start;
-    size_t end;
-    SSFUBJsonType_t jt;
-
-    SSF_REQUIRE(js != NULL);
-    SSF_REQUIRE(path != NULL);
-    SSF_REQUIRE(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH] == NULL);
-    SSF_REQUIRE(out != NULL);
-
-    if (!SSFUBJsonObject(js, jsLen, &index, &start, &end, path, 0, &jt)) return false;
-    if (jt != SSF_UBJSON_TYPE_NUMBER_INT8) return false;
-    if ((end - start) != sizeof(int8_t)) return false;
-    *out = (int8_t)js[start];
-    return true;
-}
-
-/* --------------------------------------------------------------------------------------------- */
-/* Returns true if found and is converted to int type, else false.                               */
-/* --------------------------------------------------------------------------------------------- */
-bool SSFUBJsonGetUInt8(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, uint8_t *out)
-{
-    size_t index;
-    size_t start;
-    size_t end;
-    SSFUBJsonType_t jt;
-
-    SSF_REQUIRE(js != NULL);
-    SSF_REQUIRE(path != NULL);
-    SSF_REQUIRE(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH] == NULL);
-    SSF_REQUIRE(out != NULL);
-
-    if (!SSFUBJsonObject(js, jsLen, &index, &start, &end, path, 0, &jt)) return false;
-    if (jt != SSF_UBJSON_TYPE_NUMBER_UINT8) return false;
-    if ((end - start) != sizeof(uint8_t)) return false;
-    *out = js[start];
-    return true;
-}
-/* --------------------------------------------------------------------------------------------- */
-/* Returns true if found and is converted to int type, else false.                               */
-/* --------------------------------------------------------------------------------------------- */
-bool SSFUBJsonGetInt16(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, int16_t *out)
+static bool _SSFUBJsonGetUInt64(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, int64_t *outi64,
+                                uint64_t *outu64)
 {
     size_t index;
     size_t start;
     size_t end;
     SSFUBJsonType_t jt;
     uint16_t u16;
-
-    SSF_REQUIRE(js != NULL);
-    SSF_REQUIRE(path != NULL);
-    SSF_REQUIRE(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH] == NULL);
-    SSF_REQUIRE(out != NULL);
-
-    if (!SSFUBJsonObject(js, jsLen, &index, &start, &end, path, 0, &jt)) return false;
-    if (jt != SSF_UBJSON_TYPE_NUMBER_INT16) return false;
-    if ((end - start) != sizeof(u16)) return false;
-    memcpy(&u16, &js[start], sizeof(u16));
-    u16 = ntohs(u16);
-    *out = (int16_t)u16;
-    return true;
-}
-
-/* --------------------------------------------------------------------------------------------- */
-/* Returns true if found and is converted to int type, else false.                               */
-/* --------------------------------------------------------------------------------------------- */
-bool SSFUBJsonGetInt32(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, int32_t *out)
-{
-    size_t index;
-    size_t start;
-    size_t end;
-    SSFUBJsonType_t jt;
     uint32_t u32;
+    uint64_t u64;
 
     SSF_REQUIRE(js != NULL);
     SSF_REQUIRE(path != NULL);
     SSF_REQUIRE(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH] == NULL);
-    SSF_REQUIRE(out != NULL);
+    SSF_REQUIRE(outi64 != NULL);
+    SSF_REQUIRE(outu64 != NULL);
 
     if (!SSFUBJsonObject(js, jsLen, &index, &start, &end, path, 0, &jt)) return false;
-    if (jt != SSF_UBJSON_TYPE_NUMBER_INT32) return false;
-    if ((end - start) != sizeof(u32)) return false;
-    memcpy(&u32, &js[start], sizeof(u32));
-    u32 = ntohl(u32);
-    *out = (int32_t)u32;
+    switch (jt)
+    {
+        case SSF_UBJSON_TYPE_NUMBER_INT8:
+            if ((end - start) != sizeof(int8_t)) return false;
+            *outi64 = (int64_t)(int8_t)js[start];
+            *outu64 = (uint64_t)js[start];
+        break;
+        case SSF_UBJSON_TYPE_NUMBER_UINT8:
+            if ((end - start) != sizeof(uint8_t)) return false;
+            *outi64 = (int64_t)(int8_t)js[start];
+            *outu64 = (uint64_t)js[start];
+        break;
+        case SSF_UBJSON_TYPE_NUMBER_INT16:
+            if ((end - start) != sizeof(u16)) return false;
+            memcpy(&u16, &js[start], sizeof(u16));
+            u16 = ntohs(u16);
+            *outi64 = (int64_t)(int16_t)u16;
+            *outu64 = (uint64_t)u16;
+        break;
+        case SSF_UBJSON_TYPE_NUMBER_INT32:
+            if ((end - start) != sizeof(u32)) return false;
+            memcpy(&u32, &js[start], sizeof(u32));
+            u32 = ntohl(u32);
+            *outi64 = (int64_t)(int32_t)u32;
+            *outu64 = (uint64_t)u32;
+        break;
+        case SSF_UBJSON_TYPE_NUMBER_INT64:
+            if ((end - start) != sizeof(u64)) return false;
+            memcpy(&u64, &js[start], sizeof(u64));
+            u64 = ntohll(u64);
+            *outi64 = (int64_t)u64;
+            *outu64 = u64;
+        break;
+        default:
+            return false;
+    }
     return true;
 }
+
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if found and is converted to int type, else false.                               */
+/* Returns true if found and value fits in requested int type, else false.                       */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFUBJsonGetInt64(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, int64_t *out)
+bool SSFUBJsonGetInt(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, void *out, uint8_t size,
+                     bool isSigned)
 {
-    size_t index;
-    size_t start;
-    size_t end;
-    SSFUBJsonType_t jt;
+    int64_t i64;
     uint64_t u64;
 
     SSF_REQUIRE(js != NULL);
     SSF_REQUIRE(path != NULL);
     SSF_REQUIRE(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH] == NULL);
     SSF_REQUIRE(out != NULL);
+    SSF_REQUIRE((size == 1) || (size == 2) || (size == 4) || (size == 8));
 
-    if (!SSFUBJsonObject(js, jsLen, &index, &start, &end, path, 0, &jt)) return false;
-    if (jt != SSF_UBJSON_TYPE_NUMBER_INT64) return false;
-    if ((end - start) != sizeof(u64)) return false;
-    memcpy(&u64, &js[start], sizeof(u64));
-    u64 = ntohll(u64);
-    *out = (int64_t)u64;
+    if (_SSFUBJsonGetUInt64(js, jsLen, path, &i64, &u64) == false) return false;
+    switch (size)
+    {
+    case 1:
+    {
+        if (isSigned)
+        {
+            int8_t *pi8 = (int8_t *)out;
+            if ((i64 < -128) || (i64 > 127)) return false;
+            *pi8 = (int8_t)i64;
+        }
+        else
+        {
+            uint8_t *pu8 = (uint8_t *)out;
+            if (u64 > 255) return false;
+            *pu8 = (uint8_t)u64;
+        }
+    }
+        break;
+    case 2:
+        if (isSigned)
+        {
+            int16_t *pi16 = (int16_t *)out;
+            if ((i64 < -32768) || (i64 > 32767)) return false;
+            *pi16 = (int16_t)i64;
+        }
+        else
+        {
+            uint16_t *pu16 = (uint16_t *)out;
+            if (u64 > 65535) return false;
+            *pu16 = (uint16_t)u64;
+        }
+        break;
+    case 4:
+        if (isSigned)
+        {
+            int32_t *pi32 = (int32_t *)out;
+            if ((i64 < -2147483648) || (i64 > 2147483647)) return false;
+            *pi32 = (int32_t)i64;
+        }
+        else
+        {
+            uint32_t *pu32 = (uint32_t *)out;
+            if (u64 > 4294967295) return false;
+            *pu32 = (uint32_t)u64;
+        }
+        break;
+    case 8:
+        if (isSigned)
+        {
+            int64_t *pi64 = (int64_t *)out;
+            *pi64 = i64;
+        }
+        else
+        {
+            uint64_t *pu64 = (uint64_t *)out;
+            *pu64 = u64;
+        }
+        break;
+    default:
+        SSF_ERROR();
+    }
     return true;
 }
 

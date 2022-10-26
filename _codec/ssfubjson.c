@@ -523,7 +523,6 @@ bool SSFUBJsonGetHex(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, uint8_t *out,
     size_t start;
     size_t end;
     size_t index;
-    size_t len;
     SSFUBJsonType_t jt;
 
     SSF_REQUIRE(js != NULL);
@@ -535,7 +534,6 @@ bool SSFUBJsonGetHex(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, uint8_t *out,
     if (jt != SSF_UBJSON_TYPE_STRING) return false;
     end--;
     index = 0;
-    len = end - start + 1;
     if (outLen != NULL) *outLen = 0;
 
     return SSFHexBytesToBin((SSFCStrIn_t)&js[start], (end - start + 1), out, outSize, outLen, rev);
@@ -550,7 +548,6 @@ bool SSFUBJsonGetBase64(uint8_t* js, size_t jsLen, SSFCStrIn_t* path, uint8_t* o
     size_t start;
     size_t end;
     size_t index;
-    size_t len;
     SSFUBJsonType_t jt;
 
     SSF_REQUIRE(js != NULL);
@@ -562,7 +559,6 @@ bool SSFUBJsonGetBase64(uint8_t* js, size_t jsLen, SSFCStrIn_t* path, uint8_t* o
     if (jt != SSF_UBJSON_TYPE_STRING) return false;
     end--;
     index = 0;
-    len = end - start + 1;
     if (outLen != NULL) *outLen = 0;
 
     return SSFBase64Decode((SSFCStrIn_t)&js[start], (end - start + 1), out, outSize, outLen);

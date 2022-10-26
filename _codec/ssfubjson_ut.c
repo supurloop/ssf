@@ -564,7 +564,7 @@ void SSFUBJsonUnitTest(void)
     SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nl\xff\xff\x80\x00}", 10, (SSFCStrIn_t *)path, &outI32));
     SSF_ASSERT(outI32 == -32768);
     SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nl\x80\x00\x00\x00}", 10, (SSFCStrIn_t *)path, &outI32));
-    SSF_ASSERT(outI32 == -2147483648);
+    SSF_ASSERT(outI32 == -2147483648ll);
     SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nl\x7f\xff\xff\xff}", 10, (SSFCStrIn_t *)path, &outI32));
     SSF_ASSERT(outI32 == 2147483647);
     SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nl\xff\xff\x7f\xff}", 10, (SSFCStrIn_t *)path, &outI32));
@@ -592,7 +592,7 @@ void SSFUBJsonUnitTest(void)
     SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\x7f\xff}", 14, (SSFCStrIn_t *)path, &outI32));
     SSF_ASSERT(outI32 == -32769);
     SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nL\xff\xff\xff\xff\x80\x00\x00\x00}", 14, (SSFCStrIn_t *)path, &outI32));
-    SSF_ASSERT(outI32 == -2147483648);
+    SSF_ASSERT(outI32 == -2147483648ll);
     SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nL\xff\xff\xff\xff\x7f\xff\xff\xff}", 14, (SSFCStrIn_t *)path, &outI32) == false);
     SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x7f\xff\xff\xff}", 14, (SSFCStrIn_t *)path, &outI32));
     SSF_ASSERT(outI32 == 2147483647);
@@ -726,7 +726,7 @@ void SSFUBJsonUnitTest(void)
     SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nl\xff\xff\x80\x00}", 10, (SSFCStrIn_t *)path, &outI64));
     SSF_ASSERT(outI64 == -32768);
     SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nl\x80\x00\x00\x00}", 10, (SSFCStrIn_t *)path, &outI64));
-    SSF_ASSERT(outI64 == -2147483648);
+    SSF_ASSERT(outI64 == -2147483648ll);
     SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nl\x7f\xff\xff\xff}", 10, (SSFCStrIn_t *)path, &outI64));
     SSF_ASSERT(outI64 == 2147483647);
     SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nl\xff\xff\x7f\xff}", 10, (SSFCStrIn_t *)path, &outI64));
@@ -754,7 +754,7 @@ void SSFUBJsonUnitTest(void)
     SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\x7f\xff}", 14, (SSFCStrIn_t *)path, &outI64));
     SSF_ASSERT(outI64 == -32769);
     SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nL\xff\xff\xff\xff\x80\x00\x00\x00}", 14, (SSFCStrIn_t *)path, &outI64));
-    SSF_ASSERT(outI64 == -2147483648);
+    SSF_ASSERT(outI64 == -2147483648ll);
     SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nL\xff\xff\xff\xff\x7f\xff\xff\xff}", 14, (SSFCStrIn_t *)path, &outI64));
     SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x7f\xff\xff\xff}", 14, (SSFCStrIn_t *)path, &outI64));
     SSF_ASSERT(outI64 == 2147483647);

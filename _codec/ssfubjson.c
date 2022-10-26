@@ -730,7 +730,7 @@ bool SSFUBJsonGetInt(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, void *out, ui
         if (isSigned)
         {
             int32_t *pi32 = (int32_t *)out;
-            if ((i64 < -2147483648) || (i64 > 2147483647)) return false;
+            if ((i64 < -2147483648ll) || (i64 > 2147483647)) return false;
             *pi32 = (int32_t)i64;
         }
         else

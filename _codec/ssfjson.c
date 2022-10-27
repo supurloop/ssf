@@ -697,7 +697,7 @@ bool SSFJsonPrintDouble(SSFCStrOut_t js, size_t size, size_t start, size_t *end,
     SSF_REQUIRE(js != NULL);
     SSF_REQUIRE(start <= size);
     SSF_REQUIRE(end != NULL);
-    SSF_REQUIRE((fmt >= 0) && (fmt < SSF_JSON_FLT_FMT_MAX));
+    SSF_REQUIRE(fmt < SSF_JSON_FLT_FMT_MAX);
     SSF_REQUIRE((comma == NULL) || (comma != (bool *)true));
 
     SSF_JSON_COMMA(comma);

@@ -587,12 +587,12 @@ bool SSFJsonPrintCString(SSFCStrOut_t js, size_t size, size_t start, size_t *end
         {js[start] = *in; } /* Normal ASCII character */
         else
         {
-            if (start + 6 >= size) return false;
+            if ((start + 6) >= size) return false;
             js[start] = '\\'; start++;
             js[start] = 'u'; start++;
             js[start] = '0'; start++;
             js[start] = '0'; start++;
-            snprintf(&js[start], 3, "%02X", (uint8_t)*in);
+            snprintf(&js[start], 2, "%02X", (uint8_t)*in);
             start++;
         }
         if (*in == 0)

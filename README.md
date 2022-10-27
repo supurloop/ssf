@@ -31,8 +31,7 @@ The framework implements a number of common embedded system functions:
 16. A version controlled interface for reliably storing configuration to NV storage.
 17. A cryptograpically secure capable pseudo random number generator (PRNG).
 18. A INI parser/generator interface.
-19. An Experimental Universal Binary JSON (UBJSON) parser/generator interface.
-20. A Universal Binary JSON parser/generator interface.
+19. A Universal Binary JSON parser/generator interface.
 
 To give you an idea of the framework size here are some program memory estimates for each component compiled on an MSP430 with Level 3 optimization:
 Byte FIFO, linked list, memory pool, Base64, Hex ASCII are each about 1000 bytes.

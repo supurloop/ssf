@@ -82,6 +82,12 @@ void SSFHexUnitTest(void)
                                      false, SSF_HEX_CASE_LOWER));
     SSF_ASSERT_TEST(SSFHexBinToBytes(_hexUTPass[0].bin, _hexUTPass[0].binlen, NULL,
                                      sizeof(hexout), &outlen, false, SSF_HEX_CASE_LOWER));
+    SSF_ASSERT_TEST(SSFHexBinToBytes(_hexUTPass[0].bin, _hexUTPass[0].binlen, hexout,
+                                     0, &outlen, false, SSF_HEX_CASE_LOWER));
+    SSF_ASSERT_TEST(SSFHexBinToBytes(_hexUTPass[0].bin, _hexUTPass[0].binlen, hexout,
+                                     sizeof(hexout), &outlen, false, SSF_HEX_CASE_MIN));
+    SSF_ASSERT_TEST(SSFHexBinToBytes(_hexUTPass[0].bin, _hexUTPass[0].binlen, hexout,
+                                     sizeof(hexout), &outlen, false, SSF_HEX_CASE_MAX));
 
     for (i = 0; i <= 1; i++)
     {

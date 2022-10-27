@@ -51,8 +51,9 @@ extern "C" {
 /* --------------------------------------------------------------------------------------------- */
 /* Defines                                                                                       */
 /* --------------------------------------------------------------------------------------------- */
-typedef enum SSFJsonType
+typedef enum
 {
+    SSF_JSON_TYPE_MIN = -1,
     SSF_JSON_TYPE_ERROR,
     SSF_JSON_TYPE_STRING,
     SSF_JSON_TYPE_NUMBER,
@@ -65,8 +66,9 @@ typedef enum SSFJsonType
 } SSFJsonType_t;
 
 #if SSF_JSON_CONFIG_ENABLE_FLOAT_GEN == 1
-typedef enum SSFJsonFltFmt
+typedef enum
 {
+    SSF_JSON_FLT_FMT_MIN = -1,
     SSF_JSON_FLT_FMT_PREC_0,
     SSF_JSON_FLT_FMT_PREC_1,
     SSF_JSON_FLT_FMT_PREC_2,

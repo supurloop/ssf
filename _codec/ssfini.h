@@ -45,6 +45,7 @@ extern "C" {
 /* --------------------------------------------------------------------------------------------- */
 typedef enum
 {
+    SSF_INI_LINE_ENDING_MIN = -1,
     SSF_INI_LF,
     SSF_INI_CRLF,
     SSF_INI_LINE_ENDING_MAX,
@@ -52,6 +53,7 @@ typedef enum
 
 typedef enum
 {
+    SSF_INI_BOOL_MIN = -1,
     SSF_INI_BOOL_1_0,
     SSF_INI_BOOL_YES_NO,
     SSF_INI_BOOL_ON_OFF,
@@ -61,6 +63,7 @@ typedef enum
 
 typedef enum
 {
+    SSF_INI_COMMENT_MIN = -1,
     SSF_INI_COMMENT_SEMI,
     SSF_INI_COMMENT_HASH,
     SSF_INI_COMMENT_NONE,

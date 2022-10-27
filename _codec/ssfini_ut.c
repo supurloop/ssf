@@ -443,8 +443,10 @@ void SSFINIUnitTest(void)
     SSF_ASSERT_TEST(SSFINIPrintComment("ini", 0, &iniLen, "text", SSF_INI_COMMENT_SEMI, SSF_INI_LF));
     SSF_ASSERT_TEST(SSFINIPrintComment("ini", 4, NULL, "text", SSF_INI_COMMENT_SEMI, SSF_INI_LF));
     SSF_ASSERT_TEST(SSFINIPrintComment("ini", 4, &iniLen, NULL, SSF_INI_COMMENT_SEMI, SSF_INI_LF));
+    SSF_ASSERT_TEST(SSFINIPrintComment("ini", 4, &iniLen, "text", SSF_INI_COMMENT_MIN, SSF_INI_LF));
     SSF_ASSERT_TEST(SSFINIPrintComment("ini", 4, &iniLen, "text", SSF_INI_COMMENT_MAX, SSF_INI_LF));
     SSF_ASSERT_TEST(SSFINIPrintComment("ini", 4, &iniLen, "text", SSF_INI_COMMENT_MAX + 1, SSF_INI_LF));
+    SSF_ASSERT_TEST(SSFINIPrintComment("ini", 4, &iniLen, "text", SSF_INI_COMMENT_SEMI, SSF_INI_LINE_ENDING_MIN));
     SSF_ASSERT_TEST(SSFINIPrintComment("ini", 4, &iniLen, "text", SSF_INI_COMMENT_SEMI, SSF_INI_LINE_ENDING_MAX));
     SSF_ASSERT_TEST(SSFINIPrintComment("ini", 4, &iniLen, "text", SSF_INI_COMMENT_SEMI, SSF_INI_LINE_ENDING_MAX + 1));
     SSF_ASSERT_TEST(SSFINIPrintSection(NULL, 4, &iniLen, "section", SSF_INI_LF));
@@ -452,6 +454,7 @@ void SSFINIUnitTest(void)
     SSF_ASSERT_TEST(SSFINIPrintSection("ini", 4, NULL, "section", SSF_INI_LF));
     SSF_ASSERT_TEST(SSFINIPrintSection("ini", 4, &iniLen, "", SSF_INI_LF));
     SSF_ASSERT_TEST(SSFINIPrintSection("ini", 4, &iniLen, NULL, SSF_INI_LF));
+    SSF_ASSERT_TEST(SSFINIPrintSection("ini", 4, &iniLen, "section", SSF_INI_LINE_ENDING_MIN));
     SSF_ASSERT_TEST(SSFINIPrintSection("ini", 4, &iniLen, "section", SSF_INI_LINE_ENDING_MAX));
     SSF_ASSERT_TEST(SSFINIPrintSection("ini", 4, &iniLen, "section", SSF_INI_LINE_ENDING_MAX + 1));
     SSF_ASSERT_TEST(SSFINIPrintNameStrValue(NULL, 4, &iniLen, "name", "value", SSF_INI_LF));
@@ -460,6 +463,7 @@ void SSFINIUnitTest(void)
     SSF_ASSERT_TEST(SSFINIPrintNameStrValue("ini", 4, &iniLen, "", "value", SSF_INI_LF));
     SSF_ASSERT_TEST(SSFINIPrintNameStrValue("ini", 4, &iniLen, NULL, "value", SSF_INI_LF));
     SSF_ASSERT_TEST(SSFINIPrintNameStrValue("ini", 4, &iniLen, "name", NULL, SSF_INI_LF));
+    SSF_ASSERT_TEST(SSFINIPrintNameStrValue("ini", 4, &iniLen, "name", "value", SSF_INI_LINE_ENDING_MIN));
     SSF_ASSERT_TEST(SSFINIPrintNameStrValue("ini", 4, &iniLen, "name", "value", SSF_INI_LINE_ENDING_MAX));
     SSF_ASSERT_TEST(SSFINIPrintNameStrValue("ini", 4, &iniLen, "name", "value", SSF_INI_LINE_ENDING_MAX + 1));
     SSF_ASSERT_TEST(SSFINIPrintNameBoolValue(NULL, 4, &iniLen, "name", true, SSF_INI_BOOL_1_0, SSF_INI_LF));
@@ -467,8 +471,11 @@ void SSFINIUnitTest(void)
     SSF_ASSERT_TEST(SSFINIPrintNameBoolValue("ini", 4, NULL, "name", true, SSF_INI_BOOL_1_0, SSF_INI_LF));
     SSF_ASSERT_TEST(SSFINIPrintNameBoolValue("ini", 4, &iniLen, "", true, SSF_INI_BOOL_1_0, SSF_INI_LF));
     SSF_ASSERT_TEST(SSFINIPrintNameBoolValue("ini", 4, &iniLen, NULL, true, SSF_INI_BOOL_1_0, SSF_INI_LF));
+    SSF_ASSERT_TEST(SSFINIPrintNameBoolValue("ini", 4, &iniLen, "name", true, SSF_INI_BOOL_MIN, SSF_INI_LF));
+    SSF_ASSERT_TEST(SSFINIPrintNameBoolValue("ini", 4, &iniLen, "name", true, SSF_INI_BOOL_MIN, SSF_INI_LF));
     SSF_ASSERT_TEST(SSFINIPrintNameBoolValue("ini", 4, &iniLen, "name", true, SSF_INI_BOOL_MAX, SSF_INI_LF));
     SSF_ASSERT_TEST(SSFINIPrintNameBoolValue("ini", 4, &iniLen, "name", true, SSF_INI_BOOL_MAX + 1, SSF_INI_LF));
+    SSF_ASSERT_TEST(SSFINIPrintNameBoolValue("ini", 4, &iniLen, "name", true, SSF_INI_BOOL_1_0, SSF_INI_LINE_ENDING_MIN));
     SSF_ASSERT_TEST(SSFINIPrintNameBoolValue("ini", 4, &iniLen, "name", true, SSF_INI_BOOL_1_0, SSF_INI_LINE_ENDING_MAX));
     SSF_ASSERT_TEST(SSFINIPrintNameBoolValue("ini", 4, &iniLen, "name", true, SSF_INI_BOOL_1_0, SSF_INI_LINE_ENDING_MAX + 1));
     SSF_ASSERT_TEST(SSFINIPrintNameLongValue(NULL, 4, &iniLen, "name", 0, SSF_INI_LF));
@@ -476,6 +483,7 @@ void SSFINIUnitTest(void)
     SSF_ASSERT_TEST(SSFINIPrintNameLongValue("ini", 4, NULL, "name", 0, SSF_INI_LF));
     SSF_ASSERT_TEST(SSFINIPrintNameLongValue("ini", 4, &iniLen, "", 0, SSF_INI_LF));
     SSF_ASSERT_TEST(SSFINIPrintNameLongValue("ini", 4, &iniLen, NULL, 0, SSF_INI_LF));
+    SSF_ASSERT_TEST(SSFINIPrintNameLongValue("ini", 4, &iniLen, "name", 0, SSF_INI_LINE_ENDING_MIN));
     SSF_ASSERT_TEST(SSFINIPrintNameLongValue("ini", 4, &iniLen, "name", 0, SSF_INI_LINE_ENDING_MAX));
     SSF_ASSERT_TEST(SSFINIPrintNameLongValue("ini", 4, &iniLen, "name", 0, SSF_INI_LINE_ENDING_MAX + 1));
 

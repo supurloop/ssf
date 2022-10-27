@@ -335,16 +335,18 @@ extern pthread_mutex_t gssfsmWakeMutex;
 #define SSF_SM_MAX_ACTIVE_TIMERS (3u)
 
 /* Defines the state machine identifers. */
-enum SSFSMList
+typedef enum
 {
+    SSF_SM_MIN = -1,
     SSF_SM_UNIT_TEST_1,
     SSF_SM_UNIT_TEST_2,
-    SSF_SM_END
-};
+    SSF_SM_MAX
+} SSFSMList_t;
 
 /* Defines the event identifiers for all state machines. */
-enum SSFSMEventList
+typedef enum
 {
+    SSF_SM_EVENT_MIN = -1,
     SSF_SM_EVENT_ENTRY,
     SSF_SM_EVENT_EXIT,
 #if SSF_CONFIG_SM_UNIT_TEST == 1
@@ -355,8 +357,8 @@ enum SSFSMEventList
     SSF_SM_EVENT_UTX_1,
     SSF_SM_EVENT_UTX_2,
 #endif /* SSF_CONFIG_SM_UNIT_TEST */
-    SSF_SM_EVENT_END
-};
+    SSF_SM_EVENT_MAX
+} SSFSMEventList_t;
 
 /* --------------------------------------------------------------------------------------------- */
 /* Configure ssfrs's Reed-Solomon interface                                                      */

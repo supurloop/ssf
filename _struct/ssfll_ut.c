@@ -193,6 +193,7 @@ void SSFLLUnitTest(void)
 
     SSF_ASSERT_TEST(SSFLLPutItem(NULL, (SSFLLItem_t *)&_sllItems[0], SSF_LL_LOC_HEAD, NULL));
     SSF_ASSERT_TEST(SSFLLPutItem(&_sllTest, NULL, SSF_LL_LOC_HEAD, NULL));
+    SSF_ASSERT_TEST(SSFLLPutItem(&_sllTest, (SSFLLItem_t *)&_sllItems[0], SSF_LL_LOC_MIN, NULL));
     SSF_ASSERT_TEST(SSFLLPutItem(&_sllTest, (SSFLLItem_t *)&_sllItems[0], SSF_LL_LOC_MAX, NULL));
     SSF_ASSERT_TEST(SSFLLPutItem(&_sllTest, (SSFLLItem_t *)&_sllItems[0], SSF_LL_LOC_HEAD,
                                  (SSFLLItem_t *)&_sllItems[0]));
@@ -201,6 +202,7 @@ void SSFLLUnitTest(void)
 
     SSF_ASSERT_TEST(SSFLLGetItem(NULL, (SSFLLItem_t **)&outItem, SSF_LL_LOC_HEAD, NULL));
     SSF_ASSERT_TEST(SSFLLGetItem(&_sllTest, NULL, SSF_LL_LOC_HEAD, NULL));
+    SSF_ASSERT_TEST(SSFLLGetItem(&_sllTest, (SSFLLItem_t **)&outItem, SSF_LL_LOC_MIN, NULL));
     SSF_ASSERT_TEST(SSFLLGetItem(&_sllTest, (SSFLLItem_t **)&outItem, SSF_LL_LOC_MAX, NULL));
     SSF_ASSERT_TEST(SSFLLGetItem(&_sllTest, (SSFLLItem_t **)&outItem, SSF_LL_LOC_HEAD,
                                  (SSFLLItem_t *)&_sllItems[0]));

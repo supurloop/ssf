@@ -119,7 +119,7 @@ bool SSFHexBinToBytes(const uint8_t *in, size_t inLen, SSFCStrOut_t out, size_t 
     SSF_REQUIRE(in != NULL);
     SSF_REQUIRE(out != NULL);
     SSF_REQUIRE(outSize >= 1);
-    SSF_REQUIRE(hcase < SSF_HEX_CASE_MAX);
+    SSF_REQUIRE((hcase > SSF_HEX_CASE_MIN) && (hcase < SSF_HEX_CASE_MAX));
 
     *out = 0;
     if (outLen != NULL) *outLen = 0;

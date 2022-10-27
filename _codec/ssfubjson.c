@@ -479,6 +479,7 @@ SSFUBJsonType_t SSFUBJsonGetType(uint8_t *js, size_t jsLen, SSFCStrIn_t *path)
     if (!_SSFUBJsonObject(js, jsLen, &index, &start, &end, path, 0, &jt))
     { jt = SSF_UBJSON_TYPE_ERROR; }
 
+    SSF_ENSURE((jt > SSF_UBJSON_TYPE_MIN) && (jt < SSF_UBJSON_TYPE_MAX));
     return jt;
 }
 

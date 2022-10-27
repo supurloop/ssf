@@ -43,8 +43,8 @@ extern "C" {
 /* --------------------------------------------------------------------------------------------- */
 /* Defines                                                                                       */
 /* --------------------------------------------------------------------------------------------- */
-typedef uint8_t SSFSMId_t;
-typedef uint8_t SSFSMEventId_t;
+typedef int8_t SSFSMId_t;
+typedef int16_t SSFSMEventId_t;
 typedef uint8_t SSFSMData_t;
 typedef uint16_t SSFSMDataLen_t;
 typedef SSFPortTick_t SSFSMTimeout_t;

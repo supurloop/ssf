@@ -64,8 +64,8 @@ typedef struct SSFSMTimer
 /* --------------------------------------------------------------------------------------------- */
 /* Module variables                                                                              */
 /* --------------------------------------------------------------------------------------------- */
-static SSFSMState_t _SSFSMStates[SSF_SM_END];
-static SSFSMId_t _ssfsmActive = SSF_SM_END;
+static SSFSMState_t _SSFSMStates[SSF_SM_MAX];
+static SSFSMId_t _ssfsmActive = SSF_SM_MAX;
 static SSFSMId_t _ssfsmIsEntryExit;
 static SSFMPool_t _ssfsmEventPool;
 static SSFMPool_t _ssfsmTimerPool;
@@ -101,7 +101,7 @@ static void _SSFSMStopAllTimers(void)
     SSFLLItem_t *next;
     SSFSMTimer_t t;
 
-    SSF_ASSERT(_ssfsmActive < SSF_SM_END);
+    SSF_ASSERT((_ssfsmActive > SSF_SM_MIN) && (_ssfsmActive < SSF_SM_MAX));
 
     item = SSF_LL_HEAD(&_ssfsmTimers);
     while (item != NULL)
@@ -129,7 +129,7 @@ static SSFLLItem_t *_SSFSMFindTimer(SSFSMEventId_t eid)
     SSFLLItem_t *next;
     SSFSMTimer_t t;
 
-    SSF_ASSERT(_ssfsmActive < SSF_SM_END);
+    SSF_ASSERT((_ssfsmActive > SSF_SM_MIN) && (_ssfsmActive < SSF_SM_MAX));
 
     item = SSF_LL_HEAD(&_ssfsmTimers);
     while (item != NULL)
@@ -161,7 +161,7 @@ static void _SSFSMProcessEvent(SSFSMId_t smid, SSFSMEventId_t eid, const SSFSMDa
         _SSFSMStates[_ssfsmActive].current(SSF_SM_EVENT_ENTRY, NULL, 0);
         _ssfsmIsEntryExit = false;
     }
-    _ssfsmActive = SSF_SM_END;
+    _ssfsmActive = SSF_SM_MAX;
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -255,7 +255,7 @@ void SSFSMDeInit(void)
     SSFMPoolDeInit(&_ssfsmEventPool);
 
     memset(_SSFSMStates, 0, sizeof(_SSFSMStates));
-    _ssfsmActive = SSF_SM_END;
+    _ssfsmActive = SSF_SM_MAX;
     _ssfsmIsEntryExit = false;
     SSF_ASSERT(_ssfsmMallocs == _ssfsmFrees);
     _ssfsmMallocs = 0;
@@ -267,7 +267,7 @@ void SSFSMDeInit(void)
 /* --------------------------------------------------------------------------------------------- */
 void SSFSMInitHandler(SSFSMId_t smid, SSFSMHandler_t initial)
 {
-    SSF_REQUIRE(smid < SSF_SM_END);
+    SSF_REQUIRE((smid > SSF_SM_MIN) && (smid < SSF_SM_MAX));
     SSF_REQUIRE(initial != NULL);
     SSF_ASSERT(_ssfsmIsInited);
 
@@ -275,7 +275,7 @@ void SSFSMInitHandler(SSFSMId_t smid, SSFSMHandler_t initial)
     _ssfsmActive = smid;
     _ssfsmIsEntryExit = true;
     _SSFSMStates[smid].current(SSF_SM_EVENT_ENTRY, NULL, 0);
-    _ssfsmActive = SSF_SM_END;
+    _ssfsmActive = SSF_SM_MAX;
     _ssfsmIsEntryExit = false;
 }
 
@@ -287,15 +287,16 @@ void SSFSMPutEventData(SSFSMId_t smid, SSFSMEventId_t eid, const SSFSMData_t *da
 {
     SSFSMEvent_t *e;
 
-    SSF_REQUIRE(smid < SSF_SM_END);
-    SSF_REQUIRE((eid > SSF_SM_EVENT_EXIT) && (eid < SSF_SM_EVENT_END));
+    SSF_REQUIRE((smid > SSF_SM_MIN) && (smid < SSF_SM_MAX));
+    SSF_REQUIRE((eid > SSF_SM_EVENT_EXIT) && (eid > SSF_SM_EVENT_MIN) && (eid < SSF_SM_EVENT_MAX));
     SSF_REQUIRE(((data == NULL) && (dataLen == 0)) || ((data != NULL) && (dataLen > 0)));
     SSF_ASSERT(_ssfsmIsInited);
     SSF_ASSERT(_SSFSMStates[smid].current != NULL);
 
 #if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 0
     /* In state handler or there are pending events? */
-    if ((_ssfsmActive < SSF_SM_END) || (SSFLLIsEmpty(&_ssfsmEvents) == false))
+    if (((_ssfsmActive > SSF_SM_MIN) && (_ssfsmActive < SSF_SM_MAX)) ||
+        (SSFLLIsEmpty(&_ssfsmEvents) == false))
     {
 #endif
 #if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
@@ -321,7 +322,7 @@ void SSFSMPutEventData(SSFSMId_t smid, SSFSMEventId_t eid, const SSFSMData_t *da
 void SSFSMTran(SSFSMHandler_t next)
 {
     SSF_REQUIRE(next != NULL);
-    SSF_ASSERT(_ssfsmActive < SSF_SM_END);
+    SSF_ASSERT((_ssfsmActive > SSF_SM_MIN) && (_ssfsmActive < SSF_SM_MAX));
     SSF_REQUIRE(next != _SSFSMStates[_ssfsmActive].current);
     SSF_ASSERT(_SSFSMStates[_ssfsmActive].next == NULL);
     SSF_ASSERT(_ssfsmIsEntryExit == false);
@@ -340,9 +341,9 @@ void SSFSMStartTimerData(SSFSMEventId_t eid, SSFSMTimeout_t interval, const SSFS
     SSFSMTimer_t t;
     SSFSMTimer_t *tp;
 
-    SSF_REQUIRE((eid > SSF_SM_EVENT_EXIT) && (eid < SSF_SM_EVENT_END));
+    SSF_REQUIRE((eid > SSF_SM_EVENT_EXIT) && (eid > SSF_SM_EVENT_MIN) && (eid < SSF_SM_EVENT_MAX));
     SSF_REQUIRE(((data == NULL) && (dataLen == 0)) || ((data != NULL) && (dataLen > 0)));
-    SSF_ASSERT(_ssfsmActive < SSF_SM_END);
+    SSF_ASSERT((_ssfsmActive > SSF_SM_MIN) && (_ssfsmActive < SSF_SM_MAX));
     SSF_ASSERT(_ssfsmIsInited);
 
     /* Does timer already exist? */
@@ -376,7 +377,7 @@ void SSFSMStopTimer(SSFSMEventId_t eid)
     SSFLLItem_t *item;
     SSFSMTimer_t t;
 
-    SSF_ASSERT(_ssfsmActive < SSF_SM_END);
+    SSF_ASSERT((_ssfsmActive > SSF_SM_MIN) && (_ssfsmActive < SSF_SM_MAX));
     SSF_ASSERT(_ssfsmIsInited);
 
     item = _SSFSMFindTimer(eid);
@@ -404,7 +405,7 @@ bool SSFSMTask(SSFSMTimeout_t *nextTimeout)
     SSFSMTimeout_t current = SSFPortGetTick64();
     bool retVal;
 
-    SSF_ASSERT(_ssfsmActive >= SSF_SM_END);
+    SSF_ASSERT(_ssfsmActive >= SSF_SM_MAX);
     SSF_ASSERT(_ssfsmIsInited);
 
 #if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1

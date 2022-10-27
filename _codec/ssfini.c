@@ -487,8 +487,8 @@ bool SSFINIPrintComment(SSFCStrOut_t ini, size_t iniSize, size_t *iniLen, SSFCSt
     SSF_REQUIRE(iniSize > 0);
     SSF_REQUIRE(iniLen != NULL);
     SSF_REQUIRE(text != NULL);
-    SSF_REQUIRE(commentType < SSF_INI_COMMENT_MAX);
-    SSF_REQUIRE(lineEnding < SSF_INI_LINE_ENDING_MAX);
+    SSF_REQUIRE((commentType > SSF_INI_COMMENT_MIN) && (commentType < SSF_INI_COMMENT_MAX));
+    SSF_REQUIRE((lineEnding > SSF_INI_LINE_ENDING_MIN) && (lineEnding < SSF_INI_LINE_ENDING_MAX));
 
     /* Is there any room in ini to add antything else? */
     if ((iniSize - 1) <= *iniLen) return false;
@@ -538,7 +538,7 @@ bool SSFINIPrintSection(SSFCStrOut_t ini, size_t iniSize, size_t* iniLen, SSFCSt
     SSF_REQUIRE(section != NULL);
     sectionLen = strlen(section);
     SSF_REQUIRE(sectionLen > 0);
-    SSF_REQUIRE(lineEnding < SSF_INI_LINE_ENDING_MAX);
+    SSF_REQUIRE((lineEnding > SSF_INI_LINE_ENDING_MIN) && (lineEnding < SSF_INI_LINE_ENDING_MAX));
 
     /* Is there any room in ini to add anything else? */
     if ((iniSize - 1) <= *iniLen) return false;
@@ -587,7 +587,7 @@ bool SSFINIPrintNameStrValue(SSFCStrOut_t ini, size_t iniSize, size_t* iniLen, S
     nameLen = strlen(name);
     SSF_REQUIRE(nameLen > 0);
     SSF_REQUIRE(value != NULL);
-    SSF_REQUIRE(lineEnding < SSF_INI_LINE_ENDING_MAX);
+    SSF_REQUIRE((lineEnding > SSF_INI_LINE_ENDING_MIN) && (lineEnding < SSF_INI_LINE_ENDING_MAX));
 
     /* Is there any room in ini to add antything else? */
     if ((iniSize - 1) <= *iniLen) return false;
@@ -626,7 +626,7 @@ bool SSFINIPrintNameBoolValue(SSFCStrOut_t ini, size_t iniSize, size_t* iniLen, 
                               bool value, SSFINIBool_t boolType, SSFINILineEnd_t lineEnding)
 {
     char *bstr = NULL;
-    SSF_REQUIRE(boolType < SSF_INI_BOOL_MAX);
+    SSF_REQUIRE((boolType > SSF_INI_BOOL_MIN) && (boolType < SSF_INI_BOOL_MAX));
     
     /* Convert boolean value to requested string type */
     switch (boolType)

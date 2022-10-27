@@ -1,4 +1,5 @@
 # ssf
+
 Small System Framework
 
 A collection of production ready software for small memory embedded systems.
@@ -6,30 +7,32 @@ A collection of production ready software for small memory embedded systems.
 ## Overview
 
 This code framework was designed:
-  1. To run on embedded systems that have constrained program and data memories.
-  2. To minimize the potential for common coding errors and detect and report runtime errors.
+
+1. To run on embedded systems that have constrained program and data memories.
+2. To minimize the potential for common coding errors and detect and report runtime errors.
 
 The framework implements a number of common embedded system functions:
-  1. An efficient byte FIFO interface.
-  2. A linked list interface, supporting FIFO and STACK behaviors.
-  3. A memory pool interface.
-  4. A Base64 encoder/decoder interface.
-  5. A Binary to Hex ASCII encoder/decoder interface.
-  6. A JSON parser/generator interface.
-  7. A 16-bit Fletcher checksum interface.
-  8. A finite state machine framework.
-  9. A Reed-Solomon FEC encoder/decoder interface.
-  10. A 16-bit XMODEM/CCITT-16 CRC interface.
-  11. A 32-bit CCITT-32 CRC interface.
-  12. A SHA-2 hash interface.
-  13. A TLV encoder/decoder interface.
-  14. An AES block encryption interface.
-  15. An AES-GCM authenticated encryption interface.
-  16. A version controlled interface for reliably storing configuration to NV storage.
-  17. A cryptograpically secure capable pseudo random number generator (PRNG).
-  18. A INI parser/generator interface.
-  19. An Experimental Universal Binary JSON (UBJSON) parser/generator interface.
-  20. A Universal Binary JSON parser/generator interface.
+
+1. An efficient byte FIFO interface.
+2. A linked list interface, supporting FIFO and STACK behaviors.
+3. A memory pool interface.
+4. A Base64 encoder/decoder interface.
+5. A Binary to Hex ASCII encoder/decoder interface.
+6. A JSON parser/generator interface.
+7. A 16-bit Fletcher checksum interface.
+8. A finite state machine framework.
+9. A Reed-Solomon FEC encoder/decoder interface.
+10. A 16-bit XMODEM/CCITT-16 CRC interface.
+11. A 32-bit CCITT-32 CRC interface.
+12. A SHA-2 hash interface.
+13. A TLV encoder/decoder interface.
+14. An AES block encryption interface.
+15. An AES-GCM authenticated encryption interface.
+16. A version controlled interface for reliably storing configuration to NV storage.
+17. A cryptograpically secure capable pseudo random number generator (PRNG).
+18. A INI parser/generator interface.
+19. An Experimental Universal Binary JSON (UBJSON) parser/generator interface.
+20. A Universal Binary JSON parser/generator interface.
 
 To give you an idea of the framework size here are some program memory estimates for each component compiled on an MSP430 with Level 3 optimization:
 Byte FIFO, linked list, memory pool, Base64, Hex ASCII are each about 1000 bytes.
@@ -51,20 +54,22 @@ The code will compile cleanly under Linux. ./build.sh will create the ssf execut
 The code will compile cleanly under OS X. ./build-osx.sh will create the ssf executable in the source directory.
 
 For other platforms there are only a few essential tasks that must be completed:
-  - Copy all the SSF C and H source files, except main.c, into your project sources and add them to your build environment.
-  - In ssfport.h make sure SSF_TICKS_PER_SEC is set to the number of system ticks per second on your platform.
-  - Map SSFPortGetTick64() to an existing function that returns the number of system ticks since boot, or
+
+-   Copy all the SSF C and H source files, except main.c, into your project sources and add them to your build environment.
+-   In ssfport.h make sure SSF_TICKS_PER_SEC is set to the number of system ticks per second on your platform.
+-   Map SSFPortGetTick64() to an existing function that returns the number of system ticks since boot, or
     implement SSFPortGetTick64() in ssfport.c if a simple mapping is not possible.
-  - In ssfport.h make sure to follow the instructions for the byte order macros.
-  - Run the unit tests.
+-   In ssfport.h make sure to follow the instructions for the byte order macros.
+-   Run the unit tests.
 
 Only the finite state machine framework uses system ticks, so you can stub out SSFPortGetTick64() if it is not needed.
 When the finite state machine framework runs in a multi-threaded environment some OS synchronization primitives must be implemented.
 
 ### Heap and Stack Memory
+
 Only the memory pool and finite state machine use dynamic memory, aka heap. The memory pool only does so when a pool is created. The finite state machine only uses malloc when an event has data whose size is bigger than the sizeof a pointer.
 
-The framework is fairly stack friendly, although the JSON/UBJSON parsers will recursively call functions for nested JSON objects and arrays. SSF_[UB]JSON_CONFIG_MAX_IN_DEPTH in ssfport.h can be used to control the maximum depth the parser will recurse to prevent the stack from blowing up due to bad inputs. If the unit test for the JSON/UBJSON interface is failing weirdly then increase your system stack.
+The framework is fairly stack friendly, although the JSON/UBJSON parsers will recursively call functions for nested JSON objects and arrays. SSF\_[UB]JSON_CONFIG_MAX_IN_DEPTH in ssfport.h can be used to control the maximum depth the parser will recurse to prevent the stack from blowing up due to bad inputs. If the unit test for the JSON/UBJSON interface is failing weirdly then increase your system stack.
 
 The most important step is to run the unit tests for the interfaces you intend to use on your platform. This will detect porting problems very quickly and avoid many future debugging headaches.
 
@@ -77,8 +82,10 @@ First, I recommend that it should somehow safely record the file and line number
 Second, the system should be automatically reset rather than sitting forever in a loop.
 
 ## Design Principles
+
 ### Design by Contract
-To help ensure correctness the framework uses Design by Contract techniques to immediately catch common errors that tend to creep into systems and cause problems at the worst possible times. 
+
+To help ensure correctness the framework uses Design by Contract techniques to immediately catch common errors that tend to creep into systems and cause problems at the worst possible times.
 
 Design by Contract uses assertions, conditional code that ensures that the state of the system at runtime is operating within the allowable tolerances. The assertion interface uses several macros that hint at the assertions purpose. SSF_REQUIRE() is used to check function input parameters. SSF_ENSURE() is used to check the return result of a function. SSF_ASSERT() is used to check any other system state. SSF_ERROR() always forces an assertion.
 
@@ -87,6 +94,7 @@ The framework goes to great lengths to minimize and detect the potential for buf
 The framework will also detect common errors like using interfaces before they have been properly initialized.
 
 ### RTOS Support
+
 You may have heard the terms bare-metal or superloop to describe single thread of execution systems that lack an OS.
 This library is designed to primarily* run in a single thread of execution which avoids much of the overhead and pitfalls associated with RTOSes.
 (*See Byte FIFO Interface for an explanation of how to deal with interrupts.)
@@ -104,16 +112,19 @@ For example, you can have linked list object A in task 1 and linked list object 
 To properly run the finite state machine framework in a multi-threaded system SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT must be enabled and synchronization macros must be implemented. For more details see below.
 
 ### Deinitialization
+
 This library has added support to deinitialize interfaces that have initialization functions. Primarily deinitialization was added to allow the library to better integrate with unit test frameworks.
 
 ## Interfaces
+
 ### Byte FIFO Interface
 
 Most embedded systems need to send and receive data. The idea behind the byte FIFO is to provide a buffer for incoming and outgoing bytes on these communication interfaces. For example, you may have an interrupt that fires when a byte of data is received. You don't want to process the byte in the handler so it simply gets put onto the RX byte fifo. When the interrupt completes the main execution thread will check for bytes in the RX byte fifo and process them accordingly.
 
-But wait, the interrupt is a different execution context so we have a race condition that can cause the byte FIFO interface to misbehave. The exact solution will vary between platforms, but the general idea is to disable interrupts in the main execution thread while checking *and* pulling the byte out of the RX FIFO.
+But wait, the interrupt is a different execution context so we have a race condition that can cause the byte FIFO interface to misbehave. The exact solution will vary between platforms, but the general idea is to disable interrupts in the main execution thread while checking _and_ pulling the byte out of the RX FIFO.
 
 There are MACROs defined in ssfbfifo.h that avoid the overhead of a function call to minimize the amount of time with interrupts off.
+
 ```
 SSFBFifo_t bf;
 uint8_t bf;
@@ -142,6 +153,7 @@ if (SSF_BFIFO_IS_EMPTY(&bf) == false)
 ```
 
 Here's how synchronize access to the RX FIFO if it is being filled in an interrupt and emptied in the main loop:
+
 ```
 __interrupt__ void RXInterrupt(void)
 {
@@ -162,7 +174,7 @@ while (true)
     if (SSF_BFIFO_IS_EMPTY(&bf) == false)
     {
         SSF_BFIFO_GET_BYTE(&bf, in);
-        CRITICAL_SECTION_EXIT();        
+        CRITICAL_SECTION_EXIT();
         ProcessRX(in);
     }
     else
@@ -171,12 +183,14 @@ while (true)
     }
 }
 ```
+
 Notice that the main loop disables interrupts while accessing the FIFO and immediately turns them back on once the FIFO access has been completed and before the main loop processes the RXed byte.
 
 ### Linked List Interface
 
 The linked list interface allows the creation of FIFOs and STACKs for more managing more complex data structures.
 The key to using the Linked List interface is that when you create the data structure that you want to track place a SSFLLItem_t called item at the top of the struct. For example:
+
 ```
 #define MYLL_MAX_ITEMS (3u)
 typedef struct SSFLLMyData
@@ -220,6 +234,7 @@ if (SSF_LL_STACK_POP(&myll, &item))
     free(item);
 }
 ```
+
 Besides treating the linked list as a STACK or FIFO there are interfaces to insert an item at a specific point within an existing list.
 Before an item is added to a list it cannot be part of another list otherwise an assertion will be triggered.
 This prevents the linked list chain from being corrupted which can cause resource leaks and other logic errors to occur.
@@ -227,6 +242,7 @@ This prevents the linked list chain from being corrupted which can cause resourc
 ### Memory Pool Interface
 
 The memory pool interface creates a pool of fixed sized memory blocks that can be efficiently allocated and freed without making dynamic memory calls.
+
 ```
 #define BLOCK_SIZE (42UL)
 #define BLOCKS (10UL)
@@ -244,15 +260,17 @@ if (SSFMPoolIsEmpty(&pool) == false)
     /* buf now points to a memory pool block */
     buf->header = 1;
     ...
-    
+
     /* Free the block */
     buf = free(&pool, buf);
     /* buf == NULL */
 }
 ```
+
 ### Base64 Encoder/Decoder Interface
 
 This interface allows you to encode a binary data stream into a Base64 string, or do the reverse.
+
 ```
 char encodedStr[16];
 char decodedBin[16];
@@ -275,9 +293,11 @@ if (SSFBase64Decode(encodedStr, strlen(encodedStr), decodedBin, sizeof(decodedBi
     /* decodedBin[0] == 'a' */
 }
 ```
+
 ### Binary to Hex ASCII Encoder/Decoder Interface
 
 This interface allows you to encode a binary data stream into an ASCII hexadecimal string, or do the reverse.
+
 ```
 uint8_t binOut[2];
 char strOut[5];
@@ -298,7 +318,9 @@ if (SSFHexBinToBytes(binOut, binLen, strOut, sizeof(strOut), NULL, false, SSF_HE
   /* prints "a1f5" */
 }
 ```
+
 Another convienience feature is the API allows reversal of the byte ordering either for encoding or decoding.
+
 ### JSON Parser/Generator Interface
 
 Having searched for and used many JSON parser/generators on small embedded platforms I never found exactly the right mix of attributes. The mjson project came the closest on the parser side, but relied on varargs for the generator, which provides a potential breeding ground for bugs.
@@ -308,6 +330,7 @@ Like mjson (a SAX-like parser) this parser operates on the JSON string in place 
 On the generator side it does away with varargs and opts for an interface that can be verified at compilation time to be called correctly.
 
 Here are some simple parser examples:
+
 ```
 char json1Str[] = "{\"name\":\"value\"}";
 char json2Str[] = "{\"obj\":{\"name\":\"value\",\"array\":[1,2,3]}}";
@@ -342,7 +365,7 @@ path[2] = (char *)&idx;
 for (idx = 0;;idx++)
 {
     long si;
-    
+
     if (SSFJsonGetLong(json2Str, (SSFCStrIn_t *)path, &si))
     {
         if (i != 0) print(", ");
@@ -352,17 +375,19 @@ for (idx = 0;;idx++)
 }
 /* Prints "1, 2, 3" */
 ```
+
 Here is a simple generation example:
+
 ```
 bool printFn(char *js, size_t size, size_t start, size_t *end, void *in)
 {
     bool comma = false;
-    
+
     if (!SSFJsonPrintLabel(js, size, start, &start, "label1", &comma)) return false;
     if (!SSFJsonPrintString(js, size, start, &start, "value1", false)) return false;
     if (!SSFJsonPrintLabel(js, size, start, &start, "label2", &comma)) return false;
     if (!SSFJsonPrintString(js, size, start, &start, "value2", false)) return false;
-    
+
     *end = start;
     return true;
 }
@@ -377,6 +402,7 @@ if (SSFJsonPrintObject(jsonStr, sizeof(jsonStr), 0, &end, printFn, NULL, false))
     /* jsonStr == "{\"name1\":\"value1\",\"name2\":\"value2\"}" */
 }
 ```
+
 Object and array nesting is achieved by calling SSFJsonPrintObject() or SSFJsonPrintArray() from within a printer function.
 
 There is also an interface, SSFJsonUpdate(), for updating a JSON object with a new value or element.
@@ -388,6 +414,7 @@ Every embedded system needs to use a checksum somewhere, somehow. The 16-bit Fle
 The API can compute the checksum of data incrementally.
 
 For example, the first call to SSFFCSum16() results in the same checksum as the following three calls.
+
 ```
 uint16_t fc;
 
@@ -399,6 +426,7 @@ fc = SSFFCSum16("bcd", 3, fc);
 fc = SSFFCSum16("e", 1, fc);
 /* fc == 0xc8f0 */
 ```
+
 ### Finite State Machine Framework
 
 The state machine framework allows you to create reliable and efficient state machines.
@@ -408,6 +436,7 @@ Calling into the state machine interface from two difference execution contexts 
 There is a lot that can be said about state machines in general and this one specifically, and I will continue to add to this documentation in the future.
 
 Here's a simple example:
+
 ```
 /* ssfport.h */
 ...
@@ -422,22 +451,24 @@ Here's a simple example:
 #define SSF_SM_MAX_ACTIVE_TIMERS (2u)
 
 /* Defines the state machine identifers. */
-enum SSFSMList
+typedef enum
 {
+    SSF_SM_MIN = -1,
     SSF_SM_STATUS_LED,
-    SSF_SM_END
-};
+    SSF_SM_MAX
+} SSFSMList_t;
 
 /* Defines the event identifiers for all state machines. */
-enum SSFSMEventList
+typedef enum
 {
+    SSF_SM_EVENT_MIN = -1;
     SSF_SM_EVENT_ENTRY,
     SSF_SM_EVENT_EXIT,
     SSF_SM_EVENT_STATUS_RX_DATA,
     SSF_SM_EVENT_STATUS_LED_TIMER_TOGGLE,
     SSF_SM_EVENT_STATUS_LED_TIMER_IDLE,
-    SSF_SM_EVENT_END
-};
+    SSF_SM_EVENT_MAX
+} SSFSMEventList_t;
 
 /* main.c */
 ...
@@ -475,7 +506,7 @@ static void StatusLEDBlinkHandler(SSFSMEventId_t eid, const SSFSMData_t *data, S
         break;
     case SSF_SM_EVENT_STATUS_LED_TIMER_TOGGLE:
         STATUS_LED_TOGGLE();
-        SSFSMStartTimer(SSF_SM_EVENT_STATUS_LED_TIMER_TOGGLE, SSF_TICKS_PER_SEC);        
+        SSFSMStartTimer(SSF_SM_EVENT_STATUS_LED_TIMER_TOGGLE, SSF_TICKS_PER_SEC);
         break;
     case SSF_SM_EVENT_STATUS_LED_TIMER_IDLE:
         SSFSMTran(StatusLEDIdleHandler);
@@ -490,7 +521,7 @@ void main(void)
 ...
     /* Initialize state machine framework */
     SSFSMInit(SSF_SM_MAX_ACTIVE_EVENTS, SSF_SM_MAX_ACTIVE_TIMERS);
-    
+
     /* Initialize status LED state machine */
     SSFSMInitHandler(SSF_SM_STATUS_LED, StatusLEDIdleHandler);
 
@@ -504,6 +535,7 @@ void main(void)
     }
 ...
 ```
+
 The state machine framework is first initialized. Then the state machine for the Status LED is initialized, which causes the ENTRY action of the StatusLEDIdleHandler() to be executed, this turns off the LED.
 
 Then main goes into its superloop that checks for a message begin received. When a message is received it will signal SSF_SM_EVENT_STATUS_RX_DATA. The idle handler will trigger a state transition to the StatusLEDBlinkHandler(). The state transition causes an EXIT event for the idle handler, AND an entry event for the blink handler.
@@ -516,15 +548,14 @@ After 10 seconds the SSF_SM_EVENT_STATUS_LED_TIMER_IDLE timer expires and trigge
 
 The framework automatically stops all timers associated with a state machine when a state transition occurs. This is why it is not necessary to explicitly stop the SSF_SM_EVENT_STATUS_LED_TIMER_TOGGLE timer.
 
-
 If you need to run the framework in a multi-threaded environment do the following:
 
-  - Enable SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT in ssfport.h
-  - Implement the SSF_SM_THREAD_SYNC_* macros using an OS mutext primitive.
-  - Implement the SSF_SM_WAKE_SYNC_* macros using an OS counting semaphore primitive. The unit test expects the maximum count to be capped at 1.
-  - Implement an OS exection context (a task, thread, process, etc.) that initializes the framework and all the state machines. Then call SSFSMTask() throttled by SSF_SM_THREAD_WAKE_WAIT() with the timeout returned from SSFSMTask().
-  - SSFSMTask() should normally execute as a high priority system task since it will execute quickly and block until a timer expires or an event is signalled.
-  - Only SSFSMPutEventData() and SSFSMPutEvent() may be safely invoked from other execution contexts. Event signalling is allowed from interrupts when the OS synchronization primitives support such use.
+-   Enable SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT in ssfport.h
+-   Implement the SSF*SM_THREAD_SYNC*\* macros using an OS mutext primitive.
+-   Implement the SSF*SM_WAKE_SYNC*\* macros using an OS counting semaphore primitive. The unit test expects the maximum count to be capped at 1.
+-   Implement an OS exection context (a task, thread, process, etc.) that initializes the framework and all the state machines. Then call SSFSMTask() throttled by SSF_SM_THREAD_WAKE_WAIT() with the timeout returned from SSFSMTask().
+-   SSFSMTask() should normally execute as a high priority system task since it will execute quickly and block until a timer expires or an event is signalled.
+-   Only SSFSMPutEventData() and SSFSMPutEvent() may be safely invoked from other execution contexts. Event signalling is allowed from interrupts when the OS synchronization primitives support such use.
 
 Out of the box Windows supports the state machine framework in multi-threaded environments.
 And, there is a pthread implementation for OS X and Linux that supports the state machine framework in multi-threaded environments.
@@ -532,6 +563,7 @@ OS X does not support CLOCK_MONOTONIC for pthread_cond_timedwait() so set SSF_SM
 Another note on the pthread port: Contrary to standard pthreads docs, neither OS X or Linux return ETIMEDOUT from pthread_cond_timedwait() when a timeout occurred, this is something I intend to investigate.
 
 Here's pseudocode for an OS thread initializing and running the framework, and demonstrating event generation from a different thread:
+
 ```
 void OSThreadSSFSM(void *arg)
 {
@@ -564,7 +596,7 @@ void OSThreadEventGenerator(void *arg)
         }
     }
 }
-```    
+```
 
 ### Reed-Solomon FEC Encoder/Decoder Interface
 
@@ -643,7 +675,8 @@ void main(void)
     }
 ...
 ```
-The encode call will always succeed. It will populate the ecc buffer with up to SSF_RS_MAX_CHUNKS * SSF_RS_MAX_SYMBOLS of ECC data depending on the actual length of the input message.
+
+The encode call will always succeed. It will populate the ecc buffer with up to SSF_RS_MAX_CHUNKS \* SSF_RS_MAX_SYMBOLS of ECC data depending on the actual length of the input message.
 eccLen is the actual number of EEC bytes put into the ecc buffer.
 
 Next the example copies the message and the ecc bytes to a contiguous buffer and modifies the first byte to simulate an error.
@@ -662,6 +695,7 @@ Use if you need compatability with the XMODEM CRC and/or can spare the extra pro
 The API can compute the CRC of data incrementally.
 
 For example, the first call to SSFCRC16() results in the same CRC as the following three calls.
+
 ```
 uint16_t crc;
 
@@ -682,6 +716,7 @@ Use if you need more error detection than provided by CRC16 and/or in conjunctio
 The API can compute the CRC of data incrementally.
 
 For example, the first call to SSFCRC32() results in the same CRC as the following three calls.
+
 ```
 uint32_t crc;
 
@@ -699,6 +734,7 @@ crc = SSFCRC32("e", 1, crc);
 The SHA-2 hash interface supports SHA256, SHA224, SHA512, SHA384, SHA512/224, and SHA512/256. There are two base functions that provide the ability to compute the six supported hashes. There are macros provided to simplify the calling interface to the base functions.
 
 For example, to compute the SHA256 hash of "abc".
+
 ```
 uint8_t out[SSF_SHA2_256_BYTE_SIZE];
 
@@ -715,6 +751,7 @@ For small data sets the interface can be compiled in fixed mode that limits the 
 For initialization, a user supplied buffer is passed in. If the buffer already has TLV data then the total length of the TLV can be set as well.
 When encoding the same tag can be used multiple times. On decode the interface allow simple iteration over all of the duplicate tags.
 The decode interface allows a value to be copied to a user supplied buffer, or it can simply pass back the a pointer and length of the value within the TLV data.
+
 ```
 #define TAG_NAME 1
 #define TAG_HOBBY 2
@@ -753,7 +790,7 @@ SSFTLVFind(&tlv, TAG_NAME, 0, &valPtr,  &valLen);
 
 ## AES Block Interface
 
-The AES block interface encrypts and decrypts 16 byte blocks of data with the AES cipher. The generic interface supports 128, 192 and 256 bit keys. Macros are supplied for these key sizes. This implementation *SHOULD NOT* be used in production systems. It *IS* vulnerable to timing attacks. Instead, processor specific AES instructions should be preferred.
+The AES block interface encrypts and decrypts 16 byte blocks of data with the AES cipher. The generic interface supports 128, 192 and 256 bit keys. Macros are supplied for these key sizes. This implementation _SHOULD NOT_ be used in production systems. It _IS_ vulnerable to timing attacks. Instead, processor specific AES instructions should be preferred.
 
 ```
     uint8_t pt[16];
@@ -767,7 +804,7 @@ The AES block interface encrypts and decrypts 16 byte blocks of data with the AE
 
     /* Encrypt the plaintext */
     SSFAES128BlockEncrypt(pt, sizeof(pt), ct, sizeof(ct), key, sizeof(key));
-    
+
     /* ct = "\xdc\xc9\x32\xee\xfa\x94\x00\x0d\xfb\x97\x3f\xd4\x3d\x52\x6c\x45" */
 
     /* Decrypt the ciphertext */
@@ -790,7 +827,7 @@ The AES block interface encrypts and decrypts 16 byte blocks of data with the AE
 
 ## AES-GCM Interface
 
-The AES-GCM interface provides encryption and authentication for arbitary length data. The generic AES-GCM encrypt/decrypt functions support 128, 196 and 256 bit keys. There are four available modes: authentication, authenticated data, authenticated encryption and authenticated encryption with authenticated data. Examples of these are provided below. See the AES-GCM specification for details on how to generate valid IVs, example below. Note that the AES-GCM implementation relies on the *TIMING ATTACK VULNERABLE* AES block cipher implementation. 
+The AES-GCM interface provides encryption and authentication for arbitary length data. The generic AES-GCM encrypt/decrypt functions support 128, 196 and 256 bit keys. There are four available modes: authentication, authenticated data, authenticated encryption and authenticated encryption with authenticated data. Examples of these are provided below. See the AES-GCM specification for details on how to generate valid IVs, example below. Note that the AES-GCM implementation relies on the _TIMING ATTACK VULNERABLE_ AES block cipher implementation.
 
 ```
     /* This shows a 128-bit IV generation, although a 96-bit IV is recommended and slightly more efficient */
@@ -830,7 +867,7 @@ The AES-GCM interface provides encryption and authentication for arbitary length
     /* Pass values of iv, tag to receiver so they can verify with their copy of private key */
     if (!SSFAESGCMDecrypt(NULL, 0, iv, sizeof(iv), NULL, 0, key, sizeof(key), tag,
                           sizeof(tag), NULL, 0))
-    { 
+    {
         printf("Authentication failed.\r\n");
         return;
     }
@@ -864,7 +901,7 @@ The AES-GCM interface provides encryption and authentication for arbitary length
                           sizeof(tag), dpt, sizeof(dpt)))
     {
         printf("Authentication of encrypted data failed.\r\n");
-        return; 
+        return;
     }
     /* Also verify that frameCounter value used in IV has increased, otherwise message is replayed. */
 
@@ -893,7 +930,7 @@ Most embedded systems need to read and write configuration data to non-volatile 
 #define MY_CONFIG_VER_1 (1u) /* Version number 1 of my config data */
 #define MY_CONFIG_VER_2 (2u) /* Version number 2 of my config data */
 
-uint8_t myConfigData[SSF_MAX_CFG_DATA_SIZE_LIMIT]; /* Can be any arbitrary data or structure */ 
+uint8_t myConfigData[SSF_MAX_CFG_DATA_SIZE_LIMIT]; /* Can be any arbitrary data or structure */
 uint16_t myConfigDataLen;
 
 /* Bootstrap config */
@@ -997,6 +1034,7 @@ It does appear that work on the specification has stalled, which is unfortunate 
 This parser operates on the UBJSON message in place and only consumes modest stack in proportion to the maximum nesting depth. Since the UBJSON string is parsed from the start each time a data element is accessed it is computationally inefficient; that's ok since most embedded systems are RAM constrained not performance constrained.
 
 Here are some simple parser examples:
+
 ```
     uint8_t ubjson1[] = "{i\x04nameSi\x05value}";
     size_t ubjson1Len = 16;
@@ -1044,7 +1082,9 @@ Here are some simple parser examples:
     printf("\r\n");
     /* Prints "1, 2, 3" */
 ```
+
 Here is a simple generation example:
+
 ```
 bool printFn(uint8_t* js, size_t size, size_t start, size_t* end, void* in)
 {
@@ -1077,6 +1117,7 @@ bool printFn(uint8_t* js, size_t size, size_t start, size_t* end, void* in)
         }
     }
 ```
+
 Object and array nesting is achieved by calling SSFUBJsonPrintObject() or SSFUBJsonPrintArray() from within a printer function.
 
 Parsing and generation of optimized integer arrays is supported.

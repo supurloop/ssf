@@ -44,8 +44,9 @@ extern "C"
 /* --------------------------------------------------------------------------------------------- */
 /* Defines                                                                                       */
 /* --------------------------------------------------------------------------------------------- */
-typedef enum SSFUBJsonType
+typedef enum
 {
+    SSF_UBJSON_TYPE_MIN = -1,
     SSF_UBJSON_TYPE_ERROR,
     SSF_UBJSON_TYPE_STRING,
     SSF_UBJSON_TYPE_NUMBER_INT8,

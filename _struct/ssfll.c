@@ -79,7 +79,7 @@ void SSFLLPutItem(SSFLL_t *ll, SSFLLItem_t *inItem, SSF_LL_LOC_t loc, SSFLLItem_
 {
     SSF_REQUIRE(ll != NULL);
     SSF_REQUIRE(inItem != NULL);
-    SSF_REQUIRE(loc < SSF_LL_LOC_MAX);
+    SSF_REQUIRE((loc > SSF_LL_LOC_MIN) && (loc < SSF_LL_LOC_MAX));
     SSF_REQUIRE((((loc == SSF_LL_LOC_HEAD) || (loc == SSF_LL_LOC_TAIL)) && (locItem == NULL)) ||
                 (loc == SSF_LL_LOC_ITEM));
     SSF_REQUIRE(ll->magic == SSF_LL_INIT_MAGIC);
@@ -127,7 +127,7 @@ bool SSFLLGetItem(SSFLL_t *ll, SSFLLItem_t **outItem, SSF_LL_LOC_t loc, SSFLLIte
 {
     SSF_REQUIRE(ll != NULL);
     SSF_REQUIRE(outItem != NULL);
-    SSF_REQUIRE(loc < SSF_LL_LOC_MAX);
+    SSF_REQUIRE((loc > SSF_LL_LOC_MIN) && (loc < SSF_LL_LOC_MAX));
     SSF_REQUIRE((((loc == SSF_LL_LOC_HEAD) || (loc == SSF_LL_LOC_TAIL)) && (locItem == NULL)) ||
                 ((loc == SSF_LL_LOC_ITEM) && (locItem != NULL)));
     SSF_REQUIRE(ll->magic == SSF_LL_INIT_MAGIC);

@@ -52,8 +52,14 @@
 /*         Added PRNG interface which can generate cryptographically secure random numbers.      */
 /*         Added macros to support SSF use from C++ modules.                                     */
 /*         Minor formatting changes and compiler warning fixes.                                  */
-/* 0.0.7 - Added deinitialization support. Fixed ssfsm timer w/data memory leak. Prelim. UBJSON. */
+/* 0.0.7 - Added deinitialization support.                                                       */
+/*         Fixed ssfsm timer w/data memory leak.                                                 */
+/*         Preliminary UBJSON interface.                                                         */
+/* 0.0.8 - Added UBJSON interface.                                                               */
+/*         Added enum lower bound checks.                                                        */
+/*         Added ssfrs option for GF_MUL speed vs. space optimization.                           */
+/*         Reorganized source code into module directories.                                      */
 /* --------------------------------------------------------------------------------------------- */
-#define SSF_VERSION "0.0.7"
+#define SSF_VERSION "0.0.8"
 
 #endif /* SSF_VERSION_H_INCLUDE */

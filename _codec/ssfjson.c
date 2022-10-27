@@ -592,7 +592,7 @@ bool SSFJsonPrintCString(SSFCStrOut_t js, size_t size, size_t start, size_t *end
             js[start] = 'u'; start++;
             js[start] = '0'; start++;
             js[start] = '0'; start++;
-            snprintf(&js[start], 2, "%02X", (uint8_t)*in);
+            SSF_ASSERT(SSFHexBinToByte(*in, &js[start], 2, SSF_HEX_CASE_UPPER));
             start++;
         }
         if (*in == 0)

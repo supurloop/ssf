@@ -421,7 +421,7 @@ bool SSFINIGetBoolValue(SSFCStrIn_t ini, SSFCStrIn_t section, SSFCStrIn_t name, 
     memcpy(lcv, context.value, context.valueLen);
     lcv[context.valueLen] = 0;
     while (*lcvp != 0) {
-        *lcvp = (char) tolower(*lcvp); lcvp++;
+        *lcvp = (char) tolower((int)*lcvp); lcvp++;
     }
 
     /* Assume value matches a true string */

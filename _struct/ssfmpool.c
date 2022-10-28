@@ -132,7 +132,7 @@ void SSFMPoolDeInit(SSFMPool_t *pool)
 /* --------------------------------------------------------------------------------------------- */
 /* Allocates a block from the pool.                                                              */
 /* --------------------------------------------------------------------------------------------- */
-void* SSFMPoolAlloc(SSFMPool_t *pool, uint32_t size, uint8_t owner)
+void *SSFMPoolAlloc(SSFMPool_t *pool, uint32_t size, uint8_t owner)
 {
     SSFLLItem_t *mem;
     uint8_t *p;
@@ -154,7 +154,7 @@ void* SSFMPoolAlloc(SSFMPool_t *pool, uint32_t size, uint8_t owner)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns a block to the pool, always returns NULL.                                             */
 /* --------------------------------------------------------------------------------------------- */
-void* SSFMPoolFree(SSFMPool_t *pool, void *mpool)
+void *SSFMPoolFree(SSFMPool_t *pool, void *mpool)
 {
     SSF_REQUIRE(pool != NULL);
     SSF_REQUIRE(mpool != NULL);

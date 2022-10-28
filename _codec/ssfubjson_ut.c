@@ -174,7 +174,7 @@ bool _SSFUBJsonPrintFn1(uint8_t *js, size_t size, size_t start, size_t *end, voi
     return true;
 }
 
-bool _SSFUBJsonPrintOptArray(uint8_t* js, size_t size, size_t start, size_t* end, void* in)
+bool _SSFUBJsonPrintOptArray(uint8_t *js, size_t size, size_t start, size_t *end, void *in)
 {
     size_t *alen = (size_t *)in;
     size_t i;
@@ -187,9 +187,9 @@ bool _SSFUBJsonPrintOptArray(uint8_t* js, size_t size, size_t start, size_t* end
     return true;
 }
 
-bool _SSFUBJsonPrintFn2(uint8_t* js, size_t size, size_t start, size_t* end, void* in)
+bool _SSFUBJsonPrintFn2(uint8_t *js, size_t size, size_t start, size_t *end, void *in)
 {
-    size_t* alen = (size_t*)in;
+    size_t *alen = (size_t*)in;
 
     if (!SSFUBJsonPrintLabel(js, size, start, &start, "a")) return false;
     if (!SSFUBJsonPrintArrayOpt(js, size, start, &start,
@@ -198,9 +198,9 @@ bool _SSFUBJsonPrintFn2(uint8_t* js, size_t size, size_t start, size_t* end, voi
     return true;
 }
 
-bool _SSFUBJsonPrintFn3(uint8_t* js, size_t size, size_t start, size_t* end, void* in)
+bool _SSFUBJsonPrintFn3(uint8_t *js, size_t size, size_t start, size_t *end, void *in)
 {
-    size_t* alen = (size_t*)in;
+    size_t *alen = (size_t*)in;
 
     SSF_ASSERT(alen != NULL);
     if (!SSFUBJsonPrintLabel(js, size, start, &start, "h")) return false;
@@ -210,9 +210,9 @@ bool _SSFUBJsonPrintFn3(uint8_t* js, size_t size, size_t start, size_t* end, voi
     return true;
 }
 
-bool _SSFUBJsonPrintFn4(uint8_t* js, size_t size, size_t start, size_t* end, void* in)
+bool _SSFUBJsonPrintFn4(uint8_t *js, size_t size, size_t start, size_t *end, void *in)
 {
-    size_t* alen = (size_t*)in;
+    size_t *alen = (size_t*)in;
 
     SSF_ASSERT(alen != NULL);
     if (!SSFUBJsonPrintLabel(js, size, start, &start, "b")) return false;

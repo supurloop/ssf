@@ -74,10 +74,10 @@ bool SSFUBJsonIsValid(uint8_t *js, size_t jsLen);
 SSFUBJsonType_t SSFUBJsonGetType(uint8_t *js, size_t jsLen, SSFCStrIn_t *path);
 bool SSFUBJsonGetString(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, SSFCStrOut_t out,
                         size_t outSize, size_t *outLen);
-bool SSFUBJsonGetHex(uint8_t* js, size_t jsLen, SSFCStrIn_t* path, uint8_t* out, size_t outSize,
-                     size_t* outLen, bool rev);
-bool SSFUBJsonGetBase64(uint8_t* js, size_t jsLen, SSFCStrIn_t* path, uint8_t* out, size_t outSize,
-                        size_t* outLen);
+bool SSFUBJsonGetHex(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, uint8_t *out, size_t outSize,
+                     size_t *outLen, bool rev);
+bool SSFUBJsonGetBase64(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, uint8_t *out, size_t outSize,
+                        size_t *outLen);
 bool SSFUBJsonGetFloat(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, float *out);
 bool SSFUBJsonGetDouble(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, double *out);
 
@@ -100,13 +100,13 @@ bool SSFUBJsonGetInt(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, void *out, ui
 bool SSFUBJsonPrint(uint8_t *js, size_t size, size_t start, size_t *end, SSFUBJsonPrintFn_t fn,
                     void *in, const char *oc);
 
-bool SSFUBJsonPrintLabel(uint8_t* js, size_t size, size_t start, size_t* end, SSFCStrIn_t label);
-bool SSFUBJsonPrintArrayOpt(uint8_t* js, size_t size, size_t start, size_t* end,
-                            SSFUBJsonPrintFn_t fn, void* in, SSFUBJsonType_t atype, size_t alen);
+bool SSFUBJsonPrintLabel(uint8_t *js, size_t size, size_t start, size_t *end, SSFCStrIn_t label);
+bool SSFUBJsonPrintArrayOpt(uint8_t *js, size_t size, size_t start, size_t *end,
+                            SSFUBJsonPrintFn_t fn, void *in, SSFUBJsonType_t atype, size_t alen);
 bool SSFUBJsonPrintString(uint8_t *js, size_t size, size_t start, size_t *end, SSFCStrIn_t in);
-bool SSFUBJsonPrintHex(uint8_t* js, size_t size, size_t start, size_t* end, uint8_t* in,
+bool SSFUBJsonPrintHex(uint8_t *js, size_t size, size_t start, size_t *end, uint8_t *in,
                        size_t inLen, bool rev);
-bool SSFUBJsonPrintBase64(uint8_t* js, size_t size, size_t start, size_t* end, uint8_t* in,
+bool SSFUBJsonPrintBase64(uint8_t *js, size_t size, size_t start, size_t *end, uint8_t *in,
                         size_t inLen);
 
 #define SSFUBJsonPrintTrue(js, size, start, end) \

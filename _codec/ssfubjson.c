@@ -222,7 +222,7 @@ static bool _SSFJsonTypeField(uint8_t *js, size_t jsLen, size_t *index, size_t *
         /* Fall through on purpose */
         _ssfubParseInt:
         *fstart = *index;
-        (*index)+= len; if (*index >= jsLen)return false;
+        (*index)+= len; if (*index >= jsLen) return false;
         *fend = *index;
         return true;
         case UBJ_TYPE_HPN:
@@ -236,7 +236,7 @@ static bool _SSFJsonTypeField(uint8_t *js, size_t jsLen, size_t *index, size_t *
             size_t tend;
             SSFUBJsonType_t tjt;
 
-            if (_SSFJsonTypeField(js, jsLen, index, &tstart, &tend, &tjt, 0)== false)return false;
+            if (_SSFJsonTypeField(js, jsLen, index, &tstart, &tend, &tjt, 0)== false) return false;
             switch (tjt)
             {
                 case SSF_UBJSON_TYPE_NUMBER_INT8:
@@ -547,8 +547,8 @@ bool SSFUBJsonGetHex(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, uint8_t *out,
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if found and converted Base64 string to binary string, else false.               */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFUBJsonGetBase64(uint8_t* js, size_t jsLen, SSFCStrIn_t* path, uint8_t* out,
-                        size_t outSize, size_t* outLen)
+bool SSFUBJsonGetBase64(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, uint8_t *out,
+                        size_t outSize, size_t *outLen)
 {
     size_t start;
     size_t end;
@@ -858,7 +858,8 @@ bool SSFUBJsonPrintArrayOpt(uint8_t *js, size_t size, size_t start, size_t *end,
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if in string added successfully as string, else false.                           */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFUBJsonPrintStringValue(uint8_t *js, size_t size, size_t start, size_t *end, SSFCStrIn_t in)
+static bool _SSFUBJsonPrintStringValue(uint8_t *js, size_t size, size_t start, size_t *end,
+                                       SSFCStrIn_t in)
 {
     size_t len;
 

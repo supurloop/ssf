@@ -493,9 +493,9 @@ void SSFAESGCMEncrypt(const uint8_t *pt, size_t ptLen, const uint8_t *iv, size_t
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if AES-GCM decryption/authentication successful else false.                      */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFAESGCMDecrypt(const uint8_t* ct, size_t ctLen, const uint8_t* iv, size_t ivLen,
-                      const uint8_t* auth, size_t authLen, const uint8_t* key, size_t keyLen,
-                      const uint8_t* tag, size_t tagLen, uint8_t* pt, size_t ptSize)
+bool SSFAESGCMDecrypt(const uint8_t *ct, size_t ctLen, const uint8_t *iv, size_t ivLen,
+                      const uint8_t *auth, size_t authLen, const uint8_t *key, size_t keyLen,
+                      const uint8_t *tag, size_t tagLen, uint8_t *pt, size_t ptSize)
 {
     uint8_t h[16] = { 0 };
     uint8_t s[16] = { 0 };

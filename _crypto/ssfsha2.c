@@ -113,7 +113,7 @@ void SSFSHA2_32(const uint8_t *in, uint32_t inLen, uint8_t *out, uint32_t outSiz
     bool isPadded = false;
     bool isSplit = false;
     uint32_t offset = 0;
-    const uint8_t* pin = in;
+    const uint8_t *pin = in;
     uint64_t inBits = ((uint64_t)inLen) << 3;
 
     SSF_ASSERT(in != NULL);
@@ -224,7 +224,7 @@ void SSFSHA2_32(const uint8_t *in, uint32_t inLen, uint8_t *out, uint32_t outSiz
 /* --------------------------------------------------------------------------------------------- */
 /* Computes SHA512, SHA384, SHA512/224, or SHA512/256 on in buffer, result placed in out buffer. */
 /* --------------------------------------------------------------------------------------------- */
-void SSFSHA2_64(const uint8_t* in, uint32_t inLen, uint8_t* out, uint32_t outSize,
+void SSFSHA2_64(const uint8_t *in, uint32_t inLen, uint8_t *out, uint32_t outSize,
                 uint16_t hashBitSize, uint16_t truncationBitSize)
 {
     uint64_t a, b, c, d, e, f, g, h;
@@ -238,7 +238,7 @@ void SSFSHA2_64(const uint8_t* in, uint32_t inLen, uint8_t* out, uint32_t outSiz
     bool isPadded = false;
     bool isSplit = false;
     uint32_t offset = 0;
-    const uint8_t* pin = in;
+    const uint8_t *pin = in;
     uint64_t inBits = ((uint64_t)inLen) << 3;
 
     SSF_ASSERT(in != NULL);

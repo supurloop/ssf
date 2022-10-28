@@ -49,7 +49,7 @@ int ssfUnitTestJmpRet;
 #ifdef _WIN32
 __declspec(noreturn)
 #endif /* _WIN32 */
-void SSFPortAssert(const char* file, unsigned int line)
+void SSFPortAssert(const char *file, unsigned int line)
 {
 #if SSF_CONFIG_UNIT_TEST == 1
     if (memcmp(ssfUnitTestMark, ssfUnitTestZeroMark, sizeof(ssfUnitTestMark)) != 0)

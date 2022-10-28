@@ -87,13 +87,13 @@ bool SSFINIGetLongValue(SSFCStrIn_t ini, SSFCStrIn_t section, SSFCStrIn_t name, 
 /* Generator */
 bool SSFINIPrintComment(SSFCStrOut_t ini, size_t iniSize, size_t *iniLen, SSFCStrIn_t text,
                         SSFINIComment_t commentType, SSFINILineEnd_t lineEnding);
-bool SSFINIPrintSection(SSFCStrOut_t ini, size_t iniSize, size_t* iniLen, SSFCStrIn_t section,
+bool SSFINIPrintSection(SSFCStrOut_t ini, size_t iniSize, size_t *iniLen, SSFCStrIn_t section,
                         SSFINILineEnd_t lineEnding);
-bool SSFINIPrintNameStrValue(SSFCStrOut_t ini, size_t iniSize, size_t* iniLen, SSFCStrIn_t name,
+bool SSFINIPrintNameStrValue(SSFCStrOut_t ini, size_t iniSize, size_t *iniLen, SSFCStrIn_t name,
                              SSFCStrIn_t value, SSFINILineEnd_t lineEnding);
-bool SSFINIPrintNameBoolValue(SSFCStrOut_t ini, size_t iniSize, size_t* iniLen, SSFCStrIn_t name,
+bool SSFINIPrintNameBoolValue(SSFCStrOut_t ini, size_t iniSize, size_t *iniLen, SSFCStrIn_t name,
                               bool value, SSFINIBool_t boolType, SSFINILineEnd_t lineEnding);
-bool SSFINIPrintNameLongValue(SSFCStrOut_t ini, size_t iniSize, size_t* iniLen, SSFCStrIn_t name,
+bool SSFINIPrintNameLongValue(SSFCStrOut_t ini, size_t iniSize, size_t *iniLen, SSFCStrIn_t name,
                               long int value, SSFINILineEnd_t lineEnding);
 
 /* --------------------------------------------------------------------------------------------- */

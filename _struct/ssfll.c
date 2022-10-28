@@ -65,7 +65,7 @@ void SSFLLDeInit(SSFLL_t *ll)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if linked list inited, else false.                                               */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFLLIsInited(SSFLL_t* ll)
+bool SSFLLIsInited(SSFLL_t *ll)
 {
     SSF_REQUIRE(ll != NULL);
 

@@ -74,9 +74,9 @@ void SSFTLVUnitTest(void)
     uint8_t val[100];
 #if SSF_TLV_ENABLE_EXTENDED_UNIT_TEST == 1 && SSF_TLV_ENABLE_FIXED_MODE == 0
     SSFTLV_t tlvLong;
-    uint8_t* bufLong = SSF_MALLOC(sizeof(uint8_t)*4210697);
+    uint8_t *bufLong = SSF_MALLOC(sizeof(uint8_t)*4210697);
     SSF_ASSERT(bufLong != NULL);
-    uint8_t* valLong = SSF_MALLOC(sizeof(uint8_t)*4210697);
+    uint8_t *valLong = SSF_MALLOC(sizeof(uint8_t)*4210697);
     SSF_ASSERT(valLong != NULL);
 #endif /* SSF_TLV_ENABLE_EXTENDED_UNIT_TEST */
     SSFTLVVar_t valLen;

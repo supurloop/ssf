@@ -371,7 +371,7 @@ static bool _RSCheck(const GFPoly_t *msg, uint8_t nsym)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if syndromes match, else false.                                                  */
 /* --------------------------------------------------------------------------------------------- */
-static bool _RSCheckSynd(const GFPoly_t* msg, uint8_t nsym, GFPoly_t *synd)
+static bool _RSCheckSynd(const GFPoly_t *msg, uint8_t nsym, GFPoly_t *synd)
 {
     uint16_t i;
 

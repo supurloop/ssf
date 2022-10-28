@@ -53,7 +53,7 @@ extern "C" {
 /* --------------------------------------------------------------------------------------------- */
 /* External interface                                                                            */
 /* --------------------------------------------------------------------------------------------- */
-void SSFRSEncode(const uint8_t *msg, uint16_t msgLen, uint8_t* eccBuf, uint16_t eccBufSize,
+void SSFRSEncode(const uint8_t *msg, uint16_t msgLen, uint8_t *eccBuf, uint16_t eccBufSize,
                  uint16_t *eccBufLen, uint8_t eccNumBytes, uint8_t chunkSize);
 bool SSFRSDecode(uint8_t *msg, uint16_t msgSize, uint16_t *msgLen, uint8_t chunkSyms,
                  uint8_t chunkSize);

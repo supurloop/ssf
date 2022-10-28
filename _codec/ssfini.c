@@ -88,8 +88,8 @@ typedef struct
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFINIFindNextLine(SSFCStrIn_t ini, SSFINIContext_t *context)
 {
-    char* eol;
-    char* eol2;
+    char *eol;
+    char *eol2;
 
     SSF_REQUIRE(ini != NULL);
     SSF_REQUIRE(context != NULL);
@@ -450,7 +450,7 @@ bool SSFINIGetLongValue(SSFCStrIn_t ini, SSFCStrIn_t section, SSFCStrIn_t name, 
 {
     SSFINIContext_t context;
     char li[32];
-    char* endPtr;
+    char *endPtr;
 
     SSF_REQUIRE(ini != NULL);
     SSF_REQUIRE(name != NULL);
@@ -525,7 +525,7 @@ bool SSFINIPrintComment(SSFCStrOut_t ini, size_t iniSize, size_t *iniLen, SSFCSt
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if section added to ini, else false.                                             */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFINIPrintSection(SSFCStrOut_t ini, size_t iniSize, size_t* iniLen, SSFCStrIn_t section,
+bool SSFINIPrintSection(SSFCStrOut_t ini, size_t iniSize, size_t *iniLen, SSFCStrIn_t section,
                         SSFINILineEnd_t lineEnding)
 {
     size_t sectionLen;
@@ -572,7 +572,7 @@ bool SSFINIPrintSection(SSFCStrOut_t ini, size_t iniSize, size_t* iniLen, SSFCSt
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if name/string value added to ini, else false.                                   */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFINIPrintNameStrValue(SSFCStrOut_t ini, size_t iniSize, size_t* iniLen, SSFCStrIn_t name,
+bool SSFINIPrintNameStrValue(SSFCStrOut_t ini, size_t iniSize, size_t *iniLen, SSFCStrIn_t name,
                              SSFCStrIn_t value, SSFINILineEnd_t lineEnding)
 {
     size_t nameLen;
@@ -622,7 +622,7 @@ bool SSFINIPrintNameStrValue(SSFCStrOut_t ini, size_t iniSize, size_t* iniLen, S
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if name/bool value added to ini, else false.                                     */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFINIPrintNameBoolValue(SSFCStrOut_t ini, size_t iniSize, size_t* iniLen, SSFCStrIn_t name,
+bool SSFINIPrintNameBoolValue(SSFCStrOut_t ini, size_t iniSize, size_t *iniLen, SSFCStrIn_t name,
                               bool value, SSFINIBool_t boolType, SSFINILineEnd_t lineEnding)
 {
     char *bstr = NULL;
@@ -656,7 +656,7 @@ bool SSFINIPrintNameBoolValue(SSFCStrOut_t ini, size_t iniSize, size_t* iniLen, 
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if name/long int value added to ini, else false.                                 */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFINIPrintNameLongValue(SSFCStrOut_t ini, size_t iniSize, size_t* iniLen, SSFCStrIn_t name,
+bool SSFINIPrintNameLongValue(SSFCStrOut_t ini, size_t iniSize, size_t *iniLen, SSFCStrIn_t name,
                               long int value, SSFINILineEnd_t lineEnding)
 {
     char nstr[32];

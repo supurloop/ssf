@@ -50,12 +50,12 @@ extern "C" {
 /* --------------------------------------------------------------------------------------------- */
 /* External Interface                                                                            */
 /* --------------------------------------------------------------------------------------------- */
-void SSFSHA2_32(const uint8_t* in, uint32_t inLen, uint8_t* out, uint32_t outSize,
+void SSFSHA2_32(const uint8_t *in, uint32_t inLen, uint8_t *out, uint32_t outSize,
                 uint16_t hashBitSize);
 #define SSFSHA256(in, inLen, out, outSize) SSFSHA2_32(in, inLen, out, outSize, 256)
 #define SSFSHA224(in, inLen, out, outSize) SSFSHA2_32(in, inLen, out, outSize, 224)
 
-void SSFSHA2_64(const uint8_t* in, uint32_t inLen, uint8_t* out, uint32_t outSize,
+void SSFSHA2_64(const uint8_t *in, uint32_t inLen, uint8_t *out, uint32_t outSize,
     uint16_t hashBitSize, uint16_t truncationBitSize);
 
 #define SSFSHA512(in, inLen, out, outSize) SSFSHA2_64(in, inLen, out, outSize, 512, 0)

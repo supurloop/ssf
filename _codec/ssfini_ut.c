@@ -46,7 +46,7 @@ typedef struct
     bool isExpectedSectionPresent;
     bool isExpectedNameValuePresent;
     bool isExpectedStrValue;
-    const char* expectedStrValue;
+    const char *expectedStrValue;
     bool isExpectedBoolValue;
     bool expectedBoolValue;
     bool isExpectedLongValue;

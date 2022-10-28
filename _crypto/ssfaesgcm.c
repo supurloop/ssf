@@ -1,4 +1,5 @@
 /* --------------------------------------------------------------------------------------------- */
+/* --------------------------------------------------------------------------------------------- */
 /* Small System Framework                                                                        */
 /*                                                                                               */
 /* ssfaesgcm.c                                                                                   */
@@ -361,10 +362,8 @@ static void _SSFAESGCMGHASH(const uint8_t *in, size_t inLen, const uint8_t *h, s
     SSF_ASSERT(hLen == 16);
     SSF_ASSERT(outSize == 16);
 
-    memset(buf, 0, 16);
-
     pos = 0;
-    iters = (uint32_t)inLen / 16;
+    iters = ((uint32_t)inLen) >> 4;
 
     for (i = 0; i < iters; i++)
     {
@@ -375,9 +374,18 @@ static void _SSFAESGCMGHASH(const uint8_t *in, size_t inLen, const uint8_t *h, s
 
     if (pos < inLen)
     {
+        SSF_ASSERT((inLen - pos) <= sizeof(buf));
         memset(buf, 0, sizeof(buf));
         memcpy(buf, &in[pos], inLen - pos);
+/* Disable false positive Visual Studio Code Analysis warning */
+#ifdef _WIN32
+#pragma warning(push)
+#pragma warning(disable:6385)
+#endif
         BLOCK_XOR(out, buf);
+#ifdef _WIN32
+#pragma warning(pop)
+#endif
         _SSFAESGCMBlockMult(out, outSize, h, hLen);
     }
 }

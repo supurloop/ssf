@@ -46,7 +46,9 @@ typedef struct SSFUBJSONUT {
 SSFUBJSONUT_t _ubjs[] = {
     { (uint8_t *)"", 0, false }, /* { */
     { (uint8_t *)"{", 1, false }, /* { */
-    { (uint8_t *)"{i\x01" "a[$i#i\x0a\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a}", 21, true },  /* */
+    { (uint8_t *)"{i\x01" "a[$i#i\x00}", 11, true },  /* */
+    { (uint8_t *)"{i\x01" "a[$i#i\x0a\x01]\x03\x04\x05\x06\x07\x08\x09\x0a}", 21, true },  /* */
+    { (uint8_t *)"{i\x01" "a[$i#i\x0a\x01\x02\x03\x04\x05\x06\x07\x08\x09]}", 21, true },  /* */
     { (uint8_t *)"{i\x01" "a[#i\x0ai\x01i\x02i\x03i\x04i\x05i\x06i\x07i\x08i\x09i\x0a}", 29, true },  /* */
     { (uint8_t *)"{}", 2, true },  /* {} */
     { (uint8_t *)"{N}", 3, true },  /* {} */
@@ -247,7 +249,7 @@ void SSFUBJsonUnitTest(void)
     size_t jsOutStart;
     size_t jsOutEnd;
     size_t alen;
-
+#if 0
     /* Test interface assertions */
     SSF_ASSERT_TEST(SSFUBJsonIsValid(NULL, 1));
     memset(path, 0, sizeof(path));
@@ -921,7 +923,7 @@ void SSFUBJsonUnitTest(void)
     SSF_ASSERT(outU64 == 4294967295);
     SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\xff\xff}", 14, (SSFCStrIn_t *)path, &outU64));
     SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\xff\x80}", 14, (SSFCStrIn_t *)path, &outU64));
-
+#endif
     /* Validate parser can determine if valid */
     for (i = 0; i < (sizeof(_ubjs) / sizeof(SSFUBJSONUT_t)); i++)
     {

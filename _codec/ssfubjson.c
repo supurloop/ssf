@@ -140,7 +140,6 @@ static bool _SSFUBJsonArray(uint8_t *js, size_t jsLen, size_t *index, size_t *st
         case SSF_UBJSON_TYPE_NUMBER_UINT8:
         case SSF_UBJSON_TYPE_NUMBER_CHAR:
             len = js[fstart];
-            if (len == 0) return false;
             break;
         default:
             /* Not allowing 16, 32, 64-bit types for length */
@@ -150,13 +149,15 @@ static bool _SSFUBJsonArray(uint8_t *js, size_t jsLen, size_t *index, size_t *st
 
     if ((path != NULL) && (path[depth] != NULL)) memcpy(&pindex, path[depth], sizeof(size_t));
 
+    if (((js[*index] == ']') && (len == (size_t)-1)) || ((len != (size_t)-1) && (len == 0))) goto valDone;
     while (_SSFUBJsonValue(js, jsLen, index, &valStart, &valEnd, path, depth, &djt, t))
     {
         if (pindex == curIndex) { *start = valStart; *end = valEnd; *jt = djt; }
         if (len != (size_t)-1) len--;
-        if ((js[*index] == ']') || ((len != (size_t)-1) && (len == 0))) break;
+        if (((js[*index] == ']') && (len == (size_t)-1)) || ((len != (size_t)-1) && (len == 0))) break;
         curIndex++;
     }
+valDone:
     if ((pindex != (size_t)-1) && (pindex > curIndex)) *jt = SSF_UBJSON_TYPE_ERROR;
     if (js[*index] != ']' && (len == (size_t)-1)) return false;
     *aend = *index;

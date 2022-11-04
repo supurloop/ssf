@@ -644,7 +644,6 @@ bool SSFUBJsonGetByteArrayPtr(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, uint
     size_t start;
     size_t end;
     size_t index;
-    size_t len;
     SSFUBJsonType_t jt;
 
     SSF_REQUIRE(js != NULL);

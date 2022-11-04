@@ -639,7 +639,7 @@ bool SSFUBJsonGetDouble(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, double *ou
 /* Returns true if found and ptr and len of byte array data is set, else false.                  */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFUBJsonGetByteArrayPtr(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, uint8_t **out,
-                          size_t *outLen)
+                              size_t *outLen)
 {
     size_t start;
     size_t end;
@@ -650,7 +650,6 @@ bool SSFUBJsonGetByteArrayPtr(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, uint
     SSF_REQUIRE(path != NULL);
     SSF_REQUIRE(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH] == NULL);
     SSF_REQUIRE(out != NULL);
-    SSF_REQUIRE(*out != NULL);
     SSF_REQUIRE(outLen != NULL);
 
     if (!_SSFUBJsonObject(js, jsLen, &index, &start, &end, path, 0, &jt))

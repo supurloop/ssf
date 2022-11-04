@@ -249,7 +249,9 @@ void SSFUBJsonUnitTest(void)
     size_t jsOutStart;
     size_t jsOutEnd;
     size_t alen;
-#if 0
+    uint8_t *outPtr;
+    size_t outPtrLen;
+
     /* Test interface assertions */
     SSF_ASSERT_TEST(SSFUBJsonIsValid(NULL, 1));
     memset(path, 0, sizeof(path));
@@ -348,6 +350,16 @@ void SSFUBJsonUnitTest(void)
         SSF_ASSERT(outI8 == (int8_t) (aidx1 + 1));
     }
     SSF_ASSERT(aidx1 == 10);
+
+    path[1] = NULL;
+    SSF_ASSERT(SSFUBJsonGetByteArrayPtr(_ubjOptArray2, _ubjOptArray2Len, (SSFCStrIn_t *)path, &outPtr, &outPtrLen));
+    SSF_ASSERT(outPtrLen == 10);
+    memcmp(outPtr, "\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a", outPtrLen);
+    SSF_ASSERT(SSFUBJsonGetByteArrayPtr((uint8_t *)"{i\x01" "a[$i#i\x00}", 11, (SSFCStrIn_t *)path, &outPtr, &outPtrLen));
+    SSF_ASSERT(outPtrLen == 0);
+    SSF_ASSERT(SSFUBJsonGetByteArrayPtr((uint8_t *)"{i\x01" "a[$i#i\x01]}", 12, (SSFCStrIn_t *)path, &outPtr, &outPtrLen));
+    SSF_ASSERT(outPtrLen == 1);
+    SSF_ASSERT(*outPtr == ']');
 
     memset(path, 0, sizeof(path));
     path[0] = "a";
@@ -923,7 +935,7 @@ void SSFUBJsonUnitTest(void)
     SSF_ASSERT(outU64 == 4294967295);
     SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\xff\xff}", 14, (SSFCStrIn_t *)path, &outU64));
     SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\xff\x80}", 14, (SSFCStrIn_t *)path, &outU64));
-#endif
+
     /* Validate parser can determine if valid */
     for (i = 0; i < (sizeof(_ubjs) / sizeof(SSFUBJSONUT_t)); i++)
     {

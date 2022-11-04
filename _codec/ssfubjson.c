@@ -636,6 +636,45 @@ bool SSFUBJsonGetDouble(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, double *ou
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Returns true if found and ptr and len of byte array data is set, else false.                  */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFUBJsonGetByteArrayPtr(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, uint8_t **out,
+                          size_t *outLen)
+{
+    size_t start;
+    size_t end;
+    size_t index;
+    size_t len;
+    SSFUBJsonType_t jt;
+
+    SSF_REQUIRE(js != NULL);
+    SSF_REQUIRE(path != NULL);
+    SSF_REQUIRE(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH] == NULL);
+    SSF_REQUIRE(out != NULL);
+    SSF_REQUIRE(*out != NULL);
+    SSF_REQUIRE(outLen != NULL);
+
+    if (!_SSFUBJsonObject(js, jsLen, &index, &start, &end, path, 0, &jt))
+    {return false; }
+    if (jt != SSF_UBJSON_TYPE_ARRAY) return false;
+    if ((end - start) < 6) return false; /* [$T#TL */
+    if (js[start] != UBJ_TYPE_ARRAY_OPEN) return false;
+    start++;
+    if (js[start] != UBJ_TYPE_ARRAY_OPT) return false;
+    start++;
+    if ((js[start] != UBJ_TYPE_INT8) && (js[start] != UBJ_TYPE_UINT8)) return false;
+    start++;
+    if (js[start] != UBJ_TYPE_ARRAY_NUM) return false;
+    start++;
+    if ((js[start] != UBJ_TYPE_INT8) && (js[start] != UBJ_TYPE_UINT8)) return false;
+    start++;
+    *outLen = js[start];
+    start++;
+    *out = &js[start];
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Returns true if found and is converted to int type, else false.                               */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFUBJsonGetUInt64(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, int64_t *outi64,

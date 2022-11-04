@@ -80,6 +80,8 @@ bool SSFUBJsonGetBase64(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, uint8_t *o
                         size_t *outLen);
 bool SSFUBJsonGetFloat(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, float *out);
 bool SSFUBJsonGetDouble(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, double *out);
+bool SSFUBJsonGetByteArrayPtr(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, uint8_t **out,
+                              size_t *outLen);
 
 #define SSFUBJsonGetInt8(js, jsLen, path, out) SSFUBJsonGetInt(js, jsLen, path, out, 1, true)
 #define SSFUBJsonGetUInt8(js, jsLen, path, out) SSFUBJsonGetInt(js, jsLen, path, out, 1, false)

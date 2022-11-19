@@ -30,6 +30,7 @@
 /* OF THE POSSIBILITY OF SUCH DAMAGE.                                                            */
 /* --------------------------------------------------------------------------------------------- */
 #include <stdio.h>
+#include <stdlib.h>
 #include "ssfport.h"
 
 /* --------------------------------------------------------------------------------------------- */
@@ -56,7 +57,7 @@ void SSFPortAssert(const char *file, unsigned int line)
     { longjmp(ssfUnitTestMark, -1); } else
 #endif /* SSF_CONFIG_UNIT_TEST */
     { printf("SSF Assertion: %s:%u\r\n", file, line); }
-    for (;;);
+    exit(1);
 }
 
 #ifndef _WIN32

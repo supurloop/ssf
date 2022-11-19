@@ -51,7 +51,7 @@ extern "C" {
 typedef uint64_t SSFPortTick_t;
 
 /* Define the number of system ticks per second */
-#define SSF_TICKS_PER_SEC (1000u)
+#define SSF_TICKS_PER_SEC (1000ull)
 
 /* --------------------------------------------------------------------------------------------- */
 /* Platform specific heap configuration                                                          */
@@ -129,6 +129,9 @@ typedef uint64_t SSFPortTick_t;
 #define SSF_CONFIG_PRNG_UNIT_TEST (1u)
 #define SSF_CONFIG_INI_UNIT_TEST (1u)
 #define SSF_CONFIG_UBJSON_UNIT_TEST (1u)
+#define SSF_CONFIG_DTIME_UNIT_TEST (1u)
+#define SSF_CONFIG_RTC_UNIT_TEST (1u)
+#define SSF_CONFIG_ISO8601_UNIT_TEST (1u)
 
 /* If any unit test is enabled then enable unit test mode */
 #if SSF_CONFIG_BFIFO_UNIT_TEST == 1 || \
@@ -149,7 +152,10 @@ typedef uint64_t SSFPortTick_t;
     SSF_CONFIG_CFG_UNIT_TEST == 1 || \
     SSF_CONFIG_PRNG_UNIT_TEST == 1 || \
     SSF_CONFIG_INI_UNIT_TEST == 1 || \
-    SSF_CONFIG_UBJSON_UNIT_TEST == 1
+    SSF_CONFIG_UBJSON_UNIT_TEST == 1 || \
+    SSF_CONFIG_DTIME_UNIT_TEST == 1 || \
+    SSF_CONFIG_RTC_UNIT_TEST == 1 || \
+    SSF_CONFIG_ISO8601_UNIT_TEST == 1
 #define SSF_CONFIG_UNIT_TEST (1u)
 #else
 #define SSF_CONFIG_UNIT_TEST (0u)
@@ -473,6 +479,53 @@ typedef enum
 
 /* Allow parser to return HPN type as a string instead of considering parse invalid. */
 #define SSF_UBJSON_CONFIG_HANDLE_HPN_AS_STRING (1u)
+
+/* --------------------------------------------------------------------------------------------- */
+/* Configure ssfrtc's interface                                                                  */
+/* --------------------------------------------------------------------------------------------- */
+/* 1 == Use a simulated RTC device; 1 == Interface to real RTC device */
+#define SSF_RTC_ENABLE_SIM (1u)
+
+/* Configure access to the RTC */
+#if SSF_RTC_ENABLE_SIM == 1
+    extern uint64_t _ssfRTCSimUnixSec;
+    #define SSF_RTC_WRITE(unixSec) _SSFRTCSimWrite(unixSec)
+    #define SSF_RTC_READ(unixSec) _SSFRTCSimRead(unixSec)
+#else /* SSF_RTC_ENABLE_SIM */
+    /* Map to function that writes 64-bit Unix time in seconds to RTC */
+    /* bool (*write)(uint64_t unixSec) */
+    #define SSF_RTC_WRITE(unixSec) 
+
+    /* Map to function that returns 64-bit Unix time in seconds from RTC */
+    /* bool (*read)(uint64_t *unixSec) */
+    #define SSF_RTC_READ() 
+#endif /* SSF_RTC_ENABLE_SIM */
+
+/* --------------------------------------------------------------------------------------------- */
+/* Configure ssfdtime's interface                                                                */
+/* --------------------------------------------------------------------------------------------- */
+/* 1 == Time struct modifications by application code detected; 0 == app changes not detected */
+#define SSF_DTIME_STRUCT_STRICT_CHECK (1u)
+
+/* 1 == Performs a lengthy exhausive unit test for every possible second; 0 == Reduced test */
+#define SSF_DTIME_EXHAUSTIVE_UNIT_TEST (1u)
+
+/* --------------------------------------------------------------------------------------------- */
+/* Configure ssfiso8601's interface                                                              */
+/* --------------------------------------------------------------------------------------------- */
+/* A failed conversion to ISO string format will return SSF_ISO8601_ERR_STR in user buffer */
+#define SSF_ISO8601_ERR_STR "0000-00-00T00:00:00"
+
+/* 1 == Truncate if the fractional ISO sec precision > system precision; 0 == Fail conversion */
+#define SSF_ISO8601_ALLOW_FSEC_TRUNC (1u)
+
+/* 1 == Allow valid ISO string without a zone to convert to "unixSys" time; 0 == Fail conversion */
+/* When 1 zoneOffsetMin returned by SSFISO8601ISOToUnix is set to SSFISO8601_INVALID_ZONE_OFFSET */
+/* and unixSys time may not be UTC based, as is required by SSF time interfaces. */
+#define SSF_ISO8601_ALLOW_NO_ZONE_ISO_TO_UNIX (0u)
+
+/* 1 == Performs a lengthy exhausive unit test for every possible second; 0 == Reduced test */
+#define SSF_ISO8601_EXHAUSTIVE_UNIT_TEST (1u)
 
 /* --------------------------------------------------------------------------------------------- */
 /* External interface                                                                            */

@@ -1,11 +1,11 @@
 /* --------------------------------------------------------------------------------------------- */
 /* Small System Framework                                                                        */
 /*                                                                                               */
-/* ssf.h                                                                                         */
-/* Provides core framework definitions.                                                          */
+/* ssfrtc_ut.c                                                                                   */
+/* Provides unit test for ssfrtc interface.                                                      */
 /*                                                                                               */
 /* BSD-3-Clause License                                                                          */
-/* Copyright 2020 Supurloop Software LLC                                                         */
+/* Copyright 2022 Supurloop Software LLC                                                         */
 /*                                                                                               */
 /* Redistribution and use in source and binary forms, with or without modification, are          */
 /* permitted provided that the following conditions are met:                                     */
@@ -29,47 +29,81 @@
 /* NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED  */
 /* OF THE POSSIBILITY OF SUCH DAMAGE.                                                            */
 /* --------------------------------------------------------------------------------------------- */
-#ifndef SSF_H_INCLUDE
-#define SSF_H_INCLUDE
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-#include <string.h>
-#include <stdlib.h>
+#include <stdint.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include "ssfport.h"
+#include "ssfdtime.h"
+#include "ssfrtc.h"
 
 /* --------------------------------------------------------------------------------------------- */
-/* Macros and typedefs                                                                           */
+/* Unit tests the ssfrtc interface.                                                              */
 /* --------------------------------------------------------------------------------------------- */
-#define SSF_MAX(x, y) (((x) > (y)) ? (x) : (y))
-#define SSF_MIN(x, y) (((x) < (y)) ? (x) : (y))
-#define SSFIsDigit(c) ((c) >= '0' && (c) <= '9')
+void SSFRTCUnitTest(void)
+{
+    SSFPortTick_t rtcSys;
+    SSFPortTick_t rtcExpected;
 
-typedef const char *SSFCStrIn_t;
-typedef char *SSFCStrOut_t;
+    /* Assertion tests */
+    SSF_ASSERT_TEST(SSFRTCGetUnixNow());
 
-/* Use to suppress unused parameter warnings */
-#define SSF_UNUSED(x) ssfUnused = (void *)x
-extern void *ssfUnused;
+    /* Test SSFRTCIsInited() */
+    SSF_ASSERT(SSFRTCIsInited() == false);
+    SSF_ASSERT(SSFRTCInit());
+    SSF_ASSERT(SSFRTCIsInited());
+    SSFRTCDeInit();
+    SSF_ASSERT(SSFRTCIsInited() == false);
+    SSF_ASSERT(SSFRTCSet(SSFDTIME_UNIX_EPOCH_SEC_MIN));
+    SSF_ASSERT(SSFRTCIsInited());
+    SSFRTCDeInit();
+    SSF_ASSERT(SSFRTCIsInited() == false);
+    SSF_ASSERT(SSFRTCSet(SSFDTIME_UNIX_EPOCH_SEC_MAX));
+    SSF_ASSERT(SSFRTCIsInited());
+    SSFRTCDeInit();
+    SSF_ASSERT(SSFRTCIsInited() == false);
 
-#if SSF_CONFIG_UNIT_TEST == 1
-    #include <setjmp.h>
-extern jmp_buf ssfUnitTestMark;
-extern int ssfUnitTestJmpRet;
+    /* Test SSFRTCInit() */
+    _ssfRTCSimUnixSec = SSFDTIME_UNIX_EPOCH_SEC_MIN;
+    SSF_ASSERT(SSFRTCInit());
+    SSF_ASSERT(SSFRTCIsInited());
+    _ssfRTCSimUnixSec = SSFDTIME_UNIX_EPOCH_SEC_MAX;
+    SSF_ASSERT(SSFRTCInit());
+    SSF_ASSERT(SSFRTCIsInited());
+    _ssfRTCSimUnixSec = SSFDTIME_UNIX_EPOCH_SEC_MAX + 1;
+    SSF_ASSERT(SSFRTCInit() == false);
+    SSF_ASSERT(SSFRTCIsInited() == false);
+    SSFRTCDeInit();
+    SSF_ASSERT(SSFRTCIsInited() == false);
 
-    #define SSF_ASSERT_TEST(t) do { \
-    ssfUnitTestJmpRet = setjmp(ssfUnitTestMark); \
-    if (ssfUnitTestJmpRet == 0) {t;} \
-    if (ssfUnitTestJmpRet != -1) { \
-        printf("SSF Assertion Test: %s:%u\r\n", __FILE__, (unsigned int)__LINE__); \
-        exit(1); } \
-    memset(ssfUnitTestMark, 0, sizeof(ssfUnitTestMark)); } while (0)
+    /* Test SSFRTCSet() */
+    SSFRTCDeInit();
+    SSF_ASSERT(SSFRTCIsInited() == false);
+    _ssfRTCSimUnixSec = SSFDTIME_UNIX_EPOCH_SEC_MAX + 1;
+    SSF_ASSERT(SSFRTCSet(SSFDTIME_UNIX_EPOCH_SEC_MIN));
+    SSF_ASSERT(SSFRTCIsInited());
+    SSF_ASSERT(_ssfRTCSimUnixSec == SSFDTIME_UNIX_EPOCH_SEC_MIN);
+    SSFRTCDeInit();
+    SSF_ASSERT(SSFRTCIsInited() == false);
+    _ssfRTCSimUnixSec = SSFDTIME_UNIX_EPOCH_SEC_MAX + 1;
+    SSF_ASSERT(SSFRTCSet(SSFDTIME_UNIX_EPOCH_SEC_MAX));
+    SSF_ASSERT(SSFRTCIsInited());
+    SSF_ASSERT(_ssfRTCSimUnixSec == SSFDTIME_UNIX_EPOCH_SEC_MAX);
+    SSFRTCDeInit();
+    SSF_ASSERT(SSFRTCIsInited() == false);
+    SSF_ASSERT(SSFRTCSet(SSFDTIME_UNIX_EPOCH_SEC_MAX + 1) == false);
+    SSF_ASSERT(SSFRTCIsInited() == false);
 
-#endif /* SSF_CONFIG_UNIT_TEST */
-
-#ifdef __cplusplus
+    /* Test SSFRTCGetUnixNow() */
+    _ssfRTCSimUnixSec = SSFDTIME_UNIX_EPOCH_SEC_MIN;
+    SSF_ASSERT(SSFRTCInit());
+    SSF_ASSERT(SSFRTCIsInited());
+    rtcExpected = SSFDTIME_UNIX_EPOCH_SEC_MIN * SSF_TICKS_PER_SEC;
+    rtcSys = SSFRTCGetUnixNow();
+    SSF_ASSERT((rtcSys - rtcExpected) < SSF_TICKS_PER_SEC);
+    _ssfRTCSimUnixSec = SSFDTIME_UNIX_EPOCH_SEC_MAX;
+    SSF_ASSERT(SSFRTCInit());
+    SSF_ASSERT(SSFRTCIsInited());
+    rtcExpected = SSFDTIME_UNIX_EPOCH_SEC_MAX * SSF_TICKS_PER_SEC;
+    rtcSys = SSFRTCGetUnixNow();
+    SSF_ASSERT((rtcSys - rtcExpected) < SSF_TICKS_PER_SEC);
 }
-#endif
-
-#endif /* SSF_H_INCLUDE */

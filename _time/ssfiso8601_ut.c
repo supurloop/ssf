@@ -46,11 +46,9 @@
 /* --------------------------------------------------------------------------------------------- */
 void SSFISO8601UnitTest(void)
 {
-    SSFDTimeStruct_t ts;
     SSFPortTick_t unixSys, unixSysOut;
     int16_t zoneOffsetMin;
     char isoStr[SSFISO8601_MAX_SIZE] = "";
-    char isoStr2[SSFISO8601_MAX_SIZE] = "";
     SSFPortTick_t unixSysMin = SSFDTIME_UNIX_EPOCH_SYS_MIN;
     SSFPortTick_t unixSysMax = SSFDTIME_UNIX_EPOCH_SYS_MAX;
 
@@ -59,13 +57,13 @@ void SSFISO8601UnitTest(void)
     {
         if ((unixSys % (1000000ull * SSF_TICKS_PER_SEC)) == 0)
         {
-            printf("unixSys %f%%: %llu %s\r\n", (((unixSys * 1.0) - unixSysMin) / (unixSysMax - unixSysMin)) * 100.0, unixSys, isoStr2);
+            printf("unixSys %f%%: %llu %s\r\n", (((unixSys * 1.0) - unixSysMin) / (unixSysMax - unixSysMin)) * 100.0, unixSys, isoStr);
         }
 
-        SSF_ASSERT(SSFISO8601UnixToISO(unixSys, false, false, 0, SSF_ISO8601_ZONE_UTC, 0, isoStr2, sizeof(isoStr2)));
+        SSF_ASSERT(SSFISO8601UnixToISO(unixSys, false, false, 0, SSF_ISO8601_ZONE_UTC, 0, isoStr, sizeof(isoStr)));
         unixSysOut = SSFDTIME_UNIX_EPOCH_SYS_MAX + 1;
-        //printf("isoStr2: %s\r\n", isoStr2);
-        SSF_ASSERT(SSFISO8601ISOToUnix(isoStr2, &unixSysOut, &zoneOffsetMin));
+        //printf("isoStr: %s\r\n", isoStr);
+        SSF_ASSERT(SSFISO8601ISOToUnix(isoStr, &unixSysOut, &zoneOffsetMin));
         SSF_ASSERT(unixSys == unixSysOut);
     }
 #endif /* SSF_ISO8601_EXHAUSTIVE_UNIT_TEST */

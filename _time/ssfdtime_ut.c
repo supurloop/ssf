@@ -56,6 +56,9 @@ void SSFDTimeUnitTest(void)
     uint8_t j;
     uint32_t fsec;
     time_t dtimer;
+#ifdef _WIN32
+    struct tm tm;
+#endif /* _WIN32 */
     struct tm *dtm;
     SSFDTimeStruct_t ts;
     SSFDTimeStruct_t tsi;
@@ -364,15 +367,19 @@ void SSFDTimeUnitTest(void)
 
         /* Get gmtime() conversion */
         dtimer = (time_t)(unixSys / SSF_TICKS_PER_SEC);
+#ifdef _WIN32
+        gmtime_s(&tm, &dtimer);
+        dtm = &tm;
+#else /* _WIN32 */
         dtm = gmtime(&dtimer);
-
+#endif /* _WIN32 */
         /* Assert they are the same */
         SSF_ASSERT(ts.sec == dtm->tm_sec);
         SSF_ASSERT(ts.min == dtm->tm_min);
         SSF_ASSERT(ts.hour == dtm->tm_hour);
         SSF_ASSERT(ts.day == (dtm->tm_mday - 1));
         SSF_ASSERT(ts.month == dtm->tm_mon);
-        SSF_ASSERT((ts.year + SSFDTIME_EPOCH_YEAR) == (dtm->tm_year + 1900));
+        SSF_ASSERT((ts.year + SSFDTIME_EPOCH_YEAR) == (uint16_t)(dtm->tm_year + 1900));
         SSF_ASSERT(ts.wday == dtm->tm_wday);
         SSF_ASSERT(ts.yday == dtm->tm_yday);
 
@@ -399,7 +406,12 @@ void SSFDTimeUnitTest(void)
 
         /* Get gmtime() conversion */
         dtimer = (time_t)(unixSys / SSF_TICKS_PER_SEC);
+#ifdef _WIN32
+        gmtime_s(&tm, &dtimer);
+        dtm = &tm;
+#else /* _WIN32 */
         dtm = gmtime(&dtimer);
+#endif /* _WIN32 */
 
 #if 0
         printf("unixSys   : %llu\r\n", unixSys);
@@ -420,7 +432,7 @@ void SSFDTimeUnitTest(void)
         SSF_ASSERT(ts.hour == dtm->tm_hour);
         SSF_ASSERT(ts.day == (dtm->tm_mday - 1));
         SSF_ASSERT(ts.month == dtm->tm_mon);
-        SSF_ASSERT((ts.year + SSFDTIME_EPOCH_YEAR) == (dtm->tm_year + 1900));
+        SSF_ASSERT((ts.year + SSFDTIME_EPOCH_YEAR) == (uint16_t)(dtm->tm_year + 1900));
         SSF_ASSERT(ts.wday == dtm->tm_wday);
         SSF_ASSERT(ts.yday == dtm->tm_yday);
 

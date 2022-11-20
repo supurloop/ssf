@@ -77,7 +77,7 @@ bool SSFISO8601UnixToISO(SSFPortTick_t unixSys, bool secPrecision, bool secPseud
     char offsetSign = '+';
     int64_t zoneOffsetSys;
     int64_t sunix;
-    uint16_t zoneOffsetMinAbs;
+    uint16_t zoneOffsetMinAbs = 0;
 
     SSF_REQUIRE(outStr != NULL);
 #if SSF_DTIME_SYS_PREC == 9
@@ -110,7 +110,7 @@ bool SSFISO8601UnixToISO(SSFPortTick_t unixSys, bool secPrecision, bool secPseud
              ((sunix + zoneOffsetSys) > ((int64_t)SSFDTIME_UNIX_EPOCH_SYS_MAX))))
         { return false; }
         unixSys = (uint64_t)(((int64_t)unixSys) + zoneOffsetSys);
-        zoneOffsetMinAbs = abs(zoneOffsetMin);
+        zoneOffsetMinAbs = (uint16_t)abs(zoneOffsetMin);
     }
 
     if (SSFDTimeUnixToStruct(unixSys, &ts, sizeof(ts)) == false) { return false; }
@@ -204,28 +204,28 @@ bool SSFISO8601ISOToUnix(SSFCStrIn_t inStr, SSFPortTick_t *unixSys, int16_t *zon
         (SSFIsDigit(inStr[MONTH_INDEX + 1]) == false) ||
         (inStr[MONTH_INDEX + 2] != '-'))
     { return false; }
-    ts.month = ((uint16_t)strtoul(&inStr[MONTH_INDEX], NULL, 10)) - 1u;
+    ts.month = (uint8_t)(strtoul(&inStr[MONTH_INDEX], NULL, 10) - 1u);
 
     /* Parse day */
     if ((SSFIsDigit(inStr[DAY_INDEX]) == false) ||
         (SSFIsDigit(inStr[DAY_INDEX + 1]) == false) ||
         (inStr[DAY_INDEX + 2] != 'T'))
     { return false; }
-    ts.day = ((uint16_t)strtoul(&inStr[DAY_INDEX], NULL, 10)) - 1u;
+    ts.day = (uint8_t)(strtoul(&inStr[DAY_INDEX], NULL, 10) - 1u);
 
     /* Parse hour */
     if ((SSFIsDigit(inStr[HOUR_INDEX]) == false) ||
         (SSFIsDigit(inStr[HOUR_INDEX + 1]) == false) ||
         (inStr[HOUR_INDEX + 2] != ':'))
     { return false; }
-    ts.hour = ((uint16_t)strtoul(&inStr[HOUR_INDEX], NULL, 10));
+    ts.hour = (uint8_t)strtoul(&inStr[HOUR_INDEX], NULL, 10);
 
     /* Parse minute */
     if ((SSFIsDigit(inStr[MIN_INDEX]) == false) ||
         (SSFIsDigit(inStr[MIN_INDEX + 1]) == false) ||
         (inStr[MIN_INDEX + 2] != ':'))
     { return false; }
-    ts.min = ((uint16_t)strtoul(&inStr[MIN_INDEX], NULL, 10));
+    ts.min = (uint8_t)strtoul(&inStr[MIN_INDEX], NULL, 10);
 
     /* Parse second */
     if ((SSFIsDigit(inStr[SEC_INDEX]) == false) ||
@@ -234,7 +234,7 @@ bool SSFISO8601ISOToUnix(SSFCStrIn_t inStr, SSFPortTick_t *unixSys, int16_t *zon
          (inStr[SEC_INDEX + 2] != '-') && (inStr[SEC_INDEX + 2] != '+') &&
          (inStr[SEC_INDEX + 2] != 'Z')))
     { return false; }
-    ts.sec = ((uint16_t)strtoul(&inStr[SEC_INDEX], NULL, 10));
+    ts.sec = (uint8_t)strtoul(&inStr[SEC_INDEX], NULL, 10);
 
     /* Remaining fields are optional, try to parse them */
     index = SEC_INDEX + 2;

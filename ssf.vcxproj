@@ -102,7 +102,7 @@
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <DisableSpecificWarnings>4820;5045</DisableSpecificWarnings>
-      <AdditionalIncludeDirectories>.\_crypto;.\_storage;.\_fsm;.\_struct;.\_edc;.\_ecc;.\_codec;.\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>.\_time;.\_crypto;.\_storage;.\_fsm;.\_struct;.\_edc;.\_ecc;.\_codec;.\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -186,6 +186,12 @@
     <ClCompile Include="_struct\ssfll_ut.c" />
     <ClCompile Include="_struct\ssfmpool.c" />
     <ClCompile Include="_struct\ssfmpool_ut.c" />
+    <ClCompile Include="_time\ssfdtime.c" />
+    <ClCompile Include="_time\ssfdtime_ut.c" />
+    <ClCompile Include="_time\ssfiso8601.c" />
+    <ClCompile Include="_time\ssfiso8601_ut.c" />
+    <ClCompile Include="_time\ssfrtc.c" />
+    <ClCompile Include="_time\ssfrtc_ut.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="ssf.h" />
@@ -211,6 +217,9 @@
     <ClInclude Include="_struct\ssfbfifo.h" />
     <ClInclude Include="_struct\ssfll.h" />
     <ClInclude Include="_struct\ssfmpool.h" />
+    <ClInclude Include="_time\ssfdtime.h" />
+    <ClInclude Include="_time\ssfiso8601.h" />
+    <ClInclude Include="_time\ssfrtc.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

@@ -76,7 +76,7 @@
 #define SSFDTIME_MONTH_DAY(m) { \
     if (unixDays < _daysInMonth[m]) { \
         ts->month = m; \
-        ts->day = unixDays; \
+        ts->day = (uint8_t)unixDays; \
         return; } \
         unixDays -= _daysInMonth[m]; }
 
@@ -208,16 +208,16 @@ static void _SSFDTimeUnixToStruct(uint32_t unixDays, SSFDTimeStruct_t *ts)
     }
 
     /* Save number of year days */
-    ts->yday = unixDays;
+    ts->yday = (uint16_t)unixDays;
 
     /* Search to find month and month day, loop unrolled for speed */
     isLeap = SSFDTIME_IS_LEAP_YEAR(ts->year);
     SSFDTIME_MONTH_DAY(SSF_DTIME_MONTH_JAN);
     /* February is leap month special case */
-    if (unixDays < (_daysInMonth[SSF_DTIME_MONTH_FEB] + (uint8_t)isLeap))
+    if (unixDays < (uint32_t)((_daysInMonth[SSF_DTIME_MONTH_FEB] + (uint8_t)isLeap)))
     {
         ts->month = SSF_DTIME_MONTH_FEB;
-        ts->day = unixDays;
+        ts->day = (uint8_t)unixDays;
         return;
     }
     unixDays -= (_daysInMonth[SSF_DTIME_MONTH_FEB] + (uint8_t)isLeap);
@@ -240,7 +240,6 @@ bool SSFDTimeStructInit(SSFDTimeStruct_t *ts, uint16_t year, uint8_t month, uint
                         uint8_t hour, uint8_t min, uint8_t sec, uint32_t fsec)
 {
     uint32_t unixDays;
-    uint16_t yearDays;
 
     SSF_REQUIRE(ts != NULL);
 
@@ -325,8 +324,6 @@ bool SSFDTimeUnixToStruct(SSFPortTick_t unixSys, SSFDTimeStruct_t *ts, size_t ts
 /* --------------------------------------------------------------------------------------------- */
 bool SSFDTimeStructToUnix(const SSFDTimeStruct_t *ts, SSFPortTick_t *unixSys)
 {
-    uint16_t year;
-
     SSF_REQUIRE(ts != NULL);
 #if SSF_DTIME_STRUCT_STRICT_CHECK == 1
     SSF_REQUIRE(_SSFDTimeStructIsMagicValid(ts));

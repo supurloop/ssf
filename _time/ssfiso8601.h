@@ -1,11 +1,11 @@
 /* --------------------------------------------------------------------------------------------- */
 /* Small System Framework                                                                        */
 /*                                                                                               */
-/* ssf.h                                                                                         */
-/* Provides core framework definitions.                                                          */
+/* ssfiso8601.h                                                                                  */
+/* Provides ISO8601 extended time string parser/generator interface.                             */
 /*                                                                                               */
 /* BSD-3-Clause License                                                                          */
-/* Copyright 2020 Supurloop Software LLC                                                         */
+/* Copyright 2022 Supurloop Software LLC                                                         */
 /*                                                                                               */
 /* Redistribution and use in source and binary forms, with or without modification, are          */
 /* permitted provided that the following conditions are met:                                     */
@@ -29,47 +29,53 @@
 /* NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED  */
 /* OF THE POSSIBILITY OF SUCH DAMAGE.                                                            */
 /* --------------------------------------------------------------------------------------------- */
-#ifndef SSF_H_INCLUDE
-#define SSF_H_INCLUDE
+#ifndef SSF_ISO8601_H_INCLUDE
+#define SSF_ISO8601_H_INCLUDE
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#include <string.h>
-#include <stdlib.h>
+#include <stdint.h>
+#include <stdbool.h>
+#include "ssfport.h"
 
 /* --------------------------------------------------------------------------------------------- */
-/* Macros and typedefs                                                                           */
+/* Defines and typedefs                                                                          */
 /* --------------------------------------------------------------------------------------------- */
-#define SSF_MAX(x, y) (((x) > (y)) ? (x) : (y))
-#define SSF_MIN(x, y) (((x) < (y)) ? (x) : (y))
-#define SSFIsDigit(c) ((c) >= '0' && (c) <= '9')
+#define SSFISO8601_MIN_SIZE (20u) /* Ex. "2199-12-31T23:59:59" */
+#define SSFISO8601_MAX_SIZE (38u) /* Ex. "2199-12-31T23:59:59.00000000000+00:00" */
+#define SSFISO8601_INVALID_ZONE_OFFSET (SSFDTIME_MIN_IN_DAY + 1)
 
-typedef const char *SSFCStrIn_t;
-typedef char *SSFCStrOut_t;
+typedef enum
+{
+    SSF_ISO8601_ZONE_MIN = -1,
+    SSF_ISO8601_ZONE_UTC,
+    SSF_ISO8601_ZONE_OFFSET_HH,
+    SSF_ISO8601_ZONE_OFFSET_HHMM,
+    SSF_ISO8601_ZONE_LOCAL,
+    SSF_ISO8601_ZONE_MAX,
+} SSFISO8601Zone_t;
 
-/* Use to suppress unused parameter warnings */
-#define SSF_UNUSED(x) ssfUnused = (void *)x
-extern void *ssfUnused;
+/* --------------------------------------------------------------------------------------------- */
+/* External Interface                                                                            */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFISO8601UnixToISO(SSFPortTick_t unixSys, bool secPrecision, bool secPseudoPrecision,
+                         uint16_t pseudoSecs, SSFISO8601Zone_t zone, int16_t zoneOffsetMin,
+                         SSFCStrOut_t outStr, size_t outStrSize);
+bool SSFISO8601ISOToUnix(SSFCStrIn_t inStr, SSFPortTick_t *unixSys, int16_t *zoneOffsetMin);
 
-#if SSF_CONFIG_UNIT_TEST == 1
-    #include <setjmp.h>
-extern jmp_buf ssfUnitTestMark;
-extern int ssfUnitTestJmpRet;
 
-    #define SSF_ASSERT_TEST(t) do { \
-    ssfUnitTestJmpRet = setjmp(ssfUnitTestMark); \
-    if (ssfUnitTestJmpRet == 0) {t;} \
-    if (ssfUnitTestJmpRet != -1) { \
-        printf("SSF Assertion Test: %s:%u\r\n", __FILE__, (unsigned int)__LINE__); \
-        exit(1); } \
-    memset(ssfUnitTestMark, 0, sizeof(ssfUnitTestMark)); } while (0)
-
-#endif /* SSF_CONFIG_UNIT_TEST */
+/* --------------------------------------------------------------------------------------------- */
+/* Unit test                                                                                     */
+/* --------------------------------------------------------------------------------------------- */
+#if SSF_CONFIG_ISO8601_UNIT_TEST == 1
+void SSFISO8601UnitTest(void);
+#endif /* SSF_CONFIG_ISO8601_UNIT_TEST */
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* SSF_H_INCLUDE */
+#endif /* SSF_ISO8601_H_INCLUDE */
+

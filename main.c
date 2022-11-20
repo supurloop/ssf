@@ -51,86 +51,126 @@
 #include "ssfprng.h"
 #include "ssfini.h"
 #include "ssfubjson.h"
+#include "ssfdtime.h"
+#include "ssfrtc.h"
+#include "ssfiso8601.h"
+
+typedef struct
+{
+    char *module;
+    char *description;
+    void (*utf)(void);
+} SSFUnitTest_t;
+
+SSFUnitTest_t unitTests[] =
+{
+#if SSF_CONFIG_BFIFO_UNIT_TEST == 1
+    { "ssfbfifo", "Byte FIFO", SSFBFifoUnitTest },
+#endif /* SSF_CONFIG_BFIFO_UNIT_TEST */
+
+#if SSF_CONFIG_LL_UNIT_TEST == 1
+    { "ssfll", "Linked List", SSFLLUnitTest },
+#endif  /* SSF_CONFIG_LL_UNIT_TEST */
+
+#if SSF_CONFIG_MPOOL_UNIT_TEST == 1
+    { "ssfmpool", "Memory Pool", SSFMPoolUnitTest },
+#endif /* SSF_CONFIG_MPOOL_UNIT_TEST */
+
+#if SSF_CONFIG_BASE64_UNIT_TEST == 1
+    { "ssfbase64", "Base64 Codec", SSFBase64UnitTest },
+#endif /* SSF_CONFIG_BASE64_UNIT_TEST */
+
+#if SSF_CONFIG_HEX_UNIT_TEST == 1
+    { "ssfhex", "Hex String Codec", SSFHexUnitTest },
+#endif /* SSF_CONFIG_BASE64_UNIT_TEST */
+
+#if SSF_CONFIG_JSON_UNIT_TEST == 1
+    { "ssfjson", "JSON Codec", SSFJsonUnitTest },
+#endif /* SSF_CONFIG_JSON_UNIT_TEST */
+
+#if SSF_CONFIG_FCSUM_UNIT_TEST == 1
+    { "ssffcsum", "Fletcher's Checksum", SSFFCSumUnitTest },
+#endif /* SSF_CONFIG_FCSUM_UNIT_TEST */
+
+#if SSF_CONFIG_SM_UNIT_TEST == 1
+    { "ssfsm", "Finite State Machine", SSFSMUnitTest },
+#endif /* SSF_CONFIG_SM_UNIT_TEST */
+
+#if SSF_CONFIG_RS_UNIT_TEST == 1
+    { "ssfrs", "Reed Solomon ECC", SSFRSUnitTest },
+#endif /* SSF_CONFIG_SM_UNIT_TEST */
+
+#if SSF_CONFIG_CRC16_UNIT_TEST == 1
+    { "ssfcrc16", "16-bit XMODEM/CCITT-16", SSFCRC16UnitTest },
+#endif /* SSF_CONFIG_CRC16_UNIT_TEST */
+
+#if SSF_CONFIG_CRC32_UNIT_TEST == 1
+    { "ssfcrc32", "32-bit CCITT-32", SSFCRC32UnitTest },
+#endif /* SSF_CONFIG_CRC32_UNIT_TEST */
+
+#if SSF_CONFIG_SHA2_UNIT_TEST == 1
+    { "ssfsha2", "SHA2 256-512-bits", SSFSHA2UnitTest },
+#endif /* SSF_CONFIG_SHA2_UNIT_TEST */
+
+#if SSF_CONFIG_TLV_UNIT_TEST == 1
+    { "ssftlv", "Tag/Length/Value Codec", SSFTLVUnitTest },
+#endif /* SSF_CONFIG_TLV_UNIT_TEST */
+
+#if SSF_CONFIG_AES_UNIT_TEST == 1
+    { "ssfaes", "AES128-256 Block", SSFAESUnitTest },
+#endif /* SSF_CONFIG_AES_UNIT_TEST */
+
+#if SSF_CONFIG_AESGCM_UNIT_TEST == 1
+    { "ssfaesgcm", "AES-GCM Authenticated Cipher", SSFAESGCMUnitTest },
+#endif /* SSF_CONFIG_AESGCM_UNIT_TEST */
+
+#if SSF_CONFIG_CFG_UNIT_TEST == 1
+    { "ssfcfg", "Read/Write NV Config", SSFCfgUnitTest },
+#endif /* SSF_CONFIG_CFG_UNIT_TEST */
+
+#if SSF_CONFIG_PRNG_UNIT_TEST == 1
+    { "ssfprng", "Crypto Secure Capable PRNG", SSFPRNGUnitTest },
+#endif /* SSF_CONFIG_PRNG_UNIT_TEST */
+
+#if SSF_CONFIG_INI_UNIT_TEST == 1
+    { "ssfini", "INI Codec", SSFINIUnitTest },
+#endif /* SSF_CONFIG_INI_UNIT_TEST */
+
+#if SSF_CONFIG_UBJSON_UNIT_TEST == 1
+    { "ssfubjson", "Universal Binary JSON Codec", SSFUBJsonUnitTest },
+#endif /* SSF_CONFIG_UBJSON_UNIT_TEST */
+
+#if SSF_CONFIG_RTC_UNIT_TEST == 1
+    { "ssfrtc", "RTC", SSFRTCUnitTest },
+#endif /* SSF_CONFIG_RTC_UNIT_TEST */
+
+#if SSF_CONFIG_DTIME_UNIT_TEST == 1
+    { "ssfdtime", "Date Time", SSFDTimeUnitTest },
+#endif /* SSF_CONFIG_DTIME_UNIT_TEST */
+
+#if SSF_CONFIG_ISO8601_UNIT_TEST == 1
+    { "ssfiso8601", "ISO8601 Time", SSFISO8601UnitTest }
+#endif /* SSF_CONFIG_ISO8601_UNIT_TEST */
+};
 
 /* --------------------------------------------------------------------------------------------- */
 /* SSF unit test entry point.                                                                    */
 /* --------------------------------------------------------------------------------------------- */
 int main(void)
 {
-#if SSF_CONFIG_BFIFO_UNIT_TEST == 1
-    SSFBFifoUnitTest();
-#endif /* SSF_CONFIG_BFIFO_UNIT_TEST */
+    size_t i;
+    SSFPortTick_t start;
 
-#if SSF_CONFIG_LL_UNIT_TEST == 1
-    SSFLLUnitTest();
-#endif  /* SSF_CONFIG_LL_UNIT_TEST */
+    /* Iterate over all the configured unit tests */
+    for (i = 0; i < sizeof(unitTests) / sizeof(SSFUnitTest_t); i++)
+    {
+        printf("Running %20s (%30s) unit test...", unitTests[i].module, unitTests[i].description);
+        fflush(stdout);
+        start = SSFPortGetTick64();
+        unitTests[i].utf();
+        printf("PASSED in %llus\r\n", (SSFPortGetTick64() - start) / SSF_TICKS_PER_SEC);
+    }
 
-#if SSF_CONFIG_MPOOL_UNIT_TEST == 1
-    SSFMPoolUnitTest();
-#endif /* SSF_CONFIG_MPOOL_UNIT_TEST */
-
-#if SSF_CONFIG_BASE64_UNIT_TEST == 1
-    SSFBase64UnitTest();
-#endif /* SSF_CONFIG_BASE64_UNIT_TEST */
-
-#if SSF_CONFIG_HEX_UNIT_TEST == 1
-    SSFHexUnitTest();
-#endif /* SSF_CONFIG_BASE64_UNIT_TEST */
-
-#if SSF_CONFIG_JSON_UNIT_TEST == 1
-    SSFJsonUnitTest();
-#endif /* SSF_CONFIG_JSON_UNIT_TEST */
-
-#if SSF_CONFIG_FCSUM_UNIT_TEST == 1
-    SSFFCSumUnitTest();
-#endif /* SSF_CONFIG_FCSUM_UNIT_TEST */
-
-#if SSF_CONFIG_SM_UNIT_TEST == 1
-    SSFSMUnitTest();
-#endif /* SSF_CONFIG_SM_UNIT_TEST */
-
-#if SSF_CONFIG_RS_UNIT_TEST == 1
-    SSFRSUnitTest();
-#endif /* SSF_CONFIG_SM_UNIT_TEST */
-
-#if SSF_CONFIG_CRC16_UNIT_TEST == 1
-    SSFCRC16UnitTest();
-#endif /* SSF_CONFIG_CRC16_UNIT_TEST */
-
-#if SSF_CONFIG_CRC32_UNIT_TEST == 1
-    SSFCRC32UnitTest();
-#endif /* SSF_CONFIG_CRC32_UNIT_TEST */
-
-#if SSF_CONFIG_SHA2_UNIT_TEST == 1
-    SSFSHA2UnitTest();
-#endif /* SSF_CONFIG_SHA2_UNIT_TEST */
-
-#if SSF_CONFIG_TLV_UNIT_TEST == 1
-    SSFTLVUnitTest();
-#endif /* SSF_CONFIG_TLV_UNIT_TEST */
-
-#if SSF_CONFIG_AES_UNIT_TEST == 1
-    SSFAESUnitTest();
-#endif /* SSF_CONFIG_AES_UNIT_TEST */
-
-#if SSF_CONFIG_AESGCM_UNIT_TEST == 1
-    SSFAESGCMUnitTest();
-#endif /* SSF_CONFIG_AESGCM_UNIT_TEST */
-
-#if SSF_CONFIG_CFG_UNIT_TEST == 1
-    SSFCfgUnitTest();
-#endif /* SSF_CONFIG_CFG_UNIT_TEST */
-
-#if SSF_CONFIG_PRNG_UNIT_TEST == 1
-    SSFPRNGUnitTest();
-#endif /* SSF_CONFIG_PRNG_UNIT_TEST */
-
-#if SSF_CONFIG_INI_UNIT_TEST == 1
-    SSFINIUnitTest();
-#endif /* SSF_CONFIG_INI_UNIT_TEST */
-
-#if SSF_CONFIG_UBJSON_UNIT_TEST == 1
-    SSFUBJsonUnitTest();
-#endif /* SSF_CONFIG_UBJSON_UNIT_TEST */
+    printf("\r\n");
     return 0;
 }

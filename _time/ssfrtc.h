@@ -1,11 +1,11 @@
 /* --------------------------------------------------------------------------------------------- */
 /* Small System Framework                                                                        */
 /*                                                                                               */
-/* ssf.h                                                                                         */
-/* Provides core framework definitions.                                                          */
+/* ssfrtc.h                                                                                      */
+/* Provides interface that tracks "now" as Unix system ticks from a RTC device.                  */
 /*                                                                                               */
 /* BSD-3-Clause License                                                                          */
-/* Copyright 2020 Supurloop Software LLC                                                         */
+/* Copyright 2022 Supurloop Software LLC                                                         */
 /*                                                                                               */
 /* Redistribution and use in source and binary forms, with or without modification, are          */
 /* permitted provided that the following conditions are met:                                     */
@@ -29,47 +29,34 @@
 /* NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED  */
 /* OF THE POSSIBILITY OF SUCH DAMAGE.                                                            */
 /* --------------------------------------------------------------------------------------------- */
-#ifndef SSF_H_INCLUDE
-#define SSF_H_INCLUDE
+#ifndef SSF_RTC_H_INCLUDE
+#define SSF_RTC_H_INCLUDE
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#include <string.h>
-#include <stdlib.h>
+#include <stdint.h>
+#include <stdbool.h>
 
 /* --------------------------------------------------------------------------------------------- */
-/* Macros and typedefs                                                                           */
+/* External interface                                                                            */
 /* --------------------------------------------------------------------------------------------- */
-#define SSF_MAX(x, y) (((x) > (y)) ? (x) : (y))
-#define SSF_MIN(x, y) (((x) < (y)) ? (x) : (y))
-#define SSFIsDigit(c) ((c) >= '0' && (c) <= '9')
+bool SSFRTCInit(void);
+void SSFRTCDeInit(void);
+bool SSFRTCIsInited(void);
+bool SSFRTCSet(uint64_t unixSec);
+SSFPortTick_t SSFRTCGetUnixNow(void);
 
-typedef const char *SSFCStrIn_t;
-typedef char *SSFCStrOut_t;
-
-/* Use to suppress unused parameter warnings */
-#define SSF_UNUSED(x) ssfUnused = (void *)x
-extern void *ssfUnused;
-
-#if SSF_CONFIG_UNIT_TEST == 1
-    #include <setjmp.h>
-extern jmp_buf ssfUnitTestMark;
-extern int ssfUnitTestJmpRet;
-
-    #define SSF_ASSERT_TEST(t) do { \
-    ssfUnitTestJmpRet = setjmp(ssfUnitTestMark); \
-    if (ssfUnitTestJmpRet == 0) {t;} \
-    if (ssfUnitTestJmpRet != -1) { \
-        printf("SSF Assertion Test: %s:%u\r\n", __FILE__, (unsigned int)__LINE__); \
-        exit(1); } \
-    memset(ssfUnitTestMark, 0, sizeof(ssfUnitTestMark)); } while (0)
-
-#endif /* SSF_CONFIG_UNIT_TEST */
+/* --------------------------------------------------------------------------------------------- */
+/* Unit test                                                                                     */
+/* --------------------------------------------------------------------------------------------- */
+#if SSF_CONFIG_RTC_UNIT_TEST == 1
+void SSFRTCUnitTest(void);
+#endif /* SSF_CONFIG_RTC_UNIT_TEST */
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* SSF_H_INCLUDE */
+#endif /* SSF_RTC_H_INCLUDE */

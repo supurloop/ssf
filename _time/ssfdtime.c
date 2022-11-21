@@ -343,13 +343,13 @@ bool SSFDTimeStructToUnix(const SSFDTimeStruct_t *ts, SSFPortTick_t *unixSys)
     (*unixSys) = ts->year * SSFDTIME_SEC_IN_YEAR;
 
     /* Adjust for leap seconds */
-    (*unixSys) += (((ts->year + 1) >> 2) * SSFDTIME_SEC_IN_DAY);
+    (*unixSys) += (((((SSFPortTick_t)ts->year) + 1) >> 2) * SSFDTIME_SEC_IN_DAY);
     if (ts->year > (SSFDTIME_NON_LEAP_YEAR - SSFDTIME_EPOCH_YEAR))
     { (*unixSys) -= SSFDTIME_SEC_IN_DAY; }
 
-    (*unixSys) += ts->yday * SSFDTIME_SEC_IN_DAY;
-    (*unixSys) += ts->hour * SSFDTIME_SEC_IN_HOUR;
-    (*unixSys) += ts->min * SSFDTIME_SEC_IN_MIN;
+    (*unixSys) += ((SSFPortTick_t)ts->yday) * SSFDTIME_SEC_IN_DAY;
+    (*unixSys) += ((SSFPortTick_t)ts->hour) * SSFDTIME_SEC_IN_HOUR;
+    (*unixSys) += ((SSFPortTick_t)ts->min) * SSFDTIME_SEC_IN_MIN;
     (*unixSys) += ts->sec;
     (*unixSys) *= SSF_TICKS_PER_SEC;
     (*unixSys) += ts->fsec;

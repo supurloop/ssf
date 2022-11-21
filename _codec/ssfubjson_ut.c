@@ -354,7 +354,7 @@ void SSFUBJsonUnitTest(void)
     path[1] = NULL;
     SSF_ASSERT(SSFUBJsonGetByteArrayPtr(_ubjOptArray2, _ubjOptArray2Len, (SSFCStrIn_t *)path, &outPtr, &outPtrLen));
     SSF_ASSERT(outPtrLen == 10);
-    memcmp(outPtr, "\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a", outPtrLen);
+    SSF_ASSERT(memcmp(outPtr, "\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a", outPtrLen) == 0);
     SSF_ASSERT(SSFUBJsonGetByteArrayPtr((uint8_t *)"{i\x01" "a[$i#i\x00}", 11, (SSFCStrIn_t *)path, &outPtr, &outPtrLen));
     SSF_ASSERT(outPtrLen == 0);
     SSF_ASSERT(SSFUBJsonGetByteArrayPtr((uint8_t *)"{i\x01" "a[$i#i\x01]}", 12, (SSFCStrIn_t *)path, &outPtr, &outPtrLen));

@@ -101,7 +101,7 @@ bool SSFISO8601UnixToISO(SSFPortTick_t unixSys, bool secPrecision, bool secPseud
     {
         /* Yes, adjust unix to local time before struct conversion */
         sunix = (int64_t)unixSys;
-        zoneOffsetSys = zoneOffsetMin * SSFDTIME_SEC_IN_MIN * SSF_TICKS_PER_SEC;
+        zoneOffsetSys = ((SSFPortTick_t)zoneOffsetMin) * SSFDTIME_SEC_IN_MIN * SSF_TICKS_PER_SEC;
 
         /* Adjust local time within allowed system date limits */
         if (((zoneOffsetSys < 0) &&

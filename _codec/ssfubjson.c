@@ -1006,7 +1006,7 @@ bool SSFUBJsonPrintInt(uint8_t *js, size_t size, size_t start, size_t *end, int6
 {
     uint8_t type;
     size_t len = 0;
-    uint8_t *pi;
+    uint8_t *pi = NULL;
     int8_t i8;
     uint8_t ui8;
     int16_t i16;

@@ -55,7 +55,7 @@ static uint8_t _sbfReadBuf[SSF_TEST_BFIFO_SIZE];
 void SSFBFifoUnitTest(void)
 {
     uint8_t outByte;
-    uint32_t i;
+    volatile uint32_t i;
     uint32_t j;
     SSFBFifo_t fifoZero;
 #if SSF_BFIFO_MULTI_BYTE_ENABLE == 1

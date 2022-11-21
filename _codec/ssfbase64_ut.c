@@ -89,7 +89,7 @@ SSBase64UT_t _b64StringUT[] = {
 /* --------------------------------------------------------------------------------------------- */
 void SSFBase64UnitTest(void)
 {
-    uint32_t i;
+    volatile uint32_t i;
     uint8_t b24[3];
     char b32[4];
     char encodedStr[5];

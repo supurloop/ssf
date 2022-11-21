@@ -204,7 +204,6 @@ void SSFDTimeUnitTest(void)
             tsi.fsec = SSF_TS_FSEC_MAX;
         }
 
-        //printf("day: %u\r\n", tsi.day);
         memset(&ts, 0x55, sizeof(ts));
         SSF_ASSERT(SSFDTimeStructInit(&ts, tsi.year, tsi.month, tsi.day,
                                         tsi.hour, tsi.min, tsi.sec,
@@ -232,23 +231,17 @@ void SSFDTimeUnitTest(void)
     tsi.wday = SSFDTIME_EPOCH_DAY;
     for (tsi.year = 0; tsi.year <= SSF_TS_YEAR_MAX; tsi.year++)
     {
-        //printf("year %d\r\n", tsi.year);
         tsi.yday = 0;
         for (tsi.month = 0; tsi.month <= SSF_TS_MONTH_MAX; tsi.month++)
         {
-            //printf("month %d\r\n", tsi.month);
             for (tsi.day = 0; tsi.day <= (_utDaysInMonth[tsi.month] + (uint8_t) (SSFDTimeIsLeapYear(tsi.year) && (tsi.month == SSF_DTIME_MONTH_FEB)) - 1); tsi.day++)
             {
-                //printf("day %d\r\n", tsi.day);
                 for (tsi.hour = 0; tsi.hour <= SSF_TS_HOUR_MAX; tsi.hour++)
                 {
-                    //printf("hour %d\r\n", tsi.hour);
                     for (tsi.min = 0; tsi.min <= SSF_TS_MIN_MAX; tsi.min++)
                     {
-                        //printf("min %d\r\n", tsi.min);
                         for (tsi.sec = 0; tsi.sec <= SSF_TS_SEC_MAX; tsi.sec++)
                         {
-                            //printf("sec: %d\r\n", tsi.sec);
                             memset(&ts, 0x55, sizeof(ts));
                             SSF_ASSERT(SSFDTimeStructInit(&ts, tsi.year, tsi.month, tsi.day,
                                                           tsi.hour, tsi.min, tsi.sec,
@@ -393,14 +386,6 @@ void SSFDTimeUnitTest(void)
     /* Iterate over every possible second in supported date range, verify against gmtime() */
     for (unixSys = unixSysMin; unixSys < unixSysMax; unixSys += SSF_TICKS_PER_SEC)
     {
-#if 0
-        /* Periocially print the test progress */
-        if ((unixSys % (1000000ull * SSF_TICKS_PER_SEC)) == 0)
-        {
-            printf("unixSys %f%%: %llu\r\n",
-                   (((unixSys * 1.0) - unixSysMin) / (unixSysMax - unixSysMin)) * 100.0, unixSys);
-        }
-#endif
         /* Convert unixSys to time struct */
         SSF_ASSERT(SSFDTimeUnixToStruct(unixSys, &ts, sizeof(ts)));
 
@@ -412,19 +397,6 @@ void SSFDTimeUnitTest(void)
 #else /* _WIN32 */
         dtm = gmtime(&dtimer);
 #endif /* _WIN32 */
-
-#if 0
-        printf("unixSys   : %llu\r\n", unixSys);
-        printf("sec       : %02u %02u\r\n", ts.sec, dtm->tm_sec);
-        printf("min       : %02u %02u\r\n", ts.min, dtm->tm_min);
-        printf("hour      : %02u %02u\r\n", ts.hour, dtm->tm_hour);
-        printf("day       : %02u %02u\r\n", ts.day, dtm->tm_mday - 1);
-        printf("month     : %02u %02u\r\n", ts.month, dtm->tm_mon);
-        printf("year      : %04u %04u\r\n", ts.year + SSFDTIME_EPOCH_YEAR, dtm->tm_year + 1900);
-        printf("wday      : %01u %01u\r\n", ts.wday, dtm->tm_wday);
-        printf("yday      : %03u %03u\r\n", ts.yday, dtm->tm_yday);
-        printf("\r\n");
-#endif
 
         /* Assert they are the same */
         SSF_ASSERT(ts.sec == dtm->tm_sec);

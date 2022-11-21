@@ -234,7 +234,7 @@ void SSFDTimeUnitTest(void)
         tsi.yday = 0;
         for (tsi.month = 0; tsi.month <= SSF_TS_MONTH_MAX; tsi.month++)
         {
-            for (tsi.day = 0; tsi.day <= (_utDaysInMonth[tsi.month] + (uint8_t) (SSFDTimeIsLeapYear(tsi.year) && (tsi.month == SSF_DTIME_MONTH_FEB)) - 1); tsi.day++)
+            for (tsi.day = 0; tsi.day <= (uint8_t)(_utDaysInMonth[tsi.month] + (uint8_t) (SSFDTimeIsLeapYear(tsi.year) && (tsi.month == SSF_DTIME_MONTH_FEB)) - 1); tsi.day++)
             {
                 for (tsi.hour = 0; tsi.hour <= SSF_TS_HOUR_MAX; tsi.hour++)
                 {

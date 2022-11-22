@@ -146,21 +146,35 @@ void SSFDTimeUnitTest(void)
     /* Test SSFDTimeStructInit() */
     SSF_ASSERT(SSFDTimeStructInit(&ts, SSF_TS_YEAR_MAX + 1, 0, 0, 0, 0, 0, 0) == false);
     SSF_ASSERT(SSFDTimeStructInit(&ts, 0, SSF_TS_MONTH_MAX + 1, 0, 0, 0, 0, 0) == false);
-    SSF_ASSERT(SSFDTimeStructInit(&ts, 0, SSF_DTIME_MONTH_JAN, _utDaysInMonth[SSF_DTIME_MONTH_JAN], 0, 0, 0, 0) == false);
+    SSF_ASSERT(SSFDTimeStructInit(&ts, 0, SSF_DTIME_MONTH_JAN,
+                                  _utDaysInMonth[SSF_DTIME_MONTH_JAN], 0, 0, 0, 0) == false);
     for (tsi.year = 0; tsi.year <= SSF_TS_YEAR_MAX; tsi.year++)
     {
-        SSF_ASSERT(SSFDTimeStructInit(&ts, tsi.year, SSF_DTIME_MONTH_FEB, _utDaysInMonth[SSF_DTIME_MONTH_FEB] + (uint8_t) (SSFDTimeIsLeapYear(tsi.year)), 0, 0, 0, 0) == false);
+        SSF_ASSERT(SSFDTimeStructInit(&ts, tsi.year, SSF_DTIME_MONTH_FEB,
+                                      _utDaysInMonth[SSF_DTIME_MONTH_FEB] + 
+                                      (uint8_t)(SSFDTimeIsLeapYear(tsi.year)), 0, 0, 0, 0) ==
+                                      false);
     }
-    SSF_ASSERT(SSFDTimeStructInit(&ts, 0, SSF_DTIME_MONTH_MAR, _utDaysInMonth[SSF_DTIME_MONTH_MAR], 0, 0, 0, 0) == false);
-    SSF_ASSERT(SSFDTimeStructInit(&ts, 0, SSF_DTIME_MONTH_APR, _utDaysInMonth[SSF_DTIME_MONTH_APR], 0, 0, 0, 0) == false);
-    SSF_ASSERT(SSFDTimeStructInit(&ts, 0, SSF_DTIME_MONTH_MAY, _utDaysInMonth[SSF_DTIME_MONTH_MAY], 0, 0, 0, 0) == false);
-    SSF_ASSERT(SSFDTimeStructInit(&ts, 0, SSF_DTIME_MONTH_JUN, _utDaysInMonth[SSF_DTIME_MONTH_JUN], 0, 0, 0, 0) == false);
-    SSF_ASSERT(SSFDTimeStructInit(&ts, 0, SSF_DTIME_MONTH_JUL, _utDaysInMonth[SSF_DTIME_MONTH_JUL], 0, 0, 0, 0) == false);
-    SSF_ASSERT(SSFDTimeStructInit(&ts, 0, SSF_DTIME_MONTH_AUG, _utDaysInMonth[SSF_DTIME_MONTH_AUG], 0, 0, 0, 0) == false);
-    SSF_ASSERT(SSFDTimeStructInit(&ts, 0, SSF_DTIME_MONTH_SEP, _utDaysInMonth[SSF_DTIME_MONTH_SEP], 0, 0, 0, 0) == false);
-    SSF_ASSERT(SSFDTimeStructInit(&ts, 0, SSF_DTIME_MONTH_OCT, _utDaysInMonth[SSF_DTIME_MONTH_OCT], 0, 0, 0, 0) == false);
-    SSF_ASSERT(SSFDTimeStructInit(&ts, 0, SSF_DTIME_MONTH_NOV, _utDaysInMonth[SSF_DTIME_MONTH_NOV], 0, 0, 0, 0) == false);
-    SSF_ASSERT(SSFDTimeStructInit(&ts, 0, SSF_DTIME_MONTH_DEC, _utDaysInMonth[SSF_DTIME_MONTH_DEC], 0, 0, 0, 0) == false);
+    SSF_ASSERT(SSFDTimeStructInit(&ts, 0, SSF_DTIME_MONTH_MAR,
+                                  _utDaysInMonth[SSF_DTIME_MONTH_MAR], 0, 0, 0, 0) == false);
+    SSF_ASSERT(SSFDTimeStructInit(&ts, 0, SSF_DTIME_MONTH_APR,
+                                  _utDaysInMonth[SSF_DTIME_MONTH_APR], 0, 0, 0, 0) == false);
+    SSF_ASSERT(SSFDTimeStructInit(&ts, 0, SSF_DTIME_MONTH_MAY,
+                                  _utDaysInMonth[SSF_DTIME_MONTH_MAY], 0, 0, 0, 0) == false);
+    SSF_ASSERT(SSFDTimeStructInit(&ts, 0, SSF_DTIME_MONTH_JUN,
+                                  _utDaysInMonth[SSF_DTIME_MONTH_JUN], 0, 0, 0, 0) == false);
+    SSF_ASSERT(SSFDTimeStructInit(&ts, 0, SSF_DTIME_MONTH_JUL,
+                                  _utDaysInMonth[SSF_DTIME_MONTH_JUL], 0, 0, 0, 0) == false);
+    SSF_ASSERT(SSFDTimeStructInit(&ts, 0, SSF_DTIME_MONTH_AUG,
+                                  _utDaysInMonth[SSF_DTIME_MONTH_AUG], 0, 0, 0, 0) == false);
+    SSF_ASSERT(SSFDTimeStructInit(&ts, 0, SSF_DTIME_MONTH_SEP,
+                                  _utDaysInMonth[SSF_DTIME_MONTH_SEP], 0, 0, 0, 0) == false);
+    SSF_ASSERT(SSFDTimeStructInit(&ts, 0, SSF_DTIME_MONTH_OCT,
+                                  _utDaysInMonth[SSF_DTIME_MONTH_OCT], 0, 0, 0, 0) == false);
+    SSF_ASSERT(SSFDTimeStructInit(&ts, 0, SSF_DTIME_MONTH_NOV,
+                                  _utDaysInMonth[SSF_DTIME_MONTH_NOV], 0, 0, 0, 0) == false);
+    SSF_ASSERT(SSFDTimeStructInit(&ts, 0, SSF_DTIME_MONTH_DEC,
+                                  _utDaysInMonth[SSF_DTIME_MONTH_DEC], 0, 0, 0, 0) == false);
     SSF_ASSERT(SSFDTimeStructInit(&ts, 0, 0, 0, SSF_TS_HOUR_MAX + 1, 0, 0, 0) == false);
     SSF_ASSERT(SSFDTimeStructInit(&ts, 0, 0, 0, 0, SSF_TS_MIN_MAX + 1, 0, 0) == false);
     SSF_ASSERT(SSFDTimeStructInit(&ts, 0, 0, 0, 0, 0, SSF_TS_SEC_MAX + 1, 0) == false);
@@ -236,7 +250,10 @@ void SSFDTimeUnitTest(void)
         tsi.yday = 0;
         for (tsi.month = 0; tsi.month <= SSF_TS_MONTH_MAX; tsi.month++)
         {
-            for (tsi.day = 0; tsi.day <= (uint8_t)(_utDaysInMonth[tsi.month] + (uint8_t) (SSFDTimeIsLeapYear(tsi.year) && (tsi.month == SSF_DTIME_MONTH_FEB)) - 1); tsi.day++)
+            for (tsi.day = 0; tsi.day <= (uint8_t)(_utDaysInMonth[tsi.month] +
+                                         (uint8_t)(SSFDTimeIsLeapYear(tsi.year) &&
+                                         (tsi.month == SSF_DTIME_MONTH_FEB)) - 1);
+                                         tsi.day++)
             {
                 for (tsi.hour = 0; tsi.hour <= SSF_TS_HOUR_MAX; tsi.hour++)
                 {
@@ -259,7 +276,8 @@ void SSFDTimeUnitTest(void)
                             SSF_ASSERT(tsi.wday == ts.wday);
 #if SSF_DTIME_STRUCT_STRICT_CHECK == 1
                             tsi.magic = 0;
-                            SSF_ASSERT(SSFFCSum16((uint8_t *)&tsi, sizeof(tsi), SSF_FCSUM_INITIAL) == ts.magic);
+                            SSF_ASSERT(SSFFCSum16((uint8_t *)&tsi, sizeof(tsi),
+                                                  SSF_FCSUM_INITIAL) == ts.magic);
 #endif
                         }
                     }

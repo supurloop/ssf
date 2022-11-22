@@ -498,7 +498,7 @@ typedef enum
 
     /* Map to function that returns 64-bit Unix time in seconds from RTC */
     /* bool (*read)(uint64_t *unixSec) */
-    #define SSF_RTC_READ() 
+    #define SSF_RTC_READ(unixSec) 
 #endif /* SSF_RTC_ENABLE_SIM */
 
 /* --------------------------------------------------------------------------------------------- */

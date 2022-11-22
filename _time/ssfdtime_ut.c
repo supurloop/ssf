@@ -68,6 +68,8 @@ void SSFDTimeUnitTest(void)
     SSFPortTick_t unixSysMin = SSFDTIME_UNIX_EPOCH_SYS_MIN;
     SSFPortTick_t unixSysMax = SSFDTIME_UNIX_EPOCH_SYS_MAX;
 
+    srand((unsigned int)SSFPortGetTick64());
+
     /* Verify interface assertions */
     SSF_ASSERT_TEST(SSFDTimeStructInit(NULL, 1970 - SSFDTIME_EPOCH_YEAR, 0, 0, 0, 0, 0, 0));
     SSF_ASSERT_TEST(SSFDTimeUnixToStruct(0, NULL, sizeof(ts)));

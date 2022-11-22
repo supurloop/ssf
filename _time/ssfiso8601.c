@@ -87,8 +87,10 @@ bool SSFISO8601UnixToISO(SSFPortTick_t unixSys, bool secPrecision, bool secPseud
                 ((secPseudoPrecision) && (pseudoSecs < 1000ul)));
 #endif
     SSF_REQUIRE((zone > SSF_ISO8601_ZONE_MIN) && (zone < SSF_ISO8601_ZONE_MAX));
+    if (zone == SSF_ISO8601_ZONE_UTC) { SSF_REQUIRE(zoneOffsetMin == 0); }
     SSF_REQUIRE((zoneOffsetMin > (-((int32_t)SSFDTIME_MIN_IN_DAY))) &&
                 (zoneOffsetMin < ((int16_t) SSFDTIME_MIN_IN_DAY)));
+    SSF_REQUIRE(outStr != NULL);
     SSF_REQUIRE(outStrSize >= SSFISO8601_MAX_SIZE);
 
     /* Copy default ISO string to user buffer */
@@ -134,6 +136,7 @@ bool SSFISO8601UnixToISO(SSFPortTick_t unixSys, bool secPrecision, bool secPseud
     /* Request to add pseudo sec precision? */
     if (secPseudoPrecision)
     {
+        if (secPrecision == false) { outStr[offset] = '.'; offset++; }
         offset += snprintf(&outStr[offset], outStrSize - offset, "%03d", pseudoSecs);
     }
 
@@ -249,7 +252,8 @@ bool SSFISO8601ISOToUnix(SSFCStrIn_t inStr, SSFPortTick_t *unixSys, int16_t *zon
             else break;
         }
         if ((numDigs == 0) || (numDigs > 9)) return false;
-        if ((inStr[index] != 0) && (inStr[index] != '-') && (inStr[index] != '+'))
+        if ((inStr[index] != 'Z') && (inStr[index] != 0) && (inStr[index] != '-') &&
+            (inStr[index] != '+'))
         { return false; }
 #if SSF_ISO8601_ALLOW_FSEC_TRUNC == 0
         if (numDigs > SSF_DTIME_SYS_PREC) return false;
@@ -325,5 +329,9 @@ bool SSFISO8601ISOToUnix(SSFCStrIn_t inStr, SSFPortTick_t *unixSys, int16_t *zon
     { return false; }
     if (SSFDTimeStructToUnix(&ts, unixSys) == false) { return false; }
 
-    return true;
+    /* Switch from local to UTC zone */
+    if ((*zoneOffsetMin) != SSFISO8601_INVALID_ZONE_OFFSET)
+    { *(unixSys) -= ((*zoneOffsetMin) * SSFDTIME_SEC_IN_MIN * SSF_TICKS_PER_SEC); }
+
+    return ((*unixSys) <= SSFDTIME_UNIX_EPOCH_SYS_MAX);
 }

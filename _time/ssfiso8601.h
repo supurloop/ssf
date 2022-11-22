@@ -44,7 +44,7 @@ extern "C" {
 /* Defines and typedefs                                                                          */
 /* --------------------------------------------------------------------------------------------- */
 #define SSFISO8601_MIN_SIZE (20u) /* Ex. "2199-12-31T23:59:59" */
-#define SSFISO8601_MAX_SIZE (38u) /* Ex. "2199-12-31T23:59:59.00000000000+00:00" */
+#define SSFISO8601_MAX_SIZE (36u) /* Ex. "2199-12-31T23:59:59.999999999+23:59" */
 #define SSFISO8601_INVALID_ZONE_OFFSET (SSFDTIME_MIN_IN_DAY + 1)
 
 typedef enum

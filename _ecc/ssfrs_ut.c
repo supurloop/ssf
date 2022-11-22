@@ -50,6 +50,8 @@ void SSFRSUnitTest(void)
     uint16_t i;
     uint16_t j;
 
+    srand((unsigned int)SSFPortGetTick64());
+
     /* Buffers */
     uint8_t msg[SSF_RS_MAX_MESSAGE_SIZE + (SSF_RS_MAX_SYMBOLS * SSF_RS_MAX_CHUNKS)];
     uint8_t msgCopy[SSF_RS_MAX_MESSAGE_SIZE];

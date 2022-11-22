@@ -331,7 +331,7 @@ bool SSFISO8601ISOToUnix(SSFCStrIn_t inStr, SSFPortTick_t *unixSys, int16_t *zon
 
     /* Switch from local to UTC zone */
     if ((*zoneOffsetMin) != SSFISO8601_INVALID_ZONE_OFFSET)
-    { *(unixSys) -= ((*zoneOffsetMin) * SSFDTIME_SEC_IN_MIN * SSF_TICKS_PER_SEC); }
+    { *(unixSys) -= (((SSFPortTick_t)(*zoneOffsetMin)) * SSFDTIME_SEC_IN_MIN * SSF_TICKS_PER_SEC); }
 
     return ((*unixSys) <= SSFDTIME_UNIX_EPOCH_SYS_MAX);
 }

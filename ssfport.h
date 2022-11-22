@@ -508,7 +508,7 @@ typedef enum
 #define SSF_DTIME_STRUCT_STRICT_CHECK (1u)
 
 /* 1 == Performs a lengthy exhausive unit test for every possible second; 0 == Reduced test */
-#define SSF_DTIME_EXHAUSTIVE_UNIT_TEST (0u)
+#define SSF_DTIME_EXHAUSTIVE_UNIT_TEST (1u)
 
 /* --------------------------------------------------------------------------------------------- */
 /* Configure ssfiso8601's interface                                                              */
@@ -525,7 +525,7 @@ typedef enum
 #define SSF_ISO8601_ALLOW_NO_ZONE_ISO_TO_UNIX (1u)
 
 /* 1 == Performs a lengthy exhausive unit test for every possible second; 0 == Reduced test */
-#define SSF_ISO8601_EXHAUSTIVE_UNIT_TEST (0u)
+#define SSF_ISO8601_EXHAUSTIVE_UNIT_TEST (1u)
 
 /* --------------------------------------------------------------------------------------------- */
 /* External interface                                                                            */

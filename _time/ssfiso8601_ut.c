@@ -1059,7 +1059,7 @@ void SSFISO8601UnitTest(void)
                 {
                     if (i == 0) sign = 1;
                     else sign = -1;
-                    printf("%llu, hour %u, minute %u sign:%d\r\n", unixSys, hour, minute, sign);
+                    //printf("%llu, hour %u, minute %u sign:%d\r\n", unixSys, hour, minute, sign);
                     if (((sign == -1) && (unixSys < ((((hour * SSFDTIME_MIN_IN_HOUR) + minute) * SSFDTIME_SEC_IN_MIN) * SSF_TICKS_PER_SEC))) ||
                         ((sign == 1) && (SSFDTIME_UNIX_EPOCH_SYS_MAX - unixSys) < ((((hour * SSFDTIME_MIN_IN_HOUR) + minute) * SSFDTIME_SEC_IN_MIN) * SSF_TICKS_PER_SEC)))
                     {

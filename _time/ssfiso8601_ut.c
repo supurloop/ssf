@@ -1036,6 +1036,7 @@ void SSFISO8601UnitTest(void)
 
         for (hour = 0; hour <= SSF_TS_HOUR_MAX; hour++)
         {
+            if (hour == 2) hour = SSF_TS_HOUR_MAX - 1;
             for (i = 0; i < 2; i++)
             {
                 if (i == 0) sign = 1;
@@ -1092,7 +1093,8 @@ void SSFISO8601UnitTest(void)
 
         for (hour = 0; hour <= SSF_TS_HOUR_MAX; hour++)
         {
-            for (minute = 0; minute <= SSF_TS_MIN_MAX; minute++)
+            if (hour == 2) hour = SSF_TS_HOUR_MAX - 1;
+            for (minute = 0; minute <= SSF_TS_MIN_MAX; minute += SSF_TS_MIN_MAX)
             {
                 for (i = 0; i < 2; i++)
                 {
@@ -1158,7 +1160,8 @@ void SSFISO8601UnitTest(void)
 #if SSF_ISO8601_ALLOW_NO_ZONE_ISO_TO_UNIX == 1
         for (hour = 0; hour <= SSF_TS_HOUR_MAX; hour++)
         {
-            for (minute = 0; minute <= SSF_TS_MIN_MAX; minute++)
+            if (hour == 2) hour = SSF_TS_HOUR_MAX - 1;
+            for (minute = 0; minute <= SSF_TS_MIN_MAX; minute += SSF_TS_MIN_MAX)
             {
                 for (i = 0; i < 2; i++)
                 {

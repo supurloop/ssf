@@ -32,6 +32,9 @@ The framework implements a number of common embedded system functions:
 17. A cryptograpically secure capable pseudo random number generator (PRNG).
 18. A INI parser/generator interface.
 19. A UBJSON (Universal Binary JSON) parser/generator interface.
+20. A Unix Time RTC interface.
+21. A Unix Date/Time interface.
+22. An ISO8601 Date/Time interface.
 
 To give you an idea of the framework size here are some program memory estimates for each component compiled on an MSP430 with Level 3 optimization:
 Byte FIFO, linked list, memory pool, Base64, Hex ASCII are each about 1000 bytes.
@@ -103,7 +106,7 @@ RTOSes introduce significant complexity, and in particular a dizzying amount of 
 
 That said this framework can run perfectly fine with an RTOS, Windows, or Linux, so long as some precautions are taken.
 
-Excepting the finite state machine framework, all interfaces are reentrant.
+Excepting the finite state machine framework and RTC interface, all interfaces are reentrant.
 This means that calls into those interfaces from different execution contexts will not interfere with each other.
 
 For example, you can have linked list object A in task 1 and linked list object B in task 2 and they will be managed independently and correctly, so long as they are only accessed from the context of their respective task.
@@ -1120,6 +1123,104 @@ bool printFn(uint8_t* js, size_t size, size_t start, size_t* end, void* in)
 Object and array nesting is achieved by calling SSFUBJsonPrintObject() or SSFUBJsonPrintArray() from within a printer function.
 
 Parsing and generation of optimized integer arrays is supported.
+
+### Unix Time RTC Interface
+
+This interface keeps Unix time, as initialized from an RTC, by using the system tick counter. When time is changed, the RTC is written to keep it in sync.
+
+Since many embedded systems use I2C RTC devices, accessing the RTC everytime Unix time is required is time-intensive. This interface eliminates all unnecessary RTC reads.
+
+```
+    /* Reads the RTC and tracks Unix time based on the system tick */
+    SSFRTCInit();
+
+    while (true)
+    {
+        SSFPortTick_t unixSys;
+        uint64_t newUnixSec;
+
+        /* Returns Unix time in system ticks */
+        unixSys = SSFRTCGetUnixNow();
+        /* unixSys / SSF_TICKS_PER_SEC == Seconds since Unix Epoch */
+
+        if (NTPUpdated(&newUnixSec))
+        {
+            /* NTP returned a new seconds since Unix Epoch */
+            SSFRTCSet(newUnixSec);
+            /* ...RTC has been written with new time */
+        }
+    }
+```
+
+### Date Time Interface
+
+This interface converts Unix time in system ticks into a date time struct and vice versa.
+
+```
+    /* Supported date range: 1970-01-01T00:00:00.000000000Z - 2199-12-31T23:59:59.999999999Z         */
+    /* Unix time is measured in system ticks (unixSys is seconds scaled by SSF_TICKS_PER_SEC)        */
+    /* Unix time is always UTC (Z) time zone, other zones are handled by the ssfios8601 interface.   */
+    /* Unix time does not account for leap seconds, it only accounts for leap years.                 */
+    /* It is assumed that the RTC is periodically updated from an external time source, such as NTP. */
+    /* Inputs are strictly checked to ensure they represent valid calendar dates.                    */
+    /* System ticks (SSF_TICKS_PER_SEC) must be 1000, 1000000, or 1000000000.                        */
+
+    SSFDTimeStruct_t ts;
+    SSFPortTick_t unixSys;
+    SSFDTimeStruct_t tsOut;
+
+    /* Initialize a date time struct from basic date information */
+    SSFDTimeStructInit(&ts, year, month, day, hour, min, sec, fsec);
+
+    /* Convert the date time struct to Unix time in system ticks */
+    SSFDTimeStructToUnix(&ts, &unixSys);
+    /* unixSys == system ticks since epoch for year/month/day hour/min/sec/fsec */
+
+    /* Convert unixSys back to a date time struct */
+    SSFDTimeUnixToStruct(unixSys, &tsOut, sizeof(tsOut));
+    /* tsOut struct fields == ts struct fields */
+```
+
+### ISO8601 Date Time Interface
+
+This interface converts Unix time in system ticks into an ISO8601 extended date time string and vice versa. This is the only time interface in the framework that handles "local time".
+
+```
+    /* Supported date range: 1970-01-01T00:00:00.000000000Z - 2199-12-31T23:59:59.999999999Z         */
+    /* Unix time is measured in system ticks (unixSys is seconds is scaled by SSF_TICKS_PER_SEC)     */
+    /* Unix time is always UTC (Z) time zone.                                                        */
+    /* Inputs are strictly checked to ensure they represent valid calendar dates.                    */
+    /*                                                                                               */
+    /* Only ISO8601 extended format is supported, and only with the following ordered fields:        */
+    /*   Required Date & Time Field:      YYYY-MM-DDTHH:MM:SS                                        */
+    /*   Optional Second Precision Field:                    .FFF                                    */
+    /*                                                       .FFFFFF                                 */
+    /*                                                       .FFFFFFFFF                              */
+    /*   Optional Time Zone Field :                                    Z                             */
+    /*                                                                 +HH                           */
+    /*                                                                 -HH                           */
+    /*                                                                 +HH:MM                        */
+    /*                                                                 -HH:MM                        */
+    /*                                                                 (no TZ field == local time)   */
+    /*                                                                                               */
+    /* The Date and Time field is always in local time, subtracting offset yields UTC time.          */
+    /* The default fractional second precision is determined by SSF_TICKS_PER_SEC.                   */
+    /* Fractional seconds may be optionally added when generating an ISO string.                     */
+    /* 3 digits of pseudo-fractional seconds precision may be added when generating an ISO string.   */
+    /* Daylight savings is handled by application code adjusting the zoneOffsetMin input as needed.  */
+
+    SSFPortTick_t unixSys;
+    SSFPortTick_t unixSysOut;
+    int16_t zoneOffsetMin;
+    char isoStr[SSFISO8601_MAX_SIZE];
+
+    unixSys = SSFRTCGetUnixNow();
+    SSFISO8601UnixToISO(unixSys, false, false, 0, SSF_ISO8601_ZONE_UTC, 0, isoStr, sizeof(isoStr));
+    /* isoStr looks something like "2022-11-23T13:00:12Z" */
+
+    SSFISO8601ISOToUnix(isoStr, &unixSysOut, &zoneOffsetMin);
+    /* unixSys == unixSysOut, zoneOffsetMin == 0 */
+```
 
 ## Conclusion
 

@@ -183,7 +183,7 @@ bool _SSFUBJsonPrintOptArray(uint8_t *js, size_t size, size_t start, size_t *end
 
     for (i = 0; i < *alen; i++)
     {
-        if (!SSFUBJsonPrintInt(js, size, start, &start, ((int64_t) i) + 1, false)) return false;
+        if (!SSFUBJsonPrintInt(js, size, start, &start, ((int64_t) i) + 1, true)) return false;
         *end = start;
     }
     return true;
@@ -1213,7 +1213,7 @@ void SSFUBJsonUnitTest(void)
 
     jsOutStart = 0;
     jsOutEnd = (size_t)-1;
-    alen = 10;
+    alen = 9;
     SSF_ASSERT(SSFUBJsonPrintObject(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, _SSFUBJsonPrintFn2, &alen));
     SSF_ASSERT(SSFUBJsonIsValid(jsOut, jsOutEnd));
 

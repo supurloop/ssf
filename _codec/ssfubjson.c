@@ -74,22 +74,22 @@
 /* --------------------------------------------------------------------------------------------- */
 /* Local Prototypes.                                                                             */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFUBJsonValue(uint8_t *js, size_t jsLen, size_t *index, size_t *start, size_t *end,
-                            SSFCStrIn_t *path, uint8_t depth, SSFUBJsonType_t *jt,
+static bool _SSFUBJsonValue(const uint8_t *js, size_t jsLen, size_t *index, size_t *start,
+                            size_t *end, SSFCStrIn_t *path, uint8_t depth, SSFUBJsonType_t *jt,
                             uint8_t override);
 
-static bool _SSFJsonTypeField(uint8_t *js, size_t jsLen, size_t *index, size_t *fstart,
+static bool _SSFJsonTypeField(const uint8_t *js, size_t jsLen, size_t *index, size_t *fstart,
                               size_t *fend, SSFUBJsonType_t *fjt, uint8_t override);
 
-static bool _SSFUBJsonObject(uint8_t *js, size_t jsLen, size_t *index, size_t *start, size_t *end,
-                     SSFCStrIn_t *path, uint8_t depth, SSFUBJsonType_t *jt);
+bool _SSFUBJsonObject(const uint8_t *js, size_t jsLen, size_t *index, size_t *start, size_t *end,
+                      SSFCStrIn_t *path, uint8_t depth, SSFUBJsonType_t *jt);
 
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if array found, else false; If true returns type/start/end on path index match.  */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFUBJsonArray(uint8_t *js, size_t jsLen, size_t *index, size_t *start, size_t *end,
-                            size_t *astart, size_t *aend, SSFCStrIn_t *path, uint8_t depth,
-                            SSFUBJsonType_t *jt)
+static bool _SSFUBJsonArray(const uint8_t *js, size_t jsLen, size_t *index, size_t *start,
+                            size_t *end, size_t *astart, size_t *aend, SSFCStrIn_t *path,
+                            uint8_t depth, SSFUBJsonType_t *jt)
 {
     size_t valStart;
     size_t valEnd;
@@ -171,7 +171,7 @@ valDone:
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if type field found, else false; If true returns type/start/end on path match.   */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFJsonTypeField(uint8_t *js, size_t jsLen, size_t *index, size_t *fstart,
+static bool _SSFJsonTypeField(const uint8_t *js, size_t jsLen, size_t *index, size_t *fstart,
                               size_t *fend, SSFUBJsonType_t *fjt, uint8_t override)
 {
     size_t len;
@@ -286,8 +286,8 @@ static bool _SSFJsonTypeField(uint8_t *js, size_t jsLen, size_t *index, size_t *
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if value found, else false; If true returns type/start/end on path match.        */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFUBJsonValue(uint8_t *js, size_t jsLen, size_t *index, size_t *start, size_t *end,
-                            SSFCStrIn_t *path, uint8_t depth, SSFUBJsonType_t *jt,
+static bool _SSFUBJsonValue(const uint8_t *js, size_t jsLen, size_t *index, size_t *start,
+                            size_t *end, SSFCStrIn_t *path, uint8_t depth, SSFUBJsonType_t *jt,
                             uint8_t override)
 {
     size_t i;
@@ -346,7 +346,7 @@ static bool _SSFUBJsonValue(uint8_t *js, size_t jsLen, size_t *index, size_t *st
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if name/value found, else false; If true returns type/start/end on path match.   */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFJsonNameValue(uint8_t *js, size_t jsLen, size_t *index, size_t *start,
+static bool _SSFJsonNameValue(const uint8_t *js, size_t jsLen, size_t *index, size_t *start,
                               size_t *end, SSFCStrIn_t *path, uint8_t depth, SSFUBJsonType_t *jt)
 {
     size_t valStart;
@@ -397,7 +397,7 @@ static bool _SSFJsonNameValue(uint8_t *js, size_t jsLen, size_t *index, size_t *
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if object found, else false; If true returns type/start/end on path match.       */
 /* --------------------------------------------------------------------------------------------- */
-bool _SSFUBJsonObject(uint8_t *js, size_t jsLen, size_t *index, size_t *start, size_t *end,
+bool _SSFUBJsonObject(const uint8_t *js, size_t jsLen, size_t *index, size_t *start, size_t *end,
                      SSFCStrIn_t *path, uint8_t depth, SSFUBJsonType_t *jt)
 {
     SSF_REQUIRE(js != NULL);

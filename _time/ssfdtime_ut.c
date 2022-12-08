@@ -39,10 +39,6 @@
 #include "ssffcsum.h"
 #endif
 
-#if SSF_DTIME_EXHAUSTIVE_UNIT_TEST == 0
-#warning Not running exhaustive ssfdtime unit tests; test coverage reduced.
-#endif /* SSF_DTIME_EXHAUSTIVE_UNIT_TEST */
-
 static const uint8_t _utDaysInMonth[SSFDTIME_MONTHS_IN_YEAR] =
     { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
 
@@ -181,7 +177,7 @@ void SSFDTimeUnitTest(void)
     SSF_ASSERT(SSFDTimeStructInit(&ts, 0, 0, 0, 0, 0, 0, SSF_TS_FSEC_MAX + 1) == false);
 
     /* Fuzz test for SSFDTimeStructInit() */
-    for (i = 0; i < 100000000ull; i++)
+    for (i = 0; i < 10000000ull; i++)
     {
         tsi.year = rand() % (SSF_TS_YEAR_MAX + 1);
         tsi.month = rand() % (SSF_TS_MONTH_MAX + 1);
@@ -361,7 +357,7 @@ void SSFDTimeUnitTest(void)
     SSF_ASSERT(SSFDTimeStructToUnix(&ts, &unixSys) == false);
 
     /* Fuzz test for SSFDTimeUnixToStruct() and SSFDTimeStructToUnix() */
-    for (i = 0; i < 100000000ull; i++)
+    for (i = 0; i < 10000000ull; i++)
     {
         unixSys = i;
         for (j = 0; j < sizeof(unixSys); j++)

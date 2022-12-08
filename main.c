@@ -54,6 +54,7 @@
 #include "ssfdtime.h"
 #include "ssfrtc.h"
 #include "ssfiso8601.h"
+#include "ssfdec.h"
 
 typedef struct
 {
@@ -64,6 +65,10 @@ typedef struct
 
 SSFUnitTest_t unitTests[] =
 {
+#if SSF_CONFIG_DEC_UNIT_TEST == 1
+    { "ssfdec", "Decimal String Codec", SSFDecUnitTest },
+#endif /* SSF_CONFIG_BFIFO_UNIT_TEST */
+
 #if SSF_CONFIG_BFIFO_UNIT_TEST == 1
     { "ssfbfifo", "Byte FIFO", SSFBFifoUnitTest },
 #endif /* SSF_CONFIG_BFIFO_UNIT_TEST */

@@ -132,6 +132,7 @@ typedef uint64_t SSFPortTick_t;
 #define SSF_CONFIG_DTIME_UNIT_TEST (1u)
 #define SSF_CONFIG_RTC_UNIT_TEST (1u)
 #define SSF_CONFIG_ISO8601_UNIT_TEST (1u)
+#define SSF_CONFIG_DEC_UNIT_TEST (1u)
 
 /* If any unit test is enabled then enable unit test mode */
 #if SSF_CONFIG_BFIFO_UNIT_TEST == 1 || \
@@ -155,7 +156,8 @@ typedef uint64_t SSFPortTick_t;
     SSF_CONFIG_UBJSON_UNIT_TEST == 1 || \
     SSF_CONFIG_DTIME_UNIT_TEST == 1 || \
     SSF_CONFIG_RTC_UNIT_TEST == 1 || \
-    SSF_CONFIG_ISO8601_UNIT_TEST == 1
+    SSF_CONFIG_ISO8601_UNIT_TEST == 1 || \
+    SSF_CONFIG_DEC_UNIT_TEST == 1
 #define SSF_CONFIG_UNIT_TEST (1u)
 #else
 #define SSF_CONFIG_UNIT_TEST (0u)
@@ -508,7 +510,7 @@ typedef enum
 #define SSF_DTIME_STRUCT_STRICT_CHECK (1u)
 
 /* 1 == Performs a lengthy exhausive unit test for every possible second; 0 == Reduced test */
-#define SSF_DTIME_EXHAUSTIVE_UNIT_TEST (1u)
+#define SSF_DTIME_EXHAUSTIVE_UNIT_TEST (0u)
 
 /* --------------------------------------------------------------------------------------------- */
 /* Configure ssfiso8601's interface                                                              */
@@ -525,7 +527,13 @@ typedef enum
 #define SSF_ISO8601_ALLOW_NO_ZONE_ISO_TO_UNIX (1u)
 
 /* 1 == Performs a lengthy exhausive unit test for every possible second; 0 == Reduced test */
-#define SSF_ISO8601_EXHAUSTIVE_UNIT_TEST (1u)
+#define SSF_ISO8601_EXHAUSTIVE_UNIT_TEST (0u)
+
+/* --------------------------------------------------------------------------------------------- */
+/* Configure ssfdec's interface                                                                  */
+/* --------------------------------------------------------------------------------------------- */
+/* 1 == Performs a lengthy exhausive unit test for every possible conversion; 0 == Reduced test */
+#define SSF_DEC_EXHAUSTIVE_UNIT_TEST (0u)
 
 /* --------------------------------------------------------------------------------------------- */
 /* External interface                                                                            */

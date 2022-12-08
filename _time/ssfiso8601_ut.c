@@ -37,10 +37,6 @@
 #include "ssfdtime.h"
 #include "ssfiso8601.h"
 
-#if SSF_ISO8601_EXHAUSTIVE_UNIT_TEST == 0
-#warning Not running exhaustive ssfiso8601 unit tests; test coverage reduced.
-#endif /* SSF_ISO8601_EXHAUSTIVE_UNIT_TEST */
-
 /* --------------------------------------------------------------------------------------------- */
 /* Unit tests the ssfiso8601 interface.                                                          */
 /* --------------------------------------------------------------------------------------------- */

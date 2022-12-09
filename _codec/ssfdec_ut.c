@@ -39,13 +39,15 @@
 void SSFDecUnitTest(void)
 {
     int64_t i;
-    int32_t i32;
-    uint32_t u32;
-    size_t len;
-    char str1[30];
-    char str2[30];
+    int64_t i64;
+    uint64_t u64;
+    uint64_t lastu64;
+    size_t len1;
+    size_t len2;
+    char str1[48];
+    char str2[48];
     uint8_t minFieldWidth;
-    uint16_t r = 1;
+    uint64_t r = 1;
 
     /* Test assertions */
     SSF_ASSERT_TEST(SSFDecIntToStr(0, NULL, 1));
@@ -57,146 +59,345 @@ void SSFDecUnitTest(void)
     SSF_ASSERT_TEST(SSFDecUIntToStrPadded(0, str1, sizeof(str1), 0, '0'));
     SSF_ASSERT_TEST(SSFDecUIntToStrPadded(0, str1, sizeof(str1), 1, '0'));
 
-    /* Test SSFDecIntToStr() && SSFDecUIntToStr() */
-    for (i = -2147483648; i < 2147483648; i += r)
+    /* Test boundary conditions of SSFDecIntToStr() */
+    i64 = 1;
+    for (i = 0; i < 19; i++)
     {
-#if SSF_DEC_EXHAUSTIVE_UNIT_TEST == 0
-        r = rand() % 2048;
-#endif
-        i32 = (int32_t)i;
-        snprintf(str1, sizeof(str1), "%d", i32);
-        len = SSFDecIntToStr(i32, str2, sizeof(str2));
-        SSF_ASSERT(len != 0);
-        SSF_ASSERT(str1[len - 1] != 0);
-        SSF_ASSERT(str1[len] == 0);
-        SSF_ASSERT(memcmp(str1, str2, len + 1) == 0);
-        SSF_ASSERT(SSFDecIntToStr(i32, str2, 0) == 0);
-        SSF_ASSERT(SSFDecIntToStr(i32, str2, len - 1) == 0);
-        SSF_ASSERT(SSFDecIntToStr(i32, str2, len) == 0);
-        SSF_ASSERT(SSFDecIntToStr(i32, str2, len + 1) != 0);
+        len1 = snprintf(str1, sizeof(str1), "%lld", i64);
+        len2 = SSFDecIntToStr(i64, str2, sizeof(str2));
+        SSF_ASSERT(len2 != 0);
+        SSF_ASSERT(len1 == len2);
+        SSF_ASSERT(str1[len1 - 1] != 0);
+        SSF_ASSERT(str1[len1] == 0);
+        SSF_ASSERT(memcmp(str1, str2, len1 + 1) == 0);
+        SSF_ASSERT(SSFDecIntToStr(i64, str2, 0) == 0);
+        SSF_ASSERT(SSFDecIntToStr(i64, str2, len1 - 1) == 0);
+        SSF_ASSERT(SSFDecIntToStr(i64, str2, len1) == 0);
+        SSF_ASSERT(SSFDecIntToStr(i64, str2, len1 + 1) != 0);
 
-        u32 = (uint32_t)i;
-        snprintf(str1, sizeof(str1), "%u", u32);
-        len = SSFDecUIntToStr(u32, str2, sizeof(str2));
-        SSF_ASSERT(len != 0);
-        SSF_ASSERT(str1[len - 1] != 0);
-        SSF_ASSERT(str1[len] == 0);
-        SSF_ASSERT(memcmp(str1, str2, len + 1) == 0);
-        SSF_ASSERT(SSFDecUIntToStr(u32, str2, 0) == 0);
-        SSF_ASSERT(SSFDecUIntToStr(u32, str2, len - 1) == 0);
-        SSF_ASSERT(SSFDecUIntToStr(u32, str2, len) == 0);
-        SSF_ASSERT(SSFDecUIntToStr(u32, str2, len + 1) != 0);
+        len1 = snprintf(str1, sizeof(str1), "%lld", i64 - 1);
+        len2 = SSFDecIntToStr(i64 - 1, str2, sizeof(str2));
+        SSF_ASSERT(len2 != 0);
+        SSF_ASSERT(len1 == len2);
+        SSF_ASSERT(str1[len1 - 1] != 0);
+        SSF_ASSERT(str1[len1] == 0);
+        SSF_ASSERT(memcmp(str1, str2, len1 + 1) == 0);
+        SSF_ASSERT(SSFDecIntToStr(i64 - 1, str2, 0) == 0);
+        SSF_ASSERT(SSFDecIntToStr(i64 - 1, str2, len1 - 1) == 0);
+        SSF_ASSERT(SSFDecIntToStr(i64 - 1, str2, len1) == 0);
+        SSF_ASSERT(SSFDecIntToStr(i64 - 1, str2, len1 + 1) != 0);
+
+        len1 = snprintf(str1, sizeof(str1), "%lld", -i64);
+        len2 = SSFDecIntToStr(-i64, str2, sizeof(str2));
+        SSF_ASSERT(len2 != 0);
+        SSF_ASSERT(len1 == len2);
+        SSF_ASSERT(str1[len1 - 1] != 0);
+        SSF_ASSERT(str1[len1] == 0);
+        SSF_ASSERT(memcmp(str1, str2, len1 + 1) == 0);
+        SSF_ASSERT(SSFDecIntToStr(-i64, str2, 0) == 0);
+        SSF_ASSERT(SSFDecIntToStr(-i64, str2, len1 - 1) == 0);
+        SSF_ASSERT(SSFDecIntToStr(-i64, str2, len1) == 0);
+        SSF_ASSERT(SSFDecIntToStr(-i64, str2, len1 + 1) != 0);
+
+
+        len1 = snprintf(str1, sizeof(str1), "%lld", -i64 + 1);
+        len2 = SSFDecIntToStr(-i64 + 1, str2, sizeof(str2));
+        SSF_ASSERT(len2 != 0);
+        SSF_ASSERT(len1 == len2);
+        SSF_ASSERT(str1[len1 - 1] != 0);
+        SSF_ASSERT(str1[len1] == 0);
+        SSF_ASSERT(memcmp(str1, str2, len1 + 1) == 0);
+        SSF_ASSERT(SSFDecIntToStr(-i64 + 1, str2, 0) == 0);
+        SSF_ASSERT(SSFDecIntToStr(-i64 + 1, str2, len1 - 1) == 0);
+        SSF_ASSERT(SSFDecIntToStr(-i64 + 1, str2, len1) == 0);
+        SSF_ASSERT(SSFDecIntToStr(-i64 + 1, str2, len1 + 1) != 0);
+
+        i64 *= 10;
+    }
+
+    /* Test boundary conditions of SSFDecUIntToStr() */
+    u64 = 1;
+    for (i = 0; i <= 19; i++)
+    {
+        len1 = snprintf(str1, sizeof(str1), "%llu", u64);
+        len2 = SSFDecUIntToStr(u64, str2, sizeof(str2));
+        SSF_ASSERT(len2 != 0);
+        SSF_ASSERT(len1 == len2);
+        SSF_ASSERT(str1[len1 - 1] != 0);
+        SSF_ASSERT(str1[len1] == 0);
+        SSF_ASSERT(memcmp(str1, str2, len1 + 1) == 0);
+        SSF_ASSERT(SSFDecUIntToStr(u64, str2, 0) == 0);
+        SSF_ASSERT(SSFDecUIntToStr(u64, str2, len1 - 1) == 0);
+        SSF_ASSERT(SSFDecUIntToStr(u64, str2, len1) == 0);
+        SSF_ASSERT(SSFDecUIntToStr(u64, str2, len1 + 1) != 0);
+
+
+        len1 = snprintf(str1, sizeof(str1), "%llu", u64 - 1);
+        len2 = SSFDecUIntToStr(u64 - 1, str2, sizeof(str2));
+        SSF_ASSERT(len2 != 0);
+        SSF_ASSERT(len1 == len2);
+        SSF_ASSERT(str1[len1 - 1] != 0);
+        SSF_ASSERT(str1[len1] == 0);
+        SSF_ASSERT(memcmp(str1, str2, len1 + 1) == 0);
+        SSF_ASSERT(SSFDecUIntToStr(u64 - 1, str2, 0) == 0);
+        SSF_ASSERT(SSFDecUIntToStr(u64 - 1, str2, len1 - 1) == 0);
+        SSF_ASSERT(SSFDecUIntToStr(u64 - 1, str2, len1) == 0);
+        SSF_ASSERT(SSFDecUIntToStr(u64 - 1, str2, len1 + 1) != 0);
+
+        u64 *= 10;
     }
 
     /* Test SSFDecIntToStr() && SSFDecUIntToStr() */
-    for (i = -2147483648; i < 2147483648; i += r)
+    lastu64 = 0;
+    i = 0;
+    for (u64 = 0; u64 >= lastu64; u64 += r)
     {
-#if SSF_DEC_EXHAUSTIVE_UNIT_TEST == 0
-        r = rand() % 2048;
-#endif
-        for (minFieldWidth = 2; minFieldWidth <= 12; minFieldWidth++)
+        if (u64 < 100000ull)
         {
-            i32 = (int32_t)i;
-            /* Note: Some systems output warnings if format specifiers are not const strings */
-            switch (minFieldWidth)
-            {
-                case 2:
-                    snprintf(str1, sizeof(str1), "%02d", i32);
-                    break;
-                case 3:
-                    snprintf(str1, sizeof(str1), "%03d", i32);
-                    break;
-                case 4:
-                    snprintf(str1, sizeof(str1), "%04d", i32);
-                    break;
-                case 5:
-                    snprintf(str1, sizeof(str1), "%05d", i32);
-                    break;
-                case 6:
-                    snprintf(str1, sizeof(str1), "%06d", i32);
-                    break;
-                case 7:
-                    snprintf(str1, sizeof(str1), "%07d", i32);
-                    break;
-                case 8:
-                    snprintf(str1, sizeof(str1), "%08d", i32);
-                    break;
-                case 9:
-                    snprintf(str1, sizeof(str1), "%09d", i32);
-                    break;
-                case 10:
-                    snprintf(str1, sizeof(str1), "%010d", i32);
-                    break;
-                case 11:
-                    snprintf(str1, sizeof(str1), "%011d", i32);
-                    break;
-                case 12:
-                    snprintf(str1, sizeof(str1), "%012d", i32);
-                    break;
-                default:
-                    SSF_ERROR();
-                    break;
-            }
-            len = SSFDecIntToStrPadded(i32, str2, sizeof(str2), minFieldWidth, '0');
-            SSF_ASSERT(len != 0);
-            SSF_ASSERT(str1[len - 1] != 0);
-            SSF_ASSERT(str1[len] == 0);
-            SSF_ASSERT(memcmp(str1, str2, len + 1) == 0);
-            SSF_ASSERT(SSFDecIntToStrPadded(i32, str2, 0, minFieldWidth, '0') == 0);
-            SSF_ASSERT(SSFDecIntToStrPadded(i32, str2, len - 1, minFieldWidth, '0') == 0);
-            SSF_ASSERT(SSFDecIntToStrPadded(i32, str2, len, minFieldWidth, '0') == 0);
-            SSF_ASSERT(SSFDecIntToStrPadded(i32, str2, len + 1, minFieldWidth, '0') != 0);
+            r = 1;
+        }
+        else if (u64 < 400000ull)
+        {
+            r = rand() % 8192ull;
+        }
+        else if (u64 < 4000000000ull)
+        {
+            r = rand() % 32768ull;
+        }
+        else if (u64 < 400000000000000ull)
+        {
+            r = (rand() % 32768ull) * (rand() % 32768ull) + ( rand() % 32768ull);
+        }
+        else if (u64 < 1000000000000000000ull)
+        {
+            r = (((rand() % 32768ull) * (rand() % 32768ull)) * 1000ull) + (rand() % 32768ull);
+        }
+        else
+        {
+            r = (((rand() % 32768ull) * (rand() % 32768ull)) * 10000ull) + (rand() % 32768ull);
+        }
+        lastu64 = u64;
 
-            u32 = (uint32_t)i;
+        i64 = (int64_t)u64;
+        len1 = snprintf(str1, sizeof(str1), "%lld", i64);
+        len2 = SSFDecIntToStr(i64, str2, sizeof(str2));
+        SSF_ASSERT(len1 != 0);
+        SSF_ASSERT(len1 == len2);
+        SSF_ASSERT(str1[len1 - 1] != 0);
+        SSF_ASSERT(str1[len1] == 0);
+        SSF_ASSERT(memcmp(str1, str2, len1 + 1) == 0);
+        SSF_ASSERT(SSFDecIntToStr(i64, str2, 0) == 0);
+        SSF_ASSERT(SSFDecIntToStr(i64, str2, len1 - 1) == 0);
+        SSF_ASSERT(SSFDecIntToStr(i64, str2, len1) == 0);
+        SSF_ASSERT(SSFDecIntToStr(i64, str2, len1 + 1) != 0);
+
+        len1 = snprintf(str1, sizeof(str1), "%llu", u64);
+        len2 = SSFDecUIntToStr(u64, str2, sizeof(str2));
+        SSF_ASSERT(len1 != 0);
+        SSF_ASSERT(len1 == len2);
+        SSF_ASSERT(str1[len1 - 1] != 0);
+        SSF_ASSERT(str1[len1] == 0);
+        SSF_ASSERT(memcmp(str1, str2, len1 + 1) == 0);
+        SSF_ASSERT(SSFDecUIntToStr(u64, str2, 0) == 0);
+        SSF_ASSERT(SSFDecUIntToStr(u64, str2, len1 - 1) == 0);
+        SSF_ASSERT(SSFDecUIntToStr(u64, str2, len1) == 0);
+        SSF_ASSERT(SSFDecUIntToStr(u64, str2, len1 + 1) != 0);
+    }
+
+    /* Test SSFDecIntToStrPadded() && SSFDecUIntToStrPadded() */
+    lastu64 = 0;
+    for (u64 = 0; u64 >= lastu64; u64 += r)
+    {
+        if (u64 < 100000ull)
+        {
+            r = 1;
+        }
+        else if (u64 < 400000ull)
+        {
+            r = rand() % 8192ull;
+        }
+        else if (u64 < 4000000000ull)
+        {
+            r = rand() % 32768ull;
+        }
+        else if (u64 < 400000000000000ull)
+        {
+            r = (rand() % 32768ull) * (rand() % 32768ull) + ( rand() % 32768ull);
+        }
+        else if (u64 < 1000000000000000000ull)
+        {
+            r = (((rand() % 32768ull) * (rand() % 32768ull)) * 1000ull) + (rand() % 32768ull);
+        }
+        else
+        {
+            r = (((rand() % 32768ull) * (rand() % 32768ull)) * 10000ull) + (rand() % 32768ull);
+        }
+        lastu64 = u64;
+
+        i64 = (int64_t)u64;
+        for (minFieldWidth = 2; minFieldWidth <= SSF_DEC_MAX_STR_LEN + 2; minFieldWidth++)
+        {
             /* Note: Some systems output warnings if format specifiers are not const strings */
             switch (minFieldWidth)
             {
                 case 2:
-                    snprintf(str1, sizeof(str1), "%02u", u32);
+                    len1 = snprintf(str1, sizeof(str1), "%02lld", i64);
                     break;
                 case 3:
-                    snprintf(str1, sizeof(str1), "%03u", u32);
+                    len1 = snprintf(str1, sizeof(str1), "%03lld", i64);
                     break;
                 case 4:
-                    snprintf(str1, sizeof(str1), "%04u", u32);
+                    len1 = snprintf(str1, sizeof(str1), "%04lld", i64);
                     break;
                 case 5:
-                    snprintf(str1, sizeof(str1), "%05u", u32);
+                    len1 = snprintf(str1, sizeof(str1), "%05lld", i64);
                     break;
                 case 6:
-                    snprintf(str1, sizeof(str1), "%06u", u32);
+                    len1 = snprintf(str1, sizeof(str1), "%06lld", i64);
                     break;
                 case 7:
-                    snprintf(str1, sizeof(str1), "%07u", u32);
+                    len1 = snprintf(str1, sizeof(str1), "%07lld", i64);
                     break;
                 case 8:
-                    snprintf(str1, sizeof(str1), "%08u", u32);
+                    len1 = snprintf(str1, sizeof(str1), "%08lld", i64);
                     break;
                 case 9:
-                    snprintf(str1, sizeof(str1), "%09u", u32);
+                    len1 = snprintf(str1, sizeof(str1), "%09lld", i64);
                     break;
                 case 10:
-                    snprintf(str1, sizeof(str1), "%010u", u32);
+                    len1 = snprintf(str1, sizeof(str1), "%010lld", i64);
                     break;
                 case 11:
-                    snprintf(str1, sizeof(str1), "%011u", u32);
+                    len1 = snprintf(str1, sizeof(str1), "%011lld", i64);
                     break;
                 case 12:
-                    snprintf(str1, sizeof(str1), "%012u", u32);
+                    len1 = snprintf(str1, sizeof(str1), "%012lld", i64);
+                    break;
+                case 13:
+                    len1 = snprintf(str1, sizeof(str1), "%013lld", i64);
+                    break;
+                case 14:
+                    len1 = snprintf(str1, sizeof(str1), "%014lld", i64);
+                    break;
+                case 15:
+                    len1 = snprintf(str1, sizeof(str1), "%015lld", i64);
+                    break;
+                case 16:
+                    len1 = snprintf(str1, sizeof(str1), "%016lld", i64);
+                    break;
+                case 17:
+                    len1 = snprintf(str1, sizeof(str1), "%017lld", i64);
+                    break;
+                case 18:
+                    len1 = snprintf(str1, sizeof(str1), "%018lld", i64);
+                    break;
+                case 19:
+                    len1 = snprintf(str1, sizeof(str1), "%019lld", i64);
+                    break;
+                case 20:
+                    len1 = snprintf(str1, sizeof(str1), "%020lld", i64);
+                    break;
+                case 21:
+                    len1 = snprintf(str1, sizeof(str1), "%021lld", i64);
+                    break;
+                case 22:
+                    len1 = snprintf(str1, sizeof(str1), "%022lld", i64);
                     break;
                 default:
                     SSF_ERROR();
                     break;
             }
-            len = SSFDecUIntToStrPadded(u32, str2, sizeof(str2), minFieldWidth, '0');
-            SSF_ASSERT(len != 0);
-            SSF_ASSERT(str1[len - 1] != 0);
-            SSF_ASSERT(str1[len] == 0);
-            SSF_ASSERT(memcmp(str1, str2, len + 1) == 0);
-            SSF_ASSERT(SSFDecUIntToStrPadded(u32, str2, 0, minFieldWidth, '0') == 0);
-            SSF_ASSERT(SSFDecUIntToStrPadded(u32, str2, len - 1, minFieldWidth, '0') == 0);
-            SSF_ASSERT(SSFDecUIntToStrPadded(u32, str2, len, minFieldWidth, '0') == 0);
-            SSF_ASSERT(SSFDecUIntToStrPadded(u32, str2, len + 1, minFieldWidth, '0') != 0);
+            len2 = SSFDecIntToStrPadded(i64, str2, sizeof(str2), minFieldWidth, '0');
+            SSF_ASSERT(len1 != 0);
+            SSF_ASSERT(len1 == len2);
+            SSF_ASSERT(str1[len1 - 1] != 0);
+            SSF_ASSERT(str1[len1] == 0);
+            SSF_ASSERT(memcmp(str1, str2, len1 + 1) == 0);
+            SSF_ASSERT(SSFDecIntToStrPadded(i64, str2, 0, minFieldWidth, '0') == 0);
+            SSF_ASSERT(SSFDecIntToStrPadded(i64, str2, len1 - 1, minFieldWidth, '0') == 0);
+            SSF_ASSERT(SSFDecIntToStrPadded(i64, str2, len1, minFieldWidth, '0') == 0);
+            SSF_ASSERT(SSFDecIntToStrPadded(i64, str2, len1 + 1, minFieldWidth, '0') != 0);
+
+            /* Note: Some systems output warnings if format specifiers are not const strings */
+            switch (minFieldWidth)
+            {
+                case 2:
+                    len1 = snprintf(str1, sizeof(str1), "%02llu", u64);
+                    break;
+                case 3:
+                    len1 = snprintf(str1, sizeof(str1), "%03llu", u64);
+                    break;
+                case 4:
+                    len1 = snprintf(str1, sizeof(str1), "%04llu", u64);
+                    break;
+                case 5:
+                    len1 = snprintf(str1, sizeof(str1), "%05llu", u64);
+                    break;
+                case 6:
+                    len1 = snprintf(str1, sizeof(str1), "%06llu", u64);
+                    break;
+                case 7:
+                    len1 = snprintf(str1, sizeof(str1), "%07llu", u64);
+                    break;
+                case 8:
+                    len1 = snprintf(str1, sizeof(str1), "%08llu", u64);
+                    break;
+                case 9:
+                    len1 = snprintf(str1, sizeof(str1), "%09llu", u64);
+                    break;
+                case 10:
+                    len1 = snprintf(str1, sizeof(str1), "%010llu", u64);
+                    break;
+                case 11:
+                    len1 = snprintf(str1, sizeof(str1), "%011llu", u64);
+                    break;
+                case 12:
+                    len1 = snprintf(str1, sizeof(str1), "%012llu", u64);
+                    break;
+                case 13:
+                    len1 = snprintf(str1, sizeof(str1), "%013llu", u64);
+                    break;
+                case 14:
+                    len1 = snprintf(str1, sizeof(str1), "%014llu", u64);
+                    break;
+                case 15:
+                    len1 = snprintf(str1, sizeof(str1), "%015llu", u64);
+                    break;
+                case 16:
+                    len1 = snprintf(str1, sizeof(str1), "%016llu", u64);
+                    break;
+                case 17:
+                    len1 = snprintf(str1, sizeof(str1), "%017llu", u64);
+                    break;
+                case 18:
+                    len1 = snprintf(str1, sizeof(str1), "%018llu", u64);
+                    break;
+                case 19:
+                    len1 = snprintf(str1, sizeof(str1), "%019llu", u64);
+                    break;
+                case 20:
+                    len1 = snprintf(str1, sizeof(str1), "%020llu", u64);
+                    break;
+                case 21:
+                    len1 = snprintf(str1, sizeof(str1), "%021llu", u64);
+                    break;
+                case 22:
+                    len1 = snprintf(str1, sizeof(str1), "%022llu", u64);
+                    break;
+                default:
+                    SSF_ERROR();
+                    break;
+            }
+            len2 = SSFDecUIntToStrPadded(u64, str2, sizeof(str2), minFieldWidth, '0');
+            SSF_ASSERT(len1 != 0);
+            SSF_ASSERT(len1 == len2);
+            SSF_ASSERT(str1[len1 - 1] != 0);
+            SSF_ASSERT(str1[len1] == 0);
+            SSF_ASSERT(memcmp(str1, str2, len1 + 1) == 0);
+            SSF_ASSERT(SSFDecUIntToStrPadded(u64, str2, 0, minFieldWidth, '0') == 0);
+            SSF_ASSERT(SSFDecUIntToStrPadded(u64, str2, len1 - 1, minFieldWidth, '0') == 0);
+            SSF_ASSERT(SSFDecUIntToStrPadded(u64, str2, len1, minFieldWidth, '0') == 0);
+            SSF_ASSERT(SSFDecUIntToStrPadded(u64, str2, len1 + 1, minFieldWidth, '0') != 0);
         }
     }
 }

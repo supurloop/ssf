@@ -41,11 +41,13 @@ extern "C"
 #include <stdbool.h>
 #include "ssfport.h"
 
-size_t SSFDecIntToStr(int32_t i, SSFCStrOut_t str, size_t strSize);
-size_t SSFDecUIntToStr(uint32_t i, SSFCStrOut_t str, size_t strSize);
-size_t SSFDecIntToStrPadded(int32_t i, SSFCStrOut_t str, size_t strSize, uint8_t minFieldWidth,
+#define SSF_DEC_MAX_STR_LEN (20u)
+
+size_t SSFDecIntToStr(int64_t i, SSFCStrOut_t str, size_t strSize);
+size_t SSFDecUIntToStr(uint64_t i, SSFCStrOut_t str, size_t strSize);
+size_t SSFDecIntToStrPadded(int64_t i, SSFCStrOut_t str, size_t strSize, uint8_t minFieldWidth,
                             char padChar);
-size_t SSFDecUIntToStrPadded(uint32_t i, SSFCStrOut_t str, size_t strSize, uint8_t minFieldWidth,
+size_t SSFDecUIntToStrPadded(uint64_t i, SSFCStrOut_t str, size_t strSize, uint8_t minFieldWidth,
                              char padChar);
 
 /* --------------------------------------------------------------------------------------------- */

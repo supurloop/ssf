@@ -35,6 +35,7 @@ The framework implements a number of common embedded system functions:
 20. A Unix Time RTC interface.
 21. A Unix Date/Time interface.
 22. An ISO8601 Date/Time interface.
+23. An integer to decimal string interface.
 
 To give you an idea of the framework size here are some program memory estimates for each component compiled on an MSP430 with Level 3 optimization:
 Byte FIFO, linked list, memory pool, Base64, Hex ASCII are each about 1000 bytes.
@@ -1220,6 +1221,21 @@ This interface converts Unix time in system ticks into an ISO8601 extended date 
 
     SSFISO8601ISOToUnix(isoStr, &unixSysOut, &zoneOffsetMin);
     /* unixSys == unixSysOut, zoneOffsetMin == 0 */
+```
+
+### Integer to Decimal String Interface
+
+This interface converts signed or unsigned integers to padded or unpadded decimal strings. It is meant to be faster and have stronger typing than snprintf().
+
+```
+    size_t len;
+    char str[]
+
+    len = SSFDecIntToStr(-123456789123ull, str, sizeof(str));
+    /* len == 13, str = "-123456789123" */
+
+    len = SSFDecIntToStrPadded(-123456789123ull, str, sizeof(str), 15, '0');
+    /* len == 15, str = "-00123456789123" */
 ```
 
 ## Conclusion

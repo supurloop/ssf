@@ -48,15 +48,21 @@ static const char *_ssfDecConv =
     "80818283848586878889"
     "90919293949596979899";
 
-static const uint32_t _ssfDecStrSizeLim[] =
-    { 9, 99, 999, 9999, 99999, 999999, 9999999, 99999999, 999999999 };
+#define SSF_DEC_NUM_LIM (SSF_DEC_MAX_STR_LEN - 1)
+static const uint64_t _ssfDecStrSizeLim[SSF_DEC_NUM_LIM] =
+{ 
+    9ull, 99ull, 999ull, 9999ull, 99999ull, 999999ull, 9999999ull, 99999999ull, 999999999ull,
+    9999999999ull, 99999999999ull, 999999999999ull, 9999999999999ull, 99999999999999ull,
+    999999999999999ull, 9999999999999999ull, 99999999999999999ull, 999999999999999999ull,
+    9999999999999999999ull
+};
 
 /* --------------------------------------------------------------------------------------------- */
 /* Returns number of digits written to str.                                                      */
 /* --------------------------------------------------------------------------------------------- */
-static size_t _SSFDecUIntToStr(uint32_t i, char *str)
+static size_t _SSFDecUIntToStr(uint64_t i, char *str)
 {
-    int o;
+    uint16_t o;
 
     if (i >= 10000)
     {
@@ -106,14 +112,15 @@ static size_t _SSFDecUIntToStr(uint32_t i, char *str)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns 0 if unable to convert i to decimal string, else number of bytes written to string.   */
 /* --------------------------------------------------------------------------------------------- */
-size_t SSFDecUIntToStr(uint32_t i, SSFCStrOut_t str, size_t strSize)
+size_t SSFDecUIntToStr(uint64_t i, SSFCStrOut_t str, size_t strSize)
 {
     char *tmp;
 
     SSF_ASSERT(str != NULL);
 
     /* Ensure that strSize big enough to fit i plus a NULL */
-    if ((strSize <= 1) || ((strSize <= 10) && (i > _ssfDecStrSizeLim[strSize - 2]))) { return 0; }
+    if ((strSize <= 1) || ((strSize < (SSF_DEC_NUM_LIM + 2)) &&
+                           (i > _ssfDecStrSizeLim[strSize - 2]))) { return 0; }
 
     /* Save str ptr, convert and advance str by dec str len, NULL terminate */
     tmp = str;
@@ -127,10 +134,10 @@ size_t SSFDecUIntToStr(uint32_t i, SSFCStrOut_t str, size_t strSize)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns 0 if unable to convert i to decimal string, else number of bytes written to string.   */
 /* --------------------------------------------------------------------------------------------- */
-size_t SSFDecIntToStr(int32_t i, SSFCStrOut_t str, size_t strSize)
+size_t SSFDecIntToStr(int64_t i, SSFCStrOut_t str, size_t strSize)
 {
     char *tmp;
-    uint32_t u;
+    uint64_t u;
 
     SSF_ASSERT(str != NULL);
 
@@ -138,7 +145,8 @@ size_t SSFDecIntToStr(int32_t i, SSFCStrOut_t str, size_t strSize)
     {
         /* Ensure that strSize big enough to fit -i plus a NULL */
         u = -i;
-        if ((strSize <= 2) || ((strSize <= 11) && (u > _ssfDecStrSizeLim[strSize - 3])))
+        if ((strSize <= 2) || ((strSize < (SSF_DEC_NUM_LIM + 3)) &&
+                               (u > _ssfDecStrSizeLim[strSize - 3])))
         { return 0; }
         tmp = str;
         *str++ = '-';
@@ -148,7 +156,8 @@ size_t SSFDecIntToStr(int32_t i, SSFCStrOut_t str, size_t strSize)
     {
         /* Ensure that strSize big enough to fit i plus a NULL */
         u = i;
-        if ((strSize <= 1) || ((strSize <= 10) && (u > _ssfDecStrSizeLim[strSize - 2])))
+        if ((strSize <= 1) || ((strSize < (SSF_DEC_NUM_LIM + 2)) &&
+                               (u > _ssfDecStrSizeLim[strSize - 2])))
         { return 0; }
         tmp = str;
     }
@@ -164,7 +173,7 @@ size_t SSFDecIntToStr(int32_t i, SSFCStrOut_t str, size_t strSize)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns 0 if unable to convert i to decimal string, else number of bytes written to string.   */
 /* --------------------------------------------------------------------------------------------- */
-size_t SSFDecUIntToStrPadded(uint32_t i, SSFCStrOut_t str, size_t strSize, uint8_t minFieldWidth,
+size_t SSFDecUIntToStrPadded(uint64_t i, SSFCStrOut_t str, size_t strSize, uint8_t minFieldWidth,
                              char padChar)
 {
     size_t len;
@@ -205,7 +214,7 @@ size_t SSFDecUIntToStrPadded(uint32_t i, SSFCStrOut_t str, size_t strSize, uint8
 /* --------------------------------------------------------------------------------------------- */
 /* Returns 0 if unable to convert i to decimal string, else number of bytes written to string.   */
 /* --------------------------------------------------------------------------------------------- */
-size_t SSFDecIntToStrPadded(int32_t i, SSFCStrOut_t str, size_t strSize, uint8_t minFieldWidth,
+size_t SSFDecIntToStrPadded(int64_t i, SSFCStrOut_t str, size_t strSize, uint8_t minFieldWidth,
                             char padChar)
 {
     size_t len;
@@ -226,7 +235,7 @@ size_t SSFDecIntToStrPadded(int32_t i, SSFCStrOut_t str, size_t strSize, uint8_t
     }
 
     /* Do int to decimal string conversion */
-    len = SSFDecUIntToStr((uint32_t)i, str, strSize);
+    len = SSFDecUIntToStr((uint64_t)i, str, strSize);
     if (len == 0) return 0;
 
     /* Add pad if necessary */

@@ -31,6 +31,7 @@
 /* --------------------------------------------------------------------------------------------- */
 #include <stdio.h>
 #include "ssfassert.h"
+#include "ssfversion.h"
 #include "ssfbfifo.h"
 #include "ssfll.h"
 #include "ssfsm.h"
@@ -165,6 +166,13 @@ int main(void)
 {
     size_t i;
     SSFPortTick_t start;
+
+    /* Print out SSF version */
+    printf("\r\n");
+    i = printf("Testing SSF Version %s", SSF_VERSION_STR);
+    printf("\r\n");
+    while (i--) { printf("-"); }
+    printf("\r\n");
 
     /* Iterate over all the configured unit tests */
     for (i = 0; i < sizeof(unitTests) / sizeof(SSFUnitTest_t); i++)

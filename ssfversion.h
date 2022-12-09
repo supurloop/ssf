@@ -60,8 +60,8 @@
 /*         Added ssfrs option for GF_MUL speed vs. space optimization.                           */
 /*         Reorganized source code into module directories.                                      */
 /* 0.0.9 - Added integer to decimal string conversion interface.                                 */
-/*         Replaced snprintf in ISO8601 with SSFDec() interface calls to speed up.               */
+/*         Added date/time, RTC, and ISO8601 time interfaces.                                    */
 /* --------------------------------------------------------------------------------------------- */
-#define SSF_VERSION "0.0.9"
+#define SSF_VERSION_STR "0.0.9"
 
 #endif /* SSF_VERSION_H_INCLUDE */

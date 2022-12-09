@@ -59,7 +59,9 @@
 /*         Added enum lower bound checks.                                                        */
 /*         Added ssfrs option for GF_MUL speed vs. space optimization.                           */
 /*         Reorganized source code into module directories.                                      */
+/* 0.0.9 - Added integer to decimal string conversion interface.                                 */
+/*         Replaced snprintf in ISO8601 with SSFDec() interface calls to speed up.               */
 /* --------------------------------------------------------------------------------------------- */
-#define SSF_VERSION "0.0.8"
+#define SSF_VERSION "0.0.9"
 
 #endif /* SSF_VERSION_H_INCLUDE */

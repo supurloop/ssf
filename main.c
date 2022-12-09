@@ -170,6 +170,7 @@ int main(void)
     /* Print out SSF version */
     printf("\r\n");
     i = printf("Testing SSF Version %s", SSF_VERSION_STR);
+    SSF_ASSERT(i > 0);
     printf("\r\n");
     while (i--) { printf("-"); }
     printf("\r\n");

@@ -118,11 +118,11 @@ bool SSFISO8601UnixToISO(SSFPortTick_t unixSys, bool secPrecision, bool secPseud
 
     if (SSFDTimeUnixToStruct(unixSys, &ts, sizeof(ts)) == false) { return false; }
 
-        offset += SSFDecUIntToStr(ts.year + SSFDTIME_EPOCH_YEAR, &outStr[offset], outStrSize - offset);
+        offset += SSFDecUIntToStr(((uint64_t)ts.year) + SSFDTIME_EPOCH_YEAR, &outStr[offset], outStrSize - offset);
         outStr[offset] = '-'; offset++;
-        offset += SSFDecUIntToStrPadded(ts.month + 1, &outStr[offset], outStrSize - offset, 2, '0');
+        offset += SSFDecUIntToStrPadded(((uint64_t)ts.month) + 1, &outStr[offset], outStrSize - offset, 2, '0');
         outStr[offset] = '-'; offset++;
-        offset += SSFDecUIntToStrPadded(ts.day + 1, &outStr[offset], outStrSize - offset, 2, '0');
+        offset += SSFDecUIntToStrPadded(((uint64_t)ts.day) + 1, &outStr[offset], outStrSize - offset, 2, '0');
         outStr[offset] = 'T'; offset++;
         offset += SSFDecUIntToStrPadded(ts.hour, &outStr[offset], outStrSize - offset, 2, '0');
         outStr[offset] = ':'; offset++;

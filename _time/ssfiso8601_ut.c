@@ -52,8 +52,10 @@ void SSFISO8601UnitTest(void)
     uint32_t jmax;
     int8_t sign;
     char isoStr[SSFISO8601_MAX_SIZE] = "";
+#if SSF_ISO8601_EXHAUSTIVE_UNIT_TEST == 1
     SSFPortTick_t unixSysMin = SSFDTIME_UNIX_EPOCH_SYS_MIN;
     SSFPortTick_t unixSysMax = SSFDTIME_UNIX_EPOCH_SYS_MAX;
+#endif
 
     srand((unsigned int)SSFPortGetTick64());
 

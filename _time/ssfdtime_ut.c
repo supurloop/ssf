@@ -61,8 +61,10 @@ void SSFDTimeUnitTest(void)
     SSFDTimeStruct_t tsc;
     SSFPortTick_t unixSys;
     SSFPortTick_t unixSysOut;
+#if SSF_DTIME_EXHAUSTIVE_UNIT_TEST == 1
     SSFPortTick_t unixSysMin = SSFDTIME_UNIX_EPOCH_SYS_MIN;
     SSFPortTick_t unixSysMax = SSFDTIME_UNIX_EPOCH_SYS_MAX;
+#endif
 
     srand((unsigned int)SSFPortGetTick64());
 

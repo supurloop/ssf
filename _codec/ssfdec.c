@@ -71,7 +71,7 @@ static size_t _SSFDecUIntToStr(uint64_t i, char *str)
         len = _SSFDecUIntToStr(i / 10000, str);
         str += len;
         i %= 10000;
-        o = (i / 100) << 1;
+        o = (uint16_t)((i / 100) << 1);
         *str++ = _ssfDecConv[o++];
         *str++ = _ssfDecConv[o];
         o = (i % 100) << 1;
@@ -82,7 +82,7 @@ static size_t _SSFDecUIntToStr(uint64_t i, char *str)
 
     if (i >= 1000)
     {
-        o = (i / 100) << 1;
+        o = (uint16_t)((i / 100) << 1);
         *str++ = _ssfDecConv[o++];
         *str++ = _ssfDecConv[o];
         o = (i % 100) << 1;
@@ -92,7 +92,7 @@ static size_t _SSFDecUIntToStr(uint64_t i, char *str)
     }
     else if (i >= 100)
     {
-        *str++ = (i / 100) + '0';
+        *str++ = ((char)(i / 100)) + '0';
         o = (i % 100) << 1;
         *str++ = _ssfDecConv[o++];
         *str = _ssfDecConv[o];
@@ -100,12 +100,12 @@ static size_t _SSFDecUIntToStr(uint64_t i, char *str)
     }
     else if (i >= 10)
     {
-        o = i << 1;
+        o = (uint16_t)(i << 1);
         *str++ = _ssfDecConv[o++];
         *str = _ssfDecConv[o];
         return 2;
     }
-    *str = i + '0';
+    *str = ((char)i) + '0';
     return 1;
 }
 

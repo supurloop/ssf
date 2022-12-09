@@ -49,6 +49,8 @@ void SSFDecUnitTest(void)
     uint8_t minFieldWidth;
     uint64_t r = 1;
 
+    srand((unsigned int)SSFPortGetTick64());
+
     /* Test assertions */
     SSF_ASSERT_TEST(SSFDecIntToStr(0, NULL, 1));
     SSF_ASSERT_TEST(SSFDecUIntToStr(0, NULL, 1));
@@ -63,11 +65,18 @@ void SSFDecUnitTest(void)
     i64 = 1;
     for (i = 0; i < 19; i++)
     {
-        len1 = snprintf(str1, sizeof(str1), "%lld", i64);
+        len1 = snprintf(str1, sizeof(str1), "%lld", (long long int)i64);
         len2 = SSFDecIntToStr(i64, str2, sizeof(str2));
         SSF_ASSERT(len2 != 0);
         SSF_ASSERT(len1 == len2);
+#ifdef _WIN32
+#pragma warning(push)
+#pragma warning(disable:6385)
+#endif
         SSF_ASSERT(str1[len1 - 1] != 0);
+#ifdef _WIN32
+#pragma warning(pop)
+#endif
         SSF_ASSERT(str1[len1] == 0);
         SSF_ASSERT(memcmp(str1, str2, len1 + 1) == 0);
         SSF_ASSERT(SSFDecIntToStr(i64, str2, 0) == 0);
@@ -75,7 +84,7 @@ void SSFDecUnitTest(void)
         SSF_ASSERT(SSFDecIntToStr(i64, str2, len1) == 0);
         SSF_ASSERT(SSFDecIntToStr(i64, str2, len1 + 1) != 0);
 
-        len1 = snprintf(str1, sizeof(str1), "%lld", i64 - 1);
+        len1 = snprintf(str1, sizeof(str1), "%lld", (long long int)(i64 - 1));
         len2 = SSFDecIntToStr(i64 - 1, str2, sizeof(str2));
         SSF_ASSERT(len2 != 0);
         SSF_ASSERT(len1 == len2);
@@ -87,11 +96,18 @@ void SSFDecUnitTest(void)
         SSF_ASSERT(SSFDecIntToStr(i64 - 1, str2, len1) == 0);
         SSF_ASSERT(SSFDecIntToStr(i64 - 1, str2, len1 + 1) != 0);
 
-        len1 = snprintf(str1, sizeof(str1), "%lld", -i64);
+        len1 = snprintf(str1, sizeof(str1), "%lld", (long long int)-i64);
         len2 = SSFDecIntToStr(-i64, str2, sizeof(str2));
         SSF_ASSERT(len2 != 0);
         SSF_ASSERT(len1 == len2);
+#ifdef _WIN32
+#pragma warning(push)
+#pragma warning(disable:6385)
+#endif
         SSF_ASSERT(str1[len1 - 1] != 0);
+#ifdef _WIN32
+#pragma warning(pop)
+#endif
         SSF_ASSERT(str1[len1] == 0);
         SSF_ASSERT(memcmp(str1, str2, len1 + 1) == 0);
         SSF_ASSERT(SSFDecIntToStr(-i64, str2, 0) == 0);
@@ -100,7 +116,7 @@ void SSFDecUnitTest(void)
         SSF_ASSERT(SSFDecIntToStr(-i64, str2, len1 + 1) != 0);
 
 
-        len1 = snprintf(str1, sizeof(str1), "%lld", -i64 + 1);
+        len1 = snprintf(str1, sizeof(str1), "%lld", (long long int)(-i64 + 1));
         len2 = SSFDecIntToStr(-i64 + 1, str2, sizeof(str2));
         SSF_ASSERT(len2 != 0);
         SSF_ASSERT(len1 == len2);
@@ -119,7 +135,7 @@ void SSFDecUnitTest(void)
     u64 = 1;
     for (i = 0; i <= 19; i++)
     {
-        len1 = snprintf(str1, sizeof(str1), "%llu", u64);
+        len1 = snprintf(str1, sizeof(str1), "%llu", (long long unsigned int)u64);
         len2 = SSFDecUIntToStr(u64, str2, sizeof(str2));
         SSF_ASSERT(len2 != 0);
         SSF_ASSERT(len1 == len2);
@@ -132,7 +148,7 @@ void SSFDecUnitTest(void)
         SSF_ASSERT(SSFDecUIntToStr(u64, str2, len1 + 1) != 0);
 
 
-        len1 = snprintf(str1, sizeof(str1), "%llu", u64 - 1);
+        len1 = snprintf(str1, sizeof(str1), "%llu", (long long unsigned int)(u64 - 1));
         len2 = SSFDecUIntToStr(u64 - 1, str2, sizeof(str2));
         SSF_ASSERT(len2 != 0);
         SSF_ASSERT(len1 == len2);
@@ -179,7 +195,7 @@ void SSFDecUnitTest(void)
         lastu64 = u64;
 
         i64 = (int64_t)u64;
-        len1 = snprintf(str1, sizeof(str1), "%lld", i64);
+        len1 = snprintf(str1, sizeof(str1), "%lld", (long long int)i64);
         len2 = SSFDecIntToStr(i64, str2, sizeof(str2));
         SSF_ASSERT(len1 != 0);
         SSF_ASSERT(len1 == len2);
@@ -191,7 +207,7 @@ void SSFDecUnitTest(void)
         SSF_ASSERT(SSFDecIntToStr(i64, str2, len1) == 0);
         SSF_ASSERT(SSFDecIntToStr(i64, str2, len1 + 1) != 0);
 
-        len1 = snprintf(str1, sizeof(str1), "%llu", u64);
+        len1 = snprintf(str1, sizeof(str1), "%llu", (long long unsigned int)u64);
         len2 = SSFDecUIntToStr(u64, str2, sizeof(str2));
         SSF_ASSERT(len1 != 0);
         SSF_ASSERT(len1 == len2);
@@ -241,67 +257,67 @@ void SSFDecUnitTest(void)
             switch (minFieldWidth)
             {
                 case 2:
-                    len1 = snprintf(str1, sizeof(str1), "%02lld", i64);
+                    len1 = snprintf(str1, sizeof(str1), "%02lld", (long long int)i64);
                     break;
                 case 3:
-                    len1 = snprintf(str1, sizeof(str1), "%03lld", i64);
+                    len1 = snprintf(str1, sizeof(str1), "%03lld", (long long int)i64);
                     break;
                 case 4:
-                    len1 = snprintf(str1, sizeof(str1), "%04lld", i64);
+                    len1 = snprintf(str1, sizeof(str1), "%04lld", (long long int)i64);
                     break;
                 case 5:
-                    len1 = snprintf(str1, sizeof(str1), "%05lld", i64);
+                    len1 = snprintf(str1, sizeof(str1), "%05lld", (long long int)i64);
                     break;
                 case 6:
-                    len1 = snprintf(str1, sizeof(str1), "%06lld", i64);
+                    len1 = snprintf(str1, sizeof(str1), "%06lld", (long long int)i64);
                     break;
                 case 7:
-                    len1 = snprintf(str1, sizeof(str1), "%07lld", i64);
+                    len1 = snprintf(str1, sizeof(str1), "%07lld", (long long int)i64);
                     break;
                 case 8:
-                    len1 = snprintf(str1, sizeof(str1), "%08lld", i64);
+                    len1 = snprintf(str1, sizeof(str1), "%08lld", (long long int)i64);
                     break;
                 case 9:
-                    len1 = snprintf(str1, sizeof(str1), "%09lld", i64);
+                    len1 = snprintf(str1, sizeof(str1), "%09lld", (long long int)i64);
                     break;
                 case 10:
-                    len1 = snprintf(str1, sizeof(str1), "%010lld", i64);
+                    len1 = snprintf(str1, sizeof(str1), "%010lld", (long long int)i64);
                     break;
                 case 11:
-                    len1 = snprintf(str1, sizeof(str1), "%011lld", i64);
+                    len1 = snprintf(str1, sizeof(str1), "%011lld", (long long int)i64);
                     break;
                 case 12:
-                    len1 = snprintf(str1, sizeof(str1), "%012lld", i64);
+                    len1 = snprintf(str1, sizeof(str1), "%012lld", (long long int)i64);
                     break;
                 case 13:
-                    len1 = snprintf(str1, sizeof(str1), "%013lld", i64);
+                    len1 = snprintf(str1, sizeof(str1), "%013lld", (long long int)i64);
                     break;
                 case 14:
-                    len1 = snprintf(str1, sizeof(str1), "%014lld", i64);
+                    len1 = snprintf(str1, sizeof(str1), "%014lld", (long long int)i64);
                     break;
                 case 15:
-                    len1 = snprintf(str1, sizeof(str1), "%015lld", i64);
+                    len1 = snprintf(str1, sizeof(str1), "%015lld", (long long int)i64);
                     break;
                 case 16:
-                    len1 = snprintf(str1, sizeof(str1), "%016lld", i64);
+                    len1 = snprintf(str1, sizeof(str1), "%016lld", (long long int)i64);
                     break;
                 case 17:
-                    len1 = snprintf(str1, sizeof(str1), "%017lld", i64);
+                    len1 = snprintf(str1, sizeof(str1), "%017lld", (long long int)i64);
                     break;
                 case 18:
-                    len1 = snprintf(str1, sizeof(str1), "%018lld", i64);
+                    len1 = snprintf(str1, sizeof(str1), "%018lld", (long long int)i64);
                     break;
                 case 19:
-                    len1 = snprintf(str1, sizeof(str1), "%019lld", i64);
+                    len1 = snprintf(str1, sizeof(str1), "%019lld", (long long int)i64);
                     break;
                 case 20:
-                    len1 = snprintf(str1, sizeof(str1), "%020lld", i64);
+                    len1 = snprintf(str1, sizeof(str1), "%020lld", (long long int)i64);
                     break;
                 case 21:
-                    len1 = snprintf(str1, sizeof(str1), "%021lld", i64);
+                    len1 = snprintf(str1, sizeof(str1), "%021lld", (long long int)i64);
                     break;
                 case 22:
-                    len1 = snprintf(str1, sizeof(str1), "%022lld", i64);
+                    len1 = snprintf(str1, sizeof(str1), "%022lld", (long long int)i64);
                     break;
                 default:
                     SSF_ERROR();
@@ -322,67 +338,67 @@ void SSFDecUnitTest(void)
             switch (minFieldWidth)
             {
                 case 2:
-                    len1 = snprintf(str1, sizeof(str1), "%02llu", u64);
+                    len1 = snprintf(str1, sizeof(str1), "%02llu", (long long unsigned int)u64);
                     break;
                 case 3:
-                    len1 = snprintf(str1, sizeof(str1), "%03llu", u64);
+                    len1 = snprintf(str1, sizeof(str1), "%03llu", (long long unsigned int)u64);
                     break;
                 case 4:
-                    len1 = snprintf(str1, sizeof(str1), "%04llu", u64);
+                    len1 = snprintf(str1, sizeof(str1), "%04llu", (long long unsigned int)u64);
                     break;
                 case 5:
-                    len1 = snprintf(str1, sizeof(str1), "%05llu", u64);
+                    len1 = snprintf(str1, sizeof(str1), "%05llu", (long long unsigned int)u64);
                     break;
                 case 6:
-                    len1 = snprintf(str1, sizeof(str1), "%06llu", u64);
+                    len1 = snprintf(str1, sizeof(str1), "%06llu", (long long unsigned int)u64);
                     break;
                 case 7:
-                    len1 = snprintf(str1, sizeof(str1), "%07llu", u64);
+                    len1 = snprintf(str1, sizeof(str1), "%07llu", (long long unsigned int)u64);
                     break;
                 case 8:
-                    len1 = snprintf(str1, sizeof(str1), "%08llu", u64);
+                    len1 = snprintf(str1, sizeof(str1), "%08llu", (long long unsigned int)u64);
                     break;
                 case 9:
-                    len1 = snprintf(str1, sizeof(str1), "%09llu", u64);
+                    len1 = snprintf(str1, sizeof(str1), "%09llu", (long long unsigned int)u64);
                     break;
                 case 10:
-                    len1 = snprintf(str1, sizeof(str1), "%010llu", u64);
+                    len1 = snprintf(str1, sizeof(str1), "%010llu", (long long unsigned int)u64);
                     break;
                 case 11:
-                    len1 = snprintf(str1, sizeof(str1), "%011llu", u64);
+                    len1 = snprintf(str1, sizeof(str1), "%011llu", (long long unsigned int)u64);
                     break;
                 case 12:
-                    len1 = snprintf(str1, sizeof(str1), "%012llu", u64);
+                    len1 = snprintf(str1, sizeof(str1), "%012llu", (long long unsigned int)u64);
                     break;
                 case 13:
-                    len1 = snprintf(str1, sizeof(str1), "%013llu", u64);
+                    len1 = snprintf(str1, sizeof(str1), "%013llu", (long long unsigned int)u64);
                     break;
                 case 14:
-                    len1 = snprintf(str1, sizeof(str1), "%014llu", u64);
+                    len1 = snprintf(str1, sizeof(str1), "%014llu", (long long unsigned int)u64);
                     break;
                 case 15:
-                    len1 = snprintf(str1, sizeof(str1), "%015llu", u64);
+                    len1 = snprintf(str1, sizeof(str1), "%015llu", (long long unsigned int)u64);
                     break;
                 case 16:
-                    len1 = snprintf(str1, sizeof(str1), "%016llu", u64);
+                    len1 = snprintf(str1, sizeof(str1), "%016llu", (long long unsigned int)u64);
                     break;
                 case 17:
-                    len1 = snprintf(str1, sizeof(str1), "%017llu", u64);
+                    len1 = snprintf(str1, sizeof(str1), "%017llu", (long long unsigned int)u64);
                     break;
                 case 18:
-                    len1 = snprintf(str1, sizeof(str1), "%018llu", u64);
+                    len1 = snprintf(str1, sizeof(str1), "%018llu", (long long unsigned int)u64);
                     break;
                 case 19:
-                    len1 = snprintf(str1, sizeof(str1), "%019llu", u64);
+                    len1 = snprintf(str1, sizeof(str1), "%019llu", (long long unsigned int)u64);
                     break;
                 case 20:
-                    len1 = snprintf(str1, sizeof(str1), "%020llu", u64);
+                    len1 = snprintf(str1, sizeof(str1), "%020llu", (long long unsigned int)u64);
                     break;
                 case 21:
-                    len1 = snprintf(str1, sizeof(str1), "%021llu", u64);
+                    len1 = snprintf(str1, sizeof(str1), "%021llu", (long long unsigned int)u64);
                     break;
                 case 22:
-                    len1 = snprintf(str1, sizeof(str1), "%022llu", u64);
+                    len1 = snprintf(str1, sizeof(str1), "%022llu", (long long unsigned int)u64);
                     break;
                 default:
                     SSF_ERROR();

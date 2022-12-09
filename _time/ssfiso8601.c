@@ -64,6 +64,7 @@
 #include "ssfport.h"
 #include "ssfdtime.h"
 #include "ssfiso8601.h"
+#include "ssfdec.h"
 
 /* --------------------------------------------------------------------------------------------- */
 /* Converts from unixSys to ISO time.                                                            */
@@ -117,19 +118,28 @@ bool SSFISO8601UnixToISO(SSFPortTick_t unixSys, bool secPrecision, bool secPseud
 
     if (SSFDTimeUnixToStruct(unixSys, &ts, sizeof(ts)) == false) { return false; }
 
-    offset = snprintf(outStr, outStrSize, "%04d-%02d-%02dT%02d:%02d:%02d",
-                      (int)(ts.year + SSFDTIME_EPOCH_YEAR), ts.month + 1, ts.day + 1, ts.hour,
-                      ts.min, ts.sec);
+        offset += SSFDecUIntToStr(ts.year + SSFDTIME_EPOCH_YEAR, &outStr[offset], outStrSize - offset);
+        outStr[offset] = '-'; offset++;
+        offset += SSFDecUIntToStrPadded(ts.month + 1, &outStr[offset], outStrSize - offset, 2, '0');
+        outStr[offset] = '-'; offset++;
+        offset += SSFDecUIntToStrPadded(ts.day + 1, &outStr[offset], outStrSize - offset, 2, '0');
+        outStr[offset] = 'T'; offset++;
+        offset += SSFDecUIntToStrPadded(ts.hour, &outStr[offset], outStrSize - offset, 2, '0');
+        outStr[offset] = ':'; offset++;
+        offset += SSFDecUIntToStrPadded(ts.min, &outStr[offset], outStrSize - offset, 2, '0');
+        outStr[offset] = ':'; offset++;
+        offset += SSFDecUIntToStrPadded(ts.sec, &outStr[offset], outStrSize - offset, 2, '0');
 
     /* Request to add system sec precision? */
     if (secPrecision)
     {
 #if SSF_DTIME_SYS_PREC == 3
-        offset += snprintf(&outStr[offset], outStrSize - offset, ".%03d", ts.fsec);
+        outStr[offset] = '.'; offset++;
+        offset += SSFDecUIntToStrPadded(ts.fsec, &outStr[offset], outStrSize - offset, 3, '0');
 #elif SSF_DTIME_SYS_PREC == 6
-        offset += snprintf(&outStr[offset], outStrSize - offset, ".%06d", ts.fsec);
+        offset += SSFDecUIntToStrPadded(ts.fsec, &outStr[offset], outStrSize - offset, 6, '0');
 #elif SSF_DTIME_SYS_PREC == 9
-        offset += snprintf(&outStr[offset], outStrSize - offset, ".%09d", ts.fsec);
+        offset += SSFDecUIntToStrPadded(ts.fsec, &outStr[offset], outStrSize - offset, 9, '0');
 #endif
     }
 
@@ -137,7 +147,7 @@ bool SSFISO8601UnixToISO(SSFPortTick_t unixSys, bool secPrecision, bool secPseud
     if (secPseudoPrecision)
     {
         if (secPrecision == false) { outStr[offset] = '.'; offset++; }
-        offset += snprintf(&outStr[offset], outStrSize - offset, "%03d", pseudoSecs);
+        offset += SSFDecUIntToStrPadded(pseudoSecs, &outStr[offset], outStrSize - offset, 3, '0');
     }
 
     /* Is compact zone offset requested and possible? */
@@ -148,18 +158,20 @@ bool SSFISO8601UnixToISO(SSFPortTick_t unixSys, bool secPrecision, bool secPseud
     switch(zone)
     {
         case SSF_ISO8601_ZONE_UTC:
-            offset += snprintf(&outStr[offset], outStrSize - offset, "Z");
+            outStr[offset] = 'Z'; offset++;
+            outStr[offset] = 0;
         break;
         case SSF_ISO8601_ZONE_OFFSET_HH:
             if (zoneOffsetMin < 0) { offsetSign = '-'; }
-            offset += snprintf(&outStr[offset], outStrSize - offset, "%c%02d", offsetSign,
-                               zoneOffsetMinAbs / SSFDTIME_MIN_IN_HOUR);
+            outStr[offset] = offsetSign; offset++;
+            offset += SSFDecUIntToStrPadded(zoneOffsetMinAbs / SSFDTIME_MIN_IN_HOUR, &outStr[offset], outStrSize - offset, 2, '0');
         break;
         case SSF_ISO8601_ZONE_OFFSET_HHMM:
             if (zoneOffsetMin < 0) { offsetSign = '-'; }
-            offset += snprintf(&outStr[offset], outStrSize - offset, "%c%02d:%02d", offsetSign,
-                               zoneOffsetMinAbs / SSFDTIME_MIN_IN_HOUR,
-                               zoneOffsetMinAbs % SSFDTIME_MIN_IN_HOUR);
+            outStr[offset] = offsetSign; offset++;
+            offset += SSFDecUIntToStrPadded(zoneOffsetMinAbs / SSFDTIME_MIN_IN_HOUR, &outStr[offset], outStrSize - offset, 2, '0');
+            outStr[offset] = ':'; offset++;
+            offset += SSFDecUIntToStrPadded(zoneOffsetMinAbs % SSFDTIME_MIN_IN_HOUR, &outStr[offset], outStrSize - offset, 2, '0');
         break;
         default:
         break;

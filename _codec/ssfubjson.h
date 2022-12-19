@@ -120,7 +120,8 @@ bool SSFUBJsonPrintBase64(uint8_t *js, size_t size, size_t start, size_t *end, u
 bool SSFUBJsonPrintChar(uint8_t *js, size_t size, size_t start, size_t *end,
                              const char in);
 
-bool SSFUBJsonPrintInt(uint8_t *js, size_t size, size_t start, size_t *end, int64_t in, bool opt);
+bool SSFUBJsonPrintInt(uint8_t *js, size_t size, size_t start, size_t *end, int64_t in, bool opt,
+                       SSFUBJsonType_t optType);
 bool SSFUBJsonPrintFloat(uint8_t *js, size_t size, size_t start, size_t *end, float in);
 bool SSFUBJsonPrintDouble(uint8_t *js, size_t size, size_t start, size_t *end, double in);
 

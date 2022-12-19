@@ -183,7 +183,8 @@ bool _SSFUBJsonPrintOptArray(uint8_t *js, size_t size, size_t start, size_t *end
 
     for (i = 0; i < *alen; i++)
     {
-        if (!SSFUBJsonPrintInt(js, size, start, &start, ((int64_t) i) + 1, true)) return false;
+        if (!SSFUBJsonPrintInt(js, size, start, &start, ((int64_t) i) + 1, true,
+                               SSF_UBJSON_TYPE_NUMBER_UINT8)) return false;
         *end = start;
     }
     return true;
@@ -323,8 +324,11 @@ void SSFUBJsonUnitTest(void)
     SSF_ASSERT_TEST(SSFUBJsonPrintBase64(jsOut, sizeof(jsOut), jsOutStart, NULL, (uint8_t *)"x", 1));
     SSF_ASSERT_TEST(SSFUBJsonPrintBase64(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, NULL, 1));
     SSF_ASSERT_TEST(SSFUBJsonPrintBase64(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (uint8_t *)"x", 190));
-    SSF_ASSERT_TEST(SSFUBJsonPrintInt(NULL, sizeof(jsOut), jsOutStart, &jsOutEnd, 1, false));
-    SSF_ASSERT_TEST(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, NULL, 1, false));
+    SSF_ASSERT_TEST(SSFUBJsonPrintInt(NULL, sizeof(jsOut), jsOutStart, &jsOutEnd, 1, false, 0));
+    SSF_ASSERT_TEST(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, NULL, 1, false, 0));
+    SSF_ASSERT_TEST(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, 1, false, SSF_UBJSON_TYPE_STRING));
+    SSF_ASSERT_TEST(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, 1, true, SSF_UBJSON_TYPE_STRING));
+    SSF_ASSERT_TEST(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, 1, true, SSF_UBJSON_TYPE_NUMBER_FLOAT32));
     SSF_ASSERT_TEST(SSFUBJsonPrintFloat(NULL, sizeof(jsOut), jsOutStart, &jsOutEnd, 1.0));
     SSF_ASSERT_TEST(SSFUBJsonPrintFloat(jsOut, sizeof(jsOut), jsOutStart, NULL, 1.0));
     SSF_ASSERT_TEST(SSFUBJsonPrintDouble(NULL, sizeof(jsOut), jsOutStart, &jsOutEnd, 1.0));
@@ -1142,64 +1146,190 @@ void SSFUBJsonUnitTest(void)
     memset(jsOut, 0xff, sizeof(jsOut));
     jsOutStart = 0;
     jsOutEnd = (size_t)-1;
-    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)0, false));
+    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)0, false, 0));
     SSF_ASSERT(jsOutEnd == 2);
     SSF_ASSERT(memcmp(jsOut, "i\x00", jsOutEnd) == 0);
     jsOutStart = 0;
     jsOutEnd = (size_t)-1;
-    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)1, false));
+    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)1, false, 0));
     SSF_ASSERT(jsOutEnd == 2);
     SSF_ASSERT(memcmp(jsOut, "i\x01", jsOutEnd) == 0);
     jsOutStart = 0;
     jsOutEnd = (size_t)-1;
-    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)127l, false));
+    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)127l, false, 0));
     SSF_ASSERT(jsOutEnd == 2);
     SSF_ASSERT(memcmp(jsOut, "i\x7f", jsOutEnd) == 0);
     jsOutStart = 0;
     jsOutEnd = (size_t)-1;
-    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)128l, false));
+    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)128l, false, 0));
     SSF_ASSERT(jsOutEnd == 2);
     SSF_ASSERT(memcmp(jsOut, "U\x80", jsOutEnd) == 0);
     jsOutStart = 0;
     jsOutEnd = (size_t)-1;
-    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)255l, false));
+    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)255l, false, 0));
     SSF_ASSERT(jsOutEnd == 2);
     SSF_ASSERT(memcmp(jsOut, "U\xff", jsOutEnd) == 0);
     jsOutStart = 0;
     jsOutEnd = (size_t)-1;
-    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)256l, false));
+    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)256l, false, 0));
     SSF_ASSERT(jsOutEnd == 3);
     SSF_ASSERT(memcmp(jsOut, "I\x01\x00", jsOutEnd) == 0);
     jsOutStart = 0;
     jsOutEnd = (size_t)-1;
-    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)32767l, false));
+    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)32767l, false, 0));
     SSF_ASSERT(jsOutEnd == 3);
     SSF_ASSERT(memcmp(jsOut, "I\x7f\xff", jsOutEnd) == 0);
     jsOutStart = 0;
     jsOutEnd = (size_t)-1;
-    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)32768l, false));
+    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)32768l, false, 0));
     SSF_ASSERT(jsOutEnd == 5);
     SSF_ASSERT(memcmp(jsOut, "l\x00\x00\x80\x00", jsOutEnd) == 0);
     jsOutStart = 0;
     jsOutEnd = (size_t)-1;
-    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)2147483647l, false));
+    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)2147483647l, false, 0));
     SSF_ASSERT(jsOutEnd == 5);
     SSF_ASSERT(memcmp(jsOut, "l\x7f\xff\xff\xff", jsOutEnd) == 0);
     jsOutStart = 0;
     jsOutEnd = (size_t)-1;
-    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)2147483648l, false));
+    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)2147483648l, false, 0));
     SSF_ASSERT(jsOutEnd == 9);
     SSF_ASSERT(memcmp(jsOut, "L\x00\x00\x00\x00\x80\x00\x00\x00", jsOutEnd) == 0);
     jsOutStart = 0;
     jsOutEnd = (size_t)-1;
-    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)4294967296l, false));
+    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)4294967296l, false, 0));
     SSF_ASSERT(jsOutEnd == 9);
     SSF_ASSERT(memcmp(jsOut, "L\x00\x00\x00\x01\x00\x00\x00\x00", jsOutEnd) == 0);
     jsOutStart = 0;
     jsOutEnd = (size_t)-1;
-    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)-1, false));
+    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)-1, false, 0));
     SSF_ASSERT(jsOutEnd == 2);
     SSF_ASSERT(memcmp(jsOut, "i\xff", jsOutEnd) == 0);
+
+    jsOutStart = 0;
+    jsOutEnd = (size_t)-1;
+    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)128, true,
+                                 SSF_UBJSON_TYPE_NUMBER_INT8) == false);
+    jsOutStart = 0;
+    jsOutEnd = (size_t)-1;
+    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)0, true,
+                                 SSF_UBJSON_TYPE_NUMBER_INT8));
+    SSF_ASSERT(jsOutEnd == 1);
+    SSF_ASSERT(memcmp(jsOut, "\x00", jsOutEnd) == 0);
+    jsOutStart = 0;
+    jsOutEnd = (size_t)-1;
+    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)1, true,
+                                 SSF_UBJSON_TYPE_NUMBER_INT8));
+    SSF_ASSERT(jsOutEnd == 1);
+    SSF_ASSERT(memcmp(jsOut, "\x01", jsOutEnd) == 0);
+    jsOutStart = 0;
+    jsOutEnd = (size_t)-1;
+    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)127l, true,
+                                 SSF_UBJSON_TYPE_NUMBER_INT8));
+    SSF_ASSERT(jsOutEnd == 1);
+    SSF_ASSERT(memcmp(jsOut, "\x7f", jsOutEnd) == 0);
+    jsOutStart = 0;
+    jsOutEnd = (size_t)-1;
+    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)256, true,
+                                 SSF_UBJSON_TYPE_NUMBER_UINT8) == false);
+    jsOutStart = 0;
+    jsOutEnd = (size_t)-1;
+    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)0, true,
+                                 SSF_UBJSON_TYPE_NUMBER_UINT8));
+    SSF_ASSERT(jsOutEnd == 1);
+    SSF_ASSERT(memcmp(jsOut, "\x00", jsOutEnd) == 0);
+    jsOutStart = 0;
+    jsOutEnd = (size_t)-1;
+    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)1, true,
+                                 SSF_UBJSON_TYPE_NUMBER_UINT8));
+    SSF_ASSERT(jsOutEnd == 1);
+    SSF_ASSERT(memcmp(jsOut, "\x01", jsOutEnd) == 0);
+    jsOutStart = 0;
+    jsOutEnd = (size_t)-1;
+    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)127l, true,
+                                 SSF_UBJSON_TYPE_NUMBER_UINT8));
+    SSF_ASSERT(jsOutEnd == 1);
+    SSF_ASSERT(memcmp(jsOut, "\x7f", jsOutEnd) == 0);
+    jsOutStart = 0;
+    jsOutEnd = (size_t)-1;
+    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)128l, true,
+                                 SSF_UBJSON_TYPE_NUMBER_UINT8));
+    SSF_ASSERT(jsOutEnd == 1);
+    SSF_ASSERT(memcmp(jsOut, "\x80", jsOutEnd) == 0);
+    jsOutStart = 0;
+    jsOutEnd = (size_t)-1;
+    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)255l, true,
+                                 SSF_UBJSON_TYPE_NUMBER_UINT8));
+    SSF_ASSERT(jsOutEnd == 1);
+    SSF_ASSERT(memcmp(jsOut, "\xff", jsOutEnd) == 0);
+    jsOutStart = 0;
+    jsOutEnd = (size_t)-1;
+    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)32768l, true,
+                                 SSF_UBJSON_TYPE_NUMBER_INT16) == false);
+    jsOutStart = 0;
+    jsOutEnd = (size_t)-1;
+    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)1l, true,
+                                 SSF_UBJSON_TYPE_NUMBER_INT16));
+    SSF_ASSERT(jsOutEnd == 2);
+    SSF_ASSERT(memcmp(jsOut, "\x00\x01", jsOutEnd) == 0);
+    jsOutStart = 0;
+    jsOutEnd = (size_t)-1;
+    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)256l, true,
+                                 SSF_UBJSON_TYPE_NUMBER_INT16));
+    SSF_ASSERT(jsOutEnd == 2);
+    SSF_ASSERT(memcmp(jsOut, "\x01\x00", jsOutEnd) == 0);
+    jsOutStart = 0;
+    jsOutEnd = (size_t)-1;
+    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)32767l, true,
+                                 SSF_UBJSON_TYPE_NUMBER_INT16));
+    SSF_ASSERT(jsOutEnd == 2);
+    SSF_ASSERT(memcmp(jsOut, "\x7f\xff", jsOutEnd) == 0);
+    jsOutStart = 0;
+    jsOutEnd = (size_t)-1;
+    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)2147483648ll, true,
+                                 SSF_UBJSON_TYPE_NUMBER_INT32) == false);
+    jsOutStart = 0;
+    jsOutEnd = (size_t)-1;
+    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)1l, true,
+                                 SSF_UBJSON_TYPE_NUMBER_INT32));
+    SSF_ASSERT(jsOutEnd == 4);
+    SSF_ASSERT(memcmp(jsOut, "\x00\x00\x00\x01", jsOutEnd) == 0);
+    jsOutStart = 0;
+    jsOutEnd = (size_t)-1;
+    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)32768l, true,
+                                 SSF_UBJSON_TYPE_NUMBER_INT32));
+    SSF_ASSERT(jsOutEnd == 4);
+    SSF_ASSERT(memcmp(jsOut, "\x00\x00\x80\x00", jsOutEnd) == 0);
+    jsOutStart = 0;
+    jsOutEnd = (size_t)-1;
+    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)2147483647l, true,
+                                 SSF_UBJSON_TYPE_NUMBER_INT32));
+    SSF_ASSERT(jsOutEnd == 4);
+    SSF_ASSERT(memcmp(jsOut, "\x7f\xff\xff\xff", jsOutEnd) == 0);
+    jsOutStart = 0;
+    jsOutEnd = (size_t)-1;
+    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)1l, true,
+                                 SSF_UBJSON_TYPE_NUMBER_INT64));
+    SSF_ASSERT(jsOutEnd == 8);
+    SSF_ASSERT(memcmp(jsOut, "\x00\x00\x00\x00\x00\x00\x00\x01", jsOutEnd) == 0);
+    jsOutStart = 0;
+    jsOutEnd = (size_t)-1;
+    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)2147483648l, true,
+                                 SSF_UBJSON_TYPE_NUMBER_INT64));
+    SSF_ASSERT(jsOutEnd == 8);
+    SSF_ASSERT(memcmp(jsOut, "\x00\x00\x00\x00\x80\x00\x00\x00", jsOutEnd) == 0);
+    jsOutStart = 0;
+    jsOutEnd = (size_t)-1;
+    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)4294967296l, true,
+                                 SSF_UBJSON_TYPE_NUMBER_INT64));
+    SSF_ASSERT(jsOutEnd == 8);
+    SSF_ASSERT(memcmp(jsOut, "\x00\x00\x00\x01\x00\x00\x00\x00", jsOutEnd) == 0);
+    jsOutStart = 0;
+    jsOutEnd = (size_t)-1;
+    SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)-1, true,
+                                 SSF_UBJSON_TYPE_NUMBER_INT64));
+    SSF_ASSERT(jsOutEnd == 8);
+    SSF_ASSERT(memcmp(jsOut, "\xff\xff\xff\xff\xff\xff\xff\xff", jsOutEnd) == 0);
+
     jsOutStart = 0;
     jsOutEnd = (size_t)-1;
     SSF_ASSERT(SSFUBJsonPrintFloat(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (float)1.23));

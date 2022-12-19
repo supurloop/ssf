@@ -1002,7 +1002,8 @@ bool SSFUBJsonPrintLabel(uint8_t *js, size_t size, size_t start, size_t *end, SS
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if in signed int added successfully to JSON string, else false.                  */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFUBJsonPrintInt(uint8_t *js, size_t size, size_t start, size_t *end, int64_t in, bool opt)
+bool SSFUBJsonPrintInt(uint8_t *js, size_t size, size_t start, size_t *end, int64_t in, bool opt,
+                       SSFUBJsonType_t optType)
 {
     uint8_t type;
     size_t len = 0;
@@ -1014,8 +1015,45 @@ bool SSFUBJsonPrintInt(uint8_t *js, size_t size, size_t start, size_t *end, int6
 
     SSF_REQUIRE(js != NULL);
     SSF_REQUIRE(end != NULL);
+    if (opt)
+    {
+        SSF_REQUIRE((optType == SSF_UBJSON_TYPE_NUMBER_INT8) ||
+                    (optType == SSF_UBJSON_TYPE_NUMBER_UINT8) ||
+                    (optType == SSF_UBJSON_TYPE_NUMBER_INT16) ||
+                    (optType == SSF_UBJSON_TYPE_NUMBER_INT32) ||
+                    (optType == SSF_UBJSON_TYPE_NUMBER_INT64));
+    }
+    else { SSF_REQUIRE(optType == SSF_UBJSON_TYPE_ERROR); }
 
-    if (in < 128l) type = UBJ_TYPE_INT8;
+    if (opt)
+    {
+        switch(optType)
+        {
+            case SSF_UBJSON_TYPE_NUMBER_INT8:
+                if (in >= 128l) return false;
+                type = UBJ_TYPE_INT8;
+                break;
+            case SSF_UBJSON_TYPE_NUMBER_UINT8:
+                if (in >= 256l) return false;
+                type = UBJ_TYPE_UINT8;
+                break;
+            case SSF_UBJSON_TYPE_NUMBER_INT16:
+                if (in >= 32768l) return false;
+                type = UBJ_TYPE_INT16;
+                break;
+            case SSF_UBJSON_TYPE_NUMBER_INT32:
+                if (in >= 2147483648ll) return false;
+                type = UBJ_TYPE_INT32;
+                break;
+            case SSF_UBJSON_TYPE_NUMBER_INT64:
+                type = UBJ_TYPE_INT64;
+                break;
+            default:
+                SSF_ERROR();
+                break;
+        }
+    }
+    else if (in < 128l) type = UBJ_TYPE_INT8;
     else if (in < 256l) type = UBJ_TYPE_UINT8;
     else if (in < 32768l) type = UBJ_TYPE_INT16;
     else if (in < 2147483648ll) type = UBJ_TYPE_INT32;

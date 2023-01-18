@@ -755,13 +755,13 @@ bool SSFUBJsonGetInt(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, void *out, ui
         if (isSigned)
         {
             int8_t *pi8 = (int8_t *)out;
-            if ((i64 < -128) || (i64 > 127)) return false;
+            if ((i64 < -128l) || (i64 > 127l)) return false;
             *pi8 = (int8_t)i64;
         }
         else
         {
             uint8_t *pu8 = (uint8_t *)out;
-            if (u64 > 255) return false;
+            if (u64 > 255ul) return false;
             *pu8 = (uint8_t)u64;
         }
     }
@@ -770,13 +770,13 @@ bool SSFUBJsonGetInt(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, void *out, ui
         if (isSigned)
         {
             int16_t *pi16 = (int16_t *)out;
-            if ((i64 < -32768) || (i64 > 32767)) return false;
+            if ((i64 < -32768l) || (i64 > 32767l)) return false;
             *pi16 = (int16_t)i64;
         }
         else
         {
             uint16_t *pu16 = (uint16_t *)out;
-            if (u64 > 65535) return false;
+            if (u64 > 65535ul) return false;
             *pu16 = (uint16_t)u64;
         }
         break;
@@ -784,13 +784,13 @@ bool SSFUBJsonGetInt(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, void *out, ui
         if (isSigned)
         {
             int32_t *pi32 = (int32_t *)out;
-            if ((i64 < -2147483648ll) || (i64 > 2147483647)) return false;
+            if ((i64 < -2147483648ll) || (i64 > 2147483647ll)) return false;
             *pi32 = (int32_t)i64;
         }
         else
         {
             uint32_t *pu32 = (uint32_t *)out;
-            if (u64 > 4294967295) return false;
+            if (u64 > 4294967295ull) return false;
             *pu32 = (uint32_t)u64;
         }
         break;
@@ -1005,7 +1005,7 @@ bool SSFUBJsonPrintLabel(uint8_t *js, size_t size, size_t start, size_t *end, SS
 bool SSFUBJsonPrintInt(uint8_t *js, size_t size, size_t start, size_t *end, int64_t in, bool opt,
                        SSFUBJsonType_t optType)
 {
-    uint8_t type;
+    uint8_t type = 0;
     size_t len = 0;
     uint8_t *pi = NULL;
     int8_t i8;

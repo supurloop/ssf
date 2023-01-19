@@ -1053,10 +1053,10 @@ bool SSFUBJsonPrintInt(uint8_t *js, size_t size, size_t start, size_t *end, int6
                 break;
         }
     }
-    else if (in < 128l) type = UBJ_TYPE_INT8;
-    else if (in < 256l) type = UBJ_TYPE_UINT8;
-    else if (in < 32768l) type = UBJ_TYPE_INT16;
-    else if (in < 2147483648ll) type = UBJ_TYPE_INT32;
+    else if ((in > -129l) && (in < 128l)) type = UBJ_TYPE_INT8;
+    else if ((in > -1l) && (in < 256l)) type = UBJ_TYPE_UINT8;
+    else if ((in > -32769l) && (in < 32768l)) type = UBJ_TYPE_INT16;
+    else if ((in > -2147483649ll) && (in < 2147483648ll)) type = UBJ_TYPE_INT32;
     else type = UBJ_TYPE_INT64;
 
     if (opt == false) { if (!SSFUBJsonPrintChar(js, size, start, &start, type)) return false; }

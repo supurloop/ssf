@@ -52,9 +52,11 @@ And, as noted above, portions of the framework will work on much smaller micros.
 
 This framework has been successfully ported and unit tested on the following platforms: Windows Visual Studio 32/64-bit, Linux 32/64-bit (GCC), MAC OS X, PIC32 (XC32), PIC24 (XC16), and MSP430 (TI 15.12.3.LTS). You should only need to change ssfport.c and ssfport.h to implement a successful port.
 
-The code will compile cleanly under Windows in Visual Studio using the ssf.sln solution file.
-The code will compile cleanly under Linux. ./build.sh will create the ssf executable in the source directory.
-The code will compile cleanly under OS X. ./build-osx.sh will create the ssf executable in the source directory.
+The code will compile cleanly and not report any analyzer(Lint) warnings under Windows in Visual Studio using the ssf.sln solution file.7
+The code will compile cleanly under Linux. ./build-linux.sh will create the ssf executable in the source directory.
+The code will compile cleanly under OS X. ./build-macos.sh will create the ssf executable in the source directory.
+
+The Windows, Linux, and Mac OS builds are setup to output all compiler warnings.
 
 For other platforms there are only a few essential tasks that must be completed:
 
@@ -83,6 +85,8 @@ For a production ready embedded system you should probably do something addition
 First, I recommend that it should somehow safely record the file and line number where the assertion occurred so that it can be reported on the next boot.
 
 Second, the system should be automatically reset rather than sitting forever in a loop.
+
+Third, the system should have a safe boot mode that kicks in if the system reboots quickly many times in a row.
 
 ## Design Principles
 

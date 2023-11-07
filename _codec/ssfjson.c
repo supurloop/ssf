@@ -37,6 +37,7 @@
 #include "ssfjson.h"
 #include "ssfbase64.h"
 #include "ssfhex.h"
+#include "ssfdec.h"
 
 #if SSF_JSON_CONFIG_ENABLE_FLOAT_PARSE == 1
     #include <math.h> /* round() */
@@ -736,10 +737,10 @@ bool SSFJsonPrintDouble(SSFCStrOut_t js, size_t size, size_t start, size_t *end,
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if in signed int added successfully to JSON string, else false.                  */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFJsonPrintInt(SSFCStrOut_t js, size_t size, size_t start, size_t *end, long in,
+bool SSFJsonPrintInt(SSFCStrOut_t js, size_t size, size_t start, size_t *end, int64_t in,
                      bool *comma)
 {
-    int len;
+    size_t len;
 
     SSF_REQUIRE(js != NULL);
     SSF_REQUIRE(start <= size);
@@ -747,8 +748,8 @@ bool SSFJsonPrintInt(SSFCStrOut_t js, size_t size, size_t start, size_t *end, lo
     SSF_REQUIRE((comma == NULL) || (comma != (bool *)true));
 
     SSF_JSON_COMMA(comma);
-    len = snprintf(&js[start], size - start, "%ld", in);
-    if ((len < 0) || (((size_t)len) >= (size - start))) return false;
+    len = SSFDecIntToStr(in, &js[start], size - start);
+    if ((len < 0) || (len >= (size - start))) return false;
     *end = start + len;
     return true;
 }
@@ -756,10 +757,10 @@ bool SSFJsonPrintInt(SSFCStrOut_t js, size_t size, size_t start, size_t *end, lo
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if in unsigned int added successfully to JSON string, else false.                */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFJsonPrintUInt(SSFCStrOut_t js, size_t size, size_t start, size_t *end, unsigned long in,
+bool SSFJsonPrintUInt(SSFCStrOut_t js, size_t size, size_t start, size_t *end, uint64_t in,
                       bool *comma)
 {
-    int len;
+    size_t len;
 
     SSF_REQUIRE(js != NULL);
     SSF_REQUIRE(start <= size);
@@ -767,8 +768,8 @@ bool SSFJsonPrintUInt(SSFCStrOut_t js, size_t size, size_t start, size_t *end, u
     SSF_REQUIRE((comma == NULL) || (comma != (bool *)true));
 
     SSF_JSON_COMMA(comma);
-    len = snprintf(&js[start], size - start, "%lu", in);
-    if ((len < 0) || (((size_t)len) >= (size - start))) return false;
+    len = SSFDecUIntToStr(in, &js[start], size - start);
+    if ((len < 0) || (len >= (size - start))) return false;
     *end = start + len;
     return true;
 }

@@ -127,9 +127,9 @@ bool SSFJsonPrintBase64(SSFCStrOut_t jstr, size_t size, size_t start, size_t *en
 bool SSFJsonPrintDouble(SSFCStrOut_t js, size_t size, size_t start, size_t *end, double in,
                         SSFJsonFltFmt_t fmt, bool *comma);
 #endif /* SSF_JSON_CONFIG_ENABLE_FLOAT_GEN */
-bool SSFJsonPrintInt(SSFCStrOut_t js, size_t size, size_t start, size_t *end, long in,
+bool SSFJsonPrintInt(SSFCStrOut_t js, size_t size, size_t start, size_t *end, int64_t in,
                      bool *comma);
-bool SSFJsonPrintUInt(SSFCStrOut_t js, size_t size, size_t start, size_t *end, unsigned long in,
+bool SSFJsonPrintUInt(SSFCStrOut_t js, size_t size, size_t start, size_t *end, uint64_t in,
                       bool *comma);
 #define SSFJsonPrintObject(js, size, start, end, fn, in, comma) \
         SSFJsonPrint(js, size, start, end, fn, in, "{}", comma)

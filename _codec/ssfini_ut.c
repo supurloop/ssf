@@ -353,7 +353,7 @@ void SSFINIUnitTest(void)
     size_t outStrLen;
     size_t outStrLenTemp;
     bool outBool;
-    long int outLong;
+    int64_t outLong;
     size_t iniLen;
     char iniStr[1024];
     size_t iniLenLast;
@@ -371,10 +371,10 @@ void SSFINIUnitTest(void)
     SSF_ASSERT_TEST(SSFINIGetBoolValue("ini", NULL, "", 0, &outBool));
     SSF_ASSERT_TEST(SSFINIGetBoolValue("ini", NULL, NULL, 0, &outBool));
     SSF_ASSERT_TEST(SSFINIGetBoolValue("ini", NULL, "name", 0, NULL));
-    SSF_ASSERT_TEST(SSFINIGetLongValue(NULL, NULL, "name", 0, &outLong));
-    SSF_ASSERT_TEST(SSFINIGetLongValue("ini", NULL, NULL, 0, &outLong));
-    SSF_ASSERT_TEST(SSFINIGetLongValue("ini", NULL, "", 0, &outLong));
-    SSF_ASSERT_TEST(SSFINIGetLongValue("ini", NULL, "name", 0, NULL));
+    SSF_ASSERT_TEST(SSFINIGetIntValue(NULL, NULL, "name", 0, &outLong));
+    SSF_ASSERT_TEST(SSFINIGetIntValue("ini", NULL, NULL, 0, &outLong));
+    SSF_ASSERT_TEST(SSFINIGetIntValue("ini", NULL, "", 0, &outLong));
+    SSF_ASSERT_TEST(SSFINIGetIntValue("ini", NULL, "name", 0, NULL));
 
     for (i = 0; i < sizeof(_ssfINIParserUT) / sizeof(SSFINIParserUnitTest_t); i++)
     {
@@ -429,7 +429,7 @@ void SSFINIUnitTest(void)
         {
             SSF_ASSERT(_ssfINIParserUT[i].expectedBoolValue == outBool);
         }
-        SSF_ASSERT(SSFINIGetLongValue(_ssfINIParserUT[i].ini, _ssfINIParserUT[i].section,
+        SSF_ASSERT(SSFINIGetIntValue(_ssfINIParserUT[i].ini, _ssfINIParserUT[i].section,
                                       _ssfINIParserUT[i].name, _ssfINIParserUT[i].index,
                                       &outLong) == _ssfINIParserUT[i].isExpectedLongValue);
         if (_ssfINIParserUT[i].isExpectedLongValue)
@@ -478,14 +478,14 @@ void SSFINIUnitTest(void)
     SSF_ASSERT_TEST(SSFINIPrintNameBoolValue("ini", 4, &iniLen, "name", true, SSF_INI_BOOL_1_0, SSF_INI_LINE_ENDING_MIN));
     SSF_ASSERT_TEST(SSFINIPrintNameBoolValue("ini", 4, &iniLen, "name", true, SSF_INI_BOOL_1_0, SSF_INI_LINE_ENDING_MAX));
     SSF_ASSERT_TEST(SSFINIPrintNameBoolValue("ini", 4, &iniLen, "name", true, SSF_INI_BOOL_1_0, SSF_INI_LINE_ENDING_MAX + 1));
-    SSF_ASSERT_TEST(SSFINIPrintNameLongValue(NULL, 4, &iniLen, "name", 0, SSF_INI_LF));
-    SSF_ASSERT_TEST(SSFINIPrintNameLongValue("ini", 0, &iniLen, "name", 0, SSF_INI_LF));
-    SSF_ASSERT_TEST(SSFINIPrintNameLongValue("ini", 4, NULL, "name", 0, SSF_INI_LF));
-    SSF_ASSERT_TEST(SSFINIPrintNameLongValue("ini", 4, &iniLen, "", 0, SSF_INI_LF));
-    SSF_ASSERT_TEST(SSFINIPrintNameLongValue("ini", 4, &iniLen, NULL, 0, SSF_INI_LF));
-    SSF_ASSERT_TEST(SSFINIPrintNameLongValue("ini", 4, &iniLen, "name", 0, SSF_INI_LINE_ENDING_MIN));
-    SSF_ASSERT_TEST(SSFINIPrintNameLongValue("ini", 4, &iniLen, "name", 0, SSF_INI_LINE_ENDING_MAX));
-    SSF_ASSERT_TEST(SSFINIPrintNameLongValue("ini", 4, &iniLen, "name", 0, SSF_INI_LINE_ENDING_MAX + 1));
+    SSF_ASSERT_TEST(SSFINIPrintNameIntValue(NULL, 4, &iniLen, "name", 0, SSF_INI_LF));
+    SSF_ASSERT_TEST(SSFINIPrintNameIntValue("ini", 0, &iniLen, "name", 0, SSF_INI_LF));
+    SSF_ASSERT_TEST(SSFINIPrintNameIntValue("ini", 4, NULL, "name", 0, SSF_INI_LF));
+    SSF_ASSERT_TEST(SSFINIPrintNameIntValue("ini", 4, &iniLen, "", 0, SSF_INI_LF));
+    SSF_ASSERT_TEST(SSFINIPrintNameIntValue("ini", 4, &iniLen, NULL, 0, SSF_INI_LF));
+    SSF_ASSERT_TEST(SSFINIPrintNameIntValue("ini", 4, &iniLen, "name", 0, SSF_INI_LINE_ENDING_MIN));
+    SSF_ASSERT_TEST(SSFINIPrintNameIntValue("ini", 4, &iniLen, "name", 0, SSF_INI_LINE_ENDING_MAX));
+    SSF_ASSERT_TEST(SSFINIPrintNameIntValue("ini", 4, &iniLen, "name", 0, SSF_INI_LINE_ENDING_MAX + 1));
 
     iniLen = 0;
     SSF_ASSERT(SSFINIPrintComment(iniStr, sizeof(iniStr), &iniLen, "text", SSF_INI_COMMENT_SEMI, SSF_INI_LF));
@@ -600,45 +600,45 @@ void SSFINIUnitTest(void)
     SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, 12, &iniLen, "name", true, SSF_INI_BOOL_TRUE_FALSE, SSF_INI_CRLF));
 
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintNameLongValue(iniStr, sizeof(iniStr), &iniLen, "name", 0l, SSF_INI_LF));
+    SSF_ASSERT(SSFINIPrintNameIntValue(iniStr, sizeof(iniStr), &iniLen, "name", 0l, SSF_INI_LF));
     SSF_ASSERT(iniLen == 7);
     SSF_ASSERT(strcmp(iniStr, "name=0\n") == 0);
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintNameLongValue(iniStr, 7, &iniLen, "name", 0l, SSF_INI_LF) == false);
+    SSF_ASSERT(SSFINIPrintNameIntValue(iniStr, 7, &iniLen, "name", 0l, SSF_INI_LF) == false);
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintNameLongValue(iniStr, 8, &iniLen, "name", 0l, SSF_INI_LF));
+    SSF_ASSERT(SSFINIPrintNameIntValue(iniStr, 8, &iniLen, "name", 0l, SSF_INI_LF));
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintNameLongValue(iniStr, sizeof(iniStr), &iniLen, "name", 1l , SSF_INI_LF));
+    SSF_ASSERT(SSFINIPrintNameIntValue(iniStr, sizeof(iniStr), &iniLen, "name", 1l , SSF_INI_LF));
     SSF_ASSERT(iniLen == 7);
     SSF_ASSERT(strcmp(iniStr, "name=1\n") == 0);
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintNameLongValue(iniStr, 7, &iniLen, "name", 1l, SSF_INI_LF) == false);
+    SSF_ASSERT(SSFINIPrintNameIntValue(iniStr, 7, &iniLen, "name", 1l, SSF_INI_LF) == false);
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintNameLongValue(iniStr, 8, &iniLen, "name", 1l, SSF_INI_LF));
+    SSF_ASSERT(SSFINIPrintNameIntValue(iniStr, 8, &iniLen, "name", 1l, SSF_INI_LF));
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintNameLongValue(iniStr, sizeof(iniStr), &iniLen, "name", -1l, SSF_INI_LF));
+    SSF_ASSERT(SSFINIPrintNameIntValue(iniStr, sizeof(iniStr), &iniLen, "name", -1l, SSF_INI_LF));
     SSF_ASSERT(iniLen == 8);
     SSF_ASSERT(strcmp(iniStr, "name=-1\n") == 0);
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintNameLongValue(iniStr, 8, &iniLen, "name", -1l, SSF_INI_LF) == false);
+    SSF_ASSERT(SSFINIPrintNameIntValue(iniStr, 8, &iniLen, "name", -1l, SSF_INI_LF) == false);
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintNameLongValue(iniStr, 9, &iniLen, "name", -1l, SSF_INI_LF));
+    SSF_ASSERT(SSFINIPrintNameIntValue(iniStr, 9, &iniLen, "name", -1l, SSF_INI_LF));
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintNameLongValue(iniStr, sizeof(iniStr), &iniLen, "name", 1234567890l, SSF_INI_CRLF));
+    SSF_ASSERT(SSFINIPrintNameIntValue(iniStr, sizeof(iniStr), &iniLen, "name", 1234567890l, SSF_INI_CRLF));
     SSF_ASSERT(iniLen == 17);
     SSF_ASSERT(strcmp(iniStr, "name=1234567890\r\n") == 0);
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintNameLongValue(iniStr, 17, &iniLen, "name", 1234567890l, SSF_INI_CRLF) == false);
+    SSF_ASSERT(SSFINIPrintNameIntValue(iniStr, 17, &iniLen, "name", 1234567890l, SSF_INI_CRLF) == false);
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintNameLongValue(iniStr, 18, &iniLen, "name", 1234567890l, SSF_INI_CRLF));
+    SSF_ASSERT(SSFINIPrintNameIntValue(iniStr, 18, &iniLen, "name", 1234567890l, SSF_INI_CRLF));
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintNameLongValue(iniStr, sizeof(iniStr), &iniLen, "name", -1234567890l, SSF_INI_CRLF));
+    SSF_ASSERT(SSFINIPrintNameIntValue(iniStr, sizeof(iniStr), &iniLen, "name", -1234567890l, SSF_INI_CRLF));
     SSF_ASSERT(iniLen == 18);
     SSF_ASSERT(strcmp(iniStr, "name=-1234567890\r\n") == 0);
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintNameLongValue(iniStr, 18, &iniLen, "name", -1234567890l, SSF_INI_CRLF) == false);
+    SSF_ASSERT(SSFINIPrintNameIntValue(iniStr, 18, &iniLen, "name", -1234567890l, SSF_INI_CRLF) == false);
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintNameLongValue(iniStr, 19, &iniLen, "name", -1234567890l, SSF_INI_CRLF));
+    SSF_ASSERT(SSFINIPrintNameIntValue(iniStr, 19, &iniLen, "name", -1234567890l, SSF_INI_CRLF));
 
     iniLen = 0;
     iniLenLast = iniLen;
@@ -697,17 +697,17 @@ void SSFINIUnitTest(void)
     iniLenLast = iniLen;
     SSF_ASSERT(memcmp(iniStr, _ssfINIBigINI, iniLen) == 0);
     SSF_ASSERT(iniStr[iniLen] == 0);
-    SSF_ASSERT(SSFINIPrintNameLongValue(iniStr, sizeof(iniStr), &iniLen, "LI", 0l, SSF_INI_LF));
+    SSF_ASSERT(SSFINIPrintNameIntValue(iniStr, sizeof(iniStr), &iniLen, "LI", 0l, SSF_INI_LF));
     SSF_ASSERT((iniLen - iniLenLast) == 5);
     iniLenLast = iniLen;
     SSF_ASSERT(memcmp(iniStr, _ssfINIBigINI, iniLen) == 0);
     SSF_ASSERT(iniStr[iniLen] == 0);
-    SSF_ASSERT(SSFINIPrintNameLongValue(iniStr, sizeof(iniStr), &iniLen, "LIM", -1l, SSF_INI_LF));
+    SSF_ASSERT(SSFINIPrintNameIntValue(iniStr, sizeof(iniStr), &iniLen, "LIM", -1l, SSF_INI_LF));
     SSF_ASSERT((iniLen - iniLenLast) == 7);
     iniLenLast = iniLen;
     SSF_ASSERT(memcmp(iniStr, _ssfINIBigINI, iniLen) == 0);
     SSF_ASSERT(iniStr[iniLen] == 0);
-    SSF_ASSERT(SSFINIPrintNameLongValue(iniStr, sizeof(iniStr), &iniLen, "LIL", -1234567890l, SSF_INI_LF));
+    SSF_ASSERT(SSFINIPrintNameIntValue(iniStr, sizeof(iniStr), &iniLen, "LIL", -1234567890l, SSF_INI_LF));
     SSF_ASSERT((iniLen - iniLenLast) == 16);
     iniLenLast = iniLen;
     SSF_ASSERT(memcmp(iniStr, _ssfINIBigINI, iniLen) == 0);

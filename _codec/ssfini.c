@@ -70,6 +70,7 @@
 #include <stdlib.h>
 #include "ssfport.h"
 #include "ssfini.h"
+#include "ssfdec.h"
 
 typedef struct
 {
@@ -445,8 +446,8 @@ bool SSFINIGetBoolValue(SSFCStrIn_t ini, SSFCStrIn_t section, SSFCStrIn_t name, 
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if valid long int value in [section].name[index] found/set to out, else false.   */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFINIGetLongValue(SSFCStrIn_t ini, SSFCStrIn_t section, SSFCStrIn_t name, uint8_t index,
-                        long int *out)
+bool SSFINIGetIntValue(SSFCStrIn_t ini, SSFCStrIn_t section, SSFCStrIn_t name, uint8_t index,
+                       int64_t *out)
 {
     SSFINIContext_t context;
     char li[32];
@@ -466,7 +467,7 @@ bool SSFINIGetLongValue(SSFCStrIn_t ini, SSFCStrIn_t section, SSFCStrIn_t name, 
     /* Try to convert value to long int */
     memcpy(li, context.value, context.valueLen);
     li[context.valueLen] = 0;
-    *out = strtol(&li[0], &endPtr, 10);
+    *out = (int64_t)strtol(&li[0], &endPtr, 10);
 
     /* Did we successfully convert value to a long int? */
     if (endPtr != &li[context.valueLen]) return false;
@@ -656,13 +657,13 @@ bool SSFINIPrintNameBoolValue(SSFCStrOut_t ini, size_t iniSize, size_t *iniLen, 
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if name/long int value added to ini, else false.                                 */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFINIPrintNameLongValue(SSFCStrOut_t ini, size_t iniSize, size_t *iniLen, SSFCStrIn_t name,
-                              long int value, SSFINILineEnd_t lineEnding)
+bool SSFINIPrintNameIntValue(SSFCStrOut_t ini, size_t iniSize, size_t *iniLen, SSFCStrIn_t name,
+                              int64_t value, SSFINILineEnd_t lineEnding)
 {
     char nstr[32];
-    int len;
+    size_t len;
 
-    len = snprintf(nstr, sizeof(nstr), "%ld", value);
+    len = SSFDecIntToStr(value, nstr, sizeof(nstr));
     if (len < 0) return false;
     if (len >= ((int)sizeof(nstr))) return false;
     return SSFINIPrintNameStrValue(ini, iniSize, iniLen, name, nstr, lineEnding);

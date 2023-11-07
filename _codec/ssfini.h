@@ -81,8 +81,8 @@ bool SSFINIGetStrValue(SSFCStrIn_t ini, SSFCStrIn_t section, SSFCStrIn_t name, u
                        SSFCStrOut_t out, size_t outSize, size_t *outLen);
 bool SSFINIGetBoolValue(SSFCStrIn_t ini, SSFCStrIn_t section, SSFCStrIn_t name, uint8_t index,
                         bool *out);
-bool SSFINIGetLongValue(SSFCStrIn_t ini, SSFCStrIn_t section, SSFCStrIn_t name, uint8_t index,
-                        long int *out);
+bool SSFINIGetIntValue(SSFCStrIn_t ini, SSFCStrIn_t section, SSFCStrIn_t name, uint8_t index,
+                       int64_t *out);
 
 /* Generator */
 bool SSFINIPrintComment(SSFCStrOut_t ini, size_t iniSize, size_t *iniLen, SSFCStrIn_t text,
@@ -93,8 +93,8 @@ bool SSFINIPrintNameStrValue(SSFCStrOut_t ini, size_t iniSize, size_t *iniLen, S
                              SSFCStrIn_t value, SSFINILineEnd_t lineEnding);
 bool SSFINIPrintNameBoolValue(SSFCStrOut_t ini, size_t iniSize, size_t *iniLen, SSFCStrIn_t name,
                               bool value, SSFINIBool_t boolType, SSFINILineEnd_t lineEnding);
-bool SSFINIPrintNameLongValue(SSFCStrOut_t ini, size_t iniSize, size_t *iniLen, SSFCStrIn_t name,
-                              long int value, SSFINILineEnd_t lineEnding);
+bool SSFINIPrintNameIntValue(SSFCStrOut_t ini, size_t iniSize, size_t *iniLen, SSFCStrIn_t name,
+                             int64_t value, SSFINILineEnd_t lineEnding);
 
 /* --------------------------------------------------------------------------------------------- */
 /* Unit test                                                                                     */

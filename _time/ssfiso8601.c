@@ -214,7 +214,8 @@ bool SSFISO8601ISOToUnix(SSFCStrIn_t inStr, SSFPortTick_t *unixSys, int16_t *zon
         (inStr[YEAR_INDEX + 4] != '-'))
     { return false; }
     if (SSFDecStrToInt(inStr, &tmp) == false) return false;
-    if ((tmp < SSFDTIME_EPOCH_YEAR_MIN) || (tmp > SSFDTIME_EPOCH_YEAR_MAX)) return false;
+    if ((tmp < ((int64_t)SSFDTIME_EPOCH_YEAR_MIN)) ||
+        (tmp > ((int64_t)SSFDTIME_EPOCH_YEAR_MAX))) return false;
     ts.year = (uint16_t)(tmp - SSFDTIME_EPOCH_YEAR);
 
     /* Parse month */

@@ -504,13 +504,13 @@ bool SSFDecStrToXInt(SSFCStrIn_t str, int64_t *sval, uint64_t *uval)
         if (negBase)
         {
             /* Check for signed overflow */
-            if (tmp > 9223372036854775808ll) return false;
+            if (tmp > 9223372036854775808ull) return false;
             *sval = -((int64_t)tmp);
         }
         else
         {
             /* Check for signed overflow */
-            if (tmp > 9223372036854775807ll) return false;
+            if (tmp > 9223372036854775807ull) return false;
             *sval = (int64_t)tmp;
         }
     }

@@ -197,6 +197,7 @@ bool SSFISO8601ISOToUnix(SSFCStrIn_t inStr, SSFPortTick_t *unixSys, int16_t *zon
     SSFDTimeStruct_t ts;
     size_t index;
     size_t numDigs = 0;
+    int64_t tmp;
 
     SSF_REQUIRE(inStr != NULL);
     SSF_REQUIRE(unixSys != NULL);
@@ -212,35 +213,45 @@ bool SSFISO8601ISOToUnix(SSFCStrIn_t inStr, SSFPortTick_t *unixSys, int16_t *zon
         (SSFIsDigit(inStr[YEAR_INDEX + 3]) == false) ||
         (inStr[YEAR_INDEX + 4] != '-'))
     { return false; }
-    ts.year = (uint16_t)strtoul(inStr, NULL, 10) - SSFDTIME_EPOCH_YEAR;
+    if (SSFDecStrToInt(inStr, &tmp) == false) return false;
+    if ((tmp < SSFDTIME_EPOCH_YEAR_MIN) || (tmp > SSFDTIME_EPOCH_YEAR_MAX)) return false;
+    ts.year = (uint16_t)(tmp - SSFDTIME_EPOCH_YEAR);
 
     /* Parse month */
     if ((SSFIsDigit(inStr[MONTH_INDEX]) == false) ||
         (SSFIsDigit(inStr[MONTH_INDEX + 1]) == false) ||
         (inStr[MONTH_INDEX + 2] != '-'))
     { return false; }
-    ts.month = (uint8_t)(strtoul(&inStr[MONTH_INDEX], NULL, 10) - 1u);
+    if (SSFDecStrToInt(&inStr[MONTH_INDEX], &tmp) == false) return false;
+    if ((tmp < 1) || (tmp > SSFDTIME_MONTHS_IN_YEAR)) return false;
+    ts.month = (uint8_t)(tmp - 1u);
 
     /* Parse day */
     if ((SSFIsDigit(inStr[DAY_INDEX]) == false) ||
         (SSFIsDigit(inStr[DAY_INDEX + 1]) == false) ||
         (inStr[DAY_INDEX + 2] != 'T'))
     { return false; }
-    ts.day = (uint8_t)(strtoul(&inStr[DAY_INDEX], NULL, 10) - 1u);
+    if (SSFDecStrToInt(&inStr[DAY_INDEX], &tmp) == false) return false;
+    if (tmp < 1) return false;
+    ts.day = (uint8_t)(tmp - 1u);
 
     /* Parse hour */
     if ((SSFIsDigit(inStr[HOUR_INDEX]) == false) ||
         (SSFIsDigit(inStr[HOUR_INDEX + 1]) == false) ||
         (inStr[HOUR_INDEX + 2] != ':'))
     { return false; }
-    ts.hour = (uint8_t)strtoul(&inStr[HOUR_INDEX], NULL, 10);
+    if (SSFDecStrToInt(&inStr[HOUR_INDEX], &tmp) == false) return false;
+    if ((tmp < 0) || (tmp > SSF_TS_HOUR_MAX)) return false;
+    ts.hour = (uint8_t)tmp;
 
     /* Parse minute */
     if ((SSFIsDigit(inStr[MIN_INDEX]) == false) ||
         (SSFIsDigit(inStr[MIN_INDEX + 1]) == false) ||
         (inStr[MIN_INDEX + 2] != ':'))
     { return false; }
-    ts.min = (uint8_t)strtoul(&inStr[MIN_INDEX], NULL, 10);
+    if (SSFDecStrToInt(&inStr[MIN_INDEX], &tmp) == false) return false;
+    if ((tmp < 0) || (tmp > SSF_TS_MIN_MAX)) return false;
+    ts.min = (uint8_t)tmp;
 
     /* Parse second */
     if ((SSFIsDigit(inStr[SEC_INDEX]) == false) ||
@@ -249,7 +260,9 @@ bool SSFISO8601ISOToUnix(SSFCStrIn_t inStr, SSFPortTick_t *unixSys, int16_t *zon
          (inStr[SEC_INDEX + 2] != '-') && (inStr[SEC_INDEX + 2] != '+') &&
          (inStr[SEC_INDEX + 2] != 'Z')))
     { return false; }
-    ts.sec = (uint8_t)strtoul(&inStr[SEC_INDEX], NULL, 10);
+    if (SSFDecStrToInt(&inStr[SEC_INDEX], &tmp) == false) return false;
+    if ((tmp < 0) || (tmp > SSF_TS_SEC_MAX)) return false;
+    ts.sec = (uint8_t)tmp;
 
     /* Remaining fields are optional, try to parse them */
     index = SEC_INDEX + 2;
@@ -270,7 +283,9 @@ bool SSFISO8601ISOToUnix(SSFCStrIn_t inStr, SSFPortTick_t *unixSys, int16_t *zon
 #if SSF_ISO8601_ALLOW_FSEC_TRUNC == 0
         if (numDigs > SSF_DTIME_SYS_PREC) return false;
 #endif
-        ts.fsec = ((uint32_t)strtoul(&inStr[FSEC_INDEX], NULL, 10));
+        if (SSFDecStrToInt(&inStr[FSEC_INDEX], &tmp) == false) return false;
+        if (tmp < 0) return false;
+        ts.fsec = (uint32_t)tmp;
         if (numDigs < SSF_DTIME_SYS_PREC)
         {
             SSF_ASSERT((SSF_DTIME_SYS_PREC - numDigs - 1) <
@@ -304,7 +319,9 @@ bool SSFISO8601ISOToUnix(SSFCStrIn_t inStr, SSFPortTick_t *unixSys, int16_t *zon
             (SSFIsDigit(inStr[index + 1]) == false) ||
             ((inStr[index + 2] != ':') && (inStr[index + 2] != 0)))
         { return false; }
-        hour = ((uint8_t)strtoul(&inStr[index], NULL, 10));
+        if (SSFDecStrToInt(&inStr[index], &tmp) == false) return false;
+        if ((tmp < 0) || (tmp > SSF_TS_HOUR_MAX)) return false;
+        hour = (uint8_t)tmp;
 
         /* Parse min offset */
         index += 2;
@@ -315,7 +332,9 @@ bool SSFISO8601ISOToUnix(SSFCStrIn_t inStr, SSFPortTick_t *unixSys, int16_t *zon
                 (SSFIsDigit(inStr[index + 1]) == false) ||
                 (inStr[index + 2] != 0))
             { return false; }
-            min = ((uint8_t)strtoul(&inStr[index], NULL, 10));
+            if (SSFDecStrToInt(&inStr[index], &tmp) == false) return false;
+            if ((tmp < 0) || (tmp > SSF_TS_MIN_MAX)) return false;
+            min = (uint8_t)tmp;
             index += 2;
         }
 

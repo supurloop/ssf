@@ -268,3 +268,260 @@ size_t SSFDecIntToStrPadded(int64_t i, SSFCStrOut_t str, size_t strSize, uint8_t
 
     return len;
 }
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true and val set to str's signed integer value, else false.                           */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFDecStrToInt(SSFCStrIn_t str, int64_t *val, SSFCStrIn_t *next, uint8_t *numDigits)
+{
+    #define SSF_DEC_MAX_SIGNED_DIGITS (19u)
+
+    bool isNeg = false;
+    uint64_t u64 = 0;
+    uint8_t power = 0;
+    char final = '7';
+
+    SSF_REQUIRE(str != NULL);
+    SSF_REQUIRE(val != NULL);
+
+    /* Ignore leading whitespace */
+    while ((*str != 0) && ((*str == ' ') || (*str == '\t'))) str++;
+    if (*str == 0) return false;
+
+    /* Look for - sign */
+    if (*str == '-')
+    {
+        isNeg = true;
+        final = '8';
+        str++;
+    }
+
+    /* Must be at least 1 digit */
+    if ((*str < '0') || (*str > '9')) return false;
+
+    /* Process decimal digits */
+    while (*str != 0)
+    {
+        /* Valid digit? */
+        if ((*str >= '0') && (*str <= '9'))
+        {
+            /* Yes, overflow? */
+            if ((power == (SSF_DEC_MAX_SIGNED_DIGITS - 1)) &&
+                ((u64 > 922337203685477580) || (*str > final)))
+                return false;
+            if (power == SSF_DEC_MAX_SIGNED_DIGITS) return false;
+
+            /* Accumulate digit and advance to next */
+            u64 *= 10;
+            u64 += (((uint64_t)*str) - '0');
+            str++;
+            power++;
+            if (numDigits != NULL) (*numDigits)++;
+        }
+        /* No, considered the end of the number */
+        else break;
+    }
+
+    /* Adjust sign */
+    if (isNeg) *val = -((int64_t)u64);
+    else *val = (int64_t)u64;
+    if (next != NULL) *next = str;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true and val set to str's unsigned integer value, else false.                         */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFDecStrToUInt(SSFCStrIn_t str, uint64_t* val, SSFCStrIn_t* next, uint8_t* numDigits)
+{
+    #define SSF_DEC_MAX_UNSIGNED_DIGITS (20u)
+
+    uint64_t u64 = 0;
+    uint8_t power = 0;
+
+    SSF_REQUIRE(str != NULL);
+    SSF_REQUIRE(val != NULL);
+
+    /* Ignore leading whitespace */
+    while ((*str != 0) && ((*str == ' ') || (*str == '\t'))) str++;
+    if (*str == 0)
+        return false;
+
+    /* Must be at least 1 digit */
+    if ((*str < '0') || (*str > '9'))
+        return false;
+
+    /* Process decimal digits */
+    if (numDigits != NULL) *numDigits = 0;
+    while (*str != 0)
+    {
+        /* Valid digit? */
+        if ((*str >= '0') && (*str <= '9'))
+        {
+            /* Yes, overflow? */
+            if ((power == (SSF_DEC_MAX_UNSIGNED_DIGITS - 1)) &&
+                ((u64 > 1844674407370955161) || (*str > '5')))
+                return false;
+            if (power == SSF_DEC_MAX_UNSIGNED_DIGITS) return false;
+
+            /* Accumulate digit and advance to next */
+            u64 *= 10;
+            u64 += (((uint64_t)*str) - '0');
+            str++;
+            power++;
+            if (numDigits != NULL) (*numDigits)++;
+        }
+        /* No, considered the end of the number */
+        else break;
+    }
+    *val = u64;
+    if (next != NULL) *next = str;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true and val set to str's signed integer value, else false.                           */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFDecStrToXInt(SSFCStrIn_t str, int64_t *sval, uint64_t *uval)
+{
+    uint64_t i;
+    int64_t sbase;
+    uint64_t base;
+    SSFCStrIn_t next;
+    uint64_t tmp;
+    bool negBase = false;
+    bool negExp = false;
+    uint64_t exponent = 0;
+    uint64_t fraction = 0;
+    uint8_t fractionDigits = 0;
+
+    SSF_REQUIRE(str != NULL);
+    SSF_REQUIRE(((sval != NULL) && (uval == NULL)) ||
+                ((sval == NULL) && (uval != NULL)));
+
+    /* Determine base */
+    if (sval != NULL)
+    {
+        if (_SSFDecStrToInt(str, &sbase, &next, NULL) == false) return false;
+        if (sbase < 0)
+        {
+            negBase = true;
+            base = -sbase;
+        }
+        else base = sbase;
+    }
+    else
+    {
+        if (_SSFDecStrToUInt(str, &base, &next, NULL) == false) return false;
+    }
+
+    /* Is fraction present? */
+    if (*next == '.')
+    {
+        /* Yes, determine fraction */
+        next++;
+        if (_SSFDecStrToUInt(next, &fraction, &next, &fractionDigits) == false) return false;
+    }
+
+    /* Is exponent present? */
+    if (*next == 'e' || *next == 'E')
+    {
+        /* Yes, determine exponent */
+        next++;
+        if (*next == 0) return false;
+        if (*next == '-') { next++; negExp = true; }
+        else if (*next == '+') { next++; }
+        if (_SSFDecStrToUInt(next, &exponent, &next, NULL) == false) return false;
+    }
+
+    /* Is negative exponent? */
+    if (negExp)
+    {
+        /* Yes, fraction is not relevant and base must be scaled */
+        fraction = 0;
+        while (exponent)
+        {
+            base /= 10;
+            if (base == 0) break;
+            exponent--;
+        }
+    }
+    else
+    {
+        /* No, must scale fraction and base */
+
+        /* Round fraction if necessary */
+        if (fractionDigits > exponent) i = ((uint64_t)fractionDigits) - exponent;
+        else i = 0;
+        while (i)
+        {
+            fraction /= 10;
+            if (fraction == 0) break;
+            i--;
+        }
+
+        /* Scale fraction if necessary */
+        if (exponent > 1)
+        {
+            if (fractionDigits > exponent) i = ((uint64_t)fractionDigits) - exponent - 1;
+            else i = exponent - fractionDigits;
+            tmp = fraction;
+            while (i)
+            {
+                tmp *= 10;
+
+                /* Overflow? */
+                if ((tmp / 10) != fraction) return false;
+
+                fraction = tmp;
+                i--;
+            }
+        }
+
+        /* Scale base */
+        tmp = base;
+        while (exponent)
+        {
+            tmp *= 10;
+
+            /* Check for overflow */
+            if ((tmp / 10) != base) return false;
+
+            base = tmp;
+            exponent--;
+        }
+    }
+
+    /* Compute final integer value */
+    if (sval != NULL)
+    {
+        tmp = base + fraction;
+
+        /* Check for overflow */
+        if ((tmp < base) || (tmp < fraction)) return false;
+
+        /* Make negative as necessary */
+        if (negBase)
+        {
+            /* Check for signed overflow */
+            if (tmp > 9223372036854775808ll) return false;
+            *sval = -((int64_t)tmp);
+        }
+        else
+        {
+            /* Check for signed overflow */
+            if (tmp > 9223372036854775807ll) return false;
+            *sval = (int64_t)tmp;
+        }
+    }
+    else
+    {
+        *uval = base + fraction;
+
+        /* Check for overflow */
+        if ((*uval < base) || (*uval < fraction)) return false;
+    }
+
+    return true;
+}
+

@@ -62,8 +62,6 @@
 #define SSFDTIME_NON_LEAP_YEAR (2100u)
 #define SSFDTIME_IS_LEAP_YEAR(y) (((((y) + 2) & 0x03) == 0) && \
                                  ((y) != (SSFDTIME_NON_LEAP_YEAR - SSFDTIME_EPOCH_YEAR)))
-#define SSFDTIME_EPOCH_YEAR_MIN (1970ul)
-#define SSFDTIME_EPOCH_YEAR_MAX (2199ul)
 #define SSFDTIME_SEC_IN_HOUR (3600ul)
 #define SSFDTIME_HRS_IN_DAY (24u)
 #define SSFDTIME_DAYS_IN_WEEK (7u)

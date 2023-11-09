@@ -435,38 +435,37 @@ bool SSFJsonGetDouble(SSFCStrIn_t js, SSFCStrIn_t *path, double *out)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if found and is converted to signed int, else false.                             */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFJsonGetLong(SSFCStrIn_t js, SSFCStrIn_t *path, long int *out)
+bool SSFJsonGetInt(SSFCStrIn_t js, SSFCStrIn_t *path, int64_t *out)
 {
     double dout;
 
     if (!SSFJsonGetDouble(js, path, &dout)) return false;
-    *out = (int32_t)round(dout);
+    *out = (int64_t)round(dout);
     return true;
 }
 
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if found and is converted to unsigned int, else false.                           */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFJsonGetULong(SSFCStrIn_t js, SSFCStrIn_t *path, unsigned long int *out)
+bool SSFJsonGetUInt(SSFCStrIn_t js, SSFCStrIn_t *path, uint64_t *out)
 {
     double dout;
 
     if (!SSFJsonGetDouble(js, path, &dout)) return false;
     if (dout < 0) return false;
-    *out = (uint32_t)round(dout);
+    *out = (uint64_t)round(dout);
     return true;
 }
 #else
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if found and is converted to signed int, else false.                             */
 /* --------------------------------------------------------------------------------------------- */
-bool _SSFJsonGetXLong(SSFCStrIn_t js, SSFCStrIn_t *path, long int *outs, unsigned long int *outu)
+bool _SSFJsonGetXLong(SSFCStrIn_t js, SSFCStrIn_t *path, int64_t *outs, uint64_t *outu)
 {
     size_t index;
     size_t start;
     size_t end;
     SSFJsonType_t jt;
-    char *endptr;
 
     SSF_REQUIRE(js != NULL);
     SSF_REQUIRE(path != NULL);
@@ -475,19 +474,14 @@ bool _SSFJsonGetXLong(SSFCStrIn_t js, SSFCStrIn_t *path, long int *outs, unsigne
 
     if (!SSFJsonObject(js, &index, &start, &end, path, 0, &jt)) return false;
     if (jt != SSF_JSON_TYPE_NUMBER) return false;
-    if (outu != NULL)
-    {
-        if (js[start] == '-') return false;
-        *outu = strtoul(&js[start], &endptr, 10);
-    } else *outs = strtol(&js[start], &endptr, 10);
-    if ((endptr - 1) != &js[end]) return false;
-    return true;
+    if (outu != NULL) return SSFDecStrToUInt(&js[start], outu);
+    else return SSFDecStrToInt(&js[start], outs);
 }
 
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if found and is converted to signed int, else false.                             */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFJsonGetLong(SSFCStrIn_t js, SSFCStrIn_t *path, long int *out)
+bool SSFJsonGetInt(SSFCStrIn_t js, SSFCStrIn_t *path, int64_t *out)
 {
     return _SSFJsonGetXLong(js, path, out, NULL);
 }
@@ -495,7 +489,7 @@ bool SSFJsonGetLong(SSFCStrIn_t js, SSFCStrIn_t *path, long int *out)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if found and is converted to unsigned int, else false.                           */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFJsonGetULong(SSFCStrIn_t js, SSFCStrIn_t *path, unsigned long int *out)
+bool SSFJsonGetUInt(SSFCStrIn_t js, SSFCStrIn_t *path, uint64_t *out)
 {
     return _SSFJsonGetXLong(js, path, NULL, out);
 }

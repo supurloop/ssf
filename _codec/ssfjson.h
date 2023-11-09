@@ -98,8 +98,8 @@ bool SSFJsonGetString(SSFCStrIn_t js, SSFCStrIn_t *path, SSFCStrOut_t out, size_
 #if SSF_JSON_CONFIG_ENABLE_FLOAT_PARSE == 1
 bool SSFJsonGetDouble(SSFCStrIn_t js, SSFCStrIn_t *path, double *out);
 #endif /* SSF_JSON_CONFIG_ENABLE_FLOAT_PARSE */
-bool SSFJsonGetLong(SSFCStrIn_t js, SSFCStrIn_t *path, long int *out);
-bool SSFJsonGetULong(SSFCStrIn_t js, SSFCStrIn_t *path, unsigned long int *out);
+bool SSFJsonGetInt(SSFCStrIn_t js, SSFCStrIn_t *path, int64_t *out);
+bool SSFJsonGetUInt(SSFCStrIn_t js, SSFCStrIn_t *path, uint64_t *out);
 bool SSFJsonGetHex(SSFCStrIn_t js, SSFCStrIn_t *path, uint8_t *out, size_t outSize,
                    size_t *outLen, bool rev);
 bool SSFJsonGetBase64(SSFCStrIn_t js, SSFCStrIn_t *path, uint8_t *out, size_t outSize,

@@ -50,6 +50,10 @@ size_t SSFDecIntToStrPadded(int64_t i, SSFCStrOut_t str, size_t strSize, uint8_t
 size_t SSFDecUIntToStrPadded(uint64_t i, SSFCStrOut_t str, size_t strSize, uint8_t minFieldWidth,
                              char padChar);
 
+bool SSFDecStrToXInt(SSFCStrIn_t str, int64_t* sval, uint64_t* uval);
+#define SSFDecStrToInt(str, val) SSFDecStrToXInt(str, val, NULL)
+#define SSFDecStrToUInt(str, val) SSFDecStrToXInt(str, NULL, val)
+
 /* --------------------------------------------------------------------------------------------- */
 /* Unit test                                                                                     */
 /* --------------------------------------------------------------------------------------------- */

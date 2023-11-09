@@ -451,7 +451,6 @@ bool SSFINIGetIntValue(SSFCStrIn_t ini, SSFCStrIn_t section, SSFCStrIn_t name, u
 {
     SSFINIContext_t context;
     char li[32];
-    char *endPtr;
 
     SSF_REQUIRE(ini != NULL);
     SSF_REQUIRE(name != NULL);
@@ -467,11 +466,7 @@ bool SSFINIGetIntValue(SSFCStrIn_t ini, SSFCStrIn_t section, SSFCStrIn_t name, u
     /* Try to convert value to long int */
     memcpy(li, context.value, context.valueLen);
     li[context.valueLen] = 0;
-    *out = (int64_t)strtol(&li[0], &endPtr, 10);
-
-    /* Did we successfully convert value to a long int? */
-    if (endPtr != &li[context.valueLen]) return false;
-    return true;
+    return SSFDecStrToInt(&li[0], out);
 }
 
 /* --------------------------------------------------------------------------------------------- */

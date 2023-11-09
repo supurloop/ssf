@@ -71,7 +71,7 @@ void SSFDecUnitTest(void)
     for (j = -1000000; j < 1000000; j++)
     {
         i = j + 1;
-        snprintf(str1, sizeof(str1), "%lld", j);
+        snprintf(str1, sizeof(str1), "%lld", (long long int)j);
         SSF_ASSERT(SSFDecStrToInt(str1, &i));
         SSF_ASSERT(i == j);
         i = j + 1;

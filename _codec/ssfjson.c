@@ -743,7 +743,7 @@ bool SSFJsonPrintInt(SSFCStrOut_t js, size_t size, size_t start, size_t *end, in
 
     SSF_JSON_COMMA(comma);
     len = SSFDecIntToStr(in, &js[start], size - start);
-    if ((len < 0) || (len >= (size - start))) return false;
+    if ((len == 0) || (len >= (size - start))) return false;
     *end = start + len;
     return true;
 }
@@ -763,7 +763,7 @@ bool SSFJsonPrintUInt(SSFCStrOut_t js, size_t size, size_t start, size_t *end, u
 
     SSF_JSON_COMMA(comma);
     len = SSFDecUIntToStr(in, &js[start], size - start);
-    if ((len < 0) || (len >= (size - start))) return false;
+    if ((len == 0) || (len >= (size - start))) return false;
     *end = start + len;
     return true;
 }

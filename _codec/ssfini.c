@@ -659,7 +659,7 @@ bool SSFINIPrintNameIntValue(SSFCStrOut_t ini, size_t iniSize, size_t *iniLen, S
     size_t len;
 
     len = SSFDecIntToStr(value, nstr, sizeof(nstr));
-    if (len < 0) return false;
+    if (len == 0) return false;
     if (len >= ((int)sizeof(nstr))) return false;
     return SSFINIPrintNameStrValue(ini, iniSize, iniLen, name, nstr, lineEnding);
 }

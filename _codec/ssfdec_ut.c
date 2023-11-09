@@ -122,13 +122,19 @@ void SSFDecUnitTest(void)
     }
     i = 42;
     SSF_ASSERT(SSFDecStrToInt("-9223372036854775808", &i));
-    SSF_ASSERT(i == -9223372036854775808ll);
+    SSF_ASSERT(i < 0);
+    u64 = (uint64_t)-i;
+    SSF_ASSERT(u64 == 9223372036854775808ull);
     i = 42;
     SSF_ASSERT(SSFDecStrToInt(" \t -9223372036854775808", &i));
-    SSF_ASSERT(i == -9223372036854775808ll);
+    SSF_ASSERT(i < 0);
+    u64 = (uint64_t)-i;
+    SSF_ASSERT(u64 == 9223372036854775808ull);
     i = 42;
     SSF_ASSERT(SSFDecStrToInt(" \t -9223372036854775808a", &i));
-    SSF_ASSERT(i == -9223372036854775808ll);
+    SSF_ASSERT(i < 0);
+    u64 = (uint64_t)-i;
+    SSF_ASSERT(u64 == 9223372036854775808ull);
 
     i = 42;
     SSF_ASSERT(SSFDecStrToInt("9223372036854775807", &i));
@@ -148,7 +154,9 @@ void SSFDecUnitTest(void)
     SSF_ASSERT(SSFDecStrToInt("-922337203685477580.9e1", &i) == false);
     i = 42;
     SSF_ASSERT(SSFDecStrToInt("-922337203685477580.8e1", &i));
-    SSF_ASSERT(i == -9223372036854775808ll);
+    SSF_ASSERT(i < 0);
+    u64 = (uint64_t)-i;
+    SSF_ASSERT(u64 == 9223372036854775808ull);
     SSF_ASSERT(SSFDecStrToInt("922337203685477580.8e1", &i) == false);
     i = 42;
     SSF_ASSERT(SSFDecStrToInt("922337203685477580.7e1", &i));

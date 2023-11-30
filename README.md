@@ -36,6 +36,7 @@ The framework implements a number of common embedded system functions:
 21. A Unix Date/Time interface.
 22. An ISO8601 Date/Time interface.
 23. An integer to decimal string interface.
+24. An safe C string interface.
 
 To give you an idea of the framework size here are some program memory estimates for each component compiled on an MSP430 with Level 3 optimization:
 Byte FIFO, linked list, memory pool, Base64, Hex ASCII are each about 1000 bytes.
@@ -67,7 +68,7 @@ For other platforms there are only a few essential tasks that must be completed:
 -   In ssfport.h make sure to follow the instructions for the byte order macros.
 -   Run the unit tests.
 
-Only the finite state machine framework uses system ticks, so you can stub out SSFPortGetTick64() if it is not needed.
+Only a few modules in the framework use system ticks, so you can stub out SSFPortGetTick64() if it is not needed.
 When the finite state machine framework runs in a multi-threaded environment some OS synchronization primitives must be implemented.
 
 ### Heap and Stack Memory
@@ -89,6 +90,22 @@ Second, the system should be automatically reset rather than sitting forever in 
 Third, the system should have a safe boot mode that kicks in if the system reboots quickly many times in a row.
 
 ## Design Principles
+
+### No Error Codes
+
+Too often API error codes are ignored in part or in whole, or improperly handled due to overloaded encodings (ex. <0=error, 0=ignored, >0=length)
+
+Either a SSF API call will always succeed (void return), or it will return a boolean: true on success and false on failure.
+That's it. Any function outputs are handled via the parameter list.
+This makes application error handling simple to implement, and much less prone to errors.
+
+### Militant Buffer and C String Overrun Protection
+
+All SSF interfaces require the total allocated size of buffers and C strings to be passed as arguments.
+The SSF API will never write beyond the end of a buffer or C string.
+All C strings returned by a successful SSF API call are guaranteed to be NULL terminated.
+
+Safe C string SSF API to replace crash inducing strlen(), strcat(), strcpy(), and strcmp(), and other "safe" C library calls that don't always ensure NULL termination like strncpy().
 
 ### Design by Contract
 
@@ -1240,6 +1257,27 @@ This interface converts signed or unsigned integers to padded or unpadded decima
 
     len = SSFDecIntToStrPadded(-123456789123ull, str, sizeof(str), 15, '0');
     /* len == 15, str = "-00123456789123" */
+```
+
+### Safe C String Interface
+
+This interface provides true safe replacements for strcpy(), strcat(), strcpy(), strcmp(), and related "safe" strn() calls that don't always NULL terminate.
+
+```
+    size_t len;
+    char str[10];
+
+    /* Copy 10 byte string into str var? */
+    if (SSFStrCpy(str, sizeof(str), &len, "1234567890", 11)) == false)
+    {
+        /* No, copy failed because str is not big enough to hold new string plus NULL terminator */
+    }
+
+    /* Copy 9 byte string into str var? */
+    if (SSFStrCpy(str, sizeof(str), &len, "123456789", 10)) == true)
+    {
+        /* Yes copy worked, str="123456789", len = 9 */
+    }
 ```
 
 ## Conclusion

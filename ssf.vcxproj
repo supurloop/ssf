@@ -158,6 +158,8 @@
     <ClCompile Include="_codec\ssfini_ut.c" />
     <ClCompile Include="_codec\ssfjson.c" />
     <ClCompile Include="_codec\ssfjson_ut.c" />
+    <ClCompile Include="_codec\ssfstr.c" />
+    <ClCompile Include="_codec\ssfstr_ut.c" />
     <ClCompile Include="_codec\ssftlv.c" />
     <ClCompile Include="_codec\ssftlv_ut.c" />
     <ClCompile Include="_codec\ssfubjson.c" />
@@ -205,6 +207,7 @@
     <ClInclude Include="_codec\ssfhex.h" />
     <ClInclude Include="_codec\ssfini.h" />
     <ClInclude Include="_codec\ssfjson.h" />
+    <ClInclude Include="_codec\ssfstr.h" />
     <ClInclude Include="_codec\ssftlv.h" />
     <ClInclude Include="_codec\ssfubjson.h" />
     <ClInclude Include="_crypto\ssfaes.h" />

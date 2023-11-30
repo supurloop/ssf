@@ -68,6 +68,7 @@ extern "C" {
 #define SSF_CONFIG_RTC_UNIT_TEST (1u)
 #define SSF_CONFIG_ISO8601_UNIT_TEST (1u)
 #define SSF_CONFIG_DEC_UNIT_TEST (1u)
+#define SSF_CONFIG_STR_UNIT_TEST (1u)
 
 /* If any unit test is enabled then enable unit test mode */
 #if SSF_CONFIG_BFIFO_UNIT_TEST == 1 || \
@@ -92,7 +93,8 @@ extern "C" {
     SSF_CONFIG_DTIME_UNIT_TEST == 1 || \
     SSF_CONFIG_RTC_UNIT_TEST == 1 || \
     SSF_CONFIG_ISO8601_UNIT_TEST == 1 || \
-    SSF_CONFIG_DEC_UNIT_TEST == 1
+    SSF_CONFIG_DEC_UNIT_TEST == 1 || \
+    SSF_CONFIG_STR_UNIT_TEST == 1
 #define SSF_CONFIG_UNIT_TEST (1u)
 #else
 #define SSF_CONFIG_UNIT_TEST (0u)

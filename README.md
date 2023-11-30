@@ -91,6 +91,10 @@ Third, the system should have a safe boot mode that kicks in if the system reboo
 
 ## Design Principles
 
+### No Dependencies 
+
+When you use the SSF, you just need the SSF and not a single other external dependency except for a few C standard library calls.
+
 ### No Error Codes
 
 Too often API error codes are ignored in part or in whole, or improperly handled due to overloaded encodings (ex. <0=error, 0=ignored, >0=length)
@@ -124,7 +128,7 @@ This library is designed to primarily* run in a single thread of execution which
 (*See Byte FIFO Interface for an explanation of how to deal with interrupts.)
 
 Very few small memory systems need to have a threaded/tasked/real-time capable OS.
-RTOSes introduce significant complexity, and in particular a dizzying amount of opportunity for introducing subtle race conditions (BUGS) that are difficult to find and fix.
+RTOSes introduce significant complexity, and in particular a dizzying amount of opportunity for introducing subtle race conditions (BUGS) that are easy to create and difficult to find and fix.
 
 That said this framework can run perfectly fine with an RTOS, Windows, or Linux, so long as some precautions are taken.
 

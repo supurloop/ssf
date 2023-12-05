@@ -186,6 +186,8 @@
     <ClCompile Include="_storage\ssfcfg_ut.c" />
     <ClCompile Include="_struct\ssfbfifo.c" />
     <ClCompile Include="_struct\ssfbfifo_ut.c" />
+    <ClCompile Include="_struct\ssfheap.c" />
+    <ClCompile Include="_struct\ssfheap_ut.c" />
     <ClCompile Include="_struct\ssfll.c" />
     <ClCompile Include="_struct\ssfll_ut.c" />
     <ClCompile Include="_struct\ssfmpool.c" />
@@ -221,6 +223,7 @@
     <ClInclude Include="_fsm\ssfsm.h" />
     <ClInclude Include="_storage\ssfcfg.h" />
     <ClInclude Include="_struct\ssfbfifo.h" />
+    <ClInclude Include="_struct\ssfheap.h" />
     <ClInclude Include="_struct\ssfll.h" />
     <ClInclude Include="_struct\ssfmpool.h" />
     <ClInclude Include="_time\ssfdtime.h" />

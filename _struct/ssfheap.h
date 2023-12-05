@@ -68,23 +68,24 @@ void SSFHeapStatus(SSFHeapHandle_t handle, SSFHeapStatus_t *heapStatusOut);
 bool SSFHeapAlloc(SSFHeapHandle_t handle, void **heapMemOut, uint32_t size, uint8_t mark,
                   bool isZeroed);
 #define SSFHeapMalloc(handle, heapMemOut, size, mark) \
-                      SSFHeapAlloc(handle, heapMemOut, size, mark, false)
+                      SSFHeapAlloc(handle, (void **)heapMemOut, size, mark, false)
 #define SSFHeapMallocAndZero(handle, heapMemOut, size, mark) \
-                             SSFHeapAlloc(handle, heapMemOut, size, mark, true)
+                             SSFHeapAlloc(handle, (void **)heapMemOut, size, mark, true)
 
 bool SSFHeapAllocResize(SSFHeapHandle_t handle, void **heapMemOut, uint32_t newSize,
                         uint8_t newMark, bool newIsZeroed);
 #define SSFHeapRealloc(handle, heapMemOut, newSize, newMark) \
-                       SSFHeapAllocResize(handle, heapMemOut, newSize, newMark, false)
+                       SSFHeapAllocResize(handle, (void **)heapMemOut, newSize, newMark, false)
 #define SSFHeapReallocAndZeroNew(handle, heapMemOut, newSize, newMark) \
-                              SSFHeapAllocResize(handle, heapMemOut, newSize, newMark, true)
+                              SSFHeapAllocResize(handle, (void **)heapMemOut, newSize, newMark, \
+                                                 true)
 
 void SSFHeapDealloc(SSFHeapHandle_t handle, void **heapMemOut, uint8_t *markOutOpt,
                     bool isZeroed);
 #define SSFHeapFree(handle, heapMemOut, markOutOpt) \
-                    SSFHeapDealloc(handle, heapMemOut, markOutOpt, false)
+                    SSFHeapDealloc(handle, (void **)heapMemOut, markOutOpt, false)
 #define SSFHeapFreeAndZero(handle, heapMemOut, markOutOpt) \
-                           SSFHeapDealloc(handle, heapMemOut, markOutOpt, true)
+                           SSFHeapDealloc(handle, (void **)heapMemOut, markOutOpt, true)
 
 /* --------------------------------------------------------------------------------------------- */
 /* Unit test                                                                                     */

@@ -69,7 +69,7 @@ typedef struct
 SSFUnitTest_t unitTests[] =
 {
 #if SSF_CONFIG_HEAP_UNIT_TEST == 1
-    { "ssfheap", "WIP, Integrity Checked Heap", SSFHeapUnitTest },
+    { "ssfheap", "Integrity Checked Heap", SSFHeapUnitTest },
 #endif /* SSF_CONFIG_STR_UNIT_TEST */
 
 #if SSF_CONFIG_STR_UNIT_TEST == 1

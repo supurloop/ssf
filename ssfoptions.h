@@ -361,6 +361,12 @@ typedef enum
 /* 1 == Performs a lengthy exhausive unit test for every possible second; 0 == Reduced test */
 #define SSF_ISO8601_EXHAUSTIVE_UNIT_TEST (0u)
 
+/* --------------------------------------------------------------------------------------------- */
+/* Configure ssfheap's interface                                                                 */
+/* --------------------------------------------------------------------------------------------- */
+/* Sets the maximum size of the heap for unit test. */
+#define SSF_HEAP_MAX_SIZE_FOR_UNIT_TEST (4224u)
+
 #ifdef __cplusplus
 }
 #endif

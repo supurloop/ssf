@@ -200,13 +200,13 @@ void SSFHeapInit(SSFHeapHandle_t *handleOut, uint8_t *heapMem, uint32_t heapMemS
     ph = (SSFHeapPrivateHandle_t *)(void *)heapMem;
     SSF_HEAP_ALIGN_PTR(ph);
     SSF_ASSERT(ph->magic != SSF_HEAP_MAGIC);
-    memset(ph, 0, sizeof(SSFHeapPrivateHandle_t));
+    if (isZeroed) memset(heapMem, 0, heapMemSize);
+    else memset(ph, 0, sizeof(SSFHeapPrivateHandle_t));
 
     /* Save the original heap pointer and size, init all memory to the unallocated value */
     ph->base = heapMem;
     ph->baseSize = heapMemSize;
     ph->mark = heapMark;
-    if (isZeroed) memset(ph->base, 0, ph->baseSize);
 
     /* Compute aligned start of heap */
     ph->start = SSF_HEAP_U8_CAST(ph) + sizeof(SSFHeapPrivateHandle_t);
@@ -241,10 +241,11 @@ void SSFHeapInit(SSFHeapHandle_t *handleOut, uint8_t *heapMem, uint32_t heapMemS
 void SSFHeapDeInit(SSFHeapHandle_t *handleOut, bool isZeroed)
 {
     void *memOut = NULL;
-    SSFHeapPrivateHandle_t *ph = *handleOut;
+    SSFHeapPrivateHandle_t *ph;
 
     SSF_REQUIRE(handleOut != NULL);
     SSF_REQUIRE(*handleOut != NULL);
+    ph = *handleOut;
     SSF_ASSERT(ph->magic == SSF_HEAP_MAGIC);
 
     /* No memory may be still allocated by the heap on deinit */
@@ -262,18 +263,18 @@ void SSFHeapDeInit(SSFHeapHandle_t *handleOut, bool isZeroed)
 bool SSFHeapAlloc(SSFHeapHandle_t handle, void **memOut, uint32_t memSize, uint8_t mark,
                   bool isZeroed)
 {
-    SSFHeapPrivateHandle_t *ph = handle;
-    uint32_t requestedSize = memSize;
     SSFHeapBlock_t *hb;
-    uint32_t remainingLen;
     uint32_t blockMemory;
+    uint32_t remainingLen;
+    SSFHeapPrivateHandle_t *ph;
 
     SSF_REQUIRE(handle != NULL);
+    ph = handle;
     SSF_ASSERT(ph->magic == SSF_HEAP_MAGIC);
     SSF_REQUIRE(memOut != NULL);
     SSF_REQUIRE(*memOut == NULL);
 
-    ph->numAllocRequests++;
+    ph->numTotalAllocRequests++;
     remainingLen = ph->len;
     hb = (SSFHeapBlock_t *)(void *)ph->start;
 
@@ -303,9 +304,9 @@ bool SSFHeapAlloc(SSFHeapHandle_t handle, void **memOut, uint32_t memSize, uint8
                 *memOut = SSF_HEAP_U8_CAST(hb) + sizeof(SSFHeapBlock_t);
 
                 /* Zero memory if requested */
-                if (isZeroed) memset(*memOut, 0, requestedSize);
+                if (isZeroed) memset(*memOut, 0, memSize);
 
-                ph->numTotalAllocRequests++;
+                ph->numAllocRequests++;
                 return true;
             }
 
@@ -316,7 +317,7 @@ bool SSFHeapAlloc(SSFHeapHandle_t handle, void **memOut, uint32_t memSize, uint8
                 *memOut = SSF_HEAP_U8_CAST(hb) + sizeof(SSFHeapBlock_t);
 
                 /* Zero memory if requested */
-                if (isZeroed) memset(*memOut, 0, requestedSize);
+                if (isZeroed) memset(*memOut, 0, memSize);
 
                 /* Mark block as allocated */
                 SSF_HEAP_SET_BLOCK(hb, memSize + sizeof(SSFHeapBlock_t), SSF_HEAP_BLOCK_ALLOCED,
@@ -326,7 +327,7 @@ bool SSFHeapAlloc(SSFHeapHandle_t handle, void **memOut, uint32_t memSize, uint8
                 hb = (SSFHeapBlock_t*)(void *)(SSF_HEAP_U8_CAST(hb) + hb->len);
                 SSF_HEAP_SET_BLOCK(hb, blockMemory - memSize, SSF_HEAP_BLOCK_UNALLOCED, ph->mark);
 
-                ph->numTotalAllocRequests++;
+                ph->numAllocRequests++;
                 return true;
             }
         }
@@ -346,12 +347,13 @@ bool SSFHeapAlloc(SSFHeapHandle_t handle, void **memOut, uint32_t memSize, uint8
 bool SSFHeapAllocResize(SSFHeapHandle_t handle, void** memOut, uint32_t newMemSize,
                         uint8_t newMark, bool newIsZeroed)
 {
-    SSFHeapPrivateHandle_t* ph = handle;
-    void *newMem;
+    SSFHeapPrivateHandle_t *ph;
     SSFHeapBlock_t *hb;
     uint32_t blockMemory;
+    void *newMem = NULL;
 
     SSF_REQUIRE(handle != NULL);
+    ph = handle;
     SSF_ASSERT(ph->magic == SSF_HEAP_MAGIC);
     SSF_REQUIRE(memOut != NULL);
 
@@ -386,7 +388,8 @@ bool SSFHeapAllocResize(SSFHeapHandle_t handle, void** memOut, uint32_t newMemSi
 
     /* Yes, copy existing data from old memory to new memory */
     memcpy(newMem, *memOut, SSF_MIN(newMemSize, blockMemory));
-    if (newIsZeroed && (newMemSize > blockMemory)) memset(newMem, 0, newMemSize - blockMemory);
+    if (newIsZeroed && (newMemSize > blockMemory))
+    { memset(SSF_HEAP_U8_CAST(newMem) + blockMemory, 0, newMemSize - blockMemory); }
 
     /* Free old memory and return new memory*/
     SSFHeapFree(handle, memOut, NULL);
@@ -399,10 +402,11 @@ bool SSFHeapAllocResize(SSFHeapHandle_t handle, void** memOut, uint32_t newMemSi
 /* --------------------------------------------------------------------------------------------- */
 void SSFHeapDealloc(SSFHeapHandle_t handle, void **heapMemOut, uint8_t *markOutOpt, bool isZeroed)
 {
-    SSFHeapPrivateHandle_t *ph = handle;
+    SSFHeapPrivateHandle_t *ph;
     SSFHeapBlock_t *hb;
 
     SSF_REQUIRE(handle != NULL);
+    ph = handle;
     SSF_ASSERT(ph->magic == SSF_HEAP_MAGIC);
     SSF_REQUIRE(heapMemOut != NULL);
     SSF_REQUIRE(*heapMemOut != NULL);
@@ -430,12 +434,13 @@ void SSFHeapDealloc(SSFHeapHandle_t handle, void **heapMemOut, uint8_t *markOutO
 /* --------------------------------------------------------------------------------------------- */
 void SSFHeapCheck(SSFHeapHandle_t handle)
 {
-    SSFHeapPrivateHandle_t *ph = handle;
+    SSFHeapPrivateHandle_t *ph;
     SSFHeapBlock_t* hb;
     uint8_t *mem;
     uint32_t remainingLen;
 
     SSF_REQUIRE(handle != NULL);
+    ph = handle;
     SSF_ASSERT(ph->magic == SSF_HEAP_MAGIC);
 
     hb = (SSFHeapBlock_t*)(void *)ph->start;
@@ -471,11 +476,12 @@ void SSFHeapCheck(SSFHeapHandle_t handle)
 /* --------------------------------------------------------------------------------------------- */
 void SSFHeapStatus(SSFHeapHandle_t handle, SSFHeapStatus_t *heapStatusOut)
 {
-    SSFHeapPrivateHandle_t *ph = handle;
+    SSFHeapPrivateHandle_t *ph;
     uint32_t remainingLen;
     SSFHeapBlock_t* hb;
 
     SSF_REQUIRE(handle != NULL);
+    ph = handle;
     SSF_ASSERT(ph->magic == SSF_HEAP_MAGIC);
     SSF_REQUIRE(heapStatusOut != NULL);
 
@@ -517,3 +523,4 @@ void SSFHeapStatus(SSFHeapHandle_t handle, SSFHeapStatus_t *heapStatusOut)
         hb = (SSFHeapBlock_t*)(void *)(SSF_HEAP_U8_CAST(hb) + hb->len);
     }
 }
+

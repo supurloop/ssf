@@ -208,7 +208,7 @@ void SSFHeapUnitTest(void)
             memset(ptr, i | 0x80, i);
             /* Set any spare bytes of allocation to non 0 value */
             len = i;
-            len = SSF_HEAP_ALIGN_LEN(len);
+            SSF_HEAP_ALIGN_LEN(len);
             len -= i;
             memset(ptr + i, ~(i | 0x80) | 0x40, len);
 
@@ -241,7 +241,7 @@ void SSFHeapUnitTest(void)
             memset(ptr, i | 0x40, i);
             /* Set any spare bytes of allocation to non 0 value */
             len = i;
-            len = SSF_HEAP_ALIGN_LEN(len);
+            SSF_HEAP_ALIGN_LEN(len);
             len -= i;
             memset(ptr + i, ~(i | 0x40) | 0x20, len);
 
@@ -299,7 +299,7 @@ void SSFHeapUnitTest(void)
     for (i = 0; i < SSF_HEAP_ALIGNMENT_SIZE + 1; i++)
     {
         ptrs[i] = NULL;
-        SSF_ASSERT(SSFHeapAlloc(heapHandle, &ptrs[i], i, APP_MARK, false));
+        SSF_ASSERT(SSFHeapAlloc(heapHandle, (void **)&ptrs[i], i, APP_MARK, false));
 
         SSFHeapCheck(heapHandle);
         SSFHeapStatus(heapHandle, &heapStatusOut);
@@ -312,7 +312,7 @@ void SSFHeapUnitTest(void)
         SSF_ASSERT(heapStatusOut.numFreeRequests == 0);
     }
     /* Remove in between allocation */
-    SSFHeapDealloc(heapHandle, &ptrs[1], NULL, false);
+    SSFHeapDealloc(heapHandle, (void **)&ptrs[1], NULL, false);
     SSFHeapCheck(heapHandle);
     SSFHeapStatus(heapHandle, &heapStatusOut);
     SSF_ASSERT(heapStatusOut.allocatableSize == allocatableSize);
@@ -323,7 +323,7 @@ void SSFHeapUnitTest(void)
     SSF_ASSERT(heapStatusOut.numAllocRequests == SSF_HEAP_ALIGNMENT_SIZE + 1);
     SSF_ASSERT(heapStatusOut.numFreeRequests == 1);
 
-    SSFHeapDealloc(heapHandle, &ptrs[0], NULL, false);
+    SSFHeapDealloc(heapHandle, (void **)&ptrs[0], NULL, false);
     SSFHeapCheck(heapHandle);
     SSFHeapStatus(heapHandle, &heapStatusOut);
     SSF_ASSERT(heapStatusOut.allocatableSize == allocatableSize);
@@ -334,7 +334,7 @@ void SSFHeapUnitTest(void)
     SSF_ASSERT(heapStatusOut.numAllocRequests == SSF_HEAP_ALIGNMENT_SIZE + 1);
     SSF_ASSERT(heapStatusOut.numFreeRequests == 2);
 
-    SSFHeapDealloc(heapHandle, &ptrs[3], NULL, false);
+    SSFHeapDealloc(heapHandle, (void **)&ptrs[3], NULL, false);
     SSFHeapCheck(heapHandle);
     SSFHeapStatus(heapHandle, &heapStatusOut);
     SSF_ASSERT(heapStatusOut.allocatableSize == allocatableSize);
@@ -345,7 +345,7 @@ void SSFHeapUnitTest(void)
     SSF_ASSERT(heapStatusOut.numAllocRequests == SSF_HEAP_ALIGNMENT_SIZE + 1);
     SSF_ASSERT(heapStatusOut.numFreeRequests == 3);
 
-    SSFHeapDealloc(heapHandle, &ptrs[2], NULL, false);
+    SSFHeapDealloc(heapHandle, (void **)&ptrs[2], NULL, false);
     SSFHeapCheck(heapHandle);
     SSFHeapStatus(heapHandle, &heapStatusOut);
     SSF_ASSERT(heapStatusOut.allocatableSize == allocatableSize);
@@ -356,7 +356,7 @@ void SSFHeapUnitTest(void)
     SSF_ASSERT(heapStatusOut.numAllocRequests == SSF_HEAP_ALIGNMENT_SIZE + 1);
     SSF_ASSERT(heapStatusOut.numFreeRequests == 4);
 
-    SSFHeapDealloc(heapHandle, &ptrs[8], NULL, false);
+    SSFHeapDealloc(heapHandle, (void **)&ptrs[8], NULL, false);
     SSFHeapCheck(heapHandle);
     SSFHeapStatus(heapHandle, &heapStatusOut);
     SSF_ASSERT(heapStatusOut.allocatableSize == allocatableSize);
@@ -367,7 +367,7 @@ void SSFHeapUnitTest(void)
     SSF_ASSERT(heapStatusOut.numAllocRequests == SSF_HEAP_ALIGNMENT_SIZE + 1);
     SSF_ASSERT(heapStatusOut.numFreeRequests == 5);
 
-    SSFHeapDealloc(heapHandle, &ptrs[6], NULL, false);
+    SSFHeapDealloc(heapHandle, (void **)&ptrs[6], NULL, false);
     SSFHeapCheck(heapHandle);
     SSFHeapStatus(heapHandle, &heapStatusOut);
     SSF_ASSERT(heapStatusOut.allocatableSize == allocatableSize);
@@ -378,7 +378,7 @@ void SSFHeapUnitTest(void)
     SSF_ASSERT(heapStatusOut.numAllocRequests == SSF_HEAP_ALIGNMENT_SIZE + 1);
     SSF_ASSERT(heapStatusOut.numFreeRequests == 6);
 
-    SSFHeapDealloc(heapHandle, &ptrs[5], NULL, false);
+    SSFHeapDealloc(heapHandle, (void **)&ptrs[5], NULL, false);
     SSFHeapCheck(heapHandle);
     SSFHeapStatus(heapHandle, &heapStatusOut);
     SSF_ASSERT(heapStatusOut.allocatableSize == allocatableSize);
@@ -389,7 +389,7 @@ void SSFHeapUnitTest(void)
     SSF_ASSERT(heapStatusOut.numAllocRequests == SSF_HEAP_ALIGNMENT_SIZE + 1);
     SSF_ASSERT(heapStatusOut.numFreeRequests == 7);
 
-    SSFHeapDealloc(heapHandle, &ptrs[4], NULL, false);
+    SSFHeapDealloc(heapHandle, (void **)&ptrs[4], NULL, false);
     SSFHeapCheck(heapHandle);
     SSFHeapStatus(heapHandle, &heapStatusOut);
     SSF_ASSERT(heapStatusOut.allocatableSize == allocatableSize);
@@ -400,7 +400,7 @@ void SSFHeapUnitTest(void)
     SSF_ASSERT(heapStatusOut.numAllocRequests == SSF_HEAP_ALIGNMENT_SIZE + 1);
     SSF_ASSERT(heapStatusOut.numFreeRequests == 8);
 
-    SSFHeapDealloc(heapHandle, &ptrs[7], NULL, false);
+    SSFHeapDealloc(heapHandle, (void **)&ptrs[7], NULL, false);
     SSFHeapCheck(heapHandle);
     SSFHeapStatus(heapHandle, &heapStatusOut);
     SSF_ASSERT(heapStatusOut.allocatableSize == allocatableSize);
@@ -417,10 +417,10 @@ void SSFHeapUnitTest(void)
         SSFHeapCheck(heapHandle);
         SSFHeapStatus(heapHandle, &heapStatusOut);
         ptrs[i] = NULL;
-        SSF_ASSERT(SSFHeapAlloc(heapHandle, &ptrs[i], heapStatusOut.maxAllocatableBlockLen + 1,
+        SSF_ASSERT(SSFHeapAlloc(heapHandle, (void **)&ptrs[i], heapStatusOut.maxAllocatableBlockLen + 1,
                                 APP_MARK, false) == false);
         if (heapStatusOut.maxAllocatableBlockLen == 0) break;
-        SSF_ASSERT(SSFHeapAlloc(heapHandle, &ptrs[i],
+        SSF_ASSERT(SSFHeapAlloc(heapHandle, (void **)&ptrs[i],
                                 (heapStatusOut.maxAllocatableBlockLen >> 2), APP_MARK, false));
     }
 
@@ -429,7 +429,7 @@ void SSFHeapUnitTest(void)
     {
         SSFHeapCheck(heapHandle);
         SSFHeapStatus(heapHandle, &heapStatusOut);
-        SSFHeapDealloc(heapHandle, &ptrs[j - 1], NULL, false);
+        SSFHeapDealloc(heapHandle, (void **)&ptrs[j - 1], NULL, false);
     }
 
     SSFHeapCheck(heapHandle);

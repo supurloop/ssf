@@ -364,6 +364,14 @@ typedef enum
 /* --------------------------------------------------------------------------------------------- */
 /* Configure ssfheap's interface                                                                 */
 /* --------------------------------------------------------------------------------------------- */
+#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
+#define SSF_HEAP_SYNC_DECLARATION SSF_MUTEX_DECLARATION(mutex)
+#define SSF_HEAP_SYNC_INIT() SSF_MUTEX_INIT(ph->mutex)
+#define SSF_HEAP_SYNC_DEINIT() SSF_MUTEX_DEINIT(ph->mutex)
+#define SSF_HEAP_SYNC_ACQUIRE() SSF_MUTEX_ACQUIRE(ph->mutex)
+#define SSF_HEAP_SYNC_RELEASE() SSF_MUTEX_RELEASE(ph->mutex)
+#endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
+
 /* Sets the maximum size of the heap for unit test. */
 #define SSF_HEAP_MAX_SIZE_FOR_UNIT_TEST (4224u)
 

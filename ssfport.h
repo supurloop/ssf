@@ -175,7 +175,7 @@ typedef uint64_t SSFPortTick_t;
 
 #if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
 #ifdef _WIN32
-#define SSF_MUTEX_DECLARATION(mutex) static HANDLE mutex
+#define SSF_MUTEX_DECLARATION(mutex) HANDLE mutex
 #define SSF_MUTEX_INIT(mutex) { \
     mutex = CreateMutex(NULL, FALSE, NULL); \
     SSF_ASSERT(mutex != NULL); \

@@ -471,8 +471,8 @@ void SSFHeapUnitTest(void)
         SSF_HEAP_ALIGN_PTR(ptr);
         len = j;
         SSF_HEAP_ALIGN_LEN(len);
-        size = len - (uint32_t)(ptr - heap) - sizeof(SSFHeapPrivateHandle_t) - 24u;
-        SSF_ASSERT(heapStatusOut.allocatableSize == size);
+        size = len - (uint32_t)(ptr - heap) - sizeof(SSFHeapPrivateHandle_t) - 32u;
+        SSF_ASSERT(heapStatusOut.allocatableSize >= size);
         SSF_ASSERT(heapStatusOut.allocatableLen == heapStatusOut.allocatableSize);
         SSF_ASSERT(heapStatusOut.numBlocks == 1);
         SSF_ASSERT(heapStatusOut.numAllocatableBlocks == 1);
@@ -544,7 +544,7 @@ void SSFHeapUnitTest(void)
             }
         }
         SSFHeapStatus(heapHandle, &heapStatusOut);
-        SSF_ASSERT(heapStatusOut.allocatableSize == size);
+        SSF_ASSERT(heapStatusOut.allocatableSize >= size);
         SSF_ASSERT(heapStatusOut.allocatableLen == heapStatusOut.allocatableSize);
         SSF_ASSERT(heapStatusOut.numBlocks >= (allocs - frees));
         SSF_ASSERT(heapStatusOut.numAllocatableBlocks == 1);

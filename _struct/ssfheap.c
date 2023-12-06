@@ -541,16 +541,17 @@ void SSFHeapCheck(SSFHeapHandle_t handle)
             /* Yes, make sure pointers match and that fence block valid */
             SSF_ASSERT(mem == ph->end);
             _SSFHeapCheckBlock(handle, (SSFHeapBlock_t *)(void *)ph->end);
+
+#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
+            SSF_HEAP_SYNC_RELEASE();
+#endif
             return;
         }
         /* No, make sure pointer in range and continue */
         else SSF_ASSERT(mem < ph->end);
         hb = (SSFHeapBlock_t*)(void *)mem;
     }
-
-#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
-    SSF_HEAP_SYNC_RELEASE();
-#endif
+    SSF_ERROR();
 }
 
 /* --------------------------------------------------------------------------------------------- */

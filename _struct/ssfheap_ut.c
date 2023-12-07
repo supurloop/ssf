@@ -60,7 +60,7 @@ typedef struct
     uint32_t magic;                 /* Magic number indicating that stuct is inited */
 } SSFHeapPrivateHandle_t;
 
-#define SSF_HEAP_ALIGNMENT_SIZE (uint64_t)(8u)
+#define SSF_HEAP_ALIGNMENT_SIZE (uint64_t)(sizeof(uint64_t))
 #define SSF_HEAP_ALIGNMENT_MASK (uint64_t)-((int64_t)SSF_HEAP_ALIGNMENT_SIZE)
 #define SSF_HEAP_MIN_HEAP_MEM_SIZE ((SSF_HEAP_ALIGNMENT_SIZE << 2) + \
                                     sizeof(SSFHeapPrivateHandle_t) + \

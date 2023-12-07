@@ -37,6 +37,7 @@
 /* All operations check the heap's integrity and asserts when corruption is found.               */
 /* When the time comes to read a heap dump, +/- chars help visually mark the block headers,      */
 /* while "dead" headers are zeroed so they never pollute the dump.                               */
+/* Designed to work on 8, 16, 32, and 64-bit machine word sizes.                                 */
 /*                                                                                               */
 /* Heap                                                                                          */
 /* |                                                                                             */
@@ -107,12 +108,12 @@ typedef struct
 #define SSF_HEAP_MAGIC (0x48454150)
 #define SSF_HEAP_BLOCK_ALLOCED ((uint8_t)('-'))
 #define SSF_HEAP_BLOCK_UNALLOCED ((uint8_t)('+'))
-#define SSF_HEAP_ALIGNMENT_SIZE (uint64_t)(sizeof(void *))
+#define SSF_HEAP_ALIGNMENT_SIZE (uint64_t)(8u)
 #define SSF_HEAP_ALIGNMENT_MASK (uint64_t)-((int64_t)SSF_HEAP_ALIGNMENT_SIZE)
 #define SSF_HEAP_MIN_HEAP_MEM_SIZE ((SSF_HEAP_ALIGNMENT_SIZE << 2) + \
                                     sizeof(SSFHeapPrivateHandle_t) + \
                                     (sizeof(SSFHeapBlock_t) << 1))
-#define SSF_HEAP_ALIGN_PTR(p) p = (void *)((uint64_t)(((uint8_t *)p) + \
+#define SSF_HEAP_ALIGN_PTR(p) p = (void *)(intptr_t)((uint64_t)(((uint8_t *)p) + \
                                   (SSF_HEAP_ALIGNMENT_SIZE - 1)) & SSF_HEAP_ALIGNMENT_MASK)
 #define SSF_HEAP_ALIGN_LEN(l) l = (uint32_t)((uint64_t)(l + (SSF_HEAP_ALIGNMENT_SIZE - 1)) & \
                                   SSF_HEAP_ALIGNMENT_MASK)
@@ -181,6 +182,9 @@ static void _SSFHeapBlockCondense(SSFHeapPrivateHandle_t *handle, SSFHeapBlock_t
             /* Yes, set the head block to the new condensed length */
             hb = (SSFHeapBlock_t *)(void *)start;
             SSF_HEAP_SET_BLOCK(hb, bmLen, SSF_HEAP_BLOCK_UNALLOCED, handle->mark, spareLen);
+#if SSF_HEAP_SET_BLOCK_CHECK == 1
+            _SSFHeapCheckBlock(handle, hb);
+#endif
             return;
         }
         hb = (SSFHeapBlock_t *)(void *)(SSF_HEAP_U8_CAST(hb) + len);
@@ -226,7 +230,7 @@ void SSFHeapInit(SSFHeapHandle_t *handleOut, uint8_t *heapMem, uint32_t heapMemS
     ph->start = SSF_HEAP_U8_CAST(ph) + sizeof(SSFHeapPrivateHandle_t);
     SSF_HEAP_ALIGN_PTR(ph->start);
     SSF_ASSERT(ph->start >= ph->base);
-    SSF_ASSERT((ph->start - ph->base) <= heapMemSize);
+    SSF_ASSERT((uint32_t)(ph->start - ph->base) <= heapMemSize);
 
     /* Compute aligned heap length and end */
     ph->len = heapMemSize - (uint32_t)(ph->start - ph->base);
@@ -240,11 +244,15 @@ void SSFHeapInit(SSFHeapHandle_t *handleOut, uint8_t *heapMem, uint32_t heapMemS
     /* Initialize a single free block for all available memory */
     hb = (SSFHeapBlock_t *)(void *)ph->start;
     SSF_HEAP_SET_BLOCK(hb, ph->len, SSF_HEAP_BLOCK_UNALLOCED, ph->mark, 0);
-
+#if SSF_HEAP_SET_BLOCK_CHECK == 1
+    _SSFHeapCheckBlock(ph, hb);
+#endif
     /* Initialize the End of Heap Fence Block */
     SSF_HEAP_SET_BLOCK((SSFHeapBlock_t *)(void *)ph->end, sizeof(SSFHeapBlock_t),
                        SSF_HEAP_BLOCK_ALLOCED, ph->mark, 0);
-
+#if SSF_HEAP_SET_BLOCK_CHECK == 1
+    _SSFHeapCheckBlock(ph, hb);
+#endif
     ph->magic = SSF_HEAP_MAGIC;
 
 #if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
@@ -330,6 +338,9 @@ bool SSFHeapAlloc(SSFHeapHandle_t handle, void **memOut, uint32_t memSize, uint8
                 /* Yes, mark block as alloced and set memory ptr */
                 SSF_HEAP_SET_BLOCK(hb, hb->len, SSF_HEAP_BLOCK_ALLOCED, mark,
                                    memSize - requestedSize);
+#if SSF_HEAP_SET_BLOCK_CHECK == 1
+                _SSFHeapCheckBlock(handle, hb);
+#endif
                 *memOut = SSF_HEAP_U8_CAST(hb) + sizeof(SSFHeapBlock_t);
 
                 /* Zero memory if requested */
@@ -355,11 +366,15 @@ bool SSFHeapAlloc(SSFHeapHandle_t handle, void **memOut, uint32_t memSize, uint8
                 /* Mark block as allocated */
                 SSF_HEAP_SET_BLOCK(hb, memSize + sizeof(SSFHeapBlock_t), SSF_HEAP_BLOCK_ALLOCED,
                                    mark, memSize - requestedSize);
-
+#if SSF_HEAP_SET_BLOCK_CHECK == 1
+                _SSFHeapCheckBlock(handle, hb);
+#endif
                 /* Advance to create a new available block */
                 hb = (SSFHeapBlock_t*)(void *)(SSF_HEAP_U8_CAST(hb) + hb->len);
                 SSF_HEAP_SET_BLOCK(hb, blockMemory - memSize, SSF_HEAP_BLOCK_UNALLOCED, ph->mark, 0);
-
+#if SSF_HEAP_SET_BLOCK_CHECK == 1
+                _SSFHeapCheckBlock(handle, hb);
+#endif
                 ph->numAllocRequests++;
 
 #if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
@@ -438,7 +453,9 @@ bool SSFHeapAllocResize(SSFHeapHandle_t handle, void** memOut, uint32_t newMemSi
         /* Yes, just return same memory with new mark */
         SSF_HEAP_SET_BLOCK(hb, hb->len, SSF_HEAP_BLOCK_ALLOCED, newMark,
                            newMemSize - newRequestedSize);
-
+#if SSF_HEAP_SET_BLOCK_CHECK == 1
+        _SSFHeapCheckBlock(handle, hb);
+#endif
 #if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
         SSF_HEAP_SYNC_RELEASE();
 #endif
@@ -495,6 +512,9 @@ void SSFHeapDealloc(SSFHeapHandle_t handle, void **heapMemOut, uint8_t *markOutO
 
     /* Free block */
     SSF_HEAP_SET_BLOCK(hb, hb->len, SSF_HEAP_BLOCK_UNALLOCED, ph->mark, 0);
+#if SSF_HEAP_SET_BLOCK_CHECK == 1
+    _SSFHeapCheckBlock(handle, hb);
+#endif
     if (isZeroed) memset(*heapMemOut, 0, hb->len - sizeof(SSFHeapBlock_t));
     *heapMemOut = NULL;
     ph->numFreeRequests++;

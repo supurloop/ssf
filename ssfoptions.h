@@ -372,6 +372,10 @@ typedef enum
 #define SSF_HEAP_SYNC_RELEASE() SSF_MUTEX_RELEASE((ph->mutex))
 #endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
 
+/* 1 == Extra heap block check after heap code changes a block; 0(default) == Disable check. */
+/* Useful if debugging problems on port to new architecture. */
+#define SSF_HEAP_SET_BLOCK_CHECK (0u)
+
 /* Sets the maximum size of the heap for unit test. */
 #define SSF_HEAP_MAX_SIZE_FOR_UNIT_TEST (4224u)
 

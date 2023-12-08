@@ -46,8 +46,8 @@
 /* Heap Block Header, Heap Block Memory                                                          */
 /* |<-Block Len---------------------->|                                                          */
 /* |                                                                                             */
-/* Block Len, Is Alloced, Mark, Block Header Checksum                                            */
-/* |<-Block Header Checksum->|                                                                   */
+/* Block Len, Is Alloced, Mark, Spare Len, Block Header Checksum                                 */
+/* |<-Block Header Checksum------------>|                                                        */
 /*                                                                                               */
 /* Immediately preceeding the working heap is the heap handle structure.                         */
 /* A Heap is composed of 1 or more Heap Blocks terminated by an End of Heap Fence BLock.         */
@@ -56,6 +56,7 @@
 /* The Heap Block Header Length == the byte size of the Heap Block Header and Heap Block Memory. */
 /* A Heap Block may either be allocated (isAlloced == '-') or unallocated (isAlloced == '+').    */
 /* A Heap Block Header has a Mark field, which allows app tracking of allocs and frees.          */
+/* A Heap Block Header has a spareLen field, the diff between requested and actual allocation.   */
 /* A Heap Block Header has a Checksum used to verify the integrity of the Heap Block Header.     */
 /* Heap Block Headers are checked for validity before being referenced.                          */
 /* Heap Block Headers act as a fence to detect apps writing past their allocated region.         */

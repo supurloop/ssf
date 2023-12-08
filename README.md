@@ -37,6 +37,7 @@ The framework implements a number of common embedded system functions:
 22. An ISO8601 Date/Time interface.
 23. An integer to decimal string interface.
 24. An safe C string interface.
+25. A debuggable, integrity checked heap interface.
 
 To give you an idea of the framework size here are some program memory estimates for each component compiled on an MSP430 with Level 3 optimization:
 Byte FIFO, linked list, memory pool, Base64, Hex ASCII are each about 1000 bytes.
@@ -132,7 +133,7 @@ RTOSes introduce significant complexity, and in particular a dizzying amount of 
 
 That said this framework can run perfectly fine with an RTOS, Windows, or Linux, so long as some precautions are taken.
 
-Excepting the finite state machine framework and RTC interface, all interfaces are reentrant.
+Excepting the finite state machine framework, RTC interface, and heap, all interfaces are reentrant.
 This means that calls into those interfaces from different execution contexts will not interfere with each other.
 
 For example, you can have linked list object A in task 1 and linked list object B in task 2 and they will be managed independently and correctly, so long as they are only accessed from the context of their respective task.
@@ -1282,6 +1283,44 @@ This interface provides true safe replacements for strcpy(), strcat(), strcpy(),
     {
         /* Yes copy worked, str="123456789", len = 9 */
     }
+```
+
+
+### Debuggable Integrity Checked Heap Interface
+
+Note: This heap implementation is NOT a direct replacement for malloc, realloc, free, etc.
+
+This interface has a more pedantic and consistent API designed to prevent common dynamic memory allocation mistakes that the standard C library happily permits, double frees, overruns, using pointers after being freed, etc...
+All operations check the heap's integrity and asserts when corruption is found. When the time comes to read a heap dump, +/- chars help visually mark the block headers, while "dead" headers are zeroed so they never pollute the dump.
+
+Designed to work on 8, 16, 32, and 64-bit machine word sizes, and allows up to 32-bit sized allocations.
+
+```
+    #define HEAP_MARK ('H')
+    #define APP_MARK ('A')
+    #define HEAP_SIZE (64000u)
+    #define STR_SIZE (100u)
+
+    uint8_t heap[HEAP_SIZE];
+    SSFHeapHandle_t heapHandle;
+    uint8_t *ptr = NULL;
+
+    SSFHeapInit(&heapHandle, heap, sizeof(heap), HEAP_MARK, false);
+
+    /* Can we alloc 100 bytes? */
+    if (SSFHeapMalloc(heapHandle, &ptr, STR_SIZE, APP_MARK))
+    {
+        /* Yes, use the bytes for some operation */
+        strncpy(ptr, "Hello", STR_SIZE);
+
+        /* Free the memory */
+        SSFHeapFree(heapHandle, &ptr, NULL, false);
+
+        /* ptr == NULL */
+    }
+    SSF_ASSERT(ptr == NULL);
+
+    SSFHeapDeInit(&heapHandle, false);
 ```
 
 ## Conclusion

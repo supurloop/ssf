@@ -127,23 +127,28 @@ typedef struct
 /* --------------------------------------------------------------------------------------------- */
 /* Unrolled Fletcher Checksum for Block integrity checks.                                        */
 /* --------------------------------------------------------------------------------------------- */
-#define SSFFCSum16Block(in, fcrc) { \
-    uint8_t *tmp = (uint8_t *)in; uint16_t s1 = 0, s2 = 0; \
-    s1 += *tmp; s1 %= 255; s2 = s1; s2 %= 255; tmp++; \
-    s1 += *tmp; s1 %= 255; s2 = s1; s2 %= 255; tmp++; \
-    s1 += *tmp; s1 %= 255; s2 = s1; s2 %= 255; tmp++; \
-    s1 += *tmp; s1 %= 255; s2 = s1; s2 %= 255; tmp++; \
-    s1 += *tmp; s1 %= 255; s2 = s1; s2 %= 255; tmp++; \
-    s1 += *tmp; s1 %= 255; s2 = s1; s2 %= 255; tmp++; \
-    s1 += *tmp; s1 %= 255; s2 = s1; s2 %= 255; \
-    fcrc = (uint8_t)((s2 << 8) | s1); }
+static uint8_t SSFFCSum16Block(uint8_t *in)
+{
+    uint16_t s1 = 0;
+    uint16_t s2 = 0;
+
+    s1 += *in; s1 %= 255; s2 = s1; s2 %= 255; in++;
+    s1 += *in; s1 %= 255; s2 = (s1 + s2); s2 %= 255; in++;
+    s1 += *in; s1 %= 255; s2 = (s1 + s2); s2 %= 255; in++;
+    s1 += *in; s1 %= 255; s2 = (s1 + s2); s2 %= 255; in++;
+    s1 += *in; s1 %= 255; s2 = (s1 + s2); s2 %= 255; in++;
+    s1 += *in; s1 %= 255; s2 = (s1 + s2); s2 %= 255; in++;
+    s1 += *in; s1 %= 255; s2 = (s1 + s2); s2 %= 255;
+
+    return (uint8_t)((s2 << 8) | s1);
+}
 
 #define SSF_HEAP_SET_BLOCK(blk, blkLen, blkIsAlloced, blkMark, sprLen) \
     (blk)->len = blkLen; \
     (blk)->isAlloced = blkIsAlloced; \
     (blk)->mark = blkMark; \
     (blk)->spareLen = (uint8_t)(sprLen); \
-    SSFFCSum16Block(SSF_HEAP_U8_CAST(blk), (blk)->checksum);
+    (blk)->checksum = SSFFCSum16Block(SSF_HEAP_U8_CAST(blk));
 
 #if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
 SSF_HEAP_SYNC_DECLARATION;
@@ -154,11 +159,8 @@ SSF_HEAP_SYNC_DECLARATION;
 /* --------------------------------------------------------------------------------------------- */
 void _SSFHeapCheckBlock(SSFHeapPrivateHandle_t *handle, SSFHeapBlock_t *hb)
 {
-    uint8_t fcrc;
-
     SSF_REQUIRE(handle != NULL);
-    SSFFCSum16Block(SSF_HEAP_U8_CAST(hb), fcrc);
-    SSF_ASSERT(fcrc == hb->checksum);
+    SSF_ASSERT(SSFFCSum16Block(SSF_HEAP_U8_CAST(hb)) == hb->checksum);
     SSF_ASSERT((hb->isAlloced == SSF_HEAP_BLOCK_UNALLOCED) ||
                (hb->isAlloced == SSF_HEAP_BLOCK_ALLOCED));
     SSF_ASSERT((hb->len >= sizeof(SSFHeapBlock_t)) && (hb->len <= handle->len));

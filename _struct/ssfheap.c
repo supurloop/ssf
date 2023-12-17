@@ -128,14 +128,14 @@ typedef struct
 /* Unrolled Fletcher Checksum for Block integrity checks.                                        */
 /* --------------------------------------------------------------------------------------------- */
 #define SSFFCSum16Block(in, fcrc) { \
-    uint8_t *tmp = (uint8_t *)in; uint16_t s1 = 0; uint16_t s2 = 0; \
-    s1 = (s1 + *tmp); s1 = MOD255(s1); s2 = (s1 + s2); s2 = MOD255(s2); tmp++; \
-    s1 = (s1 + *tmp); s1 = MOD255(s1); s2 = (s1 + s2); s2 = MOD255(s2); tmp++; \
-    s1 = (s1 + *tmp); s1 = MOD255(s1); s2 = (s1 + s2); s2 = MOD255(s2); tmp++; \
-    s1 = (s1 + *tmp); s1 = MOD255(s1); s2 = (s1 + s2); s2 = MOD255(s2); tmp++; \
-    s1 = (s1 + *tmp); s1 = MOD255(s1); s2 = (s1 + s2); s2 = MOD255(s2); tmp++; \
-    s1 = (s1 + *tmp); s1 = MOD255(s1); s2 = (s1 + s2); s2 = MOD255(s2); tmp++; \
-    s1 = (s1 + *tmp); s1 = MOD255(s1); s2 = (s1 + s2); s2 = MOD255(s2); \
+    uint8_t *tmp = (uint8_t *)in; uint16_t s1 = 0, s2 = 0; \
+    s1 += *tmp; s1 %= 255; s2 = s1; s2 %= 255; tmp++; \
+    s1 += *tmp; s1 %= 255; s2 = s1; s2 %= 255; tmp++; \
+    s1 += *tmp; s1 %= 255; s2 = s1; s2 %= 255; tmp++; \
+    s1 += *tmp; s1 %= 255; s2 = s1; s2 %= 255; tmp++; \
+    s1 += *tmp; s1 %= 255; s2 = s1; s2 %= 255; tmp++; \
+    s1 += *tmp; s1 %= 255; s2 = s1; s2 %= 255; tmp++; \
+    s1 += *tmp; s1 %= 255; s2 = s1; s2 %= 255; \
     fcrc = (uint8_t)((s2 << 8) | s1); }
 
 #define SSF_HEAP_SET_BLOCK(blk, blkLen, blkIsAlloced, blkMark, sprLen) \

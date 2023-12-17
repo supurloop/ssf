@@ -119,40 +119,38 @@ typedef struct
 #define SSF_HEAP_ALIGN_LEN(l) l = (uint32_t)((uint64_t)(l + (SSF_HEAP_ALIGNMENT_SIZE - 1)) & \
                                   SSF_HEAP_ALIGNMENT_MASK)
 #define SSF_HEAP_U8_CAST(p) ((uint8_t *)(p))
-
 /* Mod 255 where 0 <= a <= 510 */
 #define MOD255(a) ((((a) > 255) && ((a) != 510)) ? (uint8_t)(((a) >> 8) + ((a) & 0xff)) : \
                                                    ((a) < 255) ? (uint8_t)(a) : (uint8_t)0)
-
-/* --------------------------------------------------------------------------------------------- */
-/* Unrolled Fletcher Checksum for Block integrity checks.                                        */
-/* --------------------------------------------------------------------------------------------- */
-static uint8_t SSFFCSum16Block(uint8_t *in)
-{
-    uint16_t s1 = 0;
-    uint16_t s2 = 0;
-
-    s1 += *in; s1 %= 255; s2 = s1; s2 %= 255; in++;
-    s1 += *in; s1 %= 255; s2 = (s1 + s2); s2 %= 255; in++;
-    s1 += *in; s1 %= 255; s2 = (s1 + s2); s2 %= 255; in++;
-    s1 += *in; s1 %= 255; s2 = (s1 + s2); s2 %= 255; in++;
-    s1 += *in; s1 %= 255; s2 = (s1 + s2); s2 %= 255; in++;
-    s1 += *in; s1 %= 255; s2 = (s1 + s2); s2 %= 255; in++;
-    s1 += *in; s1 %= 255; s2 = (s1 + s2); s2 %= 255;
-
-    return (uint8_t)((s2 << 8) | s1);
-}
 
 #define SSF_HEAP_SET_BLOCK(blk, blkLen, blkIsAlloced, blkMark, sprLen) \
     (blk)->len = blkLen; \
     (blk)->isAlloced = blkIsAlloced; \
     (blk)->mark = blkMark; \
     (blk)->spareLen = (uint8_t)(sprLen); \
-    (blk)->checksum = SSFFCSum16Block(SSF_HEAP_U8_CAST(blk));
+    (blk)->checksum = _SSFFCSum8Block(SSF_HEAP_U8_CAST(blk));
 
 #if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
 SSF_HEAP_SYNC_DECLARATION;
 #endif
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns unrolled 8-bit Fletcher Checksum for Block integrity checks.                          */
+/* --------------------------------------------------------------------------------------------- */
+static uint8_t _SSFFCSum8Block(const uint8_t *in)
+{
+    uint16_t s1 = 0;
+
+    s1 += *in; s1 = MOD255(s1); in++;
+    s1 += *in; s1 = MOD255(s1); in++;
+    s1 += *in; s1 = MOD255(s1); in++;
+    s1 += *in; s1 = MOD255(s1); in++;
+    s1 += *in; s1 = MOD255(s1); in++;
+    s1 += *in; s1 = MOD255(s1); in++;
+    s1 += *in; s1 = MOD255(s1);
+
+    return (uint8_t)(s1);
+}
 
 /* --------------------------------------------------------------------------------------------- */
 /* Check heap block integrity.                                                                   */
@@ -160,7 +158,7 @@ SSF_HEAP_SYNC_DECLARATION;
 void _SSFHeapCheckBlock(SSFHeapPrivateHandle_t *handle, SSFHeapBlock_t *hb)
 {
     SSF_REQUIRE(handle != NULL);
-    SSF_ASSERT(SSFFCSum16Block(SSF_HEAP_U8_CAST(hb)) == hb->checksum);
+    SSF_ASSERT(_SSFFCSum8Block(SSF_HEAP_U8_CAST(hb)) == hb->checksum);
     SSF_ASSERT((hb->isAlloced == SSF_HEAP_BLOCK_UNALLOCED) ||
                (hb->isAlloced == SSF_HEAP_BLOCK_ALLOCED));
     SSF_ASSERT((hb->len >= sizeof(SSFHeapBlock_t)) && (hb->len <= handle->len));

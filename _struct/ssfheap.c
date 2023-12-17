@@ -119,14 +119,31 @@ typedef struct
 #define SSF_HEAP_ALIGN_LEN(l) l = (uint32_t)((uint64_t)(l + (SSF_HEAP_ALIGNMENT_SIZE - 1)) & \
                                   SSF_HEAP_ALIGNMENT_MASK)
 #define SSF_HEAP_U8_CAST(p) ((uint8_t *)(p))
+
+/* Mod 255 where 0 <= a <= 510 */
+#define MOD255(a) ((((a) > 255) && ((a) != 510)) ? (uint8_t)(((a) >> 8) + ((a) & 0xff)) : \
+                                                   ((a) < 255) ? (uint8_t)(a) : (uint8_t)0)
+
+/* --------------------------------------------------------------------------------------------- */
+/* Unrolled Fletcher Checksum for Block integrity checks.                                        */
+/* --------------------------------------------------------------------------------------------- */
+#define SSFFCSum16Block(in, fcrc) { \
+    uint8_t *tmp = (uint8_t *)in; uint16_t s1 = 0; uint16_t s2 = 0; \
+    s1 = (s1 + *tmp); s1 = MOD255(s1); s2 = (s1 + s2); s2 = MOD255(s2); tmp++; \
+    s1 = (s1 + *tmp); s1 = MOD255(s1); s2 = (s1 + s2); s2 = MOD255(s2); tmp++; \
+    s1 = (s1 + *tmp); s1 = MOD255(s1); s2 = (s1 + s2); s2 = MOD255(s2); tmp++; \
+    s1 = (s1 + *tmp); s1 = MOD255(s1); s2 = (s1 + s2); s2 = MOD255(s2); tmp++; \
+    s1 = (s1 + *tmp); s1 = MOD255(s1); s2 = (s1 + s2); s2 = MOD255(s2); tmp++; \
+    s1 = (s1 + *tmp); s1 = MOD255(s1); s2 = (s1 + s2); s2 = MOD255(s2); tmp++; \
+    s1 = (s1 + *tmp); s1 = MOD255(s1); s2 = (s1 + s2); s2 = MOD255(s2); \
+    fcrc = (uint8_t)((s2 << 8) | s1); }
+
 #define SSF_HEAP_SET_BLOCK(blk, blkLen, blkIsAlloced, blkMark, sprLen) \
     (blk)->len = blkLen; \
     (blk)->isAlloced = blkIsAlloced; \
     (blk)->mark = blkMark; \
     (blk)->spareLen = (uint8_t)(sprLen); \
-    (blk)->checksum = (uint8_t)SSFFCSum16(SSF_HEAP_U8_CAST(blk), \
-                                          sizeof(SSFHeapBlock_t) - sizeof(uint8_t), \
-                                          SSF_FCSUM_INITIAL);
+    SSFFCSum16Block(SSF_HEAP_U8_CAST(blk), (blk)->checksum);
 
 #if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
 SSF_HEAP_SYNC_DECLARATION;
@@ -137,10 +154,11 @@ SSF_HEAP_SYNC_DECLARATION;
 /* --------------------------------------------------------------------------------------------- */
 void _SSFHeapCheckBlock(SSFHeapPrivateHandle_t *handle, SSFHeapBlock_t *hb)
 {
+    uint8_t fcrc;
+
     SSF_REQUIRE(handle != NULL);
-    SSF_ASSERT(((uint8_t)SSFFCSum16(SSF_HEAP_U8_CAST(hb),
-                                    sizeof(SSFHeapBlock_t) - sizeof(uint8_t),
-                                    SSF_FCSUM_INITIAL)) == hb->checksum);
+    SSFFCSum16Block(SSF_HEAP_U8_CAST(hb), fcrc);
+    SSF_ASSERT(fcrc == hb->checksum);
     SSF_ASSERT((hb->isAlloced == SSF_HEAP_BLOCK_UNALLOCED) ||
                (hb->isAlloced == SSF_HEAP_BLOCK_ALLOCED));
     SSF_ASSERT((hb->len >= sizeof(SSFHeapBlock_t)) && (hb->len <= handle->len));

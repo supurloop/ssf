@@ -702,7 +702,7 @@ static bool _SSFUBJsonGetUInt64(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, in
         break;
         case SSF_UBJSON_TYPE_NUMBER_UINT8:
             if ((end - start) != sizeof(uint8_t)) return false;
-            *outi64 = (int64_t)(int8_t)js[start];
+            *outi64 = (uint64_t)js[start]; /* Always unsigned */
             *outu64 = (uint64_t)js[start];
         break;
         case SSF_UBJSON_TYPE_NUMBER_INT16:

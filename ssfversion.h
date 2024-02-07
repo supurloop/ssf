@@ -61,7 +61,12 @@
 /*         Reorganized source code into module directories.                                      */
 /* 0.0.9 - Added integer to decimal string conversion interface.                                 */
 /*         Added date/time, RTC, and ISO8601 time interfaces.                                    */
+/* 0.1.0 - Moved compile time options to ssfoptions.h.                                           */
+/*       - Bug fixes and enhancements to UBJSON interface.                                       */
+/*       - Added string to decimal integer conversion interface.                                 */
+/*       - Added safe string interface.                                                          */
+/*       - Added debuggable, integrity check heap interface.                                     */
 /* --------------------------------------------------------------------------------------------- */
-#define SSF_VERSION_STR "0.0.9"
+#define SSF_VERSION_STR "0.1.0"
 
 #endif /* SSF_VERSION_H_INCLUDE */

@@ -72,11 +72,11 @@
 #define SSFDTIME_SEC_IN_LEAP_YEAR (31622400ull)
 
 #define SSFDTIME_MONTH_DAY(m) { \
-    if (sunixDays < _daysInMonth[m]) { \
+    if (unixDays < _daysInMonth[m]) { \
         ts->month = m; \
-        ts->day = (uint8_t)sunixDays; \
+        ts->day = (uint8_t)unixDays; \
         return; } \
-        sunixDays -= _daysInMonth[m]; }
+        unixDays -= _daysInMonth[m]; }
 
 #define SSF_DTIME_STRUCT_CHECK_YEAR(y) \
     if ((y) > SSF_TS_YEAR_MAX) return false;
@@ -107,7 +107,7 @@ static const uint8_t _daysInMonth[SSFDTIME_MONTHS_IN_YEAR] =
     { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
 static const uint16_t _daysInMonthAcc[SSFDTIME_MONTHS_IN_YEAR - 1] =
     { 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334 };
-static const int32_t _unixDaysToYear[SSFDTIME_NUM_YEARS + 1] =
+static const uint32_t _unixDaysToYear[SSFDTIME_NUM_YEARS + 1] =
 {
     365, 730, 1096, 1461, 1826, 2191, 2557, 2922, 3287, 3652, 4018, 4383, 4748, 5113, 5479, 5844,
     6209, 6574, 6940, 7305, 7670, 8035, 8401, 8766, 9131, 9496, 9862, 10227, 10592, 10957, 11323,
@@ -175,25 +175,24 @@ void _SSFDTimeUnixToStruct(uint32_t unixDays, SSFDTimeStruct_t *ts)
 {
     bool isLeap;
     uint16_t i;
-    int32_t sunixDays = (int32_t)unixDays;
 
     SSF_REQUIRE(ts != NULL);
 
-    /* Perform search for the year/yday based on sunixDays */
-    i = SSF_MIN(SSFDTIME_NUM_YEARS, sunixDays / SSF_TS_DAYOFYEAR_LEAP_MAX);
+    /* Perform search for the year/yday based on unixDays */
+    i = (uint16_t)SSF_MIN(SSFDTIME_NUM_YEARS, unixDays / SSF_TS_DAYOFYEAR_LEAP_MAX);
     do
     {
         SSF_ASSERT(i <= SSFDTIME_NUM_YEARS);
 
-        /* Is sunixDays this year or earlier? */
-        if (sunixDays < _unixDaysToYear[i])
+        /* Is unixDays this year or earlier? */
+        if (unixDays < _unixDaysToYear[i])
         {
-            if ((i == 0) || (sunixDays >= _unixDaysToYear[i - 1])) 
+            if ((i == 0) || (unixDays >= _unixDaysToYear[i - 1])) 
             {
                 /* Found year and yday */
                 ts->year = i;
-                if (i != 0) { sunixDays -= _unixDaysToYear[i - 1]; }
-                ts->yday = sunixDays;
+                if (i != 0) { unixDays -= _unixDaysToYear[i - 1]; }
+                ts->yday = (uint16_t)unixDays;
                 break;
             }
             /* Need to search lower in array */
@@ -207,13 +206,13 @@ void _SSFDTimeUnixToStruct(uint32_t unixDays, SSFDTimeStruct_t *ts)
     isLeap = SSFDTIME_IS_LEAP_YEAR(ts->year);
     SSFDTIME_MONTH_DAY(SSF_DTIME_MONTH_JAN);
     /* February is leap month special case */
-    if (sunixDays < (int32_t)((_daysInMonth[SSF_DTIME_MONTH_FEB] + (uint8_t)isLeap)))
+    if (unixDays < (uint32_t)(_daysInMonth[SSF_DTIME_MONTH_FEB] + (uint8_t)isLeap))
     {
         ts->month = SSF_DTIME_MONTH_FEB;
-        ts->day = (uint8_t)sunixDays;
+        ts->day = (uint8_t)unixDays;
         return;
     }
-    sunixDays -= (_daysInMonth[SSF_DTIME_MONTH_FEB] + (uint8_t)isLeap);
+    unixDays -= (_daysInMonth[SSF_DTIME_MONTH_FEB] + (uint8_t)isLeap);
     SSFDTIME_MONTH_DAY(SSF_DTIME_MONTH_MAR);
     SSFDTIME_MONTH_DAY(SSF_DTIME_MONTH_APR);
     SSFDTIME_MONTH_DAY(SSF_DTIME_MONTH_MAY);

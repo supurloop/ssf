@@ -379,12 +379,10 @@ void SSFDTimeUnitTest(void)
         /* Get gmtime() conversion */
         dtimer = (time_t)(unixSys / SSF_TICKS_PER_SEC);
 
-        /* Cannot unit test full date range on 32-bit systems */
-        if ((sizeof(dtimer) == sizeof(uint32_t)) &&
-            ((unixSys / SSF_TICKS_PER_SEC) > (((uint32_t)-1) >> 1)))
-        {
-            continue;
-        }
+#if UINTPTR_MAX == UINT32_MAX
+#warning NOTE - Cannot unit test full date range on 32-bit systems.
+        if ((unixSys / SSF_TICKS_PER_SEC) > (((uint32_t)-1) >> 1)) { continue; }
+#endif
 
 #ifdef _WIN32
         gmtime_s(&tm, &dtimer);

@@ -65,7 +65,7 @@ typedef struct
 #define SSF_HEAP_MIN_HEAP_MEM_SIZE ((SSF_HEAP_ALIGNMENT_SIZE << 2) + \
                                     sizeof(SSFHeapPrivateHandle_t) + \
                                     (sizeof(SSFHeapBlock_t) << 1))
-#define SSF_HEAP_ALIGN_PTR(p) p = (void *)(intptr_t)((uint64_t)(((uint8_t *)p) + \
+#define SSF_HEAP_ALIGN_PTR(p) p = (void *)(uintptr_t)((SSF_PTR_CAST_TYPE)(((uint8_t *)p) + \
                                   (SSF_HEAP_ALIGNMENT_SIZE - 1)) & SSF_HEAP_ALIGNMENT_MASK)
 #define SSF_HEAP_ALIGN_LEN(l) l = (uint32_t)((uint64_t)(l + (SSF_HEAP_ALIGNMENT_SIZE - 1)) & \
                                   SSF_HEAP_ALIGNMENT_MASK)
@@ -178,11 +178,11 @@ void SSFHeapUnitTest(void)
             ptr = NULL;
             SSFHeapInit(&heapHandle, heap + i, sizeof(heap) - i, HEAP_MARK, false);
             SSF_ASSERT(SSFHeapAlloc(heapHandle, (void **)&ptr, sizeof(void *) + j, APP_MARK, false));
-            SSF_ASSERT((((uint64_t)ptr) % sizeof(void *)) == 0);
+            SSF_ASSERT((((SSF_PTR_CAST_TYPE)ptr) % sizeof(void *)) == 0);
             memset(ptr, 0, sizeof(void *) + j);
             SSF_ASSERT(SSFHeapAllocResize(heapHandle, (void **)&ptr, (sizeof(void *) << 1) + j, APP_MARK,
                                           false));
-            SSF_ASSERT((((uint64_t)ptr) % sizeof(void *)) == 0);
+            SSF_ASSERT((((SSF_PTR_CAST_TYPE)ptr) % sizeof(void *)) == 0);
             memset(ptr, 0, (sizeof(void *) << 1) + j);
             SSFHeapDealloc(heapHandle, (void **)&ptr, NULL, false);
             SSF_ASSERT(ptr == NULL);
@@ -204,7 +204,7 @@ void SSFHeapUnitTest(void)
         for (j = 0; j < (sizeof(void *) << 2); j++)
         {
             SSF_ASSERT(SSFHeapAlloc(heapHandle, (void **)&ptr, i, APP_MARK, false));
-            SSF_ASSERT((((uint64_t)ptr) % sizeof(void *)) == 0);
+            SSF_ASSERT((((SSF_PTR_CAST_TYPE)ptr) % sizeof(void *)) == 0);
             memset(ptr, i | 0x80, i);
             /* Set any spare bytes of allocation to non 0 value */
             len = i;
@@ -213,7 +213,7 @@ void SSFHeapUnitTest(void)
             memset(ptr + i, ~(i | 0x80) | 0x40, len);
 
             SSF_ASSERT(SSFHeapAllocResize(heapHandle, (void **)&ptr, j, APP_MARK, false));
-            SSF_ASSERT((((uint64_t)ptr) % sizeof(void *)) == 0);
+            SSF_ASSERT((((SSF_PTR_CAST_TYPE)ptr) % sizeof(void *)) == 0);
             /* Make sure all data from original alloc was preserved */
             if (j <= i)
             {
@@ -237,7 +237,7 @@ void SSFHeapUnitTest(void)
         for (j = 0; j < (sizeof(void *) << 2); j++)
         {
             SSF_ASSERT(SSFHeapAlloc(heapHandle, (void **)&ptr, i, APP_MARK, false));
-            SSF_ASSERT((((uint64_t)ptr) % sizeof(void *)) == 0);
+            SSF_ASSERT((((SSF_PTR_CAST_TYPE)ptr) % sizeof(void *)) == 0);
             memset(ptr, i | 0x40, i);
             /* Set any spare bytes of allocation to non 0 value */
             len = i;
@@ -246,7 +246,7 @@ void SSFHeapUnitTest(void)
             memset(ptr + i, ~(i | 0x40) | 0x20, len);
 
             SSF_ASSERT(SSFHeapAllocResize(heapHandle, (void **)&ptr, j, APP_MARK, true));
-            SSF_ASSERT((((uint64_t)ptr) % sizeof(void *)) == 0);
+            SSF_ASSERT((((SSF_PTR_CAST_TYPE)ptr) % sizeof(void *)) == 0);
             /* Make sure all data from original alloc was preserved and zeros added as requested */
             if (j <= i)
             {

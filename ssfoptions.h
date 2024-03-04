@@ -35,6 +35,7 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+#include <stdint.h>
 #include "ssfport.h"
 #include "ssfassert.h"
 
@@ -371,6 +372,16 @@ typedef enum
 #define SSF_HEAP_SYNC_ACQUIRE() SSF_MUTEX_ACQUIRE((ph->mutex))
 #define SSF_HEAP_SYNC_RELEASE() SSF_MUTEX_RELEASE((ph->mutex))
 #endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
+
+#if UINTPTR_MAX == UINT16_MAX
+    typedef uint16_t SSF_PTR_CAST_TYPE;
+#elif UINTPTR_MAX == UINT32_MAX
+    typedef uint32_t SSF_PTR_CAST_TYPE;
+#elif UINTPTR_MAX == UINT64_MAX
+    typedef uint64_t SSF_PTR_CAST_TYPE;
+#else
+#error SSF pointer size not determined.
+#endif
 
 /* 1 == Extra heap block check after heap code changes a block; 0(default) == Disable check. */
 /* Useful if debugging problems on port to new architecture. */

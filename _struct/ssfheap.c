@@ -114,7 +114,7 @@ typedef struct
 #define SSF_HEAP_MIN_HEAP_MEM_SIZE ((SSF_HEAP_ALIGNMENT_SIZE << 2) + \
                                     sizeof(SSFHeapPrivateHandle_t) + \
                                     (sizeof(SSFHeapBlock_t) << 1))
-#define SSF_HEAP_ALIGN_PTR(p) p = (void *)(intptr_t)((uint64_t)(((uint8_t *)p) + \
+#define SSF_HEAP_ALIGN_PTR(p) p = (void *)(uintptr_t)((SSF_PTR_CAST_TYPE)(((uint8_t *)p) + \
                                   (SSF_HEAP_ALIGNMENT_SIZE - 1)) & SSF_HEAP_ALIGNMENT_MASK)
 #define SSF_HEAP_ALIGN_LEN(l) l = (uint32_t)((uint64_t)(l + (SSF_HEAP_ALIGNMENT_SIZE - 1)) & \
                                   SSF_HEAP_ALIGNMENT_MASK)

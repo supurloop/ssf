@@ -177,8 +177,6 @@ void SSFSHA2_32(const uint8_t *in, uint32_t inLen, uint8_t *out, uint32_t outSiz
         for (i = 0; i < 16; i++)
         {
             j = i << 2;
-
-            // memcpy and ntohll???
             memcpy(&w[i], &pin[j + offset], sizeof(uint32_t));
             w[i] = ntohl(w[i]);
         }

@@ -460,6 +460,8 @@ void SSFJsonUnitTest(void)
     uint32_t i;
     size_t start;
     size_t end;
+    size_t aidx3;
+    int64_t outI64;
     char *path[SSF_JSON_CONFIG_MAX_IN_DEPTH + 1];
 
     /* Parsing tests */
@@ -1193,6 +1195,13 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(jtype == SSF_JSON_TYPE_NUMBER);
         SSF_ASSERT(memcmp(&_jtsComplex[i][start], "-42", (end - start + 1)) == 0);
     }
+
+    memset(path, 0, sizeof(path));
+    outI64 = 0;
+    aidx3 = 0;
+    path[0] = (char *)&aidx3;
+    SSF_ASSERT(SSFJsonGetInt("[18]", (SSFCStrIn_t*)path, &outI64));
+    SSF_ASSERT(outI64 == 0x12ll);
 
     /* Generator tests */
     i = 0x12345678;

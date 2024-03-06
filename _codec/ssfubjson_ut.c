@@ -1075,6 +1075,12 @@ void SSFUBJsonUnitTest(void)
     SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x80\x00\x00\x00}", 14, (SSFCStrIn_t *)path, &outI64));
     SSF_ASSERT(outI64 == 0x0000000080000000ll);
 
+    memset(path, 0, sizeof(path));
+    aidx1 = 0;
+    path[0] = (char *)&aidx1;
+    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t*)"[U\x12]", 4, (SSFCStrIn_t*)path, &outI64));
+    SSF_ASSERT(outI64 == 0x12ll);
+
     memset(jsOut, 0xff, sizeof(jsOut));
     jsOutStart = 0;
     jsOutEnd = (size_t)-1;
@@ -1086,7 +1092,7 @@ void SSFUBJsonUnitTest(void)
     jsOutStart = 0;
     jsOutEnd = (size_t)-1;
     SSF_ASSERT(SSFUBJsonPrintArray(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, NULL, NULL));
-    SSF_ASSERT(SSFUBJsonIsValid(jsOut, jsOutEnd) == false);
+    SSF_ASSERT(SSFUBJsonIsValid(jsOut, jsOutEnd));
     SSF_ASSERT(jsOutEnd == 2);
     SSF_ASSERT(memcmp(jsOut, "[]", jsOutEnd) == 0);
     memset(jsOut, 0xff, sizeof(jsOut));

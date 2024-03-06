@@ -108,9 +108,14 @@ static bool _SSFUBJsonArray(const uint8_t *js, size_t jsLen, size_t *index, size
     SSF_REQUIRE(end != NULL);
     SSF_REQUIRE(astart != NULL);
     SSF_REQUIRE(aend != NULL);
-    SSF_REQUIRE(depth >= 1);
     SSF_REQUIRE(jt != NULL);
 
+    if (depth == 0)
+    {
+        if (jsLen > SSF_UBJSON_CONFIG_MAX_IN_LEN) return false;
+        *jt = SSF_UBJSON_TYPE_ERROR;
+        *index = 0;
+    }
     if (depth >= SSF_UBJSON_CONFIG_MAX_IN_DEPTH) return false;
     if (js[*index] != '[') return false;
 
@@ -444,6 +449,29 @@ bool _SSFUBJsonObject(const uint8_t *js, size_t jsLen, size_t *index, size_t *st
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Returns true if object|array found, else false; If true returns type/start/end on path match. */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFUBJsonMessage(const uint8_t *js, size_t jsLen, size_t *index, size_t *start,
+                              size_t *end, SSFCStrIn_t *path, uint8_t depth, SSFUBJsonType_t *jt)
+{
+    size_t astart;
+    size_t aend;
+
+    SSF_REQUIRE(js != NULL);
+    SSF_REQUIRE(index != NULL);
+    SSF_REQUIRE(start != NULL);
+    SSF_REQUIRE(end != NULL);
+    SSF_REQUIRE(jt != NULL);
+
+    if (!_SSFUBJsonObject(js, jsLen, index, start, end, path, depth, jt))
+    { 
+        if (!_SSFUBJsonArray(js, jsLen, index, start, end, &astart, &aend, path, depth, jt))
+        { return false; }
+    }
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Returns true if UBJSON string is valid, else false.                                           */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFUBJsonIsValid(uint8_t *js, size_t jsLen)
@@ -457,7 +485,7 @@ bool SSFUBJsonIsValid(uint8_t *js, size_t jsLen)
     SSF_REQUIRE(js != NULL);
 
     memset(path, 0, sizeof(path));
-    if (!_SSFUBJsonObject(js, jsLen, &index, &start, &end, (SSFCStrIn_t*)path, 0, &jt))
+    if (!_SSFUBJsonMessage(js, jsLen, &index, &start, &end, (SSFCStrIn_t*)path, 0, &jt))
     { return false; }
 
     return jt != SSF_UBJSON_TYPE_ERROR;
@@ -477,7 +505,7 @@ SSFUBJsonType_t SSFUBJsonGetType(uint8_t *js, size_t jsLen, SSFCStrIn_t *path)
     SSF_REQUIRE(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH] == NULL);
     SSF_REQUIRE(path != NULL);
 
-    if (!_SSFUBJsonObject(js, jsLen, &index, &start, &end, path, 0, &jt))
+    if (!_SSFUBJsonMessage(js, jsLen, &index, &start, &end, path, 0, &jt))
     { jt = SSF_UBJSON_TYPE_ERROR; }
 
     SSF_ENSURE((jt > SSF_UBJSON_TYPE_MIN) && (jt < SSF_UBJSON_TYPE_MAX));
@@ -501,7 +529,7 @@ bool SSFUBJsonGetString(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, SSFCStrOut
     SSF_REQUIRE(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH] == NULL);
     SSF_REQUIRE(out != NULL);
 
-    if (!_SSFUBJsonObject(js, jsLen, &index, &start, &end, path, 0, &jt))
+    if (!_SSFUBJsonMessage(js, jsLen, &index, &start, &end, path, 0, &jt))
     {return false; }
     if (jt != SSF_UBJSON_TYPE_STRING) return false;
     end--;
@@ -537,7 +565,7 @@ bool SSFUBJsonGetHex(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, uint8_t *out,
     SSF_REQUIRE(out != NULL);
     SSF_REQUIRE(outLen != NULL);
 
-    if (!_SSFUBJsonObject(js, jsLen, &index, &start, &end, path, 0, &jt)) return false;
+    if (!_SSFUBJsonMessage(js, jsLen, &index, &start, &end, path, 0, &jt)) return false;
     if (jt != SSF_UBJSON_TYPE_STRING) return false;
     end--;
     index = 0;
@@ -562,7 +590,7 @@ bool SSFUBJsonGetBase64(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, uint8_t *o
     SSF_REQUIRE(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH] == NULL);
     SSF_REQUIRE(out != NULL);
 
-    if (!_SSFUBJsonObject(js, jsLen, &index, &start, &end, path, 0, &jt)) return false;
+    if (!_SSFUBJsonMessage(js, jsLen, &index, &start, &end, path, 0, &jt)) return false;
     if (jt != SSF_UBJSON_TYPE_STRING) return false;
     end--;
     index = 0;
@@ -587,7 +615,7 @@ bool SSFUBJsonGetFloat(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, float *out)
     SSF_REQUIRE(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH] == NULL);
     SSF_REQUIRE(out != NULL);
 
-    if (!_SSFUBJsonObject(js, jsLen, &index, &start, &end, path, 0, &jt)) return false;
+    if (!_SSFUBJsonMessage(js, jsLen, &index, &start, &end, path, 0, &jt)) return false;
     if (jt != SSF_UBJSON_TYPE_NUMBER_FLOAT32) return false;
     if ((end - start) != sizeof(u32)) return false;
     memcpy(&u32, &js[start], sizeof(u32));
@@ -614,7 +642,7 @@ bool SSFUBJsonGetDouble(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, double *ou
     SSF_REQUIRE(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH] == NULL);
     SSF_REQUIRE(out != NULL);
 
-    if (!_SSFUBJsonObject(js, jsLen, &index, &start, &end, path, 0, &jt)) return false;
+    if (!_SSFUBJsonMessage(js, jsLen, &index, &start, &end, path, 0, &jt)) return false;
     switch (jt)
     {
         case SSF_UBJSON_TYPE_NUMBER_FLOAT32:
@@ -653,7 +681,7 @@ bool SSFUBJsonGetByteArrayPtr(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, uint
     SSF_REQUIRE(out != NULL);
     SSF_REQUIRE(outLen != NULL);
 
-    if (!_SSFUBJsonObject(js, jsLen, &index, &start, &end, path, 0, &jt))
+    if (!_SSFUBJsonMessage(js, jsLen, &index, &start, &end, path, 0, &jt))
     {return false; }
     if (jt != SSF_UBJSON_TYPE_ARRAY) return false;
     if ((end - start) < 6) return false; /* [$T#TL */
@@ -693,7 +721,7 @@ static bool _SSFUBJsonGetUInt64(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, in
     SSF_REQUIRE(outi64 != NULL);
     SSF_REQUIRE(outu64 != NULL);
 
-    if (!_SSFUBJsonObject(js, jsLen, &index, &start, &end, path, 0, &jt)) return false;
+    if (!_SSFUBJsonMessage(js, jsLen, &index, &start, &end, path, 0, &jt)) return false;
     switch (jt)
     {
         case SSF_UBJSON_TYPE_NUMBER_INT8:

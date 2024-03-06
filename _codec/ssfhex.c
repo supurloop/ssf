@@ -97,7 +97,10 @@ bool SSFHexBytesToBin(SSFCStrIn_t in, size_t inLenLim, uint8_t *out, size_t outS
     while ((inLenLim >= 2) && (outSize != 0))
     {
         if (rev)
-        {if (!SSFHexByteToBin(&in[inLenLim - 2], out)) return false; } else
+        {
+            if (!SSFHexByteToBin(&in[inLenLim - 2], out)) return false;
+        }
+        else
         {
             if (!SSFHexByteToBin(in, out)) return false;
             in += 2;

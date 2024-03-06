@@ -102,6 +102,14 @@ void SSFHexUnitTest(void)
         SSF_ASSERT(SSFHexBytesToBin("111x", strlen("111x"), binout, sizeof(binout), &outlen,
                                     (bool)i) == false);
 
+        SSF_ASSERT(SSFHexBytesToBin("1234", strlen("1234") + 200, binout, sizeof(binout), &outlen, (bool)i) ==
+                       false);
+        SSF_ASSERT(SSFHexBytesToBin("1234", strlen("1234") + 2, binout, sizeof(binout), &outlen, (bool)i) ==
+                       false);
+        SSF_ASSERT(SSFHexBytesToBin("123", strlen("1234") + 2, binout, sizeof(binout), &outlen, (bool)i) ==
+                       false);
+        SSF_ASSERT(SSFHexBytesToBin("123", strlen("1234") + 1, binout, sizeof(binout), &outlen, (bool)i) ==
+                       false);
         SSF_ASSERT(SSFHexBytesToBin("1234", strlen("1234"), binout, 1, &outlen, (bool)i) ==
                        false);
         SSF_ASSERT(SSFHexBytesToBin("1234", strlen("1234"), binout, 2, &outlen, (bool)i) == true);

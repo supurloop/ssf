@@ -1203,6 +1203,10 @@ void SSFJsonUnitTest(void)
     SSF_ASSERT(SSFJsonIsValid(_jsOut));
     SSF_ASSERT(i == 0xabcdef90);
 
+    memset(_jsOut, 1, sizeof(_jsOut));
+    SSF_ASSERT(SSFJsonPrintCString(_jsOut, sizeof(_jsOut), 0, &end, "/", false));
+    SSF_ASSERT(memcmp(_jsOut, "/", 2) == 0);
+
 #if SSF_JSON_CONFIG_ENABLE_UPDATE == 1
     SSFJsonUnitTestUpdate(_jsOut, sizeof(_jsOut), "l1", NULL, NULL,
                           "{}",

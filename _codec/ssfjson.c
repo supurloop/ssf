@@ -572,7 +572,6 @@ bool SSFJsonPrintCString(SSFCStrOut_t js, size_t size, size_t start, size_t *end
     {
         if (*in == '\\') SSFJsonEsc(js, '\\');
         else if (*in == '\"') SSFJsonEsc(js, '\"');
-        else if (*in == '/') SSFJsonEsc(js, '/');
         else if (*in == '\r') SSFJsonEsc(js, 'r');
         else if (*in == '\n') SSFJsonEsc(js, 'n');
         else if (*in == '\t') SSFJsonEsc(js, 't');

@@ -272,6 +272,7 @@ void SSFUBJsonUnitTest(void)
     SSF_ASSERT_TEST(SSFUBJsonGetHex((uint8_t *)"{}", 1, (SSFCStrIn_t *)path, jsOut, sizeof(jsOut), &outStrLen, false));
     path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH] = NULL;
     SSF_ASSERT_TEST(SSFUBJsonGetHex((uint8_t *)"{}", 1, (SSFCStrIn_t *)path, NULL, sizeof(jsOut), &outStrLen, false));
+    SSF_ASSERT_TEST(SSFUBJsonGetHex((uint8_t *)"{}", 1, (SSFCStrIn_t *)path, jsOut, sizeof(jsOut), NULL, false));
     SSF_ASSERT_TEST(SSFUBJsonGetBase64(NULL, 1, (SSFCStrIn_t *)path, jsOut, sizeof(jsOut), &outStrLen));
     SSF_ASSERT_TEST(SSFUBJsonGetBase64((uint8_t *)"{}", 1, NULL, jsOut, sizeof(jsOut), &outStrLen));
     path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH] = "bad";

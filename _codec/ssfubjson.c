@@ -535,6 +535,7 @@ bool SSFUBJsonGetHex(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, uint8_t *out,
     SSF_REQUIRE(path != NULL);
     SSF_REQUIRE(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH] == NULL);
     SSF_REQUIRE(out != NULL);
+    SSF_REQUIRE(outLen != NULL);
 
     if (!_SSFUBJsonObject(js, jsLen, &index, &start, &end, path, 0, &jt)) return false;
     if (jt != SSF_UBJSON_TYPE_STRING) return false;

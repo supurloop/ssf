@@ -104,8 +104,8 @@ bool SSFJsonGetHex(SSFCStrIn_t js, SSFCStrIn_t *path, uint8_t *out, size_t outSi
                    size_t *outLen, bool rev);
 bool SSFJsonGetBase64(SSFCStrIn_t js, SSFCStrIn_t *path, uint8_t *out, size_t outSize,
                       size_t *outLen);
-bool SSFJsonObject(SSFCStrIn_t js, size_t *index, size_t *start, size_t *end, SSFCStrIn_t *path,
-                   uint8_t depth, SSFJsonType_t *jt);
+bool SSFJsonMessage(SSFCStrIn_t js, size_t *index, size_t *start, size_t *end, SSFCStrIn_t *path,
+                    uint8_t depth, SSFJsonType_t *jt);
 
 /* Generator */
 bool SSFJsonPrintString(SSFCStrOut_t js, size_t size, size_t start, size_t *end, SSFCStrIn_t in,

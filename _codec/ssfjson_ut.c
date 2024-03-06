@@ -45,6 +45,13 @@ const char *_jtsIsValid[] =
     "{} ",
     "{ }",
     " { } ",
+    "[]",
+    " []",
+    "[] ",
+    "[ ]",
+    " [ ] ",
+    " [1 ] ",
+    " [1, \"str\", true, false, null, {}, [] ] ",
     "\n\r\t {\t\n\r }\r \t\n",
     "{\"\":1}",
     "\t{\r\"\"\n: 1\t}\r",
@@ -565,7 +572,7 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(SSFJsonGetHex(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen, false) == false);
         SSF_ASSERT(SSFJsonGetBase64(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen) == false);
         jtype = SSF_JSON_TYPE_MAX;
-        SSF_ASSERT(SSFJsonObject(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
+        SSF_ASSERT(SSFJsonMessage(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
         SSF_ASSERT(jtype == SSF_JSON_TYPE_TRUE);
         SSF_ASSERT(memcmp(&_jtsComplex[i][start], "true", (end - start + 1)) == 0);
 
@@ -581,7 +588,7 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(SSFJsonGetHex(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen, false) == false);
         SSF_ASSERT(SSFJsonGetBase64(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen) == false);
         jtype = SSF_JSON_TYPE_MAX;
-        SSF_ASSERT(SSFJsonObject(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
+        SSF_ASSERT(SSFJsonMessage(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
         SSF_ASSERT(jtype == SSF_JSON_TYPE_FALSE);
         SSF_ASSERT(memcmp(&_jtsComplex[i][start], "false", (end - start + 1)) == 0);
 
@@ -597,7 +604,7 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(SSFJsonGetHex(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen, false) == false);
         SSF_ASSERT(SSFJsonGetBase64(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen) == false);
         jtype = SSF_JSON_TYPE_MAX;
-        SSF_ASSERT(SSFJsonObject(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
+        SSF_ASSERT(SSFJsonMessage(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
         SSF_ASSERT(jtype == SSF_JSON_TYPE_NULL);
         SSF_ASSERT(memcmp(&_jtsComplex[i][start], "null", (end - start + 1)) == 0);
 
@@ -617,7 +624,7 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(SSFJsonGetHex(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen, false) == false);
         SSF_ASSERT(SSFJsonGetBase64(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen) == false);
         jtype = SSF_JSON_TYPE_MAX;
-        SSF_ASSERT(SSFJsonObject(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
+        SSF_ASSERT(SSFJsonMessage(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
         SSF_ASSERT(jtype == SSF_JSON_TYPE_NUMBER);
         SSF_ASSERT(memcmp(&_jtsComplex[i][start], "-1.2e+03", (end - start + 1)) == 0);
 
@@ -636,7 +643,7 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(SSFJsonGetHex(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen, false) == false);
         SSF_ASSERT(SSFJsonGetBase64(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen) == false);
         jtype = SSF_JSON_TYPE_MAX;
-        SSF_ASSERT(SSFJsonObject(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
+        SSF_ASSERT(SSFJsonMessage(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
         SSF_ASSERT(jtype == SSF_JSON_TYPE_STRING);
         SSF_ASSERT(memcmp(&_jtsComplex[i][start], "\"level0\"", (end - start + 1)) == 0);
 
@@ -652,7 +659,7 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(SSFJsonGetHex(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen, false) == false);
         SSF_ASSERT(SSFJsonGetBase64(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen) == false);
         jtype = SSF_JSON_TYPE_MAX;
-        SSF_ASSERT(SSFJsonObject(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
+        SSF_ASSERT(SSFJsonMessage(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
         SSF_ASSERT(jtype == SSF_JSON_TYPE_ARRAY);
         if (i == 0) SSF_ASSERT(memcmp(&_jtsComplex[i][start], "[]", (end - start + 1)) == 0);
 
@@ -668,7 +675,7 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(SSFJsonGetHex(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen, false) == false);
         SSF_ASSERT(SSFJsonGetBase64(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen) == false);
         jtype = SSF_JSON_TYPE_MAX;
-        SSF_ASSERT(SSFJsonObject(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
+        SSF_ASSERT(SSFJsonMessage(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
         SSF_ASSERT(jtype == SSF_JSON_TYPE_ARRAY);
         if (i == 0) SSF_ASSERT(memcmp(&_jtsComplex[i][start],
                                       "[true,false,null,1234567890,-98765432,\"\",\"YQ==\",[],{},[1,2,3],{\"hex1\":\"12\",\"hex2\":\"1234567890ABCDEFabcdef\"}]",
@@ -689,7 +696,7 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(SSFJsonGetHex(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen, false) == false);
         SSF_ASSERT(SSFJsonGetBase64(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen) == false);
         jtype = SSF_JSON_TYPE_MAX;
-        SSF_ASSERT(SSFJsonObject(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
+        SSF_ASSERT(SSFJsonMessage(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
         SSF_ASSERT(jtype == SSF_JSON_TYPE_TRUE);
         SSF_ASSERT(memcmp(&_jtsComplex[i][start], "true", (end - start + 1)) == 0);
 
@@ -705,7 +712,7 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(SSFJsonGetHex(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen, false) == false);
         SSF_ASSERT(SSFJsonGetBase64(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen) == false);
         jtype = SSF_JSON_TYPE_MAX;
-        SSF_ASSERT(SSFJsonObject(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
+        SSF_ASSERT(SSFJsonMessage(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
         SSF_ASSERT(jtype == SSF_JSON_TYPE_FALSE);
         SSF_ASSERT(memcmp(&_jtsComplex[i][start], "false", (end - start + 1)) == 0);
 
@@ -721,7 +728,7 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(SSFJsonGetHex(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen, false) == false);
         SSF_ASSERT(SSFJsonGetBase64(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen) == false);
         jtype = SSF_JSON_TYPE_MAX;
-        SSF_ASSERT(SSFJsonObject(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
+        SSF_ASSERT(SSFJsonMessage(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
         SSF_ASSERT(jtype == SSF_JSON_TYPE_NULL);
         SSF_ASSERT(memcmp(&_jtsComplex[i][start], "null", (end - start + 1)) == 0);
 
@@ -740,7 +747,7 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(SSFJsonGetHex(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen, false) == false);
         SSF_ASSERT(SSFJsonGetBase64(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen) == false);
         jtype = SSF_JSON_TYPE_MAX;
-        SSF_ASSERT(SSFJsonObject(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
+        SSF_ASSERT(SSFJsonMessage(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
         SSF_ASSERT(jtype == SSF_JSON_TYPE_NUMBER);
         SSF_ASSERT(memcmp(&_jtsComplex[i][start], "1234567890", (end - start + 1)) == 0);
 
@@ -758,7 +765,7 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(SSFJsonGetHex(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen, false) == false);
         SSF_ASSERT(SSFJsonGetBase64(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen) == false);
         jtype = SSF_JSON_TYPE_MAX;
-        SSF_ASSERT(SSFJsonObject(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
+        SSF_ASSERT(SSFJsonMessage(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
         SSF_ASSERT(jtype == SSF_JSON_TYPE_NUMBER);
         SSF_ASSERT(memcmp(&_jtsComplex[i][start], "-98765432", (end - start + 1)) == 0);
 
@@ -782,7 +789,7 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(SSFJsonGetBase64(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen) == true);
         SSF_ASSERT(binOutLen == 0);
         jtype = SSF_JSON_TYPE_MAX;
-        SSF_ASSERT(SSFJsonObject(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
+        SSF_ASSERT(SSFJsonMessage(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
         SSF_ASSERT(jtype == SSF_JSON_TYPE_STRING);
         SSF_ASSERT(memcmp(&_jtsComplex[i][start], "\"\"", (end - start + 1)) == 0);
 
@@ -803,7 +810,7 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(binOutLen == 1);
         SSF_ASSERT(binOut[0] == 'a');
         jtype = SSF_JSON_TYPE_MAX;
-        SSF_ASSERT(SSFJsonObject(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
+        SSF_ASSERT(SSFJsonMessage(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
         SSF_ASSERT(jtype == SSF_JSON_TYPE_STRING);
         SSF_ASSERT(memcmp(&_jtsComplex[i][start], "\"YQ==\"", (end - start + 1)) == 0);
 
@@ -819,7 +826,7 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(SSFJsonGetHex(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen, false) == false);
         SSF_ASSERT(SSFJsonGetBase64(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen) == false);
         jtype = SSF_JSON_TYPE_MAX;
-        SSF_ASSERT(SSFJsonObject(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
+        SSF_ASSERT(SSFJsonMessage(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
         SSF_ASSERT(jtype == SSF_JSON_TYPE_ARRAY);
         if (i == 0) SSF_ASSERT(memcmp(&_jtsComplex[i][start], "[]", (end - start + 1)) == 0);
 
@@ -835,7 +842,7 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(SSFJsonGetHex(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen, false) == false);
         SSF_ASSERT(SSFJsonGetBase64(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen) == false);
         jtype = SSF_JSON_TYPE_MAX;
-        SSF_ASSERT(SSFJsonObject(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
+        SSF_ASSERT(SSFJsonMessage(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
         SSF_ASSERT(jtype == SSF_JSON_TYPE_OBJECT);
         if (i == 0) SSF_ASSERT(memcmp(&_jtsComplex[i][start], "{}", (end - start + 1)) == 0);
 
@@ -851,7 +858,7 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(SSFJsonGetHex(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen, false) == false);
         SSF_ASSERT(SSFJsonGetBase64(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen) == false);
         jtype = SSF_JSON_TYPE_MAX;
-        SSF_ASSERT(SSFJsonObject(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
+        SSF_ASSERT(SSFJsonMessage(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
         SSF_ASSERT(jtype == SSF_JSON_TYPE_ARRAY);
         if (i == 0) SSF_ASSERT(memcmp(&_jtsComplex[i][start], "[1,2,3]", (end - start + 1)) == 0);
 
@@ -873,7 +880,7 @@ void SSFJsonUnitTest(void)
             SSF_ASSERT(SSFJsonGetHex(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen, false) == false);
             SSF_ASSERT(SSFJsonGetBase64(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen) == false);
             jtype = SSF_JSON_TYPE_MAX;
-            SSF_ASSERT(SSFJsonObject(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
+            SSF_ASSERT(SSFJsonMessage(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
             SSF_ASSERT(jtype == SSF_JSON_TYPE_NUMBER);
             SSF_ASSERT(memcmp(&_jtsComplex[i][start], anum1[aidx2], (end - start + 1)) == 0);
             aidx2++;
@@ -902,7 +909,7 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(memcmp(binOut, "\x12", 1) == 0);
         SSF_ASSERT(SSFJsonGetBase64(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen) == false);
         jtype = SSF_JSON_TYPE_MAX;
-        SSF_ASSERT(SSFJsonObject(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
+        SSF_ASSERT(SSFJsonMessage(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
         SSF_ASSERT(jtype == SSF_JSON_TYPE_STRING);
         SSF_ASSERT(memcmp(&_jtsComplex[i][start], "\"12\"", (end - start + 1)) == 0);
 
@@ -928,7 +935,7 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(memcmp(binOut, "\x12\x34\x56\x78\x90\xAB\xCD\xEF\xab\xcd\xef", 11) == 0);
         SSF_ASSERT(SSFJsonGetBase64(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen) == false);
         jtype = SSF_JSON_TYPE_MAX;
-        SSF_ASSERT(SSFJsonObject(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
+        SSF_ASSERT(SSFJsonMessage(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
         SSF_ASSERT(jtype == SSF_JSON_TYPE_STRING);
         SSF_ASSERT(memcmp(&_jtsComplex[i][start], "\"1234567890ABCDEFabcdef\"", (end - start + 1)) == 0);
 
@@ -945,7 +952,7 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(SSFJsonGetHex(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen, false) == false);
         SSF_ASSERT(SSFJsonGetBase64(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen) == false);
         jtype = SSF_JSON_TYPE_MAX;
-        SSF_ASSERT(SSFJsonObject(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
+        SSF_ASSERT(SSFJsonMessage(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
         SSF_ASSERT(jtype == SSF_JSON_TYPE_OBJECT);
         if (i == 0) SSF_ASSERT(memcmp(&_jtsComplex[i][start], "{}", (end - start + 1)) == 0);
 
@@ -961,7 +968,7 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(SSFJsonGetHex(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen, false) == false);
         SSF_ASSERT(SSFJsonGetBase64(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen) == false);
         jtype = SSF_JSON_TYPE_MAX;
-        SSF_ASSERT(SSFJsonObject(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
+        SSF_ASSERT(SSFJsonMessage(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
         SSF_ASSERT(jtype == SSF_JSON_TYPE_OBJECT);
         if (i == 0) SSF_ASSERT(memcmp(&_jtsComplex[i][start],
                                       "{\"b64_1\":\"YWI=\","
@@ -987,7 +994,7 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(binOutLen == 2);
         SSF_ASSERT(memcmp(binOut, "ab", binOutLen) == 0);
         jtype = SSF_JSON_TYPE_MAX;
-        SSF_ASSERT(SSFJsonObject(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
+        SSF_ASSERT(SSFJsonMessage(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
         SSF_ASSERT(jtype == SSF_JSON_TYPE_STRING);
         SSF_ASSERT(memcmp(&_jtsComplex[i][start], "\"YWI=\"", (end - start + 1)) == 0);
 
@@ -1008,7 +1015,7 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(binOutLen == 3);
         SSF_ASSERT(memcmp(binOut, "abc", binOutLen) == 0);
         jtype = SSF_JSON_TYPE_MAX;
-        SSF_ASSERT(SSFJsonObject(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
+        SSF_ASSERT(SSFJsonMessage(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
         SSF_ASSERT(jtype == SSF_JSON_TYPE_STRING);
         SSF_ASSERT(memcmp(&_jtsComplex[i][start], "\"YWJj\"", (end - start + 1)) == 0);
 
@@ -1029,7 +1036,7 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(binOutLen == 94);
         SSF_ASSERT(memcmp(binOut, "1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!@#$%^&*()`~-_+={}[]:;'\"<>,./?|\\", binOutLen) == 0);
         jtype = SSF_JSON_TYPE_MAX;
-        SSF_ASSERT(SSFJsonObject(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
+        SSF_ASSERT(SSFJsonMessage(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
         SSF_ASSERT(jtype == SSF_JSON_TYPE_STRING);
         SSF_ASSERT(memcmp(&_jtsComplex[i][start], "\"MTIzNDU2Nzg5MGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVohQCMkJV4mKigpYH4tXys9e31bXTo7JyI8PiwuLz98XA==\"", (end - start + 1)) == 0);
 
@@ -1045,7 +1052,7 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(SSFJsonGetHex(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen, false) == false);
         SSF_ASSERT(SSFJsonGetBase64(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen) == false);
         jtype = SSF_JSON_TYPE_MAX;
-        SSF_ASSERT(SSFJsonObject(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
+        SSF_ASSERT(SSFJsonMessage(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
         SSF_ASSERT(jtype == SSF_JSON_TYPE_TRUE);
         SSF_ASSERT(memcmp(&_jtsComplex[i][start], "true", (end - start + 1)) == 0);
 
@@ -1061,7 +1068,7 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(SSFJsonGetHex(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen, false) == false);
         SSF_ASSERT(SSFJsonGetBase64(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen) == false);
         jtype = SSF_JSON_TYPE_MAX;
-        SSF_ASSERT(SSFJsonObject(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
+        SSF_ASSERT(SSFJsonMessage(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
         SSF_ASSERT(jtype == SSF_JSON_TYPE_FALSE);
         SSF_ASSERT(memcmp(&_jtsComplex[i][start], "false", (end - start + 1)) == 0);
 
@@ -1077,7 +1084,7 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(SSFJsonGetHex(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen, false) == false);
         SSF_ASSERT(SSFJsonGetBase64(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen) == false);
         jtype = SSF_JSON_TYPE_MAX;
-        SSF_ASSERT(SSFJsonObject(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
+        SSF_ASSERT(SSFJsonMessage(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
         SSF_ASSERT(jtype == SSF_JSON_TYPE_NULL);
         SSF_ASSERT(memcmp(&_jtsComplex[i][start], "null", (end - start + 1)) == 0);
 
@@ -1093,7 +1100,7 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(SSFJsonGetHex(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen, false) == false);
         SSF_ASSERT(SSFJsonGetBase64(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen) == false);
         jtype = SSF_JSON_TYPE_MAX;
-        SSF_ASSERT(SSFJsonObject(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
+        SSF_ASSERT(SSFJsonMessage(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
         SSF_ASSERT(jtype == SSF_JSON_TYPE_ARRAY);
         if (i == 0) SSF_ASSERT(memcmp(&_jtsComplex[i][start], "[\"A\",\"Z\"]", (end - start + 1)) == 0);
 
@@ -1119,7 +1126,7 @@ void SSFJsonUnitTest(void)
             SSF_ASSERT(SSFJsonGetHex(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen, false) == false);
             SSF_ASSERT(SSFJsonGetBase64(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen) == false);
             jtype = SSF_JSON_TYPE_MAX;
-            SSF_ASSERT(SSFJsonObject(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
+            SSF_ASSERT(SSFJsonMessage(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
             SSF_ASSERT(jtype == SSF_JSON_TYPE_STRING);
             SSF_ASSERT(memcmp(&_jtsComplex[i][start], strsq[aidx1], (end - start + 1)) == 0);
             aidx1++;
@@ -1139,7 +1146,7 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(SSFJsonGetHex(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen, false) == false);
         SSF_ASSERT(SSFJsonGetBase64(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen) == false);
         jtype = SSF_JSON_TYPE_MAX;
-        SSF_ASSERT(SSFJsonObject(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
+        SSF_ASSERT(SSFJsonMessage(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
         SSF_ASSERT(jtype == SSF_JSON_TYPE_OBJECT);
         if (i == 0) SSF_ASSERT(memcmp(&_jtsComplex[i][start], "{\"hex3\":\"1029384756a1b2c3d4e5f6\",\"NUMFAR\":-42}", (end - start + 1)) == 0);
 
@@ -1164,7 +1171,7 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(memcmp(binOut, "\x10\x29\x38\x47\x56\xa1\xb2\xc3\xd4\xe5\xf6", 11) == 0);
         SSF_ASSERT(SSFJsonGetBase64(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen) == false);
         jtype = SSF_JSON_TYPE_MAX;
-        SSF_ASSERT(SSFJsonObject(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
+        SSF_ASSERT(SSFJsonMessage(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
         SSF_ASSERT(jtype == SSF_JSON_TYPE_STRING);
         SSF_ASSERT(memcmp(&_jtsComplex[i][start], "\"1029384756a1b2c3d4e5f6\"", (end - start + 1)) == 0);
 
@@ -1182,7 +1189,7 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(SSFJsonGetHex(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen, false) == false);
         SSF_ASSERT(SSFJsonGetBase64(_jtsComplex[i], (SSFCStrIn_t *)path, binOut, sizeof(binOut), &binOutLen) == false);
         jtype = SSF_JSON_TYPE_MAX;
-        SSF_ASSERT(SSFJsonObject(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
+        SSF_ASSERT(SSFJsonMessage(_jtsComplex[i], &index, &start, &end, (SSFCStrIn_t *)path, 0, &jtype) == true);
         SSF_ASSERT(jtype == SSF_JSON_TYPE_NUMBER);
         SSF_ASSERT(memcmp(&_jtsComplex[i][start], "-42", (end - start + 1)) == 0);
     }

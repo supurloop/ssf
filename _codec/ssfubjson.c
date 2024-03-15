@@ -117,7 +117,7 @@ static bool _SSFUBJsonArray(const uint8_t *js, size_t jsLen, size_t *index, size
         *index = 0;
     }
     if (depth >= SSF_UBJSON_CONFIG_MAX_IN_DEPTH) return false;
-    if (js[*index] != '[') return false;
+    if (js[*index] != UBJ_TYPE_ARRAY_OPEN) return false;
 
     *astart = *index;
     if ((path != NULL) && (path[depth] == NULL)) *start = *index;
@@ -154,17 +154,19 @@ static bool _SSFUBJsonArray(const uint8_t *js, size_t jsLen, size_t *index, size
 
     if ((path != NULL) && (path[depth] != NULL)) memcpy(&pindex, path[depth], sizeof(size_t));
 
-    if (((js[*index] == ']') && (len == (size_t)-1)) || ((len != (size_t)-1) && (len == 0))) goto valDone;
+    if (((js[*index] == UBJ_TYPE_ARRAY_CLOSE) && (len == (size_t)-1)) ||
+        ((len != (size_t)-1) && (len == 0))) goto valDone;
     while (_SSFUBJsonValue(js, jsLen, index, &valStart, &valEnd, path, depth, &djt, t))
     {
         if (pindex == curIndex) { *start = valStart; *end = valEnd; *jt = djt; }
         if (len != (size_t)-1) len--;
-        if (((js[*index] == ']') && (len == (size_t)-1)) || ((len != (size_t)-1) && (len == 0))) break;
+        if (((js[*index] == UBJ_TYPE_ARRAY_CLOSE) && (len == (size_t)-1)) ||
+            ((len != (size_t)-1) && (len == 0))) break;
         curIndex++;
     }
 valDone:
     if ((pindex != (size_t)-1) && (pindex > curIndex)) *jt = SSF_UBJSON_TYPE_ERROR;
-    if (js[*index] != ']' && (len == (size_t)-1)) return false;
+    if ((js[*index] != UBJ_TYPE_ARRAY_CLOSE) && (len == (size_t)-1)) return false;
     *aend = *index;
 
     if ((path != NULL) && (path[depth] == NULL))
@@ -419,24 +421,24 @@ bool _SSFUBJsonObject(const uint8_t *js, size_t jsLen, size_t *index, size_t *st
     }
     if (depth >= SSF_UBJSON_CONFIG_MAX_IN_DEPTH) return false;
 
-    if (js[*index] != '{') return false;
+    if (js[*index] != UBJ_TYPE_OBJ_OPEN) return false;
     if ((depth != 0) || ((depth == 0) && (path != NULL) && (path[0] == NULL))) *start = *index;
     (*index)++; if (*index >= jsLen) return false;
 
     while (js[*index] == UBJ_TYPE_NOOP)
     { (*index)++; if (*index >= jsLen) return false; }
 
-    if (js[*index] != '}')
+    if (js[*index] != UBJ_TYPE_OBJ_CLOSE)
     {
         if (!_SSFJsonNameValue(js, jsLen, index, start, end, path, depth, jt)) return false;
         do
         {
             while (js[*index] == UBJ_TYPE_NOOP)
             { (*index)++; if (*index >= jsLen) return false; }
-            if (js[*index] == '}') break;
+            if (js[*index] == UBJ_TYPE_OBJ_CLOSE) break;
             if (!_SSFJsonNameValue(js, jsLen, index, start, end, path, depth, jt)) return false;
         } while (true);
-        if (js[*index] != '}') return false;
+        if (js[*index] != UBJ_TYPE_OBJ_CLOSE) return false;
         (*index)++;
     }
     else { (*index)++; *end = *index; *jt = SSF_UBJSON_TYPE_OBJECT; }
@@ -911,11 +913,11 @@ bool SSFUBJsonPrintArrayOpt(uint8_t *js, size_t size, size_t start, size_t *end,
         SSF_ERROR();
     }
 
-    if (!SSFUBJsonPrintChar(js, size, start, &start, '[')) return false;
-    if (!SSFUBJsonPrintChar(js, size, start, &start, '$')) return false;
+    if (!SSFUBJsonPrintChar(js, size, start, &start, UBJ_TYPE_ARRAY_OPEN)) return false;
+    if (!SSFUBJsonPrintChar(js, size, start, &start, UBJ_TYPE_ARRAY_OPT)) return false;
     if (!SSFUBJsonPrintChar(js, size, start, &start, t)) return false;
-    if (!SSFUBJsonPrintChar(js, size, start, &start, '#')) return false;
-    if (!SSFUBJsonPrintChar(js, size, start, &start, 'U')) return false;
+    if (!SSFUBJsonPrintChar(js, size, start, &start, UBJ_TYPE_ARRAY_NUM)) return false;
+    if (!SSFUBJsonPrintChar(js, size, start, &start, UBJ_TYPE_UINT8)) return false;
     if (!SSFUBJsonPrintChar(js, size, start, &start, (char)alen)) return false;
     if ((fn != NULL) && (!fn(js, size, start, &start, in))) return false;
     *end = start;
@@ -941,7 +943,7 @@ static bool _SSFUBJsonPrintStringValue(uint8_t *js, size_t size, size_t start, s
 
     /* Always use uint8_t as type for string length */
     if (start >= size) return false;
-    js[start] = 'U'; start++; if (start >= size) return false;
+    js[start] = UBJ_TYPE_UINT8; start++; if (start >= size) return false;
     js[start] = (uint8_t)len; start++; if (start >= size) return false;
 
     while (start < size)
@@ -963,7 +965,7 @@ bool SSFUBJsonPrintString(uint8_t *js, size_t size, size_t start, size_t *end, S
     SSF_REQUIRE(end != NULL);
     SSF_REQUIRE(in != NULL);
 
-    if (!SSFUBJsonPrintChar(js, size, start, &start, 'S')) return false;
+    if (!SSFUBJsonPrintChar(js, size, start, &start, UBJ_TYPE_STRING)) return false;
     if (!_SSFUBJsonPrintStringValue(js, size, start, &start, in)) return false;
     *end = start;
     return true;
@@ -982,8 +984,8 @@ bool SSFUBJsonPrintHex(uint8_t *js, size_t size, size_t start, size_t *end, uint
     SSF_REQUIRE(in != NULL);
     SSF_REQUIRE(inLen <= 127);
 
-    if (!SSFUBJsonPrintChar(js, size, start, &start, 'S')) return false;
-    if (!SSFUBJsonPrintChar(js, size, start, &start, 'U')) return false;
+    if (!SSFUBJsonPrintChar(js, size, start, &start, UBJ_TYPE_STRING)) return false;
+    if (!SSFUBJsonPrintChar(js, size, start, &start, UBJ_TYPE_UINT8)) return false;
     if (!SSFUBJsonPrintChar(js, size, start, &start, (char)(inLen << 1))) return false;
     if (!SSFHexBinToBytes(in, inLen, (SSFCStrOut_t)&js[start], size - start, &outLen, rev,
                           SSF_HEX_CASE_UPPER)) return false;
@@ -1005,8 +1007,8 @@ bool SSFUBJsonPrintBase64(uint8_t *js, size_t size, size_t start, size_t *end, u
     SSF_REQUIRE(in != NULL);
     SSF_REQUIRE(inLen <= 189);
 
-    if (!SSFUBJsonPrintChar(js, size, start, &start, 'S')) return false;
-    if (!SSFUBJsonPrintChar(js, size, start, &start, 'U')) return false;
+    if (!SSFUBJsonPrintChar(js, size, start, &start, UBJ_TYPE_STRING)) return false;
+    if (!SSFUBJsonPrintChar(js, size, start, &start, UBJ_TYPE_UINT8)) return false;
     if (!SSFUBJsonPrintChar(js, size, start, &start, (char)(inLen << 1))) return false;
     lenIndex = start - 1;
     if (!SSFBase64Encode(in, inLen, (SSFCStrOut_t)&js[start], size - start, &outLen)) return false;

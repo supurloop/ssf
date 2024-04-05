@@ -152,6 +152,7 @@
     <ClCompile Include="_codec\ssfbase64_ut.c" />
     <ClCompile Include="_codec\ssfdec.c" />
     <ClCompile Include="_codec\ssfdec_ut.c" />
+    <ClCompile Include="_codec\ssfgobj.c" />
     <ClCompile Include="_codec\ssfhex.c" />
     <ClCompile Include="_codec\ssfhex_ut.c" />
     <ClCompile Include="_codec\ssfini.c" />
@@ -206,6 +207,7 @@
     <ClInclude Include="ssfversion.h" />
     <ClInclude Include="_codec\ssfbase64.h" />
     <ClInclude Include="_codec\ssfdec.h" />
+    <ClInclude Include="_codec\ssfgobj.h" />
     <ClInclude Include="_codec\ssfhex.h" />
     <ClInclude Include="_codec\ssfini.h" />
     <ClInclude Include="_codec\ssfjson.h" />

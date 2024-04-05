@@ -401,14 +401,13 @@ static void _SSFAESGCMGCTR(const uint8_t *in, size_t inLen, const uint8_t *key, 
 
     if ((in == NULL) || (out == NULL)) { return; }
 
-    SSF_ASSERT(in != NULL);
-    SSF_ASSERT(key != NULL);
-    SSF_ASSERT(icb != NULL);
-    SSF_ASSERT(out != NULL);
-
-    SSF_ASSERT((keyLen == 16) || (keyLen == 24) || (keyLen == 32));
-    SSF_ASSERT(icbLen == 16);
-    SSF_ASSERT(inLen <= outSize);
+    SSF_REQUIRE(in != NULL);
+    SSF_REQUIRE(key != NULL);
+    SSF_REQUIRE(icb != NULL);
+    SSF_REQUIRE(out != NULL);
+    SSF_REQUIRE((keyLen == 16) || (keyLen == 24) || (keyLen == 32));
+    SSF_REQUIRE(icbLen == 16);
+    SSF_REQUIRE(inLen <= outSize);
 
     memcpy(cb, icb, sizeof(cb));
     memcpy(out, in, outSize);
@@ -447,14 +446,13 @@ void SSFAESGCMEncrypt(const uint8_t *pt, size_t ptLen, const uint8_t *iv, size_t
 
     uint32_t t;
 
-    SSF_ASSERT(iv != NULL);
-    SSF_ASSERT(key != NULL);
-    SSF_ASSERT(tag != NULL);
-
-    SSF_ASSERT(ptLen <= ctSize);
-    SSF_ASSERT(ivLen > 0);
-    SSF_ASSERT((keyLen == 16) || (keyLen == 24) || (keyLen == 32));
-    SSF_ASSERT(((tagSize >= 12) && (tagSize <= 16)) || (tagSize == 8) || (tagSize == 4));
+    SSF_REQUIRE(iv != NULL);
+    SSF_REQUIRE(key != NULL);
+    SSF_REQUIRE(tag != NULL);
+    SSF_REQUIRE(ptLen <= ctSize);
+    SSF_REQUIRE(ivLen > 0);
+    SSF_REQUIRE((keyLen == 16) || (keyLen == 24) || (keyLen == 32));
+    SSF_REQUIRE(((tagSize >= 12) && (tagSize <= 16)) || (tagSize == 8) || (tagSize == 4));
 
     SSFAESXXXBlockEncrypt(h, sizeof(h), h, sizeof(h), key, keyLen);
 

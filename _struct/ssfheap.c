@@ -75,6 +75,7 @@
 #include "ssfport.h"
 #include "ssffcsum.h"
 #include "ssfheap.h"
+#include "ssf.h"
 
 /* --------------------------------------------------------------------------------------------- */
 /* Defines                                                                                       */
@@ -119,9 +120,6 @@ typedef struct
 #define SSF_HEAP_ALIGN_LEN(l) l = (uint32_t)((uint64_t)(l + (SSF_HEAP_ALIGNMENT_SIZE - 1)) & \
                                   SSF_HEAP_ALIGNMENT_MASK)
 #define SSF_HEAP_U8_CAST(p) ((uint8_t *)(p))
-/* Mod 255 where 0 <= a <= 510 */
-#define MOD255(a) ((((a) > 255) && ((a) != 510)) ? (uint8_t)(((a) >> 8) + ((a) & 0xff)) : \
-                                                   ((a) < 255) ? (uint8_t)(a) : (uint8_t)0)
 
 #define SSF_HEAP_SET_BLOCK(blk, blkLen, blkIsAlloced, blkMark, sprLen) \
     (blk)->len = blkLen; \

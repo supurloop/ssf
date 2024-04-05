@@ -133,7 +133,6 @@ static const uint8_t _gfInv[256] =
 
 #define GF_ADD(x, y) (((uint8_t) x) ^ ((uint8_t) y))
 #define GF_SUB(x, y) GF_ADD(x, y)
-#define MOD255(m) ((m) % 255)
 #if SSF_RS_ENABLE_GF_MUL_OPT == 1
 #define GF_MUL(x, y) ((x == 0) || (y == 0) ? 0 : _gfExp[_gfLog[x] + _gfLog[y]])
 #else

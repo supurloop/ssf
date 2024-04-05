@@ -34,10 +34,7 @@
 #include "ssfport.h"
 #include "ssfassert.h"
 #include "ssffcsum.h"
-
-/* Mod 255 where 0 <= a <= 510 */
-#define MOD255(a) ((((a) > 255) && ((a) != 510)) ? (uint8_t)(((a) >> 8) + ((a) & 0xff)) : \
-                                                   ((a) < 255) ? (uint8_t)(a) : (uint8_t)0)
+#include "ssf.h"
 
 /* --------------------------------------------------------------------------------------------- */
 /* Returns the 16-bit Fletcher checksum on inLen bytes of in starting with initial value.        */

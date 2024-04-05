@@ -46,6 +46,7 @@ extern "C" {
 #define SSF_MAX(x, y) (((x) > (y)) ? (x) : (y))
 #define SSF_MIN(x, y) (((x) < (y)) ? (x) : (y))
 #define SSFIsDigit(c) ((c) >= '0' && (c) <= '9')
+#define MOD255(m) ((m) % 255)
 
 typedef const char *SSFCStrIn_t;
 typedef char *SSFCStrOut_t;

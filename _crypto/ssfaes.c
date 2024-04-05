@@ -219,15 +219,12 @@ static void _SSFAESKeyExpansion(uint32_t *w, size_t wSize, const uint8_t *key, s
     uint32_t i, t;
     uint8_t rcon = 1;
 
-    SSF_ASSERT(w != NULL);
-    SSF_ASSERT(key != NULL);
-
-    SSF_ASSERT(wSize == ((((size_t) nr) + 1) << 2));
-    SSF_ASSERT(keyLen == (((size_t) nk) << 2));
-
-    SSF_ASSERT(((nr == 10) && (nk == 4)) ||
-               ((nr == 12) && (nk == 6)) ||
-               ((nr == 14) && (nk == 8)));
+    SSF_REQUIRE(w != NULL);
+    SSF_REQUIRE(key != NULL);
+    SSF_REQUIRE(wSize == ((((size_t) nr) + 1) << 2));
+    SSF_REQUIRE(keyLen == (((size_t) nk) << 2));
+    SSF_REQUIRE(((nr == 10) && (nk == 4)) || ((nr == 12) && (nk == 6)) ||
+                ((nr == 14) && (nk == 8)));
 
     for (i = 0; i < nk; i++)
     {
@@ -240,11 +237,12 @@ static void _SSFAESKeyExpansion(uint32_t *w, size_t wSize, const uint8_t *key, s
         t = w[i - 1];
         if ((i % nk) == 0)
         {
-            t = ((t >> 8) | ((t << (32 - 8)) & 0xffffffff));
+            t = ((t >> 8) | ((t << 24) & 0xffffffff));
             t = SBOX_WORD(t);
             t ^= rcon;
             rcon = FGFM2(rcon);
-        } else if ((nk > 6) && ((i % nk) == 4))
+        }
+        else if ((nk > 6) && ((i % nk) == 4))
         {
             t = SBOX_WORD(t);
         }
@@ -265,17 +263,14 @@ void SSFAESBlockEncrypt(const uint8_t *pt, size_t ptLen, uint8_t *ct, size_t ctS
 
     size_t wSize = (((size_t) nr) + 1) << 2;
 
-    SSF_ASSERT(pt != NULL);
-    SSF_ASSERT(ct != NULL);
-    SSF_ASSERT(key != NULL);
-
-    SSF_ASSERT(ptLen == SSF_AES_BLOCK_SIZE);
-    SSF_ASSERT(ctSize == SSF_AES_BLOCK_SIZE);
-    SSF_ASSERT(keyLen == (((size_t) nk) << 2));
-
-    SSF_ASSERT(((nr == 10) && (nk == 4)) ||
-               ((nr == 12) && (nk == 6)) ||
-               ((nr == 14) && (nk == 8)));
+    SSF_REQUIRE(pt != NULL);
+    SSF_REQUIRE(ct != NULL);
+    SSF_REQUIRE(key != NULL);
+    SSF_REQUIRE(ptLen == SSF_AES_BLOCK_SIZE);
+    SSF_REQUIRE(ctSize == SSF_AES_BLOCK_SIZE);
+    SSF_REQUIRE(keyLen == (((size_t) nk) << 2));
+    SSF_REQUIRE(((nr == 10) && (nk == 4)) || ((nr == 12) && (nk == 6)) ||
+                ((nr == 14) && (nk == 8)));
 
     ARRAY_TO_STATE(s, pt);
     _SSFAESKeyExpansion(w, wSize, key, keyLen, nr, nk);
@@ -309,17 +304,14 @@ void SSFAESBlockDecrypt(const uint8_t *ct, size_t ctLen, uint8_t *pt, size_t ptS
 
     size_t wSize = (((size_t) nr) + 1) << 2;
 
-    SSF_ASSERT(ct != NULL);
-    SSF_ASSERT(pt != NULL);
-    SSF_ASSERT(key != NULL);
-
-    SSF_ASSERT(ctLen == SSF_AES_BLOCK_SIZE);
-    SSF_ASSERT(ptSize == SSF_AES_BLOCK_SIZE);
-    SSF_ASSERT(keyLen == (((size_t) nk) << 2));
-
-    SSF_ASSERT(((nr == 10) && (nk == 4)) ||
-               ((nr == 12) && (nk == 6)) ||
-               ((nr == 14) && (nk == 8)));
+    SSF_REQUIRE(ct != NULL);
+    SSF_REQUIRE(pt != NULL);
+    SSF_REQUIRE(key != NULL);
+    SSF_REQUIRE(ctLen == SSF_AES_BLOCK_SIZE);
+    SSF_REQUIRE(ptSize == SSF_AES_BLOCK_SIZE);
+    SSF_REQUIRE(keyLen == (((size_t) nk) << 2));
+    SSF_REQUIRE(((nr == 10) && (nk == 4)) || ((nr == 12) && (nk == 6)) ||
+                ((nr == 14) && (nk == 8)));
 
     ARRAY_TO_STATE(s, ct);
     _SSFAESKeyExpansion(w, wSize, key, keyLen, nr, nk);

@@ -337,8 +337,6 @@ void SSFSMTran(SSFSMHandler_t next)
 void SSFSMStartTimerData(SSFSMEventId_t eid, SSFSMTimeout_t interval, const SSFSMData_t *data,
                          SSFSMDataLen_t dataLen)
 {
-    SSFLLItem_t *item;
-    SSFSMTimer_t t;
     SSFSMTimer_t *tp;
 
     SSF_REQUIRE((eid > SSF_SM_EVENT_EXIT) && (eid > SSF_SM_EVENT_MIN) && (eid < SSF_SM_EVENT_MAX));
@@ -346,27 +344,17 @@ void SSFSMStartTimerData(SSFSMEventId_t eid, SSFSMTimeout_t interval, const SSFS
     SSF_ASSERT((_ssfsmActive > SSF_SM_MIN) && (_ssfsmActive < SSF_SM_MAX));
     SSF_ASSERT(_ssfsmIsInited);
 
-    /* Does timer already exist? */
-    item = _SSFSMFindTimer(eid);
-    if (item != NULL)
-    {
-        /* Yes, update it with new timer request. */
-        memcpy(&t, item, sizeof(t));
-        t.to = interval + SSFPortGetTick64();
-        if ((t.event->data) && (t.event->dataLen > sizeof(SSFSMData_t *)))
-        {_SSFSMFreeEventData(t.event->data); }
-        _SSFSMAllocEventData(t.event, data, dataLen);
-    } else
-    {
-        /* No, create new timer. */
-        tp = (SSFSMTimer_t *)SSFMPoolAlloc(&_ssfsmTimerPool, sizeof(SSFSMTimer_t), 0x22);
-        tp->event = (SSFSMEvent_t *)SSFMPoolAlloc(&_ssfsmEventPool, sizeof(SSFSMEvent_t), 0x33);
-        tp->to = interval + SSFPortGetTick64();
-        tp->event->smid = _ssfsmActive;
-        tp->event->eid = eid;
-        _SSFSMAllocEventData(tp->event, data, dataLen);
-        SSF_LL_FIFO_PUSH(&_ssfsmTimers, tp);
-    }
+    /* Stop duplicate timer if it already exists */
+    SSFSMStopTimer(eid);
+
+    /* Create new timer. */
+    tp = (SSFSMTimer_t *)SSFMPoolAlloc(&_ssfsmTimerPool, sizeof(SSFSMTimer_t), 0x22);
+    tp->event = (SSFSMEvent_t *)SSFMPoolAlloc(&_ssfsmEventPool, sizeof(SSFSMEvent_t), 0x33);
+    tp->to = interval + SSFPortGetTick64();
+    tp->event->smid = _ssfsmActive;
+    tp->event->eid = eid;
+    _SSFSMAllocEventData(tp->event, data, dataLen);
+    SSF_LL_FIFO_PUSH(&_ssfsmTimers, tp);
 }
 
 /* --------------------------------------------------------------------------------------------- */

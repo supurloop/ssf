@@ -50,6 +50,7 @@ extern "C" {
 
 typedef const char *SSFCStrIn_t;
 typedef char *SSFCStrOut_t;
+typedef void (*SSFVoidFn_t)(void); /* Generic function pointer type */
 
 /* Use to suppress unused parameter warnings */
 #define SSF_UNUSED(x) ssfUnused = (void *)x

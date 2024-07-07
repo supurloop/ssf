@@ -52,6 +52,8 @@
     _ssfsmFlags[sm][sh][ev] = false;
 
 static bool _ssfsmFlags[SSFSM_UT_NUM_SMS][SSFSM_UT_NUM_HANDLERS][SSFSM_UT_NUM_EVENTS];
+static uint8_t _utTrace[255];
+static uint16_t _utTraceIndex;
 
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if all flags are cleared, else false.                                            */
@@ -76,18 +78,31 @@ static bool _SSFSMFlagsAreCleared(void)
 }
 
 /* State handler prototypes */
-void UT1TestHandler1(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen);
-void UT1TestHandler2(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen);
-void UT2TestHandler1(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen);
-void UT2TestHandler2(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen);
+void UT1TestHandler1(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen,
+                     SSFVoidFn_t *superHandler);
+void UT1TestHandler2(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen,
+                     SSFVoidFn_t *superHandler);
+void UT2TestHandler1(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen,
+                     SSFVoidFn_t *superHandler);
+void UT2TestHandler2(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen,
+                     SSFVoidFn_t *superHandler);
+void UT3TestHandler1(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen,
+                     SSFVoidFn_t *superHandler);
+void UT3TestHandler2(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen,
+                     SSFVoidFn_t *superHandler);
+void UT3TestHandler3(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen,
+                     SSFVoidFn_t *superHandler);
 
 /* --------------------------------------------------------------------------------------------- */
 /* State machine 1 test handler 1.                                                               */
 /* --------------------------------------------------------------------------------------------- */
-void UT1TestHandler1(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen)
+void UT1TestHandler1(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen,
+                     SSFVoidFn_t *superHandler)
 {
     SSF_ASSERT(_ssfsmFlags[SSF_SM_UNIT_TEST_1][0][eid] == false);
+    SSF_UNUSED(superHandler);
     _ssfsmFlags[SSF_SM_UNIT_TEST_1][0][eid] = true;
+    if (eid == SSF_SM_EVENT_SUPER) { SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_1, 0, SSF_SM_EVENT_SUPER); }
 
     switch (eid)
     {
@@ -137,10 +152,13 @@ void UT1TestHandler1(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t
 /* --------------------------------------------------------------------------------------------- */
 /* State machine 1 test handler 2.                                                               */
 /* --------------------------------------------------------------------------------------------- */
-void UT1TestHandler2(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen)
+void UT1TestHandler2(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen,
+                     SSFVoidFn_t *superHandler)
 {
     SSF_ASSERT(_ssfsmFlags[SSF_SM_UNIT_TEST_1][1][eid] == false);
+    SSF_UNUSED(superHandler);
     _ssfsmFlags[SSF_SM_UNIT_TEST_1][1][eid] = true;
+    if (eid == SSF_SM_EVENT_SUPER) { SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_1, 1, SSF_SM_EVENT_SUPER); }
 
     switch (eid)
     {
@@ -172,10 +190,13 @@ void UT1TestHandler2(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t
 /* --------------------------------------------------------------------------------------------- */
 /* State machine 2 test handler 1.                                                               */
 /* --------------------------------------------------------------------------------------------- */
-void UT2TestHandler1(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen)
+void UT2TestHandler1(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen,
+                     SSFVoidFn_t *superHandler)
 {
     SSF_ASSERT(_ssfsmFlags[SSF_SM_UNIT_TEST_2][0][eid] == false);
+    SSF_UNUSED(superHandler);
     _ssfsmFlags[SSF_SM_UNIT_TEST_2][0][eid] = true;
+    if (eid == SSF_SM_EVENT_SUPER) { SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_2, 0, SSF_SM_EVENT_SUPER); }
 
     switch (eid)
     {
@@ -233,10 +254,13 @@ void UT2TestHandler1(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t
 /* --------------------------------------------------------------------------------------------- */
 /* State machine 2 test handler 2.                                                               */
 /* --------------------------------------------------------------------------------------------- */
-void UT2TestHandler2(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen)
+void UT2TestHandler2(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen,
+                     SSFVoidFn_t *superHandler)
 {
     SSF_ASSERT(_ssfsmFlags[SSF_SM_UNIT_TEST_2][1][eid] == false);
+    SSF_UNUSED(superHandler);
     _ssfsmFlags[SSF_SM_UNIT_TEST_2][1][eid] = true;
+    if (eid == SSF_SM_EVENT_SUPER) { SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_2, 1, SSF_SM_EVENT_SUPER); }
 
     switch (eid)
     {
@@ -262,6 +286,156 @@ void UT2TestHandler2(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t
     case SSF_SM_EVENT_UTX_2:
         break;
     default:
+        break;
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* State machine 3 test handler 1 super.                                                         */
+/* --------------------------------------------------------------------------------------------- */
+void UT3TestHandler1Super(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen,
+                          SSFVoidFn_t *superHandler)
+{
+    SSF_UNUSED(data);
+    SSF_UNUSED(&dataLen);
+    SSF_UNUSED(superHandler);
+
+    switch (eid)
+    {
+    case SSF_SM_EVENT_ENTRY:
+        SSF_ASSERT(_utTraceIndex < sizeof(_utTrace));
+        _utTrace[_utTraceIndex] = 2;
+        _utTraceIndex++;
+        break;
+    case SSF_SM_EVENT_EXIT:
+        SSF_ASSERT(_utTraceIndex < sizeof(_utTrace));
+        _utTrace[_utTraceIndex] = 4;
+        _utTraceIndex++;
+        break;
+    case SSF_SM_EVENT_UNIT_TEST_2:
+        SSFSMTran(UT3TestHandler1);
+        break;
+    default:
+        break;
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* State machine 3 test handler 1.                                                               */
+/* --------------------------------------------------------------------------------------------- */
+void UT3TestHandler1(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen,
+                     SSFVoidFn_t *superHandler)
+{
+    SSF_UNUSED(data);
+    SSF_UNUSED(&dataLen);
+    SSF_UNUSED(superHandler);
+
+    switch (eid)
+    {
+    case SSF_SM_EVENT_ENTRY:
+        SSF_ASSERT(_utTraceIndex < sizeof(_utTrace));
+        _utTrace[_utTraceIndex] = 1;
+        _utTraceIndex++;
+        break;
+    case SSF_SM_EVENT_EXIT:
+        SSF_ASSERT(_utTraceIndex < sizeof(_utTrace));
+        _utTrace[_utTraceIndex] = 3;
+        _utTraceIndex++;
+        break;
+    case SSF_SM_EVENT_UNIT_TEST_1:
+        SSFSMTran(UT3TestHandler3);
+        break;
+    case SSF_SM_EVENT_UNIT_TEST_2:
+        SSFSMTran(UT3TestHandler1Super);
+        break;
+    default:
+        SSF_SM_SUPER(UT3TestHandler1Super);
+        break;
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* State machine 3 test handler 3.                                                               */
+/* --------------------------------------------------------------------------------------------- */
+void UT3TestHandler3(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen,
+                     SSFVoidFn_t *superHandler)
+{
+    SSF_UNUSED(data);
+    SSF_UNUSED(&dataLen);
+    SSF_UNUSED(superHandler);
+
+    switch (eid)
+    {
+    case SSF_SM_EVENT_ENTRY:
+        SSF_ASSERT(_utTraceIndex < sizeof(_utTrace));
+        _utTrace[_utTraceIndex] = 5;
+        _utTraceIndex++;
+        break;
+    case SSF_SM_EVENT_EXIT:
+        SSF_ASSERT(_utTraceIndex < sizeof(_utTrace));
+        _utTrace[_utTraceIndex] = 6;
+        _utTraceIndex++;
+        break;
+    case SSF_SM_EVENT_UNIT_TEST_1:
+        SSFSMTran(UT3TestHandler1);
+        break;
+    default:
+        break;
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* State machine 3 test handler 2 super.                                                         */
+/* --------------------------------------------------------------------------------------------- */
+void UT3TestHandler2Super(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen,
+                          SSFVoidFn_t *superHandler)
+{
+    SSF_UNUSED(data);
+    SSF_UNUSED(&dataLen);
+    SSF_UNUSED(superHandler);
+
+    switch (eid)
+    {
+    case SSF_SM_EVENT_ENTRY:
+        SSF_ASSERT(_utTraceIndex < sizeof(_utTrace));
+        _utTrace[_utTraceIndex] = 2;
+        _utTraceIndex++;
+        break;
+    case SSF_SM_EVENT_EXIT:
+        SSF_ASSERT(_utTraceIndex < sizeof(_utTrace));
+        _utTrace[_utTraceIndex] = 4;
+        _utTraceIndex++;
+        break;
+    default:
+        SSF_SM_SUPER(UT3TestHandler1);
+        break;
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* State machine 3 test handler 2.                                                               */
+/* --------------------------------------------------------------------------------------------- */
+void UT3TestHandler2(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen,
+                     SSFVoidFn_t *superHandler)
+{
+    SSF_UNUSED(data);
+    SSF_UNUSED(&dataLen);
+    SSF_UNUSED(superHandler);
+
+    switch (eid)
+    {
+    case SSF_SM_EVENT_ENTRY:
+        SSF_ASSERT(_utTraceIndex < sizeof(_utTrace));
+        _utTrace[_utTraceIndex] = 1;
+        _utTraceIndex++;
+        break;
+    case SSF_SM_EVENT_EXIT:
+        SSF_ASSERT(_utTraceIndex < sizeof(_utTrace));
+        _utTrace[_utTraceIndex] = 3;
+        _utTraceIndex++;
+        break;
+    default:
+        SSF_SM_SUPER(UT3TestHandler2Super);
         break;
     }
 }
@@ -552,6 +726,49 @@ void SSFSMUnitTest(void)
     SSF_ASSERT_TEST(SSFSMDeInit());
     SSFSMInit(SSFSM_UT_MAX_EVENTS, SSFSM_UT_MAX_TIMERS);
     SSF_ASSERT_TEST(SSFSMInit(SSFSM_UT_MAX_EVENTS, SSFSM_UT_MAX_TIMERS));
+    SSFSMDeInit();
+    SSF_ASSERT_TEST(SSFSMDeInit());
+
+    /* Test SSFSMDeInitHandler() assertions */
+    SSFSMInit(SSFSM_UT_MAX_EVENTS, SSFSM_UT_MAX_TIMERS);
+    SSF_ASSERT_TEST(SSFSMDeInitHandler(SSF_SM_MIN));
+    SSF_ASSERT_TEST(SSFSMDeInitHandler(SSF_SM_MAX));
+    SSF_ASSERT_TEST(SSFSMDeInitHandler(SSF_SM_UNIT_TEST_3));
+    SSFSMDeInit();
+    SSF_ASSERT_TEST(SSFSMDeInitHandler(SSF_SM_UNIT_TEST_3));
+
+    /* Test nested states */
+    SSFSMInit(SSFSM_UT_MAX_EVENTS, SSFSM_UT_MAX_TIMERS);
+
+    /* Verify that super cannot have a super */
+    SSF_ASSERT_TEST(SSFSMInitHandler(SSF_SM_UNIT_TEST_3, UT3TestHandler2));
+
+    /* Verify that super entry called for nested initial state */
+    _utTraceIndex = 0;
+    memset(_utTrace, 0, sizeof(_utTrace));
+    SSFSMInitHandler(SSF_SM_UNIT_TEST_3, UT3TestHandler1);
+    SSF_ASSERT_TEST(SSFSMInitHandler(SSF_SM_UNIT_TEST_3, UT3TestHandler1));
+    SSF_ASSERT(_utTraceIndex == 2);
+    SSF_ASSERT(_utTrace[0] == 2);
+    SSF_ASSERT(_utTrace[1] == 1);
+
+    /* Verify that super exit called for nested state */
+    _utTraceIndex = 0;
+    memset(_utTrace, 0, sizeof(_utTrace));
+    SSFSMDeInitHandler(SSF_SM_UNIT_TEST_3);
+    SSF_ASSERT(_utTraceIndex == 2);
+    SSF_ASSERT(_utTrace[0] == 3);
+    SSF_ASSERT(_utTrace[1] == 4);
+
+    /* Verify that super entry called for nested initial state */
+    _utTraceIndex = 0;
+    memset(_utTrace, 0, sizeof(_utTrace));
+    SSFSMInitHandler(SSF_SM_UNIT_TEST_3, UT3TestHandler1);
+    SSF_ASSERT(_utTraceIndex == 2);
+    SSF_ASSERT(_utTrace[0] == 2);
+    SSF_ASSERT(_utTrace[1] == 1);
+
+    /* End test */
     SSFSMDeInit();
     SSF_ASSERT_TEST(SSFSMDeInit());
 }

@@ -179,8 +179,11 @@ extern pthread_mutex_t gssfsmWakeMutex;
 typedef enum
 {
     SSF_SM_MIN = -1,
+#if SSF_CONFIG_SM_UNIT_TEST == 1
     SSF_SM_UNIT_TEST_1,
     SSF_SM_UNIT_TEST_2,
+    SSF_SM_UNIT_TEST_3,
+#endif /* SSF_CONFIG_SM_UNIT_TEST */
     SSF_SM_MAX
 } SSFSMList_t;
 
@@ -188,8 +191,15 @@ typedef enum
 typedef enum
 {
     SSF_SM_EVENT_MIN = -1,
-    SSF_SM_EVENT_ENTRY,
-    SSF_SM_EVENT_EXIT,
+    /* Required SSF events */
+    SSF_SM_EVENT_ENTRY,  /* Signalled on entry to state handler */
+    SSF_SM_EVENT_EXIT,   /* Signalled on exit of state handler */
+    SSF_SM_EVENT_SUPER,  /* Signalled to determine parent of current state handler */
+                         /* Usually handled in default case with SSF_SM_SUPER() */
+                         /* macro. If no parent then SSF_SM_SUPER() is not */
+                         /* required or must be called with NULL */
+                         /* Super states may not have a parent super state */
+    /* User defined events */
 #if SSF_CONFIG_SM_UNIT_TEST == 1
     SSF_SM_EVENT_UT1_1,
     SSF_SM_EVENT_UT1_2,
@@ -197,6 +207,8 @@ typedef enum
     SSF_SM_EVENT_UT2_2,
     SSF_SM_EVENT_UTX_1,
     SSF_SM_EVENT_UTX_2,
+    SSF_SM_EVENT_UNIT_TEST_1,
+    SSF_SM_EVENT_UNIT_TEST_2,
 #endif /* SSF_CONFIG_SM_UNIT_TEST */
     SSF_SM_EVENT_MAX
 } SSFSMEventList_t;

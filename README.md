@@ -487,12 +487,19 @@ typedef enum
     SSF_SM_MAX
 } SSFSMList_t;
 
-/* Defines the event identifiers for all state machines. */
 typedef enum
 {
-    SSF_SM_EVENT_MIN = -1;
-    SSF_SM_EVENT_ENTRY,
-    SSF_SM_EVENT_EXIT,
+    /* Defines the event identifiers for all state machines. */
+    SSF_SM_EVENT_MIN = -1,
+    /* Required SSF events */
+    SSF_SM_EVENT_ENTRY,  /* Signalled on entry to state handler */
+    SSF_SM_EVENT_EXIT,   /* Signalled on exit of state handler */
+    SSF_SM_EVENT_SUPER,  /* Signalled to determine parent of current state handler */
+                         /* Usually handled in default case with SSF_SM_SUPER() */
+                         /* macro. If no parent then SSF_SM_SUPER() is not */
+                         /* required or must be called with NULL */
+                         /* Super states may not have a parent super state */
+    /* User defined events */
     SSF_SM_EVENT_STATUS_RX_DATA,
     SSF_SM_EVENT_STATUS_LED_TIMER_TOGGLE,
     SSF_SM_EVENT_STATUS_LED_TIMER_IDLE,
@@ -503,10 +510,13 @@ typedef enum
 ...
 
 /* State handler prototypes */
-static void StatusLEDIdleHandler(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen);
-static void StatusLEDBlinkHandler(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen);
+static void StatusLEDIdleHandler(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen,
+                                 SSFVoidFn_t *superHandler);
+static void StatusLEDBlinkHandler(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen,
+                                  SSFVoidFn_t *superHandler);
 
-static void StatusLEDIdleHandler(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen)
+static void StatusLEDIdleHandler(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen,
+                                 SSFVoidFn_t *superHandler)
 {
     switch (eid)
     {
@@ -523,7 +533,9 @@ static void StatusLEDIdleHandler(SSFSMEventId_t eid, const SSFSMData_t *data, SS
     }
 }
 
-static void StatusLEDBlinkHandler(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen)
+static void StatusLEDBlinkHandler(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen,
+                                  SSFVoidFn_t *superHandler)
+
 {
     switch (eid)
     {
@@ -547,7 +559,7 @@ static void StatusLEDBlinkHandler(SSFSMEventId_t eid, const SSFSMData_t *data, S
 
 void main(void)
 {
-...
+
     /* Initialize state machine framework */
     SSFSMInit(SSF_SM_MAX_ACTIVE_EVENTS, SSF_SM_MAX_ACTIVE_TIMERS);
 
@@ -626,6 +638,60 @@ void OSThreadEventGenerator(void *arg)
     }
 }
 ```
+The state machine framework also support 1-level of hierarchical state nesting. To designate a state to have a parent state simply use the SSF_SM_SUPER() macro in the default case of a state handler's event switch statement. The framework is able to automatically determine the state relationships by probing the default case statment. Parent and child state handlers are functionally identical except that a parent state handler cannot use the SSF_SM_SUPER() macro to name another state handler as its parent. When the child is the current state and does not handle an event, the event will be sent to the parent handler for processing. Both parent and child states can be the current state. When multiple children have the same parent they can can share the same core behaviors, and focus on just handling events which are different from the shared parent. This helps to reduce redundancy between state handlers.
+
+```
+static void ChildHandler(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen,
+                         SSFVoidFn_t *superHandler);
+static void ParentHandler(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen,
+                          SSFVoidFn_t *superHandler);
+
+static void ChildHandler(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen,
+                         SSFVoidFn_t *superHandler)
+{
+    switch (eid)
+    {
+    case SSF_SM_EVENT_ENTRY:
+        STATUS_LED_OFF();
+        break;
+    case SSF_SM_EVENT_EXIT:
+        break;
+    case SSF_SM_EVENT_CHILD:
+        /* Do something specific to the child state */
+        break;
+    default:
+        SSF_SM_SUPER(ParentHandler);
+        break;
+    }
+}
+
+static void ParentHandler(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen,
+                          SSFVoidFn_t *superHandler)
+{
+    switch (eid)
+    {
+    case SSF_SM_EVENT_ENTRY:
+        break;
+    case SSF_SM_EVENT_EXIT:
+        break;
+    case SSF_SM_EVENT_PARENT:
+        /* Do something specific to the parent state */
+        break;
+    default:
+        break;
+    }
+}
+
+...
+
+/* Initialize state machine framework */
+SSFSMInit(SSF_SM_MAX_ACTIVE_EVENTS, SSF_SM_MAX_ACTIVE_TIMERS);
+
+/* Initialize status LED state machine */
+SSFSMInitHandler(SSF_SM_CHILD_PARENT, ChildHandler);
+
+```
+If the initial state is ChildHandler() then the ParentHandler() SSF_SM_EVENT_ENTRY clause followed by the ChildHandler() SSF_SM_EVENT_ENTRY clause will be run during initialization. If SSF_SM_EVENT_CHILD occurs then the ChildHandler() will handle the event and the ParentHandler() will not run. However if SSF_SM_EVENT_PARENT occurs, ChildHandler() will be called and execute the default clause, which redirects the event to be processed by ParentHandler(). The framework handles all state transition permutations and will properly exit and enter child and parent states as necessary.
 
 ### Reed-Solomon FEC Encoder/Decoder Interface
 

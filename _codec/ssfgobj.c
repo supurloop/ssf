@@ -2,7 +2,7 @@
 /* Small System Framework                                                                        */
 /*                                                                                               */
 /* ssfgobj.c                                                                                     */
-/* Provides Generic Object interface.                                                            */
+/* Provides flexible API to r/w/modify structured data & conversion from & to other codecs.      */
 /*                                                                                               */
 /* BSD-3-Clause License                                                                          */
 /* Copyright 2024 Supurloop Software LLC                                                         */

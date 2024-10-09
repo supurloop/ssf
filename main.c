@@ -69,6 +69,10 @@ typedef struct
 
 SSFUnitTest_t unitTests[] =
 {
+#if SSF_CONFIG_GOBJ_UNIT_TEST == 1
+    { "ssfgobj", "Generic Object Codec", SSFGObjUnitTest },
+#endif /* SSF_CONFIG_UBJSON_UNIT_TEST */
+
 #if SSF_CONFIG_UBJSON_UNIT_TEST == 1
     { "ssfubjson", "Universal Binary JSON Codec", SSFUBJsonUnitTest },
 #endif /* SSF_CONFIG_UBJSON_UNIT_TEST */
@@ -170,53 +174,6 @@ SSFUnitTest_t unitTests[] =
 #endif /* SSF_CONFIG_ISO8601_UNIT_TEST */
 };
 
-uint32_t j = 0x80818283;
-int64_t k;
-
-void iterateCallback(SSFGObj_t *gobj, SSFLL_t *path, uint8_t depth)
-{
-    char label[128];
-    SSFObjType_t dataType;
-    uint32_t i;
-
-    k = j;
-    k = (int32_t)j;
-
-    SSF_REQUIRE(gobj != NULL);
-
-    dataType = SSFGObjGetType(gobj);
-
-    SSFGObjPathToString(path);
-    printf(" : ");
-    switch (gobj->dataType)
-    {
-    case SSF_OBJ_TYPE_NUMBER_UINT64:
-    {
-        uint64_t u64;
-        SSFGObjGetUInt(gobj, &u64);
-        printf("%llud 0x%08llX", u64, u64);
-    }
-    break;
-    default:
-        break;
-    }
-    printf("\r\n");
-#if 0
-    for (i = 0; i < depth; i++)
-    {
-        printf("    ");
-    }
-    if (SSFGObjGetLabel(gobj, label, sizeof(label)))
-    {
-        printf("%s:%d\r\n", label, dataType);
-    }
-    else
-    {
-        printf("NO LABEL:%d\r\n", dataType);
-    }
-#endif
-}
-
 /* --------------------------------------------------------------------------------------------- */
 /* SSF unit test entry point.                                                                    */
 /* --------------------------------------------------------------------------------------------- */
@@ -224,95 +181,6 @@ int main(void)
 {
     size_t i;
     SSFPortTick_t start;
-    SSFGObj_t *gobj = NULL;
-    SSFGObj_t* gobjPeer = NULL;
-    SSFGObj_t* gobjPeer2 = NULL;
-    SSFGObj_t* gobjChild = NULL;
-    SSFGObj_t* gobjChild2 = NULL;
-    uint64_t valueOut;
-    int64_t i64;
-    double d64;
-    char str[2000];
-    size_t length;
-    bool comma = false;
-
-    SSF_ASSERT(SSFGObjInit(&gobj, 10, 10));
-    SSF_ASSERT(SSFGObjSetLabel(gobj, "label"));
-    SSF_ASSERT(SSFGObjSetString(gobj, "value"));
-
-    length = 0;
-    comma = false;
-    SSF_ASSERT(SSFGObjToJson(str, sizeof(str), length, &length, gobj, &comma));
-
-
-    SSF_ASSERT(SSFGObjSetUInt(gobj, 0x11223344));
-    SSF_ASSERT(SSFGObjGetUInt(gobj, &valueOut));
-
-    length = 0;
-    comma = false;
-    SSF_ASSERT(SSFGObjToJson(str, sizeof(str), length, &length, gobj, &comma));
-
-
-    SSF_ASSERT(SSFGObjInit(&gobjPeer, 10, 10));
-
-    SSF_ASSERT(SSFGObjInsertPeer(gobj, gobjPeer));
-
-    SSF_ASSERT(SSFGObjSetObject(gobjPeer));
-
-    SSF_ASSERT(SSFGObjInit(&gobjChild, 1, 1));
-    SSF_ASSERT(SSFGObjSetLabel(gobjChild, "childlabel"));
-    SSF_ASSERT(SSFGObjSetUInt(gobjChild, 12345));
-
-    SSF_ASSERT(SSFGObjInit(&gobjChild2, 1, 1));
-    SSF_ASSERT(SSFGObjSetLabel(gobjChild2, "childlabel2"));
-    SSF_ASSERT(SSFGObjSetUInt(gobjChild2, 67890));
-
-    SSF_ASSERT(SSFGObjInsertChild(gobjPeer, gobjChild));
-    SSF_ASSERT(SSFGObjInsertChild(gobjPeer, gobjChild2));
-
-    length = 0;
-    comma = false;
-    SSF_ASSERT(SSFGObjToJson(str, sizeof(str), length, &length, gobjChild, &comma));
-
-    length = 0;
-    comma = false;
-    SSF_ASSERT(SSFGObjToJson(str, sizeof(str), length, &length, gobjPeer, &comma));
-
-    length = 0;
-    comma = false;
-    SSF_ASSERT(SSFGObjToJson(str, sizeof(str), length, &length, gobj, &comma));
-
-    SSF_ASSERT(SSFGObjInit(&gobjPeer2, 1, 1));
-    SSF_ASSERT(SSFGObjSetLabel(gobjPeer2, "peerlabel2"));
-    SSF_ASSERT(SSFGObjSetInt(gobjPeer2, -11223344));
-    SSF_ASSERT(SSFGObjGetInt(gobjPeer2, &i64));
-    SSF_ASSERT(SSFGObjInsertPeer(gobjPeer, gobjPeer2));
-    gobjPeer2 = NULL;
-    SSF_ASSERT(SSFGObjInit(&gobjPeer2, 1, 1));
-    SSF_ASSERT(SSFGObjSetLabel(gobjPeer2, "peerlabeldouble2"));
-    SSF_ASSERT(SSFGObjSetDouble(gobjPeer2, -1.0987));
-    SSF_ASSERT(SSFGObjGetDouble(gobjPeer2, &d64));
-    SSF_ASSERT(SSFGObjInsertPeer(gobjPeer, gobjPeer2));
-    gobjPeer2 = NULL;
-    SSF_ASSERT(SSFGObjInit(&gobjPeer2, 1, 10));
-    SSF_ASSERT(SSFGObjSetLabel(gobjPeer2, "peerarray2"));
-    SSF_ASSERT(SSFGObjSetArray(gobjPeer2));
-    SSF_ASSERT(SSFGObjInsertPeer(gobjPeer, gobjPeer2));
-    gobjChild = NULL;
-    SSF_ASSERT(SSFGObjInit(&gobjChild, 1, 1));
-    SSF_ASSERT(SSFGObjSetUInt(gobjChild, 1));
-    SSF_ASSERT(SSFGObjInsertChild(gobjPeer2, gobjChild));
-
-    length = 0;
-    comma = false;
-    SSF_ASSERT(SSFGObjToJson(str, sizeof(str), length, &length, gobj, &comma));
-
-    SSFGObjIterate(gobj, iterateCallback, 0);
-
-
-    SSFGObjDeInit(&gobj);
-
-
 
     /* Print out SSF version */
     printf("\r\n");

@@ -2,7 +2,7 @@
 /* Small System Framework                                                                        */
 /*                                                                                               */
 /* ssfgobj.h                                                                                     */
-/* Provides flexible API to r/w/modify structured data & conversion from & to other codecs.      */                                                            */
+/* Provides flexible API to r/w/modify structured data & conversion from & to other codecs.      */
 /*                                                                                               */
 /* BSD-3-Clause License                                                                          */
 /* Copyright 2024 Supurloop Software LLC                                                         */
@@ -45,6 +45,7 @@ extern "C"
 /* --------------------------------------------------------------------------------------------- */
 /* Defines                                                                                       */
 /* --------------------------------------------------------------------------------------------- */
+#define SSF_GOBJ_CONFIG_MAX_IN_DEPTH (6u) // move to options file
 
 /* --------------------------------------------------------------------------------------------- */
 /* Structs                                                                                       */
@@ -52,46 +53,28 @@ extern "C"
 typedef enum
 {
     SSF_OBJ_TYPE_MIN = -1,
-    SSF_OBJ_TYPE_ERROR,
-    SSF_OBJ_TYPE_STRING,
-    SSF_OBJ_TYPE_NUMBER_CHAR,
-    SSF_OBJ_TYPE_NUMBER_INT8,
-    SSF_OBJ_TYPE_NUMBER_UINT8,
-    SSF_OBJ_TYPE_NUMBER_INT16,
-    SSF_OBJ_TYPE_NUMBER_UINT16,
-    SSF_OBJ_TYPE_NUMBER_INT32,
-    SSF_OBJ_TYPE_NUMBER_UINT32,
-    SSF_OBJ_TYPE_NUMBER_INT64,
-    SSF_OBJ_TYPE_NUMBER_UINT64,
-    SSF_OBJ_TYPE_NUMBER_FLOAT32,
-    SSF_OBJ_TYPE_NUMBER_FLOAT64,
+    SSF_OBJ_TYPE_NONE,
+    SSF_OBJ_TYPE_STR,
+    SSF_OBJ_TYPE_BIN,
+    SSF_OBJ_TYPE_INT,
+    SSF_OBJ_TYPE_UINT,
+    SSF_OBJ_TYPE_FLOAT,
+    SSF_OBJ_TYPE_BOOL,
+    SSF_OBJ_TYPE_NULL,
     SSF_OBJ_TYPE_OBJECT,
     SSF_OBJ_TYPE_ARRAY,
-    SSF_OBJ_TYPE_TRUE,
-    SSF_OBJ_TYPE_FALSE,
-    SSF_OBJ_TYPE_NULL,
     SSF_OBJ_TYPE_MAX,
 } SSFObjType_t;
 
 typedef struct
 {
     SSFLLItem_t item;
-    char *labelCStr; /* Label value may not contain 0, but must end with 0 */
+    char *labelCStr;
     void *data;
-#if 0
-    union data
-    {
-        char *cstr;
-        sint64_t si;
-        uint64_t ui;
-    };
-#endif
-    SSFLL_t peers;
+    //SSFLL_t peers;
     SSFLL_t children;
     SSFObjType_t dataType;
-    size_t dataLen;
-    // encoding options type
-    //uint32_t magic;
+    size_t dataSize;
 } SSFGObj_t;
 
 typedef struct
@@ -106,74 +89,47 @@ typedef void (*SSFGObjIterateFn_t)(SSFGObj_t *gobj, SSFLL_t *path, uint8_t depth
 /* --------------------------------------------------------------------------------------------- */
 /* Public Interface                                                                              */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFGObjInit(SSFGObj_t **gobj, uint32_t maxPeers, uint32_t maxChildren);
+bool SSFGObjInit(SSFGObj_t **gobj, /*uint16_t maxPeers,*/ uint16_t maxChildren);
 void SSFGObjDeInit(SSFGObj_t **gobj);
+
+/* Object label accessors */
 bool SSFGObjSetLabel(SSFGObj_t *gobj, SSFCStrIn_t labelCStr);
 bool SSFGObjGetLabel(SSFGObj_t *gobj, SSFCStrOut_t labelCStrOut, size_t labelCStrOutSize);
+
+/* Object value accessors */
+SSFObjType_t SSFGObjGetType(SSFGObj_t *gobj);
+size_t SSFGObjGetSize(SSFGObj_t *gobj);
+bool SSFGObjSetNone(SSFGObj_t* gobj);
 bool SSFGObjSetString(SSFGObj_t *gobj, SSFCStrIn_t valueCStr);
-bool SSFGObjGetString(SSFGObj_t *gobj, SSFCStrOut_t labelCStrOut, size_t labelCStrOutSize);
-//SSFGObjGetHex
-//SSFGObjGetBase64
-//SSFGObjGetBin
+bool SSFGObjGetString(SSFGObj_t *gobj, SSFCStrOut_t valueCStrOut, size_t labelCStrOutSize);
 bool SSFGObjSetInt(SSFGObj_t *gobj, int64_t value);
 bool SSFGObjGetInt(SSFGObj_t *gobj, int64_t *valueOut);
 bool SSFGObjSetUInt(SSFGObj_t *gobj, uint64_t value);
 bool SSFGObjGetUInt(SSFGObj_t *gobj, uint64_t *valueOut);
-bool SSFGObjSetDouble(SSFGObj_t *gobj, double value);
-bool SSFGObjGetDouble(SSFGObj_t *gobj, double *valueOut);
+bool SSFGObjSetFloat(SSFGObj_t *gobj, double value);
+bool SSFGObjGetFloat(SSFGObj_t *gobj, double *valueOut);
+bool SSFGObjSetBool(SSFGObj_t* gobj, bool value);
+bool SSFGObjGetBool(SSFGObj_t* gobj, bool *valueOut);
+bool SSFGObjSetBin(SSFGObj_t* gobj, uint8_t* value, size_t valueLen);
+bool SSFGObjGetBin(SSFGObj_t* gobj, uint8_t* valueOut, size_t valueSize, size_t* valueLenOutOpt);
+bool SSFGObjSetNull(SSFGObj_t* gobj);
 bool SSFGObjSetObject(SSFGObj_t *gobj);
 bool SSFGObjSetArray(SSFGObj_t *gobj);
-bool SSFGObjSetTrue(SSFGObj_t *gobj);
-bool SSFGObjSetFalse(SSFGObj_t *gobj);
-bool SSFGObjSetNull(SSFGObj_t *gobj);
-SSFObjType_t SSFGObjGetType(SSFGObj_t *gobj);
-size_t SSFGObjGetLen(SSFGObj_t *gobj);
+bool SSFGObjInsertChild(SSFGObj_t *gobjParent, SSFGObj_t *gobjChild);
+bool SSFGObjRemoveChild(SSFGObj_t* gobjParent, SSFGObj_t* gobjChild);
+bool SSFGObjFindPath(SSFGObj_t* gobjRoot, SSFCStrIn_t* path, SSFGObj_t** gobjParentOut, SSFGObj_t* * gobjChildOut);
+void SSFGObjIterate(SSFGObj_t* gobj, SSFGObjIterateFn_t iterateCallback, uint8_t depth);
 
-bool SSFGObjInsertPeer(SSFGObj_t *gobjBase, SSFGObj_t *gobj);
-bool SSFGObjInsertChild(SSFGObj_t *gobjBase, SSFGObj_t *gobjChild);
-bool SSFGObjToJson(SSFCStrOut_t js, size_t size, size_t start, size_t *end, SSFGObj_t *gobj,
-                   bool *comma);
+//bool SSFGObjToJson(SSFCStrOut_t js, size_t size, size_t start, size_t *end, SSFGObj_t *gobj,
+//                   bool *comma);
 
-void SSFGObjIterate(SSFGObj_t *gobj, SSFGObjIterateFn_t iterateCallback, uint8_t depth);
-void SSFGObjPathToString(SSFLL_t *path);
 
-#if 0
-
-SSFGObjIsValid()
-
-SSFGObjSetEncoding()
-
-???
-SSFGObjGetLabel()
-SSFGObjGetEncoding()
-SSFGObjGetString()
-SSFGObjGetNumber()
-SSFGObjGetBool()
-SSFGObjGetNull()
-SSFGObjGetArray()
-SSFGObjGetObject()
-???
-
-SSFJsonToGObj()
-SSFUBJsonToGObj()
-SSFTLVToGObj()
-SSFINIToGObj()
-
-SSFGObjToJson()
-SSFGObjToUBJson()
-SSFGObjToTLV()
-SSFGObjToINI()
-
-Put Get
-Insert/remove
-alloc
-free
-#endif
 /* --------------------------------------------------------------------------------------------- */
 /* Unit test                                                                                     */
 /* --------------------------------------------------------------------------------------------- */
 #if SSF_CONFIG_GOBJ_UNIT_TEST == 1
 void SSFGObjUnitTest(void);
+bool SSFGObjIsMemoryBalanced(void);
 #endif /* SSF_CONFIG_GOBJ_UNIT_TEST */
 
 #ifdef __cplusplus

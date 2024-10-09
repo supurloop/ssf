@@ -153,6 +153,7 @@
     <ClCompile Include="_codec\ssfdec.c" />
     <ClCompile Include="_codec\ssfdec_ut.c" />
     <ClCompile Include="_codec\ssfgobj.c" />
+    <ClCompile Include="_codec\ssfgobj_ut.c" />
     <ClCompile Include="_codec\ssfhex.c" />
     <ClCompile Include="_codec\ssfhex_ut.c" />
     <ClCompile Include="_codec\ssfini.c" />

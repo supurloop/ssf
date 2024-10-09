@@ -66,7 +66,19 @@
 /*       - Added string to decimal integer conversion interface.                                 */
 /*       - Added safe string interface.                                                          */
 /*       - Added debuggable, integrity check heap interface.                                     */
+/* 0.1.1 - Fix UBJSON parser bug that incorrectly converts unsigned int to a negative number.    */
+/*       - Elimimate reentrancy problem in dtime interface.                                      */
+/*       - Skip some dtime unit tests on 32-bit systems.                                         */
+/*       - Fix various compiler warnings.                                                        */
+/*       - Remove escaping of / in JSON string generator interface.                              */
+/*       - Allow top level arrays in JSON interface.                                             */
+/*       - Allow top level arrays in UBJSON interface.                                           */
+/*       - Miscellaneous code clean up.                                                          */
+/*       - Fix bug in fsm interface where a pending timer is not updated when StartTimer called. */
+/*       - Updated fsm interface to have 1 level of nesting, a superstate.                       */
+/*       - Beta version of generic object interface.                                             */
+/*       - Better organized the source files in Visual Studio project.                           */
 /* --------------------------------------------------------------------------------------------- */
-#define SSF_VERSION_STR "0.1.0"
+#define SSF_VERSION_STR "0.1.1"
 
 #endif /* SSF_VERSION_H_INCLUDE */

@@ -1,0 +1,274 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="main.c" />
+    <ClCompile Include="ssfport.c" />
+    <ClCompile Include="_codec\ssfbase64.c">
+      <Filter>_codec</Filter>
+    </ClCompile>
+    <ClCompile Include="_codec\ssfbase64_ut.c">
+      <Filter>_codec</Filter>
+    </ClCompile>
+    <ClCompile Include="_codec\ssfdec.c">
+      <Filter>_codec</Filter>
+    </ClCompile>
+    <ClCompile Include="_codec\ssfdec_ut.c">
+      <Filter>_codec</Filter>
+    </ClCompile>
+    <ClCompile Include="_codec\ssfgobj.c">
+      <Filter>_codec</Filter>
+    </ClCompile>
+    <ClCompile Include="_codec\ssfgobj_ut.c">
+      <Filter>_codec</Filter>
+    </ClCompile>
+    <ClCompile Include="_codec\ssfhex.c">
+      <Filter>_codec</Filter>
+    </ClCompile>
+    <ClCompile Include="_codec\ssfhex_ut.c">
+      <Filter>_codec</Filter>
+    </ClCompile>
+    <ClCompile Include="_codec\ssfini.c">
+      <Filter>_codec</Filter>
+    </ClCompile>
+    <ClCompile Include="_codec\ssfini_ut.c">
+      <Filter>_codec</Filter>
+    </ClCompile>
+    <ClCompile Include="_codec\ssfjson.c">
+      <Filter>_codec</Filter>
+    </ClCompile>
+    <ClCompile Include="_codec\ssfjson_ut.c">
+      <Filter>_codec</Filter>
+    </ClCompile>
+    <ClCompile Include="_codec\ssfstr.c">
+      <Filter>_codec</Filter>
+    </ClCompile>
+    <ClCompile Include="_codec\ssfstr_ut.c">
+      <Filter>_codec</Filter>
+    </ClCompile>
+    <ClCompile Include="_codec\ssftlv.c">
+      <Filter>_codec</Filter>
+    </ClCompile>
+    <ClCompile Include="_codec\ssftlv_ut.c">
+      <Filter>_codec</Filter>
+    </ClCompile>
+    <ClCompile Include="_codec\ssfubjson.c">
+      <Filter>_codec</Filter>
+    </ClCompile>
+    <ClCompile Include="_codec\ssfubjson_ut.c">
+      <Filter>_codec</Filter>
+    </ClCompile>
+    <ClCompile Include="_crypto\ssfaes.c">
+      <Filter>_crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="_crypto\ssfaes_ut.c">
+      <Filter>_crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="_crypto\ssfaesgcm.c">
+      <Filter>_crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="_crypto\ssfaesgcm_ut.c">
+      <Filter>_crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="_crypto\ssfprng.c">
+      <Filter>_crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="_crypto\ssfprng_ut.c">
+      <Filter>_crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="_crypto\ssfsha2.c">
+      <Filter>_crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="_crypto\ssfsha2_ut.c">
+      <Filter>_crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="_ecc\ssfrs.c">
+      <Filter>_ecc</Filter>
+    </ClCompile>
+    <ClCompile Include="_ecc\ssfrs_ut.c">
+      <Filter>_ecc</Filter>
+    </ClCompile>
+    <ClCompile Include="_edc\ssfcrc16.c">
+      <Filter>_edc</Filter>
+    </ClCompile>
+    <ClCompile Include="_edc\ssfcrc16_ut.c">
+      <Filter>_edc</Filter>
+    </ClCompile>
+    <ClCompile Include="_edc\ssfcrc32.c">
+      <Filter>_edc</Filter>
+    </ClCompile>
+    <ClCompile Include="_edc\ssfcrc32_ut.c">
+      <Filter>_edc</Filter>
+    </ClCompile>
+    <ClCompile Include="_edc\ssffcsum.c">
+      <Filter>_edc</Filter>
+    </ClCompile>
+    <ClCompile Include="_edc\ssffcsum_ut.c">
+      <Filter>_edc</Filter>
+    </ClCompile>
+    <ClCompile Include="_fsm\ssfsm.c">
+      <Filter>_fsm</Filter>
+    </ClCompile>
+    <ClCompile Include="_fsm\ssfsm_ut.c">
+      <Filter>_fsm</Filter>
+    </ClCompile>
+    <ClCompile Include="_storage\ssfcfg.c">
+      <Filter>_storage</Filter>
+    </ClCompile>
+    <ClCompile Include="_storage\ssfcfg_ut.c">
+      <Filter>_storage</Filter>
+    </ClCompile>
+    <ClCompile Include="_struct\ssfbfifo.c">
+      <Filter>_struct</Filter>
+    </ClCompile>
+    <ClCompile Include="_struct\ssfbfifo_ut.c">
+      <Filter>_struct</Filter>
+    </ClCompile>
+    <ClCompile Include="_time\ssfdtime.c">
+      <Filter>_time</Filter>
+    </ClCompile>
+    <ClCompile Include="_time\ssfdtime_ut.c">
+      <Filter>_time</Filter>
+    </ClCompile>
+    <ClCompile Include="_struct\ssfheap.c">
+      <Filter>_struct</Filter>
+    </ClCompile>
+    <ClCompile Include="_struct\ssfheap_ut.c">
+      <Filter>_struct</Filter>
+    </ClCompile>
+    <ClCompile Include="_time\ssfiso8601.c">
+      <Filter>_time</Filter>
+    </ClCompile>
+    <ClCompile Include="_time\ssfiso8601_ut.c">
+      <Filter>_time</Filter>
+    </ClCompile>
+    <ClCompile Include="_struct\ssfll.c">
+      <Filter>_struct</Filter>
+    </ClCompile>
+    <ClCompile Include="_struct\ssfll_ut.c">
+      <Filter>_struct</Filter>
+    </ClCompile>
+    <ClCompile Include="_struct\ssfmpool.c">
+      <Filter>_struct</Filter>
+    </ClCompile>
+    <ClCompile Include="_struct\ssfmpool_ut.c">
+      <Filter>_struct</Filter>
+    </ClCompile>
+    <ClCompile Include="_time\ssfrtc.c">
+      <Filter>_time</Filter>
+    </ClCompile>
+    <ClCompile Include="_time\ssfrtc_ut.c">
+      <Filter>_time</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="ssf.h" />
+    <ClInclude Include="ssfassert.h" />
+    <ClInclude Include="ssfoptions.h" />
+    <ClInclude Include="ssfport.h" />
+    <ClInclude Include="ssfversion.h" />
+    <ClInclude Include="_codec\ssfbase64.h">
+      <Filter>_codec</Filter>
+    </ClInclude>
+    <ClInclude Include="_codec\ssfdec.h">
+      <Filter>_codec</Filter>
+    </ClInclude>
+    <ClInclude Include="_codec\ssfgobj.h">
+      <Filter>_codec</Filter>
+    </ClInclude>
+    <ClInclude Include="_codec\ssfhex.h">
+      <Filter>_codec</Filter>
+    </ClInclude>
+    <ClInclude Include="_codec\ssfini.h">
+      <Filter>_codec</Filter>
+    </ClInclude>
+    <ClInclude Include="_codec\ssfjson.h">
+      <Filter>_codec</Filter>
+    </ClInclude>
+    <ClInclude Include="_codec\ssfstr.h">
+      <Filter>_codec</Filter>
+    </ClInclude>
+    <ClInclude Include="_codec\ssftlv.h">
+      <Filter>_codec</Filter>
+    </ClInclude>
+    <ClInclude Include="_codec\ssfubjson.h">
+      <Filter>_codec</Filter>
+    </ClInclude>
+    <ClInclude Include="_crypto\ssfaes.h">
+      <Filter>_crypto</Filter>
+    </ClInclude>
+    <ClInclude Include="_crypto\ssfaesgcm.h">
+      <Filter>_crypto</Filter>
+    </ClInclude>
+    <ClInclude Include="_crypto\ssfprng.h">
+      <Filter>_crypto</Filter>
+    </ClInclude>
+    <ClInclude Include="_crypto\ssfsha2.h">
+      <Filter>_crypto</Filter>
+    </ClInclude>
+    <ClInclude Include="_ecc\ssfrs.h">
+      <Filter>_ecc</Filter>
+    </ClInclude>
+    <ClInclude Include="_edc\ssfcrc16.h">
+      <Filter>_edc</Filter>
+    </ClInclude>
+    <ClInclude Include="_edc\ssfcrc32.h">
+      <Filter>_edc</Filter>
+    </ClInclude>
+    <ClInclude Include="_edc\ssffcsum.h">
+      <Filter>_edc</Filter>
+    </ClInclude>
+    <ClInclude Include="_fsm\ssfsm.h">
+      <Filter>_fsm</Filter>
+    </ClInclude>
+    <ClInclude Include="_storage\ssfcfg.h">
+      <Filter>_storage</Filter>
+    </ClInclude>
+    <ClInclude Include="_struct\ssfbfifo.h">
+      <Filter>_struct</Filter>
+    </ClInclude>
+    <ClInclude Include="_time\ssfdtime.h">
+      <Filter>_time</Filter>
+    </ClInclude>
+    <ClInclude Include="_struct\ssfheap.h">
+      <Filter>_struct</Filter>
+    </ClInclude>
+    <ClInclude Include="_time\ssfiso8601.h">
+      <Filter>_time</Filter>
+    </ClInclude>
+    <ClInclude Include="_struct\ssfll.h">
+      <Filter>_struct</Filter>
+    </ClInclude>
+    <ClInclude Include="_struct\ssfmpool.h">
+      <Filter>_struct</Filter>
+    </ClInclude>
+    <ClInclude Include="_time\ssfrtc.h">
+      <Filter>_time</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="_codec">
+      <UniqueIdentifier>{1bc5d322-ded5-49f7-8adc-55948f552374}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="_crypto">
+      <UniqueIdentifier>{7031d2ab-42f5-4b2e-a79c-cfcf4eed9611}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="_ecc">
+      <UniqueIdentifier>{f9757acc-84e7-4c82-a5fa-e0e392815c1c}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="_edc">
+      <UniqueIdentifier>{0a5f3cfb-90a0-4e59-a853-a9632a2b271b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="_fsm">
+      <UniqueIdentifier>{900e1744-fc50-44bf-ad18-eefe33e6afbc}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="_storage">
+      <UniqueIdentifier>{9d326993-86f4-4864-b8f8-46643ee59a2f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="_struct">
+      <UniqueIdentifier>{6b76489b-2e1f-43b5-a441-db40ed859ad1}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="_time">
+      <UniqueIdentifier>{d78a8895-338f-4435-88fc-dd3bc263ef59}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

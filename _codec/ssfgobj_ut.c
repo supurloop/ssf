@@ -235,12 +235,12 @@ void SSFGObjUnitTest(void)
     SSF_ASSERT(SSFGObjGetSize(gobj) == sizeof(int64_t));
     SSF_ASSERT(i64 == 9223372036854775807ull);
 
-    SSF_ASSERT(SSFGObjSetInt(gobj, -9223372036854775808ull));
+    SSF_ASSERT(SSFGObjSetInt(gobj, (int64_t)-9223372036854775808ll));
     i64 = 0;
     SSF_ASSERT(SSFGObjGetInt(gobj, &i64));
     SSF_ASSERT(SSFGObjGetType(gobj) == SSF_OBJ_TYPE_INT);
     SSF_ASSERT(SSFGObjGetSize(gobj) == sizeof(int64_t));
-    SSF_ASSERT(i64 == (int64_t)-9223372036854775808ull);
+    SSF_ASSERT(i64 == (int64_t)-9223372036854775808ll);
 
     SSFGObjDeInit(&gobj);
     SSF_ASSERT(SSFGObjIsMemoryBalanced());

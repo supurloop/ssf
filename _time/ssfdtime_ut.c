@@ -380,7 +380,9 @@ void SSFDTimeUnitTest(void)
         dtimer = (time_t)(unixSys / SSF_TICKS_PER_SEC);
 
 #if UINTPTR_MAX == UINT32_MAX
+#ifndef _WIN32
 #warning NOTE - Cannot unit test full date range on 32-bit systems.
+#endif
         if ((unixSys / SSF_TICKS_PER_SEC) > (((uint32_t)-1) >> 1)) { continue; }
 #endif
 

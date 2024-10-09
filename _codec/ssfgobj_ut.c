@@ -235,12 +235,12 @@ void SSFGObjUnitTest(void)
     SSF_ASSERT(SSFGObjGetSize(gobj) == sizeof(int64_t));
     SSF_ASSERT(i64 == 9223372036854775807ull);
 
-    SSF_ASSERT(SSFGObjSetInt(gobj, -9223372036854775808ll));
+    SSF_ASSERT(SSFGObjSetInt(gobj, -9223372036854775808ull));
     i64 = 0;
     SSF_ASSERT(SSFGObjGetInt(gobj, &i64));
     SSF_ASSERT(SSFGObjGetType(gobj) == SSF_OBJ_TYPE_INT);
     SSF_ASSERT(SSFGObjGetSize(gobj) == sizeof(int64_t));
-    SSF_ASSERT(i64 == -9223372036854775808ll);
+    SSF_ASSERT(i64 == (int64_t)-9223372036854775808ull);
 
     SSFGObjDeInit(&gobj);
     SSF_ASSERT(SSFGObjIsMemoryBalanced());
@@ -480,18 +480,18 @@ void SSFGObjUnitTest(void)
     SSF_ASSERT(SSFGObjGetSize(gobjChild3) == 0);
 
     memset(path, 0, sizeof(path));
-    SSF_ASSERT_TEST(SSFGObjFindPath(NULL, path, &gobjParentOut, &gobjChildOut));
+    SSF_ASSERT_TEST(SSFGObjFindPath(NULL, (SSFCStrIn_t *)path, &gobjParentOut, &gobjChildOut));
     SSF_ASSERT_TEST(SSFGObjFindPath(gobj, NULL, &gobjParentOut, &gobjChildOut));
     path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH] = (void *)1;
-    SSF_ASSERT_TEST(SSFGObjFindPath(gobj, path, &gobjParentOut, &gobjChildOut));
+    SSF_ASSERT_TEST(SSFGObjFindPath(gobj, (SSFCStrIn_t *)path, &gobjParentOut, &gobjChildOut));
     path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH] = NULL;
-    SSF_ASSERT_TEST(SSFGObjFindPath(gobj, path, NULL, &gobjChildOut));
+    SSF_ASSERT_TEST(SSFGObjFindPath(gobj, (SSFCStrIn_t *)path, NULL, &gobjChildOut));
     gobjParentOut = (void *)1;
-    SSF_ASSERT_TEST(SSFGObjFindPath(gobj, path, &gobjParentOut, &gobjChildOut));
+    SSF_ASSERT_TEST(SSFGObjFindPath(gobj, (SSFCStrIn_t *)path, &gobjParentOut, &gobjChildOut));
     gobjParentOut = NULL;
-    SSF_ASSERT_TEST(SSFGObjFindPath(gobj, path, &gobjParentOut, NULL));
+    SSF_ASSERT_TEST(SSFGObjFindPath(gobj, (SSFCStrIn_t *)path, &gobjParentOut, NULL));
     gobjChildOut = (void *)1;
-    SSF_ASSERT_TEST(SSFGObjFindPath(gobj, path, &gobjParentOut, &gobjChildOut));
+    SSF_ASSERT_TEST(SSFGObjFindPath(gobj, (SSFCStrIn_t *)path, &gobjParentOut, &gobjChildOut));
     gobjChildOut = NULL;
 
     /* {c1, c2, c3} */
@@ -509,28 +509,28 @@ void SSFGObjUnitTest(void)
     path[0] = "child1";
     gobjParentOut = NULL;
     gobjChildOut = NULL;
-    SSF_ASSERT(SSFGObjFindPath(gobj, path, &gobjParentOut, &gobjChildOut));
+    SSF_ASSERT(SSFGObjFindPath(gobj, (SSFCStrIn_t *)path, &gobjParentOut, &gobjChildOut));
     SSF_ASSERT(gobjParentOut == gobj);
     SSF_ASSERT(gobjChildOut == gobjChild1);
 
     path[0] = "child2";
     gobjParentOut = NULL;
     gobjChildOut = NULL;
-    SSF_ASSERT(SSFGObjFindPath(gobj, path, &gobjParentOut, &gobjChildOut));
+    SSF_ASSERT(SSFGObjFindPath(gobj, (SSFCStrIn_t *)path, &gobjParentOut, &gobjChildOut));
     SSF_ASSERT(gobjParentOut == gobj);
     SSF_ASSERT(gobjChildOut == gobjChild2);
 
     path[0] = "child3";
     gobjParentOut = NULL;
     gobjChildOut = NULL;
-    SSF_ASSERT(SSFGObjFindPath(gobj, path, &gobjParentOut, &gobjChildOut));
+    SSF_ASSERT(SSFGObjFindPath(gobj, (SSFCStrIn_t *)path, &gobjParentOut, &gobjChildOut));
     SSF_ASSERT(gobjParentOut == gobj);
     SSF_ASSERT(gobjChildOut == gobjChild3);
 
     path[0] = "child4";
     gobjParentOut = NULL;
     gobjChildOut = NULL;
-    SSF_ASSERT(SSFGObjFindPath(gobj, path, &gobjParentOut, &gobjChildOut) == false);
+    SSF_ASSERT(SSFGObjFindPath(gobj, (SSFCStrIn_t *)path, &gobjParentOut, &gobjChildOut) == false);
     SSF_ASSERT(gobjParentOut == NULL);
     SSF_ASSERT(gobjChildOut == NULL);
 
@@ -541,28 +541,28 @@ void SSFGObjUnitTest(void)
     aidx1 = 0;
     gobjParentOut = NULL;
     gobjChildOut = NULL;
-    SSF_ASSERT(SSFGObjFindPath(gobj, path, &gobjParentOut, &gobjChildOut));
+    SSF_ASSERT(SSFGObjFindPath(gobj, (SSFCStrIn_t *)path, &gobjParentOut, &gobjChildOut));
     SSF_ASSERT(gobjParentOut == gobj);
     SSF_ASSERT(gobjChildOut == gobjChild1);
 
     aidx1 = 1;
     gobjParentOut = NULL;
     gobjChildOut = NULL;
-    SSF_ASSERT(SSFGObjFindPath(gobj, path, &gobjParentOut, &gobjChildOut));
+    SSF_ASSERT(SSFGObjFindPath(gobj, (SSFCStrIn_t *)path, &gobjParentOut, &gobjChildOut));
     SSF_ASSERT(gobjParentOut == gobj);
     SSF_ASSERT(gobjChildOut == gobjChild2);
 
     aidx1 = 2;
     gobjParentOut = NULL;
     gobjChildOut = NULL;
-    SSF_ASSERT(SSFGObjFindPath(gobj, path, &gobjParentOut, &gobjChildOut));
+    SSF_ASSERT(SSFGObjFindPath(gobj, (SSFCStrIn_t *)path, &gobjParentOut, &gobjChildOut));
     SSF_ASSERT(gobjParentOut == gobj);
     SSF_ASSERT(gobjChildOut == gobjChild3);
 
     aidx1 = 3;
     gobjParentOut = NULL;
     gobjChildOut = NULL;
-    SSF_ASSERT(SSFGObjFindPath(gobj, path, &gobjParentOut, &gobjChildOut) == false);
+    SSF_ASSERT(SSFGObjFindPath(gobj, (SSFCStrIn_t *)path, &gobjParentOut, &gobjChildOut) == false);
     SSF_ASSERT(gobjParentOut == NULL);
     SSF_ASSERT(gobjChildOut == NULL);
 
@@ -578,14 +578,14 @@ void SSFGObjUnitTest(void)
     path[0] = (char *)"child1";
     gobjParentOut = NULL;
     gobjChildOut = NULL;
-    SSF_ASSERT(SSFGObjFindPath(gobj, path, &gobjParentOut, &gobjChildOut));
+    SSF_ASSERT(SSFGObjFindPath(gobj, (SSFCStrIn_t *)path, &gobjParentOut, &gobjChildOut));
     SSF_ASSERT(gobjParentOut == gobj);
     SSF_ASSERT(gobjChildOut == gobjChild1);
 
     path[1] = (char *)"child2";
     gobjParentOut = NULL;
     gobjChildOut = NULL;
-    SSF_ASSERT(SSFGObjFindPath(gobj, path, &gobjParentOut, &gobjChildOut));
+    SSF_ASSERT(SSFGObjFindPath(gobj, (SSFCStrIn_t *)path, &gobjParentOut, &gobjChildOut));
     SSF_ASSERT(gobjParentOut == gobjChild1);
     SSF_ASSERT(gobjChildOut == gobjChild2);
 
@@ -593,14 +593,14 @@ void SSFGObjUnitTest(void)
     aidx1 = 0;
     gobjParentOut = NULL;
     gobjChildOut = NULL;
-    SSF_ASSERT(SSFGObjFindPath(gobj, path, &gobjParentOut, &gobjChildOut));
+    SSF_ASSERT(SSFGObjFindPath(gobj, (SSFCStrIn_t *)path, &gobjParentOut, &gobjChildOut));
     SSF_ASSERT(gobjParentOut == gobjChild2);
     SSF_ASSERT(gobjChildOut == gobjChild3);
 
     aidx1 = 1;
     gobjParentOut = NULL;
     gobjChildOut = NULL;
-    SSF_ASSERT(SSFGObjFindPath(gobj, path, &gobjParentOut, &gobjChildOut) == false);
+    SSF_ASSERT(SSFGObjFindPath(gobj, (SSFCStrIn_t *)path, &gobjParentOut, &gobjChildOut) == false);
     SSF_ASSERT(gobjParentOut == NULL);
     SSF_ASSERT(gobjChildOut == NULL);
 
@@ -608,7 +608,7 @@ void SSFGObjUnitTest(void)
     aidx1 = 0;
     gobjParentOut = NULL;
     gobjChildOut = NULL;
-    SSF_ASSERT(SSFGObjFindPath(gobj, path, &gobjParentOut, &gobjChildOut) == false);
+    SSF_ASSERT(SSFGObjFindPath(gobj, (SSFCStrIn_t *)path, &gobjParentOut, &gobjChildOut) == false);
     SSF_ASSERT(gobjParentOut == NULL);
     SSF_ASSERT(gobjChildOut == NULL);
 
@@ -617,7 +617,7 @@ void SSFGObjUnitTest(void)
     aidx1 = 0;
     gobjParentOut = NULL;
     gobjChildOut = NULL;
-    SSF_ASSERT(SSFGObjFindPath(gobj, path, &gobjParentOut, &gobjChildOut) == false);
+    SSF_ASSERT(SSFGObjFindPath(gobj, (SSFCStrIn_t *)path, &gobjParentOut, &gobjChildOut) == false);
     SSF_ASSERT(gobjParentOut == NULL);
     SSF_ASSERT(gobjChildOut == NULL);
 
@@ -630,42 +630,42 @@ void SSFGObjUnitTest(void)
     aidx2 = 0;
     gobjParentOut = NULL;
     gobjChildOut = NULL;
-    SSF_ASSERT(SSFGObjFindPath(gobj, path, &gobjParentOut, &gobjChildOut));
+    SSF_ASSERT(SSFGObjFindPath(gobj, (SSFCStrIn_t *)path, &gobjParentOut, &gobjChildOut));
     SSF_ASSERT(gobjParentOut == gobjChild2);
     SSF_ASSERT(gobjChildOut == gobjChild3);
 
     aidx2 = 1;
     gobjParentOut = NULL;
     gobjChildOut = NULL;
-    SSF_ASSERT(SSFGObjFindPath(gobj, path, &gobjParentOut, &gobjChildOut) == false);
+    SSF_ASSERT(SSFGObjFindPath(gobj, (SSFCStrIn_t *)path, &gobjParentOut, &gobjChildOut) == false);
     SSF_ASSERT(gobjParentOut == NULL);
     SSF_ASSERT(gobjChildOut == NULL);
 
     path[2] = NULL;
     gobjParentOut = NULL;
     gobjChildOut = NULL;
-    SSF_ASSERT(SSFGObjFindPath(gobj, path, &gobjParentOut, &gobjChildOut));
+    SSF_ASSERT(SSFGObjFindPath(gobj, (SSFCStrIn_t *)path, &gobjParentOut, &gobjChildOut));
     SSF_ASSERT(gobjParentOut == gobjChild1);
     SSF_ASSERT(gobjChildOut == gobjChild2);
 
     aidx1 = 1;
     gobjParentOut = NULL;
     gobjChildOut = NULL;
-    SSF_ASSERT(SSFGObjFindPath(gobj, path, &gobjParentOut, &gobjChildOut) == false);
+    SSF_ASSERT(SSFGObjFindPath(gobj, (SSFCStrIn_t *)path, &gobjParentOut, &gobjChildOut) == false);
     SSF_ASSERT(gobjParentOut == NULL);
     SSF_ASSERT(gobjChildOut == NULL);
 
     path[1] = NULL;
     gobjParentOut = NULL;
     gobjChildOut = NULL;
-    SSF_ASSERT(SSFGObjFindPath(gobj, path, &gobjParentOut, &gobjChildOut));
+    SSF_ASSERT(SSFGObjFindPath(gobj, (SSFCStrIn_t *)path, &gobjParentOut, &gobjChildOut));
     SSF_ASSERT(gobjParentOut == gobj);
     SSF_ASSERT(gobjChildOut == gobjChild1);
 
     path[0] = "child2";
     gobjParentOut = NULL;
     gobjChildOut = NULL;
-    SSF_ASSERT(SSFGObjFindPath(gobj, path, &gobjParentOut, &gobjChildOut) == false);
+    SSF_ASSERT(SSFGObjFindPath(gobj, (SSFCStrIn_t *)path, &gobjParentOut, &gobjChildOut) == false);
     SSF_ASSERT(gobjParentOut == NULL);
     SSF_ASSERT(gobjChildOut == NULL);
 

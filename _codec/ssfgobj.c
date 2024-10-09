@@ -206,7 +206,7 @@ bool SSFGObjSetLabel(SSFGObj_t *gobj, SSFCStrIn_t labelCStr)
 {
     SSF_REQUIRE(gobj != NULL);
 
-    return _SSFGObjSetField(gobj, &gobj->labelCStr, labelCStr,
+    return _SSFGObjSetField(gobj, (void *)&gobj->labelCStr, labelCStr,
                             labelCStr == NULL ? 0 : strlen(labelCStr) + 1, SSF_OBJ_TYPE_NONE,
                             true);
 }

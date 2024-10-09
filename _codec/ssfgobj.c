@@ -35,24 +35,26 @@
 #include "ssfll.h"
 #include "ssfjson.h"
 
-static uint32_t _gTotalAllocations;
-static uint32_t _gTotalDeallocations;
-
 #if SSF_CONFIG_GOBJ_UNIT_TEST == 1
+/* --------------------------------------------------------------------------------------------- */
+/* Module variables                                                                              */
+/* --------------------------------------------------------------------------------------------- */
+static uint32_t _ssfgobjTotalAllocations;
+static uint32_t _ssfgobjTotalDeallocations;
+
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if number of allocations and deallocations is the same, else false.              */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFGObjIsMemoryBalanced(void)
 {
-    return _gTotalAllocations == _gTotalDeallocations;
+    return _ssfgobjTotalAllocations == _ssfgobjTotalDeallocations;
 }
-#endif
+#endif /* SSF_CONFIG_GOBJ_UNIT_TEST */
 
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if object is initialize, else false.                                             */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFGObjInit(SSFGObj_t **gobj, //uint16_t maxPeers,
-                 uint16_t maxChildren)
+bool SSFGObjInit(SSFGObj_t **gobj, uint16_t maxChildren)
 {
     SSF_REQUIRE(gobj != NULL);
     SSF_REQUIRE(*gobj == NULL);
@@ -62,7 +64,9 @@ bool SSFGObjInit(SSFGObj_t **gobj, //uint16_t maxPeers,
 
     /* Return if memory allocation fails */
     if (*gobj == NULL) return false;
-    _gTotalAllocations++;
+#if SSF_CONFIG_GOBJ_UNIT_TEST == 1
+    _ssfgobjTotalAllocations++;
+#endif
 
     /* Initialize the object */
     memset(*gobj, 0, sizeof(SSFGObj_t));
@@ -88,7 +92,9 @@ void SSFGObjDeInit(SSFGObj_t **gobj)
         /* Yes, free it */
         SSF_FREE((*gobj)->labelCStr);
         (*gobj)->labelCStr = NULL;
-        _gTotalDeallocations++;
+#if SSF_CONFIG_GOBJ_UNIT_TEST == 1
+        _ssfgobjTotalDeallocations++;
+#endif
     }
 
     /* Is data allocated? */
@@ -97,7 +103,9 @@ void SSFGObjDeInit(SSFGObj_t **gobj)
         /* Yes, free it */
         SSF_FREE((*gobj)->data);
         (*gobj)->data = NULL;
-        _gTotalDeallocations++;
+#if SSF_CONFIG_GOBJ_UNIT_TEST == 1
+        _ssfgobjTotalDeallocations++;
+#endif
     }
 
     /* Deinit all children */
@@ -106,7 +114,7 @@ void SSFGObjDeInit(SSFGObj_t **gobj)
     {
         next = SSF_LL_NEXT_ITEM(item);
         SSFLLGetItem(&((*gobj)->children), &item, SSF_LL_LOC_ITEM, item);
-        SSFGObjDeInit((SSFGObj_t**) &item);
+        SSFGObjDeInit((SSFGObj_t **)&item);
         item = next;
     }
 
@@ -116,13 +124,15 @@ void SSFGObjDeInit(SSFGObj_t **gobj)
     /* Free top level object */
     SSF_FREE(*gobj);
     *gobj = NULL;
-    _gTotalDeallocations++;
+#if SSF_CONFIG_GOBJ_UNIT_TEST == 1
+    _ssfgobjTotalDeallocations++;
+#endif
 }
 
 /* --------------------------------------------------------------------------------------------- */
 /* Returns the type of data held in the object.                                                  */
 /* --------------------------------------------------------------------------------------------- */
-SSFObjType_t SSFGObjGetType(SSFGObj_t* gobj)
+SSFObjType_t SSFGObjGetType(SSFGObj_t *gobj)
 {
     SSF_REQUIRE(gobj != NULL);
     return gobj->dataType;
@@ -131,7 +141,7 @@ SSFObjType_t SSFGObjGetType(SSFGObj_t* gobj)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns the size of the object's data in bytes.                                               */
 /* --------------------------------------------------------------------------------------------- */
-size_t SSFGObjGetSize(SSFGObj_t* gobj)
+size_t SSFGObjGetSize(SSFGObj_t *gobj)
 {
     SSF_REQUIRE(gobj != NULL);
     return gobj->dataSize;
@@ -154,7 +164,9 @@ static bool _SSFGObjSetField(SSFGObj_t *gobj, void **dst, const void *src, size_
         /* Yes, free it */
         SSF_FREE(*dst);
         *dst = NULL;
-        _gTotalDeallocations++;
+#if SSF_CONFIG_GOBJ_UNIT_TEST == 1
+        _ssfgobjTotalDeallocations++;
+#endif
     }
 
     /* Is there data to set to field? */
@@ -162,7 +174,7 @@ static bool _SSFGObjSetField(SSFGObj_t *gobj, void **dst, const void *src, size_
     {
         /* Yes, allocate room to set data to field */
         *dst = SSF_MALLOC(srcSize);
-    
+
         /* Did allocation succeed? */
         if (*dst == NULL)
         {
@@ -171,8 +183,9 @@ static bool _SSFGObjSetField(SSFGObj_t *gobj, void **dst, const void *src, size_
             gobj->dataSize = 0;
             return false;
         }
-        _gTotalAllocations++;
-
+#if SSF_CONFIG_GOBJ_UNIT_TEST == 1
+        _ssfgobjTotalAllocations++;
+#endif
         /* Copy data to field */
         memcpy(*dst, src, srcSize);
     }
@@ -194,7 +207,8 @@ bool SSFGObjSetLabel(SSFGObj_t *gobj, SSFCStrIn_t labelCStr)
     SSF_REQUIRE(gobj != NULL);
 
     return _SSFGObjSetField(gobj, &gobj->labelCStr, labelCStr,
-                            labelCStr == NULL ? 0 : strlen(labelCStr) + 1, SSF_OBJ_TYPE_NONE, true);
+                            labelCStr == NULL ? 0 : strlen(labelCStr) + 1, SSF_OBJ_TYPE_NONE,
+                            true);
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -218,7 +232,7 @@ bool SSFGObjGetLabel(SSFGObj_t *gobj, SSFCStrOut_t labelCStrOut, size_t labelCSt
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if none type set successfully, else false.                                       */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFGObjSetNone(SSFGObj_t* gobj)
+bool SSFGObjSetNone(SSFGObj_t *gobj)
 {
     SSF_REQUIRE(gobj != NULL);
     return _SSFGObjSetField(gobj, &gobj->data, NULL, 0, SSF_OBJ_TYPE_NONE, false);
@@ -227,13 +241,13 @@ bool SSFGObjSetNone(SSFGObj_t* gobj)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if data set to string, else false.                                               */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFGObjSetString(SSFGObj_t* gobj, SSFCStrIn_t valueCStr)
+bool SSFGObjSetString(SSFGObj_t *gobj, SSFCStrIn_t valueCStr)
 {
     SSF_REQUIRE(gobj != NULL);
     SSF_REQUIRE(valueCStr != NULL);
 
-    return _SSFGObjSetField(gobj, &gobj->data, valueCStr,
-                            strlen(valueCStr) + 1, SSF_OBJ_TYPE_STR, false);
+    return _SSFGObjSetField(gobj, &gobj->data, valueCStr, strlen(valueCStr) + 1, SSF_OBJ_TYPE_STR,
+                            false);
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -330,7 +344,7 @@ bool SSFGObjGetFloat(SSFGObj_t *gobj, double *valueOut)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if bool value set successfully, else false.                                      */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFGObjSetBool(SSFGObj_t* gobj, bool value)
+bool SSFGObjSetBool(SSFGObj_t *gobj, bool value)
 {
     SSF_REQUIRE(gobj != NULL);
     return _SSFGObjSetField(gobj, &gobj->data, &value, sizeof(bool), SSF_OBJ_TYPE_BOOL, false);
@@ -339,7 +353,7 @@ bool SSFGObjSetBool(SSFGObj_t* gobj, bool value)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if bool value copied to value, else false.                                       */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFGObjGetBool(SSFGObj_t* gobj, bool *valueOut)
+bool SSFGObjGetBool(SSFGObj_t *gobj, bool *valueOut)
 {
     SSF_REQUIRE(gobj != NULL);
     SSF_REQUIRE(valueOut != NULL);
@@ -353,7 +367,7 @@ bool SSFGObjGetBool(SSFGObj_t* gobj, bool *valueOut)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if binary value set successfully, else false.                                    */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFGObjSetBin(SSFGObj_t* gobj, uint8_t* value, size_t valueLen)
+bool SSFGObjSetBin(SSFGObj_t *gobj, uint8_t *value, size_t valueLen)
 {
     SSF_REQUIRE(gobj != NULL);
     SSF_REQUIRE(value != NULL);
@@ -363,7 +377,7 @@ bool SSFGObjSetBin(SSFGObj_t* gobj, uint8_t* value, size_t valueLen)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if binary value copied to value, else false.                                     */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFGObjGetBin(SSFGObj_t* gobj, uint8_t* valueOut, size_t valueSize, size_t* valueLenOutOpt)
+bool SSFGObjGetBin(SSFGObj_t *gobj, uint8_t *valueOut, size_t valueSize, size_t *valueLenOutOpt)
 {
     SSF_REQUIRE(gobj != NULL);
     SSF_REQUIRE(valueOut != NULL);
@@ -379,7 +393,7 @@ bool SSFGObjGetBin(SSFGObj_t* gobj, uint8_t* valueOut, size_t valueSize, size_t*
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if set to NULL type, else false.                                                 */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFGObjSetNull(SSFGObj_t* gobj)
+bool SSFGObjSetNull(SSFGObj_t *gobj)
 {
     SSF_REQUIRE(gobj != NULL);
     return _SSFGObjSetField(gobj, &gobj->data, NULL, 0, SSF_OBJ_TYPE_NULL, false);
@@ -388,7 +402,7 @@ bool SSFGObjSetNull(SSFGObj_t* gobj)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if set to object type, else false.                                               */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFGObjSetObject(SSFGObj_t* gobj)
+bool SSFGObjSetObject(SSFGObj_t *gobj)
 {
     SSF_REQUIRE(gobj != NULL);
     return _SSFGObjSetField(gobj, &gobj->data, NULL, 0, SSF_OBJ_TYPE_OBJECT, false);
@@ -397,7 +411,7 @@ bool SSFGObjSetObject(SSFGObj_t* gobj)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if set to array type, else false.                                                */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFGObjSetArray(SSFGObj_t* gobj)
+bool SSFGObjSetArray(SSFGObj_t *gobj)
 {
     SSF_REQUIRE(gobj != NULL);
     return _SSFGObjSetField(gobj, &gobj->data, NULL, 0, SSF_OBJ_TYPE_ARRAY, false);
@@ -410,25 +424,25 @@ bool SSFGObjInsertChild(SSFGObj_t *gobjParent, SSFGObj_t *gobjChild)
 {
     SSF_REQUIRE(gobjParent != NULL);
     SSF_REQUIRE((gobjParent->dataType == SSF_OBJ_TYPE_OBJECT) ||
-               (gobjParent->dataType == SSF_OBJ_TYPE_ARRAY));
+                (gobjParent->dataType == SSF_OBJ_TYPE_ARRAY));
     SSF_REQUIRE(gobjChild != NULL);
 
     if (gobjParent->children.size == 0) return false;
     if (SSFLLIsFull(&(gobjParent->children))) return false;
-    SSFLLPutItem(&(gobjParent->children), (SSFLLItem_t*)gobjChild, SSF_LL_LOC_TAIL, NULL);
+    SSFLLPutItem(&(gobjParent->children), (SSFLLItem_t *)gobjChild, SSF_LL_LOC_TAIL, NULL);
     return true;
 }
 
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if child is removed from parent, else false.                                     */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFGObjRemoveChild(SSFGObj_t* gobjParent, SSFGObj_t* gobjChild)
+bool SSFGObjRemoveChild(SSFGObj_t *gobjParent, SSFGObj_t *gobjChild)
 {
-    SSFLLItem_t* item;
+    SSFLLItem_t *item;
 
     SSF_REQUIRE(gobjParent != NULL);
     SSF_REQUIRE((gobjParent->dataType == SSF_OBJ_TYPE_OBJECT) ||
-        (gobjParent->dataType == SSF_OBJ_TYPE_ARRAY));
+                (gobjParent->dataType == SSF_OBJ_TYPE_ARRAY));
     SSF_REQUIRE(gobjChild != NULL);
 
     if (gobjParent->children.size == 0) return false;
@@ -448,95 +462,98 @@ bool SSFGObjRemoveChild(SSFGObj_t* gobjParent, SSFGObj_t* gobjChild)
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Returns true if object/parent is found in supplied path, else false.                          */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFGObjFindPath(SSFGObj_t* gobjRoot, SSFCStrIn_t* path, SSFGObj_t** gobjParentOut, SSFGObj_t** gobjChildOut, uint8_t depth)
+static bool _SSFGObjFindPath(SSFGObj_t *gobjRoot, SSFCStrIn_t *path, SSFGObj_t **gobjParentOut,
+                             SSFGObj_t **gobjOut, uint8_t depth)
 {
-    SSFLLItem_t* item;
+    SSFLLItem_t *item;
     size_t cindex = 0;
     size_t pindex = (size_t)-1;
     size_t len;
+    bool isPathMatch;
 
     SSF_REQUIRE(gobjRoot != NULL);
-    //SSF_REQUIRE((gobjRoot->dataType == SSF_OBJ_TYPE_OBJECT) ||
-    //            (gobjRoot->dataType == SSF_OBJ_TYPE_ARRAY));
     SSF_REQUIRE(path != NULL);
     SSF_REQUIRE(path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH] == NULL);
     SSF_REQUIRE(gobjParentOut != NULL);
-    //SSF_REQUIRE(*gobjParentOut == NULL);
-    SSF_REQUIRE(gobjChildOut != NULL);
-    SSF_REQUIRE(*gobjChildOut == NULL);
+    SSF_REQUIRE(gobjOut != NULL);
+    SSF_REQUIRE(*gobjOut == NULL);
 
-    /* Return if recursing too deeply */
-    if (depth >= SSF_GOBJ_CONFIG_MAX_IN_DEPTH)
+    /* Return if recursing too deeply or path not set */
+    if ((depth >= SSF_GOBJ_CONFIG_MAX_IN_DEPTH) || (path[depth] == NULL))
     {
         gobjParentOut = NULL;
         return false;
     }
 
-    /* Return if path not set */
-    if (path[depth] == NULL)
-    {
-        gobjParentOut = NULL;
-        return false;
-    }
-
-    /* Decode path index if array type */
+    /* Is array type? */
     if (gobjRoot->dataType == SSF_OBJ_TYPE_ARRAY)
     {
+        /* Yes, decode array index */
         memcpy(&pindex, path[depth], sizeof(size_t));
     }
 
-    if ((gobjRoot->dataType == SSF_OBJ_TYPE_OBJECT) ||
-        (gobjRoot->dataType == SSF_OBJ_TYPE_ARRAY))
+    /* Object or array type? */
+    if ((gobjRoot->dataType == SSF_OBJ_TYPE_OBJECT) || (gobjRoot->dataType == SSF_OBJ_TYPE_ARRAY))
     {
+        /* Yes, assume this is the parent of the path object */
         *gobjParentOut = gobjRoot;
+
+        /* Iterate over children */
         item = SSF_LL_HEAD(&(gobjRoot->children));
         while (item != NULL)
         {
+            /* Object? */
             if (gobjRoot->dataType == SSF_OBJ_TYPE_OBJECT)
             {
-                SSFGObj_t* tmp = (SSFGObj_t*)item;
+                SSFGObj_t *tmp = (SSFGObj_t *)item;
 
-                len = SSF_MIN(strlen(tmp->labelCStr), strlen(path[depth]));
-                if (strncmp(tmp->labelCStr, path[depth], len + 1) == 0)
+                /* Yes, path match? */
+                isPathMatch = false;
+                if (tmp->labelCStr != NULL)
                 {
-                    if (path[depth + 1] != NULL)
-                    {
-                        return _SSFGObjFindPath((SSFGObj_t*)item, path, gobjParentOut, gobjChildOut, depth + 1);
-                    }
-                    else
-                    {
-                        *gobjChildOut = (SSFGObj_t*)item;
-                        return true;
-                    }
+                    len = SSF_MIN(strlen(tmp->labelCStr), strlen(path[depth]));
+                    isPathMatch = (strncmp(tmp->labelCStr, path[depth], len + 1) == 0);
                 }
             }
-            else
+            /* No, index match? */
+            else { isPathMatch = (cindex == pindex); }
+
+            /* Object or array path match? */
+            if (isPathMatch)
             {
-                if (cindex == pindex)
+                /* Yes, more path to check? */
+                if (path[depth + 1] != NULL)
                 {
-                    if (path[depth + 1] != NULL)
-                    {
-                        return _SSFGObjFindPath((SSFGObj_t*)item, path, gobjParentOut, gobjChildOut, depth + 1);
-                    }
-                    else
-                    {
-                        *gobjChildOut = (SSFGObj_t*)item;
-                        return true;
-                    }
+                    /* Yes, recurse and look for path */
+                    return _SSFGObjFindPath((SSFGObj_t *)item, path, gobjParentOut, gobjOut,
+                                            depth + 1);
                 }
-                cindex++;
+                else
+                {
+                    /* No, found path, return obj and its parent obj */
+                    *gobjOut = (SSFGObj_t *)item;
+                    return true;
+                }
             }
+            cindex++;
             item = SSF_LL_NEXT_ITEM(item);
         }
     }
     else
-    {        
-        len = SSF_MIN(strlen(gobjRoot->labelCStr), strlen(path[depth]));
-        if (strncmp(gobjRoot->labelCStr, path[depth], len + 1) == 0)
+    {
+        /* No, is the label set? */
+        if (gobjRoot->labelCStr != NULL)
         {
-            *gobjChildOut = gobjRoot;
-            return true;
+            /* Yes, does it match the path? */
+            len = SSF_MIN(strlen(gobjRoot->labelCStr), strlen(path[depth]));
+            if (strncmp(gobjRoot->labelCStr, path[depth], len + 1) == 0)
+            {
+                /* Yes, return the object */
+                *gobjOut = gobjRoot;
+                return true;
+            }
         }
     }
     *gobjParentOut = NULL;
@@ -544,8 +561,10 @@ static bool _SSFGObjFindPath(SSFGObj_t* gobjRoot, SSFCStrIn_t* path, SSFGObj_t**
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Returns true if object/parent is found in supplied path, else false.                          */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFGObjFindPath(SSFGObj_t* gobjRoot, SSFCStrIn_t* path, SSFGObj_t** gobjParentOut, SSFGObj_t** gobjChildOut)
+bool SSFGObjFindPath(SSFGObj_t *gobjRoot, SSFCStrIn_t *path, SSFGObj_t **gobjParentOut,
+                     SSFGObj_t **gobjChildOut)
 {
     SSF_REQUIRE(gobjRoot != NULL);
     SSF_REQUIRE(path != NULL);
@@ -556,123 +575,17 @@ bool SSFGObjFindPath(SSFGObj_t* gobjRoot, SSFCStrIn_t* path, SSFGObj_t** gobjPar
     SSF_REQUIRE(*gobjChildOut == NULL);
 
     /* Return if root is not an object or an array type */
-    if (gobjRoot->dataType != SSF_OBJ_TYPE_OBJECT &&
-        gobjRoot->dataType != SSF_OBJ_TYPE_ARRAY) return false;
+    if ((gobjRoot->dataType != SSF_OBJ_TYPE_OBJECT) &&
+        (gobjRoot->dataType != SSF_OBJ_TYPE_ARRAY)) return false;
 
     return _SSFGObjFindPath(gobjRoot, path, gobjParentOut, gobjChildOut, 0);
 }
 
-#if 0
 /* --------------------------------------------------------------------------------------------- */
+/* Iterates over every node in the object tree and invokes supplied callback with path context.  */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFGObjToJson(SSFCStrOut_t js, size_t size, size_t start, size_t *end, SSFGObj_t *gobj,
-                   bool *comma)
-{
-    SSFLLItem_t *item;
-    SSFLLItem_t *next;
-
-    SSF_REQUIRE(js != NULL);
-    SSF_REQUIRE(end != NULL);
-    SSF_REQUIRE(gobj != NULL);
-    SSF_REQUIRE(comma != NULL);
-
-    if (gobj->labelCStr != NULL)
-    {
-        if (!SSFJsonPrintLabel(js, size, start, &start, gobj->labelCStr, comma)) return false;
-        *comma = false;
-    }
-    switch (gobj->dataType)
-    {
-        case SSF_OBJ_TYPE_STR:
-            SSF_ASSERT(gobj->data != NULL);
-            if (!SSFJsonPrintString(js, size, start, &start, (char *)gobj->data, comma)) return false;
-            break;
-        case SSF_OBJ_TYPE_BOOL:
-            {
-                SSF_ASSERT(gobj->data == NULL);
-                if (1) //jlh fix this
-                {
-                    if (!SSFJsonPrintTrue(js, size, start, &start, false)) return false;
-                }
-                else
-                {
-                    if (!SSFJsonPrintFalse(js, size, start, &start, false)) return false;
-                }
-            }
-            break;
-            break;
-        case SSF_OBJ_TYPE_NULL:
-            {
-                SSF_ASSERT(gobj->data == NULL);
-                if (!SSFJsonPrintNull(js, size, start, &start, false)) return false;
-            }
-            break;
-        case SSF_OBJ_TYPE_UINT:
-            {
-                uint64_t ui;
-
-                SSF_ASSERT(gobj->data != NULL);
-                memcpy(&ui, gobj->data, sizeof(ui));
-                if (!SSFJsonPrintUInt(js, size, start, &start, ui, false)) return false;
-            }
-            break;
-        case SSF_OBJ_TYPE_INT:
-            {
-                uint64_t i64;
-
-                SSF_ASSERT(gobj->data != NULL);
-                memcpy(&i64, gobj->data, sizeof(i64));
-                if (!SSFJsonPrintInt(js, size, start, &start, i64, false)) return false;
-            }
-            break;
-        case SSF_OBJ_TYPE_FLOAT:
-            {
-                double d64;
-
-                SSF_ASSERT(gobj->data != NULL);
-                memcpy(&d64, gobj->data, sizeof(d64));
-                if (!SSFJsonPrintDouble(js, size, start, &start, d64, SSF_JSON_FLT_FMT_STD, false)) return false;
-            }
-            break;
-        case SSF_OBJ_TYPE_OBJECT:
-            if (!SSFJsonPrintCString(js, size, start, &start, "{", comma)) return false;
-            *comma = false;
-            item = SSF_LL_HEAD(&(gobj->children));
-            while (item != NULL)
-            {
-                next = SSF_LL_NEXT_ITEM(item);
-                if (!SSFGObjToJson(js, size, start, &start, (SSFGObj_t *)item, comma)) return false;
-                *comma = true;
-                item = next;
-            }
-            if (!SSFJsonPrintCString(js, size, start, &start, "}", false)) return false;
-            break;
-        case SSF_OBJ_TYPE_ARRAY:
-            if (!SSFJsonPrintCString(js, size, start, &start, "[", comma)) return false;
-            *comma = false;
-            item = SSF_LL_HEAD(&(gobj->children));
-            while (item != NULL)
-            {
-                next = SSF_LL_NEXT_ITEM(item);
-                if (!SSFGObjToJson(js, size, start, &start, (SSFGObj_t *)item, comma)) return false;
-                *comma = true;
-                item = next;
-            }
-            if (!SSFJsonPrintCString(js, size, start, &start, "]", false)) return false;
-            *comma = true;
-            break;
-        default:
-            SSF_ERROR();
-    };
-
-    *end = start;
-    return true;
-}
-#endif
-
-/* --------------------------------------------------------------------------------------------- */
-/* --------------------------------------------------------------------------------------------- */
-static void _SSFGObjIterate(SSFGObj_t *gobj, SSFGObjIterateFn_t iterateCallback, SSFLL_t *path, uint8_t depth)
+static bool _SSFGObjIterate(SSFGObj_t *gobj, SSFGObjIterateFn_t iterateCallback, SSFLL_t *path,
+                            uint8_t depth)
 {
     SSFLLItem_t *item;
     SSFLLItem_t *next;
@@ -683,13 +596,16 @@ static void _SSFGObjIterate(SSFGObj_t *gobj, SSFGObjIterateFn_t iterateCallback,
     SSF_REQUIRE(path != NULL);
     SSF_REQUIRE(iterateCallback != NULL);
 
+    /* Return if depth too much */
+    if (depth >= SSF_GOBJ_CONFIG_MAX_IN_DEPTH) return false;
+
     memset(&pathItem, 0, sizeof(pathItem));
     pathItem.index = -1;
 
     pathItem.gobj = gobj;
-    SSFLLPutItem(path, (SSFLLItem_t*)&pathItem, SSF_LL_LOC_TAIL, NULL);
-    iterateCallback(gobj, path, depth);
-    SSFLLGetItem(path, (SSFLLItem_t**)&tmp, SSF_LL_LOC_TAIL, NULL);
+    SSFLLPutItem(path, (SSFLLItem_t *)&pathItem, SSF_LL_LOC_TAIL, NULL);
+    iterateCallback(gobj, path);
+    SSFLLGetItem(path, (SSFLLItem_t **)&tmp, SSF_LL_LOC_TAIL, NULL);
 
     item = SSF_LL_HEAD(&(gobj->children));
     while (item != NULL)
@@ -701,21 +617,28 @@ static void _SSFGObjIterate(SSFGObj_t *gobj, SSFGObjIterateFn_t iterateCallback,
             pathItem.index++;
         }
         SSFLLPutItem(path, (SSFLLItem_t *)&pathItem, SSF_LL_LOC_TAIL, NULL);
-        _SSFGObjIterate((SSFGObj_t*)item, iterateCallback, path, depth + 1);
+        _SSFGObjIterate((SSFGObj_t *)item, iterateCallback, path, depth + 1);
         SSFLLGetItem(path, (SSFLLItem_t **)&tmp, SSF_LL_LOC_TAIL, NULL);
         item = next;
     }
+    return true;
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Returns true if iteration successful over every node in the object tree else false            */
 /* --------------------------------------------------------------------------------------------- */
-void SSFGObjIterate(SSFGObj_t *gobj, SSFGObjIterateFn_t iterateCallback, uint8_t depth)
+bool SSFGObjIterate(SSFGObj_t *gobj, SSFGObjIterateFn_t iterateCallback)
 {
+    bool retVal;
     SSFLL_t path;
 
-    SSFLLInit(&path, SSF_GOBJ_CONFIG_MAX_IN_DEPTH);
+    SSF_REQUIRE(gobj != NULL);
+    SSF_REQUIRE(iterateCallback != NULL);
 
-    _SSFGObjIterate(gobj, iterateCallback, &path, depth);
-
+    SSFLLInit(&path, SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1);
+    retVal = _SSFGObjIterate(gobj, iterateCallback, &path, 0);
     SSFLLDeInit(&path);
+
+    return retVal;
 }
+

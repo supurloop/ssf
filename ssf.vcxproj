@@ -204,6 +204,7 @@
   <ItemGroup>
     <ClInclude Include="ssf.h" />
     <ClInclude Include="ssfassert.h" />
+    <ClInclude Include="ssfoptions.h" />
     <ClInclude Include="ssfport.h" />
     <ClInclude Include="ssfversion.h" />
     <ClInclude Include="_codec\ssfbase64.h" />

@@ -43,11 +43,6 @@ extern "C"
 #include "ssfll.h"
 
 /* --------------------------------------------------------------------------------------------- */
-/* Defines                                                                                       */
-/* --------------------------------------------------------------------------------------------- */
-#define SSF_GOBJ_CONFIG_MAX_IN_DEPTH (6u) // move to options file
-
-/* --------------------------------------------------------------------------------------------- */
 /* Structs                                                                                       */
 /* --------------------------------------------------------------------------------------------- */
 typedef enum
@@ -71,7 +66,6 @@ typedef struct
     SSFLLItem_t item;
     char *labelCStr;
     void *data;
-    //SSFLL_t peers;
     SSFLL_t children;
     SSFObjType_t dataType;
     size_t dataSize;
@@ -80,16 +74,16 @@ typedef struct
 typedef struct
 {
     SSFLLItem_t item;
-    SSFGObj_t* gobj;
+    SSFGObj_t *gobj;
     int32_t index;
 } SSFGObjPathItem_t;
 
-typedef void (*SSFGObjIterateFn_t)(SSFGObj_t *gobj, SSFLL_t *path, uint8_t depth);
+typedef void (*SSFGObjIterateFn_t)(SSFGObj_t *gobj, SSFLL_t *path);
 
 /* --------------------------------------------------------------------------------------------- */
 /* Public Interface                                                                              */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFGObjInit(SSFGObj_t **gobj, /*uint16_t maxPeers,*/ uint16_t maxChildren);
+bool SSFGObjInit(SSFGObj_t **gobj, uint16_t maxChildren);
 void SSFGObjDeInit(SSFGObj_t **gobj);
 
 /* Object label accessors */
@@ -99,7 +93,7 @@ bool SSFGObjGetLabel(SSFGObj_t *gobj, SSFCStrOut_t labelCStrOut, size_t labelCSt
 /* Object value accessors */
 SSFObjType_t SSFGObjGetType(SSFGObj_t *gobj);
 size_t SSFGObjGetSize(SSFGObj_t *gobj);
-bool SSFGObjSetNone(SSFGObj_t* gobj);
+bool SSFGObjSetNone(SSFGObj_t *gobj);
 bool SSFGObjSetString(SSFGObj_t *gobj, SSFCStrIn_t valueCStr);
 bool SSFGObjGetString(SSFGObj_t *gobj, SSFCStrOut_t valueCStrOut, size_t labelCStrOutSize);
 bool SSFGObjSetInt(SSFGObj_t *gobj, int64_t value);
@@ -108,21 +102,22 @@ bool SSFGObjSetUInt(SSFGObj_t *gobj, uint64_t value);
 bool SSFGObjGetUInt(SSFGObj_t *gobj, uint64_t *valueOut);
 bool SSFGObjSetFloat(SSFGObj_t *gobj, double value);
 bool SSFGObjGetFloat(SSFGObj_t *gobj, double *valueOut);
-bool SSFGObjSetBool(SSFGObj_t* gobj, bool value);
-bool SSFGObjGetBool(SSFGObj_t* gobj, bool *valueOut);
-bool SSFGObjSetBin(SSFGObj_t* gobj, uint8_t* value, size_t valueLen);
-bool SSFGObjGetBin(SSFGObj_t* gobj, uint8_t* valueOut, size_t valueSize, size_t* valueLenOutOpt);
-bool SSFGObjSetNull(SSFGObj_t* gobj);
+bool SSFGObjSetBool(SSFGObj_t *gobj, bool value);
+bool SSFGObjGetBool(SSFGObj_t *gobj, bool *valueOut);
+bool SSFGObjSetBin(SSFGObj_t *gobj, uint8_t *value, size_t valueLen);
+bool SSFGObjGetBin(SSFGObj_t *gobj, uint8_t *valueOut, size_t valueSize, size_t *valueLenOutOpt);
+bool SSFGObjSetNull(SSFGObj_t *gobj);
 bool SSFGObjSetObject(SSFGObj_t *gobj);
 bool SSFGObjSetArray(SSFGObj_t *gobj);
+
+/* Object children accessors */
 bool SSFGObjInsertChild(SSFGObj_t *gobjParent, SSFGObj_t *gobjChild);
-bool SSFGObjRemoveChild(SSFGObj_t* gobjParent, SSFGObj_t* gobjChild);
-bool SSFGObjFindPath(SSFGObj_t* gobjRoot, SSFCStrIn_t* path, SSFGObj_t** gobjParentOut, SSFGObj_t* * gobjChildOut);
-void SSFGObjIterate(SSFGObj_t* gobj, SSFGObjIterateFn_t iterateCallback, uint8_t depth);
+bool SSFGObjRemoveChild(SSFGObj_t *gobjParent, SSFGObj_t *gobjChild);
 
-//bool SSFGObjToJson(SSFCStrOut_t js, size_t size, size_t start, size_t *end, SSFGObj_t *gobj,
-//                   bool *comma);
-
+/* Find and parse */
+bool SSFGObjFindPath(SSFGObj_t *gobjRoot, SSFCStrIn_t *path, SSFGObj_t **gobjParentOut,
+                     SSFGObj_t **gobjChildOut);
+bool SSFGObjIterate(SSFGObj_t *gobj, SSFGObjIterateFn_t iterateCallback);
 
 /* --------------------------------------------------------------------------------------------- */
 /* Unit test                                                                                     */

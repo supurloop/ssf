@@ -33,14 +33,35 @@
 #include "ssfport.h"
 #include "ssfgobj.h"
 
+#define SSFGOBJ_UT_NUM_OBJS (4u)
+static const char *_checkPathCStrs[SSFGOBJ_UT_NUM_OBJS] =
+{
+    "",
+    ".child1",
+    ".child1[0]",
+    ".child1[0].child3"
+};
+
+static const SSFObjType_t _checkPathTypes[SSFGOBJ_UT_NUM_OBJS] =
+{
+    SSF_OBJ_TYPE_OBJECT,
+    SSF_OBJ_TYPE_ARRAY,
+    SSF_OBJ_TYPE_OBJECT,
+    SSF_OBJ_TYPE_INT
+};
+
+uint8_t _ssfgobj_utPathIndex;
 
 /* --------------------------------------------------------------------------------------------- */
+/* Checks the path context.                                                                      */
 /* --------------------------------------------------------------------------------------------- */
-void SSFGObjPathToString(SSFLL_t* path)
+void checkPath(SSFLL_t *path)
 {
-    SSFGObjPathItem_t* pi;
-    SSFLLItem_t* item;
-    SSFLLItem_t* next;
+    SSFGObjPathItem_t *pi;
+    SSFLLItem_t *item;
+    SSFLLItem_t *next;
+    size_t len;
+    char pathCStr[128] = "";
 
     SSF_REQUIRE(path != NULL);
 
@@ -48,43 +69,39 @@ void SSFGObjPathToString(SSFLL_t* path)
     while (item != NULL)
     {
         next = SSF_LL_NEXT_ITEM(item);
-        pi = (SSFGObjPathItem_t*)item;
+        pi = (SSFGObjPathItem_t *)item;
         if (pi->gobj->labelCStr != NULL)
         {
-            printf(".%s", pi->gobj->labelCStr);
+            len = strlen(pathCStr);
+            snprintf(pathCStr + len, sizeof(pathCStr) - len, ".%s", pi->gobj->labelCStr);
         }
         if (pi->index >= 0)
         {
-            printf("[%d]", pi->index);
+            len = strlen(pathCStr);
+            snprintf(pathCStr + len, sizeof(pathCStr) - len, "[%d]", pi->index);
         }
         item = next;
     }
+    SSF_ASSERT(_ssfgobj_utPathIndex < SSFGOBJ_UT_NUM_OBJS);
+    len = SSF_MIN(strlen(pathCStr), strlen(_checkPathCStrs[_ssfgobj_utPathIndex]));
+    SSF_ASSERT(strncmp(pathCStr, _checkPathCStrs[_ssfgobj_utPathIndex], len + 1) == 0);
 }
 
-void iterateCallback(SSFGObj_t* gobj, SSFLL_t* path, uint8_t depth)
+/* --------------------------------------------------------------------------------------------- */
+/* Iterate callback.                                                                             */
+/* --------------------------------------------------------------------------------------------- */
+void iterateCallback(SSFGObj_t *gobj, SSFLL_t *path)
 {
     SSFObjType_t dataType;
 
-    SSF_UNUSED(depth);
     SSF_REQUIRE(gobj != NULL);
 
     dataType = SSFGObjGetType(gobj);
 
-    SSFGObjPathToString(path);
-    printf(" : ");
-    switch (gobj->dataType)
-    {
-    case SSF_OBJ_TYPE_UINT:
-    {
-        uint64_t u64;
-        SSFGObjGetUInt(gobj, &u64);
-        printf("%llud 0x%08llX", u64, u64);
-    }
-    break;
-    default:
-        break;
-    }
-    printf("\r\n");
+    checkPath(path);
+    SSF_ASSERT(_ssfgobj_utPathIndex < SSFGOBJ_UT_NUM_OBJS);
+    SSF_ASSERT(gobj->dataType == _checkPathTypes[_ssfgobj_utPathIndex]);
+    _ssfgobj_utPathIndex++;
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -100,15 +117,15 @@ void SSFGObjUnitTest(void)
     double f64;
     bool b;
     size_t binLen;
-    SSFGObj_t* gobj = (SSFGObj_t*)1;
-    SSFGObj_t* gobjChild1 = NULL;
-    SSFGObj_t* gobjChild2 = NULL;
-    SSFGObj_t* gobjChild3 = NULL;
-    SSFGObj_t* gobjParentOut = NULL;
-    SSFGObj_t* gobjChildOut = NULL;
+    SSFGObj_t *gobj = (SSFGObj_t *)1;
+    SSFGObj_t *gobjChild1 = NULL;
+    SSFGObj_t *gobjChild2 = NULL;
+    SSFGObj_t *gobjChild3 = NULL;
+    SSFGObj_t *gobjParentOut = NULL;
+    SSFGObj_t *gobjChildOut = NULL;
     size_t aidx1;
     size_t aidx2;
-    char* path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
+    char *path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
 
     /* Test SSFGObjInit() and SSFGObjDeInit() */
     SSF_ASSERT_TEST(SSFGObjInit(NULL, 0));
@@ -469,11 +486,11 @@ void SSFGObjUnitTest(void)
     SSF_ASSERT_TEST(SSFGObjFindPath(gobj, path, &gobjParentOut, &gobjChildOut));
     path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH] = NULL;
     SSF_ASSERT_TEST(SSFGObjFindPath(gobj, path, NULL, &gobjChildOut));
-    gobjParentOut = (void*)1;
+    gobjParentOut = (void *)1;
     SSF_ASSERT_TEST(SSFGObjFindPath(gobj, path, &gobjParentOut, &gobjChildOut));
     gobjParentOut = NULL;
     SSF_ASSERT_TEST(SSFGObjFindPath(gobj, path, &gobjParentOut, NULL));
-    gobjChildOut = (void*)1;
+    gobjChildOut = (void *)1;
     SSF_ASSERT_TEST(SSFGObjFindPath(gobj, path, &gobjParentOut, &gobjChildOut));
     gobjChildOut = NULL;
 
@@ -520,7 +537,7 @@ void SSFGObjUnitTest(void)
     /* [c1, c2, c3] */
     SSF_ASSERT(SSFGObjSetArray(gobj));
 
-    path[0] = (char*)&aidx1;
+    path[0] = (char *)&aidx1;
     aidx1 = 0;
     gobjParentOut = NULL;
     gobjChildOut = NULL;
@@ -558,21 +575,21 @@ void SSFGObjUnitTest(void)
     SSF_ASSERT(SSFGObjSetArray(gobjChild2));
     SSF_ASSERT(SSFGObjInsertChild(gobjChild2, gobjChild3));
 
-    path[0] = (char*)"child1";
+    path[0] = (char *)"child1";
     gobjParentOut = NULL;
     gobjChildOut = NULL;
     SSF_ASSERT(SSFGObjFindPath(gobj, path, &gobjParentOut, &gobjChildOut));
     SSF_ASSERT(gobjParentOut == gobj);
     SSF_ASSERT(gobjChildOut == gobjChild1);
 
-    path[1] = (char*)"child2";
+    path[1] = (char *)"child2";
     gobjParentOut = NULL;
     gobjChildOut = NULL;
     SSF_ASSERT(SSFGObjFindPath(gobj, path, &gobjParentOut, &gobjChildOut));
     SSF_ASSERT(gobjParentOut == gobjChild1);
     SSF_ASSERT(gobjChildOut == gobjChild2);
 
-    path[2] = (char*)&aidx1;
+    path[2] = (char *)&aidx1;
     aidx1 = 0;
     gobjParentOut = NULL;
     gobjChildOut = NULL;
@@ -607,8 +624,8 @@ void SSFGObjUnitTest(void)
     /* {c1:[c2:[c3]]} */
     SSF_ASSERT(SSFGObjSetArray(gobjChild1));
     path[0] = "child1";
-    path[1] = (char*)&aidx1;
-    path[2] = (char*)&aidx2;
+    path[1] = (char *)&aidx1;
+    path[2] = (char *)&aidx2;
     aidx1 = 0;
     aidx2 = 0;
     gobjParentOut = NULL;
@@ -655,101 +672,13 @@ void SSFGObjUnitTest(void)
     /* Test SSFGObjIterate() {c1:[c2:{c3}]} */
     SSFGObjSetObject(gobjChild2);
     SSFGObjSetLabel(gobjChild2, NULL);
-    //SSFGObjIterate(gobj, iterateCallback, 0);
+
+    SSF_ASSERT_TEST(SSFGObjIterate(NULL, iterateCallback));
+    SSF_ASSERT_TEST(SSFGObjIterate(gobj, NULL));
+    SSF_ASSERT(SSFGObjIterate(gobj, iterateCallback));
+    SSF_ASSERT(_ssfgobj_utPathIndex == SSFGOBJ_UT_NUM_OBJS);
 
     SSFGObjDeInit(&gobj);
     SSF_ASSERT(SSFGObjIsMemoryBalanced());
-
-#if 0
-    SSFGObj_t* gobj = NULL;
-    SSFGObj_t* gobjPeer = NULL;
-    SSFGObj_t* gobjPeer2 = NULL;
-    SSFGObj_t* gobjChild = NULL;
-    SSFGObj_t* gobjChild2 = NULL;
-    uint64_t valueOut;
-    int64_t i64;
-    double d64;
-    char str[2000];
-    size_t length;
-    bool comma = false;
-
-    SSF_ASSERT(SSFGObjInit(&gobj, 10, 10));
-    SSF_ASSERT(SSFGObjSetLabel(gobj, "label"));
-    SSF_ASSERT(SSFGObjSetString(gobj, "value"));
-
-    length = 0;
-    comma = false;
-    SSF_ASSERT(SSFGObjToJson(str, sizeof(str), length, &length, gobj, &comma));
-
-
-    SSF_ASSERT(SSFGObjSetUInt(gobj, 0x11223344));
-    SSF_ASSERT(SSFGObjGetUInt(gobj, &valueOut));
-
-    length = 0;
-    comma = false;
-    SSF_ASSERT(SSFGObjToJson(str, sizeof(str), length, &length, gobj, &comma));
-
-
-    SSF_ASSERT(SSFGObjInit(&gobjPeer, 10, 10));
-
-    SSF_ASSERT(SSFGObjInsertPeer(gobj, gobjPeer));
-
-    SSF_ASSERT(SSFGObjSetObject(gobjPeer));
-
-    SSF_ASSERT(SSFGObjInit(&gobjChild, 1, 1));
-    SSF_ASSERT(SSFGObjSetLabel(gobjChild, "childlabel"));
-    SSF_ASSERT(SSFGObjSetUInt(gobjChild, 12345));
-
-    SSF_ASSERT(SSFGObjInit(&gobjChild2, 1, 1));
-    SSF_ASSERT(SSFGObjSetLabel(gobjChild2, "childlabel2"));
-    SSF_ASSERT(SSFGObjSetUInt(gobjChild2, 67890));
-
-    SSF_ASSERT(SSFGObjInsertChild(gobjPeer, gobjChild));
-    SSF_ASSERT(SSFGObjInsertChild(gobjPeer, gobjChild2));
-
-    length = 0;
-    comma = false;
-    SSF_ASSERT(SSFGObjToJson(str, sizeof(str), length, &length, gobjChild, &comma));
-
-    length = 0;
-    comma = false;
-    SSF_ASSERT(SSFGObjToJson(str, sizeof(str), length, &length, gobjPeer, &comma));
-
-    length = 0;
-    comma = false;
-    SSF_ASSERT(SSFGObjToJson(str, sizeof(str), length, &length, gobj, &comma));
-
-    SSF_ASSERT(SSFGObjInit(&gobjPeer2, 1, 1));
-    SSF_ASSERT(SSFGObjSetLabel(gobjPeer2, "peerlabel2"));
-    SSF_ASSERT(SSFGObjSetInt(gobjPeer2, -11223344));
-    SSF_ASSERT(SSFGObjGetInt(gobjPeer2, &i64));
-    SSF_ASSERT(SSFGObjInsertPeer(gobjPeer, gobjPeer2));
-    gobjPeer2 = NULL;
-    SSF_ASSERT(SSFGObjInit(&gobjPeer2, 1, 1));
-    SSF_ASSERT(SSFGObjSetLabel(gobjPeer2, "peerlabeldouble2"));
-    SSF_ASSERT(SSFGObjSetFloat(gobjPeer2, -1.0987));
-    SSF_ASSERT(SSFGObjGetFloat(gobjPeer2, &d64));
-    SSF_ASSERT(SSFGObjInsertPeer(gobjPeer, gobjPeer2));
-    gobjPeer2 = NULL;
-    SSF_ASSERT(SSFGObjInit(&gobjPeer2, 1, 10));
-    SSF_ASSERT(SSFGObjSetLabel(gobjPeer2, "peerarray2"));
-    SSF_ASSERT(SSFGObjSetArray(gobjPeer2));
-    SSF_ASSERT(SSFGObjInsertPeer(gobjPeer, gobjPeer2));
-    gobjChild = NULL;
-    SSF_ASSERT(SSFGObjInit(&gobjChild, 1, 1));
-    SSF_ASSERT(SSFGObjSetUInt(gobjChild, 1));
-    SSF_ASSERT(SSFGObjInsertChild(gobjPeer2, gobjChild));
-
-    length = 0;
-    comma = false;
-    SSF_ASSERT(SSFGObjToJson(str, sizeof(str), length, &length, gobj, &comma));
-
-    SSFGObjIterate(gobj, iterateCallback, 0);
-
-
-    SSFGObjDeInit(&gobj);
-
-#endif
-
-
 }
+

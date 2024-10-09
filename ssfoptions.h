@@ -390,6 +390,12 @@ typedef enum
 /* Sets the maximum size of the heap for unit test. */
 #define SSF_HEAP_MAX_SIZE_FOR_UNIT_TEST (4224u)
 
+/* --------------------------------------------------------------------------------------------- */
+/* Configure ssfgobj's interface                                                                 */
+/* --------------------------------------------------------------------------------------------- */
+/* Define the maximum parse depth, each nexted object or array starts a new depth level. */
+#define SSF_GOBJ_CONFIG_MAX_IN_DEPTH (4u)
+
 #ifdef __cplusplus
 }
 #endif

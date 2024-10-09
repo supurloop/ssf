@@ -38,6 +38,7 @@ The framework implements a number of common embedded system functions:
 23. An integer to decimal string interface.
 24. An safe C string interface.
 25. A debuggable, integrity checked heap interface.
+25. BETA: A generic object parser/generater interface.
 
 To give you an idea of the framework size here are some program memory estimates for each component compiled on an MSP430 with Level 3 optimization:
 Byte FIFO, linked list, memory pool, Base64, Hex ASCII are each about 1000 bytes.
@@ -1322,6 +1323,12 @@ Designed to work on 8, 16, 32, and 64-bit machine word sizes, and allows up to 3
 
     SSFHeapDeInit(&heapHandle, false);
 ```
+
+### Generic Object Parser/Generator Interface
+
+Note: This is in BETA and is still under development.
+
+This interface allows a generic hierarchical object structure to be generated and parsed. It is meant to be a representation that can easily translate between other encoding types like JSON and UBJSON, and it is more flexible when modifications to data elements is desired.
 
 ## Conclusion
 

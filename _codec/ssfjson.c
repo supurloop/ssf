@@ -373,8 +373,8 @@ SSFJsonType_t SSFJsonGetType(SSFCStrIn_t js, SSFCStrIn_t *path)
     SSFJsonType_t jt;
 
     SSF_REQUIRE(js != NULL);
-    SSF_REQUIRE(path[SSF_JSON_CONFIG_MAX_IN_DEPTH] == NULL);
     SSF_REQUIRE(path != NULL);
+    SSF_REQUIRE(path[SSF_JSON_CONFIG_MAX_IN_DEPTH] == NULL);
 
     if (!SSFJsonMessage(js, &index, &start, &end, path, 0, &jt)) jt = SSF_JSON_TYPE_ERROR;
     return jt;

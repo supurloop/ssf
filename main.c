@@ -58,6 +58,7 @@
 #include "ssfdec.h"
 #include "ssfstr.h"
 #include "ssfheap.h"
+#include "ssfgobj.h"
 
 typedef struct
 {
@@ -68,6 +69,22 @@ typedef struct
 
 SSFUnitTest_t unitTests[] =
 {
+#if SSF_CONFIG_GOBJ_UNIT_TEST == 1
+    { "ssfgobj", "Generic Object Codec", SSFGObjUnitTest },
+#endif /* SSF_CONFIG_UBJSON_UNIT_TEST */
+
+#if SSF_CONFIG_UBJSON_UNIT_TEST == 1
+    { "ssfubjson", "Universal Binary JSON Codec", SSFUBJsonUnitTest },
+#endif /* SSF_CONFIG_UBJSON_UNIT_TEST */
+
+#if SSF_CONFIG_HEX_UNIT_TEST == 1
+    { "ssfhex", "Hex String Codec", SSFHexUnitTest },
+#endif /* SSF_CONFIG_BASE64_UNIT_TEST */
+
+#if SSF_CONFIG_JSON_UNIT_TEST == 1
+    { "ssfjson", "JSON Codec", SSFJsonUnitTest },
+#endif /* SSF_CONFIG_JSON_UNIT_TEST */
+
 #if SSF_CONFIG_HEAP_UNIT_TEST == 1
     { "ssfheap", "Integrity Checked Heap", SSFHeapUnitTest },
 #endif /* SSF_CONFIG_STR_UNIT_TEST */
@@ -95,14 +112,6 @@ SSFUnitTest_t unitTests[] =
 #if SSF_CONFIG_BASE64_UNIT_TEST == 1
     { "ssfbase64", "Base64 Codec", SSFBase64UnitTest },
 #endif /* SSF_CONFIG_BASE64_UNIT_TEST */
-
-#if SSF_CONFIG_HEX_UNIT_TEST == 1
-    { "ssfhex", "Hex String Codec", SSFHexUnitTest },
-#endif /* SSF_CONFIG_BASE64_UNIT_TEST */
-
-#if SSF_CONFIG_JSON_UNIT_TEST == 1
-    { "ssfjson", "JSON Codec", SSFJsonUnitTest },
-#endif /* SSF_CONFIG_JSON_UNIT_TEST */
 
 #if SSF_CONFIG_FCSUM_UNIT_TEST == 1
     { "ssffcsum", "Fletcher's Checksum", SSFFCSumUnitTest },
@@ -151,10 +160,6 @@ SSFUnitTest_t unitTests[] =
 #if SSF_CONFIG_INI_UNIT_TEST == 1
     { "ssfini", "INI Codec", SSFINIUnitTest },
 #endif /* SSF_CONFIG_INI_UNIT_TEST */
-
-#if SSF_CONFIG_UBJSON_UNIT_TEST == 1
-    { "ssfubjson", "Universal Binary JSON Codec", SSFUBJsonUnitTest },
-#endif /* SSF_CONFIG_UBJSON_UNIT_TEST */
 
 #if SSF_CONFIG_RTC_UNIT_TEST == 1
     { "ssfrtc", "RTC", SSFRTCUnitTest },

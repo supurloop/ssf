@@ -69,6 +69,10 @@ typedef struct
 
 SSFUnitTest_t unitTests[] =
 {
+#if SSF_CONFIG_STR_UNIT_TEST == 1
+    { "ssfstr", "Safe C Strings", SSFStrUnitTest },
+#endif /* SSF_CONFIG_STR_UNIT_TEST */
+
 #if SSF_CONFIG_GOBJ_UNIT_TEST == 1
     { "ssfgobj", "Generic Object Codec", SSFGObjUnitTest },
 #endif /* SSF_CONFIG_UBJSON_UNIT_TEST */
@@ -87,10 +91,6 @@ SSFUnitTest_t unitTests[] =
 
 #if SSF_CONFIG_HEAP_UNIT_TEST == 1
     { "ssfheap", "Integrity Checked Heap", SSFHeapUnitTest },
-#endif /* SSF_CONFIG_STR_UNIT_TEST */
-
-#if SSF_CONFIG_STR_UNIT_TEST == 1
-    { "ssfstr", "Safe C Strings", SSFStrUnitTest },
 #endif /* SSF_CONFIG_STR_UNIT_TEST */
 
 #if SSF_CONFIG_DEC_UNIT_TEST == 1

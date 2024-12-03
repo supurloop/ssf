@@ -33,147 +33,262 @@
 #include "ssfport.h"
 #include "ssfstr.h"
 
+#define SSF_STR_MAGIC (0x43735472)
+
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if length determined and cstrLenOut set, else false if NULL terminator not found.*/
+/* Initializes strbuf struct with cstr buffer.                                                   */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFStrLen(SSFCStrIn_t cstr, size_t cstrSize, size_t *cstrLenOut)
+bool SSFStrInit(SSFCStrBuf_t* sbOut, const SSFCStr_t cstr, size_t cstrSize, bool isConst)
 {
+    size_t i;
+
+    SSF_REQUIRE(sbOut != NULL);
+    SSF_REQUIRE(sbOut->ptr == NULL);
+    SSF_REQUIRE(sbOut->len == 0);
+    SSF_REQUIRE(sbOut->size == 0);
+    SSF_REQUIRE(sbOut->magic == 0);
     SSF_REQUIRE(cstr != NULL);
-    SSF_REQUIRE(cstrLenOut != NULL);
+    SSF_REQUIRE(cstrSize != 0);
+    SSF_REQUIRE(cstrSize <= SSF_STR_MAX_SIZE);
 
-    *cstrLenOut = 0;
-    while (cstrSize > 0)
+    /* Is string buffer a constant? */
+    if (isConst)
     {
-        if (*cstr == 0) { return true; }
-        cstr++;
-        (*cstrLenOut)++;
-        cstrSize--;
+        /* Yes, ensure const str is NULL terminated */
+        for (i = 0; i < cstrSize; i++)
+        {
+            if (cstr[i] == 0) break;
+        }
+        if (i == cstrSize) return false;
+        sbOut->ptr = cstr;
+        sbOut->size = cstrSize;
+        sbOut->len = i;
     }
-
-    return false;
-}
-
-/* --------------------------------------------------------------------------------------------- */
-/* Returns true if src fully catted to dst with NULL terminator cstrDstOutLenOut set, else false.*/
-/* --------------------------------------------------------------------------------------------- */
-bool SSFStrCat(SSFCStrOut_t cstrDstOut, size_t cstrDstOutSize, size_t *cstrDstOutLenOut,
-               SSFCStrIn_t cstrSrc, size_t cstrSrcSize)
-{
-    size_t dstLen;
-    size_t srcLen;
-
-    SSF_REQUIRE(cstrDstOut != NULL);
-    SSF_REQUIRE(cstrDstOutLenOut != NULL);
-    SSF_REQUIRE(cstrSrc != NULL);
-
-    /* Determine length of dst */
-    if (SSFStrLen(cstrDstOut, cstrDstOutSize, &dstLen) == false) return false;
-
-    /* Determine length of src */
-    if (SSFStrLen(cstrSrc, cstrSrcSize, &srcLen) == false) return false;
-
-    /* Will src fully cat to dst? */
-    if ((dstLen + srcLen) >= cstrDstOutSize) return false;
-
-    /* Perform cat, update out len, and NULL terminate dst */
-    memcpy(&cstrDstOut[dstLen], cstrSrc, srcLen);
-    *cstrDstOutLenOut = dstLen + srcLen;
-    cstrDstOut[*cstrDstOutLenOut] = 0;
-
+    else
+    {
+        /* No, ensure NULL termination and keep whatever string is in buffer */
+        cstr[cstrSize - 1] = 0;
+        sbOut->ptr = cstr;
+        sbOut->size = cstrSize;
+        sbOut->len = strlen(cstr);
+    }
+    sbOut->isConst = isConst;
+    sbOut->isHeap = false;
+    sbOut->magic = SSF_STR_MAGIC;
     return true;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if src fully copied to dst with NULL terminator cstrDstOutLenOut set, else false.*/
 /* --------------------------------------------------------------------------------------------- */
-bool SSFStrCpy(SSFCStrOut_t cstrDstOut, size_t cstrDstOutSize, size_t *cstrDstOutLenOut,
-               SSFCStrIn_t cstrSrc, size_t cstrSrcSize)
+bool SSFStrInitHeap(SSFCStrBuf_t* sbOut, size_t size, const SSFCStr_t initCstr, size_t initCstrSize)
 {
-    size_t dstLen;
-    size_t srcLen;
+    SSFCStr_t cstr;
+    size_t i = 0;
 
-    SSF_REQUIRE(cstrDstOut != NULL);
-    SSF_REQUIRE(cstrDstOutLenOut != NULL);
-    SSF_REQUIRE(cstrSrc != NULL);
+    SSF_REQUIRE(sbOut != NULL);
+    SSF_REQUIRE(sbOut->ptr == NULL);
+    SSF_REQUIRE(sbOut->len == 0);
+    SSF_REQUIRE(sbOut->size == 0);
+    SSF_REQUIRE(sbOut->magic == 0);
+    SSF_REQUIRE(size != 0);
+    SSF_REQUIRE(size <= SSF_STR_MAX_SIZE);
+    SSF_REQUIRE(((initCstr == NULL) && (initCstrSize == 0)) ||
+                ((initCstr != NULL) && ((initCstrSize > 0) && (initCstrSize <= SSF_STR_MAX_SIZE))));
 
-    /* Determine length of dst */
-    if (SSFStrLen(cstrDstOut, cstrDstOutSize, &dstLen) == false) return false;
+    if (initCstr != NULL)
+    {
+        /* Ensure const str is NULL terminated */
+        for (i = 0; i < initCstrSize; i++)
+        {
+            if (initCstr[i] == 0) break;
+        }
+        if (i == initCstrSize) return false;
 
-    /* Determine length of src */
-    if (SSFStrLen(cstrSrc, cstrSrcSize, &srcLen) == false) return false;
+        /* Init str fits? */
+        if (i >= size) return false;
+    }
+
+    /* Can we allocate memory for string? */
+    cstr = (SSFCStr_t)SSF_MALLOC(size);
+    if (cstr == NULL) return false;
+
+    if (initCstr != NULL)
+    {
+        memcpy(cstr, initCstr, i);
+        memset(&cstr[i], 0, size - i);
+        sbOut->ptr = cstr;
+        sbOut->size = size;
+        sbOut->len = i;
+    }
+    else
+    {
+        memset(cstr, 0, size);
+        sbOut->ptr = cstr;
+        sbOut->size = size;
+        sbOut->len = 0;
+    }
+    sbOut->isConst = false;
+    sbOut->isHeap = true;
+    sbOut->magic = SSF_STR_MAGIC;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Deinitializes strbuf struct.                                                                  */
+/* --------------------------------------------------------------------------------------------- */
+void SSFStrDeInit(SSFCStrBuf_t *sbOut)
+{
+    SSF_REQUIRE(sbOut != NULL);
+    SSF_REQUIRE(sbOut->ptr != NULL);
+    SSF_REQUIRE(sbOut->len < sbOut->size);
+    SSF_REQUIRE((sbOut->size > 0) && (sbOut->size <= SSF_STR_MAX_SIZE));
+    SSF_REQUIRE(sbOut->magic == SSF_STR_MAGIC);
+    if (sbOut->isConst) SSF_REQUIRE(sbOut->isHeap == false);
+
+    if (sbOut->isHeap) SSF_FREE(sbOut->ptr);
+    memset(sbOut, 0, sizeof(SSFCStrBuf_t));
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns length of string in string buffer.                                                    */
+/* --------------------------------------------------------------------------------------------- */
+size_t SSFStrLen(const SSFCStrBuf_t *sb)
+{
+    SSF_REQUIRE(sb != NULL);
+    SSF_REQUIRE(sb->ptr != NULL);
+    SSF_REQUIRE(sb->len < sb->size);
+    SSF_REQUIRE(sb->magic == SSF_STR_MAGIC);
+    SSF_REQUIRE(sb->ptr[sb->len] == 0);
+
+    return sb->len;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Sets entire string buffer and len to 0.                                                       */
+/* --------------------------------------------------------------------------------------------- */
+void SSFStrClr(SSFCStrBuf_t *sbOut)
+{
+    SSF_REQUIRE(sbOut != NULL);
+    SSF_REQUIRE(sbOut->ptr != NULL);
+    SSF_REQUIRE(sbOut->len < sbOut->size);
+    SSF_REQUIRE(sbOut->magic == SSF_STR_MAGIC);
+    memset(sbOut->ptr, 0, sbOut->size);
+    sbOut->len = 0;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if src fully catted to dst with NULL terminator, else false.                     */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFStrCat(SSFCStrBuf_t* dstOut, const SSFCStrBuf_t* src)
+{
+    SSF_REQUIRE(dstOut != NULL);
+    SSF_REQUIRE(dstOut->ptr != NULL);
+    SSF_REQUIRE(dstOut->len < dstOut->size);
+    SSF_REQUIRE(dstOut->magic == SSF_STR_MAGIC);
+    SSF_REQUIRE(dstOut->ptr[dstOut->len] == 0);
+    SSF_REQUIRE(src != NULL);
+    SSF_REQUIRE(src->ptr != NULL);
+    SSF_REQUIRE(src->len < src->size);
+    SSF_REQUIRE(src->magic == SSF_STR_MAGIC);
+    SSF_REQUIRE(src->ptr[src->len] == 0);
+
+    /* Will src fully cat to dst? */
+    if ((dstOut->len + src->len) >= dstOut->size) return false;
+
+    /* Perform cat, update out len, and NULL terminate dst */
+    memcpy(&dstOut->ptr[dstOut->len], src->ptr, src->len);
+    dstOut->len += src->len;
+    dstOut->ptr[dstOut->len] = 0;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if src fully copied to dst with NULL terminator, else false.                     */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFStrCpy(SSFCStrBuf_t* dstOut, const SSFCStrBuf_t* src)
+{
+    SSF_REQUIRE(dstOut != NULL);
+    SSF_REQUIRE(dstOut->ptr != NULL);
+    SSF_REQUIRE(dstOut->len < dstOut->size);
+    SSF_REQUIRE(dstOut->magic == SSF_STR_MAGIC);
+    SSF_REQUIRE(dstOut->ptr[dstOut->len] == 0);
+    SSF_REQUIRE(src != NULL);
+    SSF_REQUIRE(src->ptr != NULL);
+    SSF_REQUIRE(src->len < src->size);
+    SSF_REQUIRE(src->magic == SSF_STR_MAGIC);
+    SSF_REQUIRE(src->ptr[src->len] == 0);
 
     /* Will src fully cpy to dst? */
-    if (srcLen >= cstrDstOutSize) return false;
+    if (src->len >= dstOut->size) return false;
 
     /* Perform cpy, update out len, and NULL terminate dst */
-    memcpy(cstrDstOut, cstrSrc, srcLen);
-    *cstrDstOutLenOut = srcLen;
-    cstrDstOut[*cstrDstOutLenOut] = 0;
-
+    memcpy(dstOut->ptr, src->ptr, src->len);
+    dstOut->len = src->len;
+    dstOut->ptr[dstOut->len] = 0;
     return true;
 }
 
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if both strings exactly match, else false.                                       */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFStrCmp(SSFCStrIn_t cstr1, size_t cstr1Size, SSFCStrIn_t cstr2, size_t cstr2Size)
+bool SSFStrCmp(const SSFCStrBuf_t* sb1, const SSFCStrBuf_t* sb2)
 {
-    size_t cstr1Len;
-    size_t cstr2Len;
-
-    SSF_REQUIRE(cstr1 != NULL);
-    SSF_REQUIRE(cstr2 != NULL);
-
-    /* Determine length of cstr1 */
-    if (SSFStrLen(cstr1, cstr1Size, &cstr1Len) == false) return false;
-
-    /* Determine length of cstr2 */
-    if (SSFStrLen(cstr2, cstr2Size, &cstr2Len) == false) return false;
+    SSF_REQUIRE(sb1 != NULL);
+    SSF_REQUIRE(sb1->ptr != NULL);
+    SSF_REQUIRE(sb1->len < sb1->size);
+    SSF_REQUIRE(sb1->magic == SSF_STR_MAGIC);
+    SSF_REQUIRE(sb1->ptr[sb1->len] == 0);
+    SSF_REQUIRE(sb2 != NULL);
+    SSF_REQUIRE(sb2->ptr != NULL);
+    SSF_REQUIRE(sb2->len < sb2->size);
+    SSF_REQUIRE(sb2->magic == SSF_STR_MAGIC);
+    SSF_REQUIRE(sb2->ptr[sb2->len] == 0);
 
     /* Same length? */
-    if (cstr1Len != cstr2Len) return false;
+    if (sb1->len != sb2->len) return false;
 
     /* Match exactly? */
-    return memcmp(cstr1, cstr2, cstr1Len) == 0;
+    return memcmp(sb1->ptr, sb2->ptr, sb1->len + 1) == 0;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if string converted to case, else false if NULL terminator not found.            */
+/* Converts sb to desired case.                                                                  */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFStrToCase(SSFCStrOut_t cstrOut, size_t cstrOutSize, SSFSTRCase_t toCase)
+void SSFStrToCase(SSFCStrBuf_t* dstOut, SSFStrCase_t toCase)
 {
     #define SSFSTR_UPPER_LOWER_DELTA ((int8_t)('a' - 'A'))
-    size_t cstrOutLen;
+    char *ptr;
+    size_t len;
 
-    SSF_REQUIRE(cstrOut != NULL);
+    SSF_REQUIRE(dstOut != NULL);
+    SSF_REQUIRE(dstOut->ptr != NULL);
+    SSF_REQUIRE(dstOut->len < dstOut->size);
+    SSF_REQUIRE(dstOut->magic == SSF_STR_MAGIC);
+    SSF_REQUIRE(dstOut->ptr[dstOut->len] == 0);
     SSF_REQUIRE((toCase > SSF_STR_CASE_MIN) && (toCase < SSF_STR_CASE_MAX));
 
-    /* Determine length of cstrOut */
-    if (SSFStrLen(cstrOut, cstrOutSize, &cstrOutLen) == false) return false;
-
+    ptr = dstOut->ptr;
+    len = dstOut->len;
     switch(toCase)
     {
         case SSF_STR_CASE_LOWER:
-            while (cstrOutLen > 0)
+            while (len > 0)
             {
-                if ((*cstrOut >= 'A') && (*cstrOut <= 'Z')) (*cstrOut) += SSFSTR_UPPER_LOWER_DELTA;
-                cstrOut++;
-                cstrOutLen--;
+                if ((*ptr >= 'A') && (*ptr <= 'Z')) (*ptr) += SSFSTR_UPPER_LOWER_DELTA;
+                ptr++;
+                len--;
             }
             break;
         case SSF_STR_CASE_UPPER:
-            while (cstrOutLen > 0)
+            while (len > 0)
             {
-                if ((*cstrOut >= 'a') && (*cstrOut <= 'z')) (*cstrOut) -= SSFSTR_UPPER_LOWER_DELTA;
-                cstrOut++;
-                cstrOutLen--;
+                if ((*ptr >= 'a') && (*ptr <= 'z')) (*ptr) -= SSFSTR_UPPER_LOWER_DELTA;
+                ptr++;
+                len--;
             }
             break;
         default:
             SSF_ERROR();
             break;
     }
-
-    return true;
 }
-

@@ -44,25 +44,41 @@ extern "C"
 /* --------------------------------------------------------------------------------------------- */
 /* Public Defines                                                                                */
 /* --------------------------------------------------------------------------------------------- */
+#define SSF_STR_MAX_SIZE ((size_t)(1024ull * 1024ull))
+
+typedef struct
+{
+    char *ptr;
+    size_t len;
+    size_t size;
+    uint32_t magic;
+    bool isConst;
+    bool isHeap;
+} SSFCStrBuf_t;
+
 typedef enum
 {
     SSF_STR_CASE_MIN = -1,
     SSF_STR_CASE_LOWER,
     SSF_STR_CASE_UPPER,
     SSF_STR_CASE_MAX,
-} SSFSTRCase_t;
+} SSFStrCase_t;
 
 
 /* --------------------------------------------------------------------------------------------- */
 /* Public Interface                                                                              */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFStrLen(SSFCStrIn_t cstr, size_t cstrSize, size_t *cstrLenOut);
-bool SSFStrCat(SSFCStrOut_t cstrDstOut, size_t cstrDstOutSize, size_t *cstrDstOutLenOut,
-               SSFCStrIn_t cstrSrc, size_t cstrSrcSize);
-bool SSFStrCpy(SSFCStrOut_t cstrDstOut, size_t cstrDstOutSize, size_t *cstrDstOutLenOut,
-               SSFCStrIn_t cstrSrc, size_t cstrSrcSize);
-bool SSFStrCmp(SSFCStrIn_t cstr1, size_t cstr1Size, SSFCStrIn_t cstr2, size_t cstr2Size);
-bool SSFStrToCase(SSFCStrOut_t cstrOut, size_t cstrOutSize, SSFSTRCase_t toCase);
+bool SSFStrInit(SSFCStrBuf_t *sbOut, const SSFCStr_t cstr, size_t cstrSize, bool isConst);
+#define SSFStrInitBuf(sbOut, cstr, cstrSize) SSFStrInit(sbOut, cstr, cstrSize, false)
+#define SSFStrInitConst(sbOut, cstr) SSFStrInit(sbOut, cstr, sizeof(cstr), true)
+bool SSFStrInitHeap(SSFCStrBuf_t* sbOut, size_t size, const SSFCStr_t initCstr, size_t initCstrSize);
+void SSFStrDeInit(SSFCStrBuf_t *sbOut);
+size_t SSFStrLen(const SSFCStrBuf_t *sb);
+void SSFStrClr(SSFCStrBuf_t* sbOut);
+bool SSFStrCat(SSFCStrBuf_t *dstOut, const SSFCStrBuf_t *src);
+bool SSFStrCpy(SSFCStrBuf_t* dstOut, const SSFCStrBuf_t* src);
+bool SSFStrCmp(const SSFCStrBuf_t* sb1, const SSFCStrBuf_t* sb2);
+void SSFStrToCase(SSFCStrBuf_t* dstOut, SSFStrCase_t toCase);
 
 /* --------------------------------------------------------------------------------------------- */
 /* Unit test                                                                                     */

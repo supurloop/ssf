@@ -34,6 +34,27 @@
 #include "ssfstr.h"
 
 /* --------------------------------------------------------------------------------------------- */
+/* Returns true if str is valid, else false.                                                     */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFStrIsValid(SSFCStrIn_t cstr, size_t cstrSize)
+{
+    /* Valid pointer? */
+    if (cstr == NULL) return false;
+
+    /* Valid size? */
+    if (cstrSize == 0) return false;
+    
+    /* NULL within size bytes? */
+    while (cstrSize)
+    {
+        if (*cstr == 0) return true;
+        cstr++;
+        cstrSize--;
+    }
+    return false;
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Returns true if length determined and cstrLenOut set, else false if NULL terminator not found.*/
 /* --------------------------------------------------------------------------------------------- */
 bool SSFStrLen(SSFCStrIn_t cstr, size_t cstrSize, size_t *cstrLenOut)
@@ -177,3 +198,104 @@ bool SSFStrToCase(SSFCStrOut_t cstrOut, size_t cstrOutSize, SSFSTRCase_t toCase)
     return true;
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if substring found in cstr and matchStrOptOut set to start of match, else false.                                          */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFStrStr(SSFCStrIn_t cstr, size_t cstrSize, SSFCStrIn_t *matchStrOptOut, SSFCStrIn_t substr,
+               size_t substrSize)
+{
+    SSFCStrIn_t ss;
+    size_t sss;
+
+    SSF_REQUIRE(cstr != NULL);
+    SSF_REQUIRE(substr != NULL);
+
+    ss = substr;
+    sss = substrSize;
+    while ((*cstr != 0) && (cstrSize > 0) && (*ss != 0) && (sss > 0))
+    {
+        /* Character match? */
+        if (*cstr == *ss)
+        {
+            /* Yes, end of substr? */
+            if (*(ss + 1) == 0)
+            {
+                if (matchStrOptOut != NULL) *matchStrOptOut = cstr - (ss - substr);
+                return true;
+            }
+        }
+        else
+        {
+            /* No, reset substr */
+            ss = substr;
+            sss = substrSize;
+        }
+
+        /* Advance */
+        cstr++;
+        cstrSize--;
+        ss++;
+        sss--;
+    }
+    if (matchStrOptOut != NULL) *matchStrOptOut = NULL;
+    return false;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if delim found in cstr, else false. tokenStrLen >= 0 when tokenStr is set.       */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFStrTok(SSFCStrIn_t *cstr, size_t cstrSize, SSFCStrOut_t tokenStrOut, size_t tokenStrSize,
+               int32_t *tokenStrLen, SSFCStrIn_t delims, size_t delimsSize)
+{
+    SSFCStrIn_t cs;
+    SSFCStrIn_t dlms;
+    size_t dlmss;
+    bool retVal = false;
+
+    SSF_REQUIRE(cstr != NULL);
+    SSF_REQUIRE(*cstr != NULL);
+    SSF_REQUIRE(tokenStrOut != NULL);
+    SSF_REQUIRE(tokenStrLen != NULL);
+    SSF_REQUIRE(delims != NULL);
+
+    /* Iterate over cstr */
+    cs = *cstr;
+    while ((*cs != 0) && (cstrSize > 0))
+    {
+        /* Iterate over delims */
+        dlms = delims;
+        dlmss = delimsSize;
+        while ((*dlms != 0) && (dlmss > 0))
+        {
+            /* Delim match? */
+            if (*cs == *dlms)
+            {
+                /* Yes, return token */
+                retVal = true;
+                goto tokDone;
+            }
+            dlms++;
+            dlmss--;
+        }
+        cs++;
+        cstrSize--;
+    }
+
+tokDone:    
+    /* Enough room to copy token? */
+    if ((size_t)((cs - (*cstr)) + 1) <= tokenStrSize)
+    {
+        /* Yes, copy into token buffer */
+        *tokenStrLen = cs - (*cstr);
+        memcpy(tokenStrOut, *cstr, *tokenStrLen);
+        tokenStrOut[*tokenStrLen] = 0;
+    }
+    /* No, tokenStr not set */
+    else *tokenStrLen = -1;
+
+    /* Set next token  */
+    if (retVal) *cstr = cs + 1;
+    else *cstr = cs;
+
+    return retVal;
+}

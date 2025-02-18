@@ -42,8 +42,20 @@ void SSFStrUnitTest(void)
 #define SSFSTR_UNIT_TEST_BUF_SIZE (257u)
     size_t s1Len;
     char dst[SSFSTR_UNIT_TEST_BUF_SIZE];
+    SSFCStrIn_t tok;
     char check[SSFSTR_UNIT_TEST_BUF_SIZE];
+    SSFCStrIn_t matchStrOptOut;
     size_t i;
+    int32_t len;
+
+    /* Test SSFStrISValid() */
+    SSF_ASSERT(SSFStrIsValid(NULL, 1) == false);
+    SSF_ASSERT(SSFStrIsValid("abc", 0) == false);
+    SSF_ASSERT(SSFStrIsValid("abc", 1) == false);
+    SSF_ASSERT(SSFStrIsValid("abc", 2) == false);
+    SSF_ASSERT(SSFStrIsValid("abc", 3) == false);
+    SSF_ASSERT(SSFStrIsValid("abc", 4) == true);
+    SSF_ASSERT(SSFStrIsValid("", 1) == true);
 
     /* Test SSFStrLen() */
     SSF_ASSERT_TEST(SSFStrLen(NULL, 1, &s1Len));
@@ -177,6 +189,240 @@ void SSFStrUnitTest(void)
     }
     SSF_ASSERT(memcmp(dst, check, sizeof(dst)) == 0);
     SSF_ASSERT(dst[sizeof(dst) - 1] == 1);
+
+    /* Test SSFStrStr() */
+    SSF_ASSERT_TEST(SSFStrStr(NULL, 7, NULL, "substr", 7));
+    SSF_ASSERT_TEST(SSFStrStr(NULL, 7, &matchStrOptOut, "substr", 7));
+    SSF_ASSERT_TEST(SSFStrStr("string", 7, NULL, NULL, 7));
+    SSF_ASSERT_TEST(SSFStrStr("string", 7, &matchStrOptOut, NULL, 7));
+
+    SSF_ASSERT(SSFStrStr("string", 7, NULL, "substr", 7) == false);
+    matchStrOptOut = "abc";
+    SSF_ASSERT(SSFStrStr("string", 7, &matchStrOptOut, "substr", 7) == false);
+    SSF_ASSERT(matchStrOptOut == NULL);
+
+    SSF_ASSERT(SSFStrCpy(check, sizeof(check), &s1Len, "substrstring", 13));
+    SSF_ASSERT(SSFStrStr(check, 13, NULL, "substr", 7));
+    SSF_ASSERT(SSFStrStr(check, 14, NULL, "substr", 8));
+    SSF_ASSERT(SSFStrStr(check, 12, NULL, "substr", 7));
+    SSF_ASSERT(SSFStrStr(check, 13, NULL, "substr", 6));
+    SSF_ASSERT(SSFStrStr(check, 0, NULL, "substr", 7) == false);
+    SSF_ASSERT(SSFStrStr(check, 13, NULL, "substr", 0) == false);
+
+    matchStrOptOut = "abc";
+    SSF_ASSERT(SSFStrStr(check, 13, &matchStrOptOut, "substr", 7));
+    SSF_ASSERT(matchStrOptOut == &check[0]);
+    matchStrOptOut = "abc";
+    SSF_ASSERT(SSFStrStr(check, 14, &matchStrOptOut, "substr", 8));
+    SSF_ASSERT(matchStrOptOut == &check[0]);
+    matchStrOptOut = "abc";
+    SSF_ASSERT(SSFStrStr(check, 12, &matchStrOptOut, "substr", 7));
+    SSF_ASSERT(matchStrOptOut == &check[0]);
+    matchStrOptOut = "abc";
+    SSF_ASSERT(SSFStrStr(check, 13, &matchStrOptOut, "substr", 6));
+    SSF_ASSERT(matchStrOptOut == &check[0]);
+    matchStrOptOut = "abc";
+    SSF_ASSERT(SSFStrStr(check, 0, &matchStrOptOut, "substr", 7) == false);
+    SSF_ASSERT(matchStrOptOut == NULL);
+    matchStrOptOut = "abc";
+    SSF_ASSERT(SSFStrStr(check, 13, &matchStrOptOut, "substr", 0) == false);
+    SSF_ASSERT(matchStrOptOut == NULL);
+
+    SSF_ASSERT(SSFStrCpy(check, sizeof(check), &s1Len, "stringsubstr", 13));
+    SSF_ASSERT(SSFStrStr(check, 13, NULL, "substr", 7));
+    SSF_ASSERT(SSFStrStr(check, 14, NULL, "substr", 8));
+    SSF_ASSERT(SSFStrStr(check, 12, NULL, "substr", 7));
+    SSF_ASSERT(SSFStrStr(check, 13, NULL, "substr", 6));
+    SSF_ASSERT(SSFStrStr(check, 0, NULL, "substr", 7) == false);
+    SSF_ASSERT(SSFStrStr(check, 13, NULL, "substr", 0) == false);
+
+    matchStrOptOut = "abc";
+    SSF_ASSERT(SSFStrStr(check, 13, &matchStrOptOut, "substr", 7));
+    SSF_ASSERT(matchStrOptOut == &check[6]);
+    matchStrOptOut = "abc";
+    SSF_ASSERT(SSFStrStr(check, 14, &matchStrOptOut, "substr", 8));
+    SSF_ASSERT(matchStrOptOut == &check[6]);
+    matchStrOptOut = "abc";
+    SSF_ASSERT(SSFStrStr(check, 12, &matchStrOptOut, "substr", 7));
+    SSF_ASSERT(matchStrOptOut == &check[6]);
+    matchStrOptOut = "abc";
+    SSF_ASSERT(SSFStrStr(check, 13, &matchStrOptOut, "substr", 6));
+    SSF_ASSERT(matchStrOptOut == &check[6]);
+    matchStrOptOut = "abc";
+    SSF_ASSERT(SSFStrStr(check, 0, &matchStrOptOut, "substr", 7) == false);
+    SSF_ASSERT(matchStrOptOut == NULL);
+    matchStrOptOut = "abc";
+    SSF_ASSERT(SSFStrStr(check, 13, &matchStrOptOut, "substr", 0) == false);
+    SSF_ASSERT(matchStrOptOut == NULL);
+
+    SSF_ASSERT(SSFStrCpy(check, sizeof(check), &s1Len, "substsubstrr", 13));
+    SSF_ASSERT(SSFStrStr(check, 13, NULL, "substr", 7));
+    SSF_ASSERT(SSFStrStr(check, 14, NULL, "substr", 8));
+    SSF_ASSERT(SSFStrStr(check, 12, NULL, "substr", 7));
+    SSF_ASSERT(SSFStrStr(check, 13, NULL, "substr", 6));
+    SSF_ASSERT(SSFStrStr(check, 0, NULL, "substr", 7) == false);
+    SSF_ASSERT(SSFStrStr(check, 13, NULL, "substr", 0) == false);
+
+    matchStrOptOut = "abc";
+    SSF_ASSERT(SSFStrStr(check, 13, &matchStrOptOut, "substr", 7));
+    SSF_ASSERT(matchStrOptOut == &check[5]);
+    matchStrOptOut = "abc";
+    SSF_ASSERT(SSFStrStr(check, 14, &matchStrOptOut, "substr", 8));
+    SSF_ASSERT(matchStrOptOut == &check[5]);
+    matchStrOptOut = "abc";
+    SSF_ASSERT(SSFStrStr(check, 12, &matchStrOptOut, "substr", 7));
+    SSF_ASSERT(matchStrOptOut == &check[5]);
+    matchStrOptOut = "abc";
+    SSF_ASSERT(SSFStrStr(check, 13, &matchStrOptOut, "substr", 6));
+    SSF_ASSERT(matchStrOptOut == &check[5]);
+    matchStrOptOut = "abc";
+    SSF_ASSERT(SSFStrStr(check, 0, &matchStrOptOut, "substr", 7) == false);
+    SSF_ASSERT(matchStrOptOut == NULL);
+    matchStrOptOut = "abc";
+    SSF_ASSERT(SSFStrStr(check, 13, &matchStrOptOut, "substr", 0) == false);
+    SSF_ASSERT(matchStrOptOut == NULL);
+
+    /* Test SSFStrTok() */
+    tok = NULL;
+    SSF_ASSERT_TEST(SSFStrTok(NULL, sizeof(dst), check, sizeof(check), &len, " ,", 3));
+    SSF_ASSERT_TEST(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), &len, " ,", 3));
+    tok = dst;
+    SSF_ASSERT_TEST(SSFStrTok(&tok, sizeof(dst), NULL, sizeof(check), &len, " ,", 3));
+    SSF_ASSERT_TEST(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), NULL, " ,", 3));
+    SSF_ASSERT_TEST(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), &len, NULL, 3));
+
+    tok = dst;
+    SSF_ASSERT(SSFStrCpy(dst, sizeof(dst), &s1Len, "", 1));
+    SSF_ASSERT(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), &len, " ,", 3) == false);
+    SSF_ASSERT(*tok == 0);
+    SSF_ASSERT(len == 0);
+    SSF_ASSERT(memcmp("", check, 1) == 0);
+
+    tok = dst;
+    SSF_ASSERT(SSFStrCpy(dst, sizeof(dst), &s1Len, "", 1));
+    SSF_ASSERT(SSFStrTok(&tok, 0, check, sizeof(check), &len, " ,", 3) == false);
+    SSF_ASSERT(*tok == 0);
+    SSF_ASSERT(len == 0);
+    SSF_ASSERT(memcmp("", check, 1) == 0);
+
+    tok = dst;
+    SSF_ASSERT(SSFStrCpy(dst, sizeof(dst), &s1Len, "", 1));
+    SSF_ASSERT(SSFStrTok(&tok, sizeof(dst), check, 0, &len, " ,", 3) == false);
+    SSF_ASSERT(*tok == 0);
+    SSF_ASSERT(len == -1);
+    SSF_ASSERT(memcmp("", check, 1) == 0);
+
+    tok = dst;
+    SSF_ASSERT(SSFStrCpy(dst, sizeof(dst), &s1Len, "substsubstrr", 13));
+    SSF_ASSERT(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), &len, " ,", 3) == false);
+    SSF_ASSERT(*tok == 0);
+    SSF_ASSERT(len = 12);
+    SSF_ASSERT(memcmp("substsubstrr", check, 13) == 0);
+
+    tok = dst;
+    SSF_ASSERT(SSFStrCpy(dst, sizeof(dst), &s1Len, "subst,ubstrr", 13));
+    SSF_ASSERT(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), &len, " ,", 3));
+    SSF_ASSERT(tok == &dst[6]);
+    SSF_ASSERT(len = 5);
+    SSF_ASSERT(memcmp("subst", check, 6) == 0);
+    SSF_ASSERT(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), &len, " ,", 3) == false);
+    SSF_ASSERT(tok == &dst[12]);
+    SSF_ASSERT(len = 6);
+    SSF_ASSERT(memcmp("ubstrr", check, 6) == 0);
+
+    tok = dst;
+    SSF_ASSERT(SSFStrCpy(dst, sizeof(dst), &s1Len, "subst ubstrr", 13));
+    SSF_ASSERT(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), &len, " ,", 3));
+    SSF_ASSERT(tok == &dst[6]);
+    SSF_ASSERT(len = 5);
+    SSF_ASSERT(memcmp("subst", check, 6) == 0);
+    SSF_ASSERT(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), &len, " ,", 3) == false);
+    SSF_ASSERT(tok == &dst[12]);
+    SSF_ASSERT(*tok == 0);
+    SSF_ASSERT(len = 6);
+    SSF_ASSERT(memcmp("ubstrr", check, 7) == 0);
+
+    tok = dst;
+    SSF_ASSERT(SSFStrCpy(dst, sizeof(dst), &s1Len, "subst!ubstrr", 13));
+    SSF_ASSERT(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), &len, " ,", 3) == false);
+    SSF_ASSERT(tok == &dst[12]);
+    SSF_ASSERT(*tok == 0);
+    SSF_ASSERT(len == 12);
+    SSF_ASSERT(memcmp("subst!ubstrr", check, 13) == 0);
+
+    tok = dst;
+    SSF_ASSERT(SSFStrCpy(dst, sizeof(dst), &s1Len, ",substubstr ", 13));
+    SSF_ASSERT(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), &len, " ,", 3));
+    SSF_ASSERT(tok == &dst[1]);
+    SSF_ASSERT(*tok == 's');
+    SSF_ASSERT(len == 0);
+    SSF_ASSERT(memcmp("", check, 0) == 0);
+    SSF_ASSERT(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), &len, " ,", 3));
+    SSF_ASSERT(tok == &dst[12]);
+    SSF_ASSERT(*tok == 0);
+    SSF_ASSERT(len == 10);
+    SSF_ASSERT(memcmp("substubstr", check, 11) == 0);
+    SSF_ASSERT(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), &len, " ,", 3) == false);
+    SSF_ASSERT(tok == &dst[12]);
+    SSF_ASSERT(*tok == 0);
+    SSF_ASSERT(len == 0);
+
+    tok = dst;
+    SSF_ASSERT(SSFStrCpy(dst, sizeof(dst), &s1Len, ",", 2));
+    SSF_ASSERT(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), &len, " ,", 3));
+    SSF_ASSERT(tok == &dst[1]);
+    SSF_ASSERT(*tok == 0);
+    SSF_ASSERT(len == 0);
+    SSF_ASSERT(memcmp("", check, 0) == 0);
+    SSF_ASSERT(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), &len, " ,", 3) == false);
+    SSF_ASSERT(tok == &dst[1]);
+    SSF_ASSERT(*tok == 0);
+    SSF_ASSERT(len == 0);
+
+    tok = dst;
+    SSF_ASSERT(SSFStrCpy(dst, sizeof(dst), &s1Len, ", ,", 4));
+    SSF_ASSERT(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), &len, " ,", 3));
+    SSF_ASSERT(tok == &dst[1]);
+    SSF_ASSERT(*tok == ' ');
+    SSF_ASSERT(len == 0);
+    SSF_ASSERT(memcmp("", check, 0) == 0);
+    SSF_ASSERT(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), &len, " ,", 3));
+    SSF_ASSERT(tok == &dst[2]);
+    SSF_ASSERT(*tok == ',');
+    SSF_ASSERT(len == 0);
+    SSF_ASSERT(memcmp("", check, 0) == 0);
+    SSF_ASSERT(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), &len, " ,", 3));
+    SSF_ASSERT(tok == &dst[3]);
+    SSF_ASSERT(*tok == 0);
+    SSF_ASSERT(len == 0);
+    SSF_ASSERT(memcmp("", check, 0) == 0);
+    SSF_ASSERT(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), &len, " ,", 3) == false);
+    SSF_ASSERT(tok == &dst[3]);
+    SSF_ASSERT(*tok == 0);
+    SSF_ASSERT(len == 0);
+
+    tok = dst;
+    SSF_ASSERT(SSFStrCpy(dst, sizeof(dst), &s1Len, "0,1 2,3", 8));
+    SSF_ASSERT(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), &len, " ,", 3));
+    SSF_ASSERT(tok == &dst[2]);
+    SSF_ASSERT(*tok == '1');
+    SSF_ASSERT(len == 1);
+    SSF_ASSERT(memcmp("0", check, 0) == 0);
+    SSF_ASSERT(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), &len, " ,", 3));
+    SSF_ASSERT(tok == &dst[4]);
+    SSF_ASSERT(*tok == '2');
+    SSF_ASSERT(len == 1);
+    SSF_ASSERT(memcmp("1", check, 0) == 0);
+    SSF_ASSERT(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), &len, " ,", 3));
+    SSF_ASSERT(tok == &dst[6]);
+    SSF_ASSERT(*tok == '3');
+    SSF_ASSERT(len == 1);
+    SSF_ASSERT(memcmp("2", check, 0) == 0);
+    SSF_ASSERT(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), &len, " ,", 3) == false);
+    SSF_ASSERT(tok == &dst[7]);
+    SSF_ASSERT(*tok == 0);
+    SSF_ASSERT(len == 1);
+    SSF_ASSERT(memcmp("3", check, 0) == 0);
 }
 #endif /* SSF_CONFIG_STR_UNIT_TEST */
 

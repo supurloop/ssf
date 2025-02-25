@@ -96,8 +96,10 @@ void SSFStrUnitTest(void)
     SSF_ASSERT_TEST(SSFStrCpy(NULL, 4, &s1Len, "src", 4));
     SSF_ASSERT_TEST(SSFStrCpy("dst", 4, NULL, "src", 4));
     SSF_ASSERT_TEST(SSFStrCpy("dst", 4, &s1Len, NULL, 4));
-    SSF_ASSERT(SSFStrCpy("1234", 4, &s1Len, "src", 4) == false);
-    SSF_ASSERT(SSFStrCpy("dst", 4, &s1Len, "1234", 4) == false);
+    SSF_ASSERT(SSFStrCpy(dst, 0, &s1Len, "src", 4) == false);
+    SSF_ASSERT(SSFStrCpy(dst, sizeof(dst), &s1Len, "1234", 4) == false);
+    SSF_ASSERT(SSFStrCpy(dst, 1, &s1Len, "1234", 5) == false);
+    SSF_ASSERT(SSFStrCpy(dst, sizeof(dst), &s1Len, "1234", 5));
     memcpy(dst, "123", 4);
     dst[4] = 0x55;
     SSF_ASSERT(SSFStrCpy(dst, SSF_MIN(4, sizeof(dst)), &s1Len, "4567", 5) == false);

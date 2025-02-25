@@ -41,7 +41,9 @@ extern "C"
 #include <stdbool.h>
 #include "ssfport.h"
 
+/* int64_t "-9223372036854775808", uint64_t "18446744073709551615" */
 #define SSF_DEC_MAX_STR_LEN (20u)
+#define SSF_DEC_MAX_STR_SIZE (SSF_DEC_MAX_STR_LEN + 1u)
 
 size_t SSFDecIntToStr(int64_t i, SSFCStrOut_t str, size_t strSize);
 size_t SSFDecUIntToStr(uint64_t i, SSFCStrOut_t str, size_t strSize);

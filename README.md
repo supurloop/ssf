@@ -414,9 +414,9 @@ bool printFn(char *js, size_t size, size_t start, size_t *end, void *in)
     bool comma = false;
 
     if (!SSFJsonPrintLabel(js, size, start, &start, "label1", &comma)) return false;
-    if (!SSFJsonPrintString(js, size, start, &start, "value1", false)) return false;
+    if (!SSFJsonPrintString(js, size, start, &start, "value1", NULL)) return false;
     if (!SSFJsonPrintLabel(js, size, start, &start, "label2", &comma)) return false;
-    if (!SSFJsonPrintString(js, size, start, &start, "value2", false)) return false;
+    if (!SSFJsonPrintString(js, size, start, &start, "value2", NULL)) return false;
 
     *end = start;
     return true;
@@ -427,7 +427,7 @@ char jsonStr[128];
 size_t end;
 
 /* JSON is contained within an object {}, so to create a JSON string call SSFJsonPrintObject() */
-if (SSFJsonPrintObject(jsonStr, sizeof(jsonStr), 0, &end, printFn, NULL, false))
+if (SSFJsonPrintObject(jsonStr, sizeof(jsonStr), 0, &end, printFn, NULL, NULL))
 {
     /* jsonStr == "{\"name1\":\"value1\",\"name2\":\"value2\"}" */
 }

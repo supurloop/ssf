@@ -335,7 +335,7 @@ bool p2fn(char *js, size_t size, size_t start, size_t *end, void *in)
 
     SSF_UNUSED(in);
     if (!SSFJsonPrintLabel(js, size, start, &start, "label", &comma)) return false;
-    if (!SSFJsonPrintString(js, size, start, &start, "value", false)) return false;
+    if (!SSFJsonPrintString(js, size, start, &start, "value", NULL)) return false;
     *end = start;
     return true;
 }
@@ -394,27 +394,27 @@ bool p3fn(char *js, size_t size, size_t start, size_t *end, void *in)
     SSF_REQUIRE(i != NULL);
 
     if (!SSFJsonPrintLabel(js, size, start, &start, "object1", &comma)) return false;
-    if (!SSFJsonPrintObject(js, size, start, &start, p2fn, in, false)) return false;
+    if (!SSFJsonPrintObject(js, size, start, &start, p2fn, in, NULL)) return false;
     if (!SSFJsonPrintLabel(js, size, start, &start, "hexrev", &comma)) return false;
-    if (!SSFJsonPrintHex(js, size, start, &start, (uint8_t *)i, sizeof(uint32_t), true, false)) return false;
+    if (!SSFJsonPrintHex(js, size, start, &start, (uint8_t *)i, sizeof(uint32_t), true, NULL)) return false;
     if (!SSFJsonPrintLabel(js, size, start, &start, "hex", &comma)) return false;
-    if (!SSFJsonPrintHex(js, size, start, &start, (uint8_t *)i, sizeof(uint32_t), false, false)) return false;
+    if (!SSFJsonPrintHex(js, size, start, &start, (uint8_t *)i, sizeof(uint32_t), false, NULL)) return false;
     if (!SSFJsonPrintLabel(js, size, start, &start, "b64", &comma)) return false;
-    if (!SSFJsonPrintBase64(js, size, start, &start, (uint8_t *)i, sizeof(uint32_t), false)) return false;
+    if (!SSFJsonPrintBase64(js, size, start, &start, (uint8_t *)i, sizeof(uint32_t), NULL)) return false;
 #if SSF_JSON_CONFIG_ENABLE_FLOAT_GEN == 1
     if (!SSFJsonPrintLabel(js, size, start, &start, "double", &comma)) return false;
-    if (!SSFJsonPrintDouble(js, size, start, &start, *i, SSF_JSON_FLT_FMT_STD, false)) return false;
+    if (!SSFJsonPrintDouble(js, size, start, &start, *i, SSF_JSON_FLT_FMT_STD, NULL)) return false;
 #endif /* SSF_JSON_CONFIG_ENABLE_FLOAT_GEN */
     if (!SSFJsonPrintLabel(js, size, start, &start, "int", &comma)) return false;
-    if (!SSFJsonPrintInt(js, size, start, &start, *i, false)) return false;
+    if (!SSFJsonPrintInt(js, size, start, &start, *i, NULL)) return false;
     if (!SSFJsonPrintLabel(js, size, start, &start, "uint", &comma)) return false;
-    if (!SSFJsonPrintUInt(js, size, start, &start, *i, false)) return false;
+    if (!SSFJsonPrintUInt(js, size, start, &start, *i, NULL)) return false;
     if (!SSFJsonPrintLabel(js, size, start, &start, "array", &comma)) return false;
-    if (!SSFJsonPrintArray(js, size, start, &start, p1fn, in, false)) return false;
+    if (!SSFJsonPrintArray(js, size, start, &start, p1fn, in, NULL)) return false;
     if (!SSFJsonPrintLabel(js, size, start, &start, "object2", &comma)) return false;
-    if (!SSFJsonPrintObject(js, size, start, &start, p1fn, in, false)) return false;
+    if (!SSFJsonPrintObject(js, size, start, &start, p1fn, in, NULL)) return false;
     if (!SSFJsonPrintLabel(js, size, start, &start, "object2", &comma)) return false;
-    if (!SSFJsonPrintArray(js, size, start, &start, p2fna, in, false)) return false;
+    if (!SSFJsonPrintArray(js, size, start, &start, p2fna, in, NULL)) return false;
     *i = 0xabcdef90;
     *end = start;
     return true;
@@ -426,7 +426,7 @@ bool p3fn(char *js, size_t size, size_t start, size_t *end, void *in)
 bool p4fn(char *js, size_t size, size_t start, size_t *end, void *in)
 {
     SSF_UNUSED(in);
-    if (!SSFJsonPrintString(js, size, start, &start, "mynewvalue", false)) return false;
+    if (!SSFJsonPrintString(js, size, start, &start, "mynewvalue", NULL)) return false;
     *end = start;
     return true;
 }
@@ -1205,22 +1205,22 @@ void SSFJsonUnitTest(void)
 
     /* Generator tests */
     i = 0x12345678;
-    SSF_ASSERT(SSFJsonPrintObject(_jsOut, sizeof(_jsOut), 0, &end, p3fn, &i, false) == true);
+    SSF_ASSERT(SSFJsonPrintObject(_jsOut, sizeof(_jsOut), 0, &end, p3fn, &i, NULL) == true);
     SSF_ASSERT(SSFJsonIsValid(_jsOut));
     SSF_ASSERT(i == 0xabcdef90);
-    SSF_ASSERT(SSFJsonPrintObject(_jsOut, sizeof(_jsOut), 0, &end, p1fn, NULL, false) == true);
+    SSF_ASSERT(SSFJsonPrintObject(_jsOut, sizeof(_jsOut), 0, &end, p1fn, NULL, NULL) == true);
     SSF_ASSERT(SSFJsonIsValid(_jsOut));
-    SSF_ASSERT(SSFJsonPrintObject(_jsOut, sizeof(_jsOut), 0, &end, p2fn, NULL, false) == true);
+    SSF_ASSERT(SSFJsonPrintObject(_jsOut, sizeof(_jsOut), 0, &end, p2fn, NULL, NULL) == true);
     SSF_ASSERT(SSFJsonIsValid(_jsOut));
-    SSF_ASSERT(SSFJsonPrintObject(_jsOut, sizeof(_jsOut), 0, &end, p1fn, NULL, false) == true);
+    SSF_ASSERT(SSFJsonPrintObject(_jsOut, sizeof(_jsOut), 0, &end, p1fn, NULL, NULL) == true);
     SSF_ASSERT(SSFJsonIsValid(_jsOut));
     i = 0x12345678;
-    SSF_ASSERT(SSFJsonPrintObject(_jsOut, sizeof(_jsOut), 0, &end, p3fn, &i, false) == true);
+    SSF_ASSERT(SSFJsonPrintObject(_jsOut, sizeof(_jsOut), 0, &end, p3fn, &i, NULL) == true);
     SSF_ASSERT(SSFJsonIsValid(_jsOut));
     SSF_ASSERT(i == 0xabcdef90);
 
     memset(_jsOut, 1, sizeof(_jsOut));
-    SSF_ASSERT(SSFJsonPrintCString(_jsOut, sizeof(_jsOut), 0, &end, "/", false));
+    SSF_ASSERT(SSFJsonPrintCString(_jsOut, sizeof(_jsOut), 0, &end, "/", NULL));
     SSF_ASSERT(memcmp(_jsOut, "/", 2) == 0);
 
 #if SSF_JSON_CONFIG_ENABLE_UPDATE == 1

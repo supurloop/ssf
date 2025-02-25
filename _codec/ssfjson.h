@@ -119,8 +119,7 @@ bool SSFJsonPrintString(SSFCStrOut_t js, size_t size, size_t start, size_t *end,
 bool SSFJsonPrintLabel(SSFCStrOut_t js, size_t size, size_t start, size_t *end, SSFCStrIn_t in,
                        bool *comma);
 bool SSFJsonPrintHex(SSFCStrOut_t js, size_t size, size_t start, size_t *end, const uint8_t *in,
-                     size_t inLen,
-                     bool rev, bool *comma);
+                     size_t inLen, bool rev, bool *comma);
 bool SSFJsonPrintBase64(SSFCStrOut_t jstr, size_t size, size_t start, size_t *end,
                         const uint8_t *in, size_t inLen, bool *comma);
 #if SSF_JSON_CONFIG_ENABLE_FLOAT_GEN == 1

@@ -31,9 +31,6 @@
 /* --------------------------------------------------------------------------------------------- */
 #include <stdio.h>
 #include <stdlib.h>
-#include "ssfsm.h"
-#include "ssfll.h"
-#include "ssfmpool.h"
 #include "ssfjson.h"
 #include "ssfbase64.h"
 #include "ssfhex.h"
@@ -595,7 +592,6 @@ bool SSFJsonPrintCString(SSFCStrOut_t js, size_t size, size_t start, size_t *end
     SSF_REQUIRE(js != NULL);
     SSF_REQUIRE(end != NULL);
     SSF_REQUIRE(in != NULL);
-    SSF_REQUIRE((comma == NULL) || (comma != (bool *)true));
 
     SSF_JSON_COMMA(comma);
     while (start < size)
@@ -636,11 +632,10 @@ bool SSFJsonPrintString(SSFCStrOut_t js, size_t size, size_t start, size_t *end,
     SSF_REQUIRE(js != NULL);
     SSF_REQUIRE(end != NULL);
     SSF_REQUIRE(in != NULL);
-    SSF_REQUIRE((comma == NULL) || (comma != (bool *)true));
 
     SSF_JSON_COMMA(comma);
     if (!_SSFJsonPrintUnescChar(js, size, start, &start, '\"')) return false;
-    if (!SSFJsonPrintCString(js, size, start, &start, in, false)) return false;
+    if (!SSFJsonPrintCString(js, size, start, &start, in, NULL)) return false;
     if (!_SSFJsonPrintUnescChar(js, size, start, &start, '\"')) return false;
     *end = start;
     return true;
@@ -655,10 +650,9 @@ bool SSFJsonPrintLabel(SSFCStrOut_t js, size_t size, size_t start, size_t *end, 
     SSF_REQUIRE(js != NULL);
     SSF_REQUIRE(end != NULL);
     SSF_REQUIRE(in != NULL);
-    SSF_REQUIRE((comma == NULL) || (comma != (bool *)true));
 
     SSF_JSON_COMMA(comma);
-    if (!SSFJsonPrintString(js, size, start, &start, in, false)) return false;
+    if (!SSFJsonPrintString(js, size, start, &start, in, NULL)) return false;
     if (!_SSFJsonPrintUnescChar(js, size, start, &start, ':')) return false;
     *end = start;
     return true;
@@ -675,7 +669,6 @@ bool SSFJsonPrintHex(SSFCStrOut_t js, size_t size, size_t start, size_t *end, co
     SSF_REQUIRE(js != NULL);
     SSF_REQUIRE(end != NULL);
     SSF_REQUIRE(in != NULL);
-    SSF_REQUIRE((comma == NULL) || (comma != (bool *)true));
 
     SSF_JSON_COMMA(comma);
     if (!_SSFJsonPrintUnescChar(js, size, start, &start, '"')) return false;
@@ -698,7 +691,6 @@ bool SSFJsonPrintBase64(SSFCStrOut_t js, size_t size, size_t start, size_t *end,
     SSF_REQUIRE(js != NULL);
     SSF_REQUIRE(end != NULL);
     SSF_REQUIRE(in != NULL);
-    SSF_REQUIRE((comma == NULL) || (comma != (bool *)true));
 
     SSF_JSON_COMMA(comma);
     if (!_SSFJsonPrintUnescChar(js, size, start, &start, '"')) return false;
@@ -722,7 +714,6 @@ bool SSFJsonPrintDouble(SSFCStrOut_t js, size_t size, size_t start, size_t *end,
     SSF_REQUIRE(start <= size);
     SSF_REQUIRE(end != NULL);
     SSF_REQUIRE((fmt > SSF_JSON_FLT_FMT_MIN) && (fmt < SSF_JSON_FLT_FMT_MAX));
-    SSF_REQUIRE((comma == NULL) || (comma != (bool *)true));
 
     SSF_JSON_COMMA(comma);
     if (fmt == SSF_JSON_FLT_FMT_SHORT) len = snprintf(&js[start], size - start, "%g", in);
@@ -768,7 +759,6 @@ bool SSFJsonPrintInt(SSFCStrOut_t js, size_t size, size_t start, size_t *end, in
     SSF_REQUIRE(js != NULL);
     SSF_REQUIRE(start <= size);
     SSF_REQUIRE(end != NULL);
-    SSF_REQUIRE((comma == NULL) || (comma != (bool *)true));
 
     SSF_JSON_COMMA(comma);
     len = SSFDecIntToStr(in, &js[start], size - start);
@@ -788,7 +778,6 @@ bool SSFJsonPrintUInt(SSFCStrOut_t js, size_t size, size_t start, size_t *end, u
     SSF_REQUIRE(js != NULL);
     SSF_REQUIRE(start <= size);
     SSF_REQUIRE(end != NULL);
-    SSF_REQUIRE((comma == NULL) || (comma != (bool *)true));
 
     SSF_JSON_COMMA(comma);
     len = SSFDecUIntToStr(in, &js[start], size - start);
@@ -806,7 +795,6 @@ bool SSFJsonPrint(SSFCStrOut_t js, size_t size, size_t start, size_t *end, SSFJs
     SSF_REQUIRE(js != NULL);
     SSF_REQUIRE(start <= size);
     SSF_REQUIRE(end != NULL);
-    SSF_REQUIRE((comma == NULL) || (comma != (bool *)true));
 
     SSF_JSON_COMMA(comma);
     if ((oc != NULL) && (!_SSFJsonPrintUnescChar(js, size, start, &start, oc[0]))) return false;
@@ -830,16 +818,16 @@ static bool _SSFJsonUpdateAddPath(SSFCStrOut_t js, size_t size, size_t start, si
 
     if (ap->path[ap->depth] != NULL)
     {
-        if (!SSFJsonPrintLabel(js, size, start, &start, ap->path[ap->depth], false))
+        if (!SSFJsonPrintLabel(js, size, start, &start, ap->path[ap->depth], NULL))
         {return false; }
         ap->depth++;
         if (ap->path[ap->depth] == NULL)
         {
-            if (!SSFJsonPrint(js, size, start, &start, _SSFJsonUpdateAddPath, ap, NULL, false))
+            if (!SSFJsonPrint(js, size, start, &start, _SSFJsonUpdateAddPath, ap, NULL, NULL))
             {return false; }
         } else
         {
-            if (!SSFJsonPrintObject(js, size, start, &start, _SSFJsonUpdateAddPath, ap, false))
+            if (!SSFJsonPrintObject(js, size, start, &start, _SSFJsonUpdateAddPath, ap, NULL))
             {return false; }
         }
     } else ap->fn(js, size, start, &start, NULL);
@@ -898,7 +886,7 @@ bool SSFJsonUpdate(SSFCStrOut_t js, size_t size, SSFCStrIn_t *path, SSFJsonPrint
     ap.fn = fn;
     ap.path = path;
     memmove(&js[size - len], &js[start + 1], len);
-    if (!SSFJsonPrint(js, size - len - 1, startn, &end, _SSFJsonUpdateAddPath, &ap, NULL, false))
+    if (!SSFJsonPrint(js, size - len - 1, startn, &end, _SSFJsonUpdateAddPath, &ap, NULL, NULL))
     {return false; }
     index = size - len;
     _SSFJsonWhitespace(js, &index);

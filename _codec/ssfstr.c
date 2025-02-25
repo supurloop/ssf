@@ -110,7 +110,7 @@ bool SSFStrCat(SSFCStrOut_t cstrDstOut, size_t cstrDstOutSize, size_t *cstrDstOu
 bool SSFStrCpy(SSFCStrOut_t cstrDstOut, size_t cstrDstOutSize, size_t *cstrDstOutLenOut,
                SSFCStrIn_t cstrSrc, size_t cstrSrcSize)
 {
-    size_t dstLen;
+    //size_t dstLen;
     size_t srcLen;
 
     SSF_REQUIRE(cstrDstOut != NULL);
@@ -118,7 +118,8 @@ bool SSFStrCpy(SSFCStrOut_t cstrDstOut, size_t cstrDstOutSize, size_t *cstrDstOu
     SSF_REQUIRE(cstrSrc != NULL);
 
     /* Determine length of dst */
-    if (SSFStrLen(cstrDstOut, cstrDstOutSize, &dstLen) == false) return false;
+    if (cstrDstOutSize == 0) return false;
+    //if (SSFStrLen(cstrDstOut, cstrDstOutSize, &dstLen) == false) return false;
 
     /* Determine length of src */
     if (SSFStrLen(cstrSrc, cstrSrcSize, &srcLen) == false) return false;

@@ -45,9 +45,8 @@ extern "C" {
 /* --------------------------------------------------------------------------------------------- */
 bool SSFRTCInit(void);
 void SSFRTCDeInit(void);
-bool SSFRTCIsInited(void);
 bool SSFRTCSet(uint64_t unixSec);
-SSFPortTick_t SSFRTCGetUnixNow(void);
+bool SSFRTCGetUnixNow(SSFPortTick_t *unixSys);
 
 /* --------------------------------------------------------------------------------------------- */
 /* Unit test                                                                                     */

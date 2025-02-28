@@ -330,7 +330,15 @@ typedef enum
 /* --------------------------------------------------------------------------------------------- */
 /* Configure ssfrtc's interface                                                                  */
 /* --------------------------------------------------------------------------------------------- */
-/* 1 == Use a simulated RTC device; 1 == Interface to real RTC device */
+#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
+#define SSF_RTC_THREAD_SYNC_DECLARATION SSF_MUTEX_DECLARATION(_ssfrtcSyncMutex)
+#define SSF_RTC_THREAD_SYNC_INIT() SSF_MUTEX_INIT(_ssfrtcSyncMutex)
+#define SSF_RTC_THREAD_SYNC_DEINIT() SSF_MUTEX_DEINIT(_ssfrtcSyncMutex)
+#define SSF_RTC_THREAD_SYNC_ACQUIRE() SSF_MUTEX_ACQUIRE(_ssfrtcSyncMutex)
+#define SSF_RTC_THREAD_SYNC_RELEASE() SSF_MUTEX_RELEASE(_ssfrtcSyncMutex)
+#endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
+
+/* 1 == Use a simulated RTC device; 0 == Interface to real RTC device */
 #define SSF_RTC_ENABLE_SIM (1u)
 
 /* Configure access to the RTC */

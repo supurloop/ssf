@@ -45,65 +45,35 @@ void SSFRTCUnitTest(void)
     SSFPortTick_t rtcExpected;
 
     /* Assertion tests */
-    SSF_ASSERT_TEST(SSFRTCGetUnixNow());
 
-    /* Test SSFRTCIsInited() */
-    SSF_ASSERT(SSFRTCIsInited() == false);
+    /* Test SSFRTCInit() SSFRTCDeInit() */
     SSF_ASSERT(SSFRTCInit());
-    SSF_ASSERT(SSFRTCIsInited());
+    SSF_ASSERT_TEST(SSFRTCInit());
     SSFRTCDeInit();
-    SSF_ASSERT(SSFRTCIsInited() == false);
-    SSF_ASSERT(SSFRTCSet(SSFDTIME_UNIX_EPOCH_SEC_MIN));
-    SSF_ASSERT(SSFRTCIsInited());
-    SSFRTCDeInit();
-    SSF_ASSERT(SSFRTCIsInited() == false);
-    SSF_ASSERT(SSFRTCSet(SSFDTIME_UNIX_EPOCH_SEC_MAX));
-    SSF_ASSERT(SSFRTCIsInited());
-    SSFRTCDeInit();
-    SSF_ASSERT(SSFRTCIsInited() == false);
-
-    /* Test SSFRTCInit() */
-    _ssfRTCSimUnixSec = SSFDTIME_UNIX_EPOCH_SEC_MIN;
+    SSF_ASSERT_TEST(SSFRTCDeInit());
     SSF_ASSERT(SSFRTCInit());
-    SSF_ASSERT(SSFRTCIsInited());
-    _ssfRTCSimUnixSec = SSFDTIME_UNIX_EPOCH_SEC_MAX;
-    SSF_ASSERT(SSFRTCInit());
-    SSF_ASSERT(SSFRTCIsInited());
-    _ssfRTCSimUnixSec = SSFDTIME_UNIX_EPOCH_SEC_MAX + 1;
-    SSF_ASSERT(SSFRTCInit() == false);
-    SSF_ASSERT(SSFRTCIsInited() == false);
-    SSFRTCDeInit();
-    SSF_ASSERT(SSFRTCIsInited() == false);
 
     /* Test SSFRTCSet() */
     SSFRTCDeInit();
-    SSF_ASSERT(SSFRTCIsInited() == false);
+    SSF_ASSERT(SSFRTCInit());
     _ssfRTCSimUnixSec = SSFDTIME_UNIX_EPOCH_SEC_MAX + 1;
     SSF_ASSERT(SSFRTCSet(SSFDTIME_UNIX_EPOCH_SEC_MIN));
-    SSF_ASSERT(SSFRTCIsInited());
     SSF_ASSERT(_ssfRTCSimUnixSec == SSFDTIME_UNIX_EPOCH_SEC_MIN);
-    SSFRTCDeInit();
-    SSF_ASSERT(SSFRTCIsInited() == false);
     _ssfRTCSimUnixSec = SSFDTIME_UNIX_EPOCH_SEC_MAX + 1;
     SSF_ASSERT(SSFRTCSet(SSFDTIME_UNIX_EPOCH_SEC_MAX));
-    SSF_ASSERT(SSFRTCIsInited());
     SSF_ASSERT(_ssfRTCSimUnixSec == SSFDTIME_UNIX_EPOCH_SEC_MAX);
-    SSFRTCDeInit();
-    SSF_ASSERT(SSFRTCIsInited() == false);
     SSF_ASSERT(SSFRTCSet(SSFDTIME_UNIX_EPOCH_SEC_MAX + 1) == false);
-    SSF_ASSERT(SSFRTCIsInited() == false);
 
     /* Test SSFRTCGetUnixNow() */
+    SSFRTCDeInit();
+    SSF_ASSERT_TEST(SSFRTCGetUnixNow(&rtcSys));
     _ssfRTCSimUnixSec = SSFDTIME_UNIX_EPOCH_SEC_MIN;
     SSF_ASSERT(SSFRTCInit());
-    SSF_ASSERT(SSFRTCIsInited());
     rtcExpected = SSFDTIME_UNIX_EPOCH_SEC_MIN * SSF_TICKS_PER_SEC;
-    rtcSys = SSFRTCGetUnixNow();
+    SSF_ASSERT(SSFRTCGetUnixNow(&rtcSys));
     SSF_ASSERT((rtcSys - rtcExpected) < SSF_TICKS_PER_SEC);
-    _ssfRTCSimUnixSec = SSFDTIME_UNIX_EPOCH_SEC_MAX;
-    SSF_ASSERT(SSFRTCInit());
-    SSF_ASSERT(SSFRTCIsInited());
+    SSF_ASSERT(SSFRTCSet(SSFDTIME_UNIX_EPOCH_SEC_MAX));
     rtcExpected = SSFDTIME_UNIX_EPOCH_SEC_MAX * SSF_TICKS_PER_SEC;
-    rtcSys = SSFRTCGetUnixNow();
+    SSF_ASSERT(SSFRTCGetUnixNow(&rtcSys));
     SSF_ASSERT((rtcSys - rtcExpected) < SSF_TICKS_PER_SEC);
 }

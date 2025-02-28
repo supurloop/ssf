@@ -47,9 +47,14 @@
 /* --------------------------------------------------------------------------------------------- */
 /* Module variables.                                                                             */
 /* --------------------------------------------------------------------------------------------- */
+static bool _ssfrtcIsInited;
 static bool _ssfRTCIsNowInited;
 static SSFPortTick_t _ssfRTCUnixBaseSys;
 static SSFPortTick_t _ssfRTCTickBaseSys;
+
+#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
+SSF_RTC_THREAD_SYNC_DECLARATION;
+#endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
 
 #if SSF_RTC_ENABLE_SIM == 1
 uint64_t _ssfRTCSimUnixSec;
@@ -59,6 +64,8 @@ uint64_t _ssfRTCSimUnixSec;
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFRTCSimWrite(uint64_t unixSec)
 {
+    SSF_ASSERT(_ssfrtcIsInited);
+
     _ssfRTCSimUnixSec = unixSec;
     return true;
 }
@@ -68,6 +75,7 @@ static bool _SSFRTCSimWrite(uint64_t unixSec)
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFRTCSimRead(uint64_t *unixSec)
 {
+    SSF_ASSERT(_ssfrtcIsInited);
     SSF_ASSERT(unixSec != NULL);
 
     /* A real RTC device would return a new time, not just a static value like the sim does! */
@@ -82,6 +90,13 @@ static bool _SSFRTCSimRead(uint64_t *unixSec)
 bool SSFRTCInit(void)
 {
     uint64_t rtcUnixSec;
+
+    SSF_ASSERT(_ssfrtcIsInited == false);
+
+#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
+    SSF_RTC_THREAD_SYNC_INIT();
+#endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */   
+    _ssfrtcIsInited = true;
 
     /* Is RTC read successful? */
     if (SSF_RTC_READ(&rtcUnixSec))
@@ -109,17 +124,16 @@ bool SSFRTCInit(void)
 /* --------------------------------------------------------------------------------------------- */
 void SSFRTCDeInit(void)
 {
+    SSF_ASSERT(_ssfrtcIsInited);
+
     _ssfRTCUnixBaseSys = 0;
     _ssfRTCTickBaseSys = 0;
     _ssfRTCIsNowInited = false;
-}
 
-/* --------------------------------------------------------------------------------------------- */
-/* Returns true if "now" is inited else false.                                                   */
-/* --------------------------------------------------------------------------------------------- */
-bool SSFRTCIsInited(void)
-{
-    return _ssfRTCIsNowInited;
+#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
+    SSF_RTC_THREAD_SYNC_DEINIT();
+#endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */   
+    _ssfrtcIsInited = false;
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -127,6 +141,12 @@ bool SSFRTCIsInited(void)
 /* --------------------------------------------------------------------------------------------- */
 bool SSFRTCSet(uint64_t unixSec)
 {
+    SSF_ASSERT(_ssfrtcIsInited);
+
+#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
+    SSF_RTC_THREAD_SYNC_ACQUIRE();
+#endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */   
+
     /* Is Unix sec in valid range? */
     if (unixSec <= SSFDTIME_UNIX_EPOCH_SEC_MAX)
     {
@@ -137,6 +157,9 @@ bool SSFRTCSet(uint64_t unixSec)
             _ssfRTCUnixBaseSys =  unixSec * SSF_TICKS_PER_SEC;
             _ssfRTCTickBaseSys = SSFPortGetTick64();
             _ssfRTCIsNowInited = true;
+#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
+            SSF_RTC_THREAD_SYNC_RELEASE();
+#endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */           
             return true;
         }
     }
@@ -144,15 +167,34 @@ bool SSFRTCSet(uint64_t unixSec)
     /* Something went wrong, not inited anymore */
     _ssfRTCUnixBaseSys = 0;
     _ssfRTCIsNowInited = false;
-   return false;
+#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
+    SSF_RTC_THREAD_SYNC_RELEASE();
+#endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */           
+    return false;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns "now" as unixSys number.                                                              */
+/* Returns true and unixSys set to now, else false.                                              */
 /* --------------------------------------------------------------------------------------------- */
-SSFPortTick_t SSFRTCGetUnixNow(void)
+bool SSFRTCGetUnixNow(SSFPortTick_t *unixSys)
 {
-    SSF_ASSERT(_ssfRTCIsNowInited);
+    SSFPortTick_t retVal;
 
-    return((SSFPortGetTick64() - _ssfRTCTickBaseSys) + _ssfRTCUnixBaseSys);
+    SSF_ASSERT(_ssfrtcIsInited);
+
+#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
+    SSF_RTC_THREAD_SYNC_ACQUIRE();
+#endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */   
+
+    retVal = _ssfRTCIsNowInited;
+    if (unixSys != NULL)
+    {
+        *unixSys = (SSFPortGetTick64() - _ssfRTCTickBaseSys) + _ssfRTCUnixBaseSys;
+    }
+
+#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
+    SSF_RTC_THREAD_SYNC_RELEASE();
+#endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */           
+
+    return retVal;
 }

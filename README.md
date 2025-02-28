@@ -1234,7 +1234,7 @@ Since many embedded systems use I2C RTC devices, accessing the RTC everytime Uni
         uint64_t newUnixSec;
 
         /* Returns Unix time in system ticks */
-        unixSys = SSFRTCGetUnixNow();
+        SSF_ASSERT(SSFRTCGetUnixNow(&unixSys));
         /* unixSys / SSF_TICKS_PER_SEC == Seconds since Unix Epoch */
 
         if (NTPUpdated(&newUnixSec))
@@ -1308,7 +1308,7 @@ This interface converts Unix time in system ticks into an ISO8601 extended date 
     int16_t zoneOffsetMin;
     char isoStr[SSFISO8601_MAX_SIZE];
 
-    unixSys = SSFRTCGetUnixNow();
+    SSF_ASSERT(SSFRTCGetUnixNow(&unixSys));
     SSFISO8601UnixToISO(unixSys, false, false, 0, SSF_ISO8601_ZONE_UTC, 0, isoStr, sizeof(isoStr));
     /* isoStr looks something like "2022-11-23T13:00:12Z" */
 

@@ -50,6 +50,8 @@ typedef struct
     uint8_t* start;                 /* Aligned pointer to start of working heap area */
     uint8_t* end;                   /* Aligned pointer to end of working heap area */
     uint32_t len;                   /* Aligned length of working heap area */
+    uint32_t allocatableLen;        /* # of allocatable bytes right now */
+    uint32_t minAllocatableLen;     /* Low water mark of allocatable bytes */
     uint8_t mark;                   /* Block mark for debugging */
     uint32_t numTotalAllocRequests; /* # of allocation requests */
     uint32_t numAllocRequests;      /* # of successful allocation requests */
@@ -289,6 +291,7 @@ void SSFHeapUnitTest(void)
     SSF_ASSERT(heapStatusOut.allocatableSize >= size);
     allocatableSize = heapStatusOut.allocatableSize;
     SSF_ASSERT(heapStatusOut.allocatableLen == heapStatusOut.allocatableSize);
+    SSF_ASSERT(heapStatusOut.minAllocatableLen <= heapStatusOut.allocatableLen);
     SSF_ASSERT(heapStatusOut.numBlocks == 1);
     SSF_ASSERT(heapStatusOut.numAllocatableBlocks == 1);
     SSF_ASSERT(heapStatusOut.maxAllocatableBlockLen == heapStatusOut.allocatableSize);
@@ -307,6 +310,7 @@ void SSFHeapUnitTest(void)
         SSF_ASSERT(heapStatusOut.numBlocks == 1 + (i + 1));
         SSF_ASSERT(heapStatusOut.numAllocatableBlocks == 1);
         SSF_ASSERT(heapStatusOut.maxAllocatableBlockLen == heapStatusOut.allocatableLen);
+        SSF_ASSERT(heapStatusOut.minAllocatableLen <= heapStatusOut.allocatableLen);
         SSF_ASSERT(heapStatusOut.numTotalAllocRequests == (i + 1));
         SSF_ASSERT(heapStatusOut.numAllocRequests == (i + 1));
         SSF_ASSERT(heapStatusOut.numFreeRequests == 0);
@@ -320,6 +324,7 @@ void SSFHeapUnitTest(void)
     SSF_ASSERT(heapStatusOut.numBlocks == 1 + SSF_HEAP_ALIGNMENT_SIZE + 1);
     SSF_ASSERT(heapStatusOut.numAllocatableBlocks == 2);
     SSF_ASSERT(heapStatusOut.maxAllocatableBlockLen < heapStatusOut.allocatableLen);
+    SSF_ASSERT(heapStatusOut.minAllocatableLen <= heapStatusOut.allocatableLen);
     SSF_ASSERT(heapStatusOut.numTotalAllocRequests == SSF_HEAP_ALIGNMENT_SIZE + 1);
     SSF_ASSERT(heapStatusOut.numAllocRequests == SSF_HEAP_ALIGNMENT_SIZE + 1);
     SSF_ASSERT(heapStatusOut.numFreeRequests == 1);
@@ -342,6 +347,7 @@ void SSFHeapUnitTest(void)
     SSF_ASSERT(heapStatusOut.numBlocks == SSF_HEAP_ALIGNMENT_SIZE + 1);
     SSF_ASSERT(heapStatusOut.numAllocatableBlocks == 3);
     SSF_ASSERT(heapStatusOut.maxAllocatableBlockLen < heapStatusOut.allocatableLen);
+    SSF_ASSERT(heapStatusOut.minAllocatableLen <= heapStatusOut.allocatableLen);
     SSF_ASSERT(heapStatusOut.numTotalAllocRequests == SSF_HEAP_ALIGNMENT_SIZE + 1);
     SSF_ASSERT(heapStatusOut.numAllocRequests == SSF_HEAP_ALIGNMENT_SIZE + 1);
     SSF_ASSERT(heapStatusOut.numFreeRequests == 3);
@@ -364,6 +370,7 @@ void SSFHeapUnitTest(void)
     SSF_ASSERT(heapStatusOut.numBlocks == SSF_HEAP_ALIGNMENT_SIZE - 2);
     SSF_ASSERT(heapStatusOut.numAllocatableBlocks == 2);
     SSF_ASSERT(heapStatusOut.maxAllocatableBlockLen < heapStatusOut.allocatableLen);
+    SSF_ASSERT(heapStatusOut.minAllocatableLen <= heapStatusOut.allocatableLen);
     SSF_ASSERT(heapStatusOut.numTotalAllocRequests == SSF_HEAP_ALIGNMENT_SIZE + 1);
     SSF_ASSERT(heapStatusOut.numAllocRequests == SSF_HEAP_ALIGNMENT_SIZE + 1);
     SSF_ASSERT(heapStatusOut.numFreeRequests == 5);
@@ -375,6 +382,7 @@ void SSFHeapUnitTest(void)
     SSF_ASSERT(heapStatusOut.numBlocks == 6);
     SSF_ASSERT(heapStatusOut.numAllocatableBlocks == 3);
     SSF_ASSERT(heapStatusOut.maxAllocatableBlockLen < heapStatusOut.allocatableLen);
+    SSF_ASSERT(heapStatusOut.minAllocatableLen <= heapStatusOut.allocatableLen);
     SSF_ASSERT(heapStatusOut.numTotalAllocRequests == SSF_HEAP_ALIGNMENT_SIZE + 1);
     SSF_ASSERT(heapStatusOut.numAllocRequests == SSF_HEAP_ALIGNMENT_SIZE + 1);
     SSF_ASSERT(heapStatusOut.numFreeRequests == 6);
@@ -386,6 +394,7 @@ void SSFHeapUnitTest(void)
     SSF_ASSERT(heapStatusOut.numBlocks == 5);
     SSF_ASSERT(heapStatusOut.numAllocatableBlocks == 3);
     SSF_ASSERT(heapStatusOut.maxAllocatableBlockLen < heapStatusOut.allocatableLen);
+    SSF_ASSERT(heapStatusOut.minAllocatableLen <= heapStatusOut.allocatableLen);
     SSF_ASSERT(heapStatusOut.numTotalAllocRequests == SSF_HEAP_ALIGNMENT_SIZE + 1);
     SSF_ASSERT(heapStatusOut.numAllocRequests == SSF_HEAP_ALIGNMENT_SIZE + 1);
     SSF_ASSERT(heapStatusOut.numFreeRequests == 7);
@@ -397,6 +406,7 @@ void SSFHeapUnitTest(void)
     SSF_ASSERT(heapStatusOut.numBlocks == 3);
     SSF_ASSERT(heapStatusOut.numAllocatableBlocks == 2);
     SSF_ASSERT(heapStatusOut.maxAllocatableBlockLen < heapStatusOut.allocatableLen);
+    SSF_ASSERT(heapStatusOut.minAllocatableLen <= heapStatusOut.allocatableLen);
     SSF_ASSERT(heapStatusOut.numTotalAllocRequests == SSF_HEAP_ALIGNMENT_SIZE + 1);
     SSF_ASSERT(heapStatusOut.numAllocRequests == SSF_HEAP_ALIGNMENT_SIZE + 1);
     SSF_ASSERT(heapStatusOut.numFreeRequests == 8);
@@ -408,6 +418,7 @@ void SSFHeapUnitTest(void)
     SSF_ASSERT(heapStatusOut.numBlocks == 1);
     SSF_ASSERT(heapStatusOut.numAllocatableBlocks == 1);
     SSF_ASSERT(heapStatusOut.maxAllocatableBlockLen == heapStatusOut.allocatableLen);
+    SSF_ASSERT(heapStatusOut.minAllocatableLen <= heapStatusOut.allocatableLen);
     SSF_ASSERT(heapStatusOut.numTotalAllocRequests == SSF_HEAP_ALIGNMENT_SIZE + 1);
     SSF_ASSERT(heapStatusOut.numAllocRequests == SSF_HEAP_ALIGNMENT_SIZE + 1);
     SSF_ASSERT(heapStatusOut.numFreeRequests == 9);
@@ -723,6 +734,7 @@ void SSFHeapUnitTest(void)
         size = len - (uint32_t)(ptr - heap) - sizeof(SSFHeapPrivateHandle_t) - 32u;
         SSF_ASSERT(heapStatusOut.allocatableSize >= size);
         SSF_ASSERT(heapStatusOut.allocatableLen == heapStatusOut.allocatableSize);
+        SSF_ASSERT(heapStatusOut.minAllocatableLen <= heapStatusOut.allocatableLen);
         SSF_ASSERT(heapStatusOut.numBlocks == 1);
         SSF_ASSERT(heapStatusOut.numAllocatableBlocks == 1);
         SSF_ASSERT(heapStatusOut.maxAllocatableBlockLen == heapStatusOut.allocatableSize);
@@ -795,6 +807,7 @@ void SSFHeapUnitTest(void)
         SSFHeapStatus(heapHandle, &heapStatusOut);
         SSF_ASSERT(heapStatusOut.allocatableSize >= size);
         SSF_ASSERT(heapStatusOut.allocatableLen == heapStatusOut.allocatableSize);
+        SSF_ASSERT(heapStatusOut.minAllocatableLen <= heapStatusOut.allocatableLen);
         SSF_ASSERT(heapStatusOut.numBlocks >= (allocs - frees));
         SSF_ASSERT(heapStatusOut.numAllocatableBlocks == 1);
         SSF_ASSERT(heapStatusOut.maxAllocatableBlockLen == heapStatusOut.allocatableSize);

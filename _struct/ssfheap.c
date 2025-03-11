@@ -88,6 +88,8 @@ typedef struct
     uint8_t *start;                 /* Aligned pointer to start of working heap area */
     uint8_t *end;                   /* Aligned pointer to end of working heap area */
     uint32_t len;                   /* Aligned length of working heap area */
+    uint32_t allocatableLen;        /* # of allocatable bytes right now */
+    uint32_t minAllocatableLen;     /* Low water mark of allocatable bytes */
     uint8_t mark;                   /* Block mark for debugging */
     uint32_t numTotalAllocRequests; /* # of allocation requests */
     uint32_t numAllocRequests;      /* # of successful allocation requests */
@@ -271,6 +273,8 @@ void SSFHeapInit(SSFHeapHandle_t *handleOut, uint8_t *heapMem, uint32_t heapMemS
     _SSFHeapCheckBlock(ph, hb);
 #endif
     ph->magic = SSF_HEAP_MAGIC;
+    ph->allocatableLen = ph->len;
+    ph->minAllocatableLen = ph->allocatableLen;
 
 #if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
     SSF_HEAP_SYNC_INIT();
@@ -355,6 +359,10 @@ bool SSFHeapAlloc(SSFHeapHandle_t handle, void **memOut, uint32_t memSize, uint8
                 /* Yes, mark block as alloced and set memory ptr */
                 SSF_HEAP_SET_BLOCK(hb, hb->len, SSF_HEAP_BLOCK_ALLOCED, mark,
                                    memSize - requestedSize);
+                ph->allocatableLen -= hb->len;
+                SSF_ASSERT(ph->allocatableLen <= ph->len);
+                if (ph->minAllocatableLen >
+                    ph->allocatableLen) { ph->minAllocatableLen = ph->allocatableLen; }
 #if SSF_HEAP_SET_BLOCK_CHECK == 1
                 _SSFHeapCheckBlock(handle, hb);
 #endif
@@ -383,6 +391,10 @@ bool SSFHeapAlloc(SSFHeapHandle_t handle, void **memOut, uint32_t memSize, uint8
                 /* Mark block as allocated */
                 SSF_HEAP_SET_BLOCK(hb, memSize + sizeof(SSFHeapBlock_t), SSF_HEAP_BLOCK_ALLOCED,
                                    mark, memSize - requestedSize);
+                ph->allocatableLen -= hb->len;
+                SSF_ASSERT(ph->allocatableLen <= ph->len);
+                if (ph->minAllocatableLen >
+                    ph->allocatableLen) { ph->minAllocatableLen = ph->allocatableLen; }
 #if SSF_HEAP_SET_BLOCK_CHECK == 1
                 _SSFHeapCheckBlock(handle, hb);
 #endif
@@ -534,6 +546,8 @@ void SSFHeapDealloc(SSFHeapHandle_t handle, void **heapMemOut, uint8_t *markOutO
 #endif
     if (isZeroed) memset(*heapMemOut, 0, hb->len - sizeof(SSFHeapBlock_t));
     *heapMemOut = NULL;
+    ph->allocatableLen += hb->len;
+    SSF_ASSERT(ph->allocatableLen <= ph->len);
     ph->numFreeRequests++;
 
 #if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
@@ -645,7 +659,10 @@ void SSFHeapStatus(SSFHeapHandle_t handle, SSFHeapStatus_t *heapStatusOut)
         /* Advance to next block */
         hb = (SSFHeapBlock_t*)(void *)(SSF_HEAP_U8_CAST(hb) + hb->len);
     }
-
+    SSF_ASSERT(((sizeof(SSFHeapBlock_t) * heapStatusOut->numAllocatableBlocks) +
+                heapStatusOut->allocatableLen) == ph->allocatableLen);
+    heapStatusOut->minAllocatableLen = SSF_MIN(ph->minAllocatableLen,
+                                               heapStatusOut->allocatableLen);
 #if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
     SSF_HEAP_SYNC_RELEASE();
 #endif

@@ -47,6 +47,7 @@ typedef struct
 {
     uint32_t allocatableSize;        /* # of allocatable bytes determined at heap init */
     uint32_t allocatableLen;         /* # of allocatable bytes right now */
+    uint32_t minAllocatableLen;      /* Low water mark of allocatable bytes */
     uint32_t numBlocks;              /* # of heap blocks right now */
     uint32_t numAllocatableBlocks;   /* # of allocatable heap blocks right now */
     uint32_t maxAllocatableBlockLen; /* # of bytes in biggest allocatable block right now */

@@ -282,7 +282,7 @@ tokDone:
     if ((size_t)((cs - (*cstr)) + 1) <= tokenStrSize)
     {
         /* Yes, copy into token buffer */
-        *tokenStrLen = cs - (*cstr);
+        *tokenStrLen = (int32_t) (cs - (*cstr));
         memcpy(tokenStrOut, *cstr, *tokenStrLen);
         tokenStrOut[*tokenStrLen] = 0;
     }

@@ -318,30 +318,30 @@ void SSFStrUnitTest(void)
     SSF_ASSERT(SSFStrCpy(dst, sizeof(dst), &s1Len, "substsubstrr", 13));
     SSF_ASSERT(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), &len, " ,", 3) == false);
     SSF_ASSERT(*tok == 0);
-    SSF_ASSERT(len = 12);
+    SSF_ASSERT(len == 12);
     SSF_ASSERT(memcmp("substsubstrr", check, 13) == 0);
 
     tok = dst;
     SSF_ASSERT(SSFStrCpy(dst, sizeof(dst), &s1Len, "subst,ubstrr", 13));
     SSF_ASSERT(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), &len, " ,", 3));
     SSF_ASSERT(tok == &dst[6]);
-    SSF_ASSERT(len = 5);
+    SSF_ASSERT(len == 5);
     SSF_ASSERT(memcmp("subst", check, 6) == 0);
     SSF_ASSERT(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), &len, " ,", 3) == false);
     SSF_ASSERT(tok == &dst[12]);
-    SSF_ASSERT(len = 6);
+    SSF_ASSERT(len == 6);
     SSF_ASSERT(memcmp("ubstrr", check, 6) == 0);
 
     tok = dst;
     SSF_ASSERT(SSFStrCpy(dst, sizeof(dst), &s1Len, "subst ubstrr", 13));
     SSF_ASSERT(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), &len, " ,", 3));
     SSF_ASSERT(tok == &dst[6]);
-    SSF_ASSERT(len = 5);
+    SSF_ASSERT(len == 5);
     SSF_ASSERT(memcmp("subst", check, 6) == 0);
     SSF_ASSERT(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), &len, " ,", 3) == false);
     SSF_ASSERT(tok == &dst[12]);
     SSF_ASSERT(*tok == 0);
-    SSF_ASSERT(len = 6);
+    SSF_ASSERT(len == 6);
     SSF_ASSERT(memcmp("ubstrr", check, 7) == 0);
 
     tok = dst;

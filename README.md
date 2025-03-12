@@ -1340,13 +1340,13 @@ This interface provides true safe replacements for strcpy(), strcat(), strcpy(),
     char str[10];
 
     /* Copy 10 byte string into str var? */
-    if (SSFStrCpy(str, sizeof(str), &len, "1234567890", 11)) == false)
+    if (SSFStrBufCpy(str, sizeof(str), &len, "1234567890", 11)) == false)
     {
         /* No, copy failed because str is not big enough to hold new string plus NULL terminator */
     }
 
     /* Copy 9 byte string into str var? */
-    if (SSFStrCpy(str, sizeof(str), &len, "123456789", 10)) == true)
+    if (SSFStrBufCpy(str, sizeof(str), &len, "123456789", 10)) == true)
     {
         /* Yes copy worked, str="123456789", len = 9 */
     }

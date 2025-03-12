@@ -56,7 +56,7 @@
 #include "ssfrtc.h"
 #include "ssfiso8601.h"
 #include "ssfdec.h"
-#include "ssfstr.h"
+#include "ssfstrb.h"
 #include "ssfheap.h"
 #include "ssfgobj.h"
 
@@ -69,9 +69,9 @@ typedef struct
 
 SSFUnitTest_t unitTests[] =
 {
-#if SSF_CONFIG_STR_UNIT_TEST == 1
-    { "ssfstr", "Safe C Strings", SSFStrUnitTest },
-#endif /* SSF_CONFIG_STR_UNIT_TEST */
+#if SSF_CONFIG_STRB_UNIT_TEST == 1
+    { "ssfstrb", "Safe C String Buffers", SSFStrBufUnitTest },
+#endif /* SSF_CONFIG_STRB_UNIT_TEST */
 
 #if SSF_CONFIG_GOBJ_UNIT_TEST == 1
     { "ssfgobj", "Generic Object Codec", SSFGObjUnitTest },
@@ -91,7 +91,7 @@ SSFUnitTest_t unitTests[] =
 
 #if SSF_CONFIG_HEAP_UNIT_TEST == 1
     { "ssfheap", "Integrity Checked Heap", SSFHeapUnitTest },
-#endif /* SSF_CONFIG_STR_UNIT_TEST */
+#endif /* SSF_CONFIG_HEAP_UNIT_TEST */
 
 #if SSF_CONFIG_DEC_UNIT_TEST == 1
     { "ssfdec", "Decimal String Codec", SSFDecUnitTest },

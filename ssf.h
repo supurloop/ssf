@@ -49,8 +49,8 @@ extern "C" {
 #define MOD255(m) ((m) % 255)
 
 typedef const char *SSFCStrIn_t;
-typedef char* SSFCStrOut_t;
-typedef char* SSFCStr_t;
+typedef char *SSFCStrOut_t;
+typedef char *SSFCStr_t;
 typedef void (*SSFVoidFn_t)(void); /* Generic function pointer type */
 
 /* Use to suppress unused parameter warnings */

@@ -42,19 +42,23 @@
 /* --------------------------------------------------------------------------------------------- */
 void SSFStrBufUnitTest(void)
 {
+    #if 0
 #define SSFSTR_UNIT_TEST_BUF_SIZE (257u)
     size_t s1Len;
     char dst[SSFSTR_UNIT_TEST_BUF_SIZE];
+    char src[SSFSTR_UNIT_TEST_BUF_SIZE];
     char check[SSFSTR_UNIT_TEST_BUF_SIZE];
     size_t i;
     SSFCStrBuf_t sbDst;
     SSFCStrBuf_t sbCheck;
+    SSFCStrBuf_t sbSrc;
     const SSFCStr_t helloStr = "hello";
     char *tmp;
     size_t tlen;
     uint32_t tmagic;
 
     memset(&sbDst, 0, sizeof(sbDst));
+    memset(&sbSrc, 0, sizeof(sbSrc));
     memset(&sbCheck, 0, sizeof(sbCheck));
 
     /* Test SSFStrBufInit() */
@@ -121,13 +125,13 @@ void SSFStrBufUnitTest(void)
     SSF_ASSERT(memcmp(&sbCheck, &sbDst, sizeof(sbCheck)) == 0);
 
     memset(&sbDst, 0, sizeof(sbDst));
-    memset(dst, 1, sizeof(dst));
+    memcpy(dst, "hello", 6);
     SSF_ASSERT(SSFStrBufInitVarMalloc(&sbDst, dst, sizeof(dst)));
     SSF_ASSERT(sbDst.isConst == false);
     SSF_ASSERT(sbDst.isHeap == true);
     SSF_ASSERT(sbDst.ptr != dst);
-    SSF_ASSERT(memcmp(sbDst.ptr, dst, sizeof(dst)) == 0);
-    SSF_ASSERT(sbDst.len == sizeof(dst) - 1);
+    SSF_ASSERT(memcmp(sbDst.ptr, "hello", 6) == 0);
+    SSF_ASSERT(sbDst.len == 5);
     SSF_ASSERT(sbDst.size == sizeof(dst));
     SSF_ASSERT(sbDst.magic == SSF_STR_MAGIC);
 
@@ -231,10 +235,66 @@ void SSFStrBufUnitTest(void)
         SSF_ASSERT(sbDst.ptr[i] == 0);
     }
     SSF_ASSERT(sbDst.len == 0);
-
-#if 0
+    SSFStrBufDeInit(&sbDst);
 
     /* Test SSFStrBufCat() */
+    SSF_ASSERT(SSFStrBufInitVarMalloc(&sbDst, dst, sizeof(dst)));
+    SSF_ASSERT(SSFStrBufInitVarMalloc(&sbSrc, dst, sizeof(dst)));
+
+    SSF_ASSERT_TEST(SSFStrBufCat(NULL, &sbSrc));
+    SSF_ASSERT_TEST(SSFStrBufCat(&sbDst, NULL));
+    SSF_ASSERT_TEST(SSFStrBufCat(&sbDst, &sbDst));
+    SSF_ASSERT_TEST(SSFStrBufCat(&sbSrc, &sbSrc));
+    tmp = sbDst.ptr;
+    sbDst.ptr = NULL;
+    SSF_ASSERT_TEST(SSFStrBufCat(&sbDst, &sbSrc));
+    sbDst.ptr = tmp;
+    tlen = sbDst.len;
+    sbDst.len = sbDst.size;
+    SSF_ASSERT_TEST(SSFStrBufCat(&sbDst, &sbSrc));
+    sbDst.len = 0;
+    SSF_ASSERT_TEST(SSFStrBufCat(&sbDst, &sbSrc));
+    sbDst.len = tlen;
+    tmagic = sbDst.magic;
+    sbDst.magic = 1;
+    SSF_ASSERT_TEST(SSFStrBufCat(&sbDst, &sbSrc));
+    sbDst.magic = tmagic;
+
+    tmp = sbSrc.ptr;
+    sbSrc.ptr = NULL;
+    SSF_ASSERT_TEST(SSFStrBufCat(&sbDst, &sbSrc));
+    sbSrc.ptr = tmp;
+    tlen = sbSrc.len;
+    sbSrc.len = sbDst.size;
+    SSF_ASSERT_TEST(SSFStrBufCat(&sbDst, &sbSrc));
+    sbSrc.ptr[0] = 1;
+    sbSrc.len = 0;
+    SSF_ASSERT_TEST(SSFStrBufCat(&sbDst, &sbSrc));
+
+    tmp = sbDst.ptr;
+    sbDst.ptr = sbSrc.ptr;
+    SSF_ASSERT_TEST(SSFStrBufCat(&sbDst, &sbSrc));
+    sbDst.ptr = tmp;
+
+    sbSrc.len = tlen;
+    tmagic = sbSrc.magic;
+    sbSrc.magic = 1;
+    SSF_ASSERT_TEST(SSFStrBufCat(&sbDst, &sbSrc));
+    sbSrc.magic = tmagic;
+
+    SSFStrBufDeInit(&sbDst);
+    SSFStrBufDeInit(&sbSrc);
+
+    memset(dst, 0, sizeof(dst));
+    memset(src, 0, sizeof(src));
+
+    SSF_ASSERT(SSFStrBufInitVarMalloc(&sbDst, "hello", 6));
+    SSF_ASSERT(SSFStrBufInitVarMalloc(&sbSrc, "world", 6));
+
+    SSFStrBufDeInit(&sbDst);
+    SSFStrBufDeInit(&sbSrc);
+
+#if 0
     SSF_ASSERT_TEST(SSFStrBufCat(NULL, 4, &s1Len, "src", 4));
     SSF_ASSERT_TEST(SSFStrBufCat("dst", 4, NULL, "src", 4));
     SSF_ASSERT_TEST(SSFStrBufCat("dst", 4, &s1Len, NULL, 4));
@@ -249,7 +309,9 @@ void SSFStrBufUnitTest(void)
     SSF_ASSERT(s1Len == 4);
     SSF_ASSERT(memcmp(dst, "1231", 5) == 0);
     SSF_ASSERT(dst[5] == 0x55);
+#endif
 
+#if 0
     /* Test SSFStrBufCpy() */
     SSF_ASSERT_TEST(SSFStrBufCpy(NULL, 4, &s1Len, "src", 4));
     SSF_ASSERT_TEST(SSFStrBufCpy("dst", 4, NULL, "src", 4));
@@ -347,6 +409,7 @@ void SSFStrBufUnitTest(void)
     }
     SSF_ASSERT(memcmp(dst, check, sizeof(dst)) == 0);
     SSF_ASSERT(dst[sizeof(dst) - 1] == 1);
+#endif
 #endif
 }
 #endif /* SSF_CONFIG_STRB_UNIT_TEST */

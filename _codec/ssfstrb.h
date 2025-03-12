@@ -47,6 +47,7 @@ extern "C"
 typedef struct
 {
     char *ptr;
+    const char *ptrConst;
     size_t len;
     size_t size;
     uint32_t magic;
@@ -65,18 +66,26 @@ typedef enum
 /* --------------------------------------------------------------------------------------------- */
 /* Public Interface                                                                              */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFStrBufInit(SSFCStrBuf_t *sbOut, SSFCStr_t cstr, size_t cstrSize, bool isConst, bool isHeap);
-#define SSFStrBufInitVar(sbOut, cstr, cstrSize) SSFStrBufInit(sbOut, cstr, cstrSize, false, false)
-#define SSFStrBufInitVarMalloc(sbOut, cstr, cstrSize) SSFStrBufInit(sbOut, cstr, cstrSize, false, true)
-#define SSFStrBufInitConst(sbOut, cstr) SSFStrBufInit(sbOut, cstr, sizeof(cstr), true, false)
+bool SSFStrBufInit(SSFCStrBuf_t *sbOut, SSFCStr_t cstrBuf, size_t cstrBufSize, bool cstrBufClear);
+bool SSFStrBufInitConst(SSFCStrBuf_t *sbOut, SSFCStrIn_t strBufConst, size_t strBufConstSize);
+bool SSFStrBufInitHeap(SSFCStrBuf_t *sbOut, SSFCStrIn_t cstrInitialOpt, size_t cstrInitialSize,
+                       size_t cstrHeapSize, bool cstrHeapClear);
+bool SSFStrBufInitHeapConst(SSFCStrBuf_t *sbOut, SSFCStrIn_t cstrInitial, size_t cstrInitialSize,
+                            size_t cstrHeapSize, bool cstrHeapClear);
 void SSFStrBufDeInit(SSFCStrBuf_t *sbOut);
+
 size_t SSFStrBufLen(const SSFCStrBuf_t *sb);
 size_t SSFStrBufSize(const SSFCStrBuf_t *sb);
+bool SSFStrBufIsConst(const SSFCStrBuf_t *sb);
+bool SSFStrBufIsHeap(const SSFCStrBuf_t *sb);
+bool SSFStrBufIsValid(const SSFCStrBuf_t *sb);
+const char *SSFStrBufPtr(const SSFCStrBuf_t *sb);
+
 void SSFStrBufClr(SSFCStrBuf_t *sbOut);
 bool SSFStrBufCat(SSFCStrBuf_t *dstOut, const SSFCStrBuf_t *src);
 bool SSFStrBufCpy(SSFCStrBuf_t *dstOut, const SSFCStrBuf_t *src);
 bool SSFStrBufCmp(const SSFCStrBuf_t *sb1, const SSFCStrBuf_t *sb2);
-void SSFStrBufToCase(SSFCStrBuf_t *dstOut, SSFStrBufCase_t toCase);
+void SSFStrBufToCase(SSFCStrBuf_t *sbOut, SSFStrBufCase_t toCase);
 
 /* --------------------------------------------------------------------------------------------- */
 /* Unit test                                                                                     */

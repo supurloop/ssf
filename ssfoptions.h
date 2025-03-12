@@ -408,6 +408,11 @@ typedef enum
 /* Define the maximum parse depth, each nexted object or array starts a new depth level. */
 #define SSF_GOBJ_CONFIG_MAX_IN_DEPTH (4u)
 
+/* --------------------------------------------------------------------------------------------- */
+/* Configure ssfstrb's interface                                                                 */
+/* --------------------------------------------------------------------------------------------- */
+#define SSF_STRB_MAX_SIZE ((size_t)(1024ull * 1024ull))
+
 #ifdef __cplusplus
 }
 #endif

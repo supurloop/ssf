@@ -78,7 +78,12 @@
 /*       - Updated fsm interface to have 1 level of nesting, a superstate.                       */
 /*       - Beta version of generic object interface.                                             */
 /*       - Better organized the source files in Visual Studio project.                           */
+/* 0.1.2 - Added real-time tracking of heap current usage and minimum.                           */
+/*       - Added additional interfaces to ssfstr module.                                         */
+/*       - Made RTC interface thread safe.                                                       */
+/*       - Minor improvements to ssfjsonn interface.                                             */
+/*       - Added size constant to ssfstr interface.                                              */
 /* --------------------------------------------------------------------------------------------- */
-#define SSF_VERSION_STR "0.1.1"
+#define SSF_VERSION_STR "0.1.2"
 
 #endif /* SSF_VERSION_H_INCLUDE */

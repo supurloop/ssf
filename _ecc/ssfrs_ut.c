@@ -59,10 +59,10 @@ void SSFRSUnitTest(void)
     uint16_t eccBufLen;
     uint16_t len;
     uint16_t numChunks;
+    uint32_t byteErrorsCorrected;
 
     /* Totals */
     uint32_t totalEncodeDecode = 0;
-    uint32_t totalBitErrorsCorrected = 0;
 
     /* Verify that API assertions are functioning */
     SSF_ASSERT_TEST(SSFRSEncode(NULL, SSF_RS_MAX_MESSAGE_SIZE, eccBuf, (uint16_t)sizeof(eccBuf),
@@ -83,6 +83,8 @@ void SSFRSUnitTest(void)
                                 &eccBufLen, SSF_RS_MAX_SYMBOLS, 0));
     SSF_ASSERT_TEST(SSFRSEncode(msg, SSF_RS_MAX_MESSAGE_SIZE, eccBuf, (uint16_t)sizeof(eccBuf),
                                 &eccBufLen, SSF_RS_MAX_SYMBOLS, SSF_RS_MAX_CHUNK_SIZE + 1));
+    SSF_ASSERT_TEST(SSFRSEncode(msg, SSF_RS_MAX_MESSAGE_SIZE, eccBuf, (uint16_t)sizeof(eccBuf),
+                                &eccBufLen, SSF_RS_MAX_SYMBOLS-1, SSF_RS_MAX_CHUNK_SIZE));
 
     SSF_ASSERT_TEST(SSFRSDecode(NULL, SSF_RS_MAX_MESSAGE_SIZE, &len, SSF_RS_MAX_SYMBOLS,
                                 SSF_RS_MAX_CHUNK_SIZE));
@@ -98,6 +100,8 @@ void SSFRSUnitTest(void)
                                 0));
     SSF_ASSERT_TEST(SSFRSDecode(msg, SSF_RS_MAX_MESSAGE_SIZE, &len, SSF_RS_MAX_SYMBOLS,
                                 SSF_RS_MAX_CHUNK_SIZE + 1));
+    SSF_ASSERT_TEST(SSFRSDecode(msg, SSF_RS_MAX_MESSAGE_SIZE, &len, SSF_RS_MAX_SYMBOLS - 1,
+                                SSF_RS_MAX_CHUNK_SIZE));
 
     /* Always seed with 0 so that pseudo random values are consistent between runs to aid debug */
     srand(0);
@@ -107,7 +111,7 @@ void SSFRSUnitTest(void)
     {
         for (chunkSize = 1; (chunkSize <= SSF_RS_MAX_CHUNK_SIZE) && (chunkSize != 0); chunkSize++)
         {
-            for (eccSize = 2; eccSize <= SSF_RS_MAX_SYMBOLS; eccSize++)
+            for (eccSize = 2; eccSize <= SSF_RS_MAX_SYMBOLS; eccSize+=2)
             {
                 /* Compute the number of chunks */
                 numChunks = (uint16_t)(msgLen / chunkSize);
@@ -133,14 +137,26 @@ void SSFRSUnitTest(void)
                 memcpy(&msg[msgLen], eccBuf, eccBufLen);
 
                 /* Flip all the bits in eccSize/2 bytes of each chunk to sim max correctable err */
+                byteErrorsCorrected = 0;
                 for (i = 0; i < numChunks; i++)
                 {
                     for (j = 0; j < (eccSize >> 1); j++)
                     {
-                        msg[i * chunkSize] ^= (uint8_t) 0xff;
-                        totalBitErrorsCorrected += 8;
+                        /* Is there enough message to corrupt? */
+                        if (j < (msgLen - (i * chunkSize)))
+                        {
+                            /* Yes, corrupt message byte */
+                            msg[(i * chunkSize) + j] ^= (uint8_t)0xff;
+                        }
+                        else
+                        {
+                            /* No, corrupt ecc symbol byte */
+                            msg[(i * chunkSize) + (i * eccSize) + j] ^= (uint8_t)0xff;
+                        }
+                        byteErrorsCorrected += 1;
                     }
                 }
+                SSF_ASSERT(byteErrorsCorrected == (uint32_t)((eccSize >> 1) * numChunks));
 
                 /* Decode the error containing message */
                 SSF_ASSERT(SSFRSDecode(msg, msgLen + (eccSize * numChunks), &len, eccSize,

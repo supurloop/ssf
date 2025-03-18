@@ -252,7 +252,7 @@ typedef enum
 /* The maximum number of symbols in bytes that will encode up to SSF_RS_MAX_CHUNK_SIZE bytes */
 /* Reed-Solomon can correct SSF_RS_MAX_SYMBOLS/2 bytes with errors in a message */
 #define SSF_RS_MAX_SYMBOLS (8ul)
-#if (SSF_RS_MAX_SYMBOLS < 2) || (SSF_RS_MAX_SYMBOLS > 254)
+#if (SSF_RS_MAX_SYMBOLS < 2) || (SSF_RS_MAX_SYMBOLS > 254) || ((SSF_RS_MAX_SYMBOLS & 0x01) != 0)
 #error SSFRS Invalid SSF_RS_MAX_SYMBOLS.
 #endif
 

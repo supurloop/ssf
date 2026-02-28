@@ -131,10 +131,12 @@ static const uint8_t *_sha512_256MonteUT[] =
 /* --------------------------------------------------------------------------------------------- */
 void SSFSHA2UnitTest(void)
 {
-    uint32_t i, j;
+    uint32_t i, j, k, chunkLen, feed;
     uint8_t monteOut[64 * 3];
     uint8_t seed[64];
     uint8_t out[64];
+    SSFSHA2_32Context_t ctx32;
+    SSFSHA2_64Context_t ctx64;
 
     SSF_ASSERT_TEST(SSFSHA256(NULL, 0, out, sizeof(out)));
     SSF_ASSERT_TEST(SSFSHA256((uint8_t *)"", 0, NULL, sizeof(out)));
@@ -281,5 +283,321 @@ void SSFSHA2UnitTest(void)
 
     SSFSHA512_256((uint8_t *)"abc", 3, out, sizeof(out));
     SSF_ASSERT(memcmp(out, "\x53\x04\x8e\x26\x81\x94\x1e\xf9\x9b\x2e\x29\xb7\x6b\x4c\x7d\xab\xe4\xc2\xd0\xc6\x34\xfc\x6d\x46\xe0\xe2\xf1\x31\x07\xe7\xaf\x23", 32) == 0);
+
+    /* Incremental interface assertion tests: SSFSHA2_32 */
+    SSF_ASSERT_TEST(SSFSHA2_32Begin(NULL, 256));
+    SSF_ASSERT_TEST(SSFSHA2_32Begin(&ctx32, 512));
+
+    SSF_ASSERT_TEST(SSFSHA2_32Update(NULL, (uint8_t *)"", 0));
+    memset(&ctx32, 0, sizeof(ctx32));
+    SSF_ASSERT_TEST(SSFSHA2_32Update(&ctx32, (uint8_t *)"", 0));
+    SSFSHA256Begin(&ctx32);
+    SSF_ASSERT_TEST(SSFSHA2_32Update(&ctx32, NULL, 1));
+
+    SSF_ASSERT_TEST(SSFSHA2_32End(NULL, out, sizeof(out)));
+    memset(&ctx32, 0, sizeof(ctx32));
+    SSF_ASSERT_TEST(SSFSHA2_32End(&ctx32, out, sizeof(out)));
+    SSFSHA256Begin(&ctx32);
+    SSF_ASSERT_TEST(SSFSHA2_32End(&ctx32, NULL, sizeof(out)));
+    SSFSHA256Begin(&ctx32);
+    SSF_ASSERT_TEST(SSFSHA2_32End(&ctx32, out, SSF_SHA2_256_BYTE_SIZE - 1));
+    SSFSHA224Begin(&ctx32);
+    SSF_ASSERT_TEST(SSFSHA2_32End(&ctx32, out, SSF_SHA2_224_BYTE_SIZE - 1));
+
+    /* Incremental interface assertion tests: SSFSHA2_64 */
+    SSF_ASSERT_TEST(SSFSHA2_64Begin(NULL, 512, 0));
+    SSF_ASSERT_TEST(SSFSHA2_64Begin(&ctx64, 256, 0));
+    SSF_ASSERT_TEST(SSFSHA2_64Begin(&ctx64, 384, 256));
+    SSF_ASSERT_TEST(SSFSHA2_64Begin(&ctx64, 512, 128));
+
+    SSF_ASSERT_TEST(SSFSHA2_64Update(NULL, (uint8_t *)"", 0));
+    memset(&ctx64, 0, sizeof(ctx64));
+    SSF_ASSERT_TEST(SSFSHA2_64Update(&ctx64, (uint8_t *)"", 0));
+    SSFSHA512Begin(&ctx64);
+    SSF_ASSERT_TEST(SSFSHA2_64Update(&ctx64, NULL, 1));
+
+    SSF_ASSERT_TEST(SSFSHA2_64End(NULL, out, sizeof(out)));
+    memset(&ctx64, 0, sizeof(ctx64));
+    SSF_ASSERT_TEST(SSFSHA2_64End(&ctx64, out, sizeof(out)));
+    SSFSHA512Begin(&ctx64);
+    SSF_ASSERT_TEST(SSFSHA2_64End(&ctx64, NULL, sizeof(out)));
+    SSFSHA512Begin(&ctx64);
+    SSF_ASSERT_TEST(SSFSHA2_64End(&ctx64, out, SSF_SHA2_512_BYTE_SIZE - 1));
+    SSFSHA384Begin(&ctx64);
+    SSF_ASSERT_TEST(SSFSHA2_64End(&ctx64, out, SSF_SHA2_384_BYTE_SIZE - 1));
+    SSFSHA512_224Begin(&ctx64);
+    SSF_ASSERT_TEST(SSFSHA2_64End(&ctx64, out, SSF_SHA2_512_224_BYTE_SIZE - 1));
+    SSFSHA512_256Begin(&ctx64);
+    SSF_ASSERT_TEST(SSFSHA2_64End(&ctx64, out, SSF_SHA2_512_256_BYTE_SIZE - 1));
+
+    /* SHA224 incremental Monte Carlo: all chunk sizes 1 to 84 */
+    for (chunkLen = 1; chunkLen <= 28 * 3; chunkLen++)
+    {
+        memcpy(seed, _sha224MonteUT[0], 28);
+        for (i = 1; i < 11; i++)
+        {
+            memcpy(&monteOut[0], seed, 28);
+            memcpy(&monteOut[28], seed, 28);
+            memcpy(&monteOut[28 * 2], seed, 28);
+            for (j = 0; j < 1000; j++)
+            {
+                SSFSHA224Begin(&ctx32);
+                for (k = 0; k < 28 * 3; k += chunkLen)
+                {
+                    feed = SSF_MIN(chunkLen, 28 * 3 - k);
+                    SSFSHA224Update(&ctx32, &monteOut[k], feed);
+                }
+                SSFSHA224End(&ctx32, out, sizeof(out));
+                memcpy(&monteOut[0], &monteOut[28], 28);
+                memcpy(&monteOut[28], &monteOut[28 * 2], 28);
+                memcpy(&monteOut[28 * 2], out, 28);
+            }
+            memcpy(seed, &monteOut[28 * 2], 28);
+            SSF_ASSERT(memcmp(seed, _sha224MonteUT[i], 28) == 0);
+        }
+    }
+
+    /* SHA224 incremental: empty message */
+    SSFSHA224Begin(&ctx32);
+    SSFSHA224End(&ctx32, out, sizeof(out));
+    SSF_ASSERT(memcmp(out, "\xd1\x4a\x02\x8c\x2a\x3a\x2b\xc9\x47\x61\x02\xbb\x28\x82\x34\xc4\x15\xa2\xb0\x1f\x82\x8e\xa6\x2a\xc5\xb3\xe4\x2f", 28) == 0);
+
+    /* SHA224 incremental: "abc", all chunk sizes 1 to 3 */
+    for (chunkLen = 1; chunkLen <= 3; chunkLen++)
+    {
+        SSFSHA224Begin(&ctx32);
+        for (k = 0; k < 3; k += chunkLen)
+        {
+            feed = SSF_MIN(chunkLen, 3 - k);
+            SSFSHA224Update(&ctx32, (uint8_t *)"abc" + k, feed);
+        }
+        SSFSHA224End(&ctx32, out, sizeof(out));
+        SSF_ASSERT(memcmp(out, "\x23\x09\x7d\x22\x34\x05\xd8\x22\x86\x42\xa4\x77\xbd\xa2\x55\xb3\x2a\xad\xbc\xe4\xbd\xa0\xb3\xf7\xe3\x6c\x9d\xa7", 28) == 0);
+    }
+
+    /* SHA256 incremental Monte Carlo: all chunk sizes 1 to 96 */
+    for (chunkLen = 1; chunkLen <= 32 * 3; chunkLen++)
+    {
+        memcpy(seed, _sha256MonteUT[0], 32);
+        for (i = 1; i < 11; i++)
+        {
+            memcpy(&monteOut[0], seed, 32);
+            memcpy(&monteOut[32], seed, 32);
+            memcpy(&monteOut[32 * 2], seed, 32);
+            for (j = 0; j < 1000; j++)
+            {
+                SSFSHA256Begin(&ctx32);
+                for (k = 0; k < 32 * 3; k += chunkLen)
+                {
+                    feed = SSF_MIN(chunkLen, 32 * 3 - k);
+                    SSFSHA256Update(&ctx32, &monteOut[k], feed);
+                }
+                SSFSHA256End(&ctx32, out, sizeof(out));
+                memcpy(&monteOut[0], &monteOut[32], 32);
+                memcpy(&monteOut[32], &monteOut[32 * 2], 32);
+                memcpy(&monteOut[32 * 2], out, 32);
+            }
+            memcpy(seed, &monteOut[32 * 2], 32);
+            SSF_ASSERT(memcmp(seed, _sha256MonteUT[i], 32) == 0);
+        }
+    }
+
+    /* SHA256 incremental: empty message */
+    SSFSHA256Begin(&ctx32);
+    SSFSHA256End(&ctx32, out, sizeof(out));
+    SSF_ASSERT(memcmp(out, "\xe3\xb0\xc4\x42\x98\xfc\x1c\x14\x9a\xfb\xf4\xc8\x99\x6f\xb9\x24\x27\xae\x41\xe4\x64\x9b\x93\x4c\xa4\x95\x99\x1b\x78\x52\xb8\x55", 32) == 0);
+
+    /* SHA256 incremental: "abc", all chunk sizes 1 to 3 */
+    for (chunkLen = 1; chunkLen <= 3; chunkLen++)
+    {
+        SSFSHA256Begin(&ctx32);
+        for (k = 0; k < 3; k += chunkLen)
+        {
+            feed = SSF_MIN(chunkLen, 3 - k);
+            SSFSHA256Update(&ctx32, (uint8_t *)"abc" + k, feed);
+        }
+        SSFSHA256End(&ctx32, out, sizeof(out));
+        SSF_ASSERT(memcmp(out, "\xBA\x78\x16\xBF\x8F\x01\xCF\xEA\x41\x41\x40\xDE\x5D\xAE\x22\x23\xB0\x03\x61\xA3\x96\x17\x7A\x9C\xB4\x10\xFF\x61\xF2\x00\x15\xAD", 32) == 0);
+    }
+
+    /* SHA512 incremental Monte Carlo: all chunk sizes 1 to 192 */
+    for (chunkLen = 1; chunkLen <= 64 * 3; chunkLen++)
+    {
+        memcpy(seed, _sha512MonteUT[0], 64);
+        for (i = 1; i < 11; i++)
+        {
+            memcpy(&monteOut[0], seed, 64);
+            memcpy(&monteOut[64], seed, 64);
+            memcpy(&monteOut[64 * 2], seed, 64);
+            for (j = 0; j < 1000; j++)
+            {
+                SSFSHA512Begin(&ctx64);
+                for (k = 0; k < 64 * 3; k += chunkLen)
+                {
+                    feed = SSF_MIN(chunkLen, 64 * 3 - k);
+                    SSFSHA512Update(&ctx64, &monteOut[k], feed);
+                }
+                SSFSHA512End(&ctx64, out, sizeof(out));
+                memcpy(&monteOut[0], &monteOut[64], 64);
+                memcpy(&monteOut[64], &monteOut[64 * 2], 64);
+                memcpy(&monteOut[64 * 2], out, 64);
+            }
+            memcpy(seed, &monteOut[64 * 2], 64);
+            SSF_ASSERT(memcmp(seed, _sha512MonteUT[i], 64) == 0);
+        }
+    }
+
+    /* SHA512 incremental: empty message */
+    SSFSHA512Begin(&ctx64);
+    SSFSHA512End(&ctx64, out, sizeof(out));
+    SSF_ASSERT(memcmp(out, "\xcf\x83\xe1\x35\x7e\xef\xb8\xbd\xf1\x54\x28\x50\xd6\x6d\x80\x07\xd6\x20\xe4\x05\x0b\x57\x15\xdc\x83\xf4\xa9\x21\xd3\x6c\xe9\xce\x47\xd0\xd1\x3c\x5d\x85\xf2\xb0\xff\x83\x18\xd2\x87\x7e\xec\x2f\x63\xb9\x31\xbd\x47\x41\x7a\x81\xa5\x38\x32\x7a\xf9\x27\xda\x3e", 64) == 0);
+
+    /* SHA512 incremental: "abc", all chunk sizes 1 to 3 */
+    for (chunkLen = 1; chunkLen <= 3; chunkLen++)
+    {
+        SSFSHA512Begin(&ctx64);
+        for (k = 0; k < 3; k += chunkLen)
+        {
+            feed = SSF_MIN(chunkLen, 3 - k);
+            SSFSHA512Update(&ctx64, (uint8_t *)"abc" + k, feed);
+        }
+        SSFSHA512End(&ctx64, out, sizeof(out));
+        SSF_ASSERT(memcmp(out, "\xdd\xaf\x35\xa1\x93\x61\x7a\xba\xcc\x41\x73\x49\xae\x20\x41\x31\x12\xe6\xfa\x4e\x89\xa9\x7e\xa2\x0a\x9e\xee\xe6\x4b\x55\xd3\x9a\x21\x92\x99\x2a\x27\x4f\xc1\xa8\x36\xba\x3c\x23\xa3\xfe\xeb\xbd\x45\x4d\x44\x23\x64\x3c\xe8\x0e\x2a\x9a\xc9\x4f\xa5\x4c\xa4\x9f", 64) == 0);
+    }
+
+    /* SHA384 incremental Monte Carlo: all chunk sizes 1 to 144 */
+    for (chunkLen = 1; chunkLen <= 48 * 3; chunkLen++)
+    {
+        memcpy(seed, _sha384MonteUT[0], 48);
+        for (i = 1; i < 11; i++)
+        {
+            memcpy(&monteOut[0], seed, 48);
+            memcpy(&monteOut[48], seed, 48);
+            memcpy(&monteOut[48 * 2], seed, 48);
+            for (j = 0; j < 1000; j++)
+            {
+                SSFSHA384Begin(&ctx64);
+                for (k = 0; k < 48 * 3; k += chunkLen)
+                {
+                    feed = SSF_MIN(chunkLen, 48 * 3 - k);
+                    SSFSHA384Update(&ctx64, &monteOut[k], feed);
+                }
+                SSFSHA384End(&ctx64, out, sizeof(out));
+                memcpy(&monteOut[0], &monteOut[48], 48);
+                memcpy(&monteOut[48], &monteOut[48 * 2], 48);
+                memcpy(&monteOut[48 * 2], out, 48);
+            }
+            memcpy(seed, &monteOut[48 * 2], 48);
+            SSF_ASSERT(memcmp(seed, _sha384MonteUT[i], 48) == 0);
+        }
+    }
+
+    /* SHA384 incremental: empty message */
+    SSFSHA384Begin(&ctx64);
+    SSFSHA384End(&ctx64, out, sizeof(out));
+    SSF_ASSERT(memcmp(out, "\x38\xb0\x60\xa7\x51\xac\x96\x38\x4c\xd9\x32\x7e\xb1\xb1\xe3\x6a\x21\xfd\xb7\x11\x14\xbe\x07\x43\x4c\x0c\xc7\xbf\x63\xf6\xe1\xda\x27\x4e\xde\xbf\xe7\x6f\x65\xfb\xd5\x1a\xd2\xf1\x48\x98\xb9\x5b", 48) == 0);
+
+    /* SHA384 incremental: "abc", all chunk sizes 1 to 3 */
+    for (chunkLen = 1; chunkLen <= 3; chunkLen++)
+    {
+        SSFSHA384Begin(&ctx64);
+        for (k = 0; k < 3; k += chunkLen)
+        {
+            feed = SSF_MIN(chunkLen, 3 - k);
+            SSFSHA384Update(&ctx64, (uint8_t *)"abc" + k, feed);
+        }
+        SSFSHA384End(&ctx64, out, sizeof(out));
+        SSF_ASSERT(memcmp(out, "\xcb\x00\x75\x3f\x45\xa3\x5e\x8b\xb5\xa0\x3d\x69\x9a\xc6\x50\x07\x27\x2c\x32\xab\x0e\xde\xd1\x63\x1a\x8b\x60\x5a\x43\xff\x5b\xed\x80\x86\x07\x2b\xa1\xe7\xcc\x23\x58\xba\xec\xa1\x34\xc8\x25\xa7", 48) == 0);
+    }
+
+    /* SHA512/224 incremental Monte Carlo: all chunk sizes 1 to 84 */
+    for (chunkLen = 1; chunkLen <= 28 * 3; chunkLen++)
+    {
+        memcpy(seed, _sha512_224MonteUT[0], 28);
+        for (i = 1; i < 11; i++)
+        {
+            memcpy(&monteOut[0], seed, 28);
+            memcpy(&monteOut[28], seed, 28);
+            memcpy(&monteOut[28 * 2], seed, 28);
+            for (j = 0; j < 1000; j++)
+            {
+                SSFSHA512_224Begin(&ctx64);
+                for (k = 0; k < 28 * 3; k += chunkLen)
+                {
+                    feed = SSF_MIN(chunkLen, 28 * 3 - k);
+                    SSFSHA512_224Update(&ctx64, &monteOut[k], feed);
+                }
+                SSFSHA512_224End(&ctx64, out, sizeof(out));
+                memcpy(&monteOut[0], &monteOut[28], 28);
+                memcpy(&monteOut[28], &monteOut[28 * 2], 28);
+                memcpy(&monteOut[28 * 2], out, 28);
+            }
+            memcpy(seed, &monteOut[28 * 2], 28);
+            SSF_ASSERT(memcmp(seed, _sha512_224MonteUT[i], 28) == 0);
+        }
+    }
+
+    /* SHA512/224 incremental: empty message */
+    SSFSHA512_224Begin(&ctx64);
+    SSFSHA512_224End(&ctx64, out, sizeof(out));
+    SSF_ASSERT(memcmp(out, "\x6e\xd0\xdd\x02\x80\x6f\xa8\x9e\x25\xde\x06\x0c\x19\xd3\xac\x86\xca\xbb\x87\xd6\xa0\xdd\xd0\x5c\x33\x3b\x84\xf4", 28) == 0);
+
+    /* SHA512/224 incremental: "abc", all chunk sizes 1 to 3 */
+    for (chunkLen = 1; chunkLen <= 3; chunkLen++)
+    {
+        SSFSHA512_224Begin(&ctx64);
+        for (k = 0; k < 3; k += chunkLen)
+        {
+            feed = SSF_MIN(chunkLen, 3 - k);
+            SSFSHA512_224Update(&ctx64, (uint8_t *)"abc" + k, feed);
+        }
+        SSFSHA512_224End(&ctx64, out, sizeof(out));
+        SSF_ASSERT(memcmp(out, "\x46\x34\x27\x0f\x70\x7b\x6a\x54\xda\xae\x75\x30\x46\x08\x42\xe2\x0e\x37\xed\x26\x5c\xee\xe9\xa4\x3e\x89\x24\xaa", 28) == 0);
+    }
+
+    /* SHA512/256 incremental Monte Carlo: all chunk sizes 1 to 96 */
+    for (chunkLen = 1; chunkLen <= 32 * 3; chunkLen++)
+    {
+        memcpy(seed, _sha512_256MonteUT[0], 32);
+        for (i = 1; i < 11; i++)
+        {
+            memcpy(&monteOut[0], seed, 32);
+            memcpy(&monteOut[32], seed, 32);
+            memcpy(&monteOut[32 * 2], seed, 32);
+            for (j = 0; j < 1000; j++)
+            {
+                SSFSHA512_256Begin(&ctx64);
+                for (k = 0; k < 32 * 3; k += chunkLen)
+                {
+                    feed = SSF_MIN(chunkLen, 32 * 3 - k);
+                    SSFSHA512_256Update(&ctx64, &monteOut[k], feed);
+                }
+                SSFSHA512_256End(&ctx64, out, sizeof(out));
+                memcpy(&monteOut[0], &monteOut[32], 32);
+                memcpy(&monteOut[32], &monteOut[32 * 2], 32);
+                memcpy(&monteOut[32 * 2], out, 32);
+            }
+            memcpy(seed, &monteOut[32 * 2], 32);
+            SSF_ASSERT(memcmp(seed, _sha512_256MonteUT[i], 32) == 0);
+        }
+    }
+
+    /* SHA512/256 incremental: empty message */
+    SSFSHA512_256Begin(&ctx64);
+    SSFSHA512_256End(&ctx64, out, sizeof(out));
+    SSF_ASSERT(memcmp(out, "\xc6\x72\xb8\xd1\xef\x56\xed\x28\xab\x87\xc3\x62\x2c\x51\x14\x06\x9b\xdd\x3a\xd7\xb8\xf9\x73\x74\x98\xd0\xc0\x1e\xce\xf0\x96\x7a", 32) == 0);
+
+    /* SHA512/256 incremental: "abc", all chunk sizes 1 to 3 */
+    for (chunkLen = 1; chunkLen <= 3; chunkLen++)
+    {
+        SSFSHA512_256Begin(&ctx64);
+        for (k = 0; k < 3; k += chunkLen)
+        {
+            feed = SSF_MIN(chunkLen, 3 - k);
+            SSFSHA512_256Update(&ctx64, (uint8_t *)"abc" + k, feed);
+        }
+        SSFSHA512_256End(&ctx64, out, sizeof(out));
+        SSF_ASSERT(memcmp(out, "\x53\x04\x8e\x26\x81\x94\x1e\xf9\x9b\x2e\x29\xb7\x6b\x4c\x7d\xab\xe4\xc2\xd0\xc6\x34\xfc\x6d\x46\xe0\xe2\xf1\x31\x07\xe7\xaf\x23", 32) == 0);
+    }
 }
 #endif /* SSF_CONFIG_SHA2_UNIT_TEST */

@@ -30,7 +30,6 @@
 /* OF THE POSSIBILITY OF SUCH DAMAGE.                                                            */
 /* --------------------------------------------------------------------------------------------- */
 #include <stdint.h>
-#include <stdbool.h>
 #include "ssfport.h"
 #include "ssfassert.h"
 #include "ssfsha2.h"
@@ -54,6 +53,9 @@
 #define SSF_SHA512_BLOCK_SIZE_BYTES (128u)
 #define SSF_SHA512_MIN_PADDABLE_SIZE_BYTES (SSF_SHA512_BLOCK_SIZE_BYTES - \
                                             SSF_SHA512_MIN_PAD_SIZE_BYTES)
+
+#define SSF_SHA2_32_CONTEXT_MAGIC (0x32C01984ul)
+#define SSF_SHA2_64_CONTEXT_MAGIC (0x64C05172ul)
 
 /* --------------------------------------------------------------------------------------------- */
 /* Local variables                                                                               */
@@ -102,121 +104,16 @@ static const uint64_t k_64[SSF_SHA512_INTERNAL_SIZE_BYTES] =
 void SSFSHA2_32(const uint8_t *in, uint32_t inLen, uint8_t *out, uint32_t outSize,
                 uint16_t hashBitSize)
 {
-    uint32_t a, b, c, d, e, f, g, h;
-    uint32_t h0, h1, h2, h3, h4, h5, h6, h7;
-    uint32_t ch, temp1, maj, temp2;
-    uint32_t s0, s1;
-    uint32_t i, j;
-    uint32_t w[SSF_SHA256_BLOCK_SIZE_BYTES];
-    uint8_t pad[SSF_SHA256_BLOCK_SIZE_BYTES];
-
-    bool isPadded = false;
-    bool isSplit = false;
-    uint32_t offset = 0;
-    const uint8_t *pin = in;
-    uint64_t inBits = ((uint64_t)inLen) << 3;
+    SSFSHA2_32Context_t context;
 
     SSF_ASSERT(in != NULL);
     SSF_ASSERT(out != NULL);
     SSF_ASSERT((hashBitSize == 256) || (hashBitSize == 224));
-    SSF_ASSERT(outSize >= (uint32_t) (hashBitSize >> 3));
+    SSF_ASSERT(outSize >= (uint32_t)(hashBitSize >> 3));
 
-    /* Initialize */
-    if (hashBitSize == 256)
-    {
-        /* SHA-256 */
-        h0 = 0x6a09e667; h1 = 0xbb67ae85; h2 = 0x3c6ef372; h3 = 0xa54ff53a;
-        h4 = 0x510e527f; h5 = 0x9b05688c; h6 = 0x1f83d9ab; h7 = 0x5be0cd19;
-    }
-    else
-    {
-        /* SHA-224 */
-        h0 = 0xc1059ed8; h1 = 0x367cd507; h2 = 0x3070dd17; h3 = 0xf70e5939;
-        h4 = 0xffc00b31; h5 = 0x68581511; h6 = 0x64f98fa7; h7 = 0xbefa4fa4;
-    }
-
-    /* Iterate over 512-bit chunks adding padding at end */
-    do 
-    {
-        /* Pad? */
-        if (inLen >= SSF_SHA256_BLOCK_SIZE_BYTES)
-        {
-            /* No, just process in data */
-            inLen -= SSF_SHA256_BLOCK_SIZE_BYTES;
-        }
-        else
-        {
-            /* Yes, initialize pad buffer with in buffer */
-            memset(&pad[inLen], 0, sizeof(pad) - inLen);
-            memcpy(pad, &in[offset], inLen);
-
-            /* Room for pad in current block? */
-            if (inLen > SSF_SHA256_MIN_PADDABLE_SIZE_BYTES)
-            {
-                /* No, need to add whole additional 512-bit block; pad split across 2 blocks */
-                pad[inLen] = 0x80;
-                isSplit = true;
-            }
-            else
-            {
-                /* Yes, add the pad */
-                if (!isSplit) pad[inLen] = 0x80;
-                pad[SSF_SHA256_BLOCK_SIZE_BYTES - 1] = (uint8_t)(inBits & 0xff);
-                pad[SSF_SHA256_BLOCK_SIZE_BYTES - 2] = (uint8_t)((inBits & 0xff00) >> 8);
-                pad[SSF_SHA256_BLOCK_SIZE_BYTES - 3] = (uint8_t)((inBits & 0xff0000) >> 16);
-                pad[SSF_SHA256_BLOCK_SIZE_BYTES - 4] = (uint8_t)((inBits & 0xff000000) >> 24);
-                pad[SSF_SHA256_BLOCK_SIZE_BYTES - 5] = (uint8_t)((inBits & 0xff00000000) >> 32);
-                isPadded = true;
-            }
-            pin = pad;
-            inLen = 0;
-            offset = 0;
-        }
-
-        /* Initialize w[0-15] with data */
-        for (i = 0; i < 16; i++)
-        {
-            j = i << 2;
-            memcpy(&w[i], &pin[j + offset], sizeof(uint32_t));
-            w[i] = ntohl(w[i]);
-        }
-    
-        /* Extend */
-        for (i = 16; i < SSF_SHA256_BLOCK_SIZE_BYTES; i++)
-        {
-            s0 = (RR32(w[i-15], 7)) ^ (RR32(w[i-15], 18)) ^ (w[i-15] >> 3);
-            s1 = (RR32(w[i-2], 17)) ^ (RR32(w[i-2], 19)) ^ (w[i-2] >> 10);
-            w[i] = w[i-16] + s0 + w[i-7] + s1;
-        }
-
-        a = h0; b = h1; c = h2; d = h3; e = h4; f = h5; g = h6; h = h7;
-
-        /* Compression */
-        for (i = 0; i < SSF_SHA256_BLOCK_SIZE_BYTES; i++)
-        {
-            s1 = (RR32(e, 6)) ^ (RR32(e, 11)) ^ (RR32(e, 25));
-            ch = (e & f) ^ (~e & g);
-            temp1 = h + s1 + ch + k_32[i] + w[i];
-            s0 = (RR32(a, 2)) ^ (RR32(a, 13)) ^ (RR32(a, 22));
-            maj = (a & b) ^ (a & c) ^ (b & c);
-            temp2 = s0 + maj;
-
-            h = g; g = f; f = e; e = d + temp1; d = c; c = b; b = a; a = temp1 + temp2;
-        }
-
-        h0 += a; h1 += b; h2 += c; h3 += d; h4 += e; h5 += f; h6 += g; h7 += h;
-        offset += SSF_SHA256_BLOCK_SIZE_BYTES;
-    } while (!isPadded);
-
-    /* Accumulate hash into out buffer */
-    h0 = htonl(h0); memcpy(&out[0], &h0, sizeof(uint32_t));
-    h1 = htonl(h1); memcpy(&out[4], &h1, sizeof(uint32_t));
-    h2 = htonl(h2); memcpy(&out[8], &h2, sizeof(uint32_t));
-    h3 = htonl(h3); memcpy(&out[12], &h3, sizeof(uint32_t));
-    h4 = htonl(h4); memcpy(&out[16], &h4, sizeof(uint32_t));
-    h5 = htonl(h5); memcpy(&out[20], &h5, sizeof(uint32_t));
-    h6 = htonl(h6); memcpy(&out[24], &h6, sizeof(uint32_t));
-    if (hashBitSize != 224) { h7 = htonl(h7); memcpy(&out[28], &h7, sizeof(uint32_t)); }
+    SSFSHA2_32Begin(&context, hashBitSize);
+    SSFSHA2_32Update(&context, in, inLen);
+    SSFSHA2_32End(&context, out, outSize);
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -225,19 +122,7 @@ void SSFSHA2_32(const uint8_t *in, uint32_t inLen, uint8_t *out, uint32_t outSiz
 void SSFSHA2_64(const uint8_t *in, uint32_t inLen, uint8_t *out, uint32_t outSize,
                 uint16_t hashBitSize, uint16_t truncationBitSize)
 {
-    uint64_t a, b, c, d, e, f, g, h;
-    uint64_t h0, h1, h2, h3, h4, h5, h6, h7;
-    uint64_t ch, temp1, maj, temp2;
-    uint64_t s0, s1;
-    uint32_t i, j;
-    uint64_t w[SSF_SHA512_INTERNAL_SIZE_BYTES];
-    uint8_t pad[SSF_SHA512_BLOCK_SIZE_BYTES];
-
-    bool isPadded = false;
-    bool isSplit = false;
-    uint32_t offset = 0;
-    const uint8_t *pin = in;
-    uint64_t inBits = ((uint64_t)inLen) << 3;
+    SSFSHA2_64Context_t context;
 
     SSF_ASSERT(in != NULL);
     SSF_ASSERT(out != NULL);
@@ -248,130 +133,351 @@ void SSFSHA2_64(const uint8_t *in, uint32_t inLen, uint8_t *out, uint32_t outSiz
     { SSF_ASSERT(outSize >= (uint32_t)(hashBitSize >> 3)); }
     else SSF_ASSERT(outSize >= (uint32_t)(truncationBitSize >> 3));
 
-    /* Initialize */
+    SSFSHA2_64Begin(&context, hashBitSize, truncationBitSize);
+    SSFSHA2_64Update(&context, in, inLen);
+    SSFSHA2_64End(&context, out, outSize);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Processes one 64-byte block, updating the SHA256 or SHA224 running hash state hs[0..7].       */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFSHA2_32Block(uint32_t *hs, const uint8_t *block)
+{
+    uint32_t a, b, c, d, e, f, g, hh;
+    uint32_t ch, temp1, maj, temp2;
+    uint32_t s0, s1;
+    uint32_t i, j;
+    uint32_t w[SSF_SHA256_BLOCK_SIZE_BYTES];
+
+    for (i = 0; i < 16; i++)
+    {
+        j = i << 2;
+        memcpy(&w[i], &block[j], sizeof(uint32_t));
+        w[i] = ntohl(w[i]);
+    }
+
+    for (i = 16; i < SSF_SHA256_BLOCK_SIZE_BYTES; i++)
+    {
+        s0 = (RR32(w[i - 15], 7)) ^ (RR32(w[i - 15], 18)) ^ (w[i - 15] >> 3);
+        s1 = (RR32(w[i - 2], 17)) ^ (RR32(w[i - 2], 19)) ^ (w[i - 2] >> 10);
+        w[i] = w[i - 16] + s0 + w[i - 7] + s1;
+    }
+
+    a = hs[0]; b = hs[1]; c = hs[2]; d = hs[3]; e = hs[4]; f = hs[5]; g = hs[6]; hh = hs[7];
+
+    for (i = 0; i < SSF_SHA256_BLOCK_SIZE_BYTES; i++)
+    {
+        s1 = (RR32(e, 6)) ^ (RR32(e, 11)) ^ (RR32(e, 25));
+        ch = (e & f) ^ (~e & g);
+        temp1 = hh + s1 + ch + k_32[i] + w[i];
+        s0 = (RR32(a, 2)) ^ (RR32(a, 13)) ^ (RR32(a, 22));
+        maj = (a & b) ^ (a & c) ^ (b & c);
+        temp2 = s0 + maj;
+
+        hh = g; g = f; f = e; e = d + temp1; d = c; c = b; b = a; a = temp1 + temp2;
+    }
+
+    hs[0] += a; hs[1] += b; hs[2] += c; hs[3] += d; hs[4] += e; hs[5] += f; hs[6] += g; hs[7] += hh;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Processes one 128-byte block, updating the SHA512/384/512-224/512-256 running hash state.     */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFSHA2_64Block(uint64_t *hs, const uint8_t *block)
+{
+    uint64_t a, b, c, d, e, f, g, hh;
+    uint64_t ch, temp1, maj, temp2;
+    uint64_t s0, s1;
+    uint32_t i, j;
+    uint64_t w[SSF_SHA512_INTERNAL_SIZE_BYTES];
+
+    for (i = 0; i < 16; i++)
+    {
+        j = i << 3;
+        memcpy(&w[i], &block[j], sizeof(uint64_t)); w[i] = ntohll(w[i]);
+    }
+
+    for (i = 16; i < 80; i++)
+    {
+        s0 = (RR64(w[i - 15], 1)) ^ (RR64(w[i - 15], 8)) ^ (w[i - 15] >> 7);
+        s1 = (RR64(w[i - 2], 19)) ^ (RR64(w[i - 2], 61)) ^ (w[i - 2] >> 6);
+        w[i] = w[i - 16] + s0 + w[i - 7] + s1;
+    }
+
+    a = hs[0]; b = hs[1]; c = hs[2]; d = hs[3]; e = hs[4]; f = hs[5]; g = hs[6]; hh = hs[7];
+
+    for (i = 0; i < 80; i++)
+    {
+        s1 = (RR64(e, 14)) ^ (RR64(e, 18)) ^ (RR64(e, 41));
+        ch = (e & f) ^ (~e & g);
+        temp1 = hh + s1 + ch + k_64[i] + w[i];
+        s0 = (RR64(a, 28)) ^ (RR64(a, 34)) ^ (RR64(a, 39));
+        maj = (a & b) ^ (a & c) ^ (b & c);
+        temp2 = s0 + maj;
+
+        hh = g; g = f; f = e; e = d + temp1; d = c; c = b; b = a; a = temp1 + temp2;
+    }
+
+    hs[0] += a; hs[1] += b; hs[2] += c; hs[3] += d; hs[4] += e; hs[5] += f; hs[6] += g; hs[7] += hh;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Begins a SHA256 or SHA224 incremental hash context.                                           */
+/* --------------------------------------------------------------------------------------------- */
+void SSFSHA2_32Begin(SSFSHA2_32Context_t *context, uint16_t hashBitSize)
+{
+    SSF_ASSERT(context != NULL);
+    SSF_ASSERT((hashBitSize == 256) || (hashBitSize == 224));
+
+    memset(context, 0, sizeof(SSFSHA2_32Context_t));
+    context->hashBitSize = hashBitSize;
+
+    if (hashBitSize == 256)
+    {
+        /* SHA-256 */
+        context->h[0] = 0x6a09e667; context->h[1] = 0xbb67ae85;
+        context->h[2] = 0x3c6ef372; context->h[3] = 0xa54ff53a;
+        context->h[4] = 0x510e527f; context->h[5] = 0x9b05688c;
+        context->h[6] = 0x1f83d9ab; context->h[7] = 0x5be0cd19;
+    }
+    else
+    {
+        /* SHA-224 */
+        context->h[0] = 0xc1059ed8; context->h[1] = 0x367cd507;
+        context->h[2] = 0x3070dd17; context->h[3] = 0xf70e5939;
+        context->h[4] = 0xffc00b31; context->h[5] = 0x68581511;
+        context->h[6] = 0x64f98fa7; context->h[7] = 0xbefa4fa4;
+    }
+    context->magic = SSF_SHA2_32_CONTEXT_MAGIC;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Feeds a chunk of input data into a SHA256 or SHA224 incremental hash context.                 */
+/* --------------------------------------------------------------------------------------------- */
+void SSFSHA2_32Update(SSFSHA2_32Context_t *context, const uint8_t *in, uint32_t inLen)
+{
+    uint32_t copyLen;
+
+    SSF_ASSERT(context != NULL);
+    SSF_ASSERT(context->magic == SSF_SHA2_32_CONTEXT_MAGIC);
+    SSF_ASSERT((in != NULL) || (inLen == 0));
+
+    while (inLen > 0)
+    {
+        copyLen = SSF_SHA256_BLOCK_SIZE_BYTES - context->bufLen;
+        if (copyLen > inLen) copyLen = inLen;
+
+        memcpy(&context->buf[context->bufLen], in, copyLen);
+        context->bufLen += copyLen;
+        context->totalBits += ((uint64_t)copyLen) << 3;
+        in += copyLen;
+        inLen -= copyLen;
+
+        if (context->bufLen == SSF_SHA256_BLOCK_SIZE_BYTES)
+        {
+            _SSFSHA2_32Block(context->h, context->buf);
+            context->bufLen = 0;
+        }
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Ends a SHA256 or SHA224 incremental hash, writing the digest to out.                          */
+/* --------------------------------------------------------------------------------------------- */
+void SSFSHA2_32End(SSFSHA2_32Context_t *context, uint8_t *out, uint32_t outSize)
+{
+    uint8_t pad[SSF_SHA256_BLOCK_SIZE_BYTES];
+    uint64_t totalBits;
+    uint32_t tmp;
+
+    SSF_ASSERT(context != NULL);
+    SSF_ASSERT(context->magic == SSF_SHA2_32_CONTEXT_MAGIC);
+    SSF_ASSERT(out != NULL);
+    SSF_ASSERT(outSize >= (uint32_t)(context->hashBitSize >> 3));
+
+    totalBits = context->totalBits;
+
+    /* Build final padded block(s) from the partial buffer */
+    memcpy(pad, context->buf, context->bufLen);
+    memset(&pad[context->bufLen], 0, sizeof(pad) - context->bufLen);
+
+    if (context->bufLen > SSF_SHA256_MIN_PADDABLE_SIZE_BYTES)
+    {
+        /* Padding splits across two blocks */
+        pad[context->bufLen] = 0x80;
+        _SSFSHA2_32Block(context->h, pad);
+        memset(pad, 0, sizeof(pad));
+    }
+    else
+    {
+        pad[context->bufLen] = 0x80;
+    }
+
+    /* Append big-endian message bit length in last 8 bytes of pad */
+    pad[SSF_SHA256_BLOCK_SIZE_BYTES - 1] = (uint8_t)(totalBits & 0xff);
+    pad[SSF_SHA256_BLOCK_SIZE_BYTES - 2] = (uint8_t)((totalBits >> 8) & 0xff);
+    pad[SSF_SHA256_BLOCK_SIZE_BYTES - 3] = (uint8_t)((totalBits >> 16) & 0xff);
+    pad[SSF_SHA256_BLOCK_SIZE_BYTES - 4] = (uint8_t)((totalBits >> 24) & 0xff);
+    pad[SSF_SHA256_BLOCK_SIZE_BYTES - 5] = (uint8_t)((totalBits >> 32) & 0xff);
+    _SSFSHA2_32Block(context->h, pad);
+
+    /* Accumulate hash into out buffer */
+    tmp = htonl(context->h[0]); memcpy(&out[0],  &tmp, sizeof(uint32_t));
+    tmp = htonl(context->h[1]); memcpy(&out[4],  &tmp, sizeof(uint32_t));
+    tmp = htonl(context->h[2]); memcpy(&out[8],  &tmp, sizeof(uint32_t));
+    tmp = htonl(context->h[3]); memcpy(&out[12], &tmp, sizeof(uint32_t));
+    tmp = htonl(context->h[4]); memcpy(&out[16], &tmp, sizeof(uint32_t));
+    tmp = htonl(context->h[5]); memcpy(&out[20], &tmp, sizeof(uint32_t));
+    tmp = htonl(context->h[6]); memcpy(&out[24], &tmp, sizeof(uint32_t));
+    if (context->hashBitSize != 224) { tmp = htonl(context->h[7]); memcpy(&out[28], &tmp, sizeof(uint32_t)); }
+
+    /* Invalidate context to prevent reuse without re-init */
+    memset(context, 0, sizeof(SSFSHA2_32Context_t));
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Begins a SHA512, SHA384, SHA512/224, or SHA512/256 incremental hash context.                  */
+/* --------------------------------------------------------------------------------------------- */
+void SSFSHA2_64Begin(SSFSHA2_64Context_t *context, uint16_t hashBitSize, uint16_t truncationBitSize)
+{
+    SSF_ASSERT(context != NULL);
+    SSF_ASSERT(((hashBitSize == 512) && ((truncationBitSize == 0) || (truncationBitSize == 256) ||
+                                         (truncationBitSize == 224))) ||
+               ((hashBitSize == 384) && (truncationBitSize == 0)));
+
+    memset(context, 0, sizeof(SSFSHA2_64Context_t));
+    context->hashBitSize = hashBitSize;
+    context->truncationBitSize = truncationBitSize;
+
     if ((hashBitSize == 512) && (truncationBitSize == 0))
     {
         /* SHA-512 */
-        h0 = 0x6a09e667f3bcc908; h1 = 0xbb67ae8584caa73b;
-        h2 = 0x3c6ef372fe94f82b; h3 = 0xa54ff53a5f1d36f1;
-        h4 = 0x510e527fade682d1; h5 = 0x9b05688c2b3e6c1f;
-        h6 = 0x1f83d9abfb41bd6b; h7 = 0x5be0cd19137e2179;
+        context->h[0] = 0x6a09e667f3bcc908; context->h[1] = 0xbb67ae8584caa73b;
+        context->h[2] = 0x3c6ef372fe94f82b; context->h[3] = 0xa54ff53a5f1d36f1;
+        context->h[4] = 0x510e527fade682d1; context->h[5] = 0x9b05688c2b3e6c1f;
+        context->h[6] = 0x1f83d9abfb41bd6b; context->h[7] = 0x5be0cd19137e2179;
     }
     else if (hashBitSize == 384)
     {
         /* SHA-384 */
-        h0 = 0xcbbb9d5dc1059ed8; h1 = 0x629a292a367cd507;
-        h2 = 0x9159015a3070dd17; h3 = 0x152fecd8f70e5939;
-        h4 = 0x67332667ffc00b31; h5 = 0x8eb44a8768581511;
-        h6 = 0xdb0c2e0d64f98fa7; h7 = 0x47b5481dbefa4fa4;
+        context->h[0] = 0xcbbb9d5dc1059ed8; context->h[1] = 0x629a292a367cd507;
+        context->h[2] = 0x9159015a3070dd17; context->h[3] = 0x152fecd8f70e5939;
+        context->h[4] = 0x67332667ffc00b31; context->h[5] = 0x8eb44a8768581511;
+        context->h[6] = 0xdb0c2e0d64f98fa7; context->h[7] = 0x47b5481dbefa4fa4;
     }
     else if (truncationBitSize == 256)
     {
         /* SHA-512/256 */
-        h0 = 0x22312194FC2BF72C; h1 = 0x9F555FA3C84C64C2;
-        h2 = 0x2393B86B6F53B151; h3 = 0x963877195940EABD;
-        h4 = 0x96283EE2A88EFFE3; h5 = 0xBE5E1E2553863992;
-        h6 = 0x2B0199FC2C85B8AA; h7 = 0x0EB72DDC81C52CA2;
+        context->h[0] = 0x22312194FC2BF72C; context->h[1] = 0x9F555FA3C84C64C2;
+        context->h[2] = 0x2393B86B6F53B151; context->h[3] = 0x963877195940EABD;
+        context->h[4] = 0x96283EE2A88EFFE3; context->h[5] = 0xBE5E1E2553863992;
+        context->h[6] = 0x2B0199FC2C85B8AA; context->h[7] = 0x0EB72DDC81C52CA2;
     }
     else
     {
         /* SHA-512/224 */
-        h0 = 0x8C3D37C819544DA2; h1 = 0x73E1996689DCD4D6;
-        h2 = 0x1DFAB7AE32FF9C82; h3 = 0x679DD514582F9FCF;
-        h4 = 0x0F6D2B697BD44DA8; h5 = 0x77E36F7304C48942;
-        h6 = 0x3F9D85A86A1D36C8; h7 = 0x1112E6AD91D692A1;
+        context->h[0] = 0x8C3D37C819544DA2; context->h[1] = 0x73E1996689DCD4D6;
+        context->h[2] = 0x1DFAB7AE32FF9C82; context->h[3] = 0x679DD514582F9FCF;
+        context->h[4] = 0x0F6D2B697BD44DA8; context->h[5] = 0x77E36F7304C48942;
+        context->h[6] = 0x3F9D85A86A1D36C8; context->h[7] = 0x1112E6AD91D692A1;
+    }
+    context->magic = SSF_SHA2_64_CONTEXT_MAGIC;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Feeds a chunk of input data into a SHA512/384/512-224/512-256 incremental hash context.       */
+/* --------------------------------------------------------------------------------------------- */
+void SSFSHA2_64Update(SSFSHA2_64Context_t *context, const uint8_t *in, uint32_t inLen)
+{
+    uint32_t copyLen;
+
+    SSF_ASSERT(context != NULL);
+    SSF_ASSERT(context->magic == SSF_SHA2_64_CONTEXT_MAGIC);
+    SSF_ASSERT((in != NULL) || (inLen == 0));
+
+    while (inLen > 0)
+    {
+        copyLen = SSF_SHA512_BLOCK_SIZE_BYTES - context->bufLen;
+        if (copyLen > inLen) copyLen = inLen;
+
+        memcpy(&context->buf[context->bufLen], in, copyLen);
+        context->bufLen += copyLen;
+        context->totalBits += ((uint64_t)copyLen) << 3;
+        in += copyLen;
+        inLen -= copyLen;
+
+        if (context->bufLen == SSF_SHA512_BLOCK_SIZE_BYTES)
+        {
+            _SSFSHA2_64Block(context->h, context->buf);
+            context->bufLen = 0;
+        }
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Ends a SHA512, SHA384, SHA512/224, or SHA512/256 incremental hash, writing digest to out.     */
+/* --------------------------------------------------------------------------------------------- */
+void SSFSHA2_64End(SSFSHA2_64Context_t *context, uint8_t *out, uint32_t outSize)
+{
+    uint8_t pad[SSF_SHA512_BLOCK_SIZE_BYTES];
+    uint64_t totalBits;
+    uint64_t tmp;
+
+    SSF_ASSERT(context != NULL);
+    SSF_ASSERT(context->magic == SSF_SHA2_64_CONTEXT_MAGIC);
+    SSF_ASSERT(out != NULL);
+    if (((context->hashBitSize == 512) && (context->truncationBitSize == 0)) ||
+        (context->hashBitSize == 384))
+    { SSF_ASSERT(outSize >= (uint32_t)(context->hashBitSize >> 3)); }
+    else SSF_ASSERT(outSize >= (uint32_t)(context->truncationBitSize >> 3));
+
+    totalBits = context->totalBits;
+
+    /* Build final padded block(s) from the partial buffer */
+    memcpy(pad, context->buf, context->bufLen);
+    memset(&pad[context->bufLen], 0, sizeof(pad) - context->bufLen);
+
+    if (context->bufLen > SSF_SHA512_MIN_PADDABLE_SIZE_BYTES)
+    {
+        /* Padding splits across two blocks */
+        pad[context->bufLen] = 0x80;
+        _SSFSHA2_64Block(context->h, pad);
+        memset(pad, 0, sizeof(pad));
+    }
+    else
+    {
+        pad[context->bufLen] = 0x80;
     }
 
-    /* Iterate over 512-bit chunks adding padding at end */
-    do
-    {
-        /* Pad? */
-        if (inLen >= SSF_SHA512_BLOCK_SIZE_BYTES)
-        {
-            /* No, just process in data */
-            inLen -= SSF_SHA512_BLOCK_SIZE_BYTES;
-        }
-        else
-        {
-            /* Yes, initialize pad buffer with in buffer */
-            memset(&pad[inLen], 0, sizeof(pad) - inLen);
-            memcpy(pad, &in[offset], inLen);
-
-            /* Room for pad in current block? */
-            if (inLen > SSF_SHA512_MIN_PADDABLE_SIZE_BYTES)
-            {
-                /* No, need to add whole additional 512-bit block; pad split across 2 blocks */
-                pad[inLen] = 0x80;
-                isSplit = true;
-            }
-            else
-            {
-                /* Yes, add the pad */
-                if (!isSplit) pad[inLen] = 0x80;
-                pad[SSF_SHA512_BLOCK_SIZE_BYTES - 1] = (uint8_t)(inBits & 0xff);
-                pad[SSF_SHA512_BLOCK_SIZE_BYTES - 2] = (uint8_t)((inBits & 0xff00) >> 8);
-                pad[SSF_SHA512_BLOCK_SIZE_BYTES - 3] = (uint8_t)((inBits & 0xff0000) >> 16);
-                pad[SSF_SHA512_BLOCK_SIZE_BYTES - 4] = (uint8_t)((inBits & 0xff000000) >> 24);
-                pad[SSF_SHA512_BLOCK_SIZE_BYTES - 5] = (uint8_t)((inBits & 0xff00000000) >> 32);
-                isPadded = true;
-            }
-            pin = pad;
-            inLen = 0;
-            offset = 0;
-        }
-
-        /* Initialize w[0-15] with data */
-        for (i = 0; i < 16; i++)
-        {
-            j = i << 3;
-            memcpy(&w[i], &pin[j + offset], sizeof(uint64_t)); w[i] = ntohll(w[i]);
-        }
-
-        /* Extend */
-        for (i = 16; i < 80; i++)
-        {
-            s0 = (RR64(w[i - 15], 1)) ^ (RR64(w[i - 15], 8)) ^ (w[i - 15] >> 7);
-            s1 = (RR64(w[i - 2], 19)) ^ (RR64(w[i - 2], 61)) ^ (w[i - 2] >> 6);
-            w[i] = w[i - 16] + s0 + w[i - 7] + s1;
-        }
-
-        a = h0; b = h1; c = h2; d = h3; e = h4; f = h5; g = h6; h = h7;
-
-        /* Compression */
-        for (i = 0; i < 80; i++)
-        {
-            s1 = (RR64(e, 14)) ^ (RR64(e, 18)) ^ (RR64(e, 41));
-            ch = (e & f) ^ (~e & g);
-            temp1 = h + s1 + ch + k_64[i] + w[i];
-            s0 = (RR64(a, 28)) ^ (RR64(a, 34)) ^ (RR64(a, 39));
-            maj = (a & b) ^ (a & c) ^ (b & c);
-            temp2 = s0 + maj;
-
-            h = g; g = f; f = e; e = d + temp1; d = c; c = b; b = a; a = temp1 + temp2;
-        }
-
-        h0 += a; h1 += b; h2 += c; h3 += d; h4 += e; h5 += f; h6 += g; h7 += h;
-        offset += SSF_SHA512_BLOCK_SIZE_BYTES;
-    } while (!isPadded);
+    /* Append big-endian message bit length in last 16 bytes of pad */
+    pad[SSF_SHA512_BLOCK_SIZE_BYTES - 1] = (uint8_t)(totalBits & 0xff);
+    pad[SSF_SHA512_BLOCK_SIZE_BYTES - 2] = (uint8_t)((totalBits >> 8) & 0xff);
+    pad[SSF_SHA512_BLOCK_SIZE_BYTES - 3] = (uint8_t)((totalBits >> 16) & 0xff);
+    pad[SSF_SHA512_BLOCK_SIZE_BYTES - 4] = (uint8_t)((totalBits >> 24) & 0xff);
+    pad[SSF_SHA512_BLOCK_SIZE_BYTES - 5] = (uint8_t)((totalBits >> 32) & 0xff);
+    _SSFSHA2_64Block(context->h, pad);
 
     /* Accumulate hash into out buffer */
-    h0 = htonll(h0); memcpy(&out[0], &h0, sizeof(uint64_t));
-    h1 = htonll(h1); memcpy(&out[8], &h1, sizeof(uint64_t));
-    h2 = htonll(h2); memcpy(&out[16], &h2, sizeof(uint64_t));
-    h3 = htonll(h3);
-    if (truncationBitSize == 224)
+    tmp = htonll(context->h[0]); memcpy(&out[0],  &tmp, sizeof(uint64_t));
+    tmp = htonll(context->h[1]); memcpy(&out[8],  &tmp, sizeof(uint64_t));
+    tmp = htonll(context->h[2]); memcpy(&out[16], &tmp, sizeof(uint64_t));
+    tmp = htonll(context->h[3]);
+    if (context->truncationBitSize == 224)
     {
-        memcpy(&out[24], &h3, 4);
+        memcpy(&out[24], &tmp, 4);
     }
-    else memcpy(&out[24], &h3, sizeof(uint64_t));
-    if (truncationBitSize == 0)
+    else memcpy(&out[24], &tmp, sizeof(uint64_t));
+    if (context->truncationBitSize == 0)
     {
-        h4 = htonll(h4); memcpy(&out[32], &h4, sizeof(uint64_t));
-        h5 = htonll(h5); memcpy(&out[40], &h5, sizeof(uint64_t));
+        tmp = htonll(context->h[4]); memcpy(&out[32], &tmp, sizeof(uint64_t));
+        tmp = htonll(context->h[5]); memcpy(&out[40], &tmp, sizeof(uint64_t));
     }
-    if ((hashBitSize == 512) && (truncationBitSize == 0))
+    if ((context->hashBitSize == 512) && (context->truncationBitSize == 0))
     {
-        h6 = htonll(h6); memcpy(&out[48], &h6, sizeof(uint64_t));
-        h7 = htonll(h7); memcpy(&out[56], &h7, sizeof(uint64_t));
+        tmp = htonll(context->h[6]); memcpy(&out[48], &tmp, sizeof(uint64_t));
+        tmp = htonll(context->h[7]); memcpy(&out[56], &tmp, sizeof(uint64_t));
     }
+
+    /* Invalidate context to prevent reuse without re-init */
+    memset(context, 0, sizeof(SSFSHA2_64Context_t));
 }

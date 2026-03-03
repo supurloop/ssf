@@ -265,8 +265,8 @@ static bool _SSFJsonNameValue(SSFCStrIn_t js, size_t *index, size_t *start, size
     if (js[*index] != ':') return false;
     (*index)++;
     if ((path != NULL) && (path[depth] != NULL) &&
-        (strncmp(path[depth], &js[valStart + 1],
-                 SSF_MAX(valEnd - valStart - 1, (size_t)strlen(path[depth]))) == 0))
+        ((valEnd - valStart - 1) == (size_t)strlen(path[depth])) &&
+        (strncmp(path[depth], &js[valStart + 1], (valEnd - valStart - 1)) == 0))
     {return _SSFJsonValue(js, index, start, end, path, depth, jt); }
     else return _SSFJsonValue(js, index, &valStart, &valEnd, NULL, 0, &djt);
 }
@@ -872,7 +872,7 @@ bool SSFJsonUpdate(SSFCStrOut_t js, size_t size, SSFCStrIn_t *path, SSFJsonPrint
         len = strlen(js);
         if (end > len) return false;
         if ((len - end) > size) return false;
-        memmove(&js[size - len + end], &js[end + 1], len - end);
+        memmove(&js[size - (len - end)], &js[end + 1], len - end);
         if (!fn(&js[start], size - len - end, 0, &end2, &jt)) return false;
         memmove(&js[start + end2], &js[size - len + end], len - end);
         return true;

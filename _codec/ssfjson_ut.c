@@ -1223,6 +1223,23 @@ void SSFJsonUnitTest(void)
     SSF_ASSERT(SSFJsonPrintCString(_jsOut, sizeof(_jsOut), 0, &end, "/", NULL));
     SSF_ASSERT(memcmp(_jsOut, "/", 2) == 0);
 
+    memset(path, 0, sizeof(path));
+    path[0] = "a\"";
+    SSF_ASSERT(SSFJsonGetType("{\"a\":1}", (SSFCStrIn_t *)path) == SSF_JSON_TYPE_ERROR);
+
+    memset(path, 0, sizeof(path));
+    path[0] = "a\":";
+    SSF_ASSERT(SSFJsonGetType("{\"a\":1}", (SSFCStrIn_t *)path) == SSF_JSON_TYPE_ERROR);
+
+    memset(path, 0, sizeof(path));
+    path[0] = "ab\"";
+    SSF_ASSERT(SSFJsonGetType("{\"ab\":1}", (SSFCStrIn_t *)path) == SSF_JSON_TYPE_ERROR);
+
+    memset(path, 0, sizeof(path));
+    path[0] = "a";
+    path[1] = "b\"";
+    SSF_ASSERT(SSFJsonGetType("{\"a\":{\"b\":2}}", (SSFCStrIn_t *)path) == SSF_JSON_TYPE_ERROR);
+
 #if SSF_JSON_CONFIG_ENABLE_UPDATE == 1
     SSFJsonUnitTestUpdate(_jsOut, sizeof(_jsOut), "l1", NULL, NULL,
                           "{}",

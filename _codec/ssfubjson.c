@@ -939,7 +939,7 @@ static bool _SSFUBJsonPrintStringValue(uint8_t *js, size_t size, size_t start, s
     len = strlen(in);
 
     /* Only support strings up to 255 bytes */
-    if (len > 256) return false;
+    if (len > 255) return false;
 
     /* Always use uint8_t as type for string length */
     if (start >= size) return false;

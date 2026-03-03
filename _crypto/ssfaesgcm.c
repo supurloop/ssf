@@ -410,7 +410,7 @@ static void _SSFAESGCMGCTR(const uint8_t *in, size_t inLen, const uint8_t *key, 
     memcpy(cb, icb, sizeof(cb));
     memcpy(out, in, inLen);
 
-    n = outSize & 0xfffffff0;
+    n = inLen & 0xfffffff0;
     for (i = 0; i < n; i += 16)
     {
         SSFAESXXXBlockEncrypt(cb, sizeof(cb), buf, sizeof(buf), key, keyLen);
@@ -418,11 +418,11 @@ static void _SSFAESGCMGCTR(const uint8_t *in, size_t inLen, const uint8_t *key, 
         _SSFAESGCMBlockInc32(cb);
     }
 
-    if (i < outSize)
+    if (i < inLen)
     {
         SSFAESXXXBlockEncrypt(cb, sizeof(cb), buf, sizeof(buf), key, keyLen);
 
-        for (i = 0; i < (outSize & 0xf); i++)
+        for (i = 0; i < (inLen & 0xf); i++)
         {
             out[n + i] ^= buf[i];
         }

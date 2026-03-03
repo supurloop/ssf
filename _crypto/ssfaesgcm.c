@@ -401,10 +401,8 @@ static void _SSFAESGCMGCTR(const uint8_t *in, size_t inLen, const uint8_t *key, 
 
     if ((in == NULL) || (out == NULL)) { return; }
 
-    SSF_REQUIRE(in != NULL);
     SSF_REQUIRE(key != NULL);
     SSF_REQUIRE(icb != NULL);
-    SSF_REQUIRE(out != NULL);
     SSF_REQUIRE((keyLen == 16) || (keyLen == 24) || (keyLen == 32));
     SSF_REQUIRE(icbLen == 16);
     SSF_REQUIRE(inLen <= outSize);

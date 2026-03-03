@@ -870,6 +870,8 @@ bool SSFJsonUpdate(SSFCStrOut_t js, size_t size, SSFCStrIn_t *path, SSFJsonPrint
 
         /* Exact match to request, updated existing value */
         len = strlen(js);
+        if (end > len) return false;
+        if ((len - end) > size) return false;
         memmove(&js[size - len + end], &js[end + 1], len - end);
         if (!fn(&js[start], size - len - end, 0, &end2, &jt)) return false;
         memmove(&js[start + end2], &js[size - len + end], len - end);

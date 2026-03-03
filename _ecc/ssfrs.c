@@ -607,7 +607,11 @@ static bool _RSCorrectErrata(GFPoly_t *msg_in, GFPoly_t *synd, GFPoly_t *err_pos
 /* --------------------------------------------------------------------------------------------- */
 static void _RSForneySyndromes(const GFPoly_t *synd, GFPoly_t *fsynd)
 {
-    memcpy(&fsynd->array, &synd->array[1], synd->len);
+    SSF_REQUIRE(synd != NULL);
+    SSF_REQUIRE(fsynd != NULL);
+    SSF_REQUIRE(synd->len > 0);
+
+    memcpy(&fsynd->array, &synd->array[1], synd->len - 1);
     fsynd->len = synd->len - 1;
 }
 

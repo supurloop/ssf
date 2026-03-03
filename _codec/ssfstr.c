@@ -201,6 +201,7 @@ bool SSFStrStr(SSFCStrIn_t cstr, size_t cstrSize, SSFCStrIn_t *matchStrOptOut, S
                size_t substrSize)
 {
     SSFCStrIn_t ss;
+    SSFCStrIn_t cstrs;
     size_t sss;
 
     SSF_REQUIRE(cstr != NULL);
@@ -208,30 +209,45 @@ bool SSFStrStr(SSFCStrIn_t cstr, size_t cstrSize, SSFCStrIn_t *matchStrOptOut, S
 
     ss = substr;
     sss = substrSize;
-    while ((*cstr != 0) && (cstrSize > 0) && (*ss != 0) && (sss > 0))
+    cstrs = NULL;
+    while ((*cstr != 0) && (cstrSize > 0) && (*ss != 0) && (sss > 1))
     {
         /* Character match? */
         if (*cstr == *ss)
         {
+            /* Start of new potential match? */
+            if (cstrs == NULL)
+            {
+                /* Yes, save start */
+                cstrs = cstr;
+            }
+
             /* Yes, end of substr? */
             if (*(ss + 1) == 0)
             {
                 if (matchStrOptOut != NULL) *matchStrOptOut = cstr - (ss - substr);
                 return true;
             }
+            ss++;
+            sss--;
         }
         else
         {
-            /* No, reset substr */
+            /* No, reset substr and cstr */
             ss = substr;
             sss = substrSize;
+            if (cstrs != NULL)
+            {
+                cstrSize += (size_t)(cstr - cstrs);
+                cstr = cstrs;
+                cstrs = NULL;
+            }
+            if (cstrSize <= 1) return false;
         }
 
         /* Advance */
         cstr++;
         cstrSize--;
-        ss++;
-        sss--;
     }
     if (matchStrOptOut != NULL) *matchStrOptOut = NULL;
     return false;

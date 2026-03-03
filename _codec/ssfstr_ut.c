@@ -207,9 +207,10 @@ void SSFStrUnitTest(void)
     SSF_ASSERT(SSFStrStr(check, 13, NULL, "substr", 7));
     SSF_ASSERT(SSFStrStr(check, 14, NULL, "substr", 8));
     SSF_ASSERT(SSFStrStr(check, 12, NULL, "substr", 7));
-    SSF_ASSERT(SSFStrStr(check, 13, NULL, "substr", 6));
+    SSF_ASSERT(SSFStrStr(check, 13, NULL, "substr", 6) == false);
     SSF_ASSERT(SSFStrStr(check, 0, NULL, "substr", 7) == false);
     SSF_ASSERT(SSFStrStr(check, 13, NULL, "substr", 0) == false);
+    SSF_ASSERT(SSFStrStr("subsubstr", 10, NULL, "substr", 7));
 
     matchStrOptOut = "abc";
     SSF_ASSERT(SSFStrStr(check, 13, &matchStrOptOut, "substr", 7));
@@ -221,8 +222,8 @@ void SSFStrUnitTest(void)
     SSF_ASSERT(SSFStrStr(check, 12, &matchStrOptOut, "substr", 7));
     SSF_ASSERT(matchStrOptOut == &check[0]);
     matchStrOptOut = "abc";
-    SSF_ASSERT(SSFStrStr(check, 13, &matchStrOptOut, "substr", 6));
-    SSF_ASSERT(matchStrOptOut == &check[0]);
+    SSF_ASSERT(SSFStrStr(check, 13, &matchStrOptOut, "substr", 6) == false);
+    SSF_ASSERT(matchStrOptOut == NULL);
     matchStrOptOut = "abc";
     SSF_ASSERT(SSFStrStr(check, 0, &matchStrOptOut, "substr", 7) == false);
     SSF_ASSERT(matchStrOptOut == NULL);
@@ -230,11 +231,11 @@ void SSFStrUnitTest(void)
     SSF_ASSERT(SSFStrStr(check, 13, &matchStrOptOut, "substr", 0) == false);
     SSF_ASSERT(matchStrOptOut == NULL);
 
-    SSF_ASSERT(SSFStrCpy(check, sizeof(check), &s1Len, "stringsubstr", 13));
+    SSF_ASSERT(SSFStrCpy(check, sizeof(check), &s1Len, "strsubsubstr", 13));
     SSF_ASSERT(SSFStrStr(check, 13, NULL, "substr", 7));
     SSF_ASSERT(SSFStrStr(check, 14, NULL, "substr", 8));
     SSF_ASSERT(SSFStrStr(check, 12, NULL, "substr", 7));
-    SSF_ASSERT(SSFStrStr(check, 13, NULL, "substr", 6));
+    SSF_ASSERT(SSFStrStr(check, 13, NULL, "substr", 6) == false);
     SSF_ASSERT(SSFStrStr(check, 0, NULL, "substr", 7) == false);
     SSF_ASSERT(SSFStrStr(check, 13, NULL, "substr", 0) == false);
 
@@ -248,8 +249,8 @@ void SSFStrUnitTest(void)
     SSF_ASSERT(SSFStrStr(check, 12, &matchStrOptOut, "substr", 7));
     SSF_ASSERT(matchStrOptOut == &check[6]);
     matchStrOptOut = "abc";
-    SSF_ASSERT(SSFStrStr(check, 13, &matchStrOptOut, "substr", 6));
-    SSF_ASSERT(matchStrOptOut == &check[6]);
+    SSF_ASSERT(SSFStrStr(check, 13, &matchStrOptOut, "substr", 6) == false);
+    SSF_ASSERT(matchStrOptOut == NULL);
     matchStrOptOut = "abc";
     SSF_ASSERT(SSFStrStr(check, 0, &matchStrOptOut, "substr", 7) == false);
     SSF_ASSERT(matchStrOptOut == NULL);
@@ -261,7 +262,7 @@ void SSFStrUnitTest(void)
     SSF_ASSERT(SSFStrStr(check, 13, NULL, "substr", 7));
     SSF_ASSERT(SSFStrStr(check, 14, NULL, "substr", 8));
     SSF_ASSERT(SSFStrStr(check, 12, NULL, "substr", 7));
-    SSF_ASSERT(SSFStrStr(check, 13, NULL, "substr", 6));
+    SSF_ASSERT(SSFStrStr(check, 13, NULL, "substr", 6) == false);
     SSF_ASSERT(SSFStrStr(check, 0, NULL, "substr", 7) == false);
     SSF_ASSERT(SSFStrStr(check, 13, NULL, "substr", 0) == false);
 
@@ -275,14 +276,97 @@ void SSFStrUnitTest(void)
     SSF_ASSERT(SSFStrStr(check, 12, &matchStrOptOut, "substr", 7));
     SSF_ASSERT(matchStrOptOut == &check[5]);
     matchStrOptOut = "abc";
-    SSF_ASSERT(SSFStrStr(check, 13, &matchStrOptOut, "substr", 6));
-    SSF_ASSERT(matchStrOptOut == &check[5]);
+    SSF_ASSERT(SSFStrStr(check, 13, &matchStrOptOut, "substr", 6) == false);
+    SSF_ASSERT(matchStrOptOut == NULL);
     matchStrOptOut = "abc";
     SSF_ASSERT(SSFStrStr(check, 0, &matchStrOptOut, "substr", 7) == false);
     SSF_ASSERT(matchStrOptOut == NULL);
     matchStrOptOut = "abc";
     SSF_ASSERT(SSFStrStr(check, 13, &matchStrOptOut, "substr", 0) == false);
     SSF_ASSERT(matchStrOptOut == NULL);
+
+    matchStrOptOut = "abc";
+    SSF_ASSERT(SSFStrStr("xb", 3, &matchStrOptOut, "ab", 3) == false);
+    SSF_ASSERT(matchStrOptOut == NULL);
+
+    /* "abc" is NOT in "xbc": same substr[0]-skip, longer pattern. */
+    matchStrOptOut = "abc";
+    SSF_ASSERT(SSFStrStr("xbc", 4, &matchStrOptOut, "abc", 4) == false);
+    SSF_ASSERT(matchStrOptOut == NULL);
+
+    SSF_ASSERT(SSFStrCpy(check, sizeof(check), &s1Len, "abba", 5));
+    matchStrOptOut = "abc";
+    SSF_ASSERT(SSFStrStr(check, 5, &matchStrOptOut, "aba", 4) == false);
+    SSF_ASSERT(matchStrOptOut == NULL);
+
+    SSF_ASSERT(SSFStrCpy(check, sizeof(check), &s1Len, "ax", 3));
+    matchStrOptOut = NULL;
+    SSF_ASSERT(SSFStrStr(check, 3, &matchStrOptOut, "x", 2) == true);
+    SSF_ASSERT(matchStrOptOut == &check[1]);
+
+    SSF_ASSERT(SSFStrCpy(check, sizeof(check), &s1Len, "ab", 3));
+    matchStrOptOut = NULL;
+    SSF_ASSERT(SSFStrStr(check, 3, &matchStrOptOut, "b", 2) == true);
+    SSF_ASSERT(matchStrOptOut == &check[1]);
+
+    SSF_ASSERT(SSFStrCpy(check, sizeof(check), &s1Len, "aaz", 4));
+    matchStrOptOut = NULL;
+    SSF_ASSERT(SSFStrStr(check, 4, &matchStrOptOut, "z", 2) == true);
+    SSF_ASSERT(matchStrOptOut == &check[2]);
+
+    /* Test SSFStrStr() - fuzz test against C library strstr() */
+    {
+        char srchBuf[65];
+        char matchBuf[65];
+        size_t srchLen;
+        size_t matchLen;
+        size_t iter;
+        size_t k;
+        const char *libResult;
+        bool ssfResult;
+        const char *ssfMatchOut;
+        static const char fuzzCharset[3] = {'a', 'b', 'c'};
+
+        srand(1u);
+
+        for (srchLen = 1; srchLen <= 64; srchLen++)
+        {
+            for (iter = 0; iter < 4096; iter++)
+            {
+                /* Build random search string of length srchLen */
+                for (k = 0; k < srchLen; k++) srchBuf[k] = fuzzCharset[rand() % 3];
+                srchBuf[srchLen] = '\0';
+
+                for (matchLen = 1; matchLen <= 64; matchLen++)
+                {
+                    /* Build random match string of length matchLen */
+                    for (k = 0; k < matchLen; k++) matchBuf[k] = fuzzCharset[rand() % 3];
+                    matchBuf[matchLen] = '\0';
+
+                    /* Get reference result from C library strstr() */
+                    libResult = strstr(srchBuf, matchBuf);
+
+                    /* Get SSFStrStr result */
+                    ssfMatchOut = NULL;
+                    ssfResult = SSFStrStr(srchBuf, srchLen + 1, &ssfMatchOut,
+                                         matchBuf, matchLen + 1);
+
+                    if (libResult != NULL)
+                    {
+                        /* strstr found a match; SSFStrStr must find the same location */
+                        SSF_ASSERT(ssfResult == true);
+                        SSF_ASSERT(ssfMatchOut == libResult);
+                    }
+                    else
+                    {
+                        /* strstr found no match; SSFStrStr must agree */
+                        SSF_ASSERT(ssfResult == false);
+                        SSF_ASSERT(ssfMatchOut == NULL);
+                    }
+                }
+            }
+        }
+    }
 
     /* Test SSFStrTok() */
     tok = NULL;

@@ -410,7 +410,7 @@ static void _SSFAESGCMGCTR(const uint8_t *in, size_t inLen, const uint8_t *key, 
     SSF_REQUIRE(inLen <= outSize);
 
     memcpy(cb, icb, sizeof(cb));
-    memcpy(out, in, outSize);
+    memcpy(out, in, inLen);
 
     n = outSize & 0xfffffff0;
     for (i = 0; i < n; i += 16)

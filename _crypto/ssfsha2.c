@@ -319,6 +319,9 @@ void SSFSHA2_32End(SSFSHA2_32Context_t *context, uint8_t *out, uint32_t outSize)
     pad[SSF_SHA256_BLOCK_SIZE_BYTES - 3] = (uint8_t)((totalBits >> 16) & 0xff);
     pad[SSF_SHA256_BLOCK_SIZE_BYTES - 4] = (uint8_t)((totalBits >> 24) & 0xff);
     pad[SSF_SHA256_BLOCK_SIZE_BYTES - 5] = (uint8_t)((totalBits >> 32) & 0xff);
+    pad[SSF_SHA256_BLOCK_SIZE_BYTES - 6] = (uint8_t)((totalBits >> 40) & 0xff);
+    pad[SSF_SHA256_BLOCK_SIZE_BYTES - 7] = (uint8_t)((totalBits >> 48) & 0xff);
+    pad[SSF_SHA256_BLOCK_SIZE_BYTES - 8] = (uint8_t)((totalBits >> 56) & 0xff);
     _SSFSHA2_32Block(context->h, pad);
 
     /* Accumulate hash into out buffer */
@@ -455,6 +458,9 @@ void SSFSHA2_64End(SSFSHA2_64Context_t *context, uint8_t *out, uint32_t outSize)
     pad[SSF_SHA512_BLOCK_SIZE_BYTES - 3] = (uint8_t)((totalBits >> 16) & 0xff);
     pad[SSF_SHA512_BLOCK_SIZE_BYTES - 4] = (uint8_t)((totalBits >> 24) & 0xff);
     pad[SSF_SHA512_BLOCK_SIZE_BYTES - 5] = (uint8_t)((totalBits >> 32) & 0xff);
+    pad[SSF_SHA512_BLOCK_SIZE_BYTES - 6] = (uint8_t)((totalBits >> 40) & 0xff);
+    pad[SSF_SHA512_BLOCK_SIZE_BYTES - 7] = (uint8_t)((totalBits >> 48) & 0xff);
+    pad[SSF_SHA512_BLOCK_SIZE_BYTES - 8] = (uint8_t)((totalBits >> 56) & 0xff);
     _SSFSHA2_64Block(context->h, pad);
 
     /* Accumulate hash into out buffer */

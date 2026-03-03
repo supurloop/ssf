@@ -485,7 +485,7 @@ void SSFAESGCMEncrypt(const uint8_t *pt, size_t ptLen, const uint8_t *iv, size_t
 
     _SSFAESGCMGCTR(s, sizeof(s), key, keyLen, j0, sizeof(j0), s, sizeof(s));
 
-    memcpy(tag, s, sizeof(s));
+    memcpy(tag, s, tagSize);
 }
 
 /* --------------------------------------------------------------------------------------------- */

@@ -47,7 +47,7 @@ All options are set in `ssfoptions.h`.
 | [e.g.](#ex-init) | [`SSFBFifoInit(fifo, fifoSize, buffer, bufferSize)`](#ssfbfifoinit) | Initialize a byte FIFO |
 | [e.g.](#ex-deinit) | [`SSFBFifoDeInit(fifo)`](#ssfbfifodeinit) | De-initialize a byte FIFO |
 | [e.g.](#ex-putbyte) | [`SSFBFifoPutByte(fifo, inByte)`](#ssfbfifoputbyte) | Put one byte (bounds-checked function) |
-| [e.g.](#ex-peekbyte) | [`SSFBFifoPeekByte(fifo, outByte)`](#ssfbfifoPeekbyte) | Peek at the next byte without consuming it |
+| [e.g.](#ex-peekbyte) | [`SSFBFifoPeekByte(fifo, outByte)`](#ssfbfifopeekbyte) | Peek at the next byte without consuming it |
 | [e.g.](#ex-getbyte) | [`SSFBFifoGetByte(fifo, outByte)`](#ssfbfifogetbyte) | Get (consume) one byte |
 | [e.g.](#ex-isempty) | [`SSFBFifoIsEmpty(fifo)`](#ssfbfifoisempty--ssfbfifoisfull) | Returns true if FIFO is empty |
 | [e.g.](#ex-isfull) | [`SSFBFifoIsFull(fifo)`](#ssfbfifoisempty--ssfbfifoisfull) | Returns true if FIFO is full |
@@ -57,12 +57,14 @@ All options are set in `ssfoptions.h`.
 | [e.g.](#ex-putbytes) | [`SSFBFifoPutBytes(fifo, inBytes, inBytesLen)`](#ssfbfifoputbytes--ssfbfifopeekbytes--ssfbfifogetbytes) | Put multiple bytes (requires [`SSF_BFIFO_MULTI_BYTE_ENABLE`](#opt-multi-byte-enable)) |
 | [e.g.](#ex-peekbytes) | [`SSFBFifoPeekBytes(fifo, outBytes, outBytesSize, outBytesLen)`](#ssfbfifoputbytes--ssfbfifopeekbytes--ssfbfifogetbytes) | Peek at multiple bytes (requires [`SSF_BFIFO_MULTI_BYTE_ENABLE`](#opt-multi-byte-enable)) |
 | [e.g.](#ex-getbytes) | [`SSFBFifoGetBytes(fifo, outBytes, outBytesSize, outBytesLen)`](#ssfbfifoputbytes--ssfbfifopeekbytes--ssfbfifogetbytes) | Get multiple bytes (requires [`SSF_BFIFO_MULTI_BYTE_ENABLE`](#opt-multi-byte-enable)) |
-| [e.g.](#ex-macro-isempty) | [`SSF_BFIFO_IS_EMPTY(fifo)`](#high-performance-macros) | Macro: true if FIFO is empty (no bounds check) |
-| [e.g.](#ex-macro-isfull) | [`SSF_BFIFO_IS_FULL(fifo)`](#high-performance-macros) | Macro: true if FIFO is full (no bounds check) |
-| [e.g.](#ex-macro-putbyte) | [`SSF_BFIFO_PUT_BYTE(fifo, b)`](#high-performance-macros) | Macro: put one byte (no overflow check, asserts post-put) |
-| [e.g.](#ex-macro-getbyte) | [`SSF_BFIFO_GET_BYTE(fifo, b)`](#high-performance-macros) | Macro: get one byte (asserts non-empty, no check) |
+| [e.g.](#ex-macro-isempty) | [`SSF_BFIFO_IS_EMPTY(fifo)`](#ssf-bfifo-is-empty) | Macro: true if FIFO is empty (no bounds check) |
+| [e.g.](#ex-macro-isfull) | [`SSF_BFIFO_IS_FULL(fifo)`](#ssf-bfifo-is-full) | Macro: true if FIFO is full (no bounds check) |
+| [e.g.](#ex-macro-putbyte) | [`SSF_BFIFO_PUT_BYTE(fifo, b)`](#ssf-bfifo-put-byte) | Macro: put one byte (no overflow check, asserts post-put) |
+| [e.g.](#ex-macro-getbyte) | [`SSF_BFIFO_GET_BYTE(fifo, b)`](#ssf-bfifo-get-byte) | Macro: get one byte (asserts non-empty, no check) |
 
 ## Function Reference
+
+<a id="ssfbfifoinit"></a>
 
 ### [↑](#ssfbfifo--byte-fifo-interface) [`SSFBFifoInit()`](#ex-init)
 
@@ -88,6 +90,8 @@ full from empty).
 
 ---
 
+<a id="ssfbfifodeinit"></a>
+
 ### [↑](#ssfbfifo--byte-fifo-interface) [`SSFBFifoDeInit()`](#ex-deinit)
 
 ```c
@@ -103,6 +107,8 @@ De-initializes a byte FIFO, clearing its internal magic marker.
 **Returns:** Nothing.
 
 ---
+
+<a id="ssfbfifoputbyte"></a>
 
 ### [↑](#ssfbfifo--byte-fifo-interface) [`SSFBFifoPutByte()`](#ex-putbyte)
 
@@ -123,6 +129,8 @@ Puts one byte into the FIFO. Asserts if the FIFO is full. Call `SSFBFifoIsFull()
 
 ---
 
+<a id="ssfbfifopeekbyte"></a>
+
 ### [↑](#ssfbfifo--byte-fifo-interface) [`SSFBFifoPeekByte()`](#ex-peekbyte)
 
 ```c
@@ -142,6 +150,8 @@ be returned again on the next peek or get.
 
 ---
 
+<a id="ssfbfifogetbyte"></a>
+
 ### [↑](#ssfbfifo--byte-fifo-interface) [`SSFBFifoGetByte()`](#ex-getbyte)
 
 ```c
@@ -159,6 +169,8 @@ Removes and returns the next byte from the FIFO.
 **Returns:** `true` if a byte was available and written to `outByte`; `false` if the FIFO is empty.
 
 ---
+
+<a id="ssfbfifoisempty--ssfbfifoisfull"></a>
 
 ### [↑](#ssfbfifo--byte-fifo-interface) [`SSFBFifoIsEmpty()`](#ex-isempty) / [`SSFBFifoIsFull()`](#ex-isfull)
 
@@ -178,6 +190,8 @@ must be minimized.
 **Returns:** `true` / `false` as appropriate.
 
 ---
+
+<a id="ssfbfifosize--ssfbfifolen--ssfbfifounused"></a>
 
 ### [↑](#ssfbfifo--byte-fifo-interface) [`SSFBFifoSize()`](#ex-size) / [`SSFBFifoLen()`](#ex-len) / [`SSFBFifoUnused()`](#ex-unused)
 
@@ -201,6 +215,8 @@ on [`SSF_BFIFO_CONFIG_MAX_BFIFO_SIZE`](#opt-max-bfifo-size).
 **`SSFBFifoUnused()` returns:** Number of free bytes remaining (`Size - Len`).
 
 ---
+
+<a id="ssfbfifoputbytes--ssfbfifopeekbytes--ssfbfifogetbytes"></a>
 
 ### [↑](#ssfbfifo--byte-fifo-interface) [`SSFBFifoPutBytes()`](#ex-putbytes) / [`SSFBFifoPeekBytes()`](#ex-peekbytes) / [`SSFBFifoGetBytes()`](#ex-getbytes)
 
@@ -238,6 +254,8 @@ Multi-byte transfer functions. `SSFBFifoPutBytes()` asserts if the FIFO does not
 
 ---
 
+<a id="high-performance-macros"></a>
+
 ### [↑](#ssfbfifo--byte-fifo-interface) [High-Performance Macros](#ex-macro-isempty)
 
 Direct field-access macros for use in interrupt service routines where function call overhead is
@@ -246,6 +264,8 @@ unacceptable. Always check `SSF_BFIFO_IS_FULL()` before `SSF_BFIFO_PUT_BYTE()` a
 checks and are not thread safe by themselves.
 
 ---
+
+<a id="ssf-bfifo-is-empty"></a>
 
 #### [↑](#ssfbfifo--byte-fifo-interface) [`SSF_BFIFO_IS_EMPTY()`](#ex-macro-isempty)
 
@@ -264,6 +284,8 @@ argument validation.
 
 ---
 
+<a id="ssf-bfifo-is-full"></a>
+
 #### [↑](#ssfbfifo--byte-fifo-interface) [`SSF_BFIFO_IS_FULL()`](#ex-macro-isfull)
 
 ```c
@@ -280,6 +302,8 @@ indices without argument validation.
 **Returns:** Non-zero (true) if the FIFO is full; zero (false) otherwise.
 
 ---
+
+<a id="ssf-bfifo-put-byte"></a>
 
 #### [↑](#ssfbfifo--byte-fifo-interface) [`SSF_BFIFO_PUT_BYTE()`](#ex-macro-putbyte)
 
@@ -299,6 +323,8 @@ did not overflow after the write. Always check `SSF_BFIFO_IS_FULL()` before call
 **Returns:** Nothing.
 
 ---
+
+<a id="ssf-bfifo-get-byte"></a>
 
 #### [↑](#ssfbfifo--byte-fifo-interface) [`SSF_BFIFO_GET_BYTE()`](#ex-macro-getbyte)
 

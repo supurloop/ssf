@@ -13,95 +13,103 @@ This code framework was designed:
 
 The framework implements the following modules:
 
+> **Size estimates** are for ARM Cortex-M (Thumb-2) compiled with maximum size optimization (-Os).
+> Flash includes compiled code and any ROM lookup tables. Static RAM is memory permanently
+> consumed by the module itself; it excludes user-allocated objects and per-call stack usage.
+
 #### [Data Structures](_struct/README.md)
 
 Efficient data structure primitives for embedded systems, designed to avoid dynamic memory fragmentation and catch misuse at runtime.
 
-| Module | Description |
-|--------|-------------|
-| [Byte FIFO](_struct/ssfbfifo.md) | Interrupt-safe byte FIFO with single-byte and multi-byte put/get |
-| [Linked List](_struct/ssfll.md) | Doubly-linked list supporting FIFO and stack behaviors |
-| [Memory Pool](_struct/ssfmpool.md) | Fixed-size block memory pool with no fragmentation |
-| [Heap](_struct/ssfheap.md) | Integrity-checked heap with double-free detection and mark-based ownership tracking |
+| Module | Description | Flash | Static RAM |
+|--------|-------------|-------|------------|
+| [Byte FIFO](_struct/ssfbfifo.md) | Interrupt-safe byte FIFO with single-byte and multi-byte put/get | ~900 B | — |
+| [Linked List](_struct/ssfll.md) | Doubly-linked list supporting FIFO and stack behaviors | ~800 B | — |
+| [Memory Pool](_struct/ssfmpool.md) | Fixed-size block memory pool with no fragmentation | ~800 B | — |
+| [Heap](_struct/ssfheap.md) | Integrity-checked heap with double-free detection and mark-based ownership tracking | ~3.5 KB | — |
 
 #### [Codecs](_codec/README.md)
 
 Encoding and decoding interfaces for common data formats, all with strict buffer size enforcement and null-terminated output guarantees.
 
-| Module | Description |
-|--------|-------------|
-| [Base64](_codec/ssfbase64.md) | Base64 encoder/decoder |
-| [Hex ASCII](_codec/ssfhex.md) | Binary-to-hex ASCII encoder/decoder |
-| [JSON](_codec/ssfjson.md) | JSON parser/generator with path-based field access and in-place update |
-| [TLV](_codec/ssftlv.md) | Type-Length-Value encoder/decoder |
-| [INI](_codec/ssfini.md) | INI file parser/generator |
-| [UBJSON](_codec/ssfubjson.md) | Universal Binary JSON parser/generator |
-| [Decimal](_codec/ssfdec.md) | Integer-to-decimal string converter |
-| [Safe Strings](_codec/ssfstr.md) | Safe C string interface replacing crash-prone standard functions |
-| [Generic Object](_codec/ssfgobj.md) | BETA: Hierarchical generic object parser/generator for cross-codec in-memory representation |
+| Module | Description | Flash | Static RAM |
+|--------|-------------|-------|------------|
+| [Base64](_codec/ssfbase64.md) | Base64 encoder/decoder | ~700 B | — |
+| [Hex ASCII](_codec/ssfhex.md) | Binary-to-hex ASCII encoder/decoder | ~600 B | — |
+| [JSON](_codec/ssfjson.md) | JSON parser/generator with path-based field access and in-place update | ~7 KB | — |
+| [TLV](_codec/ssftlv.md) | Type-Length-Value encoder/decoder | ~1.2 KB | — |
+| [INI](_codec/ssfini.md) | INI file parser/generator | ~3.5 KB | — |
+| [UBJSON](_codec/ssfubjson.md) | Universal Binary JSON parser/generator | ~9 KB | — |
+| [Decimal](_codec/ssfdec.md) | Integer-to-decimal string converter | ~2.5 KB | — |
+| [Safe Strings](_codec/ssfstr.md) | Safe C string interface replacing crash-prone standard functions | ~1.2 KB | — |
+| [Generic Object](_codec/ssfgobj.md) | BETA: Hierarchical generic object parser/generator for cross-codec in-memory representation | ~3 KB | ~8 B |
 
 #### [Error Detection Codes (EDC)](_edc/README.md)
 
 Data integrity interfaces for detecting transmission and storage errors.
 
-| Module | Description |
-|--------|-------------|
-| [Fletcher Checksum](_edc/ssffcsum.md) | 16-bit Fletcher checksum |
-| [CRC-16](_edc/ssfcrc16.md) | 16-bit CRC (XMODEM/CCITT-16) |
-| [CRC-32](_edc/ssfcrc32.md) | 32-bit CRC (CCITT-32) |
+| Module | Description | Flash | Static RAM |
+|--------|-------------|-------|------------|
+| [Fletcher Checksum](_edc/ssffcsum.md) | 16-bit Fletcher checksum | ~120 B | — |
+| [CRC-16](_edc/ssfcrc16.md) | 16-bit CRC (XMODEM/CCITT-16) | ~650 B¹ | — |
+| [CRC-32](_edc/ssfcrc32.md) | 32-bit CRC (CCITT-32) | ~1.2 KB² | — |
+
+¹ Includes 512 B lookup table. ² Includes 1 KB lookup table.
 
 #### [Error Correction Codes (ECC)](_ecc/README.md)
 
 Forward error correction for recovering data corrupted during transmission or storage.
 
-| Module | Description |
-|--------|-------------|
-| [Reed-Solomon](_ecc/README.md) | Reed-Solomon forward error correction encoder/decoder |
+| Module | Description | Flash | Static RAM |
+|--------|-------------|-------|------------|
+| [Reed-Solomon](_ecc/README.md) | Reed-Solomon forward error correction encoder/decoder | ~4.5 KB³ | — |
+
+³ Includes ~768 B of GF(256) logarithm, exponent, and inverse lookup tables.
 
 #### [Cryptography](_crypto/README.md)
 
 Cryptographic primitives for hashing, encryption, and random number generation.
 
-| Module | Description |
-|--------|-------------|
-| [SHA-2](_crypto/ssfsha2.md) | SHA-2 hash (SHA-224/256/384/512/512-224/512-256), one-shot and incremental |
-| [AES](_crypto/ssfaes.md) | AES block cipher (128/192/256-bit key) |
-| [AES-GCM](_crypto/ssfaesgcm.md) | AES-GCM authenticated encryption/decryption |
-| [PRNG](_crypto/ssfprng.md) | Cryptographically capable pseudo-random number generator |
+| Module | Description | Flash | Static RAM |
+|--------|-------------|-------|------------|
+| [SHA-2](_crypto/ssfsha2.md) | SHA-2 hash (SHA-224/256/384/512/512-224/512-256), one-shot and incremental | ~3 KB⁴ | — |
+| [AES](_crypto/ssfaes.md) | AES block cipher (128/192/256-bit key) | ~2 KB⁵ | — |
+| [AES-GCM](_crypto/ssfaesgcm.md) | AES-GCM authenticated encryption/decryption | ~3.5 KB⁶ | — |
+| [PRNG](_crypto/ssfprng.md) | Cryptographically capable pseudo-random number generator | ~500 B | — |
+
+⁴ Includes ~896 B of SHA-256 and SHA-512 round constants. ⁵ Includes 512 B S-box and inverse S-box tables. ⁶ Requires AES module; figure is for GCM logic only.
 
 #### [Storage](_storage/README.md)
 
 Reliable non-volatile storage with versioning and integrity checking for configuration data.
 
-| Module | Description |
-|--------|-------------|
-| [Storage](_storage/README.md) | Version-controlled interface for reliably storing configuration to NV storage |
+| Module | Description | Flash | Static RAM |
+|--------|-------------|-------|------------|
+| [Storage](_storage/README.md) | Version-controlled interface for reliably storing configuration to NV storage | ~1.2 KB | — |
 
 #### [Finite State Machine](_fsm/README.md)
 
 Event-driven state machine framework suitable for both bare-metal and RTOS environments.
 
-| Module | Description |
-|--------|-------------|
-| [Finite State Machine](_fsm/README.md) | Event-driven finite state machine framework with optional RTOS integration |
+| Module | Description | Flash | Static RAM |
+|--------|-------------|-------|------------|
+| [Finite State Machine](_fsm/README.md) | Event-driven finite state machine framework with optional RTOS integration | ~2.5 KB | ~150 B⁷ |
+
+⁷ Static RAM scales with `SSF_SM_MAX` (number of configured state machines). Estimate is for the default single-SM configuration; excludes user-supplied event and timer pool memory.
 
 #### [Time](_time/README.md)
 
 Time management interfaces covering raw tick time, calendar conversion, and ISO 8601 string formatting.
 
-| Module | Description |
-|--------|-------------|
-| [RTC](_time/ssfrtc.md) | Unix time real-time clock interface |
-| [Date/Time](_time/ssfdtime.md) | Unix time to calendar date/time struct conversion |
-| [ISO 8601](_time/ssfiso8601.md) | ISO 8601 date/time string formatting and parsing with timezone support |
+| Module | Description | Flash | Static RAM |
+|--------|-------------|-------|------------|
+| [RTC](_time/ssfrtc.md) | Unix time real-time clock interface | ~900 B | ~20 B⁸ |
+| [Date/Time](_time/ssfdtime.md) | Unix time to calendar date/time struct conversion | ~1.8 KB | — |
+| [ISO 8601](_time/ssfiso8601.md) | ISO 8601 date/time string formatting and parsing with timezone support | ~1.8 KB | — |
 
-To give you an idea of the framework size here are some program memory estimates for each component compiled on an MSP430 with Level 3 optimization:
-Byte FIFO, linked list, memory pool, Base64, Hex ASCII are each about 1000 bytes.
-JSON parser/generator is about 7300-8800 bytes depending on configuration.
-Finite state machine is about 2000 bytes.
-Fletcher checksum is about 88 bytes.
+⁸ RTC static RAM holds two initialization flags and two 64-bit tick reference values.
 
-Little RAM is used internally by the framework, most RAM usage occurs outside the framwork when declaring or initializing different objects.
+Little RAM is used internally by the framework; most RAM usage occurs outside the framework when declaring or initializing objects.
 
 Microprocessors with >4KB RAM and >32KB program memory should easily be able to utilize this framework.
 And, as noted above, portions of the framework will work on much smaller micros.

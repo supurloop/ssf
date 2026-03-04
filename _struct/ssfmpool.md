@@ -1,44 +1,94 @@
-# ssfmpool — Fixed-Size Memory Pool
+# ssfmpool — Memory Pool Interface
 
-[Back to Data Structures README](README.md) | [Back to ssf README](../README.md)
+[SSF](../README.md) | [Data Structures](README.md)
 
-Fixed-size block memory pool for deterministic allocation without calling `malloc`.
+Fixed-size block memory pool for deterministic O(1) allocation without fragmentation.
 
-## Configuration
+All blocks are allocated from the system heap once during `SSFMPoolInit()`. Every subsequent
+`SSFMPoolAlloc()` and `SSFMPoolFree()` call is O(1) and involves no further heap interaction.
+Each block is guarded by a canary value that detects buffer overruns at free time.
+
+[Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference) | [Examples](#examples)
+
+<a id="dependencies"></a>
+
+## [↑](#ssfmpool--memory-pool-interface) Dependencies
+
+- [`ssfport.h`](../ssfport.h)
+- [`ssfoptions.h`](../ssfoptions.h)
+- [ssfll](ssfll.md) — Linked list (used internally)
+
+<a id="notes"></a>
+
+## [↑](#ssfmpool--memory-pool-interface) Notes
+
+- `SSFMPoolAlloc()` asserts (never returns `NULL`) if the pool is empty; check
+  `SSFMPoolIsEmpty()` before calling.
+- `SSFMPoolAlloc()` asserts if `size` exceeds `blockSize`; pass `sizeof` your struct or a
+  compile-time constant ≤ `blockSize`.
+- `SSFMPoolFree()` returns `NULL`; assign the return value to null the caller's pointer:
+  `ptr = (MyType_t *)SSFMPoolFree(&pool, ptr)`.
+- `SSFMPoolDeInit()` asserts if any blocks are still allocated; free all blocks first.
+- Each block carries a 3-byte canary; `SSFMPoolFree()` verifies it to detect overruns.
+- When [`SSF_MPOOL_DEBUG`](#opt-mpool-debug) is `1`, each block records its `owner` tag to aid
+  leak analysis.
+- All blocks are the same size; allocating a struct smaller than `blockSize` is allowed but
+  wastes the remainder.
+
+<a id="configuration"></a>
+
+## [↑](#ssfmpool--memory-pool-interface) Configuration
+
+All options are set in `ssfoptions.h`.
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `SSF_MPOOL_DEBUG` | `0` | `1` to enable a debug struct that tracks all blocks and their allocators |
+| <a id="opt-mpool-debug"></a>`SSF_MPOOL_DEBUG` | `0` | `1` to enable a debug structure that tracks all blocks and their `owner` tags |
 
-## API Summary
+<a id="api-summary"></a>
 
-| Function / Macro | Description |
-|-----------------|-------------|
-| `SSFMPoolInit(pool, blocks, blockSize)` | Initialize a memory pool |
-| `SSFMPoolDeInit(pool)` | De-initialize a memory pool |
-| `SSFMPoolAlloc(pool, size, owner)` | Allocate a block from the pool |
-| `SSFMPoolFree(pool, ptr)` | Free a block back to the pool |
-| `SSFMPoolBlockSize(pool)` | Returns the fixed block size in bytes |
-| `SSFMPoolSize(pool)` | Returns the total number of blocks in the pool |
-| `SSFMPoolLen(pool)` | Returns the number of currently allocated blocks |
-| `SSFMPoolIsEmpty(pool)` | Returns true if no blocks are available |
-| `SSFMPoolIsFull(pool)` | Returns true if all blocks are free |
+## [↑](#ssfmpool--memory-pool-interface) API Summary
 
-## Function Reference
+### Definitions
 
-### `SSFMPoolInit`
+| Symbol | Kind | Description |
+|--------|------|-------------|
+| <a id="type-ssfmpool-t"></a>`SSFMPool_t` | Struct | Pool instance; pass by pointer to all API functions. Do not access fields directly. |
+
+### Functions
+
+| | Function / Macro | Description |
+|---|-----------------|-------------|
+| [e.g.](#ex-init) | [`SSFMPoolInit(pool, blocks, blockSize)`](#ssfmpoolinit) | Initialize a memory pool |
+| [e.g.](#ex-deinit) | [`SSFMPoolDeInit(pool)`](#ssfmpooldeinit) | De-initialize a memory pool |
+| [e.g.](#ex-alloc) | [`SSFMPoolAlloc(pool, size, owner)`](#ssfmpoolalloc) | Allocate a block from the pool |
+| [e.g.](#ex-free) | [`SSFMPoolFree(pool, ptr)`](#ssfmpoolfree) | Free a block back to the pool |
+| [e.g.](#ex-blocksize) | [`SSFMPoolBlockSize(pool)`](#ssfmpoolblocksize) | Returns the fixed block size in bytes |
+| [e.g.](#ex-size) | [`SSFMPoolSize(pool)`](#ssfmpoolsize) | Returns the total number of blocks in the pool |
+| [e.g.](#ex-len) | [`SSFMPoolLen(pool)`](#ssfmpoollen) | Returns the number of free blocks remaining |
+| [e.g.](#ex-isempty) | [`SSFMPoolIsEmpty(pool)`](#ssfmpoolisempty) | Returns true if no free blocks remain |
+| [e.g.](#ex-isfull) | [`SSFMPoolIsFull(pool)`](#ssfmpoolisfull) | Returns true if all blocks are free |
+
+<a id="function-reference"></a>
+
+## [↑](#ssfmpool--memory-pool-interface) Function Reference
+
+<a id="ssfmpoolinit"></a>
+
+### [↑](#ssfmpool--memory-pool-interface) [`SSFMPoolInit()`](#ex-init)
 
 ```c
 void SSFMPoolInit(SSFMPool_t *pool, uint32_t blocks, uint32_t blockSize);
 ```
 
 Initializes a memory pool by allocating `blocks` blocks of `blockSize` bytes each from the
-system heap via `malloc`. The pool thereafter provides deterministic O(1) allocation and
-deallocation without any further `malloc` calls.
+system heap. The pool thereafter provides O(1) allocation and deallocation with no further heap
+calls. Each block is zero-initialized and guarded by a canary value. The pool must not already
+be initialized; asserting otherwise.
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
-| `pool` | out | `SSFMPool_t *` | Pointer to the pool structure to initialize. Must not be `NULL`. |
+| `pool` | out | [`SSFMPool_t *`](#type-ssfmpool-t) | Pointer to the pool structure to initialize. Must not be `NULL`. Must not already be initialized. |
 | `blocks` | in | `uint32_t` | Number of blocks to allocate. Must be greater than `0`. |
 | `blockSize` | in | `uint32_t` | Size of each block in bytes. Must be greater than `0`. |
 
@@ -46,63 +96,72 @@ deallocation without any further `malloc` calls.
 
 ---
 
-### `SSFMPoolDeInit`
+<a id="ssfmpooldeinit"></a>
+
+### [↑](#ssfmpool--memory-pool-interface) [`SSFMPoolDeInit()`](#ex-deinit)
 
 ```c
 void SSFMPoolDeInit(SSFMPool_t *pool);
 ```
 
 De-initializes the memory pool, freeing all block memory back to the system heap. All allocated
-blocks must have been freed before calling this function; asserting otherwise.
+blocks must have been freed before calling; asserting otherwise.
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
-| `pool` | in-out | `SSFMPool_t *` | Pointer to an initialized pool with all blocks returned. Must not be `NULL`. |
+| `pool` | in-out | [`SSFMPool_t *`](#type-ssfmpool-t) | Pointer to an initialized pool with all blocks returned. Must not be `NULL`. |
 
 **Returns:** Nothing.
 
 ---
 
-### `SSFMPoolAlloc`
+<a id="ssfmpoolalloc"></a>
+
+### [↑](#ssfmpool--memory-pool-interface) [`SSFMPoolAlloc()`](#ex-alloc)
 
 ```c
 void *SSFMPoolAlloc(SSFMPool_t *pool, uint32_t size, uint8_t owner);
 ```
 
-Allocates one block from the pool. The `size` argument is validated against the pool's
-`blockSize`; it must not exceed `blockSize`. The `owner` tag is stored in the block header
-when `SSF_MPOOL_DEBUG == 1` to aid leak analysis.
+Allocates one block from the pool and returns a pointer to it. The `size` argument is validated
+against the pool's `blockSize`; it must not exceed `blockSize`. The block is not zeroed on
+allocation. The `owner` tag is stored in the block's canary area to aid leak analysis when
+[`SSF_MPOOL_DEBUG`](#opt-mpool-debug) is `1`.
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
-| `pool` | in-out | `SSFMPool_t *` | Pointer to an initialized pool. Must not be `NULL`. Must not be empty. |
+| `pool` | in-out | [`SSFMPool_t *`](#type-ssfmpool-t) | Pointer to an initialized pool. Must not be `NULL`. Must not be empty. |
 | `size` | in | `uint32_t` | Requested allocation size in bytes. Must not exceed the pool's `blockSize`. |
-| `owner` | in | `uint8_t` | Tag identifying the allocating code path. Used only when `SSF_MPOOL_DEBUG == 1`. |
+| `owner` | in | `uint8_t` | Tag identifying the allocating code path. Stored in the block header regardless of `SSF_MPOOL_DEBUG`. |
 
-**Returns:** Pointer to the allocated block; asserts if the pool is empty or `size > blockSize`.
+**Returns:** Pointer to the allocated block. Asserts if the pool is empty or `size > blockSize`.
 
 ---
 
-### `SSFMPoolFree`
+<a id="ssfmpoolfree"></a>
+
+### [↑](#ssfmpool--memory-pool-interface) [`SSFMPoolFree()`](#ex-free)
 
 ```c
-void *SSFMPoolFree(SSFMPool_t *pool, void *mpool);
+void *SSFMPoolFree(SSFMPool_t *pool, void *ptr);
 ```
 
-Returns a previously allocated block back to the pool. After this call the pointer is invalid.
-Note that this function returns `NULL` to allow the pattern `ptr = SSFMPoolFree(pool, ptr)` to
-automatically null the caller's pointer.
+Returns a previously allocated block back to the pool. The canary value is verified before
+returning the block; asserting on corruption or overrun. After this call the pointer is invalid.
+Returns `NULL` to enable the nulling pattern `ptr = SSFMPoolFree(&pool, ptr)`.
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
-| `pool` | in-out | `SSFMPool_t *` | Pointer to the pool the block was allocated from. Must not be `NULL`. |
-| `mpool` | in | `void *` | Pointer to the block to free. Must have been returned by `SSFMPoolAlloc` on this pool. |
+| `pool` | in-out | [`SSFMPool_t *`](#type-ssfmpool-t) | Pointer to the pool the block was allocated from. Must not be `NULL`. |
+| `ptr` | in | `void *` | Pointer to the block to free. Must not be `NULL`. Must have been returned by `SSFMPoolAlloc()` on this pool. |
 
 **Returns:** Always `NULL`.
 
 ---
 
-### `SSFMPoolBlockSize`
+<a id="ssfmpoolblocksize"></a>
+
+### [↑](#ssfmpool--memory-pool-interface) [`SSFMPoolBlockSize()`](#ex-blocksize)
 
 ```c
 uint32_t SSFMPoolBlockSize(const SSFMPool_t *pool);
@@ -112,87 +171,215 @@ Returns the fixed block size of the pool.
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
-| `pool` | in | `const SSFMPool_t *` | Pointer to an initialized pool. Must not be `NULL`. |
+| `pool` | in | [`const SSFMPool_t *`](#type-ssfmpool-t) | Pointer to an initialized pool. Must not be `NULL`. |
 
-**Returns:** The `blockSize` value supplied to `SSFMPoolInit`.
+**Returns:** The `blockSize` value supplied to `SSFMPoolInit()`.
 
 ---
 
-### `SSFMPoolSize` / `SSFMPoolLen`
+<a id="ssfmpoolsize"></a>
+
+### [↑](#ssfmpool--memory-pool-interface) [`SSFMPoolSize()`](#ex-size)
 
 ```c
 uint32_t SSFMPoolSize(const SSFMPool_t *pool);
-uint32_t SSFMPoolLen(const SSFMPool_t *pool);
 ```
 
-Capacity and occupancy queries.
+Returns the total number of blocks in the pool.
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
-| `pool` | in | `const SSFMPool_t *` | Pointer to an initialized pool. Must not be `NULL`. |
+| `pool` | in | [`const SSFMPool_t *`](#type-ssfmpool-t) | Pointer to an initialized pool. Must not be `NULL`. |
 
-**`SSFMPoolSize` returns:** Total number of blocks in the pool (the `blocks` value from `SSFMPoolInit`).
-
-**`SSFMPoolLen` returns:** Number of currently allocated (in-use) blocks.
+**Returns:** The `blocks` value supplied to `SSFMPoolInit()`.
 
 ---
 
-### `SSFMPoolIsEmpty` / `SSFMPoolIsFull`
+<a id="ssfmpoollen"></a>
+
+### [↑](#ssfmpool--memory-pool-interface) [`SSFMPoolLen()`](#ex-len)
 
 ```c
-bool SSFMPoolIsEmpty(const SSFMPool_t *pool);
-bool SSFMPoolIsFull(const SSFMPool_t *pool);
+uint32_t SSFMPoolLen(const SSFMPool_t *pool);
 ```
 
-State query functions.
+Returns the number of free (available) blocks remaining in the pool.
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
-| `pool` | in | `const SSFMPool_t *` | Pointer to an initialized pool. Must not be `NULL`. |
+| `pool` | in | [`const SSFMPool_t *`](#type-ssfmpool-t) | Pointer to an initialized pool. Must not be `NULL`. |
 
-**`SSFMPoolIsEmpty` returns:** `true` if no free blocks remain (all are allocated).
+**Returns:** Number of free blocks currently available for allocation (`Size` minus the number
+of allocated blocks).
 
-**`SSFMPoolIsFull` returns:** `true` if all blocks are free (none are allocated).
+---
 
-## Usage
+<a id="ssfmpoolisempty"></a>
 
-The memory pool creates a pool of fixed-size blocks that can be efficiently allocated and freed
-without dynamic memory calls. All blocks are allocated from a contiguous heap region during
-`SSFMPoolInit()`.
+### [↑](#ssfmpool--memory-pool-interface) [`SSFMPoolIsEmpty()`](#ex-isempty)
 
 ```c
-#define BLOCK_SIZE  (42UL)
-#define BLOCKS      (10UL)
-#define MSG_FRAME_OWNER (0x11u)
+bool SSFMPoolIsEmpty(const SSFMPool_t *pool);
+```
 
+Returns `true` if no free blocks remain — i.e., all blocks are currently allocated. Calling
+`SSFMPoolAlloc()` on an empty pool will assert; check this function first.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `pool` | in | [`const SSFMPool_t *`](#type-ssfmpool-t) | Pointer to an initialized pool. Must not be `NULL`. |
+
+**Returns:** `true` if no free blocks remain; `false` otherwise.
+
+---
+
+<a id="ssfmpoolisfull"></a>
+
+### [↑](#ssfmpool--memory-pool-interface) [`SSFMPoolIsFull()`](#ex-isfull)
+
+```c
+bool SSFMPoolIsFull(const SSFMPool_t *pool);
+```
+
+Returns `true` if all blocks are free — i.e., no blocks are currently allocated. This is the
+required state before calling `SSFMPoolDeInit()`.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `pool` | in | [`const SSFMPool_t *`](#type-ssfmpool-t) | Pointer to an initialized pool. Must not be `NULL`. |
+
+**Returns:** `true` if all blocks are free; `false` otherwise.
+
+<a id="examples"></a>
+
+## [↑](#ssfmpool--memory-pool-interface) Examples
+
+All examples use the following struct definition:
+
+```c
+typedef struct { uint32_t id; uint8_t payload[16]; } MyMsg_t;
+```
+
+<a id="ex-init"></a>
+
+### [↑](#ssfmpool--memory-pool-interface) [SSFMPoolInit()](#ssfmpoolinit)
+
+```c
 SSFMPool_t pool;
-MsgFrame_t *buf;
 
-SSFMPoolInit(&pool, BLOCKS, BLOCK_SIZE);
+SSFMPoolInit(&pool, 4u, sizeof(MyMsg_t));
+/* pool holds 4 blocks of sizeof(MyMsg_t) bytes each */
+```
 
-/* Allocate and use a block */
+<a id="ex-deinit"></a>
+
+### [↑](#ssfmpool--memory-pool-interface) [SSFMPoolDeInit()](#ssfmpooldeinit)
+
+```c
+SSFMPool_t pool;
+
+SSFMPoolInit(&pool, 4u, sizeof(MyMsg_t));
+SSFMPoolDeInit(&pool);
+/* pool is no longer valid */
+```
+
+<a id="ex-alloc"></a>
+
+### [↑](#ssfmpool--memory-pool-interface) [SSFMPoolAlloc()](#ssfmpoolalloc)
+
+```c
+SSFMPool_t pool;
+MyMsg_t *msg;
+
+SSFMPoolInit(&pool, 4u, sizeof(MyMsg_t));
+
 if (SSFMPoolIsEmpty(&pool) == false)
 {
-    buf = (MsgFrame_t *)SSFMPoolAlloc(&pool, sizeof(MsgFrame_t), MSG_FRAME_OWNER);
-    buf->header = 1;
-    /* ... use buf ... */
-
-    /* Free the block */
-    buf = (MsgFrame_t *)SSFMPoolFree(&pool, buf);
-    /* buf == NULL */
+    msg = (MyMsg_t *)SSFMPoolAlloc(&pool, sizeof(MyMsg_t), 0x01u);
+    msg->id = 42u;
+    /* pool has 3 free blocks */
 }
 ```
 
-## Dependencies
+<a id="ex-free"></a>
 
-- `ssf/ssfport.h`
-- `ssf/ssfoptions.h`
+### [↑](#ssfmpool--memory-pool-interface) [SSFMPoolFree()](#ssfmpoolfree)
 
-## Notes
+```c
+SSFMPool_t pool;
+MyMsg_t *msg;
 
-- `SSFMPoolAlloc()` asserts if `size` exceeds `blockSize` — use `blockSize` as a compile-time
-  constant for sizing.
-- `SSFMPoolFree()` returns `NULL`; assign the return value to null the caller's pointer.
-- When `SSF_MPOOL_DEBUG == 1`, each block records its `owner` tag to aid debugging leaks.
-- Unlike `malloc`, all blocks are the same size; allocating a block smaller than `blockSize` is
-  allowed but wastes the remainder.
+SSFMPoolInit(&pool, 4u, sizeof(MyMsg_t));
+msg = (MyMsg_t *)SSFMPoolAlloc(&pool, sizeof(MyMsg_t), 0x01u);
+
+msg = (MyMsg_t *)SSFMPoolFree(&pool, msg);
+/* msg == NULL; pool has 4 free blocks */
+```
+
+<a id="ex-blocksize"></a>
+
+### [↑](#ssfmpool--memory-pool-interface) [SSFMPoolBlockSize()](#ssfmpoolblocksize)
+
+```c
+SSFMPool_t pool;
+
+SSFMPoolInit(&pool, 4u, sizeof(MyMsg_t));
+SSFMPoolBlockSize(&pool);   /* returns sizeof(MyMsg_t) */
+```
+
+<a id="ex-size"></a>
+
+### [↑](#ssfmpool--memory-pool-interface) [SSFMPoolSize()](#ssfmpoolsize)
+
+```c
+SSFMPool_t pool;
+
+SSFMPoolInit(&pool, 4u, sizeof(MyMsg_t));
+SSFMPoolSize(&pool);   /* returns 4 */
+```
+
+<a id="ex-len"></a>
+
+### [↑](#ssfmpool--memory-pool-interface) [SSFMPoolLen()](#ssfmpoollen)
+
+```c
+SSFMPool_t pool;
+MyMsg_t *msg;
+
+SSFMPoolInit(&pool, 4u, sizeof(MyMsg_t));
+SSFMPoolLen(&pool);   /* returns 4 (all blocks free) */
+
+msg = (MyMsg_t *)SSFMPoolAlloc(&pool, sizeof(MyMsg_t), 0x01u);
+SSFMPoolLen(&pool);   /* returns 3 */
+```
+
+<a id="ex-isempty"></a>
+
+### [↑](#ssfmpool--memory-pool-interface) [SSFMPoolIsEmpty()](#ssfmpoolisempty)
+
+```c
+SSFMPool_t pool;
+MyMsg_t *msgs[4];
+uint32_t i;
+
+SSFMPoolInit(&pool, 4u, sizeof(MyMsg_t));
+SSFMPoolIsEmpty(&pool);   /* returns false */
+
+for (i = 0; i < 4u; i++) { msgs[i] = (MyMsg_t *)SSFMPoolAlloc(&pool, sizeof(MyMsg_t), 0x01u); }
+SSFMPoolIsEmpty(&pool);   /* returns true (all blocks allocated) */
+```
+
+<a id="ex-isfull"></a>
+
+### [↑](#ssfmpool--memory-pool-interface) [SSFMPoolIsFull()](#ssfmpoolisfull)
+
+```c
+SSFMPool_t pool;
+MyMsg_t *msg;
+
+SSFMPoolInit(&pool, 4u, sizeof(MyMsg_t));
+SSFMPoolIsFull(&pool);   /* returns true (all blocks free) */
+
+msg = (MyMsg_t *)SSFMPoolAlloc(&pool, sizeof(MyMsg_t), 0x01u);
+SSFMPoolIsFull(&pool);   /* returns false */
+```

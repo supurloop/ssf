@@ -15,44 +15,52 @@ The framework implements the following modules:
 
 > **Size estimates** are for ARM Cortex-M (Thumb-2) compiled with maximum size optimization (-Os).
 > Flash includes compiled code and any ROM lookup tables. Static RAM is memory permanently
-> consumed by the module itself; it excludes user-allocated objects and per-call stack usage.
+> consumed by the module itself; it excludes user-allocated objects. Peak Stack is the maximum
+> call-stack usage during any single API call, including all nested frames and local working
+> buffers. Heap indicates whether the module calls `malloc`/`free` during normal operation.
 
 #### [Data Structures](_struct/README.md)
 
 Efficient data structure primitives for embedded systems, designed to avoid dynamic memory fragmentation and catch misuse at runtime.
 
-| Module | Description | Flash | Static RAM |
-|--------|-------------|-------|------------|
-| [Byte FIFO](_struct/ssfbfifo.md) | Interrupt-safe byte FIFO with single-byte and multi-byte put/get | ~900 B | — |
-| [Linked List](_struct/ssfll.md) | Doubly-linked list supporting FIFO and stack behaviors | ~800 B | — |
-| [Memory Pool](_struct/ssfmpool.md) | Fixed-size block memory pool with no fragmentation | ~800 B | — |
-| [Heap](_struct/ssfheap.md) | Integrity-checked heap with double-free detection and mark-based ownership tracking | ~3.5 KB | — |
+| Module | Description | Flash | Static RAM | Peak Stack | Heap |
+|--------|-------------|-------|------------|------------|------|
+| [Byte FIFO](_struct/ssfbfifo.md) | Interrupt-safe byte FIFO with single-byte and multi-byte put/get | ~900 B | — | ~80 B | — |
+| [Linked List](_struct/ssfll.md) | Doubly-linked list supporting FIFO and stack behaviors | ~800 B | — | ~64 B | — |
+| [Memory Pool](_struct/ssfmpool.md) | Fixed-size block memory pool with no fragmentation | ~800 B | — | ~96 B | — |
+| [Heap](_struct/ssfheap.md) | Integrity-checked heap with double-free detection and mark-based ownership tracking | ~3.5 KB | — | ~96 B | — |
 
 #### [Codecs](_codec/README.md)
 
 Encoding and decoding interfaces for common data formats, all with strict buffer size enforcement and null-terminated output guarantees.
 
-| Module | Description | Flash | Static RAM |
-|--------|-------------|-------|------------|
-| [Base64](_codec/ssfbase64.md) | Base64 encoder/decoder | ~700 B | — |
-| [Hex ASCII](_codec/ssfhex.md) | Binary-to-hex ASCII encoder/decoder | ~600 B | — |
-| [JSON](_codec/ssfjson.md) | JSON parser/generator with path-based field access and in-place update | ~7 KB | — |
-| [TLV](_codec/ssftlv.md) | Type-Length-Value encoder/decoder | ~1.2 KB | — |
-| [INI](_codec/ssfini.md) | INI file parser/generator | ~3.5 KB | — |
-| [UBJSON](_codec/ssfubjson.md) | Universal Binary JSON parser/generator | ~9 KB | — |
-| [Decimal](_codec/ssfdec.md) | Integer-to-decimal string converter | ~2.5 KB | — |
-| [Safe Strings](_codec/ssfstr.md) | Safe C string interface replacing crash-prone standard functions | ~1.2 KB | — |
-| [Generic Object](_codec/ssfgobj.md) | BETA: Hierarchical generic object parser/generator for cross-codec in-memory representation | ~3 KB | ~8 B |
+| Module | Description | Flash | Static RAM | Peak Stack | Heap |
+|--------|-------------|-------|------------|------------|------|
+| [Base64](_codec/ssfbase64.md) | Base64 encoder/decoder | ~700 B | — | ~64 B | — |
+| [Hex ASCII](_codec/ssfhex.md) | Binary-to-hex ASCII encoder/decoder | ~600 B | — | ~64 B | — |
+| [JSON](_codec/ssfjson.md) | JSON parser/generator with path-based field access and in-place update | ~7 KB | — | ~250 B⁹ | — |
+| [TLV](_codec/ssftlv.md) | Type-Length-Value encoder/decoder | ~1.2 KB | — | ~96 B | — |
+| [INI](_codec/ssfini.md) | INI file parser/generator | ~3.5 KB | — | ~64 B | — |
+| [UBJSON](_codec/ssfubjson.md) | Universal Binary JSON parser/generator | ~9 KB | — | ~270 B¹⁰ | — |
+| [Decimal](_codec/ssfdec.md) | Integer-to-decimal string converter | ~2.5 KB | — | ~96 B | — |
+| [Safe Strings](_codec/ssfstr.md) | Safe C string interface replacing crash-prone standard functions | ~1.2 KB | — | ~64 B | — |
+| [Generic Object](_codec/ssfgobj.md) | BETA: Hierarchical generic object parser/generator for cross-codec in-memory representation | ~3 KB | ~8 B | ~160 B¹¹ | yes¹⁵ |
+
+⁹ Recursive parser; stack scales with `SSF_JSON_CONFIG_MAX_IN_DEPTH` (default 4). Estimate uses the default depth; each additional nesting level adds ~64 B.
+
+¹⁰ Recursive parser; stack scales with `SSF_UBJSON_CONFIG_MAX_IN_DEPTH` (default 4). Estimate uses the default depth; each additional nesting level adds ~68 B.
+
+¹¹ Recursive iteration; stack scales with `SSF_GOBJ_CONFIG_MAX_IN_DEPTH` (default 4). Estimate uses the default depth; each additional nesting level adds ~40 B.
 
 #### [Error Detection Codes (EDC)](_edc/README.md)
 
 Data integrity interfaces for detecting transmission and storage errors.
 
-| Module | Description | Flash | Static RAM |
-|--------|-------------|-------|------------|
-| [Fletcher Checksum](_edc/ssffcsum.md) | 16-bit Fletcher checksum | ~120 B | — |
-| [CRC-16](_edc/ssfcrc16.md) | 16-bit CRC (XMODEM/CCITT-16) | ~650 B¹ | — |
-| [CRC-32](_edc/ssfcrc32.md) | 32-bit CRC (CCITT-32) | ~1.2 KB² | — |
+| Module | Description | Flash | Static RAM | Peak Stack | Heap |
+|--------|-------------|-------|------------|------------|------|
+| [Fletcher Checksum](_edc/ssffcsum.md) | 16-bit Fletcher checksum | ~120 B | — | ~48 B | — |
+| [CRC-16](_edc/ssfcrc16.md) | 16-bit CRC (XMODEM/CCITT-16) | ~650 B¹ | — | ~32 B | — |
+| [CRC-32](_edc/ssfcrc32.md) | 32-bit CRC (CCITT-32) | ~1.2 KB² | — | ~32 B | — |
 
 ¹ Includes 512 B lookup table. ² Includes 1 KB lookup table.
 
@@ -60,54 +68,64 @@ Data integrity interfaces for detecting transmission and storage errors.
 
 Forward error correction for recovering data corrupted during transmission or storage.
 
-| Module | Description | Flash | Static RAM |
-|--------|-------------|-------|------------|
-| [Reed-Solomon](_ecc/README.md) | Reed-Solomon forward error correction encoder/decoder | ~4.5 KB³ | — |
+| Module | Description | Flash | Static RAM | Peak Stack | Heap |
+|--------|-------------|-------|------------|------------|------|
+| [Reed-Solomon](_ecc/README.md) | Reed-Solomon forward error correction encoder/decoder | ~4.5 KB³ | — | ~600 B¹² | — |
 
 ³ Includes ~768 B of GF(256) logarithm, exponent, and inverse lookup tables.
+
+¹² Peak stack occurs in the error locator function, which holds four `GFPoly_t` working polynomials on the stack. Each polynomial is `SSF_RS_MAX_CHUNK_SIZE + SSF_RS_MAX_SYMBOLS` bytes (default 135 B). Stack scales with these configuration constants.
 
 #### [Cryptography](_crypto/README.md)
 
 Cryptographic primitives for hashing, encryption, and random number generation.
 
-| Module | Description | Flash | Static RAM |
-|--------|-------------|-------|------------|
-| [SHA-2](_crypto/ssfsha2.md) | SHA-2 hash (SHA-224/256/384/512/512-224/512-256), one-shot and incremental | ~3 KB⁴ | — |
-| [AES](_crypto/ssfaes.md) | AES block cipher (128/192/256-bit key) | ~2 KB⁵ | — |
-| [AES-GCM](_crypto/ssfaesgcm.md) | AES-GCM authenticated encryption/decryption | ~3.5 KB⁶ | — |
-| [PRNG](_crypto/ssfprng.md) | Cryptographically capable pseudo-random number generator | ~500 B | — |
+| Module | Description | Flash | Static RAM | Peak Stack | Heap |
+|--------|-------------|-------|------------|------------|------|
+| [SHA-2](_crypto/ssfsha2.md) | SHA-2 hash (SHA-224/256/384/512/512-224/512-256), one-shot and incremental | ~3 KB⁴ | — | ~800 B¹³ | — |
+| [AES](_crypto/ssfaes.md) | AES block cipher (128/192/256-bit key) | ~2 KB⁵ | — | ~300 B¹⁴ | — |
+| [AES-GCM](_crypto/ssfaesgcm.md) | AES-GCM authenticated encryption/decryption | ~3.5 KB⁶ | — | ~128 B | — |
+| [PRNG](_crypto/ssfprng.md) | Cryptographically capable pseudo-random number generator | ~500 B | — | ~96 B | — |
 
 ⁴ Includes ~896 B of SHA-256 and SHA-512 round constants. ⁵ Includes 512 B S-box and inverse S-box tables. ⁶ Requires AES module; figure is for GCM logic only.
+
+¹³ SHA-512 block processing (`_SSFSHA2_64Block`) dominates: the message schedule `w[80]` of `uint64_t` alone consumes 640 B of stack. SHA-256 peak is ~400 B.
+
+¹⁴ The AES key schedule is expanded into a local `w[60]` array of `uint32_t` (240 B) on every encrypt/decrypt call. The AES-256 key schedule is the worst case.
 
 #### [Storage](_storage/README.md)
 
 Reliable non-volatile storage with versioning and integrity checking for configuration data.
 
-| Module | Description | Flash | Static RAM |
-|--------|-------------|-------|------------|
-| [Storage](_storage/README.md) | Version-controlled interface for reliably storing configuration to NV storage | ~1.2 KB | — |
+| Module | Description | Flash | Static RAM | Peak Stack | Heap |
+|--------|-------------|-------|------------|------------|------|
+| [Storage](_storage/README.md) | Version-controlled interface for reliably storing configuration to NV storage | ~1.2 KB | — | ~100 B | — |
 
 #### [Finite State Machine](_fsm/README.md)
 
 Event-driven state machine framework suitable for both bare-metal and RTOS environments.
 
-| Module | Description | Flash | Static RAM |
-|--------|-------------|-------|------------|
-| [Finite State Machine](_fsm/README.md) | Event-driven finite state machine framework with optional RTOS integration | ~2.5 KB | ~150 B⁷ |
+| Module | Description | Flash | Static RAM | Peak Stack | Heap |
+|--------|-------------|-------|------------|------------|------|
+| [Finite State Machine](_fsm/README.md) | Event-driven finite state machine framework with optional RTOS integration | ~2.5 KB | ~150 B⁷ | ~64 B | yes¹⁶ |
 
 ⁷ Static RAM scales with `SSF_SM_MAX` (number of configured state machines). Estimate is for the default single-SM configuration; excludes user-supplied event and timer pool memory.
+
+¹⁶ Events and timers are allocated from user-configured fixed-size pools (no heap). System `malloc` is called only when an event carries a data payload larger than `sizeof(pointer)` (4 B on ARM).
 
 #### [Time](_time/README.md)
 
 Time management interfaces covering raw tick time, calendar conversion, and ISO 8601 string formatting.
 
-| Module | Description | Flash | Static RAM |
-|--------|-------------|-------|------------|
-| [RTC](_time/ssfrtc.md) | Unix time real-time clock interface | ~900 B | ~20 B⁸ |
-| [Date/Time](_time/ssfdtime.md) | Unix time to calendar date/time struct conversion | ~1.8 KB | — |
-| [ISO 8601](_time/ssfiso8601.md) | ISO 8601 date/time string formatting and parsing with timezone support | ~1.8 KB | — |
+| Module | Description | Flash | Static RAM | Peak Stack | Heap |
+|--------|-------------|-------|------------|------------|------|
+| [RTC](_time/ssfrtc.md) | Unix time real-time clock interface | ~900 B | ~20 B⁸ | ~48 B | — |
+| [Date/Time](_time/ssfdtime.md) | Unix time to calendar date/time struct conversion | ~1.8 KB | — | ~96 B | — |
+| [ISO 8601](_time/ssfiso8601.md) | ISO 8601 date/time string formatting and parsing with timezone support | ~1.8 KB | — | ~120 B | — |
 
 ⁸ RTC static RAM holds two initialization flags and two 64-bit tick reference values.
+
+¹⁵ Each `SSFGObjInit` call allocates one `SSFGObj_t` node struct (~48 B) via system `malloc`. `SSFGObjSetLabel` and `SSFGObjSet*` add further per-field allocations for labels and value data.
 
 Little RAM is used internally by the framework; most RAM usage occurs outside the framework when declaring or initializing objects.
 

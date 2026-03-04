@@ -18,7 +18,7 @@ Portions of the framework will work on even smaller microcontrollers.
 
 ### No Dependencies 
 
-When you use the SSF, you just need the SSF and not a single other external dependency except for a few C standard library calls.
+When you use the SSF, you just need the SSF and not a single other external dependency except for a few C standard library calls. Also no new type definitions for basic data types that only complicate your code base and cloud your mind; SSF uses <stdint.h> and <stdbool.h> types.
 
 ### No Error Codes
 

@@ -12,8 +12,38 @@ This module has no compile-time configuration options in `ssfoptions.h`.
 
 | Function / Macro | Description |
 |-----------------|-------------|
-| `SSFFCSum16(in, inLen, fcsum)` | Compute or accumulate a 16-bit Fletcher checksum |
+| `SSFFCSum16(in, inLen, initial)` | Compute or accumulate a 16-bit Fletcher checksum |
 | `SSF_FCSUM_INITIAL` | Initial value constant; pass for the first call in a sequence |
+
+## Function Reference
+
+### `SSFFCSum16`
+
+```c
+uint16_t SSFFCSum16(const uint8_t *in, size_t inLen, uint16_t initial);
+```
+
+Computes or accumulates a 16-bit Fletcher checksum over an input byte array. May be called
+repeatedly on successive chunks of the same data to produce the same result as a single call
+over the entire dataset.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `in` | in | `const uint8_t *` | Pointer to the input bytes to checksum. Must not be `NULL` when `inLen > 0`. |
+| `inLen` | in | `size_t` | Number of bytes to process from `in`. May be `0`, in which case `initial` is returned unchanged. |
+| `initial` | in | `uint16_t` | Starting checksum state. Pass `SSF_FCSUM_INITIAL` to begin a new computation; pass the return value of a prior call to accumulate incrementally over split data. |
+
+**Returns:** `uint16_t` — Updated 16-bit Fletcher checksum. Pass this value as `initial` to the next call when processing data in multiple chunks.
+
+---
+
+### `SSF_FCSUM_INITIAL`
+
+```c
+#define SSF_FCSUM_INITIAL ((uint16_t) 0u)
+```
+
+Constant equal to `0`. Pass as `initial` to start a fresh Fletcher checksum computation.
 
 ## Usage
 

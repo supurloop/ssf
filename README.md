@@ -13,34 +13,87 @@ This code framework was designed:
 
 The framework implements the following modules:
 
-| Module | Category | Description |
-|--------|----------|-------------|
-| [Byte FIFO](_struct/ssfbfifo.md) | [Data Structures](_struct/README.md) | Interrupt-safe byte FIFO with single-byte and multi-byte put/get |
-| [Linked List](_struct/ssfll.md) | [Data Structures](_struct/README.md) | Doubly-linked list supporting FIFO and stack behaviors |
-| [Memory Pool](_struct/ssfmpool.md) | [Data Structures](_struct/README.md) | Fixed-size block memory pool with no fragmentation |
-| [Heap](_struct/ssfheap.md) | [Data Structures](_struct/README.md) | Integrity-checked heap with double-free detection and mark-based ownership tracking |
-| [Base64](_codec/ssfbase64.md) | [Codecs](_codec/README.md) | Base64 encoder/decoder |
-| [Hex ASCII](_codec/ssfhex.md) | [Codecs](_codec/README.md) | Binary-to-hex ASCII encoder/decoder |
-| [JSON](_codec/ssfjson.md) | [Codecs](_codec/README.md) | JSON parser/generator with path-based field access and in-place update |
-| [TLV](_codec/ssftlv.md) | [Codecs](_codec/README.md) | Type-Length-Value encoder/decoder |
-| [INI](_codec/ssfini.md) | [Codecs](_codec/README.md) | INI file parser/generator |
-| [UBJSON](_codec/ssfubjson.md) | [Codecs](_codec/README.md) | Universal Binary JSON parser/generator |
-| [Decimal](_codec/ssfdec.md) | [Codecs](_codec/README.md) | Integer-to-decimal string converter |
-| [Safe Strings](_codec/ssfstr.md) | [Codecs](_codec/README.md) | Safe C string interface replacing crash-prone standard functions |
-| [Generic Object](_codec/ssfgobj.md) | [Codecs](_codec/README.md) | BETA: Hierarchical generic object parser/generator for cross-codec in-memory representation |
-| [Fletcher Checksum](_edc/ssffcsum.md) | [EDC](_edc/README.md) | 16-bit Fletcher checksum |
-| [CRC-16](_edc/ssfcrc16.md) | [EDC](_edc/README.md) | 16-bit CRC (XMODEM/CCITT-16) |
-| [CRC-32](_edc/ssfcrc32.md) | [EDC](_edc/README.md) | 32-bit CRC (CCITT-32) |
-| [Reed-Solomon](_ecc/README.md) | [ECC](_ecc/README.md) | Reed-Solomon forward error correction encoder/decoder |
-| [SHA-2](_crypto/ssfsha2.md) | [Cryptography](_crypto/README.md) | SHA-2 hash (SHA-224/256/384/512/512-224/512-256), one-shot and incremental |
-| [AES](_crypto/ssfaes.md) | [Cryptography](_crypto/README.md) | AES block cipher (128/192/256-bit key) |
-| [AES-GCM](_crypto/ssfaesgcm.md) | [Cryptography](_crypto/README.md) | AES-GCM authenticated encryption/decryption |
-| [PRNG](_crypto/ssfprng.md) | [Cryptography](_crypto/README.md) | Cryptographically capable pseudo-random number generator |
-| [Storage](_storage/README.md) | [Storage](_storage/README.md) | Version-controlled interface for reliably storing configuration to NV storage |
-| [Finite State Machine](_fsm/README.md) | [FSM](_fsm/README.md) | Event-driven finite state machine framework with optional RTOS integration |
-| [RTC](_time/ssfrtc.md) | [Time](_time/README.md) | Unix time real-time clock interface |
-| [Date/Time](_time/ssfdtime.md) | [Time](_time/README.md) | Unix time to calendar date/time struct conversion |
-| [ISO 8601](_time/ssfiso8601.md) | [Time](_time/README.md) | ISO 8601 date/time string formatting and parsing with timezone support |
+#### [Data Structures](_struct/README.md)
+
+Efficient data structure primitives for embedded systems, designed to avoid dynamic memory fragmentation and catch misuse at runtime.
+
+| Module | Description |
+|--------|-------------|
+| [Byte FIFO](_struct/ssfbfifo.md) | Interrupt-safe byte FIFO with single-byte and multi-byte put/get |
+| [Linked List](_struct/ssfll.md) | Doubly-linked list supporting FIFO and stack behaviors |
+| [Memory Pool](_struct/ssfmpool.md) | Fixed-size block memory pool with no fragmentation |
+| [Heap](_struct/ssfheap.md) | Integrity-checked heap with double-free detection and mark-based ownership tracking |
+
+#### [Codecs](_codec/README.md)
+
+Encoding and decoding interfaces for common data formats, all with strict buffer size enforcement and null-terminated output guarantees.
+
+| Module | Description |
+|--------|-------------|
+| [Base64](_codec/ssfbase64.md) | Base64 encoder/decoder |
+| [Hex ASCII](_codec/ssfhex.md) | Binary-to-hex ASCII encoder/decoder |
+| [JSON](_codec/ssfjson.md) | JSON parser/generator with path-based field access and in-place update |
+| [TLV](_codec/ssftlv.md) | Type-Length-Value encoder/decoder |
+| [INI](_codec/ssfini.md) | INI file parser/generator |
+| [UBJSON](_codec/ssfubjson.md) | Universal Binary JSON parser/generator |
+| [Decimal](_codec/ssfdec.md) | Integer-to-decimal string converter |
+| [Safe Strings](_codec/ssfstr.md) | Safe C string interface replacing crash-prone standard functions |
+| [Generic Object](_codec/ssfgobj.md) | BETA: Hierarchical generic object parser/generator for cross-codec in-memory representation |
+
+#### [Error Detection Codes (EDC)](_edc/README.md)
+
+Data integrity interfaces for detecting transmission and storage errors.
+
+| Module | Description |
+|--------|-------------|
+| [Fletcher Checksum](_edc/ssffcsum.md) | 16-bit Fletcher checksum |
+| [CRC-16](_edc/ssfcrc16.md) | 16-bit CRC (XMODEM/CCITT-16) |
+| [CRC-32](_edc/ssfcrc32.md) | 32-bit CRC (CCITT-32) |
+
+#### [Error Correction Codes (ECC)](_ecc/README.md)
+
+Forward error correction for recovering data corrupted during transmission or storage.
+
+| Module | Description |
+|--------|-------------|
+| [Reed-Solomon](_ecc/README.md) | Reed-Solomon forward error correction encoder/decoder |
+
+#### [Cryptography](_crypto/README.md)
+
+Cryptographic primitives for hashing, encryption, and random number generation.
+
+| Module | Description |
+|--------|-------------|
+| [SHA-2](_crypto/ssfsha2.md) | SHA-2 hash (SHA-224/256/384/512/512-224/512-256), one-shot and incremental |
+| [AES](_crypto/ssfaes.md) | AES block cipher (128/192/256-bit key) |
+| [AES-GCM](_crypto/ssfaesgcm.md) | AES-GCM authenticated encryption/decryption |
+| [PRNG](_crypto/ssfprng.md) | Cryptographically capable pseudo-random number generator |
+
+#### [Storage](_storage/README.md)
+
+Reliable non-volatile storage with versioning and integrity checking for configuration data.
+
+| Module | Description |
+|--------|-------------|
+| [Storage](_storage/README.md) | Version-controlled interface for reliably storing configuration to NV storage |
+
+#### [Finite State Machine](_fsm/README.md)
+
+Event-driven state machine framework suitable for both bare-metal and RTOS environments.
+
+| Module | Description |
+|--------|-------------|
+| [Finite State Machine](_fsm/README.md) | Event-driven finite state machine framework with optional RTOS integration |
+
+#### [Time](_time/README.md)
+
+Time management interfaces covering raw tick time, calendar conversion, and ISO 8601 string formatting.
+
+| Module | Description |
+|--------|-------------|
+| [RTC](_time/ssfrtc.md) | Unix time real-time clock interface |
+| [Date/Time](_time/ssfdtime.md) | Unix time to calendar date/time struct conversion |
+| [ISO 8601](_time/ssfiso8601.md) | ISO 8601 date/time string formatting and parsing with timezone support |
 
 To give you an idea of the framework size here are some program memory estimates for each component compiled on an MSP430 with Level 3 optimization:
 Byte FIFO, linked list, memory pool, Base64, Hex ASCII are each about 1000 bytes.

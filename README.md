@@ -46,6 +46,17 @@ The framework does NOT use assertions when operating on inputs that likely come 
 
 The framework will also detect common errors like using interfaces before they have been properly initialized.
 
+### Tested
+
+For the main port testing platforms of Windows, Linux, and Mac OS, all relevant compiler warnings are turned on. SSF compiles cleanly on them all.
+SSF is linted using Visual Studio's statis analysis tool with no warnings.
+ 
+SSF has been reviewed for buffer overflows and general correctness by Claude Code.
+ 
+Every SSF interface has a suite of unit tests that MUST PASS completely on all of the main port testing platforms.
+ 
+The author uses various modules of SSF in several different commercial products using a variety of microcontrollers and toolchains.
+ 
 ## Porting
 
 This framework has been successfully ported and unit tested on the following platforms: Windows Visual Studio 32/64-bit, Linux 32/64-bit (GCC), MAC OS X, PIC32 (XC32), PIC24 (XC16), MSP430 (TI 15.12.3.LTS), and many others. You should only need to change ssfport.c and ssfport.h to implement a successful port.

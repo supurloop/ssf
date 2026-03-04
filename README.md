@@ -119,7 +119,7 @@ Efficient data structure primitives for embedded systems, designed to avoid dyna
 | [Byte FIFO](_struct/ssfbfifo.md) | Interrupt-safe byte FIFO with single-byte and multi-byte put/get | ~900 B | — | ~80 B | — | Yes |
 | [Linked List](_struct/ssfll.md) | Doubly-linked list supporting FIFO and stack behaviors | ~800 B | — | ~64 B | — | Yes |
 | [Memory Pool](_struct/ssfmpool.md) | Fixed-size block memory pool with no fragmentation | ~800 B | — | ~96 B | — | Yes |
-| [Heap](_struct/ssfheap.md) | Integrity-checked heap with double-free detection and mark-based ownership tracking | ~3.5 KB | — | ~96 B | — | No |
+| [Heap](_struct/ssfheap.md) | Integrity-checked heap with double-free detection and mark-based ownership tracking | ~3.5 KB | — | ~96 B | — | No¹⁹ |
 
 #### [Codecs](_codec/README.md)
 
@@ -200,11 +200,13 @@ Event-driven state machine framework suitable for both bare-metal and RTOS envir
 
 | Module | Description | Flash | Static RAM | Peak Stack | Heap | Reentrant |
 |--------|-------------|-------|------------|------------|------|-----------|
-| [Finite State Machine](_fsm/README.md) | Event-driven finite state machine framework with optional RTOS integration | ~2.5 KB | ~150 B⁷ | ~64 B | yes¹⁶ | No |
+| [Finite State Machine](_fsm/README.md) | Event-driven finite state machine framework with optional RTOS integration | ~2.5 KB | ~150 B⁷ | ~64 B | yes¹⁶ | No¹⁹ |
 
 ⁷ Static RAM scales with `SSF_SM_MAX` (number of configured state machines). Estimate is for the default single-SM configuration; excludes user-supplied event and timer pool memory.
 
 ¹⁶ Events and timers are allocated from user-configured fixed-size pools (no heap). System `malloc` is called only when an event carries a data payload larger than `sizeof(pointer)` (4 B on ARM).
+
+¹⁹ Enable `SSF_CONFIG_ENABLE_THREAD_SUPPORT` and implement the corresponding synchronization macros in `ssfport.h` to make this module safe for concurrent multi-context use.
 
 #### [Time](_time/README.md)
 

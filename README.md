@@ -11,34 +11,36 @@ This code framework was designed:
 1. To run on embedded systems that have constrained program and data memories.
 2. To minimize the potential for common coding errors and detect and report runtime errors.
 
-The framework implements a number of common embedded system functions:
+The framework implements the following modules:
 
-1. An efficient byte FIFO interface.
-2. A linked list interface, supporting FIFO and STACK behaviors.
-3. A memory pool interface.
-4. A Base64 encoder/decoder interface.
-5. A Binary to Hex ASCII encoder/decoder interface.
-6. A JSON parser/generator interface.
-7. A 16-bit Fletcher checksum interface.
-8. A finite state machine framework.
-9. A Reed-Solomon FEC encoder/decoder interface.
-10. A 16-bit XMODEM/CCITT-16 CRC interface.
-11. A 32-bit CCITT-32 CRC interface.
-12. A SHA-2 hash interface.
-13. A TLV encoder/decoder interface.
-14. An AES block encryption interface.
-15. An AES-GCM authenticated encryption interface.
-16. A version controlled interface for reliably storing configuration to NV storage.
-17. A cryptograpically secure capable pseudo random number generator (PRNG).
-18. A INI parser/generator interface.
-19. A UBJSON (Universal Binary JSON) parser/generator interface.
-20. A Unix Time RTC interface.
-21. A Unix Date/Time interface.
-22. An ISO8601 Date/Time interface.
-23. An integer to decimal string interface.
-24. An safe C string interface.
-25. A debuggable, integrity checked heap interface.
-25. BETA: A generic object parser/generater interface.
+| Module | Category | Description |
+|--------|----------|-------------|
+| [Byte FIFO](_struct/ssfbfifo.md) | [Data Structures](_struct/README.md) | Interrupt-safe byte FIFO with single-byte and multi-byte put/get |
+| [Linked List](_struct/ssfll.md) | [Data Structures](_struct/README.md) | Doubly-linked list supporting FIFO and stack behaviors |
+| [Memory Pool](_struct/ssfmpool.md) | [Data Structures](_struct/README.md) | Fixed-size block memory pool with no fragmentation |
+| [Heap](_struct/ssfheap.md) | [Data Structures](_struct/README.md) | Integrity-checked heap with double-free detection and mark-based ownership tracking |
+| [Base64](_codec/ssfbase64.md) | [Codecs](_codec/README.md) | Base64 encoder/decoder |
+| [Hex ASCII](_codec/ssfhex.md) | [Codecs](_codec/README.md) | Binary-to-hex ASCII encoder/decoder |
+| [JSON](_codec/ssfjson.md) | [Codecs](_codec/README.md) | JSON parser/generator with path-based field access and in-place update |
+| [TLV](_codec/ssftlv.md) | [Codecs](_codec/README.md) | Type-Length-Value encoder/decoder |
+| [INI](_codec/ssfini.md) | [Codecs](_codec/README.md) | INI file parser/generator |
+| [UBJSON](_codec/ssfubjson.md) | [Codecs](_codec/README.md) | Universal Binary JSON parser/generator |
+| [Decimal](_codec/ssfdec.md) | [Codecs](_codec/README.md) | Integer-to-decimal string converter |
+| [Safe Strings](_codec/ssfstr.md) | [Codecs](_codec/README.md) | Safe C string interface replacing crash-prone standard functions |
+| [Generic Object](_codec/ssfgobj.md) | [Codecs](_codec/README.md) | BETA: Hierarchical generic object parser/generator for cross-codec in-memory representation |
+| [Fletcher Checksum](_edc/ssffcsum.md) | [EDC](_edc/README.md) | 16-bit Fletcher checksum |
+| [CRC-16](_edc/ssfcrc16.md) | [EDC](_edc/README.md) | 16-bit CRC (XMODEM/CCITT-16) |
+| [CRC-32](_edc/ssfcrc32.md) | [EDC](_edc/README.md) | 32-bit CRC (CCITT-32) |
+| [Reed-Solomon](_ecc/README.md) | [ECC](_ecc/README.md) | Reed-Solomon forward error correction encoder/decoder |
+| [SHA-2](_crypto/ssfsha2.md) | [Cryptography](_crypto/README.md) | SHA-2 hash (SHA-224/256/384/512/512-224/512-256), one-shot and incremental |
+| [AES](_crypto/ssfaes.md) | [Cryptography](_crypto/README.md) | AES block cipher (128/192/256-bit key) |
+| [AES-GCM](_crypto/ssfaesgcm.md) | [Cryptography](_crypto/README.md) | AES-GCM authenticated encryption/decryption |
+| [PRNG](_crypto/ssfprng.md) | [Cryptography](_crypto/README.md) | Cryptographically capable pseudo-random number generator |
+| [Storage](_storage/README.md) | [Storage](_storage/README.md) | Version-controlled interface for reliably storing configuration to NV storage |
+| [Finite State Machine](_fsm/README.md) | [FSM](_fsm/README.md) | Event-driven finite state machine framework with optional RTOS integration |
+| [RTC](_time/ssfrtc.md) | [Time](_time/README.md) | Unix time real-time clock interface |
+| [Date/Time](_time/ssfdtime.md) | [Time](_time/README.md) | Unix time to calendar date/time struct conversion |
+| [ISO 8601](_time/ssfiso8601.md) | [Time](_time/README.md) | ISO 8601 date/time string formatting and parsing with timezone support |
 
 To give you an idea of the framework size here are some program memory estimates for each component compiled on an MSP430 with Level 3 optimization:
 Byte FIFO, linked list, memory pool, Base64, Hex ASCII are each about 1000 bytes.
@@ -144,40 +146,6 @@ To properly run the finite state machine framework in a multi-threaded system SS
 ### Deinitialization
 
 This library has added support to deinitialize interfaces that have initialization functions. Primarily deinitialization was added to allow the library to better integrate with unit test frameworks.
-
-## Interfaces
-
-### [Data Structures](_struct/README.md)
-
-Efficient data structure primitives: byte FIFO, linked list, memory pool, and integrity-checked heap.
-
-### [Codecs](_codec/README.md)
-
-Encoding and decoding interfaces: Base64, Hex ASCII, JSON, TLV, INI, UBJSON, integer-to-decimal, safe C strings, and generic object parser/generator.
-
-### [Error Detection Codes (EDC)](_edc/README.md)
-
-Data integrity interfaces: 16-bit Fletcher checksum, 16-bit CRC (XMODEM/CCITT-16), and 32-bit CRC (CCITT-32).
-
-### [Error Correction Codes (ECC)](_ecc/README.md)
-
-Forward error correction: Reed-Solomon FEC encoder/decoder.
-
-### [Cryptography](_crypto/README.md)
-
-Cryptographic interfaces: SHA-2 hash, AES block cipher, AES-GCM authenticated encryption, and PRNG.
-
-### [Storage](_storage/README.md)
-
-Reliable non-volatile storage: version controlled configuration interface.
-
-### [Finite State Machine](_fsm/README.md)
-
-Event-driven finite state machine framework with hierarchical state support and optional RTOS integration.
-
-### [Time](_time/README.md)
-
-Time management interfaces: Unix time RTC, date/time struct conversion, and ISO8601 string formatting.
 
 ## Conclusion
 

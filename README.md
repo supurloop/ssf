@@ -49,7 +49,7 @@ The framework will also detect common errors like using interfaces before they h
 ### Tested
 
 For the main port testing platforms of Windows, Linux, and Mac OS, all relevant compiler warnings are turned on. SSF compiles cleanly on them all.
-SSF is linted using Visual Studio's statis analysis tool with no warnings.
+SSF is linted using Visual Studio's static analysis tool with no warnings.
  
 SSF has been reviewed for buffer overflows and general correctness by Claude Code.
  

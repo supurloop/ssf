@@ -657,7 +657,6 @@ uint8_t bfBuffer[SSF_BFIFO_255 + 1ul];
 
 SSFBFifoInit(&bf, SSF_BFIFO_255, bfBuffer, sizeof(bfBuffer));
 
-/* Safe to call from an ISR; no argument validation overhead */
 if (SSF_BFIFO_IS_EMPTY(&bf) == false)
 {
     /* FIFO has data to process */
@@ -674,7 +673,6 @@ uint8_t bfBuffer[SSF_BFIFO_255 + 1ul];
 
 SSFBFifoInit(&bf, SSF_BFIFO_255, bfBuffer, sizeof(bfBuffer));
 
-/* Safe to call from an ISR; no argument validation overhead */
 if (SSF_BFIFO_IS_FULL(&bf) == false)
 {
     /* FIFO has space for at least one more byte */
@@ -692,7 +690,6 @@ uint8_t rxByte = 0x42u;
 
 SSFBFifoInit(&bf, SSF_BFIFO_255, bfBuffer, sizeof(bfBuffer));
 
-/* Typical ISR usage: check before putting */
 if (SSF_BFIFO_IS_FULL(&bf) == false)
 {
     SSF_BFIFO_PUT_BYTE(&bf, rxByte);
@@ -712,7 +709,6 @@ uint8_t b;
 SSFBFifoInit(&bf, SSF_BFIFO_255, bfBuffer, sizeof(bfBuffer));
 SSF_BFIFO_PUT_BYTE(&bf, rxByte);
 
-/* Typical main-loop usage: check before getting */
 if (SSF_BFIFO_IS_EMPTY(&bf) == false)
 {
     SSF_BFIFO_GET_BYTE(&bf, b);

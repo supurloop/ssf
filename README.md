@@ -89,12 +89,12 @@ RTOSes introduce significant complexity, and in particular a dizzying amount of 
 
 That said this framework can run perfectly fine with an RTOS, Windows, or Linux, so long as some precautions are taken.
 
-Except for the finite state machine and heap modules, all interfaces are reentrant.
+Except for the finite state machine, RTC, and heap modules, all interfaces are reentrant.
 This means that calls into those interfaces from different execution contexts will not interfere with each other.
 
 For example, you can have linked list object A in task 1 and linked list object B in task 2 and they will be managed independently and correctly, so long as they are only accessed from the context of their respective task.
 
-To properly run the finite state machine framework in a multi-threaded system SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT must be enabled and synchronization macros must be implemented. For more details see below.
+To ensure safe operation of the non-renetrant modules in a multi-threaded system SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT must be enabled and synchronization macros must be implemented.
 
 ### Deinitialization
 

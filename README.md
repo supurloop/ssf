@@ -2,7 +2,7 @@
 
 Small System Framework
 
-A C source code library of production ready functionality for small memory embedded systems.
+An easily portable C source code library of production ready functionality for small memory embedded systems.
 
 ## Overview
 
@@ -58,7 +58,7 @@ The Windows, Linux, and Mac OS builds are setup to output all compiler warnings.
 
 For other platforms there are only a few essential tasks that must be completed:
 
--   Copy all the SSF C and H source files, except main.c, into your project sources and add them to your build environment.
+-   Copy the top level source files except main.c and some or all of the submodules into your project sources and add them to your build environment.
 -   In ssfport.h make sure SSF_TICKS_PER_SEC is set to the number of system ticks per second on your platform.
 -   Map SSFPortGetTick64() to an existing function that returns the number of system ticks since boot, or
     implement SSFPortGetTick64() in ssfport.c if a simple mapping is not possible.
@@ -66,7 +66,7 @@ For other platforms there are only a few essential tasks that must be completed:
 -   Run the unit tests for the modules you intend to use.
 
 Only a few modules in the framework use system ticks, so you can stub out SSFPortGetTick64() if it is not needed.
-When the finite state machine framework runs in a multi-threaded environment some OS synchronization primitives must be implemented.
+If the framework runs in a multi-threaded environment and uses non-reentrant modules define SSF_CONFIG_ENABLE_THREAD_SUPPORT and implement the OS synchronization primitives.
 
 ### SSFPortAssert()
 

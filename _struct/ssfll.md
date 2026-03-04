@@ -1,236 +1,801 @@
-# ssfll — Linked List
+# ssfll — Linked List Interface
 
-[Back to Data Structures README](README.md) | [Back to ssf README](../README.md)
+[SSF](../README.md) | [Data Structures](README.md)
 
 Doubly-linked list supporting FIFO, stack, and arbitrary-position insert/remove operations.
 
-## Configuration
+The key to using the linked list is to embed an `SSFLLItem_t` as the **first** field of any
+struct you want to track. The API casts between `SSFLLItem_t *` and your struct pointer,
+allowing any struct to participate in the list without separate allocation.
+
+[Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference) | [Examples](#examples)
+
+<a id="dependencies"></a>
+
+## [↑](#ssfll--linked-list-interface) Dependencies
+
+- [`ssfport.h`](../ssfport.h)
+
+<a id="notes"></a>
+
+## [↑](#ssfll--linked-list-interface) Notes
+
+- `SSFLLItem_t` must be the **first** field of any struct added to a list.
+- An item already in one list cannot be inserted into another list or the same list again;
+  attempting to do so triggers an assertion.
+- `SSFLLDeInit()` asserts if the list is not empty; remove all items before de-initializing.
+- `SSFLLInit()` asserts if the list is already initialized.
+- `SSF_LL_PUT()` inserts `inItem` **after** `locItem`. Pass `NULL` as `locItem` to insert at head.
+- `SSF_LL_GET()` removes `locItem` itself from the list.
+
+<a id="configuration"></a>
+
+## [↑](#ssfll--linked-list-interface) Configuration
 
 This module has no compile-time configuration options in `ssfoptions.h`.
 
-## API Summary
+<a id="api-summary"></a>
 
-| Function / Macro | Description |
-|-----------------|-------------|
-| `SSFLLInit(ll, maxSize)` | Initialize a linked list with a maximum item count |
-| `SSFLLDeInit(ll)` | De-initialize an empty linked list |
-| `SSFLLIsInited(ll)` | Returns true if the list is initialized |
-| `SSFLLPutItem(ll, inItem, loc, locItem)` | Insert an item at a specified location |
-| `SSFLLGetItem(ll, outItem, loc, locItem)` | Remove and return an item from a specified location |
-| `SSFLLIsEmpty(ll)` | Returns true if the list contains no items |
-| `SSFLLIsFull(ll)` | Returns true if the list has reached its maximum item count |
-| `SSFLLSize(ll)` | Returns the maximum item count |
-| `SSFLLLen(ll)` | Returns the current item count |
-| `SSFLLUnused(ll)` | Returns the number of additional items that can be added |
-| `SSF_LL_STACK_PUSH(ll, item)` | Macro: push item onto head (LIFO) |
-| `SSF_LL_STACK_POP(ll, item)` | Macro: pop item from head (LIFO) |
-| `SSF_LL_FIFO_PUSH(ll, item)` | Macro: enqueue item at head |
-| `SSF_LL_FIFO_POP(ll, item)` | Macro: dequeue item from tail |
-| `SSF_LL_PUT(ll, inItem, locItem)` | Macro: insert item at position of `locItem` |
-| `SSF_LL_GET(ll, outItem, locItem)` | Macro: remove item at position of `locItem` |
-| `SSF_LL_HEAD(ll)` | Macro: pointer to the head item (or `NULL` if empty) |
-| `SSF_LL_TAIL(ll)` | Macro: pointer to the tail item (or `NULL` if empty) |
-| `SSF_LL_NEXT_ITEM(item)` | Macro: pointer to the next item in the list |
-| `SSF_LL_PREV_ITEM(item)` | Macro: pointer to the previous item in the list |
+## [↑](#ssfll--linked-list-interface) API Summary
 
-## Function Reference
+### Definitions
 
-### `SSFLLInit`
+| Symbol | Kind | Description |
+|--------|------|-------------|
+| <a id="type-ssfllitem-t"></a>`SSFLLItem_t` | Struct | List item handle; must be the **first** field of any struct tracked by the list. Do not access fields directly. |
+| <a id="type-ssfll-t"></a>`SSFLL_t` | Struct | List instance; pass by pointer to all API functions. Do not access fields directly. |
+| <a id="type-ssf-ll-loc-t"></a>`SSF_LL_LOC_t` | Enum | Insertion/removal location selector |
+| `SSF_LL_LOC_HEAD` | Constant | Operate on the head of the list |
+| `SSF_LL_LOC_TAIL` | Constant | Operate on the tail of the list |
+| `SSF_LL_LOC_ITEM` | Constant | Operate relative to a specific item (`locItem`) |
+
+### Functions
+
+| | Function / Macro | Description |
+|---|-----------------|-------------|
+| [e.g.](#ex-init) | [`SSFLLInit(ll, maxSize)`](#ssfllinit) | Initialize a linked list |
+| [e.g.](#ex-deinit) | [`SSFLLDeInit(ll)`](#ssflldeinit) | De-initialize an empty linked list |
+| [e.g.](#ex-isinited) | [`SSFLLIsInited(ll)`](#ssfllisinited) | Returns true if the list is initialized |
+| [e.g.](#ex-putitem) | [`SSFLLPutItem(ll, inItem, loc, locItem)`](#ssfllputitem) | Insert an item at a specified location |
+| [e.g.](#ex-getitem) | [`SSFLLGetItem(ll, outItem, loc, locItem)`](#ssfllgetitem) | Remove and return an item from a specified location |
+| [e.g.](#ex-isempty) | [`SSFLLIsEmpty(ll)`](#ssfllisempty) | Returns true if the list contains no items |
+| [e.g.](#ex-isfull) | [`SSFLLIsFull(ll)`](#ssfllisfull) | Returns true if the list has reached its maximum item count |
+| [e.g.](#ex-size) | [`SSFLLSize(ll)`](#ssfllsize) | Returns the maximum item count |
+| [e.g.](#ex-len) | [`SSFLLLen(ll)`](#ssflllen) | Returns the current item count |
+| [e.g.](#ex-unused) | [`SSFLLUnused(ll)`](#ssfllunused) | Returns the number of additional items that can be added |
+| [e.g.](#ex-macro-stack-push) | [`SSF_LL_STACK_PUSH(ll, inItem)`](#ssf-ll-stack-push) | Macro: push item onto head (LIFO) |
+| [e.g.](#ex-macro-stack-pop) | [`SSF_LL_STACK_POP(ll, outItem)`](#ssf-ll-stack-pop) | Macro: pop item from head (LIFO) |
+| [e.g.](#ex-macro-fifo-push) | [`SSF_LL_FIFO_PUSH(ll, inItem)`](#ssf-ll-fifo-push) | Macro: enqueue item at head |
+| [e.g.](#ex-macro-fifo-pop) | [`SSF_LL_FIFO_POP(ll, outItem)`](#ssf-ll-fifo-pop) | Macro: dequeue item from tail |
+| [e.g.](#ex-macro-put) | [`SSF_LL_PUT(ll, inItem, locItem)`](#ssf-ll-put) | Macro: insert `inItem` after `locItem` |
+| [e.g.](#ex-macro-get) | [`SSF_LL_GET(ll, outItem, locItem)`](#ssf-ll-get) | Macro: remove `locItem` from the list |
+| [e.g.](#ex-macro-head) | [`SSF_LL_HEAD(ll)`](#ssf-ll-head) | Macro: pointer to the head item (`NULL` if empty) |
+| [e.g.](#ex-macro-tail) | [`SSF_LL_TAIL(ll)`](#ssf-ll-tail) | Macro: pointer to the tail item (`NULL` if empty) |
+| [e.g.](#ex-macro-next-item) | [`SSF_LL_NEXT_ITEM(item)`](#ssf-ll-next-item) | Macro: pointer to the next item (`NULL` if at tail) |
+| [e.g.](#ex-macro-prev-item) | [`SSF_LL_PREV_ITEM(item)`](#ssf-ll-prev-item) | Macro: pointer to the previous item (`NULL` if at head) |
+
+<a id="function-reference"></a>
+
+## [↑](#ssfll--linked-list-interface) Function Reference
+
+<a id="ssfllinit"></a>
+
+### [↑](#ssfll--linked-list-interface) [`SSFLLInit()`](#ex-init)
 
 ```c
 void SSFLLInit(SSFLL_t *ll, uint32_t maxSize);
 ```
 
-Initializes a linked list. The `maxSize` parameter sets an upper bound on the number of items
-the list may hold; `SSFLLIsFull()` returns `true` when `maxSize` items are present.
+Initializes a linked list. `maxSize` sets an upper bound on the number of items the list may
+hold; `SSFLLIsFull()` returns `true` when `maxSize` items are present. The list must not already
+be initialized; asserting otherwise.
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
-| `ll` | out | `SSFLL_t *` | Pointer to the linked list structure to initialize. Must not be `NULL`. |
-| `maxSize` | in | `uint32_t` | Maximum number of items the list may hold. Pass `UINT32_MAX` for an effectively unlimited list. |
+| `ll` | out | [`SSFLL_t *`](#type-ssfll-t) | Pointer to the list structure to initialize. Must not be `NULL`. Must not already be initialized. |
+| `maxSize` | in | `uint32_t` | Maximum number of items the list may hold. Must be greater than `0`. Pass `UINT32_MAX` for an effectively unlimited list. |
 
 **Returns:** Nothing.
 
 ---
 
-### `SSFLLDeInit`
+<a id="ssflldeinit"></a>
+
+### [↑](#ssfll--linked-list-interface) [`SSFLLDeInit()`](#ex-deinit)
 
 ```c
 void SSFLLDeInit(SSFLL_t *ll);
 ```
 
 De-initializes an empty linked list, clearing its internal magic marker. The list must be empty
-before calling this function; asserting otherwise.
+before calling; asserting otherwise.
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
-| `ll` | in-out | `SSFLL_t *` | Pointer to an initialized, empty linked list. Must not be `NULL`. |
+| `ll` | in-out | [`SSFLL_t *`](#type-ssfll-t) | Pointer to an initialized, empty linked list. Must not be `NULL`. |
 
 **Returns:** Nothing.
 
 ---
 
-### `SSFLLIsInited`
+<a id="ssfllisinited"></a>
+
+### [↑](#ssfll--linked-list-interface) [`SSFLLIsInited()`](#ex-isinited)
 
 ```c
 bool SSFLLIsInited(SSFLL_t *ll);
 ```
 
-Checks whether a linked list has been initialized.
+Checks whether a linked list has been initialized. Safe to call before `SSFLLInit()` on a
+zero-initialized struct to test readiness.
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
-| `ll` | in | `SSFLL_t *` | Pointer to the linked list to check. Must not be `NULL`. |
+| `ll` | in | [`SSFLL_t *`](#type-ssfll-t) | Pointer to the linked list to check. Must not be `NULL`. |
 
 **Returns:** `true` if the list is initialized; `false` otherwise.
 
 ---
 
-### `SSFLLPutItem`
+<a id="ssfllputitem"></a>
+
+### [↑](#ssfll--linked-list-interface) [`SSFLLPutItem()`](#ex-putitem)
 
 ```c
 void SSFLLPutItem(SSFLL_t *ll, SSFLLItem_t *inItem, SSF_LL_LOC_t loc, SSFLLItem_t *locItem);
 ```
 
 Inserts `inItem` into the list at the position specified by `loc`. The item must not already be
-in any list; asserting otherwise. Prefer the convenience macros for common use cases.
+in any list; asserting otherwise. The list must not be full; asserting otherwise. Prefer the
+convenience macros for common use cases.
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
-| `ll` | in-out | `SSFLL_t *` | Pointer to an initialized linked list. Must not be `NULL`. Must not be full. |
-| `inItem` | in | `SSFLLItem_t *` | Pointer to the item to insert. Must not be `NULL`. Must not currently be in any list. Must be the first field of the caller's struct. |
-| `loc` | in | `SSF_LL_LOC_t` | Insertion location: `SSF_LL_LOC_HEAD` (before all items), `SSF_LL_LOC_TAIL` (after all items), or `SSF_LL_LOC_ITEM` (before `locItem`). |
-| `locItem` | in | `SSFLLItem_t *` | Reference item used when `loc == SSF_LL_LOC_ITEM`. The new item is inserted before this item. Pass `NULL` for head/tail insertions. |
+| `ll` | in-out | [`SSFLL_t *`](#type-ssfll-t) | Pointer to an initialized linked list. Must not be `NULL`. Must not be full. |
+| `inItem` | in | [`SSFLLItem_t *`](#type-ssfllitem-t) | Pointer to the item to insert. Must not be `NULL`. Must not currently be in any list. Must be the first field of the caller's struct. |
+| `loc` | in | [`SSF_LL_LOC_t`](#type-ssf-ll-loc-t) | Insertion location: `SSF_LL_LOC_HEAD` inserts before all items; `SSF_LL_LOC_TAIL` inserts after all items; `SSF_LL_LOC_ITEM` inserts after `locItem` (`NULL` locItem inserts at head). |
+| `locItem` | in | [`SSFLLItem_t *`](#type-ssfllitem-t) | Reference item when `loc == SSF_LL_LOC_ITEM`; `inItem` is inserted after this item. Must be `NULL` for `SSF_LL_LOC_HEAD` and `SSF_LL_LOC_TAIL`. |
 
 **Returns:** Nothing.
 
 ---
 
-### `SSFLLGetItem`
+<a id="ssfllgetitem"></a>
+
+### [↑](#ssfll--linked-list-interface) [`SSFLLGetItem()`](#ex-getitem)
 
 ```c
 bool SSFLLGetItem(SSFLL_t *ll, SSFLLItem_t **outItem, SSF_LL_LOC_t loc, SSFLLItem_t *locItem);
 ```
 
-Removes an item from the list at the position specified by `loc` and returns a pointer to it.
-The caller is responsible for the removed item's lifetime.
+Removes an item from the list at the position specified by `loc` and writes a pointer to it in
+`*outItem`. The caller is responsible for the removed item's lifetime.
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
-| `ll` | in-out | `SSFLL_t *` | Pointer to an initialized linked list. Must not be `NULL`. |
-| `outItem` | out | `SSFLLItem_t **` | Receives a pointer to the removed item. Must not be `NULL`. |
-| `loc` | in | `SSF_LL_LOC_t` | Removal location: `SSF_LL_LOC_HEAD`, `SSF_LL_LOC_TAIL`, or `SSF_LL_LOC_ITEM`. |
-| `locItem` | in | `SSFLLItem_t *` | The specific item to remove when `loc == SSF_LL_LOC_ITEM`. Pass `NULL` for head/tail operations. |
+| `ll` | in-out | [`SSFLL_t *`](#type-ssfll-t) | Pointer to an initialized linked list. Must not be `NULL`. |
+| `outItem` | out | [`SSFLLItem_t **`](#type-ssfllitem-t) | Receives a pointer to the removed item on success. Must not be `NULL`. |
+| `loc` | in | [`SSF_LL_LOC_t`](#type-ssf-ll-loc-t) | Removal location: `SSF_LL_LOC_HEAD` removes the head item; `SSF_LL_LOC_TAIL` removes the tail item; `SSF_LL_LOC_ITEM` removes `locItem` specifically. |
+| `locItem` | in | [`SSFLLItem_t *`](#type-ssfllitem-t) | The specific item to remove when `loc == SSF_LL_LOC_ITEM`. Must not be `NULL` when using `SSF_LL_LOC_ITEM`. Must be `NULL` for `SSF_LL_LOC_HEAD` and `SSF_LL_LOC_TAIL`. |
 
 **Returns:** `true` if an item was removed and written to `*outItem`; `false` if the list is empty.
 
 ---
 
-### `SSFLLIsEmpty` / `SSFLLIsFull`
+<a id="ssfllisempty"></a>
+
+### [↑](#ssfll--linked-list-interface) [`SSFLLIsEmpty()`](#ex-isempty)
 
 ```c
 bool SSFLLIsEmpty(const SSFLL_t *ll);
+```
+
+Returns `true` if the list contains no items.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `ll` | in | [`const SSFLL_t *`](#type-ssfll-t) | Pointer to an initialized linked list. Must not be `NULL`. |
+
+**Returns:** `true` if the list is empty; `false` otherwise.
+
+---
+
+<a id="ssfllisfull"></a>
+
+### [↑](#ssfll--linked-list-interface) [`SSFLLIsFull()`](#ex-isfull)
+
+```c
 bool SSFLLIsFull(const SSFLL_t *ll);
 ```
 
-State query functions.
+Returns `true` if the list contains `maxSize` items and no more can be inserted.
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
-| `ll` | in | `const SSFLL_t *` | Pointer to an initialized linked list. Must not be `NULL`. |
+| `ll` | in | [`const SSFLL_t *`](#type-ssfll-t) | Pointer to an initialized linked list. Must not be `NULL`. |
 
-**`SSFLLIsEmpty` returns:** `true` if the list contains no items.
-
-**`SSFLLIsFull` returns:** `true` if the list contains `maxSize` items.
+**Returns:** `true` if the list is full; `false` otherwise.
 
 ---
 
-### `SSFLLSize` / `SSFLLLen` / `SSFLLUnused`
+<a id="ssfllsize"></a>
+
+### [↑](#ssfll--linked-list-interface) [`SSFLLSize()`](#ex-size)
 
 ```c
 uint32_t SSFLLSize(const SSFLL_t *ll);
-uint32_t SSFLLLen(const SSFLL_t *ll);
-uint32_t SSFLLUnused(const SSFLL_t *ll);
 ```
 
-Capacity and occupancy queries.
+Returns the maximum number of items the list can hold.
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
-| `ll` | in | `const SSFLL_t *` | Pointer to an initialized linked list. Must not be `NULL`. |
+| `ll` | in | [`const SSFLL_t *`](#type-ssfll-t) | Pointer to an initialized linked list. Must not be `NULL`. |
 
-**`SSFLLSize` returns:** The `maxSize` value passed to `SSFLLInit`.
-
-**`SSFLLLen` returns:** The current number of items in the list.
-
-**`SSFLLUnused` returns:** `Size - Len`, the number of additional items that can be inserted.
+**Returns:** The `maxSize` value passed to `SSFLLInit()`.
 
 ---
 
-### Convenience Macros
+<a id="ssflllen"></a>
+
+### [↑](#ssfll--linked-list-interface) [`SSFLLLen()`](#ex-len)
 
 ```c
-#define SSF_LL_STACK_PUSH(ll, inItem) SSFLLPutItem(ll, (SSFLLItem_t *)inItem, SSF_LL_LOC_HEAD, NULL)
-#define SSF_LL_STACK_POP(ll, outItem) SSFLLGetItem(ll, (SSFLLItem_t **)outItem, SSF_LL_LOC_HEAD, NULL)
-#define SSF_LL_FIFO_PUSH(ll, inItem)  SSFLLPutItem(ll, (SSFLLItem_t *)inItem, SSF_LL_LOC_HEAD, NULL)
-#define SSF_LL_FIFO_POP(ll, outItem)  SSFLLGetItem(ll, (SSFLLItem_t **)outItem, SSF_LL_LOC_TAIL, NULL)
-#define SSF_LL_PUT(ll, inItem, locItem) \
-    SSFLLPutItem(ll, (SSFLLItem_t *)inItem, SSF_LL_LOC_ITEM, (SSFLLItem_t *)locItem)
-#define SSF_LL_GET(ll, outItem, locItem) \
-    SSFLLGetItem(ll, (SSFLLItem_t **)outItem, SSF_LL_LOC_ITEM, (SSFLLItem_t *)locItem)
-#define SSF_LL_HEAD(ll)            ((ll)->head)
-#define SSF_LL_TAIL(ll)            ((ll)->tail)
-#define SSF_LL_NEXT_ITEM(item)     ((item)->next)
-#define SSF_LL_PREV_ITEM(item)     ((item)->prev)
+uint32_t SSFLLLen(const SSFLL_t *ll);
 ```
 
-`SSF_LL_STACK_PUSH/POP` operate on the head (LIFO). `SSF_LL_FIFO_PUSH` inserts at the head;
-`SSF_LL_FIFO_POP` removes from the tail (FIFO order). `SSF_LL_PUT/GET` operate on a specific
-item by position. The traversal macros (`HEAD`, `TAIL`, `NEXT_ITEM`, `PREV_ITEM`) provide
-direct field access for iteration.
+Returns the current number of items in the list.
 
-## Usage
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `ll` | in | [`const SSFLL_t *`](#type-ssfll-t) | Pointer to an initialized linked list. Must not be `NULL`. |
 
-The key to using the linked list is to place an `SSFLLItem_t` named `item` at the top of any
-struct you want to track. The linked list interface casts between `SSFLLItem_t *` and your struct
-pointer.
+**Returns:** Current item count.
+
+---
+
+<a id="ssfllunused"></a>
+
+### [↑](#ssfll--linked-list-interface) [`SSFLLUnused()`](#ex-unused)
 
 ```c
-#define MYLL_MAX_ITEMS (3u)
+uint32_t SSFLLUnused(const SSFLL_t *ll);
+```
 
+Returns the number of additional items that can be inserted before the list is full (`Size - Len`).
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `ll` | in | [`const SSFLL_t *`](#type-ssfll-t) | Pointer to an initialized linked list. Must not be `NULL`. |
+
+**Returns:** Number of free slots remaining (`Size - Len`).
+
+---
+
+<a id="convenience-macros"></a>
+
+### [↑](#ssfll--linked-list-interface) [Convenience Macros](#ex-macro-stack-push)
+
+Macros that wrap `SSFLLPutItem()` and `SSFLLGetItem()` with fixed location arguments, plus
+direct field-access macros for list traversal. Use these in preference to calling
+`SSFLLPutItem()` / `SSFLLGetItem()` directly for common patterns.
+
+---
+
+<a id="ssf-ll-stack-push"></a>
+
+#### [↑](#ssfll--linked-list-interface) [`SSF_LL_STACK_PUSH()`](#ex-macro-stack-push)
+
+```c
+#define SSF_LL_STACK_PUSH(ll, inItem) \
+    SSFLLPutItem(ll, (SSFLLItem_t *)inItem, SSF_LL_LOC_HEAD, NULL)
+```
+
+Inserts `inItem` at the head of the list. Pair with `SSF_LL_STACK_POP()` for LIFO (stack)
+behavior.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `ll` | in-out | [`SSFLL_t *`](#type-ssfll-t) | Pointer to an initialized, non-full list. Must not be `NULL`. |
+| `inItem` | in | `void *` | Pointer to a struct whose first field is [`SSFLLItem_t`](#type-ssfllitem-t). Must not be `NULL`. Must not be in any list. |
+
+**Returns:** Nothing.
+
+---
+
+<a id="ssf-ll-stack-pop"></a>
+
+#### [↑](#ssfll--linked-list-interface) [`SSF_LL_STACK_POP()`](#ex-macro-stack-pop)
+
+```c
+#define SSF_LL_STACK_POP(ll, outItem) \
+    SSFLLGetItem(ll, (SSFLLItem_t **)outItem, SSF_LL_LOC_HEAD, NULL)
+```
+
+Removes and returns the head item. Pair with `SSF_LL_STACK_PUSH()` for LIFO (stack) behavior.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `ll` | in-out | [`SSFLL_t *`](#type-ssfll-t) | Pointer to an initialized list. Must not be `NULL`. |
+| `outItem` | out | `void **` | Pointer to a struct pointer whose first field is [`SSFLLItem_t`](#type-ssfllitem-t). Receives the removed item on success. |
+
+**Returns:** `true` if an item was removed; `false` if the list is empty.
+
+---
+
+<a id="ssf-ll-fifo-push"></a>
+
+#### [↑](#ssfll--linked-list-interface) [`SSF_LL_FIFO_PUSH()`](#ex-macro-fifo-push)
+
+```c
+#define SSF_LL_FIFO_PUSH(ll, inItem) \
+    SSFLLPutItem(ll, (SSFLLItem_t *)inItem, SSF_LL_LOC_HEAD, NULL)
+```
+
+Inserts `inItem` at the head of the list. Pair with `SSF_LL_FIFO_POP()` for FIFO (queue)
+behavior; items pushed at the head are dequeued from the tail in insertion order.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `ll` | in-out | [`SSFLL_t *`](#type-ssfll-t) | Pointer to an initialized, non-full list. Must not be `NULL`. |
+| `inItem` | in | `void *` | Pointer to a struct whose first field is [`SSFLLItem_t`](#type-ssfllitem-t). Must not be `NULL`. Must not be in any list. |
+
+**Returns:** Nothing.
+
+---
+
+<a id="ssf-ll-fifo-pop"></a>
+
+#### [↑](#ssfll--linked-list-interface) [`SSF_LL_FIFO_POP()`](#ex-macro-fifo-pop)
+
+```c
+#define SSF_LL_FIFO_POP(ll, outItem) \
+    SSFLLGetItem(ll, (SSFLLItem_t **)outItem, SSF_LL_LOC_TAIL, NULL)
+```
+
+Removes and returns the tail item. Pair with `SSF_LL_FIFO_PUSH()` for FIFO (queue) behavior.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `ll` | in-out | [`SSFLL_t *`](#type-ssfll-t) | Pointer to an initialized list. Must not be `NULL`. |
+| `outItem` | out | `void **` | Pointer to a struct pointer whose first field is [`SSFLLItem_t`](#type-ssfllitem-t). Receives the removed item on success. |
+
+**Returns:** `true` if an item was removed; `false` if the list is empty.
+
+---
+
+<a id="ssf-ll-put"></a>
+
+#### [↑](#ssfll--linked-list-interface) [`SSF_LL_PUT()`](#ex-macro-put)
+
+```c
+#define SSF_LL_PUT(ll, inItem, locItem) \
+    SSFLLPutItem(ll, (SSFLLItem_t *)inItem, SSF_LL_LOC_ITEM, (SSFLLItem_t *)locItem)
+```
+
+Inserts `inItem` immediately after `locItem` in the list. Pass `NULL` as `locItem` to insert at
+the head.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `ll` | in-out | [`SSFLL_t *`](#type-ssfll-t) | Pointer to an initialized, non-full list. Must not be `NULL`. |
+| `inItem` | in | `void *` | Pointer to a struct whose first field is [`SSFLLItem_t`](#type-ssfllitem-t). Must not be `NULL`. Must not be in any list. |
+| `locItem` | in | `void *` | Item after which `inItem` is inserted. Pass `NULL` to insert at head. If not `NULL`, must be in `ll`. |
+
+**Returns:** Nothing.
+
+---
+
+<a id="ssf-ll-get"></a>
+
+#### [↑](#ssfll--linked-list-interface) [`SSF_LL_GET()`](#ex-macro-get)
+
+```c
+#define SSF_LL_GET(ll, outItem, locItem) \
+    SSFLLGetItem(ll, (SSFLLItem_t **)outItem, SSF_LL_LOC_ITEM, (SSFLLItem_t *)locItem)
+```
+
+Removes `locItem` from the list and writes a pointer to it in `*outItem`.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `ll` | in-out | [`SSFLL_t *`](#type-ssfll-t) | Pointer to an initialized list. Must not be `NULL`. |
+| `outItem` | out | `void **` | Pointer to a struct pointer whose first field is [`SSFLLItem_t`](#type-ssfllitem-t). Receives `locItem` on success. Must not be `NULL`. |
+| `locItem` | in | `void *` | The specific item to remove. Must not be `NULL`. Must be in `ll`. |
+
+**Returns:** `true` if an item was removed and written to `*outItem`; `false` if the list is empty.
+
+---
+
+<a id="ssf-ll-head"></a>
+
+#### [↑](#ssfll--linked-list-interface) [`SSF_LL_HEAD()`](#ex-macro-head)
+
+```c
+#define SSF_LL_HEAD(ll) ((ll)->head)
+```
+
+Returns a pointer to the head item without removing it. Returns `NULL` if the list is empty.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `ll` | in | [`SSFLL_t *`](#type-ssfll-t) | Pointer to an initialized list. Must not be `NULL`. |
+
+**Returns:** [`SSFLLItem_t *`](#type-ssfllitem-t) pointing to the head item, or `NULL` if empty.
+
+---
+
+<a id="ssf-ll-tail"></a>
+
+#### [↑](#ssfll--linked-list-interface) [`SSF_LL_TAIL()`](#ex-macro-tail)
+
+```c
+#define SSF_LL_TAIL(ll) ((ll)->tail)
+```
+
+Returns a pointer to the tail item without removing it. Returns `NULL` if the list is empty.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `ll` | in | [`SSFLL_t *`](#type-ssfll-t) | Pointer to an initialized list. Must not be `NULL`. |
+
+**Returns:** [`SSFLLItem_t *`](#type-ssfllitem-t) pointing to the tail item, or `NULL` if empty.
+
+---
+
+<a id="ssf-ll-next-item"></a>
+
+#### [↑](#ssfll--linked-list-interface) [`SSF_LL_NEXT_ITEM()`](#ex-macro-next-item)
+
+```c
+#define SSF_LL_NEXT_ITEM(item) ((item)->next)
+```
+
+Returns a pointer to the item that follows `item` in the list. Used for forward (head-to-tail)
+traversal. Returns `NULL` if `item` is the tail.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `item` | in | [`SSFLLItem_t *`](#type-ssfllitem-t) | Pointer to an item currently in the list. Must not be `NULL`. |
+
+**Returns:** [`SSFLLItem_t *`](#type-ssfllitem-t) pointing to the next item, or `NULL` if `item` is the tail.
+
+---
+
+<a id="ssf-ll-prev-item"></a>
+
+#### [↑](#ssfll--linked-list-interface) [`SSF_LL_PREV_ITEM()`](#ex-macro-prev-item)
+
+```c
+#define SSF_LL_PREV_ITEM(item) ((item)->prev)
+```
+
+Returns a pointer to the item that precedes `item` in the list. Used for backward (tail-to-head)
+traversal. Returns `NULL` if `item` is the head.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `item` | in | [`SSFLLItem_t *`](#type-ssfllitem-t) | Pointer to an item currently in the list. Must not be `NULL`. |
+
+**Returns:** [`SSFLLItem_t *`](#type-ssfllitem-t) pointing to the previous item, or `NULL` if `item` is the head.
+
+<a id="examples"></a>
+
+## [↑](#ssfll--linked-list-interface) Examples
+
+All examples use the following struct definition:
+
+```c
 typedef struct
 {
     SSFLLItem_t item;   /* Must be first field */
-    uint32_t mydata;
-} SSFLLMyData_t;
-
-SSFLL_t myll;
-SSFLLMyData_t *item;
-
-SSFLLInit(&myll, MYLL_MAX_ITEMS);
-
-/* Push items onto a stack */
-for (uint32_t i = 0; i < MYLL_MAX_ITEMS; i++)
-{
-    item = (SSFLLMyData_t *)malloc(sizeof(SSFLLMyData_t));
-    SSF_ASSERT(item != NULL);
-    item->mydata = i + 100;
-    SSF_LL_STACK_PUSH(&myll, item);
-}
-
-/* Pop items from the stack (LIFO order) */
-if (SSF_LL_STACK_POP(&myll, &item)) { /* item->mydata == 102 */ free(item); }
-if (SSF_LL_STACK_POP(&myll, &item)) { /* item->mydata == 101 */ free(item); }
-if (SSF_LL_STACK_POP(&myll, &item)) { /* item->mydata == 100 */ free(item); }
+    uint32_t data;
+} MyItem_t;
 ```
 
-## Dependencies
+<a id="ex-init"></a>
 
-- `ssf/ssfport.h`
+### [↑](#ssfll--linked-list-interface) [SSFLLInit()](#ssfllinit)
 
-## Notes
+```c
+SSFLL_t ll;
 
-- `SSFLLItem_t` must be the **first** field of any struct added to a list.
-- An item already in one list cannot be added to another list; attempting to do so triggers an
-  assertion. This prevents list corruption and resource leaks.
-- `SSFLLIsFull()` returns true when the list contains `maxSize` items.
+SSFLLInit(&ll, 10u);
+/* ll is ready, capacity 10 items */
+```
+
+<a id="ex-deinit"></a>
+
+### [↑](#ssfll--linked-list-interface) [SSFLLDeInit()](#ssflldeinit)
+
+```c
+SSFLL_t ll;
+
+SSFLLInit(&ll, 10u);
+SSFLLDeInit(&ll);
+/* ll is no longer valid */
+```
+
+<a id="ex-isinited"></a>
+
+### [↑](#ssfll--linked-list-interface) [SSFLLIsInited()](#ssfllisinited)
+
+```c
+static SSFLL_t ll;   /* zero-initialized */
+
+SSFLLIsInited(&ll);   /* returns false */
+SSFLLInit(&ll, 10u);
+SSFLLIsInited(&ll);   /* returns true */
+SSFLLDeInit(&ll);
+SSFLLIsInited(&ll);   /* returns false */
+```
+
+<a id="ex-putitem"></a>
+
+### [↑](#ssfll--linked-list-interface) [SSFLLPutItem()](#ssfllputitem)
+
+```c
+SSFLL_t ll;
+MyItem_t a = {{0}, 0xA0u}, b = {{0}, 0xB0u}, c = {{0}, 0xC0u};
+
+SSFLLInit(&ll, 10u);
+SSFLLPutItem(&ll, (SSFLLItem_t *)&a, SSF_LL_LOC_HEAD, NULL); /* list: a */
+SSFLLPutItem(&ll, (SSFLLItem_t *)&b, SSF_LL_LOC_TAIL, NULL); /* list: a → b */
+SSFLLPutItem(&ll, (SSFLLItem_t *)&c, SSF_LL_LOC_ITEM,        /* list: a → c → b */
+             (SSFLLItem_t *)&a);
+```
+
+<a id="ex-getitem"></a>
+
+### [↑](#ssfll--linked-list-interface) [SSFLLGetItem()](#ssfllgetitem)
+
+```c
+SSFLL_t ll;
+MyItem_t a = {{0}, 0xA0u}, b = {{0}, 0xB0u};
+MyItem_t *out;
+
+SSFLLInit(&ll, 10u);
+SSFLLPutItem(&ll, (SSFLLItem_t *)&a, SSF_LL_LOC_TAIL, NULL); /* list: a */
+SSFLLPutItem(&ll, (SSFLLItem_t *)&b, SSF_LL_LOC_TAIL, NULL); /* list: a → b */
+
+if (SSFLLGetItem(&ll, (SSFLLItem_t **)&out, SSF_LL_LOC_HEAD, NULL))
+{
+    /* out == &a, out->data == 0xA0 */
+}
+if (SSFLLGetItem(&ll, (SSFLLItem_t **)&out, SSF_LL_LOC_ITEM,
+                 (SSFLLItem_t *)&b))
+{
+    /* out == &b, out->data == 0xB0 */
+}
+```
+
+<a id="ex-isempty"></a>
+
+### [↑](#ssfll--linked-list-interface) [SSFLLIsEmpty()](#ssfllisempty)
+
+```c
+SSFLL_t ll;
+MyItem_t a = {{0}, 1u};
+
+SSFLLInit(&ll, 10u);
+SSFLLIsEmpty(&ll);   /* returns true */
+
+SSFLLPutItem(&ll, (SSFLLItem_t *)&a, SSF_LL_LOC_HEAD, NULL);
+SSFLLIsEmpty(&ll);   /* returns false */
+```
+
+<a id="ex-isfull"></a>
+
+### [↑](#ssfll--linked-list-interface) [SSFLLIsFull()](#ssfllisfull)
+
+```c
+SSFLL_t ll;
+MyItem_t a = {{0}, 1u}, b = {{0}, 2u};
+
+SSFLLInit(&ll, 2u);
+SSFLLIsFull(&ll);   /* returns false */
+
+SSFLLPutItem(&ll, (SSFLLItem_t *)&a, SSF_LL_LOC_HEAD, NULL);
+SSFLLPutItem(&ll, (SSFLLItem_t *)&b, SSF_LL_LOC_HEAD, NULL);
+SSFLLIsFull(&ll);   /* returns true */
+```
+
+<a id="ex-size"></a>
+
+### [↑](#ssfll--linked-list-interface) [SSFLLSize()](#ssfllsize)
+
+```c
+SSFLL_t ll;
+
+SSFLLInit(&ll, 10u);
+SSFLLSize(&ll);   /* returns 10 */
+```
+
+<a id="ex-len"></a>
+
+### [↑](#ssfll--linked-list-interface) [SSFLLLen()](#ssflllen)
+
+```c
+SSFLL_t ll;
+MyItem_t a = {{0}, 1u}, b = {{0}, 2u};
+
+SSFLLInit(&ll, 10u);
+SSFLLPutItem(&ll, (SSFLLItem_t *)&a, SSF_LL_LOC_HEAD, NULL);
+SSFLLPutItem(&ll, (SSFLLItem_t *)&b, SSF_LL_LOC_HEAD, NULL);
+SSFLLLen(&ll);   /* returns 2 */
+```
+
+<a id="ex-unused"></a>
+
+### [↑](#ssfll--linked-list-interface) [SSFLLUnused()](#ssfllunused)
+
+```c
+SSFLL_t ll;
+MyItem_t a = {{0}, 1u};
+
+SSFLLInit(&ll, 10u);
+SSFLLPutItem(&ll, (SSFLLItem_t *)&a, SSF_LL_LOC_HEAD, NULL);
+SSFLLUnused(&ll);   /* returns 9 */
+```
+
+<a id="ex-macro-stack-push"></a>
+
+### [↑](#ssfll--linked-list-interface) [SSF_LL_STACK_PUSH()](#convenience-macros)
+
+```c
+SSFLL_t ll;
+MyItem_t a = {{0}, 1u}, b = {{0}, 2u};
+
+SSFLLInit(&ll, 10u);
+SSF_LL_STACK_PUSH(&ll, &a);   /* head: a */
+SSF_LL_STACK_PUSH(&ll, &b);   /* head: b → a */
+```
+
+<a id="ex-macro-stack-pop"></a>
+
+### [↑](#ssfll--linked-list-interface) [SSF_LL_STACK_POP()](#convenience-macros)
+
+```c
+SSFLL_t ll;
+MyItem_t a = {{0}, 1u}, b = {{0}, 2u};
+MyItem_t *out;
+
+SSFLLInit(&ll, 10u);
+SSF_LL_STACK_PUSH(&ll, &a);
+SSF_LL_STACK_PUSH(&ll, &b);         /* head: b → a */
+
+if (SSF_LL_STACK_POP(&ll, &out)) { /* out == &b (LIFO) */ }
+if (SSF_LL_STACK_POP(&ll, &out)) { /* out == &a */ }
+```
+
+<a id="ex-macro-fifo-push"></a>
+
+### [↑](#ssfll--linked-list-interface) [SSF_LL_FIFO_PUSH()](#convenience-macros)
+
+```c
+SSFLL_t ll;
+MyItem_t a = {{0}, 1u}, b = {{0}, 2u};
+
+SSFLLInit(&ll, 10u);
+SSF_LL_FIFO_PUSH(&ll, &a);   /* head: a */
+SSF_LL_FIFO_PUSH(&ll, &b);   /* head: b → a */
+```
+
+<a id="ex-macro-fifo-pop"></a>
+
+### [↑](#ssfll--linked-list-interface) [SSF_LL_FIFO_POP()](#convenience-macros)
+
+```c
+SSFLL_t ll;
+MyItem_t a = {{0}, 1u}, b = {{0}, 2u};
+MyItem_t *out;
+
+SSFLLInit(&ll, 10u);
+SSF_LL_FIFO_PUSH(&ll, &a);
+SSF_LL_FIFO_PUSH(&ll, &b);         /* head: b → a (tail) */
+
+if (SSF_LL_FIFO_POP(&ll, &out)) { /* out == &a (FIFO: first pushed, first popped) */ }
+if (SSF_LL_FIFO_POP(&ll, &out)) { /* out == &b */ }
+```
+
+<a id="ex-macro-put"></a>
+
+### [↑](#ssfll--linked-list-interface) [SSF_LL_PUT()](#convenience-macros)
+
+```c
+SSFLL_t ll;
+MyItem_t a = {{0}, 1u}, b = {{0}, 2u}, c = {{0}, 3u};
+
+SSFLLInit(&ll, 10u);
+SSF_LL_STACK_PUSH(&ll, &a);   /* list: a */
+SSF_LL_STACK_PUSH(&ll, &b);   /* list: b → a */
+SSF_LL_PUT(&ll, &c, &b);      /* inserts c after b: b → c → a */
+```
+
+<a id="ex-macro-get"></a>
+
+### [↑](#ssfll--linked-list-interface) [SSF_LL_GET()](#convenience-macros)
+
+```c
+SSFLL_t ll;
+MyItem_t a = {{0}, 1u}, b = {{0}, 2u};
+MyItem_t *out;
+
+SSFLLInit(&ll, 10u);
+SSF_LL_STACK_PUSH(&ll, &a);
+SSF_LL_STACK_PUSH(&ll, &b);   /* list: b → a */
+
+if (SSF_LL_GET(&ll, &out, &a)) { /* removes a, out == &a; list: b */ }
+```
+
+<a id="ex-macro-head"></a>
+
+### [↑](#ssfll--linked-list-interface) [SSF_LL_HEAD()](#convenience-macros)
+
+```c
+SSFLL_t ll;
+MyItem_t a = {{0}, 1u}, b = {{0}, 2u};
+
+SSFLLInit(&ll, 10u);
+SSF_LL_STACK_PUSH(&ll, &a);
+SSF_LL_STACK_PUSH(&ll, &b);   /* list: b → a */
+
+((MyItem_t *)SSF_LL_HEAD(&ll))->data;   /* == 2 (b is head) */
+```
+
+<a id="ex-macro-tail"></a>
+
+### [↑](#ssfll--linked-list-interface) [SSF_LL_TAIL()](#convenience-macros)
+
+```c
+SSFLL_t ll;
+MyItem_t a = {{0}, 1u}, b = {{0}, 2u};
+
+SSFLLInit(&ll, 10u);
+SSF_LL_STACK_PUSH(&ll, &a);
+SSF_LL_STACK_PUSH(&ll, &b);   /* list: b → a */
+
+((MyItem_t *)SSF_LL_TAIL(&ll))->data;   /* == 1 (a is tail) */
+```
+
+<a id="ex-macro-next-item"></a>
+
+### [↑](#ssfll--linked-list-interface) [SSF_LL_NEXT_ITEM()](#convenience-macros)
+
+```c
+SSFLL_t ll;
+MyItem_t a = {{0}, 1u}, b = {{0}, 2u}, c = {{0}, 3u};
+MyItem_t *cur;
+
+SSFLLInit(&ll, 10u);
+SSF_LL_FIFO_PUSH(&ll, &a);
+SSF_LL_FIFO_PUSH(&ll, &b);
+SSF_LL_FIFO_PUSH(&ll, &c);   /* head → tail: c → b → a */
+
+for (cur = (MyItem_t *)SSF_LL_HEAD(&ll); cur != NULL;
+     cur = (MyItem_t *)SSF_LL_NEXT_ITEM(&cur->item))
+{
+    /* cur->data: 3, then 2, then 1 */
+}
+```
+
+<a id="ex-macro-prev-item"></a>
+
+### [↑](#ssfll--linked-list-interface) [SSF_LL_PREV_ITEM()](#convenience-macros)
+
+```c
+SSFLL_t ll;
+MyItem_t a = {{0}, 1u}, b = {{0}, 2u}, c = {{0}, 3u};
+MyItem_t *cur;
+
+SSFLLInit(&ll, 10u);
+SSF_LL_FIFO_PUSH(&ll, &a);
+SSF_LL_FIFO_PUSH(&ll, &b);
+SSF_LL_FIFO_PUSH(&ll, &c);   /* head → tail: c → b → a */
+
+for (cur = (MyItem_t *)SSF_LL_TAIL(&ll); cur != NULL;
+     cur = (MyItem_t *)SSF_LL_PREV_ITEM(&cur->item))
+{
+    /* cur->data: 1, then 2, then 3 */
+}
+```

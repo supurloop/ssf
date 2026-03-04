@@ -1,97 +1,130 @@
 # ssfbase64 — Base64 Encoder/Decoder
 
-[Back to Codecs README](README.md) | [Back to ssf README](../README.md)
+[SSF](../README.md) | [Codecs](README.md)
 
-Base64 encoding and decoding interface.
+Encodes binary data as printable ASCII and decodes it back to binary using the standard Base64
+alphabet (`A–Z`, `a–z`, `0–9`, `+`, `/`) with `=` padding.
 
-## Configuration
+[Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference) | [Examples](#examples)
+
+<a id="dependencies"></a>
+
+## [↑](#ssfbase64--base64-encoderdecoder) Dependencies
+
+- [`ssfport.h`](../ssfport.h)
+- [`ssfoptions.h`](../ssfoptions.h)
+
+<a id="notes"></a>
+
+## [↑](#ssfbase64--base64-encoderdecoder) Notes
+
+- `in` must not be `NULL` for [`SSFBase64Encode()`](#ssfbase64encode); passing `NULL` asserts even
+  when `inLen` is `0`.
+- `outLen` must not be `NULL` for [`SSFBase64Decode()`](#ssfbase64decode); passing `NULL` asserts.
+- `inLenLim` passed to [`SSFBase64Decode()`](#ssfbase64decode) must be a multiple of `4`; any
+  other value returns `false` immediately.
+- On successful encode the output buffer is always null-terminated and padded to a multiple of 4
+  characters with `=`.
+- `outLen` may be `NULL` for [`SSFBase64Encode()`](#ssfbase64encode) when the encoded length is
+  not needed.
+
+<a id="configuration"></a>
+
+## [↑](#ssfbase64--base64-encoderdecoder) Configuration
 
 This module has no compile-time configuration options in `ssfoptions.h`.
 
-## API Summary
+<a id="api-summary"></a>
 
-| Function / Macro | Description |
-|-----------------|-------------|
-| `SSFBase64Encode(in, inLen, out, outSize, outLen)` | Encode binary data to a Base64 string |
-| `SSFBase64Decode(in, inLenLim, out, outSize, outLen)` | Decode a Base64 string to binary data |
+## [↑](#ssfbase64--base64-encoderdecoder) API Summary
 
-## Function Reference
+### Functions
 
-### `SSFBase64Encode`
+| | Function / Macro | Description |
+|---|-----------------|-------------|
+| [e.g.](#ex-encode) | [`SSFBase64Encode(in, inLen, out, outSize, outLen)`](#ssfbase64encode) | Encode binary data to a Base64 string |
+| [e.g.](#ex-decode) | [`SSFBase64Decode(in, inLenLim, out, outSize, outLen)`](#ssfbase64decode) | Decode a Base64 string to binary data |
+
+<a id="function-reference"></a>
+
+## [↑](#ssfbase64--base64-encoderdecoder) Function Reference
+
+<a id="ssfbase64encode"></a>
+
+### [↑](#ssfbase64--base64-encoderdecoder) [`SSFBase64Encode()`](#ex-encode)
 
 ```c
 bool SSFBase64Encode(const uint8_t *in, size_t inLen,
                      SSFCStrOut_t out, size_t outSize, size_t *outLen);
 ```
 
-Encodes a binary byte array as a null-terminated Base64 string. The output length is always a
-multiple of 4 characters (padded with `=`).
+Encodes a binary byte array as a null-terminated Base64 string. Output length is always a
+multiple of 4 characters padded with `=`.
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
-| `in` | in | `const uint8_t *` | Pointer to the binary data to encode. May be `NULL` only when `inLen` is `0`. |
+| `in` | in | `const uint8_t *` | Pointer to the binary data to encode. Must not be `NULL`. |
 | `inLen` | in | `size_t` | Number of bytes to encode from `in`. |
-| `out` | out | `char *` | Output buffer that receives the null-terminated Base64 string. Must not be `NULL`. |
-| `outSize` | in | `size_t` | Total allocated size of `out` in bytes, including space for the null terminator. Must be at least `((inLen + 2) / 3) * 4 + 1`. |
-| `outLen` | out (opt) | `size_t *` | If not `NULL`, receives the number of Base64 characters written (excluding null terminator). |
+| `out` | out | `SSFCStrOut_t` | Output buffer that receives the null-terminated Base64 string. Must not be `NULL`. |
+| `outSize` | in | `size_t` | Total allocated size of `out` in bytes, including the null terminator. Must be at least `((inLen + 2) / 3) * 4 + 1`. |
+| `outLen` | out (opt) | `size_t *` | If not `NULL`, receives the number of Base64 characters written, excluding the null terminator. |
 
 **Returns:** `true` if encoding succeeded; `false` if `outSize` is too small to hold the result.
 
 ---
 
-### `SSFBase64Decode`
+<a id="ssfbase64decode"></a>
+
+### [↑](#ssfbase64--base64-encoderdecoder) [`SSFBase64Decode()`](#ex-decode)
 
 ```c
 bool SSFBase64Decode(SSFCStrIn_t in, size_t inLenLim,
                      uint8_t *out, size_t outSize, size_t *outLen);
 ```
 
-Decodes a Base64-encoded string to binary bytes. The input is processed up to `inLenLim`
-characters or the first null terminator, whichever comes first.
+Decodes a Base64-encoded string to binary bytes. `inLenLim` must be a multiple of `4`; any other
+value returns `false` immediately.
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
-| `in` | in | `const char *` | Pointer to the null-terminated Base64 string to decode. Must not be `NULL`. Must contain only valid Base64 characters (`A-Z`, `a-z`, `0-9`, `+`, `/`, `=`). |
-| `inLenLim` | in | `size_t` | Maximum number of input characters to read. Processing stops at this limit or the first null terminator, whichever is reached first. |
+| `in` | in | `SSFCStrIn_t` | Pointer to the Base64 string to decode. Must not be `NULL`. |
+| `inLenLim` | in | `size_t` | Number of input characters to decode. Must be a multiple of `4`. |
 | `out` | out | `uint8_t *` | Output buffer that receives the decoded binary data. Must not be `NULL`. |
-| `outSize` | in | `size_t` | Total allocated size of `out` in bytes. Must be at least `(inLen / 4) * 3` bytes (before padding adjustment). |
-| `outLen` | out (opt) | `size_t *` | If not `NULL`, receives the number of decoded binary bytes written to `out`. |
+| `outSize` | in | `size_t` | Total allocated size of `out` in bytes. Must be sufficient to hold all decoded output. |
+| `outLen` | out | `size_t *` | Receives the number of decoded bytes written to `out`. Must not be `NULL`. |
 
-**Returns:** `true` if decoding succeeded; `false` if the input is not valid Base64 or `outSize` is too small.
+**Returns:** `true` if decoding succeeded; `false` if `inLenLim` is not a multiple of `4`, the
+input contains invalid Base64 characters, or `outSize` is too small.
 
-## Usage
+<a id="examples"></a>
 
-This interface allows you to encode a binary data stream into a Base64 string, or decode one back
-to binary. Both functions return `true` on success and `false` if the output buffer is too small.
+## [↑](#ssfbase64--base64-encoderdecoder) Examples
+
+<a id="ex-encode"></a>
+
+### [↑](#ssfbase64--base64-encoderdecoder) [SSFBase64Encode()](#ssfbase64encode)
 
 ```c
-char encodedStr[16];
-char decodedBin[16];
-uint8_t binOut[2];
-size_t binLen;
+uint8_t bin[] = {0x01u, 0x02u, 0x03u};
+char out[9];
+size_t outLen;
 
-/* Encode arbitrary binary data */
-if (SSFBase64Encode("a", 1, encodedStr, sizeof(encodedStr), NULL))
+if (SSFBase64Encode(bin, sizeof(bin), out, sizeof(out), &outLen))
 {
-    /* Encode successful */
-    printf("%s", encodedStr);
-    /* output is "YQ==" */
-}
-
-/* Decode Base64 string into binary data */
-if (SSFBase64Decode(encodedStr, strlen(encodedStr), decodedBin, sizeof(decodedBin), &binLen))
-{
-    /* Decode successful */
-    /* binLen == 1 */
-    /* decodedBin[0] == 'a' */
+    /* out == "AQID", outLen == 4 */
 }
 ```
 
-## Dependencies
+<a id="ex-decode"></a>
 
-- `ssf/ssfport.h`
+### [↑](#ssfbase64--base64-encoderdecoder) [SSFBase64Decode()](#ssfbase64decode)
 
-## Notes
+```c
+uint8_t out[3];
+size_t outLen;
 
-- Passing `NULL` for `outLen` is valid when the output length is not needed.
-- Output strings are always null-terminated on successful encode.
+if (SSFBase64Decode("AQID", 4u, out, sizeof(out), &outLen))
+{
+    /* outLen == 3, out[0..2] == {0x01, 0x02, 0x03} */
+}
+```

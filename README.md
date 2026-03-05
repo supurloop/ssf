@@ -2,11 +2,15 @@
 
 Small System Framework
 
-An easily portable C source code library of production ready functionality for small memory embedded systems.
+A hardened, easily portable, API consistent, C source code library of production ready functionality for small memory embedded systems.
+
+[Overview](#overview) | [Design Principles](#designprinciples) | [Porting](#porting) | [Interfaces](#interfaces) | [Conclusion](#conclusion)
+
+<a id="overview"></a>
 
 ## Overview
 
-This code framework was designed:
+This code framework was specifically designed:
 
 1. To run on embedded systems that have constrained program and data memories.
 2. To minimize the potential for common coding errors and immediately detect and report runtime errors.
@@ -14,17 +18,19 @@ This code framework was designed:
 Microprocessors with >4KB RAM and >32KB program memory should easily be able to utilize this framework.
 Portions of the framework will work on even smaller microcontrollers.
 
+<a id="designprinciples"></a>
+
 ## Design Principles
 
 ### No Dependencies 
 
-When you use the SSF, you just need the SSF and not a single other external dependency except for a few C standard library calls. Also no new type definitions for basic data types that only complicate your code base and cloud your mind; SSF uses <stdint.h> and <stdbool.h> types.
+When you use the SSF, you just need the SSF and not a single other external dependency except for a few C standard library calls. No new definitions for basic data types that complicate your code base and cloud your mind; SSF uses <stdint.h> and <stdbool.h> for basic data types.
 
 ### No Error Codes
 
 Too often API error codes are ignored in part or in whole, or improperly handled due to overloaded encodings (ex. <0=error, 0=ignored, >0=length)
 
-Either a SSF API call will always succeed (void return), or it will return a boolean: true on success and false on failure.
+Either a SSF API call will always succeed, or it will return a boolean: true on success and false on failure.
 That's it. Any function outputs are handled via the parameter list.
 This makes application error handling simple to implement, and much less prone to errors.
 
@@ -46,7 +52,7 @@ The framework does NOT use assertions when operating on inputs that likely come 
 
 The framework will also detect common errors like using interfaces before they have been properly initialized.
 
-### Tested
+### Hardened and Tested
 
 For the main port testing platforms of Windows, Linux, and Mac OS, all relevant compiler warnings are turned on. SSF compiles cleanly on them all.
 SSF is linted using Visual Studio's static analysis tool with no warnings.
@@ -57,6 +63,8 @@ Every SSF interface has a suite of unit tests that MUST PASS completely on all o
  
 The author uses various modules of SSF in several different commercial products using a variety of microcontrollers and toolchains.
  
+<a id="porting"></a>
+
 ## Porting
 
 This framework has been successfully ported and unit tested on the following platforms: Windows Visual Studio 32/64-bit, Linux 32/64-bit (GCC), MAC OS X, PIC32 (XC32), PIC24 (XC16), MSP430 (TI 15.12.3.LTS), and many others. You should only need to change ssfport.c and ssfport.h to implement a successful port.
@@ -111,7 +119,9 @@ To ensure safe operation of the non-renetrant modules in a multi-threaded system
 
 This library has added support to deinitialize interfaces that have initialization functions. Primarily deinitialization was added to allow the library to better integrate with unit test frameworks.
 
-## Modules
+<a id="interfaces"></a>
+
+## Interfaces
 
 > **Size estimates** are for ARM Cortex-M (Thumb-2) compiled with maximum size optimization (-Os).
 > Flash includes compiled code and any ROM lookup tables. Static RAM is memory permanently
@@ -234,6 +244,8 @@ Time management interfaces covering raw tick time, calendar conversion, and ISO 
 ¹⁵ Each `SSFGObjInit` call allocates one `SSFGObj_t` node struct (~48 B) via system `malloc`. `SSFGObjSetLabel` and `SSFGObjSet*` add further per-field allocations for labels and value data.
 
 ¹⁸ Concurrent calls to `SSFRTCGetUnixNow` from multiple contexts are safe (read-only after init). Enable `SSF_CONFIG_ENABLE_THREAD_SUPPORT` if `SSFRTCSetUnixNow` may be called concurrently with `SSFRTCGetUnixNow`.
+
+<a id="conclusion"></a>
 
 ## Conclusion
 

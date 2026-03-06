@@ -8,7 +8,7 @@ The computation uses a 1024-byte lookup table for speed. A single call covers a 
 buffer; successive calls with the previous return value as `crc` accumulate across non-contiguous
 or streaming chunks and produce the same result as one call over the whole dataset.
 
-[Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference) | [Examples](#examples)
+[Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference)
 
 <a id="dependencies"></a>
 
@@ -44,11 +44,13 @@ This module has no compile-time configuration options in `ssfoptions.h`.
 |--------|------|-------------|
 | <a id="ssf-crc32-initial"></a>`SSF_CRC32_INITIAL` | Constant | `0` — initial CRC state; pass as `crc` to begin a fresh computation |
 
+<a id="functions"></a>
+
 ### Functions
 
 | | Function | Description |
 |---|----------|-------------|
-| [e.g.](#ex-crc32) | [`SSFCRC32(in, inLen, crc)`](#ssfcrc32fn) | Compute or accumulate a 32-bit CRC over a byte buffer |
+| [e.g.](#ex-crc32) | [`uint32_t SSFCRC32(in, inLen, crc)`](#ssfcrc32fn) | Compute or accumulate a 32-bit CRC over a byte buffer |
 
 <a id="function-reference"></a>
 
@@ -56,7 +58,7 @@ This module has no compile-time configuration options in `ssfoptions.h`.
 
 <a id="ssfcrc32fn"></a>
 
-### [↑](#ssfcrc32--32-bit-ccitt-32-crc) [`SSFCRC32()`](#ex-crc32)
+### [↑](#functions) [`uint32_t SSFCRC32()`](#functions)
 
 ```c
 uint32_t SSFCRC32(const uint8_t *in, uint32_t inLen, uint32_t crc);
@@ -75,13 +77,9 @@ concatenated.
 
 **Returns:** Updated 32-bit CRC state. Pass this value as `crc` to the next call when processing data in multiple chunks, or compare it against an expected CRC for verification.
 
-<a id="examples"></a>
-
-## [↑](#ssfcrc32--32-bit-ccitt-32-crc) Examples
-
 <a id="ex-crc32"></a>
 
-### [↑](#ssfcrc32--32-bit-ccitt-32-crc) [SSFCRC32()](#ssfcrc32fn)
+**Example:**
 
 ```c
 uint32_t crc;

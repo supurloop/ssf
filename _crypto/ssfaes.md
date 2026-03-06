@@ -9,7 +9,7 @@ block at a time. The base functions accept explicit round-count (`nr`) and key-w
 parameters; the fixed-key macros pre-set those parameters for a specific key length; and the
 `SSFAESXXX` macros derive both from `keyLen` at compile time.
 
-[Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference) | [Examples](#examples)
+[Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference)
 
 <a id="dependencies"></a>
 
@@ -49,20 +49,22 @@ This module has no compile-time configuration options in `ssfoptions.h`.
 |--------|------|-------------|
 | <a id="ssf-aes-block-size"></a>`SSF_AES_BLOCK_SIZE` | Constant | `16` — size in bytes of one AES block; all encrypt/decrypt calls operate on exactly this many bytes |
 
+<a id="functions"></a>
+
 ### Functions
 
 | | Function | Description |
 |---|----------|-------------|
-| [e.g.](#ex-base) | [`SSFAESBlockEncrypt(pt, ptLen, ct, ctSize, key, keyLen, nr, nk)`](#ssfaesblockencrypt) | Encrypt a 16-byte block using AES with explicit round and key-word counts |
-| [e.g.](#ex-base) | [`SSFAESBlockDecrypt(ct, ctLen, pt, ptSize, key, keyLen, nr, nk)`](#ssfaesblockdecrypt) | Decrypt a 16-byte block using AES with explicit round and key-word counts |
-| [e.g.](#ex-128) | [`SSFAES128BlockEncrypt(pt, ptLen, ct, ctSize, key, keyLen)`](#ssfaes128blockencrypt) | Encrypt with AES-128 (nr=10, nk=4); `keyLen` must be 16 |
-| [e.g.](#ex-128) | [`SSFAES128BlockDecrypt(ct, ctLen, pt, ptSize, key, keyLen)`](#ssfaes128blockdecrypt) | Decrypt with AES-128 (nr=10, nk=4); `keyLen` must be 16 |
-| [e.g.](#ex-192) | [`SSFAES192BlockEncrypt(pt, ptLen, ct, ctSize, key, keyLen)`](#ssfaes192blockencrypt) | Encrypt with AES-192 (nr=12, nk=6); `keyLen` must be 24 |
-| [e.g.](#ex-192) | [`SSFAES192BlockDecrypt(ct, ctLen, pt, ptSize, key, keyLen)`](#ssfaes192blockdecrypt) | Decrypt with AES-192 (nr=12, nk=6); `keyLen` must be 24 |
-| [e.g.](#ex-256) | [`SSFAES256BlockEncrypt(pt, ptLen, ct, ctSize, key, keyLen)`](#ssfaes256blockencrypt) | Encrypt with AES-256 (nr=14, nk=8); `keyLen` must be 32 |
-| [e.g.](#ex-256) | [`SSFAES256BlockDecrypt(ct, ctLen, pt, ptSize, key, keyLen)`](#ssfaes256blockdecrypt) | Decrypt with AES-256 (nr=14, nk=8); `keyLen` must be 32 |
-| [e.g.](#ex-xxx) | [`SSFAESXXXBlockEncrypt(pt, ptLen, ct, ctSize, key, keyLen)`](#ssfaesxxxblockencrypt) | Encrypt with key size inferred from `keyLen` (16, 24, or 32) at compile time |
-| [e.g.](#ex-xxx) | [`SSFAESXXXBlockDecrypt(ct, ctLen, pt, ptSize, key, keyLen)`](#ssfaesxxxblockdecrypt) | Decrypt with key size inferred from `keyLen` (16, 24, or 32) at compile time |
+| [e.g.](#ex-base) | [`void SSFAESBlockEncrypt(pt, ptLen, ct, ctSize, key, keyLen, nr, nk)`](#ssfaesblockencrypt) | Encrypt a 16-byte block using AES with explicit round and key-word counts |
+| [e.g.](#ex-base) | [`void SSFAESBlockDecrypt(ct, ctLen, pt, ptSize, key, keyLen, nr, nk)`](#ssfaesblockdecrypt) | Decrypt a 16-byte block using AES with explicit round and key-word counts |
+| [e.g.](#ex-128) | [`void SSFAES128BlockEncrypt(pt, ptLen, ct, ctSize, key, keyLen)`](#ssfaes128blockencrypt) | Encrypt with AES-128 (nr=10, nk=4); `keyLen` must be 16 |
+| [e.g.](#ex-128) | [`void SSFAES128BlockDecrypt(ct, ctLen, pt, ptSize, key, keyLen)`](#ssfaes128blockdecrypt) | Decrypt with AES-128 (nr=10, nk=4); `keyLen` must be 16 |
+| [e.g.](#ex-192) | [`void SSFAES192BlockEncrypt(pt, ptLen, ct, ctSize, key, keyLen)`](#ssfaes192blockencrypt) | Encrypt with AES-192 (nr=12, nk=6); `keyLen` must be 24 |
+| [e.g.](#ex-192) | [`void SSFAES192BlockDecrypt(ct, ctLen, pt, ptSize, key, keyLen)`](#ssfaes192blockdecrypt) | Decrypt with AES-192 (nr=12, nk=6); `keyLen` must be 24 |
+| [e.g.](#ex-256) | [`void SSFAES256BlockEncrypt(pt, ptLen, ct, ctSize, key, keyLen)`](#ssfaes256blockencrypt) | Encrypt with AES-256 (nr=14, nk=8); `keyLen` must be 32 |
+| [e.g.](#ex-256) | [`void SSFAES256BlockDecrypt(ct, ctLen, pt, ptSize, key, keyLen)`](#ssfaes256blockdecrypt) | Decrypt with AES-256 (nr=14, nk=8); `keyLen` must be 32 |
+| [e.g.](#ex-xxx) | [`void SSFAESXXXBlockEncrypt(pt, ptLen, ct, ctSize, key, keyLen)`](#ssfaesxxxblockencrypt) | Encrypt with key size inferred from `keyLen` (16, 24, or 32) at compile time |
+| [e.g.](#ex-xxx) | [`void SSFAESXXXBlockDecrypt(ct, ctLen, pt, ptSize, key, keyLen)`](#ssfaesxxxblockdecrypt) | Decrypt with key size inferred from `keyLen` (16, 24, or 32) at compile time |
 
 <a id="function-reference"></a>
 
@@ -70,7 +72,7 @@ This module has no compile-time configuration options in `ssfoptions.h`.
 
 <a id="ssfaesblockencrypt"></a>
 
-### [↑](#ssfaes--aes-block-cipher) [`SSFAESBlockEncrypt()`](#ex-base)
+### [↑](#functions) [`void SSFAESBlockEncrypt()`](#functions)
 
 ```c
 void SSFAESBlockEncrypt(const uint8_t *pt, size_t ptLen, uint8_t *ct, size_t ctSize,
@@ -99,7 +101,7 @@ calling this function directly.
 
 <a id="ssfaesblockdecrypt"></a>
 
-### [↑](#ssfaes--aes-block-cipher) [`SSFAESBlockDecrypt()`](#ex-base)
+### [↑](#functions) [`void SSFAESBlockDecrypt()`](#functions)
 
 ```c
 void SSFAESBlockDecrypt(const uint8_t *ct, size_t ctLen, uint8_t *pt, size_t ptSize,
@@ -124,127 +126,9 @@ calling this function directly.
 
 **Returns:** Nothing.
 
----
-
-<a id="fixed-key-encrypt-macros"></a>
-
-### [↑](#ssfaes--aes-block-cipher) Fixed-Key Encrypt Macros
-
-Convenience macros that expand to [`SSFAESBlockEncrypt()`](#ssfaesblockencrypt) with `nr` and
-`nk` pre-set for a specific key size. All parameters are forwarded unchanged; `keyLen` must
-match the fixed size for the chosen variant.
-
-<a id="ssfaes128blockencrypt"></a>
-
-#### [↑](#ssfaes--aes-block-cipher) [`SSFAES128BlockEncrypt()`](#ex-128)
-
-```c
-SSFAES128BlockEncrypt(pt, ptLen, ct, ctSize, key, keyLen)
-```
-
-Expands to `SSFAESBlockEncrypt(pt, ptLen, ct, ctSize, key, keyLen, 10, 4)`. `keyLen` must be 16.
-
-<a id="ssfaes192blockencrypt"></a>
-
-#### [↑](#ssfaes--aes-block-cipher) [`SSFAES192BlockEncrypt()`](#ex-192)
-
-```c
-SSFAES192BlockEncrypt(pt, ptLen, ct, ctSize, key, keyLen)
-```
-
-Expands to `SSFAESBlockEncrypt(pt, ptLen, ct, ctSize, key, keyLen, 12, 6)`. `keyLen` must be 24.
-
-<a id="ssfaes256blockencrypt"></a>
-
-#### [↑](#ssfaes--aes-block-cipher) [`SSFAES256BlockEncrypt()`](#ex-256)
-
-```c
-SSFAES256BlockEncrypt(pt, ptLen, ct, ctSize, key, keyLen)
-```
-
-Expands to `SSFAESBlockEncrypt(pt, ptLen, ct, ctSize, key, keyLen, 14, 8)`. `keyLen` must be 32.
-
----
-
-<a id="fixed-key-decrypt-macros"></a>
-
-### [↑](#ssfaes--aes-block-cipher) Fixed-Key Decrypt Macros
-
-Convenience macros that expand to [`SSFAESBlockDecrypt()`](#ssfaesblockdecrypt) with `nr` and
-`nk` pre-set for a specific key size. All parameters are forwarded unchanged; `keyLen` must
-match the fixed size for the chosen variant.
-
-<a id="ssfaes128blockdecrypt"></a>
-
-#### [↑](#ssfaes--aes-block-cipher) [`SSFAES128BlockDecrypt()`](#ex-128)
-
-```c
-SSFAES128BlockDecrypt(ct, ctLen, pt, ptSize, key, keyLen)
-```
-
-Expands to `SSFAESBlockDecrypt(ct, ctLen, pt, ptSize, key, keyLen, 10, 4)`. `keyLen` must be 16.
-
-<a id="ssfaes192blockdecrypt"></a>
-
-#### [↑](#ssfaes--aes-block-cipher) [`SSFAES192BlockDecrypt()`](#ex-192)
-
-```c
-SSFAES192BlockDecrypt(ct, ctLen, pt, ptSize, key, keyLen)
-```
-
-Expands to `SSFAESBlockDecrypt(ct, ctLen, pt, ptSize, key, keyLen, 12, 6)`. `keyLen` must be 24.
-
-<a id="ssfaes256blockdecrypt"></a>
-
-#### [↑](#ssfaes--aes-block-cipher) [`SSFAES256BlockDecrypt()`](#ex-256)
-
-```c
-SSFAES256BlockDecrypt(ct, ctLen, pt, ptSize, key, keyLen)
-```
-
-Expands to `SSFAESBlockDecrypt(ct, ctLen, pt, ptSize, key, keyLen, 14, 8)`. `keyLen` must be 32.
-
----
-
-<a id="ssfaesxxxblockencrypt"></a>
-
-### [↑](#ssfaes--aes-block-cipher) [`SSFAESXXXBlockEncrypt()`](#ex-xxx)
-
-```c
-SSFAESXXXBlockEncrypt(pt, ptLen, ct, ctSize, key, keyLen)
-```
-
-Convenience macro that derives `nr` and `nk` from `keyLen` at compile time:
-`nr = 6 + (keyLen >> 2)`, `nk = keyLen >> 2` (low byte of `keyLen` only). `keyLen` must be a
-compile-time constant of 16, 24, or 32; any other value produces incorrect round counts without
-a compile-time diagnostic. Expands to [`SSFAESBlockEncrypt()`](#ssfaesblockencrypt).
-
-**Returns:** Nothing (expands to a `void` function call).
-
----
-
-<a id="ssfaesxxxblockdecrypt"></a>
-
-### [↑](#ssfaes--aes-block-cipher) [`SSFAESXXXBlockDecrypt()`](#ex-xxx)
-
-```c
-SSFAESXXXBlockDecrypt(ct, ctLen, pt, ptSize, key, keyLen)
-```
-
-Convenience macro that derives `nr` and `nk` from `keyLen` at compile time, identical in
-behaviour to [`SSFAESXXXBlockEncrypt()`](#ssfaesxxxblockencrypt) but expands to
-[`SSFAESBlockDecrypt()`](#ssfaesblockdecrypt). `keyLen` must be a compile-time constant of 16,
-24, or 32.
-
-**Returns:** Nothing (expands to a `void` function call).
-
-<a id="examples"></a>
-
-## [↑](#ssfaes--aes-block-cipher) Examples
-
 <a id="ex-base"></a>
 
-### [↑](#ssfaes--aes-block-cipher) [SSFAESBlockEncrypt() / SSFAESBlockDecrypt()](#ssfaesblockencrypt)
+**Example:**
 
 ```c
 /* FIPS-197 Appendix B test vector (AES-128) */
@@ -269,9 +153,69 @@ SSFAESBlockDecrypt(ct, sizeof(ct), dt, sizeof(dt), key, sizeof(key), 10, 4);
 /* memcmp(dt, pt, SSF_AES_BLOCK_SIZE) == 0 */
 ```
 
+---
+
+<a id="fixed-key-encrypt-macros"></a>
+
+### [↑](#functions) Fixed-Key Encrypt Macros
+
+Convenience macros that expand to [`SSFAESBlockEncrypt()`](#ssfaesblockencrypt) with `nr` and
+`nk` pre-set for a specific key size. All parameters are forwarded unchanged; `keyLen` must
+match the fixed size for the chosen variant.
+
+<a id="ssfaes128blockencrypt"></a>
+
+#### [↑](#functions) [`void SSFAES128BlockEncrypt()`](#functions)
+
+```c
+SSFAES128BlockEncrypt(pt, ptLen, ct, ctSize, key, keyLen)
+```
+
+Expands to `SSFAESBlockEncrypt(pt, ptLen, ct, ctSize, key, keyLen, 10, 4)`. `keyLen` must be 16.
+
+<a id="ssfaes192blockencrypt"></a>
+
+#### [↑](#functions) [`void SSFAES192BlockEncrypt()`](#functions)
+
+```c
+SSFAES192BlockEncrypt(pt, ptLen, ct, ctSize, key, keyLen)
+```
+
+Expands to `SSFAESBlockEncrypt(pt, ptLen, ct, ctSize, key, keyLen, 12, 6)`. `keyLen` must be 24.
+
+<a id="ssfaes256blockencrypt"></a>
+
+#### [↑](#functions) [`void SSFAES256BlockEncrypt()`](#functions)
+
+```c
+SSFAES256BlockEncrypt(pt, ptLen, ct, ctSize, key, keyLen)
+```
+
+Expands to `SSFAESBlockEncrypt(pt, ptLen, ct, ctSize, key, keyLen, 14, 8)`. `keyLen` must be 32.
+
+---
+
+<a id="fixed-key-decrypt-macros"></a>
+
+### [↑](#functions) Fixed-Key Decrypt Macros
+
+Convenience macros that expand to [`SSFAESBlockDecrypt()`](#ssfaesblockdecrypt) with `nr` and
+`nk` pre-set for a specific key size. All parameters are forwarded unchanged; `keyLen` must
+match the fixed size for the chosen variant.
+
+<a id="ssfaes128blockdecrypt"></a>
+
+#### [↑](#functions) [`void SSFAES128BlockDecrypt()`](#functions)
+
+```c
+SSFAES128BlockDecrypt(ct, ctLen, pt, ptSize, key, keyLen)
+```
+
+Expands to `SSFAESBlockDecrypt(ct, ctLen, pt, ptSize, key, keyLen, 10, 4)`. `keyLen` must be 16.
+
 <a id="ex-128"></a>
 
-### [↑](#ssfaes--aes-block-cipher) [SSFAES128BlockEncrypt() / SSFAES128BlockDecrypt()](#ssfaes128blockencrypt)
+**Example:**
 
 ```c
 uint8_t key128[16] = {
@@ -290,9 +234,19 @@ SSFAES128BlockDecrypt(ct, sizeof(ct), dt, sizeof(dt), key128, sizeof(key128));
 /* memcmp(dt, pt, SSF_AES_BLOCK_SIZE) == 0 */
 ```
 
+<a id="ssfaes192blockdecrypt"></a>
+
+#### [↑](#functions) [`void SSFAES192BlockDecrypt()`](#functions)
+
+```c
+SSFAES192BlockDecrypt(ct, ctLen, pt, ptSize, key, keyLen)
+```
+
+Expands to `SSFAESBlockDecrypt(ct, ctLen, pt, ptSize, key, keyLen, 12, 6)`. `keyLen` must be 24.
+
 <a id="ex-192"></a>
 
-### [↑](#ssfaes--aes-block-cipher) [SSFAES192BlockEncrypt() / SSFAES192BlockDecrypt()](#ssfaes192blockencrypt)
+**Example:**
 
 ```c
 uint8_t key192[24] = {
@@ -312,9 +266,19 @@ SSFAES192BlockDecrypt(ct, sizeof(ct), dt, sizeof(dt), key192, sizeof(key192));
 /* memcmp(dt, pt, SSF_AES_BLOCK_SIZE) == 0 */
 ```
 
+<a id="ssfaes256blockdecrypt"></a>
+
+#### [↑](#functions) [`void SSFAES256BlockDecrypt()`](#functions)
+
+```c
+SSFAES256BlockDecrypt(ct, ctLen, pt, ptSize, key, keyLen)
+```
+
+Expands to `SSFAESBlockDecrypt(ct, ctLen, pt, ptSize, key, keyLen, 14, 8)`. `keyLen` must be 32.
+
 <a id="ex-256"></a>
 
-### [↑](#ssfaes--aes-block-cipher) [SSFAES256BlockEncrypt() / SSFAES256BlockDecrypt()](#ssfaes256blockencrypt)
+**Example:**
 
 ```c
 uint8_t key256[32] = {
@@ -335,9 +299,43 @@ SSFAES256BlockDecrypt(ct, sizeof(ct), dt, sizeof(dt), key256, sizeof(key256));
 /* memcmp(dt, pt, SSF_AES_BLOCK_SIZE) == 0 */
 ```
 
+---
+
+<a id="ssfaesxxxblockencrypt"></a>
+
+### [↑](#functions) [`void SSFAESXXXBlockEncrypt()`](#functions)
+
+```c
+SSFAESXXXBlockEncrypt(pt, ptLen, ct, ctSize, key, keyLen)
+```
+
+Convenience macro that derives `nr` and `nk` from `keyLen` at compile time:
+`nr = 6 + (keyLen >> 2)`, `nk = keyLen >> 2` (low byte of `keyLen` only). `keyLen` must be a
+compile-time constant of 16, 24, or 32; any other value produces incorrect round counts without
+a compile-time diagnostic. Expands to [`SSFAESBlockEncrypt()`](#ssfaesblockencrypt).
+
+**Returns:** Nothing (expands to a `void` function call).
+
+---
+
+<a id="ssfaesxxxblockdecrypt"></a>
+
+### [↑](#functions) [`void SSFAESXXXBlockDecrypt()`](#functions)
+
+```c
+SSFAESXXXBlockDecrypt(ct, ctLen, pt, ptSize, key, keyLen)
+```
+
+Convenience macro that derives `nr` and `nk` from `keyLen` at compile time, identical in
+behaviour to [`SSFAESXXXBlockEncrypt()`](#ssfaesxxxblockencrypt) but expands to
+[`SSFAESBlockDecrypt()`](#ssfaesblockdecrypt). `keyLen` must be a compile-time constant of 16,
+24, or 32.
+
+**Returns:** Nothing (expands to a `void` function call).
+
 <a id="ex-xxx"></a>
 
-### [↑](#ssfaes--aes-block-cipher) [SSFAESXXXBlockEncrypt() / SSFAESXXXBlockDecrypt()](#ssfaesxxxblockencrypt)
+**Example:**
 
 ```c
 /* keyLen must be a compile-time constant: 16, 24, or 32 */

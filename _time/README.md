@@ -1,6 +1,6 @@
 # Time
 
-[Back to ssf README](../README.md)
+[SSF](../README.md)
 
 Time management interfaces.
 

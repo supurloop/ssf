@@ -1,6 +1,6 @@
 # Error Detection Codes (EDC)
 
-[Back to ssf README](../README.md)
+[SSF](../README.md)
 
 Data integrity interfaces.
 

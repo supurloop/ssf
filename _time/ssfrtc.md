@@ -10,7 +10,7 @@ All subsequent calls to `SSFRTCGetUnixNow()` derive the current time from the el
 count without touching hardware. `SSFRTCSet()` writes a new time through to the hardware RTC
 and resets the tick baseline.
 
-[Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference) | [Examples](#examples)
+[Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference)
 
 <a id="dependencies"></a>
 
@@ -46,14 +46,16 @@ All options are set in `ssfoptions.h`.
 
 ## [↑](#ssfrtc--unix-time-rtc-interface) API Summary
 
+<a id="functions"></a>
+
 ### Functions
 
 | | Function | Description |
 |---|----------|-------------|
-| [e.g.](#ex-init) | [`SSFRTCInit()`](#ssfrtcinit) | Initialize the RTC interface; reads hardware RTC and begins tick-based tracking |
-| [e.g.](#ex-deinit) | [`SSFRTCDeInit()`](#ssfrtcdeinit) | De-initialize the RTC interface |
-| [e.g.](#ex-set) | [`SSFRTCSet(unixSec)`](#ssfrtcset) | Set the current Unix time and write to the hardware RTC |
-| [e.g.](#ex-getunixnow) | [`SSFRTCGetUnixNow(unixSys)`](#ssfrtcgetunixnow) | Get the current Unix time in system ticks |
+| [e.g.](#ex-init) | [`bool SSFRTCInit()`](#ssfrtcinit) | Initialize the RTC interface; reads hardware RTC and begins tick-based tracking |
+| [e.g.](#ex-deinit) | [`void SSFRTCDeInit()`](#ssfrtcdeinit) | De-initialize the RTC interface |
+| [e.g.](#ex-set) | [`bool SSFRTCSet(unixSec)`](#ssfrtcset) | Set the current Unix time and write to the hardware RTC |
+| [e.g.](#ex-getunixnow) | [`bool SSFRTCGetUnixNow(unixSys)`](#ssfrtcgetunixnow) | Get the current Unix time in system ticks |
 
 <a id="function-reference"></a>
 
@@ -61,7 +63,7 @@ All options are set in `ssfoptions.h`.
 
 <a id="ssfrtcinit"></a>
 
-### [↑](#ssfrtc--unix-time-rtc-interface) [`SSFRTCInit()`](#ex-init)
+### [↑](#functions) [`bool SSFRTCInit()`](#functions)
 
 ```c
 bool SSFRTCInit(void);
@@ -74,11 +76,22 @@ tick count without re-reading hardware.
 
 **Returns:** `true` if the RTC was read successfully and the interface is initialized; `false` if the hardware RTC read failed.
 
+<a id="ex-init"></a>
+
+**Example:**
+
+```c
+if (SSFRTCInit())
+{
+    /* RTC interface initialized; SSFRTCGetUnixNow() is now available */
+}
+```
+
 ---
 
 <a id="ssfrtcdeinit"></a>
 
-### [↑](#ssfrtc--unix-time-rtc-interface) [`SSFRTCDeInit()`](#ex-deinit)
+### [↑](#functions) [`void SSFRTCDeInit()`](#functions)
 
 ```c
 void SSFRTCDeInit(void);
@@ -89,11 +102,22 @@ De-initializes the RTC interface, clearing its initialized state. After this cal
 
 **Returns:** Nothing.
 
+<a id="ex-deinit"></a>
+
+**Example:**
+
+```c
+SSFRTCInit();
+/* ... use RTC ... */
+SSFRTCDeInit();
+/* SSFRTCGetUnixNow() now returns false until SSFRTCInit() is called again */
+```
+
 ---
 
 <a id="ssfrtcset"></a>
 
-### [↑](#ssfrtc--unix-time-rtc-interface) [`SSFRTCSet()`](#ex-set)
+### [↑](#functions) [`bool SSFRTCSet()`](#functions)
 
 ```c
 bool SSFRTCSet(uint64_t unixSec);
@@ -109,11 +133,27 @@ updated time.
 
 **Returns:** `true` if the hardware RTC write succeeded and internal tracking was updated; `false` if the RTC write failed or `unixSec` is out of range.
 
+<a id="ex-set"></a>
+
+**Example:**
+
+```c
+SSFRTCInit();
+
+/* Set time to 2024-03-15T10:30:45Z */
+uint64_t unixSec = 1710498645ull;
+
+if (SSFRTCSet(unixSec))
+{
+    /* Hardware RTC updated; SSFRTCGetUnixNow() now reflects the new time */
+}
+```
+
 ---
 
 <a id="ssfrtcgetunixnow"></a>
 
-### [↑](#ssfrtc--unix-time-rtc-interface) [`SSFRTCGetUnixNow()`](#ex-getunixnow)
+### [↑](#functions) [`bool SSFRTCGetUnixNow()`](#functions)
 
 ```c
 bool SSFRTCGetUnixNow(SSFPortTick_t *unixSys);
@@ -130,51 +170,9 @@ elapsed system ticks since that read. Does not access the hardware RTC. Divide `
 
 **Returns:** `true` if the interface is initialized and `*unixSys` was set; `false` if `SSFRTCInit()` has not been called successfully.
 
-<a id="examples"></a>
-
-## [↑](#ssfrtc--unix-time-rtc-interface) Examples
-
-<a id="ex-init"></a>
-
-### [↑](#ssfrtc--unix-time-rtc-interface) [SSFRTCInit()](#ssfrtcinit)
-
-```c
-if (SSFRTCInit())
-{
-    /* RTC interface initialized; SSFRTCGetUnixNow() is now available */
-}
-```
-
-<a id="ex-deinit"></a>
-
-### [↑](#ssfrtc--unix-time-rtc-interface) [SSFRTCDeInit()](#ssfrtcdeinit)
-
-```c
-SSFRTCInit();
-/* ... use RTC ... */
-SSFRTCDeInit();
-/* SSFRTCGetUnixNow() now returns false until SSFRTCInit() is called again */
-```
-
-<a id="ex-set"></a>
-
-### [↑](#ssfrtc--unix-time-rtc-interface) [SSFRTCSet()](#ssfrtcset)
-
-```c
-SSFRTCInit();
-
-/* Set time to 2024-03-15T10:30:45Z */
-uint64_t unixSec = 1710498645ull;
-
-if (SSFRTCSet(unixSec))
-{
-    /* Hardware RTC updated; SSFRTCGetUnixNow() now reflects the new time */
-}
-```
-
 <a id="ex-getunixnow"></a>
 
-### [↑](#ssfrtc--unix-time-rtc-interface) [SSFRTCGetUnixNow()](#ssfrtcgetunixnow)
+**Example:**
 
 ```c
 SSFRTCInit();

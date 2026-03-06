@@ -8,7 +8,7 @@ The same context and buffer serve both roles: initialize with `bufLen == 0` to e
 `bufLen` equal to the number of received bytes to decode. The same tag may appear multiple times;
 use the `instance` parameter (0-based) to iterate over duplicates.
 
-[Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference) | [Examples](#examples)
+[Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference)
 
 <a id="dependencies"></a>
 
@@ -55,16 +55,18 @@ All options are set in `ssfoptions.h`.
 | <a id="type-ssftlvvar-t"></a>`SSFTLVVar_t` | Typedef | `uint8_t` when [`SSF_TLV_ENABLE_FIXED_MODE`](#opt-fixed-mode) is `1`; `uint32_t` otherwise. Used for tag and value-length fields |
 | <a id="type-ssftlv-t"></a>`SSFTLV_t` | Struct | TLV context; pass by pointer to all API functions. After encoding, read `tlv.bufLen` for the number of bytes to transmit. Do not access other fields directly |
 
+<a id="functions"></a>
+
 ### Functions
 
 | | Function / Macro | Description |
 |---|-----------------|-------------|
-| [e.g.](#ex-init) | [`SSFTLVInit(tlv, buf, bufSize, bufLen)`](#ssftlvinit) | Initialize a TLV context for encoding or decoding |
-| [e.g.](#ex-deinit) | [`SSFTLVDeInit(tlv)`](#ssftlvdeinit) | De-initialize a TLV context |
-| [e.g.](#ex-put) | [`SSFTLVPut(tlv, tag, val, valLen)`](#ssftlvput) | Encode a tag/value pair into the TLV buffer |
-| [e.g.](#ex-read) | [`SSFTLVRead(tlv, tag, instance, val, valSize, valPtr, valLen)`](#ssftlvread) | Find a tag/instance and copy or point to its value |
-| [e.g.](#ex-get) | [`SSFTLVGet(tlv, tag, instance, val, valSize, valLen)`](#ssftlvget) | Macro: decode a value by tag into a caller-supplied buffer |
-| [e.g.](#ex-find) | [`SSFTLVFind(tlv, tag, instance, valPtr, valLen)`](#ssftlvfind) | Macro: locate a value by tag as a pointer into the TLV buffer |
+| [e.g.](#ex-init) | [`void SSFTLVInit(tlv, buf, bufSize, bufLen)`](#ssftlvinit) | Initialize a TLV context for encoding or decoding |
+| [e.g.](#ex-deinit) | [`void SSFTLVDeInit(tlv)`](#ssftlvdeinit) | De-initialize a TLV context |
+| [e.g.](#ex-put) | [`bool SSFTLVPut(tlv, tag, val, valLen)`](#ssftlvput) | Encode a tag/value pair into the TLV buffer |
+| [e.g.](#ex-read) | [`bool SSFTLVRead(tlv, tag, instance, val, valSize, valPtr, valLen)`](#ssftlvread) | Find a tag/instance and copy or point to its value |
+| [e.g.](#ex-get) | [`bool SSFTLVGet(tlv, tag, instance, val, valSize, valLen)`](#ssftlvget) | Macro: decode a value by tag into a caller-supplied buffer |
+| [e.g.](#ex-find) | [`bool SSFTLVFind(tlv, tag, instance, valPtr, valLen)`](#ssftlvfind) | Macro: locate a value by tag as a pointer into the TLV buffer |
 
 <a id="function-reference"></a>
 
@@ -72,7 +74,7 @@ All options are set in `ssfoptions.h`.
 
 <a id="ssftlvinit"></a>
 
-### [↑](#ssftlv--tlv-encoderdecoder) [`SSFTLVInit()`](#ex-init)
+### [↑](#ssftlv--tlv-encoderdecoder) [`void SSFTLVInit()`](#functions)
 
 ```c
 void SSFTLVInit(SSFTLV_t *tlv, uint8_t *buf, uint32_t bufSize, uint32_t bufLen);
@@ -90,11 +92,30 @@ session; pass `bufLen` equal to the number of received bytes to start a decode s
 
 **Returns:** Nothing.
 
+<a id="ex-init"></a>
+
+```c
+#define TAG_ID   1u
+#define TAG_NAME 2u
+
+SSFTLV_t tlv;
+uint8_t buf[64];
+
+/* Encode session: bufLen == 0 */
+SSFTLVInit(&tlv, buf, sizeof(buf), 0);
+/* tlv is ready; tlv.bufLen == 0 */
+
+/* Decode session: bufLen == number of received bytes */
+uint32_t rxLen = 7u; /* bytes received into buf from transport */
+SSFTLVInit(&tlv, buf, sizeof(buf), rxLen);
+/* tlv is ready for decoding rxLen bytes */
+```
+
 ---
 
 <a id="ssftlvdeinit"></a>
 
-### [↑](#ssftlv--tlv-encoderdecoder) [`SSFTLVDeInit()`](#ex-deinit)
+### [↑](#ssftlv--tlv-encoderdecoder) [`void SSFTLVDeInit()`](#functions)
 
 ```c
 void SSFTLVDeInit(SSFTLV_t *tlv);
@@ -108,11 +129,22 @@ De-initializes a TLV context, clearing its internal magic marker.
 
 **Returns:** Nothing.
 
+<a id="ex-deinit"></a>
+
+```c
+SSFTLV_t tlv;
+uint8_t buf[64];
+
+SSFTLVInit(&tlv, buf, sizeof(buf), 0);
+SSFTLVDeInit(&tlv);
+/* tlv is no longer valid */
+```
+
 ---
 
 <a id="ssftlvput"></a>
 
-### [↑](#ssftlv--tlv-encoderdecoder) [`SSFTLVPut()`](#ex-put)
+### [↑](#ssftlv--tlv-encoderdecoder) [`bool SSFTLVPut()`](#functions)
 
 ```c
 bool SSFTLVPut(SSFTLV_t *tlv, SSFTLVVar_t tag, const uint8_t *val, SSFTLVVar_t valLen);
@@ -130,11 +162,30 @@ On success `tlv.bufLen` is updated to reflect the new total encoded length.
 
 **Returns:** `true` if encoding succeeded and `tlv.bufLen` was updated; `false` if the buffer does not have enough remaining space for the tag, length, and value fields.
 
+<a id="ex-put"></a>
+
+```c
+#define TAG_ID   1u
+#define TAG_NAME 2u
+
+SSFTLV_t tlv;
+uint8_t buf[64];
+uint8_t id = 42u;
+
+SSFTLVInit(&tlv, buf, sizeof(buf), 0);
+
+if (SSFTLVPut(&tlv, TAG_ID,   &id,              1) &&
+    SSFTLVPut(&tlv, TAG_NAME, (uint8_t *)"Alice", 5))
+{
+    /* tlv.bufLen bytes of buf are ready to transmit */
+}
+```
+
 ---
 
 <a id="ssftlvread"></a>
 
-### [↑](#ssftlv--tlv-encoderdecoder) [`SSFTLVRead()`](#ex-read)
+### [↑](#ssftlv--tlv-encoderdecoder) [`bool SSFTLVRead()`](#functions)
 
 ```c
 bool SSFTLVRead(const SSFTLV_t *tlv, SSFTLVVar_t tag, uint16_t instance,
@@ -158,128 +209,7 @@ are convenience macros over this function.
 
 **Returns:** `true` if the tag/instance was found and all requested outputs were written; `false` if the tag/instance was not found or `valSize` is too small to hold the value.
 
----
-
-<a id="convenience-macros"></a>
-
-### [↑](#ssftlv--tlv-encoderdecoder) [Convenience Macros](#ex-get)
-
-Thin wrappers over [`SSFTLVRead()`](#ssftlvread) that fix the unused output arguments to `NULL`
-and `0`. Use [`SSFTLVGet()`](#ssftlvget) when a copy into a local buffer is needed; use
-[`SSFTLVFind()`](#ssftlvfind) when a zero-copy pointer into the TLV buffer is sufficient.
-
----
-
-<a id="ssftlvget"></a>
-
-#### [↑](#ssftlv--tlv-encoderdecoder) [`SSFTLVGet()`](#ex-get)
-
-```c
-#define SSFTLVGet(tlv, tag, instance, val, valSize, valLen) \
-    SSFTLVRead(tlv, tag, instance, val, valSize, NULL, valLen)
-```
-
-Finds the `instance`-th occurrence of `tag` and copies its value into `val`. Equivalent to
-calling `SSFTLVRead()` with `valPtr` set to `NULL`.
-
-| Parameter | Direction | Type | Description |
-|-----------|-----------|------|-------------|
-| `tlv` | in | [`const SSFTLV_t *`](#type-ssftlv-t) | Pointer to an initialized TLV context. Must not be `NULL`. |
-| `tag` | in | [`SSFTLVVar_t`](#type-ssftlvvar-t) | Tag identifier to search for. |
-| `instance` | in | `uint16_t` | 0-based occurrence index. |
-| `val` | out | `uint8_t *` | Buffer receiving a copy of the found value. Must not be `NULL`. |
-| `valSize` | in | `uint32_t` | Allocated size of `val`. Must be large enough to hold the found value. |
-| `valLen` | out (opt) | [`SSFTLVVar_t *`](#type-ssftlvvar-t) | If not `NULL`, receives the length of the found value. |
-
-**Returns:** `true` if the tag/instance was found and copied; `false` otherwise.
-
----
-
-<a id="ssftlvfind"></a>
-
-#### [↑](#ssftlv--tlv-encoderdecoder) [`SSFTLVFind()`](#ex-find)
-
-```c
-#define SSFTLVFind(tlv, tag, instance, valPtr, valLen) \
-    SSFTLVRead(tlv, tag, instance, NULL, 0, valPtr, valLen)
-```
-
-Finds the `instance`-th occurrence of `tag` and sets `*valPtr` to point directly into the TLV
-buffer at the start of the value, avoiding a copy. Equivalent to calling `SSFTLVRead()` with
-`val` set to `NULL` and `valSize` set to `0`. Do not write through the returned pointer.
-
-| Parameter | Direction | Type | Description |
-|-----------|-----------|------|-------------|
-| `tlv` | in | [`const SSFTLV_t *`](#type-ssftlv-t) | Pointer to an initialized TLV context. Must not be `NULL`. |
-| `tag` | in | [`SSFTLVVar_t`](#type-ssftlvvar-t) | Tag identifier to search for. |
-| `instance` | in | `uint16_t` | 0-based occurrence index. |
-| `valPtr` | out | `uint8_t **` | Receives a pointer into the TLV buffer at the start of the found value. Must not be `NULL`. |
-| `valLen` | out (opt) | [`SSFTLVVar_t *`](#type-ssftlvvar-t) | If not `NULL`, receives the length of the found value. |
-
-**Returns:** `true` if the tag/instance was found and `*valPtr` was set; `false` otherwise.
-
-<a id="examples"></a>
-
-## [↑](#ssftlv--tlv-encoderdecoder) Examples
-
-<a id="ex-init"></a>
-
-### [↑](#ssftlv--tlv-encoderdecoder) [SSFTLVInit()](#ssftlvinit)
-
-```c
-#define TAG_ID   1u
-#define TAG_NAME 2u
-
-SSFTLV_t tlv;
-uint8_t buf[64];
-
-/* Encode session: bufLen == 0 */
-SSFTLVInit(&tlv, buf, sizeof(buf), 0);
-/* tlv is ready; tlv.bufLen == 0 */
-
-/* Decode session: bufLen == number of received bytes */
-uint32_t rxLen = 7u; /* bytes received into buf from transport */
-SSFTLVInit(&tlv, buf, sizeof(buf), rxLen);
-/* tlv is ready for decoding rxLen bytes */
-```
-
-<a id="ex-deinit"></a>
-
-### [↑](#ssftlv--tlv-encoderdecoder) [SSFTLVDeInit()](#ssftlvdeinit)
-
-```c
-SSFTLV_t tlv;
-uint8_t buf[64];
-
-SSFTLVInit(&tlv, buf, sizeof(buf), 0);
-SSFTLVDeInit(&tlv);
-/* tlv is no longer valid */
-```
-
-<a id="ex-put"></a>
-
-### [↑](#ssftlv--tlv-encoderdecoder) [SSFTLVPut()](#ssftlvput)
-
-```c
-#define TAG_ID   1u
-#define TAG_NAME 2u
-
-SSFTLV_t tlv;
-uint8_t buf[64];
-uint8_t id = 42u;
-
-SSFTLVInit(&tlv, buf, sizeof(buf), 0);
-
-if (SSFTLVPut(&tlv, TAG_ID,   &id,              1) &&
-    SSFTLVPut(&tlv, TAG_NAME, (uint8_t *)"Alice", 5))
-{
-    /* tlv.bufLen bytes of buf are ready to transmit */
-}
-```
-
 <a id="ex-read"></a>
-
-### [↑](#ssftlv--tlv-encoderdecoder) [SSFTLVRead()](#ssftlvread)
 
 ```c
 #define TAG_ID   1u
@@ -313,9 +243,42 @@ if (SSFTLVRead(&tlv, TAG_NAME, 0, NULL, 0, &valPtr, &valLen))
 }
 ```
 
-<a id="ex-get"></a>
+---
 
-### [↑](#ssftlv--tlv-encoderdecoder) [SSFTLVGet()](#convenience-macros)
+<a id="convenience-macros"></a>
+
+### [↑](#ssftlv--tlv-encoderdecoder) [Convenience Macros](#ex-get)
+
+Thin wrappers over [`SSFTLVRead()`](#ssftlvread) that fix the unused output arguments to `NULL`
+and `0`. Use [`SSFTLVGet()`](#ssftlvget) when a copy into a local buffer is needed; use
+[`SSFTLVFind()`](#ssftlvfind) when a zero-copy pointer into the TLV buffer is sufficient.
+
+---
+
+<a id="ssftlvget"></a>
+
+#### [↑](#ssftlv--tlv-encoderdecoder) [`bool SSFTLVGet()`](#functions)
+
+```c
+#define SSFTLVGet(tlv, tag, instance, val, valSize, valLen) \
+    SSFTLVRead(tlv, tag, instance, val, valSize, NULL, valLen)
+```
+
+Finds the `instance`-th occurrence of `tag` and copies its value into `val`. Equivalent to
+calling `SSFTLVRead()` with `valPtr` set to `NULL`.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `tlv` | in | [`const SSFTLV_t *`](#type-ssftlv-t) | Pointer to an initialized TLV context. Must not be `NULL`. |
+| `tag` | in | [`SSFTLVVar_t`](#type-ssftlvvar-t) | Tag identifier to search for. |
+| `instance` | in | `uint16_t` | 0-based occurrence index. |
+| `val` | out | `uint8_t *` | Buffer receiving a copy of the found value. Must not be `NULL`. |
+| `valSize` | in | `uint32_t` | Allocated size of `val`. Must be large enough to hold the found value. |
+| `valLen` | out (opt) | [`SSFTLVVar_t *`](#type-ssftlvvar-t) | If not `NULL`, receives the length of the found value. |
+
+**Returns:** `true` if the tag/instance was found and copied; `false` otherwise.
+
+<a id="ex-get"></a>
 
 ```c
 #define TAG_ID   1u
@@ -338,9 +301,32 @@ if (SSFTLVGet(&tlv, TAG_NAME, 0, val, sizeof(val), &valLen))
 }
 ```
 
-<a id="ex-find"></a>
+---
 
-### [↑](#ssftlv--tlv-encoderdecoder) [SSFTLVFind()](#convenience-macros)
+<a id="ssftlvfind"></a>
+
+#### [↑](#ssftlv--tlv-encoderdecoder) [`bool SSFTLVFind()`](#functions)
+
+```c
+#define SSFTLVFind(tlv, tag, instance, valPtr, valLen) \
+    SSFTLVRead(tlv, tag, instance, NULL, 0, valPtr, valLen)
+```
+
+Finds the `instance`-th occurrence of `tag` and sets `*valPtr` to point directly into the TLV
+buffer at the start of the value, avoiding a copy. Equivalent to calling `SSFTLVRead()` with
+`val` set to `NULL` and `valSize` set to `0`. Do not write through the returned pointer.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `tlv` | in | [`const SSFTLV_t *`](#type-ssftlv-t) | Pointer to an initialized TLV context. Must not be `NULL`. |
+| `tag` | in | [`SSFTLVVar_t`](#type-ssftlvvar-t) | Tag identifier to search for. |
+| `instance` | in | `uint16_t` | 0-based occurrence index. |
+| `valPtr` | out | `uint8_t **` | Receives a pointer into the TLV buffer at the start of the found value. Must not be `NULL`. |
+| `valLen` | out (opt) | [`SSFTLVVar_t *`](#type-ssftlvvar-t) | If not `NULL`, receives the length of the found value. |
+
+**Returns:** `true` if the tag/instance was found and `*valPtr` was set; `false` otherwise.
+
+<a id="ex-find"></a>
 
 ```c
 #define TAG_ID   1u
@@ -362,3 +348,4 @@ if (SSFTLVFind(&tlv, TAG_NAME, 0, &valPtr, &valLen))
     /* valPtr points into buf at "Alice", valLen == 5 — no copy made */
 }
 ```
+

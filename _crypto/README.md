@@ -1,6 +1,6 @@
 # Cryptography
 
-[Back to ssf README](../README.md)
+[SSF](../README.md)
 
 Cryptographic interfaces.
 

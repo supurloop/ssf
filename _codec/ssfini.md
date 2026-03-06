@@ -9,7 +9,7 @@ The generator appends INI text (comments, section headers, and name=value lines)
 caller-supplied buffer. Both sides use bounded buffers and return `false` rather than
 truncating or overflowing.
 
-[Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference) | [Examples](#examples)
+[Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference)
 
 <a id="dependencies"></a>
 
@@ -56,20 +56,22 @@ This module has no compile-time configuration options in `ssfoptions.h`.
 | `SSF_INI_COMMENT_HASH` | Enum value | [`SSFINIComment_t`](#type-ssfinicomment-t) — `#` prefix |
 | `SSF_INI_COMMENT_NONE` | Enum value | [`SSFINIComment_t`](#type-ssfinicomment-t) — no prefix |
 
+<a id="functions"></a>
+
 ### Functions
 
 | | Function | Description |
 |---|----------|-------------|
-| [e.g.](#ex-issectionpresent) | [`SSFINIIsSectionPresent(ini, section)`](#ssfiniissectionpresent) | Check whether a named section exists |
-| [e.g.](#ex-isnamepresent) | [`SSFINIIsNameValuePresent(ini, section, name, index)`](#ssfiniisnamevaluepresent) | Check whether a name/value pair exists |
-| [e.g.](#ex-getstr) | [`SSFINIGetStrValue(ini, section, name, index, out, outSize, outLen)`](#ssfinigetstrvalue) | Get a value as a string |
-| [e.g.](#ex-getbool) | [`SSFINIGetBoolValue(ini, section, name, index, out)`](#ssfinigetboolvalue) | Get a value as a boolean |
-| [e.g.](#ex-getint) | [`SSFINIGetIntValue(ini, section, name, index, out)`](#ssfinigetintvalue) | Get a value as a signed 64-bit integer |
-| [e.g.](#ex-printcomment) | [`SSFINIPrintComment(ini, iniSize, iniLen, text, commentType, lineEnding)`](#ssfiniprintcomment) | Append a comment line to an INI output buffer |
-| [e.g.](#ex-printsection) | [`SSFINIPrintSection(ini, iniSize, iniLen, section, lineEnding)`](#ssfiniprintsection) | Append a section header line to an INI output buffer |
-| [e.g.](#ex-printstrvalue) | [`SSFINIPrintNameStrValue(ini, iniSize, iniLen, name, value, lineEnding)`](#ssfiniprintnamestrvalue) | Append a string name=value line |
-| [e.g.](#ex-printboolvalue) | [`SSFINIPrintNameBoolValue(ini, iniSize, iniLen, name, value, boolType, lineEnding)`](#ssfiniprintnameboolvalue) | Append a boolean name=value line |
-| [e.g.](#ex-printintvalue) | [`SSFINIPrintNameIntValue(ini, iniSize, iniLen, name, value, lineEnding)`](#ssfiniprintnameintvalue) | Append an integer name=value line |
+| [e.g.](#ex-issectionpresent) | [`bool SSFINIIsSectionPresent(ini, section)`](#ssfiniissectionpresent) | Check whether a named section exists |
+| [e.g.](#ex-isnamepresent) | [`bool SSFINIIsNameValuePresent(ini, section, name, index)`](#ssfiniisnamevaluepresent) | Check whether a name/value pair exists |
+| [e.g.](#ex-getstr) | [`bool SSFINIGetStrValue(ini, section, name, index, out, outSize, outLen)`](#ssfinigetstrvalue) | Get a value as a string |
+| [e.g.](#ex-getbool) | [`bool SSFINIGetBoolValue(ini, section, name, index, out)`](#ssfinigetboolvalue) | Get a value as a boolean |
+| [e.g.](#ex-getint) | [`bool SSFINIGetIntValue(ini, section, name, index, out)`](#ssfinigetintvalue) | Get a value as a signed 64-bit integer |
+| [e.g.](#ex-printcomment) | [`bool SSFINIPrintComment(ini, iniSize, iniLen, text, commentType, lineEnding)`](#ssfiniprintcomment) | Append a comment line to an INI output buffer |
+| [e.g.](#ex-printsection) | [`bool SSFINIPrintSection(ini, iniSize, iniLen, section, lineEnding)`](#ssfiniprintsection) | Append a section header line to an INI output buffer |
+| [e.g.](#ex-printstrvalue) | [`bool SSFINIPrintNameStrValue(ini, iniSize, iniLen, name, value, lineEnding)`](#ssfiniprintnamestrvalue) | Append a string name=value line |
+| [e.g.](#ex-printboolvalue) | [`bool SSFINIPrintNameBoolValue(ini, iniSize, iniLen, name, value, boolType, lineEnding)`](#ssfiniprintnameboolvalue) | Append a boolean name=value line |
+| [e.g.](#ex-printintvalue) | [`bool SSFINIPrintNameIntValue(ini, iniSize, iniLen, name, value, lineEnding)`](#ssfiniprintnameintvalue) | Append an integer name=value line |
 
 <a id="function-reference"></a>
 
@@ -77,7 +79,7 @@ This module has no compile-time configuration options in `ssfoptions.h`.
 
 <a id="ssfiniissectionpresent"></a>
 
-### [↑](#ssfini--ini-file-parsergenerator) [`SSFINIIsSectionPresent()`](#ex-issectionpresent)
+### [↑](#ssfini--ini-file-parsergenerator) [`bool SSFINIIsSectionPresent()`](#functions)
 
 ```c
 bool SSFINIIsSectionPresent(SSFCStrIn_t ini, SSFCStrIn_t section);
@@ -93,11 +95,29 @@ Searches a null-terminated INI string for a section header whose name exactly ma
 
 **Returns:** `true` if a matching `[section]` header is found; `false` otherwise.
 
+The parser examples below all use this INI source string:
+
+```c
+const char ini[] = "global=42\r\n"
+                   "[section]\r\n"
+                   "name=yes\r\n"
+                   "name=0\r\n"
+                   "host=localhost\r\n";
+```
+
+<a id="ex-issectionpresent"></a>
+
+```c
+SSFINIIsSectionPresent(ini, "section");   /* returns true  */
+SSFINIIsSectionPresent(ini, "Section");   /* returns false — case-sensitive */
+SSFINIIsSectionPresent(ini, "other");     /* returns false */
+```
+
 ---
 
 <a id="ssfiniisnamevaluepresent"></a>
 
-### [↑](#ssfini--ini-file-parsergenerator) [`SSFINIIsNameValuePresent()`](#ex-isnamepresent)
+### [↑](#ssfini--ini-file-parsergenerator) [`bool SSFINIIsNameValuePresent()`](#functions)
 
 ```c
 bool SSFINIIsNameValuePresent(SSFCStrIn_t ini, SSFCStrIn_t section, SSFCStrIn_t name,
@@ -116,11 +136,24 @@ The `index` parameter selects among multiple entries with the same name (0-based
 
 **Returns:** `true` if the `index`-th occurrence of `name` exists in the specified section; `false` otherwise.
 
+<a id="ex-isnamepresent"></a>
+
+```c
+/* Global scope (NULL section) */
+SSFINIIsNameValuePresent(ini, NULL,      "global", 0);   /* returns true  */
+SSFINIIsNameValuePresent(ini, NULL,      "global", 1);   /* returns false — only one occurrence */
+
+/* Named section — "name" appears twice, index 0 and 1 */
+SSFINIIsNameValuePresent(ini, "section", "name", 0);     /* returns true  */
+SSFINIIsNameValuePresent(ini, "section", "name", 1);     /* returns true  */
+SSFINIIsNameValuePresent(ini, "section", "name", 2);     /* returns false */
+```
+
 ---
 
 <a id="ssfinigetstrvalue"></a>
 
-### [↑](#ssfini--ini-file-parsergenerator) [`SSFINIGetStrValue()`](#ex-getstr)
+### [↑](#ssfini--ini-file-parsergenerator) [`bool SSFINIGetStrValue()`](#functions)
 
 ```c
 bool SSFINIGetStrValue(SSFCStrIn_t ini, SSFCStrIn_t section, SSFCStrIn_t name, uint8_t index,
@@ -142,11 +175,30 @@ it as a null-terminated string into `out`.
 
 **Returns:** `true` if the entry was found and the value copied into `out`; `false` if not found or `outSize` is too small.
 
+<a id="ex-getstr"></a>
+
+```c
+char val[32];
+size_t valLen;
+
+/* First occurrence of "name" in [section] → "yes" */
+if (SSFINIGetStrValue(ini, "section", "name", 0, val, sizeof(val), &valLen))
+{
+    /* val == "yes", valLen == 3 */
+}
+
+/* Second occurrence of "name" in [section] → "0" */
+if (SSFINIGetStrValue(ini, "section", "name", 1, val, sizeof(val), NULL))
+{
+    /* val == "0" */
+}
+```
+
 ---
 
 <a id="ssfinigetboolvalue"></a>
 
-### [↑](#ssfini--ini-file-parsergenerator) [`SSFINIGetBoolValue()`](#ex-getbool)
+### [↑](#ssfini--ini-file-parsergenerator) [`bool SSFINIGetBoolValue()`](#functions)
 
 ```c
 bool SSFINIGetBoolValue(SSFCStrIn_t ini, SSFCStrIn_t section, SSFCStrIn_t name, uint8_t index,
@@ -167,11 +219,29 @@ true values: `1`, `yes`, `on`, `true` (case-insensitive). Recognized false value
 
 **Returns:** `true` if the entry was found and the value is a recognized boolean string; `false` otherwise.
 
+<a id="ex-getbool"></a>
+
+```c
+bool b;
+
+/* "name=yes" at index 0 */
+if (SSFINIGetBoolValue(ini, "section", "name", 0, &b))
+{
+    /* b == true */
+}
+
+/* "name=0" at index 1 */
+if (SSFINIGetBoolValue(ini, "section", "name", 1, &b))
+{
+    /* b == false */
+}
+```
+
 ---
 
 <a id="ssfinigetintvalue"></a>
 
-### [↑](#ssfini--ini-file-parsergenerator) [`SSFINIGetIntValue()`](#ex-getint)
+### [↑](#ssfini--ini-file-parsergenerator) [`bool SSFINIGetIntValue()`](#functions)
 
 ```c
 bool SSFINIGetIntValue(SSFCStrIn_t ini, SSFCStrIn_t section, SSFCStrIn_t name, uint8_t index,
@@ -191,11 +261,29 @@ it as a signed 64-bit decimal integer.
 
 **Returns:** `true` if the entry was found and parsed as a valid integer; `false` otherwise.
 
+<a id="ex-getint"></a>
+
+```c
+int64_t n;
+
+/* "global=42" in global scope */
+if (SSFINIGetIntValue(ini, NULL, "global", 0, &n))
+{
+    /* n == 42 */
+}
+
+/* "name=0" at index 1 in [section] */
+if (SSFINIGetIntValue(ini, "section", "name", 1, &n))
+{
+    /* n == 0 */
+}
+```
+
 ---
 
 <a id="ssfiniprintcomment"></a>
 
-### [↑](#ssfini--ini-file-parsergenerator) [`SSFINIPrintComment()`](#ex-printcomment)
+### [↑](#ssfini--ini-file-parsergenerator) [`bool SSFINIPrintComment()`](#functions)
 
 ```c
 bool SSFINIPrintComment(SSFCStrOut_t ini, size_t iniSize, size_t *iniLen, SSFCStrIn_t text,
@@ -217,11 +305,24 @@ updated by each successive call.
 
 **Returns:** `true` if the comment line was appended; `false` if the buffer is too small.
 
+<a id="ex-printcomment"></a>
+
+```c
+char buf[128];
+size_t len = 0;
+
+SSFINIPrintComment(buf, sizeof(buf), &len, " generated config", SSF_INI_COMMENT_SEMI, SSF_INI_CRLF);
+/* buf == "; generated config\r\n" */
+
+SSFINIPrintComment(buf, sizeof(buf), &len, " also a comment",   SSF_INI_COMMENT_HASH, SSF_INI_CRLF);
+/* buf == "; generated config\r\n# also a comment\r\n" */
+```
+
 ---
 
 <a id="ssfiniprintsection"></a>
 
-### [↑](#ssfini--ini-file-parsergenerator) [`SSFINIPrintSection()`](#ex-printsection)
+### [↑](#ssfini--ini-file-parsergenerator) [`bool SSFINIPrintSection()`](#functions)
 
 ```c
 bool SSFINIPrintSection(SSFCStrOut_t ini, size_t iniSize, size_t *iniLen, SSFCStrIn_t section,
@@ -240,11 +341,21 @@ Appends a section header line (`[section]`) to the INI output buffer.
 
 **Returns:** `true` if the section header was appended; `false` if the buffer is too small.
 
+<a id="ex-printsection"></a>
+
+```c
+char buf[128];
+size_t len = 0;
+
+SSFINIPrintSection(buf, sizeof(buf), &len, "network", SSF_INI_CRLF);
+/* buf == "[network]\r\n" */
+```
+
 ---
 
 <a id="ssfiniprintnamestrvalue"></a>
 
-### [↑](#ssfini--ini-file-parsergenerator) [`SSFINIPrintNameStrValue()`](#ex-printstrvalue)
+### [↑](#ssfini--ini-file-parsergenerator) [`bool SSFINIPrintNameStrValue()`](#functions)
 
 ```c
 bool SSFINIPrintNameStrValue(SSFCStrOut_t ini, size_t iniSize, size_t *iniLen, SSFCStrIn_t name,
@@ -264,11 +375,22 @@ Appends a `name=value` line with a string value to the INI output buffer.
 
 **Returns:** `true` if the line was appended; `false` if the buffer is too small.
 
+<a id="ex-printstrvalue"></a>
+
+```c
+char buf[128];
+size_t len = 0;
+
+SSFINIPrintSection     (buf, sizeof(buf), &len, "network",   SSF_INI_CRLF);
+SSFINIPrintNameStrValue(buf, sizeof(buf), &len, "host", "localhost", SSF_INI_CRLF);
+/* buf == "[network]\r\nhost=localhost\r\n" */
+```
+
 ---
 
 <a id="ssfiniprintnameboolvalue"></a>
 
-### [↑](#ssfini--ini-file-parsergenerator) [`SSFINIPrintNameBoolValue()`](#ex-printboolvalue)
+### [↑](#ssfini--ini-file-parsergenerator) [`bool SSFINIPrintNameBoolValue()`](#functions)
 
 ```c
 bool SSFINIPrintNameBoolValue(SSFCStrOut_t ini, size_t iniSize, size_t *iniLen, SSFCStrIn_t name,
@@ -290,11 +412,23 @@ representation is selected by `boolType`.
 
 **Returns:** `true` if the line was appended; `false` if the buffer is too small.
 
+<a id="ex-printboolvalue"></a>
+
+```c
+char buf[128];
+size_t len = 0;
+
+SSFINIPrintSection      (buf, sizeof(buf), &len, "network",             SSF_INI_CRLF);
+SSFINIPrintNameBoolValue(buf, sizeof(buf), &len, "enabled", true,  SSF_INI_BOOL_YES_NO,    SSF_INI_CRLF);
+SSFINIPrintNameBoolValue(buf, sizeof(buf), &len, "debug",   false, SSF_INI_BOOL_TRUE_FALSE, SSF_INI_CRLF);
+/* buf == "[network]\r\nenabled=yes\r\ndebug=false\r\n" */
+```
+
 ---
 
 <a id="ssfiniprintnameintvalue"></a>
 
-### [↑](#ssfini--ini-file-parsergenerator) [`SSFINIPrintNameIntValue()`](#ex-printintvalue)
+### [↑](#ssfini--ini-file-parsergenerator) [`bool SSFINIPrintNameIntValue()`](#functions)
 
 ```c
 bool SSFINIPrintNameIntValue(SSFCStrOut_t ini, size_t iniSize, size_t *iniLen, SSFCStrIn_t name,
@@ -314,163 +448,7 @@ Appends a `name=value` line with a signed 64-bit integer value to the INI output
 
 **Returns:** `true` if the line was appended; `false` if the buffer is too small.
 
-<a id="examples"></a>
-
-## [↑](#ssfini--ini-file-parsergenerator) Examples
-
-The parser examples all use this INI source string:
-
-```c
-const char ini[] = "global=42\r\n"
-                   "[section]\r\n"
-                   "name=yes\r\n"
-                   "name=0\r\n"
-                   "host=localhost\r\n";
-```
-
-<a id="ex-issectionpresent"></a>
-
-### [↑](#ssfini--ini-file-parsergenerator) [SSFINIIsSectionPresent()](#ssfiniissectionpresent)
-
-```c
-SSFINIIsSectionPresent(ini, "section");   /* returns true  */
-SSFINIIsSectionPresent(ini, "Section");   /* returns false — case-sensitive */
-SSFINIIsSectionPresent(ini, "other");     /* returns false */
-```
-
-<a id="ex-isnamepresent"></a>
-
-### [↑](#ssfini--ini-file-parsergenerator) [SSFINIIsNameValuePresent()](#ssfiniisnamevaluepresent)
-
-```c
-/* Global scope (NULL section) */
-SSFINIIsNameValuePresent(ini, NULL,      "global", 0);   /* returns true  */
-SSFINIIsNameValuePresent(ini, NULL,      "global", 1);   /* returns false — only one occurrence */
-
-/* Named section — "name" appears twice, index 0 and 1 */
-SSFINIIsNameValuePresent(ini, "section", "name", 0);     /* returns true  */
-SSFINIIsNameValuePresent(ini, "section", "name", 1);     /* returns true  */
-SSFINIIsNameValuePresent(ini, "section", "name", 2);     /* returns false */
-```
-
-<a id="ex-getstr"></a>
-
-### [↑](#ssfini--ini-file-parsergenerator) [SSFINIGetStrValue()](#ssfinigetstrvalue)
-
-```c
-char val[32];
-size_t valLen;
-
-/* First occurrence of "name" in [section] → "yes" */
-if (SSFINIGetStrValue(ini, "section", "name", 0, val, sizeof(val), &valLen))
-{
-    /* val == "yes", valLen == 3 */
-}
-
-/* Second occurrence of "name" in [section] → "0" */
-if (SSFINIGetStrValue(ini, "section", "name", 1, val, sizeof(val), NULL))
-{
-    /* val == "0" */
-}
-```
-
-<a id="ex-getbool"></a>
-
-### [↑](#ssfini--ini-file-parsergenerator) [SSFINIGetBoolValue()](#ssfinigetboolvalue)
-
-```c
-bool b;
-
-/* "name=yes" at index 0 */
-if (SSFINIGetBoolValue(ini, "section", "name", 0, &b))
-{
-    /* b == true */
-}
-
-/* "name=0" at index 1 */
-if (SSFINIGetBoolValue(ini, "section", "name", 1, &b))
-{
-    /* b == false */
-}
-```
-
-<a id="ex-getint"></a>
-
-### [↑](#ssfini--ini-file-parsergenerator) [SSFINIGetIntValue()](#ssfinigetintvalue)
-
-```c
-int64_t n;
-
-/* "global=42" in global scope */
-if (SSFINIGetIntValue(ini, NULL, "global", 0, &n))
-{
-    /* n == 42 */
-}
-
-/* "name=0" at index 1 in [section] */
-if (SSFINIGetIntValue(ini, "section", "name", 1, &n))
-{
-    /* n == 0 */
-}
-```
-
-<a id="ex-printcomment"></a>
-
-### [↑](#ssfini--ini-file-parsergenerator) [SSFINIPrintComment()](#ssfiniprintcomment)
-
-```c
-char buf[128];
-size_t len = 0;
-
-SSFINIPrintComment(buf, sizeof(buf), &len, " generated config", SSF_INI_COMMENT_SEMI, SSF_INI_CRLF);
-/* buf == "; generated config\r\n" */
-
-SSFINIPrintComment(buf, sizeof(buf), &len, " also a comment",   SSF_INI_COMMENT_HASH, SSF_INI_CRLF);
-/* buf == "; generated config\r\n# also a comment\r\n" */
-```
-
-<a id="ex-printsection"></a>
-
-### [↑](#ssfini--ini-file-parsergenerator) [SSFINIPrintSection()](#ssfiniprintsection)
-
-```c
-char buf[128];
-size_t len = 0;
-
-SSFINIPrintSection(buf, sizeof(buf), &len, "network", SSF_INI_CRLF);
-/* buf == "[network]\r\n" */
-```
-
-<a id="ex-printstrvalue"></a>
-
-### [↑](#ssfini--ini-file-parsergenerator) [SSFINIPrintNameStrValue()](#ssfiniprintnamestrvalue)
-
-```c
-char buf[128];
-size_t len = 0;
-
-SSFINIPrintSection     (buf, sizeof(buf), &len, "network",   SSF_INI_CRLF);
-SSFINIPrintNameStrValue(buf, sizeof(buf), &len, "host", "localhost", SSF_INI_CRLF);
-/* buf == "[network]\r\nhost=localhost\r\n" */
-```
-
-<a id="ex-printboolvalue"></a>
-
-### [↑](#ssfini--ini-file-parsergenerator) [SSFINIPrintNameBoolValue()](#ssfiniprintnameboolvalue)
-
-```c
-char buf[128];
-size_t len = 0;
-
-SSFINIPrintSection      (buf, sizeof(buf), &len, "network",             SSF_INI_CRLF);
-SSFINIPrintNameBoolValue(buf, sizeof(buf), &len, "enabled", true,  SSF_INI_BOOL_YES_NO,    SSF_INI_CRLF);
-SSFINIPrintNameBoolValue(buf, sizeof(buf), &len, "debug",   false, SSF_INI_BOOL_TRUE_FALSE, SSF_INI_CRLF);
-/* buf == "[network]\r\nenabled=yes\r\ndebug=false\r\n" */
-```
-
 <a id="ex-printintvalue"></a>
-
-### [↑](#ssfini--ini-file-parsergenerator) [SSFINIPrintNameIntValue()](#ssfiniprintnameintvalue)
 
 ```c
 char buf[128];
@@ -481,3 +459,4 @@ SSFINIPrintNameIntValue(buf, sizeof(buf), &len, "port",    8080,    SSF_INI_CRLF
 SSFINIPrintNameIntValue(buf, sizeof(buf), &len, "timeout", -1,      SSF_INI_CRLF);
 /* buf == "[network]\r\nport=8080\r\ntimeout=-1\r\n" */
 ```
+

@@ -1,6 +1,6 @@
 # Codecs
 
-[Back to ssf README](../README.md)
+[SSF](../README.md)
 
 Encoding and decoding interfaces.
 

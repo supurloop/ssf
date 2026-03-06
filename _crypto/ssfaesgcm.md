@@ -10,7 +10,7 @@ generation over an empty message, tag generation over additional authenticated d
 authenticated encryption without AAD, and authenticated encryption with AAD. Pass `NULL` and `0`
 for any unused field.
 
-[Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference) | [Examples](#examples)
+[Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference)
 
 <a id="dependencies"></a>
 
@@ -46,12 +46,14 @@ This module has no compile-time configuration options in `ssfoptions.h`.
 
 ## [↑](#ssfaesgcm--aes-gcm-authenticated-encryption) API Summary
 
+<a id="functions"></a>
+
 ### Functions
 
 | | Function | Description |
 |---|----------|-------------|
-| [e.g.](#ex-encrypt) | [`SSFAESGCMEncrypt(pt, ptLen, iv, ivLen, auth, authLen, key, keyLen, tag, tagSize, ct, ctSize)`](#ssfaesgcmencrypt) | Encrypt and/or authenticate data; produce an authentication tag |
-| [e.g.](#ex-decrypt) | [`SSFAESGCMDecrypt(ct, ctLen, iv, ivLen, auth, authLen, key, keyLen, tag, tagLen, pt, ptSize)`](#ssfaesgcmdecrypt) | Verify authentication tag and decrypt data |
+| [e.g.](#ex-encrypt) | [`void SSFAESGCMEncrypt(pt, ptLen, iv, ivLen, auth, authLen, key, keyLen, tag, tagSize, ct, ctSize)`](#ssfaesgcmencrypt) | Encrypt and/or authenticate data; produce an authentication tag |
+| [e.g.](#ex-decrypt) | [`bool SSFAESGCMDecrypt(ct, ctLen, iv, ivLen, auth, authLen, key, keyLen, tag, tagLen, pt, ptSize)`](#ssfaesgcmdecrypt) | Verify authentication tag and decrypt data |
 
 <a id="function-reference"></a>
 
@@ -59,7 +61,7 @@ This module has no compile-time configuration options in `ssfoptions.h`.
 
 <a id="ssfaesgcmencrypt"></a>
 
-### [↑](#ssfaesgcm--aes-gcm-authenticated-encryption) [`SSFAESGCMEncrypt()`](#ex-encrypt)
+### [↑](#functions) [`void SSFAESGCMEncrypt()`](#functions)
 
 ```c
 void SSFAESGCMEncrypt(const uint8_t *pt, size_t ptLen, const uint8_t *iv, size_t ivLen,
@@ -95,11 +97,47 @@ produces a 16-byte authentication tag over the ciphertext and any additional aut
 
 **Returns:** Nothing.
 
+<a id="ex-encrypt"></a>
+
+**Example:**
+
+```c
+uint8_t key[16] = {
+    0x00u, 0x01u, 0x02u, 0x03u, 0x04u, 0x05u, 0x06u, 0x07u,
+    0x08u, 0x09u, 0x0au, 0x0bu, 0x0cu, 0x0du, 0x0eu, 0x0fu
+};
+/* 96-bit IV — must be unique for every encryption with this key */
+uint8_t iv[12] = {
+    0x10u, 0x11u, 0x12u, 0x13u, 0x14u, 0x15u, 0x16u, 0x17u,
+    0x18u, 0x19u, 0x1au, 0x1bu
+};
+uint8_t tag[16];
+uint8_t pt[]   = { 0x48u, 0x65u, 0x6cu, 0x6cu, 0x6fu }; /* "Hello" */
+uint8_t auth[] = { 0x68u, 0x64u, 0x72u };                /* "hdr"   */
+uint8_t ct[sizeof(pt)];
+
+/* Mode 1: tag over empty message — no plaintext, no AAD */
+SSFAESGCMEncrypt(NULL, 0, iv, sizeof(iv), NULL, 0,
+                 key, sizeof(key), tag, sizeof(tag), NULL, 0);
+
+/* Mode 2: tag over AAD only — authenticate header without encrypting anything */
+SSFAESGCMEncrypt(NULL, 0, iv, sizeof(iv), auth, sizeof(auth),
+                 key, sizeof(key), tag, sizeof(tag), NULL, 0);
+
+/* Mode 3: authenticated encryption without AAD */
+SSFAESGCMEncrypt(pt, sizeof(pt), iv, sizeof(iv), NULL, 0,
+                 key, sizeof(key), tag, sizeof(tag), ct, sizeof(ct));
+
+/* Mode 4: authenticated encryption with AAD */
+SSFAESGCMEncrypt(pt, sizeof(pt), iv, sizeof(iv), auth, sizeof(auth),
+                 key, sizeof(key), tag, sizeof(tag), ct, sizeof(ct));
+```
+
 ---
 
 <a id="ssfaesgcmdecrypt"></a>
 
-### [↑](#ssfaesgcm--aes-gcm-authenticated-encryption) [`SSFAESGCMDecrypt()`](#ex-decrypt)
+### [↑](#functions) [`bool SSFAESGCMDecrypt()`](#functions)
 
 ```c
 bool SSFAESGCMDecrypt(const uint8_t *ct, size_t ctLen, const uint8_t *iv, size_t ivLen,
@@ -130,59 +168,30 @@ returned and the contents of `pt` must be treated as invalid. All parameters (`i
 **Returns:** `true` if the authentication tag verified and decryption succeeded; `false` if the
 tag did not match or an argument is invalid. Always check the return value before using `pt`.
 
-<a id="examples"></a>
+<a id="ex-decrypt"></a>
 
-## [↑](#ssfaesgcm--aes-gcm-authenticated-encryption) Examples
-
-The examples below share this key and IV:
+**Example:**
 
 ```c
 uint8_t key[16] = {
     0x00u, 0x01u, 0x02u, 0x03u, 0x04u, 0x05u, 0x06u, 0x07u,
     0x08u, 0x09u, 0x0au, 0x0bu, 0x0cu, 0x0du, 0x0eu, 0x0fu
 };
-/* 96-bit IV — must be unique for every encryption with this key */
 uint8_t iv[12] = {
     0x10u, 0x11u, 0x12u, 0x13u, 0x14u, 0x15u, 0x16u, 0x17u,
     0x18u, 0x19u, 0x1au, 0x1bu
 };
-uint8_t tag[16];
-```
-
-<a id="ex-encrypt"></a>
-
-### [↑](#ssfaesgcm--aes-gcm-authenticated-encryption) [SSFAESGCMEncrypt()](#ssfaesgcmencrypt)
-
-```c
 uint8_t pt[]   = { 0x48u, 0x65u, 0x6cu, 0x6cu, 0x6fu }; /* "Hello" */
 uint8_t auth[] = { 0x68u, 0x64u, 0x72u };                /* "hdr"   */
 uint8_t ct[sizeof(pt)];
-
-/* Mode 1: tag over empty message — no plaintext, no AAD */
-SSFAESGCMEncrypt(NULL, 0, iv, sizeof(iv), NULL, 0,
-                 key, sizeof(key), tag, sizeof(tag), NULL, 0);
-
-/* Mode 2: tag over AAD only — authenticate header without encrypting anything */
-SSFAESGCMEncrypt(NULL, 0, iv, sizeof(iv), auth, sizeof(auth),
-                 key, sizeof(key), tag, sizeof(tag), NULL, 0);
-
-/* Mode 3: authenticated encryption without AAD */
-SSFAESGCMEncrypt(pt, sizeof(pt), iv, sizeof(iv), NULL, 0,
-                 key, sizeof(key), tag, sizeof(tag), ct, sizeof(ct));
-
-/* Mode 4: authenticated encryption with AAD */
-SSFAESGCMEncrypt(pt, sizeof(pt), iv, sizeof(iv), auth, sizeof(auth),
-                 key, sizeof(key), tag, sizeof(tag), ct, sizeof(ct));
-```
-
-<a id="ex-decrypt"></a>
-
-### [↑](#ssfaesgcm--aes-gcm-authenticated-encryption) [SSFAESGCMDecrypt()](#ssfaesgcmdecrypt)
-
-```c
+uint8_t tag[16];
 uint8_t dpt[sizeof(pt)];
 
-/* Verify tag and decrypt the output produced by Mode 4 above */
+/* Produce ciphertext and tag first (Mode 4: authenticated encryption with AAD) */
+SSFAESGCMEncrypt(pt, sizeof(pt), iv, sizeof(iv), auth, sizeof(auth),
+                 key, sizeof(key), tag, sizeof(tag), ct, sizeof(ct));
+
+/* Verify tag and decrypt */
 if (SSFAESGCMDecrypt(ct, sizeof(ct), iv, sizeof(iv), auth, sizeof(auth),
                      key, sizeof(key), tag, sizeof(tag), dpt, sizeof(dpt)))
 {

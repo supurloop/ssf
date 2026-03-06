@@ -14,7 +14,7 @@ YYYY-MM-DDTHH:MM:SS[.FFF|.FFFFFF|.FFFFFFFFF][Z|+HH|+HH:MM|-HH|-HH:MM|(absent)]
 The fractional-seconds field width is determined by `SSF_TICKS_PER_SEC` (3 digits for ms,
 6 for µs, 9 for ns). This is the only SSF time interface that handles local time zones.
 
-[Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference) | [Examples](#examples)
+[Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference)
 
 <a id="dependencies"></a>
 
@@ -70,12 +70,14 @@ All options are set in `ssfoptions.h`.
 | `SSF_ISO8601_ZONE_OFFSET_HHMM` | Enum value | Append `±HH:MM` hour-and-minute offset to the output string |
 | `SSF_ISO8601_ZONE_LOCAL` | Enum value | Omit the timezone field entirely |
 
+<a id="functions"></a>
+
 ### Functions
 
 | | Function | Description |
 |---|----------|-------------|
-| [e.g.](#ex-unixtoiso) | [`SSFISO8601UnixToISO(unixSys, secPrecision, secPseudoPrecision, pseudoSecs, zone, zoneOffsetMin, outStr, outStrSize)`](#ssfiso8601unixtoiso) | Convert Unix time in system ticks to an ISO 8601 string |
-| [e.g.](#ex-isotounix) | [`SSFISO8601ISOToUnix(inStr, unixSys, zoneOffsetMin)`](#ssfiso8601isotounix) | Parse an ISO 8601 string to Unix time in system ticks |
+| [e.g.](#ex-unixtoiso) | [`bool SSFISO8601UnixToISO(unixSys, secPrecision, secPseudoPrecision, pseudoSecs, zone, zoneOffsetMin, outStr, outStrSize)`](#ssfiso8601unixtoiso) | Convert Unix time in system ticks to an ISO 8601 string |
+| [e.g.](#ex-isotounix) | [`bool SSFISO8601ISOToUnix(inStr, unixSys, zoneOffsetMin)`](#ssfiso8601isotounix) | Parse an ISO 8601 string to Unix time in system ticks |
 
 <a id="function-reference"></a>
 
@@ -83,7 +85,7 @@ All options are set in `ssfoptions.h`.
 
 <a id="ssfiso8601unixtoiso"></a>
 
-### [↑](#ssfiso8601--iso-8601-datetime-string-interface) [`SSFISO8601UnixToISO()`](#ex-unixtoiso)
+### [↑](#functions) [`bool SSFISO8601UnixToISO()`](#functions)
 
 ```c
 bool SSFISO8601UnixToISO(SSFPortTick_t unixSys, bool secPrecision, bool secPseudoPrecision,
@@ -118,54 +120,15 @@ On failure [`SSF_ISO8601_ERR_STR`](#opt-err-str) is written to `outStr` and `fal
 
 **Returns:** `true` if the conversion succeeded and `outStr` contains a valid ISO 8601 string; `false` if any argument is invalid or `unixSys` is out of range.
 
----
-
-<a id="ssfiso8601isotounix"></a>
-
-### [↑](#ssfiso8601--iso-8601-datetime-string-interface) [`SSFISO8601ISOToUnix()`](#ex-isotounix)
-
-```c
-bool SSFISO8601ISOToUnix(SSFCStrIn_t inStr, SSFPortTick_t *unixSys, int16_t *zoneOffsetMin);
-```
-
-Parses a null-terminated ISO 8601 extended datetime string and converts it to a Unix time value
-in system ticks. All of the following optional fields are accepted:
-
-```
-YYYY-MM-DDTHH:MM:SS[.FFF|.FFFFFF|.FFFFFFFFF][Z|+HH|+HH:MM|-HH|-HH:MM|(absent)]
-```
-
-When a timezone is present, `*unixSys` is adjusted to UTC and `*zoneOffsetMin` receives the
-parsed offset. When no timezone is present, behaviour is controlled by
-[`SSF_ISO8601_ALLOW_NO_ZONE_ISO_TO_UNIX`](#opt-no-zone): if `1`, `*unixSys` is returned
-unadjusted and `*zoneOffsetMin` is set to [`SSFISO8601_INVALID_ZONE_OFFSET`](#const-invalid-zone);
-if `0`, the call returns `false`.
-
-| Parameter | Direction | Type | Description |
-|-----------|-----------|------|-------------|
-| `inStr` | in | `const char *` | Null-terminated ISO 8601 string to parse. Must not be `NULL`. |
-| `unixSys` | out | `SSFPortTick_t *` | Receives the parsed Unix time in system ticks, adjusted to UTC when a timezone is present. Must not be `NULL`. |
-| `zoneOffsetMin` | out | `int16_t *` | Receives the timezone offset in minutes: `0` for UTC (`Z`), the parsed signed value for `±HH`/`±HH:MM`, or [`SSFISO8601_INVALID_ZONE_OFFSET`](#const-invalid-zone) when no timezone field is present. Must not be `NULL`. |
-
-**Returns:** `true` if parsing succeeded and `*unixSys` was set; `false` if the string is malformed, out of range, or has no timezone when [`SSF_ISO8601_ALLOW_NO_ZONE_ISO_TO_UNIX`](#opt-no-zone) is `0`.
-
-<a id="examples"></a>
-
-## [↑](#ssfiso8601--iso-8601-datetime-string-interface) Examples
-
-The examples below use this Unix timestamp (ms ticks, `SSF_TICKS_PER_SEC == 1000`):
-
-```c
-/* 2024-03-15T10:30:45Z expressed in milliseconds */
-SSFPortTick_t unixSys = 1710498645000ull;
-char          iso[SSFISO8601_MAX_SIZE];
-```
-
 <a id="ex-unixtoiso"></a>
 
-### [↑](#ssfiso8601--iso-8601-datetime-string-interface) [SSFISO8601UnixToISO()](#ssfiso8601unixtoiso)
+**Example:**
 
 ```c
+/* 2024-03-15T10:30:45Z expressed in milliseconds (SSF_TICKS_PER_SEC == 1000) */
+SSFPortTick_t unixSys = 1710498645000ull;
+char          iso[SSFISO8601_MAX_SIZE];
+
 /* UTC, no fractional seconds */
 if (SSFISO8601UnixToISO(unixSys, false, false, 0,
                         SSF_ISO8601_ZONE_UTC, 0,
@@ -216,9 +179,40 @@ if (SSFISO8601UnixToISO(unixSys, false, false, 0,
 }
 ```
 
+---
+
+<a id="ssfiso8601isotounix"></a>
+
+### [↑](#functions) [`bool SSFISO8601ISOToUnix()`](#functions)
+
+```c
+bool SSFISO8601ISOToUnix(SSFCStrIn_t inStr, SSFPortTick_t *unixSys, int16_t *zoneOffsetMin);
+```
+
+Parses a null-terminated ISO 8601 extended datetime string and converts it to a Unix time value
+in system ticks. All of the following optional fields are accepted:
+
+```
+YYYY-MM-DDTHH:MM:SS[.FFF|.FFFFFF|.FFFFFFFFF][Z|+HH|+HH:MM|-HH|-HH:MM|(absent)]
+```
+
+When a timezone is present, `*unixSys` is adjusted to UTC and `*zoneOffsetMin` receives the
+parsed offset. When no timezone is present, behaviour is controlled by
+[`SSF_ISO8601_ALLOW_NO_ZONE_ISO_TO_UNIX`](#opt-no-zone): if `1`, `*unixSys` is returned
+unadjusted and `*zoneOffsetMin` is set to [`SSFISO8601_INVALID_ZONE_OFFSET`](#const-invalid-zone);
+if `0`, the call returns `false`.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `inStr` | in | `const char *` | Null-terminated ISO 8601 string to parse. Must not be `NULL`. |
+| `unixSys` | out | `SSFPortTick_t *` | Receives the parsed Unix time in system ticks, adjusted to UTC when a timezone is present. Must not be `NULL`. |
+| `zoneOffsetMin` | out | `int16_t *` | Receives the timezone offset in minutes: `0` for UTC (`Z`), the parsed signed value for `±HH`/`±HH:MM`, or [`SSFISO8601_INVALID_ZONE_OFFSET`](#const-invalid-zone) when no timezone field is present. Must not be `NULL`. |
+
+**Returns:** `true` if parsing succeeded and `*unixSys` was set; `false` if the string is malformed, out of range, or has no timezone when [`SSF_ISO8601_ALLOW_NO_ZONE_ISO_TO_UNIX`](#opt-no-zone) is `0`.
+
 <a id="ex-isotounix"></a>
 
-### [↑](#ssfiso8601--iso-8601-datetime-string-interface) [SSFISO8601ISOToUnix()](#ssfiso8601isotounix)
+**Example:**
 
 ```c
 SSFPortTick_t parsedUnix;
@@ -255,6 +249,8 @@ if (SSFISO8601ISOToUnix("2024-03-15T10:30:45", &parsedUnix, &zone))
 }
 
 /* Round-trip: generate then parse */
+SSFPortTick_t unixSys = 1710498645000ull;
+char          iso[SSFISO8601_MAX_SIZE];
 SSFISO8601UnixToISO(unixSys, false, false, 0, SSF_ISO8601_ZONE_UTC, 0, iso, sizeof(iso));
 SSFISO8601ISOToUnix(iso, &parsedUnix, &zone);
 /* parsedUnix == unixSys, zone == 0 */

@@ -9,7 +9,7 @@ Porting SSF to a new target requires editing only `ssfport.h` and `ssfport.c`. O
 `SSFPortGetTick64()` and `SSFPortAssert()` are implemented and the configuration constants are
 set, all SSF modules build and run without further modification.
 
-[Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference) | [Examples](#examples)
+[Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference)
 
 <a id="dependencies"></a>
 
@@ -101,17 +101,19 @@ Required when `SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1`. Implement these five macr
 | `SSFIsDigit(c)` | Macro | Non-zero if `c` is an ASCII decimal digit (`'0'`–`'9'`) |
 | `SSF_UNUSED(x)` | Macro | Suppresses unused-variable or unused-parameter compiler warnings |
 
+<a id="functions"></a>
+
 ### Functions
 
 | | Function / Macro | Description |
 |---|-----------------|-------------|
-| [e.g.](#ex-portassert) | [`SSFPortAssert(file, line)`](#ssfportassert) | Assertion handler — implement in `ssfport.c`; never returns in production |
-| [e.g.](#ex-gettick64) | [`SSFPortGetTick64()`](#ssfportgettick64) | Return the 64-bit monotonic tick counter — implement in `ssfport.c` |
-| [e.g.](#ex-assert-macros) | [`SSF_ASSERT(x)` / `SSF_REQUIRE(x)` / `SSF_ENSURE(x)` / `SSF_ERROR()`](#ssf-assert) | Design-by-contract assertion macros |
-| [e.g.](#ex-htons) | [`htons(x)` / `ntohs(x)`](#htons) | 16-bit host↔network byte order conversion |
-| [e.g.](#ex-htonl) | [`htonl(x)` / `ntohl(x)`](#htonl) | 32-bit host↔network byte order conversion |
-| [e.g.](#ex-htonll) | [`htonll(x)` / `ntohll(x)`](#htonll) | 64-bit host↔network byte order conversion |
-| [e.g.](#ex-mutex) | [`SSF_MUTEX_DECLARATION(m)` / `SSF_MUTEX_INIT(m)` / `SSF_MUTEX_DEINIT(m)` / `SSF_MUTEX_ACQUIRE(m)` / `SSF_MUTEX_RELEASE(m)`](#ssf-mutex-declaration) | Mutex primitives (requires `SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1`) |
+| [e.g.](#ex-portassert) | [`void SSFPortAssert(file, line)`](#ssfportassert) | Assertion handler — implement in `ssfport.c`; never returns in production |
+| [e.g.](#ex-gettick64) | [`SSFPortTick_t SSFPortGetTick64()`](#ssfportgettick64) | Return the 64-bit monotonic tick counter — implement in `ssfport.c` |
+| [e.g.](#ex-assert-macros) | [`void SSF_ASSERT(x)` / `void SSF_REQUIRE(x)` / `void SSF_ENSURE(x)` / `void SSF_ERROR()`](#ssf-assert) | Design-by-contract assertion macros |
+| [e.g.](#ex-htons) | [`uint16_t htons(x)` / `uint16_t ntohs(x)`](#htons) | 16-bit host↔network byte order conversion |
+| [e.g.](#ex-htonl) | [`uint32_t htonl(x)` / `uint32_t ntohl(x)`](#htonl) | 32-bit host↔network byte order conversion |
+| [e.g.](#ex-htonll) | [`uint64_t htonll(x)` / `uint64_t ntohll(x)`](#htonll) | 64-bit host↔network byte order conversion |
+| [e.g.](#ex-mutex) | [`void SSF_MUTEX_DECLARATION(m)` / `void SSF_MUTEX_INIT(m)` / `void SSF_MUTEX_DEINIT(m)` / `void SSF_MUTEX_ACQUIRE(m)` / `void SSF_MUTEX_RELEASE(m)`](#ssf-mutex-declaration) | Mutex primitives (requires `SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1`) |
 
 <a id="function-reference"></a>
 
@@ -119,7 +121,7 @@ Required when `SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1`. Implement these five macr
 
 <a id="ssfportassert"></a>
 
-### [↑](#ssfport--platform-port) [`SSFPortAssert()`](#ex-portassert)
+### [↑](#functions) [`void SSFPortAssert()`](#functions)
 
 ```c
 void SSFPortAssert(const char *file, unsigned int line);
@@ -137,11 +139,30 @@ recommended behaviour is to log the fault location to non-volatile memory and re
 **Returns:** Never (in production). In unit-test builds the default implementation calls
 `longjmp()` to allow assertion-triggering tests to continue.
 
+<a id="ex-portassert"></a>
+
+**Example:**
+
+```c
+/* ssfport.c — minimal production implementation */
+void SSFPortAssert(const char *file, unsigned int line)
+{
+    /* Log fault location to NV memory so it survives the reset */
+    MyNVLog(file, line);
+
+    /* Reset the system — this function must not return */
+    MySystemReset();
+
+    /* Unreachable; prevents compiler warning on platforms that don't know MySystemReset noreturn */
+    for (;;) {}
+}
+```
+
 ---
 
 <a id="ssfportgettick64"></a>
 
-### [↑](#ssfport--platform-port) [`SSFPortGetTick64()`](#ex-gettick64)
+### [↑](#functions) [`SSFPortTick_t SSFPortGetTick64()`](#functions)
 
 ```c
 SSFPortTick_t SSFPortGetTick64(void);
@@ -162,11 +183,32 @@ On POSIX the default port implements it in `ssfport.c` using `clock_gettime(CLOC
 
 **Returns:** [`SSFPortTick_t`](#ssfporttick-t) — current tick count.
 
+<a id="ex-gettick64"></a>
+
+**Example:**
+
+```c
+/* ssfport.c — POSIX implementation using clock_gettime (SSF_TICKS_PER_SEC == 1000) */
+SSFPortTick_t SSFPortGetTick64(void)
+{
+    struct timespec ticks;
+    clock_gettime(CLOCK_MONOTONIC, &ticks);
+    return (SSFPortTick_t)((((SSFPortTick_t)ticks.tv_sec) * 1000u) +
+                           (ticks.tv_nsec / 1000000u));
+}
+
+/* Usage in application code */
+SSFPortTick_t start = SSFPortGetTick64();
+/* ... do work ... */
+SSFPortTick_t elapsed = SSFPortGetTick64() - start;
+/* elapsed is in ticks; divide by SSF_TICKS_PER_SEC for seconds */
+```
+
 ---
 
 <a id="ssf-assert"></a>
 
-### [↑](#ssfport--platform-port) [`SSF_ASSERT()` / `SSF_REQUIRE()` / `SSF_ENSURE()` / `SSF_ERROR()`](#ex-assert-macros)
+### [↑](#functions) [`void SSF_ASSERT()` / `void SSF_REQUIRE()` / `void SSF_ENSURE()` / `void SSF_ERROR()`](#functions)
 
 ```c
 #define SSF_ASSERT(x)  do { if (!(x)) SSFPortAssert(__FILE__, (uint32_t)__LINE__); } while (0)
@@ -191,153 +233,9 @@ condition fails. They are semantically equivalent but carry intent:
 
 **Returns:** Nothing. Does not return to the caller if the condition is false.
 
----
-
-<a id="htons"></a>
-
-### [↑](#ssfport--platform-port) [`htons()` / `ntohs()`](#ex-htons)
-
-```c
-uint16_t htons(uint16_t x);   /* host to network (big-endian) byte order, 16-bit */
-uint16_t ntohs(uint16_t x);   /* network to host byte order, 16-bit */
-```
-
-Convert a 16-bit value between host byte order and network (big-endian) byte order. On
-little-endian targets (`SSF_CONFIG_LITTLE_ENDIAN == 1`) the bytes are swapped; on big-endian
-targets both macros are no-ops. `ntohs` is an alias for `htons` — the operation is its own
-inverse.
-
-These macros are defined by `ssfport.h` when `SSF_CONFIG_BYTE_ORDER_MACROS == 1`. When the
-platform already provides them (e.g., via `<arpa/inet.h>`), set
-`SSF_CONFIG_BYTE_ORDER_MACROS == 0` and include the appropriate header instead.
-
-| Parameter | Direction | Type | Description |
-|-----------|-----------|------|-------------|
-| `x` | in | `uint16_t` | Value to convert. |
-
-**Returns:** `uint16_t` — byte-swapped value on little-endian; unchanged value on big-endian.
-
----
-
-<a id="htonl"></a>
-
-### [↑](#ssfport--platform-port) [`htonl()` / `ntohl()`](#ex-htonl)
-
-```c
-uint32_t htonl(uint32_t x);   /* host to network byte order, 32-bit */
-uint32_t ntohl(uint32_t x);   /* network to host byte order, 32-bit */
-```
-
-Convert a 32-bit value between host byte order and network (big-endian) byte order. `ntohl` is
-an alias for `htonl`. Defined by `ssfport.h` when `SSF_CONFIG_BYTE_ORDER_MACROS == 1`.
-
-| Parameter | Direction | Type | Description |
-|-----------|-----------|------|-------------|
-| `x` | in | `uint32_t` | Value to convert. |
-
-**Returns:** `uint32_t` — byte-swapped value on little-endian; unchanged value on big-endian.
-
----
-
-<a id="htonll"></a>
-
-### [↑](#ssfport--platform-port) [`htonll()` / `ntohll()`](#ex-htonll)
-
-```c
-uint64_t htonll(uint64_t x);  /* host to network byte order, 64-bit */
-uint64_t ntohll(uint64_t x);  /* network to host byte order, 64-bit */
-```
-
-Convert a 64-bit value between host byte order and network (big-endian) byte order. `ntohll` is
-an alias for `htonll`. Defined by `ssfport.h` when `SSF_CONFIG_BYTE_ORDER_MACROS == 1`. Note
-that `htonll`/`ntohll` are SSF extensions — they are not part of the POSIX standard.
-
-| Parameter | Direction | Type | Description |
-|-----------|-----------|------|-------------|
-| `x` | in | `uint64_t` | Value to convert. |
-
-**Returns:** `uint64_t` — byte-swapped value on little-endian; unchanged value on big-endian.
-
----
-
-<a id="ssf-mutex-declaration"></a>
-
-### [↑](#ssfport--platform-port) [`SSF_MUTEX_DECLARATION()` / `SSF_MUTEX_INIT()` / `SSF_MUTEX_DEINIT()` / `SSF_MUTEX_ACQUIRE()` / `SSF_MUTEX_RELEASE()`](#ex-mutex)
-
-```c
-/* Requires SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1 */
-#define SSF_MUTEX_DECLARATION(mutex)  /* declare mutex variable */
-#define SSF_MUTEX_INIT(mutex)         /* initialize mutex */
-#define SSF_MUTEX_DEINIT(mutex)       /* destroy mutex */
-#define SSF_MUTEX_ACQUIRE(mutex)      /* lock mutex — blocks until acquired */
-#define SSF_MUTEX_RELEASE(mutex)      /* unlock mutex */
-```
-
-Five macros that adapt SSF's locking requirements to the platform's synchronization primitive.
-Only compiled and required when `SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1`. Implement all five in
-`ssfport.h` using the mutex, semaphore, or critical section appropriate for the target RTOS or OS.
-
-The mutex used by SSF modules must support **recursive acquisition** — the same thread may lock
-it more than once without deadlocking. On pthreads platforms use
-`PTHREAD_MUTEX_RECURSIVE`; on FreeRTOS use a recursive mutex.
-
-| Macro | Parameter | Description |
-|-------|-----------|-------------|
-| `SSF_MUTEX_DECLARATION(mutex)` | `mutex` — variable name | Expands to the mutex variable declaration, e.g., `HANDLE mutex` or `pthread_mutex_t mutex`. |
-| `SSF_MUTEX_INIT(mutex)` | `mutex` — declared variable | Initialize the mutex before first use. Assert internally on failure. |
-| `SSF_MUTEX_DEINIT(mutex)` | `mutex` — initialized variable | Destroy the mutex when it is no longer needed. |
-| `SSF_MUTEX_ACQUIRE(mutex)` | `mutex` — initialized variable | Lock the mutex; block until acquired. Assert internally on failure. |
-| `SSF_MUTEX_RELEASE(mutex)` | `mutex` — acquired variable | Unlock the mutex. Assert internally on failure. |
-
-**Returns:** Nothing. All macros assert internally on failure rather than returning an error code.
-
-<a id="examples"></a>
-
-## [↑](#ssfport--platform-port) Examples
-
-<a id="ex-portassert"></a>
-
-### [↑](#ssfport--platform-port) [SSFPortAssert()](#ssfportassert)
-
-```c
-/* ssfport.c — minimal production implementation */
-void SSFPortAssert(const char *file, unsigned int line)
-{
-    /* Log fault location to NV memory so it survives the reset */
-    MyNVLog(file, line);
-
-    /* Reset the system — this function must not return */
-    MySystemReset();
-
-    /* Unreachable; prevents compiler warning on platforms that don't know MySystemReset noreturn */
-    for (;;) {}
-}
-```
-
-<a id="ex-gettick64"></a>
-
-### [↑](#ssfport--platform-port) [SSFPortGetTick64()](#ssfportgettick64)
-
-```c
-/* ssfport.c — POSIX implementation using clock_gettime (SSF_TICKS_PER_SEC == 1000) */
-SSFPortTick_t SSFPortGetTick64(void)
-{
-    struct timespec ticks;
-    clock_gettime(CLOCK_MONOTONIC, &ticks);
-    return (SSFPortTick_t)((((SSFPortTick_t)ticks.tv_sec) * 1000u) +
-                           (ticks.tv_nsec / 1000000u));
-}
-
-/* Usage in application code */
-SSFPortTick_t start = SSFPortGetTick64();
-/* ... do work ... */
-SSFPortTick_t elapsed = SSFPortGetTick64() - start;
-/* elapsed is in ticks; divide by SSF_TICKS_PER_SEC for seconds */
-```
-
 <a id="ex-assert-macros"></a>
 
-### [↑](#ssfport--platform-port) [SSF_ASSERT() / SSF_REQUIRE() / SSF_ENSURE() / SSF_ERROR()](#ssf-assert)
+**Example:**
 
 ```c
 /* SSF_REQUIRE — validate input parameters at function entry */
@@ -366,9 +264,35 @@ switch (state)
 }
 ```
 
+---
+
+<a id="htons"></a>
+
+### [↑](#functions) [`uint16_t htons()` / `uint16_t ntohs()`](#functions)
+
+```c
+uint16_t htons(uint16_t x);   /* host to network (big-endian) byte order, 16-bit */
+uint16_t ntohs(uint16_t x);   /* network to host byte order, 16-bit */
+```
+
+Convert a 16-bit value between host byte order and network (big-endian) byte order. On
+little-endian targets (`SSF_CONFIG_LITTLE_ENDIAN == 1`) the bytes are swapped; on big-endian
+targets both macros are no-ops. `ntohs` is an alias for `htons` — the operation is its own
+inverse.
+
+These macros are defined by `ssfport.h` when `SSF_CONFIG_BYTE_ORDER_MACROS == 1`. When the
+platform already provides them (e.g., via `<arpa/inet.h>`), set
+`SSF_CONFIG_BYTE_ORDER_MACROS == 0` and include the appropriate header instead.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `x` | in | `uint16_t` | Value to convert. |
+
+**Returns:** `uint16_t` — byte-swapped value on little-endian; unchanged value on big-endian.
+
 <a id="ex-htons"></a>
 
-### [↑](#ssfport--platform-port) [htons() / ntohs()](#htons)
+**Example:**
 
 ```c
 uint16_t hostVal = 0x1234u;
@@ -382,9 +306,29 @@ uint16_t recovered = ntohs(netVal);
 /* recovered == 0x1234 */
 ```
 
+---
+
+<a id="htonl"></a>
+
+### [↑](#functions) [`uint32_t htonl()` / `uint32_t ntohl()`](#functions)
+
+```c
+uint32_t htonl(uint32_t x);   /* host to network byte order, 32-bit */
+uint32_t ntohl(uint32_t x);   /* network to host byte order, 32-bit */
+```
+
+Convert a 32-bit value between host byte order and network (big-endian) byte order. `ntohl` is
+an alias for `htonl`. Defined by `ssfport.h` when `SSF_CONFIG_BYTE_ORDER_MACROS == 1`.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `x` | in | `uint32_t` | Value to convert. |
+
+**Returns:** `uint32_t` — byte-swapped value on little-endian; unchanged value on big-endian.
+
 <a id="ex-htonl"></a>
 
-### [↑](#ssfport--platform-port) [htonl() / ntohl()](#htonl)
+**Example:**
 
 ```c
 uint32_t hostVal = 0x12345678u;
@@ -396,9 +340,30 @@ uint32_t recovered = ntohl(netVal);
 /* recovered == 0x12345678 */
 ```
 
+---
+
+<a id="htonll"></a>
+
+### [↑](#functions) [`uint64_t htonll()` / `uint64_t ntohll()`](#functions)
+
+```c
+uint64_t htonll(uint64_t x);  /* host to network byte order, 64-bit */
+uint64_t ntohll(uint64_t x);  /* network to host byte order, 64-bit */
+```
+
+Convert a 64-bit value between host byte order and network (big-endian) byte order. `ntohll` is
+an alias for `htonll`. Defined by `ssfport.h` when `SSF_CONFIG_BYTE_ORDER_MACROS == 1`. Note
+that `htonll`/`ntohll` are SSF extensions — they are not part of the POSIX standard.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `x` | in | `uint64_t` | Value to convert. |
+
+**Returns:** `uint64_t` — byte-swapped value on little-endian; unchanged value on big-endian.
+
 <a id="ex-htonll"></a>
 
-### [↑](#ssfport--platform-port) [htonll() / ntohll()](#htonll)
+**Example:**
 
 ```c
 uint64_t hostVal = 0x0102030405060708ull;
@@ -410,9 +375,42 @@ uint64_t recovered = ntohll(netVal);
 /* recovered == 0x0102030405060708 */
 ```
 
+---
+
+<a id="ssf-mutex-declaration"></a>
+
+### [↑](#functions) [`void SSF_MUTEX_DECLARATION()` / `void SSF_MUTEX_INIT()` / `void SSF_MUTEX_DEINIT()` / `void SSF_MUTEX_ACQUIRE()` / `void SSF_MUTEX_RELEASE()`](#functions)
+
+```c
+/* Requires SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1 */
+#define SSF_MUTEX_DECLARATION(mutex)  /* declare mutex variable */
+#define SSF_MUTEX_INIT(mutex)         /* initialize mutex */
+#define SSF_MUTEX_DEINIT(mutex)       /* destroy mutex */
+#define SSF_MUTEX_ACQUIRE(mutex)      /* lock mutex — blocks until acquired */
+#define SSF_MUTEX_RELEASE(mutex)      /* unlock mutex */
+```
+
+Five macros that adapt SSF's locking requirements to the platform's synchronization primitive.
+Only compiled and required when `SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1`. Implement all five in
+`ssfport.h` using the mutex, semaphore, or critical section appropriate for the target RTOS or OS.
+
+The mutex used by SSF modules must support **recursive acquisition** — the same thread may lock
+it more than once without deadlocking. On pthreads platforms use
+`PTHREAD_MUTEX_RECURSIVE`; on FreeRTOS use a recursive mutex.
+
+| Macro | Parameter | Description |
+|-------|-----------|-------------|
+| `SSF_MUTEX_DECLARATION(mutex)` | `mutex` — variable name | Expands to the mutex variable declaration, e.g., `HANDLE mutex` or `pthread_mutex_t mutex`. |
+| `SSF_MUTEX_INIT(mutex)` | `mutex` — declared variable | Initialize the mutex before first use. Assert internally on failure. |
+| `SSF_MUTEX_DEINIT(mutex)` | `mutex` — initialized variable | Destroy the mutex when it is no longer needed. |
+| `SSF_MUTEX_ACQUIRE(mutex)` | `mutex` — initialized variable | Lock the mutex; block until acquired. Assert internally on failure. |
+| `SSF_MUTEX_RELEASE(mutex)` | `mutex` — acquired variable | Unlock the mutex. Assert internally on failure. |
+
+**Returns:** Nothing. All macros assert internally on failure rather than returning an error code.
+
 <a id="ex-mutex"></a>
 
-### [↑](#ssfport--platform-port) [SSF_MUTEX_DECLARATION() / SSF_MUTEX_INIT() / SSF_MUTEX_DEINIT() / SSF_MUTEX_ACQUIRE() / SSF_MUTEX_RELEASE()](#ssf-mutex-declaration)
+**Example:**
 
 ```c
 /* ssfport.h — pthreads implementation example */

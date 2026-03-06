@@ -8,7 +8,7 @@ Hierarchical generic object tree for building, modifying, and querying structure
 independently of any wire format. Designed as a portable in-memory representation that can
 translate between JSON, UBJSON, and other encoding types.
 
-[Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference) | [Examples](#examples)
+[Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference)
 
 <a id="dependencies"></a>
 
@@ -83,36 +83,38 @@ All options are set in `ssfoptions.h`.
 | `SSF_OBJ_TYPE_OBJECT` | Structured object container with named children |
 | `SSF_OBJ_TYPE_ARRAY` | Ordered array container |
 
+<a id="functions"></a>
+
 ### Functions
 
 | | Function | Description |
 |---|---------|-------------|
-| [e.g.](#ex-init) | [`SSFGObjInit(gobj, maxChildren)`](#ssfgobjinit) | Allocate and initialize a new node |
-| [e.g.](#ex-deinit) | [`SSFGObjDeInit(gobj)`](#ssfgobjdeinit) | Free a node and all its children |
-| [e.g.](#ex-setlabel) | [`SSFGObjSetLabel(gobj, labelCStr)`](#ssfgobjsetlabel) | Set or clear the node's label |
-| [e.g.](#ex-getlabel) | [`SSFGObjGetLabel(gobj, labelCStrOut, labelCStrOutSize)`](#ssfgobjgetlabel) | Copy the node's label into a buffer |
-| [e.g.](#ex-gettype) | [`SSFGObjGetType(gobj)`](#ssfgobjgettype) | Return the node's current value type |
-| [e.g.](#ex-getsize) | [`SSFGObjGetSize(gobj)`](#ssfgobjgetsize) | Return the size of the node's stored value |
-| [e.g.](#ex-setnone) | [`SSFGObjSetNone(gobj)`](#ssfgobjsetnone) | Clear the node's value (set type to NONE) |
-| [e.g.](#ex-setstring) | [`SSFGObjSetString(gobj, valueCStr)`](#ssfgobjsetstring) | Store a string value |
-| [e.g.](#ex-getstring) | [`SSFGObjGetString(gobj, valueCStrOut, valueCStrOutSize)`](#ssfgobjgetstring) | Copy the node's string value |
-| [e.g.](#ex-setint) | [`SSFGObjSetInt(gobj, value)`](#ssfgobjsetint) | Store a signed 64-bit integer |
-| [e.g.](#ex-getint) | [`SSFGObjGetInt(gobj, valueOut)`](#ssfgobjgetint) | Read the node's signed 64-bit integer |
-| [e.g.](#ex-setuint) | [`SSFGObjSetUInt(gobj, value)`](#ssfgobjsetuint) | Store an unsigned 64-bit integer |
-| [e.g.](#ex-getuint) | [`SSFGObjGetUInt(gobj, valueOut)`](#ssfgobjgetuint) | Read the node's unsigned 64-bit integer |
-| [e.g.](#ex-setfloat) | [`SSFGObjSetFloat(gobj, value)`](#ssfgobjsetfloat) | Store a double-precision float |
-| [e.g.](#ex-getfloat) | [`SSFGObjGetFloat(gobj, valueOut)`](#ssfgobjgetfloat) | Read the node's double-precision float |
-| [e.g.](#ex-setbool) | [`SSFGObjSetBool(gobj, value)`](#ssfgobjsetbool) | Store a boolean |
-| [e.g.](#ex-getbool) | [`SSFGObjGetBool(gobj, valueOut)`](#ssfgobjgetbool) | Read the node's boolean |
-| [e.g.](#ex-setbin) | [`SSFGObjSetBin(gobj, value, valueLen)`](#ssfgobjsetbin) | Store a binary byte array |
-| [e.g.](#ex-getbin) | [`SSFGObjGetBin(gobj, valueOut, valueSize, valueLenOutOpt)`](#ssfgobjgetbin) | Copy the node's binary value |
-| [e.g.](#ex-setnull) | [`SSFGObjSetNull(gobj)`](#ssfgobjsetnull) | Set the node's type to NULL |
-| [e.g.](#ex-setobject) | [`SSFGObjSetObject(gobj)`](#ssfgobjsetobject) | Set the node's type to OBJECT container |
-| [e.g.](#ex-setarray) | [`SSFGObjSetArray(gobj)`](#ssfgobjsetarray) | Set the node's type to ARRAY container |
-| [e.g.](#ex-insertchild) | [`SSFGObjInsertChild(gobjParent, gobjChild)`](#ssfgobjinsertchild) | Append a child node to a container |
-| [e.g.](#ex-removechild) | [`SSFGObjRemoveChild(gobjParent, gobjChild)`](#ssfgobjremovechild) | Remove a child node from a container |
-| [e.g.](#ex-findpath) | [`SSFGObjFindPath(gobjRoot, path, gobjParentOut, gobjChildOut)`](#ssfgobjfindpath) | Locate a descendant by label path |
-| [e.g.](#ex-iterate) | [`SSFGObjIterate(gobj, iterateCallback)`](#ssfgobjiterate) | Depth-first traversal of a subtree |
+| [e.g.](#ex-init) | [`bool SSFGObjInit(gobj, maxChildren)`](#ssfgobjinit) | Allocate and initialize a new node |
+| [e.g.](#ex-deinit) | [`void SSFGObjDeInit(gobj)`](#ssfgobjdeinit) | Free a node and all its children |
+| [e.g.](#ex-setlabel) | [`bool SSFGObjSetLabel(gobj, labelCStr)`](#ssfgobjsetlabel) | Set or clear the node's label |
+| [e.g.](#ex-getlabel) | [`bool SSFGObjGetLabel(gobj, labelCStrOut, labelCStrOutSize)`](#ssfgobjgetlabel) | Copy the node's label into a buffer |
+| [e.g.](#ex-gettype) | [`SSFObjType_t SSFGObjGetType(gobj)`](#ssfgobjgettype) | Return the node's current value type |
+| [e.g.](#ex-getsize) | [`size_t SSFGObjGetSize(gobj)`](#ssfgobjgetsize) | Return the size of the node's stored value |
+| [e.g.](#ex-setnone) | [`bool SSFGObjSetNone(gobj)`](#ssfgobjsetnone) | Clear the node's value (set type to NONE) |
+| [e.g.](#ex-setstring) | [`bool SSFGObjSetString(gobj, valueCStr)`](#ssfgobjsetstring) | Store a string value |
+| [e.g.](#ex-getstring) | [`bool SSFGObjGetString(gobj, valueCStrOut, valueCStrOutSize)`](#ssfgobjgetstring) | Copy the node's string value |
+| [e.g.](#ex-setint) | [`bool SSFGObjSetInt(gobj, value)`](#ssfgobjsetint) | Store a signed 64-bit integer |
+| [e.g.](#ex-getint) | [`bool SSFGObjGetInt(gobj, valueOut)`](#ssfgobjgetint) | Read the node's signed 64-bit integer |
+| [e.g.](#ex-setuint) | [`bool SSFGObjSetUInt(gobj, value)`](#ssfgobjsetuint) | Store an unsigned 64-bit integer |
+| [e.g.](#ex-getuint) | [`bool SSFGObjGetUInt(gobj, valueOut)`](#ssfgobjgetuint) | Read the node's unsigned 64-bit integer |
+| [e.g.](#ex-setfloat) | [`bool SSFGObjSetFloat(gobj, value)`](#ssfgobjsetfloat) | Store a double-precision float |
+| [e.g.](#ex-getfloat) | [`bool SSFGObjGetFloat(gobj, valueOut)`](#ssfgobjgetfloat) | Read the node's double-precision float |
+| [e.g.](#ex-setbool) | [`bool SSFGObjSetBool(gobj, value)`](#ssfgobjsetbool) | Store a boolean |
+| [e.g.](#ex-getbool) | [`bool SSFGObjGetBool(gobj, valueOut)`](#ssfgobjgetbool) | Read the node's boolean |
+| [e.g.](#ex-setbin) | [`bool SSFGObjSetBin(gobj, value, valueLen)`](#ssfgobjsetbin) | Store a binary byte array |
+| [e.g.](#ex-getbin) | [`bool SSFGObjGetBin(gobj, valueOut, valueSize, valueLenOutOpt)`](#ssfgobjgetbin) | Copy the node's binary value |
+| [e.g.](#ex-setnull) | [`bool SSFGObjSetNull(gobj)`](#ssfgobjsetnull) | Set the node's type to NULL |
+| [e.g.](#ex-setobject) | [`bool SSFGObjSetObject(gobj)`](#ssfgobjsetobject) | Set the node's type to OBJECT container |
+| [e.g.](#ex-setarray) | [`bool SSFGObjSetArray(gobj)`](#ssfgobjsetarray) | Set the node's type to ARRAY container |
+| [e.g.](#ex-insertchild) | [`bool SSFGObjInsertChild(gobjParent, gobjChild)`](#ssfgobjinsertchild) | Append a child node to a container |
+| [e.g.](#ex-removechild) | [`bool SSFGObjRemoveChild(gobjParent, gobjChild)`](#ssfgobjremovechild) | Remove a child node from a container |
+| [e.g.](#ex-findpath) | [`bool SSFGObjFindPath(gobjRoot, path, gobjParentOut, gobjChildOut)`](#ssfgobjfindpath) | Locate a descendant by label path |
+| [e.g.](#ex-iterate) | [`bool SSFGObjIterate(gobj, iterateCallback)`](#ssfgobjiterate) | Depth-first traversal of a subtree |
 
 <a id="function-reference"></a>
 
@@ -120,7 +122,7 @@ All options are set in `ssfoptions.h`.
 
 <a id="ssfgobjinit"></a>
 
-### [↑](#ssfgobj--generic-object-beta) [`SSFGObjInit()`](#ex-init)
+### [↑](#ssfgobj--generic-object-beta) [`bool SSFGObjInit()`](#functions)
 
 ```c
 bool SSFGObjInit(SSFGObj_t **gobj, uint16_t maxChildren);
@@ -136,11 +138,22 @@ Allocates and initializes a new generic object node via `malloc`. The node start
 
 **Returns:** `true` if the node was allocated and initialized; `false` if `malloc` failed.
 
+<a id="ex-init"></a>
+
+```c
+SSFGObj_t *g = NULL;
+
+SSFGObjInit(&g, 0u);
+/* g is a leaf node with type SSF_OBJ_TYPE_NONE */
+SSFGObjDeInit(&g);
+/* g == NULL */
+```
+
 ---
 
 <a id="ssfgobjdeinit"></a>
 
-### [↑](#ssfgobj--generic-object-beta) [`SSFGObjDeInit()`](#ex-deinit)
+### [↑](#ssfgobj--generic-object-beta) [`void SSFGObjDeInit()`](#functions)
 
 ```c
 void SSFGObjDeInit(SSFGObj_t **gobj);
@@ -155,11 +168,22 @@ Frees the node and, recursively, all its children including their labels and val
 
 **Returns:** Nothing.
 
+<a id="ex-deinit"></a>
+
+```c
+SSFGObj_t *g = NULL;
+
+SSFGObjInit(&g, 0u);
+SSFGObjSetInt(g, 42);
+SSFGObjDeInit(&g);
+/* g == NULL; value memory freed */
+```
+
 ---
 
 <a id="ssfgobjsetlabel"></a>
 
-### [↑](#ssfgobj--generic-object-beta) [`SSFGObjSetLabel()`](#ex-setlabel)
+### [↑](#ssfgobj--generic-object-beta) [`bool SSFGObjSetLabel()`](#functions)
 
 ```c
 bool SSFGObjSetLabel(SSFGObj_t *gobj, SSFCStrIn_t labelCStr);
@@ -175,11 +199,26 @@ the label without error.
 
 **Returns:** `true` if the label was set or cleared; `false` if `malloc` failed when setting.
 
+<a id="ex-setlabel"></a>
+
+```c
+SSFGObj_t *g = NULL;
+
+SSFGObjInit(&g, 0u);
+SSFGObjSetLabel(g, "count");
+/* node label is "count" */
+
+SSFGObjSetLabel(g, NULL);
+/* label cleared */
+
+SSFGObjDeInit(&g);
+```
+
 ---
 
 <a id="ssfgobjgetlabel"></a>
 
-### [↑](#ssfgobj--generic-object-beta) [`SSFGObjGetLabel()`](#ex-getlabel)
+### [↑](#ssfgobj--generic-object-beta) [`bool SSFGObjGetLabel()`](#functions)
 
 ```c
 bool SSFGObjGetLabel(SSFGObj_t *gobj, SSFCStrOut_t labelCStrOut, size_t labelCStrOutSize);
@@ -195,11 +234,27 @@ Copies the node's label into `labelCStrOut`.
 
 **Returns:** `true` if the label was copied; `false` if no label is set or the buffer is too small.
 
+<a id="ex-getlabel"></a>
+
+```c
+SSFGObj_t *g = NULL;
+char buf[16];
+
+SSFGObjInit(&g, 0u);
+SSFGObjSetLabel(g, "count");
+
+if (SSFGObjGetLabel(g, buf, sizeof(buf)))
+{
+    /* buf == "count" */
+}
+SSFGObjDeInit(&g);
+```
+
 ---
 
 <a id="ssfgobjgettype"></a>
 
-### [↑](#ssfgobj--generic-object-beta) [`SSFGObjGetType()`](#ex-gettype)
+### [↑](#ssfgobj--generic-object-beta) [`SSFObjType_t SSFGObjGetType()`](#functions)
 
 ```c
 SSFObjType_t SSFGObjGetType(SSFGObj_t *gobj);
@@ -213,11 +268,25 @@ Returns the value type currently held by the node as set by the most recent `SSF
 
 **Returns:** The current [`SSFObjType_t`](#type-ssfobjtype-t) of the node.
 
+<a id="ex-gettype"></a>
+
+```c
+SSFGObj_t *g = NULL;
+
+SSFGObjInit(&g, 0u);
+SSFGObjGetType(g);   /* returns SSF_OBJ_TYPE_NONE */
+
+SSFGObjSetInt(g, 7);
+SSFGObjGetType(g);   /* returns SSF_OBJ_TYPE_INT */
+
+SSFGObjDeInit(&g);
+```
+
 ---
 
 <a id="ssfgobjgetsize"></a>
 
-### [↑](#ssfgobj--generic-object-beta) [`SSFGObjGetSize()`](#ex-getsize)
+### [↑](#ssfgobj--generic-object-beta) [`size_t SSFGObjGetSize()`](#functions)
 
 ```c
 size_t SSFGObjGetSize(SSFGObj_t *gobj);
@@ -233,11 +302,23 @@ is `0`.
 
 **Returns:** Size in bytes of the stored value, or `0` for valueless types.
 
+<a id="ex-getsize"></a>
+
+```c
+SSFGObj_t *g = NULL;
+
+SSFGObjInit(&g, 0u);
+SSFGObjSetString(g, "hi");
+SSFGObjGetSize(g);   /* returns 3 (strlen("hi") + 1) */
+
+SSFGObjDeInit(&g);
+```
+
 ---
 
 <a id="ssfgobjsetnone"></a>
 
-### [↑](#ssfgobj--generic-object-beta) [`SSFGObjSetNone()`](#ex-setnone)
+### [↑](#ssfgobj--generic-object-beta) [`bool SSFGObjSetNone()`](#functions)
 
 ```c
 bool SSFGObjSetNone(SSFGObj_t *gobj);
@@ -252,11 +333,24 @@ initial state of every freshly allocated node.
 
 **Returns:** `true` always.
 
+<a id="ex-setnone"></a>
+
+```c
+SSFGObj_t *g = NULL;
+
+SSFGObjInit(&g, 0u);
+SSFGObjSetInt(g, 42);
+SSFGObjSetNone(g);
+SSFGObjGetType(g);   /* returns SSF_OBJ_TYPE_NONE */
+
+SSFGObjDeInit(&g);
+```
+
 ---
 
 <a id="ssfgobjsetstring"></a>
 
-### [↑](#ssfgobj--generic-object-beta) [`SSFGObjSetString()`](#ex-setstring)
+### [↑](#ssfgobj--generic-object-beta) [`bool SSFGObjSetString()`](#functions)
 
 ```c
 bool SSFGObjSetString(SSFGObj_t *gobj, SSFCStrIn_t valueCStr);
@@ -271,11 +365,25 @@ Stores a copy of `valueCStr` in the node. The node's type becomes `SSF_OBJ_TYPE_
 
 **Returns:** `true` if the value was stored; `false` if `malloc` failed.
 
+<a id="ex-setstring"></a>
+
+```c
+SSFGObj_t *g = NULL;
+
+SSFGObjInit(&g, 0u);
+
+if (SSFGObjSetString(g, "hello"))
+{
+    /* node type is SSF_OBJ_TYPE_STR, SSFGObjGetSize(g) == 6 */
+}
+SSFGObjDeInit(&g);
+```
+
 ---
 
 <a id="ssfgobjgetstring"></a>
 
-### [↑](#ssfgobj--generic-object-beta) [`SSFGObjGetString()`](#ex-getstring)
+### [↑](#ssfgobj--generic-object-beta) [`bool SSFGObjGetString()`](#functions)
 
 ```c
 bool SSFGObjGetString(SSFGObj_t *gobj, SSFCStrOut_t valueCStrOut, size_t valueCStrOutSize);
@@ -292,11 +400,27 @@ Copies the node's string value into `valueCStrOut`.
 **Returns:** `true` if the string was copied; `false` if the node type is not `SSF_OBJ_TYPE_STR`
 or the buffer is too small.
 
+<a id="ex-getstring"></a>
+
+```c
+SSFGObj_t *g = NULL;
+char buf[16];
+
+SSFGObjInit(&g, 0u);
+SSFGObjSetString(g, "hello");
+
+if (SSFGObjGetString(g, buf, sizeof(buf)))
+{
+    /* buf == "hello" */
+}
+SSFGObjDeInit(&g);
+```
+
 ---
 
 <a id="ssfgobjsetint"></a>
 
-### [↑](#ssfgobj--generic-object-beta) [`SSFGObjSetInt()`](#ex-setint)
+### [↑](#ssfgobj--generic-object-beta) [`bool SSFGObjSetInt()`](#functions)
 
 ```c
 bool SSFGObjSetInt(SSFGObj_t *gobj, int64_t value);
@@ -311,11 +435,25 @@ Stores a signed 64-bit integer. The node's type becomes `SSF_OBJ_TYPE_INT`.
 
 **Returns:** `true` if the value was stored; `false` if `malloc` failed.
 
+<a id="ex-setint"></a>
+
+```c
+SSFGObj_t *g = NULL;
+
+SSFGObjInit(&g, 0u);
+
+if (SSFGObjSetInt(g, -42))
+{
+    /* node type is SSF_OBJ_TYPE_INT */
+}
+SSFGObjDeInit(&g);
+```
+
 ---
 
 <a id="ssfgobjgetint"></a>
 
-### [↑](#ssfgobj--generic-object-beta) [`SSFGObjGetInt()`](#ex-getint)
+### [↑](#ssfgobj--generic-object-beta) [`bool SSFGObjGetInt()`](#functions)
 
 ```c
 bool SSFGObjGetInt(SSFGObj_t *gobj, int64_t *valueOut);
@@ -330,11 +468,27 @@ Reads the node's signed 64-bit integer value.
 
 **Returns:** `true` if the value was read; `false` if the node type is not `SSF_OBJ_TYPE_INT`.
 
+<a id="ex-getint"></a>
+
+```c
+SSFGObj_t *g = NULL;
+int64_t val;
+
+SSFGObjInit(&g, 0u);
+SSFGObjSetInt(g, -42);
+
+if (SSFGObjGetInt(g, &val))
+{
+    /* val == -42 */
+}
+SSFGObjDeInit(&g);
+```
+
 ---
 
 <a id="ssfgobjsetuint"></a>
 
-### [↑](#ssfgobj--generic-object-beta) [`SSFGObjSetUInt()`](#ex-setuint)
+### [↑](#ssfgobj--generic-object-beta) [`bool SSFGObjSetUInt()`](#functions)
 
 ```c
 bool SSFGObjSetUInt(SSFGObj_t *gobj, uint64_t value);
@@ -349,11 +503,25 @@ Stores an unsigned 64-bit integer. The node's type becomes `SSF_OBJ_TYPE_UINT`.
 
 **Returns:** `true` if the value was stored; `false` if `malloc` failed.
 
+<a id="ex-setuint"></a>
+
+```c
+SSFGObj_t *g = NULL;
+
+SSFGObjInit(&g, 0u);
+
+if (SSFGObjSetUInt(g, 100u))
+{
+    /* node type is SSF_OBJ_TYPE_UINT */
+}
+SSFGObjDeInit(&g);
+```
+
 ---
 
 <a id="ssfgobjgetuint"></a>
 
-### [↑](#ssfgobj--generic-object-beta) [`SSFGObjGetUInt()`](#ex-getuint)
+### [↑](#ssfgobj--generic-object-beta) [`bool SSFGObjGetUInt()`](#functions)
 
 ```c
 bool SSFGObjGetUInt(SSFGObj_t *gobj, uint64_t *valueOut);
@@ -368,11 +536,27 @@ Reads the node's unsigned 64-bit integer value.
 
 **Returns:** `true` if the value was read; `false` if the node type is not `SSF_OBJ_TYPE_UINT`.
 
+<a id="ex-getuint"></a>
+
+```c
+SSFGObj_t *g = NULL;
+uint64_t val;
+
+SSFGObjInit(&g, 0u);
+SSFGObjSetUInt(g, 100u);
+
+if (SSFGObjGetUInt(g, &val))
+{
+    /* val == 100 */
+}
+SSFGObjDeInit(&g);
+```
+
 ---
 
 <a id="ssfgobjsetfloat"></a>
 
-### [↑](#ssfgobj--generic-object-beta) [`SSFGObjSetFloat()`](#ex-setfloat)
+### [↑](#ssfgobj--generic-object-beta) [`bool SSFGObjSetFloat()`](#functions)
 
 ```c
 bool SSFGObjSetFloat(SSFGObj_t *gobj, double value);
@@ -387,11 +571,25 @@ Stores a double-precision floating-point value. The node's type becomes `SSF_OBJ
 
 **Returns:** `true` if the value was stored; `false` if `malloc` failed.
 
+<a id="ex-setfloat"></a>
+
+```c
+SSFGObj_t *g = NULL;
+
+SSFGObjInit(&g, 0u);
+
+if (SSFGObjSetFloat(g, 3.14))
+{
+    /* node type is SSF_OBJ_TYPE_FLOAT */
+}
+SSFGObjDeInit(&g);
+```
+
 ---
 
 <a id="ssfgobjgetfloat"></a>
 
-### [↑](#ssfgobj--generic-object-beta) [`SSFGObjGetFloat()`](#ex-getfloat)
+### [↑](#ssfgobj--generic-object-beta) [`bool SSFGObjGetFloat()`](#functions)
 
 ```c
 bool SSFGObjGetFloat(SSFGObj_t *gobj, double *valueOut);
@@ -406,11 +604,27 @@ Reads the node's double-precision float value.
 
 **Returns:** `true` if the value was read; `false` if the node type is not `SSF_OBJ_TYPE_FLOAT`.
 
+<a id="ex-getfloat"></a>
+
+```c
+SSFGObj_t *g = NULL;
+double val;
+
+SSFGObjInit(&g, 0u);
+SSFGObjSetFloat(g, 3.14);
+
+if (SSFGObjGetFloat(g, &val))
+{
+    /* val == 3.14 */
+}
+SSFGObjDeInit(&g);
+```
+
 ---
 
 <a id="ssfgobjsetbool"></a>
 
-### [↑](#ssfgobj--generic-object-beta) [`SSFGObjSetBool()`](#ex-setbool)
+### [↑](#ssfgobj--generic-object-beta) [`bool SSFGObjSetBool()`](#functions)
 
 ```c
 bool SSFGObjSetBool(SSFGObj_t *gobj, bool value);
@@ -425,11 +639,25 @@ Stores a boolean value. The node's type becomes `SSF_OBJ_TYPE_BOOL`.
 
 **Returns:** `true` if the value was stored; `false` if `malloc` failed.
 
+<a id="ex-setbool"></a>
+
+```c
+SSFGObj_t *g = NULL;
+
+SSFGObjInit(&g, 0u);
+
+if (SSFGObjSetBool(g, true))
+{
+    /* node type is SSF_OBJ_TYPE_BOOL */
+}
+SSFGObjDeInit(&g);
+```
+
 ---
 
 <a id="ssfgobjgetbool"></a>
 
-### [↑](#ssfgobj--generic-object-beta) [`SSFGObjGetBool()`](#ex-getbool)
+### [↑](#ssfgobj--generic-object-beta) [`bool SSFGObjGetBool()`](#functions)
 
 ```c
 bool SSFGObjGetBool(SSFGObj_t *gobj, bool *valueOut);
@@ -444,11 +672,27 @@ Reads the node's boolean value.
 
 **Returns:** `true` if the value was read; `false` if the node type is not `SSF_OBJ_TYPE_BOOL`.
 
+<a id="ex-getbool"></a>
+
+```c
+SSFGObj_t *g = NULL;
+bool val;
+
+SSFGObjInit(&g, 0u);
+SSFGObjSetBool(g, true);
+
+if (SSFGObjGetBool(g, &val))
+{
+    /* val == true */
+}
+SSFGObjDeInit(&g);
+```
+
 ---
 
 <a id="ssfgobjsetbin"></a>
 
-### [↑](#ssfgobj--generic-object-beta) [`SSFGObjSetBin()`](#ex-setbin)
+### [↑](#ssfgobj--generic-object-beta) [`bool SSFGObjSetBin()`](#functions)
 
 ```c
 bool SSFGObjSetBin(SSFGObj_t *gobj, uint8_t *value, size_t valueLen);
@@ -465,11 +709,26 @@ may be `0` to store an empty binary node.
 
 **Returns:** `true` if the value was stored; `false` if `malloc` failed.
 
+<a id="ex-setbin"></a>
+
+```c
+SSFGObj_t *g = NULL;
+uint8_t data[] = {0x01u, 0x02u, 0x03u};
+
+SSFGObjInit(&g, 0u);
+
+if (SSFGObjSetBin(g, data, sizeof(data)))
+{
+    /* node type is SSF_OBJ_TYPE_BIN, SSFGObjGetSize(g) == 3 */
+}
+SSFGObjDeInit(&g);
+```
+
 ---
 
 <a id="ssfgobjgetbin"></a>
 
-### [↑](#ssfgobj--generic-object-beta) [`SSFGObjGetBin()`](#ex-getbin)
+### [↑](#ssfgobj--generic-object-beta) [`bool SSFGObjGetBin()`](#functions)
 
 ```c
 bool SSFGObjGetBin(SSFGObj_t *gobj, uint8_t *valueOut, size_t valueSize,
@@ -488,11 +747,29 @@ Copies the node's binary value into `valueOut`.
 **Returns:** `true` if the data was copied; `false` if the node type is not `SSF_OBJ_TYPE_BIN` or
 `valueSize` is too small.
 
+<a id="ex-getbin"></a>
+
+```c
+SSFGObj_t *g = NULL;
+uint8_t data[] = {0x01u, 0x02u, 0x03u};
+uint8_t buf[8];
+size_t len;
+
+SSFGObjInit(&g, 0u);
+SSFGObjSetBin(g, data, sizeof(data));
+
+if (SSFGObjGetBin(g, buf, sizeof(buf), &len))
+{
+    /* len == 3, buf[0..2] == {0x01, 0x02, 0x03} */
+}
+SSFGObjDeInit(&g);
+```
+
 ---
 
 <a id="ssfgobjsetnull"></a>
 
-### [↑](#ssfgobj--generic-object-beta) [`SSFGObjSetNull()`](#ex-setnull)
+### [↑](#ssfgobj--generic-object-beta) [`bool SSFGObjSetNull()`](#functions)
 
 ```c
 bool SSFGObjSetNull(SSFGObj_t *gobj);
@@ -507,11 +784,23 @@ Sets the node's type to `SSF_OBJ_TYPE_NULL`, representing an explicit null value
 
 **Returns:** `true` always.
 
+<a id="ex-setnull"></a>
+
+```c
+SSFGObj_t *g = NULL;
+
+SSFGObjInit(&g, 0u);
+SSFGObjSetNull(g);
+SSFGObjGetType(g);   /* returns SSF_OBJ_TYPE_NULL */
+
+SSFGObjDeInit(&g);
+```
+
 ---
 
 <a id="ssfgobjsetobject"></a>
 
-### [↑](#ssfgobj--generic-object-beta) [`SSFGObjSetObject()`](#ex-setobject)
+### [↑](#ssfgobj--generic-object-beta) [`bool SSFGObjSetObject()`](#functions)
 
 ```c
 bool SSFGObjSetObject(SSFGObj_t *gobj);
@@ -527,11 +816,23 @@ container (analogous to a JSON object `{}`). Call before
 
 **Returns:** `true` always.
 
+<a id="ex-setobject"></a>
+
+```c
+SSFGObj_t *parent = NULL;
+
+SSFGObjInit(&parent, 4u);   /* up to 4 children */
+SSFGObjSetObject(parent);
+SSFGObjGetType(parent);     /* returns SSF_OBJ_TYPE_OBJECT */
+
+SSFGObjDeInit(&parent);
+```
+
 ---
 
 <a id="ssfgobjsetarray"></a>
 
-### [↑](#ssfgobj--generic-object-beta) [`SSFGObjSetArray()`](#ex-setarray)
+### [↑](#ssfgobj--generic-object-beta) [`bool SSFGObjSetArray()`](#functions)
 
 ```c
 bool SSFGObjSetArray(SSFGObj_t *gobj);
@@ -547,11 +848,23 @@ Sets the node's type to `SSF_OBJ_TYPE_ARRAY`, marking it as an ordered child con
 
 **Returns:** `true` always.
 
+<a id="ex-setarray"></a>
+
+```c
+SSFGObj_t *parent = NULL;
+
+SSFGObjInit(&parent, 4u);   /* up to 4 children */
+SSFGObjSetArray(parent);
+SSFGObjGetType(parent);     /* returns SSF_OBJ_TYPE_ARRAY */
+
+SSFGObjDeInit(&parent);
+```
+
 ---
 
 <a id="ssfgobjinsertchild"></a>
 
-### [↑](#ssfgobj--generic-object-beta) [`SSFGObjInsertChild()`](#ex-insertchild)
+### [↑](#ssfgobj--generic-object-beta) [`bool SSFGObjInsertChild()`](#functions)
 
 ```c
 bool SSFGObjInsertChild(SSFGObj_t *gobjParent, SSFGObj_t *gobjChild);
@@ -569,11 +882,31 @@ initialized with `maxChildren > 0` and its type must be `SSF_OBJ_TYPE_OBJECT` or
 **Returns:** `true` if the child was inserted; `false` if the parent's child list is full or was
 never initialized (`maxChildren = 0`).
 
+<a id="ex-insertchild"></a>
+
+```c
+SSFGObj_t *parent = NULL;
+SSFGObj_t *child = NULL;
+
+SSFGObjInit(&parent, 2u);   /* capacity for 2 children */
+SSFGObjSetObject(parent);
+
+SSFGObjInit(&child, 0u);
+SSFGObjSetLabel(child, "count");
+SSFGObjSetInt(child, 42);
+
+if (SSFGObjInsertChild(parent, child))
+{
+    /* child is now owned by parent */
+}
+SSFGObjDeInit(&parent);     /* frees parent and child */
+```
+
 ---
 
 <a id="ssfgobjremovechild"></a>
 
-### [↑](#ssfgobj--generic-object-beta) [`SSFGObjRemoveChild()`](#ex-removechild)
+### [↑](#ssfgobj--generic-object-beta) [`bool SSFGObjRemoveChild()`](#functions)
 
 ```c
 bool SSFGObjRemoveChild(SSFGObj_t *gobjParent, SSFGObj_t *gobjChild);
@@ -589,11 +922,31 @@ and must either re-insert it or free it with [`SSFGObjDeInit()`](#ssfgobjdeinit)
 
 **Returns:** `true` if the child was found and removed; `false` otherwise.
 
+<a id="ex-removechild"></a>
+
+```c
+SSFGObj_t *parent = NULL;
+SSFGObj_t *child = NULL;
+
+SSFGObjInit(&parent, 2u);
+SSFGObjSetObject(parent);
+SSFGObjInit(&child, 0u);
+SSFGObjSetInt(child, 1);
+SSFGObjInsertChild(parent, child);
+
+if (SSFGObjRemoveChild(parent, child))
+{
+    /* child removed; caller now owns it */
+    SSFGObjDeInit(&child);
+}
+SSFGObjDeInit(&parent);
+```
+
 ---
 
 <a id="ssfgobjfindpath"></a>
 
-### [↑](#ssfgobj--generic-object-beta) [`SSFGObjFindPath()`](#ex-findpath)
+### [↑](#ssfgobj--generic-object-beta) [`bool SSFGObjFindPath()`](#functions)
 
 ```c
 bool SSFGObjFindPath(SSFGObj_t *gobjRoot, SSFCStrIn_t *path,
@@ -615,435 +968,7 @@ sentinel at index `SSF_GOBJ_CONFIG_MAX_IN_DEPTH`.
 **Returns:** `true` if the path was resolved; `false` if any label was not found or `gobjRoot` is
 not a container type.
 
----
-
-<a id="ssfgobjiterate"></a>
-
-### [↑](#ssfgobj--generic-object-beta) [`SSFGObjIterate()`](#ex-iterate)
-
-```c
-bool SSFGObjIterate(SSFGObj_t *gobj, SSFGObjIterateFn_t iterateCallback);
-```
-
-Performs a depth-first traversal of the subtree rooted at `gobj`, invoking `iterateCallback`
-once for every node including `gobj` itself. The callback receives the current node and a
-linked list of [`SSFGObjPathItem_t`](#type-ssfgobjpathitem-t) nodes representing the path from
-the traversal root to the current node.
-
-| Parameter | Direction | Type | Description |
-|-----------|-----------|------|-------------|
-| `gobj` | in | [`SSFGObj_t *`](#type-ssfgobj-t) | Root of the subtree to traverse. Must not be `NULL`. |
-| `iterateCallback` | in | [`SSFGObjIterateFn_t`](#type-ssfgobjiteratefn-t) | Callback invoked for each node. Must not be `NULL`. |
-
-**Returns:** `true` if traversal completed; `false` if the nesting depth exceeded
-[`SSF_GOBJ_CONFIG_MAX_IN_DEPTH`](#opt-gobj-max-depth).
-
-<a id="examples"></a>
-
-## [↑](#ssfgobj--generic-object-beta) Examples
-
-<a id="ex-init"></a>
-
-### [↑](#ssfgobj--generic-object-beta) [SSFGObjInit()](#ssfgobjinit)
-
-```c
-SSFGObj_t *g = NULL;
-
-SSFGObjInit(&g, 0u);
-/* g is a leaf node with type SSF_OBJ_TYPE_NONE */
-SSFGObjDeInit(&g);
-/* g == NULL */
-```
-
-<a id="ex-deinit"></a>
-
-### [↑](#ssfgobj--generic-object-beta) [SSFGObjDeInit()](#ssfgobjdeinit)
-
-```c
-SSFGObj_t *g = NULL;
-
-SSFGObjInit(&g, 0u);
-SSFGObjSetInt(g, 42);
-SSFGObjDeInit(&g);
-/* g == NULL; value memory freed */
-```
-
-<a id="ex-setlabel"></a>
-
-### [↑](#ssfgobj--generic-object-beta) [SSFGObjSetLabel()](#ssfgobjsetlabel)
-
-```c
-SSFGObj_t *g = NULL;
-
-SSFGObjInit(&g, 0u);
-SSFGObjSetLabel(g, "count");
-/* node label is "count" */
-
-SSFGObjSetLabel(g, NULL);
-/* label cleared */
-
-SSFGObjDeInit(&g);
-```
-
-<a id="ex-getlabel"></a>
-
-### [↑](#ssfgobj--generic-object-beta) [SSFGObjGetLabel()](#ssfgobjgetlabel)
-
-```c
-SSFGObj_t *g = NULL;
-char buf[16];
-
-SSFGObjInit(&g, 0u);
-SSFGObjSetLabel(g, "count");
-
-if (SSFGObjGetLabel(g, buf, sizeof(buf)))
-{
-    /* buf == "count" */
-}
-SSFGObjDeInit(&g);
-```
-
-<a id="ex-gettype"></a>
-
-### [↑](#ssfgobj--generic-object-beta) [SSFGObjGetType()](#ssfgobjgettype)
-
-```c
-SSFGObj_t *g = NULL;
-
-SSFGObjInit(&g, 0u);
-SSFGObjGetType(g);   /* returns SSF_OBJ_TYPE_NONE */
-
-SSFGObjSetInt(g, 7);
-SSFGObjGetType(g);   /* returns SSF_OBJ_TYPE_INT */
-
-SSFGObjDeInit(&g);
-```
-
-<a id="ex-getsize"></a>
-
-### [↑](#ssfgobj--generic-object-beta) [SSFGObjGetSize()](#ssfgobjgetsize)
-
-```c
-SSFGObj_t *g = NULL;
-
-SSFGObjInit(&g, 0u);
-SSFGObjSetString(g, "hi");
-SSFGObjGetSize(g);   /* returns 3 (strlen("hi") + 1) */
-
-SSFGObjDeInit(&g);
-```
-
-<a id="ex-setnone"></a>
-
-### [↑](#ssfgobj--generic-object-beta) [SSFGObjSetNone()](#ssfgobjsetnone)
-
-```c
-SSFGObj_t *g = NULL;
-
-SSFGObjInit(&g, 0u);
-SSFGObjSetInt(g, 42);
-SSFGObjSetNone(g);
-SSFGObjGetType(g);   /* returns SSF_OBJ_TYPE_NONE */
-
-SSFGObjDeInit(&g);
-```
-
-<a id="ex-setstring"></a>
-
-### [↑](#ssfgobj--generic-object-beta) [SSFGObjSetString()](#ssfgobjsetstring)
-
-```c
-SSFGObj_t *g = NULL;
-
-SSFGObjInit(&g, 0u);
-
-if (SSFGObjSetString(g, "hello"))
-{
-    /* node type is SSF_OBJ_TYPE_STR, SSFGObjGetSize(g) == 6 */
-}
-SSFGObjDeInit(&g);
-```
-
-<a id="ex-getstring"></a>
-
-### [↑](#ssfgobj--generic-object-beta) [SSFGObjGetString()](#ssfgobjgetstring)
-
-```c
-SSFGObj_t *g = NULL;
-char buf[16];
-
-SSFGObjInit(&g, 0u);
-SSFGObjSetString(g, "hello");
-
-if (SSFGObjGetString(g, buf, sizeof(buf)))
-{
-    /* buf == "hello" */
-}
-SSFGObjDeInit(&g);
-```
-
-<a id="ex-setint"></a>
-
-### [↑](#ssfgobj--generic-object-beta) [SSFGObjSetInt()](#ssfgobjsetint)
-
-```c
-SSFGObj_t *g = NULL;
-
-SSFGObjInit(&g, 0u);
-
-if (SSFGObjSetInt(g, -42))
-{
-    /* node type is SSF_OBJ_TYPE_INT */
-}
-SSFGObjDeInit(&g);
-```
-
-<a id="ex-getint"></a>
-
-### [↑](#ssfgobj--generic-object-beta) [SSFGObjGetInt()](#ssfgobjgetint)
-
-```c
-SSFGObj_t *g = NULL;
-int64_t val;
-
-SSFGObjInit(&g, 0u);
-SSFGObjSetInt(g, -42);
-
-if (SSFGObjGetInt(g, &val))
-{
-    /* val == -42 */
-}
-SSFGObjDeInit(&g);
-```
-
-<a id="ex-setuint"></a>
-
-### [↑](#ssfgobj--generic-object-beta) [SSFGObjSetUInt()](#ssfgobjsetuint)
-
-```c
-SSFGObj_t *g = NULL;
-
-SSFGObjInit(&g, 0u);
-
-if (SSFGObjSetUInt(g, 100u))
-{
-    /* node type is SSF_OBJ_TYPE_UINT */
-}
-SSFGObjDeInit(&g);
-```
-
-<a id="ex-getuint"></a>
-
-### [↑](#ssfgobj--generic-object-beta) [SSFGObjGetUInt()](#ssfgobjgetuint)
-
-```c
-SSFGObj_t *g = NULL;
-uint64_t val;
-
-SSFGObjInit(&g, 0u);
-SSFGObjSetUInt(g, 100u);
-
-if (SSFGObjGetUInt(g, &val))
-{
-    /* val == 100 */
-}
-SSFGObjDeInit(&g);
-```
-
-<a id="ex-setfloat"></a>
-
-### [↑](#ssfgobj--generic-object-beta) [SSFGObjSetFloat()](#ssfgobjsetfloat)
-
-```c
-SSFGObj_t *g = NULL;
-
-SSFGObjInit(&g, 0u);
-
-if (SSFGObjSetFloat(g, 3.14))
-{
-    /* node type is SSF_OBJ_TYPE_FLOAT */
-}
-SSFGObjDeInit(&g);
-```
-
-<a id="ex-getfloat"></a>
-
-### [↑](#ssfgobj--generic-object-beta) [SSFGObjGetFloat()](#ssfgobjgetfloat)
-
-```c
-SSFGObj_t *g = NULL;
-double val;
-
-SSFGObjInit(&g, 0u);
-SSFGObjSetFloat(g, 3.14);
-
-if (SSFGObjGetFloat(g, &val))
-{
-    /* val == 3.14 */
-}
-SSFGObjDeInit(&g);
-```
-
-<a id="ex-setbool"></a>
-
-### [↑](#ssfgobj--generic-object-beta) [SSFGObjSetBool()](#ssfgobjsetbool)
-
-```c
-SSFGObj_t *g = NULL;
-
-SSFGObjInit(&g, 0u);
-
-if (SSFGObjSetBool(g, true))
-{
-    /* node type is SSF_OBJ_TYPE_BOOL */
-}
-SSFGObjDeInit(&g);
-```
-
-<a id="ex-getbool"></a>
-
-### [↑](#ssfgobj--generic-object-beta) [SSFGObjGetBool()](#ssfgobjgetbool)
-
-```c
-SSFGObj_t *g = NULL;
-bool val;
-
-SSFGObjInit(&g, 0u);
-SSFGObjSetBool(g, true);
-
-if (SSFGObjGetBool(g, &val))
-{
-    /* val == true */
-}
-SSFGObjDeInit(&g);
-```
-
-<a id="ex-setbin"></a>
-
-### [↑](#ssfgobj--generic-object-beta) [SSFGObjSetBin()](#ssfgobjsetbin)
-
-```c
-SSFGObj_t *g = NULL;
-uint8_t data[] = {0x01u, 0x02u, 0x03u};
-
-SSFGObjInit(&g, 0u);
-
-if (SSFGObjSetBin(g, data, sizeof(data)))
-{
-    /* node type is SSF_OBJ_TYPE_BIN, SSFGObjGetSize(g) == 3 */
-}
-SSFGObjDeInit(&g);
-```
-
-<a id="ex-getbin"></a>
-
-### [↑](#ssfgobj--generic-object-beta) [SSFGObjGetBin()](#ssfgobjgetbin)
-
-```c
-SSFGObj_t *g = NULL;
-uint8_t data[] = {0x01u, 0x02u, 0x03u};
-uint8_t buf[8];
-size_t len;
-
-SSFGObjInit(&g, 0u);
-SSFGObjSetBin(g, data, sizeof(data));
-
-if (SSFGObjGetBin(g, buf, sizeof(buf), &len))
-{
-    /* len == 3, buf[0..2] == {0x01, 0x02, 0x03} */
-}
-SSFGObjDeInit(&g);
-```
-
-<a id="ex-setnull"></a>
-
-### [↑](#ssfgobj--generic-object-beta) [SSFGObjSetNull()](#ssfgobjsetnull)
-
-```c
-SSFGObj_t *g = NULL;
-
-SSFGObjInit(&g, 0u);
-SSFGObjSetNull(g);
-SSFGObjGetType(g);   /* returns SSF_OBJ_TYPE_NULL */
-
-SSFGObjDeInit(&g);
-```
-
-<a id="ex-setobject"></a>
-
-### [↑](#ssfgobj--generic-object-beta) [SSFGObjSetObject()](#ssfgobjsetobject)
-
-```c
-SSFGObj_t *parent = NULL;
-
-SSFGObjInit(&parent, 4u);   /* up to 4 children */
-SSFGObjSetObject(parent);
-SSFGObjGetType(parent);     /* returns SSF_OBJ_TYPE_OBJECT */
-
-SSFGObjDeInit(&parent);
-```
-
-<a id="ex-setarray"></a>
-
-### [↑](#ssfgobj--generic-object-beta) [SSFGObjSetArray()](#ssfgobjsetarray)
-
-```c
-SSFGObj_t *parent = NULL;
-
-SSFGObjInit(&parent, 4u);   /* up to 4 children */
-SSFGObjSetArray(parent);
-SSFGObjGetType(parent);     /* returns SSF_OBJ_TYPE_ARRAY */
-
-SSFGObjDeInit(&parent);
-```
-
-<a id="ex-insertchild"></a>
-
-### [↑](#ssfgobj--generic-object-beta) [SSFGObjInsertChild()](#ssfgobjinsertchild)
-
-```c
-SSFGObj_t *parent = NULL;
-SSFGObj_t *child = NULL;
-
-SSFGObjInit(&parent, 2u);   /* capacity for 2 children */
-SSFGObjSetObject(parent);
-
-SSFGObjInit(&child, 0u);
-SSFGObjSetLabel(child, "count");
-SSFGObjSetInt(child, 42);
-
-if (SSFGObjInsertChild(parent, child))
-{
-    /* child is now owned by parent */
-}
-SSFGObjDeInit(&parent);     /* frees parent and child */
-```
-
-<a id="ex-removechild"></a>
-
-### [↑](#ssfgobj--generic-object-beta) [SSFGObjRemoveChild()](#ssfgobjremovechild)
-
-```c
-SSFGObj_t *parent = NULL;
-SSFGObj_t *child = NULL;
-
-SSFGObjInit(&parent, 2u);
-SSFGObjSetObject(parent);
-SSFGObjInit(&child, 0u);
-SSFGObjSetInt(child, 1);
-SSFGObjInsertChild(parent, child);
-
-if (SSFGObjRemoveChild(parent, child))
-{
-    /* child removed; caller now owns it */
-    SSFGObjDeInit(&child);
-}
-SSFGObjDeInit(&parent);
-```
-
 <a id="ex-findpath"></a>
-
-### [↑](#ssfgobj--generic-object-beta) [SSFGObjFindPath()](#ssfgobjfindpath)
 
 ```c
 SSFGObj_t *root = NULL;
@@ -1071,9 +996,30 @@ if (SSFGObjFindPath(root, path, &foundParent, &found))
 SSFGObjDeInit(&root);   /* frees root and child */
 ```
 
-<a id="ex-iterate"></a>
+---
 
-### [↑](#ssfgobj--generic-object-beta) [SSFGObjIterate()](#ssfgobjiterate)
+<a id="ssfgobjiterate"></a>
+
+### [↑](#ssfgobj--generic-object-beta) [`bool SSFGObjIterate()`](#functions)
+
+```c
+bool SSFGObjIterate(SSFGObj_t *gobj, SSFGObjIterateFn_t iterateCallback);
+```
+
+Performs a depth-first traversal of the subtree rooted at `gobj`, invoking `iterateCallback`
+once for every node including `gobj` itself. The callback receives the current node and a
+linked list of [`SSFGObjPathItem_t`](#type-ssfgobjpathitem-t) nodes representing the path from
+the traversal root to the current node.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `gobj` | in | [`SSFGObj_t *`](#type-ssfgobj-t) | Root of the subtree to traverse. Must not be `NULL`. |
+| `iterateCallback` | in | [`SSFGObjIterateFn_t`](#type-ssfgobjiteratefn-t) | Callback invoked for each node. Must not be `NULL`. |
+
+**Returns:** `true` if traversal completed; `false` if the nesting depth exceeded
+[`SSF_GOBJ_CONFIG_MAX_IN_DEPTH`](#opt-gobj-max-depth).
+
+<a id="ex-iterate"></a>
 
 ```c
 void myCallback(SSFGObj_t *gobj, SSFLL_t *path)
@@ -1096,3 +1042,4 @@ SSFGObjIterate(root, myCallback);
 
 SSFGObjDeInit(&root);
 ```
+

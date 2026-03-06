@@ -5,7 +5,7 @@
 Encodes binary bytes to hexadecimal ASCII strings and decodes them back, with optional
 byte-order reversal for little-endian multi-byte values.
 
-[Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference) | [Examples](#examples)
+[Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference)
 
 <a id="dependencies"></a>
 
@@ -51,15 +51,17 @@ This module has no compile-time configuration options in `ssfoptions.h`.
 |--------|------|-------------|
 | <a id="type-ssfhexcase-t"></a>`SSFHexCase_t` | Enum | Output digit case: `SSF_HEX_CASE_LOWER` emits `a–f`; `SSF_HEX_CASE_UPPER` emits `A–F` |
 
+<a id="functions"></a>
+
 ### Functions
 
 | | Function / Macro | Description |
 |---|-----------------|-------------|
-| [e.g.](#ex-bintobyte) | [`SSFHexBinToByte(in, out, outSize, hcase)`](#ssfhexbintobyte) | Encode one byte to a 2-character hex string |
-| [e.g.](#ex-bytetobin) | [`SSFHexByteToBin(hex, out)`](#ssfhexbytetobin) | Decode 2 hex characters to one byte |
-| [e.g.](#ex-bytestobin) | [`SSFHexBytesToBin(in, inLenLim, out, outSize, outLen, rev)`](#ssfhexbytestobin) | Decode hex ASCII string to binary |
-| [e.g.](#ex-bintobytes) | [`SSFHexBinToBytes(in, inLen, out, outSize, outLen, rev, hcase)`](#ssfhexbintobytes) | Encode binary to hex ASCII string |
-| [e.g.](#ex-macro-ishex) | [`SSFIsHex(h)`](#ssf-is-hex) | Macro: true if `h` is a valid hex digit |
+| [e.g.](#ex-bintobyte) | [`bool SSFHexBinToByte(in, out, outSize, hcase)`](#ssfhexbintobyte) | Encode one byte to a 2-character hex string |
+| [e.g.](#ex-bytetobin) | [`bool SSFHexByteToBin(hex, out)`](#ssfhexbytetobin) | Decode 2 hex characters to one byte |
+| [e.g.](#ex-bytestobin) | [`bool SSFHexBytesToBin(in, inLenLim, out, outSize, outLen, rev)`](#ssfhexbytestobin) | Decode hex ASCII string to binary |
+| [e.g.](#ex-bintobytes) | [`bool SSFHexBinToBytes(in, inLen, out, outSize, outLen, rev, hcase)`](#ssfhexbintobytes) | Encode binary to hex ASCII string |
+| [e.g.](#ex-macro-ishex) | [`bool SSFIsHex(h)`](#ssf-is-hex) | Macro: true if `h` is a valid hex digit |
 
 <a id="function-reference"></a>
 
@@ -67,7 +69,7 @@ This module has no compile-time configuration options in `ssfoptions.h`.
 
 <a id="ssfhexbintobyte"></a>
 
-### [↑](#ssfhex--binary-to-hex-ascii-encoderdecoder) [`SSFHexBinToByte()`](#ex-bintobyte)
+### [↑](#ssfhex--binary-to-hex-ascii-encoderdecoder) [`bool SSFHexBinToByte()`](#functions)
 
 ```c
 bool SSFHexBinToByte(uint8_t in, char *out, size_t outSize, SSFHexCase_t hcase);
@@ -85,11 +87,22 @@ null terminator; with `outSize == 2` the output is not null-terminated.
 
 **Returns:** `true` if conversion succeeded; `false` if `outSize < 2`.
 
+<a id="ex-bintobyte"></a>
+
+```c
+char out[3];
+
+if (SSFHexBinToByte(0xA5u, out, sizeof(out), SSF_HEX_CASE_UPPER))
+{
+    /* out == "A5" */
+}
+```
+
 ---
 
 <a id="ssfhexbytetobin"></a>
 
-### [↑](#ssfhex--binary-to-hex-ascii-encoderdecoder) [`SSFHexByteToBin()`](#ex-bytetobin)
+### [↑](#ssfhex--binary-to-hex-ascii-encoderdecoder) [`bool SSFHexByteToBin()`](#functions)
 
 ```c
 bool SSFHexByteToBin(const char *hex, uint8_t *out);
@@ -104,11 +117,22 @@ Converts exactly 2 consecutive hex ASCII characters to one binary byte. Case-ins
 
 **Returns:** `true` if both characters are valid hex digits; `false` otherwise.
 
+<a id="ex-bytetobin"></a>
+
+```c
+uint8_t out;
+
+if (SSFHexByteToBin("A5", &out))
+{
+    /* out == 0xA5 */
+}
+```
+
 ---
 
 <a id="ssfhexbytestobin"></a>
 
-### [↑](#ssfhex--binary-to-hex-ascii-encoderdecoder) [`SSFHexBytesToBin()`](#ex-bytestobin)
+### [↑](#ssfhex--binary-to-hex-ascii-encoderdecoder) [`bool SSFHexBytesToBin()`](#functions)
 
 ```c
 bool SSFHexBytesToBin(SSFCStrIn_t in, size_t inLenLim,
@@ -130,11 +154,23 @@ returns `false` immediately. Optionally reverses the byte order of the output.
 **Returns:** `true` if decoding succeeded; `false` if `inLenLim` is odd, any input character is
 not a valid hex digit, or `outSize` is too small.
 
+<a id="ex-bytestobin"></a>
+
+```c
+uint8_t out[2];
+size_t outLen;
+
+if (SSFHexBytesToBin("A5F0", 4u, out, sizeof(out), &outLen, false))
+{
+    /* outLen == 2, out[0] == 0xA5, out[1] == 0xF0 */
+}
+```
+
 ---
 
 <a id="ssfhexbintobytes"></a>
 
-### [↑](#ssfhex--binary-to-hex-ascii-encoderdecoder) [`SSFHexBinToBytes()`](#ex-bintobytes)
+### [↑](#ssfhex--binary-to-hex-ascii-encoderdecoder) [`bool SSFHexBinToBytes()`](#functions)
 
 ```c
 bool SSFHexBinToBytes(const uint8_t *in, size_t inLen,
@@ -157,6 +193,19 @@ byte order of the input before encoding.
 
 **Returns:** `true` if encoding succeeded; `false` if `outSize` is too small to hold the result.
 
+<a id="ex-bintobytes"></a>
+
+```c
+uint8_t bin[] = {0xA5u, 0xF0u};
+char out[5];
+size_t outLen;
+
+if (SSFHexBinToBytes(bin, sizeof(bin), out, sizeof(out), &outLen, false, SSF_HEX_CASE_LOWER))
+{
+    /* outLen == 4, out == "a5f0" */
+}
+```
+
 ---
 
 <a id="convenience-macros"></a>
@@ -167,7 +216,7 @@ byte order of the input before encoding.
 
 <a id="ssf-is-hex"></a>
 
-#### [↑](#ssfhex--binary-to-hex-ascii-encoderdecoder) [`SSFIsHex()`](#ex-macro-ishex)
+#### [↑](#ssfhex--binary-to-hex-ascii-encoderdecoder) [`bool SSFIsHex()`](#functions)
 
 ```c
 #define SSFIsHex(h)
@@ -182,68 +231,7 @@ Evaluates to `true` if character `h` is a valid hexadecimal digit (`0–9`, `a�
 
 **Returns:** Non-zero (true) if `h` is a hex digit; zero (false) otherwise.
 
-<a id="examples"></a>
-
-## [↑](#ssfhex--binary-to-hex-ascii-encoderdecoder) Examples
-
-<a id="ex-bintobyte"></a>
-
-### [↑](#ssfhex--binary-to-hex-ascii-encoderdecoder) [SSFHexBinToByte()](#ssfhexbintobyte)
-
-```c
-char out[3];
-
-if (SSFHexBinToByte(0xA5u, out, sizeof(out), SSF_HEX_CASE_UPPER))
-{
-    /* out == "A5" */
-}
-```
-
-<a id="ex-bytetobin"></a>
-
-### [↑](#ssfhex--binary-to-hex-ascii-encoderdecoder) [SSFHexByteToBin()](#ssfhexbytetobin)
-
-```c
-uint8_t out;
-
-if (SSFHexByteToBin("A5", &out))
-{
-    /* out == 0xA5 */
-}
-```
-
-<a id="ex-bytestobin"></a>
-
-### [↑](#ssfhex--binary-to-hex-ascii-encoderdecoder) [SSFHexBytesToBin()](#ssfhexbytestobin)
-
-```c
-uint8_t out[2];
-size_t outLen;
-
-if (SSFHexBytesToBin("A5F0", 4u, out, sizeof(out), &outLen, false))
-{
-    /* outLen == 2, out[0] == 0xA5, out[1] == 0xF0 */
-}
-```
-
-<a id="ex-bintobytes"></a>
-
-### [↑](#ssfhex--binary-to-hex-ascii-encoderdecoder) [SSFHexBinToBytes()](#ssfhexbintobytes)
-
-```c
-uint8_t bin[] = {0xA5u, 0xF0u};
-char out[5];
-size_t outLen;
-
-if (SSFHexBinToBytes(bin, sizeof(bin), out, sizeof(out), &outLen, false, SSF_HEX_CASE_LOWER))
-{
-    /* outLen == 4, out == "a5f0" */
-}
-```
-
 <a id="ex-macro-ishex"></a>
-
-### [↑](#ssfhex--binary-to-hex-ascii-encoderdecoder) [SSFIsHex()](#convenience-macros)
 
 ```c
 SSFIsHex('A');    /* returns true  */
@@ -252,3 +240,4 @@ SSFIsHex('3');    /* returns true  */
 SSFIsHex('g');    /* returns false */
 SSFIsHex(' ');    /* returns false */
 ```
+

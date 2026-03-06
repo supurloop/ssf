@@ -5,7 +5,7 @@
 Converts signed and unsigned 64-bit integers to decimal strings with optional minimum-width
 padding, and parses decimal strings back to integers.
 
-[Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference) | [Examples](#examples)
+[Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference)
 
 <a id="dependencies"></a>
 
@@ -47,16 +47,18 @@ This module has no compile-time configuration options in `ssfoptions.h`.
 | <a id="def-max-str-len"></a>`SSF_DEC_MAX_STR_LEN` | Constant | Maximum decimal string length in characters (`20`); covers the longest `int64_t` or `uint64_t` representation |
 | <a id="def-max-str-size"></a>`SSF_DEC_MAX_STR_SIZE` | Constant | Maximum decimal string buffer size in bytes (`21`); equals `SSF_DEC_MAX_STR_LEN + 1` to include the null terminator |
 
+<a id="functions"></a>
+
 ### Functions
 
 | | Function / Macro | Description |
 |---|-----------------|-------------|
-| [e.g.](#ex-inttostr) | [`SSFDecIntToStr(i, str, strSize)`](#ssfdecinttostr) | Convert signed 64-bit integer to decimal string |
-| [e.g.](#ex-uinttostr) | [`SSFDecUIntToStr(i, str, strSize)`](#ssfdecuinttostr) | Convert unsigned 64-bit integer to decimal string |
-| [e.g.](#ex-inttostrpadded) | [`SSFDecIntToStrPadded(i, str, strSize, minFieldWidth, padChar)`](#ssfdecinttostrpadded) | Convert signed integer to padded decimal string |
-| [e.g.](#ex-uinttostrpadded) | [`SSFDecUIntToStrPadded(i, str, strSize, minFieldWidth, padChar)`](#ssfdecuinttostrpadded) | Convert unsigned integer to padded decimal string |
-| [e.g.](#ex-macro-strtoint) | [`SSFDecStrToInt(str, val)`](#ssf-dec-str-to-int) | Macro: parse decimal string to signed 64-bit integer |
-| [e.g.](#ex-macro-strtouint) | [`SSFDecStrToUInt(str, val)`](#ssf-dec-str-to-uint) | Macro: parse decimal string to unsigned 64-bit integer |
+| [e.g.](#ex-inttostr) | [`size_t SSFDecIntToStr(i, str, strSize)`](#ssfdecinttostr) | Convert signed 64-bit integer to decimal string |
+| [e.g.](#ex-uinttostr) | [`size_t SSFDecUIntToStr(i, str, strSize)`](#ssfdecuinttostr) | Convert unsigned 64-bit integer to decimal string |
+| [e.g.](#ex-inttostrpadded) | [`size_t SSFDecIntToStrPadded(i, str, strSize, minFieldWidth, padChar)`](#ssfdecinttostrpadded) | Convert signed integer to padded decimal string |
+| [e.g.](#ex-uinttostrpadded) | [`size_t SSFDecUIntToStrPadded(i, str, strSize, minFieldWidth, padChar)`](#ssfdecuinttostrpadded) | Convert unsigned integer to padded decimal string |
+| [e.g.](#ex-macro-strtoint) | [`bool SSFDecStrToInt(str, val)`](#ssf-dec-str-to-int) | Macro: parse decimal string to signed 64-bit integer |
+| [e.g.](#ex-macro-strtouint) | [`bool SSFDecStrToUInt(str, val)`](#ssf-dec-str-to-uint) | Macro: parse decimal string to unsigned 64-bit integer |
 
 <a id="function-reference"></a>
 
@@ -64,7 +66,7 @@ This module has no compile-time configuration options in `ssfoptions.h`.
 
 <a id="ssfdecinttostr"></a>
 
-### [↑](#ssfdec--integer-to-decimal-string-converter) [`SSFDecIntToStr()`](#ex-inttostr)
+### [↑](#ssfdec--integer-to-decimal-string-converter) [`size_t SSFDecIntToStr()`](#functions)
 
 ```c
 size_t SSFDecIntToStr(int64_t i, SSFCStrOut_t str, size_t strSize);
@@ -82,11 +84,21 @@ typed than `snprintf("%lld", ...)`.
 **Returns:** Number of characters written, excluding the null terminator. Returns `0` if `strSize`
 is too small.
 
+<a id="ex-inttostr"></a>
+
+```c
+char str[SSF_DEC_MAX_STR_SIZE];
+size_t len;
+
+len = SSFDecIntToStr(-42, str, sizeof(str));
+/* len == 3, str == "-42" */
+```
+
 ---
 
 <a id="ssfdecuinttostr"></a>
 
-### [↑](#ssfdec--integer-to-decimal-string-converter) [`SSFDecUIntToStr()`](#ex-uinttostr)
+### [↑](#ssfdec--integer-to-decimal-string-converter) [`size_t SSFDecUIntToStr()`](#functions)
 
 ```c
 size_t SSFDecUIntToStr(uint64_t i, SSFCStrOut_t str, size_t strSize);
@@ -103,11 +115,21 @@ Converts an unsigned 64-bit integer to a null-terminated decimal string.
 **Returns:** Number of characters written, excluding the null terminator. Returns `0` if `strSize`
 is too small.
 
+<a id="ex-uinttostr"></a>
+
+```c
+char str[SSF_DEC_MAX_STR_SIZE];
+size_t len;
+
+len = SSFDecUIntToStr(12345u, str, sizeof(str));
+/* len == 5, str == "12345" */
+```
+
 ---
 
 <a id="ssfdecinttostrpadded"></a>
 
-### [↑](#ssfdec--integer-to-decimal-string-converter) [`SSFDecIntToStrPadded()`](#ex-inttostrpadded)
+### [↑](#ssfdec--integer-to-decimal-string-converter) [`size_t SSFDecIntToStrPadded()`](#functions)
 
 ```c
 size_t SSFDecIntToStrPadded(int64_t i, SSFCStrOut_t str, size_t strSize,
@@ -128,11 +150,21 @@ width. The negative sign counts toward `minFieldWidth`.
 **Returns:** Number of characters written, excluding the null terminator. Returns `0` if `strSize`
 is too small.
 
+<a id="ex-inttostrpadded"></a>
+
+```c
+char str[SSF_DEC_MAX_STR_SIZE];
+size_t len;
+
+len = SSFDecIntToStrPadded(-5, str, sizeof(str), 4u, '0');
+/* len == 4, str == "-005" */
+```
+
 ---
 
 <a id="ssfdecuinttostrpadded"></a>
 
-### [↑](#ssfdec--integer-to-decimal-string-converter) [`SSFDecUIntToStrPadded()`](#ex-uinttostrpadded)
+### [↑](#ssfdec--integer-to-decimal-string-converter) [`size_t SSFDecUIntToStrPadded()`](#functions)
 
 ```c
 size_t SSFDecUIntToStrPadded(uint64_t i, SSFCStrOut_t str, size_t strSize,
@@ -153,6 +185,16 @@ width.
 **Returns:** Number of characters written, excluding the null terminator. Returns `0` if `strSize`
 is too small.
 
+<a id="ex-uinttostrpadded"></a>
+
+```c
+char str[SSF_DEC_MAX_STR_SIZE];
+size_t len;
+
+len = SSFDecUIntToStrPadded(42u, str, sizeof(str), 5u, ' ');
+/* len == 5, str == "   42" */
+```
+
 ---
 
 <a id="convenience-macros"></a>
@@ -167,7 +209,7 @@ scientific-notation input in addition to plain integer strings (e.g. `"3.7e2"` �
 
 <a id="ssf-dec-str-to-int"></a>
 
-#### [↑](#ssfdec--integer-to-decimal-string-converter) [`SSFDecStrToInt()`](#ex-macro-strtoint)
+#### [↑](#ssfdec--integer-to-decimal-string-converter) [`bool SSFDecStrToInt()`](#functions)
 
 ```c
 #define SSFDecStrToInt(str, val)  SSFDecStrToXInt(str, val, NULL)
@@ -183,11 +225,22 @@ Parses a null-terminated decimal string to a signed 64-bit integer.
 **Returns:** `true` if the string represents a valid value within `int64_t` range; `false` if the
 string is empty (after whitespace), contains invalid characters, or the value is out of range.
 
+<a id="ex-macro-strtoint"></a>
+
+```c
+int64_t val;
+
+if (SSFDecStrToInt("-42", &val))
+{
+    /* val == -42 */
+}
+```
+
 ---
 
 <a id="ssf-dec-str-to-uint"></a>
 
-#### [↑](#ssfdec--integer-to-decimal-string-converter) [`SSFDecStrToUInt()`](#ex-macro-strtouint)
+#### [↑](#ssfdec--integer-to-decimal-string-converter) [`bool SSFDecStrToUInt()`](#functions)
 
 ```c
 #define SSFDecStrToUInt(str, val) SSFDecStrToXInt(str, NULL, val)
@@ -203,74 +256,7 @@ Parses a null-terminated decimal string to an unsigned 64-bit integer.
 **Returns:** `true` if the string represents a valid value within `uint64_t` range; `false` if the
 string is empty (after whitespace), contains invalid characters, or the value is out of range.
 
-<a id="examples"></a>
-
-## [↑](#ssfdec--integer-to-decimal-string-converter) Examples
-
-<a id="ex-inttostr"></a>
-
-### [↑](#ssfdec--integer-to-decimal-string-converter) [SSFDecIntToStr()](#ssfdecinttostr)
-
-```c
-char str[SSF_DEC_MAX_STR_SIZE];
-size_t len;
-
-len = SSFDecIntToStr(-42, str, sizeof(str));
-/* len == 3, str == "-42" */
-```
-
-<a id="ex-uinttostr"></a>
-
-### [↑](#ssfdec--integer-to-decimal-string-converter) [SSFDecUIntToStr()](#ssfdecuinttostr)
-
-```c
-char str[SSF_DEC_MAX_STR_SIZE];
-size_t len;
-
-len = SSFDecUIntToStr(12345u, str, sizeof(str));
-/* len == 5, str == "12345" */
-```
-
-<a id="ex-inttostrpadded"></a>
-
-### [↑](#ssfdec--integer-to-decimal-string-converter) [SSFDecIntToStrPadded()](#ssfdecinttostrpadded)
-
-```c
-char str[SSF_DEC_MAX_STR_SIZE];
-size_t len;
-
-len = SSFDecIntToStrPadded(-5, str, sizeof(str), 4u, '0');
-/* len == 4, str == "-005" */
-```
-
-<a id="ex-uinttostrpadded"></a>
-
-### [↑](#ssfdec--integer-to-decimal-string-converter) [SSFDecUIntToStrPadded()](#ssfdecuinttostrpadded)
-
-```c
-char str[SSF_DEC_MAX_STR_SIZE];
-size_t len;
-
-len = SSFDecUIntToStrPadded(42u, str, sizeof(str), 5u, ' ');
-/* len == 5, str == "   42" */
-```
-
-<a id="ex-macro-strtoint"></a>
-
-### [↑](#ssfdec--integer-to-decimal-string-converter) [SSFDecStrToInt()](#convenience-macros)
-
-```c
-int64_t val;
-
-if (SSFDecStrToInt("-42", &val))
-{
-    /* val == -42 */
-}
-```
-
 <a id="ex-macro-strtouint"></a>
-
-### [↑](#ssfdec--integer-to-decimal-string-converter) [SSFDecStrToUInt()](#convenience-macros)
 
 ```c
 uint64_t val;
@@ -280,3 +266,4 @@ if (SSFDecStrToUInt("12345", &val))
     /* val == 12345 */
 }
 ```
+

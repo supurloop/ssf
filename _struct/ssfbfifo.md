@@ -8,7 +8,7 @@ Most embedded systems need to buffer bytes between an interrupt service routine 
 FIFO and a main loop that empties it, and vice-versa. The high-performance macros can be used to minimize the time spent with
 interrupts disabled to safely read and write from the byte FIFO.
 
-[Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference) | [Examples](#examples)
+[Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference)
 
 <a id="dependencies"></a>
 
@@ -50,6 +50,8 @@ All options are set in `ssfoptions.h`.
 | `SSF_BFIFO_255` | Constant | Value `255`; pass as `fifoSize` to [`SSFBFifoInit()`](#ssfbfifoinit) for a 255-byte FIFO |
 | `SSF_BFIFO_65535` | Constant | Value `65535`; pass as `fifoSize` to [`SSFBFifoInit()`](#ssfbfifoinit) for a 65535-byte FIFO (requires [`SSF_BFIFO_CONFIG_MAX_BFIFO_SIZE`](#opt-max-bfifo-size) >= 65535) |
 
+<a id="functions"></a>
+
 ### Functions
 
 | | Function / Macro | Description |
@@ -78,7 +80,7 @@ All options are set in `ssfoptions.h`.
 
 <a id="ssfbfifoinit"></a>
 
-### [↑](#ssfbfifo--byte-fifo-interface) [`void SSFBFifoInit()`](#ex-init)
+### [↑](#functions) [`void SSFBFifoInit()`](#functions)
 
 ```c
 void SSFBFifoInit(SSFBFifo_t *fifo,
@@ -100,11 +102,23 @@ full from empty).
 
 **Returns:** Nothing.
 
+<a id="ex-init"></a>
+
+**Example:**
+
+```c
+SSFBFifo_t bf;
+uint8_t bfBuffer[SSF_BFIFO_255 + 1ul];
+
+SSFBFifoInit(&bf, SSF_BFIFO_255, bfBuffer, sizeof(bfBuffer));
+/* bf is ready for use with 255 bytes of capacity */
+```
+
 ---
 
 <a id="ssfbfifodeinit"></a>
 
-### [↑](#ssfbfifo--byte-fifo-interface) [`void SSFBFifoDeInit()`](#ex-deinit)
+### [↑](#functions) [`void SSFBFifoDeInit()`](#functions)
 
 ```c
 void SSFBFifoDeInit(SSFBFifo_t *fifo);
@@ -118,11 +132,24 @@ De-initializes a byte FIFO, clearing its internal magic marker.
 
 **Returns:** Nothing.
 
+<a id="ex-deinit"></a>
+
+**Example:**
+
+```c
+SSFBFifo_t bf;
+uint8_t bfBuffer[SSF_BFIFO_255 + 1ul];
+
+SSFBFifoInit(&bf, SSF_BFIFO_255, bfBuffer, sizeof(bfBuffer));
+SSFBFifoDeInit(&bf);
+/* bf is no longer valid */
+```
+
 ---
 
 <a id="ssfbfifoputbyte"></a>
 
-### [↑](#ssfbfifo--byte-fifo-interface) [`void SSFBFifoPutByte()`](#ex-putbyte)
+### [↑](#functions) [`void SSFBFifoPutByte()`](#functions)
 
 ```c
 void SSFBFifoPutByte(SSFBFifo_t *fifo,
@@ -139,11 +166,28 @@ Puts one byte into the FIFO. Asserts if the FIFO is full. Call `SSFBFifoIsFull()
 
 **Returns:** Nothing.
 
+<a id="ex-putbyte"></a>
+
+**Example:**
+
+```c
+SSFBFifo_t bf;
+uint8_t bfBuffer[SSF_BFIFO_255 + 1ul];
+
+SSFBFifoInit(&bf, SSF_BFIFO_255, bfBuffer, sizeof(bfBuffer));
+
+if (SSFBFifoIsFull(&bf) == false)
+{
+    SSFBFifoPutByte(&bf, 0xA5u);
+    /* FIFO now contains one byte */
+}
+```
+
 ---
 
 <a id="ssfbfifopeekbyte"></a>
 
-### [↑](#ssfbfifo--byte-fifo-interface) [`bool SSFBFifoPeekByte()`](#ex-peekbyte)
+### [↑](#functions) [`bool SSFBFifoPeekByte()`](#functions)
 
 ```c
 bool SSFBFifoPeekByte(const SSFBFifo_t *fifo,
@@ -160,11 +204,29 @@ be returned again on the next peek or get.
 
 **Returns:** `true` if a byte was available and written to `outByte`; `false` if the FIFO is empty.
 
+<a id="ex-peekbyte"></a>
+
+**Example:**
+
+```c
+SSFBFifo_t bf;
+uint8_t bfBuffer[SSF_BFIFO_255 + 1ul];
+uint8_t b;
+
+SSFBFifoInit(&bf, SSF_BFIFO_255, bfBuffer, sizeof(bfBuffer));
+SSFBFifoPutByte(&bf, 0xA5u);
+
+if (SSFBFifoPeekByte(&bf, &b))
+{
+    /* b == 0xA5, byte is still in FIFO */
+}
+```
+
 ---
 
 <a id="ssfbfifogetbyte"></a>
 
-### [↑](#ssfbfifo--byte-fifo-interface) [`bool SSFBFifoGetByte()`](#ex-getbyte)
+### [↑](#functions) [`bool SSFBFifoGetByte()`](#functions)
 
 ```c
 bool SSFBFifoGetByte(SSFBFifo_t *fifo,
@@ -180,11 +242,30 @@ Removes and returns the next byte from the FIFO.
 
 **Returns:** `true` if a byte was available and written to `outByte`; `false` if the FIFO is empty.
 
+<a id="ex-getbyte"></a>
+
+**Example:**
+
+```c
+SSFBFifo_t bf;
+uint8_t bfBuffer[SSF_BFIFO_255 + 1ul];
+uint8_t b;
+
+SSFBFifoInit(&bf, SSF_BFIFO_255, bfBuffer, sizeof(bfBuffer));
+SSFBFifoPutByte(&bf, 0xA5u);
+
+if (SSFBFifoGetByte(&bf, &b))
+{
+    /* b == 0xA5, byte has been removed from FIFO */
+}
+/* SSFBFifoIsEmpty(&bf) == true */
+```
+
 ---
 
 <a id="ssfbfifoisempty"></a>
 
-### [↑](#ssfbfifo--byte-fifo-interface) [`bool SSFBFifoIsEmpty()`](#ex-isempty)
+### [↑](#functions) [`bool SSFBFifoIsEmpty()`](#functions)
 
 ```c
 bool SSFBFifoIsEmpty(const SSFBFifo_t *fifo);
@@ -198,11 +279,26 @@ Returns `true` if the FIFO contains no bytes. Performs full argument validation;
 
 **Returns:** `true` if the FIFO is empty; `false` otherwise.
 
+<a id="ex-isempty"></a>
+
+**Example:**
+
+```c
+SSFBFifo_t bf;
+uint8_t bfBuffer[SSF_BFIFO_255 + 1ul];
+
+SSFBFifoInit(&bf, SSF_BFIFO_255, bfBuffer, sizeof(bfBuffer));
+SSFBFifoIsEmpty(&bf);   /* returns true */
+
+SSFBFifoPutByte(&bf, 0x01u);
+SSFBFifoIsEmpty(&bf);   /* returns false */
+```
+
 ---
 
 <a id="ssfbfifoisfull"></a>
 
-### [↑](#ssfbfifo--byte-fifo-interface) [`bool SSFBFifoIsFull()`](#ex-isfull)
+### [↑](#functions) [`bool SSFBFifoIsFull()`](#functions)
 
 ```c
 bool SSFBFifoIsFull(const SSFBFifo_t *fifo);
@@ -216,11 +312,27 @@ Returns `true` if the FIFO has no space for additional bytes. Performs full argu
 
 **Returns:** `true` if the FIFO is full; `false` otherwise.
 
+<a id="ex-isfull"></a>
+
+**Example:**
+
+```c
+SSFBFifo_t bf;
+uint8_t bfBuffer[4 + 1ul];
+uint8_t i;
+
+SSFBFifoInit(&bf, 4, bfBuffer, sizeof(bfBuffer));
+SSFBFifoIsFull(&bf);   /* returns false */
+
+for (i = 0; i < 4; i++) { SSFBFifoPutByte(&bf, i); }
+SSFBFifoIsFull(&bf);   /* returns true */
+```
+
 ---
 
 <a id="ssfbfifosize"></a>
 
-### [↑](#ssfbfifo--byte-fifo-interface) [`ssfbf_uint_t SSFBFifoSize()`](#ex-size)
+### [↑](#functions) [`ssfbf_uint_t SSFBFifoSize()`](#functions)
 
 ```c
 ssfbf_uint_t SSFBFifoSize(const SSFBFifo_t *fifo);
@@ -234,11 +346,23 @@ Returns the total capacity of the FIFO in bytes. `ssfbf_uint_t` is `uint8_t`, `u
 
 **Returns:** Total FIFO capacity in bytes (the `fifoSize` value passed to `SSFBFifoInit()`).
 
+<a id="ex-size"></a>
+
+**Example:**
+
+```c
+SSFBFifo_t bf;
+uint8_t bfBuffer[SSF_BFIFO_255 + 1ul];
+
+SSFBFifoInit(&bf, SSF_BFIFO_255, bfBuffer, sizeof(bfBuffer));
+SSFBFifoSize(&bf);   /* returns 255 */
+```
+
 ---
 
 <a id="ssfbfifolen"></a>
 
-### [↑](#ssfbfifo--byte-fifo-interface) [`ssfbf_uint_t SSFBFifoLen()`](#ex-len)
+### [↑](#functions) [`ssfbf_uint_t SSFBFifoLen()`](#functions)
 
 ```c
 ssfbf_uint_t SSFBFifoLen(const SSFBFifo_t *fifo);
@@ -252,11 +376,25 @@ Returns the number of bytes currently stored in the FIFO. `ssfbf_uint_t` is `uin
 
 **Returns:** Number of bytes currently stored in the FIFO.
 
+<a id="ex-len"></a>
+
+**Example:**
+
+```c
+SSFBFifo_t bf;
+uint8_t bfBuffer[SSF_BFIFO_255 + 1ul];
+
+SSFBFifoInit(&bf, SSF_BFIFO_255, bfBuffer, sizeof(bfBuffer));
+SSFBFifoPutByte(&bf, 0x01u);
+SSFBFifoPutByte(&bf, 0x02u);
+SSFBFifoLen(&bf);   /* returns 2 */
+```
+
 ---
 
 <a id="ssfbfifounused"></a>
 
-### [↑](#ssfbfifo--byte-fifo-interface) [`ssfbf_uint_t SSFBFifoUnused()`](#ex-unused)
+### [↑](#functions) [`ssfbf_uint_t SSFBFifoUnused()`](#functions)
 
 ```c
 ssfbf_uint_t SSFBFifoUnused(const SSFBFifo_t *fifo);
@@ -270,11 +408,25 @@ Returns the number of free bytes remaining in the FIFO. `ssfbf_uint_t` is `uint8
 
 **Returns:** Number of free bytes remaining in the FIFO (`Size - Len`).
 
+<a id="ex-unused"></a>
+
+**Example:**
+
+```c
+SSFBFifo_t bf;
+uint8_t bfBuffer[SSF_BFIFO_255 + 1ul];
+
+SSFBFifoInit(&bf, SSF_BFIFO_255, bfBuffer, sizeof(bfBuffer));
+SSFBFifoPutByte(&bf, 0x01u);
+SSFBFifoPutByte(&bf, 0x02u);
+SSFBFifoUnused(&bf);   /* returns 253 */
+```
+
 ---
 
 <a id="ssfbfifoputbytes"></a>
 
-### [↑](#ssfbfifo--byte-fifo-interface) [`void SSFBFifoPutBytes()`](#ex-putbytes)
+### [↑](#functions) [`void SSFBFifoPutBytes()`](#functions)
 
 ```c
 /* Requires SSF_BFIFO_MULTI_BYTE_ENABLE == 1 */
@@ -293,11 +445,29 @@ Puts multiple bytes into the FIFO. Asserts if the FIFO does not have enough free
 
 **Returns:** Nothing.
 
+<a id="ex-putbytes"></a>
+
+**Example:**
+
+```c
+SSFBFifo_t bf;
+uint8_t bfBuffer[SSF_BFIFO_255 + 1ul];
+const uint8_t data[] = {0x01u, 0x02u, 0x03u};
+
+SSFBFifoInit(&bf, SSF_BFIFO_255, bfBuffer, sizeof(bfBuffer));
+
+if (SSFBFifoUnused(&bf) >= sizeof(data))
+{
+    SSFBFifoPutBytes(&bf, data, sizeof(data));
+    /* FIFO now contains 3 bytes */
+}
+```
+
 ---
 
 <a id="ssfbfifopeekbytes"></a>
 
-### [↑](#ssfbfifo--byte-fifo-interface) [`bool SSFBFifoPeekBytes()`](#ex-peekbytes)
+### [↑](#functions) [`bool SSFBFifoPeekBytes()`](#functions)
 
 ```c
 /* Requires SSF_BFIFO_MULTI_BYTE_ENABLE == 1 */
@@ -318,11 +488,31 @@ Copies up to `outBytesSize` bytes from the FIFO without consuming them. Requires
 
 **Returns:** `true` if at least one byte was transferred; `false` if the FIFO was empty.
 
+<a id="ex-peekbytes"></a>
+
+**Example:**
+
+```c
+SSFBFifo_t bf;
+uint8_t bfBuffer[SSF_BFIFO_255 + 1ul];
+uint8_t out[8];
+uint32_t outLen;
+const uint8_t data[] = {0x01u, 0x02u, 0x03u};
+
+SSFBFifoInit(&bf, SSF_BFIFO_255, bfBuffer, sizeof(bfBuffer));
+SSFBFifoPutBytes(&bf, data, sizeof(data));
+
+if (SSFBFifoPeekBytes(&bf, out, sizeof(out), &outLen))
+{
+    /* outLen == 3, out[0..2] == {0x01, 0x02, 0x03}, bytes still in FIFO */
+}
+```
+
 ---
 
 <a id="ssfbfifogetbytes"></a>
 
-### [↑](#ssfbfifo--byte-fifo-interface) [`bool SSFBFifoGetBytes()`](#ex-getbytes)
+### [↑](#functions) [`bool SSFBFifoGetBytes()`](#functions)
 
 ```c
 /* Requires SSF_BFIFO_MULTI_BYTE_ENABLE == 1 */
@@ -343,292 +533,9 @@ Removes and copies up to `outBytesSize` bytes from the FIFO. Requires [`SSF_BFIF
 
 **Returns:** `true` if at least one byte was transferred; `false` if the FIFO was empty.
 
----
-
-<a id="high-performance-macros"></a>
-
-### [↑](#ssfbfifo--byte-fifo-interface) [High-Performance Macros](#ex-macro-isempty)
-
-Direct field-access macros for use in interrupt service routines where function call overhead is
-unacceptable. Always check `SSF_BFIFO_IS_FULL()` before `SSF_BFIFO_PUT_BYTE()` and
-`SSF_BFIFO_IS_EMPTY()` before `SSF_BFIFO_GET_BYTE()`; the macros do not perform overflow or underflow
-checks and are not thread safe by themselves.
-
----
-
-<a id="ssf-bfifo-is-empty"></a>
-
-#### [↑](#ssfbfifo--byte-fifo-interface) [`SSF_BFIFO_IS_EMPTY()`](#ex-macro-isempty)
-
-```c
-#define SSF_BFIFO_IS_EMPTY(fifo)
-```
-
-Returns true if the FIFO contains no bytes. Directly compares the head and tail indices without
-argument validation.
-
-| Parameter | Direction | Type | Description |
-|-----------|-----------|------|-------------|
-| `fifo` | in | [`SSFBFifo_t *`](#type-ssfbfifo-t) | Pointer to an initialized FIFO. Must not be `NULL`. |
-
-**Returns:** Non-zero (true) if the FIFO is empty; zero (false) otherwise.
-
----
-
-<a id="ssf-bfifo-is-full"></a>
-
-#### [↑](#ssfbfifo--byte-fifo-interface) [`SSF_BFIFO_IS_FULL()`](#ex-macro-isfull)
-
-```c
-#define SSF_BFIFO_IS_FULL(fifo)
-```
-
-Returns true if the FIFO has no space for additional bytes. Directly inspects the head and tail
-indices without argument validation.
-
-| Parameter | Direction | Type | Description |
-|-----------|-----------|------|-------------|
-| `fifo` | in | [`SSFBFifo_t *`](#type-ssfbfifo-t) | Pointer to an initialized FIFO. Must not be `NULL`. |
-
-**Returns:** Non-zero (true) if the FIFO is full; zero (false) otherwise.
-
----
-
-<a id="ssf-bfifo-put-byte"></a>
-
-#### [↑](#ssfbfifo--byte-fifo-interface) [`SSF_BFIFO_PUT_BYTE()`](#ex-macro-putbyte)
-
-```c
-#define SSF_BFIFO_PUT_BYTE(fifo,
-                           inByte)
-```
-
-Writes one byte into the FIFO and advances the head index. Asserts via `SSF_ENSURE()` that the FIFO
-did not overflow after the write. Always check `SSF_BFIFO_IS_FULL()` before calling.
-
-| Parameter | Direction | Type | Description |
-|-----------|-----------|------|-------------|
-| `fifo` | in-out | [`SSFBFifo_t *`](#type-ssfbfifo-t) | Pointer to an initialized FIFO. Must not be `NULL`. Must not be full. |
-| `inByte` | in | `uint8_t` | Byte to write into the FIFO. |
-
-**Returns:** Nothing.
-
----
-
-<a id="ssf-bfifo-get-byte"></a>
-
-#### [↑](#ssfbfifo--byte-fifo-interface) [`SSF_BFIFO_GET_BYTE()`](#ex-macro-getbyte)
-
-```c
-#define SSF_BFIFO_GET_BYTE(fifo,
-                           outByte)
-```
-
-Reads and removes one byte from the FIFO and advances the tail index. Asserts via `SSF_REQUIRE()`
-that the FIFO is not empty before reading. Always check `SSF_BFIFO_IS_EMPTY()` before calling.
-
-| Parameter | Direction | Type | Description |
-|-----------|-----------|------|-------------|
-| `fifo` | in-out | [`SSFBFifo_t *`](#type-ssfbfifo-t) | Pointer to an initialized FIFO. Must not be `NULL`. Must not be empty. |
-| `outByte` | out | `uint8_t` | Variable that receives the byte read from the FIFO. |
-
-**Returns:** Nothing.
-
-<a id="examples"></a>
-
-## [↑](#ssfbfifo--byte-fifo-interface) Examples
-
-<a id="ex-init"></a>
-
-### [↑](#ssfbfifo--byte-fifo-interface) [void SSFBFifoInit()](#ssfbfifoinit)
-
-```c
-SSFBFifo_t bf;
-uint8_t bfBuffer[SSF_BFIFO_255 + 1ul];
-
-SSFBFifoInit(&bf, SSF_BFIFO_255, bfBuffer, sizeof(bfBuffer));
-/* bf is ready for use with 255 bytes of capacity */
-```
-
-<a id="ex-deinit"></a>
-
-### [↑](#ssfbfifo--byte-fifo-interface) [void SSFBFifoDeInit()](#ssfbfifodeinit)
-
-```c
-SSFBFifo_t bf;
-uint8_t bfBuffer[SSF_BFIFO_255 + 1ul];
-
-SSFBFifoInit(&bf, SSF_BFIFO_255, bfBuffer, sizeof(bfBuffer));
-SSFBFifoDeInit(&bf);
-/* bf is no longer valid */
-```
-
-<a id="ex-putbyte"></a>
-
-### [↑](#ssfbfifo--byte-fifo-interface) [void SSFBFifoPutByte()](#ssfbfifoputbyte)
-
-```c
-SSFBFifo_t bf;
-uint8_t bfBuffer[SSF_BFIFO_255 + 1ul];
-
-SSFBFifoInit(&bf, SSF_BFIFO_255, bfBuffer, sizeof(bfBuffer));
-
-if (SSFBFifoIsFull(&bf) == false)
-{
-    SSFBFifoPutByte(&bf, 0xA5u);
-    /* FIFO now contains one byte */
-}
-```
-
-<a id="ex-peekbyte"></a>
-
-### [↑](#ssfbfifo--byte-fifo-interface) [bool SSFBFifoPeekByte()](#ssfbfifopeekbyte)
-
-```c
-SSFBFifo_t bf;
-uint8_t bfBuffer[SSF_BFIFO_255 + 1ul];
-uint8_t b;
-
-SSFBFifoInit(&bf, SSF_BFIFO_255, bfBuffer, sizeof(bfBuffer));
-SSFBFifoPutByte(&bf, 0xA5u);
-
-if (SSFBFifoPeekByte(&bf, &b))
-{
-    /* b == 0xA5, byte is still in FIFO */
-}
-```
-
-<a id="ex-getbyte"></a>
-
-### [↑](#ssfbfifo--byte-fifo-interface) [bool SSFBFifoGetByte()](#ssfbfifogetbyte)
-
-```c
-SSFBFifo_t bf;
-uint8_t bfBuffer[SSF_BFIFO_255 + 1ul];
-uint8_t b;
-
-SSFBFifoInit(&bf, SSF_BFIFO_255, bfBuffer, sizeof(bfBuffer));
-SSFBFifoPutByte(&bf, 0xA5u);
-
-if (SSFBFifoGetByte(&bf, &b))
-{
-    /* b == 0xA5, byte has been removed from FIFO */
-}
-/* SSFBFifoIsEmpty(&bf) == true */
-```
-
-<a id="ex-isempty"></a>
-
-### [↑](#ssfbfifo--byte-fifo-interface) [bool SSFBFifoIsEmpty()](#ssfbfifoisempty)
-
-```c
-SSFBFifo_t bf;
-uint8_t bfBuffer[SSF_BFIFO_255 + 1ul];
-
-SSFBFifoInit(&bf, SSF_BFIFO_255, bfBuffer, sizeof(bfBuffer));
-SSFBFifoIsEmpty(&bf);   /* returns true */
-
-SSFBFifoPutByte(&bf, 0x01u);
-SSFBFifoIsEmpty(&bf);   /* returns false */
-```
-
-<a id="ex-isfull"></a>
-
-### [↑](#ssfbfifo--byte-fifo-interface) [bool SSFBFifoIsFull()](#ssfbfifoisfull)
-
-```c
-SSFBFifo_t bf;
-uint8_t bfBuffer[4 + 1ul];
-uint8_t i;
-
-SSFBFifoInit(&bf, 4, bfBuffer, sizeof(bfBuffer));
-SSFBFifoIsFull(&bf);   /* returns false */
-
-for (i = 0; i < 4; i++) { SSFBFifoPutByte(&bf, i); }
-SSFBFifoIsFull(&bf);   /* returns true */
-```
-
-<a id="ex-size"></a>
-
-### [↑](#ssfbfifo--byte-fifo-interface) [ssfbf_uint_t SSFBFifoSize()](#ssfbfifosize)
-
-```c
-SSFBFifo_t bf;
-uint8_t bfBuffer[SSF_BFIFO_255 + 1ul];
-
-SSFBFifoInit(&bf, SSF_BFIFO_255, bfBuffer, sizeof(bfBuffer));
-SSFBFifoSize(&bf);   /* returns 255 */
-```
-
-<a id="ex-len"></a>
-
-### [↑](#ssfbfifo--byte-fifo-interface) [ssfbf_uint_t SSFBFifoLen()](#ssfbfifolen)
-
-```c
-SSFBFifo_t bf;
-uint8_t bfBuffer[SSF_BFIFO_255 + 1ul];
-
-SSFBFifoInit(&bf, SSF_BFIFO_255, bfBuffer, sizeof(bfBuffer));
-SSFBFifoPutByte(&bf, 0x01u);
-SSFBFifoPutByte(&bf, 0x02u);
-SSFBFifoLen(&bf);   /* returns 2 */
-```
-
-<a id="ex-unused"></a>
-
-### [↑](#ssfbfifo--byte-fifo-interface) [ssfbf_uint_t SSFBFifoUnused()](#ssfbfifounused)
-
-```c
-SSFBFifo_t bf;
-uint8_t bfBuffer[SSF_BFIFO_255 + 1ul];
-
-SSFBFifoInit(&bf, SSF_BFIFO_255, bfBuffer, sizeof(bfBuffer));
-SSFBFifoPutByte(&bf, 0x01u);
-SSFBFifoPutByte(&bf, 0x02u);
-SSFBFifoUnused(&bf);   /* returns 253 */
-```
-
-<a id="ex-putbytes"></a>
-
-### [↑](#ssfbfifo--byte-fifo-interface) [void SSFBFifoPutBytes()](#ssfbfifoputbytes)
-
-```c
-SSFBFifo_t bf;
-uint8_t bfBuffer[SSF_BFIFO_255 + 1ul];
-const uint8_t data[] = {0x01u, 0x02u, 0x03u};
-
-SSFBFifoInit(&bf, SSF_BFIFO_255, bfBuffer, sizeof(bfBuffer));
-
-if (SSFBFifoUnused(&bf) >= sizeof(data))
-{
-    SSFBFifoPutBytes(&bf, data, sizeof(data));
-    /* FIFO now contains 3 bytes */
-}
-```
-
-<a id="ex-peekbytes"></a>
-
-### [↑](#ssfbfifo--byte-fifo-interface) [bool SSFBFifoPeekBytes()](#ssfbfifopeekbytes)
-
-```c
-SSFBFifo_t bf;
-uint8_t bfBuffer[SSF_BFIFO_255 + 1ul];
-uint8_t out[8];
-uint32_t outLen;
-const uint8_t data[] = {0x01u, 0x02u, 0x03u};
-
-SSFBFifoInit(&bf, SSF_BFIFO_255, bfBuffer, sizeof(bfBuffer));
-SSFBFifoPutBytes(&bf, data, sizeof(data));
-
-if (SSFBFifoPeekBytes(&bf, out, sizeof(out), &outLen))
-{
-    /* outLen == 3, out[0..2] == {0x01, 0x02, 0x03}, bytes still in FIFO */
-}
-```
-
 <a id="ex-getbytes"></a>
 
-### [↑](#ssfbfifo--byte-fifo-interface) [bool SSFBFifoGetBytes()](#ssfbfifogetbytes)
+**Example:**
 
 ```c
 SSFBFifo_t bf;
@@ -647,9 +554,39 @@ if (SSFBFifoGetBytes(&bf, out, sizeof(out), &outLen))
 /* SSFBFifoIsEmpty(&bf) == true */
 ```
 
+---
+
+<a id="high-performance-macros"></a>
+
+### [↑](#functions) [High-Performance Macros](#functions)
+
+Direct field-access macros for use in interrupt service routines where function call overhead is
+unacceptable. Always check `SSF_BFIFO_IS_FULL()` before `SSF_BFIFO_PUT_BYTE()` and
+`SSF_BFIFO_IS_EMPTY()` before `SSF_BFIFO_GET_BYTE()`; the macros do not perform overflow or underflow
+checks and are not thread safe by themselves.
+
+---
+
+<a id="ssf-bfifo-is-empty"></a>
+
+#### [↑](#functions) [`SSF_BFIFO_IS_EMPTY()`](#functions)
+
+```c
+#define SSF_BFIFO_IS_EMPTY(fifo)
+```
+
+Returns true if the FIFO contains no bytes. Directly compares the head and tail indices without
+argument validation.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `fifo` | in | [`SSFBFifo_t *`](#type-ssfbfifo-t) | Pointer to an initialized FIFO. Must not be `NULL`. |
+
+**Returns:** Non-zero (true) if the FIFO is empty; zero (false) otherwise.
+
 <a id="ex-macro-isempty"></a>
 
-### [↑](#ssfbfifo--byte-fifo-interface) [SSF_BFIFO_IS_EMPTY()](#high-performance-macros)
+**Example:**
 
 ```c
 SSFBFifo_t bf;
@@ -663,9 +600,28 @@ if (SSF_BFIFO_IS_EMPTY(&bf) == false)
 }
 ```
 
+---
+
+<a id="ssf-bfifo-is-full"></a>
+
+#### [↑](#functions) [`SSF_BFIFO_IS_FULL()`](#functions)
+
+```c
+#define SSF_BFIFO_IS_FULL(fifo)
+```
+
+Returns true if the FIFO has no space for additional bytes. Directly inspects the head and tail
+indices without argument validation.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `fifo` | in | [`SSFBFifo_t *`](#type-ssfbfifo-t) | Pointer to an initialized FIFO. Must not be `NULL`. |
+
+**Returns:** Non-zero (true) if the FIFO is full; zero (false) otherwise.
+
 <a id="ex-macro-isfull"></a>
 
-### [↑](#ssfbfifo--byte-fifo-interface) [SSF_BFIFO_IS_FULL()](#high-performance-macros)
+**Example:**
 
 ```c
 SSFBFifo_t bf;
@@ -679,9 +635,30 @@ if (SSF_BFIFO_IS_FULL(&bf) == false)
 }
 ```
 
+---
+
+<a id="ssf-bfifo-put-byte"></a>
+
+#### [↑](#functions) [`SSF_BFIFO_PUT_BYTE()`](#functions)
+
+```c
+#define SSF_BFIFO_PUT_BYTE(fifo,
+                           inByte)
+```
+
+Writes one byte into the FIFO and advances the head index. Asserts via `SSF_ENSURE()` that the FIFO
+did not overflow after the write. Always check `SSF_BFIFO_IS_FULL()` before calling.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `fifo` | in-out | [`SSFBFifo_t *`](#type-ssfbfifo-t) | Pointer to an initialized FIFO. Must not be `NULL`. Must not be full. |
+| `inByte` | in | `uint8_t` | Byte to write into the FIFO. |
+
+**Returns:** Nothing.
+
 <a id="ex-macro-putbyte"></a>
 
-### [↑](#ssfbfifo--byte-fifo-interface) [SSF_BFIFO_PUT_BYTE()](#high-performance-macros)
+**Example:**
 
 ```c
 SSFBFifo_t bf;
@@ -696,9 +673,30 @@ if (SSF_BFIFO_IS_FULL(&bf) == false)
 }
 ```
 
+---
+
+<a id="ssf-bfifo-get-byte"></a>
+
+#### [↑](#functions) [`SSF_BFIFO_GET_BYTE()`](#functions)
+
+```c
+#define SSF_BFIFO_GET_BYTE(fifo,
+                           outByte)
+```
+
+Reads and removes one byte from the FIFO and advances the tail index. Asserts via `SSF_REQUIRE()`
+that the FIFO is not empty before reading. Always check `SSF_BFIFO_IS_EMPTY()` before calling.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `fifo` | in-out | [`SSFBFifo_t *`](#type-ssfbfifo-t) | Pointer to an initialized FIFO. Must not be `NULL`. Must not be empty. |
+| `outByte` | out | `uint8_t` | Variable that receives the byte read from the FIFO. |
+
+**Returns:** Nothing.
+
 <a id="ex-macro-getbyte"></a>
 
-### [↑](#ssfbfifo--byte-fifo-interface) [SSF_BFIFO_GET_BYTE()](#high-performance-macros)
+**Example:**
 
 ```c
 SSFBFifo_t bf;
@@ -715,4 +713,3 @@ if (SSF_BFIFO_IS_EMPTY(&bf) == false)
     /* b == 0x42 */
 }
 ```
-

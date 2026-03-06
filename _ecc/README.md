@@ -15,7 +15,7 @@ allowing RAM usage to be traded against ECC overhead and throughput.
 converge on a plausible but incorrect solution without detecting the failure. See
 [`ssfcrc16`](../_edc/ssfcrc16.md) or [`ssfcrc32`](../_edc/ssfcrc32.md).
 
-[Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference) | [Examples](#examples)
+[Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference)
 
 <a id="dependencies"></a>
 
@@ -80,12 +80,14 @@ buffer.
 
 ## [↑](#ssfrs--reed-solomon-fec-encoderdecoder) API Summary
 
+<a id="functions"></a>
+
 ### Functions
 
 | | Function | Description |
 |---|----------|-------------|
-| [e.g.](#ex-encode) | [`SSFRSEncode(msg, msgLen, eccBuf, eccBufSize, eccBufLen, eccNumBytes, chunkSize)`](#ssfrsencode) | Encode a message and write ECC bytes to a separate buffer |
-| [e.g.](#ex-decode) | [`SSFRSDecode(msg, msgSize, msgLen, chunkSyms, chunkSize)`](#ssfrsdecode) | Correct errors in a received message-plus-ECC buffer in place |
+| [e.g.](#ex-encode) | [`void SSFRSEncode(msg, msgLen, eccBuf, eccBufSize, eccBufLen, eccNumBytes, chunkSize)`](#ssfrsencode) | Encode a message and write ECC bytes to a separate buffer |
+| [e.g.](#ex-decode) | [`bool SSFRSDecode(msg, msgSize, msgLen, chunkSyms, chunkSize)`](#ssfrsdecode) | Correct errors in a received message-plus-ECC buffer in place |
 
 <a id="function-reference"></a>
 
@@ -93,7 +95,7 @@ buffer.
 
 <a id="ssfrsencode"></a>
 
-### [↑](#ssfrs--reed-solomon-fec-encoderdecoder) [`SSFRSEncode()`](#ex-encode)
+### [↑](#functions) [`void SSFRSEncode()`](#functions)
 
 ```c
 void SSFRSEncode(const uint8_t *msg, uint16_t msgLen, uint8_t *eccBuf, uint16_t eccBufSize,
@@ -117,11 +119,31 @@ Transmit `msg` followed by `eccBuf[0..*eccBufLen-1]` to the receiver.
 
 **Returns:** Nothing (always succeeds).
 
+<a id="ex-encode"></a>
+
+**Example:**
+
+```c
+uint8_t  msg[SSF_RS_MAX_MESSAGE_SIZE];
+uint8_t  ecc[SSF_RS_MAX_SYMBOLS * SSF_RS_MAX_CHUNKS];
+uint16_t eccLen;
+
+/* Fill message with data to protect */
+memset(msg, 0xaau, sizeof(msg));
+
+/* Encode: produces ECC bytes for each chunk of the message */
+SSFRSEncode(msg, (uint16_t)sizeof(msg), ecc, (uint16_t)sizeof(ecc), &eccLen,
+            SSF_RS_MAX_SYMBOLS, SSF_RS_MAX_CHUNK_SIZE);
+/* eccLen == actual ECC bytes written; always <= SSF_RS_MAX_SYMBOLS * SSF_RS_MAX_CHUNKS */
+
+/* Transmit: send msg[0..sizeof(msg)-1] followed by ecc[0..eccLen-1] */
+```
+
 ---
 
 <a id="ssfrsdecode"></a>
 
-### [↑](#ssfrs--reed-solomon-fec-encoderdecoder) [`SSFRSDecode()`](#ex-decode)
+### [↑](#functions) [`bool SSFRSDecode()`](#functions)
 
 ```c
 bool SSFRSDecode(uint8_t *msg, uint16_t msgSize, uint16_t *msgLen, uint8_t chunkSyms,
@@ -150,35 +172,20 @@ converge on an incorrect solution without returning `false`.
 recovered message; `false` if any chunk had more errors than `chunkSyms / 2`, in which case
 the buffer contents are undefined. Always follow a `true` return with a CRC integrity check.
 
-<a id="examples"></a>
+<a id="ex-decode"></a>
 
-## [↑](#ssfrs--reed-solomon-fec-encoderdecoder) Examples
-
-<a id="ex-encode"></a>
-
-### [↑](#ssfrs--reed-solomon-fec-encoderdecoder) [SSFRSEncode()](#ssfrsencode)
+**Example:**
 
 ```c
 uint8_t  msg[SSF_RS_MAX_MESSAGE_SIZE];
 uint8_t  ecc[SSF_RS_MAX_SYMBOLS * SSF_RS_MAX_CHUNKS];
 uint16_t eccLen;
 
-/* Fill message with data to protect */
+/* Encode first to have ECC data for decoding */
 memset(msg, 0xaau, sizeof(msg));
-
-/* Encode: produces ECC bytes for each chunk of the message */
 SSFRSEncode(msg, (uint16_t)sizeof(msg), ecc, (uint16_t)sizeof(ecc), &eccLen,
             SSF_RS_MAX_SYMBOLS, SSF_RS_MAX_CHUNK_SIZE);
-/* eccLen == actual ECC bytes written; always <= SSF_RS_MAX_SYMBOLS * SSF_RS_MAX_CHUNKS */
 
-/* Transmit: send msg[0..sizeof(msg)-1] followed by ecc[0..eccLen-1] */
-```
-
-<a id="ex-decode"></a>
-
-### [↑](#ssfrs--reed-solomon-fec-encoderdecoder) [SSFRSDecode()](#ssfrsdecode)
-
-```c
 /* Receive buffer: message bytes followed immediately by ECC bytes — no gap */
 uint8_t  rx[SSF_RS_MAX_MESSAGE_SIZE + (SSF_RS_MAX_SYMBOLS * SSF_RS_MAX_CHUNKS)];
 uint16_t rxMsgLen;

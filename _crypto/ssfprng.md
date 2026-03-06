@@ -9,7 +9,7 @@ Each call to `SSFPRNGGetRandom()` internally encrypts a monotonically increasing
 pseudo-random output. Security depends entirely on the quality of the entropy supplied to
 `SSFPRNGInitContext()`.
 
-[Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference) | [Examples](#examples)
+[Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference)
 
 <a id="dependencies"></a>
 
@@ -52,14 +52,16 @@ This module has no compile-time configuration options in `ssfoptions.h`.
 | <a id="ssf-prng-random-max-size"></a>`SSF_PRNG_RANDOM_MAX_SIZE` | Constant | `16` — maximum number of bytes that can be requested in a single `SSFPRNGGetRandom()` call |
 | <a id="ssfprngcontext-t"></a>`SSFPRNGContext_t` | Struct | PRNG context holding the entropy seed, internal counter, and state marker. Treat as opaque; pass by pointer to all API functions. |
 
+<a id="functions"></a>
+
 ### Functions
 
 | | Function | Description |
 |---|----------|-------------|
-| [e.g.](#ex-init) | [`SSFPRNGInitContext(context, entropy, entropyLen)`](#ssfprnginitcontext) | Initialize a PRNG context with 16 bytes of entropy |
-| [e.g.](#ex-reinit) | [`SSFPRNGReInitContext(context, entropy, entropyLen)`](#ssfprngreinitcontext) | Re-seed an existing context with fresh entropy (alias for `SSFPRNGInitContext`) |
-| [e.g.](#ex-deinit) | [`SSFPRNGDeInitContext(context)`](#ssfprnginitcontext) | De-initialize a context and clear its internal state |
-| [e.g.](#ex-getrandom) | [`SSFPRNGGetRandom(context, random, randomSize)`](#ssfprnggetrandom) | Generate 1–16 bytes of pseudo-random data |
+| [e.g.](#ex-init) | [`void SSFPRNGInitContext(context, entropy, entropyLen)`](#ssfprnginitcontext) | Initialize a PRNG context with 16 bytes of entropy |
+| [e.g.](#ex-reinit) | [`void SSFPRNGReInitContext(context, entropy, entropyLen)`](#ssfprngreinitcontext) | Re-seed an existing context with fresh entropy (alias for `SSFPRNGInitContext`) |
+| [e.g.](#ex-deinit) | [`void SSFPRNGDeInitContext(context)`](#ssfprnginitcontext) | De-initialize a context and clear its internal state |
+| [e.g.](#ex-getrandom) | [`void SSFPRNGGetRandom(context, random, randomSize)`](#ssfprnggetrandom) | Generate 1–16 bytes of pseudo-random data |
 
 <a id="function-reference"></a>
 
@@ -67,7 +69,7 @@ This module has no compile-time configuration options in `ssfoptions.h`.
 
 <a id="ssfprnginitcontext"></a>
 
-### [↑](#ssfprng--pseudo-random-number-generator) [`SSFPRNGInitContext()`](#ex-init)
+### [↑](#functions) [`void SSFPRNGInitContext()`](#functions)
 
 ```c
 void SSFPRNGInitContext(SSFPRNGContext_t *context, const uint8_t *entropy, size_t entropyLen);
@@ -86,11 +88,26 @@ ready for use with `SSFPRNGGetRandom()`.
 
 **Returns:** Nothing.
 
+<a id="ex-init"></a>
+
+**Example:**
+
+```c
+uint8_t         entropy[SSF_PRNG_ENTROPY_SIZE];
+SSFPRNGContext_t ctx;
+
+/* Obtain 16 bytes of true entropy from a hardware source */
+/* entropy <--- hardware RNG or other true entropy source */
+
+SSFPRNGInitContext(&ctx, entropy, sizeof(entropy));
+/* ctx is ready; call SSFPRNGGetRandom() to produce random bytes */
+```
+
 ---
 
 <a id="ssfprngreinitcontext"></a>
 
-### [↑](#ssfprng--pseudo-random-number-generator) [`SSFPRNGReInitContext()`](#ex-reinit)
+### [↑](#functions) [`void SSFPRNGReInitContext()`](#functions)
 
 ```c
 #define SSFPRNGReInitContext SSFPRNGInitContext
@@ -101,11 +118,30 @@ entropy and resets the internal counter. Functionally identical to `SSFPRNGInitC
 separate name improves readability at re-seed call sites. Parameters and return value are the same
 as [`SSFPRNGInitContext()`](#ssfprnginitcontext).
 
+<a id="ex-reinit"></a>
+
+**Example:**
+
+```c
+uint8_t         entropy[SSF_PRNG_ENTROPY_SIZE];
+SSFPRNGContext_t ctx;
+
+/* entropy <--- hardware RNG */
+SSFPRNGInitContext(&ctx, entropy, sizeof(entropy));
+
+/* ... generate many random values ... */
+
+/* Re-seed with fresh entropy to reset the counter and update the key */
+/* entropy <--- hardware RNG */
+SSFPRNGReInitContext(&ctx, entropy, sizeof(entropy));
+/* ctx counter reset to zero; subsequent calls use the new seed */
+```
+
 ---
 
 <a id="ssfprngdeinitcontext"></a>
 
-### [↑](#ssfprng--pseudo-random-number-generator) [`SSFPRNGDeInitContext()`](#ex-deinit)
+### [↑](#functions) [`void SSFPRNGDeInitContext()`](#functions)
 
 ```c
 void SSFPRNGDeInitContext(SSFPRNGContext_t *context);
@@ -121,11 +157,26 @@ call, `SSFPRNGGetRandom()` must not be used until `SSFPRNGInitContext()` is call
 
 **Returns:** Nothing.
 
+<a id="ex-deinit"></a>
+
+**Example:**
+
+```c
+uint8_t         entropy[SSF_PRNG_ENTROPY_SIZE];
+SSFPRNGContext_t ctx;
+
+/* entropy <--- hardware RNG */
+SSFPRNGInitContext(&ctx, entropy, sizeof(entropy));
+/* ... use ctx ... */
+SSFPRNGDeInitContext(&ctx);
+/* ctx internal state zeroed; entropy seed no longer in memory */
+```
+
 ---
 
 <a id="ssfprnggetrandom"></a>
 
-### [↑](#ssfprng--pseudo-random-number-generator) [`SSFPRNGGetRandom()`](#ex-getrandom)
+### [↑](#functions) [`void SSFPRNGGetRandom()`](#functions)
 
 ```c
 void SSFPRNGGetRandom(SSFPRNGContext_t *context, uint8_t *random, size_t randomSize);
@@ -144,60 +195,18 @@ AES block are discarded; the counter always advances by one per call.
 
 **Returns:** Nothing.
 
-<a id="examples"></a>
+<a id="ex-getrandom"></a>
 
-## [↑](#ssfprng--pseudo-random-number-generator) Examples
-
-<a id="ex-init"></a>
-
-### [↑](#ssfprng--pseudo-random-number-generator) [SSFPRNGInitContext()](#ssfprnginitcontext)
+**Example:**
 
 ```c
 uint8_t         entropy[SSF_PRNG_ENTROPY_SIZE];
 SSFPRNGContext_t ctx;
-
-/* Obtain 16 bytes of true entropy from a hardware source */
-/* entropy <--- hardware RNG or other true entropy source */
-
-SSFPRNGInitContext(&ctx, entropy, sizeof(entropy));
-/* ctx is ready; call SSFPRNGGetRandom() to produce random bytes */
-```
-
-<a id="ex-reinit"></a>
-
-### [↑](#ssfprng--pseudo-random-number-generator) [SSFPRNGReInitContext()](#ssfprngreinitcontext)
-
-```c
-SSFPRNGInitContext(&ctx, entropy, sizeof(entropy));
-
-/* ... generate many random values ... */
-
-/* Re-seed with fresh entropy to reset the counter and update the key */
-/* entropy <--- hardware RNG */
-SSFPRNGReInitContext(&ctx, entropy, sizeof(entropy));
-/* ctx counter reset to zero; subsequent calls use the new seed */
-```
-
-<a id="ex-deinit"></a>
-
-### [↑](#ssfprng--pseudo-random-number-generator) [SSFPRNGDeInitContext()](#ssfprngdeinitcontext)
-
-```c
-SSFPRNGInitContext(&ctx, entropy, sizeof(entropy));
-/* ... use ctx ... */
-SSFPRNGDeInitContext(&ctx);
-/* ctx internal state zeroed; entropy seed no longer in memory */
-```
-
-<a id="ex-getrandom"></a>
-
-### [↑](#ssfprng--pseudo-random-number-generator) [SSFPRNGGetRandom()](#ssfprnggetrandom)
-
-```c
 uint8_t random16[SSF_PRNG_RANDOM_MAX_SIZE];
 uint8_t random8[8];
 uint8_t random1[1];
 
+/* entropy <--- hardware RNG */
 SSFPRNGInitContext(&ctx, entropy, sizeof(entropy));
 
 /* Generate a full 16-byte block */

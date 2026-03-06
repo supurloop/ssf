@@ -11,7 +11,7 @@ for overruns. Block headers use `+`/`-` ASCII markers that remain visible in raw
 > **Note:** This is NOT a drop-in replacement for `malloc`/`free`. The API is intentionally more
 > explicit to prevent common dynamic memory mistakes.
 
-[Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference) | [Examples](#examples)
+[Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference)
 
 <a id="dependencies"></a>
 
@@ -59,24 +59,26 @@ All options are set in `ssfoptions.h`.
 | <a id="type-ssfheaphandle-t"></a>`SSFHeapHandle_t` | Typedef | Opaque heap handle (`void *`); must be initialized to `NULL`, set by `SSFHeapInit()`, cleared by `SSFHeapDeInit()`. Do not dereference directly. |
 | <a id="type-ssfheapstatus-t"></a>`SSFHeapStatus_t` | Struct | Heap usage snapshot populated by [`SSFHeapStatus()`](#ssfheapstatus). Fields: `allocatableSize` (total allocatable bytes), `allocatableLen` (current free bytes), `minAllocatableLen` (low-water mark), `numBlocks` (current block count), `numAllocatableBlocks` (free block count), `maxAllocatableBlockLen` (largest free block), `numTotalAllocRequests`, `numAllocRequests`, `numFreeRequests`. |
 
+<a id="functions"></a>
+
 ### Functions
 
 | | Function / Macro | Description |
 |---|-----------------|-------------|
-| [e.g.](#ex-initminmemsize) | [`SSFHeapInitMinMemSize()`](#ssfheapinitminmemsize) | Returns the minimum buffer size required to create a heap |
-| [e.g.](#ex-init) | [`SSFHeapInit(handleOut, heapMem, heapMemSize, heapMark, isZeroed)`](#ssfheapinit) | Initialize a heap over a user-supplied buffer |
-| [e.g.](#ex-deinit) | [`SSFHeapDeInit(handleOut, isZeroed)`](#ssfheapdeinit) | De-initialize a heap |
-| [e.g.](#ex-check) | [`SSFHeapCheck(handle)`](#ssfheapcheck) | Verify heap integrity; asserts on corruption |
-| [e.g.](#ex-status) | [`SSFHeapStatus(handle, statusOut)`](#ssfheapstatus) | Retrieve heap usage statistics |
-| [e.g.](#ex-alloc) | [`SSFHeapAlloc(handle, heapMemOut, size, mark, isZeroed)`](#ssfheapalloc) | Allocate memory from the heap |
-| [e.g.](#ex-allocresize) | [`SSFHeapAllocResize(handle, heapMemOut, newSize, newMark, newIsZeroed)`](#ssfheapallocresize) | Resize an existing allocation |
-| [e.g.](#ex-dealloc) | [`SSFHeapDealloc(handle, heapMemOut, markOutOpt, isZeroed)`](#ssfheapdealloc) | Free memory back to the heap |
-| [e.g.](#ex-macro-malloc) | [`SSFHeapMalloc(handle, heapMemOut, size, mark)`](#ssf-heap-malloc) | Macro: allocate without zeroing |
-| [e.g.](#ex-macro-malloc-and-zero) | [`SSFHeapMallocAndZero(handle, heapMemOut, size, mark)`](#ssf-heap-malloc-and-zero) | Macro: allocate and zero memory |
-| [e.g.](#ex-macro-realloc) | [`SSFHeapRealloc(handle, heapMemOut, newSize, newMark)`](#ssf-heap-realloc) | Macro: resize without zeroing new area |
-| [e.g.](#ex-macro-realloc-and-zero-new) | [`SSFHeapReallocAndZeroNew(handle, heapMemOut, newSize, newMark)`](#ssf-heap-realloc-and-zero-new) | Macro: resize and zero newly added area |
-| [e.g.](#ex-macro-free) | [`SSFHeapFree(handle, heapMemOut, markOutOpt)`](#ssf-heap-free) | Macro: free without zeroing |
-| [e.g.](#ex-macro-free-and-zero) | [`SSFHeapFreeAndZero(handle, heapMemOut, markOutOpt)`](#ssf-heap-free-and-zero) | Macro: free and zero the freed memory |
+| [e.g.](#ex-initminmemsize) | [`uint32_t SSFHeapInitMinMemSize()`](#ssfheapinitminmemsize) | Returns the minimum buffer size required to create a heap |
+| [e.g.](#ex-init) | [`void SSFHeapInit(handleOut, heapMem, heapMemSize, heapMark, isZeroed)`](#ssfheapinit) | Initialize a heap over a user-supplied buffer |
+| [e.g.](#ex-deinit) | [`void SSFHeapDeInit(handleOut, isZeroed)`](#ssfheapdeinit) | De-initialize a heap |
+| [e.g.](#ex-check) | [`void SSFHeapCheck(handle)`](#ssfheapcheck) | Verify heap integrity; asserts on corruption |
+| [e.g.](#ex-status) | [`void SSFHeapStatus(handle, statusOut)`](#ssfheapstatus) | Retrieve heap usage statistics |
+| [e.g.](#ex-alloc) | [`bool SSFHeapAlloc(handle, heapMemOut, size, mark, isZeroed)`](#ssfheapalloc) | Allocate memory from the heap |
+| [e.g.](#ex-allocresize) | [`bool SSFHeapAllocResize(handle, heapMemOut, newSize, newMark, newIsZeroed)`](#ssfheapallocresize) | Resize an existing allocation |
+| [e.g.](#ex-dealloc) | [`void SSFHeapDealloc(handle, heapMemOut, markOutOpt, isZeroed)`](#ssfheapdealloc) | Free memory back to the heap |
+| [e.g.](#ex-macro-malloc) | [`bool SSFHeapMalloc(handle, heapMemOut, size, mark)`](#ssf-heap-malloc) | Macro: allocate without zeroing |
+| [e.g.](#ex-macro-malloc-and-zero) | [`bool SSFHeapMallocAndZero(handle, heapMemOut, size, mark)`](#ssf-heap-malloc-and-zero) | Macro: allocate and zero memory |
+| [e.g.](#ex-macro-realloc) | [`bool SSFHeapRealloc(handle, heapMemOut, newSize, newMark)`](#ssf-heap-realloc) | Macro: resize without zeroing new area |
+| [e.g.](#ex-macro-realloc-and-zero-new) | [`bool SSFHeapReallocAndZeroNew(handle, heapMemOut, newSize, newMark)`](#ssf-heap-realloc-and-zero-new) | Macro: resize and zero newly added area |
+| [e.g.](#ex-macro-free) | [`void SSFHeapFree(handle, heapMemOut, markOutOpt)`](#ssf-heap-free) | Macro: free without zeroing |
+| [e.g.](#ex-macro-free-and-zero) | [`void SSFHeapFreeAndZero(handle, heapMemOut, markOutOpt)`](#ssf-heap-free-and-zero) | Macro: free and zero the freed memory |
 
 <a id="function-reference"></a>
 
@@ -84,7 +86,7 @@ All options are set in `ssfoptions.h`.
 
 <a id="ssfheapinitminmemsize"></a>
 
-### [↑](#ssfheap--integrity-checked-heap-interface) [`SSFHeapInitMinMemSize()`](#ex-initminmemsize)
+### [↑](#functions) [`uint32_t SSFHeapInitMinMemSize()`](#functions)
 
 ```c
 uint32_t SSFHeapInitMinMemSize(void);
@@ -96,11 +98,23 @@ buffer to allow actual allocations.
 
 **Returns:** Minimum number of bytes required for heap metadata and block headers.
 
+<a id="ex-initminmemsize"></a>
+
+**Example:**
+
+```c
+uint32_t minSize;
+
+minSize = SSFHeapInitMinMemSize();
+/* minSize is the minimum buffer size needed to initialize a heap */
+/* A buffer larger than minSize provides allocatable memory */
+```
+
 ---
 
 <a id="ssfheapinit"></a>
 
-### [↑](#ssfheap--integrity-checked-heap-interface) [`SSFHeapInit()`](#ex-init)
+### [↑](#functions) [`void SSFHeapInit()`](#functions)
 
 ```c
 void SSFHeapInit(SSFHeapHandle_t *handleOut, uint8_t *heapMem, uint32_t heapMemSize,
@@ -121,11 +135,27 @@ operations. `heapMem` must remain valid for the lifetime of the heap.
 
 **Returns:** Nothing.
 
+<a id="ex-init"></a>
+
+**Example:**
+
+```c
+#define HEAP_SIZE  (1024u)
+#define HEAP_MARK  ('H')
+
+uint8_t heapMem[HEAP_SIZE];
+SSFHeapHandle_t h = NULL;
+
+SSFHeapInit(&h, heapMem, sizeof(heapMem), HEAP_MARK, false);
+/* h is a valid heap handle */
+SSFHeapDeInit(&h, false);
+```
+
 ---
 
 <a id="ssfheapdeinit"></a>
 
-### [↑](#ssfheap--integrity-checked-heap-interface) [`SSFHeapDeInit()`](#ex-deinit)
+### [↑](#functions) [`void SSFHeapDeInit()`](#functions)
 
 ```c
 void SSFHeapDeInit(SSFHeapHandle_t *handleOut, bool isZeroed);
@@ -141,11 +171,27 @@ otherwise. Sets `*handleOut` to `NULL` on return.
 
 **Returns:** Nothing.
 
+<a id="ex-deinit"></a>
+
+**Example:**
+
+```c
+#define HEAP_SIZE  (1024u)
+#define HEAP_MARK  ('H')
+
+uint8_t heapMem[HEAP_SIZE];
+SSFHeapHandle_t h = NULL;
+
+SSFHeapInit(&h, heapMem, sizeof(heapMem), HEAP_MARK, false);
+SSFHeapDeInit(&h, false);
+/* h == NULL; heap is no longer valid */
+```
+
 ---
 
 <a id="ssfheapcheck"></a>
 
-### [↑](#ssfheap--integrity-checked-heap-interface) [`SSFHeapCheck()`](#ex-check)
+### [↑](#functions) [`void SSFHeapCheck()`](#functions)
 
 ```c
 void SSFHeapCheck(SSFHeapHandle_t handle);
@@ -160,11 +206,28 @@ any corruption is detected. Use during development or debugging to catch memory 
 
 **Returns:** Nothing.
 
+<a id="ex-check"></a>
+
+**Example:**
+
+```c
+#define HEAP_SIZE  (1024u)
+#define HEAP_MARK  ('H')
+
+uint8_t heapMem[HEAP_SIZE];
+SSFHeapHandle_t h = NULL;
+
+SSFHeapInit(&h, heapMem, sizeof(heapMem), HEAP_MARK, false);
+SSFHeapCheck(h);
+/* returns normally if heap is intact; asserts on corruption */
+SSFHeapDeInit(&h, false);
+```
+
 ---
 
 <a id="ssfheapstatus"></a>
 
-### [↑](#ssfheap--integrity-checked-heap-interface) [`SSFHeapStatus()`](#ex-status)
+### [↑](#functions) [`void SSFHeapStatus()`](#functions)
 
 ```c
 void SSFHeapStatus(SSFHeapHandle_t handle, SSFHeapStatus_t *statusOut);
@@ -180,11 +243,36 @@ before computing free-space figures.
 
 **Returns:** Nothing.
 
+<a id="ex-status"></a>
+
+**Example:**
+
+```c
+#define HEAP_SIZE  (1024u)
+#define HEAP_MARK  ('H')
+#define APP_MARK   ('A')
+
+uint8_t heapMem[HEAP_SIZE];
+SSFHeapHandle_t h = NULL;
+SSFHeapStatus_t status;
+uint8_t *ptr = NULL;
+
+SSFHeapInit(&h, heapMem, sizeof(heapMem), HEAP_MARK, false);
+SSFHeapMalloc(h, &ptr, 64u, APP_MARK);
+
+SSFHeapStatus(h, &status);
+/* status.allocatableLen == (status.allocatableSize - aligned 64 bytes - block overhead) */
+/* status.numAllocRequests == 1 */
+
+SSFHeapFree(h, &ptr, NULL);
+SSFHeapDeInit(&h, false);
+```
+
 ---
 
 <a id="ssfheapalloc"></a>
 
-### [↑](#ssfheap--integrity-checked-heap-interface) [`SSFHeapAlloc()`](#ex-alloc)
+### [↑](#functions) [`bool SSFHeapAlloc()`](#functions)
 
 ```c
 bool SSFHeapAlloc(SSFHeapHandle_t handle, void **heapMemOut, uint32_t size, uint8_t mark,
@@ -205,11 +293,36 @@ set to the allocated block. On failure `*heapMemOut` is set to `NULL`. Prefer th
 
 **Returns:** `true` if allocation succeeded; `false` if the heap has insufficient contiguous free space.
 
+<a id="ex-alloc"></a>
+
+**Example:**
+
+```c
+#define HEAP_SIZE  (1024u)
+#define HEAP_MARK  ('H')
+#define APP_MARK   ('A')
+
+uint8_t heapMem[HEAP_SIZE];
+SSFHeapHandle_t h = NULL;
+uint8_t *ptr = NULL;
+
+SSFHeapInit(&h, heapMem, sizeof(heapMem), HEAP_MARK, false);
+
+if (SSFHeapAlloc(h, (void **)&ptr, 64u, APP_MARK, false))
+{
+    /* ptr points to a 64-byte block */
+    SSFHeapDealloc(h, (void **)&ptr, NULL, false);
+    /* ptr == NULL */
+}
+
+SSFHeapDeInit(&h, false);
+```
+
 ---
 
 <a id="ssfheapallocresize"></a>
 
-### [↑](#ssfheap--integrity-checked-heap-interface) [`SSFHeapAllocResize()`](#ex-allocresize)
+### [↑](#functions) [`bool SSFHeapAllocResize()`](#functions)
 
 ```c
 bool SSFHeapAllocResize(SSFHeapHandle_t handle, void **heapMemOut, uint32_t newSize,
@@ -232,11 +345,37 @@ On failure `*heapMemOut` is left unchanged and the original allocation remains v
 
 **Returns:** `true` if resize succeeded; `false` if the heap has insufficient space for the new size.
 
+<a id="ex-allocresize"></a>
+
+**Example:**
+
+```c
+#define HEAP_SIZE  (1024u)
+#define HEAP_MARK  ('H')
+#define APP_MARK   ('A')
+
+uint8_t heapMem[HEAP_SIZE];
+SSFHeapHandle_t h = NULL;
+uint8_t *ptr = NULL;
+
+SSFHeapInit(&h, heapMem, sizeof(heapMem), HEAP_MARK, false);
+SSFHeapAlloc(h, (void **)&ptr, 64u, APP_MARK, false);
+
+if (SSFHeapAllocResize(h, (void **)&ptr, 128u, APP_MARK, false))
+{
+    /* ptr points to a 128-byte block; original 64 bytes preserved */
+}
+/* if resize fails, ptr still points to the original 64-byte block */
+
+if (ptr != NULL) { SSFHeapDealloc(h, (void **)&ptr, NULL, false); }
+SSFHeapDeInit(&h, false);
+```
+
 ---
 
 <a id="ssfheapdealloc"></a>
 
-### [↑](#ssfheap--integrity-checked-heap-interface) [`SSFHeapDealloc()`](#ex-dealloc)
+### [↑](#functions) [`void SSFHeapDealloc()`](#functions)
 
 ```c
 void SSFHeapDealloc(SSFHeapHandle_t handle, void **heapMemOut, uint8_t *markOutOpt,
@@ -257,11 +396,34 @@ of calling this directly.
 
 **Returns:** Nothing.
 
+<a id="ex-dealloc"></a>
+
+**Example:**
+
+```c
+#define HEAP_SIZE  (1024u)
+#define HEAP_MARK  ('H')
+#define APP_MARK   ('A')
+
+uint8_t heapMem[HEAP_SIZE];
+SSFHeapHandle_t h = NULL;
+uint8_t *ptr = NULL;
+uint8_t mark;
+
+SSFHeapInit(&h, heapMem, sizeof(heapMem), HEAP_MARK, false);
+SSFHeapAlloc(h, (void **)&ptr, 64u, APP_MARK, false);
+
+SSFHeapDealloc(h, (void **)&ptr, &mark, false);
+/* ptr == NULL; mark == APP_MARK */
+
+SSFHeapDeInit(&h, false);
+```
+
 ---
 
 <a id="convenience-macros"></a>
 
-### [↑](#ssfheap--integrity-checked-heap-interface) [Convenience Macros](#ex-macro-malloc)
+### [↑](#functions) [Convenience Macros](#functions)
 
 Macros that wrap `SSFHeapAlloc()`, `SSFHeapAllocResize()`, and `SSFHeapDealloc()` with the
 `isZeroed` argument fixed, eliminating the need to pass it explicitly on every call. Use these
@@ -271,7 +433,7 @@ in preference to calling the underlying functions directly.
 
 <a id="ssf-heap-malloc"></a>
 
-#### [↑](#ssfheap--integrity-checked-heap-interface) [`SSFHeapMalloc()`](#ex-macro-malloc)
+#### [↑](#functions) [`bool SSFHeapMalloc()`](#functions)
 
 ```c
 #define SSFHeapMalloc(handle, heapMemOut, size, mark) \
@@ -289,11 +451,36 @@ Allocates `size` bytes from the heap without zeroing the allocated memory.
 
 **Returns:** `true` if allocation succeeded; `false` if insufficient contiguous free space.
 
+<a id="ex-macro-malloc"></a>
+
+**Example:**
+
+```c
+#define HEAP_SIZE  (1024u)
+#define HEAP_MARK  ('H')
+#define APP_MARK   ('A')
+
+uint8_t heapMem[HEAP_SIZE];
+SSFHeapHandle_t h = NULL;
+uint8_t *ptr = NULL;
+
+SSFHeapInit(&h, heapMem, sizeof(heapMem), HEAP_MARK, false);
+
+if (SSFHeapMalloc(h, &ptr, 64u, APP_MARK))
+{
+    /* ptr points to an unzeroed 64-byte block */
+    SSFHeapFree(h, &ptr, NULL);
+    /* ptr == NULL */
+}
+
+SSFHeapDeInit(&h, false);
+```
+
 ---
 
 <a id="ssf-heap-malloc-and-zero"></a>
 
-#### [↑](#ssfheap--integrity-checked-heap-interface) [`SSFHeapMallocAndZero()`](#ex-macro-malloc-and-zero)
+#### [↑](#functions) [`bool SSFHeapMallocAndZero()`](#functions)
 
 ```c
 #define SSFHeapMallocAndZero(handle, heapMemOut, size, mark) \
@@ -311,11 +498,35 @@ Allocates `size` bytes from the heap and zeroes the allocated memory before retu
 
 **Returns:** `true` if allocation succeeded; `false` if insufficient contiguous free space.
 
+<a id="ex-macro-malloc-and-zero"></a>
+
+**Example:**
+
+```c
+#define HEAP_SIZE  (1024u)
+#define HEAP_MARK  ('H')
+#define APP_MARK   ('A')
+
+uint8_t heapMem[HEAP_SIZE];
+SSFHeapHandle_t h = NULL;
+uint8_t *ptr = NULL;
+
+SSFHeapInit(&h, heapMem, sizeof(heapMem), HEAP_MARK, false);
+
+if (SSFHeapMallocAndZero(h, &ptr, 64u, APP_MARK))
+{
+    /* ptr points to a zero-initialized 64-byte block */
+    SSFHeapFree(h, &ptr, NULL);
+}
+
+SSFHeapDeInit(&h, false);
+```
+
 ---
 
 <a id="ssf-heap-realloc"></a>
 
-#### [↑](#ssfheap--integrity-checked-heap-interface) [`SSFHeapRealloc()`](#ex-macro-realloc)
+#### [↑](#functions) [`bool SSFHeapRealloc()`](#functions)
 
 ```c
 #define SSFHeapRealloc(handle, heapMemOut, newSize, newMark) \
@@ -333,11 +544,36 @@ Resizes an existing allocation without zeroing any newly added bytes.
 
 **Returns:** `true` if resize succeeded; `false` if insufficient heap space.
 
+<a id="ex-macro-realloc"></a>
+
+**Example:**
+
+```c
+#define HEAP_SIZE  (1024u)
+#define HEAP_MARK  ('H')
+#define APP_MARK   ('A')
+
+uint8_t heapMem[HEAP_SIZE];
+SSFHeapHandle_t h = NULL;
+uint8_t *ptr = NULL;
+
+SSFHeapInit(&h, heapMem, sizeof(heapMem), HEAP_MARK, false);
+SSFHeapMalloc(h, &ptr, 64u, APP_MARK);
+
+if (SSFHeapRealloc(h, &ptr, 128u, APP_MARK))
+{
+    /* ptr points to 128-byte block; original 64 bytes preserved; bytes 64-127 unzeroed */
+}
+if (ptr != NULL) { SSFHeapFree(h, &ptr, NULL); }
+
+SSFHeapDeInit(&h, false);
+```
+
 ---
 
 <a id="ssf-heap-realloc-and-zero-new"></a>
 
-#### [↑](#ssfheap--integrity-checked-heap-interface) [`SSFHeapReallocAndZeroNew()`](#ex-macro-realloc-and-zero-new)
+#### [↑](#functions) [`bool SSFHeapReallocAndZeroNew()`](#functions)
 
 ```c
 #define SSFHeapReallocAndZeroNew(handle, heapMemOut, newSize, newMark) \
@@ -355,262 +591,15 @@ Resizes an existing allocation and zeroes any bytes added when the allocation gr
 
 **Returns:** `true` if resize succeeded; `false` if insufficient heap space.
 
----
+<a id="ex-macro-realloc-and-zero-new"></a>
 
-<a id="ssf-heap-free"></a>
-
-#### [↑](#ssfheap--integrity-checked-heap-interface) [`SSFHeapFree()`](#ex-macro-free)
-
-```c
-#define SSFHeapFree(handle, heapMemOut, markOutOpt) \
-    SSFHeapDealloc(handle, (void **)heapMemOut, markOutOpt, false)
-```
-
-Frees a previously allocated block without zeroing its memory.
-
-| Parameter | Direction | Type | Description |
-|-----------|-----------|------|-------------|
-| `handle` | in | [`SSFHeapHandle_t`](#type-ssfheaphandle-t) | Opaque heap handle. Must be valid. |
-| `heapMemOut` | in-out | `void **` | Pointer to the allocation to free. Set to `NULL` on return. Must not point to `NULL`. |
-| `markOutOpt` | out (opt) | `uint8_t *` | If not `NULL`, receives the mark value from the freed block header. |
-
-**Returns:** Nothing.
-
----
-
-<a id="ssf-heap-free-and-zero"></a>
-
-#### [↑](#ssfheap--integrity-checked-heap-interface) [`SSFHeapFreeAndZero()`](#ex-macro-free-and-zero)
-
-```c
-#define SSFHeapFreeAndZero(handle, heapMemOut, markOutOpt) \
-    SSFHeapDealloc(handle, (void **)heapMemOut, markOutOpt, true)
-```
-
-Frees a previously allocated block and zeroes its memory before returning it to the free pool.
-
-| Parameter | Direction | Type | Description |
-|-----------|-----------|------|-------------|
-| `handle` | in | [`SSFHeapHandle_t`](#type-ssfheaphandle-t) | Opaque heap handle. Must be valid. |
-| `heapMemOut` | in-out | `void **` | Pointer to the allocation to free. Set to `NULL` on return. Must not point to `NULL`. |
-| `markOutOpt` | out (opt) | `uint8_t *` | If not `NULL`, receives the mark value from the freed block header. |
-
-**Returns:** Nothing.
-
-<a id="examples"></a>
-
-## [↑](#ssfheap--integrity-checked-heap-interface) Examples
-
-All examples use the following constants:
+**Example:**
 
 ```c
 #define HEAP_SIZE  (1024u)
 #define HEAP_MARK  ('H')
 #define APP_MARK   ('A')
-```
 
-<a id="ex-initminmemsize"></a>
-
-### [↑](#ssfheap--integrity-checked-heap-interface) [SSFHeapInitMinMemSize()](#ssfheapinitminmemsize)
-
-```c
-uint32_t minSize;
-
-minSize = SSFHeapInitMinMemSize();
-/* minSize is the minimum buffer size needed to initialize a heap */
-/* A buffer larger than minSize provides allocatable memory */
-```
-
-<a id="ex-init"></a>
-
-### [↑](#ssfheap--integrity-checked-heap-interface) [SSFHeapInit()](#ssfheapinit)
-
-```c
-uint8_t heapMem[HEAP_SIZE];
-SSFHeapHandle_t h = NULL;
-
-SSFHeapInit(&h, heapMem, sizeof(heapMem), HEAP_MARK, false);
-/* h is a valid heap handle */
-SSFHeapDeInit(&h, false);
-```
-
-<a id="ex-deinit"></a>
-
-### [↑](#ssfheap--integrity-checked-heap-interface) [SSFHeapDeInit()](#ssfheapdeinit)
-
-```c
-uint8_t heapMem[HEAP_SIZE];
-SSFHeapHandle_t h = NULL;
-
-SSFHeapInit(&h, heapMem, sizeof(heapMem), HEAP_MARK, false);
-SSFHeapDeInit(&h, false);
-/* h == NULL; heap is no longer valid */
-```
-
-<a id="ex-check"></a>
-
-### [↑](#ssfheap--integrity-checked-heap-interface) [SSFHeapCheck()](#ssfheapcheck)
-
-```c
-uint8_t heapMem[HEAP_SIZE];
-SSFHeapHandle_t h = NULL;
-
-SSFHeapInit(&h, heapMem, sizeof(heapMem), HEAP_MARK, false);
-SSFHeapCheck(h);
-/* returns normally if heap is intact; asserts on corruption */
-SSFHeapDeInit(&h, false);
-```
-
-<a id="ex-status"></a>
-
-### [↑](#ssfheap--integrity-checked-heap-interface) [SSFHeapStatus()](#ssfheapstatus)
-
-```c
-uint8_t heapMem[HEAP_SIZE];
-SSFHeapHandle_t h = NULL;
-SSFHeapStatus_t status;
-uint8_t *ptr = NULL;
-
-SSFHeapInit(&h, heapMem, sizeof(heapMem), HEAP_MARK, false);
-SSFHeapMalloc(h, &ptr, 64u, APP_MARK);
-
-SSFHeapStatus(h, &status);
-/* status.allocatableLen == (status.allocatableSize - aligned 64 bytes - block overhead) */
-/* status.numAllocRequests == 1 */
-
-SSFHeapFree(h, &ptr, NULL);
-SSFHeapDeInit(&h, false);
-```
-
-<a id="ex-alloc"></a>
-
-### [↑](#ssfheap--integrity-checked-heap-interface) [SSFHeapAlloc()](#ssfheapalloc)
-
-```c
-uint8_t heapMem[HEAP_SIZE];
-SSFHeapHandle_t h = NULL;
-uint8_t *ptr = NULL;
-
-SSFHeapInit(&h, heapMem, sizeof(heapMem), HEAP_MARK, false);
-
-if (SSFHeapAlloc(h, (void **)&ptr, 64u, APP_MARK, false))
-{
-    /* ptr points to a 64-byte block */
-    SSFHeapDealloc(h, (void **)&ptr, NULL, false);
-    /* ptr == NULL */
-}
-
-SSFHeapDeInit(&h, false);
-```
-
-<a id="ex-allocresize"></a>
-
-### [↑](#ssfheap--integrity-checked-heap-interface) [SSFHeapAllocResize()](#ssfheapallocresize)
-
-```c
-uint8_t heapMem[HEAP_SIZE];
-SSFHeapHandle_t h = NULL;
-uint8_t *ptr = NULL;
-
-SSFHeapInit(&h, heapMem, sizeof(heapMem), HEAP_MARK, false);
-SSFHeapAlloc(h, (void **)&ptr, 64u, APP_MARK, false);
-
-if (SSFHeapAllocResize(h, (void **)&ptr, 128u, APP_MARK, false))
-{
-    /* ptr points to a 128-byte block; original 64 bytes preserved */
-}
-/* if resize fails, ptr still points to the original 64-byte block */
-
-if (ptr != NULL) { SSFHeapDealloc(h, (void **)&ptr, NULL, false); }
-SSFHeapDeInit(&h, false);
-```
-
-<a id="ex-dealloc"></a>
-
-### [↑](#ssfheap--integrity-checked-heap-interface) [SSFHeapDealloc()](#ssfheapdealloc)
-
-```c
-uint8_t heapMem[HEAP_SIZE];
-SSFHeapHandle_t h = NULL;
-uint8_t *ptr = NULL;
-uint8_t mark;
-
-SSFHeapInit(&h, heapMem, sizeof(heapMem), HEAP_MARK, false);
-SSFHeapAlloc(h, (void **)&ptr, 64u, APP_MARK, false);
-
-SSFHeapDealloc(h, (void **)&ptr, &mark, false);
-/* ptr == NULL; mark == APP_MARK */
-
-SSFHeapDeInit(&h, false);
-```
-
-<a id="ex-macro-malloc"></a>
-
-### [↑](#ssfheap--integrity-checked-heap-interface) [SSFHeapMalloc()](#convenience-macros)
-
-```c
-uint8_t heapMem[HEAP_SIZE];
-SSFHeapHandle_t h = NULL;
-uint8_t *ptr = NULL;
-
-SSFHeapInit(&h, heapMem, sizeof(heapMem), HEAP_MARK, false);
-
-if (SSFHeapMalloc(h, &ptr, 64u, APP_MARK))
-{
-    /* ptr points to an unzeroed 64-byte block */
-    SSFHeapFree(h, &ptr, NULL);
-    /* ptr == NULL */
-}
-
-SSFHeapDeInit(&h, false);
-```
-
-<a id="ex-macro-malloc-and-zero"></a>
-
-### [↑](#ssfheap--integrity-checked-heap-interface) [SSFHeapMallocAndZero()](#convenience-macros)
-
-```c
-uint8_t heapMem[HEAP_SIZE];
-SSFHeapHandle_t h = NULL;
-uint8_t *ptr = NULL;
-
-SSFHeapInit(&h, heapMem, sizeof(heapMem), HEAP_MARK, false);
-
-if (SSFHeapMallocAndZero(h, &ptr, 64u, APP_MARK))
-{
-    /* ptr points to a zero-initialized 64-byte block */
-    SSFHeapFree(h, &ptr, NULL);
-}
-
-SSFHeapDeInit(&h, false);
-```
-
-<a id="ex-macro-realloc"></a>
-
-### [↑](#ssfheap--integrity-checked-heap-interface) [SSFHeapRealloc()](#convenience-macros)
-
-```c
-uint8_t heapMem[HEAP_SIZE];
-SSFHeapHandle_t h = NULL;
-uint8_t *ptr = NULL;
-
-SSFHeapInit(&h, heapMem, sizeof(heapMem), HEAP_MARK, false);
-SSFHeapMalloc(h, &ptr, 64u, APP_MARK);
-
-if (SSFHeapRealloc(h, &ptr, 128u, APP_MARK))
-{
-    /* ptr points to 128-byte block; original 64 bytes preserved; bytes 64-127 unzeroed */
-}
-if (ptr != NULL) { SSFHeapFree(h, &ptr, NULL); }
-
-SSFHeapDeInit(&h, false);
-```
-
-<a id="ex-macro-realloc-and-zero-new"></a>
-
-### [↑](#ssfheap--integrity-checked-heap-interface) [SSFHeapReallocAndZeroNew()](#convenience-macros)
-
-```c
 uint8_t heapMem[HEAP_SIZE];
 SSFHeapHandle_t h = NULL;
 uint8_t *ptr = NULL;
@@ -627,11 +616,36 @@ if (ptr != NULL) { SSFHeapFree(h, &ptr, NULL); }
 SSFHeapDeInit(&h, false);
 ```
 
-<a id="ex-macro-free"></a>
+---
 
-### [↑](#ssfheap--integrity-checked-heap-interface) [SSFHeapFree()](#convenience-macros)
+<a id="ssf-heap-free"></a>
+
+#### [↑](#functions) [`void SSFHeapFree()`](#functions)
 
 ```c
+#define SSFHeapFree(handle, heapMemOut, markOutOpt) \
+    SSFHeapDealloc(handle, (void **)heapMemOut, markOutOpt, false)
+```
+
+Frees a previously allocated block without zeroing its memory.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `handle` | in | [`SSFHeapHandle_t`](#type-ssfheaphandle-t) | Opaque heap handle. Must be valid. |
+| `heapMemOut` | in-out | `void **` | Pointer to the allocation to free. Set to `NULL` on return. Must not point to `NULL`. |
+| `markOutOpt` | out (opt) | `uint8_t *` | If not `NULL`, receives the mark value from the freed block header. |
+
+**Returns:** Nothing.
+
+<a id="ex-macro-free"></a>
+
+**Example:**
+
+```c
+#define HEAP_SIZE  (1024u)
+#define HEAP_MARK  ('H')
+#define APP_MARK   ('A')
+
 uint8_t heapMem[HEAP_SIZE];
 SSFHeapHandle_t h = NULL;
 uint8_t *ptr = NULL;
@@ -645,11 +659,36 @@ SSFHeapFree(h, &ptr, NULL);
 SSFHeapDeInit(&h, false);
 ```
 
-<a id="ex-macro-free-and-zero"></a>
+---
 
-### [↑](#ssfheap--integrity-checked-heap-interface) [SSFHeapFreeAndZero()](#convenience-macros)
+<a id="ssf-heap-free-and-zero"></a>
+
+#### [↑](#functions) [`void SSFHeapFreeAndZero()`](#functions)
 
 ```c
+#define SSFHeapFreeAndZero(handle, heapMemOut, markOutOpt) \
+    SSFHeapDealloc(handle, (void **)heapMemOut, markOutOpt, true)
+```
+
+Frees a previously allocated block and zeroes its memory before returning it to the free pool.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `handle` | in | [`SSFHeapHandle_t`](#type-ssfheaphandle-t) | Opaque heap handle. Must be valid. |
+| `heapMemOut` | in-out | `void **` | Pointer to the allocation to free. Set to `NULL` on return. Must not point to `NULL`. |
+| `markOutOpt` | out (opt) | `uint8_t *` | If not `NULL`, receives the mark value from the freed block header. |
+
+**Returns:** Nothing.
+
+<a id="ex-macro-free-and-zero"></a>
+
+**Example:**
+
+```c
+#define HEAP_SIZE  (1024u)
+#define HEAP_MARK  ('H')
+#define APP_MARK   ('A')
+
 uint8_t heapMem[HEAP_SIZE];
 SSFHeapHandle_t h = NULL;
 uint8_t *ptr = NULL;

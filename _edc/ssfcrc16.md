@@ -8,7 +8,7 @@ The computation uses a 512-byte lookup table for speed. A single call covers a c
 buffer; successive calls with the previous return value as `crc` accumulate across non-contiguous
 or streaming chunks and produce the same result as one call over the whole dataset.
 
-[Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference) | [Examples](#examples)
+[Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference)
 
 <a id="dependencies"></a>
 
@@ -45,11 +45,13 @@ This module has no compile-time configuration options in `ssfoptions.h`.
 |--------|------|-------------|
 | <a id="ssf-crc16-initial"></a>`SSF_CRC16_INITIAL` | Constant | `0` — initial CRC state; pass as `crc` to begin a fresh computation |
 
+<a id="functions"></a>
+
 ### Functions
 
 | | Function | Description |
 |---|----------|-------------|
-| [e.g.](#ex-crc16) | [`SSFCRC16(in, inLen, crc)`](#ssfcrc16fn) | Compute or accumulate a 16-bit CRC over a byte buffer |
+| [e.g.](#ex-crc16) | [`uint16_t SSFCRC16(in, inLen, crc)`](#ssfcrc16fn) | Compute or accumulate a 16-bit CRC over a byte buffer |
 
 <a id="function-reference"></a>
 
@@ -57,7 +59,7 @@ This module has no compile-time configuration options in `ssfoptions.h`.
 
 <a id="ssfcrc16fn"></a>
 
-### [↑](#ssfcrc16--16-bit-xmodemccitt-16-crc) [`SSFCRC16()`](#ex-crc16)
+### [↑](#functions) [`uint16_t SSFCRC16()`](#functions)
 
 ```c
 uint16_t SSFCRC16(const uint8_t *in, uint16_t inLen, uint16_t crc);
@@ -76,13 +78,9 @@ concatenated.
 
 **Returns:** Updated 16-bit CRC state. Pass this value as `crc` to the next call when processing data in multiple chunks, or compare it against an expected CRC for verification.
 
-<a id="examples"></a>
-
-## [↑](#ssfcrc16--16-bit-xmodemccitt-16-crc) Examples
-
 <a id="ex-crc16"></a>
 
-### [↑](#ssfcrc16--16-bit-xmodemccitt-16-crc) [SSFCRC16()](#ssfcrc16fn)
+**Example:**
 
 ```c
 uint16_t crc;

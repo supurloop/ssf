@@ -8,7 +8,7 @@ All time values are UTC. System ticks are whole seconds scaled by `SSF_TICKS_PER
 (milliseconds, microseconds, or nanoseconds depending on the port). The supported date range is
 `1970-01-01T00:00:00Z` through `2199-12-31T23:59:59Z`.
 
-[Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference) | [Examples](#examples)
+[Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference)
 
 <a id="dependencies"></a>
 
@@ -87,15 +87,17 @@ All options are set in `ssfoptions.h`.
 | `SSFDTIME_UNIX_EPOCH_SYS_MAX` | Constant | Maximum valid `unixSys` tick value, corresponding to `2199-12-31T23:59:59Z` plus `SSF_TS_FSEC_MAX` sub-second ticks |
 | `SSF_TS_YEAR_MAX` | Constant | Maximum year offset from 1970 accepted by [`SSFDTimeStructInit()`](#ssfdtimestructinit): `229` (= year 2199) |
 
+<a id="functions"></a>
+
 ### Functions
 
 | | Function | Description |
 |---|----------|-------------|
-| [e.g.](#ex-structinit) | [`SSFDTimeStructInit(ts, year, month, day, hour, min, sec, fsec)`](#ssfdtimestructinit) | Initialize a date/time struct from calendar components |
-| [e.g.](#ex-unixtostruct) | [`SSFDTimeUnixToStruct(unixSys, ts, tsSize)`](#ssfdtimeunixtostruct) | Convert Unix time in system ticks to a date/time struct |
-| [e.g.](#ex-structtounix) | [`SSFDTimeStructToUnix(ts, unixSys)`](#ssfdtimestructtounix) | Convert a date/time struct to Unix time in system ticks |
-| [e.g.](#ex-isleapyear) | [`SSFDTimeIsLeapYear(year)`](#ssfdtimeisleapyear) | Return true if a calendar year is a leap year |
-| [e.g.](#ex-daysinmonth) | [`SSFDTimeDaysInMonth(year, month)`](#ssfdtimedaysinmonth) | Return the number of days in a given month |
+| [e.g.](#ex-structinit) | [`bool SSFDTimeStructInit(ts, year, month, day, hour, min, sec, fsec)`](#ssfdtimestructinit) | Initialize a date/time struct from calendar components |
+| [e.g.](#ex-unixtostruct) | [`bool SSFDTimeUnixToStruct(unixSys, ts, tsSize)`](#ssfdtimeunixtostruct) | Convert Unix time in system ticks to a date/time struct |
+| [e.g.](#ex-structtounix) | [`bool SSFDTimeStructToUnix(ts, unixSys)`](#ssfdtimestructtounix) | Convert a date/time struct to Unix time in system ticks |
+| [e.g.](#ex-isleapyear) | [`bool SSFDTimeIsLeapYear(year)`](#ssfdtimeisleapyear) | Return true if a calendar year is a leap year |
+| [e.g.](#ex-daysinmonth) | [`uint8_t SSFDTimeDaysInMonth(year, month)`](#ssfdtimedaysinmonth) | Return the number of days in a given month |
 
 <a id="function-reference"></a>
 
@@ -103,7 +105,7 @@ All options are set in `ssfoptions.h`.
 
 <a id="ssfdtimestructinit"></a>
 
-### [↑](#ssfdtime--datetime-struct-conversion) [`SSFDTimeStructInit()`](#ex-structinit)
+### [↑](#functions) [`bool SSFDTimeStructInit()`](#functions)
 
 ```c
 bool SSFDTimeStructInit(SSFDTimeStruct_t *ts, uint16_t year, uint8_t month, uint8_t day,
@@ -128,97 +130,9 @@ from January, and `day` from the 1st of the month.
 
 **Returns:** `true` if all components are valid and the struct was initialized; `false` if any component is out of range.
 
----
-
-<a id="ssfdtimeunixtostruct"></a>
-
-### [↑](#ssfdtime--datetime-struct-conversion) [`SSFDTimeUnixToStruct()`](#ex-unixtostruct)
-
-```c
-bool SSFDTimeUnixToStruct(SSFPortTick_t unixSys, SSFDTimeStruct_t *ts, size_t tsSize);
-```
-
-Converts a Unix time value expressed in system ticks to a fully-populated calendar date/time
-struct, including `wday`, `yday`, and `fsec`. The `unixSys` value encodes whole seconds in its
-upper portion and sub-second ticks in its lower portion, as determined by `SSF_TICKS_PER_SEC`.
-
-| Parameter | Direction | Type | Description |
-|-----------|-----------|------|-------------|
-| `unixSys` | in | `SSFPortTick_t` | Unix time in system ticks. Valid range: `0` (= `1970-01-01T00:00:00Z`) to `SSFDTIME_UNIX_EPOCH_SYS_MAX` (= `2199-12-31T23:59:59Z` + max fsec). |
-| `ts` | out | [`SSFDTimeStruct_t *`](#type-ssfdtimestruct-t) | Pointer to the struct to fill. Must not be `NULL`. |
-| `tsSize` | in | `size_t` | Must be `sizeof(SSFDTimeStruct_t)`. Guards against struct-size mismatches across compilation units. |
-
-**Returns:** `true` if the conversion succeeded and `*ts` was populated; `false` if `unixSys` is outside the supported range.
-
----
-
-<a id="ssfdtimestructtounix"></a>
-
-### [↑](#ssfdtime--datetime-struct-conversion) [`SSFDTimeStructToUnix()`](#ex-structtounix)
-
-```c
-bool SSFDTimeStructToUnix(const SSFDTimeStruct_t *ts, SSFPortTick_t *unixSys);
-```
-
-Converts a previously initialized `SSFDTimeStruct_t` to a Unix time value in system ticks. The
-struct must have been populated by [`SSFDTimeStructInit()`](#ssfdtimestructinit) or
-[`SSFDTimeUnixToStruct()`](#ssfdtimeunixtostruct); direct field writes are detected as invalid
-when [`SSF_DTIME_STRUCT_STRICT_CHECK`](#opt-strict-check) is `1`.
-
-| Parameter | Direction | Type | Description |
-|-----------|-----------|------|-------------|
-| `ts` | in | [`const SSFDTimeStruct_t *`](#type-ssfdtimestruct-t) | Pointer to a valid, API-initialized date/time struct. Must not be `NULL`. |
-| `unixSys` | out | `SSFPortTick_t *` | Receives the Unix time in system ticks. Must not be `NULL`. |
-
-**Returns:** `true` if the conversion succeeded and `*unixSys` was set; `false` if the struct is invalid or the encoded date is out of range.
-
----
-
-<a id="ssfdtimeisleapyear"></a>
-
-### [↑](#ssfdtime--datetime-struct-conversion) [`SSFDTimeIsLeapYear()`](#ex-isleapyear)
-
-```c
-bool SSFDTimeIsLeapYear(uint16_t year);
-```
-
-Determines whether a calendar year is a leap year using the Gregorian algorithm: divisible by 4,
-except century years unless also divisible by 400. Takes the **full calendar year**, not the
-0-based year offset stored in `SSFDTimeStruct_t`.
-
-| Parameter | Direction | Type | Description |
-|-----------|-----------|------|-------------|
-| `year` | in | `uint16_t` | Full calendar year (e.g., `2024`). Not the 0-based offset from 1970. |
-
-**Returns:** `true` if `year` is a leap year; `false` otherwise.
-
----
-
-<a id="ssfdtimedaysinmonth"></a>
-
-### [↑](#ssfdtime--datetime-struct-conversion) [`SSFDTimeDaysInMonth()`](#ex-daysinmonth)
-
-```c
-uint8_t SSFDTimeDaysInMonth(uint16_t year, uint8_t month);
-```
-
-Returns the number of days in the specified month of the given year, correctly handling February
-in leap years. Takes the **full calendar year** and a **0-based month**.
-
-| Parameter | Direction | Type | Description |
-|-----------|-----------|------|-------------|
-| `year` | in | `uint16_t` | Full calendar year (e.g., `2024`). Used to determine leap year status for February. |
-| `month` | in | `uint8_t` | Month, 0-based (`0` = January, `11` = December). Use [`SSFDTimeStructMonth_t`](#type-ssfdtimestructmonth-t) constants. |
-
-**Returns:** Number of days in the month: `28`, `29`, `30`, or `31`.
-
-<a id="examples"></a>
-
-## [↑](#ssfdtime--datetime-struct-conversion) Examples
-
 <a id="ex-structinit"></a>
 
-### [↑](#ssfdtime--datetime-struct-conversion) [SSFDTimeStructInit()](#ssfdtimestructinit)
+**Example:**
 
 ```c
 SSFDTimeStruct_t ts;
@@ -239,9 +153,31 @@ if (SSFDTimeStructInit(&ts, 54, 12, 0, 0, 0, 0, 0) == false)
 }
 ```
 
+---
+
+<a id="ssfdtimeunixtostruct"></a>
+
+### [↑](#functions) [`bool SSFDTimeUnixToStruct()`](#functions)
+
+```c
+bool SSFDTimeUnixToStruct(SSFPortTick_t unixSys, SSFDTimeStruct_t *ts, size_t tsSize);
+```
+
+Converts a Unix time value expressed in system ticks to a fully-populated calendar date/time
+struct, including `wday`, `yday`, and `fsec`. The `unixSys` value encodes whole seconds in its
+upper portion and sub-second ticks in its lower portion, as determined by `SSF_TICKS_PER_SEC`.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `unixSys` | in | `SSFPortTick_t` | Unix time in system ticks. Valid range: `0` (= `1970-01-01T00:00:00Z`) to `SSFDTIME_UNIX_EPOCH_SYS_MAX` (= `2199-12-31T23:59:59Z` + max fsec). |
+| `ts` | out | [`SSFDTimeStruct_t *`](#type-ssfdtimestruct-t) | Pointer to the struct to fill. Must not be `NULL`. |
+| `tsSize` | in | `size_t` | Must be `sizeof(SSFDTimeStruct_t)`. Guards against struct-size mismatches across compilation units. |
+
+**Returns:** `true` if the conversion succeeded and `*ts` was populated; `false` if `unixSys` is outside the supported range.
+
 <a id="ex-unixtostruct"></a>
 
-### [↑](#ssfdtime--datetime-struct-conversion) [SSFDTimeUnixToStruct()](#ssfdtimeunixtostruct)
+**Example:**
 
 ```c
 SSFDTimeStruct_t ts;
@@ -264,9 +200,31 @@ if (SSFDTimeUnixToStruct(0, &ts, sizeof(ts)))
 }
 ```
 
+---
+
+<a id="ssfdtimestructtounix"></a>
+
+### [↑](#functions) [`bool SSFDTimeStructToUnix()`](#functions)
+
+```c
+bool SSFDTimeStructToUnix(const SSFDTimeStruct_t *ts, SSFPortTick_t *unixSys);
+```
+
+Converts a previously initialized `SSFDTimeStruct_t` to a Unix time value in system ticks. The
+struct must have been populated by [`SSFDTimeStructInit()`](#ssfdtimestructinit) or
+[`SSFDTimeUnixToStruct()`](#ssfdtimeunixtostruct); direct field writes are detected as invalid
+when [`SSF_DTIME_STRUCT_STRICT_CHECK`](#opt-strict-check) is `1`.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `ts` | in | [`const SSFDTimeStruct_t *`](#type-ssfdtimestruct-t) | Pointer to a valid, API-initialized date/time struct. Must not be `NULL`. |
+| `unixSys` | out | `SSFPortTick_t *` | Receives the Unix time in system ticks. Must not be `NULL`. |
+
+**Returns:** `true` if the conversion succeeded and `*unixSys` was set; `false` if the struct is invalid or the encoded date is out of range.
+
 <a id="ex-structtounix"></a>
 
-### [↑](#ssfdtime--datetime-struct-conversion) [SSFDTimeStructToUnix()](#ssfdtimestructtounix)
+**Example:**
 
 ```c
 SSFDTimeStruct_t ts;
@@ -285,9 +243,29 @@ SSFDTimeUnixToStruct(unixSys, &ts2, sizeof(ts2));
 /* ts2 fields are identical to ts fields */
 ```
 
+---
+
+<a id="ssfdtimeisleapyear"></a>
+
+### [↑](#functions) [`bool SSFDTimeIsLeapYear()`](#functions)
+
+```c
+bool SSFDTimeIsLeapYear(uint16_t year);
+```
+
+Determines whether a calendar year is a leap year using the Gregorian algorithm: divisible by 4,
+except century years unless also divisible by 400. Takes the **full calendar year**, not the
+0-based year offset stored in `SSFDTimeStruct_t`.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `year` | in | `uint16_t` | Full calendar year (e.g., `2024`). Not the 0-based offset from 1970. |
+
+**Returns:** `true` if `year` is a leap year; `false` otherwise.
+
 <a id="ex-isleapyear"></a>
 
-### [↑](#ssfdtime--datetime-struct-conversion) [SSFDTimeIsLeapYear()](#ssfdtimeisleapyear)
+**Example:**
 
 ```c
 /* Takes the full calendar year — NOT the 0-based year offset */
@@ -302,9 +280,29 @@ SSFDTimeStructInit(&ts, 54, SSF_DTIME_MONTH_JAN, 0, 0, 0, 0, 0);
 SSFDTimeIsLeapYear((uint16_t)(1970u + ts.year));   /* returns true (2024) */
 ```
 
+---
+
+<a id="ssfdtimedaysinmonth"></a>
+
+### [↑](#functions) [`uint8_t SSFDTimeDaysInMonth()`](#functions)
+
+```c
+uint8_t SSFDTimeDaysInMonth(uint16_t year, uint8_t month);
+```
+
+Returns the number of days in the specified month of the given year, correctly handling February
+in leap years. Takes the **full calendar year** and a **0-based month**.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `year` | in | `uint16_t` | Full calendar year (e.g., `2024`). Used to determine leap year status for February. |
+| `month` | in | `uint8_t` | Month, 0-based (`0` = January, `11` = December). Use [`SSFDTimeStructMonth_t`](#type-ssfdtimestructmonth-t) constants. |
+
+**Returns:** Number of days in the month: `28`, `29`, `30`, or `31`.
+
 <a id="ex-daysinmonth"></a>
 
-### [↑](#ssfdtime--datetime-struct-conversion) [SSFDTimeDaysInMonth()](#ssfdtimedaysinmonth)
+**Example:**
 
 ```c
 /* Takes the full calendar year and a 0-based month */

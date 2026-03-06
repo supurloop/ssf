@@ -10,7 +10,7 @@ covers a contiguous buffer; successive calls with the previous return value as `
 accumulate across non-contiguous or streaming chunks and produce the same result as one call
 over the whole dataset.
 
-[Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference) | [Examples](#examples)
+[Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference)
 
 <a id="dependencies"></a>
 
@@ -44,11 +44,13 @@ This module has no compile-time configuration options in `ssfoptions.h`.
 |--------|------|-------------|
 | <a id="ssf-fcsum-initial"></a>`SSF_FCSUM_INITIAL` | Constant | `0` — initial checksum state; pass as `initial` to begin a fresh computation |
 
+<a id="functions"></a>
+
 ### Functions
 
 | | Function | Description |
 |---|----------|-------------|
-| [e.g.](#ex-fcsum16) | [`SSFFCSum16(in, inLen, initial)`](#ssffcsum16fn) | Compute or accumulate a 16-bit Fletcher checksum over a byte buffer |
+| [e.g.](#ex-fcsum16) | [`uint16_t SSFFCSum16(in, inLen, initial)`](#ssffcsum16fn) | Compute or accumulate a 16-bit Fletcher checksum over a byte buffer |
 
 <a id="function-reference"></a>
 
@@ -56,7 +58,7 @@ This module has no compile-time configuration options in `ssfoptions.h`.
 
 <a id="ssffcsum16fn"></a>
 
-### [↑](#ssffcsum--16-bit-fletcher-checksum) [`SSFFCSum16()`](#ex-fcsum16)
+### [↑](#functions) [`uint16_t SSFFCSum16()`](#functions)
 
 ```c
 uint16_t SSFFCSum16(const uint8_t *in, size_t inLen, uint16_t initial);
@@ -75,13 +77,9 @@ is `0` the value of `initial` is returned unchanged.
 
 **Returns:** Updated 16-bit Fletcher checksum state. Pass this value as `initial` to the next call when processing data in multiple chunks, or compare it against an expected checksum for verification.
 
-<a id="examples"></a>
-
-## [↑](#ssffcsum--16-bit-fletcher-checksum) Examples
-
 <a id="ex-fcsum16"></a>
 
-### [↑](#ssffcsum--16-bit-fletcher-checksum) [SSFFCSum16()](#ssffcsum16fn)
+**Example:**
 
 ```c
 uint16_t fc;

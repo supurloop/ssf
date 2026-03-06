@@ -5,7 +5,7 @@
 Encodes binary data as printable ASCII and decodes it back to binary using the standard Base64
 alphabet (`A–Z`, `a–z`, `0–9`, `+`, `/`) with `=` padding.
 
-[Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference) | [Examples](#examples)
+[Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference)
 
 <a id="dependencies"></a>
 
@@ -38,6 +38,8 @@ This module has no compile-time configuration options in `ssfoptions.h`.
 
 ## [↑](#ssfbase64--base64-encoderdecoder) API Summary
 
+<a id="functions"></a>
+
 ### Functions
 
 | | Function / Macro | Description |
@@ -51,7 +53,7 @@ This module has no compile-time configuration options in `ssfoptions.h`.
 
 <a id="ssfbase64encode"></a>
 
-### [↑](#ssfbase64--base64-encoderdecoder) [`bool SSFBase64Encode()`](#ex-encode)
+### [↑](#ssfbase64--base64-encoderdecoder) [`bool SSFBase64Encode()`](#functions)
 
 ```c
 bool SSFBase64Encode(const uint8_t *in, size_t inLen,
@@ -71,11 +73,24 @@ multiple of 4 characters padded with `=`.
 
 **Returns:** `true` if encoding succeeded; `false` if `outSize` is too small to hold the result.
 
+<a id="ex-encode"></a>
+
+```c
+uint8_t bin[] = {0x01u, 0x02u, 0x03u};
+char out[9];
+size_t outLen;
+
+if (SSFBase64Encode(bin, sizeof(bin), out, sizeof(out), &outLen))
+{
+    /* out == "AQID", outLen == 4 */
+}
+```
+
 ---
 
 <a id="ssfbase64decode"></a>
 
-### [↑](#ssfbase64--base64-encoderdecoder) [`bool SSFBase64Decode()`](#ex-decode)
+### [↑](#ssfbase64--base64-encoderdecoder) [`bool SSFBase64Decode()`](#functions)
 
 ```c
 bool SSFBase64Decode(SSFCStrIn_t in, size_t inLenLim,
@@ -96,28 +111,7 @@ value returns `false` immediately.
 **Returns:** `true` if decoding succeeded; `false` if `inLenLim` is not a multiple of `4`, the
 input contains invalid Base64 characters, or `outSize` is too small.
 
-<a id="examples"></a>
-
-## [↑](#ssfbase64--base64-encoderdecoder) Examples
-
-<a id="ex-encode"></a>
-
-### [↑](#ssfbase64--base64-encoderdecoder) [bool SSFBase64Encode()](#ssfbase64encode)
-
-```c
-uint8_t bin[] = {0x01u, 0x02u, 0x03u};
-char out[9];
-size_t outLen;
-
-if (SSFBase64Encode(bin, sizeof(bin), out, sizeof(out), &outLen))
-{
-    /* out == "AQID", outLen == 4 */
-}
-```
-
 <a id="ex-decode"></a>
-
-### [↑](#ssfbase64--base64-encoderdecoder) [bool SSFBase64Decode()](#ssfbase64decode)
 
 ```c
 uint8_t out[3];

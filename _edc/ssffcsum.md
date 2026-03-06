@@ -1,80 +1,106 @@
 # ssffcsum — 16-bit Fletcher Checksum
 
-[Back to EDC README](README.md) | [Back to ssf README](../README.md)
+[SSF](../README.md) | [EDC](README.md)
 
-16-bit Fletcher checksum interface for lightweight data integrity verification.
+16-bit Fletcher checksum for lightweight data integrity verification.
 
-## Configuration
+The checksum has error-detection capability comparable to a 16-bit CRC at a fraction of the
+code size (approximately 88 bytes on MSP430 at -O3) and requires no lookup table. A single call
+covers a contiguous buffer; successive calls with the previous return value as `initial`
+accumulate across non-contiguous or streaming chunks and produce the same result as one call
+over the whole dataset.
+
+[Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference) | [Examples](#examples)
+
+<a id="dependencies"></a>
+
+## [↑](#ssffcsum--16-bit-fletcher-checksum) Dependencies
+
+- [`ssfport.h`](../ssfport.h)
+
+<a id="notes"></a>
+
+## [↑](#ssffcsum--16-bit-fletcher-checksum) Notes
+
+- Always pass [`SSF_FCSUM_INITIAL`](#ssf-fcsum-initial) as `initial` for the first call in a
+  sequence; pass the return value of the previous call for each subsequent chunk.
+- Requires no lookup table; approximately 88 bytes of program memory on MSP430 with -O3.
+- Error-detection capability is comparable to a 16-bit CRC but with simpler, smaller code.
+- For stronger error detection see [ssfcrc16](ssfcrc16.md) or [ssfcrc32](ssfcrc32.md).
+
+<a id="configuration"></a>
+
+## [↑](#ssffcsum--16-bit-fletcher-checksum) Configuration
 
 This module has no compile-time configuration options in `ssfoptions.h`.
 
-## API Summary
+<a id="api-summary"></a>
 
-| Function / Macro | Description |
-|-----------------|-------------|
-| `SSFFCSum16(in, inLen, initial)` | Compute or accumulate a 16-bit Fletcher checksum |
-| `SSF_FCSUM_INITIAL` | Initial value constant; pass for the first call in a sequence |
+## [↑](#ssffcsum--16-bit-fletcher-checksum) API Summary
 
-## Function Reference
+### Definitions
 
-### `SSFFCSum16`
+| Symbol | Kind | Description |
+|--------|------|-------------|
+| <a id="ssf-fcsum-initial"></a>`SSF_FCSUM_INITIAL` | Constant | `0` — initial checksum state; pass as `initial` to begin a fresh computation |
+
+### Functions
+
+| | Function | Description |
+|---|----------|-------------|
+| [e.g.](#ex-fcsum16) | [`SSFFCSum16(in, inLen, initial)`](#ssffcsum16fn) | Compute or accumulate a 16-bit Fletcher checksum over a byte buffer |
+
+<a id="function-reference"></a>
+
+## [↑](#ssffcsum--16-bit-fletcher-checksum) Function Reference
+
+<a id="ssffcsum16fn"></a>
+
+### [↑](#ssffcsum--16-bit-fletcher-checksum) [`SSFFCSum16()`](#ex-fcsum16)
 
 ```c
 uint16_t SSFFCSum16(const uint8_t *in, size_t inLen, uint16_t initial);
 ```
 
-Computes or accumulates a 16-bit Fletcher checksum over an input byte array. May be called
-repeatedly on successive chunks of the same data to produce the same result as a single call
-over the entire dataset.
+Computes or accumulates a 16-bit Fletcher checksum over `inLen` bytes starting at `in`. May be
+called repeatedly on successive chunks; passing the return value of one call as `initial` to
+the next produces the same result as a single call over all chunks concatenated. When `inLen`
+is `0` the value of `initial` is returned unchanged.
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
-| `in` | in | `const uint8_t *` | Pointer to the input bytes to checksum. Must not be `NULL` when `inLen > 0`. |
-| `inLen` | in | `size_t` | Number of bytes to process from `in`. May be `0`, in which case `initial` is returned unchanged. |
-| `initial` | in | `uint16_t` | Starting checksum state. Pass `SSF_FCSUM_INITIAL` to begin a new computation; pass the return value of a prior call to accumulate incrementally over split data. |
+| `in` | in | `const uint8_t *` | Pointer to the input bytes. Must not be `NULL` when `inLen > 0`. |
+| `inLen` | in | `size_t` | Number of bytes to process. May be `0`, in which case `initial` is returned unchanged. |
+| `initial` | in | `uint16_t` | Starting checksum state. Pass [`SSF_FCSUM_INITIAL`](#ssf-fcsum-initial) to begin a new computation; pass the return value of the previous call to continue an incremental computation. |
 
-**Returns:** `uint16_t` — Updated 16-bit Fletcher checksum. Pass this value as `initial` to the next call when processing data in multiple chunks.
+**Returns:** Updated 16-bit Fletcher checksum state. Pass this value as `initial` to the next call when processing data in multiple chunks, or compare it against an expected checksum for verification.
 
----
+<a id="examples"></a>
 
-### `SSF_FCSUM_INITIAL`
+## [↑](#ssffcsum--16-bit-fletcher-checksum) Examples
 
-```c
-#define SSF_FCSUM_INITIAL ((uint16_t) 0u)
-```
+<a id="ex-fcsum16"></a>
 
-Constant equal to `0`. Pass as `initial` to start a fresh Fletcher checksum computation.
-
-## Usage
-
-Every embedded system needs a checksum somewhere. The 16-bit Fletcher checksum has many of the
-error-detecting properties of a 16-bit CRC at the computational cost of a simple arithmetic
-checksum. At approximately 88 bytes of program memory on MSP430 with -O3, it is the most
-code-efficient integrity check in the framework.
-
-The API supports incremental computation. The first call with `SSF_FCSUM_INITIAL` produces the
-same result as chaining multiple calls on sub-slices of the same data:
+### [↑](#ssffcsum--16-bit-fletcher-checksum) [SSFFCSum16()](#ssffcsum16fn)
 
 ```c
 uint16_t fc;
 
-fc = SSFFCSum16("abcde", 5, SSF_FCSUM_INITIAL);
-/* fc == 0xc8f0 */
+/* Single-buffer computation */
+fc = SSFFCSum16((uint8_t *)"abcde", 5, SSF_FCSUM_INITIAL);
+/* fc == 0xC8F0 */
 
-fc = SSFFCSum16("a", 1, SSF_FCSUM_INITIAL);
-fc = SSFFCSum16("bcd", 3, fc);
-fc = SSFFCSum16("e", 1, fc);
-/* fc == 0xc8f0 */
+/* Incremental computation over chunks — same result */
+fc = SSFFCSum16((uint8_t *)"a",   1, SSF_FCSUM_INITIAL);
+fc = SSFFCSum16((uint8_t *)"bcd", 3, fc);
+fc = SSFFCSum16((uint8_t *)"e",   1, fc);
+/* fc == 0xC8F0 */
+
+/* Verifying received data against a known checksum */
+uint8_t  packet[]  = {0x01u, 0x02u, 0x03u, 0x04u};
+uint16_t expected  = 0x140Au;
+if (SSFFCSum16(packet, sizeof(packet), SSF_FCSUM_INITIAL) == expected)
+{
+    /* Packet integrity confirmed */
+}
 ```
-
-## Dependencies
-
-- `ssf/ssfport.h`
-
-## Notes
-
-- Use `SSF_FCSUM_INITIAL` for the first call; pass the return value to subsequent calls for
-  incremental computation over split data.
-- Approximately 88 bytes of program memory on MSP430 with -O3.
-- Error detection capability is comparable to a 16-bit CRC but computed with less code.
-- For stronger error detection consider [ssfcrc16](ssfcrc16.md) or [ssfcrc32](ssfcrc32.md).

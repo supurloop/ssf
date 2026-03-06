@@ -1,80 +1,107 @@
 # ssfcrc16 — 16-bit XMODEM/CCITT-16 CRC
 
-[Back to EDC README](README.md) | [Back to ssf README](../README.md)
+[SSF](../README.md) | [EDC](README.md)
 
 16-bit CRC using the 0x1021 polynomial, compatible with XMODEM and CCITT-16 standards.
 
-## Configuration
+The computation uses a 512-byte lookup table for speed. A single call covers a contiguous
+buffer; successive calls with the previous return value as `crc` accumulate across non-contiguous
+or streaming chunks and produce the same result as one call over the whole dataset.
+
+[Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference) | [Examples](#examples)
+
+<a id="dependencies"></a>
+
+## [↑](#ssfcrc16--16-bit-xmodemccitt-16-crc) Dependencies
+
+- [`ssfport.h`](../ssfport.h)
+
+<a id="notes"></a>
+
+## [↑](#ssfcrc16--16-bit-xmodemccitt-16-crc) Notes
+
+- Always pass [`SSF_CRC16_INITIAL`](#ssf-crc16-initial) as `crc` for the first call in a
+  sequence; pass the return value of the previous call for each subsequent chunk.
+- Requires 512 bytes of program memory for the lookup table.
+- Compatible with the XMODEM protocol CRC and the CCITT-16 standard (polynomial `0x1021`,
+  initial value `0x0000`).
+- Often used alongside [Reed-Solomon ECC](../_ecc/README.md) to verify that error correction
+  converged on the correct solution.
+- For stronger error detection see [ssfcrc32](ssfcrc32.md).
+
+<a id="configuration"></a>
+
+## [↑](#ssfcrc16--16-bit-xmodemccitt-16-crc) Configuration
 
 This module has no compile-time configuration options in `ssfoptions.h`.
 
-## API Summary
+<a id="api-summary"></a>
 
-| Function / Macro | Description |
-|-----------------|-------------|
-| `SSFCRC16(in, inLen, crc)` | Compute or accumulate a 16-bit CRC |
-| `SSF_CRC16_INITIAL` | Initial value constant; pass for the first call in a sequence |
+## [↑](#ssfcrc16--16-bit-xmodemccitt-16-crc) API Summary
 
-## Function Reference
+### Definitions
 
-### `SSFCRC16`
+| Symbol | Kind | Description |
+|--------|------|-------------|
+| <a id="ssf-crc16-initial"></a>`SSF_CRC16_INITIAL` | Constant | `0` — initial CRC state; pass as `crc` to begin a fresh computation |
+
+### Functions
+
+| | Function | Description |
+|---|----------|-------------|
+| [e.g.](#ex-crc16) | [`SSFCRC16(in, inLen, crc)`](#ssfcrc16fn) | Compute or accumulate a 16-bit CRC over a byte buffer |
+
+<a id="function-reference"></a>
+
+## [↑](#ssfcrc16--16-bit-xmodemccitt-16-crc) Function Reference
+
+<a id="ssfcrc16fn"></a>
+
+### [↑](#ssfcrc16--16-bit-xmodemccitt-16-crc) [`SSFCRC16()`](#ex-crc16)
 
 ```c
 uint16_t SSFCRC16(const uint8_t *in, uint16_t inLen, uint16_t crc);
 ```
 
-Computes or accumulates a 16-bit XMODEM/CCITT-16 CRC (polynomial 0x1021) over an input byte
-array using a 512-byte lookup table. May be called repeatedly on successive chunks to produce
-the same result as a single call over the entire dataset.
+Computes or accumulates a 16-bit XMODEM/CCITT-16 CRC (polynomial `0x1021`) over `inLen` bytes
+starting at `in`. May be called repeatedly on successive chunks; passing the return value of
+one call as `crc` to the next produces the same result as a single call over all chunks
+concatenated.
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
-| `in` | in | `const uint8_t *` | Pointer to the input bytes to process. Must not be `NULL` when `inLen > 0`. |
-| `inLen` | in | `uint16_t` | Number of bytes to process from `in`. Range: 0–65535. |
-| `crc` | in | `uint16_t` | Starting CRC state. Pass `SSF_CRC16_INITIAL` (0) to begin a new computation; pass the return value of a prior call to accumulate incrementally over split data. |
+| `in` | in | `const uint8_t *` | Pointer to the input bytes. Must not be `NULL` when `inLen > 0`. |
+| `inLen` | in | `uint16_t` | Number of bytes to process. Range: `0`–`65535`. |
+| `crc` | in | `uint16_t` | Starting CRC state. Pass [`SSF_CRC16_INITIAL`](#ssf-crc16-initial) to begin a new computation; pass the return value of the previous call to continue an incremental computation. |
 
-**Returns:** `uint16_t` — Updated 16-bit CRC. Pass this value as `crc` to the next call when processing data in multiple chunks.
+**Returns:** Updated 16-bit CRC state. Pass this value as `crc` to the next call when processing data in multiple chunks, or compare it against an expected CRC for verification.
 
----
+<a id="examples"></a>
 
-### `SSF_CRC16_INITIAL`
+## [↑](#ssfcrc16--16-bit-xmodemccitt-16-crc) Examples
 
-```c
-#define SSF_CRC16_INITIAL ((uint16_t) 0u)
-```
+<a id="ex-crc16"></a>
 
-Constant equal to `0`. Pass as `crc` to start a fresh CRC-16 computation.
-
-## Usage
-
-This 16-bit CRC uses the 0x1021 polynomial and a 512-byte lookup table to reduce execution time.
-Use it when you need compatibility with the XMODEM CRC and/or can afford the extra program memory
-for slightly better error detection than the 16-bit Fletcher checksum.
-
-The API supports incremental computation:
+### [↑](#ssfcrc16--16-bit-xmodemccitt-16-crc) [SSFCRC16()](#ssfcrc16fn)
 
 ```c
 uint16_t crc;
 
-crc = SSFCRC16("abcde", 5, SSF_CRC16_INITIAL);
+/* Single-buffer computation */
+crc = SSFCRC16((uint8_t *)"abcde", 5, SSF_CRC16_INITIAL);
 /* crc == 0x3EE1 */
 
-crc = SSFCRC16("a", 1, SSF_CRC16_INITIAL);
-crc = SSFCRC16("bcd", 3, crc);
-crc = SSFCRC16("e", 1, crc);
+/* Incremental computation over chunks — same result */
+crc = SSFCRC16((uint8_t *)"a",   1, SSF_CRC16_INITIAL);
+crc = SSFCRC16((uint8_t *)"bcd", 3, crc);
+crc = SSFCRC16((uint8_t *)"e",   1, crc);
 /* crc == 0x3EE1 */
+
+/* Verifying received data against a known CRC */
+uint8_t  packet[]  = {0x01u, 0x02u, 0x03u, 0x04u};
+uint16_t expected  = 0x89C3u;
+if (SSFCRC16(packet, sizeof(packet), SSF_CRC16_INITIAL) == expected)
+{
+    /* Packet integrity confirmed */
+}
 ```
-
-## Dependencies
-
-- `ssf/ssfport.h`
-
-## Notes
-
-- Requires 512 bytes of program memory for the lookup table.
-- Compatible with the XMODEM protocol CRC and the CCITT-16 standard.
-- Use `SSF_CRC16_INITIAL` for the first call; pass the return value to subsequent calls for
-  incremental computation over split data.
-- Often used alongside [Reed-Solomon ECC](../_ecc/README.md) to verify that error correction
-  converged on the correct solution.
-- For stronger error detection see [ssfcrc32](ssfcrc32.md).

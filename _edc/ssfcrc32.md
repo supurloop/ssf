@@ -1,78 +1,106 @@
 # ssfcrc32 — 32-bit CCITT-32 CRC
 
-[Back to EDC README](README.md) | [Back to ssf README](../README.md)
+[SSF](../README.md) | [EDC](README.md)
 
-32-bit CRC using the 0x04C11DB7 polynomial (CCITT-32 / ISO 3309 compatible).
+32-bit CRC using the `0x04C11DB7` polynomial, compatible with CCITT-32 and ISO 3309.
 
-## Configuration
+The computation uses a 1024-byte lookup table for speed. A single call covers a contiguous
+buffer; successive calls with the previous return value as `crc` accumulate across non-contiguous
+or streaming chunks and produce the same result as one call over the whole dataset.
+
+[Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference) | [Examples](#examples)
+
+<a id="dependencies"></a>
+
+## [↑](#ssfcrc32--32-bit-ccitt-32-crc) Dependencies
+
+- [`ssfport.h`](../ssfport.h)
+
+<a id="notes"></a>
+
+## [↑](#ssfcrc32--32-bit-ccitt-32-crc) Notes
+
+- Always pass [`SSF_CRC32_INITIAL`](#ssf-crc32-initial) as `crc` for the first call in a
+  sequence; pass the return value of the previous call for each subsequent chunk.
+- Requires 1024 bytes of program memory for the lookup table.
+- Compatible with CCITT-32 and ISO 3309 (polynomial `0x04C11DB7`, initial value `0x00000000`).
+- Strongly recommended alongside [Reed-Solomon ECC](../_ecc/README.md): Reed-Solomon can correct
+  to the wrong message without detecting the error; a CRC-32 check catches this false positive.
+- For lighter error detection with a smaller table see [ssfcrc16](ssfcrc16.md).
+
+<a id="configuration"></a>
+
+## [↑](#ssfcrc32--32-bit-ccitt-32-crc) Configuration
 
 This module has no compile-time configuration options in `ssfoptions.h`.
 
-## API Summary
+<a id="api-summary"></a>
 
-| Function / Macro | Description |
-|-----------------|-------------|
-| `SSFCRC32(in, inLen, crc)` | Compute or accumulate a 32-bit CRC |
-| `SSF_CRC32_INITIAL` | Initial value constant; pass for the first call in a sequence |
+## [↑](#ssfcrc32--32-bit-ccitt-32-crc) API Summary
 
-## Function Reference
+### Definitions
 
-### `SSFCRC32`
+| Symbol | Kind | Description |
+|--------|------|-------------|
+| <a id="ssf-crc32-initial"></a>`SSF_CRC32_INITIAL` | Constant | `0` — initial CRC state; pass as `crc` to begin a fresh computation |
+
+### Functions
+
+| | Function | Description |
+|---|----------|-------------|
+| [e.g.](#ex-crc32) | [`SSFCRC32(in, inLen, crc)`](#ssfcrc32fn) | Compute or accumulate a 32-bit CRC over a byte buffer |
+
+<a id="function-reference"></a>
+
+## [↑](#ssfcrc32--32-bit-ccitt-32-crc) Function Reference
+
+<a id="ssfcrc32fn"></a>
+
+### [↑](#ssfcrc32--32-bit-ccitt-32-crc) [`SSFCRC32()`](#ex-crc32)
 
 ```c
 uint32_t SSFCRC32(const uint8_t *in, uint32_t inLen, uint32_t crc);
 ```
 
-Computes or accumulates a 32-bit CCITT-32 CRC (polynomial 0x04C11DB7) over an input byte array
-using a 1024-byte lookup table. May be called repeatedly on successive chunks to produce the same
-result as a single call over the entire dataset.
+Computes or accumulates a 32-bit CCITT-32 CRC (polynomial `0x04C11DB7`) over `inLen` bytes
+starting at `in`. May be called repeatedly on successive chunks; passing the return value of
+one call as `crc` to the next produces the same result as a single call over all chunks
+concatenated.
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
-| `in` | in | `const uint8_t *` | Pointer to the input bytes to process. Must not be `NULL` when `inLen > 0`. |
-| `inLen` | in | `uint32_t` | Number of bytes to process from `in`. |
-| `crc` | in | `uint32_t` | Starting CRC state. Pass `SSF_CRC32_INITIAL` (0) to begin a new computation; pass the return value of a prior call to accumulate incrementally over split data. |
+| `in` | in | `const uint8_t *` | Pointer to the input bytes. Must not be `NULL` when `inLen > 0`. |
+| `inLen` | in | `uint32_t` | Number of bytes to process. |
+| `crc` | in | `uint32_t` | Starting CRC state. Pass [`SSF_CRC32_INITIAL`](#ssf-crc32-initial) to begin a new computation; pass the return value of the previous call to continue an incremental computation. |
 
-**Returns:** `uint32_t` — Updated 32-bit CRC. Pass this value as `crc` to the next call when processing data in multiple chunks.
+**Returns:** Updated 32-bit CRC state. Pass this value as `crc` to the next call when processing data in multiple chunks, or compare it against an expected CRC for verification.
 
----
+<a id="examples"></a>
 
-### `SSF_CRC32_INITIAL`
+## [↑](#ssfcrc32--32-bit-ccitt-32-crc) Examples
 
-```c
-#define SSF_CRC32_INITIAL ((uint32_t) 0ul)
-```
+<a id="ex-crc32"></a>
 
-Constant equal to `0`. Pass as `crc` to start a fresh CRC-32 computation.
-
-## Usage
-
-This 32-bit CRC uses the 0x04C11DB7 polynomial and a 1024-byte lookup table to reduce execution
-time. Use it when you need stronger error detection than CRC-16, and/or in conjunction with
-Reed-Solomon to detect wrong-solution false positives.
-
-The API supports incremental computation:
+### [↑](#ssfcrc32--32-bit-ccitt-32-crc) [SSFCRC32()](#ssfcrc32fn)
 
 ```c
 uint32_t crc;
 
-crc = SSFCRC32("abcde", 5, SSF_CRC32_INITIAL);
+/* Single-buffer computation */
+crc = SSFCRC32((uint8_t *)"abcde", 5, SSF_CRC32_INITIAL);
 /* crc == 0x8587D865 */
 
-crc = SSFCRC32("a", 1, SSF_CRC32_INITIAL);
-crc = SSFCRC32("bcd", 3, crc);
-crc = SSFCRC32("e", 1, crc);
+/* Incremental computation over chunks — same result */
+crc = SSFCRC32((uint8_t *)"a",   1, SSF_CRC32_INITIAL);
+crc = SSFCRC32((uint8_t *)"bcd", 3, crc);
+crc = SSFCRC32((uint8_t *)"e",   1, crc);
 /* crc == 0x8587D865 */
+
+/* Verifying received data against a known CRC */
+uint8_t  packet[]  = {0x01u, 0x02u, 0x03u, 0x04u};
+uint32_t expected  = 0xB63CFBCDu;
+if (SSFCRC32(packet, sizeof(packet), SSF_CRC32_INITIAL) == expected)
+{
+    /* Packet integrity confirmed */
+}
 ```
-
-## Dependencies
-
-- `ssf/ssfport.h`
-
-## Notes
-
-- Requires 1024 bytes of program memory for the lookup table.
-- Use `SSF_CRC32_INITIAL` for the first call; pass the return value to subsequent calls for
-  incremental computation over split data.
-- Strongly recommended alongside [Reed-Solomon ECC](../_ecc/README.md): Reed-Solomon can
-  "successfully" correct to the wrong message, and a CRC-32 check catches this.

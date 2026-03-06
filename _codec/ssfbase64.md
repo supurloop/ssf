@@ -42,8 +42,8 @@ This module has no compile-time configuration options in `ssfoptions.h`.
 
 | | Function / Macro | Description |
 |---|-----------------|-------------|
-| [e.g.](#ex-encode) | [`SSFBase64Encode(in, inLen, out, outSize, outLen)`](#ssfbase64encode) | Encode binary data to a Base64 string |
-| [e.g.](#ex-decode) | [`SSFBase64Decode(in, inLenLim, out, outSize, outLen)`](#ssfbase64decode) | Decode a Base64 string to binary data |
+| [e.g.](#ex-encode) | [`bool SSFBase64Encode(in, inLen, out, outSize, outLen)`](#ssfbase64encode) | Encode binary data to a Base64 string |
+| [e.g.](#ex-decode) | [`bool SSFBase64Decode(in, inLenLim, out, outSize, outLen)`](#ssfbase64decode) | Decode a Base64 string to binary data |
 
 <a id="function-reference"></a>
 
@@ -51,7 +51,7 @@ This module has no compile-time configuration options in `ssfoptions.h`.
 
 <a id="ssfbase64encode"></a>
 
-### [↑](#ssfbase64--base64-encoderdecoder) [`SSFBase64Encode()`](#ex-encode)
+### [↑](#ssfbase64--base64-encoderdecoder) [`bool SSFBase64Encode()`](#ex-encode)
 
 ```c
 bool SSFBase64Encode(const uint8_t *in, size_t inLen,
@@ -75,7 +75,7 @@ multiple of 4 characters padded with `=`.
 
 <a id="ssfbase64decode"></a>
 
-### [↑](#ssfbase64--base64-encoderdecoder) [`SSFBase64Decode()`](#ex-decode)
+### [↑](#ssfbase64--base64-encoderdecoder) [`bool SSFBase64Decode()`](#ex-decode)
 
 ```c
 bool SSFBase64Decode(SSFCStrIn_t in, size_t inLenLim,
@@ -102,7 +102,7 @@ input contains invalid Base64 characters, or `outSize` is too small.
 
 <a id="ex-encode"></a>
 
-### [↑](#ssfbase64--base64-encoderdecoder) [SSFBase64Encode()](#ssfbase64encode)
+### [↑](#ssfbase64--base64-encoderdecoder) [bool SSFBase64Encode()](#ssfbase64encode)
 
 ```c
 uint8_t bin[] = {0x01u, 0x02u, 0x03u};
@@ -117,7 +117,7 @@ if (SSFBase64Encode(bin, sizeof(bin), out, sizeof(out), &outLen))
 
 <a id="ex-decode"></a>
 
-### [↑](#ssfbase64--base64-encoderdecoder) [SSFBase64Decode()](#ssfbase64decode)
+### [↑](#ssfbase64--base64-encoderdecoder) [bool SSFBase64Decode()](#ssfbase64decode)
 
 ```c
 uint8_t out[3];

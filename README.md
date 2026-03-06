@@ -67,7 +67,7 @@ The author uses various modules of SSF in several different commercial products 
 
 ## Porting
 
-This framework has been successfully ported and unit tested on the following platforms: Windows Visual Studio 32/64-bit, Linux 32/64-bit (GCC), MAC OS X, PIC32 (XC32), PIC24 (XC16), MSP430 (TI 15.12.3.LTS), and many others. You should only need to change ssfport.c and ssfport.h to implement a successful port.
+This framework has been successfully ported and unit tested on the following platforms: Windows Visual Studio 32/64-bit, Linux 32/64-bit (GCC), MAC OS X, PIC32 (XC32), PIC24 (XC16), MSP430 (TI 15.12.3.LTS), and many others. You should only need to change [`ssfport.c` and `ssfport.h`](ssfport.md) to implement a successful port.
 
 The code will compile cleanly and not report any analyzer(Lint) warnings under Windows in Visual Studio using the ssf.sln solution file.
 The code will compile cleanly under Linux. ./build-linux.sh will create the ssf executable in the source directory.

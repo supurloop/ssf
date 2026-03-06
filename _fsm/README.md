@@ -1,221 +1,651 @@
-# Finite State Machine
+# ssfsm — Finite State Machine Framework
 
-[Back to ssf README](../README.md)
+[SSF](../README.md)
 
-Event-driven finite state machine framework with hierarchical state support and optional RTOS integration.
+Event-driven finite state machine framework with timer support and optional hierarchical states.
 
-## Finite State Machine Framework
+Each state machine is a function (`SSFSMHandler_t`) that receives events via a `switch` on
+`SSFSMEventId_t`. The framework delivers `SSF_SM_EVENT_ENTRY` and `SSF_SM_EVENT_EXIT`
+automatically on state transitions triggered by `SSFSMTran()`. Timers post events after a
+configurable delay. One level of state hierarchy is supported: a child handler names its parent
+with `SSF_SM_SUPER()` in its `default` case, and unhandled events are forwarded automatically.
 
-The state machine framework allows you to create reliable and efficient state machines.
+[Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference) | [Examples](#examples)
 
-Unless SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT is enabled, all event generation and execution of task handlers for ALL state machines must be done in a single thread of execution.
-Calling into the state machine interface from two difference execution contexts is not supported and will eventually lead to problems.
-There is a lot that can be said about state machines in general and this one specifically, and I will continue to add to this documentation in the future.
+<a id="dependencies"></a>
 
-Here's a simple example:
+## [↑](#ssfsm--finite-state-machine-framework) Dependencies
 
-```
-/* ssfport.h */
-...
+- [`ssfport.h`](../ssfport.h)
+- [`ssfoptions.h`](../ssfoptions.h)
+- [`ssf.h`](../ssf.h)
 
-/* --------------------------------------------------------------------------------------------- */
-/* Configure ssfsm's state machine interface                                                     */
-/* --------------------------------------------------------------------------------------------- */
-/* Maximum number of simultaneously queued events for all state machines. */
-#define SSF_SM_MAX_ACTIVE_EVENTS (5u)
+<a id="notes"></a>
 
-/* Maximum number of simultaneously running timers for all state machines. */
-#define SSF_SM_MAX_ACTIVE_TIMERS (2u)
+## [↑](#ssfsm--finite-state-machine-framework) Notes
 
-/* Defines the state machine identifers. */
+- `SSFSMInit()`, `SSFSMDeInit()`, `SSFSMInitHandler()`, `SSFSMDeInitHandler()`, and
+  `SSFSMTask()` must all be called from the same single thread of execution unless
+  `SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1`.
+- `SSFSMPutEventData()` and `SSFSMPutEvent()` may be called from any execution context
+  (including ISRs) when `SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1` and the OS primitives support
+  it; otherwise they must be called from the same single-threaded context as the other functions.
+- `SSFSMTran()`, `SSFSMStartTimerData()`, `SSFSMStartTimer()`, `SSFSMStopTimer()`,
+  `SSF_SM_SUPER()`, and `SSF_SM_EVENT_DATA_ALIGN()` are only valid when called from within a
+  state handler during event processing.
+- `SSF_SM_SUPER()` must appear only in the `default` case of a child state handler; parent
+  (super) state handlers must not name a further parent.
+- A state transition automatically stops all running timers for that state machine before
+  delivering `SSF_SM_EVENT_EXIT` to the current state and `SSF_SM_EVENT_ENTRY` to the new state.
+- `SSFSMStartTimer()` with `interval == 0` fires the event at the next `SSFSMTask()` call,
+  making it useful as a deferred self-post.
+- `SSFSMTask()` returns `true` when there are still pending events to process; call it again
+  immediately in that case rather than waiting on the wake primitive.
+- In multi-threaded builds, `SSFSMTask()` is typically run in a dedicated high-priority thread
+  that blocks using `SSF_SM_THREAD_WAKE_WAIT()` between calls.
+- `SSFSMList_t` and `SSFSMEventList_t` enumerations are mandatory and must be defined in
+  `ssfoptions.h`.
+
+<a id="configuration"></a>
+
+## [↑](#ssfsm--finite-state-machine-framework) Configuration
+
+All options are set in `ssfoptions.h`.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `SSF_SM_MAX_ACTIVE_EVENTS` | `3` | Maximum number of simultaneously queued events across all state machines; increase if events are dropped under peak load |
+| `SSF_SM_MAX_ACTIVE_TIMERS` | `3` | Maximum number of simultaneously running timers across all state machines |
+
+The following enumerations are **required** in `ssfoptions.h`:
+
+```c
+/* State machine identifiers — one entry per state machine instance */
 typedef enum
 {
-    SSF_SM_MIN = -1,
-    SSF_SM_STATUS_LED,
-    SSF_SM_MAX
+    SSF_SM_MIN = -1,     /* Required sentinel; must be first */
+    SSF_SM_MY_APP_1,     /* User-defined state machines */
+    SSF_SM_MY_APP_2,
+    SSF_SM_MAX           /* Required sentinel; must be last */
 } SSFSMList_t;
 
+/* Event identifiers — shared across all state machines */
 typedef enum
 {
-    /* Defines the event identifiers for all state machines. */
+    SSF_SM_EVENT_MIN = -1,      /* Required sentinel; must be first */
+    SSF_SM_EVENT_ENTRY,         /* Required: delivered on state entry */
+    SSF_SM_EVENT_EXIT,          /* Required: delivered on state exit */
+    SSF_SM_EVENT_SUPER,         /* Required: used internally for hierarchy probing */
+    /* User-defined events follow */
+    SSF_SM_EVENT_MY_DATA_RX,
+    SSF_SM_EVENT_MY_TIMER,
+    SSF_SM_EVENT_MAX            /* Required sentinel; must be last */
+} SSFSMEventList_t;
+```
+
+**Thread sync macros** (required when `SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1`):
+
+| Macro | Description |
+|-------|-------------|
+| `SSF_SM_THREAD_SYNC_DECLARATION` | Declare the mutex object |
+| `SSF_SM_THREAD_SYNC_INIT()` | Initialize the mutex |
+| `SSF_SM_THREAD_SYNC_DEINIT()` | De-initialize the mutex |
+| `SSF_SM_THREAD_SYNC_ACQUIRE()` | Acquire the mutex |
+| `SSF_SM_THREAD_SYNC_RELEASE()` | Release the mutex |
+
+**Thread wake macros** (required when `SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1`); implement with
+a counting semaphore capped at 1:
+
+| Macro | Description |
+|-------|-------------|
+| `SSF_SM_THREAD_WAKE_DECLARATION` | Declare the wake semaphore |
+| `SSF_SM_THREAD_WAKE_INIT()` | Initialize the wake semaphore |
+| `SSF_SM_THREAD_WAKE_DEINIT()` | De-initialize the wake semaphore |
+| `SSF_SM_THREAD_WAKE_POST()` | Signal the FSM thread that an event is ready |
+| `SSF_SM_THREAD_WAKE_WAIT(timeout)` | Block the FSM thread until an event arrives or `timeout` elapses |
+
+<a id="api-summary"></a>
+
+## [↑](#ssfsm--finite-state-machine-framework) API Summary
+
+### Definitions
+
+| Symbol | Kind | Description |
+|--------|------|-------------|
+| <a id="ssfsmid-t"></a>`SSFSMId_t` | Type (`int8_t`) | Identifies a state machine instance; values come from `SSFSMList_t` |
+| <a id="ssfsmeventid-t"></a>`SSFSMEventId_t` | Type (`int16_t`) | Identifies an event; values come from `SSFSMEventList_t` |
+| <a id="ssfsmdata-t"></a>`SSFSMData_t` | Type (`uint8_t`) | Element type for event data payloads |
+| <a id="ssfsmdatalen-t"></a>`SSFSMDataLen_t` | Type (`uint16_t`) | Length in bytes of an event data payload |
+| <a id="ssfsmtimeout-t"></a>`SSFSMTimeout_t` | Type (`SSFPortTick_t`) | Timer interval in system ticks; `0` fires at the next `SSFSMTask()` call |
+| <a id="ssfsmhandler-t"></a>`SSFSMHandler_t` | Function pointer | State handler signature: `void fn(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen, SSFVoidFn_t *superHandler)` |
+| <a id="ssf-sm-max-timeout"></a>`SSF_SM_MAX_TIMEOUT` | Constant | Maximum valid timer interval (`(SSFSMTimeout_t)(-1)`) |
+
+### Functions
+
+| | Function | Description |
+|---|----------|-------------|
+| [e.g.](#ex-init) | [`SSFSMInit(maxEvents, maxTimers)`](#ssfsminit) | Initialize the framework; must be called before any other ssfsm function |
+| [e.g.](#ex-deinit) | [`SSFSMDeInit()`](#ssfsmdeinit) | De-initialize the framework and release all resources |
+| [e.g.](#ex-init-handler) | [`SSFSMInitHandler(smid, initial)`](#ssfsminithandler) | Register a state machine and deliver `SSF_SM_EVENT_ENTRY` to the initial state |
+| [e.g.](#ex-deinit-handler) | [`SSFSMDeInitHandler(smid)`](#ssfsmdeinithandler) | Unregister a state machine |
+| [e.g.](#ex-task) | [`SSFSMTask(nextTimeout)`](#ssfsmtask) | Process all pending events and expired timers; returns time until next timer |
+| [e.g.](#ex-put-event-data) | [`SSFSMPutEventData(smid, eid, data, dataLen)`](#ssfsmputeventdata) | Post an event with a data payload to a state machine |
+| [e.g.](#ex-put-event) | [`SSFSMPutEvent(smid, eid)`](#ssfsmputevent) | Post an event without data (expands to `SSFSMPutEventData` with `NULL`/`0`) |
+| [e.g.](#ex-tran) | [`SSFSMTran(next)`](#ssfsmtran) | Trigger a state transition; valid only inside a state handler |
+| [e.g.](#ex-start-timer-data) | [`SSFSMStartTimerData(eid, interval, data, dataLen)`](#ssfsmstarttimerddata) | Start a timer that posts an event with data; valid only inside a state handler |
+| [e.g.](#ex-start-timer) | [`SSFSMStartTimer(eid, to)`](#ssfsmstarttimer) | Start a timer without data (expands to `SSFSMStartTimerData` with `NULL`/`0`) |
+| [e.g.](#ex-stop-timer) | [`SSFSMStopTimer(eid)`](#ssfsmstoptimer) | Cancel a running timer; valid only inside a state handler |
+| [e.g.](#ex-super) | [`SSF_SM_SUPER(super)`](#ssf-sm-super) | Name the parent state handler; place in the `default` case of a child handler |
+| [e.g.](#ex-event-data-align) | [`SSF_SM_EVENT_DATA_ALIGN(v)`](#ssf-sm-event-data-align) | Copy event data into a typed variable; valid only inside a state handler |
+
+<a id="function-reference"></a>
+
+## [↑](#ssfsm--finite-state-machine-framework) Function Reference
+
+<a id="ssfsminit"></a>
+
+### [↑](#ssfsm--finite-state-machine-framework) [`SSFSMInit()`](#ex-init)
+
+```c
+void SSFSMInit(uint32_t maxEvents, uint32_t maxTimers);
+```
+
+Initializes the framework, allocating the internal event queue and timer table. Must be called
+once before `SSFSMInitHandler()`, `SSFSMTask()`, or any event-posting function. Pass values
+that match `SSF_SM_MAX_ACTIVE_EVENTS` and `SSF_SM_MAX_ACTIVE_TIMERS` from `ssfoptions.h`.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `maxEvents` | in | `uint32_t` | Maximum simultaneously queued events. Must equal `SSF_SM_MAX_ACTIVE_EVENTS`. |
+| `maxTimers` | in | `uint32_t` | Maximum simultaneously running timers. Must equal `SSF_SM_MAX_ACTIVE_TIMERS`. |
+
+**Returns:** Nothing.
+
+---
+
+<a id="ssfsmdeinit"></a>
+
+### [↑](#ssfsm--finite-state-machine-framework) [`SSFSMDeInit()`](#ex-deinit)
+
+```c
+void SSFSMDeInit(void);
+```
+
+De-initializes the framework and frees internal resources. After this call, no other ssfsm
+function may be used until `SSFSMInit()` is called again.
+
+**Returns:** Nothing.
+
+---
+
+<a id="ssfsminithandler"></a>
+
+### [↑](#ssfsm--finite-state-machine-framework) [`SSFSMInitHandler()`](#ex-init-handler)
+
+```c
+void SSFSMInitHandler(SSFSMId_t smid, SSFSMHandler_t initial);
+```
+
+Registers a state machine identified by `smid` and sets `initial` as the current state.
+Immediately delivers `SSF_SM_EVENT_ENTRY` to `initial`. If `initial` has a parent state
+(established through `SSF_SM_SUPER()`), `SSF_SM_EVENT_ENTRY` is delivered to the parent first,
+then to `initial`.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `smid` | in | `SSFSMId_t` | State machine identifier from `SSFSMList_t`. Must be between `SSF_SM_MIN+1` and `SSF_SM_MAX-1`. |
+| `initial` | in | `SSFSMHandler_t` | Pointer to the initial state handler function. Must not be `NULL`. |
+
+**Returns:** Nothing.
+
+---
+
+<a id="ssfsmdeinithandler"></a>
+
+### [↑](#ssfsm--finite-state-machine-framework) [`SSFSMDeInitHandler()`](#ex-deinit-handler)
+
+```c
+void SSFSMDeInitHandler(SSFSMId_t smid);
+```
+
+Unregisters the state machine identified by `smid` and cancels all its pending timers and
+events. After this call the slot may be re-registered with `SSFSMInitHandler()`.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `smid` | in | `SSFSMId_t` | State machine identifier to unregister. |
+
+**Returns:** Nothing.
+
+---
+
+<a id="ssfsmtask"></a>
+
+### [↑](#ssfsm--finite-state-machine-framework) [`SSFSMTask()`](#ex-task)
+
+```c
+bool SSFSMTask(SSFSMTimeout_t *nextTimeout);
+```
+
+Processes all pending events and fires any expired timers by invoking the appropriate state
+handlers. Must be called repeatedly from the framework's execution context.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `nextTimeout` | out | `SSFSMTimeout_t *` | Receives the number of system ticks until the next timer expires, or `SSF_SM_MAX_TIMEOUT` if no timers are running. Pass `NULL` in single-threaded superloop builds. |
+
+**Returns:** `true` if there are additional pending events that should be processed immediately
+(call `SSFSMTask()` again without waiting); `false` when no more events are queued and the
+caller may safely block for up to `*nextTimeout` ticks.
+
+---
+
+<a id="ssfsmputeventdata"></a>
+
+### [↑](#ssfsm--finite-state-machine-framework) [`SSFSMPutEventData()`](#ex-put-event-data)
+
+```c
+void SSFSMPutEventData(SSFSMId_t smid, SSFSMEventId_t eid, const SSFSMData_t *data,
+                       SSFSMDataLen_t dataLen);
+```
+
+Enqueues an event for state machine `smid`. If `data` is non-`NULL`, up to `dataLen` bytes are
+copied into the event queue entry and delivered to the handler as the `data`/`dataLen`
+parameters. May be called from any context when `SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1`.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `smid` | in | `SSFSMId_t` | Target state machine identifier. |
+| `eid` | in | `SSFSMEventId_t` | Event identifier from `SSFSMEventList_t`. Must not be `SSF_SM_EVENT_ENTRY`, `SSF_SM_EVENT_EXIT`, or `SSF_SM_EVENT_SUPER`. |
+| `data` | in | `const SSFSMData_t *` | Pointer to the event data payload. Pass `NULL` when there is no data. |
+| `dataLen` | in | `SSFSMDataLen_t` | Number of bytes of event data. Must be `0` when `data` is `NULL`. |
+
+**Returns:** Nothing.
+
+---
+
+<a id="ssfsmputevent"></a>
+
+### [↑](#ssfsm--finite-state-machine-framework) [`SSFSMPutEvent()`](#ex-put-event)
+
+```c
+#define SSFSMPutEvent(smid, eid) SSFSMPutEventData(smid, eid, NULL, 0)
+```
+
+Convenience macro for posting an event without a data payload. Expands to
+[`SSFSMPutEventData()`](#ssfsmputeventdata) with `NULL` and `0` for the data parameters. All
+threading constraints of `SSFSMPutEventData()` apply.
+
+---
+
+<a id="ssfsmtran"></a>
+
+### [↑](#ssfsm--finite-state-machine-framework) [`SSFSMTran()`](#ex-tran)
+
+```c
+void SSFSMTran(SSFSMHandler_t next);
+```
+
+Requests a transition to the state handler `next`. Valid only when called from within a state
+handler during event processing. The framework delivers `SSF_SM_EVENT_EXIT` to the current
+state (and its parent if applicable), stops all running timers for the machine, then delivers
+`SSF_SM_EVENT_ENTRY` to `next` (and its parent if applicable). Must not be called from within
+the `SSF_SM_EVENT_ENTRY` or `SSF_SM_EVENT_EXIT` event cases.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `next` | in | `SSFSMHandler_t` | Pointer to the target state handler function. Must not be `NULL`. |
+
+**Returns:** Nothing.
+
+---
+
+<a id="ssfsmstarttimerddata"></a>
+
+### [↑](#ssfsm--finite-state-machine-framework) [`SSFSMStartTimerData()`](#ex-start-timer-data)
+
+```c
+void SSFSMStartTimerData(SSFSMEventId_t eid, SSFSMTimeout_t interval,
+                         const SSFSMData_t *data, SSFSMDataLen_t dataLen);
+```
+
+Starts or restarts a timer that posts event `eid` to the owning state machine after `interval`
+system ticks. If a timer for `eid` is already running, it is restarted with the new interval
+and data. An `interval` of `0` posts the event at the next `SSFSMTask()` call. Valid only
+when called from within a state handler.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `eid` | in | `SSFSMEventId_t` | Event to post when the timer expires. Must be a user-defined event from `SSFSMEventList_t`. |
+| `interval` | in | `SSFSMTimeout_t` | Delay in system ticks. `0` fires at the next `SSFSMTask()` call; `SSF_SM_MAX_TIMEOUT` is the maximum. |
+| `data` | in | `const SSFSMData_t *` | Data payload to deliver with the timer event. Pass `NULL` when there is no data. |
+| `dataLen` | in | `SSFSMDataLen_t` | Number of bytes of data. Must be `0` when `data` is `NULL`. |
+
+**Returns:** Nothing.
+
+---
+
+<a id="ssfsmstarttimer"></a>
+
+### [↑](#ssfsm--finite-state-machine-framework) [`SSFSMStartTimer()`](#ex-start-timer)
+
+```c
+#define SSFSMStartTimer(eid, to) SSFSMStartTimerData(eid, to, NULL, 0)
+```
+
+Convenience macro for starting a timer without a data payload. Expands to
+[`SSFSMStartTimerData()`](#ssfsmstarttimerddata) with `NULL` and `0` for the data parameters.
+Valid only when called from within a state handler.
+
+---
+
+<a id="ssfsmstoptimer"></a>
+
+### [↑](#ssfsm--finite-state-machine-framework) [`SSFSMStopTimer()`](#ex-stop-timer)
+
+```c
+void SSFSMStopTimer(SSFSMEventId_t eid);
+```
+
+Cancels the timer for event `eid` on the owning state machine if it is running. Has no effect
+if no timer for `eid` is active. Valid only when called from within a state handler. Note that
+`SSFSMTran()` automatically stops all running timers, so explicit cancellation is only needed
+when stopping a timer without transitioning.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `eid` | in | `SSFSMEventId_t` | Event identifier of the timer to cancel. |
+
+**Returns:** Nothing.
+
+---
+
+<a id="ssf-sm-super"></a>
+
+### [↑](#ssfsm--finite-state-machine-framework) [`SSF_SM_SUPER()`](#ex-super)
+
+```c
+#define SSF_SM_SUPER(super) *superHandler = (SSFVoidFn_t)super;
+```
+
+Names the parent (super) state handler for the current child state. Must appear in the
+`default` case of a child state handler; writes `super` into the `superHandler` output
+parameter of the handler function. When an event is not handled by the child, the framework
+re-delivers it to the parent. Parent handlers must not call `SSF_SM_SUPER()`. Valid only when
+called from within a state handler.
+
+| Parameter | Description |
+|-----------|-------------|
+| `super` | The parent state handler function (`SSFSMHandler_t`). The framework will route unhandled events to this handler. |
+
+---
+
+<a id="ssf-sm-event-data-align"></a>
+
+### [↑](#ssfsm--finite-state-machine-framework) [`SSF_SM_EVENT_DATA_ALIGN()`](#ex-event-data-align)
+
+```c
+#define SSF_SM_EVENT_DATA_ALIGN(v) { \
+    SSF_ASSERT((sizeof(v) >= dataLen) && (data != NULL)); \
+    memcpy(&(v), data, dataLen); }
+```
+
+Safely copies the event data payload into a typed variable `v`. Asserts that `sizeof(v) >=
+dataLen` and that `data` is non-`NULL`. Accesses `data` and `dataLen` from the enclosing state
+handler's parameter scope; valid only when called from within a state handler.
+
+| Parameter | Description |
+|-----------|-------------|
+| `v` | A variable whose address receives the event data via `memcpy`. Must be large enough to hold `dataLen` bytes. |
+
+<a id="examples"></a>
+
+## [↑](#ssfsm--finite-state-machine-framework) Examples
+
+The examples below use the following configuration (in `ssfoptions.h`) and forward declarations:
+
+```c
+/* ssfoptions.h */
+#define SSF_SM_MAX_ACTIVE_EVENTS (5u)
+#define SSF_SM_MAX_ACTIVE_TIMERS (3u)
+
+typedef enum { SSF_SM_MIN = -1, SSF_SM_STATUS_LED, SSF_SM_MAX } SSFSMList_t;
+
+typedef enum
+{
     SSF_SM_EVENT_MIN = -1,
-    /* Required SSF events */
-    SSF_SM_EVENT_ENTRY,  /* Signalled on entry to state handler */
-    SSF_SM_EVENT_EXIT,   /* Signalled on exit of state handler */
-    SSF_SM_EVENT_SUPER,  /* Signalled to determine parent of current state handler */
-                         /* Usually handled in default case with SSF_SM_SUPER() */
-                         /* macro. If no parent then SSF_SM_SUPER() is not */
-                         /* required or must be called with NULL */
-                         /* Super states may not have a parent super state */
-    /* User defined events */
-    SSF_SM_EVENT_STATUS_RX_DATA,
-    SSF_SM_EVENT_STATUS_LED_TIMER_TOGGLE,
-    SSF_SM_EVENT_STATUS_LED_TIMER_IDLE,
+    SSF_SM_EVENT_ENTRY, SSF_SM_EVENT_EXIT, SSF_SM_EVENT_SUPER,
+    SSF_SM_EVENT_RX_DATA,
+    SSF_SM_EVENT_BLINK_TIMER,
+    SSF_SM_EVENT_IDLE_TIMER,
     SSF_SM_EVENT_MAX
 } SSFSMEventList_t;
 
-/* main.c */
-...
-
-/* State handler prototypes */
-static void StatusLEDIdleHandler(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen,
-                                 SSFVoidFn_t *superHandler);
-static void StatusLEDBlinkHandler(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen,
-                                  SSFVoidFn_t *superHandler);
-
-static void StatusLEDIdleHandler(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen,
-                                 SSFVoidFn_t *superHandler)
-{
-    switch (eid)
-    {
-    case SSF_SM_EVENT_ENTRY:
-        STATUS_LED_OFF();
-        break;
-    case SSF_SM_EVENT_EXIT:
-        break;
-    case SSF_SM_EVENT_STATUS_RX_DATA:
-        SSFSMTran(StatusLEDBlinkHandler);
-        break;
-    default:
-        break;
-    }
-}
-
-static void StatusLEDBlinkHandler(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen,
-                                  SSFVoidFn_t *superHandler)
-
-{
-    switch (eid)
-    {
-    case SSF_SM_EVENT_ENTRY:
-        SSFSMStartTimer(SSF_SM_EVENT_STATUS_LED_TIMER_TOGGLE, 0);
-        SSFSMStartTimer(SSF_SM_EVENT_STATUS_LED_TIMER_IDLE, SSF_TICKS_PER_SEC * 10);
-        break;
-    case SSF_SM_EVENT_EXIT:
-        break;
-    case SSF_SM_EVENT_STATUS_LED_TIMER_TOGGLE:
-        STATUS_LED_TOGGLE();
-        SSFSMStartTimer(SSF_SM_EVENT_STATUS_LED_TIMER_TOGGLE, SSF_TICKS_PER_SEC);
-        break;
-    case SSF_SM_EVENT_STATUS_LED_TIMER_IDLE:
-        SSFSMTran(StatusLEDIdleHandler);
-        break;
-    default:
-        break;
-    }
-}
-
-void main(void)
-{
-
-    /* Initialize state machine framework */
-    SSFSMInit(SSF_SM_MAX_ACTIVE_EVENTS, SSF_SM_MAX_ACTIVE_TIMERS);
-
-    /* Initialize status LED state machine */
-    SSFSMInitHandler(SSF_SM_STATUS_LED, StatusLEDIdleHandler);
-
-    while (true)
-    {
-        if (ReceivedMessage())
-        {
-            SSFSMPutEvent(SSF_SM_STATUS_LED, SSF_SM_EVENT_STATUS_RX_DATA);
-        }
-        SSFSMTask(NULL);
-    }
-...
+/* Forward declarations */
+static void IdleHandler(SSFSMEventId_t eid, const SSFSMData_t *data,
+                        SSFSMDataLen_t dataLen, SSFVoidFn_t *superHandler);
+static void BlinkHandler(SSFSMEventId_t eid, const SSFSMData_t *data,
+                         SSFSMDataLen_t dataLen, SSFVoidFn_t *superHandler);
+static void ParentHandler(SSFSMEventId_t eid, const SSFSMData_t *data,
+                          SSFSMDataLen_t dataLen, SSFVoidFn_t *superHandler);
 ```
 
-The state machine framework is first initialized. Then the state machine for the Status LED is initialized, which causes the ENTRY action of the StatusLEDIdleHandler() to be executed, this turns off the LED.
+<a id="ex-init"></a>
 
-Then main goes into its superloop that checks for a message begin received. When a message is received it will signal SSF_SM_EVENT_STATUS_RX_DATA. The idle handler will trigger a state transition to the StatusLEDBlinkHandler(). The state transition causes an EXIT event for the idle handler, AND an entry event for the blink handler.
+### [↑](#ssfsm--finite-state-machine-framework) [SSFSMInit()](#ssfsminit)
 
-On ENTRY the blink handler starts two timers. The SSF_SM_EVENT_STATUS_LED_TIMER_TOGGLE timer is set to go off immediately, and the SSF_SM_EVENT_STATUS_LED_TIMER_IDLE timer is set to go off in 10 seconds. When the SSF_SM_EVENT_STATUS_LED_TIMER_TOGGLE expires the status LED is toggled and the SSF_SM_EVENT_STATUS_LED_TIMER_TOGGLE timer is setup to fire again in 1 second. This cause the LED to blink.
-
-If additional SSF_SM_EVENT_STATUS_RX_DATA events are signaled while in the toggle state they are ignored.
-
-After 10 seconds the SSF_SM_EVENT_STATUS_LED_TIMER_IDLE timer expires and triggers a state transition to the idle state. First the EXIT event in the blink handler is executed automatically by the framework, followed by the ENTRY event in the idle handler that turns off the status LED.
-
-The framework automatically stops all timers associated with a state machine when a state transition occurs. This is why it is not necessary to explicitly stop the SSF_SM_EVENT_STATUS_LED_TIMER_TOGGLE timer.
-
-If you need to run the framework in a multi-threaded environment do the following:
-
--   Enable SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT in ssfport.h
--   Implement the SSF*SM_THREAD_SYNC*\* macros using an OS mutext primitive.
--   Implement the SSF*SM_WAKE_SYNC*\* macros using an OS counting semaphore primitive. The unit test expects the maximum count to be capped at 1.
--   Implement an OS exection context (a task, thread, process, etc.) that initializes the framework and all the state machines. Then call SSFSMTask() throttled by SSF_SM_THREAD_WAKE_WAIT() with the timeout returned from SSFSMTask().
--   SSFSMTask() should normally execute as a high priority system task since it will execute quickly and block until a timer expires or an event is signalled.
--   Only SSFSMPutEventData() and SSFSMPutEvent() may be safely invoked from other execution contexts. Event signalling is allowed from interrupts when the OS synchronization primitives support such use.
-
-Out of the box Windows supports the state machine framework in multi-threaded environments.
-And, there is a pthread implementation for OS X and Linux that supports the state machine framework in multi-threaded environments.
-OS X does not support CLOCK_MONOTONIC for pthread_cond_timedwait() so set SSF_SM_THREAD_PTHREAD_CLOCK_MONOTONIC to 0. Be aware that a system time change could cause unexpected behavior.
-Another note on the pthread port: Contrary to standard pthreads docs, neither OS X or Linux return ETIMEDOUT from pthread_cond_timedwait() when a timeout occurred, this is something I intend to investigate.
-
-Here's pseudocode for an OS thread initializing and running the framework, and demonstrating event generation from a different thread:
-
+```c
+/* Initialize framework — values must match ssfoptions.h constants */
+SSFSMInit(SSF_SM_MAX_ACTIVE_EVENTS, SSF_SM_MAX_ACTIVE_TIMERS);
+/* Framework ready; call SSFSMInitHandler() for each state machine */
 ```
-void OSThreadSSFSM(void *arg)
+
+<a id="ex-deinit"></a>
+
+### [↑](#ssfsm--finite-state-machine-framework) [SSFSMDeInit()](#ssfsmdeinit)
+
+```c
+SSFSMInit(SSF_SM_MAX_ACTIVE_EVENTS, SSF_SM_MAX_ACTIVE_TIMERS);
+/* ... initialize handlers and run ... */
+SSFSMDeInit();
+/* Internal resources freed; SSFSMInit() required before further use */
+```
+
+<a id="ex-init-handler"></a>
+
+### [↑](#ssfsm--finite-state-machine-framework) [SSFSMInitHandler()](#ssfsminithandler)
+
+```c
+SSFSMInit(SSF_SM_MAX_ACTIVE_EVENTS, SSF_SM_MAX_ACTIVE_TIMERS);
+
+/* Register state machine; SSF_SM_EVENT_ENTRY is delivered to IdleHandler() immediately */
+SSFSMInitHandler(SSF_SM_STATUS_LED, IdleHandler);
+
+/* Superloop */
+while (true)
 {
-    SSFSMTimeout_t to;
+    SSFSMTask(NULL);
+}
+```
 
-    /* Initialize state machine framework */
-    SSFSMInit(SSF_SM_MAX_ACTIVE_EVENTS, SSF_SM_MAX_ACTIVE_TIMERS);
+<a id="ex-deinit-handler"></a>
 
-    /* Initialize status LED state machine */
-    SSFSMInitHandler(SSF_SM_STATUS_LED, StatusLEDIdleHandler);
+### [↑](#ssfsm--finite-state-machine-framework) [SSFSMDeInitHandler()](#ssfsmdeinithandler)
 
-    while (true)
+```c
+SSFSMInitHandler(SSF_SM_STATUS_LED, IdleHandler);
+/* ... */
+SSFSMDeInitHandler(SSF_SM_STATUS_LED);
+/* State machine unregistered; pending timers and events cancelled */
+```
+
+<a id="ex-task"></a>
+
+### [↑](#ssfsm--finite-state-machine-framework) [SSFSMTask()](#ssfsmtask)
+
+```c
+/* Single-threaded superloop */
+while (true)
+{
+    SSFSMTask(NULL);
+}
+
+/* Multi-threaded: FSM thread blocks between calls using the wake primitive */
+SSFSMTimeout_t to;
+while (true)
+{
+    if (SSFSMTask(&to) == false)
     {
-        SSFSMTask(&to);
+        /* No more pending events — block until next timer or SSFSMPutEvent() wakes us */
         SSF_SM_THREAD_WAKE_WAIT(to);
     }
 }
-
-...
-
-void OSThreadEventGenerator(void *arg)
-{
-    ...
-
-    while (true)
-    {
-        if (ReceivedMessage())
-        {
-            SSFSMPutEvent(SSF_SM_STATUS_LED, SSF_SM_EVENT_STATUS_RX_DATA);
-        }
-    }
-}
 ```
 
-The state machine framework also support 1-level of hierarchical state nesting. To designate a state to have a parent state simply use the SSF_SM_SUPER() macro in the default case of a state handler's event switch statement. The framework is able to automatically determine the state relationships by probing the default case statment. Parent and child state handlers are functionally identical except that a parent state handler cannot use the SSF_SM_SUPER() macro to name another state handler as its parent. When the child is the current state and does not handle an event, the event will be sent to the parent handler for processing. Both parent and child states can be the current state. When multiple children have the same parent they can can share the same core behaviors, and focus on just handling events which are different from the shared parent. This helps to reduce redundancy between state handlers.
+<a id="ex-put-event-data"></a>
 
+### [↑](#ssfsm--finite-state-machine-framework) [SSFSMPutEventData()](#ssfsmputeventdata)
+
+```c
+/* Post an event carrying a 16-bit received-length payload */
+uint16_t rxLen = 42u;
+SSFSMPutEventData(SSF_SM_STATUS_LED, SSF_SM_EVENT_RX_DATA,
+                  (SSFSMData_t *)&rxLen, (SSFSMDataLen_t)sizeof(rxLen));
 ```
-static void ChildHandler(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen,
-                         SSFVoidFn_t *superHandler);
-static void ParentHandler(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen,
-                          SSFVoidFn_t *superHandler);
 
-static void ChildHandler(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen,
-                         SSFVoidFn_t *superHandler)
+<a id="ex-put-event"></a>
+
+### [↑](#ssfsm--finite-state-machine-framework) [SSFSMPutEvent()](#ssfsmputevent)
+
+```c
+/* Post an event without a data payload */
+SSFSMPutEvent(SSF_SM_STATUS_LED, SSF_SM_EVENT_RX_DATA);
+```
+
+<a id="ex-tran"></a>
+
+### [↑](#ssfsm--finite-state-machine-framework) [SSFSMTran()](#ssfsmtran)
+
+```c
+static void IdleHandler(SSFSMEventId_t eid, const SSFSMData_t *data,
+                        SSFSMDataLen_t dataLen, SSFVoidFn_t *superHandler)
 {
     switch (eid)
     {
     case SSF_SM_EVENT_ENTRY:
-        STATUS_LED_OFF();
+        /* Turn LED off on entry */
         break;
     case SSF_SM_EVENT_EXIT:
         break;
-    case SSF_SM_EVENT_CHILD:
-        /* Do something specific to the child state */
+    case SSF_SM_EVENT_RX_DATA:
+        /* Transition: EXIT fires for IdleHandler, ENTRY fires for BlinkHandler */
+        SSFSMTran(BlinkHandler);
         break;
     default:
+        break;
+    }
+}
+```
+
+<a id="ex-start-timer-data"></a>
+
+### [↑](#ssfsm--finite-state-machine-framework) [SSFSMStartTimerData()](#ssfsmstarttimerddata)
+
+```c
+static void BlinkHandler(SSFSMEventId_t eid, const SSFSMData_t *data,
+                         SSFSMDataLen_t dataLen, SSFVoidFn_t *superHandler)
+{
+    switch (eid)
+    {
+    case SSF_SM_EVENT_ENTRY:
+    {
+        /* Start a 1-second timer carrying a blink-count payload */
+        uint8_t count = 5u;
+        SSFSMStartTimerData(SSF_SM_EVENT_BLINK_TIMER, SSF_TICKS_PER_SEC,
+                            (SSFSMData_t *)&count, (SSFSMDataLen_t)sizeof(count));
+        break;
+    }
+    default:
+        break;
+    }
+}
+```
+
+<a id="ex-start-timer"></a>
+
+### [↑](#ssfsm--finite-state-machine-framework) [SSFSMStartTimer()](#ssfsmstarttimer)
+
+```c
+static void BlinkHandler(SSFSMEventId_t eid, const SSFSMData_t *data,
+                         SSFSMDataLen_t dataLen, SSFVoidFn_t *superHandler)
+{
+    switch (eid)
+    {
+    case SSF_SM_EVENT_ENTRY:
+        /* Fire immediately at next SSFSMTask(); idle timeout after 10 seconds */
+        SSFSMStartTimer(SSF_SM_EVENT_BLINK_TIMER, 0);
+        SSFSMStartTimer(SSF_SM_EVENT_IDLE_TIMER,  SSF_TICKS_PER_SEC * 10u);
+        break;
+    case SSF_SM_EVENT_BLINK_TIMER:
+        /* Toggle LED and reschedule for 1-second repeat */
+        SSFSMStartTimer(SSF_SM_EVENT_BLINK_TIMER, SSF_TICKS_PER_SEC);
+        break;
+    case SSF_SM_EVENT_IDLE_TIMER:
+        SSFSMTran(IdleHandler);
+        break;
+    default:
+        break;
+    }
+}
+```
+
+<a id="ex-stop-timer"></a>
+
+### [↑](#ssfsm--finite-state-machine-framework) [SSFSMStopTimer()](#ssfsmstoptimer)
+
+```c
+static void BlinkHandler(SSFSMEventId_t eid, const SSFSMData_t *data,
+                         SSFSMDataLen_t dataLen, SSFVoidFn_t *superHandler)
+{
+    switch (eid)
+    {
+    case SSF_SM_EVENT_RX_DATA:
+        /* Cancel the idle timeout; keep blinking */
+        SSFSMStopTimer(SSF_SM_EVENT_IDLE_TIMER);
+        /* Note: SSFSMTran() would cancel all timers automatically */
+        break;
+    default:
+        break;
+    }
+}
+```
+
+<a id="ex-super"></a>
+
+### [↑](#ssfsm--finite-state-machine-framework) [SSF_SM_SUPER()](#ssf-sm-super)
+
+```c
+static void ChildHandler(SSFSMEventId_t eid, const SSFSMData_t *data,
+                         SSFSMDataLen_t dataLen, SSFVoidFn_t *superHandler)
+{
+    switch (eid)
+    {
+    case SSF_SM_EVENT_ENTRY:
+        break;
+    case SSF_SM_EVENT_EXIT:
+        break;
+    case SSF_SM_EVENT_RX_DATA:
+        /* Handle event specific to this child state */
+        break;
+    default:
+        /* Route all other events to ParentHandler for processing */
         SSF_SM_SUPER(ParentHandler);
         break;
     }
 }
 
-static void ParentHandler(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen,
-                          SSFVoidFn_t *superHandler)
+static void ParentHandler(SSFSMEventId_t eid, const SSFSMData_t *data,
+                          SSFSMDataLen_t dataLen, SSFVoidFn_t *superHandler)
 {
     switch (eid)
     {
@@ -223,21 +653,38 @@ static void ParentHandler(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMData
         break;
     case SSF_SM_EVENT_EXIT:
         break;
-    case SSF_SM_EVENT_PARENT:
-        /* Do something specific to the parent state */
+    case SSF_SM_EVENT_BLINK_TIMER:
+        /* Shared behavior: handled for any child that names ParentHandler as super */
+        SSFSMTran(IdleHandler);
         break;
+    default:
+        /* Parent handlers must NOT call SSF_SM_SUPER() */
+        break;
+    }
+}
+```
+
+<a id="ex-event-data-align"></a>
+
+### [↑](#ssfsm--finite-state-machine-framework) [SSF_SM_EVENT_DATA_ALIGN()](#ssf-sm-event-data-align)
+
+```c
+static void IdleHandler(SSFSMEventId_t eid, const SSFSMData_t *data,
+                        SSFSMDataLen_t dataLen, SSFVoidFn_t *superHandler)
+{
+    switch (eid)
+    {
+    case SSF_SM_EVENT_RX_DATA:
+    {
+        uint16_t rxLen;
+        /* Safely copy the event data payload into a typed variable */
+        SSF_SM_EVENT_DATA_ALIGN(rxLen);
+        /* rxLen now holds the value posted via SSFSMPutEventData() */
+        SSFSMTran(BlinkHandler);
+        break;
+    }
     default:
         break;
     }
 }
-
-...
-
-/* Initialize state machine framework */
-SSFSMInit(SSF_SM_MAX_ACTIVE_EVENTS, SSF_SM_MAX_ACTIVE_TIMERS);
-
-/* Initialize status LED state machine */
-SSFSMInitHandler(SSF_SM_CHILD_PARENT, ChildHandler);
 ```
-
-If the initial state is ChildHandler() then the ParentHandler() SSF_SM_EVENT_ENTRY clause followed by the ChildHandler() SSF_SM_EVENT_ENTRY clause will be run during initialization. If SSF_SM_EVENT_CHILD occurs then the ChildHandler() will handle the event and the ParentHandler() will not run. However if SSF_SM_EVENT_PARENT occurs, ChildHandler() will be called and execute the default clause, which redirects the event to be processed by ParentHandler(). The framework handles all state transition permutations and will properly exit and enter child and parent states as necessary.

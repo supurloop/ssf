@@ -1,36 +1,261 @@
-# Storage
+# ssfcfg — Version-Controlled Configuration Storage
 
-[Back to ssf README](../README.md)
+[SSF](../README.md)
 
-Non-volatile storage interfaces.
+Reliable read and write of versioned configuration data to NV storage (e.g. NOR flash).
 
-## Version Controlled Configuration Storage Interface
+Each configuration block is identified by a `dataId_t` and tagged with a `dataVersion_t`.
+`SSFCfgWrite()` stores the block with CRC protection and suppresses redundant writes when the
+data in NV storage is already identical. `SSFCfgRead()` returns the version found or
+`SSF_CFG_DATA_VERSION_INVALID` when no valid block exists for that ID, enabling clean bootstrap
+and version-migration logic at startup.
 
-Most embedded systems need to read and write configuration data to non-volatile memory such as NOR flash. This cfg interface handles all the details of reliably storing versioned data to the flash and prevents redundant writes.
+[Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference) | [Examples](#examples)
 
+<a id="dependencies"></a>
+
+## [↑](#ssfcfg--version-controlled-configuration-storage) Dependencies
+
+- [`ssfport.h`](../ssfport.h)
+- [`ssfoptions.h`](../ssfoptions.h)
+
+<a id="notes"></a>
+
+## [↑](#ssfcfg--version-controlled-configuration-storage) Notes
+
+- Each `dataId_t` value must be unique across all configuration types in the system; it maps to
+  a distinct NV storage sector.
+- The maximum number of `dataId_t` values is determined by the number of sectors available in
+  the target NV storage; configure `SSF_MAX_CFG_RAM_SECTORS` accordingly when
+  `SSF_CFG_ENABLE_STORAGE_RAM` is `1`.
+- `dataVersion_t` values must be non-negative integers; `SSF_CFG_DATA_VERSION_INVALID` (`-1`)
+  is reserved for the "not found" return value of `SSFCfgRead()`.
+- `SSFCfgWrite()` performs a read-before-write check and skips the erase and write cycle when
+  the data in NV storage is already identical, extending flash endurance.
+- Data length per `dataId` is limited to `SSF_MAX_CFG_DATA_SIZE_LIMIT` bytes.
+- `SSFCfgInit()` and `SSFCfgDeInit()` are only compiled in when
+  `SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1`; omit them in single-threaded builds.
+- The interface is thread-safe when `SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1` and the
+  `SSF_CFG_THREAD_SYNC_*` macros are implemented in `ssfoptions.h`.
+
+<a id="configuration"></a>
+
+## [↑](#ssfcfg--version-controlled-configuration-storage) Configuration
+
+All options are set in `ssfoptions.h`.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `SSF_CFG_MAX_STORAGE_SIZE` | `4096` | Maximum size in bytes of one erasable NV storage sector |
+| `SSF_MAX_CFG_DATA_SIZE_LIMIT` | `32` | Maximum bytes of configuration data per `dataId`; data passed to `SSFCfgWrite()` must not exceed this |
+| `SSF_CFG_WRITE_CHECK_CHUNK_SIZE` | `32` | Size of the temporary stack buffer used during the read-before-write check; reduce if stack space is limited |
+| `SSF_CFG_ENABLE_STORAGE_RAM` | `1` | `1` to use a RAM-based simulated NV storage suitable for unit tests; `0` to use real hardware via the port macros below |
+| `SSF_CFG_TYPEDEF_STRUCT` | `typedef struct` | Optionally append a packed-struct attribute (e.g. `__attribute__((packed))`) to the internal record structure |
+
+**Port macros** (required when `SSF_CFG_ENABLE_STORAGE_RAM == 0`; implement in `ssfoptions.h`):
+
+| Macro | Description |
+|-------|-------------|
+| `SSF_CFG_ERASE_STORAGE(dataId)` | Erase the NV storage sector associated with `dataId` |
+| `SSF_CFG_WRITE_STORAGE(data, dataLen, dataId, dataOffset)` | Write `dataLen` bytes from `data` to the sector for `dataId` at byte offset `dataOffset` |
+| `SSF_CFG_READ_STORAGE(data, dataSize, dataId, dataOffset)` | Read `dataSize` bytes from the sector for `dataId` at byte offset `dataOffset` into `data` |
+
+**Thread sync macros** (required when `SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1`; implement in `ssfoptions.h`):
+
+| Macro | Description |
+|-------|-------------|
+| `SSF_CFG_THREAD_SYNC_DECLARATION` | Declare the thread sync object |
+| `SSF_CFG_THREAD_SYNC_INIT()` | Initialize the thread sync object |
+| `SSF_CFG_THREAD_SYNC_DEINIT()` | De-initialize the thread sync object |
+| `SSF_CFG_THREAD_SYNC_ACQUIRE()` | Acquire the lock before accessing NV storage |
+| `SSF_CFG_THREAD_SYNC_RELEASE()` | Release the lock after accessing NV storage |
+
+<a id="api-summary"></a>
+
+## [↑](#ssfcfg--version-controlled-configuration-storage) API Summary
+
+### Definitions
+
+| Symbol | Kind | Description |
+|--------|------|-------------|
+| <a id="ssf-cfg-data-version-invalid"></a>`SSF_CFG_DATA_VERSION_INVALID` | Constant | `-1` — value returned by [`SSFCfgRead()`](#ssfcfgread) when no valid configuration block is found for the given `dataId` |
+| <a id="dataid-t"></a>`dataId_t` | Type (`uint32_t`) | Identifies a configuration block; must be unique per configuration type and map to a distinct NV storage sector |
+| <a id="dataversion-t"></a>`dataVersion_t` | Type (`int16_t`) | Version number for a configuration block; application-defined non-negative values; `SSF_CFG_DATA_VERSION_INVALID` is reserved |
+
+### Functions
+
+| | Function | Description |
+|---|----------|-------------|
+| [e.g.](#ex-init) | [`SSFCfgInit()`](#ssfcfginit) | Initialize the module mutex (thread-safe builds only; `SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1`) |
+| [e.g.](#ex-deinit) | [`SSFCfgDeInit()`](#ssfcfgdeinit) | De-initialize the module mutex (thread-safe builds only) |
+| [e.g.](#ex-write) | [`SSFCfgWrite(data, dataLen, dataId, dataVersion)`](#ssfcfgwrite) | Write versioned configuration data to NV storage with CRC protection |
+| [e.g.](#ex-read) | [`SSFCfgRead(data, datalen, dataSize, dataId)`](#ssfcfgread) | Read configuration data from NV storage; returns the stored version or `SSF_CFG_DATA_VERSION_INVALID` |
+
+<a id="function-reference"></a>
+
+## [↑](#ssfcfg--version-controlled-configuration-storage) Function Reference
+
+<a id="ssfcfginit"></a>
+
+### [↑](#ssfcfg--version-controlled-configuration-storage) [`SSFCfgInit()`](#ex-init)
+
+```c
+void SSFCfgInit(void);  /* compiled only when SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1 */
 ```
-#define MY_CONFIG_ID (0u) /* 32-bit number uniquely each type of config in the system */
-#define MY_CONFIG_VER_1 (1u) /* Version number 1 of my config data */
-#define MY_CONFIG_VER_2 (2u) /* Version number 2 of my config data */
 
-uint8_t myConfigData[SSF_MAX_CFG_DATA_SIZE_LIMIT]; /* Can be any arbitrary data or structure */
-uint16_t myConfigDataLen;
+Initializes the internal mutex used to make `SSFCfgRead()` and `SSFCfgWrite()` thread-safe.
+Must be called once before any other ssfcfg function in multi-threaded builds. Not compiled
+when `SSF_CONFIG_ENABLE_THREAD_SUPPORT == 0`.
 
-/* Bootstrap config */
-if (SSFCfgRead(myConfigData, &myConfigDataLen, sizeof(myConfigData), MY_CONFIG_ID) == MY_CONFIG_VER_1)
+**Returns:** Nothing.
+
+---
+
+<a id="ssfcfgdeinit"></a>
+
+### [↑](#ssfcfg--version-controlled-configuration-storage) [`SSFCfgDeInit()`](#ex-deinit)
+
+```c
+void SSFCfgDeInit(void);  /* compiled only when SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1 */
+```
+
+De-initializes the internal mutex. After this call, `SSFCfgRead()` and `SSFCfgWrite()` must
+not be called until `SSFCfgInit()` is called again. Not compiled when
+`SSF_CONFIG_ENABLE_THREAD_SUPPORT == 0`.
+
+**Returns:** Nothing.
+
+---
+
+<a id="ssfcfgwrite"></a>
+
+### [↑](#ssfcfg--version-controlled-configuration-storage) [`SSFCfgWrite()`](#ex-write)
+
+```c
+bool SSFCfgWrite(uint8_t *data, uint16_t dataLen, dataId_t dataId, dataVersion_t dataVersion);
+```
+
+Writes `dataLen` bytes from `data` to NV storage for the given `dataId`, tagged with
+`dataVersion` and protected by a CRC. Before writing, performs a read-back comparison; if the
+NV storage already holds identical content the erase and write cycle is suppressed, extending
+flash endurance. The sector is erased and rewritten only when the stored content differs.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `data` | in | `uint8_t *` | Pointer to the configuration data to write. Must not be `NULL`. |
+| `dataLen` | in | `uint16_t` | Number of bytes to write. Must be greater than `0` and no more than `SSF_MAX_CFG_DATA_SIZE_LIMIT`. |
+| `dataId` | in | `dataId_t` | Unique identifier for this configuration block. Maps to a distinct NV storage sector. |
+| `dataVersion` | in | `dataVersion_t` | Application-defined version number to store alongside the data. Must be `>= 0`. |
+
+**Returns:** `true` if the data was written (or was already identical) and verified successfully;
+`false` if the write or subsequent read-back verification failed.
+
+---
+
+<a id="ssfcfgread"></a>
+
+### [↑](#ssfcfg--version-controlled-configuration-storage) [`SSFCfgRead()`](#ex-read)
+
+```c
+dataVersion_t SSFCfgRead(uint8_t *data, uint16_t *datalen, size_t dataSize, dataId_t dataId);
+```
+
+Reads the configuration block for `dataId` from NV storage into `data`, validates the CRC,
+and sets `*datalen` to the number of bytes read. Returns the version stored with the block, or
+[`SSF_CFG_DATA_VERSION_INVALID`](#ssf-cfg-data-version-invalid) if no valid block is found.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `data` | out | `uint8_t *` | Buffer to receive the configuration data. Must not be `NULL`. |
+| `datalen` | out | `uint16_t *` | Receives the actual number of bytes read. Must not be `NULL`. |
+| `dataSize` | in | `size_t` | Allocated size of `data`. Must be at least `SSF_MAX_CFG_DATA_SIZE_LIMIT`. |
+| `dataId` | in | `dataId_t` | Identifier of the configuration block to read. |
+
+**Returns:** The `dataVersion_t` stored with the block if found and the CRC is valid;
+[`SSF_CFG_DATA_VERSION_INVALID`](#ssf-cfg-data-version-invalid) (`-1`) if no valid block exists
+for `dataId`. Compare the return value against the expected version constant to determine which
+version (if any) was found.
+
+<a id="examples"></a>
+
+## [↑](#ssfcfg--version-controlled-configuration-storage) Examples
+
+<a id="ex-init"></a>
+
+### [↑](#ssfcfg--version-controlled-configuration-storage) [SSFCfgInit()](#ssfcfginit)
+
+```c
+/* Only available when SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1 */
+SSFCfgInit();
+/* SSFCfgRead() and SSFCfgWrite() are now safe to call from multiple threads */
+```
+
+<a id="ex-deinit"></a>
+
+### [↑](#ssfcfg--version-controlled-configuration-storage) [SSFCfgDeInit()](#ssfcfgdeinit)
+
+```c
+SSFCfgInit();
+/* ... use SSFCfgRead / SSFCfgWrite ... */
+SSFCfgDeInit();
+/* Module mutex released; do not call SSFCfgRead/SSFCfgWrite until SSFCfgInit() again */
+```
+
+<a id="ex-write"></a>
+
+### [↑](#ssfcfg--version-controlled-configuration-storage) [SSFCfgWrite()](#ssfcfgwrite)
+
+```c
+#define MY_CFG_ID  (0u)
+#define MY_CFG_VER (1u)
+
+uint8_t cfg[SSF_MAX_CFG_DATA_SIZE_LIMIT];
+
+/* Fill cfg with configuration data */
+cfg[0] = 0x01u;
+cfg[1] = 0x02u;
+
+if (SSFCfgWrite(cfg, 2u, MY_CFG_ID, MY_CFG_VER))
 {
-    /* Successfully read version 1 of my config data, myConfigDataLen is actual config data len */
-    ...
+    /* Data written and verified in NV storage */
 }
-if (SSFCfgRead(myConfigData, &myConfigDataLen, sizeof(myConfigData), MY_CONFIG_ID) == MY_CONFIG_VER_2)
+
+/* Redundant write of identical data — erase/write cycle is suppressed */
+if (SSFCfgWrite(cfg, 2u, MY_CFG_ID, MY_CFG_VER))
 {
-    /* Successfully read version 2 of my config data, myConfigDataLen is actual config data len */
-    ...
+    /* Returns true; NV storage unchanged (content already matched) */
+}
+```
+
+<a id="ex-read"></a>
+
+### [↑](#ssfcfg--version-controlled-configuration-storage) [SSFCfgRead()](#ssfcfgread)
+
+```c
+#define MY_CFG_ID    (0u)
+#define MY_CFG_VER_1 (1u)
+#define MY_CFG_VER_2 (2u)
+
+uint8_t       cfg[SSF_MAX_CFG_DATA_SIZE_LIMIT];
+uint16_t      cfgLen;
+dataVersion_t ver;
+
+ver = SSFCfgRead(cfg, &cfgLen, sizeof(cfg), MY_CFG_ID);
+
+if (ver == MY_CFG_VER_2)
+{
+    /* Latest version found; cfgLen is the number of bytes read */
+}
+else if (ver == MY_CFG_VER_1)
+{
+    /* Older version found — migrate to V2 and persist */
+    /* ... update cfg fields for V2 ... */
+    SSFCfgWrite(cfg, cfgLen, MY_CFG_ID, MY_CFG_VER_2);
 }
 else
 {
-    /* Set my config to defaults */
-    memset(myConfigData, 0, sizeof(myConfigData));
-    SSFCfgWrite(myConfigData, 5, MY_CONFIG_ID, MY_CONFIG_VER_2);
+    /* SSF_CFG_DATA_VERSION_INVALID: no valid data found — apply defaults and persist */
+    memset(cfg, 0, sizeof(cfg));
+    SSFCfgWrite(cfg, sizeof(cfg), MY_CFG_ID, MY_CFG_VER_2);
 }
 ```

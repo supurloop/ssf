@@ -48,7 +48,6 @@ All options are set in `ssfoptions.h`.
 | `SSF_JSON_CONFIG_MAX_IN_LEN` | `2047` | Maximum JSON string length accepted by the parser in bytes |
 | `SSF_JSON_CONFIG_ENABLE_FLOAT_PARSE` | `0` | `1` to compile `SSFJsonGetDouble()`; `0` to omit floating-point parsing |
 | `SSF_JSON_CONFIG_ENABLE_FLOAT_GEN` | `1` | `1` to compile `SSFJsonPrintDouble()`; `0` to omit floating-point generation |
-| `SSF_JSON_CONFIG_ENABLE_UPDATE` | `1` | `1` to compile `SSFJsonUpdate()`; `0` to omit in-place field update |
 
 <a id="api-summary"></a>
 
@@ -84,7 +83,6 @@ All options are set in `ssfoptions.h`.
 | [e.g.](#ex-printtrue) | [`bool SSFJsonPrintTrue(js, size, start, end, comma)` / `bool SSFJsonPrintFalse(...)` / `bool SSFJsonPrintNull(...)`](#ssfjsonprinttrue) | Append JSON literal `true`, `false`, or `null` |
 | [e.g.](#ex-printhex) | [`bool SSFJsonPrintHex(js, size, start, end, in, inLen, rev, comma)`](#ssfjsonprinthex) | Append binary data as a hex-encoded string value |
 | [e.g.](#ex-printbase64) | [`bool SSFJsonPrintBase64(js, size, start, end, in, inLen, comma)`](#ssfjsonprintbase64) | Append binary data as a Base64-encoded string value |
-| [e.g.](#ex-update) | [`bool SSFJsonUpdate(js, size, path, fn)`](#ssfjsonupdate) | Update or insert a field in place (requires `SSF_JSON_CONFIG_ENABLE_UPDATE == 1`) |
 
 <a id="function-reference"></a>
 
@@ -818,52 +816,3 @@ if (SSFJsonPrintObject(out, sizeof(out), 0, &end, PrintFn, NULL, NULL))
 
 ### [↑](#ssfjson--json-parsergenerator) [`bool SSFJsonUpdate()`](#functions)
 
-```c
-/* Requires SSF_JSON_CONFIG_ENABLE_UPDATE == 1 */
-bool SSFJsonUpdate(SSFCStrOut_t js, size_t size, SSFCStrIn_t *path, SSFJsonPrintFn_t fn);
-```
-
-Updates the value at `path` in an existing JSON string in-place. If the path exists the current
-value is replaced by invoking `fn`; if the path does not exist a new key/value pair is inserted.
-Requires `SSF_JSON_CONFIG_ENABLE_UPDATE == 1`.
-
-| Parameter | Direction | Type | Description |
-|-----------|-----------|------|-------------|
-| `js` | in-out | `char *` | JSON string to modify in-place. Must not be `NULL`. Must have `size > strlen(js) + 1` bytes allocated. |
-| `size` | in | `size_t` | Total allocated size of `js`. Must be `> strlen(js) + 1`. |
-| `path` | in | `const char **` | Zero-terminated path array identifying the field to update or insert. Must not be `NULL`. |
-| `fn` | in | [`SSFJsonPrintFn_t`](#ssfjsonprintfn-t) | Callback that writes the new value into the buffer. Must not be `NULL`. |
-
-**Returns:** `true` if the update succeeded; `false` if the buffer is too small or `fn` returned
-`false`.
-
-<a id="ex-update"></a>
-
-```c
-/* Requires SSF_JSON_CONFIG_ENABLE_UPDATE == 1 */
-bool UpdateFn(char *js, size_t size, size_t start, size_t *end, void *in)
-{
-    return SSFJsonPrintInt(js, size, start, end, 99, NULL);
-}
-
-char jsbuf[64];
-
-/* Start with an existing JSON object */
-strcpy(jsbuf, "{\"age\":30}");
-
-/* Update an existing field */
-memset(path, 0, sizeof(path));
-path[0] = "age";
-if (SSFJsonUpdate(jsbuf, sizeof(jsbuf), (SSFCStrIn_t *)path, UpdateFn))
-{
-    /* jsbuf == "{\"age\":99}" */
-}
-
-/* Insert a new field */
-memset(path, 0, sizeof(path));
-path[0] = "score";
-if (SSFJsonUpdate(jsbuf, sizeof(jsbuf), (SSFCStrIn_t *)path, UpdateFn))
-{
-    /* jsbuf == "{\"age\":99,\"score\":99}" */
-}
-```

@@ -138,9 +138,6 @@ bool SSFJsonPrintCString(SSFCStrOut_t js, size_t size, size_t start, size_t *end
                          bool *comma);
 bool SSFJsonPrint(SSFCStrOut_t js, size_t size, size_t start, size_t *end, SSFJsonPrintFn_t fn,
                   void *in, const char *oc, bool *comma);
-#if SSF_JSON_CONFIG_ENABLE_UPDATE == 1
-bool SSFJsonUpdate(SSFCStrOut_t js, size_t size, SSFCStrIn_t *path, SSFJsonPrintFn_t fn);
-#endif /* SSF_JSON_CONFIG_ENABLE_UPDATE */
 
 /* --------------------------------------------------------------------------------------------- */
 /* Unit test                                                                                     */

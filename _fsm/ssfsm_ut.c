@@ -440,6 +440,57 @@ void UT3TestHandler2(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t
     }
 }
 
+#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
+/* --------------------------------------------------------------------------------------------- */
+/* State machine 4 test handler 2.                                                               */
+/* --------------------------------------------------------------------------------------------- */
+void UT4TestHandler2(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen,
+                     SSFVoidFn_t *superHandler)
+{
+    SSF_UNUSED(data);
+    SSF_UNUSED(&dataLen);
+    SSF_UNUSED(superHandler);
+
+    switch (eid)
+    {
+    case SSF_SM_EVENT_ENTRY:
+        break;
+    case SSF_SM_EVENT_EXIT:
+        break;
+    case SSF_SM_EVENT_STATE_TIMER_UT4:
+        SSF_ERROR();
+        break;
+    default:
+        break;
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* State machine 4 test handler 1.                                                               */
+/* --------------------------------------------------------------------------------------------- */
+void UT4TestHandler1(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen,
+                     SSFVoidFn_t *superHandler)
+{
+    SSF_UNUSED(data);
+    SSF_UNUSED(&dataLen);
+    SSF_UNUSED(superHandler);
+
+    switch (eid)
+    {
+    case SSF_SM_EVENT_ENTRY:
+        SSFSMStartTimer(SSF_SM_EVENT_STATE_TIMER_UT4, 100);
+        break;
+    case SSF_SM_EVENT_EXIT:
+        break;
+    case SSF_SM_EVENT_ABORT_UT4:
+        SSFSMTran(UT4TestHandler2);
+        break;
+    default:
+        break;
+    }
+}
+#endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1 */
+
 /* --------------------------------------------------------------------------------------------- */
 /* Performs unit test on ssfll's external interface.                                             */
 /* --------------------------------------------------------------------------------------------- */
@@ -767,6 +818,14 @@ void SSFSMUnitTest(void)
     SSF_ASSERT(_utTraceIndex == 2);
     SSF_ASSERT(_utTrace[0] == 2);
     SSF_ASSERT(_utTrace[1] == 1);
+
+#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
+    SSFSMInitHandler(SSF_SM_UNIT_TEST_4, UT4TestHandler1);
+    SSFSMPutEvent(SSF_SM_UNIT_TEST_4, SSF_SM_EVENT_ABORT_UT4);
+    nextTimeout = SSFPortGetTick64() + (SSF_TICKS_PER_SEC >> 2);
+    while (nextTimeout > SSFPortGetTick64());
+    while (SSFSMTask(NULL));
+#endif
 
     /* End test */
     SSFSMDeInit();

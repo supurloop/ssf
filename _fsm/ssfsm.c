@@ -537,20 +537,8 @@ bool SSFSMTask(SSFSMTimeout_t *nextTimeout)
     SSF_SM_THREAD_SYNC_ACQUIRE();
 #endif
 
-    /* Process timers. */
-    item = SSF_LL_HEAD(&_ssfsmTimers);
-    while (item != NULL)
-    {
-        next =  SSF_LL_NEXT_ITEM(item);
-        memcpy(&t, item, sizeof(t));  /* Ensure alignment */
-        if (t.to > current) { item = next; continue; }
-        SSFLLGetItem(&_ssfsmTimers, &item, SSF_LL_LOC_ITEM, item);
-        SSF_LL_FIFO_PUSH(&_ssfsmEvents, (SSFLLItem_t *)t.event);
-        SSFMPoolFree(&_ssfsmTimerPool, item);
-        item = next;
-    }
-
     /* Process all pending events. */
+processEvents:
     while (SSF_LL_FIFO_POP(&_ssfsmEvents, &item) == true)
     {
         memcpy(&e, item, sizeof(e)); /* Ensure alignment */
@@ -560,6 +548,20 @@ bool SSFSMTask(SSFSMTimeout_t *nextTimeout)
         if ((e.data != NULL) && (e.dataLen > sizeof(SSFSMData_t *)))
         { _SSFSMFreeEventData(e.data); }
         SSFMPoolFree(&_ssfsmEventPool, item);
+    }
+
+    /* Process timers. */
+    item = SSF_LL_HEAD(&_ssfsmTimers);
+    while (item != NULL)
+    {
+        next = SSF_LL_NEXT_ITEM(item);
+        memcpy(&t, item, sizeof(t));  /* Ensure alignment */
+        if (t.to > current) { item = next; continue; }
+        SSFLLGetItem(&_ssfsmTimers, &item, SSF_LL_LOC_ITEM, item);
+        SSF_LL_FIFO_PUSH(&_ssfsmEvents, (SSFLLItem_t*)t.event);
+        SSFMPoolFree(&_ssfsmTimerPool, item);
+        item = next;
+        goto processEvents;
     }
 
     /* If necessary determine next timer expiration */

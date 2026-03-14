@@ -10,7 +10,7 @@ automatically on state transitions triggered by `SSFSMTran()`. Timers post event
 configurable delay. One level of state hierarchy is supported: a child handler names its parent
 with `SSF_SM_SUPER()` in its `default` case, and unhandled events are forwarded automatically.
 
-[Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference)
+[Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference) | [Detailed Example](#detailed-example)
 
 <a id="dependencies"></a>
 
@@ -675,4 +675,207 @@ static void IdleHandler(SSFSMEventId_t eid, const SSFSMData_t *data,
         break;
     }
 }
+
+<a id="detailed-example"></a>
+
+## [↑](#ssfsm--finite-state-machine-framework) Detailed Example
+
+This example builds a two-state LED blinker from scratch. The RED state blinks a RED LED at
+1 Hz; the GREEN state blinks a GREEN LED at 2 Hz. A `GOOD` event moves the machine from RED
+to GREEN, and a `BAD` event moves it back. The system starts in the RED state.
+
+### Configuration (`ssfoptions.h`)
+
+Two enumerations are required. `SSFSMList_t` names every state machine instance in the system
+— here just one, `SSF_SM_LED`. `SSFSMEventList_t` declares every event. The first three
+entries (`ENTRY`, `EXIT`, `SUPER`) are mandatory framework events; the three that follow are
+application-defined:
+
+- `SSF_SM_EVENT_BLINK_TIMER` — the periodic half-period tick used by both states to drive the
+  LED toggle
+- `SSF_SM_EVENT_GOOD` — posted from outside the state machine to trigger the RED → GREEN
+  transition
+- `SSF_SM_EVENT_BAD` — posted from outside to trigger the GREEN → RED transition
+
+```c
+typedef enum
+{
+    SSF_SM_MIN = -1,
+    SSF_SM_LED,          /* single LED blinker instance */
+    SSF_SM_MAX
+} SSFSMList_t;
+
+typedef enum
+{
+    SSF_SM_EVENT_MIN = -1,
+    SSF_SM_EVENT_ENTRY,          /* required: delivered on state entry */
+    SSF_SM_EVENT_EXIT,           /* required: delivered on state exit */
+    SSF_SM_EVENT_SUPER,          /* required: used internally for hierarchy */
+    SSF_SM_EVENT_BLINK_TIMER,    /* half-period tick; drives LED toggle */
+    SSF_SM_EVENT_GOOD,           /* external trigger: RED -> GREEN */
+    SSF_SM_EVENT_BAD,            /* external trigger: GREEN -> RED */
+    SSF_SM_EVENT_MAX
+} SSFSMEventList_t;
+```
+
+### State Handlers
+
+Each state is a plain C function with the `SSFSMHandler_t` signature. The framework calls it
+with the current event ID; the `switch` dispatches to the appropriate case.
+
+A 1 Hz blink toggles every 500 ms (one half-period). A 2 Hz blink toggles every 250 ms. Both
+states reuse `SSF_SM_EVENT_BLINK_TIMER` — this is safe because `SSFSMTran()` automatically
+cancels all running timers before the EXIT/ENTRY sequence, so a timer from the departing state
+can never fire in the arriving state.
+
+```c
+/* ledblink.c */
+#include "ssf.h"
+
+/* Half-periods for each blink rate (assumes SSF_TICKS_PER_SEC == 1000):
+ *   1 Hz  ->  500 ms half-period  (RED)
+ *   2 Hz  ->  250 ms half-period  (GREEN)                                */
+#define RED_HALF_PERIOD_TICKS   (SSF_TICKS_PER_SEC / 2u)
+#define GREEN_HALF_PERIOD_TICKS (SSF_TICKS_PER_SEC / 4u)
+
+/* Forward declarations so each handler can name the other as a transition target */
+static void BlinkRedHandler(SSFSMEventId_t eid, const SSFSMData_t *data,
+                            SSFSMDataLen_t dataLen, SSFVoidFn_t *superHandler);
+static void BlinkGreenHandler(SSFSMEventId_t eid, const SSFSMData_t *data,
+                              SSFSMDataLen_t dataLen, SSFVoidFn_t *superHandler);
+
+/* ── RED state: blinks RED LED at 1 Hz ─────────────────────────────── */
+static void BlinkRedHandler(SSFSMEventId_t eid, const SSFSMData_t *data,
+                            SSFSMDataLen_t dataLen, SSFVoidFn_t *superHandler)
+{
+    switch (eid)
+    {
+    case SSF_SM_EVENT_ENTRY:
+        /* State just became active. Turn the RED LED on and arm the half-period
+           timer. The first BLINK_TIMER event will arrive in 500 ms, toggling the
+           LED off, giving a symmetric 1 Hz square wave. */
+        HalRedLedOn();
+        SSFSMStartTimer(SSF_SM_EVENT_BLINK_TIMER, RED_HALF_PERIOD_TICKS);
+        break;
+    case SSF_SM_EVENT_EXIT:
+        /* State is leaving. Extinguish the LED so the hardware is dark during
+           the transition; the arriving state's ENTRY will control it from there. */
+        HalRedLedOff();
+        break;
+    case SSF_SM_EVENT_BLINK_TIMER:
+        /* Half-period elapsed: toggle the LED and immediately re-arm the timer
+           for the next half-period. Repeats indefinitely at 1 Hz. */
+        HalRedLedToggle();
+        SSFSMStartTimer(SSF_SM_EVENT_BLINK_TIMER, RED_HALF_PERIOD_TICKS);
+        break;
+    case SSF_SM_EVENT_GOOD:
+        /* External caller signals a GOOD condition. SSFSMTran() fires
+           SSF_SM_EVENT_EXIT here then SSF_SM_EVENT_ENTRY in BlinkGreenHandler. */
+        SSFSMTran(BlinkGreenHandler);
+        break;
+    default:
+        break;
+    }
+}
+
+/* ── GREEN state: blinks GREEN LED at 2 Hz ──────────────────────────── */
+static void BlinkGreenHandler(SSFSMEventId_t eid, const SSFSMData_t *data,
+                              SSFSMDataLen_t dataLen, SSFVoidFn_t *superHandler)
+{
+    switch (eid)
+    {
+    case SSF_SM_EVENT_ENTRY:
+        /* Turn the GREEN LED on and arm the 250 ms half-period timer for 2 Hz. */
+        HalGreenLedOn();
+        SSFSMStartTimer(SSF_SM_EVENT_BLINK_TIMER, GREEN_HALF_PERIOD_TICKS);
+        break;
+    case SSF_SM_EVENT_EXIT:
+        /* Extinguish the GREEN LED on departure. */
+        HalGreenLedOff();
+        break;
+    case SSF_SM_EVENT_BLINK_TIMER:
+        /* Toggle and re-arm for a continuous 2 Hz square wave. */
+        HalGreenLedToggle();
+        SSFSMStartTimer(SSF_SM_EVENT_BLINK_TIMER, GREEN_HALF_PERIOD_TICKS);
+        break;
+    case SSF_SM_EVENT_BAD:
+        /* External caller signals a BAD condition: return to the RED state. */
+        SSFSMTran(BlinkRedHandler);
+        break;
+    default:
+        break;
+    }
+}
+```
+
+### Initialization and Run Loop
+
+```c
+void LedBlinkInit(void)
+{
+    /* Initialize the framework with the pool sizes declared in ssfoptions.h. */
+    SSFSMInit(SSF_SM_MAX_ACTIVE_EVENTS, SSF_SM_MAX_ACTIVE_TIMERS);
+
+    /* Register the LED state machine. SSFSMInitHandler() delivers
+       SSF_SM_EVENT_ENTRY to BlinkRedHandler immediately before returning,
+       so the RED LED is already on and the first timer is already armed
+       by the time this function returns. */
+    SSFSMInitHandler(SSF_SM_LED, BlinkRedHandler);
+}
+
+/* Single-threaded superloop — call from main() after LedBlinkInit() */
+void LedBlinkRun(void)
+{
+    while (true)
+    {
+        SSFSMTask(NULL);
+    }
+}
+```
+
+`SSFSMTask()` checks the event queue and fires any expired timers on every call. In a
+single-threaded build it can be called as fast as the loop allows; the framework only invokes
+a handler when there is actually something to deliver.
+
+### Triggering Transitions
+
+From anywhere in the application — a button ISR, a network callback, or another state
+machine — posting one of the external events causes the next `SSFSMTask()` call to deliver it:
+
+```c
+/* Signal a GOOD condition; the machine will leave the RED state on the next task call */
+SSFSMPutEvent(SSF_SM_LED, SSF_SM_EVENT_GOOD);
+
+/* Signal a BAD condition; the machine will leave the GREEN state on the next task call */
+SSFSMPutEvent(SSF_SM_LED, SSF_SM_EVENT_BAD);
+```
+
+`SSFSMPutEvent()` only enqueues the event — it does not invoke the handler directly. The
+actual transition, including the EXIT and ENTRY calls, happens inside the next `SSFSMTask()`
+invocation. When `SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1`, `SSFSMPutEvent()` is safe to call
+from any execution context, including interrupt service routines.
+
+### Event Sequence Walkthrough
+
+The table below traces every framework action from power-on through one complete
+RED → GREEN → RED cycle. Steps 2–3 and 7–8 repeat at their respective rates until an
+external event arrives.
+
+| Step | Event delivered | Handler | Action |
+|------|----------------|---------|--------|
+| 1 | `SSF_SM_EVENT_ENTRY` | `BlinkRedHandler` | RED LED on; 500 ms timer started |
+| 2 | `SSF_SM_EVENT_BLINK_TIMER` | `BlinkRedHandler` | RED LED off; 500 ms timer restarted |
+| 3 | `SSF_SM_EVENT_BLINK_TIMER` | `BlinkRedHandler` | RED LED on; 500 ms timer restarted |
+| 4 | `SSF_SM_EVENT_GOOD` (external) | `BlinkRedHandler` | `SSFSMTran(BlinkGreenHandler)` called |
+| 5 | `SSF_SM_EVENT_EXIT` | `BlinkRedHandler` | RED LED off; all timers stopped |
+| 6 | `SSF_SM_EVENT_ENTRY` | `BlinkGreenHandler` | GREEN LED on; 250 ms timer started |
+| 7 | `SSF_SM_EVENT_BLINK_TIMER` | `BlinkGreenHandler` | GREEN LED off; 250 ms timer restarted |
+| 8 | `SSF_SM_EVENT_BLINK_TIMER` | `BlinkGreenHandler` | GREEN LED on; 250 ms timer restarted |
+| 9 | `SSF_SM_EVENT_BAD` (external) | `BlinkGreenHandler` | `SSFSMTran(BlinkRedHandler)` called |
+| 10 | `SSF_SM_EVENT_EXIT` | `BlinkGreenHandler` | GREEN LED off; all timers stopped |
+| 11 | `SSF_SM_EVENT_ENTRY` | `BlinkRedHandler` | RED LED on; 500 ms timer started |
+
+The EXIT step always fires before ENTRY, ensuring neither LED is ever on simultaneously
+during a transition and that the departing state's blink timer is always cancelled before
+the arriving state starts its own.
 ```

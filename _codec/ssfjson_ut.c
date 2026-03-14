@@ -421,38 +421,6 @@ bool p3fn(char *js, size_t size, size_t start, size_t *end, void *in)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Printer function.                                                                             */
-/* --------------------------------------------------------------------------------------------- */
-bool p4fn(char *js, size_t size, size_t start, size_t *end, void *in)
-{
-    SSF_UNUSED(in);
-    if (!SSFJsonPrintString(js, size, start, &start, "mynewvalue", NULL)) return false;
-    *end = start;
-    return true;
-}
-
-    #if SSF_JSON_CONFIG_ENABLE_UPDATE == 1
-/* --------------------------------------------------------------------------------------------- */
-/* Printer function.                                                                             */
-/* --------------------------------------------------------------------------------------------- */
-void SSFJsonUnitTestUpdate(char *out, size_t outSize, char *path0, char *path1, char *path2,
-                           const char *initial, const char *expected)
-{
-    char *path[SSF_JSON_CONFIG_MAX_IN_DEPTH + 1];
-
-    memset(out, 0xff, outSize);
-    memcpy(out, initial, SSF_MIN(outSize, strlen(initial) + 1));
-    memset(path, 0, sizeof(path));
-    path[0] = path0;
-    path[1] = path1;
-    path[2] = path2;
-    SSF_ASSERT(SSFJsonUpdate(out, outSize, (SSFCStrIn_t *)path, p4fn) == true);
-    SSF_ASSERT(SSFJsonIsValid(out) == true);
-    if (expected != NULL) SSF_ASSERT(strncmp(out, expected, outSize) == 0);
-}
-    #endif /* SSF_JSON_CONFIG_ENABLE_UPDATE */
-
-/* --------------------------------------------------------------------------------------------- */
 /* Performs unit test on ssfjson's external interface.                                           */
 /* --------------------------------------------------------------------------------------------- */
 void SSFJsonUnitTest(void)
@@ -1239,48 +1207,6 @@ void SSFJsonUnitTest(void)
     path[0] = "a";
     path[1] = "b\"";
     SSF_ASSERT(SSFJsonGetType("{\"a\":{\"b\":2}}", (SSFCStrIn_t *)path) == SSF_JSON_TYPE_ERROR);
-
-#if SSF_JSON_CONFIG_ENABLE_UPDATE == 1
-    SSFJsonUnitTestUpdate(_jsOut, sizeof(_jsOut), "l1", NULL, NULL,
-                          "{}",
-                          "{\"l1\":\"mynewvalue\"}");
-    SSFJsonUnitTestUpdate(_jsOut, sizeof(_jsOut), "l1", NULL, NULL,
-                          "{\"l1\":{\"l2\":123}}",
-                          "{\"l1\":\"mynewvalue\"}");
-    SSFJsonUnitTestUpdate(_jsOut, sizeof(_jsOut), "l1", NULL, NULL,
-                          "{\"l2\":123}",
-                          "{\"l1\":\"mynewvalue\",\"l2\":123}");
-    SSFJsonUnitTestUpdate(_jsOut, sizeof(_jsOut), "l1", "l2", NULL,
-                          "{\"l1\":{\"l2\":\"old\"}}",
-                          "{\"l1\":{\"l2\":\"mynewvalue\"}}");
-    SSFJsonUnitTestUpdate(_jsOut, sizeof(_jsOut), "l1", "l2", NULL,
-                          "{\"l1\":{\"l2\":\"oldvalueislongerthannew\"}}",
-                          "{\"l1\":{\"l2\":\"mynewvalue\"}}");
-    SSFJsonUnitTestUpdate(_jsOut, sizeof(_jsOut), "l1", "l2", NULL,
-                          "{\"l1\":{\"l2a\":\"notreplaced\"}}",
-                          "{\"l1\":{\"l2\":\"mynewvalue\",\"l2a\":\"notreplaced\"}}");
-    SSFJsonUnitTestUpdate(_jsOut, sizeof(_jsOut), "l1", "l2", NULL,
-                          "{\"l1a\":{\"l2a\":\"notreplaced\"}}",
-                          "{\"l1\":{\"l2\":\"mynewvalue\"},\"l1a\":{\"l2a\":\"notreplaced\"}}");
-    SSFJsonUnitTestUpdate(_jsOut, sizeof(_jsOut), "l1", "l2", NULL,
-                          "{\"l1\":{\"l2a\":123,\"l2\":{\"l3\":\"replaced\"},\"l2b\":456},\"l1a\":789}",
-                          "{\"l1\":{\"l2a\":123,\"l2\":\"mynewvalue\",\"l2b\":456},\"l1a\":789}");
-    SSFJsonUnitTestUpdate(_jsOut, sizeof(_jsOut), "l1", "l2", "l3",
-                          "{\"l1\":{\"l2a\":123,\"l2\":{\"l3\":\"replaced\"},\"l2b\":456},\"l1a\":789}",
-                          "{\"l1\":{\"l2a\":123,\"l2\":{\"l3\":\"mynewvalue\"},\"l2b\":456},\"l1a\":789}");
-    SSFJsonUnitTestUpdate(_jsOut, sizeof(_jsOut), "l1", "l2", "l3",
-                          "{\"l1\":{\"l2a\":123,\"l2\":{},\"l2b\":456},\"l1a\":789}",
-                          "{\"l1\":{\"l2a\":123,\"l2\":{\"l3\":\"mynewvalue\"},\"l2b\":456},\"l1a\":789}");
-    SSFJsonUnitTestUpdate(_jsOut, sizeof(_jsOut), "l1", "l2", "l3",
-                          "{\"l1\":{\"l2a\":123,\"l2b\":456},\"l1a\":789}",
-                          "{\"l1\":{\"l2\":{\"l3\":\"mynewvalue\"},\"l2a\":123,\"l2b\":456},\"l1a\":789}");
-    SSFJsonUnitTestUpdate(_jsOut, sizeof(_jsOut), "l1", "l2", "l3",
-                          "{\"l1A\":{\"l2a\":123,\"l2b\":456},\"l1a\":789}",
-                          "{\"l1\":{\"l2\":{\"l3\":\"mynewvalue\"}},\"l1A\":{\"l2a\":123,\"l2b\":456},\"l1a\":789}");
-    SSFJsonUnitTestUpdate(_jsOut, sizeof(_jsOut), "l1", "l2", "l3", _jtsComplex[1], NULL);
-    SSFJsonUnitTestUpdate(_jsOut, sizeof(_jsOut), "obj2", "objdeep", "NUMFAR", _jtsComplex[1], NULL);
-    SSFJsonUnitTestUpdate(_jsOut, sizeof(_jsOut), "obj2", "objdeep", "hex3", _jtsComplex[1], NULL);
-#endif /* SSF_JSON_CONFIG_ENABLE_UPDATE */
 }
 #endif /* SSF_CONFIG_JSON_UNIT_TEST */
 

@@ -82,9 +82,6 @@ extern "C" {
 /* Allow generator to print floats. */
 #define SSF_JSON_CONFIG_ENABLE_FLOAT_GEN (1u)
 
-/* Enable interface that can update specific fields in a JSON string. */
-#define SSF_JSON_CONFIG_ENABLE_UPDATE (1u)
-
 /* --------------------------------------------------------------------------------------------- */
 /* Configure ssfsm's state machine interface                                                     */
 /* --------------------------------------------------------------------------------------------- */

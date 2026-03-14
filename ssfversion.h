@@ -83,7 +83,19 @@
 /*       - Made RTC interface thread safe.                                                       */
 /*       - Minor improvements to ssfjsonn interface.                                             */
 /*       - Added size constant to ssfstr interface.                                              */
+/* 0.1.3 - Fix race condition in ssfsm; expired timer events signalled to wrong state handler.   */
+/*       - Removed SSFJSONUpdate(), in future will support similar functionality via ssfgobj.    */
+/*       - Massive documentation improvements.                                                   */
+/*       - Fixed buffer overruns in ssfaesgcm and ssfrs.                                         */
+/*       - Added incremental SHA2 interfaces.                                                    */
+/*       - Fixed incorrect implementation of SSFStrStr(), expanded unit test coverage.           */
+/*       - Fixed typo in ssftlv module.                                                          */
+/*       - Fixed length check in ubjson module that would allow malformed UBJSON generation.     */
+/*       - SHA2 module now provides correct hash for data > 128GiB.                              */
+/*       - Corrected potential false path match when path strings contain JSON syntax chars.     */
+/*       - Removed unnecessary length checks in ssfbase64.                                       */
+/*       - Removed unnecessary preconditions in ssfaeggcm.                                       */
 /* --------------------------------------------------------------------------------------------- */
-#define SSF_VERSION_STR "0.1.2"
+#define SSF_VERSION_STR "0.1.3"
 
 #endif /* SSF_VERSION_H_INCLUDE */

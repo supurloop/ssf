@@ -81,7 +81,7 @@
 /* 0.1.2 - Added real-time tracking of heap current usage and minimum.                           */
 /*       - Added additional interfaces to ssfstr module.                                         */
 /*       - Made RTC interface thread safe.                                                       */
-/*       - Minor improvements to ssfjsonn interface.                                             */
+/*       - Minor improvements to ssfjson interface.                                              */
 /*       - Added size constant to ssfstr interface.                                              */
 /* 0.1.3 - Fix race condition in ssfsm; expired timer events signalled to wrong state handler.   */
 /*       - Removed SSFJSONUpdate(), in future will support similar functionality via ssfgobj.    */
@@ -95,6 +95,7 @@
 /*       - Corrected potential false path match when path strings contain JSON syntax chars.     */
 /*       - Removed unnecessary length checks in ssfbase64.                                       */
 /*       - Removed unnecessary preconditions in ssfaeggcm.                                       */
+/*       - Updated Visual Studio solution and project to Community 2026.                         */
 /* --------------------------------------------------------------------------------------------- */
 #define SSF_VERSION_STR "0.1.3"
 

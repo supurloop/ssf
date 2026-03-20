@@ -112,6 +112,7 @@ bool SSFBase64Encode(const uint8_t *in, size_t inLen, SSFCStrOut_t out, size_t o
                      size_t *outLen)
 {
     SSF_REQUIRE(in != NULL);
+    SSF_REQUIRE(outSize > 0);
     SSF_REQUIRE(out != NULL);
 
     if (outLen != NULL) *outLen = 0;
@@ -125,7 +126,8 @@ bool SSFBase64Encode(const uint8_t *in, size_t inLen, SSFCStrOut_t out, size_t o
         outSize -= 4;
         if (outLen != NULL) *outLen += 4;
     }
-    if (outSize > 0) *out = 0;
+    SSF_ASSERT(outSize > 0);
+    *out = 0;
     return inLen == 0;
 }
 
@@ -143,7 +145,7 @@ bool SSFBase64Decode(SSFCStrIn_t in, size_t inLenLim, uint8_t *out, size_t outSi
 
     if ((inLenLim & 0x03) != 0) return false;
     *outLen = 0;
-    while (inLenLim >= 4)
+    while ((inLenLim >= 4) && (outSize >= 3))
     {
         if ((len = SSFBase64Dec32To24(in, out, outSize)) == 0) return false;
         inLenLim -= 4;

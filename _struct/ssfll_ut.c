@@ -359,6 +359,12 @@ void SSFLLUnitTest(void)
     SSF_ASSERT(SSF_LL_HEAD(&_sllTest) == (SSFLLItem_t *)&_sllItems[1]);
     SSF_ASSERT(SSF_LL_TAIL(&_sllTest) == (SSFLLItem_t *)&_sllItems[0]);
 
+    /* After inserting items[2] after items[1] in list [1, 0], list is [1, 2, 0].         */
+    /* Verify successor's prev pointer was updated: items[0]->prev must be items[2].       */
+    SSF_ASSERT(_sllItems[1].item.next == (SSFLLItem_t *)&_sllItems[2]);
+    SSF_ASSERT(_sllItems[2].item.next == (SSFLLItem_t *)&_sllItems[0]);
+    SSF_ASSERT(_sllItems[0].item.prev == (SSFLLItem_t *)&_sllItems[2]);
+
     SSF_ASSERT(SSFLLGetItem(&_sllTest, (SSFLLItem_t **)&outItem, SSF_LL_LOC_ITEM,
                             (SSFLLItem_t *)&_sllItems[1]) == true);
     SSF_ASSERT(outItem == &_sllItems[1]);

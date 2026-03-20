@@ -51,6 +51,8 @@
 #define SSF_JSON_COMMA(c) do { \
     if (((c) && (*c)) && (!_SSFJsonPrintUnescChar(js, size, start, &start, ','))) return false; \
     if (c) *c = true; } while (0);
+#define SSF_JSON_ADD_ESC(e) out[index] = e; start++; len--; index++; \
+                            if (outLen != NULL) (*outLen)++; continue;
 
 /* --------------------------------------------------------------------------------------------- */
 /* Local prototypes                                                                              */
@@ -383,6 +385,7 @@ bool SSFJsonGetString(SSFCStrIn_t js, SSFCStrIn_t *path, char *out, size_t outSi
     SSF_REQUIRE(path != NULL);
     SSF_REQUIRE(path[SSF_JSON_CONFIG_MAX_IN_DEPTH] == NULL);
     SSF_REQUIRE(out != NULL);
+    SSF_REQUIRE(outSize > 0);
 
     if (!SSFJsonMessage(js, &index, &start, &end, path, 0, &jt)) return false;
     if (jt != SSF_JSON_TYPE_STRING) return false;
@@ -400,12 +403,12 @@ bool SSFJsonGetString(SSFCStrIn_t js, SSFCStrIn_t *path, char *out, size_t outSi
             if (len == 0) return false;
             /* Potential escape sequence */
             if (js[start] == '"' || js[start] == '\\' || js[start] == '/')
-            {out[index] = js[start]; }
-            else if (js[start] == 'n') out[index] = '\x0a';
-            else if (js[start] == 'r') out[index] = '\x0d';
-            else if (js[start] == 't') out[index] = '\x09';
-            else if (js[start] == 'f') out[index] = '\x0c';
-            else if (js[start] == 'b') out[index] = '\x08';
+            { SSF_JSON_ADD_ESC(js[start]) }
+            else if (js[start] == 'n') { SSF_JSON_ADD_ESC('\x0a') }
+            else if (js[start] == 'r') { SSF_JSON_ADD_ESC('\x0d') }
+            else if (js[start] == 't') { SSF_JSON_ADD_ESC('\x09') }
+            else if (js[start] == 'f') { SSF_JSON_ADD_ESC('\x0c') }
+            else if (js[start] == 'b') { SSF_JSON_ADD_ESC('\x08') }
             else if (js[start] != 'u') return false;
 
             if (outLen != NULL) (*outLen)++;

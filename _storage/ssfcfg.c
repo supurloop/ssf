@@ -60,7 +60,7 @@ SSF_CFG_TYPEDEF_STRUCT SSFCfgHeader
 /* Virtual NV Storage in RAM                                                                     */
 /* --------------------------------------------------------------------------------------------- */
 #if SSF_CFG_ENABLE_STORAGE_RAM == 1
-uint8_t _ssfCfgStorageRAM[SSF_MAX_CFG_RAM_SECTORS][SSF_MAX_CFG_RAM_SECTOR_SIZE];
+uint8_t _ssfCfgStorageRAM[SSF_MAX_CFG_RAM_SECTORS][SSF_CFG_MAX_STORAGE_SIZE];
 #endif
 
 #if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
@@ -106,6 +106,7 @@ bool SSFCfgWrite(uint8_t *data, uint16_t dataLen, dataId_t dataId, dataVersion_t
 
     SSF_REQUIRE(data != NULL);
     SSF_REQUIRE(dataLen <= SSF_MAX_CFG_DATA_SIZE);
+    SSF_REQUIRE(dataId < SSF_MAX_CFG_RAM_SECTORS);
     SSF_REQUIRE(dataVersion >= 0);
 
 #if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
@@ -174,6 +175,7 @@ dataVersion_t SSFCfgRead(uint8_t *data, uint16_t *dataLen, size_t dataSize, data
 
     SSF_REQUIRE(data != NULL);
     SSF_REQUIRE(dataLen != NULL);
+    SSF_REQUIRE(dataId < SSF_MAX_CFG_RAM_SECTORS);
 
 #if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
     SSF_ASSERT(_ssfcfgIsInited);

@@ -529,6 +529,7 @@ bool SSFUBJsonGetString(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, SSFCStrOut
     SSF_REQUIRE(js != NULL);
     SSF_REQUIRE(path != NULL);
     SSF_REQUIRE(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH] == NULL);
+    SSF_REQUIRE(outSize > 0);
     SSF_REQUIRE(out != NULL);
 
     if (!_SSFUBJsonMessage(js, jsLen, &index, &start, &end, path, 0, &jt))

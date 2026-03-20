@@ -163,6 +163,8 @@ void SSFBase64UnitTest(void)
         SSF_ASSERT(outLen == _b64StringUT[i].unencodedLen);
         SSF_ASSERT(memcmp(_b64StringUT[i].unencoded, decodedBigBin, outLen) == 0);
     }
+    SSF_ASSERT_TEST(SSFBase64Encode((uint8_t *)"abc", 0, encodedStr, 0, &outLen) == false);
+    SSF_ASSERT(SSFBase64Decode("abcd", 4, decodedBin, 2, &outLen) == false);
 }
 #endif /* SSF_CONFIG_BASE64_UNIT_TEST */
 

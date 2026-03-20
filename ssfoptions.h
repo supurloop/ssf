@@ -282,7 +282,6 @@ typedef enum
 /* --------------------------------------------------------------------------------------------- */
 #define SSF_CFG_TYPEDEF_STRUCT typedef struct /* Optionally add packed struct attribute here */
 #define SSF_CFG_MAX_STORAGE_SIZE (4096u) /* Max size of erasable NV storage sector */
-#define SSF_MAX_CFG_DATA_SIZE_LIMIT (32u) /* Max size of data */
 #define SSF_CFG_WRITE_CHECK_CHUNK_SIZE (32u) /* Max size of tmp stack buffer for write checking */
 
 /* 1 to use RAM as storage, 0 to specify another storage interface */
@@ -293,9 +292,8 @@ typedef enum
 #define SSF_CFG_READ_STORAGE(data, dataSize, dataId, dataOffset)
 #else
 #define SSF_MAX_CFG_RAM_SECTORS (3u)
-#define SSF_MAX_CFG_RAM_SECTOR_SIZE (SSF_MAX_CFG_DATA_SIZE_LIMIT + 32u)
 #define SSF_CFG_ERASE_STORAGE(dataId) { \
-    memset(&_ssfCfgStorageRAM[dataId], 0xff, SSF_MAX_CFG_RAM_SECTOR_SIZE); \
+    memset(&_ssfCfgStorageRAM[dataId], 0xff, SSF_CFG_MAX_STORAGE_SIZE); \
 }
 #define SSF_CFG_WRITE_STORAGE(data, dataLen, dataId, dataOffset) { \
     memcpy(&_ssfCfgStorageRAM[dataId][dataOffset], data, dataLen); \

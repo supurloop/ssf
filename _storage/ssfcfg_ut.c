@@ -37,7 +37,7 @@
 #include "ssfcrc16.h"
 
 #if SSF_CFG_ENABLE_STORAGE_RAM == 1
-extern uint8_t _ssfCfgStorageRAM[SSF_MAX_CFG_RAM_SECTORS][SSF_MAX_CFG_DATA_SIZE_LIMIT];
+extern uint8_t _ssfCfgStorageRAM[SSF_MAX_CFG_RAM_SECTORS][SSF_CFG_MAX_STORAGE_SIZE];
 #else
 #error ssfcfg_ut.c requires that SSF_CFG_ENABLE_STORAGE_RAM set to 1.
 #endif
@@ -51,8 +51,8 @@ extern uint8_t _ssfCfgStorageRAM[SSF_MAX_CFG_RAM_SECTORS][SSF_MAX_CFG_DATA_SIZE_
 /* --------------------------------------------------------------------------------------------- */
 void SSFCfgUnitTest(void)
 {
-    uint8_t data1[SSF_MAX_CFG_DATA_SIZE_LIMIT];
-    uint8_t data2[SSF_MAX_CFG_DATA_SIZE_LIMIT];
+    uint8_t data1[32];
+    uint8_t data2[32];
     uint16_t data1Len;
     uint16_t data2Len;
 

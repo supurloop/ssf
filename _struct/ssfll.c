@@ -114,7 +114,14 @@ void SSFLLPutItem(SSFLL_t *ll, SSFLLItem_t *inItem, SSF_LL_LOC_t loc, SSFLLItem_
         inItem->next = locItem->next;
         locItem->next = inItem;
         inItem->prev = locItem;
-        if (inItem->next == NULL) ll->tail = inItem;
+        if (inItem->next == NULL)
+        {
+            ll->tail = inItem;
+        }
+        else
+        {
+            inItem->next->prev = inItem;
+        }
     }
     inItem->ll = ll;
     ll->items++;

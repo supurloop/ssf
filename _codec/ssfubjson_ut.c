@@ -1021,6 +1021,9 @@ void SSFUBJsonUnitTest(void)
     outStrLen = sizeof(outStr) + 1;
     SSF_ASSERT(SSFUBJsonGetString((uint8_t *)"{i\x01sSi\x05world}", 13, (SSFCStrIn_t *)path, outStr, sizeof(outStr),
                                   &outStrLen));
+    SSF_ASSERT_TEST(SSFUBJsonGetString((uint8_t*)"{i\x01sSi\x05world}", 13, (SSFCStrIn_t*)path, outStr, 0,
+                                       &outStrLen) == false);
+
     SSF_ASSERT(outStrLen == 5);
     SSF_ASSERT(memcmp(outStr, "world", outStrLen) == 0);
     SSF_ASSERT(outStr[outStrLen] == 0);

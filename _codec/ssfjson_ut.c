@@ -1207,6 +1207,24 @@ void SSFJsonUnitTest(void)
     path[0] = "a";
     path[1] = "b\"";
     SSF_ASSERT(SSFJsonGetType("{\"a\":{\"b\":2}}", (SSFCStrIn_t *)path) == SSF_JSON_TYPE_ERROR);
+
+    {
+        char strOut[10];
+        size_t strOutLen;
+
+        memset(path, 0, sizeof(path));
+        path[0] = "k";
+        memset(strOut, 0x55, sizeof(strOut));
+        SSF_ASSERT_TEST(SSFJsonGetString("{\"k\":\"\\nABCD\"}", path, strOut, SSF_MIN(sizeof(strOut), 0), &strOutLen));
+        memset(strOut, 0x55, sizeof(strOut));
+        SSF_ASSERT(SSFJsonGetString("{\"k\":\"\\nABCD\"}", path, strOut, SSF_MIN(sizeof(strOut), 1), &strOutLen) == false);
+        memset(strOut, 0x55, sizeof(strOut));
+        SSF_ASSERT(SSFJsonGetString("{\"k\":\"\\nABCD\"}", path, strOut, SSF_MIN(sizeof(strOut), 5), &strOutLen) == false);
+        memset(strOut, 0x55, sizeof(strOut));
+        SSF_ASSERT(SSFJsonGetString("{\"k\":\"\\nABCD\"}", path, strOut, SSF_MIN(sizeof(strOut), 6), &strOutLen));
+        SSF_ASSERT(strOutLen == 5);
+        memcmp("\nABCD", strOut, strOutLen + 1);
+    }
 }
 #endif /* SSF_CONFIG_JSON_UNIT_TEST */
 

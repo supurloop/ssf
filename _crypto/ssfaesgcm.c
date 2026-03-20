@@ -260,11 +260,11 @@ static void _SSFAESGCMBlockMult(uint8_t *in, size_t inSize, const uint8_t *con, 
 
     uint32_t res[8];
 
-    SSF_ASSERT(in != NULL);
-    SSF_ASSERT(con != NULL);
+    SSF_REQUIRE(in != NULL);
+    SSF_REQUIRE(con != NULL);
 
-    SSF_ASSERT(inSize == 16);
-    SSF_ASSERT(conLen == 16);
+    SSF_REQUIRE(inSize == 16);
+    SSF_REQUIRE(conLen == 16);
 
     x[3] = GET_32_BE(in);
     x[2] = GET_32_BE(&in[4]);
@@ -354,13 +354,13 @@ static void _SSFAESGCMGHASH(const uint8_t *in, size_t inLen, const uint8_t *h, s
 
     if ((in == NULL) || (out == NULL) || (inLen == 0)) { return; }
 
-    SSF_ASSERT(in != NULL);
-    SSF_ASSERT(h != NULL);
-    SSF_ASSERT(out != NULL);
+    SSF_REQUIRE(in != NULL);
+    SSF_REQUIRE(h != NULL);
+    SSF_REQUIRE(out != NULL);
 
-    SSF_ASSERT(inLen > 0);
-    SSF_ASSERT(hLen == 16);
-    SSF_ASSERT(outSize == 16);
+    SSF_REQUIRE(inLen > 0);
+    SSF_REQUIRE(hLen == 16);
+    SSF_REQUIRE(outSize == 16);
 
     pos = 0;
     iters = ((uint32_t)inLen) >> 4;
@@ -447,6 +447,7 @@ void SSFAESGCMEncrypt(const uint8_t *pt, size_t ptLen, const uint8_t *iv, size_t
     SSF_REQUIRE(iv != NULL);
     SSF_REQUIRE(key != NULL);
     SSF_REQUIRE(tag != NULL);
+    SSF_REQUIRE(ptLen < (512 * 1024 * 1024));
     SSF_REQUIRE(ptLen <= ctSize);
     SSF_REQUIRE(ivLen > 0);
     SSF_REQUIRE((keyLen == 16) || (keyLen == 24) || (keyLen == 32));
@@ -501,14 +502,15 @@ bool SSFAESGCMDecrypt(const uint8_t *ct, size_t ctLen, const uint8_t *iv, size_t
 
     uint32_t t;
 
-    SSF_ASSERT(iv != NULL);
-    SSF_ASSERT(key != NULL);
-    SSF_ASSERT(tag != NULL);
+    SSF_REQUIRE(iv != NULL);
+    SSF_REQUIRE(key != NULL);
+    SSF_REQUIRE(tag != NULL);
 
-    SSF_ASSERT(ctLen <= ptSize);
-    SSF_ASSERT(ivLen > 0);
-    SSF_ASSERT((keyLen == 16) || (keyLen == 24) || (keyLen == 32));
-    SSF_ASSERT(((tagLen >= 12) && (tagLen <= 16)) || (tagLen == 8) || (tagLen == 4));
+    SSF_REQUIRE(ctLen < (512 * 1024 * 1024));
+    SSF_REQUIRE(ctLen <= ptSize);
+    SSF_REQUIRE(ivLen > 0);
+    SSF_REQUIRE((keyLen == 16) || (keyLen == 24) || (keyLen == 32));
+    SSF_REQUIRE(((tagLen >= 12) && (tagLen <= 16)) || (tagLen == 8) || (tagLen == 4));
 
     SSFAESXXXBlockEncrypt(h, sizeof(h), h, sizeof(h), key, keyLen);
 

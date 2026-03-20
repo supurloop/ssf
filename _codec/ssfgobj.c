@@ -179,8 +179,11 @@ static bool _SSFGObjSetField(SSFGObj_t *gobj, void **dst, const void *src, size_
         if (*dst == NULL)
         {
             /* No, return failure */
-            gobj->dataType = SSF_OBJ_TYPE_NONE;
-            gobj->dataSize = 0;
+            if (isLabel == false)
+            {
+                gobj->dataType = SSF_OBJ_TYPE_NONE;
+                gobj->dataSize = 0;
+            }
             return false;
         }
 #if SSF_CONFIG_GOBJ_UNIT_TEST == 1
@@ -483,7 +486,7 @@ static bool _SSFGObjFindPath(SSFGObj_t *gobjRoot, SSFCStrIn_t *path, SSFGObj_t *
     /* Return if recursing too deeply or path not set */
     if ((depth >= SSF_GOBJ_CONFIG_MAX_IN_DEPTH) || (path[depth] == NULL))
     {
-        gobjParentOut = NULL;
+        *gobjParentOut = NULL;
         return false;
     }
 

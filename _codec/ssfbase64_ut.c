@@ -116,7 +116,7 @@ void SSFBase64UnitTest(void)
                                    decodedBin, sizeof(decodedBin), NULL));    
 
     /* Check length constraints */
-    SSF_ASSERT_TEST(SSFBase64Dec32To24(_b64BlockUT[1].encoded, b24, 2));
+    SSF_ASSERT_TEST(SSFBase64Dec32To24(_b64BlockUT[1].encoded, b24, 0));
 
     SSF_ASSERT_TEST(SSFBase64Enc24To32(_b64BlockUT[1].unencoded, 0, b32, sizeof(b32)));
     SSF_ASSERT_TEST(SSFBase64Enc24To32(_b64BlockUT[1].unencoded, _b64BlockUT[1].unencodedLen, b32, 3));
@@ -163,8 +163,36 @@ void SSFBase64UnitTest(void)
         SSF_ASSERT(outLen == _b64StringUT[i].unencodedLen);
         SSF_ASSERT(memcmp(_b64StringUT[i].unencoded, decodedBigBin, outLen) == 0);
     }
-    SSF_ASSERT_TEST(SSFBase64Encode((uint8_t *)"abc", 0, encodedStr, 0, &outLen) == false);
+    SSF_ASSERT_TEST(SSFBase64Encode((uint8_t *)"abc", 0, encodedStr, 0, &outLen));
     SSF_ASSERT(SSFBase64Decode("abcd", 4, decodedBin, 2, &outLen) == false);
+
+    /* Verify decode succeeds with exactly-sized output buffers for padded inputs */
+    /* "YQ==" decodes to "a" (1 byte) - outSize=1 must succeed */
+    SSF_ASSERT(SSFBase64Decode("YQ==", 4, decodedBigBin, 1, &outLen) == true);
+    SSF_ASSERT(outLen == 1);
+    SSF_ASSERT(decodedBigBin[0] == 'a');
+
+    /* "YWI=" decodes to "ab" (2 bytes) - outSize=2 must succeed */
+    SSF_ASSERT(SSFBase64Decode("YWI=", 4, decodedBigBin, 2, &outLen) == true);
+    SSF_ASSERT(outLen == 2);
+    SSF_ASSERT(memcmp(decodedBigBin, "ab", 2) == 0);
+
+    /* "YWJjZA==" decodes to "abcd" (4 bytes) - outSize=4 must succeed */
+    SSF_ASSERT(SSFBase64Decode("YWJjZA==", 8, decodedBigBin, 4, &outLen) == true);
+    SSF_ASSERT(outLen == 4);
+    SSF_ASSERT(memcmp(decodedBigBin, "abcd", 4) == 0);
+
+    /* "YWJjZGU=" decodes to "abcde" (5 bytes) - outSize=5 must succeed */
+    SSF_ASSERT(SSFBase64Decode("YWJjZGU=", 8, decodedBigBin, 5, &outLen) == true);
+    SSF_ASSERT(outLen == 5);
+    SSF_ASSERT(memcmp(decodedBigBin, "abcde", 5) == 0);
+
+    /* Verify decode fails when outSize is too small for actual decoded data */
+    /* "YWJj" decodes to "abc" (3 bytes) - outSize=2 must fail */
+    SSF_ASSERT(SSFBase64Decode("YWJj", 4, decodedBigBin, 2, &outLen) == false);
+
+    /* "YWI=" decodes to "ab" (2 bytes) - outSize=1 must fail */
+    SSF_ASSERT(SSFBase64Decode("YWI=", 4, decodedBigBin, 1, &outLen) == false);
 }
 #endif /* SSF_CONFIG_BASE64_UNIT_TEST */
 

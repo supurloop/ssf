@@ -224,6 +224,7 @@ bool SSFTLVRead(const SSFTLV_t *tlv, SSFTLVVar_t tag, uint16_t instance, uint8_t
         remaining -= tagLen;
 
         /* Interpret LEN field */
+        if (remaining == 0) break;
         _SSF_TLV_FIELD_READ_LEN(tlv, index, lenLen);
         if (lenLen > remaining) break;
         _SSF_TLV_GET_VAR_FIELD(tlv, index, curLen, lenLen);

@@ -414,7 +414,7 @@ bool SSFJsonGetString(SSFCStrIn_t js, SSFCStrIn_t *path, char *out, size_t outSi
             if (outLen != NULL) (*outLen)++;
             start++; len--;
             if (len < 4) return false;
-            if (index >= (outSize - 1 - 2)) return false;
+            if ((index + 2) >= outSize) return false;
             if (!SSFHexByteToBin(&js[start], (uint8_t *)&out[index])) return false;
             index++;
             if (!SSFHexByteToBin(&js[start + 2], (uint8_t *)&out[index])) return false;

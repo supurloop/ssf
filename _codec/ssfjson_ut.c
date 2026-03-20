@@ -1225,6 +1225,27 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(strOutLen == 5);
         memcmp("\nABCD", strOut, strOutLen + 1);
     }
+
+    /* Verify SSFJsonGetString \uXXXX decoding succeeds with exactly-sized output buffer */
+    {
+        char strOut[10];
+        size_t strOutLen;
+
+        memset(path, 0, sizeof(path));
+        path[0] = "k";
+
+        /* \u1141 decodes to 2 bytes (0x11, 0x41), needs outSize=3 for data + null */
+        memset(strOut, 0x55, sizeof(strOut));
+        SSF_ASSERT(SSFJsonGetString("{\"k\":\"\\u1141\"}", path, strOut, 3, &strOutLen) == true);
+        SSF_ASSERT(strOutLen == 2);
+        SSF_ASSERT(strOut[0] == 0x11);
+        SSF_ASSERT(strOut[1] == 0x41);
+        SSF_ASSERT(strOut[2] == 0x00);
+
+        /* outSize=2 must fail for \uXXXX (2 bytes + null doesn't fit) */
+        memset(strOut, 0x55, sizeof(strOut));
+        SSF_ASSERT(SSFJsonGetString("{\"k\":\"\\u0041\"}", path, strOut, 2, &strOutLen) == false);
+    }
 }
 #endif /* SSF_CONFIG_JSON_UNIT_TEST */
 

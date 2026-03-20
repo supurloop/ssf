@@ -246,6 +246,29 @@ void SSFDecUnitTest(void)
     SSF_ASSERT(SSFDecStrToUInt("184467440737095516150", &u64) == false);
     SSF_ASSERT(SSFDecStrToUInt("184467440737095516.150e03", &u64) == false);
 
+    /* Verify _SSFDecStrToUInt overflow check does not reject valid 20-digit values where the */
+    /* first 19 digits are below the threshold but the last digit is > '5'. */
+    SSF_ASSERT(SSFDecStrToUInt("10000000000000000006", &u64));
+    SSF_ASSERT(u64 == 10000000000000000006ull);
+    SSF_ASSERT(SSFDecStrToUInt("10000000000000000009", &u64));
+    SSF_ASSERT(u64 == 10000000000000000009ull);
+    SSF_ASSERT(SSFDecStrToUInt("18446744073709551609", &u64));
+    SSF_ASSERT(u64 == 18446744073709551609ull);
+
+    /* Verify _SSFDecStrToInt overflow check does not reject valid 19-digit values where the */
+    /* first 18 digits are below the threshold but the last digit is > '7' (positive) or > '8' */
+    /* (negative). */
+    SSF_ASSERT(SSFDecStrToInt("1000000000000000008", &i64));
+    SSF_ASSERT(i64 == 1000000000000000008ll);
+    SSF_ASSERT(SSFDecStrToInt("1000000000000000009", &i64));
+    SSF_ASSERT(i64 == 1000000000000000009ll);
+    SSF_ASSERT(SSFDecStrToInt("9223372036854775798", &i64));
+    SSF_ASSERT(i64 == 9223372036854775798ll);
+    SSF_ASSERT(SSFDecStrToInt("-1000000000000000009", &i64));
+    SSF_ASSERT(i64 == -1000000000000000009ll);
+    SSF_ASSERT(SSFDecStrToInt("-9223372036854775799", &i64));
+    SSF_ASSERT(i64 == -9223372036854775799ll);
+
     i64 = 42;
     SSF_ASSERT(SSFDecStrToInt("0.32", &i64));
     SSF_ASSERT(i64 == 0ull);

@@ -307,7 +307,8 @@ static bool _SSFDecStrToInt(SSFCStrIn_t str, int64_t *val, SSFCStrIn_t *next, ui
         {
             /* Yes, overflow? */
             if ((power == (SSF_DEC_MAX_SIGNED_DIGITS - 1)) &&
-                ((u64 > 922337203685477580) || (*str > final)))
+                ((u64 > 922337203685477580) ||
+                 ((u64 == 922337203685477580) && (*str > final))))
                 return false;
             if (power == SSF_DEC_MAX_SIGNED_DIGITS) return false;
 
@@ -360,7 +361,8 @@ static bool _SSFDecStrToUInt(SSFCStrIn_t str, uint64_t* val, SSFCStrIn_t* next, 
         {
             /* Yes, overflow? */
             if ((power == (SSF_DEC_MAX_UNSIGNED_DIGITS - 1)) &&
-                ((u64 > 1844674407370955161) || (*str > '5')))
+                ((u64 > 1844674407370955161) ||
+                 ((u64 == 1844674407370955161) && (*str > '5'))))
                 return false;
             if (power == SSF_DEC_MAX_UNSIGNED_DIGITS) return false;
 

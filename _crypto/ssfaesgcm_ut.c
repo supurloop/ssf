@@ -3269,9 +3269,109 @@ void SSFAESGCMUnitTest(void)
                                        _AESGCMUT[i].tagLen, pt, _AESGCMUT[i].ptLen);
 
             SSF_ASSERT((pf) == (_AESGCMUT[i].pf == 0));
-            SSF_ASSERT((_AESGCMUT[i].pf != 0) 
+            SSF_ASSERT((_AESGCMUT[i].pf != 0)
                        || (memcmp(pt, _AESGCMUT[i].pt, _AESGCMUT[i].ptLen) == 0));
         }
+    }
+
+    /* Encrypt-then-decrypt round-trip with AES-128 */
+    {
+        uint8_t rtPt[16] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+                            0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10};
+        uint8_t rtCt[16];
+        uint8_t rtDec[16];
+        uint8_t rtTag[16];
+        uint8_t rtKey[16] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88,
+                             0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x00};
+        uint8_t rtIv[12] = {0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7,
+                            0xA8, 0xA9, 0xAA, 0xAB};
+        uint8_t rtAuth[4] = {0xDE, 0xAD, 0xBE, 0xEF};
+
+        SSFAESGCMEncrypt(rtPt, 16, rtIv, 12, rtAuth, 4, rtKey, 16, rtTag, 16, rtCt, 16);
+        SSF_ASSERT(memcmp(rtCt, rtPt, 16) != 0);
+        SSF_ASSERT(SSFAESGCMDecrypt(rtCt, 16, rtIv, 12, rtAuth, 4, rtKey, 16, rtTag, 16, rtDec, 16));
+        SSF_ASSERT(memcmp(rtDec, rtPt, 16) == 0);
+
+        /* Tampered tag must fail */
+        rtTag[0] ^= 0x01;
+        SSF_ASSERT(SSFAESGCMDecrypt(rtCt, 16, rtIv, 12, rtAuth, 4, rtKey, 16, rtTag, 16, rtDec, 16) == false);
+        rtTag[0] ^= 0x01;
+
+        /* Tampered ciphertext must fail */
+        rtCt[0] ^= 0x01;
+        SSF_ASSERT(SSFAESGCMDecrypt(rtCt, 16, rtIv, 12, rtAuth, 4, rtKey, 16, rtTag, 16, rtDec, 16) == false);
+        rtCt[0] ^= 0x01;
+
+        /* Tampered auth data must fail */
+        rtAuth[0] ^= 0x01;
+        SSF_ASSERT(SSFAESGCMDecrypt(rtCt, 16, rtIv, 12, rtAuth, 4, rtKey, 16, rtTag, 16, rtDec, 16) == false);
+        rtAuth[0] ^= 0x01;
+    }
+
+    /* Encrypt-then-decrypt round-trip with AES-192 key */
+    {
+        uint8_t rtPt[16] = {0x48, 0x65, 0x6C, 0x6C, 0x6F, 0x2C, 0x20, 0x57,
+                            0x6F, 0x72, 0x6C, 0x64, 0x21, 0x00, 0x00, 0x00};
+        uint8_t rtCt[16];
+        uint8_t rtDec[16];
+        uint8_t rtTag[16];
+        uint8_t rtKey192[24] = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+                                0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
+                                0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17};
+        uint8_t rtIv[12] = {0xCA, 0xFE, 0xBA, 0xBE, 0xFA, 0xCE, 0xDB, 0xAD,
+                            0xDE, 0xCA, 0xF8, 0x88};
+
+        SSFAESGCMEncrypt(rtPt, 16, rtIv, 12, NULL, 0, rtKey192, 24, rtTag, 16, rtCt, 16);
+        SSF_ASSERT(SSFAESGCMDecrypt(rtCt, 16, rtIv, 12, NULL, 0, rtKey192, 24, rtTag, 16, rtDec, 16));
+        SSF_ASSERT(memcmp(rtDec, rtPt, 16) == 0);
+    }
+
+    /* Encrypt-then-decrypt round-trip with AES-256 key */
+    {
+        uint8_t rtPt[16] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x00, 0x11,
+                            0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99};
+        uint8_t rtCt[16];
+        uint8_t rtDec[16];
+        uint8_t rtTag[16];
+        uint8_t rtKey256[32] = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+                                0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
+                                0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
+                                0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F};
+        uint8_t rtIv[12] = {0xCA, 0xFE, 0xBA, 0xBE, 0xFA, 0xCE, 0xDB, 0xAD,
+                            0xDE, 0xCA, 0xF8, 0x88};
+
+        SSFAESGCMEncrypt(rtPt, 16, rtIv, 12, NULL, 0, rtKey256, 32, rtTag, 16, rtCt, 16);
+        SSF_ASSERT(SSFAESGCMDecrypt(rtCt, 16, rtIv, 12, NULL, 0, rtKey256, 32, rtTag, 16, rtDec, 16));
+        SSF_ASSERT(memcmp(rtDec, rtPt, 16) == 0);
+    }
+
+    /* Non-12-byte IV (GHASH-based IV derivation path) */
+    {
+        uint8_t rtPt[16] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+                            0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10};
+        uint8_t rtCt[16];
+        uint8_t rtDec[16];
+        uint8_t rtTag[16];
+        uint8_t rtKey[16] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88,
+                             0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x00};
+        /* 8-byte IV (non-standard, triggers GHASH path) */
+        uint8_t rtIv8[8] = {0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7};
+        /* 16-byte IV */
+        uint8_t rtIv16[16] = {0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7,
+                              0xA8, 0xA9, 0xAA, 0xAB, 0xAC, 0xAD, 0xAE, 0xAF};
+
+        /* 8-byte IV round-trip */
+        SSFAESGCMEncrypt(rtPt, 16, rtIv8, 8, NULL, 0, rtKey, 16, rtTag, 16, rtCt, 16);
+        SSF_ASSERT(SSFAESGCMDecrypt(rtCt, 16, rtIv8, 8, NULL, 0, rtKey, 16, rtTag, 16, rtDec, 16));
+        SSF_ASSERT(memcmp(rtDec, rtPt, 16) == 0);
+
+        /* 16-byte IV round-trip */
+        SSFAESGCMEncrypt(rtPt, 16, rtIv16, 16, NULL, 0, rtKey, 16, rtTag, 16, rtCt, 16);
+        SSF_ASSERT(SSFAESGCMDecrypt(rtCt, 16, rtIv16, 16, NULL, 0, rtKey, 16, rtTag, 16, rtDec, 16));
+        SSF_ASSERT(memcmp(rtDec, rtPt, 16) == 0);
+
+        /* Wrong IV must fail decrypt */
+        SSF_ASSERT(SSFAESGCMDecrypt(rtCt, 16, rtIv8, 8, NULL, 0, rtKey, 16, rtTag, 16, rtDec, 16) == false);
     }
 }
 

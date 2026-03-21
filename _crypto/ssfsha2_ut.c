@@ -599,5 +599,98 @@ void SSFSHA2UnitTest(void)
         SSFSHA512_256End(&ctx64, out, sizeof(out));
         SSF_ASSERT(memcmp(out, "\x53\x04\x8e\x26\x81\x94\x1e\xf9\x9b\x2e\x29\xb7\x6b\x4c\x7d\xab\xe4\xc2\xd0\xc6\x34\xfc\x6d\x46\xe0\xe2\xf1\x31\x07\xe7\xaf\x23", 32) == 0);
     }
+
+    /* Incremental hash produces same result as single-call */
+    {
+        uint8_t outSingle[64];
+        uint8_t outIncr[64];
+
+        SSFSHA256((uint8_t *)"abc", 3, outSingle, sizeof(outSingle));
+        SSFSHA256Begin(&ctx32);
+        SSFSHA256Update(&ctx32, (uint8_t *)"abc", 3);
+        SSFSHA256End(&ctx32, outIncr, sizeof(outIncr));
+        SSF_ASSERT(memcmp(outSingle, outIncr, SSF_SHA2_256_BYTE_SIZE) == 0);
+
+        SSFSHA512((uint8_t *)"abc", 3, outSingle, sizeof(outSingle));
+        SSFSHA512Begin(&ctx64);
+        SSFSHA512Update(&ctx64, (uint8_t *)"abc", 3);
+        SSFSHA512End(&ctx64, outIncr, sizeof(outIncr));
+        SSF_ASSERT(memcmp(outSingle, outIncr, SSF_SHA2_512_BYTE_SIZE) == 0);
+    }
+
+    /* Update with inLen=0 is a no-op */
+    {
+        uint8_t outRef[64];
+        uint8_t outZero[64];
+
+        SSFSHA256((uint8_t *)"abc", 3, outRef, sizeof(outRef));
+        SSFSHA256Begin(&ctx32);
+        SSFSHA256Update(&ctx32, (uint8_t *)"abc", 0);
+        SSFSHA256Update(&ctx32, (uint8_t *)"abc", 3);
+        SSFSHA256Update(&ctx32, (uint8_t *)"abc", 0);
+        SSFSHA256End(&ctx32, outZero, sizeof(outZero));
+        SSF_ASSERT(memcmp(outRef, outZero, SSF_SHA2_256_BYTE_SIZE) == 0);
+    }
+
+    /* Multi-chunk Update across block boundaries */
+    {
+        /* 56-byte message crosses SHA-256's 64-byte block in various chunk patterns */
+        uint8_t msg[100];
+        uint8_t outSingle[64];
+        uint8_t outChunked[64];
+        uint32_t msgLen = 100;
+
+        for (i = 0; i < msgLen; i++) msg[i] = (uint8_t)(i & 0xff);
+
+        /* SHA-256: single call reference */
+        SSFSHA256(msg, msgLen, outSingle, sizeof(outSingle));
+
+        /* SHA-256: feed in chunks of 31, 33, 36 (sums to 100, crosses 64-byte boundary) */
+        SSFSHA256Begin(&ctx32);
+        SSFSHA256Update(&ctx32, &msg[0], 31);
+        SSFSHA256Update(&ctx32, &msg[31], 33);
+        SSFSHA256Update(&ctx32, &msg[64], 36);
+        SSFSHA256End(&ctx32, outChunked, sizeof(outChunked));
+        SSF_ASSERT(memcmp(outSingle, outChunked, SSF_SHA2_256_BYTE_SIZE) == 0);
+
+        /* SHA-512: single call reference */
+        SSFSHA512(msg, msgLen, outSingle, sizeof(outSingle));
+
+        /* SHA-512: feed in chunks of 65, 35 (crosses 128-byte boundary) */
+        SSFSHA512Begin(&ctx64);
+        SSFSHA512Update(&ctx64, &msg[0], 65);
+        SSFSHA512Update(&ctx64, &msg[65], 35);
+        SSFSHA512End(&ctx64, outChunked, sizeof(outChunked));
+        SSF_ASSERT(memcmp(outSingle, outChunked, SSF_SHA2_512_BYTE_SIZE) == 0);
+    }
+
+    /* Context reuse after End should assert-fail (magic invalidated) */
+    SSFSHA256Begin(&ctx32);
+    SSFSHA256Update(&ctx32, (uint8_t *)"abc", 3);
+    SSFSHA256End(&ctx32, out, sizeof(out));
+    SSF_ASSERT_TEST(SSFSHA256Update(&ctx32, (uint8_t *)"abc", 3));
+    SSF_ASSERT_TEST(SSFSHA256End(&ctx32, out, sizeof(out)));
+
+    SSFSHA512Begin(&ctx64);
+    SSFSHA512Update(&ctx64, (uint8_t *)"abc", 3);
+    SSFSHA512End(&ctx64, out, sizeof(out));
+    SSF_ASSERT_TEST(SSFSHA512Update(&ctx64, (uint8_t *)"abc", 3));
+    SSF_ASSERT_TEST(SSFSHA512End(&ctx64, out, sizeof(out)));
+
+    /* NIST known-answer: SHA-256("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq") */
+    SSFSHA256((uint8_t *)"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq", 56, out,
+              sizeof(out));
+    SSF_ASSERT(memcmp(out, "\x24\x8d\x6a\x61\xd2\x06\x38\xb8\xe5\xc0\x26\x93\x0c\x3e\x60\x39"
+                            "\xa3\x3c\xe4\x59\x64\xff\x21\x67\xf6\xec\xed\xd4\x19\xdb\x06\xc1",
+                      SSF_SHA2_256_BYTE_SIZE) == 0);
+
+    /* NIST known-answer: SHA-512("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq") */
+    SSFSHA512((uint8_t *)"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq", 56, out,
+              sizeof(out));
+    SSF_ASSERT(memcmp(out, "\x20\x4a\x8f\xc6\xdd\xa8\x2f\x0a\x0c\xed\x7b\xeb\x8e\x08\xa4\x16"
+                            "\x57\xc1\x6e\xf4\x68\xb2\x28\xa8\x27\x9b\xe3\x31\xa7\x03\xc3\x35"
+                            "\x96\xfd\x15\xc1\x3b\x1b\x07\xf9\xaa\x1d\x3b\xea\x57\x78\x9c\xa0"
+                            "\x31\xad\x85\xc7\xa7\x1d\xd7\x03\x54\xec\x63\x12\x38\xca\x34\x45",
+                      SSF_SHA2_512_BYTE_SIZE) == 0);
 }
 #endif /* SSF_CONFIG_SHA2_UNIT_TEST */

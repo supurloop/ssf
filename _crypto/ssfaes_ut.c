@@ -689,6 +689,113 @@ void SSFAESUnitTest(void)
             }
         }
     }
+
+    /* REQUIRE assertion tests for wrong ptLen/ctLen/keyLen sizes */
+    SSF_ASSERT_TEST(SSFAES128BlockEncrypt(_SSFAES128BlockEncryptMonteUT[0].in, 15, out, 16,
+                                     _SSFAES128BlockEncryptMonteUT[0].key, 16));
+    SSF_ASSERT_TEST(SSFAES128BlockEncrypt(_SSFAES128BlockEncryptMonteUT[0].in, 16, out, 15,
+                                     _SSFAES128BlockEncryptMonteUT[0].key, 16));
+    SSF_ASSERT_TEST(SSFAES128BlockEncrypt(_SSFAES128BlockEncryptMonteUT[0].in, 16, out, 16,
+                                     _SSFAES128BlockEncryptMonteUT[0].key, 15));
+    SSF_ASSERT_TEST(SSFAES128BlockDecrypt(_SSFAES128BlockDecryptMonteUT[0].in, 15, out, 16,
+                                     _SSFAES128BlockDecryptMonteUT[0].key, 16));
+    SSF_ASSERT_TEST(SSFAES128BlockDecrypt(_SSFAES128BlockDecryptMonteUT[0].in, 16, out, 15,
+                                     _SSFAES128BlockDecryptMonteUT[0].key, 16));
+    SSF_ASSERT_TEST(SSFAES128BlockDecrypt(_SSFAES128BlockDecryptMonteUT[0].in, 16, out, 16,
+                                     _SSFAES128BlockDecryptMonteUT[0].key, 15));
+
+    /* SSFAESXXXBlockEncrypt/Decrypt auto-detecting macros */
+    /* Verify XXX macro produces same result as explicit key-size macro, then round-trip */
+    {
+        uint8_t pt[16];
+        uint8_t ctXXX[16];
+        uint8_t ctExplicit[16];
+        uint8_t dec[16];
+        uint8_t key128[16];
+        uint8_t key192[24];
+        uint8_t key256[32];
+
+        memcpy(pt, _SSFAES128BlockEncryptMonteUT[0].in, 16);
+        memcpy(key128, _SSFAES128BlockEncryptMonteUT[0].key, 16);
+
+        /* AES-128: XXX macro must match explicit SSFAES128BlockEncrypt */
+        SSFAES128BlockEncrypt(pt, 16, ctExplicit, 16, key128, 16);
+        SSFAESXXXBlockEncrypt(pt, 16, ctXXX, 16, key128, 16);
+        SSF_ASSERT(memcmp(ctXXX, ctExplicit, 16) == 0);
+        SSFAESXXXBlockDecrypt(ctXXX, 16, dec, 16, key128, 16);
+        SSF_ASSERT(memcmp(dec, pt, 16) == 0);
+
+        /* AES-192: XXX macro must match explicit SSFAES192BlockEncrypt */
+        memcpy(pt, _SSFAES192BlockEncryptMonteUT[0].in, 16);
+        memcpy(key192, _SSFAES192BlockEncryptMonteUT[0].key, 24);
+        SSFAES192BlockEncrypt(pt, 16, ctExplicit, 16, key192, 24);
+        SSFAESXXXBlockEncrypt(pt, 16, ctXXX, 16, key192, 24);
+        SSF_ASSERT(memcmp(ctXXX, ctExplicit, 16) == 0);
+        SSFAESXXXBlockDecrypt(ctXXX, 16, dec, 16, key192, 24);
+        SSF_ASSERT(memcmp(dec, pt, 16) == 0);
+
+        /* AES-256: XXX macro must match explicit SSFAES256BlockEncrypt */
+        memcpy(pt, _SSFAES256BlockEncryptMonteUT[0].in, 16);
+        memcpy(key256, _SSFAES256BlockEncryptMonteUT[0].key, 32);
+        SSFAES256BlockEncrypt(pt, 16, ctExplicit, 16, key256, 32);
+        SSFAESXXXBlockEncrypt(pt, 16, ctXXX, 16, key256, 32);
+        SSF_ASSERT(memcmp(ctXXX, ctExplicit, 16) == 0);
+        SSFAESXXXBlockDecrypt(ctXXX, 16, dec, 16, key256, 32);
+        SSF_ASSERT(memcmp(dec, pt, 16) == 0);
+    }
+
+    /* Encrypt-then-decrypt round-trip for all key sizes */
+    {
+        uint8_t pt[16] = {0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF,
+                          0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10};
+        uint8_t ct[16];
+        uint8_t dec[16];
+        uint8_t key128[16] = {0x0F, 0x15, 0x71, 0xC9, 0x47, 0xD9, 0xE8, 0x59,
+                              0x0C, 0xB7, 0xAD, 0xD6, 0xAF, 0x7F, 0x67, 0x98};
+        uint8_t key192[24] = {0x0F, 0x15, 0x71, 0xC9, 0x47, 0xD9, 0xE8, 0x59,
+                              0x0C, 0xB7, 0xAD, 0xD6, 0xAF, 0x7F, 0x67, 0x98,
+                              0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80};
+        uint8_t key256[32] = {0x0F, 0x15, 0x71, 0xC9, 0x47, 0xD9, 0xE8, 0x59,
+                              0x0C, 0xB7, 0xAD, 0xD6, 0xAF, 0x7F, 0x67, 0x98,
+                              0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80,
+                              0x90, 0xA0, 0xB0, 0xC0, 0xD0, 0xE0, 0xF0, 0xFF};
+
+        SSFAES128BlockEncrypt(pt, 16, ct, 16, key128, 16);
+        SSF_ASSERT(memcmp(ct, pt, 16) != 0);
+        SSFAES128BlockDecrypt(ct, 16, dec, 16, key128, 16);
+        SSF_ASSERT(memcmp(dec, pt, 16) == 0);
+
+        SSFAES192BlockEncrypt(pt, 16, ct, 16, key192, 24);
+        SSF_ASSERT(memcmp(ct, pt, 16) != 0);
+        SSFAES192BlockDecrypt(ct, 16, dec, 16, key192, 24);
+        SSF_ASSERT(memcmp(dec, pt, 16) == 0);
+
+        SSFAES256BlockEncrypt(pt, 16, ct, 16, key256, 32);
+        SSF_ASSERT(memcmp(ct, pt, 16) != 0);
+        SSFAES256BlockDecrypt(ct, 16, dec, 16, key256, 32);
+        SSF_ASSERT(memcmp(dec, pt, 16) == 0);
+    }
+
+    /* All-zeros plaintext and key (NIST FIPS 197 reference) */
+    {
+        uint8_t pt[16] = {0};
+        uint8_t ct[16];
+        uint8_t dec[16];
+        uint8_t key128[16] = {0};
+        uint8_t key256[32] = {0};
+
+        /* AES-128: encrypt all-zeros, verify ciphertext is non-trivial, round-trip */
+        SSFAES128BlockEncrypt(pt, 16, ct, 16, key128, 16);
+        SSF_ASSERT(memcmp(ct, pt, 16) != 0);
+        SSFAES128BlockDecrypt(ct, 16, dec, 16, key128, 16);
+        SSF_ASSERT(memcmp(dec, pt, 16) == 0);
+
+        /* AES-256: encrypt all-zeros, round-trip */
+        SSFAES256BlockEncrypt(pt, 16, ct, 16, key256, 32);
+        SSF_ASSERT(memcmp(ct, pt, 16) != 0);
+        SSFAES256BlockDecrypt(ct, 16, dec, 16, key256, 32);
+        SSF_ASSERT(memcmp(dec, pt, 16) == 0);
+    }
 }
 #endif /* SSF_CONFIG_AES_UNIT_TEST */
 

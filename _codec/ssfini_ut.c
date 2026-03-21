@@ -712,5 +712,74 @@ void SSFINIUnitTest(void)
     iniLenLast = iniLen;
     SSF_ASSERT(memcmp(iniStr, _ssfINIBigINI, iniLen) == 0);
     SSF_ASSERT(iniStr[iniLen] == 0);
+
+    /* SSFINIGetStrValue with output buffer too small for value */
+    SSF_ASSERT(SSFINIGetStrValue("name=hello", NULL, "name", 0, outStr, 6, &outStrLen));
+    SSF_ASSERT(outStrLen == 5);
+    SSF_ASSERT(strcmp(outStr, "hello") == 0);
+    SSF_ASSERT(SSFINIGetStrValue("name=hello", NULL, "name", 0, outStr, 5, &outStrLen) == false);
+    SSF_ASSERT(SSFINIGetStrValue("name=hello", NULL, "name", 0, outStr, 1, &outStrLen) == false);
+
+    /* SSFINIGetBoolValue with present but non-boolean value */
+    SSF_ASSERT(SSFINIGetBoolValue("name=maybe", NULL, "name", 0, &outBool) == false);
+    SSF_ASSERT(SSFINIGetBoolValue("name=2", NULL, "name", 0, &outBool) == false);
+    SSF_ASSERT(SSFINIGetBoolValue("name=tru", NULL, "name", 0, &outBool) == false);
+    SSF_ASSERT(SSFINIGetBoolValue("name=ye", NULL, "name", 0, &outBool) == false);
+    SSF_ASSERT(SSFINIGetBoolValue("name=offf", NULL, "name", 0, &outBool) == false);
+    /* Value too long for boolean (> 5 chars) */
+    SSF_ASSERT(SSFINIGetBoolValue("name=falsey", NULL, "name", 0, &outBool) == false);
+
+    /* SSFINIGetIntValue with present but non-integer value */
+    SSF_ASSERT(SSFINIGetIntValue("name=abc", NULL, "name", 0, &outLong) == false);
+    SSF_ASSERT(SSFINIGetIntValue("name=hello", NULL, "name", 0, &outLong) == false);
+    /* Empty value returns false for int */
+    SSF_ASSERT(SSFINIGetIntValue("name=", NULL, "name", 0, &outLong) == false);
+
+    /* SSFINIGetStrValue outLen for empty value with non-NULL outLen */
+    outStrLen = 99;
+    SSF_ASSERT(SSFINIGetStrValue("name=", NULL, "name", 0, outStr, sizeof(outStr), &outStrLen));
+    SSF_ASSERT(outStrLen == 0);
+    SSF_ASSERT(outStr[0] == 0);
+
+    /* Generator returns false when buffer is already full */
+    iniLen = 0;
+    SSF_ASSERT(SSFINIPrintComment(iniStr, 1, &iniLen, "", SSF_INI_COMMENT_NONE, SSF_INI_LF) == false);
+    iniLen = 0;
+    SSF_ASSERT(SSFINIPrintSection(iniStr, 1, &iniLen, "s", SSF_INI_LF) == false);
+    iniLen = 0;
+    SSF_ASSERT(SSFINIPrintNameStrValue(iniStr, 1, &iniLen, "n", "", SSF_INI_LF) == false);
+    iniLen = 0;
+    SSF_ASSERT(SSFINIPrintNameIntValue(iniStr, 1, &iniLen, "n", 0, SSF_INI_LF) == false);
+    iniLen = 0;
+    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, 1, &iniLen, "n", true, SSF_INI_BOOL_1_0, SSF_INI_LF) == false);
+
+    /* Round-trip: generate INI then parse it back */
+    {
+        char rt[128];
+        size_t rtLen = 0;
+        int64_t rtLong;
+
+        SSF_ASSERT(SSFINIPrintSection(rt, sizeof(rt), &rtLen, "mysect", SSF_INI_LF));
+        SSF_ASSERT(SSFINIPrintNameStrValue(rt, sizeof(rt), &rtLen, "key1", "val1", SSF_INI_LF));
+        SSF_ASSERT(SSFINIPrintNameIntValue(rt, sizeof(rt), &rtLen, "num", -42, SSF_INI_LF));
+        SSF_ASSERT(SSFINIPrintNameBoolValue(rt, sizeof(rt), &rtLen, "flag", true, SSF_INI_BOOL_TRUE_FALSE, SSF_INI_LF));
+
+        SSF_ASSERT(SSFINIIsSectionPresent(rt, "mysect"));
+        SSF_ASSERT(SSFINIIsSectionPresent(rt, "other") == false);
+
+        SSF_ASSERT(SSFINIIsNameValuePresent(rt, "mysect", "key1", 0));
+        SSF_ASSERT(SSFINIGetStrValue(rt, "mysect", "key1", 0, outStr, sizeof(outStr), &outStrLen));
+        SSF_ASSERT(outStrLen == 4);
+        SSF_ASSERT(strcmp(outStr, "val1") == 0);
+
+        SSF_ASSERT(SSFINIGetIntValue(rt, "mysect", "num", 0, &rtLong));
+        SSF_ASSERT(rtLong == -42);
+
+        SSF_ASSERT(SSFINIGetBoolValue(rt, "mysect", "flag", 0, &outBool));
+        SSF_ASSERT(outBool == true);
+
+        SSF_ASSERT(SSFINIIsNameValuePresent(rt, "mysect", "missing", 0) == false);
+        SSF_ASSERT(SSFINIIsNameValuePresent(rt, NULL, "key1", 0) == false);
+    }
 }
 #endif /* SSF_CONFIG_INI_UNIT_TEST */

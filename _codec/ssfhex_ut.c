@@ -166,6 +166,127 @@ void SSFHexUnitTest(void)
         SSF_ASSERT(outlen == strlen(hexout));
         SSF_ASSERT(memcmp(hexout, _hexUTPass[i].asciirevup, outlen + 1) == 0);
     }
+
+    /* SSFHexBinToByte direct tests */
+    SSF_ASSERT_TEST(SSFHexBinToByte(0x00, NULL, 3, SSF_HEX_CASE_UPPER));
+    SSF_ASSERT(SSFHexBinToByte(0xAB, hexout, 0, SSF_HEX_CASE_UPPER) == false);
+    SSF_ASSERT(SSFHexBinToByte(0xAB, hexout, 1, SSF_HEX_CASE_UPPER) == false);
+    /* outSize=2: writes 2 hex chars, no null terminator */
+    memset(hexout, 0xff, sizeof(hexout));
+    SSF_ASSERT(SSFHexBinToByte(0xAB, hexout, 2, SSF_HEX_CASE_UPPER) == true);
+    SSF_ASSERT(hexout[0] == 'A');
+    SSF_ASSERT(hexout[1] == 'B');
+    SSF_ASSERT((uint8_t)hexout[2] == 0xff);
+    /* outSize>=3: writes 2 hex chars + null */
+    memset(hexout, 0xff, sizeof(hexout));
+    SSF_ASSERT(SSFHexBinToByte(0xAB, hexout, 3, SSF_HEX_CASE_UPPER) == true);
+    SSF_ASSERT(hexout[0] == 'A');
+    SSF_ASSERT(hexout[1] == 'B');
+    SSF_ASSERT(hexout[2] == 0);
+    /* Lower case */
+    SSF_ASSERT(SSFHexBinToByte(0xAB, hexout, 3, SSF_HEX_CASE_LOWER) == true);
+    SSF_ASSERT(hexout[0] == 'a');
+    SSF_ASSERT(hexout[1] == 'b');
+    /* Boundary values */
+    SSF_ASSERT(SSFHexBinToByte(0x00, hexout, 3, SSF_HEX_CASE_UPPER) == true);
+    SSF_ASSERT(hexout[0] == '0');
+    SSF_ASSERT(hexout[1] == '0');
+    SSF_ASSERT(SSFHexBinToByte(0xFF, hexout, 3, SSF_HEX_CASE_UPPER) == true);
+    SSF_ASSERT(hexout[0] == 'F');
+    SSF_ASSERT(hexout[1] == 'F');
+    SSF_ASSERT(SSFHexBinToByte(0x09, hexout, 3, SSF_HEX_CASE_UPPER) == true);
+    SSF_ASSERT(hexout[0] == '0');
+    SSF_ASSERT(hexout[1] == '9');
+    SSF_ASSERT(SSFHexBinToByte(0x0A, hexout, 3, SSF_HEX_CASE_UPPER) == true);
+    SSF_ASSERT(hexout[0] == '0');
+    SSF_ASSERT(hexout[1] == 'A');
+
+    /* SSFHexByteToBin direct tests */
+    SSF_ASSERT_TEST(SSFHexByteToBin(NULL, binout));
+    SSF_ASSERT_TEST(SSFHexByteToBin("AB", NULL));
+    SSF_ASSERT(SSFHexByteToBin("AB", binout) == true);
+    SSF_ASSERT(binout[0] == 0xAB);
+    SSF_ASSERT(SSFHexByteToBin("ab", binout) == true);
+    SSF_ASSERT(binout[0] == 0xAB);
+    SSF_ASSERT(SSFHexByteToBin("00", binout) == true);
+    SSF_ASSERT(binout[0] == 0x00);
+    SSF_ASSERT(SSFHexByteToBin("FF", binout) == true);
+    SSF_ASSERT(binout[0] == 0xFF);
+    SSF_ASSERT(SSFHexByteToBin("ff", binout) == true);
+    SSF_ASSERT(binout[0] == 0xFF);
+    SSF_ASSERT(SSFHexByteToBin("0A", binout) == true);
+    SSF_ASSERT(binout[0] == 0x0A);
+    /* Invalid chars */
+    SSF_ASSERT(SSFHexByteToBin("GG", binout) == false);
+    SSF_ASSERT(SSFHexByteToBin("0G", binout) == false);
+    SSF_ASSERT(SSFHexByteToBin("G0", binout) == false);
+    SSF_ASSERT(SSFHexByteToBin("  ", binout) == false);
+    SSF_ASSERT(SSFHexByteToBin("0x", binout) == false);
+
+    /* SSFHexBinToBytes with outLen == NULL */
+    memset(hexout, 0xff, sizeof(hexout));
+    SSF_ASSERT(SSFHexBinToBytes((uint8_t *)"\xAB", 1, hexout, sizeof(hexout), NULL, false,
+                                SSF_HEX_CASE_UPPER) == true);
+    SSF_ASSERT(hexout[0] == 'A');
+    SSF_ASSERT(hexout[1] == 'B');
+    SSF_ASSERT(hexout[2] == 0);
+
+    /* SSFHexBinToBytes exactly-sized output buffer */
+    /* 1 binary byte needs 3 bytes output (2 hex + null) */
+    memset(hexout, 0xff, sizeof(hexout));
+    SSF_ASSERT(SSFHexBinToBytes((uint8_t *)"\x12", 1, hexout, 3, &outlen, false,
+                                SSF_HEX_CASE_UPPER) == true);
+    SSF_ASSERT(outlen == 2);
+    SSF_ASSERT(memcmp(hexout, "12", 3) == 0);
+    /* 1 byte short must fail */
+    SSF_ASSERT(SSFHexBinToBytes((uint8_t *)"\x12", 1, hexout, 2, &outlen, false,
+                                SSF_HEX_CASE_UPPER) == false);
+    /* outSize=1 always fails for non-empty input (only room for null) */
+    SSF_ASSERT(SSFHexBinToBytes((uint8_t *)"\x12", 1, hexout, 1, &outlen, false,
+                                SSF_HEX_CASE_UPPER) == false);
+
+    /* SSFHexBytesToBin with outSize=0 and non-empty input */
+    SSF_ASSERT(SSFHexBytesToBin("AABB", 4, binout, 0, &outlen, false) == false);
+    /* outSize=0 with empty input succeeds */
+    SSF_ASSERT(SSFHexBytesToBin("", 0, binout, 0, &outlen, false) == true);
+    SSF_ASSERT(outlen == 0);
+
+    /* Full 256-value round-trip: encode then decode every byte */
+    {
+        uint16_t v;
+        uint8_t binIn;
+        uint8_t binDec;
+        char hexEnc[3];
+
+        for (v = 0; v <= 255; v++)
+        {
+            binIn = (uint8_t)v;
+            SSF_ASSERT(SSFHexBinToByte(binIn, hexEnc, sizeof(hexEnc), SSF_HEX_CASE_UPPER) == true);
+            SSF_ASSERT(SSFHexByteToBin(hexEnc, &binDec) == true);
+            SSF_ASSERT(binDec == binIn);
+            SSF_ASSERT(SSFHexBinToByte(binIn, hexEnc, sizeof(hexEnc), SSF_HEX_CASE_LOWER) == true);
+            SSF_ASSERT(SSFHexByteToBin(hexEnc, &binDec) == true);
+            SSF_ASSERT(binDec == binIn);
+        }
+    }
+
+    /* SSFIsHex macro */
+    SSF_ASSERT(SSFIsHex('0'));
+    SSF_ASSERT(SSFIsHex('9'));
+    SSF_ASSERT(SSFIsHex('a'));
+    SSF_ASSERT(SSFIsHex('f'));
+    SSF_ASSERT(SSFIsHex('A'));
+    SSF_ASSERT(SSFIsHex('F'));
+    SSF_ASSERT(!SSFIsHex('g'));
+    SSF_ASSERT(!SSFIsHex('G'));
+    SSF_ASSERT(!SSFIsHex(' '));
+    SSF_ASSERT(!SSFIsHex('\0'));
+    SSF_ASSERT(!SSFIsHex('/'));
+    SSF_ASSERT(!SSFIsHex(':'));
+    SSF_ASSERT(!SSFIsHex('@'));
+    SSF_ASSERT(!SSFIsHex('['));
+    SSF_ASSERT(!SSFIsHex('`'));
+    SSF_ASSERT(!SSFIsHex('{'));
 }
 #endif /* SSF_CONFIG_HEX_UNIT_TEST */
 

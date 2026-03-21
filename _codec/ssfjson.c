@@ -52,7 +52,8 @@
     if (((c) && (*c)) && (!_SSFJsonPrintUnescChar(js, size, start, &start, ','))) return false; \
     if (c) *c = true; } while (0);
 #define SSF_JSON_ADD_ESC(e) out[index] = e; start++; len--; index++; \
-                            if (outLen != NULL) (*outLen)++; continue;
+                            if (outLen != NULL) (*outLen)++; \
+                            continue;
 
 /* --------------------------------------------------------------------------------------------- */
 /* Local prototypes                                                                              */

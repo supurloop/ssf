@@ -1215,13 +1215,13 @@ void SSFJsonUnitTest(void)
         memset(path, 0, sizeof(path));
         path[0] = "k";
         memset(strOut, 0x55, sizeof(strOut));
-        SSF_ASSERT_TEST(SSFJsonGetString("{\"k\":\"\\nABCD\"}", path, strOut, SSF_MIN(sizeof(strOut), 0), &strOutLen));
+        SSF_ASSERT_TEST(SSFJsonGetString("{\"k\":\"\\nABCD\"}", (SSFCStrIn_t *)path, strOut, SSF_MIN(sizeof(strOut), 0), &strOutLen));
         memset(strOut, 0x55, sizeof(strOut));
-        SSF_ASSERT(SSFJsonGetString("{\"k\":\"\\nABCD\"}", path, strOut, SSF_MIN(sizeof(strOut), 1), &strOutLen) == false);
+        SSF_ASSERT(SSFJsonGetString("{\"k\":\"\\nABCD\"}", (SSFCStrIn_t *)path, strOut, SSF_MIN(sizeof(strOut), 1), &strOutLen) == false);
         memset(strOut, 0x55, sizeof(strOut));
-        SSF_ASSERT(SSFJsonGetString("{\"k\":\"\\nABCD\"}", path, strOut, SSF_MIN(sizeof(strOut), 5), &strOutLen) == false);
+        SSF_ASSERT(SSFJsonGetString("{\"k\":\"\\nABCD\"}", (SSFCStrIn_t *)path, strOut, SSF_MIN(sizeof(strOut), 5), &strOutLen) == false);
         memset(strOut, 0x55, sizeof(strOut));
-        SSF_ASSERT(SSFJsonGetString("{\"k\":\"\\nABCD\"}", path, strOut, SSF_MIN(sizeof(strOut), 6), &strOutLen));
+        SSF_ASSERT(SSFJsonGetString("{\"k\":\"\\nABCD\"}", (SSFCStrIn_t *)path, strOut, SSF_MIN(sizeof(strOut), 6), &strOutLen));
         SSF_ASSERT(strOutLen == 5);
         memcmp("\nABCD", strOut, strOutLen + 1);
     }
@@ -1236,7 +1236,7 @@ void SSFJsonUnitTest(void)
 
         /* \u1141 decodes to 2 bytes (0x11, 0x41), needs outSize=3 for data + null */
         memset(strOut, 0x55, sizeof(strOut));
-        SSF_ASSERT(SSFJsonGetString("{\"k\":\"\\u1141\"}", path, strOut, 3, &strOutLen) == true);
+        SSF_ASSERT(SSFJsonGetString("{\"k\":\"\\u1141\"}", (SSFCStrIn_t *)path, strOut, 3, &strOutLen) == true);
         SSF_ASSERT(strOutLen == 2);
         SSF_ASSERT(strOut[0] == 0x11);
         SSF_ASSERT(strOut[1] == 0x41);
@@ -1244,7 +1244,7 @@ void SSFJsonUnitTest(void)
 
         /* outSize=2 must fail for \uXXXX (2 bytes + null doesn't fit) */
         memset(strOut, 0x55, sizeof(strOut));
-        SSF_ASSERT(SSFJsonGetString("{\"k\":\"\\u0041\"}", path, strOut, 2, &strOutLen) == false);
+        SSF_ASSERT(SSFJsonGetString("{\"k\":\"\\u0041\"}", (SSFCStrIn_t *)path, strOut, 2, &strOutLen) == false);
     }
 }
 #endif /* SSF_CONFIG_JSON_UNIT_TEST */

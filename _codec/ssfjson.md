@@ -2,7 +2,7 @@
 
 [SSF](../README.md) | [Codecs](README.md)
 
-SAX-style JSON parser and printer-callback generator with optional in-place field update.
+SAX-style JSON parser and printer-callback generator.
 
 The parser walks the JSON string on each access without building a DOM; RAM usage scales with
 nesting depth, not message size. The generator uses a chained-callback pattern where each
@@ -29,8 +29,6 @@ nesting depth, not message size. The generator uses a chained-callback pattern w
 - The parser considers inputs with duplicate object keys valid and matches only the first
   occurrence.
 - Only 8-bit ASCII-encoded strings are accepted; an embedded `\0` terminates input.
-- `SSFJsonUpdate()` requires `size > strlen(js) + 1` bytes of allocated buffer capacity; it
-  modifies the string in-place and may grow or shrink it.
 - Generator print functions return `false` when the output buffer is too small; no partial output
   is guaranteed.
 - The `comma` pointer passed to generator functions may be `NULL` to suppress automatic comma
@@ -59,7 +57,7 @@ All options are set in `ssfoptions.h`.
 |--------|------|-------------|
 | <a id="ssfjsontype-t"></a>`SSFJsonType_t` | Enum | JSON value type returned by [`SSFJsonGetType()`](#ssfjsongettype): `SSF_JSON_TYPE_STRING`, `SSF_JSON_TYPE_NUMBER`, `SSF_JSON_TYPE_OBJECT`, `SSF_JSON_TYPE_ARRAY`, `SSF_JSON_TYPE_TRUE`, `SSF_JSON_TYPE_FALSE`, `SSF_JSON_TYPE_NULL`, `SSF_JSON_TYPE_ERROR` |
 | <a id="ssfjsonfltfmt-t"></a>`SSFJsonFltFmt_t` | Enum (requires `SSF_JSON_CONFIG_ENABLE_FLOAT_GEN == 1`) | Float format for [`SSFJsonPrintDouble()`](#ssfjsonprintdouble): `SSF_JSON_FLT_FMT_PREC_0`–`SSF_JSON_FLT_FMT_PREC_9` for fixed decimal places; `SSF_JSON_FLT_FMT_STD` for `%g`; `SSF_JSON_FLT_FMT_SHORT` for shortest representation |
-| <a id="ssfjsonprintfn-t"></a>`SSFJsonPrintFn_t` | Typedef | `bool (*)(char *js, size_t size, size_t start, size_t *end, void *in)` — callback type passed to generator and update functions |
+| <a id="ssfjsonprintfn-t"></a>`SSFJsonPrintFn_t` | Typedef | `bool (*)(char *js, size_t size, size_t start, size_t *end, void *in)` — callback type passed to generator functions |
 
 <a id="functions"></a>
 
@@ -810,9 +808,4 @@ if (SSFJsonPrintObject(out, sizeof(out), 0, &end, PrintFn, NULL, NULL))
 }
 ```
 
----
-
-<a id="ssfjsonupdate"></a>
-
-### [↑](#ssfjson--json-parsergenerator) [`bool SSFJsonUpdate()`](#functions)
 

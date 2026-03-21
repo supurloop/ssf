@@ -115,7 +115,9 @@
 /*       - ssfcfg, check that header read from NV memory has a valid length.                     */
 /*       - ssfiso8601, fix ISO string formatting if SSF_TICKS_PER_SEC == 1000000 or 1000000000.  */
 /* 0.1.5 - Fixed nuisance compiler warnings.                                                     */
+/* 0.1.6 - Expanded all unit tests to improve code coverage.                                     */
+/*       - Documentation updates.                                                                */
 /* --------------------------------------------------------------------------------------------- */
-#define SSF_VERSION_STR "0.1.5"
+#define SSF_VERSION_STR "0.1.6"
 
 #endif /* SSF_VERSION_H_INCLUDE */

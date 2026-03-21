@@ -94,9 +94,27 @@
 /*       - SHA2 module now provides correct hash for data > 128GiB.                              */
 /*       - Corrected potential false path match when path strings contain JSON syntax chars.     */
 /*       - Removed unnecessary length checks in ssfbase64.                                       */
-/*       - Removed unnecessary preconditions in ssfaeggcm.                                       */
+/*       - Removed unnecessary preconditions in ssfaesgcm.                                       */
 /*       - Updated Visual Studio solution and project to Community 2026.                         */
+/* 0.1.4 - Additional hardening, for implementation correctness and buffer overruns.             */
+/*       - SSFBase64Encode function fixes for edge cases not returning NULL terminated string.   */
+/*       - Optimized SSFBase64Decode function to fit in minimum sized output buffer.             */
+/*       - SSFJsonGetString fixes for edge case of not returning a NULL terminated string.       */
+/*       - SSFJsonGetString fixes for incorrect decode of escaped characters.                    */
+/*       - SSFUBJsonGetString fix for edge case of not returning a NULL terminated string.       */
+/*       - Use SSF_REQUIRE macro for preconditions in ssfaesgcm modeule.                         */
+/*       - Fix ssfcfg module NV simulated memory buffer overflows.                               */
+/*       - Fix logic error in ssfll module where mid-list insert leave doubly linked list broken.*/
+/*       - ssfdec fix where some valid, large numerical strings not decoded into int.            */
+/*       - Fixed edge cases handling malloc failures and NULLing user pointer in ssfgobj module. */
+/*       - Fixed overly conservative output buffer check in SSFJsonGetString.                    */
+/*       - Fixed potential 1-byte input buffer overread in ssftlv module.                        */
+/*       - ssfubjson, fixed invalid path matches if data matches part of path.                   */
+/*       - ssfubjson, fixed read past end of buffer edge case.                                   */
+/*       - ssfubjson, fixed incorrect parsing of optimized arrays not reading last array element.*/
+/*       - ssfcfg, check that header read from NV memory has a valid length.                     */
+/*       - ssfiso8601, fix ISO string formatting if SSF_TICKS_PER_SEC == 1000000 or 1000000000.  */
 /* --------------------------------------------------------------------------------------------- */
-#define SSF_VERSION_STR "0.1.3"
+#define SSF_VERSION_STR "0.1.4"
 
 #endif /* SSF_VERSION_H_INCLUDE */

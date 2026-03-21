@@ -1223,7 +1223,7 @@ void SSFJsonUnitTest(void)
         memset(strOut, 0x55, sizeof(strOut));
         SSF_ASSERT(SSFJsonGetString("{\"k\":\"\\nABCD\"}", (SSFCStrIn_t *)path, strOut, SSF_MIN(sizeof(strOut), 6), &strOutLen));
         SSF_ASSERT(strOutLen == 5);
-        memcmp("\nABCD", strOut, strOutLen + 1);
+        SSF_ASSERT(memcmp("\nABCD", strOut, strOutLen + 1) == 0);
     }
 
     /* Verify SSFJsonGetString \uXXXX decoding succeeds with exactly-sized output buffer */

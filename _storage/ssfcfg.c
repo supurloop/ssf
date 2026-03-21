@@ -128,7 +128,7 @@ bool SSFCfgWrite(uint8_t *data, uint16_t dataLen, dataId_t dataId, dataVersion_t
         offset += sizeof(header);
         while (remainingLen)
         {
-            chunkLen = (uint16_t) sizeof(header);
+            chunkLen = (uint16_t) sizeof(tmp);
             if (chunkLen > remainingLen) chunkLen = remainingLen;
             SSF_CFG_READ_STORAGE(tmp, chunkLen, dataId, offset);
             crcStorage = SSFCRC16(tmp, chunkLen, crcStorage);
@@ -186,7 +186,8 @@ dataVersion_t SSFCfgRead(uint8_t *data, uint16_t *dataLen, size_t dataSize, data
     SSF_CFG_READ_STORAGE((uint8_t *)&header, sizeof(header), dataId, 0);
 
     /* Is header OK? */
-    if ((header.dataLen <= dataSize) &&
+    if ((header.dataLen <= SSF_MAX_CFG_DATA_SIZE) &&
+        (header.dataLen <= dataSize) &&
         (header.dataId == dataId) &&
         (header.dataVersion >= 0) &&
         (header.magic == SSF_CFG_MAGIC))

@@ -101,6 +101,7 @@ static bool _SSFUBJsonArray(const uint8_t *js, size_t jsLen, size_t *index, size
     size_t len = (size_t)-1;
     SSFUBJsonType_t fjt;
     uint8_t t = 0;
+    bool isOpt;
 
     SSF_REQUIRE(js != NULL);
     SSF_REQUIRE(index != NULL);
@@ -124,7 +125,8 @@ static bool _SSFUBJsonArray(const uint8_t *js, size_t jsLen, size_t *index, size
     (*index)++; if (*index >= jsLen) return false;
 
     /* Opt type field? */
-    if (js[*index] == UBJ_TYPE_ARRAY_OPT)
+    isOpt = js[*index] == UBJ_TYPE_ARRAY_OPT;
+    if (isOpt)
     {
         (*index)++; if (*index >= jsLen) return false;
         t = js[*index];
@@ -160,13 +162,20 @@ static bool _SSFUBJsonArray(const uint8_t *js, size_t jsLen, size_t *index, size
     {
         if (pindex == curIndex) { *start = valStart; *end = valEnd; *jt = djt; }
         if (len != (size_t)-1) len--;
-        if (((js[*index] == UBJ_TYPE_ARRAY_CLOSE) && (len == (size_t)-1)) ||
-            ((len != (size_t)-1) && (len == 0))) break;
+        if (isOpt == false)
+        {
+            if (((js[*index] == UBJ_TYPE_ARRAY_CLOSE) && (len == (size_t)-1)) ||
+                ((len != (size_t)-1) && (len == 0))) break;
+        }
         curIndex++;
     }
 valDone:
     if ((pindex != (size_t)-1) && (pindex > curIndex)) *jt = SSF_UBJSON_TYPE_ERROR;
-    if ((js[*index] != UBJ_TYPE_ARRAY_CLOSE) && (len == (size_t)-1)) return false;
+    if (isOpt == false)
+    {
+        if (*index >= jsLen) return false;
+        if ((js[*index] != UBJ_TYPE_ARRAY_CLOSE) && (len == (size_t)-1)) return false;
+    }
     *aend = *index;
 
     if ((path != NULL) && (path[depth] == NULL))
@@ -197,7 +206,7 @@ static bool _SSFJsonTypeField(const uint8_t *js, size_t jsLen, size_t *index, si
         t = js[*index];
         if ((t != UBJ_TYPE_OBJ_OPEN) && (t != UBJ_TYPE_ARRAY_OPEN) &&
             (t != UBJ_TYPE_OBJ_CLOSE) && (t != UBJ_TYPE_ARRAY_CLOSE))
-        { (*index)++; if (*index >= jsLen)return false; }
+        { (*index)++; if (*index >= jsLen) return false; }
     }
     else { t = override; }
 
@@ -230,7 +239,7 @@ static bool _SSFJsonTypeField(const uint8_t *js, size_t jsLen, size_t *index, si
         /* Fall through on purpose */
         _ssfubParseInt:
         *fstart = *index;
-        (*index)+= len; if (*index >= jsLen) return false;
+        (*index) += len; if (*index > jsLen) return false;
         *fend = *index;
         return true;
         case UBJ_TYPE_HPN:
@@ -257,7 +266,7 @@ static bool _SSFJsonTypeField(const uint8_t *js, size_t jsLen, size_t *index, si
                 return false;
             }
             *fstart = *index;
-            (*index)+= len; if (*index >= jsLen)return false;
+            (*index) += len; if (*index > jsLen) return false;
             *fend = *index;
             *fjt = SSF_UBJSON_TYPE_STRING;
             return true;
@@ -389,9 +398,8 @@ static bool _SSFJsonNameValue(const uint8_t *js, size_t jsLen, size_t *index, si
     fend = *index;
 
     /* Is path set and do we have a match? */
-    if ((path != NULL) && (path[depth] != NULL) &&
-        (strncmp(path[depth], (char *)&js[fstart],
-                 SSF_MAX(fend - fstart, (size_t)strlen(path[depth]))) == 0))
+    if ((path != NULL) && (path[depth] != NULL) && ((fend - fstart) == strlen(path[depth])) &&
+        (strncmp(path[depth], (char *)&js[fstart], fend - fstart) == 0))
     /* Yes, keep matching */
     { retVal = _SSFUBJsonValue(js, jsLen, index, start, end, path, depth, jt, 0); }
     else

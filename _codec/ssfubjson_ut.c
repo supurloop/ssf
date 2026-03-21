@@ -1427,5 +1427,64 @@ void SSFUBJsonUnitTest(void)
     alen = 10;
     SSF_ASSERT(SSFUBJsonPrintObject(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, _SSFUBJsonPrintFn4, &alen));
     SSF_ASSERT(SSFUBJsonIsValid(jsOut, jsOutEnd));
+
+    /* Verify top-level optimized array parses when last element data ends exactly at jsLen */
+    /* [$i#U\x02\x0a\x0b = optimized int8 array, count=2, elements: 10, 11 (8 bytes total) */
+    {
+        int8_t outVal;
+
+        SSF_ASSERT(SSFUBJsonIsValid((uint8_t *)"[$i#U\x02\x0a\x0b", 8));
+
+        memset(path, 0, sizeof(path));
+        aidx1 = 0;
+        path[0] = (char *)&aidx1;
+        SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"[$i#U\x02\x0a\x0b", 8,
+                                     (SSFCStrIn_t *)path, &outVal) == true);
+        SSF_ASSERT(outVal == 10);
+
+        aidx1 = 1;
+        SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"[$i#U\x02\x0a\x0b", 8,
+                                     (SSFCStrIn_t *)path, &outVal) == true);
+        SSF_ASSERT(outVal == 11);
+    }
+
+    /* Verify name comparison does not match when search key is longer than the actual name */
+    /* UBJSON: {i\x02abi\x05} = object with key "ab", value int8=5 */
+    /* The byte after name "ab" is the value type 'i' (0x69). Searching for "abi" must NOT match. */
+    {
+        int8_t outVal;
+
+        memset(path, 0, sizeof(path));
+        path[0] = "abi";
+        SSF_ASSERT(SSFUBJsonGetType((uint8_t *)"{i\x02" "ab" "i\x05}", 8,
+                                     (SSFCStrIn_t *)path) == SSF_UBJSON_TYPE_ERROR);
+        SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x02" "ab" "i\x05}", 8,
+                                     (SSFCStrIn_t *)path, &outVal) == false);
+
+        /* Verify the correct key "ab" still matches */
+        path[0] = "ab";
+        SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x02" "ab" "i\x05}", 8,
+                                     (SSFCStrIn_t *)path, &outVal) == true);
+        SSF_ASSERT(outVal == 5);
+    }
+
+    /* Verify top-level optimized string array parses when last element data ends at jsLen */
+    /* [$S#U\x01U\x02hi = optimized string array, count=1, one element: "hi" (10 bytes total) */
+    /* Pos: [0]='[' [1]='$' [2]='S' [3]='#' [4]='U' [5]=1 [6]='U' [7]=2 [8]='h' [9]='i' */
+    {
+        char outStr[8];
+        size_t outStrLen;
+
+        SSF_ASSERT(SSFUBJsonIsValid((uint8_t *)"[$S#U\x01U\x02hi", 10));
+
+        memset(path, 0, sizeof(path));
+        aidx1 = 0;
+        path[0] = (char *)&aidx1;
+        SSF_ASSERT(SSFUBJsonGetString((uint8_t *)"[$S#U\x01U\x02hi", 10,
+                                       (SSFCStrIn_t *)path, outStr, sizeof(outStr),
+                                       &outStrLen) == true);
+        SSF_ASSERT(outStrLen == 2);
+        SSF_ASSERT(memcmp(outStr, "hi", 2) == 0);
+    }
 }
 

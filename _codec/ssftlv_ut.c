@@ -194,4 +194,101 @@ void SSFTLVUnitTest(void)
     SSFTLVInit(&tlv, buf, sizeof(buf), 0);
     SSF_ASSERT_TEST(SSFTLVInit(&tlv, buf, sizeof(buf), 0));
     SSFTLVDeInit(&tlv);
+
+    /* SSFTLVGet with val buffer too small */
+    memset(&tlv, 0, sizeof(tlv));
+    SSFTLVInit(&tlv, buf, sizeof(buf), 0);
+    SSF_ASSERT(SSFTLVPut(&tlv, 1, (uint8_t *)"hello", 5));
+    SSF_ASSERT(SSFTLVGet(&tlv, 1, 0, val, 5, &valLen));
+    SSF_ASSERT(valLen == 5);
+    SSF_ASSERT(memcmp(val, "hello", 5) == 0);
+    SSF_ASSERT(SSFTLVGet(&tlv, 1, 0, val, 4, &valLen) == false);
+    SSF_ASSERT(SSFTLVGet(&tlv, 1, 0, val, 1, &valLen) == false);
+    SSF_ASSERT(SSFTLVGet(&tlv, 1, 0, val, 0, &valLen) == false);
+    SSFTLVDeInit(&tlv);
+
+    /* SSFTLVRead on empty TLV */
+    memset(&tlv, 0, sizeof(tlv));
+    SSFTLVInit(&tlv, buf, sizeof(buf), 0);
+    SSF_ASSERT(SSFTLVGet(&tlv, 0, 0, val, sizeof(val), &valLen) == false);
+    SSF_ASSERT(SSFTLVFind(&tlv, 0, 0, &valPtr, &valLen) == false);
+    SSFTLVDeInit(&tlv);
+
+    /* SSFTLVPut with zero-length value */
+    memset(&tlv, 0, sizeof(tlv));
+    SSFTLVInit(&tlv, buf, sizeof(buf), 0);
+    SSF_ASSERT(SSFTLVPut(&tlv, 10, (uint8_t *)"x", 0));
+#if SSF_TLV_ENABLE_FIXED_MODE == 1
+    SSF_ASSERT(tlv.bufLen == 2);
+#endif
+    SSF_ASSERT(SSFTLVGet(&tlv, 10, 0, val, sizeof(val), &valLen));
+    SSF_ASSERT(valLen == 0);
+    SSF_ASSERT(SSFTLVFind(&tlv, 10, 0, &valPtr, &valLen));
+    SSF_ASSERT(valLen == 0);
+    SSFTLVDeInit(&tlv);
+
+    /* SSFTLVRead searching for a tag that was never put */
+    memset(&tlv, 0, sizeof(tlv));
+    SSFTLVInit(&tlv, buf, sizeof(buf), 0);
+    SSF_ASSERT(SSFTLVPut(&tlv, 1, (uint8_t *)"abc", 3));
+    SSF_ASSERT(SSFTLVPut(&tlv, 2, (uint8_t *)"def", 3));
+    SSF_ASSERT(SSFTLVGet(&tlv, 99, 0, val, sizeof(val), &valLen) == false);
+    SSF_ASSERT(SSFTLVFind(&tlv, 99, 0, &valPtr, &valLen) == false);
+
+    /* SSFTLVGet for middle tag with value verification */
+    SSF_ASSERT(SSFTLVGet(&tlv, 2, 0, val, sizeof(val), &valLen));
+    SSF_ASSERT(valLen == 3);
+    SSF_ASSERT(memcmp(val, "def", 3) == 0);
+    SSF_ASSERT(SSFTLVFind(&tlv, 2, 0, &valPtr, &valLen));
+    SSF_ASSERT(valLen == 3);
+    SSF_ASSERT(memcmp(valPtr, "def", 3) == 0);
+    /* Verify first tag still accessible */
+    SSF_ASSERT(SSFTLVGet(&tlv, 1, 0, val, sizeof(val), &valLen));
+    SSF_ASSERT(valLen == 3);
+    SSF_ASSERT(memcmp(val, "abc", 3) == 0);
+    SSFTLVDeInit(&tlv);
+
+    /* SSFTLVInit with non-zero bufLen (pre-populated buffer) */
+    {
+        SSFTLV_t tlv2;
+        uint8_t buf2[64];
+        uint32_t savedBufLen;
+
+        memset(&tlv2, 0, sizeof(tlv2));
+        SSFTLVInit(&tlv2, buf2, sizeof(buf2), 0);
+        SSF_ASSERT(SSFTLVPut(&tlv2, 5, (uint8_t *)"test", 4));
+        SSF_ASSERT(SSFTLVPut(&tlv2, 6, (uint8_t *)"data", 4));
+        savedBufLen = tlv2.bufLen;
+        SSFTLVDeInit(&tlv2);
+
+        /* Re-init with the saved bufLen to restore the pre-populated data */
+        memset(&tlv2, 0, sizeof(tlv2));
+        SSFTLVInit(&tlv2, buf2, sizeof(buf2), savedBufLen);
+        SSF_ASSERT(SSFTLVGet(&tlv2, 5, 0, val, sizeof(val), &valLen));
+        SSF_ASSERT(valLen == 4);
+        SSF_ASSERT(memcmp(val, "test", 4) == 0);
+        SSF_ASSERT(SSFTLVGet(&tlv2, 6, 0, val, sizeof(val), &valLen));
+        SSF_ASSERT(valLen == 4);
+        SSF_ASSERT(memcmp(val, "data", 4) == 0);
+        /* Can still put more data */
+        SSF_ASSERT(SSFTLVPut(&tlv2, 7, (uint8_t *)"more", 4));
+        SSF_ASSERT(SSFTLVGet(&tlv2, 7, 0, val, sizeof(val), &valLen));
+        SSF_ASSERT(valLen == 4);
+        SSF_ASSERT(memcmp(val, "more", 4) == 0);
+        SSFTLVDeInit(&tlv2);
+    }
+
+    /* Re-init after deinit with new data */
+    memset(&tlv, 0, sizeof(tlv));
+    SSFTLVInit(&tlv, buf, sizeof(buf), 0);
+    SSF_ASSERT(SSFTLVPut(&tlv, 1, (uint8_t *)"old", 3));
+    SSFTLVDeInit(&tlv);
+    memset(&tlv, 0, sizeof(tlv));
+    SSFTLVInit(&tlv, buf, sizeof(buf), 0);
+    SSF_ASSERT(SSFTLVGet(&tlv, 1, 0, val, sizeof(val), &valLen) == false);
+    SSF_ASSERT(SSFTLVPut(&tlv, 2, (uint8_t *)"new", 3));
+    SSF_ASSERT(SSFTLVGet(&tlv, 2, 0, val, sizeof(val), &valLen));
+    SSF_ASSERT(valLen == 3);
+    SSF_ASSERT(memcmp(val, "new", 3) == 0);
+    SSFTLVDeInit(&tlv);
 }

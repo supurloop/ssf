@@ -1468,6 +1468,126 @@ void SSFUBJsonUnitTest(void)
         SSF_ASSERT(outVal == 5);
     }
 
+    /* SSFUBJsonGetString with output buffer too small */
+    {
+        char outStr2[8];
+        size_t outStrLen2;
+
+        memset(path, 0, sizeof(path));
+        path[0] = "s";
+        /* "world" is 5 chars, outSize=6 succeeds (5 + null) */
+        SSF_ASSERT(SSFUBJsonGetString((uint8_t *)"{i\x01sSi\x05world}", 13,
+                                       (SSFCStrIn_t *)path, outStr2, 6, &outStrLen2));
+        SSF_ASSERT(outStrLen2 == 5);
+        /* outSize=5 fails (no room for null after 5 chars) */
+        SSF_ASSERT(SSFUBJsonGetString((uint8_t *)"{i\x01sSi\x05world}", 13,
+                                       (SSFCStrIn_t *)path, outStr2, 5, &outStrLen2) == false);
+        SSF_ASSERT(SSFUBJsonGetString((uint8_t *)"{i\x01sSi\x05world}", 13,
+                                       (SSFCStrIn_t *)path, outStr2, 1, &outStrLen2) == false);
+    }
+
+    /* SSFUBJsonGetString with outLen == NULL */
+    {
+        char outStr2[16];
+
+        memset(path, 0, sizeof(path));
+        path[0] = "s";
+        memset(outStr2, 0xff, sizeof(outStr2));
+        SSF_ASSERT(SSFUBJsonGetString((uint8_t *)"{i\x01sSi\x05world}", 13,
+                                       (SSFCStrIn_t *)path, outStr2, sizeof(outStr2), NULL));
+        SSF_ASSERT(memcmp(outStr2, "world", 6) == 0);
+    }
+
+    /* SSFUBJsonGetInt overflow/narrowing failures */
+    {
+        int8_t outI8t;
+        uint8_t outU8t;
+
+        memset(path, 0, sizeof(path));
+        path[0] = "n";
+        /* Int8 max is 127, uint8 value 128 should fail for signed int8 */
+        SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01nU\x80}", 7,
+                                     (SSFCStrIn_t *)path, &outI8t) == false);
+        /* Int8 max is 127, uint8 value 255 should fail for signed int8 */
+        SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01nU\xFF}", 7,
+                                     (SSFCStrIn_t *)path, &outI8t) == false);
+        /* UInt8 max is 255, int16 value 256 (big-endian 0x0100) should fail for uint8 */
+        SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nI\x01\x00}", 8,
+                                      (SSFCStrIn_t *)path, &outU8t) == false);
+        /* Int8 boundary: value 127 (as uint8) should succeed */
+        SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01nU\x7F}", 7,
+                                     (SSFCStrIn_t *)path, &outI8t));
+        SSF_ASSERT(outI8t == 127);
+        /* UInt8 boundary: value 255 should succeed */
+        SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nU\xFF}", 7,
+                                      (SSFCStrIn_t *)path, &outU8t));
+        SSF_ASSERT(outU8t == 255);
+    }
+
+    /* SSFUBJsonGetFloat/GetDouble on wrong value type */
+    {
+        float outF;
+        double outD;
+
+        memset(path, 0, sizeof(path));
+        path[0] = "n";
+        /* Value is int8, not float32 */
+        SSF_ASSERT(SSFUBJsonGetFloat((uint8_t *)"{i\x01ni\x05}", 7,
+                                      (SSFCStrIn_t *)path, &outF) == false);
+        /* Value is int8, not float64 */
+        SSF_ASSERT(SSFUBJsonGetDouble((uint8_t *)"{i\x01ni\x05}", 7,
+                                       (SSFCStrIn_t *)path, &outD) == false);
+        /* Value is string, not float */
+        path[0] = "s";
+        SSF_ASSERT(SSFUBJsonGetFloat((uint8_t *)"{i\x01sSi\x02hi}", 10,
+                                      (SSFCStrIn_t *)path, &outF) == false);
+        SSF_ASSERT(SSFUBJsonGetDouble((uint8_t *)"{i\x01sSi\x02hi}", 10,
+                                       (SSFCStrIn_t *)path, &outD) == false);
+    }
+
+    /* SSFUBJsonPrintInt/SSFUBJsonPrintString with insufficient buffer */
+    {
+        uint8_t tinyBuf[4];
+        size_t tinyEnd;
+
+        /* PrintInt needs type byte + value bytes. size=1 fails for any value */
+        SSF_ASSERT(SSFUBJsonPrintInt(tinyBuf, 1, 0, &tinyEnd, 0, false,
+                                      SSF_UBJSON_TYPE_ERROR) == false);
+        /* PrintString needs 'S' + 'U' + len + data + null_not_needed. size=3 fails for "ab" */
+        SSF_ASSERT(SSFUBJsonPrintString(tinyBuf, 3, 0, &tinyEnd, "ab") == false);
+        /* size=0 at start fails */
+        SSF_ASSERT(SSFUBJsonPrintChar(tinyBuf, 0, 0, &tinyEnd, 'T') == false);
+    }
+
+    /* Round-trip: generate object then parse individual values back */
+    {
+        int8_t rtI8;
+        char rtStr[16];
+        size_t rtStrLen;
+
+        /* Hand-crafted UBJSON: {s:"hello", n:42} */
+        /* {  i\x01s  S i\x05 hello  i\x01n  i\x2A  } */
+        uint8_t rtUbj[] = "{i\x01sSi\x05helloi\x01ni\x2A}";
+        size_t rtUbjLen = 18;
+
+        SSF_ASSERT(SSFUBJsonIsValid(rtUbj, rtUbjLen));
+
+        memset(path, 0, sizeof(path));
+        path[0] = "s";
+        SSF_ASSERT(SSFUBJsonGetString(rtUbj, rtUbjLen, (SSFCStrIn_t *)path, rtStr,
+                                       sizeof(rtStr), &rtStrLen));
+        SSF_ASSERT(rtStrLen == 5);
+        SSF_ASSERT(memcmp(rtStr, "hello", 5) == 0);
+
+        path[0] = "n";
+        SSF_ASSERT(SSFUBJsonGetInt8(rtUbj, rtUbjLen, (SSFCStrIn_t *)path, &rtI8));
+        SSF_ASSERT(rtI8 == 42);
+
+        /* Non-existent key returns false */
+        path[0] = "x";
+        SSF_ASSERT(SSFUBJsonGetInt8(rtUbj, rtUbjLen, (SSFCStrIn_t *)path, &rtI8) == false);
+    }
+
     /* Verify top-level optimized string array parses when last element data ends at jsLen */
     /* [$S#U\x01U\x02hi = optimized string array, count=1, one element: "hi" (10 bytes total) */
     /* Pos: [0]='[' [1]='$' [2]='S' [3]='#' [4]='U' [5]=1 [6]='U' [7]=2 [8]='h' [9]='i' */

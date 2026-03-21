@@ -225,7 +225,7 @@ bool SSFGObjGetLabel(SSFGObj_t *gobj, SSFCStrOut_t labelCStrOut, size_t labelCSt
     SSF_REQUIRE(labelCStrOut != NULL);
 
     if (gobj->labelCStr == NULL) return false;
-    len = strlen(gobj->labelCStr) + 1;;
+    len = strlen(gobj->labelCStr) + 1;
     if (len > labelCStrOutSize) return false;
 
     memcpy(labelCStrOut, gobj->labelCStr, len);
@@ -265,7 +265,7 @@ bool SSFGObjGetString(SSFGObj_t *gobj, SSFCStrOut_t valueCStrOut, size_t valueCS
 
     if (gobj->dataType != SSF_OBJ_TYPE_STR) return false;
     SSF_ASSERT(gobj->data != NULL);
-    len = strlen((char *)gobj->data) + 1;;
+    len = strlen((char *)gobj->data) + 1;
     if (len > valueCStrOutSize) return false;
 
     memcpy(valueCStrOut, gobj->data, len);

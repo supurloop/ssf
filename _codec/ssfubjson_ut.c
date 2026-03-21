@@ -1022,7 +1022,7 @@ void SSFUBJsonUnitTest(void)
     SSF_ASSERT(SSFUBJsonGetString((uint8_t *)"{i\x01sSi\x05world}", 13, (SSFCStrIn_t *)path, outStr, sizeof(outStr),
                                   &outStrLen));
     SSF_ASSERT_TEST(SSFUBJsonGetString((uint8_t*)"{i\x01sSi\x05world}", 13, (SSFCStrIn_t*)path, outStr, 0,
-                                       &outStrLen) == false);
+                                       &outStrLen));
 
     SSF_ASSERT(outStrLen == 5);
     SSF_ASSERT(memcmp(outStr, "world", outStrLen) == 0);
@@ -1472,8 +1472,8 @@ void SSFUBJsonUnitTest(void)
     /* [$S#U\x01U\x02hi = optimized string array, count=1, one element: "hi" (10 bytes total) */
     /* Pos: [0]='[' [1]='$' [2]='S' [3]='#' [4]='U' [5]=1 [6]='U' [7]=2 [8]='h' [9]='i' */
     {
-        char outStr[8];
-        size_t outStrLen;
+        char outStr2[8];
+        size_t outStrLen2;
 
         SSF_ASSERT(SSFUBJsonIsValid((uint8_t *)"[$S#U\x01U\x02hi", 10));
 
@@ -1481,10 +1481,10 @@ void SSFUBJsonUnitTest(void)
         aidx1 = 0;
         path[0] = (char *)&aidx1;
         SSF_ASSERT(SSFUBJsonGetString((uint8_t *)"[$S#U\x01U\x02hi", 10,
-                                       (SSFCStrIn_t *)path, outStr, sizeof(outStr),
-                                       &outStrLen) == true);
-        SSF_ASSERT(outStrLen == 2);
-        SSF_ASSERT(memcmp(outStr, "hi", 2) == 0);
+                                       (SSFCStrIn_t *)path, outStr2, sizeof(outStr2),
+                                       &outStrLen2) == true);
+        SSF_ASSERT(outStrLen2 == 2);
+        SSF_ASSERT(memcmp(outStr2, "hi", 2) == 0);
     }
 }
 

@@ -162,10 +162,10 @@ static bool _SSFUBJsonArray(const uint8_t *js, size_t jsLen, size_t *index, size
     {
         if (pindex == curIndex) { *start = valStart; *end = valEnd; *jt = djt; }
         if (len != (size_t)-1) len--;
+        if ((len != (size_t)-1) && (len == 0)) break;
         if (isOpt == false)
         {
-            if (((js[*index] == UBJ_TYPE_ARRAY_CLOSE) && (len == (size_t)-1)) ||
-                ((len != (size_t)-1) && (len == 0))) break;
+            if ((js[*index] == UBJ_TYPE_ARRAY_CLOSE) && (len == (size_t)-1)) break;
         }
         curIndex++;
     }

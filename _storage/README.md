@@ -18,6 +18,7 @@ and version-migration logic at startup.
 
 - [`ssfport.h`](../ssfport.h)
 - [`ssfoptions.h`](../ssfoptions.h)
+- [`ssfcrc16.h`](../_edc/ssfcrc16.h)
 
 <a id="notes"></a>
 
@@ -30,9 +31,10 @@ and version-migration logic at startup.
   `SSF_CFG_ENABLE_STORAGE_RAM` is `1`.
 - `dataVersion_t` values must be non-negative integers; `SSF_CFG_DATA_VERSION_INVALID` (`-1`)
   is reserved for the "not found" return value of `SSFCfgRead()`.
-- `SSFCfgWrite()` performs a read-before-write check and skips the erase and write cycle when
+- `SSFCfgWrite()` performs a read-before-write check and returns `false` when
   the data in NV storage is already identical, extending flash endurance.
-- Data length per `dataId` is limited to `SSF_MAX_CFG_DATA_SIZE_LIMIT` bytes.
+- Data length per `dataId` is limited to `SSF_MAX_CFG_DATA_SIZE` bytes, which is derived at
+  compile time as `SSF_CFG_MAX_STORAGE_SIZE - sizeof(SSFCfgHeader_t)`.
 - `SSFCfgInit()` and `SSFCfgDeInit()` are only compiled in when
   `SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1`; omit them in single-threaded builds.
 - The interface is thread-safe when `SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1` and the
@@ -47,7 +49,6 @@ All options are set in `ssfoptions.h`.
 | Option | Default | Description |
 |--------|---------|-------------|
 | `SSF_CFG_MAX_STORAGE_SIZE` | `4096` | Maximum size in bytes of one erasable NV storage sector |
-| `SSF_MAX_CFG_DATA_SIZE_LIMIT` | `32` | Maximum bytes of configuration data per `dataId`; data passed to `SSFCfgWrite()` must not exceed this |
 | `SSF_CFG_WRITE_CHECK_CHUNK_SIZE` | `32` | Size of the temporary stack buffer used during the read-before-write check; reduce if stack space is limited |
 | `SSF_CFG_ENABLE_STORAGE_RAM` | `1` | `1` to use a RAM-based simulated NV storage suitable for unit tests; `0` to use real hardware via the port macros below |
 | `SSF_CFG_TYPEDEF_STRUCT` | `typedef struct` | Optionally append a packed-struct attribute (e.g. `__attribute__((packed))`) to the internal record structure |
@@ -160,18 +161,19 @@ bool SSFCfgWrite(uint8_t *data, uint16_t dataLen, dataId_t dataId, dataVersion_t
 
 Writes `dataLen` bytes from `data` to NV storage for the given `dataId`, tagged with
 `dataVersion` and protected by a CRC. Before writing, performs a read-back comparison; if the
-NV storage already holds identical content the erase and write cycle is suppressed, extending
-flash endurance. The sector is erased and rewritten only when the stored content differs.
+NV storage already holds identical content (same `dataLen`, `dataId`, `dataVersion`, and CRC)
+the erase and write cycle is suppressed and the function returns `false`, extending flash
+endurance. The sector is erased and rewritten only when the stored content differs.
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
 | `data` | in | `uint8_t *` | Pointer to the configuration data to write. Must not be `NULL`. |
-| `dataLen` | in | `uint16_t` | Number of bytes to write. Must be greater than `0` and no more than `SSF_MAX_CFG_DATA_SIZE_LIMIT`. |
+| `dataLen` | in | `uint16_t` | Number of bytes to write. May be `0`. Must be no more than `SSF_MAX_CFG_DATA_SIZE`. |
 | `dataId` | in | `dataId_t` | Unique identifier for this configuration block. Maps to a distinct NV storage sector. |
 | `dataVersion` | in | `dataVersion_t` | Application-defined version number to store alongside the data. Must be `>= 0`. |
 
-**Returns:** `true` if the data was written (or was already identical) and verified successfully;
-`false` if the write or subsequent read-back verification failed.
+**Returns:** `true` if new data was written to NV storage; `false` if the data in NV storage was
+already identical (no write performed).
 
 <a id="ex-write"></a>
 
@@ -181,7 +183,7 @@ flash endurance. The sector is erased and rewritten only when the stored content
 #define MY_CFG_ID  (0u)
 #define MY_CFG_VER (1u)
 
-uint8_t cfg[SSF_MAX_CFG_DATA_SIZE_LIMIT];
+uint8_t cfg[32];
 
 /* Fill cfg with configuration data */
 cfg[0] = 0x01u;
@@ -189,13 +191,13 @@ cfg[1] = 0x02u;
 
 if (SSFCfgWrite(cfg, 2u, MY_CFG_ID, MY_CFG_VER))
 {
-    /* Data written and verified in NV storage */
+    /* Data written to NV storage */
 }
 
 /* Redundant write of identical data — erase/write cycle is suppressed */
-if (SSFCfgWrite(cfg, 2u, MY_CFG_ID, MY_CFG_VER))
+if (SSFCfgWrite(cfg, 2u, MY_CFG_ID, MY_CFG_VER) == false)
 {
-    /* Returns true; NV storage unchanged (content already matched) */
+    /* Returns false; NV storage unchanged (content already matched) */
 }
 ```
 
@@ -217,7 +219,7 @@ and sets `*datalen` to the number of bytes read. Returns the version stored with
 |-----------|-----------|------|-------------|
 | `data` | out | `uint8_t *` | Buffer to receive the configuration data. Must not be `NULL`. |
 | `datalen` | out | `uint16_t *` | Receives the actual number of bytes read. Must not be `NULL`. |
-| `dataSize` | in | `size_t` | Allocated size of `data`. Must be at least `SSF_MAX_CFG_DATA_SIZE_LIMIT`. |
+| `dataSize` | in | `size_t` | Allocated size of `data`. Must be at least as large as the stored `dataLen`; if smaller, the read fails and returns `SSF_CFG_DATA_VERSION_INVALID`. |
 | `dataId` | in | `dataId_t` | Identifier of the configuration block to read. |
 
 **Returns:** The `dataVersion_t` stored with the block if found and the CRC is valid;
@@ -234,7 +236,7 @@ version (if any) was found.
 #define MY_CFG_VER_1 (1u)
 #define MY_CFG_VER_2 (2u)
 
-uint8_t       cfg[SSF_MAX_CFG_DATA_SIZE_LIMIT];
+uint8_t       cfg[32];
 uint16_t      cfgLen;
 dataVersion_t ver;
 

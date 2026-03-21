@@ -69,109 +69,99 @@ typedef struct
 
 SSFUnitTest_t unitTests[] =
 {
+    /* _codec */
+#if SSF_CONFIG_BASE64_UNIT_TEST == 1
+    { "ssfbase64", "Base64 Codec", SSFBase64UnitTest },
+#endif /* SSF_CONFIG_BASE64_UNIT_TEST */
+#if SSF_CONFIG_DEC_UNIT_TEST == 1
+    { "ssfdec", "Decimal String Codec", SSFDecUnitTest },
+#endif /* SSF_CONFIG_DEC_UNIT_TEST */
 #if SSF_CONFIG_GOBJ_UNIT_TEST == 1
     { "ssfgobj", "Generic Object Codec", SSFGObjUnitTest },
-#endif /* SSF_CONFIG_UBJSON_UNIT_TEST */
-
+#endif /* SSF_CONFIG_GOBJ_UNIT_TEST */
+#if SSF_CONFIG_HEX_UNIT_TEST == 1
+    { "ssfhex", "Hex String Codec", SSFHexUnitTest },
+#endif /* SSF_CONFIG_HEX_UNIT_TEST */
+#if SSF_CONFIG_INI_UNIT_TEST == 1
+    { "ssfini", "INI Codec", SSFINIUnitTest },
+#endif /* SSF_CONFIG_INI_UNIT_TEST */
+#if SSF_CONFIG_JSON_UNIT_TEST == 1
+    { "ssfjson", "JSON Codec", SSFJsonUnitTest },
+#endif /* SSF_CONFIG_JSON_UNIT_TEST */
+#if SSF_CONFIG_STR_UNIT_TEST == 1
+    { "ssfstr", "Safe C Strings", SSFStrUnitTest },
+#endif /* SSF_CONFIG_STR_UNIT_TEST */
+#if SSF_CONFIG_TLV_UNIT_TEST == 1
+    { "ssftlv", "Tag/Length/Value Codec", SSFTLVUnitTest },
+#endif /* SSF_CONFIG_TLV_UNIT_TEST */
 #if SSF_CONFIG_UBJSON_UNIT_TEST == 1
     { "ssfubjson", "Universal Binary JSON Codec", SSFUBJsonUnitTest },
 #endif /* SSF_CONFIG_UBJSON_UNIT_TEST */
 
-#if SSF_CONFIG_HEX_UNIT_TEST == 1
-    { "ssfhex", "Hex String Codec", SSFHexUnitTest },
-#endif /* SSF_CONFIG_BASE64_UNIT_TEST */
-
-#if SSF_CONFIG_JSON_UNIT_TEST == 1
-    { "ssfjson", "JSON Codec", SSFJsonUnitTest },
-#endif /* SSF_CONFIG_JSON_UNIT_TEST */
-
-#if SSF_CONFIG_HEAP_UNIT_TEST == 1
-    { "ssfheap", "Integrity Checked Heap", SSFHeapUnitTest },
-#endif /* SSF_CONFIG_STR_UNIT_TEST */
-
-#if SSF_CONFIG_STR_UNIT_TEST == 1
-    { "ssfstr", "Safe C Strings", SSFStrUnitTest },
-#endif /* SSF_CONFIG_STR_UNIT_TEST */
-
-#if SSF_CONFIG_DEC_UNIT_TEST == 1
-    { "ssfdec", "Decimal String Codec", SSFDecUnitTest },
-#endif /* SSF_CONFIG_BFIFO_UNIT_TEST */
-
-#if SSF_CONFIG_BFIFO_UNIT_TEST == 1
-    { "ssfbfifo", "Byte FIFO", SSFBFifoUnitTest },
-#endif /* SSF_CONFIG_BFIFO_UNIT_TEST */
-
-#if SSF_CONFIG_LL_UNIT_TEST == 1
-    { "ssfll", "Linked List", SSFLLUnitTest },
-#endif  /* SSF_CONFIG_LL_UNIT_TEST */
-
-#if SSF_CONFIG_MPOOL_UNIT_TEST == 1
-    { "ssfmpool", "Memory Pool", SSFMPoolUnitTest },
-#endif /* SSF_CONFIG_MPOOL_UNIT_TEST */
-
-#if SSF_CONFIG_BASE64_UNIT_TEST == 1
-    { "ssfbase64", "Base64 Codec", SSFBase64UnitTest },
-#endif /* SSF_CONFIG_BASE64_UNIT_TEST */
-
-#if SSF_CONFIG_FCSUM_UNIT_TEST == 1
-    { "ssffcsum", "Fletcher's Checksum", SSFFCSumUnitTest },
-#endif /* SSF_CONFIG_FCSUM_UNIT_TEST */
-
-#if SSF_CONFIG_SM_UNIT_TEST == 1
-    { "ssfsm", "Finite State Machine", SSFSMUnitTest },
-#endif /* SSF_CONFIG_SM_UNIT_TEST */
-
-#if SSF_CONFIG_RS_UNIT_TEST == 1
-    { "ssfrs", "Reed Solomon ECC", SSFRSUnitTest },
-#endif /* SSF_CONFIG_SM_UNIT_TEST */
-
-#if SSF_CONFIG_CRC16_UNIT_TEST == 1
-    { "ssfcrc16", "16-bit XMODEM/CCITT-16", SSFCRC16UnitTest },
-#endif /* SSF_CONFIG_CRC16_UNIT_TEST */
-
-#if SSF_CONFIG_CRC32_UNIT_TEST == 1
-    { "ssfcrc32", "32-bit CCITT-32", SSFCRC32UnitTest },
-#endif /* SSF_CONFIG_CRC32_UNIT_TEST */
-
+    /* _crypto */
+#if SSF_CONFIG_AES_UNIT_TEST == 1
+    { "ssfaes", "AES128-256 Block", SSFAESUnitTest },
+#endif /* SSF_CONFIG_AES_UNIT_TEST */
+#if SSF_CONFIG_AESGCM_UNIT_TEST == 1
+    { "ssfaesgcm", "AES-GCM Authenticated Cipher", SSFAESGCMUnitTest },
+#endif /* SSF_CONFIG_AESGCM_UNIT_TEST */
+#if SSF_CONFIG_PRNG_UNIT_TEST == 1
+    { "ssfprng", "Crypto Secure Capable PRNG", SSFPRNGUnitTest },
+#endif /* SSF_CONFIG_PRNG_UNIT_TEST */
 #if SSF_CONFIG_SHA2_UNIT_TEST == 1
     { "ssfsha2", "SHA2 256-512-bits", SSFSHA2UnitTest },
 #endif /* SSF_CONFIG_SHA2_UNIT_TEST */
 
-#if SSF_CONFIG_TLV_UNIT_TEST == 1
-    { "ssftlv", "Tag/Length/Value Codec", SSFTLVUnitTest },
-#endif /* SSF_CONFIG_TLV_UNIT_TEST */
+    /* _ecc */
+#if SSF_CONFIG_RS_UNIT_TEST == 1
+    { "ssfrs", "Reed Solomon ECC", SSFRSUnitTest },
+#endif /* SSF_CONFIG_RS_UNIT_TEST */
 
-#if SSF_CONFIG_AES_UNIT_TEST == 1
-    { "ssfaes", "AES128-256 Block", SSFAESUnitTest },
-#endif /* SSF_CONFIG_AES_UNIT_TEST */
+    /* _edc */
+#if SSF_CONFIG_CRC16_UNIT_TEST == 1
+    { "ssfcrc16", "16-bit XMODEM/CCITT-16", SSFCRC16UnitTest },
+#endif /* SSF_CONFIG_CRC16_UNIT_TEST */
+#if SSF_CONFIG_CRC32_UNIT_TEST == 1
+    { "ssfcrc32", "32-bit CCITT-32", SSFCRC32UnitTest },
+#endif /* SSF_CONFIG_CRC32_UNIT_TEST */
+#if SSF_CONFIG_FCSUM_UNIT_TEST == 1
+    { "ssffcsum", "Fletcher's Checksum", SSFFCSumUnitTest },
+#endif /* SSF_CONFIG_FCSUM_UNIT_TEST */
 
-#if SSF_CONFIG_AESGCM_UNIT_TEST == 1
-    { "ssfaesgcm", "AES-GCM Authenticated Cipher", SSFAESGCMUnitTest },
-#endif /* SSF_CONFIG_AESGCM_UNIT_TEST */
+    /* _fsm */
+#if SSF_CONFIG_SM_UNIT_TEST == 1
+    { "ssfsm", "Finite State Machine", SSFSMUnitTest },
+#endif /* SSF_CONFIG_SM_UNIT_TEST */
 
+    /* _storage */
 #if SSF_CONFIG_CFG_UNIT_TEST == 1
     { "ssfcfg", "Read/Write NV Config", SSFCfgUnitTest },
 #endif /* SSF_CONFIG_CFG_UNIT_TEST */
 
-#if SSF_CONFIG_PRNG_UNIT_TEST == 1
-    { "ssfprng", "Crypto Secure Capable PRNG", SSFPRNGUnitTest },
-#endif /* SSF_CONFIG_PRNG_UNIT_TEST */
+    /* _struct */
+#if SSF_CONFIG_BFIFO_UNIT_TEST == 1
+    { "ssfbfifo", "Byte FIFO", SSFBFifoUnitTest },
+#endif /* SSF_CONFIG_BFIFO_UNIT_TEST */
+#if SSF_CONFIG_HEAP_UNIT_TEST == 1
+    { "ssfheap", "Integrity Checked Heap", SSFHeapUnitTest },
+#endif /* SSF_CONFIG_HEAP_UNIT_TEST */
+#if SSF_CONFIG_LL_UNIT_TEST == 1
+    { "ssfll", "Linked List", SSFLLUnitTest },
+#endif /* SSF_CONFIG_LL_UNIT_TEST */
+#if SSF_CONFIG_MPOOL_UNIT_TEST == 1
+    { "ssfmpool", "Memory Pool", SSFMPoolUnitTest },
+#endif /* SSF_CONFIG_MPOOL_UNIT_TEST */
 
-#if SSF_CONFIG_INI_UNIT_TEST == 1
-    { "ssfini", "INI Codec", SSFINIUnitTest },
-#endif /* SSF_CONFIG_INI_UNIT_TEST */
-
-#if SSF_CONFIG_RTC_UNIT_TEST == 1
-    { "ssfrtc", "RTC", SSFRTCUnitTest },
-#endif /* SSF_CONFIG_RTC_UNIT_TEST */
-
+    /* _time */
 #if SSF_CONFIG_DTIME_UNIT_TEST == 1
     { "ssfdtime", "Date Time", SSFDTimeUnitTest },
 #endif /* SSF_CONFIG_DTIME_UNIT_TEST */
-
 #if SSF_CONFIG_ISO8601_UNIT_TEST == 1
-    { "ssfiso8601", "ISO8601 Time", SSFISO8601UnitTest }
+    { "ssfiso8601", "ISO8601 Time", SSFISO8601UnitTest },
 #endif /* SSF_CONFIG_ISO8601_UNIT_TEST */
+#if SSF_CONFIG_RTC_UNIT_TEST == 1
+    { "ssfrtc", "RTC", SSFRTCUnitTest },
+#endif /* SSF_CONFIG_RTC_UNIT_TEST */
 };
 
 /* --------------------------------------------------------------------------------------------- */

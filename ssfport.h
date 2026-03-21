@@ -42,63 +42,88 @@ extern "C" {
 #include <time.h>
 #endif /* _WIN32 */
 #include "ssfassert.h"
+
 /* --------------------------------------------------------------------------------------------- */
 /* Enable/disable unit tests                                                                     */
 /* --------------------------------------------------------------------------------------------- */
-#define SSF_CONFIG_BFIFO_UNIT_TEST (1u)
-#define SSF_CONFIG_LL_UNIT_TEST (1u)
-#define SSF_CONFIG_MPOOL_UNIT_TEST (1u)
-#define SSF_CONFIG_JSON_UNIT_TEST (1u)
-#define SSF_CONFIG_BASE64_UNIT_TEST (1u)
-#define SSF_CONFIG_HEX_UNIT_TEST (1u)
-#define SSF_CONFIG_FCSUM_UNIT_TEST (1u)
-#define SSF_CONFIG_SM_UNIT_TEST (1u)
-#define SSF_CONFIG_RS_UNIT_TEST (1u)
-#define SSF_CONFIG_CRC16_UNIT_TEST (1u)
-#define SSF_CONFIG_CRC32_UNIT_TEST (1u)
-#define SSF_CONFIG_SHA2_UNIT_TEST (1u)
-#define SSF_CONFIG_TLV_UNIT_TEST (1u)
-#define SSF_CONFIG_AES_UNIT_TEST (1u)
-#define SSF_CONFIG_AESGCM_UNIT_TEST (1u)
-#define SSF_CONFIG_CFG_UNIT_TEST (1u)
-#define SSF_CONFIG_PRNG_UNIT_TEST (1u)
-#define SSF_CONFIG_INI_UNIT_TEST (1u)
-#define SSF_CONFIG_UBJSON_UNIT_TEST (1u)
-#define SSF_CONFIG_DTIME_UNIT_TEST (1u)
-#define SSF_CONFIG_RTC_UNIT_TEST (1u)
+
+/* _codec */
+#define SSF_CONFIG_BASE64_UNIT_TEST  (1u)
+#define SSF_CONFIG_DEC_UNIT_TEST     (1u)
+#define SSF_CONFIG_GOBJ_UNIT_TEST    (1u)
+#define SSF_CONFIG_HEX_UNIT_TEST     (1u)
+#define SSF_CONFIG_INI_UNIT_TEST     (1u)
+#define SSF_CONFIG_JSON_UNIT_TEST    (1u)
+#define SSF_CONFIG_STR_UNIT_TEST     (1u)
+#define SSF_CONFIG_TLV_UNIT_TEST     (1u)
+#define SSF_CONFIG_UBJSON_UNIT_TEST  (1u)
+
+/* _crypto */
+#define SSF_CONFIG_AES_UNIT_TEST     (1u)
+#define SSF_CONFIG_AESGCM_UNIT_TEST  (1u)
+#define SSF_CONFIG_PRNG_UNIT_TEST    (1u)
+#define SSF_CONFIG_SHA2_UNIT_TEST    (1u)
+
+/* _ecc */
+#define SSF_CONFIG_RS_UNIT_TEST      (1u)
+
+/* _edc */
+#define SSF_CONFIG_CRC16_UNIT_TEST   (1u)
+#define SSF_CONFIG_CRC32_UNIT_TEST   (1u)
+#define SSF_CONFIG_FCSUM_UNIT_TEST   (1u)
+
+/* _fsm */
+#define SSF_CONFIG_SM_UNIT_TEST      (1u)
+
+/* _storage */
+#define SSF_CONFIG_CFG_UNIT_TEST     (1u)
+
+/* _struct */
+#define SSF_CONFIG_BFIFO_UNIT_TEST   (1u)
+#define SSF_CONFIG_HEAP_UNIT_TEST    (1u)
+#define SSF_CONFIG_LL_UNIT_TEST      (1u)
+#define SSF_CONFIG_MPOOL_UNIT_TEST   (1u)
+
+/* _time */
+#define SSF_CONFIG_DTIME_UNIT_TEST   (1u)
 #define SSF_CONFIG_ISO8601_UNIT_TEST (1u)
-#define SSF_CONFIG_DEC_UNIT_TEST (1u)
-#define SSF_CONFIG_STR_UNIT_TEST (1u)
-#define SSF_CONFIG_HEAP_UNIT_TEST (1u)
-#define SSF_CONFIG_GOBJ_UNIT_TEST (1u)
+#define SSF_CONFIG_RTC_UNIT_TEST     (1u)
 
 /* If any unit test is enabled then enable unit test mode */
-#if SSF_CONFIG_BFIFO_UNIT_TEST == 1 || \
-    SSF_CONFIG_LL_UNIT_TEST == 1 || \
-    SSF_CONFIG_MPOOL_UNIT_TEST == 1 || \
-    SSF_CONFIG_JSON_UNIT_TEST == 1 || \
+#if /* _codec */ \
     SSF_CONFIG_BASE64_UNIT_TEST == 1 || \
+    SSF_CONFIG_DEC_UNIT_TEST == 1 || \
+    SSF_CONFIG_GOBJ_UNIT_TEST == 1 || \
     SSF_CONFIG_HEX_UNIT_TEST == 1 || \
-    SSF_CONFIG_FCSUM_UNIT_TEST == 1 || \
-    SSF_CONFIG_SM_UNIT_TEST == 1 || \
-    SSF_CONFIG_RS_UNIT_TEST == 1 || \
-    SSF_CONFIG_CRC16_UNIT_TEST == 1 || \
-    SSF_CONFIG_CRC32_UNIT_TEST == 1 || \
-    SSF_CONFIG_SHA2_UNIT_TEST == 1 || \
+    SSF_CONFIG_INI_UNIT_TEST == 1 || \
+    SSF_CONFIG_JSON_UNIT_TEST == 1 || \
+    SSF_CONFIG_STR_UNIT_TEST == 1 || \
     SSF_CONFIG_TLV_UNIT_TEST == 1 || \
+    SSF_CONFIG_UBJSON_UNIT_TEST == 1 || \
+    /* _crypto */ \
     SSF_CONFIG_AES_UNIT_TEST == 1 || \
     SSF_CONFIG_AESGCM_UNIT_TEST == 1 || \
-    SSF_CONFIG_CFG_UNIT_TEST == 1 || \
     SSF_CONFIG_PRNG_UNIT_TEST == 1 || \
-    SSF_CONFIG_INI_UNIT_TEST == 1 || \
-    SSF_CONFIG_UBJSON_UNIT_TEST == 1 || \
-    SSF_CONFIG_DTIME_UNIT_TEST == 1 || \
-    SSF_CONFIG_RTC_UNIT_TEST == 1 || \
-    SSF_CONFIG_ISO8601_UNIT_TEST == 1 || \
-    SSF_CONFIG_DEC_UNIT_TEST == 1 || \
-    SSF_CONFIG_STR_UNIT_TEST == 1 || \
+    SSF_CONFIG_SHA2_UNIT_TEST == 1 || \
+    /* _ecc */ \
+    SSF_CONFIG_RS_UNIT_TEST == 1 || \
+    /* _edc */ \
+    SSF_CONFIG_CRC16_UNIT_TEST == 1 || \
+    SSF_CONFIG_CRC32_UNIT_TEST == 1 || \
+    SSF_CONFIG_FCSUM_UNIT_TEST == 1 || \
+    /* _fsm */ \
+    SSF_CONFIG_SM_UNIT_TEST == 1 || \
+    /* _storage */ \
+    SSF_CONFIG_CFG_UNIT_TEST == 1 || \
+    /* _struct */ \
+    SSF_CONFIG_BFIFO_UNIT_TEST == 1 || \
     SSF_CONFIG_HEAP_UNIT_TEST == 1 || \
-    SSF_CONFIG_GOBJ_UNIT_TEST == 1
+    SSF_CONFIG_LL_UNIT_TEST == 1 || \
+    SSF_CONFIG_MPOOL_UNIT_TEST == 1 || \
+    /* _time */ \
+    SSF_CONFIG_DTIME_UNIT_TEST == 1 || \
+    SSF_CONFIG_ISO8601_UNIT_TEST == 1 || \
+    SSF_CONFIG_RTC_UNIT_TEST == 1
 #define SSF_CONFIG_UNIT_TEST (1u)
 #else
 #define SSF_CONFIG_UNIT_TEST (0u)

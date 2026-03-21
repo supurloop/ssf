@@ -133,8 +133,8 @@ bool SSFISO8601UnixToISO(SSFPortTick_t unixSys, bool secPrecision, bool secPseud
     /* Request to add system sec precision? */
     if (secPrecision)
     {
-#if SSF_DTIME_SYS_PREC == 3
         outStr[offset] = '.'; offset++;
+#if SSF_DTIME_SYS_PREC == 3
         offset += SSFDecUIntToStrPadded(ts.fsec, &outStr[offset], outStrSize - offset, 3, '0');
 #elif SSF_DTIME_SYS_PREC == 6
         offset += SSFDecUIntToStrPadded(ts.fsec, &outStr[offset], outStrSize - offset, 6, '0');
@@ -192,7 +192,8 @@ bool SSFISO8601ISOToUnix(SSFCStrIn_t inStr, SSFPortTick_t *unixSys, int16_t *zon
     #define SEC_INDEX (17u)
     #define FSEC_INDEX (20u)
 
-    const uint32_t _fsecScale[6] = { 10ul, 100ul, 1000ul, 10000ul, 100000ul, 1000000ul };
+    const uint32_t _fsecScale[8] = { 10ul, 100ul, 1000ul, 10000ul, 100000ul, 1000000ul, 10000000ul,
+                                     100000000ul };
 
     SSFDTimeStruct_t ts;
     size_t index;

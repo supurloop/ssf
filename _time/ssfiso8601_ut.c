@@ -60,10 +60,12 @@ void SSFISO8601UnitTest(void)
     srand((unsigned int)SSFPortGetTick64());
 
     /* Test Assertions */
+#if SSF_DTIME_SYS_PREC != 9
     SSF_ASSERT_TEST(SSFISO8601UnixToISO(unixSys, false, false, 1, SSF_ISO8601_ZONE_UTC, 0, isoStr,
                                         sizeof(isoStr)));
     SSF_ASSERT_TEST(SSFISO8601UnixToISO(unixSys, false, true, 1000, SSF_ISO8601_ZONE_UTC, 0,
                                         isoStr, sizeof(isoStr)));
+#endif
     SSF_ASSERT_TEST(SSFISO8601UnixToISO(unixSys, false, false, 0, SSF_ISO8601_ZONE_MIN, 0, isoStr,
                                         sizeof(isoStr)));
     SSF_ASSERT_TEST(SSFISO8601UnixToISO(unixSys, false, false, 0, SSF_ISO8601_ZONE_MAX, 0, isoStr,
@@ -183,32 +185,62 @@ void SSFISO8601UnitTest(void)
             switch(i)
             {
                 case 0:
-                    SSF_ASSERT(unixSys == ((SSFPortTick_t)j * 100ul));
+                    SSF_ASSERT(unixSys == ((SSFPortTick_t)j * (SSF_TICKS_PER_SEC / 10ul)));
                 break;
                 case 1:
-                    SSF_ASSERT(unixSys == ((SSFPortTick_t)j * 10ul));
+                    SSF_ASSERT(unixSys == ((SSFPortTick_t)j * (SSF_TICKS_PER_SEC / 100ul)));
                 break;
                 case 2:
-                    SSF_ASSERT(unixSys == j);
+                    SSF_ASSERT(unixSys == ((SSFPortTick_t)j * (SSF_TICKS_PER_SEC / 1000ul)));
                 break;
                 case 3:
+#if SSF_DTIME_SYS_PREC == 3
                     SSF_ASSERT(unixSys == (j / 10ul));
+#else
+                    SSF_ASSERT(unixSys == ((SSFPortTick_t)j * (SSF_TICKS_PER_SEC / 10000ul)));
+#endif
                 break;
                 case 4:
+#if SSF_DTIME_SYS_PREC == 3
                     SSF_ASSERT(unixSys == (j / 100ul));
-                break;
+#else
+SSF_ASSERT(unixSys == ((SSFPortTick_t)j * (SSF_TICKS_PER_SEC / 100000ul)));
+#endif
+break;
                 case 5:
+#if SSF_DTIME_SYS_PREC == 3
                     SSF_ASSERT(unixSys == (j / 1000ul));
-                break;
+#else
+SSF_ASSERT(unixSys == ((SSFPortTick_t)j * (SSF_TICKS_PER_SEC / 1000000ul)));
+#endif
+break;
                 case 6:
+#if SSF_DTIME_SYS_PREC == 3
                     SSF_ASSERT(unixSys == (j / 10000ul));
-                break;
+#elif SSF_DTIME_SYS_PREC == 6
+                    SSF_ASSERT(unixSys == (j / 10ul));
+#else
+SSF_ASSERT(unixSys == ((SSFPortTick_t)j * (SSF_TICKS_PER_SEC / 10000000ul)));
+#endif
+break;
                 case 7:
+#if SSF_DTIME_SYS_PREC == 3
                     SSF_ASSERT(unixSys == (j / 100000ul));
-                break;
+#elif SSF_DTIME_SYS_PREC == 6
+                    SSF_ASSERT(unixSys == (j / 100ul));
+#else
+SSF_ASSERT(unixSys == ((SSFPortTick_t)j * (SSF_TICKS_PER_SEC / 100000000ul)));
+#endif
+break;
                 case 8:
+#if SSF_DTIME_SYS_PREC == 3
                     SSF_ASSERT(unixSys == (j / 1000000ul));
-                break;
+#elif SSF_DTIME_SYS_PREC == 6
+                    SSF_ASSERT(unixSys == (j / 1000ul));
+#else
+SSF_ASSERT(unixSys == ((SSFPortTick_t)j * (SSF_TICKS_PER_SEC / 1000000000ul)));
+#endif
+break;
                 default:
                 SSF_ERROR();
             }
@@ -273,7 +305,7 @@ void SSFISO8601UnitTest(void)
 
     unixSys = SSFDTIME_UNIX_EPOCH_SYS_MAX;
     SSF_ASSERT(SSFISO8601UnixToISO(unixSys, true, false, 0, SSF_ISO8601_ZONE_UTC, 0, isoStr,
-                                   sizeof(isoStr)));
+        sizeof(isoStr)));
 #if SSF_DTIME_SYS_PREC == 3
     SSF_ASSERT(memcmp(isoStr, "2199-12-31T23:59:59.999Z", 24) == 0);
 #elif SSF_DTIME_SYS_PREC == 6

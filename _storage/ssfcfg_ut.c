@@ -145,6 +145,51 @@ void SSFCfgUnitTest(void)
     SSF_ASSERT(SSFCfgWrite(data1, sizeof(data1), 0, 1) == false);
     memset(data1, 0x11, sizeof(data1));
     SSF_ASSERT(SSFCfgWrite(data1, sizeof(data1), 1, 2) == false);
+
+    /* Read with dataSize too small for stored data */
+    memset(data1, 0xAA, sizeof(data1));
+    SSF_ASSERT(SSFCfgWrite(data1, sizeof(data1), 0, 3));
+    SSF_ASSERT(SSFCfgRead(data2, &data2Len, sizeof(data1) - 1, 0) == SSF_CFG_DATA_VERSION_INVALID);
+    SSF_ASSERT(SSFCfgRead(data2, &data2Len, 1, 0) == SSF_CFG_DATA_VERSION_INVALID);
+    SSF_ASSERT(SSFCfgRead(data2, &data2Len, sizeof(data1), 0) == 3);
+    SSF_ASSERT(data2Len == sizeof(data1));
+
+    /* Read from pristine/erased sector (never written, all 0xFF) */
+    memset(_ssfCfgStorageRAM[1], 0xFF, SSF_CFG_MAX_STORAGE_SIZE);
+    SSF_ASSERT(SSFCfgRead(data2, &data2Len, sizeof(data2), 1) == SSF_CFG_DATA_VERSION_INVALID);
+    /* All zeros is also invalid (magic won't match) */
+    memset(_ssfCfgStorageRAM[1], 0x00, SSF_CFG_MAX_STORAGE_SIZE);
+    SSF_ASSERT(SSFCfgRead(data2, &data2Len, sizeof(data2), 1) == SSF_CFG_DATA_VERSION_INVALID);
+
+    /* Write different data to same sector overwrites previous */
+    memset(data1, 0xBB, sizeof(data1));
+    SSF_ASSERT(SSFCfgWrite(data1, sizeof(data1), 0, 4));
+    memset(data1, 0xCC, sizeof(data1));
+    SSF_ASSERT(SSFCfgWrite(data1, sizeof(data1), 0, 4));
+    memset(data2, 0, sizeof(data2));
+    SSF_ASSERT(SSFCfgRead(data2, &data2Len, sizeof(data2), 0) == 4);
+    SSF_ASSERT(data2Len == sizeof(data1));
+    SSF_ASSERT(memcmp(data1, data2, data2Len) == 0);
+    SSF_ASSERT(data2[0] == 0xCC);
+
+    /* Write same data but different version succeeds (returns true) */
+    memset(data1, 0xDD, sizeof(data1));
+    SSF_ASSERT(SSFCfgWrite(data1, sizeof(data1), 0, 5));
+    SSF_ASSERT(SSFCfgWrite(data1, sizeof(data1), 0, 5) == false);
+    SSF_ASSERT(SSFCfgWrite(data1, sizeof(data1), 0, 6));
+    SSF_ASSERT(SSFCfgRead(data2, &data2Len, sizeof(data2), 0) == 6);
+    SSF_ASSERT(data2Len == sizeof(data1));
+    SSF_ASSERT(memcmp(data1, data2, data2Len) == 0);
+
+    /* Write different data same id/version succeeds (data changed, CRC differs) */
+    memset(data1, 0xEE, sizeof(data1));
+    SSF_ASSERT(SSFCfgWrite(data1, sizeof(data1), 0, 6));
+    memset(data2, 0, sizeof(data2));
+    SSF_ASSERT(SSFCfgRead(data2, &data2Len, sizeof(data2), 0) == 6);
+    SSF_ASSERT(data2Len == sizeof(data1));
+    SSF_ASSERT(memcmp(data1, data2, data2Len) == 0);
+    SSF_ASSERT(data2[0] == 0xEE);
+
 #if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
     SSF_ASSERT_TEST(SSFCfgInit());
     SSFCfgDeInit();

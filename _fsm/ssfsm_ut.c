@@ -827,6 +827,13 @@ void SSFSMUnitTest(void)
     while (SSFSMTask(NULL));
 #endif
 
+    /* SSFSMTask returns false with no handlers initialized (only framework inited) */
+    SSFSMDeInit();
+    SSFSMInit(SSFSM_UT_MAX_EVENTS, SSFSM_UT_MAX_TIMERS);
+    SSF_ASSERT(SSFSMTask(NULL) == false);
+    SSF_ASSERT(SSFSMTask(&nextTimeout) == false);
+    SSF_ASSERT(nextTimeout == SSF_SM_MAX_TIMEOUT);
+
     /* End test */
     SSFSMDeInit();
     SSF_ASSERT_TEST(SSFSMDeInit());

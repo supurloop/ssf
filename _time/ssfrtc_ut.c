@@ -76,4 +76,42 @@ void SSFRTCUnitTest(void)
     rtcExpected = SSFDTIME_UNIX_EPOCH_SEC_MAX * SSF_TICKS_PER_SEC;
     SSF_ASSERT(SSFRTCGetUnixNow(&rtcSys));
     SSF_ASSERT((rtcSys - rtcExpected) < SSF_TICKS_PER_SEC);
+
+    /* SSFRTCGetUnixNow with NULL unixSys parameter (no-op write, just returns status) */
+    SSF_ASSERT(SSFRTCGetUnixNow(NULL));
+    SSFRTCDeInit();
+
+    /* SSFRTCSet/SSFRTCDeInit assertion when not inited */
+    SSF_ASSERT_TEST(SSFRTCSet(0));
+    SSF_ASSERT_TEST(SSFRTCDeInit());
+    SSF_ASSERT_TEST(SSFRTCGetUnixNow(&rtcSys));
+
+    /* SSFRTCInit fails when sim RTC has invalid time */
+    _ssfRTCSimUnixSec = SSFDTIME_UNIX_EPOCH_SEC_MAX + 1;
+    SSF_ASSERT(SSFRTCInit() == false);
+    /* After failed init, module is inited but "now" is not set */
+    SSF_ASSERT(SSFRTCGetUnixNow(&rtcSys) == false);
+    SSFRTCDeInit();
+
+    /* SSFRTCGetUnixNow returns false after failed Set */
+    _ssfRTCSimUnixSec = 1000;
+    SSF_ASSERT(SSFRTCInit());
+    SSF_ASSERT(SSFRTCGetUnixNow(&rtcSys));
+    SSF_ASSERT(SSFRTCSet(SSFDTIME_UNIX_EPOCH_SEC_MAX + 1) == false);
+    SSF_ASSERT(SSFRTCGetUnixNow(&rtcSys) == false);
+    SSFRTCDeInit();
+
+    /* Re-init after DeInit with new sim time */
+    _ssfRTCSimUnixSec = 100;
+    SSF_ASSERT(SSFRTCInit());
+    rtcExpected = 100 * SSF_TICKS_PER_SEC;
+    SSF_ASSERT(SSFRTCGetUnixNow(&rtcSys));
+    SSF_ASSERT((rtcSys - rtcExpected) < SSF_TICKS_PER_SEC);
+    SSFRTCDeInit();
+    _ssfRTCSimUnixSec = 200;
+    SSF_ASSERT(SSFRTCInit());
+    rtcExpected = 200 * SSF_TICKS_PER_SEC;
+    SSF_ASSERT(SSFRTCGetUnixNow(&rtcSys));
+    SSF_ASSERT((rtcSys - rtcExpected) < SSF_TICKS_PER_SEC);
+    SSFRTCDeInit();
 }

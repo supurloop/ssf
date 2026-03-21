@@ -43,6 +43,7 @@
 
 SSFMPool_t smpTestPool;
 void *smpTestPtrs[SMP_TEST_BLOCKS];
+void *testPtr;
 
 /* --------------------------------------------------------------------------------------------- */
 /* Performs unit test on ssfll's external interface.                                             */
@@ -50,7 +51,6 @@ void *smpTestPtrs[SMP_TEST_BLOCKS];
 void SSFMPoolUnitTest(void)
 {
     uint32_t i;
-    void *testPtr;
 
     SSF_ASSERT_TEST(SSFMPoolDeInit(NULL));
     SSF_ASSERT_TEST(SSFMPoolDeInit(&smpTestPool));

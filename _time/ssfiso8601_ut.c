@@ -1491,4 +1491,53 @@ break;
         }
 #endif /* SSF_ISO8601_ALLOW_NO_ZONE_ISO_TO_UNIX */
     }
+
+    /* secPseudoPrecision: generates .XXX pseudo fractional seconds */
+    SSF_ASSERT(SSFISO8601UnixToISO(0, false, true, 123, SSF_ISO8601_ZONE_UTC, 0, isoStr,
+                                   sizeof(isoStr)));
+    SSF_ASSERT(memcmp(isoStr, "1970-01-01T00:00:00.123Z", 24) == 0);
+    SSF_ASSERT(SSFISO8601UnixToISO(0, false, true, 0, SSF_ISO8601_ZONE_UTC, 0, isoStr,
+                                   sizeof(isoStr)));
+    SSF_ASSERT(memcmp(isoStr, "1970-01-01T00:00:00.000Z", 24) == 0);
+    SSF_ASSERT(SSFISO8601UnixToISO(0, false, true, 999, SSF_ISO8601_ZONE_UTC, 0, isoStr,
+                                   sizeof(isoStr)));
+    SSF_ASSERT(memcmp(isoStr, "1970-01-01T00:00:00.999Z", 24) == 0);
+    SSF_ASSERT(SSFISO8601ISOToUnix("1970-01-01T00:00:00.123Z", &unixSysOut, &zoneOffsetMin));
+    SSF_ASSERT(zoneOffsetMin == 0);
+
+    /* Malformed/short ISO strings return false */
+    SSF_ASSERT(SSFISO8601ISOToUnix("", &unixSysOut, &zoneOffsetMin) == false);
+    SSF_ASSERT(SSFISO8601ISOToUnix("1970", &unixSysOut, &zoneOffsetMin) == false);
+    SSF_ASSERT(SSFISO8601ISOToUnix("1970-01-01", &unixSysOut, &zoneOffsetMin) == false);
+    SSF_ASSERT(SSFISO8601ISOToUnix("1970-01-01T00:00", &unixSysOut, &zoneOffsetMin) == false);
+    SSF_ASSERT(SSFISO8601ISOToUnix("1970-01-01T00:00:0", &unixSysOut, &zoneOffsetMin) == false);
+    SSF_ASSERT(SSFISO8601ISOToUnix("1970/01/01T00:00:00Z", &unixSysOut, &zoneOffsetMin) == false);
+    SSF_ASSERT(SSFISO8601ISOToUnix("1970-01-01 00:00:00Z", &unixSysOut, &zoneOffsetMin) == false);
+    SSF_ASSERT(SSFISO8601ISOToUnix("1970-01-01T00-00:00Z", &unixSysOut, &zoneOffsetMin) == false);
+    SSF_ASSERT(SSFISO8601ISOToUnix("1970-01-01T00:00-00Z", &unixSysOut, &zoneOffsetMin) == false);
+    SSF_ASSERT(SSFISO8601ISOToUnix("197X-01-01T00:00:00Z", &unixSysOut, &zoneOffsetMin) == false);
+    SSF_ASSERT(SSFISO8601ISOToUnix("1970-0X-01T00:00:00Z", &unixSysOut, &zoneOffsetMin) == false);
+    SSF_ASSERT(SSFISO8601ISOToUnix("1970-01-0XT00:00:00Z", &unixSysOut, &zoneOffsetMin) == false);
+    SSF_ASSERT(SSFISO8601ISOToUnix("1969-01-01T00:00:00Z", &unixSysOut, &zoneOffsetMin) == false);
+    SSF_ASSERT(SSFISO8601ISOToUnix("2200-01-01T00:00:00Z", &unixSysOut, &zoneOffsetMin) == false);
+    SSF_ASSERT(SSFISO8601ISOToUnix("1970-13-01T00:00:00Z", &unixSysOut, &zoneOffsetMin) == false);
+    SSF_ASSERT(SSFISO8601ISOToUnix("1970-00-01T00:00:00Z", &unixSysOut, &zoneOffsetMin) == false);
+    SSF_ASSERT(SSFISO8601ISOToUnix("1970-01-00T00:00:00Z", &unixSysOut, &zoneOffsetMin) == false);
+    SSF_ASSERT(SSFISO8601ISOToUnix("1970-01-32T00:00:00Z", &unixSysOut, &zoneOffsetMin) == false);
+    SSF_ASSERT(SSFISO8601ISOToUnix("1970-01-01T24:00:00Z", &unixSysOut, &zoneOffsetMin) == false);
+    SSF_ASSERT(SSFISO8601ISOToUnix("1970-01-01T00:60:00Z", &unixSysOut, &zoneOffsetMin) == false);
+    SSF_ASSERT(SSFISO8601ISOToUnix("1970-01-01T00:00:60Z", &unixSysOut, &zoneOffsetMin) == false);
+    SSF_ASSERT(SSFISO8601ISOToUnix("1970-01-01T00:00:00.Z", &unixSysOut, &zoneOffsetMin) == false);
+
+    /* Negative zone offset value verification */
+    SSF_ASSERT(SSFISO8601ISOToUnix("1970-01-02T00:00:00-05", &unixSysOut, &zoneOffsetMin));
+    SSF_ASSERT(zoneOffsetMin == -300);
+    SSF_ASSERT(SSFISO8601ISOToUnix("1970-01-02T00:00:00-05:30", &unixSysOut, &zoneOffsetMin));
+    SSF_ASSERT(zoneOffsetMin == -330);
+    SSF_ASSERT(SSFISO8601ISOToUnix("1970-01-01T05:00:00+05", &unixSysOut, &zoneOffsetMin));
+    SSF_ASSERT(zoneOffsetMin == 300);
+    SSF_ASSERT(unixSysOut == 0);
+    SSF_ASSERT(SSFISO8601ISOToUnix("1970-01-01T05:30:00+05:30", &unixSysOut, &zoneOffsetMin));
+    SSF_ASSERT(zoneOffsetMin == 330);
+    SSF_ASSERT(unixSysOut == 0);
 }

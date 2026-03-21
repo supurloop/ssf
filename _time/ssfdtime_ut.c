@@ -407,6 +407,64 @@ void SSFDTimeUnitTest(void)
         SSF_ASSERT(unixSys == unixSysOut);
     }
 
+    /* Known date: 1970-01-01T00:00:00 = epoch 0, Thursday */
+    SSF_ASSERT(SSFDTimeUnixToStruct(0, &ts, sizeof(ts)));
+    SSF_ASSERT(ts.year == 0);
+    SSF_ASSERT(ts.month == SSF_DTIME_MONTH_JAN);
+    SSF_ASSERT(ts.day == 0);
+    SSF_ASSERT(ts.hour == 0);
+    SSF_ASSERT(ts.min == 0);
+    SSF_ASSERT(ts.sec == 0);
+    SSF_ASSERT(ts.wday == SSF_DTIME_WDAY_THU);
+    SSF_ASSERT(ts.yday == 0);
+    SSF_ASSERT(SSFDTimeStructToUnix(&ts, &unixSysOut));
+    SSF_ASSERT(unixSysOut == 0);
+
+    /* Known date: 2000-01-01T00:00:00Z = year 30, Saturday */
+    SSF_ASSERT(SSFDTimeStructInit(&ts, 30, SSF_DTIME_MONTH_JAN, 0, 0, 0, 0, 0));
+    SSF_ASSERT(ts.wday == SSF_DTIME_WDAY_SAT);
+    SSF_ASSERT(ts.yday == 0);
+    SSF_ASSERT(SSFDTimeStructToUnix(&ts, &unixSysOut));
+    SSF_ASSERT(SSFDTimeUnixToStruct(unixSysOut, &tsc, sizeof(tsc)));
+    SSF_ASSERT(tsc.year == 30);
+    SSF_ASSERT(tsc.month == SSF_DTIME_MONTH_JAN);
+    SSF_ASSERT(tsc.day == 0);
+    SSF_ASSERT(tsc.wday == SSF_DTIME_WDAY_SAT);
+
+    /* Leap day: 2000-02-29 (year 30 is leap) */
+    SSF_ASSERT(SSFDTimeIsLeapYear(30));
+    SSF_ASSERT(SSFDTimeStructInit(&ts, 30, SSF_DTIME_MONTH_FEB, 28, 12, 0, 0, 0));
+    SSF_ASSERT(SSFDTimeStructToUnix(&ts, &unixSysOut));
+    SSF_ASSERT(SSFDTimeUnixToStruct(unixSysOut, &tsc, sizeof(tsc)));
+    SSF_ASSERT(tsc.year == 30);
+    SSF_ASSERT(tsc.month == SSF_DTIME_MONTH_FEB);
+    SSF_ASSERT(tsc.day == 28);
+    SSF_ASSERT(tsc.hour == 12);
+
+    /* Year 2100 (non-leap century) round-trip: 2100-03-01 */
+    SSF_ASSERT(SSFDTimeIsLeapYear(2100 - SSFDTIME_EPOCH_YEAR) == false);
+    SSF_ASSERT(SSFDTimeStructInit(&ts, (uint16_t)(2100 - SSFDTIME_EPOCH_YEAR),
+                                  SSF_DTIME_MONTH_MAR, 0, 0, 0, 0, 0));
+    SSF_ASSERT(SSFDTimeStructToUnix(&ts, &unixSysOut));
+    SSF_ASSERT(SSFDTimeUnixToStruct(unixSysOut, &tsc, sizeof(tsc)));
+    SSF_ASSERT(tsc.year == (2100 - SSFDTIME_EPOCH_YEAR));
+    SSF_ASSERT(tsc.month == SSF_DTIME_MONTH_MAR);
+    SSF_ASSERT(tsc.day == 0);
+    /* Feb 29 should be invalid for 2100 (non-leap) */
+    SSF_ASSERT(SSFDTimeStructInit(&ts, (uint16_t)(2100 - SSFDTIME_EPOCH_YEAR),
+                                  SSF_DTIME_MONTH_FEB, 28, 0, 0, 0, 0) == false);
+
+    /* End-of-range: 2199-12-31T23:59:59 */
+    SSF_ASSERT(SSFDTimeStructInit(&ts, SSF_TS_YEAR_MAX, SSF_DTIME_MONTH_DEC, 30, 23, 59, 59, 0));
+    SSF_ASSERT(SSFDTimeStructToUnix(&ts, &unixSysOut));
+    SSF_ASSERT(SSFDTimeUnixToStruct(unixSysOut, &tsc, sizeof(tsc)));
+    SSF_ASSERT(tsc.year == SSF_TS_YEAR_MAX);
+    SSF_ASSERT(tsc.month == SSF_DTIME_MONTH_DEC);
+    SSF_ASSERT(tsc.day == 30);
+    SSF_ASSERT(tsc.hour == 23);
+    SSF_ASSERT(tsc.min == 59);
+    SSF_ASSERT(tsc.sec == 59);
+
 #if SSF_DTIME_EXHAUSTIVE_UNIT_TEST == 1
     /* Exhaustive test for SSFDTimeUnixToStruct() && SSFDTimeStructToUnix() */
     /* Iterate over every possible second in supported date range, verify against gmtime() */

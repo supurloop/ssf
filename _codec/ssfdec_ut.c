@@ -882,4 +882,105 @@ void SSFDecUnitTest(void)
             SSF_ASSERT(SSFDecUIntToStrPadded(u64, str2, len1 + 1, minFieldWidth, '0') != 0);
         }
     }
+
+    /* SSFDecStrToInt/SSFDecStrToUInt with empty and whitespace-only strings */
+    SSF_ASSERT(SSFDecStrToInt("", &i64) == false);
+    SSF_ASSERT(SSFDecStrToInt(" ", &i64) == false);
+    SSF_ASSERT(SSFDecStrToInt("\t", &i64) == false);
+    SSF_ASSERT(SSFDecStrToInt(" \t ", &i64) == false);
+    SSF_ASSERT(SSFDecStrToUInt("", &u64) == false);
+    SSF_ASSERT(SSFDecStrToUInt(" ", &u64) == false);
+    SSF_ASSERT(SSFDecStrToUInt("\t", &u64) == false);
+    SSF_ASSERT(SSFDecStrToUInt(" \t ", &u64) == false);
+
+    /* SSFDecStrToInt with just a minus sign (no digits) */
+    SSF_ASSERT(SSFDecStrToInt("-", &i64) == false);
+    SSF_ASSERT(SSFDecStrToInt("- ", &i64) == false);
+    SSF_ASSERT(SSFDecStrToInt(" -", &i64) == false);
+
+    /* SSFDecStrToXInt with exponent marker but no digits after */
+    SSF_ASSERT(SSFDecStrToInt("1e", &i64) == false);
+    SSF_ASSERT(SSFDecStrToInt("1E", &i64) == false);
+    SSF_ASSERT(SSFDecStrToInt("1e+", &i64) == false);
+    SSF_ASSERT(SSFDecStrToInt("1e-", &i64) == false);
+    SSF_ASSERT(SSFDecStrToUInt("1e", &u64) == false);
+
+    /* SSFDecIntToStr with INT64_MIN */
+    len1 = SSFDecIntToStr(-9223372036854775807ll - 1, str2, sizeof(str2));
+    SSF_ASSERT(len1 != 0);
+    SSF_ASSERT(memcmp(str2, "-9223372036854775808", len1 + 1) == 0);
+
+    /* SSFDecUIntToStr with UINT64_MAX */
+    len1 = SSFDecUIntToStr(18446744073709551615ull, str2, sizeof(str2));
+    SSF_ASSERT(len1 != 0);
+    SSF_ASSERT(memcmp(str2, "18446744073709551615", len1 + 1) == 0);
+
+    /* SSFDecIntToStr/SSFDecUIntToStr with strSize=1 returns 0 (no room for digit + null) */
+    SSF_ASSERT(SSFDecIntToStr(0, str2, 1) == 0);
+    SSF_ASSERT(SSFDecIntToStr(5, str2, 1) == 0);
+    SSF_ASSERT(SSFDecIntToStr(-1, str2, 1) == 0);
+    SSF_ASSERT(SSFDecUIntToStr(0, str2, 1) == 0);
+    SSF_ASSERT(SSFDecUIntToStr(9, str2, 1) == 0);
+    /* strSize=2 fits single digit + null */
+    SSF_ASSERT(SSFDecIntToStr(0, str2, 2) == 1);
+    SSF_ASSERT(str2[0] == '0');
+    SSF_ASSERT(SSFDecUIntToStr(9, str2, 2) == 1);
+    SSF_ASSERT(str2[0] == '9');
+
+    /* SSFDecStrToUInt with simple negative input */
+    SSF_ASSERT(SSFDecStrToUInt("-1", &u64) == false);
+    SSF_ASSERT(SSFDecStrToUInt("-0", &u64) == false);
+
+    /* SSFDecStrToXInt with zero in various formats */
+    i64 = 42;
+    SSF_ASSERT(SSFDecStrToInt("0.0", &i64));
+    SSF_ASSERT(i64 == 0ll);
+    i64 = 42;
+    SSF_ASSERT(SSFDecStrToInt("0e0", &i64));
+    SSF_ASSERT(i64 == 0ll);
+    i64 = 42;
+    SSF_ASSERT(SSFDecStrToInt("0.0e0", &i64));
+    SSF_ASSERT(i64 == 0ll);
+    u64 = 42;
+    SSF_ASSERT(SSFDecStrToUInt("0.0", &u64));
+    SSF_ASSERT(u64 == 0ull);
+    u64 = 42;
+    SSF_ASSERT(SSFDecStrToUInt("0e0", &u64));
+    SSF_ASSERT(u64 == 0ull);
+
+    /* SSFDecStrToXInt with base overflow during unsigned exponent scaling */
+    SSF_ASSERT(SSFDecStrToUInt("2e19", &u64) == false);
+    SSF_ASSERT(SSFDecStrToUInt("9e18", &u64) == true);
+    SSF_ASSERT(u64 == 9000000000000000000ull);
+    SSF_ASSERT(SSFDecStrToInt("1e18", &i64) == true);
+    SSF_ASSERT(i64 == 1000000000000000000ll);
+    SSF_ASSERT(SSFDecStrToInt("1e19", &i64) == false);
+
+    /* SSFDecIntToStrPadded with negative values */
+    /* minFieldWidth includes the '-' sign, so -5 w/minFieldWidth=4 → "-005" (len=4) */
+    len1 = SSFDecIntToStrPadded(-5, str2, sizeof(str2), 4, '0');
+    SSF_ASSERT(len1 == 4);
+    SSF_ASSERT(memcmp(str2, "-005", 4) == 0);
+    len1 = SSFDecIntToStrPadded(-123, str2, sizeof(str2), 4, '0');
+    SSF_ASSERT(len1 == 4);
+    SSF_ASSERT(memcmp(str2, "-123", 4) == 0);
+    len1 = SSFDecIntToStrPadded(-1234, str2, sizeof(str2), 4, '0');
+    SSF_ASSERT(len1 == 5);
+    SSF_ASSERT(memcmp(str2, "-1234", 5) == 0);
+    len1 = SSFDecIntToStrPadded(-12345, str2, sizeof(str2), 4, '0');
+    SSF_ASSERT(len1 == 6);
+    SSF_ASSERT(memcmp(str2, "-12345", 6) == 0);
+    /* -5 w/minFieldWidth=5 → "-0005" (len=5) */
+    len1 = SSFDecIntToStrPadded(-5, str2, sizeof(str2), 5, '0');
+    SSF_ASSERT(len1 == 5);
+    SSF_ASSERT(memcmp(str2, "-0005", 5) == 0);
+    /* Negative padded with insufficient strSize */
+    SSF_ASSERT(SSFDecIntToStrPadded(-5, str2, 4, 4, '0') == 0);
+    SSF_ASSERT(SSFDecIntToStrPadded(-5, str2, 5, 4, '0') == 4);
+
+    /* SSFDecUIntToStrPadded returns 0 when minFieldWidth >= strSize */
+    SSF_ASSERT(SSFDecUIntToStrPadded(1, str2, 3, 3, '0') == 0);
+    SSF_ASSERT(SSFDecUIntToStrPadded(1, str2, 3, 4, '0') == 0);
+    SSF_ASSERT(SSFDecUIntToStrPadded(1, str2, 4, 3, '0') == 3);
+    SSF_ASSERT(memcmp(str2, "001", 4) == 0);
 }

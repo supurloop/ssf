@@ -681,5 +681,108 @@ void SSFGObjUnitTest(void)
 
     SSFGObjDeInit(&gobj);
     SSF_ASSERT(SSFGObjIsMemoryBalanced());
+
+    /* Test SSFGObjGetBin with insufficient output buffer */
+    SSF_ASSERT(SSFGObjInit(&gobj, 0));
+    memset(bin, 0xAA, sizeof(bin));
+    SSF_ASSERT(SSFGObjSetBin(gobj, bin, 10));
+    SSF_ASSERT(SSFGObjGetBin(gobj, binOut, 10, &binLen) == true);
+    SSF_ASSERT(binLen == 10);
+    SSF_ASSERT(SSFGObjGetBin(gobj, binOut, 9, &binLen) == false);
+    SSF_ASSERT(SSFGObjGetBin(gobj, binOut, 0, &binLen) == false);
+    SSFGObjDeInit(&gobj);
+    SSF_ASSERT(SSFGObjIsMemoryBalanced());
+
+    /* Test cross-type get failures */
+    SSF_ASSERT(SSFGObjInit(&gobj, 0));
+    SSF_ASSERT(SSFGObjSetString(gobj, "hello"));
+    SSF_ASSERT(SSFGObjGetInt(gobj, &i64) == false);
+    SSF_ASSERT(SSFGObjGetUInt(gobj, &u64) == false);
+    SSF_ASSERT(SSFGObjGetFloat(gobj, &f64) == false);
+    SSF_ASSERT(SSFGObjGetBool(gobj, &b) == false);
+    SSF_ASSERT(SSFGObjGetBin(gobj, binOut, sizeof(binOut), &binLen) == false);
+    SSF_ASSERT(SSFGObjSetInt(gobj, 42));
+    SSF_ASSERT(SSFGObjGetString(gobj, cStr, sizeof(cStr)) == false);
+    SSF_ASSERT(SSFGObjGetUInt(gobj, &u64) == false);
+    SSF_ASSERT(SSFGObjGetFloat(gobj, &f64) == false);
+    SSF_ASSERT(SSFGObjGetBool(gobj, &b) == false);
+    SSF_ASSERT(SSFGObjSetBool(gobj, true));
+    SSF_ASSERT(SSFGObjGetString(gobj, cStr, sizeof(cStr)) == false);
+    SSF_ASSERT(SSFGObjGetInt(gobj, &i64) == false);
+    SSFGObjDeInit(&gobj);
+    SSF_ASSERT(SSFGObjIsMemoryBalanced());
+
+    /* Test overwriting a value with a different type */
+    SSF_ASSERT(SSFGObjInit(&gobj, 0));
+    SSF_ASSERT(SSFGObjSetString(gobj, "test"));
+    SSF_ASSERT(SSFGObjGetType(gobj) == SSF_OBJ_TYPE_STR);
+    SSF_ASSERT(SSFGObjSetInt(gobj, 99));
+    SSF_ASSERT(SSFGObjGetType(gobj) == SSF_OBJ_TYPE_INT);
+    i64 = 0;
+    SSF_ASSERT(SSFGObjGetInt(gobj, &i64));
+    SSF_ASSERT(i64 == 99);
+    SSF_ASSERT(SSFGObjGetString(gobj, cStr, sizeof(cStr)) == false);
+    SSF_ASSERT(SSFGObjSetFloat(gobj, 3.14));
+    SSF_ASSERT(SSFGObjGetType(gobj) == SSF_OBJ_TYPE_FLOAT);
+    SSF_ASSERT(SSFGObjGetInt(gobj, &i64) == false);
+    SSFGObjDeInit(&gobj);
+    SSF_ASSERT(SSFGObjIsMemoryBalanced());
+
+    /* Test SSFGObjSetLabel overwriting an existing label */
+    SSF_ASSERT(SSFGObjInit(&gobj, 0));
+    SSF_ASSERT(SSFGObjSetLabel(gobj, "first"));
+    SSF_ASSERT(SSFGObjGetLabel(gobj, cStr, sizeof(cStr)));
+    SSF_ASSERT(memcmp(cStr, "first", 6) == 0);
+    SSF_ASSERT(SSFGObjSetLabel(gobj, "second"));
+    SSF_ASSERT(SSFGObjGetLabel(gobj, cStr, sizeof(cStr)));
+    SSF_ASSERT(memcmp(cStr, "second", 7) == 0);
+    SSF_ASSERT(SSFGObjSetLabel(gobj, "x"));
+    SSF_ASSERT(SSFGObjGetLabel(gobj, cStr, sizeof(cStr)));
+    SSF_ASSERT(memcmp(cStr, "x", 2) == 0);
+    SSFGObjDeInit(&gobj);
+    SSF_ASSERT(SSFGObjIsMemoryBalanced());
+
+    /* Test SSFGObjInsertChild on object/array with maxChildren=0 */
+    SSF_ASSERT(SSFGObjInit(&gobj, 0));
+    gobjChild1 = NULL;
+    SSF_ASSERT(SSFGObjInit(&gobjChild1, 0));
+    SSF_ASSERT(SSFGObjSetObject(gobj));
+    SSF_ASSERT(SSFGObjInsertChild(gobj, gobjChild1) == false);
+    SSF_ASSERT(SSFGObjSetArray(gobj));
+    SSF_ASSERT(SSFGObjInsertChild(gobj, gobjChild1) == false);
+    SSFGObjDeInit(&gobjChild1);
+    SSFGObjDeInit(&gobj);
+    SSF_ASSERT(SSFGObjIsMemoryBalanced());
+
+    /* Test SSFGObjFindPath on non-object/array root */
+    SSF_ASSERT(SSFGObjInit(&gobj, 0));
+    SSF_ASSERT(SSFGObjSetInt(gobj, 42));
+    memset(path, 0, sizeof(path));
+    path[0] = "key";
+    gobjParentOut = NULL;
+    gobjChildOut = NULL;
+    SSF_ASSERT(SSFGObjFindPath(gobj, (SSFCStrIn_t *)path, &gobjParentOut, &gobjChildOut) == false);
+    SSF_ASSERT(SSFGObjSetString(gobj, "hello"));
+    gobjParentOut = NULL;
+    gobjChildOut = NULL;
+    SSF_ASSERT(SSFGObjFindPath(gobj, (SSFCStrIn_t *)path, &gobjParentOut, &gobjChildOut) == false);
+    SSF_ASSERT(SSFGObjSetNull(gobj));
+    gobjParentOut = NULL;
+    gobjChildOut = NULL;
+    SSF_ASSERT(SSFGObjFindPath(gobj, (SSFCStrIn_t *)path, &gobjParentOut, &gobjChildOut) == false);
+    SSFGObjDeInit(&gobj);
+    SSF_ASSERT(SSFGObjIsMemoryBalanced());
+
+    /* Test SSFGObjRemoveChild on completely empty object/array */
+    SSF_ASSERT(SSFGObjInit(&gobj, 2));
+    gobjChild1 = NULL;
+    SSF_ASSERT(SSFGObjInit(&gobjChild1, 0));
+    SSF_ASSERT(SSFGObjSetObject(gobj));
+    SSF_ASSERT(SSFGObjRemoveChild(gobj, gobjChild1) == false);
+    SSF_ASSERT(SSFGObjSetArray(gobj));
+    SSF_ASSERT(SSFGObjRemoveChild(gobj, gobjChild1) == false);
+    SSFGObjDeInit(&gobjChild1);
+    SSFGObjDeInit(&gobj);
+    SSF_ASSERT(SSFGObjIsMemoryBalanced());
 }
 #endif /* SSF_CONFIG_GOBJ_UNIT_TEST */

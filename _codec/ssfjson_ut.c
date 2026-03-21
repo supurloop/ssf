@@ -1246,6 +1246,141 @@ void SSFJsonUnitTest(void)
         memset(strOut, 0x55, sizeof(strOut));
         SSF_ASSERT(SSFJsonGetString("{\"k\":\"\\u0041\"}", (SSFCStrIn_t *)path, strOut, 2, &strOutLen) == false);
     }
+
+    /* SSFJsonGetString with outLen == NULL */
+    {
+        char strOut[10];
+
+        memset(path, 0, sizeof(path));
+        path[0] = "k";
+        memset(strOut, 0x55, sizeof(strOut));
+        SSF_ASSERT(SSFJsonGetString("{\"k\":\"hello\"}", (SSFCStrIn_t *)path, strOut, sizeof(strOut), NULL));
+        SSF_ASSERT(memcmp(strOut, "hello", 6) == 0);
+    }
+
+    /* SSFJsonGetString decoding each escape type individually */
+    {
+        char strOut[10];
+        size_t strOutLen;
+
+        memset(path, 0, sizeof(path));
+        path[0] = "k";
+
+        SSF_ASSERT(SSFJsonGetString("{\"k\":\"\\r\"}", (SSFCStrIn_t *)path, strOut, sizeof(strOut), &strOutLen));
+        SSF_ASSERT(strOutLen == 1); SSF_ASSERT(strOut[0] == '\r');
+        SSF_ASSERT(SSFJsonGetString("{\"k\":\"\\t\"}", (SSFCStrIn_t *)path, strOut, sizeof(strOut), &strOutLen));
+        SSF_ASSERT(strOutLen == 1); SSF_ASSERT(strOut[0] == '\t');
+        SSF_ASSERT(SSFJsonGetString("{\"k\":\"\\f\"}", (SSFCStrIn_t *)path, strOut, sizeof(strOut), &strOutLen));
+        SSF_ASSERT(strOutLen == 1); SSF_ASSERT(strOut[0] == '\f');
+        SSF_ASSERT(SSFJsonGetString("{\"k\":\"\\b\"}", (SSFCStrIn_t *)path, strOut, sizeof(strOut), &strOutLen));
+        SSF_ASSERT(strOutLen == 1); SSF_ASSERT(strOut[0] == '\b');
+        SSF_ASSERT(SSFJsonGetString("{\"k\":\"\\/\"}", (SSFCStrIn_t *)path, strOut, sizeof(strOut), &strOutLen));
+        SSF_ASSERT(strOutLen == 1); SSF_ASSERT(strOut[0] == '/');
+        SSF_ASSERT(SSFJsonGetString("{\"k\":\"\\\\\"}", (SSFCStrIn_t *)path, strOut, sizeof(strOut), &strOutLen));
+        SSF_ASSERT(strOutLen == 1); SSF_ASSERT(strOut[0] == '\\');
+        SSF_ASSERT(SSFJsonGetString("{\"k\":\"\\\"\"}", (SSFCStrIn_t *)path, strOut, sizeof(strOut), &strOutLen));
+        SSF_ASSERT(strOutLen == 1); SSF_ASSERT(strOut[0] == '"');
+    }
+
+    /* SSFJsonGetString with empty string value */
+    {
+        char strOut[10];
+        size_t strOutLen;
+
+        memset(path, 0, sizeof(path));
+        path[0] = "k";
+        strOutLen = 99;
+        memset(strOut, 0x55, sizeof(strOut));
+        SSF_ASSERT(SSFJsonGetString("{\"k\":\"\"}", (SSFCStrIn_t *)path, strOut, sizeof(strOut), &strOutLen));
+        SSF_ASSERT(strOutLen == 0);
+        SSF_ASSERT(strOut[0] == 0);
+    }
+
+    /* SSFJsonPrintCString with control characters (non-printable → \u00XX) */
+    {
+        char js[64];
+        bool comma = false;
+
+        SSF_ASSERT(SSFJsonPrintCString(js, sizeof(js), 0, &end, "\x01", &comma));
+        SSF_ASSERT(memcmp(js, "\\u0001", 6) == 0);
+        comma = false;
+        SSF_ASSERT(SSFJsonPrintCString(js, sizeof(js), 0, &end, "\x1F", &comma));
+        SSF_ASSERT(memcmp(js, "\\u001F", 6) == 0);
+        comma = false;
+        SSF_ASSERT(SSFJsonPrintCString(js, sizeof(js), 0, &end, "\x80", &comma));
+        SSF_ASSERT(memcmp(js, "\\u0080", 6) == 0);
+        comma = false;
+        SSF_ASSERT(SSFJsonPrintCString(js, sizeof(js), 0, &end, "\xFF", &comma));
+        SSF_ASSERT(memcmp(js, "\\u00FF", 6) == 0);
+    }
+
+    /* SSFJsonIsValid with various malformed JSON inputs */
+    SSF_ASSERT(SSFJsonIsValid("") == false);
+    SSF_ASSERT(SSFJsonIsValid("{") == false);
+    SSF_ASSERT(SSFJsonIsValid("}") == false);
+    SSF_ASSERT(SSFJsonIsValid("[") == false);
+    SSF_ASSERT(SSFJsonIsValid("]") == false);
+    SSF_ASSERT(SSFJsonIsValid("{\"k\"") == false);
+    SSF_ASSERT(SSFJsonIsValid("{\"k\":}") == false);
+    SSF_ASSERT(SSFJsonIsValid("{\"k\":1,}") == false);
+    SSF_ASSERT(SSFJsonIsValid("{,}") == false);
+    SSF_ASSERT(SSFJsonIsValid("123") == false);
+    SSF_ASSERT(SSFJsonIsValid("\"hello\"") == false);
+    SSF_ASSERT(SSFJsonIsValid("null") == false);
+    SSF_ASSERT(SSFJsonIsValid("{}"));
+    SSF_ASSERT(SSFJsonIsValid("[]"));
+    SSF_ASSERT(SSFJsonIsValid("{\"k\":1}"));
+
+    /* Top-level array parsing */
+    {
+        size_t aidx;
+
+        memset(path, 0, sizeof(path));
+        path[0] = (char *)&aidx;
+
+        SSF_ASSERT(SSFJsonIsValid("[1,2,3]"));
+
+        aidx = 0;
+        SSF_ASSERT(SSFJsonGetType("[1,2,3]", (SSFCStrIn_t *)path) == SSF_JSON_TYPE_NUMBER);
+        aidx = 2;
+        SSF_ASSERT(SSFJsonGetType("[1,2,3]", (SSFCStrIn_t *)path) == SSF_JSON_TYPE_NUMBER);
+        aidx = 3;
+        SSF_ASSERT(SSFJsonGetType("[1,2,3]", (SSFCStrIn_t *)path) == SSF_JSON_TYPE_ERROR);
+
+        aidx = 0;
+        SSF_ASSERT(SSFJsonGetType("[true,false,null]", (SSFCStrIn_t *)path) == SSF_JSON_TYPE_TRUE);
+        aidx = 1;
+        SSF_ASSERT(SSFJsonGetType("[true,false,null]", (SSFCStrIn_t *)path) == SSF_JSON_TYPE_FALSE);
+        aidx = 2;
+        SSF_ASSERT(SSFJsonGetType("[true,false,null]", (SSFCStrIn_t *)path) == SSF_JSON_TYPE_NULL);
+    }
+
+    /* SSFJsonPrintInt/SSFJsonPrintUInt returning false for insufficient buffer */
+    {
+        char js[4];
+
+        /* size=1 fails (SSFDecIntToStr can't fit digit + null), size=2 succeeds */
+        SSF_ASSERT(SSFJsonPrintInt(js, 1, 0, &end, 0, NULL) == false);
+        SSF_ASSERT(SSFJsonPrintInt(js, 2, 0, &end, 0, NULL));
+        SSF_ASSERT(SSFJsonPrintUInt(js, 1, 0, &end, 0, NULL) == false);
+        SSF_ASSERT(SSFJsonPrintUInt(js, 2, 0, &end, 0, NULL));
+        /* start == size fails */
+        SSF_ASSERT(SSFJsonPrintInt(js, 3, 3, &end, 0, NULL) == false);
+        SSF_ASSERT(SSFJsonPrintUInt(js, 3, 3, &end, 0, NULL) == false);
+    }
+
+    /* Round-trip: generate JSON then parse values back */
+    {
+        char js[128];
+
+        SSF_ASSERT(SSFJsonPrintObject(js, sizeof(js), 0, &end, NULL, NULL, NULL));
+        SSF_ASSERT(SSFJsonIsValid(js));
+        SSF_ASSERT(memcmp(js, "{}", 3) == 0);
+
+        SSF_ASSERT(SSFJsonPrintArray(js, sizeof(js), 0, &end, NULL, NULL, NULL));
+        SSF_ASSERT(SSFJsonIsValid(js));
+        SSF_ASSERT(memcmp(js, "[]", 3) == 0);
+    }
 }
 #endif /* SSF_CONFIG_JSON_UNIT_TEST */
 

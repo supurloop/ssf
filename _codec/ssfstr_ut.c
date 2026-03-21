@@ -509,6 +509,68 @@ void SSFStrUnitTest(void)
     SSF_ASSERT(*tok == 0);
     SSF_ASSERT(len == 1);
     SSF_ASSERT(memcmp("3", check, 0) == 0);
+
+    /* SSFStrCpy with empty source string */
+    memset(dst, 0x55, sizeof(dst));
+    SSF_ASSERT(SSFStrCpy(dst, sizeof(dst), &s1Len, "", 1));
+    SSF_ASSERT(s1Len == 0);
+    SSF_ASSERT(dst[0] == 0);
+
+    /* SSFStrCat onto empty destination */
+    memset(dst, 0, 1);
+    dst[1] = 0x55;
+    SSF_ASSERT(SSFStrCat(dst, SSF_MIN(6, sizeof(dst)), &s1Len, "hello", 6));
+    SSF_ASSERT(s1Len == 5);
+    SSF_ASSERT(memcmp(dst, "hello", 6) == 0);
+    /* Cat onto empty with exact fit */
+    memset(dst, 0, 1);
+    SSF_ASSERT(SSFStrCat(dst, SSF_MIN(4, sizeof(dst)), &s1Len, "abc", 4));
+    SSF_ASSERT(s1Len == 3);
+    SSF_ASSERT(memcmp(dst, "abc", 4) == 0);
+    /* Cat onto empty with 1 byte short */
+    memset(dst, 0, 1);
+    SSF_ASSERT(SSFStrCat(dst, SSF_MIN(3, sizeof(dst)), &s1Len, "abc", 4) == false);
+
+    /* SSFStrCmp comparing two empty strings */
+    SSF_ASSERT(SSFStrCmp("", 1, "", 1));
+    SSF_ASSERT(SSFStrCmp("", 1, "a", 2) == false);
+    SSF_ASSERT(SSFStrCmp("a", 2, "", 1) == false);
+
+    /* SSFStrToCase with empty string */
+    memcpy(dst, "", 1);
+    dst[1] = 0x55;
+    SSF_ASSERT(SSFStrToCase(dst, SSF_MIN(1, sizeof(dst)), SSF_STR_CASE_LOWER));
+    SSF_ASSERT(dst[0] == 0);
+    SSF_ASSERT(dst[1] == 0x55);
+    SSF_ASSERT(SSFStrToCase(dst, SSF_MIN(1, sizeof(dst)), SSF_STR_CASE_UPPER));
+    SSF_ASSERT(dst[0] == 0);
+    SSF_ASSERT(dst[1] == 0x55);
+
+    /* SSFStrTok with token buffer too small for non-empty token */
+    SSF_ASSERT(SSFStrCpy(dst, sizeof(dst), &s1Len, "hello,world", 12));
+    tok = dst;
+    SSF_ASSERT(SSFStrTok(&tok, sizeof(dst), check, 3, &len, ",", 2));
+    SSF_ASSERT(len == -1);
+    SSF_ASSERT(tok == &dst[6]);
+    SSF_ASSERT(SSFStrTok(&tok, sizeof(dst), check, 6, &len, ",", 2) == false);
+    SSF_ASSERT(len == 5);
+    SSF_ASSERT(memcmp(check, "world", 6) == 0);
+
+    /* SSFStrStr with substr longer than cstr */
+    SSF_ASSERT(SSFStrStr("ab", 3, NULL, "abcdef", 7) == false);
+    matchStrOptOut = (SSFCStrIn_t)1;
+    SSF_ASSERT(SSFStrStr("ab", 3, &matchStrOptOut, "abcdef", 7) == false);
+    SSF_ASSERT(matchStrOptOut == NULL);
+
+    /* SSFStrCat exactly filling the buffer */
+    memcpy(dst, "hi", 3);
+    dst[3] = 0x55;
+    SSF_ASSERT(SSFStrCat(dst, SSF_MIN(6, sizeof(dst)), &s1Len, "abc", 4));
+    SSF_ASSERT(s1Len == 5);
+    SSF_ASSERT(memcmp(dst, "hiabc", 6) == 0);
+    /* One more byte would overflow */
+    memcpy(dst, "hi", 3);
+    SSF_ASSERT(SSFStrCat(dst, SSF_MIN(5, sizeof(dst)), &s1Len, "abc", 4) == false);
 }
 #endif /* SSF_CONFIG_STR_UNIT_TEST */
 

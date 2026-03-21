@@ -67,5 +67,59 @@ void SSFFCSumUnitTest(void)
 
     SSF_ASSERT(SSFFCSum16((uint8_t *)"\x01\xfe", 2, SSF_FCSUM_INITIAL) == 0x0100);
     SSF_ASSERT(SSFFCSum16((uint8_t *)"\xff", 1, SSF_FCSUM_INITIAL) == 0x0000);
+
+    /* Zero-length input returns initial unchanged */
+    SSF_ASSERT(SSFFCSum16((uint8_t *)"x", 0, SSF_FCSUM_INITIAL) == SSF_FCSUM_INITIAL);
+    SSF_ASSERT(SSFFCSum16((uint8_t *)"x", 0, 0x1234) == 0x1234);
+
+    /* Non-zero initial value on actual data */
+    {
+        uint16_t fc1 = SSFFCSum16((uint8_t *)"abcdefgh", 8, SSF_FCSUM_INITIAL);
+        uint16_t fc2 = SSFFCSum16((uint8_t *)"abcdefgh", 8, 0x0101);
+
+        SSF_ASSERT(fc1 == 0x0627);
+        SSF_ASSERT(fc2 != fc1);
+    }
+
+    /* All-zero input: single zero byte → s1=0, s2=0 */
+    SSF_ASSERT(SSFFCSum16((uint8_t *)"\x00", 1, SSF_FCSUM_INITIAL) == 0x0000);
+    /* Multiple zero bytes stay at 0 */
+    SSF_ASSERT(SSFFCSum16((uint8_t *)"\x00\x00\x00\x00", 4, SSF_FCSUM_INITIAL) == 0x0000);
+
+    /* Single byte explicit values */
+    /* 0x01: s1=1, s2=1 → 0x0101 */
+    SSF_ASSERT(SSFFCSum16((uint8_t *)"\x01", 1, SSF_FCSUM_INITIAL) == 0x0101);
+    /* 0x80: s1=128, s2=128 → 0x8080 */
+    SSF_ASSERT(SSFFCSum16((uint8_t *)"\x80", 1, SSF_FCSUM_INITIAL) == 0x8080);
+
+    /* Byte-by-byte incremental matches single-call */
+    {
+        uint16_t i;
+        uint16_t ref;
+        const uint8_t *data = (const uint8_t *)"abcdefgh";
+
+        ref = SSFFCSum16(data, 8, SSF_FCSUM_INITIAL);
+        fc = SSF_FCSUM_INITIAL;
+        for (i = 0; i < 8; i++)
+        {
+            fc = SSFFCSum16(&data[i], 1, fc);
+        }
+        SSF_ASSERT(fc == ref);
+    }
+    {
+        uint16_t i;
+        uint16_t ref;
+        const uint8_t data[] = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+                                0xF8, 0xF9, 0xFA, 0xFB, 0xFC, 0xFD, 0xFE, 0xFF};
+
+        ref = SSFFCSum16(data, 16, SSF_FCSUM_INITIAL);
+        fc = SSF_FCSUM_INITIAL;
+        for (i = 0; i < 16; i++)
+        {
+            fc = SSFFCSum16(&data[i], 1, fc);
+        }
+        SSF_ASSERT(fc == ref);
+        SSF_ASSERT(ref != SSF_FCSUM_INITIAL);
+    }
 }
 #endif /* SSF_CONFIG_FCSUM_UNIT_TEST */

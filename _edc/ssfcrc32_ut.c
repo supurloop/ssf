@@ -92,5 +92,43 @@ void SSFCRC32UnitTest(void)
                        _SSFCRC32UT[i].crc);
         }
     }
+
+    /* All-zero and all-0xFF input bytes */
+    {
+        uint8_t zeros[16];
+        uint8_t ones[16];
+
+        memset(zeros, 0x00, sizeof(zeros));
+        memset(ones, 0xFF, sizeof(ones));
+
+        crc = SSFCRC32(zeros, 16, SSF_CRC32_INITIAL);
+        SSF_ASSERT(crc != SSF_CRC32_INITIAL);
+        crc = SSFCRC32(ones, 16, SSF_CRC32_INITIAL);
+        SSF_ASSERT(crc != SSF_CRC32_INITIAL);
+        SSF_ASSERT(SSFCRC32(zeros, 16, SSF_CRC32_INITIAL) !=
+                   SSFCRC32(ones, 16, SSF_CRC32_INITIAL));
+    }
+
+    /* Single byte 0x00 and 0xFF */
+    {
+        uint8_t b0 = 0x00;
+        uint8_t bFF = 0xFF;
+
+        SSF_ASSERT(SSFCRC32(&b0, 1, SSF_CRC32_INITIAL) != SSF_CRC32_INITIAL);
+        SSF_ASSERT(SSFCRC32(&bFF, 1, SSF_CRC32_INITIAL) != SSF_CRC32_INITIAL);
+        SSF_ASSERT(SSFCRC32(&b0, 1, SSF_CRC32_INITIAL) !=
+                   SSFCRC32(&bFF, 1, SSF_CRC32_INITIAL));
+    }
+
+    /* Byte-by-byte incremental CRC matches single-call for all test vectors */
+    for (i = 0; i < sizeof(_SSFCRC32UT) / sizeof(SSFCRC32UT_t); i++)
+    {
+        crc = SSF_CRC32_INITIAL;
+        for (j = 0; j < _SSFCRC32UT[i].inLen; j++)
+        {
+            crc = SSFCRC32(&_SSFCRC32UT[i].in[j], 1, crc);
+        }
+        SSF_ASSERT(crc == _SSFCRC32UT[i].crc);
+    }
 }
 #endif /* SSF_CONFIG_CRC32_UNIT_TEST */

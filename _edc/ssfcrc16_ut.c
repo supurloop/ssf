@@ -92,5 +92,46 @@ void SSFCRC16UnitTest(void)
                        _SSFCRC16UT[i].crc);
         }
     }
+
+    /* All-zero input: XMODEM CRC-16 with initial 0 and zero data produces 0 (no inversion) */
+    {
+        uint8_t zeros[16];
+        uint8_t ones[16];
+
+        memset(zeros, 0x00, sizeof(zeros));
+        memset(ones, 0xFF, sizeof(ones));
+
+        crc = SSFCRC16(zeros, 16, SSF_CRC16_INITIAL);
+        SSF_ASSERT(crc == SSF_CRC16_INITIAL);
+        /* All-0xFF input produces non-zero CRC */
+        crc = SSFCRC16(ones, 16, SSF_CRC16_INITIAL);
+        SSF_ASSERT(crc != SSF_CRC16_INITIAL);
+        /* All-zero vs all-0xFF differ */
+        SSF_ASSERT(SSFCRC16(zeros, 16, SSF_CRC16_INITIAL) !=
+                   SSFCRC16(ones, 16, SSF_CRC16_INITIAL));
+    }
+
+    /* Single byte 0x00 and 0xFF */
+    {
+        uint8_t b0 = 0x00;
+        uint8_t bFF = 0xFF;
+
+        /* Single zero byte with zero initial stays zero (XMODEM property) */
+        SSF_ASSERT(SSFCRC16(&b0, 1, SSF_CRC16_INITIAL) == SSF_CRC16_INITIAL);
+        SSF_ASSERT(SSFCRC16(&bFF, 1, SSF_CRC16_INITIAL) != SSF_CRC16_INITIAL);
+        SSF_ASSERT(SSFCRC16(&b0, 1, SSF_CRC16_INITIAL) !=
+                   SSFCRC16(&bFF, 1, SSF_CRC16_INITIAL));
+    }
+
+    /* Byte-by-byte incremental CRC matches single-call for all test vectors */
+    for (i = 0; i < sizeof(_SSFCRC16UT) / sizeof(SSFCRC16UT_t); i++)
+    {
+        crc = SSF_CRC16_INITIAL;
+        for (j = 0; j < _SSFCRC16UT[i].inLen; j++)
+        {
+            crc = SSFCRC16(&_SSFCRC16UT[i].in[j], 1, crc);
+        }
+        SSF_ASSERT(crc == _SSFCRC16UT[i].crc);
+    }
 }
 #endif /* SSF_CONFIG_CRC16_UNIT_TEST */

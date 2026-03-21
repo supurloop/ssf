@@ -166,5 +166,73 @@ void SSFRSUnitTest(void)
             }
         }
     }
+
+    /* Decode without any errors (clean round-trip, _RSCheck returns true immediately) */
+    {
+        uint8_t m[10] = {0x48, 0x65, 0x6C, 0x6C, 0x6F, 0x57, 0x6F, 0x72, 0x6C, 0x64};
+        uint8_t mCopy[10];
+        uint8_t ecc[SSF_RS_MAX_SYMBOLS * 2];
+        uint16_t eccLen;
+        uint8_t combined[10 + SSF_RS_MAX_SYMBOLS * 2];
+
+        memcpy(mCopy, m, 10);
+        SSFRSEncode(m, 10, ecc, (uint16_t)sizeof(ecc), &eccLen, 4, SSF_RS_MAX_CHUNK_SIZE);
+        memcpy(combined, m, 10);
+        memcpy(&combined[10], ecc, eccLen);
+        /* No corruption — decode should succeed immediately */
+        SSF_ASSERT(SSFRSDecode(combined, 10 + eccLen, &len, 4, SSF_RS_MAX_CHUNK_SIZE));
+        SSF_ASSERT(len == 10);
+        SSF_ASSERT(memcmp(combined, mCopy, 10) == 0);
+    }
+
+    /* Decode fails when too many errors exceed correction capacity */
+    {
+        uint8_t m[8] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08};
+        uint8_t ecc[SSF_RS_MAX_SYMBOLS * 2];
+        uint16_t eccLen;
+        uint8_t combined[8 + SSF_RS_MAX_SYMBOLS * 2];
+
+        SSFRSEncode(m, 8, ecc, (uint16_t)sizeof(ecc), &eccLen, 4, SSF_RS_MAX_CHUNK_SIZE);
+        memcpy(combined, m, 8);
+        memcpy(&combined[8], ecc, eccLen);
+        /* Corrupt eccSize/2 + 1 = 3 bytes (exceeds max correctable of 2) */
+        combined[0] ^= 0xFF;
+        combined[1] ^= 0xFF;
+        combined[2] ^= 0xFF;
+        SSF_ASSERT(SSFRSDecode(combined, 8 + eccLen, &len, 4, SSF_RS_MAX_CHUNK_SIZE) == false);
+    }
+
+    /* Decode returns false for message too small (msgSize <= eccNumBytes) */
+    {
+        uint8_t tiny[4] = {0x01, 0x02, 0x03, 0x04};
+
+        SSF_ASSERT(SSFRSDecode(tiny, 4, &len, 4, SSF_RS_MAX_CHUNK_SIZE) == false);
+        SSF_ASSERT(SSFRSDecode(tiny, 2, &len, 2, SSF_RS_MAX_CHUNK_SIZE) == false);
+        SSF_ASSERT(SSFRSDecode(tiny, 1, &len, 2, SSF_RS_MAX_CHUNK_SIZE) == false);
+    }
+
+    /* Known fixed message: encode, verify ECC is non-trivial, decode clean */
+    {
+        uint8_t m[5] = {'H', 'e', 'l', 'l', 'o'};
+        uint8_t mCopy[5];
+        uint8_t ecc[SSF_RS_MAX_SYMBOLS * 2];
+        uint16_t eccLen;
+        uint8_t combined[5 + SSF_RS_MAX_SYMBOLS * 2];
+        uint8_t zeros[SSF_RS_MAX_SYMBOLS * 2];
+
+        memcpy(mCopy, m, 5);
+        memset(zeros, 0, sizeof(zeros));
+        SSFRSEncode(m, 5, ecc, (uint16_t)sizeof(ecc), &eccLen, 4, SSF_RS_MAX_CHUNK_SIZE);
+        SSF_ASSERT(eccLen == 4);
+        SSF_ASSERT(memcmp(ecc, zeros, eccLen) != 0);
+        memcpy(combined, m, 5);
+        memcpy(&combined[5], ecc, eccLen);
+
+        /* Corrupt 1 byte (well within eccSize/2=2 correction capacity) */
+        combined[2] ^= 0xFF;
+        SSF_ASSERT(SSFRSDecode(combined, 5 + eccLen, &len, 4, SSF_RS_MAX_CHUNK_SIZE));
+        SSF_ASSERT(len == 5);
+        SSF_ASSERT(memcmp(combined, mCopy, 5) == 0);
+    }
 }
 #endif /* SSF_CONFIG_RS_UNIT_TEST */

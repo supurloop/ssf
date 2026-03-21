@@ -181,6 +181,8 @@ typedef enum
     SSF_SM_UNIT_TEST_2,
     SSF_SM_UNIT_TEST_3,
     SSF_SM_UNIT_TEST_4,
+#else /* SSF_CONFIG_SM_UNIT_TEST */
+    SSF_SM_USER_1,
 #endif /* SSF_CONFIG_SM_UNIT_TEST */
     SSF_SM_MAX
 } SSFSMList_t;

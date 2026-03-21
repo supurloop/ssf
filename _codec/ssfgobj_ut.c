@@ -104,6 +104,7 @@ void iterateCallback(SSFGObj_t *gobj, SSFLL_t *path)
     _ssfgobj_utPathIndex++;
 }
 
+#if SSF_CONFIG_GOBJ_UNIT_TEST == 1
 /* --------------------------------------------------------------------------------------------- */
 /* Unit test for Generic Object interface, does not return on failure.                           */
 /* --------------------------------------------------------------------------------------------- */
@@ -681,4 +682,4 @@ void SSFGObjUnitTest(void)
     SSFGObjDeInit(&gobj);
     SSF_ASSERT(SSFGObjIsMemoryBalanced());
 }
-
+#endif /* SSF_CONFIG_GOBJ_UNIT_TEST */

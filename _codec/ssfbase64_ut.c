@@ -193,6 +193,53 @@ void SSFBase64UnitTest(void)
 
     /* "YWI=" decodes to "ab" (2 bytes) - outSize=1 must fail */
     SSF_ASSERT(SSFBase64Decode("YWI=", 4, decodedBigBin, 1, &outLen) == false);
+
+    /* SSFBase64Encode with outLen == NULL must not crash */
+    SSF_ASSERT(SSFBase64Encode((uint8_t *)"abc", 3, encodedBigStr, sizeof(encodedBigStr), NULL));
+    SSF_ASSERT(memcmp(encodedBigStr, "YWJj", 5) == 0);
+
+    /* SSFBase64Encode returns false when output buffer too small (> 0 but insufficient) */
+    SSF_ASSERT(SSFBase64Encode((uint8_t *)"a", 1, encodedBigStr, 4, &outLen) == false);
+    SSF_ASSERT(SSFBase64Encode((uint8_t *)"a", 1, encodedBigStr, 1, &outLen) == false);
+    SSF_ASSERT(SSFBase64Encode((uint8_t *)"abcd", 4, encodedBigStr, 5, &outLen) == false);
+    /* Exactly-sized multi-block output buffer must succeed: 4 bytes encodes to 8 chars + null = 9 */
+    SSF_ASSERT(SSFBase64Encode((uint8_t *)"abcd", 4, encodedBigStr, 9, &outLen) == true);
+    SSF_ASSERT(outLen == 8);
+    SSF_ASSERT(memcmp(encodedBigStr, "YWJjZA==", 9) == 0);
+    /* One byte short must fail */
+    SSF_ASSERT(SSFBase64Encode((uint8_t *)"abcd", 4, encodedBigStr, 8, &outLen) == false);
+
+    /* SSFBase64Decode with non-multiple-of-4 input length must return false */
+    SSF_ASSERT(SSFBase64Decode("YWJ", 3, decodedBigBin, sizeof(decodedBigBin), &outLen) == false);
+    SSF_ASSERT(SSFBase64Decode("YWJjZ", 5, decodedBigBin, sizeof(decodedBigBin), &outLen) == false);
+    SSF_ASSERT(SSFBase64Decode("Y", 1, decodedBigBin, sizeof(decodedBigBin), &outLen) == false);
+
+    /* SSFBase64Decode with invalid base64 characters must return false */
+    SSF_ASSERT(SSFBase64Decode("!@#$", 4, decodedBigBin, sizeof(decodedBigBin), &outLen) == false);
+    SSF_ASSERT(SSFBase64Decode("YW.j", 4, decodedBigBin, sizeof(decodedBigBin), &outLen) == false);
+    SSF_ASSERT(SSFBase64Decode("YWJ ", 4, decodedBigBin, sizeof(decodedBigBin), &outLen) == false);
+
+    /* SSFBase64Dec32To24 with invalid padding pattern "AA=A" (pad c but non-pad d) must return 0 */
+    SSF_ASSERT(SSFBase64Dec32To24("AA=A", b24, sizeof(b24)) == 0);
+    /* Invalid: pad in first two positions */
+    SSF_ASSERT(SSFBase64Dec32To24("=AAA", b24, sizeof(b24)) == 0);
+    SSF_ASSERT(SSFBase64Dec32To24("A=AA", b24, sizeof(b24)) == 0);
+
+    /* SSFBase64Dec32To24 with b24outSize=1 on non-padded 2-byte block must return 0 */
+    SSF_ASSERT(SSFBase64Dec32To24("YWI=", b24, 1) == 0);
+    /* SSFBase64Dec32To24 with b24outSize=2 on non-padded 3-byte block must return 0 */
+    SSF_ASSERT(SSFBase64Dec32To24("YWJj", b24, 2) == 0);
+    /* SSFBase64Dec32To24 with b24outSize=1 on padded 1-byte block must succeed */
+    SSF_ASSERT(SSFBase64Dec32To24("YQ==", b24, 1) == 1);
+    SSF_ASSERT(b24[0] == 'a');
+    /* SSFBase64Dec32To24 with b24outSize=2 on padded 2-byte block must succeed */
+    SSF_ASSERT(SSFBase64Dec32To24("YWI=", b24, 2) == 2);
+    SSF_ASSERT(memcmp(b24, "ab", 2) == 0);
+
+    /* SSFBase64Decode with outSize=0 and empty input must succeed (vacuous decode) */
+    outLen = 99;
+    SSF_ASSERT(SSFBase64Decode("", 0, decodedBigBin, 0, &outLen) == true);
+    SSF_ASSERT(outLen == 0);
 }
 #endif /* SSF_CONFIG_BASE64_UNIT_TEST */
 

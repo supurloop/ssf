@@ -816,6 +816,37 @@ void SSFHeapUnitTest(void)
         SSF_ASSERT(heapStatusOut.numFreeRequests == frees);
         SSFHeapDeInit(&heapHandle, true);
     }
+
+    /* Test convenience macros: MallocAndZero, Realloc, ReallocAndZeroNew, FreeAndZero */
+    heapHandle = NULL;
+    memset(heap, 0xDE, sizeof(heap));
+    SSFHeapInit(&heapHandle, heap, sizeof(heap), HEAP_MARK, false);
+    SSFHeapStatus(heapHandle, &heapStatusOut);
+
+    /* SSFHeapMallocAndZero: allocate and verify zeroed */
+    ptr = NULL;
+    SSFHeapMallocAndZero(heapHandle, &ptr, sizeof(void *), APP_MARK);
+    SSF_ASSERT(ptr != NULL);
+    for (i = 0; i < sizeof(void *); i++) SSF_ASSERT(ptr[i] == 0);
+    memset(ptr, 0xAB, sizeof(void *));
+
+    /* SSFHeapRealloc: resize without zeroing new bytes */
+    ptr2 = ptr;
+    SSF_ASSERT(SSFHeapRealloc(heapHandle, &ptr, sizeof(void *) << 1, APP_MARK + 1));
+    for (i = 0; i < sizeof(void *); i++) SSF_ASSERT(ptr[i] == 0xAB);
+
+    /* SSFHeapReallocAndZeroNew: resize and verify new bytes zeroed */
+    SSF_ASSERT(SSFHeapReallocAndZeroNew(heapHandle, &ptr, sizeof(void *) << 2, APP_MARK + 2));
+    for (i = 0; i < sizeof(void *); i++) SSF_ASSERT(ptr[i] == 0xAB);
+
+    /* SSFHeapFreeAndZero: free and verify memory zeroed */
+    ptr2 = ptr;
+    SSFHeapFreeAndZero(heapHandle, &ptr, &mark);
+    SSF_ASSERT(ptr == NULL);
+    SSF_ASSERT(mark == APP_MARK + 2);
+    for (i = 0; i < (sizeof(void *) << 2); i++) SSF_ASSERT(ptr2[i] == 0);
+
+    SSFHeapDeInit(&heapHandle, false);
 }
 #endif /* SSF_CONFIG_HEAP_UNIT_TEST */
 

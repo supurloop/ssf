@@ -325,6 +325,67 @@ void SSFBFifoUnitTest(void)
     }
 #endif /* SSF_BFIFO_MULTI_BYTE_ENABLE */
 
+    /* PutByte on full FIFO fires ENSURE assertion */
+    /* Note: PutByte mutates state BEFORE ENSURE fires, so FIFO is corrupted after this */
+    SSF_ASSERT(SSFBFifoIsEmpty(&_sbfFifos[0]));
+    for (j = 0; j < SSF_TEST_BFIFO_SIZE; j++)
+    {
+        SSFBFifoPutByte(&_sbfFifos[0], (uint8_t)j);
+    }
+    SSF_ASSERT(SSFBFifoIsFull(&_sbfFifos[0]));
+    SSF_ASSERT_TEST(SSFBFifoPutByte(&_sbfFifos[0], 0xFF));
+    /* FIFO state is corrupted after caught ENSURE; reinitialize for subsequent tests */
+    SSFBFifoDeInit(&_sbfFifos[0]);
+    memset(&_sbfFifos[0], 0, sizeof(_sbfFifos[0]));
+    SSFBFifoInit(&_sbfFifos[0], SSF_TEST_BFIFO_SIZE, _sbfBuffers[0], SSF_TEST_BFIFO_SIZE + (1UL));
+
+    /* Fill/empty/fill/empty: data integrity across wrap-around */
+    for (j = 0; j < SSF_TEST_BFIFO_SIZE; j++)
+    {
+        SSFBFifoPutByte(&_sbfFifos[0], (uint8_t)(j + 0x10));
+    }
+    for (j = 0; j < SSF_TEST_BFIFO_SIZE; j++)
+    {
+        SSF_ASSERT(SSFBFifoGetByte(&_sbfFifos[0], &outByte));
+        SSF_ASSERT(outByte == (uint8_t)(j + 0x10));
+    }
+    /* Second fill/empty with head/tail at mid-buffer position */
+    for (j = 0; j < SSF_TEST_BFIFO_SIZE; j++)
+    {
+        SSFBFifoPutByte(&_sbfFifos[0], (uint8_t)(j + 0x20));
+    }
+    SSF_ASSERT(SSFBFifoIsFull(&_sbfFifos[0]));
+    for (j = 0; j < SSF_TEST_BFIFO_SIZE; j++)
+    {
+        SSF_ASSERT(SSFBFifoGetByte(&_sbfFifos[0], &outByte));
+        SSF_ASSERT(outByte == (uint8_t)(j + 0x20));
+    }
+    SSF_ASSERT(SSFBFifoIsEmpty(&_sbfFifos[0]));
+
+    /* Multiple PeekByte calls return same value without consuming */
+    SSFBFifoPutByte(&_sbfFifos[0], 0x42);
+    SSFBFifoPutByte(&_sbfFifos[0], 0x43);
+    SSF_ASSERT(SSFBFifoPeekByte(&_sbfFifos[0], &outByte));
+    SSF_ASSERT(outByte == 0x42);
+    SSF_ASSERT(SSFBFifoPeekByte(&_sbfFifos[0], &outByte));
+    SSF_ASSERT(outByte == 0x42);
+    SSF_ASSERT(SSFBFifoLen(&_sbfFifos[0]) == 2);
+    SSF_ASSERT(SSFBFifoGetByte(&_sbfFifos[0], &outByte));
+    SSF_ASSERT(outByte == 0x42);
+    SSF_ASSERT(SSFBFifoPeekByte(&_sbfFifos[0], &outByte));
+    SSF_ASSERT(outByte == 0x43);
+    SSF_ASSERT(SSFBFifoGetByte(&_sbfFifos[0], &outByte));
+    SSF_ASSERT(outByte == 0x43);
+    SSF_ASSERT(SSFBFifoIsEmpty(&_sbfFifos[0]));
+
+#if SSF_BFIFO_MULTI_BYTE_ENABLE == 1
+    /* PutBytes with inBytesLen=0 is a no-op */
+    SSF_ASSERT(SSFBFifoIsEmpty(&_sbfFifos[0]));
+    SSFBFifoPutBytes(&_sbfFifos[0], (uint8_t *)"x", 0);
+    SSF_ASSERT(SSFBFifoIsEmpty(&_sbfFifos[0]));
+    SSF_ASSERT(SSFBFifoLen(&_sbfFifos[0]) == 0);
+#endif /* SSF_BFIFO_MULTI_BYTE_ENABLE */
+
     /* Deinit */
     memset(&fifoZero, 0, sizeof(fifoZero));
     for (i = 0; i < SBF_TEST_NUM_FIFOS; i++)

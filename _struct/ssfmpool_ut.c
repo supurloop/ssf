@@ -131,6 +131,69 @@ void SSFMPoolUnitTest(void)
     SSF_ASSERT_TEST(SSFMPoolInit(&smpTestPool, SMP_TEST_BLOCKS, SMP_TEST_BLOCK_SIZE));
     SSFMPoolDeInit(&smpTestPool);
     SSF_ASSERT_TEST(SSFMPoolDeInit(&smpTestPool));
+
+    /* Alloc, write data within block, free — sentinel survives normal use */
+    SSFMPoolInit(&smpTestPool, SMP_TEST_BLOCKS, SMP_TEST_BLOCK_SIZE);
+    testPtr = SSFMPoolAlloc(&smpTestPool, SMP_TEST_BLOCK_SIZE, 0x42);
+    SSF_ASSERT(testPtr != NULL);
+    memset(testPtr, 0xAA, SMP_TEST_BLOCK_SIZE);
+    testPtr = SSFMPoolFree(&smpTestPool, testPtr);
+    SSF_ASSERT(testPtr == NULL);
+    SSF_ASSERT(SSFMPoolIsFull(&smpTestPool));
+    SSFMPoolDeInit(&smpTestPool);
+
+    /* Alloc/free/re-alloc cycle: freed blocks are reusable */
+    SSFMPoolInit(&smpTestPool, SMP_TEST_BLOCKS, SMP_TEST_BLOCK_SIZE);
+    for (i = 0; i < SMP_TEST_BLOCKS; i++)
+    {
+        smpTestPtrs[i] = SSFMPoolAlloc(&smpTestPool, SMP_TEST_BLOCK_SIZE, (uint8_t)i);
+        SSF_ASSERT(smpTestPtrs[i] != NULL);
+        memset(smpTestPtrs[i], (uint8_t)i, SMP_TEST_BLOCK_SIZE);
+    }
+    SSF_ASSERT(SSFMPoolIsEmpty(&smpTestPool));
+    for (i = 0; i < SMP_TEST_BLOCKS; i++)
+    {
+        smpTestPtrs[i] = SSFMPoolFree(&smpTestPool, smpTestPtrs[i]);
+    }
+    SSF_ASSERT(SSFMPoolIsFull(&smpTestPool));
+    /* Re-alloc all blocks again */
+    for (i = 0; i < SMP_TEST_BLOCKS; i++)
+    {
+        smpTestPtrs[i] = SSFMPoolAlloc(&smpTestPool, SMP_TEST_BLOCK_SIZE, (uint8_t)(i + 0x10));
+        SSF_ASSERT(smpTestPtrs[i] != NULL);
+    }
+    SSF_ASSERT(SSFMPoolIsEmpty(&smpTestPool));
+    for (i = 0; i < SMP_TEST_BLOCKS; i++)
+    {
+        smpTestPtrs[i] = SSFMPoolFree(&smpTestPool, smpTestPtrs[i]);
+    }
+    SSFMPoolDeInit(&smpTestPool);
+
+    /* Free in reverse order (non-LIFO) */
+    SSFMPoolInit(&smpTestPool, SMP_TEST_BLOCKS, SMP_TEST_BLOCK_SIZE);
+    for (i = 0; i < SMP_TEST_BLOCKS; i++)
+    {
+        smpTestPtrs[i] = SSFMPoolAlloc(&smpTestPool, SMP_TEST_BLOCK_SIZE, (uint8_t)i);
+        SSF_ASSERT(smpTestPtrs[i] != NULL);
+    }
+    /* Free in reverse order */
+    for (i = SMP_TEST_BLOCKS; i > 0; i--)
+    {
+        smpTestPtrs[i - 1] = SSFMPoolFree(&smpTestPool, smpTestPtrs[i - 1]);
+        SSF_ASSERT(smpTestPtrs[i - 1] == NULL);
+    }
+    SSF_ASSERT(SSFMPoolIsFull(&smpTestPool));
+    SSF_ASSERT(SSFMPoolLen(&smpTestPool) == SMP_TEST_BLOCKS);
+    SSFMPoolDeInit(&smpTestPool);
+
+    /* DeInit with blocks still allocated should assert-fail */
+    SSFMPoolInit(&smpTestPool, SMP_TEST_BLOCKS, SMP_TEST_BLOCK_SIZE);
+    testPtr = SSFMPoolAlloc(&smpTestPool, SMP_TEST_BLOCK_SIZE, 0);
+    SSF_ASSERT(testPtr != NULL);
+    SSF_ASSERT_TEST(SSFMPoolDeInit(&smpTestPool));
+    /* Clean up: free the block and deinit properly */
+    testPtr = SSFMPoolFree(&smpTestPool, testPtr);
+    SSFMPoolDeInit(&smpTestPool);
 }
 #endif /* SSF_CONFIG_MPOOL_UNIT_TEST */
 

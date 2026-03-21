@@ -389,7 +389,89 @@ void SSFLLUnitTest(void)
     SSF_ASSERT(SSFLLUnused(&_sllTest) == (SLL_TEST_MAX_SIZE - 3));
     SSF_ASSERT(SSF_LL_HEAD(&_sllTest) == (SSFLLItem_t *)&_sllItems[2]);
     SSF_ASSERT(SSF_LL_TAIL(&_sllTest) == (SSFLLItem_t *)&_sllItems[1]);
+
+    /* Remove middle item from 3-item list [2, 0, 1] by LOC_ITEM */
+    SSF_ASSERT(SSFLLGetItem(&_sllTest, (SSFLLItem_t **)&outItem, SSF_LL_LOC_ITEM,
+                            (SSFLLItem_t *)&_sllItems[0]) == true);
+    SSF_ASSERT(outItem == &_sllItems[0]);
+    SSF_ASSERT(SSFLLLen(&_sllTest) == 2);
+    SSF_ASSERT(SSF_LL_HEAD(&_sllTest) == (SSFLLItem_t *)&_sllItems[2]);
+    SSF_ASSERT(SSF_LL_TAIL(&_sllTest) == (SSFLLItem_t *)&_sllItems[1]);
+    SSF_ASSERT(_sllItems[2].item.next == (SSFLLItem_t *)&_sllItems[1]);
+    SSF_ASSERT(_sllItems[1].item.prev == (SSFLLItem_t *)&_sllItems[2]);
+    /* Clean up */
+    SSF_ASSERT(SSFLLGetItem(&_sllTest, (SSFLLItem_t **)&outItem, SSF_LL_LOC_HEAD, NULL));
+    SSF_ASSERT(SSFLLGetItem(&_sllTest, (SSFLLItem_t **)&outItem, SSF_LL_LOC_HEAD, NULL));
+    SSF_ASSERT(SSFLLIsEmpty(&_sllTest));
 #endif /* SLL_TEST_MAX_SIZE */
+
+    /* SSFLLIsInited() */
+    SSFLLDeInit(&_sllTest);
+    SSF_ASSERT(SSFLLIsInited(&_sllTest) == false);
+    SSFLLInit(&_sllTest, SLL_TEST_MAX_SIZE);
+    SSF_ASSERT(SSFLLIsInited(&_sllTest) == true);
+
+    /* SSF_LL_STACK_PUSH / SSF_LL_STACK_POP macros (LIFO) */
+    SSF_LL_STACK_PUSH(&_sllTest, &_sllItems[0]);
+    SSF_LL_STACK_PUSH(&_sllTest, &_sllItems[1]);
+    SSF_LL_STACK_PUSH(&_sllTest, &_sllItems[2]);
+    SSF_ASSERT(SSFLLLen(&_sllTest) == 3);
+    SSF_ASSERT(SSF_LL_STACK_POP(&_sllTest, &outItem));
+    SSF_ASSERT(outItem == &_sllItems[2]);
+    SSF_ASSERT(SSF_LL_STACK_POP(&_sllTest, &outItem));
+    SSF_ASSERT(outItem == &_sllItems[1]);
+    SSF_ASSERT(SSF_LL_STACK_POP(&_sllTest, &outItem));
+    SSF_ASSERT(outItem == &_sllItems[0]);
+    SSF_ASSERT(SSFLLIsEmpty(&_sllTest));
+    SSF_ASSERT(SSF_LL_STACK_POP(&_sllTest, &outItem) == false);
+
+    /* SSF_LL_FIFO_PUSH / SSF_LL_FIFO_POP macros (FIFO) */
+    SSF_LL_FIFO_PUSH(&_sllTest, &_sllItems[0]);
+    SSF_LL_FIFO_PUSH(&_sllTest, &_sllItems[1]);
+    SSF_LL_FIFO_PUSH(&_sllTest, &_sllItems[2]);
+    SSF_ASSERT(SSFLLLen(&_sllTest) == 3);
+    SSF_ASSERT(SSF_LL_FIFO_POP(&_sllTest, &outItem));
+    SSF_ASSERT(outItem == &_sllItems[0]);
+    SSF_ASSERT(SSF_LL_FIFO_POP(&_sllTest, &outItem));
+    SSF_ASSERT(outItem == &_sllItems[1]);
+    SSF_ASSERT(SSF_LL_FIFO_POP(&_sllTest, &outItem));
+    SSF_ASSERT(outItem == &_sllItems[2]);
+    SSF_ASSERT(SSFLLIsEmpty(&_sllTest));
+    SSF_ASSERT(SSF_LL_FIFO_POP(&_sllTest, &outItem) == false);
+
+    /* SSF_LL_NEXT_ITEM / SSF_LL_PREV_ITEM forward and backward traversal */
+    {
+        SSFLLItem_t *cur;
+
+        SSFLLPutItem(&_sllTest, (SSFLLItem_t *)&_sllItems[0], SSF_LL_LOC_TAIL, NULL);
+        SSFLLPutItem(&_sllTest, (SSFLLItem_t *)&_sllItems[1], SSF_LL_LOC_TAIL, NULL);
+        SSFLLPutItem(&_sllTest, (SSFLLItem_t *)&_sllItems[2], SSF_LL_LOC_TAIL, NULL);
+        /* Forward: head → 0 → 1 → 2 → NULL */
+        cur = SSF_LL_HEAD(&_sllTest);
+        SSF_ASSERT(cur == (SSFLLItem_t *)&_sllItems[0]);
+        cur = SSF_LL_NEXT_ITEM(cur);
+        SSF_ASSERT(cur == (SSFLLItem_t *)&_sllItems[1]);
+        cur = SSF_LL_NEXT_ITEM(cur);
+        SSF_ASSERT(cur == (SSFLLItem_t *)&_sllItems[2]);
+        cur = SSF_LL_NEXT_ITEM(cur);
+        SSF_ASSERT(cur == NULL);
+        /* Backward: tail → 2 → 1 → 0 → NULL */
+        cur = SSF_LL_TAIL(&_sllTest);
+        SSF_ASSERT(cur == (SSFLLItem_t *)&_sllItems[2]);
+        cur = SSF_LL_PREV_ITEM(cur);
+        SSF_ASSERT(cur == (SSFLLItem_t *)&_sllItems[1]);
+        cur = SSF_LL_PREV_ITEM(cur);
+        SSF_ASSERT(cur == (SSFLLItem_t *)&_sllItems[0]);
+        cur = SSF_LL_PREV_ITEM(cur);
+        SSF_ASSERT(cur == NULL);
+        /* Clean up */
+        SSF_ASSERT(SSFLLGetItem(&_sllTest, (SSFLLItem_t **)&outItem, SSF_LL_LOC_HEAD, NULL));
+        SSF_ASSERT(SSFLLGetItem(&_sllTest, (SSFLLItem_t **)&outItem, SSF_LL_LOC_HEAD, NULL));
+        SSF_ASSERT(SSFLLGetItem(&_sllTest, (SSFLLItem_t **)&outItem, SSF_LL_LOC_HEAD, NULL));
+        SSF_ASSERT(SSFLLIsEmpty(&_sllTest));
+    }
+
+    SSFLLDeInit(&_sllTest);
 }
 #endif /* SSF_CONFIG_LL_UNIT_TEST */
 

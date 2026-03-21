@@ -95,7 +95,7 @@ SSFObjType_t SSFGObjGetType(SSFGObj_t *gobj);
 size_t SSFGObjGetSize(SSFGObj_t *gobj);
 bool SSFGObjSetNone(SSFGObj_t *gobj);
 bool SSFGObjSetString(SSFGObj_t *gobj, SSFCStrIn_t valueCStr);
-bool SSFGObjGetString(SSFGObj_t *gobj, SSFCStrOut_t valueCStrOut, size_t labelCStrOutSize);
+bool SSFGObjGetString(SSFGObj_t *gobj, SSFCStrOut_t valueCStrOut, size_t valueCStrOutSize);
 bool SSFGObjSetInt(SSFGObj_t *gobj, int64_t value);
 bool SSFGObjGetInt(SSFGObj_t *gobj, int64_t *valueOut);
 bool SSFGObjSetUInt(SSFGObj_t *gobj, uint64_t value);

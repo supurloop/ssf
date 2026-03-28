@@ -65,3 +65,30 @@ void SSFTraceDeInit(SSFTrace_t *trace)
     memset(trace, 0, sizeof(SSFTrace_t));
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if byte read and stored to data, else false.                                     */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFTraceGetByte(SSFTrace_t *trace, uint8_t *data)
+{
+    bool retVal = false;
+
+    SSF_REQUIRE(trace != NULL);
+    SSF_REQUIRE(data != NULL);
+
+#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
+    SSF_MUTEX_ACQUIRE((trace)->mutex);
+#endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
+
+    if (SSF_BFIFO_IS_EMPTY(&((trace)->fifo)) == false)
+    {
+        SSF_BFIFO_GET_BYTE(&((trace)->fifo), *data);
+        retVal = true;
+    }
+
+#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
+    SSF_MUTEX_RELEASE((trace)->mutex);
+#endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
+
+    return retVal;
+}
+

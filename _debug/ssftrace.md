@@ -27,10 +27,10 @@ interrupts disabled or mutexes held.
   requirement as `SSFBFifoInit()`).
 - [`SSF_TRACE_PUT_BYTE()`](#ssf-trace-put-byte) automatically discards the oldest byte when the
   trace is full; the caller does not need to check for space before writing.
-- [`SSF_TRACE_GET_BYTE()`](#ssf-trace-get-byte) is a no-op when the trace is empty; the caller does
+- [`SSFTraceGetByte()`](#ssftracegetbyte) returns `false` when the trace is empty; the caller does
   not need to check before reading.
-- When [`SSF_CONFIG_ENABLE_THREAD_SUPPORT`](#opt-thread-support) is enabled, the macros acquire and
-  release the trace mutex around each access.
+- When [`SSF_CONFIG_ENABLE_THREAD_SUPPORT`](#opt-thread-support) is enabled, all API calls acquire
+  and release the trace mutex around each access.
 
 <a id="configuration"></a>
 
@@ -63,8 +63,8 @@ The underlying FIFO capacity and index sizing are controlled by the
 |---|-----------------|-------------|
 | [e.g.](#ex-init) | [`void SSFTraceInit(trace, traceSize, buffer, bufferSize)`](#ssftraceinit) | Initialize a trace buffer |
 | [e.g.](#ex-deinit) | [`void SSFTraceDeInit(trace)`](#ssftracedeinit) | De-initialize a trace buffer |
+| [e.g.](#ex-getbyte) | [`bool SSFTraceGetByte(trace, data)`](#ssftracegetbyte) | Get one byte; returns `false` if empty |
 | [e.g.](#ex-putbyte) | [`SSF_TRACE_PUT_BYTE(trace, u8)`](#ssf-trace-put-byte) | Macro: put one byte, discarding oldest if full |
-| [e.g.](#ex-getbyte) | [`SSF_TRACE_GET_BYTE(trace, u8)`](#ssf-trace-get-byte) | Macro: get one byte, no-op if empty |
 | [e.g.](#ex-putbytes) | [`SSF_TRACE_PUT_BYTES(trace, u8Ptr, len)`](#ssf-trace-put-bytes) | Macro: put multiple bytes |
 
 <a id="function-reference"></a>
@@ -176,24 +176,25 @@ SSF_TRACE_PUT_BYTE(&trace, 0x01u);
 
 ---
 
-<a id="ssf-trace-get-byte"></a>
+<a id="ssftracegetbyte"></a>
 
-### [↑](#functions) [`SSF_TRACE_GET_BYTE()`](#functions)
+### [↑](#functions) [`bool SSFTraceGetByte()`](#functions)
 
 ```c
-#define SSF_TRACE_GET_BYTE(trace, u8)
+bool SSFTraceGetByte(SSFTrace_t *trace,
+                     uint8_t *data);
 ```
 
-Reads and removes one byte from the trace buffer. If the trace is empty, the operation is a no-op
-and `u8` is unchanged. When thread support is enabled, the mutex is acquired and released around
-the operation.
+Reads and removes one byte from the trace buffer. Returns `true` if a byte was available and
+written to `data`; returns `false` if the trace is empty. When thread support is enabled, the
+mutex is acquired and released around the operation.
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
 | `trace` | in-out | [`SSFTrace_t *`](#type-ssftrace-t) | Pointer to an initialized trace. Must not be `NULL`. |
-| `u8` | out | `uint8_t` | Variable that receives the byte read from the trace. Unchanged if trace is empty. |
+| `data` | out | `uint8_t *` | Receives the byte read from the trace. Must not be `NULL`. Unchanged if trace is empty. |
 
-**Returns:** Nothing.
+**Returns:** `true` if a byte was available and written to `data`; `false` if the trace was empty.
 
 <a id="ex-getbyte"></a>
 
@@ -202,16 +203,20 @@ the operation.
 ```c
 SSFTrace_t trace;
 uint8_t traceBuf[SSF_BFIFO_255 + 1ul];
-uint8_t b = 0;
+uint8_t b;
 
 SSFTraceInit(&trace, SSF_BFIFO_255, traceBuf, sizeof(traceBuf));
 SSF_TRACE_PUT_BYTE(&trace, 0xA5u);
 
-SSF_TRACE_GET_BYTE(&trace, b);
-/* b == 0xA5 */
+if (SSFTraceGetByte(&trace, &b))
+{
+    /* b == 0xA5 */
+}
 
-SSF_TRACE_GET_BYTE(&trace, b);
-/* trace was empty; b is unchanged (still 0xA5) */
+if (SSFTraceGetByte(&trace, &b) == false)
+{
+    /* trace was empty; b is unchanged */
+}
 ```
 
 ---

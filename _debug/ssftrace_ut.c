@@ -61,108 +61,147 @@ void SSFTraceUnitTest(void)
                                  STR_TEST_TRACE_SIZE + (1UL)));
     SSF_ASSERT_TEST(SSFTraceInit(&_strTraces[0], STR_TEST_TRACE_SIZE, NULL,
                                  STR_TEST_TRACE_SIZE + (1UL)));
+    SSF_ASSERT_TEST(SSFTraceInit(&_strTraces[0], 0, _strBuffers[0],
+                                 STR_TEST_TRACE_SIZE + (1UL)));
     SSF_ASSERT_TEST(SSFTraceInit(&_strTraces[0], STR_TEST_TRACE_SIZE, _strBuffers[0], 0));
 
     /* Test SSFTraceDeInit assertions */
     SSF_ASSERT_TEST(SSFTraceDeInit(NULL));
 
-    /* Initialize traces and verify underlying FIFO is empty */
+    /* Test SSFTraceGetByte assertions */
+    SSF_ASSERT_TEST(SSFTraceGetByte(NULL, &outByte));
+    SSF_ASSERT_TEST(SSFTraceGetByte(&_strTraces[0], NULL));
+
+    /* Initialize traces and verify empty via SSFTraceGetByte */
     for (j = 0; j < STR_TEST_NUM_TRACES; j++)
     {
         SSFTraceInit(&_strTraces[j], STR_TEST_TRACE_SIZE, _strBuffers[j],
                      STR_TEST_TRACE_SIZE + (1UL));
-        SSF_ASSERT(SSFBFifoIsEmpty(&_strTraces[j].fifo) == true);
-        SSF_ASSERT(SSFBFifoIsFull(&_strTraces[j].fifo) == false);
-        SSF_ASSERT(SSFBFifoSize(&_strTraces[j].fifo) == STR_TEST_TRACE_SIZE);
-        SSF_ASSERT(SSFBFifoLen(&_strTraces[j].fifo) == 0);
-        SSF_ASSERT(SSFBFifoUnused(&_strTraces[j].fifo) == STR_TEST_TRACE_SIZE);
+        SSF_ASSERT(SSFTraceGetByte(&_strTraces[j], &outByte) == false);
     }
 
     /* Double init should assert (underlying FIFO is already initialized) */
     SSF_ASSERT_TEST(SSFTraceInit(&_strTraces[0], STR_TEST_TRACE_SIZE, _strBuffers[0],
                                  STR_TEST_TRACE_SIZE + (1UL)));
 
-    /* Put and get one byte at a time through underlying FIFO until wrap occurs */
+    /* Put and get one byte at a time via trace API until wrap occurs */
     for (j = 0; j < STR_TEST_TRACE_SIZE * (2UL); j++)
     {
-        SSF_ASSERT(SSFBFifoIsEmpty(&_strTraces[0].fifo) == true);
-        SSF_ASSERT(SSFBFifoIsFull(&_strTraces[0].fifo) == false);
-        SSF_ASSERT(SSFBFifoLen(&_strTraces[0].fifo) == 0);
-        SSF_ASSERT(SSFBFifoUnused(&_strTraces[0].fifo) == STR_TEST_TRACE_SIZE);
+        SSF_ASSERT(SSFTraceGetByte(&_strTraces[0], &outByte) == false);
 
-        SSFBFifoPutByte(&_strTraces[0].fifo, (uint8_t)(j + 1));
-
-        SSF_ASSERT(SSFBFifoIsEmpty(&_strTraces[0].fifo) == false);
-        SSF_ASSERT(SSFBFifoIsFull(&_strTraces[0].fifo) == false);
-        SSF_ASSERT(SSFBFifoLen(&_strTraces[0].fifo) == 1);
-        SSF_ASSERT(SSFBFifoUnused(&_strTraces[0].fifo) == (STR_TEST_TRACE_SIZE - 1));
+        SSF_TRACE_PUT_BYTE(&_strTraces[0], (uint8_t)(j + 1));
 
         outByte = 0;
-        SSF_ASSERT(SSFBFifoPeekByte(&_strTraces[0].fifo, &outByte) == true);
+        SSF_ASSERT(SSFTraceGetByte(&_strTraces[0], &outByte) == true);
         SSF_ASSERT(outByte == (uint8_t)(j + 1));
-        SSF_ASSERT(SSFBFifoLen(&_strTraces[0].fifo) == 1);
 
-        outByte = 0;
-        SSF_ASSERT(SSFBFifoGetByte(&_strTraces[0].fifo, &outByte) == true);
-        SSF_ASSERT(outByte == (uint8_t)(j + 1));
+        SSF_ASSERT(SSFTraceGetByte(&_strTraces[0], &outByte) == false);
     }
 
-    /* Fill underlying FIFO to capacity */
-    SSF_ASSERT(SSFBFifoIsEmpty(&_strTraces[0].fifo) == true);
+    /* Fill trace to capacity via SSF_TRACE_PUT_BYTE */
     for (j = 0; j < STR_TEST_TRACE_SIZE; j++)
     {
-        SSFBFifoPutByte(&_strTraces[0].fifo, (uint8_t)(j + 0x10));
-        SSF_ASSERT(SSFBFifoLen(&_strTraces[0].fifo) == (j + 1));
+        SSF_TRACE_PUT_BYTE(&_strTraces[0], (uint8_t)(j + 0x10));
     }
-    SSF_ASSERT(SSFBFifoIsFull(&_strTraces[0].fifo) == true);
-    SSF_ASSERT(SSFBFifoIsEmpty(&_strTraces[0].fifo) == false);
-    SSF_ASSERT(SSFBFifoLen(&_strTraces[0].fifo) == STR_TEST_TRACE_SIZE);
-    SSF_ASSERT(SSFBFifoUnused(&_strTraces[0].fifo) == 0);
 
-    /* Empty underlying FIFO and verify data integrity */
+    /* Empty trace and verify data integrity via SSFTraceGetByte */
     for (j = 0; j < STR_TEST_TRACE_SIZE; j++)
     {
         outByte = 0;
-        SSF_ASSERT(SSFBFifoGetByte(&_strTraces[0].fifo, &outByte) == true);
+        SSF_ASSERT(SSFTraceGetByte(&_strTraces[0], &outByte) == true);
         SSF_ASSERT(outByte == (uint8_t)(j + 0x10));
     }
-    SSF_ASSERT(SSFBFifoIsEmpty(&_strTraces[0].fifo) == true);
-    SSF_ASSERT(SSFBFifoIsFull(&_strTraces[0].fifo) == false);
-    SSF_ASSERT(SSFBFifoLen(&_strTraces[0].fifo) == 0);
-    SSF_ASSERT(SSFBFifoUnused(&_strTraces[0].fifo) == STR_TEST_TRACE_SIZE);
+    SSF_ASSERT(SSFTraceGetByte(&_strTraces[0], &outByte) == false);
+
+    /* SSF_TRACE_PUT_BYTE auto-discards oldest byte when full */
+    for (j = 0; j < STR_TEST_TRACE_SIZE; j++)
+    {
+        SSF_TRACE_PUT_BYTE(&_strTraces[0], (uint8_t)(j + 0x20));
+    }
+    /* Trace is now full; put one more byte which should discard oldest (0x20) */
+    SSF_TRACE_PUT_BYTE(&_strTraces[0], 0xFF);
+    /* First byte out should be 0x21 (second byte originally put) */
+    outByte = 0;
+    SSF_ASSERT(SSFTraceGetByte(&_strTraces[0], &outByte) == true);
+    SSF_ASSERT(outByte == 0x21);
+    /* Drain remaining original bytes */
+    for (j = 2; j < STR_TEST_TRACE_SIZE; j++)
+    {
+        SSF_ASSERT(SSFTraceGetByte(&_strTraces[0], &outByte) == true);
+        SSF_ASSERT(outByte == (uint8_t)(j + 0x20));
+    }
+    /* Last byte should be the overflow byte */
+    SSF_ASSERT(SSFTraceGetByte(&_strTraces[0], &outByte) == true);
+    SSF_ASSERT(outByte == 0xFF);
+    SSF_ASSERT(SSFTraceGetByte(&_strTraces[0], &outByte) == false);
 
     /* Fill/empty/fill/empty: data integrity across wrap-around */
     for (j = 0; j < STR_TEST_TRACE_SIZE; j++)
     {
-        SSFBFifoPutByte(&_strTraces[0].fifo, (uint8_t)(j + 0x20));
+        SSF_TRACE_PUT_BYTE(&_strTraces[0], (uint8_t)(j + 0x30));
     }
     for (j = 0; j < STR_TEST_TRACE_SIZE; j++)
     {
-        SSF_ASSERT(SSFBFifoGetByte(&_strTraces[0].fifo, &outByte));
-        SSF_ASSERT(outByte == (uint8_t)(j + 0x20));
+        SSF_ASSERT(SSFTraceGetByte(&_strTraces[0], &outByte) == true);
+        SSF_ASSERT(outByte == (uint8_t)(j + 0x30));
     }
     /* Second fill/empty with head/tail at mid-buffer position */
     for (j = 0; j < STR_TEST_TRACE_SIZE; j++)
     {
-        SSFBFifoPutByte(&_strTraces[0].fifo, (uint8_t)(j + 0x30));
+        SSF_TRACE_PUT_BYTE(&_strTraces[0], (uint8_t)(j + 0x40));
     }
-    SSF_ASSERT(SSFBFifoIsFull(&_strTraces[0].fifo));
     for (j = 0; j < STR_TEST_TRACE_SIZE; j++)
     {
-        SSF_ASSERT(SSFBFifoGetByte(&_strTraces[0].fifo, &outByte));
-        SSF_ASSERT(outByte == (uint8_t)(j + 0x30));
+        SSF_ASSERT(SSFTraceGetByte(&_strTraces[0], &outByte) == true);
+        SSF_ASSERT(outByte == (uint8_t)(j + 0x40));
     }
-    SSF_ASSERT(SSFBFifoIsEmpty(&_strTraces[0].fifo));
+    SSF_ASSERT(SSFTraceGetByte(&_strTraces[0], &outByte) == false);
+
+    /* SSF_TRACE_PUT_BYTES: put multiple bytes and verify */
+    {
+        uint8_t *p;
+        uint32_t n;
+        const uint8_t msg[] = {0xA1, 0xB2, 0xC3, 0xD4, 0xE5};
+
+        p = (uint8_t *)msg;
+        n = sizeof(msg);
+        SSF_TRACE_PUT_BYTES(&_strTraces[0], p, n);
+        for (j = 0; j < sizeof(msg); j++)
+        {
+            outByte = 0;
+            SSF_ASSERT(SSFTraceGetByte(&_strTraces[0], &outByte) == true);
+            SSF_ASSERT(outByte == msg[j]);
+        }
+        SSF_ASSERT(SSFTraceGetByte(&_strTraces[0], &outByte) == false);
+    }
+
+    /* SSF_TRACE_PUT_BYTES: auto-discard when more bytes than capacity */
+    {
+        uint8_t putBuf[STR_TEST_TRACE_SIZE + 3];
+        uint8_t *p;
+        uint32_t n;
+
+        for (j = 0; j < sizeof(putBuf); j++) { putBuf[j] = (uint8_t)(j + 0x50); }
+        p = putBuf;
+        n = sizeof(putBuf);
+        SSF_TRACE_PUT_BYTES(&_strTraces[0], p, n);
+        /* Only last STR_TEST_TRACE_SIZE bytes should remain (oldest 3 discarded) */
+        for (j = 0; j < STR_TEST_TRACE_SIZE; j++)
+        {
+            outByte = 0;
+            SSF_ASSERT(SSFTraceGetByte(&_strTraces[0], &outByte) == true);
+            SSF_ASSERT(outByte == (uint8_t)(j + 3 + 0x50));
+        }
+        SSF_ASSERT(SSFTraceGetByte(&_strTraces[0], &outByte) == false);
+    }
 
     /* Verify second trace instance is independent */
-    SSFBFifoPutByte(&_strTraces[1].fifo, 0xAA);
-    SSF_ASSERT(SSFBFifoIsEmpty(&_strTraces[0].fifo) == true);
-    SSF_ASSERT(SSFBFifoIsEmpty(&_strTraces[1].fifo) == false);
-    SSF_ASSERT(SSFBFifoLen(&_strTraces[1].fifo) == 1);
+    SSF_TRACE_PUT_BYTE(&_strTraces[1], 0xAA);
+    SSF_ASSERT(SSFTraceGetByte(&_strTraces[0], &outByte) == false);
     outByte = 0;
-    SSF_ASSERT(SSFBFifoGetByte(&_strTraces[1].fifo, &outByte) == true);
+    SSF_ASSERT(SSFTraceGetByte(&_strTraces[1], &outByte) == true);
     SSF_ASSERT(outByte == 0xAA);
-    SSF_ASSERT(SSFBFifoIsEmpty(&_strTraces[1].fifo) == true);
+    SSF_ASSERT(SSFTraceGetByte(&_strTraces[1], &outByte) == false);
 
     /* Deinit all traces and verify zeroed */
     memset(&traceZero, 0, sizeof(traceZero));

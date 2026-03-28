@@ -230,6 +230,16 @@ Event-driven state machine framework suitable for both bare-metal and RTOS envir
 
 ¹⁹ Enable `SSF_CONFIG_ENABLE_THREAD_SUPPORT` and implement the corresponding synchronization macros in `ssfport.h` to make this module safe for concurrent multi-context use.
 
+#### [Debug](_debug/README.md)
+
+Debug and diagnostic interfaces for runtime tracing.
+
+| Module | Description | Flash | Static RAM | Peak Stack | Heap | Reentrant |
+|--------|-------------|-------|------------|------------|------|-----------|
+| [Debug Trace](_debug/ssftrace.md) | FIFO-backed debug trace buffer with automatic oldest-byte discard and optional mutex protection | ~200 B | — | ~48 B | — | Yes²⁰ |
+
+²⁰ Each `SSFTrace_t` instance is independent. When `SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1`, the macros acquire and release a per-instance mutex around each access, making concurrent use from multiple contexts safe.
+
 #### [Time](_time/README.md)
 
 Time management interfaces covering raw tick time, calendar conversion, and ISO 8601 string formatting.

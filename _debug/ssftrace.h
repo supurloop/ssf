@@ -59,16 +59,9 @@ typedef struct
 /* --------------------------------------------------------------------------------------------- */
 void SSFTraceInit(SSFTrace_t *trace, uint32_t traceSize, uint8_t *buffer, uint32_t bufferSize);
 void SSFTraceDeInit(SSFTrace_t *trace);
+bool SSFTraceGetByte(SSFTrace_t *trace, uint8_t *data);
 
 #if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
-#define SSF_TRACE_GET_BYTE(trace, u8) { \
-    SSF_MUTEX_ACQUIRE((trace)->mutex); \
-    if (SSF_BFIFO_IS_EMPTY(&((trace)->fifo)) == false) { \
-        SSF_BFIFO_GET_BYTE(&((trace)->fifo), u8); \
-    } \
-    SSF_MUTEX_RELEASE((trace)->mutex); \
-}
-
 #define SSF_TRACE_PUT_BYTE(trace, u8) { \
     SSF_MUTEX_ACQUIRE((trace)->mutex); \
     if (SSF_BFIFO_IS_FULL(&((trace)->fifo))) { \
@@ -78,12 +71,6 @@ void SSFTraceDeInit(SSFTrace_t *trace);
     SSF_MUTEX_RELEASE((trace)->mutex); \
 }
 #else /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
-#define SSF_TRACE_GET_BYTE(trace, u8) { \
-    if (SSF_BFIFO_IS_EMPTY(&((trace)->fifo)) == false) { \
-        SSF_BFIFO_GET_BYTE(&((trace)->fifo), u8); \
-    } \
-}
-
 #define SSF_TRACE_PUT_BYTE(trace, u8) { \
     if (SSF_BFIFO_IS_FULL(&((trace)->fifo))) { \
         SSF_BFIFO_PURGE_BYTE(&((trace)->fifo)); \

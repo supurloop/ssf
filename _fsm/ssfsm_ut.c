@@ -100,7 +100,7 @@ void UT1TestHandler1(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t
                      SSFVoidFn_t *superHandler)
 {
     SSF_ASSERT(_ssfsmFlags[SSF_SM_UNIT_TEST_1][0][eid] == false);
-    SSF_UNUSED(superHandler);
+    SSF_UNUSED_PTR(superHandler);
     _ssfsmFlags[SSF_SM_UNIT_TEST_1][0][eid] = true;
     if (eid == SSF_SM_EVENT_SUPER) { SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_1, 0, SSF_SM_EVENT_SUPER); }
 
@@ -156,7 +156,7 @@ void UT1TestHandler2(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t
                      SSFVoidFn_t *superHandler)
 {
     SSF_ASSERT(_ssfsmFlags[SSF_SM_UNIT_TEST_1][1][eid] == false);
-    SSF_UNUSED(superHandler);
+    SSF_UNUSED_PTR(superHandler);
     _ssfsmFlags[SSF_SM_UNIT_TEST_1][1][eid] = true;
     if (eid == SSF_SM_EVENT_SUPER) { SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_1, 1, SSF_SM_EVENT_SUPER); }
 
@@ -194,7 +194,7 @@ void UT2TestHandler1(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t
                      SSFVoidFn_t *superHandler)
 {
     SSF_ASSERT(_ssfsmFlags[SSF_SM_UNIT_TEST_2][0][eid] == false);
-    SSF_UNUSED(superHandler);
+    SSF_UNUSED_PTR(superHandler);
     _ssfsmFlags[SSF_SM_UNIT_TEST_2][0][eid] = true;
     if (eid == SSF_SM_EVENT_SUPER) { SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_2, 0, SSF_SM_EVENT_SUPER); }
 
@@ -258,7 +258,7 @@ void UT2TestHandler2(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t
                      SSFVoidFn_t *superHandler)
 {
     SSF_ASSERT(_ssfsmFlags[SSF_SM_UNIT_TEST_2][1][eid] == false);
-    SSF_UNUSED(superHandler);
+    SSF_UNUSED_PTR(superHandler);
     _ssfsmFlags[SSF_SM_UNIT_TEST_2][1][eid] = true;
     if (eid == SSF_SM_EVENT_SUPER) { SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_2, 1, SSF_SM_EVENT_SUPER); }
 
@@ -296,9 +296,9 @@ void UT2TestHandler2(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t
 void UT3TestHandler1Super(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen,
                           SSFVoidFn_t *superHandler)
 {
-    SSF_UNUSED(data);
-    SSF_UNUSED(&dataLen);
-    SSF_UNUSED(superHandler);
+    SSF_UNUSED_PTR(data);
+    SSF_UNUSED_INT(dataLen);
+    SSF_UNUSED_PTR(superHandler);
 
     switch (eid)
     {
@@ -326,9 +326,9 @@ void UT3TestHandler1Super(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMData
 void UT3TestHandler1(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen,
                      SSFVoidFn_t *superHandler)
 {
-    SSF_UNUSED(data);
-    SSF_UNUSED(&dataLen);
-    SSF_UNUSED(superHandler);
+    SSF_UNUSED_PTR(data);
+    SSF_UNUSED_INT(dataLen);
+    SSF_UNUSED_PTR(superHandler);
 
     switch (eid)
     {
@@ -360,9 +360,9 @@ void UT3TestHandler1(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t
 void UT3TestHandler3(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen,
                      SSFVoidFn_t *superHandler)
 {
-    SSF_UNUSED(data);
-    SSF_UNUSED(&dataLen);
-    SSF_UNUSED(superHandler);
+    SSF_UNUSED_PTR(data);
+    SSF_UNUSED_INT(dataLen);
+    SSF_UNUSED_PTR(superHandler);
 
     switch (eid)
     {
@@ -390,9 +390,9 @@ void UT3TestHandler3(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t
 void UT3TestHandler2Super(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen,
                           SSFVoidFn_t *superHandler)
 {
-    SSF_UNUSED(data);
-    SSF_UNUSED(&dataLen);
-    SSF_UNUSED(superHandler);
+    SSF_UNUSED_PTR(data);
+    SSF_UNUSED_INT(dataLen);
+    SSF_UNUSED_PTR(superHandler);
 
     switch (eid)
     {
@@ -418,9 +418,9 @@ void UT3TestHandler2Super(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMData
 void UT3TestHandler2(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen,
                      SSFVoidFn_t *superHandler)
 {
-    SSF_UNUSED(data);
-    SSF_UNUSED(&dataLen);
-    SSF_UNUSED(superHandler);
+    SSF_UNUSED_PTR(data);
+    SSF_UNUSED_INT(dataLen);
+    SSF_UNUSED_PTR(superHandler);
 
     switch (eid)
     {
@@ -447,9 +447,9 @@ void UT3TestHandler2(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t
 void UT4TestHandler2(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen,
                      SSFVoidFn_t *superHandler)
 {
-    SSF_UNUSED(data);
-    SSF_UNUSED(&dataLen);
-    SSF_UNUSED(superHandler);
+    SSF_UNUSED_PTR(data);
+    SSF_UNUSED_INT(dataLen);
+    SSF_UNUSED_PTR(superHandler);
 
     switch (eid)
     {
@@ -471,9 +471,9 @@ void UT4TestHandler2(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t
 void UT4TestHandler1(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen,
                      SSFVoidFn_t *superHandler)
 {
-    SSF_UNUSED(data);
-    SSF_UNUSED(&dataLen);
-    SSF_UNUSED(superHandler);
+    SSF_UNUSED_PTR(data);
+    SSF_UNUSED_INT(dataLen);
+    SSF_UNUSED_PTR(superHandler);
 
     switch (eid)
     {

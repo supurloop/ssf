@@ -1,11 +1,11 @@
 /* --------------------------------------------------------------------------------------------- */
 /* Small System Framework                                                                        */
 /*                                                                                               */
-/* ssf.h                                                                                         */
-/* Provides core framework definitions.                                                          */
+/* ssftrace.h                                                                                    */
+/* Provides a high performance debug trace interface.                                            */
 /*                                                                                               */
 /* BSD-3-Clause License                                                                          */
-/* Copyright 2020 Supurloop Software LLC                                                         */
+/* Copyright 2026 Supurloop Software LLC                                                         */
 /*                                                                                               */
 /* Redistribution and use in source and binary forms, with or without modification, are          */
 /* permitted provided that the following conditions are met:                                     */
@@ -29,52 +29,87 @@
 /* NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED  */
 /* OF THE POSSIBILITY OF SUCH DAMAGE.                                                            */
 /* --------------------------------------------------------------------------------------------- */
-#ifndef SSF_H_INCLUDE
-#define SSF_H_INCLUDE
+#ifndef SSF_TRACE_INCLUDE_H
+#define SSF_TRACE_INCLUDE_H
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#include <string.h>
+#include <stdint.h>
+#include <stdbool.h>
 #include <stdio.h>
-#include <stdlib.h>
+#include <string.h>
+#include "ssfport.h"
+#include "ssfbfifo.h"
 
 /* --------------------------------------------------------------------------------------------- */
-/* Macros and typedefs                                                                           */
+/* Defines and typedefs                                                                          */
 /* --------------------------------------------------------------------------------------------- */
-#define SSF_MAX(x, y) (((x) > (y)) ? (x) : (y))
-#define SSF_MIN(x, y) (((x) < (y)) ? (x) : (y))
-#define SSFIsDigit(c) ((c) >= '0' && (c) <= '9')
-#define MOD255(m) ((m) % 255)
+typedef struct
+{
+    SSFBFifo_t fifo;
+#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
+    SSFMutex_t mutex;
+#endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
+} SSFTrace_t;
 
-typedef const char *SSFCStrIn_t;
-typedef char *SSFCStrOut_t;
-typedef void (*SSFVoidFn_t)(void); /* Generic function pointer type */
+/* --------------------------------------------------------------------------------------------- */
+/* External interface                                                                            */
+/* --------------------------------------------------------------------------------------------- */
+void SSFTraceInit(SSFTrace_t *trace, uint32_t traceSize, uint8_t *buffer, uint32_t bufferSize);
+void SSFTraceDeInit(SSFTrace_t *trace);
 
-/* Use to suppress unused parameter warnings */
-#define SSF_UNUSED_PTR(x) ssfUnusedPtr = (void *)(x)
-#define SSF_UNUSED_INT(x) ssfUnusedInt = (uint64_t)(x)
-extern void *ssfUnusedPtr;
-extern uint64_t ssfUnusedInt;
+#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
+#define SSF_TRACE_GET_BYTE(trace, u8) { \
+    SSF_MUTEX_ACQUIRE((trace)->mutex); \
+    if (SSF_BFIFO_IS_EMPTY(&((trace)->fifo)) == false) { \
+        SSF_BFIFO_GET_BYTE(&((trace)->fifo), u8); \
+    } \
+    SSF_MUTEX_RELEASE((trace)->mutex); \
+}
 
-#if SSF_CONFIG_UNIT_TEST == 1
-    #include <setjmp.h>
-extern jmp_buf ssfUnitTestMark;
-extern int ssfUnitTestJmpRet;
+#define SSF_TRACE_PUT_BYTE(trace, u8) { \
+    SSF_MUTEX_ACQUIRE((trace)->mutex); \
+    if (SSF_BFIFO_IS_FULL(&((trace)->fifo))) { \
+        SSF_BFIFO_PURGE_BYTE(&((trace)->fifo)); \
+    } \
+    SSF_BFIFO_PUT_BYTE(&((trace)->fifo), u8); \
+    SSF_MUTEX_RELEASE((trace)->mutex); \
+}
+#else /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
+#define SSF_TRACE_GET_BYTE(trace, u8) { \
+    if (SSF_BFIFO_IS_EMPTY(&((trace)->fifo)) == false) { \
+        SSF_BFIFO_GET_BYTE(&((trace)->fifo), u8); \
+    } \
+}
 
-    #define SSF_ASSERT_TEST(t) do { \
-    ssfUnitTestJmpRet = setjmp(ssfUnitTestMark); \
-    if (ssfUnitTestJmpRet == 0) {t;} \
-    if (ssfUnitTestJmpRet != -1) { \
-        printf("SSF Assertion Test: %s:%u\r\n", __FILE__, (unsigned int)__LINE__); \
-        exit(1); } \
-    memset(ssfUnitTestMark, 0, sizeof(ssfUnitTestMark)); } while (0)
+#define SSF_TRACE_PUT_BYTE(trace, u8) { \
+    if (SSF_BFIFO_IS_FULL(&((trace)->fifo))) { \
+        SSF_BFIFO_PURGE_BYTE(&((trace)->fifo)); \
+    } \
+    SSF_BFIFO_PUT_BYTE(&((trace)->fifo), u8); \
+}
+#endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
 
-#endif /* SSF_CONFIG_UNIT_TEST */
+#define SSF_TRACE_PUT_BYTES(trace, u8Ptr, len) { \
+    while (len > 0) { \
+        SSF_TRACE_PUT_BYTE(trace, *u8Ptr); \
+        u8Ptr++; \
+        len--; \
+    } \
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Unit test                                                                                     */
+/* --------------------------------------------------------------------------------------------- */
+#if SSF_CONFIG_TRACE_UNIT_TEST == 1
+void SSFTraceUnitTest(void);
+#endif /* SSF_CONFIG_TRACE_UNIT_TEST */
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* SSF_H_INCLUDE */
+#endif /* SSF_TRACE_INCLUDE_H */
+

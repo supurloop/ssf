@@ -78,6 +78,9 @@ extern "C" {
 /* _storage */
 #define SSF_CONFIG_CFG_UNIT_TEST     (1u)
 
+/* _debug */
+#define SSF_CONFIG_TRACE_UNIT_TEST   (1u)
+
 /* _struct */
 #define SSF_CONFIG_BFIFO_UNIT_TEST   (1u)
 #define SSF_CONFIG_HEAP_UNIT_TEST    (1u)
@@ -115,6 +118,8 @@ extern "C" {
     SSF_CONFIG_SM_UNIT_TEST == 1 || \
     /* _storage */ \
     SSF_CONFIG_CFG_UNIT_TEST == 1 || \
+    /* _debug */ \
+    SSF_CONFIG_TRACE_UNIT_TEST == 1 || \
     /* _struct */ \
     SSF_CONFIG_BFIFO_UNIT_TEST == 1 || \
     SSF_CONFIG_HEAP_UNIT_TEST == 1 || \
@@ -202,6 +207,7 @@ typedef uint64_t SSFPortTick_t;
 
 #if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
 #ifdef _WIN32
+typedef HANDLE SSFMutex_t;
 #define SSF_MUTEX_DECLARATION(mutex) HANDLE mutex
 #define SSF_MUTEX_INIT(mutex) { \
     mutex = CreateMutex(NULL, FALSE, NULL); \
@@ -221,6 +227,7 @@ typedef uint64_t SSFPortTick_t;
 #include <errno.h>
 #include <stdbool.h>
 
+typedef pthread_mutex_t SSFMutex_t;
 #define SSF_MUTEX_DECLARATION(mutex) pthread_mutex_t mutex
 #define SSF_MUTEX_INIT(mutex) { \
     pthread_mutexattr_t attr; \

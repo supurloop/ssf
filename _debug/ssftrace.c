@@ -1,11 +1,11 @@
 /* --------------------------------------------------------------------------------------------- */
 /* Small System Framework                                                                        */
 /*                                                                                               */
-/* ssf.h                                                                                         */
-/* Provides core framework definitions.                                                          */
+/* ssftrace.c                                                                                    */
+/* Provides a high performance debug trace interface.                                            */
 /*                                                                                               */
 /* BSD-3-Clause License                                                                          */
-/* Copyright 2020 Supurloop Software LLC                                                         */
+/* Copyright 2026 Supurloop Software LLC                                                         */
 /*                                                                                               */
 /* Redistribution and use in source and binary forms, with or without modification, are          */
 /* permitted provided that the following conditions are met:                                     */
@@ -29,52 +29,39 @@
 /* NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED  */
 /* OF THE POSSIBILITY OF SUCH DAMAGE.                                                            */
 /* --------------------------------------------------------------------------------------------- */
-#ifndef SSF_H_INCLUDE
-#define SSF_H_INCLUDE
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-#include <string.h>
-#include <stdio.h>
-#include <stdlib.h>
+#include <stdint.h>
+#include <stdbool.h>
+#include "ssfassert.h"
+#include "ssfport.h"
+#include "ssftrace.h"
 
 /* --------------------------------------------------------------------------------------------- */
-/* Macros and typedefs                                                                           */
+/* Initializes a trace buffer.                                                                   */
 /* --------------------------------------------------------------------------------------------- */
-#define SSF_MAX(x, y) (((x) > (y)) ? (x) : (y))
-#define SSF_MIN(x, y) (((x) < (y)) ? (x) : (y))
-#define SSFIsDigit(c) ((c) >= '0' && (c) <= '9')
-#define MOD255(m) ((m) % 255)
+void SSFTraceInit(SSFTrace_t *trace, uint32_t traceSize, uint8_t *buffer, uint32_t bufferSize)
+{
+    SSF_REQUIRE(trace != NULL);
+    SSF_REQUIRE(buffer != NULL);
+    SSF_REQUIRE(traceSize > 0);
+    SSF_REQUIRE(bufferSize > 0);
 
-typedef const char *SSFCStrIn_t;
-typedef char *SSFCStrOut_t;
-typedef void (*SSFVoidFn_t)(void); /* Generic function pointer type */
-
-/* Use to suppress unused parameter warnings */
-#define SSF_UNUSED_PTR(x) ssfUnusedPtr = (void *)(x)
-#define SSF_UNUSED_INT(x) ssfUnusedInt = (uint64_t)(x)
-extern void *ssfUnusedPtr;
-extern uint64_t ssfUnusedInt;
-
-#if SSF_CONFIG_UNIT_TEST == 1
-    #include <setjmp.h>
-extern jmp_buf ssfUnitTestMark;
-extern int ssfUnitTestJmpRet;
-
-    #define SSF_ASSERT_TEST(t) do { \
-    ssfUnitTestJmpRet = setjmp(ssfUnitTestMark); \
-    if (ssfUnitTestJmpRet == 0) {t;} \
-    if (ssfUnitTestJmpRet != -1) { \
-        printf("SSF Assertion Test: %s:%u\r\n", __FILE__, (unsigned int)__LINE__); \
-        exit(1); } \
-    memset(ssfUnitTestMark, 0, sizeof(ssfUnitTestMark)); } while (0)
-
-#endif /* SSF_CONFIG_UNIT_TEST */
-
-#ifdef __cplusplus
+    SSFBFifoInit(&(trace->fifo), traceSize, buffer, bufferSize);
+#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
+    SSF_MUTEX_INIT(trace->mutex);
+#endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
 }
-#endif
 
-#endif /* SSF_H_INCLUDE */
+/* --------------------------------------------------------------------------------------------- */
+/* Deinitializes a trace buffer.                                                                 */
+/* --------------------------------------------------------------------------------------------- */
+void SSFTraceDeInit(SSFTrace_t *trace)
+{
+    SSF_REQUIRE(trace != NULL);
+
+#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
+    SSF_MUTEX_DEINIT(trace->mutex);
+#endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
+    SSFBFifoDeInit(&(trace->fifo));
+    memset(trace, 0, sizeof(SSFTrace_t));
+}
+

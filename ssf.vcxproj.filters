@@ -159,6 +159,12 @@
     <ClCompile Include="_time\ssfrtc_ut.c">
       <Filter>_time</Filter>
     </ClCompile>
+    <ClCompile Include="_debug\ssftrace.c">
+      <Filter>_debug</Filter>
+    </ClCompile>
+    <ClCompile Include="_debug\ssftrace_ut.c">
+      <Filter>_debug</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="ssf.h" />
@@ -244,6 +250,10 @@
     <ClInclude Include="_time\ssfrtc.h">
       <Filter>_time</Filter>
     </ClInclude>
+    <ClInclude Include="resource.h" />
+    <ClInclude Include="_debug\ssftrace.h">
+      <Filter>_debug</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="_codec">
@@ -270,5 +280,11 @@
     <Filter Include="_time">
       <UniqueIdentifier>{d78a8895-338f-4435-88fc-dd3bc263ef59}</UniqueIdentifier>
     </Filter>
+    <Filter Include="_debug">
+      <UniqueIdentifier>{77975937-0f9d-4b67-87fd-27085952a115}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="ssf.rc" />
   </ItemGroup>
 </Project>

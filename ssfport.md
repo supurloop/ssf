@@ -99,7 +99,8 @@ Required when `SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1`. Implement these five macr
 | `SSF_MAX(x, y)` | Macro | Returns the larger of two values |
 | `SSF_MIN(x, y)` | Macro | Returns the smaller of two values |
 | `SSFIsDigit(c)` | Macro | Non-zero if `c` is an ASCII decimal digit (`'0'`–`'9'`) |
-| `SSF_UNUSED(x)` | Macro | Suppresses unused-variable or unused-parameter compiler warnings |
+| <a id="def-ssf-unused-ptr"></a>`SSF_UNUSED_PTR(x)` | Macro | Suppresses unused-parameter warnings for pointer-typed parameters |
+| <a id="def-ssf-unused-int"></a>`SSF_UNUSED_INT(x)` | Macro | Suppresses unused-parameter warnings for integer-typed parameters |
 
 <a id="functions"></a>
 
@@ -113,6 +114,7 @@ Required when `SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1`. Implement these five macr
 | [e.g.](#ex-htons) | [`uint16_t htons(x)` / `uint16_t ntohs(x)`](#htons) | 16-bit host↔network byte order conversion |
 | [e.g.](#ex-htonl) | [`uint32_t htonl(x)` / `uint32_t ntohl(x)`](#htonl) | 32-bit host↔network byte order conversion |
 | [e.g.](#ex-htonll) | [`uint64_t htonll(x)` / `uint64_t ntohll(x)`](#htonll) | 64-bit host↔network byte order conversion |
+| [e.g.](#ex-unused) | [`SSF_UNUSED_PTR(x)` / `SSF_UNUSED_INT(x)`](#ssf-unused-ptr) | Suppress unused-parameter warnings for pointer and integer types |
 | [e.g.](#ex-mutex) | [`void SSF_MUTEX_DECLARATION(m)` / `void SSF_MUTEX_INIT(m)` / `void SSF_MUTEX_DEINIT(m)` / `void SSF_MUTEX_ACQUIRE(m)` / `void SSF_MUTEX_RELEASE(m)`](#ssf-mutex-declaration) | Mutex primitives (requires `SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1`) |
 
 <a id="function-reference"></a>
@@ -261,6 +263,55 @@ switch (state)
     case STATE_A: HandleA(); break;
     case STATE_B: HandleB(); break;
     default:      SSF_ERROR(); break;  /* fires if state is unexpected */
+}
+```
+
+---
+
+<a id="ssf-unused-ptr"></a>
+
+### [↑](#functions) [`SSF_UNUSED_PTR()` / `SSF_UNUSED_INT()`](#functions)
+
+```c
+#define SSF_UNUSED_PTR(x) ssfUnusedPtr = (void *)(x)
+#define SSF_UNUSED_INT(x) ssfUnusedInt = (uint64_t)(x)
+```
+
+Suppress unused-parameter compiler warnings by assigning the parameter to a module-level sink
+variable. Use `SSF_UNUSED_PTR()` for pointer-typed parameters and `SSF_UNUSED_INT()` for integer-
+typed parameters. These macros are typically used inside callback functions where the interface
+signature requires parameters that a particular implementation does not use.
+
+Two separate macros are provided rather than a single cast-to-void because some compilers and
+warning levels still report unused parameters with a plain `(void)x` cast; the assignment to a
+global variable guarantees the warning is suppressed on all supported toolchains.
+
+| Macro | Parameter | Type | Description |
+|-------|-----------|------|-------------|
+| `SSF_UNUSED_PTR(x)` | `x` | any pointer | Assigns `x` to the internal `void *` sink `ssfUnusedPtr`. |
+| `SSF_UNUSED_INT(x)` | `x` | any integer | Assigns `x` to the internal `uint64_t` sink `ssfUnusedInt`. |
+
+**Returns:** Nothing.
+
+<a id="ex-unused"></a>
+
+**Example:**
+
+```c
+/* State machine handler that does not use the data payload or superHandler */
+void MyStateHandler(SSFSMEventId_t eid, const SSFSMData_t *data,
+                    SSFSMDataLen_t dataLen, SSFVoidFn_t *superHandler)
+{
+    SSF_UNUSED_PTR(data);
+    SSF_UNUSED_INT(dataLen);
+    SSF_UNUSED_PTR(superHandler);
+
+    switch (eid)
+    {
+        case MY_EVENT_ENTER: /* handle entry */ break;
+        case MY_EVENT_EXIT:  /* handle exit */  break;
+        default: break;
+    }
 }
 ```
 

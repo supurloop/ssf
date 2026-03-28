@@ -386,6 +386,78 @@ void SSFBFifoUnitTest(void)
     SSF_ASSERT(SSFBFifoLen(&_sbfFifos[0]) == 0);
 #endif /* SSF_BFIFO_MULTI_BYTE_ENABLE */
 
+    /* SSF_BFIFO_PURGE_BYTE on empty FIFO asserts */
+    SSF_ASSERT(SSFBFifoIsEmpty(&_sbfFifos[0]));
+    SSF_ASSERT_TEST(SSF_BFIFO_PURGE_BYTE(&_sbfFifos[0]));
+
+    /* SSF_BFIFO_PURGE_BYTE discards oldest byte without returning it */
+    SSFBFifoPutByte(&_sbfFifos[0], 0x10);
+    SSFBFifoPutByte(&_sbfFifos[0], 0x20);
+    SSFBFifoPutByte(&_sbfFifos[0], 0x30);
+    SSF_ASSERT(SSFBFifoLen(&_sbfFifos[0]) == 3);
+    SSF_BFIFO_PURGE_BYTE(&_sbfFifos[0]);
+    SSF_ASSERT(SSFBFifoLen(&_sbfFifos[0]) == 2);
+    SSF_ASSERT(SSFBFifoUnused(&_sbfFifos[0]) == (SSF_TEST_BFIFO_SIZE - 2));
+    SSF_ASSERT(SSFBFifoIsEmpty(&_sbfFifos[0]) == false);
+    SSF_ASSERT(SSFBFifoIsFull(&_sbfFifos[0]) == false);
+    SSF_ASSERT(SSFBFifoPeekByte(&_sbfFifos[0], &outByte));
+    SSF_ASSERT(outByte == 0x20);
+    SSF_BFIFO_PURGE_BYTE(&_sbfFifos[0]);
+    SSF_ASSERT(SSFBFifoLen(&_sbfFifos[0]) == 1);
+    SSF_ASSERT(SSFBFifoPeekByte(&_sbfFifos[0], &outByte));
+    SSF_ASSERT(outByte == 0x30);
+    SSF_ASSERT(SSFBFifoGetByte(&_sbfFifos[0], &outByte));
+    SSF_ASSERT(outByte == 0x30);
+    SSF_ASSERT(SSFBFifoIsEmpty(&_sbfFifos[0]));
+
+    /* SSF_BFIFO_PURGE_BYTE to empty a full FIFO */
+    for (j = 0; j < SSF_TEST_BFIFO_SIZE; j++)
+    {
+        SSFBFifoPutByte(&_sbfFifos[0], (uint8_t)(j + 1));
+    }
+    SSF_ASSERT(SSFBFifoIsFull(&_sbfFifos[0]));
+    for (j = 0; j < SSF_TEST_BFIFO_SIZE; j++)
+    {
+        SSF_ASSERT(SSFBFifoLen(&_sbfFifos[0]) == (SSF_TEST_BFIFO_SIZE - j));
+        SSF_BFIFO_PURGE_BYTE(&_sbfFifos[0]);
+    }
+    SSF_ASSERT(SSFBFifoIsEmpty(&_sbfFifos[0]));
+    SSF_ASSERT(SSFBFifoLen(&_sbfFifos[0]) == 0);
+    SSF_ASSERT(SSFBFifoUnused(&_sbfFifos[0]) == SSF_TEST_BFIFO_SIZE);
+    SSF_ASSERT_TEST(SSF_BFIFO_PURGE_BYTE(&_sbfFifos[0]));
+
+    /* SSF_BFIFO_PURGE_BYTE data integrity across wrap-around */
+    for (j = 0; j < SSF_TEST_BFIFO_SIZE; j++)
+    {
+        SSFBFifoPutByte(&_sbfFifos[0], (uint8_t)(j + 0x40));
+    }
+    for (j = 0; j < SSF_TEST_BFIFO_SIZE; j++)
+    {
+        SSF_ASSERT(SSFBFifoGetByte(&_sbfFifos[0], &outByte));
+    }
+    /* head/tail are now at a mid-buffer position; fill again and purge some */
+    for (j = 0; j < SSF_TEST_BFIFO_SIZE; j++)
+    {
+        SSFBFifoPutByte(&_sbfFifos[0], (uint8_t)(j + 0x50));
+    }
+    SSF_ASSERT(SSFBFifoIsFull(&_sbfFifos[0]));
+    /* Purge first 3 bytes */
+    SSF_BFIFO_PURGE_BYTE(&_sbfFifos[0]);
+    SSF_BFIFO_PURGE_BYTE(&_sbfFifos[0]);
+    SSF_BFIFO_PURGE_BYTE(&_sbfFifos[0]);
+    SSF_ASSERT(SSFBFifoLen(&_sbfFifos[0]) == (SSF_TEST_BFIFO_SIZE - 3));
+    SSF_ASSERT(SSFBFifoIsFull(&_sbfFifos[0]) == false);
+    /* Verify remaining data starts at 4th byte */
+    SSF_ASSERT(SSFBFifoPeekByte(&_sbfFifos[0], &outByte));
+    SSF_ASSERT(outByte == (uint8_t)(3 + 0x50));
+    /* Drain and verify all remaining bytes */
+    for (j = 3; j < SSF_TEST_BFIFO_SIZE; j++)
+    {
+        SSF_ASSERT(SSFBFifoGetByte(&_sbfFifos[0], &outByte));
+        SSF_ASSERT(outByte == (uint8_t)(j + 0x50));
+    }
+    SSF_ASSERT(SSFBFifoIsEmpty(&_sbfFifos[0]));
+
     /* Deinit */
     memset(&fifoZero, 0, sizeof(fifoZero));
     for (i = 0; i < SBF_TEST_NUM_FIFOS; i++)

@@ -59,6 +59,7 @@
 #include "ssfstr.h"
 #include "ssfheap.h"
 #include "ssfgobj.h"
+#include "ssftrace.h"
 
 typedef struct
 {
@@ -69,6 +70,11 @@ typedef struct
 
 SSFUnitTest_t unitTests[] =
 {
+    /* _debug */
+#if SSF_CONFIG_TRACE_UNIT_TEST == 1
+    { "ssftrace", "Debug Trace", SSFTraceUnitTest },
+#endif /* SSF_CONFIG_TRACE_UNIT_TEST */
+
     /* _codec */
 #if SSF_CONFIG_BASE64_UNIT_TEST == 1
     { "ssfbase64", "Base64 Codec", SSFBase64UnitTest },

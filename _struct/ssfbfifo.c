@@ -169,9 +169,9 @@ ssfbf_uint_t SSFBFifoSize(const SSFBFifo_t *fifo)
     SSF_REQUIRE(fifo->magic == SSF_BFIFO_INIT_MAGIC);
 
 #if SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE == SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE_255
-    return SSF_BFIFO_255;
+    return (ssfbf_uint_t)(SSF_BFIFO_255);
 #else
-    return fifo->size - 1;
+    return (ssfbf_uint_t)(fifo->size - 1);
 #endif
 }
 
@@ -187,11 +187,11 @@ ssfbf_uint_t SSFBFifoLen(const SSFBFifo_t *fifo)
 
     if (fifo->head < fifo->tail)
 #if SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE == SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE_255
-    {used = SSF_BFIFO_255 - (fifo->tail - fifo->head) + 1; }
+    { used = (ssfbf_uint_t)(SSF_BFIFO_255 - (fifo->tail - fifo->head) + 1); }
 #else
-    {used = fifo->size - (fifo->tail - fifo->head); }
+    { (ssfbf_uint_t)(used = fifo->size - (fifo->tail - fifo->head)); }
 #endif
-    else used = fifo->head - fifo->tail;
+    else (ssfbf_uint_t)(used = fifo->head - fifo->tail);
 
     return used;
 }

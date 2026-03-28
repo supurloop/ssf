@@ -318,11 +318,11 @@ char _jsOut[1024];
 /* --------------------------------------------------------------------------------------------- */
 bool p1fn(char *js, size_t size, size_t start, size_t *end, void *in)
 {
-    SSF_UNUSED(js);
-    SSF_UNUSED(size);
-    SSF_UNUSED(start);
-    SSF_UNUSED(end);
-    SSF_UNUSED(in);
+    SSF_UNUSED_PTR(js);
+    SSF_UNUSED_INT(size);
+    SSF_UNUSED_INT(start);
+    SSF_UNUSED_PTR(end);
+    SSF_UNUSED_PTR(in);
     return true;
 }
 
@@ -333,7 +333,7 @@ bool p2fn(char *js, size_t size, size_t start, size_t *end, void *in)
 {
     bool comma = false;
 
-    SSF_UNUSED(in);
+    SSF_UNUSED_PTR(in);
     if (!SSFJsonPrintLabel(js, size, start, &start, "label", &comma)) return false;
     if (!SSFJsonPrintString(js, size, start, &start, "value", NULL)) return false;
     *end = start;

@@ -102,7 +102,7 @@
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <DisableSpecificWarnings>4820;5045</DisableSpecificWarnings>
-      <AdditionalIncludeDirectories>.\_time;.\_crypto;.\_storage;.\_fsm;.\_struct;.\_edc;.\_ecc;.\_codec;.\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>.\_debug;.\_time;.\_crypto;.\_storage;.\_fsm;.\_struct;.\_edc;.\_ecc;.\_codec;.\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -136,7 +136,8 @@
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <DisableSpecificWarnings>4820;5045</DisableSpecificWarnings>
-      <AdditionalIncludeDirectories>.\_time;.\_codec;.\_crypto;.\_storage;.\_fsm;.\_edc;.\_ecc;.\_struct;.\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>.\_debug;.\_time;.\_codec;.\_crypto;.\_storage;.\_fsm;.\_edc;.\_ecc;.\_struct;.\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <Optimization>Full</Optimization>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -174,6 +175,8 @@
     <ClCompile Include="_crypto\ssfprng_ut.c" />
     <ClCompile Include="_crypto\ssfsha2.c" />
     <ClCompile Include="_crypto\ssfsha2_ut.c" />
+    <ClCompile Include="_debug\ssftrace.c" />
+    <ClCompile Include="_debug\ssftrace_ut.c" />
     <ClCompile Include="_ecc\ssfrs.c" />
     <ClCompile Include="_ecc\ssfrs_ut.c" />
     <ClCompile Include="_edc\ssfcrc16.c" />
@@ -202,6 +205,7 @@
     <ClCompile Include="_time\ssfrtc_ut.c" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="resource.h" />
     <ClInclude Include="ssf.h" />
     <ClInclude Include="ssfassert.h" />
     <ClInclude Include="ssfoptions.h" />
@@ -220,6 +224,7 @@
     <ClInclude Include="_crypto\ssfaesgcm.h" />
     <ClInclude Include="_crypto\ssfprng.h" />
     <ClInclude Include="_crypto\ssfsha2.h" />
+    <ClInclude Include="_debug\ssftrace.h" />
     <ClInclude Include="_ecc\ssfrs.h" />
     <ClInclude Include="_edc\ssfcrc16.h" />
     <ClInclude Include="_edc\ssfcrc32.h" />
@@ -233,6 +238,9 @@
     <ClInclude Include="_time\ssfdtime.h" />
     <ClInclude Include="_time\ssfiso8601.h" />
     <ClInclude Include="_time\ssfrtc.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="ssf.rc" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

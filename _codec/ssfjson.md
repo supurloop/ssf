@@ -16,6 +16,7 @@ nesting depth, not message size. The generator uses a chained-callback pattern w
 
 - [`ssfport.h`](../ssfport.h)
 - [`ssfoptions.h`](../ssfoptions.h)
+- [`ssfgobj.h`](ssfgobj.h) — only when `SSF_JSON_GOBJ_ENABLE == 1`
 
 <a id="notes"></a>
 
@@ -46,6 +47,8 @@ All options are set in `ssfoptions.h`.
 | `SSF_JSON_CONFIG_MAX_IN_LEN` | `2047` | Maximum JSON string length accepted by the parser in bytes |
 | `SSF_JSON_CONFIG_ENABLE_FLOAT_PARSE` | `0` | `1` to compile `SSFJsonGetDouble()`; `0` to omit floating-point parsing |
 | `SSF_JSON_CONFIG_ENABLE_FLOAT_GEN` | `1` | `1` to compile `SSFJsonPrintDouble()`; `0` to omit floating-point generation |
+| `SSF_JSON_GOBJ_ENABLE` | `1` | `1` to enable `SSFJsonGObjCreate()` and `SSFJsonGObjPrint()` JSON/gobj conversion functions; `0` to exclude them and remove the `ssfgobj` dependency |
+| `SSF_JSON_GOBJ_CONFIG_MAX_STR_SIZE` | `256` | Maximum length in bytes of any object key or string value during JSON/gobj conversion |
 
 <a id="api-summary"></a>
 
@@ -81,6 +84,8 @@ All options are set in `ssfoptions.h`.
 | [e.g.](#ex-printtrue) | [`bool SSFJsonPrintTrue(js, size, start, end, comma)` / `bool SSFJsonPrintFalse(...)` / `bool SSFJsonPrintNull(...)`](#ssfjsonprinttrue) | Append JSON literal `true`, `false`, or `null` |
 | [e.g.](#ex-printhex) | [`bool SSFJsonPrintHex(js, size, start, end, in, inLen, rev, comma)`](#ssfjsonprinthex) | Append binary data as a hex-encoded string value |
 | [e.g.](#ex-printbase64) | [`bool SSFJsonPrintBase64(js, size, start, end, in, inLen, comma)`](#ssfjsonprintbase64) | Append binary data as a Base64-encoded string value |
+| [e.g.](#ex-gobjcreate) | [`bool SSFJsonGObjCreate(js, gobj, maxChildren)`](#ssfjsongobjcreate) | Convert a JSON string to a gobj tree (`SSF_JSON_GOBJ_ENABLE`) |
+| [e.g.](#ex-gobjprint) | [`bool SSFJsonGObjPrint(gobj, js, jsSize, jsLen)`](#ssfjsongobjprint) | Convert a gobj tree to a JSON string (`SSF_JSON_GOBJ_ENABLE`) |
 
 <a id="function-reference"></a>
 
@@ -806,6 +811,161 @@ if (SSFJsonPrintObject(out, sizeof(out), 0, &end, PrintFn, NULL, NULL))
 {
     /* out == "{\"b64\":\"AQID\"}" */
 }
+```
+
+---
+
+<a id="ssfjsongobjcreate"></a>
+
+### [↑](#ssfjson--json-parsergenerator) [`bool SSFJsonGObjCreate()`](#functions)
+
+Requires `SSF_JSON_GOBJ_ENABLE == 1`.
+
+```c
+bool SSFJsonGObjCreate(SSFCStrIn_t js, SSFGObj_t **gobj, uint16_t maxChildren);
+```
+
+Parses a null-terminated JSON string and builds a generic object tree (`SSFGObj_t`)
+representing its contents. The JSON is validated with `SSFJsonIsValid()` before parsing.
+On success, `*gobj` points to a newly allocated root node that must be freed with
+`SSFGObjDeInit()`.
+
+The resulting tree maps JSON types to gobj types as follows:
+
+| JSON type | gobj type |
+|-----------|-----------|
+| `"string"` | `SSF_OBJ_TYPE_STR` |
+| integer number | `SSF_OBJ_TYPE_INT` (signed) or `SSF_OBJ_TYPE_UINT` (unsigned overflow) |
+| floating-point number | `SSF_OBJ_TYPE_FLOAT` (requires `SSF_JSON_CONFIG_ENABLE_FLOAT_PARSE == 1`) |
+| `true` / `false` | `SSF_OBJ_TYPE_BOOL` |
+| `null` | `SSF_OBJ_TYPE_NULL` |
+| `{ ... }` | `SSF_OBJ_TYPE_OBJECT` with labeled children |
+| `[ ... ]` | `SSF_OBJ_TYPE_ARRAY` with ordered children |
+
+JSON escape sequences in strings (`\"`, `\\`, `\n`, `\t`, `\uXXXX`, etc.) are unescaped into
+the stored string value.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `js` | in | `const char *` | Null-terminated JSON string to parse. Must not be `NULL`. |
+| `gobj` | out | `SSFGObj_t **` | Receives the root of the newly allocated gobj tree. Must not be `NULL`. |
+| `maxChildren` | in | `uint16_t` | Maximum number of children for each container node (objects and arrays). |
+
+**Returns:** `true` if the JSON was successfully converted; `false` if the JSON is invalid, on
+allocation failure, or if any object key or string value exceeds
+`SSF_JSON_GOBJ_CONFIG_MAX_STR_SIZE`.
+
+<a id="ex-gobjcreate"></a>
+
+```c
+const char *js = "{\"name\":\"alice\",\"age\":30,\"active\":true}";
+SSFGObj_t *gobj = NULL;
+
+if (SSFJsonGObjCreate(js, &gobj, 8))
+{
+    SSFGObj_t *parent = NULL;
+    SSFGObj_t *child = NULL;
+    SSFCStrIn_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
+    char name[32];
+    int64_t age;
+    bool active;
+
+    memset(path, 0, sizeof(path));
+    path[0] = "name";
+    SSFGObjFindPath(gobj, path, &parent, &child);
+    SSFGObjGetString(child, name, sizeof(name));
+    /* name == "alice" */
+
+    memset(path, 0, sizeof(path));
+    path[0] = "age";
+    parent = NULL; child = NULL;
+    SSFGObjFindPath(gobj, path, &parent, &child);
+    SSFGObjGetInt(child, &age);
+    /* age == 30 */
+
+    memset(path, 0, sizeof(path));
+    path[0] = "active";
+    parent = NULL; child = NULL;
+    SSFGObjFindPath(gobj, path, &parent, &child);
+    SSFGObjGetBool(child, &active);
+    /* active == true */
+
+    SSFGObjDeInit(&gobj);
+}
+```
+
+---
+
+<a id="ssfjsongobjprint"></a>
+
+### [↑](#ssfjson--json-parsergenerator) [`bool SSFJsonGObjPrint()`](#functions)
+
+Requires `SSF_JSON_GOBJ_ENABLE == 1`.
+
+```c
+bool SSFJsonGObjPrint(SSFGObj_t *gobj, SSFCStrOut_t js, size_t jsSize, size_t *jsLen);
+```
+
+Serializes a generic object tree into a null-terminated JSON string. The gobj tree may use
+any of the supported types:
+
+| gobj type | JSON output |
+|-----------|-------------|
+| `SSF_OBJ_TYPE_STR` | `"string"` (escaped) |
+| `SSF_OBJ_TYPE_INT` | signed integer |
+| `SSF_OBJ_TYPE_UINT` | unsigned integer |
+| `SSF_OBJ_TYPE_BOOL` | `true` or `false` |
+| `SSF_OBJ_TYPE_NULL` | `null` |
+| `SSF_OBJ_TYPE_FLOAT` | floating-point (requires `SSF_JSON_CONFIG_ENABLE_FLOAT_GEN == 1`; uses `%g` format) |
+| `SSF_OBJ_TYPE_OBJECT` | `{ ... }` with labeled children as `"key":value` pairs |
+| `SSF_OBJ_TYPE_ARRAY` | `[ ... ]` with ordered children |
+
+Unsupported types (`SSF_OBJ_TYPE_BIN`, `SSF_OBJ_TYPE_NONE`) cause the function to return
+`false`.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `gobj` | in | `SSFGObj_t *` | Root of the gobj tree. Must not be `NULL`. |
+| `js` | out | `char *` | Output buffer for the JSON string. Must not be `NULL`. |
+| `jsSize` | in | `size_t` | Total allocated size of `js` in bytes. Must be > 0. |
+| `jsLen` | out | `size_t *` | Receives the length of the JSON string (excluding null terminator). Must not be `NULL`. |
+
+**Returns:** `true` if the entire tree was serialized into the buffer; `false` if the buffer is
+too small, a child has an unsupported type, or a string/label exceeds
+`SSF_JSON_GOBJ_CONFIG_MAX_STR_SIZE`.
+
+<a id="ex-gobjprint"></a>
+
+```c
+/* Build a gobj tree */
+SSFGObj_t *root = NULL;
+SSFGObj_t *child = NULL;
+
+SSFGObjInit(&root, 8);
+SSFGObjSetObject(root);
+
+SSFGObjInit(&child, 0);
+SSFGObjSetLabel(child, "name");
+SSFGObjSetString(child, "alice");
+SSFGObjInsertChild(root, child);
+
+child = NULL;
+SSFGObjInit(&child, 0);
+SSFGObjSetLabel(child, "age");
+SSFGObjSetInt(child, 30);
+SSFGObjInsertChild(root, child);
+
+/* Serialize to JSON */
+char buf[128];
+size_t len;
+
+if (SSFJsonGObjPrint(root, buf, sizeof(buf), &len))
+{
+    /* buf == "{\"name\":\"alice\",\"age\":30}" */
+    /* len == 23 */
+}
+
+SSFGObjDeInit(&root);
 ```
 
 

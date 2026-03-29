@@ -35,6 +35,9 @@
 #include "ssfbase64.h"
 #include "ssfhex.h"
 #include "ssfdec.h"
+#if SSF_JSON_GOBJ_ENABLE == 1
+#include "ssfgobj.h"
+#endif /* SSF_JSON_GOBJ_ENABLE */
 
 #if SSF_JSON_CONFIG_ENABLE_FLOAT_PARSE == 1
     #include <math.h> /* round() */
@@ -798,4 +801,362 @@ bool SSFJsonPrint(SSFCStrOut_t js, size_t size, size_t start, size_t *end, SSFJs
     *end = start - 1;
     return true;
 }
+
+#if SSF_JSON_GOBJ_ENABLE == 1
+/* --------------------------------------------------------------------------------------------- */
+/* Unescapes a JSON string value (between quotes) into out buffer. Returns true on success.      */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFJsonGObjUnescStr(SSFCStrIn_t js, size_t strStart, size_t strEnd,
+                                 SSFCStrOut_t out, size_t outSize)
+{
+    size_t s;
+    size_t o = 0;
+
+    SSF_ASSERT(js != NULL);
+    SSF_ASSERT(out != NULL);
+    SSF_ASSERT(outSize > 0);
+
+    /* Skip opening and closing quotes */
+    s = strStart + 1;
+    strEnd--;
+
+    while (s <= strEnd)
+    {
+        if (js[s] == '\\')
+        {
+            s++;
+            if (s > strEnd) return false;
+            if (js[s] == '"' || js[s] == '\\' || js[s] == '/')
+            { if (o >= (outSize - 1)) return false; out[o++] = js[s++]; }
+            else if (js[s] == 'n') { if (o >= (outSize - 1)) return false; out[o++] = '\x0a'; s++; }
+            else if (js[s] == 'r') { if (o >= (outSize - 1)) return false; out[o++] = '\x0d'; s++; }
+            else if (js[s] == 't') { if (o >= (outSize - 1)) return false; out[o++] = '\x09'; s++; }
+            else if (js[s] == 'f') { if (o >= (outSize - 1)) return false; out[o++] = '\x0c'; s++; }
+            else if (js[s] == 'b') { if (o >= (outSize - 1)) return false; out[o++] = '\x08'; s++; }
+            else if (js[s] == 'u')
+            {
+                s++;
+                if ((strEnd - s + 1) < 4) return false;
+                if ((o + 2) >= outSize) return false;
+                if (SSFHexByteToBin(&js[s], (uint8_t *)&out[o]) == false) return false;
+                o++;
+                if (SSFHexByteToBin(&js[s + 2], (uint8_t *)&out[o]) == false) return false;
+                o++;
+                s += 4;
+            }
+            else return false;
+        }
+        else
+        {
+            if (o >= (outSize - 1)) return false;
+            out[o++] = js[s++];
+        }
+    }
+    out[o] = 0;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Recursively converts a JSON value at js[*index] into a gobj node. Returns true on success.    */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFJsonGObjValue(SSFCStrIn_t js, size_t *index, SSFGObj_t *gobj,
+                              uint16_t maxChildren, uint8_t depth)
+{
+    size_t start;
+    size_t end;
+    size_t i;
+    char strBuf[SSF_JSON_GOBJ_CONFIG_MAX_STR_SIZE + 1];
+    SSFGObj_t *child = NULL;
+
+    SSF_ASSERT(js != NULL);
+    SSF_ASSERT(index != NULL);
+    SSF_ASSERT(gobj != NULL);
+
+    if (depth >= SSF_JSON_CONFIG_MAX_IN_DEPTH) return false;
+
+    _SSFJsonWhitespace(js, index);
+
+    /* Object */
+    if (js[*index] == '{')
+    {
+        if (SSFGObjSetObject(gobj) == false) return false;
+        (*index)++;
+        _SSFJsonWhitespace(js, index);
+        if (js[*index] != '}')
+        {
+            do
+            {
+                /* Parse key string */
+                i = *index;
+                if (_SSFJsonString(js, &i, &start, &end) == false) return false;
+                *index = i;
+                if (_SSFJsonGObjUnescStr(js, start, end, strBuf, sizeof(strBuf)) == false)
+                { return false; }
+
+                _SSFJsonWhitespace(js, index);
+                if (js[*index] != ':') return false;
+                (*index)++;
+
+                /* Create child and set label */
+                child = NULL;
+                if (SSFGObjInit(&child, maxChildren) == false) return false;
+                if (SSFGObjSetLabel(child, strBuf) == false)
+                { SSFGObjDeInit(&child); return false; }
+
+                /* Recurse for value */
+                if (_SSFJsonGObjValue(js, index, child, maxChildren, depth + 1) == false)
+                { SSFGObjDeInit(&child); return false; }
+                if (SSFGObjInsertChild(gobj, child) == false)
+                { SSFGObjDeInit(&child); return false; }
+
+                _SSFJsonWhitespace(js, index);
+                if (js[*index] == '}') break;
+                if (js[*index] != ',') return false;
+                (*index)++;
+            } while (true);
+        }
+        (*index)++;
+        return true;
+    }
+
+    /* Array */
+    if (js[*index] == '[')
+    {
+        if (SSFGObjSetArray(gobj) == false) return false;
+        (*index)++;
+        _SSFJsonWhitespace(js, index);
+        if (js[*index] != ']')
+        {
+            do
+            {
+                /* Create child */
+                child = NULL;
+                if (SSFGObjInit(&child, maxChildren) == false) return false;
+
+                /* Recurse for value */
+                if (_SSFJsonGObjValue(js, index, child, maxChildren, depth + 1) == false)
+                { SSFGObjDeInit(&child); return false; }
+                if (SSFGObjInsertChild(gobj, child) == false)
+                { SSFGObjDeInit(&child); return false; }
+
+                _SSFJsonWhitespace(js, index);
+                if (js[*index] == ']') break;
+                if (js[*index] != ',') return false;
+                (*index)++;
+            } while (true);
+        }
+        (*index)++;
+        return true;
+    }
+
+    /* String */
+    i = *index;
+    if (_SSFJsonString(js, &i, &start, &end))
+    {
+        *index = i;
+        if (_SSFJsonGObjUnescStr(js, start, end, strBuf, sizeof(strBuf)) == false) return false;
+        return SSFGObjSetString(gobj, strBuf);
+    }
+
+    /* Number */
+    i = *index;
+    if (_SSFJsonNumber(js, &i, &start, &end))
+    {
+        size_t numLen = end - start + 1;
+        bool hasDecimal = false;
+        size_t n;
+        int64_t intVal;
+
+        *index = i;
+        if (numLen > (sizeof(strBuf) - 1)) return false;
+
+        /* Copy number to null-terminated buffer */
+        memcpy(strBuf, &js[start], numLen);
+        strBuf[numLen] = 0;
+
+        /* Check for decimal point or exponent */
+        for (n = 0; n < numLen; n++)
+        {
+            if (strBuf[n] == '.' || strBuf[n] == 'e' || strBuf[n] == 'E')
+            { hasDecimal = true; break; }
+        }
+
+        if (hasDecimal == false)
+        {
+            /* Try signed integer first, then unsigned */
+            uint64_t uintVal;
+
+            if (SSFDecStrToInt(strBuf, &intVal)) return SSFGObjSetInt(gobj, intVal);
+            if (SSFDecStrToUInt(strBuf, &uintVal)) return SSFGObjSetUInt(gobj, uintVal);
+        }
+
+#if SSF_JSON_CONFIG_ENABLE_FLOAT_PARSE == 1
+        {
+            char *endptr;
+            double dval;
+
+            dval = strtod(strBuf, &endptr);
+            if (endptr == &strBuf[numLen]) return SSFGObjSetFloat(gobj, dval);
+        }
+#endif /* SSF_JSON_CONFIG_ENABLE_FLOAT_PARSE */
+        return false;
+    }
+
+    /* true */
+    if (strncmp(&js[*index], "true", 4) == 0)
+    { *index += 4; return SSFGObjSetBool(gobj, true); }
+
+    /* false */
+    if (strncmp(&js[*index], "false", 5) == 0)
+    { *index += 5; return SSFGObjSetBool(gobj, false); }
+
+    /* null */
+    if (strncmp(&js[*index], "null", 4) == 0)
+    { *index += 4; return SSFGObjSetNull(gobj); }
+
+    return false;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if JSON string successfully converted to gobj representation, else false.        */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFJsonGObjCreate(SSFCStrIn_t js, SSFGObj_t **gobj, uint16_t maxChildren)
+{
+    SSFGObj_t *root = NULL;
+    size_t index;
+
+    SSF_REQUIRE(js != NULL);
+    SSF_REQUIRE(gobj != NULL);
+
+    /* Validate JSON first */
+    if (SSFJsonIsValid(js) == false) return false;
+
+    /* Create root node */
+    if (SSFGObjInit(&root, maxChildren) == false) return false;
+
+    /* Parse recursively */
+    index = 0;
+    if (_SSFJsonGObjValue(js, &index, root, maxChildren, 0) == false)
+    { SSFGObjDeInit(&root); return false; }
+
+    /* Verify entire input was consumed (skip trailing whitespace) */
+    _SSFJsonWhitespace(js, &index);
+    if (js[index] != '\0')
+    { SSFGObjDeInit(&root); return false; }
+
+    *gobj = root;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Forward declaration for recursive printing.                                                   */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFJsonGObjPrintValue(SSFGObj_t *gobj, SSFCStrOut_t js, size_t size, size_t start,
+                                   size_t *end, bool *comma);
+
+/* --------------------------------------------------------------------------------------------- */
+/* Callback that prints the children of a gobj container (object or array).                      */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFJsonGObjPrintChildrenFn(char *js, size_t size, size_t start, size_t *end,
+                                        void *in)
+{
+    SSFGObj_t *gobj = (SSFGObj_t *)in;
+    SSFLLItem_t *item;
+    SSFGObj_t *child;
+    bool comma = false;
+    bool isObject;
+    char label[SSF_JSON_GOBJ_CONFIG_MAX_STR_SIZE + 1];
+
+    SSF_ASSERT(gobj != NULL);
+
+    isObject = (SSFGObjGetType(gobj) == SSF_OBJ_TYPE_OBJECT);
+
+    item = SSF_LL_HEAD(&(gobj->children));
+    while (item != NULL)
+    {
+        child = (SSFGObj_t *)item;
+
+        if (isObject)
+        {
+            /* Print "label": then value */
+            if (SSFGObjGetLabel(child, label, sizeof(label)) == false) return false;
+            if (SSFJsonPrintLabel(js, size, start, &start, label, &comma) == false) return false;
+            if (_SSFJsonGObjPrintValue(child, js, size, start, &start, NULL) == false) return false;
+        }
+        else
+        {
+            /* Array: print value with comma tracking */
+            if (_SSFJsonGObjPrintValue(child, js, size, start, &start, &comma) == false)
+            { return false; }
+        }
+        item = SSF_LL_NEXT_ITEM(item);
+    }
+    *end = start;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Prints a single gobj value into the JSON output buffer. Returns true on success.              */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFJsonGObjPrintValue(SSFGObj_t *gobj, SSFCStrOut_t js, size_t size, size_t start,
+                                   size_t *end, bool *comma)
+{
+    char strVal[SSF_JSON_GOBJ_CONFIG_MAX_STR_SIZE + 1];
+    int64_t intVal;
+    uint64_t uintVal;
+    bool boolVal;
+#if SSF_JSON_CONFIG_ENABLE_FLOAT_GEN == 1
+    double dblVal;
+#endif /* SSF_JSON_CONFIG_ENABLE_FLOAT_GEN */
+
+    SSF_ASSERT(gobj != NULL);
+
+    switch (SSFGObjGetType(gobj))
+    {
+    case SSF_OBJ_TYPE_STR:
+        if (SSFGObjGetString(gobj, strVal, sizeof(strVal)) == false) return false;
+        return SSFJsonPrintString(js, size, start, end, strVal, comma);
+    case SSF_OBJ_TYPE_INT:
+        if (SSFGObjGetInt(gobj, &intVal) == false) return false;
+        return SSFJsonPrintInt(js, size, start, end, intVal, comma);
+    case SSF_OBJ_TYPE_UINT:
+        if (SSFGObjGetUInt(gobj, &uintVal) == false) return false;
+        return SSFJsonPrintUInt(js, size, start, end, uintVal, comma);
+    case SSF_OBJ_TYPE_BOOL:
+        if (SSFGObjGetBool(gobj, &boolVal) == false) return false;
+        if (boolVal) return SSFJsonPrintTrue(js, size, start, end, comma);
+        else return SSFJsonPrintFalse(js, size, start, end, comma);
+    case SSF_OBJ_TYPE_NULL:
+        return SSFJsonPrintNull(js, size, start, end, comma);
+#if SSF_JSON_CONFIG_ENABLE_FLOAT_GEN == 1
+    case SSF_OBJ_TYPE_FLOAT:
+        if (SSFGObjGetFloat(gobj, &dblVal) == false) return false;
+        return SSFJsonPrintDouble(js, size, start, end, dblVal, SSF_JSON_FLT_FMT_STD, comma);
+#endif /* SSF_JSON_CONFIG_ENABLE_FLOAT_GEN */
+    case SSF_OBJ_TYPE_OBJECT:
+        return SSFJsonPrintObject(js, size, start, end, _SSFJsonGObjPrintChildrenFn, gobj, comma);
+    case SSF_OBJ_TYPE_ARRAY:
+        return SSFJsonPrintArray(js, size, start, end, _SSFJsonGObjPrintChildrenFn, gobj, comma);
+    default:
+        return false;
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if gobj representation successfully converted to JSON string, else false.        */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFJsonGObjPrint(SSFGObj_t *gobj, SSFCStrOut_t js, size_t jsSize, size_t *jsLen)
+{
+    size_t end;
+
+    SSF_REQUIRE(gobj != NULL);
+    SSF_REQUIRE(js != NULL);
+    SSF_REQUIRE(jsSize > 0);
+    SSF_REQUIRE(jsLen != NULL);
+
+    if (_SSFJsonGObjPrintValue(gobj, js, jsSize, 0, &end, NULL) == false) return false;
+    *jsLen = end;
+    return true;
+}
+#endif /* SSF_JSON_GOBJ_ENABLE */
 

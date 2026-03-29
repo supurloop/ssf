@@ -82,6 +82,13 @@ extern "C" {
 /* Allow generator to print floats. */
 #define SSF_JSON_CONFIG_ENABLE_FLOAT_GEN (1u)
 
+/* 1 to enable JSON to/from gobj conversion interface, else 0. */
+#define SSF_JSON_GOBJ_ENABLE (1u)
+
+/* Define the maximum string size for object keys and string values during JSON to gobj          */
+/* conversion.                                                                                   */
+#define SSF_JSON_GOBJ_CONFIG_MAX_STR_SIZE (256u)
+
 /* --------------------------------------------------------------------------------------------- */
 /* Configure ssfsm's state machine interface                                                     */
 /* --------------------------------------------------------------------------------------------- */

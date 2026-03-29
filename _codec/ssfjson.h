@@ -139,6 +139,13 @@ bool SSFJsonPrintCString(SSFCStrOut_t js, size_t size, size_t start, size_t *end
 bool SSFJsonPrint(SSFCStrOut_t js, size_t size, size_t start, size_t *end, SSFJsonPrintFn_t fn,
                   void *in, const char *oc, bool *comma);
 
+#if SSF_JSON_GOBJ_ENABLE == 1
+#include "ssfgobj.h"
+/* GObj converters */
+bool SSFJsonGObjCreate(SSFCStrIn_t js, SSFGObj_t **gobj, uint16_t maxChildren);
+bool SSFJsonGObjPrint(SSFGObj_t *gobj, SSFCStrOut_t js, size_t jsSize, size_t *jsLen);
+#endif /* SSF_JSON_GOBJ_ENABLE */
+
 /* --------------------------------------------------------------------------------------------- */
 /* Unit test                                                                                     */
 /* --------------------------------------------------------------------------------------------- */

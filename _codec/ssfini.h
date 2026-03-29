@@ -39,6 +39,9 @@ extern "C" {
 #include <stdint.h>
 #include <stdbool.h>
 #include "ssfport.h"
+#if SSF_INI_GOBJ_ENABLE == 1
+#include "ssfgobj.h"
+#endif /* SSF_INI_GOBJ_ENABLE */
 
 /* --------------------------------------------------------------------------------------------- */
 /* Defines                                                                                       */
@@ -95,6 +98,13 @@ bool SSFINIPrintNameBoolValue(SSFCStrOut_t ini, size_t iniSize, size_t *iniLen, 
                               bool value, SSFINIBool_t boolType, SSFINILineEnd_t lineEnding);
 bool SSFINIPrintNameIntValue(SSFCStrOut_t ini, size_t iniSize, size_t *iniLen, SSFCStrIn_t name,
                              int64_t value, SSFINILineEnd_t lineEnding);
+
+#if SSF_INI_GOBJ_ENABLE == 1
+/* GObj converters */
+bool SSFINIGObjCreate(SSFCStrIn_t ini, SSFGObj_t **gobj, uint16_t maxChildren);
+bool SSFINIGObjPrint(SSFGObj_t *gobj, SSFCStrOut_t ini, size_t iniSize, size_t *iniLen,
+                     SSFINIBool_t boolType, SSFINILineEnd_t lineEnding);
+#endif /* SSF_INI_GOBJ_ENABLE */
 
 /* --------------------------------------------------------------------------------------------- */
 /* Unit test                                                                                     */

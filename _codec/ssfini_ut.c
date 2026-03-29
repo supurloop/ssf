@@ -33,6 +33,9 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include "ssfini.h"
+#if SSF_INI_GOBJ_ENABLE == 1
+#include "ssfgobj.h"
+#endif /* SSF_INI_GOBJ_ENABLE */
 #include "ssfassert.h"
 #include "ssfport.h"
 
@@ -781,5 +784,370 @@ void SSFINIUnitTest(void)
         SSF_ASSERT(SSFINIIsNameValuePresent(rt, "mysect", "missing", 0) == false);
         SSF_ASSERT(SSFINIIsNameValuePresent(rt, NULL, "key1", 0) == false);
     }
+
+#if SSF_INI_GOBJ_ENABLE == 1
+    /* Test SSFINIGObjCreate */
+    SSF_ASSERT_TEST(SSFINIGObjCreate(NULL, NULL, 8));
+    {
+        SSFGObj_t *gobjNull = NULL;
+        SSF_ASSERT_TEST(SSFINIGObjCreate(NULL, &gobjNull, 8));
+    }
+
+    /* Empty INI */
+    {
+        SSFGObj_t *g = NULL;
+        SSF_ASSERT(SSFINIGObjCreate("", &g, 8));
+        SSF_ASSERT(SSFGObjGetType(g) == SSF_OBJ_TYPE_OBJECT);
+        SSFGObjDeInit(&g);
+        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+    }
+
+    /* Global name=value only */
+    {
+        SSFGObj_t *g = NULL;
+        SSFGObj_t *parent = NULL;
+        SSFGObj_t *child = NULL;
+        SSFCStrIn_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
+
+        SSF_ASSERT(SSFINIGObjCreate("name=value\n", &g, 8));
+        SSF_ASSERT(SSFGObjGetType(g) == SSF_OBJ_TYPE_OBJECT);
+        memset(path, 0, sizeof(path));
+        path[0] = "name";
+        SSF_ASSERT(SSFGObjFindPath(g, path, &parent, &child));
+        SSF_ASSERT(SSFGObjGetType(child) == SSF_OBJ_TYPE_STR);
+        SSF_ASSERT(SSFGObjGetString(child, outStr, sizeof(outStr)));
+        SSF_ASSERT(strcmp(outStr, "value") == 0);
+        SSFGObjDeInit(&g);
+        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+    }
+
+    /* Single section with values */
+    {
+        SSFGObj_t *g = NULL;
+        SSFGObj_t *parent = NULL;
+        SSFGObj_t *child = NULL;
+        SSFCStrIn_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
+
+        SSF_ASSERT(SSFINIGObjCreate("[section]\nkey1=val1\nkey2=val2\n", &g, 8));
+        SSF_ASSERT(SSFGObjGetType(g) == SSF_OBJ_TYPE_OBJECT);
+
+        memset(path, 0, sizeof(path));
+        path[0] = "section";
+        parent = NULL; child = NULL;
+        SSF_ASSERT(SSFGObjFindPath(g, path, &parent, &child));
+        SSF_ASSERT(SSFGObjGetType(child) == SSF_OBJ_TYPE_OBJECT);
+
+        memset(path, 0, sizeof(path));
+        path[0] = "section"; path[1] = "key1";
+        parent = NULL; child = NULL;
+        SSF_ASSERT(SSFGObjFindPath(g, path, &parent, &child));
+        SSF_ASSERT(SSFGObjGetType(child) == SSF_OBJ_TYPE_STR);
+        SSF_ASSERT(SSFGObjGetString(child, outStr, sizeof(outStr)));
+        SSF_ASSERT(strcmp(outStr, "val1") == 0);
+
+        memset(path, 0, sizeof(path));
+        path[0] = "section"; path[1] = "key2";
+        parent = NULL; child = NULL;
+        SSF_ASSERT(SSFGObjFindPath(g, path, &parent, &child));
+        SSF_ASSERT(SSFGObjGetType(child) == SSF_OBJ_TYPE_STR);
+        SSF_ASSERT(SSFGObjGetString(child, outStr, sizeof(outStr)));
+        SSF_ASSERT(strcmp(outStr, "val2") == 0);
+
+        SSFGObjDeInit(&g);
+        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+    }
+
+    /* Mixed global and sections */
+    {
+        SSFGObj_t *g = NULL;
+        SSFGObj_t *parent = NULL;
+        SSFGObj_t *child = NULL;
+        SSFCStrIn_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
+
+        SSF_ASSERT(SSFINIGObjCreate("gkey=gval\n[s1]\nk1=v1\n[s2]\nk2=v2\n", &g, 8));
+
+        memset(path, 0, sizeof(path));
+        path[0] = "gkey";
+        parent = NULL; child = NULL;
+        SSF_ASSERT(SSFGObjFindPath(g, path, &parent, &child));
+        SSF_ASSERT(SSFGObjGetString(child, outStr, sizeof(outStr)));
+        SSF_ASSERT(strcmp(outStr, "gval") == 0);
+
+        memset(path, 0, sizeof(path));
+        path[0] = "s1"; path[1] = "k1";
+        parent = NULL; child = NULL;
+        SSF_ASSERT(SSFGObjFindPath(g, path, &parent, &child));
+        SSF_ASSERT(SSFGObjGetString(child, outStr, sizeof(outStr)));
+        SSF_ASSERT(strcmp(outStr, "v1") == 0);
+
+        memset(path, 0, sizeof(path));
+        path[0] = "s2"; path[1] = "k2";
+        parent = NULL; child = NULL;
+        SSF_ASSERT(SSFGObjFindPath(g, path, &parent, &child));
+        SSF_ASSERT(SSFGObjGetString(child, outStr, sizeof(outStr)));
+        SSF_ASSERT(strcmp(outStr, "v2") == 0);
+
+        SSFGObjDeInit(&g);
+        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+    }
+
+    /* Duplicate section names merge */
+    {
+        SSFGObj_t *g = NULL;
+        SSFGObj_t *parent = NULL;
+        SSFGObj_t *child = NULL;
+        SSFCStrIn_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
+
+        SSF_ASSERT(SSFINIGObjCreate("[sect]\nk1=v1\n[sect]\nk2=v2\n", &g, 8));
+
+        memset(path, 0, sizeof(path));
+        path[0] = "sect"; path[1] = "k1";
+        parent = NULL; child = NULL;
+        SSF_ASSERT(SSFGObjFindPath(g, path, &parent, &child));
+        SSF_ASSERT(SSFGObjGetString(child, outStr, sizeof(outStr)));
+        SSF_ASSERT(strcmp(outStr, "v1") == 0);
+
+        memset(path, 0, sizeof(path));
+        path[0] = "sect"; path[1] = "k2";
+        parent = NULL; child = NULL;
+        SSF_ASSERT(SSFGObjFindPath(g, path, &parent, &child));
+        SSF_ASSERT(SSFGObjGetString(child, outStr, sizeof(outStr)));
+        SSF_ASSERT(strcmp(outStr, "v2") == 0);
+
+        SSFGObjDeInit(&g);
+        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+    }
+
+    /* Empty value */
+    {
+        SSFGObj_t *g = NULL;
+        SSFGObj_t *parent = NULL;
+        SSFGObj_t *child = NULL;
+        SSFCStrIn_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
+
+        SSF_ASSERT(SSFINIGObjCreate("name=\n", &g, 8));
+        memset(path, 0, sizeof(path));
+        path[0] = "name";
+        parent = NULL; child = NULL;
+        SSF_ASSERT(SSFGObjFindPath(g, path, &parent, &child));
+        SSF_ASSERT(SSFGObjGetType(child) == SSF_OBJ_TYPE_STR);
+        SSF_ASSERT(SSFGObjGetString(child, outStr, sizeof(outStr)));
+        SSF_ASSERT(strcmp(outStr, "") == 0);
+
+        SSFGObjDeInit(&g);
+        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+    }
+
+    /* Comments and whitespace are ignored */
+    {
+        SSFGObj_t *g = NULL;
+        SSFGObj_t *parent = NULL;
+        SSFGObj_t *child = NULL;
+        SSFCStrIn_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
+
+        SSF_ASSERT(SSFINIGObjCreate(";comment\n#comment\n[sec]\n  key = val\n", &g, 8));
+        memset(path, 0, sizeof(path));
+        path[0] = "sec"; path[1] = "key";
+        parent = NULL; child = NULL;
+        SSF_ASSERT(SSFGObjFindPath(g, path, &parent, &child));
+        SSF_ASSERT(SSFGObjGetString(child, outStr, sizeof(outStr)));
+        SSF_ASSERT(strcmp(outStr, "val") == 0);
+
+        SSFGObjDeInit(&g);
+        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+    }
+
+    /* CRLF line endings */
+    {
+        SSFGObj_t *g = NULL;
+        SSFGObj_t *parent = NULL;
+        SSFGObj_t *child = NULL;
+        SSFCStrIn_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
+
+        SSF_ASSERT(SSFINIGObjCreate("[s]\r\nk=v\r\n", &g, 8));
+        memset(path, 0, sizeof(path));
+        path[0] = "s"; path[1] = "k";
+        parent = NULL; child = NULL;
+        SSF_ASSERT(SSFGObjFindPath(g, path, &parent, &child));
+        SSF_ASSERT(SSFGObjGetString(child, outStr, sizeof(outStr)));
+        SSF_ASSERT(strcmp(outStr, "v") == 0);
+
+        SSFGObjDeInit(&g);
+        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+    }
+
+    /* Test SSFINIGObjPrint */
+    SSF_ASSERT_TEST(SSFINIGObjPrint(NULL, iniStr, sizeof(iniStr), &iniLen,
+                                    SSF_INI_BOOL_TRUE_FALSE, SSF_INI_LF));
+
+    /* Empty gobj produces empty INI */
+    {
+        SSFGObj_t *g = NULL;
+
+        SSF_ASSERT(SSFGObjInit(&g, 8u));
+        SSF_ASSERT(SSFGObjSetObject(g));
+        iniLen = 0;
+        SSF_ASSERT(SSFINIGObjPrint(g, iniStr, sizeof(iniStr), &iniLen,
+                                   SSF_INI_BOOL_TRUE_FALSE, SSF_INI_LF));
+        SSF_ASSERT(iniLen == 0);
+
+        SSFGObjDeInit(&g);
+        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+    }
+
+    /* GObj with global string values */
+    {
+        SSFGObj_t *g = NULL;
+        SSFGObj_t *c = NULL;
+
+        SSF_ASSERT(SSFGObjInit(&g, 8u));
+        SSF_ASSERT(SSFGObjSetObject(g));
+        SSF_ASSERT(SSFGObjInit(&c, 0u));
+        SSF_ASSERT(SSFGObjSetLabel(c, "name"));
+        SSF_ASSERT(SSFGObjSetString(c, "value"));
+        SSF_ASSERT(SSFGObjInsertChild(g, c));
+
+        iniLen = 0;
+        SSF_ASSERT(SSFINIGObjPrint(g, iniStr, sizeof(iniStr), &iniLen,
+                                   SSF_INI_BOOL_TRUE_FALSE, SSF_INI_LF));
+        SSF_ASSERT(strcmp(iniStr, "name=value\n") == 0);
+
+        SSFGObjDeInit(&g);
+        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+    }
+
+    /* GObj with section and values */
+    {
+        SSFGObj_t *g = NULL;
+        SSFGObj_t *sec = NULL;
+        SSFGObj_t *c = NULL;
+
+        SSF_ASSERT(SSFGObjInit(&g, 8u));
+        SSF_ASSERT(SSFGObjSetObject(g));
+        SSF_ASSERT(SSFGObjInit(&sec, 8u));
+        SSF_ASSERT(SSFGObjSetLabel(sec, "section"));
+        SSF_ASSERT(SSFGObjSetObject(sec));
+        SSF_ASSERT(SSFGObjInit(&c, 0u));
+        SSF_ASSERT(SSFGObjSetLabel(c, "key"));
+        SSF_ASSERT(SSFGObjSetString(c, "val"));
+        SSF_ASSERT(SSFGObjInsertChild(sec, c));
+        SSF_ASSERT(SSFGObjInsertChild(g, sec));
+
+        iniLen = 0;
+        SSF_ASSERT(SSFINIGObjPrint(g, iniStr, sizeof(iniStr), &iniLen,
+                                   SSF_INI_BOOL_TRUE_FALSE, SSF_INI_LF));
+        SSF_ASSERT(strcmp(iniStr, "[section]\nkey=val\n") == 0);
+
+        SSFGObjDeInit(&g);
+        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+    }
+
+    /* GObj with int and bool values */
+    {
+        SSFGObj_t *g = NULL;
+        SSFGObj_t *sec = NULL;
+        SSFGObj_t *c = NULL;
+
+        SSF_ASSERT(SSFGObjInit(&g, 8u));
+        SSF_ASSERT(SSFGObjSetObject(g));
+        SSF_ASSERT(SSFGObjInit(&sec, 8u));
+        SSF_ASSERT(SSFGObjSetLabel(sec, "s"));
+        SSF_ASSERT(SSFGObjSetObject(sec));
+
+        SSF_ASSERT(SSFGObjInit(&c, 0u));
+        SSF_ASSERT(SSFGObjSetLabel(c, "num"));
+        SSF_ASSERT(SSFGObjSetInt(c, -42));
+        SSF_ASSERT(SSFGObjInsertChild(sec, c));
+        c = NULL;
+
+        SSF_ASSERT(SSFGObjInit(&c, 0u));
+        SSF_ASSERT(SSFGObjSetLabel(c, "flag"));
+        SSF_ASSERT(SSFGObjSetBool(c, true));
+        SSF_ASSERT(SSFGObjInsertChild(sec, c));
+
+        SSF_ASSERT(SSFGObjInsertChild(g, sec));
+
+        iniLen = 0;
+        SSF_ASSERT(SSFINIGObjPrint(g, iniStr, sizeof(iniStr), &iniLen,
+                                   SSF_INI_BOOL_TRUE_FALSE, SSF_INI_LF));
+        SSF_ASSERT(strcmp(iniStr, "[s]\nnum=-42\nflag=true\n") == 0);
+
+        SSFGObjDeInit(&g);
+        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+    }
+
+    /* GObj with mixed global and section values, CRLF */
+    {
+        SSFGObj_t *g = NULL;
+        SSFGObj_t *sec = NULL;
+        SSFGObj_t *c = NULL;
+
+        SSF_ASSERT(SSFGObjInit(&g, 8u));
+        SSF_ASSERT(SSFGObjSetObject(g));
+
+        SSF_ASSERT(SSFGObjInit(&c, 0u));
+        SSF_ASSERT(SSFGObjSetLabel(c, "gk"));
+        SSF_ASSERT(SSFGObjSetString(c, "gv"));
+        SSF_ASSERT(SSFGObjInsertChild(g, c));
+        c = NULL;
+
+        SSF_ASSERT(SSFGObjInit(&sec, 8u));
+        SSF_ASSERT(SSFGObjSetLabel(sec, "sec"));
+        SSF_ASSERT(SSFGObjSetObject(sec));
+        SSF_ASSERT(SSFGObjInit(&c, 0u));
+        SSF_ASSERT(SSFGObjSetLabel(c, "k"));
+        SSF_ASSERT(SSFGObjSetString(c, "v"));
+        SSF_ASSERT(SSFGObjInsertChild(sec, c));
+        SSF_ASSERT(SSFGObjInsertChild(g, sec));
+
+        iniLen = 0;
+        SSF_ASSERT(SSFINIGObjPrint(g, iniStr, sizeof(iniStr), &iniLen,
+                                   SSF_INI_BOOL_TRUE_FALSE, SSF_INI_CRLF));
+        SSF_ASSERT(strcmp(iniStr, "gk=gv\r\n[sec]\r\nk=v\r\n") == 0);
+
+        SSFGObjDeInit(&g);
+        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+    }
+
+    /* GObj print with buffer too small */
+    {
+        SSFGObj_t *g = NULL;
+        SSFGObj_t *c = NULL;
+
+        SSF_ASSERT(SSFGObjInit(&g, 8u));
+        SSF_ASSERT(SSFGObjSetObject(g));
+        SSF_ASSERT(SSFGObjInit(&c, 0u));
+        SSF_ASSERT(SSFGObjSetLabel(c, "name"));
+        SSF_ASSERT(SSFGObjSetString(c, "value"));
+        SSF_ASSERT(SSFGObjInsertChild(g, c));
+
+        /* "name=value\n" is 11 chars, buffer of 11 needs 12 for null */
+        iniLen = 0;
+        SSF_ASSERT(SSFINIGObjPrint(g, iniStr, 11, &iniLen,
+                                   SSF_INI_BOOL_TRUE_FALSE, SSF_INI_LF) == false);
+
+        iniLen = 0;
+        SSF_ASSERT(SSFINIGObjPrint(g, iniStr, 12, &iniLen,
+                                   SSF_INI_BOOL_TRUE_FALSE, SSF_INI_LF));
+
+        SSFGObjDeInit(&g);
+        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+    }
+
+    /* Round-trip: INI -> gobj -> INI */
+    {
+        SSFGObj_t *g = NULL;
+        const char *srcIni = "[section]\nkey1=val1\nkey2=val2\n";
+
+        SSF_ASSERT(SSFINIGObjCreate(srcIni, &g, 8));
+        iniLen = 0;
+        SSF_ASSERT(SSFINIGObjPrint(g, iniStr, sizeof(iniStr), &iniLen,
+                                   SSF_INI_BOOL_TRUE_FALSE, SSF_INI_LF));
+        SSF_ASSERT(strcmp(iniStr, srcIni) == 0);
+
+        SSFGObjDeInit(&g);
+        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+    }
+#endif /* SSF_INI_GOBJ_ENABLE */
 }
 #endif /* SSF_CONFIG_INI_UNIT_TEST */

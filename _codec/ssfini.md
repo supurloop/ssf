@@ -16,6 +16,7 @@ truncating or overflowing.
 ## [↑](#ssfini--ini-file-parsergenerator) Dependencies
 
 - [`ssfport.h`](../ssfport.h)
+- [`ssfgobj.h`](ssfgobj.h) — only when `SSF_INI_GOBJ_ENABLE == 1`
 
 <a id="notes"></a>
 
@@ -33,7 +34,12 @@ truncating or overflowing.
 
 ## [↑](#ssfini--ini-file-parsergenerator) Configuration
 
-This module has no compile-time configuration options in `ssfoptions.h`.
+The following options are defined in [`ssfoptions.h`](../ssfoptions.h):
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `SSF_INI_GOBJ_ENABLE` | `1` | Set to `1` to enable `SSFINIGObjCreate()` and `SSFINIGObjPrint()` INI/gobj conversion functions. Set to `0` to exclude them and remove the `ssfgobj` dependency. |
+| `SSF_INI_GOBJ_CONFIG_MAX_STR_SIZE` | `256` | Maximum length in bytes of any section name, key name, or value string during INI/gobj conversion. |
 
 <a id="api-summary"></a>
 
@@ -72,6 +78,8 @@ This module has no compile-time configuration options in `ssfoptions.h`.
 | [e.g.](#ex-printstrvalue) | [`bool SSFINIPrintNameStrValue(ini, iniSize, iniLen, name, value, lineEnding)`](#ssfiniprintnamestrvalue) | Append a string name=value line |
 | [e.g.](#ex-printboolvalue) | [`bool SSFINIPrintNameBoolValue(ini, iniSize, iniLen, name, value, boolType, lineEnding)`](#ssfiniprintnameboolvalue) | Append a boolean name=value line |
 | [e.g.](#ex-printintvalue) | [`bool SSFINIPrintNameIntValue(ini, iniSize, iniLen, name, value, lineEnding)`](#ssfiniprintnameintvalue) | Append an integer name=value line |
+| [e.g.](#ex-gobjcreate) | [`bool SSFINIGObjCreate(ini, gobj, maxChildren)`](#ssfinigobjcreate) | Convert an INI string to a gobj tree (`SSF_INI_GOBJ_ENABLE`) |
+| [e.g.](#ex-gobjprint) | [`bool SSFINIGObjPrint(gobj, ini, iniSize, iniLen, boolType, lineEnding)`](#ssfinigobjprint) | Convert a gobj tree to an INI string (`SSF_INI_GOBJ_ENABLE`) |
 
 <a id="function-reference"></a>
 
@@ -458,5 +466,150 @@ SSFINIPrintSection     (buf, sizeof(buf), &len, "network",          SSF_INI_CRLF
 SSFINIPrintNameIntValue(buf, sizeof(buf), &len, "port",    8080,    SSF_INI_CRLF);
 SSFINIPrintNameIntValue(buf, sizeof(buf), &len, "timeout", -1,      SSF_INI_CRLF);
 /* buf == "[network]\r\nport=8080\r\ntimeout=-1\r\n" */
+```
+
+---
+
+<a id="ssfinigobjcreate"></a>
+
+### [↑](#ssfini--ini-file-parsergenerator) [`bool SSFINIGObjCreate()`](#functions)
+
+Requires `SSF_INI_GOBJ_ENABLE == 1`.
+
+```c
+bool SSFINIGObjCreate(SSFCStrIn_t ini, SSFGObj_t **gobj, uint16_t maxChildren);
+```
+
+Parses a null-terminated INI string and builds a generic object tree (`SSFGObj_t`) representing
+its contents. On success, `*gobj` points to a newly allocated root object that must be freed
+with `SSFGObjDeInit()`.
+
+The resulting tree has the following structure:
+
+- The **root** node is an `SSF_OBJ_TYPE_OBJECT`.
+- **Global** name=value pairs (before the first section header) become `SSF_OBJ_TYPE_STR`
+  children of the root, labeled with the name.
+- Each **section** becomes an `SSF_OBJ_TYPE_OBJECT` child of the root, labeled with the
+  section name. Its name=value pairs become `SSF_OBJ_TYPE_STR` children labeled with the name.
+- **Duplicate section** headers are merged into a single object node; entries from all
+  occurrences of that section appear as children.
+- All values are stored as strings. Comments are ignored.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `ini` | in | `const char *` | Null-terminated INI string to parse. Must not be `NULL`. |
+| `gobj` | out | `SSFGObj_t **` | Receives the root of the newly allocated gobj tree. Must not be `NULL`. |
+| `maxChildren` | in | `uint16_t` | Maximum number of children for each container node (root and sections). |
+
+**Returns:** `true` if the INI was successfully converted; `false` on allocation failure or if
+any section name, key name, or value exceeds `SSF_INI_GOBJ_CONFIG_MAX_STR_SIZE`.
+
+<a id="ex-gobjcreate"></a>
+
+```c
+const char ini[] = "global=42\n"
+                   "[section]\n"
+                   "host=localhost\n"
+                   "port=8080\n";
+SSFGObj_t *gobj = NULL;
+
+if (SSFINIGObjCreate(ini, &gobj, 8))
+{
+    SSFGObj_t *parent = NULL;
+    SSFGObj_t *child = NULL;
+    SSFCStrIn_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1] = { NULL };
+    char val[64];
+
+    /* Read a global value */
+    path[0] = "global";
+    SSFGObjFindPath(gobj, path, &parent, &child);
+    SSFGObjGetString(child, val, sizeof(val));
+    /* val == "42" */
+
+    /* Read a value inside a section */
+    memset(path, 0, sizeof(path));
+    path[0] = "section"; path[1] = "host";
+    parent = NULL; child = NULL;
+    SSFGObjFindPath(gobj, path, &parent, &child);
+    SSFGObjGetString(child, val, sizeof(val));
+    /* val == "localhost" */
+
+    SSFGObjDeInit(&gobj);
+}
+```
+
+---
+
+<a id="ssfinigobjprint"></a>
+
+### [↑](#ssfini--ini-file-parsergenerator) [`bool SSFINIGObjPrint()`](#functions)
+
+Requires `SSF_INI_GOBJ_ENABLE == 1`.
+
+```c
+bool SSFINIGObjPrint(SSFGObj_t *gobj, SSFCStrOut_t ini, size_t iniSize, size_t *iniLen,
+                     SSFINIBool_t boolType, SSFINILineEnd_t lineEnding);
+```
+
+Serializes a generic object tree into a null-terminated INI string. The gobj tree must follow
+the structure produced by [`SSFINIGObjCreate()`](#ssfinigobjcreate):
+
+- The **root** must be `SSF_OBJ_TYPE_OBJECT`.
+- Direct children of the root that are leaf types (`SSF_OBJ_TYPE_STR`, `SSF_OBJ_TYPE_INT`,
+  `SSF_OBJ_TYPE_BOOL`) are printed as global name=value lines.
+- Direct children that are `SSF_OBJ_TYPE_OBJECT` are printed as `[section]` headers, with
+  their leaf children printed as name=value lines under the section.
+
+Global entries are printed first, followed by sections in child-list order.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `gobj` | in | `SSFGObj_t *` | Root of the gobj tree. Must not be `NULL`. Must be `SSF_OBJ_TYPE_OBJECT`. |
+| `ini` | in-out | `char *` | INI output buffer. Must not be `NULL`. |
+| `iniSize` | in | `size_t` | Total allocated size of `ini` in bytes. Must be > 0. |
+| `iniLen` | in-out | `size_t *` | Current length of text in `ini`. Must be initialized to `0` before the first call. Updated on success. Must not be `NULL`. |
+| `boolType` | in | [`SSFINIBool_t`](#type-ssfinibool-t) | Text format for `SSF_OBJ_TYPE_BOOL` values. |
+| `lineEnding` | in | [`SSFINILineEnd_t`](#type-ssfiniliend-t) | Line ending style: `SSF_INI_LF` or `SSF_INI_CRLF`. |
+
+**Returns:** `true` if the entire tree was serialized into the buffer; `false` if the buffer is
+too small, the root is not an object, or a child has an unsupported type.
+
+<a id="ex-gobjprint"></a>
+
+```c
+/* Build a gobj tree */
+SSFGObj_t *root = NULL;
+SSFGObj_t *sec = NULL;
+SSFGObj_t *child = NULL;
+
+SSFGObjInit(&root, 8);
+SSFGObjSetObject(root);
+
+SSFGObjInit(&sec, 8);
+SSFGObjSetLabel(sec, "network");
+SSFGObjSetObject(sec);
+
+child = NULL;
+SSFGObjInit(&child, 0);
+SSFGObjSetLabel(child, "host");
+SSFGObjSetString(child, "localhost");
+SSFGObjInsertChild(sec, child);
+
+child = NULL;
+SSFGObjInit(&child, 0);
+SSFGObjSetLabel(child, "port");
+SSFGObjSetInt(child, 8080);
+SSFGObjInsertChild(sec, child);
+
+SSFGObjInsertChild(root, sec);
+
+/* Serialize to INI */
+char buf[128];
+size_t len = 0;
+
+SSFINIGObjPrint(root, buf, sizeof(buf), &len, SSF_INI_BOOL_TRUE_FALSE, SSF_INI_LF);
+/* buf == "[network]\nhost=localhost\nport=8080\n" */
+
+SSFGObjDeInit(&root);
 ```
 

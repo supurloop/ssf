@@ -411,6 +411,16 @@ typedef enum
 #define SSF_HEAP_MAX_SIZE_FOR_UNIT_TEST (4224u)
 
 /* --------------------------------------------------------------------------------------------- */
+/* Configure ssfini's gobj interface                                                             */
+/* --------------------------------------------------------------------------------------------- */
+/* 1 to enable INI to/from gobj conversion interface, else 0. */
+#define SSF_INI_GOBJ_ENABLE (1u)
+
+/* Define the maximum string size for section names, key names, and values during INI to gobj    */
+/* conversion.                                                                                   */
+#define SSF_INI_GOBJ_CONFIG_MAX_STR_SIZE (256u)
+
+/* --------------------------------------------------------------------------------------------- */
 /* Configure ssfgobj's interface                                                                 */
 /* --------------------------------------------------------------------------------------------- */
 /* Define the maximum parse depth, each nexted object or array starts a new depth level. */

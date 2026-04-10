@@ -70,6 +70,9 @@
 #include <stdlib.h>
 #include "ssfport.h"
 #include "ssfini.h"
+#if SSF_INI_GOBJ_ENABLE == 1
+#include "ssfgobj.h"
+#endif /* SSF_INI_GOBJ_ENABLE */
 #include "ssfdec.h"
 
 typedef struct
@@ -664,3 +667,206 @@ bool SSFINIPrintNameIntValue(SSFCStrOut_t ini, size_t iniSize, size_t *iniLen, S
     return SSFINIPrintNameStrValue(ini, iniSize, iniLen, name, nstr, lineEnding);
 }
 
+#if SSF_INI_GOBJ_ENABLE == 1
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if INI string successfully converted to gobj representation, else false.         */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFINIGObjCreate(SSFCStrIn_t ini, SSFGObj_t **gobj, uint16_t maxChildren)
+{
+    SSFINIContext_t context;
+    SSFGObj_t *root = NULL;
+    SSFGObj_t *curSection = NULL;
+    SSFGObj_t *child = NULL;
+    SSFGObj_t *foundParent = NULL;
+    SSFGObj_t *foundChild = NULL;
+    SSFCStrIn_t findPath[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
+    char strBuf[SSF_INI_GOBJ_CONFIG_MAX_STR_SIZE + 1];
+
+    SSF_REQUIRE(ini != NULL);
+    SSF_REQUIRE(gobj != NULL);
+
+    /* Create root object */
+    if (SSFGObjInit(&root, maxChildren) == false) return false;
+    if (SSFGObjSetObject(root) == false) { SSFGObjDeInit(&root); return false; }
+
+    curSection = root;
+    memset(&context, 0, sizeof(context));
+
+    /* Iterate over lines in INI string */
+    while (_SSFINIFindNextLine(ini, &context))
+    {
+        /* Found a section or name/value? */
+        if (_SSFINIParseLine(&context))
+        {
+            /* Is this a section declaration? */
+            if (context.name == NULL)
+            {
+                /* Ensure section name is valid and fits in buffer */
+                if ((context.sectionLen == 0) ||
+                    (context.sectionLen > SSF_INI_GOBJ_CONFIG_MAX_STR_SIZE))
+                { SSFGObjDeInit(&root); return false; }
+
+                /* Null-terminate section name */
+                memcpy(strBuf, context.section, context.sectionLen);
+                strBuf[context.sectionLen] = 0;
+
+                /* Look for existing section object in root */
+                memset(findPath, 0, sizeof(findPath));
+                findPath[0] = strBuf;
+                foundParent = NULL;
+                foundChild = NULL;
+                if (SSFGObjFindPath(root, (SSFCStrIn_t *)findPath, &foundParent, &foundChild) &&
+                    (SSFGObjGetType(foundChild) == SSF_OBJ_TYPE_OBJECT))
+                {
+                    /* Reuse existing section */
+                    curSection = foundChild;
+                }
+                else
+                {
+                    /* Create new section object */
+                    child = NULL;
+                    if (SSFGObjInit(&child, maxChildren) == false)
+                    { SSFGObjDeInit(&root); return false; }
+                    if (SSFGObjSetLabel(child, strBuf) == false)
+                    { SSFGObjDeInit(&child); SSFGObjDeInit(&root); return false; }
+                    if (SSFGObjSetObject(child) == false)
+                    { SSFGObjDeInit(&child); SSFGObjDeInit(&root); return false; }
+                    if (SSFGObjInsertChild(root, child) == false)
+                    { SSFGObjDeInit(&child); SSFGObjDeInit(&root); return false; }
+                    curSection = child;
+                }
+            }
+            else
+            {
+                /* Name/value pair found */
+                /* Ensure name is valid and fits in buffer */
+                if ((context.nameLen == 0) ||
+                    (context.nameLen > SSF_INI_GOBJ_CONFIG_MAX_STR_SIZE))
+                { SSFGObjDeInit(&root); return false; }
+
+                /* Null-terminate name */
+                memcpy(strBuf, context.name, context.nameLen);
+                strBuf[context.nameLen] = 0;
+
+                /* Create child node */
+                child = NULL;
+                if (SSFGObjInit(&child, 0u) == false)
+                { SSFGObjDeInit(&root); return false; }
+                if (SSFGObjSetLabel(child, strBuf) == false)
+                { SSFGObjDeInit(&child); SSFGObjDeInit(&root); return false; }
+
+                /* Ensure value fits in buffer */
+                if (context.valueLen > SSF_INI_GOBJ_CONFIG_MAX_STR_SIZE)
+                { SSFGObjDeInit(&child); SSFGObjDeInit(&root); return false; }
+
+                /* Null-terminate value and set as string */
+                if (context.valueLen > 0) memcpy(strBuf, context.value, context.valueLen);
+                strBuf[context.valueLen] = 0;
+                if (SSFGObjSetString(child, strBuf) == false)
+                { SSFGObjDeInit(&child); SSFGObjDeInit(&root); return false; }
+                if (SSFGObjInsertChild(curSection, child) == false)
+                { SSFGObjDeInit(&child); SSFGObjDeInit(&root); return false; }
+            }
+        }
+    }
+
+    *gobj = root;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if a gobj child's value is printed as a name=value line, else false.             */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFINIGObjPrintChild(SSFGObj_t *child, SSFCStrOut_t ini, size_t iniSize,
+                                  size_t *iniLen, SSFINIBool_t boolType,
+                                  SSFINILineEnd_t lineEnding)
+{
+    char label[SSF_INI_GOBJ_CONFIG_MAX_STR_SIZE + 1];
+    char strVal[SSF_INI_GOBJ_CONFIG_MAX_STR_SIZE + 1];
+    int64_t intVal;
+    bool boolVal;
+
+    SSF_ASSERT(child != NULL);
+
+    /* Get the child's label as the name */
+    if (SSFGObjGetLabel(child, label, sizeof(label)) == false) return false;
+
+    /* Print based on data type */
+    switch (SSFGObjGetType(child))
+    {
+    case SSF_OBJ_TYPE_STR:
+        if (SSFGObjGetString(child, strVal, sizeof(strVal)) == false) return false;
+        return SSFINIPrintNameStrValue(ini, iniSize, iniLen, label, strVal, lineEnding);
+    case SSF_OBJ_TYPE_INT:
+        if (SSFGObjGetInt(child, &intVal) == false) return false;
+        return SSFINIPrintNameIntValue(ini, iniSize, iniLen, label, intVal, lineEnding);
+    case SSF_OBJ_TYPE_BOOL:
+        if (SSFGObjGetBool(child, &boolVal) == false) return false;
+        return SSFINIPrintNameBoolValue(ini, iniSize, iniLen, label, boolVal, boolType,
+                                       lineEnding);
+    default:
+        return false;
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if gobj representation successfully converted to INI string, else false.         */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFINIGObjPrint(SSFGObj_t *gobj, SSFCStrOut_t ini, size_t iniSize, size_t *iniLen,
+                     SSFINIBool_t boolType, SSFINILineEnd_t lineEnding)
+{
+    SSFLLItem_t *item;
+    SSFLLItem_t *sectionItem;
+    SSFGObj_t *child;
+    char label[SSF_INI_GOBJ_CONFIG_MAX_STR_SIZE + 1];
+
+    SSF_REQUIRE(gobj != NULL);
+    SSF_REQUIRE(ini != NULL);
+    SSF_REQUIRE(iniSize > 0);
+    SSF_REQUIRE(iniLen != NULL);
+    SSF_REQUIRE((boolType > SSF_INI_BOOL_MIN) && (boolType < SSF_INI_BOOL_MAX));
+    SSF_REQUIRE((lineEnding > SSF_INI_LINE_ENDING_MIN) && (lineEnding < SSF_INI_LINE_ENDING_MAX));
+
+    /* Root must be an object */
+    if (SSFGObjGetType(gobj) != SSF_OBJ_TYPE_OBJECT) return false;
+
+    /* First pass: print global (non-OBJECT) children as name=value */
+    item = SSF_LL_HEAD(&(gobj->children));
+    while (item != NULL)
+    {
+        child = (SSFGObj_t *)item;
+        if (SSFGObjGetType(child) != SSF_OBJ_TYPE_OBJECT)
+        {
+            if (_SSFINIGObjPrintChild(child, ini, iniSize, iniLen, boolType, lineEnding) == false)
+            { return false; }
+        }
+        item = SSF_LL_NEXT_ITEM(item);
+    }
+
+    /* Second pass: print OBJECT children as [section] with their name=value children */
+    item = SSF_LL_HEAD(&(gobj->children));
+    while (item != NULL)
+    {
+        child = (SSFGObj_t *)item;
+        if (SSFGObjGetType(child) == SSF_OBJ_TYPE_OBJECT)
+        {
+            /* Print [section] header */
+            if (SSFGObjGetLabel(child, label, sizeof(label)) == false) return false;
+            if (SSFINIPrintSection(ini, iniSize, iniLen, label, lineEnding) == false) return false;
+
+            /* Print section's children as name=value */
+            sectionItem = SSF_LL_HEAD(&(child->children));
+            while (sectionItem != NULL)
+            {
+                if (_SSFINIGObjPrintChild((SSFGObj_t *)sectionItem, ini, iniSize, iniLen, boolType,
+                                          lineEnding) == false)
+                { return false; }
+                sectionItem = SSF_LL_NEXT_ITEM(sectionItem);
+            }
+        }
+        item = SSF_LL_NEXT_ITEM(item);
+    }
+
+    return true;
+}
+#endif /* SSF_INI_GOBJ_ENABLE */

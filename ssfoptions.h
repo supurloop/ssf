@@ -82,6 +82,13 @@ extern "C" {
 /* Allow generator to print floats. */
 #define SSF_JSON_CONFIG_ENABLE_FLOAT_GEN (1u)
 
+/* 1 to enable JSON to/from gobj conversion interface, else 0. */
+#define SSF_JSON_GOBJ_ENABLE (1u)
+
+/* Define the maximum string size for object keys and string values during JSON to gobj          */
+/* conversion.                                                                                   */
+#define SSF_JSON_GOBJ_CONFIG_MAX_STR_SIZE (256u)
+
 /* --------------------------------------------------------------------------------------------- */
 /* Configure ssfsm's state machine interface                                                     */
 /* --------------------------------------------------------------------------------------------- */
@@ -409,6 +416,16 @@ typedef enum
 
 /* Sets the maximum size of the heap for unit test. */
 #define SSF_HEAP_MAX_SIZE_FOR_UNIT_TEST (4224u)
+
+/* --------------------------------------------------------------------------------------------- */
+/* Configure ssfini's gobj interface                                                             */
+/* --------------------------------------------------------------------------------------------- */
+/* 1 to enable INI to/from gobj conversion interface, else 0. */
+#define SSF_INI_GOBJ_ENABLE (1u)
+
+/* Define the maximum string size for section names, key names, and values during INI to gobj    */
+/* conversion.                                                                                   */
+#define SSF_INI_GOBJ_CONFIG_MAX_STR_SIZE (256u)
 
 /* --------------------------------------------------------------------------------------------- */
 /* Configure ssfgobj's interface                                                                 */

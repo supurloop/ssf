@@ -33,6 +33,9 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include "ssfjson.h"
+#if SSF_JSON_GOBJ_ENABLE == 1
+#include "ssfgobj.h"
+#endif /* SSF_JSON_GOBJ_ENABLE */
 #include "ssfassert.h"
 #include "ssfport.h"
 
@@ -1381,6 +1384,387 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(SSFJsonIsValid(js));
         SSF_ASSERT(memcmp(js, "[]", 3) == 0);
     }
+
+#if SSF_JSON_GOBJ_ENABLE == 1
+    /* Test SSFJsonGObjCreate */
+    SSF_ASSERT_TEST(SSFJsonGObjCreate(NULL, NULL, 8));
+    {
+        SSFGObj_t *gNull = NULL;
+        SSF_ASSERT_TEST(SSFJsonGObjCreate(NULL, &gNull, 8));
+    }
+
+    /* Invalid JSON */
+    {
+        SSFGObj_t *g = NULL;
+        SSF_ASSERT(SSFJsonGObjCreate("{bad}", &g, 8) == false);
+        SSF_ASSERT(SSFJsonGObjCreate("", &g, 8) == false);
+    }
+
+    /* Empty object */
+    {
+        SSFGObj_t *g = NULL;
+        SSF_ASSERT(SSFJsonGObjCreate("{}", &g, 8));
+        SSF_ASSERT(SSFGObjGetType(g) == SSF_OBJ_TYPE_OBJECT);
+        SSFGObjDeInit(&g);
+        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+    }
+
+    /* Empty array */
+    {
+        SSFGObj_t *g = NULL;
+        SSF_ASSERT(SSFJsonGObjCreate("[]", &g, 8));
+        SSF_ASSERT(SSFGObjGetType(g) == SSF_OBJ_TYPE_ARRAY);
+        SSFGObjDeInit(&g);
+        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+    }
+
+    /* Object with string value */
+    {
+        SSFGObj_t *g = NULL;
+        SSFGObj_t *parent = NULL;
+        SSFGObj_t *child = NULL;
+        SSFCStrIn_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
+        char val[64];
+
+        SSF_ASSERT(SSFJsonGObjCreate("{\"key\":\"value\"}", &g, 8));
+        SSF_ASSERT(SSFGObjGetType(g) == SSF_OBJ_TYPE_OBJECT);
+        memset(path, 0, sizeof(path));
+        path[0] = "key";
+        SSF_ASSERT(SSFGObjFindPath(g, path, &parent, &child));
+        SSF_ASSERT(SSFGObjGetType(child) == SSF_OBJ_TYPE_STR);
+        SSF_ASSERT(SSFGObjGetString(child, val, sizeof(val)));
+        SSF_ASSERT(strcmp(val, "value") == 0);
+        SSFGObjDeInit(&g);
+        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+    }
+
+    /* Object with integer value */
+    {
+        SSFGObj_t *g = NULL;
+        SSFGObj_t *parent = NULL;
+        SSFGObj_t *child = NULL;
+        SSFCStrIn_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
+        int64_t intVal;
+
+        SSF_ASSERT(SSFJsonGObjCreate("{\"num\":-42}", &g, 8));
+        memset(path, 0, sizeof(path));
+        path[0] = "num";
+        SSF_ASSERT(SSFGObjFindPath(g, path, &parent, &child));
+        SSF_ASSERT(SSFGObjGetType(child) == SSF_OBJ_TYPE_INT);
+        SSF_ASSERT(SSFGObjGetInt(child, &intVal));
+        SSF_ASSERT(intVal == -42);
+        SSFGObjDeInit(&g);
+        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+    }
+
+    /* Object with bool and null values */
+    {
+        SSFGObj_t *g = NULL;
+        SSFGObj_t *parent = NULL;
+        SSFGObj_t *child = NULL;
+        SSFCStrIn_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
+        bool bVal;
+
+        SSF_ASSERT(SSFJsonGObjCreate("{\"a\":true,\"b\":false,\"c\":null}", &g, 8));
+
+        memset(path, 0, sizeof(path));
+        path[0] = "a";
+        parent = NULL; child = NULL;
+        SSF_ASSERT(SSFGObjFindPath(g, path, &parent, &child));
+        SSF_ASSERT(SSFGObjGetType(child) == SSF_OBJ_TYPE_BOOL);
+        SSF_ASSERT(SSFGObjGetBool(child, &bVal));
+        SSF_ASSERT(bVal == true);
+
+        memset(path, 0, sizeof(path));
+        path[0] = "b";
+        parent = NULL; child = NULL;
+        SSF_ASSERT(SSFGObjFindPath(g, path, &parent, &child));
+        SSF_ASSERT(SSFGObjGetBool(child, &bVal));
+        SSF_ASSERT(bVal == false);
+
+        memset(path, 0, sizeof(path));
+        path[0] = "c";
+        parent = NULL; child = NULL;
+        SSF_ASSERT(SSFGObjFindPath(g, path, &parent, &child));
+        SSF_ASSERT(SSFGObjGetType(child) == SSF_OBJ_TYPE_NULL);
+
+        SSFGObjDeInit(&g);
+        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+    }
+
+    /* Array with mixed types */
+    {
+        SSFGObj_t *g = NULL;
+        SSFGObj_t *parent = NULL;
+        SSFGObj_t *child = NULL;
+        SSFCStrIn_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
+        char val[64];
+        int64_t intVal;
+        size_t idx;
+
+        SSF_ASSERT(SSFJsonGObjCreate("[\"hello\",123,true]", &g, 8));
+        SSF_ASSERT(SSFGObjGetType(g) == SSF_OBJ_TYPE_ARRAY);
+
+        memset(path, 0, sizeof(path));
+        idx = 0; path[0] = (SSFCStrIn_t)&idx;
+        parent = NULL; child = NULL;
+        SSF_ASSERT(SSFGObjFindPath(g, path, &parent, &child));
+        SSF_ASSERT(SSFGObjGetString(child, val, sizeof(val)));
+        SSF_ASSERT(strcmp(val, "hello") == 0);
+
+        memset(path, 0, sizeof(path));
+        idx = 1; path[0] = (SSFCStrIn_t)&idx;
+        parent = NULL; child = NULL;
+        SSF_ASSERT(SSFGObjFindPath(g, path, &parent, &child));
+        SSF_ASSERT(SSFGObjGetInt(child, &intVal));
+        SSF_ASSERT(intVal == 123);
+
+        memset(path, 0, sizeof(path));
+        idx = 2; path[0] = (SSFCStrIn_t)&idx;
+        parent = NULL; child = NULL;
+        SSF_ASSERT(SSFGObjFindPath(g, path, &parent, &child));
+        SSF_ASSERT(SSFGObjGetType(child) == SSF_OBJ_TYPE_BOOL);
+
+        SSFGObjDeInit(&g);
+        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+    }
+
+    /* Nested object */
+    {
+        SSFGObj_t *g = NULL;
+        SSFGObj_t *parent = NULL;
+        SSFGObj_t *child = NULL;
+        SSFCStrIn_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
+        char val[64];
+
+        SSF_ASSERT(SSFJsonGObjCreate("{\"outer\":{\"inner\":\"deep\"}}", &g, 8));
+
+        memset(path, 0, sizeof(path));
+        path[0] = "outer"; path[1] = "inner";
+        parent = NULL; child = NULL;
+        SSF_ASSERT(SSFGObjFindPath(g, path, &parent, &child));
+        SSF_ASSERT(SSFGObjGetString(child, val, sizeof(val)));
+        SSF_ASSERT(strcmp(val, "deep") == 0);
+
+        SSFGObjDeInit(&g);
+        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+    }
+
+    /* String with escape sequences */
+    {
+        SSFGObj_t *g = NULL;
+        SSFGObj_t *parent = NULL;
+        SSFGObj_t *child = NULL;
+        SSFCStrIn_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
+        char val[64];
+
+        SSF_ASSERT(SSFJsonGObjCreate("{\"k\":\"a\\tb\\nc\"}", &g, 8));
+        memset(path, 0, sizeof(path));
+        path[0] = "k";
+        parent = NULL; child = NULL;
+        SSF_ASSERT(SSFGObjFindPath(g, path, &parent, &child));
+        SSF_ASSERT(SSFGObjGetString(child, val, sizeof(val)));
+        SSF_ASSERT(strcmp(val, "a\tb\nc") == 0);
+
+        SSFGObjDeInit(&g);
+        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+    }
+
+    /* Whitespace in JSON */
+    {
+        SSFGObj_t *g = NULL;
+        SSFGObj_t *parent = NULL;
+        SSFGObj_t *child = NULL;
+        SSFCStrIn_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
+        int64_t intVal;
+
+        SSF_ASSERT(SSFJsonGObjCreate("  { \"x\" : 1 , \"y\" : 2 }  ", &g, 8));
+
+        memset(path, 0, sizeof(path));
+        path[0] = "x";
+        parent = NULL; child = NULL;
+        SSF_ASSERT(SSFGObjFindPath(g, path, &parent, &child));
+        SSF_ASSERT(SSFGObjGetInt(child, &intVal));
+        SSF_ASSERT(intVal == 1);
+
+        memset(path, 0, sizeof(path));
+        path[0] = "y";
+        parent = NULL; child = NULL;
+        SSF_ASSERT(SSFGObjFindPath(g, path, &parent, &child));
+        SSF_ASSERT(SSFGObjGetInt(child, &intVal));
+        SSF_ASSERT(intVal == 2);
+
+        SSFGObjDeInit(&g);
+        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+    }
+
+    /* Test SSFJsonGObjPrint */
+    SSF_ASSERT_TEST(SSFJsonGObjPrint(NULL, _jsOut, sizeof(_jsOut), &end));
+
+    /* Empty object */
+    {
+        SSFGObj_t *g = NULL;
+        size_t len;
+
+        SSF_ASSERT(SSFGObjInit(&g, 8u));
+        SSF_ASSERT(SSFGObjSetObject(g));
+        SSF_ASSERT(SSFJsonGObjPrint(g, _jsOut, sizeof(_jsOut), &len));
+        SSF_ASSERT(strcmp(_jsOut, "{}") == 0);
+        SSF_ASSERT(len == 2);
+        SSFGObjDeInit(&g);
+        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+    }
+
+    /* Empty array */
+    {
+        SSFGObj_t *g = NULL;
+        size_t len;
+
+        SSF_ASSERT(SSFGObjInit(&g, 8u));
+        SSF_ASSERT(SSFGObjSetArray(g));
+        SSF_ASSERT(SSFJsonGObjPrint(g, _jsOut, sizeof(_jsOut), &len));
+        SSF_ASSERT(strcmp(_jsOut, "[]") == 0);
+        SSF_ASSERT(len == 2);
+        SSFGObjDeInit(&g);
+        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+    }
+
+    /* Object with string value */
+    {
+        SSFGObj_t *g = NULL;
+        SSFGObj_t *c = NULL;
+        size_t len;
+
+        SSF_ASSERT(SSFGObjInit(&g, 8u));
+        SSF_ASSERT(SSFGObjSetObject(g));
+        SSF_ASSERT(SSFGObjInit(&c, 0u));
+        SSF_ASSERT(SSFGObjSetLabel(c, "key"));
+        SSF_ASSERT(SSFGObjSetString(c, "value"));
+        SSF_ASSERT(SSFGObjInsertChild(g, c));
+
+        SSF_ASSERT(SSFJsonGObjPrint(g, _jsOut, sizeof(_jsOut), &len));
+        SSF_ASSERT(strcmp(_jsOut, "{\"key\":\"value\"}") == 0);
+        SSFGObjDeInit(&g);
+        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+    }
+
+    /* Object with int, bool, null */
+    {
+        SSFGObj_t *g = NULL;
+        SSFGObj_t *c = NULL;
+        size_t len;
+
+        SSF_ASSERT(SSFGObjInit(&g, 8u));
+        SSF_ASSERT(SSFGObjSetObject(g));
+
+        SSF_ASSERT(SSFGObjInit(&c, 0u));
+        SSF_ASSERT(SSFGObjSetLabel(c, "n"));
+        SSF_ASSERT(SSFGObjSetInt(c, -42));
+        SSF_ASSERT(SSFGObjInsertChild(g, c));
+
+        c = NULL;
+        SSF_ASSERT(SSFGObjInit(&c, 0u));
+        SSF_ASSERT(SSFGObjSetLabel(c, "b"));
+        SSF_ASSERT(SSFGObjSetBool(c, true));
+        SSF_ASSERT(SSFGObjInsertChild(g, c));
+
+        c = NULL;
+        SSF_ASSERT(SSFGObjInit(&c, 0u));
+        SSF_ASSERT(SSFGObjSetLabel(c, "z"));
+        SSF_ASSERT(SSFGObjSetNull(c));
+        SSF_ASSERT(SSFGObjInsertChild(g, c));
+
+        SSF_ASSERT(SSFJsonGObjPrint(g, _jsOut, sizeof(_jsOut), &len));
+        SSF_ASSERT(strcmp(_jsOut, "{\"n\":-42,\"b\":true,\"z\":null}") == 0);
+        SSFGObjDeInit(&g);
+        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+    }
+
+    /* Array with mixed types */
+    {
+        SSFGObj_t *g = NULL;
+        SSFGObj_t *c = NULL;
+        size_t len;
+
+        SSF_ASSERT(SSFGObjInit(&g, 8u));
+        SSF_ASSERT(SSFGObjSetArray(g));
+
+        SSF_ASSERT(SSFGObjInit(&c, 0u));
+        SSF_ASSERT(SSFGObjSetString(c, "hello"));
+        SSF_ASSERT(SSFGObjInsertChild(g, c));
+
+        c = NULL;
+        SSF_ASSERT(SSFGObjInit(&c, 0u));
+        SSF_ASSERT(SSFGObjSetInt(c, 123));
+        SSF_ASSERT(SSFGObjInsertChild(g, c));
+
+        c = NULL;
+        SSF_ASSERT(SSFGObjInit(&c, 0u));
+        SSF_ASSERT(SSFGObjSetBool(c, false));
+        SSF_ASSERT(SSFGObjInsertChild(g, c));
+
+        SSF_ASSERT(SSFJsonGObjPrint(g, _jsOut, sizeof(_jsOut), &len));
+        SSF_ASSERT(strcmp(_jsOut, "[\"hello\",123,false]") == 0);
+        SSFGObjDeInit(&g);
+        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+    }
+
+    /* Nested object */
+    {
+        SSFGObj_t *g = NULL;
+        SSFGObj_t *inner = NULL;
+        SSFGObj_t *c = NULL;
+        size_t len;
+
+        SSF_ASSERT(SSFGObjInit(&g, 8u));
+        SSF_ASSERT(SSFGObjSetObject(g));
+
+        SSF_ASSERT(SSFGObjInit(&inner, 8u));
+        SSF_ASSERT(SSFGObjSetLabel(inner, "outer"));
+        SSF_ASSERT(SSFGObjSetObject(inner));
+
+        SSF_ASSERT(SSFGObjInit(&c, 0u));
+        SSF_ASSERT(SSFGObjSetLabel(c, "inner"));
+        SSF_ASSERT(SSFGObjSetString(c, "deep"));
+        SSF_ASSERT(SSFGObjInsertChild(inner, c));
+
+        SSF_ASSERT(SSFGObjInsertChild(g, inner));
+
+        SSF_ASSERT(SSFJsonGObjPrint(g, _jsOut, sizeof(_jsOut), &len));
+        SSF_ASSERT(strcmp(_jsOut, "{\"outer\":{\"inner\":\"deep\"}}") == 0);
+        SSFGObjDeInit(&g);
+        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+    }
+
+    /* Buffer too small */
+    {
+        SSFGObj_t *g = NULL;
+        size_t len;
+
+        SSF_ASSERT(SSFGObjInit(&g, 8u));
+        SSF_ASSERT(SSFGObjSetObject(g));
+
+        /* "{}" needs 3 bytes (including null) */
+        SSF_ASSERT(SSFJsonGObjPrint(g, _jsOut, 2, &len) == false);
+        SSF_ASSERT(SSFJsonGObjPrint(g, _jsOut, 3, &len));
+
+        SSFGObjDeInit(&g);
+        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+    }
+
+    /* Round-trip: JSON -> gobj -> JSON */
+    {
+        SSFGObj_t *g = NULL;
+        size_t len;
+        const char *src = "{\"a\":1,\"b\":\"hello\",\"c\":true,\"d\":null}";
+
+        SSF_ASSERT(SSFJsonGObjCreate(src, &g, 8));
+        SSF_ASSERT(SSFJsonGObjPrint(g, _jsOut, sizeof(_jsOut), &len));
+        SSF_ASSERT(strcmp(_jsOut, src) == 0);
+        SSFGObjDeInit(&g);
+        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+    }
+#endif /* SSF_JSON_GOBJ_ENABLE */
 }
 #endif /* SSF_CONFIG_JSON_UNIT_TEST */
 

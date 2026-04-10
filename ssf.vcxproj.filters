@@ -165,6 +165,12 @@
     <ClCompile Include="_debug\ssftrace_ut.c">
       <Filter>_debug</Filter>
     </ClCompile>
+    <ClCompile Include="_ui\ssfargv.c">
+      <Filter>_ui</Filter>
+    </ClCompile>
+    <ClCompile Include="_ui\ssfargv_ut.c">
+      <Filter>_ui</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="ssf.h" />
@@ -254,6 +260,9 @@
     <ClInclude Include="_debug\ssftrace.h">
       <Filter>_debug</Filter>
     </ClInclude>
+    <ClInclude Include="_ui\ssfargv.h">
+      <Filter>_ui</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="_codec">
@@ -282,6 +291,9 @@
     </Filter>
     <Filter Include="_debug">
       <UniqueIdentifier>{77975937-0f9d-4b67-87fd-27085952a115}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="_ui">
+      <UniqueIdentifier>{bad8e4f2-1cf7-4fd6-bdc6-f5cc436dc44f}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>

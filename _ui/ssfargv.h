@@ -41,21 +41,21 @@ extern "C" {
 #include "ssfport.h"
 #include "ssf.h"
 #include "ssfgobj.h"
+#include "ssfstr.h"
 
 /* --------------------------------------------------------------------------------------------- */
 /* Defines                                                                                       */
 /* --------------------------------------------------------------------------------------------- */
+#define SSF_ARGV_CMD_STR (SSFCStrIn_t)"cmd"
+#define SSF_ARGV_OPTS_STR (SSFCStrIn_t)"opts"
+#define SSF_ARGV_ARGS_STR (SSFCStrIn_t)"args"
 
 /* --------------------------------------------------------------------------------------------- */
 /* External interface                                                                            */
 /* --------------------------------------------------------------------------------------------- */
-#if 0
-<cmd> <option>... <argument>...
-cmd [A-Za-z0-9]+
-option -[A-Za-z0-9]+ <argument>
-argument [ASCII PRINTABLE, -SPACE]+ | "[ASCII PRINTABLE, ESCAPES \" \xhh]"
-#endif
-void SSFArgvCmdLineToGObj(SSFCStrIn_t cmdLineStr, SSFGObj_t **gobj);
+bool SSFArgvInit(SSFCStrIn_t cmdLineStr, size_t cmdLineSize, SSFGObj_t **gobj, uint8_t maxOpts,
+                 uint8_t maxArgs);
+void SSFArgvDeInit(SSFGObj_t **gobj);
 
 /* --------------------------------------------------------------------------------------------- */
 /* Unit test                                                                                     */

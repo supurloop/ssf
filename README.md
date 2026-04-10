@@ -250,6 +250,18 @@ Time management interfaces covering raw tick time, calendar conversion, and ISO 
 | [Date/Time](_time/ssfdtime.md) | Unix time to calendar date/time struct conversion | ~1.8 KB | — | ~96 B | — | Yes |
 | [ISO 8601](_time/ssfiso8601.md) | ISO 8601 date/time string formatting and parsing with timezone support | ~1.8 KB | — | ~120 B | — | Yes |
 
+#### [User Interface](_ui/README.md)
+
+User-facing input parsing and presentation interfaces.
+
+| Module | Description | Flash | Static RAM | Peak Stack | Heap | Reentrant |
+|--------|-------------|-------|------------|------------|------|-----------|
+| [Argv Parser](_ui/ssfargv.md) | BETA: Command line string to gobj parser with `-opt val`, `--opt`, and backslash-escaped argument support | ~2 KB | — | ~120 B²¹ | yes²² | Yes |
+
+²¹ Excludes the recursive cost of `SSFGObjFindPath` if used by the caller to walk the result tree.
+
+²² Each `SSFArgvInit` call allocates one mutable copy of the input command line via `SSF_MALLOC` (freed before return) plus per-node `SSFGObj_t` allocations (~48 B per cmd / opts / args / per-opt / per-arg) via `ssfgobj`. The full result tree is freed by `SSFArgvDeInit`.
+
 ⁸ RTC static RAM holds two initialization flags and two 64-bit tick reference values.
 
 ¹⁵ Each `SSFGObjInit` call allocates one `SSFGObj_t` node struct (~48 B) via system `malloc`. `SSFGObjSetLabel` and `SSFGObjSet*` add further per-field allocations for labels and value data.

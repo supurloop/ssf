@@ -60,6 +60,7 @@
 #include "ssfheap.h"
 #include "ssfgobj.h"
 #include "ssftrace.h"
+#include "ssfargv.h"
 
 typedef struct
 {
@@ -70,6 +71,11 @@ typedef struct
 
 SSFUnitTest_t unitTests[] =
 {
+    /* _ui */
+#if SSF_CONFIG_ARGV_UNIT_TEST == 1
+    { "ssfargv", "Command Line Argv Parser", SSFArgvUnitTest },
+#endif /* SSF_CONFIG_ARGV_UNIT_TEST */
+
     /* _debug */
 #if SSF_CONFIG_TRACE_UNIT_TEST == 1
     { "ssftrace", "Debug Trace", SSFTraceUnitTest },
@@ -168,6 +174,7 @@ SSFUnitTest_t unitTests[] =
 #if SSF_CONFIG_RTC_UNIT_TEST == 1
     { "ssfrtc", "RTC", SSFRTCUnitTest },
 #endif /* SSF_CONFIG_RTC_UNIT_TEST */
+
 };
 
 /* --------------------------------------------------------------------------------------------- */

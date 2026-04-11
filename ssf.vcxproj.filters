@@ -171,6 +171,12 @@
     <ClCompile Include="_ui\ssfargv_ut.c">
       <Filter>_ui</Filter>
     </ClCompile>
+    <ClCompile Include="_ui\ssfvted.c">
+      <Filter>_ui</Filter>
+    </ClCompile>
+    <ClCompile Include="_ui\ssfvted_ut.c">
+      <Filter>_ui</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="ssf.h" />
@@ -261,6 +267,9 @@
       <Filter>_debug</Filter>
     </ClInclude>
     <ClInclude Include="_ui\ssfargv.h">
+      <Filter>_ui</Filter>
+    </ClInclude>
+    <ClInclude Include="_ui\ssfvted.h">
       <Filter>_ui</Filter>
     </ClInclude>
   </ItemGroup>

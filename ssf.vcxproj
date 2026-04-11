@@ -205,6 +205,8 @@
     <ClCompile Include="_time\ssfrtc_ut.c" />
     <ClCompile Include="_ui\ssfargv.c" />
     <ClCompile Include="_ui\ssfargv_ut.c" />
+    <ClCompile Include="_ui\ssfvted.c" />
+    <ClCompile Include="_ui\ssfvted_ut.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="resource.h" />
@@ -241,6 +243,7 @@
     <ClInclude Include="_time\ssfiso8601.h" />
     <ClInclude Include="_time\ssfrtc.h" />
     <ClInclude Include="_ui\ssfargv.h" />
+    <ClInclude Include="_ui\ssfvted.h" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="ssf.rc" />

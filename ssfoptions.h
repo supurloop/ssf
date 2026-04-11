@@ -433,6 +433,13 @@ typedef enum
 /* Define the maximum parse depth, each nexted object or array starts a new depth level. */
 #define SSF_GOBJ_CONFIG_MAX_IN_DEPTH (4u)
 
+/* --------------------------------------------------------------------------------------------- */
+/* Configure ssfvted's interface                                                                 */
+/* --------------------------------------------------------------------------------------------- */
+/* Define the prompt for the VT100 line editor. Leading "\r\n" guarantees the prompt starts on  */
+/* a fresh line. Length is computed at compile time via sizeof - 1.                             */
+#define SSF_VTED_PROMPT_STR "\r\n# "
+
 #ifdef __cplusplus
 }
 #endif

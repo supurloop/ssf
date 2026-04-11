@@ -257,10 +257,15 @@ User-facing input parsing and presentation interfaces.
 | Module | Description | Flash | Static RAM | Peak Stack | Heap | Reentrant |
 |--------|-------------|-------|------------|------------|------|-----------|
 | [Argv Parser](_ui/ssfargv.md) | BETA: Command line string to gobj parser with `-opt val`, `--opt`, and backslash-escaped argument support | ~2 KB | — | ~120 B²¹ | yes²² | Yes |
+| [VT100 Line Editor](_ui/ssfvted.md) | BETA: ANSI/VT100 terminal line editor with cursor movement, character insert/delete, backspace, and configurable prompt | ~1.5 KB | — | ~80 B²³ | — | Yes²⁴ |
 
 ²¹ Excludes the recursive cost of `SSFGObjFindPath` if used by the caller to walk the result tree.
 
 ²² Each `SSFArgvInit` call allocates one mutable copy of the input command line via `SSF_MALLOC` (freed before return) plus per-node `SSFGObj_t` allocations (~48 B per cmd / opts / args / per-opt / per-arg) via `ssfgobj`. The full result tree is freed by `SSFArgvDeInit`.
+
+²³ Peak stack is dominated by `strlen` calls after buffer mutations; bounded by `lineSize`. The escape-decoder state machine itself uses only a handful of bytes on the stack.
+
+²⁴ Each `SSFVTEdContext_t` is fully self-contained and holds no shared state. Multiple independent contexts can be driven concurrently from separate threads; a single context must be accessed from only one thread at a time.
 
 ⁸ RTC static RAM holds two initialization flags and two 64-bit tick reference values.
 

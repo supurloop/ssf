@@ -62,6 +62,7 @@
 #include "ssftrace.h"
 #include "ssfargv.h"
 #include "ssfvted.h"
+#include "ssfcli.h"
 
 typedef struct
 {
@@ -76,6 +77,9 @@ SSFUnitTest_t unitTests[] =
 #if SSF_CONFIG_ARGV_UNIT_TEST == 1
     { "ssfargv", "Command Line Argv Parser", SSFArgvUnitTest },
 #endif /* SSF_CONFIG_ARGV_UNIT_TEST */
+#if SSF_CONFIG_CLI_UNIT_TEST == 1
+    { "ssfcli", "CLI Framework", SSFCLIUnitTest },
+#endif /* SSF_CONFIG_CLI_UNIT_TEST */
 #if SSF_CONFIG_VTED_UNIT_TEST == 1
     { "ssfvted", "VT100 Terminal Line Editor", SSFVTEdUnitTest },
 #endif /* SSF_CONFIG_VTED_UNIT_TEST */

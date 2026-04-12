@@ -436,9 +436,34 @@ typedef enum
 /* --------------------------------------------------------------------------------------------- */
 /* Configure ssfvted's interface                                                                 */
 /* --------------------------------------------------------------------------------------------- */
+/* Define the line ending style */
+#define SSF_VTED_LINE_ENDING "\r\n"
+#define SSF_VTED_LINE_ENDING_SIZE (sizeof(SSF_VTED_LINE_ENDING_SIZE) - 1)
+
 /* Define the prompt for the VT100 line editor. Leading "\r\n" guarantees the prompt starts on  */
 /* a fresh line. Length is computed at compile time via sizeof - 1.                             */
-#define SSF_VTED_PROMPT_STR "\r\n# "
+#define SSF_VTED_PROMPT_BASE_STR "# "
+#define SSF_VTED_PROMPT_BASE_STR_SIZE (sizeof(SSF_VTED_PROMPT_BASE_STR) - 1)
+#define SSF_VTED_PROMPT_STR SSF_VTED_LINE_ENDING SSF_VTED_PROMPT_BASE_STR
+#define SSF_VTED_PROMPT_STR_SIZE (sizeof(SSF_VTED_PROMPT_STR) - 1)
+
+/* --------------------------------------------------------------------------------------------- */
+/* Configure ssfcli's interface                                                                  */
+/* --------------------------------------------------------------------------------------------- */
+/* Maximum number of option fields supplied to a single CLI command */
+#define SSF_CLI_MAX_OPTS (5u)
+
+/* Maximum number of argument fields supplied to a single CLI command */
+#define SSF_CLI_MAX_ARGS (5u)
+
+/* Maximum size of CLI's command line string, including NULL terminator */
+#define SSF_CLI_MAX_CMD_LINE_SIZE (80u)
+
+/* Maximum number of cmds that can be registered in the CLI */
+#define SSF_CLI_MAX_CMDS (10u)
+
+    /* Maximum number of cmds that can be registered in the CLI */
+#define SSF_CLI_MAX_CMD_HIST (6u)
 
 #ifdef __cplusplus
 }

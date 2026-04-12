@@ -94,6 +94,7 @@ extern "C" {
 
 /* _ui */
 #define SSF_CONFIG_ARGV_UNIT_TEST    (1u)
+#define SSF_CONFIG_CLI_UNIT_TEST     (1u)
 #define SSF_CONFIG_VTED_UNIT_TEST    (1u)
 
 /* If any unit test is enabled then enable unit test mode */
@@ -135,6 +136,7 @@ extern "C" {
     SSF_CONFIG_RTC_UNIT_TEST == 1 || \
     /* _ui */ \
     SSF_CONFIG_ARGV_UNIT_TEST == 1 || \
+    SSF_CONFIG_CLI_UNIT_TEST == 1 || \
     SSF_CONFIG_VTED_UNIT_TEST == 1
 #define SSF_CONFIG_UNIT_TEST (1u)
 #else

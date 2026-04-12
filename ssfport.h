@@ -92,6 +92,11 @@ extern "C" {
 #define SSF_CONFIG_ISO8601_UNIT_TEST (1u)
 #define SSF_CONFIG_RTC_UNIT_TEST     (1u)
 
+/* _ui */
+#define SSF_CONFIG_ARGV_UNIT_TEST    (1u)
+#define SSF_CONFIG_CLI_UNIT_TEST     (1u)
+#define SSF_CONFIG_VTED_UNIT_TEST    (1u)
+
 /* If any unit test is enabled then enable unit test mode */
 #if /* _codec */ \
     SSF_CONFIG_BASE64_UNIT_TEST == 1 || \
@@ -128,7 +133,11 @@ extern "C" {
     /* _time */ \
     SSF_CONFIG_DTIME_UNIT_TEST == 1 || \
     SSF_CONFIG_ISO8601_UNIT_TEST == 1 || \
-    SSF_CONFIG_RTC_UNIT_TEST == 1
+    SSF_CONFIG_RTC_UNIT_TEST == 1 || \
+    /* _ui */ \
+    SSF_CONFIG_ARGV_UNIT_TEST == 1 || \
+    SSF_CONFIG_CLI_UNIT_TEST == 1 || \
+    SSF_CONFIG_VTED_UNIT_TEST == 1
 #define SSF_CONFIG_UNIT_TEST (1u)
 #else
 #define SSF_CONFIG_UNIT_TEST (0u)

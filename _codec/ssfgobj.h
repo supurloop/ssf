@@ -109,6 +109,8 @@ bool SSFGObjGetBin(SSFGObj_t *gobj, uint8_t *valueOut, size_t valueSize, size_t 
 bool SSFGObjSetNull(SSFGObj_t *gobj);
 bool SSFGObjSetObject(SSFGObj_t *gobj);
 bool SSFGObjSetArray(SSFGObj_t *gobj);
+bool SSFGObjGetObjectLen(SSFGObj_t *gobj, uint32_t *numChildren);
+bool SSFGObjGetArrayLen(SSFGObj_t *gobj, uint32_t *numChildren);
 
 /* Object children accessors */
 bool SSFGObjInsertChild(SSFGObj_t *gobjParent, SSFGObj_t *gobjChild);

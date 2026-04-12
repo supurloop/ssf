@@ -269,13 +269,13 @@ void SSFCLIProcessChar(SSFCLIContext_t *context, uint8_t inChar)
                 /* Yes, get command, opts, and args objs */
                 memset(path, 0, sizeof(path));
                 path[0] = SSF_ARGV_CMD_CSTR;
-                SSF_ASSERT(SSFGObjFindPath(gobj, path, &gobjParent, &gobjCmd));
+                SSF_ASSERT(SSFGObjFindPath(gobj, (SSFCStrIn_t *)path, &gobjParent, &gobjCmd));
                 gobjParent = NULL;
                 path[0] = SSF_ARGV_OPTS_CSTR;
-                SSF_ASSERT(SSFGObjFindPath(gobj, path, &gobjParent, &gobjOpts));
+                SSF_ASSERT(SSFGObjFindPath(gobj, (SSFCStrIn_t *)path, &gobjParent, &gobjOpts));
                 gobjParent = NULL;
                 path[0] = SSF_ARGV_ARGS_CSTR;
-                SSF_ASSERT(SSFGObjFindPath(gobj, path, &gobjParent, &gobjArgs));
+                SSF_ASSERT(SSFGObjFindPath(gobj, (SSFCStrIn_t *)path, &gobjParent, &gobjArgs));
 
                 /* Search command list for exactly matching command */
                 item = SSF_LL_HEAD(&context->cmds);
@@ -431,7 +431,7 @@ bool SSFCLIGObjGetOptArgStrRef(SSFCStrOut_t optStr, SSFGObj_t *gobjOpts, SSFCStr
 
     memset(path, 0, sizeof(path));
     path[0] = optStr;
-    if (SSFGObjFindPath(gobjOpts, path, &gobjParent, &gobjArg) == false) return false;
+    if (SSFGObjFindPath(gobjOpts, (SSFCStrIn_t *)path, &gobjParent, &gobjArg) == false) return false;
 
     SSF_ASSERT(gobjArg->dataType == SSF_OBJ_TYPE_STR);
     SSF_ASSERT(gobjArg->data != NULL);
@@ -455,7 +455,7 @@ bool SSFCLIGObjGetIsOpt(SSFCStrOut_t optStr, SSFGObj_t *gobjOpts)
 
     memset(path, 0, sizeof(path));
     path[0] = optStr;
-    if (SSFGObjFindPath(gobjOpts, path, &gobjParent, &gobjArg) == false) return false;
+    if (SSFGObjFindPath(gobjOpts, (SSFCStrIn_t *)path, &gobjParent, &gobjArg) == false) return false;
 
     SSF_ASSERT(gobjArg->dataType == SSF_OBJ_TYPE_STR);
     SSF_ASSERT(gobjArg->data != NULL);
@@ -480,7 +480,7 @@ bool SSFCLIGObjGetArgStrRef(size_t argIndex, SSFGObj_t *gobjArgs, SSFCStrOut_t *
 
     memset(path, 0, sizeof(path));
     path[0] = (char *)&argIndex;
-    if (SSFGObjFindPath(gobjArgs, path, &gobjParent, &gobjArg) == false) return false;
+    if (SSFGObjFindPath(gobjArgs, (SSFCStrIn_t *)path, &gobjParent, &gobjArg) == false) return false;
 
     SSF_ASSERT(gobjArg->dataType == SSF_OBJ_TYPE_STR);
     SSF_ASSERT(gobjArg->data != NULL);

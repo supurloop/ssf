@@ -51,6 +51,7 @@
 #define SSF_VTED_UT_IN_ESC_LEFT  ('D')
 #define SSF_VTED_UT_IN_BS_ALT    ('\x7f')
 #define SSF_VTED_UT_IN_CR        ('\r')
+#define SSF_VTED_UT_IN_CTRLC     ('\x03')
 
 /* Capture buffer for the writeStdoutFn callback. */
 static uint8_t _ssfVTEdUTOut[SSF_VTED_UT_OUT_BUF_SIZE];
@@ -59,7 +60,7 @@ static size_t _ssfVTEdUTOutLen;
 /* --------------------------------------------------------------------------------------------- */
 /* Captures bytes that ssfvted would write to the terminal.                                      */
 /* --------------------------------------------------------------------------------------------- */
-static void _SSFVTEdUTWriteStdout(const uint8_t *data, uint16_t dataLen)
+static void _SSFVTEdUTWriteStdout(const uint8_t *data, size_t dataLen)
 {
     SSF_REQUIRE(data != NULL);
     SSF_ASSERT((_ssfVTEdUTOutLen + dataLen) <= sizeof(_ssfVTEdUTOut));
@@ -195,6 +196,33 @@ void SSFVTEdUnitTest(void)
     /* Test that SSFVTEdDeInit() clears the magic field */
     SSFVTEdDeInit(&ctx);
     SSF_ASSERT(ctx.magic == 0);
+
+    /* Test SSFVTEdIsInited() parameter validation */
+    SSF_ASSERT_TEST(SSFVTEdIsInited(NULL));
+
+    /* Test that SSFVTEdIsInited() reports false on a zeroed context */
+    memset(&ctx, 0, sizeof(ctx));
+    SSF_ASSERT(SSFVTEdIsInited(&ctx) == false);
+
+    /* Test that SSFVTEdIsInited() reports true after SSFVTEdInit() */
+    SSFVTEdInit(&ctx, lineBuf, sizeof(lineBuf), _SSFVTEdUTWriteStdout);
+    SSF_ASSERT(SSFVTEdIsInited(&ctx));
+
+    /* Test that SSFVTEdIsInited() still reports true after SSFVTEdReset() */
+    SSFVTEdReset(&ctx);
+    SSF_ASSERT(SSFVTEdIsInited(&ctx));
+
+    /* Test that SSFVTEdIsInited() reports false after SSFVTEdDeInit() */
+    SSFVTEdDeInit(&ctx);
+    SSF_ASSERT(SSFVTEdIsInited(&ctx) == false);
+
+    /* Test that SSFVTEdIsInited() does not mutate the context */
+    memset(&ctxBad, 0, sizeof(ctxBad));
+    SSF_ASSERT(SSFVTEdIsInited(&ctxBad) == false);
+    for (i = 0; i < sizeof(ctxBad); i++)
+    {
+        SSF_ASSERT(((uint8_t *)&ctxBad)[i] == 0);
+    }
 
     /* Test SSFVTEdReset() parameter validation */
     SSF_ASSERT_TEST(SSFVTEdReset(NULL));
@@ -544,6 +572,81 @@ void SSFVTEdUnitTest(void)
     SSF_ASSERT(ctx.cursor == 5);
     SSF_ASSERT(ctx.lineLen == 5);
     SSF_ASSERT(_ssfVTEdUTOutLen == 0);
+    SSFVTEdDeInit(&ctx);
+
+    /* Test that Ctrl-C on an empty line returns the ctrl-c escape code */
+    SSFVTEdInit(&ctx, lineBuf, sizeof(lineBuf), _SSFVTEdUTWriteStdout);
+    escOut = SSF_VTED_ESC_CODE_MIN;
+    _SSFVTEdUTOutReset();
+    SSF_ASSERT(SSFVTEdProcessChar(&ctx, SSF_VTED_UT_IN_CTRLC, &escOut) == true);
+    SSF_ASSERT(escOut == SSF_VTED_ESC_CODE_CTRLC);
+    SSF_ASSERT(ctx.line[0] == 0);
+    SSF_ASSERT(ctx.cursor == 0);
+    SSF_ASSERT(ctx.lineLen == 0);
+    SSF_ASSERT(ctx.escState == SSF_VTED_ESC_STATE_IDLE);
+    SSF_ASSERT(_ssfVTEdUTOutLen == 0);
+    SSFVTEdDeInit(&ctx);
+
+    /* Test that Ctrl-C after typed chars returns the ctrl-c code without modifying the line */
+    SSFVTEdInit(&ctx, lineBuf, sizeof(lineBuf), _SSFVTEdUTWriteStdout);
+    _SSFVTEdUTSendStr(&ctx, "abc");
+    escOut = SSF_VTED_ESC_CODE_MIN;
+    _SSFVTEdUTOutReset();
+    SSF_ASSERT(SSFVTEdProcessChar(&ctx, SSF_VTED_UT_IN_CTRLC, &escOut) == true);
+    SSF_ASSERT(escOut == SSF_VTED_ESC_CODE_CTRLC);
+    SSF_ASSERT(strcmp(ctx.line, "abc") == 0);
+    SSF_ASSERT(ctx.cursor == 3);
+    SSF_ASSERT(ctx.lineLen == 3);
+    SSF_ASSERT(ctx.escState == SSF_VTED_ESC_STATE_IDLE);
+    SSF_ASSERT(_ssfVTEdUTOutLen == 0);
+    SSFVTEdDeInit(&ctx);
+
+    /* Test that Ctrl-C with cursor not at end of line still returns ctrl-c unchanged */
+    SSFVTEdInit(&ctx, lineBuf, sizeof(lineBuf), _SSFVTEdUTWriteStdout);
+    _SSFVTEdUTSendStr(&ctx, "abc");
+    _SSFVTEdUTSendEsc(&ctx, SSF_VTED_UT_IN_ESC_LEFT, &escOut);
+    _SSFVTEdUTSendEsc(&ctx, SSF_VTED_UT_IN_ESC_LEFT, &escOut);
+    SSF_ASSERT(ctx.cursor == 1);
+    SSF_ASSERT(ctx.lineLen == 3);
+    escOut = SSF_VTED_ESC_CODE_MIN;
+    _SSFVTEdUTOutReset();
+    SSF_ASSERT(SSFVTEdProcessChar(&ctx, SSF_VTED_UT_IN_CTRLC, &escOut) == true);
+    SSF_ASSERT(escOut == SSF_VTED_ESC_CODE_CTRLC);
+    SSF_ASSERT(strcmp(ctx.line, "abc") == 0);
+    SSF_ASSERT(ctx.cursor == 1);
+    SSF_ASSERT(ctx.lineLen == 3);
+    SSF_ASSERT(ctx.escState == SSF_VTED_ESC_STATE_IDLE);
+    SSF_ASSERT(_ssfVTEdUTOutLen == 0);
+    SSFVTEdDeInit(&ctx);
+
+    /* Test that Ctrl-C on a full line returns ctrl-c without modifying the line */
+    SSFVTEdInit(&ctx, lineBuf, sizeof(lineBuf), _SSFVTEdUTWriteStdout);
+    _SSFVTEdUTSendStr(&ctx, "1234567");
+    SSF_ASSERT(ctx.lineLen == (SSF_VTED_UT_LINE_SIZE - 1));
+    escOut = SSF_VTED_ESC_CODE_MIN;
+    _SSFVTEdUTOutReset();
+    SSF_ASSERT(SSFVTEdProcessChar(&ctx, SSF_VTED_UT_IN_CTRLC, &escOut) == true);
+    SSF_ASSERT(escOut == SSF_VTED_ESC_CODE_CTRLC);
+    SSF_ASSERT(strcmp(ctx.line, "1234567") == 0);
+    SSF_ASSERT(ctx.lineLen == (SSF_VTED_UT_LINE_SIZE - 1));
+    SSF_ASSERT(ctx.escState == SSF_VTED_ESC_STATE_IDLE);
+    SSF_ASSERT(_ssfVTEdUTOutLen == 0);
+    SSFVTEdDeInit(&ctx);
+
+    /* Test that Ctrl-C received mid-escape-sequence is consumed as a malformed byte:        */
+    /* the partial ESC sequence is abandoned (state back to IDLE), and no CTRLC code is      */
+    /* emitted since Ctrl-C is only recognized in the IDLE state.                            */
+    SSFVTEdInit(&ctx, lineBuf, sizeof(lineBuf), _SSFVTEdUTWriteStdout);
+    escOut = SSF_VTED_ESC_CODE_MIN;
+    _SSFVTEdUTOutReset();
+    SSF_ASSERT(SSFVTEdProcessChar(&ctx, SSF_VTED_UT_IN_ESC, &escOut) == false);
+    SSF_ASSERT(ctx.escState == SSF_VTED_ESC_STATE_ESC);
+    SSF_ASSERT(SSFVTEdProcessChar(&ctx, SSF_VTED_UT_IN_CTRLC, &escOut) == false);
+    SSF_ASSERT(ctx.escState == SSF_VTED_ESC_STATE_IDLE);
+    SSF_ASSERT(_ssfVTEdUTOutLen == 0);
+    /* A subsequent Ctrl-C from IDLE now correctly emits the code. */
+    SSF_ASSERT(SSFVTEdProcessChar(&ctx, SSF_VTED_UT_IN_CTRLC, &escOut) == true);
+    SSF_ASSERT(escOut == SSF_VTED_ESC_CODE_CTRLC);
     SSFVTEdDeInit(&ctx);
 
     /* Test that an unknown CSI final byte is consumed without output or escape return */

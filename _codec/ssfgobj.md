@@ -113,6 +113,8 @@ All options are set in `ssfoptions.h`.
 | [e.g.](#ex-setarray) | [`bool SSFGObjSetArray(gobj)`](#ssfgobjsetarray) | Set the node's type to ARRAY container |
 | [e.g.](#ex-insertchild) | [`bool SSFGObjInsertChild(gobjParent, gobjChild)`](#ssfgobjinsertchild) | Append a child node to a container |
 | [e.g.](#ex-removechild) | [`bool SSFGObjRemoveChild(gobjParent, gobjChild)`](#ssfgobjremovechild) | Remove a child node from a container |
+| [e.g.](#ex-getobjectlen) | [`bool SSFGObjGetObjectLen(gobj, numChildrenOut)`](#ssfgobjgetobjectlen) | Return the number of children of an OBJECT node |
+| [e.g.](#ex-getarraylen) | [`bool SSFGObjGetArrayLen(gobj, numChildrenOut)`](#ssfgobjgetarraylen) | Return the number of elements of an ARRAY node |
 | [e.g.](#ex-findpath) | [`bool SSFGObjFindPath(gobjRoot, path, gobjParentOut, gobjChildOut)`](#ssfgobjfindpath) | Locate a descendant by label path |
 | [e.g.](#ex-iterate) | [`bool SSFGObjIterate(gobj, iterateCallback)`](#ssfgobjiterate) | Depth-first traversal of a subtree |
 
@@ -940,6 +942,94 @@ if (SSFGObjRemoveChild(parent, child))
     SSFGObjDeInit(&child);
 }
 SSFGObjDeInit(&parent);
+```
+
+---
+
+<a id="ssfgobjgetobjectlen"></a>
+
+### [↑](#ssfgobj--generic-object-beta) [`bool SSFGObjGetObjectLen()`](#functions)
+
+```c
+bool SSFGObjGetObjectLen(SSFGObj_t *gobj, uint32_t *numChildren);
+```
+
+Returns the number of children currently attached to an OBJECT node. The call fails if `gobj`
+is not of type `SSF_OBJ_TYPE_OBJECT`; in particular, an ARRAY node is rejected. A zero-capacity
+OBJECT (one initialized with `maxChildren = 0` and then set to OBJECT) is valid and reports
+`0`.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `gobj` | in | [`SSFGObj_t *`](#type-ssfgobj-t) | Pointer to the node whose child count is requested. Must not be `NULL`. |
+| `numChildren` | out | `uint32_t *` | Receives the number of children on success. Left unchanged on failure. Must not be `NULL`. |
+
+**Returns:** `true` if `gobj` is an OBJECT and `*numChildren` has been written with the child
+count; `false` if `gobj` is any other type. On failure `*numChildren` is left unchanged.
+
+<a id="ex-getobjectlen"></a>
+
+```c
+SSFGObj_t *obj = NULL;
+SSFGObj_t *child = NULL;
+uint32_t n = 0;
+
+SSFGObjInit(&obj, 2u);
+SSFGObjSetObject(obj);
+
+SSFGObjInit(&child, 0u);
+SSFGObjSetLabel(child, "count");
+SSFGObjSetInt(child, 42);
+SSFGObjInsertChild(obj, child);
+
+if (SSFGObjGetObjectLen(obj, &n))
+{
+    /* n == 1 */
+}
+SSFGObjDeInit(&obj);
+```
+
+---
+
+<a id="ssfgobjgetarraylen"></a>
+
+### [↑](#ssfgobj--generic-object-beta) [`bool SSFGObjGetArrayLen()`](#functions)
+
+```c
+bool SSFGObjGetArrayLen(SSFGObj_t *gobj, uint32_t *numChildren);
+```
+
+Returns the number of elements currently attached to an ARRAY node. The call fails if `gobj`
+is not of type `SSF_OBJ_TYPE_ARRAY`; in particular, an OBJECT node is rejected. A zero-capacity
+ARRAY (one initialized with `maxChildren = 0` and then set to ARRAY) is valid and reports `0`.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `gobj` | in | [`SSFGObj_t *`](#type-ssfgobj-t) | Pointer to the node whose element count is requested. Must not be `NULL`. |
+| `numChildren` | out | `uint32_t *` | Receives the number of elements on success. Left unchanged on failure. Must not be `NULL`. |
+
+**Returns:** `true` if `gobj` is an ARRAY and `*numChildren` has been written with the element
+count; `false` if `gobj` is any other type. On failure `*numChildren` is left unchanged.
+
+<a id="ex-getarraylen"></a>
+
+```c
+SSFGObj_t *arr = NULL;
+SSFGObj_t *elem = NULL;
+uint32_t n = 0;
+
+SSFGObjInit(&arr, 2u);
+SSFGObjSetArray(arr);
+
+SSFGObjInit(&elem, 0u);
+SSFGObjSetInt(elem, 10);
+SSFGObjInsertChild(arr, elem);
+
+if (SSFGObjGetArrayLen(arr, &n))
+{
+    /* n == 1 */
+}
+SSFGObjDeInit(&arr);
 ```
 
 ---

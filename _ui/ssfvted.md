@@ -54,6 +54,7 @@ calls until a full sequence is identified or abandoned.
 | Backspace (traditional) | `\b` (`0x08`) | Deletes the char before the cursor |
 | Backspace (modern terminals) | `\x7F` (DEL char) | Same as `\b` |
 | Enter / Return | `\r` (`0x0D`) | Returns `SSF_VTED_ESC_CODE_ENTER` to the caller |
+| Ctrl-C | `\x03` (ETX) | Returns `SSF_VTED_ESC_CODE_CTRLC` to the caller; line buffer, cursor, and length are left unchanged |
 | Printable | `0x20` – `0x7E` (`isprint`) | Inserted at the cursor position |
 
 Any other byte in the `IDLE` state is silently ignored. Any byte that breaks a partial
@@ -91,6 +92,7 @@ The input decoder is a small state machine with five states tracked in
 IDLE          ── printable ──────▶ Insert at cursor            (stay IDLE)
 IDLE          ── \b / \x7F ──────▶ Delete char before cursor   (stay IDLE)
 IDLE          ── \r ─────────────▶ Return ENTER                (stay IDLE)
+IDLE          ── \x03 ───────────▶ Return CTRLC                (stay IDLE)
 IDLE          ── \x1b ───────────▶ ESC
 IDLE          ── other ──────────▶ ignore                      (stay IDLE)
 
@@ -204,6 +206,7 @@ And in [`ssfport.h`](../ssfport.h):
 | `SSF_VTED_ESC_CODE_UP` | Enum value | [`SSFVTEdEscCode_t`](#type-esccode) — Arrow Up was pressed |
 | `SSF_VTED_ESC_CODE_DOWN` | Enum value | [`SSFVTEdEscCode_t`](#type-esccode) — Arrow Down was pressed |
 | `SSF_VTED_ESC_CODE_ENTER` | Enum value | [`SSFVTEdEscCode_t`](#type-esccode) — Enter (`\r`) was pressed; the line in `context->line` is ready to be consumed |
+| `SSF_VTED_ESC_CODE_CTRLC` | Enum value | [`SSFVTEdEscCode_t`](#type-esccode) — Ctrl-C (`\x03`) was pressed; the caller should typically cancel the current input and call [`SSFVTEdReset()`](#ssfvtedreset) |
 | <a id="type-escstate"></a>`SSFVTEdEscState_t` | Enum | Internal state of the VT100 input decoder; stored in `context->escState` |
 | `SSF_VTED_ESC_STATE_IDLE` | Enum value | [`SSFVTEdEscState_t`](#type-escstate) — no escape sequence in progress |
 | `SSF_VTED_ESC_STATE_ESC` | Enum value | [`SSFVTEdEscState_t`](#type-escstate) — saw `ESC`, awaiting `[` or `O` |
@@ -223,6 +226,8 @@ And in [`ssfport.h`](../ssfport.h):
 | [e.g.](#ex-process) | [`bool SSFVTEdProcessChar(context, inChar, escOut)`](#ssfvtedprocesschar) | Process one input byte; may return a high-level event code |
 | [e.g.](#ex-reset) | [`void SSFVTEdReset(context)`](#ssfvtedreset) | Clear the line buffer and emit the prompt again |
 | [e.g.](#ex-deinit) | [`void SSFVTEdDeInit(context)`](#ssfvteddeinit) | Tear down a line editor context |
+| [e.g.](#ex-isinited) | [`bool SSFVTEdIsInited(context)`](#ssfvtedisinited) | Check whether a context has been initialized |
+| [e.g.](#ex-set) | [`void SSFVTEdSet(context, cmdStr, cmdStrSize)`](#ssfvtedset) | Replace the line buffer contents and update the terminal display |
 
 <a id="function-reference"></a>
 
@@ -283,10 +288,12 @@ function returns `true` and writes the event code to `*escOut`; otherwise it ret
 | `inChar` | in | `uint8_t` | One input byte. May be a printable character, a backspace (`\b` or `\x7F`), a carriage return (`\r`), an ESC (`\x1B`), or any byte that is part of a VT100 escape sequence. |
 | `escOut` | out | [`SSFVTEdEscCode_t *`](#type-esccode) | Receives the event code when the function returns `true`. Must not be `NULL`. Not touched when the function returns `false`. |
 
-**Returns:** `true` if `inChar` completed a high-level event (Arrow Up, Arrow Down, or
-Enter) and `*escOut` is valid; `false` otherwise. A `false` return includes printable
+**Returns:** `true` if `inChar` completed a high-level event (Arrow Up, Arrow Down, Enter,
+or Ctrl-C) and `*escOut` is valid; `false` otherwise. A `false` return includes printable
 insertion, backspace, delete, arrow-left/right, a partial escape sequence that hasn't
-completed yet, and silently-ignored bytes.
+completed yet, and silently-ignored bytes. Ctrl-C (`\x03`) is only recognized in the
+`IDLE` state; a `\x03` byte received while a partial escape sequence is being decoded
+abandons the partial sequence and is consumed without emitting `SSF_VTED_ESC_CODE_CTRLC`.
 
 <a id="ex-process"></a>
 
@@ -311,6 +318,10 @@ for (;;)
         case SSF_VTED_ESC_CODE_ENTER:
             /* ctx.line contains the completed line. Dispatch it, then rearm. */
             myExecuteCommand(ctx.line);
+            SSFVTEdReset(&ctx);
+            break;
+        case SSF_VTED_ESC_CODE_CTRLC:
+            /* Cancel the current input and redraw a fresh prompt. */
             SSFVTEdReset(&ctx);
             break;
         case SSF_VTED_ESC_CODE_UP:
@@ -386,4 +397,91 @@ a new [`SSFVTEdInit()`](#ssfvtedinit) call — the zeroed `magic` satisfies Init
 ```c
 SSFVTEdDeInit(&ctx);
 /* ctx is now fully zeroed and may be re-used with SSFVTEdInit(). */
+```
+
+---
+
+<a id="ssfvtedisinited"></a>
+
+### [↑](#ssfvted--vt100-terminal-line-editor) [`bool SSFVTEdIsInited()`](#functions)
+
+```c
+bool SSFVTEdIsInited(SSFVTEdContext_t *context);
+```
+
+Returns whether `context` currently holds a live editor state. A context is considered
+initialized between a successful [`SSFVTEdInit()`](#ssfvtedinit) call and the matching
+[`SSFVTEdDeInit()`](#ssfvteddeinit) call; [`SSFVTEdReset()`](#ssfvtedreset) does not clear the
+initialized state. Detection is based on the internal `magic` field, so a context that has
+been zero-initialized (but not yet passed to `SSFVTEdInit()`) reports `false`. The call has
+no side effects and does not modify the context.
+
+Because the check is magic-based, the caller is responsible for zeroing the
+`SSFVTEdContext_t` before the first `SSFVTEdInit()`. Un-zeroed stack or heap memory whose
+bytes happen to equal `SSF_VTED_MAGIC` would produce a false positive — the same constraint
+that `SSFVTEdInit()`'s `magic == 0` precondition enforces.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `context` | in | `SSFVTEdContext_t *` | Pointer to the context to test. Must not be `NULL`. Not modified by the call. |
+
+**Returns:** `true` if `context` has been initialized by [`SSFVTEdInit()`](#ssfvtedinit) and
+not yet torn down by [`SSFVTEdDeInit()`](#ssfvteddeinit); `false` otherwise.
+
+<a id="ex-isinited"></a>
+
+```c
+SSFVTEdContext_t ctx;
+char lineBuf[128];
+
+memset(&ctx, 0, sizeof(ctx));
+/* ctx is zeroed but not yet initialized */
+if (SSFVTEdIsInited(&ctx) == false)
+{
+    SSFVTEdInit(&ctx, lineBuf, sizeof(lineBuf), myWriteFn);
+}
+
+/* ... use ctx ... */
+
+if (SSFVTEdIsInited(&ctx))
+{
+    SSFVTEdDeInit(&ctx);
+}
+```
+
+---
+
+<a id="ssfvtedset"></a>
+
+### [↑](#ssfvted--vt100-terminal-line-editor) [`void SSFVTEdSet()`](#functions)
+
+```c
+void SSFVTEdSet(SSFVTEdContext_t *context, SSFCStrIn_t cmdStr, size_t cmdStrSize);
+```
+
+Replaces the contents of the line buffer with the first `cmdStrSize` bytes of `cmdStr`, zeros
+all remaining bytes through `lineSize - 1`, clears and redraws the terminal line (including
+the prompt), then positions the cursor at the end of the new content.
+
+`cmdStrSize` is the number of bytes to copy — typically `strlen(cmdStr)`. Including or
+excluding the null terminator is safe either way: the function unconditionally zeros all bytes
+from position `cmdStrSize` through `lineSize - 1` after the copy, so the buffer is always
+properly null-terminated and the `line[lineLen..lineSize-1] == 0` invariant is preserved
+regardless.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `context` | in-out | `SSFVTEdContext_t *` | Initialized editor context. Must not be `NULL`. `context->magic` must equal `SSF_VTED_MAGIC`. |
+| `cmdStr` | in | `const char *` | Source string to load into the line buffer. Must not be `NULL`. At least `cmdStrSize` bytes must be readable. |
+| `cmdStrSize` | in | `size_t` | Number of bytes to copy from `cmdStr`. Must be `<= context->lineSize`. Bytes beyond this position are zeroed. |
+
+<a id="ex-set"></a>
+
+```c
+/* Load a recalled history entry into the editor. */
+const char *hist = "beta";
+SSFVTEdSet(&ctx, hist, strlen(hist));
+/* ctx.line == "beta", ctx.lineLen == 4, ctx.cursor == 4.
+   Terminal shows the prompt followed by "beta" with cursor at end.
+   All bytes past position 4 are zeroed. */
 ```

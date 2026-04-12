@@ -421,6 +421,40 @@ bool SSFGObjSetArray(SSFGObj_t *gobj)
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Returns true numChildren value set, else false.                                               */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFGObjGetObjectLen(SSFGObj_t *gobj, uint32_t *numChildren)
+{
+    SSF_REQUIRE(gobj != NULL);
+    SSF_REQUIRE(numChildren != NULL);
+
+    if (gobj->dataType == SSF_OBJ_TYPE_OBJECT)
+    {
+        if (gobj->children.size == 0) { *numChildren = 0; }
+        else { *numChildren = SSFLLLen(&gobj->children); }
+        return true;
+    }
+    return false;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true numChildren value set, else false.                                               */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFGObjGetArrayLen(SSFGObj_t *gobj, uint32_t *numChildren)
+{
+    SSF_REQUIRE(gobj != NULL);
+    SSF_REQUIRE(numChildren != NULL);
+
+    if (gobj->dataType == SSF_OBJ_TYPE_ARRAY)
+    {
+        if (gobj->children.size == 0) { *numChildren = 0; }
+        else { *numChildren = SSFLLLen(&gobj->children); }
+        return true;
+    }
+    return false;
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Returns true if child is inserted into parent, else false.                                    */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFGObjInsertChild(SSFGObj_t *gobjParent, SSFGObj_t *gobjChild)

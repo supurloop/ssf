@@ -52,6 +52,7 @@ typedef enum
     SSF_VTED_ESC_CODE_UP,
     SSF_VTED_ESC_CODE_DOWN,
     SSF_VTED_ESC_CODE_ENTER,
+    SSF_VTED_ESC_CODE_CTRLC,
     SSF_VTED_ESC_CODE_MAX
 } SSFVTEdEscCode_t;
 
@@ -72,7 +73,7 @@ typedef enum
     SSF_VTED_ESC_STATE_SS3    /* Saw ESC O, awaiting final byte (xterm application cursor mode) */
 } SSFVTEdEscState_t;
 
-typedef void (*SSFVTEdWriteStdoutFn_t)(const uint8_t *data, uint16_t dataLen);
+typedef void (*SSFVTEdWriteStdoutFn_t)(const uint8_t *data, size_t dataLen);
 
 typedef struct
 {
@@ -91,8 +92,10 @@ typedef struct
 void SSFVTEdInit(SSFVTEdContext_t *context, SSFCStrOut_t lineBuf, size_t lineSize,
                  SSFVTEdWriteStdoutFn_t writeStdoutFn);
 void SSFVTEdDeInit(SSFVTEdContext_t *context);
+bool SSFVTEdIsInited(SSFVTEdContext_t *context);
 bool SSFVTEdProcessChar(SSFVTEdContext_t *context, uint8_t inChar, SSFVTEdEscCode_t *escOut);
 void SSFVTEdReset(SSFVTEdContext_t *context);
+void SSFVTEdSet(SSFVTEdContext_t *context, SSFCStrIn_t cmdStr, size_t cmdStrSize);
 
 /* --------------------------------------------------------------------------------------------- */
 /* Unit test                                                                                     */

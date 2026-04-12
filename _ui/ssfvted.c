@@ -54,6 +54,7 @@
 #define SSF_VTED_IN_BS      ('\b')      /* Traditional backspace (0x08) */
 #define SSF_VTED_IN_BS_ALT  ('\x7f')    /* Modern terminal backspace (DEL char 0x7F) */
 #define SSF_VTED_IN_CR      ('\r')
+#define SSF_VTED_IN_CTRLC   ('\x03')
 
 /* --------------------------------------------------------------------------------------------- */
 /* Module Data                                                                                   */
@@ -63,6 +64,7 @@ const uint8_t _ssfOutEscRight[] = { '\x1b', '[', 'C' };
 const uint8_t _ssfOutEscDel[] = { '\x1b', '[', 'P' };
 const uint8_t _ssfOutEscBs[] = { '\x1b', '[', 'P' };
 const uint8_t _ssfOutEscIns[] = { '\x1b', '[', '@' };
+const uint8_t _ssfOutEscClrLine[] = { '\x1b', '[', '2', 'K', '\r'}; /* Resets cursor too */
 
 /* --------------------------------------------------------------------------------------------- */
 /* Initializes a line editing context.                                                           */
@@ -92,6 +94,15 @@ void SSFVTEdDeInit(SSFVTEdContext_t *context)
     SSF_REQUIRE(context != NULL);
     SSF_REQUIRE(context->magic == SSF_VTED_MAGIC);
     memset(context, 0, sizeof(SSFVTEdContext_t));
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if context is inited, else false.                                                */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFVTEdIsInited(SSFVTEdContext_t *context)
+{
+    SSF_REQUIRE(context != NULL);
+    return (context->magic == SSF_VTED_MAGIC);
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -218,7 +229,6 @@ bool SSFVTEdProcessChar(SSFVTEdContext_t *context, uint8_t inChar, SSFVTEdEscCod
     SSF_REQUIRE(context != NULL);
     SSF_REQUIRE(context->magic == SSF_VTED_MAGIC);
     SSF_REQUIRE(escOut != NULL);
-
     switch (context->escState)
     {
     case SSF_VTED_ESC_STATE_IDLE:
@@ -236,6 +246,12 @@ bool SSFVTEdProcessChar(SSFVTEdContext_t *context, uint8_t inChar, SSFVTEdEscCod
         else if (inChar == SSF_VTED_IN_CR)
         {
             *escOut = SSF_VTED_ESC_CODE_ENTER;
+            retVal = true;
+        }
+        /* Ctrl-C? */
+        else if (inChar == SSF_VTED_IN_CTRLC)
+        {
+            *escOut = SSF_VTED_ESC_CODE_CTRLC;
             retVal = true;
         }
         /* Printable? */
@@ -373,7 +389,28 @@ void SSFVTEdReset(SSFVTEdContext_t *context)
     context->escState = SSF_VTED_ESC_STATE_IDLE;
 
     /* Display the prompt. */
-    context->writeStdoutFn((const uint8_t *)SSF_VTED_PROMPT_STR,
-                           (uint16_t)(sizeof(SSF_VTED_PROMPT_STR) - 1U));
+    context->writeStdoutFn((const uint8_t *)SSF_VTED_PROMPT_STR, SSF_VTED_PROMPT_STR_SIZE);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Sets the context's line buffer state and escape decoder state, and sync with terminal.        */
+/* --------------------------------------------------------------------------------------------- */
+void SSFVTEdSet(SSFVTEdContext_t *context, SSFCStrIn_t cmdStr, size_t cmdStrSize)
+{
+    SSF_REQUIRE(context != NULL);
+    SSF_REQUIRE(context->magic == SSF_VTED_MAGIC);
+    SSF_REQUIRE(cmdStr != NULL);
+    SSF_REQUIRE(cmdStrSize <= context->lineSize);
+
+    context->writeStdoutFn(_ssfOutEscClrLine, sizeof(_ssfOutEscClrLine));
+    context->writeStdoutFn((const uint8_t *)SSF_VTED_PROMPT_BASE_STR, SSF_VTED_PROMPT_BASE_STR_SIZE);
+
+    memcpy(context->line, cmdStr, cmdStrSize);
+    memset(&context->line[cmdStrSize], 0, context->lineSize - cmdStrSize);
+    context->lineLen = strlen(context->line);
+    context->cursor = context->lineLen;
+
+    /* Display the command. */
+    context->writeStdoutFn((const uint8_t *)context->line, context->lineLen);
 }
 

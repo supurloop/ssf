@@ -29,10 +29,10 @@
 /* NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED  */
 /* OF THE POSSIBILITY OF SUCH DAMAGE.                                                            */
 /*                                                                                               */
-/* <cmd> (--<opt> | -<opt> <arg> | <arg>)...                                                     */
+/* <cmd> (//<opt> | /<opt> <arg> | <arg>)...                                                     */
 /* cmd - [A-Za-z0-9]+                                                                            */
 /* opt - [A-Za-z0-9]+                                                                            */
-/* arg - (ASCII printable not including ' ' or '\' unless preceeded by '\')                      */
+/* arg - (ASCII printable, ' ', '\', and leading '/' escaped by '\')                             */
 /* --------------------------------------------------------------------------------------------- */
 #include <stdint.h>
 #include <stdbool.h>
@@ -62,7 +62,9 @@
 #define SSF_ARG_FIND_ARG(c) { \
     while (*(c) != 0) { \
         if (*(c) == '\\') { \
-            (c)++; if ((*(c) != ' ') && (*(c) != '\\')) goto SSFArgvInitError; else (c)++; \
+            (c)++; \
+            if ((*(c) != ' ') && (*(c) != '\\') && (*(c) != '/')) goto SSFArgvInitError; \
+            else (c)++; \
         } \
         else if ((*(c) != ' ') && (isprint((unsigned char)*(c)))) (c)++; \
         else if (*(c) == ' ') break; \
@@ -77,6 +79,7 @@
         if (retVal) goto SSFArgvInitExit; \
         goto SSFArgvInitError; \
     }
+#define SSF_ARGV_OPT_CHAR '/'
 
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if command line valid and parsed into gobj, else false.                          */
@@ -176,9 +179,9 @@ bool SSFArgvInit(SSFCStrIn_t cmdLineStr, size_t cmdLineSize, SSFGObj_t **gobj, u
         SSF_ARGV_IS_PARSE_DONE(cursor);
 
         /* Possible option? */
-        if (*cursor == '-')
+        if (*cursor == SSF_ARGV_OPT_CHAR)
         {
-            bool isOptWithNoArg = (*(cursor + 1) == '-');
+            bool isOptWithNoArg = (*(cursor + 1) == SSF_ARGV_OPT_CHAR);
 
             /* Missing argument option? */
             if (gobjOptStrTmp != NULL)  goto SSFArgvInitError;

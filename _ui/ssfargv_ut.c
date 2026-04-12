@@ -222,8 +222,8 @@ void SSFArgvUnitTest(void)
     _SSFArgvUTCheckArgs(gobj, args3, sizeof(args3) / sizeof(args3[0]));
     SSFArgvDeInit(&gobj);
 
-    /* Test parsing of cmd with single value-less opt (--opt form) */
-    SSF_ASSERT(SSFArgvInit("cmd --opt1", sizeof("cmd --opt1"), &gobj, SSF_ARGV_UT_MAX_OPTS,
+    /* Test parsing of cmd with single value-less opt (//opt form) */
+    SSF_ASSERT(SSFArgvInit("cmd //opt1", sizeof("cmd //opt1"), &gobj, SSF_ARGV_UT_MAX_OPTS,
                            SSF_ARGV_UT_MAX_ARGS));
     _SSFArgvUTCheckCmd(gobj, "cmd");
     _SSFArgvUTCheckNumOpts(gobj, 1);
@@ -231,8 +231,8 @@ void SSFArgvUnitTest(void)
     _SSFArgvUTCheckArgs(gobj, NULL, 0);
     SSFArgvDeInit(&gobj);
 
-    /* Test parsing of cmd with single opt with value (-opt arg form) */
-    SSF_ASSERT(SSFArgvInit("cmd -opt1 val1", sizeof("cmd -opt1 val1"), &gobj, SSF_ARGV_UT_MAX_OPTS,
+    /* Test parsing of cmd with single opt with value (/opt arg form) */
+    SSF_ASSERT(SSFArgvInit("cmd /opt1 val1", sizeof("cmd /opt1 val1"), &gobj, SSF_ARGV_UT_MAX_OPTS,
                            SSF_ARGV_UT_MAX_ARGS));
     _SSFArgvUTCheckCmd(gobj, "cmd");
     _SSFArgvUTCheckNumOpts(gobj, 1);
@@ -241,7 +241,7 @@ void SSFArgvUnitTest(void)
     SSFArgvDeInit(&gobj);
 
     /* Test parsing of cmd with mix of opts with and without values */
-    SSF_ASSERT(SSFArgvInit("cmd --opt1 -opt2 val2", sizeof("cmd --opt1 -opt2 val2"), &gobj,
+    SSF_ASSERT(SSFArgvInit("cmd //opt1 /opt2 val2", sizeof("cmd //opt1 /opt2 val2"), &gobj,
                            SSF_ARGV_UT_MAX_OPTS, SSF_ARGV_UT_MAX_ARGS));
     _SSFArgvUTCheckCmd(gobj, "cmd");
     _SSFArgvUTCheckNumOpts(gobj, 2);
@@ -251,7 +251,7 @@ void SSFArgvUnitTest(void)
     SSFArgvDeInit(&gobj);
 
     /* Test parsing of cmd with mix of opts and args */
-    SSF_ASSERT(SSFArgvInit("cmd -opt1 val1 arg1", sizeof("cmd -opt1 val1 arg1"), &gobj,
+    SSF_ASSERT(SSFArgvInit("cmd /opt1 val1 arg1", sizeof("cmd /opt1 val1 arg1"), &gobj,
                            SSF_ARGV_UT_MAX_OPTS, SSF_ARGV_UT_MAX_ARGS));
     _SSFArgvUTCheckCmd(gobj, "cmd");
     _SSFArgvUTCheckNumOpts(gobj, 1);
@@ -259,8 +259,8 @@ void SSFArgvUnitTest(void)
     _SSFArgvUTCheckArgs(gobj, args1, sizeof(args1) / sizeof(args1[0]));
     SSFArgvDeInit(&gobj);
 
-    SSF_ASSERT(SSFArgvInit("cmd --opt1 arg1 -opt2 val2 arg2",
-                           sizeof("cmd --opt1 arg1 -opt2 val2 arg2"), &gobj, SSF_ARGV_UT_MAX_OPTS,
+    SSF_ASSERT(SSFArgvInit("cmd //opt1 arg1 /opt2 val2 arg2",
+                           sizeof("cmd //opt1 arg1 /opt2 val2 arg2"), &gobj, SSF_ARGV_UT_MAX_OPTS,
                            SSF_ARGV_UT_MAX_ARGS));
     _SSFArgvUTCheckCmd(gobj, "cmd");
     _SSFArgvUTCheckNumOpts(gobj, 2);
@@ -302,7 +302,7 @@ void SSFArgvUnitTest(void)
     SSFArgvDeInit(&gobj);
 
     /* Test parsing succeeds at exactly maxOpts capacity */
-    SSF_ASSERT(SSFArgvInit("cmd --o1 --o2 --o3 --o4", sizeof("cmd --o1 --o2 --o3 --o4"), &gobj,
+    SSF_ASSERT(SSFArgvInit("cmd //o1 //o2 //o3 //o4", sizeof("cmd //o1 //o2 //o3 //o4"), &gobj,
                            SSF_ARGV_UT_MAX_OPTS, SSF_ARGV_UT_MAX_ARGS));
     _SSFArgvUTCheckCmd(gobj, "cmd");
     _SSFArgvUTCheckNumOpts(gobj, 4);
@@ -325,7 +325,7 @@ void SSFArgvUnitTest(void)
     /* Test parsing succeeds with maxArgs == 0 when no args are supplied. The args gobj's       */
     /* children linked list is not initialized when maxArgs == 0, so its length cannot be       */
     /* queried; only its existence and type are checked.                                        */
-    SSF_ASSERT(SSFArgvInit("cmd --opt1", sizeof("cmd --opt1"), &gobj, SSF_ARGV_UT_MAX_OPTS, 0));
+    SSF_ASSERT(SSFArgvInit("cmd //opt1", sizeof("cmd //opt1"), &gobj, SSF_ARGV_UT_MAX_OPTS, 0));
     _SSFArgvUTCheckCmd(gobj, "cmd");
     _SSFArgvUTCheckNumOpts(gobj, 1);
     _SSFArgvUTCheckOpt(gobj, "opt1", "");
@@ -347,6 +347,54 @@ void SSFArgvUnitTest(void)
     _SSFArgvUTCheckNumOpts(gobj, 0);
     _SSFArgvUTCheckArgs(gobj, argsEsc, sizeof(argsEsc) / sizeof(argsEsc[0]));
     SSFArgvDeInit(&gobj);
+
+    /* Test that an arg can start with '-' (the '-' character is no longer a special option    */
+    /* specifier; only '/' is).                                                                 */
+    {
+        const char *argsDash[] = { "-dash-arg" };
+        SSF_ASSERT(SSFArgvInit("cmd -dash-arg", sizeof("cmd -dash-arg"), &gobj,
+                               SSF_ARGV_UT_MAX_OPTS, SSF_ARGV_UT_MAX_ARGS));
+        _SSFArgvUTCheckCmd(gobj, "cmd");
+        _SSFArgvUTCheckNumOpts(gobj, 0);
+        _SSFArgvUTCheckArgs(gobj, argsDash, sizeof(argsDash) / sizeof(argsDash[0]));
+        SSFArgvDeInit(&gobj);
+    }
+
+    /* Test that an arg can contain '/' in any position other than the first. A first-char    */
+    /* '/' would be parsed as an option specifier; '/' embedded in the middle or at the end   */
+    /* of an arg is just a regular printable character.                                       */
+    {
+        const char *argsSlash[] = { "path/to/file" };
+        SSF_ASSERT(SSFArgvInit("cmd path/to/file", sizeof("cmd path/to/file"), &gobj,
+                               SSF_ARGV_UT_MAX_OPTS, SSF_ARGV_UT_MAX_ARGS));
+        _SSFArgvUTCheckCmd(gobj, "cmd");
+        _SSFArgvUTCheckNumOpts(gobj, 0);
+        _SSFArgvUTCheckArgs(gobj, argsSlash, sizeof(argsSlash) / sizeof(argsSlash[0]));
+        SSFArgvDeInit(&gobj);
+    }
+
+    /* Test that an arg cannot start with '/' (the parser treats it as an option specifier    */
+    /* and then fails because the option has no following value).                              */
+    SSF_ASSERT(SSFArgvInit("cmd /path/to/file", sizeof("cmd /path/to/file"), &gobj,
+                           SSF_ARGV_UT_MAX_OPTS, SSF_ARGV_UT_MAX_ARGS) == false);
+    SSF_ASSERT(gobj == NULL);
+
+    /* Test that a leading '/' in an arg can be escaped with '\' so the arg is parsed as     */
+    /* beginning with '/' rather than as an option specifier. This is the behavior implied   */
+    /* by the grammar comment at the top of ssfargv.c ("leading '/' escaped by '\'") but is  */
+    /* NOT implemented by the current SSF_ARG_FIND_ARG macro — the macro only recognizes     */
+    /* '\ ' and '\\' as valid escape sequences and treats '\/' as a parse error. This test   */
+    /* will FAIL against the current implementation and is intended as a TDD-style witness   */
+    /* for the missing '\/' escape support.                                                   */
+    {
+        const char *argsEscSlash[] = { "/path" };
+        SSF_ASSERT(SSFArgvInit("cmd \\/path", sizeof("cmd \\/path"), &gobj,
+                               SSF_ARGV_UT_MAX_OPTS, SSF_ARGV_UT_MAX_ARGS));
+        _SSFArgvUTCheckCmd(gobj, "cmd");
+        _SSFArgvUTCheckNumOpts(gobj, 0);
+        _SSFArgvUTCheckArgs(gobj, argsEscSlash, sizeof(argsEscSlash) / sizeof(argsEscSlash[0]));
+        SSFArgvDeInit(&gobj);
+    }
 
     /* Test parsing of arg with escaped backslash (\\ becomes literal backslash) */
     SSF_ASSERT(SSFArgvInit("cmd a\\\\b", sizeof("cmd a\\\\b"), &gobj, SSF_ARGV_UT_MAX_OPTS,
@@ -381,17 +429,19 @@ void SSFArgvUnitTest(void)
     _SSFArgvUTCheckArgs(gobj, argsLeadTrail, sizeof(argsLeadTrail) / sizeof(argsLeadTrail[0]));
     SSFArgvDeInit(&gobj);
 
-    /* Test parsing of opt value with escaped space stores the unescaped value */
-    SSF_ASSERT(SSFArgvInit("cmd -path /tmp/my\\ file", sizeof("cmd -path /tmp/my\\ file"), &gobj,
+    /* Test parsing of opt value with escaped space stores the unescaped value. The arg       */
+    /* cannot begin with '/' (that would be parsed as another option), so a relative path    */
+    /* without a leading slash is used here.                                                  */
+    SSF_ASSERT(SSFArgvInit("cmd /path tmp/my\\ file", sizeof("cmd /path tmp/my\\ file"), &gobj,
                            SSF_ARGV_UT_MAX_OPTS, SSF_ARGV_UT_MAX_ARGS));
     _SSFArgvUTCheckCmd(gobj, "cmd");
     _SSFArgvUTCheckNumOpts(gobj, 1);
-    _SSFArgvUTCheckOpt(gobj, "path", "/tmp/my file");
+    _SSFArgvUTCheckOpt(gobj, "path", "tmp/my file");
     _SSFArgvUTCheckArgs(gobj, NULL, 0);
     SSFArgvDeInit(&gobj);
 
     /* Test parsing of opt value with escaped backslash stores the unescaped value */
-    SSF_ASSERT(SSFArgvInit("cmd -path C:\\\\tmp", sizeof("cmd -path C:\\\\tmp"), &gobj,
+    SSF_ASSERT(SSFArgvInit("cmd /path C:\\\\tmp", sizeof("cmd /path C:\\\\tmp"), &gobj,
                            SSF_ARGV_UT_MAX_OPTS, SSF_ARGV_UT_MAX_ARGS));
     _SSFArgvUTCheckCmd(gobj, "cmd");
     _SSFArgvUTCheckNumOpts(gobj, 1);
@@ -414,26 +464,26 @@ void SSFArgvUnitTest(void)
                            SSF_ARGV_UT_MAX_ARGS) == false);
     SSF_ASSERT(gobj == NULL);
 
-    /* Test parsing fails on bare dashes with no opt name */
-    SSF_ASSERT(SSFArgvInit("cmd -", sizeof("cmd -"), &gobj, SSF_ARGV_UT_MAX_OPTS,
+    /* Test parsing fails on bare option specifier with no opt name */
+    SSF_ASSERT(SSFArgvInit("cmd /", sizeof("cmd /"), &gobj, SSF_ARGV_UT_MAX_OPTS,
                            SSF_ARGV_UT_MAX_ARGS) == false);
     SSF_ASSERT(gobj == NULL);
-    SSF_ASSERT(SSFArgvInit("cmd --", sizeof("cmd --"), &gobj, SSF_ARGV_UT_MAX_OPTS,
-                           SSF_ARGV_UT_MAX_ARGS) == false);
-    SSF_ASSERT(gobj == NULL);
-
-    /* Test parsing fails when -opt is missing its required arg at end of input */
-    SSF_ASSERT(SSFArgvInit("cmd -opt1", sizeof("cmd -opt1"), &gobj, SSF_ARGV_UT_MAX_OPTS,
+    SSF_ASSERT(SSFArgvInit("cmd //", sizeof("cmd //"), &gobj, SSF_ARGV_UT_MAX_OPTS,
                            SSF_ARGV_UT_MAX_ARGS) == false);
     SSF_ASSERT(gobj == NULL);
 
-    /* Test parsing fails when -opt is followed by another opt instead of its required arg */
-    SSF_ASSERT(SSFArgvInit("cmd -opt1 --opt2", sizeof("cmd -opt1 --opt2"), &gobj,
+    /* Test parsing fails when /opt is missing its required arg at end of input */
+    SSF_ASSERT(SSFArgvInit("cmd /opt1", sizeof("cmd /opt1"), &gobj, SSF_ARGV_UT_MAX_OPTS,
+                           SSF_ARGV_UT_MAX_ARGS) == false);
+    SSF_ASSERT(gobj == NULL);
+
+    /* Test parsing fails when /opt is followed by another opt instead of its required arg */
+    SSF_ASSERT(SSFArgvInit("cmd /opt1 //opt2", sizeof("cmd /opt1 //opt2"), &gobj,
                            SSF_ARGV_UT_MAX_OPTS, SSF_ARGV_UT_MAX_ARGS) == false);
     SSF_ASSERT(gobj == NULL);
 
     /* Test parsing fails when too many opts supplied */
-    SSF_ASSERT(SSFArgvInit("cmd --o1 --o2 --o3 --o4 --o5", sizeof("cmd --o1 --o2 --o3 --o4 --o5"),
+    SSF_ASSERT(SSFArgvInit("cmd //o1 //o2 //o3 //o4 //o5", sizeof("cmd //o1 //o2 //o3 //o4 //o5"),
                            &gobj, SSF_ARGV_UT_MAX_OPTS, SSF_ARGV_UT_MAX_ARGS) == false);
     SSF_ASSERT(gobj == NULL);
 
@@ -458,12 +508,12 @@ void SSFArgvUnitTest(void)
     SSF_ASSERT(gobj == NULL);
 
     /* Test parsing fails when opt name is followed by an invalid (non-separator) char */
-    SSF_ASSERT(SSFArgvInit("cmd --opt!", sizeof("cmd --opt!"), &gobj, SSF_ARGV_UT_MAX_OPTS,
+    SSF_ASSERT(SSFArgvInit("cmd //opt!", sizeof("cmd //opt!"), &gobj, SSF_ARGV_UT_MAX_OPTS,
                            SSF_ARGV_UT_MAX_ARGS) == false);
     SSF_ASSERT(gobj == NULL);
 
     /* Test parsing fails when maxOpts == 0 and an opt is supplied */
-    SSF_ASSERT(SSFArgvInit("cmd --opt1", sizeof("cmd --opt1"), &gobj, 0,
+    SSF_ASSERT(SSFArgvInit("cmd //opt1", sizeof("cmd //opt1"), &gobj, 0,
                            SSF_ARGV_UT_MAX_ARGS) == false);
     SSF_ASSERT(gobj == NULL);
 

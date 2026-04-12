@@ -46,9 +46,12 @@ extern "C" {
 /* --------------------------------------------------------------------------------------------- */
 /* Defines                                                                                       */
 /* --------------------------------------------------------------------------------------------- */
-#define SSF_ARGV_CMD_STR (SSFCStrIn_t)"cmd"
-#define SSF_ARGV_OPTS_STR (SSFCStrIn_t)"opts"
-#define SSF_ARGV_ARGS_STR (SSFCStrIn_t)"args"
+#define SSF_ARGV_CMD_CSTR "cmd"
+#define SSF_ARGV_OPTS_CSTR "opts"
+#define SSF_ARGV_ARGS_CSTR "args"
+#define SSF_ARGV_CMD_STR (SSFCStrIn_t)SSF_ARGV_CMD_CSTR
+#define SSF_ARGV_OPTS_STR (SSFCStrIn_t)SSF_ARGV_OPTS_CSTR
+#define SSF_ARGV_ARGS_STR (SSFCStrIn_t)SSF_ARGV_ARGS_CSTR
 
 /* --------------------------------------------------------------------------------------------- */
 /* External interface                                                                            */

@@ -8,7 +8,7 @@ and positional arguments.
 The parser accepts a single null-terminated command line string and produces a hierarchical
 gobj tree with three top-level children: a `cmd` string, an `opts` object whose children are
 named options (each with an optional value), and an `args` array of positional arguments.
-The grammar uses POSIX-like single-dash `-opt value` and double-dash `--opt` (no value)
+The grammar uses DOS-like single-slash `/opt value` and double-slash `//opt` (no value)
 forms, with backslash escape sequences for embedding spaces and literal backslashes inside
 arguments.
 
@@ -30,8 +30,8 @@ arguments.
 ```
 <cmdline> ::= <cmd> ( <opt-noarg> | <opt-witharg> | <arg> )*
 <cmd>         ::= [A-Za-z0-9]+
-<opt-noarg>   ::= "--" [A-Za-z0-9]+
-<opt-witharg> ::= "-"  [A-Za-z0-9]+ <sep> <arg>
+<opt-noarg>   ::= "//" [A-Za-z0-9]+
+<opt-witharg> ::= "/"  [A-Za-z0-9]+ <sep> <arg>
 <arg>         ::= <printable-char>+
 <sep>         ::= " "+
 ```
@@ -45,6 +45,12 @@ Where `<printable-char>` is any ASCII printable character except space (`' '`) a
 A backslash followed by any other character (including end-of-input) is a parse error.
 Leading whitespace before the command and any number of spaces between tokens are tolerated.
 
+The **first** character of `<arg>` cannot be `/`, because the parser treats a leading `/`
+as the start of an option specifier. `/` is a normal printable character anywhere else
+inside an argument (e.g., `path/to/file` parses as a single argument). If you need an
+argument whose first character would be `/`, restructure the command to avoid it (for
+example by passing the path as the value of a single-slash option: `cmd /path tmp/out`).
+
 <a id="result-tree"></a>
 
 ## [↑](#ssfargv--command-line-argv-parser) Result Tree
@@ -55,7 +61,7 @@ A successful `SSFArgvInit()` produces this gobj structure:
 root (OBJECT)
 ├── "cmd"  (STR)    — the parsed command name
 ├── "opts" (OBJECT) — one child per option
-│   ├── "<optname>" (STR) — option value, or "" for --opts
+│   ├── "<optname>" (STR) — option value, or "" for //opts
 │   └── ...
 └── "args" (ARRAY)  — positional arguments in order
     ├── (STR)
@@ -71,11 +77,13 @@ used with `SSFGObjFindPath()` to navigate the tree.
 ## [↑](#ssfargv--command-line-argv-parser) Notes
 
 - A command name is required; an empty or whitespace-only command line is rejected.
-- Single-dash options (`-opt value`) require a following positional argument as their value.
+- Single-slash options (`/opt value`) require a following positional argument as their value.
   An option missing its required argument (at end of input or followed by another option) is
   a parse error.
-- Double-dash options (`--opt`) take no value; their stored value is the empty string `""`.
+- Double-slash options (`//opt`) take no value; their stored value is the empty string `""`.
 - Option and command names are case-sensitive and limited to ASCII alphanumeric characters.
+- `-` is no longer a special character; it can appear anywhere in an argument including as
+  the first character. Only `/` triggers option parsing.
 - The parser allocates an internal mutable copy of the command line via `SSF_MALLOC` and
   frees it before returning. The caller's input buffer is not modified.
 - The result tree is heap-allocated via `ssfgobj`. The caller must release it with
@@ -154,8 +162,8 @@ SSFCStrIn_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1] = { NULL };
 char val[64];
 size_t i;
 
-if (SSFArgvInit("copy --verbose -dest /tmp/out src.txt other.txt",
-                sizeof("copy --verbose -dest /tmp/out src.txt other.txt"),
+if (SSFArgvInit("copy //verbose /dest tmp/out src.txt other.txt",
+                sizeof("copy //verbose /dest tmp/out src.txt other.txt"),
                 &gobj, 4, 4))
 {
     /* Read the command name */
@@ -165,7 +173,7 @@ if (SSFArgvInit("copy --verbose -dest /tmp/out src.txt other.txt",
     SSFGObjGetString(child, val, sizeof(val));
     /* val == "copy" */
 
-    /* Read --verbose (value-less option, stored as "") */
+    /* Read //verbose (value-less option, stored as "") */
     memset(path, 0, sizeof(path));
     path[0] = SSF_ARGV_OPTS_STR;
     path[1] = "verbose";
@@ -174,14 +182,14 @@ if (SSFArgvInit("copy --verbose -dest /tmp/out src.txt other.txt",
     SSFGObjGetString(child, val, sizeof(val));
     /* val == "" */
 
-    /* Read -dest /tmp/out */
+    /* Read /dest tmp/out */
     memset(path, 0, sizeof(path));
     path[0] = SSF_ARGV_OPTS_STR;
     path[1] = "dest";
     parent = NULL; child = NULL;
     SSFGObjFindPath(gobj, path, &parent, &child);
     SSFGObjGetString(child, val, sizeof(val));
-    /* val == "/tmp/out" */
+    /* val == "tmp/out" */
 
     /* Read positional args by index */
     for (i = 0; i < 2; i++)
@@ -204,10 +212,12 @@ Inputs that the parser accepts:
 
 ```c
 SSFArgvInit("ls", ...);                          /* cmd only */
-SSFArgvInit("ls -l file.txt", ...);              /* cmd, opt with value, arg */
-SSFArgvInit("ls --all", ...);                    /* cmd, value-less opt */
+SSFArgvInit("ls /l file.txt", ...);              /* cmd, opt with value, arg */
+SSFArgvInit("ls //all", ...);                    /* cmd, value-less opt */
 SSFArgvInit("echo hello\\ world", ...);          /* arg "hello world" (escaped space) */
 SSFArgvInit("echo C:\\\\tmp", ...);              /* arg "C:\tmp" (escaped backslash) */
+SSFArgvInit("echo path/to/file", ...);           /* '/' is ordinary inside an arg */
+SSFArgvInit("echo -dash-arg", ...);              /* '-' is no longer a special character */
 SSFArgvInit("  cmd  arg1   arg2  ", ...);        /* extra whitespace tolerated */
 ```
 
@@ -216,11 +226,12 @@ Inputs that the parser rejects:
 ```c
 SSFArgvInit("",          ...);   /* empty - command name required */
 SSFArgvInit("  ",        ...);   /* whitespace only - no command */
-SSFArgvInit("-opt val",  ...);   /* missing command */
-SSFArgvInit("cmd -opt",  ...);   /* -opt requires a following value */
+SSFArgvInit("/opt val",  ...);   /* missing command */
+SSFArgvInit("cmd /opt",  ...);   /* /opt requires a following value */
 SSFArgvInit("cmd a\\b",  ...);   /* \X is not a valid escape */
 SSFArgvInit("cmd \t",    ...);   /* non-printable character */
 SSFArgvInit("cmd!",      ...);   /* '!' is not allowed in a command name */
+SSFArgvInit("cmd /path/to/file", ...); /* arg cannot begin with '/' */
 ```
 
 ---

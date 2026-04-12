@@ -126,6 +126,7 @@ void SSFGObjUnitTest(void)
     SSFGObj_t *gobjChildOut = NULL;
     size_t aidx1;
     size_t aidx2;
+    uint32_t numChildren;
     char *path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
 
     /* Test SSFGObjInit() and SSFGObjDeInit() */
@@ -782,6 +783,129 @@ void SSFGObjUnitTest(void)
     SSF_ASSERT(SSFGObjSetArray(gobj));
     SSF_ASSERT(SSFGObjRemoveChild(gobj, gobjChild1) == false);
     SSFGObjDeInit(&gobjChild1);
+    SSFGObjDeInit(&gobj);
+    SSF_ASSERT(SSFGObjIsMemoryBalanced());
+
+    /* Test SSFGObjGetObjectLen() and SSFGObjGetArrayLen() */
+    SSF_ASSERT(SSFGObjInit(&gobj, 2));
+    SSF_ASSERT_TEST(SSFGObjGetObjectLen(NULL, &numChildren));
+    SSF_ASSERT_TEST(SSFGObjGetObjectLen(gobj, NULL));
+    SSF_ASSERT_TEST(SSFGObjGetArrayLen(NULL, &numChildren));
+    SSF_ASSERT_TEST(SSFGObjGetArrayLen(gobj, NULL));
+
+    /* Wrong type: NONE returns false for both */
+    numChildren = 999;
+    SSF_ASSERT(SSFGObjGetType(gobj) == SSF_OBJ_TYPE_NONE);
+    SSF_ASSERT(SSFGObjGetObjectLen(gobj, &numChildren) == false);
+    SSF_ASSERT(numChildren == 999);
+    SSF_ASSERT(SSFGObjGetArrayLen(gobj, &numChildren) == false);
+    SSF_ASSERT(numChildren == 999);
+
+    /* Wrong type: STR returns false for both */
+    SSF_ASSERT(SSFGObjSetString(gobj, "hello"));
+    SSF_ASSERT(SSFGObjGetObjectLen(gobj, &numChildren) == false);
+    SSF_ASSERT(numChildren == 999);
+    SSF_ASSERT(SSFGObjGetArrayLen(gobj, &numChildren) == false);
+    SSF_ASSERT(numChildren == 999);
+
+    /* Wrong type: INT returns false for both */
+    SSF_ASSERT(SSFGObjSetInt(gobj, 42));
+    SSF_ASSERT(SSFGObjGetObjectLen(gobj, &numChildren) == false);
+    SSF_ASSERT(numChildren == 999);
+    SSF_ASSERT(SSFGObjGetArrayLen(gobj, &numChildren) == false);
+    SSF_ASSERT(numChildren == 999);
+
+    /* Cross-type rejection: GetObjectLen on an ARRAY returns false */
+    SSF_ASSERT(SSFGObjSetArray(gobj));
+    SSF_ASSERT(SSFGObjGetObjectLen(gobj, &numChildren) == false);
+    SSF_ASSERT(numChildren == 999);
+    numChildren = 999;
+    SSF_ASSERT(SSFGObjGetArrayLen(gobj, &numChildren));
+    SSF_ASSERT(numChildren == 0);
+
+    /* Cross-type rejection: GetArrayLen on an OBJECT returns false */
+    SSF_ASSERT(SSFGObjSetObject(gobj));
+    numChildren = 999;
+    SSF_ASSERT(SSFGObjGetArrayLen(gobj, &numChildren) == false);
+    SSF_ASSERT(numChildren == 999);
+    SSF_ASSERT(SSFGObjGetObjectLen(gobj, &numChildren));
+    SSF_ASSERT(numChildren == 0);
+
+    /* Populated OBJECT with 2 children */
+    gobjChild1 = NULL;
+    SSF_ASSERT(SSFGObjInit(&gobjChild1, 0));
+    SSF_ASSERT(SSFGObjSetLabel(gobjChild1, "a"));
+    SSF_ASSERT(SSFGObjSetInt(gobjChild1, 1));
+    SSF_ASSERT(SSFGObjInsertChild(gobj, gobjChild1));
+    numChildren = 999;
+    SSF_ASSERT(SSFGObjGetObjectLen(gobj, &numChildren));
+    SSF_ASSERT(numChildren == 1);
+
+    gobjChild2 = NULL;
+    SSF_ASSERT(SSFGObjInit(&gobjChild2, 0));
+    SSF_ASSERT(SSFGObjSetLabel(gobjChild2, "b"));
+    SSF_ASSERT(SSFGObjSetInt(gobjChild2, 2));
+    SSF_ASSERT(SSFGObjInsertChild(gobj, gobjChild2));
+    numChildren = 999;
+    SSF_ASSERT(SSFGObjGetObjectLen(gobj, &numChildren));
+    SSF_ASSERT(numChildren == 2);
+
+    /* GetArrayLen on populated OBJECT still rejected */
+    numChildren = 999;
+    SSF_ASSERT(SSFGObjGetArrayLen(gobj, &numChildren) == false);
+    SSF_ASSERT(numChildren == 999);
+
+    SSFGObjDeInit(&gobj);
+    SSF_ASSERT(SSFGObjIsMemoryBalanced());
+
+    /* Populated ARRAY with 2 children */
+    SSF_ASSERT(SSFGObjInit(&gobj, 2));
+    SSF_ASSERT(SSFGObjSetArray(gobj));
+    gobjChild1 = NULL;
+    SSF_ASSERT(SSFGObjInit(&gobjChild1, 0));
+    SSF_ASSERT(SSFGObjSetInt(gobjChild1, 10));
+    SSF_ASSERT(SSFGObjInsertChild(gobj, gobjChild1));
+    numChildren = 999;
+    SSF_ASSERT(SSFGObjGetArrayLen(gobj, &numChildren));
+    SSF_ASSERT(numChildren == 1);
+
+    gobjChild2 = NULL;
+    SSF_ASSERT(SSFGObjInit(&gobjChild2, 0));
+    SSF_ASSERT(SSFGObjSetInt(gobjChild2, 20));
+    SSF_ASSERT(SSFGObjInsertChild(gobj, gobjChild2));
+    numChildren = 999;
+    SSF_ASSERT(SSFGObjGetArrayLen(gobj, &numChildren));
+    SSF_ASSERT(numChildren == 2);
+
+    /* GetObjectLen on populated ARRAY still rejected */
+    numChildren = 999;
+    SSF_ASSERT(SSFGObjGetObjectLen(gobj, &numChildren) == false);
+    SSF_ASSERT(numChildren == 999);
+
+    SSFGObjDeInit(&gobj);
+    SSF_ASSERT(SSFGObjIsMemoryBalanced());
+
+    /* Zero-capacity OBJECT: must return 0 without asserting */
+    SSF_ASSERT(SSFGObjInit(&gobj, 0));
+    SSF_ASSERT(SSFGObjSetObject(gobj));
+    numChildren = 999;
+    SSF_ASSERT(SSFGObjGetObjectLen(gobj, &numChildren));
+    SSF_ASSERT(numChildren == 0);
+    numChildren = 999;
+    SSF_ASSERT(SSFGObjGetArrayLen(gobj, &numChildren) == false);
+    SSF_ASSERT(numChildren == 999);
+    SSFGObjDeInit(&gobj);
+    SSF_ASSERT(SSFGObjIsMemoryBalanced());
+
+    /* Zero-capacity ARRAY: must return 0 without asserting */
+    SSF_ASSERT(SSFGObjInit(&gobj, 0));
+    SSF_ASSERT(SSFGObjSetArray(gobj));
+    numChildren = 999;
+    SSF_ASSERT(SSFGObjGetArrayLen(gobj, &numChildren));
+    SSF_ASSERT(numChildren == 0);
+    numChildren = 999;
+    SSF_ASSERT(SSFGObjGetObjectLen(gobj, &numChildren) == false);
+    SSF_ASSERT(numChildren == 999);
     SSFGObjDeInit(&gobj);
     SSF_ASSERT(SSFGObjIsMemoryBalanced());
 }

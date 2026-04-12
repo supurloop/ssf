@@ -36,6 +36,7 @@
 /* --------------------------------------------------------------------------------------------- */
 #include <stdint.h>
 #include <stdbool.h>
+#include <ctype.h>
 #include "ssfport.h"
 #include "ssf.h"
 #include "ssfgobj.h"

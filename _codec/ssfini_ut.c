@@ -807,7 +807,7 @@ void SSFINIUnitTest(void)
         SSFGObj_t *g = NULL;
         SSFGObj_t *parent = NULL;
         SSFGObj_t *child = NULL;
-        SSFCStrIn_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
+        SSFCStrOut_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
 
         SSF_ASSERT(SSFINIGObjCreate("name=value\n", &g, 8));
         SSF_ASSERT(SSFGObjGetType(g) == SSF_OBJ_TYPE_OBJECT);
@@ -826,7 +826,7 @@ void SSFINIUnitTest(void)
         SSFGObj_t *g = NULL;
         SSFGObj_t *parent = NULL;
         SSFGObj_t *child = NULL;
-        SSFCStrIn_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
+        SSFCStrOut_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
 
         SSF_ASSERT(SSFINIGObjCreate("[section]\nkey1=val1\nkey2=val2\n", &g, 8));
         SSF_ASSERT(SSFGObjGetType(g) == SSF_OBJ_TYPE_OBJECT);
@@ -862,7 +862,7 @@ void SSFINIUnitTest(void)
         SSFGObj_t *g = NULL;
         SSFGObj_t *parent = NULL;
         SSFGObj_t *child = NULL;
-        SSFCStrIn_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
+        SSFCStrOut_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
 
         SSF_ASSERT(SSFINIGObjCreate("gkey=gval\n[s1]\nk1=v1\n[s2]\nk2=v2\n", &g, 8));
 
@@ -896,7 +896,7 @@ void SSFINIUnitTest(void)
         SSFGObj_t *g = NULL;
         SSFGObj_t *parent = NULL;
         SSFGObj_t *child = NULL;
-        SSFCStrIn_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
+        SSFCStrOut_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
 
         SSF_ASSERT(SSFINIGObjCreate("[sect]\nk1=v1\n[sect]\nk2=v2\n", &g, 8));
 
@@ -923,7 +923,7 @@ void SSFINIUnitTest(void)
         SSFGObj_t *g = NULL;
         SSFGObj_t *parent = NULL;
         SSFGObj_t *child = NULL;
-        SSFCStrIn_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
+        SSFCStrOut_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
 
         SSF_ASSERT(SSFINIGObjCreate("name=\n", &g, 8));
         memset(path, 0, sizeof(path));
@@ -943,7 +943,7 @@ void SSFINIUnitTest(void)
         SSFGObj_t *g = NULL;
         SSFGObj_t *parent = NULL;
         SSFGObj_t *child = NULL;
-        SSFCStrIn_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
+        SSFCStrOut_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
 
         SSF_ASSERT(SSFINIGObjCreate(";comment\n#comment\n[sec]\n  key = val\n", &g, 8));
         memset(path, 0, sizeof(path));
@@ -962,7 +962,7 @@ void SSFINIUnitTest(void)
         SSFGObj_t *g = NULL;
         SSFGObj_t *parent = NULL;
         SSFGObj_t *child = NULL;
-        SSFCStrIn_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
+        SSFCStrOut_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
 
         SSF_ASSERT(SSFINIGObjCreate("[s]\r\nk=v\r\n", &g, 8));
         memset(path, 0, sizeof(path));

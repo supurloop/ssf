@@ -593,6 +593,23 @@ helloworld
 # math
 math (//add | //sub) [/mult <int>] <int> <int>
 
+# math /add
+# <cmd> [(//<opt> | /<opt> <arg> | <arg>)]...
+
+  <cmd> - One or more A-Z, a-z, and 0-9 chars
+  <opt> - One or more A-Z, a-z, and 0-9 chars
+  <arg> - One or more printable chars, ' ', '\', leading '/' escaped by '\'
+
+  <ENTER>       - Run command
+  <DEL>         - Delete char at cursor
+  <BACKSPACE>   - Delete char behind cursor
+  <CTRL-C>      - New prompt
+
+  <LEFT  ARROW> - Move cursor left
+  <RIGHT ARROW> - Move cursor right
+  <UP    ARROW> - Show previous command
+  <DOWN  ARROW> - Show next command
+
 # unknown
 help - help
 echo - echo <str> [<str>]...

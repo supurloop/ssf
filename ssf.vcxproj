@@ -88,7 +88,7 @@
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <DisableSpecificWarnings>4820;5045;%(DisableSpecificWarnings)</DisableSpecificWarnings>
-      <AdditionalIncludeDirectories>.\_debug;./;./_time;./_struct;./_storage;./_fsm;./_edc;./_ecc;./_codec;./_crypto;.\_ui</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>./_debug;./;./_time;./_struct;./_storage;./_fsm;./_edc;./_ecc;./_codec;./_crypto;./_ui</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -102,7 +102,7 @@
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <DisableSpecificWarnings>4820;5045</DisableSpecificWarnings>
-      <AdditionalIncludeDirectories>.\_debug;.\_time;.\_crypto;.\_storage;.\_fsm;.\_struct;.\_edc;.\_ecc;.\_codec;.\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>.\_debug;.\_time;.\_crypto;.\_storage;.\_fsm;.\_struct;.\_edc;.\_ecc;.\_codec;.\_ui;.\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -136,7 +136,7 @@
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <DisableSpecificWarnings>4820;5045</DisableSpecificWarnings>
-      <AdditionalIncludeDirectories>.\_debug;.\_time;.\_codec;.\_crypto;.\_storage;.\_fsm;.\_edc;.\_ecc;.\_struct;.\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>.\_debug;.\_time;.\_codec;.\_crypto;.\_storage;.\_fsm;.\_edc;.\_ecc;.\_struct;.\;.\_ui;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <Optimization>Full</Optimization>
     </ClCompile>
     <Link>

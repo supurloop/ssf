@@ -8,7 +8,7 @@ line buffer.
 
 The module is a byte-at-a-time state machine: the caller feeds each received byte (typically
 from stdin put into raw mode, a UART driver, or a socket) to
-[`SSFVTEdProcessChar()`](#ssfvtedprocesschar), which interprets VT100 arrow/delete/home
+[`SSFVTEdProcessChar()`](#ssfvtedprocesschar), which interprets VT100 arrow
 sequences, backspace, carriage return, and printable characters; updates the caller's line
 buffer; and writes terminal-sync bytes through a caller-supplied write callback. The caller
 is notified of high-level events (Arrow Up, Arrow Down, Enter) via a return value plus an
@@ -46,7 +46,6 @@ calls until a full sequence is identified or abandoned.
 | Arrow Down | `ESC [ B` (3 bytes) | Returns `SSF_VTED_ESC_CODE_DOWN` to the caller |
 | Arrow Right | `ESC [ C` (3 bytes) | Moves the cursor right within the line; auto-adds a trailing space when past end-of-line |
 | Arrow Left | `ESC [ D` (3 bytes) | Moves the cursor left within the line; cleans up an auto-added trailing space when at end-of-line |
-| Delete | `ESC [ 3 ~` (4 bytes) | Deletes the character at the cursor |
 | Arrow Up (xterm app mode) | `ESC O A` (3 bytes) | Same as `ESC [ A` |
 | Arrow Down (xterm app mode) | `ESC O B` (3 bytes) | Same as `ESC [ B` |
 | Arrow Right (xterm app mode) | `ESC O C` (3 bytes) | Same as `ESC [ C` |
@@ -73,7 +72,7 @@ terminal display in sync with the line buffer:
 |-----------|--------------|---------|
 | Cursor back | `\x1b[D` | CUB — Cursor Backward |
 | Cursor forward | `\x1b[C` | CUF — Cursor Forward |
-| Delete character | `\x1b[P` | DCH — Delete Character (used by both Delete and Backspace) |
+| Delete character | `\x1b[P` | DCH — Delete Character (used by Backspace) |
 | Insert character | `\x1b[@` | ICH — Insert Character (followed by the typed byte) |
 | Backspace | `\b` + `\x1b[P` | Move cursor back, then DCH |
 | Prompt | [`SSF_VTED_PROMPT_STR`](#cfg-prompt) | Configured prompt (default `"\r\n# "`) — emitted by both `SSFVTEdInit()` and `SSFVTEdReset()` |
@@ -105,13 +104,8 @@ CSI           ── 'A' ────────────▶ Return UP      
 CSI           ── 'B' ────────────▶ Return DOWN                 (→ IDLE)
 CSI           ── 'C' ────────────▶ Cursor right                (→ IDLE)
 CSI           ── 'D' ────────────▶ Cursor left                 (→ IDLE)
-CSI           ── '3' ────────────▶ CSI_3
 CSI           ── \x1b ───────────▶ ESC                         (restart)
 CSI           ── other ──────────▶ abandon                     (→ IDLE)
-
-CSI_3         ── '~' ────────────▶ Delete char at cursor       (→ IDLE)
-CSI_3         ── \x1b ───────────▶ ESC                         (restart)
-CSI_3         ── other ──────────▶ abandon                     (→ IDLE)
 
 SS3           ── 'A' ────────────▶ Return UP                   (→ IDLE)
 SS3           ── 'B' ────────────▶ Return DOWN                 (→ IDLE)
@@ -145,7 +139,7 @@ state has a path back to `IDLE`. There is no way to get the decoder stuck.
   invariants.
 
 - **Cursor invariant**: `0 ≤ context->cursor ≤ context->lineLen ≤ context->lineSize - 1`
-  always holds. Insertions, backspace, delete, and arrow movement all preserve this.
+  always holds. Insertions, backspace, and arrow movement all preserve this.
 
 - **Arrow-right auto-space**: if the user presses Arrow Right at or past end-of-line (with
   `cursor == lineLen` and `lineLen < lineSize - 1`), the module writes a space at the
@@ -210,8 +204,7 @@ And in [`ssfport.h`](../ssfport.h):
 | <a id="type-escstate"></a>`SSFVTEdEscState_t` | Enum | Internal state of the VT100 input decoder; stored in `context->escState` |
 | `SSF_VTED_ESC_STATE_IDLE` | Enum value | [`SSFVTEdEscState_t`](#type-escstate) — no escape sequence in progress |
 | `SSF_VTED_ESC_STATE_ESC` | Enum value | [`SSFVTEdEscState_t`](#type-escstate) — saw `ESC`, awaiting `[` or `O` |
-| `SSF_VTED_ESC_STATE_CSI` | Enum value | [`SSFVTEdEscState_t`](#type-escstate) — saw `ESC [`, awaiting final byte or parameter digit |
-| `SSF_VTED_ESC_STATE_CSI_3` | Enum value | [`SSFVTEdEscState_t`](#type-escstate) — saw `ESC [ 3`, awaiting `~` |
+| `SSF_VTED_ESC_STATE_CSI` | Enum value | [`SSFVTEdEscState_t`](#type-escstate) — saw `ESC [`, awaiting final byte |
 | `SSF_VTED_ESC_STATE_SS3` | Enum value | [`SSFVTEdEscState_t`](#type-escstate) — saw `ESC O`, awaiting final byte |
 | <a id="type-writefn"></a>`SSFVTEdWriteStdoutFn_t` | Typedef | `void (*)(const uint8_t *data, uint16_t dataLen)` — caller-supplied write callback; invoked by the module to emit VT100 output bytes |
 | <a id="type-context"></a>`SSFVTEdContext_t` | Struct | Per-editor state; contains the line buffer pointer, cursor/length, escape decoder state, and the write callback |
@@ -290,7 +283,7 @@ function returns `true` and writes the event code to `*escOut`; otherwise it ret
 
 **Returns:** `true` if `inChar` completed a high-level event (Arrow Up, Arrow Down, Enter,
 or Ctrl-C) and `*escOut` is valid; `false` otherwise. A `false` return includes printable
-insertion, backspace, delete, arrow-left/right, a partial escape sequence that hasn't
+insertion, backspace, arrow-left/right, a partial escape sequence that hasn't
 completed yet, and silently-ignored bytes. Ctrl-C (`\x03`) is only recognized in the
 `IDLE` state; a `\x03` byte received while a partial escape sequence is being decoded
 abandons the partial sequence and is consumed without emitting `SSF_VTED_ESC_CODE_CTRLC`.

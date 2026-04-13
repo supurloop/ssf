@@ -62,14 +62,12 @@ typedef enum
 /*     ESC [ B        Arrow Down                                                                 */
 /*     ESC [ C        Arrow Right                                                                */
 /*     ESC [ D        Arrow Left                                                                 */
-/*     ESC [ 3 ~      Delete                                                                     */
 /*     ESC O A/B/C/D  Arrows (xterm application cursor keys mode)                                */
 typedef enum
 {
     SSF_VTED_ESC_STATE_IDLE,  /* No escape sequence in progress */
     SSF_VTED_ESC_STATE_ESC,   /* Saw ESC (0x1B), awaiting '[' or 'O' */
     SSF_VTED_ESC_STATE_CSI,   /* Saw ESC [, awaiting final byte or parameter digit */
-    SSF_VTED_ESC_STATE_CSI_3, /* Saw ESC [ 3, awaiting '~' to complete the Delete sequence */
     SSF_VTED_ESC_STATE_SS3    /* Saw ESC O, awaiting final byte (xterm application cursor mode) */
 } SSFVTEdEscState_t;
 

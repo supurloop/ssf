@@ -272,7 +272,7 @@ high-level event the CLI handles it:
 - **Arrow Down** — recalls the next command from history (if enabled). Skips empty slots.
   Blanks the line if no history exists.
 
-All other input (printable characters, arrow-left/right, backspace, delete, partial escape
+All other input (printable characters, arrow-left/right, backspace, partial escape
 sequences) is handled internally by the VT100 editor.
 
 | Parameter | Direction | Type | Description |
@@ -601,7 +601,6 @@ math (//add | //sub) [/mult <int>] <int> <int>
   <arg> - One or more printable chars, ' ', '\', leading '/' escaped by '\'
 
   <ENTER>       - Run command
-  <DEL>         - Delete char at cursor
   <BACKSPACE>   - Delete char behind cursor
   <CTRL-C>      - New prompt
 

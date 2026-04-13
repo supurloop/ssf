@@ -50,8 +50,6 @@
 #define SSF_VTED_IN_DOWN    ('B')       /* CSI/SS3 final byte for Arrow Down */
 #define SSF_VTED_IN_RIGHT   ('C')       /* CSI/SS3 final byte for Arrow Right */
 #define SSF_VTED_IN_LEFT    ('D')       /* CSI/SS3 final byte for Arrow Left */
-#define SSF_VTED_IN_DEL_NUM ('3')       /* CSI parameter digit for the Delete sequence */
-#define SSF_VTED_IN_DEL_FIN ('~')       /* CSI final byte for the Delete sequence */
 #define SSF_VTED_IN_BS      ('\b')      /* Traditional backspace (0x08) */
 #define SSF_VTED_IN_BS_ALT  ('\x7f')    /* Modern terminal backspace (DEL char 0x7F) */
 #define SSF_VTED_IN_CR      ('\r')
@@ -62,7 +60,6 @@
 /* --------------------------------------------------------------------------------------------- */
 const uint8_t _ssfOutEscLeft[] = { '\x1b', '[', 'D' };
 const uint8_t _ssfOutEscRight[] = { '\x1b', '[', 'C' };
-const uint8_t _ssfOutEscDel[] = { '\x1b', '[', 'P' };
 const uint8_t _ssfOutEscBs[] = { '\x1b', '[', 'P' };
 const uint8_t _ssfOutEscIns[] = { '\x1b', '[', '@' };
 const uint8_t _ssfOutEscClrLine[] = { '\x1b', '[', '2', 'K', '\r'}; /* Resets cursor too */
@@ -107,7 +104,7 @@ bool SSFVTEdIsInited(SSFVTEdContext_t *context)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Moves the cursor one position left and optionally clears a trailing auto-added space.        */
+/* Moves the cursor one position left and optionally clears a trailing auto-added space.         */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFVTEdHandleLeft(SSFVTEdContext_t *context)
 {
@@ -132,7 +129,7 @@ static void _SSFVTEdHandleLeft(SSFVTEdContext_t *context)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Moves the cursor one position right and optionally auto-adds a trailing space.               */
+/* Moves the cursor one position right and optionally auto-adds a trailing space.                */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFVTEdHandleRight(SSFVTEdContext_t *context)
 {
@@ -156,26 +153,7 @@ static void _SSFVTEdHandleRight(SSFVTEdContext_t *context)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Deletes the char at the cursor and shifts the trailing chars one position left.              */
-/* --------------------------------------------------------------------------------------------- */
-static void _SSFVTEdHandleDel(SSFVTEdContext_t *context)
-{
-    SSF_REQUIRE(context != NULL);
-
-    /* Cursor not at end of line? */
-    if (context->cursor < (context->lineSize - 1))
-    {
-        /* Yes, delete char and move remaining chars to the left */
-        context->writeStdoutFn(_ssfOutEscDel, sizeof(_ssfOutEscDel));
-        memmove(&context->line[context->cursor],
-                &context->line[context->cursor + 1],
-                (context->lineSize - 1) - context->cursor);
-        context->lineLen = strlen(context->line);
-    }
-}
-
-/* --------------------------------------------------------------------------------------------- */
-/* Removes the char before the cursor and shifts the trailing chars one position left.          */
+/* Removes the char before the cursor and shifts the trailing chars one position left.           */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFVTEdHandleBs(SSFVTEdContext_t *context)
 {
@@ -307,10 +285,6 @@ bool SSFVTEdProcessChar(SSFVTEdContext_t *context, uint8_t inChar, SSFVTEdEscCod
             _SSFVTEdHandleLeft(context);
             context->escState = SSF_VTED_ESC_STATE_IDLE;
             break;
-        case SSF_VTED_IN_DEL_NUM:
-            /* Intermediate — awaiting '~' to complete the Delete sequence */
-            context->escState = SSF_VTED_ESC_STATE_CSI_3;
-            break;
         case SSF_VTED_IN_ESC:
             /* Restart */
             context->escState = SSF_VTED_ESC_STATE_ESC;
@@ -319,23 +293,6 @@ bool SSFVTEdProcessChar(SSFVTEdContext_t *context, uint8_t inChar, SSFVTEdEscCod
             /* Malformed or unsupported CSI final byte; abandon */
             context->escState = SSF_VTED_ESC_STATE_IDLE;
             break;
-        }
-        break;
-
-    case SSF_VTED_ESC_STATE_CSI_3:
-        /* Expecting '~' to complete ESC [ 3 ~ */
-        if (inChar == SSF_VTED_IN_DEL_FIN)
-        {
-            _SSFVTEdHandleDel(context);
-            context->escState = SSF_VTED_ESC_STATE_IDLE;
-        }
-        else if (inChar == SSF_VTED_IN_ESC)
-        {
-            context->escState = SSF_VTED_ESC_STATE_ESC;
-        }
-        else
-        {
-            context->escState = SSF_VTED_ESC_STATE_IDLE;
         }
         break;
 

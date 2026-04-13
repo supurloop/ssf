@@ -119,21 +119,6 @@ static bool _SSFVTEdUTSendEsc(SSFVTEdContext_t *context, uint8_t code, SSFVTEdEs
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Feeds the 4-byte VT100 Delete escape sequence (ESC [ 3 ~) through SSFVTEdProcessChar().      */
-/* Returns the result of the final SSFVTEdProcessChar() call.                                   */
-/* --------------------------------------------------------------------------------------------- */
-static bool _SSFVTEdUTSendDel(SSFVTEdContext_t *context, SSFVTEdEscCode_t *escOut)
-{
-    SSF_REQUIRE(context != NULL);
-    SSF_REQUIRE(escOut != NULL);
-
-    SSF_ASSERT(SSFVTEdProcessChar(context, SSF_VTED_UT_IN_ESC, escOut) == false);
-    SSF_ASSERT(SSFVTEdProcessChar(context, SSF_VTED_UT_IN_CSI, escOut) == false);
-    SSF_ASSERT(SSFVTEdProcessChar(context, '3', escOut) == false);
-    return SSFVTEdProcessChar(context, '~', escOut);
-}
-
-/* --------------------------------------------------------------------------------------------- */
 /* Feeds a 3-byte VT100 SS3 escape sequence (ESC O finalByte) through SSFVTEdProcessChar().     */
 /* Used for xterm application cursor keys mode.                                                 */
 /* --------------------------------------------------------------------------------------------- */
@@ -487,30 +472,6 @@ void SSFVTEdUnitTest(void)
     SSF_ASSERT(_SSFVTEdUTOutEquals("\x1b[C", 3));
     SSFVTEdDeInit(&ctx);
 
-    /* Test that ESC [ 3 ~ (Delete) deletes the char at the cursor */
-    SSFVTEdInit(&ctx, lineBuf, sizeof(lineBuf), _SSFVTEdUTWriteStdout);
-    _SSFVTEdUTSendStr(&ctx, "abc");
-    _SSFVTEdUTSendEsc(&ctx, SSF_VTED_UT_IN_ESC_LEFT, &escOut);
-    _SSFVTEdUTOutReset();
-    SSF_ASSERT(_SSFVTEdUTSendDel(&ctx, &escOut) == false);
-    SSF_ASSERT(strcmp(ctx.line, "ab") == 0);
-    SSF_ASSERT(ctx.cursor == 2);
-    SSF_ASSERT(ctx.lineLen == 2);
-    SSF_ASSERT(_SSFVTEdUTOutEquals("\x1b[P", 3));
-    SSFVTEdDeInit(&ctx);
-
-    /* Test that ESC [ 3 ~ (Delete) of a middle char shifts trailing chars left */
-    SSFVTEdInit(&ctx, lineBuf, sizeof(lineBuf), _SSFVTEdUTWriteStdout);
-    _SSFVTEdUTSendStr(&ctx, "abcd");
-    _SSFVTEdUTSendEsc(&ctx, SSF_VTED_UT_IN_ESC_LEFT, &escOut);
-    _SSFVTEdUTSendEsc(&ctx, SSF_VTED_UT_IN_ESC_LEFT, &escOut);
-    SSF_ASSERT(ctx.cursor == 2);
-    SSF_ASSERT(_SSFVTEdUTSendDel(&ctx, &escOut) == false);
-    SSF_ASSERT(strcmp(ctx.line, "abd") == 0);
-    SSF_ASSERT(ctx.cursor == 2);
-    SSF_ASSERT(ctx.lineLen == 3);
-    SSFVTEdDeInit(&ctx);
-
     /* Test that ESC UP returns the up escape code */
     SSFVTEdInit(&ctx, lineBuf, sizeof(lineBuf), _SSFVTEdUTWriteStdout);
     escOut = SSF_VTED_ESC_CODE_MIN;
@@ -686,21 +647,6 @@ void SSFVTEdUnitTest(void)
     SSF_ASSERT(strcmp(ctx.line, "b") == 0);
     SSFVTEdDeInit(&ctx);
 
-    /* Test that an incomplete Delete sequence (ESC [ 3 followed by the wrong final byte) is  */
-    /* abandoned and leaves the decoder in IDLE state.                                        */
-    SSFVTEdInit(&ctx, lineBuf, sizeof(lineBuf), _SSFVTEdUTWriteStdout);
-    _SSFVTEdUTSendStr(&ctx, "abc");
-    _SSFVTEdUTOutReset();
-    SSF_ASSERT(SSFVTEdProcessChar(&ctx, SSF_VTED_UT_IN_ESC, &escOut) == false);
-    SSF_ASSERT(SSFVTEdProcessChar(&ctx, SSF_VTED_UT_IN_CSI, &escOut) == false);
-    SSF_ASSERT(SSFVTEdProcessChar(&ctx, '3', &escOut) == false);
-    SSF_ASSERT(ctx.escState == SSF_VTED_ESC_STATE_CSI_3);
-    SSF_ASSERT(SSFVTEdProcessChar(&ctx, 'X', &escOut) == false);
-    SSF_ASSERT(ctx.escState == SSF_VTED_ESC_STATE_IDLE);
-    SSF_ASSERT(strcmp(ctx.line, "abc") == 0);
-    SSF_ASSERT(_ssfVTEdUTOutLen == 0);
-    SSFVTEdDeInit(&ctx);
-
     /* Test that the alternate backspace byte (0x7F) is handled as a backspace */
     SSFVTEdInit(&ctx, lineBuf, sizeof(lineBuf), _SSFVTEdUTWriteStdout);
     _SSFVTEdUTSendStr(&ctx, "abc");
@@ -763,24 +709,6 @@ void SSFVTEdUnitTest(void)
     SSF_ASSERT(ctx.escState == SSF_VTED_ESC_STATE_IDLE);
     SSFVTEdDeInit(&ctx);
 
-    /* Test that a new ESC introducer while in CSI_3 state restarts the sequence. Sending    */
-    /* ESC [ 3 ESC [ A should put the decoder back into ESC state after the middle ESC and   */
-    /* then complete as Arrow Up.                                                              */
-    SSFVTEdInit(&ctx, lineBuf, sizeof(lineBuf), _SSFVTEdUTWriteStdout);
-    SSF_ASSERT(SSFVTEdProcessChar(&ctx, SSF_VTED_UT_IN_ESC, &escOut) == false);
-    SSF_ASSERT(SSFVTEdProcessChar(&ctx, SSF_VTED_UT_IN_CSI, &escOut) == false);
-    SSF_ASSERT(SSFVTEdProcessChar(&ctx, '3', &escOut) == false);
-    SSF_ASSERT(ctx.escState == SSF_VTED_ESC_STATE_CSI_3);
-    SSF_ASSERT(SSFVTEdProcessChar(&ctx, SSF_VTED_UT_IN_ESC, &escOut) == false);
-    SSF_ASSERT(ctx.escState == SSF_VTED_ESC_STATE_ESC);
-    SSF_ASSERT(SSFVTEdProcessChar(&ctx, SSF_VTED_UT_IN_CSI, &escOut) == false);
-    SSF_ASSERT(ctx.escState == SSF_VTED_ESC_STATE_CSI);
-    escOut = SSF_VTED_ESC_CODE_MIN;
-    SSF_ASSERT(SSFVTEdProcessChar(&ctx, SSF_VTED_UT_IN_ESC_UP, &escOut) == true);
-    SSF_ASSERT(escOut == SSF_VTED_ESC_CODE_UP);
-    SSF_ASSERT(ctx.escState == SSF_VTED_ESC_STATE_IDLE);
-    SSFVTEdDeInit(&ctx);
-
     /* Test xterm application cursor keys mode: ESC O B returns the DOWN escape code */
     SSFVTEdInit(&ctx, lineBuf, sizeof(lineBuf), _SSFVTEdUTWriteStdout);
     escOut = SSF_VTED_ESC_CODE_MIN;
@@ -825,21 +753,6 @@ void SSFVTEdUnitTest(void)
     SSF_ASSERT(_SSFVTEdUTSendSS3(&ctx, 'Z', &escOut) == false);
     SSF_ASSERT(_ssfVTEdUTOutLen == 0);
     SSF_ASSERT(ctx.escState == SSF_VTED_ESC_STATE_IDLE);
-    SSFVTEdDeInit(&ctx);
-
-    /* Test that ESC [ 3 ~ (Delete) at cursor == lineSize - 1 is a no-op. Fill the buffer    */
-    /* to capacity so cursor == lineSize - 1, then the Delete handler's outer guard is       */
-    /* false and nothing happens.                                                              */
-    SSFVTEdInit(&ctx, lineBuf, sizeof(lineBuf), _SSFVTEdUTWriteStdout);
-    _SSFVTEdUTSendStr(&ctx, "1234567");
-    SSF_ASSERT(ctx.cursor == (SSF_VTED_UT_LINE_SIZE - 1));
-    SSF_ASSERT(ctx.lineLen == (SSF_VTED_UT_LINE_SIZE - 1));
-    _SSFVTEdUTOutReset();
-    SSF_ASSERT(_SSFVTEdUTSendDel(&ctx, &escOut) == false);
-    SSF_ASSERT(strcmp(ctx.line, "1234567") == 0);
-    SSF_ASSERT(ctx.cursor == (SSF_VTED_UT_LINE_SIZE - 1));
-    SSF_ASSERT(ctx.lineLen == (SSF_VTED_UT_LINE_SIZE - 1));
-    SSF_ASSERT(_ssfVTEdUTOutLen == 0);
     SSFVTEdDeInit(&ctx);
 }
 

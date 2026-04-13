@@ -50,13 +50,12 @@
 #define SSF_CLI_SYNTAX_STR_3  "  <opt> - One or more A-Z, a-z, and 0-9 chars\r\n"
 #define SSF_CLI_SYNTAX_STR_4  "  <arg> - One or more printable chars, ' ', '\\', leading '/' escaped by '\\'\r\n\r\n"
 #define SSF_CLI_SYNTAX_STR_5  "  <ENTER>       - Run command\r\n"
-#define SSF_CLI_SYNTAX_STR_6  "  <DEL>         - Delete char at cursor\r\n"
-#define SSF_CLI_SYNTAX_STR_7  "  <BACKSPACE>   - Delete char behind cursor\r\n"
-#define SSF_CLI_SYNTAX_STR_8  "  <CTRL-C>      - New prompt\r\n\r\n"
-#define SSF_CLI_SYNTAX_STR_9  "  <LEFT  ARROW> - Move cursor left\r\n"
-#define SSF_CLI_SYNTAX_STR_10 "  <RIGHT ARROW> - Move cursor right\r\n"
-#define SSF_CLI_SYNTAX_STR_11 "  <UP    ARROW> - Show previous command\r\n"
-#define SSF_CLI_SYNTAX_STR_12 "  <DOWN  ARROW> - Show next command\r\n"
+#define SSF_CLI_SYNTAX_STR_6  "  <BACKSPACE>   - Delete char behind cursor\r\n"
+#define SSF_CLI_SYNTAX_STR_7  "  <CTRL-C>      - New prompt\r\n\r\n"
+#define SSF_CLI_SYNTAX_STR_8  "  <LEFT  ARROW> - Move cursor left\r\n"
+#define SSF_CLI_SYNTAX_STR_9  "  <RIGHT ARROW> - Move cursor right\r\n"
+#define SSF_CLI_SYNTAX_STR_10 "  <UP    ARROW> - Show previous command\r\n"
+#define SSF_CLI_SYNTAX_STR_11 "  <DOWN  ARROW> - Show next command\r\n"
 
 #define SSF_CLI_SYNTAX_STR_1_SIZE  (sizeof(SSF_CLI_SYNTAX_STR_1) - 1)
 #define SSF_CLI_SYNTAX_STR_2_SIZE  (sizeof(SSF_CLI_SYNTAX_STR_2) - 1)
@@ -69,7 +68,6 @@
 #define SSF_CLI_SYNTAX_STR_9_SIZE  (sizeof(SSF_CLI_SYNTAX_STR_9) - 1)
 #define SSF_CLI_SYNTAX_STR_10_SIZE (sizeof(SSF_CLI_SYNTAX_STR_10) - 1)
 #define SSF_CLI_SYNTAX_STR_11_SIZE (sizeof(SSF_CLI_SYNTAX_STR_11) - 1)
-#define SSF_CLI_SYNTAX_STR_12_SIZE (sizeof(SSF_CLI_SYNTAX_STR_12) - 1)
 
 typedef struct
 {
@@ -107,8 +105,6 @@ static void _SSFCLIWriteCmdLineSyntax(SSFCLIContext_t *context)
                                     SSF_CLI_SYNTAX_STR_10_SIZE);
     context->vtEdCtx->writeStdoutFn((const uint8_t *)SSF_CLI_SYNTAX_STR_11,
                                     SSF_CLI_SYNTAX_STR_11_SIZE);
-    context->vtEdCtx->writeStdoutFn((const uint8_t *)SSF_CLI_SYNTAX_STR_12,
-                                    SSF_CLI_SYNTAX_STR_12_SIZE);
 }
 
 /* --------------------------------------------------------------------------------------------- */

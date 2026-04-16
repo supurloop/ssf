@@ -55,6 +55,7 @@
 #include "ssfhmac.h"
 #include "ssfchacha20poly1305.h"
 #include "ssfec.h"
+#include "ssfhkdf.h"
 #include "ssftlv.h"
 #include "ssfaes.h"
 #include "ssfaesgcm.h"
@@ -175,6 +176,9 @@ SSFUnitTest_t unitTests[] =
 #if SSF_CONFIG_EC_UNIT_TEST == 1
     { "ssfec", "Elliptic Curve Points", SSFECUnitTest },
 #endif /* SSF_CONFIG_EC_UNIT_TEST */
+#if SSF_CONFIG_HKDF_UNIT_TEST == 1
+    { "ssfhkdf", "HKDF Key Derivation", SSFHKDFUnitTest },
+#endif /* SSF_CONFIG_HKDF_UNIT_TEST */
 
     /* _ecc */
 #if SSF_CONFIG_RS_UNIT_TEST == 1

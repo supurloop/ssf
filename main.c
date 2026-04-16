@@ -62,6 +62,7 @@
 #include "ssfprng.h"
 #include "ssfini.h"
 #include "ssfubjson.h"
+#include "ssfasn1.h"
 #include "ssfdtime.h"
 #include "ssfrtc.h"
 #include "ssfiso8601.h"
@@ -127,6 +128,9 @@ SSFUnitTest_t unitTests[] =
 #if SSF_CONFIG_UBJSON_UNIT_TEST == 1
     { "ssfubjson", "Universal Binary JSON Codec", SSFUBJsonUnitTest },
 #endif /* SSF_CONFIG_UBJSON_UNIT_TEST */
+#if SSF_CONFIG_ASN1_UNIT_TEST == 1
+    { "ssfasn1", "ASN.1 DER Codec", SSFASN1UnitTest },
+#endif /* SSF_CONFIG_ASN1_UNIT_TEST */
 
     /* _crypto */
 #if SSF_CONFIG_AES_UNIT_TEST == 1

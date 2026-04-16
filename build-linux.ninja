@@ -52,6 +52,8 @@ build $builddir/_codec/ssftlv.o:       cc_obj _codec/ssftlv.c
 build $builddir/_codec/ssftlv_ut.o:    cc_obj _codec/ssftlv_ut.c
 build $builddir/_codec/ssfubjson.o:    cc_obj _codec/ssfubjson.c
 build $builddir/_codec/ssfubjson_ut.o: cc_obj _codec/ssfubjson_ut.c
+build $builddir/_codec/ssfasn1.o:      cc_obj _codec/ssfasn1.c
+build $builddir/_codec/ssfasn1_ut.o:   cc_obj _codec/ssfasn1_ut.c
 
 # _crypto
 build $builddir/_crypto/ssfaes.o:       cc_obj _crypto/ssfaes.c
@@ -144,6 +146,7 @@ build ssf: link $builddir/main.o $builddir/ssfport.o $
     $builddir/_codec/ssfstr.o       $builddir/_codec/ssfstr_ut.o $
     $builddir/_codec/ssftlv.o       $builddir/_codec/ssftlv_ut.o $
     $builddir/_codec/ssfubjson.o    $builddir/_codec/ssfubjson_ut.o $
+    $builddir/_codec/ssfasn1.o     $builddir/_codec/ssfasn1_ut.o $
     $builddir/_crypto/ssfaes.o      $builddir/_crypto/ssfaes_ut.o $
     $builddir/_crypto/ssfaesgcm.o   $builddir/_crypto/ssfaesgcm_ut.o $
     $builddir/_crypto/ssfprng.o     $builddir/_crypto/ssfprng_ut.o $

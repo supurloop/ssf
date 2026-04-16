@@ -571,6 +571,190 @@ void SSFStrUnitTest(void)
     /* One more byte would overflow */
     memcpy(dst, "hi", 3);
     SSF_ASSERT(SSFStrCat(dst, SSF_MIN(5, sizeof(dst)), &s1Len, "abc", 4) == false);
+
+    /* ---- SSFStrCharToLower: exhaustive ---- */
+    {
+        /* Every uppercase letter maps to its lowercase equivalent */
+        SSF_ASSERT(SSFStrCharToLower('A') == 'a');
+        SSF_ASSERT(SSFStrCharToLower('B') == 'b');
+        SSF_ASSERT(SSFStrCharToLower('C') == 'c');
+        SSF_ASSERT(SSFStrCharToLower('D') == 'd');
+        SSF_ASSERT(SSFStrCharToLower('E') == 'e');
+        SSF_ASSERT(SSFStrCharToLower('F') == 'f');
+        SSF_ASSERT(SSFStrCharToLower('G') == 'g');
+        SSF_ASSERT(SSFStrCharToLower('H') == 'h');
+        SSF_ASSERT(SSFStrCharToLower('I') == 'i');
+        SSF_ASSERT(SSFStrCharToLower('J') == 'j');
+        SSF_ASSERT(SSFStrCharToLower('K') == 'k');
+        SSF_ASSERT(SSFStrCharToLower('L') == 'l');
+        SSF_ASSERT(SSFStrCharToLower('M') == 'm');
+        SSF_ASSERT(SSFStrCharToLower('N') == 'n');
+        SSF_ASSERT(SSFStrCharToLower('O') == 'o');
+        SSF_ASSERT(SSFStrCharToLower('P') == 'p');
+        SSF_ASSERT(SSFStrCharToLower('Q') == 'q');
+        SSF_ASSERT(SSFStrCharToLower('R') == 'r');
+        SSF_ASSERT(SSFStrCharToLower('S') == 's');
+        SSF_ASSERT(SSFStrCharToLower('T') == 't');
+        SSF_ASSERT(SSFStrCharToLower('U') == 'u');
+        SSF_ASSERT(SSFStrCharToLower('V') == 'v');
+        SSF_ASSERT(SSFStrCharToLower('W') == 'w');
+        SSF_ASSERT(SSFStrCharToLower('X') == 'x');
+        SSF_ASSERT(SSFStrCharToLower('Y') == 'y');
+        SSF_ASSERT(SSFStrCharToLower('Z') == 'z');
+
+        /* Every lowercase letter is unchanged */
+        SSF_ASSERT(SSFStrCharToLower('a') == 'a');
+        SSF_ASSERT(SSFStrCharToLower('b') == 'b');
+        SSF_ASSERT(SSFStrCharToLower('m') == 'm');
+        SSF_ASSERT(SSFStrCharToLower('z') == 'z');
+
+        /* Every digit is unchanged */
+        SSF_ASSERT(SSFStrCharToLower('0') == '0');
+        SSF_ASSERT(SSFStrCharToLower('1') == '1');
+        SSF_ASSERT(SSFStrCharToLower('5') == '5');
+        SSF_ASSERT(SSFStrCharToLower('9') == '9');
+
+        /* Common symbols and whitespace unchanged */
+        SSF_ASSERT(SSFStrCharToLower(' ') == ' ');
+        SSF_ASSERT(SSFStrCharToLower('\t') == '\t');
+        SSF_ASSERT(SSFStrCharToLower('\n') == '\n');
+        SSF_ASSERT(SSFStrCharToLower('\r') == '\r');
+        SSF_ASSERT(SSFStrCharToLower('\0') == '\0');
+        SSF_ASSERT(SSFStrCharToLower('!') == '!');
+        SSF_ASSERT(SSFStrCharToLower('@') == '@');
+        SSF_ASSERT(SSFStrCharToLower('[') == '[');
+        SSF_ASSERT(SSFStrCharToLower('{') == '{');
+        SSF_ASSERT(SSFStrCharToLower('~') == '~');
+        SSF_ASSERT(SSFStrCharToLower('/') == '/');
+        SSF_ASSERT(SSFStrCharToLower('-') == '-');
+        SSF_ASSERT(SSFStrCharToLower('_') == '_');
+        SSF_ASSERT(SSFStrCharToLower('.') == '.');
+
+        /* Boundary chars adjacent to A-Z range are unchanged */
+        SSF_ASSERT(SSFStrCharToLower('@') == '@');  /* 0x40, one before 'A' */
+        SSF_ASSERT(SSFStrCharToLower('[') == '[');  /* 0x5B, one after 'Z' */
+
+        /* Full 0-255 sweep: every char either converts or is unchanged */
+        {
+            int c;
+            for (c = 0; c < 256; c++)
+            {
+                char result = SSFStrCharToLower((char)c);
+                if (c >= 'A' && c <= 'Z')
+                {
+                    SSF_ASSERT(result == (char)(c + ('a' - 'A')));
+                }
+                else
+                {
+                    SSF_ASSERT(result == (char)c);
+                }
+            }
+        }
+    }
+
+    /* ---- SSFStrCharToUpper: exhaustive ---- */
+    {
+        /* Every lowercase letter maps to its uppercase equivalent */
+        SSF_ASSERT(SSFStrCharToUpper('a') == 'A');
+        SSF_ASSERT(SSFStrCharToUpper('b') == 'B');
+        SSF_ASSERT(SSFStrCharToUpper('c') == 'C');
+        SSF_ASSERT(SSFStrCharToUpper('d') == 'D');
+        SSF_ASSERT(SSFStrCharToUpper('e') == 'E');
+        SSF_ASSERT(SSFStrCharToUpper('f') == 'F');
+        SSF_ASSERT(SSFStrCharToUpper('g') == 'G');
+        SSF_ASSERT(SSFStrCharToUpper('h') == 'H');
+        SSF_ASSERT(SSFStrCharToUpper('i') == 'I');
+        SSF_ASSERT(SSFStrCharToUpper('j') == 'J');
+        SSF_ASSERT(SSFStrCharToUpper('k') == 'K');
+        SSF_ASSERT(SSFStrCharToUpper('l') == 'L');
+        SSF_ASSERT(SSFStrCharToUpper('m') == 'M');
+        SSF_ASSERT(SSFStrCharToUpper('n') == 'N');
+        SSF_ASSERT(SSFStrCharToUpper('o') == 'O');
+        SSF_ASSERT(SSFStrCharToUpper('p') == 'P');
+        SSF_ASSERT(SSFStrCharToUpper('q') == 'Q');
+        SSF_ASSERT(SSFStrCharToUpper('r') == 'R');
+        SSF_ASSERT(SSFStrCharToUpper('s') == 'S');
+        SSF_ASSERT(SSFStrCharToUpper('t') == 'T');
+        SSF_ASSERT(SSFStrCharToUpper('u') == 'U');
+        SSF_ASSERT(SSFStrCharToUpper('v') == 'V');
+        SSF_ASSERT(SSFStrCharToUpper('w') == 'W');
+        SSF_ASSERT(SSFStrCharToUpper('x') == 'X');
+        SSF_ASSERT(SSFStrCharToUpper('y') == 'Y');
+        SSF_ASSERT(SSFStrCharToUpper('z') == 'Z');
+
+        /* Every uppercase letter is unchanged */
+        SSF_ASSERT(SSFStrCharToUpper('A') == 'A');
+        SSF_ASSERT(SSFStrCharToUpper('B') == 'B');
+        SSF_ASSERT(SSFStrCharToUpper('M') == 'M');
+        SSF_ASSERT(SSFStrCharToUpper('Z') == 'Z');
+
+        /* Every digit is unchanged */
+        SSF_ASSERT(SSFStrCharToUpper('0') == '0');
+        SSF_ASSERT(SSFStrCharToUpper('1') == '1');
+        SSF_ASSERT(SSFStrCharToUpper('5') == '5');
+        SSF_ASSERT(SSFStrCharToUpper('9') == '9');
+
+        /* Common symbols and whitespace unchanged */
+        SSF_ASSERT(SSFStrCharToUpper(' ') == ' ');
+        SSF_ASSERT(SSFStrCharToUpper('\t') == '\t');
+        SSF_ASSERT(SSFStrCharToUpper('\n') == '\n');
+        SSF_ASSERT(SSFStrCharToUpper('\r') == '\r');
+        SSF_ASSERT(SSFStrCharToUpper('\0') == '\0');
+        SSF_ASSERT(SSFStrCharToUpper('!') == '!');
+        SSF_ASSERT(SSFStrCharToUpper('@') == '@');
+        SSF_ASSERT(SSFStrCharToUpper('[') == '[');
+        SSF_ASSERT(SSFStrCharToUpper('{') == '{');
+        SSF_ASSERT(SSFStrCharToUpper('~') == '~');
+        SSF_ASSERT(SSFStrCharToUpper('/') == '/');
+        SSF_ASSERT(SSFStrCharToUpper('-') == '-');
+        SSF_ASSERT(SSFStrCharToUpper('_') == '_');
+        SSF_ASSERT(SSFStrCharToUpper('.') == '.');
+
+        /* Boundary chars adjacent to a-z range are unchanged */
+        SSF_ASSERT(SSFStrCharToUpper('`') == '`');  /* 0x60, one before 'a' */
+        SSF_ASSERT(SSFStrCharToUpper('{') == '{');  /* 0x7B, one after 'z' */
+
+        /* Full 0-255 sweep: every char either converts or is unchanged */
+        {
+            int c;
+            for (c = 0; c < 256; c++)
+            {
+                char result = SSFStrCharToUpper((char)c);
+                if (c >= 'a' && c <= 'z')
+                {
+                    SSF_ASSERT(result == (char)(c - ('a' - 'A')));
+                }
+                else
+                {
+                    SSF_ASSERT(result == (char)c);
+                }
+            }
+        }
+    }
+
+    /* ---- SSFStrCharToLower/ToUpper round-trip ---- */
+    {
+        int c;
+        for (c = 0; c < 256; c++)
+        {
+            /* Lower then upper of any alpha char returns the uppercase original */
+            if (c >= 'A' && c <= 'Z')
+            {
+                SSF_ASSERT(SSFStrCharToUpper(SSFStrCharToLower((char)c)) == (char)c);
+            }
+            /* Upper then lower of any alpha char returns the lowercase original */
+            if (c >= 'a' && c <= 'z')
+            {
+                SSF_ASSERT(SSFStrCharToLower(SSFStrCharToUpper((char)c)) == (char)c);
+            }
+            /* Non-alpha chars survive both directions unchanged */
+            if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')))
+            {
+                SSF_ASSERT(SSFStrCharToLower((char)c) == (char)c);
+                SSF_ASSERT(SSFStrCharToUpper((char)c) == (char)c);
+            }
+        }
+    }
 }
 #endif /* SSF_CONFIG_STR_UNIT_TEST */
 

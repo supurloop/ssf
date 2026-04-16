@@ -34,6 +34,24 @@
 #include "ssfstr.h"
 
 /* --------------------------------------------------------------------------------------------- */
+/* Converts a character to lowercase. Non-alpha characters are returned unchanged.               */
+/* --------------------------------------------------------------------------------------------- */
+char SSFStrCharToLower(char c)
+{
+    if (c >= 'A' && c <= 'Z') return (char)(c + ('a' - 'A'));
+    return c;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Converts a character to uppercase. Non-alpha characters are returned unchanged.               */
+/* --------------------------------------------------------------------------------------------- */
+char SSFStrCharToUpper(char c)
+{
+    if (c >= 'a' && c <= 'z') return (char)(c - ('a' - 'A'));
+    return c;
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Returns true if str is valid, else false.                                                     */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFStrIsValid(SSFCStrIn_t cstr, size_t cstrSize)
@@ -159,7 +177,6 @@ bool SSFStrCmp(SSFCStrIn_t cstr1, size_t cstr1Size, SSFCStrIn_t cstr2, size_t cs
 /* --------------------------------------------------------------------------------------------- */
 bool SSFStrToCase(SSFCStrOut_t cstrOut, size_t cstrOutSize, SSFSTRCase_t toCase)
 {
-    #define SSFSTR_UPPER_LOWER_DELTA ((int8_t)('a' - 'A'))
     size_t cstrOutLen;
 
     SSF_REQUIRE(cstrOut != NULL);
@@ -173,7 +190,7 @@ bool SSFStrToCase(SSFCStrOut_t cstrOut, size_t cstrOutSize, SSFSTRCase_t toCase)
         case SSF_STR_CASE_LOWER:
             while (cstrOutLen > 0)
             {
-                if ((*cstrOut >= 'A') && (*cstrOut <= 'Z')) (*cstrOut) += SSFSTR_UPPER_LOWER_DELTA;
+                *cstrOut = SSFStrCharToLower(*cstrOut);
                 cstrOut++;
                 cstrOutLen--;
             }
@@ -181,7 +198,7 @@ bool SSFStrToCase(SSFCStrOut_t cstrOut, size_t cstrOutSize, SSFSTRCase_t toCase)
         case SSF_STR_CASE_UPPER:
             while (cstrOutLen > 0)
             {
-                if ((*cstrOut >= 'a') && (*cstrOut <= 'z')) (*cstrOut) -= SSFSTR_UPPER_LOWER_DELTA;
+                *cstrOut = SSFStrCharToUpper(*cstrOut);
                 cstrOut++;
                 cstrOutLen--;
             }

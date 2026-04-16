@@ -54,6 +54,7 @@
 #include "ssfaesccm.h"
 #include "ssfhmac.h"
 #include "ssfchacha20poly1305.h"
+#include "ssfec.h"
 #include "ssftlv.h"
 #include "ssfaes.h"
 #include "ssfaesgcm.h"
@@ -167,6 +168,9 @@ SSFUnitTest_t unitTests[] =
 #if SSF_CONFIG_CCP_UNIT_TEST == 1
     { "ssfchacha20poly1305", "ChaCha20-Poly1305 AEAD", SSFChaCha20Poly1305UnitTest },
 #endif /* SSF_CONFIG_CCP_UNIT_TEST */
+#if SSF_CONFIG_EC_UNIT_TEST == 1
+    { "ssfec", "Elliptic Curve Points", SSFECUnitTest },
+#endif /* SSF_CONFIG_EC_UNIT_TEST */
 
     /* _ecc */
 #if SSF_CONFIG_RS_UNIT_TEST == 1

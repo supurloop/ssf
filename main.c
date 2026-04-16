@@ -51,6 +51,7 @@
 #include "ssfpoly1305.h"
 #include "ssfx25519.h"
 #include "ssfed25519.h"
+#include "ssfaesccm.h"
 #include "ssftlv.h"
 #include "ssfaes.h"
 #include "ssfaesgcm.h"
@@ -155,6 +156,9 @@ SSFUnitTest_t unitTests[] =
 #if SSF_CONFIG_ED25519_UNIT_TEST == 1
     { "ssfed25519", "Ed25519 Sign/Verify", SSFEd25519UnitTest },
 #endif /* SSF_CONFIG_ED25519_UNIT_TEST */
+#if SSF_CONFIG_AESCCM_UNIT_TEST == 1
+    { "ssfaesccm", "AES-CCM Authenticated Cipher", SSFAESCCMUnitTest },
+#endif /* SSF_CONFIG_AESCCM_UNIT_TEST */
 
     /* _ecc */
 #if SSF_CONFIG_RS_UNIT_TEST == 1

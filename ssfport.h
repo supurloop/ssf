@@ -101,6 +101,7 @@ extern "C" {
 #define SSF_CONFIG_HEAP_UNIT_TEST    (1u)
 #define SSF_CONFIG_LL_UNIT_TEST      (1u)
 #define SSF_CONFIG_MPOOL_UNIT_TEST   (1u)
+#define SSF_CONFIG_SLL_UNIT_TEST     (1u)
 
 /* _time */
 #define SSF_CONFIG_DTIME_UNIT_TEST   (1u)
@@ -163,6 +164,7 @@ extern "C" {
     SSF_CONFIG_HEAP_UNIT_TEST == 1 || \
     SSF_CONFIG_LL_UNIT_TEST == 1 || \
     SSF_CONFIG_MPOOL_UNIT_TEST == 1 || \
+    SSF_CONFIG_SLL_UNIT_TEST == 1 || \
     /* _time */ \
     SSF_CONFIG_DTIME_UNIT_TEST == 1 || \
     SSF_CONFIG_ISO8601_UNIT_TEST == 1 || \

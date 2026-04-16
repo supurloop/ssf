@@ -126,6 +126,8 @@ build $builddir/_struct/ssfll.o:       cc_obj _struct/ssfll.c
 build $builddir/_struct/ssfll_ut.o:    cc_obj _struct/ssfll_ut.c
 build $builddir/_struct/ssfmpool.o:    cc_obj _struct/ssfmpool.c
 build $builddir/_struct/ssfmpool_ut.o: cc_obj _struct/ssfmpool_ut.c
+build $builddir/_struct/ssfsll.o:      cc_obj _struct/ssfsll.c
+build $builddir/_struct/ssfsll_ut.o:   cc_obj _struct/ssfsll_ut.c
 
 # _time
 build $builddir/_time/ssfdtime.o:     cc_obj _time/ssfdtime.c
@@ -188,6 +190,7 @@ build ssf: link $builddir/main.o $builddir/ssfport.o $
     $builddir/_struct/ssfheap.o     $builddir/_struct/ssfheap_ut.o $
     $builddir/_struct/ssfll.o       $builddir/_struct/ssfll_ut.o $
     $builddir/_struct/ssfmpool.o    $builddir/_struct/ssfmpool_ut.o $
+    $builddir/_struct/ssfsll.o     $builddir/_struct/ssfsll_ut.o $
     $builddir/_time/ssfdtime.o      $builddir/_time/ssfdtime_ut.o $
     $builddir/_time/ssfiso8601.o    $builddir/_time/ssfiso8601_ut.o $
     $builddir/_time/ssfrtc.o        $builddir/_time/ssfrtc_ut.o $

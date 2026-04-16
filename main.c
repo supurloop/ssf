@@ -36,6 +36,7 @@
 #include "ssfll.h"
 #include "ssfsm.h"
 #include "ssfmpool.h"
+#include "ssfsll.h"
 #include "ssfport.h"
 #include "ssfjson.h"
 #include "ssfbase64.h"
@@ -232,6 +233,9 @@ SSFUnitTest_t unitTests[] =
 #if SSF_CONFIG_MPOOL_UNIT_TEST == 1
     { "ssfmpool", "Memory Pool", SSFMPoolUnitTest },
 #endif /* SSF_CONFIG_MPOOL_UNIT_TEST */
+#if SSF_CONFIG_SLL_UNIT_TEST == 1
+    { "ssfsll", "Sorted Linked List", SSFSLLUnitTest },
+#endif /* SSF_CONFIG_SLL_UNIT_TEST */
 
     /* _time */
 #if SSF_CONFIG_DTIME_UNIT_TEST == 1

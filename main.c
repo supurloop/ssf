@@ -52,6 +52,7 @@
 #include "ssfx25519.h"
 #include "ssfed25519.h"
 #include "ssfaesccm.h"
+#include "ssfhmac.h"
 #include "ssftlv.h"
 #include "ssfaes.h"
 #include "ssfaesgcm.h"
@@ -159,6 +160,9 @@ SSFUnitTest_t unitTests[] =
 #if SSF_CONFIG_AESCCM_UNIT_TEST == 1
     { "ssfaesccm", "AES-CCM Authenticated Cipher", SSFAESCCMUnitTest },
 #endif /* SSF_CONFIG_AESCCM_UNIT_TEST */
+#if SSF_CONFIG_HMAC_UNIT_TEST == 1
+    { "ssfhmac", "HMAC Authentication Code", SSFHMACUnitTest },
+#endif /* SSF_CONFIG_HMAC_UNIT_TEST */
 
     /* _ecc */
 #if SSF_CONFIG_RS_UNIT_TEST == 1

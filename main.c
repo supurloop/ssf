@@ -47,6 +47,7 @@
 #include "ssfsha1.h"
 #include "ssfsha2.h"
 #include "ssfbn.h"
+#include "ssfchacha20.h"
 #include "ssftlv.h"
 #include "ssfaes.h"
 #include "ssfaesgcm.h"
@@ -139,6 +140,9 @@ SSFUnitTest_t unitTests[] =
 #if SSF_CONFIG_BN_UNIT_TEST == 1
     { "ssfbn", "Big Number Arithmetic", SSFBNUnitTest },
 #endif /* SSF_CONFIG_BN_UNIT_TEST */
+#if SSF_CONFIG_CHACHA20_UNIT_TEST == 1
+    { "ssfchacha20", "ChaCha20 Stream Cipher", SSFChaCha20UnitTest },
+#endif /* SSF_CONFIG_CHACHA20_UNIT_TEST */
 
     /* _ecc */
 #if SSF_CONFIG_RS_UNIT_TEST == 1

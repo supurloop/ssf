@@ -46,6 +46,7 @@
 #include "ssfcrc32.h"
 #include "ssfsha1.h"
 #include "ssfsha2.h"
+#include "ssfbn.h"
 #include "ssftlv.h"
 #include "ssfaes.h"
 #include "ssfaesgcm.h"
@@ -135,6 +136,9 @@ SSFUnitTest_t unitTests[] =
 #if SSF_CONFIG_SHA2_UNIT_TEST == 1
     { "ssfsha2", "SHA2 256-512-bits", SSFSHA2UnitTest },
 #endif /* SSF_CONFIG_SHA2_UNIT_TEST */
+#if SSF_CONFIG_BN_UNIT_TEST == 1
+    { "ssfbn", "Big Number Arithmetic", SSFBNUnitTest },
+#endif /* SSF_CONFIG_BN_UNIT_TEST */
 
     /* _ecc */
 #if SSF_CONFIG_RS_UNIT_TEST == 1

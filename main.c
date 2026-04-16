@@ -49,6 +49,7 @@
 #include "ssfbn.h"
 #include "ssfchacha20.h"
 #include "ssfpoly1305.h"
+#include "ssfx25519.h"
 #include "ssftlv.h"
 #include "ssfaes.h"
 #include "ssfaesgcm.h"
@@ -147,6 +148,9 @@ SSFUnitTest_t unitTests[] =
 #if SSF_CONFIG_POLY1305_UNIT_TEST == 1
     { "ssfpoly1305", "Poly1305 MAC", SSFPoly1305UnitTest },
 #endif /* SSF_CONFIG_POLY1305_UNIT_TEST */
+#if SSF_CONFIG_X25519_UNIT_TEST == 1
+    { "ssfx25519", "X25519 Key Exchange", SSFX25519UnitTest },
+#endif /* SSF_CONFIG_X25519_UNIT_TEST */
 
     /* _ecc */
 #if SSF_CONFIG_RS_UNIT_TEST == 1

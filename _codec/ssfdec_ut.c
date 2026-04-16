@@ -983,4 +983,146 @@ void SSFDecUnitTest(void)
     SSF_ASSERT(SSFDecUIntToStrPadded(1, str2, 3, 4, '0') == 0);
     SSF_ASSERT(SSFDecUIntToStrPadded(1, str2, 4, 3, '0') == 3);
     SSF_ASSERT(memcmp(str2, "001", 4) == 0);
+
+    /* ---- SSFDecOctetsToStr ---- */
+    {
+        char ostr[32];
+        uint8_t octets4[4] = { 192u, 168u, 1u, 10u };
+        uint8_t octets1[1] = { 0u };
+        uint8_t octets6[6] = { 0u, 17u, 34u, 51u, 68u, 85u };
+
+        /* Basic IPv4-style dotted decimal */
+        SSF_ASSERT(SSFDecOctetsToStr(octets4, 4, '.', ostr, sizeof(ostr)) == 12);
+        SSF_ASSERT(memcmp(ostr, "192.168.1.10", 13) == 0);
+
+        /* Single octet */
+        SSF_ASSERT(SSFDecOctetsToStr(octets1, 1, '.', ostr, sizeof(ostr)) == 1);
+        SSF_ASSERT(memcmp(ostr, "0", 2) == 0);
+
+        /* 6 octets with colon separator */
+        SSF_ASSERT(SSFDecOctetsToStr(octets6, 6, ':', ostr, sizeof(ostr)) == 16);
+        SSF_ASSERT(memcmp(ostr, "0:17:34:51:68:85", 17) == 0);
+
+        /* All 255s */
+        {
+            uint8_t octetsMax[4] = { 255u, 255u, 255u, 255u };
+            SSF_ASSERT(SSFDecOctetsToStr(octetsMax, 4, '.', ostr, sizeof(ostr)) == 15);
+            SSF_ASSERT(memcmp(ostr, "255.255.255.255", 16) == 0);
+        }
+
+        /* All 0s */
+        {
+            uint8_t octetsZero[4] = { 0u, 0u, 0u, 0u };
+            SSF_ASSERT(SSFDecOctetsToStr(octetsZero, 4, '.', ostr, sizeof(ostr)) == 7);
+            SSF_ASSERT(memcmp(ostr, "0.0.0.0", 8) == 0);
+        }
+
+        /* Buffer too small */
+        SSF_ASSERT(SSFDecOctetsToStr(octets4, 4, '.', ostr, 12) == 0);
+        SSF_ASSERT(SSFDecOctetsToStr(octets4, 4, '.', ostr, 13) == 12);
+
+        /* Exact fit: "0.0" needs 4 bytes (3 chars + null) */
+        {
+            uint8_t octets2[2] = { 0u, 0u };
+            SSF_ASSERT(SSFDecOctetsToStr(octets2, 2, '.', ostr, 4) == 3);
+            SSF_ASSERT(memcmp(ostr, "0.0", 4) == 0);
+            SSF_ASSERT(SSFDecOctetsToStr(octets2, 2, '.', ostr, 3) == 0);
+        }
+
+        /* Assert tests */
+        SSF_ASSERT_TEST(SSFDecOctetsToStr(NULL, 4, '.', ostr, sizeof(ostr)));
+        SSF_ASSERT_TEST(SSFDecOctetsToStr(octets4, 0, '.', ostr, sizeof(ostr)));
+        SSF_ASSERT_TEST(SSFDecOctetsToStr(octets4, 4, '.', NULL, sizeof(ostr)));
+        SSF_ASSERT_TEST(SSFDecOctetsToStr(octets4, 4, '.', ostr, 0));
+    }
+
+    /* ---- SSFDecStrToOctets ---- */
+    {
+        uint8_t octets[8];
+        uint8_t numOctets;
+
+        /* Basic IPv4-style dotted decimal */
+        SSF_ASSERT(SSFDecStrToOctets("192.168.1.10", '.', octets, sizeof(octets),
+                                     &numOctets) == true);
+        SSF_ASSERT(numOctets == 4);
+        SSF_ASSERT(octets[0] == 192u);
+        SSF_ASSERT(octets[1] == 168u);
+        SSF_ASSERT(octets[2] == 1u);
+        SSF_ASSERT(octets[3] == 10u);
+
+        /* Single octet */
+        SSF_ASSERT(SSFDecStrToOctets("0", '.', octets, sizeof(octets), &numOctets) == true);
+        SSF_ASSERT(numOctets == 1);
+        SSF_ASSERT(octets[0] == 0u);
+
+        /* All 255s */
+        SSF_ASSERT(SSFDecStrToOctets("255.255.255.255", '.', octets, sizeof(octets),
+                                     &numOctets) == true);
+        SSF_ASSERT(numOctets == 4);
+        SSF_ASSERT(octets[0] == 255u);
+        SSF_ASSERT(octets[1] == 255u);
+        SSF_ASSERT(octets[2] == 255u);
+        SSF_ASSERT(octets[3] == 255u);
+
+        /* Colon separator */
+        SSF_ASSERT(SSFDecStrToOctets("10:20:30", ':', octets, sizeof(octets),
+                                     &numOctets) == true);
+        SSF_ASSERT(numOctets == 3);
+        SSF_ASSERT(octets[0] == 10u);
+        SSF_ASSERT(octets[1] == 20u);
+        SSF_ASSERT(octets[2] == 30u);
+
+        /* Value > 255 */
+        SSF_ASSERT(SSFDecStrToOctets("256.0.0.0", '.', octets, sizeof(octets),
+                                     &numOctets) == false);
+
+        /* Leading zeros rejected */
+        SSF_ASSERT(SSFDecStrToOctets("01.2.3.4", '.', octets, sizeof(octets),
+                                     &numOctets) == false);
+        SSF_ASSERT(SSFDecStrToOctets("1.02.3.4", '.', octets, sizeof(octets),
+                                     &numOctets) == false);
+        SSF_ASSERT(SSFDecStrToOctets("1.2.03.4", '.', octets, sizeof(octets),
+                                     &numOctets) == false);
+        SSF_ASSERT(SSFDecStrToOctets("1.2.3.04", '.', octets, sizeof(octets),
+                                     &numOctets) == false);
+
+        /* Trailing characters */
+        SSF_ASSERT(SSFDecStrToOctets("1.2.3.4x", '.', octets, sizeof(octets),
+                                     &numOctets) == false);
+
+        /* Trailing separator */
+        SSF_ASSERT(SSFDecStrToOctets("1.2.3.4.", '.', octets, sizeof(octets),
+                                     &numOctets) == false);
+
+        /* Empty string */
+        SSF_ASSERT(SSFDecStrToOctets("", '.', octets, sizeof(octets), &numOctets) == false);
+
+        /* Missing octet */
+        SSF_ASSERT(SSFDecStrToOctets("1..3.4", '.', octets, sizeof(octets),
+                                     &numOctets) == false);
+
+        /* Output buffer too small */
+        SSF_ASSERT(SSFDecStrToOctets("1.2.3.4", '.', octets, 3, &numOctets) == false);
+        SSF_ASSERT(SSFDecStrToOctets("1.2.3.4", '.', octets, 4, &numOctets) == true);
+        SSF_ASSERT(numOctets == 4);
+
+        /* Round trip: encode then decode */
+        {
+            char rtStr[32];
+            uint8_t rtOctets[4] = { 10u, 0u, 0u, 1u };
+            uint8_t rtOut[4];
+            uint8_t rtNum;
+
+            SSF_ASSERT(SSFDecOctetsToStr(rtOctets, 4, '.', rtStr, sizeof(rtStr)) > 0);
+            SSF_ASSERT(SSFDecStrToOctets(rtStr, '.', rtOut, sizeof(rtOut), &rtNum) == true);
+            SSF_ASSERT(rtNum == 4);
+            SSF_ASSERT(memcmp(rtOctets, rtOut, 4) == 0);
+        }
+
+        /* Assert tests */
+        SSF_ASSERT_TEST(SSFDecStrToOctets(NULL, '.', octets, sizeof(octets), &numOctets));
+        SSF_ASSERT_TEST(SSFDecStrToOctets("1.2", '.', NULL, sizeof(octets), &numOctets));
+        SSF_ASSERT_TEST(SSFDecStrToOctets("1.2", '.', octets, 0, &numOctets));
+        SSF_ASSERT_TEST(SSFDecStrToOctets("1.2", '.', octets, sizeof(octets), NULL));
+    }
 }

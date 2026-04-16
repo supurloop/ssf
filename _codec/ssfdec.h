@@ -56,6 +56,11 @@ bool SSFDecStrToXInt(SSFCStrIn_t str, int64_t* sval, uint64_t* uval);
 #define SSFDecStrToInt(str, val) SSFDecStrToXInt(str, val, NULL)
 #define SSFDecStrToUInt(str, val) SSFDecStrToXInt(str, NULL, val)
 
+size_t SSFDecOctetsToStr(const uint8_t *octets, uint8_t numOctets, char sep, SSFCStrOut_t str,
+                         size_t strSize);
+bool SSFDecStrToOctets(SSFCStrIn_t str, char sep, uint8_t *octets, uint8_t octetsSize,
+                       uint8_t *numOctetsOut);
+
 /* --------------------------------------------------------------------------------------------- */
 /* Unit test                                                                                     */
 /* --------------------------------------------------------------------------------------------- */

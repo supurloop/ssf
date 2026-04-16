@@ -527,3 +527,97 @@ bool SSFDecStrToXInt(SSFCStrIn_t str, int64_t *sval, uint64_t *uval)
     return true;
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Formats an array of uint8_t values as a separator-delimited decimal string.                   */
+/* Returns 0 if unable to convert, else number of bytes written to str (not including NULL).      */
+/* --------------------------------------------------------------------------------------------- */
+size_t SSFDecOctetsToStr(const uint8_t *octets, uint8_t numOctets, char sep, SSFCStrOut_t str,
+                         size_t strSize)
+{
+    size_t totalLen = 0;
+    size_t len;
+    uint8_t i;
+
+    SSF_ASSERT(octets != NULL);
+    SSF_ASSERT(numOctets > 0);
+    SSF_ASSERT(str != NULL);
+    SSF_ASSERT(strSize > 0);
+
+    for (i = 0; i < numOctets; i++)
+    {
+        /* Add separator before all octets except the first */
+        if (i > 0)
+        {
+            if ((totalLen + 1u) >= strSize) return 0;
+            str[totalLen] = sep;
+            totalLen++;
+        }
+
+        /* Convert octet to decimal string */
+        len = SSFDecUIntToStr((uint64_t)octets[i], &str[totalLen], strSize - totalLen);
+        if (len == 0) return 0;
+        totalLen += len;
+    }
+    return totalLen;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Parses a separator-delimited decimal string into an array of uint8_t values.                  */
+/* Returns true if parsed, else false.                                                           */
+/* Each field must be 0-255 with no leading zeros (except "0" itself).                           */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFDecStrToOctets(SSFCStrIn_t str, char sep, uint8_t *octets, uint8_t octetsSize,
+                       uint8_t *numOctetsOut)
+{
+    uint8_t count = 0;
+    uint32_t val;
+    uint8_t digits;
+
+    SSF_REQUIRE(str != NULL);
+    SSF_REQUIRE(octets != NULL);
+    SSF_REQUIRE(octetsSize > 0);
+    SSF_REQUIRE(numOctetsOut != NULL);
+
+    while (*str != '\0')
+    {
+        const char *octetStart = str;
+
+        if (count >= octetsSize) return false;
+
+        /* Must start with a digit */
+        if (!SSFIsDigit(*str)) return false;
+
+        val = 0;
+        digits = 0;
+        while (SSFIsDigit(*str))
+        {
+            val = (val * 10u) + (uint32_t)(*str - '0');
+            digits++;
+            if (val > 255u) return false;
+            if (digits > 3u) return false;
+            str++;
+        }
+
+        /* Reject leading zeros (e.g., "01", "007") but allow "0" */
+        if ((digits > 1u) && (*octetStart == '0')) return false;
+
+        octets[count] = (uint8_t)val;
+        count++;
+
+        /* Expect separator or end of string */
+        if (*str == sep)
+        {
+            str++;
+            /* Reject trailing separator */
+            if (*str == '\0') return false;
+        }
+        else if (*str != '\0') return false;
+    }
+
+    /* Must have at least one octet */
+    if (count == 0) return false;
+
+    *numOctetsOut = count;
+    return true;
+}
+

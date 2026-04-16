@@ -50,6 +50,7 @@
 #include "ssfchacha20.h"
 #include "ssfpoly1305.h"
 #include "ssfx25519.h"
+#include "ssfed25519.h"
 #include "ssftlv.h"
 #include "ssfaes.h"
 #include "ssfaesgcm.h"
@@ -151,6 +152,9 @@ SSFUnitTest_t unitTests[] =
 #if SSF_CONFIG_X25519_UNIT_TEST == 1
     { "ssfx25519", "X25519 Key Exchange", SSFX25519UnitTest },
 #endif /* SSF_CONFIG_X25519_UNIT_TEST */
+#if SSF_CONFIG_ED25519_UNIT_TEST == 1
+    { "ssfed25519", "Ed25519 Sign/Verify", SSFEd25519UnitTest },
+#endif /* SSF_CONFIG_ED25519_UNIT_TEST */
 
     /* _ecc */
 #if SSF_CONFIG_RS_UNIT_TEST == 1

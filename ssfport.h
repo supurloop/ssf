@@ -48,6 +48,7 @@ extern "C" {
 /* --------------------------------------------------------------------------------------------- */
 
 /* _codec */
+#define SSF_CONFIG_ASN1_UNIT_TEST    (1u)
 #define SSF_CONFIG_BASE64_UNIT_TEST  (1u)
 #define SSF_CONFIG_DEC_UNIT_TEST     (1u)
 #define SSF_CONFIG_GOBJ_UNIT_TEST    (1u)
@@ -60,9 +61,23 @@ extern "C" {
 
 /* _crypto */
 #define SSF_CONFIG_AES_UNIT_TEST     (1u)
+#define SSF_CONFIG_AESCCM_UNIT_TEST  (1u)
 #define SSF_CONFIG_AESGCM_UNIT_TEST  (1u)
+#define SSF_CONFIG_BN_UNIT_TEST      (1u)
+#define SSF_CONFIG_CCP_UNIT_TEST     (1u)  /* ChaCha20-Poly1305 AEAD */
+#define SSF_CONFIG_CHACHA20_UNIT_TEST (1u)
+#define SSF_CONFIG_EC_UNIT_TEST      (1u)
+#define SSF_CONFIG_ECDSA_UNIT_TEST   (1u)
+#define SSF_CONFIG_ED25519_UNIT_TEST (1u)
+#define SSF_CONFIG_HKDF_UNIT_TEST    (1u)
+#define SSF_CONFIG_HMAC_UNIT_TEST    (1u)
+#define SSF_CONFIG_POLY1305_UNIT_TEST (1u)
 #define SSF_CONFIG_PRNG_UNIT_TEST    (1u)
+#define SSF_CONFIG_RSA_UNIT_TEST     (1u)
+#define SSF_CONFIG_SHA1_UNIT_TEST    (1u)
 #define SSF_CONFIG_SHA2_UNIT_TEST    (1u)
+#define SSF_CONFIG_TLS_UNIT_TEST     (1u)
+#define SSF_CONFIG_X25519_UNIT_TEST  (1u)
 
 /* _ecc */
 #define SSF_CONFIG_RS_UNIT_TEST      (1u)
@@ -99,6 +114,7 @@ extern "C" {
 
 /* If any unit test is enabled then enable unit test mode */
 #if /* _codec */ \
+    SSF_CONFIG_ASN1_UNIT_TEST == 1 || \
     SSF_CONFIG_BASE64_UNIT_TEST == 1 || \
     SSF_CONFIG_DEC_UNIT_TEST == 1 || \
     SSF_CONFIG_GOBJ_UNIT_TEST == 1 || \
@@ -110,9 +126,23 @@ extern "C" {
     SSF_CONFIG_UBJSON_UNIT_TEST == 1 || \
     /* _crypto */ \
     SSF_CONFIG_AES_UNIT_TEST == 1 || \
+    SSF_CONFIG_AESCCM_UNIT_TEST == 1 || \
     SSF_CONFIG_AESGCM_UNIT_TEST == 1 || \
+    SSF_CONFIG_BN_UNIT_TEST == 1 || \
+    SSF_CONFIG_CCP_UNIT_TEST == 1 || \
+    SSF_CONFIG_CHACHA20_UNIT_TEST == 1 || \
+    SSF_CONFIG_EC_UNIT_TEST == 1 || \
+    SSF_CONFIG_ECDSA_UNIT_TEST == 1 || \
+    SSF_CONFIG_ED25519_UNIT_TEST == 1 || \
+    SSF_CONFIG_HKDF_UNIT_TEST == 1 || \
+    SSF_CONFIG_HMAC_UNIT_TEST == 1 || \
+    SSF_CONFIG_POLY1305_UNIT_TEST == 1 || \
     SSF_CONFIG_PRNG_UNIT_TEST == 1 || \
+    SSF_CONFIG_RSA_UNIT_TEST == 1 || \
+    SSF_CONFIG_SHA1_UNIT_TEST == 1 || \
     SSF_CONFIG_SHA2_UNIT_TEST == 1 || \
+    SSF_CONFIG_TLS_UNIT_TEST == 1 || \
+    SSF_CONFIG_X25519_UNIT_TEST == 1 || \
     /* _ecc */ \
     SSF_CONFIG_RS_UNIT_TEST == 1 || \
     /* _edc */ \

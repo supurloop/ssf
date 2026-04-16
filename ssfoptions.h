@@ -465,6 +465,37 @@ typedef enum
     /* Maximum number of cmds that can be registered in the CLI */
 #define SSF_CLI_MAX_CMD_HIST (6u)
 
+/* --------------------------------------------------------------------------------------------- */
+/* Configure ssfasn1 / ssfbn / ssfec / ssfrsa / ssfx25519 / ssftls (from ssip)                   */
+/* --------------------------------------------------------------------------------------------- */
+
+/* Maximum OID arc depth for decoded ASN.1 OIDs */
+#define SSF_ASN1_CONFIG_MAX_OID_ARCS         (12u)
+
+/* ssfbn maximum bignum width in bits (4096 supports RSA-4096) */
+#define SSF_BN_CONFIG_MAX_BITS               (4096u)
+
+/* ssfec curves enabled */
+#define SSF_EC_CONFIG_ENABLE_P256            (1u)
+#define SSF_EC_CONFIG_ENABLE_P384            (1u)
+
+/* ssfrsa features */
+#define SSF_RSA_CONFIG_ENABLE_KEYGEN         (1u)
+#define SSF_RSA_CONFIG_ENABLE_PKCS1_V15      (1u)
+#define SSF_RSA_CONFIG_ENABLE_PSS            (1u)
+#define SSF_RSA_CONFIG_MILLER_RABIN_ROUNDS   (5u)
+
+/* ssfx25519 enabled */
+#define SSF_X25519_CONFIG_ENABLE             (1u)
+
+/* ssftls capacities */
+#define SSF_TLS_CONFIG_MAX_RECORD_SIZE       (8192u)
+#define SSF_TLS_CONFIG_MAX_CHAIN_DEPTH       (4u)
+#define SSF_TLS_CONFIG_MAX_TRUSTED_CAS       (8u)
+#define SSF_TLS_CONFIG_PSK_ENABLE            (1u)
+#define SSF_TLS_CONFIG_TICKET_LIFETIME_SEC   (3600u)
+#define SSF_TLS_CONFIG_MAX_ALPN_LEN          (32u)
+
 #ifdef __cplusplus
 }
 #endif

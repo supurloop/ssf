@@ -46,9 +46,9 @@ extern "C" {
 
 typedef struct
 {
-    uint8_t entropy[SSF_PRNG_ENTROPY_SIZE];
-    uint64_t count;
-    uint32_t magic;
+	uint8_t entropy[SSF_PRNG_ENTROPY_SIZE];
+	uint64_t count;
+	uint32_t magic;
 } SSFPRNGContext_t;
 
 /* --------------------------------------------------------------------------------------------- */

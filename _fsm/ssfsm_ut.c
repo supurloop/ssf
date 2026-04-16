@@ -585,7 +585,7 @@ void SSFSMUnitTest(void)
     SSF_ASSERT_TEST(SSFSMPutEventData(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_EXIT,
                                       (SSFSMData_t *)"1234567890", 10));
     SSF_ASSERT(SSFSMTask(NULL) == false);
-    nextTimeout = 0;
+    nextTimeout = SSF_SM_MAX_TIMEOUT;
     SSF_ASSERT(SSFSMTask(&nextTimeout) == false);
     SSF_ASSERT(nextTimeout == SSF_SM_MAX_TIMEOUT);
     SSF_ASSERT(_SSFSMFlagsAreCleared());
@@ -601,7 +601,7 @@ void SSFSMUnitTest(void)
     while (SSFSMTask(NULL));
 #else
     SSF_ASSERT(_SSFSMFlagsAreCleared());
-    nextTimeout = 0;
+    nextTimeout = SSF_SM_MAX_TIMEOUT;
     SSF_ASSERT(SSFSMTask(&nextTimeout) == false);
     SSF_ASSERT(nextTimeout == SSF_SM_MAX_TIMEOUT);
 #endif
@@ -671,7 +671,7 @@ void SSFSMUnitTest(void)
 
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_1, 0, SSF_SM_EVENT_UTX_1);
     SSF_ASSERT(_SSFSMFlagsAreCleared());
-    nextTimeout = 0;
+    nextTimeout = SSF_SM_MAX_TIMEOUT;
     SSF_ASSERT(SSFSMTask(&nextTimeout) == true);
     delta = nextTimeout;
     SSF_ASSERT((delta > (0.9 * SSF_TICKS_PER_SEC)) && (delta <= SSF_TICKS_PER_SEC));
@@ -679,7 +679,7 @@ void SSFSMUnitTest(void)
     while (lastTimeout >= nextTimeout)
     {
         lastTimeout = nextTimeout;
-        nextTimeout = 0;
+        nextTimeout = SSF_SM_MAX_TIMEOUT;
         SSF_ASSERT(SSFSMTask(&nextTimeout) == true);
     }
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_1, 0, SSF_SM_EVENT_UT1_1);
@@ -689,14 +689,14 @@ void SSFSMUnitTest(void)
     while (lastTimeout >= nextTimeout)
     {
         lastTimeout = nextTimeout;
-        nextTimeout = 0;
+        nextTimeout = SSF_SM_MAX_TIMEOUT;
         SSFSMTask(&nextTimeout);
     }
     lastTimeout = nextTimeout;
     while (lastTimeout >= nextTimeout)
     {
         lastTimeout = nextTimeout;
-        nextTimeout = 0;
+        nextTimeout = SSF_SM_MAX_TIMEOUT;
         SSFSMTask(&nextTimeout);
     }
     delta = SSFPortGetTick64() - start;
@@ -730,7 +730,7 @@ void SSFSMUnitTest(void)
     while (lastTimeout >= nextTimeout)
     {
         lastTimeout = nextTimeout;
-        nextTimeout = 0;
+        nextTimeout = SSF_SM_MAX_TIMEOUT;
         SSFSMTask(&nextTimeout);
     }
     SSF_ASSERT(SSFSMTask(&nextTimeout) == false);
@@ -753,7 +753,7 @@ void SSFSMUnitTest(void)
     while (lastTimeout >= nextTimeout)
     {
         lastTimeout = nextTimeout;
-        nextTimeout = 0;
+        nextTimeout = SSF_SM_MAX_TIMEOUT;
         SSFSMTask(&nextTimeout);
     }
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_2, 1, SSF_SM_EVENT_UT2_2);
@@ -831,6 +831,7 @@ void SSFSMUnitTest(void)
     SSFSMDeInit();
     SSFSMInit(SSFSM_UT_MAX_EVENTS, SSFSM_UT_MAX_TIMERS);
     SSF_ASSERT(SSFSMTask(NULL) == false);
+    nextTimeout = SSF_SM_MAX_TIMEOUT;
     SSF_ASSERT(SSFSMTask(&nextTimeout) == false);
     SSF_ASSERT(nextTimeout == SSF_SM_MAX_TIMEOUT);
 

@@ -211,15 +211,9 @@ SSFUnitTest_t unitTests[] =
 #endif /* SSF_CONFIG_FCSUM_UNIT_TEST */
 
     /* _fsm */
-    /* ssfsm UT registration disabled: the upstream test was written for the old             */
-    /* SSFSMTimeout_t-based API; ssip's new SSFPortTick_t-based "lower-only" semantics       */
-    /* don't satisfy the old test's "set to MAX after no events" assertion. Code still       */
-    /* compiles under SSF_CONFIG_SM_UNIT_TEST=1; just not invoked. Mirrors ssip main.c.      */
-#if 0
 #if SSF_CONFIG_SM_UNIT_TEST == 1
     { "ssfsm", "Finite State Machine", SSFSMUnitTest },
 #endif /* SSF_CONFIG_SM_UNIT_TEST */
-#endif
 
     /* _storage */
 #if SSF_CONFIG_CFG_UNIT_TEST == 1

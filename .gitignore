@@ -1,3 +1,5 @@
 Debug/**
 x64/**
 .vs/**
+build/
+ssf

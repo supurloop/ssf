@@ -1,0 +1,149 @@
+# SSF Build Configuration
+# Generated for Linux (gcc)
+#
+# Usage: ninja                  -- builds ./ssf
+#        ninja -t clean         -- removes build artifacts
+#        ninja -t targets       -- list available targets
+#
+# For Linux, use build-linux.ninja (ninja -f build-linux.ninja).
+
+cc = gcc
+
+cflags_common = -Wall -Wextra -pedantic -Wcast-align -Wno-parentheses -Wno-unused $
+    -Wdisabled-optimization -fdiagnostics-show-option -Wstrict-overflow=5 -Wformat=2
+
+includes = -I. -I_time -I_codec -I_crypto -I_ecc -I_edc -I_fsm -I_debug $
+    -I_storage -I_struct -I_ui
+
+cflags = $cflags_common -Wlogical-op -O3
+ldflags = -lm -lpthread
+
+builddir = build
+
+rule cc_obj
+    command = $cc -MMD -MF $out.d $cflags $includes -c $in -o $out
+    depfile = $out.d
+    description = CC $in
+
+rule link
+    command = $cc $in -o $out $ldflags
+    description = LINK $out
+
+# Top-level
+build $builddir/main.o:    cc_obj main.c
+build $builddir/ssfport.o: cc_obj ssfport.c
+
+# _codec
+build $builddir/_codec/ssfbase64.o:    cc_obj _codec/ssfbase64.c
+build $builddir/_codec/ssfbase64_ut.o: cc_obj _codec/ssfbase64_ut.c
+build $builddir/_codec/ssfdec.o:       cc_obj _codec/ssfdec.c
+build $builddir/_codec/ssfdec_ut.o:    cc_obj _codec/ssfdec_ut.c
+build $builddir/_codec/ssfgobj.o:      cc_obj _codec/ssfgobj.c
+build $builddir/_codec/ssfgobj_ut.o:   cc_obj _codec/ssfgobj_ut.c
+build $builddir/_codec/ssfhex.o:       cc_obj _codec/ssfhex.c
+build $builddir/_codec/ssfhex_ut.o:    cc_obj _codec/ssfhex_ut.c
+build $builddir/_codec/ssfini.o:       cc_obj _codec/ssfini.c
+build $builddir/_codec/ssfini_ut.o:    cc_obj _codec/ssfini_ut.c
+build $builddir/_codec/ssfjson.o:      cc_obj _codec/ssfjson.c
+build $builddir/_codec/ssfjson_ut.o:   cc_obj _codec/ssfjson_ut.c
+build $builddir/_codec/ssfstr.o:       cc_obj _codec/ssfstr.c
+build $builddir/_codec/ssfstr_ut.o:    cc_obj _codec/ssfstr_ut.c
+build $builddir/_codec/ssftlv.o:       cc_obj _codec/ssftlv.c
+build $builddir/_codec/ssftlv_ut.o:    cc_obj _codec/ssftlv_ut.c
+build $builddir/_codec/ssfubjson.o:    cc_obj _codec/ssfubjson.c
+build $builddir/_codec/ssfubjson_ut.o: cc_obj _codec/ssfubjson_ut.c
+
+# _crypto
+build $builddir/_crypto/ssfaes.o:       cc_obj _crypto/ssfaes.c
+build $builddir/_crypto/ssfaes_ut.o:    cc_obj _crypto/ssfaes_ut.c
+build $builddir/_crypto/ssfaesgcm.o:    cc_obj _crypto/ssfaesgcm.c
+build $builddir/_crypto/ssfaesgcm_ut.o: cc_obj _crypto/ssfaesgcm_ut.c
+build $builddir/_crypto/ssfprng.o:      cc_obj _crypto/ssfprng.c
+build $builddir/_crypto/ssfprng_ut.o:   cc_obj _crypto/ssfprng_ut.c
+build $builddir/_crypto/ssfsha2.o:      cc_obj _crypto/ssfsha2.c
+build $builddir/_crypto/ssfsha2_ut.o:   cc_obj _crypto/ssfsha2_ut.c
+
+# _debug
+build $builddir/_debug/ssftrace.o:    cc_obj _debug/ssftrace.c
+build $builddir/_debug/ssftrace_ut.o: cc_obj _debug/ssftrace_ut.c
+
+# _ecc
+build $builddir/_ecc/ssfrs.o:    cc_obj _ecc/ssfrs.c
+build $builddir/_ecc/ssfrs_ut.o: cc_obj _ecc/ssfrs_ut.c
+
+# _edc
+build $builddir/_edc/ssfcrc16.o:    cc_obj _edc/ssfcrc16.c
+build $builddir/_edc/ssfcrc16_ut.o: cc_obj _edc/ssfcrc16_ut.c
+build $builddir/_edc/ssfcrc32.o:    cc_obj _edc/ssfcrc32.c
+build $builddir/_edc/ssfcrc32_ut.o: cc_obj _edc/ssfcrc32_ut.c
+build $builddir/_edc/ssffcsum.o:    cc_obj _edc/ssffcsum.c
+build $builddir/_edc/ssffcsum_ut.o: cc_obj _edc/ssffcsum_ut.c
+
+# _fsm
+build $builddir/_fsm/ssfsm.o:    cc_obj _fsm/ssfsm.c
+build $builddir/_fsm/ssfsm_ut.o: cc_obj _fsm/ssfsm_ut.c
+
+# _storage
+build $builddir/_storage/ssfcfg.o:    cc_obj _storage/ssfcfg.c
+build $builddir/_storage/ssfcfg_ut.o: cc_obj _storage/ssfcfg_ut.c
+
+# _struct
+build $builddir/_struct/ssfbfifo.o:    cc_obj _struct/ssfbfifo.c
+build $builddir/_struct/ssfbfifo_ut.o: cc_obj _struct/ssfbfifo_ut.c
+build $builddir/_struct/ssfheap.o:     cc_obj _struct/ssfheap.c
+build $builddir/_struct/ssfheap_ut.o:  cc_obj _struct/ssfheap_ut.c
+build $builddir/_struct/ssfll.o:       cc_obj _struct/ssfll.c
+build $builddir/_struct/ssfll_ut.o:    cc_obj _struct/ssfll_ut.c
+build $builddir/_struct/ssfmpool.o:    cc_obj _struct/ssfmpool.c
+build $builddir/_struct/ssfmpool_ut.o: cc_obj _struct/ssfmpool_ut.c
+
+# _time
+build $builddir/_time/ssfdtime.o:     cc_obj _time/ssfdtime.c
+build $builddir/_time/ssfdtime_ut.o:  cc_obj _time/ssfdtime_ut.c
+build $builddir/_time/ssfiso8601.o:   cc_obj _time/ssfiso8601.c
+build $builddir/_time/ssfiso8601_ut.o:cc_obj _time/ssfiso8601_ut.c
+build $builddir/_time/ssfrtc.o:       cc_obj _time/ssfrtc.c
+build $builddir/_time/ssfrtc_ut.o:    cc_obj _time/ssfrtc_ut.c
+
+# _ui
+build $builddir/_ui/ssfargv.o:    cc_obj _ui/ssfargv.c
+build $builddir/_ui/ssfargv_ut.o: cc_obj _ui/ssfargv_ut.c
+build $builddir/_ui/ssfcli.o:     cc_obj _ui/ssfcli.c
+build $builddir/_ui/ssfcli_ut.o:  cc_obj _ui/ssfcli_ut.c
+build $builddir/_ui/ssfvted.o:    cc_obj _ui/ssfvted.c
+build $builddir/_ui/ssfvted_ut.o: cc_obj _ui/ssfvted_ut.c
+
+# Final binary
+build ssf: link $builddir/main.o $builddir/ssfport.o $
+    $builddir/_codec/ssfbase64.o    $builddir/_codec/ssfbase64_ut.o $
+    $builddir/_codec/ssfdec.o       $builddir/_codec/ssfdec_ut.o $
+    $builddir/_codec/ssfgobj.o      $builddir/_codec/ssfgobj_ut.o $
+    $builddir/_codec/ssfhex.o       $builddir/_codec/ssfhex_ut.o $
+    $builddir/_codec/ssfini.o       $builddir/_codec/ssfini_ut.o $
+    $builddir/_codec/ssfjson.o      $builddir/_codec/ssfjson_ut.o $
+    $builddir/_codec/ssfstr.o       $builddir/_codec/ssfstr_ut.o $
+    $builddir/_codec/ssftlv.o       $builddir/_codec/ssftlv_ut.o $
+    $builddir/_codec/ssfubjson.o    $builddir/_codec/ssfubjson_ut.o $
+    $builddir/_crypto/ssfaes.o      $builddir/_crypto/ssfaes_ut.o $
+    $builddir/_crypto/ssfaesgcm.o   $builddir/_crypto/ssfaesgcm_ut.o $
+    $builddir/_crypto/ssfprng.o     $builddir/_crypto/ssfprng_ut.o $
+    $builddir/_crypto/ssfsha2.o     $builddir/_crypto/ssfsha2_ut.o $
+    $builddir/_debug/ssftrace.o     $builddir/_debug/ssftrace_ut.o $
+    $builddir/_ecc/ssfrs.o          $builddir/_ecc/ssfrs_ut.o $
+    $builddir/_edc/ssfcrc16.o       $builddir/_edc/ssfcrc16_ut.o $
+    $builddir/_edc/ssfcrc32.o       $builddir/_edc/ssfcrc32_ut.o $
+    $builddir/_edc/ssffcsum.o       $builddir/_edc/ssffcsum_ut.o $
+    $builddir/_fsm/ssfsm.o          $builddir/_fsm/ssfsm_ut.o $
+    $builddir/_storage/ssfcfg.o     $builddir/_storage/ssfcfg_ut.o $
+    $builddir/_struct/ssfbfifo.o    $builddir/_struct/ssfbfifo_ut.o $
+    $builddir/_struct/ssfheap.o     $builddir/_struct/ssfheap_ut.o $
+    $builddir/_struct/ssfll.o       $builddir/_struct/ssfll_ut.o $
+    $builddir/_struct/ssfmpool.o    $builddir/_struct/ssfmpool_ut.o $
+    $builddir/_time/ssfdtime.o      $builddir/_time/ssfdtime_ut.o $
+    $builddir/_time/ssfiso8601.o    $builddir/_time/ssfiso8601_ut.o $
+    $builddir/_time/ssfrtc.o        $builddir/_time/ssfrtc_ut.o $
+    $builddir/_ui/ssfargv.o         $builddir/_ui/ssfargv_ut.o $
+    $builddir/_ui/ssfcli.o          $builddir/_ui/ssfcli_ut.o $
+    $builddir/_ui/ssfvted.o         $builddir/_ui/ssfvted_ut.o
+
+default ssf

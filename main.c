@@ -58,6 +58,7 @@
 #include "ssfhkdf.h"
 #include "ssfecdsa.h"
 #include "ssfrsa.h"
+#include "ssftls.h"
 #include "ssftlv.h"
 #include "ssfaes.h"
 #include "ssfaesgcm.h"
@@ -187,6 +188,9 @@ SSFUnitTest_t unitTests[] =
 #if SSF_CONFIG_RSA_UNIT_TEST == 1
     { "ssfrsa", "RSA Sign/Verify", SSFRSAUnitTest },
 #endif /* SSF_CONFIG_RSA_UNIT_TEST */
+#if SSF_CONFIG_TLS_UNIT_TEST == 1
+    { "ssftls", "TLS 1.3 Core", SSFTLSUnitTest },
+#endif /* SSF_CONFIG_TLS_UNIT_TEST */
 
     /* _ecc */
 #if SSF_CONFIG_RS_UNIT_TEST == 1

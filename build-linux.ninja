@@ -90,6 +90,8 @@ build $builddir/_crypto/ssfecdsa.o:      cc_obj _crypto/ssfecdsa.c
 build $builddir/_crypto/ssfecdsa_ut.o:   cc_obj _crypto/ssfecdsa_ut.c
 build $builddir/_crypto/ssfrsa.o:      cc_obj _crypto/ssfrsa.c
 build $builddir/_crypto/ssfrsa_ut.o:   cc_obj _crypto/ssfrsa_ut.c
+build $builddir/_crypto/ssftls.o:      cc_obj _crypto/ssftls.c
+build $builddir/_crypto/ssftls_ut.o:   cc_obj _crypto/ssftls_ut.c
 
 # _debug
 build $builddir/_debug/ssftrace.o:    cc_obj _debug/ssftrace.c
@@ -170,6 +172,7 @@ build ssf: link $builddir/main.o $builddir/ssfport.o $
     $builddir/_crypto/ssfhkdf.o     $builddir/_crypto/ssfhkdf_ut.o $
     $builddir/_crypto/ssfecdsa.o     $builddir/_crypto/ssfecdsa_ut.o $
     $builddir/_crypto/ssfrsa.o     $builddir/_crypto/ssfrsa_ut.o $
+    $builddir/_crypto/ssftls.o     $builddir/_crypto/ssftls_ut.o $
     $builddir/_debug/ssftrace.o     $builddir/_debug/ssftrace_ut.o $
     $builddir/_ecc/ssfrs.o          $builddir/_ecc/ssfrs_ut.o $
     $builddir/_edc/ssfcrc16.o       $builddir/_edc/ssfcrc16_ut.o $

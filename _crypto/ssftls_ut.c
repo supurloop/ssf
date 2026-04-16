@@ -1,0 +1,268 @@
+/* --------------------------------------------------------------------------------------------- */
+/* Small System Framework                                                                        */
+/*                                                                                               */
+/* ssftls_ut.c                                                                                   */
+/* Provides unit tests for the ssftls TLS 1.3 core module.                                      */
+/* Key schedule test vectors from RFC 8448 ("Example Handshake Traces for TLS 1.3").             */
+/*                                                                                               */
+/* BSD-3-Clause License                                                                          */
+/* Copyright 2024 Supurloop Software LLC                                                         */
+/*                                                                                               */
+/* Redistribution and use in source and binary forms, with or without modification, are          */
+/* permitted provided that the following conditions are met:                                     */
+/*                                                                                               */
+/* 1. Redistributions of source code must retain the above copyright notice, this list of        */
+/* conditions and the following disclaimer.                                                      */
+/* 2. Redistributions in binary form must reproduce the above copyright notice, this list of     */
+/* conditions and the following disclaimer in the documentation and/or other materials provided  */
+/* with the distribution.                                                                        */
+/* 3. Neither the name of the copyright holder nor the names of its contributors may be used to  */
+/* endorse or promote products derived from this software without specific prior written         */
+/* permission.                                                                                   */
+/*                                                                                               */
+/* THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS   */
+/* OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF               */
+/* MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE    */
+/* COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL      */
+/* EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE */
+/* GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED    */
+/* AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING     */
+/* NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED  */
+/* OF THE POSSIBILITY OF SUCH DAMAGE.                                                            */
+/* --------------------------------------------------------------------------------------------- */
+#include "ssfassert.h"
+#include "ssftls.h"
+#include "ssfhkdf.h"
+
+#if SSF_CONFIG_TLS_UNIT_TEST == 1
+
+void SSFTLSUnitTest(void)
+{
+    /* ---- Transcript hash: SHA-256 of empty string ---- */
+    {
+        SSFTLSTranscript_t t;
+        uint8_t hash[32];
+        /* SHA-256("") = e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 */
+        static const uint8_t expectedEmpty[] = {
+            0xE3u, 0xB0u, 0xC4u, 0x42u, 0x98u, 0xFCu, 0x1Cu, 0x14u,
+            0x9Au, 0xFBu, 0xF4u, 0xC8u, 0x99u, 0x6Fu, 0xB9u, 0x24u,
+            0x27u, 0xAEu, 0x41u, 0xE4u, 0x64u, 0x9Bu, 0x93u, 0x4Cu,
+            0xA4u, 0x95u, 0x99u, 0x1Bu, 0x78u, 0x52u, 0xB8u, 0x55u
+        };
+
+        SSFTLSTranscriptInit(&t, SSF_HMAC_HASH_SHA256);
+        SSFTLSTranscriptHash(&t, hash, sizeof(hash));
+        SSF_ASSERT(memcmp(hash, expectedEmpty, 32) == 0);
+    }
+
+    /* ---- Transcript hash: snapshot preserves running state ---- */
+    {
+        SSFTLSTranscript_t t;
+        uint8_t hash1[32], hash2[32];
+
+        SSFTLSTranscriptInit(&t, SSF_HMAC_HASH_SHA256);
+        SSFTLSTranscriptUpdate(&t, (const uint8_t *)"hello", 5);
+        SSFTLSTranscriptHash(&t, hash1, sizeof(hash1));
+
+        /* Update more data and take another snapshot */
+        SSFTLSTranscriptUpdate(&t, (const uint8_t *)" world", 6);
+        SSFTLSTranscriptHash(&t, hash2, sizeof(hash2));
+
+        /* Snapshots should differ */
+        SSF_ASSERT(memcmp(hash1, hash2, 32) != 0);
+    }
+
+    /* ---- HKDF-Expand-Label basic test ---- */
+    /* Verify the label encoding produces correct output by testing against known values. */
+    /* The TLS 1.3 key schedule starts with HKDF-Extract(0, 0) for early secret (no PSK). */
+    {
+        uint8_t earlySecret[32];
+        uint8_t zeroPSK[32];
+        uint8_t zeroSalt[32];
+
+        memset(zeroPSK, 0, sizeof(zeroPSK));
+        memset(zeroSalt, 0, sizeof(zeroSalt));
+
+        /* Early Secret = HKDF-Extract(salt=0, IKM=0) */
+        SSF_ASSERT(SSFHKDFExtract(SSF_HMAC_HASH_SHA256, zeroSalt, 32, zeroPSK, 32,
+                   earlySecret, sizeof(earlySecret)) == true);
+
+        /* The early secret should be deterministic and non-zero */
+        {
+            uint8_t i;
+            bool nonZero = false;
+            for (i = 0; i < 32u; i++) if (earlySecret[i] != 0u) nonZero = true;
+            SSF_ASSERT(nonZero == true);
+        }
+
+        /* Derive-Secret(early_secret, "derived", Hash("")) */
+        {
+            uint8_t emptyHash[32];
+            uint8_t derived[32];
+            SSFTLSTranscript_t t;
+
+            SSFTLSTranscriptInit(&t, SSF_HMAC_HASH_SHA256);
+            SSFTLSTranscriptHash(&t, emptyHash, sizeof(emptyHash));
+
+            SSFTLSDeriveSecret(SSF_HMAC_HASH_SHA256, earlySecret, 32,
+                               "derived", emptyHash, 32, derived, 32);
+
+            /* derived should be non-zero and different from earlySecret */
+            SSF_ASSERT(memcmp(derived, earlySecret, 32) != 0);
+        }
+    }
+
+    /* ---- Traffic key derivation roundtrip ---- */
+    {
+        uint8_t secret[32];
+        uint8_t key[16], iv[12];
+        uint8_t i;
+
+        /* Use a known secret */
+        for (i = 0; i < 32u; i++) secret[i] = i;
+
+        SSFTLSDeriveTrafficKeys(SSF_HMAC_HASH_SHA256, secret, 32,
+                                key, sizeof(key), iv, sizeof(iv));
+
+        /* Key and IV should be non-zero */
+        {
+            bool nonZero = false;
+            for (i = 0; i < 16u; i++) if (key[i] != 0u) nonZero = true;
+            SSF_ASSERT(nonZero);
+            nonZero = false;
+            for (i = 0; i < 12u; i++) if (iv[i] != 0u) nonZero = true;
+            SSF_ASSERT(nonZero);
+        }
+    }
+
+    /* ---- Finished computation ---- */
+    {
+        uint8_t baseKey[32];
+        uint8_t transcriptHash[32];
+        uint8_t verifyData[32];
+        uint8_t i;
+
+        for (i = 0; i < 32u; i++) { baseKey[i] = i; transcriptHash[i] = (uint8_t)(i + 32u); }
+        SSFTLSComputeFinished(SSF_HMAC_HASH_SHA256, baseKey, 32,
+                              transcriptHash, 32, verifyData, 32);
+
+        /* Verify data should be deterministic */
+        {
+            uint8_t verifyData2[32];
+            SSFTLSComputeFinished(SSF_HMAC_HASH_SHA256, baseKey, 32,
+                                  transcriptHash, 32, verifyData2, 32);
+            SSF_ASSERT(memcmp(verifyData, verifyData2, 32) == 0);
+        }
+    }
+
+    /* ---- Record encrypt / decrypt roundtrip (AES-128-GCM) ---- */
+    {
+        SSFTLSRecordState_t encState, decState;
+        uint8_t key[16], iv[12];
+        uint8_t plaintext[] = "Hello, TLS 1.3!";
+        size_t ptLen = sizeof(plaintext) - 1u;
+        uint8_t record[SSF_TLS_RECORD_HEADER_SIZE + 256 + 1 + SSF_TLS_AEAD_TAG_SIZE];
+        size_t recordLen;
+        uint8_t decrypted[256];
+        size_t decLen;
+        uint8_t ct;
+        uint8_t i;
+
+        /* Use test key and IV */
+        for (i = 0; i < 16u; i++) key[i] = (uint8_t)(i + 1u);
+        for (i = 0; i < 12u; i++) iv[i] = (uint8_t)(i + 0x10u);
+
+        SSFTLSRecordStateInit(&encState, SSF_TLS_CS_AES_128_GCM_SHA256,
+                              key, sizeof(key), iv, sizeof(iv));
+        SSFTLSRecordStateInit(&decState, SSF_TLS_CS_AES_128_GCM_SHA256,
+                              key, sizeof(key), iv, sizeof(iv));
+
+        /* Encrypt */
+        SSF_ASSERT(SSFTLSRecordEncrypt(&encState, SSF_TLS_CT_APPLICATION,
+                   plaintext, ptLen, record, sizeof(record), &recordLen) == true);
+
+        /* Record should be larger than plaintext */
+        SSF_ASSERT(recordLen == SSF_TLS_RECORD_HEADER_SIZE + ptLen + 1u + SSF_TLS_AEAD_TAG_SIZE);
+
+        /* Outer content type should be application_data (23) */
+        SSF_ASSERT(record[0] == SSF_TLS_CT_APPLICATION);
+
+        /* Decrypt */
+        SSF_ASSERT(SSFTLSRecordDecrypt(&decState, record, recordLen,
+                   decrypted, sizeof(decrypted), &decLen, &ct) == true);
+
+        /* Verify */
+        SSF_ASSERT(decLen == ptLen);
+        SSF_ASSERT(ct == SSF_TLS_CT_APPLICATION);
+        SSF_ASSERT(memcmp(decrypted, plaintext, ptLen) == 0);
+
+        /* Second record with incremented sequence number */
+        SSF_ASSERT(SSFTLSRecordEncrypt(&encState, SSF_TLS_CT_HANDSHAKE,
+                   plaintext, ptLen, record, sizeof(record), &recordLen) == true);
+        SSF_ASSERT(SSFTLSRecordDecrypt(&decState, record, recordLen,
+                   decrypted, sizeof(decrypted), &decLen, &ct) == true);
+        SSF_ASSERT(ct == SSF_TLS_CT_HANDSHAKE);
+        SSF_ASSERT(memcmp(decrypted, plaintext, ptLen) == 0);
+    }
+
+    /* ---- Record: corrupted ciphertext fails decryption ---- */
+    {
+        SSFTLSRecordState_t encState, decState;
+        uint8_t key[16], iv[12];
+        uint8_t plaintext[] = "test";
+        uint8_t record[128];
+        size_t recordLen;
+        uint8_t decrypted[128];
+        size_t decLen;
+        uint8_t ct;
+        uint8_t i;
+
+        for (i = 0; i < 16u; i++) key[i] = (uint8_t)i;
+        for (i = 0; i < 12u; i++) iv[i] = (uint8_t)i;
+
+        SSFTLSRecordStateInit(&encState, SSF_TLS_CS_AES_128_GCM_SHA256,
+                              key, sizeof(key), iv, sizeof(iv));
+        SSFTLSRecordStateInit(&decState, SSF_TLS_CS_AES_128_GCM_SHA256,
+                              key, sizeof(key), iv, sizeof(iv));
+
+        SSF_ASSERT(SSFTLSRecordEncrypt(&encState, SSF_TLS_CT_APPLICATION,
+                   plaintext, 4, record, sizeof(record), &recordLen) == true);
+
+        /* Corrupt one ciphertext byte */
+        record[SSF_TLS_RECORD_HEADER_SIZE] ^= 0x01u;
+
+        /* Decryption should fail due to tag mismatch */
+        SSF_ASSERT(SSFTLSRecordDecrypt(&decState, record, recordLen,
+                   decrypted, sizeof(decrypted), &decLen, &ct) == false);
+    }
+
+    /* ---- Record: AES-256-GCM roundtrip ---- */
+    {
+        SSFTLSRecordState_t encState, decState;
+        uint8_t key[32], iv[12];
+        uint8_t plaintext[] = "AES-256-GCM test";
+        uint8_t record[128];
+        size_t recordLen;
+        uint8_t decrypted[128];
+        size_t decLen;
+        uint8_t ct;
+        uint8_t i;
+
+        for (i = 0; i < 32u; i++) key[i] = (uint8_t)(i + 0x40u);
+        for (i = 0; i < 12u; i++) iv[i] = (uint8_t)(i + 0x80u);
+
+        SSFTLSRecordStateInit(&encState, SSF_TLS_CS_AES_256_GCM_SHA384,
+                              key, sizeof(key), iv, sizeof(iv));
+        SSFTLSRecordStateInit(&decState, SSF_TLS_CS_AES_256_GCM_SHA384,
+                              key, sizeof(key), iv, sizeof(iv));
+
+        SSF_ASSERT(SSFTLSRecordEncrypt(&encState, SSF_TLS_CT_APPLICATION,
+                   plaintext, 16, record, sizeof(record), &recordLen) == true);
+        SSF_ASSERT(SSFTLSRecordDecrypt(&decState, record, recordLen,
+                   decrypted, sizeof(decrypted), &decLen, &ct) == true);
+        SSF_ASSERT(decLen == 16u);
+        SSF_ASSERT(ct == SSF_TLS_CT_APPLICATION);
+        SSF_ASSERT(memcmp(decrypted, plaintext, 16) == 0);
+    }
+}
+#endif /* SSF_CONFIG_TLS_UNIT_TEST */

@@ -60,6 +60,8 @@ build $builddir/_crypto/ssfaesgcm.o:    cc_obj _crypto/ssfaesgcm.c
 build $builddir/_crypto/ssfaesgcm_ut.o: cc_obj _crypto/ssfaesgcm_ut.c
 build $builddir/_crypto/ssfprng.o:      cc_obj _crypto/ssfprng.c
 build $builddir/_crypto/ssfprng_ut.o:   cc_obj _crypto/ssfprng_ut.c
+build $builddir/_crypto/ssfsha1.o:      cc_obj _crypto/ssfsha1.c
+build $builddir/_crypto/ssfsha1_ut.o:   cc_obj _crypto/ssfsha1_ut.c
 build $builddir/_crypto/ssfsha2.o:      cc_obj _crypto/ssfsha2.c
 build $builddir/_crypto/ssfsha2_ut.o:   cc_obj _crypto/ssfsha2_ut.c
 
@@ -127,6 +129,7 @@ build ssf: link $builddir/main.o $builddir/ssfport.o $
     $builddir/_crypto/ssfaes.o      $builddir/_crypto/ssfaes_ut.o $
     $builddir/_crypto/ssfaesgcm.o   $builddir/_crypto/ssfaesgcm_ut.o $
     $builddir/_crypto/ssfprng.o     $builddir/_crypto/ssfprng_ut.o $
+    $builddir/_crypto/ssfsha1.o     $builddir/_crypto/ssfsha1_ut.o $
     $builddir/_crypto/ssfsha2.o     $builddir/_crypto/ssfsha2_ut.o $
     $builddir/_debug/ssftrace.o     $builddir/_debug/ssftrace_ut.o $
     $builddir/_ecc/ssfrs.o          $builddir/_ecc/ssfrs_ut.o $

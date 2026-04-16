@@ -44,6 +44,7 @@
 #include "ssfrs.h"
 #include "ssfcrc16.h"
 #include "ssfcrc32.h"
+#include "ssfsha1.h"
 #include "ssfsha2.h"
 #include "ssftlv.h"
 #include "ssfaes.h"
@@ -128,6 +129,9 @@ SSFUnitTest_t unitTests[] =
 #if SSF_CONFIG_PRNG_UNIT_TEST == 1
     { "ssfprng", "Crypto Secure Capable PRNG", SSFPRNGUnitTest },
 #endif /* SSF_CONFIG_PRNG_UNIT_TEST */
+#if SSF_CONFIG_SHA1_UNIT_TEST == 1
+    { "ssfsha1", "SHA1 160-bit", SSFSHA1UnitTest },
+#endif /* SSF_CONFIG_SHA1_UNIT_TEST */
 #if SSF_CONFIG_SHA2_UNIT_TEST == 1
     { "ssfsha2", "SHA2 256-512-bits", SSFSHA2UnitTest },
 #endif /* SSF_CONFIG_SHA2_UNIT_TEST */

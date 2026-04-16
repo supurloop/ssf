@@ -1089,7 +1089,7 @@ void SSFJsonUnitTest(void)
             SSF_ASSERT(SSFJsonGetString(_jtsComplex[i], (SSFCStrIn_t *)path, strOut, sizeof(strOut), &strOutLen) == true);
             SSF_ASSERT(strOutLen == 1);
             SSF_ASSERT(strOutLen == strlen(strOut));
-            SSF_ASSERT(memcmp(strOut, &strs[aidx1], strOutLen));
+            SSF_ASSERT(memcmp(strOut, strs[aidx1], strOutLen) == 0);
 #if SSF_JSON_CONFIG_ENABLE_FLOAT_PARSE == 1
             SSF_ASSERT(SSFJsonGetDouble(_jtsComplex[i], (SSFCStrIn_t *)path, &d) == false);
 #endif /* SSF_JSON_CONFIG_ENABLE_FLOAT_PARSE */
@@ -1423,13 +1423,14 @@ void SSFJsonUnitTest(void)
         SSFGObj_t *g = NULL;
         SSFGObj_t *parent = NULL;
         SSFGObj_t *child = NULL;
+        SSFCStrIn_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
         char val[64];
 
         SSF_ASSERT(SSFJsonGObjCreate("{\"key\":\"value\"}", &g, 8));
         SSF_ASSERT(SSFGObjGetType(g) == SSF_OBJ_TYPE_OBJECT);
         memset(path, 0, sizeof(path));
         path[0] = "key";
-        SSF_ASSERT(SSFGObjFindPath(g, (SSFCStrIn_t *)path, &parent, &child));
+        SSF_ASSERT(SSFGObjFindPath(g, path, &parent, &child));
         SSF_ASSERT(SSFGObjGetType(child) == SSF_OBJ_TYPE_STR);
         SSF_ASSERT(SSFGObjGetString(child, val, sizeof(val)));
         SSF_ASSERT(strcmp(val, "value") == 0);
@@ -1442,12 +1443,13 @@ void SSFJsonUnitTest(void)
         SSFGObj_t *g = NULL;
         SSFGObj_t *parent = NULL;
         SSFGObj_t *child = NULL;
+        SSFCStrIn_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
         int64_t intVal;
 
         SSF_ASSERT(SSFJsonGObjCreate("{\"num\":-42}", &g, 8));
         memset(path, 0, sizeof(path));
         path[0] = "num";
-        SSF_ASSERT(SSFGObjFindPath(g, (SSFCStrIn_t *)path, &parent, &child));
+        SSF_ASSERT(SSFGObjFindPath(g, path, &parent, &child));
         SSF_ASSERT(SSFGObjGetType(child) == SSF_OBJ_TYPE_INT);
         SSF_ASSERT(SSFGObjGetInt(child, &intVal));
         SSF_ASSERT(intVal == -42);
@@ -1460,6 +1462,7 @@ void SSFJsonUnitTest(void)
         SSFGObj_t *g = NULL;
         SSFGObj_t *parent = NULL;
         SSFGObj_t *child = NULL;
+        SSFCStrIn_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
         bool bVal;
 
         SSF_ASSERT(SSFJsonGObjCreate("{\"a\":true,\"b\":false,\"c\":null}", &g, 8));
@@ -1467,7 +1470,7 @@ void SSFJsonUnitTest(void)
         memset(path, 0, sizeof(path));
         path[0] = "a";
         parent = NULL; child = NULL;
-        SSF_ASSERT(SSFGObjFindPath(g, (SSFCStrIn_t *)path, &parent, &child));
+        SSF_ASSERT(SSFGObjFindPath(g, path, &parent, &child));
         SSF_ASSERT(SSFGObjGetType(child) == SSF_OBJ_TYPE_BOOL);
         SSF_ASSERT(SSFGObjGetBool(child, &bVal));
         SSF_ASSERT(bVal == true);
@@ -1475,14 +1478,14 @@ void SSFJsonUnitTest(void)
         memset(path, 0, sizeof(path));
         path[0] = "b";
         parent = NULL; child = NULL;
-        SSF_ASSERT(SSFGObjFindPath(g, (SSFCStrIn_t *)path, &parent, &child));
+        SSF_ASSERT(SSFGObjFindPath(g, path, &parent, &child));
         SSF_ASSERT(SSFGObjGetBool(child, &bVal));
         SSF_ASSERT(bVal == false);
 
         memset(path, 0, sizeof(path));
         path[0] = "c";
         parent = NULL; child = NULL;
-        SSF_ASSERT(SSFGObjFindPath(g, (SSFCStrIn_t *)path, &parent, &child));
+        SSF_ASSERT(SSFGObjFindPath(g, path, &parent, &child));
         SSF_ASSERT(SSFGObjGetType(child) == SSF_OBJ_TYPE_NULL);
 
         SSFGObjDeInit(&g);
@@ -1494,6 +1497,7 @@ void SSFJsonUnitTest(void)
         SSFGObj_t *g = NULL;
         SSFGObj_t *parent = NULL;
         SSFGObj_t *child = NULL;
+        SSFCStrIn_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
         char val[64];
         int64_t intVal;
         size_t idx;
@@ -1502,23 +1506,23 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(SSFGObjGetType(g) == SSF_OBJ_TYPE_ARRAY);
 
         memset(path, 0, sizeof(path));
-        idx = 0; path[0] = (SSFCStrOut_t)&idx;
+        idx = 0; path[0] = (SSFCStrIn_t)&idx;
         parent = NULL; child = NULL;
-        SSF_ASSERT(SSFGObjFindPath(g, (SSFCStrIn_t *)path, &parent, &child));
+        SSF_ASSERT(SSFGObjFindPath(g, path, &parent, &child));
         SSF_ASSERT(SSFGObjGetString(child, val, sizeof(val)));
         SSF_ASSERT(strcmp(val, "hello") == 0);
 
         memset(path, 0, sizeof(path));
-        idx = 1; path[0] = (SSFCStrOut_t)&idx;
+        idx = 1; path[0] = (SSFCStrIn_t)&idx;
         parent = NULL; child = NULL;
-        SSF_ASSERT(SSFGObjFindPath(g, (SSFCStrIn_t *)path, &parent, &child));
+        SSF_ASSERT(SSFGObjFindPath(g, path, &parent, &child));
         SSF_ASSERT(SSFGObjGetInt(child, &intVal));
         SSF_ASSERT(intVal == 123);
 
         memset(path, 0, sizeof(path));
-        idx = 2; path[0] = (SSFCStrOut_t)&idx;
+        idx = 2; path[0] = (SSFCStrIn_t)&idx;
         parent = NULL; child = NULL;
-        SSF_ASSERT(SSFGObjFindPath(g, (SSFCStrIn_t *)path, &parent, &child));
+        SSF_ASSERT(SSFGObjFindPath(g, path, &parent, &child));
         SSF_ASSERT(SSFGObjGetType(child) == SSF_OBJ_TYPE_BOOL);
 
         SSFGObjDeInit(&g);
@@ -1530,6 +1534,7 @@ void SSFJsonUnitTest(void)
         SSFGObj_t *g = NULL;
         SSFGObj_t *parent = NULL;
         SSFGObj_t *child = NULL;
+        SSFCStrIn_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
         char val[64];
 
         SSF_ASSERT(SSFJsonGObjCreate("{\"outer\":{\"inner\":\"deep\"}}", &g, 8));
@@ -1537,7 +1542,7 @@ void SSFJsonUnitTest(void)
         memset(path, 0, sizeof(path));
         path[0] = "outer"; path[1] = "inner";
         parent = NULL; child = NULL;
-        SSF_ASSERT(SSFGObjFindPath(g, (SSFCStrIn_t *)path, &parent, &child));
+        SSF_ASSERT(SSFGObjFindPath(g, path, &parent, &child));
         SSF_ASSERT(SSFGObjGetString(child, val, sizeof(val)));
         SSF_ASSERT(strcmp(val, "deep") == 0);
 
@@ -1550,13 +1555,14 @@ void SSFJsonUnitTest(void)
         SSFGObj_t *g = NULL;
         SSFGObj_t *parent = NULL;
         SSFGObj_t *child = NULL;
+        SSFCStrIn_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
         char val[64];
 
         SSF_ASSERT(SSFJsonGObjCreate("{\"k\":\"a\\tb\\nc\"}", &g, 8));
         memset(path, 0, sizeof(path));
         path[0] = "k";
         parent = NULL; child = NULL;
-        SSF_ASSERT(SSFGObjFindPath(g, (SSFCStrIn_t *)path, &parent, &child));
+        SSF_ASSERT(SSFGObjFindPath(g, path, &parent, &child));
         SSF_ASSERT(SSFGObjGetString(child, val, sizeof(val)));
         SSF_ASSERT(strcmp(val, "a\tb\nc") == 0);
 
@@ -1569,6 +1575,7 @@ void SSFJsonUnitTest(void)
         SSFGObj_t *g = NULL;
         SSFGObj_t *parent = NULL;
         SSFGObj_t *child = NULL;
+        SSFCStrIn_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
         int64_t intVal;
 
         SSF_ASSERT(SSFJsonGObjCreate("  { \"x\" : 1 , \"y\" : 2 }  ", &g, 8));
@@ -1576,14 +1583,14 @@ void SSFJsonUnitTest(void)
         memset(path, 0, sizeof(path));
         path[0] = "x";
         parent = NULL; child = NULL;
-        SSF_ASSERT(SSFGObjFindPath(g, (SSFCStrIn_t *)path, &parent, &child));
+        SSF_ASSERT(SSFGObjFindPath(g, path, &parent, &child));
         SSF_ASSERT(SSFGObjGetInt(child, &intVal));
         SSF_ASSERT(intVal == 1);
 
         memset(path, 0, sizeof(path));
         path[0] = "y";
         parent = NULL; child = NULL;
-        SSF_ASSERT(SSFGObjFindPath(g, (SSFCStrIn_t *)path, &parent, &child));
+        SSF_ASSERT(SSFGObjFindPath(g, path, &parent, &child));
         SSF_ASSERT(SSFGObjGetInt(child, &intVal));
         SSF_ASSERT(intVal == 2);
 

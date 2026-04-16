@@ -13,7 +13,7 @@ cflags_common = -Wall -Wextra -pedantic -Wcast-align -Wno-parentheses -Wno-unuse
     -Wdisabled-optimization -fdiagnostics-show-option -Wstrict-overflow=5 -Wformat=2
 
 includes = -I. -I_time -I_codec -I_crypto -I_ecc -I_edc -I_fsm -I_debug $
-    -I_storage -I_struct -I_ui -I_osal
+    -I_storage -I_struct -I_ui -I_osal -I_opt
 
 cflags = $cflags_common -Wlogical-op -O3
 ldflags = -lm -lpthread

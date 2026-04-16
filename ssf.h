@@ -45,6 +45,7 @@ extern "C" {
 /* --------------------------------------------------------------------------------------------- */
 #define SSF_MAX(x, y) (((x) > (y)) ? (x) : (y))
 #define SSF_MIN(x, y) (((x) < (y)) ? (x) : (y))
+#define SSF_MAX_NEXT_TIMEOUT ((SSFPortTick_t)(-1))
 #define SSFIsDigit(c) ((c) >= '0' && (c) <= '9')
 #define MOD255(m) ((m) % 255)
 

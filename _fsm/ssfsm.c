@@ -521,13 +521,13 @@ void SSFSMStopTimer(SSFSMEventId_t eid)
 /* Call periodically from main loop. Returns true if timers are pending, else false.             */
 /* Optionally reports delta to next timer expiration in SSF_TICKS_PER_SEC units.                 */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFSMTask(SSFSMTimeout_t *nextTimeout)
+bool SSFSMTask(SSFPortTick_t *nextTimeout)
 {
     SSFSMEvent_t e;
     SSFLLItem_t *item;
     SSFLLItem_t *next;
     SSFSMTimer_t t;
-    SSFSMTimeout_t current = SSFPortGetTick64();
+    SSFPortTick_t current = SSFPortGetTick64();
     bool retVal;
 
     SSF_ASSERT(_ssfsmActive >= SSF_SM_MAX);
@@ -567,16 +567,20 @@ processEvents:
     /* If necessary determine next timer expiration */
     if (nextTimeout != NULL)
     {
-        *nextTimeout = SSF_SM_MAX_TIMEOUT;
+        SSFPortTick_t minTo = SSF_MAX_NEXT_TIMEOUT;
         item = SSF_LL_HEAD(&_ssfsmTimers);
         while (item != NULL)
         {
             next = SSF_LL_NEXT_ITEM(item);
             memcpy(&t, item, sizeof(t));
-            if (t.to < (*nextTimeout)) *nextTimeout = t.to;
+            if (t.to < minTo) minTo = t.to;
             item = next;
         }
-        if (*nextTimeout != SSF_SM_MAX_TIMEOUT) *nextTimeout -= current;
+        if (minTo != SSF_MAX_NEXT_TIMEOUT)
+        {
+            SSFPortTick_t remaining = (minTo > current) ? (minTo - current) : 0;
+            if (remaining < *nextTimeout) *nextTimeout = remaining;
+        }
     }
     retVal = !SSFLLIsEmpty(&_ssfsmTimers);
 

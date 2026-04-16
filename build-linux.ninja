@@ -13,7 +13,7 @@ cflags_common = -Wall -Wextra -pedantic -Wcast-align -Wno-parentheses -Wno-unuse
     -Wdisabled-optimization -fdiagnostics-show-option -Wstrict-overflow=5 -Wformat=2
 
 includes = -I. -I_time -I_codec -I_crypto -I_ecc -I_edc -I_fsm -I_debug $
-    -I_storage -I_struct -I_ui
+    -I_storage -I_struct -I_ui -I_osal
 
 cflags = $cflags_common -Wlogical-op -O3
 ldflags = -lm -lpthread
@@ -143,6 +143,10 @@ build $builddir/_ui/ssfcli_ut.o:  cc_obj _ui/ssfcli_ut.c
 build $builddir/_ui/ssfvted.o:    cc_obj _ui/ssfvted.c
 build $builddir/_ui/ssfvted_ut.o: cc_obj _ui/ssfvted_ut.c
 
+# _osal
+build $builddir/_osal/ssflptask.o:    cc_obj _osal/ssflptask.c
+build $builddir/_osal/ssflptask_ut.o: cc_obj _osal/ssflptask_ut.c
+
 # Final binary
 build ssf: link $builddir/main.o $builddir/ssfport.o $
     $builddir/_codec/ssfbase64.o    $builddir/_codec/ssfbase64_ut.o $
@@ -189,6 +193,7 @@ build ssf: link $builddir/main.o $builddir/ssfport.o $
     $builddir/_time/ssfrtc.o        $builddir/_time/ssfrtc_ut.o $
     $builddir/_ui/ssfargv.o         $builddir/_ui/ssfargv_ut.o $
     $builddir/_ui/ssfcli.o          $builddir/_ui/ssfcli_ut.o $
-    $builddir/_ui/ssfvted.o         $builddir/_ui/ssfvted_ut.o
+    $builddir/_ui/ssfvted.o         $builddir/_ui/ssfvted_ut.o $
+    $builddir/_osal/ssflptask.o     $builddir/_osal/ssflptask_ut.o
 
 default ssf

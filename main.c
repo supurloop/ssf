@@ -78,6 +78,7 @@
 #include "ssfargv.h"
 #include "ssfvted.h"
 #include "ssfcli.h"
+#include "ssflptask.h"
 
 typedef struct
 {
@@ -242,6 +243,11 @@ SSFUnitTest_t unitTests[] =
 #if SSF_CONFIG_RTC_UNIT_TEST == 1
     { "ssfrtc", "RTC", SSFRTCUnitTest },
 #endif /* SSF_CONFIG_RTC_UNIT_TEST */
+
+    /* _osal */
+#if SSF_CONFIG_LPTASK_UNIT_TEST == 1
+    { "ssflptask", "Low-Priority Task Queue", SSFLPTaskUnitTest },
+#endif /* SSF_CONFIG_LPTASK_UNIT_TEST */
 
 };
 

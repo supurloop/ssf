@@ -112,6 +112,9 @@ extern "C" {
 #define SSF_CONFIG_CLI_UNIT_TEST     (1u)
 #define SSF_CONFIG_VTED_UNIT_TEST    (1u)
 
+/* _osal */
+#define SSF_CONFIG_LPTASK_UNIT_TEST  (1u)
+
 /* If any unit test is enabled then enable unit test mode */
 #if /* _codec */ \
     SSF_CONFIG_ASN1_UNIT_TEST == 1 || \
@@ -167,7 +170,9 @@ extern "C" {
     /* _ui */ \
     SSF_CONFIG_ARGV_UNIT_TEST == 1 || \
     SSF_CONFIG_CLI_UNIT_TEST == 1 || \
-    SSF_CONFIG_VTED_UNIT_TEST == 1
+    SSF_CONFIG_VTED_UNIT_TEST == 1 || \
+    /* _osal */ \
+    SSF_CONFIG_LPTASK_UNIT_TEST == 1
 #define SSF_CONFIG_UNIT_TEST (1u)
 #else
 #define SSF_CONFIG_UNIT_TEST (0u)

@@ -66,10 +66,10 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdbool.h>
-#include <ctype.h>
 #include <stdlib.h>
 #include "ssfport.h"
 #include "ssfini.h"
+#include "ssfstr.h"
 #if SSF_INI_GOBJ_ENABLE == 1
 #include "ssfgobj.h"
 #endif /* SSF_INI_GOBJ_ENABLE */
@@ -425,7 +425,7 @@ bool SSFINIGetBoolValue(SSFCStrIn_t ini, SSFCStrIn_t section, SSFCStrIn_t name, 
     memcpy(lcv, context.value, context.valueLen);
     lcv[context.valueLen] = 0;
     while (*lcvp != 0) {
-        *lcvp = (char) tolower((int)*lcvp); lcvp++;
+        *lcvp = SSFStrCharToLower(*lcvp); lcvp++;
     }
 
     /* Assume value matches a true string */
@@ -679,7 +679,7 @@ bool SSFINIGObjCreate(SSFCStrIn_t ini, SSFGObj_t **gobj, uint16_t maxChildren)
     SSFGObj_t *child = NULL;
     SSFGObj_t *foundParent = NULL;
     SSFGObj_t *foundChild = NULL;
-    SSFCStrOut_t findPath[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
+    SSFCStrIn_t findPath[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
     char strBuf[SSF_INI_GOBJ_CONFIG_MAX_STR_SIZE + 1];
 
     SSF_REQUIRE(ini != NULL);

@@ -225,6 +225,33 @@ void SSFBase64UnitTest(void)
     SSF_ASSERT(SSFBase64Dec32To24("=AAA", b24, sizeof(b24)) == 0);
     SSF_ASSERT(SSFBase64Dec32To24("A=AA", b24, sizeof(b24)) == 0);
 
+    /* RFC 4648 §3.5: non-canonical encodings MUST be rejected. When 2 base64 chars +
+     * "==" encode 1 output byte, the second char's low 4 bits MUST be zero. When 3
+     * chars + "=" encode 2 output bytes, the third char's low 2 bits MUST be zero. */
+    /* 1-byte output, non-zero b-low-4 bits. These decode to 0x00 under a loose decoder
+     * but are not a canonical encoding of anything. */
+    SSF_ASSERT(SSFBase64Dec32To24("AB==", b24, sizeof(b24)) == 0);   /* b = 0b000001 */
+    SSF_ASSERT(SSFBase64Dec32To24("AP==", b24, sizeof(b24)) == 0);   /* b = 0b001111 */
+    SSF_ASSERT(SSFBase64Dec32To24("/x==", b24, sizeof(b24)) == 0);   /* canonical is /w== */
+    /* 2-byte output, non-zero c-low-2 bits. */
+    SSF_ASSERT(SSFBase64Dec32To24("AAB=", b24, sizeof(b24)) == 0);   /* c = 0b000001 */
+    SSF_ASSERT(SSFBase64Dec32To24("AAD=", b24, sizeof(b24)) == 0);   /* c = 0b000011 */
+    SSF_ASSERT(SSFBase64Dec32To24("//9=", b24, sizeof(b24)) == 0);   /* canonical is //8= */
+
+    /* Sanity: the canonical forms still decode successfully. */
+    SSF_ASSERT(SSFBase64Dec32To24("AA==", b24, sizeof(b24)) == 1 && b24[0] == 0x00);
+    SSF_ASSERT(SSFBase64Dec32To24("/w==", b24, sizeof(b24)) == 1 && b24[0] == 0xFF);
+    SSF_ASSERT(SSFBase64Dec32To24("AAA=", b24, sizeof(b24)) == 2 &&
+               b24[0] == 0x00 && b24[1] == 0x00);
+    SSF_ASSERT(SSFBase64Dec32To24("//8=", b24, sizeof(b24)) == 2 &&
+               b24[0] == 0xFF && b24[1] == 0xFF);
+
+    /* SSFBase64Decode must also reject the non-canonical forms end-to-end. */
+    SSF_ASSERT(SSFBase64Decode("AB==", 4, decodedBigBin, sizeof(decodedBigBin), &outLen)
+               == false);
+    SSF_ASSERT(SSFBase64Decode("AAB=", 4, decodedBigBin, sizeof(decodedBigBin), &outLen)
+               == false);
+
     /* SSFBase64Dec32To24 with b24outSize=1 on non-padded 2-byte block must return 0 */
     SSF_ASSERT(SSFBase64Dec32To24("YWI=", b24, 1) == 0);
     /* SSFBase64Dec32To24 with b24outSize=2 on non-padded 3-byte block must return 0 */

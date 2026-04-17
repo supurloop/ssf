@@ -70,6 +70,8 @@ build $builddir/_crypto/ssfbn.o:      cc_obj _crypto/ssfbn.c
 build $builddir/_crypto/ssfbn_ut.o:   cc_obj _crypto/ssfbn_ut.c
 build $builddir/_crypto/ssfchacha20.o:      cc_obj _crypto/ssfchacha20.c
 build $builddir/_crypto/ssfchacha20_ut.o:   cc_obj _crypto/ssfchacha20_ut.c
+build $builddir/_crypto/ssfct.o:      cc_obj _crypto/ssfct.c
+build $builddir/_crypto/ssfct_ut.o:   cc_obj _crypto/ssfct_ut.c
 build $builddir/_crypto/ssfpoly1305.o:      cc_obj _crypto/ssfpoly1305.c
 build $builddir/_crypto/ssfpoly1305_ut.o:   cc_obj _crypto/ssfpoly1305_ut.c
 build $builddir/_crypto/ssfx25519.o:      cc_obj _crypto/ssfx25519.c
@@ -168,6 +170,7 @@ build ssf: link $builddir/main.o $builddir/ssfport.o $
     $builddir/_crypto/ssfsha2.o     $builddir/_crypto/ssfsha2_ut.o $
     $builddir/_crypto/ssfbn.o     $builddir/_crypto/ssfbn_ut.o $
     $builddir/_crypto/ssfchacha20.o     $builddir/_crypto/ssfchacha20_ut.o $
+    $builddir/_crypto/ssfct.o           $builddir/_crypto/ssfct_ut.o $
     $builddir/_crypto/ssfpoly1305.o     $builddir/_crypto/ssfpoly1305_ut.o $
     $builddir/_crypto/ssfx25519.o     $builddir/_crypto/ssfx25519_ut.o $
     $builddir/_crypto/ssfed25519.o     $builddir/_crypto/ssfed25519_ut.o $

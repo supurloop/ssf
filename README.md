@@ -200,6 +200,7 @@ Cryptographic primitives for hashing, encryption, and random number generation.
 | [SHA-2](_crypto/ssfsha2.md) | SHA-2 hash (SHA-224/256/384/512/512-224/512-256), one-shot and incremental | ~3 KB⁴ | — | ~800 B¹³ | — | Yes |
 | [AES](_crypto/ssfaes.md) | AES block cipher (128/192/256-bit key) | ~2 KB⁵ | — | ~300 B¹⁴ | — | Yes |
 | [AES-GCM](_crypto/ssfaesgcm.md) | AES-GCM authenticated encryption/decryption | ~3.5 KB⁶ | — | ~128 B | — | Yes |
+| [Constant-Time](_crypto/ssfct.h) | Constant-time byte-buffer equality for MAC and signature verification | ~40 B | — | ~32 B | — | Yes |
 | [PRNG](_crypto/ssfprng.md) | Cryptographically capable pseudo-random number generator | ~500 B | — | ~96 B | — | Yes |
 
 ⁴ Includes ~896 B of SHA-256 and SHA-512 round constants. ⁵ Includes 512 B S-box and inverse S-box tables. ⁶ Requires AES module; figure is for GCM logic only.

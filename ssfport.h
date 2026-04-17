@@ -66,6 +66,7 @@ extern "C" {
 #define SSF_CONFIG_BN_UNIT_TEST      (1u)
 #define SSF_CONFIG_CCP_UNIT_TEST     (1u)  /* ChaCha20-Poly1305 AEAD */
 #define SSF_CONFIG_CHACHA20_UNIT_TEST (1u)
+#define SSF_CONFIG_CT_UNIT_TEST      (1u)
 #define SSF_CONFIG_EC_UNIT_TEST      (1u)
 #define SSF_CONFIG_ECDSA_UNIT_TEST   (1u)
 #define SSF_CONFIG_ED25519_UNIT_TEST (1u)
@@ -135,6 +136,7 @@ extern "C" {
     SSF_CONFIG_BN_UNIT_TEST == 1 || \
     SSF_CONFIG_CCP_UNIT_TEST == 1 || \
     SSF_CONFIG_CHACHA20_UNIT_TEST == 1 || \
+    SSF_CONFIG_CT_UNIT_TEST == 1 || \
     SSF_CONFIG_EC_UNIT_TEST == 1 || \
     SSF_CONFIG_ECDSA_UNIT_TEST == 1 || \
     SSF_CONFIG_ED25519_UNIT_TEST == 1 || \

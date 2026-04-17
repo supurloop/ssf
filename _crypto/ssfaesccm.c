@@ -32,6 +32,7 @@
 #include "ssfassert.h"
 #include "ssfaes.h"
 #include "ssfaesccm.h"
+#include "ssfct.h"
 
 /* --------------------------------------------------------------------------------------------- */
 /* XOR 16 bytes: dst ^= src                                                                      */
@@ -289,20 +290,12 @@ bool SSFAESCCMDecrypt(const uint8_t *ct, size_t ctLen,
     /* Step 2: Compute CBC-MAC tag over (B_0 || AAD || decrypted plaintext) */
     _SSFAESCCMComputeTag(key, keyLen, nonce, nonceLen, aad, aadLen, pt, ctLen, tagLen, cbcTag);
 
-    /* Step 3: Compare tags */
+    /* Step 3: Compare tags (constant-time). */
+    if (!SSFCTMemEq(cbcTag, decTag, tagLen))
     {
-        uint32_t diff = 0;
-        uint32_t i;
-        for (i = 0; i < (uint32_t)tagLen; i++)
-        {
-            diff |= (uint32_t)(cbcTag[i] ^ decTag[i]);
-        }
-        if (diff != 0)
-        {
-            /* Authentication failed: zero the plaintext */
-            memset(pt, 0, ctLen);
-            return false;
-        }
+        /* Authentication failed: zero the plaintext */
+        memset(pt, 0, ctLen);
+        return false;
     }
     return true;
 }

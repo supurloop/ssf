@@ -229,7 +229,7 @@ bool SSFArgvInit(SSFCStrIn_t cmdLineStr, size_t cmdLineSize, SSFGObj_t **gobj, u
                 tmp = marker;
                 while (*tmp != 0)
                 {
-                    if (*tmp == '\\') { memmove(tmp, tmp + 1, cursor - tmp); }
+                    if (*tmp == '\\') { memmove(tmp, tmp + 1, (size_t)(cursor - tmp)); }
                     tmp++;
                 }
 

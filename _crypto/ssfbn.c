@@ -45,7 +45,8 @@ const SSFBN_t SSF_BN_NIST_P256 =
         0xFFFFFFFFul, 0xFFFFFFFFul, 0xFFFFFFFFul, 0x00000000ul,
         0x00000000ul, 0x00000000ul, 0x00000001ul, 0xFFFFFFFFul
     },
-    8
+    8,
+    SSF_BN_MAX_LIMBS
 };
 #endif /* SSF_BN_CONFIG_MAX_BITS >= 256 */
 
@@ -59,7 +60,8 @@ const SSFBN_t SSF_BN_NIST_P384 =
         0xFFFFFFFEul, 0xFFFFFFFFul, 0xFFFFFFFFul, 0xFFFFFFFFul,
         0xFFFFFFFFul, 0xFFFFFFFFul, 0xFFFFFFFFul, 0xFFFFFFFFul
     },
-    12
+    12,
+    SSF_BN_MAX_LIMBS
 };
 #endif /* SSF_BN_CONFIG_MAX_BITS >= 384 */
 

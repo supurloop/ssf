@@ -130,6 +130,11 @@ extern "C" {
 
 #define SSF_EC_MAX_ENCODED_SIZE (1u + 2u * SSF_EC_MAX_COORD_BYTES)
 
+/* Widest ECC scalar / field element in limbs, derived from the enabled-curves configuration.    */
+/* Use as the SSFBN_DEFINE `limbs` argument in ECC-only code — at `SSF_BN_CONFIG_MAX_BITS = 4096` */
+/* every ECC SSFBN_t drops from 516 B to 56 B (P-384) or 40 B (P-256-only) under Phase 2.        */
+#define SSF_EC_MAX_LIMBS (SSF_EC_MAX_COORD_BYTES / 4u)
+
 /* Curve selection */
 typedef enum
 {

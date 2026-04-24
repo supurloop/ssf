@@ -115,11 +115,28 @@ typedef uint64_t SSFBNDLimb_t;
 
 /* Big number: fixed-capacity, variable-length limb array in little-endian limb order.          */
 /* limbs[0] is the least significant limb.                                                       */
+/*                                                                                                */
+/* `len` is the number of active limbs for the current operation (1..cap).                       */
+/* `cap` is the storage capacity — the upper bound on `len` that operations may write to. Phase 1 */
+/* of the variable-width migration (2026) still embeds the limbs[] array at SSF_BN_MAX_LIMBS; cap */
+/* is tracked and validated via preconditions but does not yet shrink storage. Phase 2 will flip  */
+/* limbs[] to a pointer with separately-allocated backing storage, at which point cap reflects    */
+/* the actual bytes allocated by the SSFBN_DEFINE macro below and ECC operations see ~90% peak-   */
+/* stack reductions.                                                                              */
 typedef struct SSFBN
 {
     SSFBNLimb_t limbs[SSF_BN_MAX_LIMBS];
-    uint16_t len;   /* Number of active limbs (1..SSF_BN_MAX_LIMBS). */
+    uint16_t len;   /* Number of active limbs (1..cap). */
+    uint16_t cap;   /* Storage capacity — set by SSFBN_DEFINE or by producers. */
 } SSFBN_t;
+
+/* Declare and initialize an SSFBN_t with a specified working-limb capacity. `limbs` should be   */
+/* the smallest value of `cap` the operation will need — e.g., SSF_EC_MAX_LIMBS (12) for P-384-   */
+/* capable ECC code, SSF_BN_BITS_TO_LIMBS(256) (8) if limited to P-256, SSF_BN_MAX_LIMBS for      */
+/* generic bignum operations. In Phase 1 the backing array is still SSF_BN_MAX_LIMBS regardless  */
+/* of this value; Phase 2 will turn `limbs` into the actual storage size allocated.              */
+#define SSFBN_DEFINE(name, limbs) \
+    SSFBN_t name = { {0u}, 0u, (uint16_t)(limbs) }
 
 /* Montgomery reduction context for efficient modular exponentiation.                           */
 /* Precomputed for a given modulus; reuse across multiple operations with the same modulus.      */

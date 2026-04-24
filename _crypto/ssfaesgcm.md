@@ -31,8 +31,11 @@ for any unused field.
 - A 96-bit (12-byte) IV is recommended per the GCM specification and is slightly more efficient
   than other IV lengths; any length is accepted.
 - Supported key sizes: 16 bytes (AES-128-GCM), 24 bytes (AES-192-GCM), 32 bytes (AES-256-GCM).
-- `SSFAESGCMDecrypt()` verifies the authentication tag before decrypting. Always check the
-  return value; treat the output plaintext buffer as invalid when `false` is returned.
+- `SSFAESGCMDecrypt()` decrypts ciphertext into `pt` and then verifies the authentication
+  tag. On tag-verify failure it returns `false` **and** memsets `pt[0..ctLen-1]` to zero
+  before returning, so a buggy caller that forgets to check the return value cannot ship
+  unauthenticated plaintext. Still, the correct usage is to always check the return value
+  and treat the output buffer as invalid when `false` is returned.
 - A common embedded IV strategy is to concatenate an 8-byte device EUI-64 with a 4-byte
   big-endian frame counter that increments monotonically.
 

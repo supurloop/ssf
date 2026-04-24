@@ -502,7 +502,10 @@ bool SSFAESGCMDecrypt(const uint8_t *ct, size_t ctLen, const uint8_t *iv, size_t
 
     _SSFAESGCMGCTR(s, sizeof(s), key, keyLen, j0, sizeof(j0), s, sizeof(s));
 
-    /* Verify tag in constant time to avoid leaking the position of the first differing byte. */
-    return SSFCTMemEq(s, tag, tagLen);
+    /* Verify tag in constant time to avoid leaking the position of the first differing byte.
+     * On auth failure, zero pt so a buggy caller that ignores the return value cannot ship
+     * unauthenticated plaintext — matches the SSFAESCCMDecrypt pattern. */
+    if (!SSFCTMemEq(s, tag, tagLen)) { memset(pt, 0, ctLen); return false; }
+    return true;
 }
 

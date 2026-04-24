@@ -347,30 +347,29 @@ bool SSFECDSAKeyGen(SSFECCurve_t curve,
     if (!SSFPortGetEntropy(entropy, (uint16_t)sizeof(entropy))) return false;
     SSFPRNGInitContext(&prng, entropy, sizeof(entropy));
 
-    /* Generate d in [1, n-1] */
+    /* Generate d in [1, n-1] via rejection sampling. SSFBNRandomBelow returns a value in        */
+    /* [0, n) — the only remaining case we need to guard is d == 0 (probability ~2^-bitLen(n)). */
     for (attempts = 0; attempts < 100u; attempts++)
     {
-        uint8_t randBuf[SSF_EC_MAX_COORD_BYTES];
-        size_t generated = 0;
-
-        /* Generate coordBytes of random data via PRNG (SSF_PRNG_RANDOM_MAX_SIZE per call) */
-        while (generated < c->bytes)
+        /* Did the underlying rejection sampler succeed? */
+        if (!SSFBNRandomBelow(&d, &c->n, &prng))
         {
-            size_t chunk = c->bytes - generated;
-            if (chunk > SSF_PRNG_RANDOM_MAX_SIZE) chunk = SSF_PRNG_RANDOM_MAX_SIZE;
-            SSFPRNGGetRandom(&prng, &randBuf[generated], chunk);
-            generated += chunk;
+            /* No, retry cap exhausted. */
+            continue;
         }
-
-        if (!SSFBNFromBytes(&d, randBuf, c->bytes, c->limbs)) continue;
-
-        if (_SSFECDSAPrivKeyIsValid(&d, c)) break;
-
-        if (attempts == 99u)
+        /* Is the draw non-zero (i.e. d in [1, n-1])? */
+        if (!SSFBNIsZero(&d))
         {
-            SSFPRNGDeInitContext(&prng);
-            return false;
+            /* Yes, accept. */
+            break;
         }
+        /* No, re-roll. */
+    }
+    /* Did we fall out of the loop without finding a valid d? */
+    if (attempts >= 100u)
+    {
+        SSFPRNGDeInitContext(&prng);
+        return false;
     }
 
     SSFPRNGDeInitContext(&prng);

@@ -180,7 +180,7 @@ static void _SSFECPointDouble(SSFECPoint_t *r, const SSFECPoint_t *p,
     if (SSFBNIsZero(&p->z))
     {
         SSFBNSetZero(&r->x, c->limbs);
-        SSFBNSetUint32(&r->y, 1u, c->limbs);
+        SSFBNSetOne(&r->y, c->limbs);
         SSFBNSetZero(&r->z, c->limbs);
         return;
     }
@@ -289,7 +289,7 @@ static void _SSFECPointAddFull(SSFECPoint_t *r, const SSFECPoint_t *p, const SSF
         }
         /* P == -Q: result is identity */
         SSFBNSetZero(&r->x, c->limbs);
-        SSFBNSetUint32(&r->y, 1u, c->limbs);
+        SSFBNSetOne(&r->y, c->limbs);
         SSFBNSetZero(&r->z, c->limbs);
         return;
     }
@@ -332,7 +332,7 @@ void SSFECPointSetIdentity(SSFECPoint_t *pt, SSFECCurve_t curve)
     SSF_REQUIRE(c != NULL);
 
     SSFBNSetZero(&pt->x, c->limbs);
-    SSFBNSetUint32(&pt->y, 1u, c->limbs);
+    SSFBNSetOne(&pt->y, c->limbs);
     SSFBNSetZero(&pt->z, c->limbs);
 }
 
@@ -361,7 +361,7 @@ void SSFECPointFromAffine(SSFECPoint_t *pt, const SSFBN_t *x, const SSFBN_t *y,
 
     SSFBNCopy(&pt->x, x);
     SSFBNCopy(&pt->y, y);
-    SSFBNSetUint32(&pt->z, 1u, c->limbs);
+    SSFBNSetOne(&pt->z, c->limbs);
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -540,7 +540,7 @@ bool SSFECPointDecode(SSFECPoint_t *pt, SSFECCurve_t curve,
     if (!SSFBNFromBytes(&pt->y, &data[1u + c->bytes], c->bytes, c->limbs)) return false;
 
     /* Z = 1 (affine) */
-    SSFBNSetUint32(&pt->z, 1u, c->limbs);
+    SSFBNSetOne(&pt->z, c->limbs);
 
     /* Validate the point */
     if (!SSFECPointValidate(pt, curve)) return false;
@@ -586,7 +586,7 @@ void SSFECScalarMul(SSFECPoint_t *r, const SSFBN_t *k, const SSFECPoint_t *p,
 
     /* R0 = identity, R1 = P */
     SSFBNSetZero(&R0.x, c->limbs);
-    SSFBNSetUint32(&R0.y, 1u, c->limbs);
+    SSFBNSetOne(&R0.y, c->limbs);
     SSFBNSetZero(&R0.z, c->limbs);
     SSFBNCopy(&R1.x, &p->x);
     SSFBNCopy(&R1.y, &p->y);
@@ -655,7 +655,7 @@ void SSFECScalarMulDual(SSFECPoint_t *r,
     /* Build precomputation table */
     /* table[0] = identity */
     SSFBNSetZero(&table[0]->x, c->limbs);
-    SSFBNSetUint32(&table[0]->y, 1u, c->limbs);
+    SSFBNSetOne(&table[0]->y, c->limbs);
     SSFBNSetZero(&table[0]->z, c->limbs);
 
     /* table[1] = P */

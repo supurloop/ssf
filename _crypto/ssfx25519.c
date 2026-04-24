@@ -33,6 +33,7 @@
 #include "ssfassert.h"
 #include "ssfx25519.h"
 #include "ssfprng.h"
+#include "ssfbn.h"
 
 /* --------------------------------------------------------------------------------------------- */
 /* Field element: 256 bits in 8 x 32-bit limbs, little-endian limb order.                       */
@@ -44,7 +45,7 @@ typedef struct { uint32_t v[8]; } _fe_t;
 /* p = 2^255 - 19 as 8 limbs */
 static const _fe_t _fe_p = {{ 0xFFFFFFEDu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu,
                               0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0x7FFFFFFFu }};
-
+// claude - duplicated field math functions
 /* --------------------------------------------------------------------------------------------- */
 /* Field arithmetic: GF(2^255 - 19)                                                              */
 /* --------------------------------------------------------------------------------------------- */
@@ -241,46 +242,36 @@ static void _fe_reduce(_fe_t *a)
 }
 
 /* Import from 32 little-endian bytes. Clears bit 255 per RFC 7748. */
+/* Import from 32 little-endian bytes. Clears bit 255 per RFC 7748. SSFBNFromBytesLE handles     */
+/* the byte-packing; the v[] array is limb-layout-compatible with SSFBN_t's storage since        */
+/* sizeof(uint32_t) == sizeof(SSFBNLimb_t).                                                       */
 static void _fe_from_bytes(_fe_t *a, const uint8_t *b)
 {
-    uint8_t i;
-    for (i = 0; i < 8u; i++)
-    {
-        a->v[i] = ((uint32_t)b[i * 4u]) |
-                  ((uint32_t)b[i * 4u + 1u] << 8) |
-                  ((uint32_t)b[i * 4u + 2u] << 16) |
-                  ((uint32_t)b[i * 4u + 3u] << 24);
-    }
-    a->v[7] &= 0x7FFFFFFFu; /* Clear bit 255 */
+    SSFBN_t view = { a->v, 0u, 8u };
+    (void)SSFBNFromBytesLE(&view, b, 32u, 8u);
+    a->v[7] &= 0x7FFFFFFFu; /* Clear bit 255 per RFC 7748 §5 */
 }
 
 /* Export to 32 little-endian bytes. Fully reduces first. */
 static void _fe_to_bytes(uint8_t *b, const _fe_t *a)
 {
     _fe_t t;
-    uint8_t i;
+    SSFBN_t view;
     _fe_copy(&t, a);
     _fe_reduce(&t);
-    for (i = 0; i < 8u; i++)
-    {
-        b[i * 4u]      = (uint8_t)(t.v[i]);
-        b[i * 4u + 1u] = (uint8_t)(t.v[i] >> 8);
-        b[i * 4u + 2u] = (uint8_t)(t.v[i] >> 16);
-        b[i * 4u + 3u] = (uint8_t)(t.v[i] >> 24);
-    }
+    view.limbs = t.v;
+    view.len = 8u;
+    view.cap = 8u;
+    (void)SSFBNToBytesLE(&view, b, 32u);
 }
 
-/* Constant-time conditional swap: if swap != 0, exchange a and b. */
+/* Constant-time conditional swap: if the low bit of swap is set, exchange a and b. Delegates   */
+/* to SSFBNCondSwap; (swap & 1u) preserves the low-bit-only semantic of the original helper.    */
 static void _fe_cswap(_fe_t *a, _fe_t *b, uint32_t swap)
 {
-    uint32_t mask = (uint32_t)(-(int32_t)(swap & 1u));
-    uint8_t i;
-    for (i = 0; i < 8u; i++)
-    {
-        uint32_t diff = (a->v[i] ^ b->v[i]) & mask;
-        a->v[i] ^= diff;
-        b->v[i] ^= diff;
-    }
+    SSFBN_t va = { a->v, 8u, 8u };
+    SSFBN_t vb = { b->v, 8u, 8u };
+    SSFBNCondSwap(&va, &vb, swap & 1u);
 }
 
 /* r = a^(-1) mod p via Fermat's little theorem: a^(p-2) mod p.                                 */

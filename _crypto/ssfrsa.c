@@ -362,12 +362,15 @@ static bool _SSFRSAPrivKeyDecode(const uint8_t *der, size_t derLen,
 
 /* --------------------------------------------------------------------------------------------- */
 /* Internal: RSA public-key operation: result = m^e mod n.                                       */
+/* All three operands (m, e, n) are public: m is the signature/ciphertext, e and n form the      */
+/* public key. Variable-time ModExp is side-channel-safe here and 2-3x faster than the constant- */
+/* time ladder for the typical low-Hamming-weight public exponents (3, 17, 65537).               */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFRSAPublicOp(const SSFBN_t *m, const SSFBN_t *e, const SSFBN_t *n,
                             SSFBN_t *result)
 {
     if (SSFBNCmp(m, n) >= 0) return false;
-    SSFBNModExp(result, m, e, n);
+    SSFBNModExpPub(result, m, e, n);
     return true;
 }
 
@@ -547,12 +550,8 @@ static bool _SSFRSAKeyGenDerive(uint16_t nLimbs, uint16_t halfLimbs,
     SSFBN_DEFINE(lambda, SSF_BN_MAX_LIMBS);
 
     /* pm1 = p - 1, qm1 = q - 1 */
-    {
-        SSFBN_DEFINE(one, SSF_BN_MAX_LIMBS);
-        SSFBNSetUint32(&one, 1u, halfLimbs);
-        SSFBNSub(&pm1, p, &one);
-        SSFBNSub(&qm1, q, &one);
-    }
+    (void)SSFBNSubUint32(&pm1, p, 1u);
+    (void)SSFBNSubUint32(&qm1, q, 1u);
 
     /* g = gcd(pm1, qm1) */
     SSFBNGcd(&g, &pm1, &qm1);
@@ -562,50 +561,17 @@ static bool _SSFRSAKeyGenDerive(uint16_t nLimbs, uint16_t halfLimbs,
     {
         SSFBN_DEFINE(pm1_div, SSF_BN_MAX_LIMBS);
 
+        /* Is gcd(pm1, qm1) == 1 (the common case for well-chosen primes)? */
         if (SSFBNIsOne(&g))
         {
-            /* lambda = pm1 * qm1 directly */
+            /* Yes, skip the divide — lambda = pm1 * qm1 directly. */
             SSFBNCopy(&pm1_div, &pm1);
         }
         else
         {
-            /* Compute pm1 / g via shift-subtract long division (we want the quotient). */
+            /* No, compute pm1 / g via SSFBNDivMod. The remainder is discarded. */
             SSFBN_DEFINE(rem, SSF_BN_MAX_LIMBS);
-            SSFBN_DEFINE(shifted, SSF_BN_MAX_LIMBS);
-            SSFBN_DEFINE(dividend, SSF_BN_MAX_LIMBS);
-            SSFBN_DEFINE(quotient, SSF_BN_MAX_LIMBS);
-            uint32_t aBits, mBits;
-            int32_t shift;
-
-            SSFBNCopy(&dividend, &pm1);
-            SSFBNSetZero(&quotient, halfLimbs);
-
-            aBits = SSFBNBitLen(&dividend);
-            mBits = SSFBNBitLen(&g);
-            shift = (int32_t)(aBits - mBits);
-
-            SSFBNSetZero(&shifted, halfLimbs);
-            memcpy(shifted.limbs, g.limbs, (size_t)g.len * sizeof(SSFBNLimb_t));
-            shifted.len = halfLimbs;
-            {
-                int32_t s;
-                for (s = 0; s < shift; s++) SSFBNShiftLeft1(&shifted);
-            }
-
-            while (shift >= 0)
-            {
-                SSFBNShiftLeft1(&quotient);
-                if (SSFBNCmp(&dividend, &shifted) >= 0)
-                {
-                    SSFBNSub(&dividend, &dividend, &shifted);
-                    quotient.limbs[0] |= 1u;
-                }
-                SSFBNShiftRight1(&shifted);
-                shift--;
-            }
-
-            SSFBNCopy(&pm1_div, &quotient);
-            /* rem not used */
+            SSFBNDivMod(&pm1_div, &rem, &pm1, &g);
             (void)rem;
         }
 

@@ -174,6 +174,9 @@ void SSFBNSetZero(SSFBN_t *a, uint16_t numLimbs);
 /* Set a to a small integer value with the specified working limb count.                         */
 void SSFBNSetUint32(SSFBN_t *a, uint32_t val, uint16_t numLimbs);
 
+/* Set a to 1 with the specified working limb count. Shortcut for SetUint32(a, 1, numLimbs).     */
+void SSFBNSetOne(SSFBN_t *a, uint16_t numLimbs);
+
 /* Copy src to dst. dst->len is set to src->len.                                                 */
 void SSFBNCopy(SSFBN_t *dst, const SSFBN_t *src);
 
@@ -184,6 +187,15 @@ bool SSFBNFromBytes(SSFBN_t *a, const uint8_t *data, size_t dataLen, uint16_t nu
 /* Export to big-endian byte array. Writes exactly outSize bytes (zero-pads leading).            */
 /* Returns false if outSize is too small to hold the value.                                      */
 bool SSFBNToBytes(const SSFBN_t *a, uint8_t *out, size_t outSize);
+
+/* Import from little-endian byte array (data[0] is the lowest byte of limb[0]). Same            */
+/* zero-pad / too-large semantics as SSFBNFromBytes. Used by LE-native algorithms (X25519,       */
+/* Ed25519, RFC 8032 scalar encoding).                                                           */
+bool SSFBNFromBytesLE(SSFBN_t *a, const uint8_t *data, size_t dataLen, uint16_t numLimbs);
+
+/* Export to little-endian byte array. Writes exactly outSize bytes, zero-padding the high end. */
+/* Returns false if outSize is too small to hold the value.                                      */
+bool SSFBNToBytesLE(const SSFBN_t *a, uint8_t *out, size_t outSize);
 
 /* --------------------------------------------------------------------------------------------- */
 /* External interface: comparison                                                                */
@@ -198,9 +210,16 @@ bool SSFBNIsOne(const SSFBN_t *a);
 /* Returns true if a is even (LSB of limbs[0] is 0).                                             */
 bool SSFBNIsEven(const SSFBN_t *a);
 
+/* Returns true if a is odd (LSB of limbs[0] is 1). Symmetric companion to SSFBNIsEven.          */
+bool SSFBNIsOdd(const SSFBN_t *a);
+
 /* Constant-time comparison. Returns 0 if equal, -1 if a < b, 1 if a > b.                       */
 /* a and b must have the same limb count.                                                        */
 int8_t SSFBNCmp(const SSFBN_t *a, const SSFBN_t *b);
+
+/* Compare a to a single 32-bit value. Returns 0 if equal, -1 if a < val, 1 if a > val.         */
+/* Avoids constructing a throw-away SSFBN_t for small-integer comparisons.                       */
+int8_t SSFBNCmpUint32(const SSFBN_t *a, uint32_t val);
 
 /* --------------------------------------------------------------------------------------------- */
 /* External interface: bit operations                                                            */
@@ -216,6 +235,12 @@ uint32_t SSFBNTrailingZeros(const SSFBN_t *a);
 
 /* Returns the value of bit at position pos (0 = LSB). Returns 0 if pos >= len * 32.            */
 uint8_t SSFBNGetBit(const SSFBN_t *a, uint32_t pos);
+
+/* Set bit at position pos (0 = LSB) to 1. pos must be < a->len * SSF_BN_LIMB_BITS.              */
+void SSFBNSetBit(SSFBN_t *a, uint32_t pos);
+
+/* Clear bit at position pos to 0. pos must be < a->len * SSF_BN_LIMB_BITS.                      */
+void SSFBNClearBit(SSFBN_t *a, uint32_t pos);
 
 /* Shift a left by 1 bit in place. High bit is lost if it overflows limb count.                  */
 void SSFBNShiftLeft1(SSFBN_t *a);
@@ -243,10 +268,22 @@ SSFBNLimb_t SSFBNAdd(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b);
 /* r = a - b. Returns borrow (0 or 1, where 1 means a < b). r may alias a or b.                 */
 SSFBNLimb_t SSFBNSub(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b);
 
+/* r = a + b where b is a single 32-bit value. Returns carry out of the top limb. r->len is set */
+/* to a->len. r may alias a.                                                                     */
+SSFBNLimb_t SSFBNAddUint32(SSFBN_t *r, const SSFBN_t *a, uint32_t b);
+
+/* r = a - b where b is a single 32-bit value. Returns borrow (1 if a < b). r->len is set to    */
+/* a->len. r may alias a.                                                                        */
+SSFBNLimb_t SSFBNSubUint32(SSFBN_t *r, const SSFBN_t *a, uint32_t b);
+
 /* r = a * b. r->len is set to a->len + b->len. r must not alias a or b.                        */
 /* r->len must not exceed SSF_BN_MAX_LIMBS; caller must ensure a->len + b->len <=                */
 /* SSF_BN_MAX_LIMBS.                                                                             */
 void SSFBNMul(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b);
+
+/* r = a * b where b is a single 32-bit value. r->len is set to a->len + 1 (the product can     */
+/* grow by at most one limb). r must not alias a.                                                 */
+void SSFBNMulUint32(SSFBN_t *r, const SSFBN_t *a, uint32_t b);
 
 /* r = a * a. Faster than SSFBNMul(r, a, a) because the off-diagonal partial products are        */
 /* computed once and doubled rather than computed twice. r->len is set to 2 * a->len; r must not */
@@ -284,6 +321,11 @@ void SSFBNModMulNIST(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN
 /* r = a mod m. a->len may be up to 2 * m->len. r->len is set to m->len.                        */
 void SSFBNMod(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m);
 
+/* Shift-subtract long division: q = a / b, rem = a mod b. Both q and rem are set to            */
+/* max(a->len, b->len). q must not alias a, b, or rem; rem must not alias a, b, or q. If        */
+/* b == 0 the function returns without modifying q or rem beyond the initial zero-set.          */
+void SSFBNDivMod(SSFBN_t *q, SSFBN_t *rem, const SSFBN_t *a, const SSFBN_t *b);
+
 /* r = gcd(a, b) using binary GCD (Stein's algorithm). a and b must have the same len.          */
 void SSFBNGcd(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b);
 
@@ -319,12 +361,25 @@ void SSFBNMontConvertOut(SSFBN_t *a, const SSFBN_t *aR, const SSFBNMont_t *ctx);
 /* --------------------------------------------------------------------------------------------- */
 
 /* r = a^e mod m. Constant-time via Montgomery ladder with Montgomery multiplication.            */
-/* Suitable for RSA, DH, and DSA operations.                                                     */
+/* Suitable for RSA, DH, and DSA operations when the exponent is secret.                         */
 void SSFBNModExp(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBN_t *m);
 
 /* r = a^e mod m using precomputed Montgomery context.                                           */
 /* Use when performing multiple exponentiations with the same modulus.                           */
 void SSFBNModExpMont(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBNMont_t *ctx);
+
+/* Variable-time modular exponentiation. Left-to-right binary square-and-multiply that skips the */
+/* multiply step for zero bits of `e`. Typical 2-3x faster than SSFBNModExp for low-Hamming-     */
+/* weight exponents (e.g., RSA public exponent 65537 = 0x10001 has only 2 set bits out of 17).   */
+/*                                                                                               */
+/* WARNING: The timing and memory access pattern depend on the bit pattern of `e`. Use ONLY     */
+/* when `e` is public (RSA public-key operations, signature verification). For secret exponents */
+/* (RSA private key operations, DH with secret scalars), use SSFBNModExp instead.                */
+void SSFBNModExpPub(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBN_t *m);
+
+/* Variable-time ModExp using a precomputed Montgomery context. Same public-only caveat as       */
+/* SSFBNModExpPub.                                                                               */
+void SSFBNModExpMontPub(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBNMont_t *ctx);
 
 /* --------------------------------------------------------------------------------------------- */
 /* External interface: utility                                                                   */
@@ -350,6 +405,11 @@ uint32_t SSFBNModUint32(const SSFBN_t *a, uint32_t d);
 /* Fill the low `numLimbs` of a with uniform random data drawn from prng. Sets a->len = numLimbs.*/
 /* Limbs beyond numLimbs are not modified. Caller must ensure a->cap >= numLimbs.                */
 void SSFBNRandom(SSFBN_t *a, uint16_t numLimbs, SSFPRNGContext_t *prng);
+
+/* Draw a uniform random value in [0, bound) via rejection sampling. a->len is set to bound->len.*/
+/* Returns false if an internal retry cap is exceeded (vanishingly unlikely for cryptographic    */
+/* bounds — ~(1/2)^100). bound must be non-zero.                                                 */
+bool SSFBNRandomBelow(SSFBN_t *a, const SSFBN_t *bound, SSFPRNGContext_t *prng);
 
 /* Miller-Rabin primality test. Returns true if n is probably prime after `rounds` random-witness*/
 /* trials (each round is a ~1/4 false-positive upper bound). n must be odd and > 3; returns false*/

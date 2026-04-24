@@ -32,6 +32,10 @@
 #include "ssfassert.h"
 #include "ssfbn.h"
 #include "ssfprng.h"
+#if SSF_CONFIG_BN_MICROBENCH == 1
+#include "ssfport.h"
+#include <stdio.h>
+#endif
 
 #if SSF_CONFIG_BN_UNIT_TEST == 1
 
@@ -68,6 +72,47 @@ void SSFBNUnitTest(void)
         SSF_ASSERT(SSFBNFromBytes(&a, data, sizeof(data), 4) == true);
         SSF_ASSERT(SSFBNToBytes(&a, out, sizeof(out)) == true);
         SSF_ASSERT(memcmp(data, out, sizeof(data)) == 0);
+    }
+
+    /* ---- FromBytesLE / ToBytesLE: round-trip + parity against BE via byte reversal ---- */
+    {
+        static const uint8_t le[] = { 0xEFu, 0xCDu, 0xABu, 0x89u, 0x67u, 0x45u, 0x23u, 0x01u };
+        static const uint8_t be[] = { 0x01u, 0x23u, 0x45u, 0x67u, 0x89u, 0xABu, 0xCDu, 0xEFu };
+        uint8_t out[8];
+        SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(b, SSF_BN_MAX_LIMBS);
+
+        /* LE from the reversed BE bytes must yield the same numeric value as BE from the BE. */
+        SSF_ASSERT(SSFBNFromBytesLE(&a, le, sizeof(le), 2) == true);
+        SSF_ASSERT(SSFBNFromBytes(&b, be, sizeof(be), 2) == true);
+        SSF_ASSERT(SSFBNCmp(&a, &b) == 0);
+
+        /* Limb layout: limb[0] = 0x89ABCDEF, limb[1] = 0x01234567. */
+        SSF_ASSERT(a.limbs[0] == 0x89ABCDEFul);
+        SSF_ASSERT(a.limbs[1] == 0x01234567ul);
+
+        /* Round-trip: LE → BN → LE == original. */
+        SSF_ASSERT(SSFBNToBytesLE(&a, out, sizeof(out)) == true);
+        SSF_ASSERT(memcmp(out, le, sizeof(le)) == 0);
+    }
+
+    /* ---- FromBytesLE with dataLen shorter than numLimbs*4 (zero-pad high limbs) ---- */
+    {
+        static const uint8_t data[] = { 0xFFu };
+        uint8_t out[4];
+        SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
+
+        SSF_ASSERT(SSFBNFromBytesLE(&a, data, 1, 2) == true);
+        /* LE: low byte is 0xFF → limb[0] = 0x000000FF, limb[1] = 0. */
+        SSF_ASSERT(a.limbs[0] == 0x000000FFul);
+        SSF_ASSERT(a.limbs[1] == 0x00000000ul);
+
+        SSF_ASSERT(SSFBNToBytesLE(&a, out, sizeof(out)) == true);
+        /* LE export: low byte first, then zeros. */
+        SSF_ASSERT(out[0] == 0xFFu);
+        SSF_ASSERT(out[1] == 0x00u);
+        SSF_ASSERT(out[2] == 0x00u);
+        SSF_ASSERT(out[3] == 0x00u);
     }
 
     /* ---- FromBytes / ToBytes with leading zero pad ---- */
@@ -274,6 +319,148 @@ void SSFBNUnitTest(void)
         SSFBNShiftLeft(&a, 20u);
         SSF_ASSERT(a.limbs[0] == 0xFFF00000ul);
         SSF_ASSERT(a.limbs[1] == 0x000FFFFFul);
+    }
+
+    /* ---- SSFBNSetOne: sets to multiplicative identity ---- */
+    {
+        SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
+
+        SSFBNSetOne(&a, 4);
+        SSF_ASSERT(SSFBNIsOne(&a) == true);
+        SSF_ASSERT(SSFBNIsZero(&a) == false);
+        SSF_ASSERT(a.len == 4u);
+        SSF_ASSERT(a.limbs[0] == 1u);
+        SSF_ASSERT(a.limbs[1] == 0u);
+        SSF_ASSERT(a.limbs[2] == 0u);
+        SSF_ASSERT(a.limbs[3] == 0u);
+
+        /* Overwrites prior content. */
+        SSFBNSetUint32(&a, 0xDEADBEEFul, 4);
+        SSFBNSetOne(&a, 4);
+        SSF_ASSERT(SSFBNIsOne(&a) == true);
+    }
+
+    /* ---- SSFBNIsOdd: complement of IsEven ---- */
+    {
+        SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
+
+        SSFBNSetZero(&a, 4);
+        SSF_ASSERT(SSFBNIsOdd(&a) == false);
+
+        SSFBNSetUint32(&a, 1u, 4);
+        SSF_ASSERT(SSFBNIsOdd(&a) == true);
+
+        SSFBNSetUint32(&a, 2u, 4);
+        SSF_ASSERT(SSFBNIsOdd(&a) == false);
+
+        SSFBNSetUint32(&a, 3u, 4);
+        SSF_ASSERT(SSFBNIsOdd(&a) == true);
+
+        /* High limb parity does not affect IsOdd — only the low bit of limb[0] matters. */
+        SSFBNSetZero(&a, 4);
+        a.limbs[3] = 0x80000001ul;
+        SSF_ASSERT(SSFBNIsOdd(&a) == false); /* limb[0] = 0 → even */
+
+        a.limbs[0] = 0xFFFFFFFEul;
+        SSF_ASSERT(SSFBNIsOdd(&a) == false);
+
+        a.limbs[0] = 0xFFFFFFFFul;
+        SSF_ASSERT(SSFBNIsOdd(&a) == true);
+
+        /* IsOdd == !IsEven across the sweep. */
+        {
+            uint32_t k;
+            for (k = 0; k < 100u; k++)
+            {
+                SSFBNSetUint32(&a, k, 4);
+                SSF_ASSERT((SSFBNIsOdd(&a) ? true : false) != SSFBNIsEven(&a));
+            }
+        }
+    }
+
+    /* ---- SSFBNCmpUint32: a vs small integer ---- */
+    {
+        SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
+
+        SSFBNSetZero(&a, 4);
+        SSF_ASSERT(SSFBNCmpUint32(&a, 0u) == 0);
+        SSF_ASSERT(SSFBNCmpUint32(&a, 1u) == -1);
+
+        SSFBNSetUint32(&a, 5u, 4);
+        SSF_ASSERT(SSFBNCmpUint32(&a, 5u) == 0);
+        SSF_ASSERT(SSFBNCmpUint32(&a, 4u) == 1);
+        SSF_ASSERT(SSFBNCmpUint32(&a, 6u) == -1);
+
+        /* a > any uint32_t when a has nonzero high limbs. */
+        SSFBNSetZero(&a, 4);
+        a.limbs[1] = 1u;
+        SSF_ASSERT(SSFBNCmpUint32(&a, 0u) == 1);
+        SSF_ASSERT(SSFBNCmpUint32(&a, 0xFFFFFFFFul) == 1);
+
+        /* Exact-boundary: a == UINT32_MAX. */
+        SSFBNSetUint32(&a, 0xFFFFFFFFul, 4);
+        SSF_ASSERT(SSFBNCmpUint32(&a, 0xFFFFFFFFul) == 0);
+        SSF_ASSERT(SSFBNCmpUint32(&a, 0xFFFFFFFEul) == 1);
+    }
+
+    /* ---- SSFBNSetBit / SSFBNClearBit: single-bit mutation ---- */
+    {
+        SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
+        uint32_t pos;
+
+        /* SetBit at 0 on zero turns the value into 1. */
+        SSFBNSetZero(&a, 4);
+        SSFBNSetBit(&a, 0u);
+        SSF_ASSERT(SSFBNIsOne(&a) == true);
+
+        /* ClearBit at 0 on 1 turns it back to zero. */
+        SSFBNClearBit(&a, 0u);
+        SSF_ASSERT(SSFBNIsZero(&a) == true);
+
+        /* Set a selection of bits spanning limb boundaries and verify via GetBit. */
+        SSFBNSetZero(&a, 4);
+        {
+            static const uint32_t targets[] = { 0u, 1u, 31u, 32u, 47u, 63u, 64u, 96u, 127u };
+            uint32_t k;
+
+            for (k = 0; k < (sizeof(targets) / sizeof(targets[0])); k++)
+            {
+                SSFBNSetBit(&a, targets[k]);
+            }
+            for (pos = 0; pos < 128u; pos++)
+            {
+                uint8_t expected = 0u;
+                for (k = 0; k < (sizeof(targets) / sizeof(targets[0])); k++)
+                {
+                    if (targets[k] == pos) { expected = 1u; break; }
+                }
+                SSF_ASSERT(SSFBNGetBit(&a, pos) == expected);
+            }
+
+            /* Clearing every target restores zero. */
+            for (k = 0; k < (sizeof(targets) / sizeof(targets[0])); k++)
+            {
+                SSFBNClearBit(&a, targets[k]);
+            }
+            SSF_ASSERT(SSFBNIsZero(&a) == true);
+        }
+
+        /* SetBit on an already-set bit is a no-op. */
+        SSFBNSetZero(&a, 4);
+        SSFBNSetBit(&a, 20u);
+        SSF_ASSERT(a.limbs[0] == (1ul << 20));
+        SSFBNSetBit(&a, 20u);
+        SSF_ASSERT(a.limbs[0] == (1ul << 20));
+
+        /* ClearBit on an already-clear bit is a no-op. */
+        SSFBNClearBit(&a, 5u);
+        SSF_ASSERT(a.limbs[0] == (1ul << 20));
+
+        /* Setting the top bit of a non-empty value doesn't clobber other bits. */
+        SSFBNSetUint32(&a, 0x12345678ul, 4);
+        SSFBNSetBit(&a, 127u);
+        SSF_ASSERT(a.limbs[0] == 0x12345678ul);
+        SSF_ASSERT(a.limbs[3] == 0x80000000ul);
     }
 
     /* ---- SSFBNTrailingZeros: count low-order zero bits ---- */
@@ -524,6 +711,56 @@ void SSFBNUnitTest(void)
         SSFPRNGDeInitContext(&prng);
     }
 
+    /* ---- SSFBNRandomBelow: uniform draw in [0, bound) ---- */
+    {
+        SSFBN_DEFINE(bound, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(r, SSF_BN_MAX_LIMBS);
+        SSFPRNGContext_t prng;
+        uint8_t seed[SSF_PRNG_ENTROPY_SIZE];
+        uint16_t i;
+
+        for (i = 0; i < sizeof(seed); i++) seed[i] = (uint8_t)(0x71u ^ i);
+        SSFPRNGInitContext(&prng, seed, sizeof(seed));
+
+        /* Small bound: 100 draws all land in [0, 1000). */
+        SSFBNSetUint32(&bound, 1000u, 4);
+        for (i = 0; i < 100u; i++)
+        {
+            SSF_ASSERT(SSFBNRandomBelow(&r, &bound, &prng) == true);
+            SSF_ASSERT(SSFBNCmp(&r, &bound) < 0);
+        }
+
+        /* Large bound (P-256 prime): draws are well-distributed and always < bound. */
+        for (i = 0; i < 16u; i++)
+        {
+            SSF_ASSERT(SSFBNRandomBelow(&r, &SSF_BN_NIST_P256, &prng) == true);
+            SSF_ASSERT(SSFBNCmp(&r, &SSF_BN_NIST_P256) < 0);
+        }
+
+        /* Bound = 1: the only valid draw is 0. */
+        SSFBNSetOne(&bound, 4);
+        SSF_ASSERT(SSFBNRandomBelow(&r, &bound, &prng) == true);
+        SSF_ASSERT(SSFBNIsZero(&r) == true);
+
+        /* Bound = 2: draws are 0 or 1. Check we see both in a few hundred draws. */
+        {
+            SSFBNSetUint32(&bound, 2u, 4);
+            bool sawZero = false;
+            bool sawOne = false;
+            for (i = 0; i < 200u; i++)
+            {
+                SSF_ASSERT(SSFBNRandomBelow(&r, &bound, &prng) == true);
+                SSF_ASSERT(SSFBNCmp(&r, &bound) < 0);
+                if (SSFBNIsZero(&r)) sawZero = true;
+                else sawOne = true;
+            }
+            SSF_ASSERT(sawZero);
+            SSF_ASSERT(sawOne);
+        }
+
+        SSFPRNGDeInitContext(&prng);
+    }
+
     /* ---- SSFBNIsProbablePrime: known prime accepted, composite rejected ---- */
     {
         SSFBN_DEFINE(n, SSF_BN_MAX_LIMBS);
@@ -708,6 +945,233 @@ void SSFBNUnitTest(void)
         }
     }
 
+    /* ====================================================================================== */
+    /* Uint32 small-operand arithmetic — parity with matched 1-limb BN operand                  */
+    /* ====================================================================================== */
+
+    /* ---- SSFBNAddUint32: parity + carry return ---- */
+    {
+        SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(aCopy, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(b, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(rSum, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(rRef, SSF_BN_MAX_LIMBS);
+        SSFBNLimb_t carrySum;
+        SSFBNLimb_t carryRef;
+
+        /* Simple: 100 + 25 == 125 */
+        SSFBNSetUint32(&a, 100u, 4);
+        SSFBNSetUint32(&b, 25u, 4);
+        carryRef = SSFBNAdd(&rRef, &a, &b);
+        carrySum = SSFBNAddUint32(&rSum, &a, 25u);
+        SSF_ASSERT(carrySum == carryRef);
+        SSF_ASSERT(SSFBNCmp(&rSum, &rRef) == 0);
+
+        /* Carry propagates across limbs: 0xFFFFFFFF + 1 = 0x100000000 */
+        SSFBNSetUint32(&a, 0xFFFFFFFFul, 4);
+        SSFBNAddUint32(&rSum, &a, 1u);
+        SSF_ASSERT(rSum.limbs[0] == 0u);
+        SSF_ASSERT(rSum.limbs[1] == 1u);
+
+        /* Top-limb carry-out returned. */
+        SSFBNSetZero(&a, 2);
+        a.limbs[0] = 0xFFFFFFFFul;
+        a.limbs[1] = 0xFFFFFFFFul;
+        carrySum = SSFBNAddUint32(&rSum, &a, 1u);
+        SSF_ASSERT(carrySum == 1u);
+        SSF_ASSERT(rSum.limbs[0] == 0u);
+        SSF_ASSERT(rSum.limbs[1] == 0u);
+
+        /* Aliasing r == a works in place. */
+        SSFBNSetUint32(&aCopy, 0x123456u, 4);
+        SSFBNAddUint32(&aCopy, &aCopy, 0xFFFFu);
+        SSF_ASSERT(aCopy.limbs[0] == 0x133455ul);
+
+        /* Adding zero is a copy. */
+        SSFBNSetUint32(&a, 0xDEADBEEFul, 4);
+        carrySum = SSFBNAddUint32(&rSum, &a, 0u);
+        SSF_ASSERT(carrySum == 0u);
+        SSF_ASSERT(SSFBNCmp(&rSum, &a) == 0);
+    }
+
+    /* ---- SSFBNSubUint32: parity + borrow return ---- */
+    {
+        SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(aCopy, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(b, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(rSub, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(rRef, SSF_BN_MAX_LIMBS);
+        SSFBNLimb_t borrowSub;
+        SSFBNLimb_t borrowRef;
+
+        /* 100 - 25 == 75 */
+        SSFBNSetUint32(&a, 100u, 4);
+        SSFBNSetUint32(&b, 25u, 4);
+        borrowRef = SSFBNSub(&rRef, &a, &b);
+        borrowSub = SSFBNSubUint32(&rSub, &a, 25u);
+        SSF_ASSERT(borrowSub == borrowRef);
+        SSF_ASSERT(SSFBNCmp(&rSub, &rRef) == 0);
+
+        /* Borrow crosses limb boundary: 0x100000000 - 1 = 0xFFFFFFFF. */
+        SSFBNSetZero(&a, 2);
+        a.limbs[1] = 1u;
+        SSFBNSubUint32(&rSub, &a, 1u);
+        SSF_ASSERT(rSub.limbs[0] == 0xFFFFFFFFul);
+        SSF_ASSERT(rSub.limbs[1] == 0u);
+
+        /* Underflow returns borrow=1, result is two's-complement. */
+        SSFBNSetZero(&a, 2);
+        borrowSub = SSFBNSubUint32(&rSub, &a, 5u);
+        SSF_ASSERT(borrowSub == 1u);
+        SSF_ASSERT(rSub.limbs[0] == 0xFFFFFFFBul);
+        SSF_ASSERT(rSub.limbs[1] == 0xFFFFFFFFul);
+
+        /* Aliasing r == a. */
+        SSFBNSetUint32(&aCopy, 0x12345678ul, 4);
+        SSFBNSubUint32(&aCopy, &aCopy, 0x12340000ul);
+        SSF_ASSERT(aCopy.limbs[0] == 0x5678u);
+    }
+
+    /* ---- SSFBNMulUint32: parity with full-width Mul against a 1-limb BN ---- */
+    {
+        SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(b, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(rProd, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(rRef, SSF_BN_MAX_LIMBS);
+
+        /* 7 * 6 = 42 */
+        SSFBNSetUint32(&a, 7u, 4);
+        SSFBNSetUint32(&b, 6u, 1);
+        SSFBNMul(&rRef, &a, &b);
+        SSFBNMulUint32(&rProd, &a, 6u);
+        SSF_ASSERT(rProd.len == 5u);
+        SSF_ASSERT(rProd.limbs[0] == 42u);
+
+        /* Across limb boundary: 0xFFFFFFFF * 2 = 0x1_FFFFFFFE */
+        SSFBNSetUint32(&a, 0xFFFFFFFFul, 4);
+        SSFBNMulUint32(&rProd, &a, 2u);
+        SSF_ASSERT(rProd.limbs[0] == 0xFFFFFFFEul);
+        SSF_ASSERT(rProd.limbs[1] == 1u);
+
+        /* Parity sweep against SSFBNMul(a, b-as-BN) for multi-limb a, small b. */
+        {
+            static const uint8_t data[8] = { 0x01u, 0x23u, 0x45u, 0x67u,
+                                             0x89u, 0xABu, 0xCDu, 0xEFu };
+            uint32_t k;
+            SSFBNFromBytes(&a, data, sizeof(data), 4);
+            for (k = 1u; k <= 100u; k += 7u)
+            {
+                SSFBNSetUint32(&b, k, 1);
+                SSFBNMul(&rRef, &a, &b);
+                SSFBNMulUint32(&rProd, &a, k);
+                /* rRef is 5 limbs (4 + 1); rProd is also 5 limbs. */
+                SSF_ASSERT(rProd.len == rRef.len);
+                SSF_ASSERT(memcmp(rProd.limbs, rRef.limbs,
+                                  (size_t)rProd.len * sizeof(SSFBNLimb_t)) == 0);
+            }
+        }
+
+        /* Multiplying by zero yields zero. */
+        SSFBNSetUint32(&a, 0xDEADBEEFul, 4);
+        SSFBNMulUint32(&rProd, &a, 0u);
+        SSF_ASSERT(SSFBNIsZero(&rProd) == true);
+    }
+
+    /* ====================================================================================== */
+    /* Variable-time ModExp (public-exponent-only) — must match constant-time ModExp exactly    */
+    /* ====================================================================================== */
+
+    /* ---- SSFBNModExpPub: parity with SSFBNModExp across typical RSA public exponents ---- */
+    {
+        SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(e, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(rCT, SSF_BN_MAX_LIMBS); /* constant-time reference */
+        SSFBN_DEFINE(rVT, SSF_BN_MAX_LIMBS); /* variable-time candidate */
+        static const uint32_t pubExponents[] = { 0u, 1u, 2u, 3u, 17u, 65537u, 0xFFFFFFFFul };
+        uint16_t k;
+
+        /* Use P-256 as a convenient prime modulus for the parity sweep. */
+        SSFBNSetUint32(&a, 12345u, 8);
+
+        for (k = 0; k < (uint16_t)(sizeof(pubExponents) / sizeof(pubExponents[0])); k++)
+        {
+            SSFBNSetUint32(&e, pubExponents[k], 8);
+            SSFBNModExp(&rCT, &a, &e, &SSF_BN_NIST_P256);
+            SSFBNModExpPub(&rVT, &a, &e, &SSF_BN_NIST_P256);
+            SSF_ASSERT(SSFBNCmp(&rCT, &rVT) == 0);
+        }
+    }
+
+    /* ---- SSFBNModExpPub: parity across random bases for e = 65537 ---- */
+    {
+        SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(e, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(rCT, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(rVT, SSF_BN_MAX_LIMBS);
+        uint16_t k;
+
+        SSFBNSetUint32(&e, 65537u, 8);
+
+        for (k = 0; k < 8u; k++)
+        {
+            uint8_t data[32];
+            uint16_t i;
+
+            for (i = 0; i < sizeof(data); i++)
+            {
+                data[i] = (uint8_t)(0x2Bu + (uint8_t)i * 11u + (uint8_t)k * 19u);
+            }
+            SSFBNFromBytes(&a, data, sizeof(data), 8);
+            SSFBNMod(&a, &a, &SSF_BN_NIST_P256);
+
+            SSFBNModExp(&rCT, &a, &e, &SSF_BN_NIST_P256);
+            SSFBNModExpPub(&rVT, &a, &e, &SSF_BN_NIST_P256);
+            SSF_ASSERT(SSFBNCmp(&rCT, &rVT) == 0);
+        }
+    }
+
+    /* ---- SSFBNModExpPub: edge cases ---- */
+    {
+        SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(e, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(r, SSF_BN_MAX_LIMBS);
+
+        /* a^0 = 1 for any a. */
+        SSFBNSetUint32(&a, 42u, 8);
+        SSFBNSetUint32(&e, 0u, 8);
+        SSFBNModExpPub(&r, &a, &e, &SSF_BN_NIST_P256);
+        SSF_ASSERT(SSFBNIsOne(&r) == true);
+
+        /* 0^e = 0 for e >= 1. */
+        SSFBNSetZero(&a, 8);
+        SSFBNSetUint32(&e, 7u, 8);
+        SSFBNModExpPub(&r, &a, &e, &SSF_BN_NIST_P256);
+        SSF_ASSERT(SSFBNIsZero(&r) == true);
+
+        /* 1^e = 1. */
+        SSFBNSetUint32(&a, 1u, 8);
+        SSFBNSetUint32(&e, 0x12345678ul, 8);
+        SSFBNModExpPub(&r, &a, &e, &SSF_BN_NIST_P256);
+        SSF_ASSERT(SSFBNIsOne(&r) == true);
+    }
+
+    /* ---- SSFBNModExpMontPub: parity with SSFBNModExpMont (precomputed ctx path) ---- */
+    {
+        SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(e, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(rCT, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(rVT, SSF_BN_MAX_LIMBS);
+        SSFBNMONT_DEFINE(ctx, SSF_BN_MAX_LIMBS);
+
+        SSFBNMontInit(&ctx, &SSF_BN_NIST_P256);
+        SSFBNSetUint32(&a, 99999u, 8);
+        SSFBNSetUint32(&e, 65537u, 8);
+
+        SSFBNModExpMont(&rCT, &a, &e, &ctx);
+        SSFBNModExpMontPub(&rVT, &a, &e, &ctx);
+        SSF_ASSERT(SSFBNCmp(&rCT, &rVT) == 0);
+    }
+
     /* ---- SSFBNMontSquare on P-384 (larger modulus exercises more carry propagation) ---- */
     {
         SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
@@ -754,5 +1218,86 @@ void SSFBNUnitTest(void)
 
         SSFPRNGDeInitContext(&prng);
     }
+
+#if SSF_CONFIG_BN_MICROBENCH == 1
+    /* ====================================================================================== */
+    /* Microbenchmark — MontMul / MontSquare throughput at representative operand sizes.        */
+    /* Gated by SSF_CONFIG_BN_MICROBENCH so the normal test run stays quick; flip the macro in  */
+    /* ssfport.h to 1 before measuring perf changes, then back to 0 after.                      */
+    /* ====================================================================================== */
+    {
+        struct { uint16_t nLimbs; uint32_t iters; const char *label; } bench[] = {
+            {   8u, 4000000u, "P-256 (n= 8, RSA-256-eq) " },
+            {  32u,  400000u, "RSA-1024     (n=32)      " },
+            {  64u,  100000u, "RSA-2048     (n=64)      " },
+            { 128u,   30000u, "RSA-4096     (n=128)     " },
+        };
+        uint16_t bi;
+
+        printf("\n--- ssfbn microbenchmark (ms for iter count shown) ---\n");
+        for (bi = 0; bi < (uint16_t)(sizeof(bench) / sizeof(bench[0])); bi++)
+        {
+            uint16_t n = bench[bi].nLimbs;
+            uint32_t iters = bench[bi].iters;
+            uint32_t i;
+
+            /* Build a Mont context with an odd, prime-ish modulus (use P-256 / P-384 constants  */
+            /* where they fit; else synthesize an odd modulus with the high bit set and low bit  */
+            /* set so MontInit accepts it).                                                      */
+            SSFBN_DEFINE(mod, SSF_BN_MAX_LIMBS);
+            SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
+            SSFBN_DEFINE(b, SSF_BN_MAX_LIMBS);
+            SSFBN_DEFINE(r, SSF_BN_MAX_LIMBS);
+            SSFBNMONT_DEFINE(mont, SSF_BN_MAX_LIMBS);
+            SSFPortTick_t t0, t1;
+
+            if (n == 8u)
+            {
+                SSFBNCopy(&mod, &SSF_BN_NIST_P256);
+            }
+            else
+            {
+                SSFBNSetZero(&mod, n);
+                for (i = 0; i < n; i++) mod.limbs[i] = 0xFFFFFFFFul;
+                mod.limbs[0] ^= 0x58ul;              /* random-ish low bits, still odd */
+                mod.limbs[n - 1u] = 0xFFFFFF00ul | 1u;
+            }
+
+            SSFBNSetUint32(&a, 0x12345678ul, n);
+            a.limbs[n / 2u] = 0x9ABCDEF0ul;
+            SSFBNMod(&a, &a, &mod);
+            SSFBNSetUint32(&b, 0x0F0F0F0Ful, n);
+            b.limbs[n / 2u] = 0x87654321ul;
+            SSFBNMod(&b, &b, &mod);
+
+            SSFBNMontInit(&mont, &mod);
+            SSFBNMontConvertIn(&a, &a, &mont);
+            SSFBNMontConvertIn(&b, &b, &mont);
+
+            /* MontMul timing. */
+            t0 = SSFPortGetTick64();
+            for (i = 0; i < iters; i++)
+            {
+                SSFBNMontMul(&r, &a, &b, &mont);
+            }
+            t1 = SSFPortGetTick64();
+            printf("  MontMul    %s %u iter: %llu ms\n",
+                   bench[bi].label, (unsigned)iters,
+                   (unsigned long long)(t1 - t0));
+
+            /* MontSquare timing. */
+            t0 = SSFPortGetTick64();
+            for (i = 0; i < iters; i++)
+            {
+                SSFBNMontSquare(&r, &a, &mont);
+            }
+            t1 = SSFPortGetTick64();
+            printf("  MontSquare %s %u iter: %llu ms\n",
+                   bench[bi].label, (unsigned)iters,
+                   (unsigned long long)(t1 - t0));
+        }
+        printf("--- end microbenchmark ---\n");
+    }
+#endif /* SSF_CONFIG_BN_MICROBENCH */
 }
 #endif /* SSF_CONFIG_BN_UNIT_TEST */

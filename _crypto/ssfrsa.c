@@ -652,46 +652,42 @@ bool SSFRSAPubKeyIsValid(const uint8_t *pubKeyDer, size_t pubKeyDerLen)
 /* RSA key generation.                                                                           */
 /* --------------------------------------------------------------------------------------------- */
 #if SSF_RSA_CONFIG_ENABLE_KEYGEN == 1
-bool SSFRSAKeyGen(uint16_t bits,
-                  uint8_t *privKeyDer, size_t privKeyDerSize, size_t *privKeyDerLen,
-                  uint8_t *pubKeyDer, size_t pubKeyDerSize, size_t *pubKeyDerLen)
+/* --------------------------------------------------------------------------------------------- */
+/* KeyGen stage 1: seed PRNG from platform entropy, generate two distinct primes p and q (with    */
+/* p > q so CRT works as expected), and compute n = p * q. The PRNG context, entropy buffer, the  */
+/* swap temp and the n-product temp all live in this helper's frame and are released on return,  */
+/* so they don't coexist with the lambda / ModInv working state in stage 2.                       */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFRSAKeyGenPrimes(uint16_t bits,
+                                SSFBN_t *p, SSFBN_t *q, SSFBN_t *n,
+                                uint16_t *nLimbsOut, uint16_t *halfLimbsOut)
 {
     SSFPRNGContext_t prng;
     uint8_t entropy[SSF_PRNG_ENTROPY_SIZE];
-    SSFBN_t p, q, n, d, e, pm1, qm1, phi, g, lambda;
-    SSFBN_t dp, dq, qInv;
     uint16_t halfBits;
-    uint16_t nLimbs, halfLimbs;
-
-    SSF_REQUIRE(privKeyDer != NULL);
-    SSF_REQUIRE(pubKeyDer != NULL);
-    SSF_REQUIRE(privKeyDerLen != NULL);
-    SSF_REQUIRE(pubKeyDerLen != NULL);
-    SSF_REQUIRE(bits == 2048u || bits == 3072u || bits == 4096u);
-    SSF_REQUIRE(bits <= SSF_BN_CONFIG_MAX_BITS);
+    uint16_t nLimbs;
 
     halfBits = bits / 2u;
     nLimbs = SSF_BN_BITS_TO_LIMBS(bits);
-    halfLimbs = SSF_BN_BITS_TO_LIMBS(halfBits);
+    *nLimbsOut = nLimbs;
+    *halfLimbsOut = SSF_BN_BITS_TO_LIMBS(halfBits);
 
-    /* Seed PRNG */
     if (!_SSFRSAGetEntropy(entropy, sizeof(entropy))) return false;
     SSFPRNGInitContext(&prng, entropy, sizeof(entropy));
 
-    /* Generate primes p and q */
-    if (!_SSFRSAGenPrime(&p, halfBits, &prng)) { SSFPRNGDeInitContext(&prng); return false; }
-    if (!_SSFRSAGenPrime(&q, halfBits, &prng)) { SSFPRNGDeInitContext(&prng); return false; }
+    if (!_SSFRSAGenPrime(p, halfBits, &prng)) { SSFPRNGDeInitContext(&prng); return false; }
+    if (!_SSFRSAGenPrime(q, halfBits, &prng)) { SSFPRNGDeInitContext(&prng); return false; }
 
     /* Ensure p != q */
-    if (SSFBNCmp(&p, &q) == 0) { SSFPRNGDeInitContext(&prng); return false; }
+    if (SSFBNCmp(p, q) == 0) { SSFPRNGDeInitContext(&prng); return false; }
 
     /* Ensure p > q (for CRT) */
-    if (SSFBNCmp(&p, &q) < 0)
+    if (SSFBNCmp(p, q) < 0)
     {
         SSFBN_t tmp;
-        SSFBNCopy(&tmp, &p);
-        SSFBNCopy(&p, &q);
-        SSFBNCopy(&q, &tmp);
+        SSFBNCopy(&tmp, p);
+        SSFBNCopy(p, q);
+        SSFBNCopy(q, &tmp);
     }
 
     SSFPRNGDeInitContext(&prng);
@@ -699,50 +695,42 @@ bool SSFRSAKeyGen(uint16_t bits,
     /* n = p * q */
     {
         SSFBN_t prod;
-        SSFBNMul(&prod, &p, &q);
-        n.len = nLimbs;
-        memcpy(n.limbs, prod.limbs, (size_t)nLimbs * sizeof(SSFBNLimb_t));
+        SSFBNMul(&prod, p, q);
+        n->len = nLimbs;
+        memcpy(n->limbs, prod.limbs, (size_t)nLimbs * sizeof(SSFBNLimb_t));
     }
 
-    /* e = 65537 */
-    SSFBNSetUint32(&e, 65537u, nLimbs);
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* KeyGen stage 2: given p, q, derive d (private exponent), dp, dq, qInv (CRT parameters).        */
+/* Local pm1, qm1, g, lambda and the division-loop working state live here and are released on    */
+/* return, so they don't overlap with the MillerRabin chain of stage 1 or the DER-encoding of     */
+/* stage 3. Any secret intermediates (lambda is derived from p, q) are zeroised before return.    */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFRSAKeyGenDerive(uint16_t nLimbs, uint16_t halfLimbs,
+                                const SSFBN_t *p, const SSFBN_t *q,
+                                SSFBN_t *d, SSFBN_t *dp, SSFBN_t *dq, SSFBN_t *qInv)
+{
+    SSFBN_t pm1, qm1, g, lambda;
 
     /* pm1 = p - 1, qm1 = q - 1 */
     {
         SSFBN_t one;
         SSFBNSetUint32(&one, 1u, halfLimbs);
-        SSFBNSub(&pm1, &p, &one);
-        SSFBNSub(&qm1, &q, &one);
+        SSFBNSub(&pm1, p, &one);
+        SSFBNSub(&qm1, q, &one);
     }
 
-    /* lambda = lcm(pm1, qm1) = pm1 * qm1 / gcd(pm1, qm1) */
+    /* g = gcd(pm1, qm1) */
     SSFBNGcd(&g, &pm1, &qm1);
 
-    /* phi = pm1 * qm1 */
-    {
-        SSFBN_t prod;
-        SSFBNMul(&prod, &pm1, &qm1);
-        /* Divide phi by gcd to get lambda: lambda = phi / g */
-        /* Use shift-subtract division since we need the quotient */
-        SSFBNMod(&lambda, &prod, &g);  /* This gives remainder, not quotient! */
-    }
-
-    /* Actually compute lambda = (pm1 / gcd) * qm1 to avoid needing division of large numbers */
-    /* Since gcd divides pm1: pm1_div = pm1 / gcd, then lambda = pm1_div * qm1 */
+    /* lambda = lcm(pm1, qm1) = (pm1 / gcd) * qm1 — the division-by-large-numbers form avoids
+     * needing to divide pm1 * qm1 by g, which wouldn't fit in our fixed-width SSFBN_t. */
     {
         SSFBN_t pm1_div;
-        /* Simple approach: if gcd is small (often just 2), do repeated subtraction/shift */
-        /* More general: use shift-and-subtract division */
-        /* For now: pm1 / gcd via binary division */
-        SSFBN_t rem, shifted;
-        uint32_t aBits, mBits;
-        int32_t shift;
 
-        SSFBNCopy(&pm1_div, &pm1);
-
-        /* pm1_div = pm1 / g: iterative shift-subtract to find quotient */
-        /* Simpler: since gcd(pm1, qm1) typically divides both evenly, and is often 2, */
-        /* let's use repeated halving if g is a power of 2, else general division */
         if (SSFBNIsOne(&g))
         {
             /* lambda = pm1 * qm1 directly */
@@ -750,9 +738,12 @@ bool SSFRSAKeyGen(uint16_t bits,
         }
         else
         {
-            /* General case: compute pm1 / g by long division */
-            /* We need quotient, not remainder. Build quotient via shift-subtract. */
+            /* Compute pm1 / g via shift-subtract long division (we want the quotient). */
+            SSFBN_t rem, shifted;
             SSFBN_t dividend, quotient;
+            uint32_t aBits, mBits;
+            int32_t shift;
+
             SSFBNCopy(&dividend, &pm1);
             SSFBNSetZero(&quotient, halfLimbs);
 
@@ -781,6 +772,8 @@ bool SSFRSAKeyGen(uint16_t bits,
             }
 
             SSFBNCopy(&pm1_div, &quotient);
+            /* rem not used */
+            (void)rem;
         }
 
         /* lambda = pm1_div * qm1 */
@@ -792,40 +785,75 @@ bool SSFRSAKeyGen(uint16_t bits,
         }
     }
 
-    /* d = e^(-1) mod lambda */
+    /* d = 65537^(-1) mod lambda */
     {
         SSFBN_t eFull;
         SSFBNSetUint32(&eFull, 65537u, nLimbs);
-        if (!SSFBNModInvExt(&d, &eFull, &lambda)) return false;
+        if (!SSFBNModInvExt(d, &eFull, &lambda)) { SSFBNZeroize(&lambda); return false; }
     }
 
     /* CRT parameters */
-    /* dp = d mod (p-1) */
-    SSFBNMod(&dp, &d, &pm1);
-
-    /* dq = d mod (q-1) */
-    SSFBNMod(&dq, &d, &qm1);
+    SSFBNMod(dp, d, &pm1);
+    SSFBNMod(dq, d, &qm1);
 
     /* qInv = q^(-1) mod p (p is prime, so Fermat works) */
-    if (!SSFBNModInv(&qInv, &q, &p)) return false;
+    if (!SSFBNModInv(qInv, q, p)) { SSFBNZeroize(&lambda); return false; }
 
-    /* Encode keys */
-    {
-        SSFBN_t ePub;
-        SSFBNSetUint32(&ePub, 65537u, nLimbs);
-        if (!_SSFRSAPubKeyEncode(&n, &ePub, pubKeyDer, pubKeyDerSize, pubKeyDerLen)) return false;
-    }
-    if (!_SSFRSAPrivKeyEncode(&n, &e, &d, &p, &q, &dp, &dq, &qInv,
+    /* lambda was derived from (p-1)(q-1) — treat as secret adjacent state. */
+    SSFBNZeroize(&lambda);
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* KeyGen stage 3: encode (n, e) and (n, e, d, p, q, dp, dq, qInv) as PKCS#1 DER. Local e lives   */
+/* only here; everything else is caller-owned and passed by const pointer.                        */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFRSAKeyGenEncode(const SSFBN_t *n, const SSFBN_t *d,
+                                const SSFBN_t *p, const SSFBN_t *q,
+                                const SSFBN_t *dp, const SSFBN_t *dq, const SSFBN_t *qInv,
+                                uint16_t nLimbs,
+                                uint8_t *privKeyDer, size_t privKeyDerSize, size_t *privKeyDerLen,
+                                uint8_t *pubKeyDer,  size_t pubKeyDerSize,  size_t *pubKeyDerLen)
+{
+    SSFBN_t e;
+
+    SSFBNSetUint32(&e, 65537u, nLimbs);
+
+    if (!_SSFRSAPubKeyEncode(n, &e, pubKeyDer, pubKeyDerSize, pubKeyDerLen)) return false;
+    if (!_SSFRSAPrivKeyEncode(n, &e, d, p, q, dp, dq, qInv,
                               privKeyDer, privKeyDerSize, privKeyDerLen)) return false;
+    return true;
+}
 
-    /* Zeroize secrets */
+bool SSFRSAKeyGen(uint16_t bits,
+                  uint8_t *privKeyDer, size_t privKeyDerSize, size_t *privKeyDerLen,
+                  uint8_t *pubKeyDer, size_t pubKeyDerSize, size_t *pubKeyDerLen)
+{
+    SSFBN_t p, q, n, d, dp, dq, qInv;
+    uint16_t nLimbs, halfLimbs;
+
+    SSF_REQUIRE(privKeyDer != NULL);
+    SSF_REQUIRE(pubKeyDer != NULL);
+    SSF_REQUIRE(privKeyDerLen != NULL);
+    SSF_REQUIRE(pubKeyDerLen != NULL);
+    SSF_REQUIRE(bits == 2048u || bits == 3072u || bits == 4096u);
+    SSF_REQUIRE(bits <= SSF_BN_CONFIG_MAX_BITS);
+
+    if (!_SSFRSAKeyGenPrimes(bits, &p, &q, &n, &nLimbs, &halfLimbs)) return false;
+    if (!_SSFRSAKeyGenDerive(nLimbs, halfLimbs, &p, &q, &d, &dp, &dq, &qInv)) return false;
+    if (!_SSFRSAKeyGenEncode(&n, &d, &p, &q, &dp, &dq, &qInv, nLimbs,
+                             privKeyDer, privKeyDerSize, privKeyDerLen,
+                             pubKeyDer,  pubKeyDerSize,  pubKeyDerLen)) return false;
+
+    /* Zeroize secrets on success. Failure paths return before secrets are fully derived or
+     * before encode completes; per the existing convention those do not zeroise (the stack
+     * bytes go out of scope on return anyway). */
     SSFBNZeroize(&d);
     SSFBNZeroize(&p);
     SSFBNZeroize(&q);
     SSFBNZeroize(&dp);
     SSFBNZeroize(&dq);
     SSFBNZeroize(&qInv);
-    SSFBNZeroize(&lambda);
 
     return true;
 }

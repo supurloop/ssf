@@ -213,7 +213,7 @@ Cryptographic primitives for hashing, encryption, and random number generation.
 | [ECDSA / ECDH](_crypto/ssfecdsa.md) | ECDSA signatures (RFC 6979 deterministic) + ECDH over NIST P-256 / P-384 | ~3.5 KB⁴¹ | — | ~16.5 KB⁴² | — | Yes |
 | [X25519](_crypto/ssfx25519.md) | X25519 key agreement over Curve25519 (RFC 7748) — self-contained, constant-time | ~4 KB⁴³ | — | ~700 B⁴⁴ | — | Yes |
 | [Ed25519](_crypto/ssfed25519.md) | Ed25519 signatures (RFC 8032 pure mode) — deterministic; uses SHA-512 from ssfsha2 | ~12 KB⁴⁵ | — | ~1.5 KB⁴⁶ | — | Yes |
-| [RSA](_crypto/ssfrsa.md) | RSA-2048/3072/4096 signatures (PKCS#1 v1.5 and PSS) + key generation; PKCS#1 DER key format | ~15 KB⁴⁷ | — | ~10 KB⁴⁸ | — | Yes |
+| [RSA](_crypto/ssfrsa.md) | RSA-2048/3072/4096 signatures (PKCS#1 v1.5 and PSS) + key generation; PKCS#1 DER key format | ~15 KB⁴⁷ | — | ~12 KB⁴⁸ | — | Yes |
 | [TLS 1.3](_crypto/ssftls.md) | TLS 1.3 core building blocks (key schedule, transcript hash, record layer); not a full TLS stack | ~2.5 KB⁴⁹ | — | ~1 KB⁵⁰ | — | Yes |
 | [PRNG](_crypto/ssfprng.md) | Cryptographically capable pseudo-random number generator | ~500 B | — | ~96 B | — | Yes |
 
@@ -263,7 +263,7 @@ Cryptographic primitives for hashing, encryption, and random number generation.
 
 ⁴⁷ Requires BN, SHA-2, ASN.1, and PRNG modules; figure is for the RSA module itself — key parsing, PKCS#1 v1.5 + PSS padding, MGF1, CRT dispatch, prime generation, and Miller-Rabin. Disabling `SSF_RSA_CONFIG_ENABLE_KEYGEN` removes ~3 KB; disabling either signature scheme removes another ~1–2 KB.
 
-⁴⁸ Peak is in `SSFRSAKeyGen`: the outer frame holds ~13 `SSFBN_t` working values (`p, q, n, d, e, pm1, qm1, phi, g, lambda, dp, dq, qInv`) ≈ 6.7 KB at default 4096-bit BN width, on top of nested `SSFBNModExp` (~3.7 KB — footnote ³⁸). Sign is lighter — ~8 KB at default BN width, dominated by the CRT helper's ~6 `SSFBN_t` locals plus the private `SSFBNModExp`. Verify is the cheapest — ~3–4 KB, because `e = 65537` is only 17 bits and the ModExp scales with exponent bit-length. All scale linearly with `SSF_BN_CONFIG_MAX_BITS`: halve the width, halve the stack.
+⁴⁸ Peak is in `SSFRSAKeyGen`. Original monolithic implementation had 13 `SSFBN_t` + block-scope locals in one frame (~9 KB at default 4096-bit BN width), so the MillerRabin-nested chain (`_SSFRSAGenPrime` → `_SSFRSAMillerRabin` → `SSFBNModExp` → ladder) peaked at ~17.6 KB. Refactored in 2026 into three helpers (`_SSFRSAKeyGenPrimes`, `_SSFRSAKeyGenDerive`, `_SSFRSAKeyGenEncode`) so that stage-local `SSFBN_t`s die at helper boundaries: the outer now carries only 7 `SSFBN_t` (`p, q, n, d, dp, dq, qInv`) = ~3.6 KB, and the unused `phi` declaration was removed. Post-refactor chain peak is ~11.9 KB (~5.7 KB / 32 % reduction). Sign is ~13.4 KB (outer 8 `SSFBN_t` + `em[512]` + `m, s`, plus the private-op CRT chain). Verify is the cheapest — ~7 KB, because `e = 65537` is only 17 bits and the public-op ModExp scales with exponent bit-length. All three scale linearly with `SSF_BN_CONFIG_MAX_BITS`: halve the width, halve the stack.
 
 ⁴⁹ Requires HMAC, SHA-2, and one or more AEAD backends (AES-GCM / AES-CCM / ChaCha20-Poly1305); figure is for the TLS 1.3 primitives themselves — HKDF-Expand-Label, Derive-Secret, traffic-key derivation, transcript hash wrappers, and record-layer nonce construction + AEAD dispatch. No handshake state machine, certificate validation, or transport I/O is included.
 

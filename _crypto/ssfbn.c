@@ -2222,14 +2222,31 @@ void SSFBNModExp(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBN_t *
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* r = a^e mod m using precomputed Montgomery context. Constant-time Montgomery ladder.           */
+/* r = a^e mod m using precomputed Montgomery context. Constant-time fixed-window (k=4).          */
+/*                                                                                                */
+/* Per-window cost: 4 MontSquares + 1 16-entry masked-copy table select + 1 MontMul. Vs. a        */
+/* Montgomery ladder (1 MontMul + 1 MontSquare per exponent bit), the window form does ~1.25      */
+/* multiplications per bit instead of 2, after amortizing the 14-MontMul precompute. The table    */
+/* lookup scans all 16 entries with constant-time masked copies, so neither memory addresses nor  */
+/* timing depend on the secret exponent value.                                                    */
 /* --------------------------------------------------------------------------------------------- */
+#define SSF_BN_MODEXP_WIN_K   (4u)
+#define SSF_BN_MODEXP_TBL_N   ((uint32_t)1u << SSF_BN_MODEXP_WIN_K)
+
 void SSFBNModExpMont(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBNMont_t *ctx)
 {
-    SSFBN_DEFINE(r0, SSF_BN_MAX_LIMBS);  /* Montgomery form of running result */
-    SSFBN_DEFINE(r1, SSF_BN_MAX_LIMBS);  /* Montgomery form of running result * a */
-    SSFBN_DEFINE(aM, SSF_BN_MAX_LIMBS);  /* a in Montgomery form */
+    SSFBN_DEFINE(aM, SSF_BN_MAX_LIMBS);     /* a in Montgomery form */
+    SSFBN_DEFINE(result, SSF_BN_MAX_LIMBS); /* running result, Montgomery form */
+    SSFBN_DEFINE(picked, SSF_BN_MAX_LIMBS); /* CT-selected table entry for this window */
+    SSFBNLimb_t tableStorage[SSF_BN_MODEXP_TBL_N][SSF_BN_MAX_LIMBS];
+    SSFBN_t table[SSF_BN_MODEXP_TBL_N];
     uint32_t eBits;
+    uint32_t nWindows;
+    uint32_t winIdx;
+    uint32_t w;
+    uint32_t k;
+    uint32_t bp;
+    uint32_t bitOffset;
     int32_t i;
 
     SSF_REQUIRE(r != NULL);
@@ -2245,48 +2262,85 @@ void SSFBNModExpMont(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBN
 
     eBits = SSFBNBitLen(e);
 
+    /* Is the exponent zero? */
     if (eBits == 0u)
     {
-        /* a^0 = 1 */
+        /* Yes, a^0 = 1 by convention. */
         SSFBNSetOne(r, ctx->len);
         return;
     }
 
-    /* Convert a to Montgomery form */
+    /* Wire up table descriptors over their stack-resident backing storage. */
+    for (w = 0u; w < SSF_BN_MODEXP_TBL_N; w++)
+    {
+        table[w].limbs = tableStorage[w];
+        table[w].len = 0u;
+        table[w].cap = SSF_BN_MAX_LIMBS;
+    }
+
+    /* Convert a to Montgomery form. */
     SSFBNMontConvertIn(&aM, a, ctx);
 
-    /* Initialize: r0 = R mod m (i.e., Montgomery form of 1) */
+    /* Build precomputed powers in Montgomery form: table[0] = Mont(1) (multiplicative identity   */
+    /* for zero-windows), table[i] = aM^i for i = 1..15.                                          */
     {
         SSFBN_DEFINE(one, SSF_BN_MAX_LIMBS);
         SSFBNSetOne(&one, ctx->len);
-        SSFBNMontConvertIn(&r0, &one, ctx);
+        SSFBNMontConvertIn(&table[0], &one, ctx);
     }
-    SSFBNCopy(&r1, &aM);
-
-    /* Montgomery ladder: constant-time, processes every bit */
-    for (i = (int32_t)(eBits - 1u); i >= 0; i--)
+    SSFBNCopy(&table[1], &aM);
+    for (w = 2u; w < SSF_BN_MODEXP_TBL_N; w++)
     {
-        uint8_t bit = SSFBNGetBit(e, (uint32_t)i);
-
-        if (bit != 0u)
-        {
-            SSFBNMontMul(&r0, &r0, &r1, ctx);
-            SSFBNMontSquare(&r1, &r1, ctx);
-        }
-        else
-        {
-            SSFBNMontMul(&r1, &r0, &r1, ctx);
-            SSFBNMontSquare(&r0, &r0, ctx);
-        }
+        SSFBNMontMul(&table[w], &table[w - 1u], &aM, ctx);
     }
 
-    /* Convert result out of Montgomery form */
-    SSFBNMontConvertOut(r, &r0, ctx);
+    /* Initialize result = Mont(1); seed picked with table[0] so its len matches for CondCopy.   */
+    SSFBNCopy(&result, &table[0]);
+    SSFBNCopy(&picked, &table[0]);
 
-    /* Zeroize temporaries containing key material */
-    SSFBNZeroize(&r0);
-    SSFBNZeroize(&r1);
+    /* Process exponent in k-bit windows from MSB. The top window may straddle eBits — bits       */
+    /* above eBits are zero, so the squarings of Mont(1) act as identity and the multiply by      */
+    /* table[w] gives the right result without special-casing the partial top window.             */
+    nWindows = (eBits + SSF_BN_MODEXP_WIN_K - 1u) / SSF_BN_MODEXP_WIN_K;
+    for (winIdx = 0u; winIdx < nWindows; winIdx++)
+    {
+        /* Square k times. */
+        for (k = 0u; k < SSF_BN_MODEXP_WIN_K; k++)
+        {
+            SSFBNMontSquare(&result, &result, ctx);
+        }
+
+        /* Decode this window's k-bit value (MSB first). */
+        bitOffset = (nWindows - 1u - winIdx) * SSF_BN_MODEXP_WIN_K;
+        w = 0u;
+        for (k = 0u; k < SSF_BN_MODEXP_WIN_K; k++)
+        {
+            bp = bitOffset + (SSF_BN_MODEXP_WIN_K - 1u - k);
+            w = (w << 1) | (uint32_t)SSFBNGetBit(e, bp);
+        }
+
+        /* Constant-time table lookup: scan all entries with a masked copy. The address pattern  */
+        /* and timing are independent of w, so the secret exponent value does not leak.          */
+        for (i = 0; i < (int32_t)SSF_BN_MODEXP_TBL_N; i++)
+        {
+            SSFBNCondCopy(&picked, &table[i], (SSFBNLimb_t)((uint32_t)i == w));
+        }
+
+        /* result = result * picked (= aM^w). */
+        SSFBNMontMul(&result, &result, &picked, ctx);
+    }
+
+    /* Convert result out of Montgomery form. */
+    SSFBNMontConvertOut(r, &result, ctx);
+
+    /* Zeroize secret material. */
     SSFBNZeroize(&aM);
+    SSFBNZeroize(&result);
+    SSFBNZeroize(&picked);
+    for (w = 0u; w < SSF_BN_MODEXP_TBL_N; w++)
+    {
+        SSFBNZeroize(&table[w]);
+    }
 }
 
 /* --------------------------------------------------------------------------------------------- */

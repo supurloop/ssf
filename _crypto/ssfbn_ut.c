@@ -1309,6 +1309,56 @@ void SSFBNUnitTest(void)
                        (unsigned long long)(t1 - t0));
             }
 
+            /* --- ModExpMont (constant-time, dense full-Hamming exponent — worst case for the    */
+            /* binary ladder) and ModExpMontPub (variable-time, e = 65537 = F4, the realistic     */
+            /* RSA verify exponent). a is still in plain (non-Mont) form here.                    */
+            {
+                SSFBN_DEFINE(expPriv, SSF_BN_MAX_LIMBS);
+                SSFBN_DEFINE(expPub, SSF_BN_MAX_LIMBS);
+                SSFBN_DEFINE(rE, SSF_BN_MAX_LIMBS);
+                uint32_t expIters = 0u;
+                uint32_t expPubIters = 0u;
+
+                /* Dense pseudo-random private-style exponent: full bit-width, both ends set. */
+                SSFBNSetZero(&expPriv, n);
+                for (i = 0; i < n; i++)
+                {
+                    expPriv.limbs[i] = 0xC9F1A8B7ul ^ (i * 0x517CC1B7ul);
+                }
+                expPriv.limbs[n - 1u] |= 0x80000000ul;   /* force full bit-length */
+                expPriv.limbs[0] |= 1u;                  /* force odd */
+                expPriv.len = n;
+
+                /* Public exponent F4 = 65537. */
+                SSFBNSetUint32(&expPub, 65537u, 1u);
+
+                /* Iter counts tuned for ~0.5–2 s per measurement (Mont ladder is ~2*eBits ops). */
+                if (n == 8u)        { expIters = 20000u;  expPubIters = 500000u; }
+                else if (n == 32u)  { expIters = 400u;    expPubIters = 40000u;  }
+                else if (n == 64u)  { expIters = 50u;     expPubIters = 10000u;  }
+                else                { expIters = 10u;     expPubIters = 2000u;   }
+
+                t0 = SSFPortGetTick64();
+                for (i = 0; i < expIters; i++)
+                {
+                    SSFBNModExpMont(&rE, &a, &expPriv, &mont);
+                }
+                t1 = SSFPortGetTick64();
+                printf("  ModExpMont %s %u iter: %llu ms\n",
+                       bench[bi].label, (unsigned)expIters,
+                       (unsigned long long)(t1 - t0));
+
+                t0 = SSFPortGetTick64();
+                for (i = 0; i < expPubIters; i++)
+                {
+                    SSFBNModExpMontPub(&rE, &a, &expPub, &mont);
+                }
+                t1 = SSFPortGetTick64();
+                printf("  ModExpPub  %s %u iter: %llu ms (e=F4)\n",
+                       bench[bi].label, (unsigned)expPubIters,
+                       (unsigned long long)(t1 - t0));
+            }
+
             /* --- Mont-form MontMul / MontSquare (CIOS / SOS). --- */
             SSFBNMontConvertIn(&a, &a, &mont);
             SSFBNMontConvertIn(&b, &b, &mont);

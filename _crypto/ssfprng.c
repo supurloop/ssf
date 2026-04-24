@@ -46,14 +46,14 @@
 /* --------------------------------------------------------------------------------------------- */
 void SSFPRNGInitContext(SSFPRNGContext_t *context, const uint8_t *entropy, size_t entropyLen)
 {
-	SSF_REQUIRE(context != NULL);
-	SSF_REQUIRE(entropy != NULL);
-	SSF_REQUIRE(entropyLen == SSF_PRNG_ENTROPY_SIZE);
+    SSF_REQUIRE(context != NULL);
+    SSF_REQUIRE(entropy != NULL);
+    SSF_REQUIRE(entropyLen == SSF_PRNG_ENTROPY_SIZE);
 
-	memcpy(context->entropy, entropy, SSF_PRNG_ENTROPY_SIZE);
-	memcpy(&context->count, entropy, sizeof(uint64_t));
-	context->count = (~context->count) + 1;
-	context->magic = SSF_PRNG_MAGIC;
+    memcpy(context->entropy, entropy, SSF_PRNG_ENTROPY_SIZE);
+    memcpy(&context->count, entropy, sizeof(uint64_t));
+    context->count = (~context->count) + 1;
+    context->magic = SSF_PRNG_MAGIC;
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -61,10 +61,10 @@ void SSFPRNGInitContext(SSFPRNGContext_t *context, const uint8_t *entropy, size_
 /* --------------------------------------------------------------------------------------------- */
 void SSFPRNGDeInitContext(SSFPRNGContext_t *context)
 {
-	SSF_REQUIRE(context != NULL);
+    SSF_REQUIRE(context != NULL);
     SSF_REQUIRE(context->magic == SSF_PRNG_MAGIC);
 
-	memset(context, 0, sizeof(SSFPRNGContext_t));
+    memset(context, 0, sizeof(SSFPRNGContext_t));
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -72,22 +72,22 @@ void SSFPRNGDeInitContext(SSFPRNGContext_t *context)
 /* --------------------------------------------------------------------------------------------- */
 void SSFPRNGGetRandom(SSFPRNGContext_t *context, uint8_t *random, size_t randomSize)
 {
-	uint8_t pt[SSF_AES_BLOCK_SIZE];
-	uint8_t ct[SSF_AES_BLOCK_SIZE];
+    uint8_t pt[SSF_AES_BLOCK_SIZE];
+    uint8_t ct[SSF_AES_BLOCK_SIZE];
 
-	SSF_REQUIRE(context != NULL);
-	SSF_REQUIRE(random != NULL);
-	SSF_REQUIRE((randomSize > 0) && (randomSize <= SSF_PRNG_RANDOM_MAX_SIZE));
-	SSF_ASSERT(context->magic == SSF_PRNG_MAGIC);
+    SSF_REQUIRE(context != NULL);
+    SSF_REQUIRE(random != NULL);
+    SSF_REQUIRE((randomSize > 0) && (randomSize <= SSF_PRNG_RANDOM_MAX_SIZE));
+    SSF_ASSERT(context->magic == SSF_PRNG_MAGIC);
 
-	/* Prepare pt block with count, then advance count */
-	memcpy(pt, &context->count, sizeof(uint64_t));
-	memcpy(&pt[SSF_AES_BLOCK_SIZE >> 1], &context->count, sizeof(uint64_t));
-	context->count++;
+    /* Prepare pt block with count, then advance count */
+    memcpy(pt, &context->count, sizeof(uint64_t));
+    memcpy(&pt[SSF_AES_BLOCK_SIZE >> 1], &context->count, sizeof(uint64_t));
+    context->count++;
 
-	/* Generate next 16 bytes of random numbers from entropy */
-	SSFAES128BlockEncrypt(pt, sizeof(pt), ct, sizeof(ct), context->entropy, SSF_PRNG_ENTROPY_SIZE);
+    /* Generate next 16 bytes of random numbers from entropy */
+    SSFAES128BlockEncrypt(pt, sizeof(pt), ct, sizeof(ct), context->entropy, SSF_PRNG_ENTROPY_SIZE);
 
-	/* Copy requested number of random numbers to user buffer */
-	memcpy(random, ct, randomSize);
+    /* Copy requested number of random numbers to user buffer */
+    memcpy(random, ct, randomSize);
 }

@@ -134,7 +134,11 @@ const SSFECCurveParams_t *SSFECGetCurveParams(SSFECCurve_t curve)
 static void _SSFECPointDouble(SSFECPoint_t *r, const SSFECPoint_t *p,
                               const SSFECCurveParams_t *c)
 {
-    SSFBN_t delta, gamma, beta, alpha, tmp;
+    SSFBN_DEFINE(delta, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(gamma, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(beta, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(alpha, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(tmp, SSF_EC_MAX_LIMBS);
 
     /* Identity doubles to identity */
     if (SSFBNIsZero(&p->z))
@@ -193,7 +197,12 @@ static void _SSFECPointDouble(SSFECPoint_t *r, const SSFECPoint_t *p,
 static void _SSFECPointAddFull(SSFECPoint_t *r, const SSFECPoint_t *p, const SSFECPoint_t *q,
                                const SSFECCurveParams_t *c)
 {
-    SSFBN_t t1, t2, t3, t4, t5, t6;
+    SSFBN_DEFINE(t1, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(t2, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(t3, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(t4, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(t5, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(t6, SSF_EC_MAX_LIMBS);
 
     /* P = identity: return Q */
     if (SSFBNIsZero(&p->z))
@@ -326,7 +335,9 @@ void SSFECPointFromAffine(SSFECPoint_t *pt, const SSFBN_t *x, const SSFBN_t *y,
 bool SSFECPointToAffine(SSFBN_t *x, SSFBN_t *y, const SSFECPoint_t *pt, SSFECCurve_t curve)
 {
     const SSFECCurveParams_t *c = SSFECGetCurveParams(curve);
-    SSFBN_t zInv, zInv2, zInv3;
+    SSFBN_DEFINE(zInv, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(zInv2, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(zInv3, SSF_EC_MAX_LIMBS);
 
     SSF_REQUIRE(x != NULL);
     SSF_REQUIRE(y != NULL);
@@ -363,7 +374,11 @@ bool SSFECPointToAffine(SSFBN_t *x, SSFBN_t *y, const SSFECPoint_t *pt, SSFECCur
 bool SSFECPointOnCurve(const SSFECPoint_t *pt, SSFECCurve_t curve)
 {
     const SSFECCurveParams_t *c = SSFECGetCurveParams(curve);
-    SSFBN_t ax, ay, lhs, rhs, tmp;
+    SSFBN_DEFINE(ax, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(ay, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(lhs, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(rhs, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(tmp, SSF_EC_MAX_LIMBS);
 
     SSF_REQUIRE(pt != NULL);
     SSF_REQUIRE(c != NULL);
@@ -402,7 +417,8 @@ bool SSFECPointOnCurve(const SSFECPoint_t *pt, SSFECCurve_t curve)
 bool SSFECPointValidate(const SSFECPoint_t *pt, SSFECCurve_t curve)
 {
     const SSFECCurveParams_t *c = SSFECGetCurveParams(curve);
-    SSFBN_t ax, ay;
+    SSFBN_DEFINE(ax, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(ay, SSF_EC_MAX_LIMBS);
 
     SSF_REQUIRE(pt != NULL);
     SSF_REQUIRE(c != NULL);
@@ -439,7 +455,8 @@ bool SSFECPointEncode(const SSFECPoint_t *pt, SSFECCurve_t curve,
 {
     const SSFECCurveParams_t *c = SSFECGetCurveParams(curve);
     size_t encLen;
-    SSFBN_t ax, ay;
+    SSFBN_DEFINE(ax, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(ay, SSF_EC_MAX_LIMBS);
 
     SSF_REQUIRE(pt != NULL);
     SSF_REQUIRE(out != NULL);
@@ -519,7 +536,8 @@ void SSFECScalarMul(SSFECPoint_t *r, const SSFBN_t *k, const SSFECPoint_t *p,
                     SSFECCurve_t curve)
 {
     const SSFECCurveParams_t *c = SSFECGetCurveParams(curve);
-    SSFECPoint_t R0, R1;
+    SSFECPOINT_DEFINE(R0, SSF_EC_MAX_LIMBS);
+    SSFECPOINT_DEFINE(R1, SSF_EC_MAX_LIMBS);
     uint32_t bits;
     int32_t i;
 
@@ -578,7 +596,12 @@ void SSFECScalarMulDual(SSFECPoint_t *r,
                         SSFECCurve_t curve)
 {
     const SSFECCurveParams_t *c = SSFECGetCurveParams(curve);
-    SSFECPoint_t table[4]; /* [0]=identity, [1]=P, [2]=Q, [3]=P+Q */
+    SSFECPoint_t table[4] = { /* [0]=identity, [1]=P, [2]=Q, [3]=P+Q */
+        SSFECPOINT_INIT(SSF_EC_MAX_LIMBS),
+        SSFECPOINT_INIT(SSF_EC_MAX_LIMBS),
+        SSFECPOINT_INIT(SSF_EC_MAX_LIMBS),
+        SSFECPOINT_INIT(SSF_EC_MAX_LIMBS)
+    };
     uint32_t bits;
     int32_t i;
 

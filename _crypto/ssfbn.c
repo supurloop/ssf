@@ -39,30 +39,24 @@
 /* P-256: 2^256 - 2^224 + 2^192 + 2^96 - 1                                                      */
 /* = 0xFFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFF                           */
 #if SSF_BN_CONFIG_MAX_BITS >= 256
-const SSFBN_t SSF_BN_NIST_P256 =
+static SSFBNLimb_t _ssfBNNistP256Limbs[8] =
 {
-    {
-        0xFFFFFFFFul, 0xFFFFFFFFul, 0xFFFFFFFFul, 0x00000000ul,
-        0x00000000ul, 0x00000000ul, 0x00000001ul, 0xFFFFFFFFul
-    },
-    8,
-    SSF_BN_MAX_LIMBS
+    0xFFFFFFFFul, 0xFFFFFFFFul, 0xFFFFFFFFul, 0x00000000ul,
+    0x00000000ul, 0x00000000ul, 0x00000001ul, 0xFFFFFFFFul
 };
+const SSFBN_t SSF_BN_NIST_P256 = { _ssfBNNistP256Limbs, 8, 8 };
 #endif /* SSF_BN_CONFIG_MAX_BITS >= 256 */
 
 /* P-384: 2^384 - 2^128 - 2^96 + 2^32 - 1                                                       */
 /* = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFFFF0000000000000000FFFFFFFF  */
 #if SSF_BN_CONFIG_MAX_BITS >= 384
-const SSFBN_t SSF_BN_NIST_P384 =
+static SSFBNLimb_t _ssfBNNistP384Limbs[12] =
 {
-    {
-        0xFFFFFFFFul, 0x00000000ul, 0x00000000ul, 0xFFFFFFFFul,
-        0xFFFFFFFEul, 0xFFFFFFFFul, 0xFFFFFFFFul, 0xFFFFFFFFul,
-        0xFFFFFFFFul, 0xFFFFFFFFul, 0xFFFFFFFFul, 0xFFFFFFFFul
-    },
-    12,
-    SSF_BN_MAX_LIMBS
+    0xFFFFFFFFul, 0x00000000ul, 0x00000000ul, 0xFFFFFFFFul,
+    0xFFFFFFFEul, 0xFFFFFFFFul, 0xFFFFFFFFul, 0xFFFFFFFFul,
+    0xFFFFFFFFul, 0xFFFFFFFFul, 0xFFFFFFFFul, 0xFFFFFFFFul
 };
+const SSFBN_t SSF_BN_NIST_P384 = { _ssfBNNistP384Limbs, 12, 12 };
 #endif /* SSF_BN_CONFIG_MAX_BITS >= 384 */
 
 /* --------------------------------------------------------------------------------------------- */
@@ -1256,7 +1250,7 @@ void SSFBNMontConvertOut(SSFBN_t *a, const SSFBN_t *aR, const SSFBNMont_t *ctx)
 /* --------------------------------------------------------------------------------------------- */
 void SSFBNModExp(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBN_t *m)
 {
-    SSFBNMont_t mont;
+    SSFBNMONT_DEFINE(mont, SSF_BN_MAX_LIMBS);
 
     SSF_REQUIRE(r != NULL);
     SSF_REQUIRE(a != NULL);
@@ -1382,9 +1376,13 @@ void SSFBNZeroize(SSFBN_t *a)
     size_t n;
 
     SSF_REQUIRE(a != NULL);
+    SSF_REQUIRE(a->limbs != NULL);
 
-    p = (volatile uint8_t *)a;
-    n = sizeof(SSFBN_t);
+    /* Zero the limb storage (the secret material) via a volatile write that the compiler can't  */
+    /* elide. Leave the struct's own fields (limbs pointer, cap) intact so the SSFBN_t remains   */
+    /* usable for subsequent operations; len is explicitly cleared.                              */
+    p = (volatile uint8_t *)a->limbs;
+    n = (size_t)a->cap * sizeof(SSFBNLimb_t);
 
     for (i = 0; i < n; i++)
     {

@@ -44,26 +44,44 @@
 /* P-256 / secp256r1 parameters                                                                  */
 /* --------------------------------------------------------------------------------------------- */
 #if SSF_EC_CONFIG_ENABLE_P256 == 1
+/* p = FFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFF */
+static SSFBNLimb_t _ssfECP256_p[8] = {
+    0xFFFFFFFFul, 0xFFFFFFFFul, 0xFFFFFFFFul, 0x00000000ul,
+    0x00000000ul, 0x00000000ul, 0x00000001ul, 0xFFFFFFFFul
+};
+/* a = p - 3 */
+static SSFBNLimb_t _ssfECP256_a[8] = {
+    0xFFFFFFFCul, 0xFFFFFFFFul, 0xFFFFFFFFul, 0x00000000ul,
+    0x00000000ul, 0x00000000ul, 0x00000001ul, 0xFFFFFFFFul
+};
+/* b = 5AC635D8AA3A93E7B3EBBD55769886BC651D06B0CC53B0F63BCE3C3E27D2604B */
+static SSFBNLimb_t _ssfECP256_b[8] = {
+    0x27D2604Bul, 0x3BCE3C3Eul, 0xCC53B0F6ul, 0x651D06B0ul,
+    0x769886BCul, 0xB3EBBD55ul, 0xAA3A93E7ul, 0x5AC635D8ul
+};
+/* Gx = 6B17D1F2E12C4247F8BCE6E563A440F277037D812DEB33A0F4A13945D898C296 */
+static SSFBNLimb_t _ssfECP256_gx[8] = {
+    0xD898C296ul, 0xF4A13945ul, 0x2DEB33A0ul, 0x77037D81ul,
+    0x63A440F2ul, 0xF8BCE6E5ul, 0xE12C4247ul, 0x6B17D1F2ul
+};
+/* Gy = 4FE342E2FE1A7F9B8EE7EB4A7C0F9E162BCE33576B315ECECBB6406837BF51F5 */
+static SSFBNLimb_t _ssfECP256_gy[8] = {
+    0x37BF51F5ul, 0xCBB64068ul, 0x6B315ECEul, 0x2BCE3357ul,
+    0x7C0F9E16ul, 0x8EE7EB4Aul, 0xFE1A7F9Bul, 0x4FE342E2ul
+};
+/* n = FFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551 */
+static SSFBNLimb_t _ssfECP256_n[8] = {
+    0xFC632551ul, 0xF3B9CAC2ul, 0xA7179E84ul, 0xBCE6FAADul,
+    0xFFFFFFFFul, 0xFFFFFFFFul, 0x00000000ul, 0xFFFFFFFFul
+};
 static const SSFECCurveParams_t _ssfECP256 =
 {
-    /* p = FFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFF */
-    { { 0xFFFFFFFFul, 0xFFFFFFFFul, 0xFFFFFFFFul, 0x00000000ul,
-        0x00000000ul, 0x00000000ul, 0x00000001ul, 0xFFFFFFFFul }, 8, SSF_BN_MAX_LIMBS },
-    /* a = p - 3 */
-    { { 0xFFFFFFFCul, 0xFFFFFFFFul, 0xFFFFFFFFul, 0x00000000ul,
-        0x00000000ul, 0x00000000ul, 0x00000001ul, 0xFFFFFFFFul }, 8, SSF_BN_MAX_LIMBS },
-    /* b = 5AC635D8AA3A93E7B3EBBD55769886BC651D06B0CC53B0F63BCE3C3E27D2604B */
-    { { 0x27D2604Bul, 0x3BCE3C3Eul, 0xCC53B0F6ul, 0x651D06B0ul,
-        0x769886BCul, 0xB3EBBD55ul, 0xAA3A93E7ul, 0x5AC635D8ul }, 8, SSF_BN_MAX_LIMBS },
-    /* Gx = 6B17D1F2E12C4247F8BCE6E563A440F277037D812DEB33A0F4A13945D898C296 */
-    { { 0xD898C296ul, 0xF4A13945ul, 0x2DEB33A0ul, 0x77037D81ul,
-        0x63A440F2ul, 0xF8BCE6E5ul, 0xE12C4247ul, 0x6B17D1F2ul }, 8, SSF_BN_MAX_LIMBS },
-    /* Gy = 4FE342E2FE1A7F9B8EE7EB4A7C0F9E162BCE33576B315ECECBB6406837BF51F5 */
-    { { 0x37BF51F5ul, 0xCBB64068ul, 0x6B315ECEul, 0x2BCE3357ul,
-        0x7C0F9E16ul, 0x8EE7EB4Aul, 0xFE1A7F9Bul, 0x4FE342E2ul }, 8, SSF_BN_MAX_LIMBS },
-    /* n = FFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551 */
-    { { 0xFC632551ul, 0xF3B9CAC2ul, 0xA7179E84ul, 0xBCE6FAADul,
-        0xFFFFFFFFul, 0xFFFFFFFFul, 0x00000000ul, 0xFFFFFFFFul }, 8, SSF_BN_MAX_LIMBS },
+    { _ssfECP256_p,  8, 8 },
+    { _ssfECP256_a,  8, 8 },
+    { _ssfECP256_b,  8, 8 },
+    { _ssfECP256_gx, 8, 8 },
+    { _ssfECP256_gy, 8, 8 },
+    { _ssfECP256_n,  8, 8 },
     8,   /* limbs */
     32   /* bytes */
 };
@@ -73,37 +91,55 @@ static const SSFECCurveParams_t _ssfECP256 =
 /* P-384 / secp384r1 parameters                                                                  */
 /* --------------------------------------------------------------------------------------------- */
 #if SSF_EC_CONFIG_ENABLE_P384 == 1
+/* p = FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFE */
+/*     FFFFFFFF0000000000000000FFFFFFFF                                   */
+static SSFBNLimb_t _ssfECP384_p[12] = {
+    0xFFFFFFFFul, 0x00000000ul, 0x00000000ul, 0xFFFFFFFFul,
+    0xFFFFFFFEul, 0xFFFFFFFFul, 0xFFFFFFFFul, 0xFFFFFFFFul,
+    0xFFFFFFFFul, 0xFFFFFFFFul, 0xFFFFFFFFul, 0xFFFFFFFFul
+};
+/* a = p - 3 */
+static SSFBNLimb_t _ssfECP384_a[12] = {
+    0xFFFFFFFCul, 0x00000000ul, 0x00000000ul, 0xFFFFFFFFul,
+    0xFFFFFFFEul, 0xFFFFFFFFul, 0xFFFFFFFFul, 0xFFFFFFFFul,
+    0xFFFFFFFFul, 0xFFFFFFFFul, 0xFFFFFFFFul, 0xFFFFFFFFul
+};
+/* b = B3312FA7E23EE7E4988E056BE3F82D19181D9C6EFE8141120314088F5013875A */
+/*     C656398D8A2ED19D2A85C8EDD3EC2AEF                                   */
+static SSFBNLimb_t _ssfECP384_b[12] = {
+    0xD3EC2AEFul, 0x2A85C8EDul, 0x8A2ED19Dul, 0xC656398Dul,
+    0x5013875Aul, 0x0314088Ful, 0xFE814112ul, 0x181D9C6Eul,
+    0xE3F82D19ul, 0x988E056Bul, 0xE23EE7E4ul, 0xB3312FA7ul
+};
+/* Gx = AA87CA22BE8B05378EB1C71EF320AD746E1D3B628BA79B9859F741E082542A38 */
+/*      5502F25DBF55296C3A545E3872760AB7                                   */
+static SSFBNLimb_t _ssfECP384_gx[12] = {
+    0x72760AB7ul, 0x3A545E38ul, 0xBF55296Cul, 0x5502F25Dul,
+    0x82542A38ul, 0x59F741E0ul, 0x8BA79B98ul, 0x6E1D3B62ul,
+    0xF320AD74ul, 0x8EB1C71Eul, 0xBE8B0537ul, 0xAA87CA22ul
+};
+/* Gy = 3617DE4A96262C6F5D9E98BF9292DC29F8F41DBD289A147CE9DA3113B5F0B8C0 */
+/*      0A60B1CE1D7E819D7A431D7C90EA0E5F                                   */
+static SSFBNLimb_t _ssfECP384_gy[12] = {
+    0x90EA0E5Ful, 0x7A431D7Cul, 0x1D7E819Dul, 0x0A60B1CEul,
+    0xB5F0B8C0ul, 0xE9DA3113ul, 0x289A147Cul, 0xF8F41DBDul,
+    0x9292DC29ul, 0x5D9E98BFul, 0x96262C6Ful, 0x3617DE4Aul
+};
+/* n = FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFC7634D81F4372DDF581A0DB2 */
+/*     48B0A77AECEC196ACCC52973                                           */
+static SSFBNLimb_t _ssfECP384_n[12] = {
+    0xCCC52973ul, 0xECEC196Aul, 0x48B0A77Aul, 0x581A0DB2ul,
+    0xF4372DDFul, 0xC7634D81ul, 0xFFFFFFFFul, 0xFFFFFFFFul,
+    0xFFFFFFFFul, 0xFFFFFFFFul, 0xFFFFFFFFul, 0xFFFFFFFFul
+};
 static const SSFECCurveParams_t _ssfECP384 =
 {
-    /* p = FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFE */
-    /*     FFFFFFFF0000000000000000FFFFFFFF                                   */
-    { { 0xFFFFFFFFul, 0x00000000ul, 0x00000000ul, 0xFFFFFFFFul,
-        0xFFFFFFFEul, 0xFFFFFFFFul, 0xFFFFFFFFul, 0xFFFFFFFFul,
-        0xFFFFFFFFul, 0xFFFFFFFFul, 0xFFFFFFFFul, 0xFFFFFFFFul }, 12, SSF_BN_MAX_LIMBS },
-    /* a = p - 3 */
-    { { 0xFFFFFFFCul, 0x00000000ul, 0x00000000ul, 0xFFFFFFFFul,
-        0xFFFFFFFEul, 0xFFFFFFFFul, 0xFFFFFFFFul, 0xFFFFFFFFul,
-        0xFFFFFFFFul, 0xFFFFFFFFul, 0xFFFFFFFFul, 0xFFFFFFFFul }, 12, SSF_BN_MAX_LIMBS },
-    /* b = B3312FA7E23EE7E4988E056BE3F82D19181D9C6EFE8141120314088F5013875A */
-    /*     C656398D8A2ED19D2A85C8EDD3EC2AEF                                   */
-    { { 0xD3EC2AEFul, 0x2A85C8EDul, 0x8A2ED19Dul, 0xC656398Dul,
-        0x5013875Aul, 0x0314088Ful, 0xFE814112ul, 0x181D9C6Eul,
-        0xE3F82D19ul, 0x988E056Bul, 0xE23EE7E4ul, 0xB3312FA7ul }, 12, SSF_BN_MAX_LIMBS },
-    /* Gx = AA87CA22BE8B05378EB1C71EF320AD746E1D3B628BA79B9859F741E082542A38 */
-    /*      5502F25DBF55296C3A545E3872760AB7                                   */
-    { { 0x72760AB7ul, 0x3A545E38ul, 0xBF55296Cul, 0x5502F25Dul,
-        0x82542A38ul, 0x59F741E0ul, 0x8BA79B98ul, 0x6E1D3B62ul,
-        0xF320AD74ul, 0x8EB1C71Eul, 0xBE8B0537ul, 0xAA87CA22ul }, 12, SSF_BN_MAX_LIMBS },
-    /* Gy = 3617DE4A96262C6F5D9E98BF9292DC29F8F41DBD289A147CE9DA3113B5F0B8C0 */
-    /*      0A60B1CE1D7E819D7A431D7C90EA0E5F                                   */
-    { { 0x90EA0E5Ful, 0x7A431D7Cul, 0x1D7E819Dul, 0x0A60B1CEul,
-        0xB5F0B8C0ul, 0xE9DA3113ul, 0x289A147Cul, 0xF8F41DBDul,
-        0x9292DC29ul, 0x5D9E98BFul, 0x96262C6Ful, 0x3617DE4Aul }, 12, SSF_BN_MAX_LIMBS },
-    /* n = FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFC7634D81F4372DDF581A0DB2 */
-    /*     48B0A77AECEC196ACCC52973                                           */
-    { { 0xCCC52973ul, 0xECEC196Aul, 0x48B0A77Aul, 0x581A0DB2ul,
-        0xF4372DDFul, 0xC7634D81ul, 0xFFFFFFFFul, 0xFFFFFFFFul,
-        0xFFFFFFFFul, 0xFFFFFFFFul, 0xFFFFFFFFul, 0xFFFFFFFFul }, 12, SSF_BN_MAX_LIMBS },
+    { _ssfECP384_p,  12, 12 },
+    { _ssfECP384_a,  12, 12 },
+    { _ssfECP384_b,  12, 12 },
+    { _ssfECP384_gx, 12, 12 },
+    { _ssfECP384_gy, 12, 12 },
+    { _ssfECP384_n,  12, 12 },
     12,  /* limbs */
     48   /* bytes */
 };
@@ -596,12 +632,14 @@ void SSFECScalarMulDual(SSFECPoint_t *r,
                         SSFECCurve_t curve)
 {
     const SSFECCurveParams_t *c = SSFECGetCurveParams(curve);
-    SSFECPoint_t table[4] = { /* [0]=identity, [1]=P, [2]=Q, [3]=P+Q */
-        SSFECPOINT_INIT(SSF_EC_MAX_LIMBS),
-        SSFECPOINT_INIT(SSF_EC_MAX_LIMBS),
-        SSFECPOINT_INIT(SSF_EC_MAX_LIMBS),
-        SSFECPOINT_INIT(SSF_EC_MAX_LIMBS)
-    };
+    /* Precomputation table: [0]=identity, [1]=P, [2]=Q, [3]=P+Q. Backed by four separately-     */
+    /* declared SSFECPoint_t locals (each with its own limb storage via SSFECPOINT_DEFINE),       */
+    /* indexed through a pointer array so the runtime `idx` lookup still works.                  */
+    SSFECPOINT_DEFINE(table0, SSF_EC_MAX_LIMBS);
+    SSFECPOINT_DEFINE(table1, SSF_EC_MAX_LIMBS);
+    SSFECPOINT_DEFINE(table2, SSF_EC_MAX_LIMBS);
+    SSFECPOINT_DEFINE(table3, SSF_EC_MAX_LIMBS);
+    SSFECPoint_t *table[4] = { &table0, &table1, &table2, &table3 };
     uint32_t bits;
     int32_t i;
 
@@ -616,27 +654,27 @@ void SSFECScalarMulDual(SSFECPoint_t *r,
 
     /* Build precomputation table */
     /* table[0] = identity */
-    SSFBNSetZero(&table[0].x, c->limbs);
-    SSFBNSetUint32(&table[0].y, 1u, c->limbs);
-    SSFBNSetZero(&table[0].z, c->limbs);
+    SSFBNSetZero(&table[0]->x, c->limbs);
+    SSFBNSetUint32(&table[0]->y, 1u, c->limbs);
+    SSFBNSetZero(&table[0]->z, c->limbs);
 
     /* table[1] = P */
-    SSFBNCopy(&table[1].x, &p->x);
-    SSFBNCopy(&table[1].y, &p->y);
-    SSFBNCopy(&table[1].z, &p->z);
+    SSFBNCopy(&table[1]->x, &p->x);
+    SSFBNCopy(&table[1]->y, &p->y);
+    SSFBNCopy(&table[1]->z, &p->z);
 
     /* table[2] = Q */
-    SSFBNCopy(&table[2].x, &q->x);
-    SSFBNCopy(&table[2].y, &q->y);
-    SSFBNCopy(&table[2].z, &q->z);
+    SSFBNCopy(&table[2]->x, &q->x);
+    SSFBNCopy(&table[2]->y, &q->y);
+    SSFBNCopy(&table[2]->z, &q->z);
 
     /* table[3] = P + Q */
-    _SSFECPointAddFull(&table[3], &table[1], &table[2], c);
+    _SSFECPointAddFull(table[3], table[1], table[2], c);
 
     /* R = identity */
-    SSFBNCopy(&r->x, &table[0].x);
-    SSFBNCopy(&r->y, &table[0].y);
-    SSFBNCopy(&r->z, &table[0].z);
+    SSFBNCopy(&r->x, &table[0]->x);
+    SSFBNCopy(&r->y, &table[0]->y);
+    SSFBNCopy(&r->z, &table[0]->z);
 
     /* Interleaved double-and-add */
     for (i = (int32_t)(bits - 1u); i >= 0; i--)
@@ -651,7 +689,7 @@ void SSFECScalarMulDual(SSFECPoint_t *r,
         /* R = R + table[idx] (skip if identity) */
         if (idx != 0u)
         {
-            _SSFECPointAddFull(r, r, &table[idx], c);
+            _SSFECPointAddFull(r, r, table[idx], c);
         }
     }
 }

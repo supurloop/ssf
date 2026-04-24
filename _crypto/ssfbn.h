@@ -113,30 +113,33 @@ typedef uint64_t SSFBNDLimb_t;
 /* Maximum byte count for import/export. */
 #define SSF_BN_MAX_BYTES ((SSF_BN_CONFIG_MAX_BITS + 7u) / 8u)
 
-/* Big number: fixed-capacity, variable-length limb array in little-endian limb order.          */
+/* Big number: pointer to caller-supplied limb storage in little-endian limb order.             */
 /* limbs[0] is the least significant limb.                                                       */
 /*                                                                                                */
 /* `len` is the number of active limbs for the current operation (1..cap).                       */
-/* `cap` is the storage capacity — the upper bound on `len` that operations may write to. Phase 1 */
-/* of the variable-width migration (2026) still embeds the limbs[] array at SSF_BN_MAX_LIMBS; cap */
-/* is tracked and validated via preconditions but does not yet shrink storage. Phase 2 will flip  */
-/* limbs[] to a pointer with separately-allocated backing storage, at which point cap reflects    */
-/* the actual bytes allocated by the SSFBN_DEFINE macro below and ECC operations see ~90% peak-   */
-/* stack reductions.                                                                              */
+/* `cap` is the storage capacity — the number of SSFBNLimb_t entries available at *limbs. The    */
+/* SSFBN_DEFINE macro below packages together the backing storage and the struct initializer so  */
+/* that each SSFBN_t local consumes only (cap * 4) + 12 bytes on the stack instead of the full   */
+/* SSF_BN_MAX_LIMBS * 4 + 8 of the previous embedded-array design. Producers / callers of an     */
+/* SSFBN_t* must ensure the struct has valid backing storage and that any len they set satisfies */
+/* len <= cap. Static SSFBN_t constants (the NIST primes, curve parameters) are initialized with */
+/* a separately-declared SSFBNLimb_t[] array and pointed at via the struct initializer.          */
 typedef struct SSFBN
 {
-    SSFBNLimb_t limbs[SSF_BN_MAX_LIMBS];
+    SSFBNLimb_t *limbs;
     uint16_t len;   /* Number of active limbs (1..cap). */
-    uint16_t cap;   /* Storage capacity — set by SSFBN_DEFINE or by producers. */
+    uint16_t cap;   /* Storage capacity in limbs of the array pointed to by `limbs`. */
 } SSFBN_t;
 
-/* Declare and initialize an SSFBN_t with a specified working-limb capacity. `limbs` should be   */
-/* the smallest value of `cap` the operation will need — e.g., SSF_EC_MAX_LIMBS (12) for P-384-   */
-/* capable ECC code, SSF_BN_BITS_TO_LIMBS(256) (8) if limited to P-256, SSF_BN_MAX_LIMBS for      */
-/* generic bignum operations. In Phase 1 the backing array is still SSF_BN_MAX_LIMBS regardless  */
-/* of this value; Phase 2 will turn `limbs` into the actual storage size allocated.              */
-#define SSFBN_DEFINE(name, limbs) \
-    SSFBN_t name = { {0u}, 0u, (uint16_t)(limbs) }
+/* Declare an SSFBN_t backed by a fresh zero-initialized SSFBNLimb_t array of size `nlimbs`.     */
+/* Expands to two declarations (a limb array + the struct) so it must appear in a scope that     */
+/* admits multiple declarations (a function body or block — not an initializer expression).      */
+/* Pick `nlimbs` to fit the widest operand the code path will see: SSF_EC_MAX_LIMBS (12) for     */
+/* P-384-capable ECC code, SSF_BN_BITS_TO_LIMBS(256) (8) if limited to P-256, SSF_BN_MAX_LIMBS   */
+/* for generic bignum / RSA code that must handle any width up to SSF_BN_CONFIG_MAX_BITS.        */
+#define SSFBN_DEFINE(name, nlimbs) \
+    SSFBNLimb_t name##_storage[(nlimbs)] = {0u}; \
+    SSFBN_t name = { name##_storage, 0u, (uint16_t)(nlimbs) }
 
 /* Montgomery reduction context for efficient modular exponentiation.                           */
 /* Precomputed for a given modulus; reuse across multiple operations with the same modulus.      */
@@ -148,9 +151,16 @@ typedef struct SSFBNMont
     uint16_t len;     /* Working limb count. */
 } SSFBNMont_t;
 
-/* Declare and initialize an SSFBNMont_t with cap `limbs` on both embedded SSFBN_t members.      */
-#define SSFBNMONT_DEFINE(name, limbs) \
-    SSFBNMont_t name = { { {0u}, 0u, (uint16_t)(limbs) }, { {0u}, 0u, (uint16_t)(limbs) }, 0u, 0u }
+/* Declare an SSFBNMont_t backed by fresh zero-initialized limb arrays for each embedded        */
+/* SSFBN_t member (mod, rr), each of capacity `nlimbs`.                                          */
+#define SSFBNMONT_DEFINE(name, nlimbs) \
+    SSFBNLimb_t name##_mod_storage[(nlimbs)] = {0u}; \
+    SSFBNLimb_t name##_rr_storage[(nlimbs)] = {0u}; \
+    SSFBNMont_t name = { \
+        { name##_mod_storage, 0u, (uint16_t)(nlimbs) }, \
+        { name##_rr_storage,  0u, (uint16_t)(nlimbs) }, \
+        0u, 0u \
+    }
 
 /* --------------------------------------------------------------------------------------------- */
 /* External interface: initialization and conversion                                             */

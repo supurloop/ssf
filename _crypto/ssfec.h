@@ -152,15 +152,18 @@ typedef struct SSFECPoint
     SSFBN_t z;
 } SSFECPoint_t;
 
-/* SSFECPoint_t zero-initializer expression; each coordinate's cap set to `limbs`. Use with an   */
-/* aggregate context (scalar SSFECPOINT_DEFINE below, or inside an array-of-points initializer). */
-#define SSFECPOINT_INIT(limbs) \
-    { { {0u}, 0u, (uint16_t)(limbs) }, { {0u}, 0u, (uint16_t)(limbs) }, { {0u}, 0u, (uint16_t)(limbs) } }
-
-/* Declare and initialize an SSFECPoint_t with each of x/y/z having capacity `limbs`. Use        */
-/* SSF_EC_MAX_LIMBS in curve-generic ECC code; narrower caps are valid once curve is known.      */
-#define SSFECPOINT_DEFINE(name, limbs) \
-    SSFECPoint_t name = SSFECPOINT_INIT(limbs)
+/* Declare an SSFECPoint_t backed by three fresh zero-initialized SSFBNLimb_t arrays (one per    */
+/* coordinate), each of capacity `nlimbs`. Use SSF_EC_MAX_LIMBS for curve-generic ECC code;      */
+/* narrower caps are valid once the curve is known at compile time.                              */
+#define SSFECPOINT_DEFINE(name, nlimbs) \
+    SSFBNLimb_t name##_x_storage[(nlimbs)] = {0u}; \
+    SSFBNLimb_t name##_y_storage[(nlimbs)] = {0u}; \
+    SSFBNLimb_t name##_z_storage[(nlimbs)] = {0u}; \
+    SSFECPoint_t name = { \
+        { name##_x_storage, 0u, (uint16_t)(nlimbs) }, \
+        { name##_y_storage, 0u, (uint16_t)(nlimbs) }, \
+        { name##_z_storage, 0u, (uint16_t)(nlimbs) } \
+    }
 
 /* Curve parameters (FIPS 186-4 / NIST SP 800-186).                                             */
 typedef struct SSFECCurveParams

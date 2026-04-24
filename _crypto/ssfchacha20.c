@@ -5,7 +5,7 @@
 /* Provides ChaCha20 stream cipher implementation (RFC 7539).                                    */
 /*                                                                                               */
 /* BSD-3-Clause License                                                                          */
-/* Copyright 2024 Supurloop Software LLC                                                         */
+/* Copyright 2026 Supurloop Software LLC                                                         */
 /*                                                                                               */
 /* Redistribution and use in source and binary forms, with or without modification, are          */
 /* permitted provided that the following conditions are met:                                     */
@@ -81,50 +81,29 @@
 #include "ssfchacha20.h"
 
 /* --------------------------------------------------------------------------------------------- */
-/* Local Helper Functions                                                                        */
+/* Module Defines                                                                                */
 /* --------------------------------------------------------------------------------------------- */
-
-/* --------------------------------------------------------------------------------------------- */
-/* Reads a 32-bit little-endian word from a byte buffer.                                         */
-/* --------------------------------------------------------------------------------------------- */
-static inline uint32_t _U8TO32_LE(const uint8_t *p)
-{
-    return ((uint32_t)p[0]) | ((uint32_t)p[1] << 8) |
-           ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
-}
-
-/* --------------------------------------------------------------------------------------------- */
-/* Writes a 32-bit little-endian word to a byte buffer.                                          */
-/* --------------------------------------------------------------------------------------------- */
-static inline void _U32TO8_LE(uint8_t *p, uint32_t v)
-{
-    p[0] = (uint8_t)(v & 0xFFu);
-    p[1] = (uint8_t)((v >> 8) & 0xFFu);
-    p[2] = (uint8_t)((v >> 16) & 0xFFu);
-    p[3] = (uint8_t)((v >> 24) & 0xFFu);
-}
-
-/* --------------------------------------------------------------------------------------------- */
-/* 32-bit left rotate.                                                                           */
-/* --------------------------------------------------------------------------------------------- */
-#define ROTL32(v, n) (((v) << (n)) | ((v) >> (32 - (n))))
 
 /* --------------------------------------------------------------------------------------------- */
 /* ChaCha20 quarter round (RFC 7539 Section 2.1).                                               */
 /* --------------------------------------------------------------------------------------------- */
 #define QR(a, b, c, d) \
-    a += b; d ^= a; d = ROTL32(d, 16); \
-    c += d; b ^= c; b = ROTL32(b, 12); \
-    a += b; d ^= a; d = ROTL32(d, 8);  \
-    c += d; b ^= c; b = ROTL32(b, 7)
+    a += b; d ^= a; d = SSF_ROTL32(d, 16); \
+    c += d; b ^= c; b = SSF_ROTL32(b, 12); \
+    a += b; d ^= a; d = SSF_ROTL32(d, 8);  \
+    c += d; b ^= c; b = SSF_ROTL32(b, 7)
 
 /* --------------------------------------------------------------------------------------------- */
-/* Generates one 64-byte ChaCha20 keystream block (RFC 7539 Section 2.3).                       */
+/* Generates one 64-byte ChaCha20 keystream block (RFC 7539 Section 2.3).                        */
 /* --------------------------------------------------------------------------------------------- */
-static void _SSFChaCha20Block(const uint32_t input[16], uint8_t out[64])
+static void _SSFChaCha20Block(const uint32_t *input, size_t inputLen, uint8_t *out,
+                              size_t outSize)
 {
     uint32_t x[16];
     uint32_t i;
+
+    SSF_ASSERT(inputLen == sizeof(uint32_t) * 16u);
+    SSF_ASSERT(outSize >= SSF_CHACHA20_BLOCK_SIZE);
 
     memcpy(x, input, sizeof(uint32_t) * 16);
 
@@ -146,18 +125,16 @@ static void _SSFChaCha20Block(const uint32_t input[16], uint8_t out[64])
     /* Add initial state */
     for (i = 0; i < 16; i++)
     {
-        _U32TO8_LE(&out[i * 4], x[i] + input[i]);
+        SSF_PUTU32LE(&out[i * 4], x[i] + input[i]);
     }
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Encrypts (or decrypts) data with ChaCha20 (RFC 7539 Section 2.4).                            */
+/* Encrypts (or decrypts) data with ChaCha20 (RFC 7539 Section 2.4).                             */
 /* --------------------------------------------------------------------------------------------- */
-void SSFChaCha20Encrypt(const uint8_t *pt, size_t ptLen,
-                        const uint8_t *key, size_t keyLen,
-                        const uint8_t *nonce, size_t nonceLen,
-                        uint32_t counter,
-                        uint8_t *ct, size_t ctSize)
+void SSFChaCha20Encrypt(const uint8_t *pt, size_t ptLen, const uint8_t *key, size_t keyLen,
+                        const uint8_t *nonce, size_t nonceLen, uint32_t counter, uint8_t *ct,
+                        size_t ctSize)
 {
     uint32_t state[16];
     uint8_t block[SSF_CHACHA20_BLOCK_SIZE];
@@ -182,23 +159,23 @@ void SSFChaCha20Encrypt(const uint8_t *pt, size_t ptLen,
     state[1] = 0x3320646eu; /* "nd 3" */
     state[2] = 0x79622d32u; /* "2-by" */
     state[3] = 0x6b206574u; /* "te k" */
-    state[4] = _U8TO32_LE(&key[0]);
-    state[5] = _U8TO32_LE(&key[4]);
-    state[6] = _U8TO32_LE(&key[8]);
-    state[7] = _U8TO32_LE(&key[12]);
-    state[8] = _U8TO32_LE(&key[16]);
-    state[9] = _U8TO32_LE(&key[20]);
-    state[10] = _U8TO32_LE(&key[24]);
-    state[11] = _U8TO32_LE(&key[28]);
+    state[4] = SSF_GETU32LE(&key[0]);
+    state[5] = SSF_GETU32LE(&key[4]);
+    state[6] = SSF_GETU32LE(&key[8]);
+    state[7] = SSF_GETU32LE(&key[12]);
+    state[8] = SSF_GETU32LE(&key[16]);
+    state[9] = SSF_GETU32LE(&key[20]);
+    state[10] = SSF_GETU32LE(&key[24]);
+    state[11] = SSF_GETU32LE(&key[28]);
     state[12] = counter;
-    state[13] = _U8TO32_LE(&nonce[0]);
-    state[14] = _U8TO32_LE(&nonce[4]);
-    state[15] = _U8TO32_LE(&nonce[8]);
+    state[13] = SSF_GETU32LE(&nonce[0]);
+    state[14] = SSF_GETU32LE(&nonce[4]);
+    state[15] = SSF_GETU32LE(&nonce[8]);
 
     pos = 0;
     while (pos < ptLen)
     {
-        _SSFChaCha20Block(state, block);
+        _SSFChaCha20Block(state, sizeof(state), block, sizeof(block));
 
         remaining = ptLen - pos;
         if (remaining > SSF_CHACHA20_BLOCK_SIZE) remaining = SSF_CHACHA20_BLOCK_SIZE;
@@ -212,3 +189,4 @@ void SSFChaCha20Encrypt(const uint8_t *pt, size_t ptLen,
         pos += remaining;
     }
 }
+

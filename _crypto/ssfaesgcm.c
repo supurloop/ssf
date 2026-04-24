@@ -84,52 +84,11 @@
 #include "ssfassert.h"
 #include "ssfaes.h"
 #include "ssfaesgcm.h"
+#include "ssfct.h"
 
 /* --------------------------------------------------------------------------------------------- */
 /* Local Helper Functions and Macros                                                             */
 /* --------------------------------------------------------------------------------------------- */
-
-/* --------------------------------------------------------------------------------------------- */
-/* --------------------------------------------------------------------------------------------- */
-static inline void PUT_32_LE(uint8_t *buf, uint32_t val)
-{
-    buf[0] = (val >> 24) & 0xff;
-    buf[1] = (val >> 16) & 0xff;
-    buf[2] = (val >> 8) & 0xff;
-    buf[3] = val & 0xff;
-}
-
-/* --------------------------------------------------------------------------------------------- */
-/* --------------------------------------------------------------------------------------------- */
-static inline void PUT_64_LE(uint8_t *buf, uint64_t val)
-{
-    buf[0] = (val >> 56) & 0xff;
-    buf[1] = (val >> 48) & 0xff;
-    buf[2] = (val >> 40) & 0xff;
-    buf[3] = (val >> 32) & 0xff;
-    buf[4] = (val >> 24) & 0xff;
-    buf[5] = (val >> 16) & 0xff;
-    buf[6] = (val >> 8) & 0xff;
-    buf[7] = val & 0xff;
-}
-
-/* --------------------------------------------------------------------------------------------- */
-/* --------------------------------------------------------------------------------------------- */
-static inline uint32_t GET_32_BE(const uint8_t *buf)
-{
-    uint32_t res;
-    res = buf[0] | (buf[1] << 8) | (buf[2] << 16) | (buf[3] << 24);
-    return res;
-}
-
-/* --------------------------------------------------------------------------------------------- */
-/* --------------------------------------------------------------------------------------------- */
-static inline uint32_t GET_32_LE(const uint8_t *buf)
-{
-    uint32_t res;
-    res = buf[3] | (buf[2] << 8) | (buf[1] << 16) | (buf[0] << 24);
-    return res;
-}
 
 /* --------------------------------------------------------------------------------------------- */
 /* --------------------------------------------------------------------------------------------- */
@@ -145,9 +104,9 @@ static inline void _SSFAESGCMBlockInc32(uint8_t *in)
 {
     uint32_t x;
 
-    x = GET_32_LE(in + 12);
+    x = SSF_GETU32BE(in + 12);
     x += 1;
-    PUT_32_LE(in + 12, x);
+    SSF_PUTU32BE(in + 12, x);
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -266,20 +225,20 @@ static void _SSFAESGCMBlockMult(uint8_t *in, size_t inSize, const uint8_t *con, 
     SSF_REQUIRE(inSize == 16);
     SSF_REQUIRE(conLen == 16);
 
-    x[3] = GET_32_BE(in);
-    x[2] = GET_32_BE(&in[4]);
-    x[1] = GET_32_BE(&in[8]);
-    x[0] = GET_32_BE(&in[12]);
+    x[3] = SSF_GETU32LE(in);
+    x[2] = SSF_GETU32LE(&in[4]);
+    x[1] = SSF_GETU32LE(&in[8]);
+    x[0] = SSF_GETU32LE(&in[12]);
 
     x[0] = _SSFAESGCMReverseBytes(x[0]);
     x[1] = _SSFAESGCMReverseBytes(x[1]);
     x[2] = _SSFAESGCMReverseBytes(x[2]);
     x[3] = _SSFAESGCMReverseBytes(x[3]);
 
-    y[3] = GET_32_BE(con);
-    y[2] = GET_32_BE(&con[4]);
-    y[1] = GET_32_BE(&con[8]);
-    y[0] = GET_32_BE(&con[12]);
+    y[3] = SSF_GETU32LE(con);
+    y[2] = SSF_GETU32LE(&con[4]);
+    y[1] = SSF_GETU32LE(&con[8]);
+    y[0] = SSF_GETU32LE(&con[12]);
 
     y[0] = _SSFAESGCMReverseBytes(y[0]);
     y[1] = _SSFAESGCMReverseBytes(y[1]);
@@ -458,13 +417,13 @@ void SSFAESGCMEncrypt(const uint8_t *pt, size_t ptLen, const uint8_t *iv, size_t
     if (ivLen == 12)
     {
         memcpy(j0, iv, ivLen);
-        PUT_32_LE(&j0[12], 1);
+        SSF_PUTU32BE(&j0[12], 1);
     }
     else
     {
         _SSFAESGCMGHASH(iv, ivLen, h, sizeof(h), j0, sizeof(j0));
         t = ((uint32_t)ivLen << 3);
-        PUT_64_LE(&buf[8], t);
+        SSF_PUTU64BE(&buf[8], t);
         _SSFAESGCMGHASH(buf, sizeof(buf), h, sizeof(h), j0, sizeof(j0));
     }
 
@@ -474,9 +433,9 @@ void SSFAESGCMEncrypt(const uint8_t *pt, size_t ptLen, const uint8_t *iv, size_t
     _SSFAESGCMGCTR(pt, ptLen, key, keyLen, j1, sizeof(j1), ct, ptLen);
 
     t = ((uint32_t)authLen << 3);
-    PUT_64_LE(buf, t);
+    SSF_PUTU64BE(buf, t);
     t = ((uint32_t)ptLen << 3);
-    PUT_64_LE(&buf[8], t);
+    SSF_PUTU64BE(&buf[8], t);
 
     _SSFAESGCMGHASH(auth, authLen, h, sizeof(h), s, sizeof(s));
     _SSFAESGCMGHASH(ct, ptLen, h, sizeof(h), s, sizeof(s));
@@ -517,13 +476,13 @@ bool SSFAESGCMDecrypt(const uint8_t *ct, size_t ctLen, const uint8_t *iv, size_t
     if (ivLen == 12)
     {
         memcpy(j0, iv, ivLen);
-        PUT_32_LE(&j0[12], 1);
+        SSF_PUTU32BE(&j0[12], 1);
     }
     else
     {
         _SSFAESGCMGHASH(iv, ivLen, h, sizeof(h), j0, sizeof(j0));
         t = ((uint32_t)ivLen << 3);
-        PUT_64_LE(&buf[8], t);
+        SSF_PUTU64BE(&buf[8], t);
         _SSFAESGCMGHASH(buf, sizeof(buf), h, sizeof(h), j0, sizeof(j0));
     }
 
@@ -533,9 +492,9 @@ bool SSFAESGCMDecrypt(const uint8_t *ct, size_t ctLen, const uint8_t *iv, size_t
     _SSFAESGCMGCTR(ct, ctLen, key, keyLen, j1, sizeof(j1), pt, ptSize);
 
     t = ((uint32_t)authLen << 3);
-    PUT_64_LE(buf, t);
+    SSF_PUTU64BE(buf, t);
     t = ((uint32_t)ctLen << 3);
-    PUT_64_LE(&buf[8], t);
+    SSF_PUTU64BE(&buf[8], t);
 
     _SSFAESGCMGHASH(auth, authLen, h, sizeof(h), s, sizeof(s));
     _SSFAESGCMGHASH(ct, ctLen, h, sizeof(h), s, sizeof(s));
@@ -543,6 +502,7 @@ bool SSFAESGCMDecrypt(const uint8_t *ct, size_t ctLen, const uint8_t *iv, size_t
 
     _SSFAESGCMGCTR(s, sizeof(s), key, keyLen, j0, sizeof(j0), s, sizeof(s));
 
-    return memcmp(s, tag, tagLen) == 0;
+    /* Verify tag in constant time to avoid leaking the position of the first differing byte. */
+    return SSFCTMemEq(s, tag, tagLen);
 }
 

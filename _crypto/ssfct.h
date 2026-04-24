@@ -5,7 +5,7 @@
 /* Provides constant-time primitives used for security-sensitive comparisons.                    */
 /*                                                                                               */
 /* BSD-3-Clause License                                                                          */
-/* Copyright 2024 Supurloop Software LLC                                                         */
+/* Copyright 2026 Supurloop Software LLC                                                         */
 /*                                                                                               */
 /* Redistribution and use in source and binary forms, with or without modification, are          */
 /* permitted provided that the following conditions are met:                                     */
@@ -44,12 +44,6 @@ extern "C" {
 /* --------------------------------------------------------------------------------------------- */
 /* External interface                                                                            */
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true iff the first n bytes at a and b are equal. Always inspects every byte
- * regardless of where a mismatch occurs, so the runtime does not leak the position of the
- * first differing byte. Intended for MAC tag and signature equality checks where a
- * timing side channel would let an attacker incrementally guess the expected value.
- * Callers should prefer this over memcmp() for any comparison whose result depends on a
- * secret. n == 0 returns true. */
 bool SSFCTMemEq(const void *a, const void *b, size_t n);
 
 /* --------------------------------------------------------------------------------------------- */
@@ -64,3 +58,4 @@ void SSFCTUnitTest(void);
 #endif
 
 #endif /* SSF_CT_H_INCLUDE */
+

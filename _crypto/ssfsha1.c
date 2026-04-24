@@ -47,31 +47,6 @@
 #define SSF_SHA1_H4 (0xC3D2E1F0ul)
 
 /* --------------------------------------------------------------------------------------------- */
-/* Left-rotate a 32-bit value by n bits.                                                         */
-/* --------------------------------------------------------------------------------------------- */
-#define SSF_SHA1_ROTL(x, n) (((x) << (n)) | ((x) >> (32u - (n))))
-
-/* --------------------------------------------------------------------------------------------- */
-/* Decode a big-endian 32-bit value from a byte array.                                           */
-/* --------------------------------------------------------------------------------------------- */
-static uint32_t _SSFSHA1DecodeU32(const uint8_t *p)
-{
-    return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) |
-           ((uint32_t)p[2] << 8) | (uint32_t)p[3];
-}
-
-/* --------------------------------------------------------------------------------------------- */
-/* Encode a big-endian 32-bit value into a byte array.                                           */
-/* --------------------------------------------------------------------------------------------- */
-static void _SSFSHA1EncodeU32(uint8_t *p, uint32_t val)
-{
-    p[0] = (uint8_t)(val >> 24);
-    p[1] = (uint8_t)(val >> 16);
-    p[2] = (uint8_t)(val >> 8);
-    p[3] = (uint8_t)(val);
-}
-
-/* --------------------------------------------------------------------------------------------- */
 /* Processes a single 512-bit (64-byte) block.                                                   */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFSHA1ProcessBlock(SSFSHA1Context_t *ctx, const uint8_t block[SSF_SHA1_BLOCK_SIZE])
@@ -88,11 +63,11 @@ static void _SSFSHA1ProcessBlock(SSFSHA1Context_t *ctx, const uint8_t block[SSF_
     /* Step a: prepare the message schedule W[0..79] */
     for (t = 0; t < 16u; t++)
     {
-        w[t] = _SSFSHA1DecodeU32(&block[t * 4u]);
+        w[t] = SSF_GETU32BE(&block[t * 4u]);
     }
     for (t = 16; t < 80u; t++)
     {
-        w[t] = SSF_SHA1_ROTL(w[t - 3u] ^ w[t - 8u] ^ w[t - 14u] ^ w[t - 16u], 1);
+        w[t] = SSF_ROTL32(w[t - 3u] ^ w[t - 8u] ^ w[t - 14u] ^ w[t - 16u], 1);
     }
 
     /* Step b: initialize working variables */
@@ -129,10 +104,10 @@ static void _SSFSHA1ProcessBlock(SSFSHA1Context_t *ctx, const uint8_t block[SSF_
             k = SSF_SHA1_K3;
         }
 
-        temp = SSF_SHA1_ROTL(a, 5) + f + e + k + w[t];
+        temp = SSF_ROTL32(a, 5) + f + e + k + w[t];
         e = d;
         d = c;
-        c = SSF_SHA1_ROTL(b, 30);
+        c = SSF_ROTL32(b, 30);
         b = a;
         a = temp;
     }
@@ -223,21 +198,14 @@ void SSFSHA1End(SSFSHA1Context_t *ctx, uint8_t out[SSF_SHA1_HASH_SIZE])
     }
 
     /* Append the total length in bits as a 64-bit big-endian value */
-    ctx->block[56] = (uint8_t)(totalBits >> 56);
-    ctx->block[57] = (uint8_t)(totalBits >> 48);
-    ctx->block[58] = (uint8_t)(totalBits >> 40);
-    ctx->block[59] = (uint8_t)(totalBits >> 32);
-    ctx->block[60] = (uint8_t)(totalBits >> 24);
-    ctx->block[61] = (uint8_t)(totalBits >> 16);
-    ctx->block[62] = (uint8_t)(totalBits >> 8);
-    ctx->block[63] = (uint8_t)(totalBits);
+    SSF_PUTU64BE(&ctx->block[56], totalBits);
 
     _SSFSHA1ProcessBlock(ctx, ctx->block);
 
     /* Write the hash output (big-endian) */
     for (i = 0; i < 5u; i++)
     {
-        _SSFSHA1EncodeU32(&out[i * 4u], ctx->state[i]);
+        SSF_PUTU32BE(&out[i * 4u], ctx->state[i]);
     }
 }
 

@@ -86,15 +86,6 @@
 /* --------------------------------------------------------------------------------------------- */
 
 /* --------------------------------------------------------------------------------------------- */
-/* Reads a 32-bit little-endian word from a byte buffer.                                         */
-/* --------------------------------------------------------------------------------------------- */
-static inline uint32_t _U8TO32_LE(const uint8_t *p)
-{
-    return ((uint32_t)p[0]) | ((uint32_t)p[1] << 8) |
-           ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
-}
-
-/* --------------------------------------------------------------------------------------------- */
 /* Computes Poly1305 MAC (RFC 7539 Section 2.5).                                                 */
 /* --------------------------------------------------------------------------------------------- */
 void SSFPoly1305Mac(const uint8_t *msg, size_t msgLen,
@@ -121,17 +112,17 @@ void SSFPoly1305Mac(const uint8_t *msg, size_t msgLen,
     SSF_REQUIRE(tagSize >= SSF_POLY1305_TAG_SIZE);
 
     /* Clamp r (RFC 7539 Section 2.5) */
-    r0 = (_U8TO32_LE(&key[0])) & 0x3FFFFFFu;
-    r1 = (_U8TO32_LE(&key[3]) >> 2) & 0x3FFFF03u;
-    r2 = (_U8TO32_LE(&key[6]) >> 4) & 0x3FFC0FFu;
-    r3 = (_U8TO32_LE(&key[9]) >> 6) & 0x3F03FFFu;
-    r4 = (_U8TO32_LE(&key[12]) >> 8) & 0x00FFFFFu;
+    r0 = (SSF_GETU32LE(&key[0])) & 0x3FFFFFFu;
+    r1 = (SSF_GETU32LE(&key[3]) >> 2) & 0x3FFFF03u;
+    r2 = (SSF_GETU32LE(&key[6]) >> 4) & 0x3FFC0FFu;
+    r3 = (SSF_GETU32LE(&key[9]) >> 6) & 0x3F03FFFu;
+    r4 = (SSF_GETU32LE(&key[12]) >> 8) & 0x00FFFFFu;
 
     /* s = key[16..31] */
-    s0 = _U8TO32_LE(&key[16]);
-    s1 = _U8TO32_LE(&key[20]);
-    s2 = _U8TO32_LE(&key[24]);
-    s3 = _U8TO32_LE(&key[28]);
+    s0 = SSF_GETU32LE(&key[16]);
+    s1 = SSF_GETU32LE(&key[20]);
+    s2 = SSF_GETU32LE(&key[24]);
+    s3 = SSF_GETU32LE(&key[28]);
 
     /* Precompute r * 5 for reduction */
     rr0 = r1 * 5;
@@ -149,11 +140,11 @@ void SSFPoly1305Mac(const uint8_t *msg, size_t msgLen,
         if (remaining >= 16)
         {
             /* Full block: append 0x01 as high bit */
-            h0 += _U8TO32_LE(&msg[pos]) & 0x3FFFFFFu;
-            h1 += (_U8TO32_LE(&msg[pos + 3]) >> 2) & 0x3FFFFFFu;
-            h2 += (_U8TO32_LE(&msg[pos + 6]) >> 4) & 0x3FFFFFFu;
-            h3 += (_U8TO32_LE(&msg[pos + 9]) >> 6) & 0x3FFFFFFu;
-            h4 += (_U8TO32_LE(&msg[pos + 12]) >> 8) | (1u << 24);
+            h0 += SSF_GETU32LE(&msg[pos]) & 0x3FFFFFFu;
+            h1 += (SSF_GETU32LE(&msg[pos + 3]) >> 2) & 0x3FFFFFFu;
+            h2 += (SSF_GETU32LE(&msg[pos + 6]) >> 4) & 0x3FFFFFFu;
+            h3 += (SSF_GETU32LE(&msg[pos + 9]) >> 6) & 0x3FFFFFFu;
+            h4 += (SSF_GETU32LE(&msg[pos + 12]) >> 8) | (1u << 24);
             hibit = 0; /* Already added above */
             pos += 16;
         }
@@ -165,11 +156,11 @@ void SSFPoly1305Mac(const uint8_t *msg, size_t msgLen,
             buf[remaining] = 0x01;
             hibit = 0;
 
-            h0 += _U8TO32_LE(&buf[0]) & 0x3FFFFFFu;
-            h1 += (_U8TO32_LE(&buf[3]) >> 2) & 0x3FFFFFFu;
-            h2 += (_U8TO32_LE(&buf[6]) >> 4) & 0x3FFFFFFu;
-            h3 += (_U8TO32_LE(&buf[9]) >> 6) & 0x3FFFFFFu;
-            h4 += (_U8TO32_LE(&buf[12]) >> 8);
+            h0 += SSF_GETU32LE(&buf[0]) & 0x3FFFFFFu;
+            h1 += (SSF_GETU32LE(&buf[3]) >> 2) & 0x3FFFFFFu;
+            h2 += (SSF_GETU32LE(&buf[6]) >> 4) & 0x3FFFFFFu;
+            h3 += (SSF_GETU32LE(&buf[9]) >> 6) & 0x3FFFFFFu;
+            h4 += (SSF_GETU32LE(&buf[12]) >> 8);
             pos += remaining;
         }
 

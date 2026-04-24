@@ -5,7 +5,7 @@
 /* Provides constant-time primitives used for security-sensitive comparisons.                    */
 /*                                                                                               */
 /* BSD-3-Clause License                                                                          */
-/* Copyright 2024 Supurloop Software LLC                                                         */
+/* Copyright 2026 Supurloop Software LLC                                                         */
 /*                                                                                               */
 /* Redistribution and use in source and binary forms, with or without modification, are          */
 /* permitted provided that the following conditions are met:                                     */
@@ -36,11 +36,7 @@
 #include "ssfassert.h"
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true iff the first n bytes at a and b are equal, inspecting every byte.               */
-/* Implementation note: do NOT short-circuit this loop. The whole-buffer XOR-OR fold is what    */
-/* keeps the runtime independent of the position of the first differing byte. Some compilers    */
-/* with aggressive optimization can autovectorize this safely, but early-return rewrites would  */
-/* reintroduce the timing side channel this function exists to prevent.                          */
+/* Returns true if the first n bytes at a and b are equal, inspecting every byte, else false.    */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFCTMemEq(const void *a, const void *b, size_t n)
 {
@@ -55,3 +51,4 @@ bool SSFCTMemEq(const void *a, const void *b, size_t n)
     for (i = 0; i < n; i++) diff |= (uint8_t)(ap[i] ^ bp[i]);
     return (diff == 0);
 }
+

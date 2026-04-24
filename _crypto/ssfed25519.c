@@ -35,6 +35,7 @@
 #include "ssfassert.h"
 #include "ssfed25519.h"
 #include "ssfsha2.h"
+#include "ssfct.h"
 
 /* --------------------------------------------------------------------------------------------- */
 /* Field element: 256 bits in 8 x 32-bit limbs, little-endian limb order.                       */
@@ -1417,5 +1418,6 @@ bool SSFEd25519Verify(const uint8_t pubKey[SSF_ED25519_PUB_KEY_SIZE],
 
     _ge_encode(rcheck, &check);
 
-    return (memcmp(rcheck, sig, 32) == 0);
+    /* Compare the recomputed R against the signature in constant time. */
+    return SSFCTMemEq(rcheck, sig, 32);
 }

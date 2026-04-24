@@ -5,7 +5,7 @@
 /* Provides ChaCha20 stream cipher interface (RFC 7539).                                         */
 /*                                                                                               */
 /* BSD-3-Clause License                                                                          */
-/* Copyright 2024 Supurloop Software LLC                                                         */
+/* Copyright 2026 Supurloop Software LLC                                                         */
 /*                                                                                               */
 /* Redistribution and use in source and binary forms, with or without modification, are          */
 /* permitted provided that the following conditions are met:                                     */
@@ -95,11 +95,9 @@ extern "C" {
 /* --------------------------------------------------------------------------------------------- */
 /* External interface                                                                            */
 /* --------------------------------------------------------------------------------------------- */
-void SSFChaCha20Encrypt(const uint8_t *pt, size_t ptLen,
-                        const uint8_t *key, size_t keyLen,
-                        const uint8_t *nonce, size_t nonceLen,
-                        uint32_t counter,
-                        uint8_t *ct, size_t ctSize);
+void SSFChaCha20Encrypt(const uint8_t *pt, size_t ptLen, const uint8_t *key, size_t keyLen,
+                        const uint8_t *nonce, size_t nonceLen, uint32_t counter, uint8_t *ct,
+                        size_t ctSize);
 
 #define SSFChaCha20Decrypt SSFChaCha20Encrypt
 
@@ -112,3 +110,4 @@ void SSFChaCha20UnitTest(void);
 #endif
 
 #endif /* SSFCHACHA20_H_INCLUDE */
+

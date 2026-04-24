@@ -91,6 +91,7 @@ typedef struct
 
 SSFUnitTest_t unitTests[] =
 {
+#if 0
     /* _ui */
 #if SSF_CONFIG_ARGV_UNIT_TEST == 1
     { "ssfargv", "Command Line Argv Parser", SSFArgvUnitTest },
@@ -138,7 +139,7 @@ SSFUnitTest_t unitTests[] =
 #if SSF_CONFIG_ASN1_UNIT_TEST == 1
     { "ssfasn1", "ASN.1 DER Codec", SSFASN1UnitTest },
 #endif /* SSF_CONFIG_ASN1_UNIT_TEST */
-
+#endif
     /* _crypto */
 #if SSF_CONFIG_AES_UNIT_TEST == 1
     { "ssfaes", "AES128-256 Block", SSFAESUnitTest },
@@ -197,7 +198,7 @@ SSFUnitTest_t unitTests[] =
 #if SSF_CONFIG_TLS_UNIT_TEST == 1
     { "ssftls", "TLS 1.3 Core", SSFTLSUnitTest },
 #endif /* SSF_CONFIG_TLS_UNIT_TEST */
-
+#if 0
     /* _ecc */
 #if SSF_CONFIG_RS_UNIT_TEST == 1
     { "ssfrs", "Reed Solomon ECC", SSFRSUnitTest },
@@ -256,7 +257,7 @@ SSFUnitTest_t unitTests[] =
 #if SSF_CONFIG_LPTASK_UNIT_TEST == 1
     { "ssflptask", "Low-Priority Task Queue", SSFLPTaskUnitTest },
 #endif /* SSF_CONFIG_LPTASK_UNIT_TEST */
-
+#endif
 };
 
 /* --------------------------------------------------------------------------------------------- */

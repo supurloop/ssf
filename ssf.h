@@ -36,6 +36,7 @@
 extern "C" {
 #endif
 
+#include <stdint.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -48,6 +49,74 @@ extern "C" {
 #define SSF_MAX_NEXT_TIMEOUT ((SSFPortTick_t)(-1))
 #define SSFIsDigit(c) ((c) >= '0' && (c) <= '9')
 #define MOD255(m) ((m) % 255)
+
+/* 32-bit left rotate. x must be uint32_t; n must be in [1, 31]. */
+#define SSF_ROTL32(x, n) (((x) << (n)) | ((x) >> (32u - (n))))
+
+/* Byte-buffer <-> integer serialization helpers used by cryptographic code.
+ * Bit-shifts make these independent of host byte order; each TU gets its own
+ * inlined copy. p points at 4 bytes (U32) or 8 bytes (U64) the caller has
+ * already sized. */
+
+static inline uint32_t SSF_GETU32LE(const uint8_t *p)
+{
+    return  (uint32_t)p[0]        | ((uint32_t)p[1] <<  8) |
+           ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+static inline void SSF_PUTU32LE(uint8_t *p, uint32_t v)
+{
+    p[0] = (uint8_t)(v      );
+    p[1] = (uint8_t)(v >>  8);
+    p[2] = (uint8_t)(v >> 16);
+    p[3] = (uint8_t)(v >> 24);
+}
+
+static inline void SSF_PUTU64LE(uint8_t *p, uint64_t v)
+{
+    p[0] = (uint8_t)(v      );
+    p[1] = (uint8_t)(v >>  8);
+    p[2] = (uint8_t)(v >> 16);
+    p[3] = (uint8_t)(v >> 24);
+    p[4] = (uint8_t)(v >> 32);
+    p[5] = (uint8_t)(v >> 40);
+    p[6] = (uint8_t)(v >> 48);
+    p[7] = (uint8_t)(v >> 56);
+}
+
+static inline uint32_t SSF_GETU32BE(const uint8_t *p)
+{
+    return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) |
+           ((uint32_t)p[2] <<  8) |  (uint32_t)p[3];
+}
+
+static inline void SSF_PUTU32BE(uint8_t *p, uint32_t v)
+{
+    p[0] = (uint8_t)(v >> 24);
+    p[1] = (uint8_t)(v >> 16);
+    p[2] = (uint8_t)(v >>  8);
+    p[3] = (uint8_t)(v      );
+}
+
+static inline uint64_t SSF_GETU64BE(const uint8_t *p)
+{
+    return ((uint64_t)p[0] << 56) | ((uint64_t)p[1] << 48) |
+           ((uint64_t)p[2] << 40) | ((uint64_t)p[3] << 32) |
+           ((uint64_t)p[4] << 24) | ((uint64_t)p[5] << 16) |
+           ((uint64_t)p[6] <<  8) |  (uint64_t)p[7];
+}
+
+static inline void SSF_PUTU64BE(uint8_t *p, uint64_t v)
+{
+    p[0] = (uint8_t)(v >> 56);
+    p[1] = (uint8_t)(v >> 48);
+    p[2] = (uint8_t)(v >> 40);
+    p[3] = (uint8_t)(v >> 32);
+    p[4] = (uint8_t)(v >> 24);
+    p[5] = (uint8_t)(v >> 16);
+    p[6] = (uint8_t)(v >>  8);
+    p[7] = (uint8_t)(v      );
+}
 
 typedef const char *SSFCStrIn_t;
 typedef char *SSFCStrOut_t;

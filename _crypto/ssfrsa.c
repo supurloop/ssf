@@ -37,6 +37,7 @@
 #include "ssfasn1.h"
 #include "ssfsha2.h"
 #include "ssfprng.h"
+#include "ssfct.h"
 
 /* --------------------------------------------------------------------------------------------- */
 /* First 256 primes for trial division (up to 1613).                                             */
@@ -960,7 +961,8 @@ bool SSFRSAVerifyPKCS1(const uint8_t *pubKeyDer, size_t pubKeyDerLen,
     memcpy(&emExpected[3u + psLen], diPrefix, SSF_RSA_DIGEST_INFO_PREFIX_LEN);
     memcpy(&emExpected[3u + psLen + SSF_RSA_DIGEST_INFO_PREFIX_LEN], hashVal, hLen);
 
-    return (memcmp(em, emExpected, keyBytes) == 0);
+    /* Compare recovered EM against expected EM in constant time. */
+    return SSFCTMemEq(em, emExpected, keyBytes);
 }
 #endif /* SSF_RSA_CONFIG_ENABLE_PKCS1_V15 */
 
@@ -1185,7 +1187,7 @@ bool SSFRSAVerifyPSS(const uint8_t *pubKeyDer, size_t pubKeyDerLen,
     /* H' = Hash(M') */
     _SSFRSAHashBeginUpdateEnd(hash, mPrime, 8u + hLen + sLen, NULL, 0, HPrime, sizeof(HPrime));
 
-    /* Compare H == H' */
-    return (memcmp(H, HPrime, hLen) == 0);
+    /* Compare H == H' in constant time. */
+    return SSFCTMemEq(H, HPrime, hLen);
 }
 #endif /* SSF_RSA_CONFIG_ENABLE_PSS */

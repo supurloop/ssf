@@ -5,7 +5,7 @@
 /* Provides ChaCha20-Poly1305 AEAD interface (RFC 7539).                                         */
 /*                                                                                               */
 /* BSD-3-Clause License                                                                          */
-/* Copyright 2024 Supurloop Software LLC                                                         */
+/* Copyright 2026 Supurloop Software LLC                                                         */
 /*                                                                                               */
 /* Redistribution and use in source and binary forms, with or without modification, are          */
 /* permitted provided that the following conditions are met:                                     */
@@ -92,7 +92,7 @@ extern "C" {
 #define SSF_CCP_NONCE_SIZE (12u)
 #define SSF_CCP_TAG_SIZE   (16u)
 
-/* Max input size for internal Poly1305 construction buffer (must be >= max plaintext + AAD + pad + 16) */
+/* Max input size for internal Poly1305 buffer (must be >= max plaintext + AAD + pad + 16) */
 #ifndef SSF_CCP_POLY1305_MAX_INPUT
 #define SSF_CCP_POLY1305_MAX_INPUT (17408u)
 #endif
@@ -100,19 +100,15 @@ extern "C" {
 /* --------------------------------------------------------------------------------------------- */
 /* External interface                                                                            */
 /* --------------------------------------------------------------------------------------------- */
-void SSFChaCha20Poly1305Encrypt(const uint8_t *pt, size_t ptLen,
-                                const uint8_t *iv, size_t ivLen,
-                                const uint8_t *auth, size_t authLen,
-                                const uint8_t *key, size_t keyLen,
-                                uint8_t *tag, size_t tagSize,
-                                uint8_t *ct, size_t ctSize);
+void SSFChaCha20Poly1305Encrypt(const uint8_t *pt, size_t ptLen, const uint8_t *iv, size_t ivLen,
+                                const uint8_t *auth, size_t authLen, const uint8_t *key,
+                                size_t keyLen, uint8_t *tag, size_t tagSize, uint8_t *ct,
+                                size_t ctSize);
 
-bool SSFChaCha20Poly1305Decrypt(const uint8_t *ct, size_t ctLen,
-                                const uint8_t *iv, size_t ivLen,
-                                const uint8_t *auth, size_t authLen,
-                                const uint8_t *key, size_t keyLen,
-                                const uint8_t *tag, size_t tagLen,
-                                uint8_t *pt, size_t ptSize);
+bool SSFChaCha20Poly1305Decrypt(const uint8_t *ct, size_t ctLen, const uint8_t *iv, size_t ivLen,
+                                const uint8_t *auth, size_t authLen, const uint8_t *key,
+                                size_t keyLen, const uint8_t *tag, size_t tagLen, uint8_t *pt,
+                                size_t ptSize);
 
 #if SSF_CONFIG_CCP_UNIT_TEST == 1
 void SSFChaCha20Poly1305UnitTest(void);
@@ -123,3 +119,4 @@ void SSFChaCha20Poly1305UnitTest(void);
 #endif
 
 #endif /* SSFCHACHA20POLY1305_H_INCLUDE */
+

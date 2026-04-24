@@ -81,30 +81,14 @@
 #include "ssfchacha20.h"
 #include "ssfpoly1305.h"
 #include "ssfchacha20poly1305.h"
-
-/* --------------------------------------------------------------------------------------------- */
-/* Writes a 64-bit little-endian value to a byte buffer.                                         */
-/* --------------------------------------------------------------------------------------------- */
-static inline void _U64TO8_LE(uint8_t *p, uint64_t v)
-{
-    p[0] = (uint8_t)(v & 0xFFu);
-    p[1] = (uint8_t)((v >> 8) & 0xFFu);
-    p[2] = (uint8_t)((v >> 16) & 0xFFu);
-    p[3] = (uint8_t)((v >> 24) & 0xFFu);
-    p[4] = (uint8_t)((v >> 32) & 0xFFu);
-    p[5] = (uint8_t)((v >> 40) & 0xFFu);
-    p[6] = (uint8_t)((v >> 48) & 0xFFu);
-    p[7] = (uint8_t)((v >> 56) & 0xFFu);
-}
+#include "ssfct.h"
 
 /* --------------------------------------------------------------------------------------------- */
 /* Builds the Poly1305 construction: auth || pad16 || ct || pad16 || le64(authLen) || le64(ctLen) */
 /* and computes the tag. macData must be large enough for the construction.                      */
 /* --------------------------------------------------------------------------------------------- */
-static void _SSFCCPComputeTag(const uint8_t *auth, size_t authLen,
-                              const uint8_t *ct, size_t ctLen,
-                              const uint8_t *otk,
-                              uint8_t *tag, size_t tagSize)
+static void _SSFCCPComputeTag(const uint8_t *auth, size_t authLen, const uint8_t *ct, size_t ctLen,
+                              const uint8_t *otk, uint8_t *tag, size_t tagSize)
 {
     /* Max poly input: authLen + pad16 + ctLen + pad16 + 16 */
     /* For TLS records, this is bounded. Use stack buffer with reasonable limit. */
@@ -137,8 +121,8 @@ static void _SSFCCPComputeTag(const uint8_t *auth, size_t authLen,
     if (pad > 0) { memset(&macData[pos], 0, pad); pos += pad; }
 
     /* le64(authLen) || le64(ctLen) */
-    _U64TO8_LE(&macData[pos], (uint64_t)authLen); pos += 8;
-    _U64TO8_LE(&macData[pos], (uint64_t)ctLen); pos += 8;
+    SSF_PUTU64LE(&macData[pos], (uint64_t)authLen); pos += 8;
+    SSF_PUTU64LE(&macData[pos], (uint64_t)ctLen); pos += 8;
 
     SSFPoly1305Mac(macData, pos, otk, SSF_POLY1305_KEY_SIZE, tag, tagSize);
 }
@@ -146,12 +130,10 @@ static void _SSFCCPComputeTag(const uint8_t *auth, size_t authLen,
 /* --------------------------------------------------------------------------------------------- */
 /* Performs ChaCha20-Poly1305 AEAD encryption (RFC 7539 Section 2.8).                            */
 /* --------------------------------------------------------------------------------------------- */
-void SSFChaCha20Poly1305Encrypt(const uint8_t *pt, size_t ptLen,
-                                const uint8_t *iv, size_t ivLen,
-                                const uint8_t *auth, size_t authLen,
-                                const uint8_t *key, size_t keyLen,
-                                uint8_t *tag, size_t tagSize,
-                                uint8_t *ct, size_t ctSize)
+void SSFChaCha20Poly1305Encrypt(const uint8_t *pt, size_t ptLen, const uint8_t *iv, size_t ivLen,
+                                const uint8_t *auth, size_t authLen, const uint8_t *key,
+                                size_t keyLen, uint8_t *tag, size_t tagSize, uint8_t *ct,
+                                size_t ctSize)
 {
     uint8_t otk[SSF_POLY1305_KEY_SIZE];
     uint8_t zeros[SSF_POLY1305_KEY_SIZE];
@@ -187,12 +169,10 @@ void SSFChaCha20Poly1305Encrypt(const uint8_t *pt, size_t ptLen,
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if ChaCha20-Poly1305 AEAD decryption/authentication successful else false.       */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFChaCha20Poly1305Decrypt(const uint8_t *ct, size_t ctLen,
-                                const uint8_t *iv, size_t ivLen,
-                                const uint8_t *auth, size_t authLen,
-                                const uint8_t *key, size_t keyLen,
-                                const uint8_t *tag, size_t tagLen,
-                                uint8_t *pt, size_t ptSize)
+bool SSFChaCha20Poly1305Decrypt(const uint8_t *ct, size_t ctLen, const uint8_t *iv, size_t ivLen,
+                                const uint8_t *auth, size_t authLen, const uint8_t *key,
+                                size_t keyLen, const uint8_t *tag, size_t tagLen, uint8_t *pt,
+                                size_t ptSize)
 {
     uint8_t otk[SSF_POLY1305_KEY_SIZE];
     uint8_t zeros[SSF_POLY1305_KEY_SIZE];
@@ -217,8 +197,8 @@ bool SSFChaCha20Poly1305Decrypt(const uint8_t *ct, size_t ctLen,
     /* Zeroize one-time key */
     memset(otk, 0, sizeof(otk));
 
-    /* Verify tag */
-    if (memcmp(computedTag, tag, SSF_CCP_TAG_SIZE) != 0) return false;
+    /* Verify tag in constant time to avoid leaking the position of the first differing byte. */
+    if (!SSFCTMemEq(computedTag, tag, SSF_CCP_TAG_SIZE)) return false;
 
     /* Tag verified: decrypt */
     if (ctLen > 0)
@@ -230,3 +210,4 @@ bool SSFChaCha20Poly1305Decrypt(const uint8_t *ct, size_t ctLen,
 
     return true;
 }
+

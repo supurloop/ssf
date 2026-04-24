@@ -643,7 +643,11 @@ static bool _ge_decode(_ge_t *p, const uint8_t in[32])
     return true;
 }
 
-/* Scalar multiplication: r = [scalar]p. Double-and-add from high bit to low. */
+/* Scalar multiplication: r = [scalar]p. Double-and-add from high bit to low.                   */
+/* Variable-time in `scalar` — the inner branch on each scalar bit makes wall-clock runtime      */
+/* proportional to popcount(scalar). Only for callers who pass public scalars (e.g., the verify  */
+/* double-scalar multiplication, whose scalars are derived from the message and signature).      */
+/* For secret scalars use _ge_scalarmult_ct below.                                                */
 static void _ge_scalarmult(_ge_t *r, const uint8_t scalar[32], const _ge_t *p)
 {
     _ge_t Q;
@@ -661,14 +665,55 @@ static void _ge_scalarmult(_ge_t *r, const uint8_t scalar[32], const _ge_t *p)
     *r = Q;
 }
 
-/* Base point scalar multiplication: r = [scalar]B. */
+/* Constant-time conditional swap of two group elements: if swap != 0, exchange a and b.        */
+/* Implemented as four _fe_cswap calls over the four coordinate field-elements; the underlying   */
+/* mask-XOR pattern has no secret-dependent branch or memory access.                             */
+static void _ge_cswap(_ge_t *a, _ge_t *b, uint32_t swap)
+{
+    _fe_cswap(&a->X, &b->X, swap);
+    _fe_cswap(&a->Y, &b->Y, swap);
+    _fe_cswap(&a->Z, &b->Z, swap);
+    _fe_cswap(&a->T, &b->T, swap);
+}
+
+/* Constant-time scalar multiplication: r = [scalar]p.                                           */
+/* Double-and-add-always pattern: on every bit we compute both `Q' = 2Q` and `Q' + p`, then      */
+/* constant-time-swap to keep `Q = 2Q + p` when the bit is 1 and `Q = 2Q` when it is 0. Every   */
+/* iteration does exactly one double, one add, and one cswap regardless of bit value, so the    */
+/* wall-clock runtime does not depend on the scalar bits. Roughly 2x slower than the            */
+/* variable-time double-and-add above; use for any call site where `scalar` is a secret.        */
+static void _ge_scalarmult_ct(_ge_t *r, const uint8_t scalar[32], const _ge_t *p)
+{
+    _ge_t Q;
+    _ge_t QplusP;
+    int16_t i;
+
+    _ge_identity(&Q);
+    for (i = 255; i >= 0; i--)
+    {
+        uint32_t bit = ((uint32_t)scalar[i >> 3] >> (i & 7)) & 1u;
+
+        _ge_double(&Q, &Q);
+        _ge_add(&QplusP, &Q, p);
+        /* After the cswap:
+         *   bit == 1 → Q holds (Q + p)  (and QplusP holds the old Q, discarded)
+         *   bit == 0 → Q is unchanged   (and QplusP holds (Q + p), discarded)
+         * Either way the next iteration reads only Q, so the discard is harmless. */
+        _ge_cswap(&Q, &QplusP, bit);
+    }
+    *r = Q;
+}
+
+/* Base point scalar multiplication: r = [scalar]B. Sign-path entry point — scalar here is the   */
+/* RFC 8032 deterministic nonce, which is derived from the long-term seed and must not leak      */
+/* via timing. Routes through the constant-time variant.                                         */
 static void _ge_scalarmult_base(_ge_t *r, const uint8_t scalar[32])
 {
     _ge_t B;
 
     /* Decode the base point from its compressed form */
     (void)_ge_decode(&B, _ed_basepoint_y);
-    _ge_scalarmult(r, scalar, &B);
+    _ge_scalarmult_ct(r, scalar, &B);
 }
 
 /* Double scalar multiplication: r = [a]A + [b]B (Straus/interleaved). */

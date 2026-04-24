@@ -177,6 +177,100 @@
     <ClCompile Include="_ui\ssfvted_ut.c">
       <Filter>_ui</Filter>
     </ClCompile>
+    <ClCompile Include="_crypto\ssfct.c" />
+    <ClCompile Include="_crypto\ssfct_ut.c" />
+    <ClCompile Include="_ui\ssfcli.c" />
+    <ClCompile Include="_ui\ssfcli_ut.c" />
+    <ClCompile Include="_crypto\ssfbn.c">
+      <Filter>_crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="_crypto\ssfbn_ut.c">
+      <Filter>_crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="_crypto\ssfchacha20.c">
+      <Filter>_crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="_crypto\ssfchacha20_ut.c">
+      <Filter>_crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="_crypto\ssfchacha20poly1305.c">
+      <Filter>_crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="_crypto\ssfchacha20poly1305_ut.c">
+      <Filter>_crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="_crypto\ssfec.c">
+      <Filter>_crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="_crypto\ssfec_ut.c">
+      <Filter>_crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="_crypto\ssfecdsa.c">
+      <Filter>_crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="_crypto\ssfecdsa_ut.c">
+      <Filter>_crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="_crypto\ssfed25519.c">
+      <Filter>_crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="_crypto\ssfed25519_ut.c">
+      <Filter>_crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="_crypto\ssfhkdf.c">
+      <Filter>_crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="_crypto\ssfhkdf_ut.c">
+      <Filter>_crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="_crypto\ssfhmac.c">
+      <Filter>_crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="_crypto\ssfhmac_ut.c">
+      <Filter>_crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="_crypto\ssfpoly1305.c">
+      <Filter>_crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="_crypto\ssfpoly1305_ut.c">
+      <Filter>_crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="_crypto\ssfrsa.c">
+      <Filter>_crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="_crypto\ssfrsa_ut.c">
+      <Filter>_crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="_crypto\ssfsha1.c">
+      <Filter>_crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="_crypto\ssfsha1_ut.c">
+      <Filter>_crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="_crypto\ssftls.c">
+      <Filter>_crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="_crypto\ssftls_ut.c">
+      <Filter>_crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="_crypto\ssfx25519.c">
+      <Filter>_crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="_crypto\ssfx25519_ut.c">
+      <Filter>_crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="_crypto\ssfaesccm.c">
+      <Filter>_crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="_crypto\ssfaesccm_ut.c">
+      <Filter>_crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="_codec\ssfasn1.c">
+      <Filter>_codec</Filter>
+    </ClCompile>
+    <ClCompile Include="_codec\ssfasn1_ut.c">
+      <Filter>_codec</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="ssf.h" />
@@ -272,6 +366,53 @@
     <ClInclude Include="_ui\ssfvted.h">
       <Filter>_ui</Filter>
     </ClInclude>
+    <ClInclude Include="_crypto\ssfct.h" />
+    <ClInclude Include="_ui\ssfcli.h" />
+    <ClInclude Include="_crypto\ssfbn.h">
+      <Filter>_crypto</Filter>
+    </ClInclude>
+    <ClInclude Include="_crypto\ssfchacha20.h">
+      <Filter>_crypto</Filter>
+    </ClInclude>
+    <ClInclude Include="_crypto\ssfchacha20poly1305.h">
+      <Filter>_crypto</Filter>
+    </ClInclude>
+    <ClInclude Include="_crypto\ssfec.h">
+      <Filter>_crypto</Filter>
+    </ClInclude>
+    <ClInclude Include="_crypto\ssfecdsa.h">
+      <Filter>_crypto</Filter>
+    </ClInclude>
+    <ClInclude Include="_crypto\ssfed25519.h">
+      <Filter>_crypto</Filter>
+    </ClInclude>
+    <ClInclude Include="_crypto\ssfhkdf.h">
+      <Filter>_crypto</Filter>
+    </ClInclude>
+    <ClInclude Include="_crypto\ssfhmac.h">
+      <Filter>_crypto</Filter>
+    </ClInclude>
+    <ClInclude Include="_crypto\ssfpoly1305.h">
+      <Filter>_crypto</Filter>
+    </ClInclude>
+    <ClInclude Include="_crypto\ssfrsa.h">
+      <Filter>_crypto</Filter>
+    </ClInclude>
+    <ClInclude Include="_crypto\ssfsha1.h">
+      <Filter>_crypto</Filter>
+    </ClInclude>
+    <ClInclude Include="_crypto\ssftls.h">
+      <Filter>_crypto</Filter>
+    </ClInclude>
+    <ClInclude Include="_crypto\ssfx25519.h">
+      <Filter>_crypto</Filter>
+    </ClInclude>
+    <ClInclude Include="_crypto\ssfaesccm.h">
+      <Filter>_crypto</Filter>
+    </ClInclude>
+    <ClInclude Include="_codec\ssfasn1.h">
+      <Filter>_codec</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="_codec">
@@ -304,8 +445,5 @@
     <Filter Include="_ui">
       <UniqueIdentifier>{bad8e4f2-1cf7-4fd6-bdc6-f5cc436dc44f}</UniqueIdentifier>
     </Filter>
-  </ItemGroup>
-  <ItemGroup>
-    <ResourceCompile Include="ssf.rc" />
   </ItemGroup>
 </Project>

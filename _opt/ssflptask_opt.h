@@ -4,6 +4,7 @@
 #ifndef SSF_LPTASK_OPT_H_INCLUDE
 #define SSF_LPTASK_OPT_H_INCLUDE
 
+#include <stdbool.h>
 #include "ssfport.h"        /* SSF_CONFIG_ENABLE_THREAD_SUPPORT, SSF_MUTEX_*, pthread, etc. */
 #include "ssfassert.h"
 

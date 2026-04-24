@@ -41,7 +41,7 @@ void SSFECUnitTest(void)
     /* ---- P-256: generator is on curve ---- */
     {
         const SSFECCurveParams_t *c = SSFECGetCurveParams(SSF_EC_CURVE_P256);
-        SSFECPoint_t G;
+        SSFECPOINT_DEFINE(G, SSF_EC_MAX_LIMBS);
 
         SSF_ASSERT(c != NULL);
         SSFECPointFromAffine(&G, &c->gx, &c->gy, SSF_EC_CURVE_P256);
@@ -52,7 +52,7 @@ void SSFECUnitTest(void)
 
     /* ---- P-256: identity handling ---- */
     {
-        SSFECPoint_t O;
+        SSFECPOINT_DEFINE(O, SSF_EC_MAX_LIMBS);
 
         SSFECPointSetIdentity(&O, SSF_EC_CURVE_P256);
         SSF_ASSERT(SSFECPointIsIdentity(&O) == true);
@@ -61,7 +61,8 @@ void SSFECUnitTest(void)
     /* ---- P-256: SEC 1 encode/decode roundtrip of generator ---- */
     {
         const SSFECCurveParams_t *c = SSFECGetCurveParams(SSF_EC_CURVE_P256);
-        SSFECPoint_t G, G2;
+        SSFECPOINT_DEFINE(G, SSF_EC_MAX_LIMBS);
+        SSFECPOINT_DEFINE(G2, SSF_EC_MAX_LIMBS);
         uint8_t enc[SSF_EC_MAX_ENCODED_SIZE];
         size_t encLen;
 
@@ -72,7 +73,10 @@ void SSFECUnitTest(void)
 
         SSF_ASSERT(SSFECPointDecode(&G2, SSF_EC_CURVE_P256, enc, encLen) == true);
         {
-            SSFBN_t x1, y1, x2, y2;
+            SSFBN_DEFINE(x1, SSF_EC_MAX_LIMBS);
+            SSFBN_DEFINE(y1, SSF_EC_MAX_LIMBS);
+            SSFBN_DEFINE(x2, SSF_EC_MAX_LIMBS);
+            SSFBN_DEFINE(y2, SSF_EC_MAX_LIMBS);
             SSF_ASSERT(SSFECPointToAffine(&x1, &y1, &G, SSF_EC_CURVE_P256) == true);
             SSF_ASSERT(SSFECPointToAffine(&x2, &y2, &G2, SSF_EC_CURVE_P256) == true);
             SSF_ASSERT(SSFBNCmp(&x1, &x2) == 0);
@@ -83,7 +87,7 @@ void SSFECUnitTest(void)
     /* ---- P-256: invalid point rejection ---- */
     {
         uint8_t bad[65];
-        SSFECPoint_t pt;
+        SSFECPOINT_DEFINE(pt, SSF_EC_MAX_LIMBS);
 
         /* All zeros (not on curve) */
         memset(bad, 0, sizeof(bad));
@@ -102,9 +106,11 @@ void SSFECUnitTest(void)
     /* ---- P-256: 1 * G = G ---- */
     {
         const SSFECCurveParams_t *c = SSFECGetCurveParams(SSF_EC_CURVE_P256);
-        SSFECPoint_t G, R;
-        SSFBN_t one;
-        SSFBN_t rx, ry;
+        SSFECPOINT_DEFINE(G, SSF_EC_MAX_LIMBS);
+        SSFECPOINT_DEFINE(R, SSF_EC_MAX_LIMBS);
+        SSFBN_DEFINE(one, SSF_EC_MAX_LIMBS);
+        SSFBN_DEFINE(rx, SSF_EC_MAX_LIMBS);
+        SSFBN_DEFINE(ry, SSF_EC_MAX_LIMBS);
 
         SSFECPointFromAffine(&G, &c->gx, &c->gy, SSF_EC_CURVE_P256);
         SSFBNSetUint32(&one, 1u, c->limbs);
@@ -118,9 +124,14 @@ void SSFECUnitTest(void)
     /* ---- P-256: G + G = 2 * G consistency ---- */
     {
         const SSFECCurveParams_t *c = SSFECGetCurveParams(SSF_EC_CURVE_P256);
-        SSFECPoint_t G, sum, dbl;
-        SSFBN_t two;
-        SSFBN_t sx, sy, dx, dy;
+        SSFECPOINT_DEFINE(G, SSF_EC_MAX_LIMBS);
+        SSFECPOINT_DEFINE(sum, SSF_EC_MAX_LIMBS);
+        SSFECPOINT_DEFINE(dbl, SSF_EC_MAX_LIMBS);
+        SSFBN_DEFINE(two, SSF_EC_MAX_LIMBS);
+        SSFBN_DEFINE(sx, SSF_EC_MAX_LIMBS);
+        SSFBN_DEFINE(sy, SSF_EC_MAX_LIMBS);
+        SSFBN_DEFINE(dx, SSF_EC_MAX_LIMBS);
+        SSFBN_DEFINE(dy, SSF_EC_MAX_LIMBS);
 
         SSFECPointFromAffine(&G, &c->gx, &c->gy, SSF_EC_CURVE_P256);
 
@@ -140,7 +151,8 @@ void SSFECUnitTest(void)
     /* ---- P-256: n * G = identity (order verification) ---- */
     {
         const SSFECCurveParams_t *c = SSFECGetCurveParams(SSF_EC_CURVE_P256);
-        SSFECPoint_t G, R;
+        SSFECPOINT_DEFINE(G, SSF_EC_MAX_LIMBS);
+        SSFECPOINT_DEFINE(R, SSF_EC_MAX_LIMBS);
 
         SSFECPointFromAffine(&G, &c->gx, &c->gy, SSF_EC_CURVE_P256);
         SSFECScalarMul(&R, &c->n, &G, SSF_EC_CURVE_P256);
@@ -150,8 +162,11 @@ void SSFECUnitTest(void)
     /* ---- P-256: G + identity = G ---- */
     {
         const SSFECCurveParams_t *c = SSFECGetCurveParams(SSF_EC_CURVE_P256);
-        SSFECPoint_t G, O, R;
-        SSFBN_t rx, ry;
+        SSFECPOINT_DEFINE(G, SSF_EC_MAX_LIMBS);
+        SSFECPOINT_DEFINE(O, SSF_EC_MAX_LIMBS);
+        SSFECPOINT_DEFINE(R, SSF_EC_MAX_LIMBS);
+        SSFBN_DEFINE(rx, SSF_EC_MAX_LIMBS);
+        SSFBN_DEFINE(ry, SSF_EC_MAX_LIMBS);
 
         SSFECPointFromAffine(&G, &c->gx, &c->gy, SSF_EC_CURVE_P256);
         SSFECPointSetIdentity(&O, SSF_EC_CURVE_P256);
@@ -165,9 +180,16 @@ void SSFECUnitTest(void)
     /* ---- P-256: dual scalar mul consistency: u1*G + u2*G = (u1+u2)*G ---- */
     {
         const SSFECCurveParams_t *c = SSFECGetCurveParams(SSF_EC_CURVE_P256);
-        SSFECPoint_t G, R1, R2;
-        SSFBN_t u1, u2, uSum;
-        SSFBN_t r1x, r1y, r2x, r2y;
+        SSFECPOINT_DEFINE(G, SSF_EC_MAX_LIMBS);
+        SSFECPOINT_DEFINE(R1, SSF_EC_MAX_LIMBS);
+        SSFECPOINT_DEFINE(R2, SSF_EC_MAX_LIMBS);
+        SSFBN_DEFINE(u1, SSF_EC_MAX_LIMBS);
+        SSFBN_DEFINE(u2, SSF_EC_MAX_LIMBS);
+        SSFBN_DEFINE(uSum, SSF_EC_MAX_LIMBS);
+        SSFBN_DEFINE(r1x, SSF_EC_MAX_LIMBS);
+        SSFBN_DEFINE(r1y, SSF_EC_MAX_LIMBS);
+        SSFBN_DEFINE(r2x, SSF_EC_MAX_LIMBS);
+        SSFBN_DEFINE(r2y, SSF_EC_MAX_LIMBS);
 
         SSFECPointFromAffine(&G, &c->gx, &c->gy, SSF_EC_CURVE_P256);
         SSFBNSetUint32(&u1, 3u, c->limbs);
@@ -191,7 +213,7 @@ void SSFECUnitTest(void)
     /* ---- P-384: generator is on curve ---- */
     {
         const SSFECCurveParams_t *c = SSFECGetCurveParams(SSF_EC_CURVE_P384);
-        SSFECPoint_t G;
+        SSFECPOINT_DEFINE(G, SSF_EC_MAX_LIMBS);
 
         SSF_ASSERT(c != NULL);
         SSFECPointFromAffine(&G, &c->gx, &c->gy, SSF_EC_CURVE_P384);
@@ -202,9 +224,11 @@ void SSFECUnitTest(void)
     /* ---- P-384: 1 * G = G ---- */
     {
         const SSFECCurveParams_t *c = SSFECGetCurveParams(SSF_EC_CURVE_P384);
-        SSFECPoint_t G, R;
-        SSFBN_t one;
-        SSFBN_t rx, ry;
+        SSFECPOINT_DEFINE(G, SSF_EC_MAX_LIMBS);
+        SSFECPOINT_DEFINE(R, SSF_EC_MAX_LIMBS);
+        SSFBN_DEFINE(one, SSF_EC_MAX_LIMBS);
+        SSFBN_DEFINE(rx, SSF_EC_MAX_LIMBS);
+        SSFBN_DEFINE(ry, SSF_EC_MAX_LIMBS);
 
         SSFECPointFromAffine(&G, &c->gx, &c->gy, SSF_EC_CURVE_P384);
         SSFBNSetUint32(&one, 1u, c->limbs);
@@ -218,7 +242,8 @@ void SSFECUnitTest(void)
     /* ---- P-384: n * G = identity ---- */
     {
         const SSFECCurveParams_t *c = SSFECGetCurveParams(SSF_EC_CURVE_P384);
-        SSFECPoint_t G, R;
+        SSFECPOINT_DEFINE(G, SSF_EC_MAX_LIMBS);
+        SSFECPOINT_DEFINE(R, SSF_EC_MAX_LIMBS);
 
         SSFECPointFromAffine(&G, &c->gx, &c->gy, SSF_EC_CURVE_P384);
         SSFECScalarMul(&R, &c->n, &G, SSF_EC_CURVE_P384);

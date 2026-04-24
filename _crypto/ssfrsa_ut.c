@@ -39,7 +39,9 @@ void SSFRSAUnitTest(void)
 {
     /* ---- ssfbn enhancement: GCD ---- */
     {
-        SSFBN_t a, b, r;
+        SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(b, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(r, SSF_BN_MAX_LIMBS);
 
         /* gcd(12, 8) = 4 */
         SSFBNSetUint32(&a, 12u, 4);
@@ -62,7 +64,10 @@ void SSFRSAUnitTest(void)
 
     /* ---- ssfbn enhancement: ModInvExt (composite modulus) ---- */
     {
-        SSFBN_t a, m, r, check;
+        SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(m, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(r, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(check, SSF_BN_MAX_LIMBS);
 
         /* 3^(-1) mod 10 = 7 (since 3*7 = 21 = 1 mod 10) */
         /* 10 is composite, so Fermat's won't work but ExtGCD will */

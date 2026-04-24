@@ -38,7 +38,7 @@ void SSFBNUnitTest(void)
 {
     /* ---- SetZero, SetUint32, IsZero, IsOne ---- */
     {
-        SSFBN_t a;
+        SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
 
         SSFBNSetZero(&a, 4);
         SSF_ASSERT(SSFBNIsZero(&a) == true);
@@ -62,7 +62,7 @@ void SSFBNUnitTest(void)
     {
         static const uint8_t data[] = { 0x01u, 0x23u, 0x45u, 0x67u, 0x89u, 0xABu, 0xCDu, 0xEFu };
         uint8_t out[8];
-        SSFBN_t a;
+        SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
 
         SSF_ASSERT(SSFBNFromBytes(&a, data, sizeof(data), 4) == true);
         SSF_ASSERT(SSFBNToBytes(&a, out, sizeof(out)) == true);
@@ -73,7 +73,7 @@ void SSFBNUnitTest(void)
     {
         static const uint8_t data[] = { 0xFFu };
         uint8_t out[4];
-        SSFBN_t a;
+        SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
 
         SSF_ASSERT(SSFBNFromBytes(&a, data, 1, 2) == true);
         SSF_ASSERT(SSFBNToBytes(&a, out, sizeof(out)) == true);
@@ -85,7 +85,8 @@ void SSFBNUnitTest(void)
 
     /* ---- Comparison ---- */
     {
-        SSFBN_t a, b;
+        SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(b, SSF_BN_MAX_LIMBS);
 
         SSFBNSetUint32(&a, 100u, 4);
         SSFBNSetUint32(&b, 200u, 4);
@@ -96,20 +97,22 @@ void SSFBNUnitTest(void)
 
     /* ---- Add / Sub ---- */
     {
-        SSFBN_t a, b, r;
+        SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(b, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(r, SSF_BN_MAX_LIMBS);
 
         SSFBNSetUint32(&a, 100u, 4);
         SSFBNSetUint32(&b, 200u, 4);
         SSF_ASSERT(SSFBNAdd(&r, &a, &b) == 0);
         {
-            SSFBN_t expected;
+            SSFBN_DEFINE(expected, SSF_BN_MAX_LIMBS);
             SSFBNSetUint32(&expected, 300u, 4);
             SSF_ASSERT(SSFBNCmp(&r, &expected) == 0);
         }
 
         SSF_ASSERT(SSFBNSub(&r, &b, &a) == 0);
         {
-            SSFBN_t expected;
+            SSFBN_DEFINE(expected, SSF_BN_MAX_LIMBS);
             SSFBNSetUint32(&expected, 100u, 4);
             SSF_ASSERT(SSFBNCmp(&r, &expected) == 0);
         }
@@ -117,7 +120,9 @@ void SSFBNUnitTest(void)
 
     /* ---- Multiplication ---- */
     {
-        SSFBN_t a, b, r;
+        SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(b, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(r, SSF_BN_MAX_LIMBS);
 
         /* 7 * 6 = 42 */
         SSFBNSetUint32(&a, 7u, 2);
@@ -130,7 +135,7 @@ void SSFBNUnitTest(void)
 
     /* ---- BitLen and GetBit ---- */
     {
-        SSFBN_t a;
+        SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
 
         SSFBNSetUint32(&a, 0u, 4);
         SSF_ASSERT(SSFBNBitLen(&a) == 0);
@@ -155,7 +160,7 @@ void SSFBNUnitTest(void)
 
     /* ---- Shift left / right ---- */
     {
-        SSFBN_t a;
+        SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
 
         SSFBNSetUint32(&a, 1u, 4);
         SSFBNShiftLeft1(&a);
@@ -173,7 +178,10 @@ void SSFBNUnitTest(void)
 
     /* ---- ModAdd / ModSub with small modulus ---- */
     {
-        SSFBN_t a, b, m, r;
+        SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(b, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(m, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(r, SSF_BN_MAX_LIMBS);
 
         /* (5 + 6) mod 7 = 4 */
         SSFBNSetUint32(&a, 5u, 4);
@@ -191,7 +199,10 @@ void SSFBNUnitTest(void)
 
     /* ---- ModMul with small modulus ---- */
     {
-        SSFBN_t a, b, m, r;
+        SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(b, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(m, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(r, SSF_BN_MAX_LIMBS);
 
         /* (5 * 6) mod 7 = 30 mod 7 = 2 */
         SSFBNSetUint32(&a, 5u, 4);
@@ -203,7 +214,10 @@ void SSFBNUnitTest(void)
 
     /* ---- ModExp: 3^10 mod 7 = 59049 mod 7 = 4 ---- */
     {
-        SSFBN_t base, exp, m, r;
+        SSFBN_DEFINE(base, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(exp, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(m, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(r, SSF_BN_MAX_LIMBS);
 
         SSFBNSetUint32(&base, 3u, 4);
         SSFBNSetUint32(&exp, 10u, 4);
@@ -214,7 +228,9 @@ void SSFBNUnitTest(void)
 
     /* ---- ModInv: 2^(-1) mod 7 = 4 (since 2*4 = 8 = 1 mod 7) ---- */
     {
-        SSFBN_t a, m, r;
+        SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(m, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(r, SSF_BN_MAX_LIMBS);
 
         SSFBNSetUint32(&a, 2u, 4);
         SSFBNSetUint32(&m, 7u, 4);
@@ -224,7 +240,9 @@ void SSFBNUnitTest(void)
 
     /* ---- ModInv: 0 has no inverse ---- */
     {
-        SSFBN_t a, m, r;
+        SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(m, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(r, SSF_BN_MAX_LIMBS);
 
         SSFBNSetUint32(&a, 0u, 4);
         SSFBNSetUint32(&m, 7u, 4);
@@ -233,7 +251,8 @@ void SSFBNUnitTest(void)
 
     /* ---- CondSwap ---- */
     {
-        SSFBN_t a, b;
+        SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(b, SSF_BN_MAX_LIMBS);
 
         SSFBNSetUint32(&a, 10u, 4);
         SSFBNSetUint32(&b, 20u, 4);
@@ -247,7 +266,7 @@ void SSFBNUnitTest(void)
 
     /* ---- Zeroize ---- */
     {
-        SSFBN_t a;
+        SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
         SSFBNSetUint32(&a, 0xDEADBEEFu, 4);
         SSFBNZeroize(&a);
         SSF_ASSERT(a.limbs[0] == 0u);
@@ -263,7 +282,9 @@ void SSFBNUnitTest(void)
 
     /* ---- ModMulNIST: a * 1 mod p = a ---- */
     {
-        SSFBN_t a, one, r;
+        SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(one, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(r, SSF_BN_MAX_LIMBS);
 
         SSFBNSetUint32(&a, 42u, 8);
         SSFBNSetUint32(&one, 1u, 8);
@@ -273,7 +294,9 @@ void SSFBNUnitTest(void)
 
     /* ---- ModMulNIST: a * 0 mod p = 0 ---- */
     {
-        SSFBN_t a, zero, r;
+        SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(zero, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(r, SSF_BN_MAX_LIMBS);
 
         SSFBNSetUint32(&a, 42u, 8);
         SSFBNSetZero(&zero, 8);
@@ -283,8 +306,10 @@ void SSFBNUnitTest(void)
 
     /* ---- Montgomery: roundtrip convert in/out ---- */
     {
-        SSFBN_t a, aM, aBack;
-        SSFBNMont_t mont;
+        SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(aM, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(aBack, SSF_BN_MAX_LIMBS);
+        SSFBNMONT_DEFINE(mont, SSF_BN_MAX_LIMBS);
 
         SSFBNSetUint32(&a, 12345u, 8);
         SSFBNMontInit(&mont, &SSF_BN_NIST_P256);

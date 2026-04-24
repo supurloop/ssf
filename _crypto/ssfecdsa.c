@@ -559,15 +559,76 @@ bool SSFECDSASign(SSFECCurve_t curve,
 /* 8. v = Rx mod n                                                                               */
 /* 9. Accept iff v == r                                                                          */
 /* --------------------------------------------------------------------------------------------- */
+/* --------------------------------------------------------------------------------------------- */
+/* Verify stage 1: decode + validate pubKey, decode signature, range-check r/s, compute           */
+/* e = bits2int(hash), w = s^(-1) mod n, u1 = e*w mod n, u2 = r*w mod n. Local s, e, w are        */
+/* released when this helper returns, so they don't contribute to peak stack during the later    */
+/* scalar multiplication. Outputs go into caller-owned r, u1, u2, Q slots.                       */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFECDSAVerifyInit(const SSFECCurveParams_t *c, SSFECCurve_t curve,
+                                const uint8_t *pubKey, size_t pubKeyLen,
+                                const uint8_t *hash,   size_t hashLen,
+                                const uint8_t *sig,    size_t sigLen,
+                                SSFBN_t *rOut, SSFBN_t *u1Out, SSFBN_t *u2Out,
+                                SSFECPoint_t *QOut)
+{
+    SSFBN_t s, e, w;
+
+    if (!SSFECPointDecode(QOut, curve, pubKey, pubKeyLen)) return false;
+    if (!_SSFECDSASigDecode(sig, sigLen, c, rOut, &s)) return false;
+    if (SSFBNIsZero(rOut) || (SSFBNCmp(rOut, &c->n) >= 0)) return false;
+    if (SSFBNIsZero(&s) || (SSFBNCmp(&s, &c->n) >= 0)) return false;
+
+    _SSFECDSABits2Int(&e, hash, hashLen, c);
+    if (SSFBNCmp(&e, &c->n) >= 0) SSFBNSub(&e, &e, &c->n);
+
+    if (!SSFBNModInv(&w, &s, &c->n)) return false;
+
+    SSFBNModMul(u1Out, &e, &w, &c->n);
+    SSFBNModMul(u2Out, rOut, &w, &c->n);
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Verify stage 2: compute R = u1 * G + u2 * Q via Shamir's trick. Local G is released on return  */
+/* so it doesn't occupy stack during the later affine conversion. Rejects R = O per FIPS 186-4.   */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFECDSAVerifyGetR(const SSFECCurveParams_t *c, SSFECCurve_t curve,
+                                const SSFBN_t *u1, const SSFBN_t *u2,
+                                const SSFECPoint_t *Q,
+                                SSFECPoint_t *Rout)
+{
+    SSFECPoint_t G;
+
+    SSFECPointFromAffine(&G, &c->gx, &c->gy, curve);
+    SSFECScalarMulDual(Rout, u1, &G, u2, Q, curve);
+    if (SSFECPointIsIdentity(Rout)) return false;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Verify stage 3: extract affine Rx from R, reduce mod n, compare to r. Local Rx, Ry, v are      */
+/* released on return; ScalarMulDual's heavy call chain is already unwound by the time we reach   */
+/* this helper, so the added locals here don't compound with it.                                 */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFECDSAVerifyCheckR(const SSFECCurveParams_t *c, SSFECCurve_t curve,
+                                  const SSFECPoint_t *R, const SSFBN_t *r)
+{
+    SSFBN_t Rx, Ry, v;
+
+    if (!SSFECPointToAffine(&Rx, &Ry, R, curve)) return false;
+    _SSFECDSAReduceModN(&v, &Rx, c);
+    return (SSFBNCmp(&v, r) == 0);
+}
+
 bool SSFECDSAVerify(SSFECCurve_t curve,
                     const uint8_t *pubKey, size_t pubKeyLen,
                     const uint8_t *hash, size_t hashLen,
                     const uint8_t *sig, size_t sigLen)
 {
     const SSFECCurveParams_t *c = SSFECGetCurveParams(curve);
-    SSFBN_t r, s, e, w, u1, u2;
-    SSFECPoint_t Q, G, R;
-    SSFBN_t Rx, Ry, v;
+    SSFBN_t r, u1, u2;
+    SSFECPoint_t Q, R;
 
     SSF_REQUIRE(pubKey != NULL);
     SSF_REQUIRE(hash != NULL);
@@ -576,40 +637,10 @@ bool SSFECDSAVerify(SSFECCurve_t curve,
     /* See SSFECDSASign comment: any hash <= curve order length is mathematically valid. */
     SSF_REQUIRE(hashLen > 0u && hashLen <= c->bytes);
 
-    /* Decode public key */
-    if (!SSFECPointDecode(&Q, curve, pubKey, pubKeyLen)) return false;
-
-    /* Decode signature */
-    if (!_SSFECDSASigDecode(sig, sigLen, c, &r, &s)) return false;
-
-    /* Check r, s in [1, n-1] */
-    if (SSFBNIsZero(&r) || (SSFBNCmp(&r, &c->n) >= 0)) return false;
-    if (SSFBNIsZero(&s) || (SSFBNCmp(&s, &c->n) >= 0)) return false;
-
-    /* e = bits2int(hash) */
-    _SSFECDSABits2Int(&e, hash, hashLen, c);
-    if (SSFBNCmp(&e, &c->n) >= 0) SSFBNSub(&e, &e, &c->n);
-
-    /* w = s^(-1) mod n */
-    if (!SSFBNModInv(&w, &s, &c->n)) return false;
-
-    /* u1 = e * w mod n, u2 = r * w mod n */
-    SSFBNModMul(&u1, &e, &w, &c->n);
-    SSFBNModMul(&u2, &r, &w, &c->n);
-
-    /* R = u1 * G + u2 * Q (Shamir's trick via SSFECScalarMulDual) */
-    SSFECPointFromAffine(&G, &c->gx, &c->gy, curve);
-    SSFECScalarMulDual(&R, &u1, &G, &u2, &Q, curve);
-
-    /* R must not be identity */
-    if (SSFECPointIsIdentity(&R)) return false;
-
-    /* v = Rx mod n */
-    if (!SSFECPointToAffine(&Rx, &Ry, &R, curve)) return false;
-    _SSFECDSAReduceModN(&v, &Rx, c);
-
-    /* Accept iff v == r */
-    return (SSFBNCmp(&v, &r) == 0);
+    if (!_SSFECDSAVerifyInit(c, curve, pubKey, pubKeyLen, hash, hashLen, sig, sigLen,
+                             &r, &u1, &u2, &Q)) return false;
+    if (!_SSFECDSAVerifyGetR(c, curve, &u1, &u2, &Q, &R)) return false;
+    return _SSFECDSAVerifyCheckR(c, curve, &R, &r);
 }
 
 /* --------------------------------------------------------------------------------------------- */

@@ -210,7 +210,7 @@ Cryptographic primitives for hashing, encryption, and random number generation.
 | [Constant-Time](_crypto/ssfct.md) | Constant-time byte-buffer equality for MAC and signature verification | ~40 B | — | ~32 B | — | Yes |
 | [Big Number](_crypto/ssfbn.md) | Multi-precision big-number arithmetic; foundation for RSA, ECC, and DH | ~10 KB | — | ~3.7 KB³⁸ | — | Yes |
 | [Elliptic Curve](_crypto/ssfec.md) | NIST P-256 / P-384 point arithmetic (constant-time scalar mul, SEC 1 codec) | ~10 KB³⁹ | — | ~7 KB⁴⁰ | — | Yes |
-| [ECDSA / ECDH](_crypto/ssfecdsa.md) | ECDSA signatures (RFC 6979 deterministic) + ECDH over NIST P-256 / P-384 | ~3.5 KB⁴¹ | — | ~15 KB⁴² | — | Yes |
+| [ECDSA / ECDH](_crypto/ssfecdsa.md) | ECDSA signatures (RFC 6979 deterministic) + ECDH over NIST P-256 / P-384 | ~3.5 KB⁴¹ | — | ~16.5 KB⁴² | — | Yes |
 | [X25519](_crypto/ssfx25519.md) | X25519 key agreement over Curve25519 (RFC 7748) — self-contained, constant-time | ~4 KB⁴³ | — | ~700 B⁴⁴ | — | Yes |
 | [Ed25519](_crypto/ssfed25519.md) | Ed25519 signatures (RFC 8032 pure mode) — deterministic; uses SHA-512 from ssfsha2 | ~12 KB⁴⁵ | — | ~1.5 KB⁴⁶ | — | Yes |
 | [RSA](_crypto/ssfrsa.md) | RSA-2048/3072/4096 signatures (PKCS#1 v1.5 and PSS) + key generation; PKCS#1 DER key format | ~15 KB⁴⁷ | — | ~10 KB⁴⁸ | — | Yes |
@@ -251,7 +251,7 @@ Cryptographic primitives for hashing, encryption, and random number generation.
 
 ⁴¹ Requires ECC and BN modules; figure is for sign / verify / ECDH orchestration, RFC 6979 deterministic-nonce HMAC-DRBG, and DER signature codec only. Key-gen pulls in [`ssfprng`](_crypto/ssfprng.md) too.
 
-⁴² Peak is in `SSFECDSASign`: the outer frame holds 7 `SSFBN_t` arithmetic locals (`d`, `k`, `e`, `r`, `s`, `kInv`, `tmp`) + 2 `SSFBN_t` for `(Rx, Ry)` + 1 `SSFECPoint_t` for the generator, which at default 4096-bit BN width is ~6 KB, on top of the `SSFECScalarMul` cascade (footnote ⁴⁰) for `k·G`. Scales linearly with `SSF_BN_CONFIG_MAX_BITS`: ~7.5 KB at 2048, ~1.8 KB at 384 (ECC-only). Verify is comparable; ECDH is slightly lower (fewer `SSFBN_t` locals).
+⁴² Peak is in `SSFECDSAVerify` on the `SSFECScalarMulDual` path (the 4-entry point table dominates at ~6.2 KB — footnote ⁴⁰). Verify was refactored in 2026 into three helpers (`_SSFECDSAVerifyInit`, `_SSFECDSAVerifyGetR`, `_SSFECDSAVerifyCheckR`) so that stage-local `SSFBN_t`s (`s`, `e`, `w` in Init; `G` in GetR; `Rx`, `Ry`, `v` in CheckR) are released at helper boundaries and don't compound with the deep scalar-multiply chain. Post-refactor the Verify outer frame is 5 `SSFBN_t` + 2 `SSFECPoint_t` = ~4.6 KB (was ~9.3 KB) and the chain peak is ~16.5 KB (was ~19.6 KB — a ~3 KB / 16 % reduction). `SSFECDSASign` uses `SSFECScalarMul` (not Dual) and peaks around ~15 KB; `SSFECDHComputeSecret` peaks around ~10 KB. All three scale linearly with `SSF_BN_CONFIG_MAX_BITS`: roughly halve the stack at 2048-bit BN width, ~1/13 at 384-bit (ECC-only).
 
 ⁴³ Self-contained — no `ssfbn` or `ssfec` dependency. Own GF(2²⁵⁵−19) arithmetic over 8 × 32-bit limbs (`_fe_t` = 32 B), a constant-time Montgomery ladder, one 32-byte field-prime constant, no lookup tables. Flash is largely independent of other config knobs.
 

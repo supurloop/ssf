@@ -194,11 +194,15 @@ static uint32_t _SSFRSAModSmall(const SSFBN_t *a, uint32_t d)
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFRSAMillerRabin(const SSFBN_t *n, SSFPRNGContext_t *prng)
 {
-    SSFBN_t nm1, d, a, x, nm3;
+    SSFBN_DEFINE(nm1, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(d, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(x, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(nm3, SSF_BN_MAX_LIMBS);
     uint32_t s = 0;
     uint16_t round;
-    SSFBNMont_t mont;
-    SSFBN_t one;
+    SSFBNMONT_DEFINE(mont, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(one, SSF_BN_MAX_LIMBS);
 
     /* n must be odd and > 3 */
     if (SSFBNIsEven(n)) return false;
@@ -220,7 +224,7 @@ static bool _SSFRSAMillerRabin(const SSFBN_t *n, SSFPRNGContext_t *prng)
 
     /* nm3 = n - 3 (for random witness range [2, n-2]) */
     {
-        SSFBN_t three;
+        SSFBN_DEFINE(three, SSF_BN_MAX_LIMBS);
         SSFBNSetUint32(&three, 3u, n->len);
         SSFBNSub(&nm3, n, &three);
     }
@@ -254,7 +258,7 @@ static bool _SSFRSAMillerRabin(const SSFBN_t *n, SSFPRNGContext_t *prng)
 
             /* a = a + 2 to get range [2, n-2] */
             {
-                SSFBN_t two;
+                SSFBN_DEFINE(two, SSF_BN_MAX_LIMBS);
                 SSFBNSetUint32(&two, 2u, n->len);
                 SSFBNAdd(&a, &a, &two);
             }
@@ -272,7 +276,7 @@ static bool _SSFRSAMillerRabin(const SSFBN_t *n, SSFPRNGContext_t *prng)
         {
             /* x = x^2 mod n (using Montgomery) */
             {
-                SSFBN_t two;
+                SSFBN_DEFINE(two, SSF_BN_MAX_LIMBS);
                 SSFBNSetUint32(&two, 2u, n->len);
                 SSFBNModExpMont(&x, &x, &two, &mont);
             }
@@ -570,7 +574,12 @@ static bool _SSFRSAPrivateOpCRT(const SSFBN_t *c, uint16_t nLimbs,
                                 const SSFBN_t *qInv,
                                 SSFBN_t *result)
 {
-    SSFBN_t cp, cq, m1, m2, h, hq;
+    SSFBN_DEFINE(cp, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(cq, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(m1, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(m2, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(h, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(hq, SSF_BN_MAX_LIMBS);
     uint16_t hl = p->len;
 
     /* cp = c mod p, cq = c mod q */
@@ -598,7 +607,10 @@ static bool _SSFRSAPrivateOpCRT(const SSFBN_t *c, uint16_t nLimbs,
 
     /* result = m2 + h * q (in full n-width) */
     {
-        SSFBN_t m2Full, hFull, qFull, hqFull;
+        SSFBN_DEFINE(m2Full, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(hFull, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(qFull, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(hqFull, SSF_BN_MAX_LIMBS);
 
         /* Expand half-width values to full n-width */
         SSFBNSetZero(&m2Full, nLimbs);
@@ -612,7 +624,7 @@ static bool _SSFRSAPrivateOpCRT(const SSFBN_t *c, uint16_t nLimbs,
 
         /* hq = h * q (result fits in nLimbs since h < p and q < n/p) */
         {
-            SSFBN_t prod;
+            SSFBN_DEFINE(prod, SSF_BN_MAX_LIMBS);
             SSFBNMul(&prod, &hFull, &qFull);
             /* prod.len = 2*nLimbs; take lower nLimbs */
             result->len = nLimbs;
@@ -630,7 +642,8 @@ static bool _SSFRSAPrivateOpCRT(const SSFBN_t *c, uint16_t nLimbs,
 /* --------------------------------------------------------------------------------------------- */
 bool SSFRSAPubKeyIsValid(const uint8_t *pubKeyDer, size_t pubKeyDerLen)
 {
-    SSFBN_t n, e;
+    SSFBN_DEFINE(n, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(e, SSF_BN_MAX_LIMBS);
     uint16_t keyLimbs;
 
     SSF_REQUIRE(pubKeyDer != NULL);
@@ -684,7 +697,7 @@ static bool _SSFRSAKeyGenPrimes(uint16_t bits,
     /* Ensure p > q (for CRT) */
     if (SSFBNCmp(p, q) < 0)
     {
-        SSFBN_t tmp;
+        SSFBN_DEFINE(tmp, SSF_BN_MAX_LIMBS);
         SSFBNCopy(&tmp, p);
         SSFBNCopy(p, q);
         SSFBNCopy(q, &tmp);
@@ -694,7 +707,7 @@ static bool _SSFRSAKeyGenPrimes(uint16_t bits,
 
     /* n = p * q */
     {
-        SSFBN_t prod;
+        SSFBN_DEFINE(prod, SSF_BN_MAX_LIMBS);
         SSFBNMul(&prod, p, q);
         n->len = nLimbs;
         memcpy(n->limbs, prod.limbs, (size_t)nLimbs * sizeof(SSFBNLimb_t));
@@ -713,11 +726,14 @@ static bool _SSFRSAKeyGenDerive(uint16_t nLimbs, uint16_t halfLimbs,
                                 const SSFBN_t *p, const SSFBN_t *q,
                                 SSFBN_t *d, SSFBN_t *dp, SSFBN_t *dq, SSFBN_t *qInv)
 {
-    SSFBN_t pm1, qm1, g, lambda;
+    SSFBN_DEFINE(pm1, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(qm1, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(g, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(lambda, SSF_BN_MAX_LIMBS);
 
     /* pm1 = p - 1, qm1 = q - 1 */
     {
-        SSFBN_t one;
+        SSFBN_DEFINE(one, SSF_BN_MAX_LIMBS);
         SSFBNSetUint32(&one, 1u, halfLimbs);
         SSFBNSub(&pm1, p, &one);
         SSFBNSub(&qm1, q, &one);
@@ -729,7 +745,7 @@ static bool _SSFRSAKeyGenDerive(uint16_t nLimbs, uint16_t halfLimbs,
     /* lambda = lcm(pm1, qm1) = (pm1 / gcd) * qm1 — the division-by-large-numbers form avoids
      * needing to divide pm1 * qm1 by g, which wouldn't fit in our fixed-width SSFBN_t. */
     {
-        SSFBN_t pm1_div;
+        SSFBN_DEFINE(pm1_div, SSF_BN_MAX_LIMBS);
 
         if (SSFBNIsOne(&g))
         {
@@ -739,8 +755,10 @@ static bool _SSFRSAKeyGenDerive(uint16_t nLimbs, uint16_t halfLimbs,
         else
         {
             /* Compute pm1 / g via shift-subtract long division (we want the quotient). */
-            SSFBN_t rem, shifted;
-            SSFBN_t dividend, quotient;
+            SSFBN_DEFINE(rem, SSF_BN_MAX_LIMBS);
+            SSFBN_DEFINE(shifted, SSF_BN_MAX_LIMBS);
+            SSFBN_DEFINE(dividend, SSF_BN_MAX_LIMBS);
+            SSFBN_DEFINE(quotient, SSF_BN_MAX_LIMBS);
             uint32_t aBits, mBits;
             int32_t shift;
 
@@ -778,7 +796,7 @@ static bool _SSFRSAKeyGenDerive(uint16_t nLimbs, uint16_t halfLimbs,
 
         /* lambda = pm1_div * qm1 */
         {
-            SSFBN_t prod;
+            SSFBN_DEFINE(prod, SSF_BN_MAX_LIMBS);
             SSFBNMul(&prod, &pm1_div, &qm1);
             lambda.len = nLimbs;
             memcpy(lambda.limbs, prod.limbs, (size_t)nLimbs * sizeof(SSFBNLimb_t));
@@ -787,7 +805,7 @@ static bool _SSFRSAKeyGenDerive(uint16_t nLimbs, uint16_t halfLimbs,
 
     /* d = 65537^(-1) mod lambda */
     {
-        SSFBN_t eFull;
+        SSFBN_DEFINE(eFull, SSF_BN_MAX_LIMBS);
         SSFBNSetUint32(&eFull, 65537u, nLimbs);
         if (!SSFBNModInvExt(d, &eFull, &lambda)) { SSFBNZeroize(&lambda); return false; }
     }
@@ -815,7 +833,7 @@ static bool _SSFRSAKeyGenEncode(const SSFBN_t *n, const SSFBN_t *d,
                                 uint8_t *privKeyDer, size_t privKeyDerSize, size_t *privKeyDerLen,
                                 uint8_t *pubKeyDer,  size_t pubKeyDerSize,  size_t *pubKeyDerLen)
 {
-    SSFBN_t e;
+    SSFBN_DEFINE(e, SSF_BN_MAX_LIMBS);
 
     SSFBNSetUint32(&e, 65537u, nLimbs);
 
@@ -829,7 +847,13 @@ bool SSFRSAKeyGen(uint16_t bits,
                   uint8_t *privKeyDer, size_t privKeyDerSize, size_t *privKeyDerLen,
                   uint8_t *pubKeyDer, size_t pubKeyDerSize, size_t *pubKeyDerLen)
 {
-    SSFBN_t p, q, n, d, dp, dq, qInv;
+    SSFBN_DEFINE(p, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(q, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(n, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(d, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(dp, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(dq, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(qInv, SSF_BN_MAX_LIMBS);
     uint16_t nLimbs, halfLimbs;
 
     SSF_REQUIRE(privKeyDer != NULL);
@@ -867,7 +891,14 @@ bool SSFRSASignPKCS1(const uint8_t *privKeyDer, size_t privKeyDerLen,
                      SSFRSAHash_t hash, const uint8_t *hashVal, size_t hashLen,
                      uint8_t *sig, size_t sigSize, size_t *sigLen)
 {
-    SSFBN_t n, e, d, p, q, dp, dq, qInv;
+    SSFBN_DEFINE(n, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(e, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(d, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(p, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(q, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(dp, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(dq, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(qInv, SSF_BN_MAX_LIMBS);
     uint16_t nLimbs, halfLimbs;
     size_t keyBytes;
     size_t hLen;
@@ -875,7 +906,8 @@ bool SSFRSASignPKCS1(const uint8_t *privKeyDer, size_t privKeyDerLen,
     uint8_t em[SSF_RSA_MAX_KEY_BYTES];
     size_t tLen;
     size_t psLen;
-    SSFBN_t m, s;
+    SSFBN_DEFINE(m, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(s, SSF_BN_MAX_LIMBS);
 
     SSF_REQUIRE(privKeyDer != NULL);
     SSF_REQUIRE(hashVal != NULL);
@@ -939,7 +971,8 @@ bool SSFRSAVerifyPKCS1(const uint8_t *pubKeyDer, size_t pubKeyDerLen,
                        SSFRSAHash_t hash, const uint8_t *hashVal, size_t hashLen,
                        const uint8_t *sig, size_t sigLen)
 {
-    SSFBN_t n, e;
+    SSFBN_DEFINE(n, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(e, SSF_BN_MAX_LIMBS);
     uint16_t keyLimbs;
     size_t keyBytes;
     size_t hLen;
@@ -947,7 +980,8 @@ bool SSFRSAVerifyPKCS1(const uint8_t *pubKeyDer, size_t pubKeyDerLen,
     uint8_t em[SSF_RSA_MAX_KEY_BYTES];
     uint8_t emExpected[SSF_RSA_MAX_KEY_BYTES];
     size_t tLen, psLen;
-    SSFBN_t s, m;
+    SSFBN_DEFINE(s, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(m, SSF_BN_MAX_LIMBS);
 
     SSF_REQUIRE(pubKeyDer != NULL);
     SSF_REQUIRE(hashVal != NULL);
@@ -1035,7 +1069,14 @@ bool SSFRSASignPSS(const uint8_t *privKeyDer, size_t privKeyDerLen,
                    SSFRSAHash_t hash, const uint8_t *hashVal, size_t hashLen,
                    uint8_t *sig, size_t sigSize, size_t *sigLen)
 {
-    SSFBN_t n, e, d, p, q, dp, dq, qInv;
+    SSFBN_DEFINE(n, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(e, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(d, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(p, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(q, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(dp, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(dq, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(qInv, SSF_BN_MAX_LIMBS);
     uint16_t nLimbs, halfLimbs;
     size_t keyBytes, emBits, emLen;
     size_t hLen, sLen, dbLen;
@@ -1045,7 +1086,8 @@ bool SSFRSASignPSS(const uint8_t *privKeyDer, size_t privKeyDerLen,
     uint8_t em[SSF_RSA_MAX_KEY_BYTES];
     uint8_t dbMask[SSF_RSA_MAX_KEY_BYTES];
     size_t i;
-    SSFBN_t m, s;
+    SSFBN_DEFINE(m, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(s, SSF_BN_MAX_LIMBS);
 
     SSF_REQUIRE(privKeyDer != NULL);
     SSF_REQUIRE(hashVal != NULL);
@@ -1132,7 +1174,8 @@ bool SSFRSAVerifyPSS(const uint8_t *pubKeyDer, size_t pubKeyDerLen,
                      SSFRSAHash_t hash, const uint8_t *hashVal, size_t hashLen,
                      const uint8_t *sig, size_t sigLen)
 {
-    SSFBN_t n, e;
+    SSFBN_DEFINE(n, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(e, SSF_BN_MAX_LIMBS);
     uint16_t keyLimbs;
     size_t keyBytes, emBits, emLen;
     size_t hLen, sLen, dbLen;
@@ -1141,7 +1184,8 @@ bool SSFRSAVerifyPSS(const uint8_t *pubKeyDer, size_t pubKeyDerLen,
     uint8_t H[64], HPrime[64];
     uint8_t mPrime[8 + 64 + 64];
     size_t i;
-    SSFBN_t s, m;
+    SSFBN_DEFINE(s, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(m, SSF_BN_MAX_LIMBS);
     uint8_t topMask;
     uint8_t diff;
 

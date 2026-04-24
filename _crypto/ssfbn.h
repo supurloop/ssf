@@ -148,6 +148,10 @@ typedef struct SSFBNMont
     uint16_t len;     /* Working limb count. */
 } SSFBNMont_t;
 
+/* Declare and initialize an SSFBNMont_t with cap `limbs` on both embedded SSFBN_t members.      */
+#define SSFBNMONT_DEFINE(name, limbs) \
+    SSFBNMont_t name = { { {0u}, 0u, (uint16_t)(limbs) }, { {0u}, 0u, (uint16_t)(limbs) }, 0u, 0u }
+
 /* --------------------------------------------------------------------------------------------- */
 /* External interface: initialization and conversion                                             */
 /* --------------------------------------------------------------------------------------------- */

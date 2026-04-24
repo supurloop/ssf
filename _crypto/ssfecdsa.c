@@ -97,7 +97,7 @@ static void _SSFECDSABits2Octets(uint8_t *out, size_t outLen,
                                  const uint8_t *hash, size_t hashLen,
                                  const SSFECCurveParams_t *c)
 {
-    SSFBN_t z;
+    SSFBN_DEFINE(z, SSF_EC_MAX_LIMBS);
 
     _SSFECDSABits2Int(&z, hash, hashLen, c);
 
@@ -338,8 +338,9 @@ bool SSFECDSAKeyGen(SSFECCurve_t curve,
     const SSFECCurveParams_t *c = SSFECGetCurveParams(curve);
     SSFPRNGContext_t prng;
     uint8_t entropy[SSF_PRNG_ENTROPY_SIZE];
-    SSFBN_t d;
-    SSFECPoint_t G, Q;
+    SSFBN_DEFINE(d, SSF_EC_MAX_LIMBS);
+    SSFECPOINT_DEFINE(G, SSF_EC_MAX_LIMBS);
+    SSFECPOINT_DEFINE(Q, SSF_EC_MAX_LIMBS);
     uint16_t attempts;
 
     SSF_REQUIRE(privKey != NULL);
@@ -407,8 +408,9 @@ bool SSFECDSAPubKeyFromPrivKey(SSFECCurve_t curve,
                                uint8_t *pubKey, size_t pubKeySize, size_t *pubKeyLen)
 {
     const SSFECCurveParams_t *c = SSFECGetCurveParams(curve);
-    SSFBN_t d;
-    SSFECPoint_t G, Q;
+    SSFBN_DEFINE(d, SSF_EC_MAX_LIMBS);
+    SSFECPOINT_DEFINE(G, SSF_EC_MAX_LIMBS);
+    SSFECPOINT_DEFINE(Q, SSF_EC_MAX_LIMBS);
 
     SSF_REQUIRE(privKey != NULL);
     SSF_REQUIRE(pubKey != NULL);
@@ -441,7 +443,7 @@ bool SSFECDSAPubKeyFromPrivKey(SSFECCurve_t curve,
 /* --------------------------------------------------------------------------------------------- */
 bool SSFECDSAPubKeyIsValid(SSFECCurve_t curve, const uint8_t *pubKey, size_t pubKeyLen)
 {
-    SSFECPoint_t Q;
+    SSFECPOINT_DEFINE(Q, SSF_EC_MAX_LIMBS);
 
     SSF_REQUIRE(pubKey != NULL);
 
@@ -466,9 +468,17 @@ bool SSFECDSASign(SSFECCurve_t curve,
                   uint8_t *sig, size_t sigSize, size_t *sigLen)
 {
     const SSFECCurveParams_t *c = SSFECGetCurveParams(curve);
-    SSFBN_t d, k, e, r, s, kInv, tmp;
-    SSFECPoint_t G, R;
-    SSFBN_t Rx, Ry;
+    SSFBN_DEFINE(d, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(k, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(e, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(r, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(s, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(kInv, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(tmp, SSF_EC_MAX_LIMBS);
+    SSFECPOINT_DEFINE(G, SSF_EC_MAX_LIMBS);
+    SSFECPOINT_DEFINE(R, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(Rx, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(Ry, SSF_EC_MAX_LIMBS);
 
     SSF_REQUIRE(privKey != NULL);
     SSF_REQUIRE(hash != NULL);
@@ -572,7 +582,9 @@ static bool _SSFECDSAVerifyInit(const SSFECCurveParams_t *c, SSFECCurve_t curve,
                                 SSFBN_t *rOut, SSFBN_t *u1Out, SSFBN_t *u2Out,
                                 SSFECPoint_t *QOut)
 {
-    SSFBN_t s, e, w;
+    SSFBN_DEFINE(s, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(e, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(w, SSF_EC_MAX_LIMBS);
 
     if (!SSFECPointDecode(QOut, curve, pubKey, pubKeyLen)) return false;
     if (!_SSFECDSASigDecode(sig, sigLen, c, rOut, &s)) return false;
@@ -598,7 +610,7 @@ static bool _SSFECDSAVerifyGetR(const SSFECCurveParams_t *c, SSFECCurve_t curve,
                                 const SSFECPoint_t *Q,
                                 SSFECPoint_t *Rout)
 {
-    SSFECPoint_t G;
+    SSFECPOINT_DEFINE(G, SSF_EC_MAX_LIMBS);
 
     SSFECPointFromAffine(&G, &c->gx, &c->gy, curve);
     SSFECScalarMulDual(Rout, u1, &G, u2, Q, curve);
@@ -614,7 +626,9 @@ static bool _SSFECDSAVerifyGetR(const SSFECCurveParams_t *c, SSFECCurve_t curve,
 static bool _SSFECDSAVerifyCheckR(const SSFECCurveParams_t *c, SSFECCurve_t curve,
                                   const SSFECPoint_t *R, const SSFBN_t *r)
 {
-    SSFBN_t Rx, Ry, v;
+    SSFBN_DEFINE(Rx, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(Ry, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(v, SSF_EC_MAX_LIMBS);
 
     if (!SSFECPointToAffine(&Rx, &Ry, R, curve)) return false;
     _SSFECDSAReduceModN(&v, &Rx, c);
@@ -627,8 +641,11 @@ bool SSFECDSAVerify(SSFECCurve_t curve,
                     const uint8_t *sig, size_t sigLen)
 {
     const SSFECCurveParams_t *c = SSFECGetCurveParams(curve);
-    SSFBN_t r, u1, u2;
-    SSFECPoint_t Q, R;
+    SSFBN_DEFINE(r, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(u1, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(u2, SSF_EC_MAX_LIMBS);
+    SSFECPOINT_DEFINE(Q, SSF_EC_MAX_LIMBS);
+    SSFECPOINT_DEFINE(R, SSF_EC_MAX_LIMBS);
 
     SSF_REQUIRE(pubKey != NULL);
     SSF_REQUIRE(hash != NULL);
@@ -658,9 +675,11 @@ bool SSFECDHComputeSecret(SSFECCurve_t curve,
                           uint8_t *secret, size_t secretSize, size_t *secretLen)
 {
     const SSFECCurveParams_t *c = SSFECGetCurveParams(curve);
-    SSFBN_t d;
-    SSFECPoint_t Q, S;
-    SSFBN_t Sx, Sy;
+    SSFBN_DEFINE(d, SSF_EC_MAX_LIMBS);
+    SSFECPOINT_DEFINE(Q, SSF_EC_MAX_LIMBS);
+    SSFECPOINT_DEFINE(S, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(Sx, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(Sy, SSF_EC_MAX_LIMBS);
 
     SSF_REQUIRE(privKey != NULL);
     SSF_REQUIRE(peerPubKey != NULL);

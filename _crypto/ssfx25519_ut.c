@@ -95,7 +95,6 @@ void SSFX25519UnitTest(void)
     {
         /* Start: k = u = 9 (basepoint) */
         uint8_t k[32] = { 9 };
-        uint8_t u[32] = { 9 };
         uint8_t out[32];
 
         /* After 1 iteration: k = X25519(9, 9) */

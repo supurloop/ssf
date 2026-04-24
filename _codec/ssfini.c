@@ -679,7 +679,7 @@ bool SSFINIGObjCreate(SSFCStrIn_t ini, SSFGObj_t **gobj, uint16_t maxChildren)
     SSFGObj_t *child = NULL;
     SSFGObj_t *foundParent = NULL;
     SSFGObj_t *foundChild = NULL;
-    SSFCStrIn_t findPath[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
+    SSFCStrOut_t findPath[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
     char strBuf[SSF_INI_GOBJ_CONFIG_MAX_STR_SIZE + 1];
 
     SSF_REQUIRE(ini != NULL);

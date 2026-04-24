@@ -844,7 +844,6 @@ static void _SSFBNReduceP256(SSFBN_t *r, const SSFBN_t *t)
     /* Name the 32-bit words: t = (c15 c14 ... c1 c0) where c0 = t->limbs[0] etc. */
     /* Notation follows NIST SP 800-186 D.2.1 */
     const SSFBNLimb_t *c = t->limbs;
-    SSFBNDLimb_t acc;
     SSFBNLimb_t carry;
     SSFBNLimb_t borrow;
     SSFBN_DEFINE(s, SSF_BN_MAX_LIMBS);

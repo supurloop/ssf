@@ -197,10 +197,24 @@ Cryptographic primitives for hashing, encryption, and random number generation.
 
 | Module | Description | Flash | Static RAM | Peak Stack | Heap | Reentrant |
 |--------|-------------|-------|------------|------------|------|-----------|
+| [SHA-1](_crypto/ssfsha1.md) | SHA-1 hash (RFC 3174; legacy-protocol use only — e.g., RFC 6455 WebSocket handshake) | ~1.5 KB²⁶ | — | ~400 B²⁷ | — | Yes |
 | [SHA-2](_crypto/ssfsha2.md) | SHA-2 hash (SHA-224/256/384/512/512-224/512-256), one-shot and incremental | ~3 KB⁴ | — | ~800 B¹³ | — | Yes |
 | [AES](_crypto/ssfaes.md) | AES block cipher (128/192/256-bit key) | ~2 KB⁵ | — | ~300 B¹⁴ | — | Yes |
 | [AES-GCM](_crypto/ssfaesgcm.md) | AES-GCM authenticated encryption/decryption | ~3.5 KB⁶ | — | ~128 B | — | Yes |
-| [Constant-Time](_crypto/ssfct.h) | Constant-time byte-buffer equality for MAC and signature verification | ~40 B | — | ~32 B | — | Yes |
+| [AES-CCM](_crypto/ssfaesccm.md) | AES-CCM AEAD (RFC 3610, NIST SP 800-38C) | ~1.5 KB³⁶ | — | ~450 B³⁷ | — | Yes |
+| [HMAC](_crypto/ssfhmac.md) | HMAC (RFC 2104) keyed-hash MAC over SHA-1 / SHA-256 / SHA-384 / SHA-512 | ~1 KB²⁸ | — | ~1.3 KB²⁹ | — | Yes |
+| [HKDF](_crypto/ssfhkdf.md) | HKDF (RFC 5869) HMAC-based extract-and-expand key derivation | ~600 B³⁰ | — | ~1.5 KB³¹ | — | Yes |
+| [Poly1305](_crypto/ssfpoly1305.md) | Poly1305 one-time MAC (RFC 7539/8439) | ~1.2 KB | — | ~250 B³² | — | Yes |
+| [ChaCha20](_crypto/ssfchacha20.md) | ChaCha20 stream cipher (RFC 7539/8439) | ~1 KB | — | ~250 B³³ | — | Yes |
+| [ChaCha20-Poly1305](_crypto/ssfchacha20poly1305.md) | ChaCha20-Poly1305 AEAD (RFC 7539/8439) | ~700 B³⁴ | — | ~17.5 KB³⁵ | — | Yes |
+| [Constant-Time](_crypto/ssfct.md) | Constant-time byte-buffer equality for MAC and signature verification | ~40 B | — | ~32 B | — | Yes |
+| [Big Number](_crypto/ssfbn.md) | Multi-precision big-number arithmetic; foundation for RSA, ECC, and DH | ~10 KB | — | ~3.7 KB³⁸ | — | Yes |
+| [Elliptic Curve](_crypto/ssfec.md) | NIST P-256 / P-384 point arithmetic (constant-time scalar mul, SEC 1 codec) | ~10 KB³⁹ | — | ~7 KB⁴⁰ | — | Yes |
+| [ECDSA / ECDH](_crypto/ssfecdsa.md) | ECDSA signatures (RFC 6979 deterministic) + ECDH over NIST P-256 / P-384 | ~3.5 KB⁴¹ | — | ~15 KB⁴² | — | Yes |
+| [X25519](_crypto/ssfx25519.md) | X25519 key agreement over Curve25519 (RFC 7748) — self-contained, constant-time | ~4 KB⁴³ | — | ~700 B⁴⁴ | — | Yes |
+| [Ed25519](_crypto/ssfed25519.md) | Ed25519 signatures (RFC 8032 pure mode) — deterministic; uses SHA-512 from ssfsha2 | ~12 KB⁴⁵ | — | ~1.5 KB⁴⁶ | — | Yes |
+| [RSA](_crypto/ssfrsa.md) | RSA-2048/3072/4096 signatures (PKCS#1 v1.5 and PSS) + key generation; PKCS#1 DER key format | ~15 KB⁴⁷ | — | ~10 KB⁴⁸ | — | Yes |
+| [TLS 1.3](_crypto/ssftls.md) | TLS 1.3 core building blocks (key schedule, transcript hash, record layer); not a full TLS stack | ~2.5 KB⁴⁹ | — | ~17.5 KB⁵⁰ | — | Yes |
 | [PRNG](_crypto/ssfprng.md) | Cryptographically capable pseudo-random number generator | ~500 B | — | ~96 B | — | Yes |
 
 ⁴ Includes ~896 B of SHA-256 and SHA-512 round constants. ⁵ Includes 512 B S-box and inverse S-box tables. ⁶ Requires AES module; figure is for GCM logic only.
@@ -208,6 +222,56 @@ Cryptographic primitives for hashing, encryption, and random number generation.
 ¹³ SHA-512 block processing (`_SSFSHA2_64Block`) dominates: the message schedule `w[80]` of `uint64_t` alone consumes 640 B of stack. SHA-256 peak is ~400 B.
 
 ¹⁴ The AES key schedule is expanded into a local `w[60]` array of `uint32_t` (240 B) on every encrypt/decrypt call. The AES-256 key schedule is the worst case.
+
+²⁶ No lookup tables; round constants are four 32-bit immediates inlined into the compression function. Code size is dominated by the 80-round block function.
+
+²⁷ `_SSFSHA1ProcessBlock` allocates the message schedule `w[80]` as a local `uint32_t` array (320 B); the working variables and the call frame make up the remainder.
+
+²⁸ Requires SHA-1 and/or SHA-2 modules; figure is for HMAC dispatch, padding, and key-handling logic only.
+
+²⁹ Peak occurs with HMAC-SHA-512 and a key longer than the 128-byte block: `SSFHMACBegin` holds `keyPrime[128]` and `iKeyPad[128]` on its own frame, plus a temporary `SSFHMACContext_t` for the oversized-key pre-hash, on top of the SHA-512 backend's ~800 B schedule-dominated peak. HMAC-SHA-256 with a block-sized-or-smaller key is ~700 B.
+
+³⁰ Requires HMAC and SHA modules; figure is for HKDF extract/expand logic only.
+
+³¹ Peak occurs in `SSFHKDFExpand` with HKDF-SHA-512: the function frame holds `tPrev[64]`, `tCurr[64]`, and a live `SSFHMACContext_t` across the iteration loop, on top of each nested HMAC-SHA-512 call's own peak. HKDF-SHA-256 is ~1.2 KB.
+
+³² Single-function implementation. The frame holds the 5 × 26-bit accumulator limbs, the clamped `r` and `s` halves of the key, the precomputed `r * 5` reduction operands, 64-bit multiply-accumulate working values, and a 16-byte partial-block buffer.
+
+³³ `SSFChaCha20Encrypt` holds the 16-word `state` (64 B) and a 64-byte keystream `block` buffer; the nested `_SSFChaCha20Block` adds a 16-word working `x` array (64 B). No lookup tables — the round function uses only 32-bit add/XOR/rotate, which is why ChaCha20 is naturally constant-time.
+
+³⁶ Requires AES module; figure is for CCM orchestration, the B₀ / counter block formatting, and CBC-MAC / CTR drivers only.
+
+³⁷ Each outer frame (`SSFAESCCMEncrypt` or `Decrypt`) carries one or two 16-byte tag buffers, then calls `_SSFAESCCMComputeTag` or `_SSFAESCCMCtr` (each with two 16-byte working buffers), which in turn call `SSFAESXXXBlockEncrypt` whose key-schedule expansion dominates the path at ~300 B. The CCM-specific framing is small; the AES backend sets the peak.
+
+³⁸ Peak occurs in `SSFBNModExp` when performing a modular exponentiation: the outer frame holds a `SSFBNMont_t` (~1 KB at default `SSF_BN_CONFIG_MAX_BITS = 4096`), the nested `SSFBNModExpMont` holds four `SSFBN_t` working values (~2 KB), and `SSFBNMontMul` inside the ladder adds a `t[SSF_BN_MAX_LIMBS + 2]` working array (~0.5 KB). Stack scales approximately linearly with `SSF_BN_CONFIG_MAX_BITS`: ~1.9 KB at 2048, ~0.4 KB at 384 (ECC-only). All other entry points are far below this peak.
+
+³⁹ Flash is dominated by the two NIST curve parameter tables — each carries six `SSFBN_t` constants (`p`, `a`, `b`, `gₓ`, `gᵧ`, `n`) whose fixed-size limb arrays scale with `SSF_BN_CONFIG_MAX_BITS`. At default 4096-bit BN width, each `SSFBN_t` is ~516 B in rodata, so twelve constants occupy ~6 KB — even though each curve only uses 32 or 48 meaningful bytes. Setting `SSF_BN_CONFIG_MAX_BITS = 384` for ECC-only builds cuts the rodata portion to ~0.6 KB and total flash to ~4.5 KB.
+
+⁴⁰ Peak is in `SSFECScalarMul`: the outer frame holds two `SSFECPoint_t` (each = 3 × `SSFBN_t`, so ~3 KB at default 4096-bit BN width), the nested `_SSFECPointAddFull` adds six `SSFBN_t` working values (~3 KB), and the deeper `SSFBNModMul` call adds another ~1 KB. Scales linearly with `SSF_BN_CONFIG_MAX_BITS`: ~3.5 KB at 2048, ~0.8 KB at 384 (ECC-only). `SSFECScalarMulDual` has a similar peak (four `SSFECPoint_t` table entries, same inner depth).
+
+⁴¹ Requires ECC and BN modules; figure is for sign / verify / ECDH orchestration, RFC 6979 deterministic-nonce HMAC-DRBG, and DER signature codec only. Key-gen pulls in [`ssfprng`](_crypto/ssfprng.md) too.
+
+⁴² Peak is in `SSFECDSASign`: the outer frame holds 7 `SSFBN_t` arithmetic locals (`d`, `k`, `e`, `r`, `s`, `kInv`, `tmp`) + 2 `SSFBN_t` for `(Rx, Ry)` + 1 `SSFECPoint_t` for the generator, which at default 4096-bit BN width is ~6 KB, on top of the `SSFECScalarMul` cascade (footnote ⁴⁰) for `k·G`. Scales linearly with `SSF_BN_CONFIG_MAX_BITS`: ~7.5 KB at 2048, ~1.8 KB at 384 (ECC-only). Verify is comparable; ECDH is slightly lower (fewer `SSFBN_t` locals).
+
+⁴³ Self-contained — no `ssfbn` or `ssfec` dependency. Own GF(2²⁵⁵−19) arithmetic over 8 × 32-bit limbs (`_fe_t` = 32 B), a constant-time Montgomery ladder, one 32-byte field-prime constant, no lookup tables. Flash is largely independent of other config knobs.
+
+⁴⁴ Peak is in `_x25519_scalar_mul`: 15 `_fe_t` field-element locals (32 B each) plus a 32 B clamped-scalar copy — ~500 B on the ladder frame — plus the nested `_fe_inv` / `_fe_mul` call chain adds ~200 B. Fixed at ~700 B regardless of `SSF_BN_CONFIG_MAX_BITS` (this module does not use `ssfbn`).
+
+⁴⁵ Requires SHA-512 from `ssfsha2`; otherwise self-contained (own GF(2²⁵⁵−19) field arithmetic + twisted-Edwards point arithmetic + scalar-field reduction mod `L`, no `ssfbn` dependency). No precomputed base-point table — Sign and Verify compute scalar multiplication from the base point by double-and-add on demand. Flash is independent of `SSF_BN_CONFIG_MAX_BITS`.
+
+⁴⁶ Peak is along the Sign path: the outer frame carries `h[64] + r_hash[64] + hram[64] + a[32] + nonce[32]` ≈ 256 B plus a `_ge_t R` (~128 B) and a full `SSFSHA2_64Context_t` (~280 B), then nests into `SSFSHA512Update` whose block processing peaks at ~800 B (the SHA-512 message schedule — footnote ¹³). Verify has a similar peak. Fixed regardless of `SSF_BN_CONFIG_MAX_BITS`.
+
+⁴⁷ Requires BN, SHA-2, ASN.1, and PRNG modules; figure is for the RSA module itself — key parsing, PKCS#1 v1.5 + PSS padding, MGF1, CRT dispatch, prime generation, and Miller-Rabin. Disabling `SSF_RSA_CONFIG_ENABLE_KEYGEN` removes ~3 KB; disabling either signature scheme removes another ~1–2 KB.
+
+⁴⁸ Peak is in `SSFRSAKeyGen`: the outer frame holds ~13 `SSFBN_t` working values (`p, q, n, d, e, pm1, qm1, phi, g, lambda, dp, dq, qInv`) ≈ 6.7 KB at default 4096-bit BN width, on top of nested `SSFBNModExp` (~3.7 KB — footnote ³⁸). Sign is lighter — ~8 KB at default BN width, dominated by the CRT helper's ~6 `SSFBN_t` locals plus the private `SSFBNModExp`. Verify is the cheapest — ~3–4 KB, because `e = 65537` is only 17 bits and the ModExp scales with exponent bit-length. All scale linearly with `SSF_BN_CONFIG_MAX_BITS`: halve the width, halve the stack.
+
+⁴⁹ Requires HMAC, SHA-2, and one or more AEAD backends (AES-GCM / AES-CCM / ChaCha20-Poly1305); figure is for the TLS 1.3 primitives themselves — HKDF-Expand-Label, Derive-Secret, traffic-key derivation, transcript hash wrappers, and record-layer nonce construction + AEAD dispatch. No handshake state machine, certificate validation, or transport I/O is included.
+
+⁵⁰ Peak is inherited directly from whichever AEAD backend the active cipher suite selects. `TLS_CHACHA20_POLY1305_SHA256` routes through `SSFChaCha20Poly1305Encrypt` whose ~17.5 KB peak (footnote ³⁵) dominates. The AES-GCM and AES-CCM suites are much lighter — roughly 500 B for CCM and a few hundred bytes for GCM. Key-schedule and transcript-hash primitives on their own stay under ~1 KB. Drop the ChaCha20-Poly1305 AEAD peak — e.g., by lowering `SSF_CCP_POLY1305_MAX_INPUT` to bound the construction buffer — and this module's peak drops with it.
+
+³⁴ Requires ChaCha20 and Poly1305 modules; figure is for AEAD orchestration and the `_SSFCCPComputeTag` construction helper only.
+
+³⁵ Peak is dominated by a single stack buffer `macData[SSF_CCP_POLY1305_MAX_INPUT]` (default 17408 B) in `_SSFCCPComputeTag` that holds the full `auth ‖ pad ‖ ct ‖ pad ‖ lengths` Poly1305 construction. Reducing `SSF_CCP_POLY1305_MAX_INPUT` (override by `#define` before including the header) directly reduces peak stack but caps the largest AEAD record the module can process. Everything else — the per-message one-time key, the nested ChaCha20 and Poly1305 frames — adds only a few hundred bytes.
 
 #### [Storage](_storage/README.md)
 

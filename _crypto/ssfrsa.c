@@ -362,19 +362,34 @@ static bool _SSFRSAPubKeyEncode(const SSFBN_t *n, const SSFBN_t *e,
         eBytes -= i;
     }
 
-    nEncLen = SSFASN1EncInt(NULL, 0, nBuf, (uint32_t)nBytes);
-    eEncLen = SSFASN1EncInt(NULL, 0, eBuf, (uint32_t)eBytes);
-    if ((nEncLen == 0u) || (eEncLen == 0u)) return false;
+    if (!SSFASN1EncInt(NULL, 0, nBuf, (uint32_t)nBytes, &nEncLen)) return false;
+    if (!SSFASN1EncInt(NULL, 0, eBuf, (uint32_t)eBytes, &eEncLen)) return false;
 
     contentLen = nEncLen + eEncLen;
-    seqHdrLen = SSFASN1EncTagLen(NULL, 0, SSF_ASN1_TAG_SEQUENCE, contentLen);
-    if (seqHdrLen == 0u) return false;
+    if (!SSFASN1EncTagLen(NULL, 0, SSF_ASN1_TAG_SEQUENCE, contentLen, &seqHdrLen)) return false;
 
     if ((size_t)(seqHdrLen + contentLen) > derSize) return false;
 
-    offset = SSFASN1EncTagLen(der, (uint32_t)derSize, SSF_ASN1_TAG_SEQUENCE, contentLen);
-    offset += SSFASN1EncInt(&der[offset], (uint32_t)(derSize - offset), nBuf, (uint32_t)nBytes);
-    offset += SSFASN1EncInt(&der[offset], (uint32_t)(derSize - offset), eBuf, (uint32_t)eBytes);
+    {
+        uint32_t n;
+        if (!SSFASN1EncTagLen(der, (uint32_t)derSize, SSF_ASN1_TAG_SEQUENCE, contentLen, &n))
+        {
+            return false;
+        }
+        offset = n;
+        if (!SSFASN1EncInt(&der[offset], (uint32_t)(derSize - offset), nBuf,
+                           (uint32_t)nBytes, &n))
+        {
+            return false;
+        }
+        offset += n;
+        if (!SSFASN1EncInt(&der[offset], (uint32_t)(derSize - offset), eBuf,
+                           (uint32_t)eBytes, &n))
+        {
+            return false;
+        }
+        offset += n;
+    }
 
     *derLen = (size_t)offset;
     return true;
@@ -446,32 +461,41 @@ static bool _SSFRSAPrivKeyEncode(const SSFBN_t *n, const SSFBN_t *e, const SSFBN
     size_t fieldBytes[9];
 
     /* Version = 0 */
-    encLens[0] = SSFASN1EncIntU64(NULL, 0, 0);
+    if (!SSFASN1EncIntU64(NULL, 0, 0, &encLens[0])) return false;
     contentLen += encLens[0];
 
     for (i = 1; i < 9u; i++)
     {
         fieldBytes[i] = (size_t)fields[i]->len * sizeof(SSFBNLimb_t);
-        encLens[i] = SSFASN1EncInt(NULL, 0, buf, (uint32_t)fieldBytes[i]);
-        /* Need actual measurement with real data for correct leading-zero handling */
         if (!SSFBNToBytes(fields[i], buf, fieldBytes[i])) return false;
-        encLens[i] = SSFASN1EncInt(NULL, 0, buf, (uint32_t)fieldBytes[i]);
-        if (encLens[i] == 0u) return false;
+        if (!SSFASN1EncInt(NULL, 0, buf, (uint32_t)fieldBytes[i], &encLens[i])) return false;
         contentLen += encLens[i];
     }
 
-    seqHdrLen = SSFASN1EncTagLen(NULL, 0, SSF_ASN1_TAG_SEQUENCE, contentLen);
+    if (!SSFASN1EncTagLen(NULL, 0, SSF_ASN1_TAG_SEQUENCE, contentLen, &seqHdrLen)) return false;
     if ((size_t)(seqHdrLen + contentLen) > derSize) return false;
 
     /* Encode */
-    offset = SSFASN1EncTagLen(der, (uint32_t)derSize, SSF_ASN1_TAG_SEQUENCE, contentLen);
-    offset += SSFASN1EncIntU64(&der[offset], (uint32_t)(derSize - offset), 0);
-
-    for (i = 1; i < 9u; i++)
     {
-        SSFBNToBytes(fields[i], buf, fieldBytes[i]);
-        offset += SSFASN1EncInt(&der[offset], (uint32_t)(derSize - offset),
-                                buf, (uint32_t)fieldBytes[i]);
+        uint32_t n;
+        if (!SSFASN1EncTagLen(der, (uint32_t)derSize, SSF_ASN1_TAG_SEQUENCE, contentLen, &n))
+        {
+            return false;
+        }
+        offset = n;
+        if (!SSFASN1EncIntU64(&der[offset], (uint32_t)(derSize - offset), 0, &n)) return false;
+        offset += n;
+
+        for (i = 1; i < 9u; i++)
+        {
+            SSFBNToBytes(fields[i], buf, fieldBytes[i]);
+            if (!SSFASN1EncInt(&der[offset], (uint32_t)(derSize - offset),
+                               buf, (uint32_t)fieldBytes[i], &n))
+            {
+                return false;
+            }
+            offset += n;
+        }
     }
 
     *derLen = (size_t)offset;

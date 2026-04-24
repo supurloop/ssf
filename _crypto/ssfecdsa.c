@@ -224,21 +224,36 @@ static bool _SSFECDSASigEncode(const SSFBN_t *r, const SSFBN_t *s,
     if (!SSFBNToBytes(s, sBytes, c->bytes)) return false;
 
     /* Measure: pass 1 */
-    rEncLen = SSFASN1EncInt(NULL, 0, rBytes, (uint32_t)c->bytes);
-    sEncLen = SSFASN1EncInt(NULL, 0, sBytes, (uint32_t)c->bytes);
-    if ((rEncLen == 0u) || (sEncLen == 0u)) return false;
+    if (!SSFASN1EncInt(NULL, 0, rBytes, (uint32_t)c->bytes, &rEncLen)) return false;
+    if (!SSFASN1EncInt(NULL, 0, sBytes, (uint32_t)c->bytes, &sEncLen)) return false;
 
     contentLen = rEncLen + sEncLen;
-    seqHdrLen = SSFASN1EncTagLen(NULL, 0, SSF_ASN1_TAG_SEQUENCE, contentLen);
-    if (seqHdrLen == 0u) return false;
+    if (!SSFASN1EncTagLen(NULL, 0, SSF_ASN1_TAG_SEQUENCE, contentLen, &seqHdrLen)) return false;
 
     totalLen = seqHdrLen + contentLen;
     if ((size_t)totalLen > sigSize) return false;
 
     /* Encode: pass 2 */
-    offset = SSFASN1EncTagLen(sig, (uint32_t)sigSize, SSF_ASN1_TAG_SEQUENCE, contentLen);
-    offset += SSFASN1EncInt(&sig[offset], (uint32_t)(sigSize - offset), rBytes, (uint32_t)c->bytes);
-    offset += SSFASN1EncInt(&sig[offset], (uint32_t)(sigSize - offset), sBytes, (uint32_t)c->bytes);
+    {
+        uint32_t n;
+        if (!SSFASN1EncTagLen(sig, (uint32_t)sigSize, SSF_ASN1_TAG_SEQUENCE, contentLen, &n))
+        {
+            return false;
+        }
+        offset = n;
+        if (!SSFASN1EncInt(&sig[offset], (uint32_t)(sigSize - offset), rBytes,
+                           (uint32_t)c->bytes, &n))
+        {
+            return false;
+        }
+        offset += n;
+        if (!SSFASN1EncInt(&sig[offset], (uint32_t)(sigSize - offset), sBytes,
+                           (uint32_t)c->bytes, &n))
+        {
+            return false;
+        }
+        offset += n;
+    }
 
     *sigLen = (size_t)offset;
     return true;

@@ -31,22 +31,44 @@
 /* --------------------------------------------------------------------------------------------- */
 #include "ssfassert.h"
 #include "ssfasn1.h"
+#include "ssfdtime.h"
 
 /* --------------------------------------------------------------------------------------------- */
 /* Internal: parse tag + length from a DER buffer. Returns total header size (tag + length        */
 /* bytes), or 0 if the buffer is too short or the encoding is invalid.                           */
 /* --------------------------------------------------------------------------------------------- */
 static uint32_t _SSFASN1ParseTL(const uint8_t *buf, uint32_t bufLen,
-                                uint8_t *tagOut, uint32_t *contentLenOut)
+                                uint16_t *tagOut, uint32_t *contentLenOut)
 {
     uint32_t pos = 0;
     uint32_t len;
+    uint16_t tag;
+
+    SSF_REQUIRE(tagOut != NULL);
+    SSF_REQUIRE(contentLenOut != NULL);
+    SSF_REQUIRE((buf != NULL) || (bufLen == 0u));
 
     if (bufLen < 2u) return 0;
 
-    /* Tag byte (single-byte tags only; high-tag-number form not supported) */
-    *tagOut = buf[pos++];
-    if ((*tagOut & 0x1Fu) == 0x1Fu) return 0; /* Multi-byte tag not supported */
+    /* Tag byte. Low 5 bits != 0x1F -> single-byte tag. Low 5 bits == 0x1F -> high-tag-number   */
+    /* form, read one extension byte (tag numbers 31-127 only; reject continuation).           */
+    tag = buf[pos++];
+    if ((tag & 0x1Fu) == 0x1Fu)
+    {
+        uint8_t ext;
+        if (pos >= bufLen) return 0;
+        ext = buf[pos++];
+        /* Reject high-bit set: that means another extension byte follows (tag number >= 128),  */
+        /* which the module does not support.                                                   */
+        if ((ext & 0x80u) != 0u) return 0;
+        /* DER §8.1.2.4.2 requires minimum number of extension bytes. With one extension byte, */
+        /* the value must be >= 31 (otherwise the single-byte form would have been canonical). */
+        if (ext < 31u) return 0;
+        tag = (uint16_t)(tag | ((uint16_t)ext << 8));
+        /* Still need at least one length byte after the two-byte tag. */
+        if (pos >= bufLen) return 0;
+    }
+    *tagOut = tag;
 
     /* Length byte(s) */
     if (buf[pos] < 0x80u)
@@ -83,15 +105,16 @@ static uint32_t _SSFASN1ParseTL(const uint8_t *buf, uint32_t bufLen,
 /* ========================================================================================== */
 
 /* --------------------------------------------------------------------------------------------- */
-bool SSFASN1DecGetTLV(const SSFASN1Cursor_t *cursor, uint8_t *tagOut,
+bool SSFASN1DecGetTLV(const SSFASN1Cursor_t *cursor, uint16_t *tagOut,
                       const uint8_t **valueOut, uint32_t *valueLenOut,
                       SSFASN1Cursor_t *next)
 {
     uint32_t headerLen;
     uint32_t contentLen;
-    uint8_t tag;
+    uint16_t tag;
 
     SSF_REQUIRE(cursor != NULL);
+    SSF_REQUIRE((cursor->buf != NULL) || (cursor->bufLen == 0u));
     SSF_REQUIRE(tagOut != NULL);
     SSF_REQUIRE(valueOut != NULL);
     SSF_REQUIRE(valueLenOut != NULL);
@@ -99,7 +122,8 @@ bool SSFASN1DecGetTLV(const SSFASN1Cursor_t *cursor, uint8_t *tagOut,
 
     headerLen = _SSFASN1ParseTL(cursor->buf, cursor->bufLen, &tag, &contentLen);
     if (headerLen == 0) return false;
-    if ((headerLen + contentLen) > cursor->bufLen) return false;
+    /* Overflow-safe: headerLen <= cursor->bufLen is guaranteed by _SSFASN1ParseTL. */
+    if (contentLen > (cursor->bufLen - headerLen)) return false;
 
     *tagOut = tag;
     *valueOut = &cursor->buf[headerLen];
@@ -110,10 +134,10 @@ bool SSFASN1DecGetTLV(const SSFASN1Cursor_t *cursor, uint8_t *tagOut,
 }
 
 /* --------------------------------------------------------------------------------------------- */
-bool SSFASN1DecOpenConstructed(const SSFASN1Cursor_t *cursor, uint8_t expectedTag,
+bool SSFASN1DecOpenConstructed(const SSFASN1Cursor_t *cursor, uint16_t expectedTag,
                                SSFASN1Cursor_t *inner, SSFASN1Cursor_t *next)
 {
-    uint8_t tag;
+    uint16_t tag;
     const uint8_t *value;
     uint32_t valueLen;
 
@@ -130,22 +154,29 @@ bool SSFASN1DecOpenConstructed(const SSFASN1Cursor_t *cursor, uint8_t expectedTa
 }
 
 /* --------------------------------------------------------------------------------------------- */
-bool SSFASN1DecPeekTag(const SSFASN1Cursor_t *cursor, uint8_t *tagOut)
+bool SSFASN1DecPeekTag(const SSFASN1Cursor_t *cursor, uint16_t *tagOut)
 {
+    uint16_t tag;
+    uint32_t contentLen;
+
     SSF_REQUIRE(cursor != NULL);
     SSF_REQUIRE(tagOut != NULL);
 
-    if (cursor->bufLen == 0) return false;
-    *tagOut = cursor->buf[0];
+    /* Delegate to _SSFASN1ParseTL so the multi-byte tag form decodes consistently. */
+    if (_SSFASN1ParseTL(cursor->buf, cursor->bufLen, &tag, &contentLen) == 0) return false;
+    *tagOut = tag;
     return true;
 }
 
 /* --------------------------------------------------------------------------------------------- */
 bool SSFASN1DecSkip(const SSFASN1Cursor_t *cursor, SSFASN1Cursor_t *next)
 {
-    uint8_t tag;
+    uint16_t tag;
     const uint8_t *value;
     uint32_t valueLen;
+
+    SSF_REQUIRE(cursor != NULL);
+    SSF_REQUIRE(next != NULL);
 
     return SSFASN1DecGetTLV(cursor, &tag, &value, &valueLen, next);
 }
@@ -160,11 +191,13 @@ bool SSFASN1DecIsEmpty(const SSFASN1Cursor_t *cursor)
 /* --------------------------------------------------------------------------------------------- */
 bool SSFASN1DecGetBool(const SSFASN1Cursor_t *cursor, bool *valOut, SSFASN1Cursor_t *next)
 {
-    uint8_t tag;
+    uint16_t tag;
     const uint8_t *value;
     uint32_t valueLen;
 
+    SSF_REQUIRE(cursor != NULL);
     SSF_REQUIRE(valOut != NULL);
+    SSF_REQUIRE(next != NULL);
 
     if (!SSFASN1DecGetTLV(cursor, &tag, &value, &valueLen, next)) return false;
     if (tag != SSF_ASN1_TAG_BOOLEAN || valueLen != 1u) return false;
@@ -176,10 +209,12 @@ bool SSFASN1DecGetBool(const SSFASN1Cursor_t *cursor, bool *valOut, SSFASN1Curso
 bool SSFASN1DecGetInt(const SSFASN1Cursor_t *cursor, const uint8_t **intBufOut,
                       uint32_t *intLenOut, SSFASN1Cursor_t *next)
 {
-    uint8_t tag;
+    uint16_t tag;
 
+    SSF_REQUIRE(cursor != NULL);
     SSF_REQUIRE(intBufOut != NULL);
     SSF_REQUIRE(intLenOut != NULL);
+    SSF_REQUIRE(next != NULL);
 
     if (!SSFASN1DecGetTLV(cursor, &tag, intBufOut, intLenOut, next)) return false;
     if (tag != SSF_ASN1_TAG_INTEGER) return false;
@@ -194,7 +229,9 @@ bool SSFASN1DecGetIntU64(const SSFASN1Cursor_t *cursor, uint64_t *valOut, SSFASN
     uint32_t i;
     uint32_t start;
 
+    SSF_REQUIRE(cursor != NULL);
     SSF_REQUIRE(valOut != NULL);
+    SSF_REQUIRE(next != NULL);
 
     if (!SSFASN1DecGetInt(cursor, &intBuf, &intLen, next)) return false;
 
@@ -217,13 +254,15 @@ bool SSFASN1DecGetBitString(const SSFASN1Cursor_t *cursor, const uint8_t **bitsO
                             uint32_t *bitsLenOut, uint8_t *unusedBitsOut,
                             SSFASN1Cursor_t *next)
 {
-    uint8_t tag;
+    uint16_t tag;
     const uint8_t *value;
     uint32_t valueLen;
 
+    SSF_REQUIRE(cursor != NULL);
     SSF_REQUIRE(bitsOut != NULL);
     SSF_REQUIRE(bitsLenOut != NULL);
     SSF_REQUIRE(unusedBitsOut != NULL);
+    SSF_REQUIRE(next != NULL);
 
     if (!SSFASN1DecGetTLV(cursor, &tag, &value, &valueLen, next)) return false;
     if (tag != SSF_ASN1_TAG_BIT_STRING) return false;
@@ -239,10 +278,12 @@ bool SSFASN1DecGetBitString(const SSFASN1Cursor_t *cursor, const uint8_t **bitsO
 bool SSFASN1DecGetOctetString(const SSFASN1Cursor_t *cursor, const uint8_t **octetsOut,
                               uint32_t *octetsLenOut, SSFASN1Cursor_t *next)
 {
-    uint8_t tag;
+    uint16_t tag;
 
+    SSF_REQUIRE(cursor != NULL);
     SSF_REQUIRE(octetsOut != NULL);
     SSF_REQUIRE(octetsLenOut != NULL);
+    SSF_REQUIRE(next != NULL);
 
     if (!SSFASN1DecGetTLV(cursor, &tag, octetsOut, octetsLenOut, next)) return false;
     if (tag != SSF_ASN1_TAG_OCTET_STRING) return false;
@@ -252,9 +293,12 @@ bool SSFASN1DecGetOctetString(const SSFASN1Cursor_t *cursor, const uint8_t **oct
 /* --------------------------------------------------------------------------------------------- */
 bool SSFASN1DecGetNull(const SSFASN1Cursor_t *cursor, SSFASN1Cursor_t *next)
 {
-    uint8_t tag;
+    uint16_t tag;
     const uint8_t *value;
     uint32_t valueLen;
+
+    SSF_REQUIRE(cursor != NULL);
+    SSF_REQUIRE(next != NULL);
 
     if (!SSFASN1DecGetTLV(cursor, &tag, &value, &valueLen, next)) return false;
     if (tag != SSF_ASN1_TAG_NULL || valueLen != 0u) return false;
@@ -265,10 +309,12 @@ bool SSFASN1DecGetNull(const SSFASN1Cursor_t *cursor, SSFASN1Cursor_t *next)
 bool SSFASN1DecGetOIDRaw(const SSFASN1Cursor_t *cursor, const uint8_t **oidRawOut,
                          uint32_t *oidRawLenOut, SSFASN1Cursor_t *next)
 {
-    uint8_t tag;
+    uint16_t tag;
 
+    SSF_REQUIRE(cursor != NULL);
     SSF_REQUIRE(oidRawOut != NULL);
     SSF_REQUIRE(oidRawLenOut != NULL);
+    SSF_REQUIRE(next != NULL);
 
     if (!SSFASN1DecGetTLV(cursor, &tag, oidRawOut, oidRawLenOut, next)) return false;
     if (tag != SSF_ASN1_TAG_OID) return false;
@@ -283,29 +329,61 @@ bool SSFASN1DecGetOID(const SSFASN1Cursor_t *cursor, uint32_t *oidArcsOut,
     uint32_t rawLen;
     uint32_t pos;
     uint8_t arcCount = 0;
+    uint32_t firstSubId;
+    uint32_t arcByteCount;
 
+    SSF_REQUIRE(cursor != NULL);
     SSF_REQUIRE(oidArcsOut != NULL);
+    SSF_REQUIRE(oidArcsSize >= 2u);
     SSF_REQUIRE(oidArcsLenOut != NULL);
+    SSF_REQUIRE(next != NULL);
 
     if (!SSFASN1DecGetOIDRaw(cursor, &raw, &rawLen, next)) return false;
     if (rawLen == 0) return false;
 
-    /* First byte encodes arcs 0 and 1: value = arc0 * 40 + arc1 */
-    if (arcCount + 2u > oidArcsSize) return false;
-    oidArcsOut[0] = raw[0] / 40u;
-    oidArcsOut[1] = raw[0] % 40u;
+    /* Decode the first sub-identifier (base-128) which encodes arc0*40 + arc1.          */
+    /* Non-canonical leading 0x80 is rejected; cap at 5 bytes to fit uint32_t.            */
+    if ((raw[0] & 0x7Fu) == 0u && (raw[0] & 0x80u) != 0u) return false;
+    firstSubId = 0;
+    pos = 0;
+    arcByteCount = 0;
+    do
+    {
+        if (pos >= rawLen) return false;
+        if (arcByteCount >= 5u) return false; /* Would overflow uint32_t */
+        if ((arcByteCount == 4u) && ((firstSubId >> 25) != 0u)) return false;
+        firstSubId = (firstSubId << 7) | (uint32_t)(raw[pos] & 0x7Fu);
+        arcByteCount++;
+    } while ((raw[pos++] & 0x80u) != 0u);
+
+    /* Per X.690 §8.19.4: split first sub-id. arc0 ∈ {0,1,2}; if arc0 ∈ {0,1} then       */
+    /* arc1 ∈ [0,39], so firstSubId < 80; else arc0 = 2 and arc1 = firstSubId - 80.       */
+    if (firstSubId < 80u)
+    {
+        oidArcsOut[0] = firstSubId / 40u;
+        oidArcsOut[1] = firstSubId % 40u;
+    }
+    else
+    {
+        oidArcsOut[0] = 2u;
+        oidArcsOut[1] = firstSubId - 80u;
+    }
     arcCount = 2;
 
-    /* Remaining bytes: base-128 encoded arcs */
-    pos = 1;
+    /* Remaining sub-identifiers: base-128 encoded arcs */
     while (pos < rawLen)
     {
         uint32_t arc = 0;
+        if ((raw[pos] & 0x7Fu) == 0u && (raw[pos] & 0x80u) != 0u) return false;
+        arcByteCount = 0;
         do
         {
             if (pos >= rawLen) return false;
-            arc = (arc << 7) | (raw[pos] & 0x7Fu);
-        } while ((raw[pos++] & 0x80u) != 0);
+            if (arcByteCount >= 5u) return false;
+            if ((arcByteCount == 4u) && ((arc >> 25) != 0u)) return false;
+            arc = (arc << 7) | (uint32_t)(raw[pos] & 0x7Fu);
+            arcByteCount++;
+        } while ((raw[pos++] & 0x80u) != 0u);
 
         if (arcCount >= oidArcsSize) return false;
         oidArcsOut[arcCount++] = arc;
@@ -317,12 +395,14 @@ bool SSFASN1DecGetOID(const SSFASN1Cursor_t *cursor, uint32_t *oidArcsOut,
 
 /* --------------------------------------------------------------------------------------------- */
 bool SSFASN1DecGetString(const SSFASN1Cursor_t *cursor, const uint8_t **strOut,
-                         uint32_t *strLenOut, uint8_t *strTagOut, SSFASN1Cursor_t *next)
+                         uint32_t *strLenOut, uint16_t *strTagOut, SSFASN1Cursor_t *next)
 {
-    uint8_t tag;
+    uint16_t tag;
 
+    SSF_REQUIRE(cursor != NULL);
     SSF_REQUIRE(strOut != NULL);
     SSF_REQUIRE(strLenOut != NULL);
+    SSF_REQUIRE(next != NULL);
 
     if (!SSFASN1DecGetTLV(cursor, &tag, strOut, strLenOut, next)) return false;
 
@@ -340,10 +420,24 @@ bool SSFASN1DecGetString(const SSFASN1Cursor_t *cursor, const uint8_t **strOut,
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Internal: parse two ASCII digits. Returns false if either byte is not a digit.                */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFASN1Parse2Digit(const uint8_t *p, uint32_t *valOut)
+{
+    SSF_REQUIRE(p != NULL);
+    SSF_REQUIRE(valOut != NULL);
+
+    if (p[0] < (uint8_t)'0' || p[0] > (uint8_t)'9') return false;
+    if (p[1] < (uint8_t)'0' || p[1] > (uint8_t)'9') return false;
+    *valOut = (uint32_t)(p[0] - '0') * 10u + (uint32_t)(p[1] - '0');
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
 bool SSFASN1DecGetTime(const SSFASN1Cursor_t *cursor, uint64_t *unixSecOut,
                        SSFASN1Cursor_t *next)
 {
-    uint8_t tag;
+    uint16_t tag;
     const uint8_t *value;
     uint32_t valueLen;
     uint32_t year;
@@ -353,76 +447,181 @@ bool SSFASN1DecGetTime(const SSFASN1Cursor_t *cursor, uint64_t *unixSecOut,
     uint32_t minute;
     uint32_t second;
     uint32_t pos;
-    /* Days before each month (non-leap year) */
-    static const uint16_t daysBeforeMonth[12] = {
-        0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334
-    };
+    SSFDTimeStruct_t ts;
+    SSFPortTick_t unixSys;
 
+    SSF_REQUIRE(cursor != NULL);
     SSF_REQUIRE(unixSecOut != NULL);
+    SSF_REQUIRE(next != NULL);
 
     if (!SSFASN1DecGetTLV(cursor, &tag, &value, &valueLen, next)) return false;
 
     if (tag == SSF_ASN1_TAG_UTC_TIME)
     {
-        /* Format: YYMMDDHHMMSSZ (13 bytes) */
-        if (valueLen < 13u) return false;
-        pos = 0;
-        year = (uint32_t)(value[pos] - '0') * 10u + (uint32_t)(value[pos + 1u] - '0');
-        pos += 2;
-        year += (year >= 50u) ? 1900u : 2000u;
+        /* DER X.509 profile requires exactly YYMMDDHHMMSSZ (13 bytes). */
+        uint32_t yy;
+        if (valueLen != 13u) return false;
+        if (!_SSFASN1Parse2Digit(&value[0], &yy)) return false;
+        year = yy + ((yy >= 50u) ? 1900u : 2000u);
+        pos = 2;
     }
     else if (tag == SSF_ASN1_TAG_GENERALIZED_TIME)
     {
-        /* Format: YYYYMMDDHHMMSSZ (15 bytes) */
-        if (valueLen < 15u) return false;
-        pos = 0;
-        year = (uint32_t)(value[pos] - '0') * 1000u + (uint32_t)(value[pos + 1u] - '0') * 100u +
-               (uint32_t)(value[pos + 2u] - '0') * 10u + (uint32_t)(value[pos + 3u] - '0');
-        pos += 4;
+        /* DER X.509 profile requires exactly YYYYMMDDHHMMSSZ (15 bytes). */
+        uint32_t hi;
+        uint32_t lo;
+        if (valueLen != 15u) return false;
+        if (!_SSFASN1Parse2Digit(&value[0], &hi)) return false;
+        if (!_SSFASN1Parse2Digit(&value[2], &lo)) return false;
+        year = hi * 100u + lo;
+        pos = 4;
     }
     else
     {
         return false;
     }
 
-    month = (uint32_t)(value[pos] - '0') * 10u + (uint32_t)(value[pos + 1u] - '0');
+    if (!_SSFASN1Parse2Digit(&value[pos], &month)) return false;
     pos += 2;
-    day = (uint32_t)(value[pos] - '0') * 10u + (uint32_t)(value[pos + 1u] - '0');
+    if (!_SSFASN1Parse2Digit(&value[pos], &day)) return false;
     pos += 2;
-    hour = (uint32_t)(value[pos] - '0') * 10u + (uint32_t)(value[pos + 1u] - '0');
+    if (!_SSFASN1Parse2Digit(&value[pos], &hour)) return false;
     pos += 2;
-    minute = (uint32_t)(value[pos] - '0') * 10u + (uint32_t)(value[pos + 1u] - '0');
+    if (!_SSFASN1Parse2Digit(&value[pos], &minute)) return false;
     pos += 2;
-    second = (uint32_t)(value[pos] - '0') * 10u + (uint32_t)(value[pos + 1u] - '0');
+    if (!_SSFASN1Parse2Digit(&value[pos], &second)) return false;
+    pos += 2;
 
-    /* Convert to Unix seconds */
+    /* Trailing 'Z' required per DER X.509 profile (no offsets, no fractional seconds). */
+    if (value[pos] != (uint8_t)'Z') return false;
+
+    /* Year must fit in ssfdtime's supported range (1970 + [0..229]). Month must be >= 1 so    */
+    /* (month - 1) fits in the 0-indexed ssfdtime contract.                                    */
+    if (year < SSFDTIME_EPOCH_YEAR_MIN || year > SSFDTIME_EPOCH_YEAR_MAX) return false;
+    if (month < 1u || month > 12u) return false;
+    if (day < 1u) return false;
+
+    /* SSFDTimeStructInit performs strict calendar validation (leap years, days-in-month,      */
+    /* hour/min/sec ranges). Day and month translate to ssfdtime's 0-indexed convention.       */
+    if (!SSFDTimeStructInit(&ts, (uint16_t)(year - SSFDTIME_EPOCH_YEAR_MIN),
+                            (uint8_t)(month - 1u), (uint8_t)(day - 1u),
+                            (uint8_t)hour, (uint8_t)minute, (uint8_t)second, 0u))
     {
-        uint64_t days = 0;
-        uint32_t y;
-
-        /* Days from 1970 to year */
-        for (y = 1970u; y < year; y++)
-        {
-            days += 365u;
-            if ((y % 4u == 0u) && ((y % 100u != 0u) || (y % 400u == 0u))) days++;
-        }
-
-        /* Days in current year */
-        if (month >= 1u && month <= 12u)
-        {
-            days += daysBeforeMonth[month - 1u];
-            /* Leap day */
-            if (month > 2u && (year % 4u == 0u) &&
-                ((year % 100u != 0u) || (year % 400u == 0u)))
-            {
-                days++;
-            }
-        }
-        days += (day - 1u);
-
-        *unixSecOut = days * 86400ull + hour * 3600ull + minute * 60ull + second;
+        return false;
     }
+    if (!SSFDTimeStructToUnix(&ts, &unixSys)) return false;
+
+    *unixSecOut = (uint64_t)(unixSys / SSF_TICKS_PER_SEC);
     return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: decode common Y/M/D digits from a DATE or DATE-TIME payload. Returns false on any   */
+/* format or range violation. Populates ts[0] (year), ts[1] (month 1-12), ts[2] (day 1-31).     */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFASN1ParseYMD(const uint8_t *p, uint32_t *year, uint32_t *month, uint32_t *day)
+{
+    uint32_t yHi, yLo;
+
+    SSF_REQUIRE(p != NULL);
+    SSF_REQUIRE(year != NULL);
+    SSF_REQUIRE(month != NULL);
+    SSF_REQUIRE(day != NULL);
+
+    /* "YYYY-MM-DD" layout: digits at [0-3], [5-6], [8-9]; dashes at [4] and [7]. */
+    if (!_SSFASN1Parse2Digit(&p[0], &yHi)) return false;
+    if (!_SSFASN1Parse2Digit(&p[2], &yLo)) return false;
+    if (p[4] != (uint8_t)'-') return false;
+    if (!_SSFASN1Parse2Digit(&p[5], month)) return false;
+    if (p[7] != (uint8_t)'-') return false;
+    if (!_SSFASN1Parse2Digit(&p[8], day)) return false;
+    *year = yHi * 100u + yLo;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: build a unix-second count from validated Y/M/D/H/M/S via ssfdtime.                  */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFASN1YMDHMSToUnix(uint32_t year, uint32_t month, uint32_t day,
+                                 uint32_t hour, uint32_t minute, uint32_t second,
+                                 uint64_t *unixSecOut)
+{
+    SSFDTimeStruct_t ts;
+    SSFPortTick_t unixSys;
+
+    SSF_REQUIRE(unixSecOut != NULL);
+
+    if (year < SSFDTIME_EPOCH_YEAR_MIN || year > SSFDTIME_EPOCH_YEAR_MAX) return false;
+    if (month < 1u || month > 12u) return false;
+    if (day < 1u) return false;
+    if (hour > 23u || minute > 59u || second > 59u) return false;
+
+    if (!SSFDTimeStructInit(&ts, (uint16_t)(year - SSFDTIME_EPOCH_YEAR_MIN),
+                            (uint8_t)(month - 1u), (uint8_t)(day - 1u),
+                            (uint8_t)hour, (uint8_t)minute, (uint8_t)second, 0u))
+    {
+        return false;
+    }
+    if (!SSFDTimeStructToUnix(&ts, &unixSys)) return false;
+
+    *unixSecOut = (uint64_t)(unixSys / SSF_TICKS_PER_SEC);
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+bool SSFASN1DecGetDate(const SSFASN1Cursor_t *cursor, uint64_t *unixSecOut,
+                       SSFASN1Cursor_t *next)
+{
+    uint16_t tag;
+    const uint8_t *value;
+    uint32_t valueLen;
+    uint32_t year;
+    uint32_t month;
+    uint32_t day;
+
+    SSF_REQUIRE(cursor != NULL);
+    SSF_REQUIRE(unixSecOut != NULL);
+    SSF_REQUIRE(next != NULL);
+
+    if (!SSFASN1DecGetTLV(cursor, &tag, &value, &valueLen, next)) return false;
+    if (tag != SSF_ASN1_TAG_DATE) return false;
+    if (valueLen != 10u) return false; /* "YYYY-MM-DD" */
+    if (!_SSFASN1ParseYMD(value, &year, &month, &day)) return false;
+
+    return _SSFASN1YMDHMSToUnix(year, month, day, 0u, 0u, 0u, unixSecOut);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+bool SSFASN1DecGetDateTime(const SSFASN1Cursor_t *cursor, uint64_t *unixSecOut,
+                           SSFASN1Cursor_t *next)
+{
+    uint16_t tag;
+    const uint8_t *value;
+    uint32_t valueLen;
+    uint32_t year;
+    uint32_t month;
+    uint32_t day;
+    uint32_t hour;
+    uint32_t minute;
+    uint32_t second;
+
+    SSF_REQUIRE(cursor != NULL);
+    SSF_REQUIRE(unixSecOut != NULL);
+    SSF_REQUIRE(next != NULL);
+
+    if (!SSFASN1DecGetTLV(cursor, &tag, &value, &valueLen, next)) return false;
+    if (tag != SSF_ASN1_TAG_DATE_TIME) return false;
+    if (valueLen != 19u) return false; /* "YYYY-MM-DDTHH:MM:SS" */
+
+    if (!_SSFASN1ParseYMD(value, &year, &month, &day)) return false;
+    if (value[10] != (uint8_t)'T') return false;
+    if (!_SSFASN1Parse2Digit(&value[11], &hour)) return false;
+    if (value[13] != (uint8_t)':') return false;
+    if (!_SSFASN1Parse2Digit(&value[14], &minute)) return false;
+    if (value[16] != (uint8_t)':') return false;
+    if (!_SSFASN1Parse2Digit(&value[17], &second)) return false;
+
+    return _SSFASN1YMDHMSToUnix(year, month, day, hour, minute, second, unixSecOut);
 }
 
 /* ========================================================================================== */
@@ -446,6 +645,8 @@ static uint32_t _SSFASN1LenFieldSize(uint32_t contentLen)
 /* --------------------------------------------------------------------------------------------- */
 static uint32_t _SSFASN1WriteLenField(uint8_t *buf, uint32_t contentLen)
 {
+    SSF_REQUIRE(buf != NULL);
+
     if (contentLen < 0x80u)
     {
         buf[0] = (uint8_t)contentLen;
@@ -484,59 +685,116 @@ static uint32_t _SSFASN1WriteLenField(uint8_t *buf, uint32_t contentLen)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-uint32_t SSFASN1EncTagLen(uint8_t *buf, uint32_t bufSize, uint8_t tag, uint32_t contentLen)
+/* Internal: number of bytes the DER tag field occupies.                                         */
+/* Single-byte tag (low-5-bits != 0x1F): 1 byte. Two-byte tag (number 31-127): 2 bytes.          */
+/* --------------------------------------------------------------------------------------------- */
+static uint32_t _SSFASN1TagFieldSize(uint16_t tag)
 {
-    uint32_t headerLen = 1u + _SSFASN1LenFieldSize(contentLen);
-
-    if (buf == NULL) return headerLen;
-    if (bufSize < headerLen) return 0;
-
-    buf[0] = tag;
-    _SSFASN1WriteLenField(&buf[1], contentLen);
-    return headerLen;
+    return ((tag & 0x1Fu) == 0x1Fu) ? 2u : 1u;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-uint32_t SSFASN1EncBool(uint8_t *buf, uint32_t bufSize, bool val)
+/* Internal: write the DER tag field. Asserts buf is large enough.                               */
+/* --------------------------------------------------------------------------------------------- */
+static uint32_t _SSFASN1WriteTagField(uint8_t *buf, uint16_t tag)
 {
-    uint32_t total = 3u; /* tag(1) + len(1) + value(1) */
+    SSF_REQUIRE(buf != NULL);
 
-    if (buf == NULL) return total;
-    if (bufSize < total) return 0;
+    buf[0] = (uint8_t)(tag & 0xFFu);
+    if ((tag & 0x1Fu) == 0x1Fu)
+    {
+        buf[1] = (uint8_t)((tag >> 8) & 0xFFu);
+        return 2u;
+    }
+    return 1u;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+bool SSFASN1EncTagLen(uint8_t *buf, uint32_t bufSize, uint16_t tag, uint32_t contentLen,
+                      uint32_t *bytesWritten)
+{
+    uint32_t tagLen;
+    uint32_t headerLen;
+
+    SSF_REQUIRE(bytesWritten != NULL);
+
+    *bytesWritten = 0;
+    tagLen = _SSFASN1TagFieldSize(tag);
+    headerLen = tagLen + _SSFASN1LenFieldSize(contentLen);
+
+    if (buf == NULL)
+    {
+        *bytesWritten = headerLen;
+        return true;
+    }
+    if (bufSize < headerLen) return false;
+
+    (void)_SSFASN1WriteTagField(buf, tag);
+    _SSFASN1WriteLenField(&buf[tagLen], contentLen);
+    *bytesWritten = headerLen;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+bool SSFASN1EncBool(uint8_t *buf, uint32_t bufSize, bool val, uint32_t *bytesWritten)
+{
+    const uint32_t total = 3u; /* tag(1) + len(1) + value(1) */
+
+    SSF_REQUIRE(bytesWritten != NULL);
+
+    *bytesWritten = 0;
+    if (buf == NULL)
+    {
+        *bytesWritten = total;
+        return true;
+    }
+    if (bufSize < total) return false;
 
     buf[0] = SSF_ASN1_TAG_BOOLEAN;
     buf[1] = 0x01u;
     buf[2] = val ? 0xFFu : 0x00u;
-    return total;
+    *bytesWritten = total;
+    return true;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-uint32_t SSFASN1EncInt(uint8_t *buf, uint32_t bufSize, const uint8_t *intBuf, uint32_t intLen)
+bool SSFASN1EncInt(uint8_t *buf, uint32_t bufSize, const uint8_t *intBuf, uint32_t intLen,
+                   uint32_t *bytesWritten)
 {
     uint32_t headerLen;
     uint32_t total;
 
     SSF_REQUIRE(intBuf != NULL);
     SSF_REQUIRE(intLen > 0);
+    SSF_REQUIRE(bytesWritten != NULL);
 
+    *bytesWritten = 0;
     headerLen = 1u + _SSFASN1LenFieldSize(intLen);
+    if (intLen > (0xFFFFFFFFu - headerLen)) return false; /* Overflow guard */
     total = headerLen + intLen;
 
-    if (buf == NULL) return total;
-    if (bufSize < total) return 0;
+    if (buf == NULL)
+    {
+        *bytesWritten = total;
+        return true;
+    }
+    if (bufSize < total) return false;
 
     buf[0] = SSF_ASN1_TAG_INTEGER;
     _SSFASN1WriteLenField(&buf[1], intLen);
     memcpy(&buf[headerLen], intBuf, intLen);
-    return total;
+    *bytesWritten = total;
+    return true;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-uint32_t SSFASN1EncIntU64(uint8_t *buf, uint32_t bufSize, uint64_t val)
+bool SSFASN1EncIntU64(uint8_t *buf, uint32_t bufSize, uint64_t val, uint32_t *bytesWritten)
 {
     uint8_t intBuf[9];
     uint32_t intLen;
     uint32_t i;
+
+    SSF_REQUIRE(bytesWritten != NULL);
 
     /* Encode as big-endian with minimal length, adding leading zero if high bit set */
     if (val == 0)
@@ -546,7 +804,6 @@ uint32_t SSFASN1EncIntU64(uint8_t *buf, uint32_t bufSize, uint64_t val)
     }
     else
     {
-        /* Find the most significant non-zero byte */
         intLen = 0;
         for (i = 0; i < 8u; i++)
         {
@@ -556,7 +813,6 @@ uint32_t SSFASN1EncIntU64(uint8_t *buf, uint32_t bufSize, uint64_t val)
                 intBuf[intLen++] = b;
             }
         }
-        /* Add leading zero if high bit is set (positive number would look negative) */
         if (intBuf[0] & 0x80u)
         {
             memmove(&intBuf[1], intBuf, intLen);
@@ -565,106 +821,129 @@ uint32_t SSFASN1EncIntU64(uint8_t *buf, uint32_t bufSize, uint64_t val)
         }
     }
 
-    return SSFASN1EncInt(buf, bufSize, intBuf, intLen);
+    return SSFASN1EncInt(buf, bufSize, intBuf, intLen, bytesWritten);
 }
 
 /* --------------------------------------------------------------------------------------------- */
-uint32_t SSFASN1EncBitString(uint8_t *buf, uint32_t bufSize, const uint8_t *bits,
-                             uint32_t bitsLen, uint8_t unusedBits)
+bool SSFASN1EncBitString(uint8_t *buf, uint32_t bufSize, const uint8_t *bits, uint32_t bitsLen,
+                         uint8_t unusedBits, uint32_t *bytesWritten)
 {
-    uint32_t contentLen = 1u + bitsLen; /* unused-bits byte + data */
-    uint32_t headerLen = 1u + _SSFASN1LenFieldSize(contentLen);
-    uint32_t total = headerLen + contentLen;
+    uint32_t contentLen;
+    uint32_t headerLen;
+    uint32_t total;
 
-    if (buf == NULL) return total;
-    if (bufSize < total) return 0;
+    SSF_REQUIRE((bits != NULL) || (bitsLen == 0u));
+    SSF_REQUIRE(unusedBits <= 7u);
+    SSF_REQUIRE(!((bitsLen == 0u) && (unusedBits != 0u)));
+    SSF_REQUIRE(bytesWritten != NULL);
+
+    *bytesWritten = 0;
+    if (bitsLen == 0xFFFFFFFFu) return false; /* Overflow guard on contentLen = 1 + bitsLen */
+    contentLen = 1u + bitsLen;
+    headerLen = 1u + _SSFASN1LenFieldSize(contentLen);
+    if (contentLen > (0xFFFFFFFFu - headerLen)) return false; /* Overflow guard on total */
+    total = headerLen + contentLen;
+
+    if (buf == NULL)
+    {
+        *bytesWritten = total;
+        return true;
+    }
+    if (bufSize < total) return false;
 
     buf[0] = SSF_ASN1_TAG_BIT_STRING;
     _SSFASN1WriteLenField(&buf[1], contentLen);
     buf[headerLen] = unusedBits;
     if (bitsLen > 0) memcpy(&buf[headerLen + 1u], bits, bitsLen);
-    return total;
+    *bytesWritten = total;
+    return true;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-uint32_t SSFASN1EncOctetString(uint8_t *buf, uint32_t bufSize, const uint8_t *octets,
-                               uint32_t octetsLen)
+bool SSFASN1EncOctetString(uint8_t *buf, uint32_t bufSize, const uint8_t *octets,
+                           uint32_t octetsLen, uint32_t *bytesWritten)
 {
-    return SSFASN1EncWrap(buf, bufSize, SSF_ASN1_TAG_OCTET_STRING, octets, octetsLen);
+    SSF_REQUIRE((octets != NULL) || (octetsLen == 0u));
+    return SSFASN1EncWrap(buf, bufSize, SSF_ASN1_TAG_OCTET_STRING, octets, octetsLen,
+                          bytesWritten);
 }
 
 /* --------------------------------------------------------------------------------------------- */
-uint32_t SSFASN1EncNull(uint8_t *buf, uint32_t bufSize)
+bool SSFASN1EncNull(uint8_t *buf, uint32_t bufSize, uint32_t *bytesWritten)
 {
-    uint32_t total = 2u;
+    const uint32_t total = 2u;
 
-    if (buf == NULL) return total;
-    if (bufSize < total) return 0;
+    SSF_REQUIRE(bytesWritten != NULL);
+
+    *bytesWritten = 0;
+    if (buf == NULL)
+    {
+        *bytesWritten = total;
+        return true;
+    }
+    if (bufSize < total) return false;
 
     buf[0] = SSF_ASN1_TAG_NULL;
     buf[1] = 0x00u;
-    return total;
+    *bytesWritten = total;
+    return true;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-uint32_t SSFASN1EncOIDRaw(uint8_t *buf, uint32_t bufSize, const uint8_t *oidRaw,
-                          uint32_t oidRawLen)
+bool SSFASN1EncOIDRaw(uint8_t *buf, uint32_t bufSize, const uint8_t *oidRaw, uint32_t oidRawLen,
+                      uint32_t *bytesWritten)
 {
-    return SSFASN1EncWrap(buf, bufSize, SSF_ASN1_TAG_OID, oidRaw, oidRawLen);
+    SSF_REQUIRE(oidRaw != NULL);
+    SSF_REQUIRE(oidRawLen > 0u);
+    return SSFASN1EncWrap(buf, bufSize, SSF_ASN1_TAG_OID, oidRaw, oidRawLen, bytesWritten);
 }
 
 /* --------------------------------------------------------------------------------------------- */
-uint32_t SSFASN1EncString(uint8_t *buf, uint32_t bufSize, uint8_t strTag,
-                          const uint8_t *str, uint32_t strLen)
+bool SSFASN1EncString(uint8_t *buf, uint32_t bufSize, uint16_t strTag, const uint8_t *str,
+                      uint32_t strLen, uint32_t *bytesWritten)
 {
-    return SSFASN1EncWrap(buf, bufSize, strTag, str, strLen);
+    SSF_REQUIRE((str != NULL) || (strLen == 0u));
+    return SSFASN1EncWrap(buf, bufSize, strTag, str, strLen, bytesWritten);
 }
 
 /* --------------------------------------------------------------------------------------------- */
-uint32_t SSFASN1EncUTCTime(uint8_t *buf, uint32_t bufSize, uint64_t unixSec)
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: resolve a Unix seconds count into a calendar struct via ssfdtime.                   */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFASN1UnixSecToStruct(uint64_t unixSec, SSFDTimeStruct_t *ts)
 {
-    /* Format: YYMMDDHHMMSSZ (13 bytes) */
+    SSFPortTick_t unixSys;
+
+    SSF_REQUIRE(ts != NULL);
+
+    if (unixSec > SSFDTIME_UNIX_EPOCH_SEC_MAX) return false;
+    unixSys = (SSFPortTick_t)unixSec * SSF_TICKS_PER_SEC;
+    return SSFDTimeUnixToStruct(unixSys, ts, sizeof(*ts));
+}
+
+/* --------------------------------------------------------------------------------------------- */
+bool SSFASN1EncUTCTime(uint8_t *buf, uint32_t bufSize, uint64_t unixSec,
+                       uint32_t *bytesWritten)
+{
+    /* Format: YYMMDDHHMMSSZ (13 bytes). Year range: 1970-2049 (YY ∈ 50..99 means 1950..1999    */
+    /* per RFC 5280, but ssfdtime cannot represent pre-1970; YY ∈ 00..49 means 2000..2049).     */
     uint8_t timeStr[13];
+    SSFDTimeStruct_t ts;
     uint32_t year;
     uint32_t month;
     uint32_t day;
-    uint32_t hour;
-    uint32_t minute;
-    uint32_t second;
-    uint32_t days;
-    static const uint16_t daysInMonth[12] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
-    bool isLeap;
 
-    days = (uint32_t)(unixSec / 86400ull);
-    second = (uint32_t)(unixSec % 86400ull);
-    hour = second / 3600u;
-    minute = (second % 3600u) / 60u;
-    second = second % 60u;
+    SSF_REQUIRE(bytesWritten != NULL);
 
-    /* Year from days since 1970 */
-    year = 1970;
-    for (;;)
-    {
-        isLeap = (year % 4u == 0u) && ((year % 100u != 0u) || (year % 400u == 0u));
-        uint32_t daysInYear = isLeap ? 366u : 365u;
-        if (days < daysInYear) break;
-        days -= daysInYear;
-        year++;
-    }
+    *bytesWritten = 0;
+    if (!_SSFASN1UnixSecToStruct(unixSec, &ts)) return false;
 
-    /* Month and day */
-    isLeap = (year % 4u == 0u) && ((year % 100u != 0u) || (year % 400u == 0u));
-    for (month = 0; month < 12u; month++)
-    {
-        uint32_t dim = daysInMonth[month];
-        if (month == 1u && isLeap) dim++;
-        if (days < dim) break;
-        days -= dim;
-    }
-    month++;
-    day = days + 1u;
+    year = (uint32_t)ts.year + SSFDTIME_EPOCH_YEAR_MIN;
+    if (year > 2049u) return false;
 
-    /* Encode YY */
+    month = (uint32_t)ts.month + 1u;
+    day = (uint32_t)ts.day + 1u;
+
     year %= 100u;
     timeStr[0] = (uint8_t)('0' + year / 10u);
     timeStr[1] = (uint8_t)('0' + year % 10u);
@@ -672,58 +951,36 @@ uint32_t SSFASN1EncUTCTime(uint8_t *buf, uint32_t bufSize, uint64_t unixSec)
     timeStr[3] = (uint8_t)('0' + month % 10u);
     timeStr[4] = (uint8_t)('0' + day / 10u);
     timeStr[5] = (uint8_t)('0' + day % 10u);
-    timeStr[6] = (uint8_t)('0' + hour / 10u);
-    timeStr[7] = (uint8_t)('0' + hour % 10u);
-    timeStr[8] = (uint8_t)('0' + minute / 10u);
-    timeStr[9] = (uint8_t)('0' + minute % 10u);
-    timeStr[10] = (uint8_t)('0' + second / 10u);
-    timeStr[11] = (uint8_t)('0' + second % 10u);
+    timeStr[6] = (uint8_t)('0' + ts.hour / 10u);
+    timeStr[7] = (uint8_t)('0' + ts.hour % 10u);
+    timeStr[8] = (uint8_t)('0' + ts.min / 10u);
+    timeStr[9] = (uint8_t)('0' + ts.min % 10u);
+    timeStr[10] = (uint8_t)('0' + ts.sec / 10u);
+    timeStr[11] = (uint8_t)('0' + ts.sec % 10u);
     timeStr[12] = 'Z';
 
-    return SSFASN1EncWrap(buf, bufSize, SSF_ASN1_TAG_UTC_TIME, timeStr, 13);
+    return SSFASN1EncWrap(buf, bufSize, SSF_ASN1_TAG_UTC_TIME, timeStr, 13, bytesWritten);
 }
 
 /* --------------------------------------------------------------------------------------------- */
-uint32_t SSFASN1EncGeneralizedTime(uint8_t *buf, uint32_t bufSize, uint64_t unixSec)
+bool SSFASN1EncGeneralizedTime(uint8_t *buf, uint32_t bufSize, uint64_t unixSec,
+                               uint32_t *bytesWritten)
 {
-    /* Format: YYYYMMDDHHMMSSZ (15 bytes) */
+    /* Format: YYYYMMDDHHMMSSZ (15 bytes). Supported via ssfdtime: 1970-2199. */
     uint8_t timeStr[15];
+    SSFDTimeStruct_t ts;
     uint32_t year;
     uint32_t month;
     uint32_t day;
-    uint32_t hour;
-    uint32_t minute;
-    uint32_t second;
-    uint32_t days;
-    static const uint16_t daysInMonth[12] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
-    bool isLeap;
 
-    days = (uint32_t)(unixSec / 86400ull);
-    second = (uint32_t)(unixSec % 86400ull);
-    hour = second / 3600u;
-    minute = (second % 3600u) / 60u;
-    second = second % 60u;
+    SSF_REQUIRE(bytesWritten != NULL);
 
-    year = 1970;
-    for (;;)
-    {
-        isLeap = (year % 4u == 0u) && ((year % 100u != 0u) || (year % 400u == 0u));
-        uint32_t daysInYear = isLeap ? 366u : 365u;
-        if (days < daysInYear) break;
-        days -= daysInYear;
-        year++;
-    }
+    *bytesWritten = 0;
+    if (!_SSFASN1UnixSecToStruct(unixSec, &ts)) return false;
 
-    isLeap = (year % 4u == 0u) && ((year % 100u != 0u) || (year % 400u == 0u));
-    for (month = 0; month < 12u; month++)
-    {
-        uint32_t dim = daysInMonth[month];
-        if (month == 1u && isLeap) dim++;
-        if (days < dim) break;
-        days -= dim;
-    }
-    month++;
-    day = days + 1u;
+    year = (uint32_t)ts.year + SSFDTIME_EPOCH_YEAR_MIN;
+    month = (uint32_t)ts.month + 1u;
+    day = (uint32_t)ts.day + 1u;
 
     timeStr[0] = (uint8_t)('0' + year / 1000u);
     timeStr[1] = (uint8_t)('0' + (year / 100u) % 10u);
@@ -733,32 +990,123 @@ uint32_t SSFASN1EncGeneralizedTime(uint8_t *buf, uint32_t bufSize, uint64_t unix
     timeStr[5] = (uint8_t)('0' + month % 10u);
     timeStr[6] = (uint8_t)('0' + day / 10u);
     timeStr[7] = (uint8_t)('0' + day % 10u);
-    timeStr[8] = (uint8_t)('0' + hour / 10u);
-    timeStr[9] = (uint8_t)('0' + hour % 10u);
-    timeStr[10] = (uint8_t)('0' + minute / 10u);
-    timeStr[11] = (uint8_t)('0' + minute % 10u);
-    timeStr[12] = (uint8_t)('0' + second / 10u);
-    timeStr[13] = (uint8_t)('0' + second % 10u);
+    timeStr[8] = (uint8_t)('0' + ts.hour / 10u);
+    timeStr[9] = (uint8_t)('0' + ts.hour % 10u);
+    timeStr[10] = (uint8_t)('0' + ts.min / 10u);
+    timeStr[11] = (uint8_t)('0' + ts.min % 10u);
+    timeStr[12] = (uint8_t)('0' + ts.sec / 10u);
+    timeStr[13] = (uint8_t)('0' + ts.sec % 10u);
     timeStr[14] = 'Z';
 
-    return SSFASN1EncWrap(buf, bufSize, SSF_ASN1_TAG_GENERALIZED_TIME, timeStr, 15);
+    return SSFASN1EncWrap(buf, bufSize, SSF_ASN1_TAG_GENERALIZED_TIME, timeStr, 15,
+                          bytesWritten);
 }
 
 /* --------------------------------------------------------------------------------------------- */
-uint32_t SSFASN1EncWrap(uint8_t *buf, uint32_t bufSize, uint8_t tag,
-                        const uint8_t *content, uint32_t contentLen)
+/* Internal: format a 4-digit year + 2-digit month/day into a "YYYY-MM-DD" buffer.               */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFASN1FormatDate(uint8_t *dst, uint32_t year, uint32_t month, uint32_t day)
 {
-    uint32_t headerLen = 1u + _SSFASN1LenFieldSize(contentLen);
-    uint32_t total = headerLen + contentLen;
+    SSF_REQUIRE(dst != NULL);
 
-    if (buf == NULL) return total;
-    if (bufSize < total) return 0;
+    dst[0] = (uint8_t)('0' + year / 1000u);
+    dst[1] = (uint8_t)('0' + (year / 100u) % 10u);
+    dst[2] = (uint8_t)('0' + (year / 10u) % 10u);
+    dst[3] = (uint8_t)('0' + year % 10u);
+    dst[4] = (uint8_t)'-';
+    dst[5] = (uint8_t)('0' + month / 10u);
+    dst[6] = (uint8_t)('0' + month % 10u);
+    dst[7] = (uint8_t)'-';
+    dst[8] = (uint8_t)('0' + day / 10u);
+    dst[9] = (uint8_t)('0' + day % 10u);
+}
 
-    buf[0] = tag;
-    _SSFASN1WriteLenField(&buf[1], contentLen);
-    if (contentLen > 0 && content != NULL)
+/* --------------------------------------------------------------------------------------------- */
+bool SSFASN1EncDate(uint8_t *buf, uint32_t bufSize, uint64_t unixSec, uint32_t *bytesWritten)
+{
+    /* Format: YYYY-MM-DD (10 bytes), wrapped in multi-byte tag [UNIVERSAL 31]. */
+    uint8_t timeStr[10];
+    SSFDTimeStruct_t ts;
+    uint32_t year;
+    uint32_t month;
+    uint32_t day;
+
+    SSF_REQUIRE(bytesWritten != NULL);
+
+    *bytesWritten = 0;
+    if (!_SSFASN1UnixSecToStruct(unixSec, &ts)) return false;
+
+    year = (uint32_t)ts.year + SSFDTIME_EPOCH_YEAR_MIN;
+    month = (uint32_t)ts.month + 1u;
+    day = (uint32_t)ts.day + 1u;
+    _SSFASN1FormatDate(timeStr, year, month, day);
+
+    return SSFASN1EncWrap(buf, bufSize, SSF_ASN1_TAG_DATE, timeStr, 10, bytesWritten);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+bool SSFASN1EncDateTime(uint8_t *buf, uint32_t bufSize, uint64_t unixSec,
+                        uint32_t *bytesWritten)
+{
+    /* Format: YYYY-MM-DDTHH:MM:SS (19 bytes), wrapped in multi-byte tag [UNIVERSAL 33]. */
+    uint8_t timeStr[19];
+    SSFDTimeStruct_t ts;
+    uint32_t year;
+    uint32_t month;
+    uint32_t day;
+
+    SSF_REQUIRE(bytesWritten != NULL);
+
+    *bytesWritten = 0;
+    if (!_SSFASN1UnixSecToStruct(unixSec, &ts)) return false;
+
+    year = (uint32_t)ts.year + SSFDTIME_EPOCH_YEAR_MIN;
+    month = (uint32_t)ts.month + 1u;
+    day = (uint32_t)ts.day + 1u;
+    _SSFASN1FormatDate(timeStr, year, month, day);
+    timeStr[10] = (uint8_t)'T';
+    timeStr[11] = (uint8_t)('0' + ts.hour / 10u);
+    timeStr[12] = (uint8_t)('0' + ts.hour % 10u);
+    timeStr[13] = (uint8_t)':';
+    timeStr[14] = (uint8_t)('0' + ts.min / 10u);
+    timeStr[15] = (uint8_t)('0' + ts.min % 10u);
+    timeStr[16] = (uint8_t)':';
+    timeStr[17] = (uint8_t)('0' + ts.sec / 10u);
+    timeStr[18] = (uint8_t)('0' + ts.sec % 10u);
+
+    return SSFASN1EncWrap(buf, bufSize, SSF_ASN1_TAG_DATE_TIME, timeStr, 19, bytesWritten);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+bool SSFASN1EncWrap(uint8_t *buf, uint32_t bufSize, uint16_t tag, const uint8_t *content,
+                    uint32_t contentLen, uint32_t *bytesWritten)
+{
+    uint32_t tagLen;
+    uint32_t headerLen;
+    uint32_t total;
+
+    SSF_REQUIRE((content != NULL) || (contentLen == 0u));
+    SSF_REQUIRE(bytesWritten != NULL);
+
+    *bytesWritten = 0;
+    tagLen = _SSFASN1TagFieldSize(tag);
+    headerLen = tagLen + _SSFASN1LenFieldSize(contentLen);
+    if (contentLen > (0xFFFFFFFFu - headerLen)) return false; /* Overflow guard on total */
+    total = headerLen + contentLen;
+
+    if (buf == NULL)
+    {
+        *bytesWritten = total;
+        return true;
+    }
+    if (bufSize < total) return false;
+
+    (void)_SSFASN1WriteTagField(buf, tag);
+    _SSFASN1WriteLenField(&buf[tagLen], contentLen);
+    if (contentLen > 0u)
     {
         memcpy(&buf[headerLen], content, contentLen);
     }
-    return total;
+    *bytesWritten = total;
+    return true;
 }

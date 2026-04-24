@@ -1115,6 +1115,7 @@ bool SSFRSAVerifyPSS(const uint8_t *pubKeyDer, size_t pubKeyDerLen,
     size_t i;
     SSFBN_t s, m;
     uint8_t topMask;
+    uint8_t diff;
 
     SSF_REQUIRE(pubKeyDer != NULL);
     SSF_REQUIRE(hashVal != NULL);
@@ -1125,6 +1126,7 @@ bool SSFRSAVerifyPSS(const uint8_t *pubKeyDer, size_t pubKeyDerLen,
     sLen = hLen;
     SSF_REQUIRE(hashLen == hLen);
 
+    /* Early failures below depend only on public values (pubKey contents, sigLen). */
     if (!_SSFRSAPubKeyDecode(pubKeyDer, pubKeyDerLen, &n, &e, &keyLimbs))
     { return false; }
 
@@ -1148,46 +1150,45 @@ bool SSFRSAVerifyPSS(const uint8_t *pubKeyDer, size_t pubKeyDerLen,
         memcpy(em, &emFull[keyBytes - emLen], emLen);
     }
 
-    /* Check rightmost byte is 0xBC */
-    if (em[emLen - 1u] != 0xBCu)
-    { return false; }
-
-    /* Check top bits of maskedDB are zero */
+    /* All checks below operate on attacker-influenced bytes of `em` (the output of the RSA
+     * public op on `sig`). Fold every structural check into a single-byte accumulator `diff`
+     * and run MGF1 + DB unmask + hash recomputation unconditionally, so that the wall-clock
+     * time to reach the final `return` is independent of which byte of `em` first diverged
+     * from the PSS padding pattern. Without this, an attacker who can time rejected sigs
+     * can distinguish "em trailer wrong" from "em trailer ok but PS[k] nonzero" from
+     * "structure ok but H mismatched" — a defense-in-depth signal PSS was designed to
+     * avoid exposing. */
+    diff = 0u;
     topMask = (uint8_t)(0xFFu >> (8u * emLen - emBits));
-    if ((em[0] & ~topMask) != 0u)
-    { return false; }
 
-    /* Extract H */
+    /* Trailer byte must be 0xBC. */
+    diff |= (uint8_t)(em[emLen - 1u] ^ 0xBCu);
+
+    /* Top (emBits-aligned) bits of em[0] must be zero. */
+    diff |= (uint8_t)(em[0] & ~topMask);
+
+    /* Extract H, derive the MGF1 mask, unmask DB — all unconditional. */
     memcpy(H, &em[dbLen], hLen);
-
-    /* dbMask = MGF1(H, dbLen) */
     _SSFRSAM_GF1(hash, H, hLen, dbMask, dbLen);
-
-    /* DB = maskedDB XOR dbMask */
     for (i = 0; i < dbLen; i++) em[i] ^= dbMask[i];
-
-    /* Clear top bits of DB */
     em[0] &= topMask;
 
-    /* Check DB structure: should be PS(zeros) || 0x01 || salt */
-    for (i = 0; i < dbLen - sLen - 1u; i++)
-    {
-        if (em[i] != 0x00u)
-        { return false; }
-    }
-    if (em[dbLen - sLen - 1u] != 0x01u)
-    { return false; }
+    /* DB = PS(zeros) || 0x01 || salt. Accumulate every PS byte into diff; compare the
+     * separator byte by XOR-into-diff rather than a branch. */
+    for (i = 0; i < dbLen - sLen - 1u; i++) diff |= em[i];
+    diff |= (uint8_t)(em[dbLen - sLen - 1u] ^ 0x01u);
 
-    /* Extract salt */
-    /* M' = 00 00 00 00 00 00 00 00 || mHash || salt */
+    /* M' = 00 00 00 00 00 00 00 00 || mHash || salt — unconditional. */
     memset(mPrime, 0, 8);
     memcpy(&mPrime[8], hashVal, hLen);
     memcpy(&mPrime[8u + hLen], &em[dbLen - sLen], sLen);
 
-    /* H' = Hash(M') */
+    /* H' = Hash(M'). */
     _SSFRSAHashBeginUpdateEnd(hash, mPrime, 8u + hLen + sLen, NULL, 0, HPrime, sizeof(HPrime));
 
-    /* Compare H == H' in constant time. */
-    return SSFCTMemEq(H, HPrime, hLen);
+    /* Fold H vs H' comparison into the same accumulator. */
+    for (i = 0; i < hLen; i++) diff |= (uint8_t)(H[i] ^ HPrime[i]);
+
+    return (diff == 0u);
 }
 #endif /* SSF_RSA_CONFIG_ENABLE_PSS */

@@ -1310,24 +1310,6 @@ static bool _sc_is_lt_L(const uint8_t s[32])
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: platform entropy.                                                                   */
-/* --------------------------------------------------------------------------------------------- */
-static bool _SSFEd25519GetEntropy(uint8_t *buf, size_t len)
-{
-#ifdef _WIN32
-    SSF_ASSERT(false);
-    return false;
-#else
-    FILE *f = fopen("/dev/urandom", "rb");
-    size_t n;
-    if (f == NULL) return false;
-    n = fread(buf, 1, len, f);
-    fclose(f);
-    return (n == len);
-#endif
-}
-
-/* --------------------------------------------------------------------------------------------- */
 /* Public API                                                                                    */
 /* --------------------------------------------------------------------------------------------- */
 
@@ -1338,7 +1320,7 @@ bool SSFEd25519KeyGen(uint8_t seed[SSF_ED25519_SEED_SIZE],
     SSF_REQUIRE(seed != NULL);
     SSF_REQUIRE(pubKey != NULL);
 
-    if (!_SSFEd25519GetEntropy(seed, SSF_ED25519_SEED_SIZE)) return false;
+    if (!SSFPortGetEntropy(seed, (uint16_t)SSF_ED25519_SEED_SIZE)) return false;
     SSFEd25519PubKeyFromSeed(seed, pubKey);
     return true;
 }

@@ -83,6 +83,7 @@ extern "C" {
 #include <stdint.h>
 #include <stdbool.h>
 #include "ssfport.h"
+#include "ssfprng.h"
 
 /* --------------------------------------------------------------------------------------------- */
 /* Limitations                                                                                   */
@@ -208,6 +209,11 @@ int8_t SSFBNCmp(const SSFBN_t *a, const SSFBN_t *b);
 /* Returns the index of the most significant set bit (0-based), or 0 if a is zero.              */
 uint32_t SSFBNBitLen(const SSFBN_t *a);
 
+/* Returns the number of trailing zero bits (index of the lowest set bit, 0-based).              */
+/* a must be nonzero; asserted via SSF_REQUIRE. Useful for binary-GCD-style algorithms that      */
+/* strip factors of 2, and for factoring n-1 = 2^s * d in Miller-Rabin.                          */
+uint32_t SSFBNTrailingZeros(const SSFBN_t *a);
+
 /* Returns the value of bit at position pos (0 = LSB). Returns 0 if pos >= len * 32.            */
 uint8_t SSFBNGetBit(const SSFBN_t *a, uint32_t pos);
 
@@ -216,6 +222,15 @@ void SSFBNShiftLeft1(SSFBN_t *a);
 
 /* Shift a right by 1 bit in place. LSB is lost.                                                 */
 void SSFBNShiftRight1(SSFBN_t *a);
+
+/* Shift a left by nBits in place. Bits shifted past the most significant limb are discarded.    */
+/* O(a->len) regardless of nBits — a single limb-shift pass plus at most one bit-shift pass.     */
+/* If nBits >= a->len * SSF_BN_LIMB_BITS, the result is zero.                                    */
+void SSFBNShiftLeft(SSFBN_t *a, uint32_t nBits);
+
+/* Shift a right by nBits in place. Bits shifted past the least significant limb are discarded.  */
+/* O(a->len) regardless of nBits. If nBits >= a->len * SSF_BN_LIMB_BITS, the result is zero.     */
+void SSFBNShiftRight(SSFBN_t *a, uint32_t nBits);
 
 /* --------------------------------------------------------------------------------------------- */
 /* External interface: basic arithmetic                                                          */
@@ -233,6 +248,11 @@ SSFBNLimb_t SSFBNSub(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b);
 /* SSF_BN_MAX_LIMBS.                                                                             */
 void SSFBNMul(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b);
 
+/* r = a * a. Faster than SSFBNMul(r, a, a) because the off-diagonal partial products are        */
+/* computed once and doubled rather than computed twice. r->len is set to 2 * a->len; r must not */
+/* alias a. Caller must ensure 2 * a->len <= SSF_BN_MAX_LIMBS.                                   */
+void SSFBNSquare(SSFBN_t *r, const SSFBN_t *a);
+
 /* --------------------------------------------------------------------------------------------- */
 /* External interface: modular arithmetic                                                        */
 /* --------------------------------------------------------------------------------------------- */
@@ -247,6 +267,9 @@ void SSFBNModSub(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *
 /* r = (a * b) mod m. r may alias a or b.                                                        */
 /* Uses schoolbook multiply followed by Barrett or simple reduction.                             */
 void SSFBNModMul(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *m);
+
+/* r = (a * a) mod m. Uses SSFBNSquare then SSFBNMod. r may alias a.                             */
+void SSFBNModSquare(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m);
 
 /* r = a^(-1) mod m. Returns false if inverse does not exist (gcd(a, m) != 1).                   */
 /* Uses Fermat's little theorem (a^(m-2) mod m) when m is prime, or binary extended GCD          */
@@ -280,6 +303,11 @@ void SSFBNMontInit(SSFBNMont_t *ctx, const SSFBN_t *m);
 /* a and b must be in Montgomery form (i.e., a*R mod m). r may alias a or b.                     */
 void SSFBNMontMul(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBNMont_t *ctx);
 
+/* r = Montgomery(a, a). Semantically equivalent to SSFBNMontMul(r, a, a, ctx); exposed as a      */
+/* dedicated entry point so ModExpMont's self-multiplication sites can be accelerated by a       */
+/* future square-optimized CIOS loop without changing the caller. r may alias a.                 */
+void SSFBNMontSquare(SSFBN_t *r, const SSFBN_t *a, const SSFBNMont_t *ctx);
+
 /* Convert a to Montgomery form: aR = a * R^2 * R^(-1) mod m = a * R mod m.                     */
 void SSFBNMontConvertIn(SSFBN_t *aR, const SSFBN_t *a, const SSFBNMont_t *ctx);
 
@@ -310,6 +338,30 @@ void SSFBNCondCopy(SSFBN_t *dst, const SSFBN_t *src, SSFBNLimb_t sel);
 
 /* Securely zeroize a big number (prevents compiler from optimizing away the clear).             */
 void SSFBNZeroize(SSFBN_t *a);
+
+/* --------------------------------------------------------------------------------------------- */
+/* External interface: primality / random                                                        */
+/* --------------------------------------------------------------------------------------------- */
+
+/* Compute a mod d where d is a small (uint32) divisor. Efficient for trial division against a   */
+/* table of small primes during prime-candidate screening.                                       */
+uint32_t SSFBNModUint32(const SSFBN_t *a, uint32_t d);
+
+/* Fill the low `numLimbs` of a with uniform random data drawn from prng. Sets a->len = numLimbs.*/
+/* Limbs beyond numLimbs are not modified. Caller must ensure a->cap >= numLimbs.                */
+void SSFBNRandom(SSFBN_t *a, uint16_t numLimbs, SSFPRNGContext_t *prng);
+
+/* Miller-Rabin primality test. Returns true if n is probably prime after `rounds` random-witness*/
+/* trials (each round is a ~1/4 false-positive upper bound). n must be odd and > 3; returns false*/
+/* immediately on even or too-small n. Suitable rounds for cryptographic use: >=5 (RSA keygen    */
+/* typically uses 5-40 depending on modulus size).                                               */
+bool SSFBNIsProbablePrime(const SSFBN_t *n, uint16_t rounds, SSFPRNGContext_t *prng);
+
+/* Generate a random prime of exactly bitLen bits. Top two bits are forced high (so the product  */
+/* of two such primes has the full 2*bitLen bit length), the low bit is forced to make the       */
+/* candidate odd, small-prime trial division filters obvious composites, and `rounds`-round      */
+/* Miller-Rabin confirms. Returns false if no prime is found within the internal attempt cap.    */
+bool SSFBNGenPrime(SSFBN_t *p, uint16_t bitLen, uint16_t rounds, SSFPRNGContext_t *prng);
 
 /* --------------------------------------------------------------------------------------------- */
 /* NIST curve prime constants (defined in ssfbn.c)                                               */

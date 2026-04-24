@@ -416,24 +416,6 @@ static void _x25519_scalar_mul(uint8_t out[32], const uint8_t scalar[32],
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: platform entropy.                                                                   */
-/* --------------------------------------------------------------------------------------------- */
-static bool _SSFX25519GetEntropy(uint8_t *buf, size_t len)
-{
-#ifdef _WIN32
-    SSF_ASSERT(false);
-    return false;
-#else
-    FILE *f = fopen("/dev/urandom", "rb");
-    size_t n;
-    if (f == NULL) return false;
-    n = fread(buf, 1, len, f);
-    fclose(f);
-    return (n == len);
-#endif
-}
-
-/* --------------------------------------------------------------------------------------------- */
 /* Generate an X25519 key pair.                                                                  */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFX25519KeyGen(uint8_t privKey[32], uint8_t pubKey[32])
@@ -443,7 +425,7 @@ bool SSFX25519KeyGen(uint8_t privKey[32], uint8_t pubKey[32])
     SSF_REQUIRE(privKey != NULL);
     SSF_REQUIRE(pubKey != NULL);
 
-    if (!_SSFX25519GetEntropy(privKey, 32)) return false;
+    if (!SSFPortGetEntropy(privKey, 32u)) return false;
 
     _x25519_scalar_mul(pubKey, privKey, basepoint);
     return true;

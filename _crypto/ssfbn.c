@@ -199,27 +199,23 @@ bool SSFBNFromBytes(SSFBN_t *a, const uint8_t *data, size_t dataLen, uint16_t nu
 /* --------------------------------------------------------------------------------------------- */
 bool SSFBNToBytes(const SSFBN_t *a, uint8_t *out, size_t outSize)
 {
-    size_t totalBytes;
     size_t i;
-    size_t padLen;
 
     SSF_REQUIRE(a != NULL);
     SSF_REQUIRE(out != NULL);
 
-    totalBytes = (size_t)a->len * sizeof(SSFBNLimb_t);
-
-    /* Find actual byte length (skip leading zero limbs/bytes) */
+    /* Find the minimum byte length needed to represent a. */
     {
-        size_t actualBytes = totalBytes;
+        size_t actualBytes;
         int16_t li;
         for (li = (int16_t)(a->len - 1u); li >= 0; li--)
         {
             if (a->limbs[li] != 0u) break;
-            actualBytes -= sizeof(SSFBNLimb_t);
         }
+        /* Does a have any non-zero limbs? */
         if (li >= 0)
         {
-            /* Count significant bytes in the top nonzero limb */
+            /* Yes, count the significant bytes in the top non-zero limb. */
             SSFBNLimb_t top = a->limbs[li];
             actualBytes = (size_t)li * sizeof(SSFBNLimb_t);
             while (top != 0u)
@@ -230,26 +226,47 @@ bool SSFBNToBytes(const SSFBN_t *a, uint8_t *out, size_t outSize)
         }
         else
         {
-            actualBytes = 1u; /* Zero value still needs 1 byte */
+            /* No, represent zero as a single 0x00 byte. */
+            actualBytes = 1u;
         }
 
-        if (outSize < actualBytes) return false;
+        /* Is the caller's buffer large enough to hold the significant bytes? */
+        if (outSize < actualBytes)
+        {
+            /* No, report failure so the caller can grow the buffer. */
+            return false;
+        }
     }
 
     memset(out, 0, outSize);
 
-    /* Write little-endian limbs into big-endian byte array from the right */
-    padLen = outSize - totalBytes;
+    /* Write little-endian limbs into the tail of the big-endian buffer. Each limb i occupies   */
+    /* bytes [outSize - (i+1)*limbSize, outSize - i*limbSize) counting from the high end.       */
+    /* Skip limbs whose entire byte range falls outside [0, outSize); those limbs must already  */
+    /* be zero (guaranteed by the actualBytes <= outSize check above).                          */
     for (i = 0; i < (size_t)a->len; i++)
     {
         SSFBNLimb_t limb = a->limbs[i];
-        size_t base = outSize - 1u - (i * sizeof(SSFBNLimb_t));
+        size_t limbOffset = i * sizeof(SSFBNLimb_t); /* bytes into the tail */
         uint16_t b;
+
+        /* Does this limb's byte range reach into out[]? */
+        if (limbOffset >= outSize)
+        {
+            /* No, further limbs are entirely past the buffer — stop. */
+            break;
+        }
 
         for (b = 0; b < sizeof(SSFBNLimb_t); b++)
         {
-            if (base < b) break;
-            out[base - b] = (uint8_t)(limb & 0xFFu);
+            /* Does byte b of this limb fall inside the output buffer? */
+            if ((limbOffset + b) >= outSize)
+            {
+                /* No, the remaining high bytes of this limb don't fit — stop this limb. */
+                break;
+            }
+            /* Yes, write the byte into its big-endian slot. */
+            out[outSize - 1u - limbOffset - b] = (uint8_t)(limb & 0xFFu);
             limb >>= 8;
         }
     }
@@ -342,6 +359,43 @@ uint32_t SSFBNBitLen(const SSFBN_t *a)
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Returns the number of trailing zero bits (index of the lowest set bit).                       */
+/* --------------------------------------------------------------------------------------------- */
+uint32_t SSFBNTrailingZeros(const SSFBN_t *a)
+{
+    uint16_t i;
+    SSFBNLimb_t limb;
+    uint32_t pos;
+
+    SSF_REQUIRE(a != NULL);
+    SSF_REQUIRE(a->limbs != NULL);
+
+    /* Scan low-to-high for the first non-zero limb. */
+    for (i = 0; i < a->len; i++)
+    {
+        /* Is this limb non-zero? */
+        if (a->limbs[i] != 0u)
+        {
+            /* Yes, the lowest set bit of a lives in this limb. */
+            break;
+        }
+    }
+    /* The caller must guarantee a is non-zero; asserting here catches the bug at its source.   */
+    SSF_REQUIRE(i < a->len);
+
+    /* Within the limb, shift right until the low bit is set, counting steps. */
+    limb = a->limbs[i];
+    pos = 0;
+    while ((limb & 1u) == 0u)
+    {
+        limb >>= 1;
+        pos++;
+    }
+
+    return ((uint32_t)i * SSF_BN_LIMB_BITS) + pos;
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Returns the value of bit at position pos (0 = LSB).                                           */
 /* --------------------------------------------------------------------------------------------- */
 uint8_t SSFBNGetBit(const SSFBN_t *a, uint32_t pos)
@@ -392,6 +446,130 @@ void SSFBNShiftRight1(SSFBN_t *a)
         SSFBNLimb_t newCarry = a->limbs[i] << (SSF_BN_LIMB_BITS - 1u);
         a->limbs[i] = (a->limbs[i] >> 1) | carry;
         carry = newCarry;
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Shift a left by nBits in place. Split into a limb-shift pass and (if needed) a bit-shift pass,*/
+/* each O(a->len). Bit-shift pass is skipped when bitShift == 0 both to avoid work and to        */
+/* sidestep the `limb >> 32` undefined-behavior shape on 32-bit limbs.                           */
+/* --------------------------------------------------------------------------------------------- */
+void SSFBNShiftLeft(SSFBN_t *a, uint32_t nBits)
+{
+    uint16_t limbShift;
+    uint32_t bitShift;
+    uint16_t n;
+    int16_t i;
+
+    SSF_REQUIRE(a != NULL);
+    SSF_REQUIRE(a->limbs != NULL);
+
+    n = a->len;
+
+    /* Does the shift zero the entire value? */
+    if (nBits >= (uint32_t)n * SSF_BN_LIMB_BITS)
+    {
+        /* Yes, clear all limbs. */
+        memset(a->limbs, 0, (size_t)n * sizeof(SSFBNLimb_t));
+        return;
+    }
+    /* Is this a no-op? */
+    if (nBits == 0u)
+    {
+        /* Yes, nothing to do. */
+        return;
+    }
+
+    limbShift = (uint16_t)(nBits / SSF_BN_LIMB_BITS);
+    bitShift = nBits % SSF_BN_LIMB_BITS;
+
+    /* Limb-shift pass: move a[i - limbShift] to a[i], top-down to avoid overwriting sources.   */
+    if (limbShift > 0u)
+    {
+        for (i = (int16_t)(n - 1u); i >= (int16_t)limbShift; i--)
+        {
+            a->limbs[i] = a->limbs[i - limbShift];
+        }
+        /* Zero the freed low limbs. */
+        for (i = 0; i < (int16_t)limbShift; i++)
+        {
+            a->limbs[i] = 0u;
+        }
+    }
+
+    /* Bit-shift pass (0 < bitShift < 32): blend each limb's low bitShift bits with the */
+    /* neighbor's top (SSF_BN_LIMB_BITS - bitShift) bits.                                 */
+    if (bitShift != 0u)
+    {
+        SSFBNLimb_t carry = 0u;
+        for (i = (int16_t)limbShift; i < (int16_t)n; i++)
+        {
+            SSFBNLimb_t limb = a->limbs[i];
+            SSFBNLimb_t newCarry = (SSFBNLimb_t)(limb >> (SSF_BN_LIMB_BITS - bitShift));
+            a->limbs[i] = (SSFBNLimb_t)((limb << bitShift) | carry);
+            carry = newCarry;
+        }
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Shift a right by nBits in place. Mirror of SSFBNShiftLeft.                                    */
+/* --------------------------------------------------------------------------------------------- */
+void SSFBNShiftRight(SSFBN_t *a, uint32_t nBits)
+{
+    uint16_t limbShift;
+    uint32_t bitShift;
+    uint16_t n;
+    uint16_t i;
+
+    SSF_REQUIRE(a != NULL);
+    SSF_REQUIRE(a->limbs != NULL);
+
+    n = a->len;
+
+    /* Does the shift zero the entire value? */
+    if (nBits >= (uint32_t)n * SSF_BN_LIMB_BITS)
+    {
+        /* Yes, clear all limbs. */
+        memset(a->limbs, 0, (size_t)n * sizeof(SSFBNLimb_t));
+        return;
+    }
+    /* Is this a no-op? */
+    if (nBits == 0u)
+    {
+        /* Yes, nothing to do. */
+        return;
+    }
+
+    limbShift = (uint16_t)(nBits / SSF_BN_LIMB_BITS);
+    bitShift = nBits % SSF_BN_LIMB_BITS;
+
+    /* Limb-shift pass: move a[i + limbShift] to a[i], bottom-up to avoid overwriting sources. */
+    if (limbShift > 0u)
+    {
+        for (i = 0; i + limbShift < n; i++)
+        {
+            a->limbs[i] = a->limbs[i + limbShift];
+        }
+        /* Zero the freed high limbs. */
+        for (i = (uint16_t)(n - limbShift); i < n; i++)
+        {
+            a->limbs[i] = 0u;
+        }
+    }
+
+    /* Bit-shift pass (0 < bitShift < 32). */
+    if (bitShift != 0u)
+    {
+        SSFBNLimb_t carry = 0u;
+        uint16_t top = (uint16_t)(n - limbShift);
+        for (i = top; i > 0u; i--)
+        {
+            SSFBNLimb_t limb = a->limbs[i - 1u];
+            SSFBNLimb_t newCarry = (SSFBNLimb_t)(limb << (SSF_BN_LIMB_BITS - bitShift));
+            a->limbs[i - 1u] = (SSFBNLimb_t)((limb >> bitShift) | carry);
+            carry = newCarry;
+        }
     }
 }
 
@@ -459,6 +637,100 @@ void SSFBNMul(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b)
             carry = prod >> SSF_BN_LIMB_BITS;
         }
         r->limbs[i + b->len] += (SSFBNLimb_t)carry;
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* r = a * a. Triangular optimization: compute the strict upper triangle a[i]*a[j] (i<j) once,   */
+/* double the whole partial sum with a single shift, then add the diagonal a[i]*a[i] terms.      */
+/* --------------------------------------------------------------------------------------------- */
+void SSFBNSquare(SSFBN_t *r, const SSFBN_t *a)
+{
+    uint16_t n;
+    uint16_t rLen;
+    uint16_t i;
+    uint16_t k;
+    SSFBNLimb_t shiftCarry;
+
+    SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(a != NULL);
+    SSF_REQUIRE(r != a);
+
+    n = a->len;
+    rLen = (uint16_t)(n * 2u);
+    SSF_REQUIRE(rLen <= SSF_BN_MAX_LIMBS);
+
+    memset(r->limbs, 0, (size_t)rLen * sizeof(SSFBNLimb_t));
+    r->len = rLen;
+
+    /* Step 1: accumulate the strict upper triangle (i < j) without doubling. Each iteration    */
+    /* writes to r[i+1+i .. i+n-1+i... wait, r[i+j] for j in i+1..n-1], with the final limb     */
+    /* carry landing in r[i+n]. Since i+n across iterations covers [n, 2n-2], r[2n-1] remains 0 */
+    /* after this step, which is what lets Step 2's shift-by-1 never overflow 2n limbs.         */
+    for (i = 0; i + 1u < n; i++)
+    {
+        SSFBNDLimb_t carry = 0;
+        uint16_t j;
+        SSFBNLimb_t ai = a->limbs[i];
+
+        /* Is the current low-index limb zero? */
+        if (ai == 0u)
+        {
+            /* Yes, all partial products from this row are zero — skip. */
+            continue;
+        }
+
+        for (j = (uint16_t)(i + 1u); j < n; j++)
+        {
+            SSFBNDLimb_t prod = (SSFBNDLimb_t)ai * (SSFBNDLimb_t)a->limbs[j] +
+                                (SSFBNDLimb_t)r->limbs[i + j] + carry;
+            r->limbs[i + j] = (SSFBNLimb_t)prod;
+            carry = prod >> SSF_BN_LIMB_BITS;
+        }
+        r->limbs[i + n] += (SSFBNLimb_t)carry;
+    }
+
+    /* Step 2: double the accumulated upper triangle with a single left-shift-by-1 across all   */
+    /* 2n limbs. r[2n-1] is 0 at this point, so the shift cannot overflow into a 2n+1'th limb.  */
+    shiftCarry = 0;
+    for (k = 0; k < rLen; k++)
+    {
+        SSFBNLimb_t newCarry = r->limbs[k] >> (SSF_BN_LIMB_BITS - 1u);
+        r->limbs[k] = (SSFBNLimb_t)((r->limbs[k] << 1) | shiftCarry);
+        shiftCarry = newCarry;
+    }
+
+    /* Step 3: add the diagonal a[i]*a[i] terms into r at limb offset 2i. Each diagonal is a     */
+    /* full double-limb product; after adding the low and high halves, any residual carry must  */
+    /* propagate forward into higher limbs.                                                     */
+    for (i = 0; i < n; i++)
+    {
+        SSFBNDLimb_t sq = (SSFBNDLimb_t)a->limbs[i] * (SSFBNDLimb_t)a->limbs[i];
+        SSFBNDLimb_t sum;
+        SSFBNLimb_t carry;
+        uint16_t pos;
+
+        /* Low half of the square into r[2i]. */
+        sum = (SSFBNDLimb_t)r->limbs[2u * i] + (SSFBNDLimb_t)(SSFBNLimb_t)sq;
+        r->limbs[2u * i] = (SSFBNLimb_t)sum;
+        carry = (SSFBNLimb_t)(sum >> SSF_BN_LIMB_BITS);
+
+        /* High half of the square plus incoming carry into r[2i+1]. */
+        sum = (SSFBNDLimb_t)r->limbs[2u * i + 1u] +
+              (SSFBNDLimb_t)(SSFBNLimb_t)(sq >> SSF_BN_LIMB_BITS) +
+              (SSFBNDLimb_t)carry;
+        r->limbs[2u * i + 1u] = (SSFBNLimb_t)sum;
+        carry = (SSFBNLimb_t)(sum >> SSF_BN_LIMB_BITS);
+
+        /* Propagate any remaining carry through higher limbs. */
+        pos = (uint16_t)(2u * i + 2u);
+        while ((carry != 0u) && (pos < rLen))
+        {
+            sum = (SSFBNDLimb_t)r->limbs[pos] + (SSFBNDLimb_t)carry;
+            r->limbs[pos] = (SSFBNLimb_t)sum;
+            carry = (SSFBNLimb_t)(sum >> SSF_BN_LIMB_BITS);
+            pos++;
+        }
     }
 }
 
@@ -604,6 +876,23 @@ void SSFBNModMul(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* r = (a * a) mod m. Uses SSFBNSquare for the unreduced product.                                */
+/* --------------------------------------------------------------------------------------------- */
+void SSFBNModSquare(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
+{
+    SSFBN_DEFINE(prod, SSF_BN_MAX_LIMBS);
+
+    SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(a != NULL);
+    SSF_REQUIRE(m != NULL);
+    SSF_REQUIRE(a->len == m->len);
+    SSF_REQUIRE((uint16_t)(a->len * 2u) <= SSF_BN_MAX_LIMBS);
+
+    SSFBNSquare(&prod, a);
+    SSFBNMod(r, &prod, m);
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* r = gcd(a, b) using binary GCD (Stein's algorithm).                                          */
 /* --------------------------------------------------------------------------------------------- */
 void SSFBNGcd(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b)
@@ -624,20 +913,23 @@ void SSFBNGcd(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b)
     SSFBNCopy(&u, a);
     SSFBNCopy(&v, b);
 
-    /* Remove and count common factors of 2 */
-    while (SSFBNIsEven(&u) && SSFBNIsEven(&v))
+    /* Strip the common factors of 2 in one shot. min(tz(u), tz(v)) is the number of 2-factors  */
+    /* shared by both inputs; shifting each right by that count leaves at least one of u, v odd. */
     {
-        SSFBNShiftRight1(&u);
-        SSFBNShiftRight1(&v);
-        shift++;
+        uint32_t tzU = SSFBNTrailingZeros(&u);
+        uint32_t tzV = SSFBNTrailingZeros(&v);
+        shift = (tzU < tzV) ? tzU : tzV;
+        SSFBNShiftRight(&u, shift);
+        SSFBNShiftRight(&v, shift);
     }
 
-    /* Remove remaining factors of 2 from u */
-    while (SSFBNIsEven(&u)) SSFBNShiftRight1(&u);
+    /* Strip any remaining factors of 2 from u so u is odd going into the main loop. */
+    SSFBNShiftRight(&u, SSFBNTrailingZeros(&u));
 
     while (!SSFBNIsZero(&v))
     {
-        while (SSFBNIsEven(&v)) SSFBNShiftRight1(&v);
+        /* Reduce v to its odd part in one shot. */
+        SSFBNShiftRight(&v, SSFBNTrailingZeros(&v));
 
         if (SSFBNCmp(&u, &v) > 0)
         {
@@ -650,10 +942,7 @@ void SSFBNGcd(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b)
 
     /* Restore common factors of 2 */
     SSFBNCopy(r, &u);
-    {
-        uint32_t s;
-        for (s = 0; s < shift; s++) SSFBNShiftLeft1(r);
-    }
+    SSFBNShiftLeft(r, shift);
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -683,10 +972,7 @@ static void _SSFBNDivMod(SSFBN_t *q, SSFBN_t *rem, const SSFBN_t *a, const SSFBN
         uint16_t i;
         for (i = 0; i < b->len && i < workLen; i++) shifted.limbs[i] = b->limbs[i];
     }
-    {
-        int32_t s;
-        for (s = 0; s < shift; s++) SSFBNShiftLeft1(&shifted);
-    }
+    SSFBNShiftLeft(&shifted, (uint32_t)shift);
 
     while (shift >= 0)
     {
@@ -1216,6 +1502,148 @@ void SSFBNMontMul(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBNMon
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* r = Montgomery(a, a). SOS (Separated Operand Scanning) squaring: first compute the full 2n-   */
+/* limb square a*a using the triangular algorithm (half the single-limb multiplies of a general  */
+/* mul), then perform an n-iteration Montgomery reduction across the 2n+1-limb buffer. This wins */
+/* ~25-40% over SSFBNMontMul(a, a, ctx) on large operands because ~50% of MontMul's work is the  */
+/* a[i]*b[j] loop, and that half is now done via triangular square.                              */
+/*                                                                                               */
+/* Note: cannot reuse SSFBNSquare here because its rLen<=SSF_BN_MAX_LIMBS assertion caps n at    */
+/* SSF_BN_MAX_LIMBS/2, while MontSquare must handle full-width moduli (e.g., RSA-4096 where      */
+/* n == SSF_BN_MAX_LIMBS). The triangular math is inlined below against a local 2n+1 buffer.     */
+/* --------------------------------------------------------------------------------------------- */
+void SSFBNMontSquare(SSFBN_t *r, const SSFBN_t *a, const SSFBNMont_t *ctx)
+{
+    SSFBNLimb_t t[(2u * SSF_BN_MAX_LIMBS) + 1u];
+    uint16_t n;
+    uint16_t i;
+    SSFBNLimb_t shiftCarry;
+    SSFBNLimb_t borrow;
+
+    SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(a != NULL);
+    SSF_REQUIRE(ctx != NULL);
+
+    n = ctx->len;
+    SSF_REQUIRE(n >= 1u);
+    SSF_REQUIRE(n <= SSF_BN_MAX_LIMBS);
+
+    /* Zero the full working buffer (2n + 1 limbs) up front. */
+    memset(t, 0, (size_t)(2u * n + 1u) * sizeof(SSFBNLimb_t));
+
+    /* -------- Triangular full square: t = a * a (2n limbs) -------- */
+
+    /* Step 1: accumulate the strict upper triangle a[i]*a[j] (i < j) without doubling.          */
+    for (i = 0; (uint16_t)(i + 1u) < n; i++)
+    {
+        SSFBNDLimb_t carry = 0;
+        uint16_t j;
+        SSFBNLimb_t ai = a->limbs[i];
+
+        /* Is the row's multiplicand zero? */
+        if (ai == 0u)
+        {
+            /* Yes, the whole row contributes nothing — skip. */
+            continue;
+        }
+
+        for (j = (uint16_t)(i + 1u); j < n; j++)
+        {
+            SSFBNDLimb_t prod = (SSFBNDLimb_t)ai * (SSFBNDLimb_t)a->limbs[j] +
+                                (SSFBNDLimb_t)t[i + j] + carry;
+            t[i + j] = (SSFBNLimb_t)prod;
+            carry = prod >> SSF_BN_LIMB_BITS;
+        }
+        t[i + n] += (SSFBNLimb_t)carry;
+    }
+
+    /* Step 2: double the upper triangle via a single shift-left-by-1 across 2n limbs. t[2n-1]'s */
+    /* top bit is 0 after step 1, so no bits spill into t[2n].                                   */
+    shiftCarry = 0;
+    for (i = 0; i < (uint16_t)(2u * n); i++)
+    {
+        SSFBNLimb_t newCarry = t[i] >> (SSF_BN_LIMB_BITS - 1u);
+        t[i] = (SSFBNLimb_t)((t[i] << 1) | shiftCarry);
+        shiftCarry = newCarry;
+    }
+
+    /* Step 3: add diagonal a[i]*a[i] terms at offset 2i, propagating carries forward. */
+    for (i = 0; i < n; i++)
+    {
+        SSFBNDLimb_t sq = (SSFBNDLimb_t)a->limbs[i] * (SSFBNDLimb_t)a->limbs[i];
+        SSFBNDLimb_t sum;
+        SSFBNLimb_t carry;
+        uint16_t pos;
+
+        sum = (SSFBNDLimb_t)t[2u * i] + (SSFBNDLimb_t)(SSFBNLimb_t)sq;
+        t[2u * i] = (SSFBNLimb_t)sum;
+        carry = (SSFBNLimb_t)(sum >> SSF_BN_LIMB_BITS);
+
+        sum = (SSFBNDLimb_t)t[2u * i + 1u] +
+              (SSFBNDLimb_t)(SSFBNLimb_t)(sq >> SSF_BN_LIMB_BITS) +
+              (SSFBNDLimb_t)carry;
+        t[2u * i + 1u] = (SSFBNLimb_t)sum;
+        carry = (SSFBNLimb_t)(sum >> SSF_BN_LIMB_BITS);
+
+        pos = (uint16_t)(2u * i + 2u);
+        while (carry != 0u)
+        {
+            sum = (SSFBNDLimb_t)t[pos] + (SSFBNDLimb_t)carry;
+            t[pos] = (SSFBNLimb_t)sum;
+            carry = (SSFBNLimb_t)(sum >> SSF_BN_LIMB_BITS);
+            pos++;
+        }
+    }
+
+    /* -------- Montgomery reduction (SOS-style): make t ≡ 0 (mod R), extract upper half -------- */
+    /* Invariant after iteration i: t[0..i-1] == 0 and the full value represented by t has been  */
+    /* shifted right implicitly by i*w bits. After all n iterations, t[n..2n-1] holds            */
+    /* (a*a * R^-1) mod m (modulo one extra subtraction of m).                                   */
+    for (i = 0; i < n; i++)
+    {
+        SSFBNLimb_t u = (SSFBNLimb_t)(t[i] * ctx->mp);
+        SSFBNDLimb_t carry = 0;
+        uint16_t j;
+        uint16_t k;
+
+        /* t[i..i+n-1] += u * m (low n limbs of the product). */
+        for (j = 0; j < n; j++)
+        {
+            SSFBNDLimb_t prod = (SSFBNDLimb_t)u * (SSFBNDLimb_t)ctx->mod.limbs[j] +
+                                (SSFBNDLimb_t)t[i + j] + carry;
+            t[i + j] = (SSFBNLimb_t)prod;
+            carry = prod >> SSF_BN_LIMB_BITS;
+        }
+
+        /* Propagate the inner-loop carry through t[i+n], t[i+n+1], ... The total value is      */
+        /* bounded by ~2^(2n*w+1) limbs so the carry cannot reach past t[2n].                    */
+        k = (uint16_t)(i + n);
+        while (carry != 0u)
+        {
+            SSFBNDLimb_t sum = (SSFBNDLimb_t)t[k] + carry;
+            t[k] = (SSFBNLimb_t)sum;
+            carry = sum >> SSF_BN_LIMB_BITS;
+            k++;
+        }
+    }
+
+    /* -------- Final conditional subtraction: result in [0, 2m), want [0, m). -------- */
+    r->len = n;
+    memcpy(r->limbs, &t[n], (size_t)n * sizeof(SSFBNLimb_t));
+
+    borrow = _SSFBNRawSub(r->limbs, r->limbs, ctx->mod.limbs, n);
+    /* Was the subtraction needed? The "yes" case is either (a) no borrow — r was >= m — or     */
+    /* (b) t[2n] == 1, meaning the unreduced value had a bit in position 2n*w so r really was    */
+    /* >= m even though the n-limb view borrowed. The "no" case is borrow AND t[2n] == 0, in    */
+    /* which case we undo the subtraction.                                                       */
+    if ((borrow != 0u) && (t[2u * n] == 0u))
+    {
+        /* No, undo: r was actually in [0, m) already. */
+        _SSFBNRawAdd(r->limbs, r->limbs, ctx->mod.limbs, n);
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Convert a to Montgomery form.                                                                 */
 /* --------------------------------------------------------------------------------------------- */
 void SSFBNMontConvertIn(SSFBN_t *aR, const SSFBN_t *a, const SSFBNMont_t *ctx)
@@ -1304,12 +1732,12 @@ void SSFBNModExpMont(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBN
         if (bit != 0u)
         {
             SSFBNMontMul(&r0, &r0, &r1, ctx);
-            SSFBNMontMul(&r1, &r1, &r1, ctx);
+            SSFBNMontSquare(&r1, &r1, ctx);
         }
         else
         {
             SSFBNMontMul(&r1, &r0, &r1, ctx);
-            SSFBNMontMul(&r0, &r0, &r0, ctx);
+            SSFBNMontSquare(&r0, &r0, ctx);
         }
     }
 
@@ -1388,4 +1816,280 @@ void SSFBNZeroize(SSFBN_t *a)
         p[i] = 0;
     }
     a->len = 0;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Primality / random                                                                            */
+/* --------------------------------------------------------------------------------------------- */
+
+/* First 256 primes for trial division during prime-candidate screening (up to 1613). */
+static const uint16_t _ssfBNSmallPrimes[] = {
+       2,    3,    5,    7,   11,   13,   17,   19,   23,   29,   31,   37,   41,   43,   47,
+      53,   59,   61,   67,   71,   73,   79,   83,   89,   97,  101,  103,  107,  109,  113,
+     127,  131,  137,  139,  149,  151,  157,  163,  167,  173,  179,  181,  191,  193,  197,
+     199,  211,  223,  227,  229,  233,  239,  241,  251,  257,  263,  269,  271,  277,  281,
+     283,  293,  307,  311,  313,  317,  331,  337,  347,  349,  353,  359,  367,  373,  379,
+     383,  389,  397,  401,  409,  419,  421,  431,  433,  439,  443,  449,  457,  461,  463,
+     467,  479,  487,  491,  499,  503,  509,  521,  523,  541,  547,  557,  563,  569,  571,
+     577,  587,  593,  599,  601,  607,  613,  617,  619,  631,  641,  643,  647,  653,  659,
+     661,  673,  677,  683,  691,  701,  709,  719,  727,  733,  739,  743,  751,  757,  761,
+     769,  773,  787,  797,  809,  811,  821,  823,  827,  829,  839,  853,  857,  859,  863,
+     877,  881,  883,  887,  907,  911,  919,  929,  937,  941,  947,  953,  967,  971,  977,
+     983,  991,  997, 1009, 1013, 1019, 1021, 1031, 1033, 1039, 1049, 1051, 1061, 1063, 1069,
+    1087, 1091, 1093, 1097, 1103, 1109, 1117, 1123, 1129, 1151, 1153, 1163, 1171, 1181, 1187,
+    1193, 1201, 1213, 1217, 1223, 1229, 1231, 1237, 1249, 1259, 1277, 1279, 1283, 1289, 1291,
+    1297, 1301, 1303, 1307, 1319, 1321, 1327, 1361, 1367, 1373, 1381, 1399, 1409, 1423, 1427,
+    1429, 1433, 1439, 1447, 1451, 1453, 1459, 1471, 1481, 1483, 1487, 1489, 1493, 1499, 1511,
+    1523, 1531, 1543, 1549, 1553, 1559, 1567, 1571, 1579, 1583, 1597, 1601, 1607, 1609, 1613
+};
+#define SSF_BN_NUM_SMALL_PRIMES (sizeof(_ssfBNSmallPrimes) / sizeof(_ssfBNSmallPrimes[0]))
+
+/* --------------------------------------------------------------------------------------------- */
+uint32_t SSFBNModUint32(const SSFBN_t *a, uint32_t d)
+{
+    uint64_t r = 0;
+    int16_t i;
+
+    SSF_REQUIRE(a != NULL);
+    SSF_REQUIRE(a->limbs != NULL);
+    SSF_REQUIRE(d != 0u);
+
+    for (i = (int16_t)(a->len - 1u); i >= 0; i--)
+    {
+        r = ((r << SSF_BN_LIMB_BITS) | (uint64_t)a->limbs[i]) % (uint64_t)d;
+    }
+    return (uint32_t)r;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+void SSFBNRandom(SSFBN_t *a, uint16_t numLimbs, SSFPRNGContext_t *prng)
+{
+    size_t byteLen;
+    size_t generated;
+    uint8_t *buf;
+
+    SSF_REQUIRE(a != NULL);
+    SSF_REQUIRE(a->limbs != NULL);
+    SSF_REQUIRE(numLimbs >= 1u);
+    SSF_REQUIRE(numLimbs <= a->cap);
+    SSF_REQUIRE(prng != NULL);
+
+    /* Fill the limb storage as a byte stream, chunked by SSF_PRNG_RANDOM_MAX_SIZE per call. */
+    byteLen = (size_t)numLimbs * sizeof(SSFBNLimb_t);
+    buf = (uint8_t *)a->limbs;
+    generated = 0;
+    while (generated < byteLen)
+    {
+        size_t chunk = byteLen - generated;
+
+        /* Is the remaining request larger than one PRNG call can satisfy? */
+        if (chunk > SSF_PRNG_RANDOM_MAX_SIZE)
+        {
+            /* Yes, clamp to the max. Subsequent iterations cover the rest. */
+            chunk = SSF_PRNG_RANDOM_MAX_SIZE;
+        }
+        SSFPRNGGetRandom(prng, &buf[generated], chunk);
+        generated += chunk;
+    }
+    a->len = numLimbs;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+bool SSFBNIsProbablePrime(const SSFBN_t *n, uint16_t rounds, SSFPRNGContext_t *prng)
+{
+    SSFBN_DEFINE(nm1, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(d, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(x, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(nm3, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(one, SSF_BN_MAX_LIMBS);
+    SSFBNMONT_DEFINE(mont, SSF_BN_MAX_LIMBS);
+    uint32_t s = 0;
+    uint16_t round;
+
+    SSF_REQUIRE(n != NULL);
+    SSF_REQUIRE(n->limbs != NULL);
+    SSF_REQUIRE(prng != NULL);
+
+    /* Is n even? */
+    if (SSFBNIsEven(n))
+    {
+        /* Yes, only 2 is even-and-prime and we require n > 3 below anyway. Reject. */
+        return false;
+    }
+
+    /* Is n small enough that we should short-circuit? n must be > 3 for the witness pick below  */
+    /* to have a non-empty range [2, n-2]. Reject n <= 3 conservatively (callers pre-screening   */
+    /* against _ssfBNSmallPrimes will have already identified 2 and 3 as prime).                 */
+    {
+        SSFBN_DEFINE(three, SSF_BN_MAX_LIMBS);
+        SSFBNSetUint32(&three, 3u, n->len);
+        if (SSFBNCmp(n, &three) <= 0) return false;
+    }
+
+    SSFBNSetUint32(&one, 1u, n->len);
+    SSFBNSetUint32(&nm1, 0u, n->len);
+    SSFBNSub(&nm1, n, &one);   /* nm1 = n - 1 */
+
+    /* Write n-1 = 2^s * d. n-1 is even (n odd by the SSFBNIsEven check above plus n > 3),      */
+    /* so TrailingZeros is defined.                                                              */
+    SSFBNCopy(&d, &nm1);
+    s = SSFBNTrailingZeros(&d);
+    SSFBNShiftRight(&d, s);
+
+    /* Precompute Montgomery context for n. */
+    SSFBNMontInit(&mont, n);
+
+    /* nm3 = n - 3 for the witness-range rejection check. */
+    {
+        SSFBN_DEFINE(three, SSF_BN_MAX_LIMBS);
+        SSFBNSetUint32(&three, 3u, n->len);
+        SSFBNSub(&nm3, n, &three);
+    }
+
+    for (round = 0; round < rounds; round++)
+    {
+        uint32_t r;
+        bool cont = false;
+
+        /* Pick random witness a in [2, n-2]. */
+        {
+            uint16_t attempts;
+
+            for (attempts = 0; attempts < 100u; attempts++)
+            {
+                SSFBNRandom(&a, n->len, prng);
+
+                /* Clear the high bits above n's bit length so a < 2^bitLen(n). */
+                {
+                    uint32_t nBits = SSFBNBitLen(n);
+                    uint16_t topLimb = (uint16_t)((nBits - 1u) / SSF_BN_LIMB_BITS);
+                    uint16_t topBit = (uint16_t)((nBits - 1u) % SSF_BN_LIMB_BITS);
+                    a.limbs[topLimb] &= ((SSFBNLimb_t)1u << topBit) - 1u;
+                }
+
+                /* Is the candidate already below n-3? */
+                if (SSFBNCmp(&a, &nm3) < 0)
+                {
+                    /* Yes, accept it. */
+                    break;
+                }
+                /* No, re-draw. */
+            }
+
+            /* Shift to [2, n-2] by adding 2. */
+            {
+                SSFBN_DEFINE(two, SSF_BN_MAX_LIMBS);
+                SSFBNSetUint32(&two, 2u, n->len);
+                SSFBNAdd(&a, &a, &two);
+            }
+        }
+
+        /* x = a^d mod n. */
+        SSFBNModExpMont(&x, &a, &d, &mont);
+
+        /* Does x equal 1 or n-1? */
+        if (SSFBNIsOne(&x) || (SSFBNCmp(&x, &nm1) == 0))
+        {
+            /* Yes, this witness is inconclusive. Try another round. */
+            continue;
+        }
+
+        /* Inner loop: square x up to s-1 times, looking for x == n-1. */
+        cont = false;
+        for (r = 1; r < s; r++)
+        {
+            SSFBN_DEFINE(two, SSF_BN_MAX_LIMBS);
+            SSFBNSetUint32(&two, 2u, n->len);
+            SSFBNModExpMont(&x, &x, &two, &mont);
+
+            /* Did squaring hit n-1? */
+            if (SSFBNCmp(&x, &nm1) == 0)
+            {
+                /* Yes, witness inconclusive. */
+                cont = true;
+                break;
+            }
+            /* Did squaring reach 1 without first passing through n-1? */
+            if (SSFBNIsOne(&x))
+            {
+                /* Yes, definitive composite via non-trivial sqrt(1). */
+                return false;
+            }
+        }
+
+        /* Did we find a pass condition inside the inner loop? */
+        if (!cont)
+        {
+            /* No, this witness proves n composite. */
+            return false;
+        }
+    }
+
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+bool SSFBNGenPrime(SSFBN_t *p, uint16_t bitLen, uint16_t rounds, SSFPRNGContext_t *prng)
+{
+    size_t byteLen;
+    uint16_t limbs;
+    uint8_t buf[SSF_BN_MAX_BYTES];
+    uint32_t attempts;
+
+    SSF_REQUIRE(p != NULL);
+    SSF_REQUIRE(p->limbs != NULL);
+    SSF_REQUIRE(bitLen >= 8u);
+    SSF_REQUIRE(bitLen <= SSF_BN_CONFIG_MAX_BITS);
+    SSF_REQUIRE(prng != NULL);
+
+    byteLen = (size_t)(bitLen + 7u) / 8u;
+    limbs = SSF_BN_BITS_TO_LIMBS(bitLen);
+
+    for (attempts = 0; attempts < 50000u; attempts++)
+    {
+        uint16_t i;
+        bool trialPass;
+        size_t generated = 0;
+
+        /* Draw byteLen random bytes via the PRNG. */
+        while (generated < byteLen)
+        {
+            size_t chunk = byteLen - generated;
+            if (chunk > SSF_PRNG_RANDOM_MAX_SIZE) chunk = SSF_PRNG_RANDOM_MAX_SIZE;
+            SSFPRNGGetRandom(prng, &buf[generated], chunk);
+            generated += chunk;
+        }
+
+        /* Force the top two bits so p * q has the full 2*bitLen bit length. */
+        buf[0] |= 0xC0u;
+        /* Force the low bit so the candidate is odd. */
+        buf[byteLen - 1u] |= 0x01u;
+
+        SSFBNFromBytes(p, buf, byteLen, limbs);
+
+        /* Trial-divide against the small-prime table. */
+        trialPass = true;
+        for (i = 0; i < SSF_BN_NUM_SMALL_PRIMES; i++)
+        {
+            /* Does this small prime divide p? */
+            if (SSFBNModUint32(p, _ssfBNSmallPrimes[i]) == 0u)
+            {
+                /* Yes, reject (if p equals the small prime it's prime but way too small). */
+                trialPass = false;
+                break;
+            }
+        }
+        /* Did trial division pass? */
+        if (!trialPass)
+        {
+            /* No, next candidate. */
+            continue;
+        }
+
+        /* Yes, confirm with Miller-Rabin. */
+        if (SSFBNIsProbablePrime(p, rounds, prng)) return true;
+    }
+
+    return false;
 }

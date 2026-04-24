@@ -40,28 +40,9 @@
 #include "ssfct.h"
 
 /* --------------------------------------------------------------------------------------------- */
-/* First 256 primes for trial division (up to 1613).                                             */
+/* Prime-candidate screening (small-prime trial division, Miller-Rabin, and the random-prime     */
+/* generator) now lives in ssfbn. See SSFBNModUint32, SSFBNIsProbablePrime, SSFBNGenPrime.       */
 /* --------------------------------------------------------------------------------------------- */
-static const uint16_t _ssfRSASmallPrimes[] = {
-       2,    3,    5,    7,   11,   13,   17,   19,   23,   29,   31,   37,   41,   43,   47,
-      53,   59,   61,   67,   71,   73,   79,   83,   89,   97,  101,  103,  107,  109,  113,
-     127,  131,  137,  139,  149,  151,  157,  163,  167,  173,  179,  181,  191,  193,  197,
-     199,  211,  223,  227,  229,  233,  239,  241,  251,  257,  263,  269,  271,  277,  281,
-     283,  293,  307,  311,  313,  317,  331,  337,  347,  349,  353,  359,  367,  373,  379,
-     383,  389,  397,  401,  409,  419,  421,  431,  433,  439,  443,  449,  457,  461,  463,
-     467,  479,  487,  491,  499,  503,  509,  521,  523,  541,  547,  557,  563,  569,  571,
-     577,  587,  593,  599,  601,  607,  613,  617,  619,  631,  641,  643,  647,  653,  659,
-     661,  673,  677,  683,  691,  701,  709,  719,  727,  733,  739,  743,  751,  757,  761,
-     769,  773,  787,  797,  809,  811,  821,  823,  827,  829,  839,  853,  857,  859,  863,
-     877,  881,  883,  887,  907,  911,  919,  929,  937,  941,  947,  953,  967,  971,  977,
-     983,  991,  997, 1009, 1013, 1019, 1021, 1031, 1033, 1039, 1049, 1051, 1061, 1063, 1069,
-    1087, 1091, 1093, 1097, 1103, 1109, 1117, 1123, 1129, 1151, 1153, 1163, 1171, 1181, 1187,
-    1193, 1201, 1213, 1217, 1223, 1229, 1231, 1237, 1249, 1259, 1277, 1279, 1283, 1289, 1291,
-    1297, 1301, 1303, 1307, 1319, 1321, 1327, 1361, 1367, 1373, 1381, 1399, 1409, 1423, 1427,
-    1429, 1433, 1439, 1447, 1451, 1453, 1459, 1471, 1481, 1483, 1487, 1489, 1493, 1499, 1511,
-    1523, 1531, 1543, 1549, 1553, 1559, 1567, 1571, 1579, 1583, 1597, 1601, 1607, 1609, 1613
-};
-#define SSF_RSA_NUM_SMALL_PRIMES (sizeof(_ssfRSASmallPrimes) / sizeof(_ssfRSASmallPrimes[0]))
 
 /* --------------------------------------------------------------------------------------------- */
 /* DigestInfo DER prefixes for PKCS#1 v1.5 (RFC 8017 Section 9.2, Note 1).                      */
@@ -140,204 +121,6 @@ static void _SSFRSAHashBeginUpdateEnd(SSFRSAHash_t hash,
     default: SSF_ASSERT(false); break;
     }
 }
-
-/* --------------------------------------------------------------------------------------------- */
-/* Internal: platform entropy for key generation and PSS salt.                                   */
-/* --------------------------------------------------------------------------------------------- */
-static bool _SSFRSAGetEntropy(uint8_t *buf, size_t len)
-{
-#ifdef _WIN32
-    SSF_ASSERT(false);
-    return false;
-#else
-    FILE *f = fopen("/dev/urandom", "rb");
-    size_t n;
-    if (f == NULL) return false;
-    n = fread(buf, 1, len, f);
-    fclose(f);
-    return (n == len);
-#endif
-}
-
-/* --------------------------------------------------------------------------------------------- */
-/* Internal: generate random bytes using PRNG (multiple calls for sizes > 16).                   */
-/* --------------------------------------------------------------------------------------------- */
-static void _SSFRSAGetRandomBytes(SSFPRNGContext_t *prng, uint8_t *buf, size_t len)
-{
-    size_t generated = 0;
-    while (generated < len)
-    {
-        size_t chunk = len - generated;
-        if (chunk > SSF_PRNG_RANDOM_MAX_SIZE) chunk = SSF_PRNG_RANDOM_MAX_SIZE;
-        SSFPRNGGetRandom(prng, &buf[generated], chunk);
-        generated += chunk;
-    }
-}
-
-/* --------------------------------------------------------------------------------------------- */
-/* Internal: compute a mod d where d is a small uint32_t. Efficient for trial division.          */
-/* --------------------------------------------------------------------------------------------- */
-static uint32_t _SSFRSAModSmall(const SSFBN_t *a, uint32_t d)
-{
-    uint64_t r = 0;
-    int16_t i;
-    for (i = (int16_t)(a->len - 1u); i >= 0; i--)
-    {
-        r = ((r << SSF_BN_LIMB_BITS) | (uint64_t)a->limbs[i]) % (uint64_t)d;
-    }
-    return (uint32_t)r;
-}
-
-/* --------------------------------------------------------------------------------------------- */
-/* Internal: Miller-Rabin primality test.                                                        */
-/* Returns true if n is probably prime after the configured number of rounds.                     */
-/* --------------------------------------------------------------------------------------------- */
-static bool _SSFRSAMillerRabin(const SSFBN_t *n, SSFPRNGContext_t *prng)
-{
-    SSFBN_DEFINE(nm1, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(d, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(x, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(nm3, SSF_BN_MAX_LIMBS);
-    uint32_t s = 0;
-    uint16_t round;
-    SSFBNMONT_DEFINE(mont, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(one, SSF_BN_MAX_LIMBS);
-
-    /* n must be odd and > 3 */
-    if (SSFBNIsEven(n)) return false;
-
-    SSFBNSetUint32(&one, 1u, n->len);
-    SSFBNSetUint32(&nm1, 0u, n->len);
-    SSFBNSub(&nm1, n, &one);   /* nm1 = n - 1 */
-
-    /* Write n-1 = 2^s * d */
-    SSFBNCopy(&d, &nm1);
-    while (SSFBNIsEven(&d))
-    {
-        SSFBNShiftRight1(&d);
-        s++;
-    }
-
-    /* Precompute Montgomery context for n */
-    SSFBNMontInit(&mont, n);
-
-    /* nm3 = n - 3 (for random witness range [2, n-2]) */
-    {
-        SSFBN_DEFINE(three, SSF_BN_MAX_LIMBS);
-        SSFBNSetUint32(&three, 3u, n->len);
-        SSFBNSub(&nm3, n, &three);
-    }
-
-    for (round = 0; round < SSF_RSA_CONFIG_MILLER_RABIN_ROUNDS; round++)
-    {
-        uint32_t r;
-        bool cont = false;
-
-        /* Pick random witness a in [2, n-2] */
-        {
-            size_t byteLen = (size_t)n->len * sizeof(SSFBNLimb_t);
-            uint8_t buf[SSF_BN_MAX_BYTES];
-            uint16_t attempts;
-
-            for (attempts = 0; attempts < 100u; attempts++)
-            {
-                _SSFRSAGetRandomBytes(prng, buf, byteLen);
-                SSFBNFromBytes(&a, buf, byteLen, n->len);
-
-                /* Ensure a < n - 3 by clearing top bits */
-                {
-                    uint32_t nBits = SSFBNBitLen(n);
-                    uint16_t topLimb = (uint16_t)((nBits - 1u) / SSF_BN_LIMB_BITS);
-                    uint16_t topBit = (uint16_t)((nBits - 1u) % SSF_BN_LIMB_BITS);
-                    a.limbs[topLimb] &= ((SSFBNLimb_t)1u << topBit) - 1u;
-                }
-
-                if (SSFBNCmp(&a, &nm3) < 0) break;
-            }
-
-            /* a = a + 2 to get range [2, n-2] */
-            {
-                SSFBN_DEFINE(two, SSF_BN_MAX_LIMBS);
-                SSFBNSetUint32(&two, 2u, n->len);
-                SSFBNAdd(&a, &a, &two);
-            }
-        }
-
-        /* x = a^d mod n */
-        SSFBNModExpMont(&x, &a, &d, &mont);
-
-        /* if x == 1 or x == n-1, continue */
-        if (SSFBNIsOne(&x) || (SSFBNCmp(&x, &nm1) == 0)) continue;
-
-        /* for r = 1 to s-1 */
-        cont = false;
-        for (r = 1; r < s; r++)
-        {
-            /* x = x^2 mod n (using Montgomery) */
-            {
-                SSFBN_DEFINE(two, SSF_BN_MAX_LIMBS);
-                SSFBNSetUint32(&two, 2u, n->len);
-                SSFBNModExpMont(&x, &x, &two, &mont);
-            }
-
-            if (SSFBNCmp(&x, &nm1) == 0) { cont = true; break; }
-            if (SSFBNIsOne(&x)) return false;
-        }
-
-        if (!cont) return false;
-    }
-
-    return true;
-}
-
-/* --------------------------------------------------------------------------------------------- */
-/* Internal: generate a random prime of the given bit length.                                    */
-/* --------------------------------------------------------------------------------------------- */
-#if SSF_RSA_CONFIG_ENABLE_KEYGEN == 1
-static bool _SSFRSAGenPrime(SSFBN_t *p, uint16_t bitLen, SSFPRNGContext_t *prng)
-{
-    size_t byteLen = (bitLen + 7u) / 8u;
-    uint16_t limbs = SSF_BN_BITS_TO_LIMBS(bitLen);
-    uint8_t buf[SSF_BN_MAX_BYTES];
-    uint32_t attempts;
-
-    for (attempts = 0; attempts < 50000u; attempts++)
-    {
-        uint16_t i;
-        bool trialPass;
-
-        /* Generate random bytes */
-        _SSFRSAGetRandomBytes(prng, buf, byteLen);
-
-        /* Set the top two bits (ensures n = p*q has full bit length) */
-        buf[0] |= 0xC0u;
-
-        /* Set the bottom bit (make odd) */
-        buf[byteLen - 1u] |= 0x01u;
-
-        SSFBNFromBytes(p, buf, byteLen, limbs);
-
-        /* Trial division against small primes */
-        trialPass = true;
-        for (i = 0; i < SSF_RSA_NUM_SMALL_PRIMES; i++)
-        {
-            if (_SSFRSAModSmall(p, _ssfRSASmallPrimes[i]) == 0u)
-            {
-                /* If p equals the small prime, it IS prime but too small */
-                trialPass = false;
-                break;
-            }
-        }
-        if (!trialPass) continue;
-
-        /* Miller-Rabin primality test */
-        if (_SSFRSAMillerRabin(p, prng)) return true;
-    }
-
-    return false;
-}
-#endif /* SSF_RSA_CONFIG_ENABLE_KEYGEN */
 
 /* --------------------------------------------------------------------------------------------- */
 /* Internal: DER-encode an RSA public key: SEQUENCE { INTEGER n, INTEGER e }.                    */
@@ -709,11 +492,19 @@ static bool _SSFRSAKeyGenPrimes(uint16_t bits,
     *nLimbsOut = nLimbs;
     *halfLimbsOut = SSF_BN_BITS_TO_LIMBS(halfBits);
 
-    if (!_SSFRSAGetEntropy(entropy, sizeof(entropy))) return false;
+    if (!SSFPortGetEntropy(entropy, (uint16_t)sizeof(entropy))) return false;
     SSFPRNGInitContext(&prng, entropy, sizeof(entropy));
 
-    if (!_SSFRSAGenPrime(p, halfBits, &prng)) { SSFPRNGDeInitContext(&prng); return false; }
-    if (!_SSFRSAGenPrime(q, halfBits, &prng)) { SSFPRNGDeInitContext(&prng); return false; }
+    if (!SSFBNGenPrime(p, halfBits, SSF_RSA_CONFIG_MILLER_RABIN_ROUNDS, &prng))
+    {
+        SSFPRNGDeInitContext(&prng);
+        return false;
+    }
+    if (!SSFBNGenPrime(q, halfBits, SSF_RSA_CONFIG_MILLER_RABIN_ROUNDS, &prng))
+    {
+        SSFPRNGDeInitContext(&prng);
+        return false;
+    }
 
     /* Ensure p != q */
     if (SSFBNCmp(p, q) == 0) { SSFPRNGDeInitContext(&prng); return false; }
@@ -1135,8 +926,9 @@ bool SSFRSASignPSS(const uint8_t *privKeyDer, size_t privKeyDerLen,
 
     dbLen = emLen - hLen - 1u;
 
-    /* Generate random salt */
-    if (!_SSFRSAGetEntropy(salt, sLen)) return false;
+    /* Generate random salt. sLen is bounded by the hash output size (<= 64 bytes for SHA-512), */
+    /* so the narrowing cast to uint16_t cannot truncate.                                       */
+    if (!SSFPortGetEntropy(salt, (uint16_t)sLen)) return false;
 
     /* M' = (0x)00 00 00 00 00 00 00 00 || mHash || salt */
     memset(mPrime, 0, 8);

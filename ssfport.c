@@ -32,6 +32,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "ssfport.h"
+#ifdef _WIN32
+#include <bcrypt.h>
+#endif
 
 /* --------------------------------------------------------------------------------------------- */
 /* Variables.                                                                                    */
@@ -69,4 +72,32 @@ SSFPortTick_t SSFPortGetTick64(void)
     return (SSFPortTick_t) ((((SSFPortTick_t)ticks.tv_sec) * 1000) + (ticks.tv_nsec / 1000000));
 }
 #endif /* _WIN32 */
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if bufLen bytes of entropy were copied into buf, else false.                     */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFPortGetEntropy(uint8_t *buf, uint16_t bufLen)
+{
+    SSF_REQUIRE(buf != NULL);
+
+#ifdef _WIN32
+    /* Windows: BCryptGenRandom returns 0 (STATUS_SUCCESS) on success. Requires bcrypt.lib. */
+    return BCryptGenRandom(NULL, buf, bufLen, BCRYPT_USE_SYSTEM_PREFERRED_RNG) == 0;
+#else
+    /* POSIX: read from /dev/urandom. */
+    FILE *f = fopen("/dev/urandom", "rb");
+    size_t n;
+
+    /* Is /dev/urandom available on this system? */
+    if (f == NULL)
+    {
+        /* No, cannot satisfy the entropy request. */
+        return false;
+    }
+    /* Yes, draw bufLen bytes from it. */
+    n = fread(buf, 1, (size_t)bufLen, f);
+    fclose(f);
+    return (n == (size_t)bufLen);
+#endif
+}
 

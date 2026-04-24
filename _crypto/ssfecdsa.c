@@ -322,28 +322,6 @@ static bool _SSFECDSAPrivKeyIsValid(const SSFBN_t *d, const SSFECCurveParams_t *
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: get platform entropy for key generation.                                            */
-/* Uses /dev/urandom on POSIX (macOS, Linux). Returns false if entropy is unavailable.           */
-/* --------------------------------------------------------------------------------------------- */
-static bool _SSFECDSAGetEntropy(uint8_t *buf, size_t len)
-{
-#ifdef _WIN32
-    /* Windows: not yet supported. Define a platform-specific entropy source. */
-    SSF_ASSERT(false);
-    return false;
-#else
-    /* POSIX: read from /dev/urandom */
-    FILE *f = fopen("/dev/urandom", "rb");
-    size_t n;
-
-    if (f == NULL) return false;
-    n = fread(buf, 1, len, f);
-    fclose(f);
-    return (n == len);
-#endif
-}
-
-/* --------------------------------------------------------------------------------------------- */
 /* Generate an ECDSA key pair.                                                                   */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFECDSAKeyGen(SSFECCurve_t curve,
@@ -366,7 +344,7 @@ bool SSFECDSAKeyGen(SSFECCurve_t curve,
     SSF_REQUIRE(pubKeySize >= (1u + 2u * (size_t)c->bytes));
 
     /* Obtain platform entropy and seed PRNG */
-    if (!_SSFECDSAGetEntropy(entropy, sizeof(entropy))) return false;
+    if (!SSFPortGetEntropy(entropy, (uint16_t)sizeof(entropy))) return false;
     SSFPRNGInitContext(&prng, entropy, sizeof(entropy));
 
     /* Generate d in [1, n-1] */

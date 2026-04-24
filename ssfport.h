@@ -41,6 +41,8 @@ extern "C" {
 #else /* _WIN32 */
 #include <time.h>
 #endif /* _WIN32 */
+#include <stdint.h>
+#include <stdbool.h>
 #include "ssfassert.h"
 
 /* --------------------------------------------------------------------------------------------- */
@@ -304,6 +306,10 @@ void SSFPortAssert(const char *file, unsigned int line);
 #else /* _WIN32 */
 SSFPortTick_t SSFPortGetTick64(void);
 #endif /* _WIN32 */
+
+/* Platform entropy source. Returns true if bufLen bytes of entropy were copied into buf, else  */
+/* false. Backed by the OS CSPRNG (BCryptGenRandom on Windows, /dev/urandom on POSIX).          */
+bool SSFPortGetEntropy(uint8_t *buf, uint16_t bufLen);
 
 #include "ssf.h"
 #include "ssfoptions.h"

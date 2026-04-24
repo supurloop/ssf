@@ -878,6 +878,115 @@ SSFBNLimb_t SSFBNSubUint32(SSFBN_t *r, const SSFBN_t *a, uint32_t b)
 /* r = a * b. Schoolbook multiplication.                                                         */
 /* r->len is set to a->len + b->len. r must not alias a or b.                                   */
 /* --------------------------------------------------------------------------------------------- */
+
+/* Threshold at or above which SSFBNMul dispatches to Karatsuba (same-size, even-length only).  */
+/* Below this, schoolbook wins due to Karatsuba's split/sum/subtract overhead.                   */
+#define SSF_BN_KARATSUBA_THRESHOLD (32u)
+
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: raw schoolbook multiply operating on limb pointers + lengths. No SSFBN_t wrapping. */
+/* r must have (na + nb) limbs zeroed on entry; caller ensures no alias with a or b.             */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFBNSchoolbookMulRaw(SSFBNLimb_t *r,
+                                   const SSFBNLimb_t *a, uint16_t na,
+                                   const SSFBNLimb_t *b, uint16_t nb)
+{
+    uint16_t i;
+    uint16_t j;
+
+    memset(r, 0, (size_t)(na + nb) * sizeof(SSFBNLimb_t));
+
+    for (i = 0; i < na; i++)
+    {
+        SSFBNDLimb_t carry = 0;
+        SSFBNLimb_t ai = a[i];
+
+        if (ai == 0u) continue;
+
+        for (j = 0; j < nb; j++)
+        {
+            SSFBNDLimb_t prod = (SSFBNDLimb_t)ai * (SSFBNDLimb_t)b[j] +
+                                (SSFBNDLimb_t)r[i + j] + carry;
+            r[i + j] = (SSFBNLimb_t)prod;
+            carry = prod >> SSF_BN_LIMB_BITS;
+        }
+        r[i + nb] += (SSFBNLimb_t)carry;
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: one-level Karatsuba mul for same-size even-length operands. Computes three n/2-size */
+/* schoolbook subproducts and combines. r must be 2n limbs; caller ensures no alias.             */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFBNKaratsubaMul(SSFBNLimb_t *r,
+                               const SSFBNLimb_t *a,
+                               const SSFBNLimb_t *b, uint16_t n)
+{
+    /* half+1-limb sum buffers and n+2-limb mid product. Sized for the largest allowed n.         */
+    SSFBNLimb_t sumA[(SSF_BN_MAX_LIMBS / 2u) + 1u];
+    SSFBNLimb_t sumB[(SSF_BN_MAX_LIMBS / 2u) + 1u];
+    SSFBNLimb_t mid[SSF_BN_MAX_LIMBS + 2u];
+    uint16_t half;
+    uint16_t i;
+    SSFBNLimb_t borrow;
+    SSFBNDLimb_t addCarry;
+
+    /* Fall back to schoolbook when size below threshold or n is odd. */
+    if ((n < SSF_BN_KARATSUBA_THRESHOLD) || ((n & 1u) != 0u))
+    {
+        _SSFBNSchoolbookMulRaw(r, a, n, b, n);
+        return;
+    }
+
+    half = (uint16_t)(n / 2u);
+
+    /* Step 1: z0 = aL * bL -> r[0..n-1]. */
+    _SSFBNSchoolbookMulRaw(r, a, half, b, half);
+
+    /* Step 2: z2 = aH * bH -> r[n..2n-1]. */
+    _SSFBNSchoolbookMulRaw(&r[n], &a[half], half, &b[half], half);
+
+    /* Step 3: sumA = aL + aH, sumB = bL + bH, each (half+1) limbs including the carry bit. */
+    sumA[half] = _SSFBNRawAdd(sumA, a, &a[half], half);
+    sumB[half] = _SSFBNRawAdd(sumB, b, &b[half], half);
+
+    /* Step 4: mid = sumA * sumB -> up to 2*(half+1) = n+2 limbs. */
+    _SSFBNSchoolbookMulRaw(mid, sumA, (uint16_t)(half + 1u), sumB, (uint16_t)(half + 1u));
+
+    /* Step 5: mid -= z0 (occupying r[0..n-1]). */
+    borrow = _SSFBNRawSub(mid, mid, r, n);
+    for (i = n; (borrow != 0u) && (i < (uint16_t)(n + 2u)); i++)
+    {
+        SSFBNDLimb_t diff = (SSFBNDLimb_t)mid[i] - (SSFBNDLimb_t)borrow;
+        mid[i] = (SSFBNLimb_t)diff;
+        borrow = (SSFBNLimb_t)((diff >> SSF_BN_LIMB_BITS) & 1u);
+    }
+
+    /* Step 6: mid -= z2 (occupying r[n..2n-1]). */
+    borrow = _SSFBNRawSub(mid, mid, &r[n], n);
+    for (i = n; (borrow != 0u) && (i < (uint16_t)(n + 2u)); i++)
+    {
+        SSFBNDLimb_t diff = (SSFBNDLimb_t)mid[i] - (SSFBNDLimb_t)borrow;
+        mid[i] = (SSFBNLimb_t)diff;
+        borrow = (SSFBNLimb_t)((diff >> SSF_BN_LIMB_BITS) & 1u);
+    }
+
+    /* Step 7: r[half .. half+n+1] += mid[0 .. n+1], propagate carry through higher r limbs. */
+    addCarry = 0;
+    for (i = 0; i < (uint16_t)(n + 2u); i++)
+    {
+        addCarry += (SSFBNDLimb_t)r[half + i] + (SSFBNDLimb_t)mid[i];
+        r[half + i] = (SSFBNLimb_t)addCarry;
+        addCarry >>= SSF_BN_LIMB_BITS;
+    }
+    for (i = (uint16_t)(half + n + 2u); (addCarry != 0u) && (i < (uint16_t)(2u * n)); i++)
+    {
+        addCarry += (SSFBNDLimb_t)r[i];
+        r[i] = (SSFBNLimb_t)addCarry;
+        addCarry >>= SSF_BN_LIMB_BITS;
+    }
+}
+
 void SSFBNMul(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b)
 {
     uint16_t rLen;
@@ -898,6 +1007,18 @@ void SSFBNMul(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b)
     SSF_REQUIRE(rLen <= SSF_BN_MAX_LIMBS);
     SSF_REQUIRE(rLen <= r->cap);
 
+    /* Is this a same-size, even-length multiply at or above the Karatsuba threshold? */
+    if ((a->len == b->len) &&
+        (a->len >= SSF_BN_KARATSUBA_THRESHOLD) &&
+        ((a->len & 1u) == 0u))
+    {
+        /* Yes, dispatch to Karatsuba — ~0.75·n² single-limb multiplies vs n² schoolbook. */
+        _SSFBNKaratsubaMul(r->limbs, a->limbs, b->limbs, a->len);
+        r->len = rLen;
+        return;
+    }
+
+    /* No, use schoolbook (handles asymmetric-length or small-operand cases). */
     memset(r->limbs, 0, (size_t)rLen * sizeof(SSFBNLimb_t));
     r->len = rLen;
 

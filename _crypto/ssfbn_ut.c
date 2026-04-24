@@ -1221,16 +1221,19 @@ void SSFBNUnitTest(void)
 
 #if SSF_CONFIG_BN_MICROBENCH == 1
     /* ====================================================================================== */
-    /* Microbenchmark — MontMul / MontSquare throughput at representative operand sizes.        */
-    /* Gated by SSF_CONFIG_BN_MICROBENCH so the normal test run stays quick; flip the macro in  */
-    /* ssfport.h to 1 before measuring perf changes, then back to 0 after.                      */
+    /* Microbenchmark — MontMul / MontSquare (CIOS-based) and raw Mul / Square (schoolbook /    */
+    /* triangular) throughput at representative operand sizes. Gated by SSF_CONFIG_BN_MICROBENCH*/
+    /* so the normal test run stays quick; flip the macro in ssfport.h to 1 before measuring    */
+    /* perf changes, then back to 0 after.                                                      */
+    /*                                                                                          */
+    /* Raw Mul/Square require 2*nLimbs <= SSF_BN_MAX_LIMBS, so n=128 is skipped for those.      */
     /* ====================================================================================== */
     {
-        struct { uint16_t nLimbs; uint32_t iters; const char *label; } bench[] = {
-            {   8u, 4000000u, "P-256 (n= 8, RSA-256-eq) " },
-            {  32u,  400000u, "RSA-1024     (n=32)      " },
-            {  64u,  100000u, "RSA-2048     (n=64)      " },
-            { 128u,   30000u, "RSA-4096     (n=128)     " },
+        struct { uint16_t nLimbs; uint32_t mIters; uint32_t mulIters; const char *label; } bench[] = {
+            {   8u, 4000000u, 20000000u, "P-256 (n= 8, RSA-256-eq) " },
+            {  32u,  400000u,  5000000u, "RSA-1024     (n=32)      " },
+            {  64u,  100000u,  1500000u, "RSA-2048     (n=64)      " },
+            { 128u,   30000u,        0u, "RSA-4096     (n=128)     " },
         };
         uint16_t bi;
 
@@ -1238,7 +1241,8 @@ void SSFBNUnitTest(void)
         for (bi = 0; bi < (uint16_t)(sizeof(bench) / sizeof(bench[0])); bi++)
         {
             uint16_t n = bench[bi].nLimbs;
-            uint32_t iters = bench[bi].iters;
+            uint32_t mIters = bench[bi].mIters;
+            uint32_t mulIters = bench[bi].mulIters;
             uint32_t i;
 
             /* Build a Mont context with an odd, prime-ish modulus (use P-256 / P-384 constants  */
@@ -1248,6 +1252,7 @@ void SSFBNUnitTest(void)
             SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
             SSFBN_DEFINE(b, SSF_BN_MAX_LIMBS);
             SSFBN_DEFINE(r, SSF_BN_MAX_LIMBS);
+            SSFBN_DEFINE(rWide, SSF_BN_MAX_LIMBS); /* Width for raw Mul/Square (2n limbs). */
             SSFBNMONT_DEFINE(mont, SSF_BN_MAX_LIMBS);
             SSFPortTick_t t0, t1;
 
@@ -1263,37 +1268,69 @@ void SSFBNUnitTest(void)
                 mod.limbs[n - 1u] = 0xFFFFFF00ul | 1u;
             }
 
-            SSFBNSetUint32(&a, 0x12345678ul, n);
-            a.limbs[n / 2u] = 0x9ABCDEF0ul;
+            /* Fill every limb with pseudo-random non-zero data so SSFBNMul's `if (a[i]==0)` */
+            /* shortcut does not artificially speed the baseline. Use a cheap LCG-style seed   */
+            /* keyed on the limb index.                                                        */
+            SSFBNSetZero(&a, n);
+            SSFBNSetZero(&b, n);
+            for (i = 0; i < n; i++)
+            {
+                a.limbs[i] = 0xA5A5A5A5ul ^ (i * 0x9E3779B9ul);
+                b.limbs[i] = 0x5A5A5A5Aul ^ (i * 0x7F4A7C15ul);
+            }
+            a.len = n;
+            b.len = n;
             SSFBNMod(&a, &a, &mod);
-            SSFBNSetUint32(&b, 0x0F0F0F0Ful, n);
-            b.limbs[n / 2u] = 0x87654321ul;
             SSFBNMod(&b, &b, &mod);
 
             SSFBNMontInit(&mont, &mod);
+
+            /* --- Raw SSFBNMul / SSFBNSquare (non-Mont) at 2n-limb output. --- */
+            if (mulIters > 0u)
+            {
+                t0 = SSFPortGetTick64();
+                for (i = 0; i < mulIters; i++)
+                {
+                    SSFBNMul(&rWide, &a, &b);
+                }
+                t1 = SSFPortGetTick64();
+                printf("  Mul        %s %u iter: %llu ms\n",
+                       bench[bi].label, (unsigned)mulIters,
+                       (unsigned long long)(t1 - t0));
+
+                t0 = SSFPortGetTick64();
+                for (i = 0; i < mulIters; i++)
+                {
+                    SSFBNSquare(&rWide, &a);
+                }
+                t1 = SSFPortGetTick64();
+                printf("  Square     %s %u iter: %llu ms\n",
+                       bench[bi].label, (unsigned)mulIters,
+                       (unsigned long long)(t1 - t0));
+            }
+
+            /* --- Mont-form MontMul / MontSquare (CIOS / SOS). --- */
             SSFBNMontConvertIn(&a, &a, &mont);
             SSFBNMontConvertIn(&b, &b, &mont);
 
-            /* MontMul timing. */
             t0 = SSFPortGetTick64();
-            for (i = 0; i < iters; i++)
+            for (i = 0; i < mIters; i++)
             {
                 SSFBNMontMul(&r, &a, &b, &mont);
             }
             t1 = SSFPortGetTick64();
             printf("  MontMul    %s %u iter: %llu ms\n",
-                   bench[bi].label, (unsigned)iters,
+                   bench[bi].label, (unsigned)mIters,
                    (unsigned long long)(t1 - t0));
 
-            /* MontSquare timing. */
             t0 = SSFPortGetTick64();
-            for (i = 0; i < iters; i++)
+            for (i = 0; i < mIters; i++)
             {
                 SSFBNMontSquare(&r, &a, &mont);
             }
             t1 = SSFPortGetTick64();
             printf("  MontSquare %s %u iter: %llu ms\n",
-                   bench[bi].label, (unsigned)iters,
+                   bench[bi].label, (unsigned)mIters,
                    (unsigned long long)(t1 - t0));
         }
         printf("--- end microbenchmark ---\n");

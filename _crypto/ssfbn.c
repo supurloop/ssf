@@ -475,7 +475,7 @@ void SSFBNModAdd(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *
 {
     SSFBNLimb_t carry;
     SSFBNLimb_t borrow;
-    SSFBN_t tmp;
+    SSFBN_DEFINE(tmp, SSF_BN_MAX_LIMBS);
 
     SSF_REQUIRE(r != NULL);
     SSF_REQUIRE(a != NULL);
@@ -504,7 +504,7 @@ void SSFBNModAdd(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *
 void SSFBNModSub(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *m)
 {
     SSFBNLimb_t borrow;
-    SSFBN_t tmp;
+    SSFBN_DEFINE(tmp, SSF_BN_MAX_LIMBS);
 
     SSF_REQUIRE(r != NULL);
     SSF_REQUIRE(a != NULL);
@@ -530,8 +530,8 @@ void SSFBNModSub(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *
 /* --------------------------------------------------------------------------------------------- */
 void SSFBNMod(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
 {
-    SSFBN_t rem;
-    SSFBN_t shifted;
+    SSFBN_DEFINE(rem, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(shifted, SSF_BN_MAX_LIMBS);
     uint32_t aBits;
     uint32_t mBits;
     int32_t shift;
@@ -595,7 +595,7 @@ void SSFBNMod(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
 /* --------------------------------------------------------------------------------------------- */
 void SSFBNModMul(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *m)
 {
-    SSFBN_t prod;
+    SSFBN_DEFINE(prod, SSF_BN_MAX_LIMBS);
 
     SSF_REQUIRE(r != NULL);
     SSF_REQUIRE(a != NULL);
@@ -614,7 +614,9 @@ void SSFBNModMul(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *
 /* --------------------------------------------------------------------------------------------- */
 void SSFBNGcd(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b)
 {
-    SSFBN_t u, v, tmp;
+    SSFBN_DEFINE(u, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(v, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(tmp, SSF_BN_MAX_LIMBS);
     uint32_t shift = 0;
 
     SSF_REQUIRE(r != NULL);
@@ -666,7 +668,7 @@ void SSFBNGcd(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b)
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFBNDivMod(SSFBN_t *q, SSFBN_t *rem, const SSFBN_t *a, const SSFBN_t *b)
 {
-    SSFBN_t shifted;
+    SSFBN_DEFINE(shifted, SSF_BN_MAX_LIMBS);
     uint32_t aBits, bBits;
     int32_t shift;
     uint16_t workLen = (a->len > b->len) ? a->len : b->len;
@@ -716,7 +718,14 @@ bool SSFBNModInvExt(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
     /* When old_r = gcd = 1, old_s is the modular inverse.                                       */
     /* We only track the 's' coefficient (for a), not 't' (for m).                               */
     /* Signs are tracked separately since SSFBN_t is unsigned.                                   */
-    SSFBN_t old_r, cur_r, old_s, cur_s, quotient, tmp_r, tmp_s, prod;
+    SSFBN_DEFINE(old_r, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(cur_r, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(old_s, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(cur_s, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(quotient, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(tmp_r, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(tmp_s, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(prod, SSF_BN_MAX_LIMBS);
     bool old_s_neg = false;
     bool cur_s_neg = false;
     uint16_t len = m->len;
@@ -751,7 +760,7 @@ bool SSFBNModInvExt(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
         /* tmp_s = old_s - quotient * cur_s (with sign tracking) */
         /* First compute quotient * cur_s */
         {
-            SSFBN_t qxs;
+            SSFBN_DEFINE(qxs, SSF_BN_MAX_LIMBS);
             /* quotient and cur_s may have len up to 'len'. Product may overflow. */
             /* Since quotient < old_r/cur_r and cur_s < m, product < m^2 which may be > len */
             /* Use modular approach: compute (quotient * cur_s) mod m, track sign */
@@ -821,7 +830,7 @@ bool SSFBNModInvExt(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
 
     /* Verify: a * r mod m == 1 */
     {
-        SSFBN_t check;
+        SSFBN_DEFINE(check, SSF_BN_MAX_LIMBS);
         SSFBNModMul(&check, a, r, m);
         if (!SSFBNIsOne(&check)) return false;
     }
@@ -844,8 +853,8 @@ static void _SSFBNReduceP256(SSFBN_t *r, const SSFBN_t *t)
     SSFBNDLimb_t acc;
     SSFBNLimb_t carry;
     SSFBNLimb_t borrow;
-    SSFBN_t s;
-    SSFBN_t tmp;
+    SSFBN_DEFINE(s, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(tmp, SSF_BN_MAX_LIMBS);
 
     /* s1 = (c7, c6, c5, c4, c3, c2, c1, c0) -- the low half */
     r->len = 8;
@@ -943,8 +952,8 @@ static void _SSFBNReduceP384(SSFBN_t *r, const SSFBN_t *t)
     const SSFBNLimb_t *c = t->limbs;
     SSFBNLimb_t carry = 0;
     SSFBNLimb_t borrow = 0;
-    SSFBN_t s;
-    SSFBN_t tmp;
+    SSFBN_DEFINE(s, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(tmp, SSF_BN_MAX_LIMBS);
 
     /* s1 = (c11, c10, c9, c8, c7, c6, c5, c4, c3, c2, c1, c0) */
     r->len = 12;
@@ -1030,7 +1039,7 @@ static void _SSFBNReduceP384(SSFBN_t *r, const SSFBN_t *t)
 /* --------------------------------------------------------------------------------------------- */
 void SSFBNModMulNIST(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *m)
 {
-    SSFBN_t prod;
+    SSFBN_DEFINE(prod, SSF_BN_MAX_LIMBS);
 
     SSF_REQUIRE(r != NULL);
     SSF_REQUIRE(a != NULL);
@@ -1067,8 +1076,8 @@ void SSFBNModMulNIST(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN
 /* --------------------------------------------------------------------------------------------- */
 bool SSFBNModInv(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
 {
-    SSFBN_t exp;
-    SSFBN_t two;
+    SSFBN_DEFINE(exp, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(two, SSF_BN_MAX_LIMBS);
 
     SSF_REQUIRE(r != NULL);
     SSF_REQUIRE(a != NULL);
@@ -1086,7 +1095,7 @@ bool SSFBNModInv(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
 
     /* Verify: if a and m are not coprime, the result won't satisfy a*r = 1 mod m */
     {
-        SSFBN_t check;
+        SSFBN_DEFINE(check, SSF_BN_MAX_LIMBS);
         SSFBNModMul(&check, a, r, m);
         if (!SSFBNIsOne(&check)) return false;
     }
@@ -1101,7 +1110,7 @@ bool SSFBNModInv(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
 void SSFBNMontInit(SSFBNMont_t *ctx, const SSFBN_t *m)
 {
     uint16_t i;
-    SSFBN_t r2;
+    SSFBN_DEFINE(r2, SSF_BN_MAX_LIMBS);
 
     SSF_REQUIRE(ctx != NULL);
     SSF_REQUIRE(m != NULL);
@@ -1231,7 +1240,7 @@ void SSFBNMontConvertIn(SSFBN_t *aR, const SSFBN_t *a, const SSFBNMont_t *ctx)
 /* --------------------------------------------------------------------------------------------- */
 void SSFBNMontConvertOut(SSFBN_t *a, const SSFBN_t *aR, const SSFBNMont_t *ctx)
 {
-    SSFBN_t one;
+    SSFBN_DEFINE(one, SSF_BN_MAX_LIMBS);
 
     SSF_REQUIRE(a != NULL);
     SSF_REQUIRE(aR != NULL);
@@ -1263,9 +1272,9 @@ void SSFBNModExp(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBN_t *
 /* --------------------------------------------------------------------------------------------- */
 void SSFBNModExpMont(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBNMont_t *ctx)
 {
-    SSFBN_t r0;  /* Montgomery form of running result */
-    SSFBN_t r1;  /* Montgomery form of running result * a */
-    SSFBN_t aM;  /* a in Montgomery form */
+    SSFBN_DEFINE(r0, SSF_BN_MAX_LIMBS);  /* Montgomery form of running result */
+    SSFBN_DEFINE(r1, SSF_BN_MAX_LIMBS);  /* Montgomery form of running result * a */
+    SSFBN_DEFINE(aM, SSF_BN_MAX_LIMBS);  /* a in Montgomery form */
     uint32_t eBits;
     int32_t i;
 
@@ -1288,7 +1297,7 @@ void SSFBNModExpMont(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBN
 
     /* Initialize: r0 = R mod m (i.e., Montgomery form of 1) */
     {
-        SSFBN_t one;
+        SSFBN_DEFINE(one, SSF_BN_MAX_LIMBS);
         SSFBNSetUint32(&one, 1u, ctx->len);
         SSFBNMontConvertIn(&r0, &one, ctx);
     }

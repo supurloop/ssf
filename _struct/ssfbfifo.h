@@ -51,8 +51,6 @@ extern "C" {
 #if (SSF_BFIFO_CONFIG_MAX_BFIFO_SIZE <= SSF_BFIFO_255) || \
     (SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE == SSF_BFIFO_CONFIG_RUNTIME_BFIFO_SIZE_255)
 typedef uint8_t ssfbf_uint_t;
-#elif SSF_BFIFO_CONFIG_MAX_BFIFO_SIZE <= SSF_BFIFO_65535
-typedef uint16_t ssfbf_uint_t;
 #else
 typedef uint32_t ssfbf_uint_t;
 #endif

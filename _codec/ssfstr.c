@@ -316,7 +316,7 @@ tokDone:
     {
         /* Yes, copy into token buffer */
         *tokenStrLen = (int32_t) (cs - (*cstr));
-        memcpy(tokenStrOut, *cstr, *tokenStrLen);
+        memcpy(tokenStrOut, *cstr, (size_t)*tokenStrLen);
         tokenStrOut[*tokenStrLen] = 0;
     }
     /* No, tokenStr not set */

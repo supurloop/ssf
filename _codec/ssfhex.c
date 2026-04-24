@@ -78,7 +78,7 @@ bool SSFHexByteToBin(const char *hex, uint8_t *out)
 
     SSF_HEX_TO_BIN(un, hex[0]);
     SSF_HEX_TO_BIN(ln, hex[1]);
-    *out = (un << 4) + ln;
+    *out = (uint8_t)((un << 4) + ln);
     return true;
 }
 

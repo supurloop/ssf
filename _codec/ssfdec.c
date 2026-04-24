@@ -74,7 +74,7 @@ static size_t _SSFDecUIntToStr(uint64_t i, char *str)
         o = (uint16_t)((i / 100) << 1);
         *str++ = _ssfDecConv[o++];
         *str++ = _ssfDecConv[o];
-        o = (i % 100) << 1;
+        o = (uint16_t)((i % 100) << 1);
         *str++ = _ssfDecConv[o++];
         *str = _ssfDecConv[o];
         return len + 4;
@@ -85,7 +85,7 @@ static size_t _SSFDecUIntToStr(uint64_t i, char *str)
         o = (uint16_t)((i / 100) << 1);
         *str++ = _ssfDecConv[o++];
         *str++ = _ssfDecConv[o];
-        o = (i % 100) << 1;
+        o = (uint16_t)((i % 100) << 1);
         *str++ = _ssfDecConv[o++];
         *str = _ssfDecConv[o];
         return 4;
@@ -93,7 +93,7 @@ static size_t _SSFDecUIntToStr(uint64_t i, char *str)
     else if (i >= 100)
     {
         *str++ = ((char)(i / 100)) + '0';
-        o = (i % 100) << 1;
+        o = (uint16_t)((i % 100) << 1);
         *str++ = _ssfDecConv[o++];
         *str = _ssfDecConv[o];
         return 3;
@@ -144,7 +144,7 @@ size_t SSFDecIntToStr(int64_t i, SSFCStrOut_t str, size_t strSize)
     if (i < 0)
     {
         /* Ensure that strSize big enough to fit -i plus a NULL */
-        u = -i;
+        u = (uint64_t)(-i);
         if ((strSize <= 2) || ((strSize < (SSF_DEC_NUM_LIM + 3)) &&
                                (u > _ssfDecStrSizeLim[strSize - 3])))
         { return 0; }
@@ -155,7 +155,7 @@ size_t SSFDecIntToStr(int64_t i, SSFCStrOut_t str, size_t strSize)
     else
     {
         /* Ensure that strSize big enough to fit i plus a NULL */
-        u = i;
+        u = (uint64_t)i;
         if ((strSize <= 1) || ((strSize < (SSF_DEC_NUM_LIM + 2)) &&
                                (u > _ssfDecStrSizeLim[strSize - 2])))
         { return 0; }
@@ -408,9 +408,9 @@ bool SSFDecStrToXInt(SSFCStrIn_t str, int64_t *sval, uint64_t *uval)
         if (sbase < 0)
         {
             negBase = true;
-            base = -sbase;
+            base = (uint64_t)(-sbase);
         }
-        else base = sbase;
+        else base = (uint64_t)sbase;
     }
     else
     {

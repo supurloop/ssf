@@ -33,7 +33,6 @@
 #include "ssfport.h"
 #include "ssfgobj.h"
 #include "ssfll.h"
-#include "ssfjson.h"
 
 #if SSF_CONFIG_GOBJ_UNIT_TEST == 1
 /* --------------------------------------------------------------------------------------------- */

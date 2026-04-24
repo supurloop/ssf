@@ -240,9 +240,9 @@ void SSFCLIProcessChar(SSFCLIContext_t *context, uint8_t inChar)
                 if (context->vtEdCtx->line[0] != 0)
                 {
                     /* Yes, save the command in history */
-                    memcpy(&context->cmdHistBuf[context->cmdHistBufIndex *
+                    memcpy(&context->cmdHistBuf[(size_t)(context->cmdHistBufIndex) *
                                                 context->vtEdCtx->lineSize],
-                           context->vtEdCtx->line, context->vtEdCtx->lineSize);
+                           context->vtEdCtx->line, (size_t)context->vtEdCtx->lineSize);
                     context->cmdHistBufIndex++;
                     if (context->cmdHistBufIndex >= context->numCmdHist)
                     { context->cmdHistBufIndex = 0; }
@@ -345,7 +345,7 @@ void SSFCLIProcessChar(SSFCLIContext_t *context, uint8_t inChar)
                     context->cmdHistBufIndex--;
                     if (context->cmdHistBufIndex < 0)
                     { context->cmdHistBufIndex = context->numCmdHist - 1; }
-                } while ((context->cmdHistBuf[context->cmdHistBufIndex *
+                } while ((context->cmdHistBuf[(size_t)(context->cmdHistBufIndex) *
                                               context->vtEdCtx->lineSize] == 0) &&
                          (i < context->numCmdHist));
 
@@ -354,10 +354,10 @@ void SSFCLIProcessChar(SSFCLIContext_t *context, uint8_t inChar)
                 {
                     /* Yes, show it */
                     SSFVTEdSet(context->vtEdCtx,
-                               (SSFCStrIn_t)&context->cmdHistBuf[context->cmdHistBufIndex *
+                               (SSFCStrIn_t)&context->cmdHistBuf[(size_t)(context->cmdHistBufIndex) *
                                                                  context->vtEdCtx->lineSize],
                                strlen((const char *)
-                                      &context->cmdHistBuf[context->cmdHistBufIndex *
+                                      &context->cmdHistBuf[(size_t)(context->cmdHistBufIndex) *
                                                            context->vtEdCtx->lineSize]));
                 }
                 else
@@ -381,7 +381,7 @@ void SSFCLIProcessChar(SSFCLIContext_t *context, uint8_t inChar)
                     context->cmdHistBufIndex++;
                     if (context->cmdHistBufIndex >= context->numCmdHist)
                     { context->cmdHistBufIndex = 0; }
-                }  while ((context->cmdHistBuf[context->cmdHistBufIndex *
+                }  while ((context->cmdHistBuf[(size_t)(context->cmdHistBufIndex) *
                                                context->vtEdCtx->lineSize] == 0) &&
                           (i < context->numCmdHist));
 
@@ -390,10 +390,10 @@ void SSFCLIProcessChar(SSFCLIContext_t *context, uint8_t inChar)
                 {
                     /* Yes, show it */
                     SSFVTEdSet(context->vtEdCtx,
-                               (SSFCStrIn_t)&context->cmdHistBuf[context->cmdHistBufIndex *
+                               (SSFCStrIn_t)&context->cmdHistBuf[(size_t)(context->cmdHistBufIndex) *
                                                                  context->vtEdCtx->lineSize],
                                strlen((const char *)
-                                      &context->cmdHistBuf[context->cmdHistBufIndex *
+                                      &context->cmdHistBuf[(size_t)(context->cmdHistBufIndex) *
                                                            context->vtEdCtx->lineSize]));
                 }
                 else

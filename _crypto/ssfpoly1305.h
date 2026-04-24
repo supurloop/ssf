@@ -91,11 +91,49 @@ extern "C" {
 #define SSF_POLY1305_KEY_SIZE (32u)
 #define SSF_POLY1305_TAG_SIZE (16u)
 
+/* Incremental Poly1305 context. Callers treat as opaque; pass by pointer to Begin/Update/End.   */
+/* Holds the clamped r (5 × 26-bit limbs), s (4 × 32-bit LE words), precomputed r[1..4] * 5, the */
+/* 130-bit accumulator h, and a 16-byte partial-block buffer with fill length. Seeded by Begin,  */
+/* fed by Update, finalised and zeroised by End. Never reuse a context across two messages —     */
+/* Poly1305 is a one-time MAC (see the ssfpoly1305.md key-reuse note).                           */
+typedef struct SSFPoly1305Context
+{
+    uint32_t r0, r1, r2, r3, r4;         /* clamped r limbs */
+    uint32_t s0, s1, s2, s3;              /* s = key[16..31] as 4 LE words */
+    uint32_t rr0, rr1, rr2, rr3;          /* r1..r4 * 5 (precomputed reduction operands) */
+    uint32_t h0, h1, h2, h3, h4;          /* 130-bit accumulator */
+    uint8_t  buf[16];                     /* partial-block accumulator */
+    uint8_t  bufLen;                      /* 0..15 — bytes currently in buf[] */
+} SSFPoly1305Context_t;
+
 /* --------------------------------------------------------------------------------------------- */
 /* External interface                                                                            */
 /* --------------------------------------------------------------------------------------------- */
+
+/* One-shot: compute Poly1305 tag over msg using the 32-byte one-time key. Convenience wrapper   */
+/* over Begin/Update/End; preserves the original function signature and RFC 7539 test vectors.   */
 void SSFPoly1305Mac(const uint8_t *msg, size_t msgLen,
                     const uint8_t *key, size_t keyLen,
+                    uint8_t *tag, size_t tagSize);
+
+/* Incremental: initialize ctx with a 32-byte one-time key. Clamps r, derives s, precomputes     */
+/* the r*5 reduction operands, and zeroes the accumulator. After Begin the context is ready for  */
+/* a sequence of Update calls terminated by one End call. */
+void SSFPoly1305Begin(SSFPoly1305Context_t *ctx,
+                      const uint8_t *key, size_t keyLen);
+
+/* Incremental: feed msgLen bytes of message into the MAC. Internally processes complete 16-byte */
+/* blocks as they accumulate and stashes any trailing < 16-byte tail in the context for the next */
+/* call. Can be invoked any number of times with any chunk sizes; the result is identical to a   */
+/* single-buffer call over the concatenation of all Update inputs. */
+void SSFPoly1305Update(SSFPoly1305Context_t *ctx,
+                       const uint8_t *msg, size_t msgLen);
+
+/* Incremental: finalize and write the 16-byte tag. Processes any remaining partial block with   */
+/* the RFC 7539 0x01 high-bit marker, runs the final reduction, adds s, and emits the tag. Also  */
+/* zeroises ctx on return to limit exposure of the one-time key material. After End the context  */
+/* is invalid — Begin it again before reuse. */
+void SSFPoly1305End(SSFPoly1305Context_t *ctx,
                     uint8_t *tag, size_t tagSize);
 
 #if SSF_CONFIG_POLY1305_UNIT_TEST == 1

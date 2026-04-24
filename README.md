@@ -206,7 +206,7 @@ Cryptographic primitives for hashing, encryption, and random number generation.
 | [HKDF](_crypto/ssfhkdf.md) | HKDF (RFC 5869) HMAC-based extract-and-expand key derivation | ~600 B³⁰ | — | ~1.5 KB³¹ | — | Yes |
 | [Poly1305](_crypto/ssfpoly1305.md) | Poly1305 one-time MAC (RFC 7539/8439) | ~1.2 KB | — | ~250 B³² | — | Yes |
 | [ChaCha20](_crypto/ssfchacha20.md) | ChaCha20 stream cipher (RFC 7539/8439) | ~1 KB | — | ~250 B³³ | — | Yes |
-| [ChaCha20-Poly1305](_crypto/ssfchacha20poly1305.md) | ChaCha20-Poly1305 AEAD (RFC 7539/8439) | ~700 B³⁴ | — | ~17.5 KB³⁵ | — | Yes |
+| [ChaCha20-Poly1305](_crypto/ssfchacha20poly1305.md) | ChaCha20-Poly1305 AEAD (RFC 7539/8439) | ~700 B³⁴ | — | ~400 B³⁵ | — | Yes |
 | [Constant-Time](_crypto/ssfct.md) | Constant-time byte-buffer equality for MAC and signature verification | ~40 B | — | ~32 B | — | Yes |
 | [Big Number](_crypto/ssfbn.md) | Multi-precision big-number arithmetic; foundation for RSA, ECC, and DH | ~10 KB | — | ~3.7 KB³⁸ | — | Yes |
 | [Elliptic Curve](_crypto/ssfec.md) | NIST P-256 / P-384 point arithmetic (constant-time scalar mul, SEC 1 codec) | ~10 KB³⁹ | — | ~7 KB⁴⁰ | — | Yes |
@@ -214,7 +214,7 @@ Cryptographic primitives for hashing, encryption, and random number generation.
 | [X25519](_crypto/ssfx25519.md) | X25519 key agreement over Curve25519 (RFC 7748) — self-contained, constant-time | ~4 KB⁴³ | — | ~700 B⁴⁴ | — | Yes |
 | [Ed25519](_crypto/ssfed25519.md) | Ed25519 signatures (RFC 8032 pure mode) — deterministic; uses SHA-512 from ssfsha2 | ~12 KB⁴⁵ | — | ~1.5 KB⁴⁶ | — | Yes |
 | [RSA](_crypto/ssfrsa.md) | RSA-2048/3072/4096 signatures (PKCS#1 v1.5 and PSS) + key generation; PKCS#1 DER key format | ~15 KB⁴⁷ | — | ~10 KB⁴⁸ | — | Yes |
-| [TLS 1.3](_crypto/ssftls.md) | TLS 1.3 core building blocks (key schedule, transcript hash, record layer); not a full TLS stack | ~2.5 KB⁴⁹ | — | ~17.5 KB⁵⁰ | — | Yes |
+| [TLS 1.3](_crypto/ssftls.md) | TLS 1.3 core building blocks (key schedule, transcript hash, record layer); not a full TLS stack | ~2.5 KB⁴⁹ | — | ~1 KB⁵⁰ | — | Yes |
 | [PRNG](_crypto/ssfprng.md) | Cryptographically capable pseudo-random number generator | ~500 B | — | ~96 B | — | Yes |
 
 ⁴ Includes ~896 B of SHA-256 and SHA-512 round constants. ⁵ Includes 512 B S-box and inverse S-box tables. ⁶ Requires AES module; figure is for GCM logic only.
@@ -267,11 +267,11 @@ Cryptographic primitives for hashing, encryption, and random number generation.
 
 ⁴⁹ Requires HMAC, SHA-2, and one or more AEAD backends (AES-GCM / AES-CCM / ChaCha20-Poly1305); figure is for the TLS 1.3 primitives themselves — HKDF-Expand-Label, Derive-Secret, traffic-key derivation, transcript hash wrappers, and record-layer nonce construction + AEAD dispatch. No handshake state machine, certificate validation, or transport I/O is included.
 
-⁵⁰ Peak is inherited directly from whichever AEAD backend the active cipher suite selects. `TLS_CHACHA20_POLY1305_SHA256` routes through `SSFChaCha20Poly1305Encrypt` whose ~17.5 KB peak (footnote ³⁵) dominates. The AES-GCM and AES-CCM suites are much lighter — roughly 500 B for CCM and a few hundred bytes for GCM. Key-schedule and transcript-hash primitives on their own stay under ~1 KB. Drop the ChaCha20-Poly1305 AEAD peak — e.g., by lowering `SSF_CCP_POLY1305_MAX_INPUT` to bound the construction buffer — and this module's peak drops with it.
+⁵⁰ Peak is inherited from whichever AEAD backend the active cipher suite selects. All five supported suites now have comparable stack footprints in the few-hundred-byte range: AES-GCM and AES-CCM routes through the AES-backed dispatch (~450 B peak, dominated by the AES key schedule), and the ChaCha20-Poly1305 route (~400 B peak, dominated by the Poly1305 context and the ChaCha20 working state after the 2025 streaming refactor). The key-schedule and transcript-hash primitives on their own stay under ~1 KB. Overall TLS 1.3 record-layer peak is ~1 KB regardless of cipher suite.
 
 ³⁴ Requires ChaCha20 and Poly1305 modules; figure is for AEAD orchestration and the `_SSFCCPComputeTag` construction helper only.
 
-³⁵ Peak is dominated by a single stack buffer `macData[SSF_CCP_POLY1305_MAX_INPUT]` (default 17408 B) in `_SSFCCPComputeTag` that holds the full `auth ‖ pad ‖ ct ‖ pad ‖ lengths` Poly1305 construction. Reducing `SSF_CCP_POLY1305_MAX_INPUT` (override by `#define` before including the header) directly reduces peak stack but caps the largest AEAD record the module can process. Everything else — the per-message one-time key, the nested ChaCha20 and Poly1305 frames — adds only a few hundred bytes.
+³⁵ `_SSFCCPComputeTag` now streams the `auth ‖ pad ‖ ct ‖ pad ‖ lengths` construction through the incremental Poly1305 Begin/Update/End interface rather than materialising the full concatenation on the stack. Peak is ~`sizeof(SSFPoly1305Context_t)` (~100 B) + the per-message one-time-key buffer (32 B) + the nested ChaCha20 frame's working state — total ~400 B, independent of record size. (Before the 2025 refactor to the streaming Poly1305 API, the construction buffer was configurable via `SSF_CCP_POLY1305_MAX_INPUT` and defaulted to 17408 B.)
 
 #### [Storage](_storage/README.md)
 

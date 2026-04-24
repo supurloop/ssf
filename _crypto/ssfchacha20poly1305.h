@@ -92,11 +92,6 @@ extern "C" {
 #define SSF_CCP_NONCE_SIZE (12u)
 #define SSF_CCP_TAG_SIZE   (16u)
 
-/* Max input size for internal Poly1305 buffer (must be >= max plaintext + AAD + pad + 16) */
-#ifndef SSF_CCP_POLY1305_MAX_INPUT
-#define SSF_CCP_POLY1305_MAX_INPUT (17408u)
-#endif
-
 /* --------------------------------------------------------------------------------------------- */
 /* External interface                                                                            */
 /* --------------------------------------------------------------------------------------------- */

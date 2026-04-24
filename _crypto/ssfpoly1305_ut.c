@@ -95,6 +95,58 @@ void SSFPoly1305UnitTest(void)
         SSFPoly1305Mac(msg, 16, key, sizeof(key), blockTag, sizeof(blockTag));
         /* Verify doesn't crash with exact block boundary */
     }
+
+    /* Streaming API: Begin/Update/End over the RFC 7539 vector must produce the same tag
+     * as the one-shot Mac. Run it several ways to exercise the partial-block hold-back
+     * across the 16-byte block boundary: byte-by-byte, uneven chunks, and chunks that
+     * straddle the boundary. */
+    {
+        SSFPoly1305Context_t ctx;
+        uint8_t streamTag[16];
+        size_t i;
+
+        /* Single Update over the whole message — should match Mac exactly. */
+        SSFPoly1305Begin(&ctx, key, sizeof(key));
+        SSFPoly1305Update(&ctx, msg, sizeof(msg));
+        SSFPoly1305End(&ctx, streamTag, sizeof(streamTag));
+        SSF_ASSERT(memcmp(streamTag, expected_tag, sizeof(expected_tag)) == 0);
+
+        /* Byte-by-byte Update — exercises the partial-block drain on every single call. */
+        SSFPoly1305Begin(&ctx, key, sizeof(key));
+        for (i = 0; i < sizeof(msg); i++) SSFPoly1305Update(&ctx, &msg[i], 1u);
+        SSFPoly1305End(&ctx, streamTag, sizeof(streamTag));
+        SSF_ASSERT(memcmp(streamTag, expected_tag, sizeof(expected_tag)) == 0);
+
+        /* Boundary-straddling chunks: 1, 15, 17, 1 — forces drain, then drain+block,
+         * then block+partial, then final partial. Total = 34 = sizeof(msg). */
+        SSFPoly1305Begin(&ctx, key, sizeof(key));
+        SSFPoly1305Update(&ctx, &msg[0],  1u);
+        SSFPoly1305Update(&ctx, &msg[1],  15u);
+        SSFPoly1305Update(&ctx, &msg[16], 17u);
+        SSFPoly1305Update(&ctx, &msg[33], 1u);
+        SSFPoly1305End(&ctx, streamTag, sizeof(streamTag));
+        SSF_ASSERT(memcmp(streamTag, expected_tag, sizeof(expected_tag)) == 0);
+
+        /* Zero-length Updates mixed with real ones — must be a no-op. */
+        SSFPoly1305Begin(&ctx, key, sizeof(key));
+        SSFPoly1305Update(&ctx, NULL, 0u);
+        SSFPoly1305Update(&ctx, msg, 10u);
+        SSFPoly1305Update(&ctx, NULL, 0u);
+        SSFPoly1305Update(&ctx, &msg[10], sizeof(msg) - 10u);
+        SSFPoly1305Update(&ctx, NULL, 0u);
+        SSFPoly1305End(&ctx, streamTag, sizeof(streamTag));
+        SSF_ASSERT(memcmp(streamTag, expected_tag, sizeof(expected_tag)) == 0);
+
+        /* Begin/End with no data — tag should equal s (for this RFC vector, nonzero). */
+        {
+            uint8_t emptyStreamTag[16];
+            uint8_t emptyOneShotTag[16];
+            SSFPoly1305Begin(&ctx, key, sizeof(key));
+            SSFPoly1305End(&ctx, emptyStreamTag, sizeof(emptyStreamTag));
+            SSFPoly1305Mac(NULL, 0u, key, sizeof(key), emptyOneShotTag, sizeof(emptyOneShotTag));
+            SSF_ASSERT(memcmp(emptyStreamTag, emptyOneShotTag, sizeof(emptyStreamTag)) == 0);
+        }
+    }
 }
 
 #endif /* SSF_CONFIG_POLY1305_UNIT_TEST */

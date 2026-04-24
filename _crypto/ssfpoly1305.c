@@ -86,142 +86,224 @@
 /* --------------------------------------------------------------------------------------------- */
 
 /* --------------------------------------------------------------------------------------------- */
-/* Computes Poly1305 MAC (RFC 7539 Section 2.5).                                                 */
+/* Internal: h = h * r mod (2^130 - 5), using 5 × 26-bit limbs and precomputed r[1..4] * 5.      */
+/* Shared between full-block (Update) and final-partial-block (End) paths.                       */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFPoly1305MulR(SSFPoly1305Context_t *ctx)
+{
+    uint64_t d0, d1, d2, d3, d4;
+    uint32_t c;
+
+    d0 = ((uint64_t)ctx->h0 * ctx->r0) + ((uint64_t)ctx->h1 * ctx->rr3) +
+         ((uint64_t)ctx->h2 * ctx->rr2) + ((uint64_t)ctx->h3 * ctx->rr1) +
+         ((uint64_t)ctx->h4 * ctx->rr0);
+    d1 = ((uint64_t)ctx->h0 * ctx->r1) + ((uint64_t)ctx->h1 * ctx->r0) +
+         ((uint64_t)ctx->h2 * ctx->rr3) + ((uint64_t)ctx->h3 * ctx->rr2) +
+         ((uint64_t)ctx->h4 * ctx->rr1);
+    d2 = ((uint64_t)ctx->h0 * ctx->r2) + ((uint64_t)ctx->h1 * ctx->r1) +
+         ((uint64_t)ctx->h2 * ctx->r0) + ((uint64_t)ctx->h3 * ctx->rr3) +
+         ((uint64_t)ctx->h4 * ctx->rr2);
+    d3 = ((uint64_t)ctx->h0 * ctx->r3) + ((uint64_t)ctx->h1 * ctx->r2) +
+         ((uint64_t)ctx->h2 * ctx->r1) + ((uint64_t)ctx->h3 * ctx->r0) +
+         ((uint64_t)ctx->h4 * ctx->rr3);
+    d4 = ((uint64_t)ctx->h0 * ctx->r4) + ((uint64_t)ctx->h1 * ctx->r3) +
+         ((uint64_t)ctx->h2 * ctx->r2) + ((uint64_t)ctx->h3 * ctx->r1) +
+         ((uint64_t)ctx->h4 * ctx->r0);
+
+    /* Carry propagation */
+    c = (uint32_t)(d0 >> 26); ctx->h0 = (uint32_t)d0 & 0x3FFFFFFu;
+    d1 += c; c = (uint32_t)(d1 >> 26); ctx->h1 = (uint32_t)d1 & 0x3FFFFFFu;
+    d2 += c; c = (uint32_t)(d2 >> 26); ctx->h2 = (uint32_t)d2 & 0x3FFFFFFu;
+    d3 += c; c = (uint32_t)(d3 >> 26); ctx->h3 = (uint32_t)d3 & 0x3FFFFFFu;
+    d4 += c; c = (uint32_t)(d4 >> 26); ctx->h4 = (uint32_t)d4 & 0x3FFFFFFu;
+    ctx->h0 += c * 5u; c = ctx->h0 >> 26; ctx->h0 &= 0x3FFFFFFu;
+    ctx->h1 += c;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: process one complete 16-byte block (adds implicit high bit 2^128 per RFC 7539 §2.5) */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFPoly1305ProcessFullBlock(SSFPoly1305Context_t *ctx, const uint8_t block[16])
+{
+    ctx->h0 += SSF_GETU32LE(&block[0])  & 0x3FFFFFFu;
+    ctx->h1 += (SSF_GETU32LE(&block[3])  >> 2) & 0x3FFFFFFu;
+    ctx->h2 += (SSF_GETU32LE(&block[6])  >> 4) & 0x3FFFFFFu;
+    ctx->h3 += (SSF_GETU32LE(&block[9])  >> 6) & 0x3FFFFFFu;
+    ctx->h4 += (SSF_GETU32LE(&block[12]) >> 8) | (1u << 24);
+    _SSFPoly1305MulR(ctx);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Incremental API: initialize context from a 32-byte one-time key.                              */
+/* RFC 7539 §2.5: clamp the low half of the key as r, take the high half verbatim as s, and      */
+/* precompute r[1..4] * 5 for the modular reduction inner loop. Accumulator starts at zero.       */
+/* --------------------------------------------------------------------------------------------- */
+void SSFPoly1305Begin(SSFPoly1305Context_t *ctx,
+                      const uint8_t *key, size_t keyLen)
+{
+    SSF_REQUIRE(ctx != NULL);
+    SSF_REQUIRE(key != NULL);
+    SSF_REQUIRE(keyLen == SSF_POLY1305_KEY_SIZE);
+
+    /* Clamp r (RFC 7539 §2.5) */
+    ctx->r0 = (SSF_GETU32LE(&key[0]))        & 0x3FFFFFFu;
+    ctx->r1 = (SSF_GETU32LE(&key[3])  >> 2)  & 0x3FFFF03u;
+    ctx->r2 = (SSF_GETU32LE(&key[6])  >> 4)  & 0x3FFC0FFu;
+    ctx->r3 = (SSF_GETU32LE(&key[9])  >> 6)  & 0x3F03FFFu;
+    ctx->r4 = (SSF_GETU32LE(&key[12]) >> 8)  & 0x00FFFFFu;
+
+    /* s = key[16..31] as four little-endian 32-bit words */
+    ctx->s0 = SSF_GETU32LE(&key[16]);
+    ctx->s1 = SSF_GETU32LE(&key[20]);
+    ctx->s2 = SSF_GETU32LE(&key[24]);
+    ctx->s3 = SSF_GETU32LE(&key[28]);
+
+    /* Precompute r[1..4] * 5 for the reduction-inner multiply */
+    ctx->rr0 = ctx->r1 * 5u;
+    ctx->rr1 = ctx->r2 * 5u;
+    ctx->rr2 = ctx->r3 * 5u;
+    ctx->rr3 = ctx->r4 * 5u;
+
+    /* Accumulator = 0, partial-block buffer empty */
+    ctx->h0 = ctx->h1 = ctx->h2 = ctx->h3 = ctx->h4 = 0u;
+    ctx->bufLen = 0u;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Incremental API: feed msgLen bytes. Drains any partial-block hold-back from a previous call   */
+/* first, then processes complete 16-byte blocks directly from msg, then stashes any trailing    */
+/* < 16-byte tail back into ctx->buf for the next Update or End. Produces bit-identical output   */
+/* to a single Mac call over the concatenation of all Update inputs.                              */
+/* --------------------------------------------------------------------------------------------- */
+void SSFPoly1305Update(SSFPoly1305Context_t *ctx,
+                       const uint8_t *msg, size_t msgLen)
+{
+    size_t pos = 0;
+    size_t take;
+
+    SSF_REQUIRE(ctx != NULL);
+    SSF_REQUIRE((msg != NULL) || (msgLen == 0u));
+
+    /* Drain the partial buffer first if it holds anything. */
+    if (ctx->bufLen > 0u)
+    {
+        take = (size_t)(16u - ctx->bufLen);
+        if (take > msgLen) take = msgLen;
+        memcpy(&ctx->buf[ctx->bufLen], msg, take);
+        ctx->bufLen = (uint8_t)(ctx->bufLen + take);
+        pos += take;
+
+        if (ctx->bufLen == 16u)
+        {
+            _SSFPoly1305ProcessFullBlock(ctx, ctx->buf);
+            ctx->bufLen = 0u;
+        }
+    }
+
+    /* Process full blocks directly from the caller's buffer. */
+    while ((msgLen - pos) >= 16u)
+    {
+        _SSFPoly1305ProcessFullBlock(ctx, &msg[pos]);
+        pos += 16u;
+    }
+
+    /* Stash the < 16-byte tail. */
+    if (pos < msgLen)
+    {
+        take = msgLen - pos;
+        memcpy(&ctx->buf[ctx->bufLen], &msg[pos], take);
+        ctx->bufLen = (uint8_t)(ctx->bufLen + take);
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Incremental API: finalize, emit the 16-byte tag, zeroise the context.                         */
+/* Processes any remaining partial block with the RFC 7539 0x01 high-bit marker (no 2^128 bit),  */
+/* runs the final reduction, selects h mod p, adds s, writes the LE tag, and memsets ctx to 0.   */
+/* --------------------------------------------------------------------------------------------- */
+void SSFPoly1305End(SSFPoly1305Context_t *ctx,
+                    uint8_t *tag, size_t tagSize)
+{
+    uint32_t c;
+    uint32_t g0, g1, g2, g3, g4;
+    uint32_t mask;
+    uint64_t f;
+
+    SSF_REQUIRE(ctx != NULL);
+    SSF_REQUIRE(tag != NULL);
+    SSF_REQUIRE(tagSize >= SSF_POLY1305_TAG_SIZE);
+
+    /* Final partial block (if any): pad with 0x01 then zeros, then multiply by r. */
+    if (ctx->bufLen > 0u)
+    {
+        uint8_t partial[16];
+
+        memset(partial, 0, sizeof(partial));
+        memcpy(partial, ctx->buf, ctx->bufLen);
+        partial[ctx->bufLen] = 0x01u;
+
+        ctx->h0 += SSF_GETU32LE(&partial[0])  & 0x3FFFFFFu;
+        ctx->h1 += (SSF_GETU32LE(&partial[3])  >> 2) & 0x3FFFFFFu;
+        ctx->h2 += (SSF_GETU32LE(&partial[6])  >> 4) & 0x3FFFFFFu;
+        ctx->h3 += (SSF_GETU32LE(&partial[9])  >> 6) & 0x3FFFFFFu;
+        ctx->h4 += (SSF_GETU32LE(&partial[12]) >> 8);  /* no 2^128 bit for partial */
+        _SSFPoly1305MulR(ctx);
+        ctx->bufLen = 0u;
+    }
+
+    /* Fully carry h. */
+    c = ctx->h1 >> 26; ctx->h1 &= 0x3FFFFFFu;
+    ctx->h2 += c; c = ctx->h2 >> 26; ctx->h2 &= 0x3FFFFFFu;
+    ctx->h3 += c; c = ctx->h3 >> 26; ctx->h3 &= 0x3FFFFFFu;
+    ctx->h4 += c; c = ctx->h4 >> 26; ctx->h4 &= 0x3FFFFFFu;
+    ctx->h0 += c * 5u; c = ctx->h0 >> 26; ctx->h0 &= 0x3FFFFFFu;
+    ctx->h1 += c;
+
+    /* h - p = h - (2^130 - 5). */
+    g0 = ctx->h0 + 5u; c = g0 >> 26; g0 &= 0x3FFFFFFu;
+    g1 = ctx->h1 + c; c = g1 >> 26; g1 &= 0x3FFFFFFu;
+    g2 = ctx->h2 + c; c = g2 >> 26; g2 &= 0x3FFFFFFu;
+    g3 = ctx->h3 + c; c = g3 >> 26; g3 &= 0x3FFFFFFu;
+    g4 = ctx->h4 + c - (1u << 26);
+
+    /* Select h if h < p, else h - p. */
+    mask = (g4 >> 31) - 1u;
+    g0 &= mask; g1 &= mask; g2 &= mask; g3 &= mask; g4 &= mask;
+    mask = ~mask;
+    ctx->h0 = (ctx->h0 & mask) | g0;
+    ctx->h1 = (ctx->h1 & mask) | g1;
+    ctx->h2 = (ctx->h2 & mask) | g2;
+    ctx->h3 = (ctx->h3 & mask) | g3;
+    ctx->h4 = (ctx->h4 & mask) | g4;
+
+    /* Assemble h into 4 × 32-bit LE words and add s, writing the tag as 16 bytes LE. */
+    f = (uint64_t)(ctx->h0 | (ctx->h1 << 26)) + ctx->s0;
+    tag[0]  = (uint8_t)f;       tag[1]  = (uint8_t)(f >> 8);
+    tag[2]  = (uint8_t)(f >> 16); tag[3]  = (uint8_t)(f >> 24);
+    f = (uint64_t)((ctx->h1 >> 6) | (ctx->h2 << 20)) + ctx->s1 + (f >> 32);
+    tag[4]  = (uint8_t)f;       tag[5]  = (uint8_t)(f >> 8);
+    tag[6]  = (uint8_t)(f >> 16); tag[7]  = (uint8_t)(f >> 24);
+    f = (uint64_t)((ctx->h2 >> 12) | (ctx->h3 << 14)) + ctx->s2 + (f >> 32);
+    tag[8]  = (uint8_t)f;       tag[9]  = (uint8_t)(f >> 8);
+    tag[10] = (uint8_t)(f >> 16); tag[11] = (uint8_t)(f >> 24);
+    f = (uint64_t)((ctx->h3 >> 18) | (ctx->h4 << 8)) + ctx->s3 + (f >> 32);
+    tag[12] = (uint8_t)f;       tag[13] = (uint8_t)(f >> 8);
+    tag[14] = (uint8_t)(f >> 16); tag[15] = (uint8_t)(f >> 24);
+
+    /* Zeroise key-derived state. Poly1305 is a one-time MAC — the context must not be reused. */
+    memset(ctx, 0, sizeof(*ctx));
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Computes Poly1305 MAC (RFC 7539 §2.5). One-shot convenience wrapper over Begin/Update/End.    */
 /* --------------------------------------------------------------------------------------------- */
 void SSFPoly1305Mac(const uint8_t *msg, size_t msgLen,
                     const uint8_t *key, size_t keyLen,
                     uint8_t *tag, size_t tagSize)
 {
-    uint32_t r0, r1, r2, r3, r4;
-    uint32_t s0, s1, s2, s3;
-    uint32_t h0, h1, h2, h3, h4;
-    uint32_t rr0, rr1, rr2, rr3;
-    uint64_t d0, d1, d2, d3, d4;
-    uint32_t c;
-    size_t pos;
-    size_t remaining;
-    uint32_t hibit;
-    uint8_t buf[16];
-    uint64_t f;
-    uint32_t g0, g1, g2, g3, g4;
-    uint32_t mask;
+    SSFPoly1305Context_t ctx;
 
-    SSF_REQUIRE(key != NULL);
-    SSF_REQUIRE(keyLen == SSF_POLY1305_KEY_SIZE);
-    SSF_REQUIRE(tag != NULL);
-    SSF_REQUIRE(tagSize >= SSF_POLY1305_TAG_SIZE);
-
-    /* Clamp r (RFC 7539 Section 2.5) */
-    r0 = (SSF_GETU32LE(&key[0])) & 0x3FFFFFFu;
-    r1 = (SSF_GETU32LE(&key[3]) >> 2) & 0x3FFFF03u;
-    r2 = (SSF_GETU32LE(&key[6]) >> 4) & 0x3FFC0FFu;
-    r3 = (SSF_GETU32LE(&key[9]) >> 6) & 0x3F03FFFu;
-    r4 = (SSF_GETU32LE(&key[12]) >> 8) & 0x00FFFFFu;
-
-    /* s = key[16..31] */
-    s0 = SSF_GETU32LE(&key[16]);
-    s1 = SSF_GETU32LE(&key[20]);
-    s2 = SSF_GETU32LE(&key[24]);
-    s3 = SSF_GETU32LE(&key[28]);
-
-    /* Precompute r * 5 for reduction */
-    rr0 = r1 * 5;
-    rr1 = r2 * 5;
-    rr2 = r3 * 5;
-    rr3 = r4 * 5;
-
-    h0 = 0; h1 = 0; h2 = 0; h3 = 0; h4 = 0;
-
-    pos = 0;
-    while (pos < msgLen)
-    {
-        remaining = msgLen - pos;
-
-        if (remaining >= 16)
-        {
-            /* Full block: append 0x01 as high bit */
-            h0 += SSF_GETU32LE(&msg[pos]) & 0x3FFFFFFu;
-            h1 += (SSF_GETU32LE(&msg[pos + 3]) >> 2) & 0x3FFFFFFu;
-            h2 += (SSF_GETU32LE(&msg[pos + 6]) >> 4) & 0x3FFFFFFu;
-            h3 += (SSF_GETU32LE(&msg[pos + 9]) >> 6) & 0x3FFFFFFu;
-            h4 += (SSF_GETU32LE(&msg[pos + 12]) >> 8) | (1u << 24);
-            hibit = 0; /* Already added above */
-            pos += 16;
-        }
-        else
-        {
-            /* Partial block: pad with 0x01 then zeros */
-            memset(buf, 0, sizeof(buf));
-            memcpy(buf, &msg[pos], remaining);
-            buf[remaining] = 0x01;
-            hibit = 0;
-
-            h0 += SSF_GETU32LE(&buf[0]) & 0x3FFFFFFu;
-            h1 += (SSF_GETU32LE(&buf[3]) >> 2) & 0x3FFFFFFu;
-            h2 += (SSF_GETU32LE(&buf[6]) >> 4) & 0x3FFFFFFu;
-            h3 += (SSF_GETU32LE(&buf[9]) >> 6) & 0x3FFFFFFu;
-            h4 += (SSF_GETU32LE(&buf[12]) >> 8);
-            pos += remaining;
-        }
-
-        /* h = (h * r) mod p */
-        d0 = ((uint64_t)h0 * r0) + ((uint64_t)h1 * rr3) +
-             ((uint64_t)h2 * rr2) + ((uint64_t)h3 * rr1) + ((uint64_t)h4 * rr0);
-        d1 = ((uint64_t)h0 * r1) + ((uint64_t)h1 * r0) +
-             ((uint64_t)h2 * rr3) + ((uint64_t)h3 * rr2) + ((uint64_t)h4 * rr1);
-        d2 = ((uint64_t)h0 * r2) + ((uint64_t)h1 * r1) +
-             ((uint64_t)h2 * r0) + ((uint64_t)h3 * rr3) + ((uint64_t)h4 * rr2);
-        d3 = ((uint64_t)h0 * r3) + ((uint64_t)h1 * r2) +
-             ((uint64_t)h2 * r1) + ((uint64_t)h3 * r0) + ((uint64_t)h4 * rr3);
-        d4 = ((uint64_t)h0 * r4) + ((uint64_t)h1 * r3) +
-             ((uint64_t)h2 * r2) + ((uint64_t)h3 * r1) + ((uint64_t)h4 * r0);
-
-        /* Carry propagation */
-        c = (uint32_t)(d0 >> 26); h0 = (uint32_t)d0 & 0x3FFFFFFu;
-        d1 += c; c = (uint32_t)(d1 >> 26); h1 = (uint32_t)d1 & 0x3FFFFFFu;
-        d2 += c; c = (uint32_t)(d2 >> 26); h2 = (uint32_t)d2 & 0x3FFFFFFu;
-        d3 += c; c = (uint32_t)(d3 >> 26); h3 = (uint32_t)d3 & 0x3FFFFFFu;
-        d4 += c; c = (uint32_t)(d4 >> 26); h4 = (uint32_t)d4 & 0x3FFFFFFu;
-        h0 += c * 5; c = h0 >> 26; h0 &= 0x3FFFFFFu;
-        h1 += c;
-    }
-
-    /* Final reduction: fully carry h */
-    c = h1 >> 26; h1 &= 0x3FFFFFFu;
-    h2 += c; c = h2 >> 26; h2 &= 0x3FFFFFFu;
-    h3 += c; c = h3 >> 26; h3 &= 0x3FFFFFFu;
-    h4 += c; c = h4 >> 26; h4 &= 0x3FFFFFFu;
-    h0 += c * 5; c = h0 >> 26; h0 &= 0x3FFFFFFu;
-    h1 += c;
-
-    /* Compute h - p = h - (2^130 - 5) */
-    g0 = h0 + 5; c = g0 >> 26; g0 &= 0x3FFFFFFu;
-    g1 = h1 + c; c = g1 >> 26; g1 &= 0x3FFFFFFu;
-    g2 = h2 + c; c = g2 >> 26; g2 &= 0x3FFFFFFu;
-    g3 = h3 + c; c = g3 >> 26; g3 &= 0x3FFFFFFu;
-    g4 = h4 + c - (1u << 26);
-
-    /* Select h if h < p, else g = h - p */
-    mask = (g4 >> 31) - 1u; /* 0 if g4 bit 31 set (h < p), 0xFFFFFFFF otherwise */
-    g0 &= mask;
-    g1 &= mask;
-    g2 &= mask;
-    g3 &= mask;
-    g4 &= mask;
-    mask = ~mask;
-    h0 = (h0 & mask) | g0;
-    h1 = (h1 & mask) | g1;
-    h2 = (h2 & mask) | g2;
-    h3 = (h3 & mask) | g3;
-    h4 = (h4 & mask) | g4;
-
-    /* Assemble h into 4 × 32-bit words and add s */
-    f = (uint64_t)(h0 | (h1 << 26)) + s0; tag[0] = (uint8_t)f;
-    tag[1] = (uint8_t)(f >> 8); tag[2] = (uint8_t)(f >> 16); tag[3] = (uint8_t)(f >> 24);
-    f = (uint64_t)((h1 >> 6) | (h2 << 20)) + s1 + (f >> 32); tag[4] = (uint8_t)f;
-    tag[5] = (uint8_t)(f >> 8); tag[6] = (uint8_t)(f >> 16); tag[7] = (uint8_t)(f >> 24);
-    f = (uint64_t)((h2 >> 12) | (h3 << 14)) + s2 + (f >> 32); tag[8] = (uint8_t)f;
-    tag[9] = (uint8_t)(f >> 8); tag[10] = (uint8_t)(f >> 16); tag[11] = (uint8_t)(f >> 24);
-    f = (uint64_t)((h3 >> 18) | (h4 << 8)) + s3 + (f >> 32); tag[12] = (uint8_t)f;
-    tag[13] = (uint8_t)(f >> 8); tag[14] = (uint8_t)(f >> 16); tag[15] = (uint8_t)(f >> 24);
+    SSFPoly1305Begin(&ctx, key, keyLen);
+    SSFPoly1305Update(&ctx, msg, msgLen);
+    SSFPoly1305End(&ctx, tag, tagSize);
 }

@@ -84,47 +84,34 @@
 #include "ssfct.h"
 
 /* --------------------------------------------------------------------------------------------- */
-/* Builds the Poly1305 construction: auth || pad16 || ct || pad16 || le64(authLen) || le64(ctLen) */
-/* and computes the tag. macData must be large enough for the construction.                      */
+/* Streams the Poly1305 AEAD construction `auth || pad16 || ct || pad16 || le64(authLen) ||      */
+/* le64(ctLen)` directly into an incremental Poly1305 context — no intermediate buffer.          */
+/* Peak stack for this function is ~sizeof(SSFPoly1305Context_t) + ~32 B of locals, independent  */
+/* of authLen and ctLen.                                                                          */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFCCPComputeTag(const uint8_t *auth, size_t authLen, const uint8_t *ct, size_t ctLen,
                               const uint8_t *otk, uint8_t *tag, size_t tagSize)
 {
-    /* Max poly input: authLen + pad16 + ctLen + pad16 + 16 */
-    /* For TLS records, this is bounded. Use stack buffer with reasonable limit. */
-    uint8_t macData[SSF_CCP_POLY1305_MAX_INPUT];
-    size_t pos = 0;
-    size_t pad;
+    static const uint8_t pad16[15] = { 0 };
+    SSFPoly1305Context_t ctx;
+    uint8_t lengths[16];
 
-    SSF_ASSERT((authLen + 16 + ctLen + 16 + 16) <= sizeof(macData));
+    SSFPoly1305Begin(&ctx, otk, SSF_POLY1305_KEY_SIZE);
 
-    /* auth */
-    if (authLen > 0)
-    {
-        memcpy(&macData[pos], auth, authLen);
-        pos += authLen;
-    }
+    /* AAD + zero pad to 16-byte boundary. */
+    if (authLen > 0u) SSFPoly1305Update(&ctx, auth, authLen);
+    SSFPoly1305Update(&ctx, pad16, (16u - (authLen & 15u)) & 15u);
 
-    /* pad16(auth) */
-    pad = (16 - (authLen & 0xF)) & 0xF;
-    if (pad > 0) { memset(&macData[pos], 0, pad); pos += pad; }
+    /* Ciphertext + zero pad to 16-byte boundary. */
+    if (ctLen > 0u) SSFPoly1305Update(&ctx, ct, ctLen);
+    SSFPoly1305Update(&ctx, pad16, (16u - (ctLen & 15u)) & 15u);
 
-    /* ct */
-    if (ctLen > 0)
-    {
-        memcpy(&macData[pos], ct, ctLen);
-        pos += ctLen;
-    }
+    /* le64(authLen) || le64(ctLen). */
+    SSF_PUTU64LE(&lengths[0], (uint64_t)authLen);
+    SSF_PUTU64LE(&lengths[8], (uint64_t)ctLen);
+    SSFPoly1305Update(&ctx, lengths, sizeof(lengths));
 
-    /* pad16(ct) */
-    pad = (16 - (ctLen & 0xF)) & 0xF;
-    if (pad > 0) { memset(&macData[pos], 0, pad); pos += pad; }
-
-    /* le64(authLen) || le64(ctLen) */
-    SSF_PUTU64LE(&macData[pos], (uint64_t)authLen); pos += 8;
-    SSF_PUTU64LE(&macData[pos], (uint64_t)ctLen); pos += 8;
-
-    SSFPoly1305Mac(macData, pos, otk, SSF_POLY1305_KEY_SIZE, tag, tagSize);
+    SSFPoly1305End(&ctx, tag, tagSize);
 }
 
 /* --------------------------------------------------------------------------------------------- */

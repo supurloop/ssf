@@ -51,15 +51,14 @@ ChaCha20 or Poly1305 primitives directly.
 - AAD (`auth`, `authLen`) is protected for integrity but not encrypted. Both sides must
   supply the exact same AAD bytes for decryption to succeed. `auth` may be `NULL` when
   `authLen` is `0`.
-- The AEAD construction buffers `auth || pad16 || ct || pad16 || le64(authLen) || le64(ctLen)`
-  on the stack before running Poly1305 over it, so the total MAC input — not just the
-  plaintext — is capped by [`SSF_CCP_POLY1305_MAX_INPUT`](#ssf-ccp-poly1305-max-input)
-  (default `17408` bytes). Exceeding that cap trips an `SSF_ASSERT`. To raise it, `#define`
-  the macro before including `ssfchacha20poly1305.h`; to lower it for RAM-constrained ports,
-  do the same with a smaller value large enough for your expected worst-case record.
-- `ptLen` (encrypt) and `ctLen` (decrypt) are also capped at `512 MiB` (2²⁹) per call,
-  inherited from [`ssfchacha20`](ssfchacha20.md). Typical AEAD records — TLS, QUIC, SSH —
-  are well below any of these limits.
+- The AEAD construction `auth || pad16 || ct || pad16 || le64(authLen) || le64(ctLen)` is
+  streamed into the Poly1305 primitive via its incremental
+  [Begin/Update/End](ssfpoly1305.md#ssfpoly1305begin) interface — no intermediate buffer.
+  Peak stack for the tag-computation step is fixed at ~`sizeof(SSFPoly1305Context_t)` + ~32 B
+  of locals, independent of `authLen` and `ctLen`.
+- `ptLen` (encrypt) and `ctLen` (decrypt) are capped at `512 MiB` (2²⁹) per call, inherited
+  from [`ssfchacha20`](ssfchacha20.md). Typical AEAD records — TLS, QUIC, SSH — are well
+  below this limit.
 - In-place operation (`ct == pt`) is supported for both encrypt and decrypt: the tag is
   computed over the ciphertext bytes at the point they exist in the shared buffer, which is
   "after encryption" on encrypt and "before decryption" on decrypt.
@@ -72,9 +71,7 @@ ChaCha20 or Poly1305 primitives directly.
 
 ## [↑](#ssfchacha20poly1305--chacha20-poly1305-aead) Configuration
 
-| Macro | Default | Description |
-|-------|---------|-------------|
-| <a id="ssf-ccp-poly1305-max-input"></a>`SSF_CCP_POLY1305_MAX_INPUT` | `17408` | Upper bound on the Poly1305 construction buffer that the encrypt and decrypt functions allocate on the stack. Must be at least `authLen + pad16 + ctLen + pad16 + 16` for the largest record the caller intends to process. Override by `#define`-ing before including `ssfchacha20poly1305.h`. |
+This module has no compile-time configuration options.
 
 <a id="api-summary"></a>
 
@@ -121,7 +118,7 @@ written to `tag`; the ciphertext is written to `ct` and is the same length as th
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
 | `pt` | in | `const uint8_t *` | Plaintext. May be `NULL` when `ptLen` is `0`. |
-| `ptLen` | in | `size_t` | Number of plaintext bytes. Must be `< 512 MiB`; together with `authLen`, must satisfy [`SSF_CCP_POLY1305_MAX_INPUT`](#ssf-ccp-poly1305-max-input). |
+| `ptLen` | in | `size_t` | Number of plaintext bytes. Must be `< 512 MiB`. |
 | `iv` | in | `const uint8_t *` | 12-byte nonce. Must not be `NULL`. **Must be unique per key.** |
 | `ivLen` | in | `size_t` | Must equal [`SSF_CCP_NONCE_SIZE`](#ssf-ccp-nonce-size) (12). |
 | `auth` | in | `const uint8_t *` | Associated data (integrity-protected, not encrypted). May be `NULL` when `authLen` is `0`. |
@@ -195,7 +192,7 @@ supplied `tag` before any plaintext is written.
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
 | `ct` | in | `const uint8_t *` | Ciphertext. May be `NULL` when `ctLen` is `0`. |
-| `ctLen` | in | `size_t` | Number of ciphertext bytes. Must be `< 512 MiB`; together with `authLen`, must satisfy [`SSF_CCP_POLY1305_MAX_INPUT`](#ssf-ccp-poly1305-max-input). |
+| `ctLen` | in | `size_t` | Number of ciphertext bytes. Must be `< 512 MiB`. |
 | `iv` | in | `const uint8_t *` | 12-byte nonce. Must not be `NULL`. Must match the nonce used during encryption. |
 | `ivLen` | in | `size_t` | Must equal [`SSF_CCP_NONCE_SIZE`](#ssf-ccp-nonce-size) (12). |
 | `auth` | in | `const uint8_t *` | Associated data. May be `NULL` when `authLen` is `0`. Must bitwise match the AAD supplied to encrypt. |

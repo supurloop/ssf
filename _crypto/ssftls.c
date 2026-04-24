@@ -251,6 +251,26 @@ static void _SSFTLSBuildNonce(const SSFTLSRecordState_t *state, uint8_t nonce[12
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* AEAD tag size per TLS 1.3 cipher suite. Returns 0 for an unsupported suite.                   */
+/* All currently supported suites use 16-byte tags except TLS_AES_128_CCM_8_SHA256 (8 bytes).    */
+/* --------------------------------------------------------------------------------------------- */
+static size_t _SSFTLSAeadTagSize(uint16_t cipherSuite)
+{
+    switch (cipherSuite)
+    {
+    case SSF_TLS_CS_AES_128_GCM_SHA256:
+    case SSF_TLS_CS_AES_256_GCM_SHA384:
+    case SSF_TLS_CS_AES_128_CCM_SHA256:
+    case SSF_TLS_CS_CHACHA20_POLY1305_SHA256:
+        return SSF_TLS_AEAD_TAG_SIZE;    /* 16 */
+    case SSF_TLS_CS_AES_128_CCM_8_SHA256:
+        return 8u;
+    default:
+        return 0u;                        /* Unsupported */
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Record layer: encrypt a plaintext into a TLS 1.3 record.                                      */
 /* RFC 8446 Section 5.2: inner content type appended before encryption.                          */
 /* --------------------------------------------------------------------------------------------- */
@@ -258,9 +278,10 @@ bool SSFTLSRecordEncrypt(SSFTLSRecordState_t *state, uint8_t contentType,
                          const uint8_t *pt, size_t ptLen,
                          uint8_t *record, size_t recordSize, size_t *recordLen)
 {
-    size_t innerLen = ptLen + 1u; /* plaintext + inner content type */
-    size_t cipherLen = innerLen + SSF_TLS_AEAD_TAG_SIZE;
-    size_t totalLen = SSF_TLS_RECORD_HEADER_SIZE + cipherLen;
+    size_t tagLen;
+    size_t innerLen;
+    size_t cipherLen;
+    size_t totalLen;
     uint8_t nonce[SSF_TLS_IV_SIZE];
     uint8_t *inner;
     uint8_t *ct;
@@ -270,13 +291,23 @@ bool SSFTLSRecordEncrypt(SSFTLSRecordState_t *state, uint8_t contentType,
     SSF_REQUIRE(record != NULL);
     SSF_REQUIRE(recordLen != NULL);
 
-    if (recordSize < totalLen) return false;
-    if (cipherLen > 0x4000u + 256u) return false; /* RFC limit */
+    /* Per-suite AEAD tag size (16 bytes for all suites except TLS_AES_128_CCM_8_SHA256, which
+     * uses 8). Rejecting unsupported suites up front keeps the rest of the function's sizing
+     * math straightforward. */
+    tagLen = _SSFTLSAeadTagSize(state->cipherSuite);
+    if (tagLen == 0u) return false;
 
-    /* Build record header (used as AAD) */
+    innerLen  = ptLen + 1u;              /* plaintext + inner content type */
+    cipherLen = innerLen + tagLen;
+    totalLen  = SSF_TLS_RECORD_HEADER_SIZE + cipherLen;
+
+    if (recordSize < totalLen) return false;
+    if (cipherLen > 0x4000u + 256u) return false; /* RFC 8446 §5.2 record limit */
+
+    /* Build record header (used as AAD). cipherLen now correctly reflects the tag size. */
     record[0] = SSF_TLS_CT_APPLICATION; /* Outer type is always application_data */
     record[1] = 0x03u;
-    record[2] = 0x03u; /* Legacy version 0x0303 */
+    record[2] = 0x03u;                   /* Legacy version 0x0303 */
     record[3] = (uint8_t)((cipherLen >> 8) & 0xFFu);
     record[4] = (uint8_t)(cipherLen & 0xFFu);
 
@@ -288,7 +319,7 @@ bool SSFTLSRecordEncrypt(SSFTLSRecordState_t *state, uint8_t contentType,
     /* Build nonce */
     _SSFTLSBuildNonce(state, nonce);
 
-    /* AEAD encrypt in-place (inner → ct at same location for GCM) */
+    /* AEAD encrypt in-place and place the tag of size `tagLen` immediately after. */
     ct = &record[SSF_TLS_RECORD_HEADER_SIZE];
     {
         uint8_t tag[SSF_TLS_AEAD_TAG_SIZE];
@@ -300,36 +331,26 @@ bool SSFTLSRecordEncrypt(SSFTLSRecordState_t *state, uint8_t contentType,
             SSFAESGCMEncrypt(inner, innerLen, nonce, SSF_TLS_IV_SIZE,
                              record, SSF_TLS_RECORD_HEADER_SIZE,
                              state->key, state->keyLen,
-                             tag, sizeof(tag), ct, innerLen);
-            memcpy(&ct[innerLen], tag, SSF_TLS_AEAD_TAG_SIZE);
+                             tag, tagLen, ct, innerLen);
             break;
         case SSF_TLS_CS_AES_128_CCM_SHA256:
+        case SSF_TLS_CS_AES_128_CCM_8_SHA256:
             SSFAESCCMEncrypt(inner, innerLen, nonce, SSF_TLS_IV_SIZE,
                              record, SSF_TLS_RECORD_HEADER_SIZE,
                              state->key, state->keyLen,
-                             tag, sizeof(tag), ct, innerLen);
-            memcpy(&ct[innerLen], tag, SSF_TLS_AEAD_TAG_SIZE);
+                             tag, tagLen, ct, innerLen);
             break;
         case SSF_TLS_CS_CHACHA20_POLY1305_SHA256:
             SSFChaCha20Poly1305Encrypt(inner, innerLen, nonce, SSF_TLS_IV_SIZE,
                                        record, SSF_TLS_RECORD_HEADER_SIZE,
                                        state->key, state->keyLen,
-                                       tag, sizeof(tag), ct, innerLen);
-            memcpy(&ct[innerLen], tag, SSF_TLS_AEAD_TAG_SIZE);
-            break;
-        case SSF_TLS_CS_AES_128_CCM_8_SHA256:
-            SSFAESCCMEncrypt(inner, innerLen, nonce, SSF_TLS_IV_SIZE,
-                             record, SSF_TLS_RECORD_HEADER_SIZE,
-                             state->key, state->keyLen,
-                             tag, 8u, ct, innerLen);
-            /* CCM-8 uses 8-byte tag but TLS 1.3 always uses 16 */
-            /* For CCM_8 suite, the tag is 8 bytes per RFC 8446 */
-            memcpy(&ct[innerLen], tag, 8u);
-            /* Adjust cipherLen for CCM-8 (8-byte tag) */
+                                       tag, tagLen, ct, innerLen);
             break;
         default:
+            /* Unreachable: _SSFTLSAeadTagSize rejected this above. */
             return false;
         }
+        memcpy(&ct[innerLen], tag, tagLen);
     }
 
     state->seqNum++;
@@ -345,6 +366,7 @@ bool SSFTLSRecordDecrypt(SSFTLSRecordState_t *state,
                          uint8_t *pt, size_t ptSize, size_t *ptLen,
                          uint8_t *contentType)
 {
+    size_t tagLen;
     uint16_t fragLen;
     size_t innerLen;
     uint8_t nonce[SSF_TLS_IV_SIZE];
@@ -357,16 +379,20 @@ bool SSFTLSRecordDecrypt(SSFTLSRecordState_t *state,
     SSF_REQUIRE(ptLen != NULL);
     SSF_REQUIRE(contentType != NULL);
 
-    if (recordLen < SSF_TLS_RECORD_HEADER_SIZE + SSF_TLS_AEAD_TAG_SIZE + 1u) return false;
+    /* Per-suite AEAD tag size — must match what the encrypting peer emitted. */
+    tagLen = _SSFTLSAeadTagSize(state->cipherSuite);
+    if (tagLen == 0u) return false;
+
+    if (recordLen < SSF_TLS_RECORD_HEADER_SIZE + tagLen + 1u) return false;
 
     /* Parse record header */
     if (record[0] != SSF_TLS_CT_APPLICATION) return false;
 
     fragLen = ((uint16_t)record[3] << 8) | (uint16_t)record[4];
     if ((size_t)(SSF_TLS_RECORD_HEADER_SIZE + fragLen) != recordLen) return false;
-    if (fragLen < SSF_TLS_AEAD_TAG_SIZE + 1u) return false;
+    if (fragLen < tagLen + 1u) return false;
 
-    innerLen = (size_t)fragLen - SSF_TLS_AEAD_TAG_SIZE;
+    innerLen = (size_t)fragLen - tagLen;
     if (ptSize < innerLen) return false;
 
     ct = &record[SSF_TLS_RECORD_HEADER_SIZE];
@@ -386,21 +412,23 @@ bool SSFTLSRecordDecrypt(SSFTLSRecordState_t *state,
             ok = SSFAESGCMDecrypt(ct, innerLen, nonce, SSF_TLS_IV_SIZE,
                                   record, SSF_TLS_RECORD_HEADER_SIZE,
                                   state->key, state->keyLen,
-                                  tag, SSF_TLS_AEAD_TAG_SIZE, pt, innerLen);
+                                  tag, tagLen, pt, innerLen);
             break;
         case SSF_TLS_CS_AES_128_CCM_SHA256:
+        case SSF_TLS_CS_AES_128_CCM_8_SHA256:
             ok = SSFAESCCMDecrypt(ct, innerLen, nonce, SSF_TLS_IV_SIZE,
                                   record, SSF_TLS_RECORD_HEADER_SIZE,
                                   state->key, state->keyLen,
-                                  tag, SSF_TLS_AEAD_TAG_SIZE, pt, innerLen);
+                                  tag, tagLen, pt, innerLen);
             break;
         case SSF_TLS_CS_CHACHA20_POLY1305_SHA256:
             ok = SSFChaCha20Poly1305Decrypt(ct, innerLen, nonce, SSF_TLS_IV_SIZE,
                                              record, SSF_TLS_RECORD_HEADER_SIZE,
                                              state->key, state->keyLen,
-                                             tag, SSF_TLS_AEAD_TAG_SIZE, pt, innerLen);
+                                             tag, tagLen, pt, innerLen);
             break;
         default:
+            /* Unreachable: _SSFTLSAeadTagSize rejected this above. */
             return false;
         }
         if (!ok) return false;

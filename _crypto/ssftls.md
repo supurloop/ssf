@@ -102,14 +102,13 @@ through the `ssfhkdf` API).
   1.3 records on the wire advertise the legacy `0x0303` version for middlebox
   compatibility; the real version is negotiated through the `supported_versions`
   extension (in the ClientHello / ServerHello, not in the record layer).
-- **`SSF_TLS_CS_AES_128_CCM_8_SHA256` has a known inconsistency in the current
-  implementation.** The record header still advertises a 16-byte tag length (`cipherLen =
-  innerLen + SSF_TLS_AEAD_TAG_SIZE` is computed before the suite dispatch at
-  ssftls.c:262), but only 8 bytes of tag are actually written for the CCM_8 suite,
-  leaving 8 bytes of uninitialised buffer between the ciphertext and the tag. A peer
-  expecting RFC 8446 CCM_8 records will reject these. Prefer one of the 16-byte-tag
-  suites unless you have verified interop end-to-end with your specific peer. A fix
-  would rewrite `cipherLen` for the CCM_8 branch before building the header.
+- **Per-suite AEAD tag length** is derived at runtime via the internal
+  `_SSFTLSAeadTagSize()` helper (16 bytes for every suite except
+  `TLS_AES_128_CCM_8_SHA256`, which is 8). The value flows into `cipherLen`,
+  `totalLen`, the per-suite tag copy, and the decrypt-side `innerLen` arithmetic, so all
+  four CCM and non-CCM suites produce correctly-sized records. In particular, a CCM_8
+  record for an N-byte plaintext is `5 + (N + 1) + 8` bytes on the wire, not
+  `5 + (N + 1) + 16`.
 - **Transcript hash spans every handshake message bytewise.** Per RFC 8446 §4.4.1, the
   transcript is the concatenation of all handshake messages (including their 4-byte
   headers) that have been exchanged so far. Feed *every* handshake message to
@@ -401,8 +400,10 @@ bool SSFTLSRecordEncrypt(SSFTLSRecordState_t *state, uint8_t contentType,
 Produce one TLS 1.3 record containing `pt` as the protected payload with inner type
 `contentType`. Writes the full wire record to `record`: 5-byte header
 (`0x17 0x03 0x03 len_hi len_lo`), then `ptLen + 1` bytes of inner plaintext
-(`pt ‖ contentType`) AEAD-encrypted in-place, followed by the 16-byte AEAD tag (or 8-byte
-for CCM_8 — see [Notes](#notes) on that suite's known header-length issue).
+(`pt ‖ contentType`) AEAD-encrypted in-place, followed by the AEAD tag (16 bytes for
+every suite except `TLS_AES_128_CCM_8_SHA256`, which uses 8 — see the cipher-suite table
+in [Notes](#notes)). `recordLen` reports the total wire-record size including header,
+ciphertext, and tag.
 
 Returns `false` if `recordSize` is too small or if the record would exceed the RFC 8446
 per-record ciphertext limit of `2^14 + 256` bytes. The sequence number is

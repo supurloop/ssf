@@ -264,5 +264,76 @@ void SSFTLSUnitTest(void)
         SSF_ASSERT(ct == SSF_TLS_CT_APPLICATION);
         SSF_ASSERT(memcmp(decrypted, plaintext, 16) == 0);
     }
+
+    /* AES-128-CCM round trip (16-byte tag). */
+    {
+        SSFTLSRecordState_t encState, decState;
+        uint8_t key[16], iv[12];
+        uint8_t plaintext[] = "AES-128-CCM test";
+        uint8_t record[128];
+        size_t recordLen;
+        uint8_t decrypted[128];
+        size_t decLen;
+        uint8_t ct;
+        uint8_t i;
+
+        for (i = 0; i < 16u; i++) key[i] = (uint8_t)(i + 0xA0u);
+        for (i = 0; i < 12u; i++) iv[i]  = (uint8_t)(i + 0xB0u);
+
+        SSFTLSRecordStateInit(&encState, SSF_TLS_CS_AES_128_CCM_SHA256,
+                              key, sizeof(key), iv, sizeof(iv));
+        SSFTLSRecordStateInit(&decState, SSF_TLS_CS_AES_128_CCM_SHA256,
+                              key, sizeof(key), iv, sizeof(iv));
+
+        SSF_ASSERT(SSFTLSRecordEncrypt(&encState, SSF_TLS_CT_APPLICATION,
+                   plaintext, 16, record, sizeof(record), &recordLen) == true);
+        /* 5 header + 17 inner + 16 tag = 38 bytes on the wire. */
+        SSF_ASSERT(recordLen == 38u);
+        SSF_ASSERT(SSFTLSRecordDecrypt(&decState, record, recordLen,
+                   decrypted, sizeof(decrypted), &decLen, &ct) == true);
+        SSF_ASSERT(decLen == 16u);
+        SSF_ASSERT(ct == SSF_TLS_CT_APPLICATION);
+        SSF_ASSERT(memcmp(decrypted, plaintext, 16) == 0);
+    }
+
+    /* AES-128-CCM-8 round trip (8-byte tag). Regression test for the framing bug where
+     * the record header advertised a 16-byte tag length but only 8 tag bytes were written,
+     * leaving 8 uninitialised bytes in the wire record and breaking interop with any
+     * spec-compliant peer. cipherLen must reflect the 8-byte tag, and Decrypt must
+     * dispatch CCM_8 correctly. */
+    {
+        SSFTLSRecordState_t encState, decState;
+        uint8_t key[16], iv[12];
+        uint8_t plaintext[] = "CCM-8 regression";
+        uint8_t record[128];
+        size_t recordLen;
+        uint8_t decrypted[128];
+        size_t decLen;
+        uint8_t ct;
+        uint8_t i;
+        uint16_t hdrCipherLen;
+
+        for (i = 0; i < 16u; i++) key[i] = (uint8_t)(i + 0xC0u);
+        for (i = 0; i < 12u; i++) iv[i]  = (uint8_t)(i + 0xD0u);
+
+        SSFTLSRecordStateInit(&encState, SSF_TLS_CS_AES_128_CCM_8_SHA256,
+                              key, sizeof(key), iv, sizeof(iv));
+        SSFTLSRecordStateInit(&decState, SSF_TLS_CS_AES_128_CCM_8_SHA256,
+                              key, sizeof(key), iv, sizeof(iv));
+
+        SSF_ASSERT(SSFTLSRecordEncrypt(&encState, SSF_TLS_CT_APPLICATION,
+                   plaintext, 16, record, sizeof(record), &recordLen) == true);
+        /* 5 header + 17 inner + 8 tag = 30 bytes on the wire. */
+        SSF_ASSERT(recordLen == 30u);
+        /* The header's advertised cipherLen must match innerLen + tagLen = 25. */
+        hdrCipherLen = ((uint16_t)record[3] << 8) | (uint16_t)record[4];
+        SSF_ASSERT(hdrCipherLen == 25u);
+
+        SSF_ASSERT(SSFTLSRecordDecrypt(&decState, record, recordLen,
+                   decrypted, sizeof(decrypted), &decLen, &ct) == true);
+        SSF_ASSERT(decLen == 16u);
+        SSF_ASSERT(ct == SSF_TLS_CT_APPLICATION);
+        SSF_ASSERT(memcmp(decrypted, plaintext, 16) == 0);
+    }
 }
 #endif /* SSF_CONFIG_TLS_UNIT_TEST */

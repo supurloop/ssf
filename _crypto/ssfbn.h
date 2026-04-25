@@ -229,11 +229,14 @@ int8_t SSFBNCmpUint32(const SSFBN_t *a, uint32_t val);
 /* --------------------------------------------------------------------------------------------- */
 
 /* Returns the index of the most significant set bit (0-based), or 0 if a is zero.              */
+/* VARIABLE-TIME: timing depends on the position of a's highest set bit. PUBLIC-INPUT ONLY —     */
+/* do not call on secret values where the bit length itself must remain confidential.            */
 uint32_t SSFBNBitLen(const SSFBN_t *a);
 
 /* Returns the number of trailing zero bits (index of the lowest set bit, 0-based).              */
 /* a must be nonzero; asserted via SSF_REQUIRE. Useful for binary-GCD-style algorithms that      */
 /* strip factors of 2, and for factoring n-1 = 2^s * d in Miller-Rabin.                          */
+/* VARIABLE-TIME: timing depends on the position of a's lowest set bit. PUBLIC-INPUT ONLY.       */
 uint32_t SSFBNTrailingZeros(const SSFBN_t *a);
 
 /* Returns the value of bit at position pos (0 = LSB). Returns 0 if pos >= len * 32.            */
@@ -332,18 +335,27 @@ bool SSFBNModInv(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m);
 void SSFBNModMulNIST(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *m);
 
 /* r = a mod m. a->len may be up to 2 * m->len. r->len is set to m->len.                        */
+/* VARIABLE-TIME: shift-and-subtract long division. Iteration count and per-step branch outcome  */
+/* depend on the bit pattern of a. PUBLIC-INPUT ONLY — do not call on secret a or m.             */
 void SSFBNMod(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m);
 
 /* Shift-subtract long division: q = a / b, rem = a mod b. Both q and rem are set to            */
 /* max(a->len, b->len). q must not alias a, b, or rem; rem must not alias a, b, or q. b must    */
 /* be nonzero; division by zero is rejected via SSF_REQUIRE.                                    */
+/* VARIABLE-TIME: shift count and per-step branch depend on bit patterns of a and b.            */
+/* PUBLIC-INPUT ONLY.                                                                            */
 void SSFBNDivMod(SSFBN_t *q, SSFBN_t *rem, const SSFBN_t *a, const SSFBN_t *b);
 
 /* r = gcd(a, b) using binary GCD (Stein's algorithm). a and b must have the same len.          */
+/* VARIABLE-TIME: Stein's algorithm branches on parity of intermediate values. PUBLIC-INPUT     */
+/* ONLY — do not call on secret a or b.                                                          */
 void SSFBNGcd(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b);
 
 /* r = a^(-1) mod m using binary extended GCD. Works for any coprime a and m (m need not be     */
 /* prime). Returns false if gcd(a, m) != 1.                                                      */
+/* VARIABLE-TIME: Stein's binary extended GCD branches on parity of intermediate values. The    */
+/* iteration count and branch outcomes leak information about a. PUBLIC-INPUT ONLY — for secret */
+/* a use SSFBNModInv (Fermat's little theorem path) instead.                                     */
 bool SSFBNModInvExt(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m);
 
 /* --------------------------------------------------------------------------------------------- */

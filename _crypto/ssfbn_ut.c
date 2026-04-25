@@ -306,6 +306,18 @@ static void _VerifyAtSize(int bits, uint16_t iters, bool prime_capable)
 
                 SSF_ASSERT(SSFBNModInvExt(&invR, &aP, &prime) == true);
                 SSF_ASSERT(_EqOSSL(&invR, bnR));
+
+                /* Round-trip property: aP * inv mod prime == 1. Catches ModInv/ModMul errors    */
+                /* that might both happen to match OpenSSL bug-for-bug or that corrupt internal  */
+                /* state without being visible at single-op parity. ModMul requires 2*nLimbs <=  */
+                /* MAX_LIMBS, so this only runs at sizes where Mul is also testable.             */
+                if ((uint32_t)nLimbs * 2u <= SSF_BN_MAX_LIMBS)
+                {
+                    SSFBN_DEFINE(check, SSF_BN_MAX_LIMBS);
+                    check.len = nLimbs;
+                    SSFBNModMul(&check, &aP, &invR, &prime);
+                    SSF_ASSERT(SSFBNCmpUint32(&check, 1u) == 0);
+                }
             }
             BN_free(bnAP);
         }
@@ -1347,6 +1359,198 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
     BN_CTX_free(ctx);
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Karatsuba boundary stress.                                                                    */
+/*                                                                                                */
+/* SSFBNMul dispatches to Karatsuba when (a->len == b->len) AND (n >= 32) AND (n is even); every  */
+/* other case falls back to schoolbook. Random-input sweeps don't reliably probe the boundary —  */
+/* this function explicitly tests lengths that bracket the threshold and exercise the dispatch   */
+/* logic on both even/odd and same/asymmetric pairings.                                          */
+/* --------------------------------------------------------------------------------------------- */
+static void _VerifyKaratsubaAtBoundary(void)
+{
+    static const struct { uint16_t aLen; uint16_t bLen; } cases[] = {
+        { 31u, 31u },  /* schoolbook (just below threshold) */
+        { 32u, 32u },  /* Karatsuba (boundary, even) */
+        { 33u, 33u },  /* schoolbook (odd, even though >= threshold) */
+        { 34u, 34u },  /* Karatsuba (just above) */
+        { 32u, 31u },  /* schoolbook (asymmetric) */
+        { 32u, 33u },  /* schoolbook (asymmetric, larger b) */
+        { 31u, 32u },  /* schoolbook (asymmetric, larger a) */
+        { 62u, 62u },  /* Karatsuba (large even) */
+        { 63u, 63u },  /* schoolbook (large odd) */
+        { 64u, 64u },  /* Karatsuba (max within MAX_LIMBS) */
+    };
+    BN_CTX *ctx = BN_CTX_new();
+    BIGNUM *bnA = BN_new();
+    BIGNUM *bnB = BN_new();
+    BIGNUM *bnR = BN_new();
+    size_t ci;
+
+    for (ci = 0; ci < sizeof(cases) / sizeof(cases[0]); ci++)
+    {
+        uint16_t iter;
+        const uint16_t aLen = cases[ci].aLen;
+        const uint16_t bLen = cases[ci].bLen;
+
+        for (iter = 0; iter < 5u; iter++)
+        {
+            SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
+            SSFBN_DEFINE(b, SSF_BN_MAX_LIMBS);
+            SSFBN_DEFINE(r, SSF_BN_MAX_LIMBS);
+
+            SSF_ASSERT(BN_rand(bnA, (int)aLen * 32, BN_RAND_TOP_ONE, BN_RAND_BOTTOM_ANY) == 1);
+            SSF_ASSERT(BN_rand(bnB, (int)bLen * 32, BN_RAND_TOP_ONE, BN_RAND_BOTTOM_ANY) == 1);
+            _FromOSSL(&a, bnA, aLen);
+            _FromOSSL(&b, bnB, bLen);
+
+            SSFBNMul(&r, &a, &b);
+            SSF_ASSERT(BN_mul(bnR, bnA, bnB, ctx) == 1);
+            SSF_ASSERT(r.len == (uint16_t)(aLen + bLen));
+            SSF_ASSERT(_EqOSSL(&r, bnR));
+
+            /* Square parity (only when a.len matches what SSFBNSquare can handle and aLen==bLen) */
+            if ((aLen == bLen) && ((uint32_t)aLen * 2u <= SSF_BN_MAX_LIMBS))
+            {
+                SSFBN_DEFINE(sq, SSF_BN_MAX_LIMBS);
+                SSFBNSquare(&sq, &a);
+                SSF_ASSERT(BN_sqr(bnR, bnA, ctx) == 1);
+                SSF_ASSERT(_EqOSSL(&sq, bnR));
+            }
+        }
+    }
+
+    BN_free(bnA); BN_free(bnB); BN_free(bnR);
+    BN_CTX_free(ctx);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* NIST fast-reduction stress.                                                                   */
+/*                                                                                                */
+/* _SSFBNReduceP256 / _SSFBNReduceP384 are hand-coded magic-limb-permutation tables from NIST    */
+/* SP 800-186. Each s_i and d_i selects specific 32-bit chunks of the 16- or 24-limb input —     */
+/* easy to typo, hard to spot in code review. The trailing carry/borrow adjustment loops are     */
+/* hit infrequently with purely random inputs because random a*b rarely sits right at the prime. */
+/* This sweep injects boundary values periodically to force adjustment-loop activity.            */
+/* --------------------------------------------------------------------------------------------- */
+static void _VerifyNISTReductionStress(void)
+{
+    BN_CTX *ctx = BN_CTX_new();
+    BIGNUM *bnA = BN_new();
+    BIGNUM *bnB = BN_new();
+    BIGNUM *bnM = BN_new();
+    BIGNUM *bnR = BN_new();
+
+    /* Per-curve sweep. */
+    {
+        const struct { const SSFBN_t *p; uint16_t nLimbs; const char *label; } curves[] = {
+            { &SSF_BN_NIST_P256, 8u,  "P-256" },
+            { &SSF_BN_NIST_P384, 12u, "P-384" },
+        };
+        size_t ci;
+
+        for (ci = 0; ci < sizeof(curves) / sizeof(curves[0]); ci++)
+        {
+            uint16_t iter;
+            const SSFBN_t *p = curves[ci].p;
+            const uint16_t nLimbs = curves[ci].nLimbs;
+            (void)curves[ci].label;
+
+            _ToOSSL(bnM, p);
+
+            for (iter = 0; iter < 1000u; iter++)
+            {
+                SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
+                SSFBN_DEFINE(b, SSF_BN_MAX_LIMBS);
+                SSFBN_DEFINE(r, SSF_BN_MAX_LIMBS);
+                r.len = nLimbs;
+
+                /* Inject boundary inputs every 32 iters to exercise the adjustment loops. */
+                switch ((unsigned)iter & 0x1Fu)
+                {
+                    case 0u: /* a = p - 1 */
+                        SSF_ASSERT(BN_sub(bnA, bnM, BN_value_one()) == 1);
+                        break;
+                    case 1u: /* a = (p - 1) / 2 */
+                        SSF_ASSERT(BN_sub(bnA, bnM, BN_value_one()) == 1);
+                        SSF_ASSERT(BN_rshift1(bnA, bnA) == 1);
+                        break;
+                    case 2u: /* a = 1 */
+                        SSF_ASSERT(BN_one(bnA) == 1);
+                        break;
+                    case 3u: /* a = 2 */
+                        SSF_ASSERT(BN_set_word(bnA, 2u) == 1);
+                        break;
+                    default:
+                        SSF_ASSERT(BN_rand_range(bnA, bnM) == 1);
+                        break;
+                }
+                switch ((unsigned)(iter >> 5) & 0x3u)
+                {
+                    case 0u: /* b = p - 1 */
+                        SSF_ASSERT(BN_sub(bnB, bnM, BN_value_one()) == 1);
+                        break;
+                    case 1u: /* b = 1 */
+                        SSF_ASSERT(BN_one(bnB) == 1);
+                        break;
+                    default:
+                        SSF_ASSERT(BN_rand_range(bnB, bnM) == 1);
+                        break;
+                }
+                _FromOSSL(&a, bnA, nLimbs);
+                _FromOSSL(&b, bnB, nLimbs);
+
+                SSFBNModMulNIST(&r, &a, &b, p);
+                SSF_ASSERT(BN_mod_mul(bnR, bnA, bnB, bnM, ctx) == 1);
+                SSF_ASSERT(_EqOSSL(&r, bnR));
+            }
+        }
+    }
+
+    BN_free(bnA); BN_free(bnB); BN_free(bnM); BN_free(bnR);
+    BN_CTX_free(ctx);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* ModInvExt at RSA-2048.                                                                        */
+/*                                                                                                */
+/* The existing _VerifyAtSize covers ModInv at 256, 384, 1024 (where prime gen is fast). At      */
+/* 2048 prime gen would dominate test runtime, and at 4096 SSFBNModInv's internal verification   */
+/* via SSFBNModMul trips the 2*nLimbs <= MAX_LIMBS precondition. This function fills the gap by  */
+/* generating one 2048-bit prime and running a focused ModInvExt sweep against it.               */
+/* --------------------------------------------------------------------------------------------- */
+static void _VerifyModInvExtAtRSA2048(void)
+{
+    const uint16_t nLimbs = 64u;
+    BN_CTX *ctx = BN_CTX_new();
+    BIGNUM *bnPrime = BN_new();
+    BIGNUM *bnA = BN_new();
+    BIGNUM *bnInv = BN_new();
+    SSFBN_DEFINE(prime, SSF_BN_MAX_LIMBS);
+    uint16_t iter;
+
+    SSF_ASSERT(BN_generate_prime_ex(bnPrime, 2048, 0, NULL, NULL, NULL) == 1);
+    _FromOSSL(&prime, bnPrime, nLimbs);
+
+    for (iter = 0; iter < 50u; iter++)
+    {
+        SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(inv, SSF_BN_MAX_LIMBS);
+        inv.len = nLimbs;
+
+        SSF_ASSERT(BN_rand_range(bnA, bnPrime) == 1);
+        if (BN_is_zero(bnA)) SSF_ASSERT(BN_set_word(bnA, 1u) == 1);
+        _FromOSSL(&a, bnA, nLimbs);
+
+        SSF_ASSERT(SSFBNModInvExt(&inv, &a, &prime) == true);
+        SSF_ASSERT(BN_mod_inverse(bnInv, bnA, bnPrime, ctx) != NULL);
+        SSF_ASSERT(_EqOSSL(&inv, bnInv));
+    }
+
+    BN_free(bnPrime); BN_free(bnA); BN_free(bnInv);
+    BN_CTX_free(ctx);
+}
+
 static void _SSFBNVerifyAgainstOpenSSL(void)
 {
     static const struct
@@ -1379,6 +1583,14 @@ static void _SSFBNVerifyAgainstOpenSSL(void)
     fflush(stdout);
     _VerifyCornerCasesAgainstOpenSSL();
     printf("OK\n");
+    printf("  Karatsuba boundary stress... ");
+    fflush(stdout);
+    _VerifyKaratsubaAtBoundary();
+    printf("OK\n");
+    printf("  NIST fast-reduction stress (P-256 + P-384, 1000 iters each)... ");
+    fflush(stdout);
+    _VerifyNISTReductionStress();
+    printf("OK\n");
     for (si = 0; si < (sizeof(sizes) / sizeof(sizes[0])); si++)
     {
         printf("  %-9s %4d-bit x %u iters... ", sizes[si].label, sizes[si].bits, sizes[si].iters);
@@ -1386,6 +1598,10 @@ static void _SSFBNVerifyAgainstOpenSSL(void)
         _VerifyAtSize(sizes[si].bits, sizes[si].iters, sizes[si].prime_capable);
         printf("OK\n");
     }
+    printf("  ModInvExt @ RSA-2048 (50 iters)... ");
+    fflush(stdout);
+    _VerifyModInvExtAtRSA2048();
+    printf("OK\n");
     printf("--- end OpenSSL cross-check ---\n");
 }
 

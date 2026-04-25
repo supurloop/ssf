@@ -136,10 +136,14 @@ SSFUnitTest_t unitTests[] =
 #if SSF_CONFIG_UBJSON_UNIT_TEST == 1
     { "ssfubjson", "Universal Binary JSON Codec", SSFUBJsonUnitTest },
 #endif /* SSF_CONFIG_UBJSON_UNIT_TEST */
-#if SSF_CONFIG_ASN1_UNIT_TEST == 1
-    { "ssfasn1", "ASN.1 DER Codec", SSFASN1UnitTest },
-#endif /* SSF_CONFIG_ASN1_UNIT_TEST */
+    #if SSF_CONFIG_ASN1_UNIT_TEST == 1
+        { "ssfasn1", "ASN.1 DER Codec", SSFASN1UnitTest },
+    #endif /* SSF_CONFIG_ASN1_UNIT_TEST */
 #endif
+#if SSF_CONFIG_BN_UNIT_TEST == 1
+    { "ssfbn", "Big Number Arithmetic", SSFBNUnitTest },
+#endif /* SSF_CONFIG_BN_UNIT_TEST */
+#if 1
     /* _crypto */
 #if SSF_CONFIG_AES_UNIT_TEST == 1
     { "ssfaes", "AES128-256 Block", SSFAESUnitTest },
@@ -156,9 +160,6 @@ SSFUnitTest_t unitTests[] =
 #if SSF_CONFIG_SHA2_UNIT_TEST == 1
     { "ssfsha2", "SHA2 256-512-bits", SSFSHA2UnitTest },
 #endif /* SSF_CONFIG_SHA2_UNIT_TEST */
-#if SSF_CONFIG_BN_UNIT_TEST == 1
-    { "ssfbn", "Big Number Arithmetic", SSFBNUnitTest },
-#endif /* SSF_CONFIG_BN_UNIT_TEST */
 #if SSF_CONFIG_CHACHA20_UNIT_TEST == 1
     { "ssfchacha20", "ChaCha20 Stream Cipher", SSFChaCha20UnitTest },
 #endif /* SSF_CONFIG_CHACHA20_UNIT_TEST */
@@ -198,6 +199,8 @@ SSFUnitTest_t unitTests[] =
 #if SSF_CONFIG_TLS_UNIT_TEST == 1
     { "ssftls", "TLS 1.3 Core", SSFTLSUnitTest },
 #endif /* SSF_CONFIG_TLS_UNIT_TEST */
+#endif
+
 #if 0
     /* _ecc */
 #if SSF_CONFIG_RS_UNIT_TEST == 1

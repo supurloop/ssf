@@ -427,29 +427,7 @@ bool SSFBNIsOne(const SSFBN_t *a)
     return (bits == 0u);
 }
 
-/* --------------------------------------------------------------------------------------------- */
-/* Returns true if a is even.                                                                    */
-/* --------------------------------------------------------------------------------------------- */
-bool SSFBNIsEven(const SSFBN_t *a)
-{
-    SSF_REQUIRE(a != NULL);
-    SSF_REQUIRE(a->limbs != NULL);
-    SSF_REQUIRE(a->len >= 1u);
-
-    return ((a->limbs[0] & 1u) == 0u);
-}
-
-/* --------------------------------------------------------------------------------------------- */
-/* Returns true if a is odd.                                                                     */
-/* --------------------------------------------------------------------------------------------- */
-bool SSFBNIsOdd(const SSFBN_t *a)
-{
-    SSF_REQUIRE(a != NULL);
-    SSF_REQUIRE(a->limbs != NULL);
-    SSF_REQUIRE(a->len >= 1u);
-
-    return ((a->limbs[0] & 1u) != 0u);
-}
+/* SSFBNIsEven and SSFBNIsOdd are macros in ssfbn.h to eliminate call overhead.                   */
 
 /* --------------------------------------------------------------------------------------------- */
 /* Constant-time comparison.                                                                     */
@@ -561,58 +539,8 @@ uint32_t SSFBNTrailingZeros(const SSFBN_t *a)
     return ((uint32_t)i * SSF_BN_LIMB_BITS) + pos;
 }
 
-/* --------------------------------------------------------------------------------------------- */
-/* Returns the value of bit at position pos (0 = LSB).                                           */
-/* --------------------------------------------------------------------------------------------- */
-uint8_t SSFBNGetBit(const SSFBN_t *a, uint32_t pos)
-{
-    uint16_t limbIdx;
-    uint16_t bitIdx;
-
-    SSF_REQUIRE(a != NULL);
-    SSF_REQUIRE(a->limbs != NULL);
-
-    limbIdx = (uint16_t)(pos / SSF_BN_LIMB_BITS);
-    bitIdx = (uint16_t)(pos % SSF_BN_LIMB_BITS);
-
-    if (limbIdx >= a->len) return 0;
-
-    return (uint8_t)((a->limbs[limbIdx] >> bitIdx) & 1u);
-}
-
-/* --------------------------------------------------------------------------------------------- */
-/* Set bit at position pos to 1. Caller must ensure pos is within a->len * SSF_BN_LIMB_BITS.     */
-/* --------------------------------------------------------------------------------------------- */
-void SSFBNSetBit(SSFBN_t *a, uint32_t pos)
-{
-    uint16_t limbIdx;
-    uint16_t bitIdx;
-
-    SSF_REQUIRE(a != NULL);
-    SSF_REQUIRE(a->limbs != NULL);
-    SSF_REQUIRE(pos < ((uint32_t)a->len * SSF_BN_LIMB_BITS));
-
-    limbIdx = (uint16_t)(pos / SSF_BN_LIMB_BITS);
-    bitIdx = (uint16_t)(pos % SSF_BN_LIMB_BITS);
-    a->limbs[limbIdx] |= ((SSFBNLimb_t)1u << bitIdx);
-}
-
-/* --------------------------------------------------------------------------------------------- */
-/* Clear bit at position pos to 0. Caller must ensure pos is within a->len * SSF_BN_LIMB_BITS.   */
-/* --------------------------------------------------------------------------------------------- */
-void SSFBNClearBit(SSFBN_t *a, uint32_t pos)
-{
-    uint16_t limbIdx;
-    uint16_t bitIdx;
-
-    SSF_REQUIRE(a != NULL);
-    SSF_REQUIRE(a->limbs != NULL);
-    SSF_REQUIRE(pos < ((uint32_t)a->len * SSF_BN_LIMB_BITS));
-
-    limbIdx = (uint16_t)(pos / SSF_BN_LIMB_BITS);
-    bitIdx = (uint16_t)(pos % SSF_BN_LIMB_BITS);
-    a->limbs[limbIdx] &= ~((SSFBNLimb_t)1u << bitIdx);
-}
+/* SSFBNGetBit, SSFBNSetBit, SSFBNClearBit are macros in ssfbn.h to eliminate call overhead in   */
+/* per-bit loops (ModExp, scalar multiplication, division).                                       */
 
 /* --------------------------------------------------------------------------------------------- */
 /* Shift a left by 1 bit in place.                                                               */
@@ -2476,22 +2404,19 @@ void SSFBNCondCopy(SSFBN_t *dst, const SSFBN_t *src, SSFBNLimb_t sel)
 /* --------------------------------------------------------------------------------------------- */
 void SSFBNZeroize(SSFBN_t *a)
 {
-    volatile uint8_t *p;
-    size_t i;
-    size_t n;
+    volatile SSFBNLimb_t *p;
+    uint16_t i;
 
     SSF_REQUIRE(a != NULL);
     SSF_REQUIRE(a->limbs != NULL);
 
     /* Zero the limb storage (the secret material) via a volatile write that the compiler can't  */
-    /* elide. Leave the struct's own fields (limbs pointer, cap) intact so the SSFBN_t remains   */
-    /* usable for subsequent operations; len is explicitly cleared.                              */
-    p = (volatile uint8_t *)a->limbs;
-    n = (size_t)a->cap * sizeof(SSFBNLimb_t);
-
-    for (i = 0; i < n; i++)
+    /* elide via dead-store elimination. Leave the struct's own fields (limbs pointer, cap)      */
+    /* intact so the SSFBN_t remains usable for subsequent operations; len is explicitly cleared.*/
+    p = (volatile SSFBNLimb_t *)a->limbs;
+    for (i = 0; i < a->cap; i++)
     {
-        p[i] = 0;
+        p[i] = 0u;
     }
     a->len = 0;
 }

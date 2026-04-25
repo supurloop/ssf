@@ -207,11 +207,14 @@ bool SSFBNIsZero(const SSFBN_t *a);
 /* Returns true if a equals 1.                                                                   */
 bool SSFBNIsOne(const SSFBN_t *a);
 
-/* Returns true if a is even (LSB of limbs[0] is 0).                                             */
-bool SSFBNIsEven(const SSFBN_t *a);
+/* Returns true if a is even (LSB of limbs[0] is 0). Implemented as a macro to avoid call        */
+/* overhead on hot paths (binary-GCD, Miller-Rabin). The argument `a` must be a non-NULL pointer  */
+/* to an SSFBN_t with a->len >= 1; debug-build assertions in the function form are dropped.       */
+#define SSFBNIsEven(a)  (((a)->limbs[0] & 1u) == 0u)
 
-/* Returns true if a is odd (LSB of limbs[0] is 1). Symmetric companion to SSFBNIsEven.          */
-bool SSFBNIsOdd(const SSFBN_t *a);
+/* Returns true if a is odd (LSB of limbs[0] is 1). Symmetric companion to SSFBNIsEven. Same     */
+/* preconditions and macro-form caveat as SSFBNIsEven.                                            */
+#define SSFBNIsOdd(a)   (((a)->limbs[0] & 1u) != 0u)
 
 /* Constant-time comparison. Returns 0 if equal, -1 if a < b, 1 if a > b.                       */
 /* a and b must have the same limb count.                                                        */
@@ -234,13 +237,23 @@ uint32_t SSFBNBitLen(const SSFBN_t *a);
 uint32_t SSFBNTrailingZeros(const SSFBN_t *a);
 
 /* Returns the value of bit at position pos (0 = LSB). Returns 0 if pos >= len * 32.            */
-uint8_t SSFBNGetBit(const SSFBN_t *a, uint32_t pos);
+/* Macro form to eliminate call overhead in ModExp inner loops (per-bit/per-window decode) and   */
+/* in ssfec scalar-multiplication ladders. Both `a` and `pos` are evaluated more than once —     */
+/* callers must avoid side-effecting expressions for either argument.                             */
+#define SSFBNGetBit(a, pos) \
+    ((((uint32_t)(pos) >> 5u) >= (uint32_t)(a)->len) ? (uint8_t)0u : \
+     (uint8_t)(((a)->limbs[(uint32_t)(pos) >> 5u] >> ((uint32_t)(pos) & 0x1Fu)) & 1u))
 
 /* Set bit at position pos (0 = LSB) to 1. pos must be < a->len * SSF_BN_LIMB_BITS.              */
-void SSFBNSetBit(SSFBN_t *a, uint32_t pos);
+/* Macro form; do {} while(0) wrapper makes it usable as a statement. Same multi-eval caveat as  */
+/* SSFBNGetBit applies to both arguments.                                                         */
+#define SSFBNSetBit(a, pos) \
+    do { (a)->limbs[(uint32_t)(pos) >> 5u] |= ((SSFBNLimb_t)1u << ((uint32_t)(pos) & 0x1Fu)); } while (0)
 
 /* Clear bit at position pos to 0. pos must be < a->len * SSF_BN_LIMB_BITS.                      */
-void SSFBNClearBit(SSFBN_t *a, uint32_t pos);
+/* Macro form; same caveats as SSFBNSetBit.                                                       */
+#define SSFBNClearBit(a, pos) \
+    do { (a)->limbs[(uint32_t)(pos) >> 5u] &= ~((SSFBNLimb_t)1u << ((uint32_t)(pos) & 0x1Fu)); } while (0)
 
 /* Shift a left by 1 bit in place. High bit is lost if it overflows limb count.                  */
 void SSFBNShiftLeft1(SSFBN_t *a);

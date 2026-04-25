@@ -33,6 +33,13 @@
 #include "ssfassert.h"
 #include "ssfbn.h"
 
+/* SSFBNMul/Square compute rLen = a->len + b->len in uint16_t. The bounds checks then compare    */
+/* rLen against SSF_BN_MAX_LIMBS, but if MAX_LIMBS exceeds 32767 that addition can overflow      */
+/* uint16_t and the check passes on a wrapped value, allowing writes past r->cap. Catch a        */
+/* misconfiguration of SSF_BN_CONFIG_MAX_BITS at compile time before it becomes a runtime hole.  */
+_Static_assert(SSF_BN_MAX_LIMBS <= 32767u,
+               "SSF_BN_MAX_LIMBS must fit in int16_t to keep uint16_t sums safe in Mul/Square");
+
 /* --------------------------------------------------------------------------------------------- */
 /* NIST curve prime constants                                                                    */
 /* --------------------------------------------------------------------------------------------- */
@@ -1126,11 +1133,10 @@ void SSFBNModAdd(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *
     tmp.len = m->len;
     borrow = _SSFBNRawSub(tmp.limbs, r->limbs, m->limbs, m->len);
 
-    /* Use result of subtraction if there was a carry from add, or no borrow from sub */
-    if ((carry != 0u) || (borrow == 0u))
-    {
-        memcpy(r->limbs, tmp.limbs, (size_t)m->len * sizeof(SSFBNLimb_t));
-    }
+    /* Use result of subtraction if there was a carry from add, or no borrow from sub. Done in   */
+    /* constant time via SSFBNCondCopy so the timing and memory access pattern do not depend on  */
+    /* the secret operands.                                                                       */
+    SSFBNCondCopy(r, &tmp, (SSFBNLimb_t)((carry != 0u) | (borrow == 0u)));
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -1139,7 +1145,6 @@ void SSFBNModAdd(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *
 void SSFBNModSub(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *m)
 {
     SSFBNLimb_t borrow;
-    SSFBN_DEFINE(tmp, SSF_BN_MAX_LIMBS);
 
     SSF_REQUIRE(r != NULL);
     SSF_REQUIRE(r->limbs != NULL);
@@ -1157,11 +1162,18 @@ void SSFBNModSub(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *
     r->len = m->len;
     borrow = _SSFBNRawSub(r->limbs, a->limbs, b->limbs, m->len);
 
-    /* If borrow, add m back */
-    if (borrow != 0u)
+    /* If borrow, add m back. Done in constant time via a value-masked add so the timing and    */
+    /* memory access pattern do not depend on the secret operands.                                */
     {
-        tmp.len = m->len;
-        _SSFBNRawAdd(r->limbs, r->limbs, m->limbs, m->len);
+        SSFBNLimb_t mask = (SSFBNLimb_t)(-(int32_t)(borrow != 0u));
+        SSFBNDLimb_t carry = 0;
+        uint16_t i;
+        for (i = 0; i < m->len; i++)
+        {
+            carry += (SSFBNDLimb_t)r->limbs[i] + (SSFBNDLimb_t)(m->limbs[i] & mask);
+            r->limbs[i] = (SSFBNLimb_t)carry;
+            carry >>= SSF_BN_LIMB_BITS;
+        }
     }
 }
 
@@ -1360,6 +1372,7 @@ void SSFBNDivMod(SSFBN_t *q, SSFBN_t *rem, const SSFBN_t *a, const SSFBN_t *b)
     SSF_REQUIRE(rem != b);
     SSF_REQUIRE(a->len >= 1u);
     SSF_REQUIRE(b->len >= 1u);
+    SSF_REQUIRE(!SSFBNIsZero(b)); /* Division by zero is undefined. */
 
     workLen = (a->len > b->len) ? a->len : b->len;
     SSF_REQUIRE(workLen <= q->cap);
@@ -1371,7 +1384,6 @@ void SSFBNDivMod(SSFBN_t *q, SSFBN_t *rem, const SSFBN_t *a, const SSFBN_t *b)
 
     aBits = SSFBNBitLen(rem);
     bBits = SSFBNBitLen(b);
-    if (bBits == 0u) return;
 
     shift = (int32_t)(aBits - bBits);
     if (shift < 0) return; /* a < b, quotient is 0, remainder is a */
@@ -1879,6 +1891,8 @@ void SSFBNMontMul(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBNMon
     SSF_REQUIRE(ctx->len >= 1u);
     SSF_REQUIRE(ctx->len <= SSF_BN_MAX_LIMBS);
     SSF_REQUIRE(ctx->len <= r->cap);
+    SSF_REQUIRE(ctx->len <= a->cap); /* Inner loop reads a->limbs[0..ctx->len-1]. */
+    SSF_REQUIRE(ctx->len <= b->cap); /* Inner loop reads b->limbs[0..ctx->len-1]. */
 
     n = ctx->len;
     memset(t, 0, (size_t)(n + 2u) * sizeof(SSFBNLimb_t));
@@ -1929,15 +1943,24 @@ void SSFBNMontMul(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBNMon
         }
     }
 
-    /* Final conditional subtraction */
+    /* Final conditional subtraction — done in constant time. The unconditional sub puts r in    */
+    /* [-m, m), then we add m back iff (borrow && t[n] == 0) using a value-masked add so the      */
+    /* memory access pattern and timing are independent of the secret intermediate r.             */
     r->len = n;
     memcpy(r->limbs, t, (size_t)n * sizeof(SSFBNLimb_t));
 
     borrow = _SSFBNRawSub(r->limbs, r->limbs, ctx->mod.limbs, n);
-    if ((borrow != 0u) && (t[n] == 0u))
     {
-        /* Undo subtraction */
-        _SSFBNRawAdd(r->limbs, r->limbs, ctx->mod.limbs, n);
+        SSFBNLimb_t cond = ((SSFBNLimb_t)(borrow != 0u)) & ((SSFBNLimb_t)(t[n] == 0u));
+        SSFBNLimb_t mask = (SSFBNLimb_t)(-(int32_t)cond);
+        SSFBNDLimb_t addCarry = 0;
+        uint16_t i;
+        for (i = 0; i < n; i++)
+        {
+            addCarry += (SSFBNDLimb_t)r->limbs[i] + (SSFBNDLimb_t)(ctx->mod.limbs[i] & mask);
+            r->limbs[i] = (SSFBNLimb_t)addCarry;
+            addCarry >>= SSF_BN_LIMB_BITS;
+        }
     }
 }
 
@@ -1971,6 +1994,7 @@ void SSFBNMontSquare(SSFBN_t *r, const SSFBN_t *a, const SSFBNMont_t *ctx)
     SSF_REQUIRE(n >= 1u);
     SSF_REQUIRE(n <= SSF_BN_MAX_LIMBS);
     SSF_REQUIRE(n <= r->cap);
+    SSF_REQUIRE(n <= a->cap); /* Triangular-square reads a->limbs[0..n-1]. */
 
     /* Zero the full working buffer (2n + 1 limbs) up front. */
     memset(t, 0, (size_t)(2u * n + 1u) * sizeof(SSFBNLimb_t));
@@ -2079,11 +2103,19 @@ void SSFBNMontSquare(SSFBN_t *r, const SSFBN_t *a, const SSFBNMont_t *ctx)
     /* Was the subtraction needed? The "yes" case is either (a) no borrow — r was >= m — or     */
     /* (b) t[2n] == 1, meaning the unreduced value had a bit in position 2n*w so r really was    */
     /* >= m even though the n-limb view borrowed. The "no" case is borrow AND t[2n] == 0, in    */
-    /* which case we undo the subtraction.                                                       */
-    if ((borrow != 0u) && (t[2u * n] == 0u))
+    /* which case we undo the subtraction. Done in constant time via a value-masked add so the   */
+    /* timing and memory access pattern do not depend on the secret intermediate r.              */
     {
-        /* No, undo: r was actually in [0, m) already. */
-        _SSFBNRawAdd(r->limbs, r->limbs, ctx->mod.limbs, n);
+        SSFBNLimb_t cond = ((SSFBNLimb_t)(borrow != 0u)) & ((SSFBNLimb_t)(t[2u * n] == 0u));
+        SSFBNLimb_t mask = (SSFBNLimb_t)(-(int32_t)cond);
+        SSFBNDLimb_t addCarry = 0;
+        uint16_t i;
+        for (i = 0; i < n; i++)
+        {
+            addCarry += (SSFBNDLimb_t)r->limbs[i] + (SSFBNDLimb_t)(ctx->mod.limbs[i] & mask);
+            r->limbs[i] = (SSFBNLimb_t)addCarry;
+            addCarry >>= SSF_BN_LIMB_BITS;
+        }
     }
 }
 
@@ -2576,17 +2608,12 @@ bool SSFBNIsProbablePrime(const SSFBN_t *n, uint16_t rounds, SSFPRNGContext_t *p
     SSF_REQUIRE(n->limbs != NULL);
     SSF_REQUIRE(prng != NULL);
 
-    /* Is n even? */
-    if (SSFBNIsEven(n))
-    {
-        /* Yes, only 2 is even-and-prime and we require n > 3 below anyway. Reject. */
-        return false;
-    }
-
-    /* Is n small enough that we should short-circuit? n must be > 3 for the witness pick below  */
-    /* to have a non-empty range [2, n-2]. Reject n <= 3 conservatively (callers pre-screening   */
-    /* against _ssfBNSmallPrimes will have already identified 2 and 3 as prime).                 */
-    if (SSFBNCmpUint32(n, 3u) <= 0) return false;
+    /* Small-case fast paths: Miller-Rabin's witness range [2, n-2] is empty for n <= 3, so   */
+    /* handle 0, 1, 2, 3 explicitly before the Miller-Rabin core takes over.                  */
+    if (SSFBNCmpUint32(n, 1u) <= 0) return false;  /* 0 and 1 are not prime */
+    if (SSFBNCmpUint32(n, 3u) <= 0) return true;   /* 2 and 3 are prime */
+    if (SSFBNIsEven(n))             return false;  /* other evens are composite */
+    /* From here n >= 5 and odd; the witness range [2, n-2] is non-empty.                     */
 
     /* nm1 = n - 1. */
     (void)SSFBNSubUint32(&nm1, n, 1u);
@@ -2616,12 +2643,19 @@ bool SSFBNIsProbablePrime(const SSFBN_t *n, uint16_t rounds, SSFPRNGContext_t *p
             {
                 SSFBNRandom(&a, n->len, prng);
 
-                /* Clear the high bits above n's bit length so a < 2^bitLen(n). */
+                /* Mask the candidate down to bitLen(n)-1 bits. Without zeroing the limbs    */
+                /* above topLimb, a wide n.cap leaves the upper limbs random and the < n-3   */
+                /* rejection check almost never accepts.                                     */
                 {
                     uint32_t nBits = SSFBNBitLen(n);
                     uint16_t topLimb = (uint16_t)((nBits - 1u) / SSF_BN_LIMB_BITS);
                     uint16_t topBit = (uint16_t)((nBits - 1u) % SSF_BN_LIMB_BITS);
+                    uint16_t k;
                     a.limbs[topLimb] &= ((SSFBNLimb_t)1u << topBit) - 1u;
+                    for (k = (uint16_t)(topLimb + 1u); k < n->len; k++)
+                    {
+                        a.limbs[k] = 0u;
+                    }
                 }
 
                 /* Is the candidate already below n-3? */

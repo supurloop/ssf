@@ -335,8 +335,8 @@ void SSFBNModMulNIST(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN
 void SSFBNMod(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m);
 
 /* Shift-subtract long division: q = a / b, rem = a mod b. Both q and rem are set to            */
-/* max(a->len, b->len). q must not alias a, b, or rem; rem must not alias a, b, or q. If        */
-/* b == 0 the function returns without modifying q or rem beyond the initial zero-set.          */
+/* max(a->len, b->len). q must not alias a, b, or rem; rem must not alias a, b, or q. b must    */
+/* be nonzero; division by zero is rejected via SSF_REQUIRE.                                    */
 void SSFBNDivMod(SSFBN_t *q, SSFBN_t *rem, const SSFBN_t *a, const SSFBN_t *b);
 
 /* r = gcd(a, b) using binary GCD (Stein's algorithm). a and b must have the same len.          */

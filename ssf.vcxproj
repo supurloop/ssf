@@ -152,6 +152,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="main.c" />
+    <ClCompile Include="ssf.c" />
     <ClCompile Include="ssfport.c" />
     <ClCompile Include="_codec\ssfasn1.c" />
     <ClCompile Include="_codec\ssfasn1_ut.c" />

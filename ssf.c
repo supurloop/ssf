@@ -1,9 +1,8 @@
 /* --------------------------------------------------------------------------------------------- */
 /* Small System Framework                                                                        */
 /*                                                                                               */
-/* ssfhmac.h                                                                                     */
-/* Provides HMAC (RFC 2104) keyed-hash message authentication code interface.                    */
-/* Supports SHA-1, SHA-256, SHA-384, and SHA-512 hash functions.                                 */
+/* ssf.c                                                                                         */
+/* Provides core framework helpers.                                                              */
 /*                                                                                               */
 /* BSD-3-Clause License                                                                          */
 /* Copyright 2020 Supurloop Software LLC                                                         */
@@ -30,80 +29,26 @@
 /* NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED  */
 /* OF THE POSSIBILITY OF SUCH DAMAGE.                                                            */
 /* --------------------------------------------------------------------------------------------- */
-#ifndef SSF_HMAC_H_INCLUDE
-#define SSF_HMAC_H_INCLUDE
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 #include <stdint.h>
-#include <stdbool.h>
-#include "ssfport.h"
-#include "ssfsha1.h"
-#include "ssfsha2.h"
+#include <stddef.h>
+#include "ssfassert.h"
+#include "ssf.h"
 
 /* --------------------------------------------------------------------------------------------- */
-/* Defines and typedefs                                                                          */
+/* Securely zeroize a buffer.                                                                    */
+/* Uses a volatile pointer write so the compiler cannot eliminate the clear via dead-store       */
+/* elimination, even when the buffer is never read again before going out of scope.              */
 /* --------------------------------------------------------------------------------------------- */
-#define SSF_HMAC_MAX_HASH_SIZE  (64u)  /* SHA-512 output size */
-#define SSF_HMAC_MAX_BLOCK_SIZE (128u) /* SHA-384/512 block size */
-
-/* Hash algorithm selection */
-typedef enum
+void SSFSecureZero(void *p, size_t n)
 {
-    SSF_HMAC_HASH_MIN = -1,
-    SSF_HMAC_HASH_SHA1,     /* HMAC-SHA-1 (hash=20, block=64) */
-    SSF_HMAC_HASH_SHA256,   /* HMAC-SHA-256 (hash=32, block=64) */
-    SSF_HMAC_HASH_SHA384,   /* HMAC-SHA-384 (hash=48, block=128) */
-    SSF_HMAC_HASH_SHA512,   /* HMAC-SHA-512 (hash=64, block=128) */
-    SSF_HMAC_HASH_MAX,
-} SSFHMACHash_t;
+    volatile uint8_t *v;
+    size_t i;
 
-/* Incremental HMAC context */
-typedef struct SSFHMACContext
-{
-    SSFHMACHash_t hash;
-    uint8_t oKeyPad[SSF_HMAC_MAX_BLOCK_SIZE];
-    union
+    SSF_REQUIRE(p != NULL);
+
+    v = (volatile uint8_t *)p;
+    for (i = 0u; i < n; i++)
     {
-        SSFSHA1Context_t sha1;
-        SSFSHA2_32Context_t sha2_32;
-        SSFSHA2_64Context_t sha2_64;
-    } hashCtx;
-} SSFHMACContext_t;
-
-/* --------------------------------------------------------------------------------------------- */
-/* External interface                                                                            */
-/* --------------------------------------------------------------------------------------------- */
-
-/* Single-call HMAC: computes the MAC in one call. */
-bool SSFHMAC(SSFHMACHash_t hash, const uint8_t *key, size_t keyLen,
-             const uint8_t *msg, size_t msgLen,
-             uint8_t *macOut, size_t macOutSize);
-
-/* Incremental HMAC: Begin/Update/End for streaming messages. */
-void SSFHMACBegin(SSFHMACContext_t *ctx, SSFHMACHash_t hash,
-                  const uint8_t *key, size_t keyLen);
-void SSFHMACUpdate(SSFHMACContext_t *ctx, const uint8_t *data, size_t dataLen);
-void SSFHMACEnd(SSFHMACContext_t *ctx, uint8_t *macOut, size_t macOutSize);
-
-/* Securely zeroize an HMAC context. Call before the context goes out of scope to clear */
-/* the key-derived oKeyPad and any inner-hash state. */
-void SSFHMACDeInit(SSFHMACContext_t *ctx);
-
-/* Helper: returns the output size in bytes for a given hash. */
-size_t SSFHMACGetHashSize(SSFHMACHash_t hash);
-
-/* --------------------------------------------------------------------------------------------- */
-/* Unit test                                                                                     */
-/* --------------------------------------------------------------------------------------------- */
-#if SSF_CONFIG_HMAC_UNIT_TEST == 1
-void SSFHMACUnitTest(void);
-#endif /* SSF_CONFIG_HMAC_UNIT_TEST */
-
-#ifdef __cplusplus
+        v[i] = 0u;
+    }
 }
-#endif
-
-#endif /* SSF_HMAC_H_INCLUDE */

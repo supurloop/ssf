@@ -403,7 +403,7 @@ static void _x25519_scalar_mul(uint8_t out[32], const uint8_t scalar[32],
     _fe_to_bytes(out, &x_2);
 
     /* Zeroize sensitive stack data */
-    memset(k, 0, sizeof(k));
+    SSFSecureZero(k, sizeof(k));
 }
 
 /* --------------------------------------------------------------------------------------------- */

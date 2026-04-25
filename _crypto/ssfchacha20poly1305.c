@@ -150,7 +150,7 @@ void SSFChaCha20Poly1305Encrypt(const uint8_t *pt, size_t ptLen, const uint8_t *
     _SSFCCPComputeTag(auth, authLen, ct, ptLen, otk, tag, SSF_CCP_TAG_SIZE);
 
     /* Zeroize one-time key */
-    memset(otk, 0, sizeof(otk));
+    SSFSecureZero(otk, sizeof(otk));
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -182,7 +182,7 @@ bool SSFChaCha20Poly1305Decrypt(const uint8_t *ct, size_t ctLen, const uint8_t *
     _SSFCCPComputeTag(auth, authLen, ct, ctLen, otk, computedTag, sizeof(computedTag));
 
     /* Zeroize one-time key */
-    memset(otk, 0, sizeof(otk));
+    SSFSecureZero(otk, sizeof(otk));
 
     /* Verify tag in constant time to avoid leaking the position of the first differing byte. */
     if (!SSFCTMemEq(computedTag, tag, SSF_CCP_TAG_SIZE)) return false;

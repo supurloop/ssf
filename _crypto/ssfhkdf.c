@@ -134,6 +134,11 @@ bool SSFHKDFExpand(SSFHMACHash_t hash,
         memcpy(tPrev, tCurr, hashSize);
     }
 
+    /* Zeroize key-derived stack state. */
+    SSFHMACDeInit(&ctx);
+    SSFSecureZero(tPrev, sizeof(tPrev));
+    SSFSecureZero(tCurr, sizeof(tCurr));
+
     return true;
 }
 
@@ -148,9 +153,12 @@ bool SSFHKDF(SSFHMACHash_t hash,
 {
     uint8_t prk[SSF_HMAC_MAX_HASH_SIZE];
     size_t hashSize;
+    bool ok;
 
     hashSize = SSFHMACGetHashSize(hash);
 
     if (!SSFHKDFExtract(hash, salt, saltLen, ikm, ikmLen, prk, sizeof(prk))) return false;
-    return SSFHKDFExpand(hash, prk, hashSize, info, infoLen, okmOut, okmLen);
+    ok = SSFHKDFExpand(hash, prk, hashSize, info, infoLen, okmOut, okmLen);
+    SSFSecureZero(prk, sizeof(prk));
+    return ok;
 }

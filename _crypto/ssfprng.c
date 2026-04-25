@@ -64,7 +64,7 @@ void SSFPRNGDeInitContext(SSFPRNGContext_t *context)
     SSF_REQUIRE(context != NULL);
     SSF_REQUIRE(context->magic == SSF_PRNG_MAGIC);
 
-    memset(context, 0, sizeof(SSFPRNGContext_t));
+    SSFSecureZero(context, sizeof(SSFPRNGContext_t));
 }
 
 /* --------------------------------------------------------------------------------------------- */

@@ -191,6 +191,11 @@ static bool _SSFECDSAGenK(SSFECCurve_t curve,
         /* Check k in [1, n-1] */
         if (!SSFBNIsZero(k) && (SSFBNCmp(k, &c->n) < 0))
         {
+            SSFHMACDeInit(&ctx);
+            SSFSecureZero(V, sizeof(V));
+            SSFSecureZero(K, sizeof(K));
+            SSFSecureZero(h1Octets, sizeof(h1Octets));
+            SSFSecureZero(T, sizeof(T));
             return true;
         }
 
@@ -204,6 +209,11 @@ static bool _SSFECDSAGenK(SSFECCurve_t curve,
         SSFHMAC(hmacHash, K, hlen, V, hlen, V, sizeof(V));
     }
 
+    SSFHMACDeInit(&ctx);
+    SSFSecureZero(V, sizeof(V));
+    SSFSecureZero(K, sizeof(K));
+    SSFSecureZero(h1Octets, sizeof(h1Octets));
+    SSFSecureZero(T, sizeof(T));
     return false; /* Should never reach here for valid inputs */
 }
 

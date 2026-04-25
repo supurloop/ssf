@@ -155,6 +155,10 @@ void SSFHMACBegin(SSFHMACContext_t *ctx, SSFHMACHash_t hash,
     /* Step 3: Start the inner hash: H(iKeyPad || ...) */
     _SSFHMACHashBegin(ctx);
     _SSFHMACHashUpdate(ctx, iKeyPad, blockSize);
+
+    /* Zeroize key-derived stack state. oKeyPad lives in ctx until SSFHMACDeInit. */
+    SSFSecureZero(keyPrime, sizeof(keyPrime));
+    SSFSecureZero(iKeyPad, sizeof(iKeyPad));
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -196,6 +200,18 @@ void SSFHMACEnd(SSFHMACContext_t *ctx, uint8_t *macOut, size_t macOutSize)
 
     /* Step 7: Finalize the outer hash */
     _SSFHMACHashEnd(ctx, macOut, macOutSize);
+
+    /* innerHash is derived from the key — clear before going out of scope. */
+    SSFSecureZero(innerHash, sizeof(innerHash));
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Securely zeroize an HMAC context.                                                             */
+/* --------------------------------------------------------------------------------------------- */
+void SSFHMACDeInit(SSFHMACContext_t *ctx)
+{
+    SSF_REQUIRE(ctx != NULL);
+    SSFSecureZero(ctx, sizeof(*ctx));
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -216,5 +232,6 @@ bool SSFHMAC(SSFHMACHash_t hash, const uint8_t *key, size_t keyLen,
     SSFHMACBegin(&ctx, hash, key, keyLen);
     SSFHMACUpdate(&ctx, msg, msgLen);
     SSFHMACEnd(&ctx, macOut, macOutSize);
+    SSFHMACDeInit(&ctx);
     return true;
 }

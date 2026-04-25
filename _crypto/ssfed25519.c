@@ -1338,8 +1338,8 @@ void SSFEd25519PubKeyFromSeed(const uint8_t seed[SSF_ED25519_SEED_SIZE],
     _ge_encode(pubKey, &A);
 
     /* Zeroize sensitive data */
-    memset(h, 0, sizeof(h));
-    memset(a, 0, sizeof(a));
+    SSFSecureZero(h, sizeof(h));
+    SSFSecureZero(a, sizeof(a));
 }
 
 /* Sign a message. */
@@ -1388,11 +1388,11 @@ void SSFEd25519Sign(const uint8_t seed[SSF_ED25519_SEED_SIZE],
     _sc_muladd(&sig[32], hram, a, nonce);  /* S = h*a + r mod L */
 
     /* Zeroize sensitive data */
-    memset(h, 0, sizeof(h));
-    memset(a, 0, sizeof(a));
-    memset(nonce, 0, sizeof(nonce));
-    memset(r_hash, 0, sizeof(r_hash));
-    memset(&ctx, 0, sizeof(ctx));
+    SSFSecureZero(h, sizeof(h));
+    SSFSecureZero(a, sizeof(a));
+    SSFSecureZero(nonce, sizeof(nonce));
+    SSFSecureZero(r_hash, sizeof(r_hash));
+    SSFSecureZero(&ctx, sizeof(ctx));
 }
 
 /* Verify a signature. Returns true if valid. */

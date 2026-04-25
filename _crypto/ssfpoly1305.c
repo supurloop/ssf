@@ -249,6 +249,8 @@ void SSFPoly1305End(SSFPoly1305Context_t *ctx,
         ctx->h4 += (SSF_GETU32LE(&partial[12]) >> 8);  /* no 2^128 bit for partial */
         _SSFPoly1305MulR(ctx);
         ctx->bufLen = 0u;
+
+        SSFSecureZero(partial, sizeof(partial));
     }
 
     /* Fully carry h. */
@@ -291,7 +293,7 @@ void SSFPoly1305End(SSFPoly1305Context_t *ctx,
     tag[14] = (uint8_t)(f >> 16); tag[15] = (uint8_t)(f >> 24);
 
     /* Zeroise key-derived state. Poly1305 is a one-time MAC — the context must not be reused. */
-    memset(ctx, 0, sizeof(*ctx));
+    SSFSecureZero(ctx, sizeof(*ctx));
 }
 
 /* --------------------------------------------------------------------------------------------- */

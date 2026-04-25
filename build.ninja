@@ -32,6 +32,7 @@ rule link
 # Top-level
 build $builddir/main.o:    cc_obj main.c
 build $builddir/ssfport.o: cc_obj ssfport.c
+build $builddir/ssf.o:     cc_obj ssf.c
 
 # _codec
 build $builddir/_codec/ssfbase64.o:    cc_obj _codec/ssfbase64.c
@@ -152,7 +153,7 @@ build $builddir/_osal/ssflptask.o:    cc_obj _osal/ssflptask.c
 build $builddir/_osal/ssflptask_ut.o: cc_obj _osal/ssflptask_ut.c
 
 # Final binary
-build ssf: link $builddir/main.o $builddir/ssfport.o $
+build ssf: link $builddir/main.o $builddir/ssfport.o $builddir/ssf.o $
     $builddir/_codec/ssfbase64.o    $builddir/_codec/ssfbase64_ut.o $
     $builddir/_codec/ssfdec.o       $builddir/_codec/ssfdec_ut.o $
     $builddir/_codec/ssfgobj.o      $builddir/_codec/ssfgobj_ut.o $

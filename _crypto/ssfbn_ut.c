@@ -604,6 +604,24 @@ void SSFBNUnitTest(void)
         SSF_ASSERT(a.len == 0);
     }
 
+    /* ---- SSFSecureZero ---- */
+    {
+        uint8_t buf[37];
+        size_t i;
+
+        for (i = 0; i < sizeof(buf); i++) buf[i] = (uint8_t)(i + 1u);
+        SSFSecureZero(buf, sizeof(buf));
+        for (i = 0; i < sizeof(buf); i++) SSF_ASSERT(buf[i] == 0u);
+
+        /* n == 0 must be a no-op (loop body never executes). */
+        buf[0] = 0xA5u;
+        SSFSecureZero(buf, 0);
+        SSF_ASSERT(buf[0] == 0xA5u);
+
+        /* p == NULL must trip SSF_REQUIRE. */
+        SSF_ASSERT_TEST(SSFSecureZero(NULL, 1));
+    }
+
     /* ---- NIST P-256: verify p is consistent with SSF_BN_NIST_P256 ---- */
     {
         SSF_ASSERT(SSFBNCmp(&SSF_BN_NIST_P256, &SSF_BN_NIST_P256) == 0);

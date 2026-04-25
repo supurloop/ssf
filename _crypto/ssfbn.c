@@ -419,14 +419,16 @@ bool SSFBNIsZero(const SSFBN_t *a)
 /* --------------------------------------------------------------------------------------------- */
 bool SSFBNIsOne(const SSFBN_t *a)
 {
-    SSFBNLimb_t bits = 0;
+    SSFBNLimb_t bits;
     uint16_t i;
 
     SSF_REQUIRE(a != NULL);
     SSF_REQUIRE(a->limbs != NULL);
     SSF_REQUIRE(a->len >= 1u);
 
-    if (a->limbs[0] != 1u) return false;
+    /* Fold the "limb[0] differs from 1" indicator into the OR-accumulator so the result is a    */
+    /* single comparison whose timing is independent of where the first set bit lives.            */
+    bits = a->limbs[0] ^ 1u;
     for (i = 1; i < a->len; i++)
     {
         bits |= a->limbs[i];
@@ -836,8 +838,9 @@ static void _SSFBNSchoolbookMulRaw(SSFBNLimb_t *r,
         SSFBNDLimb_t carry = 0;
         SSFBNLimb_t ai = a[i];
 
-        if (ai == 0u) continue;
-
+        /* No zero-limb skip: timing must be independent of operand bit pattern when this is on a */
+        /* secret-data path (e.g., ECDSA's k via _SSFBNRawMul-equivalents reachable through        */
+        /* SSFBNMul). The unconditional inner loop adds 0*b[j] which is harmless arithmetically.   */
         for (j = 0; j < nb; j++)
         {
             SSFBNDLimb_t prod = (SSFBNDLimb_t)ai * (SSFBNDLimb_t)b[j] +
@@ -962,8 +965,7 @@ void SSFBNMul(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b)
         SSFBNDLimb_t carry = 0;
         uint16_t j;
 
-        if (a->limbs[i] == 0u) continue;
-
+        /* No zero-limb skip — see _SSFBNSchoolbookMulRaw for rationale. */
         for (j = 0; j < b->len; j++)
         {
             SSFBNDLimb_t prod = (SSFBNDLimb_t)a->limbs[i] * (SSFBNDLimb_t)b->limbs[j] +
@@ -1043,13 +1045,7 @@ void SSFBNSquare(SSFBN_t *r, const SSFBN_t *a)
         uint16_t j;
         SSFBNLimb_t ai = a->limbs[i];
 
-        /* Is the current low-index limb zero? */
-        if (ai == 0u)
-        {
-            /* Yes, all partial products from this row are zero — skip. */
-            continue;
-        }
-
+        /* No zero-limb skip — see _SSFBNSchoolbookMulRaw for rationale. */
         for (j = (uint16_t)(i + 1u); j < n; j++)
         {
             SSFBNDLimb_t prod = (SSFBNDLimb_t)ai * (SSFBNDLimb_t)a->limbs[j] +
@@ -2008,13 +2004,7 @@ void SSFBNMontSquare(SSFBN_t *r, const SSFBN_t *a, const SSFBNMont_t *ctx)
         uint16_t j;
         SSFBNLimb_t ai = a->limbs[i];
 
-        /* Is the row's multiplicand zero? */
-        if (ai == 0u)
-        {
-            /* Yes, the whole row contributes nothing — skip. */
-            continue;
-        }
-
+        /* No zero-limb skip — see _SSFBNSchoolbookMulRaw for rationale. */
         for (j = (uint16_t)(i + 1u); j < n; j++)
         {
             SSFBNDLimb_t prod = (SSFBNDLimb_t)ai * (SSFBNDLimb_t)a->limbs[j] +
@@ -2200,7 +2190,6 @@ void SSFBNModExpMont(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBN
     SSFBN_DEFINE(picked, SSF_BN_MAX_LIMBS); /* CT-selected table entry for this window */
     SSFBNLimb_t tableStorage[SSF_BN_MODEXP_TBL_N][SSF_BN_MAX_LIMBS];
     SSFBN_t table[SSF_BN_MODEXP_TBL_N];
-    uint32_t eBits;
     uint32_t nWindows;
     uint32_t winIdx;
     uint32_t w;
@@ -2219,16 +2208,6 @@ void SSFBNModExpMont(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBN
     SSF_REQUIRE(ctx->mod.limbs != NULL);
     SSF_REQUIRE(ctx->len >= 1u);
     SSF_REQUIRE(ctx->len <= r->cap);
-
-    eBits = SSFBNBitLen(e);
-
-    /* Is the exponent zero? */
-    if (eBits == 0u)
-    {
-        /* Yes, a^0 = 1 by convention. */
-        SSFBNSetOne(r, ctx->len);
-        return;
-    }
 
     /* Wire up table descriptors over their stack-resident backing storage. */
     for (w = 0u; w < SSF_BN_MODEXP_TBL_N; w++)
@@ -2258,10 +2237,18 @@ void SSFBNModExpMont(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBN
     SSFBNCopy(&result, &table[0]);
     SSFBNCopy(&picked, &table[0]);
 
-    /* Process exponent in k-bit windows from MSB. The top window may straddle eBits — bits       */
-    /* above eBits are zero, so the squarings of Mont(1) act as identity and the multiply by      */
-    /* table[w] gives the right result without special-casing the partial top window.             */
-    nWindows = (eBits + SSF_BN_MODEXP_WIN_K - 1u) / SSF_BN_MODEXP_WIN_K;
+    /* Process exponent in k-bit windows from MSB. The window count is fixed at max(e->len,      */
+    /* ctx->len) — both are public storage lengths — so the per-call work is independent of the  */
+    /* secret bit pattern of e. Leading zero windows decode to w=0, the table lookup selects     */
+    /* table[0] = Mont(1), and the MontMul becomes a no-op multiply by the identity, so the      */
+    /* result is unchanged. Taking the max preserves correctness when callers happen to allocate */
+    /* e wider than the modulus; the typical RSA / ECDSA path has e->len == ctx->len so the max  */
+    /* is degenerate. The previous eBits==0 fast-path is also dropped — for e==0 every window    */
+    /* is zero, the loop produces Mont(1), and ConvertOut yields 1.                               */
+    {
+        uint16_t expLen = (e->len > ctx->len) ? e->len : ctx->len;
+        nWindows = (uint32_t)expLen * SSF_BN_LIMB_BITS / SSF_BN_MODEXP_WIN_K;
+    }
     for (winIdx = 0u; winIdx < nWindows; winIdx++)
     {
         /* Square k times. */

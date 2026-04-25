@@ -906,6 +906,22 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
         SSFBNModExp(&r, &rand1, &e, &m);
         SSF_ASSERT(SSFBNCmpUint32(&r, 1u) == 0);
 
+        /* Wider e (e->len > ctx->len) with high bits set: ModExp must process all of e, not    */
+        /* silently truncate to the modulus's bit width. Construct e with e->len = 2*nLimbs and */
+        /* a bit set above ctx->len*32 — verify against OpenSSL. */
+        {
+            SSFBN_DEFINE(eWide, SSF_BN_MAX_LIMBS);
+            BIGNUM *bnEWide = BN_new();
+            SSFBNSetZero(&eWide, (uint16_t)(nLimbs * 2u));
+            SSFBNSetBit(&eWide, (uint32_t)nLimbs * 32u + 5u); /* bit above modulus width */
+            SSFBNSetBit(&eWide, 3u);                          /* and a low bit */
+            _ToOSSL(bnEWide, &eWide);
+            SSFBNModExp(&r, &rand1, &eWide, &m);
+            SSF_ASSERT(BN_mod_exp(bnR, bnA, bnEWide, bnM, ctx) == 1);
+            SSF_ASSERT(_EqOSSL(&r, bnR));
+            BN_free(bnEWide);
+        }
+
         BN_free(bnE);
     }
 

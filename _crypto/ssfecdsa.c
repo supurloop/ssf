@@ -611,7 +611,11 @@ static bool _SSFECDSAVerifyInit(const SSFECCurveParams_t *c, SSFECCurve_t curve,
     _SSFECDSABits2Int(&e, hash, hashLen, c);
     if (SSFBNCmp(&e, &c->n) >= 0) SSFBNSub(&e, &e, &c->n);
 
-    if (!SSFBNModInv(&w, &s, &c->n)) return false;
+    /* s is part of the (public) signature, so non-CT inversion is safe here.                  */
+    /* SSFBNModInvExt (binary EEA) is ~1.6× faster than SSFBNModInv (Fermat-via-ModExp) at     */
+    /* P-256 size in this codebase — measured 44 µs vs 70.5 µs per call. Saves ~25 µs per      */
+    /* Verify, ~5% of total Verify cost.                                                        */
+    if (!SSFBNModInvExt(&w, &s, &c->n)) return false;
 
     SSFBNModMul(u1Out, &e, &w, &c->n);
     SSFBNModMul(u2Out, rOut, &w, &c->n);

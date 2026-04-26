@@ -3005,6 +3005,32 @@ void SSFBNUnitTest(void)
                        (unsigned long long)(t1 - t0));
             }
 
+            /* --- ModInv (Fermat via ModExp) vs ModInvExt (binary EEA, non-CT) at P-256 size. */
+            /* Used to validate that EEA actually beats Fermat in this codebase before routing  */
+            /* public-input ECDSA Verify ModInv calls to the EEA path.                          */
+            if (n == 8u)
+            {
+                SSFBN_DEFINE(rInv, SSF_BN_MAX_LIMBS);
+                rInv.len = n;
+                t0 = SSFPortGetTick64();
+                for (i = 0; i < 2000u; i++)
+                {
+                    (void)SSFBNModInv(&rInv, &a, &mod);
+                }
+                t1 = SSFPortGetTick64();
+                printf("  ModInv     %s %u iter: %llu ms (Fermat)\n",
+                       bench[bi].label, 2000u, (unsigned long long)(t1 - t0));
+
+                t0 = SSFPortGetTick64();
+                for (i = 0; i < 2000u; i++)
+                {
+                    (void)SSFBNModInvExt(&rInv, &a, &mod);
+                }
+                t1 = SSFPortGetTick64();
+                printf("  ModInvExt  %s %u iter: %llu ms (binary EEA)\n",
+                       bench[bi].label, 2000u, (unsigned long long)(t1 - t0));
+            }
+
             /* --- Mont-form MontMul / MontSquare (CIOS / SOS). --- */
             SSFBNMontConvertIn(&a, &a, &mont);
             SSFBNMontConvertIn(&b, &b, &mont);

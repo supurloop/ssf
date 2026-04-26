@@ -34,15 +34,15 @@
 /* --------------------------------------------------------------------------------------------- */
 /* Module defines.                                                                               */
 /* --------------------------------------------------------------------------------------------- */
-/* SSFBNMul / SSFBNSquare compute rLen = a->len + b->len in uint16_t. If MAX_LIMBS exceeds       */
-/* 32767, the addition wraps and the bounds check passes on a wrapped value, allowing writes     */
-/* past r->cap. Reject the misconfiguration at compile time.                                     */
-_Static_assert(SSF_BN_MAX_LIMBS <= 32767u,
-               "SSF_BN_MAX_LIMBS must fit in int16_t to keep uint16_t sums safe in Mul/Square");
+/* SSF_BN_MAX_LIMBS must fit in int16_t so a->len + b->len can't overflow uint16_t. */
+#if (SSF_BN_MAX_LIMBS > 32767u)
+#error "SSF_BN_MAX_LIMBS must fit in int16_t to keep uint16_t sums safe in Mul/Square"
+#endif
 
 #define SSF_BN_KARATSUBA_THRESHOLD (32u)
 #define SSF_BN_MODEXP_WIN_K        (4u)
 #define SSF_BN_MODEXP_TBL_N        ((uint32_t)1u << SSF_BN_MODEXP_WIN_K)
+#define SSF_BN_NUM_SMALL_PRIMES    (sizeof(_ssfBNSmallPrimes) / sizeof(_ssfBNSmallPrimes[0]))
 
 /* --------------------------------------------------------------------------------------------- */
 /* Module data.                                                                                  */
@@ -68,6 +68,27 @@ static SSFBNLimb_t _ssfBNNistP384Limbs[12] =
 const SSFBN_t SSF_BN_NIST_P384 = { _ssfBNNistP384Limbs, 12, 12 };
 #endif /* SSF_BN_CONFIG_MAX_BITS >= 384 */
 
+/* First 256 primes for trial division during prime-candidate screening (up to 1613). */
+static const uint16_t _ssfBNSmallPrimes[] = {
+       2,    3,    5,    7,   11,   13,   17,   19,   23,   29,   31,   37,   41,   43,   47,
+      53,   59,   61,   67,   71,   73,   79,   83,   89,   97,  101,  103,  107,  109,  113,
+     127,  131,  137,  139,  149,  151,  157,  163,  167,  173,  179,  181,  191,  193,  197,
+     199,  211,  223,  227,  229,  233,  239,  241,  251,  257,  263,  269,  271,  277,  281,
+     283,  293,  307,  311,  313,  317,  331,  337,  347,  349,  353,  359,  367,  373,  379,
+     383,  389,  397,  401,  409,  419,  421,  431,  433,  439,  443,  449,  457,  461,  463,
+     467,  479,  487,  491,  499,  503,  509,  521,  523,  541,  547,  557,  563,  569,  571,
+     577,  587,  593,  599,  601,  607,  613,  617,  619,  631,  641,  643,  647,  653,  659,
+     661,  673,  677,  683,  691,  701,  709,  719,  727,  733,  739,  743,  751,  757,  761,
+     769,  773,  787,  797,  809,  811,  821,  823,  827,  829,  839,  853,  857,  859,  863,
+     877,  881,  883,  887,  907,  911,  919,  929,  937,  941,  947,  953,  967,  971,  977,
+     983,  991,  997, 1009, 1013, 1019, 1021, 1031, 1033, 1039, 1049, 1051, 1061, 1063, 1069,
+    1087, 1091, 1093, 1097, 1103, 1109, 1117, 1123, 1129, 1151, 1153, 1163, 1171, 1181, 1187,
+    1193, 1201, 1213, 1217, 1223, 1229, 1231, 1237, 1249, 1259, 1277, 1279, 1283, 1289, 1291,
+    1297, 1301, 1303, 1307, 1319, 1321, 1327, 1361, 1367, 1373, 1381, 1399, 1409, 1423, 1427,
+    1429, 1433, 1439, 1447, 1451, 1453, 1459, 1471, 1481, 1483, 1487, 1489, 1493, 1499, 1511,
+    1523, 1531, 1543, 1549, 1553, 1559, 1567, 1571, 1579, 1583, 1597, 1601, 1607, 1609, 1613
+};
+
 /* --------------------------------------------------------------------------------------------- */
 /* Returns a if sel != 0, else b; constant-time.                                                 */
 /* --------------------------------------------------------------------------------------------- */
@@ -85,6 +106,11 @@ static SSFBNLimb_t _SSFBNRawAdd(SSFBNLimb_t *r, const SSFBNLimb_t *a, const SSFB
 {
     SSFBNDLimb_t carry = 0;
     uint16_t i;
+
+    SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(a != NULL);
+    SSF_REQUIRE(b != NULL);
+    SSF_REQUIRE(n >= 1u);
 
     for (i = 0; i < n; i++)
     {
@@ -104,6 +130,11 @@ static SSFBNLimb_t _SSFBNRawSub(SSFBNLimb_t *r, const SSFBNLimb_t *a, const SSFB
     SSFBNDLimb_t borrow = 0;
     uint16_t i;
 
+    SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(a != NULL);
+    SSF_REQUIRE(b != NULL);
+    SSF_REQUIRE(n >= 1u);
+
     for (i = 0; i < n; i++)
     {
         SSFBNDLimb_t diff = ((SSFBNDLimb_t)a[i] - (SSFBNDLimb_t)b[i] - borrow);
@@ -121,6 +152,10 @@ static int8_t _SSFBNRawCmp(const SSFBNLimb_t *a, const SSFBNLimb_t *b, uint16_t 
     uint32_t gt = 0;
     uint32_t lt = 0;
     int16_t i;
+
+    SSF_REQUIRE(a != NULL);
+    SSF_REQUIRE(b != NULL);
+    SSF_REQUIRE(n >= 1u);
 
     for (i = (int16_t)(n - 1u); i >= 0; i--)
     {
@@ -166,6 +201,12 @@ void SSFBNSetUint32(SSFBN_t *a, uint32_t val, uint16_t numLimbs)
 /* --------------------------------------------------------------------------------------------- */
 void SSFBNSetOne(SSFBN_t *a, uint16_t numLimbs)
 {
+    SSF_REQUIRE(a != NULL);
+    SSF_REQUIRE(a->limbs != NULL);
+    SSF_REQUIRE(numLimbs >= 1u);
+    SSF_REQUIRE(numLimbs <= SSF_BN_MAX_LIMBS);
+    SSF_REQUIRE(numLimbs <= a->cap);
+
     SSFBNSetUint32(a, 1u, numLimbs);
 }
 
@@ -598,7 +639,7 @@ void SSFBNShiftLeft(SSFBN_t *a, uint32_t nBits)
     n = a->len;
 
     /* Does the shift zero the entire value? */
-    if (nBits >= (uint32_t)n * SSF_BN_LIMB_BITS)
+    if (nBits >= ((uint32_t)n * SSF_BN_LIMB_BITS))
     {
         /* Yes, clear all limbs. */
         memset(a->limbs, 0, (size_t)n * sizeof(SSFBNLimb_t));
@@ -658,7 +699,7 @@ void SSFBNShiftRight(SSFBN_t *a, uint32_t nBits)
     n = a->len;
 
     /* Does the shift zero the entire value? */
-    if (nBits >= (uint32_t)n * SSF_BN_LIMB_BITS)
+    if (nBits >= ((uint32_t)n * SSF_BN_LIMB_BITS))
     {
         /* Yes, clear all limbs. */
         memset(a->limbs, 0, (size_t)n * sizeof(SSFBNLimb_t));
@@ -810,6 +851,13 @@ static void _SSFBNSchoolbookMulRaw(SSFBNLimb_t *r,
     uint16_t i;
     uint16_t j;
 
+    SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(a != NULL);
+    SSF_REQUIRE(b != NULL);
+    SSF_REQUIRE(na >= 1u);
+    SSF_REQUIRE(nb >= 1u);
+    SSF_REQUIRE((uint32_t)na + (uint32_t)nb <= (uint32_t)SSF_BN_MAX_LIMBS);
+
     memset(r, 0, (size_t)(na + nb) * sizeof(SSFBNLimb_t));
 
     for (i = 0; i < na; i++)
@@ -825,7 +873,15 @@ static void _SSFBNSchoolbookMulRaw(SSFBNLimb_t *r,
             r[i + j] = (SSFBNLimb_t)prod;
             carry = prod >> SSF_BN_LIMB_BITS;
         }
+/* Disable false positive Visual Studio Code Analysis warning */
+#ifdef _WIN32
+#pragma warning(push)
+#pragma warning(disable:6385)
+#endif
         r[i + nb] += (SSFBNLimb_t)carry;
+#ifdef _WIN32
+#pragma warning(pop)
+#endif
     }
 }
 
@@ -844,6 +900,12 @@ static void _SSFBNKaratsubaMul(SSFBNLimb_t *r,
     uint16_t i;
     SSFBNLimb_t borrow;
     SSFBNDLimb_t addCarry;
+
+    SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(a != NULL);
+    SSF_REQUIRE(b != NULL);
+    SSF_REQUIRE(n >= 1u);
+    SSF_REQUIRE((uint32_t)(n * 2u) <= (uint32_t)SSF_BN_MAX_LIMBS);
 
     /* Fall back to schoolbook when size below threshold or n is odd. */
     if ((n < SSF_BN_KARATSUBA_THRESHOLD) || ((n & 1u) != 0u))
@@ -952,7 +1014,15 @@ void SSFBNMul(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b)
             r->limbs[i + j] = (SSFBNLimb_t)prod;
             carry = prod >> SSF_BN_LIMB_BITS;
         }
+/* Disable false positive Visual Studio Code Analysis warning */
+#ifdef _WIN32
+#pragma warning(push)
+#pragma warning(disable:6385)
+#endif
         r->limbs[i + b->len] += (SSFBNLimb_t)carry;
+#ifdef _WIN32
+#pragma warning(pop)
+#endif
     }
 }
 
@@ -1064,7 +1134,15 @@ void SSFBNSquare(SSFBN_t *r, const SSFBN_t *a)
         pos = (uint16_t)(2u * i + 2u);
         while ((carry != 0u) && (pos < rLen))
         {
+/* Disable false positive Visual Studio Code Analysis warning */
+#ifdef _WIN32
+#pragma warning(push)
+#pragma warning(disable:6385)
+#endif
             sum = (SSFBNDLimb_t)r->limbs[pos] + (SSFBNDLimb_t)carry;
+#ifdef _WIN32
+#pragma warning(pop)
+#endif
             r->limbs[pos] = (SSFBNLimb_t)sum;
             carry = (SSFBNLimb_t)(sum >> SSF_BN_LIMB_BITS);
             pos++;
@@ -1511,11 +1589,20 @@ static void _SSFBNReduceP256(SSFBN_t *r, const SSFBN_t *t)
 {
     /* Name the 32-bit words: t = (c15 c14 ... c1 c0) where c0 = t->limbs[0] etc. */
     /* Notation follows NIST SP 800-186 D.2.1 */
-    const SSFBNLimb_t *c = t->limbs;
+    const SSFBNLimb_t *c;
     SSFBNLimb_t carry;
     SSFBNLimb_t borrow;
     SSFBN_DEFINE(s, SSF_BN_MAX_LIMBS);
     SSFBN_DEFINE(tmp, SSF_BN_MAX_LIMBS);
+
+    SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(r->limbs != NULL);
+    SSF_REQUIRE(r->cap >= 8u);
+    SSF_REQUIRE(t != NULL);
+    SSF_REQUIRE(t->limbs != NULL);
+    SSF_REQUIRE(t->len >= 16u);
+
+    c = t->limbs;
 
     /* s1 = (c7, c6, c5, c4, c3, c2, c1, c0) -- the low half */
     r->len = 8;
@@ -1607,11 +1694,20 @@ static void _SSFBNReduceP256(SSFBN_t *r, const SSFBN_t *t)
 #if SSF_BN_CONFIG_MAX_BITS >= 384
 static void _SSFBNReduceP384(SSFBN_t *r, const SSFBN_t *t)
 {
-    const SSFBNLimb_t *c = t->limbs;
+    const SSFBNLimb_t *c;
     SSFBNLimb_t carry = 0;
     SSFBNLimb_t borrow = 0;
     SSFBN_DEFINE(s, SSF_BN_MAX_LIMBS);
     SSFBN_DEFINE(tmp, SSF_BN_MAX_LIMBS);
+
+    SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(r->limbs != NULL);
+    SSF_REQUIRE(r->cap >= 12u);
+    SSF_REQUIRE(t != NULL);
+    SSF_REQUIRE(t->limbs != NULL);
+    SSF_REQUIRE(t->len >= 24u);
+
+    c = t->limbs;
 
     /* s1 = (c11, c10, c9, c8, c7, c6, c5, c4, c3, c2, c1, c0) */
     r->len = 12;
@@ -1865,7 +1961,15 @@ void SSFBNMontMul(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBNMon
         {
             SSFBNDLimb_t sum = (SSFBNDLimb_t)t[n] + carry;
             t[n] = (SSFBNLimb_t)sum;
+/* Disable false positive Visual Studio Code Analysis warning */
+#ifdef _WIN32
+#pragma warning(push)
+#pragma warning(disable:6385)
+#endif
             t[n + 1u] += (SSFBNLimb_t)(sum >> SSF_BN_LIMB_BITS);
+#ifdef _WIN32
+#pragma warning(pop)
+#endif
         }
 
         {
@@ -1887,7 +1991,6 @@ void SSFBNMontMul(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBNMon
         SSFBNLimb_t cond = ((SSFBNLimb_t)(borrow != 0u)) & ((SSFBNLimb_t)(t[n] == 0u));
         SSFBNLimb_t mask = (SSFBNLimb_t)(-(int32_t)cond);
         SSFBNDLimb_t addCarry = 0;
-        uint16_t i;
         for (i = 0; i < n; i++)
         {
             addCarry += (SSFBNDLimb_t)r->limbs[i] + (SSFBNDLimb_t)(ctx->mod.limbs[i] & mask);
@@ -1974,7 +2077,15 @@ void SSFBNMontSquare(SSFBN_t *r, const SSFBN_t *a, const SSFBNMont_t *ctx)
         pos = (uint16_t)(2u * i + 2u);
         while (carry != 0u)
         {
+/* Disable false positive Visual Studio Code Analysis warning */
+#ifdef _WIN32
+#pragma warning(push)
+#pragma warning(disable:6385)
+#endif
             sum = (SSFBNDLimb_t)t[pos] + (SSFBNDLimb_t)carry;
+#ifdef _WIN32
+#pragma warning(pop)
+#endif
             t[pos] = (SSFBNLimb_t)sum;
             carry = (SSFBNLimb_t)(sum >> SSF_BN_LIMB_BITS);
             pos++;
@@ -2019,7 +2130,6 @@ void SSFBNMontSquare(SSFBN_t *r, const SSFBN_t *a, const SSFBNMont_t *ctx)
         SSFBNLimb_t cond = ((SSFBNLimb_t)(borrow != 0u)) & ((SSFBNLimb_t)(t[2u * n] == 0u));
         SSFBNLimb_t mask = (SSFBNLimb_t)(-(int32_t)cond);
         SSFBNDLimb_t addCarry = 0;
-        uint16_t i;
         for (i = 0; i < n; i++)
         {
             addCarry += (SSFBNDLimb_t)r->limbs[i] + (SSFBNDLimb_t)(ctx->mod.limbs[i] & mask);
@@ -2335,32 +2445,6 @@ void SSFBNZeroize(SSFBN_t *a)
     }
     a->len = 0;
 }
-
-/* --------------------------------------------------------------------------------------------- */
-/* Primality / random                                                                            */
-/* --------------------------------------------------------------------------------------------- */
-
-/* First 256 primes for trial division during prime-candidate screening (up to 1613). */
-static const uint16_t _ssfBNSmallPrimes[] = {
-       2,    3,    5,    7,   11,   13,   17,   19,   23,   29,   31,   37,   41,   43,   47,
-      53,   59,   61,   67,   71,   73,   79,   83,   89,   97,  101,  103,  107,  109,  113,
-     127,  131,  137,  139,  149,  151,  157,  163,  167,  173,  179,  181,  191,  193,  197,
-     199,  211,  223,  227,  229,  233,  239,  241,  251,  257,  263,  269,  271,  277,  281,
-     283,  293,  307,  311,  313,  317,  331,  337,  347,  349,  353,  359,  367,  373,  379,
-     383,  389,  397,  401,  409,  419,  421,  431,  433,  439,  443,  449,  457,  461,  463,
-     467,  479,  487,  491,  499,  503,  509,  521,  523,  541,  547,  557,  563,  569,  571,
-     577,  587,  593,  599,  601,  607,  613,  617,  619,  631,  641,  643,  647,  653,  659,
-     661,  673,  677,  683,  691,  701,  709,  719,  727,  733,  739,  743,  751,  757,  761,
-     769,  773,  787,  797,  809,  811,  821,  823,  827,  829,  839,  853,  857,  859,  863,
-     877,  881,  883,  887,  907,  911,  919,  929,  937,  941,  947,  953,  967,  971,  977,
-     983,  991,  997, 1009, 1013, 1019, 1021, 1031, 1033, 1039, 1049, 1051, 1061, 1063, 1069,
-    1087, 1091, 1093, 1097, 1103, 1109, 1117, 1123, 1129, 1151, 1153, 1163, 1171, 1181, 1187,
-    1193, 1201, 1213, 1217, 1223, 1229, 1231, 1237, 1249, 1259, 1277, 1279, 1283, 1289, 1291,
-    1297, 1301, 1303, 1307, 1319, 1321, 1327, 1361, 1367, 1373, 1381, 1399, 1409, 1423, 1427,
-    1429, 1433, 1439, 1447, 1451, 1453, 1459, 1471, 1481, 1483, 1487, 1489, 1493, 1499, 1511,
-    1523, 1531, 1543, 1549, 1553, 1559, 1567, 1571, 1579, 1583, 1597, 1601, 1607, 1609, 1613
-};
-#define SSF_BN_NUM_SMALL_PRIMES (sizeof(_ssfBNSmallPrimes) / sizeof(_ssfBNSmallPrimes[0]))
 
 /* --------------------------------------------------------------------------------------------- */
 /* Returns a mod d via successive 64-bit modulo across limbs from MSB to LSB.                    */

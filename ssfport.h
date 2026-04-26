@@ -71,7 +71,29 @@ extern "C" {
 #define SSF_CONFIG_CHACHA20_UNIT_TEST (1u)
 #define SSF_CONFIG_CT_UNIT_TEST      (1u)
 #define SSF_CONFIG_EC_UNIT_TEST      (1u)
+#define SSF_CONFIG_EC_MICROBENCH     (1u)  /* 1 to run [k]G perf harness in ssfec_ut */
 #define SSF_CONFIG_ECDSA_UNIT_TEST   (1u)
+
+/* 1 to enable the fixed-base 4-bit Lim-Lee comb table for [k]G_P256. ~3-4x faster than the    */
+/* generic Montgomery ladder. Costs ~1.5 KB of Flash for the precomputed point table.          */
+#define SSF_EC_CONFIG_FIXED_BASE_P256 (1u)
+
+/* 1 to enable the fixed-base 4-bit Lim-Lee comb table for [k]G_P384. ~3-4x faster than the    */
+/* generic Montgomery ladder. Costs ~2.3 KB of Flash for the precomputed point table.          */
+#define SSF_EC_CONFIG_FIXED_BASE_P384 (1u)
+
+/* SSF_EC_FIXED_BASE_COMB_H — fixed-base Lim-Lee comb window size for SSFECScalarMulBaseP256/  */
+/* P384. Larger h shrinks the per-call iteration count from d=ceil(n/h) to d=ceil(n/h+1) at   */
+/* the cost of a 2x-larger precomputed table in .rodata. RAM/stack and .text are unchanged.   */
+/*                                                                                            */
+/*   4 — minimal Flash, slowest. Tables ~2.6 KB total.       Baseline.                        */
+/*   5 — balanced.            Tables ~5.6 KB total (+~3 KB).  ~15-17% faster [k]G.            */
+/*   6 — maximum perf.        Tables ~12.0 KB total (+~9 KB). ~22-25% faster [k]G.            */
+/*                                                                                            */
+/* Affects: SSFECScalarMulBaseP256, SSFECScalarMulBaseP384, SSFECScalarMulDualBase, ECDSA     */
+/* KeyGen and Sign (which use the comb internally). Verify is mostly variable-base so gain   */
+/* there is smaller. Only one setting compiles in.                                            */
+#define SSF_EC_FIXED_BASE_COMB_H (6u)
 #define SSF_CONFIG_ED25519_UNIT_TEST (1u)
 #define SSF_CONFIG_HKDF_UNIT_TEST    (1u)
 #define SSF_CONFIG_HMAC_UNIT_TEST    (1u)

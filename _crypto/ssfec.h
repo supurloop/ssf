@@ -229,11 +229,57 @@ void SSFECScalarMulDual(SSFECPoint_t *r,
                         const SSFBN_t *u2, const SSFECPoint_t *q,
                         SSFECCurve_t curve);
 
+#if (SSF_EC_CONFIG_FIXED_BASE_P256 == 1) || (SSF_EC_CONFIG_FIXED_BASE_P384 == 1)
+/* Specialized dual scalar multiplication: r = u1 * G + u2 * q where G is the curve generator.   */
+/* Uses SSFECScalarMulBase{P256,P384} for u1*G (fixed-base comb, ~4x faster than the ladder)     */
+/* plus the windowed SSFECScalarMul for u2*Q, then a final point add. Faster than                */
+/* SSFECScalarMulDual's Shamir's trick when fixed-base tables are configured for `curve`.        */
+/* Inputs are public; not constant-time. Intended for ECDSA verify.                              */
+void SSFECScalarMulDualBase(SSFECPoint_t *r,
+                            const SSFBN_t *u1,
+                            const SSFBN_t *u2, const SSFECPoint_t *q,
+                            SSFECCurve_t curve);
+#endif /* SSF_EC_CONFIG_FIXED_BASE_P256 || SSF_EC_CONFIG_FIXED_BASE_P384 */
+
+#if SSF_EC_CONFIG_FIXED_BASE_P256 == 1
+/* Fixed-base scalar multiplication for P-256: r = k * G. Constant-time, ~3-4x faster than     */
+/* SSFECScalarMul(r, k, G, SSF_EC_CURVE_P256) thanks to a precomputed Lim-Lee comb table over   */
+/* multiples of G. k must be in [0, n) where n is the P-256 curve order.                       */
+void SSFECScalarMulBaseP256(SSFECPoint_t *r, const SSFBN_t *k);
+#endif /* SSF_EC_CONFIG_FIXED_BASE_P256 */
+
+#if SSF_EC_CONFIG_FIXED_BASE_P384 == 1
+/* Fixed-base scalar multiplication for P-384: r = k * G. Constant-time, ~3-4x faster than     */
+/* SSFECScalarMul(r, k, G, SSF_EC_CURVE_P384) thanks to a precomputed Lim-Lee comb table over   */
+/* multiples of G. k must be in [0, n) where n is the P-384 curve order.                       */
+void SSFECScalarMulBaseP384(SSFECPoint_t *r, const SSFBN_t *k);
+#endif /* SSF_EC_CONFIG_FIXED_BASE_P384 */
+
 /* --------------------------------------------------------------------------------------------- */
 /* Unit test                                                                                     */
 /* --------------------------------------------------------------------------------------------- */
 #if SSF_CONFIG_EC_UNIT_TEST == 1
 void SSFECUnitTest(void);
+
+/* Test-only wrapper exposing the static _SSFECPointAddMixed for direct verification.            */
+/* q must have Z=1 (affine) or Z=0 (identity); the function asserts neither, but mathematically  */
+/* relies on Z=1 for the non-identity case. r may alias p or q.                                   */
+void _SSFECPointAddMixedForTest(SSFECPoint_t *r, const SSFECPoint_t *p,
+                                const SSFECPoint_t *q, SSFECCurve_t curve);
+
+/* Test-only wrapper exposing the static _SSFECPointAddMixedNoDouble for direct verification.    */
+/* Same contract as _SSFECPointAddMixed except: the caller must guarantee P != Q (and P != -Q is */
+/* still handled). For P == Q the result is undefined (the function skips computing 2*P to save  */
+/* one full doubling). Used by the comb runtime where R-vs-table[mask] collisions are            */
+/* statistically impossible (~2^-bits).                                                            */
+void _SSFECPointAddMixedNoDoubleForTest(SSFECPoint_t *r, const SSFECPoint_t *p,
+                                        const SSFECPoint_t *q, SSFECCurve_t curve);
+
+/* Test-only wrapper exposing the static variable-time wNAF scalar mul. Result is r = k*P.       */
+/* PUBLIC-INPUT ONLY — timing depends on the bit pattern of k. Used internally by                */
+/* SSFECScalarMulDualBase for the [u2]Q half of ECDSA verify.                                     */
+void _SSFECScalarMulVTwNAFForTest(SSFECPoint_t *r, const SSFBN_t *k,
+                                  const SSFECPoint_t *p, SSFECCurve_t curve);
 #endif /* SSF_CONFIG_EC_UNIT_TEST */
 
 #ifdef __cplusplus

@@ -42,6 +42,27 @@
 #include "ssfprng.h"
 
 /* --------------------------------------------------------------------------------------------- */
+/* Internal: r = k * G via the fastest available scalar multiplication. Dispatches to the curve-  */
+/* specific fixed-base comb when configured (~4x faster than the generic windowed routine);       */
+/* otherwise falls back to SSFECScalarMul through a stack-built G.                                */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFECDSAScalarMulBase(SSFECPoint_t *r, const SSFBN_t *k, SSFECCurve_t curve)
+{
+#if SSF_EC_CONFIG_FIXED_BASE_P256 == 1
+    if (curve == SSF_EC_CURVE_P256) { SSFECScalarMulBaseP256(r, k); return; }
+#endif
+#if SSF_EC_CONFIG_FIXED_BASE_P384 == 1
+    if (curve == SSF_EC_CURVE_P384) { SSFECScalarMulBaseP384(r, k); return; }
+#endif
+    {
+        const SSFECCurveParams_t *c = SSFECGetCurveParams(curve);
+        SSFECPOINT_DEFINE(G, SSF_EC_MAX_LIMBS);
+        SSFECPointFromAffine(&G, &c->gx, &c->gy, curve);
+        SSFECScalarMul(r, k, &G, curve);
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Internal: select HMAC hash type for the curve.                                                */
 /* --------------------------------------------------------------------------------------------- */
 static SSFHMACHash_t _SSFECDSAGetHMACHash(SSFECCurve_t curve)
@@ -342,7 +363,6 @@ bool SSFECDSAKeyGen(SSFECCurve_t curve,
     SSFPRNGContext_t prng;
     uint8_t entropy[SSF_PRNG_ENTROPY_SIZE];
     SSFBN_DEFINE(d, SSF_EC_MAX_LIMBS);
-    SSFECPOINT_DEFINE(G, SSF_EC_MAX_LIMBS);
     SSFECPOINT_DEFINE(Q, SSF_EC_MAX_LIMBS);
     uint16_t attempts;
 
@@ -388,8 +408,7 @@ bool SSFECDSAKeyGen(SSFECCurve_t curve,
     if (!SSFBNToBytes(&d, privKey, c->bytes)) return false;
 
     /* Compute public key: Q = d * G */
-    SSFECPointFromAffine(&G, &c->gx, &c->gy, curve);
-    SSFECScalarMul(&Q, &d, &G, curve);
+    _SSFECDSAScalarMulBase(&Q, &d, curve);
 
     /* Encode public key in SEC 1 uncompressed format */
     if (!SSFECPointEncode(&Q, curve, pubKey, pubKeySize, pubKeyLen))
@@ -411,7 +430,6 @@ bool SSFECDSAPubKeyFromPrivKey(SSFECCurve_t curve,
 {
     const SSFECCurveParams_t *c = SSFECGetCurveParams(curve);
     SSFBN_DEFINE(d, SSF_EC_MAX_LIMBS);
-    SSFECPOINT_DEFINE(G, SSF_EC_MAX_LIMBS);
     SSFECPOINT_DEFINE(Q, SSF_EC_MAX_LIMBS);
 
     SSF_REQUIRE(privKey != NULL);
@@ -426,8 +444,7 @@ bool SSFECDSAPubKeyFromPrivKey(SSFECCurve_t curve,
     if (!_SSFECDSAPrivKeyIsValid(&d, c)) return false;
 
     /* Q = d * G */
-    SSFECPointFromAffine(&G, &c->gx, &c->gy, curve);
-    SSFECScalarMul(&Q, &d, &G, curve);
+    _SSFECDSAScalarMulBase(&Q, &d, curve);
 
     /* Encode */
     if (!SSFECPointEncode(&Q, curve, pubKey, pubKeySize, pubKeyLen))
@@ -477,7 +494,6 @@ bool SSFECDSASign(SSFECCurve_t curve,
     SSFBN_DEFINE(s, SSF_EC_MAX_LIMBS);
     SSFBN_DEFINE(kInv, SSF_EC_MAX_LIMBS);
     SSFBN_DEFINE(tmp, SSF_EC_MAX_LIMBS);
-    SSFECPOINT_DEFINE(G, SSF_EC_MAX_LIMBS);
     SSFECPOINT_DEFINE(R, SSF_EC_MAX_LIMBS);
     SSFBN_DEFINE(Rx, SSF_EC_MAX_LIMBS);
     SSFBN_DEFINE(Ry, SSF_EC_MAX_LIMBS);
@@ -509,8 +525,7 @@ bool SSFECDSASign(SSFECCurve_t curve,
     }
 
     /* R = k * G */
-    SSFECPointFromAffine(&G, &c->gx, &c->gy, curve);
-    SSFECScalarMul(&R, &k, &G, curve);
+    _SSFECDSAScalarMulBase(&R, &k, curve);
 
     /* Convert R to affine and get r = Rx mod n */
     if (!SSFECPointToAffine(&Rx, &Ry, &R, curve))
@@ -604,37 +619,78 @@ static bool _SSFECDSAVerifyInit(const SSFECCurveParams_t *c, SSFECCurve_t curve,
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Verify stage 2: compute R = u1 * G + u2 * Q via Shamir's trick. Local G is released on return  */
-/* so it doesn't occupy stack during the later affine conversion. Rejects R = O per FIPS 186-4.   */
+/* Verify stage 2: compute R = u1 * G + u2 * Q. When fixed-base tables are configured for the    */
+/* curve, dispatches to SSFECScalarMulDualBase (~10-15% faster than plain Shamir's trick on the  */
+/* dual scalar mul); otherwise falls back to SSFECScalarMulDual. Rejects R = O per FIPS 186-4.   */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFECDSAVerifyGetR(const SSFECCurveParams_t *c, SSFECCurve_t curve,
                                 const SSFBN_t *u1, const SSFBN_t *u2,
                                 const SSFECPoint_t *Q,
                                 SSFECPoint_t *Rout)
 {
-    SSFECPOINT_DEFINE(G, SSF_EC_MAX_LIMBS);
-
-    SSFECPointFromAffine(&G, &c->gx, &c->gy, curve);
-    SSFECScalarMulDual(Rout, u1, &G, u2, Q, curve);
+#if (SSF_EC_CONFIG_FIXED_BASE_P256 == 1) || (SSF_EC_CONFIG_FIXED_BASE_P384 == 1)
+    (void)c;
+    SSFECScalarMulDualBase(Rout, u1, u2, Q, curve);
+#else
+    {
+        SSFECPOINT_DEFINE(G, SSF_EC_MAX_LIMBS);
+        SSFECPointFromAffine(&G, &c->gx, &c->gy, curve);
+        SSFECScalarMulDual(Rout, u1, &G, u2, Q, curve);
+    }
+#endif
     if (SSFECPointIsIdentity(Rout)) return false;
     return true;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Verify stage 3: extract affine Rx from R, reduce mod n, compare to r. Local Rx, Ry, v are      */
-/* released on return; ScalarMulDual's heavy call chain is already unwound by the time we reach   */
-/* this helper, so the added locals here don't compound with it.                                 */
+/* Verify stage 3: check r ≡ affine(R).x (mod n) directly in Jacobian coordinates, without       */
+/* inverting Z. Affine x = R.X / R.Z² mod p, and ECDSA verify wants (affine_x mod n) == r.       */
+/*                                                                                                */
+/*   Case A (always check): affine_x == r              ⇔  r · Z² ≡ R.X  (mod p)                 */
+/*   Case B (only if r < p − n): affine_x == r + n     ⇔  (r + n) · Z² ≡ R.X  (mod p)            */
+/*                                                                                                */
+/* Case B handles the rare wraparound where the original signer's affine x landed in [n, p−1]    */
+/* and got reduced mod n during signing. For NIST P-256 / P-384 this fires with probability      */
+/* (p − n)/p ≈ 2^−128 / 2^−191 respectively but is mandatory for spec correctness.               */
+/*                                                                                                */
+/* Saves one full SSFBNModInv per Verify versus the previous PointToAffine path (~150 µs at      */
+/* current Fermat-via-ModExp cost), at the cost of one ModSqr + one or two ModMul mod p.         */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFECDSAVerifyCheckR(const SSFECCurveParams_t *c, SSFECCurve_t curve,
                                   const SSFECPoint_t *R, const SSFBN_t *r)
 {
-    SSFBN_DEFINE(Rx, SSF_EC_MAX_LIMBS);
-    SSFBN_DEFINE(Ry, SSF_EC_MAX_LIMBS);
-    SSFBN_DEFINE(v, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(z2, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(t, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(rPlusN, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(pMinusN, SSF_EC_MAX_LIMBS);
 
-    if (!SSFECPointToAffine(&Rx, &Ry, R, curve)) return false;
-    _SSFECDSAReduceModN(&v, &Rx, c);
-    return (SSFBNCmp(&v, r) == 0);
+    (void)curve;
+
+    /* z2 = R.z² mod p */
+    SSFBNModMulNIST(&z2, &R->z, &R->z, &c->p);
+
+    /* Case A: t = r * z2 mod p; accept if t == R.x */
+    SSFBNModMulNIST(&t, r, &z2, &c->p);
+    if (SSFBNCmp(&t, &R->x) == 0) return true;
+
+    /* Case B: only if r < p - n (wraparound is possible). r + n is < p in that case so no   */
+    /* extra mod-p reduction is needed before the multiply.                                  */
+    SSFBNSub(&pMinusN, &c->p, &c->n);
+    if (SSFBNCmp(r, &pMinusN) < 0)
+    {
+        (void)SSFBNAdd(&rPlusN, r, &c->n);
+        SSFBNModMulNIST(&t, &rPlusN, &z2, &c->p);
+        if (SSFBNCmp(&t, &R->x) == 0) return true;
+    }
+    return false;
+}
+
+/* Test-only wrapper that exposes _SSFECDSAVerifyCheckR for unit tests that synthesize R.        */
+bool _SSFECDSAVerifyCheckRForTest(SSFECCurve_t curve, const SSFECPoint_t *R, const SSFBN_t *r)
+{
+    const SSFECCurveParams_t *c = SSFECGetCurveParams(curve);
+    if (c == NULL) return false;
+    return _SSFECDSAVerifyCheckR(c, curve, R, r);
 }
 
 bool SSFECDSAVerify(SSFECCurve_t curve,

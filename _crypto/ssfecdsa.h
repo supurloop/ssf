@@ -203,6 +203,11 @@ bool SSFECDHComputeSecret(SSFECCurve_t curve,
 /* --------------------------------------------------------------------------------------------- */
 #if SSF_CONFIG_ECDSA_UNIT_TEST == 1
 void SSFECDSAUnitTest(void);
+
+/* Test-only wrapper around the internal projective verify check. Lets unit tests pass a synthetic */
+/* Jacobian R (including ones with non-1 Z and ones whose affine x lies in [n, p-1] to exercise    */
+/* the wraparound branch) and confirm the comparison logic is correct.                              */
+bool _SSFECDSAVerifyCheckRForTest(SSFECCurve_t curve, const SSFECPoint_t *R, const SSFBN_t *r);
 #endif /* SSF_CONFIG_ECDSA_UNIT_TEST */
 
 #ifdef __cplusplus

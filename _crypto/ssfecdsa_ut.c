@@ -256,6 +256,64 @@ void SSFECDSAUnitTest(void)
         SSF_ASSERT(sig1Len == sig2Len);
         SSF_ASSERT(memcmp(sig1, sig2, sig1Len) == 0);
     }
+
+    /* ---- P-256: projective verify check accepts a Jacobian R with non-1 Z ---- */
+    /* Builds R = [k]G with k > 1 (so Z != 1 in Jacobian form) and confirms the new projective    */
+    /* _SSFECDSAVerifyCheckR accepts the matching r and rejects a tampered r.                      */
+    {
+        SSFBN_DEFINE(k, SSF_EC_MAX_LIMBS);
+        SSFBN_DEFINE(rx, SSF_EC_MAX_LIMBS);
+        SSFBN_DEFINE(ry, SSF_EC_MAX_LIMBS);
+        SSFBN_DEFINE(rOk, SSF_EC_MAX_LIMBS);
+        SSFBN_DEFINE(rBad, SSF_EC_MAX_LIMBS);
+        SSFECPOINT_DEFINE(R, SSF_EC_MAX_LIMBS);
+        const SSFECCurveParams_t *c = SSFECGetCurveParams(SSF_EC_CURVE_P256);
+
+        /* k = 12345 — any value > 1 produces a Jacobian R with Z != 1 after the doublings/adds. */
+        SSFBNSetUint32(&k, 12345u, c->limbs);
+        SSFECScalarMulBaseP256(&R, &k);
+
+        /* Reference: convert R to affine and reduce x mod n to compute the expected r. */
+        SSF_ASSERT(SSFECPointToAffine(&rx, &ry, &R, SSF_EC_CURVE_P256) == true);
+        SSFBNCopy(&rOk, &rx);
+        if (SSFBNCmp(&rOk, &c->n) >= 0) SSFBNSub(&rOk, &rOk, &c->n);
+
+        /* Projective check should accept the canonical r and reject a tampered one. */
+        SSF_ASSERT(_SSFECDSAVerifyCheckRForTest(SSF_EC_CURVE_P256, &R, &rOk) == true);
+        SSFBNCopy(&rBad, &rOk);
+        (void)SSFBNAddUint32(&rBad, &rBad, 1u);
+        SSF_ASSERT(_SSFECDSAVerifyCheckRForTest(SSF_EC_CURVE_P256, &R, &rBad) == false);
+    }
+
+    /* ---- P-256: projective verify check exercises the wraparound branch ---- */
+    /* Builds a synthetic R with Z=1 and X = n (smallest value triggering wraparound), then sets  */
+    /* r = X - n = 0... no, r=0 is rejected upstream. Use X = n + 1 so r = 1 is a valid scalar.   */
+    /* _SSFECDSAVerifyCheckR doesn't validate curve membership; it only does the projective       */
+    /* comparison. r < p - n must hold for the wraparound branch to fire.                          */
+    {
+        SSFBN_DEFINE(rWrap, SSF_EC_MAX_LIMBS);
+        SSFBN_DEFINE(rNotMatch, SSF_EC_MAX_LIMBS);
+        SSFBN_DEFINE(pMinusN, SSF_EC_MAX_LIMBS);
+        SSFECPOINT_DEFINE(R, SSF_EC_MAX_LIMBS);
+        const SSFECCurveParams_t *c = SSFECGetCurveParams(SSF_EC_CURVE_P256);
+
+        /* Sanity-check that r=1 sits below p-n on this curve so the wraparound branch will run. */
+        SSFBNSub(&pMinusN, &c->p, &c->n);
+        SSFBNSetUint32(&rWrap, 1u, c->limbs);
+        SSF_ASSERT(SSFBNCmp(&rWrap, &pMinusN) < 0);
+
+        /* Synthetic R: affine (Z=1), X = n + 1, Y arbitrary. (X - n) mod n = 1 = r. */
+        SSFBNSetZero(&R.y, c->limbs);
+        SSFBNSetOne(&R.z, c->limbs);
+        (void)SSFBNAdd(&R.x, &c->n, &rWrap);  /* R.x = n + 1, < p since 1 < p - n */
+
+        /* Wraparound branch: accepts r=1 because (1 + n) * 1² == n + 1 == R.x (mod p). */
+        SSF_ASSERT(_SSFECDSAVerifyCheckRForTest(SSF_EC_CURVE_P256, &R, &rWrap) == true);
+
+        /* Negative: r=2 should NOT match. (2 + n) * 1² = n + 2 != n + 1, and 2 * 1² = 2 != n+1. */
+        SSFBNSetUint32(&rNotMatch, 2u, c->limbs);
+        SSF_ASSERT(_SSFECDSAVerifyCheckRForTest(SSF_EC_CURVE_P256, &R, &rNotMatch) == false);
+    }
 #endif /* SSF_EC_CONFIG_ENABLE_P256 */
 }
 #endif /* SSF_CONFIG_ECDSA_UNIT_TEST */

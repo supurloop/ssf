@@ -176,14 +176,10 @@ static void _SSFECPointDouble(SSFECPoint_t *r, const SSFECPoint_t *p,
     SSFBN_DEFINE(alpha, SSF_EC_MAX_LIMBS);
     SSFBN_DEFINE(tmp, SSF_EC_MAX_LIMBS);
 
-    /* Identity doubles to identity */
-    if (SSFBNIsZero(&p->z))
-    {
-        SSFBNSetZero(&r->x, c->limbs);
-        SSFBNSetOne(&r->y, c->limbs);
-        SSFBNSetZero(&r->z, c->limbs);
-        return;
-    }
+    /* No identity early-exit. When p->z == 0, the formulas below produce r->z == (Y1+0)^2 - */
+    /* Y1^2 - 0 == 0, so the identity is preserved. The X3, Y3 values become arithmetic       */
+    /* "garbage" but are don't-care once Z3 == 0 — every consumer detects identity by Z.      */
+    /* Removing the branch is what makes scalar mul constant-time at the first ladder step.   */
 
     /* delta = Z1^2 */
     SSFBNModMulNIST(&delta, &p->z, &p->z, &c->p);
@@ -223,6 +219,14 @@ static void _SSFECPointDouble(SSFECPoint_t *r, const SSFECPoint_t *p,
     SSFBNModAdd(&gamma, &gamma, &gamma, &c->p);   /* 4 * Y1^4 */
     SSFBNModAdd(&gamma, &gamma, &gamma, &c->p);   /* 8 * Y1^4 */
     SSFBNModSub(&r->y, &tmp, &gamma, &c->p);
+
+    /* Zeroize scratch — these contain values derived from the secret scalar during the     */
+    /* Montgomery ladder. Stack reuse would otherwise leak intermediate point coordinates.   */
+    SSFBNZeroize(&delta);
+    SSFBNZeroize(&gamma);
+    SSFBNZeroize(&beta);
+    SSFBNZeroize(&alpha);
+    SSFBNZeroize(&tmp);
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -239,87 +243,322 @@ static void _SSFECPointAddFull(SSFECPoint_t *r, const SSFECPoint_t *p, const SSF
     SSFBN_DEFINE(t4, SSF_EC_MAX_LIMBS);
     SSFBN_DEFINE(t5, SSF_EC_MAX_LIMBS);
     SSFBN_DEFINE(t6, SSF_EC_MAX_LIMBS);
+    /* Saved copies of the inputs let us run all selection branches without losing p or q to */
+    /* aliasing — r may alias either or both. */
+    SSFECPOINT_DEFINE(P, SSF_EC_MAX_LIMBS);
+    SSFECPOINT_DEFINE(Q, SSF_EC_MAX_LIMBS);
+    /* Doubling result for the "P == Q" special case, and an identity point for "P == -Q".   */
+    SSFECPOINT_DEFINE(dblP, SSF_EC_MAX_LIMBS);
+    SSFECPOINT_DEFINE(zeroPt, SSF_EC_MAX_LIMBS);
+    SSFBNLimb_t z1z, z2z, hz, rz, hzAndRz, hzAndNotRz;
 
-    /* P = identity: return Q */
-    if (SSFBNIsZero(&p->z))
-    {
-        SSFBNCopy(&r->x, &q->x);
-        SSFBNCopy(&r->y, &q->y);
-        SSFBNCopy(&r->z, &q->z);
-        return;
-    }
+    /* Save p and q so the general formulas can run unconditionally even when r aliases p    */
+    /* or q — every read after this point goes through P / Q.                                */
+    SSFBNCopy(&P.x, &p->x); SSFBNCopy(&P.y, &p->y); SSFBNCopy(&P.z, &p->z);
+    SSFBNCopy(&Q.x, &q->x); SSFBNCopy(&Q.y, &q->y); SSFBNCopy(&Q.z, &q->z);
 
-    /* Q = identity: return P */
-    if (SSFBNIsZero(&q->z))
-    {
-        SSFBNCopy(&r->x, &p->x);
-        SSFBNCopy(&r->y, &p->y);
-        SSFBNCopy(&r->z, &p->z);
-        return;
-    }
+    /* Pre-compute Double(P) for the P==Q select branch. Done before we touch r so the      */
+    /* ScalarMul aliasing pattern (r == &R0 or &R1) doesn't poison the input.                */
+    _SSFECPointDouble(&dblP, &P, c);
 
+    /* zeroPt = identity (X=0, Y=1, Z=0) — used for the P == -Q branch.                      */
+    SSFBNSetZero(&zeroPt.x, c->limbs);
+    SSFBNSetOne(&zeroPt.y, c->limbs);
+    SSFBNSetZero(&zeroPt.z, c->limbs);
+
+    /* General Jacobian addition formulas. Read from saved P / Q only.                       */
     /* z1_sq = Z1^2, z2_sq = Z2^2 */
-    SSFBNModMulNIST(&t1, &p->z, &p->z, &c->p);   /* t1 = Z1^2 */
-    SSFBNModMulNIST(&t2, &q->z, &q->z, &c->p);   /* t2 = Z2^2 */
+    SSFBNModMulNIST(&t1, &P.z, &P.z, &c->p);     /* t1 = Z1^2 */
+    SSFBNModMulNIST(&t2, &Q.z, &Q.z, &c->p);     /* t2 = Z2^2 */
 
     /* z1_cu = Z1 * Z1^2, z2_cu = Z2 * Z2^2 */
-    SSFBNModMulNIST(&t3, &p->z, &t1, &c->p);     /* t3 = Z1^3 */
-    SSFBNModMulNIST(&t4, &q->z, &t2, &c->p);     /* t4 = Z2^3 */
+    SSFBNModMulNIST(&t3, &P.z, &t1, &c->p);      /* t3 = Z1^3 */
+    SSFBNModMulNIST(&t4, &Q.z, &t2, &c->p);      /* t4 = Z2^3 */
 
     /* U1 = X1 * Z2^2, U2 = X2 * Z1^2 */
-    SSFBNModMulNIST(&t5, &p->x, &t2, &c->p);     /* t5 = U1 = X1*Z2^2 */
-    SSFBNModMulNIST(&t2, &q->x, &t1, &c->p);     /* t2 = U2 = X2*Z1^2 (reuse t2) */
+    SSFBNModMulNIST(&t5, &P.x, &t2, &c->p);      /* t5 = U1 = X1*Z2^2 */
+    SSFBNModMulNIST(&t2, &Q.x, &t1, &c->p);      /* t2 = U2 = X2*Z1^2 (reuse t2) */
 
     /* S1 = Y1 * Z2^3, S2 = Y2 * Z1^3 */
-    SSFBNModMulNIST(&t1, &p->y, &t4, &c->p);     /* t1 = S1 = Y1*Z2^3 (reuse t1) */
-    SSFBNModMulNIST(&t4, &q->y, &t3, &c->p);     /* t4 = S2 = Y2*Z1^3 (reuse t4) */
+    SSFBNModMulNIST(&t1, &P.y, &t4, &c->p);      /* t1 = S1 = Y1*Z2^3 (reuse t1) */
+    SSFBNModMulNIST(&t4, &Q.y, &t3, &c->p);      /* t4 = S2 = Y2*Z1^3 (reuse t4) */
 
     /* H = U2 - U1, R = S2 - S1 */
-    SSFBNModSub(&t3, &t2, &t5, &c->p);            /* t3 = H = U2 - U1 (reuse t3) */
-    SSFBNModSub(&t2, &t4, &t1, &c->p);            /* t2 = R = S2 - S1 (reuse t2) */
+    SSFBNModSub(&t3, &t2, &t5, &c->p);           /* t3 = H = U2 - U1 (reuse t3) */
+    SSFBNModSub(&t2, &t4, &t1, &c->p);           /* t2 = R = S2 - S1 (reuse t2) */
 
-    /* Check for special cases: H == 0 means X coordinates match */
-    if (SSFBNIsZero(&t3))
-    {
-        if (SSFBNIsZero(&t2))
-        {
-            /* P == Q: use doubling */
-            _SSFECPointDouble(r, p, c);
-            return;
-        }
-        /* P == -Q: result is identity */
-        SSFBNSetZero(&r->x, c->limbs);
-        SSFBNSetOne(&r->y, c->limbs);
-        SSFBNSetZero(&r->z, c->limbs);
-        return;
-    }
+    /* Capture special-case flags BEFORE the formulas continue overwriting things. All four  */
+    /* are derived via constant-time IsZero (OR-accumulator).                                 */
+    z1z = (SSFBNLimb_t)SSFBNIsZero(&P.z);
+    z2z = (SSFBNLimb_t)SSFBNIsZero(&Q.z);
+    hz  = (SSFBNLimb_t)SSFBNIsZero(&t3);         /* H == 0 */
+    rz  = (SSFBNLimb_t)SSFBNIsZero(&t2);         /* R == 0 */
+
+    /* Continue the general formulas unconditionally. When inputs hit a special case the     */
+    /* general result is mathematically wrong, but every wrong-case is overridden by the      */
+    /* cascaded conditional copies below.                                                    */
 
     /* t4 = H^2 */
-    SSFBNModMulNIST(&t4, &t3, &t3, &c->p);       /* t4 = H^2 */
-
-    /* t6 = H^3 = H * H^2 */
-    SSFBNModMulNIST(&t6, &t3, &t4, &c->p);        /* t6 = H^3 */
-
+    SSFBNModMulNIST(&t4, &t3, &t3, &c->p);
+    /* t6 = H^3 */
+    SSFBNModMulNIST(&t6, &t3, &t4, &c->p);
     /* U1H2 = U1 * H^2 */
-    SSFBNModMulNIST(&t5, &t5, &t4, &c->p);        /* t5 = U1*H^2 (reuse t5, was U1) */
+    SSFBNModMulNIST(&t5, &t5, &t4, &c->p);
 
     /* Z3 = Z1 * Z2 * H */
-    /* Compute before writing r->x, r->y in case r aliases p or q */
-    SSFBNModMulNIST(&r->z, &p->z, &q->z, &c->p); /* Z1 * Z2 */
-    SSFBNModMulNIST(&r->z, &r->z, &t3, &c->p);   /* Z1 * Z2 * H */
+    SSFBNModMulNIST(&r->z, &P.z, &Q.z, &c->p);
+    SSFBNModMulNIST(&r->z, &r->z, &t3, &c->p);
 
     /* X3 = R^2 - H^3 - 2 * U1H2 */
-    SSFBNModMulNIST(&r->x, &t2, &t2, &c->p);     /* R^2 */
-    SSFBNModSub(&r->x, &r->x, &t6, &c->p);       /* R^2 - H^3 */
-    SSFBNModAdd(&t4, &t5, &t5, &c->p);            /* 2 * U1H2 (reuse t4) */
-    SSFBNModSub(&r->x, &r->x, &t4, &c->p);       /* X3 */
+    SSFBNModMulNIST(&r->x, &t2, &t2, &c->p);
+    SSFBNModSub(&r->x, &r->x, &t6, &c->p);
+    SSFBNModAdd(&t4, &t5, &t5, &c->p);
+    SSFBNModSub(&r->x, &r->x, &t4, &c->p);
 
     /* Y3 = R * (U1H2 - X3) - S1 * H^3 */
-    SSFBNModSub(&t5, &t5, &r->x, &c->p);          /* U1H2 - X3 */
-    SSFBNModMulNIST(&t5, &t2, &t5, &c->p);        /* R * (U1H2 - X3) */
-    SSFBNModMulNIST(&t1, &t1, &t6, &c->p);        /* S1 * H^3 (t1 was S1) */
-    SSFBNModSub(&r->y, &t5, &t1, &c->p);          /* Y3 */
+    SSFBNModSub(&t5, &t5, &r->x, &c->p);
+    SSFBNModMulNIST(&t5, &t2, &t5, &c->p);
+    SSFBNModMulNIST(&t1, &t1, &t6, &c->p);
+    SSFBNModSub(&r->y, &t5, &t1, &c->p);
+
+    /* Cascaded constant-time conditional copy. Each later override has higher priority      */
+    /* than earlier ones (later writes on top of earlier writes).                            */
+    /*   default       : r = general add result (already in r)                               */
+    /*   hz & !rz      : P == -Q, result is identity                                          */
+    /*   hz &  rz      : P ==  Q, result is 2*P                                               */
+    /*   z2z           : Q is identity, result is P                                           */
+    /*   z1z           : P is identity, result is Q (highest priority)                       */
+    hzAndRz    = hz & rz;
+    hzAndNotRz = hz & ((SSFBNLimb_t)1u ^ rz);
+
+    SSFBNCondCopy(&r->x, &zeroPt.x, hzAndNotRz);
+    SSFBNCondCopy(&r->y, &zeroPt.y, hzAndNotRz);
+    SSFBNCondCopy(&r->z, &zeroPt.z, hzAndNotRz);
+
+    SSFBNCondCopy(&r->x, &dblP.x, hzAndRz);
+    SSFBNCondCopy(&r->y, &dblP.y, hzAndRz);
+    SSFBNCondCopy(&r->z, &dblP.z, hzAndRz);
+
+    SSFBNCondCopy(&r->x, &P.x, z2z);
+    SSFBNCondCopy(&r->y, &P.y, z2z);
+    SSFBNCondCopy(&r->z, &P.z, z2z);
+
+    SSFBNCondCopy(&r->x, &Q.x, z1z);
+    SSFBNCondCopy(&r->y, &Q.y, z1z);
+    SSFBNCondCopy(&r->z, &Q.z, z1z);
+
+    /* Zeroize scratch — every t* and the saved point copies hold values derived from the   */
+    /* secret scalar during the Montgomery ladder.                                          */
+    SSFBNZeroize(&t1); SSFBNZeroize(&t2); SSFBNZeroize(&t3);
+    SSFBNZeroize(&t4); SSFBNZeroize(&t5); SSFBNZeroize(&t6);
+    SSFBNZeroize(&P.x); SSFBNZeroize(&P.y); SSFBNZeroize(&P.z);
+    SSFBNZeroize(&Q.x); SSFBNZeroize(&Q.y); SSFBNZeroize(&Q.z);
+    SSFBNZeroize(&dblP.x); SSFBNZeroize(&dblP.y); SSFBNZeroize(&dblP.z);
 }
+
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: mixed-coordinate addition. q is required to satisfy q->z == 1 (affine) OR q->z == 0 */
+/* (identity); the simplifications below assume q->z == 1 for the general case, and the CT       */
+/* cascade handles q->z == 0 correctly. Saves 3 muls + 1 square per call vs full Jacobian add by */
+/* dropping Z2², Z2³, and Z1*Z2.                                                                  */
+/* r may alias p or q.                                                                            */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFECPointAddMixed(SSFECPoint_t *r, const SSFECPoint_t *p, const SSFECPoint_t *q,
+                                const SSFECCurveParams_t *c)
+{
+    SSFBN_DEFINE(t1, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(t2, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(t3, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(t4, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(t5, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(t6, SSF_EC_MAX_LIMBS);
+    SSFECPOINT_DEFINE(P, SSF_EC_MAX_LIMBS);
+    SSFECPOINT_DEFINE(Q, SSF_EC_MAX_LIMBS);
+    SSFECPOINT_DEFINE(dblP, SSF_EC_MAX_LIMBS);
+    SSFECPOINT_DEFINE(zeroPt, SSF_EC_MAX_LIMBS);
+    SSFBNLimb_t z1z, z2z, hz, rz, hzAndRz, hzAndNotRz;
+
+    /* Save p, q so the formulas can run safely even when r aliases either. */
+    SSFBNCopy(&P.x, &p->x); SSFBNCopy(&P.y, &p->y); SSFBNCopy(&P.z, &p->z);
+    SSFBNCopy(&Q.x, &q->x); SSFBNCopy(&Q.y, &q->y); SSFBNCopy(&Q.z, &q->z);
+
+    /* Pre-compute Double(P) for the P==Q case. */
+    _SSFECPointDouble(&dblP, &P, c);
+
+    /* zeroPt = identity */
+    SSFBNSetZero(&zeroPt.x, c->limbs);
+    SSFBNSetOne(&zeroPt.y, c->limbs);
+    SSFBNSetZero(&zeroPt.z, c->limbs);
+
+    /* General mixed-coordinate add (assume Z2 = 1):                                              */
+    /*   Z1Z1 = Z1²            Z1ZZZ1 = Z1 * Z1Z1                                                  */
+    /*   U1 = X1               U2 = X2 * Z1Z1                                                     */
+    /*   S1 = Y1               S2 = Y2 * Z1ZZZ1                                                   */
+    /*   H = U2 - U1           R = S2 - S1                                                        */
+    /*   X3 = R² - H³ - 2 * U1 * H²                                                               */
+    /*   Y3 = R * (U1*H² - X3) - S1 * H³                                                          */
+    /*   Z3 = Z1 * H                                                                              */
+    SSFBNModMulNIST(&t1, &P.z, &P.z, &c->p);          /* t1 = Z1²                       */
+    SSFBNModMulNIST(&t3, &P.z, &t1, &c->p);            /* t3 = Z1³                       */
+    SSFBNModMulNIST(&t2, &Q.x, &t1, &c->p);            /* t2 = U2 = X2 * Z1²            */
+    SSFBNModMulNIST(&t4, &Q.y, &t3, &c->p);            /* t4 = S2 = Y2 * Z1³            */
+    SSFBNModSub(&t3, &t2, &P.x, &c->p);                /* t3 = H = U2 - X1 (U1 = X1)    */
+    SSFBNModSub(&t2, &t4, &P.y, &c->p);                /* t2 = R = S2 - Y1 (S1 = Y1)    */
+
+    /* Capture flags before continuing.                                                          */
+    z1z = (SSFBNLimb_t)SSFBNIsZero(&P.z);
+    z2z = (SSFBNLimb_t)SSFBNIsZero(&Q.z);
+    hz  = (SSFBNLimb_t)SSFBNIsZero(&t3);
+    rz  = (SSFBNLimb_t)SSFBNIsZero(&t2);
+
+    SSFBNModMulNIST(&t4, &t3, &t3, &c->p);             /* t4 = H²                       */
+    SSFBNModMulNIST(&t6, &t3, &t4, &c->p);             /* t6 = H³                       */
+    SSFBNModMulNIST(&t5, &P.x, &t4, &c->p);            /* t5 = U1*H² = X1*H²            */
+
+    /* Z3 = Z1 * H (skipping the Z1*Z2 step from the full add). */
+    SSFBNModMulNIST(&r->z, &P.z, &t3, &c->p);
+
+    /* X3 = R² - H³ - 2 * U1*H² */
+    SSFBNModMulNIST(&r->x, &t2, &t2, &c->p);
+    SSFBNModSub(&r->x, &r->x, &t6, &c->p);
+    SSFBNModAdd(&t4, &t5, &t5, &c->p);
+    SSFBNModSub(&r->x, &r->x, &t4, &c->p);
+
+    /* Y3 = R * (U1*H² - X3) - S1 * H³ = R * (X1*H² - X3) - Y1 * H³ */
+    SSFBNModSub(&t5, &t5, &r->x, &c->p);
+    SSFBNModMulNIST(&t5, &t2, &t5, &c->p);
+    SSFBNModMulNIST(&t1, &P.y, &t6, &c->p);            /* t1 = Y1 * H³ (reuse t1)       */
+    SSFBNModSub(&r->y, &t5, &t1, &c->p);
+
+    /* CT cascade — same priority order as the full add. */
+    hzAndRz    = hz & rz;
+    hzAndNotRz = hz & ((SSFBNLimb_t)1u ^ rz);
+
+    SSFBNCondCopy(&r->x, &zeroPt.x, hzAndNotRz);
+    SSFBNCondCopy(&r->y, &zeroPt.y, hzAndNotRz);
+    SSFBNCondCopy(&r->z, &zeroPt.z, hzAndNotRz);
+
+    SSFBNCondCopy(&r->x, &dblP.x, hzAndRz);
+    SSFBNCondCopy(&r->y, &dblP.y, hzAndRz);
+    SSFBNCondCopy(&r->z, &dblP.z, hzAndRz);
+
+    SSFBNCondCopy(&r->x, &P.x, z2z);
+    SSFBNCondCopy(&r->y, &P.y, z2z);
+    SSFBNCondCopy(&r->z, &P.z, z2z);
+
+    SSFBNCondCopy(&r->x, &Q.x, z1z);
+    SSFBNCondCopy(&r->y, &Q.y, z1z);
+    SSFBNCondCopy(&r->z, &Q.z, z1z);
+
+    /* Zeroize scratch. */
+    SSFBNZeroize(&t1); SSFBNZeroize(&t2); SSFBNZeroize(&t3);
+    SSFBNZeroize(&t4); SSFBNZeroize(&t5); SSFBNZeroize(&t6);
+    SSFBNZeroize(&P.x); SSFBNZeroize(&P.y); SSFBNZeroize(&P.z);
+    SSFBNZeroize(&Q.x); SSFBNZeroize(&Q.y); SSFBNZeroize(&Q.z);
+    SSFBNZeroize(&dblP.x); SSFBNZeroize(&dblP.y); SSFBNZeroize(&dblP.z);
+}
+
+#if SSF_CONFIG_EC_UNIT_TEST == 1
+void _SSFECPointAddMixedForTest(SSFECPoint_t *r, const SSFECPoint_t *p,
+                                const SSFECPoint_t *q, SSFECCurve_t curve)
+{
+    _SSFECPointAddMixed(r, p, q, SSFECGetCurveParams(curve));
+}
+#endif
+
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: comb-runtime variant of mixed addition. Same as _SSFECPointAddMixed with one      */
+/* difference — it does NOT precompute Double(P), saving one full doubling per call.           */
+/* Caller MUST guarantee P != Q (the P == Q case is otherwise mathematically required to dispatch */
+/* into doubling). For the comb-runtime use case, R is the running accumulator and Q is a fixed  */
+/* table entry; the probability of R coinciding with table[mask] is ~2^-bits, statistically zero. */
+/* All other special cases (P == identity, Q == identity, P == -Q) are still handled correctly.  */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFECPointAddMixedNoDouble(SSFECPoint_t *r, const SSFECPoint_t *p,
+                                        const SSFECPoint_t *q, const SSFECCurveParams_t *c)
+{
+    SSFBN_DEFINE(t1, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(t2, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(t3, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(t4, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(t5, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(t6, SSF_EC_MAX_LIMBS);
+    SSFECPOINT_DEFINE(P, SSF_EC_MAX_LIMBS);
+    SSFECPOINT_DEFINE(Q, SSF_EC_MAX_LIMBS);
+    SSFECPOINT_DEFINE(zeroPt, SSF_EC_MAX_LIMBS);
+    SSFBNLimb_t z1z, z2z, hz, rz, hzAndNotRz;
+
+    /* Save p, q for safe aliasing of r. */
+    SSFBNCopy(&P.x, &p->x); SSFBNCopy(&P.y, &p->y); SSFBNCopy(&P.z, &p->z);
+    SSFBNCopy(&Q.x, &q->x); SSFBNCopy(&Q.y, &q->y); SSFBNCopy(&Q.z, &q->z);
+
+    SSFBNSetZero(&zeroPt.x, c->limbs);
+    SSFBNSetOne(&zeroPt.y, c->limbs);
+    SSFBNSetZero(&zeroPt.z, c->limbs);
+
+    /* General mixed-coordinate add (assume Z2 = 1) — same formulas as _SSFECPointAddMixed. */
+    SSFBNModMulNIST(&t1, &P.z, &P.z, &c->p);
+    SSFBNModMulNIST(&t3, &P.z, &t1, &c->p);
+    SSFBNModMulNIST(&t2, &Q.x, &t1, &c->p);
+    SSFBNModMulNIST(&t4, &Q.y, &t3, &c->p);
+    SSFBNModSub(&t3, &t2, &P.x, &c->p);
+    SSFBNModSub(&t2, &t4, &P.y, &c->p);
+
+    z1z = (SSFBNLimb_t)SSFBNIsZero(&P.z);
+    z2z = (SSFBNLimb_t)SSFBNIsZero(&Q.z);
+    hz  = (SSFBNLimb_t)SSFBNIsZero(&t3);
+    rz  = (SSFBNLimb_t)SSFBNIsZero(&t2);
+
+    SSFBNModMulNIST(&t4, &t3, &t3, &c->p);
+    SSFBNModMulNIST(&t6, &t3, &t4, &c->p);
+    SSFBNModMulNIST(&t5, &P.x, &t4, &c->p);
+
+    SSFBNModMulNIST(&r->z, &P.z, &t3, &c->p);
+
+    SSFBNModMulNIST(&r->x, &t2, &t2, &c->p);
+    SSFBNModSub(&r->x, &r->x, &t6, &c->p);
+    SSFBNModAdd(&t4, &t5, &t5, &c->p);
+    SSFBNModSub(&r->x, &r->x, &t4, &c->p);
+
+    SSFBNModSub(&t5, &t5, &r->x, &c->p);
+    SSFBNModMulNIST(&t5, &t2, &t5, &c->p);
+    SSFBNModMulNIST(&t1, &P.y, &t6, &c->p);
+    SSFBNModSub(&r->y, &t5, &t1, &c->p);
+
+    /* Cascade — three overrides only (no P == Q case):                                          */
+    /*   default       : r = general add result                                                  */
+    /*   hz & !rz      : P == -Q, result is identity                                             */
+    /*   z2z           : Q is identity, result is P                                              */
+    /*   z1z           : P is identity, result is Q (highest priority)                           */
+    /* If P == Q (hz & rz both true), the result is wrong — but the caller guarantees P != Q.    */
+    hzAndNotRz = hz & ((SSFBNLimb_t)1u ^ rz);
+
+    SSFBNCondCopy(&r->x, &zeroPt.x, hzAndNotRz);
+    SSFBNCondCopy(&r->y, &zeroPt.y, hzAndNotRz);
+    SSFBNCondCopy(&r->z, &zeroPt.z, hzAndNotRz);
+
+    SSFBNCondCopy(&r->x, &P.x, z2z);
+    SSFBNCondCopy(&r->y, &P.y, z2z);
+    SSFBNCondCopy(&r->z, &P.z, z2z);
+
+    SSFBNCondCopy(&r->x, &Q.x, z1z);
+    SSFBNCondCopy(&r->y, &Q.y, z1z);
+    SSFBNCondCopy(&r->z, &Q.z, z1z);
+
+    /* Zeroize scratch. */
+    SSFBNZeroize(&t1); SSFBNZeroize(&t2); SSFBNZeroize(&t3);
+    SSFBNZeroize(&t4); SSFBNZeroize(&t5); SSFBNZeroize(&t6);
+    SSFBNZeroize(&P.x); SSFBNZeroize(&P.y); SSFBNZeroize(&P.z);
+    SSFBNZeroize(&Q.x); SSFBNZeroize(&Q.y); SSFBNZeroize(&Q.z);
+}
+
+#if SSF_CONFIG_EC_UNIT_TEST == 1
+void _SSFECPointAddMixedNoDoubleForTest(SSFECPoint_t *r, const SSFECPoint_t *p,
+                                        const SSFECPoint_t *q, SSFECCurve_t curve)
+{
+    _SSFECPointAddMixedNoDouble(r, p, q, SSFECGetCurveParams(curve));
+}
+#endif
 
 /* --------------------------------------------------------------------------------------------- */
 /* Set point to identity.                                                                        */
@@ -550,6 +789,10 @@ bool SSFECPointDecode(SSFECPoint_t *pt, SSFECCurve_t curve,
 
 /* --------------------------------------------------------------------------------------------- */
 /* Point addition: r = p + q (Jacobian).                                                         */
+/* Affine fast path: when either operand has Z = 1 (e.g. freshly built via SSFECPointFromAffine  */
+/* or freshly decoded from SEC1), dispatch to the cheaper mixed-coordinate addition. The Z-value */
+/* check leaks the Z attribute of the inputs, which is a property of the caller's setup, not of  */
+/* any secret scalar — so this remains safe to use from public-input callers.                    */
 /* --------------------------------------------------------------------------------------------- */
 void SSFECPointAdd(SSFECPoint_t *r, const SSFECPoint_t *p, const SSFECPoint_t *q,
                    SSFECCurve_t curve)
@@ -561,6 +804,17 @@ void SSFECPointAdd(SSFECPoint_t *r, const SSFECPoint_t *p, const SSFECPoint_t *q
     SSF_REQUIRE(q != NULL);
     SSF_REQUIRE(c != NULL);
 
+    if ((q->z.len >= 1u) && SSFBNIsOne(&q->z))
+    {
+        _SSFECPointAddMixed(r, p, q, c);
+        return;
+    }
+    if ((p->z.len >= 1u) && SSFBNIsOne(&p->z))
+    {
+        /* Symmetric: swap operands so the Z=1 one is q in the mixed-add contract. */
+        _SSFECPointAddMixed(r, q, p, c);
+        return;
+    }
     _SSFECPointAddFull(r, p, q, c);
 }
 
@@ -568,13 +822,45 @@ void SSFECPointAdd(SSFECPoint_t *r, const SSFECPoint_t *p, const SSFECPoint_t *q
 /* Constant-time scalar multiplication via Montgomery ladder: r = k * p.                         */
 /* k must be in [1, n-1]. Iterates over all bits of the curve's limb width for constant time.    */
 /* --------------------------------------------------------------------------------------------- */
+/* --------------------------------------------------------------------------------------------- */
+/* Constant-time variable-base scalar multiplication via 4-bit windowed scan.                    */
+/*                                                                                                */
+/* Algorithm:                                                                                     */
+/*   1. Precompute table[i] = [i] * P  for i in 0..15 (table[0] = identity).                      */
+/*   2. Initialize R = identity.                                                                  */
+/*   3. For each 4-bit window of k from MSB to LSB:                                               */
+/*        R = 16 * R                                  (4 doublings)                               */
+/*        w = decoded window value (0..15)                                                         */
+/*        R = R + table[w]                            (CT table lookup + 1 addition)              */
+/*                                                                                                */
+/* Correctness: R = sum_{j=0}^{nWindows-1} w_j * P * 2^(j*4) = k * P.                             */
+/*                                                                                                */
+/* Cost (P-256, 256 bits):                                                                        */
+/*   - Precompute: 14 additions building [2..15] * P (table[i] = table[i-1] + P).                 */
+/*   - Main loop: 64 windows × (4 doublings + 1 addition) = 256 doublings + 64 additions.         */
+/*   - vs Montgomery ladder: 256 additions + 256 doublings.                                       */
+/* Net win: ~192 fewer additions per call (≈1.8-2x speedup), at the cost of ~2.5 KB more stack.   */
+/*                                                                                                */
+/* Constant-time: timing and memory access pattern are independent of k's bit pattern. The table  */
+/* lookup scans all 16 entries with masked SSFBNCondCopy; the per-window doubling and addition    */
+/* run unconditionally.                                                                            */
+/* --------------------------------------------------------------------------------------------- */
+#define _SSF_EC_VAR_WINDOW_K (4u)
+#define _SSF_EC_VAR_TABLE_N  ((uint32_t)1u << _SSF_EC_VAR_WINDOW_K) /* 16 */
+
 void SSFECScalarMul(SSFECPoint_t *r, const SSFBN_t *k, const SSFECPoint_t *p,
                     SSFECCurve_t curve)
 {
     const SSFECCurveParams_t *c = SSFECGetCurveParams(curve);
-    SSFECPOINT_DEFINE(R0, SSF_EC_MAX_LIMBS);
-    SSFECPOINT_DEFINE(R1, SSF_EC_MAX_LIMBS);
+    SSFBNLimb_t tableStorage[_SSF_EC_VAR_TABLE_N][3][SSF_EC_MAX_LIMBS];
+    SSFECPoint_t table[_SSF_EC_VAR_TABLE_N];
+    SSFECPOINT_DEFINE(picked, SSF_EC_MAX_LIMBS);
     uint32_t bits;
+    uint32_t nWindows;
+    uint32_t winIdx;
+    uint32_t w;
+    uint32_t bp;
+    uint32_t bitOffset;
     int32_t i;
 
     SSF_REQUIRE(r != NULL);
@@ -584,42 +870,91 @@ void SSFECScalarMul(SSFECPoint_t *r, const SSFBN_t *k, const SSFECPoint_t *p,
 
     bits = (uint32_t)c->limbs * SSF_BN_LIMB_BITS;
 
-    /* R0 = identity, R1 = P */
-    SSFBNSetZero(&R0.x, c->limbs);
-    SSFBNSetOne(&R0.y, c->limbs);
-    SSFBNSetZero(&R0.z, c->limbs);
-    SSFBNCopy(&R1.x, &p->x);
-    SSFBNCopy(&R1.y, &p->y);
-    SSFBNCopy(&R1.z, &p->z);
-
-    /* Montgomery ladder: process every bit for constant time */
-    for (i = (int32_t)(bits - 1u); i >= 0; i--)
+    /* Wire up SSFECPoint_t descriptors over the local backing storage. */
+    for (i = 0; i < (int32_t)_SSF_EC_VAR_TABLE_N; i++)
     {
-        SSFBNLimb_t bit = (SSFBNLimb_t)SSFBNGetBit(k, (uint32_t)i);
-
-        /* Conditional swap based on current bit */
-        SSFBNCondSwap(&R0.x, &R1.x, bit);
-        SSFBNCondSwap(&R0.y, &R1.y, bit);
-        SSFBNCondSwap(&R0.z, &R1.z, bit);
-
-        /* R1 = R0 + R1, R0 = 2 * R0 */
-        _SSFECPointAddFull(&R1, &R0, &R1, c);
-        _SSFECPointDouble(&R0, &R0, c);
-
-        /* Swap back */
-        SSFBNCondSwap(&R0.x, &R1.x, bit);
-        SSFBNCondSwap(&R0.y, &R1.y, bit);
-        SSFBNCondSwap(&R0.z, &R1.z, bit);
+        table[i].x.limbs = tableStorage[i][0];
+        table[i].x.cap = SSF_EC_MAX_LIMBS;
+        table[i].x.len = 0u;
+        table[i].y.limbs = tableStorage[i][1];
+        table[i].y.cap = SSF_EC_MAX_LIMBS;
+        table[i].y.len = 0u;
+        table[i].z.limbs = tableStorage[i][2];
+        table[i].z.cap = SSF_EC_MAX_LIMBS;
+        table[i].z.len = 0u;
     }
 
-    /* Copy result */
-    SSFBNCopy(&r->x, &R0.x);
-    SSFBNCopy(&r->y, &R0.y);
-    SSFBNCopy(&r->z, &R0.z);
+    /* table[0] = identity */
+    SSFBNSetZero(&table[0].x, c->limbs);
+    SSFBNSetOne(&table[0].y, c->limbs);
+    SSFBNSetZero(&table[0].z, c->limbs);
 
-    /* Zeroize temporaries that may contain key-derived data */
-    SSFBNZeroize(&R0.x); SSFBNZeroize(&R0.y); SSFBNZeroize(&R0.z);
-    SSFBNZeroize(&R1.x); SSFBNZeroize(&R1.y); SSFBNZeroize(&R1.z);
+    /* table[1] = P */
+    SSFBNCopy(&table[1].x, &p->x);
+    SSFBNCopy(&table[1].y, &p->y);
+    SSFBNCopy(&table[1].z, &p->z);
+
+    /* table[i] = table[i-1] + P for i = 2..15. Note table[2] = P+P = 2P (the AddFull cascade   */
+    /* handles P==Q via the precomputed Double).                                                 */
+    for (w = 2u; w < _SSF_EC_VAR_TABLE_N; w++)
+    {
+        _SSFECPointAddFull(&table[w], &table[w - 1u], &table[1], c);
+    }
+
+    /* R = identity */
+    SSFBNSetZero(&r->x, c->limbs);
+    SSFBNSetOne(&r->y, c->limbs);
+    SSFBNSetZero(&r->z, c->limbs);
+
+    /* nWindows = bits / 4. For P-256 / P-384, bits is divisible by 4 so we cover k exactly.    */
+    nWindows = bits / _SSF_EC_VAR_WINDOW_K;
+
+    for (winIdx = 0; winIdx < nWindows; winIdx++)
+    {
+        uint32_t step;
+
+        /* R = 16 * R: four consecutive doublings. */
+        for (step = 0; step < _SSF_EC_VAR_WINDOW_K; step++)
+        {
+            _SSFECPointDouble(r, r, c);
+        }
+
+        /* Decode this window's value (MSB first within k). */
+        bitOffset = (nWindows - 1u - winIdx) * _SSF_EC_VAR_WINDOW_K;
+        w = 0u;
+        for (step = 0; step < _SSF_EC_VAR_WINDOW_K; step++)
+        {
+            bp = bitOffset + (_SSF_EC_VAR_WINDOW_K - 1u - step);
+            w = (w << 1) | (uint32_t)SSFBNGetBit(k, bp);
+        }
+
+        /* Constant-time table lookup: scan all 16 entries, mask-select the one matching w.    */
+        SSFBNSetZero(&picked.x, c->limbs);
+        SSFBNSetOne(&picked.y, c->limbs);
+        SSFBNSetZero(&picked.z, c->limbs);
+        for (i = 0; i < (int32_t)_SSF_EC_VAR_TABLE_N; i++)
+        {
+            SSFBNLimb_t sel = (SSFBNLimb_t)((uint32_t)i == w);
+            SSFBNCondCopy(&picked.x, &table[i].x, sel);
+            SSFBNCondCopy(&picked.y, &table[i].y, sel);
+            SSFBNCondCopy(&picked.z, &table[i].z, sel);
+        }
+
+        /* R = R + table[w] (full Jacobian add — table entries have arbitrary Z). */
+        _SSFECPointAddFull(r, r, &picked, c);
+    }
+
+    /* Zeroize all scratch — the precomputed table holds [i]*P for the (potentially secret) P, */
+    /* and `picked` carried table contents indexed by secret window values.                     */
+    for (i = 0; i < (int32_t)_SSF_EC_VAR_TABLE_N; i++)
+    {
+        SSFBNZeroize(&table[i].x);
+        SSFBNZeroize(&table[i].y);
+        SSFBNZeroize(&table[i].z);
+    }
+    SSFBNZeroize(&picked.x);
+    SSFBNZeroize(&picked.y);
+    SSFBNZeroize(&picked.z);
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -693,3 +1028,402 @@ void SSFECScalarMulDual(SSFECPoint_t *r,
         }
     }
 }
+
+#if (SSF_EC_CONFIG_FIXED_BASE_P256 == 1) || (SSF_EC_CONFIG_FIXED_BASE_P384 == 1)
+
+/* --------------------------------------------------------------------------------------------- */
+/* Fixed-base scalar multiplication via the Lim-Lee 4-bit comb.                                  */
+/*                                                                                                */
+/* Decomposition: k (b bits) is split into h=4 strips of d=b/4 bits each. Let G_j = [2^(j*d)] G   */
+/* for j in {0, 1, 2, 3}. table[mask] = sum_{j: bit j of mask is set} G_j  for mask in 0..15.    */
+/*                                                                                                */
+/* Runtime: for j = d-1 down to 0:                                                                */
+/*   R = 2 * R                                                                                    */
+/*   bits = (k_bit[j] << 0) | (k_bit[j+d] << 1) | (k_bit[j+2d] << 2) | (k_bit[j+3d] << 3)        */
+/*   R = R + table[bits]                                                                          */
+/* After d iterations R = [k]G. Cost: d doublings + d additions = 2d point ops vs. ~4d in the    */
+/* Montgomery ladder — about 2x in raw ops, ~4x end-to-end after constants amortize.             */
+/* --------------------------------------------------------------------------------------------- */
+
+#if (SSF_EC_FIXED_BASE_COMB_H != 4u) && (SSF_EC_FIXED_BASE_COMB_H != 5u) && (SSF_EC_FIXED_BASE_COMB_H != 6u)
+#error "SSF_EC_FIXED_BASE_COMB_H must be 4, 5, or 6"
+#endif
+
+#define _SSF_EC_COMB_H      (SSF_EC_FIXED_BASE_COMB_H)
+#define _SSF_EC_COMB_NTABLE (1u << _SSF_EC_COMB_H)
+
+/* Affine-only comb table descriptor: just X and Y (Z is implicitly 1 for the precomputed       */
+/* multiples of G; entry 0 is encoded as (0, 1) and treated as the identity by the runtime via  */
+/* a CT mask-on-zero override). Dropping Z saves 33% of the comb-table Flash footprint and ~16  */
+/* CondCopy operations per comb iteration.                                                       */
+typedef struct
+{
+    SSFBN_t x;
+    SSFBN_t y;
+} _SSFECCombAffine_t;
+
+/* Common comb runtime. Per-curve wrappers below pass the curve params, the precomputed table,  */
+/* and the strip width d.                                                                         */
+static void _SSFECScalarMulComb(SSFECPoint_t *r, const SSFBN_t *k,
+                                const SSFECCurveParams_t *c,
+                                const _SSFECCombAffine_t *table,
+                                uint32_t dBits)
+{
+    SSFECPOINT_DEFINE(picked, SSF_EC_MAX_LIMBS);
+    SSFECPOINT_DEFINE(rSaved, SSF_EC_MAX_LIMBS);
+    int32_t j;
+
+    /* R = identity */
+    SSFBNSetZero(&r->x, c->limbs);
+    SSFBNSetOne(&r->y, c->limbs);
+    SSFBNSetZero(&r->z, c->limbs);
+
+    for (j = (int32_t)(dBits - 1u); j >= 0; j--)
+    {
+        uint8_t mask;
+        uint8_t i;
+        SSFBNLimb_t maskIsZero;
+
+        _SSFECPointDouble(r, r, c);
+
+        /* Decode the comb mask: bit i of mask = bit (j + i*dBits) of k. j is public.            */
+        mask = 0u;
+        for (i = 0u; i < (uint8_t)_SSF_EC_COMB_H; i++)
+        {
+            mask |= (uint8_t)((uint8_t)SSFBNGetBit(k, (uint32_t)j + (uint32_t)i * dBits) << i);
+        }
+
+        /* Constant-time table lookup: scan only X and Y (Z is implicitly 1, set below). */
+        SSFBNSetZero(&picked.x, c->limbs);
+        SSFBNSetZero(&picked.y, c->limbs);
+        SSFBNSetOne(&picked.z, c->limbs);
+        for (i = 0; i < _SSF_EC_COMB_NTABLE; i++)
+        {
+            SSFBNLimb_t sel = (SSFBNLimb_t)((uint32_t)i == (uint32_t)mask);
+            SSFBNCondCopy(&picked.x, &table[i].x, sel);
+            SSFBNCondCopy(&picked.y, &table[i].y, sel);
+        }
+
+        /* Save r before the add so we can restore it CT when mask == 0 (the table[0] entry is  */
+        /* a sentinel; the mixed-add result is garbage in that case and must be discarded).      */
+        SSFBNCopy(&rSaved.x, &r->x);
+        SSFBNCopy(&rSaved.y, &r->y);
+        SSFBNCopy(&rSaved.z, &r->z);
+
+        /* Mixed-coordinate add (no-double variant): saves an extra full doubling per call vs */
+        /* _SSFECPointAddMixed by skipping the precomputed Double(P) used for the P==Q case.  */
+        /* The comb-runtime guarantees R != table[mask] statistically (~2^-bits collision      */
+        /* probability), so we never need the doubling fallback here.                          */
+        _SSFECPointAddMixedNoDouble(r, r, &picked, c);
+
+        /* Restore r when mask == 0 — the add was operating on the (0, 0/1, 1) sentinel and    */
+        /* produced garbage. Done CT via the same SSFBNCondCopy primitive used elsewhere.       */
+        maskIsZero = (SSFBNLimb_t)((mask == 0u) ? 1u : 0u);
+        SSFBNCondCopy(&r->x, &rSaved.x, maskIsZero);
+        SSFBNCondCopy(&r->y, &rSaved.y, maskIsZero);
+        SSFBNCondCopy(&r->z, &rSaved.z, maskIsZero);
+    }
+
+    /* Zeroize scratch — picked carried table contents indexed by secret bits, and rSaved      */
+    /* mirrored intermediate r values.                                                           */
+    SSFBNZeroize(&picked.x);
+    SSFBNZeroize(&picked.y);
+    SSFBNZeroize(&picked.z);
+    SSFBNZeroize(&rSaved.x);
+    SSFBNZeroize(&rSaved.y);
+    SSFBNZeroize(&rSaved.z);
+}
+
+#endif /* SSF_EC_CONFIG_FIXED_BASE_P256 || SSF_EC_CONFIG_FIXED_BASE_P384 */
+
+/* Per-curve strip width d = ceil(nbits / h). Multiplied by h it covers >= nbits.                */
+#define _SSF_EC_P256_COMB_D ((256u + _SSF_EC_COMB_H - 1u) / _SSF_EC_COMB_H)
+#define _SSF_EC_P384_COMB_D ((384u + _SSF_EC_COMB_H - 1u) / _SSF_EC_COMB_H)
+
+/* Initializer-list helpers: expand M(0)..M(N-1) inside an aggregate initializer. Used to wire   */
+/* up the comb-table descriptors from the storage arrays without writing 16/32/64 lines by hand. */
+#define _SSF_EC_LIST_16(M) \
+    M( 0),M( 1),M( 2),M( 3),M( 4),M( 5),M( 6),M( 7), \
+    M( 8),M( 9),M(10),M(11),M(12),M(13),M(14),M(15)
+#define _SSF_EC_LIST_32(M) _SSF_EC_LIST_16(M), \
+    M(16),M(17),M(18),M(19),M(20),M(21),M(22),M(23), \
+    M(24),M(25),M(26),M(27),M(28),M(29),M(30),M(31)
+#define _SSF_EC_LIST_64(M) _SSF_EC_LIST_32(M), \
+    M(32),M(33),M(34),M(35),M(36),M(37),M(38),M(39), \
+    M(40),M(41),M(42),M(43),M(44),M(45),M(46),M(47), \
+    M(48),M(49),M(50),M(51),M(52),M(53),M(54),M(55), \
+    M(56),M(57),M(58),M(59),M(60),M(61),M(62),M(63)
+
+#if _SSF_EC_COMB_H == 4u
+#define _SSF_EC_LIST_NTABLE(M) _SSF_EC_LIST_16(M)
+#elif _SSF_EC_COMB_H == 5u
+#define _SSF_EC_LIST_NTABLE(M) _SSF_EC_LIST_32(M)
+#elif _SSF_EC_COMB_H == 6u
+#define _SSF_EC_LIST_NTABLE(M) _SSF_EC_LIST_64(M)
+#endif
+
+#if SSF_EC_CONFIG_FIXED_BASE_P256 == 1
+
+#if _SSF_EC_COMB_H == 4u
+#  include "ssfec_p256_comb_table_h4.h"
+#elif _SSF_EC_COMB_H == 5u
+#  include "ssfec_p256_comb_table_h5.h"
+#elif _SSF_EC_COMB_H == 6u
+#  include "ssfec_p256_comb_table_h6.h"
+#endif
+
+#define _SSF_EC_P256_COMB_ENTRY(idx)                                              \
+    {                                                                             \
+        { (SSFBNLimb_t *)_ssfECP256CombStorage[(idx)][0], 8u, 8u },               \
+        { (SSFBNLimb_t *)_ssfECP256CombStorage[(idx)][1], 8u, 8u },               \
+    }
+
+/* Descriptor table — const, lives in .rodata next to the storage. The const-cast on .limbs is */
+/* safe because every consumer of these descriptors only READS through them.                    */
+static const _SSFECCombAffine_t _ssfECP256CombTable[_SSF_EC_COMB_NTABLE] = {
+    _SSF_EC_LIST_NTABLE(_SSF_EC_P256_COMB_ENTRY)
+};
+
+void SSFECScalarMulBaseP256(SSFECPoint_t *r, const SSFBN_t *k)
+{
+    SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(k != NULL);
+    _SSFECScalarMulComb(r, k, SSFECGetCurveParams(SSF_EC_CURVE_P256),
+                        _ssfECP256CombTable, _SSF_EC_P256_COMB_D);
+}
+
+#endif /* SSF_EC_CONFIG_FIXED_BASE_P256 */
+
+#if SSF_EC_CONFIG_FIXED_BASE_P384 == 1
+
+#if _SSF_EC_COMB_H == 4u
+#  include "ssfec_p384_comb_table_h4.h"
+#elif _SSF_EC_COMB_H == 5u
+#  include "ssfec_p384_comb_table_h5.h"
+#elif _SSF_EC_COMB_H == 6u
+#  include "ssfec_p384_comb_table_h6.h"
+#endif
+
+#define _SSF_EC_P384_COMB_ENTRY(idx)                                                \
+    {                                                                               \
+        { (SSFBNLimb_t *)_ssfECP384CombStorage[(idx)][0], 12u, 12u },               \
+        { (SSFBNLimb_t *)_ssfECP384CombStorage[(idx)][1], 12u, 12u },               \
+    }
+
+static const _SSFECCombAffine_t _ssfECP384CombTable[_SSF_EC_COMB_NTABLE] = {
+    _SSF_EC_LIST_NTABLE(_SSF_EC_P384_COMB_ENTRY)
+};
+
+void SSFECScalarMulBaseP384(SSFECPoint_t *r, const SSFBN_t *k)
+{
+    SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(k != NULL);
+    _SSFECScalarMulComb(r, k, SSFECGetCurveParams(SSF_EC_CURVE_P384),
+                        _ssfECP384CombTable, _SSF_EC_P384_COMB_D);
+}
+
+#endif /* SSF_EC_CONFIG_FIXED_BASE_P384 */
+
+#if (SSF_EC_CONFIG_FIXED_BASE_P256 == 1) || (SSF_EC_CONFIG_FIXED_BASE_P384 == 1)
+
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: variable-time scalar multiplication via 5-bit signed-digit wNAF.                    */
+/*                                                                                                */
+/* PUBLIC-INPUT ONLY — timing depends on the bit pattern of k. Faster than the constant-time     */
+/* windowed SSFECScalarMul because:                                                              */
+/*   - wNAF density is ~1/(w+1) = 1/6 nonzero digits (vs every 4-bit window in the CT path).     */
+/*   - Only odd multiples are precomputed: [1]P, [3]P, ..., [15]P (8 entries vs 15).             */
+/*   - No constant-time table scan — direct indexed access.                                      */
+/*   - Skips the add entirely when the digit is 0.                                                */
+/*                                                                                                */
+/* Total: ~bits doublings + ~bits/6 additions vs the CT path's ~bits doublings + ~bits/4 adds    */
+/* with full table scans. Roughly 2x faster on the variable-base half.                            */
+/* --------------------------------------------------------------------------------------------- */
+#define _SSF_EC_VTWNAF_W            (5u)
+#define _SSF_EC_VTWNAF_TABLE_SIZE   (1u << (_SSF_EC_VTWNAF_W - 2u)) /* 8 odd multiples */
+#define _SSF_EC_VTWNAF_MAX_DIGITS   ((SSF_EC_MAX_COORD_BYTES * 8u) + 1u)
+
+static void _SSFECScalarMulVTwNAF(SSFECPoint_t *r, const SSFBN_t *k,
+                                  const SSFECPoint_t *p, const SSFECCurveParams_t *c)
+{
+    SSFBNLimb_t tableStorage[_SSF_EC_VTWNAF_TABLE_SIZE][3][SSF_EC_MAX_LIMBS];
+    SSFECPoint_t table[_SSF_EC_VTWNAF_TABLE_SIZE]; /* table[i] = [(2i+1)] P */
+    SSFECPOINT_DEFINE(twoP, SSF_EC_MAX_LIMBS);
+    SSFECPOINT_DEFINE(neg, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(kCopy, SSF_EC_MAX_LIMBS);
+    int8_t digits[_SSF_EC_VTWNAF_MAX_DIGITS];
+    int32_t nDigits = 0;
+    int32_t i;
+    bool inputAffine; /* true when caller's P has Z = 1 (e.g. from PointDecode / PointFromAffine) */
+
+    /* Wire up table descriptors. */
+    for (i = 0; i < (int32_t)_SSF_EC_VTWNAF_TABLE_SIZE; i++)
+    {
+        table[i].x.limbs = tableStorage[i][0]; table[i].x.cap = SSF_EC_MAX_LIMBS; table[i].x.len = 0u;
+        table[i].y.limbs = tableStorage[i][1]; table[i].y.cap = SSF_EC_MAX_LIMBS; table[i].y.len = 0u;
+        table[i].z.limbs = tableStorage[i][2]; table[i].z.cap = SSF_EC_MAX_LIMBS; table[i].z.len = 0u;
+    }
+
+    /* Precompute table[0] = P, twoP = 2P, table[i] = table[i-1] + 2P  for i = 1..7.            */
+    SSFBNCopy(&table[0].x, &p->x);
+    SSFBNCopy(&table[0].y, &p->y);
+    SSFBNCopy(&table[0].z, &p->z);
+    inputAffine = (table[0].z.len >= 1u) && SSFBNIsOne(&table[0].z);
+    _SSFECPointDouble(&twoP, p, c);
+    /* First add: table[1] = table[0] + twoP. If P is affine, mixed-add saves 3 muls + 1 sq.    */
+    if (inputAffine)
+    {
+        _SSFECPointAddMixed(&table[1], &twoP, &table[0], c);
+    }
+    else
+    {
+        _SSFECPointAddFull(&table[1], &table[0], &twoP, c);
+    }
+    /* Subsequent table[i] for i >= 2: both operands are Jacobian (twoP and table[i-1]). */
+    for (i = 2; i < (int32_t)_SSF_EC_VTWNAF_TABLE_SIZE; i++)
+    {
+        _SSFECPointAddFull(&table[i], &table[i - 1], &twoP, c);
+    }
+
+    /* Compute wNAF digits. Digits are emitted LSB-first, processed MSB-first below.            */
+    SSFBNCopy(&kCopy, k);
+    kCopy.len = c->limbs;
+    while (!SSFBNIsZero(&kCopy))
+    {
+        int8_t d;
+        if ((kCopy.limbs[0] & 1u) != 0u)
+        {
+            uint32_t lo = kCopy.limbs[0] & ((1u << _SSF_EC_VTWNAF_W) - 1u); /* low 5 bits */
+            if (lo >= (1u << (_SSF_EC_VTWNAF_W - 1u)))
+            {
+                /* Map to negative: lo - 32 */
+                d = (int8_t)((int32_t)lo - (1 << _SSF_EC_VTWNAF_W));
+                /* kCopy -= d  ==  kCopy += |d| */
+                (void)SSFBNAddUint32(&kCopy, &kCopy, (uint32_t)(-(int32_t)d));
+            }
+            else
+            {
+                d = (int8_t)lo;
+                /* kCopy -= d */
+                (void)SSFBNSubUint32(&kCopy, &kCopy, (uint32_t)d);
+            }
+        }
+        else
+        {
+            d = 0;
+        }
+        if (nDigits < (int32_t)_SSF_EC_VTWNAF_MAX_DIGITS)
+        {
+            digits[nDigits++] = d;
+        }
+        SSFBNShiftRight1(&kCopy);
+    }
+
+    /* R = identity */
+    SSFBNSetZero(&r->x, c->limbs);
+    SSFBNSetOne(&r->y, c->limbs);
+    SSFBNSetZero(&r->z, c->limbs);
+
+    /* Process digits MSB-first. table[0] = P; if P was affine (Z=1), use mixed-add when this  */
+    /* digit selects ±table[0]. All other table entries are Jacobian (built via PointAddFull). */
+    for (i = nDigits - 1; i >= 0; i--)
+    {
+        int8_t d = digits[i];
+        _SSFECPointDouble(r, r, c);
+        if (d > 0)
+        {
+            int32_t idx = (d - 1) / 2;
+            if ((idx == 0) && inputAffine)
+            {
+                _SSFECPointAddMixed(r, r, &table[0], c);
+            }
+            else
+            {
+                _SSFECPointAddFull(r, r, &table[idx], c);
+            }
+        }
+        else if (d < 0)
+        {
+            int32_t idx = (-d - 1) / 2;
+            /* neg = -table[idx] = (X, p - Y, Z) */
+            SSFBNCopy(&neg.x, &table[idx].x);
+            SSFBNSub(&neg.y, &c->p, &table[idx].y);
+            SSFBNCopy(&neg.z, &table[idx].z);
+            if ((idx == 0) && inputAffine)
+            {
+                _SSFECPointAddMixed(r, r, &neg, c);
+            }
+            else
+            {
+                _SSFECPointAddFull(r, r, &neg, c);
+            }
+        }
+    }
+}
+
+#if SSF_CONFIG_EC_UNIT_TEST == 1
+void _SSFECScalarMulVTwNAFForTest(SSFECPoint_t *r, const SSFBN_t *k,
+                                  const SSFECPoint_t *p, SSFECCurve_t curve)
+{
+    _SSFECScalarMulVTwNAF(r, k, p, SSFECGetCurveParams(curve));
+}
+#endif
+
+/* --------------------------------------------------------------------------------------------- */
+/* Specialized dual scalar mul for ECDSA verify: r = u1 * G + u2 * q.                            */
+/*                                                                                                */
+/* Strategy: split the work into two single-scalar muls and a final point add. The first half    */
+/* uses the fixed-base comb table for [u1]G (when configured for the curve), and the second half */
+/* uses variable-time wNAF for [u2]q (~2x faster than the CT windowed routine). Both inputs are  */
+/* derived from public ECDSA verify data, so leaking timing on u2 is safe by construction.        */
+/* --------------------------------------------------------------------------------------------- */
+void SSFECScalarMulDualBase(SSFECPoint_t *r,
+                            const SSFBN_t *u1,
+                            const SSFBN_t *u2, const SSFECPoint_t *q,
+                            SSFECCurve_t curve)
+{
+    const SSFECCurveParams_t *c = SSFECGetCurveParams(curve);
+    SSFECPOINT_DEFINE(R1, SSF_EC_MAX_LIMBS); /* [u1] G          */
+    SSFECPOINT_DEFINE(R2, SSF_EC_MAX_LIMBS); /* [u2] q          */
+    bool didFixedBase = false;
+
+    SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(u1 != NULL);
+    SSF_REQUIRE(u2 != NULL);
+    SSF_REQUIRE(q != NULL);
+    SSF_REQUIRE(c != NULL);
+
+#if SSF_EC_CONFIG_FIXED_BASE_P256 == 1
+    if (curve == SSF_EC_CURVE_P256)
+    {
+        SSFECScalarMulBaseP256(&R1, u1);
+        didFixedBase = true;
+    }
+#endif
+#if SSF_EC_CONFIG_FIXED_BASE_P384 == 1
+    if (curve == SSF_EC_CURVE_P384)
+    {
+        SSFECScalarMulBaseP384(&R1, u1);
+        didFixedBase = true;
+    }
+#endif
+
+    if (!didFixedBase)
+    {
+        SSFECPOINT_DEFINE(G, SSF_EC_MAX_LIMBS);
+        SSFECPointFromAffine(&G, &c->gx, &c->gy, curve);
+        SSFECScalarMul(&R1, u1, &G, curve);
+    }
+
+    /* [u2] q via the variable-time wNAF (faster than the CT path; safe because u2 is public). */
+    _SSFECScalarMulVTwNAF(&R2, u2, q, c);
+
+    /* r = R1 + R2 */
+    SSFECPointAdd(r, &R1, &R2, curve);
+
+    /* Inputs are public, but zeroizing is cheap and consistent with the rest of the module. */
+    SSFBNZeroize(&R1.x); SSFBNZeroize(&R1.y); SSFBNZeroize(&R1.z);
+    SSFBNZeroize(&R2.x); SSFBNZeroize(&R2.y); SSFBNZeroize(&R2.z);
+}
+
+#endif /* SSF_EC_CONFIG_FIXED_BASE_P256 || SSF_EC_CONFIG_FIXED_BASE_P384 */

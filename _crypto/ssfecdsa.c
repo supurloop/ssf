@@ -41,6 +41,33 @@
 #include "ssfasn1.h"
 #include "ssfprng.h"
 
+#if SSF_CONFIG_ECDSA_UNIT_TEST == 1
+/* Test-only exit hooks. Production builds compile these out entirely. Each hook fires at the    */
+/* unified cleanup label of its function, AFTER the stack-local working memory has been          */
+/* zeroized but BEFORE the function returns. Tests install a hook to assert that every           */
+/* secret-bearing limb is zero by the time control leaves the function — the documented promise  */
+/* in ssfecdsa.md ("Private keys are zeroized before return from every function that touches     */
+/* them") covers more than just `d`.                                                              */
+/* The hook receives pointers to the stack locals; do not retain them past the callback.         */
+void (*_SSFECDSASignTestExitHook)(void *ctx,
+                                  const SSFBN_t *d, const SSFBN_t *k, const SSFBN_t *e,
+                                  const SSFBN_t *kInv, const SSFBN_t *tmp,
+                                  const SSFECPoint_t *R,
+                                  const SSFBN_t *Rx, const SSFBN_t *Ry) = NULL;
+void *_SSFECDSASignTestExitHookCtx = NULL;
+
+void (*_SSFECDSAECDHTestExitHook)(void *ctx,
+                                  const SSFBN_t *d,
+                                  const SSFECPoint_t *S,
+                                  const SSFBN_t *Sx, const SSFBN_t *Sy) = NULL;
+void *_SSFECDSAECDHTestExitHookCtx = NULL;
+
+void (*_SSFECDSAKeyGenTestExitHook)(void *ctx,
+                                    const SSFBN_t *d,
+                                    const uint8_t *entropy, size_t entropyLen) = NULL;
+void *_SSFECDSAKeyGenTestExitHookCtx = NULL;
+#endif /* SSF_CONFIG_ECDSA_UNIT_TEST */
+
 /* --------------------------------------------------------------------------------------------- */
 /* Internal: r = k * G via the fastest available scalar multiplication. Dispatches to the curve-  */
 /* specific fixed-base comb when configured (~4x faster than the generic windowed routine);       */
@@ -235,6 +262,10 @@ static bool _SSFECDSAGenK(SSFECCurve_t curve,
     SSFSecureZero(K, sizeof(K));
     SSFSecureZero(h1Octets, sizeof(h1Octets));
     SSFSecureZero(T, sizeof(T));
+    /* The loop populated *k with rejected candidates; wipe before returning false so a caller   */
+    /* that misses the cleanup path doesn't observe HMAC-DRBG output. (SSFECDSASign's unified    */
+    /* cleanup also zeroes k, so this is defense in depth.)                                       */
+    SSFBNZeroize(k);
     return false; /* Should never reach here for valid inputs */
 }
 
@@ -501,6 +532,8 @@ bool SSFECDSAKeyGen(SSFECCurve_t curve,
     SSFBN_DEFINE(d, SSF_EC_MAX_LIMBS);
     SSFECPOINT_DEFINE(Q, SSF_EC_MAX_LIMBS);
     uint16_t attempts;
+    bool prngInited = false;
+    bool ok = false;
 
     SSF_REQUIRE(privKey != NULL);
     SSF_REQUIRE(pubKey != NULL);
@@ -510,8 +543,9 @@ bool SSFECDSAKeyGen(SSFECCurve_t curve,
     SSF_REQUIRE(pubKeySize >= (1u + 2u * (size_t)c->bytes));
 
     /* Obtain platform entropy and seed PRNG */
-    if (!SSFPortGetEntropy(entropy, (uint16_t)sizeof(entropy))) return false;
+    if (!SSFPortGetEntropy(entropy, (uint16_t)sizeof(entropy))) goto cleanup;
     SSFPRNGInitContext(&prng, entropy, sizeof(entropy));
+    prngInited = true;
 
     /* Generate d in [1, n-1] via rejection sampling. SSFBNRandomBelow returns a value in        */
     /* [0, n) — the only remaining case we need to guard is d == 0 (probability ~2^-bitLen(n)). */
@@ -532,29 +566,34 @@ bool SSFECDSAKeyGen(SSFECCurve_t curve,
         /* No, re-roll. */
     }
     /* Did we fall out of the loop without finding a valid d? */
-    if (attempts >= 100u)
-    {
-        SSFPRNGDeInitContext(&prng);
-        return false;
-    }
-
-    SSFPRNGDeInitContext(&prng);
+    if (attempts >= 100u) goto cleanup;
 
     /* Export private key */
-    if (!SSFBNToBytes(&d, privKey, c->bytes)) return false;
+    if (!SSFBNToBytes(&d, privKey, c->bytes)) goto cleanup;
 
     /* Compute public key: Q = d * G */
     _SSFECDSAScalarMulBase(&Q, &d, curve);
 
     /* Encode public key in SEC 1 uncompressed format */
-    if (!SSFECPointEncode(&Q, curve, pubKey, pubKeySize, pubKeyLen))
-    {
-        SSFBNZeroize(&d);
-        return false;
-    }
+    if (!SSFECPointEncode(&Q, curve, pubKey, pubKeySize, pubKeyLen)) goto cleanup;
 
+    ok = true;
+
+cleanup:
+    /* Wipe the private key bignum and the entropy seed buffer. The entropy bytes are the        */
+    /* HMAC-DRBG seed that produced d; leaving them on the stack is equivalent to leaking d.     */
+    /* SSFPRNGDeInitContext also zeroes the PRNG state derived from those bytes.                 */
     SSFBNZeroize(&d);
-    return true;
+    if (prngInited) SSFPRNGDeInitContext(&prng);
+    SSFSecureZero(entropy, sizeof(entropy));
+#if SSF_CONFIG_ECDSA_UNIT_TEST == 1
+    if (_SSFECDSAKeyGenTestExitHook != NULL)
+    {
+        _SSFECDSAKeyGenTestExitHook(_SSFECDSAKeyGenTestExitHookCtx,
+                                    &d, entropy, sizeof(entropy));
+    }
+#endif
+    return ok;
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -633,6 +672,7 @@ bool SSFECDSASign(SSFECCurve_t curve,
     SSFECPOINT_DEFINE(R, SSF_EC_MAX_LIMBS);
     SSFBN_DEFINE(Rx, SSF_EC_MAX_LIMBS);
     SSFBN_DEFINE(Ry, SSF_EC_MAX_LIMBS);
+    bool ok = false;
 
     SSF_REQUIRE(privKey != NULL);
     SSF_REQUIRE(hash != NULL);
@@ -646,46 +686,27 @@ bool SSFECDSASign(SSFECCurve_t curve,
     SSF_REQUIRE(hashLen > 0u && hashLen <= c->bytes);
 
     /* Import private key */
-    if (!SSFBNFromBytes(&d, privKey, privKeyLen, c->limbs)) return false;
-    if (!_SSFECDSAPrivKeyIsValid(&d, c)) { SSFBNZeroize(&d); return false; }
+    if (!SSFBNFromBytes(&d, privKey, privKeyLen, c->limbs)) goto cleanup;
+    if (!_SSFECDSAPrivKeyIsValid(&d, c)) goto cleanup;
 
     /* e = bits2int(hash) */
     _SSFECDSABits2Int(&e, hash, hashLen, c);
     if (SSFBNCmp(&e, &c->n) >= 0) SSFBNSub(&e, &e, &c->n);
 
     /* Generate deterministic k per RFC 6979 */
-    if (!_SSFECDSAGenK(curve, privKey, privKeyLen, hash, hashLen, c, &k))
-    {
-        SSFBNZeroize(&d);
-        return false;
-    }
+    if (!_SSFECDSAGenK(curve, privKey, privKeyLen, hash, hashLen, c, &k)) goto cleanup;
 
     /* R = k * G */
     _SSFECDSAScalarMulBase(&R, &k, curve);
 
     /* Convert R to affine and get r = Rx mod n */
-    if (!SSFECPointToAffine(&Rx, &Ry, &R, curve))
-    {
-        SSFBNZeroize(&d);
-        SSFBNZeroize(&k);
-        return false;
-    }
+    if (!SSFECPointToAffine(&Rx, &Ry, &R, curve)) goto cleanup;
     _SSFECDSAReduceModN(&r, &Rx, c);
 
-    if (SSFBNIsZero(&r))
-    {
-        SSFBNZeroize(&d);
-        SSFBNZeroize(&k);
-        return false;
-    }
+    if (SSFBNIsZero(&r)) goto cleanup;
 
     /* s = k^(-1) * (e + r * d) mod n */
-    if (!SSFBNModInv(&kInv, &k, &c->n))
-    {
-        SSFBNZeroize(&d);
-        SSFBNZeroize(&k);
-        return false;
-    }
+    if (!SSFBNModInv(&kInv, &k, &c->n)) goto cleanup;
 
     /* CT mod-n arithmetic on secret operands. SSFBNModMul uses SSFBNMod whose iteration count   */
     /* and per-iteration branches leak the bit length and intermediate magnitudes of secret       */
@@ -697,21 +718,37 @@ bool SSFECDSASign(SSFECCurve_t curve,
     SSFBNModAdd(&tmp, &e, &tmp, &c->n);     /* e + r*d mod n */
     SSFBNModMulCT(&s, &kInv, &tmp, &c->n);  /* k^(-1) * (e + r*d) mod n */
 
-    if (SSFBNIsZero(&s))
-    {
-        SSFBNZeroize(&d);
-        SSFBNZeroize(&k);
-        SSFBNZeroize(&kInv);
-        return false;
-    }
+    if (SSFBNIsZero(&s)) goto cleanup;
 
-    /* Zeroize secret intermediates */
+    /* DER-encode the signature. r and s are not secret (they are about to be published), but    */
+    /* tmp held r·d mod n on the way to s and is wiped by the cleanup block below.               */
+    ok = _SSFECDSASigEncode(&r, &s, c, sig, sigSize, sigLen);
+
+cleanup:
+    /* Wipe every limb that ever held secret-derived material. d and k are obviously sensitive;  */
+    /* kInv = k^-1 mod n leaks k; tmp held r·d mod n; e is bits2int(hash) (public, but cheap to  */
+    /* wipe and keeps the audit invariant uniform); R/Rx/Ry are k·G — affine x mod n is the      */
+    /* signature's r (public), but the unreduced bits and the y-coordinate are not, and the      */
+    /* Jacobian projective Z aliases k. Zero them all before unwinding the frame. The audit hook */
+    /* in test builds confirms this invariant on every exit path.                                 */
     SSFBNZeroize(&d);
     SSFBNZeroize(&k);
+    SSFBNZeroize(&e);
     SSFBNZeroize(&kInv);
-
-    /* DER-encode the signature */
-    return _SSFECDSASigEncode(&r, &s, c, sig, sigSize, sigLen);
+    SSFBNZeroize(&tmp);
+    SSFBNZeroize(&R.x);
+    SSFBNZeroize(&R.y);
+    SSFBNZeroize(&R.z);
+    SSFBNZeroize(&Rx);
+    SSFBNZeroize(&Ry);
+#if SSF_CONFIG_ECDSA_UNIT_TEST == 1
+    if (_SSFECDSASignTestExitHook != NULL)
+    {
+        _SSFECDSASignTestExitHook(_SSFECDSASignTestExitHookCtx,
+                                  &d, &k, &e, &kInv, &tmp, &R, &Rx, &Ry);
+    }
+#endif
+    return ok;
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -884,6 +921,7 @@ bool SSFECDHComputeSecret(SSFECCurve_t curve,
     SSFECPOINT_DEFINE(S, SSF_EC_MAX_LIMBS);
     SSFBN_DEFINE(Sx, SSF_EC_MAX_LIMBS);
     SSFBN_DEFINE(Sy, SSF_EC_MAX_LIMBS);
+    bool ok = false;
 
     SSF_REQUIRE(privKey != NULL);
     SSF_REQUIRE(peerPubKey != NULL);
@@ -894,36 +932,41 @@ bool SSFECDHComputeSecret(SSFECCurve_t curve,
     SSF_REQUIRE(secretSize >= c->bytes);
 
     /* Import and validate private key */
-    if (!SSFBNFromBytes(&d, privKey, privKeyLen, c->limbs))
-    {
-        SSFBNZeroize(&d);
-        return false;
-    }
-    if (!_SSFECDSAPrivKeyIsValid(&d, c))
-    {
-        SSFBNZeroize(&d);
-        return false;
-    }
+    if (!SSFBNFromBytes(&d, privKey, privKeyLen, c->limbs)) goto cleanup;
+    if (!_SSFECDSAPrivKeyIsValid(&d, c)) goto cleanup;
 
     /* Decode and validate peer's public key */
-    if (!SSFECPointDecode(&Q, curve, peerPubKey, peerPubKeyLen))
-    {
-        SSFBNZeroize(&d);
-        return false;
-    }
+    if (!SSFECPointDecode(&Q, curve, peerPubKey, peerPubKeyLen)) goto cleanup;
 
-    /* S = d * Q */
+    /* S = d * Q. The shared point and its affine coordinates are the actual ECDH output —    */
+    /* they remain on the stack until the cleanup block wipes them.                            */
     SSFECScalarMul(&S, &d, &Q, curve);
 
-    SSFBNZeroize(&d);
-
     /* S must not be identity */
-    if (SSFECPointIsIdentity(&S)) return false;
+    if (SSFECPointIsIdentity(&S)) goto cleanup;
 
     /* Export x-coordinate of S as shared secret */
-    if (!SSFECPointToAffine(&Sx, &Sy, &S, curve)) return false;
-    if (!SSFBNToBytes(&Sx, secret, c->bytes)) return false;
+    if (!SSFECPointToAffine(&Sx, &Sy, &S, curve)) goto cleanup;
+    if (!SSFBNToBytes(&Sx, secret, c->bytes)) goto cleanup;
 
     *secretLen = c->bytes;
-    return true;
+    ok = true;
+
+cleanup:
+    /* Wipe local privKey and the shared point/affine coordinates. The caller's `secret` buffer */
+    /* still holds Sx (that's the API contract); only stack residue is cleared here. Q is the   */
+    /* peer's public key — not secret — but Q is left in place because it isn't sensitive.      */
+    SSFBNZeroize(&d);
+    SSFBNZeroize(&S.x);
+    SSFBNZeroize(&S.y);
+    SSFBNZeroize(&S.z);
+    SSFBNZeroize(&Sx);
+    SSFBNZeroize(&Sy);
+#if SSF_CONFIG_ECDSA_UNIT_TEST == 1
+    if (_SSFECDSAECDHTestExitHook != NULL)
+    {
+        _SSFECDSAECDHTestExitHook(_SSFECDSAECDHTestExitHookCtx, &d, &S, &Sx, &Sy);
+    }
+#endif
+    return ok;
 }

@@ -84,9 +84,337 @@ static void _ECDSAOSSLSetPriv(EC_KEY *eckey, const uint8_t *privKey, size_t priv
 }
 #endif /* SSF_ECDSA_OSSL_VERIFY */
 
+/* --------------------------------------------------------------------------------------------- */
+/* Zeroization audit hooks                                                                       */
+/* --------------------------------------------------------------------------------------------- */
+/* The hardening invariant we want to enforce: by the time SSFECDSASign / SSFECDHComputeSecret / */
+/* SSFECDSAKeyGen returns, every stack-local that ever held secret-derived material must have    */
+/* been wiped. The hook fires from each function's unified cleanup label after the explicit       */
+/* SSFBNZeroize calls — a non-zero limb here means a code path slipped past zeroization.          */
+typedef struct
+{
+    bool sawHook;
+    bool nonZero;
+    const char *firstNonZero;
+} _SSFECDSAZeroAudit_t;
+
+static bool _ECDSAUTLimbsAllZero(const SSFBN_t *bn)
+{
+    uint16_t i;
+    if (bn == NULL || bn->limbs == NULL) return true;
+    for (i = 0; i < bn->cap; i++)
+    {
+        if (bn->limbs[i] != 0u) return false;
+    }
+    return true;
+}
+
+static void _ECDSAUTRecordBN(_SSFECDSAZeroAudit_t *a, const SSFBN_t *bn, const char *name)
+{
+    if (a->nonZero) return;
+    if (!_ECDSAUTLimbsAllZero(bn))
+    {
+        a->nonZero = true;
+        a->firstNonZero = name;
+    }
+}
+
+static void _ECDSAUTSignHook(void *ctx,
+                             const SSFBN_t *d, const SSFBN_t *k, const SSFBN_t *e,
+                             const SSFBN_t *kInv, const SSFBN_t *tmp,
+                             const SSFECPoint_t *R,
+                             const SSFBN_t *Rx, const SSFBN_t *Ry)
+{
+    _SSFECDSAZeroAudit_t *a = (_SSFECDSAZeroAudit_t *)ctx;
+    a->sawHook = true;
+    _ECDSAUTRecordBN(a, d,    "d");
+    _ECDSAUTRecordBN(a, k,    "k");
+    _ECDSAUTRecordBN(a, e,    "e");
+    _ECDSAUTRecordBN(a, kInv, "kInv");
+    _ECDSAUTRecordBN(a, tmp,  "tmp");
+    if (R != NULL)
+    {
+        _ECDSAUTRecordBN(a, &R->x, "R.x");
+        _ECDSAUTRecordBN(a, &R->y, "R.y");
+        _ECDSAUTRecordBN(a, &R->z, "R.z");
+    }
+    _ECDSAUTRecordBN(a, Rx, "Rx");
+    _ECDSAUTRecordBN(a, Ry, "Ry");
+}
+
+static void _ECDSAUTECDHHook(void *ctx,
+                             const SSFBN_t *d,
+                             const SSFECPoint_t *S,
+                             const SSFBN_t *Sx, const SSFBN_t *Sy)
+{
+    _SSFECDSAZeroAudit_t *a = (_SSFECDSAZeroAudit_t *)ctx;
+    a->sawHook = true;
+    _ECDSAUTRecordBN(a, d, "d");
+    if (S != NULL)
+    {
+        _ECDSAUTRecordBN(a, &S->x, "S.x");
+        _ECDSAUTRecordBN(a, &S->y, "S.y");
+        _ECDSAUTRecordBN(a, &S->z, "S.z");
+    }
+    _ECDSAUTRecordBN(a, Sx, "Sx");
+    _ECDSAUTRecordBN(a, Sy, "Sy");
+}
+
+static void _ECDSAUTKeyGenHook(void *ctx,
+                               const SSFBN_t *d,
+                               const uint8_t *entropy, size_t entropyLen)
+{
+    _SSFECDSAZeroAudit_t *a = (_SSFECDSAZeroAudit_t *)ctx;
+    size_t i;
+    a->sawHook = true;
+    _ECDSAUTRecordBN(a, d, "d");
+    if (entropy != NULL && !a->nonZero)
+    {
+        for (i = 0; i < entropyLen; i++)
+        {
+            if (entropy[i] != 0u)
+            {
+                a->nonZero = true;
+                a->firstNonZero = "entropy";
+                break;
+            }
+        }
+    }
+}
+
 void SSFECDSAUnitTest(void)
 {
 #if SSF_EC_CONFIG_ENABLE_P256 == 1
+    /* ---- Zeroization audit: Sign success path leaves no secret-derived limbs on stack ---- */
+    /* The hook fires from Sign's unified cleanup label after explicit SSFBNZeroize. Any non-zero */
+    /* limb is a slot that the implementation forgot to wipe. d, k, kInv are the obvious privacy- */
+    /* sensitive ones; Rx/Ry/R.{x,y,z}/tmp/e are computed from k or d and must also be wiped.     */
+    {
+        static const uint8_t privKey[] = {
+            0xC9u, 0xAFu, 0xA9u, 0xD8u, 0x45u, 0xBAu, 0x75u, 0x16u,
+            0x6Bu, 0x5Cu, 0x21u, 0x57u, 0x67u, 0xB1u, 0xD6u, 0x93u,
+            0x4Eu, 0x50u, 0xC3u, 0xDBu, 0x36u, 0xE8u, 0x9Bu, 0x12u,
+            0x7Bu, 0x8Au, 0x62u, 0x2Bu, 0x12u, 0x0Fu, 0x67u, 0x21u
+        };
+        uint8_t hash[32];
+        uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
+        size_t sigLen;
+        _SSFECDSAZeroAudit_t audit = { false, false, NULL };
+
+        SSFSHA256((const uint8_t *)"audit-sign-success", 18, hash, sizeof(hash));
+
+        _SSFECDSASignTestExitHookCtx = &audit;
+        _SSFECDSASignTestExitHook = _ECDSAUTSignHook;
+        SSF_ASSERT(SSFECDSASign(SSF_EC_CURVE_P256, privKey, sizeof(privKey),
+                   hash, sizeof(hash), sig, sizeof(sig), &sigLen) == true);
+        _SSFECDSASignTestExitHook = NULL;
+        _SSFECDSASignTestExitHookCtx = NULL;
+
+        SSF_ASSERT(audit.sawHook == true);
+        if (audit.nonZero)
+        {
+            printf("ECDSA Sign zeroization audit FAILED: %s left non-zero on stack\n",
+                   audit.firstNonZero);
+        }
+        SSF_ASSERT(audit.nonZero == false);
+    }
+
+    /* ---- Zeroization audit: Sign failure path (invalid privKey) also wipes secrets ---- */
+    {
+        const SSFECCurveParams_t *c = SSFECGetCurveParams(SSF_EC_CURVE_P256);
+        uint8_t badPrivKey[32];
+        uint8_t hash[32];
+        uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
+        size_t sigLen;
+        _SSFECDSAZeroAudit_t audit = { false, false, NULL };
+
+        /* d = n exactly: SSFBNFromBytes succeeds but _SSFECDSAPrivKeyIsValid rejects (d >= n).   */
+        SSFBNToBytes(&c->n, badPrivKey, sizeof(badPrivKey));
+        SSFSHA256((const uint8_t *)"audit-sign-fail", 15, hash, sizeof(hash));
+
+        _SSFECDSASignTestExitHookCtx = &audit;
+        _SSFECDSASignTestExitHook = _ECDSAUTSignHook;
+        SSF_ASSERT(SSFECDSASign(SSF_EC_CURVE_P256, badPrivKey, sizeof(badPrivKey),
+                   hash, sizeof(hash), sig, sizeof(sig), &sigLen) == false);
+        _SSFECDSASignTestExitHook = NULL;
+        _SSFECDSASignTestExitHookCtx = NULL;
+
+        SSF_ASSERT(audit.sawHook == true);
+        if (audit.nonZero)
+        {
+            printf("ECDSA Sign (fail path) zeroization audit FAILED: %s left non-zero\n",
+                   audit.firstNonZero);
+        }
+        SSF_ASSERT(audit.nonZero == false);
+    }
+
+    /* ---- Zeroization audit: ECDH success path leaves no shared-secret limbs on stack ---- */
+    /* d (local privKey) and S/Sx/Sy (the shared point and its affine coords — i.e., the raw    */
+    /* ECDH output) all need to be wiped at exit. Sy is wiped both as defense-in-depth and to   */
+    /* prevent any future code change that exposes y from leaking it through stack memory.       */
+    {
+        uint8_t privA[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        uint8_t pubA[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        size_t pubALen;
+        uint8_t privB[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        uint8_t pubB[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        size_t pubBLen;
+        uint8_t shared[SSF_ECDH_MAX_SECRET_SIZE];
+        size_t sharedLen;
+        _SSFECDSAZeroAudit_t audit = { false, false, NULL };
+
+        SSF_ASSERT(SSFECDSAKeyGen(SSF_EC_CURVE_P256,
+                   privA, sizeof(privA), pubA, sizeof(pubA), &pubALen) == true);
+        SSF_ASSERT(SSFECDSAKeyGen(SSF_EC_CURVE_P256,
+                   privB, sizeof(privB), pubB, sizeof(pubB), &pubBLen) == true);
+
+        _SSFECDSAECDHTestExitHookCtx = &audit;
+        _SSFECDSAECDHTestExitHook = _ECDSAUTECDHHook;
+        SSF_ASSERT(SSFECDHComputeSecret(SSF_EC_CURVE_P256, privA, 32u, pubB, pubBLen,
+                   shared, sizeof(shared), &sharedLen) == true);
+        _SSFECDSAECDHTestExitHook = NULL;
+        _SSFECDSAECDHTestExitHookCtx = NULL;
+
+        SSF_ASSERT(audit.sawHook == true);
+        if (audit.nonZero)
+        {
+            printf("ECDH zeroization audit FAILED: %s left non-zero on stack\n",
+                   audit.firstNonZero);
+        }
+        SSF_ASSERT(audit.nonZero == false);
+    }
+
+    /* ---- Zeroization audit: ECDH failure path (invalid peer pubKey) wipes secrets ---- */
+    {
+        uint8_t privKey[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        uint8_t pubKey[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        size_t pubKeyLen;
+        uint8_t badPub[65];
+        uint8_t shared[SSF_ECDH_MAX_SECRET_SIZE];
+        size_t sharedLen;
+        _SSFECDSAZeroAudit_t audit = { false, false, NULL };
+
+        SSF_ASSERT(SSFECDSAKeyGen(SSF_EC_CURVE_P256,
+                   privKey, sizeof(privKey), pubKey, sizeof(pubKey), &pubKeyLen) == true);
+
+        memset(badPub, 0, sizeof(badPub));
+        badPub[0] = 0x04u;  /* Identity-shaped — rejected by SSFECPointDecode */
+
+        _SSFECDSAECDHTestExitHookCtx = &audit;
+        _SSFECDSAECDHTestExitHook = _ECDSAUTECDHHook;
+        SSF_ASSERT(SSFECDHComputeSecret(SSF_EC_CURVE_P256, privKey, 32u, badPub, sizeof(badPub),
+                   shared, sizeof(shared), &sharedLen) == false);
+        _SSFECDSAECDHTestExitHook = NULL;
+        _SSFECDSAECDHTestExitHookCtx = NULL;
+
+        SSF_ASSERT(audit.sawHook == true);
+        if (audit.nonZero)
+        {
+            printf("ECDH (fail path) zeroization audit FAILED: %s left non-zero\n",
+                   audit.firstNonZero);
+        }
+        SSF_ASSERT(audit.nonZero == false);
+    }
+
+    /* ---- Zeroization audit: KeyGen wipes both d and the entropy seed buffer ---- */
+    /* The entropy[] buffer is what feeds SSFPRNGInitContext, which produces d. Leaving entropy */
+    /* on the stack defeats the privacy of d as effectively as leaving d itself.                 */
+    {
+        uint8_t privKey[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        uint8_t pubKey[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        size_t pubKeyLen;
+        _SSFECDSAZeroAudit_t audit = { false, false, NULL };
+
+        _SSFECDSAKeyGenTestExitHookCtx = &audit;
+        _SSFECDSAKeyGenTestExitHook = _ECDSAUTKeyGenHook;
+        SSF_ASSERT(SSFECDSAKeyGen(SSF_EC_CURVE_P256,
+                   privKey, sizeof(privKey),
+                   pubKey,  sizeof(pubKey), &pubKeyLen) == true);
+        _SSFECDSAKeyGenTestExitHook = NULL;
+        _SSFECDSAKeyGenTestExitHookCtx = NULL;
+
+        SSF_ASSERT(audit.sawHook == true);
+        if (audit.nonZero)
+        {
+            printf("KeyGen zeroization audit FAILED: %s left non-zero on stack\n",
+                   audit.firstNonZero);
+        }
+        SSF_ASSERT(audit.nonZero == false);
+    }
+
+    /* ---- RFC 6979 A.2.5: canonical (r, s) KAT for P-256/SHA-256 "sample" ---- */
+    /* Pins the deterministic nonce derivation, the (r, s) computation, and the DER wrapping     */
+    /* against the RFC. Also exercises the non-CT s^-1 path in Verify on a known-good s — if    */
+    /* SSFBNModInvExt ever regressed for canonical-spec inputs this test would catch it.         */
+    {
+        static const uint8_t privKey[] = {
+            0xC9u, 0xAFu, 0xA9u, 0xD8u, 0x45u, 0xBAu, 0x75u, 0x16u,
+            0x6Bu, 0x5Cu, 0x21u, 0x57u, 0x67u, 0xB1u, 0xD6u, 0x93u,
+            0x4Eu, 0x50u, 0xC3u, 0xDBu, 0x36u, 0xE8u, 0x9Bu, 0x12u,
+            0x7Bu, 0x8Au, 0x62u, 0x2Bu, 0x12u, 0x0Fu, 0x67u, 0x21u
+        };
+        static const uint8_t pubKey[] = {
+            0x04u,
+            0x60u, 0xFEu, 0xD4u, 0xBAu, 0x25u, 0x5Au, 0x9Du, 0x31u,
+            0xC9u, 0x61u, 0xEBu, 0x74u, 0xC6u, 0x35u, 0x6Du, 0x68u,
+            0xC0u, 0x49u, 0xB8u, 0x92u, 0x3Bu, 0x61u, 0xFAu, 0x6Cu,
+            0xE6u, 0x69u, 0x62u, 0x2Eu, 0x60u, 0xF2u, 0x9Fu, 0xB6u,
+            0x79u, 0x03u, 0xFEu, 0x10u, 0x08u, 0xB8u, 0xBCu, 0x99u,
+            0xA4u, 0x1Au, 0xE9u, 0xE9u, 0x56u, 0x28u, 0xBCu, 0x64u,
+            0xF2u, 0xF1u, 0xB2u, 0x0Cu, 0x2Du, 0x7Eu, 0x9Fu, 0x51u,
+            0x77u, 0xA3u, 0xC2u, 0x94u, 0xD4u, 0x46u, 0x22u, 0x99u
+        };
+        /* RFC 6979 A.2.5 expected r, s for SHA-256 / "sample" (32 bytes each) */
+        static const uint8_t expR[32] = {
+            0xEFu, 0xD4u, 0x8Bu, 0x2Au, 0xACu, 0xB6u, 0xA8u, 0xFDu,
+            0x11u, 0x40u, 0xDDu, 0x9Cu, 0xD4u, 0x5Eu, 0x81u, 0xD6u,
+            0x9Du, 0x2Cu, 0x87u, 0x7Bu, 0x56u, 0xAAu, 0xF9u, 0x91u,
+            0xC3u, 0x4Du, 0x0Eu, 0xA8u, 0x4Eu, 0xAFu, 0x37u, 0x16u
+        };
+        static const uint8_t expS[32] = {
+            0xF7u, 0xCBu, 0x1Cu, 0x94u, 0x2Du, 0x65u, 0x7Cu, 0x41u,
+            0xD4u, 0x36u, 0xC7u, 0xA1u, 0xB6u, 0xE2u, 0x9Fu, 0x65u,
+            0xF3u, 0xE9u, 0x00u, 0xDBu, 0xB9u, 0xAFu, 0xF4u, 0x06u,
+            0x4Du, 0xC4u, 0xABu, 0x2Fu, 0x84u, 0x3Au, 0xCDu, 0xA8u
+        };
+        uint8_t hash[32];
+        uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
+        size_t sigLen;
+
+        SSFSHA256((const uint8_t *)"sample", 6, hash, sizeof(hash));
+        SSF_ASSERT(SSFECDSASign(SSF_EC_CURVE_P256, privKey, sizeof(privKey),
+                   hash, sizeof(hash), sig, sizeof(sig), &sigLen) == true);
+
+        /* DER layout: 30 LL 02 RL r... 02 SL s... For RFC 6979 A.2.5 / "sample": both r and s  */
+        /* have their MSB set (0xEF, 0xF7), so each INTEGER is 33 bytes (0x00 sign-pad + 32),   */
+        /* yielding a 70-byte SEQUENCE content and a 72-byte total signature.                    */
+        SSF_ASSERT(sigLen == 72u);
+        SSF_ASSERT(sig[0] == 0x30u);
+        SSF_ASSERT(sig[2] == 0x02u);
+        SSF_ASSERT(sig[3] == 0x21u);  /* 33 = 0x21 */
+        SSF_ASSERT(sig[4] == 0x00u);
+        SSF_ASSERT(memcmp(&sig[5], expR, 32) == 0);
+        SSF_ASSERT(sig[37] == 0x02u);
+        SSF_ASSERT(sig[38] == 0x21u);
+        SSF_ASSERT(sig[39] == 0x00u);
+        SSF_ASSERT(memcmp(&sig[40], expS, 32) == 0);
+
+        /* Round-trip verify: confirms the non-CT s^-1 path reaches the right answer for the    */
+        /* canonical s. */
+        SSF_ASSERT(SSFECDSAVerify(SSF_EC_CURVE_P256, pubKey, sizeof(pubKey),
+                   hash, sizeof(hash), sig, sigLen) == true);
+
+        /* Negative: tampering s by one bit must reject. Targets the last byte of s, well past  */
+        /* the DER header. */
+        {
+            uint8_t bad[SSF_ECDSA_MAX_SIG_SIZE];
+            memcpy(bad, sig, sigLen);
+            bad[sigLen - 1u] ^= 0x01u;
+            SSF_ASSERT(SSFECDSAVerify(SSF_EC_CURVE_P256, pubKey, sizeof(pubKey),
+                       hash, sizeof(hash), bad, sigLen) == false);
+        }
+    }
+
     /* ---- RFC 6979 A.2.5: P-256/SHA-256 sign and verify ---- */
     {
         /* Private key from RFC 6979 A.2.5 */
@@ -410,6 +738,100 @@ void SSFECDSAUnitTest(void)
 #endif /* SSF_EC_CONFIG_ENABLE_P256 */
 
 #if SSF_EC_CONFIG_ENABLE_P384 == 1
+    /* ---- RFC 6979 §A.2.6: P-384/SHA-384 sign and verify KAT for "sample" ---- */
+    /* Pins the deterministic-nonce derivation, (r, s) computation, and DER wrapping for the    */
+    /* P-384 curve. Until this test, P-384 was covered only by ECDH-KAT and Wycheproof verify;  */
+    /* this is the first P-384 *sign* known-answer test in the suite.                            */
+    {
+        /* RFC 6979 §A.2.6: x (privKey, 48 bytes) */
+        static const uint8_t privKey[] = {
+            0x6Bu, 0x9Du, 0x3Du, 0xADu, 0x2Eu, 0x1Bu, 0x8Cu, 0x1Cu,
+            0x05u, 0xB1u, 0x98u, 0x75u, 0xB6u, 0x65u, 0x9Fu, 0x4Du,
+            0xE2u, 0x3Cu, 0x3Bu, 0x66u, 0x7Bu, 0xF2u, 0x97u, 0xBAu,
+            0x9Au, 0xA4u, 0x77u, 0x40u, 0x78u, 0x71u, 0x37u, 0xD8u,
+            0x96u, 0xD5u, 0x72u, 0x4Eu, 0x4Cu, 0x70u, 0xA8u, 0x25u,
+            0xF8u, 0x72u, 0xC9u, 0xEAu, 0x60u, 0xD2u, 0xEDu, 0xF5u
+        };
+        /* Expected pubKey U = x·G in SEC 1 uncompressed (1 + 2*48 = 97 bytes) */
+        static const uint8_t expPub[97] = {
+            0x04u,
+            /* Ux */
+            0xECu, 0x3Au, 0x4Eu, 0x41u, 0x5Bu, 0x4Eu, 0x19u, 0xA4u,
+            0x56u, 0x86u, 0x18u, 0x02u, 0x9Fu, 0x42u, 0x7Fu, 0xA5u,
+            0xDAu, 0x9Au, 0x8Bu, 0xC4u, 0xAEu, 0x92u, 0xE0u, 0x2Eu,
+            0x06u, 0xAAu, 0xE5u, 0x28u, 0x6Bu, 0x30u, 0x0Cu, 0x64u,
+            0xDEu, 0xF8u, 0xF0u, 0xEAu, 0x90u, 0x55u, 0x86u, 0x60u,
+            0x64u, 0xA2u, 0x54u, 0x51u, 0x54u, 0x80u, 0xBCu, 0x13u,
+            /* Uy */
+            0x80u, 0x15u, 0xD9u, 0xB7u, 0x2Du, 0x7Du, 0x57u, 0x24u,
+            0x4Eu, 0xA8u, 0xEFu, 0x9Au, 0xC0u, 0xC6u, 0x21u, 0x89u,
+            0x67u, 0x08u, 0xA5u, 0x93u, 0x67u, 0xF9u, 0xDFu, 0xB9u,
+            0xF5u, 0x4Cu, 0xA8u, 0x4Bu, 0x3Fu, 0x1Cu, 0x9Du, 0xB1u,
+            0x28u, 0x8Bu, 0x23u, 0x1Cu, 0x3Au, 0xE0u, 0xD4u, 0xFEu,
+            0x73u, 0x44u, 0xFDu, 0x25u, 0x33u, 0x26u, 0x47u, 0x20u
+        };
+        /* RFC 6979 A.2.6 expected r, s for SHA-384 / "sample" (48 bytes each) */
+        static const uint8_t expR[48] = {
+            0x94u, 0xEDu, 0xBBu, 0x92u, 0xA5u, 0xECu, 0xB8u, 0xAAu,
+            0xD4u, 0x73u, 0x6Eu, 0x56u, 0xC6u, 0x91u, 0x91u, 0x6Bu,
+            0x3Fu, 0x88u, 0x14u, 0x06u, 0x66u, 0xCEu, 0x9Fu, 0xA7u,
+            0x3Du, 0x64u, 0xC4u, 0xEAu, 0x95u, 0xADu, 0x13u, 0x3Cu,
+            0x81u, 0xA6u, 0x48u, 0x15u, 0x2Eu, 0x44u, 0xACu, 0xF9u,
+            0x6Eu, 0x36u, 0xDDu, 0x1Eu, 0x80u, 0xFAu, 0xBEu, 0x46u
+        };
+        static const uint8_t expS[48] = {
+            0x99u, 0xEFu, 0x4Au, 0xEBu, 0x15u, 0xF1u, 0x78u, 0xCEu,
+            0xA1u, 0xFEu, 0x40u, 0xDBu, 0x26u, 0x03u, 0x13u, 0x8Fu,
+            0x13u, 0x0Eu, 0x74u, 0x0Au, 0x19u, 0x62u, 0x45u, 0x26u,
+            0x20u, 0x3Bu, 0x63u, 0x51u, 0xD0u, 0xA3u, 0xA9u, 0x4Fu,
+            0xA3u, 0x29u, 0xC1u, 0x45u, 0x78u, 0x6Eu, 0x67u, 0x9Eu,
+            0x7Bu, 0x82u, 0xC7u, 0x1Au, 0x38u, 0x62u, 0x8Au, 0xC8u
+        };
+        uint8_t pubKey[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        size_t pubKeyLen;
+        uint8_t hash[48];
+        uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
+        size_t sigLen;
+
+        /* Derive pubKey from privKey, then check it matches RFC 6979 A.2.6's documented U. */
+        SSF_ASSERT(SSFECDSAPubKeyFromPrivKey(SSF_EC_CURVE_P384,
+                   privKey, sizeof(privKey),
+                   pubKey, sizeof(pubKey), &pubKeyLen) == true);
+        SSF_ASSERT(pubKeyLen == sizeof(expPub));
+        SSF_ASSERT(memcmp(pubKey, expPub, sizeof(expPub)) == 0);
+
+        /* Sign and check the canonical (r, s). r=0x94..., s=0x99... — both have MSB set, so   */
+        /* each INTEGER is 49 bytes (0x00 sign-pad + 48), giving a 102-byte SEQUENCE content    */
+        /* and a 104-byte total signature (the P-384 max).                                       */
+        SSFSHA384((const uint8_t *)"sample", 6, hash, sizeof(hash));
+        SSF_ASSERT(SSFECDSASign(SSF_EC_CURVE_P384, privKey, sizeof(privKey),
+                   hash, sizeof(hash), sig, sizeof(sig), &sigLen) == true);
+        SSF_ASSERT(sigLen == 104u);
+        SSF_ASSERT(sig[0] == 0x30u);
+        SSF_ASSERT(sig[1] == 0x66u);  /* 102 = 0x66 */
+        SSF_ASSERT(sig[2] == 0x02u);
+        SSF_ASSERT(sig[3] == 0x31u);  /* 49 = 0x31 */
+        SSF_ASSERT(sig[4] == 0x00u);
+        SSF_ASSERT(memcmp(&sig[5], expR, 48) == 0);
+        SSF_ASSERT(sig[53] == 0x02u);
+        SSF_ASSERT(sig[54] == 0x31u);
+        SSF_ASSERT(sig[55] == 0x00u);
+        SSF_ASSERT(memcmp(&sig[56], expS, 48) == 0);
+
+        /* Round-trip verify confirms the produced signature parses and validates. */
+        SSF_ASSERT(SSFECDSAVerify(SSF_EC_CURVE_P384, pubKey, pubKeyLen,
+                   hash, sizeof(hash), sig, sigLen) == true);
+
+        /* Negative: tampering s rejects (exercises the P-384 verify path on a corrupted s). */
+        {
+            uint8_t bad[SSF_ECDSA_MAX_SIG_SIZE];
+            memcpy(bad, sig, sigLen);
+            bad[sigLen - 1u] ^= 0x01u;
+            SSF_ASSERT(SSFECDSAVerify(SSF_EC_CURVE_P384, pubKey, pubKeyLen,
+                       hash, sizeof(hash), bad, sigLen) == false);
+        }
+    }
+
     /* ---- RFC 5903 §8.2 ECDH P-384 known-answer test (using the symmetric (r, gi) → z form) ---- */
     /* ECDH is symmetric: [i]gr = [r]gi = z. We use (r, gi) here (responder's privKey + initiator's */
     /* pubKey) which gives the same expected zx.                                                     */

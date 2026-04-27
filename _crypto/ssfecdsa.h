@@ -208,6 +208,27 @@ void SSFECDSAUnitTest(void);
 /* Jacobian R (including ones with non-1 Z and ones whose affine x lies in [n, p-1] to exercise    */
 /* the wraparound branch) and confirm the comparison logic is correct.                              */
 bool _SSFECDSAVerifyCheckRForTest(SSFECCurve_t curve, const SSFECPoint_t *R, const SSFBN_t *r);
+
+/* Test-only exit hooks. Each fires from its function's unified cleanup label, AFTER zeroization  */
+/* and BEFORE return, so a test installer can assert every secret-bearing local is wiped. NULL in */
+/* production. Pointers are valid only inside the callback.                                        */
+extern void (*_SSFECDSASignTestExitHook)(void *ctx,
+                                         const SSFBN_t *d, const SSFBN_t *k, const SSFBN_t *e,
+                                         const SSFBN_t *kInv, const SSFBN_t *tmp,
+                                         const SSFECPoint_t *R,
+                                         const SSFBN_t *Rx, const SSFBN_t *Ry);
+extern void *_SSFECDSASignTestExitHookCtx;
+
+extern void (*_SSFECDSAECDHTestExitHook)(void *ctx,
+                                         const SSFBN_t *d,
+                                         const SSFECPoint_t *S,
+                                         const SSFBN_t *Sx, const SSFBN_t *Sy);
+extern void *_SSFECDSAECDHTestExitHookCtx;
+
+extern void (*_SSFECDSAKeyGenTestExitHook)(void *ctx,
+                                           const SSFBN_t *d,
+                                           const uint8_t *entropy, size_t entropyLen);
+extern void *_SSFECDSAKeyGenTestExitHookCtx;
 #endif /* SSF_CONFIG_ECDSA_UNIT_TEST */
 
 #ifdef __cplusplus

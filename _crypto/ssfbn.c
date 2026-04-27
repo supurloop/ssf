@@ -1342,6 +1342,7 @@ void SSFBNModMulCT(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t
     SSF_REQUIRE(a->len == m->len);
     SSF_REQUIRE(b->len == m->len);
     SSF_REQUIRE(m->len >= 1u);
+    SSF_REQUIRE(SSFBNIsZero(m) == false);
     SSF_REQUIRE((uint16_t)(2u * m->len) <= SSF_BN_MAX_LIMBS);
     SSF_REQUIRE(m->len <= r->cap);
 

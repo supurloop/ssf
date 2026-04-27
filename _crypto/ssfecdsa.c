@@ -241,22 +241,58 @@ static bool _SSFECDSAGenK(SSFECCurve_t curve,
 /* --------------------------------------------------------------------------------------------- */
 /* Internal: DER-encode an ECDSA signature (r, s) as SEQUENCE { INTEGER, INTEGER }.              */
 /* --------------------------------------------------------------------------------------------- */
+/* Canonicalize a fixed-width big-endian integer for ASN.1 encoding: strip leading zero bytes,  */
+/* then prepend ONE 0x00 byte if the high bit of the first byte is set (so the value is read as */
+/* a positive INTEGER in two's complement). Writes a pointer to the canonical bytes into *outBuf */
+/* (which may point into the input or into the supplied padBuf scratch).                          */
+static void _SSFECDSACanonicalizeInt(const uint8_t *intBuf, uint32_t intLen,
+                                     uint8_t *padBuf, uint32_t padBufSize,
+                                     const uint8_t **outBuf, uint32_t *outLen)
+{
+    const uint8_t *p = intBuf;
+    uint32_t n = intLen;
+    while (n > 1u && *p == 0u) { p++; n--; }
+    if ((*p & 0x80u) != 0u)
+    {
+        SSF_ASSERT(padBufSize >= n + 1u);
+        padBuf[0] = 0u;
+        memcpy(&padBuf[1], p, (size_t)n);
+        *outBuf = padBuf;
+        *outLen = n + 1u;
+    }
+    else
+    {
+        *outBuf = p;
+        *outLen = n;
+    }
+}
+
 static bool _SSFECDSASigEncode(const SSFBN_t *r, const SSFBN_t *s,
                                const SSFECCurveParams_t *c,
                                uint8_t *sig, size_t sigSize, size_t *sigLen)
 {
     uint8_t rBytes[SSF_EC_MAX_COORD_BYTES];
     uint8_t sBytes[SSF_EC_MAX_COORD_BYTES];
+    uint8_t rPad[SSF_EC_MAX_COORD_BYTES + 1u];
+    uint8_t sPad[SSF_EC_MAX_COORD_BYTES + 1u];
+    const uint8_t *rCan;
+    const uint8_t *sCan;
+    uint32_t rCanLen;
+    uint32_t sCanLen;
     uint32_t rEncLen, sEncLen, contentLen, seqHdrLen, totalLen;
     uint32_t offset;
 
-    /* Export r and s as big-endian bytes */
+    /* Export r and s as big-endian bytes, then canonicalize for ASN.1 INTEGER encoding (strip   */
+    /* leading zeros + prepend 0x00 when MSB set so the value is read as positive). The original */
+    /* encoder skipped this step; OpenSSL and other strict ASN.1 verifiers reject the result.    */
     if (!SSFBNToBytes(r, rBytes, c->bytes)) return false;
     if (!SSFBNToBytes(s, sBytes, c->bytes)) return false;
+    _SSFECDSACanonicalizeInt(rBytes, (uint32_t)c->bytes, rPad, sizeof(rPad), &rCan, &rCanLen);
+    _SSFECDSACanonicalizeInt(sBytes, (uint32_t)c->bytes, sPad, sizeof(sPad), &sCan, &sCanLen);
 
     /* Measure: pass 1 */
-    if (!SSFASN1EncInt(NULL, 0, rBytes, (uint32_t)c->bytes, &rEncLen)) return false;
-    if (!SSFASN1EncInt(NULL, 0, sBytes, (uint32_t)c->bytes, &sEncLen)) return false;
+    if (!SSFASN1EncInt(NULL, 0, rCan, rCanLen, &rEncLen)) return false;
+    if (!SSFASN1EncInt(NULL, 0, sCan, sCanLen, &sEncLen)) return false;
 
     contentLen = rEncLen + sEncLen;
     if (!SSFASN1EncTagLen(NULL, 0, SSF_ASN1_TAG_SEQUENCE, contentLen, &seqHdrLen)) return false;
@@ -272,14 +308,12 @@ static bool _SSFECDSASigEncode(const SSFBN_t *r, const SSFBN_t *s,
             return false;
         }
         offset = n;
-        if (!SSFASN1EncInt(&sig[offset], (uint32_t)(sigSize - offset), rBytes,
-                           (uint32_t)c->bytes, &n))
+        if (!SSFASN1EncInt(&sig[offset], (uint32_t)(sigSize - offset), rCan, rCanLen, &n))
         {
             return false;
         }
         offset += n;
-        if (!SSFASN1EncInt(&sig[offset], (uint32_t)(sigSize - offset), sBytes,
-                           (uint32_t)c->bytes, &n))
+        if (!SSFASN1EncInt(&sig[offset], (uint32_t)(sigSize - offset), sCan, sCanLen, &n))
         {
             return false;
         }
@@ -341,6 +375,14 @@ static void _SSFECDSAReduceModN(SSFBN_t *r, const SSFBN_t *x, const SSFECCurvePa
     SSFBNLimb_t borrow;
     SSFBNLimb_t mask;
     uint16_t i;
+
+    SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(r->limbs != NULL);
+    SSF_REQUIRE(x != NULL);
+    SSF_REQUIRE(x->limbs != NULL);
+    SSF_REQUIRE(c != NULL);
+    SSF_REQUIRE(x->len == c->n.len);
+    SSF_REQUIRE(c->n.len <= r->cap);
 
     SSFBNCopy(r, x);
     tmp.len = r->len;

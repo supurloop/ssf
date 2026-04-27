@@ -176,6 +176,19 @@ static void _SSFECPointDouble(SSFECPoint_t *r, const SSFECPoint_t *p,
     SSFBN_DEFINE(alpha, SSF_EC_MAX_LIMBS);
     SSFBN_DEFINE(tmp, SSF_EC_MAX_LIMBS);
 
+    SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(r->x.limbs != NULL);
+    SSF_REQUIRE(r->y.limbs != NULL);
+    SSF_REQUIRE(r->z.limbs != NULL);
+    SSF_REQUIRE(p != NULL);
+    SSF_REQUIRE(p->x.limbs != NULL);
+    SSF_REQUIRE(p->y.limbs != NULL);
+    SSF_REQUIRE(p->z.limbs != NULL);
+    SSF_REQUIRE(c != NULL);
+    SSF_REQUIRE(r->x.cap >= c->limbs);
+    SSF_REQUIRE(r->y.cap >= c->limbs);
+    SSF_REQUIRE(r->z.cap >= c->limbs);
+
     /* No identity early-exit. When p->z == 0, the formulas below produce r->z == (Y1+0)^2 - */
     /* Y1^2 - 0 == 0, so the identity is preserved. The X3, Y3 values become arithmetic       */
     /* "garbage" but are don't-care once Z3 == 0 — every consumer detects identity by Z.      */
@@ -243,6 +256,23 @@ static void _SSFECPointAddFull(SSFECPoint_t *r, const SSFECPoint_t *p, const SSF
     SSFBN_DEFINE(t4, SSF_EC_MAX_LIMBS);
     SSFBN_DEFINE(t5, SSF_EC_MAX_LIMBS);
     SSFBN_DEFINE(t6, SSF_EC_MAX_LIMBS);
+
+    SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(r->x.limbs != NULL);
+    SSF_REQUIRE(r->y.limbs != NULL);
+    SSF_REQUIRE(r->z.limbs != NULL);
+    SSF_REQUIRE(p != NULL);
+    SSF_REQUIRE(p->x.limbs != NULL);
+    SSF_REQUIRE(p->y.limbs != NULL);
+    SSF_REQUIRE(p->z.limbs != NULL);
+    SSF_REQUIRE(q != NULL);
+    SSF_REQUIRE(q->x.limbs != NULL);
+    SSF_REQUIRE(q->y.limbs != NULL);
+    SSF_REQUIRE(q->z.limbs != NULL);
+    SSF_REQUIRE(c != NULL);
+    SSF_REQUIRE(r->x.cap >= c->limbs);
+    SSF_REQUIRE(r->y.cap >= c->limbs);
+    SSF_REQUIRE(r->z.cap >= c->limbs);
     /* Saved copies of the inputs let us run all selection branches without losing p or q to */
     /* aliasing — r may alias either or both. */
     SSFECPOINT_DEFINE(P, SSF_EC_MAX_LIMBS);
@@ -378,6 +408,23 @@ static void _SSFECPointAddMixed(SSFECPoint_t *r, const SSFECPoint_t *p, const SS
     SSFECPOINT_DEFINE(zeroPt, SSF_EC_MAX_LIMBS);
     SSFBNLimb_t z1z, z2z, hz, rz, hzAndRz, hzAndNotRz;
 
+    SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(r->x.limbs != NULL);
+    SSF_REQUIRE(r->y.limbs != NULL);
+    SSF_REQUIRE(r->z.limbs != NULL);
+    SSF_REQUIRE(p != NULL);
+    SSF_REQUIRE(p->x.limbs != NULL);
+    SSF_REQUIRE(p->y.limbs != NULL);
+    SSF_REQUIRE(p->z.limbs != NULL);
+    SSF_REQUIRE(q != NULL);
+    SSF_REQUIRE(q->x.limbs != NULL);
+    SSF_REQUIRE(q->y.limbs != NULL);
+    SSF_REQUIRE(q->z.limbs != NULL);
+    SSF_REQUIRE(c != NULL);
+    SSF_REQUIRE(r->x.cap >= c->limbs);
+    SSF_REQUIRE(r->y.cap >= c->limbs);
+    SSF_REQUIRE(r->z.cap >= c->limbs);
+
     /* Save p, q so the formulas can run safely even when r aliases either. */
     SSFBNCopy(&P.x, &p->x); SSFBNCopy(&P.y, &p->y); SSFBNCopy(&P.z, &p->z);
     SSFBNCopy(&Q.x, &q->x); SSFBNCopy(&Q.y, &q->y); SSFBNCopy(&Q.z, &q->z);
@@ -488,6 +535,23 @@ static void _SSFECPointAddMixedNoDouble(SSFECPoint_t *r, const SSFECPoint_t *p,
     SSFECPOINT_DEFINE(zeroPt, SSF_EC_MAX_LIMBS);
     SSFBNLimb_t z1z, z2z, hz, rz, hzAndNotRz;
 
+    SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(r->x.limbs != NULL);
+    SSF_REQUIRE(r->y.limbs != NULL);
+    SSF_REQUIRE(r->z.limbs != NULL);
+    SSF_REQUIRE(p != NULL);
+    SSF_REQUIRE(p->x.limbs != NULL);
+    SSF_REQUIRE(p->y.limbs != NULL);
+    SSF_REQUIRE(p->z.limbs != NULL);
+    SSF_REQUIRE(q != NULL);
+    SSF_REQUIRE(q->x.limbs != NULL);
+    SSF_REQUIRE(q->y.limbs != NULL);
+    SSF_REQUIRE(q->z.limbs != NULL);
+    SSF_REQUIRE(c != NULL);
+    SSF_REQUIRE(r->x.cap >= c->limbs);
+    SSF_REQUIRE(r->y.cap >= c->limbs);
+    SSF_REQUIRE(r->z.cap >= c->limbs);
+
     /* Save p, q for safe aliasing of r. */
     SSFBNCopy(&P.x, &p->x); SSFBNCopy(&P.y, &p->y); SSFBNCopy(&P.z, &p->z);
     SSFBNCopy(&Q.x, &q->x); SSFBNCopy(&Q.y, &q->y); SSFBNCopy(&Q.z, &q->z);
@@ -568,7 +632,13 @@ void SSFECPointSetIdentity(SSFECPoint_t *pt, SSFECCurve_t curve)
     const SSFECCurveParams_t *c = SSFECGetCurveParams(curve);
 
     SSF_REQUIRE(pt != NULL);
+    SSF_REQUIRE(pt->x.limbs != NULL);
+    SSF_REQUIRE(pt->y.limbs != NULL);
+    SSF_REQUIRE(pt->z.limbs != NULL);
     SSF_REQUIRE(c != NULL);
+    SSF_REQUIRE(pt->x.cap >= c->limbs);
+    SSF_REQUIRE(pt->y.cap >= c->limbs);
+    SSF_REQUIRE(pt->z.cap >= c->limbs);
 
     SSFBNSetZero(&pt->x, c->limbs);
     SSFBNSetOne(&pt->y, c->limbs);
@@ -581,6 +651,7 @@ void SSFECPointSetIdentity(SSFECPoint_t *pt, SSFECCurve_t curve)
 bool SSFECPointIsIdentity(const SSFECPoint_t *pt)
 {
     SSF_REQUIRE(pt != NULL);
+    SSF_REQUIRE(pt->z.limbs != NULL);
 
     return SSFBNIsZero(&pt->z);
 }
@@ -594,9 +665,17 @@ void SSFECPointFromAffine(SSFECPoint_t *pt, const SSFBN_t *x, const SSFBN_t *y,
     const SSFECCurveParams_t *c = SSFECGetCurveParams(curve);
 
     SSF_REQUIRE(pt != NULL);
+    SSF_REQUIRE(pt->x.limbs != NULL);
+    SSF_REQUIRE(pt->y.limbs != NULL);
+    SSF_REQUIRE(pt->z.limbs != NULL);
     SSF_REQUIRE(x != NULL);
+    SSF_REQUIRE(x->limbs != NULL);
     SSF_REQUIRE(y != NULL);
+    SSF_REQUIRE(y->limbs != NULL);
     SSF_REQUIRE(c != NULL);
+    SSF_REQUIRE(pt->x.cap >= x->len);
+    SSF_REQUIRE(pt->y.cap >= y->len);
+    SSF_REQUIRE(pt->z.cap >= c->limbs);
 
     SSFBNCopy(&pt->x, x);
     SSFBNCopy(&pt->y, y);
@@ -615,9 +694,16 @@ bool SSFECPointToAffine(SSFBN_t *x, SSFBN_t *y, const SSFECPoint_t *pt, SSFECCur
     SSFBN_DEFINE(zInv3, SSF_EC_MAX_LIMBS);
 
     SSF_REQUIRE(x != NULL);
+    SSF_REQUIRE(x->limbs != NULL);
     SSF_REQUIRE(y != NULL);
+    SSF_REQUIRE(y->limbs != NULL);
     SSF_REQUIRE(pt != NULL);
+    SSF_REQUIRE(pt->x.limbs != NULL);
+    SSF_REQUIRE(pt->y.limbs != NULL);
+    SSF_REQUIRE(pt->z.limbs != NULL);
     SSF_REQUIRE(c != NULL);
+    SSF_REQUIRE(x->cap >= c->limbs);
+    SSF_REQUIRE(y->cap >= c->limbs);
 
     /* Reject identity (Z=0) — undefined affine coordinate. The early return is data-dependent  */
     /* on a single bit of pt->z, but for prime-order curves (P-256/P-384) with scalars in       */
@@ -652,6 +738,12 @@ bool SSFECPointOnCurve(const SSFECPoint_t *pt, SSFECCurve_t curve)
     const SSFECCurveParams_t *c = SSFECGetCurveParams(curve);
     SSFBN_DEFINE(ax, SSF_EC_MAX_LIMBS);
     SSFBN_DEFINE(ay, SSF_EC_MAX_LIMBS);
+
+    SSF_REQUIRE(pt != NULL);
+    SSF_REQUIRE(pt->x.limbs != NULL);
+    SSF_REQUIRE(pt->y.limbs != NULL);
+    SSF_REQUIRE(pt->z.limbs != NULL);
+    SSF_REQUIRE(c != NULL);
     SSFBN_DEFINE(lhs, SSF_EC_MAX_LIMBS);
     SSFBN_DEFINE(rhs, SSF_EC_MAX_LIMBS);
     SSFBN_DEFINE(tmp, SSF_EC_MAX_LIMBS);
@@ -697,6 +789,9 @@ bool SSFECPointValidate(const SSFECPoint_t *pt, SSFECCurve_t curve)
     SSFBN_DEFINE(ay, SSF_EC_MAX_LIMBS);
 
     SSF_REQUIRE(pt != NULL);
+    SSF_REQUIRE(pt->x.limbs != NULL);
+    SSF_REQUIRE(pt->y.limbs != NULL);
+    SSF_REQUIRE(pt->z.limbs != NULL);
     SSF_REQUIRE(c != NULL);
 
     /* Must not be identity */
@@ -735,6 +830,9 @@ bool SSFECPointEncode(const SSFECPoint_t *pt, SSFECCurve_t curve,
     SSFBN_DEFINE(ay, SSF_EC_MAX_LIMBS);
 
     SSF_REQUIRE(pt != NULL);
+    SSF_REQUIRE(pt->x.limbs != NULL);
+    SSF_REQUIRE(pt->y.limbs != NULL);
+    SSF_REQUIRE(pt->z.limbs != NULL);
     SSF_REQUIRE(out != NULL);
     SSF_REQUIRE(outLen != NULL);
     SSF_REQUIRE(c != NULL);
@@ -766,8 +864,14 @@ bool SSFECPointDecode(SSFECPoint_t *pt, SSFECCurve_t curve,
     size_t encLen;
 
     SSF_REQUIRE(pt != NULL);
+    SSF_REQUIRE(pt->x.limbs != NULL);
+    SSF_REQUIRE(pt->y.limbs != NULL);
+    SSF_REQUIRE(pt->z.limbs != NULL);
     SSF_REQUIRE(data != NULL);
     SSF_REQUIRE(c != NULL);
+    SSF_REQUIRE(pt->x.cap >= c->limbs);
+    SSF_REQUIRE(pt->y.cap >= c->limbs);
+    SSF_REQUIRE(pt->z.cap >= c->limbs);
 
     encLen = 1u + 2u * (size_t)c->bytes;
     if (dataLen != encLen) return false;
@@ -801,9 +905,21 @@ void SSFECPointAdd(SSFECPoint_t *r, const SSFECPoint_t *p, const SSFECPoint_t *q
     const SSFECCurveParams_t *c = SSFECGetCurveParams(curve);
 
     SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(r->x.limbs != NULL);
+    SSF_REQUIRE(r->y.limbs != NULL);
+    SSF_REQUIRE(r->z.limbs != NULL);
     SSF_REQUIRE(p != NULL);
+    SSF_REQUIRE(p->x.limbs != NULL);
+    SSF_REQUIRE(p->y.limbs != NULL);
+    SSF_REQUIRE(p->z.limbs != NULL);
     SSF_REQUIRE(q != NULL);
+    SSF_REQUIRE(q->x.limbs != NULL);
+    SSF_REQUIRE(q->y.limbs != NULL);
+    SSF_REQUIRE(q->z.limbs != NULL);
     SSF_REQUIRE(c != NULL);
+    SSF_REQUIRE(r->x.cap >= c->limbs);
+    SSF_REQUIRE(r->y.cap >= c->limbs);
+    SSF_REQUIRE(r->z.cap >= c->limbs);
 
     if ((q->z.len >= 1u) && SSFBNIsOne(&q->z))
     {
@@ -865,9 +981,19 @@ void SSFECScalarMul(SSFECPoint_t *r, const SSFBN_t *k, const SSFECPoint_t *p,
     int32_t i;
 
     SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(r->x.limbs != NULL);
+    SSF_REQUIRE(r->y.limbs != NULL);
+    SSF_REQUIRE(r->z.limbs != NULL);
     SSF_REQUIRE(k != NULL);
+    SSF_REQUIRE(k->limbs != NULL);
     SSF_REQUIRE(p != NULL);
+    SSF_REQUIRE(p->x.limbs != NULL);
+    SSF_REQUIRE(p->y.limbs != NULL);
+    SSF_REQUIRE(p->z.limbs != NULL);
     SSF_REQUIRE(c != NULL);
+    SSF_REQUIRE(r->x.cap >= c->limbs);
+    SSF_REQUIRE(r->y.cap >= c->limbs);
+    SSF_REQUIRE(r->z.cap >= c->limbs);
 
     bits = (uint32_t)c->limbs * SSF_BN_LIMB_BITS;
 
@@ -980,11 +1106,25 @@ void SSFECScalarMulDual(SSFECPoint_t *r,
     int32_t i;
 
     SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(r->x.limbs != NULL);
+    SSF_REQUIRE(r->y.limbs != NULL);
+    SSF_REQUIRE(r->z.limbs != NULL);
     SSF_REQUIRE(u1 != NULL);
+    SSF_REQUIRE(u1->limbs != NULL);
     SSF_REQUIRE(p != NULL);
+    SSF_REQUIRE(p->x.limbs != NULL);
+    SSF_REQUIRE(p->y.limbs != NULL);
+    SSF_REQUIRE(p->z.limbs != NULL);
     SSF_REQUIRE(u2 != NULL);
+    SSF_REQUIRE(u2->limbs != NULL);
     SSF_REQUIRE(q != NULL);
+    SSF_REQUIRE(q->x.limbs != NULL);
+    SSF_REQUIRE(q->y.limbs != NULL);
+    SSF_REQUIRE(q->z.limbs != NULL);
     SSF_REQUIRE(c != NULL);
+    SSF_REQUIRE(r->x.cap >= c->limbs);
+    SSF_REQUIRE(r->y.cap >= c->limbs);
+    SSF_REQUIRE(r->z.cap >= c->limbs);
 
     bits = (uint32_t)c->limbs * SSF_BN_LIMB_BITS;
 
@@ -1073,6 +1213,19 @@ static void _SSFECScalarMulComb(SSFECPoint_t *r, const SSFBN_t *k,
     SSFECPOINT_DEFINE(picked, SSF_EC_MAX_LIMBS);
     SSFECPOINT_DEFINE(rSaved, SSF_EC_MAX_LIMBS);
     int32_t j;
+
+    SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(r->x.limbs != NULL);
+    SSF_REQUIRE(r->y.limbs != NULL);
+    SSF_REQUIRE(r->z.limbs != NULL);
+    SSF_REQUIRE(k != NULL);
+    SSF_REQUIRE(k->limbs != NULL);
+    SSF_REQUIRE(c != NULL);
+    SSF_REQUIRE(table != NULL);
+    SSF_REQUIRE(dBits >= 1u);
+    SSF_REQUIRE(r->x.cap >= c->limbs);
+    SSF_REQUIRE(r->y.cap >= c->limbs);
+    SSF_REQUIRE(r->z.cap >= c->limbs);
 
     /* R = identity */
     SSFBNSetZero(&r->x, c->limbs);
@@ -1188,7 +1341,14 @@ static const _SSFECCombAffine_t _ssfECP256CombTable[_SSF_EC_COMB_NTABLE] = {
 void SSFECScalarMulBaseP256(SSFECPoint_t *r, const SSFBN_t *k)
 {
     SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(r->x.limbs != NULL);
+    SSF_REQUIRE(r->y.limbs != NULL);
+    SSF_REQUIRE(r->z.limbs != NULL);
     SSF_REQUIRE(k != NULL);
+    SSF_REQUIRE(k->limbs != NULL);
+    SSF_REQUIRE(r->x.cap >= 8u);
+    SSF_REQUIRE(r->y.cap >= 8u);
+    SSF_REQUIRE(r->z.cap >= 8u);
     _SSFECScalarMulComb(r, k, SSFECGetCurveParams(SSF_EC_CURVE_P256),
                         _ssfECP256CombTable, _SSF_EC_P256_COMB_D);
 }
@@ -1218,7 +1378,14 @@ static const _SSFECCombAffine_t _ssfECP384CombTable[_SSF_EC_COMB_NTABLE] = {
 void SSFECScalarMulBaseP384(SSFECPoint_t *r, const SSFBN_t *k)
 {
     SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(r->x.limbs != NULL);
+    SSF_REQUIRE(r->y.limbs != NULL);
+    SSF_REQUIRE(r->z.limbs != NULL);
     SSF_REQUIRE(k != NULL);
+    SSF_REQUIRE(k->limbs != NULL);
+    SSF_REQUIRE(r->x.cap >= 12u);
+    SSF_REQUIRE(r->y.cap >= 12u);
+    SSF_REQUIRE(r->z.cap >= 12u);
     _SSFECScalarMulComb(r, k, SSFECGetCurveParams(SSF_EC_CURVE_P384),
                         _ssfECP384CombTable, _SSF_EC_P384_COMB_D);
 }
@@ -1256,6 +1423,21 @@ static void _SSFECScalarMulVTwNAF(SSFECPoint_t *r, const SSFBN_t *k,
     int32_t nDigits = 0;
     int32_t i;
     bool inputAffine; /* true when caller's P has Z = 1 (e.g. from PointDecode / PointFromAffine) */
+
+    SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(r->x.limbs != NULL);
+    SSF_REQUIRE(r->y.limbs != NULL);
+    SSF_REQUIRE(r->z.limbs != NULL);
+    SSF_REQUIRE(k != NULL);
+    SSF_REQUIRE(k->limbs != NULL);
+    SSF_REQUIRE(p != NULL);
+    SSF_REQUIRE(p->x.limbs != NULL);
+    SSF_REQUIRE(p->y.limbs != NULL);
+    SSF_REQUIRE(p->z.limbs != NULL);
+    SSF_REQUIRE(c != NULL);
+    SSF_REQUIRE(r->x.cap >= c->limbs);
+    SSF_REQUIRE(r->y.cap >= c->limbs);
+    SSF_REQUIRE(r->z.cap >= c->limbs);
 
     /* Wire up table descriptors. */
     for (i = 0; i < (int32_t)_SSF_EC_VTWNAF_TABLE_SIZE; i++)
@@ -1389,10 +1571,21 @@ void SSFECScalarMulDualBase(SSFECPoint_t *r,
     bool didFixedBase = false;
 
     SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(r->x.limbs != NULL);
+    SSF_REQUIRE(r->y.limbs != NULL);
+    SSF_REQUIRE(r->z.limbs != NULL);
     SSF_REQUIRE(u1 != NULL);
+    SSF_REQUIRE(u1->limbs != NULL);
     SSF_REQUIRE(u2 != NULL);
+    SSF_REQUIRE(u2->limbs != NULL);
     SSF_REQUIRE(q != NULL);
+    SSF_REQUIRE(q->x.limbs != NULL);
+    SSF_REQUIRE(q->y.limbs != NULL);
+    SSF_REQUIRE(q->z.limbs != NULL);
     SSF_REQUIRE(c != NULL);
+    SSF_REQUIRE(r->x.cap >= c->limbs);
+    SSF_REQUIRE(r->y.cap >= c->limbs);
+    SSF_REQUIRE(r->z.cap >= c->limbs);
 
 #if SSF_EC_CONFIG_FIXED_BASE_P256 == 1
     if (curve == SSF_EC_CURVE_P256)

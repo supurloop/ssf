@@ -34,7 +34,55 @@
 #include "ssfecdsa.h"
 #include "ssfsha2.h"
 
+/* Cross-validate ECDSA sign/verify with OpenSSL on host platforms where libcrypto is linked.    */
+#if (defined(__APPLE__) || defined(__linux__)) && (SSF_CONFIG_ECDSA_UNIT_TEST == 1)
+#define SSF_ECDSA_OSSL_VERIFY 1
+#else
+#define SSF_ECDSA_OSSL_VERIFY 0
+#endif
+
+#if SSF_ECDSA_OSSL_VERIFY == 1
+#include <openssl/bn.h>
+#include <openssl/ec.h>
+#include <openssl/ecdsa.h>
+#include <openssl/obj_mac.h>
+#include <stdio.h>
+#endif
+
 #if SSF_CONFIG_ECDSA_UNIT_TEST == 1
+
+#if SSF_ECDSA_OSSL_VERIFY == 1
+/* --------------------------------------------------------------------------------------------- */
+/* ECDSA sign/verify interop helpers — bridge SSF privKey/pubKey/sig bytes to OpenSSL EC_KEY     */
+/* and ECDSA_SIG, and back. Used to catch DER encoding / signature serialization bugs that       */
+/* self-consistency tests miss.                                                                   */
+/* --------------------------------------------------------------------------------------------- */
+
+/* Build an OpenSSL EC_KEY for the given curve, with the SSF-format pubKey loaded. */
+static EC_KEY *_ECDSAOSSLKeyFromPub(SSFECCurve_t curve,
+                                    const uint8_t *pubKey, size_t pubKeyLen)
+{
+    int nid = (curve == SSF_EC_CURVE_P256) ? NID_X9_62_prime256v1 : NID_secp384r1;
+    EC_KEY *eckey = EC_KEY_new_by_curve_name(nid);
+    EC_POINT *pt = NULL;
+    SSF_ASSERT(eckey != NULL);
+    pt = EC_POINT_new(EC_KEY_get0_group(eckey));
+    SSF_ASSERT(pt != NULL);
+    SSF_ASSERT(EC_POINT_oct2point(EC_KEY_get0_group(eckey), pt, pubKey, pubKeyLen, NULL) == 1);
+    SSF_ASSERT(EC_KEY_set_public_key(eckey, pt) == 1);
+    EC_POINT_free(pt);
+    return eckey;
+}
+
+/* Set the private-key BIGNUM on an EC_KEY from SSF privKey bytes. */
+static void _ECDSAOSSLSetPriv(EC_KEY *eckey, const uint8_t *privKey, size_t privKeyLen)
+{
+    BIGNUM *bnD = BN_bin2bn(privKey, (int)privKeyLen, NULL);
+    SSF_ASSERT(bnD != NULL);
+    SSF_ASSERT(EC_KEY_set_private_key(eckey, bnD) == 1);
+    BN_free(bnD);
+}
+#endif /* SSF_ECDSA_OSSL_VERIFY */
 
 void SSFECDSAUnitTest(void)
 {
@@ -314,6 +362,255 @@ void SSFECDSAUnitTest(void)
         SSFBNSetUint32(&rNotMatch, 2u, c->limbs);
         SSF_ASSERT(_SSFECDSAVerifyCheckRForTest(SSF_EC_CURVE_P256, &R, &rNotMatch) == false);
     }
+
+    /* ---- (Gap 6) RFC 5903 §8.1 ECDH P-256 known-answer test ---- */
+    /* Verifies SSFECDHComputeSecret produces the documented shared secret for a known privKey  */
+    /* + peerPubKey pair from RFC 5903 §8.1. The existing Alice/Bob roundtrip test only verifies */
+    /* self-consistency — this catches arithmetic bugs that would silently produce mutually-     */
+    /* matching but incorrect shared secrets.                                                    */
+    {
+        /* RFC 5903 §8.1: i (initiator's privKey) */
+        static const uint8_t privKey[] = {
+            0xC8u, 0x8Fu, 0x01u, 0xF5u, 0x10u, 0xD9u, 0xACu, 0x3Fu,
+            0x70u, 0xA2u, 0x92u, 0xDAu, 0xA2u, 0x31u, 0x6Du, 0xE5u,
+            0x44u, 0xE9u, 0xAAu, 0xB8u, 0xAFu, 0xE8u, 0x40u, 0x49u,
+            0xC6u, 0x2Au, 0x9Cu, 0x57u, 0x86u, 0x2Du, 0x14u, 0x33u
+        };
+        /* RFC 5903 §8.1: gr (responder's pubKey) in SEC1 uncompressed form */
+        static const uint8_t peerPubKey[65] = {
+            0x04u,
+            /* grx */
+            0xD1u, 0x2Du, 0xFBu, 0x52u, 0x89u, 0xC8u, 0xD4u, 0xF8u,
+            0x12u, 0x08u, 0xB7u, 0x02u, 0x70u, 0x39u, 0x8Cu, 0x34u,
+            0x22u, 0x96u, 0x97u, 0x0Au, 0x0Bu, 0xCCu, 0xB7u, 0x4Cu,
+            0x73u, 0x6Fu, 0xC7u, 0x55u, 0x44u, 0x94u, 0xBFu, 0x63u,
+            /* gry */
+            0x56u, 0xFBu, 0xF3u, 0xCAu, 0x36u, 0x6Cu, 0xC2u, 0x3Eu,
+            0x81u, 0x57u, 0x85u, 0x4Cu, 0x13u, 0xC5u, 0x8Du, 0x6Au,
+            0xACu, 0x23u, 0xF0u, 0x46u, 0xADu, 0xA3u, 0x0Fu, 0x83u,
+            0x53u, 0xE7u, 0x4Fu, 0x33u, 0x03u, 0x98u, 0x72u, 0xABu
+        };
+        /* RFC 5903 §8.1: zx (shared secret = x-coord of [i]gr = [r]gi) */
+        static const uint8_t expectedZ[] = {
+            0xD6u, 0x84u, 0x0Fu, 0x6Bu, 0x42u, 0xF6u, 0xEDu, 0xAFu,
+            0xD1u, 0x31u, 0x16u, 0xE0u, 0xE1u, 0x25u, 0x65u, 0x20u,
+            0x2Fu, 0xEFu, 0x8Eu, 0x9Eu, 0xCEu, 0x7Du, 0xCEu, 0x03u,
+            0x81u, 0x24u, 0x64u, 0xD0u, 0x4Bu, 0x94u, 0x42u, 0xDEu
+        };
+        uint8_t shared[SSF_ECDH_MAX_SECRET_SIZE];
+        size_t sharedLen;
+
+        SSF_ASSERT(SSFECDHComputeSecret(SSF_EC_CURVE_P256,
+                   privKey, sizeof(privKey),
+                   peerPubKey, sizeof(peerPubKey),
+                   shared, sizeof(shared), &sharedLen) == true);
+        SSF_ASSERT(sharedLen == sizeof(expectedZ));
+        SSF_ASSERT(memcmp(shared, expectedZ, sizeof(expectedZ)) == 0);
+    }
 #endif /* SSF_EC_CONFIG_ENABLE_P256 */
+
+#if SSF_EC_CONFIG_ENABLE_P384 == 1
+    /* ---- RFC 5903 §8.2 ECDH P-384 known-answer test (using the symmetric (r, gi) → z form) ---- */
+    /* ECDH is symmetric: [i]gr = [r]gi = z. We use (r, gi) here (responder's privKey + initiator's */
+    /* pubKey) which gives the same expected zx.                                                     */
+    {
+        /* RFC 5903 §8.2: r (responder's privKey, 48 bytes) */
+        static const uint8_t privKey[] = {
+            0x41u, 0xCBu, 0x07u, 0x79u, 0xB4u, 0xBDu, 0xB8u, 0x5Du,
+            0x47u, 0x84u, 0x67u, 0x25u, 0xFBu, 0xECu, 0x3Cu, 0x94u,
+            0x30u, 0xFAu, 0xB4u, 0x6Cu, 0xC8u, 0xDCu, 0x50u, 0x60u,
+            0x85u, 0x5Cu, 0xC9u, 0xBDu, 0xA0u, 0xAAu, 0x29u, 0x42u,
+            0xE0u, 0x30u, 0x83u, 0x12u, 0x91u, 0x6Bu, 0x8Eu, 0xD2u,
+            0x96u, 0x0Eu, 0x4Bu, 0xD5u, 0x5Au, 0x74u, 0x48u, 0xFCu
+        };
+        /* RFC 5903 §8.2: gi (initiator's pubKey) in SEC1 uncompressed form */
+        static const uint8_t peerPubKey[97] = {
+            0x04u,
+            /* gix */
+            0x66u, 0x78u, 0x42u, 0xD7u, 0xD1u, 0x80u, 0xACu, 0x2Cu,
+            0xDEu, 0x6Fu, 0x74u, 0xF3u, 0x75u, 0x51u, 0xF5u, 0x57u,
+            0x55u, 0xC7u, 0x64u, 0x5Cu, 0x20u, 0xEFu, 0x73u, 0xE3u,
+            0x16u, 0x34u, 0xFEu, 0x72u, 0xB4u, 0xC5u, 0x5Eu, 0xE6u,
+            0xDEu, 0x3Au, 0xC8u, 0x08u, 0xACu, 0xB4u, 0xBDu, 0xB4u,
+            0xC8u, 0x87u, 0x32u, 0xAEu, 0xE9u, 0x5Fu, 0x41u, 0xAAu,
+            /* giy */
+            0x94u, 0x82u, 0xEDu, 0x1Fu, 0xC0u, 0xEEu, 0xB9u, 0xCAu,
+            0xFCu, 0x49u, 0x84u, 0x62u, 0x5Cu, 0xCFu, 0xC2u, 0x3Fu,
+            0x65u, 0x03u, 0x21u, 0x49u, 0xE0u, 0xE1u, 0x44u, 0xADu,
+            0xA0u, 0x24u, 0x18u, 0x15u, 0x35u, 0xA0u, 0xF3u, 0x8Eu,
+            0xEBu, 0x9Fu, 0xCFu, 0xF3u, 0xC2u, 0xC9u, 0x47u, 0xDAu,
+            0xE6u, 0x9Bu, 0x4Cu, 0x63u, 0x45u, 0x73u, 0xA8u, 0x1Cu
+        };
+        /* RFC 5903 §8.2: zx (shared secret) */
+        static const uint8_t expectedZ[] = {
+            0x11u, 0x18u, 0x73u, 0x31u, 0xC2u, 0x79u, 0x96u, 0x2Du,
+            0x93u, 0xD6u, 0x04u, 0x24u, 0x3Fu, 0xD5u, 0x92u, 0xCBu,
+            0x9Du, 0x0Au, 0x92u, 0x6Fu, 0x42u, 0x2Eu, 0x47u, 0x18u,
+            0x75u, 0x21u, 0x28u, 0x7Eu, 0x71u, 0x56u, 0xC5u, 0xC4u,
+            0xD6u, 0x03u, 0x13u, 0x55u, 0x69u, 0xB9u, 0xE9u, 0xD0u,
+            0x9Cu, 0xF5u, 0xD4u, 0xA2u, 0x70u, 0xF5u, 0x97u, 0x46u
+        };
+        uint8_t shared[SSF_ECDH_MAX_SECRET_SIZE];
+        size_t sharedLen;
+
+        SSF_ASSERT(SSFECDHComputeSecret(SSF_EC_CURVE_P384,
+                   privKey, sizeof(privKey),
+                   peerPubKey, sizeof(peerPubKey),
+                   shared, sizeof(shared), &sharedLen) == true);
+        SSF_ASSERT(sharedLen == sizeof(expectedZ));
+        SSF_ASSERT(memcmp(shared, expectedZ, sizeof(expectedZ)) == 0);
+    }
+#endif /* SSF_EC_CONFIG_ENABLE_P384 */
+
+#if SSF_ECDSA_OSSL_VERIFY == 1
+    /* ====================================================================================== */
+    /* === Sign-with-SSF / verify-with-OpenSSL (and reverse) interop ========================  */
+    /* ====================================================================================== */
+    /* Catches DER signature encoding bugs (length fields, ASN.1 INTEGER tag/leading-zero      */
+    /* handling) and end-to-end serialization mismatches that the per-primitive KATs miss.     */
+    /* Run for both directions on each enabled curve.                                           */
+    printf("--- ssfecdsa OpenSSL sign/verify interop ---\n");
+
+#if SSF_EC_CONFIG_ENABLE_P256 == 1
+    {
+        uint8_t privKey[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        uint8_t pubKey[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        size_t pubKeyLen;
+        uint8_t hash[32];
+        uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
+        size_t sigLen;
+        const char *messages[] = {
+            "interop-msg-0", "interop-msg-1", "interop-msg-2",
+            "interop-msg-3", "interop-msg-4"
+        };
+        size_t mi;
+
+        /* === SSF signs → OpenSSL verifies (P-256/SHA-256) === */
+        SSF_ASSERT(SSFECDSAKeyGen(SSF_EC_CURVE_P256,
+                   privKey, sizeof(privKey),
+                   pubKey,  sizeof(pubKey), &pubKeyLen) == true);
+
+        for (mi = 0; mi < sizeof(messages) / sizeof(messages[0]); mi++)
+        {
+            EC_KEY *eckey;
+            const uint8_t *p;
+            ECDSA_SIG *osslSig;
+            int verifyResult;
+
+            SSFSHA256((const uint8_t *)messages[mi], (uint32_t)strlen(messages[mi]),
+                      hash, sizeof(hash));
+            SSF_ASSERT(SSFECDSASign(SSF_EC_CURVE_P256, privKey, 32u,
+                       hash, sizeof(hash), sig, sizeof(sig), &sigLen) == true);
+
+            /* Hand SSF's pubKey + DER sig to OpenSSL for verification. */
+            eckey = _ECDSAOSSLKeyFromPub(SSF_EC_CURVE_P256, pubKey, pubKeyLen);
+            p = sig;
+            osslSig = d2i_ECDSA_SIG(NULL, &p, (long)sigLen);
+            SSF_ASSERT(osslSig != NULL);  /* DER must parse */
+            verifyResult = ECDSA_do_verify(hash, sizeof(hash), osslSig, eckey);
+            SSF_ASSERT(verifyResult == 1);
+            ECDSA_SIG_free(osslSig);
+            EC_KEY_free(eckey);
+        }
+
+        /* === OpenSSL signs → SSF verifies (P-256/SHA-256) === */
+        for (mi = 0; mi < sizeof(messages) / sizeof(messages[0]); mi++)
+        {
+            EC_KEY *eckey;
+            ECDSA_SIG *osslSig;
+            uint8_t osslDer[SSF_ECDSA_MAX_SIG_SIZE];
+            uint8_t *derP = osslDer;
+            int derLen;
+
+            eckey = _ECDSAOSSLKeyFromPub(SSF_EC_CURVE_P256, pubKey, pubKeyLen);
+            _ECDSAOSSLSetPriv(eckey, privKey, 32u);
+
+            SSFSHA256((const uint8_t *)messages[mi], (uint32_t)strlen(messages[mi]),
+                      hash, sizeof(hash));
+            osslSig = ECDSA_do_sign(hash, sizeof(hash), eckey);
+            SSF_ASSERT(osslSig != NULL);
+
+            derLen = i2d_ECDSA_SIG(osslSig, &derP);
+            SSF_ASSERT(derLen > 0 && derLen <= (int)sizeof(osslDer));
+            ECDSA_SIG_free(osslSig);
+
+            SSF_ASSERT(SSFECDSAVerify(SSF_EC_CURVE_P256,
+                       pubKey, pubKeyLen, hash, sizeof(hash),
+                       osslDer, (size_t)derLen) == true);
+            EC_KEY_free(eckey);
+        }
+    }
+#endif /* SSF_EC_CONFIG_ENABLE_P256 */
+
+#if SSF_EC_CONFIG_ENABLE_P384 == 1
+    {
+        uint8_t privKey[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        uint8_t pubKey[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        size_t pubKeyLen;
+        uint8_t hash[48];
+        uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
+        size_t sigLen;
+        const char *messages[] = {
+            "interop-msg-0", "interop-msg-1", "interop-msg-2",
+            "interop-msg-3", "interop-msg-4"
+        };
+        size_t mi;
+
+        /* === SSF signs → OpenSSL verifies (P-384/SHA-384) === */
+        SSF_ASSERT(SSFECDSAKeyGen(SSF_EC_CURVE_P384,
+                   privKey, sizeof(privKey),
+                   pubKey,  sizeof(pubKey), &pubKeyLen) == true);
+
+        for (mi = 0; mi < sizeof(messages) / sizeof(messages[0]); mi++)
+        {
+            EC_KEY *eckey;
+            const uint8_t *p;
+            ECDSA_SIG *osslSig;
+
+            SSFSHA384((const uint8_t *)messages[mi], (uint32_t)strlen(messages[mi]),
+                      hash, sizeof(hash));
+            SSF_ASSERT(SSFECDSASign(SSF_EC_CURVE_P384, privKey, 48u,
+                       hash, sizeof(hash), sig, sizeof(sig), &sigLen) == true);
+
+            eckey = _ECDSAOSSLKeyFromPub(SSF_EC_CURVE_P384, pubKey, pubKeyLen);
+            p = sig;
+            osslSig = d2i_ECDSA_SIG(NULL, &p, (long)sigLen);
+            SSF_ASSERT(osslSig != NULL);
+            SSF_ASSERT(ECDSA_do_verify(hash, sizeof(hash), osslSig, eckey) == 1);
+            ECDSA_SIG_free(osslSig);
+            EC_KEY_free(eckey);
+        }
+
+        /* === OpenSSL signs → SSF verifies (P-384/SHA-384) === */
+        for (mi = 0; mi < sizeof(messages) / sizeof(messages[0]); mi++)
+        {
+            EC_KEY *eckey;
+            ECDSA_SIG *osslSig;
+            uint8_t osslDer[SSF_ECDSA_MAX_SIG_SIZE];
+            uint8_t *derP = osslDer;
+            int derLen;
+
+            eckey = _ECDSAOSSLKeyFromPub(SSF_EC_CURVE_P384, pubKey, pubKeyLen);
+            _ECDSAOSSLSetPriv(eckey, privKey, 48u);
+
+            SSFSHA384((const uint8_t *)messages[mi], (uint32_t)strlen(messages[mi]),
+                      hash, sizeof(hash));
+            osslSig = ECDSA_do_sign(hash, sizeof(hash), eckey);
+            SSF_ASSERT(osslSig != NULL);
+
+            derLen = i2d_ECDSA_SIG(osslSig, &derP);
+            SSF_ASSERT(derLen > 0 && derLen <= (int)sizeof(osslDer));
+            ECDSA_SIG_free(osslSig);
+
+            SSF_ASSERT(SSFECDSAVerify(SSF_EC_CURVE_P384,
+                       pubKey, pubKeyLen, hash, sizeof(hash),
+                       osslDer, (size_t)derLen) == true);
+            EC_KEY_free(eckey);
+        }
+    }
+#endif /* SSF_EC_CONFIG_ENABLE_P384 */
+
+    printf("--- end ssfecdsa OpenSSL interop ---\n");
+#endif /* SSF_ECDSA_OSSL_VERIFY */
 }
 #endif /* SSF_CONFIG_ECDSA_UNIT_TEST */

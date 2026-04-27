@@ -39,9 +39,9 @@ measuring response times.
 - Both parameters are `const void *`, so callers can pass `uint8_t *`, `char *`, or any other
   byte-granular pointer without a cast at the call site.
 - This module is used internally wherever the framework compares a computed tag or signature
-  against a caller-supplied expected value (for example, the AEAD decryption paths in
-  [`ssfaesgcm`](ssfaesgcm.md), `ssfaesccm`, `ssfchacha20poly1305`, and the MAC / signature
-  verification paths in `ssfhmac`, `ssfecdsa`, and `ssfed25519`).
+  against a caller-supplied expected value: the AEAD decryption paths in
+  [`ssfaesgcm`](ssfaesgcm.md), `ssfaesccm`, and `ssfchacha20poly1305`; the signature
+  verification path in `ssfed25519`; and the RSA encoded-message comparison in `ssfrsa`.
 
 <a id="configuration"></a>
 

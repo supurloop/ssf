@@ -40,14 +40,18 @@
 /* --------------------------------------------------------------------------------------------- */
 bool SSFCTMemEq(const void *a, const void *b, size_t n)
 {
-    const uint8_t *ap = (const uint8_t *)a;
-    const uint8_t *bp = (const uint8_t *)b;
-    uint8_t diff = 0;
     size_t i;
+    const uint8_t *ap;
+    const uint8_t *bp;
+    volatile uint8_t diff = 0;
 
     SSF_REQUIRE(a != NULL);
     SSF_REQUIRE(b != NULL);
 
+    ap = (const uint8_t *)a;
+    bp = (const uint8_t *)b;
+
+    /* volatile prevents the compiler from rewriting the OR-accumulator into an early exit */
     for (i = 0; i < n; i++) diff |= (uint8_t)(ap[i] ^ bp[i]);
     return (diff == 0);
 }

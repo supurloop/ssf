@@ -42,11 +42,14 @@
 /* --------------------------------------------------------------------------------------------- */
 void SSFCTUnitTest(void)
 {
-    /* NULL-argument assertions */
+    /* NULL-argument assertions. The contract requires non-NULL pointers even when n is 0,
+       so exercise both n>0 and n==0 to pin the documented behavior. */
     {
         uint8_t buf[4] = {0};
         SSF_ASSERT_TEST(SSFCTMemEq(NULL, buf, 4u));
         SSF_ASSERT_TEST(SSFCTMemEq(buf, NULL, 4u));
+        SSF_ASSERT_TEST(SSFCTMemEq(NULL, buf, 0u));
+        SSF_ASSERT_TEST(SSFCTMemEq(buf, NULL, 0u));
     }
 
     /* Zero-length input compares equal regardless of pointer values. */

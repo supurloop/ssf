@@ -23,11 +23,16 @@ RUN apt-get update \
         binutils \
         gcc-mipsel-linux-gnu        binutils-mipsel-linux-gnu        libc6-dev-mipsel-cross \
         gcc-mips-linux-gnu          binutils-mips-linux-gnu          libc6-dev-mips-cross \
-        gcc-mips64el-linux-gnuabi64 binutils-mips64el-linux-gnuabi64 libc6-dev-mips64el-cross \
-        gcc-mips64-linux-gnuabi64   binutils-mips64-linux-gnuabi64   libc6-dev-mips64-cross \
+        gcc-multilib-mips64el-linux-gnuabi64 binutils-mips64el-linux-gnuabi64 libc6-dev-mips64el-cross \
+        gcc-multilib-mips64-linux-gnuabi64   binutils-mips64-linux-gnuabi64   libc6-dev-mips64-cross \
         gcc-arm-linux-gnueabihf     binutils-arm-linux-gnueabihf     libc6-dev-armhf-cross \
         gcc-aarch64-linux-gnu       binutils-aarch64-linux-gnu       libc6-dev-arm64-cross \
         gcc-riscv64-linux-gnu       binutils-riscv64-linux-gnu       libc6-dev-riscv64-cross \
+        gcc-i686-linux-gnu          binutils-i686-linux-gnu          libc6-dev-i386-cross \
+        gcc-m68k-linux-gnu          binutils-m68k-linux-gnu          libc6-dev-m68k-cross \
+        gcc-powerpc-linux-gnu       binutils-powerpc-linux-gnu       libc6-dev-powerpc-cross \
+        binutils-mips64-linux-gnuabin32   libc6-dev-mipsn32-cross \
+        binutils-mips64el-linux-gnuabin32 libc6-dev-mipsn32el-cross \
         qemu-user-static \
  && rm -rf /var/lib/apt/lists/*
 

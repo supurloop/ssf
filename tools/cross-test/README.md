@@ -95,6 +95,18 @@ Then `docker build -t ssf-cross:latest tools/cross-test/docker` and
 | `armhf`    | `arm-linux-gnueabihf`        | 32   | LE     | hard-float EABI |
 | `aarch64`  | `aarch64-linux-gnu`          | 64   | LE     | |
 | `riscv64`  | `riscv64-linux-gnu`          | 64   | LE     | Debian doesn't ship riscv32 |
+| `i686`     | `i686-linux-gnu`             | 32   | LE     | x86-32; qemu binary is `qemu-i386-static` |
+| `m68k`     | `m68k-linux-gnu`             | 32   | BE     | Motorola 68k; BE-only, no 64-bit variant |
+| `mipsn32`  | `mips64-linux-gnuabi64`      | 32p/64r | BE  | n32 ABI (32-bit pointers, 64-bit registers); built via the n64 gcc + `-mabi=n32` |
+| `mipsn32el`| `mips64el-linux-gnuabi64`    | 32p/64r | LE  | n32 ABI; same multilib story as mipsn32 |
+| `powerpc`  | `powerpc-linux-gnu`          | 32   | BE     | Classic PowerPC 32 BE |
+
+`armeb` (ARM 32 BE) is intentionally absent: Debian doesn't ship an
+ARM-big-endian Linux toolchain (no `gcc-armeb-linux-gnueabi`, no matching
+binutils/libc-dev), and `qemu-armeb-static` alone is useless without a way to
+produce a BE ARM ELF. Adding it would require pulling an external toolchain
+(Linaro / Bootlin prebuilt) into the image — out of scope for the
+Debian-only contract this image holds.
 
 The `--docker all` mode iterates every descriptor in `targets/`. Coverage
 spans every (32/64) × (BE/LE) cell that Debian stable's cross toolchains

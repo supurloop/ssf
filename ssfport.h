@@ -78,6 +78,7 @@ extern "C" {
 #define SSF_CONFIG_CCP_UNIT_TEST     (1u)  /* ChaCha20-Poly1305 AEAD */
 #define SSF_CONFIG_CHACHA20_UNIT_TEST (1u)
 #define SSF_CONFIG_CRYPT_UNIT_TEST   (1u)
+#define SSF_CONFIG_CRYPT_CT_TIMING_TEST (1u)  /* 1 to run SSFCryptCTMemEq wall-clock CT check */
 #define SSF_CONFIG_EC_UNIT_TEST      (1u)
 #define SSF_CONFIG_EC_MICROBENCH     (1u)  /* 1 to run [k]G perf harness in ssfec_ut */
 #define SSF_CONFIG_ECDSA_UNIT_TEST   (1u)

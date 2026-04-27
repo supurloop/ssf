@@ -34,8 +34,9 @@
 #include "ssfecdsa.h"
 #include "ssfsha2.h"
 
-/* Cross-validate ECDSA sign/verify with OpenSSL on host platforms where libcrypto is linked.    */
-#if (defined(__APPLE__) || defined(__linux__)) && (SSF_CONFIG_ECDSA_UNIT_TEST == 1)
+/* Cross-validate ECDSA sign/verify with OpenSSL on host builds where libcrypto is linked. Gated */
+/* on SSF_CONFIG_HAVE_OPENSSL (1 on native macOS/Linux, 0 on cross builds — see ssfport.h).      */
+#if (SSF_CONFIG_HAVE_OPENSSL == 1) && (SSF_CONFIG_ECDSA_UNIT_TEST == 1)
 #define SSF_ECDSA_OSSL_VERIFY 1
 #else
 #define SSF_ECDSA_OSSL_VERIFY 0

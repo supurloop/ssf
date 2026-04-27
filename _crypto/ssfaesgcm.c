@@ -179,7 +179,14 @@ static inline void _SSFAESGCMCarrylessReduce(uint32_t *in)
     r[0] = d ^ e[0] ^ f[0] ^ g[0] ^ x0;
     r[1] = x3 ^ e[1] ^ f[1] ^ g[1] ^ x1;
 
-    memcpy(in, r, 16);
+    /* Write r[0..1] back into in[0..3] using the same little-endian word
+     * layout that memcpy would produce on a little-endian host. Doing this
+     * explicitly keeps the result identical on big-endian hosts (KAT-fail
+     * on mips/mips64 BE before this). */
+    in[0] = (uint32_t)(r[0]);
+    in[1] = (uint32_t)(r[0] >> 32);
+    in[2] = (uint32_t)(r[1]);
+    in[3] = (uint32_t)(r[1] >> 32);
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -300,7 +307,12 @@ static void _SSFAESGCMBlockMult(uint8_t *in, size_t inSize, const uint8_t *con, 
     res[2] = _SSFAESGCMReverseBytes(res[2]);
     res[3] = _SSFAESGCMReverseBytes(res[3]);
 
-    memcpy(in, res, 16);
+    /* Symmetric inverse of the SSF_GETU32LE reads above; replaces the
+     * host-endian memcpy that broke on big-endian hosts. */
+    SSF_PUTU32LE(&in[0],  res[0]);
+    SSF_PUTU32LE(&in[4],  res[1]);
+    SSF_PUTU32LE(&in[8],  res[2]);
+    SSF_PUTU32LE(&in[12], res[3]);
 }
 
 /* --------------------------------------------------------------------------------------------- */

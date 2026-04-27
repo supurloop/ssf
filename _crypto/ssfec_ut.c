@@ -40,9 +40,9 @@
 #include <stdio.h>
 #endif
 
-/* Cross-check the SSFEC implementation against OpenSSL's EC_POINT / EC_GROUP. Enabled by default */
-/* on host desktop platforms (macOS, Linux) where libcrypto is linked; disabled elsewhere.         */
-#if (defined(__APPLE__) || defined(__linux__)) && (SSF_CONFIG_EC_UNIT_TEST == 1)
+/* Cross-check the SSFEC implementation against OpenSSL's EC_POINT / EC_GROUP. Gated on          */
+/* SSF_CONFIG_HAVE_OPENSSL (1 on native macOS/Linux, 0 on cross builds — see ssfport.h).         */
+#if (SSF_CONFIG_HAVE_OPENSSL == 1) && (SSF_CONFIG_EC_UNIT_TEST == 1)
 #define SSF_EC_OSSL_VERIFY 1
 #else
 #define SSF_EC_OSSL_VERIFY 0

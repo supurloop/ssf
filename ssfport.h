@@ -61,6 +61,14 @@ extern "C" {
 #define SSF_CONFIG_TLV_UNIT_TEST     (1u)
 #define SSF_CONFIG_UBJSON_UNIT_TEST  (1u)
 
+/* SSF_CONFIG_HAVE_OPENSSL — set to 1 on host builds where libcrypto is linked at the build's    */
+/* command line (macOS/Linux native). Cross builds (e.g. mipsel under QEMU) override this to 0   */
+/* to skip OpenSSL cross-validation paths in the unit suite. Defined as a fall-through default   */
+/* so command-line -D wins.                                                                      */
+#ifndef SSF_CONFIG_HAVE_OPENSSL
+#define SSF_CONFIG_HAVE_OPENSSL      (1u)
+#endif
+
 /* _crypto */
 #define SSF_CONFIG_AES_UNIT_TEST     (1u)
 #define SSF_CONFIG_AESCCM_UNIT_TEST  (1u)
@@ -235,7 +243,17 @@ typedef uint64_t SSFPortTick_t;
 #define SSF_CONFIG_LITTLE_ENDIAN (1u)
 #else
 #define SSF_CONFIG_BYTE_ORDER_MACROS (1u)
+/* Auto-detect endianness from the compiler when available (GCC/Clang expose
+ * __BYTE_ORDER__). Hardcoding LE here corrupted ntohl/htonl/ntohll/htonll on
+ * BE hosts, breaking SHA-2 (and any other consumer of those macros) on
+ * mips/mips64. Embedded targets without __BYTE_ORDER__ default to LE; flip
+ * SSF_CONFIG_LITTLE_ENDIAN by hand if you're on a non-GCC BE compiler. */
+#if defined(__BYTE_ORDER__) && defined(__ORDER_BIG_ENDIAN__) && \
+    (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
+#define SSF_CONFIG_LITTLE_ENDIAN (0u)
+#else
 #define SSF_CONFIG_LITTLE_ENDIAN (1u)
+#endif
 #endif
 
 #if SSF_CONFIG_BYTE_ORDER_MACROS == 1

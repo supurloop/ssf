@@ -37,11 +37,11 @@
 #include <stdio.h>
 #endif
 
-/* Cross-check the SSFBN implementation against OpenSSL's BIGNUM. Enabled by default on the host */
-/* desktop platforms where libcrypto ships with the toolchain (macOS via Homebrew, Linux via the */
-/* distribution), and disabled elsewhere (Windows, embedded targets). The build files add        */
-/* -lcrypto on these platforms; the host include path picks up the system or Homebrew header.    */
-#if (defined(__APPLE__) || defined(__linux__)) && (SSF_CONFIG_BN_UNIT_TEST == 1)
+/* Cross-check the SSFBN implementation against OpenSSL's BIGNUM. Enabled when the build is      */
+/* linking libcrypto (host macOS/Linux); disabled on cross builds via -DSSF_CONFIG_HAVE_OPENSSL=0 */
+/* (see ssfport.h). When disabled, the Wycheproof corpus and the RFC 6979 KATs are the load-     */
+/* bearing correctness coverage instead.                                                          */
+#if (SSF_CONFIG_HAVE_OPENSSL == 1) && (SSF_CONFIG_BN_UNIT_TEST == 1)
 #define SSF_BN_OSSL_VERIFY 1
 #else
 #define SSF_BN_OSSL_VERIFY 0

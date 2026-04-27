@@ -282,6 +282,9 @@ static void _SSFECDSACanonicalizeInt(const uint8_t *intBuf, uint32_t intLen,
 {
     const uint8_t *p = intBuf;
     uint32_t n = intLen;
+    /* intLen == 0 would dereference a zero-byte buffer at *p below. Current callers always pass */
+    /* c->bytes (>= 32), so this is unreachable in practice — assert it as a precondition.       */
+    SSF_REQUIRE(intLen > 0u);
     while (n > 1u && *p == 0u) { p++; n--; }
     if ((*p & 0x80u) != 0u)
     {

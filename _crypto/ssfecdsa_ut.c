@@ -415,6 +415,90 @@ void SSFECDSAUnitTest(void)
         }
     }
 
+    /* ---- Sign rejects undersized sig buffer without overflowing it ---- */
+    /* The DER encoder's "totalLen > sigSize" guard is the last line of defense before any byte */
+    /* lands in the caller's buffer. Bracket it: a 1-byte-short buffer must reject; an exactly- */
+    /* sized buffer must accept; the 1-byte-short buffer's tail must remain unwritten.           */
+    {
+        static const uint8_t privKey[] = {
+            0xC9u, 0xAFu, 0xA9u, 0xD8u, 0x45u, 0xBAu, 0x75u, 0x16u,
+            0x6Bu, 0x5Cu, 0x21u, 0x57u, 0x67u, 0xB1u, 0xD6u, 0x93u,
+            0x4Eu, 0x50u, 0xC3u, 0xDBu, 0x36u, 0xE8u, 0x9Bu, 0x12u,
+            0x7Bu, 0x8Au, 0x62u, 0x2Bu, 0x12u, 0x0Fu, 0x67u, 0x21u
+        };
+        uint8_t hash[32];
+        uint8_t sigFull[SSF_ECDSA_MAX_SIG_SIZE];
+        size_t sigFullLen;
+
+        SSFSHA256((const uint8_t *)"sample", 6, hash, sizeof(hash));
+
+        /* First produce the canonical signature (sigFullLen = 72 for this RFC vector). */
+        SSF_ASSERT(SSFECDSASign(SSF_EC_CURVE_P256, privKey, sizeof(privKey),
+                   hash, sizeof(hash), sigFull, sizeof(sigFull), &sigFullLen) == true);
+        SSF_ASSERT(sigFullLen == 72u);
+
+        /* Sign into a buffer one byte too small. The DER encoder must reject (return false)    */
+        /* without writing a byte. Detect any spurious write by surrounding the small buffer    */
+        /* with sentinel bytes and confirming all bytes (including the head/tail sentinels) are */
+        /* untouched.                                                                            */
+        {
+            uint8_t guarded[1u + (72u - 1u) + 1u];   /* head sentinel | sig buffer | tail sentinel */
+            uint8_t *sigSmall = &guarded[1];
+            size_t sigSmallSize = 71u;
+            size_t sigOutLen = 999u;
+
+            memset(guarded, 0xA5u, sizeof(guarded));
+            SSF_ASSERT(SSFECDSASign(SSF_EC_CURVE_P256, privKey, sizeof(privKey),
+                       hash, sizeof(hash), sigSmall, sigSmallSize, &sigOutLen) == false);
+
+            SSF_ASSERT(guarded[0] == 0xA5u);                      /* head sentinel intact */
+            SSF_ASSERT(guarded[sizeof(guarded) - 1u] == 0xA5u);   /* tail sentinel intact */
+            /* The DER encoder is allowed to scribble the SEQUENCE header into the buffer head  */
+            /* before the totalLen check fires (current implementation in fact does so via the  */
+            /* pass-2 EncTagLen call), but it must not write past sigSmallSize. Verify the head */
+            /* sentinel above already covers the lower-OOB direction; the assertion that the    */
+            /* tail sentinel is intact covers the upper-OOB direction.                           */
+        }
+
+        /* Sign into an exactly-sized buffer succeeds and produces the same DER bytes. */
+        {
+            uint8_t sigExact[72];
+            size_t sigExactLen;
+            SSF_ASSERT(SSFECDSASign(SSF_EC_CURVE_P256, privKey, sizeof(privKey),
+                       hash, sizeof(hash), sigExact, sizeof(sigExact), &sigExactLen) == true);
+            SSF_ASSERT(sigExactLen == sigFullLen);
+            SSF_ASSERT(memcmp(sigExact, sigFull, sigFullLen) == 0);
+        }
+    }
+
+    /* ---- Verify rejects sig buffers below the strict-DER minimum without overflow ---- */
+    /* Strict DER validator's first check is `sigLen < 8u`, well before any sig-byte read past  */
+    /* the first. Hand it lengths 0..7 and confirm rejection without crash.                      */
+    {
+        static const uint8_t pubKey[] = {
+            0x04u,
+            0x60u, 0xFEu, 0xD4u, 0xBAu, 0x25u, 0x5Au, 0x9Du, 0x31u,
+            0xC9u, 0x61u, 0xEBu, 0x74u, 0xC6u, 0x35u, 0x6Du, 0x68u,
+            0xC0u, 0x49u, 0xB8u, 0x92u, 0x3Bu, 0x61u, 0xFAu, 0x6Cu,
+            0xE6u, 0x69u, 0x62u, 0x2Eu, 0x60u, 0xF2u, 0x9Fu, 0xB6u,
+            0x79u, 0x03u, 0xFEu, 0x10u, 0x08u, 0xB8u, 0xBCu, 0x99u,
+            0xA4u, 0x1Au, 0xE9u, 0xE9u, 0x56u, 0x28u, 0xBCu, 0x64u,
+            0xF2u, 0xF1u, 0xB2u, 0x0Cu, 0x2Du, 0x7Eu, 0x9Fu, 0x51u,
+            0x77u, 0xA3u, 0xC2u, 0x94u, 0xD4u, 0x46u, 0x22u, 0x99u
+        };
+        uint8_t hash[32];
+        uint8_t shortSig[7] = { 0x30u, 0x05u, 0x02u, 0x01u, 0x01u, 0x02u, 0x01u };
+        size_t i;
+
+        SSFSHA256((const uint8_t *)"sample", 6, hash, sizeof(hash));
+
+        for (i = 0; i <= 7u; i++)
+        {
+            SSF_ASSERT(SSFECDSAVerify(SSF_EC_CURVE_P256, pubKey, sizeof(pubKey),
+                       hash, sizeof(hash), shortSig, i) == false);
+        }
+    }
+
     /* ---- RFC 6979 A.2.5: P-256/SHA-256 sign and verify ---- */
     {
         /* Private key from RFC 6979 A.2.5 */

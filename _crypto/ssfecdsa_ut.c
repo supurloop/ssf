@@ -47,6 +47,7 @@
 #include <openssl/ec.h>
 #include <openssl/ecdsa.h>
 #include <openssl/obj_mac.h>
+#include <openssl/rand.h>
 #include <stdio.h>
 #endif
 
@@ -82,6 +83,332 @@ static void _ECDSAOSSLSetPriv(EC_KEY *eckey, const uint8_t *privKey, size_t priv
     SSF_ASSERT(bnD != NULL);
     SSF_ASSERT(EC_KEY_set_private_key(eckey, bnD) == 1);
     BN_free(bnD);
+}
+
+/* Curve metadata bundle: byte sizes and OpenSSL NID. Avoids scattering the curve→{nid,sizes}     */
+/* mapping across each cross-check function.                                                       */
+typedef struct
+{
+    int      nid;        /* OpenSSL NID for the curve. */
+    size_t   privBytes;  /* Private-key serialized size. */
+    size_t   pubBytes;   /* Public-key uncompressed size (1 + 2 * field). */
+    size_t   hashBytes;  /* Recommended hash size (matches the curve's bit size). */
+    size_t   secretBytes;/* ECDH shared-secret size (== field size). */
+} _ECDSAOSSLCurveInfo_t;
+
+static void _ECDSAOSSLCurveInfo(SSFECCurve_t curve, _ECDSAOSSLCurveInfo_t *info)
+{
+    if (curve == SSF_EC_CURVE_P256)
+    {
+        info->nid = NID_X9_62_prime256v1;
+        info->privBytes = 32u; info->pubBytes = 65u;
+        info->hashBytes = 32u; info->secretBytes = 32u;
+    }
+    else
+    {
+        SSF_ASSERT(curve == SSF_EC_CURVE_P384);
+        info->nid = NID_secp384r1;
+        info->privBytes = 48u; info->pubBytes = 97u;
+        info->hashBytes = 48u; info->secretBytes = 48u;
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Random fuzz: per curve × iters, exercise every cross-direction (SSF↔OpenSSL) on randomly       */
+/* generated keys and randomly generated hashes. Catches DER edge cases, leftmost-bits truncation */
+/* off-by-ones, and any state-corruption between operations that the fixed-message interop misses */
+/* by reusing one keypair.                                                                         */
+/* --------------------------------------------------------------------------------------------- */
+static void _VerifyECDSARandomAgainstOpenSSL(SSFECCurve_t curve, uint16_t iters)
+{
+    _ECDSAOSSLCurveInfo_t info;
+    uint16_t i;
+
+    _ECDSAOSSLCurveInfo(curve, &info);
+
+    for (i = 0; i < iters; i++)
+    {
+        uint8_t privKey[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        uint8_t pubKey[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        size_t  pubKeyLen = 0u;
+        uint8_t hash[SSF_ECDSA_MAX_PRIV_KEY_SIZE]; /* hash size == priv size for these curves. */
+        uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
+        size_t  sigLen;
+
+        /* === SSF generates the key, OpenSSL must accept it === */
+        SSF_ASSERT(SSFECDSAKeyGen(curve,
+                                  privKey, sizeof(privKey),
+                                  pubKey,  sizeof(pubKey), &pubKeyLen) == true);
+        SSF_ASSERT(pubKeyLen == info.pubBytes);
+        {
+            EC_KEY *eckey = _ECDSAOSSLKeyFromPub(curve, pubKey, pubKeyLen);
+            _ECDSAOSSLSetPriv(eckey, privKey, info.privBytes);
+            /* OpenSSL's EC_KEY_check_key validates: priv ∈ [1, n-1], pub on curve, and          */
+            /* priv * G == pub. A failure here means SSF's KeyGen produced an inconsistent pair.  */
+            SSF_ASSERT(EC_KEY_check_key(eckey) == 1);
+            EC_KEY_free(eckey);
+        }
+
+        /* === Random hash (simulates a digest of arbitrary content) === */
+        SSF_ASSERT(RAND_bytes(hash, (int)info.hashBytes) == 1);
+
+        /* === SSF signs → OpenSSL verifies === */
+        SSF_ASSERT(SSFECDSASign(curve, privKey, info.privBytes,
+                                hash, info.hashBytes,
+                                sig, sizeof(sig), &sigLen) == true);
+        {
+            EC_KEY *eckey = _ECDSAOSSLKeyFromPub(curve, pubKey, pubKeyLen);
+            const uint8_t *p = sig;
+            ECDSA_SIG *osslSig = d2i_ECDSA_SIG(NULL, &p, (long)sigLen);
+            SSF_ASSERT(osslSig != NULL);
+            SSF_ASSERT(ECDSA_do_verify(hash, (int)info.hashBytes, osslSig, eckey) == 1);
+            ECDSA_SIG_free(osslSig);
+            EC_KEY_free(eckey);
+        }
+
+        /* === OpenSSL signs (with the same SSF-generated key) → SSF verifies === */
+        {
+            EC_KEY *eckey = _ECDSAOSSLKeyFromPub(curve, pubKey, pubKeyLen);
+            ECDSA_SIG *osslSig;
+            uint8_t osslDer[SSF_ECDSA_MAX_SIG_SIZE];
+            uint8_t *derP = osslDer;
+            int derLen;
+
+            _ECDSAOSSLSetPriv(eckey, privKey, info.privBytes);
+            osslSig = ECDSA_do_sign(hash, (int)info.hashBytes, eckey);
+            SSF_ASSERT(osslSig != NULL);
+            derLen = i2d_ECDSA_SIG(osslSig, &derP);
+            SSF_ASSERT(derLen > 0 && derLen <= (int)sizeof(osslDer));
+            ECDSA_SIG_free(osslSig);
+
+            SSF_ASSERT(SSFECDSAVerify(curve, pubKey, pubKeyLen,
+                                      hash, info.hashBytes,
+                                      osslDer, (size_t)derLen) == true);
+            EC_KEY_free(eckey);
+        }
+
+        /* === OpenSSL generates the key, SSF verifies a sig OpenSSL produced === */
+        {
+            EC_KEY *osslKey = EC_KEY_new_by_curve_name(info.nid);
+            const EC_GROUP *grp;
+            const EC_POINT *pub;
+            size_t osslPubLen;
+            uint8_t osslPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+            ECDSA_SIG *osslSig;
+            uint8_t osslDer[SSF_ECDSA_MAX_SIG_SIZE];
+            uint8_t *derP = osslDer;
+            int derLen;
+
+            SSF_ASSERT(osslKey != NULL);
+            SSF_ASSERT(EC_KEY_generate_key(osslKey) == 1);
+            grp = EC_KEY_get0_group(osslKey);
+            pub = EC_KEY_get0_public_key(osslKey);
+            osslPubLen = EC_POINT_point2oct(grp, pub, POINT_CONVERSION_UNCOMPRESSED,
+                                            osslPub, sizeof(osslPub), NULL);
+            SSF_ASSERT(osslPubLen == info.pubBytes);
+
+            osslSig = ECDSA_do_sign(hash, (int)info.hashBytes, osslKey);
+            SSF_ASSERT(osslSig != NULL);
+            derLen = i2d_ECDSA_SIG(osslSig, &derP);
+            SSF_ASSERT(derLen > 0);
+            ECDSA_SIG_free(osslSig);
+
+            SSF_ASSERT(SSFECDSAVerify(curve, osslPub, osslPubLen,
+                                      hash, info.hashBytes,
+                                      osslDer, (size_t)derLen) == true);
+
+            /* Validity oracle: SSFECDSAPubKeyIsValid must agree with EC_KEY_check_key on the     */
+            /* OpenSSL-generated public key (which is on-curve by construction).                  */
+            SSF_ASSERT(SSFECDSAPubKeyIsValid(curve, osslPub, osslPubLen) == true);
+
+            EC_KEY_free(osslKey);
+        }
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* ECDH cross-check: SSF and OpenSSL must derive the same shared secret given the same           */
+/* (private, peer-public) inputs. Run with mixed origins — keys from SSF, keys from OpenSSL,     */
+/* and one of each — to catch any corner where an SSF-imported pubkey and an OpenSSL-imported    */
+/* pubkey diverge.                                                                                */
+/* --------------------------------------------------------------------------------------------- */
+static void _VerifyECDHAgainstOpenSSL(SSFECCurve_t curve, uint16_t iters)
+{
+    _ECDSAOSSLCurveInfo_t info;
+    uint16_t i;
+
+    _ECDSAOSSLCurveInfo(curve, &info);
+
+    for (i = 0; i < iters; i++)
+    {
+        /* Two keypairs A and B. Both generated by SSF this iteration. */
+        uint8_t privA[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        uint8_t pubA [SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        size_t  pubALen = 0u;
+        uint8_t privB[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        uint8_t pubB [SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        size_t  pubBLen = 0u;
+        uint8_t ssfSecret [SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        uint8_t osslSecret[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        size_t  ssfSecretLen = 0u;
+        EC_KEY *keyA, *keyB;
+        const EC_POINT *pubBPoint;
+        int      n;
+
+        SSF_ASSERT(SSFECDSAKeyGen(curve, privA, sizeof(privA),
+                                  pubA, sizeof(pubA), &pubALen) == true);
+        SSF_ASSERT(SSFECDSAKeyGen(curve, privB, sizeof(privB),
+                                  pubB, sizeof(pubB), &pubBLen) == true);
+
+        /* === SSF: compute A↔B via SSFECDH === */
+        SSF_ASSERT(SSFECDHComputeSecret(curve, privA, info.privBytes, pubB, pubBLen,
+                                        ssfSecret, sizeof(ssfSecret),
+                                        &ssfSecretLen) == true);
+        SSF_ASSERT(ssfSecretLen == info.secretBytes);
+
+        /* === OpenSSL: same operation, same inputs (priv from A, pub from B) === */
+        keyA = _ECDSAOSSLKeyFromPub(curve, pubA, pubALen);
+        _ECDSAOSSLSetPriv(keyA, privA, info.privBytes);
+        keyB = _ECDSAOSSLKeyFromPub(curve, pubB, pubBLen);
+        pubBPoint = EC_KEY_get0_public_key(keyB);
+
+        n = ECDH_compute_key(osslSecret, sizeof(osslSecret), pubBPoint, keyA, NULL);
+        SSF_ASSERT(n == (int)info.secretBytes);
+        SSF_ASSERT(memcmp(ssfSecret, osslSecret, info.secretBytes) == 0);
+
+        EC_KEY_free(keyA);
+        EC_KEY_free(keyB);
+
+        /* === Mixed origin: priv from SSF, peer pub from a fresh OpenSSL keypair === */
+        {
+            EC_KEY *osslPeer = EC_KEY_new_by_curve_name(info.nid);
+            const EC_GROUP *grp;
+            uint8_t osslPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+            size_t  osslPubLen;
+            EC_KEY *keyAself;
+            uint8_t ssfSecret2[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+            uint8_t osslSecret2[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+            size_t  ssfSecret2Len = 0u;
+
+            SSF_ASSERT(osslPeer != NULL);
+            SSF_ASSERT(EC_KEY_generate_key(osslPeer) == 1);
+            grp = EC_KEY_get0_group(osslPeer);
+            osslPubLen = EC_POINT_point2oct(grp, EC_KEY_get0_public_key(osslPeer),
+                                            POINT_CONVERSION_UNCOMPRESSED,
+                                            osslPub, sizeof(osslPub), NULL);
+            SSF_ASSERT(osslPubLen == info.pubBytes);
+
+            SSF_ASSERT(SSFECDHComputeSecret(curve, privA, info.privBytes,
+                                            osslPub, osslPubLen,
+                                            ssfSecret2, sizeof(ssfSecret2),
+                                            &ssfSecret2Len) == true);
+
+            keyAself = _ECDSAOSSLKeyFromPub(curve, pubA, pubALen);
+            _ECDSAOSSLSetPriv(keyAself, privA, info.privBytes);
+            n = ECDH_compute_key(osslSecret2, sizeof(osslSecret2),
+                                 EC_KEY_get0_public_key(osslPeer), keyAself, NULL);
+            SSF_ASSERT(n == (int)info.secretBytes);
+            SSF_ASSERT(memcmp(ssfSecret2, osslSecret2, info.secretBytes) == 0);
+
+            EC_KEY_free(keyAself);
+            EC_KEY_free(osslPeer);
+        }
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Corner-case verification against OpenSSL.                                                      */
+/*                                                                                                */
+/* Random fuzz can miss identity-shaped inputs (all-zero hash, all-0xFF hash) and the DER         */
+/* round-trip property. This routine drives those explicitly per curve.                           */
+/* --------------------------------------------------------------------------------------------- */
+static void _VerifyECDSACornerCasesAgainstOpenSSL(SSFECCurve_t curve)
+{
+    _ECDSAOSSLCurveInfo_t info;
+    uint8_t privKey[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+    uint8_t pubKey[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+    size_t  pubKeyLen = 0u;
+    uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
+    size_t  sigLen;
+    static const uint8_t zeroHash[SSF_ECDSA_MAX_PRIV_KEY_SIZE] = {0};
+    uint8_t ffHash[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+
+    _ECDSAOSSLCurveInfo(curve, &info);
+    memset(ffHash, 0xFFu, sizeof(ffHash));
+
+    SSF_ASSERT(SSFECDSAKeyGen(curve, privKey, sizeof(privKey),
+                              pubKey, sizeof(pubKey), &pubKeyLen) == true);
+
+    /* All-zero hash. Valid input to ECDSA (e == 0 mod n). Sign with SSF, verify with OpenSSL. */
+    SSF_ASSERT(SSFECDSASign(curve, privKey, info.privBytes,
+                            zeroHash, info.hashBytes,
+                            sig, sizeof(sig), &sigLen) == true);
+    {
+        EC_KEY *eckey = _ECDSAOSSLKeyFromPub(curve, pubKey, pubKeyLen);
+        const uint8_t *p = sig;
+        ECDSA_SIG *osslSig = d2i_ECDSA_SIG(NULL, &p, (long)sigLen);
+        SSF_ASSERT(osslSig != NULL);
+        SSF_ASSERT(ECDSA_do_verify(zeroHash, (int)info.hashBytes, osslSig, eckey) == 1);
+        ECDSA_SIG_free(osslSig);
+        EC_KEY_free(eckey);
+    }
+
+    /* All-0xFF hash. Tests reduction-mod-n on a hash bigger than the curve order. */
+    SSF_ASSERT(SSFECDSASign(curve, privKey, info.privBytes,
+                            ffHash, info.hashBytes,
+                            sig, sizeof(sig), &sigLen) == true);
+    {
+        EC_KEY *eckey = _ECDSAOSSLKeyFromPub(curve, pubKey, pubKeyLen);
+        const uint8_t *p = sig;
+        ECDSA_SIG *osslSig = d2i_ECDSA_SIG(NULL, &p, (long)sigLen);
+        SSF_ASSERT(osslSig != NULL);
+        SSF_ASSERT(ECDSA_do_verify(ffHash, (int)info.hashBytes, osslSig, eckey) == 1);
+        ECDSA_SIG_free(osslSig);
+        EC_KEY_free(eckey);
+    }
+
+    /* DER round-trip property: parse SSF's signature with OpenSSL, re-encode, expect byte-      */
+    /* identical output. Catches superfluous-leading-byte and length-encoding deviations from    */
+    /* canonical DER (which OpenSSL would re-canonicalize on the way out).                       */
+    SSF_ASSERT(SSFECDSASign(curve, privKey, info.privBytes,
+                            zeroHash, info.hashBytes,
+                            sig, sizeof(sig), &sigLen) == true);
+    {
+        const uint8_t *p = sig;
+        ECDSA_SIG *osslSig = d2i_ECDSA_SIG(NULL, &p, (long)sigLen);
+        uint8_t roundtrip[SSF_ECDSA_MAX_SIG_SIZE];
+        uint8_t *rp = roundtrip;
+        int rLen;
+        SSF_ASSERT(osslSig != NULL);
+        rLen = i2d_ECDSA_SIG(osslSig, &rp);
+        SSF_ASSERT(rLen == (int)sigLen);
+        SSF_ASSERT(memcmp(roundtrip, sig, sigLen) == 0);
+        ECDSA_SIG_free(osslSig);
+    }
+
+    /* Public-key derivation cross-check: OpenSSL derives priv * G, must match SSF's pubKey. */
+    {
+        EC_KEY *osslKey = EC_KEY_new_by_curve_name(info.nid);
+        BIGNUM *bnD = BN_bin2bn(privKey, (int)info.privBytes, NULL);
+        const EC_GROUP *grp;
+        EC_POINT *derived;
+        uint8_t derivedBytes[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        size_t  derivedLen;
+
+        SSF_ASSERT(osslKey != NULL); SSF_ASSERT(bnD != NULL);
+        SSF_ASSERT(EC_KEY_set_private_key(osslKey, bnD) == 1);
+        grp = EC_KEY_get0_group(osslKey);
+        derived = EC_POINT_new(grp);
+        SSF_ASSERT(EC_POINT_mul(grp, derived, bnD, NULL, NULL, NULL) == 1);
+        derivedLen = EC_POINT_point2oct(grp, derived, POINT_CONVERSION_UNCOMPRESSED,
+                                        derivedBytes, sizeof(derivedBytes), NULL);
+        SSF_ASSERT(derivedLen == pubKeyLen);
+        SSF_ASSERT(memcmp(derivedBytes, pubKey, pubKeyLen) == 0);
+
+        EC_POINT_free(derived);
+        BN_free(bnD);
+        EC_KEY_free(osslKey);
+    }
 }
 #endif /* SSF_ECDSA_OSSL_VERIFY */
 
@@ -1183,6 +1510,23 @@ void SSFECDSAUnitTest(void)
 #endif /* SSF_EC_CONFIG_ENABLE_P384 */
 
     printf("--- end ssfecdsa OpenSSL interop ---\n");
+
+    /* Comprehensive OpenSSL cross-validation, mirroring the ssfbn pattern: random fuzz across   */
+    /* both curves (catches DER-edge / leftmost-bits / state-corruption bugs the fixed-message   */
+    /* interop above can miss with one keypair), ECDH cross-check (no prior coverage), and       */
+    /* corner cases (zero hash, all-0xFF hash, DER round-trip, pubkey derivation).               */
+    printf("--- ssfecdsa OpenSSL random fuzz + ECDH + corner cases ---\n");
+#if SSF_EC_CONFIG_ENABLE_P256 == 1
+    _VerifyECDSARandomAgainstOpenSSL(SSF_EC_CURVE_P256, 25u);
+    _VerifyECDHAgainstOpenSSL(SSF_EC_CURVE_P256, 25u);
+    _VerifyECDSACornerCasesAgainstOpenSSL(SSF_EC_CURVE_P256);
+#endif
+#if SSF_EC_CONFIG_ENABLE_P384 == 1
+    _VerifyECDSARandomAgainstOpenSSL(SSF_EC_CURVE_P384, 15u);
+    _VerifyECDHAgainstOpenSSL(SSF_EC_CURVE_P384, 15u);
+    _VerifyECDSACornerCasesAgainstOpenSSL(SSF_EC_CURVE_P384);
+#endif
+    printf("--- end ssfecdsa OpenSSL random fuzz + ECDH + corner cases ---\n");
 #endif /* SSF_ECDSA_OSSL_VERIFY */
 
 #if SSF_EC_CONFIG_ENABLE_P256 == 1

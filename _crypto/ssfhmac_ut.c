@@ -34,7 +34,212 @@
 #include "ssfassert.h"
 #include "ssfhmac.h"
 
+/* Cross-check the SSFHMAC implementation against OpenSSL's HMAC. Enabled when the build is      */
+/* linking libcrypto (host macOS/Linux); disabled on cross builds via -DSSF_CONFIG_HAVE_OPENSSL=0 */
+/* (see ssfport.h). When disabled, the RFC 4231 / RFC 2202 KATs above are the load-bearing       */
+/* correctness coverage.                                                                          */
+#if (SSF_CONFIG_HAVE_OPENSSL == 1) && (SSF_CONFIG_HMAC_UNIT_TEST == 1)
+#define SSF_HMAC_OSSL_VERIFY 1
+#else
+#define SSF_HMAC_OSSL_VERIFY 0
+#endif
+
+#if SSF_HMAC_OSSL_VERIFY == 1
+#include <openssl/hmac.h>
+#include <openssl/evp.h>
+#include <openssl/rand.h>
+#endif
+
 #if SSF_CONFIG_HMAC_UNIT_TEST == 1
+
+#if SSF_HMAC_OSSL_VERIFY == 1
+
+/* --------------------------------------------------------------------------------------------- */
+/* OpenSSL cross-check helpers.                                                                  */
+/* --------------------------------------------------------------------------------------------- */
+
+/* Map SSF hash enum to OpenSSL's EVP_MD*. */
+static const EVP_MD *_OSSLMd(SSFHMACHash_t h)
+{
+    switch (h)
+    {
+        case SSF_HMAC_HASH_SHA1:   return EVP_sha1();
+        case SSF_HMAC_HASH_SHA256: return EVP_sha256();
+        case SSF_HMAC_HASH_SHA384: return EVP_sha384();
+        case SSF_HMAC_HASH_SHA512: return EVP_sha512();
+        default: SSF_ASSERT(0); return NULL;
+    }
+}
+
+/* Compute HMAC via OpenSSL's single-call API. The output buffer must be exactly hashSize bytes. */
+static void _OSSLHMAC(SSFHMACHash_t h, const uint8_t *key, size_t keyLen,
+                      const uint8_t *msg, size_t msgLen,
+                      uint8_t *out, size_t outLen)
+{
+    unsigned int outU = (unsigned int)outLen;
+
+    SSF_ASSERT(HMAC(_OSSLMd(h), key, (int)keyLen, msg, msgLen, out, &outU) != NULL);
+    SSF_ASSERT((size_t)outU == outLen);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Random fuzz across (hash × keyLen × msgLen). Each cell draws fresh random key/message bytes,  */
+/* computes the MAC via SSFHMAC's one-shot path AND via the incremental path with a mid-message  */
+/* split, then compares both to OpenSSL's one-call HMAC. Catches divergence in the long-key       */
+/* branch, the inner/outer pad construction, the chunked-update dispatch, and any block-boundary */
+/* state bug that survives RFC KAT coverage.                                                     */
+/* --------------------------------------------------------------------------------------------- */
+static void _VerifyHMACAgainstOpenSSLRandom(void)
+{
+    static const SSFHMACHash_t hashes[] = {
+        SSF_HMAC_HASH_SHA1, SSF_HMAC_HASH_SHA256,
+        SSF_HMAC_HASH_SHA384, SSF_HMAC_HASH_SHA512
+    };
+    /* keyLens span the three regimes (< block, == block, > block) for both block sizes        */
+    /* (64 for SHA-1/256, 128 for SHA-384/512).                                                  */
+    static const size_t keyLens[] = {1u, 16u, 32u, 63u, 64u, 65u, 100u, 127u, 128u, 131u, 200u};
+    /* msgLens span SHA's partial-block buffer transitions and a couple of multi-block cases.   */
+    static const size_t msgLens[] = {0u, 1u, 7u, 31u, 63u, 64u, 65u, 127u,
+                                     128u, 129u, 255u, 256u, 511u, 1024u};
+    uint8_t key[256];
+    uint8_t msg[1024];
+    uint8_t macSSF[64];
+    uint8_t macOSSL[64];
+    size_t hIdx, kIdx, mIdx;
+    int iter;
+
+    for (hIdx = 0; hIdx < sizeof(hashes) / sizeof(hashes[0]); hIdx++)
+    {
+        size_t hashSize = SSFHMACGetHashSize(hashes[hIdx]);
+
+        for (kIdx = 0; kIdx < sizeof(keyLens) / sizeof(keyLens[0]); kIdx++)
+        {
+            size_t kLen = keyLens[kIdx];
+
+            for (mIdx = 0; mIdx < sizeof(msgLens) / sizeof(msgLens[0]); mIdx++)
+            {
+                size_t mLen = msgLens[mIdx];
+
+                for (iter = 0; iter < 5; iter++)
+                {
+                    SSFHMACContext_t ctx = {0};
+
+                    SSF_ASSERT(RAND_bytes(key, (int)kLen) == 1);
+                    if (mLen > 0u) SSF_ASSERT(RAND_bytes(msg, (int)mLen) == 1);
+
+                    SSF_ASSERT(SSFHMAC(hashes[hIdx], key, kLen,
+                                       (mLen == 0u) ? NULL : msg, mLen,
+                                       macSSF, hashSize) == true);
+                    _OSSLHMAC(hashes[hIdx], key, kLen, msg, mLen, macOSSL, hashSize);
+                    SSF_ASSERT(memcmp(macSSF, macOSSL, hashSize) == 0);
+
+                    SSFHMACBegin(&ctx, hashes[hIdx], key, kLen);
+                    if (mLen >= 4u)
+                    {
+                        SSFHMACUpdate(&ctx, msg, mLen / 2u);
+                        SSFHMACUpdate(&ctx, &msg[mLen / 2u], mLen - (mLen / 2u));
+                    }
+                    else if (mLen > 0u)
+                    {
+                        SSFHMACUpdate(&ctx, msg, mLen);
+                    }
+                    SSFHMACEnd(&ctx, macSSF, hashSize);
+                    SSFHMACDeInit(&ctx);
+                    SSF_ASSERT(memcmp(macSSF, macOSSL, hashSize) == 0);
+                }
+            }
+        }
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Corner-case verification against OpenSSL.                                                      */
+/*                                                                                                */
+/* Random testing rarely hits identity-style values (all-zero key, all-0xFF key, all-zero        */
+/* message) or pathological streaming patterns (one byte at a time across the SHA inner-block    */
+/* boundary). This routine drives those cases explicitly per hash variant.                        */
+/* --------------------------------------------------------------------------------------------- */
+static void _VerifyHMACCornerCasesAgainstOpenSSL(void)
+{
+    static const SSFHMACHash_t hashes[] = {
+        SSF_HMAC_HASH_SHA1, SSF_HMAC_HASH_SHA256,
+        SSF_HMAC_HASH_SHA384, SSF_HMAC_HASH_SHA512
+    };
+    uint8_t macSSF[64];
+    uint8_t macOSSL[64];
+    size_t hIdx;
+
+    for (hIdx = 0; hIdx < sizeof(hashes) / sizeof(hashes[0]); hIdx++)
+    {
+        SSFHMACHash_t h = hashes[hIdx];
+        size_t hashSize = SSFHMACGetHashSize(h);
+        size_t blockSize = (h == SSF_HMAC_HASH_SHA384 || h == SSF_HMAC_HASH_SHA512) ? 128u : 64u;
+
+        /* All-zero key (32 B), nominal message. */
+        {
+            uint8_t key[32] = {0};
+            static const uint8_t msg[] = "the quick brown fox";
+            SSF_ASSERT(SSFHMAC(h, key, sizeof(key), msg, sizeof(msg) - 1u,
+                               macSSF, hashSize) == true);
+            _OSSLHMAC(h, key, sizeof(key), msg, sizeof(msg) - 1u, macOSSL, hashSize);
+            SSF_ASSERT(memcmp(macSSF, macOSSL, hashSize) == 0);
+        }
+
+        /* All-0xFF key (32 B), nominal message. */
+        {
+            uint8_t key[32];
+            static const uint8_t msg[] = "the quick brown fox";
+            memset(key, 0xFFu, sizeof(key));
+            SSF_ASSERT(SSFHMAC(h, key, sizeof(key), msg, sizeof(msg) - 1u,
+                               macSSF, hashSize) == true);
+            _OSSLHMAC(h, key, sizeof(key), msg, sizeof(msg) - 1u, macOSSL, hashSize);
+            SSF_ASSERT(memcmp(macSSF, macOSSL, hashSize) == 0);
+        }
+
+        /* All-zero message of exactly the hash's block size. */
+        {
+            static const uint8_t key[16] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
+            uint8_t msg[128] = {0};
+            SSF_ASSERT(SSFHMAC(h, key, sizeof(key), msg, blockSize,
+                               macSSF, hashSize) == true);
+            _OSSLHMAC(h, key, sizeof(key), msg, blockSize, macOSSL, hashSize);
+            SSF_ASSERT(memcmp(macSSF, macOSSL, hashSize) == 0);
+        }
+
+        /* Key length exactly == block size — bypasses the long-key hash-the-key path. */
+        {
+            uint8_t key[128];
+            static const uint8_t msg[] = "boundary";
+            size_t i;
+            for (i = 0; i < blockSize; i++) key[i] = (uint8_t)(i ^ 0x77u);
+            SSF_ASSERT(SSFHMAC(h, key, blockSize, msg, sizeof(msg) - 1u,
+                               macSSF, hashSize) == true);
+            _OSSLHMAC(h, key, blockSize, msg, sizeof(msg) - 1u, macOSSL, hashSize);
+            SSF_ASSERT(memcmp(macSSF, macOSSL, hashSize) == 0);
+        }
+
+        /* Incremental Update with one-byte chunks across multiple SHA blocks. Stresses the     */
+        /* partial-block buffer in the underlying hash and the per-call dispatch path.          */
+        {
+            uint8_t key[24];
+            uint8_t msg[300];
+            SSFHMACContext_t ctx = {0};
+            size_t i;
+            for (i = 0; i < sizeof(key); i++) key[i] = (uint8_t)(i + 0x88u);
+            for (i = 0; i < sizeof(msg); i++) msg[i] = (uint8_t)((i * 7u) ^ 0xA5u);
+
+            SSFHMACBegin(&ctx, h, key, sizeof(key));
+            for (i = 0; i < sizeof(msg); i++) SSFHMACUpdate(&ctx, &msg[i], 1u);
+            SSFHMACEnd(&ctx, macSSF, hashSize);
+            SSFHMACDeInit(&ctx);
+
+            _OSSLHMAC(h, key, sizeof(key), msg, sizeof(msg), macOSSL, hashSize);
+            SSF_ASSERT(memcmp(macSSF, macOSSL, hashSize) == 0);
+        }
+    }
+}
+
+#endif /* SSF_HMAC_OSSL_VERIFY */
 
 void SSFHMACUnitTest(void)
 {
@@ -795,5 +1000,14 @@ void SSFHMACUnitTest(void)
         SSF_ASSERT_TEST(SSFHMAC(SSF_HMAC_HASH_SHA256, key, 0u,
                                 (const uint8_t *)"abc", 3, mac, 32u));
     }
+
+#if SSF_HMAC_OSSL_VERIFY == 1
+    /* Comprehensive cross-validation against OpenSSL. Random fuzz across the full              */
+    /* (hash × keyLen × msgLen) matrix, plus explicit corner cases. Skipped on cross builds     */
+    /* (-DSSF_CONFIG_HAVE_OPENSSL=0) — RFC 4231 / RFC 2202 KATs above remain the load-bearing   */
+    /* coverage there.                                                                           */
+    _VerifyHMACAgainstOpenSSLRandom();
+    _VerifyHMACCornerCasesAgainstOpenSSL();
+#endif
 }
 #endif /* SSF_CONFIG_HMAC_UNIT_TEST */

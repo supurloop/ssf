@@ -327,6 +327,86 @@ static bool _SSFECDSASigEncode(const SSFBN_t *r, const SSFBN_t *s,
 /* --------------------------------------------------------------------------------------------- */
 /* Internal: DER-decode an ECDSA signature from SEQUENCE { INTEGER, INTEGER } to (r, s).         */
 /* --------------------------------------------------------------------------------------------- */
+/* Strict DER validation for an ECDSA signature SEQUENCE { INTEGER r, INTEGER s }.            */
+/* The generic SSFASN1 decoder is BER-tolerant (accepts long-form length encodings, leading-  */
+/* zero length octets, and lenient INTEGER content). For ECDSA we must reject these forms     */
+/* per Wycheproof / RFC 5480 strict DER requirements — accepting them creates signature       */
+/* malleability (CVE-2020-14966, CVE-2020-13822, CVE-2019-14859, CVE-2016-1000342 class).     */
+/*                                                                                             */
+/* Validates:                                                                                  */
+/*  - Outer SEQUENCE tag (0x30) and canonical-form length                                     */
+/*  - Total byte count exactly matches header + SEQUENCE content                              */
+/*  - Two INTEGERs back-to-back, each with short-form length                                  */
+/*  - INTEGER length in [1, coordBytes+1] (length 1 holds 0x00..0x7F; length coordBytes+1     */
+/*    holds the canonical 0x00 sign-pad followed by an MSB-set byte)                          */
+/*  - INTEGER content is canonical positive: no extra leading 0x00, and MSB of first byte     */
+/*    must be 0 (a value with MSB set requires the canonical 0x00 prefix; any encoding where  */
+/*    the first content byte is >= 0x80 is rejected since ECDSA r,s are always positive)      */
+/*  - No trailing data after the second INTEGER                                                */
+static bool _SSFECDSAValidateStrictDER(const uint8_t *sig, size_t sigLen, uint16_t coordBytes)
+{
+    size_t pos = 0u;
+    size_t seqLen;
+    size_t intLen;
+    uint16_t i;
+
+    /* Smallest valid sig: 30 06 02 01 rr 02 01 ss = 8 bytes (1-byte r and s). Use 8 as floor. */
+    if (sigLen < 8u) return false;
+
+    /* Outer SEQUENCE tag. */
+    if (sig[pos++] != 0x30u) return false;
+
+    /* SEQUENCE length: short form (< 128) OR canonical long form 0x81 XX (XX >= 128). Reject */
+    /* 0x82+ since ECDSA P-256/P-384 sigs have content < 256 bytes (max ~104 for P-384).      */
+    if (sig[pos] < 0x80u)
+    {
+        seqLen = sig[pos++];
+    }
+    else if (sig[pos] == 0x81u)
+    {
+        pos++;
+        if (pos >= sigLen) return false;
+        seqLen = sig[pos++];
+        if (seqLen < 0x80u) return false;  /* must use short form when < 128 */
+    }
+    else
+    {
+        return false;
+    }
+
+    /* Total bytes must match exactly: header (pos) + content (seqLen). */
+    if (sigLen != pos + seqLen) return false;
+
+    /* Two INTEGERs: r then s. Same canonical-form requirements. */
+    for (i = 0u; i < 2u; i++)
+    {
+        if (pos >= sigLen) return false;
+        if (sig[pos++] != 0x02u) return false;             /* INTEGER tag */
+        if (pos >= sigLen) return false;
+        if (sig[pos] >= 0x80u) return false;               /* INTEGER length must be short form */
+        intLen = sig[pos++];
+        if (intLen == 0u) return false;
+        if (pos + intLen > sigLen) return false;
+        if (intLen > (size_t)coordBytes + 1u) return false; /* exceeds maximum for the curve */
+
+        if (intLen > 1u)
+        {
+            /* Reject extra leading zero: 0x00 prefix only valid when the next byte's MSB is set. */
+            if (sig[pos] == 0x00u && sig[pos + 1u] < 0x80u) return false;
+        }
+        /* MSB of first content byte must be 0 (positive). A value with MSB set must use the   */
+        /* canonical 0x00 sign-pad — caught by the != 0x00 case above failing the above check. */
+        if (sig[pos] >= 0x80u) return false;
+
+        pos += intLen;
+    }
+
+    /* No trailing data after second INTEGER. */
+    if (pos != sigLen) return false;
+
+    return true;
+}
+
 static bool _SSFECDSASigDecode(const uint8_t *sig, size_t sigLen,
                                const SSFECCurveParams_t *c,
                                SSFBN_t *r, SSFBN_t *s)
@@ -334,6 +414,9 @@ static bool _SSFECDSASigDecode(const uint8_t *sig, size_t sigLen,
     SSFASN1Cursor_t cursor, inner, next, next2;
     const uint8_t *rBuf, *sBuf;
     uint32_t rLen, sLen;
+
+    /* Reject non-canonical DER (BER-tolerant forms, malformed encodings) before any parsing. */
+    if (!_SSFECDSAValidateStrictDER(sig, sigLen, c->bytes)) return false;
 
     cursor.buf = sig;
     cursor.bufLen = (uint32_t)sigLen;

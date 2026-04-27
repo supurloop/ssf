@@ -612,5 +612,53 @@ void SSFECDSAUnitTest(void)
 
     printf("--- end ssfecdsa OpenSSL interop ---\n");
 #endif /* SSF_ECDSA_OSSL_VERIFY */
+
+#if SSF_EC_CONFIG_ENABLE_P256 == 1
+    /* ====================================================================================== */
+    /* === Wycheproof ECDSA P-256/SHA-256 verify vectors (Google adversarial test suite) ====  */
+    /* ====================================================================================== */
+    /* 482 vectors covering edge cases that random KAT can't reach: malformed DER, integer    */
+    /* overflow patterns, edge-case public keys, Shamir multiplication corner cases, BER vs   */
+    /* DER encodings, invalid r/s ranges, etc. Counts mismatches without aborting on the      */
+    /* first failure so we can survey the entire vector set in one run.                        */
+    {
+        #include "wycheproof_ecdsa_p256.h"
+        uint8_t hash[32];
+        uint16_t i;
+        uint16_t pass = 0, mismatches = 0;
+
+        printf("--- Wycheproof ECDSA P-256 verify (%u tests) ---\n",
+               (unsigned)SSF_WYCHEPROOF_ECDSA_P256_NTESTS);
+        for (i = 0; i < (uint16_t)SSF_WYCHEPROOF_ECDSA_P256_NTESTS; i++)
+        {
+            const _SSFWycheproofEcdsaP256Test_t *t = &_wp_P256_tests[i];
+            bool got;
+
+            SSFSHA256(t->msg, (uint32_t)t->msgLen, hash, sizeof(hash));
+            got = SSFECDSAVerify(SSF_EC_CURVE_P256,
+                                 t->pubKey, t->pubKeyLen,
+                                 hash, sizeof(hash),
+                                 t->sig, t->sigLen);
+
+            if (got == t->expectedValid)
+            {
+                pass++;
+            }
+            else
+            {
+                mismatches++;
+                printf("  tcId %4u: expected %s, got %s (sig %u bytes)\n",
+                       (unsigned)t->tcId,
+                       t->expectedValid ? "valid  " : "invalid",
+                       got               ? "valid  " : "invalid",
+                       (unsigned)t->sigLen);
+            }
+        }
+        printf("--- Wycheproof ECDSA P-256: %u/%u pass, %u mismatches ---\n",
+               (unsigned)pass, (unsigned)SSF_WYCHEPROOF_ECDSA_P256_NTESTS,
+               (unsigned)mismatches);
+        SSF_ASSERT(mismatches == 0u);
+    }
+#endif /* SSF_EC_CONFIG_ENABLE_P256 */
 }
 #endif /* SSF_CONFIG_ECDSA_UNIT_TEST */

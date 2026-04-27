@@ -550,6 +550,132 @@ void SSFECUnitTest(void)
         SSF_ASSERT(SSFECPointDecode(&pt, SSF_EC_CURVE_P256, bad, 64) == false);
     }
 
+    /* ---- P-256: SEC1 format-specific rejection (compressed/hybrid/infinity) ---- */
+    /* SSF only supports the uncompressed format (0x04). Per SEC1 v2 §2.3.3:                       */
+    /*   0x00 = point at infinity (length 1)                                                       */
+    /*   0x02 = compressed, even Y    | length 1 + coord_bytes                                    */
+    /*   0x03 = compressed, odd  Y    | length 1 + coord_bytes                                    */
+    /*   0x04 = uncompressed          | length 1 + 2*coord_bytes — the only one we support        */
+    /*   0x06 = hybrid, even Y        | length 1 + 2*coord_bytes                                  */
+    /*   0x07 = hybrid, odd Y         | length 1 + 2*coord_bytes                                  */
+    /* All non-0x04 forms must be rejected. Catches a real interop hazard: a peer sending a       */
+    /* compressed pubkey would crash or be silently accepted by a lenient decoder.                */
+    {
+        const SSFECCurveParams_t *c = SSFECGetCurveParams(SSF_EC_CURVE_P256);
+        SSFECPOINT_DEFINE(G, SSF_EC_MAX_LIMBS);
+        SSFECPOINT_DEFINE(decoded, SSF_EC_MAX_LIMBS);
+        uint8_t enc[65];
+        size_t encLen;
+
+        /* Get a valid uncompressed encoding of G to lift X / X||Y from. */
+        SSFECPointFromAffine(&G, &c->gx, &c->gy, SSF_EC_CURVE_P256);
+        SSF_ASSERT(SSFECPointEncode(&G, SSF_EC_CURVE_P256, enc, sizeof(enc), &encLen) == true);
+        SSF_ASSERT(encLen == 65u);
+
+        /* (1) Compressed even (0x02 || X, length 33). */
+        {
+            uint8_t comp[33];
+            comp[0] = 0x02u;
+            memcpy(&comp[1], &enc[1], c->bytes);
+            SSF_ASSERT(SSFECPointDecode(&decoded, SSF_EC_CURVE_P256, comp, sizeof(comp)) == false);
+        }
+
+        /* (2) Compressed odd (0x03 || X, length 33). */
+        {
+            uint8_t comp[33];
+            comp[0] = 0x03u;
+            memcpy(&comp[1], &enc[1], c->bytes);
+            SSF_ASSERT(SSFECPointDecode(&decoded, SSF_EC_CURVE_P256, comp, sizeof(comp)) == false);
+        }
+
+        /* (3) Hybrid even (0x06 || X || Y, length 65). Even though X||Y is valid, format reject. */
+        {
+            uint8_t hyb[65];
+            memcpy(hyb, enc, sizeof(hyb));
+            hyb[0] = 0x06u;
+            SSF_ASSERT(SSFECPointDecode(&decoded, SSF_EC_CURVE_P256, hyb, sizeof(hyb)) == false);
+        }
+
+        /* (4) Hybrid odd (0x07 || X || Y, length 65). */
+        {
+            uint8_t hyb[65];
+            memcpy(hyb, enc, sizeof(hyb));
+            hyb[0] = 0x07u;
+            SSF_ASSERT(SSFECPointDecode(&decoded, SSF_EC_CURVE_P256, hyb, sizeof(hyb)) == false);
+        }
+
+        /* (5) Point at infinity (0x00, length 1). SSF should reject the encoding entirely. */
+        {
+            uint8_t infBuf[1] = { 0x00u };
+            SSF_ASSERT(SSFECPointDecode(&decoded, SSF_EC_CURVE_P256, infBuf, 1u) == false);
+        }
+
+        /* (6) Spec-conforming compressed-format BUFFER LENGTH but with 0x04 prefix.              */
+        /* Length 33 with any prefix (including 0x04) is invalid for uncompressed and unsupported */
+        /* for compressed — must be rejected.                                                      */
+        {
+            uint8_t comp[33];
+            comp[0] = 0x04u;
+            memcpy(&comp[1], &enc[1], c->bytes);
+            SSF_ASSERT(SSFECPointDecode(&decoded, SSF_EC_CURVE_P256, comp, sizeof(comp)) == false);
+        }
+
+        /* (7) Other arbitrary nonsense prefixes (0x01, 0x08, 0xFF) — all rejected at any size. */
+        {
+            uint8_t nonsense[65];
+            const uint8_t bad_prefixes[] = { 0x01u, 0x08u, 0xFFu };
+            size_t pi;
+            memcpy(nonsense, enc, sizeof(nonsense));
+            for (pi = 0; pi < sizeof(bad_prefixes) / sizeof(bad_prefixes[0]); pi++)
+            {
+                nonsense[0] = bad_prefixes[pi];
+                SSF_ASSERT(SSFECPointDecode(&decoded, SSF_EC_CURVE_P256,
+                                            nonsense, sizeof(nonsense)) == false);
+            }
+        }
+    }
+
+#if SSF_EC_CONFIG_ENABLE_P384 == 1
+    /* ---- P-384: SEC1 format-specific rejection (mirror of P-256) ---- */
+    {
+        const SSFECCurveParams_t *c = SSFECGetCurveParams(SSF_EC_CURVE_P384);
+        SSFECPOINT_DEFINE(G, SSF_EC_MAX_LIMBS);
+        SSFECPOINT_DEFINE(decoded, SSF_EC_MAX_LIMBS);
+        uint8_t enc[97];  /* 1 + 2*48 */
+        size_t encLen;
+
+        SSFECPointFromAffine(&G, &c->gx, &c->gy, SSF_EC_CURVE_P384);
+        SSF_ASSERT(SSFECPointEncode(&G, SSF_EC_CURVE_P384, enc, sizeof(enc), &encLen) == true);
+        SSF_ASSERT(encLen == 97u);
+
+        /* Compressed even/odd (length 49). */
+        {
+            uint8_t comp[49];
+            memcpy(&comp[1], &enc[1], c->bytes);
+            comp[0] = 0x02u;
+            SSF_ASSERT(SSFECPointDecode(&decoded, SSF_EC_CURVE_P384, comp, sizeof(comp)) == false);
+            comp[0] = 0x03u;
+            SSF_ASSERT(SSFECPointDecode(&decoded, SSF_EC_CURVE_P384, comp, sizeof(comp)) == false);
+        }
+
+        /* Hybrid even/odd (length 97). */
+        {
+            uint8_t hyb[97];
+            memcpy(hyb, enc, sizeof(hyb));
+            hyb[0] = 0x06u;
+            SSF_ASSERT(SSFECPointDecode(&decoded, SSF_EC_CURVE_P384, hyb, sizeof(hyb)) == false);
+            hyb[0] = 0x07u;
+            SSF_ASSERT(SSFECPointDecode(&decoded, SSF_EC_CURVE_P384, hyb, sizeof(hyb)) == false);
+        }
+
+        /* Infinity. */
+        {
+            uint8_t infBuf[1] = { 0x00u };
+            SSF_ASSERT(SSFECPointDecode(&decoded, SSF_EC_CURVE_P384, infBuf, 1u) == false);
+        }
+    }
+#endif /* SSF_EC_CONFIG_ENABLE_P384 */
+
     /* ---- P-256: 1 * G = G ---- */
     {
         const SSFECCurveParams_t *c = SSFECGetCurveParams(SSF_EC_CURVE_P256);
@@ -930,6 +1056,213 @@ void SSFECUnitTest(void)
         SSFBNCopy(&badPt.y, &c->gy);
         SSFBNSetOne(&badPt.z, c->limbs);
         SSF_ASSERT(SSFECPointValidate(&badPt, SSF_EC_CURVE_P384) == true);
+    }
+#endif /* SSF_EC_CONFIG_ENABLE_P384 */
+
+    /* ====================================================================================== */
+    /* === Algebraic identity stress tests ====================================================*/
+    /* ====================================================================================== */
+    /* These are intrinsic group properties that must hold for any valid EC implementation:    */
+    /*   commutativity:    P + Q == Q + P                                                       */
+    /*   associativity:    (P + Q) + R == P + (Q + R)                                           */
+    /*   scalar additivity: [k1]P + [k2]P == [k1+k2]P                                          */
+    /*   distributivity:   [k]P + [k]Q == [k](P + Q)                                            */
+    /* High iter counts catch subtle accumulator/aliasing bugs that the existing 10-iter tests */
+    /* might miss. All checks are self-consistency — no external reference needed.              */
+
+#if SSF_EC_CONFIG_ENABLE_P256 == 1
+    {
+        const SSFECCurveParams_t *c = SSFECGetCurveParams(SSF_EC_CURVE_P256);
+        SSFECPOINT_DEFINE(G,  SSF_EC_MAX_LIMBS);
+        SSFECPOINT_DEFINE(P,  SSF_EC_MAX_LIMBS);
+        SSFECPOINT_DEFINE(Q,  SSF_EC_MAX_LIMBS);
+        SSFECPOINT_DEFINE(R,  SSF_EC_MAX_LIMBS);
+        SSFECPOINT_DEFINE(L,  SSF_EC_MAX_LIMBS);
+        SSFECPOINT_DEFINE(M,  SSF_EC_MAX_LIMBS);
+        SSFBN_DEFINE(k1, SSF_EC_MAX_LIMBS);
+        SSFBN_DEFINE(k2, SSF_EC_MAX_LIMBS);
+        SSFBN_DEFINE(kSum, SSF_EC_MAX_LIMBS);
+        SSFBN_DEFINE(lx, SSF_EC_MAX_LIMBS);
+        SSFBN_DEFINE(ly, SSF_EC_MAX_LIMBS);
+        SSFBN_DEFINE(mx, SSF_EC_MAX_LIMBS);
+        SSFBN_DEFINE(my, SSF_EC_MAX_LIMBS);
+        SSFPRNGContext_t prng;
+        uint8_t seed[SSF_PRNG_ENTROPY_SIZE];
+        uint16_t i;
+
+        for (i = 0; i < sizeof(seed); i++) seed[i] = (uint8_t)(0x77u ^ i);
+        SSFPRNGInitContext(&prng, seed, sizeof(seed));
+        SSFECPointFromAffine(&G, &c->gx, &c->gy, SSF_EC_CURVE_P256);
+
+        /* Commutativity: P + Q == Q + P (100 random pairs). */
+        for (i = 0; i < 100u; i++)
+        {
+            SSFBNRandomBelow(&k1, &c->n, &prng);
+            SSFBNRandomBelow(&k2, &c->n, &prng);
+            SSFECScalarMul(&P, &k1, &G, SSF_EC_CURVE_P256);
+            SSFECScalarMul(&Q, &k2, &G, SSF_EC_CURVE_P256);
+
+            SSFECPointAdd(&L, &P, &Q, SSF_EC_CURVE_P256);
+            SSFECPointAdd(&M, &Q, &P, SSF_EC_CURVE_P256);
+            SSF_ASSERT(SSFECPointToAffine(&lx, &ly, &L, SSF_EC_CURVE_P256) == true);
+            SSF_ASSERT(SSFECPointToAffine(&mx, &my, &M, SSF_EC_CURVE_P256) == true);
+            SSF_ASSERT(SSFBNCmp(&lx, &mx) == 0);
+            SSF_ASSERT(SSFBNCmp(&ly, &my) == 0);
+        }
+
+        /* Associativity: (P + Q) + R == P + (Q + R) (50 random triples). */
+        for (i = 0; i < 50u; i++)
+        {
+            SSFBNRandomBelow(&k1, &c->n, &prng);
+            SSFBNRandomBelow(&k2, &c->n, &prng);
+            SSFECScalarMul(&P, &k1, &G, SSF_EC_CURVE_P256);
+            SSFECScalarMul(&Q, &k2, &G, SSF_EC_CURVE_P256);
+            SSFBNRandomBelow(&k1, &c->n, &prng);
+            SSFECScalarMul(&R, &k1, &G, SSF_EC_CURVE_P256);
+
+            /* (P + Q) + R */
+            SSFECPointAdd(&L, &P, &Q, SSF_EC_CURVE_P256);
+            SSFECPointAdd(&L, &L, &R, SSF_EC_CURVE_P256);
+            /* P + (Q + R) */
+            SSFECPointAdd(&M, &Q, &R, SSF_EC_CURVE_P256);
+            SSFECPointAdd(&M, &P, &M, SSF_EC_CURVE_P256);
+
+            SSF_ASSERT(SSFECPointToAffine(&lx, &ly, &L, SSF_EC_CURVE_P256) == true);
+            SSF_ASSERT(SSFECPointToAffine(&mx, &my, &M, SSF_EC_CURVE_P256) == true);
+            SSF_ASSERT(SSFBNCmp(&lx, &mx) == 0);
+            SSF_ASSERT(SSFBNCmp(&ly, &my) == 0);
+        }
+
+        /* Scalar additivity: [k1]G + [k2]G == [k1+k2 mod n]G (50 iters). */
+        for (i = 0; i < 50u; i++)
+        {
+            SSFBNRandomBelow(&k1, &c->n, &prng);
+            SSFBNRandomBelow(&k2, &c->n, &prng);
+            SSFBNModAdd(&kSum, &k1, &k2, &c->n);  /* CT-correct (k1 + k2) mod n */
+
+            SSFECScalarMul(&P, &k1, &G, SSF_EC_CURVE_P256);
+            SSFECScalarMul(&Q, &k2, &G, SSF_EC_CURVE_P256);
+            SSFECPointAdd(&L, &P, &Q, SSF_EC_CURVE_P256);
+            SSFECScalarMul(&M, &kSum, &G, SSF_EC_CURVE_P256);
+
+            /* If [k1+k2]G is identity (kSum happened to be 0), so should L. */
+            if (SSFECPointIsIdentity(&M))
+            {
+                SSF_ASSERT(SSFECPointIsIdentity(&L) == true);
+            }
+            else
+            {
+                SSF_ASSERT(SSFECPointToAffine(&lx, &ly, &L, SSF_EC_CURVE_P256) == true);
+                SSF_ASSERT(SSFECPointToAffine(&mx, &my, &M, SSF_EC_CURVE_P256) == true);
+                SSF_ASSERT(SSFBNCmp(&lx, &mx) == 0);
+                SSF_ASSERT(SSFBNCmp(&ly, &my) == 0);
+            }
+        }
+
+        /* Distributivity: [k](P + Q) == [k]P + [k]Q (30 iters; uses 2 base points). */
+        for (i = 0; i < 30u; i++)
+        {
+            SSFECPOINT_DEFINE(Pin, SSF_EC_MAX_LIMBS);
+            SSFECPOINT_DEFINE(Qin, SSF_EC_MAX_LIMBS);
+            SSFECPOINT_DEFINE(Sum, SSF_EC_MAX_LIMBS);
+            SSFBN_DEFINE(kx, SSF_EC_MAX_LIMBS);
+
+            SSFBNRandomBelow(&kx, &c->n, &prng);
+            SSFECScalarMul(&Pin, &kx, &G, SSF_EC_CURVE_P256);
+            SSFBNRandomBelow(&kx, &c->n, &prng);
+            SSFECScalarMul(&Qin, &kx, &G, SSF_EC_CURVE_P256);
+            SSFBNRandomBelow(&kx, &c->n, &prng);  /* the multiplier k */
+
+            /* L = [k]P + [k]Q */
+            SSFECScalarMul(&P, &kx, &Pin, SSF_EC_CURVE_P256);
+            SSFECScalarMul(&Q, &kx, &Qin, SSF_EC_CURVE_P256);
+            SSFECPointAdd(&L, &P, &Q, SSF_EC_CURVE_P256);
+            /* M = [k](P + Q) */
+            SSFECPointAdd(&Sum, &Pin, &Qin, SSF_EC_CURVE_P256);
+            SSFECScalarMul(&M, &kx, &Sum, SSF_EC_CURVE_P256);
+
+            if (SSFECPointIsIdentity(&L))
+            {
+                SSF_ASSERT(SSFECPointIsIdentity(&M) == true);
+            }
+            else
+            {
+                SSF_ASSERT(SSFECPointToAffine(&lx, &ly, &L, SSF_EC_CURVE_P256) == true);
+                SSF_ASSERT(SSFECPointToAffine(&mx, &my, &M, SSF_EC_CURVE_P256) == true);
+                SSF_ASSERT(SSFBNCmp(&lx, &mx) == 0);
+                SSF_ASSERT(SSFBNCmp(&ly, &my) == 0);
+            }
+        }
+
+        SSFPRNGDeInitContext(&prng);
+    }
+#endif /* SSF_EC_CONFIG_ENABLE_P256 */
+
+#if SSF_EC_CONFIG_ENABLE_P384 == 1
+    /* Same identities for P-384 with reduced iter counts. */
+    {
+        const SSFECCurveParams_t *c = SSFECGetCurveParams(SSF_EC_CURVE_P384);
+        SSFECPOINT_DEFINE(G,  SSF_EC_MAX_LIMBS);
+        SSFECPOINT_DEFINE(P,  SSF_EC_MAX_LIMBS);
+        SSFECPOINT_DEFINE(Q,  SSF_EC_MAX_LIMBS);
+        SSFECPOINT_DEFINE(L,  SSF_EC_MAX_LIMBS);
+        SSFECPOINT_DEFINE(M,  SSF_EC_MAX_LIMBS);
+        SSFBN_DEFINE(k1, SSF_EC_MAX_LIMBS);
+        SSFBN_DEFINE(k2, SSF_EC_MAX_LIMBS);
+        SSFBN_DEFINE(kSum, SSF_EC_MAX_LIMBS);
+        SSFBN_DEFINE(lx, SSF_EC_MAX_LIMBS);
+        SSFBN_DEFINE(ly, SSF_EC_MAX_LIMBS);
+        SSFBN_DEFINE(mx, SSF_EC_MAX_LIMBS);
+        SSFBN_DEFINE(my, SSF_EC_MAX_LIMBS);
+        SSFPRNGContext_t prng;
+        uint8_t seed[SSF_PRNG_ENTROPY_SIZE];
+        uint16_t i;
+
+        for (i = 0; i < sizeof(seed); i++) seed[i] = (uint8_t)(0x99u ^ i);
+        SSFPRNGInitContext(&prng, seed, sizeof(seed));
+        SSFECPointFromAffine(&G, &c->gx, &c->gy, SSF_EC_CURVE_P384);
+
+        /* Commutativity: 50 iters. */
+        for (i = 0; i < 50u; i++)
+        {
+            SSFBNRandomBelow(&k1, &c->n, &prng);
+            SSFBNRandomBelow(&k2, &c->n, &prng);
+            SSFECScalarMul(&P, &k1, &G, SSF_EC_CURVE_P384);
+            SSFECScalarMul(&Q, &k2, &G, SSF_EC_CURVE_P384);
+            SSFECPointAdd(&L, &P, &Q, SSF_EC_CURVE_P384);
+            SSFECPointAdd(&M, &Q, &P, SSF_EC_CURVE_P384);
+            SSF_ASSERT(SSFECPointToAffine(&lx, &ly, &L, SSF_EC_CURVE_P384) == true);
+            SSF_ASSERT(SSFECPointToAffine(&mx, &my, &M, SSF_EC_CURVE_P384) == true);
+            SSF_ASSERT(SSFBNCmp(&lx, &mx) == 0);
+            SSF_ASSERT(SSFBNCmp(&ly, &my) == 0);
+        }
+
+        /* Scalar additivity: 25 iters (associativity skipped — covered amply by P-256). */
+        for (i = 0; i < 25u; i++)
+        {
+            SSFBNRandomBelow(&k1, &c->n, &prng);
+            SSFBNRandomBelow(&k2, &c->n, &prng);
+            SSFBNModAdd(&kSum, &k1, &k2, &c->n);  /* CT-correct (k1 + k2) mod n */
+
+            SSFECScalarMul(&P, &k1, &G, SSF_EC_CURVE_P384);
+            SSFECScalarMul(&Q, &k2, &G, SSF_EC_CURVE_P384);
+            SSFECPointAdd(&L, &P, &Q, SSF_EC_CURVE_P384);
+            SSFECScalarMul(&M, &kSum, &G, SSF_EC_CURVE_P384);
+
+            if (SSFECPointIsIdentity(&M))
+            {
+                SSF_ASSERT(SSFECPointIsIdentity(&L) == true);
+            }
+            else
+            {
+                SSF_ASSERT(SSFECPointToAffine(&lx, &ly, &L, SSF_EC_CURVE_P384) == true);
+                SSF_ASSERT(SSFECPointToAffine(&mx, &my, &M, SSF_EC_CURVE_P384) == true);
+                SSF_ASSERT(SSFBNCmp(&lx, &mx) == 0);
+                SSF_ASSERT(SSFBNCmp(&ly, &my) == 0);
+            }
+        }
+
+        SSFPRNGDeInitContext(&prng);
     }
 #endif /* SSF_EC_CONFIG_ENABLE_P384 */
 

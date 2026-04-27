@@ -28,6 +28,8 @@ RUN apt-get update \
         gcc-arm-linux-gnueabihf     binutils-arm-linux-gnueabihf     libc6-dev-armhf-cross \
         gcc-aarch64-linux-gnu       binutils-aarch64-linux-gnu       libc6-dev-arm64-cross \
         gcc-riscv64-linux-gnu       binutils-riscv64-linux-gnu       libc6-dev-riscv64-cross \
+        gcc-i686-linux-gnu          binutils-i686-linux-gnu          libc6-dev-i386-cross \
+        gcc-m68k-linux-gnu          binutils-m68k-linux-gnu          libc6-dev-m68k-cross \
         qemu-user-static \
  && rm -rf /var/lib/apt/lists/*
 

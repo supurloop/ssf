@@ -95,6 +95,8 @@ Then `docker build -t ssf-cross:latest tools/cross-test/docker` and
 | `armhf`    | `arm-linux-gnueabihf`        | 32   | LE     | hard-float EABI |
 | `aarch64`  | `aarch64-linux-gnu`          | 64   | LE     | |
 | `riscv64`  | `riscv64-linux-gnu`          | 64   | LE     | Debian doesn't ship riscv32 |
+| `i686`     | `i686-linux-gnu`             | 32   | LE     | x86-32; qemu binary is `qemu-i386-static` |
+| `m68k`     | `m68k-linux-gnu`             | 32   | BE     | Motorola 68k; BE-only, no 64-bit variant |
 
 The `--docker all` mode iterates every descriptor in `targets/`. Coverage
 spans every (32/64) × (BE/LE) cell that Debian stable's cross toolchains

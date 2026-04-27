@@ -40,6 +40,7 @@
 #include "ssfsha2.h"
 #include "ssfasn1.h"
 #include "ssfprng.h"
+#include "ssfcrypt.h"
 
 #if SSF_CONFIG_ECDSA_UNIT_TEST == 1
 /* Test-only exit hooks. Production builds compile these out entirely. Each hook fires at the    */
@@ -240,10 +241,10 @@ static bool _SSFECDSAGenK(SSFECCurve_t curve,
         if (!SSFBNIsZero(k) && (SSFBNCmp(k, &c->n) < 0))
         {
             SSFHMACDeInit(&ctx);
-            SSFSecureZero(V, sizeof(V));
-            SSFSecureZero(K, sizeof(K));
-            SSFSecureZero(h1Octets, sizeof(h1Octets));
-            SSFSecureZero(T, sizeof(T));
+            SSFCryptSecureZero(V, sizeof(V));
+            SSFCryptSecureZero(K, sizeof(K));
+            SSFCryptSecureZero(h1Octets, sizeof(h1Octets));
+            SSFCryptSecureZero(T, sizeof(T));
             return true;
         }
 
@@ -258,10 +259,10 @@ static bool _SSFECDSAGenK(SSFECCurve_t curve,
     }
 
     SSFHMACDeInit(&ctx);
-    SSFSecureZero(V, sizeof(V));
-    SSFSecureZero(K, sizeof(K));
-    SSFSecureZero(h1Octets, sizeof(h1Octets));
-    SSFSecureZero(T, sizeof(T));
+    SSFCryptSecureZero(V, sizeof(V));
+    SSFCryptSecureZero(K, sizeof(K));
+    SSFCryptSecureZero(h1Octets, sizeof(h1Octets));
+    SSFCryptSecureZero(T, sizeof(T));
     /* The loop populated *k with rejected candidates; wipe before returning false so a caller   */
     /* that misses the cleanup path doesn't observe HMAC-DRBG output. (SSFECDSASign's unified    */
     /* cleanup also zeroes k, so this is defense in depth.)                                       */
@@ -588,7 +589,7 @@ cleanup:
     /* SSFPRNGDeInitContext also zeroes the PRNG state derived from those bytes.                 */
     SSFBNZeroize(&d);
     if (prngInited) SSFPRNGDeInitContext(&prng);
-    SSFSecureZero(entropy, sizeof(entropy));
+    SSFCryptSecureZero(entropy, sizeof(entropy));
 #if SSF_CONFIG_ECDSA_UNIT_TEST == 1
     if (_SSFECDSAKeyGenTestExitHook != NULL)
     {

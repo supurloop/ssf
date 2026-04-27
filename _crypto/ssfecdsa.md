@@ -38,7 +38,7 @@ Two design choices worth calling out up front:
 - [`ssfhmac`](ssfhmac.md) — HMAC-SHA-based RFC 6979 deterministic nonce derivation
 - [`ssfprng`](ssfprng.md) — only used by [`SSFECDSAKeyGen()`](#ssfecdsakeygen); signing
   itself does not need randomness
-- [`ssfct`](ssfct.md) — constant-time comparisons in the signature path
+- [`ssfcrypt`](ssfcrypt.md) — constant-time comparisons in the signature path
 
 <a id="notes"></a>
 
@@ -99,7 +99,7 @@ Two design choices worth calling out up front:
 - **Signing is constant-time; verification is not.** Sign uses the constant-time
   [`SSFECScalarMul`](ssfec.md#ssfecscalarmul) path and constant-time modular inverse
   ([`SSFBNModInv`](ssfbn.md#modinv), which is Fermat-based over the prime curve order `n`)
-  and constant-time MAC compare via [`ssfct`](ssfct.md). Verify uses the variable-time
+  and constant-time MAC compare via [`ssfcrypt`](ssfcrypt.md). Verify uses the variable-time
   [`SSFECScalarMulDual`](ssfec.md#ssfecscalarmuldual) — fine because everything fed into
   verify is public.
 - **Zero `r` or `s` in a signature is rejected.** Per FIPS 186-4 §6.4.2 the verifier

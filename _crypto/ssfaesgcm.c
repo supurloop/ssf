@@ -84,7 +84,7 @@
 #include "ssfassert.h"
 #include "ssfaes.h"
 #include "ssfaesgcm.h"
-#include "ssfct.h"
+#include "ssfcrypt.h"
 
 /* --------------------------------------------------------------------------------------------- */
 /* Local Helper Functions and Macros                                                             */
@@ -517,7 +517,7 @@ bool SSFAESGCMDecrypt(const uint8_t *ct, size_t ctLen, const uint8_t *iv, size_t
     /* Verify tag in constant time to avoid leaking the position of the first differing byte.
      * On auth failure, zero pt so a buggy caller that ignores the return value cannot ship
      * unauthenticated plaintext — matches the SSFAESCCMDecrypt pattern. */
-    if (!SSFCTMemEq(s, tag, tagLen)) { memset(pt, 0, ctLen); return false; }
+    if (SSFCryptCTMemEq(s, tag, tagLen) == false) { memset(pt, 0, ctLen); return false; }
     return true;
 }
 

@@ -35,7 +35,7 @@
 #include "ssfassert.h"
 #include "ssfed25519.h"
 #include "ssfsha2.h"
-#include "ssfct.h"
+#include "ssfcrypt.h"
 #include "ssfbn.h"
 
 /* --------------------------------------------------------------------------------------------- */
@@ -1338,8 +1338,8 @@ void SSFEd25519PubKeyFromSeed(const uint8_t seed[SSF_ED25519_SEED_SIZE],
     _ge_encode(pubKey, &A);
 
     /* Zeroize sensitive data */
-    SSFSecureZero(h, sizeof(h));
-    SSFSecureZero(a, sizeof(a));
+    SSFCryptSecureZero(h, sizeof(h));
+    SSFCryptSecureZero(a, sizeof(a));
 }
 
 /* Sign a message. */
@@ -1388,11 +1388,11 @@ void SSFEd25519Sign(const uint8_t seed[SSF_ED25519_SEED_SIZE],
     _sc_muladd(&sig[32], hram, a, nonce);  /* S = h*a + r mod L */
 
     /* Zeroize sensitive data */
-    SSFSecureZero(h, sizeof(h));
-    SSFSecureZero(a, sizeof(a));
-    SSFSecureZero(nonce, sizeof(nonce));
-    SSFSecureZero(r_hash, sizeof(r_hash));
-    SSFSecureZero(&ctx, sizeof(ctx));
+    SSFCryptSecureZero(h, sizeof(h));
+    SSFCryptSecureZero(a, sizeof(a));
+    SSFCryptSecureZero(nonce, sizeof(nonce));
+    SSFCryptSecureZero(r_hash, sizeof(r_hash));
+    SSFCryptSecureZero(&ctx, sizeof(ctx));
 }
 
 /* Verify a signature. Returns true if valid. */
@@ -1435,5 +1435,5 @@ bool SSFEd25519Verify(const uint8_t pubKey[SSF_ED25519_PUB_KEY_SIZE],
     _ge_encode(rcheck, &check);
 
     /* Compare the recomputed R against the signature in constant time. */
-    return SSFCTMemEq(rcheck, sig, 32);
+    return SSFCryptCTMemEq(rcheck, sig, 32);
 }

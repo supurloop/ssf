@@ -2,7 +2,6 @@
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <ClCompile Include="main.c" />
-    <ClCompile Include="ssf.c" />
     <ClCompile Include="ssfport.c" />
     <ClCompile Include="_codec\ssfbase64.c">
       <Filter>_codec</Filter>
@@ -178,8 +177,8 @@
     <ClCompile Include="_ui\ssfvted_ut.c">
       <Filter>_ui</Filter>
     </ClCompile>
-    <ClCompile Include="_crypto\ssfct.c" />
-    <ClCompile Include="_crypto\ssfct_ut.c" />
+    <ClCompile Include="_crypto\ssfcrypt.c" />
+    <ClCompile Include="_crypto\ssfcrypt_ut.c" />
     <ClCompile Include="_ui\ssfcli.c" />
     <ClCompile Include="_ui\ssfcli_ut.c" />
     <ClCompile Include="_crypto\ssfbn.c">
@@ -367,7 +366,7 @@
     <ClInclude Include="_ui\ssfvted.h">
       <Filter>_ui</Filter>
     </ClInclude>
-    <ClInclude Include="_crypto\ssfct.h" />
+    <ClInclude Include="_crypto\ssfcrypt.h" />
     <ClInclude Include="_ui\ssfcli.h" />
     <ClInclude Include="_crypto\ssfbn.h">
       <Filter>_crypto</Filter>

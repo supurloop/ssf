@@ -56,7 +56,7 @@ This module exposes both steps individually ([`SSFHKDFExtract`](#ssfhkdfextract)
 - `prkOutSize` passed to [`SSFHKDFExtract()`](#ssfhkdfextract) must be at least `HashLen`.
   The full `HashLen`-byte PRK is always written; oversized buffers are not padded.
 - The derived OKM is secret material — store, wipe, and compare it with the same care as any
-  other long-term key. Use [`SSFCTMemEq()`](ssfct.md) when any equality check on derived-key
+  other long-term key. Use [`SSFCryptCTMemEq()`](ssfcrypt.md) when any equality check on derived-key
   bytes affects a security decision.
 - All three entry points return `bool` for consistency with the SSF API style; in practice
   they always return `true`. Argument-validity failures are caught by `SSF_REQUIRE`

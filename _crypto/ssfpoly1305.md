@@ -32,8 +32,8 @@ construction that supplies its own per-message one-time key.
   concern — it is a direct algebraic attack. For general-purpose keyed MACing with a
   reusable key, use [`ssfhmac`](ssfhmac.md) instead. For authenticated encryption, use the
   `ssfchacha20poly1305` AEAD, which handles fresh-key derivation for you.
-- **Verify tags with [`ssfct`](ssfct.md), not `memcmp()`.** Compare a computed tag to an
-  expected tag using `SSFCTMemEq()` to avoid a timing side channel that would let an attacker
+- **Verify tags with [`ssfcrypt`](ssfcrypt.md), not `memcmp()`.** Compare a computed tag to an
+  expected tag using `SSFCryptCTMemEq()` to avoid a timing side channel that would let an attacker
   forge MACs byte-by-byte.
 - The key must be exactly [`SSF_POLY1305_KEY_SIZE`](#ssf-poly1305-key-size) (32) bytes — this
   is enforced by a `SSF_REQUIRE`. The clamping of the low half (`r`) defined in RFC 7539
@@ -144,7 +144,7 @@ const uint8_t expected[SSF_POLY1305_TAG_SIZE] = {
     0xa8,0x06,0x1d,0xc1,0x30,0x51,0x36,0xc6,
     0xc2,0x2b,0x8b,0xaf,0x0c,0x01,0x27,0xa9
 };
-bool ok = SSFCTMemEq(tag, expected, SSF_POLY1305_TAG_SIZE);
+bool ok = SSFCryptCTMemEq(tag, expected, SSF_POLY1305_TAG_SIZE);
 ```
 
 ---

@@ -85,7 +85,7 @@
     <ClCompile>
       <WarningLevel>Level4</WarningLevel>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_DEBUG;_CONSOLE;SSF_CONFIG_HAVE_OPENSSL=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <DisableSpecificWarnings>4820;5045;%(DisableSpecificWarnings)</DisableSpecificWarnings>
       <AdditionalIncludeDirectories>./_debug;./;./_opt;./_osal;./_time;./_struct;./_storage;./_fsm;./_edc;./_ecc;./_codec;./_crypto;./_ui</AdditionalIncludeDirectories>
@@ -100,7 +100,7 @@
     <ClCompile>
       <WarningLevel>Level4</WarningLevel>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_DEBUG;_CONSOLE;SSF_CONFIG_HAVE_OPENSSL=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <DisableSpecificWarnings>4820;5045</DisableSpecificWarnings>
       <AdditionalIncludeDirectories>.\_osal;.\_debug;.\_opt;.\_time;.\_crypto;.\_storage;.\_fsm;.\_struct;.\_edc;.\_ecc;.\_codec;.\_ui;.\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
@@ -117,7 +117,7 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>NDEBUG;_CONSOLE;SSF_CONFIG_HAVE_OPENSSL=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <DisableSpecificWarnings>4820;5045;%(DisableSpecificWarnings)</DisableSpecificWarnings>
       <AdditionalIncludeDirectories>.\_debug;.\;.\_opt;.\_osal;.\_time;.\_crypto;.\_struct;.\_storage;.\_fsm;.\_edc;.\_ecc;.\_codec;.\_ui</AdditionalIncludeDirectories>
@@ -136,7 +136,7 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>NDEBUG;_CONSOLE;SSF_CONFIG_HAVE_OPENSSL=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <DisableSpecificWarnings>4820;5045</DisableSpecificWarnings>
       <AdditionalIncludeDirectories>.\_osal;.\_debug;.\_opt;.\_time;.\_codec;.\_crypto;.\_storage;.\_fsm;.\_edc;.\_ecc;.\_struct;.\;.\_ui;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
@@ -152,7 +152,6 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="main.c" />
-    <ClCompile Include="ssf.c" />
     <ClCompile Include="ssfport.c" />
     <ClCompile Include="_codec\ssfasn1.c" />
     <ClCompile Include="_codec\ssfasn1_ut.c" />
@@ -186,8 +185,8 @@
     <ClCompile Include="_crypto\ssfchacha20poly1305.c" />
     <ClCompile Include="_crypto\ssfchacha20poly1305_ut.c" />
     <ClCompile Include="_crypto\ssfchacha20_ut.c" />
-    <ClCompile Include="_crypto\ssfct.c" />
-    <ClCompile Include="_crypto\ssfct_ut.c" />
+    <ClCompile Include="_crypto\ssfcrypt.c" />
+    <ClCompile Include="_crypto\ssfcrypt_ut.c" />
     <ClCompile Include="_crypto\ssfec.c" />
     <ClCompile Include="_crypto\ssfecdsa.c" />
     <ClCompile Include="_crypto\ssfecdsa_ut.c" />
@@ -270,7 +269,7 @@
     <ClInclude Include="_crypto\ssfbn.h" />
     <ClInclude Include="_crypto\ssfchacha20.h" />
     <ClInclude Include="_crypto\ssfchacha20poly1305.h" />
-    <ClInclude Include="_crypto\ssfct.h" />
+    <ClInclude Include="_crypto\ssfcrypt.h" />
     <ClInclude Include="_crypto\ssfec.h" />
     <ClInclude Include="_crypto\ssfecdsa.h" />
     <ClInclude Include="_crypto\ssfed25519.h" />

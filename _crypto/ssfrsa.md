@@ -32,7 +32,7 @@ comparable security.
 - [`ssfsha2`](ssfsha2.md) — SHA-256 / SHA-384 / SHA-512 inside PKCS#1 v1.5 DigestInfo
   encoding, MGF1, and PSS `H` / `H'` computation.
 - [`ssfprng`](ssfprng.md) — seeded from platform entropy for prime generation and PSS salt.
-- [`ssfct`](ssfct.md) — constant-time comparison on the PKCS#1 v1.5 and PSS verify paths.
+- [`ssfcrypt`](ssfcrypt.md) — constant-time comparison on the PKCS#1 v1.5 and PSS verify paths.
 
 <a id="notes"></a>
 
@@ -106,7 +106,7 @@ comparable security.
   inspects each zero byte of `PS` with an early-return `if`). This does not enable any
   known direct forgery, but it does leak where `PS` diverged from the expected pattern —
   a defense-in-depth concern flagged for a future hardening pass. The final `H == H'`
-  comparison is already constant-time via [`SSFCTMemEq`](ssfct.md).
+  comparison is already constant-time via [`SSFCryptCTMemEq`](ssfcrypt.md).
 - **Keys are not parsed lazily on every call.** Each sign / verify / key-validate entry
   point re-parses the DER blob on entry. If you're signing many messages under the same
   key, this is a few hundred microseconds per call that could in principle be
@@ -257,7 +257,7 @@ bool SSFRSAVerifyPKCS1(const uint8_t *pubKeyDer, size_t pubKeyDerLen,
 ```
 Verify a PKCS#1 v1.5 signature. Performs the public operation `sig^e mod n`, reconstructs
 the expected `EM` from `(hash, hashVal)`, and compares the recovered and expected blocks
-with [`SSFCTMemEq()`](ssfct.md). Any mismatch — wrong key, wrong hash algorithm, tampered
+with [`SSFCryptCTMemEq()`](ssfcrypt.md). Any mismatch — wrong key, wrong hash algorithm, tampered
 signature, corrupted DER — returns `false`. Callers should treat all `false` outcomes
 identically.
 

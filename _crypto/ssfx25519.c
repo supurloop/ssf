@@ -34,6 +34,7 @@
 #include "ssfx25519.h"
 #include "ssfprng.h"
 #include "ssfbn.h"
+#include "ssfcrypt.h"
 
 /* --------------------------------------------------------------------------------------------- */
 /* Field element: 256 bits in 8 x 32-bit limbs, little-endian limb order.                       */
@@ -403,7 +404,7 @@ static void _x25519_scalar_mul(uint8_t out[32], const uint8_t scalar[32],
     _fe_to_bytes(out, &x_2);
 
     /* Zeroize sensitive stack data */
-    SSFSecureZero(k, sizeof(k));
+    SSFCryptSecureZero(k, sizeof(k));
 }
 
 /* --------------------------------------------------------------------------------------------- */

@@ -122,7 +122,7 @@ Neither is in scope today.
 QEMU user-mode is roughly 5×–10× slower than native. The full unit suite is
 ~60 s on host, so expect ~5–10 minutes per cross run. The dominant time goes
 to `ssfrsa` and `ssfecdsa`'s Wycheproof loops; if you only want a quick
-smoke pass, comment out those tests in `ssf.c` or run a focused subset.
+smoke pass, comment out those tests in `main.c` or run a focused subset.
 
 ## Known caveats
 

@@ -32,7 +32,7 @@
 #include "ssfassert.h"
 #include "ssfaes.h"
 #include "ssfaesccm.h"
-#include "ssfct.h"
+#include "ssfcrypt.h"
 
 /* --------------------------------------------------------------------------------------------- */
 /* XOR 16 bytes: dst ^= src                                                                      */
@@ -291,7 +291,7 @@ bool SSFAESCCMDecrypt(const uint8_t *ct, size_t ctLen,
     _SSFAESCCMComputeTag(key, keyLen, nonce, nonceLen, aad, aadLen, pt, ctLen, tagLen, cbcTag);
 
     /* Step 3: Compare tags (constant-time). */
-    if (!SSFCTMemEq(cbcTag, decTag, tagLen))
+    if (SSFCryptCTMemEq(cbcTag, decTag, tagLen) == false)
     {
         /* Authentication failed: zero the plaintext */
         memset(pt, 0, ctLen);

@@ -81,7 +81,7 @@
 #include "ssfchacha20.h"
 #include "ssfpoly1305.h"
 #include "ssfchacha20poly1305.h"
-#include "ssfct.h"
+#include "ssfcrypt.h"
 
 /* --------------------------------------------------------------------------------------------- */
 /* Streams the Poly1305 AEAD construction `auth || pad16 || ct || pad16 || le64(authLen) ||      */
@@ -150,7 +150,7 @@ void SSFChaCha20Poly1305Encrypt(const uint8_t *pt, size_t ptLen, const uint8_t *
     _SSFCCPComputeTag(auth, authLen, ct, ptLen, otk, tag, SSF_CCP_TAG_SIZE);
 
     /* Zeroize one-time key */
-    SSFSecureZero(otk, sizeof(otk));
+    SSFCryptSecureZero(otk, sizeof(otk));
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -182,10 +182,10 @@ bool SSFChaCha20Poly1305Decrypt(const uint8_t *ct, size_t ctLen, const uint8_t *
     _SSFCCPComputeTag(auth, authLen, ct, ctLen, otk, computedTag, sizeof(computedTag));
 
     /* Zeroize one-time key */
-    SSFSecureZero(otk, sizeof(otk));
+    SSFCryptSecureZero(otk, sizeof(otk));
 
     /* Verify tag in constant time to avoid leaking the position of the first differing byte. */
-    if (!SSFCTMemEq(computedTag, tag, SSF_CCP_TAG_SIZE)) return false;
+    if (SSFCryptCTMemEq(computedTag, tag, SSF_CCP_TAG_SIZE) == false) return false;
 
     /* Tag verified: decrypt */
     if (ctLen > 0)

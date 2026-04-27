@@ -122,9 +122,6 @@ typedef const char *SSFCStrIn_t;
 typedef char *SSFCStrOut_t;
 typedef void (*SSFVoidFn_t)(void); /* Generic function pointer type */
 
-/* Securely zero n bytes at p. Defeats dead-store elimination via a volatile write loop. */
-void SSFSecureZero(void *p, size_t n);
-
 /* Use to suppress unused parameter warnings */
 #define SSF_UNUSED_PTR(x) ssfUnusedPtr = (void *)(x)
 #define SSF_UNUSED_INT(x) ssfUnusedInt = (uint64_t)(x)

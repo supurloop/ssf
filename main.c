@@ -53,7 +53,7 @@
 #include "ssfx25519.h"
 #include "ssfed25519.h"
 #include "ssfaesccm.h"
-#include "ssfct.h"
+#include "ssfcrypt.h"
 #include "ssfhmac.h"
 #include "ssfchacha20poly1305.h"
 #include "ssfec.h"
@@ -175,9 +175,9 @@ SSFUnitTest_t unitTests[] =
 #if SSF_CONFIG_AESCCM_UNIT_TEST == 1
     { "ssfaesccm", "AES-CCM Authenticated Cipher", SSFAESCCMUnitTest },
 #endif /* SSF_CONFIG_AESCCM_UNIT_TEST */
-#if SSF_CONFIG_CT_UNIT_TEST == 1
-    { "ssfct", "Constant-Time Primitives", SSFCTUnitTest },
-#endif /* SSF_CONFIG_CT_UNIT_TEST */
+#if SSF_CONFIG_CRYPT_UNIT_TEST == 1
+    { "ssfcrypt", "Cryptographic Helpers", SSFCryptUnitTest },
+#endif /* SSF_CONFIG_CRYPT_UNIT_TEST */
 #if SSF_CONFIG_HMAC_UNIT_TEST == 1
     { "ssfhmac", "HMAC Authentication Code", SSFHMACUnitTest },
 #endif /* SSF_CONFIG_HMAC_UNIT_TEST */

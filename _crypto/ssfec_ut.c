@@ -2051,11 +2051,11 @@ void SSFECUnitTest(void)
     {
         const SSFECCurveParams_t *c = SSFECGetCurveParams(SSF_EC_CURVE_P256);
         SSFECPOINT_DEFINE(G, SSF_EC_MAX_LIMBS);
-        uint8_t small[10];  /* Too small: needs 65 bytes for P-256 */
+        uint8_t asmall[10];  /* Too small: needs 65 bytes for P-256 */
         size_t outLen = 0xDEADBEEFu;
 
         SSFECPointFromAffine(&G, &c->gx, &c->gy, SSF_EC_CURVE_P256);
-        SSF_ASSERT(SSFECPointEncode(&G, SSF_EC_CURVE_P256, small, sizeof(small), &outLen) == false);
+        SSF_ASSERT(SSFECPointEncode(&G, SSF_EC_CURVE_P256, asmall, sizeof(asmall), &outLen) == false);
         /* outLen must NOT be updated on failure (caller reads it as "use this many bytes"). */
         SSF_ASSERT(outLen == 0xDEADBEEFu);
 

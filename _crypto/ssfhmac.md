@@ -29,8 +29,8 @@ so callers can size their MAC buffer without hard-coding a constant.
 - **Prefer SHA-256 or stronger.** `SSF_HMAC_HASH_SHA1` is provided for interop with legacy
   protocols only (see [`ssfsha1`](ssfsha1.md)). HMAC-SHA-1 itself is not directly broken by
   the SHA-1 collision attacks, but there is no reason to pick it for new designs.
-- **Verify MACs with [`ssfct`](ssfct.md), not `memcmp()`.** `SSFHMAC()` computes a tag; callers
-  must then compare the computed tag to the expected tag using `SSFCTMemEq()` to avoid a
+- **Verify MACs with [`ssfcrypt`](ssfcrypt.md), not `memcmp()`.** `SSFHMAC()` computes a tag; callers
+  must then compare the computed tag to the expected tag using `SSFCryptCTMemEq()` to avoid a
   timing side channel that would let an attacker forge MACs byte-by-byte.
 - `macOut` must be at least [`SSFHMACGetHashSize(hash)`](#ssfhmacgethashsize) bytes; the full
   hash output is always written (HMAC truncation is not performed by this module — if your
@@ -138,7 +138,7 @@ const uint8_t expected[32] = { 0xb0, 0x34, 0x4c, 0x61, 0xd8, 0xdb, 0x38, 0x53,
                                0x5c, 0xa8, 0xaf, 0xce, 0xaf, 0x0b, 0xf1, 0x2b,
                                0x88, 0x1d, 0xc2, 0x00, 0xc9, 0x83, 0x3d, 0xa7,
                                0x26, 0xe9, 0x37, 0x6c, 0x2e, 0x32, 0xcf, 0xf7 };
-bool ok = SSFCTMemEq(mac, expected, SSFHMACGetHashSize(SSF_HMAC_HASH_SHA256));
+bool ok = SSFCryptCTMemEq(mac, expected, SSFHMACGetHashSize(SSF_HMAC_HASH_SHA256));
 ```
 
 ---

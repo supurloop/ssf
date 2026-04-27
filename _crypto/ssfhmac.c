@@ -31,6 +31,7 @@
 /* --------------------------------------------------------------------------------------------- */
 #include "ssfassert.h"
 #include "ssfhmac.h"
+#include "ssfcrypt.h"
 
 /* --------------------------------------------------------------------------------------------- */
 /* Returns the block size in bytes for the given hash algorithm.                                 */
@@ -157,8 +158,8 @@ void SSFHMACBegin(SSFHMACContext_t *ctx, SSFHMACHash_t hash,
     _SSFHMACHashUpdate(ctx, iKeyPad, blockSize);
 
     /* Zeroize key-derived stack state. oKeyPad lives in ctx until SSFHMACDeInit. */
-    SSFSecureZero(keyPrime, sizeof(keyPrime));
-    SSFSecureZero(iKeyPad, sizeof(iKeyPad));
+    SSFCryptSecureZero(keyPrime, sizeof(keyPrime));
+    SSFCryptSecureZero(iKeyPad, sizeof(iKeyPad));
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -202,7 +203,7 @@ void SSFHMACEnd(SSFHMACContext_t *ctx, uint8_t *macOut, size_t macOutSize)
     _SSFHMACHashEnd(ctx, macOut, macOutSize);
 
     /* innerHash is derived from the key — clear before going out of scope. */
-    SSFSecureZero(innerHash, sizeof(innerHash));
+    SSFCryptSecureZero(innerHash, sizeof(innerHash));
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -211,7 +212,7 @@ void SSFHMACEnd(SSFHMACContext_t *ctx, uint8_t *macOut, size_t macOutSize)
 void SSFHMACDeInit(SSFHMACContext_t *ctx)
 {
     SSF_REQUIRE(ctx != NULL);
-    SSFSecureZero(ctx, sizeof(*ctx));
+    SSFCryptSecureZero(ctx, sizeof(*ctx));
 }
 
 /* --------------------------------------------------------------------------------------------- */

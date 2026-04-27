@@ -25,7 +25,7 @@ with those standards is required and/or when a tag length shorter than 16 bytes 
 
 - [`ssfport.h`](../ssfport.h)
 - [`ssfaes`](ssfaes.md) — AES block cipher
-- [`ssfct`](ssfct.md) — constant-time tag comparison inside
+- [`ssfcrypt`](ssfcrypt.md) — constant-time tag comparison inside
   [`SSFAESCCMDecrypt()`](#ssfaesccmdecrypt)
 
 <a id="notes"></a>
@@ -212,7 +212,7 @@ into `pt`. On tag-verify failure the entire `pt` buffer is memset to zero before
 
 **Returns:** `true` if the tag is valid and `pt` holds the plaintext; `false` if the tag
 does not match, in which case `pt[0..ctLen-1]` has been zeroed. The comparison is constant
-time via [`SSFCTMemEq()`](ssfct.md).
+time via [`SSFCryptCTMemEq()`](ssfcrypt.md).
 
 <a id="ex-decrypt"></a>
 

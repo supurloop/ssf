@@ -37,7 +37,6 @@ rule link
 # Top-level
 build $builddir/main.o:    cc_obj main.c
 build $builddir/ssfport.o: cc_obj ssfport.c
-build $builddir/ssf.o:     cc_obj ssf.c
 
 # _codec
 build $builddir/_codec/ssfbase64.o:    cc_obj _codec/ssfbase64.c
@@ -72,8 +71,8 @@ build $builddir/_crypto/ssfsha1.o:      cc_obj _crypto/ssfsha1.c
 build $builddir/_crypto/ssfsha1_ut.o:   cc_obj _crypto/ssfsha1_ut.c
 build $builddir/_crypto/ssfsha2.o:      cc_obj _crypto/ssfsha2.c
 build $builddir/_crypto/ssfsha2_ut.o:   cc_obj _crypto/ssfsha2_ut.c
-build $builddir/_crypto/ssfct.o:        cc_obj _crypto/ssfct.c
-build $builddir/_crypto/ssfct_ut.o:     cc_obj _crypto/ssfct_ut.c
+build $builddir/_crypto/ssfcrypt.o:     cc_obj _crypto/ssfcrypt.c
+build $builddir/_crypto/ssfcrypt_ut.o:  cc_obj _crypto/ssfcrypt_ut.c
 build $builddir/_crypto/ssfbn.o:        cc_obj _crypto/ssfbn.c
 build $builddir/_crypto/ssfbn_ut.o:     cc_obj _crypto/ssfbn_ut.c
 build $builddir/_crypto/ssfchacha20.o:        cc_obj _crypto/ssfchacha20.c
@@ -158,7 +157,7 @@ build $builddir/_osal/ssflptask.o:    cc_obj _osal/ssflptask.c
 build $builddir/_osal/ssflptask_ut.o: cc_obj _osal/ssflptask_ut.c
 
 # Final binary
-build @OUTBIN@: link $builddir/main.o $builddir/ssfport.o $builddir/ssf.o $
+build @OUTBIN@: link $builddir/main.o $builddir/ssfport.o $
     $builddir/_codec/ssfbase64.o    $builddir/_codec/ssfbase64_ut.o $
     $builddir/_codec/ssfdec.o       $builddir/_codec/ssfdec_ut.o $
     $builddir/_codec/ssfgobj.o      $builddir/_codec/ssfgobj_ut.o $
@@ -174,7 +173,7 @@ build @OUTBIN@: link $builddir/main.o $builddir/ssfport.o $builddir/ssf.o $
     $builddir/_crypto/ssfprng.o     $builddir/_crypto/ssfprng_ut.o $
     $builddir/_crypto/ssfsha1.o     $builddir/_crypto/ssfsha1_ut.o $
     $builddir/_crypto/ssfsha2.o     $builddir/_crypto/ssfsha2_ut.o $
-    $builddir/_crypto/ssfct.o       $builddir/_crypto/ssfct_ut.o $
+    $builddir/_crypto/ssfcrypt.o    $builddir/_crypto/ssfcrypt_ut.o $
     $builddir/_crypto/ssfbn.o       $builddir/_crypto/ssfbn_ut.o $
     $builddir/_crypto/ssfchacha20.o $builddir/_crypto/ssfchacha20_ut.o $
     $builddir/_crypto/ssfpoly1305.o $builddir/_crypto/ssfpoly1305_ut.o $

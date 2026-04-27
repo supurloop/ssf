@@ -33,6 +33,7 @@
 #include "ssfport.h"
 #include "ssfassert.h"
 #include "ssfsha2.h"
+#include "ssfcrypt.h"
 
 /* --------------------------------------------------------------------------------------------- */
 /* Local defines                                                                                 */
@@ -328,10 +329,10 @@ void SSFSHA2_32End(SSFSHA2_32Context_t *context, uint8_t *out, uint32_t outSize)
     if (context->hashBitSize != 224) { tmp = htonl(context->h[7]); memcpy(&out[28], &tmp, sizeof(uint32_t)); }
 
     /* Zeroize pad — it holds trailing message bytes and the encoded bit length. */
-    SSFSecureZero(pad, sizeof(pad));
+    SSFCryptSecureZero(pad, sizeof(pad));
 
     /* Invalidate context to prevent reuse without re-init */
-    SSFSecureZero(context, sizeof(SSFSHA2_32Context_t));
+    SSFCryptSecureZero(context, sizeof(SSFSHA2_32Context_t));
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -474,8 +475,8 @@ void SSFSHA2_64End(SSFSHA2_64Context_t *context, uint8_t *out, uint32_t outSize)
     }
 
     /* Zeroize pad — it holds trailing message bytes and the encoded bit length. */
-    SSFSecureZero(pad, sizeof(pad));
+    SSFCryptSecureZero(pad, sizeof(pad));
 
     /* Invalidate context to prevent reuse without re-init */
-    SSFSecureZero(context, sizeof(SSFSHA2_64Context_t));
+    SSFCryptSecureZero(context, sizeof(SSFSHA2_64Context_t));
 }

@@ -79,6 +79,7 @@
 #include "ssfport.h"
 #include "ssfassert.h"
 #include "ssfpoly1305.h"
+#include "ssfcrypt.h"
 
 /* --------------------------------------------------------------------------------------------- */
 /* Poly1305 uses 130-bit arithmetic mod p = 2^130 - 5.                                          */
@@ -250,7 +251,7 @@ void SSFPoly1305End(SSFPoly1305Context_t *ctx,
         _SSFPoly1305MulR(ctx);
         ctx->bufLen = 0u;
 
-        SSFSecureZero(partial, sizeof(partial));
+        SSFCryptSecureZero(partial, sizeof(partial));
     }
 
     /* Fully carry h. */
@@ -293,7 +294,7 @@ void SSFPoly1305End(SSFPoly1305Context_t *ctx,
     tag[14] = (uint8_t)(f >> 16); tag[15] = (uint8_t)(f >> 24);
 
     /* Zeroise key-derived state. Poly1305 is a one-time MAC — the context must not be reused. */
-    SSFSecureZero(ctx, sizeof(*ctx));
+    SSFCryptSecureZero(ctx, sizeof(*ctx));
 }
 
 /* --------------------------------------------------------------------------------------------- */

@@ -35,6 +35,7 @@
 #include "ssfassert.h"
 #include "ssfaes.h"
 #include "ssfprng.h"
+#include "ssfcrypt.h"
 
 /* --------------------------------------------------------------------------------------------- */
 /* Module defines.                                                                               */
@@ -64,7 +65,7 @@ void SSFPRNGDeInitContext(SSFPRNGContext_t *context)
     SSF_REQUIRE(context != NULL);
     SSF_REQUIRE(context->magic == SSF_PRNG_MAGIC);
 
-    SSFSecureZero(context, sizeof(SSFPRNGContext_t));
+    SSFCryptSecureZero(context, sizeof(SSFPRNGContext_t));
 }
 
 /* --------------------------------------------------------------------------------------------- */

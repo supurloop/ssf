@@ -31,6 +31,7 @@
 /* --------------------------------------------------------------------------------------------- */
 #include "ssfassert.h"
 #include "ssfhkdf.h"
+#include "ssfcrypt.h"
 
 /* --------------------------------------------------------------------------------------------- */
 /* Extract: PRK = HMAC-Hash(salt, IKM)                                                           */
@@ -136,8 +137,8 @@ bool SSFHKDFExpand(SSFHMACHash_t hash,
 
     /* Zeroize key-derived stack state. */
     SSFHMACDeInit(&ctx);
-    SSFSecureZero(tPrev, sizeof(tPrev));
-    SSFSecureZero(tCurr, sizeof(tCurr));
+    SSFCryptSecureZero(tPrev, sizeof(tPrev));
+    SSFCryptSecureZero(tCurr, sizeof(tCurr));
 
     return true;
 }
@@ -159,6 +160,6 @@ bool SSFHKDF(SSFHMACHash_t hash,
 
     if (!SSFHKDFExtract(hash, salt, saltLen, ikm, ikmLen, prk, sizeof(prk))) return false;
     ok = SSFHKDFExpand(hash, prk, hashSize, info, infoLen, okmOut, okmLen);
-    SSFSecureZero(prk, sizeof(prk));
+    SSFCryptSecureZero(prk, sizeof(prk));
     return ok;
 }

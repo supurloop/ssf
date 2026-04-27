@@ -207,7 +207,7 @@ Cryptographic primitives for hashing, encryption, and random number generation.
 | [Poly1305](_crypto/ssfpoly1305.md) | Poly1305 one-time MAC (RFC 7539/8439) | ~1.2 KB | — | ~250 B³² | — | Yes |
 | [ChaCha20](_crypto/ssfchacha20.md) | ChaCha20 stream cipher (RFC 7539/8439) | ~1 KB | — | ~250 B³³ | — | Yes |
 | [ChaCha20-Poly1305](_crypto/ssfchacha20poly1305.md) | ChaCha20-Poly1305 AEAD (RFC 7539/8439) | ~700 B³⁴ | — | ~400 B³⁵ | — | Yes |
-| [Constant-Time](_crypto/ssfct.md) | Constant-time byte-buffer equality for MAC and signature verification | ~40 B | — | ~32 B | — | Yes |
+| [Crypto Helpers](_crypto/ssfcrypt.md) | Constant-time byte-buffer equality and secure zeroize for sensitive memory | ~80 B | — | ~32 B | — | Yes |
 | [Big Number](_crypto/ssfbn.md) | Multi-precision big-number arithmetic; foundation for RSA, ECC, and DH | ~10 KB | — | ~12 KB³⁸ | — | Yes |
 | [Elliptic Curve](_crypto/ssfec.md) | NIST P-256 / P-384 point arithmetic (constant-time scalar mul, SEC 1 codec) | ~10 KB³⁹ | — | ~7 KB⁴⁰ | — | Yes |
 | [ECDSA / ECDH](_crypto/ssfecdsa.md) | ECDSA signatures (RFC 6979 deterministic) + ECDH over NIST P-256 / P-384 | ~3.5 KB⁴¹ | — | ~16.5 KB⁴² | — | Yes |

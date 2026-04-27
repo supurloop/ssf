@@ -16,7 +16,7 @@ Cryptographic interfaces.
 | ssfaes | AES block cipher (128/192/256-bit) | ssfaes.c, ssfaes.h | [ssfaes.md](ssfaes.md) |
 | ssfaesgcm | AES-GCM authenticated encryption | ssfaesgcm.c, ssfaesgcm.h | [ssfaesgcm.md](ssfaesgcm.md) |
 | ssfaesccm | AES-CCM AEAD (RFC 3610, NIST SP 800-38C) | ssfaesccm.c, ssfaesccm.h | [ssfaesccm.md](ssfaesccm.md) |
-| ssfct | Constant-time byte-buffer equality for MAC and signature verification | ssfct.c, ssfct.h | [ssfct.md](ssfct.md) |
+| ssfcrypt | High-level cryptographic helpers (constant-time compare, secure zeroize) | ssfcrypt.c, ssfcrypt.h | [ssfcrypt.md](ssfcrypt.md) |
 | ssfprng | Cryptographically secure capable PRNG | ssfprng.c, ssfprng.h | [ssfprng.md](ssfprng.md) |
 | ssfbn | Multi-precision big-number arithmetic (foundation for RSA, ECC, DH) | ssfbn.c, ssfbn.h | [ssfbn.md](ssfbn.md) |
 | ssfec | Elliptic curve point arithmetic (NIST P-256 / P-384) | ssfec.c, ssfec.h | [ssfec.md](ssfec.md) |

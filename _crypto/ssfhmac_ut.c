@@ -488,7 +488,6 @@ void SSFHMACUnitTest(void)
        a regression where the implementation accidentally short-circuits on an all-zero key. */
     {
         static const uint8_t zeroKey[32] = {0};
-        uint8_t mac[32];
         bool nonZero = false;
         size_t i;
 
@@ -631,7 +630,6 @@ void SSFHMACUnitTest(void)
        own magic. */
     {
         SSFHMACContext_t ctx = {0};
-        uint8_t mac[32];
         uint8_t data[4] = {0};
 
         memset(&ctx, 0, sizeof(ctx));
@@ -645,7 +643,6 @@ void SSFHMACUnitTest(void)
        cleanup bug, must fail loudly. */
     {
         SSFHMACContext_t ctx = {0};
-        uint8_t mac[32];
         uint8_t key[16] = {0};
         uint8_t data[4] = {0};
 
@@ -662,7 +659,6 @@ void SSFHMACUnitTest(void)
        practice is always to zero-init. */
     {
         SSFHMACContext_t ctx;
-        uint8_t mac[32];
         uint8_t key[16] = {0};
 
         /* Zeroed prior contents — Begin succeeds. */
@@ -767,7 +763,6 @@ void SSFHMACUnitTest(void)
     {
         SSFHMACContext_t ctx = {0};
         uint8_t key[16] = {0};
-        uint8_t mac[32];
 
         SSFHMACBegin(&ctx, SSF_HMAC_HASH_SHA256, key, sizeof(key));
         SSF_ASSERT_TEST(SSFHMACEnd(NULL, mac, 32u));
@@ -784,7 +779,6 @@ void SSFHMACUnitTest(void)
     /* DBC: single-call SSFHMAC parameter validation — every required argument tested. */
     {
         uint8_t key[16] = {0};
-        uint8_t mac[32];
 
         SSF_ASSERT_TEST(SSFHMAC(SSF_HMAC_HASH_SHA256, NULL, sizeof(key),
                                 (const uint8_t *)"abc", 3, mac, 32u));

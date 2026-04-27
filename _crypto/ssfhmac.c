@@ -39,6 +39,18 @@
 #define SSF_HMAC_CONTEXT_MAGIC (0x484D4143ul)   /* 'HMAC' — set by Begin, cleared by DeInit. */
 
 /* --------------------------------------------------------------------------------------------- */
+/* Compile-time bounds checks: the local stack buffers and ctx->oKeyPad are sized to the         */
+/* SSF_HMAC_MAX_* constants, but every write into them assumes the per-hash block / hash size    */
+/* returned by _SSFHMACGetBlockSize and SSFHMACGetHashSize is ≤ those constants. These trip if a */
+/* future hash is added to the dispatch without bumping the constants. typedef-array idiom (size */
+/* becomes -1 on failure) is used in place of _Static_assert because the cross-test toolchain    */
+/* matrix predates universal C11 support.                                                        */
+/* --------------------------------------------------------------------------------------------- */
+typedef char _ssf_hmac_sa_block_sha1_256_fits[(64u  <= SSF_HMAC_MAX_BLOCK_SIZE)  ? 1 : -1];
+typedef char _ssf_hmac_sa_block_sha384_512_fits[(128u <= SSF_HMAC_MAX_BLOCK_SIZE) ? 1 : -1];
+typedef char _ssf_hmac_sa_hash_max_fits[(64u  <= SSF_HMAC_MAX_HASH_SIZE)         ? 1 : -1];
+
+/* --------------------------------------------------------------------------------------------- */
 /* Returns the block size in bytes for the given hash algorithm.                                 */
 /* --------------------------------------------------------------------------------------------- */
 static size_t _SSFHMACGetBlockSize(SSFHMACHash_t hash)

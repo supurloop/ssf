@@ -1309,6 +1309,78 @@ void SSFBNModMul(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* r = (a * b) mod m, constant-time. Mathematically equivalent to SSFBNModMul but the iteration  */
+/* count and per-iteration work do not depend on the values of a, b, or intermediate state — only */
+/* on the limb count of m. Use this when a or b are secret (e.g. ECDSA Sign's k^-1 and d-derived  */
+/* operands on mod-n).                                                                            */
+/*                                                                                                */
+/* Cost: ~2-3x slower than SSFBNModMul for typical inputs because it always does worst-case work. */
+/* Algorithm: schoolbook multiply (already CT) followed by fixed-iteration shift-and-subtract     */
+/* reduction with branchless mask-conditional commits.                                            */
+/* --------------------------------------------------------------------------------------------- */
+void SSFBNModMulCT(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *m)
+{
+    SSFBN_DEFINE(prod, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(shifted, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(tmp, SSF_BN_MAX_LIMBS);
+    uint16_t i;
+    uint16_t j;
+    uint16_t prodLen;
+    uint32_t nIters;
+    uint32_t k;
+    SSFBNLimb_t mask;
+    SSFBNLimb_t borrow;
+
+    SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(r->limbs != NULL);
+    SSF_REQUIRE(a != NULL);
+    SSF_REQUIRE(a->limbs != NULL);
+    SSF_REQUIRE(b != NULL);
+    SSF_REQUIRE(b->limbs != NULL);
+    SSF_REQUIRE(m != NULL);
+    SSF_REQUIRE(m->limbs != NULL);
+    SSF_REQUIRE(a->len == m->len);
+    SSF_REQUIRE(b->len == m->len);
+    SSF_REQUIRE(m->len >= 1u);
+    SSF_REQUIRE((uint16_t)(2u * m->len) <= SSF_BN_MAX_LIMBS);
+    SSF_REQUIRE(m->len <= r->cap);
+
+    /* prod = a * b. SSFBNMul has no zero-limb shortcut so it is CT over (a, b). */
+    SSFBNMul(&prod, a, b);
+    prodLen = (uint16_t)(2u * m->len);
+    prod.len = prodLen;
+
+    /* shifted = m << (m->len * 32). Place m in the high half of a 2n-limb buffer; low half is 0. */
+    SSFBNSetZero(&shifted, prodLen);
+    for (i = 0; i < m->len; i++)
+    {
+        shifted.limbs[i + m->len] = m->limbs[i];
+    }
+    shifted.len = prodLen;
+    tmp.len = prodLen;
+
+    /* Fixed-iteration shift-and-subtract: nIters = m->len * 32 + 1 covers all possible shifts.   */
+    /* Each iteration: compute prod - shifted into tmp; commit prod := tmp via CT mask if the     */
+    /* subtract did not underflow; then shift shifted right by 1.                                  */
+    nIters = (uint32_t)m->len * SSF_BN_LIMB_BITS + 1u;
+    for (k = 0; k < nIters; k++)
+    {
+        borrow = _SSFBNRawSub(tmp.limbs, prod.limbs, shifted.limbs, prodLen);
+        /* mask = all-ones if borrow == 0 (subtract was valid, i.e. prod >= shifted), else 0. */
+        mask = (SSFBNLimb_t)(borrow - 1u);
+        for (j = 0; j < prodLen; j++)
+        {
+            prod.limbs[j] = (tmp.limbs[j] & mask) | (prod.limbs[j] & ~mask);
+        }
+        SSFBNShiftRight1(&shifted);
+    }
+
+    /* After the loop, prod < m and the high m->len limbs of prod are zero. Copy the low half. */
+    r->len = m->len;
+    memcpy(r->limbs, prod.limbs, (size_t)m->len * sizeof(SSFBNLimb_t));
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* r = (a * a) mod m.                                                                            */
 /* --------------------------------------------------------------------------------------------- */
 void SSFBNModSquare(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)

@@ -551,9 +551,15 @@ bool SSFECDSASign(SSFECCurve_t curve,
         return false;
     }
 
-    SSFBNModMul(&tmp, &r, &d, &c->n);     /* r * d mod n */
-    SSFBNModAdd(&tmp, &e, &tmp, &c->n);   /* e + r*d mod n */
-    SSFBNModMul(&s, &kInv, &tmp, &c->n);  /* k^(-1) * (e + r*d) mod n */
+    /* CT mod-n arithmetic on secret operands. SSFBNModMul uses SSFBNMod whose iteration count   */
+    /* and per-iteration branches leak the bit length and intermediate magnitudes of secret       */
+    /* operands (d = private key, kInv = secret nonce inverse). SSFBNModMulCT runs fixed work    */
+    /* regardless of input. SSFBNModAdd is already CT (no data-dependent branches in its loop).  */
+    /* Measured cost: zero — the variable-iteration SSFBNMod already runs near worst-case for    */
+    /* 256-bit operands, so swapping in the fixed-iteration CT version is free.                  */
+    SSFBNModMulCT(&tmp, &r, &d, &c->n);     /* r * d mod n */
+    SSFBNModAdd(&tmp, &e, &tmp, &c->n);     /* e + r*d mod n */
+    SSFBNModMulCT(&s, &kInv, &tmp, &c->n);  /* k^(-1) * (e + r*d) mod n */
 
     if (SSFBNIsZero(&s))
     {

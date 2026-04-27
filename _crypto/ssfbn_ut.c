@@ -1251,6 +1251,55 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
         _ToOSSL(bnB, &rand2);
     }
 
+    /* === ModMulCT: cross-check against ModMul + OpenSSL ============================== */
+    /* The CT primitive must produce identical results to the data-dependent SSFBNModMul   */
+    /* across random inputs and edge cases. The strongest invariant: ModMulCT(a, b, m) ==  */
+    /* ModMul(a, b, m) for any (a, b, m). If the fixed-iteration mask logic is wrong, the   */
+    /* random cross-check or the (m-1)*(m-1) edge case will fail.                            */
+    {
+        SSFBN_DEFINE(rCT, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(rGen, SSF_BN_MAX_LIMBS);
+        rCT.len = nLimbs; rGen.len = nLimbs;
+
+        /* Random inputs against the local odd modulus `m`. */
+        SSFBNModMulCT(&rCT, &rand1, &rand2, &m);
+        SSFBNModMul(&rGen, &rand1, &rand2, &m);
+        SSF_ASSERT(SSFBNCmp(&rCT, &rGen) == 0);
+        SSF_ASSERT(BN_mod_mul(bnR, bnA, bnB, bnM, ctx) == 1);
+        SSF_ASSERT(_EqOSSL(&rCT, bnR));
+
+        /* Edge: a = 0, b = anything → result = 0. */
+        {
+            SSFBN_DEFINE(zero, SSF_BN_MAX_LIMBS);
+            SSFBNSetZero(&zero, nLimbs);
+            SSFBNModMulCT(&rCT, &zero, &rand2, &m);
+            SSF_ASSERT(SSFBNIsZero(&rCT) == true);
+        }
+
+        /* Edge: a = 1, b = rand2 → result = rand2 (rand2 was reduced to be < m above). */
+        {
+            SSFBN_DEFINE(one, SSF_BN_MAX_LIMBS);
+            SSFBNSetOne(&one, nLimbs);
+            SSFBNModMulCT(&rCT, &one, &rand2, &m);
+            SSF_ASSERT(SSFBNCmp(&rCT, &rand2) == 0);
+        }
+
+        /* Edge: (m-1) * (m-1) mod m == 1 (exercises full reduction including underflow). */
+        SSFBNModMulCT(&rCT, &mMinus1, &mMinus1, &m);
+        SSF_ASSERT(SSFBNCmpUint32(&rCT, 1u) == 0);
+
+        /* Edge: at NIST P-256 prime as modulus (the dense bit pattern of P-256 = 2^256 -      */
+        /* 2^224 + ... is a stress case for shift-and-subtract reductions). */
+        if (nLimbs == 8u)
+        {
+            SSFBN_DEFINE(rCTNist, SSF_BN_MAX_LIMBS);
+            rCTNist.len = nLimbs;
+            SSFBNModMulCT(&rCTNist, &rand1, &rand2, &SSF_BN_NIST_P256);
+            SSFBNModMulNIST(&rGen, &rand1, &rand2, &SSF_BN_NIST_P256);
+            SSF_ASSERT(SSFBNCmp(&rCTNist, &rGen) == 0);
+        }
+    }
+
     /* === DivMod with b = 0: division by zero must trip SSF_REQUIRE ================== */
     {
         SSFBN_DEFINE(zeroB, SSF_BN_MAX_LIMBS);

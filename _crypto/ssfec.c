@@ -619,15 +619,16 @@ bool SSFECPointToAffine(SSFBN_t *x, SSFBN_t *y, const SSFECPoint_t *pt, SSFECCur
     SSF_REQUIRE(pt != NULL);
     SSF_REQUIRE(c != NULL);
 
+    /* Reject identity (Z=0) — undefined affine coordinate. The early return is data-dependent  */
+    /* on a single bit of pt->z, but for prime-order curves (P-256/P-384) with scalars in       */
+    /* [1, n-1] the scalar-mul output is never the identity, so this case only triggers on       */
+    /* malformed or error inputs and leaks no information about secret operations.               */
     if (SSFBNIsZero(&pt->z)) return false;
 
-    /* Fast path: Z == 1 (already affine) */
-    if (SSFBNIsOne(&pt->z))
-    {
-        SSFBNCopy(x, &pt->x);
-        SSFBNCopy(y, &pt->y);
-        return true;
-    }
+    /* No Z==1 fast-path: removed in favor of unconditional inversion. The fast-path branched   */
+    /* on the (potentially secret) Z value, and Jacobian scalar-mul outputs have Z = 1 only      */
+    /* with probability ~2^-256, so skipping the inversion saved nothing in real workloads while */
+    /* leaking 1 bit per call when callers happened to pass an already-affine point.             */
 
     /* zInv = Z^(-1) mod p */
     if (!SSFBNModInv(&zInv, &pt->z, &c->p)) return false;

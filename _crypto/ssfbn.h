@@ -181,6 +181,7 @@ void SSFBNSquare(SSFBN_t *r, const SSFBN_t *a);
 void SSFBNModAdd(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *m);
 void SSFBNModSub(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *m);
 void SSFBNModMul(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *m);
+void SSFBNModMulCT(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *m);
 void SSFBNModSquare(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m);
 bool SSFBNModInv(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m);
 void SSFBNModMulNIST(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *m);

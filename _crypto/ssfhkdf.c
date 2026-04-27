@@ -60,8 +60,9 @@ bool SSFHKDFExtract(SSFHMACHash_t hash,
         saltLen = hashSize;
     }
 
-    /* PRK = HMAC-Hash(salt, IKM) */
-    return SSFHMAC(hash, salt, saltLen, ikm, ikmLen, prkOut, prkOutSize);
+    /* PRK = HMAC-Hash(salt, IKM) — HMAC writes exactly hashSize bytes; any caller-supplied */
+    /* tail in prkOut beyond hashSize is left as-is (RFC 5869: PRK length is HashLen). */
+    return SSFHMAC(hash, salt, saltLen, ikm, ikmLen, prkOut, hashSize);
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -84,7 +85,7 @@ bool SSFHKDFExpand(SSFHMACHash_t hash,
     size_t done = 0;
     uint8_t tPrev[SSF_HMAC_MAX_HASH_SIZE];
     uint8_t tCurr[SSF_HMAC_MAX_HASH_SIZE];
-    SSFHMACContext_t ctx;
+    SSFHMACContext_t ctx = {0};
     size_t i;
 
     SSF_REQUIRE(prk != NULL);
@@ -123,7 +124,7 @@ bool SSFHKDFExpand(SSFHMACHash_t hash,
         /* Single-byte counter i */
         SSFHMACUpdate(&ctx, &iByte, 1);
 
-        SSFHMACEnd(&ctx, tCurr, sizeof(tCurr));
+        SSFHMACEnd(&ctx, tCurr, hashSize);
 
         /* Copy to output */
         copyLen = okmLen - done;
@@ -133,10 +134,12 @@ bool SSFHKDFExpand(SSFHMACHash_t hash,
 
         /* Save for next iteration */
         memcpy(tPrev, tCurr, hashSize);
+
+        /* Clear magic so the next iteration's Begin sees a fresh context. The DeInit also */
+        /* zeroizes the key-derived stack state held inside ctx.                           */
+        SSFHMACDeInit(&ctx);
     }
 
-    /* Zeroize key-derived stack state. */
-    SSFHMACDeInit(&ctx);
     SSFCryptSecureZero(tPrev, sizeof(tPrev));
     SSFCryptSecureZero(tCurr, sizeof(tCurr));
 

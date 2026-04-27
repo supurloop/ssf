@@ -34,10 +34,17 @@
 #include "ssfcrypt.h"
 
 /* --------------------------------------------------------------------------------------------- */
+/* Module defines.                                                                               */
+/* --------------------------------------------------------------------------------------------- */
+#define SSF_HMAC_CONTEXT_MAGIC (0x484D4143ul)   /* 'HMAC' — set by Begin, cleared by DeInit. */
+
+/* --------------------------------------------------------------------------------------------- */
 /* Returns the block size in bytes for the given hash algorithm.                                 */
 /* --------------------------------------------------------------------------------------------- */
 static size_t _SSFHMACGetBlockSize(SSFHMACHash_t hash)
 {
+    SSF_REQUIRE((hash > SSF_HMAC_HASH_MIN) && (hash < SSF_HMAC_HASH_MAX));
+
     switch (hash)
     {
     case SSF_HMAC_HASH_SHA1:   return 64u;
@@ -53,6 +60,8 @@ static size_t _SSFHMACGetBlockSize(SSFHMACHash_t hash)
 /* --------------------------------------------------------------------------------------------- */
 size_t SSFHMACGetHashSize(SSFHMACHash_t hash)
 {
+    SSF_REQUIRE((hash > SSF_HMAC_HASH_MIN) && (hash < SSF_HMAC_HASH_MAX));
+
     switch (hash)
     {
     case SSF_HMAC_HASH_SHA1:   return 20u;
@@ -68,6 +77,9 @@ size_t SSFHMACGetHashSize(SSFHMACHash_t hash)
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFHMACHashBegin(SSFHMACContext_t *ctx)
 {
+    SSF_REQUIRE(ctx != NULL);
+    SSF_REQUIRE((ctx->hash > SSF_HMAC_HASH_MIN) && (ctx->hash < SSF_HMAC_HASH_MAX));
+
     switch (ctx->hash)
     {
     case SSF_HMAC_HASH_SHA1:   SSFSHA1Begin(&ctx->hashCtx.sha1);     break;
@@ -79,17 +91,46 @@ static void _SSFHMACHashBegin(SSFHMACContext_t *ctx)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Hash dispatch: Update                                                                         */
+/* Hash dispatch: feed a single chunk whose length already fits in uint32_t.                     */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFHMACHashUpdateChunk(SSFHMACContext_t *ctx, const uint8_t *data, uint32_t chunk)
+{
+    SSF_REQUIRE(ctx != NULL);
+    SSF_REQUIRE((ctx->hash > SSF_HMAC_HASH_MIN) && (ctx->hash < SSF_HMAC_HASH_MAX));
+    SSF_REQUIRE((data != NULL) || (chunk == 0u));
+
+    switch (ctx->hash)
+    {
+    case SSF_HMAC_HASH_SHA1:   SSFSHA1Update(&ctx->hashCtx.sha1, data, chunk);     break;
+    case SSF_HMAC_HASH_SHA256: SSFSHA256Update(&ctx->hashCtx.sha2_32, data, chunk); break;
+    case SSF_HMAC_HASH_SHA384: SSFSHA2_64Update(&ctx->hashCtx.sha2_64, data, chunk); break;
+    case SSF_HMAC_HASH_SHA512: SSFSHA512Update(&ctx->hashCtx.sha2_64, data, chunk); break;
+    default: SSF_ASSERT(false); break;
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Hash dispatch: chunk a size_t-sized input into uint32_t-bounded SHA Update calls.             */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFHMACHashUpdate(SSFHMACContext_t *ctx, const uint8_t *data, size_t len)
 {
-    switch (ctx->hash)
+    SSF_REQUIRE(ctx != NULL);
+    SSF_REQUIRE((ctx->hash > SSF_HMAC_HASH_MIN) && (ctx->hash < SSF_HMAC_HASH_MAX));
+    SSF_REQUIRE((data != NULL) || (len == 0u));
+
+#if SIZE_MAX > UINT32_MAX
+    /* On 64-bit size_t hosts, peel off UINT32_MAX-sized chunks so the SHA Update's uint32_t   */
+    /* length argument is honored. The loop body never runs on 32-bit size_t (always false).   */
+    while (len > (size_t)UINT32_MAX)
     {
-    case SSF_HMAC_HASH_SHA1:   SSFSHA1Update(&ctx->hashCtx.sha1, data, (uint32_t)len);     break;
-    case SSF_HMAC_HASH_SHA256: SSFSHA256Update(&ctx->hashCtx.sha2_32, data, (uint32_t)len); break;
-    case SSF_HMAC_HASH_SHA384: SSFSHA2_64Update(&ctx->hashCtx.sha2_64, data, (uint32_t)len); break;
-    case SSF_HMAC_HASH_SHA512: SSFSHA512Update(&ctx->hashCtx.sha2_64, data, (uint32_t)len); break;
-    default: SSF_ASSERT(false); break;
+        _SSFHMACHashUpdateChunk(ctx, data, UINT32_MAX);
+        data += (size_t)UINT32_MAX;
+        len  -= (size_t)UINT32_MAX;
+    }
+#endif
+    if (len > 0u)
+    {
+        _SSFHMACHashUpdateChunk(ctx, data, (uint32_t)len);
     }
 }
 
@@ -98,6 +139,10 @@ static void _SSFHMACHashUpdate(SSFHMACContext_t *ctx, const uint8_t *data, size_
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFHMACHashEnd(SSFHMACContext_t *ctx, uint8_t *out, size_t outSize)
 {
+    SSF_REQUIRE(ctx != NULL);
+    SSF_REQUIRE((ctx->hash > SSF_HMAC_HASH_MIN) && (ctx->hash < SSF_HMAC_HASH_MAX));
+    SSF_REQUIRE(out != NULL);
+
     switch (ctx->hash)
     {
     case SSF_HMAC_HASH_SHA1:   SSFSHA1End(&ctx->hashCtx.sha1, out);                         break;
@@ -122,7 +167,9 @@ void SSFHMACBegin(SSFHMACContext_t *ctx, SSFHMACHash_t hash,
     size_t i;
 
     SSF_REQUIRE(ctx != NULL);
+    SSF_REQUIRE(ctx->magic != SSF_HMAC_CONTEXT_MAGIC);
     SSF_REQUIRE(key != NULL);
+    SSF_REQUIRE(keyLen > 0u);
     SSF_REQUIRE((hash > SSF_HMAC_HASH_MIN) && (hash < SSF_HMAC_HASH_MAX));
 
     ctx->hash = hash;
@@ -160,6 +207,10 @@ void SSFHMACBegin(SSFHMACContext_t *ctx, SSFHMACHash_t hash,
     /* Zeroize key-derived stack state. oKeyPad lives in ctx until SSFHMACDeInit. */
     SSFCryptSecureZero(keyPrime, sizeof(keyPrime));
     SSFCryptSecureZero(iKeyPad, sizeof(iKeyPad));
+
+    /* Mark the context valid last — if any earlier step asserts, magic stays unset and any */
+    /* subsequent Update / End / DeInit fails loudly instead of operating on partial state. */
+    ctx->magic = SSF_HMAC_CONTEXT_MAGIC;
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -168,6 +219,7 @@ void SSFHMACBegin(SSFHMACContext_t *ctx, SSFHMACHash_t hash,
 void SSFHMACUpdate(SSFHMACContext_t *ctx, const uint8_t *data, size_t dataLen)
 {
     SSF_REQUIRE(ctx != NULL);
+    SSF_REQUIRE(ctx->magic == SSF_HMAC_CONTEXT_MAGIC);
     SSF_REQUIRE((data != NULL) || (dataLen == 0));
 
     _SSFHMACHashUpdate(ctx, data, dataLen);
@@ -184,12 +236,17 @@ void SSFHMACEnd(SSFHMACContext_t *ctx, uint8_t *macOut, size_t macOutSize)
     uint8_t innerHash[SSF_HMAC_MAX_HASH_SIZE];
 
     SSF_REQUIRE(ctx != NULL);
+    SSF_REQUIRE(ctx->magic == SSF_HMAC_CONTEXT_MAGIC);
     SSF_REQUIRE(macOut != NULL);
 
     hashSize = SSFHMACGetHashSize(ctx->hash);
     blockSize = _SSFHMACGetBlockSize(ctx->hash);
 
-    SSF_REQUIRE(macOutSize >= hashSize);
+    /* Strict equality: HMAC always writes exactly hashSize bytes. Allowing macOutSize >  */
+    /* hashSize would leave the trailing region uninitialized, leaking stack contents to */
+    /* any caller that later read or transmitted the full buffer. Truncated MACs (<      */
+    /* hashSize) are the caller's responsibility post-hoc.                                */
+    SSF_REQUIRE(macOutSize == hashSize);
 
     /* Step 5: Finalize the inner hash */
     _SSFHMACHashEnd(ctx, innerHash, hashSize);
@@ -212,6 +269,7 @@ void SSFHMACEnd(SSFHMACContext_t *ctx, uint8_t *macOut, size_t macOutSize)
 void SSFHMACDeInit(SSFHMACContext_t *ctx)
 {
     SSF_REQUIRE(ctx != NULL);
+    SSF_REQUIRE(ctx->magic == SSF_HMAC_CONTEXT_MAGIC);
     SSFCryptSecureZero(ctx, sizeof(*ctx));
 }
 
@@ -222,13 +280,14 @@ bool SSFHMAC(SSFHMACHash_t hash, const uint8_t *key, size_t keyLen,
              const uint8_t *msg, size_t msgLen,
              uint8_t *macOut, size_t macOutSize)
 {
-    SSFHMACContext_t ctx;
+    SSFHMACContext_t ctx = {0};
 
     SSF_REQUIRE(key != NULL);
+    SSF_REQUIRE(keyLen > 0u);
     SSF_REQUIRE((msg != NULL) || (msgLen == 0));
     SSF_REQUIRE(macOut != NULL);
     SSF_REQUIRE((hash > SSF_HMAC_HASH_MIN) && (hash < SSF_HMAC_HASH_MAX));
-    SSF_REQUIRE(macOutSize >= SSFHMACGetHashSize(hash));
+    SSF_REQUIRE(macOutSize == SSFHMACGetHashSize(hash));
 
     SSFHMACBegin(&ctx, hash, key, keyLen);
     SSFHMACUpdate(&ctx, msg, msgLen);
@@ -236,3 +295,33 @@ bool SSFHMAC(SSFHMACHash_t hash, const uint8_t *key, size_t keyLen,
     SSFHMACDeInit(&ctx);
     return true;
 }
+
+#if SSF_CONFIG_HMAC_UNIT_TEST == 1
+/* --------------------------------------------------------------------------------------------- */
+/* Test hook: feed data through the chunking loop with a caller-supplied chunk max.              */
+/* --------------------------------------------------------------------------------------------- */
+void _SSFHMACTestHookUpdateChunked(SSFHMACContext_t *ctx, const uint8_t *data, size_t dataLen,
+                                    uint32_t chunkMax)
+{
+    SSF_REQUIRE(ctx != NULL);
+    SSF_REQUIRE(ctx->magic == SSF_HMAC_CONTEXT_MAGIC);
+    SSF_REQUIRE((data != NULL) || (dataLen == 0));
+    SSF_REQUIRE(chunkMax > 0u);
+
+    while (dataLen > 0u)
+    {
+        uint32_t chunk;
+        if (dataLen > (size_t)chunkMax)
+        {
+            chunk = chunkMax;
+        }
+        else
+        {
+            chunk = (uint32_t)dataLen;
+        }
+        _SSFHMACHashUpdateChunk(ctx, data, chunk);
+        data += chunk;
+        dataLen -= chunk;
+    }
+}
+#endif /* SSF_CONFIG_HMAC_UNIT_TEST */

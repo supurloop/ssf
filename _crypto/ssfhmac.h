@@ -71,6 +71,7 @@ typedef struct SSFHMACContext
         SSFSHA2_32Context_t sha2_32;
         SSFSHA2_64Context_t sha2_64;
     } hashCtx;
+    uint32_t magic;                             /* Context validity marker */
 } SSFHMACContext_t;
 
 /* --------------------------------------------------------------------------------------------- */
@@ -100,6 +101,11 @@ size_t SSFHMACGetHashSize(SSFHMACHash_t hash);
 /* --------------------------------------------------------------------------------------------- */
 #if SSF_CONFIG_HMAC_UNIT_TEST == 1
 void SSFHMACUnitTest(void);
+/* Test hook: forces SSFHMACUpdate's internal chunking with a configurable max chunk size, so   */
+/* the chunking loop is exercisable on practical buffer sizes (the production max is UINT32_MAX */
+/* which a unit test can't allocate). Not for production use.                                   */
+void _SSFHMACTestHookUpdateChunked(SSFHMACContext_t *ctx, const uint8_t *data, size_t dataLen,
+                                    uint32_t chunkMax);
 #endif /* SSF_CONFIG_HMAC_UNIT_TEST */
 
 #ifdef __cplusplus

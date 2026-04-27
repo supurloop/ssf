@@ -174,7 +174,7 @@ static bool _SSFECDSAGenK(SSFECCurve_t curve,
     uint8_t V[SSF_HMAC_MAX_HASH_SIZE];
     uint8_t K[SSF_HMAC_MAX_HASH_SIZE];
     uint8_t h1Octets[SSF_EC_MAX_COORD_BYTES];
-    SSFHMACContext_t ctx;
+    SSFHMACContext_t ctx = {0};
     uint8_t sep;
     uint8_t T[SSF_EC_MAX_COORD_BYTES];
     uint16_t attempts;
@@ -197,22 +197,23 @@ static bool _SSFECDSAGenK(SSFECCurve_t curve,
     SSFHMACUpdate(&ctx, &sep, 1);
     SSFHMACUpdate(&ctx, privKey, privKeyLen);
     SSFHMACUpdate(&ctx, h1Octets, c->bytes);
-    SSFHMACEnd(&ctx, K, sizeof(K));
+    SSFHMACEnd(&ctx, K, hlen);
 
     /* Step e: V = HMAC_K(V) */
-    SSFHMAC(hmacHash, K, hlen, V, hlen, V, sizeof(V));
+    SSFHMAC(hmacHash, K, hlen, V, hlen, V, hlen);
 
     /* Step f: K = HMAC_K(V || 0x01 || int2octets(x) || bits2octets(h1)) */
     sep = 0x01u;
+    SSFHMACDeInit(&ctx);
     SSFHMACBegin(&ctx, hmacHash, K, hlen);
     SSFHMACUpdate(&ctx, V, hlen);
     SSFHMACUpdate(&ctx, &sep, 1);
     SSFHMACUpdate(&ctx, privKey, privKeyLen);
     SSFHMACUpdate(&ctx, h1Octets, c->bytes);
-    SSFHMACEnd(&ctx, K, sizeof(K));
+    SSFHMACEnd(&ctx, K, hlen);
 
     /* Step g: V = HMAC_K(V) */
-    SSFHMAC(hmacHash, K, hlen, V, hlen, V, sizeof(V));
+    SSFHMAC(hmacHash, K, hlen, V, hlen, V, hlen);
 
     /* Step h: Loop until a valid k is found */
     for (attempts = 0; attempts < 100u; attempts++)
@@ -223,7 +224,7 @@ static bool _SSFECDSAGenK(SSFECCurve_t curve,
         while (tLen < c->bytes)
         {
             /* V = HMAC_K(V) */
-            SSFHMAC(hmacHash, K, hlen, V, hlen, V, sizeof(V));
+            SSFHMAC(hmacHash, K, hlen, V, hlen, V, hlen);
 
             /* T = T || V */
             {
@@ -250,12 +251,13 @@ static bool _SSFECDSAGenK(SSFECCurve_t curve,
 
         /* Step h.3 (retry): K = HMAC_K(V || 0x00), V = HMAC_K(V) */
         sep = 0x00u;
+        SSFHMACDeInit(&ctx);
         SSFHMACBegin(&ctx, hmacHash, K, hlen);
         SSFHMACUpdate(&ctx, V, hlen);
         SSFHMACUpdate(&ctx, &sep, 1);
-        SSFHMACEnd(&ctx, K, sizeof(K));
+        SSFHMACEnd(&ctx, K, hlen);
 
-        SSFHMAC(hmacHash, K, hlen, V, hlen, V, sizeof(V));
+        SSFHMAC(hmacHash, K, hlen, V, hlen, V, hlen);
     }
 
     SSFHMACDeInit(&ctx);

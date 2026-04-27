@@ -1733,25 +1733,22 @@ static void _SSFBNReduceP256(SSFBN_t *r, const SSFBN_t *t)
     s.limbs[6] = 0; s.limbs[7] = c[13];
     borrow += _SSFBNRawSub(r->limbs, r->limbs, s.limbs, 8);
 
-    /* CT correction loops. Mathematically equivalent to the data-dependent loops below but each */
-    /* always runs to its worst-case bound and uses a CT mask to decide whether to commit:        */
-    /*                                                                                            */
-    /*   while (borrow > carry) { r += p; borrow--; }    -- max 4 iters (4 sub ops above)         */
-    /*   while (carry > 0)      { r -= p; carry--; }     -- max 6 iters (6 add ops above)         */
-    /*   while (r >= p)         { r -= p; }              -- max 3 iters (post-correction bound)   */
-    /*                                                                                            */
-    /* This eliminates the per-modmul timing leak that fires inside every EC point operation.    */
-    /* Cost: ~5% per modmul on P-256 — acceptable for closing a side-channel leak that fires on  */
-    /* every modular multiply in the EC stack.                                                    */
+    /* CT correction loops. Each preserves V mod p where V = r + (carry - borrow) * 2^256.       */
+    /* The borrow/carry counters must only be decremented when the underlying add/sub actually   */
+    /* crosses the 2^256 boundary — otherwise the bookkeeping breaks the V-mod-p invariant       */
+    /* (Wycheproof ECDH P-256 tcId 49 / sparse-coord inputs were a victim of the prior buggy     */
+    /* unconditional decrement). Bounds: each successful (overflow-causing) iter is preceded by  */
+    /* up to one "spinning" non-overflow iter that pushes r toward 2^256 — so 2× the original    */
+    /* worst-case carry/borrow counts cover all cases.                                            */
     tmp.len = 8;
     {
-        SSFBNLimb_t mask, lim, subBorrow;
+        SSFBNLimb_t mask, lim, addCarry, subBorrow;
         uint16_t k, j;
 
-        /* Loop 1: add p when borrow > carry. */
-        for (k = 0; k < 4u; k++)
+        /* Loop 1: while (borrow > carry), add p. Decrement borrow ONLY when the add overflows. */
+        for (k = 0; k < 8u; k++)
         {
-            (void)_SSFBNRawAdd(tmp.limbs, r->limbs, SSF_BN_NIST_P256.limbs, 8);
+            addCarry = _SSFBNRawAdd(tmp.limbs, r->limbs, SSF_BN_NIST_P256.limbs, 8);
             /* mask = all-ones if (borrow > carry); use unsigned wraparound on (carry - borrow). */
             lim = carry - borrow;
             mask = (SSFBNLimb_t)0u - (SSFBNLimb_t)(lim >> (SSF_BN_LIMB_BITS - 1u));
@@ -1759,16 +1756,16 @@ static void _SSFBNReduceP256(SSFBN_t *r, const SSFBN_t *t)
             {
                 r->limbs[j] = (tmp.limbs[j] & mask) | (r->limbs[j] & ~mask);
             }
-            borrow -= (mask & 1u);
+            borrow -= (mask & 1u) & (addCarry & 1u);
         }
 
         /* Now borrow <= carry; collapse to a single net carry. */
         carry -= borrow;
 
-        /* Loop 2: subtract p while carry > 0. */
-        for (k = 0; k < 6u; k++)
+        /* Loop 2: while (carry > 0), subtract p. Decrement carry ONLY when the sub underflows. */
+        for (k = 0; k < 12u; k++)
         {
-            (void)_SSFBNRawSub(tmp.limbs, r->limbs, SSF_BN_NIST_P256.limbs, 8);
+            subBorrow = _SSFBNRawSub(tmp.limbs, r->limbs, SSF_BN_NIST_P256.limbs, 8);
             /* mask = all-ones if carry != 0. */
             mask = (SSFBNLimb_t)0u -
                    (SSFBNLimb_t)(((carry | (SSFBNLimb_t)(0u - carry)) >> (SSF_BN_LIMB_BITS - 1u)));
@@ -1776,7 +1773,7 @@ static void _SSFBNReduceP256(SSFBN_t *r, const SSFBN_t *t)
             {
                 r->limbs[j] = (tmp.limbs[j] & mask) | (r->limbs[j] & ~mask);
             }
-            carry -= (mask & 1u);
+            carry -= (mask & 1u) & (subBorrow & 1u);
         }
 
         /* Loop 3: final reduce. mask is set when the trial subtract did not underflow. */
@@ -1869,41 +1866,37 @@ static void _SSFBNReduceP384(SSFBN_t *r, const SSFBN_t *t)
     s.limbs[3] = c[23]; s.limbs[4] = c[23];
     borrow += _SSFBNRawSub(r->limbs, r->limbs, s.limbs, 12);
 
-    /* CT correction loops. See _SSFBNReduceP256 for the algorithm; bounds for P-384 are:        */
-    /*   borrow correction: max 3 iters (3 sub ops above)                                         */
-    /*   carry correction:  max 7 iters (7 add ops above)                                         */
-    /*   final reduce:      max 3 iters (post-correction bound)                                   */
-    /* Measured cost: ~13% per modmul on P-384 (more than P-256's 5% because n=12 limbs vs 8     */
-    /* and 13 max iters vs 13 here — same total, but each iter is heavier).                       */
+    /* CT correction loops — same algorithm as _SSFBNReduceP256. Bounds doubled to handle the    */
+    /* "non-progressing" non-overflow iters that occur for sparse-coord inputs.                   */
     tmp.len = 12;
     {
-        SSFBNLimb_t mask, lim, subBorrow;
+        SSFBNLimb_t mask, lim, addCarry, subBorrow;
         uint16_t k, j;
 
-        for (k = 0; k < 3u; k++)
+        for (k = 0; k < 6u; k++)  /* original max borrow = 3, doubled */
         {
-            (void)_SSFBNRawAdd(tmp.limbs, r->limbs, SSF_BN_NIST_P384.limbs, 12);
+            addCarry = _SSFBNRawAdd(tmp.limbs, r->limbs, SSF_BN_NIST_P384.limbs, 12);
             lim = carry - borrow;
             mask = (SSFBNLimb_t)0u - (SSFBNLimb_t)(lim >> (SSF_BN_LIMB_BITS - 1u));
             for (j = 0; j < 12u; j++)
             {
                 r->limbs[j] = (tmp.limbs[j] & mask) | (r->limbs[j] & ~mask);
             }
-            borrow -= (mask & 1u);
+            borrow -= (mask & 1u) & (addCarry & 1u);
         }
 
         carry -= borrow;
 
-        for (k = 0; k < 7u; k++)
+        for (k = 0; k < 14u; k++)  /* original max carry = 7, doubled */
         {
-            (void)_SSFBNRawSub(tmp.limbs, r->limbs, SSF_BN_NIST_P384.limbs, 12);
+            subBorrow = _SSFBNRawSub(tmp.limbs, r->limbs, SSF_BN_NIST_P384.limbs, 12);
             mask = (SSFBNLimb_t)0u -
                    (SSFBNLimb_t)(((carry | (SSFBNLimb_t)(0u - carry)) >> (SSF_BN_LIMB_BITS - 1u)));
             for (j = 0; j < 12u; j++)
             {
                 r->limbs[j] = (tmp.limbs[j] & mask) | (r->limbs[j] & ~mask);
             }
-            carry -= (mask & 1u);
+            carry -= (mask & 1u) & (subBorrow & 1u);
         }
 
         for (k = 0; k < 3u; k++)

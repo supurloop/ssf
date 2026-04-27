@@ -330,15 +330,26 @@ static bool _SSFECDSASigDecode(const uint8_t *sig, size_t sigLen,
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: reduce an affine x-coordinate modulo n.                                             */
-/* For NIST curves, p > n but p < 2n, so at most one subtraction is needed.                      */
+/* Internal: reduce an affine x-coordinate modulo n, constant-time.                              */
+/* For NIST curves, p > n but p < 2n, so at most one subtraction is needed. The CT version       */
+/* always does the trial subtract and uses a mask to decide whether to commit. This closes the   */
+/* "is Rx >= n?" one-bit timing leak that fired in ECDSA Sign on the secret-derived Rx value.    */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFECDSAReduceModN(SSFBN_t *r, const SSFBN_t *x, const SSFECCurveParams_t *c)
 {
+    SSFBN_DEFINE(tmp, SSF_EC_MAX_LIMBS);
+    SSFBNLimb_t borrow;
+    SSFBNLimb_t mask;
+    uint16_t i;
+
     SSFBNCopy(r, x);
-    if (SSFBNCmp(r, &c->n) >= 0)
+    tmp.len = r->len;
+    /* tmp = r - n. If r >= n, borrow == 0 and we commit tmp; else keep r. */
+    borrow = SSFBNSub(&tmp, r, &c->n);
+    mask = (SSFBNLimb_t)(borrow - 1u);  /* all-ones if borrow == 0, else 0 */
+    for (i = 0; i < r->len; i++)
     {
-        SSFBNSub(r, r, &c->n);
+        r->limbs[i] = (tmp.limbs[i] & mask) | (r->limbs[i] & ~mask);
     }
 }
 

@@ -67,12 +67,16 @@ already cover.
   constants — `p`, `a`, `b`, `gₓ`, `gᵧ`, `n`). Disabling both is a compile error. The
   header also compile-time asserts that
   [`SSF_BN_CONFIG_MAX_BITS`](ssfbn.md#ssf-bn-config-max-bits) is large enough for each
-  enabled curve (`≥ 256` for P-256, `≥ 384` for P-384).
+  enabled curve (`≥ 512` for P-256, `≥ 768` for P-384). The minimum is twice the curve
+  operand width because [`SSFBNModMulNIST()`](ssfbn.md#modmulnist) routes through
+  [`SSFBNMul()`](ssfbn.md#mul), whose `2N`-limb intermediate product is gated by
+  `SSF_BN_MAX_LIMBS`.
 - **For ECC-only builds, drop the BN width.** Stack usage inside scalar multiplication
-  scales linearly with `SSF_BN_CONFIG_MAX_BITS`. The default 4096-bit width (set by
-  `ssfbn_opt.h` to accommodate RSA-4096) bloats every `SSFECPoint_t` to ~1.5 KB on the
-  stack. If you do not need RSA, setting `SSF_BN_CONFIG_MAX_BITS = 384` cuts scalar-mul
-  peak stack by roughly an order of magnitude — see the top-level README footnote.
+  scales linearly with `SSF_BN_CONFIG_MAX_BITS`. The default 8192-bit width (set by
+  `ssfbn_opt.h` to accommodate RSA-4096) bloats every `SSFBN_t` and `SSFECPoint_t`
+  intermediate. If you do not need RSA, setting `SSF_BN_CONFIG_MAX_BITS = 512`
+  (P-256-only) or `768` (P-384) cuts scalar-mul peak stack by roughly an order of
+  magnitude.
 - **Identity is represented as `Z = 0`.** [`SSFECPointIsIdentity()`](#ssfecpointisidentity)
   checks that flag; [`SSFECPointSetIdentity()`](#ssfecpointsetidentity) produces it;
   [`SSFECPointToAffine()`](#ssfecpointtoaffine) returns `false` if asked to convert the
@@ -100,8 +104,8 @@ enabled.
 
 | Macro | Default | Description |
 |-------|---------|-------------|
-| `SSF_EC_CONFIG_ENABLE_P256` | `1` | Enable NIST P-256 (`secp256r1` / `prime256v1`). Requires `SSF_BN_CONFIG_MAX_BITS ≥ 256`. |
-| `SSF_EC_CONFIG_ENABLE_P384` | `1` | Enable NIST P-384 (`secp384r1`). Requires `SSF_BN_CONFIG_MAX_BITS ≥ 384`. |
+| `SSF_EC_CONFIG_ENABLE_P256` | `1` | Enable NIST P-256 (`secp256r1` / `prime256v1`). Requires `SSF_BN_CONFIG_MAX_BITS ≥ 512` (2 × 256). |
+| `SSF_EC_CONFIG_ENABLE_P384` | `1` | Enable NIST P-384 (`secp384r1`). Requires `SSF_BN_CONFIG_MAX_BITS ≥ 768` (2 × 384). |
 
 Disabling a curve removes its parameter constants from the build and compiles out any code
 paths that reference it. Disabling both produces `#error At least one EC curve must be

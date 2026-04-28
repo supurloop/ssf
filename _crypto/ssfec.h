@@ -91,15 +91,17 @@ extern "C" {
 /* --------------------------------------------------------------------------------------------- */
 /* Compile-time validation                                                                       */
 /* --------------------------------------------------------------------------------------------- */
+/* The minimum is 2 × the curve operand width because SSFBNModMulNIST routes through SSFBNMul,   */
+/* whose intermediate product occupies 2N limbs and is gated by SSF_BN_MAX_LIMBS.                */
 #if SSF_EC_CONFIG_ENABLE_P256 == 1
-#if SSF_BN_CONFIG_MAX_BITS < 256
-#error SSF_BN_CONFIG_MAX_BITS must be >= 256 for P-256 support.
+#if SSF_BN_CONFIG_MAX_BITS < 512
+#error SSF_BN_CONFIG_MAX_BITS must be >= 512 for P-256 support (2 x 256-bit operand).
 #endif
 #endif
 
 #if SSF_EC_CONFIG_ENABLE_P384 == 1
-#if SSF_BN_CONFIG_MAX_BITS < 384
-#error SSF_BN_CONFIG_MAX_BITS must be >= 384 for P-384 support.
+#if SSF_BN_CONFIG_MAX_BITS < 768
+#error SSF_BN_CONFIG_MAX_BITS must be >= 768 for P-384 support (2 x 384-bit operand).
 #endif
 #endif
 
@@ -114,7 +116,7 @@ extern "C" {
 /* SSFECScalarMulDual is NOT constant-time; it is intended for ECDSA verify where both scalars   */
 /* are derived from public data.                                                                 */
 /* Stack usage scales with SSF_BN_CONFIG_MAX_BITS. For ECC-only applications, set                */
-/* SSF_BN_CONFIG_MAX_BITS to 384 to minimize stack usage.                                        */
+/* SSF_BN_CONFIG_MAX_BITS to 512 (P-256-only) or 768 (P-384) to minimize stack usage.            */
 /* --------------------------------------------------------------------------------------------- */
 
 /* --------------------------------------------------------------------------------------------- */

@@ -139,15 +139,15 @@ you will operate on.
 
 | Macro | Default | Description |
 |-------|---------|-------------|
-| <a id="ssf-bn-config-max-bits"></a>`SSF_BN_CONFIG_MAX_BITS` | `4096` | Maximum big-number width in bits. Sizes the limb arrays produced by [`SSFBN_DEFINE`](#ssfbn-define) inside this module's own callers (e.g., the working `SSFBN_t`s declared in `SSFBNModExp`, `SSFBNModInv`, `SSFBNGenPrime`), and bounds the per-instance `cap`. Set to `384` for ECC-P-256/P-384 only, `2048` for RSA-2048 / DH Group 14, `4096` for RSA-4096 / DH Group 16. Multiplication needs `2 × key-bits` of result limbs, so RSA-2048 still fits in a 4096-bit configuration, but RSA-4096 does not fit in a 2048-bit one. |
+| <a id="ssf-bn-config-max-bits"></a>`SSF_BN_CONFIG_MAX_BITS` | `8192` | Maximum big-number width in bits. Sizes the limb arrays produced by [`SSFBN_DEFINE`](#ssfbn-define) inside this module's own callers (e.g., the working `SSFBN_t`s declared in `SSFBNModExp`, `SSFBNModInv`, `SSFBNGenPrime`), and bounds the per-instance `cap`. Multiplication produces a `2N`-limb intermediate, so the cap must be **twice** the largest operand width: set `512` for P-256-only, `768` for P-256+P-384, `4096` for RSA-2048, `6144` for RSA-3072, `8192` for RSA-4096 (or any combination — pick the maximum across all enabled algorithms). |
 
 The `SSFBN_t` struct itself is small (a pointer plus two `uint16_t` fields); the actual
 limb storage lives in whatever array the caller supplies. Dropping `SSF_BN_CONFIG_MAX_BITS`
-from `4096` to `2048` halves the per-array storage that `SSFBN_DEFINE(name,
-SSF_BN_MAX_LIMBS)` allocates (from 512 to 256 bytes), which directly reduces every
-caller's stack frame. The `ssfrsa` and `ssfbn` modules sanity-check against this macro at
-compile time (`SSF_BN_MAX_LIMBS <= 32767` so `a->len + b->len` cannot wrap `uint16_t` in
-`SSFBNMul` / `SSFBNSquare`).
+from `8192` to `768` cuts the per-array storage that `SSFBN_DEFINE(name, SSF_BN_MAX_LIMBS)`
+allocates from 1024 bytes to 96 bytes, which directly reduces every caller's stack frame.
+The `ssfrsa` and `ssfbn` modules sanity-check against this macro at compile time
+(`SSF_BN_MAX_LIMBS <= 32767` so `a->len + b->len` cannot wrap `uint16_t` in `SSFBNMul` /
+`SSFBNSquare`).
 
 <a id="api-summary"></a>
 
@@ -169,7 +169,7 @@ compile time (`SSF_BN_MAX_LIMBS <= 32767` so `a->len + b->len` cannot wrap `uint
 | <a id="ssfbnmont-t"></a>`SSFBNMont_t` | Struct | Precomputed Montgomery reduction context for a given modulus: holds the modulus `mod` (an `SSFBN_t`), `rr` (`R² mod m`, an `SSFBN_t`), `mp` (`-m⁻¹ mod 2³²`), and `len`. Treat members as opaque; declare via [`SSFBNMONT_DEFINE`](#ssfbnmont-define) and initialise via [`SSFBNMontInit()`](#montinit). |
 | <a id="ssfbn-define"></a>`SSFBN_DEFINE(name, nlimbs)` | Macro | Declare an `SSFBN_t` named `name` backed by a fresh zero-initialised `SSFBNLimb_t[nlimbs]` array. Expands to two declarations (storage + struct), so it must appear in a scope that admits multiple declarations (function body or block — not an initialiser expression). Pick `nlimbs` to fit the widest operand the code path will see (`SSF_EC_MAX_LIMBS` (12) for P-384-capable ECC, `SSF_BN_BITS_TO_LIMBS(256)` (8) for P-256-only, `SSF_BN_MAX_LIMBS` for generic / RSA code). |
 | <a id="ssfbnmont-define"></a>`SSFBNMONT_DEFINE(name, nlimbs)` | Macro | Declare an `SSFBNMont_t` named `name` with fresh zero-initialised limb storage for both `mod` and `rr` (each of capacity `nlimbs`). Same scope restrictions as `SSFBN_DEFINE`. |
-| <a id="nist-constants"></a>`SSF_BN_NIST_P256`, `SSF_BN_NIST_P384` | `extern const SSFBN_t` | The NIST P-256 and P-384 curve primes (8 / 12 limbs respectively), ready to pass as a modulus to [`SSFBNModMulNIST()`](#modmulnist). Defined when `SSF_BN_CONFIG_MAX_BITS` is at least 256 / 384. |
+| <a id="nist-constants"></a>`SSF_BN_NIST_P256`, `SSF_BN_NIST_P384` | `extern const SSFBN_t` | The NIST P-256 and P-384 curve primes (8 / 12 limbs respectively), ready to pass as a modulus to [`SSFBNModMulNIST()`](#modmulnist). Defined when `SSF_BN_CONFIG_MAX_BITS` is at least 512 / 768 — the cap must hold the 2N-limb intermediate product from [`SSFBNMul()`](#mul). |
 
 <a id="functions"></a>
 

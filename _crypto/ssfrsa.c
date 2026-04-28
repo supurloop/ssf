@@ -68,6 +68,82 @@ static const uint8_t _ssfRSADigestInfoSHA512[] = {
 #endif /* SSF_RSA_CONFIG_ENABLE_PKCS1_V15 */
 
 /* --------------------------------------------------------------------------------------------- */
+/* Internal: zero a byte buffer through a volatile pointer so the compiler cannot elide the      */
+/* writes. Mirrors the pattern in SSFBNZeroize for non-SSFBN scratch (entropy buffers, byte      */
+/* arrays).                                                                                       */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFRSASecureWipe(void *buf, size_t len)
+{
+    volatile uint8_t *p = (volatile uint8_t *)buf;
+    while (len > 0u) { *p++ = 0u; len--; }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: scrub the deeper-stack region used by ssfbn primitives that ssfrsa just called.     */
+/* SSFBNGcd, SSFBNDivMod, SSFBNModInv, SSFBNModInvExt, SSFBNModExp etc. all leave their internal */
+/* SSFBN locals in their freed frames, and ssfrsa cannot reach into those frames to wipe them.   */
+/* Calling this helper from sign / keygen cleanup allocates a fresh frame at the same depth      */
+/* those primitives just vacated and overwrites it with zeros. The size is generous enough to    */
+/* cover the deepest in-tree BN call chain (SSFBNModInvExt + helpers).                            */
+/* --------------------------------------------------------------------------------------------- */
+__attribute__((noinline))
+static void _SSFRSAStackScrub(void)
+{
+    volatile uint8_t scratch[8192];
+    size_t i;
+    for (i = 0u; i < sizeof(scratch); i++) scratch[i] = 0u;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: convert an SSFBN-serialized magnitude into a strict-DER INTEGER body, in place.     */
+/* ASN.1 INTEGER is signed two's-complement (X.690 §8.3.2): a positive magnitude whose leading   */
+/* byte has bit 7 set must carry a single 0x00 padding byte. Strips leading zeros first so the   */
+/* output is canonical regardless of how zero-padded the SSFBNToBytes output was. Caller must    */
+/* size intBuf for at least magLen + 1 bytes to accommodate the optional padding byte.           */
+/* All-zero magnitudes collapse to a single 0x00 byte (DER's canonical zero).                    */
+/* --------------------------------------------------------------------------------------------- */
+static size_t _SSFRSANormalizeMag(uint8_t *intBuf, size_t magLen)
+{
+    size_t i;
+
+    for (i = 0; i < magLen && intBuf[i] == 0u; i++) {}
+    if (i == magLen)
+    {
+        intBuf[0] = 0x00u;
+        return 1u;
+    }
+    if (i > 0u)
+    {
+        memmove(intBuf, &intBuf[i], magLen - i);
+        magLen -= i;
+    }
+    if ((intBuf[0] & 0x80u) != 0u)
+    {
+        memmove(&intBuf[1], intBuf, magLen);
+        intBuf[0] = 0x00u;
+        magLen += 1u;
+    }
+    return magLen;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: read the next ASN.1 INTEGER under cursor and import it into bn at the requested    */
+/* limb width, stripping the leading 0x00 sign byte (or any spurious leading zeros) so that      */
+/* magnitudes that are exactly limbs*4 bytes long round-trip even when the producer emitted the  */
+/* canonical positive-INTEGER 0x00 prefix. Returns false on any structural or sizing error.      */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFRSADecIntToBN(const SSFASN1Cursor_t *cursor, SSFBN_t *bn, uint16_t limbs,
+                              SSFASN1Cursor_t *next)
+{
+    const uint8_t *buf;
+    uint32_t bufLen;
+
+    if (!SSFASN1DecGetInt(cursor, &buf, &bufLen, next)) return false;
+    while (bufLen > 0u && *buf == 0u) { buf++; bufLen--; }
+    return SSFBNFromBytes(bn, buf, bufLen, limbs);
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Internal: hash output size for the given hash algorithm.                                      */
 /* --------------------------------------------------------------------------------------------- */
 static size_t _SSFRSAGetHashSize(SSFRSAHash_t hash)
@@ -130,20 +206,15 @@ static bool _SSFRSAPubKeyEncode(const SSFBN_t *n, const SSFBN_t *e,
 {
     size_t nBytes = (size_t)n->len * sizeof(SSFBNLimb_t);
     size_t eBytes = (size_t)e->len * sizeof(SSFBNLimb_t);
-    uint8_t nBuf[SSF_BN_MAX_BYTES];
-    uint8_t eBuf[SSF_BN_MAX_BYTES];
+    uint8_t nBuf[SSF_BN_MAX_BYTES + 1u];
+    uint8_t eBuf[SSF_BN_MAX_BYTES + 1u];
     uint32_t nEncLen, eEncLen, contentLen, seqHdrLen, offset;
 
     if (!SSFBNToBytes(n, nBuf, nBytes)) return false;
     if (!SSFBNToBytes(e, eBuf, eBytes)) return false;
 
-    /* Find actual byte length of e (strip leading zeros) */
-    {
-        size_t i;
-        for (i = 0; i < eBytes - 1u; i++) { if (eBuf[i] != 0u) break; }
-        memmove(eBuf, &eBuf[i], eBytes - i);
-        eBytes -= i;
-    }
+    nBytes = _SSFRSANormalizeMag(nBuf, nBytes);
+    eBytes = _SSFRSANormalizeMag(eBuf, eBytes);
 
     if (!SSFASN1EncInt(NULL, 0, nBuf, (uint32_t)nBytes, &nEncLen)) return false;
     if (!SSFASN1EncInt(NULL, 0, eBuf, (uint32_t)eBytes, &eEncLen)) return false;
@@ -232,7 +303,7 @@ static bool _SSFRSAPrivKeyEncode(const SSFBN_t *n, const SSFBN_t *e, const SSFBN
                                  const SSFBN_t *dp, const SSFBN_t *dq, const SSFBN_t *qInv,
                                  uint8_t *der, size_t derSize, size_t *derLen)
 {
-    uint8_t buf[SSF_BN_MAX_BYTES];
+    uint8_t buf[SSF_BN_MAX_BYTES + 1u];
     uint32_t encLens[9];
     uint32_t contentLen = 0;
     uint32_t seqHdrLen;
@@ -249,8 +320,9 @@ static bool _SSFRSAPrivKeyEncode(const SSFBN_t *n, const SSFBN_t *e, const SSFBN
 
     for (i = 1; i < 9u; i++)
     {
-        fieldBytes[i] = (size_t)fields[i]->len * sizeof(SSFBNLimb_t);
-        if (!SSFBNToBytes(fields[i], buf, fieldBytes[i])) return false;
+        size_t magLen = (size_t)fields[i]->len * sizeof(SSFBNLimb_t);
+        if (!SSFBNToBytes(fields[i], buf, magLen)) return false;
+        fieldBytes[i] = _SSFRSANormalizeMag(buf, magLen);
         if (!SSFASN1EncInt(NULL, 0, buf, (uint32_t)fieldBytes[i], &encLens[i])) return false;
         contentLen += encLens[i];
     }
@@ -271,7 +343,9 @@ static bool _SSFRSAPrivKeyEncode(const SSFBN_t *n, const SSFBN_t *e, const SSFBN
 
         for (i = 1; i < 9u; i++)
         {
-            (void)SSFBNToBytes(fields[i], buf, fieldBytes[i]);
+            size_t magLen = (size_t)fields[i]->len * sizeof(SSFBNLimb_t);
+            (void)SSFBNToBytes(fields[i], buf, magLen);
+            (void)_SSFRSANormalizeMag(buf, magLen); /* fieldBytes[i] computed in pass 1 */
             if (!SSFASN1EncInt(&der[offset], (uint32_t)(derSize - offset),
                                buf, (uint32_t)fieldBytes[i], &wrLen))
             {
@@ -296,7 +370,7 @@ static bool _SSFRSAPrivKeyDecode(const uint8_t *der, size_t derLen,
                                  SSFBN_t *dp, SSFBN_t *dq, SSFBN_t *qInv,
                                  uint16_t *nLimbs)
 {
-    SSFASN1Cursor_t cursor, inner, next;
+    SSFASN1Cursor_t cursor, inner, next, peek;
     const uint8_t *buf;
     uint32_t bufLen;
     uint64_t version;
@@ -311,49 +385,29 @@ static bool _SSFRSAPrivKeyDecode(const uint8_t *der, size_t derLen,
     if (!SSFASN1DecGetIntU64(&inner, &version, &next)) return false;
     if (version != 0u) return false;
 
-    /* n */
-    if (!SSFASN1DecGetInt(&next, &buf, &bufLen, &next)) return false;
-    {
-        const uint8_t *nb = buf;
-        uint32_t nbLen = bufLen;
-        while (nbLen > 0u && *nb == 0u) { nb++; nbLen--; }
-        nl = (uint16_t)SSF_BN_BITS_TO_LIMBS(nbLen * 8u);
-    }
-    if (!SSFBNFromBytes(n, buf, bufLen, nl)) return false;
+    /* n: peek to derive nl from the magnitude length, then import via the helper. */
+    peek = next;
+    if (!SSFASN1DecGetInt(&peek, &buf, &bufLen, &peek)) return false;
+    while (bufLen > 0u && *buf == 0u) { buf++; bufLen--; }
+    nl = (uint16_t)SSF_BN_BITS_TO_LIMBS(bufLen * 8u);
+    if (!_SSFRSADecIntToBN(&next, n, nl, &next)) return false;
 
-    /* e */
-    if (!SSFASN1DecGetInt(&next, &buf, &bufLen, &next)) return false;
-    if (!SSFBNFromBytes(e, buf, bufLen, nl)) return false;
+    /* e, d are loaded at full key width. */
+    if (!_SSFRSADecIntToBN(&next, e, nl, &next)) return false;
+    if (!_SSFRSADecIntToBN(&next, d, nl, &next)) return false;
 
-    /* d */
-    if (!SSFASN1DecGetInt(&next, &buf, &bufLen, &next)) return false;
-    if (!SSFBNFromBytes(d, buf, bufLen, nl)) return false;
+    /* p: peek to derive hl from the magnitude length. */
+    peek = next;
+    if (!SSFASN1DecGetInt(&peek, &buf, &bufLen, &peek)) return false;
+    while (bufLen > 0u && *buf == 0u) { buf++; bufLen--; }
+    hl = (uint16_t)SSF_BN_BITS_TO_LIMBS(bufLen * 8u);
+    if (!_SSFRSADecIntToBN(&next, p, hl, &next)) return false;
 
-    /* p */
-    if (!SSFASN1DecGetInt(&next, &buf, &bufLen, &next)) return false;
-    {
-        const uint8_t *pb = buf;
-        uint32_t pbLen = bufLen;
-        while (pbLen > 0u && *pb == 0u) { pb++; pbLen--; }
-        hl = (uint16_t)SSF_BN_BITS_TO_LIMBS(pbLen * 8u);
-    }
-    if (!SSFBNFromBytes(p, buf, bufLen, hl)) return false;
-
-    /* q */
-    if (!SSFASN1DecGetInt(&next, &buf, &bufLen, &next)) return false;
-    if (!SSFBNFromBytes(q, buf, bufLen, hl)) return false;
-
-    /* dp */
-    if (!SSFASN1DecGetInt(&next, &buf, &bufLen, &next)) return false;
-    if (!SSFBNFromBytes(dp, buf, bufLen, hl)) return false;
-
-    /* dq */
-    if (!SSFASN1DecGetInt(&next, &buf, &bufLen, &next)) return false;
-    if (!SSFBNFromBytes(dq, buf, bufLen, hl)) return false;
-
-    /* qInv */
-    if (!SSFASN1DecGetInt(&next, &buf, &bufLen, &next)) return false;
-    if (!SSFBNFromBytes(qInv, buf, bufLen, hl)) return false;
+    /* q, dp, dq, qInv are loaded at half-key width. */
+    if (!_SSFRSADecIntToBN(&next, q, hl, &next)) return false;
+    if (!_SSFRSADecIntToBN(&next, dp, hl, &next)) return false;
+    if (!_SSFRSADecIntToBN(&next, dq, hl, &next)) return false;
+    if (!_SSFRSADecIntToBN(&next, qInv, hl, &next)) return false;
 
     *nLimbs = nl;
     return true;
@@ -383,11 +437,18 @@ static bool _SSFRSAPrivateOpCRT(const SSFBN_t *c, uint16_t nLimbs,
                                 const SSFBN_t *qInv,
                                 SSFBN_t *result)
 {
+    /* Flat declarations (vs. nested scopes) so the cleanup section can wipe every local on the */
+    /* return path. Each of these carries information about the secret factors p, q or the      */
+    /* secret CRT exponents dp, dq, so leaving them in the freed frame would be a hygiene leak. */
     SSFBN_DEFINE(cp, SSF_BN_MAX_LIMBS);
     SSFBN_DEFINE(cq, SSF_BN_MAX_LIMBS);
     SSFBN_DEFINE(m1, SSF_BN_MAX_LIMBS);
     SSFBN_DEFINE(m2, SSF_BN_MAX_LIMBS);
     SSFBN_DEFINE(h, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(m2Full, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(hFull, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(qFull, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(prod, SSF_BN_MAX_LIMBS);
     uint16_t hl = p->len;
 
     /* cp = c mod p, cq = c mod q */
@@ -413,33 +474,119 @@ static bool _SSFRSAPrivateOpCRT(const SSFBN_t *c, uint16_t nLimbs,
     }
     SSFBNModMul(&h, qInv, &h, p);
 
-    /* result = m2 + h * q (in full n-width) */
+    /* Expand half-width values to full n-width. */
+    SSFBNSetZero(&m2Full, nLimbs);
+    memcpy(m2Full.limbs, m2.limbs, (size_t)hl * sizeof(SSFBNLimb_t));
+    SSFBNSetZero(&hFull, nLimbs);
+    memcpy(hFull.limbs, h.limbs, (size_t)hl * sizeof(SSFBNLimb_t));
+    SSFBNSetZero(&qFull, nLimbs);
+    memcpy(qFull.limbs, q->limbs, (size_t)hl * sizeof(SSFBNLimb_t));
+
+    /* result = (h * q) + m2 (in full n-width). */
+    SSFBNMul(&prod, &hFull, &qFull);
+    result->len = nLimbs;
+    memcpy(result->limbs, prod.limbs, (size_t)nLimbs * sizeof(SSFBNLimb_t));
+    SSFBNAdd(result, result, &m2Full);
+
+    SSFBNZeroize(&cp);
+    SSFBNZeroize(&cq);
+    SSFBNZeroize(&m1);
+    SSFBNZeroize(&m2);
+    SSFBNZeroize(&h);
+    SSFBNZeroize(&m2Full);
+    SSFBNZeroize(&hFull);
+    SSFBNZeroize(&qFull);
+    SSFBNZeroize(&prod);
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* FIPS 186-4 §B.3 keygen post-condition checks.                                                 */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFRSAFipsPrimeDistanceOK(const SSFBN_t *p, const SSFBN_t *q, uint16_t halfBits)
+{
+    SSFBN_DEFINE(diff, SSF_BN_MAX_LIMBS);
+
+    SSF_REQUIRE(p != NULL);
+    SSF_REQUIRE(p->limbs != NULL);
+    SSF_REQUIRE(q != NULL);
+    SSF_REQUIRE(q->limbs != NULL);
+    SSF_REQUIRE(halfBits > 100u);
+
+    if (SSFBNCmp(p, q) >= 0)
     {
-        SSFBN_DEFINE(m2Full, SSF_BN_MAX_LIMBS);
-        SSFBN_DEFINE(hFull, SSF_BN_MAX_LIMBS);
-        SSFBN_DEFINE(qFull, SSF_BN_MAX_LIMBS);
-
-        /* Expand half-width values to full n-width */
-        SSFBNSetZero(&m2Full, nLimbs);
-        memcpy(m2Full.limbs, m2.limbs, (size_t)hl * sizeof(SSFBNLimb_t));
-
-        SSFBNSetZero(&hFull, nLimbs);
-        memcpy(hFull.limbs, h.limbs, (size_t)hl * sizeof(SSFBNLimb_t));
-
-        SSFBNSetZero(&qFull, nLimbs);
-        memcpy(qFull.limbs, q->limbs, (size_t)hl * sizeof(SSFBNLimb_t));
-
-        /* hq = h * q (result fits in nLimbs since h < p and q < n/p) */
-        {
-            SSFBN_DEFINE(prod, SSF_BN_MAX_LIMBS);
-            SSFBNMul(&prod, &hFull, &qFull);
-            /* prod.len = 2*nLimbs; take lower nLimbs */
-            result->len = nLimbs;
-            memcpy(result->limbs, prod.limbs, (size_t)nLimbs * sizeof(SSFBNLimb_t));
-        }
-
-        SSFBNAdd(result, result, &m2Full);
+        (void)SSFBNSub(&diff, p, q);
     }
+    else
+    {
+        (void)SSFBNSub(&diff, q, p);
+    }
+    /* bitLen(diff) > halfBits - 100 ⇔ diff >= 2^(halfBits - 100). Random primes clear this by  */
+    /* a wide margin; the explicit guard is for defense in depth and FIPS conformance.          */
+    return SSFBNBitLen(&diff) > (uint32_t)(halfBits - 100u);
+}
+
+bool SSFRSAFipsDLowerBoundOK(const SSFBN_t *d, uint16_t halfBits)
+{
+    SSF_REQUIRE(d != NULL);
+    SSF_REQUIRE(d->limbs != NULL);
+    SSF_REQUIRE(halfBits > 0u);
+    /* bitLen(d) > halfBits ⇔ d >= 2^halfBits. Strict-> per spec; matters only at the boundary  */
+    /* which random d never hits.                                                               */
+    return SSFBNBitLen(d) > (uint32_t)halfBits;
+}
+
+bool SSFRSAFipsECoprimeOK(const SSFBN_t *e, const SSFBN_t *pMinus1, const SSFBN_t *qMinus1)
+{
+    SSFBN_DEFINE(eW, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(xW, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(g, SSF_BN_MAX_LIMBS);
+
+    SSF_REQUIRE(e != NULL);
+    SSF_REQUIRE(e->limbs != NULL);
+    SSF_REQUIRE(pMinus1 != NULL);
+    SSF_REQUIRE(pMinus1->limbs != NULL);
+    SSF_REQUIRE(qMinus1 != NULL);
+    SSF_REQUIRE(qMinus1->limbs != NULL);
+
+    /* SSFBNGcd requires equal-len operands. Keygen passes e at full key width and (p-1)/(q-1)  */
+    /* at half-key width, so widen each pair into a shared SSF_BN_MAX_LIMBS scratch first.       */
+    SSFBNSetZero(&eW, SSF_BN_MAX_LIMBS);
+    memcpy(eW.limbs, e->limbs, (size_t)e->len * sizeof(SSFBNLimb_t));
+
+    SSFBNSetZero(&xW, SSF_BN_MAX_LIMBS);
+    memcpy(xW.limbs, pMinus1->limbs, (size_t)pMinus1->len * sizeof(SSFBNLimb_t));
+    SSFBNGcd(&g, &eW, &xW);
+    if (!SSFBNIsOne(&g)) return false;
+
+    SSFBNSetZero(&xW, SSF_BN_MAX_LIMBS);
+    memcpy(xW.limbs, qMinus1->limbs, (size_t)qMinus1->len * sizeof(SSFBNLimb_t));
+    SSFBNGcd(&g, &eW, &xW);
+    if (!SSFBNIsOne(&g)) return false;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: validate decoded (n, e). Used by both SSFRSAPubKeyIsValid and SSFRSAPrivKeyIsValid  */
+/* so the public-side rules stay in one place.                                                    */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFRSAValidatePubFields(const SSFBN_t *n, const SSFBN_t *e)
+{
+    uint32_t nBits;
+
+    /* n: odd, > 1, and at one of the supported bit lengths. The exact-set check also implies   */
+    /* the high bit of the leading byte is set (for 2048/3072/4096 which are byte-aligned), so  */
+    /* a degenerate modulus with leading zero bits is rejected here.                             */
+    if (SSFBNIsEven(n)) return false;
+    if (SSFBNIsOne(n)) return false;
+    nBits = SSFBNBitLen(n);
+    if ((nBits != 2048u) && (nBits != 3072u) && (nBits != 4096u)) return false;
+    if (nBits > SSF_BN_CONFIG_MAX_BITS) return false;
+
+    /* e: odd, ≥ 65537 (rejects e=3, e=17 small-exponent classes per FIPS 186-4 §B.3.1), < n.   */
+    if (SSFBNIsEven(e)) return false;
+    if (SSFBNBitLen(e) < 17u) return false;          /* 65537 has bitLen 17, anything smaller fails */
+    if (SSFBNCmp(e, n) >= 0) return false;
 
     return true;
 }
@@ -454,16 +601,73 @@ bool SSFRSAPubKeyIsValid(const uint8_t *pubKeyDer, size_t pubKeyDerLen)
     uint16_t keyLimbs;
 
     SSF_REQUIRE(pubKeyDer != NULL);
+    SSF_REQUIRE(pubKeyDerLen > 0u);
 
     if (!_SSFRSAPubKeyDecode(pubKeyDer, pubKeyDerLen, &n, &e, &keyLimbs)) return false;
+    return _SSFRSAValidatePubFields(&n, &e);
+}
 
-    /* n must be odd and > 1 */
-    if (SSFBNIsEven(&n)) return false;
-    if (SSFBNIsOne(&n)) return false;
+/* --------------------------------------------------------------------------------------------- */
+/* Validate a DER-encoded RSA private key.                                                       */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFRSAPrivKeyIsValid(const uint8_t *privKeyDer, size_t privKeyDerLen)
+{
+    SSFBN_DEFINE(n, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(e, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(d, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(p, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(q, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(dp, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(dq, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(qInv, SSF_BN_MAX_LIMBS);
+    uint16_t nLimbs;
 
-    /* e must be odd and > 1 */
-    if (SSFBNIsEven(&e)) return false;
-    if (SSFBNIsOne(&e)) return false;
+    SSF_REQUIRE(privKeyDer != NULL);
+    SSF_REQUIRE(privKeyDerLen > 0u);
+
+    if (!_SSFRSAPrivKeyDecode(privKeyDer, privKeyDerLen, &n, &e, &d,
+                              &p, &q, &dp, &dq, &qInv, &nLimbs)) return false;
+
+    /* Public-side rules (n size, e bounds, e < n). */
+    if (!_SSFRSAValidatePubFields(&n, &e)) return false;
+
+    /* d, p, q must be odd and > 1. */
+    if (SSFBNIsZero(&d) || SSFBNIsOne(&d)) return false;
+    if (SSFBNIsEven(&p) || SSFBNIsOne(&p)) return false;
+    if (SSFBNIsEven(&q) || SSFBNIsOne(&q)) return false;
+
+    /* n == p * q. Both p and q have len = nLimbs/2, so p*q has len = nLimbs and matches n.     */
+    {
+        SSFBN_DEFINE(prod, SSF_BN_MAX_LIMBS);
+        SSFBNMul(&prod, &p, &q);
+        if (prod.len != n.len) return false;
+        if (SSFBNCmp(&prod, &n) != 0) return false;
+    }
+
+    /* dp == d mod (p - 1). */
+    {
+        SSFBN_DEFINE(pm1, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(check, SSF_BN_MAX_LIMBS);
+        (void)SSFBNSubUint32(&pm1, &p, 1u);
+        SSFBNMod(&check, &d, &pm1);
+        if (SSFBNCmp(&check, &dp) != 0) return false;
+    }
+
+    /* dq == d mod (q - 1). */
+    {
+        SSFBN_DEFINE(qm1, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(check, SSF_BN_MAX_LIMBS);
+        (void)SSFBNSubUint32(&qm1, &q, 1u);
+        SSFBNMod(&check, &d, &qm1);
+        if (SSFBNCmp(&check, &dq) != 0) return false;
+    }
+
+    /* qInv * q ≡ 1 (mod p). qInv, q, p all have len = nLimbs/2 — SSFBNModMul-compatible.       */
+    {
+        SSFBN_DEFINE(prod, SSF_BN_MAX_LIMBS);
+        SSFBNModMul(&prod, &qInv, &q, &p);
+        if (!SSFBNIsOne(&prod)) return false;
+    }
 
     return true;
 }
@@ -486,48 +690,47 @@ static bool _SSFRSAKeyGenPrimes(uint16_t bits,
     uint8_t entropy[SSF_PRNG_ENTROPY_SIZE];
     uint16_t halfBits;
     uint16_t nLimbs;
+    SSFBN_DEFINE(tmp, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(prod, SSF_BN_MAX_LIMBS);
+    bool ok = false;
 
     halfBits = bits / 2u;
     nLimbs = (uint16_t)SSF_BN_BITS_TO_LIMBS(bits);
     *nLimbsOut = nLimbs;
 
-    if (!SSFPortGetEntropy(entropy, (uint16_t)sizeof(entropy))) return false;
+    if (!SSFPortGetEntropy(entropy, (uint16_t)sizeof(entropy))) goto cleanup;
     SSFPRNGInitContext(&prng, entropy, sizeof(entropy));
 
-    if (!SSFBNGenPrime(p, halfBits, SSF_RSA_CONFIG_MILLER_RABIN_ROUNDS, &prng))
-    {
-        SSFPRNGDeInitContext(&prng);
-        return false;
-    }
-    if (!SSFBNGenPrime(q, halfBits, SSF_RSA_CONFIG_MILLER_RABIN_ROUNDS, &prng))
-    {
-        SSFPRNGDeInitContext(&prng);
-        return false;
-    }
+    if (!SSFBNGenPrime(p, halfBits, SSF_RSA_CONFIG_MILLER_RABIN_ROUNDS, &prng)) goto cleanup_prng;
+    if (!SSFBNGenPrime(q, halfBits, SSF_RSA_CONFIG_MILLER_RABIN_ROUNDS, &prng)) goto cleanup_prng;
 
     /* Ensure p != q */
-    if (SSFBNCmp(p, q) == 0) { SSFPRNGDeInitContext(&prng); return false; }
+    if (SSFBNCmp(p, q) == 0) goto cleanup_prng;
 
-    /* Ensure p > q (for CRT) */
+    /* Ensure p > q (for CRT). tmp briefly holds the original p — secret-adjacent state. */
     if (SSFBNCmp(p, q) < 0)
     {
-        SSFBN_DEFINE(tmp, SSF_BN_MAX_LIMBS);
         SSFBNCopy(&tmp, p);
         SSFBNCopy(p, q);
         SSFBNCopy(q, &tmp);
     }
 
-    SSFPRNGDeInitContext(&prng);
-
     /* n = p * q */
-    {
-        SSFBN_DEFINE(prod, SSF_BN_MAX_LIMBS);
-        SSFBNMul(&prod, p, q);
-        n->len = nLimbs;
-        memcpy(n->limbs, prod.limbs, (size_t)nLimbs * sizeof(SSFBNLimb_t));
-    }
+    SSFBNMul(&prod, p, q);
+    n->len = nLimbs;
+    memcpy(n->limbs, prod.limbs, (size_t)nLimbs * sizeof(SSFBNLimb_t));
 
-    return true;
+    ok = true;
+
+cleanup_prng:
+    SSFPRNGDeInitContext(&prng);
+cleanup:
+    /* Wipe the raw entropy buffer (PRNG context's copy is wiped by DeInit; this is the source  */
+    /* copy on the stack) and the tmp/prod scratch BNs that briefly held p, q, or p·q.          */
+    _SSFRSASecureWipe(entropy, sizeof(entropy));
+    SSFBNZeroize(&tmp);
+    SSFBNZeroize(&prod);
+    return ok;
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -544,59 +747,66 @@ static bool _SSFRSAKeyGenDerive(uint16_t nLimbs,
     SSFBN_DEFINE(qm1, SSF_BN_MAX_LIMBS);
     SSFBN_DEFINE(g, SSF_BN_MAX_LIMBS);
     SSFBN_DEFINE(lambda, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(eFull, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(pm1_div, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(prod, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(rem, SSF_BN_MAX_LIMBS);
+    bool ok = false;
 
     /* pm1 = p - 1, qm1 = q - 1 */
     (void)SSFBNSubUint32(&pm1, p, 1u);
     (void)SSFBNSubUint32(&qm1, q, 1u);
 
+    /* Explicit FIPS check: e ⊥ (p-1) and e ⊥ (q-1). Fails fast before λ compute on the rare    */
+    /* case where 65537 divides p-1 or q-1 (caller retries with fresh primes).                   */
+    SSFBNSetUint32(&eFull, 65537u, nLimbs);
+    if (!SSFRSAFipsECoprimeOK(&eFull, &pm1, &qm1)) goto cleanup;
+
     /* g = gcd(pm1, qm1) */
     SSFBNGcd(&g, &pm1, &qm1);
 
-    /* lambda = lcm(pm1, qm1) = (pm1 / gcd) * qm1 — the division-by-large-numbers form avoids
-     * needing to divide pm1 * qm1 by g, which wouldn't fit in our fixed-width SSFBN_t. */
+    /* lambda = lcm(pm1, qm1) = (pm1 / gcd) * qm1 — the division-by-large-numbers form avoids   */
+    /* needing to divide pm1 * qm1 by g, which wouldn't fit in our fixed-width SSFBN_t.          */
+    if (SSFBNIsOne(&g))
     {
-        SSFBN_DEFINE(pm1_div, SSF_BN_MAX_LIMBS);
-
-        /* Is gcd(pm1, qm1) == 1 (the common case for well-chosen primes)? */
-        if (SSFBNIsOne(&g))
-        {
-            /* Yes, skip the divide — lambda = pm1 * qm1 directly. */
-            SSFBNCopy(&pm1_div, &pm1);
-        }
-        else
-        {
-            /* No, compute pm1 / g via SSFBNDivMod. The remainder is discarded. */
-            SSFBN_DEFINE(rem, SSF_BN_MAX_LIMBS);
-            SSFBNDivMod(&pm1_div, &rem, &pm1, &g);
-            (void)rem;
-        }
-
-        /* lambda = pm1_div * qm1 */
-        {
-            SSFBN_DEFINE(prod, SSF_BN_MAX_LIMBS);
-            SSFBNMul(&prod, &pm1_div, &qm1);
-            lambda.len = nLimbs;
-            memcpy(lambda.limbs, prod.limbs, (size_t)nLimbs * sizeof(SSFBNLimb_t));
-        }
+        /* Common case: skip the divide — lambda = pm1 * qm1 directly. */
+        SSFBNCopy(&pm1_div, &pm1);
     }
-
-    /* d = 65537^(-1) mod lambda */
+    else
     {
-        SSFBN_DEFINE(eFull, SSF_BN_MAX_LIMBS);
-        SSFBNSetUint32(&eFull, 65537u, nLimbs);
-        if (!SSFBNModInvExt(d, &eFull, &lambda)) { SSFBNZeroize(&lambda); return false; }
+        SSFBNDivMod(&pm1_div, &rem, &pm1, &g);
     }
+    SSFBNMul(&prod, &pm1_div, &qm1);
+    lambda.len = nLimbs;
+    memcpy(lambda.limbs, prod.limbs, (size_t)nLimbs * sizeof(SSFBNLimb_t));
 
-    /* CRT parameters */
+    /* d = 65537^(-1) mod lambda. */
+    if (!SSFBNModInvExt(d, &eFull, &lambda)) goto cleanup;
+
+    /* CRT parameters. */
     SSFBNMod(dp, d, &pm1);
     SSFBNMod(dq, d, &qm1);
 
-    /* qInv = q^(-1) mod p (p is prime, so Fermat works) */
-    if (!SSFBNModInv(qInv, q, p)) { SSFBNZeroize(&lambda); return false; }
+    /* qInv = q^(-1) mod p (p is prime, so Fermat works). */
+    if (!SSFBNModInv(qInv, q, p)) goto cleanup;
 
-    /* lambda was derived from (p-1)(q-1) — treat as secret adjacent state. */
+    ok = true;
+
+cleanup:
+    /* All locals are derived from the secret primes (pm1, qm1, lambda, pm1_div, prod, rem) or  */
+    /* are arithmetic temporaries that touched the secret λ(n) (g, eFull). Wipe every one so    */
+    /* the freed frame is clean regardless of which return path we took, then scrub the deeper- */
+    /* stack region used by SSFBNGcd / SSFBNDivMod / SSFBNModInvExt / SSFBNModInv internals.    */
+    SSFBNZeroize(&pm1);
+    SSFBNZeroize(&qm1);
+    SSFBNZeroize(&g);
     SSFBNZeroize(&lambda);
-    return true;
+    SSFBNZeroize(&eFull);
+    SSFBNZeroize(&pm1_div);
+    SSFBNZeroize(&prod);
+    SSFBNZeroize(&rem);
+    _SSFRSAStackScrub();
+    return ok;
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -620,6 +830,11 @@ static bool _SSFRSAKeyGenEncode(const SSFBN_t *n, const SSFBN_t *d,
     return true;
 }
 
+/* Cap the prime+derive retry budget. The FIPS post-conditions (|p-q|, d-lower-bound, e-coprime) */
+/* almost never reject random candidates — a healthy run completes in attempts == 1. The cap is  */
+/* purely a guard against pathological loops if entropy or the BN layer goes sideways.           */
+#define SSF_RSA_KEYGEN_FIPS_MAX_ATTEMPTS (8u)
+
 bool SSFRSAKeyGen(uint16_t bits,
                   uint8_t *privKeyDer, size_t privKeyDerSize, size_t *privKeyDerLen,
                   uint8_t *pubKeyDer, size_t pubKeyDerSize, size_t *pubKeyDerLen)
@@ -632,6 +847,9 @@ bool SSFRSAKeyGen(uint16_t bits,
     SSFBN_DEFINE(dq, SSF_BN_MAX_LIMBS);
     SSFBN_DEFINE(qInv, SSF_BN_MAX_LIMBS);
     uint16_t nLimbs;
+    uint16_t halfBits;
+    uint32_t attempts;
+    bool ok = false;
 
     SSF_REQUIRE(privKeyDer != NULL);
     SSF_REQUIRE(pubKeyDer != NULL);
@@ -639,24 +857,57 @@ bool SSFRSAKeyGen(uint16_t bits,
     SSF_REQUIRE(pubKeyDerLen != NULL);
     SSF_REQUIRE(bits == 2048u || bits == 3072u || bits == 4096u);
     SSF_REQUIRE(bits <= SSF_BN_CONFIG_MAX_BITS);
+    SSF_REQUIRE(privKeyDerSize >= SSF_RSA_MAX_PRIV_KEY_DER_SIZE);
+    SSF_REQUIRE(pubKeyDerSize >= SSF_RSA_MAX_PUB_KEY_DER_SIZE);
 
-    if (!_SSFRSAKeyGenPrimes(bits, &p, &q, &n, &nLimbs)) return false;
-    if (!_SSFRSAKeyGenDerive(nLimbs, &p, &q, &d, &dp, &dq, &qInv)) return false;
+    halfBits = bits / 2u;
+    ok = false;
+
+    /* FIPS 186-4 §B.3.3 step 5: if a candidate fails any post-condition, regenerate the prime  */
+    /* pair and retry. Each retry is a full prime-pair regeneration (the most defensive option  */
+    /* — finer-grained retry of just q on |p-q| failure is the pure-spec form, but the win is   */
+    /* irrelevant when the rejection rate is ~2^-100 per check).                                 */
+    for (attempts = 0u; attempts < SSF_RSA_KEYGEN_FIPS_MAX_ATTEMPTS; attempts++)
+    {
+        /* Hard failure (no entropy, etc.) — don't retry. */
+        if (!_SSFRSAKeyGenPrimes(bits, &p, &q, &n, &nLimbs)) goto cleanup;
+
+        /* §B.3.3 step 5.4: |p - q| > 2^(halfBits - 100). */
+        if (!SSFRSAFipsPrimeDistanceOK(&p, &q, halfBits)) continue;
+
+        /* Soft failure inside Derive (e ⊥ λ(n) violated, or modular-inverse instability).      */
+        /* Both are retriable per FIPS — fresh primes give a fresh λ(n).                         */
+        if (!_SSFRSAKeyGenDerive(nLimbs, &p, &q, &d, &dp, &dq, &qInv)) continue;
+
+        /* §B.3.1: d > 2^halfBits, defending against Wiener. */
+        if (!SSFRSAFipsDLowerBoundOK(&d, halfBits)) continue;
+
+        ok = true;
+        break;
+    }
+    if (!ok) goto cleanup;
+
     if (!_SSFRSAKeyGenEncode(&n, &d, &p, &q, &dp, &dq, &qInv, nLimbs,
                              privKeyDer, privKeyDerSize, privKeyDerLen,
-                             pubKeyDer,  pubKeyDerSize,  pubKeyDerLen)) return false;
+                             pubKeyDer,  pubKeyDerSize,  pubKeyDerLen))
+    {
+        ok = false;
+        goto cleanup;
+    }
 
-    /* Zeroize secrets on success. Failure paths return before secrets are fully derived or
-     * before encode completes; per the existing convention those do not zeroise (the stack
-     * bytes go out of scope on return anyway). */
+cleanup:
+    /* Wipe every secret-bearing local on every return path (success or any failure). n is the */
+    /* public modulus so it isn't in the wipe list, but everything else carries information     */
+    /* about the secret factors and must be cleared. The stack scrub then overwrites the deeper */
+    /* frames left behind by Primes / Derive / Encode so BN-internal scratch doesn't survive.   */
     SSFBNZeroize(&d);
     SSFBNZeroize(&p);
     SSFBNZeroize(&q);
     SSFBNZeroize(&dp);
     SSFBNZeroize(&dq);
     SSFBNZeroize(&qInv);
-
-    return true;
+    _SSFRSAStackScrub();
+    return ok;
 }
 #endif /* SSF_RSA_CONFIG_ENABLE_KEYGEN */
 
@@ -676,6 +927,9 @@ bool SSFRSASignPKCS1(const uint8_t *privKeyDer, size_t privKeyDerLen,
     SSFBN_DEFINE(dp, SSF_BN_MAX_LIMBS);
     SSFBN_DEFINE(dq, SSF_BN_MAX_LIMBS);
     SSFBN_DEFINE(qInv, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(m, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(s, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(mCheck, SSF_BN_MAX_LIMBS);
     uint16_t nLimbs;
     size_t keyBytes;
     size_t hLen;
@@ -683,10 +937,10 @@ bool SSFRSASignPKCS1(const uint8_t *privKeyDer, size_t privKeyDerLen,
     uint8_t em[SSF_RSA_MAX_KEY_BYTES];
     size_t tLen;
     size_t psLen;
-    SSFBN_DEFINE(m, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(s, SSF_BN_MAX_LIMBS);
+    bool ok = false;
 
     SSF_REQUIRE(privKeyDer != NULL);
+    SSF_REQUIRE(privKeyDerLen > 0u);
     SSF_REQUIRE(hashVal != NULL);
     SSF_REQUIRE(sig != NULL);
     SSF_REQUIRE(sigLen != NULL);
@@ -696,29 +950,24 @@ bool SSFRSASignPKCS1(const uint8_t *privKeyDer, size_t privKeyDerLen,
     SSF_REQUIRE(hashLen == hLen);
 
     if (!_SSFRSAPrivKeyDecode(privKeyDer, privKeyDerLen, &n, &e, &d,
-                              &p, &q, &dp, &dq, &qInv, &nLimbs)) return false;
+                              &p, &q, &dp, &dq, &qInv, &nLimbs)) goto cleanup;
 
     keyBytes = (SSFBNBitLen(&n) + 7u) / 8u;
-    if (sigSize < keyBytes) return false;
+    if (sigSize < keyBytes) goto cleanup;
 
-    /* Select DigestInfo prefix */
     switch (hash)
     {
     case SSF_RSA_HASH_SHA256: diPrefix = _ssfRSADigestInfoSHA256; break;
     case SSF_RSA_HASH_SHA384: diPrefix = _ssfRSADigestInfoSHA384; break;
     case SSF_RSA_HASH_SHA512: diPrefix = _ssfRSADigestInfoSHA512; break;
-    default: return false;
+    default: goto cleanup;
     }
 
-    /* T = DigestInfo prefix || hash */
     tLen = SSF_RSA_DIGEST_INFO_PREFIX_LEN + hLen;
-
-    /* EM must be at least tLen + 11 bytes */
-    if (keyBytes < tLen + 11u) return false;
-
+    if (keyBytes < tLen + 11u) goto cleanup;
     psLen = keyBytes - tLen - 3u;
 
-    /* Build EM: 0x00 || 0x01 || PS || 0x00 || T */
+    /* EM = 0x00 || 0x01 || PS(0xFF…) || 0x00 || T. */
     em[0] = 0x00u;
     em[1] = 0x01u;
     memset(&em[2], 0xFF, psLen);
@@ -726,22 +975,37 @@ bool SSFRSASignPKCS1(const uint8_t *privKeyDer, size_t privKeyDerLen,
     memcpy(&em[3u + psLen], diPrefix, SSF_RSA_DIGEST_INFO_PREFIX_LEN);
     memcpy(&em[3u + psLen + SSF_RSA_DIGEST_INFO_PREFIX_LEN], hashVal, hLen);
 
-    /* Convert EM to integer and perform private-key operation */
+    /* Convert EM to integer and perform private-key operation. */
     SSFBNFromBytes(&m, em, keyBytes, nLimbs);
-    if (!_SSFRSAPrivateOpCRT(&m, nLimbs, &p, &q, &dp, &dq, &qInv, &s)) return false;
+    if (!_SSFRSAPrivateOpCRT(&m, nLimbs, &p, &q, &dp, &dq, &qInv, &s)) goto cleanup;
 
-    /* Export signature */
-    if (!SSFBNToBytes(&s, sig, keyBytes)) return false;
+    /* Verify-after-sign: recompute m' = s^e mod n and require m' == m before releasing the     */
+    /* signature. Defense against the Boneh-DeMillo-Lipton CRT fault attack and against simple  */
+    /* private-key tampering (mismatched dp / dq / qInv). The cost is one extra public-exponent */
+    /* modular exponentiation per sign — small relative to the CRT private op.                   */
+    if (!_SSFRSAPublicOp(&s, &e, &n, &mCheck)) goto cleanup;
+    if (SSFBNCmp(&mCheck, &m) != 0) goto cleanup;
+
+    if (!SSFBNToBytes(&s, sig, keyBytes)) goto cleanup;
     *sigLen = keyBytes;
+    ok = true;
 
+cleanup:
+    /* Wipe every BN local that touched the private key, plus the EM (carries the message hash) */
+    /* and the BN-form message m / signature s / verify-after-sign reconstructed mCheck. Then   */
+    /* scrub the deeper-stack region used by the CRT primitive's internal SSFBN locals.          */
     SSFBNZeroize(&d);
     SSFBNZeroize(&p);
     SSFBNZeroize(&q);
     SSFBNZeroize(&dp);
     SSFBNZeroize(&dq);
     SSFBNZeroize(&qInv);
-
-    return true;
+    SSFBNZeroize(&m);
+    SSFBNZeroize(&s);
+    SSFBNZeroize(&mCheck);
+    _SSFRSASecureWipe(em, sizeof(em));
+    _SSFRSAStackScrub();
+    return ok;
 }
 
 bool SSFRSAVerifyPKCS1(const uint8_t *pubKeyDer, size_t pubKeyDerLen,
@@ -761,6 +1025,7 @@ bool SSFRSAVerifyPKCS1(const uint8_t *pubKeyDer, size_t pubKeyDerLen,
     SSFBN_DEFINE(m, SSF_BN_MAX_LIMBS);
 
     SSF_REQUIRE(pubKeyDer != NULL);
+    SSF_REQUIRE(pubKeyDerLen > 0u);
     SSF_REQUIRE(hashVal != NULL);
     SSF_REQUIRE(sig != NULL);
     SSF_REQUIRE((hash > SSF_RSA_HASH_MIN) && (hash < SSF_RSA_HASH_MAX));
@@ -854,19 +1119,22 @@ bool SSFRSASignPSS(const uint8_t *privKeyDer, size_t privKeyDerLen,
     SSFBN_DEFINE(dp, SSF_BN_MAX_LIMBS);
     SSFBN_DEFINE(dq, SSF_BN_MAX_LIMBS);
     SSFBN_DEFINE(qInv, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(m, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(s, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(mCheck, SSF_BN_MAX_LIMBS);
     uint16_t nLimbs;
     size_t keyBytes, emBits, emLen;
     size_t hLen, sLen, dbLen;
-    uint8_t salt[64]; /* max hash size */
-    uint8_t mPrime[8 + 64 + 64]; /* 8 zero + hash + salt */
+    uint8_t salt[64];                /* max hash size */
+    uint8_t mPrime[8 + 64 + 64];     /* 8 zero + hash + salt */
     uint8_t H[64];
     uint8_t em[SSF_RSA_MAX_KEY_BYTES];
     uint8_t dbMask[SSF_RSA_MAX_KEY_BYTES];
     size_t i;
-    SSFBN_DEFINE(m, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(s, SSF_BN_MAX_LIMBS);
+    bool ok = false;
 
     SSF_REQUIRE(privKeyDer != NULL);
+    SSF_REQUIRE(privKeyDerLen > 0u);
     SSF_REQUIRE(hashVal != NULL);
     SSF_REQUIRE(sig != NULL);
     SSF_REQUIRE(sigLen != NULL);
@@ -877,20 +1145,20 @@ bool SSFRSASignPSS(const uint8_t *privKeyDer, size_t privKeyDerLen,
     SSF_REQUIRE(hashLen == hLen);
 
     if (!_SSFRSAPrivKeyDecode(privKeyDer, privKeyDerLen, &n, &e, &d,
-                              &p, &q, &dp, &dq, &qInv, &nLimbs)) return false;
+                              &p, &q, &dp, &dq, &qInv, &nLimbs)) goto cleanup;
 
     emBits = SSFBNBitLen(&n) - 1u;
     emLen = (emBits + 7u) / 8u;
     keyBytes = (SSFBNBitLen(&n) + 7u) / 8u;
 
-    if (emLen < hLen + sLen + 2u) return false;
-    if (sigSize < keyBytes) return false;
+    if (emLen < hLen + sLen + 2u) goto cleanup;
+    if (sigSize < keyBytes) goto cleanup;
 
     dbLen = emLen - hLen - 1u;
 
     /* Generate random salt. sLen is bounded by the hash output size (<= 64 bytes for SHA-512), */
     /* so the narrowing cast to uint16_t cannot truncate.                                       */
-    if (!SSFPortGetEntropy(salt, (uint16_t)sLen)) return false;
+    if (!SSFPortGetEntropy(salt, (uint16_t)sLen)) goto cleanup;
 
     /* M' = (0x)00 00 00 00 00 00 00 00 || mHash || salt */
     memset(mPrime, 0, 8);
@@ -930,19 +1198,35 @@ bool SSFRSASignPSS(const uint8_t *privKeyDer, size_t privKeyDerLen,
 
     /* Convert EM to integer and perform private-key operation */
     SSFBNFromBytes(&m, em, keyBytes, nLimbs);
-    if (!_SSFRSAPrivateOpCRT(&m, nLimbs, &p, &q, &dp, &dq, &qInv, &s)) return false;
+    if (!_SSFRSAPrivateOpCRT(&m, nLimbs, &p, &q, &dp, &dq, &qInv, &s)) goto cleanup;
 
-    if (!SSFBNToBytes(&s, sig, keyBytes)) return false;
+    /* Verify-after-sign: m' = s^e mod n must equal m. See SSFRSASignPKCS1 for rationale. */
+    if (!_SSFRSAPublicOp(&s, &e, &n, &mCheck)) goto cleanup;
+    if (SSFBNCmp(&mCheck, &m) != 0) goto cleanup;
+
+    if (!SSFBNToBytes(&s, sig, keyBytes)) goto cleanup;
     *sigLen = keyBytes;
+    ok = true;
 
+cleanup:
     SSFBNZeroize(&d);
     SSFBNZeroize(&p);
     SSFBNZeroize(&q);
     SSFBNZeroize(&dp);
     SSFBNZeroize(&dq);
     SSFBNZeroize(&qInv);
-
-    return true;
+    SSFBNZeroize(&m);
+    SSFBNZeroize(&s);
+    SSFBNZeroize(&mCheck);
+    /* salt is the random salt fed back into both H computation and DB; mPrime contains hash    */
+    /* + salt; em / dbMask hold the encoded message and the MGF1 mask. All must be wiped.        */
+    _SSFRSASecureWipe(salt, sizeof(salt));
+    _SSFRSASecureWipe(mPrime, sizeof(mPrime));
+    _SSFRSASecureWipe(H, sizeof(H));
+    _SSFRSASecureWipe(em, sizeof(em));
+    _SSFRSASecureWipe(dbMask, sizeof(dbMask));
+    _SSFRSAStackScrub();
+    return ok;
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -968,6 +1252,7 @@ bool SSFRSAVerifyPSS(const uint8_t *pubKeyDer, size_t pubKeyDerLen,
     uint8_t diff;
 
     SSF_REQUIRE(pubKeyDer != NULL);
+    SSF_REQUIRE(pubKeyDerLen > 0u);
     SSF_REQUIRE(hashVal != NULL);
     SSF_REQUIRE(sig != NULL);
     SSF_REQUIRE((hash > SSF_RSA_HASH_MIN) && (hash < SSF_RSA_HASH_MAX));

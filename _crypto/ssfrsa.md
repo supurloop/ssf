@@ -102,11 +102,25 @@ comparable security.
   unsigned big-endian. **This is not PKCS#8** (no `AlgorithmIdentifier` wrapper) and not
   PEM (no Base64, no `-----BEGIN-----` header). If your storage format is PKCS#8 or PEM,
   strip those layers at the call site before handing the bytes in.
-- **The PSS verify path currently has a variable-time pad check** (ssfrsa.c:1171–1177
-  inspects each zero byte of `PS` with an early-return `if`). This does not enable any
-  known direct forgery, but it does leak where `PS` diverged from the expected pattern —
-  a defense-in-depth concern flagged for a future hardening pass. The final `H == H'`
-  comparison is already constant-time via [`SSFCryptCTMemEq`](ssfcrypt.md).
+- **PSS verify is constant-time end-to-end.** The trailer byte, top-bit mask, MGF1 unmask,
+  PS-zero scan, salt separator, and final `H == H'` comparison are all folded into a
+  single-byte XOR/OR accumulator (`diff`) so the wall-clock time to reach the final
+  return is independent of which byte of the recovered `EM` first diverged from the PSS
+  padding pattern.
+- **Sign performs verify-after-sign.** After the CRT private op produces `s`, the signer
+  recomputes `m' = s^e mod n` via the public-key path and rejects the signature unless
+  `m' == m`. This catches a faulty CRT branch (Boneh-DeMillo-Lipton fault attack), a
+  tampered private-key DER (mismatched `dp` / `dq` / `qInv`), and most transient
+  glitches. The cost is one extra public-exponent modular exponentiation per sign —
+  small relative to the CRT private op (the public op with `e = 65537` is ~10–20× faster
+  than the private op).
+- **All sign / keygen entry points zeroize secrets and scrub the deeper stack region on
+  every return path.** Failure paths get the same wipe as success paths; the CRT helper
+  zeroes its CRT intermediates (`cp`, `cq`, `m1`, `m2`, `h`, expanded full-width copies
+  and the `h*q` product) before returning. A `noinline` stack-scrub helper at the end of
+  each entry point overwrites the freed frames left by the underlying `ssfbn` primitives
+  (`SSFBNGcd`, `SSFBNDivMod`, `SSFBNModInv`, `SSFBNModInvExt`) which `ssfrsa` cannot
+  reach into directly.
 - **Keys are not parsed lazily on every call.** Each sign / verify / key-validate entry
   point re-parses the DER blob on entry. If you're signing many messages under the same
   key, this is a few hundred microseconds per call that could in principle be

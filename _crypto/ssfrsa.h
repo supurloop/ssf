@@ -145,8 +145,40 @@ bool SSFRSAKeyGen(uint16_t bits,
 /* External interface: key validation                                                            */
 /* --------------------------------------------------------------------------------------------- */
 
-/* Validate a DER-encoded RSA public key. Returns true if the key is well-formed.                */
+/* Validate a DER-encoded RSA public key. Returns true if the DER parses, the modulus has a      */
+/* supported bit length (2048, 3072, or 4096), the public exponent is at least 65537 and odd,    */
+/* and 1 < e < n. Does not verify that n is actually a product of two primes (which would        */
+/* require factoring); a deliberately weak modulus with a small factor still passes here.        */
 bool SSFRSAPubKeyIsValid(const uint8_t *pubKeyDer, size_t pubKeyDerLen);
+
+/* Validate a DER-encoded PKCS#1 RSAPrivateKey. Returns true if the DER parses with version=0,   */
+/* the public-side fields satisfy SSFRSAPubKeyIsValid, and the algebraic CRT consistency holds:  */
+/*   n == p * q                                                                                  */
+/*   dp == d mod (p - 1)                                                                         */
+/*   dq == d mod (q - 1)                                                                         */
+/*   qInv * q ≡ 1 (mod p)                                                                        */
+/* These checks confirm the key is internally consistent — a tampered private key (corrupted     */
+/* dp/dq/qInv, or an attempt to swap p and q labels) fails here. Does not verify that p and q    */
+/* are actually prime or check FIPS 186-4 §B.3 keygen-side bounds.                                */
+bool SSFRSAPrivKeyIsValid(const uint8_t *privKeyDer, size_t privKeyDerLen);
+
+/* --------------------------------------------------------------------------------------------- */
+/* FIPS 186-4 §B.3 keygen post-condition checks. Used internally by SSFRSAKeyGen and exposed for */
+/* unit testing and (future) imported-key validation. halfBits = nlen / 2 (i.e., 1024 for RSA-   */
+/* 2048, 1536 for RSA-3072, 2048 for RSA-4096).                                                  */
+/* --------------------------------------------------------------------------------------------- */
+
+/* §B.3.3 step 5.4: returns true if |p - q| > 2^(halfBits - 100). Defends against Fermat-style   */
+/* factorization when the two primes happen to be unusually close.                                */
+bool SSFRSAFipsPrimeDistanceOK(const SSFBN_t *p, const SSFBN_t *q, uint16_t halfBits);
+
+/* §B.3.1: returns true if d > 2^halfBits. Defends against Wiener's continued-fraction attack    */
+/* on small private exponents.                                                                    */
+bool SSFRSAFipsDLowerBoundOK(const SSFBN_t *d, uint16_t halfBits);
+
+/* Returns true if gcd(e, p-1) == 1 AND gcd(e, q-1) == 1. Both must hold for                     */
+/* d = e^(-1) mod λ(n) to exist; the modular inverse fails otherwise.                            */
+bool SSFRSAFipsECoprimeOK(const SSFBN_t *e, const SSFBN_t *pMinus1, const SSFBN_t *qMinus1);
 
 /* --------------------------------------------------------------------------------------------- */
 /* External interface: PKCS#1 v1.5 signature (RFC 8017 Section 8.2)                              */

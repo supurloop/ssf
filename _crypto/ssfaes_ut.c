@@ -37,6 +37,22 @@
 
 #if SSF_CONFIG_AES_UNIT_TEST == 1
 
+/* Cross-check the SSFAES implementation against OpenSSL's AES via EVP. Enabled when the build is */
+/* linking libcrypto (host macOS/Linux); disabled on cross builds via -DSSF_CONFIG_HAVE_OPENSSL=0  */
+/* (see ssfport.h). When disabled, the FIPS-197 round-trip and Monte-Carlo KAT vectors below are  */
+/* the load-bearing correctness coverage instead.                                                  */
+#if (SSF_CONFIG_HAVE_OPENSSL == 1)
+#define SSF_AES_OSSL_VERIFY 1
+#else
+#define SSF_AES_OSSL_VERIFY 0
+#endif
+
+#if SSF_AES_OSSL_VERIFY == 1
+#include <openssl/evp.h>
+#include <openssl/rand.h>
+#include <string.h>
+#endif
+
 typedef struct SSFAESUT
 {
     uint8_t *in;
@@ -428,6 +444,186 @@ SSFAESUT_t _SSFAES256BlockDecryptMonteUT[] =
     }
 };
 
+#if SSF_AES_OSSL_VERIFY == 1
+
+/* --------------------------------------------------------------------------------------------- */
+/* OpenSSL cross-check helpers.                                                                  */
+/* --------------------------------------------------------------------------------------------- */
+
+/* Encrypt or decrypt one 16-byte AES-ECB block via OpenSSL EVP. Padding is disabled so the call */
+/* is a pure block primitive — exactly comparable to SSFAESBlockEncrypt/Decrypt.                 */
+static void _AESECBViaOpenSSL(uint8_t out[16], const uint8_t in[16],
+                              const uint8_t *key, size_t keyLen, bool encrypt)
+{
+    const EVP_CIPHER *cipher;
+    EVP_CIPHER_CTX *ctx;
+    int outLen = 0;
+    int finalLen = 0;
+
+    switch (keyLen)
+    {
+        case 16: cipher = EVP_aes_128_ecb(); break;
+        case 24: cipher = EVP_aes_192_ecb(); break;
+        case 32: cipher = EVP_aes_256_ecb(); break;
+        default: SSF_ASSERT(false); return;
+    }
+
+    ctx = EVP_CIPHER_CTX_new();
+    SSF_ASSERT(ctx != NULL);
+
+    if (encrypt)
+    {
+        SSF_ASSERT(EVP_EncryptInit_ex(ctx, cipher, NULL, key, NULL) == 1);
+        SSF_ASSERT(EVP_CIPHER_CTX_set_padding(ctx, 0) == 1);
+        SSF_ASSERT(EVP_EncryptUpdate(ctx, out, &outLen, in, 16) == 1);
+        SSF_ASSERT(outLen == 16);
+        SSF_ASSERT(EVP_EncryptFinal_ex(ctx, out + outLen, &finalLen) == 1);
+        SSF_ASSERT(finalLen == 0);
+    }
+    else
+    {
+        SSF_ASSERT(EVP_DecryptInit_ex(ctx, cipher, NULL, key, NULL) == 1);
+        SSF_ASSERT(EVP_CIPHER_CTX_set_padding(ctx, 0) == 1);
+        SSF_ASSERT(EVP_DecryptUpdate(ctx, out, &outLen, in, 16) == 1);
+        SSF_ASSERT(outLen == 16);
+        SSF_ASSERT(EVP_DecryptFinal_ex(ctx, out + outLen, &finalLen) == 1);
+        SSF_ASSERT(finalLen == 0);
+    }
+
+    EVP_CIPHER_CTX_free(ctx);
+}
+
+/* Verify one (key, pt) pair in both directions: SSF encrypt agrees with OpenSSL encrypt, and    */
+/* SSF decrypt of OpenSSL ciphertext recovers the plaintext.                                     */
+static void _VerifyOneAES(const uint8_t *key, size_t keyLen, const uint8_t pt[16])
+{
+    uint8_t ossl[16];
+    uint8_t ssf[16];
+    uint8_t back[16];
+
+    /* Encrypt: SSF must match OpenSSL byte-for-byte. */
+    _AESECBViaOpenSSL(ossl, pt, key, keyLen, true);
+    SSFAESXXXBlockEncrypt(pt, 16, ssf, 16, key, keyLen);
+    SSF_ASSERT(memcmp(ossl, ssf, 16) == 0);
+
+    /* Decrypt: SSF must invert OpenSSL's ciphertext. */
+    SSFAESXXXBlockDecrypt(ossl, 16, back, 16, key, keyLen);
+    SSF_ASSERT(memcmp(back, pt, 16) == 0);
+
+    /* And OpenSSL must invert SSF's ciphertext. */
+    _AESECBViaOpenSSL(back, ssf, key, keyLen, false);
+    SSF_ASSERT(memcmp(back, pt, 16) == 0);
+}
+
+/* Run `iters` random (key, plaintext) pairs at the given key size. */
+static void _VerifyRandomAES(size_t keyLen, uint32_t iters)
+{
+    uint8_t key[32];
+    uint8_t pt[16];
+    uint32_t i;
+
+    SSF_ASSERT(keyLen <= sizeof(key));
+
+    for (i = 0; i < iters; i++)
+    {
+        SSF_ASSERT(RAND_bytes(key, (int)keyLen) == 1);
+        SSF_ASSERT(RAND_bytes(pt, (int)sizeof(pt)) == 1);
+        _VerifyOneAES(key, keyLen, pt);
+    }
+}
+
+/* Cover fixed corner-case shapes (all-zero, all-ones, alternating bits, FIPS-197 example) for   */
+/* every key size. These aren't redundant with the random pass: they pin specific patterns that  */
+/* are likely to appear in regression KATs and worth checking explicitly.                        */
+static void _VerifyAESCornerCases(void)
+{
+    static const uint8_t zeros16[16] = {0};
+    static const uint8_t ones16[16] = {
+        0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu,
+        0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu
+    };
+    static const uint8_t alt55AA[16] = {
+        0x55u, 0xAAu, 0x55u, 0xAAu, 0x55u, 0xAAu, 0x55u, 0xAAu,
+        0x55u, 0xAAu, 0x55u, 0xAAu, 0x55u, 0xAAu, 0x55u, 0xAAu
+    };
+    /* FIPS-197 Appendix A example plaintext. */
+    static const uint8_t fipsPt[16] = {
+        0x00u, 0x11u, 0x22u, 0x33u, 0x44u, 0x55u, 0x66u, 0x77u,
+        0x88u, 0x99u, 0xAAu, 0xBBu, 0xCCu, 0xDDu, 0xEEu, 0xFFu
+    };
+    static const uint8_t keyZeros[32] = {0};
+    static const uint8_t keyOnes[32] = {
+        0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu,
+        0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu,
+        0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu,
+        0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu
+    };
+    static const uint8_t keySeq[32] = {
+        0x00u, 0x01u, 0x02u, 0x03u, 0x04u, 0x05u, 0x06u, 0x07u,
+        0x08u, 0x09u, 0x0Au, 0x0Bu, 0x0Cu, 0x0Du, 0x0Eu, 0x0Fu,
+        0x10u, 0x11u, 0x12u, 0x13u, 0x14u, 0x15u, 0x16u, 0x17u,
+        0x18u, 0x19u, 0x1Au, 0x1Bu, 0x1Cu, 0x1Du, 0x1Eu, 0x1Fu
+    };
+    static const size_t keyLens[] = { 16u, 24u, 32u };
+    size_t k;
+
+    for (k = 0; k < (sizeof(keyLens) / sizeof(keyLens[0])); k++)
+    {
+        size_t kl = keyLens[k];
+        _VerifyOneAES(keyZeros, kl, zeros16);
+        _VerifyOneAES(keyZeros, kl, ones16);
+        _VerifyOneAES(keyZeros, kl, alt55AA);
+        _VerifyOneAES(keyZeros, kl, fipsPt);
+        _VerifyOneAES(keyOnes,  kl, zeros16);
+        _VerifyOneAES(keyOnes,  kl, ones16);
+        _VerifyOneAES(keyOnes,  kl, fipsPt);
+        _VerifyOneAES(keySeq,   kl, zeros16);
+        _VerifyOneAES(keySeq,   kl, fipsPt);
+    }
+}
+
+static void _SSFAESVerifyAgainstOpenSSL(void)
+{
+    static const struct
+    {
+        const char *label;
+        size_t keyLen;
+        uint32_t iters;
+    } sizes[] = {
+        { "AES-128", 16u, 5000u },
+        { "AES-192", 24u, 5000u },
+        { "AES-256", 32u, 5000u },
+    };
+    size_t si;
+
+    /* Deterministic seed so test failures are reproducible. */
+    {
+        static const uint8_t seed[32] = {
+            0x53u, 0x53u, 0x46u, 0x41u, 0x45u, 0x53u, 0x2Du, 0x4Fu,
+            0x53u, 0x53u, 0x4Cu, 0x2Du, 0x56u, 0x45u, 0x52u, 0x49u,
+            0x46u, 0x59u, 0x2Du, 0x53u, 0x45u, 0x45u, 0x44u, 0x2Du,
+            0x32u, 0x30u, 0x32u, 0x36u, 0x2Du, 0x30u, 0x34u, 0x32u
+        };
+        RAND_seed(seed, (int)sizeof(seed));
+    }
+
+    printf("--- ssfaes OpenSSL cross-check ---\n");
+    printf("  corner cases (all-zero / all-ones / alt-bits / FIPS-197 PT, all key sizes)... ");
+    fflush(stdout);
+    _VerifyAESCornerCases();
+    printf("OK\n");
+    for (si = 0; si < (sizeof(sizes) / sizeof(sizes[0])); si++)
+    {
+        printf("  %-7s x %u iters... ", sizes[si].label, sizes[si].iters);
+        fflush(stdout);
+        _VerifyRandomAES(sizes[si].keyLen, sizes[si].iters);
+        printf("OK\n");
+    }
+    printf("--- end OpenSSL cross-check ---\n");
+}
+
+#endif /* SSF_AES_OSSL_VERIFY */
+
 /* --------------------------------------------------------------------------------------------- */
 /* Unit tests the AES external interface.                                                        */
 /* --------------------------------------------------------------------------------------------- */
@@ -796,6 +992,10 @@ void SSFAESUnitTest(void)
         SSFAES256BlockDecrypt(ct, 16, dec, 16, key256, 32);
         SSF_ASSERT(memcmp(dec, pt, 16) == 0);
     }
+
+#if SSF_AES_OSSL_VERIFY == 1
+    _SSFAESVerifyAgainstOpenSSL();
+#endif
 }
 #endif /* SSF_CONFIG_AES_UNIT_TEST */
 

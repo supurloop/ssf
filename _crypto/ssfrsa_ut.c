@@ -33,12 +33,11 @@
 #include "ssfrsa.h"
 #include "ssfsha2.h"
 
-/* Cross-check the SSFRSA implementation against OpenSSL. Enabled by default on the host        */
-/* desktop platforms where libcrypto ships with the toolchain (macOS via Homebrew, Linux via    */
-/* the distribution); disabled elsewhere (Windows, embedded targets). The build files add       */
-/* -lcrypto on these platforms and expose /opt/homebrew/include or /usr/local/include via the   */
-/* `includes` line in build.ninja, so the system or Homebrew RSA / EVP headers resolve cleanly. */
-#if (defined(__APPLE__) || defined(__linux__)) && (SSF_CONFIG_RSA_UNIT_TEST == 1)
+/* Cross-check the SSFRSA implementation against OpenSSL. Same gating pattern as every other   */
+/* _ut.c file: SSF_CONFIG_HAVE_OPENSSL drives whether the libcrypto path is compiled in. The   */
+/* host ninja files default it to 1 and link -lcrypto; cross-test envs (e.g. tools/cross-test/ */
+/* targets/mipsel.env) pass -DSSF_CONFIG_HAVE_OPENSSL=0 so the headers aren't required.        */
+#if (SSF_CONFIG_HAVE_OPENSSL == 1) && (SSF_CONFIG_RSA_UNIT_TEST == 1)
 #define SSF_RSA_OSSL_VERIFY 1
 #else
 #define SSF_RSA_OSSL_VERIFY 0

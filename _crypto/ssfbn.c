@@ -90,15 +90,6 @@ static const uint16_t _ssfBNSmallPrimes[] = {
 };
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns a if sel != 0, else b; constant-time.                                                 */
-/* --------------------------------------------------------------------------------------------- */
-static SSFBNLimb_t _SSFBNConstSelect(SSFBNLimb_t a, SSFBNLimb_t b, SSFBNLimb_t sel)
-{
-    SSFBNLimb_t mask = (SSFBNLimb_t)(-(int32_t)(sel != 0u));
-    return ((a & mask) | (b & ~mask));
-}
-
-/* --------------------------------------------------------------------------------------------- */
 /* Adds n limbs of a + b into r and returns the final carry.                                     */
 /* --------------------------------------------------------------------------------------------- */
 static SSFBNLimb_t _SSFBNRawAdd(SSFBNLimb_t *r, const SSFBNLimb_t *a, const SSFBNLimb_t *b,

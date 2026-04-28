@@ -89,8 +89,8 @@ extern "C" {
 /* Ed25519 pure mode only (no pre-hashing / Ed25519ctx / Ed25519ph).                             */
 /* Seed-based API: the 32-byte seed is the secret; the expanded key is derived internally.       */
 /* Signing is deterministic per RFC 8032: the nonce is derived from SHA-512(prefix || message).  */
-/* Self-contained: uses dedicated GF(2^255-19) field arithmetic, no ssfbn dependency.            */
-/* Requires SHA-512 from ssfsha2 module.                                                         */
+/* Self-contained: dedicated GF(2^255-19) field arithmetic; no ssfbn dependency.                 */
+/* Requires SHA-512 from ssfsha2 module and the platform entropy source for SSFEd25519KeyGen.    */
 /* --------------------------------------------------------------------------------------------- */
 
 /* --------------------------------------------------------------------------------------------- */
@@ -115,7 +115,10 @@ void SSFEd25519PubKeyFromSeed(const uint8_t seed[SSF_ED25519_SEED_SIZE],
                                uint8_t pubKey[SSF_ED25519_PUB_KEY_SIZE]);
 
 /* Sign a message. Ed25519 signs the raw message (hashing is internal per RFC 8032).             */
-void SSFEd25519Sign(const uint8_t seed[SSF_ED25519_SEED_SIZE],
+/* Returns true on success; returns false if the verify-after-sign check rejects the produced     */
+/* signature. A false return indicates either a fault during the private operation or a pubKey    */
+/* that does not correspond to seed. On false, sig is wiped to all zeros.                         */
+bool SSFEd25519Sign(const uint8_t seed[SSF_ED25519_SEED_SIZE],
                     const uint8_t pubKey[SSF_ED25519_PUB_KEY_SIZE],
                     const uint8_t *msg, size_t msgLen,
                     uint8_t sig[SSF_ED25519_SIG_SIZE]);

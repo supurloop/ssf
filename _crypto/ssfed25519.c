@@ -36,7 +36,6 @@
 #include "ssfed25519.h"
 #include "ssfsha2.h"
 #include "ssfcrypt.h"
-#include "ssfbn.h"
 
 /* --------------------------------------------------------------------------------------------- */
 /* Field element: 256 bits in 8 x 32-bit limbs, little-endian limb order.                       */
@@ -257,34 +256,51 @@ static void _fe_reduce(_fe_t *a)
     }
 }
 
-/* Import from 32 little-endian bytes. Does NOT clear bit 255 (unlike X25519 version). */
-/* Import from 32 little-endian bytes. Unlike x25519, ed25519 does not clear the top bit here — */
-/* the high-bit test is performed explicitly at point-decoding time per RFC 8032.                */
+/* Import from 32 little-endian bytes. Caller is responsible for any pre-import bit handling:    */
+/* _ge_decode strips byte[31]'s sign bit before calling here, then enforces the y < p canonical  */
+/* check on the unreduced limbs (RFC 8032 §5.1.3). The X25519 sibling instead clears bit 254    */
+/* and ignores bit 255 in its own pre-import — this routine itself is unconditional.             */
 static void _fe_from_bytes(_fe_t *a, const uint8_t *b)
 {
-    SSFBN_t view = { a->v, 0u, 8u };
-    (void)SSFBNFromBytesLE(&view, b, 32u, 8u);
+    uint8_t i;
+    for (i = 0; i < 8u; i++)
+    {
+        a->v[i] = ((uint32_t)b[i * 4u]) |
+                  ((uint32_t)b[i * 4u + 1u] << 8) |
+                  ((uint32_t)b[i * 4u + 2u] << 16) |
+                  ((uint32_t)b[i * 4u + 3u] << 24);
+    }
 }
 
 /* Export to 32 little-endian bytes. Fully reduces first. */
 static void _fe_to_bytes(uint8_t *b, const _fe_t *a)
 {
     _fe_t t;
-    SSFBN_t view;
+    uint8_t i;
     _fe_copy(&t, a);
     _fe_reduce(&t);
-    view.limbs = t.v;
-    view.len = 8u;
-    view.cap = 8u;
-    (void)SSFBNToBytesLE(&view, b, 32u);
+    for (i = 0; i < 8u; i++)
+    {
+        b[i * 4u]      = (uint8_t)(t.v[i]);
+        b[i * 4u + 1u] = (uint8_t)(t.v[i] >> 8);
+        b[i * 4u + 2u] = (uint8_t)(t.v[i] >> 16);
+        b[i * 4u + 3u] = (uint8_t)(t.v[i] >> 24);
+    }
 }
 
-/* Constant-time conditional swap: if the low bit of swap is set, exchange a and b. */
+/* Constant-time conditional swap: if the low bit of swap is set, exchange a and b.              */
+/* Mask construction (-(swap & 1u) cast to uint32_t) yields all-ones when bit 0 is set, all-zero */
+/* otherwise — no branch on the secret bit.                                                      */
 static void _fe_cswap(_fe_t *a, _fe_t *b, uint32_t swap)
 {
-    SSFBN_t va = { a->v, 8u, 8u };
-    SSFBN_t vb = { b->v, 8u, 8u };
-    SSFBNCondSwap(&va, &vb, swap & 1u);
+    uint32_t mask = (uint32_t)(0u - (swap & 1u));
+    uint8_t i;
+    for (i = 0; i < 8u; i++)
+    {
+        uint32_t diff = (a->v[i] ^ b->v[i]) & mask;
+        a->v[i] ^= diff;
+        b->v[i] ^= diff;
+    }
 }
 
 /* r = a^(-1) mod p via Fermat's little theorem: a^(p-2) mod p.                                 */
@@ -344,17 +360,15 @@ static void _fe_inv(_fe_t *r, const _fe_t *a)
     _fe_mul(r, &t1, &t0);
 }
 
-/* r = a^((p+3)/8) mod p. Used for square root computation. */
-/* (p+3)/8 = (2^255-19+3)/8 = (2^255-16)/8 = 2^252 - 2                                        */
+/* r = a^((p-5)/8) mod p. Used by _ge_decode's square-root step (the candidate-x formula        */
+/*   x = u * v^3 * (u * v^7)^((p-5)/8)).                                                        */
+/* (p-5)/8 = (2^255 - 19 - 5)/8 = (2^255 - 24)/8 = 2^252 - 3. The function name (_fe_pow2523)   */
+/* records that exponent in shorthand. Addition chain mirrors _fe_inv, with five fewer trailing */
+/* squarings and a multiply-by-`a` instead of the multiply-by-`a^11` _fe_inv ends with.         */
 static void _fe_pow2523(_fe_t *r, const _fe_t *a)
 {
     _fe_t t0, t1, t2, t3;
     uint16_t i;
-
-    /* This computes a^(2^252 - 3) which equals a^((p-5)/8).                                    */
-    /* Actually we need a^((p+3)/8) = a^(2^252 - 2).                                            */
-    /* 2^252 - 2 in binary: 252 ones followed by a zero, but more precisely:                     */
-    /* We use the same addition chain structure as _fe_inv.                                       */
 
     /* a^2 */
     _fe_sqr(&t0, a);
@@ -453,12 +467,21 @@ static const _fe_t _ed_2d = {{ 0x26B2F159u, 0xEBD69B94u, 0x8283B156u, 0x00E0149A
 static const _fe_t _fe_sqrtm1 = {{ 0x4A0EA0B0u, 0xC4EE1B27u, 0xAD2FE478u, 0x2F431806u,
                                    0x3DFBD7A7u, 0x2B4D0099u, 0x4FC1DF0Bu, 0x2B832480u }};
 
-/* Base point B: y = 4/5 mod p, x = positive root */
-static const uint8_t _ed_basepoint_y[32] = {
-    0x58, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66,
-    0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66,
-    0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66,
-    0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66
+/* Base point B in extended-Edwards coords (X:Y:Z:T), X=B_x, Y=B_y=4/5 mod p, Z=1, T=B_x*B_y.    */
+/* Y is the bytes 0x58 0x66×31 reinterpreted as 8 little-endian 32-bit limbs (sign bit clear).   */
+/* X and T values are derived from the curve equation -x^2 + y^2 = 1 + d*x^2*y^2 with the        */
+/* positive (even) root for x, then encoded as 8 limbs little-endian. Hardcoded here to skip the */
+/* per-call _ge_decode the previous design did at every Sign / Verify / PubKeyFromSeed entry.    */
+/* Correctness of these constants is enforced end-to-end by the RFC 8032 §7.1 test vectors and   */
+/* the OpenSSL cross-check below — any wrong byte makes every signature deviate.                  */
+static const _ge_t _ed_basepoint = {
+    /* X */ {{ 0x8F25D51Au, 0xC9562D60u, 0x9525A7B2u, 0x692CC760u,
+               0xFDD6DC5Cu, 0xC0A4E231u, 0xCD6E53FEu, 0x216936D3u }},
+    /* Y */ {{ 0x66666658u, 0x66666666u, 0x66666666u, 0x66666666u,
+               0x66666666u, 0x66666666u, 0x66666666u, 0x66666666u }},
+    /* Z = 1 */ {{ 1u, 0u, 0u, 0u, 0u, 0u, 0u, 0u }},
+    /* T = X*Y mod p */ {{ 0xA5B7DDA3u, 0x6DDE8AB3u, 0x775152F5u, 0x20F09F80u,
+                           0x64ABE37Du, 0x66EA4E8Eu, 0xD78B7665u, 0x67875F0Fu }}
 };
 
 /* Group order L = 2^252 + 27742317777372353535851937790883648493 */
@@ -638,26 +661,28 @@ static bool _ge_decode(_ge_t *p, const uint8_t in[32])
     return true;
 }
 
-/* Scalar multiplication: r = [scalar]p. Double-and-add from high bit to low.                   */
-/* Variable-time in `scalar` — the inner branch on each scalar bit makes wall-clock runtime      */
-/* proportional to popcount(scalar). Only for callers who pass public scalars (e.g., the verify  */
-/* double-scalar multiplication, whose scalars are derived from the message and signature).      */
-/* For secret scalars use _ge_scalarmult_ct below.                                                */
-static void _ge_scalarmult(_ge_t *r, const uint8_t scalar[32], const _ge_t *p)
+/* Low-order subgroup check: returns true if [8]p is the identity, i.e., p has order in        */
+/* {1,2,4,8}. Per Chalkias et al. "Taming the many EdDSAs" §5, signatures under low-order      */
+/* public keys can be forged for arbitrary messages by setting (R, S) so that the verify        */
+/* equation reduces to identity = identity, regardless of the message. RFC 8032 doesn't         */
+/* mandate the check, but every modern Ed25519 implementation (libsodium ≥1.0.16, BoringSSL)   */
+/* enforces it; we match that posture. Three doublings is cheaper than the alternative          */
+/* hardcoded byte-blocklist and generalises to any future torsion case.                          */
+/* Identity in projective extended coords has X = 0 and Y = Z (and T = 0); checking those two   */
+/* conditions on [8]p is sufficient because the doubling formula preserves the invariant T·Z = */
+/* X·Y (and Y == Z combined with X == 0 implies that invariant trivially).                      */
+static bool _ge_is_low_order(const _ge_t *p)
 {
-    _ge_t Q;
-    int16_t i;
+    _ge_t t;
+    _fe_t diff;
 
-    _ge_identity(&Q);
-    for (i = 255; i >= 0; i--)
-    {
-        _ge_double(&Q, &Q);
-        if (((scalar[i >> 3] >> (i & 7)) & 1u) != 0u)
-        {
-            _ge_add(&Q, &Q, p);
-        }
-    }
-    *r = Q;
+    _ge_double(&t, p);     /* [2]p */
+    _ge_double(&t, &t);    /* [4]p */
+    _ge_double(&t, &t);    /* [8]p */
+
+    if (_fe_iszero(&t.X) == 0u) return false;
+    _fe_sub(&diff, &t.Y, &t.Z);
+    return (_fe_iszero(&diff) != 0u);
 }
 
 /* Constant-time conditional swap of two group elements: if swap != 0, exchange a and b.        */
@@ -704,23 +729,15 @@ static void _ge_scalarmult_ct(_ge_t *r, const uint8_t scalar[32], const _ge_t *p
 /* via timing. Routes through the constant-time variant.                                         */
 static void _ge_scalarmult_base(_ge_t *r, const uint8_t scalar[32])
 {
-    _ge_t B;
-
-    /* Decode the base point from its compressed form */
-    (void)_ge_decode(&B, _ed_basepoint_y);
-    _ge_scalarmult_ct(r, scalar, &B);
+    _ge_scalarmult_ct(r, scalar, &_ed_basepoint);
 }
 
 /* Double scalar multiplication: r = [a]A + [b]B (Straus/interleaved). */
 static void _ge_double_scalarmult(_ge_t *r, const uint8_t a[32], const _ge_t *A,
                                   const uint8_t b[32])
 {
-    _ge_t B;
     _ge_t Q;
     int16_t i;
-
-    /* Decode base point */
-    (void)_ge_decode(&B, _ed_basepoint_y);
 
     _ge_identity(&Q);
     for (i = 255; i >= 0; i--)
@@ -735,7 +752,7 @@ static void _ge_double_scalarmult(_ge_t *r, const uint8_t a[32], const _ge_t *A,
         }
         if (bBit != 0u)
         {
-            _ge_add(&Q, &Q, &B);
+            _ge_add(&Q, &Q, &_ed_basepoint);
         }
     }
     *r = Q;
@@ -1305,6 +1322,22 @@ static bool _sc_is_lt_L(const uint8_t s[32])
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Scrub the deeper-stack region used by Sign's primitives. _ge_scalarmult_ct, _ge_double, and   */
+/* _ge_add all leave _ge_t / _fe_t locals (Q, QplusP, A..H) in their freed frames; those frames  */
+/* contain partial scalar-mult intermediates that depend on the secret nonce. Sign cannot reach  */
+/* into those frames to wipe them, so we allocate a fresh frame at the same depth and overwrite  */
+/* it with zeros via volatile writes (which the compiler cannot elide). Sized generously to      */
+/* cover the deepest call chain Sign exercises: _ge_scalarmult_ct → _ge_add → _fe_mul.            */
+/* --------------------------------------------------------------------------------------------- */
+__attribute__((noinline))
+static void _ed25519_stack_scrub(void)
+{
+    volatile uint8_t scratch[4096];
+    size_t i;
+    for (i = 0; i < sizeof(scratch); i++) scratch[i] = 0u;
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Feed an arbitrary-size buffer to a SHA-512 context, looping in UINT32_MAX-sized chunks.       */
 /* SSFSHA512Update takes a uint32_t length; on 64-bit hosts a single message can exceed that, so */
 /* a naked (uint32_t)msgLen cast silently truncates and produces a hash over the wrong prefix.   */
@@ -1366,7 +1399,7 @@ void SSFEd25519PubKeyFromSeed(const uint8_t seed[SSF_ED25519_SEED_SIZE],
 }
 
 /* Sign a message. */
-void SSFEd25519Sign(const uint8_t seed[SSF_ED25519_SEED_SIZE],
+bool SSFEd25519Sign(const uint8_t seed[SSF_ED25519_SEED_SIZE],
                     const uint8_t pubKey[SSF_ED25519_PUB_KEY_SIZE],
                     const uint8_t *msg, size_t msgLen,
                     uint8_t sig[SSF_ED25519_SIG_SIZE])
@@ -1410,12 +1443,37 @@ void SSFEd25519Sign(const uint8_t seed[SSF_ED25519_SEED_SIZE],
 
     _sc_muladd(&sig[32], hram, a, nonce);  /* S = h*a + r mod L */
 
+    /* Verify-after-sign: re-run the public verify equation against the produced (R, S). A      */
+    /* fault during the private operation, or a pubKey that does not correspond to seed, both   */
+    /* manifest as a sig that does not verify. Catching this here prevents the device from      */
+    /* releasing a signature that an honest verifier will reject — and, more importantly,       */
+    /* defeats the differential-fault class of attacks where a single bad signature leaks       */
+    /* secret-scalar bits to an attacker who can request signatures on chosen messages.         */
+    if (!SSFEd25519Verify(pubKey, msg, msgLen, sig))
+    {
+        SSFCryptSecureZero(sig, SSF_ED25519_SIG_SIZE);
+        SSFCryptSecureZero(h, sizeof(h));
+        SSFCryptSecureZero(a, sizeof(a));
+        SSFCryptSecureZero(nonce, sizeof(nonce));
+        SSFCryptSecureZero(r_hash, sizeof(r_hash));
+        SSFCryptSecureZero(hram, sizeof(hram));
+        SSFCryptSecureZero(&R, sizeof(R));
+        SSFCryptSecureZero(&ctx, sizeof(ctx));
+        _ed25519_stack_scrub();
+        return false;
+    }
+
     /* Zeroize sensitive data */
     SSFCryptSecureZero(h, sizeof(h));
     SSFCryptSecureZero(a, sizeof(a));
     SSFCryptSecureZero(nonce, sizeof(nonce));
     SSFCryptSecureZero(r_hash, sizeof(r_hash));
+    SSFCryptSecureZero(hram, sizeof(hram));
+    SSFCryptSecureZero(&R, sizeof(R));
     SSFCryptSecureZero(&ctx, sizeof(ctx));
+    _ed25519_stack_scrub();
+
+    return true;
 }
 
 /* Verify a signature. Returns true if valid. */
@@ -1437,6 +1495,10 @@ bool SSFEd25519Verify(const uint8_t pubKey[SSF_ED25519_PUB_KEY_SIZE],
 
     /* Decode public key */
     if (!_ge_decode(&A, pubKey)) return false;
+
+    /* Reject low-order pubkeys: [8]A = identity → A has order ≤ 8 → forgery class trivially   */
+    /* satisfies the verify equation regardless of message.                                     */
+    if (_ge_is_low_order(&A)) return false;
 
     /* Negate A: -A has coordinates (-X, Y, Z, -T) */
     _fe_neg(&negA.X, &A.X);

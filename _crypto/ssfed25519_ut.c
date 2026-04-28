@@ -58,8 +58,24 @@
 /* counts surviving sentinel bytes. A correctly scrubbed Sign overwrites the sentinel via its    */
 /* deep zero-fill; without scrub, most of the polluted region (which Sign's natural frames don't */
 /* touch) remains.                                                                                 */
+/*                                                                                               */
+/* The sentinel value MUST NOT be 0xCC: MSVC's /RTC1 (Debug runtime checks) initializes every    */
+/* stack frame with 0xCCCCCCCC on entry, so 0xCC bytes in the scanner would be indistinguishable */
+/* from the polluter's writes versus RTC1's own fill. 0xAB is arbitrary and outside both the     */
+/* RTC1 fill (0xCC) and the heap-debug fill (0xFD / 0xCD).                                       */
+/*                                                                                               */
+/* The polluter and scanner also disable /RTC1 for their own bodies via                          */
+/* `#pragma runtime_checks("scu", off)`. With RTC1 active MSVC writes 0xCC into every newly      */
+/* allocated stack frame on function entry — including the scanner's `buf` — which would erase   */
+/* the bytes the polluter just wrote at the same stack offset, making the test always read 0    */
+/* sentinels regardless of whether the scrub helper ran.                                          */
 /* --------------------------------------------------------------------------------------------- */
 #define _SSFED25519_UT_STACK_PROBE_SIZE (4096u)
+#define _SSFED25519_UT_SENTINEL         (0xABu)
+
+#if defined(_MSC_VER)
+#pragma runtime_checks("scu", off)
+#endif
 
 SSF_NOINLINE
 static void _SSFEd25519UTPolluteStack(uint8_t pattern)
@@ -67,7 +83,7 @@ static void _SSFEd25519UTPolluteStack(uint8_t pattern)
     volatile uint8_t buf[_SSFED25519_UT_STACK_PROBE_SIZE];
     size_t i;
     for (i = 0; i < sizeof(buf); i++) buf[i] = pattern;
-    /* Volatile write + SSF_NOINLINE keep the buffer live and uncoalesced across the call. */
+    SSF_OPTIMIZER_BARRIER(buf);
 }
 
 SSF_NOINLINE
@@ -76,14 +92,19 @@ static size_t _SSFEd25519UTCountSentinel(uint8_t pattern)
     volatile uint8_t buf[_SSFED25519_UT_STACK_PROBE_SIZE];
     size_t hits = 0;
     size_t i;
-    /* Read the buffer's pre-existing stack contents BEFORE writing it, so we observe what    */
-    /* the previous frame at this depth left behind.                                            */
+    /* The volatile reads in the loop force the compiler to materialize buf at a real stack     */
+    /* slot, so a pre-loop barrier is not required (and would warn C4700 reading uninitialised  */
+    /* memory under the MSVC variant of SSF_OPTIMIZER_BARRIER).                                 */
     for (i = 0; i < sizeof(buf); i++)
     {
         if (buf[i] == pattern) hits++;
     }
     return hits;
 }
+
+#if defined(_MSC_VER)
+#pragma runtime_checks("scu", restore)
+#endif
 
 #if SSF_ED25519_OSSL_VERIFY == 1
 /* --------------------------------------------------------------------------------------------- */
@@ -572,14 +593,19 @@ void SSFEd25519UnitTest(void)
 
         SSF_ASSERT(SSFEd25519KeyGen(seed, pubKey) == true);
 
-        _SSFEd25519UTPolluteStack(0xCCu);
+        _SSFEd25519UTPolluteStack(_SSFED25519_UT_SENTINEL);
         SSF_ASSERT(SSFEd25519Sign(seed, pubKey, msg, sizeof(msg) - 1u, sig) == true);
-        hitsAfter = _SSFEd25519UTCountSentinel(0xCCu);
+        hitsAfter = _SSFEd25519UTCountSentinel(_SSFED25519_UT_SENTINEL);
 
         /* Tolerance: the scanner's own frame layout (return addr, saved registers) may differ */
         /* from the polluter's by a handful of bytes, so allow a small residue. The pre-fix    */
         /* failure mode leaves thousands of sentinel bytes, well above this threshold.         */
+        /* MSVC tolerance is higher — see equivalent comment in ssfx25519_ut.c.                */
+#if defined(_MSC_VER)
+        SSF_ASSERT(hitsAfter < 512u);
+#else
         SSF_ASSERT(hitsAfter < 64u);
+#endif
     }
 
     /* ---- A3 regression: low-order pubkey signature attack must be rejected. */

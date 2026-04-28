@@ -380,6 +380,7 @@ static void _x25519_stack_scrub(void)
     volatile uint8_t scratch[4096];
     size_t i;
     for (i = 0; i < sizeof(scratch); i++) scratch[i] = 0u;
+    SSF_OPTIMIZER_BARRIER(scratch);
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -471,7 +472,9 @@ static void _x25519_scalar_mul(uint8_t out[32], const uint8_t scalar[32],
     SSFCryptSecureZero(&DA, sizeof(DA));
     SSFCryptSecureZero(&CB, sizeof(CB));
     SSFCryptSecureZero(&t, sizeof(t));
-    _x25519_stack_scrub();
+    /* The deep-frame scrub is invoked at the public-API boundary (SSFX25519KeyGen /             */
+    /* PubKeyFromPrivKey / ComputeSecret) — calling it here would leave it one frame too deep    */
+    /* to overwrite the bytes this function's freed frame leaves on the stack.                   */
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -487,6 +490,7 @@ bool SSFX25519KeyGen(uint8_t privKey[32], uint8_t pubKey[32])
     if (!SSFPortGetEntropy(privKey, 32u)) return false;
 
     _x25519_scalar_mul(pubKey, privKey, basepoint);
+    _x25519_stack_scrub();
     return true;
 }
 
@@ -501,6 +505,7 @@ void SSFX25519PubKeyFromPrivKey(const uint8_t privKey[32], uint8_t pubKey[32])
     SSF_REQUIRE(pubKey != NULL);
 
     _x25519_scalar_mul(pubKey, privKey, basepoint);
+    _x25519_stack_scrub();
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -518,6 +523,7 @@ bool SSFX25519ComputeSecret(const uint8_t privKey[32],
     SSF_REQUIRE(secret != NULL);
 
     _x25519_scalar_mul(secret, privKey, peerPubKey);
+    _x25519_stack_scrub();
 
     /* Check for all-zero output (low-order point attack) */
     for (i = 0; i < 32u; i++) zero |= secret[i];

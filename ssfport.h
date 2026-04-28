@@ -351,6 +351,27 @@ typedef pthread_mutex_t SSFMutex_t;
 #define SSF_NOINLINE
 #endif
 
+/* SSF_OPTIMIZER_BARRIER(p) — force the compiler to materialize p (an address-taken object) and  */
+/* fence all preceding/following memory operations across this point. Required at the end of     */
+/* stack-scrub helpers and pollute/scan probes so the compiler cannot reorder loads/stores       */
+/* across the function boundary or elide a "dead" stack buffer that the test framework relies    */
+/* on having a real, addressable stack location. `volatile` alone is not sufficient on MSVC      */
+/* because the optimizer may still place a volatile local at a stack offset that does not        */
+/* persist across the call (or coalesce loop iterations). The GCC variant uses an empty inline   */
+/* asm with `"r"(p)` to pin the address into a register and `"memory"` to clobber. The MSVC      */
+/* variant pairs the deprecated-but-effective _ReadWriteBarrier compiler fence with a volatile   */
+/* read of the first byte to force materialization.                                              */
+#if defined(__GNUC__) || defined(__clang__)
+#define SSF_OPTIMIZER_BARRIER(p) __asm__ __volatile__("" : : "r"(p) : "memory")
+#elif defined(_MSC_VER)
+#include <intrin.h>
+#pragma intrinsic(_ReadWriteBarrier)
+#define SSF_OPTIMIZER_BARRIER(p) \
+    do { _ReadWriteBarrier(); (void)(*(volatile uint8_t *)(p)); } while (0)
+#else
+#define SSF_OPTIMIZER_BARRIER(p) ((void)(p))
+#endif
+
 /* --------------------------------------------------------------------------------------------- */
 /* External interface                                                                            */
 /* --------------------------------------------------------------------------------------------- */

@@ -1309,6 +1309,7 @@ static void _ed25519_stack_scrub(void)
     volatile uint8_t scratch[4096];
     size_t i;
     for (i = 0; i < sizeof(scratch); i++) scratch[i] = 0u;
+    SSF_OPTIMIZER_BARRIER(scratch);
 }
 
 /* --------------------------------------------------------------------------------------------- */

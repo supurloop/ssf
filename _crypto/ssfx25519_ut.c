@@ -155,8 +155,24 @@ static void _VerifyX25519AgainstOpenSSL(uint16_t iters)
 /* before returning. The scanner allocates a deep frame at the same depth and reads its          */
 /* uninitialised contents — those reflect what the previous frame at that depth wrote. After     */
 /* scrub the sentinel count must drop to near-zero; pre-scrub thousands of bytes survive.        */
+/*                                                                                               */
+/* The sentinel value MUST NOT be 0xCC: MSVC's /RTC1 (Debug runtime checks) initializes every    */
+/* stack frame with 0xCCCCCCCC on entry, so 0xCC bytes in the scanner would be indistinguishable */
+/* from the polluter's writes versus RTC1's own fill. 0xAB is arbitrary and outside both the     */
+/* RTC1 fill (0xCC) and the heap-debug fill (0xFD / 0xCD).                                       */
+/*                                                                                               */
+/* The polluter and scanner also disable /RTC1 for their own bodies via                          */
+/* `#pragma runtime_checks("scu", off)`. With RTC1 active MSVC writes 0xCC into every newly      */
+/* allocated stack frame on function entry — including the scanner's `buf` — which would erase   */
+/* the bytes the polluter just wrote at the same stack offset, making the test always read 0    */
+/* sentinels regardless of whether the scrub helper ran.                                          */
 /* --------------------------------------------------------------------------------------------- */
 #define _SSFX25519_UT_STACK_PROBE_SIZE (4096u)
+#define _SSFX25519_UT_SENTINEL         (0xABu)
+
+#if defined(_MSC_VER)
+#pragma runtime_checks("scu", off)
+#endif
 
 SSF_NOINLINE
 static void _SSFX25519UTPolluteStack(uint8_t pattern)
@@ -164,7 +180,7 @@ static void _SSFX25519UTPolluteStack(uint8_t pattern)
     volatile uint8_t buf[_SSFX25519_UT_STACK_PROBE_SIZE];
     size_t i;
     for (i = 0; i < sizeof(buf); i++) buf[i] = pattern;
-    /* Volatile write + SSF_NOINLINE keep the buffer live and uncoalesced across the call. */
+    SSF_OPTIMIZER_BARRIER(buf);
 }
 
 SSF_NOINLINE
@@ -173,12 +189,19 @@ static size_t _SSFX25519UTCountSentinel(uint8_t pattern)
     volatile uint8_t buf[_SSFX25519_UT_STACK_PROBE_SIZE];
     size_t hits = 0;
     size_t i;
+    /* The volatile reads in the loop force the compiler to materialize buf at a real stack     */
+    /* slot, so a pre-loop barrier is not required (and would warn C4700 reading uninitialised  */
+    /* memory under the MSVC variant of SSF_OPTIMIZER_BARRIER).                                 */
     for (i = 0; i < sizeof(buf); i++)
     {
         if (buf[i] == pattern) hits++;
     }
     return hits;
 }
+
+#if defined(_MSC_VER)
+#pragma runtime_checks("scu", restore)
+#endif
 
 /* --------------------------------------------------------------------------------------------- */
 /* SSF-internal deterministic fuzz. Runs without OpenSSL. Uses ECDH's commutative property as    */
@@ -424,13 +447,25 @@ void SSFX25519UnitTest(void)
         SSF_ASSERT(SSFX25519KeyGen(priv, pub) == true);
         SSF_ASSERT(SSFX25519KeyGen(peerPriv, peerPub) == true);
 
-        _SSFX25519UTPolluteStack(0xCCu);
+        _SSFX25519UTPolluteStack(_SSFX25519_UT_SENTINEL);
         SSF_ASSERT(SSFX25519ComputeSecret(priv, peerPub, secret) == true);
-        hitsAfter = _SSFX25519UTCountSentinel(0xCCu);
+        hitsAfter = _SSFX25519UTCountSentinel(_SSFX25519_UT_SENTINEL);
 
         /* Pre-fix: thousands of sentinels survive (no scrub). Post-fix: scrub helper      */
         /* zeroes the deep region; small residue tolerated for scanner's own frame layout. */
+        /*                                                                                  */
+        /* The threshold is platform-tuned. On GCC/clang the call-frame overhead between    */
+        /* the polluter and the scrub is ~50 bytes, so residue stays well under 64. MSVC    */
+        /* /RTC1 + /GS produce ~80–400 byte frame overheads (RTC1 fill on padding, /GS      */
+        /* canaries, larger spill slots) that are NOT secret-bearing — they're saved-reg    */
+        /* values, return addresses, and uninit fill — but they happen to fall inside the   */
+        /* polluter's address range and get counted. 512 is comfortably below the ~4 KiB    */
+        /* unscrubbed total and still rejects a regression that disabled the scrub.          */
+#if defined(_MSC_VER)
+        SSF_ASSERT(hitsAfter < 512u);
+#else
         SSF_ASSERT(hitsAfter < 64u);
+#endif
     }
 
     /* SSF-internal deterministic ECDH fuzz. Independent of OpenSSL — exercises the              */

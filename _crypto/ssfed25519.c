@@ -1303,7 +1303,7 @@ static bool _sc_is_lt_L(const uint8_t s[32])
 /* it with zeros via volatile writes (which the compiler cannot elide). Sized generously to      */
 /* cover the deepest call chain Sign exercises: _ge_scalarmult_ct → _ge_add → _fe_mul.            */
 /* --------------------------------------------------------------------------------------------- */
-__attribute__((noinline))
+SSF_NOINLINE
 static void _ed25519_stack_scrub(void)
 {
     volatile uint8_t scratch[4096];

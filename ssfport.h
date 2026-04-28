@@ -72,6 +72,7 @@ extern "C" {
 /* _crypto */
 #define SSF_CONFIG_AES_UNIT_TEST     (1u)
 #define SSF_CONFIG_AESCCM_UNIT_TEST  (1u)
+#define SSF_CONFIG_AESCTR_UNIT_TEST  (1u)
 #define SSF_CONFIG_AESGCM_UNIT_TEST  (1u)
 #define SSF_CONFIG_BN_UNIT_TEST      (1u)
 #define SSF_CONFIG_BN_MICROBENCH     (1u)  /* 1 to run MontMul/MontSquare perf harness */
@@ -166,6 +167,7 @@ extern "C" {
     /* _crypto */ \
     SSF_CONFIG_AES_UNIT_TEST == 1 || \
     SSF_CONFIG_AESCCM_UNIT_TEST == 1 || \
+    SSF_CONFIG_AESCTR_UNIT_TEST == 1 || \
     SSF_CONFIG_AESGCM_UNIT_TEST == 1 || \
     SSF_CONFIG_BN_UNIT_TEST == 1 || \
     SSF_CONFIG_CCP_UNIT_TEST == 1 || \
@@ -334,6 +336,20 @@ typedef pthread_mutex_t SSFMutex_t;
 #define SSF_MUTEX_RELEASE(mutex) { SSF_ASSERT(pthread_mutex_unlock(&mutex) == 0); }
 #endif /* _WIN32 */
 #endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
+
+/* --------------------------------------------------------------------------------------------- */
+/* Portable function attributes                                                                  */
+/* --------------------------------------------------------------------------------------------- */
+
+/* SSF_NOINLINE — force the compiler to give the function its own stack frame and call site.    */
+/* Used by stack-scrub helpers and side-channel-sensitive routines that need a clean frame.      */
+#if defined(__GNUC__) || defined(__clang__)
+#define SSF_NOINLINE __attribute__((noinline))
+#elif defined(_MSC_VER)
+#define SSF_NOINLINE __declspec(noinline)
+#else
+#define SSF_NOINLINE
+#endif
 
 /* --------------------------------------------------------------------------------------------- */
 /* External interface                                                                            */

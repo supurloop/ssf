@@ -3243,6 +3243,48 @@ void SSFAESGCMUnitTest(void)
                                      _AESGCMUT[0].key, _AESGCMUT[0].keyLen, NULL,
                                      _AESGCMUT[0].tagLen, pt, _AESGCMUT[0].ptLen));
 
+    /* DBC: NULL pt/ct/auth with non-zero matching length must trip (S2). The previous
+       implementation silently skipped GHASH/GCTR work but still encoded the length in the
+       tag's length block, producing a tag that no correct verifier could ever match.        */
+    {
+        uint8_t okBuf[16] = {0};
+        uint8_t okIv[12]  = {0};
+        uint8_t okKey[16] = {0};
+        uint8_t okTag[16] = {0};
+
+        /* Encrypt: NULL pt + ptLen > 0 must trip. */
+        SSF_ASSERT_TEST(SSFAESGCMEncrypt(NULL, 16u, okIv, 12u, NULL, 0u,
+                                         okKey, 16u, okTag, 16u, okBuf, 16u));
+        /* Encrypt: NULL ct + ptLen > 0 must trip. */
+        SSF_ASSERT_TEST(SSFAESGCMEncrypt(okBuf, 16u, okIv, 12u, NULL, 0u,
+                                         okKey, 16u, okTag, 16u, NULL, 16u));
+        /* Encrypt: NULL auth + authLen > 0 must trip. */
+        SSF_ASSERT_TEST(SSFAESGCMEncrypt(okBuf, 16u, okIv, 12u, NULL, 8u,
+                                         okKey, 16u, okTag, 16u, okBuf, 16u));
+
+        /* Decrypt mirror. */
+        SSF_ASSERT_TEST(SSFAESGCMDecrypt(NULL, 16u, okIv, 12u, NULL, 0u,
+                                         okKey, 16u, okTag, 16u, okBuf, 16u));
+        SSF_ASSERT_TEST(SSFAESGCMDecrypt(okBuf, 16u, okIv, 12u, NULL, 0u,
+                                         okKey, 16u, okTag, 16u, NULL, 16u));
+        SSF_ASSERT_TEST(SSFAESGCMDecrypt(okBuf, 16u, okIv, 12u, NULL, 8u,
+                                         okKey, 16u, okTag, 16u, okBuf, 16u));
+    }
+
+    /* Positive control: NULL + 0-length is the legitimate auth-only / no-AAD path and must
+       continue to round-trip. Encrypt with ptLen == 0 and authLen == 0, then verify the tag
+       decrypts back successfully. Confirms the tightened DBC didn't break the empty-data
+       case (which is GMAC-flavored AES-GCM use). */
+    {
+        uint8_t okIv[12]  = {0};
+        uint8_t okKey[16] = {0};
+        uint8_t emptyTag[16];
+
+        SSFAESGCMEncrypt(NULL, 0u, okIv, 12u, NULL, 0u, okKey, 16u, emptyTag, 16u, NULL, 0u);
+        SSF_ASSERT(SSFAESGCMDecrypt(NULL, 0u, okIv, 12u, NULL, 0u, okKey, 16u,
+                                    emptyTag, 16u, NULL, 0u) == true);
+    }
+
     for (j = 0; j < 10; j++)
     {
         for (i = 7; i < sizeof(_AESGCMUT) / sizeof(SSFAESGCMUT_t); i++)

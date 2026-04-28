@@ -202,6 +202,7 @@ Cryptographic primitives for hashing, encryption, and random number generation.
 | [AES](_crypto/ssfaes.md) | AES block cipher (128/192/256-bit key) | ~2 KB⁵ | — | ~300 B¹⁴ | — | Yes |
 | [AES-GCM](_crypto/ssfaesgcm.md) | AES-GCM authenticated encryption/decryption | ~3.5 KB⁶ | — | ~128 B | — | Yes |
 | [AES-CCM](_crypto/ssfaesccm.md) | AES-CCM AEAD (RFC 3610, NIST SP 800-38C) | ~1.5 KB³⁶ | — | ~450 B³⁷ | — | Yes |
+| [AES-CTR](_crypto/ssfaesctr.md) | AES-CTR confidentiality-only stream cipher (NIST SP 800-38A §6.5) | ~600 B | — | ~120 B | — | Yes |
 | [HMAC](_crypto/ssfhmac.md) | HMAC (RFC 2104) keyed-hash MAC over SHA-1 / SHA-256 / SHA-384 / SHA-512 | ~1 KB²⁸ | — | ~1.3 KB²⁹ | — | Yes |
 | [HKDF](_crypto/ssfhkdf.md) | HKDF (RFC 5869) HMAC-based extract-and-expand key derivation | ~600 B³⁰ | — | ~1.5 KB³¹ | — | Yes |
 | [Poly1305](_crypto/ssfpoly1305.md) | Poly1305 one-time MAC (RFC 7539/8439) | ~1.2 KB | — | ~250 B³² | — | Yes |

@@ -87,6 +87,16 @@
 #include "ssfcrypt.h"
 
 /* --------------------------------------------------------------------------------------------- */
+/* Compile-time bounds checks: the GCM length-block is a 64-bit BE bit count per NIST SP 800-38D */
+/* §6.5; the GHASH iteration count and GCTR full-block count are derived from size_t lengths.    */
+/* These typedefs trip the build if the project's integer widths shrink such that the helpers'   */
+/* size_t / uint64_t arithmetic could silently truncate. typedef-array idiom is used in place of */
+/* _Static_assert because the cross-test toolchain matrix predates universal C11 support.        */
+/* --------------------------------------------------------------------------------------------- */
+typedef char _ssf_aesgcm_sa_size_at_least_32[(sizeof(size_t) >= 4) ? 1 : -1];
+typedef char _ssf_aesgcm_sa_u64_is_64_bit[(sizeof(uint64_t) == 8) ? 1 : -1];
+
+/* --------------------------------------------------------------------------------------------- */
 /* Local Helper Functions and Macros                                                             */
 /* --------------------------------------------------------------------------------------------- */
 
@@ -321,26 +331,33 @@ static void _SSFAESGCMGHASH(const uint8_t *in, size_t inLen, const uint8_t *h, s
                             uint8_t *out, size_t outSize)
 {
     uint8_t buf[16] = {0};
-    uint32_t i, pos, iters;
+    size_t i;
+    size_t pos;
+    size_t iters;
 
-    if ((in == NULL) || (out == NULL) || (inLen == 0)) { return; }
+    /* inLen == 0 is the legitimate empty-AAD / empty-plaintext case (auth-only GCM). The     */
+    /* public API rejects NULL pointers with positive length, so once we get here, NULL means */
+    /* len == 0.                                                                              */
+    if (inLen == 0u) return;
 
     SSF_REQUIRE(in != NULL);
     SSF_REQUIRE(h != NULL);
     SSF_REQUIRE(out != NULL);
 
-    SSF_REQUIRE(inLen > 0);
     SSF_REQUIRE(hLen == 16);
     SSF_REQUIRE(outSize == 16);
 
-    pos = 0;
-    iters = ((uint32_t)inLen) >> 4;
+    pos = 0u;
+    /* size_t throughout — was previously truncating to uint32_t, which silently produced wrong */
+    /* tags for inputs > 4 GiB. Public API still caps inLen below that, but this helper is now  */
+    /* correct independent of the cap.                                                          */
+    iters = inLen >> 4;
 
     for (i = 0; i < iters; i++)
     {
         BLOCK_XOR(out, &in[pos]);
         _SSFAESGCMBlockMult(out, outSize, h, hLen);
-        pos += 16;
+        pos += 16u;
     }
 
     if (pos < inLen)
@@ -368,21 +385,25 @@ static void _SSFAESGCMGCTR(const uint8_t *in, size_t inLen, const uint8_t *key, 
 {
     uint8_t cb[16];
     uint8_t buf[16];
-    uint32_t i, n;
+    size_t i;
+    size_t n;
 
-    if ((in == NULL) || (out == NULL)) { return; }
-
+    SSF_REQUIRE(in != NULL);
+    SSF_REQUIRE(out != NULL);
     SSF_REQUIRE(key != NULL);
     SSF_REQUIRE(icb != NULL);
     SSF_REQUIRE((keyLen == 16) || (keyLen == 24) || (keyLen == 32));
     SSF_REQUIRE(icbLen == 16);
+    SSF_REQUIRE(inLen > 0u);    /* Caller-side encrypt/decrypt guards inLen == 0 cases. */
     SSF_REQUIRE(inLen <= outSize);
 
     memcpy(cb, icb, sizeof(cb));
     memcpy(out, in, inLen);
 
-    n = inLen & 0xfffffff0;
-    for (i = 0; i < n; i += 16)
+    /* size_t mask — was previously a 32-bit constant that clobbered the high half on 64-bit   */
+    /* hosts for inLen > 4 GiB.                                                                  */
+    n = inLen & ~(size_t)0xFu;
+    for (i = 0; i < n; i += 16u)
     {
         SSFAESXXXBlockEncrypt(cb, sizeof(cb), buf, sizeof(buf), key, keyLen);
         BLOCK_XOR(&out[i], buf);
@@ -393,7 +414,7 @@ static void _SSFAESGCMGCTR(const uint8_t *in, size_t inLen, const uint8_t *key, 
     {
         SSFAESXXXBlockEncrypt(cb, sizeof(cb), buf, sizeof(buf), key, keyLen);
 
-        for (i = 0; i < (inLen & 0xf); i++)
+        for (i = 0; i < (inLen & (size_t)0xFu); i++)
         {
             out[n + i] ^= buf[i];
         }
@@ -413,12 +434,18 @@ void SSFAESGCMEncrypt(const uint8_t *pt, size_t ptLen, const uint8_t *iv, size_t
     uint8_t j1[16] = {0};
     uint8_t buf[16] = {0};
 
-    uint32_t t;
+    /* uint64_t — the GCM length block encodes lengths-in-bits as 64-bit big-endian per NIST    */
+    /* SP 800-38D §6.5. Was previously uint32_t which silently truncated for ptLen >= 2^29,    */
+    /* exactly the boundary the public API cap brushes against.                                 */
+    uint64_t t;
 
     SSF_REQUIRE(iv != NULL);
     SSF_REQUIRE(key != NULL);
     SSF_REQUIRE(tag != NULL);
-    SSF_REQUIRE(ptLen < (512 * 1024 * 1024));
+    SSF_REQUIRE((pt != NULL) || (ptLen == 0u));
+    SSF_REQUIRE((ct != NULL) || (ptLen == 0u));
+    SSF_REQUIRE((auth != NULL) || (authLen == 0u));
+    SSF_REQUIRE(ptLen < (512u * 1024u * 1024u));
     SSF_REQUIRE(ptLen <= ctSize);
     SSF_REQUIRE(ivLen > 0);
     SSF_REQUIRE((keyLen == 16) || (keyLen == 24) || (keyLen == 32));
@@ -434,7 +461,7 @@ void SSFAESGCMEncrypt(const uint8_t *pt, size_t ptLen, const uint8_t *iv, size_t
     else
     {
         _SSFAESGCMGHASH(iv, ivLen, h, sizeof(h), j0, sizeof(j0));
-        t = ((uint32_t)ivLen << 3);
+        t = ((uint64_t)ivLen) << 3;
         SSF_PUTU64BE(&buf[8], t);
         _SSFAESGCMGHASH(buf, sizeof(buf), h, sizeof(h), j0, sizeof(j0));
     }
@@ -442,11 +469,16 @@ void SSFAESGCMEncrypt(const uint8_t *pt, size_t ptLen, const uint8_t *iv, size_t
     memcpy(j1, j0, sizeof(j1));
     _SSFAESGCMBlockInc32(j1);
 
-    _SSFAESGCMGCTR(pt, ptLen, key, keyLen, j1, sizeof(j1), ct, ptLen);
+    /* Guard the GCTR call so pt / ct may legitimately be NULL when ptLen == 0 (auth-only /  */
+    /* GMAC-style use). _SSFAESGCMGCTR's memcpy would otherwise be passed NULLs.              */
+    if (ptLen > 0u)
+    {
+        _SSFAESGCMGCTR(pt, ptLen, key, keyLen, j1, sizeof(j1), ct, ptLen);
+    }
 
-    t = ((uint32_t)authLen << 3);
+    t = ((uint64_t)authLen) << 3;
     SSF_PUTU64BE(buf, t);
-    t = ((uint32_t)ptLen << 3);
+    t = ((uint64_t)ptLen) << 3;
     SSF_PUTU64BE(&buf[8], t);
 
     _SSFAESGCMGHASH(auth, authLen, h, sizeof(h), s, sizeof(s));
@@ -471,13 +503,18 @@ bool SSFAESGCMDecrypt(const uint8_t *ct, size_t ctLen, const uint8_t *iv, size_t
     uint8_t j1[16] = { 0 };
     uint8_t buf[16] = { 0 };
 
-    uint32_t t;
+    /* uint64_t — see SSFAESGCMEncrypt for rationale; matches NIST SP 800-38D §6.5 length block */
+    /* encoding (64-bit big-endian count of bits).                                              */
+    uint64_t t;
 
     SSF_REQUIRE(iv != NULL);
     SSF_REQUIRE(key != NULL);
     SSF_REQUIRE(tag != NULL);
+    SSF_REQUIRE((ct != NULL) || (ctLen == 0u));
+    SSF_REQUIRE((pt != NULL) || (ctLen == 0u));
+    SSF_REQUIRE((auth != NULL) || (authLen == 0u));
 
-    SSF_REQUIRE(ctLen < (512 * 1024 * 1024));
+    SSF_REQUIRE(ctLen < (512u * 1024u * 1024u));
     SSF_REQUIRE(ctLen <= ptSize);
     SSF_REQUIRE(ivLen > 0);
     SSF_REQUIRE((keyLen == 16) || (keyLen == 24) || (keyLen == 32));
@@ -493,7 +530,7 @@ bool SSFAESGCMDecrypt(const uint8_t *ct, size_t ctLen, const uint8_t *iv, size_t
     else
     {
         _SSFAESGCMGHASH(iv, ivLen, h, sizeof(h), j0, sizeof(j0));
-        t = ((uint32_t)ivLen << 3);
+        t = ((uint64_t)ivLen) << 3;
         SSF_PUTU64BE(&buf[8], t);
         _SSFAESGCMGHASH(buf, sizeof(buf), h, sizeof(h), j0, sizeof(j0));
     }
@@ -501,11 +538,14 @@ bool SSFAESGCMDecrypt(const uint8_t *ct, size_t ctLen, const uint8_t *iv, size_t
     memcpy(j1, j0, sizeof(j1));
     _SSFAESGCMBlockInc32(j1);
 
-    _SSFAESGCMGCTR(ct, ctLen, key, keyLen, j1, sizeof(j1), pt, ptSize);
+    if (ctLen > 0u)
+    {
+        _SSFAESGCMGCTR(ct, ctLen, key, keyLen, j1, sizeof(j1), pt, ptSize);
+    }
 
-    t = ((uint32_t)authLen << 3);
+    t = ((uint64_t)authLen) << 3;
     SSF_PUTU64BE(buf, t);
-    t = ((uint32_t)ctLen << 3);
+    t = ((uint64_t)ctLen) << 3;
     SSF_PUTU64BE(&buf[8], t);
 
     _SSFAESGCMGHASH(auth, authLen, h, sizeof(h), s, sizeof(s));
@@ -516,8 +556,13 @@ bool SSFAESGCMDecrypt(const uint8_t *ct, size_t ctLen, const uint8_t *iv, size_t
 
     /* Verify tag in constant time to avoid leaking the position of the first differing byte.
      * On auth failure, zero pt so a buggy caller that ignores the return value cannot ship
-     * unauthenticated plaintext — matches the SSFAESCCMDecrypt pattern. */
-    if (SSFCryptCTMemEq(s, tag, tagLen) == false) { memset(pt, 0, ctLen); return false; }
+     * unauthenticated plaintext — matches the SSFAESCCMDecrypt pattern. The ctLen > 0 guard
+     * is needed because pt may legitimately be NULL when ctLen == 0 (auth-only / GMAC mode). */
+    if (SSFCryptCTMemEq(s, tag, tagLen) == false)
+    {
+        if (ctLen > 0u) memset(pt, 0, ctLen);
+        return false;
+    }
     return true;
 }
 

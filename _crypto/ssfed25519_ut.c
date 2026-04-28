@@ -61,17 +61,16 @@
 /* --------------------------------------------------------------------------------------------- */
 #define _SSFED25519_UT_STACK_PROBE_SIZE (4096u)
 
-__attribute__((noinline))
+SSF_NOINLINE
 static void _SSFEd25519UTPolluteStack(uint8_t pattern)
 {
     volatile uint8_t buf[_SSFED25519_UT_STACK_PROBE_SIZE];
     size_t i;
     for (i = 0; i < sizeof(buf); i++) buf[i] = pattern;
-    /* Volatile write blocks DCE; barrier-style inline asm prevents the buffer being elided. */
-    __asm__ __volatile__("" : : "r"(buf) : "memory");
+    /* Volatile write + SSF_NOINLINE keep the buffer live and uncoalesced across the call. */
 }
 
-__attribute__((noinline))
+SSF_NOINLINE
 static size_t _SSFEd25519UTCountSentinel(uint8_t pattern)
 {
     volatile uint8_t buf[_SSFED25519_UT_STACK_PROBE_SIZE];
@@ -83,8 +82,6 @@ static size_t _SSFEd25519UTCountSentinel(uint8_t pattern)
     {
         if (buf[i] == pattern) hits++;
     }
-    /* Use buf so the compiler can't elide the read. */
-    __asm__ __volatile__("" : : "r"(buf) : "memory");
     return hits;
 }
 

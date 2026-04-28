@@ -265,6 +265,12 @@
     <ClCompile Include="_crypto\ssfaesccm_ut.c">
       <Filter>_crypto</Filter>
     </ClCompile>
+    <ClCompile Include="_crypto\ssfaesctr.c">
+      <Filter>_crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="_crypto\ssfaesctr_ut.c">
+      <Filter>_crypto</Filter>
+    </ClCompile>
     <ClCompile Include="_codec\ssfasn1.c">
       <Filter>_codec</Filter>
     </ClCompile>
@@ -408,6 +414,9 @@
       <Filter>_crypto</Filter>
     </ClInclude>
     <ClInclude Include="_crypto\ssfaesccm.h">
+      <Filter>_crypto</Filter>
+    </ClInclude>
+    <ClInclude Include="_crypto\ssfaesctr.h">
       <Filter>_crypto</Filter>
     </ClInclude>
     <ClInclude Include="_codec\ssfasn1.h">

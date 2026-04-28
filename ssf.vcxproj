@@ -176,6 +176,8 @@
     <ClCompile Include="_crypto\ssfaes.c" />
     <ClCompile Include="_crypto\ssfaesccm.c" />
     <ClCompile Include="_crypto\ssfaesccm_ut.c" />
+    <ClCompile Include="_crypto\ssfaesctr.c" />
+    <ClCompile Include="_crypto\ssfaesctr_ut.c" />
     <ClCompile Include="_crypto\ssfaesgcm.c" />
     <ClCompile Include="_crypto\ssfaesgcm_ut.c" />
     <ClCompile Include="_crypto\ssfaes_ut.c" />
@@ -265,6 +267,7 @@
     <ClInclude Include="_codec\ssfubjson.h" />
     <ClInclude Include="_crypto\ssfaes.h" />
     <ClInclude Include="_crypto\ssfaesccm.h" />
+    <ClInclude Include="_crypto\ssfaesctr.h" />
     <ClInclude Include="_crypto\ssfaesgcm.h" />
     <ClInclude Include="_crypto\ssfbn.h" />
     <ClInclude Include="_crypto\ssfchacha20.h" />

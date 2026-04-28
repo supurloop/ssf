@@ -16,6 +16,7 @@ Cryptographic interfaces.
 | ssfaes | AES block cipher (128/192/256-bit) | ssfaes.c, ssfaes.h | [ssfaes.md](ssfaes.md) |
 | ssfaesgcm | AES-GCM authenticated encryption | ssfaesgcm.c, ssfaesgcm.h | [ssfaesgcm.md](ssfaesgcm.md) |
 | ssfaesccm | AES-CCM AEAD (RFC 3610, NIST SP 800-38C) | ssfaesccm.c, ssfaesccm.h | [ssfaesccm.md](ssfaesccm.md) |
+| ssfaesctr | AES-CTR confidentiality-only stream cipher (NIST SP 800-38A §6.5) | ssfaesctr.c, ssfaesctr.h | [ssfaesctr.md](ssfaesctr.md) |
 | ssfcrypt | High-level cryptographic helpers (constant-time compare, secure zeroize) | ssfcrypt.c, ssfcrypt.h | [ssfcrypt.md](ssfcrypt.md) |
 | ssfprng | Cryptographically secure capable PRNG | ssfprng.c, ssfprng.h | [ssfprng.md](ssfprng.md) |
 | ssfbn | Multi-precision big-number arithmetic (foundation for RSA, ECC, DH) | ssfbn.c, ssfbn.h | [ssfbn.md](ssfbn.md) |

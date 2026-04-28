@@ -76,7 +76,7 @@
 /* --------------------------------------------------------------------------------------------- */
 #define _SSFRSA_UT_HYGIENE_PROBE_BYTES (16u * 1024u)
 
-__attribute__((noinline))
+SSF_NOINLINE
 static void _SSFRSAUTPolluteStack(uint8_t v)
 {
     volatile uint8_t buf[_SSFRSA_UT_HYGIENE_PROBE_BYTES];
@@ -84,7 +84,7 @@ static void _SSFRSAUTPolluteStack(uint8_t v)
     for (i = 0u; i < sizeof(buf); i++) buf[i] = v;
 }
 
-__attribute__((noinline))
+SSF_NOINLINE
 static int _SSFRSAUTScanStack(const uint8_t *needle, size_t needleLen)
 {
     volatile uint8_t buf[_SSFRSA_UT_HYGIENE_PROBE_BYTES];

@@ -86,7 +86,7 @@ static void _SSFRSASecureWipe(void *buf, size_t len)
 /* those primitives just vacated and overwrites it with zeros. The size is generous enough to    */
 /* cover the deepest in-tree BN call chain (SSFBNModInvExt + helpers).                            */
 /* --------------------------------------------------------------------------------------------- */
-__attribute__((noinline))
+SSF_NOINLINE
 static void _SSFRSAStackScrub(void)
 {
     volatile uint8_t scratch[8192];

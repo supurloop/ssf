@@ -53,6 +53,7 @@
 #include "ssfx25519.h"
 #include "ssfed25519.h"
 #include "ssfaesccm.h"
+#include "ssfaesctr.h"
 #include "ssfcrypt.h"
 #include "ssfhmac.h"
 #include "ssfchacha20poly1305.h"
@@ -175,6 +176,9 @@ SSFUnitTest_t unitTests[] =
 #if SSF_CONFIG_AESCCM_UNIT_TEST == 1
     { "ssfaesccm", "AES-CCM Authenticated Cipher", SSFAESCCMUnitTest },
 #endif /* SSF_CONFIG_AESCCM_UNIT_TEST */
+#if SSF_CONFIG_AESCTR_UNIT_TEST == 1
+    { "ssfaesctr", "AES-CTR Stream Cipher", SSFAESCTRUnitTest },
+#endif /* SSF_CONFIG_AESCTR_UNIT_TEST */
 #if SSF_CONFIG_CRYPT_UNIT_TEST == 1
     { "ssfcrypt", "Cryptographic Helpers", SSFCryptUnitTest },
 #endif /* SSF_CONFIG_CRYPT_UNIT_TEST */

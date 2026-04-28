@@ -34,7 +34,99 @@
 #include "ssfassert.h"
 #include "ssfaesctr.h"
 
+/* Cross-validate AES-CTR against OpenSSL on host builds where libcrypto is linked. Same gating */
+/* pattern as ssfhmac_ut.c / ssfed25519_ut.c. When disabled (cross builds with                    */
+/* -DSSF_CONFIG_HAVE_OPENSSL=0) the NIST SP 800-38A F.5 KATs above are the load-bearing           */
+/* correctness coverage.                                                                          */
+#if (SSF_CONFIG_HAVE_OPENSSL == 1) && (SSF_CONFIG_AESCTR_UNIT_TEST == 1)
+#define SSF_AESCTR_OSSL_VERIFY 1
+#else
+#define SSF_AESCTR_OSSL_VERIFY 0
+#endif
+
+#if SSF_AESCTR_OSSL_VERIFY == 1
+#include <openssl/evp.h>
+#include <openssl/rand.h>
+#endif
+
 #if SSF_CONFIG_AESCTR_UNIT_TEST == 1
+
+#if SSF_AESCTR_OSSL_VERIFY == 1
+
+/* --------------------------------------------------------------------------------------------- */
+/* OpenSSL cross-check helpers.                                                                  */
+/* --------------------------------------------------------------------------------------------- */
+
+/* Map keyLen to the OpenSSL AES-CTR EVP_CIPHER. */
+static const EVP_CIPHER *_OSSLAESCTRCipher(size_t keyLen)
+{
+    switch (keyLen)
+    {
+        case 16u: return EVP_aes_128_ctr();
+        case 24u: return EVP_aes_192_ctr();
+        case 32u: return EVP_aes_256_ctr();
+        default: SSF_ASSERT(0); return NULL;
+    }
+}
+
+/* Compute AES-CTR via OpenSSL's EVP one-shot path. iv is the 16-byte initial counter; OpenSSL */
+/* uses the same NIST §B.1 full-128-bit big-endian counter convention as SSF.                  */
+static void _OSSLAESCTR(const uint8_t *key, size_t keyLen, const uint8_t *iv,
+                        const uint8_t *in, uint8_t *out, size_t len)
+{
+    EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
+    int outL = 0;
+    int outL2 = 0;
+
+    SSF_ASSERT(ctx != NULL);
+    SSF_ASSERT(EVP_EncryptInit_ex(ctx, _OSSLAESCTRCipher(keyLen), NULL, key, iv) == 1);
+    SSF_ASSERT(EVP_EncryptUpdate(ctx, out, &outL, in, (int)len) == 1);
+    SSF_ASSERT(EVP_EncryptFinal_ex(ctx, out + outL, &outL2) == 1);
+    SSF_ASSERT((size_t)(outL + outL2) == len);
+    EVP_CIPHER_CTX_free(ctx);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Random fuzz across (keyLen × len). Each cell draws fresh random key/iv/message bytes,        */
+/* computes the ciphertext via SSFAESCTR's one-shot path, and compares to OpenSSL. Catches       */
+/* divergence in the keystream generation or counter increment that wouldn't surface in the      */
+/* fixed-IV NIST KATs.                                                                            */
+/* --------------------------------------------------------------------------------------------- */
+static void _VerifyAESCTRAgainstOpenSSLRandom(void)
+{
+    static const size_t keyLens[] = {16u, 24u, 32u};
+    static const size_t lens[]    = {1u, 15u, 16u, 17u, 31u, 32u, 33u, 63u, 64u, 65u,
+                                      127u, 128u, 256u, 1024u};
+    uint8_t key[32];
+    uint8_t iv[16];
+    uint8_t in[1024];
+    uint8_t outSSF[1024];
+    uint8_t outOSSL[1024];
+    size_t kIdx;
+    size_t lIdx;
+    int iter;
+
+    for (kIdx = 0; kIdx < (sizeof(keyLens) / sizeof(keyLens[0])); kIdx++)
+    {
+        for (lIdx = 0; lIdx < (sizeof(lens) / sizeof(lens[0])); lIdx++)
+        {
+            for (iter = 0; iter < 5; iter++)
+            {
+                size_t keyLen = keyLens[kIdx];
+                size_t len    = lens[lIdx];
+
+                SSF_ASSERT(RAND_bytes(key, (int)keyLen) == 1);
+                SSF_ASSERT(RAND_bytes(iv, 16) == 1);
+                SSF_ASSERT(RAND_bytes(in, (int)len) == 1);
+
+                SSFAESCTR(key, keyLen, iv, in, outSSF, len);
+                _OSSLAESCTR(key, keyLen, iv, in, outOSSL, len);
+                SSF_ASSERT(memcmp(outSSF, outOSSL, len) == 0);
+            }
+        }
+    }
+}
+#endif /* SSF_AESCTR_OSSL_VERIFY */
 
 /* NIST SP 800-38A F.5 shared test plaintext (4 × 16-byte blocks). */
 static const uint8_t _nistPt[64] = {
@@ -306,6 +398,27 @@ void SSFAESCTRUnitTest(void)
         SSFAESCTRDeInit(&ctx);
     }
 
+    /* Full-counter wraparound: every byte is 0xFF. After one block, the increment ripples
+       through all 16 bytes and the entire counter rolls to all zeros (mod 2^128). The loop's
+       termination on i = -1 is the only path that exits; this case exercises it exclusively.
+       Off-by-one in the loop bound or a wrong unsigned/signed comparison would surface here. */
+    {
+        static const uint8_t key[16] = {0};
+        static const uint8_t iv[16] = {
+            0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu,
+            0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu
+        };
+        uint8_t pt[16] = {0};
+        uint8_t ct[16];
+        SSFAESCTRContext_t ctx = {0};
+        size_t i;
+
+        SSFAESCTRBegin(&ctx, key, sizeof(key), iv);
+        SSFAESCTRCrypt(&ctx, pt, ct, sizeof(pt));
+        for (i = 0; i < 16u; i++) SSF_ASSERT(ctx.counter[i] == 0u);
+        SSFAESCTRDeInit(&ctx);
+    }
+
     /* Empty input is a no-op: 0-byte Crypt does not advance the counter or touch the keystream
        buffer. */
     {
@@ -413,5 +526,9 @@ void SSFAESCTRUnitTest(void)
         p = (const uint8_t *)&ctx;
         for (i = 0; i < sizeof(ctx); i++) SSF_ASSERT(p[i] == 0u);
     }
+
+#if SSF_AESCTR_OSSL_VERIFY == 1
+    _VerifyAESCTRAgainstOpenSSLRandom();
+#endif
 }
 #endif /* SSF_CONFIG_AESCTR_UNIT_TEST */

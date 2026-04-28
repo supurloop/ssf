@@ -57,6 +57,8 @@ static void _SSFAESCTRIncCounter(uint8_t counter[SSF_AESCTR_BLOCK_SIZE])
 {
     int i;
 
+    SSF_REQUIRE(counter != NULL);
+
     for (i = (int)SSF_AESCTR_BLOCK_SIZE - 1; i >= 0; i--)
     {
         counter[i]++;
@@ -69,6 +71,9 @@ static void _SSFAESCTRIncCounter(uint8_t counter[SSF_AESCTR_BLOCK_SIZE])
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFAESCTRNextKeystream(SSFAESCTRContext_t *ctx)
 {
+    SSF_REQUIRE(ctx != NULL);
+    SSF_REQUIRE((ctx->keyLen == 16u) || (ctx->keyLen == 24u) || (ctx->keyLen == 32u));
+
     SSFAESXXXBlockEncrypt(ctx->counter, SSF_AESCTR_BLOCK_SIZE,
                           ctx->ks, SSF_AESCTR_BLOCK_SIZE,
                           ctx->key, ctx->keyLen);

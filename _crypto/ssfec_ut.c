@@ -1741,7 +1741,10 @@ void SSFECUnitTest(void)
 #endif /* SSF_EC_CONFIG_ENABLE_P256 */
 
 #if SSF_EC_CONFIG_ENABLE_P256 == 1
-    /* ---- Variable-time wNAF scalar mul: must agree with constant-time SSFECScalarMul ---- */
+#if (SSF_EC_CONFIG_FIXED_BASE_P256 == 1) || (SSF_EC_CONFIG_FIXED_BASE_P384 == 1)
+    /* ---- Variable-time wNAF scalar mul: must agree with constant-time SSFECScalarMul ----    */
+    /* _SSFECScalarMulVTwNAFForTest is only compiled when at least one FIXED_BASE_* flag is set */
+    /* (it lives in the same #if block as the comb-table machinery in ssfec.c).                 */
     {
         const SSFECCurveParams_t *c = SSFECGetCurveParams(SSF_EC_CURVE_P256);
         SSFECPOINT_DEFINE(G, SSF_EC_MAX_LIMBS);
@@ -1822,6 +1825,7 @@ void SSFECUnitTest(void)
 
         SSFPRNGDeInitContext(&prng);
     }
+#endif /* SSF_EC_CONFIG_FIXED_BASE_P256 || SSF_EC_CONFIG_FIXED_BASE_P384 */
 
     /* ---- Public SSFECPointAdd: results must match for any combination of Z=1 / Jacobian ---- */
     {

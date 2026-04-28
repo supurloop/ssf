@@ -374,7 +374,7 @@ static void _fe_inv(_fe_t *r, const _fe_t *a)
 /* same depth and overwrite it with zeros via volatile writes the compiler cannot elide. Sized   */
 /* to comfortably cover the ladder's stack footprint plus any spill slots the compiler adds.    */
 /* --------------------------------------------------------------------------------------------- */
-__attribute__((noinline))
+SSF_NOINLINE
 static void _x25519_stack_scrub(void)
 {
     volatile uint8_t scratch[4096];

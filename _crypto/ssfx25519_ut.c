@@ -158,16 +158,16 @@ static void _VerifyX25519AgainstOpenSSL(uint16_t iters)
 /* --------------------------------------------------------------------------------------------- */
 #define _SSFX25519_UT_STACK_PROBE_SIZE (4096u)
 
-__attribute__((noinline))
+SSF_NOINLINE
 static void _SSFX25519UTPolluteStack(uint8_t pattern)
 {
     volatile uint8_t buf[_SSFX25519_UT_STACK_PROBE_SIZE];
     size_t i;
     for (i = 0; i < sizeof(buf); i++) buf[i] = pattern;
-    __asm__ __volatile__("" : : "r"(buf) : "memory");
+    /* Volatile write + SSF_NOINLINE keep the buffer live and uncoalesced across the call. */
 }
 
-__attribute__((noinline))
+SSF_NOINLINE
 static size_t _SSFX25519UTCountSentinel(uint8_t pattern)
 {
     volatile uint8_t buf[_SSFX25519_UT_STACK_PROBE_SIZE];
@@ -177,7 +177,6 @@ static size_t _SSFX25519UTCountSentinel(uint8_t pattern)
     {
         if (buf[i] == pattern) hits++;
     }
-    __asm__ __volatile__("" : : "r"(buf) : "memory");
     return hits;
 }
 

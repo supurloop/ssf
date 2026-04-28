@@ -1045,9 +1045,11 @@ void SSFECDSAUnitTest(void)
         SSF_ASSERT(memcmp(sig1, sig2, sig1Len) == 0);
     }
 
+#if SSF_EC_CONFIG_FIXED_BASE_P256 == 1
     /* ---- P-256: projective verify check accepts a Jacobian R with non-1 Z ---- */
     /* Builds R = [k]G with k > 1 (so Z != 1 in Jacobian form) and confirms the new projective    */
-    /* _SSFECDSAVerifyCheckR accepts the matching r and rejects a tampered r.                      */
+    /* _SSFECDSAVerifyCheckR accepts the matching r and rejects a tampered r. Gated on            */
+    /* FIXED_BASE_P256 because SSFECScalarMulBaseP256 is only compiled when the comb table is in. */
     {
         SSFBN_DEFINE(k, SSF_EC_MAX_LIMBS);
         SSFBN_DEFINE(rx, SSF_EC_MAX_LIMBS);
@@ -1072,6 +1074,7 @@ void SSFECDSAUnitTest(void)
         (void)SSFBNAddUint32(&rBad, &rBad, 1u);
         SSF_ASSERT(_SSFECDSAVerifyCheckRForTest(SSF_EC_CURVE_P256, &R, &rBad) == false);
     }
+#endif /* SSF_EC_CONFIG_FIXED_BASE_P256 */
 
     /* ---- P-256: projective verify check exercises the wraparound branch ---- */
     /* Builds a synthetic R with Z=1 and X = n (smallest value triggering wraparound), then sets  */

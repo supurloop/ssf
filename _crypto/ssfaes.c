@@ -77,97 +77,146 @@
 /* --------------------------------------------------------------------------------------------- */
 #include <stdint.h>
 #include <stdbool.h>
+#include <string.h>
 #include "ssfport.h"
 #include "ssfassert.h"
 #include "ssfaes.h"
 
+/* --------------------------------------------------------------------------------------------- */
+/* Column-major u32 state representation.                                                        */
+/*                                                                                                */
+/* The state is stored as four uint32_t columns. Each column packs the four row bytes in little- */
+/* endian order: column c = row0 | (row1 << 8) | (row2 << 16) | (row3 << 24). On a 32-bit LE     */
+/* host that matches the natural FIPS 197 byte layout, so loading a column from the input array  */
+/* is a single u32 LE load and storing back is a single u32 LE store.                            */
+/*                                                                                                */
+/* This lets ADD_KEY collapse to four word XORs, MixColumns operate per-column with a packed     */
+/* xtime + rotate identity, and SHIFT_ROWS fold into the SBOX pass via a single byte-permuted    */
+/* gather. Net result is fewer instructions per round than the prior byte-by-byte form, with the */
+/* macros expanding to less code.                                                                 */
+/* --------------------------------------------------------------------------------------------- */
+
 #define FGFM2(x) ((x<<1) ^ (0x1b & -(x>>7)))
 
-#define BOX_STATE(s, b) \
-    s[0][0] = b[s[0][0]]; s[0][1] = b[s[0][1]]; s[0][2] = b[s[0][2]]; s[0][3] = b[s[0][3]]; \
-    s[1][0] = b[s[1][0]]; s[1][1] = b[s[1][1]]; s[1][2] = b[s[1][2]]; s[1][3] = b[s[1][3]]; \
-    s[2][0] = b[s[2][0]]; s[2][1] = b[s[2][1]]; s[2][2] = b[s[2][2]]; s[2][3] = b[s[2][3]]; \
-    s[3][0] = b[s[3][0]]; s[3][1] = b[s[3][1]]; s[3][2] = b[s[3][2]]; s[3][3] = b[s[3][3]]
+#define ROTR8(x)  (((x) >> 8)  | ((x) << 24))
+#define ROTR16(x) (((x) >> 16) | ((x) << 16))
+#define ROTR24(x) (((x) >> 24) | ((x) << 8))
 
-#define SBOX_STATE(s) BOX_STATE(s, sbox)
-#define INV_SBOX_STATE(s) BOX_STATE(s, inv_sbox)
+/* Packed xtime: multiply each byte of x by 2 in GF(2^8) (poly 0x1B). The carries out of each */
+/* byte are masked off; the high-bit lane is reduced by 0x1B per byte via a single multiply.  */
+#define XTIME32(x) ((((x) << 1) & 0xFEFEFEFEu) ^ ((((x) >> 7) & 0x01010101u) * 0x1Bu))
 
-#define SBOX_WORD(x) (sbox[(x & 0xff)] ^ (sbox[((x >> 8) & 0xff)] << 8) \
-    ^ (sbox[((x >> 16) & 0xff)] << 16) ^ (sbox[((x >> 24) & 0xff)] << 24))
+/* Load a 16-byte block as four LE column words. memcpy lets the compiler emit native u32 loads */
+/* on aligned input and falls back to byte loads (or LWL/LWR on MIPS R1) when the source isn't  */
+/* aligned. The bytes-as-LE convention means no byte-shuffle is needed on a LE target.          */
+#define ARRAY_TO_STATE(s, a) do { \
+    memcpy(&(s)[0], &(a)[0],  4); \
+    memcpy(&(s)[1], &(a)[4],  4); \
+    memcpy(&(s)[2], &(a)[8],  4); \
+    memcpy(&(s)[3], &(a)[12], 4); \
+} while (0)
 
-#define SHIFT_ROWS(s, t) \
-    t = s[1][0]; s[1][0] = s[1][1]; s[1][1] = s[1][2]; s[1][2] = s[1][3]; s[1][3] = t; \
-    t = s[2][0]; s[2][0] = s[2][2]; s[2][2] = t; t = s[2][1]; s[2][1] = s[2][3]; s[2][3] = t; \
-    t = s[3][0]; s[3][0] = s[3][3]; s[3][3] = s[3][2]; s[3][2] = s[3][1]; s[3][1] = t
+#define STATE_TO_ARRAY(s, a) do { \
+    memcpy(&(a)[0],  &(s)[0], 4); \
+    memcpy(&(a)[4],  &(s)[1], 4); \
+    memcpy(&(a)[8],  &(s)[2], 4); \
+    memcpy(&(a)[12], &(s)[3], 4); \
+} while (0)
 
-#define INV_SHIFT_ROWS(s, t) \
-    t = s[1][3]; s[1][3] = s[1][2]; s[1][2] = s[1][1]; s[1][1] = s[1][0]; s[1][0] = t; \
-    t = s[2][0]; s[2][0] = s[2][2]; s[2][2] = t; t = s[2][1]; s[2][1] = s[2][3]; s[2][3] = t; \
-    t = s[3][0]; s[3][0] = s[3][1]; s[3][1] = s[3][2]; s[3][2] = s[3][3]; s[3][3] = t
+/* AddRoundKey: four word XORs, one per column. The schedule w[] is already u32; w[base+c] is */
+/* the round key column c.                                                                      */
+#define ADD_KEY(s, w, i) do { \
+    (s)[0] ^= (w)[(i) + 0]; \
+    (s)[1] ^= (w)[(i) + 1]; \
+    (s)[2] ^= (w)[(i) + 2]; \
+    (s)[3] ^= (w)[(i) + 3]; \
+} while (0)
 
-#define MIX_COLUMN(s, i, t) \
-    t[4] = s[0][i] ^ s[1][i] ^ s[2][i] ^ s[3][i]; \
-    t[0] = s[0][i] ^ s[1][i]; \
-    t[0] = FGFM2(t[0]) ^ s[0][i] ^ t[4]; \
-    t[1] = s[1][i] ^ s[2][i]; \
-    t[1] = FGFM2(t[1]) ^ s[1][i] ^ t[4]; \
-    t[2] = s[2][i] ^ s[3][i]; \
-    t[2] = FGFM2(t[2]) ^ s[2][i] ^ t[4]; \
-    t[3] = s[3][i] ^ s[0][i]; \
-    t[3] = FGFM2(t[3]) ^ s[3][i] ^ t[4]; \
-    s[0][i] = t[0]; s[1][i] = t[1]; s[2][i] = t[2]; s[3][i] = t[3]
+/* SubBytes + ShiftRows fused. The byte at row r of column c after ShiftRows is the byte at row */
+/* r of column (c + r) mod 4 before. Reading the right byte position from the right column      */
+/* during the SBOX pack lets us drop SHIFT_ROWS as a separate step, so it costs zero rounds.    */
+#define SBOX_SHIFT_ROWS(s, b) do { \
+    uint32_t _c0 = (s)[0], _c1 = (s)[1], _c2 = (s)[2], _c3 = (s)[3]; \
+    (s)[0] = ((uint32_t)(b)[ _c0        & 0xFFu])        | \
+             ((uint32_t)(b)[(_c1 >>  8) & 0xFFu] <<  8)  | \
+             ((uint32_t)(b)[(_c2 >> 16) & 0xFFu] << 16)  | \
+             ((uint32_t)(b)[(_c3 >> 24) & 0xFFu] << 24); \
+    (s)[1] = ((uint32_t)(b)[ _c1        & 0xFFu])        | \
+             ((uint32_t)(b)[(_c2 >>  8) & 0xFFu] <<  8)  | \
+             ((uint32_t)(b)[(_c3 >> 16) & 0xFFu] << 16)  | \
+             ((uint32_t)(b)[(_c0 >> 24) & 0xFFu] << 24); \
+    (s)[2] = ((uint32_t)(b)[ _c2        & 0xFFu])        | \
+             ((uint32_t)(b)[(_c3 >>  8) & 0xFFu] <<  8)  | \
+             ((uint32_t)(b)[(_c0 >> 16) & 0xFFu] << 16)  | \
+             ((uint32_t)(b)[(_c1 >> 24) & 0xFFu] << 24); \
+    (s)[3] = ((uint32_t)(b)[ _c3        & 0xFFu])        | \
+             ((uint32_t)(b)[(_c0 >>  8) & 0xFFu] <<  8)  | \
+             ((uint32_t)(b)[(_c1 >> 16) & 0xFFu] << 16)  | \
+             ((uint32_t)(b)[(_c2 >> 24) & 0xFFu] << 24); \
+} while (0)
 
-#define MIX_COLUMNS(s, t) \
-    MIX_COLUMN(s, 0, t); MIX_COLUMN(s, 1, t); \
-    MIX_COLUMN(s, 2, t); MIX_COLUMN(s, 3, t)
+/* InvSubBytes + InvShiftRows fused. Inverse ShiftRows moves byte at row r of column c to       */
+/* column (c - r) mod 4, so the gather pattern reverses.                                         */
+#define INV_SBOX_SHIFT_ROWS(s, b) do { \
+    uint32_t _c0 = (s)[0], _c1 = (s)[1], _c2 = (s)[2], _c3 = (s)[3]; \
+    (s)[0] = ((uint32_t)(b)[ _c0        & 0xFFu])        | \
+             ((uint32_t)(b)[(_c3 >>  8) & 0xFFu] <<  8)  | \
+             ((uint32_t)(b)[(_c2 >> 16) & 0xFFu] << 16)  | \
+             ((uint32_t)(b)[(_c1 >> 24) & 0xFFu] << 24); \
+    (s)[1] = ((uint32_t)(b)[ _c1        & 0xFFu])        | \
+             ((uint32_t)(b)[(_c0 >>  8) & 0xFFu] <<  8)  | \
+             ((uint32_t)(b)[(_c3 >> 16) & 0xFFu] << 16)  | \
+             ((uint32_t)(b)[(_c2 >> 24) & 0xFFu] << 24); \
+    (s)[2] = ((uint32_t)(b)[ _c2        & 0xFFu])        | \
+             ((uint32_t)(b)[(_c1 >>  8) & 0xFFu] <<  8)  | \
+             ((uint32_t)(b)[(_c0 >> 16) & 0xFFu] << 16)  | \
+             ((uint32_t)(b)[(_c3 >> 24) & 0xFFu] << 24); \
+    (s)[3] = ((uint32_t)(b)[ _c3        & 0xFFu])        | \
+             ((uint32_t)(b)[(_c2 >>  8) & 0xFFu] <<  8)  | \
+             ((uint32_t)(b)[(_c1 >> 16) & 0xFFu] << 16)  | \
+             ((uint32_t)(b)[(_c0 >> 24) & 0xFFu] << 24); \
+} while (0)
 
-#define INV_MIX_COLUMNS_PREPROCESS_COLUMN(s, i, t) \
-    t[0] = s[0][i] ^ s[2][i]; \
-    t[0] = FGFM2(t[0]); \
-    t[0] = FGFM2(t[0]); \
-    t[1] = s[1][i] ^ s[3][i]; \
-    t[1] = FGFM2(t[1]); \
-    t[1] = FGFM2(t[1]); \
-    s[0][i] ^= t[0]; \
-    s[1][i] ^= t[1]; \
-    s[2][i] ^= t[0]; \
-    s[3][i] ^= t[1]
+#define SBOX_STATE(s)     SBOX_SHIFT_ROWS((s), sbox)
+#define INV_SBOX_STATE(s) INV_SBOX_SHIFT_ROWS((s), inv_sbox)
 
-#define INV_MIX_COLUMNS(s, t) \
-    INV_MIX_COLUMNS_PREPROCESS_COLUMN(s, 0, t); INV_MIX_COLUMNS_PREPROCESS_COLUMN(s, 1, t); \
-    INV_MIX_COLUMNS_PREPROCESS_COLUMN(s, 2, t); INV_MIX_COLUMNS_PREPROCESS_COLUMN(s, 3, t); \
-    MIX_COLUMNS(s, t)
+/* Word-form MixColumns. For column c with bytes [a,b,c,d] in LE u32:                            */
+/*   E = c ^ rotr(c, 8)              ; bytewise [a^b, b^c, c^d, d^a]                             */
+/*   T = E ^ rotr(E, 16)             ; bytewise broadcast of (a^b^c^d)                           */
+/*   c' = c ^ T ^ xtime(E)           ; per-byte: old ^ (a^b^c^d) ^ xtime(neighbor-XOR)           */
+/* Each column reduces to 2 rotates + 3 XORs + 1 packed xtime, vs ~16 byte ops in the byte form. */
+#define MIX_COL_WORD(c) do { \
+    uint32_t _E = (c) ^ ROTR8(c); \
+    uint32_t _T = _E ^ ROTR16(_E); \
+    (c) = (c) ^ _T ^ XTIME32(_E); \
+} while (0)
 
+#define MIX_COLUMNS(s) do { \
+    MIX_COL_WORD((s)[0]); MIX_COL_WORD((s)[1]); \
+    MIX_COL_WORD((s)[2]); MIX_COL_WORD((s)[3]); \
+} while (0)
 
-#define ADD_KEY(s, w, i) \
-    s[0][0] ^= w[i] & 0xff; \
-    s[1][0] ^= (w[i] >> 8) & 0xff; \
-    s[2][0] ^= (w[i] >> 16) & 0xff; \
-    s[3][0] ^= (w[i] >> 24) & 0xff; \
-    s[0][1] ^= w[i + 1] & 0xff; \
-    s[1][1] ^= (w[i + 1] >> 8) & 0xff; \
-    s[2][1] ^= (w[i + 1] >> 16) & 0xff; \
-    s[3][1] ^= (w[i + 1] >> 24) & 0xff; \
-    s[0][2] ^= w[i + 2] & 0xff; \
-    s[1][2] ^= (w[i + 2] >> 8) & 0xff; \
-    s[2][2] ^= (w[i + 2] >> 16) & 0xff; \
-    s[3][2] ^= (w[i + 2] >> 24) & 0xff; \
-    s[0][3] ^= w[i + 3] & 0xff; \
-    s[1][3] ^= (w[i + 3] >> 8) & 0xff; \
-    s[2][3] ^= (w[i + 3] >> 16) & 0xff; \
-    s[3][3] ^= (w[i + 3] >> 24) & 0xff
+/* Inverse MixColumns via Gladman's preprocess-then-MixColumns identity:                         */
+/*   InvMix(c) = Mix(c ^ broadcast(4*(a^c) on rows 0/2, 4*(b^d) on rows 1/3))                    */
+/* In word form: rotr(c, 16) gives bytewise [c, d, a, b], so c ^ rotr(c, 16) is [a^c, b^d,       */
+/* c^a, d^b], which after two xtimes (×4) is the broadcast we need. One word op per column for  */
+/* the preprocess, then forward MixColumns.                                                       */
+#define INV_MIX_PRE(c) do { \
+    uint32_t _e = (c) ^ ROTR16(c); \
+    (c) ^= XTIME32(XTIME32(_e)); \
+} while (0)
 
-#define ARRAY_TO_STATE(s, a) \
-    s[0][0] = a[0]; s[0][1] = a[4]; s[0][2] = a[8]; s[0][3] = a[12]; \
-    s[1][0] = a[1]; s[1][1] = a[5]; s[1][2] = a[9]; s[1][3] = a[13]; \
-    s[2][0] = a[2]; s[2][1] = a[6]; s[2][2] = a[10]; s[2][3] = a[14]; \
-    s[3][0] = a[3]; s[3][1] = a[7]; s[3][2] = a[11]; s[3][3] = a[15]
+#define INV_MIX_COLUMNS(s) do { \
+    INV_MIX_PRE((s)[0]); INV_MIX_PRE((s)[1]); \
+    INV_MIX_PRE((s)[2]); INV_MIX_PRE((s)[3]); \
+    MIX_COLUMNS(s); \
+} while (0)
 
-#define STATE_TO_ARRAY(s, a) \
-    a[0] = s[0][0]; a[4] = s[0][1]; a[8] = s[0][2]; a[12] = s[0][3]; \
-    a[1] = s[1][0]; a[5] = s[1][1]; a[9] = s[1][2]; a[13] = s[1][3]; \
-    a[2] = s[2][0]; a[6] = s[2][1]; a[10] = s[2][2]; a[14] = s[2][3]; \
-    a[3] = s[3][0]; a[7] = s[3][1]; a[11] = s[3][2]; a[15] = s[3][3]
+/* Used by key expansion: byte-wise SBOX over a u32 (no row shift). */
+#define SBOX_WORD(x) ((uint32_t)sbox[(x) & 0xFFu] \
+    | ((uint32_t)sbox[((x) >> 8)  & 0xFFu] << 8) \
+    | ((uint32_t)sbox[((x) >> 16) & 0xFFu] << 16) \
+    | ((uint32_t)sbox[((x) >> 24) & 0xFFu] << 24))
 
 
 static const uint8_t sbox[256] =
@@ -257,8 +306,7 @@ void SSFAESBlockEncrypt(const uint8_t *pt, size_t ptLen, uint8_t *ct, size_t ctS
                         const uint8_t *key, size_t keyLen, uint8_t nr, uint8_t nk)
 {
     uint32_t w[60];
-    uint8_t t[5];
-    uint8_t s[4][4];
+    uint32_t s[4];
     uint8_t i;
 
     size_t wSize = (((size_t) nr) + 1) << 2;
@@ -279,13 +327,11 @@ void SSFAESBlockEncrypt(const uint8_t *pt, size_t ptLen, uint8_t *ct, size_t ctS
     for (i = 1; i < nr; i++)
     {
         SBOX_STATE(s);
-        SHIFT_ROWS(s, t[0]);
-        MIX_COLUMNS(s, t);
+        MIX_COLUMNS(s);
         ADD_KEY(s, w, (i << 2));
     }
 
     SBOX_STATE(s);
-    SHIFT_ROWS(s, t[0]);
     ADD_KEY(s, w, (nr << 2));
 
     STATE_TO_ARRAY(s, ct);
@@ -298,8 +344,7 @@ void SSFAESBlockDecrypt(const uint8_t *ct, size_t ctLen, uint8_t *pt, size_t ptS
                         const uint8_t *key, size_t keyLen, uint8_t nr, uint8_t nk)
 {
     uint32_t w[60];
-    uint8_t t[5];
-    uint8_t s[4][4];
+    uint32_t s[4];
     uint8_t i;
 
     size_t wSize = (((size_t) nr) + 1) << 2;
@@ -319,13 +364,11 @@ void SSFAESBlockDecrypt(const uint8_t *ct, size_t ctLen, uint8_t *pt, size_t ptS
 
     for (i = nr - 1; i > 0; i--)
     {
-        INV_SHIFT_ROWS(s, t[0]);
         INV_SBOX_STATE(s);
         ADD_KEY(s, w, (i << 2));
-        INV_MIX_COLUMNS(s, t);
+        INV_MIX_COLUMNS(s);
     }
 
-    INV_SHIFT_ROWS(s, t[0]);
     INV_SBOX_STATE(s);
     ADD_KEY(s, w, 0);
 

@@ -10,7 +10,7 @@ mode like [`ssfaesgcm`](ssfaesgcm.md) or [`ssfaesccm`](ssfaesccm.md) when integr
 CTR turns AES into a stream cipher: the keystream is `AES(key, counter) ‖ AES(key, counter+1) ‖ …`,
 XORed against the plaintext. Encryption and decryption are the same operation.
 
-[Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference)
+[Dependencies](#dependencies) | [Notes](#notes) | [Counter convention](#counter-convention) | [Streaming usage](#streaming-usage) | [Threat model](#threat-model) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference)
 
 <a id="dependencies"></a>
 
@@ -59,6 +59,105 @@ XORed against the plaintext. Encryption and decryption are the same operation.
   + `wc_AesCtrEncrypt(&ctx, ct, pt, len)` maps to `SSFAESCTRBegin(&ctx, key, len, iv)` +
   `SSFAESCTRCrypt(&ctx, pt, ct, len)`. Byte-for-byte compatible because both libraries use the
   full-16-byte big-endian counter convention.
+
+<a id="counter-convention"></a>
+
+## [↑](#ssfaesctr--aes-ctr-stream-cipher) Counter convention
+
+> ⚠️ **SSF AES-CTR uses the full 128-bit big-endian counter from NIST SP 800-38A §B.1**
+> (also matches WolfSSL's `wc_AesCtrEncrypt`). The entire 16-byte IV is a counter; every
+> block increments it by 1 with the carry rippling all the way to byte 0.
+
+Other libraries / protocols use **different** counter conventions. If you are interoperating
+with one, you must convert the IV format at the call boundary or use a different mode:
+
+| Source | Convention | Compatible with SSFAESCTR? |
+|---|---|---|
+| NIST SP 800-38A §B.1 (the "standard counter function") | full 128-bit BE | ✓ Yes |
+| WolfSSL `wc_AesCtrEncrypt` | full 128-bit BE | ✓ Yes |
+| OpenSSL `EVP_aes_*_ctr` | full 128-bit BE | ✓ Yes |
+| **RFC 3686 (TLS-CTR)** | 32-bit nonce + 64-bit IV + 32-bit counter (last 4 bytes wrap independently) | ✗ No — wraps differently |
+| **AES-GCM J0** | 96-bit nonce + 32-bit counter (last 4 bytes only) | ✗ No — first 12 bytes are constant |
+| **NIST SP 800-38C (CCM)** | flag byte + nonce + counter — bespoke format | ✗ No — different mode entirely |
+
+For the RFC 3686 / GCM-J0 use cases, the practical effect is that SSF AES-CTR will
+correctly increment the counter past the 32-bit boundary into bytes 11..0, while a 32-bit-
+counter implementation would wrap at the 32-bit boundary leaving bytes 11..0 unchanged.
+For messages under 64 GiB this divergence never fires — the 32-bit counter doesn't reach
+its wrap. For larger messages or if you're verifying interop byte-for-byte against a
+32-bit-counter implementation, you'll see a mismatch.
+
+<a id="streaming-usage"></a>
+
+## [↑](#ssfaesctr--aes-ctr-stream-cipher) Streaming usage
+
+> ⚠️ **Do not call `SSFAESCTR()` repeatedly on the same IV to process a chunked stream.**
+
+The one-shot `SSFAESCTR(...)` takes `const uint8_t *iv` — by contract it does not and will
+not mutate the caller's IV buffer. Calling it twice with the same IV pointer regenerates
+the **same** keystream both times. XOR-ing the two ciphertexts then cancels the keystream,
+exposing `pt1 ⊕ pt2` — catastrophic for AES-CTR.
+
+**For chunked / streaming decrypt, use the incremental API.** It maintains the counter
+internally across `Crypt` calls and handles partial trailing blocks correctly:
+
+```c
+SSFAESCTRContext_t ctx = {0};
+
+SSFAESCTRBegin(&ctx, key, keyLen, iv);
+while (haveMoreInput()) {
+    size_t got = readChunk(buf, sizeof(buf));
+    SSFAESCTRCrypt(&ctx, buf, buf, got);    /* in-place; counter advances internally */
+    consume(buf, got);
+}
+SSFAESCTRDeInit(&ctx);
+```
+
+The chunk size can be any positive value — including non-multiples of 16. The implementation
+buffers the unused tail of the last keystream block across calls. A second call resuming
+mid-block produces output identical to the equivalent single one-shot call.
+
+If you absolutely must use the one-shot in a chunked pattern (e.g., when the caller cannot
+hold a context across iterations), you must advance the IV manually between calls by
+`ceil(chunk_bytes / 16)` blocks, treating the IV as a 128-bit big-endian integer with
+carry through all 16 bytes. **Chunk sizes must then be multiples of 16** (a partial chunk
+in the middle desynchronizes the keystream because the per-block ks tail is dropped).
+The incremental API exists precisely to avoid this.
+
+<a id="threat-model"></a>
+
+## [↑](#ssfaesctr--aes-ctr-stream-cipher) Threat model
+
+AES-CTR is **confidentiality-only**. What it does and does not provide:
+
+| Property | AES-CTR | Notes |
+|---|---|---|
+| Confidentiality (under random, never-reused IV) | ✓ | Equivalent to AES under standard model. |
+| Integrity (detection of any modification) | ✗ | A bit flip in the ciphertext flips the corresponding plaintext bit on decrypt — the receiver gets attacker-chosen plaintext with no signal that anything is wrong. |
+| Authenticity (proof of origin) | ✗ | No tag, no MAC. Anyone with the (key, IV) pair can produce arbitrary ciphertext that decrypts cleanly. |
+| Non-malleability | ✗ | Specifically, the keystream XOR makes ciphertext perfectly malleable: `pt' = pt ⊕ Δ` is producible from `ct` by setting `ct' = ct ⊕ Δ`. |
+| Replay protection | ✗ | A captured ciphertext + IV can be replayed verbatim. Needs a higher-layer freshness guarantee (sequence number, timestamp). |
+| IV-reuse safety | ✗ catastrophic | Reusing `(key, IV)` for two messages reveals `pt1 ⊕ pt2`. See [Notes](#notes). |
+
+### Use AES-CTR only when integrity comes from somewhere else
+
+Acceptable patterns:
+
+- **Envelope signature.** ECDSA / Ed25519 / RSA-PSS over the ciphertext (and any associated
+  metadata). The signature acts as the integrity gate; CTR provides confidentiality. This
+  is the canonical use case for SSF AES-CTR — e.g., a signed firmware image where the
+  payload is CTR-encrypted and the manifest carrying the signature covers the encrypted
+  bytes verbatim.
+- **External MAC.** HMAC-SHA-256 / Poly1305 / etc. over the ciphertext, transmitted alongside
+  it. Verify the MAC before decrypting.
+- **Container-level integrity.** A higher-level container format (signed certificate,
+  authenticated archive) that the CTR ciphertext is wrapped in.
+
+### Do not use AES-CTR if you need authentication
+
+Use [`ssfaesgcm`](ssfaesgcm.md) or [`ssfaesccm`](ssfaesccm.md) instead — those are AEAD
+modes that integrate authentication into the cipher. They reject any tampered ciphertext
+at decrypt time, eliminating the malleability and replay paths above.
 
 <a id="configuration"></a>
 

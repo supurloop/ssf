@@ -161,5 +161,48 @@ void SSFEd25519UnitTest(void)
         memset(sig, 0, 64);
         SSF_ASSERT(SSFEd25519Verify(pubKey, msg, sizeof(msg) - 1u, sig) == false);
     }
+
+    /* ---- A1 regression: non-canonical pubkey y must be rejected (RFC 8032 §5.1.3). */
+    /* Construct a pubkey whose 255-bit y interpretation is y = p + 1 = 2^255 - 18,    */
+    /* a non-canonical encoding of the canonical y = 1 (the curve identity, with x=0). */
+    /* The chosen signature R||S = (canonical identity encoding)||0 mathematically     */
+    /* satisfies the verify equation [S]B - [k]A = identity once A is decoded as the   */
+    /* identity, so a decoder that silently accepts the non-canonical y would return   */
+    /* true here. RFC 8032 requires this to fail.                                      */
+    {
+        uint8_t noncanonPub[32];
+        uint8_t sig[64];
+
+        memset(noncanonPub, 0xFFu, 32);
+        noncanonPub[0]  = 0xEEu;   /* low byte of (p + 1) = 0xEE */
+        noncanonPub[31] = 0x7Fu;   /* sign bit cleared -> y_raw = 2^255 - 18 */
+
+        memset(sig, 0, 64);
+        sig[0] = 0x01u;            /* R = canonical identity encoding (y=1, x=0) */
+                                   /* S = 0 (32 zero bytes) */
+
+        SSF_ASSERT(SSFEd25519Verify(noncanonPub, NULL, 0, sig) == false);
+    }
+
+    /* ---- A4 regression: long message round-trip exercises chunked SHA-512 update.  */
+    /* Cannot allocate >4 GiB on a host to trip the actual size_t->uint32_t truncation */
+    /* bug, but a 256 KiB message with byte-level corruption detection at least proves */
+    /* the rewritten chunking helper preserves the single-call hash semantics on every */
+    /* code path Sign and Verify exercise.                                              */
+    {
+        static uint8_t bigMsg[256u * 1024u];
+        uint8_t seed[32], pubKey[32], sig[64];
+        size_t i;
+
+        for (i = 0; i < sizeof(bigMsg); i++) bigMsg[i] = (uint8_t)(i * 31u + 7u);
+
+        SSF_ASSERT(SSFEd25519KeyGen(seed, pubKey) == true);
+        SSFEd25519Sign(seed, pubKey, bigMsg, sizeof(bigMsg), sig);
+        SSF_ASSERT(SSFEd25519Verify(pubKey, bigMsg, sizeof(bigMsg), sig) == true);
+
+        /* Flip one byte deep in the message — verify must reject. */
+        bigMsg[sizeof(bigMsg) / 2u] ^= 0x01u;
+        SSF_ASSERT(SSFEd25519Verify(pubKey, bigMsg, sizeof(bigMsg), sig) == false);
+    }
 }
 #endif /* SSF_CONFIG_ED25519_UNIT_TEST */

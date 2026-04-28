@@ -568,13 +568,19 @@ static bool _ge_decode(_ge_t *p, const uint8_t in[32])
     tmp[31] &= 0x7Fu; /* clear sign bit */
     _fe_from_bytes(&p->Y, tmp);
 
-    /* Check that y < p by reducing and comparing */
+    /* Reject non-canonical y per RFC 8032 §5.1.3: the loaded y must satisfy y < p. The high  */
+    /* bit was just cleared so y is in [0, 2^255); the only non-canonical values are the 19   */
+    /* representatives in [p, 2^255-1] = [2^255-19, 2^255-1]. Compare the unreduced limbs to  */
+    /* p directly: a borrow-free subtraction of p means y >= p.                                */
     {
-        _fe_t yCopy;
-        _fe_copy(&yCopy, &p->Y);
-        _fe_reduce(&yCopy);
-        /* If the original had bit 255 set (after clearing sign bit this won't happen since
-           we cleared bit 7 of byte 31, but check y < p anyway) */
+        uint64_t borrow = 0;
+        uint8_t i;
+        for (i = 0; i < 8u; i++)
+        {
+            uint64_t diff = (uint64_t)p->Y.v[i] - (uint64_t)_fe_p.v[i] - borrow;
+            borrow = (diff >> 63) & 1u;
+        }
+        if (borrow == 0u) return false;
     }
 
     /* u = y^2 - 1 */
@@ -1299,6 +1305,23 @@ static bool _sc_is_lt_L(const uint8_t s[32])
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Feed an arbitrary-size buffer to a SHA-512 context, looping in UINT32_MAX-sized chunks.       */
+/* SSFSHA512Update takes a uint32_t length; on 64-bit hosts a single message can exceed that, so */
+/* a naked (uint32_t)msgLen cast silently truncates and produces a hash over the wrong prefix.   */
+/* RFC 8032 places no 4 GiB ceiling on Ed25519 message length, so the cast was a real bug.       */
+/* --------------------------------------------------------------------------------------------- */
+static void _sha512_update_sized(SSFSHA2_64Context_t *ctx, const uint8_t *buf, size_t len)
+{
+    while (len > 0u)
+    {
+        uint32_t chunk = (len > (size_t)UINT32_MAX) ? UINT32_MAX : (uint32_t)len;
+        SSFSHA512Update(ctx, buf, chunk);
+        buf += chunk;
+        len -= chunk;
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Public API                                                                                    */
 /* --------------------------------------------------------------------------------------------- */
 
@@ -1368,7 +1391,7 @@ void SSFEd25519Sign(const uint8_t seed[SSF_ED25519_SEED_SIZE],
     /* r = SHA-512(prefix || msg) mod L */
     SSFSHA512Begin(&ctx);
     SSFSHA512Update(&ctx, &h[32], 32);  /* prefix = upper 32 bytes of SHA-512(seed) */
-    if (msgLen > 0u) SSFSHA512Update(&ctx, msg, (uint32_t)msgLen);
+    _sha512_update_sized(&ctx, msg, msgLen);
     SSFSHA512End(&ctx, r_hash, 64);
     _sc_reduce(r_hash);
     memcpy(nonce, r_hash, 32);
@@ -1381,7 +1404,7 @@ void SSFEd25519Sign(const uint8_t seed[SSF_ED25519_SEED_SIZE],
     SSFSHA512Begin(&ctx);
     SSFSHA512Update(&ctx, sig, 32);     /* R */
     SSFSHA512Update(&ctx, pubKey, 32);  /* A */
-    if (msgLen > 0u) SSFSHA512Update(&ctx, msg, (uint32_t)msgLen);
+    _sha512_update_sized(&ctx, msg, msgLen);
     SSFSHA512End(&ctx, hram, 64);
     _sc_reduce(hram);
 
@@ -1425,7 +1448,7 @@ bool SSFEd25519Verify(const uint8_t pubKey[SSF_ED25519_PUB_KEY_SIZE],
     SSFSHA512Begin(&ctx);
     SSFSHA512Update(&ctx, sig, 32);     /* R (first 32 bytes of sig) */
     SSFSHA512Update(&ctx, pubKey, 32);  /* A */
-    if (msgLen > 0u) SSFSHA512Update(&ctx, msg, (uint32_t)msgLen);
+    _sha512_update_sized(&ctx, msg, msgLen);
     SSFSHA512End(&ctx, hram, 64);
     _sc_reduce(hram);
 

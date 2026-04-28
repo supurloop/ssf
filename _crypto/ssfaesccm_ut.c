@@ -33,7 +33,235 @@
 #include "ssfassert.h"
 #include "ssfaesccm.h"
 
+/* Cross-validate AES-CCM against OpenSSL on host builds where libcrypto is linked. Same gating */
+/* pattern as ssfaesctr_ut.c. When disabled (cross builds with -DSSF_CONFIG_HAVE_OPENSSL=0) the  */
+/* NIST SP 800-38C KATs above are the load-bearing correctness coverage.                         */
+#if (SSF_CONFIG_HAVE_OPENSSL == 1) && (SSF_CONFIG_AESCCM_UNIT_TEST == 1)
+#define SSF_AESCCM_OSSL_VERIFY 1
+#else
+#define SSF_AESCCM_OSSL_VERIFY 0
+#endif
+
+#if SSF_AESCCM_OSSL_VERIFY == 1
+#include <openssl/evp.h>
+#include <openssl/rand.h>
+#include <string.h>
+#endif
+
 #if SSF_CONFIG_AESCCM_UNIT_TEST == 1
+
+#if SSF_AESCCM_OSSL_VERIFY == 1
+
+/* --------------------------------------------------------------------------------------------- */
+/* OpenSSL cross-check helpers.                                                                  */
+/* --------------------------------------------------------------------------------------------- */
+
+/* Map keyLen to the OpenSSL AES-CCM EVP_CIPHER. */
+static const EVP_CIPHER *_OSSLAESCCMCipher(size_t keyLen)
+{
+    switch (keyLen)
+    {
+        case 16u: return EVP_aes_128_ccm();
+        case 24u: return EVP_aes_192_ccm();
+        case 32u: return EVP_aes_256_ccm();
+        default: SSF_ASSERT(0); return NULL;
+    }
+}
+
+/* Compute AES-CCM via OpenSSL's EVP path. CCM requires the total plaintext length to be set */
+/* before AAD is fed in (NULL-update with len = ptLen) and produces both ciphertext and tag. */
+static void _OSSLAESCCMEncrypt(const uint8_t *pt, size_t ptLen,
+                               const uint8_t *nonce, size_t nonceLen,
+                               const uint8_t *aad, size_t aadLen,
+                               const uint8_t *key, size_t keyLen,
+                               uint8_t *tag, size_t tagLen,
+                               uint8_t *ct)
+{
+    EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
+    int outL = 0;
+    int outL2 = 0;
+
+    uint8_t dummy = 0u;
+    const uint8_t *ptIn = (ptLen > 0u) ? pt : &dummy;
+    uint8_t *ctOut = (ptLen > 0u) ? ct : &dummy;
+
+    SSF_ASSERT(ctx != NULL);
+    SSF_ASSERT(EVP_EncryptInit_ex(ctx, _OSSLAESCCMCipher(keyLen), NULL, NULL, NULL) == 1);
+    SSF_ASSERT(EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_IVLEN, (int)nonceLen, NULL) == 1);
+    SSF_ASSERT(EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_TAG, (int)tagLen, NULL) == 1);
+    SSF_ASSERT(EVP_EncryptInit_ex(ctx, NULL, NULL, key, nonce) == 1);
+    /* CCM requires the total plaintext length to be set up-front so B0 is formatted with the */
+    /* correct length encoding. The "only when AAD is used" wording in OpenSSL docs is        */
+    /* misleading; the data-feed update below depends on the announce having happened.        */
+    SSF_ASSERT(EVP_EncryptUpdate(ctx, NULL, &outL, NULL, (int)ptLen) == 1);
+    if (aadLen > 0u)
+    {
+        SSF_ASSERT(EVP_EncryptUpdate(ctx, NULL, &outL, aad, (int)aadLen) == 1);
+    }
+    /* Always call the data-feed update — even at ptLen == 0 — so the CBC-MAC tag is         */
+    /* finalized. NULL pointers would be re-interpreted as another AAD update; use a dummy.  */
+    SSF_ASSERT(EVP_EncryptUpdate(ctx, ctOut, &outL, ptIn, (int)ptLen) == 1);
+    SSF_ASSERT((size_t)outL == ptLen);
+    SSF_ASSERT(EVP_EncryptFinal_ex(ctx, ctOut + outL, &outL2) == 1);
+    SSF_ASSERT(outL2 == 0);
+    SSF_ASSERT(EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_GET_TAG, (int)tagLen, tag) == 1);
+    EVP_CIPHER_CTX_free(ctx);
+}
+
+/* Decrypt + verify via OpenSSL. Returns true iff the tag verified. CCM verifies the tag inside */
+/* DecryptUpdate (not Final), so its return value is the auth result.                            */
+static bool _OSSLAESCCMDecrypt(const uint8_t *ct, size_t ctLen,
+                               const uint8_t *nonce, size_t nonceLen,
+                               const uint8_t *aad, size_t aadLen,
+                               const uint8_t *key, size_t keyLen,
+                               const uint8_t *tag, size_t tagLen,
+                               uint8_t *pt)
+{
+    EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
+    int outL = 0;
+    int rc = 0;
+    bool ok;
+
+    uint8_t dummy = 0u;
+    const uint8_t *ctIn = (ctLen > 0u) ? ct : &dummy;
+    uint8_t *ptOut = (ctLen > 0u) ? pt : &dummy;
+
+    SSF_ASSERT(ctx != NULL);
+    SSF_ASSERT(EVP_DecryptInit_ex(ctx, _OSSLAESCCMCipher(keyLen), NULL, NULL, NULL) == 1);
+    SSF_ASSERT(EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_IVLEN, (int)nonceLen, NULL) == 1);
+    SSF_ASSERT(EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_TAG, (int)tagLen, (void *)tag) == 1);
+    SSF_ASSERT(EVP_DecryptInit_ex(ctx, NULL, NULL, key, nonce) == 1);
+    /* Mirror the encrypt path: always announce length, conditional AAD, always feed data. */
+    SSF_ASSERT(EVP_DecryptUpdate(ctx, NULL, &outL, NULL, (int)ctLen) == 1);
+    if (aadLen > 0u)
+    {
+        SSF_ASSERT(EVP_DecryptUpdate(ctx, NULL, &outL, aad, (int)aadLen) == 1);
+    }
+    /* CCM verifies the tag inside DecryptUpdate, so its return value is the auth result. */
+    rc = EVP_DecryptUpdate(ctx, ptOut, &outL, ctIn, (int)ctLen);
+    ok = (rc == 1);
+    EVP_CIPHER_CTX_free(ctx);
+    return ok;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Random fuzz across (keyLen × nonceLen × tagLen × ptLen × aadLen). Each cell:                  */
+/*   - draws fresh random key/nonce/aad/pt                                                       */
+/*   - encrypts via SSF, encrypts via OpenSSL, asserts byte-equal ct AND tag                     */
+/*   - decrypts SSF ciphertext via OpenSSL and OpenSSL ciphertext via SSF, both must succeed     */
+/*   - tampers ct[0] / aad[0] / tag[0] (when each is non-empty) and asserts BOTH SSF and OpenSSL */
+/*     reject the tampered input                                                                  */
+/* This catches divergence in CBC-MAC tag formation, CTR keystream, B0/A_i formatting, AAD       */
+/* length encoding, and partial-block padding that wouldn't surface in the fixed NIST KATs.       */
+/* --------------------------------------------------------------------------------------------- */
+static void _VerifyAESCCMAgainstOpenSSLRandom(void)
+{
+    static const size_t keyLens[]   = {16u, 24u, 32u};
+    static const size_t nonceLens[] = {7u, 8u, 11u, 12u, 13u};
+    static const size_t tagLens[]   = {4u, 6u, 8u, 10u, 12u, 14u, 16u};
+    static const size_t ptLens[]    = {0u, 1u, 15u, 16u, 17u, 31u, 32u, 33u, 64u, 100u, 256u};
+    static const size_t aadLens[]   = {0u, 1u, 15u, 16u, 17u, 64u, 100u};
+    uint8_t key[32];
+    uint8_t nonce[13];
+    uint8_t aad[100];
+    uint8_t pt[256];
+    uint8_t ctSSF[256];
+    uint8_t ctOSSL[256];
+    uint8_t tagSSF[16];
+    uint8_t tagOSSL[16];
+    uint8_t back[256];
+    size_t kIdx;
+    size_t nIdx;
+    size_t tIdx;
+    size_t pIdx;
+    size_t aIdx;
+
+    for (kIdx = 0; kIdx < (sizeof(keyLens) / sizeof(keyLens[0])); kIdx++)
+    {
+        for (nIdx = 0; nIdx < (sizeof(nonceLens) / sizeof(nonceLens[0])); nIdx++)
+        {
+            for (tIdx = 0; tIdx < (sizeof(tagLens) / sizeof(tagLens[0])); tIdx++)
+            {
+                for (pIdx = 0; pIdx < (sizeof(ptLens) / sizeof(ptLens[0])); pIdx++)
+                {
+                    for (aIdx = 0; aIdx < (sizeof(aadLens) / sizeof(aadLens[0])); aIdx++)
+                    {
+                        size_t keyLen   = keyLens[kIdx];
+                        size_t nonceLen = nonceLens[nIdx];
+                        size_t tagLen   = tagLens[tIdx];
+                        size_t ptLen    = ptLens[pIdx];
+                        size_t aadLen   = aadLens[aIdx];
+
+                        SSF_ASSERT(RAND_bytes(key, (int)keyLen) == 1);
+                        SSF_ASSERT(RAND_bytes(nonce, (int)nonceLen) == 1);
+                        if (aadLen > 0u) SSF_ASSERT(RAND_bytes(aad, (int)aadLen) == 1);
+                        if (ptLen > 0u)  SSF_ASSERT(RAND_bytes(pt, (int)ptLen) == 1);
+
+                        /* Encrypt: SSF and OpenSSL must produce identical ciphertext + tag. */
+                        SSFAESCCMEncrypt(ptLen ? pt : NULL, ptLen, nonce, nonceLen,
+                                         aadLen ? aad : NULL, aadLen, key, keyLen,
+                                         tagSSF, tagLen, ctSSF, ptLen);
+                        _OSSLAESCCMEncrypt(ptLen ? pt : NULL, ptLen, nonce, nonceLen,
+                                           aadLen ? aad : NULL, aadLen, key, keyLen,
+                                           tagOSSL, tagLen, ctOSSL);
+                        if (ptLen > 0u) SSF_ASSERT(memcmp(ctSSF, ctOSSL, ptLen) == 0);
+                        SSF_ASSERT(memcmp(tagSSF, tagOSSL, tagLen) == 0);
+
+                        /* SSF decrypts OpenSSL's ciphertext successfully. */
+                        SSF_ASSERT(SSFAESCCMDecrypt(ctOSSL, ptLen, nonce, nonceLen,
+                                                    aadLen ? aad : NULL, aadLen, key, keyLen,
+                                                    tagOSSL, tagLen, back, ptLen) == true);
+                        if (ptLen > 0u) SSF_ASSERT(memcmp(back, pt, ptLen) == 0);
+
+                        /* OpenSSL decrypts SSF's ciphertext successfully. */
+                        memset(back, 0, sizeof(back));
+                        SSF_ASSERT(_OSSLAESCCMDecrypt(ctSSF, ptLen, nonce, nonceLen,
+                                                      aadLen ? aad : NULL, aadLen, key, keyLen,
+                                                      tagSSF, tagLen, back) == true);
+                        if (ptLen > 0u) SSF_ASSERT(memcmp(back, pt, ptLen) == 0);
+
+                        /* Tamper ct: both must reject. (Skip when ptLen == 0.) */
+                        if (ptLen > 0u)
+                        {
+                            ctSSF[0] ^= 0x01u;
+                            SSF_ASSERT(SSFAESCCMDecrypt(ctSSF, ptLen, nonce, nonceLen,
+                                                        aadLen ? aad : NULL, aadLen, key, keyLen,
+                                                        tagSSF, tagLen, back, ptLen) == false);
+                            SSF_ASSERT(_OSSLAESCCMDecrypt(ctSSF, ptLen, nonce, nonceLen,
+                                                          aadLen ? aad : NULL, aadLen, key, keyLen,
+                                                          tagSSF, tagLen, back) == false);
+                            ctSSF[0] ^= 0x01u;
+                        }
+
+                        /* Tamper aad: both must reject. (Skip when aadLen == 0.) */
+                        if (aadLen > 0u)
+                        {
+                            aad[0] ^= 0x01u;
+                            SSF_ASSERT(SSFAESCCMDecrypt(ctSSF, ptLen, nonce, nonceLen,
+                                                        aad, aadLen, key, keyLen,
+                                                        tagSSF, tagLen, back, ptLen) == false);
+                            SSF_ASSERT(_OSSLAESCCMDecrypt(ctSSF, ptLen, nonce, nonceLen,
+                                                          aad, aadLen, key, keyLen,
+                                                          tagSSF, tagLen, back) == false);
+                            aad[0] ^= 0x01u;
+                        }
+
+                        /* Tamper tag: both must reject. */
+                        tagSSF[0] ^= 0x01u;
+                        SSF_ASSERT(SSFAESCCMDecrypt(ctSSF, ptLen, nonce, nonceLen,
+                                                    aadLen ? aad : NULL, aadLen, key, keyLen,
+                                                    tagSSF, tagLen, back, ptLen) == false);
+                        SSF_ASSERT(_OSSLAESCCMDecrypt(ctSSF, ptLen, nonce, nonceLen,
+                                                      aadLen ? aad : NULL, aadLen, key, keyLen,
+                                                      tagSSF, tagLen, back) == false);
+                        tagSSF[0] ^= 0x01u;
+                    }
+                }
+            }
+        }
+    }
+}
+#endif /* SSF_AESCCM_OSSL_VERIFY */
 
 void SSFAESCCMUnitTest(void)
 {
@@ -262,5 +490,9 @@ void SSFAESCCMUnitTest(void)
                    key, sizeof(key), tag, sizeof(tag), dec, sizeof(dec)) == true);
         SSF_ASSERT(memcmp(dec, pt, sizeof(pt)) == 0);
     }
+
+#if SSF_AESCCM_OSSL_VERIFY == 1
+    _VerifyAESCCMAgainstOpenSSLRandom();
+#endif
 }
 #endif /* SSF_CONFIG_AESCCM_UNIT_TEST */

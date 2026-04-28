@@ -32,8 +32,24 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <string.h>
 #include "ssfaesgcm.h"
 #include "ssfassert.h"
+
+/* Cross-validate AES-GCM against OpenSSL on host builds where libcrypto is linked. Same gating */
+/* pattern as ssfaesctr_ut.c. When disabled (cross builds with -DSSF_CONFIG_HAVE_OPENSSL=0) the  */
+/* NIST CAVP-derived KAT table _AESGCMUT and the round-trip cases below are the load-bearing    */
+/* correctness coverage.                                                                         */
+#if (SSF_CONFIG_HAVE_OPENSSL == 1) && (SSF_CONFIG_AESGCM_UNIT_TEST == 1)
+#define SSF_AESGCM_OSSL_VERIFY 1
+#else
+#define SSF_AESGCM_OSSL_VERIFY 0
+#endif
+
+#if SSF_AESGCM_OSSL_VERIFY == 1
+#include <openssl/evp.h>
+#include <openssl/rand.h>
+#endif
 
 #if SSF_CONFIG_AESGCM_UNIT_TEST == 1
 
@@ -3207,6 +3223,208 @@ SSFAESGCMUT_t _AESGCMUT[] = {
     {NULL,51,(uint8_t *)"\xcf\x44\x29\xe3\x3f\x0f\x3c\x0a\xd4\x30\x87\xfb\x80\xa1\x84\x2a\xce\xb5\x84\x13\x00\xdf\x1b\xce\xbe\x58\x5f\x23\x54\x79\xbf\xcf\x6a\xa9\x75\xff\x2e\x30\x7f\xb5\x86\x02\x0d\x08\xba\xf6\x73\x83\xe5\xcf\x34\x69\x82\xf5\xd0\x0f\x9e\xa3\x37\xea\x40\xe0\xf8\xa2\xcc\x0f\xbd\xfd\xc9\x68\xce\x95\x79\x6a\x05\x87\x51\x95\xdc\xe5\xa7\xd3\x63\x9e\x25\xf3\x97\x36\x51\xd1\xdb\x27\xb5\xf8\xeb\x59\x8b\xf4\x09\xaf\x61\x28\x50\x29\x44\xb5\x8e\xdb\x02\x14\xc0\x23\x75\xf9\xb2\x40\x78\xde\xa8\x82\x0e\x9f\xcd\x2d\xf1\x2a\xc5\x77",128,(uint8_t *)"\xfe\xb3\x47\xec\x96\xf2\x2b\x1a\x61\x54\xd4\x7e\xb3\xc9\x8c\x79\x7a\x13\x3c\xa8\x39\x1e\x82\x66\x9b\xe6\xa2\xa0\x42\x38\x0e\x2a\xa5\xfe\xf1\xc2\x4e\x43\x99\x96\x07\xf9\x37\x03\x8e\x62\x13\x0b\xd1\x50\x20\xb7\x15\xad\x94\x2c\x4e\xd4\xc3\xb4\x79\x36\x28\x5a\xf3\xe7\x1e\xae\x78\x77\x4e\xaf\x39\x3c\x53\x67\x2e\x95\x43\x0b\x09\x59\x27\xec\x5b\xd9\xc1\x7f\xdc\x7a",90,(uint8_t *)"\xdd\x82\xa1\x29\xca\x46\xbd\x68\xd7\x6c\xb3\x27\x59\xb0\x20\x6f\x3a\x24\xf8\xed\x38\x83\x12\x9f\x08\xc4\x7e\xe1\x4f\x3e\xa3\x43",32,(uint8_t *)"\x91\x3f\x8a\x8c",4,(uint8_t *)"\xa8\xce\xd4\x34\x13\x1f\xb2\x83\x07\x35\x62\x79\x24\x1a\x16\x91\x90\xfc\xf4\x57\x76\xba\xef\x3b\x9b\x7c\x01\x5d\x7f\x76\xdf\x86\x6c\x32\xea\x48\xaf\x5f\x91\x6c\x26\x57\x35\x9a\xcc\xba\x72\xb6\x9b\x7e\x71",51,1},
 };
 
+#if SSF_AESGCM_OSSL_VERIFY == 1
+
+/* --------------------------------------------------------------------------------------------- */
+/* OpenSSL cross-check helpers.                                                                  */
+/* --------------------------------------------------------------------------------------------- */
+
+/* Map keyLen to the OpenSSL AES-GCM EVP_CIPHER. */
+static const EVP_CIPHER *_OSSLAESGCMCipher(size_t keyLen)
+{
+    switch (keyLen)
+    {
+        case 16u: return EVP_aes_128_gcm();
+        case 24u: return EVP_aes_192_gcm();
+        case 32u: return EVP_aes_256_gcm();
+        default: SSF_ASSERT(0); return NULL;
+    }
+}
+
+/* Compute AES-GCM via OpenSSL's EVP path. ivLen != 12 exercises the GHASH-based J0 derivation, */
+/* matching the same path SSFAESGCMEncrypt takes via SP 800-38D §7.1.                           */
+static void _OSSLAESGCMEncrypt(const uint8_t *pt, size_t ptLen,
+                               const uint8_t *iv, size_t ivLen,
+                               const uint8_t *aad, size_t aadLen,
+                               const uint8_t *key, size_t keyLen,
+                               uint8_t *tag, size_t tagLen,
+                               uint8_t *ct)
+{
+    EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
+    int outL = 0;
+    int outL2 = 0;
+
+    SSF_ASSERT(ctx != NULL);
+    SSF_ASSERT(EVP_EncryptInit_ex(ctx, _OSSLAESGCMCipher(keyLen), NULL, NULL, NULL) == 1);
+    SSF_ASSERT(EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_IVLEN, (int)ivLen, NULL) == 1);
+    SSF_ASSERT(EVP_EncryptInit_ex(ctx, NULL, NULL, key, iv) == 1);
+    if (aadLen > 0u)
+    {
+        SSF_ASSERT(EVP_EncryptUpdate(ctx, NULL, &outL, aad, (int)aadLen) == 1);
+    }
+    if (ptLen > 0u)
+    {
+        SSF_ASSERT(EVP_EncryptUpdate(ctx, ct, &outL, pt, (int)ptLen) == 1);
+        SSF_ASSERT((size_t)outL == ptLen);
+    }
+    SSF_ASSERT(EVP_EncryptFinal_ex(ctx, (ptLen > 0u) ? (ct + outL) : NULL, &outL2) == 1);
+    SSF_ASSERT(outL2 == 0);
+    SSF_ASSERT(EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_GET_TAG, (int)tagLen, tag) == 1);
+    EVP_CIPHER_CTX_free(ctx);
+}
+
+/* Decrypt + verify via OpenSSL. Returns true iff the tag verified. GCM verifies the tag in    */
+/* DecryptFinal_ex, unlike CCM which verifies in DecryptUpdate.                                 */
+static bool _OSSLAESGCMDecrypt(const uint8_t *ct, size_t ctLen,
+                               const uint8_t *iv, size_t ivLen,
+                               const uint8_t *aad, size_t aadLen,
+                               const uint8_t *key, size_t keyLen,
+                               const uint8_t *tag, size_t tagLen,
+                               uint8_t *pt)
+{
+    EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
+    int outL = 0;
+    int rc;
+    bool ok;
+
+    SSF_ASSERT(ctx != NULL);
+    SSF_ASSERT(EVP_DecryptInit_ex(ctx, _OSSLAESGCMCipher(keyLen), NULL, NULL, NULL) == 1);
+    SSF_ASSERT(EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_IVLEN, (int)ivLen, NULL) == 1);
+    SSF_ASSERT(EVP_DecryptInit_ex(ctx, NULL, NULL, key, iv) == 1);
+    if (aadLen > 0u)
+    {
+        SSF_ASSERT(EVP_DecryptUpdate(ctx, NULL, &outL, aad, (int)aadLen) == 1);
+    }
+    if (ctLen > 0u)
+    {
+        SSF_ASSERT(EVP_DecryptUpdate(ctx, pt, &outL, ct, (int)ctLen) == 1);
+        SSF_ASSERT((size_t)outL == ctLen);
+    }
+    SSF_ASSERT(EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_TAG, (int)tagLen, (void *)tag) == 1);
+    rc = EVP_DecryptFinal_ex(ctx, (ctLen > 0u) ? (pt + outL) : NULL, &outL);
+    ok = (rc == 1);
+    EVP_CIPHER_CTX_free(ctx);
+    return ok;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Random fuzz across (keyLen × ivLen × tagLen × ptLen × aadLen). The ivLen sweep deliberately */
+/* spans the 12-byte fast path AND non-12-byte sizes that exercise the GHASH-based J0 path —    */
+/* a divergence in either path is the bug class this catches that the fixed-IV NIST KATs miss.  */
+/* Per cell:                                                                                    */
+/*   - draw fresh random key/iv/aad/pt                                                          */
+/*   - SSF and OpenSSL encrypt; assert ct AND tag agree byte-for-byte                           */
+/*   - decrypt SSF ct via OpenSSL and OpenSSL ct via SSF; both must succeed and recover pt      */
+/*   - tamper ct[0] / aad[0] / tag[0] when each is non-empty; both libs must reject             */
+/* --------------------------------------------------------------------------------------------- */
+static void _VerifyAESGCMAgainstOpenSSLRandom(void)
+{
+    static const size_t keyLens[] = {16u, 24u, 32u};
+    static const size_t ivLens[]  = {1u, 8u, 12u, 13u, 16u, 32u};
+    static const size_t tagLens[] = {4u, 8u, 12u, 13u, 14u, 15u, 16u};
+    static const size_t ptLens[]  = {0u, 1u, 15u, 16u, 17u, 31u, 32u, 33u, 64u, 100u, 256u};
+    static const size_t aadLens[] = {0u, 1u, 15u, 16u, 17u, 64u, 100u};
+    uint8_t key[32];
+    uint8_t iv[32];
+    uint8_t aad[100];
+    uint8_t pt[256];
+    uint8_t ctSSF[256];
+    uint8_t ctOSSL[256];
+    uint8_t tagSSF[16];
+    uint8_t tagOSSL[16];
+    uint8_t back[256];
+    size_t kIdx;
+    size_t vIdx;
+    size_t tIdx;
+    size_t pIdx;
+    size_t aIdx;
+
+    for (kIdx = 0; kIdx < (sizeof(keyLens) / sizeof(keyLens[0])); kIdx++)
+    {
+        for (vIdx = 0; vIdx < (sizeof(ivLens) / sizeof(ivLens[0])); vIdx++)
+        {
+            for (tIdx = 0; tIdx < (sizeof(tagLens) / sizeof(tagLens[0])); tIdx++)
+            {
+                for (pIdx = 0; pIdx < (sizeof(ptLens) / sizeof(ptLens[0])); pIdx++)
+                {
+                    for (aIdx = 0; aIdx < (sizeof(aadLens) / sizeof(aadLens[0])); aIdx++)
+                    {
+                        size_t keyLen = keyLens[kIdx];
+                        size_t ivLen  = ivLens[vIdx];
+                        size_t tagLen = tagLens[tIdx];
+                        size_t ptLen  = ptLens[pIdx];
+                        size_t aadLen = aadLens[aIdx];
+
+                        SSF_ASSERT(RAND_bytes(key, (int)keyLen) == 1);
+                        SSF_ASSERT(RAND_bytes(iv, (int)ivLen) == 1);
+                        if (aadLen > 0u) SSF_ASSERT(RAND_bytes(aad, (int)aadLen) == 1);
+                        if (ptLen > 0u)  SSF_ASSERT(RAND_bytes(pt, (int)ptLen) == 1);
+
+                        SSFAESGCMEncrypt(ptLen ? pt : NULL, ptLen, iv, ivLen,
+                                         aadLen ? aad : NULL, aadLen, key, keyLen,
+                                         tagSSF, tagLen, ctSSF, ptLen);
+                        _OSSLAESGCMEncrypt(ptLen ? pt : NULL, ptLen, iv, ivLen,
+                                           aadLen ? aad : NULL, aadLen, key, keyLen,
+                                           tagOSSL, tagLen, ctOSSL);
+                        if (ptLen > 0u) SSF_ASSERT(memcmp(ctSSF, ctOSSL, ptLen) == 0);
+                        SSF_ASSERT(memcmp(tagSSF, tagOSSL, tagLen) == 0);
+
+                        /* SSF decrypts OpenSSL's ciphertext successfully. */
+                        SSF_ASSERT(SSFAESGCMDecrypt(ctOSSL, ptLen, iv, ivLen,
+                                                    aadLen ? aad : NULL, aadLen, key, keyLen,
+                                                    tagOSSL, tagLen, back, ptLen) == true);
+                        if (ptLen > 0u) SSF_ASSERT(memcmp(back, pt, ptLen) == 0);
+
+                        /* OpenSSL decrypts SSF's ciphertext successfully. */
+                        memset(back, 0, sizeof(back));
+                        SSF_ASSERT(_OSSLAESGCMDecrypt(ctSSF, ptLen, iv, ivLen,
+                                                      aadLen ? aad : NULL, aadLen, key, keyLen,
+                                                      tagSSF, tagLen, back) == true);
+                        if (ptLen > 0u) SSF_ASSERT(memcmp(back, pt, ptLen) == 0);
+
+                        /* Tamper ct: both must reject. */
+                        if (ptLen > 0u)
+                        {
+                            ctSSF[0] ^= 0x01u;
+                            SSF_ASSERT(SSFAESGCMDecrypt(ctSSF, ptLen, iv, ivLen,
+                                                        aadLen ? aad : NULL, aadLen, key, keyLen,
+                                                        tagSSF, tagLen, back, ptLen) == false);
+                            SSF_ASSERT(_OSSLAESGCMDecrypt(ctSSF, ptLen, iv, ivLen,
+                                                          aadLen ? aad : NULL, aadLen, key, keyLen,
+                                                          tagSSF, tagLen, back) == false);
+                            ctSSF[0] ^= 0x01u;
+                        }
+
+                        /* Tamper aad: both must reject. */
+                        if (aadLen > 0u)
+                        {
+                            aad[0] ^= 0x01u;
+                            SSF_ASSERT(SSFAESGCMDecrypt(ctSSF, ptLen, iv, ivLen,
+                                                        aad, aadLen, key, keyLen,
+                                                        tagSSF, tagLen, back, ptLen) == false);
+                            SSF_ASSERT(_OSSLAESGCMDecrypt(ctSSF, ptLen, iv, ivLen,
+                                                          aad, aadLen, key, keyLen,
+                                                          tagSSF, tagLen, back) == false);
+                            aad[0] ^= 0x01u;
+                        }
+
+                        /* Tamper tag: both must reject. */
+                        tagSSF[0] ^= 0x01u;
+                        SSF_ASSERT(SSFAESGCMDecrypt(ctSSF, ptLen, iv, ivLen,
+                                                    aadLen ? aad : NULL, aadLen, key, keyLen,
+                                                    tagSSF, tagLen, back, ptLen) == false);
+                        SSF_ASSERT(_OSSLAESGCMDecrypt(ctSSF, ptLen, iv, ivLen,
+                                                      aadLen ? aad : NULL, aadLen, key, keyLen,
+                                                      tagSSF, tagLen, back) == false);
+                        tagSSF[0] ^= 0x01u;
+                    }
+                }
+            }
+        }
+    }
+}
+#endif /* SSF_AESGCM_OSSL_VERIFY */
+
 /* --------------------------------------------------------------------------------------------- */
 /* Unit tests the AESGCM external interface.                                                     */
 /* --------------------------------------------------------------------------------------------- */
@@ -3415,6 +3633,10 @@ void SSFAESGCMUnitTest(void)
         /* Wrong IV must fail decrypt */
         SSF_ASSERT(SSFAESGCMDecrypt(rtCt, 16, rtIv8, 8, NULL, 0, rtKey, 16, rtTag, 16, rtDec, 16) == false);
     }
+
+#if SSF_AESGCM_OSSL_VERIFY == 1
+    _VerifyAESGCMAgainstOpenSSLRandom();
+#endif
 }
 
 #endif /* SSF_CONFIG_AESGCM_UNIT_TEST */

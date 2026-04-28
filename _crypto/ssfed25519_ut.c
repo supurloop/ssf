@@ -674,6 +674,54 @@ void SSFEd25519UnitTest(void)
     /* and is reproducible because the state stream is derived from a fixed master seed.         */
     _Ed25519SelfFuzz(256u);
 
+    /* === Wycheproof Ed25519 verify vectors (Google adversarial test suite) === */
+    /* 88 "valid" + 62 "invalid" verify cases. Probes for the same field-arithmetic class of   */
+    /* bug that surfaced in ssfx25519's Wycheproof tcId 57 (peer u = p - 2^128 triggers a       */
+    /* carry / fold pattern that produces unreduced field-op outputs). ssfed25519 shares the    */
+    /* same field arithmetic and may have the same sensitivity in its verify path.              */
+    {
+        #include "wycheproof_ed25519.h"
+        uint16_t i;
+        uint16_t pass = 0, mismatches = 0, acceptableSkipped = 0;
+
+        printf("--- Wycheproof Ed25519 verify (%u tests) ---\n",
+               (unsigned)SSF_WYCHEPROOF_ED25519_NTESTS);
+        for (i = 0; i < (uint16_t)SSF_WYCHEPROOF_ED25519_NTESTS; i++)
+        {
+            const _SSFWycheproofEd25519Test_t *t = &_wp_Ed25519_tests[i];
+            bool got;
+
+            if (t->sigLen != 64u)
+            {
+                /* Wycheproof emits sigs of various lengths for "invalid"-class tests; SSFEd25519
+                   Verify takes a fixed 64-byte signature, so wrong-length must be a reject.    */
+                if (t->expectedValid) { mismatches++;
+                    printf("  tcId %4u: expected valid but sig is %u bytes\n",
+                           (unsigned)t->tcId, (unsigned)t->sigLen);
+                }
+                else pass++;
+                continue;
+            }
+
+            got = SSFEd25519Verify(t->pubKey, t->msg, t->msgLen, t->sig);
+
+            if (t->acceptable) { acceptableSkipped++; continue; }
+
+            if ((t->expectedValid && got) || (!t->expectedValid && !got)) pass++;
+            else
+            {
+                mismatches++;
+                printf("  tcId %4u: expected %s, got %s\n",
+                       (unsigned)t->tcId,
+                       t->expectedValid ? "valid" : "invalid",
+                       got ? "valid" : "invalid");
+            }
+        }
+        printf("--- Wycheproof Ed25519: %u pass, %u acceptable, %u mismatches ---\n",
+               (unsigned)pass, (unsigned)acceptableSkipped, (unsigned)mismatches);
+        SSF_ASSERT(mismatches == 0u);
+    }
+
 #if SSF_ED25519_OSSL_VERIFY == 1
     /* Comprehensive OpenSSL cross-check: random seeds, random messages, bidirectional sign /  */
     /* verify, and pubkey-from-seed byte equality. Catches deterministic-nonce bugs, encoding  */

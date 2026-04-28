@@ -181,32 +181,6 @@ static void _fe_sqr(_fe_t *r, const _fe_t *a)
     _fe_mul(r, a, a);
 }
 
-/* r = a * c mod p, where c is a small uint32_t constant. */
-static void _fe_mul_small(_fe_t *r, const _fe_t *a, uint32_t c)
-{
-    uint64_t carry = 0;
-    uint8_t i;
-
-    for (i = 0; i < 8u; i++)
-    {
-        carry += (uint64_t)a->v[i] * (uint64_t)c;
-        r->v[i] = (uint32_t)carry;
-        carry >>= 32;
-    }
-
-    /* Fold carry back: carry * 38 mod p */
-    if (carry != 0u)
-    {
-        uint64_t c2 = carry * 38u;
-        for (i = 0; i < 8u; i++)
-        {
-            c2 += (uint64_t)r->v[i];
-            r->v[i] = (uint32_t)c2;
-            c2 >>= 32;
-        }
-    }
-}
-
 /* Fully reduce a to [0, p). */
 static void _fe_reduce(_fe_t *a)
 {

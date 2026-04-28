@@ -438,6 +438,58 @@ void SSFX25519UnitTest(void)
     /* commutative property privA·pubB == privB·pubA across 256 deterministic random keypairs.   */
     _X25519SelfFuzz(256u);
 
+    /* === Wycheproof X25519 vectors (Google adversarial test suite) === */
+    /* X25519 has 264 "valid" cases (must match expected shared byte-for-byte) and 254             */
+    /* "acceptable" cases (RFC 7748 doesn't strictly require either accept or reject — typically   */
+    /* twist points / low-order edge cases). 0 "invalid" cases for X25519. This harness asserts    */
+    /* zero new mismatches on the valid set; acceptable cases are tracked separately and don't     */
+    /* count toward mismatches either way.                                                          */
+    {
+        #include "wycheproof_x25519.h"
+        uint8_t secret[32];
+        uint16_t i;
+        uint16_t pass = 0, mismatches = 0, acceptableAccepted = 0, acceptableRejected = 0;
+
+        printf("--- Wycheproof X25519 (%u tests) ---\n",
+               (unsigned)SSF_WYCHEPROOF_X25519_NTESTS);
+        for (i = 0; i < (uint16_t)SSF_WYCHEPROOF_X25519_NTESTS; i++)
+        {
+            const _SSFWycheproofX25519Test_t *t = &_wp_X25519_tests[i];
+            bool got, sharedOk = false;
+
+            got = SSFX25519ComputeSecret(t->privKey, t->pubKey, secret);
+            if (got) sharedOk = (memcmp(secret, t->shared, t->sharedLen) == 0);
+
+            if (t->acceptable)
+            {
+                /* Either accept (with any output) or reject is RFC-compliant. Track stats only. */
+                if (got) acceptableAccepted++;
+                else     acceptableRejected++;
+                continue;
+            }
+
+            /* expectedValid == true: must accept and shared must match.                          */
+            /* expectedValid == false (none today for X25519, future-proof): must reject.        */
+            {
+                bool expectedOk = t->expectedValid ? (got && sharedOk) : (!got);
+                if (expectedOk) pass++;
+                else
+                {
+                    mismatches++;
+                    printf("  tcId %4u: expected %s, got %s\n",
+                           (unsigned)t->tcId,
+                           t->expectedValid ? "valid" : "invalid",
+                           got ? (sharedOk ? "valid" : "wrong-shared") : "rejected");
+                }
+            }
+        }
+        printf("--- Wycheproof X25519: %u pass, %u acceptable-accepted, "
+               "%u acceptable-rejected, %u mismatches ---\n",
+               (unsigned)pass, (unsigned)acceptableAccepted,
+               (unsigned)acceptableRejected, (unsigned)mismatches);
+        SSF_ASSERT(mismatches == 0u);
+    }
+
 #if SSF_X25519_OSSL_VERIFY == 1
     /* Comprehensive OpenSSL cross-check: random privs, byte-equal pubkeys, byte-equal shared    */
     /* secrets in both directions. Catches any divergence in scalar clamping, ladder formulae,    */

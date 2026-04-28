@@ -46,6 +46,9 @@ typedef struct { uint32_t v[8]; } _fe_t;
 static const _fe_t _fe_p = {{ 0xFFFFFFEDu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu,
                               0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0x7FFFFFFFu }};
 
+/* Forward declaration for _fe_reduce (used by _fe_mul to fully reduce its output). */
+static void _fe_reduce(_fe_t *a);
+
 /* --------------------------------------------------------------------------------------------- */
 /* Field arithmetic: GF(2^255 - 19). Mirrors the helpers in ssfed25519.c — keep in sync if either */
 /* module's bounds analysis changes.                                                              */
@@ -90,6 +93,12 @@ static void _fe_add(_fe_t *r, const _fe_t *a, const _fe_t *b)
             c >>= 32;
         }
     }
+
+    /* Fully reduce so output is in [0, p). Trivializes the input-bound contract for           */
+    /* downstream _fe_mul. Empirically required to pass Wycheproof tcId 57 (peer u = p - 2^128 */
+    /* triggers a carry / fold pattern that produces correct mod-p results but unreduced       */
+    /* representations whose interaction with subsequent ops compounds an off-by-38 error.     */
+    _fe_reduce(r);
 }
 
 /* r = a - b mod p. If a < b, add 2p to recover a positive value. Borrow-fold runs               */
@@ -117,6 +126,9 @@ static void _fe_sub(_fe_t *r, const _fe_t *a, const _fe_t *b)
         r->v[i] = (uint32_t)carry;
         carry >>= 32;
     }
+
+    /* Fully reduce. See _fe_add for rationale; same Wycheproof tcId 57 sensitivity applies. */
+    _fe_reduce(r);
 }
 
 /* r = a * b mod p. Schoolbook 8x8 multiply with fast reduction by 38. */
@@ -159,6 +171,13 @@ static void _fe_mul(_fe_t *r, const _fe_t *a, const _fe_t *b)
             c >>= 32;
         }
     }
+
+    /* The fold loop itself can leave a residual final carry — for inputs whose limbs are       */
+    /* close to all-1s (e.g., Wycheproof's edge-case u = p - 2^128), adding 38*carry at limb 0  */
+    /* propagates through the chain and emits another 1 carry past limb 7. The fold path was   */
+    /* missing this final reduce: ssfed25519's mirror has _fe_reduce here for the same reason.  */
+    /* Guarantees output is in [0, p) so subsequent _fe_add / _fe_sub bounds analysis holds.    */
+    _fe_reduce(r);
 }
 
 /* r = a^2 mod p. Optimized: cross-terms computed once and doubled. */
@@ -190,6 +209,10 @@ static void _fe_mul_small(_fe_t *r, const _fe_t *a, uint32_t c)
             c2 >>= 32;
         }
     }
+
+    /* Same residual-carry concern as _fe_mul: large `c` values (small c, large limbs) can      */
+    /* leave r in [0, ~2p) after the fold. Reduce so subsequent _fe_add gets a value in [0, p). */
+    _fe_reduce(r);
 }
 
 /* Fully reduce a to [0, p). */

@@ -90,8 +90,8 @@ extern "C" {
 /* Private keys are clamped per RFC 7748 Section 5 before use.                                   */
 /* The shared secret should be processed through SSFHKDF for key derivation.                     */
 /* Returns false if the computed shared secret is the all-zero value (low-order peer key).        */
-/* Constant-time Montgomery ladder; no secret-dependent branches.                                */
-/* Self-contained: uses dedicated GF(2^255-19) arithmetic, no ssfbn dependency.                  */
+/* Constant-time Montgomery ladder. Field-arithmetic carry/borrow folds are also branch-free.   */
+/* Self-contained: dedicated GF(2^255-19) arithmetic; no ssfbn dependency.                       */
 /* --------------------------------------------------------------------------------------------- */
 
 /* --------------------------------------------------------------------------------------------- */

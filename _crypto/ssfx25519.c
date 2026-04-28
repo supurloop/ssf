@@ -30,10 +30,9 @@
 /* NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED  */
 /* OF THE POSSIBILITY OF SUCH DAMAGE.                                                            */
 /* --------------------------------------------------------------------------------------------- */
+#include <string.h>
 #include "ssfassert.h"
 #include "ssfx25519.h"
-#include "ssfprng.h"
-#include "ssfbn.h"
 #include "ssfcrypt.h"
 
 /* --------------------------------------------------------------------------------------------- */
@@ -46,9 +45,10 @@ typedef struct { uint32_t v[8]; } _fe_t;
 /* p = 2^255 - 19 as 8 limbs */
 static const _fe_t _fe_p = {{ 0xFFFFFFEDu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu,
                               0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0x7FFFFFFFu }};
-// claude - duplicated field math functions
+
 /* --------------------------------------------------------------------------------------------- */
-/* Field arithmetic: GF(2^255 - 19)                                                              */
+/* Field arithmetic: GF(2^255 - 19). Mirrors the helpers in ssfed25519.c — keep in sync if either */
+/* module's bounds analysis changes.                                                              */
 /* --------------------------------------------------------------------------------------------- */
 static void _fe_0(_fe_t *r)
 {
@@ -66,7 +66,10 @@ static void _fe_copy(_fe_t *r, const _fe_t *a)
     memcpy(r->v, a->v, sizeof(r->v));
 }
 
-/* r = a + b. Result may be up to 2p if both inputs < p. */
+/* r = a + b. Result may be up to 2p if both inputs < p. The carry-fold runs unconditionally —   */
+/* a 0-carry input degenerates to adding 0 through the limb chain, which leaves r unchanged. The */
+/* fold path used to be branch-guarded; making it branch-free closes a timing channel since the  */
+/* carry value depends on the secret-derived ladder operands.                                     */
 static void _fe_add(_fe_t *r, const _fe_t *a, const _fe_t *b)
 {
     uint64_t carry = 0;
@@ -77,11 +80,9 @@ static void _fe_add(_fe_t *r, const _fe_t *a, const _fe_t *b)
         r->v[i] = (uint32_t)carry;
         carry >>= 32;
     }
-    /* If carry, result >= 2^256. Reduce by subtracting p (add 19, clear bit 255). */
-    /* This keeps the result in a manageable range. */
-    if (carry != 0u)
+    /* 2^256 mod p = 2 * 19 = 38. carry is 0 or 1; multiply unconditionally. */
     {
-        uint64_t c = 38u; /* 2^256 mod p = 2 * 19 = 38 */
+        uint64_t c = 38u * carry;
         for (i = 0; i < 8u; i++)
         {
             c += (uint64_t)r->v[i];
@@ -91,13 +92,17 @@ static void _fe_add(_fe_t *r, const _fe_t *a, const _fe_t *b)
     }
 }
 
-/* r = a - b mod p. If a < b, add p to avoid underflow. */
+/* r = a - b mod p. If a < b, add 2p to recover a positive value. Borrow-fold runs               */
+/* unconditionally with `borrow` (0 or 1) multiplied into the addend; same closed-channel        */
+/* rationale as _fe_add. With inputs in [0, 2p) the borrow-path 8-limb addition always           */
+/* overflows 2^256, which exactly cancels the +2^256 from the underflow, so output stays in      */
+/* [0, 2p) without an explicit reduce step.                                                       */
 static void _fe_sub(_fe_t *r, const _fe_t *a, const _fe_t *b)
 {
     uint64_t borrow = 0;
+    uint64_t carry = 0;
     uint8_t i;
 
-    /* r = a - b */
     for (i = 0; i < 8u; i++)
     {
         uint64_t diff = (uint64_t)a->v[i] - (uint64_t)b->v[i] - borrow;
@@ -105,16 +110,12 @@ static void _fe_sub(_fe_t *r, const _fe_t *a, const _fe_t *b)
         borrow = (diff >> 63) & 1u;
     }
 
-    /* If borrow, add 2p (works since inputs are < 2p, so result + 2p is in [0, 2p)) */
-    if (borrow != 0u)
+    /* Conditionally add 2p: borrow is 0 or 1, so (borrow * 2 * _fe_p.v[i]) is the addend. */
+    for (i = 0; i < 8u; i++)
     {
-        uint64_t carry = 0;
-        for (i = 0; i < 8u; i++)
-        {
-            carry += (uint64_t)r->v[i] + (uint64_t)_fe_p.v[i] + (uint64_t)_fe_p.v[i];
-            r->v[i] = (uint32_t)carry;
-            carry >>= 32;
-        }
+        carry += (uint64_t)r->v[i] + 2u * (uint64_t)_fe_p.v[i] * borrow;
+        r->v[i] = (uint32_t)carry;
+        carry >>= 32;
     }
 }
 
@@ -148,8 +149,7 @@ static void _fe_mul(_fe_t *r, const _fe_t *a, const _fe_t *b)
         carry >>= 32;
     }
 
-    /* Carry might remain (up to ~6 bits). Fold it back: carry * 38 */
-    if (carry != 0u)
+    /* Carry might remain (up to ~6 bits). Fold unconditionally; carry == 0 leaves r unchanged. */
     {
         uint64_t c = carry * 38u;
         for (i = 0; i < 8u; i++)
@@ -180,8 +180,7 @@ static void _fe_mul_small(_fe_t *r, const _fe_t *a, uint32_t c)
         carry >>= 32;
     }
 
-    /* Fold carry back: carry * 38 mod p */
-    if (carry != 0u)
+    /* Fold carry back: carry * 38 mod p. Unconditional — carry == 0 leaves r unchanged. */
     {
         uint64_t c2 = carry * 38u;
         for (i = 0; i < 8u; i++)
@@ -242,37 +241,50 @@ static void _fe_reduce(_fe_t *a)
     }
 }
 
-/* Import from 32 little-endian bytes. Clears bit 255 per RFC 7748. */
-/* Import from 32 little-endian bytes. Clears bit 255 per RFC 7748. SSFBNFromBytesLE handles     */
-/* the byte-packing; the v[] array is limb-layout-compatible with SSFBN_t's storage since        */
-/* sizeof(uint32_t) == sizeof(SSFBNLimb_t).                                                       */
+/* Import from 32 little-endian bytes. Clears bit 255 per RFC 7748 §5: callers MUST mask the    */
+/* most-significant bit of the final byte before treating the input as a u-coordinate.           */
 static void _fe_from_bytes(_fe_t *a, const uint8_t *b)
 {
-    SSFBN_t view = { a->v, 0u, 8u };
-    (void)SSFBNFromBytesLE(&view, b, 32u, 8u);
-    a->v[7] &= 0x7FFFFFFFu; /* Clear bit 255 per RFC 7748 §5 */
+    uint8_t i;
+    for (i = 0; i < 8u; i++)
+    {
+        a->v[i] = ((uint32_t)b[i * 4u]) |
+                  ((uint32_t)b[i * 4u + 1u] << 8) |
+                  ((uint32_t)b[i * 4u + 2u] << 16) |
+                  ((uint32_t)b[i * 4u + 3u] << 24);
+    }
+    a->v[7] &= 0x7FFFFFFFu;
 }
 
 /* Export to 32 little-endian bytes. Fully reduces first. */
 static void _fe_to_bytes(uint8_t *b, const _fe_t *a)
 {
     _fe_t t;
-    SSFBN_t view;
+    uint8_t i;
     _fe_copy(&t, a);
     _fe_reduce(&t);
-    view.limbs = t.v;
-    view.len = 8u;
-    view.cap = 8u;
-    (void)SSFBNToBytesLE(&view, b, 32u);
+    for (i = 0; i < 8u; i++)
+    {
+        b[i * 4u]      = (uint8_t)(t.v[i]);
+        b[i * 4u + 1u] = (uint8_t)(t.v[i] >> 8);
+        b[i * 4u + 2u] = (uint8_t)(t.v[i] >> 16);
+        b[i * 4u + 3u] = (uint8_t)(t.v[i] >> 24);
+    }
 }
 
-/* Constant-time conditional swap: if the low bit of swap is set, exchange a and b. Delegates   */
-/* to SSFBNCondSwap; (swap & 1u) preserves the low-bit-only semantic of the original helper.    */
+/* Constant-time conditional swap: if the low bit of swap is set, exchange a and b. Mask         */
+/* construction (-(swap & 1u) cast to uint32_t) yields all-ones when bit 0 is set, all-zero      */
+/* otherwise — no compiler-emitted branch on the secret bit.                                     */
 static void _fe_cswap(_fe_t *a, _fe_t *b, uint32_t swap)
 {
-    SSFBN_t va = { a->v, 8u, 8u };
-    SSFBN_t vb = { b->v, 8u, 8u };
-    SSFBNCondSwap(&va, &vb, swap & 1u);
+    uint32_t mask = (uint32_t)(0u - (swap & 1u));
+    uint8_t i;
+    for (i = 0; i < 8u; i++)
+    {
+        uint32_t diff = (a->v[i] ^ b->v[i]) & mask;
+        a->v[i] ^= diff;
+        b->v[i] ^= diff;
+    }
 }
 
 /* r = a^(-1) mod p via Fermat's little theorem: a^(p-2) mod p.                                 */
@@ -330,6 +342,21 @@ static void _fe_inv(_fe_t *r, const _fe_t *a)
     _fe_sqr(&t1, &t1);
     _fe_sqr(&t1, &t1);
     _fe_mul(r, &t1, &t0);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Scrub the deeper-stack region used by the Montgomery ladder. The ladder has 14 _fe_t locals  */
+/* (~448 bytes) plus the clamped scalar — all derived from the secret private key. After return */
+/* those frames are freed but their bytes persist on the stack. Allocate a fresh frame at the   */
+/* same depth and overwrite it with zeros via volatile writes the compiler cannot elide. Sized   */
+/* to comfortably cover the ladder's stack footprint plus any spill slots the compiler adds.    */
+/* --------------------------------------------------------------------------------------------- */
+__attribute__((noinline))
+static void _x25519_stack_scrub(void)
+{
+    volatile uint8_t scratch[4096];
+    size_t i;
+    for (i = 0; i < sizeof(scratch); i++) scratch[i] = 0u;
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -403,8 +430,25 @@ static void _x25519_scalar_mul(uint8_t out[32], const uint8_t scalar[32],
     _fe_mul(&x_2, &x_2, &z_2);
     _fe_to_bytes(out, &x_2);
 
-    /* Zeroize sensitive stack data */
+    /* Zeroize the clamped scalar plus every _fe_t local that touched the secret. The deep-frame */
+    /* scrub below also covers compiler spill slots and any inlined helpers' locals.              */
     SSFCryptSecureZero(k, sizeof(k));
+    SSFCryptSecureZero(&x_1, sizeof(x_1));
+    SSFCryptSecureZero(&x_2, sizeof(x_2));
+    SSFCryptSecureZero(&z_2, sizeof(z_2));
+    SSFCryptSecureZero(&x_3, sizeof(x_3));
+    SSFCryptSecureZero(&z_3, sizeof(z_3));
+    SSFCryptSecureZero(&A, sizeof(A));
+    SSFCryptSecureZero(&AA, sizeof(AA));
+    SSFCryptSecureZero(&B, sizeof(B));
+    SSFCryptSecureZero(&BB, sizeof(BB));
+    SSFCryptSecureZero(&E, sizeof(E));
+    SSFCryptSecureZero(&C, sizeof(C));
+    SSFCryptSecureZero(&D, sizeof(D));
+    SSFCryptSecureZero(&DA, sizeof(DA));
+    SSFCryptSecureZero(&CB, sizeof(CB));
+    SSFCryptSecureZero(&t, sizeof(t));
+    _x25519_stack_scrub();
 }
 
 /* --------------------------------------------------------------------------------------------- */

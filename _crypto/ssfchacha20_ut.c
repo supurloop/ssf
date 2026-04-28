@@ -36,7 +36,107 @@
 #include "ssfassert.h"
 #include "ssfchacha20.h"
 
+/* Cross-validate ChaCha20 against OpenSSL on host builds where libcrypto is linked. Same    */
+/* gating pattern as ssfaesctr_ut.c. When disabled (cross builds with                         */
+/* -DSSF_CONFIG_HAVE_OPENSSL=0) the RFC 8439 test vectors above are the load-bearing          */
+/* correctness coverage.                                                                      */
+#if (SSF_CONFIG_HAVE_OPENSSL == 1) && (SSF_CONFIG_CHACHA20_UNIT_TEST == 1)
+#define SSF_CHACHA20_OSSL_VERIFY 1
+#else
+#define SSF_CHACHA20_OSSL_VERIFY 0
+#endif
+
+#if SSF_CHACHA20_OSSL_VERIFY == 1
+#include <openssl/evp.h>
+#include <openssl/rand.h>
+#endif
+
 #if SSF_CONFIG_CHACHA20_UNIT_TEST == 1
+
+#if SSF_CHACHA20_OSSL_VERIFY == 1
+
+/* --------------------------------------------------------------------------------------------- */
+/* OpenSSL cross-check helpers.                                                                  */
+/* --------------------------------------------------------------------------------------------- */
+
+/* Compute ChaCha20 via OpenSSL's EVP_chacha20. OpenSSL takes a 16-byte IV laid out as          */
+/* [counter (4 bytes little-endian) | nonce (12 bytes)] per RFC 8439.                            */
+static void _OSSLChaCha20(const uint8_t *key, const uint8_t *nonce, uint32_t counter,
+                          const uint8_t *in, uint8_t *out, size_t len)
+{
+    EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
+    uint8_t iv[16];
+    int outL = 0;
+    int outL2 = 0;
+
+    iv[0] = (uint8_t)(counter & 0xFFu);
+    iv[1] = (uint8_t)((counter >> 8) & 0xFFu);
+    iv[2] = (uint8_t)((counter >> 16) & 0xFFu);
+    iv[3] = (uint8_t)((counter >> 24) & 0xFFu);
+    memcpy(&iv[4], nonce, 12u);
+
+    SSF_ASSERT(ctx != NULL);
+    SSF_ASSERT(EVP_EncryptInit_ex(ctx, EVP_chacha20(), NULL, key, iv) == 1);
+    if (len > 0u) SSF_ASSERT(EVP_EncryptUpdate(ctx, out, &outL, in, (int)len) == 1);
+    SSF_ASSERT(EVP_EncryptFinal_ex(ctx, out + outL, &outL2) == 1);
+    SSF_ASSERT((size_t)(outL + outL2) == len);
+    EVP_CIPHER_CTX_free(ctx);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Random fuzz across (counter × len) including the block-boundary cutoffs (64-byte) and       */
+/* the counter values that test the high-bit / wrap-adjacent paths.                              */
+/* --------------------------------------------------------------------------------------------- */
+static void _VerifyChaCha20AgainstOpenSSLRandom(void)
+{
+    static const size_t lens[]        = {0u, 1u, 31u, 63u, 64u, 65u, 127u, 128u, 129u,
+                                          255u, 256u, 257u, 1023u, 1024u, 1025u, 4096u};
+    /* Keep counters far enough below 2^32 that 4096 bytes (64 blocks) cannot wrap. RFC 8439   */
+    /* doesn't define IETF ChaCha20 behavior past the 32-bit counter, and OpenSSL/SSF need not */
+    /* agree there.                                                                             */
+    static const uint32_t counters[]  = {0u, 1u, 0x12345678u, 0x7FFFFFFFu, 0xFFFFFFA0u};
+    uint8_t key[SSF_CHACHA20_KEY_SIZE];
+    uint8_t nonce[SSF_CHACHA20_NONCE_SIZE];
+    uint8_t in[4096];
+    uint8_t outSSF[4096];
+    uint8_t outOSSL[4096];
+    size_t lIdx;
+    size_t cIdx;
+    int iter;
+
+    for (lIdx = 0; lIdx < (sizeof(lens) / sizeof(lens[0])); lIdx++)
+    {
+        for (cIdx = 0; cIdx < (sizeof(counters) / sizeof(counters[0])); cIdx++)
+        {
+            for (iter = 0; iter < 5; iter++)
+            {
+                size_t len = lens[lIdx];
+                uint32_t counter = counters[cIdx];
+
+                SSF_ASSERT(RAND_bytes(key, sizeof(key)) == 1);
+                SSF_ASSERT(RAND_bytes(nonce, sizeof(nonce)) == 1);
+                if (len > 0u) SSF_ASSERT(RAND_bytes(in, (int)len) == 1);
+
+                SSFChaCha20Encrypt(in, len, key, sizeof(key), nonce, sizeof(nonce),
+                                   counter, outSSF, sizeof(outSSF));
+                _OSSLChaCha20(key, nonce, counter, in, outOSSL, len);
+                if (len > 0u) SSF_ASSERT(memcmp(outSSF, outOSSL, len) == 0);
+
+                /* In-place encrypt must produce the same output: catches a bug where the impl */
+                /* reads from out[i] before writing the keystream-XOR result.                  */
+                if (len > 0u)
+                {
+                    uint8_t buf[4096];
+                    memcpy(buf, in, len);
+                    SSFChaCha20Encrypt(buf, len, key, sizeof(key), nonce, sizeof(nonce),
+                                       counter, buf, sizeof(buf));
+                    SSF_ASSERT(memcmp(buf, outSSF, len) == 0);
+                }
+            }
+        }
+    }
+}
+#endif /* SSF_CHACHA20_OSSL_VERIFY */
 
 /* --------------------------------------------------------------------------------------------- */
 /* RFC 7539 Section 2.4.2 test vector                                                            */
@@ -131,6 +231,10 @@ void SSFChaCha20UnitTest(void)
                            big_dec, sizeof(big_dec));
         SSF_ASSERT(memcmp(big_dec, big_pt, sizeof(big_pt)) == 0);
     }
+
+#if SSF_CHACHA20_OSSL_VERIFY == 1
+    _VerifyChaCha20AgainstOpenSSLRandom();
+#endif
 }
 
 #endif /* SSF_CONFIG_CHACHA20_UNIT_TEST */

@@ -36,7 +36,194 @@
 #include "ssfassert.h"
 #include "ssfchacha20poly1305.h"
 
+/* Cross-validate ChaCha20-Poly1305 AEAD against OpenSSL on host builds where libcrypto is */
+/* linked. Same gating pattern as ssfaesctr_ut.c. When disabled (cross builds with         */
+/* -DSSF_CONFIG_HAVE_OPENSSL=0) the RFC 8439 KAT plus internal corner cases are the load-  */
+/* bearing correctness coverage.                                                             */
+#if (SSF_CONFIG_HAVE_OPENSSL == 1) && (SSF_CONFIG_CCP_UNIT_TEST == 1)
+#define SSF_CCP_OSSL_VERIFY 1
+#else
+#define SSF_CCP_OSSL_VERIFY 0
+#endif
+
+#if SSF_CCP_OSSL_VERIFY == 1
+#include <openssl/evp.h>
+#include <openssl/rand.h>
+#endif
+
 #if SSF_CONFIG_CCP_UNIT_TEST == 1
+
+#if SSF_CCP_OSSL_VERIFY == 1
+
+/* --------------------------------------------------------------------------------------------- */
+/* OpenSSL cross-check helpers.                                                                  */
+/* --------------------------------------------------------------------------------------------- */
+
+/* Encrypt + tag via OpenSSL EVP_chacha20_poly1305. */
+static void _OSSLCCPEncrypt(const uint8_t *pt, size_t ptLen,
+                            const uint8_t *iv, size_t ivLen,
+                            const uint8_t *aad, size_t aadLen,
+                            const uint8_t *key, uint8_t *tag, uint8_t *ct)
+{
+    EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
+    int outL = 0;
+    int outL2 = 0;
+
+    SSF_ASSERT(ctx != NULL);
+    SSF_ASSERT(EVP_EncryptInit_ex(ctx, EVP_chacha20_poly1305(), NULL, NULL, NULL) == 1);
+    SSF_ASSERT(EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_IVLEN, (int)ivLen, NULL) == 1);
+    SSF_ASSERT(EVP_EncryptInit_ex(ctx, NULL, NULL, key, iv) == 1);
+    if (aadLen > 0u)
+    {
+        SSF_ASSERT(EVP_EncryptUpdate(ctx, NULL, &outL, aad, (int)aadLen) == 1);
+    }
+    if (ptLen > 0u)
+    {
+        SSF_ASSERT(EVP_EncryptUpdate(ctx, ct, &outL, pt, (int)ptLen) == 1);
+        SSF_ASSERT((size_t)outL == ptLen);
+    }
+    SSF_ASSERT(EVP_EncryptFinal_ex(ctx, (ptLen > 0u) ? (ct + outL) : NULL, &outL2) == 1);
+    SSF_ASSERT(outL2 == 0);
+    SSF_ASSERT(EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_GET_TAG, SSF_CCP_TAG_SIZE, tag) == 1);
+    EVP_CIPHER_CTX_free(ctx);
+}
+
+/* Decrypt + verify via OpenSSL. */
+static bool _OSSLCCPDecrypt(const uint8_t *ct, size_t ctLen,
+                            const uint8_t *iv, size_t ivLen,
+                            const uint8_t *aad, size_t aadLen,
+                            const uint8_t *key, const uint8_t *tag, uint8_t *pt)
+{
+    EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
+    int outL = 0;
+    int rc;
+    bool ok;
+
+    SSF_ASSERT(ctx != NULL);
+    SSF_ASSERT(EVP_DecryptInit_ex(ctx, EVP_chacha20_poly1305(), NULL, NULL, NULL) == 1);
+    SSF_ASSERT(EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_IVLEN, (int)ivLen, NULL) == 1);
+    SSF_ASSERT(EVP_DecryptInit_ex(ctx, NULL, NULL, key, iv) == 1);
+    if (aadLen > 0u)
+    {
+        SSF_ASSERT(EVP_DecryptUpdate(ctx, NULL, &outL, aad, (int)aadLen) == 1);
+    }
+    if (ctLen > 0u)
+    {
+        SSF_ASSERT(EVP_DecryptUpdate(ctx, pt, &outL, ct, (int)ctLen) == 1);
+        SSF_ASSERT((size_t)outL == ctLen);
+    }
+    SSF_ASSERT(EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_TAG, SSF_CCP_TAG_SIZE, (void *)tag) == 1);
+    rc = EVP_DecryptFinal_ex(ctx, (ctLen > 0u) ? (pt + outL) : NULL, &outL);
+    ok = (rc == 1);
+    EVP_CIPHER_CTX_free(ctx);
+    return ok;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Random fuzz across (ptLen × aadLen). Each cell:                                               */
+/*   - draws fresh random key/nonce/aad/pt                                                       */
+/*   - SSF and OpenSSL encrypt; assert ct AND tag agree byte-for-byte                            */
+/*   - decrypt SSF ct via OpenSSL and OpenSSL ct via SSF; both must succeed and recover pt       */
+/*   - tamper ct[0] / aad[0] / tag[0]; both libs must reject                                     */
+/* --------------------------------------------------------------------------------------------- */
+static void _VerifyCCPAgainstOpenSSLRandom(void)
+{
+    static const size_t ptLens[]  = {0u, 1u, 15u, 16u, 17u, 31u, 32u, 33u, 63u, 64u, 65u, 100u,
+                                      256u, 1024u};
+    static const size_t aadLens[] = {0u, 1u, 15u, 16u, 17u, 64u, 100u};
+    uint8_t key[SSF_CCP_KEY_SIZE];
+    uint8_t nonce[SSF_CCP_NONCE_SIZE];
+    uint8_t aad[100];
+    uint8_t pt[1024];
+    uint8_t ctSSF[1024];
+    uint8_t ctOSSL[1024];
+    uint8_t tagSSF[SSF_CCP_TAG_SIZE];
+    uint8_t tagOSSL[SSF_CCP_TAG_SIZE];
+    uint8_t back[1024];
+    size_t pIdx;
+    size_t aIdx;
+    int iter;
+
+    for (pIdx = 0; pIdx < (sizeof(ptLens) / sizeof(ptLens[0])); pIdx++)
+    {
+        for (aIdx = 0; aIdx < (sizeof(aadLens) / sizeof(aadLens[0])); aIdx++)
+        {
+            for (iter = 0; iter < 3; iter++)
+            {
+                size_t ptLen  = ptLens[pIdx];
+                size_t aadLen = aadLens[aIdx];
+
+                SSF_ASSERT(RAND_bytes(key, sizeof(key)) == 1);
+                SSF_ASSERT(RAND_bytes(nonce, sizeof(nonce)) == 1);
+                if (aadLen > 0u) SSF_ASSERT(RAND_bytes(aad, (int)aadLen) == 1);
+                if (ptLen > 0u)  SSF_ASSERT(RAND_bytes(pt, (int)ptLen) == 1);
+
+                SSFChaCha20Poly1305Encrypt(ptLen ? pt : NULL, ptLen, nonce, sizeof(nonce),
+                                           aadLen ? aad : NULL, aadLen, key, sizeof(key),
+                                           tagSSF, sizeof(tagSSF), ctSSF, ptLen);
+                _OSSLCCPEncrypt(ptLen ? pt : NULL, ptLen, nonce, sizeof(nonce),
+                                aadLen ? aad : NULL, aadLen, key, tagOSSL, ctOSSL);
+                if (ptLen > 0u) SSF_ASSERT(memcmp(ctSSF, ctOSSL, ptLen) == 0);
+                SSF_ASSERT(memcmp(tagSSF, tagOSSL, SSF_CCP_TAG_SIZE) == 0);
+
+                /* SSF decrypts OpenSSL's ciphertext. */
+                SSF_ASSERT(SSFChaCha20Poly1305Decrypt(ctOSSL, ptLen, nonce, sizeof(nonce),
+                                                     aadLen ? aad : NULL, aadLen,
+                                                     key, sizeof(key),
+                                                     tagOSSL, sizeof(tagOSSL),
+                                                     back, ptLen) == true);
+                if (ptLen > 0u) SSF_ASSERT(memcmp(back, pt, ptLen) == 0);
+
+                /* OpenSSL decrypts SSF's ciphertext. */
+                memset(back, 0, sizeof(back));
+                SSF_ASSERT(_OSSLCCPDecrypt(ctSSF, ptLen, nonce, sizeof(nonce),
+                                           aadLen ? aad : NULL, aadLen, key, tagSSF, back) == true);
+                if (ptLen > 0u) SSF_ASSERT(memcmp(back, pt, ptLen) == 0);
+
+                /* Tamper ct: both libs must reject. */
+                if (ptLen > 0u)
+                {
+                    ctSSF[0] ^= 0x01u;
+                    SSF_ASSERT(SSFChaCha20Poly1305Decrypt(ctSSF, ptLen, nonce, sizeof(nonce),
+                                                         aadLen ? aad : NULL, aadLen,
+                                                         key, sizeof(key),
+                                                         tagSSF, sizeof(tagSSF),
+                                                         back, ptLen) == false);
+                    SSF_ASSERT(_OSSLCCPDecrypt(ctSSF, ptLen, nonce, sizeof(nonce),
+                                               aadLen ? aad : NULL, aadLen,
+                                               key, tagSSF, back) == false);
+                    ctSSF[0] ^= 0x01u;
+                }
+
+                /* Tamper aad: both libs must reject. */
+                if (aadLen > 0u)
+                {
+                    aad[0] ^= 0x01u;
+                    SSF_ASSERT(SSFChaCha20Poly1305Decrypt(ctSSF, ptLen, nonce, sizeof(nonce),
+                                                         aad, aadLen, key, sizeof(key),
+                                                         tagSSF, sizeof(tagSSF),
+                                                         back, ptLen) == false);
+                    SSF_ASSERT(_OSSLCCPDecrypt(ctSSF, ptLen, nonce, sizeof(nonce),
+                                               aad, aadLen, key, tagSSF, back) == false);
+                    aad[0] ^= 0x01u;
+                }
+
+                /* Tamper tag: both libs must reject. */
+                tagSSF[0] ^= 0x01u;
+                SSF_ASSERT(SSFChaCha20Poly1305Decrypt(ctSSF, ptLen, nonce, sizeof(nonce),
+                                                     aadLen ? aad : NULL, aadLen,
+                                                     key, sizeof(key),
+                                                     tagSSF, sizeof(tagSSF),
+                                                     back, ptLen) == false);
+                SSF_ASSERT(_OSSLCCPDecrypt(ctSSF, ptLen, nonce, sizeof(nonce),
+                                           aadLen ? aad : NULL, aadLen,
+                                           key, tagSSF, back) == false);
+                tagSSF[0] ^= 0x01u;
+            }
+        }
+    }
+}
+#endif /* SSF_CCP_OSSL_VERIFY */
 
 /* --------------------------------------------------------------------------------------------- */
 /* RFC 7539 Section 2.8.2 AEAD test vector                                                      */
@@ -163,6 +350,10 @@ void SSFChaCha20Poly1305UnitTest(void)
                                         authOnlyTag2, sizeof(authOnlyTag2), NULL, 0);
         SSF_ASSERT(!ok);
     }
+
+#if SSF_CCP_OSSL_VERIFY == 1
+    _VerifyCCPAgainstOpenSSLRandom();
+#endif
 }
 
 #endif /* SSF_CONFIG_CCP_UNIT_TEST */

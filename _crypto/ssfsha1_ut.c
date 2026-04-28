@@ -30,10 +30,92 @@
 /* NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED  */
 /* OF THE POSSIBILITY OF SUCH DAMAGE.                                                            */
 /* --------------------------------------------------------------------------------------------- */
+#include <string.h>
 #include "ssfassert.h"
 #include "ssfsha1.h"
 
+/* Cross-validate SHA-1 against OpenSSL on host builds where libcrypto is linked. Same gating */
+/* pattern as ssfaesctr_ut.c. When disabled (cross builds with -DSSF_CONFIG_HAVE_OPENSSL=0)   */
+/* the FIPS 180-1 / RFC 3174 KATs above are the load-bearing correctness coverage.            */
+#if (SSF_CONFIG_HAVE_OPENSSL == 1) && (SSF_CONFIG_SHA1_UNIT_TEST == 1)
+#define SSF_SHA1_OSSL_VERIFY 1
+#else
+#define SSF_SHA1_OSSL_VERIFY 0
+#endif
+
+#if SSF_SHA1_OSSL_VERIFY == 1
+#include <openssl/evp.h>
+#include <openssl/rand.h>
+#endif
+
 #if SSF_CONFIG_SHA1_UNIT_TEST == 1
+
+#if SSF_SHA1_OSSL_VERIFY == 1
+
+/* --------------------------------------------------------------------------------------------- */
+/* OpenSSL cross-check helpers.                                                                  */
+/* --------------------------------------------------------------------------------------------- */
+
+/* One-shot SHA-1 via EVP. */
+static void _OSSLSHA1(const uint8_t *in, size_t inLen, uint8_t out[SSF_SHA1_HASH_SIZE])
+{
+    EVP_MD_CTX *ctx = EVP_MD_CTX_new();
+    unsigned int outU = 0;
+
+    SSF_ASSERT(ctx != NULL);
+    SSF_ASSERT(EVP_DigestInit_ex(ctx, EVP_sha1(), NULL) == 1);
+    if (inLen > 0u) SSF_ASSERT(EVP_DigestUpdate(ctx, in, inLen) == 1);
+    SSF_ASSERT(EVP_DigestFinal_ex(ctx, out, &outU) == 1);
+    SSF_ASSERT(outU == SSF_SHA1_HASH_SIZE);
+    EVP_MD_CTX_free(ctx);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Random fuzz across length × split combinations. Each cell:                                    */
+/*   - draws a fresh random message                                                              */
+/*   - hashes it via SSFSHA1 one-shot AND via SSFSHA1Begin/Update/End with a mid-message split   */
+/*   - compares both to OpenSSL's EVP_sha1                                                       */
+/* The lengths span the 64-byte block boundary and the 55/56-byte padding-overflow boundary —   */
+/* the bug class this catches that the fixed RFC 3174 KATs would miss.                           */
+/* --------------------------------------------------------------------------------------------- */
+static void _VerifySHA1AgainstOpenSSLRandom(void)
+{
+    static const size_t lens[] = {0u, 1u, 31u, 54u, 55u, 56u, 57u, 63u, 64u, 65u, 119u, 120u,
+                                  127u, 128u, 129u, 191u, 192u, 256u, 1024u, 4096u};
+    uint8_t msg[4096];
+    uint8_t hashSSF[SSF_SHA1_HASH_SIZE];
+    uint8_t hashSSFInc[SSF_SHA1_HASH_SIZE];
+    uint8_t hashOSSL[SSF_SHA1_HASH_SIZE];
+    size_t lIdx;
+    int iter;
+
+    for (lIdx = 0; lIdx < (sizeof(lens) / sizeof(lens[0])); lIdx++)
+    {
+        for (iter = 0; iter < 10; iter++)
+        {
+            size_t len = lens[lIdx];
+            SSFSHA1Context_t ctx;
+
+            if (len > 0u) SSF_ASSERT(RAND_bytes(msg, (int)len) == 1);
+
+            SSFSHA1(len ? msg : NULL, (uint32_t)len, hashSSF);
+            _OSSLSHA1(msg, len, hashOSSL);
+            SSF_ASSERT(memcmp(hashSSF, hashOSSL, SSF_SHA1_HASH_SIZE) == 0);
+
+            /* Incremental: feed first half then second half. Catches a bug where Update fails */
+            /* to span the 64-byte block boundary correctly when called multiple times.        */
+            SSFSHA1Begin(&ctx);
+            if (len > 0u)
+            {
+                SSFSHA1Update(&ctx, msg, (uint32_t)(len / 2u));
+                SSFSHA1Update(&ctx, &msg[len / 2u], (uint32_t)(len - len / 2u));
+            }
+            SSFSHA1End(&ctx, hashSSFInc);
+            SSF_ASSERT(memcmp(hashSSFInc, hashOSSL, SSF_SHA1_HASH_SIZE) == 0);
+        }
+    }
+}
+#endif /* SSF_SHA1_OSSL_VERIFY */
 
 void SSFSHA1UnitTest(void)
 {
@@ -193,5 +275,9 @@ void SSFSHA1UnitTest(void)
             SSF_ASSERT(allZero == false);
         }
     }
+
+#if SSF_SHA1_OSSL_VERIFY == 1
+    _VerifySHA1AgainstOpenSSLRandom();
+#endif
 }
 #endif /* SSF_CONFIG_SHA1_UNIT_TEST */

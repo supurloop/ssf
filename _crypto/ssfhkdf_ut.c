@@ -30,10 +30,180 @@
 /* NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED  */
 /* OF THE POSSIBILITY OF SUCH DAMAGE.                                                            */
 /* --------------------------------------------------------------------------------------------- */
+#include <string.h>
 #include "ssfassert.h"
 #include "ssfhkdf.h"
+#include "ssfhmac.h"
+
+/* Cross-validate HKDF against OpenSSL on host builds where libcrypto is linked. Same gating */
+/* pattern as ssfaesctr_ut.c. When disabled (cross builds with -DSSF_CONFIG_HAVE_OPENSSL=0)  */
+/* the RFC 5869 KATs above are the load-bearing correctness coverage.                         */
+#if (SSF_CONFIG_HAVE_OPENSSL == 1) && (SSF_CONFIG_HKDF_UNIT_TEST == 1)
+#define SSF_HKDF_OSSL_VERIFY 1
+#else
+#define SSF_HKDF_OSSL_VERIFY 0
+#endif
+
+#if SSF_HKDF_OSSL_VERIFY == 1
+#include <openssl/evp.h>
+#include <openssl/kdf.h>
+#include <openssl/rand.h>
+#include <openssl/params.h>
+#endif
 
 #if SSF_CONFIG_HKDF_UNIT_TEST == 1
+
+#if SSF_HKDF_OSSL_VERIFY == 1
+
+/* --------------------------------------------------------------------------------------------- */
+/* OpenSSL cross-check helpers.                                                                  */
+/* --------------------------------------------------------------------------------------------- */
+
+/* Map SSFHMACHash_t to the OpenSSL digest name. */
+static const char *_OSSLHKDFDigestName(SSFHMACHash_t h)
+{
+    switch (h)
+    {
+        case SSF_HMAC_HASH_SHA1:   return "SHA1";
+        case SSF_HMAC_HASH_SHA256: return "SHA256";
+        case SSF_HMAC_HASH_SHA384: return "SHA384";
+        case SSF_HMAC_HASH_SHA512: return "SHA512";
+        default: SSF_ASSERT(0); return NULL;
+    }
+}
+
+/* Drive OpenSSL's EVP_KDF("HKDF") in one of three modes. okmLen is the requested output length. */
+static void _OSSLHKDF(const char *mode, SSFHMACHash_t h,
+                      const uint8_t *salt, size_t saltLen,
+                      const uint8_t *key, size_t keyLen,
+                      const uint8_t *info, size_t infoLen,
+                      uint8_t *okm, size_t okmLen)
+{
+    EVP_KDF *kdf = EVP_KDF_fetch(NULL, "HKDF", NULL);
+    EVP_KDF_CTX *ctx;
+    OSSL_PARAM params[6];
+    size_t pIdx = 0;
+    char digestName[16];
+
+    SSF_ASSERT(kdf != NULL);
+    ctx = EVP_KDF_CTX_new(kdf);
+    SSF_ASSERT(ctx != NULL);
+
+    /* OSSL_PARAM_construct_utf8_string takes a writable char* in OpenSSL 3.0; copy to a local. */
+    {
+        const char *src = _OSSLHKDFDigestName(h);
+        size_t i = 0;
+        while (src[i] != '\0' && i + 1u < sizeof(digestName)) { digestName[i] = src[i]; i++; }
+        digestName[i] = '\0';
+    }
+
+    params[pIdx++] = OSSL_PARAM_construct_utf8_string("mode", (char *)mode, 0);
+    params[pIdx++] = OSSL_PARAM_construct_utf8_string("digest", digestName, 0);
+    params[pIdx++] = OSSL_PARAM_construct_octet_string("key", (void *)key, keyLen);
+    if (saltLen > 0u)
+    {
+        params[pIdx++] = OSSL_PARAM_construct_octet_string("salt", (void *)salt, saltLen);
+    }
+    if (infoLen > 0u)
+    {
+        params[pIdx++] = OSSL_PARAM_construct_octet_string("info", (void *)info, infoLen);
+    }
+    params[pIdx++] = OSSL_PARAM_construct_end();
+
+    SSF_ASSERT(EVP_KDF_derive(ctx, okm, okmLen, params) == 1);
+
+    EVP_KDF_CTX_free(ctx);
+    EVP_KDF_free(kdf);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Random fuzz across (hash × saltLen × ikmLen × infoLen × okmLen). Each cell drives:           */
+/*   - SSFHKDFExtract  vs OpenSSL "EXTRACT_ONLY"                                                 */
+/*   - SSFHKDFExpand   vs OpenSSL "EXPAND_ONLY" (using the SSF-derived PRK as the "key")         */
+/*   - SSFHKDF         vs OpenSSL "EXTRACT_AND_EXPAND"                                           */
+/* okmLens span the 1-, multi-block, and last-partial-block paths plus the per-hash maximum     */
+/* (255 * hashSize) edge cases via large requests.                                              */
+/* --------------------------------------------------------------------------------------------- */
+static void _VerifyHKDFAgainstOpenSSLRandom(void)
+{
+    static const SSFHMACHash_t hashes[] = {
+        SSF_HMAC_HASH_SHA1, SSF_HMAC_HASH_SHA256,
+        SSF_HMAC_HASH_SHA384, SSF_HMAC_HASH_SHA512
+    };
+    static const size_t saltLens[] = {0u, 1u, 16u, 32u, 100u};
+    static const size_t ikmLens[]  = {1u, 16u, 32u, 100u};
+    static const size_t infoLens[] = {0u, 1u, 16u, 100u};
+    static const size_t okmLens[]  = {1u, 16u, 32u, 33u, 64u, 65u, 100u, 1024u};
+    uint8_t salt[100];
+    uint8_t ikm[100];
+    uint8_t info[100];
+    uint8_t prkSSF[64];
+    uint8_t prkOSSL[64];
+    uint8_t okmSSF[1024];
+    uint8_t okmOSSL[1024];
+    size_t hIdx;
+    size_t sIdx;
+    size_t iIdx;
+    size_t fIdx;
+    size_t oIdx;
+
+    for (hIdx = 0; hIdx < (sizeof(hashes) / sizeof(hashes[0])); hIdx++)
+    {
+        size_t hashSize = SSFHMACGetHashSize(hashes[hIdx]);
+
+        for (sIdx = 0; sIdx < (sizeof(saltLens) / sizeof(saltLens[0])); sIdx++)
+        {
+            for (iIdx = 0; iIdx < (sizeof(ikmLens) / sizeof(ikmLens[0])); iIdx++)
+            {
+                for (fIdx = 0; fIdx < (sizeof(infoLens) / sizeof(infoLens[0])); fIdx++)
+                {
+                    for (oIdx = 0; oIdx < (sizeof(okmLens) / sizeof(okmLens[0])); oIdx++)
+                    {
+                        size_t saltLen = saltLens[sIdx];
+                        size_t ikmLen  = ikmLens[iIdx];
+                        size_t infoLen = infoLens[fIdx];
+                        size_t okmLen  = okmLens[oIdx];
+
+                        if (saltLen > 0u) SSF_ASSERT(RAND_bytes(salt, (int)saltLen) == 1);
+                        SSF_ASSERT(RAND_bytes(ikm, (int)ikmLen) == 1);
+                        if (infoLen > 0u) SSF_ASSERT(RAND_bytes(info, (int)infoLen) == 1);
+
+                        /* Extract: SSF vs OpenSSL EXTRACT_ONLY. */
+                        SSF_ASSERT(SSFHKDFExtract(hashes[hIdx],
+                                                  saltLen ? salt : NULL, saltLen,
+                                                  ikm, ikmLen, prkSSF, hashSize) == true);
+                        _OSSLHKDF("EXTRACT_ONLY", hashes[hIdx],
+                                  saltLen ? salt : NULL, saltLen,
+                                  ikm, ikmLen, NULL, 0u, prkOSSL, hashSize);
+                        SSF_ASSERT(memcmp(prkSSF, prkOSSL, hashSize) == 0);
+
+                        /* Expand: SSF vs OpenSSL EXPAND_ONLY (use SSF's PRK as the "key"). */
+                        SSF_ASSERT(SSFHKDFExpand(hashes[hIdx], prkSSF, hashSize,
+                                                 infoLen ? info : NULL, infoLen,
+                                                 okmSSF, okmLen) == true);
+                        _OSSLHKDF("EXPAND_ONLY", hashes[hIdx],
+                                  NULL, 0u, prkSSF, hashSize,
+                                  infoLen ? info : NULL, infoLen, okmOSSL, okmLen);
+                        SSF_ASSERT(memcmp(okmSSF, okmOSSL, okmLen) == 0);
+
+                        /* Full HKDF: SSF vs OpenSSL EXTRACT_AND_EXPAND. */
+                        SSF_ASSERT(SSFHKDF(hashes[hIdx],
+                                           saltLen ? salt : NULL, saltLen,
+                                           ikm, ikmLen,
+                                           infoLen ? info : NULL, infoLen,
+                                           okmSSF, okmLen) == true);
+                        _OSSLHKDF("EXTRACT_AND_EXPAND", hashes[hIdx],
+                                  saltLen ? salt : NULL, saltLen,
+                                  ikm, ikmLen,
+                                  infoLen ? info : NULL, infoLen, okmOSSL, okmLen);
+                        SSF_ASSERT(memcmp(okmSSF, okmOSSL, okmLen) == 0);
+                    }
+                }
+            }
+        }
+    }
+}
+#endif /* SSF_HKDF_OSSL_VERIFY */
 
 void SSFHKDFUnitTest(void)
 {
@@ -235,5 +405,9 @@ void SSFHKDFUnitTest(void)
         SSF_ASSERT(SSFHKDFExpand(SSF_HMAC_HASH_SHA256, prk, sizeof(prk), NULL, 0,
                    prk, 0) == true);
     }
+
+#if SSF_HKDF_OSSL_VERIFY == 1
+    _VerifyHKDFAgainstOpenSSLRandom();
+#endif
 }
 #endif /* SSF_CONFIG_HKDF_UNIT_TEST */

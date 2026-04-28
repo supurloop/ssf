@@ -36,7 +36,99 @@
 #include "ssfassert.h"
 #include "ssfpoly1305.h"
 
+/* Cross-validate Poly1305 against OpenSSL on host builds where libcrypto is linked. Same      */
+/* gating pattern as ssfaesctr_ut.c. When disabled (cross builds with                          */
+/* -DSSF_CONFIG_HAVE_OPENSSL=0) the RFC 8439 KAT plus internal corner cases are the load-      */
+/* bearing correctness coverage.                                                                */
+#if (SSF_CONFIG_HAVE_OPENSSL == 1) && (SSF_CONFIG_POLY1305_UNIT_TEST == 1)
+#define SSF_POLY1305_OSSL_VERIFY 1
+#else
+#define SSF_POLY1305_OSSL_VERIFY 0
+#endif
+
+#if SSF_POLY1305_OSSL_VERIFY == 1
+#include <openssl/evp.h>
+#include <openssl/rand.h>
+#include <openssl/params.h>
+#endif
+
 #if SSF_CONFIG_POLY1305_UNIT_TEST == 1
+
+#if SSF_POLY1305_OSSL_VERIFY == 1
+
+/* --------------------------------------------------------------------------------------------- */
+/* OpenSSL cross-check helpers.                                                                  */
+/* --------------------------------------------------------------------------------------------- */
+
+/* One-shot Poly1305 via OpenSSL's EVP_MAC ("POLY1305" provider). */
+static void _OSSLPoly1305(const uint8_t key[SSF_POLY1305_KEY_SIZE],
+                          const uint8_t *msg, size_t msgLen,
+                          uint8_t tag[SSF_POLY1305_TAG_SIZE])
+{
+    EVP_MAC *mac = EVP_MAC_fetch(NULL, "POLY1305", NULL);
+    EVP_MAC_CTX *ctx;
+    OSSL_PARAM params[2];
+    size_t outL = 0;
+
+    SSF_ASSERT(mac != NULL);
+    ctx = EVP_MAC_CTX_new(mac);
+    SSF_ASSERT(ctx != NULL);
+
+    params[0] = OSSL_PARAM_construct_octet_string("key", (void *)key, SSF_POLY1305_KEY_SIZE);
+    params[1] = OSSL_PARAM_construct_end();
+    SSF_ASSERT(EVP_MAC_init(ctx, NULL, 0u, params) == 1);
+    if (msgLen > 0u) SSF_ASSERT(EVP_MAC_update(ctx, msg, msgLen) == 1);
+    SSF_ASSERT(EVP_MAC_final(ctx, tag, &outL, SSF_POLY1305_TAG_SIZE) == 1);
+    SSF_ASSERT(outL == SSF_POLY1305_TAG_SIZE);
+
+    EVP_MAC_CTX_free(ctx);
+    EVP_MAC_free(mac);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Random fuzz across message lengths spanning the 16-byte Poly1305 block boundary plus the    */
+/* multi-block / partial-final-block paths. Each cell hashes via SSF one-shot AND incremental   */
+/* (mid-message split) and compares both against OpenSSL.                                        */
+/* --------------------------------------------------------------------------------------------- */
+static void _VerifyPoly1305AgainstOpenSSLRandom(void)
+{
+    static const size_t lens[] = {0u, 1u, 15u, 16u, 17u, 31u, 32u, 33u, 63u, 64u, 65u, 127u, 128u,
+                                  129u, 256u, 1024u, 4096u};
+    uint8_t key[SSF_POLY1305_KEY_SIZE];
+    uint8_t msg[4096];
+    uint8_t tagSSF[SSF_POLY1305_TAG_SIZE];
+    uint8_t tagSSFInc[SSF_POLY1305_TAG_SIZE];
+    uint8_t tagOSSL[SSF_POLY1305_TAG_SIZE];
+    size_t lIdx;
+    int iter;
+
+    for (lIdx = 0; lIdx < (sizeof(lens) / sizeof(lens[0])); lIdx++)
+    {
+        for (iter = 0; iter < 10; iter++)
+        {
+            size_t len = lens[lIdx];
+            SSFPoly1305Context_t ctx;
+
+            SSF_ASSERT(RAND_bytes(key, sizeof(key)) == 1);
+            if (len > 0u) SSF_ASSERT(RAND_bytes(msg, (int)len) == 1);
+
+            SSFPoly1305Mac(len ? msg : NULL, len, key, sizeof(key), tagSSF, sizeof(tagSSF));
+            _OSSLPoly1305(key, msg, len, tagOSSL);
+            SSF_ASSERT(memcmp(tagSSF, tagOSSL, SSF_POLY1305_TAG_SIZE) == 0);
+
+            /* Incremental: feed first half then second half. */
+            SSFPoly1305Begin(&ctx, key, sizeof(key));
+            if (len > 0u)
+            {
+                SSFPoly1305Update(&ctx, msg, len / 2u);
+                SSFPoly1305Update(&ctx, &msg[len / 2u], len - len / 2u);
+            }
+            SSFPoly1305End(&ctx, tagSSFInc, sizeof(tagSSFInc));
+            SSF_ASSERT(memcmp(tagSSFInc, tagOSSL, SSF_POLY1305_TAG_SIZE) == 0);
+        }
+    }
+}
+#endif /* SSF_POLY1305_OSSL_VERIFY */
 
 /* --------------------------------------------------------------------------------------------- */
 /* RFC 7539 Section 2.5.2 test vector                                                            */
@@ -147,6 +239,10 @@ void SSFPoly1305UnitTest(void)
             SSF_ASSERT(memcmp(emptyStreamTag, emptyOneShotTag, sizeof(emptyStreamTag)) == 0);
         }
     }
+
+#if SSF_POLY1305_OSSL_VERIFY == 1
+    _VerifyPoly1305AgainstOpenSSLRandom();
+#endif
 }
 
 #endif /* SSF_CONFIG_POLY1305_UNIT_TEST */

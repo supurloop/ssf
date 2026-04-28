@@ -31,10 +31,202 @@
 /* --------------------------------------------------------------------------------------------- */
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 #include "ssfsha2.h"
 #include "ssfassert.h"
 
+/* Cross-validate SHA-2 against OpenSSL on host builds where libcrypto is linked. Same gating */
+/* pattern as ssfaesctr_ut.c. When disabled (cross builds with -DSSF_CONFIG_HAVE_OPENSSL=0)   */
+/* the FIPS 180-4 / NIST CAVS Monte-Carlo KATs above are the load-bearing correctness         */
+/* coverage.                                                                                   */
+#if (SSF_CONFIG_HAVE_OPENSSL == 1) && (SSF_CONFIG_SHA2_UNIT_TEST == 1)
+#define SSF_SHA2_OSSL_VERIFY 1
+#else
+#define SSF_SHA2_OSSL_VERIFY 0
+#endif
+
+#if SSF_SHA2_OSSL_VERIFY == 1
+#include <openssl/evp.h>
+#include <openssl/rand.h>
+#endif
+
 #if SSF_CONFIG_SHA2_UNIT_TEST == 1
+
+#if SSF_SHA2_OSSL_VERIFY == 1
+
+/* --------------------------------------------------------------------------------------------- */
+/* OpenSSL cross-check helpers.                                                                  */
+/* --------------------------------------------------------------------------------------------- */
+
+/* Tag for one of the SHA-2 variants. */
+typedef enum {
+    _SHA2_VAR_224 = 0,
+    _SHA2_VAR_256,
+    _SHA2_VAR_384,
+    _SHA2_VAR_512,
+    _SHA2_VAR_512_224,
+    _SHA2_VAR_512_256,
+    _SHA2_VAR_COUNT
+} _SHA2Variant_t;
+
+/* Map variant tag to (EVP_MD, output size, descriptive label, block size). */
+static const EVP_MD *_OSSLSHA2Md(_SHA2Variant_t v)
+{
+    switch (v)
+    {
+        case _SHA2_VAR_224:     return EVP_sha224();
+        case _SHA2_VAR_256:     return EVP_sha256();
+        case _SHA2_VAR_384:     return EVP_sha384();
+        case _SHA2_VAR_512:     return EVP_sha512();
+        case _SHA2_VAR_512_224: return EVP_sha512_224();
+        case _SHA2_VAR_512_256: return EVP_sha512_256();
+        default: SSF_ASSERT(0); return NULL;
+    }
+}
+
+static size_t _SHA2HashSize(_SHA2Variant_t v)
+{
+    switch (v)
+    {
+        case _SHA2_VAR_224:     return SSF_SHA2_224_BYTE_SIZE;
+        case _SHA2_VAR_256:     return SSF_SHA2_256_BYTE_SIZE;
+        case _SHA2_VAR_384:     return SSF_SHA2_384_BYTE_SIZE;
+        case _SHA2_VAR_512:     return SSF_SHA2_512_BYTE_SIZE;
+        case _SHA2_VAR_512_224: return SSF_SHA2_512_224_BYTE_SIZE;
+        case _SHA2_VAR_512_256: return SSF_SHA2_512_256_BYTE_SIZE;
+        default: SSF_ASSERT(0); return 0;
+    }
+}
+
+/* Drive the SSF one-shot for a given variant. */
+static void _SSFSHA2OneShot(_SHA2Variant_t v, const uint8_t *in, size_t inLen,
+                            uint8_t *out, size_t outSize)
+{
+    switch (v)
+    {
+        case _SHA2_VAR_224:     SSFSHA224((uint8_t *)in, (uint32_t)inLen, out, (uint32_t)outSize); break;
+        case _SHA2_VAR_256:     SSFSHA256((uint8_t *)in, (uint32_t)inLen, out, (uint32_t)outSize); break;
+        case _SHA2_VAR_384:     SSFSHA384((uint8_t *)in, (uint32_t)inLen, out, (uint32_t)outSize); break;
+        case _SHA2_VAR_512:     SSFSHA512((uint8_t *)in, (uint32_t)inLen, out, (uint32_t)outSize); break;
+        case _SHA2_VAR_512_224: SSFSHA512_224((uint8_t *)in, (uint32_t)inLen, out, (uint32_t)outSize); break;
+        case _SHA2_VAR_512_256: SSFSHA512_256((uint8_t *)in, (uint32_t)inLen, out, (uint32_t)outSize); break;
+        default: SSF_ASSERT(0); break;
+    }
+}
+
+/* Drive the SSF incremental path with a mid-message split. Catches bugs where Update fails to */
+/* span the 64- or 128-byte block boundary correctly when called multiple times.                */
+static void _SSFSHA2Incremental(_SHA2Variant_t v, const uint8_t *in, size_t inLen,
+                                uint8_t *out, size_t outSize)
+{
+    SSFSHA2_32Context_t c32;
+    SSFSHA2_64Context_t c64;
+    size_t mid = inLen / 2u;
+
+    switch (v)
+    {
+        case _SHA2_VAR_224:
+            SSFSHA224Begin(&c32);
+            if (inLen > 0u) { SSFSHA224Update(&c32, in, (uint32_t)mid);
+                              SSFSHA224Update(&c32, &in[mid], (uint32_t)(inLen - mid)); }
+            SSFSHA224End(&c32, out, (uint32_t)outSize);
+            break;
+        case _SHA2_VAR_256:
+            SSFSHA256Begin(&c32);
+            if (inLen > 0u) { SSFSHA256Update(&c32, in, (uint32_t)mid);
+                              SSFSHA256Update(&c32, &in[mid], (uint32_t)(inLen - mid)); }
+            SSFSHA256End(&c32, out, (uint32_t)outSize);
+            break;
+        case _SHA2_VAR_384:
+            SSFSHA384Begin(&c64);
+            if (inLen > 0u) { SSFSHA384Update(&c64, in, (uint32_t)mid);
+                              SSFSHA384Update(&c64, &in[mid], (uint32_t)(inLen - mid)); }
+            SSFSHA384End(&c64, out, (uint32_t)outSize);
+            break;
+        case _SHA2_VAR_512:
+            SSFSHA512Begin(&c64);
+            if (inLen > 0u) { SSFSHA512Update(&c64, in, (uint32_t)mid);
+                              SSFSHA512Update(&c64, &in[mid], (uint32_t)(inLen - mid)); }
+            SSFSHA512End(&c64, out, (uint32_t)outSize);
+            break;
+        case _SHA2_VAR_512_224:
+            SSFSHA512_224Begin(&c64);
+            if (inLen > 0u) { SSFSHA512_224Update(&c64, in, (uint32_t)mid);
+                              SSFSHA512_224Update(&c64, &in[mid], (uint32_t)(inLen - mid)); }
+            SSFSHA512_224End(&c64, out, (uint32_t)outSize);
+            break;
+        case _SHA2_VAR_512_256:
+            SSFSHA512_256Begin(&c64);
+            if (inLen > 0u) { SSFSHA512_256Update(&c64, in, (uint32_t)mid);
+                              SSFSHA512_256Update(&c64, &in[mid], (uint32_t)(inLen - mid)); }
+            SSFSHA512_256End(&c64, out, (uint32_t)outSize);
+            break;
+        default: SSF_ASSERT(0); break;
+    }
+}
+
+/* One-shot SHA-2 via EVP. */
+static void _OSSLSHA2(_SHA2Variant_t v, const uint8_t *in, size_t inLen,
+                      uint8_t *out, size_t outSize)
+{
+    EVP_MD_CTX *ctx = EVP_MD_CTX_new();
+    unsigned int outU = 0;
+
+    SSF_ASSERT(ctx != NULL);
+    SSF_ASSERT(EVP_DigestInit_ex(ctx, _OSSLSHA2Md(v), NULL) == 1);
+    if (inLen > 0u) SSF_ASSERT(EVP_DigestUpdate(ctx, in, inLen) == 1);
+    SSF_ASSERT(EVP_DigestFinal_ex(ctx, out, &outU) == 1);
+    SSF_ASSERT((size_t)outU == outSize);
+    EVP_MD_CTX_free(ctx);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Random fuzz across (variant × len). Lengths span both the 64-byte (SHA-224/256) and 128-byte */
+/* (SHA-384/512/512-224/512-256) block boundaries plus the corresponding padding-overflow       */
+/* cutoffs (55/56 and 111/112), where padding-handling bugs typically surface.                  */
+/* --------------------------------------------------------------------------------------------- */
+static void _VerifySHA2AgainstOpenSSLRandom(void)
+{
+    static const _SHA2Variant_t variants[] = {
+        _SHA2_VAR_224, _SHA2_VAR_256, _SHA2_VAR_384,
+        _SHA2_VAR_512, _SHA2_VAR_512_224, _SHA2_VAR_512_256
+    };
+    static const size_t lens[] = {0u, 1u, 31u, 54u, 55u, 56u, 57u, 63u, 64u, 65u, 95u, 110u, 111u,
+                                  112u, 113u, 119u, 120u, 127u, 128u, 129u, 191u, 192u, 256u,
+                                  1024u, 4096u};
+    uint8_t msg[4096];
+    uint8_t hashSSF[SSF_SHA2_512_BYTE_SIZE];
+    uint8_t hashSSFInc[SSF_SHA2_512_BYTE_SIZE];
+    uint8_t hashOSSL[SSF_SHA2_512_BYTE_SIZE];
+    size_t vIdx;
+    size_t lIdx;
+    int iter;
+
+    for (vIdx = 0; vIdx < (sizeof(variants) / sizeof(variants[0])); vIdx++)
+    {
+        size_t hashSize = _SHA2HashSize(variants[vIdx]);
+
+        for (lIdx = 0; lIdx < (sizeof(lens) / sizeof(lens[0])); lIdx++)
+        {
+            for (iter = 0; iter < 5; iter++)
+            {
+                size_t len = lens[lIdx];
+
+                if (len > 0u) SSF_ASSERT(RAND_bytes(msg, (int)len) == 1);
+
+                /* SSFSHA2_32/_64 one-shots reject NULL `in` even at inLen == 0, unlike the    */
+                /* incremental Update path. Always pass a valid pointer; the bytes go unused.  */
+                _SSFSHA2OneShot(variants[vIdx], msg, len, hashSSF, hashSize);
+                _OSSLSHA2(variants[vIdx], msg, len, hashOSSL, hashSize);
+                SSF_ASSERT(memcmp(hashSSF, hashOSSL, hashSize) == 0);
+
+                _SSFSHA2Incremental(variants[vIdx], msg, len, hashSSFInc, hashSize);
+                SSF_ASSERT(memcmp(hashSSFInc, hashOSSL, hashSize) == 0);
+            }
+        }
+    }
+}
+#endif /* SSF_SHA2_OSSL_VERIFY */
 
 static const uint8_t *_sha224MonteUT[] =
 {
@@ -692,5 +884,9 @@ void SSFSHA2UnitTest(void)
                             "\x96\xfd\x15\xc1\x3b\x1b\x07\xf9\xaa\x1d\x3b\xea\x57\x78\x9c\xa0"
                             "\x31\xad\x85\xc7\xa7\x1d\xd7\x03\x54\xec\x63\x12\x38\xca\x34\x45",
                       SSF_SHA2_512_BYTE_SIZE) == 0);
+
+#if SSF_SHA2_OSSL_VERIFY == 1
+    _VerifySHA2AgainstOpenSSLRandom();
+#endif
 }
 #endif /* SSF_CONFIG_SHA2_UNIT_TEST */

@@ -91,8 +91,6 @@ extern "C" {
 /* --------------------------------------------------------------------------------------------- */
 /* Compile-time validation                                                                       */
 /* --------------------------------------------------------------------------------------------- */
-/* The minimum is 2 × the curve operand width because SSFBNModMulNIST routes through SSFBNMul,   */
-/* whose intermediate product occupies 2N limbs and is gated by SSF_BN_MAX_LIMBS.                */
 #if SSF_EC_CONFIG_ENABLE_P256 == 1
 #if SSF_BN_CONFIG_MAX_BITS < 512
 #error SSF_BN_CONFIG_MAX_BITS must be >= 512 for P-256 support (2 x 256-bit operand).
@@ -104,20 +102,6 @@ extern "C" {
 #error SSF_BN_CONFIG_MAX_BITS must be >= 768 for P-384 support (2 x 384-bit operand).
 #endif
 #endif
-
-/* --------------------------------------------------------------------------------------------- */
-/* Limitations                                                                                   */
-/* --------------------------------------------------------------------------------------------- */
-/* At least one curve must be enabled via SSF_EC_CONFIG_ENABLE_P256 or SSF_EC_CONFIG_ENABLE_P384 */
-/* in ssfoptions.h.                                                                              */
-/* Scalar multiplication uses a Montgomery ladder for constant-time execution. The edge case of  */
-/* identity input handling may leak timing for the first few scalar bits; this is not exploitable */
-/* for properly generated random scalars.                                                        */
-/* SSFECScalarMulDual is NOT constant-time; it is intended for ECDSA verify where both scalars   */
-/* are derived from public data.                                                                 */
-/* Stack usage scales with SSF_BN_CONFIG_MAX_BITS. For ECC-only applications, set                */
-/* SSF_BN_CONFIG_MAX_BITS to 512 (P-256-only) or 768 (P-384) to minimize stack usage.            */
-/* --------------------------------------------------------------------------------------------- */
 
 /* --------------------------------------------------------------------------------------------- */
 /* Defines and typedefs                                                                          */
@@ -132,9 +116,7 @@ extern "C" {
 
 #define SSF_EC_MAX_ENCODED_SIZE (1u + 2u * SSF_EC_MAX_COORD_BYTES)
 
-/* Widest ECC scalar / field element in limbs, derived from the enabled-curves configuration.    */
-/* Use as the SSFBN_DEFINE `limbs` argument in ECC-only code — at `SSF_BN_CONFIG_MAX_BITS = 4096` */
-/* every ECC SSFBN_t drops from 516 B to 56 B (P-384) or 40 B (P-256-only) under Phase 2.        */
+/* Widest ECC scalar / field element in limbs, derived from the enabled-curves configuration. */
 #define SSF_EC_MAX_LIMBS (SSF_EC_MAX_COORD_BYTES / 4u)
 
 /* Curve selection */
@@ -154,9 +136,7 @@ typedef struct SSFECPoint
     SSFBN_t z;
 } SSFECPoint_t;
 
-/* Declare an SSFECPoint_t backed by three fresh zero-initialized SSFBNLimb_t arrays (one per    */
-/* coordinate), each of capacity `nlimbs`. Use SSF_EC_MAX_LIMBS for curve-generic ECC code;      */
-/* narrower caps are valid once the curve is known at compile time.                              */
+/* Declares an SSFECPoint_t backed by three zero-initialized SSFBNLimb_t arrays (X, Y, Z). */
 #define SSFECPOINT_DEFINE(name, nlimbs) \
     SSFBNLimb_t name##_x_storage[(nlimbs)] = {0u}; \
     SSFBNLimb_t name##_y_storage[(nlimbs)] = {0u}; \
@@ -183,77 +163,33 @@ typedef struct SSFECCurveParams
 /* --------------------------------------------------------------------------------------------- */
 /* External interface                                                                            */
 /* --------------------------------------------------------------------------------------------- */
-
-/* Returns curve parameters for the given curve. Returns NULL if curve is not enabled.           */
 const SSFECCurveParams_t *SSFECGetCurveParams(SSFECCurve_t curve);
-
-/* Set point to identity (0, 1, 0) with the curve's working limb count.                         */
 void SSFECPointSetIdentity(SSFECPoint_t *pt, SSFECCurve_t curve);
-
-/* Returns true if point is identity (Z == 0).                                                   */
 bool SSFECPointIsIdentity(const SSFECPoint_t *pt);
-
-/* Set Jacobian point from affine coordinates (x, y). Sets Z = 1.                               */
 void SSFECPointFromAffine(SSFECPoint_t *pt, const SSFBN_t *x, const SSFBN_t *y,
                           SSFECCurve_t curve);
-
-/* Convert Jacobian point to affine (x, y). Returns false if point is identity.                  */
 bool SSFECPointToAffine(SSFBN_t *x, SSFBN_t *y, const SSFECPoint_t *pt, SSFECCurve_t curve);
-
-/* Returns true if point lies on the curve y^2 = x^3 + ax + b (mod p).                          */
 bool SSFECPointOnCurve(const SSFECPoint_t *pt, SSFECCurve_t curve);
-
-/* Full point validation for untrusted input: on-curve, not identity, coordinates in range.      */
 bool SSFECPointValidate(const SSFECPoint_t *pt, SSFECCurve_t curve);
-
-/* Encode point in SEC 1 uncompressed format: 0x04 || X || Y.                                   */
-/* Returns false if outSize is too small. outLen receives actual encoded length.                  */
-bool SSFECPointEncode(const SSFECPoint_t *pt, SSFECCurve_t curve,
-                      uint8_t *out, size_t outSize, size_t *outLen);
-
-/* Decode SEC 1 uncompressed point. Validates the decoded point. Returns false on any failure.   */
-bool SSFECPointDecode(SSFECPoint_t *pt, SSFECCurve_t curve,
-                      const uint8_t *data, size_t dataLen);
-
-/* Point addition: r = p + q (Jacobian). r may alias p or q.                                     */
+bool SSFECPointEncode(const SSFECPoint_t *pt, SSFECCurve_t curve, uint8_t *out, size_t outSize,
+                      size_t *outLen);
+bool SSFECPointDecode(SSFECPoint_t *pt, SSFECCurve_t curve, const uint8_t *data, size_t dataLen);
 void SSFECPointAdd(SSFECPoint_t *r, const SSFECPoint_t *p, const SSFECPoint_t *q,
                    SSFECCurve_t curve);
-
-/* Constant-time scalar multiplication: r = k * p (Montgomery ladder).                           */
-/* k must be in [1, n-1].                                                                        */
-void SSFECScalarMul(SSFECPoint_t *r, const SSFBN_t *k, const SSFECPoint_t *p,
-                    SSFECCurve_t curve);
-
-/* Dual scalar multiplication: r = u1 * p + u2 * q (Shamir's trick, not constant-time).         */
-/* For ECDSA verify where u1, u2 are derived from public data.                                   */
-void SSFECScalarMulDual(SSFECPoint_t *r,
-                        const SSFBN_t *u1, const SSFECPoint_t *p,
-                        const SSFBN_t *u2, const SSFECPoint_t *q,
-                        SSFECCurve_t curve);
+void SSFECScalarMul(SSFECPoint_t *r, const SSFBN_t *k, const SSFECPoint_t *p, SSFECCurve_t curve);
+void SSFECScalarMulDual(SSFECPoint_t *r, const SSFBN_t *u1, const SSFECPoint_t *p,
+                        const SSFBN_t *u2, const SSFECPoint_t *q, SSFECCurve_t curve);
 
 #if (SSF_EC_CONFIG_FIXED_BASE_P256 == 1) || (SSF_EC_CONFIG_FIXED_BASE_P384 == 1)
-/* Specialized dual scalar multiplication: r = u1 * G + u2 * q where G is the curve generator.   */
-/* Uses SSFECScalarMulBase{P256,P384} for u1*G (fixed-base comb, ~4x faster than the ladder)     */
-/* plus the windowed SSFECScalarMul for u2*Q, then a final point add. Faster than                */
-/* SSFECScalarMulDual's Shamir's trick when fixed-base tables are configured for `curve`.        */
-/* Inputs are public; not constant-time. Intended for ECDSA verify.                              */
-void SSFECScalarMulDualBase(SSFECPoint_t *r,
-                            const SSFBN_t *u1,
-                            const SSFBN_t *u2, const SSFECPoint_t *q,
-                            SSFECCurve_t curve);
+void SSFECScalarMulDualBase(SSFECPoint_t *r, const SSFBN_t *u1,
+                            const SSFBN_t *u2, const SSFECPoint_t *q, SSFECCurve_t curve);
 #endif /* SSF_EC_CONFIG_FIXED_BASE_P256 || SSF_EC_CONFIG_FIXED_BASE_P384 */
 
 #if SSF_EC_CONFIG_FIXED_BASE_P256 == 1
-/* Fixed-base scalar multiplication for P-256: r = k * G. Constant-time, ~3-4x faster than     */
-/* SSFECScalarMul(r, k, G, SSF_EC_CURVE_P256) thanks to a precomputed Lim-Lee comb table over   */
-/* multiples of G. k must be in [0, n) where n is the P-256 curve order.                       */
 void SSFECScalarMulBaseP256(SSFECPoint_t *r, const SSFBN_t *k);
 #endif /* SSF_EC_CONFIG_FIXED_BASE_P256 */
 
 #if SSF_EC_CONFIG_FIXED_BASE_P384 == 1
-/* Fixed-base scalar multiplication for P-384: r = k * G. Constant-time, ~3-4x faster than     */
-/* SSFECScalarMul(r, k, G, SSF_EC_CURVE_P384) thanks to a precomputed Lim-Lee comb table over   */
-/* multiples of G. k must be in [0, n) where n is the P-384 curve order.                       */
 void SSFECScalarMulBaseP384(SSFECPoint_t *r, const SSFBN_t *k);
 #endif /* SSF_EC_CONFIG_FIXED_BASE_P384 */
 
@@ -263,23 +199,15 @@ void SSFECScalarMulBaseP384(SSFECPoint_t *r, const SSFBN_t *k);
 #if SSF_CONFIG_EC_UNIT_TEST == 1
 void SSFECUnitTest(void);
 
-/* Test-only wrapper exposing the static _SSFECPointAddMixed for direct verification.            */
-/* q must have Z=1 (affine) or Z=0 (identity); the function asserts neither, but mathematically  */
-/* relies on Z=1 for the non-identity case. r may alias p or q.                                   */
+/* Test wrapper for _SSFECPointAddMixed (q must have Z=1 affine or Z=0 identity). */
 void _SSFECPointAddMixedForTest(SSFECPoint_t *r, const SSFECPoint_t *p,
                                 const SSFECPoint_t *q, SSFECCurve_t curve);
 
-/* Test-only wrapper exposing the static _SSFECPointAddMixedNoDouble for direct verification.    */
-/* Same contract as _SSFECPointAddMixed except: the caller must guarantee P != Q (and P != -Q is */
-/* still handled). For P == Q the result is undefined (the function skips computing 2*P to save  */
-/* one full doubling). Used by the comb runtime where R-vs-table[mask] collisions are            */
-/* statistically impossible (~2^-bits).                                                            */
+/* Test wrapper for _SSFECPointAddMixedNoDouble (caller must guarantee P != Q). */
 void _SSFECPointAddMixedNoDoubleForTest(SSFECPoint_t *r, const SSFECPoint_t *p,
                                         const SSFECPoint_t *q, SSFECCurve_t curve);
 
-/* Test-only wrapper exposing the static variable-time wNAF scalar mul. Result is r = k*P.       */
-/* PUBLIC-INPUT ONLY — timing depends on the bit pattern of k. Used internally by                */
-/* SSFECScalarMulDualBase for the [u2]Q half of ECDSA verify.                                     */
+/* Test wrapper for the variable-time wNAF scalar mul (PUBLIC-INPUT ONLY). */
 void _SSFECScalarMulVTwNAFForTest(SSFECPoint_t *r, const SSFBN_t *k,
                                   const SSFECPoint_t *p, SSFECCurve_t curve);
 #endif /* SSF_CONFIG_EC_UNIT_TEST */
@@ -289,3 +217,4 @@ void _SSFECScalarMulVTwNAFForTest(SSFECPoint_t *r, const SSFBN_t *k,
 #endif
 
 #endif /* SSF_EC_H_INCLUDE */
+

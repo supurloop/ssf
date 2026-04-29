@@ -81,8 +81,7 @@ static void _fe_add(_fe_t *r, const _fe_t *a, const _fe_t *b)
         r->v[i] = (uint32_t)carry;
         carry >>= 32;
     }
-    /* If carry, result >= 2^256. Reduce by subtracting p (add 19, clear bit 255). */
-    /* This keeps the result in a manageable range. */
+    /* If carry, result >= 2^256; reduce by adding 19 and clearing bit 255. */
     if (carry != 0u)
     {
         uint64_t c = 38u; /* 2^256 mod p = 2 * 19 = 38 */
@@ -185,10 +184,13 @@ static void _fe_sqr(_fe_t *r, const _fe_t *a)
 static void _fe_reduce(_fe_t *a)
 {
     uint64_t carry;
-    uint8_t i;
+    uint64_t borrow = 0;
+    uint64_t diff;
+    uint32_t t[8];
     uint32_t mask;
+    uint8_t i;
 
-    /* First, if bit 255 is set, clear it and add 19 (since 2^255 = 19 mod p) */
+    /* If bit 255 is set, clear it and add 19 (since 2^255 = 19 mod p). */
     carry = (uint64_t)(a->v[7] >> 31) * 19u;
     a->v[7] &= 0x7FFFFFFFu;
     for (i = 0; i < 8u; i++)
@@ -198,7 +200,7 @@ static void _fe_reduce(_fe_t *a)
         carry >>= 32;
     }
 
-    /* Repeat in case of another overflow */
+    /* Repeat in case of another overflow. */
     carry = (uint64_t)(a->v[7] >> 31) * 19u;
     a->v[7] &= 0x7FFFFFFFu;
     for (i = 0; i < 8u; i++)
@@ -208,32 +210,21 @@ static void _fe_reduce(_fe_t *a)
         carry >>= 32;
     }
 
-    /* Now a < 2^255. Check if a >= p by trying to subtract p. */
-    /* If a >= p, the subtraction won't borrow. */
+    /* a < 2^255 now; subtract p and conditional-select if no borrow. */
+    for (i = 0; i < 8u; i++)
     {
-        uint64_t borrow = 0;
-        uint32_t t[8];
-        for (i = 0; i < 8u; i++)
-        {
-            uint64_t diff = (uint64_t)a->v[i] - (uint64_t)_fe_p.v[i] - borrow;
-            t[i] = (uint32_t)diff;
-            borrow = (diff >> 63) & 1u;
-        }
-        /* If no borrow, a >= p, use the subtracted result */
-        mask = (uint32_t)(1u - borrow); /* 1 if a >= p, 0 if a < p */
-        /* mask is 0 or 1, expand to all bits */
-        mask = (uint32_t)(-(int32_t)mask);
-        for (i = 0; i < 8u; i++)
-        {
-            a->v[i] = (a->v[i] & ~mask) | (t[i] & mask);
-        }
+        diff = (uint64_t)a->v[i] - (uint64_t)_fe_p.v[i] - borrow;
+        t[i] = (uint32_t)diff;
+        borrow = (diff >> 63) & 1u;
+    }
+    mask = (uint32_t)(-(int32_t)(1u - borrow));   /* all-ones if a >= p, else 0 */
+    for (i = 0; i < 8u; i++)
+    {
+        a->v[i] = (a->v[i] & ~mask) | (t[i] & mask);
     }
 }
 
-/* Import from 32 little-endian bytes. Caller is responsible for any pre-import bit handling:    */
-/* _ge_decode strips byte[31]'s sign bit before calling here, then enforces the y < p canonical  */
-/* check on the unreduced limbs (RFC 8032 §5.1.3). The X25519 sibling instead clears bit 254    */
-/* and ignores bit 255 in its own pre-import — this routine itself is unconditional.             */
+/* Import from 32 little-endian bytes (caller handles any pre-import bit clearing). */
 static void _fe_from_bytes(_fe_t *a, const uint8_t *b)
 {
     uint8_t i;
@@ -423,8 +414,7 @@ static void _fe_neg(_fe_t *r, const _fe_t *a)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Edwards curve point in extended coordinates: (X:Y:Z:T) where x=X/Z, y=Y/Z, T=X*Y/Z.        */
-/* Curve: -x^2 + y^2 = 1 + d*x^2*y^2  (twisted Edwards, a = -1)                                */
+/* Edwards point in extended coords (X:Y:Z:T): x=X/Z, y=Y/Z, T=X*Y/Z; curve a = -1.              */
 /* --------------------------------------------------------------------------------------------- */
 typedef struct { _fe_t X, Y, Z, T; } _ge_t;
 
@@ -565,10 +555,7 @@ static bool _ge_decode(_ge_t *p, const uint8_t in[32])
     tmp[31] &= 0x7Fu; /* clear sign bit */
     _fe_from_bytes(&p->Y, tmp);
 
-    /* Reject non-canonical y per RFC 8032 §5.1.3: the loaded y must satisfy y < p. The high  */
-    /* bit was just cleared so y is in [0, 2^255); the only non-canonical values are the 19   */
-    /* representatives in [p, 2^255-1] = [2^255-19, 2^255-1]. Compare the unreduced limbs to  */
-    /* p directly: a borrow-free subtraction of p means y >= p.                                */
+    /* Reject non-canonical y per RFC 8032 §5.1.3 (must satisfy y < p). */
     {
         uint64_t borrow = 0;
         uint8_t i;
@@ -590,8 +577,7 @@ static bool _ge_decode(_ge_t *p, const uint8_t in[32])
         _fe_add(&v, &v, &one);    /* v = d*y^2 + 1 */
     }
 
-    /* Compute x = sqrt(u/v) using the formula:                                                  */
-    /* x = u * v^3 * (u * v^7)^((p-5)/8)                                                        */
+    /* Compute x = sqrt(u/v) via x = u * v^3 * (u * v^7)^((p-5)/8). */
     _fe_sqr(&v3, &v);             /* v^2 */
     _fe_mul(&v3, &v3, &v);        /* v^3 */
     _fe_sqr(&p->X, &v3);          /* v^6 */
@@ -733,10 +719,7 @@ static void _ge_double_scalarmult(_ge_t *r, const uint8_t a[32], const _ge_t *A,
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Scalar arithmetic modulo L (group order).                                                     */
-/* Uses SUPERCOP ref10 approach: represent scalars in 24 limbs of ~21 bits (signed),             */
-/* perform reduction using the known factorization of L.                                         */
-/* L = 2^252 + 27742317777372353535851937790883648493                                            */
+/* Scalar arithmetic modulo L (group order, SUPERCOP ref10 24-limb signed representation).       */
 /* --------------------------------------------------------------------------------------------- */
 
 /* Helper functions for scalar loading (21-bit limb representation).                             */
@@ -813,10 +796,7 @@ static void _sc_reduce(uint8_t s[64])
     int64_t carry8, carry9, carry10, carry11, carry12, carry13, carry14, carry15;
     int64_t carry16;
 
-    /* Reduce limbs 23..12 into 0..11 using L's structure.                                       */
-    /* L's limbs (21-bit): l0=0x1cf5d3ed, but specifically:                                      */
-    /*   L = sum(l_i * 2^(21*i)) where the l_i encode the low part of L.                        */
-    /* The reduction subtracts s_i * L for high limbs.                                           */
+    /* Reduce limbs 23..12 into 0..11 by subtracting s_i * L for each high limb. */
 
     s11 += s23 * 666643;
     s12 += s23 * 470296;
@@ -1296,12 +1276,7 @@ static bool _sc_is_lt_L(const uint8_t s[32])
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Scrub the deeper-stack region used by Sign's primitives. _ge_scalarmult_ct, _ge_double, and   */
-/* _ge_add all leave _ge_t / _fe_t locals (Q, QplusP, A..H) in their freed frames; those frames  */
-/* contain partial scalar-mult intermediates that depend on the secret nonce. Sign cannot reach  */
-/* into those frames to wipe them, so we allocate a fresh frame at the same depth and overwrite  */
-/* it with zeros via volatile writes (which the compiler cannot elide). Sized generously to      */
-/* cover the deepest call chain Sign exercises: _ge_scalarmult_ct → _ge_add → _fe_mul.            */
+/* Scrubs the deeper-stack region used by Sign (overwrites freed-frame intermediates).          */
 /* --------------------------------------------------------------------------------------------- */
 SSF_NOINLINE
 static void _ed25519_stack_scrub(void)
@@ -1313,10 +1288,7 @@ static void _ed25519_stack_scrub(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Feed an arbitrary-size buffer to a SHA-512 context, looping in UINT32_MAX-sized chunks.       */
-/* SSFSHA512Update takes a uint32_t length; on 64-bit hosts a single message can exceed that, so */
-/* a naked (uint32_t)msgLen cast silently truncates and produces a hash over the wrong prefix.   */
-/* RFC 8032 places no 4 GiB ceiling on Ed25519 message length, so the cast was a real bug.       */
+/* Feeds an arbitrary-size buffer to a SHA-512 context, looping in UINT32_MAX-sized chunks.      */
 /* --------------------------------------------------------------------------------------------- */
 static void _sha512_update_sized(SSFSHA2_64Context_t *ctx, const uint8_t *buf, size_t len)
 {
@@ -1418,12 +1390,7 @@ bool SSFEd25519Sign(const uint8_t seed[SSF_ED25519_SEED_SIZE],
 
     _sc_muladd(&sig[32], hram, a, nonce);  /* S = h*a + r mod L */
 
-    /* Verify-after-sign: re-run the public verify equation against the produced (R, S). A      */
-    /* fault during the private operation, or a pubKey that does not correspond to seed, both   */
-    /* manifest as a sig that does not verify. Catching this here prevents the device from      */
-    /* releasing a signature that an honest verifier will reject — and, more importantly,       */
-    /* defeats the differential-fault class of attacks where a single bad signature leaks       */
-    /* secret-scalar bits to an attacker who can request signatures on chosen messages.         */
+    /* Verify-after-sign defeats differential-fault attacks and catches seed/pubKey mismatch. */
     if (!SSFEd25519Verify(pubKey, msg, msgLen, sig))
     {
         SSFCryptSecureZero(sig, SSF_ED25519_SIG_SIZE);
@@ -1471,8 +1438,7 @@ bool SSFEd25519Verify(const uint8_t pubKey[SSF_ED25519_PUB_KEY_SIZE],
     /* Decode public key */
     if (!_ge_decode(&A, pubKey)) return false;
 
-    /* Reject low-order pubkeys: [8]A = identity → A has order ≤ 8 → forgery class trivially   */
-    /* satisfies the verify equation regardless of message.                                     */
+    /* Reject low-order pubkeys ([8]A = identity → trivial forgery for any message). */
     if (_ge_is_low_order(&A)) return false;
 
     /* Negate A: -A has coordinates (-X, Y, Z, -T) */
@@ -1497,3 +1463,4 @@ bool SSFEd25519Verify(const uint8_t pubKey[SSF_ED25519_PUB_KEY_SIZE],
     /* Compare the recomputed R against the signature in constant time. */
     return SSFCryptCTMemEq(rcheck, sig, 32);
 }
+

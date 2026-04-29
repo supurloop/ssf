@@ -62,11 +62,7 @@ typedef struct SSFSHA1Context
 /* --------------------------------------------------------------------------------------------- */
 /* External interface                                                                            */
 /* --------------------------------------------------------------------------------------------- */
-
-/* Single-call hash: computes SHA-1 of in[0..inLen-1] into out[0..19]. */
 void SSFSHA1(const uint8_t *in, uint32_t inLen, uint8_t out[SSF_SHA1_HASH_SIZE]);
-
-/* Incremental hash: Begin/Update/End pattern for hashing data in chunks. */
 void SSFSHA1Begin(SSFSHA1Context_t *ctx);
 void SSFSHA1Update(SSFSHA1Context_t *ctx, const uint8_t *in, uint32_t inLen);
 void SSFSHA1End(SSFSHA1Context_t *ctx, uint8_t out[SSF_SHA1_HASH_SIZE]);
@@ -83,3 +79,4 @@ void SSFSHA1UnitTest(void);
 #endif
 
 #endif /* SSF_SHA1_H_INCLUDE */
+

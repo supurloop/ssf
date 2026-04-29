@@ -161,8 +161,7 @@ void SSFSHA1Update(SSFSHA1Context_t *ctx, const uint8_t *in, uint32_t inLen)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Finalizes the SHA-1 hash and writes the 20-byte result.                                       */
-/* Applies FIPS 180-1 padding: append bit '1', pad with zeros, append 64-bit length.            */
+/* Finalizes the SHA-1 hash (FIPS 180-1 padding) and writes the 20-byte result.                  */
 /* --------------------------------------------------------------------------------------------- */
 void SSFSHA1End(SSFSHA1Context_t *ctx, uint8_t out[SSF_SHA1_HASH_SIZE])
 {
@@ -223,3 +222,4 @@ void SSFSHA1(const uint8_t *in, uint32_t inLen, uint8_t out[SSF_SHA1_HASH_SIZE])
     SSFSHA1Update(&ctx, in, inLen);
     SSFSHA1End(&ctx, out);
 }
+

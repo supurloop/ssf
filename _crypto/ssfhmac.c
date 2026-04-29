@@ -38,14 +38,7 @@
 /* --------------------------------------------------------------------------------------------- */
 #define SSF_HMAC_CONTEXT_MAGIC (0x484D4143ul)   /* 'HMAC' — set by Begin, cleared by DeInit. */
 
-/* --------------------------------------------------------------------------------------------- */
-/* Compile-time bounds checks: the local stack buffers and ctx->oKeyPad are sized to the         */
-/* SSF_HMAC_MAX_* constants, but every write into them assumes the per-hash block / hash size    */
-/* returned by _SSFHMACGetBlockSize and SSFHMACGetHashSize is ≤ those constants. These trip if a */
-/* future hash is added to the dispatch without bumping the constants. typedef-array idiom (size */
-/* becomes -1 on failure) is used in place of _Static_assert because the cross-test toolchain    */
-/* matrix predates universal C11 support.                                                        */
-/* --------------------------------------------------------------------------------------------- */
+/* Compile-time bounds checks via typedef-array idiom (size becomes -1 on failure). */
 typedef char _ssf_hmac_sa_block_sha1_256_fits[(64u  <= SSF_HMAC_MAX_BLOCK_SIZE)  ? 1 : -1];
 typedef char _ssf_hmac_sa_block_sha384_512_fits[(128u <= SSF_HMAC_MAX_BLOCK_SIZE) ? 1 : -1];
 typedef char _ssf_hmac_sa_hash_max_fits[(64u  <= SSF_HMAC_MAX_HASH_SIZE)         ? 1 : -1];
@@ -131,8 +124,7 @@ static void _SSFHMACHashUpdate(SSFHMACContext_t *ctx, const uint8_t *data, size_
     SSF_REQUIRE((data != NULL) || (len == 0u));
 
 #if SIZE_MAX > UINT32_MAX
-    /* On 64-bit size_t hosts, peel off UINT32_MAX-sized chunks so the SHA Update's uint32_t   */
-    /* length argument is honored. The loop body never runs on 32-bit size_t (always false).   */
+    /* On 64-bit size_t hosts, peel off UINT32_MAX-sized chunks (loop never runs on 32-bit). */
     while (len > (size_t)UINT32_MAX)
     {
         _SSFHMACHashUpdateChunk(ctx, data, UINT32_MAX);
@@ -166,11 +158,9 @@ static void _SSFHMACHashEnd(SSFHMACContext_t *ctx, uint8_t *out, size_t outSize)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Initializes an incremental HMAC context.                                                      */
-/* RFC 2104 steps 1-4: prepare the padded key and start the inner hash.                          */
+/* Initializes an incremental HMAC context (RFC 2104 steps 1-4).                                 */
 /* --------------------------------------------------------------------------------------------- */
-void SSFHMACBegin(SSFHMACContext_t *ctx, SSFHMACHash_t hash,
-                  const uint8_t *key, size_t keyLen)
+void SSFHMACBegin(SSFHMACContext_t *ctx, SSFHMACHash_t hash, const uint8_t *key, size_t keyLen)
 {
     size_t blockSize;
     size_t hashSize;
@@ -188,8 +178,7 @@ void SSFHMACBegin(SSFHMACContext_t *ctx, SSFHMACHash_t hash,
     blockSize = _SSFHMACGetBlockSize(hash);
     hashSize = SSFHMACGetHashSize(hash);
 
-    /* Step 1: If key > blockSize, hash it to get K' of length hashSize.                         */
-    /* Otherwise K' = key, zero-padded to blockSize.                                             */
+    /* Step 1: If key > blockSize hash it to K' of length hashSize, else K' = zero-padded key. */
     memset(keyPrime, 0, blockSize);
     if (keyLen > blockSize)
     {
@@ -220,8 +209,7 @@ void SSFHMACBegin(SSFHMACContext_t *ctx, SSFHMACHash_t hash,
     SSFCryptSecureZero(keyPrime, sizeof(keyPrime));
     SSFCryptSecureZero(iKeyPad, sizeof(iKeyPad));
 
-    /* Mark the context valid last — if any earlier step asserts, magic stays unset and any */
-    /* subsequent Update / End / DeInit fails loudly instead of operating on partial state. */
+    /* Mark the context valid last so any earlier assert leaves magic unset. */
     ctx->magic = SSF_HMAC_CONTEXT_MAGIC;
 }
 
@@ -238,8 +226,7 @@ void SSFHMACUpdate(SSFHMACContext_t *ctx, const uint8_t *data, size_t dataLen)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Finalizes the HMAC computation and produces the MAC output.                                   */
-/* RFC 2104 steps 5-7: finalize inner hash, compute outer hash.                                  */
+/* Finalizes the HMAC computation and produces the MAC output (RFC 2104 steps 5-7).              */
 /* --------------------------------------------------------------------------------------------- */
 void SSFHMACEnd(SSFHMACContext_t *ctx, uint8_t *macOut, size_t macOutSize)
 {
@@ -254,10 +241,7 @@ void SSFHMACEnd(SSFHMACContext_t *ctx, uint8_t *macOut, size_t macOutSize)
     hashSize = SSFHMACGetHashSize(ctx->hash);
     blockSize = _SSFHMACGetBlockSize(ctx->hash);
 
-    /* Strict equality: HMAC always writes exactly hashSize bytes. Allowing macOutSize >  */
-    /* hashSize would leave the trailing region uninitialized, leaking stack contents to */
-    /* any caller that later read or transmitted the full buffer. Truncated MACs (<      */
-    /* hashSize) are the caller's responsibility post-hoc.                                */
+    /* Strict equality: HMAC writes exactly hashSize; truncation is the caller's job. */
     SSF_REQUIRE(macOutSize == hashSize);
 
     /* Step 5: Finalize the inner hash */
@@ -313,7 +297,7 @@ bool SSFHMAC(SSFHMACHash_t hash, const uint8_t *key, size_t keyLen,
 /* Test hook: feed data through the chunking loop with a caller-supplied chunk max.              */
 /* --------------------------------------------------------------------------------------------- */
 void _SSFHMACTestHookUpdateChunked(SSFHMACContext_t *ctx, const uint8_t *data, size_t dataLen,
-                                    uint32_t chunkMax)
+                                   uint32_t chunkMax)
 {
     SSF_REQUIRE(ctx != NULL);
     SSF_REQUIRE(ctx->magic == SSF_HMAC_CONTEXT_MAGIC);
@@ -337,3 +321,4 @@ void _SSFHMACTestHookUpdateChunked(SSFHMACContext_t *ctx, const uint8_t *data, s
     }
 }
 #endif /* SSF_CONFIG_HMAC_UNIT_TEST */
+

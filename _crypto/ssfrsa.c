@@ -68,9 +68,7 @@ static const uint8_t _ssfRSADigestInfoSHA512[] = {
 #endif /* SSF_RSA_CONFIG_ENABLE_PKCS1_V15 */
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: zero a byte buffer through a volatile pointer so the compiler cannot elide the      */
-/* writes. Mirrors the pattern in SSFBNZeroize for non-SSFBN scratch (entropy buffers, byte      */
-/* arrays).                                                                                       */
+/* Internal: zero a byte buffer through a volatile pointer (defeats compiler dead-store elision).*/
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFRSASecureWipe(void *buf, size_t len)
 {
@@ -79,12 +77,7 @@ static void _SSFRSASecureWipe(void *buf, size_t len)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: scrub the deeper-stack region used by ssfbn primitives that ssfrsa just called.     */
-/* SSFBNGcd, SSFBNDivMod, SSFBNModInv, SSFBNModInvExt, SSFBNModExp etc. all leave their internal */
-/* SSFBN locals in their freed frames, and ssfrsa cannot reach into those frames to wipe them.   */
-/* Calling this helper from sign / keygen cleanup allocates a fresh frame at the same depth      */
-/* those primitives just vacated and overwrites it with zeros. The size is generous enough to    */
-/* cover the deepest in-tree BN call chain (SSFBNModInvExt + helpers).                            */
+/* Internal: scrub the deeper-stack region used by ssfbn primitives (overwrites freed frames).   */
 /* --------------------------------------------------------------------------------------------- */
 SSF_NOINLINE
 static void _SSFRSAStackScrub(void)
@@ -96,11 +89,6 @@ static void _SSFRSAStackScrub(void)
 
 /* --------------------------------------------------------------------------------------------- */
 /* Internal: convert an SSFBN-serialized magnitude into a strict-DER INTEGER body, in place.     */
-/* ASN.1 INTEGER is signed two's-complement (X.690 §8.3.2): a positive magnitude whose leading   */
-/* byte has bit 7 set must carry a single 0x00 padding byte. Strips leading zeros first so the   */
-/* output is canonical regardless of how zero-padded the SSFBNToBytes output was. Caller must    */
-/* size intBuf for at least magLen + 1 bytes to accommodate the optional padding byte.           */
-/* All-zero magnitudes collapse to a single 0x00 byte (DER's canonical zero).                    */
 /* --------------------------------------------------------------------------------------------- */
 static size_t _SSFRSANormalizeMag(uint8_t *intBuf, size_t magLen)
 {
@@ -127,10 +115,7 @@ static size_t _SSFRSANormalizeMag(uint8_t *intBuf, size_t magLen)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: read the next ASN.1 INTEGER under cursor and import it into bn at the requested    */
-/* limb width, stripping the leading 0x00 sign byte (or any spurious leading zeros) so that      */
-/* magnitudes that are exactly limbs*4 bytes long round-trip even when the producer emitted the  */
-/* canonical positive-INTEGER 0x00 prefix. Returns false on any structural or sizing error.      */
+/* Internal: read the next ASN.1 INTEGER under cursor and import it into bn at the requested w.  */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFRSADecIntToBN(const SSFASN1Cursor_t *cursor, SSFBN_t *bn, uint16_t limbs,
                               SSFASN1Cursor_t *next)
@@ -160,10 +145,9 @@ static size_t _SSFRSAGetHashSize(SSFRSAHash_t hash)
 /* --------------------------------------------------------------------------------------------- */
 /* Internal: compute hash using incremental API (for MGF1 and PSS).                              */
 /* --------------------------------------------------------------------------------------------- */
-static void _SSFRSAHashBeginUpdateEnd(SSFRSAHash_t hash,
-                                      const uint8_t *d1, size_t d1Len,
-                                      const uint8_t *d2, size_t d2Len,
-                                      uint8_t *out, size_t outSize)
+static void _SSFRSAHashBeginUpdateEnd(SSFRSAHash_t hash, const uint8_t *d1, size_t d1Len,
+                                      const uint8_t *d2, size_t d2Len, uint8_t *out,
+                                      size_t outSize)
 {
     switch (hash)
     {
@@ -201,8 +185,8 @@ static void _SSFRSAHashBeginUpdateEnd(SSFRSAHash_t hash,
 /* --------------------------------------------------------------------------------------------- */
 /* Internal: DER-encode an RSA public key: SEQUENCE { INTEGER n, INTEGER e }.                    */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFRSAPubKeyEncode(const SSFBN_t *n, const SSFBN_t *e,
-                                uint8_t *der, size_t derSize, size_t *derLen)
+static bool _SSFRSAPubKeyEncode(const SSFBN_t *n, const SSFBN_t *e, uint8_t *der,
+                                size_t derSize, size_t *derLen)
 {
     size_t nBytes = (size_t)n->len * sizeof(SSFBNLimb_t);
     size_t eBytes = (size_t)e->len * sizeof(SSFBNLimb_t);
@@ -252,12 +236,16 @@ static bool _SSFRSAPubKeyEncode(const SSFBN_t *n, const SSFBN_t *e,
 /* --------------------------------------------------------------------------------------------- */
 /* Internal: DER-decode an RSA public key.                                                       */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFRSAPubKeyDecode(const uint8_t *der, size_t derLen,
-                                SSFBN_t *n, SSFBN_t *e, uint16_t *keyLimbs)
+static bool _SSFRSAPubKeyDecode(const uint8_t *der, size_t derLen, SSFBN_t *n, SSFBN_t *e,
+                                uint16_t *keyLimbs)
 {
     SSFASN1Cursor_t cursor, inner, next;
     const uint8_t *nBuf, *eBuf;
+    const uint8_t *nb;
+    const uint8_t *eb;
     uint32_t nLen, eLen;
+    uint32_t nl;
+    uint32_t el;
     uint16_t limbs;
 
     cursor.buf = der;
@@ -267,28 +255,17 @@ static bool _SSFRSAPubKeyDecode(const uint8_t *der, size_t derLen,
     if (!SSFASN1DecGetInt(&inner, &nBuf, &nLen, &next)) return false;
     if (!SSFASN1DecGetInt(&next, &eBuf, &eLen, &next)) return false;
 
-    /* Determine limb count from n's byte length (skip leading zeros) */
-    {
-        const uint8_t *nb = nBuf;
-        uint32_t nl = nLen;
-        while (nl > 0u && *nb == 0u) { nb++; nl--; }
-        limbs = (uint16_t)SSF_BN_BITS_TO_LIMBS(nl * 8u);
-    }
+    /* Strip ASN.1 INTEGER leading 0x00 sign byte; compute limbs from the trimmed length. */
+    nb = nBuf;
+    nl = nLen;
+    while (nl > 0u && *nb == 0u) { nb++; nl--; }
+    limbs = (uint16_t)SSF_BN_BITS_TO_LIMBS(nl * 8u);
+    if (!SSFBNFromBytes(n, nb, nl, limbs)) return false;
 
-    /* Strip leading zeros before importing (ASN.1 INTEGER may have a leading 0x00 for
-       positive sign, which makes nLen one byte larger than the limb capacity) */
-    {
-        const uint8_t *nb = nBuf;
-        uint32_t nl = nLen;
-        while (nl > 0u && *nb == 0u) { nb++; nl--; }
-        if (!SSFBNFromBytes(n, nb, nl, limbs)) return false;
-    }
-    {
-        const uint8_t *eb = eBuf;
-        uint32_t el = eLen;
-        while (el > 0u && *eb == 0u) { eb++; el--; }
-        if (!SSFBNFromBytes(e, eb, el, limbs)) return false;
-    }
+    eb = eBuf;
+    el = eLen;
+    while (el > 0u && *eb == 0u) { eb++; el--; }
+    if (!SSFBNFromBytes(e, eb, el, limbs)) return false;
 
     *keyLimbs = limbs;
     return true;
@@ -299,9 +276,9 @@ static bool _SSFRSAPubKeyDecode(const uint8_t *der, size_t derLen,
 /* --------------------------------------------------------------------------------------------- */
 #if SSF_RSA_CONFIG_ENABLE_KEYGEN == 1
 static bool _SSFRSAPrivKeyEncode(const SSFBN_t *n, const SSFBN_t *e, const SSFBN_t *d,
-                                 const SSFBN_t *p, const SSFBN_t *q,
-                                 const SSFBN_t *dp, const SSFBN_t *dq, const SSFBN_t *qInv,
-                                 uint8_t *der, size_t derSize, size_t *derLen)
+                                 const SSFBN_t *p, const SSFBN_t *q, const SSFBN_t *dp,
+                                 const SSFBN_t *dq, const SSFBN_t *qInv, uint8_t *der,
+                                 size_t derSize, size_t *derLen)
 {
     uint8_t buf[SSF_BN_MAX_BYTES + 1u];
     uint32_t encLens[9];
@@ -361,14 +338,11 @@ static bool _SSFRSAPrivKeyEncode(const SSFBN_t *n, const SSFBN_t *e, const SSFBN
 #endif /* SSF_RSA_CONFIG_ENABLE_KEYGEN */
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: DER-decode an RSA private key (PKCS#1 RSAPrivateKey).                               */
-/* Extracts n, d, p, q, dp, dq, qInv for CRT operations.                                        */
+/* Internal: DER-decode an RSA private key (PKCS#1 RSAPrivateKey) into n, d, p, q, dp, dq, qInv. */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFRSAPrivKeyDecode(const uint8_t *der, size_t derLen,
-                                 SSFBN_t *n, SSFBN_t *e, SSFBN_t *d,
-                                 SSFBN_t *p, SSFBN_t *q,
-                                 SSFBN_t *dp, SSFBN_t *dq, SSFBN_t *qInv,
-                                 uint16_t *nLimbs)
+static bool _SSFRSAPrivKeyDecode(const uint8_t *der, size_t derLen, SSFBN_t *n, SSFBN_t *e,
+                                 SSFBN_t *d, SSFBN_t *p, SSFBN_t *q, SSFBN_t *dp, SSFBN_t *dq,
+                                 SSFBN_t *qInv, uint16_t *nLimbs)
 {
     SSFASN1Cursor_t cursor, inner, next, peek;
     const uint8_t *buf;
@@ -414,13 +388,9 @@ static bool _SSFRSAPrivKeyDecode(const uint8_t *der, size_t derLen,
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: RSA public-key operation: result = m^e mod n.                                       */
-/* All three operands (m, e, n) are public: m is the signature/ciphertext, e and n form the      */
-/* public key. Variable-time ModExp is side-channel-safe here and 2-3x faster than the constant- */
-/* time ladder for the typical low-Hamming-weight public exponents (3, 17, 65537).               */
+/* Internal: RSA public-key operation result = m^e mod n (variable-time; all operands public).   */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFRSAPublicOp(const SSFBN_t *m, const SSFBN_t *e, const SSFBN_t *n,
-                            SSFBN_t *result)
+static bool _SSFRSAPublicOp(const SSFBN_t *m, const SSFBN_t *e, const SSFBN_t *n, SSFBN_t *result)
 {
     if (SSFBNCmp(m, n) >= 0) return false;
     SSFBNModExpPub(result, m, e, n);
@@ -429,17 +399,12 @@ static bool _SSFRSAPublicOp(const SSFBN_t *m, const SSFBN_t *e, const SSFBN_t *n
 
 /* --------------------------------------------------------------------------------------------- */
 /* Internal: RSA private-key operation using CRT.                                                */
-/* m1 = c^dp mod p, m2 = c^dq mod q, h = qInv*(m1-m2) mod p, result = m2 + h*q                 */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFRSAPrivateOpCRT(const SSFBN_t *c, uint16_t nLimbs,
-                                const SSFBN_t *p, const SSFBN_t *q,
-                                const SSFBN_t *dp, const SSFBN_t *dq,
-                                const SSFBN_t *qInv,
-                                SSFBN_t *result)
+static bool _SSFRSAPrivateOpCRT(const SSFBN_t *c, uint16_t nLimbs, const SSFBN_t *p,
+                                const SSFBN_t *q, const SSFBN_t *dp, const SSFBN_t *dq,
+                                const SSFBN_t *qInv, SSFBN_t *result)
 {
-    /* Flat declarations (vs. nested scopes) so the cleanup section can wipe every local on the */
-    /* return path. Each of these carries information about the secret factors p, q or the      */
-    /* secret CRT exponents dp, dq, so leaving them in the freed frame would be a hygiene leak. */
+    /* Flat declarations so the cleanup section can wipe every secret-derived local. */
     SSFBN_DEFINE(cp, SSF_BN_MAX_LIMBS);
     SSFBN_DEFINE(cq, SSF_BN_MAX_LIMBS);
     SSFBN_DEFINE(m1, SSF_BN_MAX_LIMBS);
@@ -501,7 +466,7 @@ static bool _SSFRSAPrivateOpCRT(const SSFBN_t *c, uint16_t nLimbs,
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* FIPS 186-4 §B.3 keygen post-condition checks.                                                 */
+/* If |p - q| > 2^(halfBits - 100) returns true, else false (FIPS 186-4 §B.3.3 step 5.4).        */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFRSAFipsPrimeDistanceOK(const SSFBN_t *p, const SSFBN_t *q, uint16_t halfBits)
 {
@@ -521,21 +486,25 @@ bool SSFRSAFipsPrimeDistanceOK(const SSFBN_t *p, const SSFBN_t *q, uint16_t half
     {
         (void)SSFBNSub(&diff, q, p);
     }
-    /* bitLen(diff) > halfBits - 100 ⇔ diff >= 2^(halfBits - 100). Random primes clear this by  */
-    /* a wide margin; the explicit guard is for defense in depth and FIPS conformance.          */
+    /* bitLen(diff) > halfBits - 100 ⇔ diff >= 2^(halfBits - 100). */
     return SSFBNBitLen(&diff) > (uint32_t)(halfBits - 100u);
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* If d > 2^halfBits returns true, else false (FIPS 186-4 §B.3.1 Wiener-attack lower bound).     */
+/* --------------------------------------------------------------------------------------------- */
 bool SSFRSAFipsDLowerBoundOK(const SSFBN_t *d, uint16_t halfBits)
 {
     SSF_REQUIRE(d != NULL);
     SSF_REQUIRE(d->limbs != NULL);
     SSF_REQUIRE(halfBits > 0u);
-    /* bitLen(d) > halfBits ⇔ d >= 2^halfBits. Strict-> per spec; matters only at the boundary  */
-    /* which random d never hits.                                                               */
+    /* bitLen(d) > halfBits ⇔ d >= 2^halfBits (strict-> per spec). */
     return SSFBNBitLen(d) > (uint32_t)halfBits;
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* If gcd(e, p-1) == 1 and gcd(e, q-1) == 1 returns true, else false.                            */
+/* --------------------------------------------------------------------------------------------- */
 bool SSFRSAFipsECoprimeOK(const SSFBN_t *e, const SSFBN_t *pMinus1, const SSFBN_t *qMinus1)
 {
     SSFBN_DEFINE(eW, SSF_BN_MAX_LIMBS);
@@ -549,8 +518,7 @@ bool SSFRSAFipsECoprimeOK(const SSFBN_t *e, const SSFBN_t *pMinus1, const SSFBN_
     SSF_REQUIRE(qMinus1 != NULL);
     SSF_REQUIRE(qMinus1->limbs != NULL);
 
-    /* SSFBNGcd requires equal-len operands. Keygen passes e at full key width and (p-1)/(q-1)  */
-    /* at half-key width, so widen each pair into a shared SSF_BN_MAX_LIMBS scratch first.       */
+    /* SSFBNGcd requires equal-len operands; widen e and (p-1)/(q-1) into MAX_LIMBS scratch. */
     SSFBNSetZero(&eW, SSF_BN_MAX_LIMBS);
     memcpy(eW.limbs, e->limbs, (size_t)e->len * sizeof(SSFBNLimb_t));
 
@@ -567,18 +535,13 @@ bool SSFRSAFipsECoprimeOK(const SSFBN_t *e, const SSFBN_t *pMinus1, const SSFBN_
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: validate decoded (n, e). Used by both SSFRSAPubKeyIsValid and SSFRSAPrivKeyIsValid  */
-/* so the public-side rules stay in one place.                                                    */
+/* Internal: validate decoded (n, e); shared by SSFRSAPubKeyIsValid and SSFRSAPrivKeyIsValid.    */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFRSAValidatePubFields(const SSFBN_t *n, const SSFBN_t *e)
 {
     uint32_t nBits;
 
-    /* n: odd, > 1, and at one of the build-enabled bit lengths. The exact-set check also       */
-    /* implies the high bit of the leading byte is set (the supported sizes are byte-aligned),  */
-    /* so a degenerate modulus with leading zero bits is rejected here. Sizes disabled in       */
-    /* ssfrsa_opt.h are dropped from the accept set so size-restricted builds reject keys that  */
-    /* would otherwise route through unbuilt code paths.                                         */
+    /* n: odd, > 1, and at one of the build-enabled bit lengths. */
     if (SSFBNIsEven(n)) return false;
     if (SSFBNIsOne(n)) return false;
     nBits = SSFBNBitLen(n);
@@ -597,16 +560,16 @@ static bool _SSFRSAValidatePubFields(const SSFBN_t *n, const SSFBN_t *e)
     }
     if (nBits > SSF_BN_CONFIG_MAX_BITS) return false;
 
-    /* e: odd, ≥ 65537 (rejects e=3, e=17 small-exponent classes per FIPS 186-4 §B.3.1), < n.   */
+    /* e: odd, ≥ 65537, < n (FIPS 186-4 §B.3.1 rejects small-exponent classes). */
     if (SSFBNIsEven(e)) return false;
-    if (SSFBNBitLen(e) < 17u) return false;          /* 65537 has bitLen 17, anything smaller fails */
+    if (SSFBNBitLen(e) < 17u) return false;          /* 65537 has bitLen 17 */
     if (SSFBNCmp(e, n) >= 0) return false;
 
     return true;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Validate a DER-encoded RSA public key.                                                        */
+/* If the DER-encoded RSA public key is valid returns true, else false.                          */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFRSAPubKeyIsValid(const uint8_t *pubKeyDer, size_t pubKeyDerLen)
 {
@@ -622,7 +585,7 @@ bool SSFRSAPubKeyIsValid(const uint8_t *pubKeyDer, size_t pubKeyDerLen)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Validate a DER-encoded RSA private key.                                                       */
+/* If the DER-encoded RSA private key is valid (CRT consistency holds) returns true, else false. */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFRSAPrivKeyIsValid(const uint8_t *privKeyDer, size_t privKeyDerLen)
 {
@@ -650,7 +613,7 @@ bool SSFRSAPrivKeyIsValid(const uint8_t *privKeyDer, size_t privKeyDerLen)
     if (SSFBNIsEven(&p) || SSFBNIsOne(&p)) return false;
     if (SSFBNIsEven(&q) || SSFBNIsOne(&q)) return false;
 
-    /* n == p * q. Both p and q have len = nLimbs/2, so p*q has len = nLimbs and matches n.     */
+    /* n == p * q (both p and q have len = nLimbs/2). */
     {
         SSFBN_DEFINE(prod, SSF_BN_MAX_LIMBS);
         SSFBNMul(&prod, &p, &q);
@@ -676,7 +639,7 @@ bool SSFRSAPrivKeyIsValid(const uint8_t *privKeyDer, size_t privKeyDerLen)
         if (SSFBNCmp(&check, &dq) != 0) return false;
     }
 
-    /* qInv * q ≡ 1 (mod p). qInv, q, p all have len = nLimbs/2 — SSFBNModMul-compatible.       */
+    /* qInv * q ≡ 1 (mod p). */
     {
         SSFBN_DEFINE(prod, SSF_BN_MAX_LIMBS);
         SSFBNModMul(&prod, &qInv, &q, &p);
@@ -691,13 +654,9 @@ bool SSFRSAPrivKeyIsValid(const uint8_t *privKeyDer, size_t privKeyDerLen)
 /* --------------------------------------------------------------------------------------------- */
 #if SSF_RSA_CONFIG_ENABLE_KEYGEN == 1
 /* --------------------------------------------------------------------------------------------- */
-/* KeyGen stage 1: seed PRNG from platform entropy, generate two distinct primes p and q (with    */
-/* p > q so CRT works as expected), and compute n = p * q. The PRNG context, entropy buffer, the  */
-/* swap temp and the n-product temp all live in this helper's frame and are released on return,  */
-/* so they don't coexist with the lambda / ModInv working state in stage 2.                       */
+/* KeyGen stage 1: seed PRNG, generate two distinct primes p > q, compute n = p * q.             */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFRSAKeyGenPrimes(uint16_t bits,
-                                SSFBN_t *p, SSFBN_t *q, SSFBN_t *n,
+static bool _SSFRSAKeyGenPrimes(uint16_t bits, SSFBN_t *p, SSFBN_t *q, SSFBN_t *n,
                                 uint16_t *nLimbsOut)
 {
     SSFPRNGContext_t prng;
@@ -739,8 +698,7 @@ static bool _SSFRSAKeyGenPrimes(uint16_t bits,
 cleanup_prng:
     SSFPRNGDeInitContext(&prng);
 cleanup:
-    /* Wipe the raw entropy buffer (PRNG context's copy is wiped by DeInit; this is the source  */
-    /* copy on the stack) and the tmp/prod scratch BNs that briefly held p, q, or p·q.          */
+    /* Wipe the entropy buffer and scratch BNs that briefly held p, q, or p·q. */
     _SSFRSASecureWipe(entropy, sizeof(entropy));
     SSFBNZeroize(&tmp);
     SSFBNZeroize(&prod);
@@ -748,14 +706,10 @@ cleanup:
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* KeyGen stage 2: given p, q, derive d (private exponent), dp, dq, qInv (CRT parameters).        */
-/* Local pm1, qm1, g, lambda and the division-loop working state live here and are released on    */
-/* return, so they don't overlap with the MillerRabin chain of stage 1 or the DER-encoding of     */
-/* stage 3. Any secret intermediates (lambda is derived from p, q) are zeroised before return.    */
+/* KeyGen stage 2: given p, q, derive d (private exponent) and dp, dq, qInv (CRT parameters).    */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFRSAKeyGenDerive(uint16_t nLimbs,
-                                const SSFBN_t *p, const SSFBN_t *q,
-                                SSFBN_t *d, SSFBN_t *dp, SSFBN_t *dq, SSFBN_t *qInv)
+static bool _SSFRSAKeyGenDerive(uint16_t nLimbs, const SSFBN_t *p, const SSFBN_t *q, SSFBN_t *d,
+                                SSFBN_t *dp, SSFBN_t *dq, SSFBN_t *qInv)
 {
     SSFBN_DEFINE(pm1, SSF_BN_MAX_LIMBS);
     SSFBN_DEFINE(qm1, SSF_BN_MAX_LIMBS);
@@ -771,16 +725,14 @@ static bool _SSFRSAKeyGenDerive(uint16_t nLimbs,
     (void)SSFBNSubUint32(&pm1, p, 1u);
     (void)SSFBNSubUint32(&qm1, q, 1u);
 
-    /* Explicit FIPS check: e ⊥ (p-1) and e ⊥ (q-1). Fails fast before λ compute on the rare    */
-    /* case where 65537 divides p-1 or q-1 (caller retries with fresh primes).                   */
+    /* Explicit FIPS check: e ⊥ (p-1) and e ⊥ (q-1) (caller retries with fresh primes). */
     SSFBNSetUint32(&eFull, 65537u, nLimbs);
     if (!SSFRSAFipsECoprimeOK(&eFull, &pm1, &qm1)) goto cleanup;
 
     /* g = gcd(pm1, qm1) */
     SSFBNGcd(&g, &pm1, &qm1);
 
-    /* lambda = lcm(pm1, qm1) = (pm1 / gcd) * qm1 — the division-by-large-numbers form avoids   */
-    /* needing to divide pm1 * qm1 by g, which wouldn't fit in our fixed-width SSFBN_t.          */
+    /* lambda = lcm(pm1, qm1) = (pm1 / gcd) * qm1 (avoids needing pm1*qm1 to fit in SSFBN_t). */
     if (SSFBNIsOne(&g))
     {
         /* Common case: skip the divide — lambda = pm1 * qm1 directly. */
@@ -807,10 +759,7 @@ static bool _SSFRSAKeyGenDerive(uint16_t nLimbs,
     ok = true;
 
 cleanup:
-    /* All locals are derived from the secret primes (pm1, qm1, lambda, pm1_div, prod, rem) or  */
-    /* are arithmetic temporaries that touched the secret λ(n) (g, eFull). Wipe every one so    */
-    /* the freed frame is clean regardless of which return path we took, then scrub the deeper- */
-    /* stack region used by SSFBNGcd / SSFBNDivMod / SSFBNModInvExt / SSFBNModInv internals.    */
+    /* Wipe every secret-derived local; then scrub the deeper-stack region used by ssfbn. */
     SSFBNZeroize(&pm1);
     SSFBNZeroize(&qm1);
     SSFBNZeroize(&g);
@@ -824,15 +773,13 @@ cleanup:
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* KeyGen stage 3: encode (n, e) and (n, e, d, p, q, dp, dq, qInv) as PKCS#1 DER. Local e lives   */
-/* only here; everything else is caller-owned and passed by const pointer.                        */
+/* KeyGen stage 3: encode (n, e) and (n, e, d, p, q, dp, dq, qInv) as PKCS#1 DER.                */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFRSAKeyGenEncode(const SSFBN_t *n, const SSFBN_t *d,
-                                const SSFBN_t *p, const SSFBN_t *q,
-                                const SSFBN_t *dp, const SSFBN_t *dq, const SSFBN_t *qInv,
-                                uint16_t nLimbs,
-                                uint8_t *privKeyDer, size_t privKeyDerSize, size_t *privKeyDerLen,
-                                uint8_t *pubKeyDer,  size_t pubKeyDerSize,  size_t *pubKeyDerLen)
+static bool _SSFRSAKeyGenEncode(const SSFBN_t *n, const SSFBN_t *d, const SSFBN_t *p,
+                                const SSFBN_t *q, const SSFBN_t *dp, const SSFBN_t *dq,
+                                const SSFBN_t *qInv, uint16_t nLimbs, uint8_t *privKeyDer,
+                                size_t privKeyDerSize, size_t *privKeyDerLen,
+                                uint8_t *pubKeyDer, size_t pubKeyDerSize, size_t *pubKeyDerLen)
 {
     SSFBN_DEFINE(e, SSF_BN_MAX_LIMBS);
 
@@ -844,13 +791,13 @@ static bool _SSFRSAKeyGenEncode(const SSFBN_t *n, const SSFBN_t *d,
     return true;
 }
 
-/* Cap the prime+derive retry budget. The FIPS post-conditions (|p-q|, d-lower-bound, e-coprime) */
-/* almost never reject random candidates — a healthy run completes in attempts == 1. The cap is  */
-/* purely a guard against pathological loops if entropy or the BN layer goes sideways.           */
+/* Cap on prime+derive retry budget (guards against pathological loops). */
 #define SSF_RSA_KEYGEN_FIPS_MAX_ATTEMPTS (8u)
 
-bool SSFRSAKeyGen(uint16_t bits,
-                  uint8_t *privKeyDer, size_t privKeyDerSize, size_t *privKeyDerLen,
+/* --------------------------------------------------------------------------------------------- */
+/* If keypair is generated, writes DER privKey and pubKey, returns true, else false.             */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFRSAKeyGen(uint16_t bits, uint8_t *privKeyDer, size_t privKeyDerSize, size_t *privKeyDerLen,
                   uint8_t *pubKeyDer, size_t pubKeyDerSize, size_t *pubKeyDerLen)
 {
     SSFBN_DEFINE(p, SSF_BN_MAX_LIMBS);
@@ -869,9 +816,7 @@ bool SSFRSAKeyGen(uint16_t bits,
     SSF_REQUIRE(pubKeyDer != NULL);
     SSF_REQUIRE(privKeyDerLen != NULL);
     SSF_REQUIRE(pubKeyDerLen != NULL);
-    /* Caller must pick one of the build-enabled sizes; a disabled size traps even though the   */
-    /* underlying BN cap may technically permit it. The 2N <= MAX_BITS invariant is already     */
-    /* enforced as a compile-time gate in ssfrsa.h.                                              */
+    /* Caller must pick one of the build-enabled sizes; a disabled size traps. */
     {
         bool bitsOk = false;
 #if SSF_RSA_CONFIG_ENABLE_2048 == 1
@@ -891,10 +836,7 @@ bool SSFRSAKeyGen(uint16_t bits,
     halfBits = bits / 2u;
     ok = false;
 
-    /* FIPS 186-4 §B.3.3 step 5: if a candidate fails any post-condition, regenerate the prime  */
-    /* pair and retry. Each retry is a full prime-pair regeneration (the most defensive option  */
-    /* — finer-grained retry of just q on |p-q| failure is the pure-spec form, but the win is   */
-    /* irrelevant when the rejection rate is ~2^-100 per check).                                 */
+    /* FIPS 186-4 §B.3.3 step 5: regenerate the full prime pair if any post-condition fails. */
     for (attempts = 0u; attempts < SSF_RSA_KEYGEN_FIPS_MAX_ATTEMPTS; attempts++)
     {
         /* Hard failure (no entropy, etc.) — don't retry. */
@@ -903,8 +845,7 @@ bool SSFRSAKeyGen(uint16_t bits,
         /* §B.3.3 step 5.4: |p - q| > 2^(halfBits - 100). */
         if (!SSFRSAFipsPrimeDistanceOK(&p, &q, halfBits)) continue;
 
-        /* Soft failure inside Derive (e ⊥ λ(n) violated, or modular-inverse instability).      */
-        /* Both are retriable per FIPS — fresh primes give a fresh λ(n).                         */
+        /* Soft failure inside Derive (retriable: fresh primes give a fresh λ(n)). */
         if (!_SSFRSAKeyGenDerive(nLimbs, &p, &q, &d, &dp, &dq, &qInv)) continue;
 
         /* §B.3.1: d > 2^halfBits, defending against Wiener. */
@@ -924,10 +865,7 @@ bool SSFRSAKeyGen(uint16_t bits,
     }
 
 cleanup:
-    /* Wipe every secret-bearing local on every return path (success or any failure). n is the */
-    /* public modulus so it isn't in the wipe list, but everything else carries information     */
-    /* about the secret factors and must be cleared. The stack scrub then overwrites the deeper */
-    /* frames left behind by Primes / Derive / Encode so BN-internal scratch doesn't survive.   */
+    /* Wipe every secret-bearing local on every return path; then scrub deeper frames. */
     SSFBNZeroize(&d);
     SSFBNZeroize(&p);
     SSFBNZeroize(&q);
@@ -939,12 +877,12 @@ cleanup:
 }
 #endif /* SSF_RSA_CONFIG_ENABLE_KEYGEN */
 
-/* --------------------------------------------------------------------------------------------- */
-/* PKCS#1 v1.5 signature.                                                                        */
-/* --------------------------------------------------------------------------------------------- */
 #if SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1
-bool SSFRSASignPKCS1(const uint8_t *privKeyDer, size_t privKeyDerLen,
-                     SSFRSAHash_t hash, const uint8_t *hashVal, size_t hashLen,
+/* --------------------------------------------------------------------------------------------- */
+/* If RSASSA-PKCS1-v1_5 sign succeeds, writes sig and sigLen, returns true, else false.          */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFRSASignPKCS1(const uint8_t *privKeyDer, size_t privKeyDerLen, SSFRSAHash_t hash,
+                     const uint8_t *hashVal, size_t hashLen,
                      uint8_t *sig, size_t sigSize, size_t *sigLen)
 {
     SSFBN_DEFINE(n, SSF_BN_MAX_LIMBS);
@@ -1007,10 +945,7 @@ bool SSFRSASignPKCS1(const uint8_t *privKeyDer, size_t privKeyDerLen,
     SSFBNFromBytes(&m, em, keyBytes, nLimbs);
     if (!_SSFRSAPrivateOpCRT(&m, nLimbs, &p, &q, &dp, &dq, &qInv, &s)) goto cleanup;
 
-    /* Verify-after-sign: recompute m' = s^e mod n and require m' == m before releasing the     */
-    /* signature. Defense against the Boneh-DeMillo-Lipton CRT fault attack and against simple  */
-    /* private-key tampering (mismatched dp / dq / qInv). The cost is one extra public-exponent */
-    /* modular exponentiation per sign — small relative to the CRT private op.                   */
+    /* Verify-after-sign defends against the Boneh-DeMillo-Lipton CRT fault attack. */
     if (!_SSFRSAPublicOp(&s, &e, &n, &mCheck)) goto cleanup;
     if (SSFBNCmp(&mCheck, &m) != 0) goto cleanup;
 
@@ -1019,9 +954,7 @@ bool SSFRSASignPKCS1(const uint8_t *privKeyDer, size_t privKeyDerLen,
     ok = true;
 
 cleanup:
-    /* Wipe every BN local that touched the private key, plus the EM (carries the message hash) */
-    /* and the BN-form message m / signature s / verify-after-sign reconstructed mCheck. Then   */
-    /* scrub the deeper-stack region used by the CRT primitive's internal SSFBN locals.          */
+    /* Wipe every BN local that touched the private key; scrub deeper-stack from CRT primitive. */
     SSFBNZeroize(&d);
     SSFBNZeroize(&p);
     SSFBNZeroize(&q);
@@ -1036,8 +969,11 @@ cleanup:
     return ok;
 }
 
-bool SSFRSAVerifyPKCS1(const uint8_t *pubKeyDer, size_t pubKeyDerLen,
-                       SSFRSAHash_t hash, const uint8_t *hashVal, size_t hashLen,
+/* --------------------------------------------------------------------------------------------- */
+/* If RSASSA-PKCS1-v1_5 signature verifies returns true, else false.                             */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFRSAVerifyPKCS1(const uint8_t *pubKeyDer, size_t pubKeyDerLen, SSFRSAHash_t hash,
+                       const uint8_t *hashVal, size_t hashLen,
                        const uint8_t *sig, size_t sigLen)
 {
     SSFBN_DEFINE(n, SSF_BN_MAX_LIMBS);
@@ -1102,8 +1038,8 @@ bool SSFRSAVerifyPKCS1(const uint8_t *pubKeyDer, size_t pubKeyDerLen,
 /* MGF1 mask generation function (RFC 8017 Appendix B.2.1).                                     */
 /* --------------------------------------------------------------------------------------------- */
 #if SSF_RSA_CONFIG_ENABLE_PSS == 1
-static void _SSFRSAM_GF1(SSFRSAHash_t hash, const uint8_t *seed, size_t seedLen,
-                         uint8_t *mask, size_t maskLen)
+static void _SSFRSAM_GF1(SSFRSAHash_t hash, const uint8_t *seed, size_t seedLen, uint8_t *mask,
+                         size_t maskLen)
 {
     uint32_t counter = 0;
     size_t generated = 0;
@@ -1132,11 +1068,10 @@ static void _SSFRSAM_GF1(SSFRSAHash_t hash, const uint8_t *seed, size_t seedLen,
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* RSA-PSS signature (RFC 8017 Section 8.1.1, 9.1.1).                                           */
-/* Salt length = hash length (per TLS 1.3 requirement).                                          */
+/* If RSASSA-PSS sign succeeds, writes sig and sigLen, returns true, else false.                 */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFRSASignPSS(const uint8_t *privKeyDer, size_t privKeyDerLen,
-                   SSFRSAHash_t hash, const uint8_t *hashVal, size_t hashLen,
+bool SSFRSASignPSS(const uint8_t *privKeyDer, size_t privKeyDerLen, SSFRSAHash_t hash,
+                   const uint8_t *hashVal, size_t hashLen,
                    uint8_t *sig, size_t sigSize, size_t *sigLen)
 {
     SSFBN_DEFINE(n, SSF_BN_MAX_LIMBS);
@@ -1184,8 +1119,7 @@ bool SSFRSASignPSS(const uint8_t *privKeyDer, size_t privKeyDerLen,
 
     dbLen = emLen - hLen - 1u;
 
-    /* Generate random salt. sLen is bounded by the hash output size (<= 64 bytes for SHA-512), */
-    /* so the narrowing cast to uint16_t cannot truncate.                                       */
+    /* Generate random salt (sLen <= 64 bytes, so the uint16_t cast cannot truncate). */
     if (!SSFPortGetEntropy(salt, (uint16_t)sLen)) goto cleanup;
 
     /* M' = (0x)00 00 00 00 00 00 00 00 || mHash || salt */
@@ -1246,8 +1180,7 @@ cleanup:
     SSFBNZeroize(&m);
     SSFBNZeroize(&s);
     SSFBNZeroize(&mCheck);
-    /* salt is the random salt fed back into both H computation and DB; mPrime contains hash    */
-    /* + salt; em / dbMask hold the encoded message and the MGF1 mask. All must be wiped.        */
+    /* Wipe salt, mPrime (hash+salt), em, dbMask. */
     _SSFRSASecureWipe(salt, sizeof(salt));
     _SSFRSASecureWipe(mPrime, sizeof(mPrime));
     _SSFRSASecureWipe(H, sizeof(H));
@@ -1258,10 +1191,10 @@ cleanup:
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* RSA-PSS verification (RFC 8017 Section 8.1.2, 9.1.2).                                        */
+/* If RSASSA-PSS signature verifies returns true, else false.                                    */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFRSAVerifyPSS(const uint8_t *pubKeyDer, size_t pubKeyDerLen,
-                     SSFRSAHash_t hash, const uint8_t *hashVal, size_t hashLen,
+bool SSFRSAVerifyPSS(const uint8_t *pubKeyDer, size_t pubKeyDerLen, SSFRSAHash_t hash,
+                     const uint8_t *hashVal, size_t hashLen,
                      const uint8_t *sig, size_t sigLen)
 {
     SSFBN_DEFINE(n, SSF_BN_MAX_LIMBS);
@@ -1313,14 +1246,7 @@ bool SSFRSAVerifyPSS(const uint8_t *pubKeyDer, size_t pubKeyDerLen,
         memcpy(em, &emFull[keyBytes - emLen], emLen);
     }
 
-    /* All checks below operate on attacker-influenced bytes of `em` (the output of the RSA
-     * public op on `sig`). Fold every structural check into a single-byte accumulator `diff`
-     * and run MGF1 + DB unmask + hash recomputation unconditionally, so that the wall-clock
-     * time to reach the final `return` is independent of which byte of `em` first diverged
-     * from the PSS padding pattern. Without this, an attacker who can time rejected sigs
-     * can distinguish "em trailer wrong" from "em trailer ok but PS[k] nonzero" from
-     * "structure ok but H mismatched" — a defense-in-depth signal PSS was designed to
-     * avoid exposing. */
+    /* CT structural checks: fold every divergence into `diff`; run all stages unconditionally. */
     diff = 0u;
     topMask = (uint8_t)(0xFFu >> (8u * emLen - emBits));
 
@@ -1336,8 +1262,7 @@ bool SSFRSAVerifyPSS(const uint8_t *pubKeyDer, size_t pubKeyDerLen,
     for (i = 0; i < dbLen; i++) em[i] ^= dbMask[i];
     em[0] &= topMask;
 
-    /* DB = PS(zeros) || 0x01 || salt. Accumulate every PS byte into diff; compare the
-     * separator byte by XOR-into-diff rather than a branch. */
+    /* DB = PS(zeros) || 0x01 || salt; accumulate via XOR-into-diff (branchless). */
     for (i = 0; i < dbLen - sLen - 1u; i++) diff |= em[i];
     diff |= (uint8_t)(em[dbLen - sLen - 1u] ^ 0x01u);
 
@@ -1355,3 +1280,4 @@ bool SSFRSAVerifyPSS(const uint8_t *pubKeyDer, size_t pubKeyDerLen,
     return (diff == 0u);
 }
 #endif /* SSF_RSA_CONFIG_ENABLE_PSS */
+

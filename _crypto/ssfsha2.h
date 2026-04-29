@@ -36,7 +36,6 @@
 extern "C" {
 #endif
 
-#include <stdio.h>
 #include <stdint.h>
 #include "ssfport.h"
 
@@ -75,7 +74,7 @@ typedef struct
 } SSFSHA2_64Context_t;
 
 /* --------------------------------------------------------------------------------------------- */
-/* External Interface                                                                            */
+/* External interface                                                                            */
 /* --------------------------------------------------------------------------------------------- */
 void SSFSHA2_32(const uint8_t *in, uint32_t inLen, uint8_t *out, uint32_t outSize,
                 uint16_t hashBitSize);
@@ -83,14 +82,13 @@ void SSFSHA2_32(const uint8_t *in, uint32_t inLen, uint8_t *out, uint32_t outSiz
 #define SSFSHA224(in, inLen, out, outSize) SSFSHA2_32(in, inLen, out, outSize, 224)
 
 void SSFSHA2_64(const uint8_t *in, uint32_t inLen, uint8_t *out, uint32_t outSize,
-    uint16_t hashBitSize, uint16_t truncationBitSize);
+                uint16_t hashBitSize, uint16_t truncationBitSize);
 
 #define SSFSHA512(in, inLen, out, outSize) SSFSHA2_64(in, inLen, out, outSize, 512, 0)
 #define SSFSHA512_256(in, inLen, out, outSize) SSFSHA2_64(in, inLen, out, outSize, 512, 256)
 #define SSFSHA512_224(in, inLen, out, outSize) SSFSHA2_64(in, inLen, out, outSize, 512, 224)
 #define SSFSHA384(in, inLen, out, outSize) SSFSHA2_64(in, inLen, out, outSize, 384, 0)
 
-/* Incremental interface – Begin/Update/End                                                      */
 void SSFSHA2_32Begin(SSFSHA2_32Context_t *context, uint16_t hashBitSize);
 void SSFSHA2_32Update(SSFSHA2_32Context_t *context, const uint8_t *in, uint32_t inLen);
 void SSFSHA2_32End(SSFSHA2_32Context_t *context, uint8_t *out, uint32_t outSize);
@@ -136,3 +134,4 @@ void SSFSHA2UnitTest(void);
 #endif
 
 #endif /* SSF_SHA2_H_INCLUDE */
+

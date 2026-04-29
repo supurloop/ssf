@@ -90,21 +90,6 @@ extern "C" {
 #include "ssfec.h"
 
 /* --------------------------------------------------------------------------------------------- */
-/* Limitations                                                                                   */
-/* --------------------------------------------------------------------------------------------- */
-/* Signing uses deterministic nonce generation per RFC 6979. This eliminates the need for a      */
-/* cryptographic random number source during signing and prevents nonce-reuse attacks.            */
-/* The hash algorithm is selected automatically: SHA-256 for P-256, SHA-384 for P-384.           */
-/* Signatures are DER-encoded per SEC 1 / X.690: SEQUENCE { INTEGER r, INTEGER s }.              */
-/* Maximum DER signature size is 2 + 2 + 33 + 2 + 33 = 72 bytes for P-256, and                  */
-/* 2 + 2 + 49 + 2 + 49 = 104 bytes for P-384 (extra byte when high bit set).                    */
-/* Public keys are SEC 1 uncompressed format: 0x04 || X || Y.                                    */
-/* Private keys are big-endian unsigned integers of the curve's coordinate byte length.          */
-/* ECDH shared secret output is the raw x-coordinate of the shared point; use SSFHKDF to         */
-/* derive keying material from it.                                                               */
-/* --------------------------------------------------------------------------------------------- */
-
-/* --------------------------------------------------------------------------------------------- */
 /* Defines                                                                                       */
 /* --------------------------------------------------------------------------------------------- */
 
@@ -114,8 +99,7 @@ extern "C" {
 /* Maximum public key size in bytes (SEC 1 uncompressed). */
 #define SSF_ECDSA_MAX_PUB_KEY_SIZE SSF_EC_MAX_ENCODED_SIZE
 
-/* Maximum DER-encoded signature size in bytes. */
-/* SEQUENCE(2) + INTEGER(2 + coordBytes + 1) + INTEGER(2 + coordBytes + 1) */
+/* Maximum DER-encoded signature size in bytes (SEQUENCE + 2 INTEGERs with optional sign byte). */
 #if SSF_EC_CONFIG_ENABLE_P384 == 1
 #define SSF_ECDSA_MAX_SIG_SIZE (104u)
 #elif SSF_EC_CONFIG_ENABLE_P256 == 1
@@ -128,75 +112,31 @@ extern "C" {
 /* --------------------------------------------------------------------------------------------- */
 /* External interface: key generation                                                            */
 /* --------------------------------------------------------------------------------------------- */
-
-/* Generate an ECDSA key pair.                                                                   */
-/* privKey receives the private key as a big-endian integer (coordBytes long).                   */
-/* pubKey receives the public key in SEC 1 uncompressed format (1 + 2*coordBytes).               */
-/* pubKeyLen receives the actual public key length written.                                      */
-/* Requires a seeded SSFPRNGContext_t for random number generation.                              */
-/* Returns false on failure.                                                                     */
-bool SSFECDSAKeyGen(SSFECCurve_t curve,
-                    uint8_t *privKey, size_t privKeySize,
-                    uint8_t *pubKey, size_t pubKeySize, size_t *pubKeyLen);
-
-/* Compute the public key from a private key.                                                    */
-/* privKey is the private key as a big-endian integer.                                           */
-/* pubKey receives the public key in SEC 1 uncompressed format.                                  */
-/* pubKeyLen receives the actual public key length written.                                      */
-/* Returns false if the private key is invalid (not in [1, n-1]).                                */
-bool SSFECDSAPubKeyFromPrivKey(SSFECCurve_t curve,
-                               const uint8_t *privKey, size_t privKeyLen,
+bool SSFECDSAKeyGen(SSFECCurve_t curve, uint8_t *privKey, size_t privKeySize, uint8_t *pubKey,
+                    size_t pubKeySize, size_t *pubKeyLen);
+bool SSFECDSAPubKeyFromPrivKey(SSFECCurve_t curve, const uint8_t *privKey, size_t privKeyLen,
                                uint8_t *pubKey, size_t pubKeySize, size_t *pubKeyLen);
-
-/* Validate a public key. Returns true if the key is a valid point on the curve.                 */
 bool SSFECDSAPubKeyIsValid(SSFECCurve_t curve, const uint8_t *pubKey, size_t pubKeyLen);
 
 /* --------------------------------------------------------------------------------------------- */
 /* External interface: ECDSA signing                                                             */
 /* --------------------------------------------------------------------------------------------- */
-
-/* Sign a message hash using ECDSA with deterministic nonce (RFC 6979).                          */
-/* hash is the message hash (SHA-256 for P-256, SHA-384 for P-384).                              */
-/* hashLen must be the hash output size for the curve (32 for P-256, 48 for P-384).              */
-/* privKey is the private key as a big-endian integer (coordBytes).                              */
-/* sig receives the DER-encoded signature: SEQUENCE { INTEGER r, INTEGER s }.                    */
-/* sigLen receives the actual signature length written.                                          */
-/* Returns false on failure.                                                                     */
-bool SSFECDSASign(SSFECCurve_t curve,
-                  const uint8_t *privKey, size_t privKeyLen,
-                  const uint8_t *hash, size_t hashLen,
-                  uint8_t *sig, size_t sigSize, size_t *sigLen);
+bool SSFECDSASign(SSFECCurve_t curve, const uint8_t *privKey, size_t privKeyLen,
+                  const uint8_t *hash, size_t hashLen, uint8_t *sig, size_t sigSize,
+                  size_t *sigLen);
 
 /* --------------------------------------------------------------------------------------------- */
 /* External interface: ECDSA verification                                                        */
 /* --------------------------------------------------------------------------------------------- */
-
-/* Verify an ECDSA signature over a message hash.                                                */
-/* hash is the message hash (SHA-256 for P-256, SHA-384 for P-384).                              */
-/* hashLen must be the hash output size for the curve.                                           */
-/* pubKey is the public key in SEC 1 uncompressed format.                                        */
-/* sig is the DER-encoded signature.                                                             */
-/* Returns true if the signature is valid.                                                       */
-bool SSFECDSAVerify(SSFECCurve_t curve,
-                    const uint8_t *pubKey, size_t pubKeyLen,
-                    const uint8_t *hash, size_t hashLen,
-                    const uint8_t *sig, size_t sigLen);
+bool SSFECDSAVerify(SSFECCurve_t curve, const uint8_t *pubKey, size_t pubKeyLen,
+                    const uint8_t *hash, size_t hashLen, const uint8_t *sig, size_t sigLen);
 
 /* --------------------------------------------------------------------------------------------- */
 /* External interface: ECDH key agreement                                                        */
 /* --------------------------------------------------------------------------------------------- */
-
-/* Compute an ECDH shared secret.                                                                */
-/* privKey is the local private key as a big-endian integer.                                     */
-/* peerPubKey is the peer's public key in SEC 1 uncompressed format.                             */
-/* secret receives the shared secret (x-coordinate of the shared point, big-endian).             */
-/* secretLen receives the actual secret length written (coordBytes for the curve).               */
-/* The peer's public key is validated before use. Returns false on any failure.                   */
-/* The raw shared secret should be processed through SSFHKDF for key derivation.                 */
-bool SSFECDHComputeSecret(SSFECCurve_t curve,
-                          const uint8_t *privKey, size_t privKeyLen,
-                          const uint8_t *peerPubKey, size_t peerPubKeyLen,
-                          uint8_t *secret, size_t secretSize, size_t *secretLen);
+bool SSFECDHComputeSecret(SSFECCurve_t curve, const uint8_t *privKey, size_t privKeyLen,
+                          const uint8_t *peerPubKey, size_t peerPubKeyLen, uint8_t *secret,
+                          size_t secretSize, size_t *secretLen);
 
 /* --------------------------------------------------------------------------------------------- */
 /* Unit test                                                                                     */
@@ -204,14 +144,10 @@ bool SSFECDHComputeSecret(SSFECCurve_t curve,
 #if SSF_CONFIG_ECDSA_UNIT_TEST == 1
 void SSFECDSAUnitTest(void);
 
-/* Test-only wrapper around the internal projective verify check. Lets unit tests pass a synthetic */
-/* Jacobian R (including ones with non-1 Z and ones whose affine x lies in [n, p-1] to exercise    */
-/* the wraparound branch) and confirm the comparison logic is correct.                              */
+/* Test wrapper around the internal projective verify check (synthetic R). */
 bool _SSFECDSAVerifyCheckRForTest(SSFECCurve_t curve, const SSFECPoint_t *R, const SSFBN_t *r);
 
-/* Test-only exit hooks. Each fires from its function's unified cleanup label, AFTER zeroization  */
-/* and BEFORE return, so a test installer can assert every secret-bearing local is wiped. NULL in */
-/* production. Pointers are valid only inside the callback.                                        */
+/* Test-only exit hooks fired AFTER zeroization, BEFORE return; NULL in production. */
 extern void (*_SSFECDSASignTestExitHook)(void *ctx,
                                          const SSFBN_t *d, const SSFBN_t *k, const SSFBN_t *e,
                                          const SSFBN_t *kInv, const SSFBN_t *tmp,
@@ -236,3 +172,4 @@ extern void *_SSFECDSAKeyGenTestExitHookCtx;
 #endif
 
 #endif /* SSF_ECDSA_H_INCLUDE */
+

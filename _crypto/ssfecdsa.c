@@ -43,13 +43,7 @@
 #include "ssfcrypt.h"
 
 #if SSF_CONFIG_ECDSA_UNIT_TEST == 1
-/* Test-only exit hooks. Production builds compile these out entirely. Each hook fires at the    */
-/* unified cleanup label of its function, AFTER the stack-local working memory has been          */
-/* zeroized but BEFORE the function returns. Tests install a hook to assert that every           */
-/* secret-bearing limb is zero by the time control leaves the function — the documented promise  */
-/* in ssfecdsa.md ("Private keys are zeroized before return from every function that touches     */
-/* them") covers more than just `d`.                                                              */
-/* The hook receives pointers to the stack locals; do not retain them past the callback.         */
+/* Test-only exit hooks fired AFTER zeroization, BEFORE return; NULL in production. */
 void (*_SSFECDSASignTestExitHook)(void *ctx,
                                   const SSFBN_t *d, const SSFBN_t *k, const SSFBN_t *e,
                                   const SSFBN_t *kInv, const SSFBN_t *tmp,
@@ -70,9 +64,7 @@ void *_SSFECDSAKeyGenTestExitHookCtx = NULL;
 #endif /* SSF_CONFIG_ECDSA_UNIT_TEST */
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: r = k * G via the fastest available scalar multiplication. Dispatches to the curve-  */
-/* specific fixed-base comb when configured (~4x faster than the generic windowed routine);       */
-/* otherwise falls back to SSFECScalarMul through a stack-built G.                                */
+/* Internal: r = k * G via the fastest configured scalar mul (fixed-base comb when available).   */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFECDSAScalarMulBase(SSFECPoint_t *r, const SSFBN_t *k, SSFECCurve_t curve)
 {
@@ -125,10 +117,7 @@ static size_t _SSFECDSAGetHashSize(SSFECCurve_t curve)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: bits2int per RFC 6979 section 2.3.2.                                                */
-/* Converts a hash byte string to an integer, right-shifting if the hash is longer than the      */
-/* curve order's bit length. For our matched hash/curve pairs (SHA-256/P-256, SHA-384/P-384),    */
-/* no shifting is needed.                                                                        */
+/* Internal: bits2int per RFC 6979 §2.3.2 (hash bytes to integer, no shift for matched pairs).   */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFECDSABits2Int(SSFBN_t *out, const uint8_t *hash, size_t hashLen,
                               const SSFECCurveParams_t *c)
@@ -139,11 +128,9 @@ static void _SSFECDSABits2Int(SSFBN_t *out, const uint8_t *hash, size_t hashLen,
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: bits2octets per RFC 6979 section 2.3.4.                                             */
-/* Converts a hash to an integer mod n, then to a big-endian byte string of coordBytes length.   */
+/* Internal: bits2octets per RFC 6979 §2.3.4 (hash to integer mod n, then BE bytes coordBytes).  */
 /* --------------------------------------------------------------------------------------------- */
-static void _SSFECDSABits2Octets(uint8_t *out, size_t outLen,
-                                 const uint8_t *hash, size_t hashLen,
+static void _SSFECDSABits2Octets(uint8_t *out, size_t outLen, const uint8_t *hash, size_t hashLen,
                                  const SSFECCurveParams_t *c)
 {
     SSFBN_DEFINE(z, SSF_EC_MAX_LIMBS);
@@ -160,13 +147,10 @@ static void _SSFECDSABits2Octets(uint8_t *out, size_t outLen,
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: RFC 6979 deterministic nonce generation.                                            */
-/* Generates k in [1, n-1] using HMAC-DRBG seeded with the private key and message hash.        */
+/* Internal: RFC 6979 deterministic nonce generation (HMAC-DRBG; k in [1, n-1]).                 */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFECDSAGenK(SSFECCurve_t curve,
-                          const uint8_t *privKey, size_t privKeyLen,
-                          const uint8_t *hash, size_t hashLen,
-                          const SSFECCurveParams_t *c,
+static bool _SSFECDSAGenK(SSFECCurve_t curve, const uint8_t *privKey, size_t privKeyLen,
+                          const uint8_t *hash, size_t hashLen, const SSFECCurveParams_t *c,
                           SSFBN_t *k)
 {
     SSFHMACHash_t hmacHash = _SSFECDSAGetHMACHash(curve);
@@ -265,9 +249,7 @@ static bool _SSFECDSAGenK(SSFECCurve_t curve,
     SSFCryptSecureZero(K, sizeof(K));
     SSFCryptSecureZero(h1Octets, sizeof(h1Octets));
     SSFCryptSecureZero(T, sizeof(T));
-    /* The loop populated *k with rejected candidates; wipe before returning false so a caller   */
-    /* that misses the cleanup path doesn't observe HMAC-DRBG output. (SSFECDSASign's unified    */
-    /* cleanup also zeroes k, so this is defense in depth.)                                       */
+    /* Wipe k (rejected candidates leak HMAC-DRBG output if the caller skips the cleanup path). */
     SSFBNZeroize(k);
     return false; /* Should never reach here for valid inputs */
 }
@@ -285,8 +267,7 @@ static void _SSFECDSACanonicalizeInt(const uint8_t *intBuf, uint32_t intLen,
 {
     const uint8_t *p = intBuf;
     uint32_t n = intLen;
-    /* intLen == 0 would dereference a zero-byte buffer at *p below. Current callers always pass */
-    /* c->bytes (>= 32), so this is unreachable in practice — assert it as a precondition.       */
+    /* intLen == 0 would dereference a zero-byte buffer at *p below; assert as a precondition. */
     SSF_REQUIRE(intLen > 0u);
     while (n > 1u && *p == 0u) { p++; n--; }
     if ((*p & 0x80u) != 0u)
@@ -304,8 +285,7 @@ static void _SSFECDSACanonicalizeInt(const uint8_t *intBuf, uint32_t intLen,
     }
 }
 
-static bool _SSFECDSASigEncode(const SSFBN_t *r, const SSFBN_t *s,
-                               const SSFECCurveParams_t *c,
+static bool _SSFECDSASigEncode(const SSFBN_t *r, const SSFBN_t *s, const SSFECCurveParams_t *c,
                                uint8_t *sig, size_t sigSize, size_t *sigLen)
 {
     uint8_t rBytes[SSF_EC_MAX_COORD_BYTES];
@@ -319,9 +299,7 @@ static bool _SSFECDSASigEncode(const SSFBN_t *r, const SSFBN_t *s,
     uint32_t rEncLen, sEncLen, contentLen, seqHdrLen, totalLen;
     uint32_t offset;
 
-    /* Export r and s as big-endian bytes, then canonicalize for ASN.1 INTEGER encoding (strip   */
-    /* leading zeros + prepend 0x00 when MSB set so the value is read as positive). The original */
-    /* encoder skipped this step; OpenSSL and other strict ASN.1 verifiers reject the result.    */
+    /* Export r, s as BE bytes and canonicalize for ASN.1 INTEGER encoding. */
     if (!SSFBNToBytes(r, rBytes, c->bytes)) return false;
     if (!SSFBNToBytes(s, sBytes, c->bytes)) return false;
     _SSFECDSACanonicalizeInt(rBytes, (uint32_t)c->bytes, rPad, sizeof(rPad), &rCan, &rCanLen);
@@ -393,8 +371,7 @@ static bool _SSFECDSAValidateStrictDER(const uint8_t *sig, size_t sigLen, uint16
     /* Outer SEQUENCE tag. */
     if (sig[pos++] != 0x30u) return false;
 
-    /* SEQUENCE length: short form (< 128) OR canonical long form 0x81 XX (XX >= 128). Reject */
-    /* 0x82+ since ECDSA P-256/P-384 sigs have content < 256 bytes (max ~104 for P-384).      */
+    /* SEQUENCE length: short form or canonical 0x81 XX; reject 0x82+ (sigs < 256 bytes). */
     if (sig[pos] < 0x80u)
     {
         seqLen = sig[pos++];
@@ -431,8 +408,7 @@ static bool _SSFECDSAValidateStrictDER(const uint8_t *sig, size_t sigLen, uint16
             /* Reject extra leading zero: 0x00 prefix only valid when the next byte's MSB is set. */
             if (sig[pos] == 0x00u && sig[pos + 1u] < 0x80u) return false;
         }
-        /* MSB of first content byte must be 0 (positive). A value with MSB set must use the   */
-        /* canonical 0x00 sign-pad — caught by the != 0x00 case above failing the above check. */
+        /* MSB of first content byte must be 0 (positive INTEGER without canonical 0x00 pad). */
         if (sig[pos] >= 0x80u) return false;
 
         pos += intLen;
@@ -444,8 +420,7 @@ static bool _SSFECDSAValidateStrictDER(const uint8_t *sig, size_t sigLen, uint16
     return true;
 }
 
-static bool _SSFECDSASigDecode(const uint8_t *sig, size_t sigLen,
-                               const SSFECCurveParams_t *c,
+static bool _SSFECDSASigDecode(const uint8_t *sig, size_t sigLen, const SSFECCurveParams_t *c,
                                SSFBN_t *r, SSFBN_t *s)
 {
     SSFASN1Cursor_t cursor, inner, next, next2;
@@ -484,10 +459,7 @@ static bool _SSFECDSASigDecode(const uint8_t *sig, size_t sigLen,
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: reduce an affine x-coordinate modulo n, constant-time.                              */
-/* For NIST curves, p > n but p < 2n, so at most one subtraction is needed. The CT version       */
-/* always does the trial subtract and uses a mask to decide whether to commit. This closes the   */
-/* "is Rx >= n?" one-bit timing leak that fired in ECDSA Sign on the secret-derived Rx value.    */
+/* Internal: reduces affine x mod n constant-time (one trial subtract + masked commit).          */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFECDSAReduceModN(SSFBN_t *r, const SSFBN_t *x, const SSFECCurveParams_t *c)
 {
@@ -528,8 +500,7 @@ static bool _SSFECDSAPrivKeyIsValid(const SSFBN_t *d, const SSFECCurveParams_t *
 /* --------------------------------------------------------------------------------------------- */
 /* Generate an ECDSA key pair.                                                                   */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFECDSAKeyGen(SSFECCurve_t curve,
-                    uint8_t *privKey, size_t privKeySize,
+bool SSFECDSAKeyGen(SSFECCurve_t curve, uint8_t *privKey, size_t privKeySize,
                     uint8_t *pubKey, size_t pubKeySize, size_t *pubKeyLen)
 {
     const SSFECCurveParams_t *c = SSFECGetCurveParams(curve);
@@ -553,8 +524,7 @@ bool SSFECDSAKeyGen(SSFECCurve_t curve,
     SSFPRNGInitContext(&prng, entropy, sizeof(entropy));
     prngInited = true;
 
-    /* Generate d in [1, n-1] via rejection sampling. SSFBNRandomBelow returns a value in        */
-    /* [0, n) — the only remaining case we need to guard is d == 0 (probability ~2^-bitLen(n)). */
+    /* Generate d in [1, n-1] via rejection sampling (guard against d == 0). */
     for (attempts = 0; attempts < 100u; attempts++)
     {
         /* Did the underlying rejection sampler succeed? */
@@ -586,9 +556,7 @@ bool SSFECDSAKeyGen(SSFECCurve_t curve,
     ok = true;
 
 cleanup:
-    /* Wipe the private key bignum and the entropy seed buffer. The entropy bytes are the        */
-    /* HMAC-DRBG seed that produced d; leaving them on the stack is equivalent to leaking d.     */
-    /* SSFPRNGDeInitContext also zeroes the PRNG state derived from those bytes.                 */
+    /* Wipe d and the HMAC-DRBG seed (leaving the seed on the stack is equivalent to leaking d). */
     SSFBNZeroize(&d);
     if (prngInited) SSFPRNGDeInitContext(&prng);
     SSFCryptSecureZero(entropy, sizeof(entropy));
@@ -605,8 +573,7 @@ cleanup:
 /* --------------------------------------------------------------------------------------------- */
 /* Compute the public key from a private key.                                                    */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFECDSAPubKeyFromPrivKey(SSFECCurve_t curve,
-                               const uint8_t *privKey, size_t privKeyLen,
+bool SSFECDSAPubKeyFromPrivKey(SSFECCurve_t curve, const uint8_t *privKey, size_t privKeyLen,
                                uint8_t *pubKey, size_t pubKeySize, size_t *pubKeyLen)
 {
     const SSFECCurveParams_t *c = SSFECGetCurveParams(curve);
@@ -652,20 +619,10 @@ bool SSFECDSAPubKeyIsValid(SSFECCurve_t curve, const uint8_t *pubKey, size_t pub
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Sign a message hash using ECDSA with deterministic nonce (RFC 6979).                          */
-/*                                                                                               */
-/* Algorithm (FIPS 186-4 section 6.4):                                                           */
-/* 1. e = bits2int(hash)                                                                         */
-/* 2. k = RFC6979_HMAC_DRBG(privKey, hash)                                                      */
-/* 3. R = k * G                                                                                  */
-/* 4. r = Rx mod n                                                                               */
-/* 5. s = k^(-1) * (e + r * d) mod n                                                             */
-/* 6. Return DER(SEQUENCE { INTEGER r, INTEGER s })                                              */
+/* Signs a message hash using ECDSA with deterministic nonce (RFC 6979 / FIPS 186-4 §6.4).       */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFECDSASign(SSFECCurve_t curve,
-                  const uint8_t *privKey, size_t privKeyLen,
-                  const uint8_t *hash, size_t hashLen,
-                  uint8_t *sig, size_t sigSize, size_t *sigLen)
+bool SSFECDSASign(SSFECCurve_t curve, const uint8_t *privKey, size_t privKeyLen,
+                  const uint8_t *hash, size_t hashLen, uint8_t *sig, size_t sigSize, size_t *sigLen)
 {
     const SSFECCurveParams_t *c = SSFECGetCurveParams(curve);
     SSFBN_DEFINE(d, SSF_EC_MAX_LIMBS);
@@ -686,9 +643,7 @@ bool SSFECDSASign(SSFECCurve_t curve,
     SSF_REQUIRE(sigLen != NULL);
     SSF_REQUIRE(c != NULL);
     SSF_REQUIRE(privKeyLen == c->bytes);
-    /* RFC 5758 §3.2 / FIPS 186-4 §6.4: ECDSA may pair any hash with any curve. The current     */
-    /* _SSFECDSABits2Int implementation handles hashLen <= c->bytes correctly (no right-shift   */
-    /* required); longer hashes would need bit-truncation which is not implemented.             */
+    /* hashLen <= c->bytes (longer hashes would need bit-truncation, not implemented). */
     SSF_REQUIRE(hashLen > 0u && hashLen <= c->bytes);
 
     /* Import private key */
@@ -714,29 +669,18 @@ bool SSFECDSASign(SSFECCurve_t curve,
     /* s = k^(-1) * (e + r * d) mod n */
     if (!SSFBNModInv(&kInv, &k, &c->n)) goto cleanup;
 
-    /* CT mod-n arithmetic on secret operands. SSFBNModMul uses SSFBNMod whose iteration count   */
-    /* and per-iteration branches leak the bit length and intermediate magnitudes of secret       */
-    /* operands (d = private key, kInv = secret nonce inverse). SSFBNModMulCT runs fixed work    */
-    /* regardless of input. SSFBNModAdd is already CT (no data-dependent branches in its loop).  */
-    /* Measured cost: zero — the variable-iteration SSFBNMod already runs near worst-case for    */
-    /* 256-bit operands, so swapping in the fixed-iteration CT version is free.                  */
+    /* CT mod-n arithmetic on secret operands (d, kInv): SSFBNModMulCT, SSFBNModAdd both CT. */
     SSFBNModMulCT(&tmp, &r, &d, &c->n);     /* r * d mod n */
     SSFBNModAdd(&tmp, &e, &tmp, &c->n);     /* e + r*d mod n */
     SSFBNModMulCT(&s, &kInv, &tmp, &c->n);  /* k^(-1) * (e + r*d) mod n */
 
     if (SSFBNIsZero(&s)) goto cleanup;
 
-    /* DER-encode the signature. r and s are not secret (they are about to be published), but    */
-    /* tmp held r·d mod n on the way to s and is wiped by the cleanup block below.               */
+    /* DER-encode the signature. */
     ok = _SSFECDSASigEncode(&r, &s, c, sig, sigSize, sigLen);
 
 cleanup:
-    /* Wipe every limb that ever held secret-derived material. d and k are obviously sensitive;  */
-    /* kInv = k^-1 mod n leaks k; tmp held r·d mod n; e is bits2int(hash) (public, but cheap to  */
-    /* wipe and keeps the audit invariant uniform); R/Rx/Ry are k·G — affine x mod n is the      */
-    /* signature's r (public), but the unreduced bits and the y-coordinate are not, and the      */
-    /* Jacobian projective Z aliases k. Zero them all before unwinding the frame. The audit hook */
-    /* in test builds confirms this invariant on every exit path.                                 */
+    /* Wipe every secret-derived limb (d, k, kInv, tmp, R/Rx/Ry; e wiped for audit uniformity). */
     SSFBNZeroize(&d);
     SSFBNZeroize(&k);
     SSFBNZeroize(&e);
@@ -758,31 +702,13 @@ cleanup:
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Verify an ECDSA signature over a message hash.                                                */
-/*                                                                                               */
-/* Algorithm (FIPS 186-4 section 6.4):                                                           */
-/* 1. Decode DER signature -> (r, s)                                                             */
-/* 2. Check r, s in [1, n-1]                                                                     */
-/* 3. e = bits2int(hash)                                                                         */
-/* 4. w = s^(-1) mod n                                                                           */
-/* 5. u1 = e * w mod n                                                                           */
-/* 6. u2 = r * w mod n                                                                           */
-/* 7. R = u1 * G + u2 * Q                                                                       */
-/* 8. v = Rx mod n                                                                               */
-/* 9. Accept iff v == r                                                                          */
-/* --------------------------------------------------------------------------------------------- */
-/* --------------------------------------------------------------------------------------------- */
-/* Verify stage 1: decode + validate pubKey, decode signature, range-check r/s, compute           */
-/* e = bits2int(hash), w = s^(-1) mod n, u1 = e*w mod n, u2 = r*w mod n. Local s, e, w are        */
-/* released when this helper returns, so they don't contribute to peak stack during the later    */
-/* scalar multiplication. Outputs go into caller-owned r, u1, u2, Q slots.                       */
+/* Verify stage 1: decode + validate pubKey, decode sig, range-check r/s, compute e, w, u1, u2.  */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFECDSAVerifyInit(const SSFECCurveParams_t *c, SSFECCurve_t curve,
                                 const uint8_t *pubKey, size_t pubKeyLen,
-                                const uint8_t *hash,   size_t hashLen,
-                                const uint8_t *sig,    size_t sigLen,
-                                SSFBN_t *rOut, SSFBN_t *u1Out, SSFBN_t *u2Out,
-                                SSFECPoint_t *QOut)
+                                const uint8_t *hash, size_t hashLen,
+                                const uint8_t *sig, size_t sigLen,
+                                SSFBN_t *rOut, SSFBN_t *u1Out, SSFBN_t *u2Out, SSFECPoint_t *QOut)
 {
     SSFBN_DEFINE(s, SSF_EC_MAX_LIMBS);
     SSFBN_DEFINE(e, SSF_EC_MAX_LIMBS);
@@ -796,10 +722,7 @@ static bool _SSFECDSAVerifyInit(const SSFECCurveParams_t *c, SSFECCurve_t curve,
     _SSFECDSABits2Int(&e, hash, hashLen, c);
     if (SSFBNCmp(&e, &c->n) >= 0) SSFBNSub(&e, &e, &c->n);
 
-    /* s is part of the (public) signature, so non-CT inversion is safe here.                  */
-    /* SSFBNModInvExt (binary EEA) is ~1.6× faster than SSFBNModInv (Fermat-via-ModExp) at     */
-    /* P-256 size in this codebase — measured 44 µs vs 70.5 µs per call. Saves ~25 µs per      */
-    /* Verify, ~5% of total Verify cost.                                                        */
+    /* s is public, so non-CT SSFBNModInvExt is faster than the CT SSFBNModInv. */
     if (!SSFBNModInvExt(&w, &s, &c->n)) return false;
 
     SSFBNModMul(u1Out, &e, &w, &c->n);
@@ -808,13 +731,10 @@ static bool _SSFECDSAVerifyInit(const SSFECCurveParams_t *c, SSFECCurve_t curve,
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Verify stage 2: compute R = u1 * G + u2 * Q. When fixed-base tables are configured for the    */
-/* curve, dispatches to SSFECScalarMulDualBase (~10-15% faster than plain Shamir's trick on the  */
-/* dual scalar mul); otherwise falls back to SSFECScalarMulDual. Rejects R = O per FIPS 186-4.   */
+/* Verify stage 2: R = u1 * G + u2 * Q (dispatches to fixed-base dual when configured).          */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFECDSAVerifyGetR(const SSFECCurveParams_t *c, SSFECCurve_t curve,
-                                const SSFBN_t *u1, const SSFBN_t *u2,
-                                const SSFECPoint_t *Q,
+                                const SSFBN_t *u1, const SSFBN_t *u2, const SSFECPoint_t *Q,
                                 SSFECPoint_t *Rout)
 {
 #if (SSF_EC_CONFIG_FIXED_BASE_P256 == 1) || (SSF_EC_CONFIG_FIXED_BASE_P384 == 1)
@@ -832,18 +752,7 @@ static bool _SSFECDSAVerifyGetR(const SSFECCurveParams_t *c, SSFECCurve_t curve,
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Verify stage 3: check r ≡ affine(R).x (mod n) directly in Jacobian coordinates, without       */
-/* inverting Z. Affine x = R.X / R.Z² mod p, and ECDSA verify wants (affine_x mod n) == r.       */
-/*                                                                                                */
-/*   Case A (always check): affine_x == r              ⇔  r · Z² ≡ R.X  (mod p)                 */
-/*   Case B (only if r < p − n): affine_x == r + n     ⇔  (r + n) · Z² ≡ R.X  (mod p)            */
-/*                                                                                                */
-/* Case B handles the rare wraparound where the original signer's affine x landed in [n, p−1]    */
-/* and got reduced mod n during signing. For NIST P-256 / P-384 this fires with probability      */
-/* (p − n)/p ≈ 2^−128 / 2^−191 respectively but is mandatory for spec correctness.               */
-/*                                                                                                */
-/* Saves one full SSFBNModInv per Verify versus the previous PointToAffine path (~150 µs at      */
-/* current Fermat-via-ModExp cost), at the cost of one ModSqr + one or two ModMul mod p.         */
+/* Verify stage 3: r ≡ affine(R).x (mod n) checked in Jacobian (no inversion of Z).              */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFECDSAVerifyCheckR(const SSFECCurveParams_t *c, SSFECCurve_t curve,
                                   const SSFECPoint_t *R, const SSFBN_t *r)
@@ -862,8 +771,7 @@ static bool _SSFECDSAVerifyCheckR(const SSFECCurveParams_t *c, SSFECCurve_t curv
     SSFBNModMulNIST(&t, r, &z2, &c->p);
     if (SSFBNCmp(&t, &R->x) == 0) return true;
 
-    /* Case B: only if r < p - n (wraparound is possible). r + n is < p in that case so no   */
-    /* extra mod-p reduction is needed before the multiply.                                  */
+    /* Case B: only if r < p - n (wraparound; r + n is then < p without further reduction). */
     SSFBNSub(&pMinusN, &c->p, &c->n);
     if (SSFBNCmp(r, &pMinusN) < 0)
     {
@@ -882,10 +790,8 @@ bool _SSFECDSAVerifyCheckRForTest(SSFECCurve_t curve, const SSFECPoint_t *R, con
     return _SSFECDSAVerifyCheckR(c, curve, R, r);
 }
 
-bool SSFECDSAVerify(SSFECCurve_t curve,
-                    const uint8_t *pubKey, size_t pubKeyLen,
-                    const uint8_t *hash, size_t hashLen,
-                    const uint8_t *sig, size_t sigLen)
+bool SSFECDSAVerify(SSFECCurve_t curve, const uint8_t *pubKey, size_t pubKeyLen,
+                    const uint8_t *hash, size_t hashLen, const uint8_t *sig, size_t sigLen)
 {
     const SSFECCurveParams_t *c = SSFECGetCurveParams(curve);
     SSFBN_DEFINE(r, SSF_EC_MAX_LIMBS);
@@ -908,16 +814,9 @@ bool SSFECDSAVerify(SSFECCurve_t curve,
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Compute an ECDH shared secret.                                                                */
-/*                                                                                               */
-/* Algorithm (NIST SP 800-56A Rev. 3):                                                           */
-/* 1. Validate peer's public key Q                                                               */
-/* 2. S = d * Q (scalar multiplication)                                                          */
-/* 3. If S is identity, fail                                                                     */
-/* 4. Shared secret = Sx (x-coordinate of S)                                                     */
+/* Computes an ECDH shared secret S = d * Q (NIST SP 800-56A Rev. 3); returns Sx.                */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFECDHComputeSecret(SSFECCurve_t curve,
-                          const uint8_t *privKey, size_t privKeyLen,
+bool SSFECDHComputeSecret(SSFECCurve_t curve, const uint8_t *privKey, size_t privKeyLen,
                           const uint8_t *peerPubKey, size_t peerPubKeyLen,
                           uint8_t *secret, size_t secretSize, size_t *secretLen)
 {
@@ -944,8 +843,7 @@ bool SSFECDHComputeSecret(SSFECCurve_t curve,
     /* Decode and validate peer's public key */
     if (!SSFECPointDecode(&Q, curve, peerPubKey, peerPubKeyLen)) goto cleanup;
 
-    /* S = d * Q. The shared point and its affine coordinates are the actual ECDH output —    */
-    /* they remain on the stack until the cleanup block wipes them.                            */
+    /* S = d * Q (the shared point; affine coords wiped in the cleanup block). */
     SSFECScalarMul(&S, &d, &Q, curve);
 
     /* S must not be identity */
@@ -959,9 +857,7 @@ bool SSFECDHComputeSecret(SSFECCurve_t curve,
     ok = true;
 
 cleanup:
-    /* Wipe local privKey and the shared point/affine coordinates. The caller's `secret` buffer */
-    /* still holds Sx (that's the API contract); only stack residue is cleared here. Q is the   */
-    /* peer's public key — not secret — but Q is left in place because it isn't sensitive.      */
+    /* Wipe d and the shared-point intermediates (caller's secret buffer keeps Sx). */
     SSFBNZeroize(&d);
     SSFBNZeroize(&S.x);
     SSFBNZeroize(&S.y);
@@ -976,3 +872,4 @@ cleanup:
 #endif
     return ok;
 }
+

@@ -326,7 +326,11 @@ void SSFSHA2_32End(SSFSHA2_32Context_t *context, uint8_t *out, uint32_t outSize)
     tmp = htonl(context->h[4]); memcpy(&out[16], &tmp, sizeof(uint32_t));
     tmp = htonl(context->h[5]); memcpy(&out[20], &tmp, sizeof(uint32_t));
     tmp = htonl(context->h[6]); memcpy(&out[24], &tmp, sizeof(uint32_t));
-    if (context->hashBitSize != 224) { tmp = htonl(context->h[7]); memcpy(&out[28], &tmp, sizeof(uint32_t)); }
+    if (context->hashBitSize != 224)
+    {
+        tmp = htonl(context->h[7]);
+        memcpy(&out[28], &tmp, sizeof(uint32_t));
+    }
 
     /* Zeroize pad — it holds trailing message bytes and the encoded bit length. */
     SSFCryptSecureZero(pad, sizeof(pad));
@@ -480,3 +484,4 @@ void SSFSHA2_64End(SSFSHA2_64Context_t *context, uint8_t *out, uint32_t outSize)
     /* Invalidate context to prevent reuse without re-init */
     SSFCryptSecureZero(context, sizeof(SSFSHA2_64Context_t));
 }
+

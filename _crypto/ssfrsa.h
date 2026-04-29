@@ -88,18 +88,6 @@ extern "C" {
 #include "ssfbn.h"
 
 /* --------------------------------------------------------------------------------------------- */
-/* Limitations                                                                                   */
-/* --------------------------------------------------------------------------------------------- */
-/* Supported key sizes: 2048, 3072, 4096 bits (limited by SSF_BN_CONFIG_MAX_BITS).               */
-/* Public exponent is fixed at e = 65537 (F4).                                                   */
-/* Key generation requires platform entropy (/dev/urandom on POSIX).                             */
-/* Key generation is computationally expensive: seconds on modern CPUs, minutes on embedded.     */
-/* Private key operations use CRT for ~4x speedup over direct modular exponentiation.            */
-/* Keys are DER-encoded in PKCS#1 format (RSAPublicKey, RSAPrivateKey).                          */
-/* PSS salt length equals the hash output length (per TLS 1.3 requirement).                      */
-/* --------------------------------------------------------------------------------------------- */
-
-/* --------------------------------------------------------------------------------------------- */
 /* Compile-time validation                                                                       */
 /* --------------------------------------------------------------------------------------------- */
 #if (SSF_RSA_CONFIG_ENABLE_2048 == 0) && \
@@ -108,8 +96,7 @@ extern "C" {
 #error At least one of SSF_RSA_CONFIG_ENABLE_2048 / 3072 / 4096 must be enabled.
 #endif
 
-/* The BN module's working width must hold a 2N-limb product for any enabled RSA size — the CRT  */
-/* recombine and λ(n) inversion both go through SSFBNMul on full-width operands.                 */
+/* The BN module's working width must hold a 2N-limb product for any enabled RSA size. */
 #if SSF_RSA_CONFIG_ENABLE_4096 == 1
 #if SSF_BN_CONFIG_MAX_BITS < 8192
 #error SSF_BN_CONFIG_MAX_BITS must be >= 8192 for RSA-4096 support (2 x 4096-bit modulus).
@@ -128,10 +115,7 @@ extern "C" {
 /* Defines and typedefs                                                                          */
 /* --------------------------------------------------------------------------------------------- */
 
-/* Maximum key size in bits — derived from the largest enabled key size, not from the BN cap.   */
-/* Tracks the public-key validator's accepted set; sizing API output buffers and the encoder's  */
-/* DER scratch on this rather than SSF_BN_CONFIG_MAX_BITS lets a 2048-only build use            */
-/* meaningfully smaller stack and parameter buffers even when the BN cap is left at the default.*/
+/* Maximum key size in bits, derived from the largest enabled key size. */
 #if SSF_RSA_CONFIG_ENABLE_4096 == 1
 #define SSF_RSA_MAX_KEY_BITS (4096u)
 #elif SSF_RSA_CONFIG_ENABLE_3072 == 1
@@ -166,92 +150,46 @@ typedef enum
 /* External interface: key generation                                                            */
 /* --------------------------------------------------------------------------------------------- */
 #if SSF_RSA_CONFIG_ENABLE_KEYGEN == 1
-
-/* Generate an RSA key pair.                                                                     */
-/* bits must be one of the enabled sizes (SSF_RSA_CONFIG_ENABLE_2048 / 3072 / 4096).             */
-/* privKeyDer receives the PKCS#1 RSAPrivateKey DER encoding.                                    */
-/* pubKeyDer receives the PKCS#1 RSAPublicKey DER encoding.                                      */
-/* Returns false on failure.                                                                     */
 bool SSFRSAKeyGen(uint16_t bits,
                   uint8_t *privKeyDer, size_t privKeyDerSize, size_t *privKeyDerLen,
                   uint8_t *pubKeyDer, size_t pubKeyDerSize, size_t *pubKeyDerLen);
-
 #endif /* SSF_RSA_CONFIG_ENABLE_KEYGEN */
 
 /* --------------------------------------------------------------------------------------------- */
 /* External interface: key validation                                                            */
 /* --------------------------------------------------------------------------------------------- */
-
-/* Validate a DER-encoded RSA public key. Returns true if the DER parses, the modulus has a      */
-/* supported bit length (one of the enabled sizes — see SSF_RSA_CONFIG_ENABLE_*), the public     */
-/* exponent is at least 65537 and odd, and 1 < e < n. Does not verify that n is actually a       */
-/* product of two primes (which would require factoring); a deliberately weak modulus with a     */
-/* small factor still passes here.                                                                */
 bool SSFRSAPubKeyIsValid(const uint8_t *pubKeyDer, size_t pubKeyDerLen);
-
-/* Validate a DER-encoded PKCS#1 RSAPrivateKey. Returns true if the DER parses with version=0,   */
-/* the public-side fields satisfy SSFRSAPubKeyIsValid, and the algebraic CRT consistency holds:  */
-/*   n == p * q                                                                                  */
-/*   dp == d mod (p - 1)                                                                         */
-/*   dq == d mod (q - 1)                                                                         */
-/*   qInv * q ≡ 1 (mod p)                                                                        */
-/* These checks confirm the key is internally consistent — a tampered private key (corrupted     */
-/* dp/dq/qInv, or an attempt to swap p and q labels) fails here. Does not verify that p and q    */
-/* are actually prime or check FIPS 186-4 §B.3 keygen-side bounds.                                */
 bool SSFRSAPrivKeyIsValid(const uint8_t *privKeyDer, size_t privKeyDerLen);
 
 /* --------------------------------------------------------------------------------------------- */
-/* FIPS 186-4 §B.3 keygen post-condition checks. Used internally by SSFRSAKeyGen and exposed for */
-/* unit testing and (future) imported-key validation. halfBits = nlen / 2 (i.e., 1024 for RSA-   */
-/* 2048, 1536 for RSA-3072, 2048 for RSA-4096).                                                  */
+/* FIPS 186-4 §B.3 keygen post-condition checks (halfBits = nlen / 2).                           */
 /* --------------------------------------------------------------------------------------------- */
-
-/* §B.3.3 step 5.4: returns true if |p - q| > 2^(halfBits - 100). Defends against Fermat-style   */
-/* factorization when the two primes happen to be unusually close.                                */
 bool SSFRSAFipsPrimeDistanceOK(const SSFBN_t *p, const SSFBN_t *q, uint16_t halfBits);
-
-/* §B.3.1: returns true if d > 2^halfBits. Defends against Wiener's continued-fraction attack    */
-/* on small private exponents.                                                                    */
 bool SSFRSAFipsDLowerBoundOK(const SSFBN_t *d, uint16_t halfBits);
-
-/* Returns true if gcd(e, p-1) == 1 AND gcd(e, q-1) == 1. Both must hold for                     */
-/* d = e^(-1) mod λ(n) to exist; the modular inverse fails otherwise.                            */
 bool SSFRSAFipsECoprimeOK(const SSFBN_t *e, const SSFBN_t *pMinus1, const SSFBN_t *qMinus1);
 
 /* --------------------------------------------------------------------------------------------- */
 /* External interface: PKCS#1 v1.5 signature (RFC 8017 Section 8.2)                              */
 /* --------------------------------------------------------------------------------------------- */
 #if SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1
-
-/* Sign a message hash using RSASSA-PKCS1-v1_5. Deterministic (no randomness needed).            */
-/* hashVal is the pre-computed message hash. hashLen must match the hash algorithm's output size. */
-/* sig receives the signature (keyBytes long). sigLen receives the actual length written.         */
-bool SSFRSASignPKCS1(const uint8_t *privKeyDer, size_t privKeyDerLen,
-                     SSFRSAHash_t hash, const uint8_t *hashVal, size_t hashLen,
+bool SSFRSASignPKCS1(const uint8_t *privKeyDer, size_t privKeyDerLen, SSFRSAHash_t hash,
+                     const uint8_t *hashVal, size_t hashLen,
                      uint8_t *sig, size_t sigSize, size_t *sigLen);
-
-/* Verify an RSASSA-PKCS1-v1_5 signature.                                                       */
-bool SSFRSAVerifyPKCS1(const uint8_t *pubKeyDer, size_t pubKeyDerLen,
-                       SSFRSAHash_t hash, const uint8_t *hashVal, size_t hashLen,
+bool SSFRSAVerifyPKCS1(const uint8_t *pubKeyDer, size_t pubKeyDerLen, SSFRSAHash_t hash,
+                       const uint8_t *hashVal, size_t hashLen,
                        const uint8_t *sig, size_t sigLen);
-
 #endif /* SSF_RSA_CONFIG_ENABLE_PKCS1_V15 */
 
 /* --------------------------------------------------------------------------------------------- */
 /* External interface: RSA-PSS signature (RFC 8017 Section 8.1)                                  */
 /* --------------------------------------------------------------------------------------------- */
 #if SSF_RSA_CONFIG_ENABLE_PSS == 1
-
-/* Sign a message hash using RSASSA-PSS with random salt (salt length = hash length).            */
-bool SSFRSASignPSS(const uint8_t *privKeyDer, size_t privKeyDerLen,
-                   SSFRSAHash_t hash, const uint8_t *hashVal, size_t hashLen,
+bool SSFRSASignPSS(const uint8_t *privKeyDer, size_t privKeyDerLen, SSFRSAHash_t hash,
+                   const uint8_t *hashVal, size_t hashLen,
                    uint8_t *sig, size_t sigSize, size_t *sigLen);
-
-/* Verify an RSASSA-PSS signature.                                                              */
-bool SSFRSAVerifyPSS(const uint8_t *pubKeyDer, size_t pubKeyDerLen,
-                     SSFRSAHash_t hash, const uint8_t *hashVal, size_t hashLen,
+bool SSFRSAVerifyPSS(const uint8_t *pubKeyDer, size_t pubKeyDerLen, SSFRSAHash_t hash,
+                     const uint8_t *hashVal, size_t hashLen,
                      const uint8_t *sig, size_t sigLen);
-
 #endif /* SSF_RSA_CONFIG_ENABLE_PSS */
 
 /* --------------------------------------------------------------------------------------------- */
@@ -266,3 +204,4 @@ void SSFRSAUnitTest(void);
 #endif
 
 #endif /* SSF_RSA_H_INCLUDE */
+

@@ -92,3 +92,4 @@ void SSFPRNGGetRandom(SSFPRNGContext_t *context, uint8_t *random, size_t randomS
     /* Copy requested number of random numbers to user buffer */
     memcpy(random, ct, randomSize);
 }
+

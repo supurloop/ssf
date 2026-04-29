@@ -84,16 +84,6 @@ extern "C" {
 #include "ssfport.h"
 
 /* --------------------------------------------------------------------------------------------- */
-/* Limitations                                                                                   */
-/* --------------------------------------------------------------------------------------------- */
-/* Ed25519 pure mode only (no pre-hashing / Ed25519ctx / Ed25519ph).                             */
-/* Seed-based API: the 32-byte seed is the secret; the expanded key is derived internally.       */
-/* Signing is deterministic per RFC 8032: the nonce is derived from SHA-512(prefix || message).  */
-/* Self-contained: dedicated GF(2^255-19) field arithmetic; no ssfbn dependency.                 */
-/* Requires SHA-512 from ssfsha2 module and the platform entropy source for SSFEd25519KeyGen.    */
-/* --------------------------------------------------------------------------------------------- */
-
-/* --------------------------------------------------------------------------------------------- */
 /* Defines                                                                                       */
 /* --------------------------------------------------------------------------------------------- */
 #define SSF_ED25519_SEED_SIZE     (32u)
@@ -103,27 +93,13 @@ extern "C" {
 /* --------------------------------------------------------------------------------------------- */
 /* External interface                                                                            */
 /* --------------------------------------------------------------------------------------------- */
-
-/* Generate an Ed25519 key pair.                                                                 */
-/* seed receives 32 random bytes. pubKey receives the derived 32-byte public key.                */
-/* Requires platform entropy (/dev/urandom on POSIX).                                            */
 bool SSFEd25519KeyGen(uint8_t seed[SSF_ED25519_SEED_SIZE],
                       uint8_t pubKey[SSF_ED25519_PUB_KEY_SIZE]);
-
-/* Derive public key from a 32-byte seed.                                                        */
 void SSFEd25519PubKeyFromSeed(const uint8_t seed[SSF_ED25519_SEED_SIZE],
-                               uint8_t pubKey[SSF_ED25519_PUB_KEY_SIZE]);
-
-/* Sign a message. Ed25519 signs the raw message (hashing is internal per RFC 8032).             */
-/* Returns true on success; returns false if the verify-after-sign check rejects the produced     */
-/* signature. A false return indicates either a fault during the private operation or a pubKey    */
-/* that does not correspond to seed. On false, sig is wiped to all zeros.                         */
+                              uint8_t pubKey[SSF_ED25519_PUB_KEY_SIZE]);
 bool SSFEd25519Sign(const uint8_t seed[SSF_ED25519_SEED_SIZE],
                     const uint8_t pubKey[SSF_ED25519_PUB_KEY_SIZE],
-                    const uint8_t *msg, size_t msgLen,
-                    uint8_t sig[SSF_ED25519_SIG_SIZE]);
-
-/* Verify a signature. Returns true if valid, false otherwise.                                   */
+                    const uint8_t *msg, size_t msgLen, uint8_t sig[SSF_ED25519_SIG_SIZE]);
 bool SSFEd25519Verify(const uint8_t pubKey[SSF_ED25519_PUB_KEY_SIZE],
                       const uint8_t *msg, size_t msgLen,
                       const uint8_t sig[SSF_ED25519_SIG_SIZE]);
@@ -140,3 +116,4 @@ void SSFEd25519UnitTest(void);
 #endif
 
 #endif /* SSF_ED25519_H_INCLUDE */
+

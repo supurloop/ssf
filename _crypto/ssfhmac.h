@@ -77,23 +77,12 @@ typedef struct SSFHMACContext
 /* --------------------------------------------------------------------------------------------- */
 /* External interface                                                                            */
 /* --------------------------------------------------------------------------------------------- */
-
-/* Single-call HMAC: computes the MAC in one call. */
-bool SSFHMAC(SSFHMACHash_t hash, const uint8_t *key, size_t keyLen,
-             const uint8_t *msg, size_t msgLen,
-             uint8_t *macOut, size_t macOutSize);
-
-/* Incremental HMAC: Begin/Update/End for streaming messages. */
-void SSFHMACBegin(SSFHMACContext_t *ctx, SSFHMACHash_t hash,
-                  const uint8_t *key, size_t keyLen);
+bool SSFHMAC(SSFHMACHash_t hash, const uint8_t *key, size_t keyLen, const uint8_t *msg,
+             size_t msgLen, uint8_t *macOut, size_t macOutSize);
+void SSFHMACBegin(SSFHMACContext_t *ctx, SSFHMACHash_t hash, const uint8_t *key, size_t keyLen);
 void SSFHMACUpdate(SSFHMACContext_t *ctx, const uint8_t *data, size_t dataLen);
 void SSFHMACEnd(SSFHMACContext_t *ctx, uint8_t *macOut, size_t macOutSize);
-
-/* Securely zeroize an HMAC context. Call before the context goes out of scope to clear */
-/* the key-derived oKeyPad and any inner-hash state. */
 void SSFHMACDeInit(SSFHMACContext_t *ctx);
-
-/* Helper: returns the output size in bytes for a given hash. */
 size_t SSFHMACGetHashSize(SSFHMACHash_t hash);
 
 /* --------------------------------------------------------------------------------------------- */
@@ -101,11 +90,10 @@ size_t SSFHMACGetHashSize(SSFHMACHash_t hash);
 /* --------------------------------------------------------------------------------------------- */
 #if SSF_CONFIG_HMAC_UNIT_TEST == 1
 void SSFHMACUnitTest(void);
-/* Test hook: forces SSFHMACUpdate's internal chunking with a configurable max chunk size, so   */
-/* the chunking loop is exercisable on practical buffer sizes (the production max is UINT32_MAX */
-/* which a unit test can't allocate). Not for production use.                                   */
+
+/* Test hook: feeds data through chunking with a caller-supplied chunk max (not for production). */
 void _SSFHMACTestHookUpdateChunked(SSFHMACContext_t *ctx, const uint8_t *data, size_t dataLen,
-                                    uint32_t chunkMax);
+                                   uint32_t chunkMax);
 #endif /* SSF_CONFIG_HMAC_UNIT_TEST */
 
 #ifdef __cplusplus
@@ -113,3 +101,4 @@ void _SSFHMACTestHookUpdateChunked(SSFHMACContext_t *ctx, const uint8_t *data, s
 #endif
 
 #endif /* SSF_HMAC_H_INCLUDE */
+

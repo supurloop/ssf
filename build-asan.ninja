@@ -1,0 +1,230 @@
+# SSF Build Configuration — AddressSanitizer + UndefinedBehaviorSanitizer.
+#
+# Builds ./ssf-asan with -O1 -g and -fsanitize=address,undefined. Run the
+# unit suite under it to surface stack/heap memory issues (ASan) and signed
+# overflow / shift overflow / nonnull-attribute violations (UBSan):
+#
+#   ninja -f build-asan.ninja                   # build ./ssf-asan
+#   ASAN_OPTIONS=halt_on_error=0:abort_on_error=0 \
+#   UBSAN_OPTIONS=halt_on_error=0:print_stacktrace=1 \
+#       ./ssf-asan                              # run, surface all findings
+#
+# OpenSSL cross-checks are disabled (-DSSF_CONFIG_HAVE_OPENSSL=0) so the run
+# exercises only SSF-internal code, matching what ships on cross-arch targets.
+#
+# macOS-arm64 caveat: ASan can hit a dyld-init race on Apple Silicon
+# (CHECK failed: sanitizer_malloc_mac.inc:189). If that fires, run inside
+# Linux Docker — see tools/cross-test/docker for an environment with native
+# gcc + libasan; gcc:latest from Docker Hub also works:
+#
+#   docker run --rm -v "$PWD":/work -w /work gcc:latest bash -c \
+#     'apt-get update -qq && apt-get install -y -qq ninja-build > /dev/null && \
+#      sed -e "s|builddir = build-asan|builddir = build-asan-linux|" \
+#          -e "s|^build ssf-asan:|build ssf-asan-linux:|" \
+#          -e "s|^default ssf-asan|default ssf-asan-linux|" \
+#          -e "s|ldflags = -lm |ldflags = -lm -lpthread |" \
+#          build-asan.ninja > /tmp/build.ninja && \
+#      ninja -f /tmp/build.ninja && ./ssf-asan-linux'
+
+cc = gcc
+
+cflags_common = -Wall -Wextra -pedantic -Wcast-align -Wno-parentheses -Wno-unused $
+    -Wdisabled-optimization -fdiagnostics-show-option -Wstrict-overflow=5 -Wformat=2
+
+includes = -I. -I_time -I_codec -I_crypto -I_ecc -I_edc -I_fsm -I_debug $
+    -I_storage -I_struct -I_ui -I_osal -I_opt -I/opt/homebrew/include $
+    -I/usr/local/include
+
+san = -fsanitize=address,undefined -fno-omit-frame-pointer
+
+cflags = $cflags_common -O1 -g -DSSF_CONFIG_HAVE_OPENSSL=0 $san
+ldflags = -lm $san
+
+builddir = build-asan
+
+rule cc_obj
+    command = $cc -MMD -MF $out.d $cflags $includes -c $in -o $out
+    depfile = $out.d
+    description = CC $in
+
+rule link
+    command = $cc $in -o $out $ldflags
+    description = LINK $out
+
+# Top-level
+build $builddir/main.o:    cc_obj main.c
+build $builddir/ssfport.o: cc_obj ssfport.c
+
+# _codec
+build $builddir/_codec/ssfbase64.o:    cc_obj _codec/ssfbase64.c
+build $builddir/_codec/ssfbase64_ut.o: cc_obj _codec/ssfbase64_ut.c
+build $builddir/_codec/ssfdec.o:       cc_obj _codec/ssfdec.c
+build $builddir/_codec/ssfdec_ut.o:    cc_obj _codec/ssfdec_ut.c
+build $builddir/_codec/ssfgobj.o:      cc_obj _codec/ssfgobj.c
+build $builddir/_codec/ssfgobj_ut.o:   cc_obj _codec/ssfgobj_ut.c
+build $builddir/_codec/ssfhex.o:       cc_obj _codec/ssfhex.c
+build $builddir/_codec/ssfhex_ut.o:    cc_obj _codec/ssfhex_ut.c
+build $builddir/_codec/ssfini.o:       cc_obj _codec/ssfini.c
+build $builddir/_codec/ssfini_ut.o:    cc_obj _codec/ssfini_ut.c
+build $builddir/_codec/ssfjson.o:      cc_obj _codec/ssfjson.c
+build $builddir/_codec/ssfjson_ut.o:   cc_obj _codec/ssfjson_ut.c
+build $builddir/_codec/ssfstr.o:       cc_obj _codec/ssfstr.c
+build $builddir/_codec/ssfstr_ut.o:    cc_obj _codec/ssfstr_ut.c
+build $builddir/_codec/ssftlv.o:       cc_obj _codec/ssftlv.c
+build $builddir/_codec/ssftlv_ut.o:    cc_obj _codec/ssftlv_ut.c
+build $builddir/_codec/ssfubjson.o:    cc_obj _codec/ssfubjson.c
+build $builddir/_codec/ssfubjson_ut.o: cc_obj _codec/ssfubjson_ut.c
+build $builddir/_codec/ssfasn1.o:      cc_obj _codec/ssfasn1.c
+build $builddir/_codec/ssfasn1_ut.o:   cc_obj _codec/ssfasn1_ut.c
+
+# _crypto
+build $builddir/_crypto/ssfaes.o:       cc_obj _crypto/ssfaes.c
+build $builddir/_crypto/ssfaes_ut.o:    cc_obj _crypto/ssfaes_ut.c
+build $builddir/_crypto/ssfaesgcm.o:    cc_obj _crypto/ssfaesgcm.c
+build $builddir/_crypto/ssfaesgcm_ut.o: cc_obj _crypto/ssfaesgcm_ut.c
+build $builddir/_crypto/ssfprng.o:      cc_obj _crypto/ssfprng.c
+build $builddir/_crypto/ssfprng_ut.o:   cc_obj _crypto/ssfprng_ut.c
+build $builddir/_crypto/ssfsha1.o:      cc_obj _crypto/ssfsha1.c
+build $builddir/_crypto/ssfsha1_ut.o:   cc_obj _crypto/ssfsha1_ut.c
+build $builddir/_crypto/ssfsha2.o:      cc_obj _crypto/ssfsha2.c
+build $builddir/_crypto/ssfsha2_ut.o:   cc_obj _crypto/ssfsha2_ut.c
+build $builddir/_crypto/ssfbn.o:      cc_obj _crypto/ssfbn.c
+build $builddir/_crypto/ssfbn_ut.o:   cc_obj _crypto/ssfbn_ut.c
+build $builddir/_crypto/ssfchacha20.o:      cc_obj _crypto/ssfchacha20.c
+build $builddir/_crypto/ssfchacha20_ut.o:   cc_obj _crypto/ssfchacha20_ut.c
+build $builddir/_crypto/ssfcrypt.o:    cc_obj _crypto/ssfcrypt.c
+build $builddir/_crypto/ssfcrypt_ut.o: cc_obj _crypto/ssfcrypt_ut.c
+build $builddir/_crypto/ssfpoly1305.o:      cc_obj _crypto/ssfpoly1305.c
+build $builddir/_crypto/ssfpoly1305_ut.o:   cc_obj _crypto/ssfpoly1305_ut.c
+build $builddir/_crypto/ssfx25519.o:      cc_obj _crypto/ssfx25519.c
+build $builddir/_crypto/ssfx25519_ut.o:   cc_obj _crypto/ssfx25519_ut.c
+build $builddir/_crypto/ssfed25519.o:      cc_obj _crypto/ssfed25519.c
+build $builddir/_crypto/ssfed25519_ut.o:   cc_obj _crypto/ssfed25519_ut.c
+build $builddir/_crypto/ssfaesccm.o:      cc_obj _crypto/ssfaesccm.c
+build $builddir/_crypto/ssfaesccm_ut.o:   cc_obj _crypto/ssfaesccm_ut.c
+build $builddir/_crypto/ssfaesctr.o:      cc_obj _crypto/ssfaesctr.c
+build $builddir/_crypto/ssfaesctr_ut.o:   cc_obj _crypto/ssfaesctr_ut.c
+build $builddir/_crypto/ssfhmac.o:      cc_obj _crypto/ssfhmac.c
+build $builddir/_crypto/ssfhmac_ut.o:   cc_obj _crypto/ssfhmac_ut.c
+build $builddir/_crypto/ssfchacha20poly1305.o:      cc_obj _crypto/ssfchacha20poly1305.c
+build $builddir/_crypto/ssfchacha20poly1305_ut.o:   cc_obj _crypto/ssfchacha20poly1305_ut.c
+build $builddir/_crypto/ssfec.o:      cc_obj _crypto/ssfec.c
+build $builddir/_crypto/ssfec_ut.o:   cc_obj _crypto/ssfec_ut.c
+build $builddir/_crypto/ssfhkdf.o:      cc_obj _crypto/ssfhkdf.c
+build $builddir/_crypto/ssfhkdf_ut.o:   cc_obj _crypto/ssfhkdf_ut.c
+build $builddir/_crypto/ssfecdsa.o:      cc_obj _crypto/ssfecdsa.c
+build $builddir/_crypto/ssfecdsa_ut.o:   cc_obj _crypto/ssfecdsa_ut.c
+build $builddir/_crypto/ssfrsa.o:      cc_obj _crypto/ssfrsa.c
+build $builddir/_crypto/ssfrsa_ut.o:   cc_obj _crypto/ssfrsa_ut.c
+build $builddir/_crypto/ssftls.o:      cc_obj _crypto/ssftls.c
+build $builddir/_crypto/ssftls_ut.o:   cc_obj _crypto/ssftls_ut.c
+
+# _debug
+build $builddir/_debug/ssftrace.o:    cc_obj _debug/ssftrace.c
+build $builddir/_debug/ssftrace_ut.o: cc_obj _debug/ssftrace_ut.c
+
+# _ecc
+build $builddir/_ecc/ssfrs.o:    cc_obj _ecc/ssfrs.c
+build $builddir/_ecc/ssfrs_ut.o: cc_obj _ecc/ssfrs_ut.c
+
+# _edc
+build $builddir/_edc/ssfcrc16.o:    cc_obj _edc/ssfcrc16.c
+build $builddir/_edc/ssfcrc16_ut.o: cc_obj _edc/ssfcrc16_ut.c
+build $builddir/_edc/ssfcrc32.o:    cc_obj _edc/ssfcrc32.c
+build $builddir/_edc/ssfcrc32_ut.o: cc_obj _edc/ssfcrc32_ut.c
+build $builddir/_edc/ssffcsum.o:    cc_obj _edc/ssffcsum.c
+build $builddir/_edc/ssffcsum_ut.o: cc_obj _edc/ssffcsum_ut.c
+
+# _fsm
+build $builddir/_fsm/ssfsm.o:    cc_obj _fsm/ssfsm.c
+build $builddir/_fsm/ssfsm_ut.o: cc_obj _fsm/ssfsm_ut.c
+
+# _storage
+build $builddir/_storage/ssfcfg.o:    cc_obj _storage/ssfcfg.c
+build $builddir/_storage/ssfcfg_ut.o: cc_obj _storage/ssfcfg_ut.c
+
+# _struct
+build $builddir/_struct/ssfbfifo.o:    cc_obj _struct/ssfbfifo.c
+build $builddir/_struct/ssfbfifo_ut.o: cc_obj _struct/ssfbfifo_ut.c
+build $builddir/_struct/ssfheap.o:     cc_obj _struct/ssfheap.c
+build $builddir/_struct/ssfheap_ut.o:  cc_obj _struct/ssfheap_ut.c
+build $builddir/_struct/ssfll.o:       cc_obj _struct/ssfll.c
+build $builddir/_struct/ssfll_ut.o:    cc_obj _struct/ssfll_ut.c
+build $builddir/_struct/ssfmpool.o:    cc_obj _struct/ssfmpool.c
+build $builddir/_struct/ssfmpool_ut.o: cc_obj _struct/ssfmpool_ut.c
+build $builddir/_struct/ssfsll.o:      cc_obj _struct/ssfsll.c
+build $builddir/_struct/ssfsll_ut.o:   cc_obj _struct/ssfsll_ut.c
+
+# _time
+build $builddir/_time/ssfdtime.o:     cc_obj _time/ssfdtime.c
+build $builddir/_time/ssfdtime_ut.o:  cc_obj _time/ssfdtime_ut.c
+build $builddir/_time/ssfiso8601.o:   cc_obj _time/ssfiso8601.c
+build $builddir/_time/ssfiso8601_ut.o:cc_obj _time/ssfiso8601_ut.c
+build $builddir/_time/ssfrtc.o:       cc_obj _time/ssfrtc.c
+build $builddir/_time/ssfrtc_ut.o:    cc_obj _time/ssfrtc_ut.c
+
+# _ui
+build $builddir/_ui/ssfargv.o:    cc_obj _ui/ssfargv.c
+build $builddir/_ui/ssfargv_ut.o: cc_obj _ui/ssfargv_ut.c
+build $builddir/_ui/ssfcli.o:     cc_obj _ui/ssfcli.c
+build $builddir/_ui/ssfcli_ut.o:  cc_obj _ui/ssfcli_ut.c
+build $builddir/_ui/ssfvted.o:    cc_obj _ui/ssfvted.c
+build $builddir/_ui/ssfvted_ut.o: cc_obj _ui/ssfvted_ut.c
+
+# _osal
+build $builddir/_osal/ssflptask.o:    cc_obj _osal/ssflptask.c
+build $builddir/_osal/ssflptask_ut.o: cc_obj _osal/ssflptask_ut.c
+
+# Final binary
+build ssf-asan: link $builddir/main.o $builddir/ssfport.o $
+    $builddir/_codec/ssfbase64.o    $builddir/_codec/ssfbase64_ut.o $
+    $builddir/_codec/ssfdec.o       $builddir/_codec/ssfdec_ut.o $
+    $builddir/_codec/ssfgobj.o      $builddir/_codec/ssfgobj_ut.o $
+    $builddir/_codec/ssfhex.o       $builddir/_codec/ssfhex_ut.o $
+    $builddir/_codec/ssfini.o       $builddir/_codec/ssfini_ut.o $
+    $builddir/_codec/ssfjson.o      $builddir/_codec/ssfjson_ut.o $
+    $builddir/_codec/ssfstr.o       $builddir/_codec/ssfstr_ut.o $
+    $builddir/_codec/ssftlv.o       $builddir/_codec/ssftlv_ut.o $
+    $builddir/_codec/ssfubjson.o    $builddir/_codec/ssfubjson_ut.o $
+    $builddir/_codec/ssfasn1.o     $builddir/_codec/ssfasn1_ut.o $
+    $builddir/_crypto/ssfaes.o      $builddir/_crypto/ssfaes_ut.o $
+    $builddir/_crypto/ssfaesgcm.o   $builddir/_crypto/ssfaesgcm_ut.o $
+    $builddir/_crypto/ssfprng.o     $builddir/_crypto/ssfprng_ut.o $
+    $builddir/_crypto/ssfsha1.o     $builddir/_crypto/ssfsha1_ut.o $
+    $builddir/_crypto/ssfsha2.o     $builddir/_crypto/ssfsha2_ut.o $
+    $builddir/_crypto/ssfbn.o     $builddir/_crypto/ssfbn_ut.o $
+    $builddir/_crypto/ssfchacha20.o     $builddir/_crypto/ssfchacha20_ut.o $
+    $builddir/_crypto/ssfcrypt.o        $builddir/_crypto/ssfcrypt_ut.o $
+    $builddir/_crypto/ssfpoly1305.o     $builddir/_crypto/ssfpoly1305_ut.o $
+    $builddir/_crypto/ssfx25519.o     $builddir/_crypto/ssfx25519_ut.o $
+    $builddir/_crypto/ssfed25519.o     $builddir/_crypto/ssfed25519_ut.o $
+    $builddir/_crypto/ssfaesccm.o     $builddir/_crypto/ssfaesccm_ut.o $
+    $builddir/_crypto/ssfaesctr.o     $builddir/_crypto/ssfaesctr_ut.o $
+    $builddir/_crypto/ssfhmac.o     $builddir/_crypto/ssfhmac_ut.o $
+    $builddir/_crypto/ssfchacha20poly1305.o     $builddir/_crypto/ssfchacha20poly1305_ut.o $
+    $builddir/_crypto/ssfec.o     $builddir/_crypto/ssfec_ut.o $
+    $builddir/_crypto/ssfhkdf.o     $builddir/_crypto/ssfhkdf_ut.o $
+    $builddir/_crypto/ssfecdsa.o     $builddir/_crypto/ssfecdsa_ut.o $
+    $builddir/_crypto/ssfrsa.o     $builddir/_crypto/ssfrsa_ut.o $
+    $builddir/_crypto/ssftls.o     $builddir/_crypto/ssftls_ut.o $
+    $builddir/_debug/ssftrace.o     $builddir/_debug/ssftrace_ut.o $
+    $builddir/_ecc/ssfrs.o          $builddir/_ecc/ssfrs_ut.o $
+    $builddir/_edc/ssfcrc16.o       $builddir/_edc/ssfcrc16_ut.o $
+    $builddir/_edc/ssfcrc32.o       $builddir/_edc/ssfcrc32_ut.o $
+    $builddir/_edc/ssffcsum.o       $builddir/_edc/ssffcsum_ut.o $
+    $builddir/_fsm/ssfsm.o          $builddir/_fsm/ssfsm_ut.o $
+    $builddir/_storage/ssfcfg.o     $builddir/_storage/ssfcfg_ut.o $
+    $builddir/_struct/ssfbfifo.o    $builddir/_struct/ssfbfifo_ut.o $
+    $builddir/_struct/ssfheap.o     $builddir/_struct/ssfheap_ut.o $
+    $builddir/_struct/ssfll.o       $builddir/_struct/ssfll_ut.o $
+    $builddir/_struct/ssfmpool.o    $builddir/_struct/ssfmpool_ut.o $
+    $builddir/_struct/ssfsll.o     $builddir/_struct/ssfsll_ut.o $
+    $builddir/_time/ssfdtime.o      $builddir/_time/ssfdtime_ut.o $
+    $builddir/_time/ssfiso8601.o    $builddir/_time/ssfiso8601_ut.o $
+    $builddir/_time/ssfrtc.o        $builddir/_time/ssfrtc_ut.o $
+    $builddir/_ui/ssfargv.o         $builddir/_ui/ssfargv_ut.o $
+    $builddir/_ui/ssfcli.o          $builddir/_ui/ssfcli_ut.o $
+    $builddir/_ui/ssfvted.o         $builddir/_ui/ssfvted_ut.o $
+    $builddir/_osal/ssflptask.o     $builddir/_osal/ssflptask_ut.o
+
+default ssf-asan

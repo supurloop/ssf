@@ -3519,7 +3519,8 @@ void SSFAESGCMUnitTest(void)
                                  ct, _AESGCMUT[i].ctLen);
 
                 SSF_ASSERT(memcmp(tag, _AESGCMUT[i].tag, _AESGCMUT[i].tagLen) == 0);
-                SSF_ASSERT(memcmp(ct, _AESGCMUT[i].ct, _AESGCMUT[i].ctLen) == 0);
+                SSF_ASSERT((_AESGCMUT[i].ctLen == 0u) ||
+                           (memcmp(ct, _AESGCMUT[i].ct, _AESGCMUT[i].ctLen) == 0));
             }
 
             bool pf = SSFAESGCMDecrypt(_AESGCMUT[i].ct, _AESGCMUT[i].ctLen, _AESGCMUT[i].iv, 
@@ -3529,8 +3530,8 @@ void SSFAESGCMUnitTest(void)
                                        _AESGCMUT[i].tagLen, pt, _AESGCMUT[i].ptLen);
 
             SSF_ASSERT((pf) == (_AESGCMUT[i].pf == 0));
-            SSF_ASSERT((_AESGCMUT[i].pf != 0)
-                       || (memcmp(pt, _AESGCMUT[i].pt, _AESGCMUT[i].ptLen) == 0));
+            SSF_ASSERT((_AESGCMUT[i].pf != 0) || (_AESGCMUT[i].ptLen == 0u) ||
+                       (memcmp(pt, _AESGCMUT[i].pt, _AESGCMUT[i].ptLen) == 0));
         }
     }
 

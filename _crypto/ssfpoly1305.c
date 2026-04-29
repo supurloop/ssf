@@ -149,7 +149,7 @@ void SSFPoly1305Update(SSFPoly1305Context_t *ctx,
     SSF_REQUIRE((msg != NULL) || (msgLen == 0u));
 
     /* Drain the partial buffer first if it holds anything. */
-    if (ctx->bufLen > 0u)
+    if ((ctx->bufLen > 0u) && (msgLen > 0u))
     {
         take = (size_t)(16u - ctx->bufLen);
         if (take > msgLen) take = msgLen;

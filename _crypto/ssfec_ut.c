@@ -810,6 +810,24 @@ void SSFECUnitTest(void)
         }
     }
 
+    /* ---- P-256: malformed Jacobian Z exercises PointToAffine failure path ---- */
+    /* SSFECPointOnCurve / SSFECPointValidate take a fast path when Z == 1 (affine input).      */
+    /* The slow path at ssfec.c:706 / 748 calls SSFECPointToAffine, which fails when ModInv(Z,p)*/
+    /* fails — i.e. when Z ≡ 0 (mod p). A non-zero, non-one Z = p produces this. Real callers   */
+    /* (SSFECPointDecode → Validate) always pass Z = 1, so the slow-path return-false is        */
+    /* otherwise unreached. Confirm the validators correctly reject the malformed input.        */
+    {
+        const SSFECCurveParams_t *c = SSFECGetCurveParams(SSF_EC_CURVE_P256);
+        SSFECPOINT_DEFINE(badPt, SSF_EC_MAX_LIMBS);
+
+        SSFBNSetUint32(&badPt.x, 1u, c->limbs);
+        SSFBNSetUint32(&badPt.y, 1u, c->limbs);
+        SSFBNCopy(&badPt.z, &c->p);  /* Z = p ⇒ non-zero, non-one, ModInv(Z, p) fails */
+
+        SSF_ASSERT(SSFECPointOnCurve(&badPt, SSF_EC_CURVE_P256) == false);
+        SSF_ASSERT(SSFECPointValidate(&badPt, SSF_EC_CURVE_P256) == false);
+    }
+
 #if SSF_EC_CONFIG_ENABLE_P384 == 1
     /* ---- P-384: SEC1 format-specific rejection (mirror of P-256) ---- */
     {

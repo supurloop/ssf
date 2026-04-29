@@ -232,6 +232,97 @@ void SSFChaCha20UnitTest(void)
         SSF_ASSERT(memcmp(big_dec, big_pt, sizeof(big_pt)) == 0);
     }
 
+    /* SSFChaCha20Encrypt: DBC coverage. The contract surface is large — key / keyLen / nonce
+     * / nonceLen / ptLen <= ctSize / ptLen < 512 MiB / pt / ct. Every SSF_REQUIRE is exercised
+     * with at least one boundary or NULL-pointer violation. The 512 MiB ptLen test passes
+     * matching ctSize so that check fires last — nothing dereferences the pt/ct pointers so
+     * the absurd ptLen value never causes a real allocation. */
+    {
+        static const uint8_t scratchKey[32] = {0};
+        static const uint8_t scratchNonce[12] = {0};
+        static const uint8_t scratchPt[16] = {0};
+        uint8_t scratchCt[16];
+
+        /* key NULL */
+        SSF_ASSERT_TEST(SSFChaCha20Encrypt(scratchPt, sizeof(scratchPt),
+                                           NULL, sizeof(scratchKey),
+                                           scratchNonce, sizeof(scratchNonce),
+                                           0u, scratchCt, sizeof(scratchCt)));
+
+        /* keyLen wrong (0, just below, just above, double-size) */
+        SSF_ASSERT_TEST(SSFChaCha20Encrypt(scratchPt, sizeof(scratchPt),
+                                           scratchKey, 0u,
+                                           scratchNonce, sizeof(scratchNonce),
+                                           0u, scratchCt, sizeof(scratchCt)));
+        SSF_ASSERT_TEST(SSFChaCha20Encrypt(scratchPt, sizeof(scratchPt),
+                                           scratchKey, 31u,
+                                           scratchNonce, sizeof(scratchNonce),
+                                           0u, scratchCt, sizeof(scratchCt)));
+        SSF_ASSERT_TEST(SSFChaCha20Encrypt(scratchPt, sizeof(scratchPt),
+                                           scratchKey, 33u,
+                                           scratchNonce, sizeof(scratchNonce),
+                                           0u, scratchCt, sizeof(scratchCt)));
+        SSF_ASSERT_TEST(SSFChaCha20Encrypt(scratchPt, sizeof(scratchPt),
+                                           scratchKey, 64u,
+                                           scratchNonce, sizeof(scratchNonce),
+                                           0u, scratchCt, sizeof(scratchCt)));
+
+        /* nonce NULL */
+        SSF_ASSERT_TEST(SSFChaCha20Encrypt(scratchPt, sizeof(scratchPt),
+                                           scratchKey, sizeof(scratchKey),
+                                           NULL, sizeof(scratchNonce),
+                                           0u, scratchCt, sizeof(scratchCt)));
+
+        /* nonceLen wrong (0, just below, just above, double-size) */
+        SSF_ASSERT_TEST(SSFChaCha20Encrypt(scratchPt, sizeof(scratchPt),
+                                           scratchKey, sizeof(scratchKey),
+                                           scratchNonce, 0u,
+                                           0u, scratchCt, sizeof(scratchCt)));
+        SSF_ASSERT_TEST(SSFChaCha20Encrypt(scratchPt, sizeof(scratchPt),
+                                           scratchKey, sizeof(scratchKey),
+                                           scratchNonce, 11u,
+                                           0u, scratchCt, sizeof(scratchCt)));
+        SSF_ASSERT_TEST(SSFChaCha20Encrypt(scratchPt, sizeof(scratchPt),
+                                           scratchKey, sizeof(scratchKey),
+                                           scratchNonce, 13u,
+                                           0u, scratchCt, sizeof(scratchCt)));
+        SSF_ASSERT_TEST(SSFChaCha20Encrypt(scratchPt, sizeof(scratchPt),
+                                           scratchKey, sizeof(scratchKey),
+                                           scratchNonce, 24u,
+                                           0u, scratchCt, sizeof(scratchCt)));
+
+        /* ptLen > ctSize */
+        SSF_ASSERT_TEST(SSFChaCha20Encrypt(scratchPt, sizeof(scratchPt),
+                                           scratchKey, sizeof(scratchKey),
+                                           scratchNonce, sizeof(scratchNonce),
+                                           0u, scratchCt, sizeof(scratchPt) - 1u));
+
+        /* ptLen ≥ 512 MiB. ctSize matches so the size-bound assert fires; nothing derefs pt
+         * or ct, so the absurd length never causes any actual allocation or access. */
+        SSF_ASSERT_TEST(SSFChaCha20Encrypt(scratchPt, 512u * 1024u * 1024u,
+                                           scratchKey, sizeof(scratchKey),
+                                           scratchNonce, sizeof(scratchNonce),
+                                           0u, scratchCt, 512u * 1024u * 1024u));
+
+        /* pt NULL with ptLen > 0 */
+        SSF_ASSERT_TEST(SSFChaCha20Encrypt(NULL, sizeof(scratchCt),
+                                           scratchKey, sizeof(scratchKey),
+                                           scratchNonce, sizeof(scratchNonce),
+                                           0u, scratchCt, sizeof(scratchCt)));
+
+        /* ct NULL with ptLen > 0 */
+        SSF_ASSERT_TEST(SSFChaCha20Encrypt(scratchPt, sizeof(scratchPt),
+                                           scratchKey, sizeof(scratchKey),
+                                           scratchNonce, sizeof(scratchNonce),
+                                           0u, NULL, sizeof(scratchCt)));
+
+        /* Permitted edge: ptLen == 0 with pt and ct both NULL must NOT assert. */
+        SSFChaCha20Encrypt(NULL, 0u,
+                           scratchKey, sizeof(scratchKey),
+                           scratchNonce, sizeof(scratchNonce),
+                           0u, NULL, 0u);
+    }
+
 #if SSF_CHACHA20_OSSL_VERIFY == 1
     _VerifyChaCha20AgainstOpenSSLRandom();
 #endif

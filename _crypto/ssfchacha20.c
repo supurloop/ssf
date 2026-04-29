@@ -79,6 +79,7 @@
 #include "ssfport.h"
 #include "ssfassert.h"
 #include "ssfchacha20.h"
+#include "ssfcrypt.h"
 
 /* --------------------------------------------------------------------------------------------- */
 /* Module Defines                                                                                */
@@ -188,5 +189,11 @@ void SSFChaCha20Encrypt(const uint8_t *pt, size_t ptLen, const uint8_t *key, siz
         state[12]++;
         pos += remaining;
     }
+
+    /* Defense-in-depth: state[4..11] holds the key, block[] holds the most recent keystream. */
+    /* Scrub both before stack reuse. SSFCryptSecureZero uses volatile writes to defeat dead- */
+    /* store elimination at -O3.                                                              */
+    SSFCryptSecureZero(state, sizeof(state));
+    SSFCryptSecureZero(block, sizeof(block));
 }
 

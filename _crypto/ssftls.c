@@ -56,6 +56,10 @@ void SSFTLSHkdfExpandLabel(SSFHMACHash_t hash,
     SSF_REQUIRE(label != NULL);
     SSF_REQUIRE(out != NULL);
     SSF_REQUIRE(outLen <= 255u);
+    /* hkdfLabel buffer is sized for at most SSF_TLS_MAX_HASH_SIZE bytes of context. RFC 8446 */
+    /* §7.1 permits up to 255 bytes, but real TLS 1.3 only feeds transcript hashes (≤ 48), so */
+    /* tightening to the buffer's slot is safe and matches actual usage.                     */
+    SSF_REQUIRE(ctxLen <= SSF_TLS_MAX_HASH_SIZE);
 
     labelLen = strlen(label);
     SSF_REQUIRE(labelLen <= 64u);
@@ -131,6 +135,9 @@ void SSFTLSComputeFinished(SSFHMACHash_t hash,
     SSF_REQUIRE(baseKey != NULL);
     SSF_REQUIRE(transcriptHash != NULL);
     SSF_REQUIRE(verifyData != NULL);
+    /* finishedKey is sized for SSF_TLS_MAX_HASH_SIZE — verifyDataLen above that overflows it. */
+    /* RFC 8446 §4.4.4 specifies verify_data length equals the hash output length (32 or 48). */
+    SSF_REQUIRE(verifyDataLen <= SSF_TLS_MAX_HASH_SIZE);
 
     /* finished_key = HKDF-Expand-Label(BaseKey, "finished", "", Hash.length) */
     SSFTLSHkdfExpandLabel(hash, baseKey, baseKeyLen, "finished", NULL, 0,
@@ -391,6 +398,8 @@ bool SSFTLSRecordDecrypt(SSFTLSRecordState_t *state,
     fragLen = ((uint16_t)record[3] << 8) | (uint16_t)record[4];
     if ((size_t)(SSF_TLS_RECORD_HEADER_SIZE + fragLen) != recordLen) return false;
     if (fragLen < tagLen + 1u) return false;
+    /* RFC 8446 §5.2: receivers MUST reject records whose ciphertext exceeds 2^14 + 256. */
+    if (fragLen > 0x4000u + 256u) return false;
 
     innerLen = (size_t)fragLen - tagLen;
     if (ptSize < innerLen) return false;

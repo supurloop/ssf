@@ -335,5 +335,69 @@ void SSFTLSUnitTest(void)
         SSF_ASSERT(ct == SSF_TLS_CT_APPLICATION);
         SSF_ASSERT(memcmp(decrypted, plaintext, 16) == 0);
     }
+    /* SSFTLSHkdfExpandLabel: ctxLen must be bounded. The internal hkdfLabel buffer is sized
+     * for at most SSF_TLS_MAX_HASH_SIZE (48) context bytes — without a contract check, larger
+     * ctxLen values overflow the stack buffer. The call below would write 100 bytes into a
+     * slot sized for 48; the SSF_REQUIRE introduced for this finding catches it. */
+    {
+        uint8_t scratchSecret[32] = {0};
+        uint8_t scratchCtx[200];
+        uint8_t scratchOut[32];
+
+        memset(scratchCtx, 0xA5u, sizeof(scratchCtx));
+        SSF_ASSERT_TEST(SSFTLSHkdfExpandLabel(SSF_HMAC_HASH_SHA256,
+                                              scratchSecret, sizeof(scratchSecret),
+                                              "key",
+                                              scratchCtx, 49u,
+                                              scratchOut, sizeof(scratchOut)));
+        SSF_ASSERT_TEST(SSFTLSHkdfExpandLabel(SSF_HMAC_HASH_SHA256,
+                                              scratchSecret, sizeof(scratchSecret),
+                                              "key",
+                                              scratchCtx, sizeof(scratchCtx),
+                                              scratchOut, sizeof(scratchOut)));
+    }
+
+    /* SSFTLSComputeFinished: verifyDataLen must be bounded. The internal finishedKey buffer
+     * is SSF_TLS_MAX_HASH_SIZE (48) bytes — verifyDataLen above that overflows it. */
+    {
+        uint8_t scratchKey[32] = {0};
+        uint8_t scratchHash[32] = {0};
+        uint8_t scratchVerify[100];
+
+        SSF_ASSERT_TEST(SSFTLSComputeFinished(SSF_HMAC_HASH_SHA256,
+                                              scratchKey, sizeof(scratchKey),
+                                              scratchHash, sizeof(scratchHash),
+                                              scratchVerify, 49u));
+        SSF_ASSERT_TEST(SSFTLSComputeFinished(SSF_HMAC_HASH_SHA256,
+                                              scratchKey, sizeof(scratchKey),
+                                              scratchHash, sizeof(scratchHash),
+                                              scratchVerify, sizeof(scratchVerify)));
+    }
+
+    /* SSFTLSRecordDecrypt: records claiming a fragLen above 2^14 + 256 (RFC 8446 §5.2 limit)
+     * must be rejected. Build a header with fragLen = 0x4101 (one past the limit) and check
+     * that decrypt returns false rather than proceeding to the AEAD layer. */
+    {
+        SSFTLSRecordState_t decState;
+        uint8_t key[16] = {0};
+        uint8_t iv[12] = {0};
+        uint8_t oversizedRecord[0x4106];   /* HEADER + 0x4101 */
+        uint8_t scratchPt[0x4101];
+        size_t scratchPtLen;
+        uint8_t scratchCt;
+
+        SSFTLSRecordStateInit(&decState, SSF_TLS_CS_AES_128_GCM_SHA256,
+                              key, sizeof(key), iv, sizeof(iv));
+        memset(oversizedRecord, 0, sizeof(oversizedRecord));
+        oversizedRecord[0] = SSF_TLS_CT_APPLICATION;
+        oversizedRecord[1] = 0x03u;
+        oversizedRecord[2] = 0x03u;
+        oversizedRecord[3] = 0x41u;        /* fragLen = 0x4101 = 16641, just over the limit */
+        oversizedRecord[4] = 0x01u;
+
+        SSF_ASSERT(SSFTLSRecordDecrypt(&decState, oversizedRecord, sizeof(oversizedRecord),
+                                       scratchPt, sizeof(scratchPt),
+                                       &scratchPtLen, &scratchCt) == false);
+    }
 }
 #endif /* SSF_CONFIG_TLS_UNIT_TEST */

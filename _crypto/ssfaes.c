@@ -49,18 +49,28 @@
 /* Packed xtime: multiply each byte of x by 2 in GF(2^8) with poly 0x1B. */
 #define XTIME32(x) ((((x) << 1) & 0xFEFEFEFEu) ^ ((((x) >> 7) & 0x01010101u) * 0x1Bu))
 
+/* Explicit shift-pack so packing matches the LE state convention on big-endian hosts too;
+   gcc/clang collapse this to a single load (+bswap on BE) at -O1+. */
 #define ARRAY_TO_STATE(s, a) do { \
-    memcpy(&(s)[0], &(a)[0],  4); \
-    memcpy(&(s)[1], &(a)[4],  4); \
-    memcpy(&(s)[2], &(a)[8],  4); \
-    memcpy(&(s)[3], &(a)[12], 4); \
+    (s)[0] =  (uint32_t)(a)[ 0]        | ((uint32_t)(a)[ 1] <<  8) | \
+             ((uint32_t)(a)[ 2] << 16) | ((uint32_t)(a)[ 3] << 24); \
+    (s)[1] =  (uint32_t)(a)[ 4]        | ((uint32_t)(a)[ 5] <<  8) | \
+             ((uint32_t)(a)[ 6] << 16) | ((uint32_t)(a)[ 7] << 24); \
+    (s)[2] =  (uint32_t)(a)[ 8]        | ((uint32_t)(a)[ 9] <<  8) | \
+             ((uint32_t)(a)[10] << 16) | ((uint32_t)(a)[11] << 24); \
+    (s)[3] =  (uint32_t)(a)[12]        | ((uint32_t)(a)[13] <<  8) | \
+             ((uint32_t)(a)[14] << 16) | ((uint32_t)(a)[15] << 24); \
 } while (0)
 
 #define STATE_TO_ARRAY(s, a) do { \
-    memcpy(&(a)[0],  &(s)[0], 4); \
-    memcpy(&(a)[4],  &(s)[1], 4); \
-    memcpy(&(a)[8],  &(s)[2], 4); \
-    memcpy(&(a)[12], &(s)[3], 4); \
+    (a)[ 0] = (uint8_t) (s)[0];        (a)[ 1] = (uint8_t)((s)[0] >>  8); \
+    (a)[ 2] = (uint8_t)((s)[0] >> 16); (a)[ 3] = (uint8_t)((s)[0] >> 24); \
+    (a)[ 4] = (uint8_t) (s)[1];        (a)[ 5] = (uint8_t)((s)[1] >>  8); \
+    (a)[ 6] = (uint8_t)((s)[1] >> 16); (a)[ 7] = (uint8_t)((s)[1] >> 24); \
+    (a)[ 8] = (uint8_t) (s)[2];        (a)[ 9] = (uint8_t)((s)[2] >>  8); \
+    (a)[10] = (uint8_t)((s)[2] >> 16); (a)[11] = (uint8_t)((s)[2] >> 24); \
+    (a)[12] = (uint8_t) (s)[3];        (a)[13] = (uint8_t)((s)[3] >>  8); \
+    (a)[14] = (uint8_t)((s)[3] >> 16); (a)[15] = (uint8_t)((s)[3] >> 24); \
 } while (0)
 
 #define ADD_KEY(s, w, i) do { \

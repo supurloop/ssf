@@ -234,6 +234,7 @@ static uint8_t _GFPolyEval(const GFPoly_t *p, uint8_t x)
     size_t rem;
 
     SSF_REQUIRE(p != NULL);
+    SSF_REQUIRE(p->len >= 1u);
 
     y = p->array[0];
     rem = p->len - 1;

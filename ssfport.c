@@ -51,9 +51,11 @@ int ssfUnitTestJmpRet;
 /* --------------------------------------------------------------------------------------------- */
 /* Never returns (except for unit testing), reports assertion failure.                           */
 /* --------------------------------------------------------------------------------------------- */
-#ifdef _WIN32
+#if defined(_WIN32)
 __declspec(noreturn)
-#endif /* _WIN32 */
+#elif defined(__GNUC__) || defined(__clang__)
+__attribute__((noreturn))
+#endif
 void SSFPortAssert(const char *file, unsigned int line)
 {
 #if SSF_CONFIG_UNIT_TEST == 1

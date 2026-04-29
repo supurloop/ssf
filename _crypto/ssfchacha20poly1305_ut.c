@@ -651,7 +651,6 @@ void SSFChaCha20Poly1305UnitTest(void)
         uint8_t scratchBadTag[SSF_CCP_TAG_SIZE];
         uint8_t recovered[64];
         size_t i;
-        bool ok;
 
         for (i = 0; i < sizeof(scratchKey);   i++) scratchKey[i]   = (uint8_t)(i ^ 0x33u);
         for (i = 0; i < sizeof(scratchNonce); i++) scratchNonce[i] = (uint8_t)(i ^ 0x77u);

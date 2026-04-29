@@ -179,13 +179,13 @@ void SSFPoly1305UnitTest(void)
      * Catches any path that would fail to emit zero when both r and s are zero (defensive
      * floor for the corner case where the multiply produces no contribution). */
     {
-        static const uint8_t key[32] = {0};
-        static const uint8_t msg[64] = {0};
+        static const uint8_t tv1Key[32] = {0};
+        static const uint8_t tv1Msg[64] = {0};
         static const uint8_t expectedTag[16] = {0};
-        uint8_t tag[16];
+        uint8_t tv1Tag[16];
 
-        SSFPoly1305Mac(msg, sizeof(msg), key, sizeof(key), tag, sizeof(tag));
-        SSF_ASSERT(memcmp(tag, expectedTag, sizeof(expectedTag)) == 0);
+        SSFPoly1305Mac(tv1Msg, sizeof(tv1Msg), tv1Key, sizeof(tv1Key), tv1Tag, sizeof(tv1Tag));
+        SSF_ASSERT(memcmp(tv1Tag, expectedTag, sizeof(expectedTag)) == 0);
     }
 
     /* RFC 8439 §A.3 Test Vector #5: r=2 (clamped from `02 00…`), s=0, msg = `ff × 16`.
@@ -195,7 +195,7 @@ void SSFPoly1305UnitTest(void)
      * tag = 0x03 in low byte, rest zero. Cross-build coverage for the carry-edge case
      * that the OpenSSL fuzz catches on host. */
     {
-        static const uint8_t key[32] = {
+        static const uint8_t tv5Key[32] = {
             0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -209,10 +209,10 @@ void SSFPoly1305UnitTest(void)
             0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
         };
-        uint8_t tag[16];
+        uint8_t tv5Tag[16];
 
-        SSFPoly1305Mac(carryMsg, sizeof(carryMsg), key, sizeof(key), tag, sizeof(tag));
-        SSF_ASSERT(memcmp(tag, expectedTag, sizeof(expectedTag)) == 0);
+        SSFPoly1305Mac(carryMsg, sizeof(carryMsg), tv5Key, sizeof(tv5Key), tv5Tag, sizeof(tv5Tag));
+        SSF_ASSERT(memcmp(tv5Tag, expectedTag, sizeof(expectedTag)) == 0);
     }
 
     /* r=0 algebraic edge: with r clamped from `00 × 16` to 0, every multiply yields 0, so
@@ -232,17 +232,17 @@ void SSFPoly1305UnitTest(void)
             0x36, 0xE5, 0xF6, 0xB5, 0xC5, 0xE0, 0x60, 0x70,
             0xF0, 0xEF, 0xCA, 0x96, 0x22, 0x7A, 0x86, 0x3E
         };
-        uint8_t tag[16];
+        uint8_t r0Tag[16];
 
-        SSFPoly1305Mac(msg, sizeof(msg), r0Key, sizeof(r0Key), tag, sizeof(tag));
-        SSF_ASSERT(memcmp(tag, expectedTag, sizeof(expectedTag)) == 0);
+        SSFPoly1305Mac(msg, sizeof(msg), r0Key, sizeof(r0Key), r0Tag, sizeof(r0Tag));
+        SSF_ASSERT(memcmp(r0Tag, expectedTag, sizeof(expectedTag)) == 0);
     }
 
     /* RFC 8439 §A.3 Test Vector #3: r ≠ 0, s = 0, with a 375-byte multi-block IETF text.
      * Complement to the r=0 case above — exercises the pure-r-mixing path across many MulR
      * iterations. Ensures multi-block reductions converge to the canonical h with no s-add. */
     {
-        static const uint8_t key[] = {
+        static const uint8_t tv3Key[] = {
             0x36u, 0xE5u, 0xF6u, 0xB5u, 0xC5u, 0xE0u, 0x60u, 0x70u,
             0xF0u, 0xEFu, 0xCAu, 0x96u, 0x22u, 0x7Au, 0x86u, 0x3Eu,
             0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u,
@@ -301,17 +301,17 @@ void SSFPoly1305UnitTest(void)
             0xF3u, 0x47u, 0x7Eu, 0x7Cu, 0xD9u, 0x54u, 0x17u, 0xAFu,
             0x89u, 0xA6u, 0xB8u, 0x79u, 0x4Cu, 0x31u, 0x0Cu, 0xF0u
         };
-        uint8_t tag[16];
+        uint8_t tv3Tag[16];
 
-        SSFPoly1305Mac(text, sizeof(text), key, sizeof(key), tag, sizeof(tag));
-        SSF_ASSERT(memcmp(tag, expectedTag, sizeof(expectedTag)) == 0);
+        SSFPoly1305Mac(text, sizeof(text), tv3Key, sizeof(tv3Key), tv3Tag, sizeof(tv3Tag));
+        SSF_ASSERT(memcmp(tv3Tag, expectedTag, sizeof(expectedTag)) == 0);
     }
 
     /* RFC 8439 §A.3 Test Vector #6: r=2, s=ff×16, msg=`02 00…00`. Stresses the s-addition
      * carry propagation in the tag-write loop — adding s=ff×16 to a non-zero h forces the
      * carry to walk through all four 32-bit assembly words. */
     {
-        static const uint8_t key[] = {
+        static const uint8_t tv6Key[] = {
             0x02u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u,
             0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u,
             0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu,
@@ -325,17 +325,17 @@ void SSFPoly1305UnitTest(void)
             0x03u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u,
             0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u
         };
-        uint8_t tag[16];
+        uint8_t tv6Tag[16];
 
-        SSFPoly1305Mac(text, sizeof(text), key, sizeof(key), tag, sizeof(tag));
-        SSF_ASSERT(memcmp(tag, expectedTag, sizeof(expectedTag)) == 0);
+        SSFPoly1305Mac(text, sizeof(text), tv6Key, sizeof(tv6Key), tv6Tag, sizeof(tv6Tag));
+        SSF_ASSERT(memcmp(tv6Tag, expectedTag, sizeof(expectedTag)) == 0);
     }
 
     /* RFC 8439 §A.3 Test Vector #7: r=1, s=0, 48-byte msg crafted to push h to/past p across
      * three blocks. Specifically tests the constant-time `h - p` selection in End — the
      * mask = (g4 >> 31) - 1u branch where the high-bit underflow distinguishes h<p from h≥p. */
     {
-        static const uint8_t key[] = {
+        static const uint8_t tv7Key[] = {
             0x01u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u,
             0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u,
             0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u,
@@ -353,16 +353,16 @@ void SSFPoly1305UnitTest(void)
             0x05u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u,
             0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u
         };
-        uint8_t tag[16];
+        uint8_t tv7Tag[16];
 
-        SSFPoly1305Mac(text, sizeof(text), key, sizeof(key), tag, sizeof(tag));
-        SSF_ASSERT(memcmp(tag, expectedTag, sizeof(expectedTag)) == 0);
+        SSFPoly1305Mac(text, sizeof(text), tv7Key, sizeof(tv7Key), tv7Tag, sizeof(tv7Tag));
+        SSF_ASSERT(memcmp(tv7Tag, expectedTag, sizeof(expectedTag)) == 0);
     }
 
     /* RFC 8439 §A.3 Test Vector #9: r=2, s=0, msg=`fd ff…ff`. Reduction edge complementary to
      * TV5 — different upper-boundary pattern through MulR's `c * 5` carry-back-into-h0 path. */
     {
-        static const uint8_t key[] = {
+        static const uint8_t tv9Key[] = {
             0x02u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u,
             0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u,
             0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u,
@@ -376,10 +376,10 @@ void SSFPoly1305UnitTest(void)
             0xFAu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu,
             0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu
         };
-        uint8_t tag[16];
+        uint8_t tv9Tag[16];
 
-        SSFPoly1305Mac(text, sizeof(text), key, sizeof(key), tag, sizeof(tag));
-        SSF_ASSERT(memcmp(tag, expectedTag, sizeof(expectedTag)) == 0);
+        SSFPoly1305Mac(text, sizeof(text), tv9Key, sizeof(tv9Key), tv9Tag, sizeof(tv9Tag));
+        SSF_ASSERT(memcmp(tv9Tag, expectedTag, sizeof(expectedTag)) == 0);
     }
 
     /* Streaming API: Begin/Update/End over the RFC 7539 vector must produce the same tag

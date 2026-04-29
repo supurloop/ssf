@@ -190,16 +190,20 @@ void SSFChaCha20UnitTest(void)
         0x87, 0x4d
     };
 
-    uint8_t ct[sizeof(pt)];
-    uint8_t dec[sizeof(pt)];
+    {
+        uint8_t ct[sizeof(pt)];
+        uint8_t dec[sizeof(pt)];
 
-    /* Test encryption (counter = 1 per RFC 7539 Section 2.4.2) */
-    SSFChaCha20Encrypt(pt, sizeof(pt), key, sizeof(key), nonce, sizeof(nonce), 1, ct, sizeof(ct));
-    SSF_ASSERT(memcmp(ct, expected_ct, sizeof(expected_ct)) == 0);
+        /* Test encryption (counter = 1 per RFC 7539 Section 2.4.2) */
+        SSFChaCha20Encrypt(pt, sizeof(pt), key, sizeof(key), nonce, sizeof(nonce), 1,
+                           ct, sizeof(ct));
+        SSF_ASSERT(memcmp(ct, expected_ct, sizeof(expected_ct)) == 0);
 
-    /* Test decryption (ChaCha20 is symmetric) */
-    SSFChaCha20Decrypt(ct, sizeof(ct), key, sizeof(key), nonce, sizeof(nonce), 1, dec, sizeof(dec));
-    SSF_ASSERT(memcmp(dec, pt, sizeof(pt)) == 0);
+        /* Test decryption (ChaCha20 is symmetric) */
+        SSFChaCha20Decrypt(ct, sizeof(ct), key, sizeof(key), nonce, sizeof(nonce), 1,
+                           dec, sizeof(dec));
+        SSF_ASSERT(memcmp(dec, pt, sizeof(pt)) == 0);
+    }
 
     /* Test zero-length input */
     SSFChaCha20Encrypt(NULL, 0, key, sizeof(key), nonce, sizeof(nonce), 0, NULL, 0);

@@ -169,7 +169,7 @@ void SSFPRNGUnitTest(void)
             0x00u, 0x01u, 0x02u, 0x03u, 0x04u, 0x05u, 0x06u, 0x07u,
             0x08u, 0x09u, 0x0Au, 0x0Bu, 0x0Cu, 0x0Du, 0x0Eu, 0x0Fu
         };
-        uint8_t random[SSF_PRNG_RANDOM_MAX_SIZE];
+        uint8_t knownRandom[SSF_PRNG_RANDOM_MAX_SIZE];
         uint8_t expectedPt[SSF_AES_BLOCK_SIZE];
         uint8_t expectedCt[SSF_AES_BLOCK_SIZE];
         uint64_t snappedCount;
@@ -185,8 +185,8 @@ void SSFPRNGUnitTest(void)
                               expectedCt, sizeof(expectedCt),
                               entropyKnown, sizeof(entropyKnown));
 
-        SSFPRNGGetRandom(&ctx, random, sizeof(random));
-        SSF_ASSERT(memcmp(random, expectedCt, sizeof(random)) == 0);
+        SSFPRNGGetRandom(&ctx, knownRandom, sizeof(knownRandom));
+        SSF_ASSERT(memcmp(knownRandom, expectedCt, sizeof(knownRandom)) == 0);
 
         SSFPRNGDeInitContext(&ctx);
     }

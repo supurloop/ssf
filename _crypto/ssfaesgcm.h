@@ -29,7 +29,7 @@
 /* EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE */
 /* GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED    */
 /* AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING     */
-/* NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISE   */
+/* NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED  */
 /* OF THE POSSIBILITY OF SUCH DAMAGE.                                                            */
 /* --------------------------------------------------------------------------------------------- */
 
@@ -76,8 +76,8 @@
 /* President                                                                                     */
 /* Supurloop Software LLC                                                                        */
 /* --------------------------------------------------------------------------------------------- */
-#ifndef SSFAEGCMS_H_INCLUDE
-#define SSFAEGCMS_H_INCLUDE
+#ifndef SSFAESGCM_H_INCLUDE
+#define SSFAESGCM_H_INCLUDE
 
 #ifdef __cplusplus
 extern "C" {
@@ -98,13 +98,16 @@ bool SSFAESGCMDecrypt(const uint8_t *ct, size_t ctLen, const uint8_t *iv, size_t
                       const uint8_t *auth, size_t authLen, const uint8_t *key, size_t keyLen,
                       const uint8_t *tag, size_t tagLen, uint8_t *pt, size_t ptSize);
 
+/* --------------------------------------------------------------------------------------------- */
+/* Unit test                                                                                     */
+/* --------------------------------------------------------------------------------------------- */
 #if SSF_CONFIG_AESGCM_UNIT_TEST == 1
 void SSFAESGCMUnitTest(void);
-#endif /* SSF_CONFIG_AES_UNIT_TEST */
+#endif /* SSF_CONFIG_AESGCM_UNIT_TEST */
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* SSFAES_H_INCLUDE */
+#endif /* SSFAESGCM_H_INCLUDE */
 

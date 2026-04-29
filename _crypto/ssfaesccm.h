@@ -41,15 +41,6 @@ extern "C" {
 #include "ssfport.h"
 
 /* --------------------------------------------------------------------------------------------- */
-/* Limitations                                                                                   */
-/* --------------------------------------------------------------------------------------------- */
-/* Nonce length must be between 7 and 13 bytes (L = 15 - nonceLen, 2 <= L <= 8).                 */
-/* Tag length must be 4, 6, 8, 10, 12, 14, or 16 bytes.                                         */
-/* Key length must be 16 (AES-128), 24 (AES-192), or 32 (AES-256) bytes.                        */
-/* Maximum plaintext/ciphertext length is limited to 2^(8*L) - 1 bytes.                          */
-/* --------------------------------------------------------------------------------------------- */
-
-/* --------------------------------------------------------------------------------------------- */
 /* Defines                                                                                       */
 /* --------------------------------------------------------------------------------------------- */
 #define SSF_AESCCM_BLOCK_SIZE (16u)
@@ -57,24 +48,13 @@ extern "C" {
 /* --------------------------------------------------------------------------------------------- */
 /* External interface                                                                            */
 /* --------------------------------------------------------------------------------------------- */
+void SSFAESCCMEncrypt(const uint8_t *pt, size_t ptLen, const uint8_t *nonce, size_t nonceLen,
+                      const uint8_t *aad, size_t aadLen, const uint8_t *key, size_t keyLen,
+                      uint8_t *tag, size_t tagSize, uint8_t *ct, size_t ctSize);
 
-/* Encrypt and authenticate.                                                                     */
-/* Produces ciphertext (same length as plaintext) and an authentication tag.                     */
-void SSFAESCCMEncrypt(const uint8_t *pt, size_t ptLen,
-                      const uint8_t *nonce, size_t nonceLen,
-                      const uint8_t *aad, size_t aadLen,
-                      const uint8_t *key, size_t keyLen,
-                      uint8_t *tag, size_t tagSize,
-                      uint8_t *ct, size_t ctSize);
-
-/* Decrypt and verify.                                                                           */
-/* Returns true if the tag is valid. On failure, plaintext is zeroed.                            */
-bool SSFAESCCMDecrypt(const uint8_t *ct, size_t ctLen,
-                      const uint8_t *nonce, size_t nonceLen,
-                      const uint8_t *aad, size_t aadLen,
-                      const uint8_t *key, size_t keyLen,
-                      const uint8_t *tag, size_t tagLen,
-                      uint8_t *pt, size_t ptSize);
+bool SSFAESCCMDecrypt(const uint8_t *ct, size_t ctLen, const uint8_t *nonce, size_t nonceLen,
+                      const uint8_t *aad, size_t aadLen, const uint8_t *key, size_t keyLen,
+                      const uint8_t *tag, size_t tagLen, uint8_t *pt, size_t ptSize);
 
 /* --------------------------------------------------------------------------------------------- */
 /* Unit test                                                                                     */
@@ -88,3 +68,4 @@ void SSFAESCCMUnitTest(void);
 #endif
 
 #endif /* SSF_AESCCM_H_INCLUDE */
+

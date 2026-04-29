@@ -40,18 +40,12 @@
 /* --------------------------------------------------------------------------------------------- */
 #define SSF_AESCTR_CONTEXT_MAGIC (0x41435452ul)     /* 'ACTR' — set by Begin, cleared by DeInit. */
 
-/* --------------------------------------------------------------------------------------------- */
-/* Compile-time bounds checks: ks[] and counter[] are sized to SSF_AESCTR_BLOCK_SIZE; the keystream */
-/* generation passes 16-byte buffers to SSFAESBlockEncrypt. key[] is sized to                   */
-/* SSF_AESCTR_KEY_MAX_SIZE. typedef-array idiom (size becomes -1 on failure) is used in place of */
-/* _Static_assert because the cross-test toolchain matrix predates universal C11 support.        */
-/* --------------------------------------------------------------------------------------------- */
+/* Compile-time bounds checks via typedef-array idiom (size becomes -1 on failure). */
 typedef char _ssf_aesctr_sa_block_size[(SSF_AESCTR_BLOCK_SIZE == 16u) ? 1 : -1];
 typedef char _ssf_aesctr_sa_key_max[(SSF_AESCTR_KEY_MAX_SIZE >= 32u) ? 1 : -1];
 
 /* --------------------------------------------------------------------------------------------- */
-/* Increment the 128-bit counter as a big-endian integer. NIST SP 800-38A §B.1 standard counter  */
-/* function T = T + 1 mod 2^128. Matches WolfSSL's wc_AesCtrEncrypt counter convention.          */
+/* Increments the 128-bit counter as a big-endian integer (NIST SP 800-38A §B.1).                */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFAESCTRIncCounter(uint8_t counter[SSF_AESCTR_BLOCK_SIZE])
 {
@@ -84,8 +78,7 @@ static void _SSFAESCTRNextKeystream(SSFAESCTRContext_t *ctx)
 /* --------------------------------------------------------------------------------------------- */
 /* Initializes an incremental AES-CTR context with key and initial counter.                      */
 /* --------------------------------------------------------------------------------------------- */
-void SSFAESCTRBegin(SSFAESCTRContext_t *ctx, const uint8_t *key, size_t keyLen,
-                    const uint8_t *iv)
+void SSFAESCTRBegin(SSFAESCTRContext_t *ctx, const uint8_t *key, size_t keyLen, const uint8_t *iv)
 {
     SSF_REQUIRE(ctx != NULL);
     SSF_REQUIRE(ctx->magic != SSF_AESCTR_CONTEXT_MAGIC);
@@ -99,8 +92,7 @@ void SSFAESCTRBegin(SSFAESCTRContext_t *ctx, const uint8_t *key, size_t keyLen,
     /* ksOff == BLOCK_SIZE means "no buffered keystream"; the first Crypt call will refill. */
     ctx->ksOff = SSF_AESCTR_BLOCK_SIZE;
 
-    /* Mark valid last so that any earlier assert leaves magic unset and subsequent Crypt /     */
-    /* DeInit calls fail loudly.                                                                */
+    /* Mark valid last so any earlier assert leaves magic unset and Crypt/DeInit fail loudly. */
     ctx->magic = SSF_AESCTR_CONTEXT_MAGIC;
 }
 
@@ -156,8 +148,8 @@ void SSFAESCTRDeInit(SSFAESCTRContext_t *ctx)
 /* --------------------------------------------------------------------------------------------- */
 /* Single-call AES-CTR encryption/decryption.                                                    */
 /* --------------------------------------------------------------------------------------------- */
-void SSFAESCTR(const uint8_t *key, size_t keyLen, const uint8_t *iv,
-               const uint8_t *in, uint8_t *out, size_t len)
+void SSFAESCTR(const uint8_t *key, size_t keyLen, const uint8_t *iv, const uint8_t *in,
+               uint8_t *out, size_t len)
 {
     SSFAESCTRContext_t ctx = {0};
 
@@ -171,3 +163,4 @@ void SSFAESCTR(const uint8_t *key, size_t keyLen, const uint8_t *iv,
     SSFAESCTRCrypt(&ctx, in, out, len);
     SSFAESCTRDeInit(&ctx);
 }
+

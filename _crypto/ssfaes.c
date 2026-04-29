@@ -28,7 +28,7 @@
 /* EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE */
 /* GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED    */
 /* AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING     */
-/* NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISE   */
+/* NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED  */
 /* OF THE POSSIBILITY OF SUCH DAMAGE.                                                            */
 /* --------------------------------------------------------------------------------------------- */
 
@@ -82,33 +82,16 @@
 #include "ssfassert.h"
 #include "ssfaes.h"
 
-/* --------------------------------------------------------------------------------------------- */
-/* Column-major u32 state representation.                                                        */
-/*                                                                                                */
-/* The state is stored as four uint32_t columns. Each column packs the four row bytes in little- */
-/* endian order: column c = row0 | (row1 << 8) | (row2 << 16) | (row3 << 24). On a 32-bit LE     */
-/* host that matches the natural FIPS 197 byte layout, so loading a column from the input array  */
-/* is a single u32 LE load and storing back is a single u32 LE store.                            */
-/*                                                                                                */
-/* This lets ADD_KEY collapse to four word XORs, MixColumns operate per-column with a packed     */
-/* xtime + rotate identity, and SHIFT_ROWS fold into the SBOX pass via a single byte-permuted    */
-/* gather. Net result is fewer instructions per round than the prior byte-by-byte form, with the */
-/* macros expanding to less code.                                                                 */
-/* --------------------------------------------------------------------------------------------- */
-
+/* State is four LE-packed u32 columns: c = row0 | (row1<<8) | (row2<<16) | (row3<<24). */
 #define FGFM2(x) ((x<<1) ^ (0x1b & -(x>>7)))
 
 #define ROTR8(x)  (((x) >> 8)  | ((x) << 24))
 #define ROTR16(x) (((x) >> 16) | ((x) << 16))
 #define ROTR24(x) (((x) >> 24) | ((x) << 8))
 
-/* Packed xtime: multiply each byte of x by 2 in GF(2^8) (poly 0x1B). The carries out of each */
-/* byte are masked off; the high-bit lane is reduced by 0x1B per byte via a single multiply.  */
+/* Packed xtime: multiply each byte of x by 2 in GF(2^8) with poly 0x1B. */
 #define XTIME32(x) ((((x) << 1) & 0xFEFEFEFEu) ^ ((((x) >> 7) & 0x01010101u) * 0x1Bu))
 
-/* Load a 16-byte block as four LE column words. memcpy lets the compiler emit native u32 loads */
-/* on aligned input and falls back to byte loads (or LWL/LWR on MIPS R1) when the source isn't  */
-/* aligned. The bytes-as-LE convention means no byte-shuffle is needed on a LE target.          */
 #define ARRAY_TO_STATE(s, a) do { \
     memcpy(&(s)[0], &(a)[0],  4); \
     memcpy(&(s)[1], &(a)[4],  4); \
@@ -123,8 +106,6 @@
     memcpy(&(a)[12], &(s)[3], 4); \
 } while (0)
 
-/* AddRoundKey: four word XORs, one per column. The schedule w[] is already u32; w[base+c] is */
-/* the round key column c.                                                                      */
 #define ADD_KEY(s, w, i) do { \
     (s)[0] ^= (w)[(i) + 0]; \
     (s)[1] ^= (w)[(i) + 1]; \
@@ -132,9 +113,7 @@
     (s)[3] ^= (w)[(i) + 3]; \
 } while (0)
 
-/* SubBytes + ShiftRows fused. The byte at row r of column c after ShiftRows is the byte at row */
-/* r of column (c + r) mod 4 before. Reading the right byte position from the right column      */
-/* during the SBOX pack lets us drop SHIFT_ROWS as a separate step, so it costs zero rounds.    */
+/* SubBytes + ShiftRows fused: byte at row r col c gathered from col (c+r) mod 4. */
 #define SBOX_SHIFT_ROWS(s, b) do { \
     uint32_t _c0 = (s)[0], _c1 = (s)[1], _c2 = (s)[2], _c3 = (s)[3]; \
     (s)[0] = ((uint32_t)(b)[ _c0        & 0xFFu])        | \
@@ -155,8 +134,7 @@
              ((uint32_t)(b)[(_c2 >> 24) & 0xFFu] << 24); \
 } while (0)
 
-/* InvSubBytes + InvShiftRows fused. Inverse ShiftRows moves byte at row r of column c to       */
-/* column (c - r) mod 4, so the gather pattern reverses.                                         */
+/* InvSubBytes + InvShiftRows fused: gather from col (c-r) mod 4 (gather pattern reverses). */
 #define INV_SBOX_SHIFT_ROWS(s, b) do { \
     uint32_t _c0 = (s)[0], _c1 = (s)[1], _c2 = (s)[2], _c3 = (s)[3]; \
     (s)[0] = ((uint32_t)(b)[ _c0        & 0xFFu])        | \
@@ -180,11 +158,7 @@
 #define SBOX_STATE(s)     SBOX_SHIFT_ROWS((s), sbox)
 #define INV_SBOX_STATE(s) INV_SBOX_SHIFT_ROWS((s), inv_sbox)
 
-/* Word-form MixColumns. For column c with bytes [a,b,c,d] in LE u32:                            */
-/*   E = c ^ rotr(c, 8)              ; bytewise [a^b, b^c, c^d, d^a]                             */
-/*   T = E ^ rotr(E, 16)             ; bytewise broadcast of (a^b^c^d)                           */
-/*   c' = c ^ T ^ xtime(E)           ; per-byte: old ^ (a^b^c^d) ^ xtime(neighbor-XOR)           */
-/* Each column reduces to 2 rotates + 3 XORs + 1 packed xtime, vs ~16 byte ops in the byte form. */
+/* Word-form MixColumns: 2 rotates + 3 XORs + 1 packed xtime per column. */
 #define MIX_COL_WORD(c) do { \
     uint32_t _E = (c) ^ ROTR8(c); \
     uint32_t _T = _E ^ ROTR16(_E); \
@@ -196,11 +170,7 @@
     MIX_COL_WORD((s)[2]); MIX_COL_WORD((s)[3]); \
 } while (0)
 
-/* Inverse MixColumns via Gladman's preprocess-then-MixColumns identity:                         */
-/*   InvMix(c) = Mix(c ^ broadcast(4*(a^c) on rows 0/2, 4*(b^d) on rows 1/3))                    */
-/* In word form: rotr(c, 16) gives bytewise [c, d, a, b], so c ^ rotr(c, 16) is [a^c, b^d,       */
-/* c^a, d^b], which after two xtimes (×4) is the broadcast we need. One word op per column for  */
-/* the preprocess, then forward MixColumns.                                                       */
+/* Inverse MixColumns via Gladman's preprocess-then-MixColumns identity. */
 #define INV_MIX_PRE(c) do { \
     uint32_t _e = (c) ^ ROTR16(c); \
     (c) ^= XTIME32(XTIME32(_e)); \
@@ -284,15 +254,19 @@ static void _SSFAESKeyExpansion(uint32_t *w, size_t wSize, const uint8_t *key, s
     for (i = nk; i < wSize; i++)
     {
         t = w[i - 1];
+        /* Is this word at the start of a new Nk-word group? */
         if ((i % nk) == 0)
         {
+            /* Yes, apply the round-key transform: RotWord, SubWord, then XOR Rcon. */
             t = ((t >> 8) | ((t << 24) & 0xffffffff));
             t = SBOX_WORD(t);
             t ^= rcon;
             rcon = FGFM2(rcon);
         }
+        /* No, but for AES-256 only, is this the mid-group SubWord position? */
         else if ((nk > 6) && ((i % nk) == 4))
         {
+            /* Yes, apply SubWord (no rotate, no Rcon). */
             t = SBOX_WORD(t);
         }
         w[i] = w[i - nk] ^ t;

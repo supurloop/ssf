@@ -219,7 +219,7 @@ void SSFBNCopy(SSFBN_t *dst, const SSFBN_t *src)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* If data fits in numLimbs then writes a, sets a->len = numLimbs, returns true; else false.     */
+/* If data fits in numLimbs then writes a, sets a->len = numLimbs, returns true, else false.     */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFBNFromBytes(SSFBN_t *a, const uint8_t *data, size_t dataLen, uint16_t numLimbs)
 {
@@ -253,7 +253,7 @@ bool SSFBNFromBytes(SSFBN_t *a, const uint8_t *data, size_t dataLen, uint16_t nu
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* If outSize holds a then writes out (BE, zero-padded leading), returns true; else false.       */
+/* If outSize holds a then writes out (BE, zero-padded leading), returns true, else false.       */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFBNToBytes(const SSFBN_t *a, uint8_t *out, size_t outSize)
 {
@@ -332,8 +332,7 @@ bool SSFBNToBytes(const SSFBN_t *a, uint8_t *out, size_t outSize)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* If data fits in numLimbs then writes a (LE), sets a->len = numLimbs, returns true; else       */
-/* false.                                                                                        */
+/* If data fits in numLimbs writes a (LE), sets a->len = numLimbs, returns true, else false.     */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFBNFromBytesLE(SSFBN_t *a, const uint8_t *data, size_t dataLen, uint16_t numLimbs)
 {
@@ -371,7 +370,7 @@ bool SSFBNFromBytesLE(SSFBN_t *a, const uint8_t *data, size_t dataLen, uint16_t 
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* If outSize holds a then writes out (LE, zero-padded high), returns true; else false.          */
+/* If outSize holds a then writes out (LE, zero-padded high), returns true, else false.          */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFBNToBytesLE(const SSFBN_t *a, uint8_t *out, size_t outSize)
 {
@@ -1302,14 +1301,7 @@ void SSFBNModMul(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* r = (a * b) mod m, constant-time. Mathematically equivalent to SSFBNModMul but the iteration  */
-/* count and per-iteration work do not depend on the values of a, b, or intermediate state — only */
-/* on the limb count of m. Use this when a or b are secret (e.g. ECDSA Sign's k^-1 and d-derived  */
-/* operands on mod-n).                                                                            */
-/*                                                                                                */
-/* Cost: ~2-3x slower than SSFBNModMul for typical inputs because it always does worst-case work. */
-/* Algorithm: schoolbook multiply (already CT) followed by fixed-iteration shift-and-subtract     */
-/* reduction with branchless mask-conditional commits.                                            */
+/* r = (a * b) mod m, constant-time.                                                             */
 /* --------------------------------------------------------------------------------------------- */
 void SSFBNModMulCT(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *m)
 {
@@ -1353,9 +1345,7 @@ void SSFBNModMulCT(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t
     shifted.len = prodLen;
     tmp.len = prodLen;
 
-    /* Fixed-iteration shift-and-subtract: nIters = m->len * 32 + 1 covers all possible shifts.   */
-    /* Each iteration: compute prod - shifted into tmp; commit prod := tmp via CT mask if the     */
-    /* subtract did not underflow; then shift shifted right by 1.                                  */
+    /* Fixed-iteration shift-and-subtract: nIters = m->len * 32 + 1 covers all possible shifts. */
     nIters = (uint32_t)m->len * SSF_BN_LIMB_BITS + 1u;
     for (k = 0; k < nIters; k++)
     {
@@ -1517,7 +1507,7 @@ void SSFBNDivMod(SSFBN_t *q, SSFBN_t *rem, const SSFBN_t *a, const SSFBN_t *b)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* If a^(-1) mod m exists then writes r, returns true; else false.                               */
+/* If a^(-1) mod m exists then writes r, returns true, else false.                               */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFBNModInvExt(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
 {
@@ -1654,7 +1644,6 @@ bool SSFBNModInvExt(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
 static void _SSFBNReduceP256(SSFBN_t *r, const SSFBN_t *t)
 {
     /* Name the 32-bit words: t = (c15 c14 ... c1 c0) where c0 = t->limbs[0] etc. */
-    /* Notation follows NIST SP 800-186 D.2.1 */
     const SSFBNLimb_t *c;
     SSFBNLimb_t carry;
     SSFBNLimb_t borrow;
@@ -1726,13 +1715,7 @@ static void _SSFBNReduceP256(SSFBN_t *r, const SSFBN_t *t)
     s.limbs[6] = 0; s.limbs[7] = c[13];
     borrow += _SSFBNRawSub(r->limbs, r->limbs, s.limbs, 8);
 
-    /* CT correction loops. Each preserves V mod p where V = r + (carry - borrow) * 2^256.       */
-    /* The borrow/carry counters must only be decremented when the underlying add/sub actually   */
-    /* crosses the 2^256 boundary — otherwise the bookkeeping breaks the V-mod-p invariant       */
-    /* (Wycheproof ECDH P-256 tcId 49 / sparse-coord inputs were a victim of the prior buggy     */
-    /* unconditional decrement). Bounds: each successful (overflow-causing) iter is preceded by  */
-    /* up to one "spinning" non-overflow iter that pushes r toward 2^256 — so 2× the original    */
-    /* worst-case carry/borrow counts cover all cases.                                            */
+    /* CT correction loops preserve V mod p; decrement borrow/carry only on boundary crossings. */
     tmp.len = 8;
     {
         SSFBNLimb_t mask, lim, addCarry, subBorrow;
@@ -1859,8 +1842,7 @@ static void _SSFBNReduceP384(SSFBN_t *r, const SSFBN_t *t)
     s.limbs[3] = c[23]; s.limbs[4] = c[23];
     borrow += _SSFBNRawSub(r->limbs, r->limbs, s.limbs, 12);
 
-    /* CT correction loops — same algorithm as _SSFBNReduceP256. Bounds doubled to handle the    */
-    /* "non-progressing" non-overflow iters that occur for sparse-coord inputs.                   */
+    /* CT correction loops — same as _SSFBNReduceP256; bounds doubled for sparse-coord inputs. */
     tmp.len = 12;
     {
         SSFBNLimb_t mask, lim, addCarry, subBorrow;
@@ -1948,7 +1930,7 @@ void SSFBNModMulNIST(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* If a^(-1) mod m exists for prime m and is verified then writes r, returns true; else false.   */
+/* If a^(-1) mod m exists for prime m and is verified then writes r, returns true, else false.   */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFBNModInv(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
 {
@@ -2619,7 +2601,7 @@ void SSFBNRandom(SSFBN_t *a, uint16_t numLimbs, SSFPRNGContext_t *prng)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* If a uniform random in [0, bound) is found within the cap then writes a; returns success.     */
+/* If a uniform random in [0, bound) is found within the cap, writes a, returns true, else false.*/
 /* --------------------------------------------------------------------------------------------- */
 bool SSFBNRandomBelow(SSFBN_t *a, const SSFBN_t *bound, SSFPRNGContext_t *prng)
 {
@@ -2796,7 +2778,7 @@ bool SSFBNIsProbablePrime(const SSFBN_t *n, uint16_t rounds, SSFPRNGContext_t *p
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* If a random bitLen-bit prime is found within the cap then writes p, returns true; else false. */
+/* If a random bitLen-bit prime is found within the cap then writes p, returns true, else false. */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFBNGenPrime(SSFBN_t *p, uint16_t bitLen, uint16_t rounds, SSFPRNGContext_t *prng)
 {

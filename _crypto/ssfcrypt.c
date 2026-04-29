@@ -36,7 +36,7 @@
 #include "ssfassert.h"
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if the first n bytes at a and b are equal, inspecting every byte, else false.    */
+/* If the first n bytes at a and b are equal, inspecting every byte, returns true, else false.  */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFCryptCTMemEq(const void *a, const void *b, size_t n)
 {
@@ -72,3 +72,4 @@ void SSFCryptSecureZero(void *p, size_t n)
         v[i] = 0u;
     }
 }
+

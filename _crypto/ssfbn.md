@@ -62,7 +62,7 @@ other big-integer libraries.
 
   | Status | Functions |
   |---|---|
-  | **Constant-time** (safe on secrets) | [`SSFBNCmp`](#ssfbncmp), [`SSFBNModExp`/`SSFBNModExpMont`](#modexp), [`SSFBNMontMul`](#montmul), [`SSFBNMontSquare`](#montsquare), [`SSFBNMontConvertIn`/`Out`](#montconv), [`SSFBNCondSwap`](#condswap), [`SSFBNCondCopy`](#condswap), [`SSFBNAdd`](#ssfbnadd), [`SSFBNSub`](#ssfbnsub), [`SSFBNModAdd`](#modaddsub), [`SSFBNModSub`](#modaddsub), [`SSFBNMul`](#ssfbnmul), [`SSFBNSquare`](#ssfbnsquare), [`SSFBNIsEven`/`SSFBNIsOdd`](#predicates) |
+  | **Constant-time** (safe on secrets) | [`SSFBNCmp`](#ssfbncmp), [`SSFBNModExp`/`SSFBNModExpMont`](#modexp), [`SSFBNMontMul`](#montmul), [`SSFBNMontSquare`](#montsquare), [`SSFBNMontConvertIn`/`Out`](#montconv), [`SSFBNCondSwap`](#condswap), [`SSFBNCondCopy`](#condswap), [`SSFBNAdd`](#ssfbnadd), [`SSFBNSub`](#ssfbnsub), [`SSFBNModAdd`](#modaddsub), [`SSFBNModSub`](#modaddsub), [`SSFBNModMulCT`](#ssfbnmodmulct), [`SSFBNMul`](#ssfbnmul), [`SSFBNSquare`](#ssfbnsquare), [`SSFBNIsEven`/`SSFBNIsOdd`](#predicates) |
   | **Variable-time** (do not use on secrets) | [`SSFBNMod`](#ssfbnmod), [`SSFBNDivMod`](#ssfbndivmod), [`SSFBNModMul`](#ssfbnmodmul), [`SSFBNModSquare`](#ssfbnmodsquare), [`SSFBNGcd`](#ssfbngcd), [`SSFBNModInvExt`](#modinv), [`SSFBNModMulNIST`](#modmulnist), [`SSFBNModExpPub`/`SSFBNModExpMontPub`](#modexppub), [`SSFBNBitLen`](#bitlen), [`SSFBNTrailingZeros`](#trailingzeros), [`SSFBNIsZero`/`IsOne`](#predicates), [`SSFBNShiftLeft1`/`Right1`](#shift), [`SSFBNShiftLeft`/`Right`](#shift-multi), [`SSFBNIsProbablePrime`](#ssfbnisprobableprime), [`SSFBNGenPrime`](#ssfbngenprime) |
   | **Constant-time only when `m` is prime** | [`SSFBNModInv`](#modinv) — uses Fermat's little theorem (`a^(m-2) mod m`), which is constant-time but yields the correct answer only for prime `m`. After computing it, the function verifies `a · r ≡ 1 (mod m)` and returns `false` if it does not hold, so non-prime moduli are rejected (even when an inverse exists). |
 - **Secret scalars go through `SSFBNModInv` (with prime `m`) or the ModExp path, never
@@ -234,6 +234,7 @@ The `ssfrsa` and `ssfbn` modules sanity-check against this macro at compile time
 | | [`void SSFBNModAdd(r, a, b, m)`](#modaddsub) | `r = (a + b) mod m`; requires `a, b < m` |
 | | [`void SSFBNModSub(r, a, b, m)`](#modaddsub) | `r = (a − b) mod m`; requires `a, b < m` |
 | [e.g.](#ex-modmul) | [`void SSFBNModMul(r, a, b, m)`](#ssfbnmodmul) | `r = (a × b) mod m`; general-purpose |
+| | [`void SSFBNModMulCT(r, a, b, m)`](#ssfbnmodmulct) | `r = (a × b) mod m`, constant-time; for secret `a` or `b` |
 | | [`void SSFBNModSquare(r, a, m)`](#ssfbnmodsquare) | `r = (a²) mod m`; `Square` then `Mod` (variable-time) |
 | | [`void SSFBNModMulNIST(r, a, b, m)`](#modmulnist) | `r = (a × b) mod m` using NIST fast reduction for P-256 / P-384 |
 | | [`bool SSFBNModInv(r, a, m)`](#modinv) | `r = a⁻¹ mod m` via Fermat's little theorem (prime `m`) |
@@ -594,6 +595,18 @@ inherits the bit-pattern-dependent timing of `SSFBNMod`, so do not call on secre
 For modular multiplications on secret data — and for many multiplications against the same
 modulus (the RSA / DH case) — go through the Montgomery path
 ([`SSFBNMontMul`](#montmul) / [`SSFBNMontSquare`](#montsquare)).
+
+<a id="ssfbnmodmulct"></a>
+```c
+void SSFBNModMulCT(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *m);
+```
+`r = (a × b) mod m`. Mathematically equivalent to [`SSFBNModMul`](#ssfbnmodmul) but the
+iteration count and per-iteration work do not depend on the values of `a`, `b`, or
+intermediate state — only on the limb count of `m`. **Constant-time** — use this when `a`
+or `b` are secret (e.g., ECDSA signing's `k⁻¹` and `d`-derived operands modulo the curve
+order). Cost: ~2–3× slower than `SSFBNModMul` for typical inputs because it always does
+worst-case work. Algorithm: schoolbook multiply (already CT) followed by fixed-iteration
+shift-and-subtract reduction with branchless mask-conditional commits.
 
 <a id="ssfbnmodsquare"></a>
 ```c

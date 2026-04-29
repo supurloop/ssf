@@ -1,5 +1,4 @@
 /* --------------------------------------------------------------------------------------------- */
-/* --------------------------------------------------------------------------------------------- */
 /* Small System Framework                                                                        */
 /*                                                                                               */
 /* ssfaesgcm.c                                                                                   */
@@ -30,7 +29,7 @@
 /* EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE */
 /* GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED    */
 /* AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING     */
-/* NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISE   */
+/* NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED  */
 /* OF THE POSSIBILITY OF SUCH DAMAGE.                                                            */
 /* --------------------------------------------------------------------------------------------- */
 
@@ -77,7 +76,6 @@
 /* President                                                                                     */
 /* Supurloop Software LLC                                                                        */
 /* --------------------------------------------------------------------------------------------- */
-#include <stdio.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include "ssfport.h"
@@ -86,13 +84,7 @@
 #include "ssfaesgcm.h"
 #include "ssfcrypt.h"
 
-/* --------------------------------------------------------------------------------------------- */
-/* Compile-time bounds checks: the GCM length-block is a 64-bit BE bit count per NIST SP 800-38D */
-/* §6.5; the GHASH iteration count and GCTR full-block count are derived from size_t lengths.    */
-/* These typedefs trip the build if the project's integer widths shrink such that the helpers'   */
-/* size_t / uint64_t arithmetic could silently truncate. typedef-array idiom is used in place of */
-/* _Static_assert because the cross-test toolchain matrix predates universal C11 support.        */
-/* --------------------------------------------------------------------------------------------- */
+/* Compile-time bounds checks via typedef-array idiom (size becomes -1 on failure). */
 typedef char _ssf_aesgcm_sa_size_at_least_32[(sizeof(size_t) >= 4) ? 1 : -1];
 typedef char _ssf_aesgcm_sa_u64_is_64_bit[(sizeof(uint64_t) == 8) ? 1 : -1];
 
@@ -100,8 +92,7 @@ typedef char _ssf_aesgcm_sa_u64_is_64_bit[(sizeof(uint64_t) == 8) ? 1 : -1];
 /* Local Helper Functions and Macros                                                             */
 /* --------------------------------------------------------------------------------------------- */
 
-/* --------------------------------------------------------------------------------------------- */
-/* --------------------------------------------------------------------------------------------- */
+/* XORs the 16 bytes at y into x in place. */
 #define BLOCK_XOR(x, y) \
     (x)[0] ^= (y)[0]; (x)[1] ^= (y)[1]; (x)[2] ^= (y)[2]; (x)[3] ^= (y)[3]; \
     (x)[4] ^= (y)[4]; (x)[5] ^= (y)[5]; (x)[6] ^= (y)[6]; (x)[7] ^= (y)[7]; \
@@ -109,6 +100,7 @@ typedef char _ssf_aesgcm_sa_u64_is_64_bit[(sizeof(uint64_t) == 8) ? 1 : -1];
     (x)[12] ^= (y)[12]; (x)[13] ^= (y)[13]; (x)[14] ^= (y)[14]; (x)[15] ^= (y)[15]
 
 /* --------------------------------------------------------------------------------------------- */
+/* Increments the low 32 bits of the 16-byte counter block (GCM inc32, NIST SP 800-38D §6.2).    */
 /* --------------------------------------------------------------------------------------------- */
 static inline void _SSFAESGCMBlockInc32(uint8_t *in)
 {
@@ -120,6 +112,7 @@ static inline void _SSFAESGCMBlockInc32(uint8_t *in)
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* 32-bit carryless multiply over GF(2); writes the 64-bit product into (l, r) low/high halves.  */
 /* --------------------------------------------------------------------------------------------- */
 static inline void _SSFAESGCMCarryless32Mult(uint32_t a, uint32_t b, uint32_t *l, uint32_t *r)
 {
@@ -159,6 +152,7 @@ static inline void _SSFAESGCMCarryless32Mult(uint32_t a, uint32_t b, uint32_t *l
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Reduces a 256-bit carryless product modulo the GCM polynomial x^128 + x^7 + x^2 + x + 1.      */
 /* --------------------------------------------------------------------------------------------- */
 static inline void _SSFAESGCMCarrylessReduce(uint32_t *in)
 {
@@ -189,10 +183,7 @@ static inline void _SSFAESGCMCarrylessReduce(uint32_t *in)
     r[0] = d ^ e[0] ^ f[0] ^ g[0] ^ x0;
     r[1] = x3 ^ e[1] ^ f[1] ^ g[1] ^ x1;
 
-    /* Write r[0..1] back into in[0..3] using the same little-endian word
-     * layout that memcpy would produce on a little-endian host. Doing this
-     * explicitly keeps the result identical on big-endian hosts (KAT-fail
-     * on mips/mips64 BE before this). */
+    /* Explicit LE word layout so the result matches across LE and BE hosts. */
     in[0] = (uint32_t)(r[0]);
     in[1] = (uint32_t)(r[0] >> 32);
     in[2] = (uint32_t)(r[1]);
@@ -200,6 +191,7 @@ static inline void _SSFAESGCMCarrylessReduce(uint32_t *in)
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Bit-reverses a single byte.                                                                   */
 /* --------------------------------------------------------------------------------------------- */
 static inline uint32_t _SSFAESGCMReverseByte(uint8_t x)
 {
@@ -210,6 +202,7 @@ static inline uint32_t _SSFAESGCMReverseByte(uint8_t x)
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Bit-reverses each byte of a uint32_t independently.                                           */
 /* --------------------------------------------------------------------------------------------- */
 static inline uint32_t _SSFAESGCMReverseBytes(uint32_t x)
 {
@@ -220,6 +213,7 @@ static inline uint32_t _SSFAESGCMReverseBytes(uint32_t x)
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* In-place GF(2^128) multiply of in by con (Karatsuba carryless multiply + GCM reduction).      */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFAESGCMBlockMult(uint8_t *in, size_t inSize, const uint8_t *con, size_t conLen)
 {
@@ -317,8 +311,7 @@ static void _SSFAESGCMBlockMult(uint8_t *in, size_t inSize, const uint8_t *con, 
     res[2] = _SSFAESGCMReverseBytes(res[2]);
     res[3] = _SSFAESGCMReverseBytes(res[3]);
 
-    /* Symmetric inverse of the SSF_GETU32LE reads above; replaces the
-     * host-endian memcpy that broke on big-endian hosts. */
+    /* Symmetric inverse of the SSF_GETU32LE reads above (host-endian-safe). */
     SSF_PUTU32LE(&in[0],  res[0]);
     SSF_PUTU32LE(&in[4],  res[1]);
     SSF_PUTU32LE(&in[8],  res[2]);
@@ -326,6 +319,7 @@ static void _SSFAESGCMBlockMult(uint8_t *in, size_t inSize, const uint8_t *con, 
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Iterative GHASH update: out := (out XOR each 16-byte block of in) * h, in GF(2^128).          */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFAESGCMGHASH(const uint8_t *in, size_t inLen, const uint8_t *h, size_t hLen,
                             uint8_t *out, size_t outSize)
@@ -335,9 +329,7 @@ static void _SSFAESGCMGHASH(const uint8_t *in, size_t inLen, const uint8_t *h, s
     size_t pos;
     size_t iters;
 
-    /* inLen == 0 is the legitimate empty-AAD / empty-plaintext case (auth-only GCM). The     */
-    /* public API rejects NULL pointers with positive length, so once we get here, NULL means */
-    /* len == 0.                                                                              */
+    /* inLen == 0 is the legitimate empty-AAD / empty-plaintext (auth-only GCM) case. */
     if (inLen == 0u) return;
 
     SSF_REQUIRE(in != NULL);
@@ -348,9 +340,6 @@ static void _SSFAESGCMGHASH(const uint8_t *in, size_t inLen, const uint8_t *h, s
     SSF_REQUIRE(outSize == 16);
 
     pos = 0u;
-    /* size_t throughout — was previously truncating to uint32_t, which silently produced wrong */
-    /* tags for inputs > 4 GiB. Public API still caps inLen below that, but this helper is now  */
-    /* correct independent of the cap.                                                          */
     iters = inLen >> 4;
 
     for (i = 0; i < iters; i++)
@@ -360,8 +349,10 @@ static void _SSFAESGCMGHASH(const uint8_t *in, size_t inLen, const uint8_t *h, s
         pos += 16u;
     }
 
+    /* Is there a partial trailing block? */
     if (pos < inLen)
     {
+        /* Yes, zero-pad it to 16 bytes and absorb. */
         SSF_ASSERT((inLen - pos) <= sizeof(buf));
         memset(buf, 0, sizeof(buf));
         memcpy(buf, &in[pos], inLen - pos);
@@ -379,6 +370,7 @@ static void _SSFAESGCMGHASH(const uint8_t *in, size_t inLen, const uint8_t *h, s
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* GCTR mode: XORs in into out using AES-CTR keystream starting from initial counter block icb.  */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFAESGCMGCTR(const uint8_t *in, size_t inLen, const uint8_t *key, size_t keyLen,
                            const uint8_t *icb, size_t icbLen, uint8_t *out, size_t outSize)
@@ -400,8 +392,6 @@ static void _SSFAESGCMGCTR(const uint8_t *in, size_t inLen, const uint8_t *key, 
     memcpy(cb, icb, sizeof(cb));
     memcpy(out, in, inLen);
 
-    /* size_t mask — was previously a 32-bit constant that clobbered the high half on 64-bit   */
-    /* hosts for inLen > 4 GiB.                                                                  */
     n = inLen & ~(size_t)0xFu;
     for (i = 0; i < n; i += 16u)
     {
@@ -410,8 +400,10 @@ static void _SSFAESGCMGCTR(const uint8_t *in, size_t inLen, const uint8_t *key, 
         _SSFAESGCMBlockInc32(cb);
     }
 
+    /* Is there a partial trailing block? */
     if (i < inLen)
     {
+        /* Yes, encrypt one more keystream block and XOR only the leftover bytes. */
         SSFAESXXXBlockEncrypt(cb, sizeof(cb), buf, sizeof(buf), key, keyLen);
 
         for (i = 0; i < (inLen & (size_t)0xFu); i++)
@@ -433,10 +425,6 @@ void SSFAESGCMEncrypt(const uint8_t *pt, size_t ptLen, const uint8_t *iv, size_t
     uint8_t j0[16] = {0};
     uint8_t j1[16] = {0};
     uint8_t buf[16] = {0};
-
-    /* uint64_t — the GCM length block encodes lengths-in-bits as 64-bit big-endian per NIST    */
-    /* SP 800-38D §6.5. Was previously uint32_t which silently truncated for ptLen >= 2^29,    */
-    /* exactly the boundary the public API cap brushes against.                                 */
     uint64_t t;
 
     SSF_REQUIRE(iv != NULL);
@@ -453,13 +441,16 @@ void SSFAESGCMEncrypt(const uint8_t *pt, size_t ptLen, const uint8_t *iv, size_t
 
     SSFAESXXXBlockEncrypt(h, sizeof(h), h, sizeof(h), key, keyLen);
 
+    /* Is the IV exactly 96 bits (the GCM fast path)? */
     if (ivLen == 12)
     {
+        /* Yes, J_0 = IV || 0x00000001 directly. */
         memcpy(j0, iv, ivLen);
         SSF_PUTU32BE(&j0[12], 1);
     }
     else
     {
+        /* No, J_0 = GHASH(IV || 0^s || len(IV)). */
         _SSFAESGCMGHASH(iv, ivLen, h, sizeof(h), j0, sizeof(j0));
         t = ((uint64_t)ivLen) << 3;
         SSF_PUTU64BE(&buf[8], t);
@@ -469,10 +460,10 @@ void SSFAESGCMEncrypt(const uint8_t *pt, size_t ptLen, const uint8_t *iv, size_t
     memcpy(j1, j0, sizeof(j1));
     _SSFAESGCMBlockInc32(j1);
 
-    /* Guard the GCTR call so pt / ct may legitimately be NULL when ptLen == 0 (auth-only /  */
-    /* GMAC-style use). _SSFAESGCMGCTR's memcpy would otherwise be passed NULLs.              */
+    /* Is there plaintext to encrypt? (skip the GCTR call when ptLen == 0 / GMAC-only use.) */
     if (ptLen > 0u)
     {
+        /* Yes, encrypt under counter J_1. */
         _SSFAESGCMGCTR(pt, ptLen, key, keyLen, j1, sizeof(j1), ct, ptLen);
     }
 
@@ -491,7 +482,7 @@ void SSFAESGCMEncrypt(const uint8_t *pt, size_t ptLen, const uint8_t *iv, size_t
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if AES-GCM decryption/authentication successful else false.                      */
+/* If tag verifies, decrypts ct into pt, returns true, else zeroes pt and returns false.         */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFAESGCMDecrypt(const uint8_t *ct, size_t ctLen, const uint8_t *iv, size_t ivLen,
                       const uint8_t *auth, size_t authLen, const uint8_t *key, size_t keyLen,
@@ -502,9 +493,6 @@ bool SSFAESGCMDecrypt(const uint8_t *ct, size_t ctLen, const uint8_t *iv, size_t
     uint8_t j0[16] = { 0 };
     uint8_t j1[16] = { 0 };
     uint8_t buf[16] = { 0 };
-
-    /* uint64_t — see SSFAESGCMEncrypt for rationale; matches NIST SP 800-38D §6.5 length block */
-    /* encoding (64-bit big-endian count of bits).                                              */
     uint64_t t;
 
     SSF_REQUIRE(iv != NULL);
@@ -522,13 +510,16 @@ bool SSFAESGCMDecrypt(const uint8_t *ct, size_t ctLen, const uint8_t *iv, size_t
 
     SSFAESXXXBlockEncrypt(h, sizeof(h), h, sizeof(h), key, keyLen);
 
+    /* Is the IV exactly 96 bits (the GCM fast path)? */
     if (ivLen == 12)
     {
+        /* Yes, J_0 = IV || 0x00000001 directly. */
         memcpy(j0, iv, ivLen);
         SSF_PUTU32BE(&j0[12], 1);
     }
     else
     {
+        /* No, J_0 = GHASH(IV || 0^s || len(IV)). */
         _SSFAESGCMGHASH(iv, ivLen, h, sizeof(h), j0, sizeof(j0));
         t = ((uint64_t)ivLen) << 3;
         SSF_PUTU64BE(&buf[8], t);
@@ -538,8 +529,10 @@ bool SSFAESGCMDecrypt(const uint8_t *ct, size_t ctLen, const uint8_t *iv, size_t
     memcpy(j1, j0, sizeof(j1));
     _SSFAESGCMBlockInc32(j1);
 
+    /* Is there ciphertext to decrypt? (skip GCTR when ctLen == 0 / GMAC-only use.) */
     if (ctLen > 0u)
     {
+        /* Yes, decrypt under counter J_1. */
         _SSFAESGCMGCTR(ct, ctLen, key, keyLen, j1, sizeof(j1), pt, ptSize);
     }
 
@@ -554,15 +547,14 @@ bool SSFAESGCMDecrypt(const uint8_t *ct, size_t ctLen, const uint8_t *iv, size_t
 
     _SSFAESGCMGCTR(s, sizeof(s), key, keyLen, j0, sizeof(j0), s, sizeof(s));
 
-    /* Verify tag in constant time to avoid leaking the position of the first differing byte.
-     * On auth failure, zero pt so a buggy caller that ignores the return value cannot ship
-     * unauthenticated plaintext — matches the SSFAESCCMDecrypt pattern. The ctLen > 0 guard
-     * is needed because pt may legitimately be NULL when ctLen == 0 (auth-only / GMAC mode). */
+    /* Did the tags differ? (constant-time compare) */
     if (SSFCryptCTMemEq(s, tag, tagLen) == false)
     {
+        /* Yes, authentication failed; zero the plaintext. */
         if (ctLen > 0u) memset(pt, 0, ctLen);
         return false;
     }
+    /* No, tags match; return success. */
     return true;
 }
 

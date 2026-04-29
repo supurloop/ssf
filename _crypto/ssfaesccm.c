@@ -46,23 +46,19 @@ static void _SSFAESCCMXorBlock(uint8_t *dst, const uint8_t *src)
 /* --------------------------------------------------------------------------------------------- */
 /* Encrypt a single 16-byte block using the AES key.                                             */
 /* --------------------------------------------------------------------------------------------- */
-static void _SSFAESCCMEncBlock(const uint8_t *key, size_t keyLen,
-                               const uint8_t *in, uint8_t *out)
+static void _SSFAESCCMEncBlock(const uint8_t *key, size_t keyLen, const uint8_t *in, uint8_t *out)
 {
     SSFAESXXXBlockEncrypt(in, SSF_AESCCM_BLOCK_SIZE, out, SSF_AESCCM_BLOCK_SIZE, key, keyLen);
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Formats the B_0 block (RFC 3610 section 2.2).                                                 */
-/*   Byte 0: flags = (aadPresent ? 0x40 : 0) | ((t-2)/2 << 3) | (L-1)                          */
-/*   Bytes 1..nonceLen: nonce                                                                    */
-/*   Bytes nonceLen+1..15: plaintext length encoded big-endian in L bytes                        */
+/* Formats the B_0 block per RFC 3610 section 2.2.                                               */
 /* --------------------------------------------------------------------------------------------- */
-static void _SSFAESCCMFormatB0(uint8_t b0[SSF_AESCCM_BLOCK_SIZE],
-                               const uint8_t *nonce, size_t nonceLen,
-                               size_t aadLen, size_t ptLen, size_t tagLen)
+static void _SSFAESCCMFormatB0(uint8_t b0[SSF_AESCCM_BLOCK_SIZE], const uint8_t *nonce,
+                               size_t nonceLen, size_t aadLen, size_t ptLen, size_t tagLen)
 {
     uint32_t L = (uint32_t)(15u - nonceLen);
+    size_t q = ptLen;
     uint32_t i;
 
     memset(b0, 0, SSF_AESCCM_BLOCK_SIZE);
@@ -76,26 +72,21 @@ static void _SSFAESCCMFormatB0(uint8_t b0[SSF_AESCCM_BLOCK_SIZE],
     memcpy(&b0[1], nonce, nonceLen);
 
     /* Plaintext length in L bytes, big-endian */
+    for (i = 0; i < L; i++)
     {
-        size_t q = ptLen;
-        for (i = 0; i < L; i++)
-        {
-            b0[15u - i] = (uint8_t)(q & 0xFFu);
-            q >>= 8;
-        }
+        b0[15u - i] = (uint8_t)(q & 0xFFu);
+        q >>= 8;
     }
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Formats counter block A_i (RFC 3610 section 2.3).                                             */
-/*   Byte 0: flags = L-1                                                                        */
-/*   Bytes 1..nonceLen: nonce                                                                    */
-/*   Bytes nonceLen+1..15: counter i encoded big-endian in L bytes                               */
+/* Formats counter block A_i per RFC 3610 section 2.3.                                           */
 /* --------------------------------------------------------------------------------------------- */
-static void _SSFAESCCMFormatCtr(uint8_t a[SSF_AESCCM_BLOCK_SIZE],
-                                const uint8_t *nonce, size_t nonceLen, uint32_t counter)
+static void _SSFAESCCMFormatCtr(uint8_t a[SSF_AESCCM_BLOCK_SIZE], const uint8_t *nonce,
+                                size_t nonceLen, uint32_t counter)
 {
     uint32_t L = (uint32_t)(15u - nonceLen);
+    uint32_t c = counter;
     uint32_t i;
 
     memset(a, 0, SSF_AESCCM_BLOCK_SIZE);
@@ -103,29 +94,27 @@ static void _SSFAESCCMFormatCtr(uint8_t a[SSF_AESCCM_BLOCK_SIZE],
     memcpy(&a[1], nonce, nonceLen);
 
     /* Counter in L bytes, big-endian */
+    for (i = 0; i < L; i++)
     {
-        uint32_t c = counter;
-        for (i = 0; i < L; i++)
-        {
-            a[15u - i] = (uint8_t)(c & 0xFFu);
-            c >>= 8;
-        }
+        a[15u - i] = (uint8_t)(c & 0xFFu);
+        c >>= 8;
     }
 }
 
 /* --------------------------------------------------------------------------------------------- */
 /* Computes CBC-MAC tag T over (B_0 || AAD || plaintext) per RFC 3610 section 2.2.               */
 /* --------------------------------------------------------------------------------------------- */
-static void _SSFAESCCMComputeTag(const uint8_t *key, size_t keyLen,
-                                 const uint8_t *nonce, size_t nonceLen,
-                                 const uint8_t *aad, size_t aadLen,
-                                 const uint8_t *data, size_t dataLen,
-                                 size_t tagLen,
+static void _SSFAESCCMComputeTag(const uint8_t *key, size_t keyLen, const uint8_t *nonce,
+                                 size_t nonceLen, const uint8_t *aad, size_t aadLen,
+                                 const uint8_t *data, size_t dataLen, size_t tagLen,
                                  uint8_t *tagOut)
 {
     uint8_t x[SSF_AESCCM_BLOCK_SIZE];
     uint8_t b[SSF_AESCCM_BLOCK_SIZE];
     uint32_t pos;
+    size_t chunk;
+    size_t aadDone;
+    size_t done = 0;
 
     /* Process B_0 */
     _SSFAESCCMFormatB0(b, nonce, nonceLen, aadLen, dataLen, tagLen);
@@ -141,44 +130,37 @@ static void _SSFAESCCMComputeTag(const uint8_t *key, size_t keyLen,
         pos = 2;
 
         /* Fill the rest of the first block with AAD data */
+        chunk = aadLen;
+        if (chunk > (SSF_AESCCM_BLOCK_SIZE - 2u)) chunk = SSF_AESCCM_BLOCK_SIZE - 2u;
+        memcpy(&b[pos], aad, chunk);
+        pos = 0; /* reset for subsequent blocks */
+        _SSFAESCCMXorBlock(x, b);
+        _SSFAESCCMEncBlock(key, keyLen, x, x);
+
+        /* Process remaining AAD blocks */
+        aadDone = chunk;
+        while (aadDone < aadLen)
         {
-            size_t chunk = aadLen;
-            if (chunk > (SSF_AESCCM_BLOCK_SIZE - 2u)) chunk = SSF_AESCCM_BLOCK_SIZE - 2u;
-            memcpy(&b[pos], aad, chunk);
-            pos = 0; /* reset for subsequent blocks */
+            memset(b, 0, SSF_AESCCM_BLOCK_SIZE);
+            chunk = aadLen - aadDone;
+            if (chunk > SSF_AESCCM_BLOCK_SIZE) chunk = SSF_AESCCM_BLOCK_SIZE;
+            memcpy(b, &aad[aadDone], chunk);
             _SSFAESCCMXorBlock(x, b);
             _SSFAESCCMEncBlock(key, keyLen, x, x);
-
-            /* Process remaining AAD blocks */
-            {
-                size_t aadDone = chunk;
-                while (aadDone < aadLen)
-                {
-                    memset(b, 0, SSF_AESCCM_BLOCK_SIZE);
-                    chunk = aadLen - aadDone;
-                    if (chunk > SSF_AESCCM_BLOCK_SIZE) chunk = SSF_AESCCM_BLOCK_SIZE;
-                    memcpy(b, &aad[aadDone], chunk);
-                    _SSFAESCCMXorBlock(x, b);
-                    _SSFAESCCMEncBlock(key, keyLen, x, x);
-                    aadDone += chunk;
-                }
-            }
+            aadDone += chunk;
         }
     }
 
     /* Process plaintext/data blocks */
+    while (done < dataLen)
     {
-        size_t done = 0;
-        while (done < dataLen)
-        {
-            size_t chunk = dataLen - done;
-            if (chunk > SSF_AESCCM_BLOCK_SIZE) chunk = SSF_AESCCM_BLOCK_SIZE;
-            memset(b, 0, SSF_AESCCM_BLOCK_SIZE);
-            memcpy(b, &data[done], chunk);
-            _SSFAESCCMXorBlock(x, b);
-            _SSFAESCCMEncBlock(key, keyLen, x, x);
-            done += chunk;
-        }
+        chunk = dataLen - done;
+        if (chunk > SSF_AESCCM_BLOCK_SIZE) chunk = SSF_AESCCM_BLOCK_SIZE;
+        memset(b, 0, SSF_AESCCM_BLOCK_SIZE);
+        memcpy(b, &data[done], chunk);
+        _SSFAESCCMXorBlock(x, b);
+        _SSFAESCCMEncBlock(key, keyLen, x, x);
+        done += chunk;
     }
 
     /* Tag is the first tagLen bytes of x */
@@ -188,22 +170,21 @@ static void _SSFAESCCMComputeTag(const uint8_t *key, size_t keyLen,
 /* --------------------------------------------------------------------------------------------- */
 /* Applies CTR mode encryption/decryption and encrypts/decrypts the tag using S_0.               */
 /* --------------------------------------------------------------------------------------------- */
-static void _SSFAESCCMCtr(const uint8_t *key, size_t keyLen,
-                          const uint8_t *nonce, size_t nonceLen,
-                          const uint8_t *in, size_t inLen,
-                          uint8_t *out,
-                          const uint8_t *tagIn, uint8_t *tagOut, size_t tagLen)
+static void _SSFAESCCMCtr(const uint8_t *key, size_t keyLen, const uint8_t *nonce, size_t nonceLen,
+                          const uint8_t *in, size_t inLen, uint8_t *out, const uint8_t *tagIn,
+                          uint8_t *tagOut, size_t tagLen)
 {
     uint8_t a[SSF_AESCCM_BLOCK_SIZE];
     uint8_t s[SSF_AESCCM_BLOCK_SIZE];
     uint32_t counter = 1;
     size_t done = 0;
+    size_t chunk;
+    uint32_t j;
 
     /* Encrypt/decrypt the data using S_1, S_2, ... */
     while (done < inLen)
     {
-        size_t chunk = inLen - done;
-        uint32_t j;
+        chunk = inLen - done;
         if (chunk > SSF_AESCCM_BLOCK_SIZE) chunk = SSF_AESCCM_BLOCK_SIZE;
 
         _SSFAESCCMFormatCtr(a, nonce, nonceLen, counter);
@@ -221,24 +202,18 @@ static void _SSFAESCCMCtr(const uint8_t *key, size_t keyLen,
     /* Encrypt/decrypt the tag using S_0 */
     _SSFAESCCMFormatCtr(a, nonce, nonceLen, 0);
     _SSFAESCCMEncBlock(key, keyLen, a, s);
+    for (j = 0; j < (uint32_t)tagLen; j++)
     {
-        uint32_t j;
-        for (j = 0; j < (uint32_t)tagLen; j++)
-        {
-            tagOut[j] = tagIn[j] ^ s[j];
-        }
+        tagOut[j] = tagIn[j] ^ s[j];
     }
 }
 
 /* --------------------------------------------------------------------------------------------- */
 /* Encrypt and authenticate.                                                                     */
 /* --------------------------------------------------------------------------------------------- */
-void SSFAESCCMEncrypt(const uint8_t *pt, size_t ptLen,
-                      const uint8_t *nonce, size_t nonceLen,
-                      const uint8_t *aad, size_t aadLen,
-                      const uint8_t *key, size_t keyLen,
-                      uint8_t *tag, size_t tagSize,
-                      uint8_t *ct, size_t ctSize)
+void SSFAESCCMEncrypt(const uint8_t *pt, size_t ptLen, const uint8_t *nonce, size_t nonceLen,
+                      const uint8_t *aad, size_t aadLen, const uint8_t *key, size_t keyLen,
+                      uint8_t *tag, size_t tagSize, uint8_t *ct, size_t ctSize)
 {
     uint8_t cbcTag[SSF_AESCCM_BLOCK_SIZE];
 
@@ -261,14 +236,11 @@ void SSFAESCCMEncrypt(const uint8_t *pt, size_t ptLen,
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Decrypt and verify.                                                                           */
+/* If tag verifies, decrypts ct into pt, returns true, else zeroes pt and returns false.         */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFAESCCMDecrypt(const uint8_t *ct, size_t ctLen,
-                      const uint8_t *nonce, size_t nonceLen,
-                      const uint8_t *aad, size_t aadLen,
-                      const uint8_t *key, size_t keyLen,
-                      const uint8_t *tag, size_t tagLen,
-                      uint8_t *pt, size_t ptSize)
+bool SSFAESCCMDecrypt(const uint8_t *ct, size_t ctLen, const uint8_t *nonce, size_t nonceLen,
+                      const uint8_t *aad, size_t aadLen, const uint8_t *key, size_t keyLen,
+                      const uint8_t *tag, size_t tagLen, uint8_t *pt, size_t ptSize)
 {
     uint8_t decTag[SSF_AESCCM_BLOCK_SIZE];
     uint8_t cbcTag[SSF_AESCCM_BLOCK_SIZE];
@@ -290,12 +262,14 @@ bool SSFAESCCMDecrypt(const uint8_t *ct, size_t ctLen,
     /* Step 2: Compute CBC-MAC tag over (B_0 || AAD || decrypted plaintext) */
     _SSFAESCCMComputeTag(key, keyLen, nonce, nonceLen, aad, aadLen, pt, ctLen, tagLen, cbcTag);
 
-    /* Step 3: Compare tags (constant-time). */
+    /* Step 3: Did the tags differ? (constant-time compare) */
     if (SSFCryptCTMemEq(cbcTag, decTag, tagLen) == false)
     {
-        /* Authentication failed: zero the plaintext */
+        /* Yes, authentication failed; zero the plaintext. */
         memset(pt, 0, ctLen);
         return false;
     }
+    /* No, tags match; return success. */
     return true;
 }
+

@@ -50,9 +50,6 @@ extern "C" {
 #define SSF_AESCTR_KEY_MAX_SIZE (32u)               /* Holds AES-128 / 192 / 256 keys. */
 #define SSF_AESCTR_BLOCK_SIZE   SSF_AES_BLOCK_SIZE  /* Always 16. */
 
-/* Incremental AES-CTR context. Magic field follows the SSF convention: set by Begin, cleared    */
-/* by DeInit, checked on Crypt / DeInit. Begin requires magic != MAGIC, so the caller must zero  */
-/* the struct before first use (or call DeInit on a previously-Begun ctx between Begins).        */
 typedef struct SSFAESCTRContext
 {
     uint8_t  key[SSF_AESCTR_KEY_MAX_SIZE];
@@ -66,22 +63,11 @@ typedef struct SSFAESCTRContext
 /* --------------------------------------------------------------------------------------------- */
 /* External interface                                                                            */
 /* --------------------------------------------------------------------------------------------- */
-
-/* Initialize an incremental AES-CTR context. iv is the initial 16-byte counter (per SP 800-38A  */
-/* §6.5 the counter is treated as a 128-bit big-endian integer and incremented by 1 per block).  */
-void SSFAESCTRBegin(SSFAESCTRContext_t *ctx, const uint8_t *key, size_t keyLen,
-                    const uint8_t *iv);
-
-/* Encrypt OR decrypt len bytes from in into out. CTR is symmetric — the same call performs both */
-/* directions. in and out may alias (the function is in-place safe). */
+void SSFAESCTRBegin(SSFAESCTRContext_t *ctx, const uint8_t *key, size_t keyLen, const uint8_t *iv);
 void SSFAESCTRCrypt(SSFAESCTRContext_t *ctx, const uint8_t *in, uint8_t *out, size_t len);
-
-/* Securely zero an AES-CTR context. */
 void SSFAESCTRDeInit(SSFAESCTRContext_t *ctx);
-
-/* Single-call wrapper: equivalent to Begin / Crypt(in, out, len) / DeInit on an internal ctx. */
-void SSFAESCTR(const uint8_t *key, size_t keyLen, const uint8_t *iv,
-               const uint8_t *in, uint8_t *out, size_t len);
+void SSFAESCTR(const uint8_t *key, size_t keyLen, const uint8_t *iv, const uint8_t *in,
+               uint8_t *out, size_t len);
 
 /* --------------------------------------------------------------------------------------------- */
 /* Unit test                                                                                     */
@@ -95,3 +81,4 @@ void SSFAESCTRUnitTest(void);
 #endif
 
 #endif /* SSF_AESCTR_H_INCLUDE */
+

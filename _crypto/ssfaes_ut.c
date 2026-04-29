@@ -993,6 +993,177 @@ void SSFAESUnitTest(void)
         SSF_ASSERT(memcmp(dec, pt, 16) == 0);
     }
 
+    /* ====================================================================================== */
+    /* === NIST CAVS AES KAT vectors (ECB-mode, validates the AES block primitive) =========  */
+    /* ====================================================================================== */
+    /* 2078 vectors across GFSbox / KeySbox / VarKey / VarTxt × {128,192,256} × {ENC,DEC}.    */
+    /* Source: NIST CAVS 11.1 KAT_AES.zip (csrc.nist.gov/.../documents/aes/KAT_AES.zip).      */
+    /* The CAVS framework validates AES-CTR / AES-GCM / AES-CCM by validating the underlying  */
+    /* AES block primitive that they all share — these vectors cover the structured-input     */
+    /* edge cases (S-box edges, walking-1s key, walking-1s plaintext) that random test sweeps */
+    /* don't reliably reach.                                                                   */
+    {
+        #include "cavs_aes_kat.h"
+
+        uint8_t actual[16];
+        uint16_t i;
+
+        /* AES-128 ENCRYPT */
+        for (i = 0; i < SSF_CAVS_AES_KAT_GFSBOX128_ENCRYPT_N; i++)
+        {
+            SSFAES128BlockEncrypt(_kat_GFSbox128_ENCRYPT[i].pt, 16, actual, 16,
+                                  _kat_GFSbox128_ENCRYPT[i].key, 16);
+            SSF_ASSERT(memcmp(actual, _kat_GFSbox128_ENCRYPT[i].ct, 16) == 0);
+        }
+        for (i = 0; i < SSF_CAVS_AES_KAT_KEYSBOX128_ENCRYPT_N; i++)
+        {
+            SSFAES128BlockEncrypt(_kat_KeySbox128_ENCRYPT[i].pt, 16, actual, 16,
+                                  _kat_KeySbox128_ENCRYPT[i].key, 16);
+            SSF_ASSERT(memcmp(actual, _kat_KeySbox128_ENCRYPT[i].ct, 16) == 0);
+        }
+        for (i = 0; i < SSF_CAVS_AES_KAT_VARKEY128_ENCRYPT_N; i++)
+        {
+            SSFAES128BlockEncrypt(_kat_VarKey128_ENCRYPT[i].pt, 16, actual, 16,
+                                  _kat_VarKey128_ENCRYPT[i].key, 16);
+            SSF_ASSERT(memcmp(actual, _kat_VarKey128_ENCRYPT[i].ct, 16) == 0);
+        }
+        for (i = 0; i < SSF_CAVS_AES_KAT_VARTXT128_ENCRYPT_N; i++)
+        {
+            SSFAES128BlockEncrypt(_kat_VarTxt128_ENCRYPT[i].pt, 16, actual, 16,
+                                  _kat_VarTxt128_ENCRYPT[i].key, 16);
+            SSF_ASSERT(memcmp(actual, _kat_VarTxt128_ENCRYPT[i].ct, 16) == 0);
+        }
+
+        /* AES-128 DECRYPT */
+        for (i = 0; i < SSF_CAVS_AES_KAT_GFSBOX128_DECRYPT_N; i++)
+        {
+            SSFAES128BlockDecrypt(_kat_GFSbox128_DECRYPT[i].ct, 16, actual, 16,
+                                  _kat_GFSbox128_DECRYPT[i].key, 16);
+            SSF_ASSERT(memcmp(actual, _kat_GFSbox128_DECRYPT[i].pt, 16) == 0);
+        }
+        for (i = 0; i < SSF_CAVS_AES_KAT_KEYSBOX128_DECRYPT_N; i++)
+        {
+            SSFAES128BlockDecrypt(_kat_KeySbox128_DECRYPT[i].ct, 16, actual, 16,
+                                  _kat_KeySbox128_DECRYPT[i].key, 16);
+            SSF_ASSERT(memcmp(actual, _kat_KeySbox128_DECRYPT[i].pt, 16) == 0);
+        }
+        for (i = 0; i < SSF_CAVS_AES_KAT_VARKEY128_DECRYPT_N; i++)
+        {
+            SSFAES128BlockDecrypt(_kat_VarKey128_DECRYPT[i].ct, 16, actual, 16,
+                                  _kat_VarKey128_DECRYPT[i].key, 16);
+            SSF_ASSERT(memcmp(actual, _kat_VarKey128_DECRYPT[i].pt, 16) == 0);
+        }
+        for (i = 0; i < SSF_CAVS_AES_KAT_VARTXT128_DECRYPT_N; i++)
+        {
+            SSFAES128BlockDecrypt(_kat_VarTxt128_DECRYPT[i].ct, 16, actual, 16,
+                                  _kat_VarTxt128_DECRYPT[i].key, 16);
+            SSF_ASSERT(memcmp(actual, _kat_VarTxt128_DECRYPT[i].pt, 16) == 0);
+        }
+
+        /* AES-192 ENCRYPT / DECRYPT */
+        for (i = 0; i < SSF_CAVS_AES_KAT_GFSBOX192_ENCRYPT_N; i++)
+        {
+            SSFAES192BlockEncrypt(_kat_GFSbox192_ENCRYPT[i].pt, 16, actual, 16,
+                                  _kat_GFSbox192_ENCRYPT[i].key, 24);
+            SSF_ASSERT(memcmp(actual, _kat_GFSbox192_ENCRYPT[i].ct, 16) == 0);
+        }
+        for (i = 0; i < SSF_CAVS_AES_KAT_KEYSBOX192_ENCRYPT_N; i++)
+        {
+            SSFAES192BlockEncrypt(_kat_KeySbox192_ENCRYPT[i].pt, 16, actual, 16,
+                                  _kat_KeySbox192_ENCRYPT[i].key, 24);
+            SSF_ASSERT(memcmp(actual, _kat_KeySbox192_ENCRYPT[i].ct, 16) == 0);
+        }
+        for (i = 0; i < SSF_CAVS_AES_KAT_VARKEY192_ENCRYPT_N; i++)
+        {
+            SSFAES192BlockEncrypt(_kat_VarKey192_ENCRYPT[i].pt, 16, actual, 16,
+                                  _kat_VarKey192_ENCRYPT[i].key, 24);
+            SSF_ASSERT(memcmp(actual, _kat_VarKey192_ENCRYPT[i].ct, 16) == 0);
+        }
+        for (i = 0; i < SSF_CAVS_AES_KAT_VARTXT192_ENCRYPT_N; i++)
+        {
+            SSFAES192BlockEncrypt(_kat_VarTxt192_ENCRYPT[i].pt, 16, actual, 16,
+                                  _kat_VarTxt192_ENCRYPT[i].key, 24);
+            SSF_ASSERT(memcmp(actual, _kat_VarTxt192_ENCRYPT[i].ct, 16) == 0);
+        }
+        for (i = 0; i < SSF_CAVS_AES_KAT_GFSBOX192_DECRYPT_N; i++)
+        {
+            SSFAES192BlockDecrypt(_kat_GFSbox192_DECRYPT[i].ct, 16, actual, 16,
+                                  _kat_GFSbox192_DECRYPT[i].key, 24);
+            SSF_ASSERT(memcmp(actual, _kat_GFSbox192_DECRYPT[i].pt, 16) == 0);
+        }
+        for (i = 0; i < SSF_CAVS_AES_KAT_KEYSBOX192_DECRYPT_N; i++)
+        {
+            SSFAES192BlockDecrypt(_kat_KeySbox192_DECRYPT[i].ct, 16, actual, 16,
+                                  _kat_KeySbox192_DECRYPT[i].key, 24);
+            SSF_ASSERT(memcmp(actual, _kat_KeySbox192_DECRYPT[i].pt, 16) == 0);
+        }
+        for (i = 0; i < SSF_CAVS_AES_KAT_VARKEY192_DECRYPT_N; i++)
+        {
+            SSFAES192BlockDecrypt(_kat_VarKey192_DECRYPT[i].ct, 16, actual, 16,
+                                  _kat_VarKey192_DECRYPT[i].key, 24);
+            SSF_ASSERT(memcmp(actual, _kat_VarKey192_DECRYPT[i].pt, 16) == 0);
+        }
+        for (i = 0; i < SSF_CAVS_AES_KAT_VARTXT192_DECRYPT_N; i++)
+        {
+            SSFAES192BlockDecrypt(_kat_VarTxt192_DECRYPT[i].ct, 16, actual, 16,
+                                  _kat_VarTxt192_DECRYPT[i].key, 24);
+            SSF_ASSERT(memcmp(actual, _kat_VarTxt192_DECRYPT[i].pt, 16) == 0);
+        }
+
+        /* AES-256 ENCRYPT / DECRYPT */
+        for (i = 0; i < SSF_CAVS_AES_KAT_GFSBOX256_ENCRYPT_N; i++)
+        {
+            SSFAES256BlockEncrypt(_kat_GFSbox256_ENCRYPT[i].pt, 16, actual, 16,
+                                  _kat_GFSbox256_ENCRYPT[i].key, 32);
+            SSF_ASSERT(memcmp(actual, _kat_GFSbox256_ENCRYPT[i].ct, 16) == 0);
+        }
+        for (i = 0; i < SSF_CAVS_AES_KAT_KEYSBOX256_ENCRYPT_N; i++)
+        {
+            SSFAES256BlockEncrypt(_kat_KeySbox256_ENCRYPT[i].pt, 16, actual, 16,
+                                  _kat_KeySbox256_ENCRYPT[i].key, 32);
+            SSF_ASSERT(memcmp(actual, _kat_KeySbox256_ENCRYPT[i].ct, 16) == 0);
+        }
+        for (i = 0; i < SSF_CAVS_AES_KAT_VARKEY256_ENCRYPT_N; i++)
+        {
+            SSFAES256BlockEncrypt(_kat_VarKey256_ENCRYPT[i].pt, 16, actual, 16,
+                                  _kat_VarKey256_ENCRYPT[i].key, 32);
+            SSF_ASSERT(memcmp(actual, _kat_VarKey256_ENCRYPT[i].ct, 16) == 0);
+        }
+        for (i = 0; i < SSF_CAVS_AES_KAT_VARTXT256_ENCRYPT_N; i++)
+        {
+            SSFAES256BlockEncrypt(_kat_VarTxt256_ENCRYPT[i].pt, 16, actual, 16,
+                                  _kat_VarTxt256_ENCRYPT[i].key, 32);
+            SSF_ASSERT(memcmp(actual, _kat_VarTxt256_ENCRYPT[i].ct, 16) == 0);
+        }
+        for (i = 0; i < SSF_CAVS_AES_KAT_GFSBOX256_DECRYPT_N; i++)
+        {
+            SSFAES256BlockDecrypt(_kat_GFSbox256_DECRYPT[i].ct, 16, actual, 16,
+                                  _kat_GFSbox256_DECRYPT[i].key, 32);
+            SSF_ASSERT(memcmp(actual, _kat_GFSbox256_DECRYPT[i].pt, 16) == 0);
+        }
+        for (i = 0; i < SSF_CAVS_AES_KAT_KEYSBOX256_DECRYPT_N; i++)
+        {
+            SSFAES256BlockDecrypt(_kat_KeySbox256_DECRYPT[i].ct, 16, actual, 16,
+                                  _kat_KeySbox256_DECRYPT[i].key, 32);
+            SSF_ASSERT(memcmp(actual, _kat_KeySbox256_DECRYPT[i].pt, 16) == 0);
+        }
+        for (i = 0; i < SSF_CAVS_AES_KAT_VARKEY256_DECRYPT_N; i++)
+        {
+            SSFAES256BlockDecrypt(_kat_VarKey256_DECRYPT[i].ct, 16, actual, 16,
+                                  _kat_VarKey256_DECRYPT[i].key, 32);
+            SSF_ASSERT(memcmp(actual, _kat_VarKey256_DECRYPT[i].pt, 16) == 0);
+        }
+        for (i = 0; i < SSF_CAVS_AES_KAT_VARTXT256_DECRYPT_N; i++)
+        {
+            SSFAES256BlockDecrypt(_kat_VarTxt256_DECRYPT[i].ct, 16, actual, 16,
+                                  _kat_VarTxt256_DECRYPT[i].key, 32);
+            SSF_ASSERT(memcmp(actual, _kat_VarTxt256_DECRYPT[i].pt, 16) == 0);
+        }
+
+        SSF_UT_PRINTF("--- NIST CAVS AES KATs: %u vectors pass ---\n",
+                      (unsigned)SSF_CAVS_AES_KAT_TOTAL_N);
+    }
+
 #if SSF_AES_OSSL_VERIFY == 1
     _SSFAESVerifyAgainstOpenSSL();
 #endif

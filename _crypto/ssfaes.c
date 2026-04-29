@@ -215,7 +215,8 @@ static void _SSFAESKeyExpansion(uint32_t *w, size_t wSize, const uint8_t *key, s
     for (i = 0; i < nk; i++)
     {
         t = i << 2;
-        w[i] = (key[t]) ^ (key[t + 1] << 8) ^ (key[t + 2] << 16) ^ (key[t + 3] << 24);
+        w[i] = ((uint32_t)key[t])              ^ ((uint32_t)key[t + 1] <<  8) ^
+               ((uint32_t)key[t + 2] << 16)    ^ ((uint32_t)key[t + 3] << 24);
     }
 
     for (i = nk; i < wSize; i++)

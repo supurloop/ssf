@@ -140,6 +140,7 @@ you will operate on.
 | Macro | Default | Description |
 |-------|---------|-------------|
 | <a id="ssf-bn-config-max-bits"></a>`SSF_BN_CONFIG_MAX_BITS` | auto | Maximum big-number width in bits. **Auto-derived in `ssfbn.h`** as `2 × largest enabled operand` from [`SSF_EC_CONFIG_ENABLE_P256/P384`](ssfec.md#configuration) and [`SSF_RSA_CONFIG_ENABLE_2048/3072/4096`](ssfrsa.md#configuration). The doubling is mandatory: multiplication produces a `2N`-limb intermediate, and `SSFBNMul` / `SSFBNModMul` / `SSFBNModMulNIST` / `SSFBNModInvExt` all gate on `2N <= MAX_LIMBS`. Resulting values: `512` for P-256-only, `768` for P-256+P-384, `4096` for RSA-2048, `6144` for RSA-3072, `8192` for RSA-4096 — the maximum across all enabled algorithms wins. Override in [`_opt/ssfbn_opt.h`](../_opt/ssfbn_opt.h) only when an out-of-tree consumer needs a wider cap; the in-tree consumers self-size correctly. |
+| <a id="ssf-bn-max-mod-limbs"></a>`SSF_BN_MAX_MOD_LIMBS` | `(SSF_BN_MAX_LIMBS + 1) / 2` | Upper bound on `SSFBNMont_t::len` — the cap needed to hold a Montgomery residue (mod `m`). The `2N` derivation of `SSF_BN_CONFIG_MAX_BITS` makes `MAX_LIMBS / 2` exactly the largest possible modulus for any enabled algorithm; per-algo static asserts in `ssfbn.h` enforce this. [`SSFBNModExpMont`](#modexpmont) sizes its 16-entry window table and residue locals at this width — sticking to `SSF_BN_MAX_LIMBS` would inflate the function's stack frame by ~10 KB without ever using the extra capacity. Override in [`_opt/ssfbn_opt.h`](../_opt/ssfbn_opt.h) only when pinning `SSF_BN_CONFIG_MAX_BITS` to a non-`2N` value (no algorithm flags enabled, or an out-of-tree modulus wider than `MAX_LIMBS / 2`). |
 
 The `SSFBN_t` struct itself is small (a pointer plus two `uint16_t` fields); the actual
 limb storage lives in whatever array the caller supplies. Dropping `SSF_BN_CONFIG_MAX_BITS`
@@ -161,6 +162,7 @@ The `ssfrsa` and `ssfbn` modules sanity-check against this macro at compile time
 | `SSF_BN_LIMB_MAX` | Constant | `0xFFFFFFFF` — largest single-limb value. |
 | `SSF_BN_BITS_TO_LIMBS(bits)` | Macro | Number of limbs needed to represent `bits` bits (rounded up). |
 | <a id="ssf-bn-max-limbs"></a>`SSF_BN_MAX_LIMBS` | Constant | `SSF_BN_BITS_TO_LIMBS(SSF_BN_CONFIG_MAX_BITS)` — the maximum limb count any `SSFBN_t` may hold. |
+| <a id="ssf-bn-max-mod-limbs"></a>`SSF_BN_MAX_MOD_LIMBS` | Constant | Upper bound on `SSFBNMont_t::len` — the cap needed to hold a Montgomery residue mod `m`. See [Configuration](#configuration). |
 | `SSF_BN_MAX_BYTES` | Constant | `(SSF_BN_CONFIG_MAX_BITS + 7) / 8` — the maximum byte width for [serialization](#serialization). |
 | `SSF_BN_KARATSUBA_THRESHOLD` | Constant | `32` — limb count at or above which `SSFBNMul` dispatches to Karatsuba (same-size, even-length operands only); schoolbook is used below. |
 | `SSFBNLimb_t` | Typedef | `uint32_t` — the single-limb integer type. |

@@ -2308,10 +2308,11 @@ void SSFBNModExp(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBN_t *
 /* --------------------------------------------------------------------------------------------- */
 void SSFBNModExpMont(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBNMont_t *ctx)
 {
-    SSFBN_DEFINE(aM, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(result, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(picked, SSF_BN_MAX_LIMBS);
-    SSFBNLimb_t tableStorage[SSF_BN_MODEXP_TBL_N][SSF_BN_MAX_LIMBS];
+    /* Residues only — never the 2N raw-mul intermediate. See ssfbn.md "MAX_MOD_LIMBS". */
+    SSFBN_DEFINE(aM,     SSF_BN_MAX_MOD_LIMBS);
+    SSFBN_DEFINE(result, SSF_BN_MAX_MOD_LIMBS);
+    SSFBN_DEFINE(picked, SSF_BN_MAX_MOD_LIMBS);
+    SSFBNLimb_t tableStorage[SSF_BN_MODEXP_TBL_N][SSF_BN_MAX_MOD_LIMBS] = {0};
     SSFBN_t table[SSF_BN_MODEXP_TBL_N];
     uint32_t nWindows;
     uint32_t winIdx;
@@ -2331,13 +2332,14 @@ void SSFBNModExpMont(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBN
     SSF_REQUIRE(ctx->mod.limbs != NULL);
     SSF_REQUIRE(ctx->len >= 1u);
     SSF_REQUIRE(ctx->len <= r->cap);
+    SSF_REQUIRE(ctx->len <= SSF_BN_MAX_MOD_LIMBS);
 
     /* Wire up table descriptors over their stack-resident backing storage. */
     for (w = 0u; w < SSF_BN_MODEXP_TBL_N; w++)
     {
         table[w].limbs = tableStorage[w];
         table[w].len = 0u;
-        table[w].cap = SSF_BN_MAX_LIMBS;
+        table[w].cap = SSF_BN_MAX_MOD_LIMBS;
     }
 
     /* Convert a to Montgomery form. */
@@ -2345,7 +2347,7 @@ void SSFBNModExpMont(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBN
 
     /* table[0] = Mont(1) for zero-windows; table[i] = aM^i for i=1..15. */
     {
-        SSFBN_DEFINE(one, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(one, SSF_BN_MAX_MOD_LIMBS);
         SSFBNSetOne(&one, ctx->len);
         SSFBNMontConvertIn(&table[0], &one, ctx);
     }

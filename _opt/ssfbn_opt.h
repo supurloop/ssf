@@ -22,6 +22,20 @@ extern "C" {
 /* Example: force 8192 even on an ECC-only build.                                                */
 /*   #define SSF_BN_CONFIG_MAX_BITS               (8192u)                                       */
 
+/* ssfbn maximum modulus limb count.                                                             */
+/*                                                                                               */
+/* By default this is auto-derived in ssfbn.h as (SSF_BN_MAX_LIMBS + 1) / 2, which is exactly    */
+/* the largest possible modulus for any auto-derived configuration (the 2N derivation of         */
+/* SSF_BN_CONFIG_MAX_BITS makes MAX_LIMBS / 2 the modulus ceiling). Sized this way to keep        */
+/* SSFBNModExpMont's stack frame compact. See ssfbn.md "Configuration" for the full rationale.   */
+/*                                                                                               */
+/* Override only when pinning SSF_BN_CONFIG_MAX_BITS to a non-2N value. Per-algorithm static     */
+/* asserts in ssfbn.h plus a runtime SSF_REQUIRE in SSFBNModExpMont catch a too-small override. */
+/*                                                                                               */
+/* Example: out-of-tree consumer with a 1024-bit modulus (no algorithm flags enabled).           */
+/*   #define SSF_BN_CONFIG_MAX_BITS               (1024u)                                       */
+/*   #define SSF_BN_MAX_MOD_LIMBS                 (32u)                                          */
+
 /* SSFBNMul Karatsuba dispatch threshold (limbs). Operands at or above this — same length, even */
 /* length — go through one-level Karatsuba; below it, schoolbook. Both code paths always link;  */
 /* the threshold only steers the runtime dispatch. Default is 32 (RSA-1024 boundary); the       */

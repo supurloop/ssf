@@ -87,6 +87,11 @@ typedef uint64_t SSFBNDLimb_t;
 #define SSF_BN_MAX_LIMBS           SSF_BN_BITS_TO_LIMBS(SSF_BN_CONFIG_MAX_BITS)
 #define SSF_BN_MAX_BYTES           (((SSF_BN_CONFIG_MAX_BITS) + 7u) / 8u)
 
+/* Upper bound on SSFBNMont_t::len. Override only for non-2N MAX_BITS pins. See ssfbn.md.       */
+#ifndef SSF_BN_MAX_MOD_LIMBS
+#define SSF_BN_MAX_MOD_LIMBS       (((SSF_BN_MAX_LIMBS) + 1u) / 2u)
+#endif
+
 /* --------------------------------------------------------------------------------------------- */
 /* Static-assert defense-in-depth on the derived width.                                          */
 /*                                                                                                */
@@ -126,6 +131,30 @@ typedef char _ssf_bn_sa_cap_supports_rsa3072[
 #if (defined(SSF_RSA_CONFIG_ENABLE_4096) && (SSF_RSA_CONFIG_ENABLE_4096 == 1))
 typedef char _ssf_bn_sa_cap_supports_rsa4096[
     ((SSF_BN_CONFIG_MAX_BITS) >= 8192u) ? 1 : -1];
+#endif
+
+/* Per-algorithm: SSF_BN_MAX_MOD_LIMBS must hold the modulus, and must not exceed MAX_LIMBS. */
+typedef char _ssf_bn_sa_mod_limbs_cap[
+    ((SSF_BN_MAX_MOD_LIMBS) <= (SSF_BN_MAX_LIMBS)) ? 1 : -1];
+#if (defined(SSF_EC_CONFIG_ENABLE_P256) && (SSF_EC_CONFIG_ENABLE_P256 == 1))
+typedef char _ssf_bn_sa_mod_supports_p256[
+    ((SSF_BN_MAX_MOD_LIMBS) >= 8u) ? 1 : -1];
+#endif
+#if (defined(SSF_EC_CONFIG_ENABLE_P384) && (SSF_EC_CONFIG_ENABLE_P384 == 1))
+typedef char _ssf_bn_sa_mod_supports_p384[
+    ((SSF_BN_MAX_MOD_LIMBS) >= 12u) ? 1 : -1];
+#endif
+#if (defined(SSF_RSA_CONFIG_ENABLE_2048) && (SSF_RSA_CONFIG_ENABLE_2048 == 1))
+typedef char _ssf_bn_sa_mod_supports_rsa2048[
+    ((SSF_BN_MAX_MOD_LIMBS) >= 64u) ? 1 : -1];
+#endif
+#if (defined(SSF_RSA_CONFIG_ENABLE_3072) && (SSF_RSA_CONFIG_ENABLE_3072 == 1))
+typedef char _ssf_bn_sa_mod_supports_rsa3072[
+    ((SSF_BN_MAX_MOD_LIMBS) >= 96u) ? 1 : -1];
+#endif
+#if (defined(SSF_RSA_CONFIG_ENABLE_4096) && (SSF_RSA_CONFIG_ENABLE_4096 == 1))
+typedef char _ssf_bn_sa_mod_supports_rsa4096[
+    ((SSF_BN_MAX_MOD_LIMBS) >= 128u) ? 1 : -1];
 #endif
 
 typedef struct SSFBN

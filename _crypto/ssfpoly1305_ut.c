@@ -290,6 +290,75 @@ void SSFPoly1305UnitTest(void)
         }
     }
 
+    /* SSFPoly1305Verify: positive correctness — RFC 7539 §2.5.2 vector accepts. */
+    {
+        SSF_ASSERT(SSFPoly1305Verify(msg, sizeof(msg), key, sizeof(key), expected_tag) == true);
+    }
+
+    /* SSFPoly1305Verify: negative correctness — single-bit flip rejects. Verifies the function
+     * actually compares all 16 bytes rather than e.g. always returning true. */
+    {
+        uint8_t wrongTag[16];
+        size_t i;
+
+        memcpy(wrongTag, expected_tag, sizeof(wrongTag));
+        wrongTag[0] ^= 0x01u;
+        SSF_ASSERT(SSFPoly1305Verify(msg, sizeof(msg), key, sizeof(key), wrongTag) == false);
+
+        /* Flip every byte position once to confirm the compare looks at all 16 bytes. */
+        for (i = 0; i < 16u; i++)
+        {
+            memcpy(wrongTag, expected_tag, sizeof(wrongTag));
+            wrongTag[i] ^= 0x80u;
+            SSF_ASSERT(SSFPoly1305Verify(msg, sizeof(msg), key, sizeof(key), wrongTag) == false);
+        }
+    }
+
+    /* SSFPoly1305Verify: round-trip — Mac followed by Verify of the computed tag accepts. */
+    {
+        uint8_t computedTag[16];
+
+        /* Empty message round-trip. */
+        SSFPoly1305Mac(NULL, 0u, key, sizeof(key), computedTag, sizeof(computedTag));
+        SSF_ASSERT(SSFPoly1305Verify(NULL, 0u, key, sizeof(key), computedTag) == true);
+
+        /* Multi-block round-trip with deterministic message content. */
+        {
+            uint8_t multiBlockMsg[64];
+            size_t i;
+            for (i = 0; i < sizeof(multiBlockMsg); i++) multiBlockMsg[i] = (uint8_t)(i ^ 0xA5u);
+            SSFPoly1305Mac(multiBlockMsg, sizeof(multiBlockMsg), key, sizeof(key),
+                           computedTag, sizeof(computedTag));
+            SSF_ASSERT(SSFPoly1305Verify(multiBlockMsg, sizeof(multiBlockMsg), key, sizeof(key),
+                                         computedTag) == true);
+        }
+    }
+
+    /* SSFPoly1305Verify: DBC coverage. msg may be NULL only when msgLen == 0; key must be
+     * non-NULL with length exactly SSF_POLY1305_KEY_SIZE; expectedTag must be non-NULL. */
+    {
+        static const uint8_t scratchKey[32] = {0};
+        static const uint8_t scratchMsg[16] = {0};
+        static const uint8_t scratchTag[16] = {0};
+
+        SSF_ASSERT_TEST(SSFPoly1305Verify(NULL, 1u, scratchKey, sizeof(scratchKey), scratchTag));
+        SSF_ASSERT_TEST(SSFPoly1305Verify(scratchMsg, sizeof(scratchMsg), NULL, sizeof(scratchKey),
+                                          scratchTag));
+        SSF_ASSERT_TEST(SSFPoly1305Verify(scratchMsg, sizeof(scratchMsg), scratchKey, 0u,
+                                          scratchTag));
+        SSF_ASSERT_TEST(SSFPoly1305Verify(scratchMsg, sizeof(scratchMsg), scratchKey, 31u,
+                                          scratchTag));
+        SSF_ASSERT_TEST(SSFPoly1305Verify(scratchMsg, sizeof(scratchMsg), scratchKey, 33u,
+                                          scratchTag));
+        SSF_ASSERT_TEST(SSFPoly1305Verify(scratchMsg, sizeof(scratchMsg), scratchKey,
+                                          sizeof(scratchKey), NULL));
+
+        /* msg == NULL with msgLen == 0 is permitted and must not assert. Return value is
+         * unconstrained (depends on whether the all-zeros tag matches the all-zeros key's
+         * empty-message MAC), but the call must complete. */
+        (void)SSFPoly1305Verify(NULL, 0u, scratchKey, sizeof(scratchKey), scratchTag);
+    }
+
     /* Defensive: the context-magic check rejects any call sequence that violates
      * Begin → (Update*) → End. Begin requires `magic == 0` on entry (stricter than
      * HMAC's `!= MAGIC` convention), so a non-zero context — whether previously

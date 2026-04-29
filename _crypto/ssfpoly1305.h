@@ -119,6 +119,15 @@ void SSFPoly1305Mac(const uint8_t *msg, size_t msgLen,
                     const uint8_t *key, size_t keyLen,
                     uint8_t *tag, size_t tagSize);
 
+/* One-shot tag verification: compute the Poly1305 tag over msg with key, then compare against   */
+/* expectedTag in constant time. Returns true iff the tags match exactly. expectedTag is read    */
+/* as exactly SSF_POLY1305_TAG_SIZE bytes — no truncation; for shorter compare semantics, use    */
+/* SSFPoly1305Mac + SSFCryptCTMemEq directly. Bundles the CT-compare so callers cannot acciden-  */
+/* tally pair Mac with a non-CT memcmp() and open a tag-recovery timing side channel.            */
+bool SSFPoly1305Verify(const uint8_t *msg, size_t msgLen,
+                       const uint8_t *key, size_t keyLen,
+                       const uint8_t *expectedTag);
+
 /* Incremental: initialize ctx with a 32-byte one-time key. Clamps r, derives s, precomputes     */
 /* the r*5 reduction operands, and zeroes the accumulator. After Begin the context is ready for  */
 /* a sequence of Update calls terminated by one End call. */

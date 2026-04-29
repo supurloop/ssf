@@ -32,9 +32,12 @@ construction that supplies its own per-message one-time key.
   concern — it is a direct algebraic attack. For general-purpose keyed MACing with a
   reusable key, use [`ssfhmac`](ssfhmac.md) instead. For authenticated encryption, use the
   `ssfchacha20poly1305` AEAD, which handles fresh-key derivation for you.
-- **Verify tags with [`ssfcrypt`](ssfcrypt.md), not `memcmp()`.** Compare a computed tag to an
-  expected tag using `SSFCryptCTMemEq()` to avoid a timing side channel that would let an attacker
-  forge MACs byte-by-byte.
+- **Verify tags via [`SSFPoly1305Verify()`](#ssfpoly1305verify), not by composing
+  `SSFPoly1305Mac()` with `memcmp()`.** Verify bundles the compute with a constant-time
+  compare so a verifying caller cannot accidentally introduce a tag-recovery timing side
+  channel. Use the explicit `Mac` + [`SSFCryptCTMemEq()`](ssfcrypt.md) pattern only when you
+  need behaviour Verify does not expose (e.g. truncated-tag verification at less than the
+  full 16 bytes — uncommon, and not recommended for new designs).
 - The key must be exactly [`SSF_POLY1305_KEY_SIZE`](#ssf-poly1305-key-size) (32) bytes — this
   is enforced by a `SSF_REQUIRE`. The clamping of the low half (`r`) defined in RFC 7539
   §2.5 is performed inside the function; callers supply the raw 32-byte key.
@@ -92,6 +95,7 @@ This module has no compile-time configuration options in `ssfoptions.h`.
 | | Function | Description |
 |---|----------|-------------|
 | [e.g.](#ex-mac) | [`void SSFPoly1305Mac(msg, msgLen, key, keyLen, tag, tagSize)`](#ssfpoly1305mac) | One-shot: compute a 16-byte Poly1305 tag over `msg` using a 32-byte one-time key |
+| [e.g.](#ex-verify) | [`bool SSFPoly1305Verify(msg, msgLen, key, keyLen, expectedTag)`](#ssfpoly1305verify) | One-shot: compute and constant-time-compare against `expectedTag` |
 | [e.g.](#ex-stream) | [`void SSFPoly1305Begin(ctx, key, keyLen)`](#ssfpoly1305begin) | Incremental: initialise context with the 32-byte key |
 | [e.g.](#ex-stream) | [`void SSFPoly1305Update(ctx, msg, msgLen)`](#ssfpoly1305update) | Incremental: feed a chunk of the message |
 | [e.g.](#ex-stream) | [`void SSFPoly1305End(ctx, tag, tagSize)`](#ssfpoly1305end) | Incremental: finalise, emit tag, zeroise context |
@@ -146,12 +150,67 @@ SSFPoly1305Mac(msg, sizeof(msg) - 1,     /* exclude trailing NUL */
 /* tag ==
    a8 06 1d c1 30 51 36 c6 c2 2b 8b af 0c 01 27 a9 */
 
-/* Tag verification must be constant-time. */
-const uint8_t expected[SSF_POLY1305_TAG_SIZE] = {
+/* For tag verification prefer SSFPoly1305Verify, which bundles compute + constant-time
+   compare and cannot be paired with a non-CT memcmp by mistake. */
+```
+
+---
+
+<a id="ssfpoly1305verify"></a>
+
+### [↑](#functions) [`bool SSFPoly1305Verify()`](#functions)
+
+```c
+bool SSFPoly1305Verify(const uint8_t *msg, size_t msgLen,
+                       const uint8_t *key, size_t keyLen,
+                       const uint8_t *expectedTag);
+```
+
+Computes the Poly1305 tag over `msgLen` bytes from `msg` using the 32-byte one-time key at
+`key` and constant-time-compares it against `expectedTag`. Returns `true` if and only if the
+tags match exactly across all 16 bytes. The internal computed tag is scrubbed before return
+so a failed verify does not leave a forgery-grade tag value on the stack.
+
+Use this in preference to composing [`SSFPoly1305Mac()`](#ssfpoly1305mac) with a hand-rolled
+compare — pairing `Mac` with `memcmp()` opens a tag-recovery timing side channel that lets
+an attacker submitting forged tags recover the correct tag byte-by-byte from response timing.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `msg` | in | `const uint8_t *` | Pointer to the message that was authenticated. May be `NULL` when `msgLen` is `0`. |
+| `msgLen` | in | `size_t` | Number of message bytes. |
+| `key` | in | `const uint8_t *` | Pointer to the 32-byte one-time key that was used to produce `expectedTag`. Must not be `NULL`. **Must never be reused across two different messages.** |
+| `keyLen` | in | `size_t` | Must equal [`SSF_POLY1305_KEY_SIZE`](#ssf-poly1305-key-size) (32). |
+| `expectedTag` | in | `const uint8_t *` | The 16-byte tag to verify against. Must not be `NULL`. Read as exactly [`SSF_POLY1305_TAG_SIZE`](#ssf-poly1305-tag-size) bytes — no truncated-compare semantics. |
+
+**Returns:** `true` on a full 16-byte match, `false` otherwise.
+
+<a id="ex-verify"></a>
+
+**Example:**
+
+```c
+/* Receiver side of the RFC 7539 §2.5.2 vector. */
+const uint8_t key[SSF_POLY1305_KEY_SIZE] = {
+    0x85,0xd6,0xbe,0x78,0x57,0x55,0x6d,0x33,
+    0x7f,0x44,0x52,0xfe,0x42,0xd5,0x06,0xa8,
+    0x01,0x03,0x80,0x8a,0xfb,0x0d,0xb2,0xfd,
+    0x4a,0xbf,0xf6,0xaf,0x41,0x49,0xf5,0x1b
+};
+const uint8_t msg[] = "Cryptographic Forum Research Group";
+const uint8_t receivedTag[SSF_POLY1305_TAG_SIZE] = {
     0xa8,0x06,0x1d,0xc1,0x30,0x51,0x36,0xc6,
     0xc2,0x2b,0x8b,0xaf,0x0c,0x01,0x27,0xa9
 };
-bool ok = SSFCryptCTMemEq(tag, expected, SSF_POLY1305_TAG_SIZE);
+
+if (SSFPoly1305Verify(msg, sizeof(msg) - 1, key, sizeof(key), receivedTag))
+{
+    /* Authentic — process the message. */
+}
+else
+{
+    /* Reject. */
+}
 ```
 
 ---

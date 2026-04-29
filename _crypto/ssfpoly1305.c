@@ -318,3 +318,29 @@ void SSFPoly1305Mac(const uint8_t *msg, size_t msgLen,
     SSFPoly1305Update(&ctx, msg, msgLen);
     SSFPoly1305End(&ctx, tag, tagSize);
 }
+
+/* --------------------------------------------------------------------------------------------- */
+/* If the computed Poly1305 tag over msg with key matches expectedTag exactly returns true,      */
+/* else false. Compare is constant-time. Bundles compute + CT-compare so callers cannot pair Mac */
+/* with a non-CT memcmp() and open a tag-recovery timing side channel.                            */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFPoly1305Verify(const uint8_t *msg, size_t msgLen,
+                       const uint8_t *key, size_t keyLen,
+                       const uint8_t *expectedTag)
+{
+    uint8_t computedTag[SSF_POLY1305_TAG_SIZE];
+    bool ok;
+
+    SSF_REQUIRE((msg != NULL) || (msgLen == 0u));
+    SSF_REQUIRE(key != NULL);
+    SSF_REQUIRE(keyLen == SSF_POLY1305_KEY_SIZE);
+    SSF_REQUIRE(expectedTag != NULL);
+
+    SSFPoly1305Mac(msg, msgLen, key, keyLen, computedTag, sizeof(computedTag));
+    ok = SSFCryptCTMemEq(computedTag, expectedTag, SSF_POLY1305_TAG_SIZE);
+
+    /* On a verify failure, computedTag holds the valid tag for (msg, key) — exactly the */
+    /* secret an attacker is trying to forge. Scrub before stack residue can leak it.    */
+    SSFCryptSecureZero(computedTag, sizeof(computedTag));
+    return ok;
+}

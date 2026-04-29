@@ -920,29 +920,6 @@ void SSFECDSAUnitTest(void)
         SSF_ASSERT(memcmp(pubKey, expectedPub, 65) == 0);
     }
 
-    /* ---- P-256: public key validation ---- */
-    {
-        static const uint8_t goodPub[] = {
-            0x04u,
-            0x60u, 0xFEu, 0xD4u, 0xBAu, 0x25u, 0x5Au, 0x9Du, 0x31u,
-            0xC9u, 0x61u, 0xEBu, 0x74u, 0xC6u, 0x35u, 0x6Du, 0x68u,
-            0xC0u, 0x49u, 0xB8u, 0x92u, 0x3Bu, 0x61u, 0xFAu, 0x6Cu,
-            0xE6u, 0x69u, 0x62u, 0x2Eu, 0x60u, 0xF2u, 0x9Fu, 0xB6u,
-            0x79u, 0x03u, 0xFEu, 0x10u, 0x08u, 0xB8u, 0xBCu, 0x99u,
-            0xA4u, 0x1Au, 0xE9u, 0xE9u, 0x56u, 0x28u, 0xBCu, 0x64u,
-            0xF2u, 0xF1u, 0xB2u, 0x0Cu, 0x2Du, 0x7Eu, 0x9Fu, 0x51u,
-            0x77u, 0xA3u, 0xC2u, 0x94u, 0xD4u, 0x46u, 0x22u, 0x99u
-        };
-        uint8_t badPub[65];
-
-        SSF_ASSERT(SSFECDSAPubKeyIsValid(SSF_EC_CURVE_P256, goodPub, sizeof(goodPub)) == true);
-
-        /* Invalid: all zeros */
-        memset(badPub, 0, sizeof(badPub));
-        badPub[0] = 0x04u;
-        SSF_ASSERT(SSFECDSAPubKeyIsValid(SSF_EC_CURVE_P256, badPub, sizeof(badPub)) == false);
-    }
-
     /* ---- P-256: key generation + sign + verify roundtrip ---- */
     {
         uint8_t privKey[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
@@ -1541,6 +1518,29 @@ void SSFECDSAUnitTest(void)
        /* and ECDH below run regardless because they do not use SSFECDSASign.                 */
 
 #if SSF_EC_CONFIG_ENABLE_P256 == 1
+    /* ---- P-256: SSFECDSAPubKeyIsValid oracle (runs in verify-only builds too) ---- */
+    {
+        static const uint8_t goodPub[] = {
+            0x04u,
+            0x60u, 0xFEu, 0xD4u, 0xBAu, 0x25u, 0x5Au, 0x9Du, 0x31u,
+            0xC9u, 0x61u, 0xEBu, 0x74u, 0xC6u, 0x35u, 0x6Du, 0x68u,
+            0xC0u, 0x49u, 0xB8u, 0x92u, 0x3Bu, 0x61u, 0xFAu, 0x6Cu,
+            0xE6u, 0x69u, 0x62u, 0x2Eu, 0x60u, 0xF2u, 0x9Fu, 0xB6u,
+            0x79u, 0x03u, 0xFEu, 0x10u, 0x08u, 0xB8u, 0xBCu, 0x99u,
+            0xA4u, 0x1Au, 0xE9u, 0xE9u, 0x56u, 0x28u, 0xBCu, 0x64u,
+            0xF2u, 0xF1u, 0xB2u, 0x0Cu, 0x2Du, 0x7Eu, 0x9Fu, 0x51u,
+            0x77u, 0xA3u, 0xC2u, 0x94u, 0xD4u, 0x46u, 0x22u, 0x99u
+        };
+        uint8_t badPub[65];
+
+        SSF_ASSERT(SSFECDSAPubKeyIsValid(SSF_EC_CURVE_P256, goodPub, sizeof(goodPub)) == true);
+
+        /* Invalid: all zeros */
+        memset(badPub, 0, sizeof(badPub));
+        badPub[0] = 0x04u;
+        SSF_ASSERT(SSFECDSAPubKeyIsValid(SSF_EC_CURVE_P256, badPub, sizeof(badPub)) == false);
+    }
+
     /* ====================================================================================== */
     /* === Wycheproof ECDSA P-256/SHA-256 verify vectors (Google adversarial test suite) ====  */
     /* ====================================================================================== */

@@ -474,7 +474,7 @@ static bool _SSFUBJsonMessage(const uint8_t *js, size_t jsLen, size_t *index, si
     SSF_REQUIRE(jt != NULL);
 
     if (!_SSFUBJsonObject(js, jsLen, index, start, end, path, depth, jt))
-    { 
+    {
         if (!_SSFUBJsonArray(js, jsLen, index, start, end, &astart, &aend, path, depth, jt))
         { return false; }
     }

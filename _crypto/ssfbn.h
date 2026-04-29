@@ -130,6 +130,47 @@ typedef uint64_t SSFBNDLimb_t;
 #define SSF_BN_MAX_LIMBS           SSF_BN_BITS_TO_LIMBS(SSF_BN_CONFIG_MAX_BITS)
 #define SSF_BN_MAX_BYTES           (((SSF_BN_CONFIG_MAX_BITS) + 7u) / 8u)
 
+/* --------------------------------------------------------------------------------------------- */
+/* Static-assert defense-in-depth on the derived width.                                          */
+/*                                                                                                */
+/* These typedef-array tautologies are guaranteed by the auto-derivation above, but they catch   */
+/* user overrides of SSF_BN_CONFIG_MAX_BITS in ssfbn_opt.h that drop below an enabled algorithm's */
+/* minimum. The pre-C11 typedef-array idiom is used because the cross-test toolchain matrix     */
+/* predates universal _Static_assert support.                                                     */
+/* --------------------------------------------------------------------------------------------- */
+
+/* SSF_BN_CONFIG_MAX_BITS must be a whole-limb multiple so SSF_BN_BITS_TO_LIMBS doesn't pick up */
+/* a fractional-limb residue.                                                                   */
+typedef char _ssf_bn_sa_max_bits_aligned[
+    ((SSF_BN_CONFIG_MAX_BITS) % SSF_BN_LIMB_BITS == 0u) ? 1 : -1];
+
+/* SSF_BN_MAX_LIMBS must fit in int16_t so a->len + b->len cannot wrap uint16_t in SSFBNMul /  */
+/* SSFBNSquare. Same property as the matching #error in ssfbn.c, but visible at every include. */
+typedef char _ssf_bn_sa_max_limbs_fits_int16[
+    ((SSF_BN_MAX_LIMBS) <= 32767u) ? 1 : -1];
+
+/* Per-algorithm: the cap must hold a 2N-limb intermediate from SSFBNMul. */
+#if (defined(SSF_EC_CONFIG_ENABLE_P256) && (SSF_EC_CONFIG_ENABLE_P256 == 1))
+typedef char _ssf_bn_sa_cap_supports_p256[
+    ((SSF_BN_CONFIG_MAX_BITS) >= 512u) ? 1 : -1];
+#endif
+#if (defined(SSF_EC_CONFIG_ENABLE_P384) && (SSF_EC_CONFIG_ENABLE_P384 == 1))
+typedef char _ssf_bn_sa_cap_supports_p384[
+    ((SSF_BN_CONFIG_MAX_BITS) >= 768u) ? 1 : -1];
+#endif
+#if (defined(SSF_RSA_CONFIG_ENABLE_2048) && (SSF_RSA_CONFIG_ENABLE_2048 == 1))
+typedef char _ssf_bn_sa_cap_supports_rsa2048[
+    ((SSF_BN_CONFIG_MAX_BITS) >= 4096u) ? 1 : -1];
+#endif
+#if (defined(SSF_RSA_CONFIG_ENABLE_3072) && (SSF_RSA_CONFIG_ENABLE_3072 == 1))
+typedef char _ssf_bn_sa_cap_supports_rsa3072[
+    ((SSF_BN_CONFIG_MAX_BITS) >= 6144u) ? 1 : -1];
+#endif
+#if (defined(SSF_RSA_CONFIG_ENABLE_4096) && (SSF_RSA_CONFIG_ENABLE_4096 == 1))
+typedef char _ssf_bn_sa_cap_supports_rsa4096[
+    ((SSF_BN_CONFIG_MAX_BITS) >= 8192u) ? 1 : -1];
+#endif
+
 typedef struct SSFBN
 {
     SSFBNLimb_t *limbs;

@@ -95,7 +95,7 @@ bool SSFRTCInit(void)
 
 #if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
     SSF_RTC_THREAD_SYNC_INIT();
-#endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */   
+#endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
     _ssfrtcIsInited = true;
 
     /* Is RTC read successful? */
@@ -132,7 +132,7 @@ void SSFRTCDeInit(void)
 
 #if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
     SSF_RTC_THREAD_SYNC_DEINIT();
-#endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */   
+#endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
     _ssfrtcIsInited = false;
 }
 
@@ -145,7 +145,7 @@ bool SSFRTCSet(uint64_t unixSec)
 
 #if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
     SSF_RTC_THREAD_SYNC_ACQUIRE();
-#endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */   
+#endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
 
     /* Is Unix sec in valid range? */
     if (unixSec <= SSFDTIME_UNIX_EPOCH_SEC_MAX)
@@ -159,7 +159,7 @@ bool SSFRTCSet(uint64_t unixSec)
             _ssfRTCIsNowInited = true;
 #if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
             SSF_RTC_THREAD_SYNC_RELEASE();
-#endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */           
+#endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
             return true;
         }
     }
@@ -169,7 +169,7 @@ bool SSFRTCSet(uint64_t unixSec)
     _ssfRTCIsNowInited = false;
 #if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
     SSF_RTC_THREAD_SYNC_RELEASE();
-#endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */           
+#endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
     return false;
 }
 
@@ -184,7 +184,7 @@ bool SSFRTCGetUnixNow(SSFPortTick_t *unixSys)
 
 #if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
     SSF_RTC_THREAD_SYNC_ACQUIRE();
-#endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */   
+#endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
 
     retVal = _ssfRTCIsNowInited;
     if (unixSys != NULL)
@@ -194,7 +194,7 @@ bool SSFRTCGetUnixNow(SSFPortTick_t *unixSys)
 
 #if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
     SSF_RTC_THREAD_SYNC_RELEASE();
-#endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */           
+#endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
 
     return retVal;
 }

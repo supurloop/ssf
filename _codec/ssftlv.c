@@ -251,7 +251,7 @@ bool SSFTLVRead(const SSFTLV_t *tlv, SSFTLVVar_t tag, uint16_t instance, uint8_t
                 }
                 /* No, set user pointer to value */
                 else { *valPtr = &tlv->buf[index]; }
-                
+
                 /* Pass back value length */
                 *valLen = curLen;
                 return true;

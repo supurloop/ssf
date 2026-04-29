@@ -77,7 +77,7 @@ void SSFAESBlockDecrypt(const uint8_t *ct, size_t ctLen, uint8_t *pt, size_t ptS
 #define SSFAESXXXBlockDecrypt(ct, ctLen, pt, ptSize, key, keyLen) \
     SSFAESBlockDecrypt(ct, ctLen, pt, ptSize, key, keyLen, \
                        (6 + (((keyLen) & 0xff) >> 2)), (((keyLen) & 0xff) >> 2))
-                       
+
 #if SSF_CONFIG_AES_UNIT_TEST == 1
 void SSFAESUnitTest(void);
 #endif /* SSF_CONFIG_AES_UNIT_TEST */

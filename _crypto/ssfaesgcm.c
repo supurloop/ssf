@@ -88,13 +88,13 @@ static inline void _SSFAESGCMCarryless32Mult(uint32_t a, uint32_t b, uint32_t *l
     y[2] = b & 0x44444444;
     y[3] = b & 0x88888888;
 
-    z[0] = ((uint64_t)x[0] * (uint64_t)y[0]) ^ ((uint64_t)x[1] * (uint64_t)y[3]) 
+    z[0] = ((uint64_t)x[0] * (uint64_t)y[0]) ^ ((uint64_t)x[1] * (uint64_t)y[3])
          ^ ((uint64_t)x[2] * (uint64_t)y[2]) ^ ((uint64_t)x[3] * (uint64_t)y[1]);
-    z[1] = ((uint64_t)x[0] * (uint64_t)y[1]) ^ ((uint64_t)x[1] * (uint64_t)y[0]) 
+    z[1] = ((uint64_t)x[0] * (uint64_t)y[1]) ^ ((uint64_t)x[1] * (uint64_t)y[0])
          ^ ((uint64_t)x[2] * (uint64_t)y[3]) ^ ((uint64_t)x[3] * (uint64_t)y[2]);
-    z[2] = ((uint64_t)x[0] * (uint64_t)y[2]) ^ ((uint64_t)x[1] * (uint64_t)y[1]) 
+    z[2] = ((uint64_t)x[0] * (uint64_t)y[2]) ^ ((uint64_t)x[1] * (uint64_t)y[1])
          ^ ((uint64_t)x[2] * (uint64_t)y[0]) ^ ((uint64_t)x[3] * (uint64_t)y[3]);
-    z[3] = ((uint64_t)x[0] * (uint64_t)y[3]) ^ ((uint64_t)x[1] * (uint64_t)y[2]) 
+    z[3] = ((uint64_t)x[0] * (uint64_t)y[3]) ^ ((uint64_t)x[1] * (uint64_t)y[2])
          ^ ((uint64_t)x[2] * (uint64_t)y[1]) ^ ((uint64_t)x[3] * (uint64_t)y[0]);
 
     z[0] &= 0x1111111111111111;
@@ -163,9 +163,9 @@ static inline uint32_t _SSFAESGCMReverseByte(uint8_t x)
 /* --------------------------------------------------------------------------------------------- */
 static inline uint32_t _SSFAESGCMReverseBytes(uint32_t x)
 {
-    return (_SSFAESGCMReverseByte(x & 0xff) 
+    return (_SSFAESGCMReverseByte(x & 0xff)
            ^ (_SSFAESGCMReverseByte((x >> 8) & 0xff) << 8)
-           ^ (_SSFAESGCMReverseByte((x >> 16) & 0xff) << 16) 
+           ^ (_SSFAESGCMReverseByte((x >> 16) & 0xff) << 16)
            ^ (_SSFAESGCMReverseByte((x >> 24) & 0xff) << 24));
 }
 
@@ -237,7 +237,7 @@ static void _SSFAESGCMBlockMult(uint8_t *in, size_t inSize, const uint8_t *con, 
 
     _SSFAESGCMCarryless32Mult((x[0] ^ x[2]), (y[0] ^ y[2]), &ac64[1], &ac64[0]);
     _SSFAESGCMCarryless32Mult((x[1] ^ x[3]), (y[1] ^ y[3]), &bd64[1], &bd64[0]);
-    _SSFAESGCMCarryless32Mult((x[0] ^ x[1] ^ x[2] ^ x[3]), 
+    _SSFAESGCMCarryless32Mult((x[0] ^ x[1] ^ x[2] ^ x[3]),
                               (y[0] ^ y[1] ^ y[2] ^ y[3]), &ab_cd64[1], &ab_cd64[0]);
     ab_cd64[0] ^= ac64[0] ^ bd64[0];
     ab_cd64[1] ^= ac64[1] ^ bd64[1];

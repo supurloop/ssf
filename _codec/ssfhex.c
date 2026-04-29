@@ -46,7 +46,7 @@ bool SSFHexBinToByte(uint8_t in, char *out, size_t outSize, SSFHexCase_t hcase)
     uint8_t un;
     uint8_t ln;
     uint8_t up;
-    
+
     SSF_REQUIRE(out != NULL);
     if (outSize < 2) return false;
 

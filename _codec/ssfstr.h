@@ -71,7 +71,7 @@ bool SSFStrStr(SSFCStrIn_t cstr, size_t cstrSize, SSFCStrIn_t *matchStrOptOut, S
                size_t substrSize);
 bool SSFStrTok(SSFCStrIn_t *cstr, size_t cstrSize, SSFCStrOut_t tokenStrOut, size_t tokenStrSize,
                int32_t *tokenStrLen, SSFCStrIn_t delims, size_t delimsSize);
-  
+
 /* --------------------------------------------------------------------------------------------- */
 /* Unit test                                                                                     */
 /* --------------------------------------------------------------------------------------------- */

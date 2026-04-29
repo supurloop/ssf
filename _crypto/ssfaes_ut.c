@@ -60,7 +60,7 @@ typedef struct SSFAESUT
     uint8_t *out;
 } SSFAESUT_t;
 
-SSFAESUT_t _SSFAES128BlockEncryptMonteUT[] = 
+SSFAESUT_t _SSFAES128BlockEncryptMonteUT[] =
 {
     {
         (uint8_t *)"\xb9\x14\x5a\x76\x8b\x7d\xc4\x89\xa0\x96\xb5\x46\xf4\x3b\x23\x1f",
@@ -124,7 +124,7 @@ SSFAESUT_t _SSFAES128BlockEncryptMonteUT[] =
     }
 };
 
-SSFAESUT_t _SSFAES192BlockEncryptMonteUT[] = 
+SSFAESUT_t _SSFAES192BlockEncryptMonteUT[] =
 {
     {
         (uint8_t *)"\x85\xa1\xf7\xa5\x81\x67\xb3\x89\xcd\xdc\x8a\x9f\xf1\x75\xee\x26",
@@ -188,7 +188,7 @@ SSFAESUT_t _SSFAES192BlockEncryptMonteUT[] =
     }
 };
 
-SSFAESUT_t _SSFAES256BlockEncryptMonteUT[] = 
+SSFAESUT_t _SSFAES256BlockEncryptMonteUT[] =
 {
     {
         (uint8_t *)"\xb3\x79\x77\x7f\x90\x50\xe2\xa8\x18\xf2\x94\x0c\xbb\xd9\xab\xa4",
@@ -252,7 +252,7 @@ SSFAESUT_t _SSFAES256BlockEncryptMonteUT[] =
     }
 };
 
-SSFAESUT_t _SSFAES128BlockDecryptMonteUT[] = 
+SSFAESUT_t _SSFAES128BlockDecryptMonteUT[] =
 {
     {
         (uint8_t *)"\xb0\x8a\x29\xb1\x1a\x50\x0e\xa3\xac\xa4\x2c\x36\x67\x5b\x97\x85",
@@ -316,7 +316,7 @@ SSFAESUT_t _SSFAES128BlockDecryptMonteUT[] =
     }
 };
 
-SSFAESUT_t _SSFAES192BlockDecryptMonteUT[] = 
+SSFAESUT_t _SSFAES192BlockDecryptMonteUT[] =
 {
     {
         (uint8_t *)"\xd0\xbd\x0e\x02\xde\xd1\x55\xe4\x51\x6b\xe8\x3f\x42\xd3\x47\xa4",
@@ -380,7 +380,7 @@ SSFAESUT_t _SSFAES192BlockDecryptMonteUT[] =
     }
 };
 
-SSFAESUT_t _SSFAES256BlockDecryptMonteUT[] = 
+SSFAESUT_t _SSFAES256BlockDecryptMonteUT[] =
 {
     {
         (uint8_t *)"\x89\x64\x9b\xd0\x11\x5f\x30\xbd\x87\x85\x67\x61\x02\x23\xa5\x9d",
@@ -673,7 +673,7 @@ void SSFAESUnitTest(void)
                                           32));
     SSF_ASSERT_TEST(SSFAES256BlockDecrypt(_SSFAES256BlockDecryptMonteUT[0].in, 16, NULL, 16,
                                      _SSFAES256BlockDecryptMonteUT[0].key, 32));
-    SSF_ASSERT_TEST(SSFAES256BlockDecrypt(_SSFAES256BlockDecryptMonteUT[0].in, 16, out, 16, NULL, 
+    SSF_ASSERT_TEST(SSFAES256BlockDecrypt(_SSFAES256BlockDecryptMonteUT[0].in, 16, out, 16, NULL,
                                           32));
 
     memcpy(in, _SSFAES128BlockEncryptMonteUT[0].in, 16);
@@ -709,7 +709,7 @@ void SSFAESUnitTest(void)
 
     memcpy(in, _SSFAES128BlockDecryptMonteUT[0].in, 16);
     memcpy(key, _SSFAES128BlockDecryptMonteUT[0].key, 16);
-    
+
     for (i = 0; i < (sizeof(_SSFAES128BlockDecryptMonteUT) / sizeof(SSFAESUT_t)); i++)
     {
         for (j = 0; j < 9; j++)
@@ -740,7 +740,7 @@ void SSFAESUnitTest(void)
 
     memcpy(in, _SSFAES192BlockEncryptMonteUT[0].in, 16);
     memcpy(key, _SSFAES192BlockEncryptMonteUT[0].key, 24);
-    
+
     for (i = 0; i < (sizeof(_SSFAES192BlockEncryptMonteUT) / sizeof(SSFAESUT_t)); i++)
     {
         for (j = 0; j < 9; j++)
@@ -777,10 +777,10 @@ void SSFAESUnitTest(void)
 
     memcpy(in, _SSFAES192BlockDecryptMonteUT[0].in, 16);
     memcpy(key, _SSFAES192BlockDecryptMonteUT[0].key, 24);
-    
+
     for (i = 0; i < (sizeof(_SSFAES192BlockDecryptMonteUT) / sizeof(SSFAESUT_t)); i++)
     {
-        for (j = 0; j < 9; j++) 
+        for (j = 0; j < 9; j++)
         {
             if (j == 0)
             {
@@ -814,7 +814,7 @@ void SSFAESUnitTest(void)
 
     memcpy(in, _SSFAES256BlockEncryptMonteUT[0].in, 16);
     memcpy(key, _SSFAES256BlockEncryptMonteUT[0].key, 32);
-    
+
     for (i = 0; i < (sizeof(_SSFAES256BlockEncryptMonteUT) / sizeof(SSFAESUT_t)); i++)
     {
         for (j = 0; j < 9; j++)

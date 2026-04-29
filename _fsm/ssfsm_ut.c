@@ -119,7 +119,7 @@ void UT1TestHandler1(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t
         SSFSMPutEvent(SSF_SM_UNIT_TEST_2, SSF_SM_EVENT_UT1_2);
 #if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 0
         SSF_ASSERT_TEST(SSFSMPutEvent(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_UT1_1));
-#endif        
+#endif
         break;
     case SSF_SM_EVENT_UTX_1:
         if ((data != NULL) && (dataLen == 1))

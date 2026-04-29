@@ -62,7 +62,7 @@
 /* Local prototypes                                                                              */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFJsonValue(SSFCStrIn_t js, size_t *index, size_t *start, size_t *end,
-                          SSFCStrIn_t *path, uint8_t depth, SSFJsonType_t *jt); 
+                          SSFCStrIn_t *path, uint8_t depth, SSFJsonType_t *jt);
 static bool _SSFJsonObject(SSFCStrIn_t js, size_t *index, size_t *start, size_t *end,
                            SSFCStrIn_t *path, uint8_t depth, SSFJsonType_t *jt);
 

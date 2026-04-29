@@ -315,7 +315,7 @@ void SSFHeapUnitTest(void)
         SSF_ASSERT(heapStatusOut.numAllocRequests == (i + 1));
         SSF_ASSERT(heapStatusOut.numFreeRequests == 0);
     }
-    
+
     /* Remove in between allocation */
     SSFHeapDealloc(heapHandle, (void**)&ptrs[1], NULL, false);
     SSFHeapCheck(heapHandle);

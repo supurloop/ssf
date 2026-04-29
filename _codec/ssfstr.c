@@ -61,7 +61,7 @@ bool SSFStrIsValid(SSFCStrIn_t cstr, size_t cstrSize)
 
     /* Valid size? */
     if (cstrSize == 0) return false;
-    
+
     /* NULL within size bytes? */
     while (cstrSize)
     {
@@ -310,7 +310,7 @@ bool SSFStrTok(SSFCStrIn_t *cstr, size_t cstrSize, SSFCStrOut_t tokenStrOut, siz
         cstrSize--;
     }
 
-tokDone:    
+tokDone:
     /* Enough room to copy token? */
     if ((size_t)((cs - (*cstr)) + 1) <= tokenStrSize)
     {

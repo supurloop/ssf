@@ -38,7 +38,7 @@
 /* Unit tests variable length TLV with 3 and 4 byte length values */
 #define SSF_TLV_ENABLE_EXTENDED_UNIT_TEST (1u)
 
-typedef struct SSFTLVUT 
+typedef struct SSFTLVUT
 {
     SSFTLVVar_t tag;
     const uint8_t *val;
@@ -48,14 +48,14 @@ typedef struct SSFTLVUT
 } SSFTLVUT_t;
 
 #if SSF_TLV_ENABLE_FIXED_MODE == 1
-static const SSFTLVUT_t _SSFTLVUT[] = 
+static const SSFTLVUT_t _SSFTLVUT[] =
 {
     {0, (uint8_t *)"hello", 5, 7},
     {64, (uint8_t *)"world", 5, 7},
     {127, (uint8_t *)"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 84, 86}
 };
 #else /* SSF_TLV_ENABLE_FIXED_MODE */
-static const SSFTLVUT_t _SSFTLVUT[] = 
+static const SSFTLVUT_t _SSFTLVUT[] =
 {
     {0, (uint8_t *)"hello", 5, 7},
     {64, (uint8_t *)"world", 5, 8},
@@ -94,7 +94,7 @@ void SSFTLVUnitTest(void)
 
     SSF_ASSERT_TEST(SSFTLVPut(NULL, 0, (const uint8_t*)"error", 5));
     SSF_ASSERT_TEST(SSFTLVPut(&tlv, 0, NULL, 0));
-    
+
     valLen = (SSFTLVVar_t)-1;
     SSF_ASSERT_TEST(SSFTLVGet(NULL, 0, 0, val, sizeof(val), &valLen));
     SSF_ASSERT_TEST(SSFTLVGet(&tlv, 0, 0, NULL, sizeof(val), &valLen));
@@ -134,7 +134,7 @@ void SSFTLVUnitTest(void)
     tlv.bufLen = 0;
 
     expectedBufLen = 0;
-    for (i = 0; i < sizeof(_SSFTLVUT) / sizeof(SSFTLVUT_t); i++) 
+    for (i = 0; i < sizeof(_SSFTLVUT) / sizeof(SSFTLVUT_t); i++)
     {
         SSF_ASSERT(SSFTLVPut(&tlv, _SSFTLVUT[i].tag, _SSFTLVUT[i].val, _SSFTLVUT[i].valLen));
         expectedBufLen += _SSFTLVUT[i].bufLenChange;
@@ -161,7 +161,7 @@ void SSFTLVUnitTest(void)
     SSF_ASSERT(tlv.bufLen == 100);
 
     SSF_ASSERT(SSFTLVPut(&tlv, 63, (const uint8_t*)"!", 1) == false);
-    SSF_ASSERT(SSFTLVPut(&tlv, 64, (const uint8_t*)"!", 1) == false);   
+    SSF_ASSERT(SSFTLVPut(&tlv, 64, (const uint8_t*)"!", 1) == false);
 #endif /* SSF_TLV_ENABLE_FIXED_MODE */
 
 #if SSF_TLV_ENABLE_EXTENDED_UNIT_TEST == 1 && SSF_TLV_ENABLE_FIXED_MODE == 0

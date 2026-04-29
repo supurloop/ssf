@@ -252,7 +252,7 @@ void SSFLLUnitTest(void)
     SSF_ASSERT(SSFLLIsEmpty(&_sllTest) == false);
  #if SLL_TEST_MAX_SIZE == 1
     SSF_ASSERT(SSFLLIsFull(&_sllTest) == true);
- #else 
+ #else
     SSF_ASSERT(SSFLLIsFull(&_sllTest) == false);
 #endif
     SSF_ASSERT(SSFLLSize(&_sllTest) == SLL_TEST_MAX_SIZE);

@@ -128,7 +128,7 @@ void SSFRSUnitTest(void)
                 {
                     msg[i] = msgCopy[i] = (uint8_t) rand();
                 }
-                
+
                 /* Encode the message */
                 SSFRSEncode(msg, msgLen, eccBuf, (uint16_t)sizeof(eccBuf), &eccBufLen, eccSize,
                             chunkSize);

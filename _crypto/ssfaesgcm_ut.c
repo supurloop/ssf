@@ -53,7 +53,7 @@
 
 #if SSF_CONFIG_AESGCM_UNIT_TEST == 1
 
-typedef struct SSFAESGCMUT 
+typedef struct SSFAESGCMUT
 {
     uint8_t *pt;
     size_t ptLen;
@@ -3437,7 +3437,7 @@ void SSFAESGCMUnitTest(void)
 
     SSF_ASSERT_TEST(SSFAESGCMEncrypt(_AESGCMUT[0].pt, _AESGCMUT[0].ptLen, NULL,
                                      _AESGCMUT[0].ivLen, _AESGCMUT[0].auth, _AESGCMUT[0].authLen,
-                                     _AESGCMUT[0].key, _AESGCMUT[0].keyLen, tag, 
+                                     _AESGCMUT[0].key, _AESGCMUT[0].keyLen, tag,
                                      _AESGCMUT[0].tagLen, ct, _AESGCMUT[0].ctLen));
     SSF_ASSERT_TEST(SSFAESGCMEncrypt(_AESGCMUT[0].pt, _AESGCMUT[0].ptLen, _AESGCMUT[0].iv,
                                      _AESGCMUT[0].ivLen, _AESGCMUT[0].auth, _AESGCMUT[0].authLen,
@@ -3445,7 +3445,7 @@ void SSFAESGCMUnitTest(void)
                                      ct, _AESGCMUT[0].ctLen));
     SSF_ASSERT_TEST(SSFAESGCMEncrypt(_AESGCMUT[0].pt, _AESGCMUT[0].ptLen, _AESGCMUT[0].iv,
                                      _AESGCMUT[0].ivLen, _AESGCMUT[0].auth, _AESGCMUT[0].authLen,
-                                     _AESGCMUT[0].key, _AESGCMUT[0].keyLen, NULL, 
+                                     _AESGCMUT[0].key, _AESGCMUT[0].keyLen, NULL,
                                      _AESGCMUT[0].tagLen, ct, _AESGCMUT[0].ctLen));
 
     SSF_ASSERT_TEST(SSFAESGCMDecrypt(_AESGCMUT[0].ct, _AESGCMUT[0].ctLen, NULL, _AESGCMUT[0].ivLen,
@@ -3523,9 +3523,9 @@ void SSFAESGCMUnitTest(void)
                            (memcmp(ct, _AESGCMUT[i].ct, _AESGCMUT[i].ctLen) == 0));
             }
 
-            bool pf = SSFAESGCMDecrypt(_AESGCMUT[i].ct, _AESGCMUT[i].ctLen, _AESGCMUT[i].iv, 
-                                       _AESGCMUT[i].ivLen, _AESGCMUT[i].auth, 
-                                       _AESGCMUT[i].authLen, _AESGCMUT[i].key, 
+            bool pf = SSFAESGCMDecrypt(_AESGCMUT[i].ct, _AESGCMUT[i].ctLen, _AESGCMUT[i].iv,
+                                       _AESGCMUT[i].ivLen, _AESGCMUT[i].auth,
+                                       _AESGCMUT[i].authLen, _AESGCMUT[i].key,
                                        _AESGCMUT[i].keyLen, _AESGCMUT[i].tag,
                                        _AESGCMUT[i].tagLen, pt, _AESGCMUT[i].ptLen);
 

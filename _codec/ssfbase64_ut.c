@@ -113,7 +113,7 @@ void SSFBase64UnitTest(void)
     SSF_ASSERT_TEST(SSFBase64Decode(_b64BlockUT[1].encoded, strlen(_b64BlockUT[1].encoded),
                                    NULL, sizeof(decodedBin), &outLen));
     SSF_ASSERT_TEST(SSFBase64Decode(_b64BlockUT[1].encoded, strlen(_b64BlockUT[1].encoded),
-                                   decodedBin, sizeof(decodedBin), NULL));    
+                                   decodedBin, sizeof(decodedBin), NULL));
 
     /* Check length constraints */
     SSF_ASSERT_TEST(SSFBase64Dec32To24(_b64BlockUT[1].encoded, b24, 0));

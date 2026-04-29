@@ -1133,7 +1133,7 @@ break;
                     if (((sign == -1) && (unixSys < (((((SSFPortTick_t)hour * SSFDTIME_MIN_IN_HOUR) +
                                                      minute) * SSFDTIME_SEC_IN_MIN) *
                                                      SSF_TICKS_PER_SEC))) ||
-                        ((sign == 1) && (SSFDTIME_UNIX_EPOCH_SYS_MAX - unixSys) < 
+                        ((sign == 1) && (SSFDTIME_UNIX_EPOCH_SYS_MAX - unixSys) <
                                         (((((SSFPortTick_t)hour * SSFDTIME_MIN_IN_HOUR) + minute) *
                                         SSFDTIME_SEC_IN_MIN) * SSF_TICKS_PER_SEC)))
                     {
@@ -1200,7 +1200,7 @@ break;
                     if (((sign == -1) && (unixSys < (((((SSFPortTick_t)hour * SSFDTIME_MIN_IN_HOUR) +
                                                     minute) * SSFDTIME_SEC_IN_MIN) *
                                                     SSF_TICKS_PER_SEC))) ||
-                        ((sign == 1) && (SSFDTIME_UNIX_EPOCH_SYS_MAX - unixSys) < 
+                        ((sign == 1) && (SSFDTIME_UNIX_EPOCH_SYS_MAX - unixSys) <
                                         (((((SSFPortTick_t)hour * SSFDTIME_MIN_IN_HOUR) + minute) *
                                         SSFDTIME_SEC_IN_MIN) * SSF_TICKS_PER_SEC)))
                     {
@@ -1265,7 +1265,7 @@ break;
 
         if (ii == 0) unixSys = SSFDTIME_UNIX_EPOCH_SYS_MIN;
         else if (ii == 1) unixSys = SSFDTIME_UNIX_EPOCH_SYS_MAX;
-        
+
         if (unixSys < (SSFDTIME_UNIX_EPOCH_SYS_MIN + (SSFDTIME_MIN_IN_DAY * SSFDTIME_SEC_IN_MIN *
                                                       SSF_TICKS_PER_SEC)))
         {
@@ -1316,7 +1316,7 @@ break;
                 else sign = -1;
                 if (((sign == -1) && (unixSys < ((SSFPortTick_t)hour * SSFDTIME_MIN_IN_HOUR *
                                                  SSFDTIME_SEC_IN_MIN * SSF_TICKS_PER_SEC))) ||
-                    ((sign == 1) && (SSFDTIME_UNIX_EPOCH_SYS_MAX - unixSys) < 
+                    ((sign == 1) && (SSFDTIME_UNIX_EPOCH_SYS_MAX - unixSys) <
                                     ((SSFPortTick_t)hour * SSFDTIME_MIN_IN_HOUR *
                                     SSFDTIME_SEC_IN_MIN * SSF_TICKS_PER_SEC)))
                 {
@@ -1442,7 +1442,7 @@ break;
                     if (((sign == -1) && (unixSys < (((((SSFPortTick_t)hour * SSFDTIME_MIN_IN_HOUR) +
                                                      minute) * SSFDTIME_SEC_IN_MIN) *
                                                      SSF_TICKS_PER_SEC))) ||
-                        ((sign == 1) && (SSFDTIME_UNIX_EPOCH_SYS_MAX - unixSys) < 
+                        ((sign == 1) && (SSFDTIME_UNIX_EPOCH_SYS_MAX - unixSys) <
                                         (((((SSFPortTick_t)hour * SSFDTIME_MIN_IN_HOUR) + minute) *
                                         SSFDTIME_SEC_IN_MIN) * SSF_TICKS_PER_SEC)))
                     {

@@ -517,7 +517,7 @@ bool SSFINIPrintComment(SSFCStrOut_t ini, size_t iniSize, size_t *iniLen, SSFCSt
     /* Add line ending */
     if (lineEnding == SSF_INI_CRLF) { ini[*iniLen] = '\r'; *iniLen += 1; }
     ini[*iniLen] = '\n'; *iniLen += 1; ini[*iniLen] = 0;
-    
+
     return true;
 }
 
@@ -626,7 +626,7 @@ bool SSFINIPrintNameBoolValue(SSFCStrOut_t ini, size_t iniSize, size_t *iniLen, 
 {
     char *bstr = NULL;
     SSF_REQUIRE((boolType > SSF_INI_BOOL_MIN) && (boolType < SSF_INI_BOOL_MAX));
-    
+
     /* Convert boolean value to requested string type */
     switch (boolType)
     {

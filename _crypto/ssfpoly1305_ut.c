@@ -107,7 +107,7 @@ static void _VerifyPoly1305AgainstOpenSSLRandom(void)
         for (iter = 0; iter < 10; iter++)
         {
             size_t len = lens[lIdx];
-            SSFPoly1305Context_t ctx;
+            SSFPoly1305Context_t ctx = {0};
 
             SSF_ASSERT(RAND_bytes(key, sizeof(key)) == 1);
             if (len > 0u) SSF_ASSERT(RAND_bytes(msg, (int)len) == 1);
@@ -159,7 +159,8 @@ void SSFPoly1305UnitTest(void)
     SSFPoly1305Mac(msg, sizeof(msg), key, sizeof(key), tag, sizeof(tag));
     SSF_ASSERT(memcmp(tag, expected_tag, sizeof(expected_tag)) == 0);
 
-    /* Test empty message */
+    /* Empty message with r=1, s=0 → tag = (h=0) + s = 0. Asserts the empty-message path
+     * actually emits the algebraically-required all-zero tag, instead of just "doesn't crash". */
     {
         static const uint8_t zeroKey[32] = {
             0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -167,25 +168,74 @@ void SSFPoly1305UnitTest(void)
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
         };
+        static const uint8_t expectedZeroTag[16] = {0};
         uint8_t emptyTag[16];
 
         SSFPoly1305Mac(NULL, 0, zeroKey, sizeof(zeroKey), emptyTag, sizeof(emptyTag));
-        /* With r=1, s=0, empty message: tag should be s = 0 */
+        SSF_ASSERT(memcmp(emptyTag, expectedZeroTag, sizeof(expectedZeroTag)) == 0);
     }
 
-    /* Test single-byte message */
+    /* RFC 8439 §A.3 Test Vector #1: all-zero key + 64-byte all-zero msg → all-zero tag.
+     * Catches any path that would fail to emit zero when both r and s are zero (defensive
+     * floor for the corner case where the multiply produces no contribution). */
     {
-        uint8_t oneByte = 0x01;
-        uint8_t oneTag[16];
-        SSFPoly1305Mac(&oneByte, 1, key, sizeof(key), oneTag, sizeof(oneTag));
-        /* Just verify it doesn't crash; correctness covered by RFC vector above */
+        static const uint8_t key[32] = {0};
+        static const uint8_t msg[64] = {0};
+        static const uint8_t expectedTag[16] = {0};
+        uint8_t tag[16];
+
+        SSFPoly1305Mac(msg, sizeof(msg), key, sizeof(key), tag, sizeof(tag));
+        SSF_ASSERT(memcmp(tag, expectedTag, sizeof(expectedTag)) == 0);
     }
 
-    /* Test exactly 16-byte (one block) message */
+    /* RFC 8439 §A.3 Test Vector #5: r=2 (clamped from `02 00…`), s=0, msg = `ff × 16`.
+     * Specifically chosen to exercise the modular reduction near 2^130: the single block
+     * `ff × 16 || 01` interpreted as a 130-bit number is 2^128 + (2^128 - 1); multiplying
+     * by 2 wraps past 2^130, exercising the `c * 5` carry-propagation path. Expected
+     * tag = 0x03 in low byte, rest zero. Cross-build coverage for the carry-edge case
+     * that the OpenSSL fuzz catches on host. */
     {
-        uint8_t blockTag[16];
-        SSFPoly1305Mac(msg, 16, key, sizeof(key), blockTag, sizeof(blockTag));
-        /* Verify doesn't crash with exact block boundary */
+        static const uint8_t key[32] = {
+            0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+        };
+        static const uint8_t carryMsg[16] = {
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF
+        };
+        static const uint8_t expectedTag[16] = {
+            0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+        };
+        uint8_t tag[16];
+
+        SSFPoly1305Mac(carryMsg, sizeof(carryMsg), key, sizeof(key), tag, sizeof(tag));
+        SSF_ASSERT(memcmp(tag, expectedTag, sizeof(expectedTag)) == 0);
+    }
+
+    /* r=0 algebraic edge: with r clamped from `00 × 16` to 0, every multiply yields 0, so
+     * the accumulator stays 0 regardless of message content and the final tag is exactly s.
+     * Reuses the RFC 8439 §A.3 TV2 key (s = `36 e5 f6 b5 …`) but pairs it with the §2.5.2
+     * 34-byte message rather than TV2's 375-byte IETF text — the result is algebraically
+     * determined by r=0 and is independent of message content. Catches a class of bugs
+     * where the multiply path leaks state into the output even when r is zero. */
+    {
+        static const uint8_t r0Key[32] = {
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x36, 0xE5, 0xF6, 0xB5, 0xC5, 0xE0, 0x60, 0x70,
+            0xF0, 0xEF, 0xCA, 0x96, 0x22, 0x7A, 0x86, 0x3E
+        };
+        static const uint8_t expectedTag[16] = {
+            0x36, 0xE5, 0xF6, 0xB5, 0xC5, 0xE0, 0x60, 0x70,
+            0xF0, 0xEF, 0xCA, 0x96, 0x22, 0x7A, 0x86, 0x3E
+        };
+        uint8_t tag[16];
+
+        SSFPoly1305Mac(msg, sizeof(msg), r0Key, sizeof(r0Key), tag, sizeof(tag));
+        SSF_ASSERT(memcmp(tag, expectedTag, sizeof(expectedTag)) == 0);
     }
 
     /* Streaming API: Begin/Update/End over the RFC 7539 vector must produce the same tag
@@ -193,7 +243,7 @@ void SSFPoly1305UnitTest(void)
      * across the 16-byte block boundary: byte-by-byte, uneven chunks, and chunks that
      * straddle the boundary. */
     {
-        SSFPoly1305Context_t ctx;
+        SSFPoly1305Context_t ctx = {0};
         uint8_t streamTag[16];
         size_t i;
 
@@ -238,6 +288,40 @@ void SSFPoly1305UnitTest(void)
             SSFPoly1305Mac(NULL, 0u, key, sizeof(key), emptyOneShotTag, sizeof(emptyOneShotTag));
             SSF_ASSERT(memcmp(emptyStreamTag, emptyOneShotTag, sizeof(emptyStreamTag)) == 0);
         }
+    }
+
+    /* Defensive: the context-magic check rejects any call sequence that violates
+     * Begin → (Update*) → End. Begin requires `magic == 0` on entry (stricter than
+     * HMAC's `!= MAGIC` convention), so a non-zero context — whether previously
+     * initialised or stack residue — is rejected. */
+    {
+        SSFPoly1305Context_t ctx = {0};
+        uint8_t scratchTag[16];
+
+        /* Begin must refuse a context that is already initialised. */
+        SSFPoly1305Begin(&ctx, key, sizeof(key));
+        SSF_ASSERT_TEST(SSFPoly1305Begin(&ctx, key, sizeof(key)));
+        SSFPoly1305End(&ctx, scratchTag, sizeof(scratchTag));   /* End wipes ctx → magic == 0. */
+
+        /* Begin must refuse a context filled with non-zero garbage. Stricter than HMAC, where
+         * any pattern != MAGIC is accepted; forces callers to use `... ctx = {0};` rather than
+         * relying on stack residue happening not to collide with MAGIC. */
+        memset(&ctx, 0xC3u, sizeof(ctx));
+        SSF_ASSERT_TEST(SSFPoly1305Begin(&ctx, key, sizeof(key)));
+        memset(&ctx, 0, sizeof(ctx));   /* restore zero-init for the cases below */
+
+        /* Update / End must refuse an uninitialised context (magic == 0). */
+        SSF_ASSERT_TEST(SSFPoly1305Update(&ctx, msg, sizeof(msg)));
+        SSF_ASSERT_TEST(SSFPoly1305End(&ctx, scratchTag, sizeof(scratchTag)));
+
+        /* End wipes ctx → Update / End on the wiped context must also assert. Catches the
+         * common "Begin once, MAC twice" bug: silently emitting `tag = s = 0` for the second
+         * message (since r and s are zero post-wipe) would otherwise be a hard-to-spot
+         * MAC-collapse rather than a loud failure. */
+        SSFPoly1305Begin(&ctx, key, sizeof(key));
+        SSFPoly1305End(&ctx, scratchTag, sizeof(scratchTag));
+        SSF_ASSERT_TEST(SSFPoly1305Update(&ctx, msg, 1u));
+        SSF_ASSERT_TEST(SSFPoly1305End(&ctx, scratchTag, sizeof(scratchTag)));
     }
 
 #if SSF_POLY1305_OSSL_VERIFY == 1

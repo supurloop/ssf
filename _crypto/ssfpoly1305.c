@@ -86,6 +86,8 @@
 /* We use 5 limbs of 26 bits each (Donna variant). All intermediate products fit uint64_t.       */
 /* --------------------------------------------------------------------------------------------- */
 
+#define SSF_POLY1305_CONTEXT_MAGIC (0x504F4C59ul) /* 'POLY' — set by Begin, cleared by End. */
+
 /* --------------------------------------------------------------------------------------------- */
 /* Internal: h = h * r mod (2^130 - 5), using 5 × 26-bit limbs and precomputed r[1..4] * 5.      */
 /* Shared between full-block (Update) and final-partial-block (End) paths.                       */
@@ -143,6 +145,7 @@ void SSFPoly1305Begin(SSFPoly1305Context_t *ctx,
                       const uint8_t *key, size_t keyLen)
 {
     SSF_REQUIRE(ctx != NULL);
+    SSF_REQUIRE(ctx->magic == 0u);
     SSF_REQUIRE(key != NULL);
     SSF_REQUIRE(keyLen == SSF_POLY1305_KEY_SIZE);
 
@@ -168,6 +171,9 @@ void SSFPoly1305Begin(SSFPoly1305Context_t *ctx,
     /* Accumulator = 0, partial-block buffer empty */
     ctx->h0 = ctx->h1 = ctx->h2 = ctx->h3 = ctx->h4 = 0u;
     ctx->bufLen = 0u;
+
+    /* Mark the context valid last so any earlier assert leaves magic clear. */
+    ctx->magic = SSF_POLY1305_CONTEXT_MAGIC;
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -183,6 +189,7 @@ void SSFPoly1305Update(SSFPoly1305Context_t *ctx,
     size_t take;
 
     SSF_REQUIRE(ctx != NULL);
+    SSF_REQUIRE(ctx->magic == SSF_POLY1305_CONTEXT_MAGIC);
     SSF_REQUIRE((msg != NULL) || (msgLen == 0u));
 
     /* Drain the partial buffer first if it holds anything. */
@@ -231,6 +238,7 @@ void SSFPoly1305End(SSFPoly1305Context_t *ctx,
     uint64_t f;
 
     SSF_REQUIRE(ctx != NULL);
+    SSF_REQUIRE(ctx->magic == SSF_POLY1305_CONTEXT_MAGIC);
     SSF_REQUIRE(tag != NULL);
     SSF_REQUIRE(tagSize >= SSF_POLY1305_TAG_SIZE);
 
@@ -304,7 +312,7 @@ void SSFPoly1305Mac(const uint8_t *msg, size_t msgLen,
                     const uint8_t *key, size_t keyLen,
                     uint8_t *tag, size_t tagSize)
 {
-    SSFPoly1305Context_t ctx;
+    SSFPoly1305Context_t ctx = {0};
 
     SSFPoly1305Begin(&ctx, key, keyLen);
     SSFPoly1305Update(&ctx, msg, msgLen);

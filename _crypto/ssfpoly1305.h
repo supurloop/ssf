@@ -93,9 +93,11 @@ extern "C" {
 
 /* Incremental Poly1305 context. Callers treat as opaque; pass by pointer to Begin/Update/End.   */
 /* Holds the clamped r (5 × 26-bit limbs), s (4 × 32-bit LE words), precomputed r[1..4] * 5, the */
-/* 130-bit accumulator h, and a 16-byte partial-block buffer with fill length. Seeded by Begin,  */
-/* fed by Update, finalised and zeroised by End. Never reuse a context across two messages —     */
-/* Poly1305 is a one-time MAC (see the ssfpoly1305.md key-reuse note).                           */
+/* 130-bit accumulator h, a 16-byte partial-block buffer with fill length, and a validity        */
+/* marker. Seeded by Begin, fed by Update, finalised and zeroised by End. Never reuse a context  */
+/* across two messages — Poly1305 is a one-time MAC (see the ssfpoly1305.md key-reuse note).     */
+/* Callers MUST zero the context before the first call to Begin (e.g. `... ctx = {0};`); End     */
+/* leaves the context fully zeroed so a subsequent Begin on the same storage is also valid.      */
 typedef struct SSFPoly1305Context
 {
     uint32_t r0, r1, r2, r3, r4;         /* clamped r limbs */
@@ -104,6 +106,7 @@ typedef struct SSFPoly1305Context
     uint32_t h0, h1, h2, h3, h4;          /* 130-bit accumulator */
     uint8_t  buf[16];                     /* partial-block accumulator */
     uint8_t  bufLen;                      /* 0..15 — bytes currently in buf[] */
+    uint32_t magic;                       /* context validity marker — 0 ⇒ uninitialised */
 } SSFPoly1305Context_t;
 
 /* --------------------------------------------------------------------------------------------- */

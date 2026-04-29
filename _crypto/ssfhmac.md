@@ -45,9 +45,18 @@ so callers can size their MAC buffer without hard-coding a constant.
 - `SSFHMAC()` returns `bool` for consistency with the SSF API style; in practice it always
   returns `true`. All argument-validity failures are caught by `SSF_REQUIRE` design-by-contract
   asserts, not by a `false` return.
-- After `SSFHMACEnd()` the context is invalid; call `SSFHMACBegin()` again before reuse. The
-  context holds the outer-hash padding block and the live inner-hash state — treat it as
-  secret and keep it on the stack or in zeroed memory whenever possible.
+- **Zero the context before the first `Begin`.** `SSFHMACContext_t` carries a magic-number
+  validity marker that must be zero on entry to `SSFHMACBegin()` — use
+  `SSFHMACContext_t ctx = {0};` (or equivalent) at declaration. `SSFHMACDeInit()` wipes the
+  context, so a subsequent `Begin` on the same storage is valid without a re-zero.
+  `SSFHMACEnd()` does **not** wipe the context: to reuse a context for a second MAC you must
+  call `SSFHMACDeInit()` between the End of the first and the Begin of the second. `Update`,
+  `End`, and `DeInit` all assert that the context is currently initialised, so calling them
+  on a zeroed, finalised, or DeInit'd context fires a `SSF_REQUIRE` rather than silently
+  operating on stale state.
+- After `SSFHMACEnd()` the context is finalised but still holds the outer-hash padding and
+  inner-hash state — treat it as secret. Call `SSFHMACDeInit()` to scrub it before the
+  storage goes out of scope or is reused.
 - `SSFHMACContext_t` should be treated as opaque; do not access its members directly.
 - `hash` must be one of the four defined variants in [`SSFHMACHash_t`](#ssfhmachash-t); the
   `MIN`/`MAX` sentinels are bounds only and must not be passed as a valid selector.

@@ -93,7 +93,7 @@ static void _SSFCCPComputeTag(const uint8_t *auth, size_t authLen, const uint8_t
                               const uint8_t *otk, uint8_t *tag, size_t tagSize)
 {
     static const uint8_t pad16[15] = { 0 };
-    SSFPoly1305Context_t ctx;
+    SSFPoly1305Context_t ctx = {0};
     uint8_t lengths[16];
 
     SSFPoly1305Begin(&ctx, otk, SSF_POLY1305_KEY_SIZE);

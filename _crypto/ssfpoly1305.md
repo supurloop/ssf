@@ -48,6 +48,13 @@ construction that supplies its own per-message one-time key.
   messages this is acceptable — the secret (`r`, `s`) is mixed only into the final output —
   but do not use this module in constructions where the attacker can observe timing of the
   MAC computation on secret message bytes.
+- **Zero the context before the first `Begin`.** `SSFPoly1305Context_t` carries a magic-number
+  validity marker that must be zero on entry to [`SSFPoly1305Begin()`](#ssfpoly1305begin) — use
+  `SSFPoly1305Context_t ctx = {0};` (or equivalent) at declaration. `SSFPoly1305End()` wipes
+  the context, so subsequent `Begin` calls on the same storage are valid without a re-zero.
+  `Update` and `End` assert that the context is currently initialised, so calling them on a
+  zeroed or finalised context fires a `SSF_REQUIRE` rather than silently producing a junk tag
+  (e.g. an `End` after `End` would otherwise emit `s = 0` for any message).
 - Two interfaces are provided: a one-shot [`SSFPoly1305Mac()`](#ssfpoly1305mac) for
   callers who have the full message in a single buffer, and an incremental
   [`SSFPoly1305Begin()`](#ssfpoly1305begin) / [`SSFPoly1305Update()`](#ssfpoly1305update) /
@@ -165,7 +172,7 @@ the accumulator.
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
-| `ctx` | out | `SSFPoly1305Context_t *` | Context to initialise. Must not be `NULL`. |
+| `ctx` | out | `SSFPoly1305Context_t *` | Context to initialise. Must not be `NULL`. Must be zero-initialised on first use (e.g. `... ctx = {0};`); a context previously finalised by [`SSFPoly1305End()`](#ssfpoly1305end) is already zeroed and safe to re-`Begin`. |
 | `key` | in | `const uint8_t *` | The 32-byte one-time key. **Must never be reused across two different messages.** |
 | `keyLen` | in | `size_t` | Must equal [`SSF_POLY1305_KEY_SIZE`](#ssf-poly1305-key-size) (32). |
 
@@ -229,7 +236,7 @@ On return the context is memset to zero — it must be re-initialised via
    as the SSFPoly1305Mac call above, with no intermediate concatenation buffer. Useful
    when the message is assembled from several sources (AEAD construction, on-the-fly
    protocol framing, etc.). */
-SSFPoly1305Context_t ctx;
+SSFPoly1305Context_t ctx = {0};   /* zero-init required on first Begin */
 uint8_t tag[SSF_POLY1305_TAG_SIZE];
 
 SSFPoly1305Begin(&ctx, key, sizeof(key));

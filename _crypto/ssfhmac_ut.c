@@ -858,10 +858,10 @@ void SSFHMACUnitTest(void)
         SSF_ASSERT_TEST(SSFHMACDeInit(&ctx));
     }
 
-    /* Begin requires that magic is not already set: the caller must zero the struct (or
-       DeInit it) before calling Begin. Garbage that does not happen to match the magic
-       value also passes — but callers are responsible for ensuring this, so the safe
-       practice is always to zero-init. */
+    /* Begin requires `magic == 0` on entry: the caller must zero the struct (or DeInit it)
+       before calling Begin. Stricter than the older `!= MAGIC` check — non-zero garbage is
+       rejected too, forcing explicit zero-init rather than relying on stack residue happening
+       not to collide with the magic value. */
     {
         SSFHMACContext_t ctx;
         uint8_t key[16] = {0};
@@ -873,12 +873,9 @@ void SSFHMACUnitTest(void)
         SSFHMACEnd(&ctx, mac, 32u);
         SSFHMACDeInit(&ctx);
 
-        /* Non-zero garbage that does not equal SSF_HMAC_CONTEXT_MAGIC — Begin succeeds. */
+        /* Non-zero garbage — Begin must reject. */
         memset(&ctx, 0xC3u, sizeof(ctx));
-        SSFHMACBegin(&ctx, SSF_HMAC_HASH_SHA256, key, sizeof(key));
-        SSFHMACUpdate(&ctx, (const uint8_t *)"def", 3);
-        SSFHMACEnd(&ctx, mac, 32u);
-        SSFHMACDeInit(&ctx);
+        SSF_ASSERT_TEST(SSFHMACBegin(&ctx, SSF_HMAC_HASH_SHA256, key, sizeof(key)));
     }
 
     /* Begin must refuse to re-init an already-initialized context — the caller is required

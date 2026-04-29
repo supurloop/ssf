@@ -169,7 +169,7 @@ void SSFHMACBegin(SSFHMACContext_t *ctx, SSFHMACHash_t hash, const uint8_t *key,
     size_t i;
 
     SSF_REQUIRE(ctx != NULL);
-    SSF_REQUIRE(ctx->magic != SSF_HMAC_CONTEXT_MAGIC);
+    SSF_REQUIRE(ctx->magic == 0u);
     SSF_REQUIRE(key != NULL);
     SSF_REQUIRE(keyLen > 0u);
     SSF_REQUIRE((hash > SSF_HMAC_HASH_MIN) && (hash < SSF_HMAC_HASH_MAX));

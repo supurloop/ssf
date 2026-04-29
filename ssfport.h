@@ -355,8 +355,10 @@ typedef pthread_mutex_t SSFMutex_t;
 /* --------------------------------------------------------------------------------------------- */
 /* External interface                                                                            */
 /* --------------------------------------------------------------------------------------------- */
-#ifdef _WIN32
+#if defined(_WIN32)
 __declspec(noreturn)
+#elif defined(__GNUC__) || defined(__clang__)
+__attribute__((noreturn))
 #endif
 void SSFPortAssert(const char *file, unsigned int line);
 

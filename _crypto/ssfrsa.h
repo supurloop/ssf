@@ -100,11 +100,48 @@ extern "C" {
 /* --------------------------------------------------------------------------------------------- */
 
 /* --------------------------------------------------------------------------------------------- */
+/* Compile-time validation                                                                       */
+/* --------------------------------------------------------------------------------------------- */
+#if (SSF_RSA_CONFIG_ENABLE_2048 == 0) && \
+    (SSF_RSA_CONFIG_ENABLE_3072 == 0) && \
+    (SSF_RSA_CONFIG_ENABLE_4096 == 0)
+#error At least one of SSF_RSA_CONFIG_ENABLE_2048 / 3072 / 4096 must be enabled.
+#endif
+
+/* The BN module's working width must hold a 2N-limb product for any enabled RSA size — the CRT  */
+/* recombine and λ(n) inversion both go through SSFBNMul on full-width operands.                 */
+#if SSF_RSA_CONFIG_ENABLE_4096 == 1
+#if SSF_BN_CONFIG_MAX_BITS < 8192
+#error SSF_BN_CONFIG_MAX_BITS must be >= 8192 for RSA-4096 support (2 x 4096-bit modulus).
+#endif
+#elif SSF_RSA_CONFIG_ENABLE_3072 == 1
+#if SSF_BN_CONFIG_MAX_BITS < 6144
+#error SSF_BN_CONFIG_MAX_BITS must be >= 6144 for RSA-3072 support (2 x 3072-bit modulus).
+#endif
+#elif SSF_RSA_CONFIG_ENABLE_2048 == 1
+#if SSF_BN_CONFIG_MAX_BITS < 4096
+#error SSF_BN_CONFIG_MAX_BITS must be >= 4096 for RSA-2048 support (2 x 2048-bit modulus).
+#endif
+#endif
+
+/* --------------------------------------------------------------------------------------------- */
 /* Defines and typedefs                                                                          */
 /* --------------------------------------------------------------------------------------------- */
 
+/* Maximum key size in bits — derived from the largest enabled key size, not from the BN cap.   */
+/* Tracks the public-key validator's accepted set; sizing API output buffers and the encoder's  */
+/* DER scratch on this rather than SSF_BN_CONFIG_MAX_BITS lets a 2048-only build use            */
+/* meaningfully smaller stack and parameter buffers even when the BN cap is left at the default.*/
+#if SSF_RSA_CONFIG_ENABLE_4096 == 1
+#define SSF_RSA_MAX_KEY_BITS (4096u)
+#elif SSF_RSA_CONFIG_ENABLE_3072 == 1
+#define SSF_RSA_MAX_KEY_BITS (3072u)
+#else
+#define SSF_RSA_MAX_KEY_BITS (2048u)
+#endif
+
 /* Maximum key size in bytes. */
-#define SSF_RSA_MAX_KEY_BYTES (SSF_BN_CONFIG_MAX_BITS / 8u)
+#define SSF_RSA_MAX_KEY_BYTES (SSF_RSA_MAX_KEY_BITS / 8u)
 
 /* Maximum signature size in bytes (equal to key size). */
 #define SSF_RSA_MAX_SIG_SIZE SSF_RSA_MAX_KEY_BYTES
@@ -131,7 +168,7 @@ typedef enum
 #if SSF_RSA_CONFIG_ENABLE_KEYGEN == 1
 
 /* Generate an RSA key pair.                                                                     */
-/* bits must be 2048, 3072, or 4096.                                                             */
+/* bits must be one of the enabled sizes (SSF_RSA_CONFIG_ENABLE_2048 / 3072 / 4096).             */
 /* privKeyDer receives the PKCS#1 RSAPrivateKey DER encoding.                                    */
 /* pubKeyDer receives the PKCS#1 RSAPublicKey DER encoding.                                      */
 /* Returns false on failure.                                                                     */
@@ -146,9 +183,10 @@ bool SSFRSAKeyGen(uint16_t bits,
 /* --------------------------------------------------------------------------------------------- */
 
 /* Validate a DER-encoded RSA public key. Returns true if the DER parses, the modulus has a      */
-/* supported bit length (2048, 3072, or 4096), the public exponent is at least 65537 and odd,    */
-/* and 1 < e < n. Does not verify that n is actually a product of two primes (which would        */
-/* require factoring); a deliberately weak modulus with a small factor still passes here.        */
+/* supported bit length (one of the enabled sizes — see SSF_RSA_CONFIG_ENABLE_*), the public     */
+/* exponent is at least 65537 and odd, and 1 < e < n. Does not verify that n is actually a       */
+/* product of two primes (which would require factoring); a deliberately weak modulus with a     */
+/* small factor still passes here.                                                                */
 bool SSFRSAPubKeyIsValid(const uint8_t *pubKeyDer, size_t pubKeyDerLen);
 
 /* Validate a DER-encoded PKCS#1 RSAPrivateKey. Returns true if the DER parses with version=0,   */

@@ -574,13 +574,27 @@ static bool _SSFRSAValidatePubFields(const SSFBN_t *n, const SSFBN_t *e)
 {
     uint32_t nBits;
 
-    /* n: odd, > 1, and at one of the supported bit lengths. The exact-set check also implies   */
-    /* the high bit of the leading byte is set (for 2048/3072/4096 which are byte-aligned), so  */
-    /* a degenerate modulus with leading zero bits is rejected here.                             */
+    /* n: odd, > 1, and at one of the build-enabled bit lengths. The exact-set check also       */
+    /* implies the high bit of the leading byte is set (the supported sizes are byte-aligned),  */
+    /* so a degenerate modulus with leading zero bits is rejected here. Sizes disabled in       */
+    /* ssfrsa_opt.h are dropped from the accept set so size-restricted builds reject keys that  */
+    /* would otherwise route through unbuilt code paths.                                         */
     if (SSFBNIsEven(n)) return false;
     if (SSFBNIsOne(n)) return false;
     nBits = SSFBNBitLen(n);
-    if ((nBits != 2048u) && (nBits != 3072u) && (nBits != 4096u)) return false;
+    {
+        bool sizeOk = false;
+#if SSF_RSA_CONFIG_ENABLE_2048 == 1
+        if (nBits == 2048u) sizeOk = true;
+#endif
+#if SSF_RSA_CONFIG_ENABLE_3072 == 1
+        if (nBits == 3072u) sizeOk = true;
+#endif
+#if SSF_RSA_CONFIG_ENABLE_4096 == 1
+        if (nBits == 4096u) sizeOk = true;
+#endif
+        if (sizeOk == false) return false;
+    }
     if (nBits > SSF_BN_CONFIG_MAX_BITS) return false;
 
     /* e: odd, ≥ 65537 (rejects e=3, e=17 small-exponent classes per FIPS 186-4 §B.3.1), < n.   */
@@ -855,8 +869,22 @@ bool SSFRSAKeyGen(uint16_t bits,
     SSF_REQUIRE(pubKeyDer != NULL);
     SSF_REQUIRE(privKeyDerLen != NULL);
     SSF_REQUIRE(pubKeyDerLen != NULL);
-    SSF_REQUIRE(bits == 2048u || bits == 3072u || bits == 4096u);
-    SSF_REQUIRE(bits <= SSF_BN_CONFIG_MAX_BITS);
+    /* Caller must pick one of the build-enabled sizes; a disabled size traps even though the   */
+    /* underlying BN cap may technically permit it. The 2N <= MAX_BITS invariant is already     */
+    /* enforced as a compile-time gate in ssfrsa.h.                                              */
+    {
+        bool bitsOk = false;
+#if SSF_RSA_CONFIG_ENABLE_2048 == 1
+        if (bits == 2048u) bitsOk = true;
+#endif
+#if SSF_RSA_CONFIG_ENABLE_3072 == 1
+        if (bits == 3072u) bitsOk = true;
+#endif
+#if SSF_RSA_CONFIG_ENABLE_4096 == 1
+        if (bits == 4096u) bitsOk = true;
+#endif
+        SSF_REQUIRE(bitsOk);
+    }
     SSF_REQUIRE(privKeyDerSize >= SSF_RSA_MAX_PRIV_KEY_DER_SIZE);
     SSF_REQUIRE(pubKeyDerSize >= SSF_RSA_MAX_PUB_KEY_DER_SIZE);
 

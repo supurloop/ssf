@@ -546,7 +546,7 @@ void SSFECDSAUnitTest(void)
         SSF_ASSERT(audit.sawHook == true);
         if (audit.nonZero)
         {
-            printf("ECDSA Sign zeroization audit FAILED: %s left non-zero on stack\n",
+            SSF_UT_PRINTF("ECDSA Sign zeroization audit FAILED: %s left non-zero on stack\n",
                    audit.firstNonZero);
         }
         SSF_ASSERT(audit.nonZero == false);
@@ -575,7 +575,7 @@ void SSFECDSAUnitTest(void)
         SSF_ASSERT(audit.sawHook == true);
         if (audit.nonZero)
         {
-            printf("ECDSA Sign (fail path) zeroization audit FAILED: %s left non-zero\n",
+            SSF_UT_PRINTF("ECDSA Sign (fail path) zeroization audit FAILED: %s left non-zero\n",
                    audit.firstNonZero);
         }
         SSF_ASSERT(audit.nonZero == false);
@@ -611,7 +611,7 @@ void SSFECDSAUnitTest(void)
         SSF_ASSERT(audit.sawHook == true);
         if (audit.nonZero)
         {
-            printf("ECDH zeroization audit FAILED: %s left non-zero on stack\n",
+            SSF_UT_PRINTF("ECDH zeroization audit FAILED: %s left non-zero on stack\n",
                    audit.firstNonZero);
         }
         SSF_ASSERT(audit.nonZero == false);
@@ -643,7 +643,7 @@ void SSFECDSAUnitTest(void)
         SSF_ASSERT(audit.sawHook == true);
         if (audit.nonZero)
         {
-            printf("ECDH (fail path) zeroization audit FAILED: %s left non-zero\n",
+            SSF_UT_PRINTF("ECDH (fail path) zeroization audit FAILED: %s left non-zero\n",
                    audit.firstNonZero);
         }
         SSF_ASSERT(audit.nonZero == false);
@@ -669,7 +669,7 @@ void SSFECDSAUnitTest(void)
         SSF_ASSERT(audit.sawHook == true);
         if (audit.nonZero)
         {
-            printf("KeyGen zeroization audit FAILED: %s left non-zero on stack\n",
+            SSF_UT_PRINTF("KeyGen zeroization audit FAILED: %s left non-zero on stack\n",
                    audit.firstNonZero);
         }
         SSF_ASSERT(audit.nonZero == false);
@@ -1353,7 +1353,7 @@ void SSFECDSAUnitTest(void)
     /* Catches DER signature encoding bugs (length fields, ASN.1 INTEGER tag/leading-zero      */
     /* handling) and end-to-end serialization mismatches that the per-primitive KATs miss.     */
     /* Run for both directions on each enabled curve.                                           */
-    printf("--- ssfecdsa OpenSSL sign/verify interop ---\n");
+    SSF_UT_PRINTF("--- ssfecdsa OpenSSL sign/verify interop ---\n");
 
 #if SSF_EC_CONFIG_ENABLE_P256 == 1
     {
@@ -1494,13 +1494,13 @@ void SSFECDSAUnitTest(void)
     }
 #endif /* SSF_EC_CONFIG_ENABLE_P384 */
 
-    printf("--- end ssfecdsa OpenSSL interop ---\n");
+    SSF_UT_PRINTF("--- end ssfecdsa OpenSSL interop ---\n");
 
     /* Comprehensive OpenSSL cross-validation, mirroring the ssfbn pattern: random fuzz across   */
     /* both curves (catches DER-edge / leftmost-bits / state-corruption bugs the fixed-message   */
     /* interop above can miss with one keypair), ECDH cross-check (no prior coverage), and       */
     /* corner cases (zero hash, all-0xFF hash, DER round-trip, pubkey derivation).               */
-    printf("--- ssfecdsa OpenSSL random fuzz + ECDH + corner cases ---\n");
+    SSF_UT_PRINTF("--- ssfecdsa OpenSSL random fuzz + ECDH + corner cases ---\n");
 #if SSF_EC_CONFIG_ENABLE_P256 == 1
     _VerifyECDSARandomAgainstOpenSSL(SSF_EC_CURVE_P256, 25u);
     _VerifyECDHAgainstOpenSSL(SSF_EC_CURVE_P256, 25u);
@@ -1511,7 +1511,7 @@ void SSFECDSAUnitTest(void)
     _VerifyECDHAgainstOpenSSL(SSF_EC_CURVE_P384, 15u);
     _VerifyECDSACornerCasesAgainstOpenSSL(SSF_EC_CURVE_P384);
 #endif
-    printf("--- end ssfecdsa OpenSSL random fuzz + ECDH + corner cases ---\n");
+    SSF_UT_PRINTF("--- end ssfecdsa OpenSSL random fuzz + ECDH + corner cases ---\n");
 #endif /* SSF_ECDSA_OSSL_VERIFY */
 
 #endif /* SSF_ECDSA_CONFIG_ENABLE_SIGN — Sign-using blocks above; Wycheproof verify vectors */
@@ -1554,7 +1554,7 @@ void SSFECDSAUnitTest(void)
         uint16_t i;
         uint16_t pass = 0, mismatches = 0;
 
-        printf("--- Wycheproof ECDSA P-256 verify (%u tests) ---\n",
+        SSF_UT_PRINTF("--- Wycheproof ECDSA P-256 verify (%u tests) ---\n",
                (unsigned)SSF_WYCHEPROOF_ECDSA_P256_NTESTS);
         for (i = 0; i < (uint16_t)SSF_WYCHEPROOF_ECDSA_P256_NTESTS; i++)
         {
@@ -1574,14 +1574,14 @@ void SSFECDSAUnitTest(void)
             else
             {
                 mismatches++;
-                printf("  tcId %4u: expected %s, got %s (sig %u bytes)\n",
+                SSF_UT_PRINTF("  tcId %4u: expected %s, got %s (sig %u bytes)\n",
                        (unsigned)t->tcId,
                        t->expectedValid ? "valid  " : "invalid",
                        got               ? "valid  " : "invalid",
                        (unsigned)t->sigLen);
             }
         }
-        printf("--- Wycheproof ECDSA P-256: %u/%u pass, %u mismatches ---\n",
+        SSF_UT_PRINTF("--- Wycheproof ECDSA P-256: %u/%u pass, %u mismatches ---\n",
                (unsigned)pass, (unsigned)SSF_WYCHEPROOF_ECDSA_P256_NTESTS,
                (unsigned)mismatches);
         SSF_ASSERT(mismatches == 0u);
@@ -1596,7 +1596,7 @@ void SSFECDSAUnitTest(void)
         uint16_t i;
         uint16_t pass = 0, mismatches = 0;
 
-        printf("--- Wycheproof ECDSA P-384 verify (%u tests) ---\n",
+        SSF_UT_PRINTF("--- Wycheproof ECDSA P-384 verify (%u tests) ---\n",
                (unsigned)SSF_WYCHEPROOF_ECDSA_P384_NTESTS);
         for (i = 0; i < (uint16_t)SSF_WYCHEPROOF_ECDSA_P384_NTESTS; i++)
         {
@@ -1616,14 +1616,14 @@ void SSFECDSAUnitTest(void)
             else
             {
                 mismatches++;
-                printf("  tcId %4u: expected %s, got %s (sig %u bytes)\n",
+                SSF_UT_PRINTF("  tcId %4u: expected %s, got %s (sig %u bytes)\n",
                        (unsigned)t->tcId,
                        t->expectedValid ? "valid  " : "invalid",
                        got               ? "valid  " : "invalid",
                        (unsigned)t->sigLen);
             }
         }
-        printf("--- Wycheproof ECDSA P-384: %u/%u pass, %u mismatches ---\n",
+        SSF_UT_PRINTF("--- Wycheproof ECDSA P-384: %u/%u pass, %u mismatches ---\n",
                (unsigned)pass, (unsigned)SSF_WYCHEPROOF_ECDSA_P384_NTESTS,
                (unsigned)mismatches);
         SSF_ASSERT(mismatches == 0u);
@@ -1650,7 +1650,7 @@ void SSFECDSAUnitTest(void)
         uint16_t i;
         uint16_t pass = 0, mismatches = 0, acceptableSkipped = 0, knownIssue = 0;
 
-        printf("--- Wycheproof ECDH P-256 (%u tests) ---\n",
+        SSF_UT_PRINTF("--- Wycheproof ECDH P-256 (%u tests) ---\n",
                (unsigned)SSF_WYCHEPROOF_ECDH_P256_NTESTS);
         for (i = 0; i < (uint16_t)SSF_WYCHEPROOF_ECDH_P256_NTESTS; i++)
         {
@@ -1682,13 +1682,13 @@ void SSFECDSAUnitTest(void)
             else
             {
                 mismatches++;
-                printf("  tcId %4u: expected %s, got %s\n",
+                SSF_UT_PRINTF("  tcId %4u: expected %s, got %s\n",
                        (unsigned)t->tcId,
                        t->expectedValid ? "valid" : "invalid",
                        got ? (sharedOk ? "valid" : "wrong-shared") : "rejected");
             }
         }
-        printf("--- Wycheproof ECDH P-256: %u pass, %u acceptable, %u known-issue, %u new-mismatches ---\n",
+        SSF_UT_PRINTF("--- Wycheproof ECDH P-256: %u pass, %u acceptable, %u known-issue, %u new-mismatches ---\n",
                (unsigned)pass, (unsigned)acceptableSkipped, (unsigned)knownIssue, (unsigned)mismatches);
         SSF_ASSERT(mismatches == 0u);
     }
@@ -1707,7 +1707,7 @@ void SSFECDSAUnitTest(void)
         uint16_t firstFails[16];
         uint16_t nFirstFails = 0;
 
-        printf("--- Wycheproof ECDH P-384 (%u tests) ---\n",
+        SSF_UT_PRINTF("--- Wycheproof ECDH P-384 (%u tests) ---\n",
                (unsigned)SSF_WYCHEPROOF_ECDH_P384_NTESTS);
         for (i = 0; i < (uint16_t)SSF_WYCHEPROOF_ECDH_P384_NTESTS; i++)
         {
@@ -1736,16 +1736,16 @@ void SSFECDSAUnitTest(void)
             }
             (void)knownIssue;
         }
-        printf("--- Wycheproof ECDH P-384: %u pass, %u acceptable, %u mismatches",
+        SSF_UT_PRINTF("--- Wycheproof ECDH P-384: %u pass, %u acceptable, %u mismatches",
                (unsigned)pass, (unsigned)acceptableSkipped, (unsigned)mismatches);
         if (mismatches > 0u)
         {
             uint16_t k;
-            printf(" (first fails:");
-            for (k = 0; k < nFirstFails && k < 8u; k++) printf(" %u", (unsigned)firstFails[k]);
-            printf(")");
+            SSF_UT_PRINTF(" (first fails:");
+            for (k = 0; k < nFirstFails && k < 8u; k++) SSF_UT_PRINTF(" %u", (unsigned)firstFails[k]);
+            SSF_UT_PRINTF(")");
         }
-        printf(" ---\n");
+        SSF_UT_PRINTF(" ---\n");
         SSF_ASSERT(mismatches == 0u);
     }
 #endif /* SSF_EC_CONFIG_ENABLE_P384 */

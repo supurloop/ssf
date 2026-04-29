@@ -1632,31 +1632,31 @@ static void _SSFBNVerifyAgainstOpenSSL(void)
         RAND_seed(seed, (int)sizeof(seed));
     }
 
-    printf("--- ssfbn OpenSSL cross-check ---\n");
-    printf("  corner cases (256-bit, NIST P-256 modulus)... ");
+    SSF_UT_PRINTF("--- ssfbn OpenSSL cross-check ---\n");
+    SSF_UT_PRINTF("  corner cases (256-bit, NIST P-256 modulus)... ");
     fflush(stdout);
     _VerifyCornerCasesAgainstOpenSSL();
-    printf("OK\n");
-    printf("  Karatsuba boundary stress... ");
+    SSF_UT_PRINTF("OK\n");
+    SSF_UT_PRINTF("  Karatsuba boundary stress... ");
     fflush(stdout);
     _VerifyKaratsubaAtBoundary();
-    printf("OK\n");
-    printf("  NIST fast-reduction stress (P-256 + P-384, 1000 iters each)... ");
+    SSF_UT_PRINTF("OK\n");
+    SSF_UT_PRINTF("  NIST fast-reduction stress (P-256 + P-384, 1000 iters each)... ");
     fflush(stdout);
     _VerifyNISTReductionStress();
-    printf("OK\n");
+    SSF_UT_PRINTF("OK\n");
     for (si = 0; si < (sizeof(sizes) / sizeof(sizes[0])); si++)
     {
-        printf("  %-9s %4d-bit x %u iters... ", sizes[si].label, sizes[si].bits, sizes[si].iters);
+        SSF_UT_PRINTF("  %-9s %4d-bit x %u iters... ", sizes[si].label, sizes[si].bits, sizes[si].iters);
         fflush(stdout);
         _VerifyAtSize(sizes[si].bits, sizes[si].iters, sizes[si].prime_capable);
-        printf("OK\n");
+        SSF_UT_PRINTF("OK\n");
     }
-    printf("  ModInvExt @ RSA-2048 (50 iters)... ");
+    SSF_UT_PRINTF("  ModInvExt @ RSA-2048 (50 iters)... ");
     fflush(stdout);
     _VerifyModInvExtAtRSA2048();
-    printf("OK\n");
-    printf("--- end OpenSSL cross-check ---\n");
+    SSF_UT_PRINTF("OK\n");
+    SSF_UT_PRINTF("--- end OpenSSL cross-check ---\n");
 }
 
 #endif /* SSF_BN_OSSL_VERIFY */
@@ -2937,7 +2937,7 @@ void SSFBNUnitTest(void)
         };
         uint16_t bi;
 
-        printf("\n--- ssfbn microbenchmark (ms for iter count shown) ---\n");
+        SSF_UT_PRINTF("\n--- ssfbn microbenchmark (ms for iter count shown) ---\n");
         for (bi = 0; bi < (uint16_t)(sizeof(bench) / sizeof(bench[0])); bi++)
         {
             uint16_t n = bench[bi].nLimbs;
@@ -2994,7 +2994,7 @@ void SSFBNUnitTest(void)
                     SSFBNMul(&rWide, &a, &b);
                 }
                 t1 = SSFPortGetTick64();
-                printf("  Mul        %s %u iter: %llu ms\n",
+                SSF_UT_PRINTF("  Mul        %s %u iter: %llu ms\n",
                        bench[bi].label, (unsigned)mulIters,
                        (unsigned long long)(t1 - t0));
 
@@ -3004,7 +3004,7 @@ void SSFBNUnitTest(void)
                     SSFBNSquare(&rWide, &a);
                 }
                 t1 = SSFPortGetTick64();
-                printf("  Square     %s %u iter: %llu ms\n",
+                SSF_UT_PRINTF("  Square     %s %u iter: %llu ms\n",
                        bench[bi].label, (unsigned)mulIters,
                        (unsigned long long)(t1 - t0));
             }
@@ -3044,7 +3044,7 @@ void SSFBNUnitTest(void)
                     SSFBNModExpMont(&rE, &a, &expPriv, &mont);
                 }
                 t1 = SSFPortGetTick64();
-                printf("  ModExpMont %s %u iter: %llu ms\n",
+                SSF_UT_PRINTF("  ModExpMont %s %u iter: %llu ms\n",
                        bench[bi].label, (unsigned)expIters,
                        (unsigned long long)(t1 - t0));
 
@@ -3054,7 +3054,7 @@ void SSFBNUnitTest(void)
                     SSFBNModExpMontPub(&rE, &a, &expPub, &mont);
                 }
                 t1 = SSFPortGetTick64();
-                printf("  ModExpPub  %s %u iter: %llu ms (e=F4)\n",
+                SSF_UT_PRINTF("  ModExpPub  %s %u iter: %llu ms (e=F4)\n",
                        bench[bi].label, (unsigned)expPubIters,
                        (unsigned long long)(t1 - t0));
             }
@@ -3072,7 +3072,7 @@ void SSFBNUnitTest(void)
                     (void)SSFBNModInv(&rInv, &a, &mod);
                 }
                 t1 = SSFPortGetTick64();
-                printf("  ModInv     %s %u iter: %llu ms (Fermat)\n",
+                SSF_UT_PRINTF("  ModInv     %s %u iter: %llu ms (Fermat)\n",
                        bench[bi].label, 2000u, (unsigned long long)(t1 - t0));
 
                 t0 = SSFPortGetTick64();
@@ -3081,7 +3081,7 @@ void SSFBNUnitTest(void)
                     (void)SSFBNModInvExt(&rInv, &a, &mod);
                 }
                 t1 = SSFPortGetTick64();
-                printf("  ModInvExt  %s %u iter: %llu ms (binary EEA)\n",
+                SSF_UT_PRINTF("  ModInvExt  %s %u iter: %llu ms (binary EEA)\n",
                        bench[bi].label, 2000u, (unsigned long long)(t1 - t0));
             }
 
@@ -3095,7 +3095,7 @@ void SSFBNUnitTest(void)
                 SSFBNMontMul(&r, &a, &b, &mont);
             }
             t1 = SSFPortGetTick64();
-            printf("  MontMul    %s %u iter: %llu ms\n",
+            SSF_UT_PRINTF("  MontMul    %s %u iter: %llu ms\n",
                    bench[bi].label, (unsigned)mIters,
                    (unsigned long long)(t1 - t0));
 
@@ -3105,11 +3105,11 @@ void SSFBNUnitTest(void)
                 SSFBNMontSquare(&r, &a, &mont);
             }
             t1 = SSFPortGetTick64();
-            printf("  MontSquare %s %u iter: %llu ms\n",
+            SSF_UT_PRINTF("  MontSquare %s %u iter: %llu ms\n",
                    bench[bi].label, (unsigned)mIters,
                    (unsigned long long)(t1 - t0));
         }
-        printf("--- end microbenchmark ---\n");
+        SSF_UT_PRINTF("--- end microbenchmark ---\n");
     }
 #endif /* SSF_CONFIG_BN_MICROBENCH */
 }

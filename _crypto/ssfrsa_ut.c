@@ -430,35 +430,35 @@ static void _SSFRSAVerifyAgainstOpenSSL(const uint8_t *foreignPriv, size_t forei
     static const EVP_MD *(*const m4096[])(void) = { _OSSLSha256, _OSSLSha384, _OSSLSha512 };
 #endif
 
-    printf("\n--- ssfrsa OpenSSL cross-check ---\n");
+    SSF_UT_PRINTF("\n--- ssfrsa OpenSSL cross-check ---\n");
 
-    printf("  foreign-key PSS round-trip (sign-OSSL / verify-SSF)... ");
+    SSF_UT_PRINTF("  foreign-key PSS round-trip (sign-OSSL / verify-SSF)... ");
     fflush(stdout);
     _SSFRSACrossCheckForeignPSS(foreignPriv, foreignPrivLen, foreignPub, foreignPubLen);
-    printf("OK\n");
+    SSF_UT_PRINTF("OK\n");
 
 #if SSF_RSA_CONFIG_ENABLE_2048 == 1
-    printf("  RSA-2048 keygen + PKCS1v15(byte-match) + PSS(round-trip) @ SHA-256... ");
+    SSF_UT_PRINTF("  RSA-2048 keygen + PKCS1v15(byte-match) + PSS(round-trip) @ SHA-256... ");
     fflush(stdout);
     _SSFRSACrossCheckAtSize(2048u, h2048, l2048, m2048, sizeof(h2048) / sizeof(h2048[0]));
-    printf("OK\n");
+    SSF_UT_PRINTF("OK\n");
 #endif
 
 #if SSF_RSA_CONFIG_ENABLE_3072 == 1
-    printf("  RSA-3072 keygen + PKCS1v15(byte-match) + PSS(round-trip) @ SHA-256/384... ");
+    SSF_UT_PRINTF("  RSA-3072 keygen + PKCS1v15(byte-match) + PSS(round-trip) @ SHA-256/384... ");
     fflush(stdout);
     _SSFRSACrossCheckAtSize(3072u, h3072, l3072, m3072, sizeof(h3072) / sizeof(h3072[0]));
-    printf("OK\n");
+    SSF_UT_PRINTF("OK\n");
 #endif
 
 #if SSF_RSA_CONFIG_ENABLE_4096 == 1
-    printf("  RSA-4096 keygen + PKCS1v15(byte-match) + PSS(round-trip) @ SHA-256/384/512... ");
+    SSF_UT_PRINTF("  RSA-4096 keygen + PKCS1v15(byte-match) + PSS(round-trip) @ SHA-256/384/512... ");
     fflush(stdout);
     _SSFRSACrossCheckAtSize(4096u, h4096, l4096, m4096, sizeof(h4096) / sizeof(h4096[0]));
-    printf("OK\n");
+    SSF_UT_PRINTF("OK\n");
 #endif
 
-    printf("--- end OpenSSL cross-check ---\n");
+    SSF_UT_PRINTF("--- end OpenSSL cross-check ---\n");
 }
 
 #pragma GCC diagnostic pop  /* -Wdeprecated-declarations restored */
@@ -476,7 +476,7 @@ void SSFRSAUnitTest(void)
     /* No RSA size is enabled — the rest of the body references SSFRSAKeyGen / SSFRSASignPKCS1 / */
     /* etc., none of which are compiled. Print a clear "skipped" line and return so main.c's     */
     /* test runner stays linkable for pure-ECC builds.                                            */
-    printf("(skipped: no SSF_RSA_CONFIG_ENABLE_2048 / 3072 / 4096 enabled)\n");
+    SSF_UT_PRINTF("(skipped: no SSF_RSA_CONFIG_ENABLE_2048 / 3072 / 4096 enabled)\n");
     return;
 #else
 

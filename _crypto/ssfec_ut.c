@@ -650,14 +650,14 @@ void SSFECUnitTest(void)
     /* OpenSSL EC cross-check: ~10 random k per curve exercises every public op against an     */
     /* independent reference. Order matters — run these first so any disagreement surfaces      */
     /* before the self-consistency tests below.                                                  */
-    printf("--- ssfec OpenSSL cross-check ---\n");
+    SSF_UT_PRINTF("--- ssfec OpenSSL cross-check ---\n");
 #if SSF_EC_CONFIG_ENABLE_P256 == 1
     _ECVerifyAtCurve(SSF_EC_CURVE_P256, 20u);
 #endif
 #if SSF_EC_CONFIG_ENABLE_P384 == 1
     _ECVerifyAtCurve(SSF_EC_CURVE_P384, 12u);
 #endif
-    printf("--- end OpenSSL cross-check ---\n");
+    SSF_UT_PRINTF("--- end OpenSSL cross-check ---\n");
 #endif
 #if SSF_EC_CONFIG_ENABLE_P256 == 1
     /* ---- P-256: generator is on curve ---- */
@@ -2530,26 +2530,26 @@ void SSFECUnitTest(void)
                 SSFBNSetUint32(&all[pi]->z, 1u, c->limbs);
             }
 
-            printf("\n/* === BEGIN %s AFFINE COMB TABLE DUMP === */\n", specs[si].label);
+            SSF_UT_PRINTF("\n/* === BEGIN %s AFFINE COMB TABLE DUMP === */\n", specs[si].label);
             for (pi = 0; pi < 16u; pi++)
             {
                 uint16_t lim, li;
                 const SSFBN_t *coords[3] = { &all[pi]->x, &all[pi]->y, &all[pi]->z };
-                printf("    /* table[%2u] */\n    {\n", (unsigned)pi);
+                SSF_UT_PRINTF("    /* table[%2u] */\n    {\n", (unsigned)pi);
                 for (lim = 0; lim < 3u; lim++)
                 {
-                    printf("        { ");
+                    SSF_UT_PRINTF("        { ");
                     for (li = 0; li < specs[si].nLimbs; li++)
                     {
                         SSFBNLimb_t v = (li < coords[lim]->len) ? coords[lim]->limbs[li] : 0u;
-                        printf("0x%08Xu%s", (unsigned)v,
+                        SSF_UT_PRINTF("0x%08Xu%s", (unsigned)v,
                                (li + 1u < specs[si].nLimbs) ? ", " : "");
                     }
-                    printf(" },\n");
+                    SSF_UT_PRINTF(" },\n");
                 }
-                printf("    },\n");
+                SSF_UT_PRINTF("    },\n");
             }
-            printf("/* === END %s AFFINE COMB TABLE DUMP === */\n\n", specs[si].label);
+            SSF_UT_PRINTF("/* === END %s AFFINE COMB TABLE DUMP === */\n\n", specs[si].label);
         }
     }
 #endif
@@ -2569,7 +2569,7 @@ void SSFECUnitTest(void)
         for (i = 0; i < sizeof(seed); i++) seed[i] = (uint8_t)(0xA5u ^ i);
         SSFPRNGInitContext(&prng, seed, sizeof(seed));
 
-        printf("\n--- ssfec microbenchmark (ms for iter count shown) ---\n");
+        SSF_UT_PRINTF("\n--- ssfec microbenchmark (ms for iter count shown) ---\n");
 
 #if SSF_EC_CONFIG_ENABLE_P256 == 1
         {
@@ -2587,7 +2587,7 @@ void SSFECUnitTest(void)
                 SSFECScalarMul(&R, &k, &G, SSF_EC_CURVE_P256);
             }
             t1 = SSFPortGetTick64();
-            printf("  ScalarMul       P-256 [k]G   %u iter: %llu ms\n",
+            SSF_UT_PRINTF("  ScalarMul       P-256 [k]G   %u iter: %llu ms\n",
                    (unsigned)iters, (unsigned long long)(t1 - t0));
 
 #if SSF_EC_CONFIG_FIXED_BASE_P256 == 1
@@ -2598,7 +2598,7 @@ void SSFECUnitTest(void)
                 SSFECScalarMulBaseP256(&R, &k);
             }
             t1 = SSFPortGetTick64();
-            printf("  BaseP256 [k]G (fixed-base) %u iter: %llu ms\n",
+            SSF_UT_PRINTF("  BaseP256 [k]G (fixed-base) %u iter: %llu ms\n",
                    (unsigned)iters, (unsigned long long)(t1 - t0));
 #endif /* SSF_EC_CONFIG_FIXED_BASE_P256 */
         }
@@ -2620,7 +2620,7 @@ void SSFECUnitTest(void)
                 SSFECScalarMul(&R, &k, &G, SSF_EC_CURVE_P384);
             }
             t1 = SSFPortGetTick64();
-            printf("  ScalarMul       P-384 [k]G   %u iter: %llu ms\n",
+            SSF_UT_PRINTF("  ScalarMul       P-384 [k]G   %u iter: %llu ms\n",
                    (unsigned)iters, (unsigned long long)(t1 - t0));
 
 #if SSF_EC_CONFIG_FIXED_BASE_P384 == 1
@@ -2631,7 +2631,7 @@ void SSFECUnitTest(void)
                 SSFECScalarMulBaseP384(&R, &k);
             }
             t1 = SSFPortGetTick64();
-            printf("  BaseP384 [k]G (fixed-base) %u iter: %llu ms\n",
+            SSF_UT_PRINTF("  BaseP384 [k]G (fixed-base) %u iter: %llu ms\n",
                    (unsigned)iters, (unsigned long long)(t1 - t0));
 #endif /* SSF_EC_CONFIG_FIXED_BASE_P384 */
         }
@@ -2662,7 +2662,7 @@ void SSFECUnitTest(void)
                 SSFECScalarMulDual(&R, &u1, &G, &u2, &Q, SSF_EC_CURVE_P256);
             }
             t1 = SSFPortGetTick64();
-            printf("  ScalarMulDual   P-256 (Shamir)  %u iter: %llu ms\n",
+            SSF_UT_PRINTF("  ScalarMulDual   P-256 (Shamir)  %u iter: %llu ms\n",
                    (unsigned)iters, (unsigned long long)(t1 - t0));
 
 #if SSF_EC_CONFIG_FIXED_BASE_P256 == 1
@@ -2674,7 +2674,7 @@ void SSFECUnitTest(void)
                 SSFECScalarMulDualBase(&R, &u1, &u2, &Q, SSF_EC_CURVE_P256);
             }
             t1 = SSFPortGetTick64();
-            printf("  DualBase P-256 (fixed+windowed) %u iter: %llu ms\n",
+            SSF_UT_PRINTF("  DualBase P-256 (fixed+windowed) %u iter: %llu ms\n",
                    (unsigned)iters, (unsigned long long)(t1 - t0));
 #endif /* SSF_EC_CONFIG_FIXED_BASE_P256 */
         }
@@ -2703,7 +2703,7 @@ void SSFECUnitTest(void)
                 SSFECScalarMulDual(&R, &u1, &G, &u2, &Q, SSF_EC_CURVE_P384);
             }
             t1 = SSFPortGetTick64();
-            printf("  ScalarMulDual   P-384 (Shamir)  %u iter: %llu ms\n",
+            SSF_UT_PRINTF("  ScalarMulDual   P-384 (Shamir)  %u iter: %llu ms\n",
                    (unsigned)iters, (unsigned long long)(t1 - t0));
 
 #if SSF_EC_CONFIG_FIXED_BASE_P384 == 1
@@ -2715,7 +2715,7 @@ void SSFECUnitTest(void)
                 SSFECScalarMulDualBase(&R, &u1, &u2, &Q, SSF_EC_CURVE_P384);
             }
             t1 = SSFPortGetTick64();
-            printf("  DualBase P-384 (fixed+windowed) %u iter: %llu ms\n",
+            SSF_UT_PRINTF("  DualBase P-384 (fixed+windowed) %u iter: %llu ms\n",
                    (unsigned)iters, (unsigned long long)(t1 - t0));
 #endif /* SSF_EC_CONFIG_FIXED_BASE_P384 */
         }
@@ -2752,7 +2752,7 @@ void SSFECUnitTest(void)
                                pubBuf, sizeof(pubBuf), &pkLen);
             }
             t1 = SSFPortGetTick64();
-            printf("  ECDSAKeyGen     P-256        %u iter: %llu ms\n",
+            SSF_UT_PRINTF("  ECDSAKeyGen     P-256        %u iter: %llu ms\n",
                    (unsigned)iters, (unsigned long long)(t1 - t0));
 
             sigLen = 0;
@@ -2765,7 +2765,7 @@ void SSFECUnitTest(void)
                                         &sigLen) == true);
             }
             t1 = SSFPortGetTick64();
-            printf("  ECDSASign       P-256        %u iter: %llu ms\n",
+            SSF_UT_PRINTF("  ECDSASign       P-256        %u iter: %llu ms\n",
                    (unsigned)iters, (unsigned long long)(t1 - t0));
 
             t0 = SSFPortGetTick64();
@@ -2776,13 +2776,13 @@ void SSFECUnitTest(void)
                                           sig, sigLen) == true);
             }
             t1 = SSFPortGetTick64();
-            printf("  ECDSAVerify     P-256        %u iter: %llu ms\n",
+            SSF_UT_PRINTF("  ECDSAVerify     P-256        %u iter: %llu ms\n",
                    (unsigned)iters, (unsigned long long)(t1 - t0));
 #endif /* SSF_ECDSA_CONFIG_ENABLE_SIGN — sig produced by Sign feeds Verify */
         }
 #endif /* SSF_EC_CONFIG_ENABLE_P256 */
 
-        printf("--- end ssfec microbenchmark ---\n");
+        SSF_UT_PRINTF("--- end ssfec microbenchmark ---\n");
 
         SSFPRNGDeInitContext(&prng);
     }

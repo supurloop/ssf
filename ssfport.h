@@ -198,6 +198,28 @@ extern "C" {
 #define SSF_CONFIG_UNIT_TEST (0u)
 #endif
 
+/* SSF_CONFIG_UT_VERBOSE — gate diagnostic stdout from unit tests (microbenchmark timings,        */
+/* OpenSSL cross-check banners, Wycheproof per-tcId mismatches, zeroization-audit failure         */
+/* details). Default 0 keeps the suite silent so main.c's "Running ... PASSED in Ns" line is the  */
+/* only output and aligned columns are not corrupted. Override with -DSSF_CONFIG_UT_VERBOSE=1     */
+/* to recover the diagnostic stream when profiling or debugging a failure.                        */
+#ifndef SSF_CONFIG_UT_VERBOSE
+#define SSF_CONFIG_UT_VERBOSE (0u)
+#endif
+
+#if SSF_CONFIG_UT_VERBOSE == 1
+#include <stdio.h>
+#define SSF_UT_PRINTF(...) printf(__VA_ARGS__)
+#else
+/* Disabled form: sizeof-of-call is unevaluated — args are type-checked and "referenced" enough   */
+/* to suppress unused-variable warnings on counters that exist solely to drive these prints, but  */
+/* generate zero runtime code. Requires <stdio.h> in scope wherever SSF_UT_PRINTF appears so the  */
+/* printf prototype is visible to the sizeof expression; every unit test file that uses it        */
+/* already includes <stdio.h> for snprintf.                                                       */
+#include <stdio.h>
+#define SSF_UT_PRINTF(...) ((void)sizeof(printf(__VA_ARGS__)))
+#endif
+
 /* --------------------------------------------------------------------------------------------- */
 /* Platform specific tick configuration                                                          */
 /* --------------------------------------------------------------------------------------------- */

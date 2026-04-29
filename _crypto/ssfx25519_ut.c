@@ -101,7 +101,7 @@ static void _VerifyX25519AgainstOpenSSL(uint16_t iters)
 {
     uint16_t iter;
 
-    printf("--- ssfx25519 OpenSSL cross-check (%u iters, bidirectional) ---\n",
+    SSF_UT_PRINTF("--- ssfx25519 OpenSSL cross-check (%u iters, bidirectional) ---\n",
            (unsigned)iters);
 
     for (iter = 0; iter < iters; iter++)
@@ -145,7 +145,7 @@ static void _VerifyX25519AgainstOpenSSL(uint16_t iters)
         SSF_ASSERT(memcmp(secretSSF, secretOSSL, 32) == 0);
     }
 
-    printf("--- end ssfx25519 OpenSSL cross-check ---\n");
+    SSF_UT_PRINTF("--- end ssfx25519 OpenSSL cross-check ---\n");
 }
 #endif /* SSF_X25519_OSSL_VERIFY */
 
@@ -230,7 +230,7 @@ static void _X25519SelfFuzz(uint16_t iters)
     uint8_t state[64];
     uint16_t iter;
 
-    printf("--- ssfx25519 self-fuzz (%u iters, deterministic) ---\n", (unsigned)iters);
+    SSF_UT_PRINTF("--- ssfx25519 self-fuzz (%u iters, deterministic) ---\n", (unsigned)iters);
 
     memset(state, 0xA5u, sizeof(state));
 
@@ -261,7 +261,7 @@ static void _X25519SelfFuzz(uint16_t iters)
         SSF_ASSERT(memcmp(secretA, secretB, 32) == 0);
     }
 
-    printf("--- end ssfx25519 self-fuzz ---\n");
+    SSF_UT_PRINTF("--- end ssfx25519 self-fuzz ---\n");
 }
 
 void SSFX25519UnitTest(void)
@@ -501,7 +501,7 @@ void SSFX25519UnitTest(void)
         uint16_t i;
         uint16_t pass = 0, mismatches = 0, acceptableAccepted = 0, acceptableRejected = 0;
 
-        printf("--- Wycheproof X25519 (%u tests) ---\n",
+        SSF_UT_PRINTF("--- Wycheproof X25519 (%u tests) ---\n",
                (unsigned)SSF_WYCHEPROOF_X25519_NTESTS);
         for (i = 0; i < (uint16_t)SSF_WYCHEPROOF_X25519_NTESTS; i++)
         {
@@ -527,14 +527,14 @@ void SSFX25519UnitTest(void)
                 else
                 {
                     mismatches++;
-                    printf("  tcId %4u: expected %s, got %s\n",
+                    SSF_UT_PRINTF("  tcId %4u: expected %s, got %s\n",
                            (unsigned)t->tcId,
                            t->expectedValid ? "valid" : "invalid",
                            got ? (sharedOk ? "valid" : "wrong-shared") : "rejected");
                 }
             }
         }
-        printf("--- Wycheproof X25519: %u pass, %u acceptable-accepted, "
+        SSF_UT_PRINTF("--- Wycheproof X25519: %u pass, %u acceptable-accepted, "
                "%u acceptable-rejected, %u mismatches ---\n",
                (unsigned)pass, (unsigned)acceptableAccepted,
                (unsigned)acceptableRejected, (unsigned)mismatches);

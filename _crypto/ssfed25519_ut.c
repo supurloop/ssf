@@ -193,7 +193,7 @@ static void _VerifyEd25519AgainstOpenSSL(uint16_t iters)
 {
     uint16_t iter;
 
-    printf("--- ssfed25519 OpenSSL cross-check (%u iters, bidirectional) ---\n",
+    SSF_UT_PRINTF("--- ssfed25519 OpenSSL cross-check (%u iters, bidirectional) ---\n",
            (unsigned)iters);
 
     for (iter = 0; iter < iters; iter++)
@@ -243,7 +243,7 @@ static void _VerifyEd25519AgainstOpenSSL(uint16_t iters)
         }
     }
 
-    printf("--- end ssfed25519 OpenSSL cross-check ---\n");
+    SSF_UT_PRINTF("--- end ssfed25519 OpenSSL cross-check ---\n");
 }
 #endif /* SSF_ED25519_OSSL_VERIFY */
 
@@ -258,7 +258,7 @@ static void _Ed25519SelfFuzz(uint16_t iters)
     uint8_t state[64];
     uint16_t iter;
 
-    printf("--- ssfed25519 self-fuzz (%u iters, deterministic) ---\n", (unsigned)iters);
+    SSF_UT_PRINTF("--- ssfed25519 self-fuzz (%u iters, deterministic) ---\n", (unsigned)iters);
 
     /* Fixed master state — any nonzero pattern is fine; the SHA-512 chain mixes thoroughly. */
     memset(state, 0xA5u, sizeof(state));
@@ -337,7 +337,7 @@ static void _Ed25519SelfFuzz(uint16_t iters)
         }
     }
 
-    printf("--- end ssfed25519 self-fuzz ---\n");
+    SSF_UT_PRINTF("--- end ssfed25519 self-fuzz ---\n");
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -724,7 +724,7 @@ void SSFEd25519UnitTest(void)
         uint16_t i;
         uint16_t pass = 0, mismatches = 0, acceptableSkipped = 0;
 
-        printf("--- Wycheproof Ed25519 verify (%u tests) ---\n",
+        SSF_UT_PRINTF("--- Wycheproof Ed25519 verify (%u tests) ---\n",
                (unsigned)SSF_WYCHEPROOF_ED25519_NTESTS);
         for (i = 0; i < (uint16_t)SSF_WYCHEPROOF_ED25519_NTESTS; i++)
         {
@@ -736,7 +736,7 @@ void SSFEd25519UnitTest(void)
                 /* Wycheproof emits sigs of various lengths for "invalid"-class tests; SSFEd25519
                    Verify takes a fixed 64-byte signature, so wrong-length must be a reject.    */
                 if (t->expectedValid) { mismatches++;
-                    printf("  tcId %4u: expected valid but sig is %u bytes\n",
+                    SSF_UT_PRINTF("  tcId %4u: expected valid but sig is %u bytes\n",
                            (unsigned)t->tcId, (unsigned)t->sigLen);
                 }
                 else pass++;
@@ -751,13 +751,13 @@ void SSFEd25519UnitTest(void)
             else
             {
                 mismatches++;
-                printf("  tcId %4u: expected %s, got %s\n",
+                SSF_UT_PRINTF("  tcId %4u: expected %s, got %s\n",
                        (unsigned)t->tcId,
                        t->expectedValid ? "valid" : "invalid",
                        got ? "valid" : "invalid");
             }
         }
-        printf("--- Wycheproof Ed25519: %u pass, %u acceptable, %u mismatches ---\n",
+        SSF_UT_PRINTF("--- Wycheproof Ed25519: %u pass, %u acceptable, %u mismatches ---\n",
                (unsigned)pass, (unsigned)acceptableSkipped, (unsigned)mismatches);
         SSF_ASSERT(mismatches == 0u);
     }

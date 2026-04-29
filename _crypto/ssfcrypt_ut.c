@@ -244,7 +244,7 @@ void SSFCryptUnitTest(void)
             if (lateMs[trial] < lateMin) lateMin = lateMs[trial];
         }
 
-        printf("ssfcrypt CT timing: early=%llums late=%llums "
+        SSF_UT_PRINTF("ssfcrypt CT timing: early=%llums late=%llums "
                "(min over %u trials, %u iters x %u B)\n",
                (unsigned long long)earlyMin, (unsigned long long)lateMin,
                (unsigned)CT_TRIALS, (unsigned)CT_ITERS, (unsigned)CT_BUF_SIZE);

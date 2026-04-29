@@ -607,19 +607,19 @@ static void _SSFAESVerifyAgainstOpenSSL(void)
         RAND_seed(seed, (int)sizeof(seed));
     }
 
-    printf("--- ssfaes OpenSSL cross-check ---\n");
-    printf("  corner cases (all-zero / all-ones / alt-bits / FIPS-197 PT, all key sizes)... ");
+    SSF_UT_PRINTF("--- ssfaes OpenSSL cross-check ---\n");
+    SSF_UT_PRINTF("  corner cases (all-zero / all-ones / alt-bits / FIPS-197 PT, all key sizes)... ");
     fflush(stdout);
     _VerifyAESCornerCases();
-    printf("OK\n");
+    SSF_UT_PRINTF("OK\n");
     for (si = 0; si < (sizeof(sizes) / sizeof(sizes[0])); si++)
     {
-        printf("  %-7s x %u iters... ", sizes[si].label, sizes[si].iters);
+        SSF_UT_PRINTF("  %-7s x %u iters... ", sizes[si].label, sizes[si].iters);
         fflush(stdout);
         _VerifyRandomAES(sizes[si].keyLen, sizes[si].iters);
-        printf("OK\n");
+        SSF_UT_PRINTF("OK\n");
     }
-    printf("--- end OpenSSL cross-check ---\n");
+    SSF_UT_PRINTF("--- end OpenSSL cross-check ---\n");
 }
 
 #endif /* SSF_AES_OSSL_VERIFY */

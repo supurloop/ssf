@@ -351,6 +351,81 @@ void SSFChaCha20Poly1305UnitTest(void)
         SSF_ASSERT(!ok);
     }
 
+    /* Defense-in-depth regression: the failure-then-success sequence below confirms that a
+     * Decrypt that returns false on a wrong tag does not leave the operation in a state that
+     * breaks subsequent calls. The internal computedTag scrub on the failure path is not
+     * directly observable from C, but this round-trip pattern would catch any state-leak
+     * regression that affects the next decrypt. */
+    {
+        uint8_t scratchKey[SSF_CCP_KEY_SIZE];
+        uint8_t scratchNonce[SSF_CCP_NONCE_SIZE];
+        uint8_t scratchPt[64];
+        uint8_t scratchCt[64];
+        uint8_t scratchTag[SSF_CCP_TAG_SIZE];
+        uint8_t scratchBadTag[SSF_CCP_TAG_SIZE];
+        uint8_t recovered[64];
+        size_t i;
+        bool ok;
+
+        for (i = 0; i < sizeof(scratchKey);   i++) scratchKey[i]   = (uint8_t)(i ^ 0x33u);
+        for (i = 0; i < sizeof(scratchNonce); i++) scratchNonce[i] = (uint8_t)(i ^ 0x77u);
+        for (i = 0; i < sizeof(scratchPt);    i++) scratchPt[i]    = (uint8_t)(i ^ 0xA5u);
+
+        SSFChaCha20Poly1305Encrypt(scratchPt, sizeof(scratchPt),
+                                   scratchNonce, sizeof(scratchNonce),
+                                   NULL, 0u,
+                                   scratchKey, sizeof(scratchKey),
+                                   scratchTag, sizeof(scratchTag),
+                                   scratchCt, sizeof(scratchCt));
+
+        memcpy(scratchBadTag, scratchTag, sizeof(scratchBadTag));
+        scratchBadTag[0] ^= 0x01u;
+        ok = SSFChaCha20Poly1305Decrypt(scratchCt, sizeof(scratchCt),
+                                        scratchNonce, sizeof(scratchNonce),
+                                        NULL, 0u,
+                                        scratchKey, sizeof(scratchKey),
+                                        scratchBadTag, sizeof(scratchBadTag),
+                                        recovered, sizeof(recovered));
+        SSF_ASSERT(ok == false);
+
+        /* Same buffers, correct tag — must succeed with the original plaintext. */
+        ok = SSFChaCha20Poly1305Decrypt(scratchCt, sizeof(scratchCt),
+                                        scratchNonce, sizeof(scratchNonce),
+                                        NULL, 0u,
+                                        scratchKey, sizeof(scratchKey),
+                                        scratchTag, sizeof(scratchTag),
+                                        recovered, sizeof(recovered));
+        SSF_ASSERT(ok == true);
+        SSF_ASSERT(memcmp(recovered, scratchPt, sizeof(scratchPt)) == 0);
+    }
+
+    /* AAD-pointer contract regression. NULL `auth` with `authLen > 0` must assert at the
+     * AEAD entry, both for encrypt and for decrypt. The test passes regardless of which
+     * SSF_REQUIRE catches it (the AEAD-level check or the deeper Poly1305Update), so it
+     * serves as documentation + regression protection if either layer is later refactored. */
+    {
+        static const uint8_t scratchKey[SSF_CCP_KEY_SIZE] = {0};
+        static const uint8_t scratchNonce[SSF_CCP_NONCE_SIZE] = {0};
+        static const uint8_t scratchTag[SSF_CCP_TAG_SIZE] = {0};
+        static const uint8_t scratchPt[16] = {0};
+        uint8_t scratchCt[16];
+        uint8_t scratchOutTag[SSF_CCP_TAG_SIZE];
+        uint8_t scratchOutPt[16];
+
+        SSF_ASSERT_TEST(SSFChaCha20Poly1305Encrypt(scratchPt, sizeof(scratchPt),
+                                                   scratchNonce, sizeof(scratchNonce),
+                                                   NULL, 5u,
+                                                   scratchKey, sizeof(scratchKey),
+                                                   scratchOutTag, sizeof(scratchOutTag),
+                                                   scratchCt, sizeof(scratchCt)));
+        SSF_ASSERT_TEST(SSFChaCha20Poly1305Decrypt(scratchCt, sizeof(scratchCt),
+                                                   scratchNonce, sizeof(scratchNonce),
+                                                   NULL, 5u,
+                                                   scratchKey, sizeof(scratchKey),
+                                                   scratchTag, sizeof(scratchTag),
+                                                   scratchOutPt, sizeof(scratchOutPt)));
+    }
+
 #if SSF_CCP_OSSL_VERIFY == 1
     _VerifyCCPAgainstOpenSSLRandom();
 #endif

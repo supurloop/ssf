@@ -133,6 +133,7 @@ void SSFChaCha20Poly1305Encrypt(const uint8_t *pt, size_t ptLen, const uint8_t *
     SSF_REQUIRE(tagSize >= SSF_CCP_TAG_SIZE);
     SSF_REQUIRE(ptLen <= ctSize);
     SSF_REQUIRE(ptLen < (512u * 1024u * 1024u));
+    SSF_REQUIRE((auth != NULL) || (authLen == 0u));
 
     /* Generate Poly1305 one-time key using counter=0 */
     memset(zeros, 0, sizeof(zeros));
@@ -173,6 +174,7 @@ bool SSFChaCha20Poly1305Decrypt(const uint8_t *ct, size_t ctLen, const uint8_t *
     SSF_REQUIRE(tagLen == SSF_CCP_TAG_SIZE);
     SSF_REQUIRE(ctLen <= ptSize);
     SSF_REQUIRE(ctLen < (512u * 1024u * 1024u));
+    SSF_REQUIRE((auth != NULL) || (authLen == 0u));
 
     /* Generate Poly1305 one-time key using counter=0 */
     memset(zeros, 0, sizeof(zeros));
@@ -185,7 +187,14 @@ bool SSFChaCha20Poly1305Decrypt(const uint8_t *ct, size_t ctLen, const uint8_t *
     SSFCryptSecureZero(otk, sizeof(otk));
 
     /* Verify tag in constant time to avoid leaking the position of the first differing byte. */
-    if (SSFCryptCTMemEq(computedTag, tag, SSF_CCP_TAG_SIZE) == false) return false;
+    if (SSFCryptCTMemEq(computedTag, tag, SSF_CCP_TAG_SIZE) == false)
+    {
+        /* Scrub computedTag before stack reuse: on the failure path it holds the correct */
+        /* expected tag for (key, AAD, ct), the value an attacker submitting forged tags  */
+        /* is trying to recover.                                                          */
+        SSFCryptSecureZero(computedTag, sizeof(computedTag));
+        return false;
+    }
 
     /* Tag verified: decrypt */
     if (ctLen > 0)
@@ -195,6 +204,10 @@ bool SSFChaCha20Poly1305Decrypt(const uint8_t *ct, size_t ctLen, const uint8_t *
         SSFChaCha20Encrypt(ct, ctLen, key, keyLen, iv, ivLen, 1, pt, ptSize);
     }
 
+    /* Scrub computedTag for symmetry with the failure path. On success it equals the     */
+    /* caller's supplied tag (already public), but consistent scrubbing is cheaper than   */
+    /* path-dependent reasoning.                                                          */
+    SSFCryptSecureZero(computedTag, sizeof(computedTag));
     return true;
 }
 

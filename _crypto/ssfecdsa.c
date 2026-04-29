@@ -344,16 +344,16 @@ static bool _SSFECDSASigEncode(const SSFBN_t *r, const SSFBN_t *s, const SSFECCu
     return true;
 }
 
-#endif /* SSF_ECDSA_CONFIG_ENABLE_SIGN — end of DER-encode helpers */
+#endif /* SSF_ECDSA_CONFIG_ENABLE_SIGN -- end of DER-encode helpers */
 
 /* --------------------------------------------------------------------------------------------- */
 /* Internal: DER-decode an ECDSA signature from SEQUENCE { INTEGER, INTEGER } to (r, s).         */
 /* --------------------------------------------------------------------------------------------- */
 /* Strict DER parse for an ECDSA signature SEQUENCE { INTEGER r, INTEGER s }. Validates the   */
-/* structure and emits the (r, s) byte offsets+lengths. Pure byte-level — no ssfasn1 calls,   */
+/* structure and emits the (r, s) byte offsets+lengths. Pure byte-level -- no ssfasn1 calls,  */
 /* so a verify-only build can drop the entire ssfasn1 module. The strict ruleset rejects the  */
 /* BER-tolerant forms a generic decoder would accept, which create signature malleability     */
-/* (CVE-2020-14966, CVE-2020-13822, CVE-2019-14859, CVE-2016-1000342 class) — these are the   */
+/* (CVE-2020-14966, CVE-2020-13822, CVE-2019-14859, CVE-2016-1000342 class) -- these are the  */
 /* same Wycheproof / RFC 5480 strictness rules.                                                */
 /*                                                                                             */
 /* Validates:                                                                                  */
@@ -368,7 +368,7 @@ static bool _SSFECDSASigEncode(const SSFBN_t *r, const SSFBN_t *s, const SSFECCu
 /*  - No trailing data after the second INTEGER                                                */
 /*                                                                                             */
 /* On success: rOff/rLen and sOff/sLen point at the INTEGER content bytes inside `sig` (no    */
-/* leading 0x00 stripping yet — the caller does that to get a canonical magnitude).            */
+/* leading 0x00 stripping yet -- the caller does that to get a canonical magnitude).           */
 static bool _SSFECDSASigParseStrictDER(const uint8_t *sig, size_t sigLen, uint16_t coordBytes,
                                        size_t *rOff, size_t *rLen,
                                        size_t *sOff, size_t *sLen)

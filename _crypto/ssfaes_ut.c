@@ -451,7 +451,7 @@ SSFAESUT_t _SSFAES256BlockDecryptMonteUT[] =
 /* --------------------------------------------------------------------------------------------- */
 
 /* Encrypt or decrypt one 16-byte AES-ECB block via OpenSSL EVP. Padding is disabled so the call */
-/* is a pure block primitive — exactly comparable to SSFAESBlockEncrypt/Decrypt.                 */
+/* is a pure block primitive -- exactly comparable to SSFAESBlockEncrypt/Decrypt.                */
 static void _AESECBViaOpenSSL(uint8_t out[16], const uint8_t in[16],
                               const uint8_t *key, size_t keyLen, bool encrypt)
 {

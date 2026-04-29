@@ -1,5 +1,5 @@
 /* --------------------------------------------------------------------------------------------- */
-/* Small System Framework — ssfbn configuration                                                   */
+/* Small System Framework -- ssfbn configuration                                                 */
 /* --------------------------------------------------------------------------------------------- */
 #ifndef SSF_BN_OPT_H_INCLUDE
 #define SSF_BN_OPT_H_INCLUDE
@@ -11,7 +11,7 @@ extern "C" {
 /* ssfbn maximum bignum width in bits.                                                          */
 /*                                                                                              */
 /* By default this is auto-derived in ssfbn.h from the enabled algorithm flags                  */
-/* (SSF_EC_CONFIG_ENABLE_P256/P384, SSF_RSA_CONFIG_ENABLE_2048/3072/4096) — pick the largest    */
+/* (SSF_EC_CONFIG_ENABLE_P256/P384, SSF_RSA_CONFIG_ENABLE_2048/3072/4096) -- pick the largest   */
 /* enabled operand width × 2, since RSA keygen, CRT recombine, ModInvExt over λ(n), and ECC's   */
 /* SSFBNModMulNIST all run intermediate products at up to 2·N bits (full-width n × n).          */
 /*                                                                                              */
@@ -36,8 +36,8 @@ extern "C" {
 /*   #define SSF_BN_CONFIG_MAX_BITS               (1024u)                                       */
 /*   #define SSF_BN_MAX_MOD_LIMBS                 (32u)                                          */
 
-/* SSFBNMul Karatsuba dispatch threshold (limbs). Operands at or above this — same length, even */
-/* length — go through one-level Karatsuba; below it, schoolbook. Both code paths always link;  */
+/* SSFBNMul Karatsuba dispatch threshold (limbs). Operands at or above this -- same length, even */
+/* length -- go through one-level Karatsuba; below it, schoolbook. Both code paths always link; */
 /* the threshold only steers the runtime dispatch. Default is 32 (RSA-1024 boundary); the       */
 /* MAX_PERF profile lowers this to 16 so RSA-2048 multiplies enter Karatsuba sooner.            */
 #ifndef SSF_BN_KARATSUBA_THRESHOLD

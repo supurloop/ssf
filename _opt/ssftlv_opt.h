@@ -1,5 +1,5 @@
 /* --------------------------------------------------------------------------------------------- */
-/* Small System Framework — ssftlv configuration                                                  */
+/* Small System Framework -- ssftlv configuration                                                */
 /* --------------------------------------------------------------------------------------------- */
 #ifndef SSF_TLV_OPT_H_INCLUDE
 #define SSF_TLV_OPT_H_INCLUDE

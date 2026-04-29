@@ -1,5 +1,5 @@
 /* --------------------------------------------------------------------------------------------- */
-/* Small System Framework — ssfini configuration                                                  */
+/* Small System Framework -- ssfini configuration                                                */
 /* --------------------------------------------------------------------------------------------- */
 #ifndef SSF_INI_OPT_H_INCLUDE
 #define SSF_INI_OPT_H_INCLUDE

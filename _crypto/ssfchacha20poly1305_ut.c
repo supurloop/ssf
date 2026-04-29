@@ -418,7 +418,7 @@ void SSFChaCha20Poly1305UnitTest(void)
         SSF_ASSERT(memcmp(a5Pt2, a5Pt, sizeof(a5Pt)) == 0);
     }
 
-    /* Wycheproof v1 chacha20_poly1305_test.json — selected representative vectors. The 300-
+    /* Wycheproof v1 chacha20_poly1305_test.json -- selected representative vectors. The 300-
      * vector set is too large to embed wholesale (and the OpenSSL fuzz on host already covers
      * the bulk of the valid-input combinatorics); these four vectors specifically pin down
      * patterns the fuzz won't generate by chance. */
@@ -464,7 +464,7 @@ void SSFChaCha20Poly1305UnitTest(void)
     }
 
     /* Wycheproof tcId 4 (valid): 1-byte msg, ZERO-length AAD. Auth-only path with empty AAD
-     * pad16 — should produce an entirely-empty padded-AAD region in the Poly1305 tag input. */
+     * pad16 -- should produce an entirely-empty padded-AAD region in the Poly1305 tag input. */
     {
         static const uint8_t wpKey[] = {
             0xCCu, 0x56u, 0xB6u, 0x80u, 0x55u, 0x2Eu, 0xB7u, 0x50u,
@@ -494,7 +494,7 @@ void SSFChaCha20Poly1305UnitTest(void)
 
     /* Wycheproof tcId 72 (valid): 64-byte msg (one full block), zero-length AAD, distinct
      * key/nonce. Multi-block-boundary case beyond what RFC §2.8.2 (114B) and §A.5 (265B)
-     * exercise — specifically tests the exactly-one-full-block boundary. */
+     * exercise -- specifically tests the exactly-one-full-block boundary. */
     {
         static const uint8_t wpKey[] = {
             0x5Bu, 0x1Du, 0x10u, 0x35u, 0xC0u, 0xB1u, 0x7Eu, 0xE0u,
@@ -541,7 +541,7 @@ void SSFChaCha20Poly1305UnitTest(void)
     }
 
     /* Wycheproof tcId 146 (invalid): empty msg, 3-byte AAD, single-bit flip in tag. Auth-only
-     * mode with a tampered tag — Decrypt MUST return false. The original valid tag would have
+     * mode with a tampered tag -- Decrypt MUST return false. The original valid tag would have
      * been f4..., the supplied tampered tag is f5... (low bit of byte 0 flipped). */
     {
         static const uint8_t wpKey[] = {
@@ -560,7 +560,7 @@ void SSFChaCha20Poly1305UnitTest(void)
             0x14u, 0xACu, 0x51u, 0x40u, 0x54u, 0x32u, 0x3Fu, 0x44u
         };
 
-        /* Empty ct — pass NULL with ctLen = 0. Tampered tag must reject. */
+        /* Empty ct -- pass NULL with ctLen = 0. Tampered tag must reject. */
         SSF_ASSERT(SSFChaCha20Poly1305Decrypt(NULL, 0u,
                                               wpIv, sizeof(wpIv),
                                               wpAad, sizeof(wpAad),
@@ -673,7 +673,7 @@ void SSFChaCha20Poly1305UnitTest(void)
                                         recovered, sizeof(recovered));
         SSF_ASSERT(ok == false);
 
-        /* Same buffers, correct tag — must succeed with the original plaintext. */
+        /* Same buffers, correct tag -- must succeed with the original plaintext. */
         ok = SSFChaCha20Poly1305Decrypt(scratchCt, sizeof(scratchCt),
                                         scratchNonce, sizeof(scratchNonce),
                                         NULL, 0u,
@@ -925,7 +925,7 @@ void SSFChaCha20Poly1305UnitTest(void)
                                                    scratchTag, sizeof(scratchTag),
                                                    scratchPt, sizeof(scratchPt)));
 
-        /* Permitted edge: ctLen == 0 with NULL ct and pt — auth-only mode with NULL buffers
+        /* Permitted edge: ctLen == 0 with NULL ct and pt -- auth-only mode with NULL buffers
          * and a zero-AAD construction. The all-zero tag matches the all-zero-key auth-only
          * computation only by accident, so we don't assert on the return value. The point
          * is that the call must not assert. */

@@ -1,5 +1,5 @@
 /* --------------------------------------------------------------------------------------------- */
-/* Small System Framework — ssfsm state machine configuration                                     */
+/* Small System Framework -- ssfsm state machine configuration                                   */
 /* --------------------------------------------------------------------------------------------- */
 #ifndef SSF_SM_OPT_H_INCLUDE
 #define SSF_SM_OPT_H_INCLUDE

@@ -312,7 +312,7 @@ bool SSFBNToBytes(const SSFBN_t *a, uint8_t *out, size_t outSize)
         /* Does this limb's byte range reach into out[]? */
         if (limbOffset >= outSize)
         {
-            /* No, further limbs are entirely past the buffer — stop. */
+            /* No, further limbs are entirely past the buffer -- stop. */
             break;
         }
 
@@ -321,7 +321,7 @@ bool SSFBNToBytes(const SSFBN_t *a, uint8_t *out, size_t outSize)
             /* Does byte b of this limb fall inside the output buffer? */
             if ((limbOffset + b) >= outSize)
             {
-                /* No, the remaining high bytes of this limb don't fit — stop this limb. */
+                /* No, the remaining high bytes of this limb don't fit -- stop this limb. */
                 break;
             }
             /* Yes, write the byte into its big-endian slot. */
@@ -353,7 +353,7 @@ bool SSFBNFromBytesLE(SSFBN_t *a, const uint8_t *data, size_t dataLen, uint16_t 
     /* Does the input fit in numLimbs worth of bytes? */
     if (dataLen > maxBytes)
     {
-        /* No, the high bytes would be truncated — reject. */
+        /* No, the high bytes would be truncated -- reject. */
         return false;
     }
 
@@ -404,7 +404,7 @@ bool SSFBNToBytesLE(const SSFBN_t *a, uint8_t *out, size_t outSize)
     }
     else
     {
-        /* No, the value is zero — represent as a single 0x00 byte. */
+        /* No, the value is zero -- represent as a single 0x00 byte. */
         actualBytes = 1u;
     }
 
@@ -982,7 +982,7 @@ void SSFBNMul(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b)
         (a->len >= SSF_BN_KARATSUBA_THRESHOLD) &&
         ((a->len & 1u) == 0u))
     {
-        /* Yes, dispatch to Karatsuba — ~0.75·n² single-limb multiplies vs n² schoolbook. */
+        /* Yes, dispatch to Karatsuba -- ~0.75·n² single-limb multiplies vs n² schoolbook. */
         _SSFBNKaratsubaMul(r->limbs, a->limbs, b->limbs, a->len);
         r->len = rLen;
         return;
@@ -997,7 +997,7 @@ void SSFBNMul(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b)
         SSFBNDLimb_t carry = 0;
         uint16_t j;
 
-        /* No zero-limb skip — see _SSFBNSchoolbookMulRaw for rationale. */
+        /* No zero-limb skip -- see _SSFBNSchoolbookMulRaw for rationale. */
         for (j = 0; j < b->len; j++)
         {
             SSFBNDLimb_t prod = (SSFBNDLimb_t)a->limbs[i] * (SSFBNDLimb_t)b->limbs[j] +
@@ -1081,7 +1081,7 @@ void SSFBNSquare(SSFBN_t *r, const SSFBN_t *a)
         uint16_t j;
         SSFBNLimb_t ai = a->limbs[i];
 
-        /* No zero-limb skip — see _SSFBNSchoolbookMulRaw for rationale. */
+        /* No zero-limb skip -- see _SSFBNSchoolbookMulRaw for rationale. */
         for (j = (uint16_t)(i + 1u); j < n; j++)
         {
             SSFBNDLimb_t prod = (SSFBNDLimb_t)ai * (SSFBNDLimb_t)a->limbs[j] +
@@ -1829,7 +1829,7 @@ static void _SSFBNReduceP384(SSFBN_t *r, const SSFBN_t *t)
     s.limbs[3] = c[23]; s.limbs[4] = c[23];
     borrow += _SSFBNRawSub(r->limbs, r->limbs, s.limbs, 12);
 
-    /* CT correction loops — same as _SSFBNReduceP256; bounds doubled for sparse-coord inputs. */
+    /* CT correction loops -- same as _SSFBNReduceP256; bounds doubled for sparse-coord inputs. */
     tmp.len = 12;
     {
         SSFBNLimb_t mask, lim, addCarry, subBorrow;
@@ -2123,7 +2123,7 @@ void SSFBNMontSquare(SSFBN_t *r, const SSFBN_t *a, const SSFBNMont_t *ctx)
         uint16_t j;
         SSFBNLimb_t ai = a->limbs[i];
 
-        /* No zero-limb skip — see _SSFBNSchoolbookMulRaw for rationale. */
+        /* No zero-limb skip -- see _SSFBNSchoolbookMulRaw for rationale. */
         for (j = (uint16_t)(i + 1u); j < n; j++)
         {
             SSFBNDLimb_t prod = (SSFBNDLimb_t)ai * (SSFBNDLimb_t)a->limbs[j] +
@@ -2293,7 +2293,7 @@ void SSFBNModExp(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBN_t *
 /* --------------------------------------------------------------------------------------------- */
 void SSFBNModExpMont(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBNMont_t *ctx)
 {
-    /* Residues only — never the 2N raw-mul intermediate. See ssfbn.md "MAX_MOD_LIMBS". */
+    /* Residues only -- never the 2N raw-mul intermediate. See ssfbn.md "MAX_MOD_LIMBS". */
     SSFBN_DEFINE(aM,     SSF_BN_MAX_MOD_LIMBS);
     SSFBN_DEFINE(result, SSF_BN_MAX_MOD_LIMBS);
     SSFBN_DEFINE(picked, SSF_BN_MAX_MOD_LIMBS);

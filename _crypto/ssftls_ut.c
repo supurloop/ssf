@@ -167,10 +167,10 @@ void SSFTLSUnitTest(void)
     /*   derived       = Derive-Secret(early_secret, "derived", empty_hash)                         */
     /*   c_hs_traffic  = Derive-Secret(handshake_secret, "c hs traffic", thash_through_ServerHello) */
     /*   s_hs_traffic  = Derive-Secret(handshake_secret, "s hs traffic", thash_through_ServerHello) */
-    /*   (key, iv)     = DeriveTrafficKeys(c_hs_traffic) — HKDF-Expand-Label "key" + "iv"           */
+    /*   (key, iv)     = DeriveTrafficKeys(c_hs_traffic) -- HKDF-Expand-Label "key" + "iv"          */
     /* Exercises HkdfExpandLabel, DeriveSecret, and DeriveTrafficKeys against published RFC values  */
     /* for the strongest cross-build correctness coverage. The Finished step is not pinned here     */
-    /* because the trace doesn't make its transcript-hash input explicit — it remains exercised     */
+    /* because the trace doesn't make its transcript-hash input explicit -- it remains exercised    */
     /* via the existing deterministic regression test below.                                        */
     {
         static const uint8_t earlySecret[] = {
@@ -247,7 +247,7 @@ void SSFTLSUnitTest(void)
                            sHsTraffic, sizeof(sHsTraffic));
         SSF_ASSERT(memcmp(sHsTraffic, expectedSHsTraffic, sizeof(expectedSHsTraffic)) == 0);
 
-        /* (key, iv) = DeriveTrafficKeys(c_hs_traffic) — HKDF-Expand-Label("key", 16) and ("iv", 12) */
+        /* (key, iv) = DeriveTrafficKeys(c_hs_traffic) -- HKDF-Expand-Label("key", 16) and ("iv", 12) */
         SSFTLSDeriveTrafficKeys(SSF_HMAC_HASH_SHA256, cHsTraffic, sizeof(cHsTraffic),
                                 clientKey, sizeof(clientKey),
                                 clientIv, sizeof(clientIv));
@@ -471,7 +471,7 @@ void SSFTLSUnitTest(void)
     }
 
     /* RFC 8446 §5.5: implementations MUST close the connection when the sequence number
-     * wraps. SSF refuses encrypt / decrypt when state->seqNum is already at UINT64_MAX —
+     * wraps. SSF refuses encrypt / decrypt when state->seqNum is already at UINT64_MAX --
      * the next increment would wrap to 0 and reuse the nonce of record 0, breaking the
      * AEAD contract catastrophically. Set state.seqNum to the boundary and confirm both
      * directions return false. */
@@ -535,7 +535,7 @@ void SSFTLSUnitTest(void)
         SSF_ASSERT_TEST(SSFTLSHkdfExpandLabel(SSF_HMAC_HASH_SHA256,
                                               scratchSecret, sizeof(scratchSecret), "key",
                                               NULL, 0u, scratchOut, 256u));
-        /* ctxLen > SSF_TLS_MAX_HASH_SIZE — addresses #1 buffer overflow */
+        /* ctxLen > SSF_TLS_MAX_HASH_SIZE -- addresses #1 buffer overflow */
         SSF_ASSERT_TEST(SSFTLSHkdfExpandLabel(SSF_HMAC_HASH_SHA256,
                                               scratchSecret, sizeof(scratchSecret), "key",
                                               scratchCtx, 49u,
@@ -601,7 +601,7 @@ void SSFTLSUnitTest(void)
                                               scratchKey, sizeof(scratchKey),
                                               scratchHash, sizeof(scratchHash),
                                               NULL, 32u));
-        /* verifyDataLen > SSF_TLS_MAX_HASH_SIZE — addresses #2 buffer overflow */
+        /* verifyDataLen > SSF_TLS_MAX_HASH_SIZE -- addresses #2 buffer overflow */
         SSF_ASSERT_TEST(SSFTLSComputeFinished(SSF_HMAC_HASH_SHA256,
                                               scratchKey, sizeof(scratchKey),
                                               scratchHash, sizeof(scratchHash),
@@ -635,7 +635,7 @@ void SSFTLSUnitTest(void)
         SSF_ASSERT_TEST(SSFTLSTranscriptHash(NULL, scratchHash, sizeof(scratchHash)));
         /* Hash: out NULL */
         SSF_ASSERT_TEST(SSFTLSTranscriptHash(&t, NULL, sizeof(scratchHash)));
-        /* Hash: outSize < hashLen — SHA-256 needs 32 */
+        /* Hash: outSize < hashLen -- SHA-256 needs 32 */
         SSF_ASSERT_TEST(SSFTLSTranscriptHash(&t, scratchHash, 31u));
     }
 

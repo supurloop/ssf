@@ -80,7 +80,7 @@ void SSFCryptUnitTest(void)
         SSF_ASSERT(SSFCryptCTMemEq(a, a, 6u) == true);
     }
 
-    /* Mismatch at first, middle, and last positions. Each must return false —
+    /* Mismatch at first, middle, and last positions. Each must return false --
        proves the whole-buffer scan behavior by induction. */
     {
         const uint8_t base[6]    = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};

@@ -2,7 +2,7 @@
 /* Small System Framework                                                                        */
 /*                                                                                               */
 /* ssfoptions.h                                                                                  */
-/* Aggregator façade — pulls in every per-module configuration header from _opt/.                */
+/* Aggregator façade -- pulls in every per-module configuration header from _opt/.               */
 /* Existing code that #includes only "ssfoptions.h" continues to work unchanged.                  */
 /*                                                                                               */
 /* BSD-3-Clause License                                                                          */

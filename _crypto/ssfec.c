@@ -439,7 +439,7 @@ static void _SSFECPointAddMixed(SSFECPoint_t *r, const SSFECPoint_t *p, const SS
     SSFBNModMulNIST(&t1, &P.y, &t6, &c->p);            /* t1 = Y1 * H³ (reuse t1)       */
     SSFBNModSub(&r->y, &t5, &t1, &c->p);
 
-    /* CT cascade — same priority order as the full add. */
+    /* CT cascade -- same priority order as the full add. */
     hzAndRz    = hz & rz;
     hzAndNotRz = hz & ((SSFBNLimb_t)1u ^ rz);
 
@@ -517,7 +517,7 @@ static void _SSFECPointAddMixedNoDouble(SSFECPoint_t *r, const SSFECPoint_t *p,
     SSFBNSetOne(&zeroPt.y, c->limbs);
     SSFBNSetZero(&zeroPt.z, c->limbs);
 
-    /* General mixed-coordinate add (assume Z2 = 1) — same formulas as _SSFECPointAddMixed. */
+    /* General mixed-coordinate add (assume Z2 = 1) -- same formulas as _SSFECPointAddMixed. */
     SSFBNModMulNIST(&t1, &P.z, &P.z, &c->p);
     SSFBNModMulNIST(&t3, &P.z, &t1, &c->p);
     SSFBNModMulNIST(&t2, &Q.x, &t1, &c->p);
@@ -655,7 +655,7 @@ bool SSFECPointToAffine(SSFBN_t *x, SSFBN_t *y, const SSFECPoint_t *pt, SSFECCur
     SSF_REQUIRE(x->cap >= c->limbs);
     SSF_REQUIRE(y->cap >= c->limbs);
 
-    /* Reject identity (Z=0) — undefined affine coordinate. */
+    /* Reject identity (Z=0) -- undefined affine coordinate. */
     if (SSFBNIsZero(&pt->z)) return false;
 
     /* zInv = Z^(-1) mod p */
@@ -977,7 +977,7 @@ void SSFECScalarMul(SSFECPoint_t *r, const SSFBN_t *k, const SSFECPoint_t *p, SS
             SSFBNCondCopy(&picked.z, &table[i].z, sel);
         }
 
-        /* R = R + table[w] (full Jacobian add — table entries have arbitrary Z). */
+        /* R = R + table[w] (full Jacobian add -- table entries have arbitrary Z). */
         _SSFECPointAddFull(r, r, &picked, c);
     }
 
@@ -1222,7 +1222,7 @@ static void _SSFECScalarMulComb(SSFECPoint_t *r, const SSFBN_t *k,
         { (SSFBNLimb_t *)_ssfECP256CombStorage[(idx)][1], 8u, 8u },               \
     }
 
-/* Descriptor table — const, lives in .rodata next to the storage. The const-cast on .limbs is */
+/* Descriptor table -- const, lives in .rodata next to the storage. The const-cast on .limbs is */
 /* safe because every consumer of these descriptors only READS through them.                    */
 static const _SSFECCombAffine_t _ssfECP256CombTable[_SSF_EC_COMB_NTABLE] = {
     _SSF_EC_LIST_NTABLE(_SSF_EC_P256_COMB_ENTRY)

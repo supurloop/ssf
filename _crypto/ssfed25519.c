@@ -256,7 +256,7 @@ static void _fe_to_bytes(uint8_t *b, const _fe_t *a)
 
 /* Constant-time conditional swap: if the low bit of swap is set, exchange a and b.              */
 /* Mask construction (-(swap & 1u) cast to uint32_t) yields all-ones when bit 0 is set, all-zero */
-/* otherwise — no branch on the secret bit.                                                      */
+/* otherwise -- no branch on the secret bit.                                                     */
 static void _fe_cswap(_fe_t *a, _fe_t *b, uint32_t swap)
 {
     uint32_t mask = (uint32_t)(0u - (swap & 1u));
@@ -438,7 +438,7 @@ static const _fe_t _fe_sqrtm1 = {{ 0x4A0EA0B0u, 0xC4EE1B27u, 0xAD2FE478u, 0x2F43
 /* positive (even) root for x, then encoded as 8 limbs little-endian. Hardcoded here to skip the */
 /* per-call _ge_decode the previous design did at every Sign / Verify / PubKeyFromSeed entry.    */
 /* Correctness of these constants is enforced end-to-end by the RFC 8032 §7.1 test vectors and   */
-/* the OpenSSL cross-check below — any wrong byte makes every signature deviate.                  */
+/* the OpenSSL cross-check below -- any wrong byte makes every signature deviate.                 */
 static const _ge_t _ed_basepoint = {
     /* X */ {{ 0x8F25D51Au, 0xC9562D60u, 0x9525A7B2u, 0x692CC760u,
                0xFDD6DC5Cu, 0xC0A4E231u, 0xCD6E53FEu, 0x216936D3u }},
@@ -685,7 +685,7 @@ static void _ge_scalarmult_ct(_ge_t *r, const uint8_t scalar[32], const _ge_t *p
     *r = Q;
 }
 
-/* Base point scalar multiplication: r = [scalar]B. Sign-path entry point — scalar here is the   */
+/* Base point scalar multiplication: r = [scalar]B. Sign-path entry point -- scalar here is the  */
 /* RFC 8032 deterministic nonce, which is derived from the long-term seed and must not leak      */
 /* via timing. Routes through the constant-time variant.                                         */
 static void _ge_scalarmult_base(_ge_t *r, const uint8_t scalar[32])

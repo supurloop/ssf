@@ -1,5 +1,5 @@
 /* --------------------------------------------------------------------------------------------- */
-/* Small System Framework — ssfubjson configuration                                               */
+/* Small System Framework -- ssfubjson configuration                                             */
 /* --------------------------------------------------------------------------------------------- */
 #ifndef SSF_UBJSON_OPT_H_INCLUDE
 #define SSF_UBJSON_OPT_H_INCLUDE

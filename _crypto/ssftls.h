@@ -69,7 +69,7 @@ typedef enum
 typedef void (*SSFTLSTraceFn_t)(SSFTLSTraceLevel_t level, SSFTLSTraceCategory_t category,
                                 const char *msg, void *userCtx);
 
-/* Trace context — stored in each session, passed to internal functions. */
+/* Trace context -- stored in each session, passed to internal functions. */
 typedef struct SSFTLSTraceCtx
 {
     SSFTLSTraceFn_t fn;
@@ -84,7 +84,7 @@ typedef struct SSFTLSTraceCtx
         (tctx)->fn(level, cat, _tlsTraceBuf, (tctx)->userCtx); \
     } } while (0)
 
-/* Convenience macros — use T as the SSFTLSTraceCtx_t pointer */
+/* Convenience macros -- use T as the SSFTLSTraceCtx_t pointer */
 #define SSF_TLS_TRACE_HS_INFO(T, ...)    _SSF_TLS_TRACE(T, SSF_TLS_TRACE_INFO, SSF_TLS_TRACE_HANDSHAKE, __VA_ARGS__)
 #define SSF_TLS_TRACE_HS_ERROR(T, ...)   _SSF_TLS_TRACE(T, SSF_TLS_TRACE_ERROR, SSF_TLS_TRACE_HANDSHAKE, __VA_ARGS__)
 #define SSF_TLS_TRACE_HS_DEBUG(T, ...)   _SSF_TLS_TRACE(T, SSF_TLS_TRACE_DEBUG, SSF_TLS_TRACE_HANDSHAKE, __VA_ARGS__)
@@ -98,8 +98,8 @@ typedef struct SSFTLSTraceCtx
 #define SSF_TLS_TRACE_CERT_DEBUG(T, ...) _SSF_TLS_TRACE(T, SSF_TLS_TRACE_DEBUG, SSF_TLS_TRACE_CERT, __VA_ARGS__)
 #define SSF_TLS_TRACE_ALERT(T, ...)      _SSF_TLS_TRACE(T, SSF_TLS_TRACE_WARN, SSF_TLS_TRACE_ALERT, __VA_ARGS__)
 
-/* Legacy compatibility macro — uses session->trace as the context */
-#define SSF_TLS_TRACE(...)  /* removed — use category-specific macros instead */
+/* Legacy compatibility macro -- uses session->trace as the context */
+#define SSF_TLS_TRACE(...)  /* removed -- use category-specific macros instead */
 
 /* --------------------------------------------------------------------------------------------- */
 /* Defines                                                                                       */

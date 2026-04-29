@@ -41,7 +41,7 @@
 
 /* --------------------------------------------------------------------------------------------- */
 /* Streams the Poly1305 AEAD construction `auth || pad16 || ct || pad16 || le64(authLen) ||      */
-/* le64(ctLen)` directly into an incremental Poly1305 context — no intermediate buffer.          */
+/* le64(ctLen)` directly into an incremental Poly1305 context -- no intermediate buffer.         */
 /* Peak stack for this function is ~sizeof(SSFPoly1305Context_t) + ~32 B of locals, independent  */
 /* of authLen and ctLen.                                                                          */
 /* --------------------------------------------------------------------------------------------- */

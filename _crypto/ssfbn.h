@@ -53,7 +53,7 @@ extern "C" {
 /*   RSA-3072                   → 2 × 3072 = 6144                                                 */
 /*   RSA-4096                   → 2 × 4096 = 8192                                                 */
 /*                                                                                               */
-/* If no consumer is enabled the cap defaults to 256 — ssfbn still compiles but its working      */
+/* If no consumer is enabled the cap defaults to 256 -- ssfbn still compiles but its working     */
 /* state is irrelevant. Users can override via SSF_BN_CONFIG_MAX_BITS in ssfbn_opt.h to size the */
 /* cap up for an out-of-tree consumer.                                                            */
 /* --------------------------------------------------------------------------------------------- */

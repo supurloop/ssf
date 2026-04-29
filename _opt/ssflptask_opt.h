@@ -1,5 +1,5 @@
 /* --------------------------------------------------------------------------------------------- */
-/* Small System Framework — ssflptask configuration                                               */
+/* Small System Framework -- ssflptask configuration                                             */
 /* --------------------------------------------------------------------------------------------- */
 #ifndef SSF_LPTASK_OPT_H_INCLUDE
 #define SSF_LPTASK_OPT_H_INCLUDE
@@ -71,7 +71,7 @@ extern "C" {
 }
 #endif /* _WIN32 */
 
-/* Main loop wake mechanism — signalled by LP task completion, interrupts, etc. */
+/* Main loop wake mechanism -- signalled by LP task completion, interrupts, etc. */
 /* Uses self-pipe so it integrates with select()-based main loops. */
 #ifdef _WIN32
 #define SSF_MAIN_THREAD_WAKE_DECLARATION HANDLE _ssfMainWakeEvent; bool _ssfMainWakeInited

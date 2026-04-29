@@ -445,7 +445,7 @@ void SSFHKDFUnitTest(void)
         uint8_t prk[20];
         uint8_t okm[42];
 
-        /* Salt absent for SHA-1 — exercises the salt==NULL substitution branch that TC4 does */
+        /* Salt absent for SHA-1 -- exercises the salt==NULL substitution branch that TC4 does */
         /* not reach (TC3 covers it for SHA-256 only).                                         */
         SSF_ASSERT(SSFHKDFExtract(SSF_HMAC_HASH_SHA1, NULL, 0, ikm, sizeof(ikm),
                    prk, sizeof(prk)) == true);

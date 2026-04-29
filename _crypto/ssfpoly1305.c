@@ -42,7 +42,7 @@
 /* We use 5 limbs of 26 bits each (Donna variant). All intermediate products fit uint64_t.       */
 /* --------------------------------------------------------------------------------------------- */
 
-#define SSF_POLY1305_CONTEXT_MAGIC (0x504F4C59ul) /* 'POLY' — set by Begin, cleared by End. */
+#define SSF_POLY1305_CONTEXT_MAGIC (0x504F4C59ul) /* 'POLY' -- set by Begin, cleared by End. */
 
 /* --------------------------------------------------------------------------------------------- */
 /* Internal: h = h * r mod (2^130 - 5), using 5 × 26-bit limbs and precomputed r[1..4] * 5.      */
@@ -257,7 +257,7 @@ void SSFPoly1305End(SSFPoly1305Context_t *ctx,
     tag[12] = (uint8_t)f;       tag[13] = (uint8_t)(f >> 8);
     tag[14] = (uint8_t)(f >> 16); tag[15] = (uint8_t)(f >> 24);
 
-    /* Zeroise key-derived state. Poly1305 is a one-time MAC — the context must not be reused. */
+    /* Zeroise key-derived state. Poly1305 is a one-time MAC -- the context must not be reused. */
     SSFCryptSecureZero(ctx, sizeof(*ctx));
 }
 
@@ -295,7 +295,7 @@ bool SSFPoly1305Verify(const uint8_t *msg, size_t msgLen,
     SSFPoly1305Mac(msg, msgLen, key, keyLen, computedTag, sizeof(computedTag));
     ok = SSFCryptCTMemEq(computedTag, expectedTag, SSF_POLY1305_TAG_SIZE);
 
-    /* On a verify failure, computedTag holds the valid tag for (msg, key) — exactly the */
+    /* On a verify failure, computedTag holds the valid tag for (msg, key) -- exactly the */
     /* secret an attacker is trying to forge. Scrub before stack residue can leak it.    */
     SSFCryptSecureZero(computedTag, sizeof(computedTag));
     return ok;

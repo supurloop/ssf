@@ -239,7 +239,7 @@ void SSFChaCha20UnitTest(void)
 
     /* RFC 8439 §A.1 ChaCha20 block-function vectors. Encrypt-of-zero exposes the raw 64-byte
      * keystream block. These KATs isolate the QR macro / round routing / state init from the
-     * encryption layer — a self-consistent-but-wrong implementation would still round-trip for
+     * encryption layer -- a self-consistent-but-wrong implementation would still round-trip for
      * arbitrary plaintexts but produce keystream values that diverge from the RFC. */
 
     /* RFC 8439 §A.1 TV1: key=0, counter=0, nonce=0. */
@@ -264,7 +264,7 @@ void SSFChaCha20UnitTest(void)
         SSF_ASSERT(memcmp(ct, expectedKs, sizeof(expectedKs)) == 0);
     }
 
-    /* RFC 8439 §A.1 TV2: key=0, counter=1, nonce=0 — same key/nonce as TV1 with a different
+    /* RFC 8439 §A.1 TV2: key=0, counter=1, nonce=0 -- same key/nonce as TV1 with a different
      * counter. Confirms counter is correctly mixed into state[12]. */
     {
         static const uint8_t zeroKey[32] = {0};
@@ -287,7 +287,7 @@ void SSFChaCha20UnitTest(void)
         SSF_ASSERT(memcmp(ct, expectedKs, sizeof(expectedKs)) == 0);
     }
 
-    /* RFC 8439 §A.1 TV3: key=00..01, counter=1, nonce=0 — confirms key bytes mix correctly. */
+    /* RFC 8439 §A.1 TV3: key=00..01, counter=1, nonce=0 -- confirms key bytes mix correctly. */
     {
         static const uint8_t key1[] = {
             0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u,
@@ -314,7 +314,7 @@ void SSFChaCha20UnitTest(void)
         SSF_ASSERT(memcmp(ct, expectedKs, sizeof(expectedKs)) == 0);
     }
 
-    /* RFC 8439 §A.1 TV4: key=00 FF 00.., counter=2, nonce=0 — non-zero high bit in second key
+    /* RFC 8439 §A.1 TV4: key=00 FF 00.., counter=2, nonce=0 -- non-zero high bit in second key
      * byte exercises the LE byte-loading at state[4]. */
     {
         static const uint8_t key00ff[] = {
@@ -342,7 +342,7 @@ void SSFChaCha20UnitTest(void)
         SSF_ASSERT(memcmp(ct, expectedKs, sizeof(expectedKs)) == 0);
     }
 
-    /* RFC 8439 §A.1 TV5: key=0, counter=0, nonce=00..02 — non-zero nonce confirms it is
+    /* RFC 8439 §A.1 TV5: key=0, counter=0, nonce=00..02 -- non-zero nonce confirms it is
      * correctly placed in state[13..15]. */
     {
         static const uint8_t zeroKey[32] = {0};
@@ -371,7 +371,7 @@ void SSFChaCha20UnitTest(void)
     /* RFC 8439 §A.2 TV2: 375-byte IETF-text encryption with key=00..01, counter=1, nonce=00..02.
      * Multi-block (5 full + 1 partial = 6 blocks); confirms counter advances correctly across
      * blocks and partial-final-block keystream truncation works. (§A.2 TV1 is redundant with
-     * §A.1 TV1 above — same key/nonce/counter on a 64-byte zero plaintext — so it is omitted.) */
+     * §A.1 TV1 above -- same key/nonce/counter on a 64-byte zero plaintext -- so it is omitted.) */
     {
         static const uint8_t key1[] = {
             0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u,
@@ -490,7 +490,7 @@ void SSFChaCha20UnitTest(void)
 
     /* RFC 8439 §A.2 TV3: 127-byte Jabberwocky excerpt with a non-zero key, an unusual high
      * starting counter (42), and the §A.1 TV5 nonce. Tests counter values that are neither 0
-     * nor 1 — the typical (key, nonce, counter ≠ 0/1) combination not exercised elsewhere. */
+     * nor 1 -- the typical (key, nonce, counter ≠ 0/1) combination not exercised elsewhere. */
     {
         static const uint8_t keyJ[] = {
             0x1Cu, 0x92u, 0x40u, 0xA5u, 0xEBu, 0x55u, 0xD3u, 0x8Au,
@@ -545,10 +545,10 @@ void SSFChaCha20UnitTest(void)
         SSF_ASSERT(memcmp(ct, expectedCt, sizeof(expectedCt)) == 0);
     }
 
-    /* SSFChaCha20Encrypt: DBC coverage. The contract surface is large — key / keyLen / nonce
+    /* SSFChaCha20Encrypt: DBC coverage. The contract surface is large -- key / keyLen / nonce
      * / nonceLen / ptLen <= ctSize / ptLen < 512 MiB / pt / ct. Every SSF_REQUIRE is exercised
      * with at least one boundary or NULL-pointer violation. The 512 MiB ptLen test passes
-     * matching ctSize so that check fires last — nothing dereferences the pt/ct pointers so
+     * matching ctSize so that check fires last -- nothing dereferences the pt/ct pointers so
      * the absurd ptLen value never causes a real allocation. */
     {
         static const uint8_t scratchKey[32] = {0};

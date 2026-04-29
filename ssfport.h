@@ -61,7 +61,7 @@ extern "C" {
 #define SSF_CONFIG_TLV_UNIT_TEST     (1u)
 #define SSF_CONFIG_UBJSON_UNIT_TEST  (1u)
 
-/* SSF_CONFIG_HAVE_OPENSSL — set to 1 on host builds where libcrypto is linked at the build's    */
+/* SSF_CONFIG_HAVE_OPENSSL -- set to 1 on host builds where libcrypto is linked at the build's   */
 /* command line (macOS/Linux native). Cross builds (e.g. mipsel under QEMU) override this to 0   */
 /* to skip OpenSSL cross-validation paths in the unit suite. Defined as a fall-through default   */
 /* so command-line -D wins.                                                                      */
@@ -198,7 +198,7 @@ extern "C" {
 #define SSF_CONFIG_UNIT_TEST (0u)
 #endif
 
-/* SSF_CONFIG_UT_VERBOSE — gate diagnostic stdout from unit tests (microbenchmark timings,        */
+/* SSF_CONFIG_UT_VERBOSE -- gate diagnostic stdout from unit tests (microbenchmark timings,       */
 /* OpenSSL cross-check banners, Wycheproof per-tcId mismatches, zeroization-audit failure         */
 /* details). Default 0 keeps the suite silent so main.c's "Running ... PASSED in Ns" line is the  */
 /* only output and aligned columns are not corrupted. Override with -DSSF_CONFIG_UT_VERBOSE=1     */
@@ -211,7 +211,7 @@ extern "C" {
 #include <stdio.h>
 #define SSF_UT_PRINTF(...) printf(__VA_ARGS__)
 #else
-/* Disabled form: sizeof-of-call is unevaluated — args are type-checked and "referenced" enough   */
+/* Disabled form: sizeof-of-call is unevaluated -- args are type-checked and "referenced" enough  */
 /* to suppress unused-variable warnings on counters that exist solely to drive these prints, but  */
 /* generate zero runtime code. Requires <stdio.h> in scope wherever SSF_UT_PRINTF appears so the  */
 /* printf prototype is visible to the sizeof expression; every unit test file that uses it        */
@@ -343,7 +343,7 @@ typedef pthread_mutex_t SSFMutex_t;
 /* Portable function attributes                                                                  */
 /* --------------------------------------------------------------------------------------------- */
 
-/* SSF_NOINLINE — force the compiler to give the function its own stack frame and call site.    */
+/* SSF_NOINLINE -- force the compiler to give the function its own stack frame and call site.    */
 /* Used by stack-scrub helpers and side-channel-sensitive routines that need a clean frame.      */
 #if defined(__GNUC__) || defined(__clang__)
 #define SSF_NOINLINE __attribute__((noinline))
@@ -353,7 +353,7 @@ typedef pthread_mutex_t SSFMutex_t;
 #define SSF_NOINLINE
 #endif
 
-/* SSF_OPTIMIZER_BARRIER(p) — force the compiler to materialize p (an address-taken object) and  */
+/* SSF_OPTIMIZER_BARRIER(p) -- force the compiler to materialize p (an address-taken object) and */
 /* fence all preceding/following memory operations across this point. Required at the end of     */
 /* stack-scrub helpers and pollute/scan probes so the compiler cannot reorder loads/stores       */
 /* across the function boundary or elide a "dead" stack buffer that the test framework relies    */

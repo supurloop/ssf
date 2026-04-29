@@ -1,5 +1,5 @@
 /* --------------------------------------------------------------------------------------------- */
-/* Small System Framework — ssfdtime configuration                                                */
+/* Small System Framework -- ssfdtime configuration                                              */
 /* --------------------------------------------------------------------------------------------- */
 #ifndef SSF_DTIME_OPT_H_INCLUDE
 #define SSF_DTIME_OPT_H_INCLUDE

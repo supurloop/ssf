@@ -1,5 +1,5 @@
 /* --------------------------------------------------------------------------------------------- */
-/* Small System Framework — ssfcfg configuration                                                  */
+/* Small System Framework -- ssfcfg configuration                                                */
 /* --------------------------------------------------------------------------------------------- */
 #ifndef SSF_CFG_OPT_H_INCLUDE
 #define SSF_CFG_OPT_H_INCLUDE

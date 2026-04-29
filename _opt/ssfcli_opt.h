@@ -1,5 +1,5 @@
 /* --------------------------------------------------------------------------------------------- */
-/* Small System Framework — ssfcli configuration                                                  */
+/* Small System Framework -- ssfcli configuration                                                */
 /* --------------------------------------------------------------------------------------------- */
 #ifndef SSF_CLI_OPT_H_INCLUDE
 #define SSF_CLI_OPT_H_INCLUDE

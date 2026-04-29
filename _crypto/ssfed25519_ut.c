@@ -66,7 +66,7 @@
 /*                                                                                               */
 /* The polluter and scanner also disable /RTC1 for their own bodies via                          */
 /* `#pragma runtime_checks("scu", off)`. With RTC1 active MSVC writes 0xCC into every newly      */
-/* allocated stack frame on function entry — including the scanner's `buf` — which would erase   */
+/* allocated stack frame on function entry -- including the scanner's `buf` -- which would erase */
 /* the bytes the polluter just wrote at the same stack offset, making the test always read 0    */
 /* sentinels regardless of whether the scrub helper ran.                                          */
 /* --------------------------------------------------------------------------------------------- */
@@ -86,7 +86,7 @@ static void _SSFEd25519UTPolluteStack(uint8_t pattern)
     SSF_OPTIMIZER_BARRIER(buf);
 }
 
-/* Reading uninitialized stack is the test — silence GCC/clang's -Wuninitialized and MSVC       */
+/* Reading uninitialized stack is the test -- silence GCC/clang's -Wuninitialized and MSVC      */
 /* /analyze's C6001 for this body.                                                              */
 #if defined(__GNUC__)
 #pragma GCC diagnostic push
@@ -260,7 +260,7 @@ static void _Ed25519SelfFuzz(uint16_t iters)
 
     SSF_UT_PRINTF("--- ssfed25519 self-fuzz (%u iters, deterministic) ---\n", (unsigned)iters);
 
-    /* Fixed master state — any nonzero pattern is fine; the SHA-512 chain mixes thoroughly. */
+    /* Fixed master state -- any nonzero pattern is fine; the SHA-512 chain mixes thoroughly. */
     memset(state, 0xA5u, sizeof(state));
 
     for (iter = 0; iter < iters; iter++)
@@ -318,7 +318,7 @@ static void _Ed25519SelfFuzz(uint16_t iters)
         sig[flipPos] = origByte;
 
         /* Mutation 2: flip a pubKey byte. After A1 / A3 a perturbed pubKey may decode to a       */
-        /* different valid point, fail the y < p canonical check, or land on a low-order point — */
+        /* different valid point, fail the y < p canonical check, or land on a low-order point -- */
         /* all three rejection paths are valid here.                                              */
         flipPos = (size_t)state[35] % 32u;
         origByte = pubKey[flipPos];
@@ -564,7 +564,7 @@ void SSFEd25519UnitTest(void)
         SSF_ASSERT(SSFEd25519Sign(seed, pubKey, bigMsg, sizeof(bigMsg), sig) == true);
         SSF_ASSERT(SSFEd25519Verify(pubKey, bigMsg, sizeof(bigMsg), sig) == true);
 
-        /* Flip one byte deep in the message — verify must reject. */
+        /* Flip one byte deep in the message -- verify must reject. */
         bigMsg[sizeof(bigMsg) / 2u] ^= 0x01u;
         SSF_ASSERT(SSFEd25519Verify(pubKey, bigMsg, sizeof(bigMsg), sig) == false);
     }
@@ -572,7 +572,7 @@ void SSFEd25519UnitTest(void)
     /* ---- B3 regression: verify-after-sign rejects mismatched pubKey. */
     /* If a fault flips a bit in the long-term pubKey blob (or the caller stores a corrupted    */
     /* (seed, pubKey) pair), the produced signature uses the seed-derived scalar a but the      */
-    /* challenge hash incorporates the corrupted A — verifiers reject the signature. Sign       */
+    /* challenge hash incorporates the corrupted A -- verifiers reject the signature. Sign      */
     /* should detect this internally and refuse to release the bad signature.                   */
     {
         uint8_t seed[32], pubKey[32], badPub[32], sig[64];
@@ -599,7 +599,7 @@ void SSFEd25519UnitTest(void)
     /* ---- B1 regression: Sign performs a deep-stack scrub before returning. */
     /* Sentinel is written into a deep frame; Sign runs at the same call depth and its scrub   */
     /* helper must zero a generous deeper region. The post-Sign scanner allocates a fresh frame */
-    /* at the same depth and reads its uninitialised contents — those contents reflect what     */
+    /* at the same depth and reads its uninitialised contents -- those contents reflect what    */
     /* the previous frame at that depth (the scrub helper) wrote. After scrub, the sentinel     */
     /* count must drop to zero. Without scrub, Sign's natural frames overwrite only a small     */
     /* portion of the sentinel region, so most sentinel bytes survive.                           */
@@ -617,7 +617,7 @@ void SSFEd25519UnitTest(void)
         /* Tolerance: the scanner's own frame layout (return addr, saved registers) may differ */
         /* from the polluter's by a handful of bytes, so allow a small residue. The pre-fix    */
         /* failure mode leaves thousands of sentinel bytes, well above this threshold.         */
-        /* MSVC tolerance is higher — see equivalent comment in ssfx25519_ut.c.                */
+        /* MSVC tolerance is higher -- see equivalent comment in ssfx25519_ut.c.               */
 #if defined(_MSC_VER)
         SSF_ASSERT(hitsAfter < 512u);
 #else
@@ -627,7 +627,7 @@ void SSFEd25519UnitTest(void)
 
     /* ---- A3 regression: low-order pubkey signature attack must be rejected. */
     /* The identity (y=1, x=0) is canonically encoded as {0x01, 0x00 ×31}, passes A1's y < p   */
-    /* check, and decodes successfully — but it has order 1 (or 8 at most for any low-order     */
+    /* check, and decodes successfully -- but it has order 1 (or 8 at most for any low-order    */
     /* point), which means [k]·A = identity for every challenge k modulo a small factor.       */
     /* With sig = (R=identity, S=0), the verify equation [S]B - [k]A = identity - identity =   */
     /* identity reconstructs identity bytes equal to R bytes, so without a low-order check     */
@@ -649,26 +649,26 @@ void SSFEd25519UnitTest(void)
     /* ---- D3 coverage: every canonical low-order point encoding must be rejected. */
     /* The full set of 8 low-order points on edwards25519 (cofactor 8). After A1's y < p check */
     /* removes the non-canonical encodings of (0, 0) and (0, p-1) from the libsodium 11-entry  */
-    /* blocklist, exactly 8 canonical encodings remain — all listed here with their sign-bit   */
+    /* blocklist, exactly 8 canonical encodings remain -- all listed here with their sign-bit  */
     /* variants. The [8]A check inside Verify must reject every one regardless of signature.   */
     {
         static const uint8_t lowOrderEncodings[8][32] = {
-            /* (y=1, x=0) — identity, sign 0 (covered above; included for completeness). */
+            /* (y=1, x=0) -- identity, sign 0 (covered above; included for completeness). */
             { 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
               0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
               0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
               0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 },
-            /* (y=p-1, x=0) — order 2, sign 0. */
+            /* (y=p-1, x=0) -- order 2, sign 0. */
             { 0xec, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
               0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
               0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
               0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f },
-            /* (y=0, x=+sqrt(-1)) — order 4, sign 0. */
+            /* (y=0, x=+sqrt(-1)) -- order 4, sign 0. */
             { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
               0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
               0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
               0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 },
-            /* (y=0, x=-sqrt(-1)) — order 4, sign 1. */
+            /* (y=0, x=-sqrt(-1)) -- order 4, sign 1. */
             { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
               0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
               0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -699,7 +699,7 @@ void SSFEd25519UnitTest(void)
         const uint8_t msg[] = "low-order forgery probe";
 
         memset(sig, 0, 64);
-        sig[0] = 0x01u;            /* R = canonical identity, S = 0 — the easiest forgery shape */
+        sig[0] = 0x01u;            /* R = canonical identity, S = 0 -- the easiest forgery shape */
 
         for (i = 0; i < 8; i++)
         {
@@ -709,7 +709,7 @@ void SSFEd25519UnitTest(void)
         }
     }
 
-    /* SSF-internal deterministic fuzz. Independent of OpenSSL — exercises sign / verify /     */
+    /* SSF-internal deterministic fuzz. Independent of OpenSSL -- exercises sign / verify /    */
     /* mutation rejection across longer messages (up to 2 KiB) than the OpenSSL fuzz covers,    */
     /* and is reproducible because the state stream is derived from a fixed master seed.         */
     _Ed25519SelfFuzz(256u);

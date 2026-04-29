@@ -133,7 +133,7 @@ static void _VerifyX25519AgainstOpenSSL(uint16_t iters)
         }
         SSF_ASSERT(memcmp(secretSSF, secretOSSL, 32) == 0);
 
-        /* === Reverse direction (privB, pubA) — sanity check on commutativity through both === */
+        /* === Reverse direction (privB, pubA) -- sanity check on commutativity through both === */
         SSF_ASSERT(SSFX25519ComputeSecret(privB, pubSSF_A, secretSSF) == true);
         {
             EVP_PKEY *opriv = _X25519OSSLPrivFromBytes(privB);
@@ -153,7 +153,7 @@ static void _VerifyX25519AgainstOpenSSL(uint16_t iters)
 /* Stack scrub probe helpers (X3 regression). Polluter writes a sentinel pattern into a deep     */
 /* frame, returns; ComputeSecret runs at the same call depth and must scrub its freed frame      */
 /* before returning. The scanner allocates a deep frame at the same depth and reads its          */
-/* uninitialised contents — those reflect what the previous frame at that depth wrote. After     */
+/* uninitialised contents -- those reflect what the previous frame at that depth wrote. After    */
 /* scrub the sentinel count must drop to near-zero; pre-scrub thousands of bytes survive.        */
 /*                                                                                               */
 /* The sentinel value MUST NOT be 0xCC: MSVC's /RTC1 (Debug runtime checks) initializes every    */
@@ -163,7 +163,7 @@ static void _VerifyX25519AgainstOpenSSL(uint16_t iters)
 /*                                                                                               */
 /* The polluter and scanner also disable /RTC1 for their own bodies via                          */
 /* `#pragma runtime_checks("scu", off)`. With RTC1 active MSVC writes 0xCC into every newly      */
-/* allocated stack frame on function entry — including the scanner's `buf` — which would erase   */
+/* allocated stack frame on function entry -- including the scanner's `buf` -- which would erase */
 /* the bytes the polluter just wrote at the same stack offset, making the test always read 0    */
 /* sentinels regardless of whether the scrub helper ran.                                          */
 /* --------------------------------------------------------------------------------------------- */
@@ -183,7 +183,7 @@ static void _SSFX25519UTPolluteStack(uint8_t pattern)
     SSF_OPTIMIZER_BARRIER(buf);
 }
 
-/* Reading uninitialized stack is the test — silence GCC/clang's -Wuninitialized and MSVC       */
+/* Reading uninitialized stack is the test -- silence GCC/clang's -Wuninitialized and MSVC      */
 /* /analyze's C6001 for this body.                                                              */
 #if defined(__GNUC__)
 #pragma GCC diagnostic push
@@ -395,38 +395,38 @@ void SSFX25519UnitTest(void)
     /* The 7 known small-order encodings on Curve25519 / its twist (per libsodium's              */
     /* has_small_order_blocklist). RFC 7748 §6.1's all-zero-output check rejects any peer key   */
     /* that produces a zero shared secret; the design assumption is that all small-order points  */
-    /* satisfy that. This test verifies the assumption empirically — if any entry comes back as  */
+    /* satisfy that. This test verifies the assumption empirically -- if any entry comes back as */
     /* a non-rejected (true) result, that's evidence the all-zero check is insufficient and we   */
     /* need an explicit input blocklist (X6).                                                     */
     {
         static const uint8_t lowOrderPub[][32] = {
-            /* 0 — order 4. */
+            /* 0 -- order 4. */
             { 0, 0, 0, 0, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0,
               0, 0, 0, 0, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0 },
-            /* 1 — order 4 on twist. */
+            /* 1 -- order 4 on twist. */
             { 1, 0, 0, 0, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0,
               0, 0, 0, 0, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0 },
-            /* 325606250916557431795983626356110631294008115727848805560023387167927233504 — order 8. */
+            /* 325606250916557431795983626356110631294008115727848805560023387167927233504 -- order 8. */
             { 0xe0, 0xeb, 0x7a, 0x7c, 0x3b, 0x41, 0xb8, 0xae,
               0x16, 0x56, 0xe3, 0xfa, 0xf1, 0x9f, 0xc4, 0x6a,
               0xda, 0x09, 0x8d, 0xeb, 0x9c, 0x32, 0xb1, 0xfd,
               0x86, 0x62, 0x05, 0x16, 0x5f, 0x49, 0xb8, 0x00 },
-            /* 39382357235489614581723060781553021112529911719440698176882885853963445705823 — order 8. */
+            /* 39382357235489614581723060781553021112529911719440698176882885853963445705823 -- order 8. */
             { 0x5f, 0x9c, 0x95, 0xbc, 0xa3, 0x50, 0x8c, 0x24,
               0xb1, 0xd0, 0xb1, 0x55, 0x9c, 0x83, 0xef, 0x5b,
               0x04, 0x44, 0x5c, 0xc4, 0x58, 0x1c, 0x8e, 0x86,
               0xd8, 0x22, 0x4e, 0xdd, 0xd0, 0x9f, 0x11, 0x57 },
-            /* p-1 — order 4. */
+            /* p-1 -- order 4. */
             { 0xec, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
               0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
               0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
               0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f },
-            /* p — equivalent to 0 mod p. */
+            /* p -- equivalent to 0 mod p. */
             { 0xed, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
               0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
               0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
               0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f },
-            /* p+1 — equivalent to 1 mod p. */
+            /* p+1 -- equivalent to 1 mod p. */
             { 0xee, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
               0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
               0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
@@ -474,8 +474,8 @@ void SSFX25519UnitTest(void)
         /* The threshold is platform-tuned. On GCC/clang the call-frame overhead between    */
         /* the polluter and the scrub is ~50 bytes, so residue stays well under 64. MSVC    */
         /* /RTC1 + /GS produce ~80–400 byte frame overheads (RTC1 fill on padding, /GS      */
-        /* canaries, larger spill slots) that are NOT secret-bearing — they're saved-reg    */
-        /* values, return addresses, and uninit fill — but they happen to fall inside the   */
+        /* canaries, larger spill slots) that are NOT secret-bearing -- they're saved-reg   */
+        /* values, return addresses, and uninit fill -- but they happen to fall inside the  */
         /* polluter's address range and get counted. 512 is comfortably below the ~4 KiB    */
         /* unscrubbed total and still rejects a regression that disabled the scrub.          */
 #if defined(_MSC_VER)
@@ -485,13 +485,13 @@ void SSFX25519UnitTest(void)
 #endif
     }
 
-    /* SSF-internal deterministic ECDH fuzz. Independent of OpenSSL — exercises the              */
+    /* SSF-internal deterministic ECDH fuzz. Independent of OpenSSL -- exercises the             */
     /* commutative property privA·pubB == privB·pubA across 256 deterministic random keypairs.   */
     _X25519SelfFuzz(256u);
 
     /* === Wycheproof X25519 vectors (Google adversarial test suite) === */
     /* X25519 has 264 "valid" cases (must match expected shared byte-for-byte) and 254             */
-    /* "acceptable" cases (RFC 7748 doesn't strictly require either accept or reject — typically   */
+    /* "acceptable" cases (RFC 7748 doesn't strictly require either accept or reject -- typically  */
     /* twist points / low-order edge cases). 0 "invalid" cases for X25519. This harness asserts    */
     /* zero new mismatches on the valid set; acceptable cases are tracked separately and don't     */
     /* count toward mismatches either way.                                                          */

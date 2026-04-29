@@ -98,7 +98,7 @@ static void _OSSLAESCCMEncrypt(const uint8_t *pt, size_t ptLen,
     {
         SSF_ASSERT(EVP_EncryptUpdate(ctx, NULL, &outL, aad, (int)aadLen) == 1);
     }
-    /* Always call the data-feed update — even at ptLen == 0 — so the CBC-MAC tag is         */
+    /* Always call the data-feed update -- even at ptLen == 0 -- so the CBC-MAC tag is       */
     /* finalized. NULL pointers would be re-interpreted as another AAD update; use a dummy.  */
     SSF_ASSERT(EVP_EncryptUpdate(ctx, ctOut, &outL, ptIn, (int)ptLen) == 1);
     SSF_ASSERT((size_t)outL == ptLen);

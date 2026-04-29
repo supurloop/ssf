@@ -683,7 +683,7 @@ static bool _SSFRSAKeyGenPrimes(uint16_t bits, SSFBN_t *p, SSFBN_t *q, SSFBN_t *
     /* Ensure p != q */
     if (SSFBNCmp(p, q) == 0) goto cleanup_prng;
 
-    /* Ensure p > q (for CRT). tmp briefly holds the original p — secret-adjacent state. */
+    /* Ensure p > q (for CRT). tmp briefly holds the original p -- secret-adjacent state. */
     if (SSFBNCmp(p, q) < 0)
     {
         SSFBNCopy(&tmp, p);
@@ -738,7 +738,7 @@ static bool _SSFRSAKeyGenDerive(uint16_t nLimbs, const SSFBN_t *p, const SSFBN_t
     /* lambda = lcm(pm1, qm1) = (pm1 / gcd) * qm1 (avoids needing pm1*qm1 to fit in SSFBN_t). */
     if (SSFBNIsOne(&g))
     {
-        /* Common case: skip the divide — lambda = pm1 * qm1 directly. */
+        /* Common case: skip the divide -- lambda = pm1 * qm1 directly. */
         SSFBNCopy(&pm1_div, &pm1);
     }
     else
@@ -842,7 +842,7 @@ bool SSFRSAKeyGen(uint16_t bits, uint8_t *privKeyDer, size_t privKeyDerSize, siz
     /* FIPS 186-4 §B.3.3 step 5: regenerate the full prime pair if any post-condition fails. */
     for (attempts = 0u; attempts < SSF_RSA_KEYGEN_FIPS_MAX_ATTEMPTS; attempts++)
     {
-        /* Hard failure (no entropy, etc.) — don't retry. */
+        /* Hard failure (no entropy, etc.) -- don't retry. */
         if (!_SSFRSAKeyGenPrimes(bits, &p, &q, &n, &nLimbs)) goto cleanup;
 
         /* §B.3.3 step 5.4: |p - q| > 2^(halfBits - 100). */
@@ -1259,7 +1259,7 @@ bool SSFRSAVerifyPSS(const uint8_t *pubKeyDer, size_t pubKeyDerLen, SSFRSAHash_t
     /* Top (emBits-aligned) bits of em[0] must be zero. */
     diff |= (uint8_t)(em[0] & ~topMask);
 
-    /* Extract H, derive the MGF1 mask, unmask DB — all unconditional. */
+    /* Extract H, derive the MGF1 mask, unmask DB -- all unconditional. */
     memcpy(H, &em[dbLen], hLen);
     _SSFRSAM_GF1(hash, H, hLen, dbMask, dbLen);
     for (i = 0; i < dbLen; i++) em[i] ^= dbMask[i];
@@ -1269,7 +1269,7 @@ bool SSFRSAVerifyPSS(const uint8_t *pubKeyDer, size_t pubKeyDerLen, SSFRSAHash_t
     for (i = 0; i < dbLen - sLen - 1u; i++) diff |= em[i];
     diff |= (uint8_t)(em[dbLen - sLen - 1u] ^ 0x01u);
 
-    /* M' = 00 00 00 00 00 00 00 00 || mHash || salt — unconditional. */
+    /* M' = 00 00 00 00 00 00 00 00 || mHash || salt -- unconditional. */
     memset(mPrime, 0, 8);
     memcpy(&mPrime[8], hashVal, hLen);
     memcpy(&mPrime[8u + hLen], &em[dbLen - sLen], sLen);

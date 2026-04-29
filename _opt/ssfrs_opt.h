@@ -1,5 +1,5 @@
 /* --------------------------------------------------------------------------------------------- */
-/* Small System Framework — ssfrs Reed-Solomon configuration                                      */
+/* Small System Framework -- ssfrs Reed-Solomon configuration                                    */
 /* --------------------------------------------------------------------------------------------- */
 #ifndef SSF_RS_OPT_H_INCLUDE
 #define SSF_RS_OPT_H_INCLUDE

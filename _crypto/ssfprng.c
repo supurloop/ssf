@@ -84,7 +84,7 @@ void SSFPRNGGetRandom(SSFPRNGContext_t *context, uint8_t *random, size_t randomS
 
     /* Prepare pt block as count || zeros (NIST SP 800-90A CTR_DRBG-style input shape), then  */
     /* advance count. The zero-padded form gives the same effective security as count||count  */
-    /* — both use 2^64 distinct AES inputs over the lifetime — but matches the standard       */
+    /* -- both use 2^64 distinct AES inputs over the lifetime -- but matches the standard     */
     /* convention and avoids the "structured input" pattern that would otherwise raise a      */
     /* reviewer's eyebrow.                                                                     */
     memcpy(pt, &context->count, sizeof(uint64_t));

@@ -206,7 +206,7 @@ static void _VerifyHMACCornerCasesAgainstOpenSSL(void)
             SSF_ASSERT(memcmp(macSSF, macOSSL, hashSize) == 0);
         }
 
-        /* Key length exactly == block size — bypasses the long-key hash-the-key path. */
+        /* Key length exactly == block size -- bypasses the long-key hash-the-key path. */
         {
             uint8_t key[128];
             static const uint8_t msg[] = "boundary";
@@ -566,7 +566,7 @@ void SSFHMACUnitTest(void)
     }
 
     /* Incremental Begin / Update / End must match the one-shot SSFHMAC for every hash variant.
-       The existing Incremental test covers SHA-256 only — this extends to SHA-1/384/512. */
+       The existing Incremental test covers SHA-256 only -- this extends to SHA-1/384/512. */
     {
         static const SSFHMACHash_t hashes[] = {
             SSF_HMAC_HASH_SHA1,
@@ -703,7 +703,7 @@ void SSFHMACUnitTest(void)
     }
 
     /* Key length boundary sweep under HMAC-SHA-256 (block = 64, hash = 32). Covers the
-       three regimes — keyLen < blockSize, keyLen == blockSize, keyLen > blockSize — at the
+       three regimes -- keyLen < blockSize, keyLen == blockSize, keyLen > blockSize -- at the
        boundaries (1, 32, 63, 64, 65, 100, 131). For each, one-shot must equal incremental.
        Catches a length-dependent bug in the long-key vs short-key branch in Begin. */
     {
@@ -737,7 +737,7 @@ void SSFHMACUnitTest(void)
     /* Regression for the size_t -> uint32_t silent-truncation bug in _SSFHMACHashUpdate.
        Production chunkMax is UINT32_MAX, which can't be exercised with a 4 GB allocation;
        the test hook forces small chunkMax values so the chunking loop runs on practical
-       buffers. The MAC must match a single-call reference for every chunkMax — proves no
+       buffers. The MAC must match a single-call reference for every chunkMax -- proves no
        off-by-one in chunk size, no missed pointer advance, no remainder mishandling. */
     {
         uint8_t data[1024];
@@ -767,7 +767,7 @@ void SSFHMACUnitTest(void)
         }
     }
 
-    /* Chunked Update across all hash dispatches — proves each underlying SHA Update is
+    /* Chunked Update across all hash dispatches -- proves each underlying SHA Update is
        reached correctly. Catches a copy-paste bug in the dispatch switch. */
     {
         static const SSFHMACHash_t hashes[] = {
@@ -829,7 +829,7 @@ void SSFHMACUnitTest(void)
     }
 
     /* M3: an uninitialized context (stack-allocated, never Begun) must trip a contract check
-       on Update / End / DeInit. Defense-in-depth — the underlying SHA module's magic also
+       on Update / End / DeInit. Defense-in-depth -- the underlying SHA module's magic also
        catches this via dispatch, but the HMAC-level check fires earlier (before dispatch),
        reports the right call site, and survives a future hash variant that might lack its
        own magic. */
@@ -859,26 +859,26 @@ void SSFHMACUnitTest(void)
     }
 
     /* Begin requires `magic == 0` on entry: the caller must zero the struct (or DeInit it)
-       before calling Begin. Stricter than the older `!= MAGIC` check — non-zero garbage is
+       before calling Begin. Stricter than the older `!= MAGIC` check -- non-zero garbage is
        rejected too, forcing explicit zero-init rather than relying on stack residue happening
        not to collide with the magic value. */
     {
         SSFHMACContext_t ctx;
         uint8_t key[16] = {0};
 
-        /* Zeroed prior contents — Begin succeeds. */
+        /* Zeroed prior contents -- Begin succeeds. */
         memset(&ctx, 0, sizeof(ctx));
         SSFHMACBegin(&ctx, SSF_HMAC_HASH_SHA256, key, sizeof(key));
         SSFHMACUpdate(&ctx, (const uint8_t *)"abc", 3);
         SSFHMACEnd(&ctx, mac, 32u);
         SSFHMACDeInit(&ctx);
 
-        /* Non-zero garbage — Begin must reject. */
+        /* Non-zero garbage -- Begin must reject. */
         memset(&ctx, 0xC3u, sizeof(ctx));
         SSF_ASSERT_TEST(SSFHMACBegin(&ctx, SSF_HMAC_HASH_SHA256, key, sizeof(key)));
     }
 
-    /* Begin must refuse to re-init an already-initialized context — the caller is required
+    /* Begin must refuse to re-init an already-initialized context -- the caller is required
        to DeInit (or zero) the struct between Begins. Catches the common bug of forgetting
        DeInit before reusing a stack-allocated context for a second HMAC. */
     {
@@ -978,7 +978,7 @@ void SSFHMACUnitTest(void)
         SSF_ASSERT_TEST(SSFHMACDeInit(NULL));
     }
 
-    /* DBC: single-call SSFHMAC parameter validation — every required argument tested. */
+    /* DBC: single-call SSFHMAC parameter validation -- every required argument tested. */
     {
         uint8_t key[16] = {0};
 
@@ -1001,7 +1001,7 @@ void SSFHMACUnitTest(void)
 #if SSF_HMAC_OSSL_VERIFY == 1
     /* Comprehensive cross-validation against OpenSSL. Random fuzz across the full              */
     /* (hash × keyLen × msgLen) matrix, plus explicit corner cases. Skipped on cross builds     */
-    /* (-DSSF_CONFIG_HAVE_OPENSSL=0) — RFC 4231 / RFC 2202 KATs above remain the load-bearing   */
+    /* (-DSSF_CONFIG_HAVE_OPENSSL=0) -- RFC 4231 / RFC 2202 KATs above remain the load-bearing  */
     /* coverage there.                                                                           */
     _VerifyHMACAgainstOpenSSLRandom();
     _VerifyHMACCornerCasesAgainstOpenSSL();

@@ -1,5 +1,5 @@
 /* --------------------------------------------------------------------------------------------- */
-/* Small System Framework — ssfiso8601 configuration                                              */
+/* Small System Framework -- ssfiso8601 configuration                                            */
 /* --------------------------------------------------------------------------------------------- */
 #ifndef SSF_ISO8601_OPT_H_INCLUDE
 #define SSF_ISO8601_OPT_H_INCLUDE

@@ -46,7 +46,7 @@
 #if SSF_RSA_OSSL_VERIFY == 1
 /* d2i_RSAPrivateKey / d2i_RSAPublicKey are the natural decoders for our PKCS#1 RSAPrivateKey / */
 /* RSAPublicKey output. They are flagged "low-level" (deprecated) in OpenSSL 3.x but still ship */
-/* and still return a usable RSA pointer — we silence the warning only inside this test file.   */
+/* and still return a usable RSA pointer -- we silence the warning only inside this test file.  */
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #include <openssl/rsa.h>
@@ -65,7 +65,7 @@
 /* The pollute / scan / target helpers all run with `noinline` so each gets its own stack frame  */
 /* allocated below their common parent. A frame size of 16 KiB exceeds the worst-case stack      */
 /* footprint of SSFRSAKeyGen and the sign paths, so a sentinel laid down by the polluter and     */
-/* then partially overwritten by a target call is fully visible to the scanner — the scanner's   */
+/* then partially overwritten by a target call is fully visible to the scanner -- the scanner's  */
 /* uninitialised local sits at the same stack region the previous callee just freed.             */
 /*                                                                                               */
 /* The scan looks for an exact byte-pattern needle. We use the top bytes of `p` extracted from   */
@@ -92,7 +92,7 @@ static void _SSFRSAUTPolluteStack(uint8_t v)
 #pragma warning(pop)
 #endif
 
-/* Reading uninitialized stack is the test — silence GCC/clang's -Wuninitialized and MSVC       */
+/* Reading uninitialized stack is the test -- silence GCC/clang's -Wuninitialized and MSVC      */
 /* /analyze's C6001 for this body.                                                              */
 #if defined(__GNUC__)
 #pragma GCC diagnostic push
@@ -111,7 +111,7 @@ static int _SSFRSAUTScanStack(const uint8_t *needle, size_t needleLen)
     int found = 0;
     size_t i, j;
 
-    /* Read residue without writing first — buf was just allocated atop the freed callee frame.  */
+    /* Read residue without writing first -- buf was just allocated atop the freed callee frame. */
     for (i = 0u; (i + needleLen) <= sizeof(buf); i++)
     {
         bool match = true;
@@ -167,7 +167,7 @@ static const uint8_t *_SSFRSAUTLocatePMag(const uint8_t *priv, size_t privLen)
 /*   1. SSFRSAKeyGen DER must be parseable by OpenSSL (validates strict-DER compliance and the   */
 /*      n=p*q / dp / dq / qInv consistency that OpenSSL itself checks during EVP_PKEY load).     */
 /*   2. PKCS#1 v1.5: SSF-sign vs. OpenSSL-sign must produce the same byte-exact signature for    */
-/*      the same (key, hash, message) — PKCS#1 v1.5 is deterministic.                            */
+/*      the same (key, hash, message) -- PKCS#1 v1.5 is deterministic.                           */
 /*   3. PKCS#1 v1.5: SSFRSAVerifyPKCS1 accepts an OpenSSL-produced signature.                    */
 /*   4. PSS: SSFRSAVerifyPSS accepts an OpenSSL-produced signature with sLen=hLen MGF1=H.        */
 /*   5. PSS: OpenSSL accepts an SSF-produced signature.                                          */
@@ -189,7 +189,7 @@ static EVP_PKEY *_OSSLLoadPrivKey(const uint8_t *der, size_t derLen)
         EVP_PKEY_free(pkey);
         return NULL;
     }
-    /* assign_RSA takes ownership of rsa on success — don't free rsa here. */
+    /* assign_RSA takes ownership of rsa on success -- don't free rsa here. */
     return pkey;
 }
 
@@ -292,7 +292,7 @@ static void _SSFRSAVerifyHashAtKey(const uint8_t *priv, size_t privLen,
 
     SSF_ASSERT(hLen <= sizeof(hashVal));
 
-    /* Compute the message hash with SSF — fed to SSFRSA's hashed-input API. */
+    /* Compute the message hash with SSF -- fed to SSFRSA's hashed-input API. */
     switch (ssfHash)
     {
     case SSF_RSA_HASH_SHA256: SSFSHA256(msg, (uint32_t)msgLen, hashVal, (uint32_t)hLen); break;
@@ -316,7 +316,7 @@ static void _SSFRSAVerifyHashAtKey(const uint8_t *priv, size_t privLen,
                                  sigOSSL, sigOSSLLen) == true);
 
     /* ---- PSS round-trip --------------------------------------------------------------- */
-    /* PSS is randomized, so byte match is impossible — only cross-verify both directions. */
+    /* PSS is randomized, so byte match is impossible -- only cross-verify both directions. */
     SSF_ASSERT(SSFRSASignPSS(priv, privLen, ssfHash, hashVal, hLen,
                              sigSSF, sizeof(sigSSF), &sigSSFLen) == true);
     SSF_ASSERT(_OSSLVerifyPSS(pkeyPub, md, (int)hLen, msg, msgLen, sigSSF, sigSSFLen));
@@ -350,7 +350,7 @@ static void _SSFRSACrossCheckAtSize(uint16_t bits,
     EVP_PKEY *pkeyPub = NULL;
     size_t i;
 
-    /* Generate a fresh key with SSF. The DER bytes are then handed to OpenSSL — if OpenSSL    */
+    /* Generate a fresh key with SSF. The DER bytes are then handed to OpenSSL -- if OpenSSL   */
     /* can decode the PKCS#1 RSAPrivateKey blob, our strict-DER encoding plus n=p*q / CRT       */
     /* consistency is correct (OpenSSL re-derives and checks these on load).                    */
     SSF_ASSERT(SSFRSAKeyGen(bits, priv, sizeof(priv), &privLen,
@@ -390,7 +390,7 @@ static void _SSFRSACrossCheckForeignPSS(const uint8_t *foreignPriv, size_t forei
 
     SSFSHA256(msg, sizeof(msg) - 1u, hashVal, sizeof(hashVal));
 
-    /* OpenSSL signs PSS-SHA256 with sLen=32, MGF1=SHA256 — same profile SSF emits.            */
+    /* OpenSSL signs PSS-SHA256 with sLen=32, MGF1=SHA256 -- same profile SSF emits.           */
     SSF_ASSERT(_OSSLSignPSS(pkey, EVP_sha256(), 32, msg, sizeof(msg) - 1u,
                             sigOSSL, &sigOSSLLen));
     SSF_ASSERT(SSFRSAVerifyPSS(foreignPub, foreignPubLen, SSF_RSA_HASH_SHA256,
@@ -411,7 +411,7 @@ static void _SSFRSAVerifyAgainstOpenSSL(const uint8_t *foreignPriv, size_t forei
     /* Hash menus per NIST SP 800-57 §5.6.2 (security-strength matching with key size). Each     */
     /* enabled size runs end-to-end provided SSF_BN_CONFIG_MAX_BITS is at least twice the       */
     /* largest enabled modulus (the CRT recombine and ModInvExt over λ(n) feed a full-width n×n */
-    /* product into SSFBNMul — see ssfrsa.h compile-time gates).                                 */
+    /* product into SSFBNMul -- see ssfrsa.h compile-time gates).                                */
 #if SSF_RSA_CONFIG_ENABLE_2048 == 1
     static const SSFRSAHash_t h2048[] = { SSF_RSA_HASH_SHA256 };
     static const size_t       l2048[] = { 32u };
@@ -473,7 +473,7 @@ static void _SSFRSAVerifyAgainstOpenSSL(const uint8_t *foreignPriv, size_t forei
 void SSFRSAUnitTest(void)
 {
 #if SSF_RSA_ANY_ENABLED == 0
-    /* No RSA size is enabled — the rest of the body references SSFRSAKeyGen / SSFRSASignPKCS1 / */
+    /* No RSA size is enabled -- the rest of the body references SSFRSAKeyGen / SSFRSASignPKCS1 / */
     /* etc., none of which are compiled. Print a clear "skipped" line and return so main.c's     */
     /* test runner stays linkable for pure-ECC builds.                                            */
     SSF_UT_PRINTF("(skipped: no SSF_RSA_CONFIG_ENABLE_2048 / 3072 / 4096 enabled)\n");
@@ -561,14 +561,14 @@ void SSFRSAUnitTest(void)
         SSFBN_DEFINE(p, SSF_BN_MAX_LIMBS);
         SSFBN_DEFINE(q, SSF_BN_MAX_LIMBS);
 
-        /* Reject: p and q identical except for low bits — |p-q| < 2^(1024-100)=2^924. */
+        /* Reject: p and q identical except for low bits -- |p-q| < 2^(1024-100)=2^924. */
         SSFBNSetZero(&p, SSF_BN_MAX_LIMBS);
         SSFBNSetBit(&p, 1023u);
         SSFBNCopy(&q, &p);
         (void)SSFBNAddUint32(&q, &q, 5u);
         SSF_ASSERT(SSFRSAFipsPrimeDistanceOK(&p, &q, 1024u) == false);
 
-        /* Accept: p and q differ by 2^925 — well above the 2^924 threshold. */
+        /* Accept: p and q differ by 2^925 -- well above the 2^924 threshold. */
         SSFBNSetZero(&p, SSF_BN_MAX_LIMBS);
         SSFBNSetBit(&p, 1023u);
         SSFBNCopy(&q, &p);
@@ -585,16 +585,16 @@ void SSFRSAUnitTest(void)
     {
         SSFBN_DEFINE(d, SSF_BN_MAX_LIMBS);
 
-        /* Reject: d = 2^1023 has bitLen 1024 — equal to halfBits, not strictly greater. */
+        /* Reject: d = 2^1023 has bitLen 1024 -- equal to halfBits, not strictly greater. */
         SSFBNSetZero(&d, SSF_BN_MAX_LIMBS);
         SSFBNSetBit(&d, 1023u);
         SSF_ASSERT(SSFRSAFipsDLowerBoundOK(&d, 1024u) == false);
 
-        /* Reject: d = 1 — bitLen 1, far below halfBits=1024. */
+        /* Reject: d = 1 -- bitLen 1, far below halfBits=1024. */
         SSFBNSetUint32(&d, 1u, SSF_BN_MAX_LIMBS);
         SSF_ASSERT(SSFRSAFipsDLowerBoundOK(&d, 1024u) == false);
 
-        /* Accept: d = 2^1024 has bitLen 1025 — strictly greater than halfBits. */
+        /* Accept: d = 2^1024 has bitLen 1025 -- strictly greater than halfBits. */
         SSFBNSetZero(&d, SSF_BN_MAX_LIMBS);
         SSFBNSetBit(&d, 1024u);
         SSF_ASSERT(SSFRSAFipsDLowerBoundOK(&d, 1024u) == true);
@@ -616,17 +616,17 @@ void SSFRSAUnitTest(void)
 
         SSFBNSetUint32(&e, 65537u, SSF_BN_MAX_LIMBS);
 
-        /* Accept: pm1=4, qm1=4 — gcd with 65537 (prime) is 1. */
+        /* Accept: pm1=4, qm1=4 -- gcd with 65537 (prime) is 1. */
         SSFBNSetUint32(&pm1, 4u, SSF_BN_MAX_LIMBS);
         SSFBNSetUint32(&qm1, 4u, SSF_BN_MAX_LIMBS);
         SSF_ASSERT(SSFRSAFipsECoprimeOK(&e, &pm1, &qm1) == true);
 
-        /* Reject: pm1 = 65537 — gcd(65537, 65537) = 65537. */
+        /* Reject: pm1 = 65537 -- gcd(65537, 65537) = 65537. */
         SSFBNSetUint32(&pm1, 65537u, SSF_BN_MAX_LIMBS);
         SSFBNSetUint32(&qm1, 4u, SSF_BN_MAX_LIMBS);
         SSF_ASSERT(SSFRSAFipsECoprimeOK(&e, &pm1, &qm1) == false);
 
-        /* Reject: qm1 = 2*65537 — qm1-side gcd is 65537. */
+        /* Reject: qm1 = 2*65537 -- qm1-side gcd is 65537. */
         SSFBNSetUint32(&pm1, 4u, SSF_BN_MAX_LIMBS);
         SSFBNSetUint32(&qm1, 131074u, SSF_BN_MAX_LIMBS);
         SSF_ASSERT(SSFRSAFipsECoprimeOK(&e, &pm1, &qm1) == false);
@@ -813,7 +813,7 @@ void SSFRSAUnitTest(void)
 
         /* Sign with the foreign-format private key, verify with the foreign-format
          * public key. PKCS#1 v1.5 is deterministic, so the signature must match what
-         * openssl produced byte-for-byte — pinning both the decoder *and* the math. */
+         * openssl produced byte-for-byte -- pinning both the decoder *and* the math. */
         SSF_ASSERT(SSFRSASignPKCS1(foreignPriv, sizeof(foreignPriv),
                    SSF_RSA_HASH_SHA256, hashVal, sizeof(hashVal),
                    sig, sizeof(sig), &sigLen) == true);
@@ -937,7 +937,7 @@ void SSFRSAUnitTest(void)
         }
 
         /* Validate generated public and private keys (FIPS post-conditions plus n=p*q,           */
-        /* dp == d mod (p-1), dq == d mod (q-1), qInv*q == 1 mod p — all hold by construction).   */
+        /* dp == d mod (p-1), dq == d mod (q-1), qInv*q == 1 mod p -- all hold by construction).  */
         SSF_ASSERT(SSFRSAPubKeyIsValid(pubKeyDer, pubKeyDerLen) == true);
         SSF_ASSERT(SSFRSAPrivKeyIsValid(privKeyDer, privKeyDerLen) == true);
 
@@ -1056,7 +1056,7 @@ void SSFRSAUnitTest(void)
     /* drives each one with a deliberately-violating call and uses SSF_ASSERT_TEST to confirm  */
     /* the assertion fires. Some violations were already caught at the entry point, others    */
     /* trickled into ssfbn / ssfasn1 deep inside the call (where the assertion is correct but */
-    /* harder to attribute) or — worst — slipped through to a graceful `return false`. After   */
+    /* harder to attribute) or -- worst -- slipped through to a graceful `return false`. After */
     /* the DBC pass every violation lands at the entry point of the function the caller       */
     /* invoked, so a misuse is identified at its source.                                       */
     {

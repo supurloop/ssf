@@ -39,7 +39,7 @@
 /* --------------------------------------------------------------------------------------------- */
 /* Module defines.                                                                               */
 /* --------------------------------------------------------------------------------------------- */
-#define SSF_AESCTR_CONTEXT_MAGIC (0x41435452ul)     /* 'ACTR' — set by Begin, cleared by DeInit. */
+#define SSF_AESCTR_CONTEXT_MAGIC (0x41435452ul)     /* 'ACTR' -- set by Begin, cleared by DeInit. */
 
 /* Compile-time bounds checks via typedef-array idiom (size becomes -1 on failure). */
 typedef char _ssf_aesctr_sa_block_size[(SSF_AESCTR_BLOCK_SIZE == 16u) ? 1 : -1];

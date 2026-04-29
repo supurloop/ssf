@@ -1,5 +1,5 @@
 /* --------------------------------------------------------------------------------------------- */
-/* Small System Framework — ssfbfifo configuration                                                */
+/* Small System Framework -- ssfbfifo configuration                                              */
 /* --------------------------------------------------------------------------------------------- */
 #ifndef SSF_BFIFO_OPT_H_INCLUDE
 #define SSF_BFIFO_OPT_H_INCLUDE

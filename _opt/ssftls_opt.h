@@ -1,5 +1,5 @@
 /* --------------------------------------------------------------------------------------------- */
-/* Small System Framework — ssftls configuration                                                  */
+/* Small System Framework -- ssftls configuration                                                */
 /* --------------------------------------------------------------------------------------------- */
 #ifndef SSF_TLS_OPT_H_INCLUDE
 #define SSF_TLS_OPT_H_INCLUDE

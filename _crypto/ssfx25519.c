@@ -69,7 +69,7 @@ static void _fe_copy(_fe_t *r, const _fe_t *a)
     memcpy(r->v, a->v, sizeof(r->v));
 }
 
-/* r = a + b. Result may be up to 2p if both inputs < p. The carry-fold runs unconditionally —   */
+/* r = a + b. Result may be up to 2p if both inputs < p. The carry-fold runs unconditionally --  */
 /* a 0-carry input degenerates to adding 0 through the limb chain, which leaves r unchanged. The */
 /* fold path used to be branch-guarded; making it branch-free closes a timing channel since the  */
 /* carry value depends on the secret-derived ladder operands.                                     */
@@ -188,7 +188,7 @@ static void _fe_mul_small(_fe_t *r, const _fe_t *a, uint32_t c)
         carry >>= 32;
     }
 
-    /* Fold carry back: carry * 38 mod p. Unconditional — carry == 0 leaves r unchanged. */
+    /* Fold carry back: carry * 38 mod p. Unconditional -- carry == 0 leaves r unchanged. */
     {
         uint64_t c2 = carry * 38u;
         for (i = 0; i < 8u; i++)
@@ -280,7 +280,7 @@ static void _fe_to_bytes(uint8_t *b, const _fe_t *a)
 
 /* Constant-time conditional swap: if the low bit of swap is set, exchange a and b. Mask         */
 /* construction (-(swap & 1u) cast to uint32_t) yields all-ones when bit 0 is set, all-zero      */
-/* otherwise — no compiler-emitted branch on the secret bit.                                     */
+/* otherwise -- no compiler-emitted branch on the secret bit.                                    */
 static void _fe_cswap(_fe_t *a, _fe_t *b, uint32_t swap)
 {
     uint32_t mask = (uint32_t)(0u - (swap & 1u));

@@ -79,7 +79,7 @@ bool SSFECDSAPubKeyIsValid(SSFECCurve_t curve, const uint8_t *pubKey, size_t pub
 /* External interface: ECDSA signing                                                             */
 /*                                                                                                */
 /* Disabling SSF_ECDSA_CONFIG_ENABLE_SIGN drops both the declaration here and the implementation */
-/* in ssfecdsa.c, along with the only ssfasn1 references in the module — verify-only builds can  */
+/* in ssfecdsa.c, along with the only ssfasn1 references in the module -- verify-only builds can */
 /* then omit the entire ssfasn1 module from the project.                                          */
 /* --------------------------------------------------------------------------------------------- */
 #if SSF_ECDSA_CONFIG_ENABLE_SIGN == 1

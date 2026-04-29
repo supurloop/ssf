@@ -41,7 +41,7 @@
 #endif
 
 /* Cross-check the SSFEC implementation against OpenSSL's EC_POINT / EC_GROUP. Gated on          */
-/* SSF_CONFIG_HAVE_OPENSSL (1 on native macOS/Linux, 0 on cross builds — see ssfport.h).         */
+/* SSF_CONFIG_HAVE_OPENSSL (1 on native macOS/Linux, 0 on cross builds -- see ssfport.h).        */
 #if (SSF_CONFIG_HAVE_OPENSSL == 1) && (SSF_CONFIG_EC_UNIT_TEST == 1)
 #define SSF_EC_OSSL_VERIFY 1
 #else
@@ -62,7 +62,7 @@
 #if SSF_EC_OSSL_VERIFY == 1
 
 /* --------------------------------------------------------------------------------------------- */
-/* OpenSSL EC cross-check helpers — analogous to the BIGNUM helpers in ssfbn_ut.c.               */
+/* OpenSSL EC cross-check helpers -- analogous to the BIGNUM helpers in ssfbn_ut.c.              */
 /* --------------------------------------------------------------------------------------------- */
 
 /* Convert an SSFBN_t to a BIGNUM via the canonical big-endian byte representation. */
@@ -291,11 +291,11 @@ static void _ECVerifyAtCurve(SSFECCurve_t curve, uint16_t iters)
             SSF_ASSERT(sec1Len == osslSec1Len);
             SSF_ASSERT(memcmp(sec1, osslSec1, sec1Len) == 0);
 
-            /* Decode SSF's encoding back via SSF — must round-trip. */
+            /* Decode SSF's encoding back via SSF -- must round-trip. */
             SSF_ASSERT(SSFECPointDecode(&decoded, curve, sec1, sec1Len) == true);
             SSF_ASSERT(_ECPointEqOSSL(&decoded, osslP, curve, group, ctx) == true);
 
-            /* Decode OpenSSL's encoding via SSF — must accept and equal P. */
+            /* Decode OpenSSL's encoding via SSF -- must accept and equal P. */
             SSF_ASSERT(SSFECPointDecode(&decoded, curve, osslSec1, osslSec1Len) == true);
             SSF_ASSERT(_ECPointEqOSSL(&decoded, osslP, curve, group, ctx) == true);
         }
@@ -577,7 +577,7 @@ static void _ECVerifyAtCurve(SSFECCurve_t curve, uint16_t iters)
 
     /* === Scalars k > n: reduction-mod-n behaviour ========================================== */
     /* SSFBN_t at SSF_EC_MAX_LIMBS holds at most ~curve_bits, so k can only exceed n by the    */
-    /* gap between n and 2^curve_bits — small for both NIST curves but enough to verify the    */
+    /* gap between n and 2^curve_bits -- small for both NIST curves but enough to verify the   */
     /* implementation reduces mod n correctly. OpenSSL handles k > n via internal reduction;   */
     /* SSF must produce the same point.                                                         */
     {
@@ -648,7 +648,7 @@ void SSFECUnitTest(void)
 {
 #if SSF_EC_OSSL_VERIFY == 1
     /* OpenSSL EC cross-check: ~10 random k per curve exercises every public op against an     */
-    /* independent reference. Order matters — run these first so any disagreement surfaces      */
+    /* independent reference. Order matters -- run these first so any disagreement surfaces     */
     /* before the self-consistency tests below.                                                  */
     SSF_UT_PRINTF("--- ssfec OpenSSL cross-check ---\n");
 #if SSF_EC_CONFIG_ENABLE_P256 == 1
@@ -730,7 +730,7 @@ void SSFECUnitTest(void)
     /*   0x00 = point at infinity (length 1)                                                       */
     /*   0x02 = compressed, even Y    | length 1 + coord_bytes                                    */
     /*   0x03 = compressed, odd  Y    | length 1 + coord_bytes                                    */
-    /*   0x04 = uncompressed          | length 1 + 2*coord_bytes — the only one we support        */
+    /*   0x04 = uncompressed          | length 1 + 2*coord_bytes -- the only one we support       */
     /*   0x06 = hybrid, even Y        | length 1 + 2*coord_bytes                                  */
     /*   0x07 = hybrid, odd Y         | length 1 + 2*coord_bytes                                  */
     /* All non-0x04 forms must be rejected. Catches a real interop hazard: a peer sending a       */
@@ -787,7 +787,7 @@ void SSFECUnitTest(void)
 
         /* (6) Spec-conforming compressed-format BUFFER LENGTH but with 0x04 prefix.              */
         /* Length 33 with any prefix (including 0x04) is invalid for uncompressed and unsupported */
-        /* for compressed — must be rejected.                                                      */
+        /* for compressed -- must be rejected.                                                     */
         {
             uint8_t comp[33];
             comp[0] = 0x04u;
@@ -795,7 +795,7 @@ void SSFECUnitTest(void)
             SSF_ASSERT(SSFECPointDecode(&decoded, SSF_EC_CURVE_P256, comp, sizeof(comp)) == false);
         }
 
-        /* (7) Other arbitrary nonsense prefixes (0x01, 0x08, 0xFF) — all rejected at any size. */
+        /* (7) Other arbitrary nonsense prefixes (0x01, 0x08, 0xFF) -- all rejected at any size. */
         {
             uint8_t nonsense[65];
             const uint8_t bad_prefixes[] = { 0x01u, 0x08u, 0xFFu };
@@ -813,7 +813,7 @@ void SSFECUnitTest(void)
     /* ---- P-256: malformed Jacobian Z exercises PointToAffine failure path ---- */
     /* SSFECPointOnCurve / SSFECPointValidate take a fast path when Z == 1 (affine input).      */
     /* The slow path at ssfec.c:706 / 748 calls SSFECPointToAffine, which fails when ModInv(Z,p)*/
-    /* fails — i.e. when Z ≡ 0 (mod p). A non-zero, non-one Z = p produces this. Real callers   */
+    /* fails -- i.e. when Z ≡ 0 (mod p). A non-zero, non-one Z = p produces this. Real callers  */
     /* (SSFECPointDecode → Validate) always pass Z = 1, so the slow-path return-false is        */
     /* otherwise unreached. Confirm the validators correctly reject the malformed input.        */
     {
@@ -1030,7 +1030,7 @@ void SSFECUnitTest(void)
         SSF_ASSERT(SSFECPointIsIdentity(&R) == true);
     }
 
-    /* ---- P-256: G + (-G) = identity (H==0, R!=0 cascade — P + -Q case) ---- */
+    /* ---- P-256: G + (-G) = identity (H==0, R!=0 cascade -- P + -Q case) ---- */
     {
         const SSFECCurveParams_t *c = SSFECGetCurveParams(SSF_EC_CURVE_P256);
         SSFECPOINT_DEFINE(G, SSF_EC_MAX_LIMBS);
@@ -1239,7 +1239,7 @@ void SSFECUnitTest(void)
         SSF_ASSERT(SSFBNToBytes(&c->p,  &bad[1u + c->bytes], c->bytes) == true);
         SSF_ASSERT(SSFECPointDecode(&decoded, SSF_EC_CURVE_P384, bad, sizeof(bad)) == false);
 
-        /* PKV failure (2): all-zeros (0, 0) — not on curve. */
+        /* PKV failure (2): all-zeros (0, 0) -- not on curve. */
         memset(bad, 0, sizeof(bad));
         bad[0] = 0x04u;
         SSF_ASSERT(SSFECPointDecode(&decoded, SSF_EC_CURVE_P384, bad, sizeof(bad)) == false);
@@ -1261,7 +1261,7 @@ void SSFECUnitTest(void)
     /*   scalar additivity: [k1]P + [k2]P == [k1+k2]P                                          */
     /*   distributivity:   [k]P + [k]Q == [k](P + Q)                                            */
     /* High iter counts catch subtle accumulator/aliasing bugs that the existing 10-iter tests */
-    /* might miss. All checks are self-consistency — no external reference needed.              */
+    /* might miss. All checks are self-consistency -- no external reference needed.             */
 
 #if SSF_EC_CONFIG_ENABLE_P256 == 1
     {
@@ -1430,7 +1430,7 @@ void SSFECUnitTest(void)
             SSF_ASSERT(SSFBNCmp(&ly, &my) == 0);
         }
 
-        /* Scalar additivity: 25 iters (associativity skipped — covered amply by P-256). */
+        /* Scalar additivity: 25 iters (associativity skipped -- covered amply by P-256). */
         for (i = 0; i < 25u; i++)
         {
             SSFBNRandomBelow(&k1, &c->n, &prng);
@@ -1495,7 +1495,7 @@ void SSFECUnitTest(void)
         SSF_ASSERT(SSFBNCmp(&bx, &lx) == 0);
         SSF_ASSERT(SSFBNCmp(&by, &ly) == 0);
 
-        /* Random k parity sweep — fixed-base must match the ladder for arbitrary scalars. */
+        /* Random k parity sweep -- fixed-base must match the ladder for arbitrary scalars. */
         for (i = 0; i < 32u; i++)
         {
             SSFBNRandomBelow(&k, &c->n, &prng);
@@ -1665,11 +1665,11 @@ void SSFECUnitTest(void)
 
         SSFECPointFromAffine(&G, &c->gx, &c->gy, SSF_EC_CURVE_P256);
 
-        /* P = [3]G — has Z != 1 in Jacobian form. */
+        /* P = [3]G -- has Z != 1 in Jacobian form. */
         SSFBNSetUint32(&scalar, 3u, c->limbs);
         SSFECScalarMul(&P, &scalar, &G, SSF_EC_CURVE_P256);
 
-        /* Q = G — affine (Z = 1) by construction of SSFECPointFromAffine. */
+        /* Q = G -- affine (Z = 1) by construction of SSFECPointFromAffine. */
         SSFBNCopy(&Q.x, &G.x); SSFBNCopy(&Q.y, &G.y); SSFBNCopy(&Q.z, &G.z);
 
         _SSFECPointAddMixedForTest(&viaMixed, &P, &Q, SSF_EC_CURVE_P256);
@@ -1702,7 +1702,7 @@ void SSFECUnitTest(void)
         }
 
         /* Mixed-add edge: p == q (with q affine). Result = 2*p (= 2*G when both = G affine). */
-        /* Use Q for both — Q is affine. */
+        /* Use Q for both -- Q is affine. */
         _SSFECPointAddMixedForTest(&viaMixed, &Q, &Q, SSF_EC_CURVE_P256);
         SSFBNSetUint32(&scalar, 2u, c->limbs);
         SSFECScalarMul(&viaFull, &scalar, &G, SSF_EC_CURVE_P256);
@@ -1822,7 +1822,7 @@ void SSFECUnitTest(void)
             }
         }
 
-        /* Random parity sweep — Q is Jacobian (not Z=1). */
+        /* Random parity sweep -- Q is Jacobian (not Z=1). */
         for (i = 0; i < 16u; i++)
         {
             SSFBNRandomBelow(&k, &c->n, &prng);
@@ -1834,7 +1834,7 @@ void SSFECUnitTest(void)
             SSF_ASSERT(SSFBNCmp(&cy, &wy) == 0);
         }
 
-        /* Affine-input sweep — G is Z=1 (built from c->gx, c->gy). Hits the wNAF affine     */
+        /* Affine-input sweep -- G is Z=1 (built from c->gx, c->gy). Hits the wNAF affine    */
         /* fast path (table[0] is Z=1, so adds of ±table[0] use mixed-coordinate addition).  */
         for (i = 0; i < 8u; i++)
         {
@@ -1927,7 +1927,7 @@ void SSFECUnitTest(void)
         SSFECScalarMul(&Rref, &d, &G, SSF_EC_CURVE_P256);  /* Rref = 8G */
         SSF_ASSERT(SSFECPointToAffine(&refx, &refy, &Rref, SSF_EC_CURVE_P256) == true);
 
-        /* Case 1a: SSFECPointAdd(&P, &P, &Q) — output aliases first input. */
+        /* Case 1a: SSFECPointAdd(&P, &P, &Q) -- output aliases first input. */
         {
             SSFECPOINT_DEFINE(Plocal, SSF_EC_MAX_LIMBS);
             SSFBNCopy(&Plocal.x, &P.x); SSFBNCopy(&Plocal.y, &P.y); SSFBNCopy(&Plocal.z, &P.z);
@@ -1937,7 +1937,7 @@ void SSFECUnitTest(void)
             SSF_ASSERT(SSFBNCmp(&ry, &refy) == 0);
         }
 
-        /* Case 1b: SSFECPointAdd(&Q, &P, &Q) — output aliases second input. */
+        /* Case 1b: SSFECPointAdd(&Q, &P, &Q) -- output aliases second input. */
         {
             SSFECPOINT_DEFINE(Qlocal, SSF_EC_MAX_LIMBS);
             SSFBNCopy(&Qlocal.x, &Q.x); SSFBNCopy(&Qlocal.y, &Q.y); SSFBNCopy(&Qlocal.z, &Q.z);
@@ -1947,7 +1947,7 @@ void SSFECUnitTest(void)
             SSF_ASSERT(SSFBNCmp(&ry, &refy) == 0);
         }
 
-        /* Case 1c: SSFECPointAdd(&P, &P, &P) — both inputs aliased to output (P+P=2P=6G). */
+        /* Case 1c: SSFECPointAdd(&P, &P, &P) -- both inputs aliased to output (P+P=2P=6G). */
         {
             SSFECPOINT_DEFINE(Plocal, SSF_EC_MAX_LIMBS);
             SSFECPOINT_DEFINE(Rref6, SSF_EC_MAX_LIMBS);
@@ -1964,7 +1964,7 @@ void SSFECUnitTest(void)
             SSF_ASSERT(SSFBNCmp(&ry, &refy6) == 0);
         }
 
-        /* Case 1d: SSFECScalarMul(&P, &k, &P) — output aliases input point ([5]·3G = 15G). */
+        /* Case 1d: SSFECScalarMul(&P, &k, &P) -- output aliases input point ([5]·3G = 15G). */
         {
             SSFECPOINT_DEFINE(Plocal, SSF_EC_MAX_LIMBS);
             SSFECPOINT_DEFINE(Rref15, SSF_EC_MAX_LIMBS);
@@ -2073,7 +2073,7 @@ void SSFECUnitTest(void)
     }
 
     /* ---- (Gap 4) Off-curve negative test: PointValidate / PointDecode must reject ---- */
-    /* Build (G.x, G.y + 1) — guaranteed off-curve since (G.x, G.y) IS on the curve.       */
+    /* Build (G.x, G.y + 1) -- guaranteed off-curve since (G.x, G.y) IS on the curve.      */
     {
         const SSFECCurveParams_t *c = SSFECGetCurveParams(SSF_EC_CURVE_P256);
         SSFECPOINT_DEFINE(badPt, SSF_EC_MAX_LIMBS);
@@ -2273,7 +2273,7 @@ void SSFECUnitTest(void)
         SSF_ASSERT(SSFECPointEncode(&O, SSF_EC_CURVE_P256, enc, sizeof(enc), &outLen) == false);
     }
 
-    /* ---- Edge: PointDecode rejects (0, 0) — not on curve ---- */
+    /* ---- Edge: PointDecode rejects (0, 0) -- not on curve ---- */
     {
         SSFECPOINT_DEFINE(decoded, SSF_EC_MAX_LIMBS);
         uint8_t allZero[65] = { 0 };
@@ -2460,7 +2460,7 @@ void SSFECUnitTest(void)
     }
 #endif /* SSF_EC_CONFIG_ENABLE_P256 */
 
-#if 0 /* GENERATE_AFFINE_COMB_TABLES — flip to 1, run, paste dumps into the .h files.            */
+#if 0 /* GENERATE_AFFINE_COMB_TABLES -- flip to 1, run, paste dumps into the .h files.           */
       /* Generates BOTH P-256 and P-384 comb tables in affine form (Z=1) so the comb runtime can */
       /* use mixed-coordinate addition for ~10% speedup.                                          */
     {
@@ -2556,7 +2556,7 @@ void SSFECUnitTest(void)
 
 #if SSF_CONFIG_EC_MICROBENCH == 1
     /* ====================================================================================== */
-    /* Microbenchmark — [k]G scalar multiplication. Driven by random scalars to avoid          */
+    /* Microbenchmark -- [k]G scalar multiplication. Driven by random scalars to avoid         */
     /* branch-predictor caching artefacts. Gated by SSF_CONFIG_EC_MICROBENCH so the normal     */
     /* test run stays quick.                                                                    */
     /* ====================================================================================== */
@@ -2778,7 +2778,7 @@ void SSFECUnitTest(void)
             t1 = SSFPortGetTick64();
             SSF_UT_PRINTF("  ECDSAVerify     P-256        %u iter: %llu ms\n",
                    (unsigned)iters, (unsigned long long)(t1 - t0));
-#endif /* SSF_ECDSA_CONFIG_ENABLE_SIGN — sig produced by Sign feeds Verify */
+#endif /* SSF_ECDSA_CONFIG_ENABLE_SIGN -- sig produced by Sign feeds Verify */
         }
 #endif /* SSF_EC_CONFIG_ENABLE_P256 */
 

@@ -1,5 +1,5 @@
 /* --------------------------------------------------------------------------------------------- */
-/* Small System Framework — ssfasn1 configuration                                                 */
+/* Small System Framework -- ssfasn1 configuration                                               */
 /* --------------------------------------------------------------------------------------------- */
 #ifndef SSF_ASN1_OPT_H_INCLUDE
 #define SSF_ASN1_OPT_H_INCLUDE

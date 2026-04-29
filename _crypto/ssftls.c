@@ -136,7 +136,7 @@ void SSFTLSComputeFinished(SSFHMACHash_t hash,
     SSF_REQUIRE(baseKey != NULL);
     SSF_REQUIRE(transcriptHash != NULL);
     SSF_REQUIRE(verifyData != NULL);
-    /* finishedKey is sized for SSF_TLS_MAX_HASH_SIZE — verifyDataLen above that overflows it. */
+    /* finishedKey is sized for SSF_TLS_MAX_HASH_SIZE -- verifyDataLen above that overflows it. */
     /* RFC 8446 §4.4.4 specifies verify_data length equals the hash output length (32 or 48). */
     SSF_REQUIRE(verifyDataLen <= SSF_TLS_MAX_HASH_SIZE);
 
@@ -300,7 +300,7 @@ bool SSFTLSRecordEncrypt(SSFTLSRecordState_t *state, uint8_t contentType,
     SSF_REQUIRE(recordLen != NULL);
 
     /* RFC 8446 §5.5: refuse to encrypt when seqNum is at the wrap boundary. The next */
-    /* increment would wrap to 0 and re-use the nonce of record 0 — catastrophic.    */
+    /* increment would wrap to 0 and re-use the nonce of record 0 -- catastrophic.   */
     if (state->seqNum == UINT64_MAX) return false;
 
     /* Per-suite AEAD tag size (16 bytes for all suites except TLS_AES_128_CCM_8_SHA256, which
@@ -396,7 +396,7 @@ bool SSFTLSRecordDecrypt(SSFTLSRecordState_t *state,
     /* not be allowed to wrap and re-accept earlier replayed records.                       */
     if (state->seqNum == UINT64_MAX) return false;
 
-    /* Per-suite AEAD tag size — must match what the encrypting peer emitted. */
+    /* Per-suite AEAD tag size -- must match what the encrypting peer emitted. */
     tagLen = _SSFTLSAeadTagSize(state->cipherSuite);
     if (tagLen == 0u) return false;
 

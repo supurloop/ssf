@@ -37,7 +37,7 @@
 /* --------------------------------------------------------------------------------------------- */
 /* Module defines.                                                                               */
 /* --------------------------------------------------------------------------------------------- */
-#define SSF_HMAC_CONTEXT_MAGIC (0x484D4143ul)   /* 'HMAC' — set by Begin, cleared by DeInit. */
+#define SSF_HMAC_CONTEXT_MAGIC (0x484D4143ul)   /* 'HMAC' -- set by Begin, cleared by DeInit. */
 
 /* Compile-time bounds checks via typedef-array idiom (size becomes -1 on failure). */
 typedef char _ssf_hmac_sa_block_sha1_256_fits[(64u  <= SSF_HMAC_MAX_BLOCK_SIZE)  ? 1 : -1];
@@ -264,7 +264,7 @@ void SSFHMACEnd(SSFHMACContext_t *ctx, uint8_t *macOut, size_t macOutSize)
     /* Step 7: Finalize the outer hash */
     _SSFHMACHashEnd(ctx, macOut, macOutSize);
 
-    /* innerHash is derived from the key — clear before going out of scope. */
+    /* innerHash is derived from the key -- clear before going out of scope. */
     SSFCryptSecureZero(innerHash, sizeof(innerHash));
 }
 

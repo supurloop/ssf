@@ -172,7 +172,7 @@ void SSFLPTaskUnitTest(void)
         static volatile bool _slowDone;
         _slowDone = false;
 
-        /* Slow work function — holds the thread busy */
+        /* Slow work function -- holds the thread busy */
         handle = SSFLPTaskQueue(
             (SSFLPTaskWorkFn_t)_SSFLPTaskTestWork, _SSFLPTaskTestComplete, NULL, NULL);
         SSF_ASSERT(handle != SSF_LPTASK_HANDLE_INVALID);
@@ -183,7 +183,7 @@ void SSFLPTaskUnitTest(void)
             uint32_t cancelVal = 77;
             cancelHandle = SSFLPTaskQueue(_SSFLPTaskTestWork, _SSFLPTaskTestComplete,
                                           &cancelVal, NULL);
-            /* Try to cancel — may succeed or fail depending on thread scheduling */
+            /* Try to cancel -- may succeed or fail depending on thread scheduling */
             (void)SSFLPTaskCancel(cancelHandle);
         }
 
@@ -202,6 +202,6 @@ void SSFLPTaskUnitTest(void)
 }
 
 #else /* SSF_CONFIG_ENABLE_THREAD_SUPPORT != 1 */
-void SSFLPTaskUnitTest(void) { /* Thread support disabled — skip */ }
+void SSFLPTaskUnitTest(void) { /* Thread support disabled -- skip */ }
 #endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
 #endif /* SSF_CONFIG_LPTASK_UNIT_TEST */

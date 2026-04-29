@@ -471,7 +471,7 @@ void SSFAESCTRUnitTest(void)
         uint8_t iv[16] = {0};
         uint8_t buf[4] = {0};
 
-        /* Uninitialized ctx — magic check trips. */
+        /* Uninitialized ctx -- magic check trips. */
         SSF_ASSERT_TEST(SSFAESCTRCrypt(&ctx, buf, buf, sizeof(buf)));
 
         SSFAESCTRBegin(&ctx, key, sizeof(key), iv);
@@ -489,7 +489,7 @@ void SSFAESCTRUnitTest(void)
         SSFAESCTRContext_t ctx = {0};
 
         SSF_ASSERT_TEST(SSFAESCTRDeInit(NULL));
-        /* Uninitialized — magic mismatch. */
+        /* Uninitialized -- magic mismatch. */
         SSF_ASSERT_TEST(SSFAESCTRDeInit(&ctx));
     }
 
@@ -530,7 +530,7 @@ void SSFAESCTRUnitTest(void)
     /* IV-immutability: SSFAESCTR's iv parameter is const uint8_t *. The function must not
        mutate the caller's IV buffer. Encrypt a multi-block message (so the internal counter
        advances multiple times) and verify the caller's IV bytes are byte-identical after
-       the call. Locks in the no-mutation contract — guards against a regression where
+       the call. Locks in the no-mutation contract -- guards against a regression where
        someone "optimizes" by advancing the IV in place. */
     {
         static const uint8_t key[16] = {
@@ -549,7 +549,7 @@ void SSFAESCTRUnitTest(void)
         SSFAESCTR(key, sizeof(key), iv, pt, ct, sizeof(pt));
         SSF_ASSERT(memcmp(iv, ivSnapshot, sizeof(iv)) == 0);
 
-        /* Same check via the incremental API — the caller's iv buffer must also be       */
+        /* Same check via the incremental API -- the caller's iv buffer must also be      */
         /* untouched after Begin (which copies it into ctx->counter and never writes back). */
         {
             SSFAESCTRContext_t ctx = {0};

@@ -59,7 +59,7 @@ bool SSFHKDFExtract(SSFHMACHash_t hash, const uint8_t *salt, size_t saltLen,
         saltLen = hashSize;
     }
 
-    /* PRK = HMAC-Hash(salt, IKM) — HMAC writes exactly hashSize bytes; any caller-supplied */
+    /* PRK = HMAC-Hash(salt, IKM) -- HMAC writes exactly hashSize bytes; any caller-supplied */
     /* tail in prkOut beyond hashSize is left as-is (RFC 5869: PRK length is HashLen). */
     return SSFHMAC(hash, salt, saltLen, ikm, ikmLen, prkOut, hashSize);
 }

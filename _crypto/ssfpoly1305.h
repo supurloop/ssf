@@ -50,7 +50,7 @@ extern "C" {
 /* Holds the clamped r (5 × 26-bit limbs), s (4 × 32-bit LE words), precomputed r[1..4] * 5, the */
 /* 130-bit accumulator h, a 16-byte partial-block buffer with fill length, and a validity        */
 /* marker. Seeded by Begin, fed by Update, finalised and zeroised by End. Never reuse a context  */
-/* across two messages — Poly1305 is a one-time MAC (see the ssfpoly1305.md key-reuse note).     */
+/* across two messages -- Poly1305 is a one-time MAC (see the ssfpoly1305.md key-reuse note).    */
 /* Callers MUST zero the context before the first call to Begin (e.g. `... ctx = {0};`); End     */
 /* leaves the context fully zeroed so a subsequent Begin on the same storage is also valid.      */
 typedef struct SSFPoly1305Context
@@ -60,8 +60,8 @@ typedef struct SSFPoly1305Context
     uint32_t rr0, rr1, rr2, rr3;          /* r1..r4 * 5 (precomputed reduction operands) */
     uint32_t h0, h1, h2, h3, h4;          /* 130-bit accumulator */
     uint8_t  buf[16];                     /* partial-block accumulator */
-    uint8_t  bufLen;                      /* 0..15 — bytes currently in buf[] */
-    uint32_t magic;                       /* context validity marker — 0 ⇒ uninitialised */
+    uint8_t  bufLen;                      /* 0..15 -- bytes currently in buf[] */
+    uint32_t magic;                       /* context validity marker -- 0 ⇒ uninitialised */
 } SSFPoly1305Context_t;
 
 /* --------------------------------------------------------------------------------------------- */
@@ -76,7 +76,7 @@ void SSFPoly1305Mac(const uint8_t *msg, size_t msgLen,
 
 /* One-shot tag verification: compute the Poly1305 tag over msg with key, then compare against   */
 /* expectedTag in constant time. Returns true iff the tags match exactly. expectedTag is read    */
-/* as exactly SSF_POLY1305_TAG_SIZE bytes — no truncation; for shorter compare semantics, use    */
+/* as exactly SSF_POLY1305_TAG_SIZE bytes -- no truncation; for shorter compare semantics, use   */
 /* SSFPoly1305Mac + SSFCryptCTMemEq directly. Bundles the CT-compare so callers cannot acciden-  */
 /* tally pair Mac with a non-CT memcmp() and open a tag-recovery timing side channel.            */
 bool SSFPoly1305Verify(const uint8_t *msg, size_t msgLen,
@@ -99,7 +99,7 @@ void SSFPoly1305Update(SSFPoly1305Context_t *ctx,
 /* Incremental: finalize and write the 16-byte tag. Processes any remaining partial block with   */
 /* the RFC 7539 0x01 high-bit marker, runs the final reduction, adds s, and emits the tag. Also  */
 /* zeroises ctx on return to limit exposure of the one-time key material. After End the context  */
-/* is invalid — Begin it again before reuse. */
+/* is invalid -- Begin it again before reuse. */
 void SSFPoly1305End(SSFPoly1305Context_t *ctx,
                     uint8_t *tag, size_t tagSize);
 

@@ -352,7 +352,7 @@ static void _VerifyAtSize(int bits, uint16_t iters, bool prime_capable)
             SSFBN_DEFINE(e, SSF_BN_MAX_LIMBS);
             SSFBN_DEFINE(rOut, SSF_BN_MAX_LIMBS);
 
-            /* Public exponent: e = 65537. Non-secret, low Hamming weight — exercises ModExpPub. */
+            /* Public exponent: e = 65537. Non-secret, low Hamming weight -- exercises ModExpPub. */
             SSFBNSetUint32(&e, 65537u, nLimbs);
             BN_set_word(bnE, 65537u);
 
@@ -388,7 +388,7 @@ static void _VerifyAtSize(int bits, uint16_t iters, bool prime_capable)
 
             SSF_ASSERT(SSFBNBitLen(&a) == (uint32_t)BN_num_bits(bnA));
 
-            shiftBy = (uint32_t)((unsigned)i & 0x1Fu); /* 0..31 — keeps result inside nLimbs. */
+            shiftBy = (uint32_t)((unsigned)i & 0x1Fu); /* 0..31 -- keeps result inside nLimbs. */
             SSFBNCopy(&shifted, &a);
             SSFBNShiftRight(&shifted, shiftBy);
             SSF_ASSERT(BN_rshift(bnR, bnA, (int)shiftBy) == 1);
@@ -604,7 +604,7 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
         SSF_ASSERT(BN_mul(bnR, bnTmp, bnA, ctx) == 1);
         SSF_ASSERT(_EqOSSL(&r, bnR));
 
-        /* allOnes * allOnes — exercises full carry propagation. */
+        /* allOnes * allOnes -- exercises full carry propagation. */
         SSFBNMul(&r, &allOnes, &allOnes);
         _ToOSSL(bnTmp, &allOnes);
         SSF_ASSERT(BN_mul(bnR, bnTmp, bnTmp, ctx) == 1);
@@ -803,7 +803,7 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
         SSF_ASSERT(SSFBNModInv(&r, &mMinus1, &m) == true);
         SSF_ASSERT(SSFBNCmp(&r, &mMinus1) == 0);
 
-        /* a^(-1) * a mod m = 1 — round-trip property. */
+        /* a^(-1) * a mod m = 1 -- round-trip property. */
         {
             SSFBN_DEFINE(prod, SSF_BN_MAX_LIMBS);
             prod.len = nLimbs;
@@ -861,7 +861,7 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
         SSFBNMontMul(&rR, &oneR, &aR, &mont);
         SSF_ASSERT(SSFBNCmp(&rR, &aR) == 0);
 
-        /* Aliasing: MontMul(rR, rR, ..) — r = a. */
+        /* Aliasing: MontMul(rR, rR, ..) -- r = a. */
         SSFBNMontConvertIn(&bR, &rand2, &mont);
         SSFBNCopy(&rR, &aR);
         SSFBNMontMul(&rR, &rR, &bR, &mont);
@@ -920,7 +920,7 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
 
         /* Wider e (e->len > ctx->len) with high bits set: ModExp must process all of e, not    */
         /* silently truncate to the modulus's bit width. Construct e with e->len = 2*nLimbs and */
-        /* a bit set above ctx->len*32 — verify against OpenSSL. */
+        /* a bit set above ctx->len*32 -- verify against OpenSSL. */
         {
             SSFBN_DEFINE(eWide, SSF_BN_MAX_LIMBS);
             BIGNUM *bnEWide = BN_new();
@@ -1168,7 +1168,7 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
         SSFBNSetUint32(&t, 65537u, nLimbs);
         SSF_ASSERT(SSFBNIsProbablePrime(&t, 5u, &prng) == true);
 
-        /* Carmichael number 561 = 3 * 11 * 17 — passes Fermat test but Miller-Rabin must */
+        /* Carmichael number 561 = 3 * 11 * 17 -- passes Fermat test but Miller-Rabin must */
         /* reject with a few rounds of random witnesses. */
         SSFBNSetUint32(&t, 561u, nLimbs);
         SSF_ASSERT(SSFBNIsProbablePrime(&t, 10u, &prng) == false);
@@ -1192,13 +1192,13 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
         SSF_ASSERT(BN_mod_mul(bnR, bnA, bnB, bnM, ctx) == 1);
         SSF_ASSERT(_EqOSSL(&rNist, bnR));
 
-        /* (P-256 - 1) * (P-256 - 1) mod P-256 = 1 — exercises the reduction tail. */
+        /* (P-256 - 1) * (P-256 - 1) mod P-256 = 1 -- exercises the reduction tail. */
         SSFBNModMulNIST(&rNist, &mMinus1, &mMinus1, &SSF_BN_NIST_P256);
         SSF_ASSERT(SSFBNCmpUint32(&rNist, 1u) == 0);
     }
 #if SSF_BN_CONFIG_MAX_BITS >= 768
     {
-        /* P-384 fast path. (Block requires SSF_BN_NIST_P384 — only defined when the cap is at  */
+        /* P-384 fast path. (Block requires SSF_BN_NIST_P384 -- only defined when the cap is at */
         /* least 768 bits, which excludes a pure-ECC-P256-only config.)                          */
         const uint16_t n384 = 12u;
         SSFBN_DEFINE(a384, SSF_BN_MAX_LIMBS);
@@ -1248,7 +1248,7 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
         SSF_ASSERT(BN_mod_mul(bnR, bnA, bnB, bnTmp, ctx) == 1);
         SSF_ASSERT(_EqOSSL(&rNist, bnR));
 
-        /* Restore bnA, bnB to the rand1/rand2 values used elsewhere — caller of this */
+        /* Restore bnA, bnB to the rand1/rand2 values used elsewhere -- caller of this */
         /* function does not depend on them, but be tidy. */
         _ToOSSL(bnA, &rand1);
         _ToOSSL(bnB, &rand2);
@@ -1338,7 +1338,7 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
         SSFBN_DEFINE(t, SSF_BN_MAX_LIMBS);
         uint8_t buf[SSF_BN_MAX_BYTES + 1];
 
-        /* dataLen one byte beyond numLimbs * 4 — must reject regardless of leading byte. */
+        /* dataLen one byte beyond numLimbs * 4 -- must reject regardless of leading byte. */
         memset(buf, 0xFFu, sizeof(buf));
         SSF_ASSERT(SSFBNFromBytes(&t, buf, (size_t)nLimbs * 4u + 1u, nLimbs) == false);
         memset(buf, 0x00u, sizeof(buf));
@@ -1415,7 +1415,7 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
 /* Karatsuba boundary stress.                                                                    */
 /*                                                                                                */
 /* SSFBNMul dispatches to Karatsuba when (a->len == b->len) AND (n >= 32) AND (n is even); every  */
-/* other case falls back to schoolbook. Random-input sweeps don't reliably probe the boundary —  */
+/* other case falls back to schoolbook. Random-input sweeps don't reliably probe the boundary -- */
 /* this function explicitly tests lengths that bracket the threshold and exercise the dispatch   */
 /* logic on both even/odd and same/asymmetric pairings.                                          */
 /* --------------------------------------------------------------------------------------------- */
@@ -1480,7 +1480,7 @@ static void _VerifyKaratsubaAtBoundary(void)
 /* NIST fast-reduction stress.                                                                   */
 /*                                                                                                */
 /* _SSFBNReduceP256 / _SSFBNReduceP384 are hand-coded magic-limb-permutation tables from NIST    */
-/* SP 800-186. Each s_i and d_i selects specific 32-bit chunks of the 16- or 24-limb input —     */
+/* SP 800-186. Each s_i and d_i selects specific 32-bit chunks of the 16- or 24-limb input --    */
 /* easy to typo, hard to spot in code review. The trailing carry/borrow adjustment loops are     */
 /* hit infrequently with purely random inputs because random a*b rarely sits right at the prime. */
 /* This sweep injects boundary values periodically to force adjustment-loop activity.            */
@@ -1984,7 +1984,7 @@ void SSFBNUnitTest(void)
         SSFBNSetUint32(&a, 3u, 4);
         SSF_ASSERT(SSFBNIsOdd(&a) == true);
 
-        /* High limb parity does not affect IsOdd — only the low bit of limb[0] matters. */
+        /* High limb parity does not affect IsOdd -- only the low bit of limb[0] matters. */
         SSFBNSetZero(&a, 4);
         a.limbs[3] = 0x80000001ul;
         SSF_ASSERT(SSFBNIsOdd(&a) == false); /* limb[0] = 0 → even */
@@ -2122,7 +2122,7 @@ void SSFBNUnitTest(void)
         a.limbs[3] = 1u;
         SSF_ASSERT(SSFBNTrailingZeros(&a) == 96u);
 
-        /* Mixed value: low limb zero, limb[1] has a low set bit and other high bits — must      */
+        /* Mixed value: low limb zero, limb[1] has a low set bit and other high bits -- must     */
         /* return the position of the lowest set bit only.                                       */
         SSFBNSetZero(&a, 4);
         a.limbs[1] = 0xFF00FF10ul; /* lowest set bit is bit 4 of limb 1 → global bit 36 */
@@ -2407,7 +2407,7 @@ void SSFBNUnitTest(void)
         SSFBNSetUint32(&n, 2147483645u, 4);
         SSF_ASSERT(SSFBNIsProbablePrime(&n, 5u, &prng) == false);
 
-        /* 91 = 7 * 13 — small composite that fools Fermat base-3 test but not MR. */
+        /* 91 = 7 * 13 -- small composite that fools Fermat base-3 test but not MR. */
         SSFBNSetUint32(&n, 91u, 4);
         SSF_ASSERT(SSFBNIsProbablePrime(&n, 5u, &prng) == false);
 
@@ -2415,7 +2415,7 @@ void SSFBNUnitTest(void)
     }
 
     /* ====================================================================================== */
-    /* Squaring API — must agree bit-for-bit with the general multiply on every input.          */
+    /* Squaring API -- must agree bit-for-bit with the general multiply on every input.         */
     /* ====================================================================================== */
 
     /* ---- SSFBNSquare: parity with SSFBNMul(a, a) across small, mid, and large operands ---- */
@@ -2574,7 +2574,7 @@ void SSFBNUnitTest(void)
     }
 
     /* ====================================================================================== */
-    /* Uint32 small-operand arithmetic — parity with matched 1-limb BN operand                  */
+    /* Uint32 small-operand arithmetic -- parity with matched 1-limb BN operand                 */
     /* ====================================================================================== */
 
     /* ---- SSFBNAddUint32: parity + carry return ---- */
@@ -2706,7 +2706,7 @@ void SSFBNUnitTest(void)
     }
 
     /* ====================================================================================== */
-    /* Variable-time ModExp (public-exponent-only) — must match constant-time ModExp exactly    */
+    /* Variable-time ModExp (public-exponent-only) -- must match constant-time ModExp exactly   */
     /* ====================================================================================== */
 
     /* ---- SSFBNModExpPub: parity with SSFBNModExp across typical RSA public exponents ---- */
@@ -2849,7 +2849,7 @@ void SSFBNUnitTest(void)
         SSFPRNGDeInitContext(&prng);
     }
 
-    /* ---- Precondition assertions (SSF_REQUIRE) — make sure the documented contracts trip ---- */
+    /* ---- Precondition assertions (SSF_REQUIRE) -- make sure the documented contracts trip ---- */
     {
         SSFBN_DEFINE(z, SSF_BN_MAX_LIMBS);
         SSFBN_DEFINE(a8, SSF_BN_MAX_LIMBS);
@@ -2878,7 +2878,7 @@ void SSFBNUnitTest(void)
         SSF_ASSERT_TEST(SSFBNAdd(NULL, &a8, &a8));
         SSF_ASSERT_TEST(SSFBNMod(NULL, &a8, &a8));
 
-        /* DivMod forbids q == rem aliasing — should assert. */
+        /* DivMod forbids q == rem aliasing -- should assert. */
         {
             SSFBN_DEFINE(qr, SSF_BN_MAX_LIMBS);
             qr.len = 8u;
@@ -2911,7 +2911,7 @@ void SSFBNUnitTest(void)
 
 #if SSF_CONFIG_BN_MICROBENCH == 1
     /* ====================================================================================== */
-    /* Microbenchmark — MontMul / MontSquare (CIOS-based) and raw Mul / Square (schoolbook /    */
+    /* Microbenchmark -- MontMul / MontSquare (CIOS-based) and raw Mul / Square (schoolbook /   */
     /* triangular) throughput at representative operand sizes. Gated by SSF_CONFIG_BN_MICROBENCH*/
     /* so the normal test run stays quick; flip the macro in ssfport.h to 1 before measuring    */
     /* perf changes, then back to 0 after.                                                      */
@@ -3009,7 +3009,7 @@ void SSFBNUnitTest(void)
                        (unsigned long long)(t1 - t0));
             }
 
-            /* --- ModExpMont (constant-time, dense full-Hamming exponent — worst case for the    */
+            /* --- ModExpMont (constant-time, dense full-Hamming exponent -- worst case for the   */
             /* binary ladder) and ModExpMontPub (variable-time, e = 65537 = F4, the realistic     */
             /* RSA verify exponent). a is still in plain (non-Mont) form here.                    */
             {

@@ -116,7 +116,7 @@ static void *_SSFLPTaskThread(void *arg)
             }
             SSF_LPTASK_THREAD_SYNC_RELEASE();
 
-            if (entry == NULL) break; /* Queue drained — go back to waiting */
+            if (entry == NULL) break; /* Queue drained -- go back to waiting */
 
             /* Copy fields before returning entry to free list */
             workFn = entry->workFn;
@@ -365,7 +365,7 @@ bool SSFLPTaskGetStatus(SSFLPTaskStatus_t *statusOut)
 
 #else /* SSF_CONFIG_ENABLE_THREAD_SUPPORT != 1 */
 
-/* Stubs when thread support is disabled — these should never be called */
+/* Stubs when thread support is disabled -- these should never be called */
 void SSFLPTaskInit(void) { SSF_ERROR(); }
 void SSFLPTaskDeInit(void) { SSF_ERROR(); }
 bool SSFLPTaskIsInited(void) { return false; }

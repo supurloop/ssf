@@ -1,5 +1,5 @@
 /* --------------------------------------------------------------------------------------------- */
-/* Small System Framework — ssfjson configuration                                                 */
+/* Small System Framework -- ssfjson configuration                                               */
 /* --------------------------------------------------------------------------------------------- */
 #ifndef SSF_JSON_OPT_H_INCLUDE
 #define SSF_JSON_OPT_H_INCLUDE

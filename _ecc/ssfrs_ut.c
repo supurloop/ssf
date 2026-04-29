@@ -179,7 +179,7 @@ void SSFRSUnitTest(void)
         SSFRSEncode(m, 10, ecc, (uint16_t)sizeof(ecc), &eccLen, 4, SSF_RS_MAX_CHUNK_SIZE);
         memcpy(combined, m, 10);
         memcpy(&combined[10], ecc, eccLen);
-        /* No corruption — decode should succeed immediately */
+        /* No corruption -- decode should succeed immediately */
         SSF_ASSERT(SSFRSDecode(combined, 10 + eccLen, &len, 4, SSF_RS_MAX_CHUNK_SIZE));
         SSF_ASSERT(len == 10);
         SSF_ASSERT(memcmp(combined, mCopy, 10) == 0);

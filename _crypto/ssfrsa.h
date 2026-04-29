@@ -157,12 +157,12 @@ bool SSFRSAVerifyPSS(const uint8_t *pubKeyDer, size_t pubKeyDerLen, SSFRSAHash_t
                      const uint8_t *sig, size_t sigLen);
 #endif /* SSF_RSA_CONFIG_ENABLE_PSS */
 
-#endif /* SSF_RSA_ANY_ENABLED == 1 — end of API gated on at-least-one-size-enabled */
+#endif /* SSF_RSA_ANY_ENABLED == 1 -- end of API gated on at-least-one-size-enabled */
 
 /* --------------------------------------------------------------------------------------------- */
 /* Unit test                                                                                     */
 /*                                                                                               */
-/* The declaration is NOT gated on SSF_RSA_ANY_ENABLED — main.c references SSFRSAUnitTest under  */
+/* The declaration is NOT gated on SSF_RSA_ANY_ENABLED -- main.c references SSFRSAUnitTest under */
 /* SSF_CONFIG_RSA_UNIT_TEST and would fail to link if the symbol disappeared. ssfrsa_ut.c gates  */
 /* the body internally and prints a "skipped" message when no sizes are enabled.                  */
 /* --------------------------------------------------------------------------------------------- */

@@ -35,7 +35,7 @@
 #include "ssfsha2.h"
 
 /* Cross-validate ECDSA sign/verify with OpenSSL on host builds where libcrypto is linked. Gated */
-/* on SSF_CONFIG_HAVE_OPENSSL (1 on native macOS/Linux, 0 on cross builds — see ssfport.h).      */
+/* on SSF_CONFIG_HAVE_OPENSSL (1 on native macOS/Linux, 0 on cross builds -- see ssfport.h).     */
 #if (SSF_CONFIG_HAVE_OPENSSL == 1) && (SSF_CONFIG_ECDSA_UNIT_TEST == 1)
 #define SSF_ECDSA_OSSL_VERIFY 1
 #else
@@ -59,7 +59,7 @@
 
 #if SSF_ECDSA_OSSL_VERIFY == 1
 /* --------------------------------------------------------------------------------------------- */
-/* ECDSA sign/verify interop helpers — bridge SSF privKey/pubKey/sig bytes to OpenSSL EC_KEY     */
+/* ECDSA sign/verify interop helpers -- bridge SSF privKey/pubKey/sig bytes to OpenSSL EC_KEY    */
 /* and ECDSA_SIG, and back. Used to catch DER encoding / signature serialization bugs that       */
 /* self-consistency tests miss.                                                                   */
 /* --------------------------------------------------------------------------------------------- */
@@ -232,8 +232,8 @@ static void _VerifyECDSARandomAgainstOpenSSL(SSFECCurve_t curve, uint16_t iters)
 
 /* --------------------------------------------------------------------------------------------- */
 /* ECDH cross-check: SSF and OpenSSL must derive the same shared secret given the same           */
-/* (private, peer-public) inputs. Run with mixed origins — keys from SSF, keys from OpenSSL,     */
-/* and one of each — to catch any corner where an SSF-imported pubkey and an OpenSSL-imported    */
+/* (private, peer-public) inputs. Run with mixed origins -- keys from SSF, keys from OpenSSL,    */
+/* and one of each -- to catch any corner where an SSF-imported pubkey and an OpenSSL-imported   */
 /* pubkey diverge.                                                                                */
 /* --------------------------------------------------------------------------------------------- */
 static void _VerifyECDHAgainstOpenSSL(SSFECCurve_t curve, uint16_t iters)
@@ -422,7 +422,7 @@ static void _VerifyECDSACornerCasesAgainstOpenSSL(SSFECCurve_t curve)
 /* The hardening invariant we want to enforce: by the time SSFECDSASign / SSFECDHComputeSecret / */
 /* SSFECDSAKeyGen returns, every stack-local that ever held secret-derived material must have    */
 /* been wiped. The hook fires from each function's unified cleanup label after the explicit       */
-/* SSFBNZeroize calls — a non-zero limb here means a code path slipped past zeroization.          */
+/* SSFBNZeroize calls -- a non-zero limb here means a code path slipped past zeroization.         */
 typedef struct
 {
     bool sawHook;
@@ -582,7 +582,7 @@ void SSFECDSAUnitTest(void)
     }
 
     /* ---- Zeroization audit: ECDH success path leaves no shared-secret limbs on stack ---- */
-    /* d (local privKey) and S/Sx/Sy (the shared point and its affine coords — i.e., the raw    */
+    /* d (local privKey) and S/Sx/Sy (the shared point and its affine coords -- i.e., the raw   */
     /* ECDH output) all need to be wiped at exit. Sy is wiped both as defense-in-depth and to   */
     /* prevent any future code change that exposes y from leaking it through stack memory.       */
     {
@@ -631,7 +631,7 @@ void SSFECDSAUnitTest(void)
                    privKey, sizeof(privKey), pubKey, sizeof(pubKey), &pubKeyLen) == true);
 
         memset(badPub, 0, sizeof(badPub));
-        badPub[0] = 0x04u;  /* Identity-shaped — rejected by SSFECPointDecode */
+        badPub[0] = 0x04u;  /* Identity-shaped -- rejected by SSFECPointDecode */
 
         _SSFECDSAECDHTestExitHookCtx = &audit;
         _SSFECDSAECDHTestExitHook = _ECDSAUTECDHHook;
@@ -677,7 +677,7 @@ void SSFECDSAUnitTest(void)
 
     /* ---- RFC 6979 A.2.5: canonical (r, s) KAT for P-256/SHA-256 "sample" ---- */
     /* Pins the deterministic nonce derivation, the (r, s) computation, and the DER wrapping     */
-    /* against the RFC. Also exercises the non-CT s^-1 path in Verify on a known-good s — if    */
+    /* against the RFC. Also exercises the non-CT s^-1 path in Verify on a known-good s -- if   */
     /* SSFBNModInvExt ever regressed for canonical-spec inputs this test would catch it.         */
     {
         static const uint8_t privKey[] = {
@@ -1041,7 +1041,7 @@ void SSFECDSAUnitTest(void)
         SSFECPOINT_DEFINE(R, SSF_EC_MAX_LIMBS);
         const SSFECCurveParams_t *c = SSFECGetCurveParams(SSF_EC_CURVE_P256);
 
-        /* k = 12345 — any value > 1 produces a Jacobian R with Z != 1 after the doublings/adds. */
+        /* k = 12345 -- any value > 1 produces a Jacobian R with Z != 1 after the doublings/adds. */
         SSFBNSetUint32(&k, 12345u, c->limbs);
         SSFECScalarMulBaseP256(&R, &k);
 
@@ -1091,7 +1091,7 @@ void SSFECDSAUnitTest(void)
     /* ---- (Gap 6) RFC 5903 §8.1 ECDH P-256 known-answer test ---- */
     /* Verifies SSFECDHComputeSecret produces the documented shared secret for a known privKey  */
     /* + peerPubKey pair from RFC 5903 §8.1. The existing Alice/Bob roundtrip test only verifies */
-    /* self-consistency — this catches arithmetic bugs that would silently produce mutually-     */
+    /* self-consistency -- this catches arithmetic bugs that would silently produce mutually-    */
     /* matching but incorrect shared secrets.                                                    */
     {
         /* RFC 5903 §8.1: i (initiator's privKey) */
@@ -1197,7 +1197,7 @@ void SSFECDSAUnitTest(void)
         SSF_ASSERT(pubKeyLen == sizeof(expPub));
         SSF_ASSERT(memcmp(pubKey, expPub, sizeof(expPub)) == 0);
 
-        /* Sign and check the canonical (r, s). r=0x94..., s=0x99... — both have MSB set, so   */
+        /* Sign and check the canonical (r, s). r=0x94..., s=0x99... -- both have MSB set, so  */
         /* each INTEGER is 49 bytes (0x00 sign-pad + 48), giving a 102-byte SEQUENCE content    */
         /* and a 104-byte total signature (the P-384 max).                                       */
         SSFSHA384((const uint8_t *)"sample", 6, hash, sizeof(hash));
@@ -1514,7 +1514,7 @@ void SSFECDSAUnitTest(void)
     SSF_UT_PRINTF("--- end ssfecdsa OpenSSL random fuzz + ECDH + corner cases ---\n");
 #endif /* SSF_ECDSA_OSSL_VERIFY */
 
-#endif /* SSF_ECDSA_CONFIG_ENABLE_SIGN — Sign-using blocks above; Wycheproof verify vectors */
+#endif /* SSF_ECDSA_CONFIG_ENABLE_SIGN -- Sign-using blocks above; Wycheproof verify vectors */
        /* and ECDH below run regardless because they do not use SSFECDSASign.                 */
 
 #if SSF_EC_CONFIG_ENABLE_P256 == 1

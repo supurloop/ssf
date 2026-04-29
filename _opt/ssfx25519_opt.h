@@ -1,5 +1,5 @@
 /* --------------------------------------------------------------------------------------------- */
-/* Small System Framework — ssfx25519 configuration                                               */
+/* Small System Framework -- ssfx25519 configuration                                             */
 /* --------------------------------------------------------------------------------------------- */
 #ifndef SSF_X25519_OPT_H_INCLUDE
 #define SSF_X25519_OPT_H_INCLUDE

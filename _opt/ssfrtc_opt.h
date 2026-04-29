@@ -1,5 +1,5 @@
 /* --------------------------------------------------------------------------------------------- */
-/* Small System Framework — ssfrtc configuration                                                  */
+/* Small System Framework -- ssfrtc configuration                                                */
 /* --------------------------------------------------------------------------------------------- */
 #ifndef SSF_RTC_OPT_H_INCLUDE
 #define SSF_RTC_OPT_H_INCLUDE

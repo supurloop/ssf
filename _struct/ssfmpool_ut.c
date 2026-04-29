@@ -132,7 +132,7 @@ void SSFMPoolUnitTest(void)
     SSFMPoolDeInit(&smpTestPool);
     SSF_ASSERT_TEST(SSFMPoolDeInit(&smpTestPool));
 
-    /* Alloc, write data within block, free — sentinel survives normal use */
+    /* Alloc, write data within block, free -- sentinel survives normal use */
     SSFMPoolInit(&smpTestPool, SMP_TEST_BLOCKS, SMP_TEST_BLOCK_SIZE);
     testPtr = SSFMPoolAlloc(&smpTestPool, SMP_TEST_BLOCK_SIZE, 0x42);
     SSF_ASSERT(testPtr != NULL);

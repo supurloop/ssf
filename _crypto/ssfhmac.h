@@ -62,7 +62,7 @@ typedef enum
 
 /* Incremental HMAC context. Callers MUST zero the context before the first call to            */
 /* SSFHMACBegin (e.g. `... ctx = {0};`); SSFHMACDeInit leaves the context fully zeroed so a     */
-/* subsequent Begin on the same storage is also valid. SSFHMACEnd does not zero — DeInit is     */
+/* subsequent Begin on the same storage is also valid. SSFHMACEnd does not zero -- DeInit is    */
 /* required between two Begins on the same context.                                              */
 typedef struct SSFHMACContext
 {
@@ -74,7 +74,7 @@ typedef struct SSFHMACContext
         SSFSHA2_32Context_t sha2_32;
         SSFSHA2_64Context_t sha2_64;
     } hashCtx;
-    uint32_t magic;                             /* validity marker — 0 ⇒ uninitialised */
+    uint32_t magic;                             /* validity marker -- 0 ⇒ uninitialised */
 } SSFHMACContext_t;
 
 /* --------------------------------------------------------------------------------------------- */

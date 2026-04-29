@@ -193,7 +193,7 @@ void SSFPRNGUnitTest(void)
 
     /* Defense-in-depth regression: GetRandom now scrubs its internal pt and ct stack buffers
      * before return. The scrub is not externally observable through the C API, but it must
-     * not break the deterministic-output contract — a fresh ctx with the same entropy must
+     * not break the deterministic-output contract -- a fresh ctx with the same entropy must
      * still produce the same first-call output. This catches any regression that would
      * accidentally damage the live state during the scrub (e.g., scrubbing context->entropy
      * by mistake). */

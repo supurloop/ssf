@@ -1,5 +1,5 @@
 /* --------------------------------------------------------------------------------------------- */
-/* Small System Framework — ssfheap configuration                                                 */
+/* Small System Framework -- ssfheap configuration                                               */
 /* --------------------------------------------------------------------------------------------- */
 #ifndef SSF_HEAP_OPT_H_INCLUDE
 #define SSF_HEAP_OPT_H_INCLUDE

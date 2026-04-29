@@ -562,7 +562,7 @@ void SSFASN1UnitTest(void)
         SSF_ASSERT(decoded == 0ull);
     }
 
-    /* ---- Time range #2: UTCTime YY=69 (1969) rejected — ssfdtime range starts at 1970 ---- */
+    /* ---- Time range #2: UTCTime YY=69 (1969) rejected -- ssfdtime range starts at 1970 ---- */
     {
         static const uint8_t bad[] = {
             SSF_ASN1_TAG_UTC_TIME, 0x0Du,

@@ -1,5 +1,5 @@
 /* --------------------------------------------------------------------------------------------- */
-/* Small System Framework — _crypto-wide configuration profile                                    */
+/* Small System Framework -- _crypto-wide configuration profile                                  */
 /*                                                                                               */
 /* Selects defaults for the cross-module performance / memory knobs in ssfbn and ssfec. Each     */
 /* per-module opt file (ssfbn_opt.h, ssfec_opt.h) processes its own knobs through #ifndef so any */
@@ -66,7 +66,7 @@ extern "C" {
 
 /* Drop SSFECDSASign and the DER-encode helper. The verify path is now ssfasn1-free, so a    */
 /* MIN_MEMORY build with this default can omit the entire ssfasn1 module. Targets that need  */
-/* on-device signing (rare for MIN_MEMORY — typical use case is firmware-update verifiers)   */
+/* on-device signing (rare for MIN_MEMORY -- typical use case is firmware-update verifiers)  */
 /* override this back to 1.                                                                  */
 #ifndef SSF_ECDSA_CONFIG_ENABLE_SIGN
 #define SSF_ECDSA_CONFIG_ENABLE_SIGN         (0u)
@@ -74,17 +74,17 @@ extern "C" {
 
 #elif SSF_CRYPT_CONFIG_PROFILE == SSF_CRYPT_PROFILE_MAX_PERF
 
-/* Karatsuba dispatch sooner — wins for RSA-2048+ multiplies. */
+/* Karatsuba dispatch sooner -- wins for RSA-2048+ multiplies. */
 #ifndef SSF_BN_KARATSUBA_THRESHOLD
 #define SSF_BN_KARATSUBA_THRESHOLD           (16u)
 #endif
 
-#endif /* CUSTOM picks no profile-set defaults — per-module opts pick their own. */
+#endif /* CUSTOM picks no profile-set defaults -- per-module opts pick their own. */
 
 /* SSF_BN_MODEXP_WIN_K is intentionally NOT profile-controlled: the windowed Montgomery        */
 /* exponentiation in SSFBNModExpMont assumes the window size cleanly divides SSF_BN_LIMB_BITS  */
 /* (32) when computing nWindows = expLen * 32 / WIN_K. Setting WIN_K to a non-divisor (3, 5,   */
-/* 6, 7) silently truncates the iteration count and corrupts results — most visibly through    */
+/* 6, 7) silently truncates the iteration count and corrupts results -- most visibly through   */
 /* SSFBNModInv (Fermat) and downstream SSFECPointToAffine. Keep WIN_K = 4 until ModExp is      */
 /* generalised to handle a partial top window.                                                  */
 

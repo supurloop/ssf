@@ -75,7 +75,7 @@ static void _OSSLSHA1(const uint8_t *in, size_t inLen, uint8_t out[SSF_SHA1_HASH
 /*   - draws a fresh random message                                                              */
 /*   - hashes it via SSFSHA1 one-shot AND via SSFSHA1Begin/Update/End with a mid-message split   */
 /*   - compares both to OpenSSL's EVP_sha1                                                       */
-/* The lengths span the 64-byte block boundary and the 55/56-byte padding-overflow boundary —   */
+/* The lengths span the 64-byte block boundary and the 55/56-byte padding-overflow boundary --  */
 /* the bug class this catches that the fixed RFC 3174 KATs would miss.                           */
 /* --------------------------------------------------------------------------------------------- */
 static void _VerifySHA1AgainstOpenSSLRandom(void)

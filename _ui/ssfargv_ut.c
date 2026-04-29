@@ -382,7 +382,7 @@ void SSFArgvUnitTest(void)
     /* Test that a leading '/' in an arg can be escaped with '\' so the arg is parsed as     */
     /* beginning with '/' rather than as an option specifier. This is the behavior implied   */
     /* by the grammar comment at the top of ssfargv.c ("leading '/' escaped by '\'") but is  */
-    /* NOT implemented by the current SSF_ARG_FIND_ARG macro — the macro only recognizes     */
+    /* NOT implemented by the current SSF_ARG_FIND_ARG macro -- the macro only recognizes    */
     /* '\ ' and '\\' as valid escape sequences and treats '\/' as a parse error. This test   */
     /* will FAIL against the current implementation and is intended as a TDD-style witness   */
     /* for the missing '\/' escape support.                                                   */

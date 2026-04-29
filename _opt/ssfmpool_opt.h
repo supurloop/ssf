@@ -1,5 +1,5 @@
 /* --------------------------------------------------------------------------------------------- */
-/* Small System Framework — ssfmpool configuration                                                */
+/* Small System Framework -- ssfmpool configuration                                              */
 /* --------------------------------------------------------------------------------------------- */
 #ifndef SSF_MPOOL_OPT_H_INCLUDE
 #define SSF_MPOOL_OPT_H_INCLUDE

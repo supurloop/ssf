@@ -1,5 +1,5 @@
 /* --------------------------------------------------------------------------------------------- */
-/* Small System Framework — ssfvted configuration                                                 */
+/* Small System Framework -- ssfvted configuration                                               */
 /* --------------------------------------------------------------------------------------------- */
 #ifndef SSF_VTED_OPT_H_INCLUDE
 #define SSF_VTED_OPT_H_INCLUDE

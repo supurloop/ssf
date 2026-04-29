@@ -91,5 +91,11 @@ void SSFPRNGGetRandom(SSFPRNGContext_t *context, uint8_t *random, size_t randomS
 
     /* Copy requested number of random numbers to user buffer */
     memcpy(random, ct, randomSize);
+
+    /* Scrub stack secrets before return: pt encodes the count (which derives from the first 8 */
+    /* bytes of entropy, so its recovery leaks half the seed); ct[randomSize..15] is unused      */
+    /* keystream that would let an attacker forward-predict the next-block portion of output.   */
+    SSFCryptSecureZero(pt, sizeof(pt));
+    SSFCryptSecureZero(ct, sizeof(ct));
 }
 

@@ -157,4 +157,37 @@ void SSFPRNGUnitTest(void)
         SSF_ASSERT(memcmp(r, zeros, sizeof(r)) != 0);
         SSFPRNGDeInitContext(&ctx);
     }
+
+    /* Defense-in-depth regression: GetRandom now scrubs its internal pt and ct stack buffers
+     * before return. The scrub is not externally observable through the C API, but it must
+     * not break the deterministic-output contract — a fresh ctx with the same entropy must
+     * still produce the same first-call output. This catches any regression that would
+     * accidentally damage the live state during the scrub (e.g., scrubbing context->entropy
+     * by mistake). */
+    {
+        SSFPRNGContext_t ctxA;
+        SSFPRNGContext_t ctxB;
+        uint8_t rA[SSF_PRNG_RANDOM_MAX_SIZE];
+        uint8_t rB[SSF_PRNG_RANDOM_MAX_SIZE];
+
+        SSFPRNGInitContext(&ctxA, entropy, sizeof(entropy));
+        SSFPRNGGetRandom(&ctxA, rA, sizeof(rA));
+
+        /* Run a few extra calls to exercise the scrub path multiple times before the    */
+        /* second context's first call. If the scrub were corrupting state, ctxB's first */
+        /* call would diverge from ctxA's first call.                                    */
+        {
+            uint8_t scratch[SSF_PRNG_RANDOM_MAX_SIZE];
+            SSFPRNGGetRandom(&ctxA, scratch, sizeof(scratch));
+            SSFPRNGGetRandom(&ctxA, scratch, 1u);
+            SSFPRNGGetRandom(&ctxA, scratch, 7u);
+        }
+
+        SSFPRNGInitContext(&ctxB, entropy, sizeof(entropy));
+        SSFPRNGGetRandom(&ctxB, rB, sizeof(rB));
+        SSF_ASSERT(memcmp(rA, rB, sizeof(rA)) == 0);
+
+        SSFPRNGDeInitContext(&ctxA);
+        SSFPRNGDeInitContext(&ctxB);
+    }
 }

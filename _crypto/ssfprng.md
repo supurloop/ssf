@@ -22,9 +22,17 @@ pseudo-random output. Security depends entirely on the quality of the entropy su
 
 ## [↑](#ssfprng--pseudo-random-number-generator) Notes
 
-- **Timing attack warning:** This implementation relies on the timing-attack-vulnerable
-  [`ssfaes`](ssfaes.md) block cipher. Do not use in production environments where an attacker
-  can observe precise execution times.
+- **Timing attack warning — seed recovery, not just per-call leakage.** This implementation
+  uses the timing-attack-vulnerable [`ssfaes`](ssfaes.md) block cipher with the entropy as
+  the AES-128 key. In an ordinary AES use, recovering the key via timing observation
+  compromises only the message protected with that key. Here, **the AES key IS the PRNG
+  seed**: an attacker who recovers the key from timing observations can predict every future
+  PRNG output (the counter is monotonic, so the keystream is deterministic) and reproduce
+  every past output (the counter is recoverable). Any keys, nonces, IVs, or other secrets
+  the higher-level code derived from this PRNG become predictable. Do not use in
+  environments where an attacker can observe precise execution times unless the consuming
+  application is explicitly designed to tolerate seed-recovery (e.g., one-shot use with
+  immediate re-seed from a fresh entropy source).
 - Cryptographic security depends entirely on the quality of the entropy provided to
   `SSFPRNGInitContext()`. Weak or predictable entropy produces weak output.
 - Each `SSFPRNGGetRandom()` call advances the internal counter by one regardless of `randomSize`;

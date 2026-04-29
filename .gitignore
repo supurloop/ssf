@@ -2,5 +2,7 @@ Debug/**
 x64/**
 .vs/**
 build/
+build-asan/
+build-asan-linux/
 ssf
 ssf-*

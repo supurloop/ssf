@@ -123,10 +123,18 @@ void SSFAESCTRCrypt(SSFAESCTRContext_t *ctx, const uint8_t *in, uint8_t *out, si
         take = SSF_AESCTR_BLOCK_SIZE - ctx->ksOff;
         if (take > len) take = len;
 
+/* Disable false positive Visual Studio Code Analysis warning */
+#ifdef _WIN32
+#pragma warning(push)
+#pragma warning(disable:6385)
+#endif
         for (i = 0; i < take; i++)
         {
             out[i] = (uint8_t)(in[i] ^ ctx->ks[ctx->ksOff + i]);
         }
+#ifdef _WIN32
+#pragma warning(pop)
+#endif
 
         ctx->ksOff += take;
         in  += take;

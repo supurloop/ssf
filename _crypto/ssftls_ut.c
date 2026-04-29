@@ -36,6 +36,13 @@
 
 #if SSF_CONFIG_TLS_UNIT_TEST == 1
 
+/* Suppress C6262 (large stack frame). This unit-test entry point intentionally allocates many */
+/* TLS record / transcript buffers across its sub-test blocks; the host test environment has   */
+/* ample stack.                                                                                 */
+#ifdef _WIN32
+#pragma warning(push)
+#pragma warning(disable:6262)
+#endif
 void SSFTLSUnitTest(void)
 {
     /* ---- Transcript hash: SHA-256 of empty string ---- */
@@ -739,4 +746,7 @@ void SSFTLSUnitTest(void)
                                        &scratchPtLen, &scratchCt) == false);
     }
 }
+#ifdef _WIN32
+#pragma warning(pop)
+#endif
 #endif /* SSF_CONFIG_TLS_UNIT_TEST */

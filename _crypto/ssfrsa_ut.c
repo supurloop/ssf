@@ -75,6 +75,12 @@
 /* --------------------------------------------------------------------------------------------- */
 #define _SSFRSA_UT_HYGIENE_PROBE_BYTES (16u * 1024u)
 
+/* Suppress C6262 (large stack frame). The pollute/scan probe pair intentionally allocates a   */
+/* 16 KiB stack buffer to overlay the freed callee frame from the function under test.         */
+#ifdef _WIN32
+#pragma warning(push)
+#pragma warning(disable:6262)
+#endif
 SSF_NOINLINE
 static void _SSFRSAUTPolluteStack(uint8_t v)
 {
@@ -82,12 +88,21 @@ static void _SSFRSAUTPolluteStack(uint8_t v)
     size_t i;
     for (i = 0u; i < sizeof(buf); i++) buf[i] = v;
 }
+#ifdef _WIN32
+#pragma warning(pop)
+#endif
 
-/* Reading uninitialized stack is the test — silence GCC/clang's -Wuninitialized for this body. */
+/* Reading uninitialized stack is the test — silence GCC/clang's -Wuninitialized and MSVC       */
+/* /analyze's C6001 for this body.                                                              */
 #if defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wuninitialized"
 #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#endif
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable: 6001)
+#pragma warning(disable: 6262)
 #endif
 SSF_NOINLINE
 static int _SSFRSAUTScanStack(const uint8_t *needle, size_t needleLen)
@@ -110,6 +125,9 @@ static int _SSFRSAUTScanStack(const uint8_t *needle, size_t needleLen)
     buf[0] = (uint8_t)found;
     return found;
 }
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
 #if defined(__GNUC__)
 #pragma GCC diagnostic pop
 #endif
@@ -446,6 +464,12 @@ static void _SSFRSAVerifyAgainstOpenSSL(const uint8_t *foreignPriv, size_t forei
 #pragma GCC diagnostic pop  /* -Wdeprecated-declarations restored */
 #endif /* SSF_RSA_OSSL_VERIFY */
 
+/* Suppress C6262 (large stack frame). This unit-test entry point intentionally allocates many */
+/* RSA-sized buffers across its sub-test blocks; the host test environment has ample stack.    */
+#ifdef _WIN32
+#pragma warning(push)
+#pragma warning(disable:6262)
+#endif
 void SSFRSAUnitTest(void)
 {
 #if SSF_RSA_ANY_ENABLED == 0
@@ -1190,4 +1214,7 @@ void SSFRSAUnitTest(void)
     }
 #endif /* SSF_RSA_ANY_ENABLED */
 }
+#ifdef _WIN32
+#pragma warning(pop)
+#endif
 #endif /* SSF_CONFIG_RSA_UNIT_TEST */

@@ -120,6 +120,9 @@ bool SSFASN1DecGetTLV(const SSFASN1Cursor_t *cursor, uint16_t *tagOut,
     SSF_REQUIRE(valueLenOut != NULL);
     SSF_REQUIRE(next != NULL);
 
+    /* Hoists bufLen==0 so /analyze can see buf!=NULL on the dereferences below (C6011). */
+    if (cursor->bufLen == 0u) return false;
+
     headerLen = _SSFASN1ParseTL(cursor->buf, cursor->bufLen, &tag, &contentLen);
     if (headerLen == 0) return false;
     /* Overflow-safe: headerLen <= cursor->bufLen is guaranteed by _SSFASN1ParseTL. */

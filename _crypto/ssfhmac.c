@@ -196,11 +196,19 @@ void SSFHMACBegin(SSFHMACContext_t *ctx, SSFHMACHash_t hash, const uint8_t *key,
     }
 
     /* Step 2: Compute iKeyPad = K' XOR 0x36 and oKeyPad = K' XOR 0x5C */
+/* Disable false positive Visual Studio Code Analysis warning */
+#ifdef _WIN32
+#pragma warning(push)
+#pragma warning(disable:6385)
+#endif
     for (i = 0; i < blockSize; i++)
     {
         iKeyPad[i] = keyPrime[i] ^ 0x36u;
         ctx->oKeyPad[i] = keyPrime[i] ^ 0x5Cu;
     }
+#ifdef _WIN32
+#pragma warning(pop)
+#endif
 
     /* Step 3: Start the inner hash: H(iKeyPad || ...) */
     _SSFHMACHashBegin(ctx);

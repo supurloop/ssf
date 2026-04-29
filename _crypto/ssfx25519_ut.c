@@ -183,11 +183,16 @@ static void _SSFX25519UTPolluteStack(uint8_t pattern)
     SSF_OPTIMIZER_BARRIER(buf);
 }
 
-/* Reading uninitialized stack is the test — silence GCC/clang's -Wuninitialized for this body. */
+/* Reading uninitialized stack is the test — silence GCC/clang's -Wuninitialized and MSVC       */
+/* /analyze's C6001 for this body.                                                              */
 #if defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wuninitialized"
 #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#endif
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable: 6001)
 #endif
 SSF_NOINLINE
 static size_t _SSFX25519UTCountSentinel(uint8_t pattern)
@@ -204,6 +209,9 @@ static size_t _SSFX25519UTCountSentinel(uint8_t pattern)
     }
     return hits;
 }
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
 #if defined(__GNUC__)
 #pragma GCC diagnostic pop
 #endif

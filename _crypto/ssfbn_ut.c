@@ -1661,6 +1661,12 @@ static void _SSFBNVerifyAgainstOpenSSL(void)
 
 #endif /* SSF_BN_OSSL_VERIFY */
 
+/* Suppress C6262 (large stack frame). This unit-test entry point intentionally allocates many */
+/* SSFBN_DEFINE locals across its sub-test blocks; the host test environment has ample stack.  */
+#ifdef _WIN32
+#pragma warning(push)
+#pragma warning(disable:6262)
+#endif
 void SSFBNUnitTest(void)
 {
     /* ---- SetZero, SetUint32, IsZero, IsOne ---- */
@@ -3107,4 +3113,7 @@ void SSFBNUnitTest(void)
     }
 #endif /* SSF_CONFIG_BN_MICROBENCH */
 }
+#ifdef _WIN32
+#pragma warning(pop)
+#endif
 #endif /* SSF_CONFIG_BN_UNIT_TEST */

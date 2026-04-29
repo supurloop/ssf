@@ -638,6 +638,12 @@ static void _ECVerifyAtCurve(SSFECCurve_t curve, uint16_t iters)
 
 #endif /* SSF_EC_OSSL_VERIFY */
 
+/* Suppress C6262 (large stack frame). This unit-test entry point intentionally allocates many */
+/* curve-state locals across its sub-test blocks; the host test environment has ample stack.   */
+#ifdef _WIN32
+#pragma warning(push)
+#pragma warning(disable:6262)
+#endif
 void SSFECUnitTest(void)
 {
 #if SSF_EC_OSSL_VERIFY == 1
@@ -2764,4 +2770,7 @@ void SSFECUnitTest(void)
     }
 #endif /* SSF_CONFIG_EC_MICROBENCH */
 }
+#ifdef _WIN32
+#pragma warning(pop)
+#endif
 #endif /* SSF_CONFIG_EC_UNIT_TEST */

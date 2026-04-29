@@ -155,6 +155,99 @@ void SSFTLSUnitTest(void)
         }
     }
 
+    /* ---- RFC 8448 §3 Simple 1-RTT Handshake key-schedule KAT ---- */
+    /* Walks four steps of the published worked example with bit-exact reference values:           */
+    /*   derived       = Derive-Secret(early_secret, "derived", empty_hash)                         */
+    /*   c_hs_traffic  = Derive-Secret(handshake_secret, "c hs traffic", thash_through_ServerHello) */
+    /*   s_hs_traffic  = Derive-Secret(handshake_secret, "s hs traffic", thash_through_ServerHello) */
+    /*   (key, iv)     = DeriveTrafficKeys(c_hs_traffic) — HKDF-Expand-Label "key" + "iv"           */
+    /* Exercises HkdfExpandLabel, DeriveSecret, and DeriveTrafficKeys against published RFC values  */
+    /* for the strongest cross-build correctness coverage. The Finished step is not pinned here     */
+    /* because the trace doesn't make its transcript-hash input explicit — it remains exercised     */
+    /* via the existing deterministic regression test below.                                        */
+    {
+        static const uint8_t earlySecret[] = {
+            0x33u, 0xADu, 0x0Au, 0x1Cu, 0x60u, 0x7Eu, 0xC0u, 0x3Bu,
+            0x09u, 0xE6u, 0xCDu, 0x98u, 0x93u, 0x68u, 0x0Cu, 0xE2u,
+            0x10u, 0xADu, 0xF3u, 0x00u, 0xAAu, 0x1Fu, 0x26u, 0x60u,
+            0xE1u, 0xB2u, 0x2Eu, 0x10u, 0xF1u, 0x70u, 0xF9u, 0x2Au
+        };
+        static const uint8_t emptyHash[] = {
+            0xE3u, 0xB0u, 0xC4u, 0x42u, 0x98u, 0xFCu, 0x1Cu, 0x14u,
+            0x9Au, 0xFBu, 0xF4u, 0xC8u, 0x99u, 0x6Fu, 0xB9u, 0x24u,
+            0x27u, 0xAEu, 0x41u, 0xE4u, 0x64u, 0x9Bu, 0x93u, 0x4Cu,
+            0xA4u, 0x95u, 0x99u, 0x1Bu, 0x78u, 0x52u, 0xB8u, 0x55u
+        };
+        static const uint8_t expectedDerived[] = {
+            0x6Fu, 0x26u, 0x15u, 0xA1u, 0x08u, 0xC7u, 0x02u, 0xC5u,
+            0x67u, 0x8Fu, 0x54u, 0xFCu, 0x9Du, 0xBAu, 0xB6u, 0x97u,
+            0x16u, 0xC0u, 0x76u, 0x18u, 0x9Cu, 0x48u, 0x25u, 0x0Cu,
+            0xEBu, 0xEAu, 0xC3u, 0x57u, 0x6Cu, 0x36u, 0x11u, 0xBAu
+        };
+        static const uint8_t handshakeSecret[] = {
+            0x1Du, 0xC8u, 0x26u, 0xE9u, 0x36u, 0x06u, 0xAAu, 0x6Fu,
+            0xDCu, 0x0Au, 0xADu, 0xC1u, 0x2Fu, 0x74u, 0x1Bu, 0x01u,
+            0x04u, 0x6Au, 0xA6u, 0xB9u, 0x9Fu, 0x69u, 0x1Eu, 0xD2u,
+            0x21u, 0xA9u, 0xF0u, 0xCAu, 0x04u, 0x3Fu, 0xBEu, 0xACu
+        };
+        static const uint8_t thashServerHello[] = {
+            0x86u, 0x0Cu, 0x06u, 0xEDu, 0xC0u, 0x78u, 0x58u, 0xEEu,
+            0x8Eu, 0x78u, 0xF0u, 0xE7u, 0x42u, 0x8Cu, 0x58u, 0xEDu,
+            0xD6u, 0xB4u, 0x3Fu, 0x2Cu, 0xA3u, 0xE6u, 0xE9u, 0x5Fu,
+            0x02u, 0xEDu, 0x06u, 0x3Cu, 0xF0u, 0xE1u, 0xCAu, 0xD8u
+        };
+        static const uint8_t expectedCHsTraffic[] = {
+            0xB3u, 0xEDu, 0xDBu, 0x12u, 0x6Eu, 0x06u, 0x7Fu, 0x35u,
+            0xA7u, 0x80u, 0xB3u, 0xABu, 0xF4u, 0x5Eu, 0x2Du, 0x8Fu,
+            0x3Bu, 0x1Au, 0x95u, 0x07u, 0x38u, 0xF5u, 0x2Eu, 0x96u,
+            0x00u, 0x74u, 0x6Au, 0x0Eu, 0x27u, 0xA5u, 0x5Au, 0x21u
+        };
+        static const uint8_t expectedSHsTraffic[] = {
+            0xB6u, 0x7Bu, 0x7Du, 0x69u, 0x0Cu, 0xC1u, 0x6Cu, 0x4Eu,
+            0x75u, 0xE5u, 0x42u, 0x13u, 0xCBu, 0x2Du, 0x37u, 0xB4u,
+            0xE9u, 0xC9u, 0x12u, 0xBCu, 0xDEu, 0xD9u, 0x10u, 0x5Du,
+            0x42u, 0xBEu, 0xFDu, 0x59u, 0xD3u, 0x91u, 0xADu, 0x38u
+        };
+        static const uint8_t expectedClientKey[] = {
+            0xDBu, 0xFAu, 0xA6u, 0x93u, 0xD1u, 0x76u, 0x2Cu, 0x5Bu,
+            0x66u, 0x6Au, 0xF5u, 0xD9u, 0x50u, 0x25u, 0x8Du, 0x01u
+        };
+        static const uint8_t expectedClientIv[] = {
+            0x5Bu, 0xD3u, 0xC7u, 0x1Bu, 0x83u, 0x6Eu, 0x0Bu, 0x76u,
+            0xBBu, 0x73u, 0x26u, 0x5Fu
+        };
+        uint8_t derived[32];
+        uint8_t cHsTraffic[32];
+        uint8_t sHsTraffic[32];
+        uint8_t clientKey[16];
+        uint8_t clientIv[12];
+
+        /* derived = Derive-Secret(early_secret, "derived", empty_hash) */
+        SSFTLSDeriveSecret(SSF_HMAC_HASH_SHA256, earlySecret, sizeof(earlySecret),
+                           "derived", emptyHash, sizeof(emptyHash),
+                           derived, sizeof(derived));
+        SSF_ASSERT(memcmp(derived, expectedDerived, sizeof(expectedDerived)) == 0);
+
+        /* c_hs_traffic = Derive-Secret(handshake_secret, "c hs traffic", thash_ServerHello) */
+        SSFTLSDeriveSecret(SSF_HMAC_HASH_SHA256, handshakeSecret, sizeof(handshakeSecret),
+                           "c hs traffic", thashServerHello, sizeof(thashServerHello),
+                           cHsTraffic, sizeof(cHsTraffic));
+        SSF_ASSERT(memcmp(cHsTraffic, expectedCHsTraffic, sizeof(expectedCHsTraffic)) == 0);
+
+        /* s_hs_traffic = Derive-Secret(handshake_secret, "s hs traffic", thash_ServerHello) */
+        SSFTLSDeriveSecret(SSF_HMAC_HASH_SHA256, handshakeSecret, sizeof(handshakeSecret),
+                           "s hs traffic", thashServerHello, sizeof(thashServerHello),
+                           sHsTraffic, sizeof(sHsTraffic));
+        SSF_ASSERT(memcmp(sHsTraffic, expectedSHsTraffic, sizeof(expectedSHsTraffic)) == 0);
+
+        /* (key, iv) = DeriveTrafficKeys(c_hs_traffic) — HKDF-Expand-Label("key", 16) and ("iv", 12) */
+        SSFTLSDeriveTrafficKeys(SSF_HMAC_HASH_SHA256, cHsTraffic, sizeof(cHsTraffic),
+                                clientKey, sizeof(clientKey),
+                                clientIv, sizeof(clientIv));
+        SSF_ASSERT(memcmp(clientKey, expectedClientKey, sizeof(expectedClientKey)) == 0);
+        SSF_ASSERT(memcmp(clientIv, expectedClientIv, sizeof(expectedClientIv)) == 0);
+    }
+
     /* ---- Record encrypt / decrypt roundtrip (AES-128-GCM) ---- */
     {
         SSFTLSRecordState_t encState, decState;
@@ -335,35 +428,134 @@ void SSFTLSUnitTest(void)
         SSF_ASSERT(ct == SSF_TLS_CT_APPLICATION);
         SSF_ASSERT(memcmp(decrypted, plaintext, 16) == 0);
     }
-    /* SSFTLSHkdfExpandLabel: ctxLen must be bounded. The internal hkdfLabel buffer is sized
-     * for at most SSF_TLS_MAX_HASH_SIZE (48) context bytes — without a contract check, larger
-     * ctxLen values overflow the stack buffer. The call below would write 100 bytes into a
-     * slot sized for 48; the SSF_REQUIRE introduced for this finding catches it. */
+    /* ---- Record: ChaCha20-Poly1305 round-trip ---- */
+    {
+        SSFTLSRecordState_t encState, decState;
+        uint8_t key[32], iv[12];
+        uint8_t plaintext[] = "ChaCha20-Poly1305 record test";
+        uint8_t record[128];
+        size_t recordLen;
+        uint8_t decrypted[128];
+        size_t decLen;
+        uint8_t ct;
+        uint8_t i;
+
+        for (i = 0; i < 32u; i++) key[i] = (uint8_t)(i + 0xE0u);
+        for (i = 0; i < 12u; i++) iv[i]  = (uint8_t)(i + 0xF0u);
+
+        SSFTLSRecordStateInit(&encState, SSF_TLS_CS_CHACHA20_POLY1305_SHA256,
+                              key, sizeof(key), iv, sizeof(iv));
+        SSFTLSRecordStateInit(&decState, SSF_TLS_CS_CHACHA20_POLY1305_SHA256,
+                              key, sizeof(key), iv, sizeof(iv));
+
+        SSF_ASSERT(SSFTLSRecordEncrypt(&encState, SSF_TLS_CT_APPLICATION,
+                   plaintext, sizeof(plaintext) - 1u, record, sizeof(record), &recordLen) == true);
+        SSF_ASSERT(record[0] == SSF_TLS_CT_APPLICATION);
+        SSF_ASSERT(SSFTLSRecordDecrypt(&decState, record, recordLen,
+                   decrypted, sizeof(decrypted), &decLen, &ct) == true);
+        SSF_ASSERT(decLen == sizeof(plaintext) - 1u);
+        SSF_ASSERT(ct == SSF_TLS_CT_APPLICATION);
+        SSF_ASSERT(memcmp(decrypted, plaintext, sizeof(plaintext) - 1u) == 0);
+
+        /* Tampered ct must reject under ChaCha20-Poly1305 just as under AES-*. */
+        record[SSF_TLS_RECORD_HEADER_SIZE] ^= 0x01u;
+        SSF_ASSERT(SSFTLSRecordDecrypt(&decState, record, recordLen,
+                   decrypted, sizeof(decrypted), &decLen, &ct) == false);
+    }
+
+    /* SSFTLSHkdfExpandLabel: full DBC surface. */
     {
         uint8_t scratchSecret[32] = {0};
-        uint8_t scratchCtx[200];
+        uint8_t scratchCtx[100];
         uint8_t scratchOut[32];
+        char    longLabel[80];
 
         memset(scratchCtx, 0xA5u, sizeof(scratchCtx));
+        memset(longLabel, 'X', sizeof(longLabel));
+        longLabel[sizeof(longLabel) - 1u] = '\0';   /* 79-char label, just past the 64-byte cap */
+
+        /* secret NULL */
+        SSF_ASSERT_TEST(SSFTLSHkdfExpandLabel(SSF_HMAC_HASH_SHA256, NULL, 32u, "key",
+                                              NULL, 0u, scratchOut, sizeof(scratchOut)));
+        /* label NULL */
         SSF_ASSERT_TEST(SSFTLSHkdfExpandLabel(SSF_HMAC_HASH_SHA256,
-                                              scratchSecret, sizeof(scratchSecret),
-                                              "key",
+                                              scratchSecret, sizeof(scratchSecret), NULL,
+                                              NULL, 0u, scratchOut, sizeof(scratchOut)));
+        /* out NULL */
+        SSF_ASSERT_TEST(SSFTLSHkdfExpandLabel(SSF_HMAC_HASH_SHA256,
+                                              scratchSecret, sizeof(scratchSecret), "key",
+                                              NULL, 0u, NULL, sizeof(scratchOut)));
+        /* outLen > 255 */
+        SSF_ASSERT_TEST(SSFTLSHkdfExpandLabel(SSF_HMAC_HASH_SHA256,
+                                              scratchSecret, sizeof(scratchSecret), "key",
+                                              NULL, 0u, scratchOut, 256u));
+        /* ctxLen > SSF_TLS_MAX_HASH_SIZE — addresses #1 buffer overflow */
+        SSF_ASSERT_TEST(SSFTLSHkdfExpandLabel(SSF_HMAC_HASH_SHA256,
+                                              scratchSecret, sizeof(scratchSecret), "key",
                                               scratchCtx, 49u,
                                               scratchOut, sizeof(scratchOut)));
         SSF_ASSERT_TEST(SSFTLSHkdfExpandLabel(SSF_HMAC_HASH_SHA256,
-                                              scratchSecret, sizeof(scratchSecret),
-                                              "key",
+                                              scratchSecret, sizeof(scratchSecret), "key",
                                               scratchCtx, sizeof(scratchCtx),
                                               scratchOut, sizeof(scratchOut)));
+        /* labelLen > 64 */
+        SSF_ASSERT_TEST(SSFTLSHkdfExpandLabel(SSF_HMAC_HASH_SHA256,
+                                              scratchSecret, sizeof(scratchSecret), longLabel,
+                                              NULL, 0u, scratchOut, sizeof(scratchOut)));
     }
 
-    /* SSFTLSComputeFinished: verifyDataLen must be bounded. The internal finishedKey buffer
-     * is SSF_TLS_MAX_HASH_SIZE (48) bytes — verifyDataLen above that overflows it. */
+    /* SSFTLSDeriveSecret: adds transcriptHash NULL on top of HkdfExpandLabel's contracts. */
+    {
+        uint8_t scratchSecret[32] = {0};
+        uint8_t scratchOut[32];
+
+        SSF_ASSERT_TEST(SSFTLSDeriveSecret(SSF_HMAC_HASH_SHA256,
+                                           scratchSecret, sizeof(scratchSecret), "derived",
+                                           NULL, 0u, scratchOut, sizeof(scratchOut)));
+    }
+
+    /* SSFTLSDeriveTrafficKeys: full DBC surface. */
+    {
+        uint8_t scratchSecret[32] = {0};
+        uint8_t scratchKey[16];
+        uint8_t scratchIv[12];
+
+        SSF_ASSERT_TEST(SSFTLSDeriveTrafficKeys(SSF_HMAC_HASH_SHA256,
+                                                NULL, sizeof(scratchSecret),
+                                                scratchKey, sizeof(scratchKey),
+                                                scratchIv, sizeof(scratchIv)));
+        SSF_ASSERT_TEST(SSFTLSDeriveTrafficKeys(SSF_HMAC_HASH_SHA256,
+                                                scratchSecret, sizeof(scratchSecret),
+                                                NULL, sizeof(scratchKey),
+                                                scratchIv, sizeof(scratchIv)));
+        SSF_ASSERT_TEST(SSFTLSDeriveTrafficKeys(SSF_HMAC_HASH_SHA256,
+                                                scratchSecret, sizeof(scratchSecret),
+                                                scratchKey, sizeof(scratchKey),
+                                                NULL, sizeof(scratchIv)));
+    }
+
+    /* SSFTLSComputeFinished: full DBC surface. */
     {
         uint8_t scratchKey[32] = {0};
         uint8_t scratchHash[32] = {0};
         uint8_t scratchVerify[100];
 
+        /* baseKey NULL */
+        SSF_ASSERT_TEST(SSFTLSComputeFinished(SSF_HMAC_HASH_SHA256,
+                                              NULL, sizeof(scratchKey),
+                                              scratchHash, sizeof(scratchHash),
+                                              scratchVerify, 32u));
+        /* transcriptHash NULL */
+        SSF_ASSERT_TEST(SSFTLSComputeFinished(SSF_HMAC_HASH_SHA256,
+                                              scratchKey, sizeof(scratchKey),
+                                              NULL, sizeof(scratchHash),
+                                              scratchVerify, 32u));
+        /* verifyData NULL */
+        SSF_ASSERT_TEST(SSFTLSComputeFinished(SSF_HMAC_HASH_SHA256,
+                                              scratchKey, sizeof(scratchKey),
+                                              scratchHash, sizeof(scratchHash),
+                                              NULL, 32u));
+        /* verifyDataLen > SSF_TLS_MAX_HASH_SIZE — addresses #2 buffer overflow */
         SSF_ASSERT_TEST(SSFTLSComputeFinished(SSF_HMAC_HASH_SHA256,
                                               scratchKey, sizeof(scratchKey),
                                               scratchHash, sizeof(scratchHash),
@@ -372,6 +564,114 @@ void SSFTLSUnitTest(void)
                                               scratchKey, sizeof(scratchKey),
                                               scratchHash, sizeof(scratchHash),
                                               scratchVerify, sizeof(scratchVerify)));
+    }
+
+    /* SSFTLSTranscriptInit / Update / Hash: full DBC surface. */
+    {
+        SSFTLSTranscript_t t;
+        uint8_t scratchHash[48];
+        uint8_t scratchData[16] = {0};
+
+        /* Init: t NULL */
+        SSF_ASSERT_TEST(SSFTLSTranscriptInit(NULL, SSF_HMAC_HASH_SHA256));
+        /* Init: invalid hash (SHA-1 is not allowed for the TLS 1.3 transcript) */
+        SSF_ASSERT_TEST(SSFTLSTranscriptInit(&t, SSF_HMAC_HASH_SHA1));
+
+        /* Properly init for the rest of the tests. */
+        SSFTLSTranscriptInit(&t, SSF_HMAC_HASH_SHA256);
+
+        /* Update: t NULL */
+        SSF_ASSERT_TEST(SSFTLSTranscriptUpdate(NULL, scratchData, sizeof(scratchData)));
+        /* Update: data NULL with len > 0 */
+        SSF_ASSERT_TEST(SSFTLSTranscriptUpdate(&t, NULL, 1u));
+
+        /* Hash: t NULL */
+        SSF_ASSERT_TEST(SSFTLSTranscriptHash(NULL, scratchHash, sizeof(scratchHash)));
+        /* Hash: out NULL */
+        SSF_ASSERT_TEST(SSFTLSTranscriptHash(&t, NULL, sizeof(scratchHash)));
+        /* Hash: outSize < hashLen — SHA-256 needs 32 */
+        SSF_ASSERT_TEST(SSFTLSTranscriptHash(&t, scratchHash, 31u));
+    }
+
+    /* SSFTLSRecordStateInit: full DBC surface. */
+    {
+        SSFTLSRecordState_t state;
+        uint8_t key[32] = {0};
+        uint8_t iv[12] = {0};
+
+        /* state NULL */
+        SSF_ASSERT_TEST(SSFTLSRecordStateInit(NULL, SSF_TLS_CS_AES_128_GCM_SHA256,
+                                              key, 16u, iv, sizeof(iv)));
+        /* key NULL */
+        SSF_ASSERT_TEST(SSFTLSRecordStateInit(&state, SSF_TLS_CS_AES_128_GCM_SHA256,
+                                              NULL, 16u, iv, sizeof(iv)));
+        /* iv NULL */
+        SSF_ASSERT_TEST(SSFTLSRecordStateInit(&state, SSF_TLS_CS_AES_128_GCM_SHA256,
+                                              key, 16u, NULL, sizeof(iv)));
+        /* ivLen != 12 */
+        SSF_ASSERT_TEST(SSFTLSRecordStateInit(&state, SSF_TLS_CS_AES_128_GCM_SHA256,
+                                              key, 16u, iv, 11u));
+        SSF_ASSERT_TEST(SSFTLSRecordStateInit(&state, SSF_TLS_CS_AES_128_GCM_SHA256,
+                                              key, 16u, iv, 13u));
+        /* keyLen > SSF_TLS_MAX_KEY_SIZE */
+        SSF_ASSERT_TEST(SSFTLSRecordStateInit(&state, SSF_TLS_CS_AES_128_GCM_SHA256,
+                                              key, 33u, iv, sizeof(iv)));
+    }
+
+    /* SSFTLSRecordEncrypt: full DBC surface. */
+    {
+        SSFTLSRecordState_t state;
+        uint8_t key[16] = {0};
+        uint8_t iv[12] = {0};
+        uint8_t pt[16] = {0};
+        uint8_t record[64];
+        size_t recordLen;
+
+        SSFTLSRecordStateInit(&state, SSF_TLS_CS_AES_128_GCM_SHA256,
+                              key, sizeof(key), iv, sizeof(iv));
+
+        /* state NULL */
+        SSF_ASSERT_TEST(SSFTLSRecordEncrypt(NULL, SSF_TLS_CT_APPLICATION,
+                                            pt, sizeof(pt), record, sizeof(record), &recordLen));
+        /* pt NULL */
+        SSF_ASSERT_TEST(SSFTLSRecordEncrypt(&state, SSF_TLS_CT_APPLICATION,
+                                            NULL, sizeof(pt), record, sizeof(record), &recordLen));
+        /* record NULL */
+        SSF_ASSERT_TEST(SSFTLSRecordEncrypt(&state, SSF_TLS_CT_APPLICATION,
+                                            pt, sizeof(pt), NULL, sizeof(record), &recordLen));
+        /* recordLen NULL */
+        SSF_ASSERT_TEST(SSFTLSRecordEncrypt(&state, SSF_TLS_CT_APPLICATION,
+                                            pt, sizeof(pt), record, sizeof(record), NULL));
+    }
+
+    /* SSFTLSRecordDecrypt: full DBC surface. */
+    {
+        SSFTLSRecordState_t state;
+        uint8_t key[16] = {0};
+        uint8_t iv[12] = {0};
+        uint8_t record[64] = {0};
+        uint8_t pt[64];
+        size_t ptLen;
+        uint8_t ct;
+
+        SSFTLSRecordStateInit(&state, SSF_TLS_CS_AES_128_GCM_SHA256,
+                              key, sizeof(key), iv, sizeof(iv));
+
+        /* state NULL */
+        SSF_ASSERT_TEST(SSFTLSRecordDecrypt(NULL, record, sizeof(record),
+                                            pt, sizeof(pt), &ptLen, &ct));
+        /* record NULL */
+        SSF_ASSERT_TEST(SSFTLSRecordDecrypt(&state, NULL, sizeof(record),
+                                            pt, sizeof(pt), &ptLen, &ct));
+        /* pt NULL */
+        SSF_ASSERT_TEST(SSFTLSRecordDecrypt(&state, record, sizeof(record),
+                                            NULL, sizeof(pt), &ptLen, &ct));
+        /* ptLen NULL */
+        SSF_ASSERT_TEST(SSFTLSRecordDecrypt(&state, record, sizeof(record),
+                                            pt, sizeof(pt), NULL, &ct));
+        /* contentType NULL */
+        SSF_ASSERT_TEST(SSFTLSRecordDecrypt(&state, record, sizeof(record),
+                                            pt, sizeof(pt), &ptLen, NULL));
     }
 
     /* SSFTLSRecordDecrypt: records claiming a fragLen above 2^14 + 256 (RFC 8446 §5.2 limit)

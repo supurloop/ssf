@@ -393,6 +393,89 @@ void SSFPoly1305UnitTest(void)
         SSF_ASSERT_TEST(SSFPoly1305End(&ctx, scratchTag, sizeof(scratchTag)));
     }
 
+    /* SSFPoly1305Begin: DBC coverage. ctx must be non-NULL and zero-initialised; key must be
+     * non-NULL with length exactly SSF_POLY1305_KEY_SIZE. The magic-field requirement
+     * (ctx->magic == 0u) is exercised separately above. */
+    {
+        SSFPoly1305Context_t scratchCtx = {0};
+        static const uint8_t scratchKey[32] = {0};
+
+        SSF_ASSERT_TEST(SSFPoly1305Begin(NULL, scratchKey, sizeof(scratchKey)));
+        SSF_ASSERT_TEST(SSFPoly1305Begin(&scratchCtx, NULL, sizeof(scratchKey)));
+        SSF_ASSERT_TEST(SSFPoly1305Begin(&scratchCtx, scratchKey, 0u));
+        SSF_ASSERT_TEST(SSFPoly1305Begin(&scratchCtx, scratchKey, 1u));
+        SSF_ASSERT_TEST(SSFPoly1305Begin(&scratchCtx, scratchKey, 31u));
+        SSF_ASSERT_TEST(SSFPoly1305Begin(&scratchCtx, scratchKey, 33u));
+        SSF_ASSERT_TEST(SSFPoly1305Begin(&scratchCtx, scratchKey, 64u));
+        /* scratchCtx remains zero-init since every assert fires before Begin sets magic. */
+    }
+
+    /* SSFPoly1305Update: DBC coverage. ctx must be non-NULL and initialised; msg may only be
+     * NULL when msgLen == 0. Magic-required-for-init is exercised above. */
+    {
+        SSFPoly1305Context_t scratchCtx = {0};
+        static const uint8_t scratchKey[32] = {0};
+        static const uint8_t scratchMsg[8] = {0};
+        uint8_t scratchTag[16];
+
+        SSFPoly1305Begin(&scratchCtx, scratchKey, sizeof(scratchKey));
+        SSF_ASSERT_TEST(SSFPoly1305Update(NULL, scratchMsg, sizeof(scratchMsg)));
+        SSF_ASSERT_TEST(SSFPoly1305Update(&scratchCtx, NULL, 1u));
+
+        /* Permitted edge: NULL msg with msgLen == 0 must not assert. */
+        SSFPoly1305Update(&scratchCtx, NULL, 0u);
+
+        /* Successful End wipes the still-initialised ctx so it goes out of scope clean. */
+        SSFPoly1305End(&scratchCtx, scratchTag, sizeof(scratchTag));
+    }
+
+    /* SSFPoly1305End: DBC coverage. ctx must be non-NULL and initialised; tag must be non-NULL;
+     * tagSize must be >= SSF_POLY1305_TAG_SIZE. Magic-required is exercised above. */
+    {
+        SSFPoly1305Context_t scratchCtx = {0};
+        static const uint8_t scratchKey[32] = {0};
+        uint8_t scratchTag[16];
+
+        SSFPoly1305Begin(&scratchCtx, scratchKey, sizeof(scratchKey));
+        SSF_ASSERT_TEST(SSFPoly1305End(NULL, scratchTag, sizeof(scratchTag)));
+        SSF_ASSERT_TEST(SSFPoly1305End(&scratchCtx, NULL, sizeof(scratchTag)));
+        SSF_ASSERT_TEST(SSFPoly1305End(&scratchCtx, scratchTag, 0u));
+        SSF_ASSERT_TEST(SSFPoly1305End(&scratchCtx, scratchTag, 1u));
+        SSF_ASSERT_TEST(SSFPoly1305End(&scratchCtx, scratchTag, 15u));
+
+        /* Successful End to clean up the still-initialised ctx. */
+        SSFPoly1305End(&scratchCtx, scratchTag, sizeof(scratchTag));
+    }
+
+    /* SSFPoly1305Mac: DBC coverage. The one-shot wrapper has no own SSF_REQUIRE — every
+     * contract violation fires inside Begin / Update / End. Mac has no ctx parameter (the
+     * context is internally allocated), so no NULL-ctx case applies. */
+    {
+        static const uint8_t scratchKey[32] = {0};
+        static const uint8_t scratchMsg[8] = {0};
+        uint8_t scratchTag[16];
+
+        SSF_ASSERT_TEST(SSFPoly1305Mac(NULL, 1u, scratchKey, sizeof(scratchKey),
+                                       scratchTag, sizeof(scratchTag)));
+        SSF_ASSERT_TEST(SSFPoly1305Mac(scratchMsg, sizeof(scratchMsg), NULL, sizeof(scratchKey),
+                                       scratchTag, sizeof(scratchTag)));
+        SSF_ASSERT_TEST(SSFPoly1305Mac(scratchMsg, sizeof(scratchMsg), scratchKey, 0u,
+                                       scratchTag, sizeof(scratchTag)));
+        SSF_ASSERT_TEST(SSFPoly1305Mac(scratchMsg, sizeof(scratchMsg), scratchKey, 31u,
+                                       scratchTag, sizeof(scratchTag)));
+        SSF_ASSERT_TEST(SSFPoly1305Mac(scratchMsg, sizeof(scratchMsg), scratchKey, 33u,
+                                       scratchTag, sizeof(scratchTag)));
+        SSF_ASSERT_TEST(SSFPoly1305Mac(scratchMsg, sizeof(scratchMsg), scratchKey,
+                                       sizeof(scratchKey), NULL, sizeof(scratchTag)));
+        SSF_ASSERT_TEST(SSFPoly1305Mac(scratchMsg, sizeof(scratchMsg), scratchKey,
+                                       sizeof(scratchKey), scratchTag, 0u));
+        SSF_ASSERT_TEST(SSFPoly1305Mac(scratchMsg, sizeof(scratchMsg), scratchKey,
+                                       sizeof(scratchKey), scratchTag, 15u));
+
+        /* Permitted edge: NULL msg with msgLen == 0 must not assert. */
+        SSFPoly1305Mac(NULL, 0u, scratchKey, sizeof(scratchKey), scratchTag, sizeof(scratchTag));
+    }
+
 #if SSF_POLY1305_OSSL_VERIFY == 1
     _VerifyPoly1305AgainstOpenSSLRandom();
 #endif

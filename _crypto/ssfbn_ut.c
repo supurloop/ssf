@@ -1196,8 +1196,10 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
         SSFBNModMulNIST(&rNist, &mMinus1, &mMinus1, &SSF_BN_NIST_P256);
         SSF_ASSERT(SSFBNCmpUint32(&rNist, 1u) == 0);
     }
+#if SSF_BN_CONFIG_MAX_BITS >= 768
     {
-        /* P-384 fast path. */
+        /* P-384 fast path. (Block requires SSF_BN_NIST_P384 — only defined when the cap is at  */
+        /* least 768 bits, which excludes a pure-ECC-P256-only config.)                          */
         const uint16_t n384 = 12u;
         SSFBN_DEFINE(a384, SSF_BN_MAX_LIMBS);
         SSFBN_DEFINE(b384, SSF_BN_MAX_LIMBS);
@@ -1222,6 +1224,7 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
 
         BN_free(bnA384); BN_free(bnB384); BN_free(bnM384);
     }
+#endif /* SSF_BN_CONFIG_MAX_BITS >= 768 */
     {
         /* Fallback path: a non-NIST modulus must produce the same result as ModMul. */
         SSFBN_DEFINE(altMod, SSF_BN_MAX_LIMBS);
@@ -1494,7 +1497,9 @@ static void _VerifyNISTReductionStress(void)
     {
         const struct { const SSFBN_t *p; uint16_t nLimbs; const char *label; } curves[] = {
             { &SSF_BN_NIST_P256, 8u,  "P-256" },
+#if SSF_BN_CONFIG_MAX_BITS >= 768
             { &SSF_BN_NIST_P384, 12u, "P-384" },
+#endif
         };
         size_t ci;
 
@@ -2789,6 +2794,7 @@ void SSFBNUnitTest(void)
         SSF_ASSERT(SSFBNCmp(&rCT, &rVT) == 0);
     }
 
+#if SSF_BN_CONFIG_MAX_BITS >= 768
     /* ---- SSFBNMontSquare on P-384 (larger modulus exercises more carry propagation) ---- */
     {
         SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
@@ -2817,6 +2823,7 @@ void SSFBNUnitTest(void)
             SSF_ASSERT(SSFBNCmp(&sqM, &mulM) == 0);
         }
     }
+#endif /* SSF_BN_CONFIG_MAX_BITS >= 768 */
 
     /* ---- SSFBNGenPrime: produces a prime of the requested size ---- */
     {

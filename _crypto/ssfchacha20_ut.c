@@ -136,6 +136,7 @@ static void _VerifyChaCha20AgainstOpenSSLRandom(void)
         }
     }
 }
+
 #endif /* SSF_CHACHA20_OSSL_VERIFY */
 
 /* --------------------------------------------------------------------------------------------- */
@@ -629,6 +630,39 @@ void SSFChaCha20UnitTest(void)
                            scratchKey, sizeof(scratchKey),
                            scratchNonce, sizeof(scratchNonce),
                            0u, NULL, 0u);
+
+        /* Counter wrap forbidden. RFC 8439 leaves behavior past 2^32 blocks undefined and
+         * SSF diverges from OpenSSL there; the contract forbids any (counter, ptLen) where
+         * the last block index would exceed 2^32 - 1. Use larger pt/ct buffers since the
+         * earlier ptLen <= ctSize check would otherwise fire first. */
+        {
+            uint8_t bigPt[129] = {0};
+            uint8_t bigCt[129];
+
+            /* Just past the boundary: counter=UINT32_MAX with ptLen=65 needs 2 blocks, and
+             * the second one would be at the wrap. Must assert. */
+            SSF_ASSERT_TEST(SSFChaCha20Encrypt(bigPt, 65u,
+                                               scratchKey, sizeof(scratchKey),
+                                               scratchNonce, sizeof(scratchNonce),
+                                               0xFFFFFFFFu, bigCt, sizeof(bigCt)));
+            /* Past boundary by one: counter=0xFFFFFFFE with ptLen=129 needs 3 blocks; the
+             * third one is at the wrap. Must assert. */
+            SSF_ASSERT_TEST(SSFChaCha20Encrypt(bigPt, 129u,
+                                               scratchKey, sizeof(scratchKey),
+                                               scratchNonce, sizeof(scratchNonce),
+                                               0xFFFFFFFEu, bigCt, sizeof(bigCt)));
+
+            /* Boundary OK: last block at counter == UINT32_MAX, no wrap. Must NOT assert. */
+            SSFChaCha20Encrypt(bigPt, 64u,
+                               scratchKey, sizeof(scratchKey),
+                               scratchNonce, sizeof(scratchNonce),
+                               0xFFFFFFFFu, bigCt, sizeof(bigCt));
+            /* Boundary OK: 2 blocks ending at counter == UINT32_MAX. Must NOT assert. */
+            SSFChaCha20Encrypt(bigPt, 128u,
+                               scratchKey, sizeof(scratchKey),
+                               scratchNonce, sizeof(scratchNonce),
+                               0xFFFFFFFEu, bigCt, sizeof(bigCt));
+        }
     }
 
 #if SSF_CHACHA20_OSSL_VERIFY == 1

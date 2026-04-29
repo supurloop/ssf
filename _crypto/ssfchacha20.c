@@ -149,6 +149,10 @@ void SSFChaCha20Encrypt(const uint8_t *pt, size_t ptLen, const uint8_t *key, siz
     SSF_REQUIRE(nonceLen == SSF_CHACHA20_NONCE_SIZE);
     SSF_REQUIRE(ptLen <= ctSize);
     SSF_REQUIRE(ptLen < (512u * 1024u * 1024u));
+    /* Counter must not wrap past 2^32 blocks. RFC 8439 leaves wrap behavior undefined and SSF */
+    /* diverges from OpenSSL there; refuse the call rather than produce non-interoperable      */
+    /* output. Callers wanting >2^32 blocks (256 GiB) under a single (key, nonce) must split.  */
+    SSF_REQUIRE(((uint64_t)counter + ((ptLen + 63u) / 64u)) <= 0x100000000ull);
 
     if (ptLen == 0) return;
 

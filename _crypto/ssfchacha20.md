@@ -43,10 +43,16 @@ authenticated encryption, pair this module with [`ssfpoly1305`](ssfpoly1305.md) 
   data; start at `1` when producing the body ciphertext in ChaCha20-Poly1305, reserving
   block 0 for the Poly1305 key derivation. Whatever value you pass here will be used for the
   first 64-byte block; subsequent blocks increment from there.
-- `ptLen` is bounded at `512 MiB` (2²⁹ bytes) per call. Within a single `(key, nonce)` pair
-  the 32-bit counter allows up to `2³² × 64 B = 256 GiB`, but exceeding that would require
-  multiple calls with manually-carried counter state; if you are doing that you should
-  instead split the data across multiple `(key, nonce)` pairs.
+- `ptLen` is bounded at `512 MiB` (2²⁹ bytes) per call.
+- **The counter must not wrap past 2³² blocks.** A `SSF_REQUIRE` enforces
+  `counter + ⌈ptLen / 64⌉ ≤ 2³²` — i.e., the highest block index used must fit in 32 bits.
+  RFC 8439 leaves wrap behavior undefined and SSF was empirically observed to diverge from
+  OpenSSL's `EVP_chacha20` past the boundary, so producing output that wraps would be
+  non-interoperable; the contract refuses the call rather than silently risking that. Within
+  a single `(key, nonce)` pair the contract still allows up to `2³² × 64 B = 256 GiB` of
+  ciphertext, possibly produced via several calls that manually carry the counter — once you
+  approach that limit you should be splitting across multiple `(key, nonce)` pairs anyway,
+  because the security bounds for ChaCha20 also degrade past the 2³² block mark.
 - `ct` may alias `pt` for in-place encryption; both buffers are traversed in ascending order
   64 bytes at a time, and each keystream byte is consumed before the corresponding output
   byte is written, so overwriting the input as it is read is safe. Partial overlap is not

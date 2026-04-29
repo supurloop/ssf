@@ -900,13 +900,9 @@ static void _SSFBNKaratsubaMul(SSFBNLimb_t *r,
     SSF_REQUIRE(b != NULL);
     SSF_REQUIRE(n >= 1u);
     SSF_REQUIRE((uint32_t)(n * 2u) <= (uint32_t)SSF_BN_MAX_LIMBS);
-
-    /* Fall back to schoolbook when size below threshold or n is odd. */
-    if ((n < SSF_BN_KARATSUBA_THRESHOLD) || ((n & 1u) != 0u))
-    {
-        _SSFBNSchoolbookMulRaw(r, a, n, b, n);
-        return;
-    }
+    /* Caller's contract (SSFBNMul dispatcher at lines 982-991): same-size, even, >= threshold. */
+    SSF_REQUIRE(n >= SSF_BN_KARATSUBA_THRESHOLD);
+    SSF_REQUIRE((n & 1u) == 0u);
 
     half = (uint16_t)(n / 2u);
 
@@ -949,6 +945,7 @@ static void _SSFBNKaratsubaMul(SSFBNLimb_t *r,
         r[half + i] = (SSFBNLimb_t)addCarry;
         addCarry >>= SSF_BN_LIMB_BITS;
     }
+    /* Tail carry-propagation: empirically never fires (safety net for adversarial inputs). */
     for (i = (uint16_t)(half + n + 2u); (addCarry != 0u) && (i < (uint16_t)(2u * n)); i++)
     {
         addCarry += (SSFBNDLimb_t)r[i];
@@ -1562,18 +1559,10 @@ bool SSFBNModInvExt(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
         /* tmp_s = old_s - quotient * cur_s with sign tracking; reduce mod m to bound product. */
         {
             SSFBN_DEFINE(qxs, SSF_BN_MAX_LIMBS);
-            /* Does the full product fit within MAX_LIMBS? */
-            if ((uint16_t)(quotient.len + cur_s.len) <= SSF_BN_MAX_LIMBS)
-            {
-                /* Yes, compute it directly then reduce. */
-                SSFBNMul(&prod, &quotient, &cur_s);
-                SSFBNMod(&qxs, &prod, m);
-            }
-            else
-            {
-                /* No, fall back to modular multiply. */
-                SSFBNModMul(&qxs, &quotient, &cur_s, m);
-            }
+            /* Buffer-capacity guard for `prod`; see ssfbn.md "Configuration" on the 2N cap. */
+            SSF_ENSURE((uint16_t)(quotient.len + cur_s.len) <= SSF_BN_MAX_LIMBS);
+            SSFBNMul(&prod, &quotient, &cur_s);
+            SSFBNMod(&qxs, &prod, m);
 
             /* Do old_s and qxs share the same sign? */
             if (old_s_neg == cur_s_neg)
@@ -1622,12 +1611,8 @@ bool SSFBNModInvExt(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
         SSFBNCopy(r, &old_s);
     }
 
-    /* Is r still >= m after the sign normalization? */
-    if (SSFBNCmp(r, m) >= 0)
-    {
-        /* Yes, reduce by one subtraction. */
-        SSFBNSub(r, r, m);
-    }
+    /* Sign-normalize postcondition: branches above produce r ∈ [0, m) by construction. */
+    SSF_ENSURE(SSFBNCmp(r, m) < 0);
 
     /* Verify a * r mod m == 1; catches a non-coprime case where the algorithm produced garbage. */
     {

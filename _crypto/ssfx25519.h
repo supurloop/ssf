@@ -84,17 +84,6 @@ extern "C" {
 #include "ssfport.h"
 
 /* --------------------------------------------------------------------------------------------- */
-/* Limitations                                                                                   */
-/* --------------------------------------------------------------------------------------------- */
-/* All keys and secrets are exactly 32 bytes.                                                    */
-/* Private keys are clamped per RFC 7748 Section 5 before use.                                   */
-/* The shared secret should be processed through SSFHKDF for key derivation.                     */
-/* Returns false if the computed shared secret is the all-zero value (low-order peer key).        */
-/* Constant-time Montgomery ladder. Field-arithmetic carry/borrow folds are also branch-free.   */
-/* Self-contained: dedicated GF(2^255-19) arithmetic; no ssfbn dependency.                       */
-/* --------------------------------------------------------------------------------------------- */
-
-/* --------------------------------------------------------------------------------------------- */
 /* Defines                                                                                       */
 /* --------------------------------------------------------------------------------------------- */
 #define SSF_X25519_KEY_SIZE   (32u)
@@ -103,24 +92,9 @@ extern "C" {
 /* --------------------------------------------------------------------------------------------- */
 /* External interface                                                                            */
 /* --------------------------------------------------------------------------------------------- */
-
-/* Generate an X25519 key pair.                                                                  */
-/* privKey receives 32 random bytes (clamped internally for subsequent use).                     */
-/* pubKey receives the 32-byte public key (u-coordinate of privKey * basepoint 9).               */
-/* Requires platform entropy (/dev/urandom on POSIX).                                            */
 bool SSFX25519KeyGen(uint8_t privKey[32], uint8_t pubKey[32]);
-
-/* Compute the public key from a private key.                                                    */
-/* privKey: 32-byte private key. pubKey: receives 32-byte public key.                            */
 void SSFX25519PubKeyFromPrivKey(const uint8_t privKey[32], uint8_t pubKey[32]);
-
-/* Compute the X25519 shared secret (RFC 7748 Section 5).                                        */
-/* privKey: 32-byte local private key.                                                           */
-/* peerPubKey: 32-byte peer public key (u-coordinate).                                           */
-/* secret: receives 32-byte shared secret.                                                       */
-/* Returns false if the result is the all-zero value (rejected per RFC 7748).                    */
-bool SSFX25519ComputeSecret(const uint8_t privKey[32],
-                            const uint8_t peerPubKey[32],
+bool SSFX25519ComputeSecret(const uint8_t privKey[32], const uint8_t peerPubKey[32],
                             uint8_t secret[32]);
 
 /* --------------------------------------------------------------------------------------------- */
@@ -135,3 +109,4 @@ void SSFX25519UnitTest(void);
 #endif
 
 #endif /* SSF_X25519_H_INCLUDE */
+

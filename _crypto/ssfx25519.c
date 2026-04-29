@@ -50,8 +50,7 @@ static const _fe_t _fe_p = {{ 0xFFFFFFEDu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu
 static void _fe_reduce(_fe_t *a);
 
 /* --------------------------------------------------------------------------------------------- */
-/* Field arithmetic: GF(2^255 - 19). Mirrors the helpers in ssfed25519.c — keep in sync if either */
-/* module's bounds analysis changes.                                                              */
+/* Field arithmetic: GF(2^255 - 19) (mirrors helpers in ssfed25519.c).                           */
 /* --------------------------------------------------------------------------------------------- */
 static void _fe_0(_fe_t *r)
 {
@@ -94,18 +93,11 @@ static void _fe_add(_fe_t *r, const _fe_t *a, const _fe_t *b)
         }
     }
 
-    /* Fully reduce so output is in [0, p). Trivializes the input-bound contract for           */
-    /* downstream _fe_mul. Empirically required to pass Wycheproof tcId 57 (peer u = p - 2^128 */
-    /* triggers a carry / fold pattern that produces correct mod-p results but unreduced       */
-    /* representations whose interaction with subsequent ops compounds an off-by-38 error.     */
+    /* Fully reduce so output is in [0, p) (required for downstream _fe_mul bounds). */
     _fe_reduce(r);
 }
 
-/* r = a - b mod p. If a < b, add 2p to recover a positive value. Borrow-fold runs               */
-/* unconditionally with `borrow` (0 or 1) multiplied into the addend; same closed-channel        */
-/* rationale as _fe_add. With inputs in [0, 2p) the borrow-path 8-limb addition always           */
-/* overflows 2^256, which exactly cancels the +2^256 from the underflow, so output stays in      */
-/* [0, 2p) without an explicit reduce step.                                                       */
+/* r = a - b mod p (branch-free borrow-fold; output stays in [0, 2p)). */
 static void _fe_sub(_fe_t *r, const _fe_t *a, const _fe_t *b)
 {
     uint64_t borrow = 0;
@@ -172,11 +164,7 @@ static void _fe_mul(_fe_t *r, const _fe_t *a, const _fe_t *b)
         }
     }
 
-    /* The fold loop itself can leave a residual final carry — for inputs whose limbs are       */
-    /* close to all-1s (e.g., Wycheproof's edge-case u = p - 2^128), adding 38*carry at limb 0  */
-    /* propagates through the chain and emits another 1 carry past limb 7. The fold path was   */
-    /* missing this final reduce: ssfed25519's mirror has _fe_reduce here for the same reason.  */
-    /* Guarantees output is in [0, p) so subsequent _fe_add / _fe_sub bounds analysis holds.    */
+    /* Final reduce so output is in [0, p) (handles residual fold-loop carry on edge inputs). */
     _fe_reduce(r);
 }
 
@@ -210,8 +198,7 @@ static void _fe_mul_small(_fe_t *r, const _fe_t *a, uint32_t c)
         }
     }
 
-    /* Same residual-carry concern as _fe_mul: large `c` values (small c, large limbs) can      */
-    /* leave r in [0, ~2p) after the fold. Reduce so subsequent _fe_add gets a value in [0, p). */
+    /* Reduce to [0, p) (same residual-carry concern as _fe_mul). */
     _fe_reduce(r);
 }
 
@@ -219,10 +206,13 @@ static void _fe_mul_small(_fe_t *r, const _fe_t *a, uint32_t c)
 static void _fe_reduce(_fe_t *a)
 {
     uint64_t carry;
-    uint8_t i;
+    uint64_t borrow = 0;
+    uint64_t diff;
+    uint32_t t[8];
     uint32_t mask;
+    uint8_t i;
 
-    /* First, if bit 255 is set, clear it and add 19 (since 2^255 = 19 mod p) */
+    /* If bit 255 is set, clear it and add 19 (since 2^255 = 19 mod p). */
     carry = (uint64_t)(a->v[7] >> 31) * 19u;
     a->v[7] &= 0x7FFFFFFFu;
     for (i = 0; i < 8u; i++)
@@ -232,7 +222,7 @@ static void _fe_reduce(_fe_t *a)
         carry >>= 32;
     }
 
-    /* Repeat in case of another overflow */
+    /* Repeat in case of another overflow. */
     carry = (uint64_t)(a->v[7] >> 31) * 19u;
     a->v[7] &= 0x7FFFFFFFu;
     for (i = 0; i < 8u; i++)
@@ -242,25 +232,17 @@ static void _fe_reduce(_fe_t *a)
         carry >>= 32;
     }
 
-    /* Now a < 2^255. Check if a >= p by trying to subtract p. */
-    /* If a >= p, the subtraction won't borrow. */
+    /* a < 2^255 now; subtract p and conditional-select if no borrow. */
+    for (i = 0; i < 8u; i++)
     {
-        uint64_t borrow = 0;
-        uint32_t t[8];
-        for (i = 0; i < 8u; i++)
-        {
-            uint64_t diff = (uint64_t)a->v[i] - (uint64_t)_fe_p.v[i] - borrow;
-            t[i] = (uint32_t)diff;
-            borrow = (diff >> 63) & 1u;
-        }
-        /* If no borrow, a >= p, use the subtracted result */
-        mask = (uint32_t)(1u - borrow); /* 1 if a >= p, 0 if a < p */
-        /* mask is 0 or 1, expand to all bits */
-        mask = (uint32_t)(-(int32_t)mask);
-        for (i = 0; i < 8u; i++)
-        {
-            a->v[i] = (a->v[i] & ~mask) | (t[i] & mask);
-        }
+        diff = (uint64_t)a->v[i] - (uint64_t)_fe_p.v[i] - borrow;
+        t[i] = (uint32_t)diff;
+        borrow = (diff >> 63) & 1u;
+    }
+    mask = (uint32_t)(-(int32_t)(1u - borrow));   /* all-ones if a >= p, else 0 */
+    for (i = 0; i < 8u; i++)
+    {
+        a->v[i] = (a->v[i] & ~mask) | (t[i] & mask);
     }
 }
 
@@ -368,11 +350,7 @@ static void _fe_inv(_fe_t *r, const _fe_t *a)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Scrub the deeper-stack region used by the Montgomery ladder. The ladder has 14 _fe_t locals  */
-/* (~448 bytes) plus the clamped scalar — all derived from the secret private key. After return */
-/* those frames are freed but their bytes persist on the stack. Allocate a fresh frame at the   */
-/* same depth and overwrite it with zeros via volatile writes the compiler cannot elide. Sized   */
-/* to comfortably cover the ladder's stack footprint plus any spill slots the compiler adds.    */
+/* Scrubs the deeper-stack region used by the Montgomery ladder.                                 */
 /* --------------------------------------------------------------------------------------------- */
 SSF_NOINLINE
 static void _x25519_stack_scrub(void)
@@ -384,8 +362,7 @@ static void _x25519_stack_scrub(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* X25519 scalar multiplication (RFC 7748 Section 5).                                            */
-/* Constant-time Montgomery ladder on x-coordinates.                                             */
+/* X25519 scalar multiplication (RFC 7748 §5; constant-time Montgomery ladder on x-coords).      */
 /* --------------------------------------------------------------------------------------------- */
 static void _x25519_scalar_mul(uint8_t out[32], const uint8_t scalar[32],
                                const uint8_t point[32])
@@ -454,8 +431,7 @@ static void _x25519_scalar_mul(uint8_t out[32], const uint8_t scalar[32],
     _fe_mul(&x_2, &x_2, &z_2);
     _fe_to_bytes(out, &x_2);
 
-    /* Zeroize the clamped scalar plus every _fe_t local that touched the secret. The deep-frame */
-    /* scrub below also covers compiler spill slots and any inlined helpers' locals.              */
+    /* Zeroize the clamped scalar plus every _fe_t local that touched the secret. */
     SSFCryptSecureZero(k, sizeof(k));
     SSFCryptSecureZero(&x_1, sizeof(x_1));
     SSFCryptSecureZero(&x_2, sizeof(x_2));
@@ -472,9 +448,7 @@ static void _x25519_scalar_mul(uint8_t out[32], const uint8_t scalar[32],
     SSFCryptSecureZero(&DA, sizeof(DA));
     SSFCryptSecureZero(&CB, sizeof(CB));
     SSFCryptSecureZero(&t, sizeof(t));
-    /* The deep-frame scrub is invoked at the public-API boundary (SSFX25519KeyGen /             */
-    /* PubKeyFromPrivKey / ComputeSecret) — calling it here would leave it one frame too deep    */
-    /* to overwrite the bytes this function's freed frame leaves on the stack.                   */
+    /* Deep-frame scrub is invoked at the public-API boundary (one frame shallower). */
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -531,3 +505,4 @@ bool SSFX25519ComputeSecret(const uint8_t privKey[32],
 
     return true;
 }
+

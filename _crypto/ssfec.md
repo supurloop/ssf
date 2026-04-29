@@ -106,10 +106,13 @@ enabled.
 |-------|---------|-------------|
 | `SSF_EC_CONFIG_ENABLE_P256` | `1` | Enable NIST P-256 (`secp256r1` / `prime256v1`). Requires `SSF_BN_CONFIG_MAX_BITS ≥ 512` (2 × 256). |
 | `SSF_EC_CONFIG_ENABLE_P384` | `1` | Enable NIST P-384 (`secp384r1`). Requires `SSF_BN_CONFIG_MAX_BITS ≥ 768` (2 × 384). |
+| `SSF_EC_CONFIG_FIXED_BASE_P256` | `= ENABLE_P256` | Enable the P-256 fixed-base Lim-Lee comb table that accelerates `[k]G_P256` ~3-4x. Costs ~1.5 KB rodata; auto-disables when the curve itself is off. Setting this `1` while `ENABLE_P256` is `0` is a compile error. |
+| `SSF_EC_CONFIG_FIXED_BASE_P384` | `= ENABLE_P384` | Same for P-384 — ~2.3 KB rodata, ~3-4x speed-up, auto-disables with the curve. |
+| `SSF_EC_FIXED_BASE_COMB_H` | `6` | Comb window size: `4` minimal flash, `5` balanced, `6` maximum perf. Affects both P-256 and P-384 tables (and ECDSA keygen / sign which use them internally). |
 
-Disabling a curve removes its parameter constants from the build and compiles out any code
-paths that reference it. Disabling both produces `#error At least one EC curve must be
-enabled.`
+Disabling a curve removes its parameter constants from the build, auto-drops its fixed-base
+comb table, and compiles out any code paths that reference it. Disabling both produces
+`#error At least one EC curve must be enabled.`
 
 <a id="api-summary"></a>
 

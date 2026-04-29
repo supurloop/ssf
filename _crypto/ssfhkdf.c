@@ -34,13 +34,10 @@
 #include "ssfcrypt.h"
 
 /* --------------------------------------------------------------------------------------------- */
-/* Extract: PRK = HMAC-Hash(salt, IKM)                                                           */
-/* RFC 5869 section 2.2                                                                          */
+/* If HKDF-Extract succeeds writes prkOut and returns true, else false (RFC 5869 §2.2).          */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFHKDFExtract(SSFHMACHash_t hash,
-                    const uint8_t *salt, size_t saltLen,
-                    const uint8_t *ikm, size_t ikmLen,
-                    uint8_t *prkOut, size_t prkOutSize)
+bool SSFHKDFExtract(SSFHMACHash_t hash, const uint8_t *salt, size_t saltLen,
+                    const uint8_t *ikm, size_t ikmLen, uint8_t *prkOut, size_t prkOutSize)
 {
     size_t hashSize;
     uint8_t zeroSalt[SSF_HMAC_MAX_HASH_SIZE];
@@ -52,9 +49,10 @@ bool SSFHKDFExtract(SSFHMACHash_t hash,
     hashSize = SSFHMACGetHashSize(hash);
     SSF_REQUIRE(prkOutSize >= hashSize);
 
-    /* If salt is not provided, use a zero-filled salt of HashLen bytes (RFC 5869 section 2.2) */
+    /* Was a salt provided? */
     if (salt == NULL || saltLen == 0)
     {
+        /* No, use a zero-filled HashLen-byte salt (RFC 5869 §2.2). */
         memset(zeroSalt, 0, hashSize);
         salt = zeroSalt;
         saltLen = hashSize;
@@ -66,19 +64,10 @@ bool SSFHKDFExtract(SSFHMACHash_t hash,
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Expand: OKM = HKDF-Expand(PRK, info, L)                                                      */
-/* RFC 5869 section 2.3                                                                          */
-/*                                                                                               */
-/* N = ceil(L/HashLen)                                                                           */
-/* T = T(1) || T(2) || ... || T(N)                                                              */
-/* T(0) = empty                                                                                  */
-/* T(i) = HMAC-Hash(PRK, T(i-1) || info || i)    for i = 1..N, where i is a single byte         */
-/* OKM = first L bytes of T                                                                      */
+/* If HKDF-Expand succeeds writes okmOut and returns true, else false (RFC 5869 §2.3).           */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFHKDFExpand(SSFHMACHash_t hash,
-                   const uint8_t *prk, size_t prkLen,
-                   const uint8_t *info, size_t infoLen,
-                   uint8_t *okmOut, size_t okmLen)
+bool SSFHKDFExpand(SSFHMACHash_t hash, const uint8_t *prk, size_t prkLen, const uint8_t *info,
+                   size_t infoLen, uint8_t *okmOut, size_t okmLen)
 {
     size_t hashSize;
     size_t n;
@@ -109,15 +98,17 @@ bool SSFHKDFExpand(SSFHMACHash_t hash,
 
         SSFHMACBegin(&ctx, hash, prk, prkLen);
 
-        /* T(i-1): for i > 1, feed the previous hash block */
+        /* Is this iteration past the first? */
         if (i > 1u)
         {
+            /* Yes, feed the previous hash block T(i-1). */
             SSFHMACUpdate(&ctx, tPrev, hashSize);
         }
 
-        /* info */
+        /* Did the caller provide info? */
         if (info != NULL && infoLen > 0)
         {
+            /* Yes, feed it into the HMAC. */
             SSFHMACUpdate(&ctx, info, infoLen);
         }
 
@@ -135,8 +126,7 @@ bool SSFHKDFExpand(SSFHMACHash_t hash,
         /* Save for next iteration */
         memcpy(tPrev, tCurr, hashSize);
 
-        /* Clear magic so the next iteration's Begin sees a fresh context. The DeInit also */
-        /* zeroizes the key-derived stack state held inside ctx.                           */
+        /* DeInit clears magic and zeroizes ctx's key-derived state. */
         SSFHMACDeInit(&ctx);
     }
 
@@ -147,13 +137,10 @@ bool SSFHKDFExpand(SSFHMACHash_t hash,
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Combined Extract + Expand.                                                                    */
+/* If combined HKDF (Extract + Expand) succeeds writes okmOut and returns true, else false.      */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFHKDF(SSFHMACHash_t hash,
-             const uint8_t *salt, size_t saltLen,
-             const uint8_t *ikm, size_t ikmLen,
-             const uint8_t *info, size_t infoLen,
-             uint8_t *okmOut, size_t okmLen)
+bool SSFHKDF(SSFHMACHash_t hash, const uint8_t *salt, size_t saltLen, const uint8_t *ikm,
+             size_t ikmLen, const uint8_t *info, size_t infoLen, uint8_t *okmOut, size_t okmLen)
 {
     uint8_t prk[SSF_HMAC_MAX_HASH_SIZE];
     size_t hashSize;
@@ -168,16 +155,18 @@ bool SSFHKDF(SSFHMACHash_t hash,
     hashSize = SSFHMACGetHashSize(hash);
     SSF_REQUIRE(okmLen <= 255u * hashSize);
 
-    /* Unconditional scrub: prk must not escape this frame on any path, including a future */
-    /* Extract failure that may have partially written HMAC-derived state into prk.        */
+    /* Did Extract succeed? */
     if (SSFHKDFExtract(hash, salt, saltLen, ikm, ikmLen, prk, sizeof(prk)))
     {
+        /* Yes, run Expand to produce the OKM. */
         ok = SSFHKDFExpand(hash, prk, hashSize, info, infoLen, okmOut, okmLen);
     }
     else
     {
+        /* No, fail; prk gets scrubbed below regardless. */
         ok = false;
     }
     SSFCryptSecureZero(prk, sizeof(prk));
     return ok;
 }
+

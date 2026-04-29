@@ -42,38 +42,14 @@ extern "C" {
 #include "ssfhmac.h"
 
 /* --------------------------------------------------------------------------------------------- */
-/* Limitations                                                                                   */
-/* --------------------------------------------------------------------------------------------- */
-/* Maximum output keying material length is 255 * HashLen bytes (per RFC 5869 section 2.3).      */
-/* --------------------------------------------------------------------------------------------- */
-
-/* --------------------------------------------------------------------------------------------- */
 /* External interface                                                                            */
 /* --------------------------------------------------------------------------------------------- */
-
-/* Extract: PRK = HMAC-Hash(salt, IKM)                                                           */
-/* If salt is NULL, a zero-filled salt of HashLen bytes is used (RFC 5869 section 2.2).          */
-/* prkOutSize must be >= SSFHMACGetHashSize(hash).                                               */
-bool SSFHKDFExtract(SSFHMACHash_t hash,
-                    const uint8_t *salt, size_t saltLen,
-                    const uint8_t *ikm, size_t ikmLen,
-                    uint8_t *prkOut, size_t prkOutSize);
-
-/* Expand: OKM = HKDF-Expand(PRK, info, L)                                                      */
-/* prkLen must be >= SSFHMACGetHashSize(hash).                                                   */
-/* okmLen must be <= 255 * SSFHMACGetHashSize(hash).                                             */
-/* info may be NULL if infoLen is 0.                                                             */
-bool SSFHKDFExpand(SSFHMACHash_t hash,
-                   const uint8_t *prk, size_t prkLen,
-                   const uint8_t *info, size_t infoLen,
-                   uint8_t *okmOut, size_t okmLen);
-
-/* Combined Extract + Expand in one call.                                                        */
-bool SSFHKDF(SSFHMACHash_t hash,
-             const uint8_t *salt, size_t saltLen,
-             const uint8_t *ikm, size_t ikmLen,
-             const uint8_t *info, size_t infoLen,
-             uint8_t *okmOut, size_t okmLen);
+bool SSFHKDFExtract(SSFHMACHash_t hash, const uint8_t *salt, size_t saltLen,
+                    const uint8_t *ikm, size_t ikmLen, uint8_t *prkOut, size_t prkOutSize);
+bool SSFHKDFExpand(SSFHMACHash_t hash, const uint8_t *prk, size_t prkLen, const uint8_t *info,
+                   size_t infoLen, uint8_t *okmOut, size_t okmLen);
+bool SSFHKDF(SSFHMACHash_t hash, const uint8_t *salt, size_t saltLen, const uint8_t *ikm,
+             size_t ikmLen, const uint8_t *info, size_t infoLen, uint8_t *okmOut, size_t okmLen);
 
 /* --------------------------------------------------------------------------------------------- */
 /* Unit test                                                                                     */
@@ -87,3 +63,4 @@ void SSFHKDFUnitTest(void);
 #endif
 
 #endif /* SSF_HKDF_H_INCLUDE */
+

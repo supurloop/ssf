@@ -303,6 +303,292 @@ void SSFChaCha20Poly1305UnitTest(void)
     SSF_ASSERT(ok);
     SSF_ASSERT(memcmp(dec, pt, sizeof(pt)) == 0);
 
+    /* RFC 8439 §A.5 AEAD test vector. Distinct (key, nonce, AAD) from §2.8.2 with a 265-byte
+     * plaintext crossing 4 full blocks plus a partial. Bidirectional: encrypt-of-pt must
+     * produce expected ct + tag; decrypt-of-ct + tag must verify and recover pt. */
+    {
+        static const uint8_t a5Key[] = {
+            0x1Cu, 0x92u, 0x40u, 0xA5u, 0xEBu, 0x55u, 0xD3u, 0x8Au,
+            0xF3u, 0x33u, 0x88u, 0x86u, 0x04u, 0xF6u, 0xB5u, 0xF0u,
+            0x47u, 0x39u, 0x17u, 0xC1u, 0x40u, 0x2Bu, 0x80u, 0x09u,
+            0x9Du, 0xCAu, 0x5Cu, 0xBCu, 0x20u, 0x70u, 0x75u, 0xC0u
+        };
+        static const uint8_t a5Nonce[] = {
+            0x00u, 0x00u, 0x00u, 0x00u, 0x01u, 0x02u, 0x03u, 0x04u,
+            0x05u, 0x06u, 0x07u, 0x08u
+        };
+        static const uint8_t a5Aad[] = {
+            0xF3u, 0x33u, 0x88u, 0x86u, 0x00u, 0x00u, 0x00u, 0x00u,
+            0x00u, 0x00u, 0x4Eu, 0x91u
+        };
+        static const uint8_t a5Pt[] = {
+            0x49u, 0x6Eu, 0x74u, 0x65u, 0x72u, 0x6Eu, 0x65u, 0x74u,
+            0x2Du, 0x44u, 0x72u, 0x61u, 0x66u, 0x74u, 0x73u, 0x20u,
+            0x61u, 0x72u, 0x65u, 0x20u, 0x64u, 0x72u, 0x61u, 0x66u,
+            0x74u, 0x20u, 0x64u, 0x6Fu, 0x63u, 0x75u, 0x6Du, 0x65u,
+            0x6Eu, 0x74u, 0x73u, 0x20u, 0x76u, 0x61u, 0x6Cu, 0x69u,
+            0x64u, 0x20u, 0x66u, 0x6Fu, 0x72u, 0x20u, 0x61u, 0x20u,
+            0x6Du, 0x61u, 0x78u, 0x69u, 0x6Du, 0x75u, 0x6Du, 0x20u,
+            0x6Fu, 0x66u, 0x20u, 0x73u, 0x69u, 0x78u, 0x20u, 0x6Du,
+            0x6Fu, 0x6Eu, 0x74u, 0x68u, 0x73u, 0x20u, 0x61u, 0x6Eu,
+            0x64u, 0x20u, 0x6Du, 0x61u, 0x79u, 0x20u, 0x62u, 0x65u,
+            0x20u, 0x75u, 0x70u, 0x64u, 0x61u, 0x74u, 0x65u, 0x64u,
+            0x2Cu, 0x20u, 0x72u, 0x65u, 0x70u, 0x6Cu, 0x61u, 0x63u,
+            0x65u, 0x64u, 0x2Cu, 0x20u, 0x6Fu, 0x72u, 0x20u, 0x6Fu,
+            0x62u, 0x73u, 0x6Fu, 0x6Cu, 0x65u, 0x74u, 0x65u, 0x64u,
+            0x20u, 0x62u, 0x79u, 0x20u, 0x6Fu, 0x74u, 0x68u, 0x65u,
+            0x72u, 0x20u, 0x64u, 0x6Fu, 0x63u, 0x75u, 0x6Du, 0x65u,
+            0x6Eu, 0x74u, 0x73u, 0x20u, 0x61u, 0x74u, 0x20u, 0x61u,
+            0x6Eu, 0x79u, 0x20u, 0x74u, 0x69u, 0x6Du, 0x65u, 0x2Eu,
+            0x20u, 0x49u, 0x74u, 0x20u, 0x69u, 0x73u, 0x20u, 0x69u,
+            0x6Eu, 0x61u, 0x70u, 0x70u, 0x72u, 0x6Fu, 0x70u, 0x72u,
+            0x69u, 0x61u, 0x74u, 0x65u, 0x20u, 0x74u, 0x6Fu, 0x20u,
+            0x75u, 0x73u, 0x65u, 0x20u, 0x49u, 0x6Eu, 0x74u, 0x65u,
+            0x72u, 0x6Eu, 0x65u, 0x74u, 0x2Du, 0x44u, 0x72u, 0x61u,
+            0x66u, 0x74u, 0x73u, 0x20u, 0x61u, 0x73u, 0x20u, 0x72u,
+            0x65u, 0x66u, 0x65u, 0x72u, 0x65u, 0x6Eu, 0x63u, 0x65u,
+            0x20u, 0x6Du, 0x61u, 0x74u, 0x65u, 0x72u, 0x69u, 0x61u,
+            0x6Cu, 0x20u, 0x6Fu, 0x72u, 0x20u, 0x74u, 0x6Fu, 0x20u,
+            0x63u, 0x69u, 0x74u, 0x65u, 0x20u, 0x74u, 0x68u, 0x65u,
+            0x6Du, 0x20u, 0x6Fu, 0x74u, 0x68u, 0x65u, 0x72u, 0x20u,
+            0x74u, 0x68u, 0x61u, 0x6Eu, 0x20u, 0x61u, 0x73u, 0x20u,
+            0x2Fu, 0xE2u, 0x80u, 0x9Cu, 0x77u, 0x6Fu, 0x72u, 0x6Bu,
+            0x20u, 0x69u, 0x6Eu, 0x20u, 0x70u, 0x72u, 0x6Fu, 0x67u,
+            0x72u, 0x65u, 0x73u, 0x73u, 0x2Eu, 0x2Fu, 0xE2u, 0x80u,
+            0x9Du
+        };
+        static const uint8_t a5ExpectedCt[] = {
+            0x64u, 0xA0u, 0x86u, 0x15u, 0x75u, 0x86u, 0x1Au, 0xF4u,
+            0x60u, 0xF0u, 0x62u, 0xC7u, 0x9Bu, 0xE6u, 0x43u, 0xBDu,
+            0x5Eu, 0x80u, 0x5Cu, 0xFDu, 0x34u, 0x5Cu, 0xF3u, 0x89u,
+            0xF1u, 0x08u, 0x67u, 0x0Au, 0xC7u, 0x6Cu, 0x8Cu, 0xB2u,
+            0x4Cu, 0x6Cu, 0xFCu, 0x18u, 0x75u, 0x5Du, 0x43u, 0xEEu,
+            0xA0u, 0x9Eu, 0xE9u, 0x4Eu, 0x38u, 0x2Du, 0x26u, 0xB0u,
+            0xBDu, 0xB7u, 0xB7u, 0x3Cu, 0x32u, 0x1Bu, 0x01u, 0x00u,
+            0xD4u, 0xF0u, 0x3Bu, 0x7Fu, 0x35u, 0x58u, 0x94u, 0xCFu,
+            0x33u, 0x2Fu, 0x83u, 0x0Eu, 0x71u, 0x0Bu, 0x97u, 0xCEu,
+            0x98u, 0xC8u, 0xA8u, 0x4Au, 0xBDu, 0x0Bu, 0x94u, 0x81u,
+            0x14u, 0xADu, 0x17u, 0x6Eu, 0x00u, 0x8Du, 0x33u, 0xBDu,
+            0x60u, 0xF9u, 0x82u, 0xB1u, 0xFFu, 0x37u, 0xC8u, 0x55u,
+            0x97u, 0x97u, 0xA0u, 0x6Eu, 0xF4u, 0xF0u, 0xEFu, 0x61u,
+            0xC1u, 0x86u, 0x32u, 0x4Eu, 0x2Bu, 0x35u, 0x06u, 0x38u,
+            0x36u, 0x06u, 0x90u, 0x7Bu, 0x6Au, 0x7Cu, 0x02u, 0xB0u,
+            0xF9u, 0xF6u, 0x15u, 0x7Bu, 0x53u, 0xC8u, 0x67u, 0xE4u,
+            0xB9u, 0x16u, 0x6Cu, 0x76u, 0x7Bu, 0x80u, 0x4Du, 0x46u,
+            0xA5u, 0x9Bu, 0x52u, 0x16u, 0xCDu, 0xE7u, 0xA4u, 0xE9u,
+            0x90u, 0x40u, 0xC5u, 0xA4u, 0x04u, 0x33u, 0x22u, 0x5Eu,
+            0xE2u, 0x82u, 0xA1u, 0xB0u, 0xA0u, 0x6Cu, 0x52u, 0x3Eu,
+            0xAFu, 0x45u, 0x34u, 0xD7u, 0xF8u, 0x3Fu, 0xA1u, 0x15u,
+            0x5Bu, 0x00u, 0x47u, 0x71u, 0x8Cu, 0xBCu, 0x54u, 0x6Au,
+            0x0Du, 0x07u, 0x2Bu, 0x04u, 0xB3u, 0x56u, 0x4Eu, 0xEAu,
+            0x1Bu, 0x42u, 0x22u, 0x73u, 0xF5u, 0x48u, 0x27u, 0x1Au,
+            0x0Bu, 0xB2u, 0x31u, 0x60u, 0x53u, 0xFAu, 0x76u, 0x99u,
+            0x19u, 0x55u, 0xEBu, 0xD6u, 0x31u, 0x59u, 0x43u, 0x4Eu,
+            0xCEu, 0xBBu, 0x4Eu, 0x46u, 0x6Du, 0xAEu, 0x5Au, 0x10u,
+            0x73u, 0xA6u, 0x72u, 0x76u, 0x27u, 0x09u, 0x7Au, 0x10u,
+            0x49u, 0xE6u, 0x17u, 0xD9u, 0x1Du, 0x36u, 0x10u, 0x94u,
+            0xFAu, 0x68u, 0xF0u, 0xFFu, 0x77u, 0x98u, 0x71u, 0x30u,
+            0x30u, 0x5Bu, 0xEAu, 0xBAu, 0x2Eu, 0xDAu, 0x04u, 0xDFu,
+            0x99u, 0x7Bu, 0x71u, 0x4Du, 0x6Cu, 0x6Fu, 0x2Cu, 0x29u,
+            0xA6u, 0xADu, 0x5Cu, 0xB4u, 0x02u, 0x2Bu, 0x02u, 0x70u,
+            0x9Bu
+        };
+        static const uint8_t a5ExpectedTag[] = {
+            0xEEu, 0xADu, 0x9Du, 0x67u, 0x89u, 0x0Cu, 0xBBu, 0x22u,
+            0x39u, 0x23u, 0x36u, 0xFEu, 0xA1u, 0x85u, 0x1Fu, 0x38u
+        };
+        uint8_t a5Ct[265];
+        uint8_t a5Tag[16];
+        uint8_t a5Pt2[265];
+        bool a5Ok;
+
+        SSFChaCha20Poly1305Encrypt(a5Pt, sizeof(a5Pt), a5Nonce, sizeof(a5Nonce),
+                                   a5Aad, sizeof(a5Aad), a5Key, sizeof(a5Key),
+                                   a5Tag, sizeof(a5Tag), a5Ct, sizeof(a5Ct));
+        SSF_ASSERT(memcmp(a5Ct, a5ExpectedCt, sizeof(a5ExpectedCt)) == 0);
+        SSF_ASSERT(memcmp(a5Tag, a5ExpectedTag, sizeof(a5ExpectedTag)) == 0);
+
+        a5Ok = SSFChaCha20Poly1305Decrypt(a5ExpectedCt, sizeof(a5ExpectedCt),
+                                          a5Nonce, sizeof(a5Nonce),
+                                          a5Aad, sizeof(a5Aad),
+                                          a5Key, sizeof(a5Key),
+                                          a5ExpectedTag, sizeof(a5ExpectedTag),
+                                          a5Pt2, sizeof(a5Pt2));
+        SSF_ASSERT(a5Ok == true);
+        SSF_ASSERT(memcmp(a5Pt2, a5Pt, sizeof(a5Pt)) == 0);
+    }
+
+    /* Wycheproof v1 chacha20_poly1305_test.json — selected representative vectors. The 300-
+     * vector set is too large to embed wholesale (and the OpenSSL fuzz on host already covers
+     * the bulk of the valid-input combinatorics); these four vectors specifically pin down
+     * patterns the fuzz won't generate by chance. */
+
+    /* Wycheproof tcId 5 (valid): 1-byte msg, 8-byte AAD. Single-byte body exercises the
+     * partial-block keystream truncation in the AEAD wrapper. */
+    {
+        static const uint8_t wpKey[] = {
+            0x46u, 0xF0u, 0x25u, 0x49u, 0x65u, 0xF7u, 0x69u, 0xD5u,
+            0x2Bu, 0xDBu, 0x4Au, 0x70u, 0xB4u, 0x43u, 0x19u, 0x9Fu,
+            0x8Eu, 0xF2u, 0x07u, 0x52u, 0x0Du, 0x12u, 0x20u, 0xC5u,
+            0x5Eu, 0x4Bu, 0x70u, 0xF0u, 0xFDu, 0xA6u, 0x20u, 0xEEu
+        };
+        static const uint8_t wpIv[] = {
+            0xABu, 0x0Du, 0xCAu, 0x71u, 0x6Eu, 0xE0u, 0x51u, 0xD2u,
+            0x78u, 0x2Fu, 0x44u, 0x03u
+        };
+        static const uint8_t wpAad[] = {
+            0x91u, 0xCAu, 0x6Cu, 0x59u, 0x2Cu, 0xBCu, 0xCAu, 0x53u
+        };
+        static const uint8_t wpMsg[]      = { 0x51u };
+        static const uint8_t wpExpectCt[] = { 0xC4u };
+        static const uint8_t wpExpectTag[] = {
+            0x16u, 0x83u, 0x10u, 0xCAu, 0x45u, 0xB1u, 0xF7u, 0xC6u,
+            0x6Cu, 0xADu, 0x4Eu, 0x99u, 0xE4u, 0x3Fu, 0x72u, 0xB9u
+        };
+        uint8_t wpCt[1];
+        uint8_t wpTag[16];
+        uint8_t wpDec[1];
+
+        SSFChaCha20Poly1305Encrypt(wpMsg, sizeof(wpMsg), wpIv, sizeof(wpIv),
+                                   wpAad, sizeof(wpAad), wpKey, sizeof(wpKey),
+                                   wpTag, sizeof(wpTag), wpCt, sizeof(wpCt));
+        SSF_ASSERT(memcmp(wpCt, wpExpectCt, sizeof(wpExpectCt)) == 0);
+        SSF_ASSERT(memcmp(wpTag, wpExpectTag, sizeof(wpExpectTag)) == 0);
+        SSF_ASSERT(SSFChaCha20Poly1305Decrypt(wpExpectCt, sizeof(wpExpectCt),
+                                              wpIv, sizeof(wpIv),
+                                              wpAad, sizeof(wpAad),
+                                              wpKey, sizeof(wpKey),
+                                              wpExpectTag, sizeof(wpExpectTag),
+                                              wpDec, sizeof(wpDec)) == true);
+        SSF_ASSERT(memcmp(wpDec, wpMsg, sizeof(wpMsg)) == 0);
+    }
+
+    /* Wycheproof tcId 4 (valid): 1-byte msg, ZERO-length AAD. Auth-only path with empty AAD
+     * pad16 — should produce an entirely-empty padded-AAD region in the Poly1305 tag input. */
+    {
+        static const uint8_t wpKey[] = {
+            0xCCu, 0x56u, 0xB6u, 0x80u, 0x55u, 0x2Eu, 0xB7u, 0x50u,
+            0x08u, 0xF5u, 0x48u, 0x4Bu, 0x4Cu, 0xB8u, 0x03u, 0xFAu,
+            0x50u, 0x63u, 0xEBu, 0xD6u, 0xEAu, 0xB9u, 0x1Fu, 0x6Au,
+            0xB6u, 0xAEu, 0xF4u, 0x91u, 0x6Au, 0x76u, 0x62u, 0x73u
+        };
+        static const uint8_t wpIv[] = {
+            0x99u, 0xE2u, 0x3Eu, 0xC4u, 0x89u, 0x85u, 0xBCu, 0xCDu,
+            0xEEu, 0xABu, 0x60u, 0xF1u
+        };
+        static const uint8_t wpMsg[]      = { 0x2Au };
+        static const uint8_t wpExpectCt[] = { 0x3Au };
+        static const uint8_t wpExpectTag[] = {
+            0xCAu, 0xC2u, 0x7Du, 0xECu, 0x09u, 0x68u, 0x80u, 0x1Eu,
+            0x9Fu, 0x6Eu, 0xDEu, 0xD6u, 0x9Du, 0x80u, 0x75u, 0x22u
+        };
+        uint8_t wpCt[1];
+        uint8_t wpTag[16];
+
+        SSFChaCha20Poly1305Encrypt(wpMsg, sizeof(wpMsg), wpIv, sizeof(wpIv),
+                                   NULL, 0u, wpKey, sizeof(wpKey),
+                                   wpTag, sizeof(wpTag), wpCt, sizeof(wpCt));
+        SSF_ASSERT(memcmp(wpCt, wpExpectCt, sizeof(wpExpectCt)) == 0);
+        SSF_ASSERT(memcmp(wpTag, wpExpectTag, sizeof(wpExpectTag)) == 0);
+    }
+
+    /* Wycheproof tcId 72 (valid): 64-byte msg (one full block), zero-length AAD, distinct
+     * key/nonce. Multi-block-boundary case beyond what RFC §2.8.2 (114B) and §A.5 (265B)
+     * exercise — specifically tests the exactly-one-full-block boundary. */
+    {
+        static const uint8_t wpKey[] = {
+            0x5Bu, 0x1Du, 0x10u, 0x35u, 0xC0u, 0xB1u, 0x7Eu, 0xE0u,
+            0xB0u, 0x44u, 0x47u, 0x67u, 0xF8u, 0x0Au, 0x25u, 0xB8u,
+            0xC1u, 0xB7u, 0x41u, 0xF4u, 0xB5u, 0x0Au, 0x4Du, 0x30u,
+            0x52u, 0x22u, 0x6Bu, 0xAAu, 0x1Cu, 0x6Fu, 0xB7u, 0x01u
+        };
+        static const uint8_t wpIv[] = {
+            0xD6u, 0x10u, 0x40u, 0xA3u, 0x13u, 0xEDu, 0x49u, 0x28u,
+            0x23u, 0xCCu, 0x06u, 0x5Bu
+        };
+        static const uint8_t wpMsg[] = {
+            0xD0u, 0x96u, 0x80u, 0x31u, 0x81u, 0xBEu, 0xEFu, 0x9Eu,
+            0x00u, 0x8Fu, 0xF8u, 0x5Du, 0x5Du, 0xDCu, 0x38u, 0xDDu,
+            0xACu, 0xF0u, 0xF0u, 0x9Eu, 0xE5u, 0xF7u, 0xE0u, 0x7Fu,
+            0x1Eu, 0x40u, 0x79u, 0xCBu, 0x64u, 0xD0u, 0xDCu, 0x8Fu,
+            0x5Eu, 0x67u, 0x11u, 0xCDu, 0x49u, 0x21u, 0xA7u, 0x88u,
+            0x7Du, 0xE7u, 0x6Eu, 0x26u, 0x78u, 0xFDu, 0xC6u, 0x76u,
+            0x18u, 0xF1u, 0x18u, 0x55u, 0x86u, 0xBFu, 0xEAu, 0x9Du,
+            0x4Cu, 0x68u, 0x5Du, 0x50u, 0xE4u, 0xBBu, 0x9Au, 0x82u
+        };
+        static const uint8_t wpExpectCt[] = {
+            0x9Au, 0x4Eu, 0xF2u, 0x2Bu, 0x18u, 0x16u, 0x77u, 0xB5u,
+            0x75u, 0x5Cu, 0x08u, 0xF7u, 0x47u, 0xC0u, 0xF8u, 0xD8u,
+            0xE8u, 0xD4u, 0xC1u, 0x8Au, 0x9Cu, 0xC2u, 0x40u, 0x5Cu,
+            0x12u, 0xBBu, 0x51u, 0xBBu, 0x18u, 0x72u, 0xC8u, 0xE8u,
+            0xB8u, 0x77u, 0x67u, 0x8Bu, 0xECu, 0x44u, 0x2Cu, 0xFCu,
+            0xBBu, 0x0Fu, 0xF4u, 0x64u, 0xA6u, 0x4Bu, 0x74u, 0x33u,
+            0x2Cu, 0xF0u, 0x72u, 0x89u, 0x8Cu, 0x7Eu, 0x0Eu, 0xDDu,
+            0xF6u, 0x23u, 0x2Eu, 0xA6u, 0xE2u, 0x7Eu, 0xFEu, 0x50u
+        };
+        static const uint8_t wpExpectTag[] = {
+            0x9Fu, 0xF3u, 0x42u, 0x7Au, 0x0Fu, 0x32u, 0xFAu, 0x56u,
+            0x6Du, 0x9Cu, 0xA0u, 0xA7u, 0x8Au, 0xEFu, 0xC0u, 0x13u
+        };
+        uint8_t wpCt[64];
+        uint8_t wpTag[16];
+
+        SSFChaCha20Poly1305Encrypt(wpMsg, sizeof(wpMsg), wpIv, sizeof(wpIv),
+                                   NULL, 0u, wpKey, sizeof(wpKey),
+                                   wpTag, sizeof(wpTag), wpCt, sizeof(wpCt));
+        SSF_ASSERT(memcmp(wpCt, wpExpectCt, sizeof(wpExpectCt)) == 0);
+        SSF_ASSERT(memcmp(wpTag, wpExpectTag, sizeof(wpExpectTag)) == 0);
+    }
+
+    /* Wycheproof tcId 146 (invalid): empty msg, 3-byte AAD, single-bit flip in tag. Auth-only
+     * mode with a tampered tag — Decrypt MUST return false. The original valid tag would have
+     * been f4..., the supplied tampered tag is f5... (low bit of byte 0 flipped). */
+    {
+        static const uint8_t wpKey[] = {
+            0x20u, 0x21u, 0x22u, 0x23u, 0x24u, 0x25u, 0x26u, 0x27u,
+            0x28u, 0x29u, 0x2Au, 0x2Bu, 0x2Cu, 0x2Du, 0x2Eu, 0x2Fu,
+            0x30u, 0x31u, 0x32u, 0x33u, 0x34u, 0x35u, 0x36u, 0x37u,
+            0x38u, 0x39u, 0x3Au, 0x3Bu, 0x3Cu, 0x3Du, 0x3Eu, 0x3Fu
+        };
+        static const uint8_t wpIv[] = {
+            0x00u, 0x01u, 0x02u, 0x03u, 0x04u, 0x05u, 0x06u, 0x07u,
+            0x08u, 0x09u, 0x0Au, 0x0Bu
+        };
+        static const uint8_t wpAad[]        = { 0x00u, 0x01u, 0x02u };
+        static const uint8_t wpTamperedTag[] = {
+            0xF5u, 0x40u, 0x9Bu, 0xB7u, 0x29u, 0x03u, 0x9Du, 0x08u,
+            0x14u, 0xACu, 0x51u, 0x40u, 0x54u, 0x32u, 0x3Fu, 0x44u
+        };
+
+        /* Empty ct — pass NULL with ctLen = 0. Tampered tag must reject. */
+        SSF_ASSERT(SSFChaCha20Poly1305Decrypt(NULL, 0u,
+                                              wpIv, sizeof(wpIv),
+                                              wpAad, sizeof(wpAad),
+                                              wpKey, sizeof(wpKey),
+                                              wpTamperedTag, sizeof(wpTamperedTag),
+                                              NULL, 0u) == false);
+    }
+
+    /* Tag-buffer write boundary: oversized tag buffer must leave bytes 16..N-1 untouched.
+     * Pins down the .md guarantee "exactly 16 bytes are written". */
+    {
+        static const uint8_t boundaryKey[SSF_CCP_KEY_SIZE] = {0};
+        static const uint8_t boundaryNonce[SSF_CCP_NONCE_SIZE] = {0};
+        static const uint8_t boundaryPt[16] = {0};
+        uint8_t boundaryCt[16];
+        uint8_t oversizedTag[32];
+        size_t i;
+
+        memset(oversizedTag, 0xCCu, sizeof(oversizedTag));
+        SSFChaCha20Poly1305Encrypt(boundaryPt, sizeof(boundaryPt),
+                                   boundaryNonce, sizeof(boundaryNonce),
+                                   NULL, 0u,
+                                   boundaryKey, sizeof(boundaryKey),
+                                   oversizedTag, sizeof(oversizedTag),
+                                   boundaryCt, sizeof(boundaryCt));
+        for (i = 16u; i < sizeof(oversizedTag); i++) SSF_ASSERT(oversizedTag[i] == 0xCCu);
+    }
+
     /* Test wrong tag returns false */
     {
         uint8_t badTag[16];
@@ -399,31 +685,257 @@ void SSFChaCha20Poly1305UnitTest(void)
         SSF_ASSERT(memcmp(recovered, scratchPt, sizeof(scratchPt)) == 0);
     }
 
-    /* AAD-pointer contract regression. NULL `auth` with `authLen > 0` must assert at the
-     * AEAD entry, both for encrypt and for decrypt. The test passes regardless of which
-     * SSF_REQUIRE catches it (the AEAD-level check or the deeper Poly1305Update), so it
-     * serves as documentation + regression protection if either layer is later refactored. */
+    /* SSFChaCha20Poly1305Encrypt: DBC coverage. Every SSF_REQUIRE at the AEAD entry is
+     * exercised with at least one boundary or NULL-pointer violation. The 512 MiB ptLen test
+     * passes a matching ctSize so the size-bound check fires last; nothing dereferences pt or
+     * ct so the absurd length never causes any actual allocation. */
     {
         static const uint8_t scratchKey[SSF_CCP_KEY_SIZE] = {0};
         static const uint8_t scratchNonce[SSF_CCP_NONCE_SIZE] = {0};
-        static const uint8_t scratchTag[SSF_CCP_TAG_SIZE] = {0};
         static const uint8_t scratchPt[16] = {0};
+        uint8_t scratchTag[SSF_CCP_TAG_SIZE];
         uint8_t scratchCt[16];
-        uint8_t scratchOutTag[SSF_CCP_TAG_SIZE];
-        uint8_t scratchOutPt[16];
 
+        /* iv NULL */
+        SSF_ASSERT_TEST(SSFChaCha20Poly1305Encrypt(scratchPt, sizeof(scratchPt),
+                                                   NULL, sizeof(scratchNonce),
+                                                   NULL, 0u,
+                                                   scratchKey, sizeof(scratchKey),
+                                                   scratchTag, sizeof(scratchTag),
+                                                   scratchCt, sizeof(scratchCt)));
+        /* key NULL */
+        SSF_ASSERT_TEST(SSFChaCha20Poly1305Encrypt(scratchPt, sizeof(scratchPt),
+                                                   scratchNonce, sizeof(scratchNonce),
+                                                   NULL, 0u,
+                                                   NULL, sizeof(scratchKey),
+                                                   scratchTag, sizeof(scratchTag),
+                                                   scratchCt, sizeof(scratchCt)));
+        /* tag NULL */
+        SSF_ASSERT_TEST(SSFChaCha20Poly1305Encrypt(scratchPt, sizeof(scratchPt),
+                                                   scratchNonce, sizeof(scratchNonce),
+                                                   NULL, 0u,
+                                                   scratchKey, sizeof(scratchKey),
+                                                   NULL, sizeof(scratchTag),
+                                                   scratchCt, sizeof(scratchCt)));
+        /* keyLen wrong */
+        SSF_ASSERT_TEST(SSFChaCha20Poly1305Encrypt(scratchPt, sizeof(scratchPt),
+                                                   scratchNonce, sizeof(scratchNonce),
+                                                   NULL, 0u,
+                                                   scratchKey, 0u,
+                                                   scratchTag, sizeof(scratchTag),
+                                                   scratchCt, sizeof(scratchCt)));
+        SSF_ASSERT_TEST(SSFChaCha20Poly1305Encrypt(scratchPt, sizeof(scratchPt),
+                                                   scratchNonce, sizeof(scratchNonce),
+                                                   NULL, 0u,
+                                                   scratchKey, 31u,
+                                                   scratchTag, sizeof(scratchTag),
+                                                   scratchCt, sizeof(scratchCt)));
+        SSF_ASSERT_TEST(SSFChaCha20Poly1305Encrypt(scratchPt, sizeof(scratchPt),
+                                                   scratchNonce, sizeof(scratchNonce),
+                                                   NULL, 0u,
+                                                   scratchKey, 33u,
+                                                   scratchTag, sizeof(scratchTag),
+                                                   scratchCt, sizeof(scratchCt)));
+        /* ivLen wrong */
+        SSF_ASSERT_TEST(SSFChaCha20Poly1305Encrypt(scratchPt, sizeof(scratchPt),
+                                                   scratchNonce, 0u,
+                                                   NULL, 0u,
+                                                   scratchKey, sizeof(scratchKey),
+                                                   scratchTag, sizeof(scratchTag),
+                                                   scratchCt, sizeof(scratchCt)));
+        SSF_ASSERT_TEST(SSFChaCha20Poly1305Encrypt(scratchPt, sizeof(scratchPt),
+                                                   scratchNonce, 11u,
+                                                   NULL, 0u,
+                                                   scratchKey, sizeof(scratchKey),
+                                                   scratchTag, sizeof(scratchTag),
+                                                   scratchCt, sizeof(scratchCt)));
+        SSF_ASSERT_TEST(SSFChaCha20Poly1305Encrypt(scratchPt, sizeof(scratchPt),
+                                                   scratchNonce, 13u,
+                                                   NULL, 0u,
+                                                   scratchKey, sizeof(scratchKey),
+                                                   scratchTag, sizeof(scratchTag),
+                                                   scratchCt, sizeof(scratchCt)));
+        /* tagSize too small */
+        SSF_ASSERT_TEST(SSFChaCha20Poly1305Encrypt(scratchPt, sizeof(scratchPt),
+                                                   scratchNonce, sizeof(scratchNonce),
+                                                   NULL, 0u,
+                                                   scratchKey, sizeof(scratchKey),
+                                                   scratchTag, 0u,
+                                                   scratchCt, sizeof(scratchCt)));
+        SSF_ASSERT_TEST(SSFChaCha20Poly1305Encrypt(scratchPt, sizeof(scratchPt),
+                                                   scratchNonce, sizeof(scratchNonce),
+                                                   NULL, 0u,
+                                                   scratchKey, sizeof(scratchKey),
+                                                   scratchTag, 15u,
+                                                   scratchCt, sizeof(scratchCt)));
+        /* ptLen > ctSize */
+        SSF_ASSERT_TEST(SSFChaCha20Poly1305Encrypt(scratchPt, sizeof(scratchPt),
+                                                   scratchNonce, sizeof(scratchNonce),
+                                                   NULL, 0u,
+                                                   scratchKey, sizeof(scratchKey),
+                                                   scratchTag, sizeof(scratchTag),
+                                                   scratchCt, sizeof(scratchPt) - 1u));
+        /* ptLen ≥ 512 MiB */
+        SSF_ASSERT_TEST(SSFChaCha20Poly1305Encrypt(scratchPt, 512u * 1024u * 1024u,
+                                                   scratchNonce, sizeof(scratchNonce),
+                                                   NULL, 0u,
+                                                   scratchKey, sizeof(scratchKey),
+                                                   scratchTag, sizeof(scratchTag),
+                                                   scratchCt, 512u * 1024u * 1024u));
+        /* pt NULL with ptLen > 0 */
+        SSF_ASSERT_TEST(SSFChaCha20Poly1305Encrypt(NULL, sizeof(scratchCt),
+                                                   scratchNonce, sizeof(scratchNonce),
+                                                   NULL, 0u,
+                                                   scratchKey, sizeof(scratchKey),
+                                                   scratchTag, sizeof(scratchTag),
+                                                   scratchCt, sizeof(scratchCt)));
+        /* ct NULL with ptLen > 0 */
+        SSF_ASSERT_TEST(SSFChaCha20Poly1305Encrypt(scratchPt, sizeof(scratchPt),
+                                                   scratchNonce, sizeof(scratchNonce),
+                                                   NULL, 0u,
+                                                   scratchKey, sizeof(scratchKey),
+                                                   scratchTag, sizeof(scratchTag),
+                                                   NULL, sizeof(scratchCt)));
+        /* AAD NULL with authLen > 0 (already covered above; repeated here for completeness
+         * within this DBC block). */
         SSF_ASSERT_TEST(SSFChaCha20Poly1305Encrypt(scratchPt, sizeof(scratchPt),
                                                    scratchNonce, sizeof(scratchNonce),
                                                    NULL, 5u,
                                                    scratchKey, sizeof(scratchKey),
-                                                   scratchOutTag, sizeof(scratchOutTag),
+                                                   scratchTag, sizeof(scratchTag),
                                                    scratchCt, sizeof(scratchCt)));
+
+        /* Permitted edge: ptLen == 0 with NULL pt and ct must NOT assert. */
+        SSFChaCha20Poly1305Encrypt(NULL, 0u,
+                                   scratchNonce, sizeof(scratchNonce),
+                                   NULL, 0u,
+                                   scratchKey, sizeof(scratchKey),
+                                   scratchTag, sizeof(scratchTag),
+                                   NULL, 0u);
+    }
+
+    /* SSFChaCha20Poly1305Decrypt: DBC coverage. Mirror of the encrypt block, plus the
+     * tagLen-must-equal-16 check (decrypt rejects truncated tags rather than verifying a
+     * shorter prefix). The pt/ct NULL-with-len>0 cases assert via Poly1305Update inside
+     * tag computation since pt/ct's explicit AEAD-level check is gated on a successful
+     * tag verify which never happens on these all-zero-key inputs. */
+    {
+        static const uint8_t scratchKey[SSF_CCP_KEY_SIZE] = {0};
+        static const uint8_t scratchNonce[SSF_CCP_NONCE_SIZE] = {0};
+        static const uint8_t scratchTag[SSF_CCP_TAG_SIZE] = {0};
+        static const uint8_t scratchCt[16] = {0};
+        uint8_t scratchPt[16];
+
+        /* iv NULL */
+        SSF_ASSERT_TEST(SSFChaCha20Poly1305Decrypt(scratchCt, sizeof(scratchCt),
+                                                   NULL, sizeof(scratchNonce),
+                                                   NULL, 0u,
+                                                   scratchKey, sizeof(scratchKey),
+                                                   scratchTag, sizeof(scratchTag),
+                                                   scratchPt, sizeof(scratchPt)));
+        /* key NULL */
+        SSF_ASSERT_TEST(SSFChaCha20Poly1305Decrypt(scratchCt, sizeof(scratchCt),
+                                                   scratchNonce, sizeof(scratchNonce),
+                                                   NULL, 0u,
+                                                   NULL, sizeof(scratchKey),
+                                                   scratchTag, sizeof(scratchTag),
+                                                   scratchPt, sizeof(scratchPt)));
+        /* tag NULL */
+        SSF_ASSERT_TEST(SSFChaCha20Poly1305Decrypt(scratchCt, sizeof(scratchCt),
+                                                   scratchNonce, sizeof(scratchNonce),
+                                                   NULL, 0u,
+                                                   scratchKey, sizeof(scratchKey),
+                                                   NULL, sizeof(scratchTag),
+                                                   scratchPt, sizeof(scratchPt)));
+        /* keyLen wrong */
+        SSF_ASSERT_TEST(SSFChaCha20Poly1305Decrypt(scratchCt, sizeof(scratchCt),
+                                                   scratchNonce, sizeof(scratchNonce),
+                                                   NULL, 0u,
+                                                   scratchKey, 0u,
+                                                   scratchTag, sizeof(scratchTag),
+                                                   scratchPt, sizeof(scratchPt)));
+        SSF_ASSERT_TEST(SSFChaCha20Poly1305Decrypt(scratchCt, sizeof(scratchCt),
+                                                   scratchNonce, sizeof(scratchNonce),
+                                                   NULL, 0u,
+                                                   scratchKey, 31u,
+                                                   scratchTag, sizeof(scratchTag),
+                                                   scratchPt, sizeof(scratchPt)));
+        SSF_ASSERT_TEST(SSFChaCha20Poly1305Decrypt(scratchCt, sizeof(scratchCt),
+                                                   scratchNonce, sizeof(scratchNonce),
+                                                   NULL, 0u,
+                                                   scratchKey, 33u,
+                                                   scratchTag, sizeof(scratchTag),
+                                                   scratchPt, sizeof(scratchPt)));
+        /* ivLen wrong */
+        SSF_ASSERT_TEST(SSFChaCha20Poly1305Decrypt(scratchCt, sizeof(scratchCt),
+                                                   scratchNonce, 0u,
+                                                   NULL, 0u,
+                                                   scratchKey, sizeof(scratchKey),
+                                                   scratchTag, sizeof(scratchTag),
+                                                   scratchPt, sizeof(scratchPt)));
+        SSF_ASSERT_TEST(SSFChaCha20Poly1305Decrypt(scratchCt, sizeof(scratchCt),
+                                                   scratchNonce, 11u,
+                                                   NULL, 0u,
+                                                   scratchKey, sizeof(scratchKey),
+                                                   scratchTag, sizeof(scratchTag),
+                                                   scratchPt, sizeof(scratchPt)));
+        SSF_ASSERT_TEST(SSFChaCha20Poly1305Decrypt(scratchCt, sizeof(scratchCt),
+                                                   scratchNonce, 13u,
+                                                   NULL, 0u,
+                                                   scratchKey, sizeof(scratchKey),
+                                                   scratchTag, sizeof(scratchTag),
+                                                   scratchPt, sizeof(scratchPt)));
+        /* tagLen wrong (decrypt rejects anything other than exactly 16) */
+        SSF_ASSERT_TEST(SSFChaCha20Poly1305Decrypt(scratchCt, sizeof(scratchCt),
+                                                   scratchNonce, sizeof(scratchNonce),
+                                                   NULL, 0u,
+                                                   scratchKey, sizeof(scratchKey),
+                                                   scratchTag, 0u,
+                                                   scratchPt, sizeof(scratchPt)));
+        SSF_ASSERT_TEST(SSFChaCha20Poly1305Decrypt(scratchCt, sizeof(scratchCt),
+                                                   scratchNonce, sizeof(scratchNonce),
+                                                   NULL, 0u,
+                                                   scratchKey, sizeof(scratchKey),
+                                                   scratchTag, 15u,
+                                                   scratchPt, sizeof(scratchPt)));
+        SSF_ASSERT_TEST(SSFChaCha20Poly1305Decrypt(scratchCt, sizeof(scratchCt),
+                                                   scratchNonce, sizeof(scratchNonce),
+                                                   NULL, 0u,
+                                                   scratchKey, sizeof(scratchKey),
+                                                   scratchTag, 17u,
+                                                   scratchPt, sizeof(scratchPt)));
+        /* ctLen > ptSize */
+        SSF_ASSERT_TEST(SSFChaCha20Poly1305Decrypt(scratchCt, sizeof(scratchCt),
+                                                   scratchNonce, sizeof(scratchNonce),
+                                                   NULL, 0u,
+                                                   scratchKey, sizeof(scratchKey),
+                                                   scratchTag, sizeof(scratchTag),
+                                                   scratchPt, sizeof(scratchCt) - 1u));
+        /* ctLen ≥ 512 MiB */
+        SSF_ASSERT_TEST(SSFChaCha20Poly1305Decrypt(scratchCt, 512u * 1024u * 1024u,
+                                                   scratchNonce, sizeof(scratchNonce),
+                                                   NULL, 0u,
+                                                   scratchKey, sizeof(scratchKey),
+                                                   scratchTag, sizeof(scratchTag),
+                                                   scratchPt, 512u * 1024u * 1024u));
+        /* AAD NULL with authLen > 0 */
         SSF_ASSERT_TEST(SSFChaCha20Poly1305Decrypt(scratchCt, sizeof(scratchCt),
                                                    scratchNonce, sizeof(scratchNonce),
                                                    NULL, 5u,
                                                    scratchKey, sizeof(scratchKey),
                                                    scratchTag, sizeof(scratchTag),
-                                                   scratchOutPt, sizeof(scratchOutPt)));
+                                                   scratchPt, sizeof(scratchPt)));
+
+        /* Permitted edge: ctLen == 0 with NULL ct and pt — auth-only mode with NULL buffers
+         * and a zero-AAD construction. The all-zero tag matches the all-zero-key auth-only
+         * computation only by accident, so we don't assert on the return value. The point
+         * is that the call must not assert. */
+        (void)SSFChaCha20Poly1305Decrypt(NULL, 0u,
+                                         scratchNonce, sizeof(scratchNonce),
+                                         NULL, 0u,
+                                         scratchKey, sizeof(scratchKey),
+                                         scratchTag, sizeof(scratchTag),
+                                         NULL, 0u);
     }
 
 #if SSF_CCP_OSSL_VERIFY == 1

@@ -20,7 +20,7 @@ cflags_common = -Wall -Wextra -pedantic -Wcast-align -Wno-parentheses -Wno-unuse
 includes = -I. -I_time -I_codec -I_crypto -I_ecc -I_edc -I_fsm -I_debug $
     -I_storage -I_struct -I_ui -I_osal -I_opt
 
-cflags = $cflags_common @CFLAGS@
+cflags = $cflags_common -Wlogical-op @CFLAGS@
 ldflags = @LDFLAGS@
 
 builddir = @BUILDDIR@

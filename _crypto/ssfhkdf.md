@@ -53,8 +53,17 @@ This module exposes both steps individually ([`SSFHKDFExtract`](#ssfhkdfextract)
   [`SSFHKDFExpand()`](#ssfhkdfexpand). `okmLen == 0` is accepted and is a no-op.
 - `prkLen` passed to [`SSFHKDFExpand()`](#ssfhkdfexpand) must be at least `HashLen`; supplying
   a PRK that is too short violates the security proof and is rejected by a `SSF_REQUIRE`.
+  Bytes of `prk` beyond `HashLen` are not ignored — they are fed into HMAC per RFC 2104
+  (zero-padded when `prkLen ≤ HMAC blockSize`, hashed down to `HashLen` first when
+  `prkLen > blockSize`). Pass exactly `HashLen` bytes unless you have a specific reason.
 - `prkOutSize` passed to [`SSFHKDFExtract()`](#ssfhkdfextract) must be at least `HashLen`.
   The full `HashLen`-byte PRK is always written; oversized buffers are not padded.
+- **No aliasing.** Output buffers must not overlap any input buffer. For
+  [`SSFHKDFExpand()`](#ssfhkdfexpand) and [`SSFHKDF()`](#ssfhkdf), `okmOut` must not overlap
+  `prk`, `info`, `salt`, or `ikm`; for [`SSFHKDFExtract()`](#ssfhkdfextract), `prkOut` must
+  not overlap `salt` or `ikm`. `Expand` re-reads `prk` and `info` on every block iteration,
+  so an `okmOut` that aliases either will silently corrupt subsequent blocks (only single-block
+  outputs, `okmLen ≤ HashLen`, escape this). Aliasing is not detected at runtime.
 - The derived OKM is secret material — store, wipe, and compare it with the same care as any
   other long-term key. Use [`SSFCryptCTMemEq()`](ssfcrypt.md) when any equality check on derived-key
   bytes affects a security decision.

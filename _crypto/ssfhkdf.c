@@ -159,10 +159,25 @@ bool SSFHKDF(SSFHMACHash_t hash,
     size_t hashSize;
     bool ok;
 
-    hashSize = SSFHMACGetHashSize(hash);
+    /* Pre-validate Expand's contract here so a contract failure aborts before prk is populated, */
+    /* otherwise the live PRK would linger on the stack past the abort (coredump / no-scrub HW). */
+    SSF_REQUIRE(okmOut != NULL);
+    SSF_REQUIRE((info != NULL) || (infoLen == 0));
+    SSF_REQUIRE((hash > SSF_HMAC_HASH_MIN) && (hash < SSF_HMAC_HASH_MAX));
 
-    if (!SSFHKDFExtract(hash, salt, saltLen, ikm, ikmLen, prk, sizeof(prk))) return false;
-    ok = SSFHKDFExpand(hash, prk, hashSize, info, infoLen, okmOut, okmLen);
+    hashSize = SSFHMACGetHashSize(hash);
+    SSF_REQUIRE(okmLen <= 255u * hashSize);
+
+    /* Unconditional scrub: prk must not escape this frame on any path, including a future */
+    /* Extract failure that may have partially written HMAC-derived state into prk.        */
+    if (SSFHKDFExtract(hash, salt, saltLen, ikm, ikmLen, prk, sizeof(prk)))
+    {
+        ok = SSFHKDFExpand(hash, prk, hashSize, info, infoLen, okmOut, okmLen);
+    }
+    else
+    {
+        ok = false;
+    }
     SSFCryptSecureZero(prk, sizeof(prk));
     return ok;
 }

@@ -52,7 +52,35 @@ compiler when the target buffer is never read again.
 
 ## [↑](#ssfcrypt--cryptographic-helpers) Configuration
 
-This module has no compile-time configuration options in `ssfoptions.h`.
+This module's own helpers (`SSFCryptCTMemEq`, `SSFCryptSecureZero`) have no
+compile-time options. The same opt file
+([`_opt/ssfcrypt_opt.h`](../_opt/ssfcrypt_opt.h)) hosts the **`_crypto`-wide
+profile selector** that sets defaults for the cross-module performance / memory
+knobs in [`ssfbn`](ssfbn.md#configuration) and [`ssfec`](ssfec.md#configuration):
+
+| Macro | Default | Description |
+|-------|---------|-------------|
+| `SSF_CRYPT_CONFIG_PROFILE` | `SSF_CRYPT_PROFILE_CUSTOM` | One of `MIN_MEMORY` / `CUSTOM` / `MAX_PERF`. |
+
+**`SSF_CRYPT_PROFILE_MIN_MEMORY`** sets `SSF_EC_CONFIG_FIXED_BASE_P256` and
+`SSF_EC_CONFIG_FIXED_BASE_P384` to `0`, dropping the Lim-Lee comb tables (~12 KB
+rodata at the default `COMB_H = 6`). Cost: `[k]G` runs ~3-4× slower (Montgomery
+ladder fallback); `SSFECScalarMulDualBase` auto-falls-back to the Shamir's-trick
+path. Suited to verify-only signers on Cortex-M0/M3-class targets.
+
+**`SSF_CRYPT_PROFILE_CUSTOM`** is today's defaults — both fixed-base tables on,
+both curves enabled, RSA-2048/3072/4096 all on. Intended for networked 32-bit
+MCUs in the ~512 KB-RAM range.
+
+**`SSF_CRYPT_PROFILE_MAX_PERF`** sets `SSF_BN_KARATSUBA_THRESHOLD = 16` so
+RSA-2048+ multiplies enter Karatsuba sooner. Suited to host / server builds.
+
+The compiler's dead-code elimination handles the rest: unreferenced KeyGen,
+PSS, larger RSA sizes, or unused curve code paths are stripped at link without
+needing per-profile flag gating, so the profile only touches knobs DCE cannot
+reach (lookup-table sizes, dispatch thresholds). Each knob is `#ifndef`-guarded
+in its per-module opt file, so individual overrides still win after the
+profile sets its defaults.
 
 <a id="api-summary"></a>
 

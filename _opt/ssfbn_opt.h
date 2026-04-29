@@ -22,6 +22,27 @@ extern "C" {
 /* Example: force 8192 even on an ECC-only build.                                                */
 /*   #define SSF_BN_CONFIG_MAX_BITS               (8192u)                                       */
 
+/* SSFBNMul Karatsuba dispatch threshold (limbs). Operands at or above this — same length, even */
+/* length — go through one-level Karatsuba; below it, schoolbook. Both code paths always link;  */
+/* the threshold only steers the runtime dispatch. Default is 32 (RSA-1024 boundary); the       */
+/* MAX_PERF profile lowers this to 16 so RSA-2048 multiplies enter Karatsuba sooner.            */
+#ifndef SSF_BN_KARATSUBA_THRESHOLD
+#define SSF_BN_KARATSUBA_THRESHOLD           (32u)
+#endif
+
+/* SSFBNModExp fixed-window size in bits. The constant-time Montgomery exponentiation          */
+/* precomputes a 2^k entry table of Montgomery powers, then squares-and-multiplies through the  */
+/* exponent in k-bit windows.                                                                    */
+/*                                                                                              */
+/* Currently WIN_K must DIVIDE SSF_BN_LIMB_BITS (32): valid values are 1, 2, 4, 8, 16, 32.      */
+/* The windowing computes nWindows = expLen * 32 / WIN_K; non-divisor values silently truncate  */
+/* the iteration count and corrupt results (visible downstream through SSFBNModInv → Fermat →   */
+/* SSFECPointToAffine). The default 4 (16-entry table) is the practical sweet spot. Larger k    */
+/* means fewer MontMuls per bit at the cost of a 2x-larger stack-resident table per call.       */
+#ifndef SSF_BN_MODEXP_WIN_K
+#define SSF_BN_MODEXP_WIN_K                  (4u)
+#endif
+
 #ifdef __cplusplus
 }
 #endif

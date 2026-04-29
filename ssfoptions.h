@@ -41,6 +41,10 @@ extern "C" {
 #include "ssfport.h"
 #include "ssfassert.h"
 
+/* The _crypto-wide profile selector must be processed BEFORE the per-module crypto opts so its */
+/* defaults are visible to their #ifndef guards. Out of alphabetical order intentionally.        */
+#include "ssfcrypt_opt.h"
+
 /* Per-module option files. Each is also includable directly by its module's source. */
 #include "ssfasn1_opt.h"
 #include "ssfbfifo_opt.h"

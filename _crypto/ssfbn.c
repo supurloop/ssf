@@ -39,8 +39,8 @@
 #error "SSF_BN_MAX_LIMBS must fit in int16_t to keep uint16_t sums safe in Mul/Square"
 #endif
 
-#define SSF_BN_KARATSUBA_THRESHOLD (32u)
-#define SSF_BN_MODEXP_WIN_K        (4u)
+/* SSF_BN_KARATSUBA_THRESHOLD and SSF_BN_MODEXP_WIN_K are configured in ssfbn_opt.h (or via the */
+/* SSF_CRYPT_CONFIG_PROFILE selector in ssfcrypt_opt.h).                                         */
 #define SSF_BN_MODEXP_TBL_N        ((uint32_t)1u << SSF_BN_MODEXP_WIN_K)
 #define SSF_BN_NUM_SMALL_PRIMES    (sizeof(_ssfBNSmallPrimes) / sizeof(_ssfBNSmallPrimes[0]))
 

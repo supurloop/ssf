@@ -2732,6 +2732,7 @@ void SSFECUnitTest(void)
                    (unsigned)iters, (unsigned long long)(t1 - t0));
 
             sigLen = 0;
+#if SSF_ECDSA_CONFIG_ENABLE_SIGN == 1
             t0 = SSFPortGetTick64();
             for (i = 0; i < iters; i++)
             {
@@ -2753,6 +2754,7 @@ void SSFECUnitTest(void)
             t1 = SSFPortGetTick64();
             printf("  ECDSAVerify     P-256        %u iter: %llu ms\n",
                    (unsigned)iters, (unsigned long long)(t1 - t0));
+#endif /* SSF_ECDSA_CONFIG_ENABLE_SIGN — sig produced by Sign feeds Verify */
         }
 #endif /* SSF_EC_CONFIG_ENABLE_P256 */
 

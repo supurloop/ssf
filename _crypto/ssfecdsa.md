@@ -116,9 +116,17 @@ Two design choices worth calling out up front:
 
 ## [↑](#ssfecdsa--ecdsa-signatures-and-ecdh-key-agreement) Configuration
 
-This module has no `_opt` configuration of its own; curve enablement flows through from
-[`ssfec`](ssfec.md#configuration) via `SSF_EC_CONFIG_ENABLE_P256` /
+Options live in [`_opt/ssfecdsa_opt.h`](../_opt/ssfecdsa_opt.h). Curve enablement flows
+through from [`ssfec`](ssfec.md#configuration) via `SSF_EC_CONFIG_ENABLE_P256` /
 `SSF_EC_CONFIG_ENABLE_P384`.
+
+| Macro | Default | Description |
+|-------|---------|-------------|
+| `SSF_ECDSA_CONFIG_ENABLE_SIGN` | `1` | Compile `SSFECDSASign` and the DER-encode helper. Setting to `0` drops them — and drops the only `ssfasn1` reference in this module. The verify path was refactored so DER-input parsing is purely byte-level (no `ssfasn1` calls), so a verify-only build can omit the entire `ssfasn1` module from its project. `SSFECDSAVerify`, `SSFECDSAKeyGen`, and `SSFECDHComputeSecret` are unaffected. |
+
+The [`SSF_CRYPT_PROFILE_MIN_MEMORY`](ssfcrypt.md#configuration) profile defaults
+`SSF_ECDSA_CONFIG_ENABLE_SIGN = 0` since the typical MIN_MEMORY use case (firmware-update
+verifier) needs verify but not on-device signing.
 
 <a id="api-summary"></a>
 

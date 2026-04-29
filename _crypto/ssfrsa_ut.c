@@ -83,6 +83,12 @@ static void _SSFRSAUTPolluteStack(uint8_t v)
     for (i = 0u; i < sizeof(buf); i++) buf[i] = v;
 }
 
+/* Reading uninitialized stack is the test — silence GCC/clang's -Wuninitialized for this body. */
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wuninitialized"
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#endif
 SSF_NOINLINE
 static int _SSFRSAUTScanStack(const uint8_t *needle, size_t needleLen)
 {
@@ -104,6 +110,9 @@ static int _SSFRSAUTScanStack(const uint8_t *needle, size_t needleLen)
     buf[0] = (uint8_t)found;
     return found;
 }
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 
 /* Locate the start of p's magnitude bytes inside an emitted PKCS#1 RSAPrivateKey for a 2048-bit */
 /* key. Layout:                                                                                  */

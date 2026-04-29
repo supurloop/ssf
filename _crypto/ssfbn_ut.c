@@ -80,7 +80,7 @@ static void _FromOSSL(SSFBN_t *dst, const BIGNUM *src, uint16_t numLimbs)
     size_t outSize = (size_t)numLimbs * sizeof(SSFBNLimb_t);
 
     SSF_ASSERT(outSize <= sizeof(buf));
-    SSF_ASSERT(BN_num_bytes(src) <= (int)outSize);
+    SSF_ASSERT((size_t)BN_num_bytes(src) <= outSize);
     SSF_ASSERT(BN_bn2binpad(src, buf, (int)outSize) == (int)outSize);
     SSF_ASSERT(SSFBNFromBytes(dst, buf, outSize, numLimbs) == true);
 }

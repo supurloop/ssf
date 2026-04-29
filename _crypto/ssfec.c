@@ -1300,8 +1300,8 @@ static void _SSFECScalarMulVTwNAF(SSFECPoint_t *r, const SSFBN_t *k,
     SSFECPOINT_DEFINE(neg, SSF_EC_MAX_LIMBS);
     SSFBN_DEFINE(kCopy, SSF_EC_MAX_LIMBS);
     int8_t digits[_SSF_EC_VTWNAF_MAX_DIGITS];
-    int32_t nDigits = 0;
-    int32_t i;
+    size_t nDigits = 0;
+    size_t i;
     bool inputAffine; /* true when caller's P has Z = 1 (e.g. from PointDecode / PointFromAffine) */
 
     SSF_REQUIRE(r != NULL);
@@ -1320,7 +1320,7 @@ static void _SSFECScalarMulVTwNAF(SSFECPoint_t *r, const SSFBN_t *k,
     SSF_REQUIRE(r->z.cap >= c->limbs);
 
     /* Wire up table descriptors. */
-    for (i = 0; i < (int32_t)_SSF_EC_VTWNAF_TABLE_SIZE; i++)
+    for (i = 0; i < _SSF_EC_VTWNAF_TABLE_SIZE; i++)
     {
         table[i].x.limbs = tableStorage[i][0];
         table[i].x.cap = SSF_EC_MAX_LIMBS;
@@ -1349,7 +1349,7 @@ static void _SSFECScalarMulVTwNAF(SSFECPoint_t *r, const SSFBN_t *k,
         _SSFECPointAddFull(&table[1], &table[0], &twoP, c);
     }
     /* Subsequent table[i] for i >= 2: both operands are Jacobian (twoP and table[i-1]). */
-    for (i = 2; i < (int32_t)_SSF_EC_VTWNAF_TABLE_SIZE; i++)
+    for (i = 2; i < _SSF_EC_VTWNAF_TABLE_SIZE; i++)
     {
         _SSFECPointAddFull(&table[i], &table[i - 1], &twoP, c);
     }
@@ -1381,7 +1381,7 @@ static void _SSFECScalarMulVTwNAF(SSFECPoint_t *r, const SSFBN_t *k,
         {
             d = 0;
         }
-        if (nDigits < (int32_t)_SSF_EC_VTWNAF_MAX_DIGITS)
+        if (nDigits < _SSF_EC_VTWNAF_MAX_DIGITS)
         {
             digits[nDigits++] = d;
         }
@@ -1394,7 +1394,7 @@ static void _SSFECScalarMulVTwNAF(SSFECPoint_t *r, const SSFBN_t *k,
     SSFBNSetZero(&r->z, c->limbs);
 
     /* Process digits MSB-first; mixed-add against table[0] when P was affine (Z=1). */
-    for (i = nDigits - 1; i >= 0; i--)
+    for (i = nDigits; i-- > 0; )
     {
         int8_t d = digits[i];
         _SSFECPointDouble(r, r, c);

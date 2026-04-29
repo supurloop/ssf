@@ -790,7 +790,7 @@ bool SSFASN1EncInt(uint8_t *buf, uint32_t bufSize, const uint8_t *intBuf, uint32
 /* --------------------------------------------------------------------------------------------- */
 bool SSFASN1EncIntU64(uint8_t *buf, uint32_t bufSize, uint64_t val, uint32_t *bytesWritten)
 {
-    uint8_t intBuf[9];
+    uint8_t intBuf[9] = {0};
     uint32_t intLen;
     uint32_t i;
 

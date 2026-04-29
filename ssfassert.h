@@ -44,6 +44,18 @@ extern "C" {
 #define SSF_ENSURE(x) SSF_ASSERT(x)
 #define SSF_ERROR() SSF_ASSERT(0)
 
+/* Optimizer hint: tells the compiler it may assume (x) holds. Not a runtime check — pair with    */
+/* SSF_REQUIRE/SSF_ASSERT when the same condition needs to be enforced at runtime. Used to share  */
+/* a callee's precondition with the caller's value-range analysis after inlining (e.g. to silence */
+/* false-positive -Warray-bounds on a memcpy bounded by a SSF_REQUIRE'd length).                  */
+#if defined(__GNUC__) || defined(__clang__)
+#define SSF_ASSUME(x) do { if (!(x)) __builtin_unreachable(); } while (0)
+#elif defined(_MSC_VER)
+#define SSF_ASSUME(x) __assume(x)
+#else
+#define SSF_ASSUME(x) ((void)0)
+#endif
+
 #ifdef __cplusplus
 }
 #endif

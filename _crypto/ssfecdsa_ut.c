@@ -43,6 +43,10 @@
 #endif
 
 #if SSF_ECDSA_OSSL_VERIFY == 1
+/* This test file uses the legacy EC_KEY / ECDSA_do_* / ECDH_compute_key API as an interop oracle. */
+/* Pin the exposed API to OpenSSL 1.1.1 so the 3.0+ deprecation markers don't fire here. Scoped to */
+/* this translation unit; production code keeps -Wdeprecated-declarations active.                  */
+#define OPENSSL_API_COMPAT 10101
 #include <openssl/bn.h>
 #include <openssl/ec.h>
 #include <openssl/ecdsa.h>

@@ -214,6 +214,7 @@ void SSFBNCopy(SSFBN_t *dst, const SSFBN_t *src)
     SSF_REQUIRE(src != NULL);
     SSF_REQUIRE(src->limbs != NULL);
     SSF_REQUIRE(src->len <= dst->cap);
+    SSF_ASSUME(src->len <= dst->cap); /* propagate the bound past inlining for -Warray-bounds */
 
     memcpy(dst->limbs, src->limbs, (size_t)src->len * sizeof(SSFBNLimb_t));
     dst->len = src->len;

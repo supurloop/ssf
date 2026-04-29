@@ -92,9 +92,10 @@ static void _OSSLHKDF(const char *mode, SSFHMACHash_t h,
     /* OSSL_PARAM_construct_utf8_string takes a writable char* in OpenSSL 3.0; copy to a local. */
     {
         const char *src = _OSSLHKDFDigestName(h);
-        size_t i = 0;
-        while (src[i] != '\0' && i + 1u < sizeof(digestName)) { digestName[i] = src[i]; i++; }
-        digestName[i] = '\0';
+        size_t srcLen = strlen(src);
+        SSF_ASSERT(srcLen < sizeof(digestName));
+        memcpy(digestName, src, srcLen);
+        digestName[srcLen] = '\0';
     }
 
     params[pIdx++] = OSSL_PARAM_construct_utf8_string("mode", (char *)mode, 0);

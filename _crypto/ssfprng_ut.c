@@ -158,6 +158,39 @@ void SSFPRNGUnitTest(void)
         SSFPRNGDeInitContext(&ctx);
     }
 
+    /* Verify pt = count || zeros (NIST CTR_DRBG-style input shape). Property test: the PRNG
+     * output for any (entropy, count) must equal AES-128-ECB(entropy, count_bytes || zeros).
+     * Compute both sides on the host (same memcpy semantics on either endianness) and compare.
+     * Pre-fix this would have been AES(entropy, count||count); the change makes the input
+     * shape match standard CTR_DRBG conventions. */
+    {
+        SSFPRNGContext_t ctx;
+        uint8_t entropyKnown[SSF_PRNG_ENTROPY_SIZE] = {
+            0x00u, 0x01u, 0x02u, 0x03u, 0x04u, 0x05u, 0x06u, 0x07u,
+            0x08u, 0x09u, 0x0Au, 0x0Bu, 0x0Cu, 0x0Du, 0x0Eu, 0x0Fu
+        };
+        uint8_t random[SSF_PRNG_RANDOM_MAX_SIZE];
+        uint8_t expectedPt[SSF_AES_BLOCK_SIZE];
+        uint8_t expectedCt[SSF_AES_BLOCK_SIZE];
+        uint64_t snappedCount;
+
+        SSFPRNGInitContext(&ctx, entropyKnown, sizeof(entropyKnown));
+        snappedCount = ctx.count;
+
+        /* Build the AES input as count || zeros (the post-fix construction). */
+        memcpy(expectedPt, &snappedCount, sizeof(uint64_t));
+        memset(&expectedPt[sizeof(uint64_t)], 0, sizeof(uint64_t));
+
+        SSFAES128BlockEncrypt(expectedPt, sizeof(expectedPt),
+                              expectedCt, sizeof(expectedCt),
+                              entropyKnown, sizeof(entropyKnown));
+
+        SSFPRNGGetRandom(&ctx, random, sizeof(random));
+        SSF_ASSERT(memcmp(random, expectedCt, sizeof(random)) == 0);
+
+        SSFPRNGDeInitContext(&ctx);
+    }
+
     /* Defense-in-depth regression: GetRandom now scrubs its internal pt and ct stack buffers
      * before return. The scrub is not externally observable through the C API, but it must
      * not break the deterministic-output contract — a fresh ctx with the same entropy must

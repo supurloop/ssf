@@ -120,7 +120,7 @@ static bool _OSSLCCPDecrypt(const uint8_t *ct, size_t ctLen,
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Random fuzz across (ptLen × aadLen). Each cell:                                               */
+/* Random fuzz across (ptLen x aadLen). Each cell:                                               */
 /*   - draws fresh random key/nonce/aad/pt                                                       */
 /*   - SSF and OpenSSL encrypt; assert ct AND tag agree byte-for-byte                            */
 /*   - decrypt SSF ct via OpenSSL and OpenSSL ct via SSF; both must succeed and recover pt       */
@@ -303,7 +303,7 @@ void SSFChaCha20Poly1305UnitTest(void)
     SSF_ASSERT(ok);
     SSF_ASSERT(memcmp(dec, pt, sizeof(pt)) == 0);
 
-    /* RFC 8439 §A.5 AEAD test vector. Distinct (key, nonce, AAD) from §2.8.2 with a 265-byte
+    /* RFC 8439 Sec. A.5 AEAD test vector. Distinct (key, nonce, AAD) from Sec. 2.8.2 with a 265-byte
      * plaintext crossing 4 full blocks plus a partial. Bidirectional: encrypt-of-pt must
      * produce expected ct + tag; decrypt-of-ct + tag must verify and recover pt. */
     {
@@ -493,7 +493,7 @@ void SSFChaCha20Poly1305UnitTest(void)
     }
 
     /* Wycheproof tcId 72 (valid): 64-byte msg (one full block), zero-length AAD, distinct
-     * key/nonce. Multi-block-boundary case beyond what RFC §2.8.2 (114B) and §A.5 (265B)
+     * key/nonce. Multi-block-boundary case beyond what RFC Sec. 2.8.2 (114B) and Sec. A.5 (265B)
      * exercise -- specifically tests the exactly-one-full-block boundary. */
     {
         static const uint8_t wpKey[] = {
@@ -774,7 +774,7 @@ void SSFChaCha20Poly1305UnitTest(void)
                                                    scratchKey, sizeof(scratchKey),
                                                    scratchTag, sizeof(scratchTag),
                                                    scratchCt, sizeof(scratchPt) - 1u));
-        /* ptLen ≥ 512 MiB */
+        /* ptLen >= 512 MiB */
         SSF_ASSERT_TEST(SSFChaCha20Poly1305Encrypt(scratchPt, 512u * 1024u * 1024u,
                                                    scratchNonce, sizeof(scratchNonce),
                                                    NULL, 0u,
@@ -910,7 +910,7 @@ void SSFChaCha20Poly1305UnitTest(void)
                                                    scratchKey, sizeof(scratchKey),
                                                    scratchTag, sizeof(scratchTag),
                                                    scratchPt, sizeof(scratchCt) - 1u));
-        /* ctLen ≥ 512 MiB */
+        /* ctLen >= 512 MiB */
         SSF_ASSERT_TEST(SSFChaCha20Poly1305Decrypt(scratchCt, 512u * 1024u * 1024u,
                                                    scratchNonce, sizeof(scratchNonce),
                                                    NULL, 0u,

@@ -996,7 +996,7 @@ void SSFAESUnitTest(void)
     /* ====================================================================================== */
     /* === NIST CAVS AES KAT vectors (ECB-mode, validates the AES block primitive) =========  */
     /* ====================================================================================== */
-    /* 2078 vectors across GFSbox / KeySbox / VarKey / VarTxt × {128,192,256} × {ENC,DEC}.    */
+    /* 2078 vectors across GFSbox / KeySbox / VarKey / VarTxt x {128,192,256} x {ENC,DEC}.    */
     /* Source: NIST CAVS 11.1 KAT_AES.zip (csrc.nist.gov/.../documents/aes/KAT_AES.zip).      */
     /* The CAVS framework validates AES-CTR / AES-GCM / AES-CCM by validating the underlying  */
     /* AES block primitive that they all share -- these vectors cover the structured-input    */

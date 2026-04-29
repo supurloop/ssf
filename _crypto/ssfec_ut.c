@@ -381,12 +381,12 @@ static void _ECVerifyAtCurve(SSFECCurve_t curve, uint16_t iters)
 
     /* === Edge scalars: k = 0, 1, n-1, n cross-checked with OpenSSL ======================= */
     /* Random scalars almost certainly miss these specific values. OpenSSL handles them in    */
-    /* well-defined ways (k=0 → identity, k=1 → G, k=n-1 → -G, k=n → identity); SSF must too. */
+    /* well-defined ways (k=0 -> identity, k=1 -> G, k=n-1 -> -G, k=n -> identity); SSF must too. */
     {
         SSFBN_DEFINE(kEdge, SSF_EC_MAX_LIMBS);
         BIGNUM *bnEdge = BN_new();
 
-        /* k = 0 → identity */
+        /* k = 0 -> identity */
         SSFBNSetZero(&kEdge, c->limbs);
         BN_zero(bnEdge);
         SSFECScalarMul(&R, &kEdge, &G, curve);
@@ -394,14 +394,14 @@ static void _ECVerifyAtCurve(SSFECCurve_t curve, uint16_t iters)
         SSF_ASSERT(_ECPointEqOSSL(&R, osslR, curve, group, ctx) == true);
         SSF_ASSERT(SSFECPointIsIdentity(&R) == true);
 
-        /* k = 1 → G */
+        /* k = 1 -> G */
         SSFBNSetUint32(&kEdge, 1u, c->limbs);
         BN_one(bnEdge);
         SSFECScalarMul(&R, &kEdge, &G, curve);
         SSF_ASSERT(EC_POINT_mul(group, osslR, bnEdge, NULL, NULL, ctx) == 1);
         SSF_ASSERT(_ECPointEqOSSL(&R, osslR, curve, group, ctx) == true);
 
-        /* k = n-1 → -G */
+        /* k = n-1 -> -G */
         SSFBNCopy(&kEdge, &c->n);
         (void)SSFBNSubUint32(&kEdge, &kEdge, 1u);
         SSF_ASSERT(BN_copy(bnEdge, bnOrder) != NULL);
@@ -410,7 +410,7 @@ static void _ECVerifyAtCurve(SSFECCurve_t curve, uint16_t iters)
         SSF_ASSERT(EC_POINT_mul(group, osslR, bnEdge, NULL, NULL, ctx) == 1);
         SSF_ASSERT(_ECPointEqOSSL(&R, osslR, curve, group, ctx) == true);
 
-        /* k = n → identity (curve order kills G) */
+        /* k = n -> identity (curve order kills G) */
         SSFBNCopy(&kEdge, &c->n);
         SSF_ASSERT(BN_copy(bnEdge, bnOrder) != NULL);
         SSFECScalarMul(&R, &kEdge, &G, curve);
@@ -461,7 +461,7 @@ static void _ECVerifyAtCurve(SSFECCurve_t curve, uint16_t iters)
         BN_free(bnEdge);
     }
 
-    /* === ScalarMul on identity input → identity (cross-checked with OpenSSL) ============== */
+    /* === ScalarMul on identity input -> identity (cross-checked with OpenSSL) ============== */
     {
         SSFECPOINT_DEFINE(Oin, SSF_EC_MAX_LIMBS);
         SSFBN_DEFINE(kArbit, SSF_EC_MAX_LIMBS);
@@ -591,7 +591,7 @@ static void _ECVerifyAtCurve(SSFECCurve_t curve, uint16_t iters)
         for (it = 0; it < 4u; it++)
         {
             /* Random delta in [1, 2^32). bnBig = n + delta. Always > n, always < 2^curve_bits  */
-            /* for both P-256 (n ≈ 2^256 - 2^224 - ...) and P-384 (similar margin).             */
+            /* for both P-256 (n ~= 2^256 - 2^224 - ...) and P-384 (similar margin).            */
             SSF_ASSERT(BN_rand(bnDelta, 32, BN_RAND_TOP_ANY, BN_RAND_BOTTOM_ANY) == 1);
             if (BN_is_zero(bnDelta)) BN_one(bnDelta);
             SSF_ASSERT(BN_add(bnBig, bnOrder, bnDelta) == 1);
@@ -726,7 +726,7 @@ void SSFECUnitTest(void)
     }
 
     /* ---- P-256: SEC1 format-specific rejection (compressed/hybrid/infinity) ---- */
-    /* SSF only supports the uncompressed format (0x04). Per SEC1 v2 §2.3.3:                       */
+    /* SSF only supports the uncompressed format (0x04). Per SEC1 v2 Sec. 2.3.3:                   */
     /*   0x00 = point at infinity (length 1)                                                       */
     /*   0x02 = compressed, even Y    | length 1 + coord_bytes                                    */
     /*   0x03 = compressed, odd  Y    | length 1 + coord_bytes                                    */
@@ -813,8 +813,8 @@ void SSFECUnitTest(void)
     /* ---- P-256: malformed Jacobian Z exercises PointToAffine failure path ---- */
     /* SSFECPointOnCurve / SSFECPointValidate take a fast path when Z == 1 (affine input).      */
     /* The slow path at ssfec.c:706 / 748 calls SSFECPointToAffine, which fails when ModInv(Z,p)*/
-    /* fails -- i.e. when Z ≡ 0 (mod p). A non-zero, non-one Z = p produces this. Real callers  */
-    /* (SSFECPointDecode → Validate) always pass Z = 1, so the slow-path return-false is        */
+    /* fails -- i.e. when Z == 0 (mod p). A non-zero, non-one Z = p produces this. Real callers */
+    /* (SSFECPointDecode -> Validate) always pass Z = 1, so the slow-path return-false is       */
     /* otherwise unreached. Confirm the validators correctly reject the malformed input.        */
     {
         const SSFECCurveParams_t *c = SSFECGetCurveParams(SSF_EC_CURVE_P256);
@@ -822,7 +822,7 @@ void SSFECUnitTest(void)
 
         SSFBNSetUint32(&badPt.x, 1u, c->limbs);
         SSFBNSetUint32(&badPt.y, 1u, c->limbs);
-        SSFBNCopy(&badPt.z, &c->p);  /* Z = p ⇒ non-zero, non-one, ModInv(Z, p) fails */
+        SSFBNCopy(&badPt.z, &c->p);  /* Z = p => non-zero, non-one, ModInv(Z, p) fails */
 
         SSF_ASSERT(SSFECPointOnCurve(&badPt, SSF_EC_CURVE_P256) == false);
         SSF_ASSERT(SSFECPointValidate(&badPt, SSF_EC_CURVE_P256) == false);
@@ -940,12 +940,12 @@ void SSFECUnitTest(void)
 
         SSFECPointFromAffine(&G, &c->gx, &c->gy, SSF_EC_CURVE_P256);
 
-        /* k = 0 → identity */
+        /* k = 0 -> identity */
         SSFBNSetZero(&k, c->limbs);
         SSFECScalarMul(&R, &k, &G, SSF_EC_CURVE_P256);
         SSF_ASSERT(SSFECPointIsIdentity(&R) == true);
 
-        /* k = 1 → G */
+        /* k = 1 -> G */
         SSFBNSetUint32(&k, 1u, c->limbs);
         SSFECScalarMul(&R, &k, &G, SSF_EC_CURVE_P256);
         SSF_ASSERT(SSFECPointToAffine(&rx, &ry, &R, SSF_EC_CURVE_P256) == true);
@@ -1143,7 +1143,7 @@ void SSFECUnitTest(void)
         SSF_ASSERT(SSFECPointIsIdentity(&R) == true);
     }
 
-    /* ---- NIST KAT: P-384 [d]G from RFC 6979 §A.2.6 (mirror of the P-256 KAT) ---- */
+    /* ---- NIST KAT: P-384 [d]G from RFC 6979 Sec. A.2.6 (mirror of the P-256 KAT) ---- */
     {
         static const uint8_t d_bytes[] = {
             0x6Bu, 0x9Du, 0x3Du, 0xADu, 0x2Eu, 0x1Bu, 0x8Cu, 0x1Cu,
@@ -1835,7 +1835,7 @@ void SSFECUnitTest(void)
         }
 
         /* Affine-input sweep -- G is Z=1 (built from c->gx, c->gy). Hits the wNAF affine    */
-        /* fast path (table[0] is Z=1, so adds of ±table[0] use mixed-coordinate addition).  */
+        /* fast path (table[0] is Z=1, so adds of +/-table[0] use mixed-coordinate addition).*/
         for (i = 0; i < 8u; i++)
         {
             SSFBNRandomBelow(&k, &c->n, &prng);
@@ -1964,7 +1964,7 @@ void SSFECUnitTest(void)
             SSF_ASSERT(SSFBNCmp(&ry, &refy6) == 0);
         }
 
-        /* Case 1d: SSFECScalarMul(&P, &k, &P) -- output aliases input point ([5]·3G = 15G). */
+        /* Case 1d: SSFECScalarMul(&P, &k, &P) -- output aliases input point ([5]*3G = 15G). */
         {
             SSFECPOINT_DEFINE(Plocal, SSF_EC_MAX_LIMBS);
             SSFECPOINT_DEFINE(Rref15, SSF_EC_MAX_LIMBS);
@@ -2212,7 +2212,7 @@ void SSFECUnitTest(void)
         SSFECScalarMul(&P, &d, &G, SSF_EC_CURVE_P256);  /* P = 7G in Jacobian */
         SSF_ASSERT(SSFECPointToAffine(&srcx, &srcy, &P, SSF_EC_CURVE_P256) == true);
 
-        /* Round-trip: those affine coords → FromAffine → ToAffine should equal originals. */
+        /* Round-trip: those affine coords -> FromAffine -> ToAffine should equal originals. */
         SSFECPointFromAffine(&P, &srcx, &srcy, SSF_EC_CURVE_P256);
         SSF_ASSERT(SSFECPointToAffine(&rx, &ry, &P, SSF_EC_CURVE_P256) == true);
         SSF_ASSERT(SSFBNCmp(&rx, &srcx) == 0);
@@ -2301,7 +2301,7 @@ void SSFECUnitTest(void)
         (void)maxBytes;
     }
 
-    /* ---- Edge: SEC1 Encode → Decode roundtrip preserves a non-G point ---- */
+    /* ---- Edge: SEC1 Encode -> Decode roundtrip preserves a non-G point ---- */
     {
         const SSFECCurveParams_t *c = SSFECGetCurveParams(SSF_EC_CURVE_P256);
         SSFECPOINT_DEFINE(G, SSF_EC_MAX_LIMBS);
@@ -2328,7 +2328,7 @@ void SSFECUnitTest(void)
         SSF_ASSERT(SSFBNCmp(&ry, &dy) == 0);
     }
 
-    /* ---- Edge: ScalarMul on identity input → identity for any k ---- */
+    /* ---- Edge: ScalarMul on identity input -> identity for any k ---- */
     {
         const SSFECCurveParams_t *c = SSFECGetCurveParams(SSF_EC_CURVE_P256);
         SSFECPOINT_DEFINE(O, SSF_EC_MAX_LIMBS);

@@ -982,7 +982,7 @@ void SSFBNMul(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b)
         (a->len >= SSF_BN_KARATSUBA_THRESHOLD) &&
         ((a->len & 1u) == 0u))
     {
-        /* Yes, dispatch to Karatsuba -- ~0.75·n² single-limb multiplies vs n² schoolbook. */
+        /* Yes, dispatch to Karatsuba -- ~0.75*n^2 single-limb multiplies vs n^2 schoolbook. */
         _SSFBNKaratsubaMul(r->limbs, a->limbs, b->limbs, a->len);
         r->len = rLen;
         return;
@@ -1611,7 +1611,7 @@ bool SSFBNModInvExt(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
         SSFBNCopy(r, &old_s);
     }
 
-    /* Sign-normalize postcondition: branches above produce r ∈ [0, m) by construction. */
+    /* Sign-normalize postcondition: branches above produce r in [0, m) by construction. */
     SSF_ENSURE(SSFBNCmp(r, m) < 0);
 
     /* Verify a * r mod m == 1; catches a non-coprime case where the algorithm produced garbage. */

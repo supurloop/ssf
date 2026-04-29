@@ -408,9 +408,9 @@ static const EVP_MD *_OSSLSha512(void) { return EVP_sha512(); }
 static void _SSFRSAVerifyAgainstOpenSSL(const uint8_t *foreignPriv, size_t foreignPrivLen,
                                         const uint8_t *foreignPub,  size_t foreignPubLen)
 {
-    /* Hash menus per NIST SP 800-57 §5.6.2 (security-strength matching with key size). Each     */
+    /* Hash menus per NIST SP 800-57 Sec. 5.6.2 (security-strength matching with key size). Each */
     /* enabled size runs end-to-end provided SSF_BN_CONFIG_MAX_BITS is at least twice the       */
-    /* largest enabled modulus (the CRT recombine and ModInvExt over λ(n) feed a full-width n×n */
+    /* largest enabled modulus (the CRT recombine and ModInvExt over lambda(n) feed a full nxn  */
     /* product into SSFBNMul -- see ssfrsa.h compile-time gates).                                */
 #if SSF_RSA_CONFIG_ENABLE_2048 == 1
     static const SSFRSAHash_t h2048[] = { SSF_RSA_HASH_SHA256 };
@@ -553,7 +553,7 @@ void SSFRSAUnitTest(void)
         }
     }
 
-    /* ---- FIPS 186-4 §B.3.3 step 5.4: |p - q| > 2^(halfBits - 100) ---- */
+    /* ---- FIPS 186-4 Sec. B.3.3 step 5.4: |p - q| > 2^(halfBits - 100) ---- */
     /* Defends against Fermat-style factorization of n when p and q happen to be very    */
     /* close. The threshold is statistically irrelevant for random primes (failure is    */
     /* ~2^-100), but the spec mandates the explicit guard.                                */
@@ -579,9 +579,9 @@ void SSFRSAUnitTest(void)
         SSF_ASSERT(SSFRSAFipsPrimeDistanceOK(&q, &p, 1024u) == true);
     }
 
-    /* ---- FIPS 186-4 §B.3.1: d > 2^(nlen/2) ---- */
+    /* ---- FIPS 186-4 Sec. B.3.1: d > 2^(nlen/2) ---- */
     /* Defends against Wiener's continued-fraction attack on small d. With random         */
-    /* primes d is overwhelmingly large, but unlucky λ(n) values can produce a small d.   */
+    /* primes d is overwhelmingly large, but unlucky lambda(n) values can produce a small d.*/
     {
         SSFBN_DEFINE(d, SSF_BN_MAX_LIMBS);
 
@@ -606,7 +606,7 @@ void SSFRSAUnitTest(void)
     }
 
     /* ---- gcd(e, p-1) == 1 && gcd(e, q-1) == 1 ---- */
-    /* Required for d = e^(-1) mod λ(n) to exist. Implicitly ensured by SSFBNModInvExt   */
+    /* Required for d = e^(-1) mod lambda(n) to exist. Implicitly ensured by SSFBNModInvExt*/
     /* failure today, but FIPS prefers an explicit pre-check on (p-1, q-1) so failures    */
     /* abort early before the lcm/divide work, and so an imported key can be validated.   */
     {
@@ -829,7 +829,7 @@ void SSFRSAUnitTest(void)
             SSF_ASSERT(pubE3[1] == 0x82u);       /* long-form 2-byte length follows */
             SSF_ASSERT(pubE3[2] == 0x01u);       /* original length high byte */
             SSF_ASSERT(pubE3[3] == 0x0au);       /* original length low byte (266) */
-            pubE3[3] = 0x08u;                    /* new length 264 = 266 − 2 */
+            pubE3[3] = 0x08u;                    /* new length 264 = 266 - 2 */
             pubE3[sizeof(foreignPub) - 5u + 0u] = 0x02u;  /* INTEGER tag */
             pubE3[sizeof(foreignPub) - 5u + 1u] = 0x01u;  /* length 1 */
             pubE3[sizeof(foreignPub) - 5u + 2u] = 0x03u;  /* e = 3 */
@@ -920,13 +920,13 @@ void SSFRSAUnitTest(void)
         SSF_ASSERT(pubKeyDerLen > 0u);
 
         /* Hygiene: scan the just-freed keygen frame for the top 16 bytes of p. Those bytes      */
-        /* equal the top bytes of pm1 = p − 1 (only the lowest limb differs), and pm1 lives in   */
+        /* equal the top bytes of pm1 = p - 1 (only the lowest limb differs), and pm1 lives in   */
         /* _SSFRSAKeyGenDerive's stack frame. Pre-fix the scanner finds 1+ matches; post-fix     */
         /* Derive zeroizes its intermediates so the scanner finds 0.                              */
         /*                                                                                       */
         /* SSFBN stores 32-bit limbs little-endian-byte within each limb, with limb[0] = lowest. */
         /* p's DER magnitude is big-endian, so its top 16 bytes appear in the in-memory limb     */
-        /* array as those 16 bytes byte-reversed (limbs[28..31] → memory bytes byte[15]…byte[0]).*/
+        /* array as those 16 bytes byte-reversed (limbs[28..31] -> bytes byte[15]..byte[0]).      */
         {
             const uint8_t *pTop = _SSFRSAUTLocatePMag(privKeyDer, privKeyDerLen);
             uint8_t needle[16];
@@ -944,7 +944,7 @@ void SSFRSAUnitTest(void)
         /* The emitted public DER must be strict-DER compliant. RSAPublicKey is                    */
         /*   SEQUENCE { INTEGER n, INTEGER e }                                                     */
         /* and the keygen forces the top two bits of p and q so n always has bit 2047 set. ASN.1   */
-        /* INTEGER is signed (X.690 §8.3.2), so n's encoded body must lead with a 0x00 padding     */
+        /* INTEGER is signed (X.690 Sec. 8.3.2), so n's encoded body must lead with a 0x00 padding */
         /* byte. Without that byte, strict DER parsers (OpenSSL, mbedTLS) read n as negative.      */
         {
             /* Outer SEQUENCE: tag 0x30, long-form length (0x82, 2 length bytes). */
@@ -1131,7 +1131,7 @@ void SSFRSAUnitTest(void)
                                      dbcPubBuf, sizeof(dbcPubBuf), &dbcLenB));
         SSF_ASSERT_TEST(SSFRSAKeyGen(5120u, dbcDerBuf, sizeof(dbcDerBuf), &dbcLenA,
                                      dbcPubBuf, sizeof(dbcPubBuf), &dbcLenB));
-        /* Output-buffer size is documented as ≥ SSF_RSA_MAX_*_DER_SIZE; must be a precondition.*/
+        /* Output-buffer size is documented as >= SSF_RSA_MAX_*_DER_SIZE; must be a precondition.*/
         SSF_ASSERT_TEST(SSFRSAKeyGen(_SSFRSA_UT_DBC_BITS, dbcDerBuf,
                                      SSF_RSA_MAX_PRIV_KEY_DER_SIZE - 1u,
                                      &dbcLenA, dbcPubBuf, sizeof(dbcPubBuf), &dbcLenB));

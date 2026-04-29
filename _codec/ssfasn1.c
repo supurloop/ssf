@@ -61,7 +61,7 @@ static uint32_t _SSFASN1ParseTL(const uint8_t *buf, uint32_t bufLen,
         /* Reject high-bit set: that means another extension byte follows (tag number >= 128),  */
         /* which the module does not support.                                                   */
         if ((ext & 0x80u) != 0u) return 0;
-        /* DER §8.1.2.4.2 requires minimum number of extension bytes. With one extension byte, */
+        /* DER Sec. 8.1.2.4.2 requires min number of extension bytes. With one extension byte,  */
         /* the value must be >= 31 (otherwise the single-byte form would have been canonical). */
         if (ext < 31u) return 0;
         tag = (uint16_t)(tag | ((uint16_t)ext << 8));
@@ -359,8 +359,8 @@ bool SSFASN1DecGetOID(const SSFASN1Cursor_t *cursor, uint32_t *oidArcsOut,
         arcByteCount++;
     } while ((raw[pos++] & 0x80u) != 0u);
 
-    /* Per X.690 §8.19.4: split first sub-id. arc0 ∈ {0,1,2}; if arc0 ∈ {0,1} then       */
-    /* arc1 ∈ [0,39], so firstSubId < 80; else arc0 = 2 and arc1 = firstSubId - 80.       */
+    /* Per X.690 Sec. 8.19.4: split first sub-id. arc0 in {0,1,2}; if arc0 in {0,1} then */
+    /* arc1 in [0,39], so firstSubId < 80; else arc0 = 2 and arc1 = firstSubId - 80.      */
     if (firstSubId < 80u)
     {
         oidArcsOut[0] = firstSubId / 40u;
@@ -409,7 +409,7 @@ bool SSFASN1DecGetString(const SSFASN1Cursor_t *cursor, const uint8_t **strOut,
 
     if (!SSFASN1DecGetTLV(cursor, &tag, strOut, strLenOut, next)) return false;
 
-    /* Accept all string types per RFC 5280 §4.1.2.4 DirectoryString. New certs SHOULD use     */
+    /* Accept all string types per RFC 5280 Sec. 4.1.2.4 DirectoryString. New certs SHOULD use */
     /* UTF-8 / Printable; legacy certs (e.g. early Entrust roots) carry TeletexString or       */
     /* UniversalString and verifiers MUST handle them.                                          */
     if (tag != SSF_ASN1_TAG_UTF8_STRING && tag != SSF_ASN1_TAG_PRINTABLE_STRING &&
@@ -928,8 +928,8 @@ static bool _SSFASN1UnixSecToStruct(uint64_t unixSec, SSFDTimeStruct_t *ts)
 bool SSFASN1EncUTCTime(uint8_t *buf, uint32_t bufSize, uint64_t unixSec,
                        uint32_t *bytesWritten)
 {
-    /* Format: YYMMDDHHMMSSZ (13 bytes). Year range: 1970-2049 (YY ∈ 50..99 means 1950..1999    */
-    /* per RFC 5280, but ssfdtime cannot represent pre-1970; YY ∈ 00..49 means 2000..2049).     */
+    /* Format: YYMMDDHHMMSSZ (13 bytes). Year range: 1970-2049 (YY in 50..99 means 1950..1999   */
+    /* per RFC 5280, but ssfdtime cannot represent pre-1970; YY in 00..49 means 2000..2049).    */
     uint8_t timeStr[13];
     SSFDTimeStruct_t ts;
     uint32_t year;

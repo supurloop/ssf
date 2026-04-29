@@ -9,7 +9,7 @@ extern "C" {
 #endif
 
 /* ssfrsa key sizes -- at least one must be 1u. Each size requires SSF_BN_CONFIG_MAX_BITS to be  */
-/* at least twice the modulus width (the CRT recombine and ModInvExt over λ(n) run a 2N-limb     */
+/* at least twice the modulus width (the CRT recombine and ModInvExt over lambda(n) run a 2N-limb*/
 /* product through SSFBNMul). Disabling unused sizes shrinks the public-key validator's accepted */
 /* set and lets the linker drop unused KeyGen retry-budget code on size-restricted builds.       */
 #define SSF_RSA_CONFIG_ENABLE_2048           (1u)

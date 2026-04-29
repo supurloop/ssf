@@ -3242,7 +3242,7 @@ static const EVP_CIPHER *_OSSLAESGCMCipher(size_t keyLen)
 }
 
 /* Compute AES-GCM via OpenSSL's EVP path. ivLen != 12 exercises the GHASH-based J0 derivation, */
-/* matching the same path SSFAESGCMEncrypt takes via SP 800-38D §7.1.                           */
+/* matching the same path SSFAESGCMEncrypt takes via SP 800-38D Sec. 7.1.                       */
 static void _OSSLAESGCMEncrypt(const uint8_t *pt, size_t ptLen,
                                const uint8_t *iv, size_t ivLen,
                                const uint8_t *aad, size_t aadLen,
@@ -3308,7 +3308,7 @@ static bool _OSSLAESGCMDecrypt(const uint8_t *ct, size_t ctLen,
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Random fuzz across (keyLen × ivLen × tagLen × ptLen × aadLen). The ivLen sweep deliberately */
+/* Random fuzz across (keyLen x ivLen x tagLen x ptLen x aadLen). The ivLen sweep deliberately */
 /* spans the 12-byte fast path AND non-12-byte sizes that exercise the GHASH-based J0 path --   */
 /* a divergence in either path is the bug class this catches that the fixed-IV NIST KATs miss.  */
 /* Per cell:                                                                                    */

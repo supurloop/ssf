@@ -568,15 +568,15 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
         SSFBN_DEFINE(r, SSF_BN_MAX_LIMBS);
         SSFBNLimb_t carry;
 
-        /* allOnes + 1 → 0, carry=1. */
+        /* allOnes + 1 -> 0, carry=1. */
         carry = SSFBNAddUint32(&r, &allOnes, 1u); SSF_ASSERT(carry == 1u);
         SSF_ASSERT(SSFBNIsZero(&r));
 
-        /* allOnes + 0 → allOnes, carry=0. */
+        /* allOnes + 0 -> allOnes, carry=0. */
         carry = SSFBNAddUint32(&r, &allOnes, 0u); SSF_ASSERT(carry == 0u);
         SSF_ASSERT(SSFBNCmp(&r, &allOnes) == 0);
 
-        /* 0 - 1 → allOnes, borrow=1. */
+        /* 0 - 1 -> allOnes, borrow=1. */
         carry = SSFBNSubUint32(&r, &zero, 1u); SSF_ASSERT(carry == 1u);
         SSF_ASSERT(SSFBNCmp(&r, &allOnes) == 0);
 
@@ -799,7 +799,7 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
         SSF_ASSERT(SSFBNModInv(&r, &one, &m) == true);
         SSF_ASSERT(SSFBNCmpUint32(&r, 1u) == 0);
 
-        /* (m-1)^(-1) mod m = m-1 (since (m-1) ≡ -1, and (-1)^2 = 1). */
+        /* (m-1)^(-1) mod m = m-1 (since (m-1) == -1, and (-1)^2 = 1). */
         SSF_ASSERT(SSFBNModInv(&r, &mMinus1, &m) == true);
         SSF_ASSERT(SSFBNCmp(&r, &mMinus1) == 0);
 
@@ -819,7 +819,7 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
         SSF_ASSERT(BN_mod_inverse(bnR, bnA, bnM, ctx) != NULL);
         SSF_ASSERT(_EqOSSL(&r, bnR));
 
-        /* ModInvExt: even input vs even modulus → no inverse (gcd > 1). */
+        /* ModInvExt: even input vs even modulus -> no inverse (gcd > 1). */
         {
             SSFBN_DEFINE(twoMod, SSF_BN_MAX_LIMBS);
             SSFBN_DEFINE(four, SSF_BN_MAX_LIMBS);
@@ -841,18 +841,18 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
 
         SSFBNMontInit(&mont, &m);
 
-        /* ConvertIn(0) → 0; ConvertOut → 0. */
+        /* ConvertIn(0) -> 0; ConvertOut -> 0. */
         SSFBNMontConvertIn(&zR, &zero, &mont);
         SSF_ASSERT(SSFBNIsZero(&zR));
         SSFBNMontConvertOut(&rOut, &zR, &mont);
         SSF_ASSERT(SSFBNIsZero(&rOut));
 
-        /* ConvertIn(1) = R mod m; ConvertOut → 1. */
+        /* ConvertIn(1) = R mod m; ConvertOut -> 1. */
         SSFBNMontConvertIn(&oneR, &one, &mont);
         SSFBNMontConvertOut(&rOut, &oneR, &mont);
         SSF_ASSERT(SSFBNCmpUint32(&rOut, 1u) == 0);
 
-        /* MontMul(0R, anything) → 0R. */
+        /* MontMul(0R, anything) -> 0R. */
         SSFBNMontConvertIn(&aR, &rand1, &mont);
         SSFBNMontMul(&rR, &zR, &aR, &mont);
         SSF_ASSERT(SSFBNIsZero(&rR));
@@ -961,12 +961,12 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
         SSF_ASSERT(BN_rshift(bnR, bnA, 32) == 1);
         SSF_ASSERT(_EqOSSL(&r, bnR));
 
-        /* Shift right by full width → zero. */
+        /* Shift right by full width -> zero. */
         SSFBNCopy(&r, &rand1); r.len = nLimbs;
         SSFBNShiftRight(&r, (uint32_t)nLimbs * 32u);
         SSF_ASSERT(SSFBNIsZero(&r));
 
-        /* Shift left by full width → all bits truncated → zero. */
+        /* Shift left by full width -> all bits truncated -> zero. */
         SSFBNCopy(&r, &rand1); r.len = nLimbs;
         SSFBNShiftLeft(&r, (uint32_t)nLimbs * 32u);
         SSF_ASSERT(SSFBNIsZero(&r));
@@ -978,7 +978,7 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
         SSFBNShiftRight1(&r);
         SSF_ASSERT(SSFBNIsZero(&r));
 
-        /* Shift1 of one: << → 2, >> → 0. */
+        /* Shift1 of one: << -> 2, >> -> 0. */
         SSFBNCopy(&r, &one); r.len = nLimbs;
         SSFBNShiftLeft1(&r);
         SSF_ASSERT(SSFBNCmpUint32(&r, 2u) == 0);
@@ -1046,12 +1046,12 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
         SSFBN_DEFINE(t, SSF_BN_MAX_LIMBS);
         uint8_t buf[SSF_BN_MAX_BYTES];
 
-        /* All-zero bytes → zero value. */
+        /* All-zero bytes -> zero value. */
         memset(buf, 0, nBytes);
         SSF_ASSERT(SSFBNFromBytes(&t, buf, nBytes, nLimbs) == true);
         SSF_ASSERT(SSFBNIsZero(&t));
 
-        /* All-FF bytes → allOnes value. */
+        /* All-FF bytes -> allOnes value. */
         memset(buf, 0xFFu, nBytes);
         SSF_ASSERT(SSFBNFromBytes(&t, buf, nBytes, nLimbs) == true);
         SSF_ASSERT(SSFBNCmp(&t, &allOnes) == 0);
@@ -1103,12 +1103,12 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
         SSFBNCopy(&x, &rand1); x.len = nLimbs;
         SSFBNCopy(&y, &rand2); y.len = nLimbs;
 
-        /* swap=0 → no change. */
+        /* swap=0 -> no change. */
         SSFBNCondSwap(&x, &y, 0u);
         SSF_ASSERT(SSFBNCmp(&x, &rand1) == 0);
         SSF_ASSERT(SSFBNCmp(&y, &rand2) == 0);
 
-        /* swap=1 → swap. */
+        /* swap=1 -> swap. */
         SSFBNCondSwap(&x, &y, 1u);
         SSF_ASSERT(SSFBNCmp(&x, &rand2) == 0);
         SSF_ASSERT(SSFBNCmp(&y, &rand1) == 0);
@@ -1118,11 +1118,11 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
         SSF_ASSERT(SSFBNCmp(&x, &rand1) == 0);
         SSF_ASSERT(SSFBNCmp(&y, &rand2) == 0);
 
-        /* CondCopy: sel=0 → no copy. */
+        /* CondCopy: sel=0 -> no copy. */
         SSFBNCopy(&x, &rand1); x.len = nLimbs;
         SSFBNCondCopy(&x, &rand2, 0u);
         SSF_ASSERT(SSFBNCmp(&x, &rand1) == 0);
-        /* sel=1 → copy. */
+        /* sel=1 -> copy. */
         SSFBNCondCopy(&x, &rand2, 1u);
         SSF_ASSERT(SSFBNCmp(&x, &rand2) == 0);
     }
@@ -1271,7 +1271,7 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
         SSF_ASSERT(BN_mod_mul(bnR, bnA, bnB, bnM, ctx) == 1);
         SSF_ASSERT(_EqOSSL(&rCT, bnR));
 
-        /* Edge: a = 0, b = anything → result = 0. */
+        /* Edge: a = 0, b = anything -> result = 0. */
         {
             SSFBN_DEFINE(zero, SSF_BN_MAX_LIMBS);
             SSFBNSetZero(&zero, nLimbs);
@@ -1279,7 +1279,7 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
             SSF_ASSERT(SSFBNIsZero(&rCT) == true);
         }
 
-        /* Edge: a = 1, b = rand2 → result = rand2 (rand2 was reduced to be < m above). */
+        /* Edge: a = 1, b = rand2 -> result = rand2 (rand2 was reduced to be < m above). */
         {
             SSFBN_DEFINE(one, SSF_BN_MAX_LIMBS);
             SSFBNSetOne(&one, nLimbs);
@@ -1719,7 +1719,7 @@ void SSFBNUnitTest(void)
         SSF_ASSERT(a.limbs[0] == 0x89ABCDEFul);
         SSF_ASSERT(a.limbs[1] == 0x01234567ul);
 
-        /* Round-trip: LE → BN → LE == original. */
+        /* Round-trip: LE -> BN -> LE == original. */
         SSF_ASSERT(SSFBNToBytesLE(&a, out, sizeof(out)) == true);
         SSF_ASSERT(memcmp(out, le, sizeof(le)) == 0);
     }
@@ -1731,7 +1731,7 @@ void SSFBNUnitTest(void)
         SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
 
         SSF_ASSERT(SSFBNFromBytesLE(&a, data, 1, 2) == true);
-        /* LE: low byte is 0xFF → limb[0] = 0x000000FF, limb[1] = 0. */
+        /* LE: low byte is 0xFF -> limb[0] = 0x000000FF, limb[1] = 0. */
         SSF_ASSERT(a.limbs[0] == 0x000000FFul);
         SSF_ASSERT(a.limbs[1] == 0x00000000ul);
 
@@ -1778,7 +1778,7 @@ void SSFBNUnitTest(void)
         SSF_ASSERT(out[3] == 0x00u);
         SSF_ASSERT(out[4] == 0x01u);
         SSF_ASSERT(out[5] == 0x23u);
-        /* Canaries intact → no stack corruption. */
+        /* Canaries intact -> no stack corruption. */
         SSF_ASSERT(canaryLo == 0xA5u);
         SSF_ASSERT(canaryHi == 0x5Au);
     }
@@ -1987,7 +1987,7 @@ void SSFBNUnitTest(void)
         /* High limb parity does not affect IsOdd -- only the low bit of limb[0] matters. */
         SSFBNSetZero(&a, 4);
         a.limbs[3] = 0x80000001ul;
-        SSF_ASSERT(SSFBNIsOdd(&a) == false); /* limb[0] = 0 → even */
+        SSF_ASSERT(SSFBNIsOdd(&a) == false); /* limb[0] = 0 -> even */
 
         a.limbs[0] = 0xFFFFFFFEul;
         SSF_ASSERT(SSFBNIsOdd(&a) == false);
@@ -2095,29 +2095,29 @@ void SSFBNUnitTest(void)
     {
         SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
 
-        /* a = 1 → tz = 0 */
+        /* a = 1 -> tz = 0 */
         SSFBNSetUint32(&a, 1u, 4);
         SSF_ASSERT(SSFBNTrailingZeros(&a) == 0u);
 
-        /* a = 2 → tz = 1 */
+        /* a = 2 -> tz = 1 */
         SSFBNSetUint32(&a, 2u, 4);
         SSF_ASSERT(SSFBNTrailingZeros(&a) == 1u);
 
-        /* a = 0x80000000 (bit 31) → tz = 31 (top of limb 0) */
+        /* a = 0x80000000 (bit 31) -> tz = 31 (top of limb 0) */
         SSFBNSetUint32(&a, 0x80000000ul, 4);
         SSF_ASSERT(SSFBNTrailingZeros(&a) == 31u);
 
-        /* a = 2^32 (bit 32, start of limb 1) → tz = 32 */
+        /* a = 2^32 (bit 32, start of limb 1) -> tz = 32 */
         SSFBNSetZero(&a, 4);
         a.limbs[1] = 1u;
         SSF_ASSERT(SSFBNTrailingZeros(&a) == 32u);
 
-        /* a = 2^47 (mid-limb 1) → tz = 47 */
+        /* a = 2^47 (mid-limb 1) -> tz = 47 */
         SSFBNSetZero(&a, 4);
         a.limbs[1] = 0x00008000ul;
         SSF_ASSERT(SSFBNTrailingZeros(&a) == 47u);
 
-        /* a = 2^96 (start of limb 3) → tz = 96 */
+        /* a = 2^96 (start of limb 3) -> tz = 96 */
         SSFBNSetZero(&a, 4);
         a.limbs[3] = 1u;
         SSF_ASSERT(SSFBNTrailingZeros(&a) == 96u);
@@ -2125,7 +2125,7 @@ void SSFBNUnitTest(void)
         /* Mixed value: low limb zero, limb[1] has a low set bit and other high bits -- must     */
         /* return the position of the lowest set bit only.                                       */
         SSFBNSetZero(&a, 4);
-        a.limbs[1] = 0xFF00FF10ul; /* lowest set bit is bit 4 of limb 1 → global bit 36 */
+        a.limbs[1] = 0xFF00FF10ul; /* lowest set bit is bit 4 of limb 1 -> global bit 36 */
         SSF_ASSERT(SSFBNTrailingZeros(&a) == 36u);
 
         /* After a left shift by k, tz grows by k. */
@@ -2843,7 +2843,7 @@ void SSFBNUnitTest(void)
 
         /* Small bit size keeps the test fast but still exercises the loop. */
         SSF_ASSERT(SSFBNGenPrime(&p, 64u, 5u, &prng) == true);
-        SSF_ASSERT(SSFBNBitLen(&p) == 64u); /* Top two bits forced set → bit length exact. */
+        SSF_ASSERT(SSFBNBitLen(&p) == 64u); /* Top two bits forced set -> bit length exact. */
         SSF_ASSERT(SSFBNIsProbablePrime(&p, 5u, &prng) == true);
 
         SSFPRNGDeInitContext(&prng);
@@ -2921,7 +2921,7 @@ void SSFBNUnitTest(void)
     {
         /* Drop bench entries whose 2*nLimbs would exceed SSF_BN_MAX_LIMBS at the configured BN  */
         /* cap. With auto-derivation in ssfbn.h the cap tracks the largest enabled algorithm;   */
-        /* an ECC-only build (cap = 768 → MAX_LIMBS = 24) cannot run the RSA-1024+ rows because */
+        /* an ECC-only build (cap = 768 -> MAX_LIMBS = 24) cannot run the RSA-1024+ rows because */
         /* the schoolbook product would overflow the SSF_REQUIRE in SSFBNSetZero / SSFBNMul.    */
         struct { uint16_t nLimbs; uint32_t mIters; uint32_t mulIters; const char *label; } bench[] = {
             {   8u, 4000000u, 20000000u, "P-256 (n= 8, RSA-256-eq) " },
@@ -3032,7 +3032,7 @@ void SSFBNUnitTest(void)
                 /* Public exponent F4 = 65537. */
                 SSFBNSetUint32(&expPub, 65537u, 1u);
 
-                /* Iter counts tuned for ~0.5–2 s per measurement (Mont ladder is ~2*eBits ops). */
+                /* Iter counts tuned for ~0.5-2 s per measurement (Mont ladder is ~2*eBits ops). */
                 if (n == 8u)        { expIters = 20000u;  expPubIters = 500000u; }
                 else if (n == 32u)  { expIters = 400u;    expPubIters = 40000u;  }
                 else if (n == 64u)  { expIters = 50u;     expPubIters = 10000u;  }

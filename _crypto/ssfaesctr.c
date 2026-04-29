@@ -2,7 +2,7 @@
 /* Small System Framework                                                                        */
 /*                                                                                               */
 /* ssfaesctr.c                                                                                   */
-/* Provides AES-CTR (counter mode) confidentiality-only stream cipher per NIST SP 800-38A §6.5.  */
+/* Provides AES-CTR confidentiality-only stream cipher per NIST SP 800-38A Sec. 6.5.             */
 /*                                                                                               */
 /* BSD-3-Clause License                                                                          */
 /* Copyright 2026 Supurloop Software LLC                                                         */
@@ -46,7 +46,7 @@ typedef char _ssf_aesctr_sa_block_size[(SSF_AESCTR_BLOCK_SIZE == 16u) ? 1 : -1];
 typedef char _ssf_aesctr_sa_key_max[(SSF_AESCTR_KEY_MAX_SIZE >= 32u) ? 1 : -1];
 
 /* --------------------------------------------------------------------------------------------- */
-/* Increments the 128-bit counter as a big-endian integer (NIST SP 800-38A §B.1).                */
+/* Increments the 128-bit counter as a big-endian integer (NIST SP 800-38A Sec. B.1).            */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFAESCTRIncCounter(uint8_t counter[SSF_AESCTR_BLOCK_SIZE])
 {

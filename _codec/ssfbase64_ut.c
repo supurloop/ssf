@@ -225,7 +225,7 @@ void SSFBase64UnitTest(void)
     SSF_ASSERT(SSFBase64Dec32To24("=AAA", b24, sizeof(b24)) == 0);
     SSF_ASSERT(SSFBase64Dec32To24("A=AA", b24, sizeof(b24)) == 0);
 
-    /* RFC 4648 §3.5: non-canonical encodings MUST be rejected. When 2 base64 chars +
+    /* RFC 4648 Sec. 3.5: non-canonical encodings MUST be rejected. When 2 base64 chars +
      * "==" encode 1 output byte, the second char's low 4 bits MUST be zero. When 3
      * chars + "=" encode 2 output bytes, the third char's low 2 bits MUST be zero. */
     /* 1-byte output, non-zero b-low-4 bits. These decode to 0x00 under a loose decoder

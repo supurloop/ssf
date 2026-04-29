@@ -181,7 +181,7 @@ static void _OSSLSHA2(_SHA2Variant_t v, const uint8_t *in, size_t inLen,
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Random fuzz across (variant × len). Lengths span both the 64-byte (SHA-224/256) and 128-byte */
+/* Random fuzz across (variant x len). Lengths span both the 64-byte (SHA-224/256) and 128-byte */
 /* (SHA-384/512/512-224/512-256) block boundaries plus the corresponding padding-overflow       */
 /* cutoffs (55/56 and 111/112), where padding-handling bugs typically surface.                  */
 /* --------------------------------------------------------------------------------------------- */

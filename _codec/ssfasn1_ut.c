@@ -169,7 +169,7 @@ void SSFASN1UnitTest(void)
         cursor.buf = buf; cursor.bufLen = len;
         SSF_ASSERT(SSFASN1DecGetOID(&cursor, arcs, SSF_ASN1_CONFIG_MAX_OID_ARCS, &arcsLen,
                    &next) == true);
-        /* 0x55 = 2*40+5 → arcs 2,5; 0x04 → arc 4; 0x03 → arc 3 = OID 2.5.4.3 */
+        /* 0x55 = 2*40+5 -> arcs 2,5; 0x04 -> arc 4; 0x03 -> arc 3 = OID 2.5.4.3 */
         SSF_ASSERT(arcsLen == 4u);
         SSF_ASSERT(arcs[0] == 2u && arcs[1] == 5u && arcs[2] == 4u && arcs[3] == 3u);
     }
@@ -387,7 +387,7 @@ void SSFASN1UnitTest(void)
     }
 
     /* ---- Fix #2a: OID arc0=2, arc1>=40 split correctly ---- */
-    /* OID 2.100.3 encodes as 0x81 0x34 0x03 (first sub-id 180 → arc0=2, arc1=100).             */
+    /* OID 2.100.3 encodes as 0x81 0x34 0x03 (first sub-id 180 -> arc0=2, arc1=100).            */
     {
         static const uint8_t oidRaw[] = { 0x81u, 0x34u, 0x03u };
         uint32_t arcs[SSF_ASN1_CONFIG_MAX_OID_ARCS];
@@ -404,7 +404,7 @@ void SSFASN1UnitTest(void)
     }
 
     /* ---- Fix #2b: OID first-byte >= 80 maps arc0=2 (not arc0=3) ---- */
-    /* Single-byte first sub-id of 0x82 = 130 → arc0=2, arc1=50 per X.690 §8.19.4.              */
+    /* Single-byte first sub-id of 0x82 = 130 -> arc0=2, arc1=50 per X.690 Sec. 8.19.4.         */
     {
         static const uint8_t oidRaw[] = { 0x82u, 0x01u }; /* Invalid continuation -> reject */
         uint32_t arcs[SSF_ASN1_CONFIG_MAX_OID_ARCS];
@@ -417,7 +417,7 @@ void SSFASN1UnitTest(void)
         cursor.buf = buf; cursor.bufLen = len;
         SSF_ASSERT(SSFASN1DecGetOID(&cursor, arcs, SSF_ASN1_CONFIG_MAX_OID_ARCS, &arcsLen,
                    &next) == true);
-        /* 257 - 80 = 177 → arc0=2, arc1=177 */
+        /* 257 - 80 = 177 -> arc0=2, arc1=177 */
         SSF_ASSERT(arcsLen == 2u);
         SSF_ASSERT(arcs[0] == 2u);
         SSF_ASSERT(arcs[1] == 177u);
@@ -426,7 +426,7 @@ void SSFASN1UnitTest(void)
         cursor.buf = buf; cursor.bufLen = len;
         SSF_ASSERT(SSFASN1DecGetOID(&cursor, arcs, SSF_ASN1_CONFIG_MAX_OID_ARCS, &arcsLen,
                    &next) == true);
-        /* (1<<7)|2 = 130; 130 - 80 = 50 → arc0=2, arc1=50, arc2=5 */
+        /* (1<<7)|2 = 130; 130 - 80 = 50 -> arc0=2, arc1=50, arc2=5 */
         SSF_ASSERT(arcsLen == 3u);
         SSF_ASSERT(arcs[0] == 2u);
         SSF_ASSERT(arcs[1] == 50u);

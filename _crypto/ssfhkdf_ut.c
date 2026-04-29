@@ -118,7 +118,7 @@ static void _OSSLHKDF(const char *mode, SSFHMACHash_t h,
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Random fuzz across (hash × saltLen × ikmLen × infoLen × okmLen). Each cell drives:           */
+/* Random fuzz across (hash x saltLen x ikmLen x infoLen x okmLen). Each cell drives:           */
 /*   - SSFHKDFExtract  vs OpenSSL "EXTRACT_ONLY"                                                 */
 /*   - SSFHKDFExpand   vs OpenSSL "EXPAND_ONLY" (using the SSF-derived PRK as the "key")         */
 /*   - SSFHKDF         vs OpenSSL "EXTRACT_AND_EXPAND"                                           */
@@ -510,7 +510,7 @@ void SSFHKDFUnitTest(void)
         };
         uint8_t okm[64];
 
-        /* 64B output > 48B SHA-384 hashSize → exercises multi-block Expand iteration. */
+        /* 64B output > 48B SHA-384 hashSize -> exercises multi-block Expand iteration. */
         SSF_ASSERT(SSFHKDF(SSF_HMAC_HASH_SHA384, salt, sizeof(salt), ikm, sizeof(ikm),
                    info, sizeof(info), okm, sizeof(okm)) == true);
         SSF_ASSERT(memcmp(okm, expectedOKM, sizeof(expectedOKM)) == 0);
@@ -587,7 +587,7 @@ void SSFHKDFUnitTest(void)
         };
         uint8_t okm[120];
 
-        /* 120B output > 64B SHA-512 hashSize → exercises multi-block Expand iteration. */
+        /* 120B output > 64B SHA-512 hashSize -> exercises multi-block Expand iteration. */
         SSF_ASSERT(SSFHKDF(SSF_HMAC_HASH_SHA512, salt, sizeof(salt), ikm, sizeof(ikm),
                    info, sizeof(info), okm, sizeof(okm)) == true);
         SSF_ASSERT(memcmp(okm, expectedOKM, sizeof(expectedOKM)) == 0);

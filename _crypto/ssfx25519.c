@@ -247,7 +247,7 @@ static void _fe_reduce(_fe_t *a)
     }
 }
 
-/* Import from 32 little-endian bytes. Clears bit 255 per RFC 7748 §5: callers MUST mask the    */
+/* Import from 32 little-endian bytes. Clears bit 255 per RFC 7748 Sec. 5: callers MUST mask the*/
 /* most-significant bit of the final byte before treating the input as a u-coordinate.           */
 static void _fe_from_bytes(_fe_t *a, const uint8_t *b)
 {
@@ -363,7 +363,7 @@ static void _x25519_stack_scrub(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* X25519 scalar multiplication (RFC 7748 §5; constant-time Montgomery ladder on x-coords).      */
+/* X25519 scalar multiplication (RFC 7748 Sec. 5; constant-time Montgomery ladder on x-coords).  */
 /* --------------------------------------------------------------------------------------------- */
 static void _x25519_scalar_mul(uint8_t out[32], const uint8_t scalar[32],
                                const uint8_t point[32])

@@ -70,7 +70,7 @@ static const EVP_CIPHER *_OSSLAESCTRCipher(size_t keyLen)
 }
 
 /* Compute AES-CTR via OpenSSL's EVP one-shot path. iv is the 16-byte initial counter; OpenSSL */
-/* uses the same NIST §B.1 full-128-bit big-endian counter convention as SSF.                  */
+/* uses the same NIST Sec. B.1 full-128-bit big-endian counter convention as SSF.              */
 static void _OSSLAESCTR(const uint8_t *key, size_t keyLen, const uint8_t *iv,
                         const uint8_t *in, uint8_t *out, size_t len)
 {
@@ -87,7 +87,7 @@ static void _OSSLAESCTR(const uint8_t *key, size_t keyLen, const uint8_t *iv,
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Random fuzz across (keyLen × len). Each cell draws fresh random key/iv/message bytes,        */
+/* Random fuzz across (keyLen x len). Each cell draws fresh random key/iv/message bytes,        */
 /* computes the ciphertext via SSFAESCTR's one-shot path, and compares to OpenSSL. Catches       */
 /* divergence in the keystream generation or counter increment that wouldn't surface in the      */
 /* fixed-IV NIST KATs.                                                                            */
@@ -128,7 +128,7 @@ static void _VerifyAESCTRAgainstOpenSSLRandom(void)
 }
 #endif /* SSF_AESCTR_OSSL_VERIFY */
 
-/* NIST SP 800-38A F.5 shared test plaintext (4 × 16-byte blocks). */
+/* NIST SP 800-38A F.5 shared test plaintext (4 x 16-byte blocks). */
 static const uint8_t _nistPt[64] = {
     0x6Bu, 0xC1u, 0xBEu, 0xE2u, 0x2Eu, 0x40u, 0x9Fu, 0x96u,
     0xE9u, 0x3Du, 0x7Eu, 0x11u, 0x73u, 0x93u, 0x17u, 0x2Au,
@@ -226,7 +226,7 @@ void SSFAESCTRUnitTest(void)
         SSF_ASSERT(memcmp(back, _nistPt, 64) == 0);
     }
 
-    /* ---- RFC 3686 §6: AES-CTR vectors covering varied nonce/IV/counter shapes ---- */
+    /* ---- RFC 3686 Sec. 6: AES-CTR vectors covering varied nonce/IV/counter shapes ---- */
     /* The SP 800-38A F.5 vectors above all use the same all-ones IV; RFC 3686 adds 9 vectors */
     /* covering AES-128/192/256 with different nonce|IV|counter compositions and message     */
     /* lengths (16, 32, 36 bytes). Together with the F.5 KATs and the counter-wrap edge      */

@@ -47,11 +47,11 @@ extern "C" {
 /* product, and SSFBNModMul / SSFBNModMulNIST / SSFBNModInvExt all gate on 2N <= MAX_LIMBS. The  */
 /* derivation picks the largest operand width across enabled algorithms and doubles it:          */
 /*                                                                                               */
-/*   ECC P-256                  → 2 × 256  =  512                                                 */
-/*   ECC P-384                  → 2 × 384  =  768                                                 */
-/*   RSA-2048 (sign / keygen)   → 2 × 2048 = 4096                                                 */
-/*   RSA-3072                   → 2 × 3072 = 6144                                                 */
-/*   RSA-4096                   → 2 × 4096 = 8192                                                 */
+/*   ECC P-256                  -> 2 x 256  =  512                                                */
+/*   ECC P-384                  -> 2 x 384  =  768                                                */
+/*   RSA-2048 (sign / keygen)   -> 2 x 2048 = 4096                                                */
+/*   RSA-3072                   -> 2 x 3072 = 6144                                                */
+/*   RSA-4096                   -> 2 x 4096 = 8192                                                */
 /*                                                                                               */
 /* If no consumer is enabled the cap defaults to 256 -- ssfbn still compiles but its working     */
 /* state is irrelevant. Users can override via SSF_BN_CONFIG_MAX_BITS in ssfbn_opt.h to size the */

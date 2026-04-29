@@ -433,11 +433,11 @@ static const _fe_t _fe_sqrtm1 = {{ 0x4A0EA0B0u, 0xC4EE1B27u, 0xAD2FE478u, 0x2F43
                                    0x3DFBD7A7u, 0x2B4D0099u, 0x4FC1DF0Bu, 0x2B832480u }};
 
 /* Base point B in extended-Edwards coords (X:Y:Z:T), X=B_x, Y=B_y=4/5 mod p, Z=1, T=B_x*B_y.    */
-/* Y is the bytes 0x58 0x66×31 reinterpreted as 8 little-endian 32-bit limbs (sign bit clear).   */
+/* Y is the bytes 0x58 0x66x31 reinterpreted as 8 little-endian 32-bit limbs (sign bit clear).   */
 /* X and T values are derived from the curve equation -x^2 + y^2 = 1 + d*x^2*y^2 with the        */
 /* positive (even) root for x, then encoded as 8 limbs little-endian. Hardcoded here to skip the */
 /* per-call _ge_decode the previous design did at every Sign / Verify / PubKeyFromSeed entry.    */
-/* Correctness of these constants is enforced end-to-end by the RFC 8032 §7.1 test vectors and   */
+/* Correctness of these constants is enforced end-to-end by the RFC 8032 Sec. 7.1 test vectors and*/
 /* the OpenSSL cross-check below -- any wrong byte makes every signature deviate.                 */
 static const _ge_t _ed_basepoint = {
     /* X */ {{ 0x8F25D51Au, 0xC9562D60u, 0x9525A7B2u, 0x692CC760u,
@@ -556,7 +556,7 @@ static bool _ge_decode(_ge_t *p, const uint8_t in[32])
     tmp[31] &= 0x7Fu; /* clear sign bit */
     _fe_from_bytes(&p->Y, tmp);
 
-    /* Reject non-canonical y per RFC 8032 §5.1.3 (must satisfy y < p). */
+    /* Reject non-canonical y per RFC 8032 Sec. 5.1.3 (must satisfy y < p). */
     {
         uint64_t borrow = 0;
         uint8_t i;
@@ -623,15 +623,15 @@ static bool _ge_decode(_ge_t *p, const uint8_t in[32])
 }
 
 /* Low-order subgroup check: returns true if [8]p is the identity, i.e., p has order in        */
-/* {1,2,4,8}. Per Chalkias et al. "Taming the many EdDSAs" §5, signatures under low-order      */
+/* {1,2,4,8}. Per Chalkias et al. "Taming the many EdDSAs" Sec. 5, signatures under low-order  */
 /* public keys can be forged for arbitrary messages by setting (R, S) so that the verify        */
 /* equation reduces to identity = identity, regardless of the message. RFC 8032 doesn't         */
-/* mandate the check, but every modern Ed25519 implementation (libsodium ≥1.0.16, BoringSSL)   */
+/* mandate the check, but every modern Ed25519 implementation (libsodium >=1.0.16, BoringSSL)  */
 /* enforces it; we match that posture. Three doublings is cheaper than the alternative          */
 /* hardcoded byte-blocklist and generalises to any future torsion case.                          */
 /* Identity in projective extended coords has X = 0 and Y = Z (and T = 0); checking those two   */
-/* conditions on [8]p is sufficient because the doubling formula preserves the invariant T·Z = */
-/* X·Y (and Y == Z combined with X == 0 implies that invariant trivially).                      */
+/* conditions on [8]p is sufficient because the doubling formula preserves the invariant T*Z = */
+/* X*Y (and Y == Z combined with X == 0 implies that invariant trivially).                      */
 static bool _ge_is_low_order(const _ge_t *p)
 {
     _ge_t t;
@@ -677,8 +677,8 @@ static void _ge_scalarmult_ct(_ge_t *r, const uint8_t scalar[32], const _ge_t *p
         _ge_double(&Q, &Q);
         _ge_add(&QplusP, &Q, p);
         /* After the cswap:
-         *   bit == 1 → Q holds (Q + p)  (and QplusP holds the old Q, discarded)
-         *   bit == 0 → Q is unchanged   (and QplusP holds (Q + p), discarded)
+         *   bit == 1 -> Q holds (Q + p)  (and QplusP holds the old Q, discarded)
+         *   bit == 0 -> Q is unchanged   (and QplusP holds (Q + p), discarded)
          * Either way the next iteration reads only Q, so the discard is harmless. */
         _ge_cswap(&Q, &QplusP, bit);
     }
@@ -1439,7 +1439,7 @@ bool SSFEd25519Verify(const uint8_t pubKey[SSF_ED25519_PUB_KEY_SIZE],
     /* Decode public key */
     if (!_ge_decode(&A, pubKey)) return false;
 
-    /* Reject low-order pubkeys ([8]A = identity → trivial forgery for any message). */
+    /* Reject low-order pubkeys ([8]A = identity -> trivial forgery for any message). */
     if (_ge_is_low_order(&A)) return false;
 
     /* Negate A: -A has coordinates (-X, Y, Z, -T) */

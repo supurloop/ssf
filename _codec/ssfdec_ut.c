@@ -957,7 +957,7 @@ void SSFDecUnitTest(void)
     SSF_ASSERT(SSFDecStrToInt("1e19", &i64) == false);
 
     /* SSFDecIntToStrPadded with negative values */
-    /* minFieldWidth includes the '-' sign, so -5 w/minFieldWidth=4 → "-005" (len=4) */
+    /* minFieldWidth includes the '-' sign, so -5 w/minFieldWidth=4 -> "-005" (len=4) */
     len1 = SSFDecIntToStrPadded(-5, str2, sizeof(str2), 4, '0');
     SSF_ASSERT(len1 == 4);
     SSF_ASSERT(memcmp(str2, "-005", 4) == 0);
@@ -970,7 +970,7 @@ void SSFDecUnitTest(void)
     len1 = SSFDecIntToStrPadded(-12345, str2, sizeof(str2), 4, '0');
     SSF_ASSERT(len1 == 6);
     SSF_ASSERT(memcmp(str2, "-12345", 6) == 0);
-    /* -5 w/minFieldWidth=5 → "-0005" (len=5) */
+    /* -5 w/minFieldWidth=5 -> "-0005" (len=5) */
     len1 = SSFDecIntToStrPadded(-5, str2, sizeof(str2), 5, '0');
     SSF_ASSERT(len1 == 5);
     SSF_ASSERT(memcmp(str2, "-0005", 5) == 0);

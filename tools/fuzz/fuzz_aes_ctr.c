@@ -1,7 +1,7 @@
 /* libFuzzer harness: differential test SSF AES-CTR against OpenSSL EVP_aes_*_ctr.
  *
  * Input layout (mutated by the fuzzer):
- *   byte 0          -- keysize selector (0/1/2 → 16/24/32)
+ *   byte 0          -- keysize selector (0/1/2 -> 16/24/32)
  *   bytes 1..N      -- key
  *   bytes N+1..N+16 -- IV / initial counter (16 bytes)
  *   bytes N+17..end -- plaintext (variable length, 0..1024 bytes)

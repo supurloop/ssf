@@ -35,7 +35,7 @@
 #include "ssfusexport.h"
 
 /* --------------------------------------------------------------------------------------------- */
-/* If HKDF-Extract succeeds writes prkOut and returns true, else false (RFC 5869 §2.2).          */
+/* If HKDF-Extract succeeds writes prkOut and returns true, else false (RFC 5869 Sec. 2.2).      */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFHKDFExtract(SSFHMACHash_t hash, const uint8_t *salt, size_t saltLen,
                     const uint8_t *ikm, size_t ikmLen, uint8_t *prkOut, size_t prkOutSize)
@@ -53,7 +53,7 @@ bool SSFHKDFExtract(SSFHMACHash_t hash, const uint8_t *salt, size_t saltLen,
     /* Was a salt provided? */
     if (salt == NULL || saltLen == 0)
     {
-        /* No, use a zero-filled HashLen-byte salt (RFC 5869 §2.2). */
+        /* No, use a zero-filled HashLen-byte salt (RFC 5869 Sec. 2.2). */
         memset(zeroSalt, 0, hashSize);
         salt = zeroSalt;
         saltLen = hashSize;
@@ -65,7 +65,7 @@ bool SSFHKDFExtract(SSFHMACHash_t hash, const uint8_t *salt, size_t saltLen,
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* If HKDF-Expand succeeds writes okmOut and returns true, else false (RFC 5869 §2.3).           */
+/* If HKDF-Expand succeeds writes okmOut and returns true, else false (RFC 5869 Sec. 2.3).       */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFHKDFExpand(SSFHMACHash_t hash, const uint8_t *prk, size_t prkLen, const uint8_t *info,
                    size_t infoLen, uint8_t *okmOut, size_t okmLen)

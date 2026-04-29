@@ -127,7 +127,7 @@ bool SSFRSAPubKeyIsValid(const uint8_t *pubKeyDer, size_t pubKeyDerLen);
 bool SSFRSAPrivKeyIsValid(const uint8_t *privKeyDer, size_t privKeyDerLen);
 
 /* --------------------------------------------------------------------------------------------- */
-/* FIPS 186-4 §B.3 keygen post-condition checks (halfBits = nlen / 2).                           */
+/* FIPS 186-4 Sec. B.3 keygen post-condition checks (halfBits = nlen / 2).                       */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFRSAFipsPrimeDistanceOK(const SSFBN_t *p, const SSFBN_t *q, uint16_t halfBits);
 bool SSFRSAFipsDLowerBoundOK(const SSFBN_t *d, uint16_t halfBits);

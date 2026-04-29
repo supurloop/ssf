@@ -45,7 +45,7 @@
 #define SSF_POLY1305_CONTEXT_MAGIC (0x504F4C59ul) /* 'POLY' -- set by Begin, cleared by End. */
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: h = h * r mod (2^130 - 5), using 5 × 26-bit limbs and precomputed r[1..4] * 5.      */
+/* Internal: h = h * r mod (2^130 - 5), using 5 x 26-bit limbs and precomputed r[1..4] * 5.      */
 /* Shared between full-block (Update) and final-partial-block (End) paths.                       */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFPoly1305MulR(SSFPoly1305Context_t *ctx)
@@ -80,7 +80,7 @@ static void _SSFPoly1305MulR(SSFPoly1305Context_t *ctx)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: process one complete 16-byte block (adds implicit high bit 2^128 per RFC 7539 §2.5) */
+/* Internal: process one complete 16-byte block (adds implicit high bit 2^128 per RFC 7539 2.5) */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFPoly1305ProcessFullBlock(SSFPoly1305Context_t *ctx, const uint8_t block[16])
 {
@@ -94,7 +94,7 @@ static void _SSFPoly1305ProcessFullBlock(SSFPoly1305Context_t *ctx, const uint8_
 
 /* --------------------------------------------------------------------------------------------- */
 /* Incremental API: initialize context from a 32-byte one-time key.                              */
-/* RFC 7539 §2.5: clamp the low half of the key as r, take the high half verbatim as s, and      */
+/* RFC 7539 Sec. 2.5: clamp the low half of the key as r, take the high half verbatim as s, and  */
 /* precompute r[1..4] * 5 for the modular reduction inner loop. Accumulator starts at zero.       */
 /* --------------------------------------------------------------------------------------------- */
 void SSFPoly1305Begin(SSFPoly1305Context_t *ctx,
@@ -105,7 +105,7 @@ void SSFPoly1305Begin(SSFPoly1305Context_t *ctx,
     SSF_REQUIRE(key != NULL);
     SSF_REQUIRE(keyLen == SSF_POLY1305_KEY_SIZE);
 
-    /* Clamp r (RFC 7539 §2.5) */
+    /* Clamp r (RFC 7539 Sec. 2.5) */
     ctx->r0 = (SSF_GETU32LE(&key[0]))        & 0x3FFFFFFu;
     ctx->r1 = (SSF_GETU32LE(&key[3])  >> 2)  & 0x3FFFF03u;
     ctx->r2 = (SSF_GETU32LE(&key[6])  >> 4)  & 0x3FFC0FFu;
@@ -243,7 +243,7 @@ void SSFPoly1305End(SSFPoly1305Context_t *ctx,
     ctx->h3 = (ctx->h3 & mask) | g3;
     ctx->h4 = (ctx->h4 & mask) | g4;
 
-    /* Assemble h into 4 × 32-bit LE words and add s, writing the tag as 16 bytes LE. */
+    /* Assemble h into 4 x 32-bit LE words and add s, writing the tag as 16 bytes LE. */
     f = (uint64_t)(ctx->h0 | (ctx->h1 << 26)) + ctx->s0;
     tag[0]  = (uint8_t)f;       tag[1]  = (uint8_t)(f >> 8);
     tag[2]  = (uint8_t)(f >> 16); tag[3]  = (uint8_t)(f >> 24);
@@ -262,7 +262,7 @@ void SSFPoly1305End(SSFPoly1305Context_t *ctx,
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Computes Poly1305 MAC (RFC 7539 §2.5). One-shot convenience wrapper over Begin/Update/End.    */
+/* Computes Poly1305 MAC (RFC 7539 Sec. 2.5). One-shot convenience wrapper over Begin/Update/End.*/
 /* --------------------------------------------------------------------------------------------- */
 void SSFPoly1305Mac(const uint8_t *msg, size_t msgLen,
                     const uint8_t *key, size_t keyLen,

@@ -79,7 +79,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
                                  sig, sigLen);
 
     int ossl = ossl_verify(pub, PUBKEY_LEN, hash, HASH_LEN, sig, sigLen);
-    /* ossl == 1 → accept; ossl == 0 → reject. */
+    /* ossl == 1 -> accept; ossl == 0 -> reject. */
 
     if ((ssf_ok ? 1 : 0) != ossl) {
         fprintf(stderr, "DIVERGENCE: ssf=%s ossl=%s sigLen=%zu\n",

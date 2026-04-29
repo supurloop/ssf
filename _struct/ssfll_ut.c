@@ -446,7 +446,7 @@ void SSFLLUnitTest(void)
         SSFLLPutItem(&_sllTest, (SSFLLItem_t *)&_sllItems[0], SSF_LL_LOC_TAIL, NULL);
         SSFLLPutItem(&_sllTest, (SSFLLItem_t *)&_sllItems[1], SSF_LL_LOC_TAIL, NULL);
         SSFLLPutItem(&_sllTest, (SSFLLItem_t *)&_sllItems[2], SSF_LL_LOC_TAIL, NULL);
-        /* Forward: head → 0 → 1 → 2 → NULL */
+        /* Forward: head -> 0 -> 1 -> 2 -> NULL */
         cur = SSF_LL_HEAD(&_sllTest);
         SSF_ASSERT(cur == (SSFLLItem_t *)&_sllItems[0]);
         cur = SSF_LL_NEXT_ITEM(cur);
@@ -455,7 +455,7 @@ void SSFLLUnitTest(void)
         SSF_ASSERT(cur == (SSFLLItem_t *)&_sllItems[2]);
         cur = SSF_LL_NEXT_ITEM(cur);
         SSF_ASSERT(cur == NULL);
-        /* Backward: tail → 2 → 1 → 0 → NULL */
+        /* Backward: tail -> 2 -> 1 -> 0 -> NULL */
         cur = SSF_LL_TAIL(&_sllTest);
         SSF_ASSERT(cur == (SSFLLItem_t *)&_sllItems[2]);
         cur = SSF_LL_PREV_ITEM(cur);

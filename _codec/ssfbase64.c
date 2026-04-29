@@ -72,7 +72,7 @@ uint8_t SSFBase64Dec32To24(const char *b32, uint8_t *b24out, size_t b24outSize)
 
     if (a >= 64 || b >= 64 || c >= 65 || d >= 65) return 0;
     if (c == 64 && d != 64) return 0;
-    /* RFC 4648 §3.5: when the final quantum of encoded input has fewer than 24 bits of
+    /* RFC 4648 Sec. 3.5: when the final quantum of encoded input has fewer than 24 bits of
      * decoded output, the low bits of the last non-pad character MUST be zero. Rejecting
      * non-canonical encodings guarantees that decode(encode(x)) == x for every x. */
     if (c == 64 && (b & 0x0Fu) != 0u) return 0;     /* 1-byte output: b's low 4 bits */

@@ -214,7 +214,7 @@ static void _VerifyEd25519AgainstOpenSSL(uint16_t iters)
         _Ed25519OSSLPubFromSeed(seed, pubOSSL);
         SSF_ASSERT(memcmp(pubSSF, pubOSSL, 32) == 0);
 
-        /* === SSF signs → OpenSSL verifies === */
+        /* === SSF signs -> OpenSSL verifies === */
         SSF_ASSERT(SSFEd25519Sign(seed, pubSSF, msg, msgLen, sigSSF) == true);
         {
             EVP_PKEY *opub = _Ed25519OSSLPubFromBytes(pubSSF);
@@ -442,9 +442,9 @@ void SSFEd25519UnitTest(void)
         SSF_ASSERT(SSFEd25519Verify(pubKey, msg, sizeof(msg), sig) == true);
     }
 
-    /* ---- RFC 8032 §7.1 Test Vector 4: 1023-byte message ---- */
+    /* ---- RFC 8032 Sec. 7.1 Test Vector 4: 1023-byte message ---- */
     /* The named long-message vector. Catches buffer-handling bugs in long messages that the     */
-    /* short TV1–TV3 vectors miss; complements the OpenSSL cross-check with a hardcoded RFC      */
+    /* short TV1-TV3 vectors miss; complements the OpenSSL cross-check with a hardcoded RFC      */
     /* reference value that doesn't depend on libcrypto being linked.                             */
     {
         static uint8_t tv4Msg[1023];
@@ -526,7 +526,7 @@ void SSFEd25519UnitTest(void)
         SSF_ASSERT(SSFEd25519Verify(pubKey, msg, sizeof(msg) - 1u, sig) == false);
     }
 
-    /* ---- A1 regression: non-canonical pubkey y must be rejected (RFC 8032 §5.1.3). */
+    /* ---- A1 regression: non-canonical pubkey y must be rejected (RFC 8032 Sec. 5.1.3). */
     /* Construct a pubkey whose 255-bit y interpretation is y = p + 1 = 2^255 - 18,    */
     /* a non-canonical encoding of the canonical y = 1 (the curve identity, with x=0). */
     /* The chosen signature R||S = (canonical identity encoding)||0 mathematically     */
@@ -626,13 +626,13 @@ void SSFEd25519UnitTest(void)
     }
 
     /* ---- A3 regression: low-order pubkey signature attack must be rejected. */
-    /* The identity (y=1, x=0) is canonically encoded as {0x01, 0x00 ×31}, passes A1's y < p   */
+    /* The identity (y=1, x=0) is canonically encoded as {0x01, 0x00 x31}, passes A1's y < p   */
     /* check, and decodes successfully -- but it has order 1 (or 8 at most for any low-order    */
-    /* point), which means [k]·A = identity for every challenge k modulo a small factor.       */
+    /* point), which means [k]*A = identity for every challenge k modulo a small factor.       */
     /* With sig = (R=identity, S=0), the verify equation [S]B - [k]A = identity - identity =   */
     /* identity reconstructs identity bytes equal to R bytes, so without a low-order check     */
     /* every message verifies under the identity public key. Per Chalkias et al. "Taming the   */
-    /* many EdDSAs" §5, verifiers must reject these pubkeys.                                    */
+    /* many EdDSAs" Sec. 5, verifiers must reject these pubkeys.                                */
     {
         uint8_t identityPub[32];
         uint8_t sig[64];

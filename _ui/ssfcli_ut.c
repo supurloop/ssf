@@ -681,7 +681,7 @@ void SSFCLIUnitTest(void)
     _SSFCLIUTHandlerReset();
     _ssfCLIUTHandler.returnValue = true;
 
-    /* Fill all 3 history slots: c1 → slot 0, c1 → slot 1, c1 → slot 2 */
+    /* Fill all 3 history slots: c1 -> slot 0, c1 -> slot 1, c1 -> slot 2 */
     _SSFCLIUTSendStr(&cli, "c1\r");
     SSF_ASSERT(cli.cmdHistBufIndex == 1);
     _SSFCLIUTSendStr(&cli, "c1\r");

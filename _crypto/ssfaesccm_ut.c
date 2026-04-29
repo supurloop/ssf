@@ -145,7 +145,7 @@ static bool _OSSLAESCCMDecrypt(const uint8_t *ct, size_t ctLen,
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Random fuzz across (keyLen × nonceLen × tagLen × ptLen × aadLen). Each cell:                  */
+/* Random fuzz across (keyLen x nonceLen x tagLen x ptLen x aadLen). Each cell:                  */
 /*   - draws fresh random key/nonce/aad/pt                                                       */
 /*   - encrypts via SSF, encrypts via OpenSSL, asserts byte-equal ct AND tag                     */
 /*   - decrypts SSF ciphertext via OpenSSL and OpenSSL ciphertext via SSF, both must succeed     */

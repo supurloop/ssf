@@ -83,7 +83,7 @@ static void _OSSLHMAC(SSFHMACHash_t h, const uint8_t *key, size_t keyLen,
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Random fuzz across (hash × keyLen × msgLen). Each cell draws fresh random key/message bytes,  */
+/* Random fuzz across (hash x keyLen x msgLen). Each cell draws fresh random key/message bytes,  */
 /* computes the MAC via SSFHMAC's one-shot path AND via the incremental path with a mid-message  */
 /* split, then compares both to OpenSSL's one-call HMAC. Catches divergence in the long-key       */
 /* branch, the inner/outer pad construction, the chunked-update dispatch, and any block-boundary */
@@ -961,7 +961,7 @@ void SSFHMACUnitTest(void)
     }
 
     /* DBC: SSFHMACEnd parameter validation. NULL ctx and NULL macOut must trip;
-       macOutSize ≠ hashSize is covered by the M2 block above. */
+       macOutSize != hashSize is covered by the M2 block above. */
     {
         SSFHMACContext_t ctx = {0};
         uint8_t key[16] = {0};
@@ -1000,7 +1000,7 @@ void SSFHMACUnitTest(void)
 
 #if SSF_HMAC_OSSL_VERIFY == 1
     /* Comprehensive cross-validation against OpenSSL. Random fuzz across the full              */
-    /* (hash × keyLen × msgLen) matrix, plus explicit corner cases. Skipped on cross builds     */
+    /* (hash x keyLen x msgLen) matrix, plus explicit corner cases. Skipped on cross builds     */
     /* (-DSSF_CONFIG_HAVE_OPENSSL=0) -- RFC 4231 / RFC 2202 KATs above remain the load-bearing  */
     /* coverage there.                                                                           */
     _VerifyHMACAgainstOpenSSLRandom();

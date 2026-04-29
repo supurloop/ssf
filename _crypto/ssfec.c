@@ -407,10 +407,10 @@ static void _SSFECPointAddMixed(SSFECPoint_t *r, const SSFECPoint_t *p, const SS
     SSFBNSetZero(&zeroPt.z, c->limbs);
 
     /* General mixed-coordinate add (assume Z2 = 1; U1 = X1, S1 = Y1). */
-    SSFBNModMulNIST(&t1, &P.z, &P.z, &c->p);          /* t1 = Z1²                       */
-    SSFBNModMulNIST(&t3, &P.z, &t1, &c->p);            /* t3 = Z1³                       */
-    SSFBNModMulNIST(&t2, &Q.x, &t1, &c->p);            /* t2 = U2 = X2 * Z1²            */
-    SSFBNModMulNIST(&t4, &Q.y, &t3, &c->p);            /* t4 = S2 = Y2 * Z1³            */
+    SSFBNModMulNIST(&t1, &P.z, &P.z, &c->p);          /* t1 = Z1^2                      */
+    SSFBNModMulNIST(&t3, &P.z, &t1, &c->p);            /* t3 = Z1^3                      */
+    SSFBNModMulNIST(&t2, &Q.x, &t1, &c->p);            /* t2 = U2 = X2 * Z1^2           */
+    SSFBNModMulNIST(&t4, &Q.y, &t3, &c->p);            /* t4 = S2 = Y2 * Z1^3           */
     SSFBNModSub(&t3, &t2, &P.x, &c->p);                /* t3 = H = U2 - X1 (U1 = X1)    */
     SSFBNModSub(&t2, &t4, &P.y, &c->p);                /* t2 = R = S2 - Y1 (S1 = Y1)    */
 
@@ -420,23 +420,23 @@ static void _SSFECPointAddMixed(SSFECPoint_t *r, const SSFECPoint_t *p, const SS
     hz  = (SSFBNLimb_t)SSFBNIsZero(&t3);
     rz  = (SSFBNLimb_t)SSFBNIsZero(&t2);
 
-    SSFBNModMulNIST(&t4, &t3, &t3, &c->p);             /* t4 = H²                       */
-    SSFBNModMulNIST(&t6, &t3, &t4, &c->p);             /* t6 = H³                       */
-    SSFBNModMulNIST(&t5, &P.x, &t4, &c->p);            /* t5 = U1*H² = X1*H²            */
+    SSFBNModMulNIST(&t4, &t3, &t3, &c->p);             /* t4 = H^2                      */
+    SSFBNModMulNIST(&t6, &t3, &t4, &c->p);             /* t6 = H^3                      */
+    SSFBNModMulNIST(&t5, &P.x, &t4, &c->p);            /* t5 = U1*H^2 = X1*H^2          */
 
     /* Z3 = Z1 * H (skipping the Z1*Z2 step from the full add). */
     SSFBNModMulNIST(&r->z, &P.z, &t3, &c->p);
 
-    /* X3 = R² - H³ - 2 * U1*H² */
+    /* X3 = R^2 - H^3 - 2 * U1*H^2 */
     SSFBNModMulNIST(&r->x, &t2, &t2, &c->p);
     SSFBNModSub(&r->x, &r->x, &t6, &c->p);
     SSFBNModAdd(&t4, &t5, &t5, &c->p);
     SSFBNModSub(&r->x, &r->x, &t4, &c->p);
 
-    /* Y3 = R * (U1*H² - X3) - S1 * H³ = R * (X1*H² - X3) - Y1 * H³ */
+    /* Y3 = R * (U1*H^2 - X3) - S1 * H^3 = R * (X1*H^2 - X3) - Y1 * H^3 */
     SSFBNModSub(&t5, &t5, &r->x, &c->p);
     SSFBNModMulNIST(&t5, &t2, &t5, &c->p);
-    SSFBNModMulNIST(&t1, &P.y, &t6, &c->p);            /* t1 = Y1 * H³ (reuse t1)       */
+    SSFBNModMulNIST(&t1, &P.y, &t6, &c->p);            /* t1 = Y1 * H^3 (reuse t1)      */
     SSFBNModSub(&r->y, &t5, &t1, &c->p);
 
     /* CT cascade -- same priority order as the full add. */

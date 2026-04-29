@@ -162,7 +162,7 @@ void SSFTLSUnitTest(void)
         }
     }
 
-    /* ---- RFC 8448 §3 Simple 1-RTT Handshake key-schedule KAT ---- */
+    /* ---- RFC 8448 Sec. 3 Simple 1-RTT Handshake key-schedule KAT ---- */
     /* Walks four steps of the published worked example with bit-exact reference values:           */
     /*   derived       = Derive-Secret(early_secret, "derived", empty_hash)                         */
     /*   c_hs_traffic  = Derive-Secret(handshake_secret, "c hs traffic", thash_through_ServerHello) */
@@ -470,7 +470,7 @@ void SSFTLSUnitTest(void)
                    decrypted, sizeof(decrypted), &decLen, &ct) == false);
     }
 
-    /* RFC 8446 §5.5: implementations MUST close the connection when the sequence number
+    /* RFC 8446 Sec. 5.5: implementations MUST close the connection when the sequence number
      * wraps. SSF refuses encrypt / decrypt when state->seqNum is already at UINT64_MAX --
      * the next increment would wrap to 0 and reuse the nonce of record 0, breaking the
      * AEAD contract catastrophically. Set state.seqNum to the boundary and confirm both
@@ -720,7 +720,7 @@ void SSFTLSUnitTest(void)
                                             pt, sizeof(pt), &ptLen, NULL));
     }
 
-    /* SSFTLSRecordDecrypt: records claiming a fragLen above 2^14 + 256 (RFC 8446 §5.2 limit)
+    /* SSFTLSRecordDecrypt: records claiming a fragLen above 2^14 + 256 (RFC 8446 Sec. 5.2 limit)
      * must be rejected. Build a header with fragLen = 0x4101 (one past the limit) and check
      * that decrypt returns false rather than proceeding to the AEAD layer. */
     {

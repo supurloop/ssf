@@ -58,7 +58,7 @@ void SSFTLSHkdfExpandLabel(SSFHMACHash_t hash,
     SSF_REQUIRE(out != NULL);
     SSF_REQUIRE(outLen <= 255u);
     /* hkdfLabel buffer is sized for at most SSF_TLS_MAX_HASH_SIZE bytes of context. RFC 8446 */
-    /* §7.1 permits up to 255 bytes, but real TLS 1.3 only feeds transcript hashes (≤ 48), so */
+    /* Sec. 7.1 permits up to 255 bytes, but real TLS 1.3 feeds transcript hashes (<= 48), so */
     /* tightening to the buffer's slot is safe and matches actual usage.                     */
     SSF_REQUIRE(ctxLen <= SSF_TLS_MAX_HASH_SIZE);
 
@@ -137,7 +137,7 @@ void SSFTLSComputeFinished(SSFHMACHash_t hash,
     SSF_REQUIRE(transcriptHash != NULL);
     SSF_REQUIRE(verifyData != NULL);
     /* finishedKey is sized for SSF_TLS_MAX_HASH_SIZE -- verifyDataLen above that overflows it. */
-    /* RFC 8446 §4.4.4 specifies verify_data length equals the hash output length (32 or 48). */
+    /* RFC 8446 Sec. 4.4.4 specifies verify_data length equals the hash output length (32 or 48). */
     SSF_REQUIRE(verifyDataLen <= SSF_TLS_MAX_HASH_SIZE);
 
     /* finished_key = HKDF-Expand-Label(BaseKey, "finished", "", Hash.length) */
@@ -299,7 +299,7 @@ bool SSFTLSRecordEncrypt(SSFTLSRecordState_t *state, uint8_t contentType,
     SSF_REQUIRE(record != NULL);
     SSF_REQUIRE(recordLen != NULL);
 
-    /* RFC 8446 §5.5: refuse to encrypt when seqNum is at the wrap boundary. The next */
+    /* RFC 8446 Sec. 5.5: refuse to encrypt when seqNum is at the wrap boundary. The next */
     /* increment would wrap to 0 and re-use the nonce of record 0 -- catastrophic.   */
     if (state->seqNum == UINT64_MAX) return false;
 
@@ -314,7 +314,7 @@ bool SSFTLSRecordEncrypt(SSFTLSRecordState_t *state, uint8_t contentType,
     totalLen  = SSF_TLS_RECORD_HEADER_SIZE + cipherLen;
 
     if (recordSize < totalLen) return false;
-    if (cipherLen > 0x4000u + 256u) return false; /* RFC 8446 §5.2 record limit */
+    if (cipherLen > 0x4000u + 256u) return false; /* RFC 8446 Sec. 5.2 record limit */
 
     /* Build record header (used as AAD). cipherLen now correctly reflects the tag size. */
     record[0] = SSF_TLS_CT_APPLICATION; /* Outer type is always application_data */
@@ -391,7 +391,7 @@ bool SSFTLSRecordDecrypt(SSFTLSRecordState_t *state,
     SSF_REQUIRE(ptLen != NULL);
     SSF_REQUIRE(contentType != NULL);
 
-    /* RFC 8446 §5.5: refuse to decrypt when seqNum is at the wrap boundary, mirroring the */
+    /* RFC 8446 Sec. 5.5: refuse to decrypt when seqNum is at the wrap boundary, mirroring the */
     /* encrypt-side guard. A peer that has wrapped must be rejected; our own seqNum must   */
     /* not be allowed to wrap and re-accept earlier replayed records.                       */
     if (state->seqNum == UINT64_MAX) return false;
@@ -408,7 +408,7 @@ bool SSFTLSRecordDecrypt(SSFTLSRecordState_t *state,
     fragLen = ((uint16_t)record[3] << 8) | (uint16_t)record[4];
     if ((size_t)(SSF_TLS_RECORD_HEADER_SIZE + fragLen) != recordLen) return false;
     if (fragLen < tagLen + 1u) return false;
-    /* RFC 8446 §5.2: receivers MUST reject records whose ciphertext exceeds 2^14 + 256. */
+    /* RFC 8446 Sec. 5.2: receivers MUST reject records whose ciphertext exceeds 2^14 + 256. */
     if (fragLen > 0x4000u + 256u) return false;
 
     innerLen = (size_t)fragLen - tagLen;

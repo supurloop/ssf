@@ -1299,7 +1299,7 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(strOut[0] == 0);
     }
 
-    /* SSFJsonPrintCString with control characters (non-printable → \u00XX) */
+    /* SSFJsonPrintCString with control characters (non-printable -> \u00XX) */
     {
         char js[64];
         bool comma = false;

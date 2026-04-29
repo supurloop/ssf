@@ -2,7 +2,7 @@
 /* Small System Framework                                                                        */
 /*                                                                                               */
 /* ssfaesctr.h                                                                                   */
-/* Provides AES-CTR (counter mode) confidentiality-only stream cipher per NIST SP 800-38A §6.5.  */
+/* Provides AES-CTR confidentiality-only stream cipher per NIST SP 800-38A Sec. 6.5.             */
 /*                                                                                               */
 /* https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38a.pdf                 */
 /*                                                                                               */

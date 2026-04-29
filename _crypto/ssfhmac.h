@@ -74,7 +74,7 @@ typedef struct SSFHMACContext
         SSFSHA2_32Context_t sha2_32;
         SSFSHA2_64Context_t sha2_64;
     } hashCtx;
-    uint32_t magic;                             /* validity marker -- 0 ⇒ uninitialised */
+    uint32_t magic;                             /* validity marker -- 0 => uninitialised */
 } SSFHMACContext_t;
 
 /* --------------------------------------------------------------------------------------------- */

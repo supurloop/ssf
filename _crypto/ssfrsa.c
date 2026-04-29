@@ -469,7 +469,7 @@ static bool _SSFRSAPrivateOpCRT(const SSFBN_t *c, uint16_t nLimbs, const SSFBN_t
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* If |p - q| > 2^(halfBits - 100) returns true, else false (FIPS 186-4 §B.3.3 step 5.4).        */
+/* If |p - q| > 2^(halfBits - 100) returns true, else false (FIPS 186-4 Sec. B.3.3 step 5.4).    */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFRSAFipsPrimeDistanceOK(const SSFBN_t *p, const SSFBN_t *q, uint16_t halfBits)
 {
@@ -489,19 +489,19 @@ bool SSFRSAFipsPrimeDistanceOK(const SSFBN_t *p, const SSFBN_t *q, uint16_t half
     {
         (void)SSFBNSub(&diff, q, p);
     }
-    /* bitLen(diff) > halfBits - 100 ⇔ diff >= 2^(halfBits - 100). */
+    /* bitLen(diff) > halfBits - 100 <=> diff >= 2^(halfBits - 100). */
     return SSFBNBitLen(&diff) > (uint32_t)(halfBits - 100u);
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* If d > 2^halfBits returns true, else false (FIPS 186-4 §B.3.1 Wiener-attack lower bound).     */
+/* If d > 2^halfBits returns true, else false (FIPS 186-4 Sec. B.3.1 Wiener-attack lower bound). */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFRSAFipsDLowerBoundOK(const SSFBN_t *d, uint16_t halfBits)
 {
     SSF_REQUIRE(d != NULL);
     SSF_REQUIRE(d->limbs != NULL);
     SSF_REQUIRE(halfBits > 0u);
-    /* bitLen(d) > halfBits ⇔ d >= 2^halfBits (strict-> per spec). */
+    /* bitLen(d) > halfBits <=> d >= 2^halfBits (strict-> per spec). */
     return SSFBNBitLen(d) > (uint32_t)halfBits;
 }
 
@@ -563,7 +563,7 @@ static bool _SSFRSAValidatePubFields(const SSFBN_t *n, const SSFBN_t *e)
     }
     if (nBits > SSF_BN_CONFIG_MAX_BITS) return false;
 
-    /* e: odd, ≥ 65537, < n (FIPS 186-4 §B.3.1 rejects small-exponent classes). */
+    /* e: odd, >= 65537, < n (FIPS 186-4 Sec. B.3.1 rejects small-exponent classes). */
     if (SSFBNIsEven(e)) return false;
     if (SSFBNBitLen(e) < 17u) return false;          /* 65537 has bitLen 17 */
     if (SSFBNCmp(e, n) >= 0) return false;
@@ -642,7 +642,7 @@ bool SSFRSAPrivKeyIsValid(const uint8_t *privKeyDer, size_t privKeyDerLen)
         if (SSFBNCmp(&check, &dq) != 0) return false;
     }
 
-    /* qInv * q ≡ 1 (mod p). */
+    /* qInv * q == 1 (mod p). */
     {
         SSFBN_DEFINE(prod, SSF_BN_MAX_LIMBS);
         SSFBNModMul(&prod, &qInv, &q, &p);
@@ -701,7 +701,7 @@ static bool _SSFRSAKeyGenPrimes(uint16_t bits, SSFBN_t *p, SSFBN_t *q, SSFBN_t *
 cleanup_prng:
     SSFPRNGDeInitContext(&prng);
 cleanup:
-    /* Wipe the entropy buffer and scratch BNs that briefly held p, q, or p·q. */
+    /* Wipe the entropy buffer and scratch BNs that briefly held p, q, or p*q. */
     _SSFRSASecureWipe(entropy, sizeof(entropy));
     SSFBNZeroize(&tmp);
     SSFBNZeroize(&prod);
@@ -728,7 +728,7 @@ static bool _SSFRSAKeyGenDerive(uint16_t nLimbs, const SSFBN_t *p, const SSFBN_t
     (void)SSFBNSubUint32(&pm1, p, 1u);
     (void)SSFBNSubUint32(&qm1, q, 1u);
 
-    /* Explicit FIPS check: e ⊥ (p-1) and e ⊥ (q-1) (caller retries with fresh primes). */
+    /* Explicit FIPS check: e _|_ (p-1) and e _|_ (q-1) (caller retries with fresh primes). */
     SSFBNSetUint32(&eFull, 65537u, nLimbs);
     if (!SSFRSAFipsECoprimeOK(&eFull, &pm1, &qm1)) goto cleanup;
 
@@ -839,19 +839,19 @@ bool SSFRSAKeyGen(uint16_t bits, uint8_t *privKeyDer, size_t privKeyDerSize, siz
     halfBits = bits / 2u;
     ok = false;
 
-    /* FIPS 186-4 §B.3.3 step 5: regenerate the full prime pair if any post-condition fails. */
+    /* FIPS 186-4 Sec. B.3.3 step 5: regenerate the full prime pair if any post-condition fails. */
     for (attempts = 0u; attempts < SSF_RSA_KEYGEN_FIPS_MAX_ATTEMPTS; attempts++)
     {
         /* Hard failure (no entropy, etc.) -- don't retry. */
         if (!_SSFRSAKeyGenPrimes(bits, &p, &q, &n, &nLimbs)) goto cleanup;
 
-        /* §B.3.3 step 5.4: |p - q| > 2^(halfBits - 100). */
+        /* Sec. B.3.3 step 5.4: |p - q| > 2^(halfBits - 100). */
         if (!SSFRSAFipsPrimeDistanceOK(&p, &q, halfBits)) continue;
 
-        /* Soft failure inside Derive (retriable: fresh primes give a fresh λ(n)). */
+        /* Soft failure inside Derive (retriable: fresh primes give a fresh lambda(n)). */
         if (!_SSFRSAKeyGenDerive(nLimbs, &p, &q, &d, &dp, &dq, &qInv)) continue;
 
-        /* §B.3.1: d > 2^halfBits, defending against Wiener. */
+        /* Sec. B.3.1: d > 2^halfBits, defending against Wiener. */
         if (!SSFRSAFipsDLowerBoundOK(&d, halfBits)) continue;
 
         ok = true;
@@ -936,7 +936,7 @@ bool SSFRSASignPKCS1(const uint8_t *privKeyDer, size_t privKeyDerLen, SSFRSAHash
     if (keyBytes < tLen + 11u) goto cleanup;
     psLen = keyBytes - tLen - 3u;
 
-    /* EM = 0x00 || 0x01 || PS(0xFF…) || 0x00 || T. */
+    /* EM = 0x00 || 0x01 || PS(0xFF...) || 0x00 || T. */
     em[0] = 0x00u;
     em[1] = 0x01u;
     memset(&em[2], 0xFF, psLen);

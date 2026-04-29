@@ -89,7 +89,7 @@ static void _ECDSAOSSLSetPriv(EC_KEY *eckey, const uint8_t *privKey, size_t priv
     BN_free(bnD);
 }
 
-/* Curve metadata bundle: byte sizes and OpenSSL NID. Avoids scattering the curve→{nid,sizes}     */
+/* Curve metadata bundle: byte sizes and OpenSSL NID. Avoids scattering the curve->{nid,sizes}    */
 /* mapping across each cross-check function.                                                       */
 typedef struct
 {
@@ -118,7 +118,7 @@ static void _ECDSAOSSLCurveInfo(SSFECCurve_t curve, _ECDSAOSSLCurveInfo_t *info)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Random fuzz: per curve × iters, exercise every cross-direction (SSF↔OpenSSL) on randomly       */
+/* Random fuzz: per curve x iters, exercise every cross-direction (SSF<->OpenSSL) on randomly    */
 /* generated keys and randomly generated hashes. Catches DER edge cases, leftmost-bits truncation */
 /* off-by-ones, and any state-corruption between operations that the fixed-message interop misses */
 /* by reusing one keypair.                                                                         */
@@ -147,7 +147,7 @@ static void _VerifyECDSARandomAgainstOpenSSL(SSFECCurve_t curve, uint16_t iters)
         {
             EC_KEY *eckey = _ECDSAOSSLKeyFromPub(curve, pubKey, pubKeyLen);
             _ECDSAOSSLSetPriv(eckey, privKey, info.privBytes);
-            /* OpenSSL's EC_KEY_check_key validates: priv ∈ [1, n-1], pub on curve, and          */
+            /* OpenSSL's EC_KEY_check_key validates: priv in [1, n-1], pub on curve, and         */
             /* priv * G == pub. A failure here means SSF's KeyGen produced an inconsistent pair.  */
             SSF_ASSERT(EC_KEY_check_key(eckey) == 1);
             EC_KEY_free(eckey);
@@ -156,7 +156,7 @@ static void _VerifyECDSARandomAgainstOpenSSL(SSFECCurve_t curve, uint16_t iters)
         /* === Random hash (simulates a digest of arbitrary content) === */
         SSF_ASSERT(RAND_bytes(hash, (int)info.hashBytes) == 1);
 
-        /* === SSF signs → OpenSSL verifies === */
+        /* === SSF signs -> OpenSSL verifies === */
         SSF_ASSERT(SSFECDSASign(curve, privKey, info.privBytes,
                                 hash, info.hashBytes,
                                 sig, sizeof(sig), &sigLen) == true);
@@ -170,7 +170,7 @@ static void _VerifyECDSARandomAgainstOpenSSL(SSFECCurve_t curve, uint16_t iters)
             EC_KEY_free(eckey);
         }
 
-        /* === OpenSSL signs (with the same SSF-generated key) → SSF verifies === */
+        /* === OpenSSL signs (with the same SSF-generated key) -> SSF verifies === */
         {
             EC_KEY *eckey = _ECDSAOSSLKeyFromPub(curve, pubKey, pubKeyLen);
             ECDSA_SIG *osslSig;
@@ -264,7 +264,7 @@ static void _VerifyECDHAgainstOpenSSL(SSFECCurve_t curve, uint16_t iters)
         SSF_ASSERT(SSFECDSAKeyGen(curve, privB, sizeof(privB),
                                   pubB, sizeof(pubB), &pubBLen) == true);
 
-        /* === SSF: compute A↔B via SSFECDH === */
+        /* === SSF: compute A<->B via SSFECDH === */
         SSF_ASSERT(SSFECDHComputeSecret(curve, privA, info.privBytes, pubB, pubBLen,
                                         ssfSecret, sizeof(ssfSecret),
                                         &ssfSecretLen) == true);
@@ -1080,28 +1080,28 @@ void SSFECDSAUnitTest(void)
         SSFBNSetOne(&R.z, c->limbs);
         (void)SSFBNAdd(&R.x, &c->n, &rWrap);  /* R.x = n + 1, < p since 1 < p - n */
 
-        /* Wraparound branch: accepts r=1 because (1 + n) * 1² == n + 1 == R.x (mod p). */
+        /* Wraparound branch: accepts r=1 because (1 + n) * 1^2 == n + 1 == R.x (mod p). */
         SSF_ASSERT(_SSFECDSAVerifyCheckRForTest(SSF_EC_CURVE_P256, &R, &rWrap) == true);
 
-        /* Negative: r=2 should NOT match. (2 + n) * 1² = n + 2 != n + 1, and 2 * 1² = 2 != n+1. */
+        /* Negative: r=2 should NOT match. (2+n)*1^2 = n+2 != n+1, and 2*1^2 = 2 != n+1.          */
         SSFBNSetUint32(&rNotMatch, 2u, c->limbs);
         SSF_ASSERT(_SSFECDSAVerifyCheckRForTest(SSF_EC_CURVE_P256, &R, &rNotMatch) == false);
     }
 
-    /* ---- (Gap 6) RFC 5903 §8.1 ECDH P-256 known-answer test ---- */
+    /* ---- (Gap 6) RFC 5903 Sec. 8.1 ECDH P-256 known-answer test ---- */
     /* Verifies SSFECDHComputeSecret produces the documented shared secret for a known privKey  */
-    /* + peerPubKey pair from RFC 5903 §8.1. The existing Alice/Bob roundtrip test only verifies */
+    /* + peerPubKey pair from RFC 5903 Sec. 8.1. The Alice/Bob roundtrip test only verifies     */
     /* self-consistency -- this catches arithmetic bugs that would silently produce mutually-    */
     /* matching but incorrect shared secrets.                                                    */
     {
-        /* RFC 5903 §8.1: i (initiator's privKey) */
+        /* RFC 5903 Sec. 8.1: i (initiator's privKey) */
         static const uint8_t privKey[] = {
             0xC8u, 0x8Fu, 0x01u, 0xF5u, 0x10u, 0xD9u, 0xACu, 0x3Fu,
             0x70u, 0xA2u, 0x92u, 0xDAu, 0xA2u, 0x31u, 0x6Du, 0xE5u,
             0x44u, 0xE9u, 0xAAu, 0xB8u, 0xAFu, 0xE8u, 0x40u, 0x49u,
             0xC6u, 0x2Au, 0x9Cu, 0x57u, 0x86u, 0x2Du, 0x14u, 0x33u
         };
-        /* RFC 5903 §8.1: gr (responder's pubKey) in SEC1 uncompressed form */
+        /* RFC 5903 Sec. 8.1: gr (responder's pubKey) in SEC1 uncompressed form */
         static const uint8_t peerPubKey[65] = {
             0x04u,
             /* grx */
@@ -1115,7 +1115,7 @@ void SSFECDSAUnitTest(void)
             0xACu, 0x23u, 0xF0u, 0x46u, 0xADu, 0xA3u, 0x0Fu, 0x83u,
             0x53u, 0xE7u, 0x4Fu, 0x33u, 0x03u, 0x98u, 0x72u, 0xABu
         };
-        /* RFC 5903 §8.1: zx (shared secret = x-coord of [i]gr = [r]gi) */
+        /* RFC 5903 Sec. 8.1: zx (shared secret = x-coord of [i]gr = [r]gi) */
         static const uint8_t expectedZ[] = {
             0xD6u, 0x84u, 0x0Fu, 0x6Bu, 0x42u, 0xF6u, 0xEDu, 0xAFu,
             0xD1u, 0x31u, 0x16u, 0xE0u, 0xE1u, 0x25u, 0x65u, 0x20u,
@@ -1135,12 +1135,12 @@ void SSFECDSAUnitTest(void)
 #endif /* SSF_EC_CONFIG_ENABLE_P256 */
 
 #if SSF_EC_CONFIG_ENABLE_P384 == 1
-    /* ---- RFC 6979 §A.2.6: P-384/SHA-384 sign and verify KAT for "sample" ---- */
+    /* ---- RFC 6979 Sec. A.2.6: P-384/SHA-384 sign and verify KAT for "sample" ---- */
     /* Pins the deterministic-nonce derivation, (r, s) computation, and DER wrapping for the    */
     /* P-384 curve. Until this test, P-384 was covered only by ECDH-KAT and Wycheproof verify;  */
     /* this is the first P-384 *sign* known-answer test in the suite.                            */
     {
-        /* RFC 6979 §A.2.6: x (privKey, 48 bytes) */
+        /* RFC 6979 Sec. A.2.6: x (privKey, 48 bytes) */
         static const uint8_t privKey[] = {
             0x6Bu, 0x9Du, 0x3Du, 0xADu, 0x2Eu, 0x1Bu, 0x8Cu, 0x1Cu,
             0x05u, 0xB1u, 0x98u, 0x75u, 0xB6u, 0x65u, 0x9Fu, 0x4Du,
@@ -1149,7 +1149,7 @@ void SSFECDSAUnitTest(void)
             0x96u, 0xD5u, 0x72u, 0x4Eu, 0x4Cu, 0x70u, 0xA8u, 0x25u,
             0xF8u, 0x72u, 0xC9u, 0xEAu, 0x60u, 0xD2u, 0xEDu, 0xF5u
         };
-        /* Expected pubKey U = x·G in SEC 1 uncompressed (1 + 2*48 = 97 bytes) */
+        /* Expected pubKey U = x*G in SEC 1 uncompressed (1 + 2*48 = 97 bytes) */
         static const uint8_t expPub[97] = {
             0x04u,
             /* Ux */
@@ -1229,11 +1229,11 @@ void SSFECDSAUnitTest(void)
         }
     }
 
-    /* ---- RFC 5903 §8.2 ECDH P-384 known-answer test (using the symmetric (r, gi) → z form) ---- */
+    /* ---- RFC 5903 Sec. 8.2 ECDH P-384 known-answer test (using the symmetric (r, gi) -> z form) ---- */
     /* ECDH is symmetric: [i]gr = [r]gi = z. We use (r, gi) here (responder's privKey + initiator's */
     /* pubKey) which gives the same expected zx.                                                     */
     {
-        /* RFC 5903 §8.2: r (responder's privKey, 48 bytes) */
+        /* RFC 5903 Sec. 8.2: r (responder's privKey, 48 bytes) */
         static const uint8_t privKey[] = {
             0x41u, 0xCBu, 0x07u, 0x79u, 0xB4u, 0xBDu, 0xB8u, 0x5Du,
             0x47u, 0x84u, 0x67u, 0x25u, 0xFBu, 0xECu, 0x3Cu, 0x94u,
@@ -1242,7 +1242,7 @@ void SSFECDSAUnitTest(void)
             0xE0u, 0x30u, 0x83u, 0x12u, 0x91u, 0x6Bu, 0x8Eu, 0xD2u,
             0x96u, 0x0Eu, 0x4Bu, 0xD5u, 0x5Au, 0x74u, 0x48u, 0xFCu
         };
-        /* RFC 5903 §8.2: gi (initiator's pubKey) in SEC1 uncompressed form */
+        /* RFC 5903 Sec. 8.2: gi (initiator's pubKey) in SEC1 uncompressed form */
         static const uint8_t peerPubKey[97] = {
             0x04u,
             /* gix */
@@ -1260,7 +1260,7 @@ void SSFECDSAUnitTest(void)
             0xEBu, 0x9Fu, 0xCFu, 0xF3u, 0xC2u, 0xC9u, 0x47u, 0xDAu,
             0xE6u, 0x9Bu, 0x4Cu, 0x63u, 0x45u, 0x73u, 0xA8u, 0x1Cu
         };
-        /* RFC 5903 §8.2: zx (shared secret) */
+        /* RFC 5903 Sec. 8.2: zx (shared secret) */
         static const uint8_t expectedZ[] = {
             0x11u, 0x18u, 0x73u, 0x31u, 0xC2u, 0x79u, 0x96u, 0x2Du,
             0x93u, 0xD6u, 0x04u, 0x24u, 0x3Fu, 0xD5u, 0x92u, 0xCBu,
@@ -1309,8 +1309,8 @@ void SSFECDSAUnitTest(void)
         SSFBNCopy(&b, &a);
         b.len = c->limbs;
 
-        /* Computing (p-1) * (p-1) mod p = (p² - 2p + 1) mod p = 1 mod p */
-        /* But the intermediate product p² - 2p + 1 is much larger than p and will        */
+        /* Computing (p-1) * (p-1) mod p = (p^2 - 2p + 1) mod p = 1 mod p */
+        /* But the intermediate product p^2 - 2p + 1 is much larger than p and will       */
         /* trigger the reduction bug pattern with multiple correction iterations.          */
         /* The expected result should be 1.                                                */
         SSFBNCopy(&expected, &one);
@@ -1336,7 +1336,7 @@ void SSFECDSAUnitTest(void)
         SSFBNSub(&pMinus2, &c->p, &two);
         pMinus2.len = c->limbs;
 
-        /* Expected: (p-2) * 2 = 2p - 4 ≡ -4 ≡ p-4 (mod p) */
+        /* Expected: (p-2) * 2 = 2p - 4 == -4 == p-4 (mod p) */
         SSFBNSetUint32(&pMinus4, 4u, c->limbs);
         SSFBNSub(&pMinus4, &c->p, &pMinus4);
         pMinus4.len = c->limbs;
@@ -1369,7 +1369,7 @@ void SSFECDSAUnitTest(void)
         };
         size_t mi;
 
-        /* === SSF signs → OpenSSL verifies (P-256/SHA-256) === */
+        /* === SSF signs -> OpenSSL verifies (P-256/SHA-256) === */
         SSF_ASSERT(SSFECDSAKeyGen(SSF_EC_CURVE_P256,
                    privKey, sizeof(privKey),
                    pubKey,  sizeof(pubKey), &pubKeyLen) == true);
@@ -1397,7 +1397,7 @@ void SSFECDSAUnitTest(void)
             EC_KEY_free(eckey);
         }
 
-        /* === OpenSSL signs → SSF verifies (P-256/SHA-256) === */
+        /* === OpenSSL signs -> SSF verifies (P-256/SHA-256) === */
         for (mi = 0; mi < sizeof(messages) / sizeof(messages[0]); mi++)
         {
             EC_KEY *eckey;
@@ -1440,7 +1440,7 @@ void SSFECDSAUnitTest(void)
         };
         size_t mi;
 
-        /* === SSF signs → OpenSSL verifies (P-384/SHA-384) === */
+        /* === SSF signs -> OpenSSL verifies (P-384/SHA-384) === */
         SSF_ASSERT(SSFECDSAKeyGen(SSF_EC_CURVE_P384,
                    privKey, sizeof(privKey),
                    pubKey,  sizeof(pubKey), &pubKeyLen) == true);
@@ -1465,7 +1465,7 @@ void SSFECDSAUnitTest(void)
             EC_KEY_free(eckey);
         }
 
-        /* === OpenSSL signs → SSF verifies (P-384/SHA-384) === */
+        /* === OpenSSL signs -> SSF verifies (P-384/SHA-384) === */
         for (mi = 0; mi < sizeof(messages) / sizeof(messages[0]); mi++)
         {
             EC_KEY *eckey;
@@ -1632,7 +1632,7 @@ void SSFECDSAUnitTest(void)
 
 #if SSF_EC_CONFIG_ENABLE_P256 == 1
     /* === Wycheproof ECDH P-256 vectors ===                                                */
-    /* Each test case: privKey + peer pubKey → expected shared secret. SSF accepts only      */
+    /* Each test case: privKey + peer pubKey -> expected shared secret. SSF accepts only     */
     /* uncompressed SEC1 pubkeys; SPKI-wrapped ones were stripped at codegen and tests where */
     /* SPKI was malformed are marked with the original bytes (SSF must reject them).         */
     /* "acceptable" Wycheproof results don't increment mismatches either way.                */

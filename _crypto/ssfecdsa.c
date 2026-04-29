@@ -120,7 +120,7 @@ static size_t _SSFECDSAGetHashSize(SSFECCurve_t curve)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: bits2int per RFC 6979 §2.3.2 (hash bytes to integer, no shift for matched pairs).   */
+/* Internal: bits2int per RFC 6979 Sec. 2.3.2 (hash bytes to integer, no shift for matched pairs).*/
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFECDSABits2Int(SSFBN_t *out, const uint8_t *hash, size_t hashLen,
                               const SSFECCurveParams_t *c)
@@ -131,7 +131,7 @@ static void _SSFECDSABits2Int(SSFBN_t *out, const uint8_t *hash, size_t hashLen,
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: bits2octets per RFC 6979 §2.3.4 (hash to integer mod n, then BE bytes coordBytes).  */
+/* Internal: bits2octets per RFC 6979 2.3.4 (hash to integer mod n, then BE bytes coordBytes).   */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFECDSABits2Octets(uint8_t *out, size_t outLen, const uint8_t *hash, size_t hashLen,
                                  const SSFECCurveParams_t *c)
@@ -621,7 +621,7 @@ bool SSFECDSAPubKeyIsValid(SSFECCurve_t curve, const uint8_t *pubKey, size_t pub
 
 #if SSF_ECDSA_CONFIG_ENABLE_SIGN == 1
 /* --------------------------------------------------------------------------------------------- */
-/* Signs a message hash using ECDSA with deterministic nonce (RFC 6979 / FIPS 186-4 §6.4).       */
+/* Signs a message hash using ECDSA with deterministic nonce (RFC 6979 / FIPS 186-4 Sec. 6.4).   */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFECDSASign(SSFECCurve_t curve, const uint8_t *privKey, size_t privKeyLen,
                   const uint8_t *hash, size_t hashLen, uint8_t *sig, size_t sigSize, size_t *sigLen)
@@ -755,7 +755,7 @@ static bool _SSFECDSAVerifyGetR(const SSFECCurveParams_t *c, SSFECCurve_t curve,
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Verify stage 3: r ≡ affine(R).x (mod n) checked in Jacobian (no inversion of Z).              */
+/* Verify stage 3: r == affine(R).x (mod n) checked in Jacobian (no inversion of Z).             */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFECDSAVerifyCheckR(const SSFECCurveParams_t *c, SSFECCurve_t curve,
                                   const SSFECPoint_t *R, const SSFBN_t *r)
@@ -767,7 +767,7 @@ static bool _SSFECDSAVerifyCheckR(const SSFECCurveParams_t *c, SSFECCurve_t curv
 
     (void)curve;
 
-    /* z2 = R.z² mod p */
+    /* z2 = R.z^2 mod p */
     SSFBNModMulNIST(&z2, &R->z, &R->z, &c->p);
 
     /* Case A: t = r * z2 mod p; accept if t == R.x */

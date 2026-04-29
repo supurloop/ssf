@@ -71,7 +71,7 @@ static void _OSSLSHA1(const uint8_t *in, size_t inLen, uint8_t out[SSF_SHA1_HASH
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Random fuzz across length × split combinations. Each cell:                                    */
+/* Random fuzz across length x split combinations. Each cell:                                    */
 /*   - draws a fresh random message                                                              */
 /*   - hashes it via SSFSHA1 one-shot AND via SSFSHA1Begin/Update/End with a mid-message split   */
 /*   - compares both to OpenSSL's EVP_sha1                                                       */

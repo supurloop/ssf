@@ -159,7 +159,7 @@ void SSFPoly1305UnitTest(void)
     SSFPoly1305Mac(msg, sizeof(msg), key, sizeof(key), tag, sizeof(tag));
     SSF_ASSERT(memcmp(tag, expected_tag, sizeof(expected_tag)) == 0);
 
-    /* Empty message with r=1, s=0 → tag = (h=0) + s = 0. Asserts the empty-message path
+    /* Empty message with r=1, s=0 -> tag = (h=0) + s = 0. Asserts the empty-message path
      * actually emits the algebraically-required all-zero tag, instead of just "doesn't crash". */
     {
         static const uint8_t zeroKey[32] = {
@@ -175,7 +175,7 @@ void SSFPoly1305UnitTest(void)
         SSF_ASSERT(memcmp(emptyTag, expectedZeroTag, sizeof(expectedZeroTag)) == 0);
     }
 
-    /* RFC 8439 §A.3 Test Vector #1: all-zero key + 64-byte all-zero msg → all-zero tag.
+    /* RFC 8439 Sec. A.3 Test Vector #1: all-zero key + 64-byte all-zero msg -> all-zero tag.
      * Catches any path that would fail to emit zero when both r and s are zero (defensive
      * floor for the corner case where the multiply produces no contribution). */
     {
@@ -188,9 +188,9 @@ void SSFPoly1305UnitTest(void)
         SSF_ASSERT(memcmp(tv1Tag, expectedTag, sizeof(expectedTag)) == 0);
     }
 
-    /* RFC 8439 §A.3 Test Vector #5: r=2 (clamped from `02 00…`), s=0, msg = `ff × 16`.
+    /* RFC 8439 Sec. A.3 Test Vector #5: r=2 (clamped from `02 00...`), s=0, msg = `ff x 16`.
      * Specifically chosen to exercise the modular reduction near 2^130: the single block
-     * `ff × 16 || 01` interpreted as a 130-bit number is 2^128 + (2^128 - 1); multiplying
+     * `ff x 16 || 01` interpreted as a 130-bit number is 2^128 + (2^128 - 1); multiplying
      * by 2 wraps past 2^130, exercising the `c * 5` carry-propagation path. Expected
      * tag = 0x03 in low byte, rest zero. Cross-build coverage for the carry-edge case
      * that the OpenSSL fuzz catches on host. */
@@ -215,9 +215,9 @@ void SSFPoly1305UnitTest(void)
         SSF_ASSERT(memcmp(tv5Tag, expectedTag, sizeof(expectedTag)) == 0);
     }
 
-    /* r=0 algebraic edge: with r clamped from `00 × 16` to 0, every multiply yields 0, so
+    /* r=0 algebraic edge: with r clamped from `00 x 16` to 0, every multiply yields 0, so
      * the accumulator stays 0 regardless of message content and the final tag is exactly s.
-     * Reuses the RFC 8439 §A.3 TV2 key (s = `36 e5 f6 b5 …`) but pairs it with the §2.5.2
+     * Reuses the RFC 8439 Sec. A.3 TV2 key (s = `36 e5 f6 b5 ...`) but pairs it with the Sec. 2.5.2
      * 34-byte message rather than TV2's 375-byte IETF text -- the result is algebraically
      * determined by r=0 and is independent of message content. Catches a class of bugs
      * where the multiply path leaks state into the output even when r is zero. */
@@ -238,7 +238,7 @@ void SSFPoly1305UnitTest(void)
         SSF_ASSERT(memcmp(r0Tag, expectedTag, sizeof(expectedTag)) == 0);
     }
 
-    /* RFC 8439 §A.3 Test Vector #3: r ≠ 0, s = 0, with a 375-byte multi-block IETF text.
+    /* RFC 8439 Sec. A.3 Test Vector #3: r != 0, s = 0, with a 375-byte multi-block IETF text.
      * Complement to the r=0 case above -- exercises the pure-r-mixing path across many MulR
      * iterations. Ensures multi-block reductions converge to the canonical h with no s-add. */
     {
@@ -307,8 +307,8 @@ void SSFPoly1305UnitTest(void)
         SSF_ASSERT(memcmp(tv3Tag, expectedTag, sizeof(expectedTag)) == 0);
     }
 
-    /* RFC 8439 §A.3 Test Vector #6: r=2, s=ff×16, msg=`02 00…00`. Stresses the s-addition
-     * carry propagation in the tag-write loop -- adding s=ff×16 to a non-zero h forces the
+    /* RFC 8439 Sec. A.3 Test Vector #6: r=2, s=ffx16, msg=`02 00...00`. Stresses the s-addition
+     * carry propagation in the tag-write loop -- adding s=ffx16 to a non-zero h forces the
      * carry to walk through all four 32-bit assembly words. */
     {
         static const uint8_t tv6Key[] = {
@@ -331,9 +331,9 @@ void SSFPoly1305UnitTest(void)
         SSF_ASSERT(memcmp(tv6Tag, expectedTag, sizeof(expectedTag)) == 0);
     }
 
-    /* RFC 8439 §A.3 Test Vector #7: r=1, s=0, 48-byte msg crafted to push h to/past p across
+    /* RFC 8439 Sec. A.3 Test Vector #7: r=1, s=0, 48-byte msg crafted to push h to/past p across
      * three blocks. Specifically tests the constant-time `h - p` selection in End -- the
-     * mask = (g4 >> 31) - 1u branch where the high-bit underflow distinguishes h<p from h≥p. */
+     * mask = (g4 >> 31) - 1u branch where the high-bit underflow distinguishes h<p from h>=p. */
     {
         static const uint8_t tv7Key[] = {
             0x01u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u,
@@ -359,7 +359,7 @@ void SSFPoly1305UnitTest(void)
         SSF_ASSERT(memcmp(tv7Tag, expectedTag, sizeof(expectedTag)) == 0);
     }
 
-    /* RFC 8439 §A.3 Test Vector #9: r=2, s=0, msg=`fd ff…ff`. Reduction edge complementary to
+    /* RFC 8439 Sec. A.3 Test Vector #9: r=2, s=0, msg=`fd ff...ff`. Reduction edge complementary to
      * TV5 -- different upper-boundary pattern through MulR's `c * 5` carry-back-into-h0 path. */
     {
         static const uint8_t tv9Key[] = {
@@ -511,7 +511,7 @@ void SSFPoly1305UnitTest(void)
         }
     }
 
-    /* SSFPoly1305Verify: positive correctness -- RFC 7539 §2.5.2 vector accepts. */
+    /* SSFPoly1305Verify: positive correctness -- RFC 7539 Sec. 2.5.2 vector accepts. */
     {
         SSF_ASSERT(SSFPoly1305Verify(msg, sizeof(msg), key, sizeof(key), expected_tag) == true);
     }
@@ -581,7 +581,7 @@ void SSFPoly1305UnitTest(void)
     }
 
     /* Defensive: the context-magic check rejects any call sequence that violates
-     * Begin → (Update*) → End. Begin requires `magic == 0` on entry (stricter than
+     * Begin -> (Update*) -> End. Begin requires `magic == 0` on entry (stricter than
      * HMAC's `!= MAGIC` convention), so a non-zero context -- whether previously
      * initialised or stack residue -- is rejected. */
     {
@@ -591,7 +591,7 @@ void SSFPoly1305UnitTest(void)
         /* Begin must refuse a context that is already initialised. */
         SSFPoly1305Begin(&ctx, key, sizeof(key));
         SSF_ASSERT_TEST(SSFPoly1305Begin(&ctx, key, sizeof(key)));
-        SSFPoly1305End(&ctx, scratchTag, sizeof(scratchTag));   /* End wipes ctx → magic == 0. */
+        SSFPoly1305End(&ctx, scratchTag, sizeof(scratchTag));   /* End wipes ctx -> magic == 0. */
 
         /* Begin must refuse a context filled with non-zero garbage. Stricter than HMAC, where
          * any pattern != MAGIC is accepted; forces callers to use `... ctx = {0};` rather than
@@ -604,7 +604,7 @@ void SSFPoly1305UnitTest(void)
         SSF_ASSERT_TEST(SSFPoly1305Update(&ctx, msg, sizeof(msg)));
         SSF_ASSERT_TEST(SSFPoly1305End(&ctx, scratchTag, sizeof(scratchTag)));
 
-        /* End wipes ctx → Update / End on the wiped context must also assert. Catches the
+        /* End wipes ctx -> Update / End on the wiped context must also assert. Catches the
          * common "Begin once, MAC twice" bug: silently emitting `tag = s = 0` for the second
          * message (since r and s are zero post-wipe) would otherwise be a hard-to-spot
          * MAC-collapse rather than a loud failure. */

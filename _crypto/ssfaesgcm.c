@@ -57,7 +57,7 @@ typedef char _ssf_aesgcm_sa_u64_is_64_bit[(sizeof(uint64_t) == 8) ? 1 : -1];
     (x)[12] ^= (y)[12]; (x)[13] ^= (y)[13]; (x)[14] ^= (y)[14]; (x)[15] ^= (y)[15]
 
 /* --------------------------------------------------------------------------------------------- */
-/* Increments the low 32 bits of the 16-byte counter block (GCM inc32, NIST SP 800-38D §6.2).    */
+/* Increments the low 32 bits of the 16-byte counter block (GCM inc32, NIST SP 800-38D Sec. 6.2).*/
 /* --------------------------------------------------------------------------------------------- */
 static inline void _SSFAESGCMBlockInc32(uint8_t *in)
 {

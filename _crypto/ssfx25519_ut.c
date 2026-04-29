@@ -122,7 +122,7 @@ static void _VerifyX25519AgainstOpenSSL(uint16_t iters)
         SSF_ASSERT(memcmp(pubSSF_A, pubOSSL_A, 32) == 0);
         SSF_ASSERT(memcmp(pubSSF_B, pubOSSL_B, 32) == 0);
 
-        /* === SSF derives → OpenSSL derives → must match (privA, pubB direction) === */
+        /* === SSF derives -> OpenSSL derives -> must match (privA, pubB direction) === */
         SSF_ASSERT(SSFX25519ComputeSecret(privA, pubSSF_B, secretSSF) == true);
         {
             EVP_PKEY *opriv = _X25519OSSLPrivFromBytes(privA);
@@ -222,7 +222,7 @@ static size_t _SSFX25519UTCountSentinel(uint8_t pattern)
 
 /* --------------------------------------------------------------------------------------------- */
 /* SSF-internal deterministic fuzz. Runs without OpenSSL. Uses ECDH's commutative property as    */
-/* the oracle: privA·pubB must byte-equal privB·pubA. State is advanced via a SHA-512 chain      */
+/* the oracle: privA*pubB must byte-equal privB*pubA. State is advanced via a SHA-512 chain      */
 /* from a fixed master seed so failures reproduce across runs.                                    */
 /* --------------------------------------------------------------------------------------------- */
 static void _X25519SelfFuzz(uint16_t iters)
@@ -255,7 +255,7 @@ static void _X25519SelfFuzz(uint16_t iters)
         SSFX25519PubKeyFromPrivKey(privA, pubA);
         SSFX25519PubKeyFromPrivKey(privB, pubB);
 
-        /* Commutative property: privA · pubB == privB · pubA. */
+        /* Commutative property: privA * pubB == privB * pubA. */
         SSF_ASSERT(SSFX25519ComputeSecret(privA, pubB, secretA) == true);
         SSF_ASSERT(SSFX25519ComputeSecret(privB, pubA, secretB) == true);
         SSF_ASSERT(memcmp(secretA, secretB, 32) == 0);
@@ -339,7 +339,7 @@ void SSFX25519UnitTest(void)
         SSF_ASSERT(memcmp(out, expected1, 32) == 0);
     }
 
-    /* ---- RFC 7748 §5.2 Iterated test: 1000 iterations ---- */
+    /* ---- RFC 7748 Sec. 5.2 Iterated test: 1000 iterations ---- */
     /* Per RFC: k = u = 9 initially; each iter computes new_k = X25519(k, u) then sets u = old k.*/
     /* Expected final k after 1000 iters: 684CF59BA83309552800EF566F2F4D3C1C3887C49360E3875F2EB94D99532C51 */
     {
@@ -393,7 +393,7 @@ void SSFX25519UnitTest(void)
 
     /* ---- X10b: low-order peer-key rejection coverage. */
     /* The 7 known small-order encodings on Curve25519 / its twist (per libsodium's              */
-    /* has_small_order_blocklist). RFC 7748 §6.1's all-zero-output check rejects any peer key   */
+    /* has_small_order_blocklist). RFC 7748 Sec. 6.1's all-zero-output check rejects any peer key*/
     /* that produces a zero shared secret; the design assumption is that all small-order points  */
     /* satisfy that. This test verifies the assumption empirically -- if any entry comes back as */
     /* a non-rejected (true) result, that's evidence the all-zero check is insufficient and we   */
@@ -473,7 +473,7 @@ void SSFX25519UnitTest(void)
         /*                                                                                  */
         /* The threshold is platform-tuned. On GCC/clang the call-frame overhead between    */
         /* the polluter and the scrub is ~50 bytes, so residue stays well under 64. MSVC    */
-        /* /RTC1 + /GS produce ~80–400 byte frame overheads (RTC1 fill on padding, /GS      */
+        /* /RTC1 + /GS produce ~80-400 byte frame overheads (RTC1 fill on padding, /GS      */
         /* canaries, larger spill slots) that are NOT secret-bearing -- they're saved-reg   */
         /* values, return addresses, and uninit fill -- but they happen to fall inside the  */
         /* polluter's address range and get counted. 512 is comfortably below the ~4 KiB    */
@@ -486,7 +486,7 @@ void SSFX25519UnitTest(void)
     }
 
     /* SSF-internal deterministic ECDH fuzz. Independent of OpenSSL -- exercises the             */
-    /* commutative property privA·pubB == privB·pubA across 256 deterministic random keypairs.   */
+    /* commutative property privA*pubB == privB*pubA across 256 deterministic random keypairs.   */
     _X25519SelfFuzz(256u);
 
     /* === Wycheproof X25519 vectors (Google adversarial test suite) === */

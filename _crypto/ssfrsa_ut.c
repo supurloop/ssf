@@ -439,6 +439,14 @@ static void _SSFRSAVerifyAgainstOpenSSL(const uint8_t *foreignPriv, size_t forei
 
 void SSFRSAUnitTest(void)
 {
+#if SSF_RSA_ANY_ENABLED == 0
+    /* No RSA size is enabled — the rest of the body references SSFRSAKeyGen / SSFRSASignPKCS1 / */
+    /* etc., none of which are compiled. Print a clear "skipped" line and return so main.c's     */
+    /* test runner stays linkable for pure-ECC builds.                                            */
+    printf("(skipped: no SSF_RSA_CONFIG_ENABLE_2048 / 3072 / 4096 enabled)\n");
+    return;
+#else
+
     /* ---- ssfbn enhancement: GCD ---- */
     {
         SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
@@ -1171,5 +1179,6 @@ void SSFRSAUnitTest(void)
                                         dbcSigBuf, 256u));
 #endif /* SSF_RSA_CONFIG_ENABLE_PSS */
     }
+#endif /* SSF_RSA_ANY_ENABLED */
 }
 #endif /* SSF_CONFIG_RSA_UNIT_TEST */

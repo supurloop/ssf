@@ -39,6 +39,8 @@
 #include "ssfprng.h"
 #include "ssfcrypt.h"
 
+#if SSF_RSA_ANY_ENABLED == 1
+
 /* --------------------------------------------------------------------------------------------- */
 /* Prime-candidate screening (small-prime trial division, Miller-Rabin, and the random-prime     */
 /* generator) now lives in ssfbn. See SSFBNModUint32, SSFBNIsProbablePrime, SSFBNGenPrime.       */
@@ -1280,4 +1282,6 @@ bool SSFRSAVerifyPSS(const uint8_t *pubKeyDer, size_t pubKeyDerLen, SSFRSAHash_t
     return (diff == 0u);
 }
 #endif /* SSF_RSA_CONFIG_ENABLE_PSS */
+
+#endif /* SSF_RSA_ANY_ENABLED == 1 */
 

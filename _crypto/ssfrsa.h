@@ -88,13 +88,21 @@ extern "C" {
 #include "ssfbn.h"
 
 /* --------------------------------------------------------------------------------------------- */
-/* Compile-time validation                                                                       */
+/* Module enable / compile-time validation                                                       */
+/*                                                                                                */
+/* SSF_RSA_ANY_ENABLED is the master gate: the module compiles to nothing when no key size is    */
+/* enabled (a pure-ECC build can leave ssfrsa.c in the project without dragging RSA in). The API */
+/* declarations, sizing constants, and ssfrsa.c implementation are all conditional on it.        */
 /* --------------------------------------------------------------------------------------------- */
-#if (SSF_RSA_CONFIG_ENABLE_2048 == 0) && \
-    (SSF_RSA_CONFIG_ENABLE_3072 == 0) && \
-    (SSF_RSA_CONFIG_ENABLE_4096 == 0)
-#error At least one of SSF_RSA_CONFIG_ENABLE_2048 / 3072 / 4096 must be enabled.
+#if (SSF_RSA_CONFIG_ENABLE_2048 == 1) || \
+    (SSF_RSA_CONFIG_ENABLE_3072 == 1) || \
+    (SSF_RSA_CONFIG_ENABLE_4096 == 1)
+#define SSF_RSA_ANY_ENABLED (1u)
+#else
+#define SSF_RSA_ANY_ENABLED (0u)
 #endif
+
+#if SSF_RSA_ANY_ENABLED == 1
 
 /* The BN module's working width must hold a 2N-limb product for any enabled RSA size. */
 #if SSF_RSA_CONFIG_ENABLE_4096 == 1
@@ -192,8 +200,14 @@ bool SSFRSAVerifyPSS(const uint8_t *pubKeyDer, size_t pubKeyDerLen, SSFRSAHash_t
                      const uint8_t *sig, size_t sigLen);
 #endif /* SSF_RSA_CONFIG_ENABLE_PSS */
 
+#endif /* SSF_RSA_ANY_ENABLED == 1 — end of API gated on at-least-one-size-enabled */
+
 /* --------------------------------------------------------------------------------------------- */
 /* Unit test                                                                                     */
+/*                                                                                               */
+/* The declaration is NOT gated on SSF_RSA_ANY_ENABLED — main.c references SSFRSAUnitTest under  */
+/* SSF_CONFIG_RSA_UNIT_TEST and would fail to link if the symbol disappeared. ssfrsa_ut.c gates  */
+/* the body internally and prints a "skipped" message when no sizes are enabled.                  */
 /* --------------------------------------------------------------------------------------------- */
 #if SSF_CONFIG_RSA_UNIT_TEST == 1
 void SSFRSAUnitTest(void);

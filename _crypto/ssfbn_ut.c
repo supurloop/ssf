@@ -2906,11 +2906,21 @@ void SSFBNUnitTest(void)
     /* Raw Mul/Square require 2*nLimbs <= SSF_BN_MAX_LIMBS, so n=128 is skipped for those.      */
     /* ====================================================================================== */
     {
+        /* Drop bench entries whose 2*nLimbs would exceed SSF_BN_MAX_LIMBS at the configured BN  */
+        /* cap. With auto-derivation in ssfbn.h the cap tracks the largest enabled algorithm;   */
+        /* an ECC-only build (cap = 768 → MAX_LIMBS = 24) cannot run the RSA-1024+ rows because */
+        /* the schoolbook product would overflow the SSF_REQUIRE in SSFBNSetZero / SSFBNMul.    */
         struct { uint16_t nLimbs; uint32_t mIters; uint32_t mulIters; const char *label; } bench[] = {
             {   8u, 4000000u, 20000000u, "P-256 (n= 8, RSA-256-eq) " },
+#if (2u * 32u) <= SSF_BN_MAX_LIMBS
             {  32u,  400000u,  5000000u, "RSA-1024     (n=32)      " },
+#endif
+#if (2u * 64u) <= SSF_BN_MAX_LIMBS
             {  64u,  100000u,  1500000u, "RSA-2048     (n=64)      " },
+#endif
+#if (2u * 128u) <= SSF_BN_MAX_LIMBS
             { 128u,   30000u,        0u, "RSA-4096     (n=128)     " },
+#endif
         };
         uint16_t bi;
 

@@ -143,12 +143,15 @@ need — each compiles its entry points out of the build, reclaiming flash.
 | `SSF_RSA_CONFIG_ENABLE_PSS` | `1` | Enable `SSFRSASignPSS` / `SSFRSAVerifyPSS`. |
 | `SSF_RSA_CONFIG_MILLER_RABIN_ROUNDS` | `5` | Number of Miller-Rabin witnesses per prime candidate in keygen. Five rounds gives a false-positive probability ≤ 2⁻¹⁰⁰ for random inputs (FIPS 186-4 §C.3 minimum is 4 for RSA-2048, 5 for RSA-3072/4096). Higher values slow keygen proportionally with marginal security gain. |
 
-At least one of `SSF_RSA_CONFIG_ENABLE_2048 / 3072 / 4096` must be `1` — the header
-issues `#error` otherwise. The same header gates that the BN cap covers `2 × largest
-enabled size`; that's the binding constraint for keygen and CRT recombine, which run a
-full-width `n × n` product through [`SSFBNMul`](ssfbn.md#mul). Disabling unused sizes
-shrinks the public-key validator's accept set and lets the test harness drop unused
-size-specific test blocks.
+Disabling unused sizes shrinks the public-key validator's accept set and lets the test
+harness drop unused size-specific test blocks. The header validates that the BN cap
+covers `2 × largest enabled size` — that's the binding constraint for keygen and CRT
+recombine, which run a full-width `n × n` product through [`SSFBNMul`](ssfbn.md#mul).
+
+Setting **all three** size flags to `0` is allowed: the entire RSA module compiles to
+nothing (ssfrsa.c body is gated on the derived `SSF_RSA_ANY_ENABLED` macro), the public
+API headers expose no declarations, and `SSFRSAUnitTest` becomes a one-line "skipped"
+stub so a pure-ECC build can keep `ssfrsa.c` in the project without dragging RSA in.
 
 <a id="api-summary"></a>
 

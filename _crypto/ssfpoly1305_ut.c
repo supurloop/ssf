@@ -434,6 +434,83 @@ void SSFPoly1305UnitTest(void)
         }
     }
 
+    /* Tag-buffer write boundary: an oversized tag buffer must leave bytes 16..N-1 untouched.
+     * Pins down the .md guarantee "Oversized buffers are not padded — byte 16 onward is left
+     * untouched" — currently asserted nowhere else. */
+    {
+        uint8_t oversizedTag[32];
+        size_t i;
+
+        memset(oversizedTag, 0xCCu, sizeof(oversizedTag));
+        SSFPoly1305Mac(msg, sizeof(msg), key, sizeof(key), oversizedTag, sizeof(oversizedTag));
+        SSF_ASSERT(memcmp(oversizedTag, expected_tag, 16u) == 0);
+        for (i = 16u; i < sizeof(oversizedTag); i++) SSF_ASSERT(oversizedTag[i] == 0xCCu);
+    }
+
+    /* Length walk 0..32: for every msg length, one-shot Mac and byte-by-byte streaming must
+     * produce the same tag. Walks bufLen through every 0..15 value across two block boundaries
+     * and pins down one-shot/streaming agreement at each length. */
+    {
+        static const uint8_t walkKey[32] = {
+            0xABu, 0xCDu, 0xEFu, 0x01u, 0x23u, 0x45u, 0x67u, 0x89u,
+            0xFEu, 0xDCu, 0xBAu, 0x98u, 0x76u, 0x54u, 0x32u, 0x10u,
+            0x11u, 0x22u, 0x33u, 0x44u, 0x55u, 0x66u, 0x77u, 0x88u,
+            0x99u, 0xAAu, 0xBBu, 0xCCu, 0xDDu, 0xEEu, 0xFFu, 0x00u
+        };
+        uint8_t walkMsg[33];
+        uint8_t macTag[16];
+        uint8_t streamTag[16];
+        SSFPoly1305Context_t walkCtx = {0};
+        size_t len;
+        size_t i;
+
+        for (i = 0; i < sizeof(walkMsg); i++) walkMsg[i] = (uint8_t)((i * 7u + 0x5Au) & 0xFFu);
+
+        for (len = 0; len <= 32u; len++)
+        {
+            SSFPoly1305Mac(len ? walkMsg : NULL, len, walkKey, sizeof(walkKey),
+                           macTag, sizeof(macTag));
+
+            SSFPoly1305Begin(&walkCtx, walkKey, sizeof(walkKey));
+            for (i = 0; i < len; i++) SSFPoly1305Update(&walkCtx, &walkMsg[i], 1u);
+            SSFPoly1305End(&walkCtx, streamTag, sizeof(streamTag));
+
+            SSF_ASSERT(memcmp(macTag, streamTag, 16u) == 0);
+        }
+    }
+
+    /* Exhaustive 2-chunk split equivalence: for a fixed 64-byte message, every possible split
+     * point 0..64 of two Update calls must produce the same tag as one-shot Mac. Catches off-
+     * by-one bugs in the partial-block drain at every possible (bufLen, remaining) state pair. */
+    {
+        static const uint8_t splitKey[32] = {
+            0x10u, 0x21u, 0x32u, 0x43u, 0x54u, 0x65u, 0x76u, 0x87u,
+            0x98u, 0xA9u, 0xBAu, 0xCBu, 0xDCu, 0xEDu, 0xFEu, 0x0Fu,
+            0xF0u, 0xE1u, 0xD2u, 0xC3u, 0xB4u, 0xA5u, 0x96u, 0x87u,
+            0x78u, 0x69u, 0x5Au, 0x4Bu, 0x3Cu, 0x2Du, 0x1Eu, 0x0Fu
+        };
+        uint8_t splitMsg[64];
+        uint8_t splitMacTag[16];
+        uint8_t splitStreamTag[16];
+        SSFPoly1305Context_t splitCtx = {0};
+        size_t splitPoint;
+        size_t i;
+
+        for (i = 0; i < sizeof(splitMsg); i++) splitMsg[i] = (uint8_t)((i * 13u + 0xA3u) & 0xFFu);
+
+        SSFPoly1305Mac(splitMsg, sizeof(splitMsg), splitKey, sizeof(splitKey),
+                       splitMacTag, sizeof(splitMacTag));
+
+        for (splitPoint = 0; splitPoint <= sizeof(splitMsg); splitPoint++)
+        {
+            SSFPoly1305Begin(&splitCtx, splitKey, sizeof(splitKey));
+            SSFPoly1305Update(&splitCtx, splitMsg, splitPoint);
+            SSFPoly1305Update(&splitCtx, &splitMsg[splitPoint], sizeof(splitMsg) - splitPoint);
+            SSFPoly1305End(&splitCtx, splitStreamTag, sizeof(splitStreamTag));
+            SSF_ASSERT(memcmp(splitStreamTag, splitMacTag, 16u) == 0);
+        }
+    }
+
     /* SSFPoly1305Verify: positive correctness — RFC 7539 §2.5.2 vector accepts. */
     {
         SSF_ASSERT(SSFPoly1305Verify(msg, sizeof(msg), key, sizeof(key), expected_tag) == true);

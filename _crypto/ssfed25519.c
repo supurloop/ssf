@@ -36,6 +36,7 @@
 #include "ssfed25519.h"
 #include "ssfsha2.h"
 #include "ssfcrypt.h"
+#include "ssfusexport.h"
 
 /* --------------------------------------------------------------------------------------------- */
 /* Field element: 256 bits in 8 x 32-bit limbs, little-endian limb order.                       */

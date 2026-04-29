@@ -33,6 +33,7 @@
 #include "ssfaes.h"
 #include "ssfaesccm.h"
 #include "ssfcrypt.h"
+#include "ssfusexport.h"
 
 /* --------------------------------------------------------------------------------------------- */
 /* XOR 16 bytes: dst ^= src                                                                      */

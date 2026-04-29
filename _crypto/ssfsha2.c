@@ -34,6 +34,7 @@
 #include "ssfassert.h"
 #include "ssfsha2.h"
 #include "ssfcrypt.h"
+#include "ssfusexport.h"
 
 /* --------------------------------------------------------------------------------------------- */
 /* Local defines                                                                                 */

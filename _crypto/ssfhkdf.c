@@ -32,6 +32,7 @@
 #include "ssfassert.h"
 #include "ssfhkdf.h"
 #include "ssfcrypt.h"
+#include "ssfusexport.h"
 
 /* --------------------------------------------------------------------------------------------- */
 /* If HKDF-Extract succeeds writes prkOut and returns true, else false (RFC 5869 §2.2).          */

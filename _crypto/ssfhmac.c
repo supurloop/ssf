@@ -32,6 +32,7 @@
 #include "ssfassert.h"
 #include "ssfhmac.h"
 #include "ssfcrypt.h"
+#include "ssfusexport.h"
 
 /* --------------------------------------------------------------------------------------------- */
 /* Module defines.                                                                               */

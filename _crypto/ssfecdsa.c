@@ -41,6 +41,7 @@
 #include "ssfasn1.h"
 #include "ssfprng.h"
 #include "ssfcrypt.h"
+#include "ssfusexport.h"
 
 #if SSF_CONFIG_ECDSA_UNIT_TEST == 1
 /* Test-only exit hooks fired AFTER zeroization, BEFORE return; NULL in production. */

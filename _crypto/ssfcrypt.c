@@ -34,6 +34,7 @@
 #include <stddef.h>
 #include "ssfcrypt.h"
 #include "ssfassert.h"
+#include "ssfusexport.h"
 
 /* --------------------------------------------------------------------------------------------- */
 /* If the first n bytes at a and b are equal, inspecting every byte, returns true, else false.  */

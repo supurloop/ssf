@@ -35,6 +35,7 @@
 #include "ssfaesgcm.h"
 #include "ssfaesccm.h"
 #include "ssfchacha20poly1305.h"
+#include "ssfusexport.h"
 
 /* --------------------------------------------------------------------------------------------- */
 /* Key schedule: HKDF-Expand-Label (RFC 8446 Section 7.1)                                        */

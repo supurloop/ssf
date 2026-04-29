@@ -38,6 +38,7 @@
 #include "ssfsha2.h"
 #include "ssfprng.h"
 #include "ssfcrypt.h"
+#include "ssfusexport.h"
 
 #if SSF_RSA_ANY_ENABLED == 1
 

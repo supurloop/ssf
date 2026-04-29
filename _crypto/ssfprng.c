@@ -36,6 +36,7 @@
 #include "ssfaes.h"
 #include "ssfprng.h"
 #include "ssfcrypt.h"
+#include "ssfusexport.h"
 
 /* --------------------------------------------------------------------------------------------- */
 /* Module defines.                                                                               */

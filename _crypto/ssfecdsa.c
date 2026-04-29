@@ -38,7 +38,9 @@
 #include "ssfecdsa.h"
 #include "ssfhmac.h"
 #include "ssfsha2.h"
-#include "ssfasn1.h"
+#if SSF_ECDSA_CONFIG_ENABLE_SIGN == 1
+#include "ssfasn1.h"  /* Sign's _SSFECDSASigEncode is the only consumer; verify is byte-level. */
+#endif
 #include "ssfprng.h"
 #include "ssfcrypt.h"
 #include "ssfusexport.h"
@@ -255,6 +257,8 @@ static bool _SSFECDSAGenK(SSFECCurve_t curve, const uint8_t *privKey, size_t pri
     return false; /* Should never reach here for valid inputs */
 }
 
+#if SSF_ECDSA_CONFIG_ENABLE_SIGN == 1
+
 /* --------------------------------------------------------------------------------------------- */
 /* Internal: DER-encode an ECDSA signature (r, s) as SEQUENCE { INTEGER, INTEGER }.              */
 /* --------------------------------------------------------------------------------------------- */
@@ -340,14 +344,17 @@ static bool _SSFECDSASigEncode(const SSFBN_t *r, const SSFBN_t *s, const SSFECCu
     return true;
 }
 
+#endif /* SSF_ECDSA_CONFIG_ENABLE_SIGN — end of DER-encode helpers */
+
 /* --------------------------------------------------------------------------------------------- */
 /* Internal: DER-decode an ECDSA signature from SEQUENCE { INTEGER, INTEGER } to (r, s).         */
 /* --------------------------------------------------------------------------------------------- */
-/* Strict DER validation for an ECDSA signature SEQUENCE { INTEGER r, INTEGER s }.            */
-/* The generic SSFASN1 decoder is BER-tolerant (accepts long-form length encodings, leading-  */
-/* zero length octets, and lenient INTEGER content). For ECDSA we must reject these forms     */
-/* per Wycheproof / RFC 5480 strict DER requirements — accepting them creates signature       */
-/* malleability (CVE-2020-14966, CVE-2020-13822, CVE-2019-14859, CVE-2016-1000342 class).     */
+/* Strict DER parse for an ECDSA signature SEQUENCE { INTEGER r, INTEGER s }. Validates the   */
+/* structure and emits the (r, s) byte offsets+lengths. Pure byte-level — no ssfasn1 calls,   */
+/* so a verify-only build can drop the entire ssfasn1 module. The strict ruleset rejects the  */
+/* BER-tolerant forms a generic decoder would accept, which create signature malleability     */
+/* (CVE-2020-14966, CVE-2020-13822, CVE-2019-14859, CVE-2016-1000342 class) — these are the   */
+/* same Wycheproof / RFC 5480 strictness rules.                                                */
 /*                                                                                             */
 /* Validates:                                                                                  */
 /*  - Outer SEQUENCE tag (0x30) and canonical-form length                                     */
@@ -359,11 +366,18 @@ static bool _SSFECDSASigEncode(const SSFBN_t *r, const SSFBN_t *s, const SSFECCu
 /*    must be 0 (a value with MSB set requires the canonical 0x00 prefix; any encoding where  */
 /*    the first content byte is >= 0x80 is rejected since ECDSA r,s are always positive)      */
 /*  - No trailing data after the second INTEGER                                                */
-static bool _SSFECDSAValidateStrictDER(const uint8_t *sig, size_t sigLen, uint16_t coordBytes)
+/*                                                                                             */
+/* On success: rOff/rLen and sOff/sLen point at the INTEGER content bytes inside `sig` (no    */
+/* leading 0x00 stripping yet — the caller does that to get a canonical magnitude).            */
+static bool _SSFECDSASigParseStrictDER(const uint8_t *sig, size_t sigLen, uint16_t coordBytes,
+                                       size_t *rOff, size_t *rLen,
+                                       size_t *sOff, size_t *sLen)
 {
     size_t pos = 0u;
     size_t seqLen;
     size_t intLen;
+    size_t outOff[2];
+    size_t outLen[2];
     uint16_t i;
 
     /* Smallest valid sig: 30 06 02 01 rr 02 01 ss = 8 bytes (1-byte r and s). Use 8 as floor. */
@@ -412,50 +426,36 @@ static bool _SSFECDSAValidateStrictDER(const uint8_t *sig, size_t sigLen, uint16
         /* MSB of first content byte must be 0 (positive INTEGER without canonical 0x00 pad). */
         if (sig[pos] >= 0x80u) return false;
 
+        outOff[i] = pos;
+        outLen[i] = intLen;
         pos += intLen;
     }
 
     /* No trailing data after second INTEGER. */
     if (pos != sigLen) return false;
 
+    *rOff = outOff[0]; *rLen = outLen[0];
+    *sOff = outOff[1]; *sLen = outLen[1];
     return true;
 }
 
 static bool _SSFECDSASigDecode(const uint8_t *sig, size_t sigLen, const SSFECCurveParams_t *c,
                                SSFBN_t *r, SSFBN_t *s)
 {
-    SSFASN1Cursor_t cursor, inner, next, next2;
-    const uint8_t *rBuf, *sBuf;
-    uint32_t rLen, sLen;
+    size_t rOff, rLen, sOff, sLen;
 
-    /* Reject non-canonical DER (BER-tolerant forms, malformed encodings) before any parsing. */
-    if (!_SSFECDSAValidateStrictDER(sig, sigLen, c->bytes)) return false;
-
-    cursor.buf = sig;
-    cursor.bufLen = (uint32_t)sigLen;
-
-    /* Open the outer SEQUENCE */
-    if (!SSFASN1DecOpenConstructed(&cursor, SSF_ASN1_TAG_SEQUENCE, &inner, &next)) return false;
-
-    /* Decode r INTEGER */
-    if (!SSFASN1DecGetInt(&inner, &rBuf, &rLen, &next2)) return false;
-
-    /* Decode s INTEGER */
-    if (!SSFASN1DecGetInt(&next2, &sBuf, &sLen, &next2)) return false;
-
-    /* No trailing data allowed */
-    if (!SSFASN1DecIsEmpty(&next2)) return false;
-
-    /* Import into SSFBN_t. Strip leading 0x00 bytes from ASN.1 INTEGER (positive sign padding). */
+    if (!_SSFECDSASigParseStrictDER(sig, sigLen, c->bytes, &rOff, &rLen, &sOff, &sLen))
     {
-        const uint8_t *rb = rBuf; uint32_t rl = rLen;
-        const uint8_t *sb = sBuf; uint32_t sl = sLen;
-        while (rl > 0u && *rb == 0u) { rb++; rl--; }
-        while (sl > 0u && *sb == 0u) { sb++; sl--; }
-        if (!SSFBNFromBytes(r, rb, rl, c->limbs)) return false;
-        if (!SSFBNFromBytes(s, sb, sl, c->limbs)) return false;
+        return false;
     }
 
+    /* Strip the canonical 0x00 sign-pad (positive ASN.1 INTEGER convention) so SSFBNFromBytes */
+    /* sees the raw magnitude bytes. The strict parser already validated length bounds and    */
+    /* canonical-form, so at most one 0x00 leading byte can be present.                        */
+    if (rLen > 1u && sig[rOff] == 0u) { rOff++; rLen--; }
+    if (sLen > 1u && sig[sOff] == 0u) { sOff++; sLen--; }
+    if (!SSFBNFromBytes(r, &sig[rOff], rLen, c->limbs)) return false;
+    if (!SSFBNFromBytes(s, &sig[sOff], sLen, c->limbs)) return false;
     return true;
 }
 
@@ -619,6 +619,7 @@ bool SSFECDSAPubKeyIsValid(SSFECCurve_t curve, const uint8_t *pubKey, size_t pub
     return SSFECPointDecode(&Q, curve, pubKey, pubKeyLen);
 }
 
+#if SSF_ECDSA_CONFIG_ENABLE_SIGN == 1
 /* --------------------------------------------------------------------------------------------- */
 /* Signs a message hash using ECDSA with deterministic nonce (RFC 6979 / FIPS 186-4 §6.4).       */
 /* --------------------------------------------------------------------------------------------- */
@@ -701,6 +702,7 @@ cleanup:
 #endif
     return ok;
 }
+#endif /* SSF_ECDSA_CONFIG_ENABLE_SIGN */
 
 /* --------------------------------------------------------------------------------------------- */
 /* Verify stage 1: decode + validate pubKey, decode sig, range-check r/s, compute e, w, u1, u2.  */

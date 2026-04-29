@@ -512,6 +512,7 @@ static void _ECDSAUTKeyGenHook(void *ctx,
 
 void SSFECDSAUnitTest(void)
 {
+#if SSF_ECDSA_CONFIG_ENABLE_SIGN == 1
 #if SSF_EC_CONFIG_ENABLE_P256 == 1
     /* ---- Zeroization audit: Sign success path leaves no secret-derived limbs on stack ---- */
     /* The hook fires from Sign's unified cleanup label after explicit SSFBNZeroize. Any non-zero */
@@ -1531,6 +1532,9 @@ void SSFECDSAUnitTest(void)
 #endif
     printf("--- end ssfecdsa OpenSSL random fuzz + ECDH + corner cases ---\n");
 #endif /* SSF_ECDSA_OSSL_VERIFY */
+
+#endif /* SSF_ECDSA_CONFIG_ENABLE_SIGN — Sign-using blocks above; Wycheproof verify vectors */
+       /* and ECDH below run regardless because they do not use SSFECDSASign.                 */
 
 #if SSF_EC_CONFIG_ENABLE_P256 == 1
     /* ====================================================================================== */

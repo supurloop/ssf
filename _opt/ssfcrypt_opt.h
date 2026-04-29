@@ -64,6 +64,14 @@ extern "C" {
 #define SSF_EC_CONFIG_FIXED_BASE_P384        (0u)
 #endif
 
+/* Drop SSFECDSASign and the DER-encode helper. The verify path is now ssfasn1-free, so a    */
+/* MIN_MEMORY build with this default can omit the entire ssfasn1 module. Targets that need  */
+/* on-device signing (rare for MIN_MEMORY — typical use case is firmware-update verifiers)   */
+/* override this back to 1.                                                                  */
+#ifndef SSF_ECDSA_CONFIG_ENABLE_SIGN
+#define SSF_ECDSA_CONFIG_ENABLE_SIGN         (0u)
+#endif
+
 #elif SSF_CRYPT_CONFIG_PROFILE == SSF_CRYPT_PROFILE_MAX_PERF
 
 /* Karatsuba dispatch sooner — wins for RSA-2048+ multiplies. */

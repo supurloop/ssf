@@ -463,6 +463,45 @@ void SSFTLSUnitTest(void)
                    decrypted, sizeof(decrypted), &decLen, &ct) == false);
     }
 
+    /* RFC 8446 §5.5: implementations MUST close the connection when the sequence number
+     * wraps. SSF refuses encrypt / decrypt when state->seqNum is already at UINT64_MAX —
+     * the next increment would wrap to 0 and reuse the nonce of record 0, breaking the
+     * AEAD contract catastrophically. Set state.seqNum to the boundary and confirm both
+     * directions return false. */
+    {
+        SSFTLSRecordState_t encState, decState;
+        uint8_t key[16] = {0};
+        uint8_t iv[12] = {0};
+        uint8_t pt[16] = {0};
+        uint8_t record[64];
+        size_t recordLen;
+        uint8_t decBuf[64];
+        size_t decLen;
+        uint8_t innerCt;
+
+        SSFTLSRecordStateInit(&encState, SSF_TLS_CS_AES_128_GCM_SHA256,
+                              key, sizeof(key), iv, sizeof(iv));
+        SSFTLSRecordStateInit(&decState, SSF_TLS_CS_AES_128_GCM_SHA256,
+                              key, sizeof(key), iv, sizeof(iv));
+
+        encState.seqNum = UINT64_MAX;
+        SSF_ASSERT(SSFTLSRecordEncrypt(&encState, SSF_TLS_CT_APPLICATION,
+                                       pt, sizeof(pt),
+                                       record, sizeof(record), &recordLen) == false);
+
+        /* Build a real-looking record header so decrypt's framing checks pass and the seqNum
+         * guard is the actual gate. */
+        decState.seqNum = UINT64_MAX;
+        record[0] = SSF_TLS_CT_APPLICATION;
+        record[1] = 0x03u;
+        record[2] = 0x03u;
+        record[3] = 0x00u;
+        record[4] = 0x21u;   /* fragLen = 33 = innerLen(17) + tagLen(16) */
+        SSF_ASSERT(SSFTLSRecordDecrypt(&decState, record, 5u + 0x21u,
+                                       decBuf, sizeof(decBuf),
+                                       &decLen, &innerCt) == false);
+    }
+
     /* SSFTLSHkdfExpandLabel: full DBC surface. */
     {
         uint8_t scratchSecret[32] = {0};

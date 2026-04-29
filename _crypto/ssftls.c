@@ -298,6 +298,10 @@ bool SSFTLSRecordEncrypt(SSFTLSRecordState_t *state, uint8_t contentType,
     SSF_REQUIRE(record != NULL);
     SSF_REQUIRE(recordLen != NULL);
 
+    /* RFC 8446 §5.5: refuse to encrypt when seqNum is at the wrap boundary. The next */
+    /* increment would wrap to 0 and re-use the nonce of record 0 — catastrophic.    */
+    if (state->seqNum == UINT64_MAX) return false;
+
     /* Per-suite AEAD tag size (16 bytes for all suites except TLS_AES_128_CCM_8_SHA256, which
      * uses 8). Rejecting unsupported suites up front keeps the rest of the function's sizing
      * math straightforward. */
@@ -385,6 +389,11 @@ bool SSFTLSRecordDecrypt(SSFTLSRecordState_t *state,
     SSF_REQUIRE(pt != NULL);
     SSF_REQUIRE(ptLen != NULL);
     SSF_REQUIRE(contentType != NULL);
+
+    /* RFC 8446 §5.5: refuse to decrypt when seqNum is at the wrap boundary, mirroring the */
+    /* encrypt-side guard. A peer that has wrapped must be rejected; our own seqNum must   */
+    /* not be allowed to wrap and re-accept earlier replayed records.                       */
+    if (state->seqNum == UINT64_MAX) return false;
 
     /* Per-suite AEAD tag size — must match what the encrypting peer emitted. */
     tagLen = _SSFTLSAeadTagSize(state->cipherSuite);

@@ -84,6 +84,22 @@ through the `ssfhkdf` API).
   and transcript hash over SHA-256; the SHA384 suite runs them over SHA-384. Callers
   select `SSF_HMAC_HASH_SHA256` or `SSF_HMAC_HASH_SHA384` based on the cipher suite and
   pass that to every key-schedule function.
+- **AEAD security limits and KeyUpdate.** RFC 8446 §5.5 cites per-suite security bounds on
+  the number of records that should be encrypted under a single traffic key before
+  triggering a `KeyUpdate`: roughly `2^24.5` (~24 million) full-size records for AES-GCM
+  before AEAD security degrades, with similar order-of-magnitude bounds for AES-CCM and
+  ChaCha20-Poly1305. The record layer in this module does **not** track or enforce these
+  thresholds — it tracks only the 64-bit sequence number for nonce construction. Callers
+  driving a long-lived TLS session must monitor record counts themselves and trigger a
+  `KeyUpdate` (re-deriving traffic keys and creating a new `SSFTLSRecordState_t`) before
+  the threshold for the active suite is reached.
+- **Sequence-number wrap is forbidden.** Both [`SSFTLSRecordEncrypt`](#ssftlsrecordencrypt)
+  and [`SSFTLSRecordDecrypt`](#ssftlsrecorddecrypt) refuse a record when `state->seqNum` is
+  already at `UINT64_MAX` — the next increment would wrap to `0` and reuse the nonce of
+  record `0`, breaking the AEAD contract. Per RFC 8446 §5.5 the connection MUST be closed
+  on wrap; a `false` return from either function on a fresh state should be treated as a
+  fatal error (close the connection, do not key-update). In practice the wrap is
+  unreachable at any realistic record rate, but the guard is unconditional.
 - **Record-layer nonce construction.** [`SSFTLSRecordEncrypt`](#ssftlsrecordencrypt)
   builds the per-record AEAD nonce by XOR-ing the 64-bit sequence number (big-endian,
   left-padded) into the static IV obtained during

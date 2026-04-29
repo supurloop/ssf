@@ -139,7 +139,7 @@ you will operate on.
 
 | Macro | Default | Description |
 |-------|---------|-------------|
-| <a id="ssf-bn-config-max-bits"></a>`SSF_BN_CONFIG_MAX_BITS` | `8192` | Maximum big-number width in bits. Sizes the limb arrays produced by [`SSFBN_DEFINE`](#ssfbn-define) inside this module's own callers (e.g., the working `SSFBN_t`s declared in `SSFBNModExp`, `SSFBNModInv`, `SSFBNGenPrime`), and bounds the per-instance `cap`. Multiplication produces a `2N`-limb intermediate, so the cap must be **twice** the largest operand width: set `512` for P-256-only, `768` for P-256+P-384, `4096` for RSA-2048, `6144` for RSA-3072, `8192` for RSA-4096 (or any combination — pick the maximum across all enabled algorithms). |
+| <a id="ssf-bn-config-max-bits"></a>`SSF_BN_CONFIG_MAX_BITS` | auto | Maximum big-number width in bits. **Auto-derived in `ssfbn.h`** as `2 × largest enabled operand` from [`SSF_EC_CONFIG_ENABLE_P256/P384`](ssfec.md#configuration) and [`SSF_RSA_CONFIG_ENABLE_2048/3072/4096`](ssfrsa.md#configuration). The doubling is mandatory: multiplication produces a `2N`-limb intermediate, and `SSFBNMul` / `SSFBNModMul` / `SSFBNModMulNIST` / `SSFBNModInvExt` all gate on `2N <= MAX_LIMBS`. Resulting values: `512` for P-256-only, `768` for P-256+P-384, `4096` for RSA-2048, `6144` for RSA-3072, `8192` for RSA-4096 — the maximum across all enabled algorithms wins. Override in [`_opt/ssfbn_opt.h`](../_opt/ssfbn_opt.h) only when an out-of-tree consumer needs a wider cap; the in-tree consumers self-size correctly. |
 
 The `SSFBN_t` struct itself is small (a pointer plus two `uint16_t` fields); the actual
 limb storage lives in whatever array the caller supplies. Dropping `SSF_BN_CONFIG_MAX_BITS`

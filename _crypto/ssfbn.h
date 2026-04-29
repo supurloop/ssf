@@ -84,6 +84,41 @@ extern "C" {
 #include "ssfprng.h"
 
 /* --------------------------------------------------------------------------------------------- */
+/* Auto-derive SSF_BN_CONFIG_MAX_BITS from enabled algorithm flags.                              */
+/*                                                                                               */
+/* The cap must hold a 2N-limb intermediate for any consumer module: SSFBNMul produces a 2N-limb */
+/* product, and SSFBNModMul / SSFBNModMulNIST / SSFBNModInvExt all gate on 2N <= MAX_LIMBS. The  */
+/* derivation picks the largest operand width across enabled algorithms and doubles it:          */
+/*                                                                                               */
+/*   ECC P-256                  → 2 × 256  =  512                                                 */
+/*   ECC P-384                  → 2 × 384  =  768                                                 */
+/*   RSA-2048 (sign / keygen)   → 2 × 2048 = 4096                                                 */
+/*   RSA-3072                   → 2 × 3072 = 6144                                                 */
+/*   RSA-4096                   → 2 × 4096 = 8192                                                 */
+/*                                                                                               */
+/* If no consumer is enabled the cap defaults to 256 — ssfbn still compiles but its working      */
+/* state is irrelevant. Users can override via SSF_BN_CONFIG_MAX_BITS in ssfbn_opt.h to size the */
+/* cap up for an out-of-tree consumer.                                                            */
+/* --------------------------------------------------------------------------------------------- */
+#ifndef SSF_BN_CONFIG_MAX_BITS
+
+#if (defined(SSF_RSA_CONFIG_ENABLE_4096) && (SSF_RSA_CONFIG_ENABLE_4096 == 1))
+#define SSF_BN_CONFIG_MAX_BITS (8192u)
+#elif (defined(SSF_RSA_CONFIG_ENABLE_3072) && (SSF_RSA_CONFIG_ENABLE_3072 == 1))
+#define SSF_BN_CONFIG_MAX_BITS (6144u)
+#elif (defined(SSF_RSA_CONFIG_ENABLE_2048) && (SSF_RSA_CONFIG_ENABLE_2048 == 1))
+#define SSF_BN_CONFIG_MAX_BITS (4096u)
+#elif (defined(SSF_EC_CONFIG_ENABLE_P384) && (SSF_EC_CONFIG_ENABLE_P384 == 1))
+#define SSF_BN_CONFIG_MAX_BITS  (768u)
+#elif (defined(SSF_EC_CONFIG_ENABLE_P256) && (SSF_EC_CONFIG_ENABLE_P256 == 1))
+#define SSF_BN_CONFIG_MAX_BITS  (512u)
+#else
+#define SSF_BN_CONFIG_MAX_BITS  (256u)
+#endif
+
+#endif /* !defined(SSF_BN_CONFIG_MAX_BITS) */
+
+/* --------------------------------------------------------------------------------------------- */
 /* Defines.                                                                                      */
 /* --------------------------------------------------------------------------------------------- */
 typedef uint32_t SSFBNLimb_t;

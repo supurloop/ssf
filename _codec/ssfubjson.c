@@ -413,7 +413,7 @@ static bool _SSFJsonNameValue(const uint8_t *js, size_t jsLen, size_t *index, si
 /* Returns true if object found, else false; If true returns type/start/end on path match.       */
 /* --------------------------------------------------------------------------------------------- */
 bool _SSFUBJsonObject(const uint8_t *js, size_t jsLen, size_t *index, size_t *start, size_t *end,
-                     SSFCStrIn_t *path, uint8_t depth, SSFUBJsonType_t *jt)
+                      SSFCStrIn_t *path, uint8_t depth, SSFUBJsonType_t *jt)
 {
     SSF_REQUIRE(js != NULL);
     SSF_REQUIRE(index != NULL);
@@ -562,8 +562,8 @@ bool SSFUBJsonGetString(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, SSFCStrOut
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if found and converted ASCII Hex string to binary string, else false.            */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFUBJsonGetHex(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, uint8_t *out,
-                     size_t outSize, size_t *outLen, bool rev)
+bool SSFUBJsonGetHex(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, uint8_t *out, size_t outSize,
+                     size_t *outLen, bool rev)
 {
     size_t start;
     size_t end;
@@ -588,8 +588,8 @@ bool SSFUBJsonGetHex(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, uint8_t *out,
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if found and converted Base64 string to binary string, else false.               */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFUBJsonGetBase64(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, uint8_t *out,
-                        size_t outSize, size_t *outLen)
+bool SSFUBJsonGetBase64(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, uint8_t *out, size_t outSize,
+                        size_t *outLen)
 {
     size_t start;
     size_t end;
@@ -1006,7 +1006,7 @@ bool SSFUBJsonPrintHex(uint8_t *js, size_t size, size_t start, size_t *end, uint
 /* Returns true if in binary string added successfully as Base64 string, else false.             */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFUBJsonPrintBase64(uint8_t *js, size_t size, size_t start, size_t *end, uint8_t *in,
-                       size_t inLen)
+                          size_t inLen)
 {
     size_t outLen;
     size_t lenIndex;

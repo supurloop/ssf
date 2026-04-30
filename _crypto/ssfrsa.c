@@ -149,8 +149,7 @@ static size_t _SSFRSAGetHashSize(SSFRSAHash_t hash)
 /* Internal: compute hash using incremental API (for MGF1 and PSS).                              */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFRSAHashBeginUpdateEnd(SSFRSAHash_t hash, const uint8_t *d1, size_t d1Len,
-                                      const uint8_t *d2, size_t d2Len, uint8_t *out,
-                                      size_t outSize)
+                                      const uint8_t *d2, size_t d2Len, uint8_t *out, size_t outSize)
 {
     switch (hash)
     {
@@ -188,8 +187,8 @@ static void _SSFRSAHashBeginUpdateEnd(SSFRSAHash_t hash, const uint8_t *d1, size
 /* --------------------------------------------------------------------------------------------- */
 /* Internal: DER-encode an RSA public key: SEQUENCE { INTEGER n, INTEGER e }.                    */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFRSAPubKeyEncode(const SSFBN_t *n, const SSFBN_t *e, uint8_t *der,
-                                size_t derSize, size_t *derLen)
+static bool _SSFRSAPubKeyEncode(const SSFBN_t *n, const SSFBN_t *e, uint8_t *der, size_t derSize,
+                                size_t *derLen)
 {
     size_t nBytes = (size_t)n->len * sizeof(SSFBNLimb_t);
     size_t eBytes = (size_t)e->len * sizeof(SSFBNLimb_t);
@@ -781,8 +780,8 @@ cleanup:
 static bool _SSFRSAKeyGenEncode(const SSFBN_t *n, const SSFBN_t *d, const SSFBN_t *p,
                                 const SSFBN_t *q, const SSFBN_t *dp, const SSFBN_t *dq,
                                 const SSFBN_t *qInv, uint16_t nLimbs, uint8_t *privKeyDer,
-                                size_t privKeyDerSize, size_t *privKeyDerLen,
-                                uint8_t *pubKeyDer, size_t pubKeyDerSize, size_t *pubKeyDerLen)
+                                size_t privKeyDerSize, size_t *privKeyDerLen, uint8_t *pubKeyDer,
+                                size_t pubKeyDerSize, size_t *pubKeyDerLen)
 {
     SSFBN_DEFINE(e, SSF_BN_MAX_LIMBS);
 
@@ -885,8 +884,8 @@ cleanup:
 /* If RSASSA-PKCS1-v1_5 sign succeeds, writes sig and sigLen, returns true, else false.          */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFRSASignPKCS1(const uint8_t *privKeyDer, size_t privKeyDerLen, SSFRSAHash_t hash,
-                     const uint8_t *hashVal, size_t hashLen,
-                     uint8_t *sig, size_t sigSize, size_t *sigLen)
+                     const uint8_t *hashVal, size_t hashLen, uint8_t *sig, size_t sigSize,
+                     size_t *sigLen)
 {
     SSFBN_DEFINE(n, SSF_BN_MAX_LIMBS);
     SSFBN_DEFINE(e, SSF_BN_MAX_LIMBS);
@@ -976,8 +975,7 @@ cleanup:
 /* If RSASSA-PKCS1-v1_5 signature verifies returns true, else false.                             */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFRSAVerifyPKCS1(const uint8_t *pubKeyDer, size_t pubKeyDerLen, SSFRSAHash_t hash,
-                       const uint8_t *hashVal, size_t hashLen,
-                       const uint8_t *sig, size_t sigLen)
+                       const uint8_t *hashVal, size_t hashLen, const uint8_t *sig, size_t sigLen)
 {
     SSFBN_DEFINE(n, SSF_BN_MAX_LIMBS);
     SSFBN_DEFINE(e, SSF_BN_MAX_LIMBS);
@@ -1074,8 +1072,8 @@ static void _SSFRSAM_GF1(SSFRSAHash_t hash, const uint8_t *seed, size_t seedLen,
 /* If RSASSA-PSS sign succeeds, writes sig and sigLen, returns true, else false.                 */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFRSASignPSS(const uint8_t *privKeyDer, size_t privKeyDerLen, SSFRSAHash_t hash,
-                   const uint8_t *hashVal, size_t hashLen,
-                   uint8_t *sig, size_t sigSize, size_t *sigLen)
+                   const uint8_t *hashVal, size_t hashLen, uint8_t *sig, size_t sigSize,
+                   size_t *sigLen)
 {
     SSFBN_DEFINE(n, SSF_BN_MAX_LIMBS);
     SSFBN_DEFINE(e, SSF_BN_MAX_LIMBS);
@@ -1197,8 +1195,7 @@ cleanup:
 /* If RSASSA-PSS signature verifies returns true, else false.                                    */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFRSAVerifyPSS(const uint8_t *pubKeyDer, size_t pubKeyDerLen, SSFRSAHash_t hash,
-                     const uint8_t *hashVal, size_t hashLen,
-                     const uint8_t *sig, size_t sigLen)
+                     const uint8_t *hashVal, size_t hashLen, const uint8_t *sig, size_t sigLen)
 {
     SSFBN_DEFINE(n, SSF_BN_MAX_LIMBS);
     SSFBN_DEFINE(e, SSF_BN_MAX_LIMBS);

@@ -97,10 +97,8 @@ bool SSFLPTaskIsInited(void);
 /* Queue a work item. Returns handle or SSF_LPTASK_HANDLE_INVALID if queue full.                 */
 /* description is an optional label for lifecycle tracing (NULL to omit).                        */
 /* IMPORTANT: Caller MUST NOT access *ctx until completeFn fires.                                */
-SSFLPTaskHandle_t SSFLPTaskQueue(SSFLPTaskWorkFn_t workFn,
-                                 SSFLPTaskCompleteFn_t completeFn,
-                                 void *ctx,
-                                 const char *description);
+SSFLPTaskHandle_t SSFLPTaskQueue(SSFLPTaskWorkFn_t workFn, SSFLPTaskCompleteFn_t completeFn,
+                                 void *ctx, const char *description);
 
 /* Cancel a queued item not yet started. Returns true if removed. */
 bool SSFLPTaskCancel(SSFLPTaskHandle_t handle);

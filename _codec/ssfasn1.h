@@ -114,9 +114,8 @@ typedef struct SSFASN1Cursor
 } SSFASN1Cursor_t;
 
 /* Core TLV parser: reads tag, value pointer, value length, advances cursor.                     */
-bool SSFASN1DecGetTLV(const SSFASN1Cursor_t *cursor, uint16_t *tagOut,
-                      const uint8_t **valueOut, uint32_t *valueLenOut,
-                      SSFASN1Cursor_t *next);
+bool SSFASN1DecGetTLV(const SSFASN1Cursor_t *cursor, uint16_t *tagOut, const uint8_t **valueOut,
+                      uint32_t *valueLenOut, SSFASN1Cursor_t *next);
 
 /* Enter a constructed element (SEQUENCE, SET, or context-tagged).                               */
 bool SSFASN1DecOpenConstructed(const SSFASN1Cursor_t *cursor, uint16_t expectedTag,
@@ -133,26 +132,23 @@ bool SSFASN1DecIsEmpty(const SSFASN1Cursor_t *cursor);
 
 /* Primitive type decoders */
 bool SSFASN1DecGetBool(const SSFASN1Cursor_t *cursor, bool *valOut, SSFASN1Cursor_t *next);
-bool SSFASN1DecGetInt(const SSFASN1Cursor_t *cursor, const uint8_t **intBufOut,
-                      uint32_t *intLenOut, SSFASN1Cursor_t *next);
+bool SSFASN1DecGetInt(const SSFASN1Cursor_t *cursor, const uint8_t **intBufOut, uint32_t *intLenOut,
+                      SSFASN1Cursor_t *next);
 bool SSFASN1DecGetIntU64(const SSFASN1Cursor_t *cursor, uint64_t *valOut, SSFASN1Cursor_t *next);
 bool SSFASN1DecGetBitString(const SSFASN1Cursor_t *cursor, const uint8_t **bitsOut,
-                            uint32_t *bitsLenOut, uint8_t *unusedBitsOut,
-                            SSFASN1Cursor_t *next);
+                            uint32_t *bitsLenOut, uint8_t *unusedBitsOut, SSFASN1Cursor_t *next);
 bool SSFASN1DecGetOctetString(const SSFASN1Cursor_t *cursor, const uint8_t **octetsOut,
                               uint32_t *octetsLenOut, SSFASN1Cursor_t *next);
 bool SSFASN1DecGetNull(const SSFASN1Cursor_t *cursor, SSFASN1Cursor_t *next);
-bool SSFASN1DecGetOID(const SSFASN1Cursor_t *cursor, uint32_t *oidArcsOut,
-                      uint8_t oidArcsSize, uint8_t *oidArcsLenOut, SSFASN1Cursor_t *next);
+bool SSFASN1DecGetOID(const SSFASN1Cursor_t *cursor, uint32_t *oidArcsOut, uint8_t oidArcsSize,
+                      uint8_t *oidArcsLenOut, SSFASN1Cursor_t *next);
 bool SSFASN1DecGetOIDRaw(const SSFASN1Cursor_t *cursor, const uint8_t **oidRawOut,
                          uint32_t *oidRawLenOut, SSFASN1Cursor_t *next);
-bool SSFASN1DecGetString(const SSFASN1Cursor_t *cursor, const uint8_t **strOut,
-                         uint32_t *strLenOut, uint16_t *strTagOut, SSFASN1Cursor_t *next);
-bool SSFASN1DecGetTime(const SSFASN1Cursor_t *cursor, uint64_t *unixSecOut,
-                       SSFASN1Cursor_t *next);
+bool SSFASN1DecGetString(const SSFASN1Cursor_t *cursor, const uint8_t **strOut, uint32_t *strLenOut,
+                         uint16_t *strTagOut, SSFASN1Cursor_t *next);
+bool SSFASN1DecGetTime(const SSFASN1Cursor_t *cursor, uint64_t *unixSecOut, SSFASN1Cursor_t *next);
 /* DATE: decodes a "YYYY-MM-DD" payload. Returns Unix seconds for 00:00:00 UTC of that date.     */
-bool SSFASN1DecGetDate(const SSFASN1Cursor_t *cursor, uint64_t *unixSecOut,
-                       SSFASN1Cursor_t *next);
+bool SSFASN1DecGetDate(const SSFASN1Cursor_t *cursor, uint64_t *unixSecOut, SSFASN1Cursor_t *next);
 /* DATE-TIME: decodes a "YYYY-MM-DDTHH:MM:SS" payload (UTC). Returns Unix seconds.               */
 bool SSFASN1DecGetDateTime(const SSFASN1Cursor_t *cursor, uint64_t *unixSecOut,
                            SSFASN1Cursor_t *next);
@@ -182,16 +178,14 @@ bool SSFASN1EncOIDRaw(uint8_t *buf, uint32_t bufSize, const uint8_t *oidRaw, uin
                       uint32_t *bytesWritten);
 bool SSFASN1EncString(uint8_t *buf, uint32_t bufSize, uint16_t strTag, const uint8_t *str,
                       uint32_t strLen, uint32_t *bytesWritten);
-bool SSFASN1EncUTCTime(uint8_t *buf, uint32_t bufSize, uint64_t unixSec,
-                       uint32_t *bytesWritten);
+bool SSFASN1EncUTCTime(uint8_t *buf, uint32_t bufSize, uint64_t unixSec, uint32_t *bytesWritten);
 bool SSFASN1EncGeneralizedTime(uint8_t *buf, uint32_t bufSize, uint64_t unixSec,
                                uint32_t *bytesWritten);
 /* DATE: encodes the date portion of unixSec as "YYYY-MM-DD" under tag [UNIVERSAL 31]. Sub-day   */
 /* resolution is truncated (rounded down to midnight UTC).                                       */
 bool SSFASN1EncDate(uint8_t *buf, uint32_t bufSize, uint64_t unixSec, uint32_t *bytesWritten);
 /* DATE-TIME: encodes unixSec as "YYYY-MM-DDTHH:MM:SS" (UTC) under tag [UNIVERSAL 33].           */
-bool SSFASN1EncDateTime(uint8_t *buf, uint32_t bufSize, uint64_t unixSec,
-                        uint32_t *bytesWritten);
+bool SSFASN1EncDateTime(uint8_t *buf, uint32_t bufSize, uint64_t unixSec, uint32_t *bytesWritten);
 bool SSFASN1EncWrap(uint8_t *buf, uint32_t bufSize, uint16_t tag, const uint8_t *content,
                     uint32_t contentLen, uint32_t *bytesWritten);
 

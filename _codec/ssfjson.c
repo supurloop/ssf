@@ -376,8 +376,7 @@ SSFJsonType_t SSFJsonGetType(SSFCStrIn_t js, SSFCStrIn_t *path)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if found and is unescaped completely into buffer w/NULL term., else false.       */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFJsonGetString(SSFCStrIn_t js, SSFCStrIn_t *path, char *out, size_t outSize,
-                      size_t *outLen)
+bool SSFJsonGetString(SSFCStrIn_t js, SSFCStrIn_t *path, char *out, size_t outSize, size_t *outLen)
 {
     size_t start;
     size_t end;
@@ -522,8 +521,8 @@ bool SSFJsonGetUInt(SSFCStrIn_t js, SSFCStrIn_t *path, uint64_t *out)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if found and completely converted to binary data, else false.                    */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFJsonGetHex(SSFCStrIn_t js, SSFCStrIn_t *path, uint8_t *out, size_t outSize,
-                   size_t *outLen, bool rev)
+bool SSFJsonGetHex(SSFCStrIn_t js, SSFCStrIn_t *path, uint8_t *out, size_t outSize, size_t *outLen,
+                   bool rev)
 {
     size_t start;
     size_t end;
@@ -680,8 +679,8 @@ bool SSFJsonPrintHex(SSFCStrOut_t js, size_t size, size_t start, size_t *end, co
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if in data added successfully as quoted Base64 string, else false.               */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFJsonPrintBase64(SSFCStrOut_t js, size_t size, size_t start, size_t *end,
-                        const uint8_t *in, size_t inLen, bool *comma)
+bool SSFJsonPrintBase64(SSFCStrOut_t js, size_t size, size_t start, size_t *end, const uint8_t *in,
+                        size_t inLen, bool *comma)
 {
     size_t outLen;
 
@@ -806,8 +805,8 @@ bool SSFJsonPrint(SSFCStrOut_t js, size_t size, size_t start, size_t *end, SSFJs
 /* --------------------------------------------------------------------------------------------- */
 /* Unescapes a JSON string value (between quotes) into out buffer. Returns true on success.      */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFJsonGObjUnescStr(SSFCStrIn_t js, size_t strStart, size_t strEnd,
-                                 SSFCStrOut_t out, size_t outSize)
+static bool _SSFJsonGObjUnescStr(SSFCStrIn_t js, size_t strStart, size_t strEnd, SSFCStrOut_t out,
+                                 size_t outSize)
 {
     size_t s;
     size_t o = 0;
@@ -859,8 +858,8 @@ static bool _SSFJsonGObjUnescStr(SSFCStrIn_t js, size_t strStart, size_t strEnd,
 /* --------------------------------------------------------------------------------------------- */
 /* Recursively converts a JSON value at js[*index] into a gobj node. Returns true on success.    */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFJsonGObjValue(SSFCStrIn_t js, size_t *index, SSFGObj_t *gobj,
-                              uint16_t maxChildren, uint8_t depth)
+static bool _SSFJsonGObjValue(SSFCStrIn_t js, size_t *index, SSFGObj_t *gobj, uint16_t maxChildren,
+                              uint8_t depth)
 {
     size_t start;
     size_t end;
@@ -1057,8 +1056,7 @@ static bool _SSFJsonGObjPrintValue(SSFGObj_t *gobj, SSFCStrOut_t js, size_t size
 /* --------------------------------------------------------------------------------------------- */
 /* Callback that prints the children of a gobj container (object or array).                      */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFJsonGObjPrintChildrenFn(char *js, size_t size, size_t start, size_t *end,
-                                        void *in)
+static bool _SSFJsonGObjPrintChildrenFn(char *js, size_t size, size_t start, size_t *end, void *in)
 {
     SSFGObj_t *gobj = (SSFGObj_t *)in;
     SSFLLItem_t *item;

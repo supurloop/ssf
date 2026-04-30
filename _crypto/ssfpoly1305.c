@@ -97,8 +97,7 @@ static void _SSFPoly1305ProcessFullBlock(SSFPoly1305Context_t *ctx, const uint8_
 /* RFC 7539 Sec. 2.5: clamp the low half of the key as r, take the high half verbatim as s, and  */
 /* precompute r[1..4] * 5 for the modular reduction inner loop. Accumulator starts at zero.       */
 /* --------------------------------------------------------------------------------------------- */
-void SSFPoly1305Begin(SSFPoly1305Context_t *ctx,
-                      const uint8_t *key, size_t keyLen)
+void SSFPoly1305Begin(SSFPoly1305Context_t *ctx, const uint8_t *key, size_t keyLen)
 {
     SSF_REQUIRE(ctx != NULL);
     SSF_REQUIRE(ctx->magic == 0u);
@@ -138,8 +137,7 @@ void SSFPoly1305Begin(SSFPoly1305Context_t *ctx,
 /* < 16-byte tail back into ctx->buf for the next Update or End. Produces bit-identical output   */
 /* to a single Mac call over the concatenation of all Update inputs.                              */
 /* --------------------------------------------------------------------------------------------- */
-void SSFPoly1305Update(SSFPoly1305Context_t *ctx,
-                       const uint8_t *msg, size_t msgLen)
+void SSFPoly1305Update(SSFPoly1305Context_t *ctx, const uint8_t *msg, size_t msgLen)
 {
     size_t pos = 0;
     size_t take;
@@ -185,8 +183,7 @@ void SSFPoly1305Update(SSFPoly1305Context_t *ctx,
 /* Processes any remaining partial block with the RFC 7539 0x01 high-bit marker (no 2^128 bit),  */
 /* runs the final reduction, selects h mod p, adds s, writes the LE tag, and memsets ctx to 0.   */
 /* --------------------------------------------------------------------------------------------- */
-void SSFPoly1305End(SSFPoly1305Context_t *ctx,
-                    uint8_t *tag, size_t tagSize)
+void SSFPoly1305End(SSFPoly1305Context_t *ctx, uint8_t *tag, size_t tagSize)
 {
     uint32_t c;
     uint32_t g0, g1, g2, g3, g4;
@@ -264,8 +261,7 @@ void SSFPoly1305End(SSFPoly1305Context_t *ctx,
 /* --------------------------------------------------------------------------------------------- */
 /* Computes Poly1305 MAC (RFC 7539 Sec. 2.5). One-shot convenience wrapper over Begin/Update/End.*/
 /* --------------------------------------------------------------------------------------------- */
-void SSFPoly1305Mac(const uint8_t *msg, size_t msgLen,
-                    const uint8_t *key, size_t keyLen,
+void SSFPoly1305Mac(const uint8_t *msg, size_t msgLen, const uint8_t *key, size_t keyLen,
                     uint8_t *tag, size_t tagSize)
 {
     SSFPoly1305Context_t ctx = {0};
@@ -280,8 +276,7 @@ void SSFPoly1305Mac(const uint8_t *msg, size_t msgLen,
 /* else false. Compare is constant-time. Bundles compute + CT-compare so callers cannot pair Mac */
 /* with a non-CT memcmp() and open a tag-recovery timing side channel.                            */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFPoly1305Verify(const uint8_t *msg, size_t msgLen,
-                       const uint8_t *key, size_t keyLen,
+bool SSFPoly1305Verify(const uint8_t *msg, size_t msgLen, const uint8_t *key, size_t keyLen,
                        const uint8_t *expectedTag)
 {
     uint8_t computedTag[SSF_POLY1305_TAG_SIZE];

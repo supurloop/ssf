@@ -37,8 +37,8 @@
 /* Internal: parse tag + length from a DER buffer. Returns total header size (tag + length        */
 /* bytes), or 0 if the buffer is too short or the encoding is invalid.                           */
 /* --------------------------------------------------------------------------------------------- */
-static uint32_t _SSFASN1ParseTL(const uint8_t *buf, uint32_t bufLen,
-                                uint16_t *tagOut, uint32_t *contentLenOut)
+static uint32_t _SSFASN1ParseTL(const uint8_t *buf, uint32_t bufLen, uint16_t *tagOut,
+                                uint32_t *contentLenOut)
 {
     uint32_t pos = 0;
     uint32_t len;
@@ -105,9 +105,8 @@ static uint32_t _SSFASN1ParseTL(const uint8_t *buf, uint32_t bufLen,
 /* ========================================================================================== */
 
 /* --------------------------------------------------------------------------------------------- */
-bool SSFASN1DecGetTLV(const SSFASN1Cursor_t *cursor, uint16_t *tagOut,
-                      const uint8_t **valueOut, uint32_t *valueLenOut,
-                      SSFASN1Cursor_t *next)
+bool SSFASN1DecGetTLV(const SSFASN1Cursor_t *cursor, uint16_t *tagOut, const uint8_t **valueOut,
+                      uint32_t *valueLenOut, SSFASN1Cursor_t *next)
 {
     uint32_t headerLen;
     uint32_t contentLen;
@@ -209,8 +208,8 @@ bool SSFASN1DecGetBool(const SSFASN1Cursor_t *cursor, bool *valOut, SSFASN1Curso
 }
 
 /* --------------------------------------------------------------------------------------------- */
-bool SSFASN1DecGetInt(const SSFASN1Cursor_t *cursor, const uint8_t **intBufOut,
-                      uint32_t *intLenOut, SSFASN1Cursor_t *next)
+bool SSFASN1DecGetInt(const SSFASN1Cursor_t *cursor, const uint8_t **intBufOut, uint32_t *intLenOut,
+                      SSFASN1Cursor_t *next)
 {
     uint16_t tag;
 
@@ -254,8 +253,7 @@ bool SSFASN1DecGetIntU64(const SSFASN1Cursor_t *cursor, uint64_t *valOut, SSFASN
 
 /* --------------------------------------------------------------------------------------------- */
 bool SSFASN1DecGetBitString(const SSFASN1Cursor_t *cursor, const uint8_t **bitsOut,
-                            uint32_t *bitsLenOut, uint8_t *unusedBitsOut,
-                            SSFASN1Cursor_t *next)
+                            uint32_t *bitsLenOut, uint8_t *unusedBitsOut, SSFASN1Cursor_t *next)
 {
     uint16_t tag;
     const uint8_t *value;
@@ -325,8 +323,8 @@ bool SSFASN1DecGetOIDRaw(const SSFASN1Cursor_t *cursor, const uint8_t **oidRawOu
 }
 
 /* --------------------------------------------------------------------------------------------- */
-bool SSFASN1DecGetOID(const SSFASN1Cursor_t *cursor, uint32_t *oidArcsOut,
-                      uint8_t oidArcsSize, uint8_t *oidArcsLenOut, SSFASN1Cursor_t *next)
+bool SSFASN1DecGetOID(const SSFASN1Cursor_t *cursor, uint32_t *oidArcsOut, uint8_t oidArcsSize,
+                      uint8_t *oidArcsLenOut, SSFASN1Cursor_t *next)
 {
     const uint8_t *raw;
     uint32_t rawLen;
@@ -397,8 +395,8 @@ bool SSFASN1DecGetOID(const SSFASN1Cursor_t *cursor, uint32_t *oidArcsOut,
 }
 
 /* --------------------------------------------------------------------------------------------- */
-bool SSFASN1DecGetString(const SSFASN1Cursor_t *cursor, const uint8_t **strOut,
-                         uint32_t *strLenOut, uint16_t *strTagOut, SSFASN1Cursor_t *next)
+bool SSFASN1DecGetString(const SSFASN1Cursor_t *cursor, const uint8_t **strOut, uint32_t *strLenOut,
+                         uint16_t *strTagOut, SSFASN1Cursor_t *next)
 {
     uint16_t tag;
 
@@ -437,8 +435,7 @@ static bool _SSFASN1Parse2Digit(const uint8_t *p, uint32_t *valOut)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-bool SSFASN1DecGetTime(const SSFASN1Cursor_t *cursor, uint64_t *unixSecOut,
-                       SSFASN1Cursor_t *next)
+bool SSFASN1DecGetTime(const SSFASN1Cursor_t *cursor, uint64_t *unixSecOut, SSFASN1Cursor_t *next)
 {
     uint16_t tag;
     const uint8_t *value;
@@ -545,9 +542,8 @@ static bool _SSFASN1ParseYMD(const uint8_t *p, uint32_t *year, uint32_t *month, 
 /* --------------------------------------------------------------------------------------------- */
 /* Internal: build a unix-second count from validated Y/M/D/H/M/S via ssfdtime.                  */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFASN1YMDHMSToUnix(uint32_t year, uint32_t month, uint32_t day,
-                                 uint32_t hour, uint32_t minute, uint32_t second,
-                                 uint64_t *unixSecOut)
+static bool _SSFASN1YMDHMSToUnix(uint32_t year, uint32_t month, uint32_t day, uint32_t hour,
+                                 uint32_t minute, uint32_t second, uint64_t *unixSecOut)
 {
     SSFDTimeStruct_t ts;
     SSFPortTick_t unixSys;
@@ -572,8 +568,7 @@ static bool _SSFASN1YMDHMSToUnix(uint32_t year, uint32_t month, uint32_t day,
 }
 
 /* --------------------------------------------------------------------------------------------- */
-bool SSFASN1DecGetDate(const SSFASN1Cursor_t *cursor, uint64_t *unixSecOut,
-                       SSFASN1Cursor_t *next)
+bool SSFASN1DecGetDate(const SSFASN1Cursor_t *cursor, uint64_t *unixSecOut, SSFASN1Cursor_t *next)
 {
     uint16_t tag;
     const uint8_t *value;
@@ -925,8 +920,7 @@ static bool _SSFASN1UnixSecToStruct(uint64_t unixSec, SSFDTimeStruct_t *ts)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-bool SSFASN1EncUTCTime(uint8_t *buf, uint32_t bufSize, uint64_t unixSec,
-                       uint32_t *bytesWritten)
+bool SSFASN1EncUTCTime(uint8_t *buf, uint32_t bufSize, uint64_t unixSec, uint32_t *bytesWritten)
 {
     /* Format: YYMMDDHHMMSSZ (13 bytes). Year range: 1970-2049 (YY in 50..99 means 1950..1999   */
     /* per RFC 5280, but ssfdtime cannot represent pre-1970; YY in 00..49 means 2000..2049).    */
@@ -1048,8 +1042,7 @@ bool SSFASN1EncDate(uint8_t *buf, uint32_t bufSize, uint64_t unixSec, uint32_t *
 }
 
 /* --------------------------------------------------------------------------------------------- */
-bool SSFASN1EncDateTime(uint8_t *buf, uint32_t bufSize, uint64_t unixSec,
-                        uint32_t *bytesWritten)
+bool SSFASN1EncDateTime(uint8_t *buf, uint32_t bufSize, uint64_t unixSec, uint32_t *bytesWritten)
 {
     /* Format: YYYY-MM-DDTHH:MM:SS (19 bytes), wrapped in multi-byte tag [UNIVERSAL 33]. */
     uint8_t timeStr[19];

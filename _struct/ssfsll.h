@@ -82,8 +82,7 @@ struct SSFSLL
 /* --------------------------------------------------------------------------------------------- */
 /* External interface                                                                            */
 /* --------------------------------------------------------------------------------------------- */
-void SSFSLLInit(SSFSLL_t *sll, uint32_t maxSize, SSFSLLCompareFn_t compareFn,
-                SSF_SLL_ORDER_t order);
+void SSFSLLInit(SSFSLL_t *sll, uint32_t maxSize, SSFSLLCompareFn_t compareFn, SSF_SLL_ORDER_t order);
 void SSFSLLDeInit(SSFSLL_t *sll);
 bool SSFSLLIsInited(SSFSLL_t *sll);
 void SSFSLLInsertItem(SSFSLL_t *sll, SSFSLLItem_t *inItem);

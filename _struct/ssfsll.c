@@ -37,8 +37,7 @@
 /* --------------------------------------------------------------------------------------------- */
 /* Initializes a new sorted linked list.                                                         */
 /* --------------------------------------------------------------------------------------------- */
-void SSFSLLInit(SSFSLL_t *sll, uint32_t maxSize, SSFSLLCompareFn_t compareFn,
-                SSF_SLL_ORDER_t order)
+void SSFSLLInit(SSFSLL_t *sll, uint32_t maxSize, SSFSLLCompareFn_t compareFn, SSF_SLL_ORDER_t order)
 {
     SSF_REQUIRE(sll != NULL);
     SSF_REQUIRE(sll->magic != SSF_SLL_INIT_MAGIC);

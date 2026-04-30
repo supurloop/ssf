@@ -253,10 +253,8 @@ bool SSFLPTaskIsInited(void)
 /* --------------------------------------------------------------------------------------------- */
 /* Queues a work item for execution by the background thread.                                    */
 /* --------------------------------------------------------------------------------------------- */
-SSFLPTaskHandle_t SSFLPTaskQueue(SSFLPTaskWorkFn_t workFn,
-                                 SSFLPTaskCompleteFn_t completeFn,
-                                 void *ctx,
-                                 const char *description)
+SSFLPTaskHandle_t SSFLPTaskQueue(SSFLPTaskWorkFn_t workFn, SSFLPTaskCompleteFn_t completeFn,
+                                 void *ctx, const char *description)
 {
     SSFLPTaskEntry_t *entry = NULL;
     SSFLPTaskHandle_t handle;

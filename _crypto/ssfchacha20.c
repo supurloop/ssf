@@ -53,8 +53,7 @@
 /* --------------------------------------------------------------------------------------------- */
 /* Generates one 64-byte ChaCha20 keystream block (RFC 7539 Section 2.3).                        */
 /* --------------------------------------------------------------------------------------------- */
-static void _SSFChaCha20Block(const uint32_t *input, size_t inputLen, uint8_t *out,
-                              size_t outSize)
+static void _SSFChaCha20Block(const uint32_t *input, size_t inputLen, uint8_t *out, size_t outSize)
 {
     uint32_t x[16];
     uint32_t i;

@@ -78,8 +78,7 @@ typedef enum
 /* --------------------------------------------------------------------------------------------- */
 /* Parser */
 bool SSFINIIsSectionPresent(SSFCStrIn_t ini, SSFCStrIn_t section);
-bool SSFINIIsNameValuePresent(SSFCStrIn_t ini, SSFCStrIn_t section, SSFCStrIn_t name,
-                              uint8_t index);
+bool SSFINIIsNameValuePresent(SSFCStrIn_t ini, SSFCStrIn_t section, SSFCStrIn_t name, uint8_t index);
 bool SSFINIGetStrValue(SSFCStrIn_t ini, SSFCStrIn_t section, SSFCStrIn_t name, uint8_t index,
                        SSFCStrOut_t out, size_t outSize, size_t *outLen);
 bool SSFINIGetBoolValue(SSFCStrIn_t ini, SSFCStrIn_t section, SSFCStrIn_t name, uint8_t index,

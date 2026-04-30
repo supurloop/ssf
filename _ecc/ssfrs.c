@@ -526,8 +526,7 @@ static void _RSFindErrataLocator(const GFPoly_t *e_pos, GFPoly_t *e_loc)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true is errata corrected else false.                                                  */
 /* --------------------------------------------------------------------------------------------- */
-static bool _RSCorrectErrata(GFPoly_t *msg_in, GFPoly_t *synd, GFPoly_t *err_pos,
-                             GFPoly_t *msg_out)
+static bool _RSCorrectErrata(GFPoly_t *msg_in, GFPoly_t *synd, GFPoly_t *err_pos, GFPoly_t *msg_out)
 {
     GFPoly_t coef_pos;
     GFPoly_t err_loc;

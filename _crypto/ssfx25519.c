@@ -365,8 +365,7 @@ static void _x25519_stack_scrub(void)
 /* --------------------------------------------------------------------------------------------- */
 /* X25519 scalar multiplication (RFC 7748 Sec. 5; constant-time Montgomery ladder on x-coords).  */
 /* --------------------------------------------------------------------------------------------- */
-static void _x25519_scalar_mul(uint8_t out[32], const uint8_t scalar[32],
-                               const uint8_t point[32])
+static void _x25519_scalar_mul(uint8_t out[32], const uint8_t scalar[32], const uint8_t point[32])
 {
     uint8_t k[32];
     _fe_t x_1, x_2, z_2, x_3, z_3;
@@ -486,8 +485,7 @@ void SSFX25519PubKeyFromPrivKey(const uint8_t privKey[32], uint8_t pubKey[32])
 /* --------------------------------------------------------------------------------------------- */
 /* Compute X25519 shared secret.                                                                 */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFX25519ComputeSecret(const uint8_t privKey[32],
-                            const uint8_t peerPubKey[32],
+bool SSFX25519ComputeSecret(const uint8_t privKey[32], const uint8_t peerPubKey[32],
                             uint8_t secret[32])
 {
     uint8_t i;

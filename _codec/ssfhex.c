@@ -85,8 +85,8 @@ bool SSFHexByteToBin(const char *hex, uint8_t *out)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if ASCII hex byte string converted successfully to binary bytes, else false.     */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFHexBytesToBin(SSFCStrIn_t in, size_t inLenLim, uint8_t *out, size_t outSize,
-                      size_t *outLen, bool rev)
+bool SSFHexBytesToBin(SSFCStrIn_t in, size_t inLenLim, uint8_t *out, size_t outSize, size_t *outLen,
+                      bool rev)
 {
     SSF_REQUIRE(in != NULL);
     SSF_REQUIRE(out != NULL);

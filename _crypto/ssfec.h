@@ -123,8 +123,7 @@ typedef struct SSFECCurveParams
 const SSFECCurveParams_t *SSFECGetCurveParams(SSFECCurve_t curve);
 void SSFECPointSetIdentity(SSFECPoint_t *pt, SSFECCurve_t curve);
 bool SSFECPointIsIdentity(const SSFECPoint_t *pt);
-void SSFECPointFromAffine(SSFECPoint_t *pt, const SSFBN_t *x, const SSFBN_t *y,
-                          SSFECCurve_t curve);
+void SSFECPointFromAffine(SSFECPoint_t *pt, const SSFBN_t *x, const SSFBN_t *y, SSFECCurve_t curve);
 bool SSFECPointToAffine(SSFBN_t *x, SSFBN_t *y, const SSFECPoint_t *pt, SSFECCurve_t curve);
 bool SSFECPointOnCurve(const SSFECPoint_t *pt, SSFECCurve_t curve);
 bool SSFECPointValidate(const SSFECPoint_t *pt, SSFECCurve_t curve);
@@ -138,8 +137,8 @@ void SSFECScalarMulDual(SSFECPoint_t *r, const SSFBN_t *u1, const SSFECPoint_t *
                         const SSFBN_t *u2, const SSFECPoint_t *q, SSFECCurve_t curve);
 
 #if (SSF_EC_CONFIG_FIXED_BASE_P256 == 1) || (SSF_EC_CONFIG_FIXED_BASE_P384 == 1)
-void SSFECScalarMulDualBase(SSFECPoint_t *r, const SSFBN_t *u1,
-                            const SSFBN_t *u2, const SSFECPoint_t *q, SSFECCurve_t curve);
+void SSFECScalarMulDualBase(SSFECPoint_t *r, const SSFBN_t *u1, const SSFBN_t *u2,
+                            const SSFECPoint_t *q, SSFECCurve_t curve);
 #endif /* SSF_EC_CONFIG_FIXED_BASE_P256 || SSF_EC_CONFIG_FIXED_BASE_P384 */
 
 #if SSF_EC_CONFIG_FIXED_BASE_P256 == 1
@@ -157,16 +156,16 @@ void SSFECScalarMulBaseP384(SSFECPoint_t *r, const SSFBN_t *k);
 void SSFECUnitTest(void);
 
 /* Test wrapper for _SSFECPointAddMixed (q must have Z=1 affine or Z=0 identity). */
-void _SSFECPointAddMixedForTest(SSFECPoint_t *r, const SSFECPoint_t *p,
-                                const SSFECPoint_t *q, SSFECCurve_t curve);
+void _SSFECPointAddMixedForTest(SSFECPoint_t *r, const SSFECPoint_t *p, const SSFECPoint_t *q,
+                                SSFECCurve_t curve);
 
 /* Test wrapper for _SSFECPointAddMixedNoDouble (caller must guarantee P != Q). */
 void _SSFECPointAddMixedNoDoubleForTest(SSFECPoint_t *r, const SSFECPoint_t *p,
                                         const SSFECPoint_t *q, SSFECCurve_t curve);
 
 /* Test wrapper for the variable-time wNAF scalar mul (PUBLIC-INPUT ONLY). */
-void _SSFECScalarMulVTwNAFForTest(SSFECPoint_t *r, const SSFBN_t *k,
-                                  const SSFECPoint_t *p, SSFECCurve_t curve);
+void _SSFECScalarMulVTwNAFForTest(SSFECPoint_t *r, const SSFBN_t *k, const SSFECPoint_t *p,
+                                  SSFECCurve_t curve);
 #endif /* SSF_CONFIG_EC_UNIT_TEST */
 
 #ifdef __cplusplus

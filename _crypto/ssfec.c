@@ -761,8 +761,8 @@ bool SSFECPointValidate(const SSFECPoint_t *pt, SSFECCurve_t curve)
 /* --------------------------------------------------------------------------------------------- */
 /* Encode point in SEC 1 uncompressed format: 0x04 || X || Y.                                   */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFECPointEncode(const SSFECPoint_t *pt, SSFECCurve_t curve,
-                      uint8_t *out, size_t outSize, size_t *outLen)
+bool SSFECPointEncode(const SSFECPoint_t *pt, SSFECCurve_t curve, uint8_t *out, size_t outSize,
+                      size_t *outLen)
 {
     const SSFECCurveParams_t *c = SSFECGetCurveParams(curve);
     size_t encLen;
@@ -797,8 +797,7 @@ bool SSFECPointEncode(const SSFECPoint_t *pt, SSFECCurve_t curve,
 /* --------------------------------------------------------------------------------------------- */
 /* Decode SEC 1 uncompressed point. Validates the decoded point.                                 */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFECPointDecode(SSFECPoint_t *pt, SSFECCurve_t curve,
-                      const uint8_t *data, size_t dataLen)
+bool SSFECPointDecode(SSFECPoint_t *pt, SSFECCurve_t curve, const uint8_t *data, size_t dataLen)
 {
     const SSFECCurveParams_t *c = SSFECGetCurveParams(curve);
     size_t encLen;
@@ -996,10 +995,8 @@ void SSFECScalarMul(SSFECPoint_t *r, const SSFBN_t *k, const SSFECPoint_t *p, SS
 /* --------------------------------------------------------------------------------------------- */
 /* Dual scalar mul r = u1 * p + u2 * q (Shamir's trick, NOT constant-time).                      */
 /* --------------------------------------------------------------------------------------------- */
-void SSFECScalarMulDual(SSFECPoint_t *r,
-                        const SSFBN_t *u1, const SSFECPoint_t *p,
-                        const SSFBN_t *u2, const SSFECPoint_t *q,
-                        SSFECCurve_t curve)
+void SSFECScalarMulDual(SSFECPoint_t *r, const SSFBN_t *u1, const SSFECPoint_t *p,
+                        const SSFBN_t *u2, const SSFECPoint_t *q, SSFECCurve_t curve)
 {
     const SSFECCurveParams_t *c = SSFECGetCurveParams(curve);
     /* table[0]=identity, [1]=P, [2]=Q, [3]=P+Q. */
@@ -1101,10 +1098,8 @@ typedef struct
 
 /* Common comb runtime. Per-curve wrappers below pass the curve params, the precomputed table,  */
 /* and the strip width d.                                                                         */
-static void _SSFECScalarMulComb(SSFECPoint_t *r, const SSFBN_t *k,
-                                const SSFECCurveParams_t *c,
-                                const _SSFECCombAffine_t *table,
-                                uint32_t dBits)
+static void _SSFECScalarMulComb(SSFECPoint_t *r, const SSFBN_t *k, const SSFECCurveParams_t *c,
+                                const _SSFECCombAffine_t *table, uint32_t dBits)
 {
     SSFECPOINT_DEFINE(picked, SSF_EC_MAX_LIMBS);
     SSFECPOINT_DEFINE(rSaved, SSF_EC_MAX_LIMBS);
@@ -1291,8 +1286,8 @@ void SSFECScalarMulBaseP384(SSFECPoint_t *r, const SSFBN_t *k)
 #define _SSF_EC_VTWNAF_TABLE_SIZE   (1u << (_SSF_EC_VTWNAF_W - 2u)) /* 8 odd multiples */
 #define _SSF_EC_VTWNAF_MAX_DIGITS   ((SSF_EC_MAX_COORD_BYTES * 8u) + 1u)
 
-static void _SSFECScalarMulVTwNAF(SSFECPoint_t *r, const SSFBN_t *k,
-                                  const SSFECPoint_t *p, const SSFECCurveParams_t *c)
+static void _SSFECScalarMulVTwNAF(SSFECPoint_t *r, const SSFBN_t *k, const SSFECPoint_t *p,
+                                  const SSFECCurveParams_t *c)
 {
     SSFBNLimb_t tableStorage[_SSF_EC_VTWNAF_TABLE_SIZE][3][SSF_EC_MAX_LIMBS];
     SSFECPoint_t table[_SSF_EC_VTWNAF_TABLE_SIZE]; /* table[i] = [(2i+1)] P */
@@ -1430,8 +1425,8 @@ static void _SSFECScalarMulVTwNAF(SSFECPoint_t *r, const SSFBN_t *k,
 }
 
 #if SSF_CONFIG_EC_UNIT_TEST == 1
-void _SSFECScalarMulVTwNAFForTest(SSFECPoint_t *r, const SSFBN_t *k,
-                                  const SSFECPoint_t *p, SSFECCurve_t curve)
+void _SSFECScalarMulVTwNAFForTest(SSFECPoint_t *r, const SSFBN_t *k, const SSFECPoint_t *p,
+                                  SSFECCurve_t curve)
 {
     _SSFECScalarMulVTwNAF(r, k, p, SSFECGetCurveParams(curve));
 }
@@ -1440,10 +1435,8 @@ void _SSFECScalarMulVTwNAFForTest(SSFECPoint_t *r, const SSFBN_t *k,
 /* --------------------------------------------------------------------------------------------- */
 /* Specialized dual scalar mul for ECDSA verify: r = u1 * G + u2 * q (NOT constant-time).        */
 /* --------------------------------------------------------------------------------------------- */
-void SSFECScalarMulDualBase(SSFECPoint_t *r,
-                            const SSFBN_t *u1,
-                            const SSFBN_t *u2, const SSFECPoint_t *q,
-                            SSFECCurve_t curve)
+void SSFECScalarMulDualBase(SSFECPoint_t *r, const SSFBN_t *u1, const SSFBN_t *u2,
+                            const SSFECPoint_t *q, SSFECCurve_t curve)
 {
     const SSFECCurveParams_t *c = SSFECGetCurveParams(curve);
     SSFECPOINT_DEFINE(R1, SSF_EC_MAX_LIMBS); /* [u1] G          */

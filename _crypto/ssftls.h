@@ -221,28 +221,21 @@ typedef struct SSFTLSRecordState
 /* --------------------------------------------------------------------------------------------- */
 
 /* HKDF-Expand-Label (RFC 8446 Section 7.1). */
-void SSFTLSHkdfExpandLabel(SSFHMACHash_t hash,
-                           const uint8_t *secret, size_t secretLen,
-                           const char *label,
-                           const uint8_t *context, size_t ctxLen,
-                           uint8_t *out, size_t outLen);
+void SSFTLSHkdfExpandLabel(SSFHMACHash_t hash, const uint8_t *secret, size_t secretLen,
+                           const char *label, const uint8_t *context, size_t ctxLen, uint8_t *out,
+                           size_t outLen);
 
 /* Derive-Secret = HKDF-Expand-Label(secret, label, Transcript-Hash, hashLen). */
-void SSFTLSDeriveSecret(SSFHMACHash_t hash,
-                        const uint8_t *secret, size_t secretLen,
-                        const char *label,
-                        const uint8_t *transcriptHash, size_t transcriptHashLen,
+void SSFTLSDeriveSecret(SSFHMACHash_t hash, const uint8_t *secret, size_t secretLen,
+                        const char *label, const uint8_t *transcriptHash, size_t transcriptHashLen,
                         uint8_t *out, size_t outLen);
 
 /* Derive traffic key and IV from a traffic secret. */
-void SSFTLSDeriveTrafficKeys(SSFHMACHash_t hash,
-                             const uint8_t *trafficSecret, size_t secretLen,
-                             uint8_t *key, size_t keyLen,
-                             uint8_t *iv, size_t ivLen);
+void SSFTLSDeriveTrafficKeys(SSFHMACHash_t hash, const uint8_t *trafficSecret, size_t secretLen,
+                             uint8_t *key, size_t keyLen, uint8_t *iv, size_t ivLen);
 
 /* Compute the Finished verify_data: HMAC(finished_key, transcript_hash). */
-void SSFTLSComputeFinished(SSFHMACHash_t hash,
-                           const uint8_t *baseKey, size_t baseKeyLen,
+void SSFTLSComputeFinished(SSFHMACHash_t hash, const uint8_t *baseKey, size_t baseKeyLen,
                            const uint8_t *transcriptHash, size_t transcriptHashLen,
                            uint8_t *verifyData, size_t verifyDataLen);
 
@@ -259,21 +252,17 @@ void SSFTLSTranscriptHash(const SSFTLSTranscript_t *t, uint8_t *out, size_t outS
 /* --------------------------------------------------------------------------------------------- */
 
 /* Initialize record state with derived traffic keys. */
-void SSFTLSRecordStateInit(SSFTLSRecordState_t *state, uint16_t cipherSuite,
-                           const uint8_t *key, size_t keyLen,
-                           const uint8_t *iv, size_t ivLen);
+void SSFTLSRecordStateInit(SSFTLSRecordState_t *state, uint16_t cipherSuite, const uint8_t *key,
+                           size_t keyLen, const uint8_t *iv, size_t ivLen);
 
 /* Encrypt plaintext into a TLS record (header + ciphertext + tag).                              */
 /* record must have room for SSF_TLS_RECORD_HEADER_SIZE + ptLen + 1 + SSF_TLS_AEAD_TAG_SIZE.     */
-bool SSFTLSRecordEncrypt(SSFTLSRecordState_t *state, uint8_t contentType,
-                         const uint8_t *pt, size_t ptLen,
-                         uint8_t *record, size_t recordSize, size_t *recordLen);
+bool SSFTLSRecordEncrypt(SSFTLSRecordState_t *state, uint8_t contentType, const uint8_t *pt,
+                         size_t ptLen, uint8_t *record, size_t recordSize, size_t *recordLen);
 
 /* Decrypt a TLS record. Validates AEAD tag and extracts inner content type.                     */
-bool SSFTLSRecordDecrypt(SSFTLSRecordState_t *state,
-                         const uint8_t *record, size_t recordLen,
-                         uint8_t *pt, size_t ptSize, size_t *ptLen,
-                         uint8_t *contentType);
+bool SSFTLSRecordDecrypt(SSFTLSRecordState_t *state, const uint8_t *record, size_t recordLen,
+                         uint8_t *pt, size_t ptSize, size_t *ptLen, uint8_t *contentType);
 
 /* --------------------------------------------------------------------------------------------- */
 /* Unit test                                                                                     */

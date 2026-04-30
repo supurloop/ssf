@@ -84,8 +84,7 @@ bool SSFECDSAPubKeyIsValid(SSFECCurve_t curve, const uint8_t *pubKey, size_t pub
 /* --------------------------------------------------------------------------------------------- */
 #if SSF_ECDSA_CONFIG_ENABLE_SIGN == 1
 bool SSFECDSASign(SSFECCurve_t curve, const uint8_t *privKey, size_t privKeyLen,
-                  const uint8_t *hash, size_t hashLen, uint8_t *sig, size_t sigSize,
-                  size_t *sigLen);
+                  const uint8_t *hash, size_t hashLen, uint8_t *sig, size_t sigSize, size_t *sigLen);
 #endif /* SSF_ECDSA_CONFIG_ENABLE_SIGN */
 
 /* --------------------------------------------------------------------------------------------- */

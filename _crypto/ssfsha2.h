@@ -101,8 +101,7 @@ void SSFSHA2_32End(SSFSHA2_32Context_t *context, uint8_t *out, uint32_t outSize)
 #define SSFSHA224Update(context, in, inLen)           SSFSHA2_32Update(context, in, inLen)
 #define SSFSHA224End(context, out, outSize)           SSFSHA2_32End(context, out, outSize)
 
-void SSFSHA2_64Begin(SSFSHA2_64Context_t *context, uint16_t hashBitSize,
-                     uint16_t truncationBitSize);
+void SSFSHA2_64Begin(SSFSHA2_64Context_t *context, uint16_t hashBitSize, uint16_t truncationBitSize);
 void SSFSHA2_64Update(SSFSHA2_64Context_t *context, const uint8_t *in, uint32_t inLen);
 void SSFSHA2_64End(SSFSHA2_64Context_t *context, uint8_t *out, uint32_t outSize);
 

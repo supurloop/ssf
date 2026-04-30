@@ -72,8 +72,8 @@ typedef struct
 /* --------------------------------------------------------------------------------------------- */
 /* External interface                                                                            */
 /* --------------------------------------------------------------------------------------------- */
-void SSFCLIInit(SSFCLIContext_t *context, uint16_t maxCmds, uint8_t maxCmdHist,
-                uint8_t *cmdHistBuf, size_t cmdHistBufSize, SSFVTEdContext_t *vtEdCtx);
+void SSFCLIInit(SSFCLIContext_t *context, uint16_t maxCmds, uint8_t maxCmdHist, uint8_t *cmdHistBuf,
+                size_t cmdHistBufSize, SSFVTEdContext_t *vtEdCtx);
 void SSFCLIDeInit(SSFCLIContext_t *context);
 void SSFCLIInitCmd(SSFCLIContext_t *context, SSFCLICmd_t *cmd);
 void SSFCLIDeInitCmd(SSFCLIContext_t *context, SSFCLICmd_t *cmd);

@@ -838,8 +838,7 @@ SSFBNLimb_t SSFBNSubUint32(SSFBN_t *r, const SSFBN_t *a, uint32_t b)
 /* --------------------------------------------------------------------------------------------- */
 /* Schoolbook multiply on raw limb pointers; r is overwritten with na + nb limbs.                */
 /* --------------------------------------------------------------------------------------------- */
-static void _SSFBNSchoolbookMulRaw(SSFBNLimb_t *r,
-                                   const SSFBNLimb_t *a, uint16_t na,
+static void _SSFBNSchoolbookMulRaw(SSFBNLimb_t *r, const SSFBNLimb_t *a, uint16_t na,
                                    const SSFBNLimb_t *b, uint16_t nb)
 {
     uint16_t i;
@@ -882,9 +881,8 @@ static void _SSFBNSchoolbookMulRaw(SSFBNLimb_t *r,
 /* --------------------------------------------------------------------------------------------- */
 /* One-level Karatsuba mul for same-size even-length operands; r must be 2n limbs, no alias.     */
 /* --------------------------------------------------------------------------------------------- */
-static void _SSFBNKaratsubaMul(SSFBNLimb_t *r,
-                               const SSFBNLimb_t *a,
-                               const SSFBNLimb_t *b, uint16_t n)
+static void _SSFBNKaratsubaMul(SSFBNLimb_t *r, const SSFBNLimb_t *a, const SSFBNLimb_t *b,
+                               uint16_t n)
 {
     /* half+1-limb sum buffers and n+2-limb mid product. Sized for the largest allowed n. */
     SSFBNLimb_t sumA[(SSF_BN_MAX_LIMBS / 2u) + 1u];

@@ -37,8 +37,8 @@
 /* --------------------------------------------------------------------------------------------- */
 /* If HKDF-Extract succeeds writes prkOut and returns true, else false (RFC 5869 Sec. 2.2).      */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFHKDFExtract(SSFHMACHash_t hash, const uint8_t *salt, size_t saltLen,
-                    const uint8_t *ikm, size_t ikmLen, uint8_t *prkOut, size_t prkOutSize)
+bool SSFHKDFExtract(SSFHMACHash_t hash, const uint8_t *salt, size_t saltLen, const uint8_t *ikm,
+                    size_t ikmLen, uint8_t *prkOut, size_t prkOutSize)
 {
     size_t hashSize;
     uint8_t zeroSalt[SSF_HMAC_MAX_HASH_SIZE];

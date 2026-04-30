@@ -43,11 +43,9 @@
 /* HkdfLabel = uint16(Length) || uint8(6 + len(Label)) || "tls13 " || Label ||                   */
 /*             uint8(len(Context)) || Context                                                    */
 /* --------------------------------------------------------------------------------------------- */
-void SSFTLSHkdfExpandLabel(SSFHMACHash_t hash,
-                           const uint8_t *secret, size_t secretLen,
-                           const char *label,
-                           const uint8_t *context, size_t ctxLen,
-                           uint8_t *out, size_t outLen)
+void SSFTLSHkdfExpandLabel(SSFHMACHash_t hash, const uint8_t *secret, size_t secretLen,
+                           const char *label, const uint8_t *context, size_t ctxLen, uint8_t *out,
+                           size_t outLen)
 {
     uint8_t hkdfLabel[2 + 1 + 6 + 64 + 1 + SSF_TLS_MAX_HASH_SIZE];
     size_t labelLen;
@@ -92,10 +90,8 @@ void SSFTLSHkdfExpandLabel(SSFHMACHash_t hash,
 /* --------------------------------------------------------------------------------------------- */
 /* Key schedule: Derive-Secret (RFC 8446 Section 7.1)                                            */
 /* --------------------------------------------------------------------------------------------- */
-void SSFTLSDeriveSecret(SSFHMACHash_t hash,
-                        const uint8_t *secret, size_t secretLen,
-                        const char *label,
-                        const uint8_t *transcriptHash, size_t transcriptHashLen,
+void SSFTLSDeriveSecret(SSFHMACHash_t hash, const uint8_t *secret, size_t secretLen,
+                        const char *label, const uint8_t *transcriptHash, size_t transcriptHashLen,
                         uint8_t *out, size_t outLen)
 {
     SSF_REQUIRE(transcriptHash != NULL);
@@ -107,10 +103,8 @@ void SSFTLSDeriveSecret(SSFHMACHash_t hash,
 /* --------------------------------------------------------------------------------------------- */
 /* Key schedule: derive traffic key and IV from traffic secret (RFC 8446 Section 7.3)            */
 /* --------------------------------------------------------------------------------------------- */
-void SSFTLSDeriveTrafficKeys(SSFHMACHash_t hash,
-                             const uint8_t *trafficSecret, size_t secretLen,
-                             uint8_t *key, size_t keyLen,
-                             uint8_t *iv, size_t ivLen)
+void SSFTLSDeriveTrafficKeys(SSFHMACHash_t hash, const uint8_t *trafficSecret, size_t secretLen,
+                             uint8_t *key, size_t keyLen, uint8_t *iv, size_t ivLen)
 {
     SSF_REQUIRE(trafficSecret != NULL);
     SSF_REQUIRE(key != NULL);
@@ -126,8 +120,7 @@ void SSFTLSDeriveTrafficKeys(SSFHMACHash_t hash,
 /* finished_key = HKDF-Expand-Label(BaseKey, "finished", "", Hash.length)                        */
 /* verify_data = HMAC(finished_key, Transcript-Hash(Handshake Context ...))                      */
 /* --------------------------------------------------------------------------------------------- */
-void SSFTLSComputeFinished(SSFHMACHash_t hash,
-                           const uint8_t *baseKey, size_t baseKeyLen,
+void SSFTLSComputeFinished(SSFHMACHash_t hash, const uint8_t *baseKey, size_t baseKeyLen,
                            const uint8_t *transcriptHash, size_t transcriptHashLen,
                            uint8_t *verifyData, size_t verifyDataLen)
 {
@@ -224,9 +217,8 @@ void SSFTLSTranscriptHash(const SSFTLSTranscript_t *t, uint8_t *out, size_t outS
 /* --------------------------------------------------------------------------------------------- */
 /* Record layer: initialize state                                                                */
 /* --------------------------------------------------------------------------------------------- */
-void SSFTLSRecordStateInit(SSFTLSRecordState_t *state, uint16_t cipherSuite,
-                           const uint8_t *key, size_t keyLen,
-                           const uint8_t *iv, size_t ivLen)
+void SSFTLSRecordStateInit(SSFTLSRecordState_t *state, uint16_t cipherSuite, const uint8_t *key,
+                           size_t keyLen, const uint8_t *iv, size_t ivLen)
 {
     SSF_REQUIRE(state != NULL);
     SSF_REQUIRE(key != NULL);
@@ -282,9 +274,8 @@ static size_t _SSFTLSAeadTagSize(uint16_t cipherSuite)
 /* Record layer: encrypt a plaintext into a TLS 1.3 record.                                      */
 /* RFC 8446 Section 5.2: inner content type appended before encryption.                          */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFTLSRecordEncrypt(SSFTLSRecordState_t *state, uint8_t contentType,
-                         const uint8_t *pt, size_t ptLen,
-                         uint8_t *record, size_t recordSize, size_t *recordLen)
+bool SSFTLSRecordEncrypt(SSFTLSRecordState_t *state, uint8_t contentType, const uint8_t *pt,
+                         size_t ptLen, uint8_t *record, size_t recordSize, size_t *recordLen)
 {
     size_t tagLen;
     size_t innerLen;
@@ -373,10 +364,8 @@ bool SSFTLSRecordEncrypt(SSFTLSRecordState_t *state, uint8_t contentType,
 /* --------------------------------------------------------------------------------------------- */
 /* Record layer: decrypt a TLS 1.3 record.                                                       */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFTLSRecordDecrypt(SSFTLSRecordState_t *state,
-                         const uint8_t *record, size_t recordLen,
-                         uint8_t *pt, size_t ptSize, size_t *ptLen,
-                         uint8_t *contentType)
+bool SSFTLSRecordDecrypt(SSFTLSRecordState_t *state, const uint8_t *record, size_t recordLen,
+                         uint8_t *pt, size_t ptSize, size_t *ptLen, uint8_t *contentType)
 {
     size_t tagLen;
     uint16_t fragLen;

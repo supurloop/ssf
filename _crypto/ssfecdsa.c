@@ -266,9 +266,8 @@ static bool _SSFECDSAGenK(SSFECCurve_t curve, const uint8_t *privKey, size_t pri
 /* then prepend ONE 0x00 byte if the high bit of the first byte is set (so the value is read as */
 /* a positive INTEGER in two's complement). Writes a pointer to the canonical bytes into *outBuf */
 /* (which may point into the input or into the supplied padBuf scratch).                          */
-static void _SSFECDSACanonicalizeInt(const uint8_t *intBuf, uint32_t intLen,
-                                     uint8_t *padBuf, uint32_t padBufSize,
-                                     const uint8_t **outBuf, uint32_t *outLen)
+static void _SSFECDSACanonicalizeInt(const uint8_t *intBuf, uint32_t intLen, uint8_t *padBuf,
+                                     uint32_t padBufSize, const uint8_t **outBuf, uint32_t *outLen)
 {
     const uint8_t *p = intBuf;
     uint32_t n = intLen;
@@ -370,8 +369,7 @@ static bool _SSFECDSASigEncode(const SSFBN_t *r, const SSFBN_t *s, const SSFECCu
 /* On success: rOff/rLen and sOff/sLen point at the INTEGER content bytes inside `sig` (no    */
 /* leading 0x00 stripping yet -- the caller does that to get a canonical magnitude).           */
 static bool _SSFECDSASigParseStrictDER(const uint8_t *sig, size_t sigLen, uint16_t coordBytes,
-                                       size_t *rOff, size_t *rLen,
-                                       size_t *sOff, size_t *sLen)
+                                       size_t *rOff, size_t *rLen, size_t *sOff, size_t *sLen)
 {
     size_t pos = 0u;
     size_t seqLen;
@@ -501,8 +499,8 @@ static bool _SSFECDSAPrivKeyIsValid(const SSFBN_t *d, const SSFECCurveParams_t *
 /* --------------------------------------------------------------------------------------------- */
 /* Generate an ECDSA key pair.                                                                   */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFECDSAKeyGen(SSFECCurve_t curve, uint8_t *privKey, size_t privKeySize,
-                    uint8_t *pubKey, size_t pubKeySize, size_t *pubKeyLen)
+bool SSFECDSAKeyGen(SSFECCurve_t curve, uint8_t *privKey, size_t privKeySize, uint8_t *pubKey,
+                    size_t pubKeySize, size_t *pubKeyLen)
 {
     const SSFECCurveParams_t *c = SSFECGetCurveParams(curve);
     SSFPRNGContext_t prng;
@@ -708,10 +706,9 @@ cleanup:
 /* Verify stage 1: decode + validate pubKey, decode sig, range-check r/s, compute e, w, u1, u2.  */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFECDSAVerifyInit(const SSFECCurveParams_t *c, SSFECCurve_t curve,
-                                const uint8_t *pubKey, size_t pubKeyLen,
-                                const uint8_t *hash, size_t hashLen,
-                                const uint8_t *sig, size_t sigLen,
-                                SSFBN_t *rOut, SSFBN_t *u1Out, SSFBN_t *u2Out, SSFECPoint_t *QOut)
+                                const uint8_t *pubKey, size_t pubKeyLen, const uint8_t *hash,
+                                size_t hashLen, const uint8_t *sig, size_t sigLen, SSFBN_t *rOut,
+                                SSFBN_t *u1Out, SSFBN_t *u2Out, SSFECPoint_t *QOut)
 {
     SSFBN_DEFINE(s, SSF_EC_MAX_LIMBS);
     SSFBN_DEFINE(e, SSF_EC_MAX_LIMBS);
@@ -736,9 +733,8 @@ static bool _SSFECDSAVerifyInit(const SSFECCurveParams_t *c, SSFECCurve_t curve,
 /* --------------------------------------------------------------------------------------------- */
 /* Verify stage 2: R = u1 * G + u2 * Q (dispatches to fixed-base dual when configured).          */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFECDSAVerifyGetR(const SSFECCurveParams_t *c, SSFECCurve_t curve,
-                                const SSFBN_t *u1, const SSFBN_t *u2, const SSFECPoint_t *Q,
-                                SSFECPoint_t *Rout)
+static bool _SSFECDSAVerifyGetR(const SSFECCurveParams_t *c, SSFECCurve_t curve, const SSFBN_t *u1,
+                                const SSFBN_t *u2, const SSFECPoint_t *Q, SSFECPoint_t *Rout)
 {
 #if (SSF_EC_CONFIG_FIXED_BASE_P256 == 1) || (SSF_EC_CONFIG_FIXED_BASE_P384 == 1)
     (void)c;
@@ -820,8 +816,8 @@ bool SSFECDSAVerify(SSFECCurve_t curve, const uint8_t *pubKey, size_t pubKeyLen,
 /* Computes an ECDH shared secret S = d * Q (NIST SP 800-56A Rev. 3); returns Sx.                */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFECDHComputeSecret(SSFECCurve_t curve, const uint8_t *privKey, size_t privKeyLen,
-                          const uint8_t *peerPubKey, size_t peerPubKeyLen,
-                          uint8_t *secret, size_t secretSize, size_t *secretLen)
+                          const uint8_t *peerPubKey, size_t peerPubKeyLen, uint8_t *secret,
+                          size_t secretSize, size_t *secretLen)
 {
     const SSFECCurveParams_t *c = SSFECGetCurveParams(curve);
     SSFBN_DEFINE(d, SSF_EC_MAX_LIMBS);

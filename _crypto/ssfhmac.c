@@ -281,9 +281,8 @@ void SSFHMACDeInit(SSFHMACContext_t *ctx)
 /* --------------------------------------------------------------------------------------------- */
 /* Single-call HMAC.                                                                             */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFHMAC(SSFHMACHash_t hash, const uint8_t *key, size_t keyLen,
-             const uint8_t *msg, size_t msgLen,
-             uint8_t *macOut, size_t macOutSize)
+bool SSFHMAC(SSFHMACHash_t hash, const uint8_t *key, size_t keyLen, const uint8_t *msg,
+             size_t msgLen, uint8_t *macOut, size_t macOutSize)
 {
     SSFHMACContext_t ctx = {0};
 

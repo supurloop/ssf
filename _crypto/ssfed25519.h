@@ -50,16 +50,14 @@ extern "C" {
 /* --------------------------------------------------------------------------------------------- */
 /* External interface                                                                            */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFEd25519KeyGen(uint8_t seed[SSF_ED25519_SEED_SIZE],
-                      uint8_t pubKey[SSF_ED25519_PUB_KEY_SIZE]);
+bool SSFEd25519KeyGen(uint8_t seed[SSF_ED25519_SEED_SIZE], uint8_t pubKey[SSF_ED25519_PUB_KEY_SIZE]);
 void SSFEd25519PubKeyFromSeed(const uint8_t seed[SSF_ED25519_SEED_SIZE],
                               uint8_t pubKey[SSF_ED25519_PUB_KEY_SIZE]);
 bool SSFEd25519Sign(const uint8_t seed[SSF_ED25519_SEED_SIZE],
-                    const uint8_t pubKey[SSF_ED25519_PUB_KEY_SIZE],
-                    const uint8_t *msg, size_t msgLen, uint8_t sig[SSF_ED25519_SIG_SIZE]);
-bool SSFEd25519Verify(const uint8_t pubKey[SSF_ED25519_PUB_KEY_SIZE],
-                      const uint8_t *msg, size_t msgLen,
-                      const uint8_t sig[SSF_ED25519_SIG_SIZE]);
+                    const uint8_t pubKey[SSF_ED25519_PUB_KEY_SIZE], const uint8_t *msg,
+                    size_t msgLen, uint8_t sig[SSF_ED25519_SIG_SIZE]);
+bool SSFEd25519Verify(const uint8_t pubKey[SSF_ED25519_PUB_KEY_SIZE], const uint8_t *msg,
+                      size_t msgLen, const uint8_t sig[SSF_ED25519_SIG_SIZE]);
 
 /* --------------------------------------------------------------------------------------------- */
 /* Unit test                                                                                     */

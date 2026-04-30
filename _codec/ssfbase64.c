@@ -141,8 +141,7 @@ bool SSFBase64Encode(const uint8_t *in, size_t inLen, SSFCStrOut_t out, size_t o
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if C string input successfully decoded as output, else false.                    */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFBase64Decode(SSFCStrIn_t in, size_t inLenLim, uint8_t *out, size_t outSize,
-                     size_t *outLen)
+bool SSFBase64Decode(SSFCStrIn_t in, size_t inLenLim, uint8_t *out, size_t outSize, size_t *outLen)
 {
     uint8_t len;
 

@@ -109,7 +109,7 @@ bool SSFUBJsonPrintString(uint8_t *js, size_t size, size_t start, size_t *end, S
 bool SSFUBJsonPrintHex(uint8_t *js, size_t size, size_t start, size_t *end, uint8_t *in,
                        size_t inLen, bool rev);
 bool SSFUBJsonPrintBase64(uint8_t *js, size_t size, size_t start, size_t *end, uint8_t *in,
-                        size_t inLen);
+                          size_t inLen);
 
 #define SSFUBJsonPrintTrue(js, size, start, end) \
         SSFUBJsonPrintChar(js, size, start, end, 'T')
@@ -117,8 +117,7 @@ bool SSFUBJsonPrintBase64(uint8_t *js, size_t size, size_t start, size_t *end, u
         SSFUBJsonPrintChar(js, size, start, end, 'F')
 #define SSFUBJsonPrintNull(js, size, start, end) \
         SSFUBJsonPrintChar(js, size, start, end, 'Z')
-bool SSFUBJsonPrintChar(uint8_t *js, size_t size, size_t start, size_t *end,
-                             const char in);
+bool SSFUBJsonPrintChar(uint8_t *js, size_t size, size_t start, size_t *end, const char in);
 
 bool SSFUBJsonPrintInt(uint8_t *js, size_t size, size_t start, size_t *end, int64_t in, bool opt,
                        SSFUBJsonType_t optType);

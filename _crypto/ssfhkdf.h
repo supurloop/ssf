@@ -44,8 +44,8 @@ extern "C" {
 /* --------------------------------------------------------------------------------------------- */
 /* External interface                                                                            */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFHKDFExtract(SSFHMACHash_t hash, const uint8_t *salt, size_t saltLen,
-                    const uint8_t *ikm, size_t ikmLen, uint8_t *prkOut, size_t prkOutSize);
+bool SSFHKDFExtract(SSFHMACHash_t hash, const uint8_t *salt, size_t saltLen, const uint8_t *ikm,
+                    size_t ikmLen, uint8_t *prkOut, size_t prkOutSize);
 bool SSFHKDFExpand(SSFHMACHash_t hash, const uint8_t *prk, size_t prkLen, const uint8_t *info,
                    size_t infoLen, uint8_t *okmOut, size_t okmLen);
 bool SSFHKDF(SSFHMACHash_t hash, const uint8_t *salt, size_t saltLen, const uint8_t *ikm,

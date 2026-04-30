@@ -70,8 +70,7 @@ typedef struct SSFPoly1305Context
 
 /* One-shot: compute Poly1305 tag over msg using the 32-byte one-time key. Convenience wrapper   */
 /* over Begin/Update/End; preserves the original function signature and RFC 7539 test vectors.   */
-void SSFPoly1305Mac(const uint8_t *msg, size_t msgLen,
-                    const uint8_t *key, size_t keyLen,
+void SSFPoly1305Mac(const uint8_t *msg, size_t msgLen, const uint8_t *key, size_t keyLen,
                     uint8_t *tag, size_t tagSize);
 
 /* One-shot tag verification: compute the Poly1305 tag over msg with key, then compare against   */
@@ -79,29 +78,25 @@ void SSFPoly1305Mac(const uint8_t *msg, size_t msgLen,
 /* as exactly SSF_POLY1305_TAG_SIZE bytes -- no truncation; for shorter compare semantics, use   */
 /* SSFPoly1305Mac + SSFCryptCTMemEq directly. Bundles the CT-compare so callers cannot acciden-  */
 /* tally pair Mac with a non-CT memcmp() and open a tag-recovery timing side channel.            */
-bool SSFPoly1305Verify(const uint8_t *msg, size_t msgLen,
-                       const uint8_t *key, size_t keyLen,
+bool SSFPoly1305Verify(const uint8_t *msg, size_t msgLen, const uint8_t *key, size_t keyLen,
                        const uint8_t *expectedTag);
 
 /* Incremental: initialize ctx with a 32-byte one-time key. Clamps r, derives s, precomputes     */
 /* the r*5 reduction operands, and zeroes the accumulator. After Begin the context is ready for  */
 /* a sequence of Update calls terminated by one End call. */
-void SSFPoly1305Begin(SSFPoly1305Context_t *ctx,
-                      const uint8_t *key, size_t keyLen);
+void SSFPoly1305Begin(SSFPoly1305Context_t *ctx, const uint8_t *key, size_t keyLen);
 
 /* Incremental: feed msgLen bytes of message into the MAC. Internally processes complete 16-byte */
 /* blocks as they accumulate and stashes any trailing < 16-byte tail in the context for the next */
 /* call. Can be invoked any number of times with any chunk sizes; the result is identical to a   */
 /* single-buffer call over the concatenation of all Update inputs. */
-void SSFPoly1305Update(SSFPoly1305Context_t *ctx,
-                       const uint8_t *msg, size_t msgLen);
+void SSFPoly1305Update(SSFPoly1305Context_t *ctx, const uint8_t *msg, size_t msgLen);
 
 /* Incremental: finalize and write the 16-byte tag. Processes any remaining partial block with   */
 /* the RFC 7539 0x01 high-bit marker, runs the final reduction, adds s, and emits the tag. Also  */
 /* zeroises ctx on return to limit exposure of the one-time key material. After End the context  */
 /* is invalid -- Begin it again before reuse. */
-void SSFPoly1305End(SSFPoly1305Context_t *ctx,
-                    uint8_t *tag, size_t tagSize);
+void SSFPoly1305End(SSFPoly1305Context_t *ctx, uint8_t *tag, size_t tagSize);
 
 #if SSF_CONFIG_POLY1305_UNIT_TEST == 1
 void SSFPoly1305UnitTest(void);

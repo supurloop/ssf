@@ -980,8 +980,7 @@ static void _sc_reduce(uint8_t s[64])
 /* Compute s = (a * b + c) mod L.                                                                */
 /* a, b, c are 32-byte LE scalars (already reduced mod L).                                       */
 /* Output s is 32 bytes LE.                                                                      */
-static void _sc_muladd(uint8_t s[32], const uint8_t a[32], const uint8_t b[32],
-                       const uint8_t c[32])
+static void _sc_muladd(uint8_t s[32], const uint8_t a[32], const uint8_t b[32], const uint8_t c[32])
 {
     int64_t a0  = (int64_t)(2097151u & _sc_load3(&a[0]));
     int64_t a1  = (int64_t)(2097151u & (_sc_load4(&a[2])  >> 5));
@@ -1307,8 +1306,7 @@ static void _sha512_update_sized(SSFSHA2_64Context_t *ctx, const uint8_t *buf, s
 /* --------------------------------------------------------------------------------------------- */
 
 /* Generate an Ed25519 key pair. */
-bool SSFEd25519KeyGen(uint8_t seed[SSF_ED25519_SEED_SIZE],
-                      uint8_t pubKey[SSF_ED25519_PUB_KEY_SIZE])
+bool SSFEd25519KeyGen(uint8_t seed[SSF_ED25519_SEED_SIZE], uint8_t pubKey[SSF_ED25519_PUB_KEY_SIZE])
 {
     SSF_REQUIRE(seed != NULL);
     SSF_REQUIRE(pubKey != NULL);
@@ -1320,7 +1318,7 @@ bool SSFEd25519KeyGen(uint8_t seed[SSF_ED25519_SEED_SIZE],
 
 /* Derive public key from a 32-byte seed. */
 void SSFEd25519PubKeyFromSeed(const uint8_t seed[SSF_ED25519_SEED_SIZE],
-                               uint8_t pubKey[SSF_ED25519_PUB_KEY_SIZE])
+                              uint8_t pubKey[SSF_ED25519_PUB_KEY_SIZE])
 {
     uint8_t h[64];
     uint8_t a[32];
@@ -1348,9 +1346,8 @@ void SSFEd25519PubKeyFromSeed(const uint8_t seed[SSF_ED25519_SEED_SIZE],
 
 /* Sign a message. */
 bool SSFEd25519Sign(const uint8_t seed[SSF_ED25519_SEED_SIZE],
-                    const uint8_t pubKey[SSF_ED25519_PUB_KEY_SIZE],
-                    const uint8_t *msg, size_t msgLen,
-                    uint8_t sig[SSF_ED25519_SIG_SIZE])
+                    const uint8_t pubKey[SSF_ED25519_PUB_KEY_SIZE], const uint8_t *msg,
+                    size_t msgLen, uint8_t sig[SSF_ED25519_SIG_SIZE])
 {
     uint8_t h[64], r_hash[64], hram[64];
     uint8_t a[32], nonce[32];
@@ -1420,9 +1417,8 @@ bool SSFEd25519Sign(const uint8_t seed[SSF_ED25519_SEED_SIZE],
 }
 
 /* Verify a signature. Returns true if valid. */
-bool SSFEd25519Verify(const uint8_t pubKey[SSF_ED25519_PUB_KEY_SIZE],
-                      const uint8_t *msg, size_t msgLen,
-                      const uint8_t sig[SSF_ED25519_SIG_SIZE])
+bool SSFEd25519Verify(const uint8_t pubKey[SSF_ED25519_PUB_KEY_SIZE], const uint8_t *msg,
+                      size_t msgLen, const uint8_t sig[SSF_ED25519_SIG_SIZE])
 {
     _ge_t A, negA, check;
     uint8_t hram[64];

@@ -17,7 +17,7 @@ and version-migration logic at startup.
 ## [↑](#ssfcfg--version-controlled-configuration-storage) Dependencies
 
 - [`ssfport.h`](../ssfport.h)
-- [`ssfoptions.h`](../ssfoptions.h)
+- [`_opt/ssfcfg_opt.h`](../_opt/ssfcfg_opt.h) (aggregated through `ssfoptions.h`)
 - [`ssfcrc16.h`](../_edc/ssfcrc16.h)
 
 <a id="notes"></a>
@@ -44,16 +44,18 @@ and version-migration logic at startup.
 
 ## [↑](#ssfcfg--version-controlled-configuration-storage) Configuration
 
-All options are set in `ssfoptions.h`.
+Options live in [`_opt/ssfcfg_opt.h`](../_opt/ssfcfg_opt.h) (aggregated into the build via
+`ssfoptions.h`).
 
 | Option | Default | Description |
 |--------|---------|-------------|
 | `SSF_CFG_MAX_STORAGE_SIZE` | `4096` | Maximum size in bytes of one erasable NV storage sector |
 | `SSF_CFG_WRITE_CHECK_CHUNK_SIZE` | `32` | Size of the temporary stack buffer used during the read-before-write check; reduce if stack space is limited |
 | `SSF_CFG_ENABLE_STORAGE_RAM` | `1` | `1` to use a RAM-based simulated NV storage suitable for unit tests; `0` to use real hardware via the port macros below |
+| `SSF_MAX_CFG_RAM_SECTORS` | `3` | Number of RAM-backed sectors when `SSF_CFG_ENABLE_STORAGE_RAM == 1`. Caps the maximum number of distinct `dataId_t` values the build supports. Defined only inside the `#if SSF_CFG_ENABLE_STORAGE_RAM == 1` block in the opt file. |
 | `SSF_CFG_TYPEDEF_STRUCT` | `typedef struct` | Optionally append a packed-struct attribute (e.g. `__attribute__((packed))`) to the internal record structure |
 
-**Port macros** (required when `SSF_CFG_ENABLE_STORAGE_RAM == 0`; implement in `ssfoptions.h`):
+**Port macros** (required when `SSF_CFG_ENABLE_STORAGE_RAM == 0`; implement in [`_opt/ssfcfg_opt.h`](../_opt/ssfcfg_opt.h)):
 
 | Macro | Description |
 |-------|-------------|
@@ -61,7 +63,7 @@ All options are set in `ssfoptions.h`.
 | `SSF_CFG_WRITE_STORAGE(data, dataLen, dataId, dataOffset)` | Write `dataLen` bytes from `data` to the sector for `dataId` at byte offset `dataOffset` |
 | `SSF_CFG_READ_STORAGE(data, dataSize, dataId, dataOffset)` | Read `dataSize` bytes from the sector for `dataId` at byte offset `dataOffset` into `data` |
 
-**Thread sync macros** (required when `SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1`; implement in `ssfoptions.h`):
+**Thread sync macros** (defined in [`_opt/ssfcfg_opt.h`](../_opt/ssfcfg_opt.h) when `SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1`):
 
 | Macro | Description |
 |-------|-------------|

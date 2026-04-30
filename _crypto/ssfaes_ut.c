@@ -1006,7 +1006,6 @@ void SSFAESUnitTest(void)
         #include "cavs_aes_kat.h"
 
         uint8_t actual[16];
-        uint16_t i;
 
         /* AES-128 ENCRYPT */
         for (i = 0; i < SSF_CAVS_AES_KAT_GFSBOX128_ENCRYPT_N; i++)

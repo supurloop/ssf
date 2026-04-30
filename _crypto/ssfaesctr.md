@@ -201,6 +201,8 @@ Initializes an incremental AES-CTR context with the given key and initial 16-byt
 | `keyLen` | in | `size_t` | Key length in bytes. Must be exactly 16, 24, or 32. |
 | `iv` | in | `const uint8_t *` | 16-byte initial counter. Must be non-NULL. |
 
+**Returns:** Nothing.
+
 <a id="ssfaesctrcrypt"></a>
 
 ### [↑](#functions) [`void SSFAESCTRCrypt()`](#functions)
@@ -219,6 +221,8 @@ both directions. `in` and `out` may alias.
 | `out` | out | `uint8_t *` | Output buffer (at least `len` bytes). May be `NULL` if `len == 0`. |
 | `len` | in | `size_t` | Number of bytes to process. May be `0`. |
 
+**Returns:** Nothing.
+
 <a id="ssfaesctrdeinit"></a>
 
 ### [↑](#functions) [`void SSFAESCTRDeInit()`](#functions)
@@ -232,6 +236,8 @@ Securely zeroes the entire context, clearing the key, counter, and any buffered 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
 | `ctx` | in/out | `SSFAESCTRContext_t *` | Live context (must have valid magic). |
+
+**Returns:** Nothing.
 
 <a id="ex-incremental"></a>
 
@@ -259,6 +265,18 @@ void SSFAESCTR(const uint8_t *key, size_t keyLen, const uint8_t *iv,
 ```
 
 Single-call encrypt/decrypt. Equivalent to `Begin` / `Crypt` / `DeInit` on an internal context.
+For chunked streaming use the incremental API instead — see [Streaming usage](#streaming-usage).
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `key` | in | `const uint8_t *` | AES key bytes. Must be non-`NULL`. |
+| `keyLen` | in | `size_t` | Key length in bytes. Must be exactly 16, 24, or 32. |
+| `iv` | in | `const uint8_t *` | 16-byte initial counter. Must be non-`NULL`. |
+| `in` | in | `const uint8_t *` | Input buffer. May be `NULL` if `len == 0`. |
+| `out` | out | `uint8_t *` | Output buffer (at least `len` bytes). May be `NULL` if `len == 0`. May alias `in` for in-place. |
+| `len` | in | `size_t` | Number of bytes to process. May be `0`. |
+
+**Returns:** Nothing.
 
 <a id="ex-oneshot"></a>
 

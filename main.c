@@ -92,60 +92,10 @@ typedef struct
 
 SSFUnitTest_t unitTests[] =
 {
-#if 0
-    /* _ui */
-#if SSF_CONFIG_ARGV_UNIT_TEST == 1
-    { "ssfargv", "Command Line Argv Parser", SSFArgvUnitTest },
-#endif /* SSF_CONFIG_ARGV_UNIT_TEST */
-#if SSF_CONFIG_CLI_UNIT_TEST == 1
-    { "ssfcli", "CLI Framework", SSFCLIUnitTest },
-#endif /* SSF_CONFIG_CLI_UNIT_TEST */
-#if SSF_CONFIG_VTED_UNIT_TEST == 1
-    { "ssfvted", "VT100 Terminal Line Editor", SSFVTEdUnitTest },
-#endif /* SSF_CONFIG_VTED_UNIT_TEST */
-
-    /* _debug */
-#if SSF_CONFIG_TRACE_UNIT_TEST == 1
-    { "ssftrace", "Debug Trace", SSFTraceUnitTest },
-#endif /* SSF_CONFIG_TRACE_UNIT_TEST */
-
-    /* _codec */
-#if SSF_CONFIG_BASE64_UNIT_TEST == 1
-    { "ssfbase64", "Base64 Codec", SSFBase64UnitTest },
-#endif /* SSF_CONFIG_BASE64_UNIT_TEST */
-#if SSF_CONFIG_DEC_UNIT_TEST == 1
-    { "ssfdec", "Decimal String Codec", SSFDecUnitTest },
-#endif /* SSF_CONFIG_DEC_UNIT_TEST */
-#if SSF_CONFIG_GOBJ_UNIT_TEST == 1
-    { "ssfgobj", "Generic Object Codec", SSFGObjUnitTest },
-#endif /* SSF_CONFIG_GOBJ_UNIT_TEST */
-#if SSF_CONFIG_HEX_UNIT_TEST == 1
-    { "ssfhex", "Hex String Codec", SSFHexUnitTest },
-#endif /* SSF_CONFIG_HEX_UNIT_TEST */
-#if SSF_CONFIG_INI_UNIT_TEST == 1
-    { "ssfini", "INI Codec", SSFINIUnitTest },
-#endif /* SSF_CONFIG_INI_UNIT_TEST */
-#if SSF_CONFIG_JSON_UNIT_TEST == 1
-    { "ssfjson", "JSON Codec", SSFJsonUnitTest },
-#endif /* SSF_CONFIG_JSON_UNIT_TEST */
-#if SSF_CONFIG_STR_UNIT_TEST == 1
-    { "ssfstr", "Safe C Strings", SSFStrUnitTest },
-#endif /* SSF_CONFIG_STR_UNIT_TEST */
-#if SSF_CONFIG_TLV_UNIT_TEST == 1
-    { "ssftlv", "Tag/Length/Value Codec", SSFTLVUnitTest },
-#endif /* SSF_CONFIG_TLV_UNIT_TEST */
-#if SSF_CONFIG_UBJSON_UNIT_TEST == 1
-    { "ssfubjson", "Universal Binary JSON Codec", SSFUBJsonUnitTest },
-#endif /* SSF_CONFIG_UBJSON_UNIT_TEST */
-    #if SSF_CONFIG_ASN1_UNIT_TEST == 1
-        { "ssfasn1", "ASN.1 DER Codec", SSFASN1UnitTest },
-    #endif /* SSF_CONFIG_ASN1_UNIT_TEST */
-#endif
+    /* _crypto */
 #if SSF_CONFIG_BN_UNIT_TEST == 1
     { "ssfbn", "Big Number Arithmetic", SSFBNUnitTest },
 #endif /* SSF_CONFIG_BN_UNIT_TEST */
-#if 1
-    /* _crypto */
 #if SSF_CONFIG_AES_UNIT_TEST == 1
     { "ssfaes", "AES128-256 Block", SSFAESUnitTest },
 #endif /* SSF_CONFIG_AES_UNIT_TEST */
@@ -203,9 +153,55 @@ SSFUnitTest_t unitTests[] =
 #if SSF_CONFIG_TLS_UNIT_TEST == 1
     { "ssftls", "TLS 1.3 Core", SSFTLSUnitTest },
 #endif /* SSF_CONFIG_TLS_UNIT_TEST */
-#endif
 
-#if 0
+    /* _ui */
+#if SSF_CONFIG_ARGV_UNIT_TEST == 1
+    { "ssfargv", "Command Line Argv Parser", SSFArgvUnitTest },
+#endif /* SSF_CONFIG_ARGV_UNIT_TEST */
+#if SSF_CONFIG_CLI_UNIT_TEST == 1
+    { "ssfcli", "CLI Framework", SSFCLIUnitTest },
+#endif /* SSF_CONFIG_CLI_UNIT_TEST */
+#if SSF_CONFIG_VTED_UNIT_TEST == 1
+    { "ssfvted", "VT100 Terminal Line Editor", SSFVTEdUnitTest },
+#endif /* SSF_CONFIG_VTED_UNIT_TEST */
+
+    /* _debug */
+#if SSF_CONFIG_TRACE_UNIT_TEST == 1
+    { "ssftrace", "Debug Trace", SSFTraceUnitTest },
+#endif /* SSF_CONFIG_TRACE_UNIT_TEST */
+
+    /* _codec */
+#if SSF_CONFIG_BASE64_UNIT_TEST == 1
+    { "ssfbase64", "Base64 Codec", SSFBase64UnitTest },
+#endif /* SSF_CONFIG_BASE64_UNIT_TEST */
+#if SSF_CONFIG_DEC_UNIT_TEST == 1
+    { "ssfdec", "Decimal String Codec", SSFDecUnitTest },
+#endif /* SSF_CONFIG_DEC_UNIT_TEST */
+#if SSF_CONFIG_GOBJ_UNIT_TEST == 1
+    { "ssfgobj", "Generic Object Codec", SSFGObjUnitTest },
+#endif /* SSF_CONFIG_GOBJ_UNIT_TEST */
+#if SSF_CONFIG_HEX_UNIT_TEST == 1
+    { "ssfhex", "Hex String Codec", SSFHexUnitTest },
+#endif /* SSF_CONFIG_HEX_UNIT_TEST */
+#if SSF_CONFIG_INI_UNIT_TEST == 1
+    { "ssfini", "INI Codec", SSFINIUnitTest },
+#endif /* SSF_CONFIG_INI_UNIT_TEST */
+#if SSF_CONFIG_JSON_UNIT_TEST == 1
+    { "ssfjson", "JSON Codec", SSFJsonUnitTest },
+#endif /* SSF_CONFIG_JSON_UNIT_TEST */
+#if SSF_CONFIG_STR_UNIT_TEST == 1
+    { "ssfstr", "Safe C Strings", SSFStrUnitTest },
+#endif /* SSF_CONFIG_STR_UNIT_TEST */
+#if SSF_CONFIG_TLV_UNIT_TEST == 1
+    { "ssftlv", "Tag/Length/Value Codec", SSFTLVUnitTest },
+#endif /* SSF_CONFIG_TLV_UNIT_TEST */
+#if SSF_CONFIG_UBJSON_UNIT_TEST == 1
+    { "ssfubjson", "Universal Binary JSON Codec", SSFUBJsonUnitTest },
+#endif /* SSF_CONFIG_UBJSON_UNIT_TEST */
+#if SSF_CONFIG_ASN1_UNIT_TEST == 1
+    { "ssfasn1", "ASN.1 DER Codec", SSFASN1UnitTest },
+#endif /* SSF_CONFIG_ASN1_UNIT_TEST */
+
     /* _ecc */
 #if SSF_CONFIG_RS_UNIT_TEST == 1
     { "ssfrs", "Reed Solomon ECC", SSFRSUnitTest },
@@ -264,7 +260,6 @@ SSFUnitTest_t unitTests[] =
 #if SSF_CONFIG_LPTASK_UNIT_TEST == 1
     { "ssflptask", "Low-Priority Task Queue", SSFLPTaskUnitTest },
 #endif /* SSF_CONFIG_LPTASK_UNIT_TEST */
-#endif
 };
 
 /* --------------------------------------------------------------------------------------------- */

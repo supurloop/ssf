@@ -68,7 +68,7 @@ This module has no compile-time configuration options in `ssfoptions.h`.
 |---|----------|-------------|
 | [e.g.](#ex-init) | [`void SSFPRNGInitContext(context, entropy, entropyLen)`](#ssfprnginitcontext) | Initialize a PRNG context with 16 bytes of entropy |
 | [e.g.](#ex-reinit) | [`void SSFPRNGReInitContext(context, entropy, entropyLen)`](#ssfprngreinitcontext) | Re-seed an existing context with fresh entropy (alias for `SSFPRNGInitContext`) |
-| [e.g.](#ex-deinit) | [`void SSFPRNGDeInitContext(context)`](#ssfprnginitcontext) | De-initialize a context and clear its internal state |
+| [e.g.](#ex-deinit) | [`void SSFPRNGDeInitContext(context)`](#ssfprngdeinitcontext) | De-initialize a context and clear its internal state |
 | [e.g.](#ex-getrandom) | [`void SSFPRNGGetRandom(context, random, randomSize)`](#ssfprnggetrandom) | Generate 1–16 bytes of pseudo-random data |
 
 <a id="function-reference"></a>

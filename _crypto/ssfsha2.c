@@ -108,7 +108,7 @@ void SSFSHA2_32(const uint8_t *in, uint32_t inLen, uint8_t *out, uint32_t outSiz
 {
     SSFSHA2_32Context_t context;
 
-    SSF_ASSERT(in != NULL);
+    SSF_ASSERT((in != NULL) || (inLen == 0));
     SSF_ASSERT(out != NULL);
     SSF_ASSERT((hashBitSize == 256) || (hashBitSize == 224));
     SSF_ASSERT(outSize >= (uint32_t)(hashBitSize >> 3));
@@ -126,7 +126,7 @@ void SSFSHA2_64(const uint8_t *in, uint32_t inLen, uint8_t *out, uint32_t outSiz
 {
     SSFSHA2_64Context_t context;
 
-    SSF_ASSERT(in != NULL);
+    SSF_ASSERT((in != NULL) || (inLen == 0));
     SSF_ASSERT(out != NULL);
     SSF_ASSERT(((hashBitSize == 512) && ((truncationBitSize == 0) || (truncationBitSize == 256) ||
                                          (truncationBitSize == 224))) ||

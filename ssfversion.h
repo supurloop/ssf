@@ -117,7 +117,28 @@
 /* 0.1.5 - Fixed nuisance compiler warnings.                                                     */
 /* 0.1.6 - Expanded all unit tests to improve code coverage.                                     */
 /*       - Documentation updates.                                                                */
+/* 0.5.0 - Added ssfsha1, ssfhmac, ssfhkdf, ssfaesctr, and ssfaesccm crypto modules.             */
+/*       - Added ssfchacha20, ssfchacha20poly1305, and ssfpoly1305 crypto modules.               */
+/*       - Added ssfbn arbitrary-precision arithmetic crypto module.                             */
+/*       - Added ssfec, ssfecdsa, ssfed25519, and ssfx25519 elliptic-curve crypto modules.       */
+/*       - Added ssfrsa crypto module.                                                           */
+/*       - Added ssfcrypt high-level crypto profile/dispatcher module.                           */
+/*       - Added ssftls TLS module.                                                              */
+/*       - Added ssfasn1 ASN.1 DER encoder/decoder module.                                       */
+/*       - Added ssfsll sorted linked-list module.                                               */
+/*       - Added ssftrace debug trace module.                                                    */
+/*       - Added ssflptask lightweight cooperative task module (_osal).                          */
+/*       - Added ssfargv, ssfcli, and ssfvted UI modules.                                        */
+/*       - Added _opt directory with per-module compile-time configuration headers.              */
+/*       - Added libFuzzer differential harnesses for AES-CTR and ECDSA verify.                  */
+/*       - Added cross-architecture unit-test matrix under QEMU and ASan/UBSan build variant.    */
+/*       - ssfaesgcm fix: zero plaintext on authentication failure in Decrypt.                   */
+/*       - ssfaes fix: signed-shift UB in key expansion byte-load loop.                          */
+/*       - ssfaes fix: big-endian KAT failures from state/array endian mismatch.                 */
+/*       - ssfprng fix: scrub stack secrets in GetRandom; align AES input with NIST CTR_DRBG.    */
+/*       - ssfbase64: reject non-canonical encodings per RFC 4648 section 3.5.                   */
+/*       - Other minor changes, hardening, warning fixes, and documentation improvements.        */
 /* --------------------------------------------------------------------------------------------- */
-#define SSF_VERSION_STR "0.1.6"
+#define SSF_VERSION_STR "0.5.0"
 
 #endif /* SSF_VERSION_H_INCLUDE */

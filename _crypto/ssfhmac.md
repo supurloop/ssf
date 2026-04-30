@@ -32,9 +32,12 @@ so callers can size their MAC buffer without hard-coding a constant.
 - **Verify MACs with [`ssfcrypt`](ssfcrypt.md), not `memcmp()`.** `SSFHMAC()` computes a tag; callers
   must then compare the computed tag to the expected tag using `SSFCryptCTMemEq()` to avoid a
   timing side channel that would let an attacker forge MACs byte-by-byte.
-- `macOut` must be at least [`SSFHMACGetHashSize(hash)`](#ssfhmacgethashsize) bytes; the full
-  hash output is always written (HMAC truncation is not performed by this module — if your
-  protocol requires HMAC-SHA-256-128 or similar, truncate the output at the call site).
+- `macOut` must be exactly [`SSFHMACGetHashSize(hash)`](#ssfhmacgethashsize) bytes — strict
+  equality, enforced by `SSF_REQUIRE` in both [`SSFHMAC()`](#ssfhmac) and
+  [`SSFHMACEnd()`](#ssfhmac-inc). Oversize buffers are rejected so the caller cannot
+  accidentally transmit or re-hash uninitialised stack bytes past the hash output. If your
+  protocol requires HMAC-SHA-256-128 or similar, write to a hash-sized buffer and copy or
+  reference the leading bytes at the call site.
 - Key-length handling follows RFC 2104 §2:
   - `keyLen > blockSize` → the key is pre-hashed with the selected hash and the hash output
     is used as the effective key.
@@ -89,6 +92,7 @@ This module has no compile-time configuration options in `ssfoptions.h`.
 |---|----------|-------------|
 | [e.g.](#ex-hmac) | [`bool SSFHMAC(hash, key, keyLen, msg, msgLen, macOut, macOutSize)`](#ssfhmac) | One-shot HMAC over `msg` with `key` using the selected hash |
 | [e.g.](#ex-hmac-inc) | [`void SSFHMACBegin` / `void SSFHMACUpdate` / `void SSFHMACEnd`](#ssfhmac-inc) | Incremental HMAC: initialize context with key, feed message chunks, finalize MAC |
+| [e.g.](#ex-hmac-inc) | [`void SSFHMACDeInit(ctx)`](#ssfhmacdeinit) | Scrub a context's internal state and reset it for a fresh `SSFHMACBegin()` |
 | [e.g.](#ex-hashsize) | [`size_t SSFHMACGetHashSize(hash)`](#ssfhmacgethashsize) | Output size in bytes for the selected hash; useful for sizing the MAC buffer |
 
 <a id="function-reference"></a>
@@ -113,11 +117,11 @@ hash algorithm selected by `hash`, writing the MAC to `macOut`. Equivalent to
 |-----------|-----------|------|-------------|
 | `hash` | in | `SSFHMACHash_t` | Hash algorithm. Must be one of `SSF_HMAC_HASH_SHA1`, `SHA256`, `SHA384`, `SHA512`. |
 | `key` | in | `const uint8_t *` | Pointer to the HMAC key. Must not be `NULL`. Keys shorter than the hash's block size are zero-padded; keys longer than the block size are pre-hashed per RFC 2104 §2. |
-| `keyLen` | in | `size_t` | Number of key bytes. |
+| `keyLen` | in | `size_t` | Number of key bytes. Must be `> 0`. |
 | `msg` | in | `const uint8_t *` | Pointer to the message. May be `NULL` when `msgLen` is `0`. |
 | `msgLen` | in | `size_t` | Number of message bytes. |
 | `macOut` | out | `uint8_t *` | Buffer receiving the MAC. Must not be `NULL`. |
-| `macOutSize` | in | `size_t` | Size of `macOut`. Must be at least [`SSFHMACGetHashSize(hash)`](#ssfhmacgethashsize); the full hash-sized MAC is always written. |
+| `macOutSize` | in | `size_t` | Size of `macOut`. Must equal [`SSFHMACGetHashSize(hash)`](#ssfhmacgethashsize) (strict equality; oversize and undersize both trip `SSF_REQUIRE`). |
 
 **Returns:** `true`. The function always succeeds when it returns; all argument-validity
 failures are caught by `SSF_REQUIRE` before return. The `bool` result preserves the SSF API
@@ -134,7 +138,8 @@ const uint8_t key[20] = {
     0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b, 0x0b,
     0x0b, 0x0b, 0x0b, 0x0b
 };
-uint8_t mac[SSF_HMAC_MAX_HASH_SIZE];
+/* mac size must equal hashSize for the chosen hash (32 for SHA-256). */
+uint8_t mac[32];
 
 SSFHMAC(SSF_HMAC_HASH_SHA256, key, sizeof(key),
         (const uint8_t *)"Hi There", 8, mac, sizeof(mac));
@@ -166,8 +171,9 @@ void SSFHMACEnd(SSFHMACContext_t *ctx, uint8_t *macOut, size_t macOutSize);
 Incremental HMAC interface. Call `SSFHMACBegin()` once to bind a hash algorithm and key to the
 context, `SSFHMACUpdate()` zero or more times to feed message chunks, then `SSFHMACEnd()` once
 to finalize and write the MAC. The result is identical to the one-shot
-[`SSFHMAC()`](#ssfhmac) interface. After `SSFHMACEnd()` the context is invalid — call
-`SSFHMACBegin()` again before reusing it.
+[`SSFHMAC()`](#ssfhmac) interface. `SSFHMACEnd()` does not scrub the context; call
+[`SSFHMACDeInit()`](#ssfhmacdeinit) before issuing another `SSFHMACBegin()` on the same
+storage, and at end-of-life to wipe key-derived state.
 
 **`SSFHMACBegin()` parameters:**
 
@@ -176,7 +182,7 @@ to finalize and write the MAC. The result is identical to the one-shot
 | `ctx` | out | `SSFHMACContext_t *` | Pointer to the context to initialize. Must not be `NULL`. |
 | `hash` | in | `SSFHMACHash_t` | Hash algorithm; one of the four defined variants. |
 | `key` | in | `const uint8_t *` | HMAC key. Must not be `NULL`. Pre-hashed when `keyLen` exceeds the hash's block size; otherwise zero-padded to the block size. |
-| `keyLen` | in | `size_t` | Number of key bytes. |
+| `keyLen` | in | `size_t` | Number of key bytes. Must be `> 0`. |
 
 **`SSFHMACUpdate()` parameters:**
 
@@ -192,7 +198,7 @@ to finalize and write the MAC. The result is identical to the one-shot
 |-----------|-----------|------|-------------|
 | `ctx` | in-out | `SSFHMACContext_t *` | Pointer to the context to finalize. Invalidated after this call. Must not be `NULL`. |
 | `macOut` | out | `uint8_t *` | Buffer receiving the MAC. Must not be `NULL`. |
-| `macOutSize` | in | `size_t` | Size of `macOut`. Must be at least [`SSFHMACGetHashSize(ctx->hash)`](#ssfhmacgethashsize). |
+| `macOutSize` | in | `size_t` | Size of `macOut`. Must equal [`SSFHMACGetHashSize(ctx->hash)`](#ssfhmacgethashsize) (strict equality; oversize and undersize both trip `SSF_REQUIRE`). |
 
 All three functions **return:** Nothing.
 
@@ -201,8 +207,9 @@ All three functions **return:** Nothing.
 **Example:**
 
 ```c
-SSFHMACContext_t ctx;
-uint8_t          mac[SSF_HMAC_MAX_HASH_SIZE];
+SSFHMACContext_t ctx = {0};                   /* magic must be zero before first Begin */
+uint8_t          mac256[32];                  /* must equal hashSize (32 for SHA-256) */
+uint8_t          mac512[64];                  /* must equal hashSize (64 for SHA-512) */
 const uint8_t    key[] = "shared-secret-key";
 
 /* Stream a large message (e.g., a file) through HMAC-SHA-256 without
@@ -211,12 +218,37 @@ SSFHMACBegin(&ctx, SSF_HMAC_HASH_SHA256, key, sizeof(key) - 1);
 SSFHMACUpdate(&ctx, header, headerLen);
 SSFHMACUpdate(&ctx, body,   bodyLen);
 SSFHMACUpdate(&ctx, footer, footerLen);
-SSFHMACEnd(&ctx, mac, sizeof(mac));
+SSFHMACEnd(&ctx, mac256, sizeof(mac256));
 
-/* Context is invalid after End(); Begin() again to reuse. */
+/* DeInit between two Begins on the same context: End() does not scrub. */
+SSFHMACDeInit(&ctx);
 SSFHMACBegin(&ctx, SSF_HMAC_HASH_SHA512, key, sizeof(key) - 1);
 /* ... */
+SSFHMACEnd(&ctx, mac512, sizeof(mac512));     /* sized to SHA-512's 64-byte output */
+SSFHMACDeInit(&ctx);                          /* scrub before storage goes out of scope */
 ```
+
+---
+
+<a id="ssfhmacdeinit"></a>
+
+### [↑](#functions) [`void SSFHMACDeInit()`](#functions)
+
+```c
+void SSFHMACDeInit(SSFHMACContext_t *ctx);
+```
+
+Securely zeroes a previously initialised HMAC context, wiping the outer-key pad, the embedded
+hash state, the algorithm selector, and the magic marker. Required between two
+`SSFHMACBegin()` calls on the same storage (because `SSFHMACEnd()` leaves the magic marker set
+and `SSFHMACBegin()` requires it to be zero), and at end-of-life to scrub the key-derived
+state before the storage goes out of scope or is reused for an unrelated purpose.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `ctx` | in-out | `SSFHMACContext_t *` | Pointer to a context that has previously been initialised by `SSFHMACBegin()` (with or without a subsequent `SSFHMACEnd()`). Must not be `NULL`. |
+
+**Returns:** Nothing.
 
 ---
 
@@ -243,12 +275,13 @@ SHA-256, `48` for SHA-384, `64` for SHA-512. Useful for sizing a MAC buffer and 
 **Example:**
 
 ```c
-/* Size a MAC buffer for the hash actually selected at runtime — no per-hash
-   branching at the call site. */
+/* Size a MAC buffer for the hash actually selected at runtime. SSFHMAC's
+   macOutSize must equal hashSize, so size the buffer to SSF_HMAC_MAX_HASH_SIZE
+   and pass the per-hash size as macOutSize. */
 SSFHMACHash_t hash   = SSF_HMAC_HASH_SHA384;
 size_t        macLen = SSFHMACGetHashSize(hash);   /* 48 */
-uint8_t       mac[SSF_HMAC_MAX_HASH_SIZE];
+uint8_t       mac[SSF_HMAC_MAX_HASH_SIZE];         /* upper bound across all hashes */
 
-SSFHMAC(hash, key, keyLen, msg, msgLen, mac, sizeof(mac));
-/* Only the first macLen bytes of mac are meaningful. */
+SSFHMAC(hash, key, keyLen, msg, msgLen, mac, macLen);
+/* Only the first macLen bytes of mac are written and meaningful. */
 ```

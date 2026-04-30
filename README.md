@@ -114,7 +114,7 @@ This means that calls into those interfaces from different execution contexts wi
 
 For example, you can have linked list object A in task 1 and linked list object B in task 2 and they will be managed independently and correctly, so long as they are only accessed from the context of their respective task.
 
-To ensure safe operation of the non-renetrant modules in a multi-threaded system SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT must be enabled and synchronization macros must be implemented.
+To ensure safe operation of the non-reentrant modules in a multi-threaded system SSF_CONFIG_ENABLE_THREAD_SUPPORT must be enabled and synchronization macros must be implemented.
 
 ### Deinitialization
 
@@ -140,6 +140,7 @@ Efficient data structure primitives for embedded systems, designed to avoid dyna
 |--------|-------------|-------|------------|------------|------|-----------|
 | [Byte FIFO](_struct/ssfbfifo.md) | Interrupt-safe byte FIFO with single-byte and multi-byte put/get | ~900 B | — | ~80 B | — | Yes |
 | [Linked List](_struct/ssfll.md) | Doubly-linked list supporting FIFO and stack behaviors | ~800 B | — | ~64 B | — | Yes |
+| [Sorted Linked List](_struct/ssfsll.md) | Doubly-linked list with caller-supplied comparison + ascending/descending sort order | ~1 KB | — | ~80 B⁵¹ | — | Yes |
 | [Memory Pool](_struct/ssfmpool.md) | Fixed-size block memory pool with no fragmentation | ~800 B | — | ~96 B | — | Yes |
 | [Heap](_struct/ssfheap.md) | Integrity-checked heap with double-free detection and mark-based ownership tracking | ~3.5 KB | — | ~96 B | — | No¹⁹ |
 
@@ -149,6 +150,7 @@ Encoding and decoding interfaces for common data formats, all with strict buffer
 
 | Module | Description | Flash | Static RAM | Peak Stack | Heap | Reentrant |
 |--------|-------------|-------|------------|------------|------|-----------|
+| [ASN.1 DER](_codec/ssfasn1.md) | ASN.1 DER encoder/decoder (zero-copy decode + measure-then-write encode; X.509 / PKCS#1 / SEC 1 wire formats) | ~3.5 KB | — | ~160 B⁵² | — | Yes |
 | [Base64](_codec/ssfbase64.md) | Base64 encoder/decoder | ~700 B | — | ~64 B | — | Yes |
 | [Hex ASCII](_codec/ssfhex.md) | Binary-to-hex ASCII encoder/decoder | ~600 B | — | ~64 B | — | Yes |
 | [JSON](_codec/ssfjson.md) | JSON parser/generator with path-based field access and in-place update | ~7 KB | — | ~250 B⁹ | — | Yes |
@@ -306,6 +308,20 @@ Debug and diagnostic interfaces for runtime tracing.
 
 ²⁰ Each `SSFTrace_t` instance is independent. When `SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1`, the macros acquire and release a per-instance mutex around each access, making concurrent use from multiple contexts safe.
 
+#### [OS Abstraction](_osal/README.md)
+
+OS abstraction layer interfaces — primitives that wrap platform-specific threading, synchronization, and scheduling so application code can stay platform-neutral.
+
+| Module | Description | Flash | Static RAM | Peak Stack | Heap | Reentrant |
+|--------|-------------|-------|------------|------------|------|-----------|
+| [Low-Priority Task Queue](_osal/ssflptask.md) | Singleton FIFO worker-thread queue for offloading blocking / CPU-intensive work from the main loop; FIFO order, bounded queue depth, optional completion callback | ~1.2 KB | ~450 B⁵³ | ~120 B⁵⁴ | — | Yes⁵⁵ |
+
+⁵³ Static RAM scales with `SSF_LPTASK_CONFIG_MAX_QUEUE_DEPTH` (default `8`). Holds an entry pool sized at the depth (~36 B per entry on 32-bit), two `SSFLL_t` lists, the queue mutex, and the worker-wake primitive (semaphore on Windows; `pthread_cond` + `pthread_mutex` on POSIX). Setting the depth to `2` cuts the entry pool to ~80 B; setting it to `32` raises it to ~1.2 KB.
+
+⁵⁴ Framework-level peak; the user-supplied `workFn(ctx)` and `completeFn(ctx)` add their own peaks on top, executed in the worker-thread context.
+
+⁵⁵ Singleton — one process-wide queue, no per-instance handle. The public API is thread-safe (operations protected by an internal mutex). Multiple priority queues require multiple application-layer worker threads, each with its own [`ssfll`](_struct/ssfll.md)-based queue.
+
 #### [Time](_time/README.md)
 
 Time management interfaces covering raw tick time, calendar conversion, and ISO 8601 string formatting.
@@ -341,6 +357,10 @@ User-facing input parsing and presentation interfaces.
 ¹⁵ Each `SSFGObjInit` call allocates one `SSFGObj_t` node struct (~48 B) via system `malloc`. `SSFGObjSetLabel` and `SSFGObjSet*` add further per-field allocations for labels and value data.
 
 ¹⁸ Concurrent calls to `SSFRTCGetUnixNow` from multiple contexts are safe (read-only after init). Enable `SSF_CONFIG_ENABLE_THREAD_SUPPORT` if `SSFRTCSetUnixNow` may be called concurrently with `SSFRTCGetUnixNow`.
+
+⁵¹ Peak stack is dominated by `SSFSLLInsertItem`'s linear scan: a few `SSFSLLItem_t *` working pointers plus the indirect call into the caller's three-way `SSFSLLCompareFn_t`. The caller's compare function adds its own frame on top.
+
+⁵² Peak stack is in the time decoders (`SSFASN1DecGetTime`, `SSFASN1DecGetDateTime`) — the frame holds a `SSFDTimeStruct_t` (~32 B) plus a handful of `uint32_t` field locals (year/month/day/hour/minute/second) plus the parent TLV cursor. All other decoders peak well under this; the encoder pass uses a smaller frame.
 
 <a id="conclusion"></a>
 

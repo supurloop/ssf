@@ -70,22 +70,20 @@ extern pthread_mutex_t gssfsmWakeMutex;
     SSF_ASSERT(pthread_mutex_unlock(&gssfsmWakeMutex) == 0); \
 }
 
-/* On a cond_timedwait() timeout OS X has errno set to ETIMEDOUT + 256! */
-/* On a cond_timedwait() timeout a recent version of Debian Linux has errno set to 0! */
-/* Based on documentation a cond_timedwait() timeout should set errno to ETIMEDOUT. */
 #define SSF_SM_THREAD_WAKE_WAIT(timeout) { \
     SSF_ASSERT(pthread_mutex_lock(&gssfsmWakeMutex) == 0); \
     if (gssfsmIsWakeSignalled == false) { \
         uint64_t ns; \
         struct timespec ts; \
+        int rc; \
         SSF_ASSERT(clock_gettime(SSF_SM_THREAD_PTHREAD_CLOCK, &ts) == 0); \
         ns = ((uint64_t) ts.tv_nsec) + (((timeout * 1000ul) / SSF_TICKS_PER_SEC) * 1000000ul); \
         while (ns >= 1000000000l) { \
             ns -= 1000000000l; \
             ts.tv_sec++; } \
         ts.tv_nsec = (long int) ns; \
-        if (pthread_cond_timedwait(&gssfsmWakeCond, &gssfsmWakeMutex, &ts) != 0) { \
-            SSF_ASSERT(((errno & 0xff) == ETIMEDOUT) || (errno == 0)); } } \
+        rc = pthread_cond_timedwait(&gssfsmWakeCond, &gssfsmWakeMutex, &ts); \
+        SSF_ASSERT((rc == 0) || (rc == ETIMEDOUT)); } \
     gssfsmIsWakeSignalled = false; \
     SSF_ASSERT(pthread_mutex_unlock(&gssfsmWakeMutex) == 0); \
 }

@@ -79,6 +79,31 @@ void SSFTLSUnitTest(void)
         SSF_ASSERT(memcmp(hash1, hash2, 32) != 0);
     }
 
+    /* ---- Transcript hash: SHA-384 paths (used by AES_256_GCM_SHA384 cipher suite) ---- */
+    {
+        SSFTLSTranscript_t t;
+        uint8_t hash[SSF_SHA2_384_BYTE_SIZE];
+        uint8_t hash2[SSF_SHA2_384_BYTE_SIZE];
+        /* SHA-384("") FIPS 180-4 Appendix B. */
+        static const uint8_t expectedEmpty384[SSF_SHA2_384_BYTE_SIZE] = {
+            0x38u, 0xB0u, 0x60u, 0xA7u, 0x51u, 0xACu, 0x96u, 0x38u,
+            0x4Cu, 0xD9u, 0x32u, 0x7Eu, 0xB1u, 0xB1u, 0xE3u, 0x6Au,
+            0x21u, 0xFDu, 0xB7u, 0x11u, 0x14u, 0xBEu, 0x07u, 0x43u,
+            0x4Cu, 0x0Cu, 0xC7u, 0xBFu, 0x63u, 0xF6u, 0xE1u, 0xDAu,
+            0x27u, 0x4Eu, 0xDEu, 0xBFu, 0xE7u, 0x6Fu, 0x65u, 0xFBu,
+            0xD5u, 0x1Au, 0xD2u, 0xF1u, 0x48u, 0x98u, 0xB9u, 0x5Bu
+        };
+
+        SSFTLSTranscriptInit(&t, SSF_HMAC_HASH_SHA384);
+        SSFTLSTranscriptHash(&t, hash, sizeof(hash));
+        SSF_ASSERT(memcmp(hash, expectedEmpty384, SSF_SHA2_384_BYTE_SIZE) == 0);
+
+        /* Update + re-snapshot must change the digest while leaving the running state intact. */
+        SSFTLSTranscriptUpdate(&t, (const uint8_t *)"abc", 3);
+        SSFTLSTranscriptHash(&t, hash2, sizeof(hash2));
+        SSF_ASSERT(memcmp(hash, hash2, SSF_SHA2_384_BYTE_SIZE) != 0);
+    }
+
     /* ---- HKDF-Expand-Label basic test ---- */
     /* Verify the label encoding produces correct output by testing against known values. */
     /* The TLS 1.3 key schedule starts with HKDF-Extract(0, 0) for early secret (no PSK). */
@@ -507,6 +532,33 @@ void SSFTLSUnitTest(void)
         SSF_ASSERT(SSFTLSRecordDecrypt(&decState, record, 5u + 0x21u,
                                        decBuf, sizeof(decBuf),
                                        &decLen, &innerCt) == false);
+    }
+
+    /* ---- Record encrypt/decrypt reject when cipher suite is unsupported ---- */
+    /* SSFTLSRecordStateInit accepts any uint16_t; a caller that wires up a bogus suite */
+    /* must not produce a wire record. _SSFTLSAeadTagSize returns 0 for the unknown     */
+    /* suite, and both encrypt and decrypt early-out on tagLen == 0.                    */
+    {
+        SSFTLSRecordState_t state;
+        uint8_t key[16] = {0};
+        uint8_t iv[12] = {0};
+        uint8_t pt[16] = {0};
+        uint8_t record[64];
+        size_t outLen;
+        uint8_t innerCt;
+
+        SSFTLSRecordStateInit(&state, 0xFFFFu, key, sizeof(key), iv, sizeof(iv));
+        SSF_ASSERT(SSFTLSRecordEncrypt(&state, SSF_TLS_CT_APPLICATION, pt, sizeof(pt),
+                                       record, sizeof(record), &outLen) == false);
+
+        /* Build a header that parses cleanly so the tag-size guard is the actual gate. */
+        record[0] = SSF_TLS_CT_APPLICATION;
+        record[1] = 0x03u;
+        record[2] = 0x03u;
+        record[3] = 0x00u;
+        record[4] = 0x21u;
+        SSF_ASSERT(SSFTLSRecordDecrypt(&state, record, 5u + 0x21u,
+                                       pt, sizeof(pt), &outLen, &innerCt) == false);
     }
 
     /* SSFTLSHkdfExpandLabel: full DBC surface. */

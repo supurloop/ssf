@@ -1148,6 +1148,50 @@ void SSFINIUnitTest(void)
         SSFGObjDeInit(&g);
         SSF_ASSERT(SSFGObjIsMemoryBalanced());
     }
+
+    /* SSFINIGObjPrint rejects a root that is not an OBJECT type (ssfini.c:829). */
+    {
+        SSFGObj_t *g = NULL;
+        SSF_ASSERT(SSFGObjInit(&g, 0u) == true);
+        SSF_ASSERT(SSFGObjSetString(g, "not-an-object") == true);
+        iniLen = 0;
+        SSF_ASSERT(SSFINIGObjPrint(g, iniStr, sizeof(iniStr), &iniLen,
+                                   SSF_INI_BOOL_TRUE_FALSE, SSF_INI_LF) == false);
+        SSFGObjDeInit(&g);
+        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+    }
+
+    /* SSFINIGObjCreate rejects an INI whose value exceeds                                  */
+    /* SSF_INI_GOBJ_CONFIG_MAX_STR_SIZE (ssfini.c:758). Build "name=" + 257 'x'.              */
+    {
+        SSFGObj_t *g = (SSFGObj_t *)0x1;  /* must be NULL going in -- DeInit caller handles  */
+                                          /* the failure path; we just need to confirm reject */
+        char longIni[SSF_INI_GOBJ_CONFIG_MAX_STR_SIZE + 16];
+        size_t prefix = strlen("name=");
+        size_t i;
+        memcpy(longIni, "name=", prefix);
+        for (i = 0; i < SSF_INI_GOBJ_CONFIG_MAX_STR_SIZE + 1u; i++) longIni[prefix + i] = 'x';
+        longIni[prefix + SSF_INI_GOBJ_CONFIG_MAX_STR_SIZE + 1u] = '\0';
+        g = NULL;
+        SSF_ASSERT(SSFINIGObjCreate(longIni, &g, 8) == false);
+        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+    }
+
+    /* SSFINIGObjCreate rejects an INI section header with empty name (ssfini.c:704). */
+    {
+        SSFGObj_t *g = NULL;
+        SSF_ASSERT(SSFINIGObjCreate("[]\nname=val\n", &g, 8) == false);
+        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+    }
+
+    /* SSFINIGObjCreate rejects an INI name with empty name (ssfini.c:742). The parser only */
+    /* sets context->name when it sees a non-WS character before '='; an "=val" line ends   */
+    /* up with sectionLen == 0 / nameLen == 0 in the section/name path. Test via "[s]\n=v". */
+    {
+        SSFGObj_t *g = NULL;
+        SSF_ASSERT(SSFINIGObjCreate("[s]\n=val\n", &g, 8) == false);
+        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+    }
 #endif /* SSF_INI_GOBJ_ENABLE */
 }
 #endif /* SSF_CONFIG_INI_UNIT_TEST */

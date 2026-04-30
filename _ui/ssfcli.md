@@ -78,7 +78,8 @@ and positional arguments inside command handlers.
 
 ## [↑](#ssfcli--cli-framework) Configuration
 
-The following options are defined in [`ssfoptions.h`](../ssfoptions.h):
+The following options are defined in [`_opt/ssfcli_opt.h`](../_opt/ssfcli_opt.h)
+(aggregated into the build via `ssfoptions.h`):
 
 | Option | Default | Description |
 |--------|---------|-------------|
@@ -457,7 +458,7 @@ bool help(SSFGObj_t *gobjCmd, uint32_t numOpts, SSFGObj_t *gobjOpts,
     if ((numOpts > 0) || (numArgs > 0)) return false;
 
     writeStdoutFn((const uint8_t *)"This is help output.\r\n",
-                  (uint16_t)strlen("This is help output.\r\n"));
+                  strlen("This is help output.\r\n"));
     return true;
 }
 

@@ -206,7 +206,7 @@ And in [`ssfport.h`](../ssfport.h):
 | `SSF_VTED_ESC_STATE_ESC` | Enum value | [`SSFVTEdEscState_t`](#type-escstate) — saw `ESC`, awaiting `[` or `O` |
 | `SSF_VTED_ESC_STATE_CSI` | Enum value | [`SSFVTEdEscState_t`](#type-escstate) — saw `ESC [`, awaiting final byte |
 | `SSF_VTED_ESC_STATE_SS3` | Enum value | [`SSFVTEdEscState_t`](#type-escstate) — saw `ESC O`, awaiting final byte |
-| <a id="type-writefn"></a>`SSFVTEdWriteStdoutFn_t` | Typedef | `void (*)(const uint8_t *data, uint16_t dataLen)` — caller-supplied write callback; invoked by the module to emit VT100 output bytes |
+| <a id="type-writefn"></a>`SSFVTEdWriteStdoutFn_t` | Typedef | `void (*)(const uint8_t *data, size_t dataLen)` — caller-supplied write callback; invoked by the module to emit VT100 output bytes |
 | <a id="type-context"></a>`SSFVTEdContext_t` | Struct | Per-editor state; contains the line buffer pointer, cursor/length, escape decoder state, and the write callback |
 
 <a id="functions"></a>
@@ -246,7 +246,7 @@ contexts are auto-zeroed).
 | `context` | in-out | `SSFVTEdContext_t *` | Caller-supplied context storage. Must not be `NULL`. `context->magic` must be `0` on entry. |
 | `lineBuf` | in-out | `char *` | Caller-supplied line buffer. Must not be `NULL`. The module zeroes it immediately. |
 | `lineSize` | in | `size_t` | Total allocated size of `lineBuf` in bytes. Must be `> 0`. The maximum user-visible line length is `lineSize - 1`. |
-| `writeStdoutFn` | in | [`SSFVTEdWriteStdoutFn_t`](#type-writefn) | Callback the module uses to emit terminal-sync bytes. Must not be `NULL`. Must accept a read-only byte pointer and a 16-bit length. |
+| `writeStdoutFn` | in | [`SSFVTEdWriteStdoutFn_t`](#type-writefn) | Callback the module uses to emit terminal-sync bytes. Must not be `NULL`. Must accept a read-only byte pointer and a `size_t` length. |
 
 <a id="ex-init"></a>
 

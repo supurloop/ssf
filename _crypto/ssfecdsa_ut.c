@@ -832,6 +832,67 @@ void SSFECDSAUnitTest(void)
         }
     }
 
+    /* ---- Verify rejects DER with non-canonical leading 0x00 in an INTEGER ---- */
+    /* Strict-DER decoder rejects an INTEGER whose first content byte is 0x00 unless the     */
+    /* second byte's MSB is set. Construct a valid SEQUENCE { INTEGER, INTEGER } where the   */
+    /* first INTEGER carries an extra leading 0x00 followed by a byte < 0x80; the verify     */
+    /* must reject without ever reaching the curve-arithmetic stage.                          */
+    {
+        static const uint8_t pubKey[] = {
+            0x04u,
+            0x60u, 0xFEu, 0xD4u, 0xBAu, 0x25u, 0x5Au, 0x9Du, 0x31u,
+            0xC9u, 0x61u, 0xEBu, 0x74u, 0xC6u, 0x35u, 0x6Du, 0x68u,
+            0xC0u, 0x49u, 0xB8u, 0x92u, 0x3Bu, 0x61u, 0xFAu, 0x6Cu,
+            0xE6u, 0x69u, 0x62u, 0x2Eu, 0x60u, 0xF2u, 0x9Fu, 0xB6u,
+            0x79u, 0x03u, 0xFEu, 0x10u, 0x08u, 0xB8u, 0xBCu, 0x99u,
+            0xA4u, 0x1Au, 0xE9u, 0xE9u, 0x56u, 0x28u, 0xBCu, 0x64u,
+            0xF2u, 0xF1u, 0xB2u, 0x0Cu, 0x2Du, 0x7Eu, 0x9Fu, 0x51u,
+            0x77u, 0xA3u, 0xC2u, 0x94u, 0xD4u, 0x46u, 0x22u, 0x99u
+        };
+        uint8_t hash[32];
+        /* SEQUENCE(0x47=71) { INT(0x21=33){00 01 ..32 bytes..}, INT(0x20=32){5A ..32 bytes..} } */
+        uint8_t badSig[73] = {
+            0x30u, 0x47u,
+            0x02u, 0x21u,
+            0x00u,                                  /* extra leading zero */
+            0x01u, 0x02u, 0x03u, 0x04u, 0x05u, 0x06u, 0x07u, 0x08u,  /* next byte 0x01 < 0x80 */
+            0x09u, 0x0Au, 0x0Bu, 0x0Cu, 0x0Du, 0x0Eu, 0x0Fu, 0x10u,
+            0x11u, 0x12u, 0x13u, 0x14u, 0x15u, 0x16u, 0x17u, 0x18u,
+            0x19u, 0x1Au, 0x1Bu, 0x1Cu, 0x1Du, 0x1Eu, 0x1Fu, 0x20u,
+            0x02u, 0x20u,
+            0x5Au, 0x5Bu, 0x5Cu, 0x5Du, 0x5Eu, 0x5Fu, 0x60u, 0x61u,
+            0x62u, 0x63u, 0x64u, 0x65u, 0x66u, 0x67u, 0x68u, 0x69u,
+            0x6Au, 0x6Bu, 0x6Cu, 0x6Du, 0x6Eu, 0x6Fu, 0x70u, 0x71u,
+            0x72u, 0x73u, 0x74u, 0x75u, 0x76u, 0x77u, 0x78u, 0x79u
+        };
+
+        SSFSHA256((const uint8_t *)"sample", 6, hash, sizeof(hash));
+        SSF_ASSERT(SSFECDSAVerify(SSF_EC_CURVE_P256, pubKey, sizeof(pubKey),
+                                  hash, sizeof(hash), badSig, sizeof(badSig)) == false);
+    }
+
+    /* ---- Sign / PubKeyFromPrivKey reject the d == 0 private key ---- */
+    /* _SSFECDSAPrivKeyIsValid rejects d outside [1, n-1]; the existing audit covers d == n.  */
+    /* This adds the d == 0 arm: an all-zero 32-byte private key must fail at the same gate. */
+    {
+        uint8_t zeroPriv[32] = {0};
+        uint8_t pubKey[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        size_t pubKeyLen;
+        uint8_t hash[32];
+        uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
+        size_t sigLen;
+
+        SSFSHA256((const uint8_t *)"sample", 6, hash, sizeof(hash));
+        SSF_ASSERT(SSFECDSAPubKeyFromPrivKey(SSF_EC_CURVE_P256, zeroPriv, sizeof(zeroPriv),
+                                             pubKey, sizeof(pubKey), &pubKeyLen) == false);
+#if SSF_ECDSA_CONFIG_ENABLE_SIGN == 1
+        SSF_ASSERT(SSFECDSASign(SSF_EC_CURVE_P256, zeroPriv, sizeof(zeroPriv),
+                                hash, sizeof(hash), sig, sizeof(sig), &sigLen) == false);
+#else
+        (void)sig; (void)sigLen;
+#endif
+    }
+
     /* ---- RFC 6979 A.2.5: P-256/SHA-256 sign and verify ---- */
     {
         /* Private key from RFC 6979 A.2.5 */

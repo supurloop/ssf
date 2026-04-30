@@ -15,7 +15,7 @@ translate between JSON, UBJSON, and other encoding types.
 ## [↑](#ssfgobj--generic-object-beta) Dependencies
 
 - [`ssfport.h`](../ssfport.h)
-- [`ssfoptions.h`](../ssfoptions.h)
+- [`_opt/ssfgobj_opt.h`](../_opt/ssfgobj_opt.h) (aggregated through `ssfoptions.h`)
 - [ssfll](../\_struct/ssfll.md) — Linked list (used internally for child lists and path tracking)
 
 <a id="notes"></a>
@@ -49,7 +49,7 @@ translate between JSON, UBJSON, and other encoding types.
 
 ## [↑](#ssfgobj--generic-object-beta) Configuration
 
-All options are set in `ssfoptions.h`.
+Options live in [`_opt/ssfgobj_opt.h`](../_opt/ssfgobj_opt.h) (aggregated into the build via `ssfoptions.h`).
 
 | Option | Default | Description |
 |--------|---------|-------------|

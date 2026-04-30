@@ -18,9 +18,9 @@ for overruns. Block headers use `+`/`-` ASCII markers that remain visible in raw
 ## [↑](#ssfheap--integrity-checked-heap-interface) Dependencies
 
 - [`ssfport.h`](../ssfport.h)
-- [`ssfoptions.h`](../ssfoptions.h)
+- [`_opt/ssfheap_opt.h`](../_opt/ssfheap_opt.h) (aggregated through `ssfoptions.h`)
 - [ssfll](ssfll.md) — Linked list (used internally)
-- [ssffcsum](../ssffcsum.md) — Fletcher checksum (used for block header integrity)
+- [ssffcsum](../_edc/ssffcsum.md) — Fletcher checksum (used for block header integrity)
 
 <a id="notes"></a>
 
@@ -42,7 +42,7 @@ for overruns. Block headers use `+`/`-` ASCII markers that remain visible in raw
 
 ## [↑](#ssfheap--integrity-checked-heap-interface) Configuration
 
-All options are set in `ssfoptions.h`.
+Options live in [`_opt/ssfheap_opt.h`](../_opt/ssfheap_opt.h) (aggregated into the build via `ssfoptions.h`).
 
 | Option | Default | Description |
 |--------|---------|-------------|

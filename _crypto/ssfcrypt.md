@@ -64,9 +64,12 @@ knobs in [`ssfbn`](ssfbn.md#configuration) and [`ssfec`](ssfec.md#configuration)
 
 **`SSF_CRYPT_PROFILE_MIN_MEMORY`** sets `SSF_EC_CONFIG_FIXED_BASE_P256` and
 `SSF_EC_CONFIG_FIXED_BASE_P384` to `0`, dropping the Lim-Lee comb tables (~12 KB
-rodata at the default `COMB_H = 6`). Cost: `[k]G` runs ~3-4× slower (Montgomery
-ladder fallback); `SSFECScalarMulDualBase` auto-falls-back to the Shamir's-trick
-path. Suited to verify-only signers on Cortex-M0/M3-class targets.
+rodata at the default `COMB_H = 6`); `[k]G` runs ~3-4× slower (Montgomery
+ladder fallback) and `SSFECScalarMulDualBase` auto-falls-back to the
+Shamir's-trick path. Also sets `SSF_ECDSA_CONFIG_ENABLE_SIGN` to `0`, dropping
+`SSFECDSASign()` and the DER-encode helper; the verify-only path is
+`ssfasn1`-free, so a MIN_MEMORY build with this default can omit the entire
+`ssfasn1` module. Suited to verify-only signers on Cortex-M0/M3-class targets.
 
 **`SSF_CRYPT_PROFILE_CUSTOM`** is today's defaults — both fixed-base tables on,
 both curves enabled, RSA-2048/3072/4096 all on. Intended for networked 32-bit

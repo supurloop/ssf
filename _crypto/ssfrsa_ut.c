@@ -555,6 +555,30 @@ void SSFRSAUnitTest(void)
         }
     }
 
+    /* ---- All key-consuming public APIs reject malformed DER on the decode boundary ---- */
+    /* PubKeyIsValid above only exercises one call site of _SSFRSAPubKeyDecode. The decode-  */
+    /* failure branch at every other call site (PrivKeyIsValid, SignPKCS1, SignPSS,         */
+    /* VerifyPSS) needs its own test or stays uncovered.                                    */
+    {
+        static const uint8_t badDer[] = { 0x30u, 0x00u };  /* empty SEQUENCE -- parser bails */
+        uint8_t hash[32];
+        uint8_t sig[SSF_RSA_MAX_KEY_BYTES];
+        size_t sigLen;
+
+        SSFSHA256((const uint8_t *)"sample", 6, hash, sizeof(hash));
+
+        SSF_ASSERT(SSFRSAPrivKeyIsValid(badDer, sizeof(badDer)) == false);
+        SSF_ASSERT(SSFRSASignPKCS1(badDer, sizeof(badDer), SSF_RSA_HASH_SHA256,
+                                   hash, sizeof(hash), sig, sizeof(sig), &sigLen) == false);
+        SSF_ASSERT(SSFRSASignPSS(badDer, sizeof(badDer), SSF_RSA_HASH_SHA256,
+                                 hash, sizeof(hash), sig, sizeof(sig), &sigLen) == false);
+        /* Verify-side: provide a same-length placeholder sig; the decode must bail before    */
+        /* any sig byte is read, so the sig contents are irrelevant.                            */
+        memset(sig, 0, 256);
+        SSF_ASSERT(SSFRSAVerifyPSS(badDer, sizeof(badDer), SSF_RSA_HASH_SHA256,
+                                   hash, sizeof(hash), sig, 256) == false);
+    }
+
     /* ---- FIPS 186-4 Sec. B.3.3 step 5.4: |p - q| > 2^(halfBits - 100) ---- */
     /* Defends against Fermat-style factorization of n when p and q happen to be very    */
     /* close. The threshold is statistically irrelevant for random primes (failure is    */

@@ -12,7 +12,6 @@ byte-order reversal for little-endian multi-byte values.
 ## [↑](#ssfhex--binary-to-hex-ascii-encoderdecoder) Dependencies
 
 - [`ssfport.h`](../ssfport.h)
-- [`ssfoptions.h`](../ssfoptions.h)
 
 <a id="notes"></a>
 

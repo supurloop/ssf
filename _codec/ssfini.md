@@ -34,7 +34,7 @@ truncating or overflowing.
 
 ## [↑](#ssfini--ini-file-parsergenerator) Configuration
 
-The following options are defined in [`ssfoptions.h`](../ssfoptions.h):
+Options live in [`_opt/ssfini_opt.h`](../_opt/ssfini_opt.h) (aggregated through `ssfoptions.h`):
 
 | Option | Default | Description |
 |--------|---------|-------------|

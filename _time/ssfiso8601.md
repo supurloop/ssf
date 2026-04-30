@@ -21,7 +21,7 @@ The fractional-seconds field width is determined by `SSF_TICKS_PER_SEC` (3 digit
 ## [↑](#ssfiso8601--iso-8601-datetime-string-interface) Dependencies
 
 - [`ssfport.h`](../ssfport.h)
-- [`ssfoptions.h`](../ssfoptions.h)
+- [`_opt/ssfiso8601_opt.h`](../_opt/ssfiso8601_opt.h) (aggregated through `ssfoptions.h`)
 - [`ssfdtime`](ssfdtime.md) — date/time struct used internally
 
 <a id="notes"></a>
@@ -44,7 +44,7 @@ The fractional-seconds field width is determined by `SSF_TICKS_PER_SEC` (3 digit
 
 ## [↑](#ssfiso8601--iso-8601-datetime-string-interface) Configuration
 
-All options are set in `ssfoptions.h`.
+Options live in [`_opt/ssfiso8601_opt.h`](../_opt/ssfiso8601_opt.h) (aggregated into the build via `ssfoptions.h`).
 
 | Option | Default | Description |
 |--------|---------|-------------|

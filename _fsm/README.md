@@ -17,7 +17,7 @@ with `SSF_SM_SUPER()` in its `default` case, and unhandled events are forwarded 
 ## [↑](#ssfsm--finite-state-machine-framework) Dependencies
 
 - [`ssfport.h`](../ssfport.h)
-- [`ssfoptions.h`](../ssfoptions.h)
+- [`_opt/ssfsm_opt.h`](../_opt/ssfsm_opt.h) (aggregated through `ssfoptions.h`)
 - [`ssf.h`](../ssf.h)
 
 <a id="notes"></a>
@@ -50,14 +50,15 @@ with `SSF_SM_SUPER()` in its `default` case, and unhandled events are forwarded 
 
 ## [↑](#ssfsm--finite-state-machine-framework) Configuration
 
-All options are set in `ssfoptions.h`.
+Options live in [`_opt/ssfsm_opt.h`](../_opt/ssfsm_opt.h) (aggregated into the build via
+`ssfoptions.h`).
 
 | Option | Default | Description |
 |--------|---------|-------------|
 | `SSF_SM_MAX_ACTIVE_EVENTS` | `3` | Maximum number of simultaneously queued events across all state machines; increase if events are dropped under peak load |
 | `SSF_SM_MAX_ACTIVE_TIMERS` | `3` | Maximum number of simultaneously running timers across all state machines |
 
-The following enumerations are **required** in `ssfoptions.h`:
+The following enumerations are **required** in [`_opt/ssfsm_opt.h`](../_opt/ssfsm_opt.h):
 
 ```c
 /* State machine identifiers — one entry per state machine instance */
@@ -83,7 +84,7 @@ typedef enum
 } SSFSMEventList_t;
 ```
 
-**Thread sync macros** (required when `SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1`):
+**Thread sync macros** (defined in [`_opt/ssfsm_opt.h`](../_opt/ssfsm_opt.h) when `SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1`):
 
 | Macro | Description |
 |-------|-------------|
@@ -93,7 +94,7 @@ typedef enum
 | `SSF_SM_THREAD_SYNC_ACQUIRE()` | Acquire the mutex |
 | `SSF_SM_THREAD_SYNC_RELEASE()` | Release the mutex |
 
-**Thread wake macros** (required when `SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1`); implement with
+**Thread wake macros** (defined in [`_opt/ssfsm_opt.h`](../_opt/ssfsm_opt.h) when `SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1`); implement with
 a counting semaphore capped at 1:
 
 | Macro | Description |

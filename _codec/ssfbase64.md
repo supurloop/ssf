@@ -12,7 +12,6 @@ alphabet (`A–Z`, `a–z`, `0–9`, `+`, `/`) with `=` padding.
 ## [↑](#ssfbase64--base64-encoderdecoder) Dependencies
 
 - [`ssfport.h`](../ssfport.h)
-- [`ssfoptions.h`](../ssfoptions.h)
 
 <a id="notes"></a>
 

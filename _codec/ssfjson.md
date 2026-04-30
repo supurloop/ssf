@@ -15,7 +15,7 @@ nesting depth, not message size. The generator uses a chained-callback pattern w
 ## [↑](#ssfjson--json-parsergenerator) Dependencies
 
 - [`ssfport.h`](../ssfport.h)
-- [`ssfoptions.h`](../ssfoptions.h)
+- [`_opt/ssfjson_opt.h`](../_opt/ssfjson_opt.h) (aggregated through `ssfoptions.h`)
 - [`ssfgobj.h`](ssfgobj.h) — only when `SSF_JSON_GOBJ_ENABLE == 1`
 
 <a id="notes"></a>
@@ -39,7 +39,7 @@ nesting depth, not message size. The generator uses a chained-callback pattern w
 
 ## [↑](#ssfjson--json-parsergenerator) Configuration
 
-All options are set in `ssfoptions.h`.
+Options live in [`_opt/ssfjson_opt.h`](../_opt/ssfjson_opt.h) (aggregated into the build via `ssfoptions.h`).
 
 | Option | Default | Description |
 |--------|---------|-------------|

@@ -172,12 +172,63 @@ function flush() {
 END { flush() }
 ' "$cov_dir/gcov/$module/raw.txt" > "$summary_tsv"
 
+# Walk each .gcov file in turn and classify branches by whether they sit on a
+# DBC-macro line (SSF_REQUIRE / SSF_ENSURE / SSF_ASSERT / SSF_ASSUME). Those
+# branches' "false" arms only fire on a contract violation — they're abort
+# paths exercised by SSF_ASSERT_TEST harnesses in a forked child, but the
+# child writes its .gcda only on the path that *reached* the abort, not the
+# abort itself. So they stay 0% by construction and inflate the "uncovered"
+# count without representing a real test gap. Reporting them separately makes
+# the non-DBC headline metric honest.
+nondbc_tsv="$cov_dir/gcov/$module/nondbc.tsv"
+: > "$nondbc_tsv"
+for gcov_file in "$gcov_outdir"/*.gcov; do
+    [ -f "$gcov_file" ] || continue
+    awk '
+    BEGIN { src=""; cur_dbc=0; total=0; taken=0; nondbc_total=0; nondbc_taken=0 }
+    /^[ \t]*-:[ \t]*0:Source:/ {
+        s=$0; sub(/.*Source:/, "", s); src=s; next
+    }
+    /^[ \t]*([0-9]+|#####):[ \t]*[0-9]+:/ {
+        # Strip leading "    NNN:    NNN:" to leave just the source content.
+        content=$0
+        n=index(content, ":"); content=substr(content, n+1)
+        n=index(content, ":"); content=substr(content, n+1)
+        cur_dbc = (content ~ /SSF_(REQUIRE|ENSURE|ASSERT|ASSUME)/) ? 1 : 0
+        next
+    }
+    /^[ \t]*-:[ \t]*[0-9]+:/ { cur_dbc=0; next }
+    /^branch[ \t]+[0-9]+ taken [0-9]+%/ {
+        total++
+        pct=$0; sub(/.*taken /, "", pct); sub(/%.*/, "", pct)
+        if (pct + 0 > 0) taken++
+        if (!cur_dbc) {
+            nondbc_total++
+            if (pct + 0 > 0) nondbc_taken++
+        }
+    }
+    END { printf "%s\t%d\t%d\n", src, nondbc_total, nondbc_taken }
+    ' "$gcov_file" >> "$nondbc_tsv"
+done
+
 # Pretty-print the table + a totals row. Width tuned for ssf*.c paths.
-awk -F'\t' -v module="$module" '
+# nondbc.tsv has rows `<source>\t<nondbc_total>\t<nondbc_taken>` — load into a
+# per-file map so the printer can append a "branch% (non-DBC)" column.
+awk -F'\t' -v module="$module" -v nondbc_tsv="$nondbc_tsv" '
 BEGIN {
+    while ((getline line < nondbc_tsv) > 0) {
+        n=split(line, a, "\t")
+        if (n == 3) {
+            nondbc_n[a[1]] = a[2] + 0
+            nondbc_t[a[1]] = a[3] + 0
+        }
+    }
+    close(nondbc_tsv)
     printf "\nCoverage report for %s/\n", module
-    printf "%-44s  %8s  %12s  %8s  %12s\n", "file", "lines%", "exec/total", "branch%", "taken/total"
-    printf "%-44s  %8s  %12s  %8s  %12s\n", "----", "------", "----------", "-------", "-----------"
+    printf "%-44s  %8s  %12s  %8s  %12s  %8s  %12s\n", \
+        "file", "lines%", "exec/total", "branch%", "taken/total", "br%(nDBC)", "taken/total"
+    printf "%-44s  %8s  %12s  %8s  %12s  %8s  %12s\n", \
+        "----", "------", "----------", "-------", "-----------", "---------", "-----------"
 }
 {
     file=$1; lp=$2; ln=$3; tp=$4; tn=$5
@@ -191,7 +242,27 @@ BEGIN {
         sum_taken += taken; sum_branches += tn
         branch_cell = sprintf("%d/%d", taken, tn)
     } else { branch_cell = "—"; tp = "—" }
-    printf "%-44s  %7s%%  %12s  %7s%%  %12s\n", file, lp, lines_cell, tp, branch_cell
+
+    # Match non-DBC stats by file path. ssf.h and other inlined headers may
+    # appear multiple times in summary.tsv (one per gcov invocation that saw
+    # them) but only once in nondbc.tsv (last write wins) — for those, just
+    # leave the column blank rather than risk double-counting in the total.
+    if (file in nondbc_n && _seen_nondbc[file] == 0 && file ~ /\.c$/) {
+        ndbc_n_val = nondbc_n[file]; ndbc_t_val = nondbc_t[file]
+        if (ndbc_n_val > 0) {
+            ndbc_pct = sprintf("%.2f", ndbc_t_val * 100.0 / ndbc_n_val)
+            ndbc_cell = sprintf("%d/%d", ndbc_t_val, ndbc_n_val)
+            sum_ndbc_n += ndbc_n_val; sum_ndbc_t += ndbc_t_val
+        } else {
+            ndbc_pct = "—"; ndbc_cell = "—"
+        }
+        _seen_nondbc[file] = 1
+    } else {
+        ndbc_pct = "—"; ndbc_cell = "—"
+    }
+
+    printf "%-44s  %7s%%  %12s  %7s%%  %12s  %8s%%  %12s\n", \
+        file, lp, lines_cell, tp, branch_cell, ndbc_pct, ndbc_cell
 }
 END {
     if (sum_lines > 0) {
@@ -202,8 +273,14 @@ END {
         agg_branches = sum_taken * 100.0 / sum_branches
         agg_branch_cell = sprintf("%d/%d", sum_taken, sum_branches)
     } else { agg_branches = 0; agg_branch_cell = "0/0" }
-    printf "%-44s  %7s%%  %12s  %7s%%  %12s\n", "----", "------", "----------", "-------", "-----------"
-    printf "%-44s  %7.2f%%  %12s  %7.2f%%  %12s\n", "TOTAL", agg_lines, agg_lines_cell, agg_branches, agg_branch_cell
+    if (sum_ndbc_n > 0) {
+        agg_ndbc = sum_ndbc_t * 100.0 / sum_ndbc_n
+        agg_ndbc_cell = sprintf("%d/%d", sum_ndbc_t, sum_ndbc_n)
+    } else { agg_ndbc = 0; agg_ndbc_cell = "0/0" }
+    printf "%-44s  %8s  %12s  %8s  %12s  %9s  %12s\n", \
+        "----", "------", "----------", "-------", "-----------", "---------", "-----------"
+    printf "%-44s  %7.2f%%  %12s  %7.2f%%  %12s  %8.2f%%  %12s\n", \
+        "TOTAL", agg_lines, agg_lines_cell, agg_branches, agg_branch_cell, agg_ndbc, agg_ndbc_cell
 }
 ' "$summary_tsv"
 

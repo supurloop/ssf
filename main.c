@@ -30,6 +30,16 @@
 /* OF THE POSSIBILITY OF SUCH DAMAGE.                                                            */
 /* --------------------------------------------------------------------------------------------- */
 #include <stdio.h>
+#if !defined(_WIN32)
+#include <errno.h>
+#include <fcntl.h>
+#include <poll.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#endif /* !_WIN32 */
 #include "ssfassert.h"
 #include "ssfversion.h"
 #include "ssfbfifo.h"
@@ -262,6 +272,227 @@ SSFUnitTest_t unitTests[] =
 #endif /* SSF_CONFIG_LPTASK_UNIT_TEST */
 };
 
+#if !defined(_WIN32)
+/* Cap on concurrent worker processes regardless of host core count. */
+#define SSF_PARALLEL_MAX_WORKERS 64
+
+typedef struct
+{
+    pid_t pid;
+    int fd;
+    size_t idx;
+    SSFPortTick_t start;
+    char *buf;
+    size_t bufLen;
+    size_t bufCap;
+    bool inUse;
+    bool eof;
+} SSFTestRun_t;
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns count of online CPUs clamped to [1, SSF_PARALLEL_MAX_WORKERS].                        */
+/* --------------------------------------------------------------------------------------------- */
+static int SSFCoreCount(void)
+{
+    long n;
+
+    n = sysconf(_SC_NPROCESSORS_ONLN);
+    if (n < 1) n = 1;
+    if (n > SSF_PARALLEL_MAX_WORKERS) n = SSF_PARALLEL_MAX_WORKERS;
+    return (int)n;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Forks a child to run unitTests[idx] with stdout/stderr captured. Returns true if started.     */
+/* --------------------------------------------------------------------------------------------- */
+static bool SSFStartRun(SSFTestRun_t *run, size_t idx)
+{
+    int pipeFd[2];
+    pid_t pid;
+    int flags;
+
+    SSF_REQUIRE(run != NULL);
+    SSF_REQUIRE(idx < sizeof(unitTests) / sizeof(SSFUnitTest_t));
+
+    /* Drain parent stdio buffers so the forked child does not replay them. */
+    (void)fflush(stdout);
+    (void)fflush(stderr);
+
+    if (pipe(pipeFd) != 0) return false;
+    pid = fork();
+    if (pid < 0) { (void)close(pipeFd[0]); (void)close(pipeFd[1]); return false; }
+    if (pid == 0)
+    {
+        (void)close(pipeFd[0]);
+        (void)dup2(pipeFd[1], STDOUT_FILENO);
+        (void)dup2(pipeFd[1], STDERR_FILENO);
+        (void)close(pipeFd[1]);
+        unitTests[idx].utf();
+        (void)fflush(stdout);
+        (void)fflush(stderr);
+        _exit(0);
+    }
+    (void)close(pipeFd[1]);
+    flags = fcntl(pipeFd[0], F_GETFL, 0);
+    if (flags >= 0) (void)fcntl(pipeFd[0], F_SETFL, flags | O_NONBLOCK);
+
+    run->pid = pid;
+    run->fd = pipeFd[0];
+    run->idx = idx;
+    run->start = SSFPortGetTick64();
+    run->buf = NULL;
+    run->bufLen = 0;
+    run->bufCap = 0;
+    run->inUse = true;
+    run->eof = false;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Drains all available bytes from run->fd into run->buf, sets run->eof on remote close.         */
+/* --------------------------------------------------------------------------------------------- */
+static void SSFDrainRun(SSFTestRun_t *run)
+{
+    char tmp[4096];
+    ssize_t n;
+    size_t newCap;
+    char *p;
+
+    SSF_REQUIRE(run != NULL);
+
+    for (;;)
+    {
+        n = read(run->fd, tmp, sizeof(tmp));
+        if (n > 0)
+        {
+            if (run->bufLen + (size_t)n + 1 > run->bufCap)
+            {
+                newCap = run->bufCap == 0 ? 8192 : run->bufCap * 2;
+                while (newCap < run->bufLen + (size_t)n + 1) { newCap *= 2; }
+                p = (char *)realloc(run->buf, newCap);
+                SSF_ASSERT(p != NULL);
+                run->buf = p;
+                run->bufCap = newCap;
+            }
+            memcpy(run->buf + run->bufLen, tmp, (size_t)n);
+            run->bufLen += (size_t)n;
+            run->buf[run->bufLen] = '\0';
+            continue;
+        }
+        if (n == 0) { run->eof = true; return; }
+        if (errno == EINTR) continue;
+        return;
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Reaps the finished child, prints its result line and captured output. Returns true if passed.*/
+/* --------------------------------------------------------------------------------------------- */
+static bool SSFFinishRun(SSFTestRun_t *run)
+{
+    int status;
+    SSFPortTick_t elapsed;
+    bool passed;
+
+    SSF_REQUIRE(run != NULL);
+    SSF_REQUIRE(run->inUse);
+
+    status = 0;
+    (void)waitpid(run->pid, &status, 0);
+    (void)close(run->fd);
+    elapsed = (SSFPortGetTick64() - run->start) / SSF_TICKS_PER_SEC;
+    passed = WIFEXITED(status) && (WEXITSTATUS(status) == 0);
+
+    printf("Running %20s (%30s) unit test...%s in %llus\r\n",
+           unitTests[run->idx].module, unitTests[run->idx].description,
+           passed ? "PASSED" : "FAILED", (unsigned long long)elapsed);
+    if (run->bufLen > 0) { (void)fwrite(run->buf, 1, run->bufLen, stdout); }
+    (void)fflush(stdout);
+    free(run->buf);
+    memset(run, 0, sizeof(*run));
+    return passed;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* SSF unit test entry point. Runs tests in parallel up to host core count.                      */
+/* --------------------------------------------------------------------------------------------- */
+int main(void)
+{
+    size_t total;
+    size_t next;
+    size_t done;
+    int cores;
+    bool allPassed;
+    SSFTestRun_t *runs;
+    struct pollfd *pfds;
+    int i;
+    int nPoll;
+    int pr;
+    int hdrLen;
+
+    total = sizeof(unitTests) / sizeof(SSFUnitTest_t);
+    next = 0;
+    done = 0;
+    cores = SSFCoreCount();
+    if (total > 0 && (size_t)cores > total) cores = (int)total;
+    if (cores < 1) cores = 1;
+    allPassed = true;
+
+    printf("\r\n");
+    hdrLen = printf("Testing SSF Version %s (parallel x%d)", SSF_VERSION_STR, cores);
+    SSF_ASSERT(hdrLen > 0);
+    printf("\r\n");
+    while (hdrLen--) { printf("-"); }
+    printf("\r\n");
+
+    if (total == 0) { printf("\r\n"); return 0; }
+
+    runs = (SSFTestRun_t *)calloc((size_t)cores, sizeof(SSFTestRun_t));
+    SSF_ASSERT(runs != NULL);
+    pfds = (struct pollfd *)calloc((size_t)cores, sizeof(struct pollfd));
+    SSF_ASSERT(pfds != NULL);
+
+    while (done < total)
+    {
+        for (i = 0; i < cores && next < total; i++)
+        {
+            if (!runs[i].inUse)
+            {
+                if (!SSFStartRun(&runs[i], next)) SSF_ERROR();
+                next++;
+            }
+        }
+        nPoll = 0;
+        for (i = 0; i < cores; i++)
+        {
+            if (runs[i].inUse && !runs[i].eof)
+            {
+                pfds[nPoll].fd = runs[i].fd;
+                pfds[nPoll].events = POLLIN;
+                pfds[nPoll].revents = 0;
+                nPoll++;
+            }
+        }
+        if (nPoll > 0)
+        {
+            do { pr = poll(pfds, (nfds_t)nPoll, 1000); } while (pr < 0 && errno == EINTR);
+        }
+        for (i = 0; i < cores; i++)
+        {
+            if (!runs[i].inUse) continue;
+            SSFDrainRun(&runs[i]);
+            if (runs[i].eof) { if (!SSFFinishRun(&runs[i])) allPassed = false; done++; }
+        }
+    }
+
+    free(runs);
+    free(pfds);
+    printf("\r\n");
+    return allPassed ? 0 : 1;
+}
+
+#else /* _WIN32 */
+
 /* --------------------------------------------------------------------------------------------- */
 /* SSF unit test entry point.                                                                    */
 /* --------------------------------------------------------------------------------------------- */
@@ -270,7 +501,6 @@ int main(void)
     size_t i;
     SSFPortTick_t start;
 
-    /* Print out SSF version */
     printf("\r\n");
     i = printf("Testing SSF Version %s", SSF_VERSION_STR);
     SSF_ASSERT(i > 0);
@@ -278,7 +508,6 @@ int main(void)
     while (i--) { printf("-"); }
     printf("\r\n");
 
-    /* Iterate over all the configured unit tests */
     for (i = 0; i < sizeof(unitTests) / sizeof(SSFUnitTest_t); i++)
     {
         printf("Running %20s (%30s) unit test...", unitTests[i].module, unitTests[i].description);
@@ -291,3 +520,5 @@ int main(void)
     printf("\r\n");
     return 0;
 }
+
+#endif /* _WIN32 */

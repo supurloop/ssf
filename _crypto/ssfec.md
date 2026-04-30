@@ -126,7 +126,9 @@ comb table, and compiles out any code paths that reference it. Disabling both pr
 | <a id="ssfecpoint-t"></a>`SSFECPoint_t` | Struct | Jacobian point `{ SSFBN_t x; SSFBN_t y; SSFBN_t z; }`. Affine `(x, y) = (X/Z², Y/Z³)`; identity when `Z = 0`. |
 | <a id="ssfeccurveparams-t"></a>`SSFECCurveParams_t` | Struct | Curve parameters: field prime `p`, curve coefficients `a` and `b`, generator `(gₓ, gᵧ)`, order `n`, working limb count, coordinate byte length. Obtain via [`SSFECGetCurveParams()`](#ssfecgetcurveparams). |
 | <a id="ssf-ec-max-coord-bytes"></a>`SSF_EC_MAX_COORD_BYTES` | Constant | `48` if P-384 is enabled, `32` otherwise — the coordinate byte length of the widest enabled curve. |
+| <a id="ssf-ec-max-limbs"></a>`SSF_EC_MAX_LIMBS` | Constant | `SSF_EC_MAX_COORD_BYTES / 4` — widest ECC scalar / field element in 32-bit limbs (`8` for P-256-only, `12` if P-384 is enabled). Pass to [`SSFBN_DEFINE`](ssfbn.md#ssfbn-define) / [`SSFECPOINT_DEFINE`](#ssfecpoint-define) when allocating ECC-only storage smaller than `SSF_BN_MAX_LIMBS`. |
 | <a id="ssf-ec-max-encoded-size"></a>`SSF_EC_MAX_ENCODED_SIZE` | Constant | `1 + 2 × SSF_EC_MAX_COORD_BYTES` — the SEC 1 uncompressed-form encoded length for the widest enabled curve (`65` or `97`). |
+| <a id="ssfecpoint-define"></a>`SSFECPOINT_DEFINE(name, nlimbs)` | Macro | Declare an `SSFECPoint_t` named `name` backed by three fresh zero-initialised `SSFBNLimb_t[nlimbs]` arrays (one for `x`, `y`, `z`). Same scope restrictions as [`SSFBN_DEFINE`](ssfbn.md#ssfbn-define). Pick `nlimbs` to fit the curves the code path will see — `SSF_EC_MAX_LIMBS` for any enabled-curves combination, or a curve-specific value (8 for P-256, 12 for P-384). |
 
 <a id="functions"></a>
 
@@ -168,6 +170,9 @@ comb table, and compiles out any code paths that reference it. Disabling both pr
 | [e.g.](#ex-add) | [`void SSFECPointAdd(r, p, q, curve)`](#ssfecpointadd) | `r = P + Q` (handles all corner cases) |
 | [e.g.](#ex-scalarmul) | [`void SSFECScalarMul(r, k, p, curve)`](#ssfecscalarmul) | `r = k·P` — **constant-time**, for secret `k` |
 | [e.g.](#ex-scalarmuldual) | [`void SSFECScalarMulDual(r, u1, p, u2, q, curve)`](#ssfecscalarmuldual) | `r = u₁·P + u₂·Q` — variable-time, ECDSA verify only |
+| | [`void SSFECScalarMulBaseP256(r, k)`](#ssfecscalarmulbase) | Constant-time `r = k·G_P256` via the Lim-Lee comb table; gated by `SSF_EC_CONFIG_FIXED_BASE_P256` |
+| | [`void SSFECScalarMulBaseP384(r, k)`](#ssfecscalarmulbase) | Constant-time `r = k·G_P384` via the Lim-Lee comb table; gated by `SSF_EC_CONFIG_FIXED_BASE_P384` |
+| | [`void SSFECScalarMulDualBase(r, u1, u2, q, curve)`](#ssfecscalarmuldualbase) | Variable-time `r = u₁·G + u₂·Q` using the curve's fixed-base table for `[u₁]G`; ECDSA verify only |
 
 <a id="function-reference"></a>
 
@@ -395,3 +400,40 @@ SSFECScalarMulDual(&Rprime, &u1, &G_point, &u2, &Q_signer, SSF_EC_CURVE_P256);
 
 /* Extract affine x and compare mod n to the signature's r field. */
 ```
+
+<a id="ssfecscalarmulbase"></a>
+```c
+#if SSF_EC_CONFIG_FIXED_BASE_P256 == 1
+void SSFECScalarMulBaseP256(SSFECPoint_t *r, const SSFBN_t *k);
+#endif
+#if SSF_EC_CONFIG_FIXED_BASE_P384 == 1
+void SSFECScalarMulBaseP384(SSFECPoint_t *r, const SSFBN_t *k);
+#endif
+```
+
+Constant-time `r = k·G` for the curve's generator, evaluated via a precomputed Lim-Lee
+comb table (rodata size set by [`SSF_EC_FIXED_BASE_COMB_H`](#configuration); default `H=6`
+gives ~1.5 KB for P-256 and ~2.3 KB for P-384). ~3-4× faster than running the generic
+[`SSFECScalarMul()`](#ssfecscalarmul) with `P = G` because the table-lookup pattern
+amortises across every comb window. Used internally by ECDSA signing and key generation
+when the corresponding `SSF_EC_CONFIG_FIXED_BASE_*` is enabled.
+
+`k` must be in `[1, n-1]` (same precondition as `SSFECScalarMul`). The functions are
+declared only when the matching `SSF_EC_CONFIG_FIXED_BASE_*` is `1` — guard call sites
+with `#ifdef` if your code might be built with the comb tables disabled.
+
+<a id="ssfecscalarmuldualbase"></a>
+```c
+#if (SSF_EC_CONFIG_FIXED_BASE_P256 == 1) || (SSF_EC_CONFIG_FIXED_BASE_P384 == 1)
+void SSFECScalarMulDualBase(SSFECPoint_t *r,
+                            const SSFBN_t *u1, const SSFBN_t *u2,
+                            const SSFECPoint_t *q, SSFECCurve_t curve);
+#endif
+```
+
+Variable-time `r = u₁·G + u₂·Q` for ECDSA verify. Uses the curve's fixed-base comb table
+for the `[u₁]G` half and a wNAF / Shamir's-trick path for `[u₂]Q`, which gives a faster
+verify than the table-free [`SSFECScalarMulDual()`](#ssfecscalarmuldual) for the same
+inputs. Falls back to `SSFECScalarMulDual()` when the selected curve's
+`SSF_EC_CONFIG_FIXED_BASE_*` flag is `0`. Same threat-model constraint: both scalars must
+be public.

@@ -33,6 +33,9 @@ are provided.
   `Begin` function again before reuse.
 - `SSFSHA2_32Context_t` and `SSFSHA2_64Context_t` should be treated as opaque; do not access
   their members directly.
+- The one-shot `SSFSHA2_32` / `SSFSHA2_64` (and the macro forms) require a non-`NULL` `in` even
+  when `inLen` is `0` — pass any valid pointer (e.g., a pointer to a zero-length string literal).
+  The incremental `Update` interface accepts `in == NULL` when `inLen == 0`.
 
 <a id="configuration"></a>
 
@@ -99,7 +102,7 @@ One-shot SHA-2 hash using the 32-bit (512-bit block) engine. Computes SHA-256 or
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
-| `in` | in | `const uint8_t *` | Pointer to the data to hash. May be `NULL` when `inLen` is `0`. |
+| `in` | in | `const uint8_t *` | Pointer to the data to hash. Must not be `NULL`, even when `inLen` is `0` (pass a valid pointer to any byte). |
 | `inLen` | in | `uint32_t` | Number of bytes to hash. |
 | `out` | out | `uint8_t *` | Buffer receiving the hash. Must not be `NULL`. |
 | `outSize` | in | `uint32_t` | Size of `out`. Must be at least [`SSF_SHA2_256_BYTE_SIZE`](#ssf-sha2-256-byte-size) (32) for SHA-256 or [`SSF_SHA2_224_BYTE_SIZE`](#ssf-sha2-224-byte-size) (28) for SHA-224. |
@@ -319,7 +322,7 @@ macros ([`SSFSHA512`](#ssfsha512), [`SSFSHA384`](#ssfsha384), [`SSFSHA512_256`](
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
-| `in` | in | `const uint8_t *` | Pointer to the data to hash. May be `NULL` when `inLen` is `0`. |
+| `in` | in | `const uint8_t *` | Pointer to the data to hash. Must not be `NULL`, even when `inLen` is `0` (pass a valid pointer to any byte). |
 | `inLen` | in | `uint32_t` | Number of bytes to hash. |
 | `out` | out | `uint8_t *` | Buffer receiving the hash. Must not be `NULL`. |
 | `outSize` | in | `uint32_t` | Size of `out`. Must be at least the output size of the chosen variant (see `SSF_SHA2_*_BYTE_SIZE` constants). |

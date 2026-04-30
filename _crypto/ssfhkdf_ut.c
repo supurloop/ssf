@@ -383,10 +383,33 @@ void SSFHKDFUnitTest(void)
                    prk, sizeof(prk)) == true);
         SSF_ASSERT(memcmp(prk, expectedPRK, sizeof(expectedPRK)) == 0);
 
+        /* Extract with non-NULL pointer + saltLen == 0 must be equivalent to NULL salt:    */
+        /* per RFC 5869 Sec. 2.2 the function substitutes a HashLen-byte zero salt either   */
+        /* way. Existing tests only ever pair NULL with len=0, leaving the (ptr, 0) arm     */
+        /* of the salt short-circuit unexercised.                                            */
+        {
+            uint8_t prkPtr0[32];
+            uint8_t saltPtr;
+            SSF_ASSERT(SSFHKDFExtract(SSF_HMAC_HASH_SHA256, &saltPtr, 0, ikm, sizeof(ikm),
+                       prkPtr0, sizeof(prkPtr0)) == true);
+            SSF_ASSERT(memcmp(prkPtr0, expectedPRK, sizeof(expectedPRK)) == 0);
+        }
+
         /* Expand with empty info */
         SSF_ASSERT(SSFHKDFExpand(SSF_HMAC_HASH_SHA256, prk, sizeof(prk), NULL, 0,
                    okm, sizeof(okm)) == true);
         SSF_ASSERT(memcmp(okm, expectedOKM, sizeof(expectedOKM)) == 0);
+
+        /* Expand with non-NULL pointer + infoLen == 0 must be equivalent to NULL info:     */
+        /* the loop's `if (info != NULL && infoLen > 0)` skip arm is the same in both       */
+        /* cases. Existing tests only pair NULL with len=0.                                  */
+        {
+            uint8_t okmPtr0[42];
+            uint8_t infoPtr;
+            SSF_ASSERT(SSFHKDFExpand(SSF_HMAC_HASH_SHA256, prk, sizeof(prk), &infoPtr, 0,
+                       okmPtr0, sizeof(okmPtr0)) == true);
+            SSF_ASSERT(memcmp(okmPtr0, expectedOKM, sizeof(expectedOKM)) == 0);
+        }
     }
 
     /* ---- RFC 5869 Test Case 4: HKDF-SHA-1, basic ---- */

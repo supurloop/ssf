@@ -91,7 +91,9 @@ static void _SSFEd25519UTPolluteStack(uint8_t pattern)
 #if defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wuninitialized"
+#if !defined(__clang__)
 #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#endif
 #endif
 #if defined(_MSC_VER)
 #pragma warning(push)

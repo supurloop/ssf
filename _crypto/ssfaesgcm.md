@@ -29,8 +29,14 @@ for any unused field.
 - The IV must be unique for every encryption performed with the same key. Reusing an IV with
   the same key completely breaks GCM confidentiality and authenticity.
 - A 96-bit (12-byte) IV is recommended per the GCM specification and is slightly more efficient
-  than other IV lengths; any length is accepted.
+  than other IV lengths. `ivLen` must be `> 0`; any positive length is accepted.
 - Supported key sizes: 16 bytes (AES-128-GCM), 24 bytes (AES-192-GCM), 32 bytes (AES-256-GCM).
+- Tag length is per-call selectable per NIST SP 800-38D §5.2.1.2: `tagSize` (Encrypt) and
+  `tagLen` (Decrypt) must be one of `{4, 8, 12, 13, 14, 15, 16}`. SP 800-38D restricts use of
+  the 4- and 8-byte tags to specific protocol contexts (e.g., voice-over-IP) — prefer 16, and
+  fall back only when the protocol mandates a shorter tag.
+- `ptLen` (Encrypt) and `ctLen` (Decrypt) are capped at `512 MiB` (2²⁹) per call, mirroring
+  [`ssfchacha20`](ssfchacha20.md). The cap is enforced by `SSF_REQUIRE`.
 - `SSFAESGCMDecrypt()` decrypts ciphertext into `pt` and then verifies the authentication
   tag. On tag-verify failure it returns `false` **and** memsets `pt[0..ctLen-1]` to zero
   before returning, so a buggy caller that forgets to check the return value cannot ship
@@ -73,8 +79,9 @@ void SSFAESGCMEncrypt(const uint8_t *pt, size_t ptLen, const uint8_t *iv, size_t
 ```
 
 Performs AES-GCM authenticated encryption. Encrypts `ptLen` bytes from `pt` into `ct` and
-produces a 16-byte authentication tag over the ciphertext and any additional authenticated data
-(`auth`). The operating mode is determined by which data fields are non-`NULL`:
+produces a `tagSize`-byte authentication tag over the ciphertext and any additional
+authenticated data (`auth`). The operating mode is determined by which data fields are
+non-`NULL`:
 
 | `pt` / `ct` | `auth` | Mode |
 |:-----------:|:------:|------|
@@ -86,15 +93,15 @@ produces a 16-byte authentication tag over the ciphertext and any additional aut
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
 | `pt` | in | `const uint8_t *` | Plaintext to encrypt. Pass `NULL` for auth-only modes. |
-| `ptLen` | in | `size_t` | Number of plaintext bytes. Must be `0` when `pt` is `NULL`. |
+| `ptLen` | in | `size_t` | Number of plaintext bytes. Must be `0` when `pt` is `NULL`. Must be `< 512 MiB` (2²⁹). |
 | `iv` | in | `const uint8_t *` | Initialization vector. Must not be `NULL`. Must be unique per encryption with the same key. |
-| `ivLen` | in | `size_t` | Length of `iv` in bytes. Any length is accepted; 12 is recommended. |
+| `ivLen` | in | `size_t` | Length of `iv` in bytes. Must be `> 0`; 12 is recommended. |
 | `auth` | in | `const uint8_t *` | Additional authenticated data (AAD) to authenticate but not encrypt. Pass `NULL` when not used. |
 | `authLen` | in | `size_t` | Number of AAD bytes. Must be `0` when `auth` is `NULL`. |
 | `key` | in | `const uint8_t *` | AES key. Must not be `NULL`. |
 | `keyLen` | in | `size_t` | Length of `key`: 16 (AES-128-GCM), 24 (AES-192-GCM), or 32 (AES-256-GCM). |
-| `tag` | out | `uint8_t *` | Buffer receiving the 16-byte authentication tag. Must not be `NULL`. |
-| `tagSize` | in | `size_t` | Size of `tag`. Must be at least 16 bytes. |
+| `tag` | out | `uint8_t *` | Buffer receiving the authentication tag. Must not be `NULL`. Must hold at least `tagSize` bytes. |
+| `tagSize` | in | `size_t` | Tag length in bytes. Must be one of `{4, 8, 12, 13, 14, 15, 16}` per NIST SP 800-38D §5.2.1.2. Exactly `tagSize` bytes are written. |
 | `ct` | out | `uint8_t *` | Buffer receiving the ciphertext. Pass `NULL` when `pt` is `NULL`. When non-`NULL`, must be at least `ptLen` bytes. |
 | `ctSize` | in | `size_t` | Size of `ct`. Must be at least `ptLen` when `ct` is non-`NULL`. |
 
@@ -156,15 +163,15 @@ returned and the contents of `pt` must be treated as invalid. All parameters (`i
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
 | `ct` | in | `const uint8_t *` | Ciphertext to decrypt. Pass `NULL` for auth-only verification. |
-| `ctLen` | in | `size_t` | Number of ciphertext bytes. Must be `0` when `ct` is `NULL`. |
+| `ctLen` | in | `size_t` | Number of ciphertext bytes. Must be `0` when `ct` is `NULL`. Must be `< 512 MiB` (2²⁹). |
 | `iv` | in | `const uint8_t *` | Initialization vector used during encryption. Must not be `NULL`. |
-| `ivLen` | in | `size_t` | Length of `iv` in bytes. Must match the value used during encryption. |
+| `ivLen` | in | `size_t` | Length of `iv` in bytes. Must be `> 0` and match the value used during encryption. |
 | `auth` | in | `const uint8_t *` | Additional authenticated data. Pass `NULL` when not used. Must match the value used during encryption. |
 | `authLen` | in | `size_t` | Number of AAD bytes. Must be `0` when `auth` is `NULL`. |
 | `key` | in | `const uint8_t *` | AES key. Must not be `NULL`. Must match the key used during encryption. |
 | `keyLen` | in | `size_t` | Length of `key`: 16, 24, or 32. Must match the value used during encryption. |
 | `tag` | in | `const uint8_t *` | Authentication tag produced by `SSFAESGCMEncrypt()`. Must not be `NULL`. |
-| `tagLen` | in | `size_t` | Length of `tag` in bytes. Must match the tag length produced during encryption. |
+| `tagLen` | in | `size_t` | Tag length in bytes. Must be one of `{4, 8, 12, 13, 14, 15, 16}` per NIST SP 800-38D §5.2.1.2 and match the value used during encryption. |
 | `pt` | out | `uint8_t *` | Buffer receiving the decrypted plaintext. Pass `NULL` when `ct` is `NULL`. When non-`NULL`, must be at least `ctLen` bytes. |
 | `ptSize` | in | `size_t` | Size of `pt`. Must be at least `ctLen` when `pt` is non-`NULL`. |
 

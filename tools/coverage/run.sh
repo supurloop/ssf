@@ -129,16 +129,21 @@ if [ -z "$srcs" ]; then
     exit 72
 fi
 
+# Run gcov from the repo root so the source paths recorded in .gcno (which are
+# repo-root-relative, like _codec/ssfasn1.c) resolve cleanly. Apple's gcov shim
+# can't find sources when invoked from a sibling directory even if the source
+# argument is correctly relative — it produces .gcov files containing only the
+# Source: header. Generate at repo root, then move the .gcov files into the
+# per-module gcov output dir so reruns and other modules don't pile them up.
 (
-    cd "$gcov_outdir"
+    rm -f *.gcov 2>/dev/null
     for src in $srcs; do
-        # repo-root-relative path from the gcov_outdir vantage point.
-        rel_src="../../../$src"
-        # Object dir holds the .gcno/.gcda for this source.
-        obj_dir="../../../$cov_dir/$(dirname "$src")"
-        "$gcov_bin" -b -o "$obj_dir" "$rel_src" 2>/dev/null
+        obj_dir="$cov_dir/$(dirname "$src")"
+        "$gcov_bin" -b -o "$obj_dir" "$src" 2>/dev/null
     done
 ) > "$cov_dir/gcov/$module/raw.txt"
+# Move every freshly produced .gcov into the module's output dir.
+mv -f *.gcov "$gcov_outdir/" 2>/dev/null || true
 
 # Parse the gcov stdout into per-file rows. Lines look like:
 #   File '_crypto/ssfaes.c'

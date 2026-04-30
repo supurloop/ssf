@@ -357,6 +357,13 @@ static void _SSFRSACrossCheckAtSize(uint16_t bits,
     /* consistency is correct (OpenSSL re-derives and checks these on load).                    */
     SSF_ASSERT(SSFRSAKeyGen(bits, priv, sizeof(priv), &privLen,
                              pub, sizeof(pub), &pubLen) == true);
+
+    /* Both validators must accept a freshly generated key at every enabled bit length. The   */
+    /* non-2048 sizes (3072, 4096) reach _SSFRSAValidatePubFields' size-match arms only via   */
+    /* this path -- the dedicated 2048 keygen test above doesn't run at those sizes.          */
+    SSF_ASSERT(SSFRSAPubKeyIsValid(pub, pubLen) == true);
+    SSF_ASSERT(SSFRSAPrivKeyIsValid(priv, privLen) == true);
+
     pkey = _OSSLLoadPrivKey(priv, privLen);
     SSF_ASSERT(pkey != NULL);
     pkeyPub = _OSSLLoadPubKey(pub, pubLen);
@@ -558,7 +565,7 @@ void SSFRSAUnitTest(void)
     /* ---- All key-consuming public APIs reject malformed DER on the decode boundary ---- */
     /* PubKeyIsValid above only exercises one call site of _SSFRSAPubKeyDecode. The decode-  */
     /* failure branch at every other call site (PrivKeyIsValid, SignPKCS1, SignPSS,         */
-    /* VerifyPSS) needs its own test or stays uncovered.                                    */
+    /* VerifyPKCS1, VerifyPSS) needs its own test or stays uncovered.                       */
     {
         static const uint8_t badDer[] = { 0x30u, 0x00u };  /* empty SEQUENCE -- parser bails */
         uint8_t hash[32];
@@ -575,8 +582,52 @@ void SSFRSAUnitTest(void)
         /* Verify-side: provide a same-length placeholder sig; the decode must bail before    */
         /* any sig byte is read, so the sig contents are irrelevant.                            */
         memset(sig, 0, 256);
+        SSF_ASSERT(SSFRSAVerifyPKCS1(badDer, sizeof(badDer), SSF_RSA_HASH_SHA256,
+                                     hash, sizeof(hash), sig, 256) == false);
         SSF_ASSERT(SSFRSAVerifyPSS(badDer, sizeof(badDer), SSF_RSA_HASH_SHA256,
                                    hash, sizeof(hash), sig, 256) == false);
+    }
+
+    /* ---- Sign / Verify reject signature-length and buffer-size mismatches ---- */
+    /* sig too small on the sign side, sig length wrong on the verify side, and sig integer  */
+    /* >= n on the verify side. These exercise three distinct early-return arms that the      */
+    /* happy-path round-trips never hit.                                                      */
+    {
+        uint8_t hash[32];
+        uint8_t pubKeyDer[SSF_RSA_MAX_PUB_KEY_DER_SIZE];
+        uint8_t privKeyDer[SSF_RSA_MAX_PRIV_KEY_DER_SIZE];
+        size_t pubKeyDerLen, privKeyDerLen;
+        uint8_t sig[SSF_RSA_MAX_KEY_BYTES];
+        uint8_t sigFF[256];
+        size_t sigLen;
+        uint8_t tinyBuf[8];
+
+        SSFSHA256((const uint8_t *)"sample", 6, hash, sizeof(hash));
+        SSF_ASSERT(SSFRSAKeyGen(2048u,
+                                privKeyDer, sizeof(privKeyDer), &privKeyDerLen,
+                                pubKeyDer,  sizeof(pubKeyDer),  &pubKeyDerLen) == true);
+
+        /* SignPKCS1 / SignPSS reject when the output buffer cannot hold a keyBytes-sized sig. */
+        SSF_ASSERT(SSFRSASignPKCS1(privKeyDer, privKeyDerLen, SSF_RSA_HASH_SHA256,
+                                   hash, sizeof(hash), tinyBuf, sizeof(tinyBuf), &sigLen) == false);
+        SSF_ASSERT(SSFRSASignPSS(privKeyDer, privKeyDerLen, SSF_RSA_HASH_SHA256,
+                                 hash, sizeof(hash), tinyBuf, sizeof(tinyBuf), &sigLen) == false);
+
+        /* Produce one valid sig so we can mangle its length on the verify side. */
+        SSF_ASSERT(SSFRSASignPKCS1(privKeyDer, privKeyDerLen, SSF_RSA_HASH_SHA256,
+                                   hash, sizeof(hash), sig, sizeof(sig), &sigLen) == true);
+
+        /* VerifyPKCS1 / VerifyPSS reject when sigLen != keyBytes (256 for RSA-2048). */
+        SSF_ASSERT(SSFRSAVerifyPKCS1(pubKeyDer, pubKeyDerLen, SSF_RSA_HASH_SHA256,
+                                     hash, sizeof(hash), sig, sigLen - 1u) == false);
+        SSF_ASSERT(SSFRSAVerifyPSS(pubKeyDer, pubKeyDerLen, SSF_RSA_HASH_SHA256,
+                                   hash, sizeof(hash), sig, sigLen - 1u) == false);
+
+        /* VerifyPKCS1 with sig as integer >= n: an all-0xFF 256-byte sig is 2^2048 - 1, which */
+        /* exceeds any 2048-bit modulus, so _SSFRSAPublicOp's `m >= n` arm rejects.            */
+        memset(sigFF, 0xFFu, sizeof(sigFF));
+        SSF_ASSERT(SSFRSAVerifyPKCS1(pubKeyDer, pubKeyDerLen, SSF_RSA_HASH_SHA256,
+                                     hash, sizeof(hash), sigFF, sizeof(sigFF)) == false);
     }
 
     /* ---- FIPS 186-4 Sec. B.3.3 step 5.4: |p - q| > 2^(halfBits - 100) ---- */

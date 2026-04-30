@@ -178,6 +178,15 @@ stub so a pure-ECC build can keep `ssfrsa.c` in the project without dragging RSA
 |---|----------|-------------|
 | [e.g.](#ex-keygen) | [`bool SSFRSAKeyGen(bits, privKeyDer, privKeyDerSize, privKeyDerLen, pubKeyDer, pubKeyDerSize, pubKeyDerLen)`](#ssfrsakeygen) | Generate a 2048 / 3072 / 4096-bit key pair (enable via `SSF_RSA_CONFIG_ENABLE_KEYGEN`) |
 | | [`bool SSFRSAPubKeyIsValid(pubKeyDer, pubKeyDerLen)`](#ssfrsapubkeyisvalid) | Validate a DER-encoded `RSAPublicKey` blob |
+| | [`bool SSFRSAPrivKeyIsValid(privKeyDer, privKeyDerLen)`](#ssfrsaprivkeyisvalid) | Validate a DER-encoded `RSAPrivateKey` blob |
+
+**[FIPS 186-4 keygen post-condition helpers](#fips-helpers)**
+
+| | Function | Description |
+|---|----------|-------------|
+| | [`bool SSFRSAFipsPrimeDistanceOK(p, q, halfBits)`](#fips-helpers) | Check `\|p − q\| > 2^(halfBits − 100)` |
+| | [`bool SSFRSAFipsDLowerBoundOK(d, halfBits)`](#fips-helpers) | Check `d > 2^halfBits` |
+| | [`bool SSFRSAFipsECoprimeOK(e, pMinus1, qMinus1)`](#fips-helpers) | Check `gcd(e, λ(n)) == 1` |
 
 **[PKCS#1 v1.5 signatures](#pkcs1-v15)**
 
@@ -252,6 +261,45 @@ modulus in the supported size range and a valid public exponent. Does **not** ch
 the modulus is actually the product of two primes (which would require factoring); a
 well-formed but deliberately weak key — e.g., a modulus with a small factor — would still
 return `true` here. Use this to reject mis-encoded or size-wrong keys at ingestion time.
+
+<a id="ssfrsaprivkeyisvalid"></a>
+```c
+bool SSFRSAPrivKeyIsValid(const uint8_t *privKeyDer, size_t privKeyDerLen);
+```
+Parse the DER blob and return whether it is a well-formed PKCS#1 `RSAPrivateKey` (version
+0, all eight integers `n / e / d / p / q / dp / dq / qInv` present, `n = p · q`, `e · d ≡ 1
+(mod λ(n))`, `qInv = q⁻¹ mod p`, modulus in the supported size range). Counterpart of
+[`SSFRSAPubKeyIsValid()`](#ssfrsapubkeyisvalid) for the private blob. Use this to reject
+malformed key material at ingestion time before passing it to the sign entry points.
+
+---
+
+<a id="fips-helpers"></a>
+
+### [↑](#functions) FIPS 186-4 Keygen Post-Condition Helpers
+
+```c
+bool SSFRSAFipsPrimeDistanceOK(const SSFBN_t *p, const SSFBN_t *q, uint16_t halfBits);
+bool SSFRSAFipsDLowerBoundOK(const SSFBN_t *d, uint16_t halfBits);
+bool SSFRSAFipsECoprimeOK(const SSFBN_t *e, const SSFBN_t *pMinus1, const SSFBN_t *qMinus1);
+```
+
+The three post-condition checks from FIPS 186-4 §B.3 that
+[`SSFRSAKeyGen()`](#ssfrsakeygen) runs against each candidate `(p, q, d)` before accepting
+the key:
+
+- **`PrimeDistanceOK`** rejects `|p − q| ≤ 2^(halfBits − 100)` (B.3.3 step 5.4) — primes
+  too close together let Fermat factorisation recover them in a single sqrt.
+- **`DLowerBoundOK`** rejects `d ≤ 2^halfBits` (B.3.1 step 4.1.b) — small private
+  exponents are vulnerable to Boneh-Durfee lattice attacks.
+- **`ECoprimeOK`** rejects `gcd(e, λ(n)) ≠ 1` where `λ(n) = lcm(p−1, q−1)` — required for
+  `d = e⁻¹ mod λ(n)` to exist.
+
+These take [`SSFBN_t`](ssfbn.md#ssfbn-t) operands rather than DER bytes because they
+operate on the integer values directly. They are exposed in the public header for
+consumers building their own keygen on top of [`ssfbn`](ssfbn.md), and for FIPS-compliance
+test harnesses that need to drive the post-conditions independently. `halfBits` is `nlen
+/ 2` — i.e., 1024 for RSA-2048, 1536 for RSA-3072, 2048 for RSA-4096.
 
 ---
 

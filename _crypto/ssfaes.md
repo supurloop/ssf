@@ -26,8 +26,9 @@ parameters; the fixed-key macros pre-set those parameters for a specific key len
   times (e.g., network servers, shared systems). Use a constant-time AES library for those cases.
 - Operates on exactly one 16-byte block per call; chain block operations at the application
   layer to implement modes such as CBC or CTR.
-- `ptLen`/`ctLen` must equal [`SSF_AES_BLOCK_SIZE`](#ssf-aes-block-size) (16);
-  `ctSize`/`ptSize` must be at least [`SSF_AES_BLOCK_SIZE`](#ssf-aes-block-size).
+- `ptLen` / `ctLen` and `ctSize` / `ptSize` must all equal
+  [`SSF_AES_BLOCK_SIZE`](#ssf-aes-block-size) (16) — strict equality on both length and
+  buffer-size parameters, enforced by `SSF_REQUIRE`.
 - The `SSFAESXXX` macros derive `nr` and `nk` from `keyLen` at compile time; `keyLen` must be a
   compile-time constant of 16, 24, or 32. Any other value produces incorrect round counts without
   a compile-time diagnostic.
@@ -89,7 +90,7 @@ calling this function directly.
 | `pt` | in | `const uint8_t *` | Pointer to the plaintext block. Must not be `NULL`. |
 | `ptLen` | in | `size_t` | Number of plaintext bytes. Must equal `SSF_AES_BLOCK_SIZE` (16). |
 | `ct` | out | `uint8_t *` | Buffer to receive the ciphertext block. Must not be `NULL` and must not overlap `pt`. |
-| `ctSize` | in | `size_t` | Size of `ct`. Must be at least `SSF_AES_BLOCK_SIZE` (16). |
+| `ctSize` | in | `size_t` | Size of `ct`. Must equal `SSF_AES_BLOCK_SIZE` (16) — strict equality. |
 | `key` | in | `const uint8_t *` | Pointer to the AES key bytes. Must not be `NULL`. |
 | `keyLen` | in | `size_t` | Number of key bytes. Must be 16, 24, or 32, consistent with `nr` and `nk`. |
 | `nr` | in | `uint8_t` | Number of AES rounds: 10 for AES-128, 12 for AES-192, 14 for AES-256. |
@@ -118,7 +119,7 @@ calling this function directly.
 | `ct` | in | `const uint8_t *` | Pointer to the ciphertext block. Must not be `NULL`. |
 | `ctLen` | in | `size_t` | Number of ciphertext bytes. Must equal `SSF_AES_BLOCK_SIZE` (16). |
 | `pt` | out | `uint8_t *` | Buffer to receive the decrypted plaintext. Must not be `NULL` and must not overlap `ct`. |
-| `ptSize` | in | `size_t` | Size of `pt`. Must be at least `SSF_AES_BLOCK_SIZE` (16). |
+| `ptSize` | in | `size_t` | Size of `pt`. Must equal `SSF_AES_BLOCK_SIZE` (16) — strict equality. |
 | `key` | in | `const uint8_t *` | Pointer to the AES key bytes. Must not be `NULL`. |
 | `keyLen` | in | `size_t` | Number of key bytes. Must be 16, 24, or 32, consistent with `nr` and `nk`. |
 | `nr` | in | `uint8_t` | Number of AES rounds: 10 for AES-128, 12 for AES-192, 14 for AES-256. |

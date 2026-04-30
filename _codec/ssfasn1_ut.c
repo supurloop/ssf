@@ -934,5 +934,577 @@ void SSFASN1UnitTest(void)
         SSF_ASSERT(SSFASN1DecGetDate(&seqInner, &decoded, &seqInner) == true);
         SSF_ASSERT(decoded == 1718409600ull);
     }
+
+    /* ---- Branch sweep: every reject path in the decoder + encoder ------------------------ */
+    /* Each block below targets a specific branch in ssfasn1.c that the existing happy-path     */
+    /* and isolated-edge tests above never reach. The goal is to exercise every public-API      */
+    /* reject path with the minimum input that triggers it; comments name the source line(s).   */
+    {
+        SSFASN1Cursor_t cur, next;
+        uint16_t tag;
+        const uint8_t *value;
+        uint32_t valueLen;
+        uint64_t u64;
+        uint8_t scratch;
+
+        /* ssfasn1.c line 51: bufLen < 2u (cannot fit minimum tag+length). */
+        {
+            uint8_t buf[1] = { 0x02u };
+            cur.buf = buf; cur.bufLen = 1u;
+            SSF_ASSERT(SSFASN1DecGetTLV(&cur, &tag, &value, &valueLen, &next) == false);
+        }
+
+        /* line 59: high-tag-number form with no extension byte. */
+        {
+            uint8_t buf[2] = { 0x1Fu, 0x00u };  /* second byte interpreted as length, but no tag ext */
+            cur.buf = buf; cur.bufLen = 1u;     /* length 1 -> ParseTL bails after reading 0x1F */
+            SSF_ASSERT(SSFASN1DecGetTLV(&cur, &tag, &value, &valueLen, &next) == false);
+        }
+
+        /* line 63: extension byte high bit set (multi-byte tag continuation not supported). */
+        {
+            uint8_t buf[3] = { 0x1Fu, 0xFFu, 0x00u };
+            cur.buf = buf; cur.bufLen = 3u;
+            SSF_ASSERT(SSFASN1DecGetTLV(&cur, &tag, &value, &valueLen, &next) == false);
+        }
+
+        /* line 66: non-canonical short-form tag (extension byte < 31, should have used 1-byte). */
+        {
+            uint8_t buf[3] = { 0x1Fu, 0x1Eu, 0x00u };
+            cur.buf = buf; cur.bufLen = 3u;
+            SSF_ASSERT(SSFASN1DecGetTLV(&cur, &tag, &value, &valueLen, &next) == false);
+        }
+
+        /* line 69: 2-byte tag consumed but no length byte follows. */
+        {
+            uint8_t buf[2] = { 0x1Fu, 0x40u };
+            cur.buf = buf; cur.bufLen = 2u;
+            SSF_ASSERT(SSFASN1DecGetTLV(&cur, &tag, &value, &valueLen, &next) == false);
+        }
+
+        /* line 79: indefinite-form length (0x80) is BER, forbidden in DER. */
+        {
+            uint8_t buf[3] = { 0x30u, 0x80u, 0x00u };
+            cur.buf = buf; cur.bufLen = 3u;
+            SSF_ASSERT(SSFASN1DecGetTLV(&cur, &tag, &value, &valueLen, &next) == false);
+        }
+
+        /* line 88: long-form length-of-length > 4 bytes. */
+        {
+            uint8_t buf[6] = { 0x30u, 0x85u, 0x00u, 0x00u, 0x00u, 0x00u };
+            cur.buf = buf; cur.bufLen = 6u;
+            SSF_ASSERT(SSFASN1DecGetTLV(&cur, &tag, &value, &valueLen, &next) == false);
+        }
+
+        /* line 89: long-form length declares more bytes than the buffer holds. */
+        {
+            uint8_t buf[2] = { 0x30u, 0x82u };  /* claims 2 length bytes, none present */
+            cur.buf = buf; cur.bufLen = 2u;
+            SSF_ASSERT(SSFASN1DecGetTLV(&cur, &tag, &value, &valueLen, &next) == false);
+        }
+
+        /* line 168: SSFASN1DecPeekTag returns false on a malformed header. */
+        {
+            uint8_t buf[1] = { 0x02u };
+            cur.buf = buf; cur.bufLen = 1u;
+            SSF_ASSERT(SSFASN1DecPeekTag(&cur, &tag) == false);
+        }
+
+        /* lines 150/151: SSFASN1DecOpenConstructed fails on TLV parse error AND on tag mismatch. */
+        {
+            uint8_t bad[1] = { 0x30u };
+            SSFASN1Cursor_t inner;
+            cur.buf = bad; cur.bufLen = 1u;
+            SSF_ASSERT(SSFASN1DecOpenConstructed(&cur, SSF_ASN1_TAG_SEQUENCE, &inner, &next) == false);
+        }
+        {
+            uint8_t intDer[3] = { 0x02u, 0x01u, 0x05u };
+            SSFASN1Cursor_t inner;
+            cur.buf = intDer; cur.bufLen = 3u;
+            SSF_ASSERT(SSFASN1DecOpenConstructed(&cur, SSF_ASN1_TAG_SEQUENCE, &inner, &next) == false);
+        }
+
+        /* lines 204/205: DecGetBool TLV failure + tag/length checks. */
+        {
+            bool b;
+            uint8_t bad[1] = { 0x01u };
+            cur.buf = bad; cur.bufLen = 1u;
+            SSF_ASSERT(SSFASN1DecGetBool(&cur, &b, &next) == false);
+        }
+        {
+            bool b;
+            uint8_t wrongTag[3] = { 0x02u, 0x01u, 0x01u };  /* INTEGER instead of BOOLEAN */
+            cur.buf = wrongTag; cur.bufLen = 3u;
+            SSF_ASSERT(SSFASN1DecGetBool(&cur, &b, &next) == false);
+        }
+        {
+            bool b;
+            uint8_t wrongLen[4] = { 0x01u, 0x02u, 0xFFu, 0x00u };  /* BOOLEAN with len 2 */
+            cur.buf = wrongLen; cur.bufLen = 4u;
+            SSF_ASSERT(SSFASN1DecGetBool(&cur, &b, &next) == false);
+        }
+
+        /* line 244: DecGetIntU64 rejects integers wider than 8 bytes after leading-zero strip. */
+        {
+            uint8_t big[12] = { 0x02u, 0x0Au, 0x00u, 0x80u, 0x01u, 0x02u, 0x03u, 0x04u,
+                                0x05u, 0x06u, 0x07u, 0x08u };  /* 10 content -> strip 1 -> 9 > 8 */
+            cur.buf = big; cur.bufLen = 12u;
+            SSF_ASSERT(SSFASN1DecGetIntU64(&cur, &u64, &next) == false);
+        }
+
+        /* lines 268-270: DecGetBitString TLV fail, tag mismatch, zero-length value. */
+        {
+            const uint8_t *bits;
+            uint32_t bitsLen;
+            uint8_t unused;
+            uint8_t bad[1] = { 0x03u };
+            cur.buf = bad; cur.bufLen = 1u;
+            SSF_ASSERT(SSFASN1DecGetBitString(&cur, &bits, &bitsLen, &unused, &next) == false);
+        }
+        {
+            const uint8_t *bits;
+            uint32_t bitsLen;
+            uint8_t unused;
+            uint8_t wrongTag[3] = { 0x04u, 0x01u, 0x00u };  /* OCTET STRING tag */
+            cur.buf = wrongTag; cur.bufLen = 3u;
+            SSF_ASSERT(SSFASN1DecGetBitString(&cur, &bits, &bitsLen, &unused, &next) == false);
+        }
+        {
+            const uint8_t *bits;
+            uint32_t bitsLen;
+            uint8_t unused;
+            uint8_t empty[2] = { 0x03u, 0x00u };  /* BIT STRING with valueLen 0 */
+            cur.buf = empty; cur.bufLen = 2u;
+            SSF_ASSERT(SSFASN1DecGetBitString(&cur, &bits, &bitsLen, &unused, &next) == false);
+        }
+
+        /* lines 289/290: DecGetOctetString TLV fail + tag mismatch. */
+        {
+            const uint8_t *octets;
+            uint32_t octetsLen;
+            uint8_t bad[1] = { 0x04u };
+            cur.buf = bad; cur.bufLen = 1u;
+            SSF_ASSERT(SSFASN1DecGetOctetString(&cur, &octets, &octetsLen, &next) == false);
+        }
+        {
+            const uint8_t *octets;
+            uint32_t octetsLen;
+            uint8_t wrongTag[3] = { 0x02u, 0x01u, 0x05u };
+            cur.buf = wrongTag; cur.bufLen = 3u;
+            SSF_ASSERT(SSFASN1DecGetOctetString(&cur, &octets, &octetsLen, &next) == false);
+        }
+
+        /* lines 304/305: DecGetNull TLV fail + tag mismatch + non-zero value length. */
+        {
+            uint8_t bad[1] = { 0x05u };
+            cur.buf = bad; cur.bufLen = 1u;
+            SSF_ASSERT(SSFASN1DecGetNull(&cur, &next) == false);
+        }
+        {
+            uint8_t wrongTag[2] = { 0x02u, 0x00u };
+            cur.buf = wrongTag; cur.bufLen = 2u;
+            SSF_ASSERT(SSFASN1DecGetNull(&cur, &next) == false);
+        }
+        {
+            uint8_t nonEmpty[3] = { 0x05u, 0x01u, 0x00u };
+            cur.buf = nonEmpty; cur.bufLen = 3u;
+            SSF_ASSERT(SSFASN1DecGetNull(&cur, &next) == false);
+        }
+
+        /* lines 320/321: DecGetOIDRaw TLV fail + tag mismatch. */
+        {
+            const uint8_t *raw;
+            uint32_t rawLen;
+            uint8_t bad[1] = { 0x06u };
+            cur.buf = bad; cur.bufLen = 1u;
+            SSF_ASSERT(SSFASN1DecGetOIDRaw(&cur, &raw, &rawLen, &next) == false);
+        }
+        {
+            const uint8_t *raw;
+            uint32_t rawLen;
+            uint8_t wrongTag[3] = { 0x02u, 0x01u, 0x05u };
+            cur.buf = wrongTag; cur.bufLen = 3u;
+            SSF_ASSERT(SSFASN1DecGetOIDRaw(&cur, &raw, &rawLen, &next) == false);
+        }
+
+        /* lines 343, 347, 353-355, 378, 382-384, 389: DecGetOID malformed-OID rejects. */
+        {
+            uint32_t arcs[16];
+            uint8_t arcsLen;
+
+            /* line 343: empty OID payload. */
+            {
+                uint8_t emptyOid[2] = { 0x06u, 0x00u };
+                cur.buf = emptyOid; cur.bufLen = 2u;
+                SSF_ASSERT(SSFASN1DecGetOID(&cur, arcs, 16u, &arcsLen, &next) == false);
+            }
+            /* line 347: non-canonical leading 0x80 in first sub-id. */
+            {
+                uint8_t nonCanon[3] = { 0x06u, 0x01u, 0x80u };
+                cur.buf = nonCanon; cur.bufLen = 3u;
+                SSF_ASSERT(SSFASN1DecGetOID(&cur, arcs, 16u, &arcsLen, &next) == false);
+            }
+            /* line 353: first sub-id continuation runs past raw end. */
+            {
+                uint8_t truncFirst[3] = { 0x06u, 0x01u, 0x81u };  /* high bit set, no follow */
+                cur.buf = truncFirst; cur.bufLen = 3u;
+                SSF_ASSERT(SSFASN1DecGetOID(&cur, arcs, 16u, &arcsLen, &next) == false);
+            }
+            /* line 354: first sub-id needs 6 continuation bytes to enter iter 6 with count=5. */
+            {
+                uint8_t bigFirst[8] = { 0x06u, 0x06u, 0x82u, 0x82u, 0x82u, 0x82u, 0x82u, 0x01u };
+                cur.buf = bigFirst; cur.bufLen = 8u;
+                SSF_ASSERT(SSFASN1DecGetOID(&cur, arcs, 16u, &arcsLen, &next) == false);
+            }
+            /* line 355: at iter 5, accumulated 4 x 0x7F = 0x0FFFFFFF; bit 25 set -> overflow. */
+            {
+                uint8_t firstOverflow[7] = { 0x06u, 0x05u, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0x01u };
+                cur.buf = firstOverflow; cur.bufLen = 7u;
+                SSF_ASSERT(SSFASN1DecGetOID(&cur, arcs, 16u, &arcsLen, &next) == false);
+            }
+            /* line 378: non-canonical leading 0x80 on a subsequent arc. */
+            {
+                uint8_t nonCanon2[4] = { 0x06u, 0x02u, 0x2Au, 0x80u };  /* OK first, then 0x80 */
+                cur.buf = nonCanon2; cur.bufLen = 4u;
+                SSF_ASSERT(SSFASN1DecGetOID(&cur, arcs, 16u, &arcsLen, &next) == false);
+            }
+            /* line 382: subsequent arc continuation runs past raw end. */
+            {
+                uint8_t truncSub[4] = { 0x06u, 0x02u, 0x2Au, 0x81u };
+                cur.buf = truncSub; cur.bufLen = 4u;
+                SSF_ASSERT(SSFASN1DecGetOID(&cur, arcs, 16u, &arcsLen, &next) == false);
+            }
+            /* line 383: subsequent arc with 6 continuation bytes -> iter 6 count=5. */
+            {
+                uint8_t bigSub[9] = { 0x06u, 0x07u, 0x2Au, 0x82u, 0x82u, 0x82u, 0x82u, 0x82u,
+                                      0x01u };
+                cur.buf = bigSub; cur.bufLen = 9u;
+                SSF_ASSERT(SSFASN1DecGetOID(&cur, arcs, 16u, &arcsLen, &next) == false);
+            }
+            /* line 384: subsequent arc 4-byte overflow (same shape as line 355's first arc). */
+            {
+                uint8_t subOverflow[8] = { 0x06u, 0x06u, 0x2Au, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0x01u };
+                cur.buf = subOverflow; cur.bufLen = 8u;
+                SSF_ASSERT(SSFASN1DecGetOID(&cur, arcs, 16u, &arcsLen, &next) == false);
+            }
+            /* line 389: OID has more arcs than oidArcsSize. Limit caller buffer to 2. */
+            {
+                uint8_t threeArc[5] = { 0x06u, 0x03u, 0x2Au, 0x03u, 0x04u };  /* 1.2.3.4 */
+                uint32_t small[2];
+                cur.buf = threeArc; cur.bufLen = 5u;
+                SSF_ASSERT(SSFASN1DecGetOID(&cur, small, 2u, &arcsLen, &next) == false);
+            }
+        }
+
+        /* lines 408, 413: DecGetString TLV fail + tag-not-in-allowed-set. */
+        {
+            const uint8_t *str;
+            uint32_t strLen;
+            uint16_t strTag;
+            uint8_t bad[1] = { 0x0Cu };
+            cur.buf = bad; cur.bufLen = 1u;
+            SSF_ASSERT(SSFASN1DecGetString(&cur, &str, &strLen, &strTag, &next) == false);
+        }
+        {
+            const uint8_t *str;
+            uint32_t strLen;
+            uint16_t strTag;
+            uint8_t notString[3] = { 0x02u, 0x01u, 0x01u };  /* INTEGER -> not in string set */
+            cur.buf = notString; cur.bufLen = 3u;
+            SSF_ASSERT(SSFASN1DecGetString(&cur, &str, &strLen, &strTag, &next) == false);
+        }
+        /* line 419: strTagOut == NULL is also a valid path (caller skips reading the tag). */
+        {
+            const uint8_t *str;
+            uint32_t strLen;
+            uint8_t utf[5] = { 0x0Cu, 0x03u, 'a', 'b', 'c' };
+            cur.buf = utf; cur.bufLen = 5u;
+            SSF_ASSERT(SSFASN1DecGetString(&cur, &str, &strLen, NULL, &next) == true);
+        }
+
+        /* line 457: DecGetTime TLV fail. */
+        {
+            uint8_t bad[1] = { 0x17u };
+            cur.buf = bad; cur.bufLen = 1u;
+            SSF_ASSERT(SSFASN1DecGetTime(&cur, &u64, &next) == false);
+        }
+        /* lines 463, 473: wrong content length for UTC vs GeneralizedTime. */
+        {
+            uint8_t shortUTC[5] = { 0x17u, 0x03u, '2', '4', 'Z' };
+            cur.buf = shortUTC; cur.bufLen = 5u;
+            SSF_ASSERT(SSFASN1DecGetTime(&cur, &u64, &next) == false);
+        }
+        {
+            uint8_t shortGT[5] = { 0x18u, 0x03u, '2', '0', 'Z' };
+            cur.buf = shortGT; cur.bufLen = 5u;
+            SSF_ASSERT(SSFASN1DecGetTime(&cur, &u64, &next) == false);
+        }
+        /* lines 474/475: GeneralizedTime year hi/lo non-digit. */
+        {
+            uint8_t badYearHi[17] = {
+                0x18u, 0x0Fu, 'X','0','2','4','0','1','0','1','1','2','3','4','5','6','Z'
+            };
+            cur.buf = badYearHi; cur.bufLen = 17u;
+            SSF_ASSERT(SSFASN1DecGetTime(&cur, &u64, &next) == false);
+        }
+        {
+            uint8_t badYearLo[17] = {
+                0x18u, 0x0Fu, '2','0','X','4','0','1','0','1','1','2','3','4','5','6','Z'
+            };
+            cur.buf = badYearLo; cur.bufLen = 17u;
+            SSF_ASSERT(SSFASN1DecGetTime(&cur, &u64, &next) == false);
+        }
+        /* lines 484, 486, 488, 490, 492: month / day / hour / min / sec non-digit. */
+        {
+            /* GeneralizedTime: pos starts at 4 after year, so month at 4-5. */
+            uint8_t badMonth[17] = {
+                0x18u, 0x0Fu, '2','0','2','4','X','1','0','1','1','2','3','4','5','6','Z'
+            };
+            cur.buf = badMonth; cur.bufLen = 17u;
+            SSF_ASSERT(SSFASN1DecGetTime(&cur, &u64, &next) == false);
+        }
+        {
+            uint8_t badDay[17] = {
+                0x18u, 0x0Fu, '2','0','2','4','0','6','X','5','1','2','3','4','5','6','Z'
+            };
+            cur.buf = badDay; cur.bufLen = 17u;
+            SSF_ASSERT(SSFASN1DecGetTime(&cur, &u64, &next) == false);
+        }
+        {
+            uint8_t badHour[17] = {
+                0x18u, 0x0Fu, '2','0','2','4','0','6','1','5','X','2','3','4','5','6','Z'
+            };
+            cur.buf = badHour; cur.bufLen = 17u;
+            SSF_ASSERT(SSFASN1DecGetTime(&cur, &u64, &next) == false);
+        }
+        {
+            uint8_t badMin[17] = {
+                0x18u, 0x0Fu, '2','0','2','4','0','6','1','5','1','2','X','4','5','6','Z'
+            };
+            cur.buf = badMin; cur.bufLen = 17u;
+            SSF_ASSERT(SSFASN1DecGetTime(&cur, &u64, &next) == false);
+        }
+        {
+            uint8_t badSec[17] = {
+                0x18u, 0x0Fu, '2','0','2','4','0','6','1','5','1','2','3','4','X','6','Z'
+            };
+            cur.buf = badSec; cur.bufLen = 17u;
+            SSF_ASSERT(SSFASN1DecGetTime(&cur, &u64, &next) == false);
+        }
+        /* line 501: year out of range (e.g. 1969 — below SSFDTIME_EPOCH_YEAR_MIN). */
+        {
+            uint8_t oldYear[17] = {
+                0x18u, 0x0Fu, '1','9','6','9','0','1','0','1','0','0','0','0','0','0','Z'
+            };
+            cur.buf = oldYear; cur.bufLen = 17u;
+            SSF_ASSERT(SSFASN1DecGetTime(&cur, &u64, &next) == false);
+        }
+        /* line 502: month == 0. */
+        {
+            uint8_t monthZero[17] = {
+                0x18u, 0x0Fu, '2','0','2','4','0','0','0','1','0','0','0','0','0','0','Z'
+            };
+            cur.buf = monthZero; cur.bufLen = 17u;
+            SSF_ASSERT(SSFASN1DecGetTime(&cur, &u64, &next) == false);
+        }
+
+        /* lines 532/533/535/536/537: _SSFASN1ParseYMD branches via DecGetDate. Tag is 0x1F1F  */
+        /* (multi-byte). Encode TL via the encoder so the tag-length serialization is correct. */
+        {
+            uint8_t buf[64];
+            uint32_t hdrLen;
+            uint64_t decoded;
+            uint8_t payload[10];
+
+            /* line 532: year hi non-digit. "X024-06-15" */
+            memcpy(payload, "X024-06-15", 10);
+            SSF_ASSERT(SSFASN1EncTagLen(buf, sizeof(buf), SSF_ASN1_TAG_DATE, 10u, &hdrLen) == true);
+            memcpy(&buf[hdrLen], payload, 10);
+            cur.buf = buf; cur.bufLen = hdrLen + 10u;
+            SSF_ASSERT(SSFASN1DecGetDate(&cur, &decoded, &next) == false);
+
+            /* line 533: year lo non-digit. */
+            memcpy(payload, "20X4-06-15", 10);
+            SSF_ASSERT(SSFASN1EncTagLen(buf, sizeof(buf), SSF_ASN1_TAG_DATE, 10u, &hdrLen) == true);
+            memcpy(&buf[hdrLen], payload, 10);
+            cur.buf = buf; cur.bufLen = hdrLen + 10u;
+            SSF_ASSERT(SSFASN1DecGetDate(&cur, &decoded, &next) == false);
+
+            /* line 535: month non-digit. */
+            memcpy(payload, "2024-X6-15", 10);
+            SSF_ASSERT(SSFASN1EncTagLen(buf, sizeof(buf), SSF_ASN1_TAG_DATE, 10u, &hdrLen) == true);
+            memcpy(&buf[hdrLen], payload, 10);
+            cur.buf = buf; cur.bufLen = hdrLen + 10u;
+            SSF_ASSERT(SSFASN1DecGetDate(&cur, &decoded, &next) == false);
+
+            /* line 536: missing dash at offset 7 (tested in existing block; harmless to repeat). */
+            memcpy(payload, "2024-06X15", 10);
+            SSF_ASSERT(SSFASN1EncTagLen(buf, sizeof(buf), SSF_ASN1_TAG_DATE, 10u, &hdrLen) == true);
+            memcpy(&buf[hdrLen], payload, 10);
+            cur.buf = buf; cur.bufLen = hdrLen + 10u;
+            SSF_ASSERT(SSFASN1DecGetDate(&cur, &decoded, &next) == false);
+
+            /* line 537: day non-digit. */
+            memcpy(payload, "2024-06-X5", 10);
+            SSF_ASSERT(SSFASN1EncTagLen(buf, sizeof(buf), SSF_ASN1_TAG_DATE, 10u, &hdrLen) == true);
+            memcpy(&buf[hdrLen], payload, 10);
+            cur.buf = buf; cur.bufLen = hdrLen + 10u;
+            SSF_ASSERT(SSFASN1DecGetDate(&cur, &decoded, &next) == false);
+        }
+
+        /* lines 553-556: _SSFASN1YMDHMSToUnix range checks via DecGetDateTime. */
+        {
+            uint8_t buf[64];
+            uint32_t hdrLen;
+            uint64_t decoded;
+            uint8_t payload[19];
+
+            /* line 553: year out of range (1969). */
+            memcpy(payload, "1969-01-01T00:00:00", 19);
+            SSF_ASSERT(SSFASN1EncTagLen(buf, sizeof(buf), SSF_ASN1_TAG_DATE_TIME, 19u, &hdrLen)
+                       == true);
+            memcpy(&buf[hdrLen], payload, 19);
+            cur.buf = buf; cur.bufLen = hdrLen + 19u;
+            SSF_ASSERT(SSFASN1DecGetDateTime(&cur, &decoded, &next) == false);
+
+            /* line 554: month == 0. */
+            memcpy(payload, "2024-00-01T00:00:00", 19);
+            SSF_ASSERT(SSFASN1EncTagLen(buf, sizeof(buf), SSF_ASN1_TAG_DATE_TIME, 19u, &hdrLen)
+                       == true);
+            memcpy(&buf[hdrLen], payload, 19);
+            cur.buf = buf; cur.bufLen = hdrLen + 19u;
+            SSF_ASSERT(SSFASN1DecGetDateTime(&cur, &decoded, &next) == false);
+
+            /* line 555: day == 0. */
+            memcpy(payload, "2024-06-00T00:00:00", 19);
+            SSF_ASSERT(SSFASN1EncTagLen(buf, sizeof(buf), SSF_ASN1_TAG_DATE_TIME, 19u, &hdrLen)
+                       == true);
+            memcpy(&buf[hdrLen], payload, 19);
+            cur.buf = buf; cur.bufLen = hdrLen + 19u;
+            SSF_ASSERT(SSFASN1DecGetDateTime(&cur, &decoded, &next) == false);
+
+            /* line 556: minute > 59 (and second > 59 covered together via OR short-circuit). */
+            memcpy(payload, "2024-06-15T12:60:00", 19);
+            SSF_ASSERT(SSFASN1EncTagLen(buf, sizeof(buf), SSF_ASN1_TAG_DATE_TIME, 19u, &hdrLen)
+                       == true);
+            memcpy(&buf[hdrLen], payload, 19);
+            cur.buf = buf; cur.bufLen = hdrLen + 19u;
+            SSF_ASSERT(SSFASN1DecGetDateTime(&cur, &decoded, &next) == false);
+        }
+
+        /* line 584: DecGetDate TLV fail. */
+        {
+            uint64_t decoded;
+            uint8_t bad[1] = { 0x1Fu };  /* multi-byte tag start, no follow-up */
+            cur.buf = bad; cur.bufLen = 1u;
+            SSF_ASSERT(SSFASN1DecGetDate(&cur, &decoded, &next) == false);
+        }
+
+        /* line 610: DecGetDateTime TLV fail. */
+        {
+            uint64_t decoded;
+            uint8_t bad[1] = { 0x1Fu };
+            cur.buf = bad; cur.bufLen = 1u;
+            SSF_ASSERT(SSFASN1DecGetDateTime(&cur, &decoded, &next) == false);
+        }
+        /* lines 616-620: DateTime hour / colon / minute / colon / second non-digit / wrong sep. */
+        {
+            uint8_t buf[64];
+            uint32_t hdrLen;
+            uint64_t decoded;
+            uint8_t payload[19];
+            const char *bad_payloads[] = {
+                "2024-06-15TX2:00:00",   /* hour non-digit (line 616) */
+                "2024-06-15T12X00:00",   /* missing first colon (line 617) */
+                "2024-06-15T12:X0:00",   /* minute non-digit (line 618) */
+                "2024-06-15T12:00X00",   /* missing second colon (line 619) */
+                "2024-06-15T12:00:X0"    /* second non-digit (line 620) */
+            };
+            size_t i;
+            for (i = 0; i < sizeof(bad_payloads) / sizeof(bad_payloads[0]); i++) {
+                memcpy(payload, bad_payloads[i], 19);
+                SSF_ASSERT(SSFASN1EncTagLen(buf, sizeof(buf), SSF_ASN1_TAG_DATE_TIME, 19u, &hdrLen)
+                           == true);
+                memcpy(&buf[hdrLen], payload, 19);
+                cur.buf = buf; cur.bufLen = hdrLen + 19u;
+                SSF_ASSERT(SSFASN1DecGetDateTime(&cur, &decoded, &next) == false);
+            }
+        }
+
+        /* Encoder side ------------------------------------------------------------------------ */
+
+        /* lines 637, 659: 3-byte length-field path (contentLen in 0x100..0xFFFF). */
+        {
+            uint8_t buf[300];
+            uint32_t written;
+            SSF_ASSERT(SSFASN1EncTagLen(buf, sizeof(buf), SSF_ASN1_TAG_OCTET_STRING, 300u,
+                                        &written) == true);
+            SSF_ASSERT(written == 4u);   /* 1 tag + 1 lead (0x82) + 2 length bytes */
+            SSF_ASSERT(buf[1] == 0x82u);
+        }
+
+        /* line 728: SSFASN1EncTagLen rejects an output buffer smaller than the header. */
+        {
+            uint8_t small[1];
+            uint32_t written;
+            SSF_ASSERT(SSFASN1EncTagLen(small, sizeof(small), SSF_ASN1_TAG_INTEGER, 5u, &written)
+                       == false);
+        }
+
+        /* line 771: SSFASN1EncInt rejects intLen that would overflow total. */
+        {
+            uint8_t buf[16];
+            uint32_t written;
+            SSF_ASSERT(SSFASN1EncInt(buf, sizeof(buf), &scratch, 0xFFFFFFFEu, &written) == false);
+        }
+
+        /* lines 842, 850, 855: SSFASN1EncBitString overflow + buffer-too-small + empty bits. */
+        {
+            uint8_t buf[16];
+            uint32_t written;
+            uint8_t stub = 0;
+
+            /* line 842: bitsLen near uint32_t max trips total-overflow guard. */
+            SSF_ASSERT(SSFASN1EncBitString(buf, sizeof(buf), &stub, 0xFFFFFFFEu, 0u, &written)
+                       == false);
+
+            /* line 850: bufSize too small for the contentLen+header. */
+            {
+                uint8_t small[3];
+                SSF_ASSERT(SSFASN1EncBitString(small, sizeof(small), &stub, 4u, 0u, &written)
+                           == false);
+            }
+
+            /* line 855: bitsLen == 0 path skips the memcpy; round-trip the result. */
+            SSF_ASSERT(SSFASN1EncBitString(buf, sizeof(buf), NULL, 0u, 0u, &written) == true);
+            SSF_ASSERT(written == 3u);
+        }
+
+        /* lines 936, 1034, 1057: encoder rejects unixSec values that cannot resolve to a date. */
+        {
+            uint8_t buf[32];
+            uint32_t written;
+            uint64_t huge = 0xFFFFFFFFFFFFFFFFull;  /* > SSFDTIME_UNIX_EPOCH_SEC_MAX */
+            SSF_ASSERT(SSFASN1EncUTCTime(buf, sizeof(buf), huge, &written) == false);
+            SSF_ASSERT(SSFASN1EncDate(buf, sizeof(buf), huge, &written) == false);
+            SSF_ASSERT(SSFASN1EncDateTime(buf, sizeof(buf), huge, &written) == false);
+        }
+
+        /* line 1098: SSFASN1EncDateTime rejects a buffer smaller than the encoded total. */
+        {
+            uint8_t small[10];
+            uint32_t written;
+            SSF_ASSERT(SSFASN1EncDateTime(small, sizeof(small), 1718452800ull, &written) == false);
+        }
+
+        /* line 1102: SSFASN1EncWrap with contentLen == 0 skips the memcpy (NULL content OK). */
+        {
+            uint8_t buf[8];
+            uint32_t written;
+            SSF_ASSERT(SSFASN1EncWrap(buf, sizeof(buf), SSF_ASN1_TAG_NULL, NULL, 0u, &written)
+                       == true);
+            SSF_ASSERT(written == 2u);  /* tag + 0-length */
+        }
+    }
 }
 #endif /* SSF_CONFIG_ASN1_UNIT_TEST */

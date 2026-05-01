@@ -1540,4 +1540,28 @@ break;
     SSF_ASSERT(SSFISO8601ISOToUnix("1970-01-01T05:30:00+05:30", &unixSysOut, &zoneOffsetMin));
     SSF_ASSERT(zoneOffsetMin == 330);
     SSF_ASSERT(unixSysOut == 0);
+
+    /* Fractional seconds: 10+ digits trips the numDigs > 9 reject (ssfiso8601.c:281). */
+    SSF_ASSERT(SSFISO8601ISOToUnix("1970-01-01T00:00:00.1234567890Z",
+                                    &unixSysOut, &zoneOffsetMin) == false);
+
+    /* Timezone hour: non-digit at position 0 / 1 of "+HH". */
+    SSF_ASSERT(SSFISO8601ISOToUnix("1970-01-01T00:00:00+X5", &unixSysOut, &zoneOffsetMin)
+               == false);
+    SSF_ASSERT(SSFISO8601ISOToUnix("1970-01-01T00:00:00+0X", &unixSysOut, &zoneOffsetMin)
+               == false);
+
+    /* Timezone min: non-digit at position 0 / 1 of "+HH:MM". */
+    SSF_ASSERT(SSFISO8601ISOToUnix("1970-01-01T00:00:00+05:X0", &unixSysOut, &zoneOffsetMin)
+               == false);
+    SSF_ASSERT(SSFISO8601ISOToUnix("1970-01-01T00:00:00+05:0X", &unixSysOut, &zoneOffsetMin)
+               == false);
+
+    /* Timezone hour out of range. */
+    SSF_ASSERT(SSFISO8601ISOToUnix("1970-01-01T00:00:00+25:00", &unixSysOut, &zoneOffsetMin)
+               == false);
+
+    /* Timezone min out of range. */
+    SSF_ASSERT(SSFISO8601ISOToUnix("1970-01-01T00:00:00+05:60", &unixSysOut, &zoneOffsetMin)
+               == false);
 }

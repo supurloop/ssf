@@ -819,6 +819,31 @@ void SSFSMUnitTest(void)
     SSF_ASSERT(_utTrace[0] == 2);
     SSF_ASSERT(_utTrace[1] == 1);
 
+    /* Drive runtime transitions to exercise super exit/entry across hierarchy boundaries. */
+    /* The existing init/deinit tests cover super entry/exit at framework boundaries; this  */
+    /* adds the inter-state transition path (ssfsm.c lines 199-216 -- currentSuper !=        */
+    /* nextSuper, with each side independently NULL or non-NULL).                            */
+    /* From the previous block, UT3 is currently initialized to Handler1 (has super).        */
+    {
+        /* Tran Handler1 (super = Handler1Super) -> Handler3 (no super). */
+        _utTraceIndex = 0;
+        memset(_utTrace, 0, sizeof(_utTrace));
+        SSFSMPutEvent(SSF_SM_UNIT_TEST_3, SSF_SM_EVENT_UNIT_TEST_1);
+        while (SSFSMTask(NULL));
+        SSF_ASSERT(_utTrace[0] == 3);   /* Handler1 EXIT */
+        SSF_ASSERT(_utTrace[1] == 4);   /* Handler1Super EXIT */
+        SSF_ASSERT(_utTrace[2] == 5);   /* Handler3 ENTRY */
+
+        /* Tran Handler3 (no super) -> Handler1 (super). */
+        _utTraceIndex = 0;
+        memset(_utTrace, 0, sizeof(_utTrace));
+        SSFSMPutEvent(SSF_SM_UNIT_TEST_3, SSF_SM_EVENT_UNIT_TEST_1);
+        while (SSFSMTask(NULL));
+        SSF_ASSERT(_utTrace[0] == 6);   /* Handler3 EXIT */
+        SSF_ASSERT(_utTrace[1] == 2);   /* Handler1Super ENTRY */
+        SSF_ASSERT(_utTrace[2] == 1);   /* Handler1 ENTRY */
+    }
+
 #if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
     SSFSMInitHandler(SSF_SM_UNIT_TEST_4, UT4TestHandler1);
     SSFSMPutEvent(SSF_SM_UNIT_TEST_4, SSF_SM_EVENT_ABORT_UT4);

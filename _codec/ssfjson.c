@@ -740,7 +740,7 @@ bool SSFJsonPrintDouble(SSFCStrOut_t js, size_t size, size_t start, size_t *end,
         }
     }
     if ((len < 0) || (((size_t)len) >= (size - start))) return false;
-    *end = start + len;
+    *end = start + (size_t)len;
     return true;
 }
 #endif /* SSF_JSON_CONFIG_ENABLE_FLOAT_GEN */

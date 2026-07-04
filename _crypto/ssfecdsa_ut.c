@@ -516,6 +516,36 @@ static void _ECDSAUTKeyGenHook(void *ctx,
 
 void SSFECDSAUnitTest(void)
 {
+    /* ---- (Hardening) _SSFECDSABits2Int self-guards its RFC 6979 bits2int preconditions ---- */
+    /* The no-shift bits2int relied on two previously-unchecked properties, both now asserted in  */
+    /* the helper. Drive each through the test wrapper -- the public Sign/Verify entry points      */
+    /* reject an out-of-range hashLen upstream, so these asserts are otherwise unreachable:        */
+    /*   (1) SSFBNFromBytes must succeed; an over-long hashLen leaves the output at len 0, which    */
+    /*       would otherwise surface only as a confusing length-mismatch assert inside the caller.  */
+    /*   (2) The order must fill the coordinate byte width (bitlen(n) == bytes*8) -- the condition  */
+    /*       under which truncating the hash to c->bytes equals the RFC 6979 truncation to qlen.    */
+    {
+#if SSF_EC_CONFIG_ENABLE_P256 == 1
+        const SSFECCurveParams_t *cReal = SSFECGetCurveParams(SSF_EC_CURVE_P256);
+#else
+        const SSFECCurveParams_t *cReal = SSFECGetCurveParams(SSF_EC_CURVE_P384);
+#endif
+        uint8_t hash[SSF_EC_MAX_COORD_BYTES + 1u] = {0};
+        SSFECCurveParams_t cBad;
+
+        /* (1) hashLen one byte past the coordinate width makes SSFBNFromBytes fail -> assert. */
+        SSF_ASSERT_TEST(_SSFECDSABits2IntForTest(cReal, hash, (size_t)cReal->bytes + 1u));
+
+        /* A matched-width hashLen must NOT assert (the normal path still works). */
+        _SSFECDSABits2IntForTest(cReal, hash, cReal->bytes);
+
+        /* (2) Shrink `bytes` on a shallow params copy (the limb pointers stay valid) so bytes*8   */
+        /* no longer equals bitlen(n); the byte-aligned-order assert must fire.                     */
+        cBad = *cReal;
+        cBad.bytes = (uint16_t)(cReal->bytes - 1u);
+        SSF_ASSERT_TEST(_SSFECDSABits2IntForTest(&cBad, hash, 1u));
+    }
+
 #if SSF_ECDSA_CONFIG_ENABLE_SIGN == 1
 #if SSF_EC_CONFIG_ENABLE_P256 == 1
     /* ---- Zeroization audit: Sign success path leaves no secret-derived limbs on stack ---- */

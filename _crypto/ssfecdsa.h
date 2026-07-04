@@ -106,8 +106,8 @@ bool SSFECDHComputeSecret(SSFECCurve_t curve, const uint8_t *privKey, size_t pri
 #if SSF_CONFIG_ECDSA_UNIT_TEST == 1
 void SSFECDSAUnitTest(void);
 
-/* Test wrapper around the internal projective verify check (synthetic R). */
 bool _SSFECDSAVerifyCheckRForTest(SSFECCurve_t curve, const SSFECPoint_t *R, const SSFBN_t *r);
+void _SSFECDSABits2IntForTest(const SSFECCurveParams_t *c, const uint8_t *hash, size_t hashLen);
 
 /* Test-only exit hooks fired AFTER zeroization, BEFORE return; NULL in production. */
 extern void (*_SSFECDSASignTestExitHook)(void *ctx,

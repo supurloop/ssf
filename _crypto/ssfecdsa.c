@@ -125,9 +125,8 @@ static size_t _SSFECDSAGetHashSize(SSFECCurve_t curve)
 static void _SSFECDSABits2Int(SSFBN_t *out, const uint8_t *hash, size_t hashLen,
                               const SSFECCurveParams_t *c)
 {
-    SSFBNFromBytes(out, hash, hashLen, c->limbs);
-
-    /* If hash bit length > order bit length, right-shift. Not needed for matched pairs. */
+    SSF_REQUIRE((uint32_t)c->bytes * 8u == SSFBNBitLen(&c->n));
+    SSF_ASSERT(SSFBNFromBytes(out, hash, hashLen, c->limbs));
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -781,6 +780,7 @@ static bool _SSFECDSAVerifyCheckR(const SSFECCurveParams_t *c, SSFECCurve_t curv
     return false;
 }
 
+#if SSF_CONFIG_ECDSA_UNIT_TEST == 1
 /* Test-only wrapper that exposes _SSFECDSAVerifyCheckR for unit tests that synthesize R.        */
 bool _SSFECDSAVerifyCheckRForTest(SSFECCurve_t curve, const SSFECPoint_t *R, const SSFBN_t *r)
 {
@@ -788,6 +788,15 @@ bool _SSFECDSAVerifyCheckRForTest(SSFECCurve_t curve, const SSFECPoint_t *R, con
     if (c == NULL) return false;
     return _SSFECDSAVerifyCheckR(c, curve, R, r);
 }
+
+/* Test-only wrapper that drives _SSFECDSABits2Int with caller-supplied curve params + hashLen.   */
+void _SSFECDSABits2IntForTest(const SSFECCurveParams_t *c, const uint8_t *hash, size_t hashLen)
+{
+    SSFBN_DEFINE(out, SSF_EC_MAX_LIMBS);
+    _SSFECDSABits2Int(&out, hash, hashLen, c);
+    SSFBNZeroize(&out);
+}
+#endif /* SSF_CONFIG_ECDSA_UNIT_TEST */
 
 bool SSFECDSAVerify(SSFECCurve_t curve, const uint8_t *pubKey, size_t pubKeyLen,
                     const uint8_t *hash, size_t hashLen, const uint8_t *sig, size_t sigLen)

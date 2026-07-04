@@ -550,6 +550,22 @@ void SSFEd25519UnitTest(void)
         SSF_ASSERT(SSFEd25519Verify(noncanonPub, NULL, 0, sig) == false);
     }
 
+    /* ---- Decompression rejects (X == 0, sign == 1): RFC 8032 Sec. 5.1.3 step 4 ---- */
+    /* When the encoded Y gives X = 0 (only possible at Y = 1, the identity-y), the      */
+    /* sign bit MUST be 0; sign = 1 with X = 0 is non-canonical and the decoder must     */
+    /* reject. Construct a 32-byte pubKey with Y = 1 and the sign bit set, then verify   */
+    /* against any signature -- decompression bails at line 614 before any point math.   */
+    {
+        uint8_t badPub[32];
+        uint8_t sig[64];
+
+        memset(badPub, 0, 32);
+        badPub[0]  = 0x01u;    /* Y = 1 (LE), giving X = 0 */
+        badPub[31] = 0x80u;    /* sign bit set */
+        memset(sig, 0, 64);
+        SSF_ASSERT(SSFEd25519Verify(badPub, NULL, 0, sig) == false);
+    }
+
     /* ---- A4 regression: long message round-trip exercises chunked SHA-512 update.  */
     /* Cannot allocate >4 GiB on a host to trip the actual size_t->uint32_t truncation */
     /* bug, but a 256 KiB message with byte-level corruption detection at least proves */

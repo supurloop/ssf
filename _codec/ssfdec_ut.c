@@ -1124,5 +1124,28 @@ void SSFDecUnitTest(void)
         SSF_ASSERT_TEST(SSFDecStrToOctets("1.2", '.', NULL, sizeof(octets), &numOctets));
         SSF_ASSERT_TEST(SSFDecStrToOctets("1.2", '.', octets, 0, &numOctets));
         SSF_ASSERT_TEST(SSFDecStrToOctets("1.2", '.', octets, sizeof(octets), NULL));
+
+        /* SSFDecStrToOctets: starts with non-digit (ssfdec.c:588). Existing rejects all start  */
+        /* with a digit and only fail on later parsing; this hits the very first guard.          */
+        SSF_ASSERT(SSFDecStrToOctets("x.1.2.3", '.', octets, sizeof(octets), &numOctets)
+                   == false);
+
+        /* SSFDecStrToOctets: octet field with 4+ digits (ssfdec.c:597). Need val <= 255 with    */
+        /* digits > 3, which only happens with leading zeros: "0001" reaches digits == 4 with    */
+        /* val == 1, trips the digit-cap before the leading-zero rule.                            */
+        SSF_ASSERT(SSFDecStrToOctets("0001.2.3.4", '.', octets, sizeof(octets), &numOctets)
+                   == false);
+    }
+
+    /* ---- SSFDecOctetsToStr: separator overflow path (ssfdec.c:551) ---- */
+    /* Existing buffer-too-small tests bail inside SSFDecUIntToStr when the integer write       */
+    /* itself can't fit; the explicit `(totalLen + 1u) >= strSize` separator-write check is     */
+    /* only reached when the prior octet exactly filled the buffer. Pick an strSize that fits   */
+    /* the first octet but leaves no room for the separator.                                     */
+    {
+        uint8_t octets2[2] = { 1u, 2u };
+        char ostr[8];
+        /* "1\0" needs 2 bytes; sep would need byte 2 which doesn't exist when strSize == 2. */
+        SSF_ASSERT(SSFDecOctetsToStr(octets2, 2, '.', ostr, 2) == 0);
     }
 }

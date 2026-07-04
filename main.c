@@ -330,7 +330,14 @@ static bool SSFStartRun(SSFTestRun_t *run, size_t idx)
         unitTests[idx].utf();
         (void)fflush(stdout);
         (void)fflush(stderr);
+#if defined(SSF_COVERAGE)
+        /* Run atexit handlers so libgcov flushes counters to .gcda; the worker  */
+        /* registers no other atexit hooks, so exit() and _exit() differ only in */
+        /* this flush.                                                           */
+        exit(0);
+#else
         _exit(0);
+#endif
     }
     (void)close(pipeFd[1]);
     flags = fcntl(pipeFd[0], F_GETFL, 0);

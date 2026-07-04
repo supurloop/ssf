@@ -755,6 +755,15 @@ void SSFStrUnitTest(void)
             }
         }
     }
+
+    /* SSFStrStr: post-mismatch reset path where remaining haystack is exactly 1 byte and the   */
+    /* match has not been found. Existing tests pass null-terminated haystacks so the loop      */
+    /* exits via *cstr == 0 before reaching the cstrSize <= 1 check at ssfstr.c:262. Pass an    */
+    /* unterminated 2-char buffer that mismatches throughout: after one iteration cstrSize is   */
+    /* 1, no terminator seen, and the next iter trips the explicit reject.                       */
+    /* The function early-returns at line 262 without writing matchStrOptOut, so just confirm   */
+    /* the return value -- testing matchOut here would observe stack garbage.                    */
+    SSF_ASSERT(SSFStrStr("xx", 2, NULL, "abc", 4) == false);
 }
 #endif /* SSF_CONFIG_STR_UNIT_TEST */
 

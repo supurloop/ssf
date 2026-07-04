@@ -2219,11 +2219,59 @@ void SSFECUnitTest(void)
         SSF_ASSERT(SSFBNCmp(&ry, &srcy) == 0);
     }
 
-    /* ---- Edge: PointOnCurve returns false for identity ---- */
+    /* ---- Edge: PointOnCurve / PointValidate reject identity ---- */
     {
         SSFECPOINT_DEFINE(O, SSF_EC_MAX_LIMBS);
         SSFECPointSetIdentity(&O, SSF_EC_CURVE_P256);
         SSF_ASSERT(SSFECPointOnCurve(&O, SSF_EC_CURVE_P256) == false);
+        SSF_ASSERT(SSFECPointValidate(&O, SSF_EC_CURVE_P256) == false);
+#if SSF_EC_CONFIG_ENABLE_P384 == 1
+        {
+            SSFECPOINT_DEFINE(O384, SSF_EC_MAX_LIMBS);
+            SSFECPointSetIdentity(&O384, SSF_EC_CURVE_P384);
+            SSF_ASSERT(SSFECPointOnCurve(&O384, SSF_EC_CURVE_P384) == false);
+            SSF_ASSERT(SSFECPointValidate(&O384, SSF_EC_CURVE_P384) == false);
+        }
+#endif
+    }
+
+    /* ---- Edge: PointAdd mixed-add fast path (one operand affine, Z = 1) ---- */
+    /* SSFECPointAdd dispatches to _SSFECPointAddMixed when q->z == 1 (line 859) or, with        */
+    /* operands swapped, when p->z == 1 (line 864). Inputs from PointFromAffine have Z = 1;       */
+    /* inputs from ScalarMul are Jacobian with Z != 1. Build one of each, run both orderings,    */
+    /* and cross-check the sum equals [k+1]G via an independent ScalarMul.                        */
+    {
+        const SSFECCurveParams_t *c = SSFECGetCurveParams(SSF_EC_CURVE_P256);
+        SSFECPOINT_DEFINE(G,     SSF_EC_MAX_LIMBS);
+        SSFECPOINT_DEFINE(Pjac,  SSF_EC_MAX_LIMBS);
+        SSFECPOINT_DEFINE(Rqaff, SSF_EC_MAX_LIMBS);
+        SSFECPOINT_DEFINE(Rpaff, SSF_EC_MAX_LIMBS);
+        SSFECPOINT_DEFINE(Rref,  SSF_EC_MAX_LIMBS);
+        SSFBN_DEFINE(k, SSF_EC_MAX_LIMBS);
+        SSFBN_DEFINE(rxA, SSF_EC_MAX_LIMBS);
+        SSFBN_DEFINE(ryA, SSF_EC_MAX_LIMBS);
+        SSFBN_DEFINE(rxB, SSF_EC_MAX_LIMBS);
+        SSFBN_DEFINE(ryB, SSF_EC_MAX_LIMBS);
+        SSFBN_DEFINE(rxR, SSF_EC_MAX_LIMBS);
+        SSFBN_DEFINE(ryR, SSF_EC_MAX_LIMBS);
+
+        SSFECPointFromAffine(&G, &c->gx, &c->gy, SSF_EC_CURVE_P256);   /* G has Z = 1 */
+        SSFBNSetUint32(&k, 3u, c->limbs);
+        SSFECScalarMul(&Pjac, &k, &G, SSF_EC_CURVE_P256);              /* Pjac = [3]G, Z != 1 */
+
+        SSFECPointAdd(&Rqaff, &Pjac, &G,    SSF_EC_CURVE_P256);        /* q affine -> mixed */
+        SSFECPointAdd(&Rpaff, &G,    &Pjac, SSF_EC_CURVE_P256);        /* p affine -> mixed swap */
+
+        SSFBNSetUint32(&k, 4u, c->limbs);
+        SSFECScalarMul(&Rref, &k, &G, SSF_EC_CURVE_P256);              /* [4]G */
+
+        SSF_ASSERT(SSFECPointToAffine(&rxA, &ryA, &Rqaff, SSF_EC_CURVE_P256) == true);
+        SSF_ASSERT(SSFECPointToAffine(&rxB, &ryB, &Rpaff, SSF_EC_CURVE_P256) == true);
+        SSF_ASSERT(SSFECPointToAffine(&rxR, &ryR, &Rref,  SSF_EC_CURVE_P256) == true);
+        SSF_ASSERT(SSFBNCmp(&rxA, &rxR) == 0);
+        SSF_ASSERT(SSFBNCmp(&ryA, &ryR) == 0);
+        SSF_ASSERT(SSFBNCmp(&rxB, &rxR) == 0);
+        SSF_ASSERT(SSFBNCmp(&ryB, &ryR) == 0);
     }
 
     /* ---- Edge: PointValidate rejects coordinates >= p ---- */

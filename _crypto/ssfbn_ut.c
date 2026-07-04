@@ -827,6 +827,16 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
             SSFBNSetUint32(&four, 4u, nLimbs);    /* shares factor 4 with 8 */
             SSF_ASSERT(SSFBNModInvExt(&r, &four, &twoMod) == false);
         }
+
+        /* ModInvExt: a == 0 -> no inverse (zero divisor). */
+        {
+            SSFBN_DEFINE(zero, SSF_BN_MAX_LIMBS);
+            SSFBNSetZero(&zero, nLimbs);
+            SSF_ASSERT(SSFBNModInvExt(&r, &zero, &m) == false);
+        }
+
+        /* ModInvExt: a == m -> a mod m == 0 -> no inverse. */
+        SSF_ASSERT(SSFBNModInvExt(&r, &m, &m) == false);
     }
 
     /* === Mont corner cases ========================================================== */
@@ -1755,6 +1765,29 @@ void SSFBNUnitTest(void)
         SSF_ASSERT(out[1] == 0x00u);
         SSF_ASSERT(out[2] == 0x00u);
         SSF_ASSERT(out[3] == 0xFFu);
+    }
+
+    /* ---- FromBytesLE rejects dataLen > numLimbs * sizeof(limb) ---- */
+    {
+        uint8_t tooMany[9];  /* 9 bytes > 2 limbs * 4 bytes */
+        SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
+        memset(tooMany, 0xAA, sizeof(tooMany));
+        SSF_ASSERT(SSFBNFromBytesLE(&a, tooMany, sizeof(tooMany), 2) == false);
+    }
+
+    /* ---- ToBytesLE on zero (single 0x00 byte) and with too-small buffer ---- */
+    {
+        SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
+        uint8_t out[4];
+        uint8_t tiny[1];
+
+        SSFBNSetZero(&a, 4u);
+        SSF_ASSERT(SSFBNToBytesLE(&a, out, sizeof(out)) == true);
+        SSF_ASSERT(out[0] == 0x00u);
+
+        /* Non-zero value with a buffer too small for its significant bytes. */
+        SSFBNSetUint32(&a, 0x12345678u, 4u);
+        SSF_ASSERT(SSFBNToBytesLE(&a, tiny, sizeof(tiny)) == false);
     }
 
     /* ---- ToBytes regression: outSize smaller than a->len * limb-size must not corrupt  */

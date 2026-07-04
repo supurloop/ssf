@@ -4,5 +4,6 @@ x64/**
 build/
 build-asan/
 build-asan-linux/
+build-cov/
 ssf
 ssf-*

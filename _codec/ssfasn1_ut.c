@@ -1190,9 +1190,9 @@ void SSFASN1UnitTest(void)
             /* line 389: OID has more arcs than oidArcsSize. Limit caller buffer to 2. */
             {
                 uint8_t threeArc[5] = { 0x06u, 0x03u, 0x2Au, 0x03u, 0x04u };  /* 1.2.3.4 */
-                uint32_t small[2];
+                uint32_t smallBuf[2];
                 cur.buf = threeArc; cur.bufLen = 5u;
-                SSF_ASSERT(SSFASN1DecGetOID(&cur, small, 2u, &arcsLen, &next) == false);
+                SSF_ASSERT(SSFASN1DecGetOID(&cur, smallBuf, 2u, &arcsLen, &next) == false);
             }
         }
 
@@ -1445,10 +1445,10 @@ void SSFASN1UnitTest(void)
 
         /* line 728: SSFASN1EncTagLen rejects an output buffer smaller than the header. */
         {
-            uint8_t small[1];
+            uint8_t smallBuf[1];
             uint32_t written;
-            SSF_ASSERT(SSFASN1EncTagLen(small, sizeof(small), SSF_ASN1_TAG_INTEGER, 5u, &written)
-                       == false);
+            SSF_ASSERT(SSFASN1EncTagLen(smallBuf, sizeof(smallBuf), SSF_ASN1_TAG_INTEGER, 5u,
+                                        &written) == false);
         }
 
         /* line 771: SSFASN1EncInt rejects intLen that would overflow total. */
@@ -1470,8 +1470,8 @@ void SSFASN1UnitTest(void)
 
             /* line 850: bufSize too small for the contentLen+header. */
             {
-                uint8_t small[3];
-                SSF_ASSERT(SSFASN1EncBitString(small, sizeof(small), &stub, 4u, 0u, &written)
+                uint8_t smallBuf[3];
+                SSF_ASSERT(SSFASN1EncBitString(smallBuf, sizeof(smallBuf), &stub, 4u, 0u, &written)
                            == false);
             }
 
@@ -1492,9 +1492,10 @@ void SSFASN1UnitTest(void)
 
         /* line 1098: SSFASN1EncDateTime rejects a buffer smaller than the encoded total. */
         {
-            uint8_t small[10];
+            uint8_t smallBuf[10];
             uint32_t written;
-            SSF_ASSERT(SSFASN1EncDateTime(small, sizeof(small), 1718452800ull, &written) == false);
+            SSF_ASSERT(SSFASN1EncDateTime(smallBuf, sizeof(smallBuf), 1718452800ull, &written)
+                       == false);
         }
 
         /* line 1102: SSFASN1EncWrap with contentLen == 0 skips the memcpy (NULL content OK). */

@@ -228,6 +228,10 @@ void SSFAESCCMEncrypt(const uint8_t *pt, size_t ptLen, const uint8_t *nonce, siz
     SSF_REQUIRE((tagSize >= 4u) && (tagSize <= 16u) && ((tagSize & 1u) == 0));
     SSF_REQUIRE((ct != NULL) || (ptLen == 0));
     SSF_REQUIRE(ctSize >= ptLen);
+    {
+        uint32_t L = (uint32_t)(15u - nonceLen);
+        SSF_REQUIRE((L >= 8u) || ((uint64_t)ptLen < ((uint64_t)1u << (8u * L))));
+    }
 
     /* Step 1: Compute CBC-MAC tag over (B_0 || AAD || plaintext) */
     _SSFAESCCMComputeTag(key, keyLen, nonce, nonceLen, aad, aadLen, pt, ptLen, tagSize, cbcTag);
@@ -256,6 +260,10 @@ bool SSFAESCCMDecrypt(const uint8_t *ct, size_t ctLen, const uint8_t *nonce, siz
     SSF_REQUIRE((tagLen >= 4u) && (tagLen <= 16u) && ((tagLen & 1u) == 0));
     SSF_REQUIRE((pt != NULL) || (ctLen == 0));
     SSF_REQUIRE(ptSize >= ctLen);
+    {
+        uint32_t L = (uint32_t)(15u - nonceLen);
+        if ((L < 8u) && ((uint64_t)ctLen >= ((uint64_t)1u << (8u * L)))) return false;
+    }
 
     /* Step 1: CTR decrypt the ciphertext and decrypt the tag */
     _SSFAESCCMCtr(key, keyLen, nonce, nonceLen, ct, ctLen, pt, tag, decTag, tagLen);

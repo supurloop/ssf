@@ -265,6 +265,35 @@ static void _VerifyAESCCMAgainstOpenSSLRandom(void)
 
 void SSFAESCCMUnitTest(void)
 {
+    /* ---- (Hardening) Reject a message too long for the L-byte length / counter field ---- */
+    /* With a 13-byte nonce, L = 15 - 13 = 2, so the payload length and the CTR counter are each  */
+    /* encoded in only 2 bytes -- the largest representable payload is 2^16 - 1 = 65535 bytes. A   */
+    /* 65536-byte message would silently truncate the B0 length field and wrap the counter field,  */
+    /* reusing keystream within one message (a catastrophic AEAD break, RFC 3610 Sec. 2.2). Encrypt */
+    /* must reject via SSF_REQUIRE; decrypt (whose ctLen is attacker-controlled) must reject with   */
+    /* false rather than halt.                                                                       */
+    {
+        static uint8_t big[65536];
+        static uint8_t out[65536];
+        static const uint8_t key[16] = { 0 };
+        static const uint8_t nonce13[13] = { 0 };
+        uint8_t tag[16] = { 0 };
+
+        /* Encrypt at exactly the 2^16 boundary must trip the length-field guard. */
+        SSF_ASSERT_TEST(SSFAESCCMEncrypt(big, sizeof(big), nonce13, sizeof(nonce13),
+                                         NULL, 0u, key, sizeof(key), tag, sizeof(tag),
+                                         out, sizeof(out)));
+
+        /* One byte below the boundary is a valid length and must NOT assert. */
+        SSFAESCCMEncrypt(big, sizeof(big) - 1u, nonce13, sizeof(nonce13), NULL, 0u,
+                         key, sizeof(key), tag, sizeof(tag), out, sizeof(out) - 1u);
+
+        /* Decrypt: an over-long ciphertext is necessarily forged -> reject with false, no halt. */
+        SSF_ASSERT(SSFAESCCMDecrypt(big, sizeof(big), nonce13, sizeof(nonce13),
+                                    NULL, 0u, key, sizeof(key), tag, sizeof(tag),
+                                    out, sizeof(out)) == false);
+    }
+
     /* ---- NIST SP 800-38C Example 1: AES-128, Nonce=7, Tag=4 ---- */
     /* Key: 40414243 44454647 48494a4b 4c4d4e4f */
     /* Nonce: 10111213 141516 */

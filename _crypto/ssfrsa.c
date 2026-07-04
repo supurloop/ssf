@@ -126,6 +126,7 @@ static bool _SSFRSADecIntToBN(const SSFASN1Cursor_t *cursor, SSFBN_t *bn, uint16
     const uint8_t *buf;
     uint32_t bufLen;
 
+    if ((limbs < 1u) || (limbs > SSF_BN_MAX_LIMBS)) return false;
     if (!SSFASN1DecGetInt(cursor, &buf, &bufLen, next)) return false;
     while (bufLen > 0u && *buf == 0u) { buf++; bufLen--; }
     return SSFBNFromBytes(bn, buf, bufLen, limbs);
@@ -261,6 +262,7 @@ static bool _SSFRSAPubKeyDecode(const uint8_t *der, size_t derLen, SSFBN_t *n, S
     nb = nBuf;
     nl = nLen;
     while (nl > 0u && *nb == 0u) { nb++; nl--; }
+    if ((nl == 0u) || (nl > (uint32_t)SSF_BN_MAX_BYTES)) return false;
     limbs = (uint16_t)SSF_BN_BITS_TO_LIMBS(nl * 8u);
     if (!SSFBNFromBytes(n, nb, nl, limbs)) return false;
 

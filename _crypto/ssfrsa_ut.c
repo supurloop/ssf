@@ -489,6 +489,37 @@ void SSFRSAUnitTest(void)
     return;
 #else
 
+    /* ---- (Hardening) DER public key with an oversized modulus is rejected, not a DoS halt ---- */
+    /* The decoder derives the BN limb count directly from the attacker-controlled DER INTEGER      */
+    /* length. A modulus magnitude wider than the largest supported BN would drive SSFBNFromBytes    */
+    /* into its `numLimbs <= SSF_BN_MAX_LIMBS` SSF_REQUIRE, halting the device. SSFRSAPubKeyIsValid   */
+    /* is handed untrusted DER, so this must return false gracefully. Build SEQUENCE { INTEGER n,     */
+    /* INTEGER e=65537 } with n's magnitude one+ limb past SSF_BN_MAX_BYTES.                          */
+    {
+        static uint8_t der[SSF_BN_MAX_BYTES + 32u];
+        const uint32_t nMag = (uint32_t)SSF_BN_MAX_BYTES + 8u; /* exceeds the max BN byte width */
+        const uint32_t content = (4u + nMag) + 5u;             /* INTEGER n TLV + INTEGER e TLV */
+        uint32_t p = 0u;
+        uint32_t i;
+
+        der[p++] = 0x30u;                          /* SEQUENCE */
+        der[p++] = 0x82u;                          /* 2-byte long-form length */
+        der[p++] = (uint8_t)(content >> 8);
+        der[p++] = (uint8_t)(content & 0xFFu);
+        der[p++] = 0x02u;                          /* INTEGER n */
+        der[p++] = 0x82u;
+        der[p++] = (uint8_t)(nMag >> 8);
+        der[p++] = (uint8_t)(nMag & 0xFFu);
+        der[p++] = 0x7Fu;                          /* MSB: nonzero + positive (no leading-zero trim) */
+        for (i = 1u; i < nMag; i++) { der[p++] = 0xFFu; }
+        der[p++] = 0x02u;                          /* INTEGER e = 65537 */
+        der[p++] = 0x03u;
+        der[p++] = 0x01u; der[p++] = 0x00u; der[p++] = 0x01u;
+
+        SSF_ASSERT((size_t)p <= sizeof(der));
+        SSF_ASSERT(SSFRSAPubKeyIsValid(der, (size_t)p) == false);
+    }
+
     /* ---- ssfbn enhancement: GCD ---- */
     {
         SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);

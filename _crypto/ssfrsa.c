@@ -430,18 +430,9 @@ static bool _SSFRSAPrivateOpCRT(const SSFBN_t *c, uint16_t nLimbs, const SSFBN_t
     /* m2 = cq^dq mod q */
     SSFBNModExp(&m2, &cq, dq, q);
 
-    /* h = qInv * (m1 - m2) mod p */
-    if (SSFBNCmp(&m1, &m2) >= 0)
-    {
-        SSFBNSub(&h, &m1, &m2);
-    }
-    else
-    {
-        /* m1 < m2: compute (m1 + p - m2) to avoid underflow */
-        SSFBNSub(&h, &m2, &m1);
-        SSFBNSub(&h, p, &h);
-    }
-    SSFBNModMul(&h, qInv, &h, p);
+    /* h = qInv * (m1 - m2) mod p, constant-time on the secret CRT intermediates */
+    SSFBNModSub(&h, &m1, &m2, p);
+    SSFBNModMulCT(&h, qInv, &h, p);
 
     /* Expand half-width values to full n-width. */
     SSFBNSetZero(&m2Full, nLimbs);

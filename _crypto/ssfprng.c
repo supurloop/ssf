@@ -76,31 +76,32 @@ void SSFPRNGGetRandom(SSFPRNGContext_t *context, uint8_t *random, size_t randomS
 {
     uint8_t pt[SSF_AES_BLOCK_SIZE];
     uint8_t ct[SSF_AES_BLOCK_SIZE];
+    uint8_t newKey[SSF_PRNG_ENTROPY_SIZE];
 
     SSF_REQUIRE(context != NULL);
     SSF_REQUIRE(random != NULL);
     SSF_REQUIRE((randomSize > 0) && (randomSize <= SSF_PRNG_RANDOM_MAX_SIZE));
     SSF_ASSERT(context->magic == SSF_PRNG_MAGIC);
 
-    /* Prepare pt block as count || zeros (NIST SP 800-90A CTR_DRBG-style input shape), then  */
-    /* advance count. The zero-padded form gives the same effective security as count||count  */
-    /* -- both use 2^64 distinct AES inputs over the lifetime -- but matches the standard     */
-    /* convention and avoids the "structured input" pattern that would otherwise raise a      */
-    /* reviewer's eyebrow.                                                                     */
+    /* Output block: ct = AES_key(count || zeros) (NIST SP 800-90A CTR_DRBG-style input shape). */
     memcpy(pt, &context->count, sizeof(uint64_t));
     memset(&pt[sizeof(uint64_t)], 0, SSF_AES_BLOCK_SIZE - sizeof(uint64_t));
-    context->count++;
-
-    /* Generate next 16 bytes of random numbers from entropy */
     SSFAES128BlockEncrypt(pt, sizeof(pt), ct, sizeof(ct), context->entropy, SSF_PRNG_ENTROPY_SIZE);
 
     /* Copy requested number of random numbers to user buffer */
     memcpy(random, ct, randomSize);
 
-    /* Scrub stack secrets before return: pt encodes the count (which derives from the first 8 */
-    /* bytes of entropy, so its recovery leaks half the seed); ct[randomSize..15] is unused      */
-    /* keystream that would let an attacker forward-predict the next-block portion of output.   */
+    /* Backtracking resistance (CTR_DRBG-style Update): derive a fresh key under the CURRENT key */
+    pt[sizeof(uint64_t)] = 0x01u;
+    SSFAES128BlockEncrypt(pt, sizeof(pt), newKey, sizeof(newKey), context->entropy,
+                          SSF_PRNG_ENTROPY_SIZE);
+    memcpy(context->entropy, newKey, SSF_PRNG_ENTROPY_SIZE);
+    context->count++;
+
+    /* Scrub stack secrets before return: pt encodes the count, ct holds output/unused keystream, */
+    /* and newKey is a copy of the freshly installed key.                                          */
     SSFCryptSecureZero(pt, sizeof(pt));
     SSFCryptSecureZero(ct, sizeof(ct));
+    SSFCryptSecureZero(newKey, sizeof(newKey));
 }
 

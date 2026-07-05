@@ -145,6 +145,24 @@ void SSFPRNGUnitTest(void)
         SSFPRNGDeInitContext(&ctx);
     }
 
+    /* (Hardening) Backtracking resistance: GetRandom performs a CTR_DRBG-style Update that
+     * re-keys the context, destroying the AES key that produced the returned bytes. A state
+     * compromise after the call therefore cannot recover previously returned output. Observe the
+     * rotation directly -- right after init the context key equals the seed; after one draw it
+     * must differ. (The first output block stays deterministic for a given seed; covered above.) */
+    {
+        SSFPRNGContext_t ctx;
+        uint8_t seedKey[SSF_PRNG_ENTROPY_SIZE] = {0, 1, 2, 3, 4, 5, 6, 7,
+                                                  8, 9, 10, 11, 12, 13, 14, 15};
+        uint8_t out[SSF_PRNG_RANDOM_MAX_SIZE];
+
+        SSFPRNGInitContext(&ctx, seedKey, sizeof(seedKey));
+        SSF_ASSERT(memcmp(ctx.entropy, seedKey, sizeof(seedKey)) == 0);
+        SSFPRNGGetRandom(&ctx, out, sizeof(out));
+        SSF_ASSERT(memcmp(ctx.entropy, seedKey, sizeof(seedKey)) != 0);
+        SSFPRNGDeInitContext(&ctx);
+    }
+
     /* Random output is non-trivial (not all zeros) */
     {
         SSFPRNGContext_t ctx;

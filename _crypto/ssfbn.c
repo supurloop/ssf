@@ -2159,9 +2159,7 @@ void SSFBNMontSquare(SSFBN_t *r, const SSFBN_t *a, const SSFBNMont_t *ctx)
         t[2u * i + 1u] = (SSFBNLimb_t)sum;
         carry = (SSFBNLimb_t)(sum >> SSF_BN_LIMB_BITS);
 
-        /* Fixed-length carry propagation (constant-time): a*a fits in 2n limbs, so the carry is  */
-        /* always absorbed at or before t[2n-1]. Iterate a data-independent span rather than a     */
-        /* value-dependent while(carry); once the carry is absorbed the tail additions are no-ops. */
+        /* Fixed-length carry propagation (constant-time): a*a fits in 2n limbs */
         for (pos = (uint16_t)(2u * i + 2u); pos < (uint16_t)(2u * n); pos++)
         {
 /* Disable false positive Visual Studio Code Analysis warning */
@@ -2195,10 +2193,7 @@ void SSFBNMontSquare(SSFBN_t *r, const SSFBN_t *a, const SSFBNMont_t *ctx)
             carry = prod >> SSF_BN_LIMB_BITS;
         }
 
-        /* Fixed-length carry propagation (constant-time): the reduction result is < 2m < 2R, so   */
-        /* the carry is absorbed at or before the overflow limb t[2n]. Iterate a data-independent   */
-        /* span up to and including t[2n] rather than a value-dependent while(carry); the absorbed   */
-        /* (zero) carry makes the tail additions no-ops.                                             */
+        /* Fixed-length carry propagation (constant-time): the reduction result is < 2m < 2R */
         for (k = (uint16_t)(i + n); k <= (uint16_t)(2u * n); k++)
         {
             SSFBNDLimb_t sum = (SSFBNDLimb_t)t[k] + carry;

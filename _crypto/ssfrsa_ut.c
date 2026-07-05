@@ -479,6 +479,35 @@ static void _SSFRSAVerifyAgainstOpenSSL(const uint8_t *foreignPriv, size_t forei
 #pragma warning(push)
 #pragma warning(disable:6262)
 #endif
+#if (SSF_RSA_CONFIG_ENABLE_KEYGEN == 1) && (SSF_RSA_CONFIG_ENABLE_2048 == 1)
+/* Audit captured by the RSA private-op blinding hook: confirms message + exponent blinding is    */
+/* actually engaged and self-consistent (see the blinding test in SSFRSAUnitTest).                */
+typedef struct
+{
+    bool fired;
+    bool rInRange;    /* message blind r in [1, n-1] */
+    bool rInvOk;      /* r * rInv == 1 mod n */
+    bool baseBlinded; /* cBlind != cIn */
+    bool expBlindsNZ; /* both exponent blinds non-zero */
+} _SSFRSABlindAudit_t;
+
+static void _SSFRSABlindHook(void *ctx, const SSFBN_t *r, const SSFBN_t *rInv,
+                             const SSFBN_t *expBlindP, const SSFBN_t *expBlindQ,
+                             const SSFBN_t *cIn, const SSFBN_t *cBlind, const SSFBN_t *n)
+{
+    _SSFRSABlindAudit_t *a = (_SSFRSABlindAudit_t *)ctx;
+    SSFBN_DEFINE(chk, SSF_BN_MAX_LIMBS);
+
+    a->fired = true;
+    a->rInRange = (SSFBNIsZero(r) == false) && (SSFBNCmp(r, n) < 0);
+    SSFBNModMul(&chk, r, rInv, n);                     /* r * rInv mod n must be 1 */
+    a->rInvOk = (SSFBNCmpUint32(&chk, 1u) == 0);
+    a->baseBlinded = (SSFBNCmp(cBlind, cIn) != 0);     /* the base was actually blinded */
+    a->expBlindsNZ = (SSFBNIsZero(expBlindP) == false) && (SSFBNIsZero(expBlindQ) == false);
+    SSFBNZeroize(&chk);
+}
+#endif /* SSF_RSA_CONFIG_ENABLE_KEYGEN && SSF_RSA_CONFIG_ENABLE_2048 */
+
 void SSFRSAUnitTest(void)
 {
 #if SSF_RSA_ANY_ENABLED == 0
@@ -660,6 +689,57 @@ void SSFRSAUnitTest(void)
         SSF_ASSERT(SSFRSAVerifyPKCS1(pubKeyDer, pubKeyDerLen, SSF_RSA_HASH_SHA256,
                                      hash, sizeof(hash), sigFF, sizeof(sigFF)) == false);
     }
+
+#if (SSF_RSA_CONFIG_ENABLE_KEYGEN == 1) && (SSF_RSA_CONFIG_ENABLE_2048 == 1)
+    /* ---- (Hardening) RSA private op applies message + exponent blinding ---- */
+    /* Blinding is unblinded away, so it is invisible in the signature; capture it via the test     */
+    /* hook to confirm it is engaged and self-consistent (r in [1, n-1], r*rInv == 1 mod n, base     */
+    /* blinded so cB != c, non-zero exponent blinds), then confirm signing stays correct AND         */
+    /* deterministic (PKCS#1 v1.5) across many fresh random blinds.                                  */
+    {
+        _SSFRSABlindAudit_t audit;
+        uint8_t hash[32];
+        uint8_t privKeyDer[SSF_RSA_MAX_PRIV_KEY_DER_SIZE];
+        uint8_t pubKeyDer[SSF_RSA_MAX_PUB_KEY_DER_SIZE];
+        size_t privLen, pubLen;
+        uint8_t sig[SSF_RSA_MAX_KEY_BYTES];
+        uint8_t sig2[SSF_RSA_MAX_KEY_BYTES];
+        size_t sigLen, sig2Len;
+        int iter;
+
+        SSFSHA256((const uint8_t *)"blind-me", 8, hash, sizeof(hash));
+        SSF_ASSERT(SSFRSAKeyGen(2048u, privKeyDer, sizeof(privKeyDer), &privLen,
+                                pubKeyDer, sizeof(pubKeyDer), &pubLen) == true);
+
+        memset(&audit, 0, sizeof(audit));
+        _SSFRSASignBlindTestHookCtx = &audit;
+        _SSFRSASignBlindTestHook = _SSFRSABlindHook;
+        SSF_ASSERT(SSFRSASignPKCS1(privKeyDer, privLen, SSF_RSA_HASH_SHA256,
+                                   hash, sizeof(hash), sig, sizeof(sig), &sigLen) == true);
+        _SSFRSASignBlindTestHook = NULL;
+        _SSFRSASignBlindTestHookCtx = NULL;
+
+        /* Blinding was engaged and internally consistent. */
+        SSF_ASSERT(audit.fired == true);
+        SSF_ASSERT(audit.rInRange == true);
+        SSF_ASSERT(audit.rInvOk == true);
+        SSF_ASSERT(audit.baseBlinded == true);
+        SSF_ASSERT(audit.expBlindsNZ == true);
+
+        /* Signature is valid, and repeated signing (fresh blinds each call) is correct + stable. */
+        SSF_ASSERT(SSFRSAVerifyPKCS1(pubKeyDer, pubLen, SSF_RSA_HASH_SHA256,
+                                     hash, sizeof(hash), sig, sigLen) == true);
+        for (iter = 0; iter < 8; iter++)
+        {
+            SSF_ASSERT(SSFRSASignPKCS1(privKeyDer, privLen, SSF_RSA_HASH_SHA256,
+                                       hash, sizeof(hash), sig2, sizeof(sig2), &sig2Len) == true);
+            SSF_ASSERT(sig2Len == sigLen);
+            SSF_ASSERT(memcmp(sig, sig2, sigLen) == 0);
+            SSF_ASSERT(SSFRSAVerifyPKCS1(pubKeyDer, pubLen, SSF_RSA_HASH_SHA256,
+                                         hash, sizeof(hash), sig2, sig2Len) == true);
+        }
+    }
+#endif /* SSF_RSA_CONFIG_ENABLE_KEYGEN && SSF_RSA_CONFIG_ENABLE_2048 */
 
     /* ---- FIPS 186-4 Sec. B.3.3 step 5.4: |p - q| > 2^(halfBits - 100) ---- */
     /* Defends against Fermat-style factorization of n when p and q happen to be very    */

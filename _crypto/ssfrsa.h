@@ -165,6 +165,11 @@ bool SSFRSAVerifyPSS(const uint8_t *pubKeyDer, size_t pubKeyDerLen, SSFRSAHash_t
 /* --------------------------------------------------------------------------------------------- */
 #if SSF_CONFIG_RSA_UNIT_TEST == 1
 void SSFRSAUnitTest(void);
+extern void (*_SSFRSASignBlindTestHook)(void *ctx, const SSFBN_t *r, const SSFBN_t *rInv,
+                                        const SSFBN_t *expBlindP, const SSFBN_t *expBlindQ,
+                                        const SSFBN_t *cIn, const SSFBN_t *cBlind,
+                                        const SSFBN_t *n);
+extern void *_SSFRSASignBlindTestHookCtx;
 #endif /* SSF_CONFIG_RSA_UNIT_TEST */
 
 #ifdef __cplusplus

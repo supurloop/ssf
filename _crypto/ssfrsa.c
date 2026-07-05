@@ -401,53 +401,131 @@ static bool _SSFRSAPublicOp(const SSFBN_t *m, const SSFBN_t *e, const SSFBN_t *n
     return true;
 }
 
+#if SSF_CONFIG_RSA_UNIT_TEST == 1
+/* Test-only hook fired after blinding is applied in the CRT private op; NULL in production. */
+void (*_SSFRSASignBlindTestHook)(void *ctx, const SSFBN_t *r, const SSFBN_t *rInv,
+                                 const SSFBN_t *expBlindP, const SSFBN_t *expBlindQ,
+                                 const SSFBN_t *cIn, const SSFBN_t *cBlind,
+                                 const SSFBN_t *n) = NULL;
+void *_SSFRSASignBlindTestHookCtx = NULL;
+#endif /* SSF_CONFIG_RSA_UNIT_TEST */
+
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: RSA private-key operation using CRT.                                                */
+/* Internal: form a blinded CRT exponent d' = d + rBlind * (prime - 1).                          */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFRSAPrivateOpCRT(const SSFBN_t *c, uint16_t nLimbs, const SSFBN_t *p,
-                                const SSFBN_t *q, const SSFBN_t *dp, const SSFBN_t *dq,
-                                const SSFBN_t *qInv, SSFBN_t *result)
+static void _SSFRSABlindExp(SSFBN_t *out, const SSFBN_t *d, const SSFBN_t *rBlind,
+                            const SSFBN_t *pm1, uint16_t hl)
 {
-    /* Flat declarations so the cleanup section can wipe every secret-derived local. */
-    SSFBN_DEFINE(cp, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(cq, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(m1, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(m2, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(h, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(m2Full, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(hFull, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(qFull, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(prod, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(prod, SSF_BN_MAX_MOD_LIMBS); /* rBlind*(prime-1) is 2 + hl <= n-width limbs */
+    uint16_t w;
+
+    SSFBNMul(&prod, rBlind, pm1);
+    w = prod.len;
+    SSFBNSetZero(out, w);
+    memcpy(out->limbs, d->limbs, (size_t)hl * sizeof(SSFBNLimb_t));
+    SSFBNAdd(out, out, &prod);
+    SSFBNZeroize(&prod);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: RSA private-key operation using CRT, with message (base) and exponent blinding.      */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFRSAPrivateOpCRT(const SSFBN_t *c, uint16_t nLimbs, const SSFBN_t *n,
+                                const SSFBN_t *e, const SSFBN_t *p, const SSFBN_t *q,
+                                const SSFBN_t *dp, const SSFBN_t *dq, const SSFBN_t *qInv,
+                                SSFBN_t *result)
+{
+    SSFBN_DEFINE(cp, SSF_BN_MAX_MOD_LIMBS);
+    SSFBN_DEFINE(cq, SSF_BN_MAX_MOD_LIMBS);
+    SSFBN_DEFINE(m1, SSF_BN_MAX_MOD_LIMBS);
+    SSFBN_DEFINE(m2, SSF_BN_MAX_MOD_LIMBS);
+    SSFBN_DEFINE(h, SSF_BN_MAX_MOD_LIMBS);
+    SSFBN_DEFINE(m2Full, SSF_BN_MAX_MOD_LIMBS);
+    SSFBN_DEFINE(hFull, SSF_BN_MAX_MOD_LIMBS);
+    SSFBN_DEFINE(qFull, SSF_BN_MAX_MOD_LIMBS);
+    SSFBN_DEFINE(prod, SSF_BN_MAX_LIMBS); /* hFull*qFull is 2n limbs; the only full-width local */
+    SSFBN_DEFINE(mB, SSF_BN_MAX_MOD_LIMBS);
+    SSFBN_DEFINE(r, SSF_BN_MAX_MOD_LIMBS);
+    SSFBN_DEFINE(rInv, SSF_BN_MAX_MOD_LIMBS);
+    SSFBN_DEFINE(rE, SSF_BN_MAX_MOD_LIMBS);
+    SSFBN_DEFINE(cB, SSF_BN_MAX_MOD_LIMBS);
+    SSFBN_DEFINE(pm1, SSF_BN_MAX_MOD_LIMBS);
+    SSFBN_DEFINE(qm1, SSF_BN_MAX_MOD_LIMBS);
+    SSFBN_DEFINE(eb1, 2u); /* 64-bit exponent-blind randomizers */
+    SSFBN_DEFINE(eb2, 2u);
+    SSFBN_DEFINE(dpb, SSF_BN_MAX_MOD_LIMBS);
+    SSFBN_DEFINE(dqb, SSF_BN_MAX_MOD_LIMBS);
+    SSFPRNGContext_t prng;
+    uint8_t entropy[SSF_PRNG_ENTROPY_SIZE];
     uint16_t hl = p->len;
+    uint16_t attempts;
+    bool prngInited = false;
+    bool ok = false;
 
-    /* cp = c mod p, cq = c mod q */
-    SSFBNMod(&cp, c, p);
-    SSFBNMod(&cq, c, q);
+    /* Seed a PRNG for the per-operation blinds (a fresh r, eb1, eb2 each call). */
+    if (!SSFPortGetEntropy(entropy, (uint16_t)sizeof(entropy))) goto cleanup;
+    SSFPRNGInitContext(&prng, entropy, sizeof(entropy));
+    prngInited = true;
 
-    /* m1 = cp^dp mod p */
-    SSFBNModExp(&m1, &cp, dp, p);
+    /* Message (base) blinding: pick random r in [1, n) coprime to n; rInv = r^-1 mod n. */
+    for (attempts = 0u; attempts < 16u; attempts++)
+    {
+        if (!SSFBNRandomBelow(&r, n, &prng)) continue;
+        if (SSFBNIsZero(&r)) continue;
+        if (SSFBNModInvExt(&rInv, &r, n)) break; /* r invertible mod n (fails only if not coprime) */
+    }
+    if (attempts >= 16u) goto cleanup;
 
-    /* m2 = cq^dq mod q */
-    SSFBNModExp(&m2, &cq, dq, q);
+    /* cB = c * r^e mod n (blinded input; e is the public exponent). */
+    SSFBNModExpPub(&rE, &r, e, n);
+    SSFBNModMulCT(&cB, c, &rE, n);
 
-    /* h = qInv * (m1 - m2) mod p, constant-time on the secret CRT intermediates */
+    /* cp = cB mod p, cq = cB mod q */
+    SSFBNMod(&cp, &cB, p);
+    SSFBNMod(&cq, &cB, q);
+
+    /* Exponent blinding: dpb = dp + eb1*(p-1), dqb = dq + eb2*(q-1); eb1/eb2 are 64-bit randomizers.*/
+    (void)SSFBNSubUint32(&pm1, p, 1u);
+    (void)SSFBNSubUint32(&qm1, q, 1u);
+    SSFBNRandom(&eb1, 2u, &prng);
+    SSFBNRandom(&eb2, 2u, &prng);
+    eb1.limbs[1] |= 0x80000000u; /* force into [2^63, 2^64): a full, non-zero blind */
+    eb2.limbs[1] |= 0x80000000u;
+    _SSFRSABlindExp(&dpb, dp, &eb1, &pm1, hl);
+    _SSFRSABlindExp(&dqb, dq, &eb2, &qm1, hl);
+
+    /* m1 = cp^dpb mod p, m2 = cq^dqb mod q (== cB^dp mod p, cB^dq mod q by Fermat). */
+    SSFBNModExp(&m1, &cp, &dpb, p);
+    SSFBNModExp(&m2, &cq, &dqb, q);
+
+    /* h = qInv * (m1 - m2) mod p, constant-time on the secret CRT intermediates. */
     SSFBNModSub(&h, &m1, &m2, p);
     SSFBNModMulCT(&h, qInv, &h, p);
 
-    /* Expand half-width values to full n-width. */
+    /* Recombine: mB = (h * q) + m2 in full n-width (still the blinded value c^d * r mod n). */
     SSFBNSetZero(&m2Full, nLimbs);
     memcpy(m2Full.limbs, m2.limbs, (size_t)hl * sizeof(SSFBNLimb_t));
     SSFBNSetZero(&hFull, nLimbs);
     memcpy(hFull.limbs, h.limbs, (size_t)hl * sizeof(SSFBNLimb_t));
     SSFBNSetZero(&qFull, nLimbs);
     memcpy(qFull.limbs, q->limbs, (size_t)hl * sizeof(SSFBNLimb_t));
-
-    /* result = (h * q) + m2 (in full n-width). */
     SSFBNMul(&prod, &hFull, &qFull);
-    result->len = nLimbs;
-    memcpy(result->limbs, prod.limbs, (size_t)nLimbs * sizeof(SSFBNLimb_t));
-    SSFBNAdd(result, result, &m2Full);
+    SSFBNSetZero(&mB, nLimbs);
+    memcpy(mB.limbs, prod.limbs, (size_t)nLimbs * sizeof(SSFBNLimb_t));
+    SSFBNAdd(&mB, &mB, &m2Full);
 
+    /* Unblind: result = mB * r^-1 mod n = c^d mod n. */
+    SSFBNModMulCT(result, &mB, &rInv, n);
+
+#if SSF_CONFIG_RSA_UNIT_TEST == 1
+    if (_SSFRSASignBlindTestHook != NULL)
+    {
+        _SSFRSASignBlindTestHook(_SSFRSASignBlindTestHookCtx, &r, &rInv, &eb1, &eb2, c, &cB, n);
+    }
+#endif
+    ok = true;
+
+cleanup:
     SSFBNZeroize(&cp);
     SSFBNZeroize(&cq);
     SSFBNZeroize(&m1);
@@ -457,7 +535,20 @@ static bool _SSFRSAPrivateOpCRT(const SSFBN_t *c, uint16_t nLimbs, const SSFBN_t
     SSFBNZeroize(&hFull);
     SSFBNZeroize(&qFull);
     SSFBNZeroize(&prod);
-    return true;
+    SSFBNZeroize(&mB);
+    SSFBNZeroize(&r);
+    SSFBNZeroize(&rInv);
+    SSFBNZeroize(&rE);
+    SSFBNZeroize(&cB);
+    SSFBNZeroize(&pm1);
+    SSFBNZeroize(&qm1);
+    SSFBNZeroize(&eb1);
+    SSFBNZeroize(&eb2);
+    SSFBNZeroize(&dpb);
+    SSFBNZeroize(&dqb);
+    if (prngInited) SSFPRNGDeInitContext(&prng);
+    _SSFRSASecureWipe(entropy, sizeof(entropy));
+    return ok;
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -938,7 +1029,7 @@ bool SSFRSASignPKCS1(const uint8_t *privKeyDer, size_t privKeyDerLen, SSFRSAHash
 
     /* Convert EM to integer and perform private-key operation. */
     SSFBNFromBytes(&m, em, keyBytes, nLimbs);
-    if (!_SSFRSAPrivateOpCRT(&m, nLimbs, &p, &q, &dp, &dq, &qInv, &s)) goto cleanup;
+    if (!_SSFRSAPrivateOpCRT(&m, nLimbs, &n, &e, &p, &q, &dp, &dq, &qInv, &s)) goto cleanup;
 
     /* Verify-after-sign defends against the Boneh-DeMillo-Lipton CRT fault attack. */
     if (!_SSFRSAPublicOp(&s, &e, &n, &mCheck)) goto cleanup;
@@ -1154,7 +1245,7 @@ bool SSFRSASignPSS(const uint8_t *privKeyDer, size_t privKeyDerLen, SSFRSAHash_t
 
     /* Convert EM to integer and perform private-key operation */
     SSFBNFromBytes(&m, em, keyBytes, nLimbs);
-    if (!_SSFRSAPrivateOpCRT(&m, nLimbs, &p, &q, &dp, &dq, &qInv, &s)) goto cleanup;
+    if (!_SSFRSAPrivateOpCRT(&m, nLimbs, &n, &e, &p, &q, &dp, &dq, &qInv, &s)) goto cleanup;
 
     /* Verify-after-sign: m' = s^e mod n must equal m. See SSFRSASignPKCS1 for rationale. */
     if (!_SSFRSAPublicOp(&s, &e, &n, &mCheck)) goto cleanup;

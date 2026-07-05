@@ -294,6 +294,34 @@ void SSFAESCCMUnitTest(void)
                                     out, sizeof(out)) == false);
     }
 
+    /* ---- (Hardening) Reject AAD longer than the 2-byte CCM length encoding supports ---- */
+    /* RFC 3610 Sec. 2.2 encodes an AAD length < 0xFF00 in 2 bytes; larger lengths require the      */
+    /* extended 6/10-byte forms this module does not implement. An aadLen >= 0xFF00 would silently   */
+    /* truncate to its low 16 bits, breaking the injective MAC length encoding. Both entry points    */
+    /* must reject it (AAD size is a caller contract).                                                */
+    {
+        static uint8_t aadBig[0xFF00];
+        static const uint8_t key[16] = { 0 };
+        static const uint8_t nonce[12] = { 0 };
+        uint8_t pt[4] = { 0 };
+        uint8_t ct[4];
+        uint8_t tag[16] = { 0 };
+
+        /* Encrypt with aadLen == 0xFF00 must assert. */
+        SSF_ASSERT_TEST(SSFAESCCMEncrypt(pt, sizeof(pt), nonce, sizeof(nonce),
+                                         aadBig, sizeof(aadBig), key, sizeof(key),
+                                         tag, sizeof(tag), ct, sizeof(ct)));
+
+        /* aadLen one below the boundary is valid and must NOT assert. */
+        SSFAESCCMEncrypt(pt, sizeof(pt), nonce, sizeof(nonce), aadBig, sizeof(aadBig) - 1u,
+                         key, sizeof(key), tag, sizeof(tag), ct, sizeof(ct));
+
+        /* Decrypt likewise rejects the oversized AAD. */
+        SSF_ASSERT_TEST(SSFAESCCMDecrypt(ct, sizeof(ct), nonce, sizeof(nonce),
+                                         aadBig, sizeof(aadBig), key, sizeof(key),
+                                         tag, sizeof(tag), pt, sizeof(pt)));
+    }
+
     /* ---- NIST SP 800-38C Example 1: AES-128, Nonce=7, Tag=4 ---- */
     /* Key: 40414243 44454647 48494a4b 4c4d4e4f */
     /* Nonce: 10111213 141516 */

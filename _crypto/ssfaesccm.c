@@ -222,9 +222,6 @@ void SSFAESCCMEncrypt(const uint8_t *pt, size_t ptLen, const uint8_t *nonce, siz
     SSF_REQUIRE(nonce != NULL);
     SSF_REQUIRE((nonceLen >= 7u) && (nonceLen <= 13u));
     SSF_REQUIRE((aad != NULL) || (aadLen == 0));
-    /* The AAD length is MAC'd in a 2-byte field; RFC 3610 Sec. 2.2 restricts that form to        */
-    /* aadLen < 0xFF00. Larger lengths need the unimplemented 6/10-byte encodings and would        */
-    /* silently truncate to 16 bits, breaking the injective MAC encoding -- reject at the contract. */
     SSF_REQUIRE(aadLen < 0xFF00u);
     SSF_REQUIRE(key != NULL);
     SSF_REQUIRE((keyLen == 16u) || (keyLen == 24u) || (keyLen == 32u));
@@ -258,9 +255,6 @@ bool SSFAESCCMDecrypt(const uint8_t *ct, size_t ctLen, const uint8_t *nonce, siz
     SSF_REQUIRE(nonce != NULL);
     SSF_REQUIRE((nonceLen >= 7u) && (nonceLen <= 13u));
     SSF_REQUIRE((aad != NULL) || (aadLen == 0));
-    /* The AAD length is MAC'd in a 2-byte field; RFC 3610 Sec. 2.2 restricts that form to        */
-    /* aadLen < 0xFF00. Larger lengths need the unimplemented 6/10-byte encodings and would        */
-    /* silently truncate to 16 bits, breaking the injective MAC encoding -- reject at the contract. */
     SSF_REQUIRE(aadLen < 0xFF00u);
     SSF_REQUIRE(key != NULL);
     SSF_REQUIRE((keyLen == 16u) || (keyLen == 24u) || (keyLen == 32u));

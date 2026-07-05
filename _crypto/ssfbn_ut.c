@@ -1701,6 +1701,54 @@ void SSFBNUnitTest(void)
         SSF_ASSERT(SSFBNIsEven(&a) == false);
     }
 
+    /* ---- (Hardening) SSFBNMontSquare fixed-length carry propagation ---- */
+    /* The constant-time rewrite replaced two value-dependent while(carry) loops with fixed-length */
+    /* spans. Square an operand that fills the high limbs (near 2^256, maximizing the carry ripple  */
+    /* the fix now spans unconditionally) via the Montgomery path and check it against the          */
+    /* independent schoolbook reference a^2 mod m. Guards correctness across the rewrite; the        */
+    /* constant-time property itself is verified by code review, not observable through the API.     */
+    {
+        SSFBNMONT_DEFINE(mont, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(m, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(aRed, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(aR, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(sqR, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(montOut, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(ref, SSF_BN_MAX_LIMBS);
+        /* Odd 256-bit modulus (Montgomery requires gcd(m, 2) = 1): 0xFFFF..FF43. */
+        static const uint8_t mBytes[32] = {
+            0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu,
+            0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu,
+            0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu,
+            0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0x43u
+        };
+        /* Operand a = 2^256 - 1 (all-ones limbs) -> maximal carry activity in the square. */
+        static const uint8_t aBytes[32] = {
+            0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu,
+            0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu,
+            0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu,
+            0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu
+        };
+
+        SSF_ASSERT(SSFBNFromBytes(&m, mBytes, sizeof(mBytes), 8) == true);
+        SSF_ASSERT(SSFBNFromBytes(&a, aBytes, sizeof(aBytes), 8) == true);
+
+        /* aRed = a mod m (MontConvertIn expects a reduced operand). */
+        SSFBNMod(&aRed, &a, &m);
+
+        /* Reference: a^2 mod m via the independent schoolbook path. */
+        SSFBNModMul(&ref, &aRed, &aRed, &m);
+
+        /* Montgomery square path (the function under test). */
+        SSFBNMontInit(&mont, &m);
+        SSFBNMontConvertIn(&aR, &aRed, &mont);
+        SSFBNMontSquare(&sqR, &aR, &mont);
+        SSFBNMontConvertOut(&montOut, &sqR, &mont);
+
+        SSF_ASSERT(SSFBNCmp(&montOut, &ref) == 0);
+    }
+
     /* ---- FromBytes / ToBytes roundtrip ---- */
     {
         static const uint8_t data[] = { 0x01u, 0x23u, 0x45u, 0x67u, 0x89u, 0xABu, 0xCDu, 0xEFu };

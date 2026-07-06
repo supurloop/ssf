@@ -78,6 +78,23 @@ void SSFAESBlockDecrypt(const uint8_t *ct, size_t ctLen, uint8_t *pt, size_t ptS
     SSFAESBlockDecrypt(ct, ctLen, pt, ptSize, key, keyLen, \
                        (6 + (((keyLen) & 0xff) >> 2)), (((keyLen) & 0xff) >> 2))
 
+/* Max expanded round-key words: AES-256 -> (Nr + 1) * Nb = (14 + 1) * 4 = 60. */
+#define SSF_AES_MAX_ROUND_KEY_WORDS (60u)
+
+typedef struct
+{
+    uint32_t w[SSF_AES_MAX_ROUND_KEY_WORDS]; /* expanded round keys (secret) */
+    uint8_t nr;                              /* number of rounds: 10 / 12 / 14 */
+    uint32_t magic;
+} SSFAESKeySchedule_t;
+
+void SSFAESKeyScheduleInit(SSFAESKeySchedule_t *ks, const uint8_t *key, size_t keyLen);
+void SSFAESKeyScheduleDeInit(SSFAESKeySchedule_t *ks);
+void SSFAESKSBlockEncrypt(const SSFAESKeySchedule_t *ks, const uint8_t *pt, size_t ptLen,
+                          uint8_t *ct, size_t ctSize);
+void SSFAESKSBlockDecrypt(const SSFAESKeySchedule_t *ks, const uint8_t *ct, size_t ctLen,
+                          uint8_t *pt, size_t ptSize);
+
 #if SSF_CONFIG_AES_UNIT_TEST == 1
 void SSFAESUnitTest(void);
 #endif /* SSF_CONFIG_AES_UNIT_TEST */

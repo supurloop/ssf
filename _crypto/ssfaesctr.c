@@ -67,11 +67,9 @@ static void _SSFAESCTRIncCounter(uint8_t counter[SSF_AESCTR_BLOCK_SIZE])
 static void _SSFAESCTRNextKeystream(SSFAESCTRContext_t *ctx)
 {
     SSF_REQUIRE(ctx != NULL);
-    SSF_REQUIRE((ctx->keyLen == 16u) || (ctx->keyLen == 24u) || (ctx->keyLen == 32u));
 
-    SSFAESXXXBlockEncrypt(ctx->counter, SSF_AESCTR_BLOCK_SIZE,
-                          ctx->ks, SSF_AESCTR_BLOCK_SIZE,
-                          ctx->key, ctx->keyLen);
+    SSFAESKSBlockEncrypt(&ctx->sched, ctx->counter, SSF_AESCTR_BLOCK_SIZE,
+                         ctx->ks, SSF_AESCTR_BLOCK_SIZE);
     _SSFAESCTRIncCounter(ctx->counter);
     ctx->ksOff = 0u;
 }
@@ -87,8 +85,8 @@ void SSFAESCTRBegin(SSFAESCTRContext_t *ctx, const uint8_t *key, size_t keyLen, 
     SSF_REQUIRE((keyLen == 16u) || (keyLen == 24u) || (keyLen == 32u));
     SSF_REQUIRE(iv != NULL);
 
-    memcpy(ctx->key, key, keyLen);
-    ctx->keyLen = keyLen;
+    ctx->sched.magic = 0u;
+    SSFAESKeyScheduleInit(&ctx->sched, key, keyLen);
     memcpy(ctx->counter, iv, SSF_AESCTR_BLOCK_SIZE);
     /* ksOff == BLOCK_SIZE means "no buffered keystream"; the first Crypt call will refill. */
     ctx->ksOff = SSF_AESCTR_BLOCK_SIZE;

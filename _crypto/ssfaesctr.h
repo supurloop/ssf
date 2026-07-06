@@ -52,11 +52,10 @@ extern "C" {
 
 typedef struct SSFAESCTRContext
 {
-    uint8_t  key[SSF_AESCTR_KEY_MAX_SIZE];
-    size_t   keyLen;                                /* 16, 24, or 32. */
-    uint8_t  counter[SSF_AESCTR_BLOCK_SIZE];        /* Current 128-bit counter value. */
-    uint8_t  ks[SSF_AESCTR_BLOCK_SIZE];             /* Buffered keystream. */
-    size_t   ksOff;                                 /* Index of next unused keystream byte. */
+    SSFAESKeySchedule_t sched;                       /* round keys expanded once at Begin. */
+    uint8_t  counter[SSF_AESCTR_BLOCK_SIZE];         /* Current 128-bit counter value. */
+    uint8_t  ks[SSF_AESCTR_BLOCK_SIZE];              /* Buffered keystream. */
+    size_t   ksOff;                                  /* Index of next unused keystream byte. */
     uint32_t magic;
 } SSFAESCTRContext_t;
 

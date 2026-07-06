@@ -634,6 +634,49 @@ void SSFAESUnitTest(void)
     uint8_t key[32];
     uint8_t in[16];
 
+    /* ---- (Hardening) Key-schedule API: expand once, matches one-shot, DeInit wipes it ---- */
+    /* Covers AES-128 (nr=10) and AES-256 (nr=14). The one-shot API now routes through this same  */
+    /* schedule path, so all existing KATs also exercise it; this checks the direct entry points   */
+    /* and that DeInit securely zeroes the expanded round keys.                                     */
+    {
+        SSFAESKeySchedule_t sched = {0};   /* must be zeroed before the first Init (magic guard) */
+        uint8_t zeros[sizeof(sched)];
+        uint8_t ref[16];
+        uint8_t ksOut[16];
+        uint8_t back[16];
+        const struct { uint8_t *ky; size_t kl; uint8_t nr; uint8_t nk; } cases[2] = {
+            { _SSFAES128BlockEncryptMonteUT[0].key, 16u, 10u, 4u },
+            { _SSFAES256BlockEncryptMonteUT[0].key, 32u, 14u, 8u }
+        };
+        uint8_t c;
+
+        memset(zeros, 0, sizeof(zeros));
+        for (c = 0u; c < 2u; c++)
+        {
+            uint8_t *pt = _SSFAES128BlockEncryptMonteUT[0].in;
+
+            SSFAESBlockEncrypt(pt, 16, ref, 16, cases[c].ky, cases[c].kl, cases[c].nr, cases[c].nk);
+
+            SSFAESKeyScheduleInit(&sched, cases[c].ky, cases[c].kl);
+            SSFAESKSBlockEncrypt(&sched, pt, 16, ksOut, 16);
+            SSF_ASSERT(memcmp(ksOut, ref, 16) == 0);            /* KS path == one-shot */
+            SSFAESKSBlockEncrypt(&sched, pt, 16, ksOut, 16);    /* reuse the schedule again */
+            SSF_ASSERT(memcmp(ksOut, ref, 16) == 0);
+            SSFAESKSBlockDecrypt(&sched, ksOut, 16, back, 16);  /* round-trips */
+            SSF_ASSERT(memcmp(back, pt, 16) == 0);
+            SSFAESKeyScheduleDeInit(&sched);                    /* DeInit re-zeros for the next Init */
+            SSF_ASSERT(memcmp(&sched, zeros, sizeof(sched)) == 0); /* DeInit wiped the round keys */
+        }
+
+        /* Re-initializing a live (already-magic) schedule must be rejected by the init-once guard. */
+        {
+            SSFAESKeySchedule_t s2 = {0};
+            SSFAESKeyScheduleInit(&s2, _SSFAES128BlockEncryptMonteUT[0].key, 16);
+            SSF_ASSERT_TEST(SSFAESKeyScheduleInit(&s2, _SSFAES128BlockEncryptMonteUT[0].key, 16));
+            SSFAESKeyScheduleDeInit(&s2);
+        }
+    }
+
     SSF_ASSERT_TEST(SSFAES128BlockEncrypt(NULL, 16, out, 16, _SSFAES128BlockEncryptMonteUT[0].key,
                                           16));
     SSF_ASSERT_TEST(SSFAES128BlockEncrypt(_SSFAES128BlockEncryptMonteUT[0].in, 16, NULL, 16,

@@ -329,7 +329,7 @@ static void _SSFAESGCMGHASH(const uint8_t *in, size_t inLen, const uint8_t *h, s
 /* --------------------------------------------------------------------------------------------- */
 /* GCTR mode: XORs in into out using AES-CTR keystream starting from initial counter block icb.  */
 /* --------------------------------------------------------------------------------------------- */
-static void _SSFAESGCMGCTR(const uint8_t *in, size_t inLen, const uint8_t *key, size_t keyLen,
+static void _SSFAESGCMGCTR(const uint8_t *in, size_t inLen, const SSFAESKeySchedule_t *ks,
                            const uint8_t *icb, size_t icbLen, uint8_t *out, size_t outSize)
 {
     uint8_t cb[16];
@@ -339,9 +339,8 @@ static void _SSFAESGCMGCTR(const uint8_t *in, size_t inLen, const uint8_t *key, 
 
     SSF_REQUIRE(in != NULL);
     SSF_REQUIRE(out != NULL);
-    SSF_REQUIRE(key != NULL);
+    SSF_REQUIRE(ks != NULL);
     SSF_REQUIRE(icb != NULL);
-    SSF_REQUIRE((keyLen == 16) || (keyLen == 24) || (keyLen == 32));
     SSF_REQUIRE(icbLen == 16);
     SSF_REQUIRE(inLen > 0u);    /* Caller-side encrypt/decrypt guards inLen == 0 cases. */
     SSF_REQUIRE(inLen <= outSize);
@@ -352,7 +351,7 @@ static void _SSFAESGCMGCTR(const uint8_t *in, size_t inLen, const uint8_t *key, 
     n = inLen & ~(size_t)0xFu;
     for (i = 0; i < n; i += 16u)
     {
-        SSFAESXXXBlockEncrypt(cb, sizeof(cb), buf, sizeof(buf), key, keyLen);
+        SSFAESKSBlockEncrypt(ks, cb, sizeof(cb), buf, sizeof(buf));
         BLOCK_XOR(&out[i], buf);
         _SSFAESGCMBlockInc32(cb);
     }
@@ -361,7 +360,7 @@ static void _SSFAESGCMGCTR(const uint8_t *in, size_t inLen, const uint8_t *key, 
     if (i < inLen)
     {
         /* Yes, encrypt one more keystream block and XOR only the leftover bytes. */
-        SSFAESXXXBlockEncrypt(cb, sizeof(cb), buf, sizeof(buf), key, keyLen);
+        SSFAESKSBlockEncrypt(ks, cb, sizeof(cb), buf, sizeof(buf));
 
         for (i = 0; i < (inLen & (size_t)0xFu); i++)
         {
@@ -383,6 +382,7 @@ void SSFAESGCMEncrypt(const uint8_t *pt, size_t ptLen, const uint8_t *iv, size_t
     uint8_t j1[16] = {0};
     uint8_t buf[16] = {0};
     uint64_t t;
+    SSFAESKeySchedule_t ks = {0};
 
     SSF_REQUIRE(iv != NULL);
     SSF_REQUIRE(key != NULL);
@@ -396,7 +396,9 @@ void SSFAESGCMEncrypt(const uint8_t *pt, size_t ptLen, const uint8_t *iv, size_t
     SSF_REQUIRE((keyLen == 16) || (keyLen == 24) || (keyLen == 32));
     SSF_REQUIRE(((tagSize >= 12) && (tagSize <= 16)) || (tagSize == 8) || (tagSize == 4));
 
-    SSFAESXXXBlockEncrypt(h, sizeof(h), h, sizeof(h), key, keyLen);
+    /* Expand the round keys once for the hash subkey H and every GCTR keystream block. */
+    SSFAESKeyScheduleInit(&ks, key, keyLen);
+    SSFAESKSBlockEncrypt(&ks, h, sizeof(h), h, sizeof(h));
 
     /* Is the IV exactly 96 bits (the GCM fast path)? */
     if (ivLen == 12)
@@ -421,7 +423,7 @@ void SSFAESGCMEncrypt(const uint8_t *pt, size_t ptLen, const uint8_t *iv, size_t
     if (ptLen > 0u)
     {
         /* Yes, encrypt under counter J_1. */
-        _SSFAESGCMGCTR(pt, ptLen, key, keyLen, j1, sizeof(j1), ct, ptLen);
+        _SSFAESGCMGCTR(pt, ptLen, &ks, j1, sizeof(j1), ct, ptLen);
     }
 
     t = ((uint64_t)authLen) << 3;
@@ -433,9 +435,10 @@ void SSFAESGCMEncrypt(const uint8_t *pt, size_t ptLen, const uint8_t *iv, size_t
     _SSFAESGCMGHASH(ct, ptLen, h, sizeof(h), s, sizeof(s));
     _SSFAESGCMGHASH(buf, sizeof(buf), h, sizeof(h), s, sizeof(s));
 
-    _SSFAESGCMGCTR(s, sizeof(s), key, keyLen, j0, sizeof(j0), s, sizeof(s));
+    _SSFAESGCMGCTR(s, sizeof(s), &ks, j0, sizeof(j0), s, sizeof(s));
 
     memcpy(tag, s, tagSize);
+    SSFAESKeyScheduleDeInit(&ks);
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -451,6 +454,7 @@ bool SSFAESGCMDecrypt(const uint8_t *ct, size_t ctLen, const uint8_t *iv, size_t
     uint8_t j1[16] = { 0 };
     uint8_t buf[16] = { 0 };
     uint64_t t;
+    SSFAESKeySchedule_t ks = {0};
 
     SSF_REQUIRE(iv != NULL);
     SSF_REQUIRE(key != NULL);
@@ -465,7 +469,9 @@ bool SSFAESGCMDecrypt(const uint8_t *ct, size_t ctLen, const uint8_t *iv, size_t
     SSF_REQUIRE((keyLen == 16) || (keyLen == 24) || (keyLen == 32));
     SSF_REQUIRE(((tagLen >= 12) && (tagLen <= 16)) || (tagLen == 8) || (tagLen == 4));
 
-    SSFAESXXXBlockEncrypt(h, sizeof(h), h, sizeof(h), key, keyLen);
+    /* Expand the round keys once for the hash subkey H and every GCTR keystream block. */
+    SSFAESKeyScheduleInit(&ks, key, keyLen);
+    SSFAESKSBlockEncrypt(&ks, h, sizeof(h), h, sizeof(h));
 
     /* Is the IV exactly 96 bits (the GCM fast path)? */
     if (ivLen == 12)
@@ -490,7 +496,7 @@ bool SSFAESGCMDecrypt(const uint8_t *ct, size_t ctLen, const uint8_t *iv, size_t
     if (ctLen > 0u)
     {
         /* Yes, decrypt under counter J_1. */
-        _SSFAESGCMGCTR(ct, ctLen, key, keyLen, j1, sizeof(j1), pt, ptSize);
+        _SSFAESGCMGCTR(ct, ctLen, &ks, j1, sizeof(j1), pt, ptSize);
     }
 
     t = ((uint64_t)authLen) << 3;
@@ -502,7 +508,9 @@ bool SSFAESGCMDecrypt(const uint8_t *ct, size_t ctLen, const uint8_t *iv, size_t
     _SSFAESGCMGHASH(ct, ctLen, h, sizeof(h), s, sizeof(s));
     _SSFAESGCMGHASH(buf, sizeof(buf), h, sizeof(h), s, sizeof(s));
 
-    _SSFAESGCMGCTR(s, sizeof(s), key, keyLen, j0, sizeof(j0), s, sizeof(s));
+    _SSFAESGCMGCTR(s, sizeof(s), &ks, j0, sizeof(j0), s, sizeof(s));
+
+    SSFAESKeyScheduleDeInit(&ks);
 
     /* Did the tags differ? (constant-time compare) */
     if (SSFCryptCTMemEq(s, tag, tagLen) == false)

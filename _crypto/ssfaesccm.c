@@ -47,9 +47,9 @@ static void _SSFAESCCMXorBlock(uint8_t *dst, const uint8_t *src)
 /* --------------------------------------------------------------------------------------------- */
 /* Encrypt a single 16-byte block using the AES key.                                             */
 /* --------------------------------------------------------------------------------------------- */
-static void _SSFAESCCMEncBlock(const uint8_t *key, size_t keyLen, const uint8_t *in, uint8_t *out)
+static void _SSFAESCCMEncBlock(const SSFAESKeySchedule_t *ks, const uint8_t *in, uint8_t *out)
 {
-    SSFAESXXXBlockEncrypt(in, SSF_AESCCM_BLOCK_SIZE, out, SSF_AESCCM_BLOCK_SIZE, key, keyLen);
+    SSFAESKSBlockEncrypt(ks, in, SSF_AESCCM_BLOCK_SIZE, out, SSF_AESCCM_BLOCK_SIZE);
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -105,7 +105,7 @@ static void _SSFAESCCMFormatCtr(uint8_t a[SSF_AESCCM_BLOCK_SIZE], const uint8_t 
 /* --------------------------------------------------------------------------------------------- */
 /* Computes CBC-MAC tag T over (B_0 || AAD || plaintext) per RFC 3610 section 2.2.               */
 /* --------------------------------------------------------------------------------------------- */
-static void _SSFAESCCMComputeTag(const uint8_t *key, size_t keyLen, const uint8_t *nonce,
+static void _SSFAESCCMComputeTag(const SSFAESKeySchedule_t *ks, const uint8_t *nonce,
                                  size_t nonceLen, const uint8_t *aad, size_t aadLen,
                                  const uint8_t *data, size_t dataLen, size_t tagLen,
                                  uint8_t *tagOut)
@@ -119,7 +119,7 @@ static void _SSFAESCCMComputeTag(const uint8_t *key, size_t keyLen, const uint8_
 
     /* Process B_0 */
     _SSFAESCCMFormatB0(b, nonce, nonceLen, aadLen, dataLen, tagLen);
-    _SSFAESCCMEncBlock(key, keyLen, b, x);
+    _SSFAESCCMEncBlock(ks, b, x);
 
     /* Process AAD if present */
     if (aadLen > 0)
@@ -136,7 +136,7 @@ static void _SSFAESCCMComputeTag(const uint8_t *key, size_t keyLen, const uint8_
         memcpy(&b[pos], aad, chunk);
         pos = 0; /* reset for subsequent blocks */
         _SSFAESCCMXorBlock(x, b);
-        _SSFAESCCMEncBlock(key, keyLen, x, x);
+        _SSFAESCCMEncBlock(ks, x, x);
 
         /* Process remaining AAD blocks */
         aadDone = chunk;
@@ -147,7 +147,7 @@ static void _SSFAESCCMComputeTag(const uint8_t *key, size_t keyLen, const uint8_
             if (chunk > SSF_AESCCM_BLOCK_SIZE) chunk = SSF_AESCCM_BLOCK_SIZE;
             memcpy(b, &aad[aadDone], chunk);
             _SSFAESCCMXorBlock(x, b);
-            _SSFAESCCMEncBlock(key, keyLen, x, x);
+            _SSFAESCCMEncBlock(ks, x, x);
             aadDone += chunk;
         }
     }
@@ -160,7 +160,7 @@ static void _SSFAESCCMComputeTag(const uint8_t *key, size_t keyLen, const uint8_
         memset(b, 0, SSF_AESCCM_BLOCK_SIZE);
         memcpy(b, &data[done], chunk);
         _SSFAESCCMXorBlock(x, b);
-        _SSFAESCCMEncBlock(key, keyLen, x, x);
+        _SSFAESCCMEncBlock(ks, x, x);
         done += chunk;
     }
 
@@ -171,7 +171,7 @@ static void _SSFAESCCMComputeTag(const uint8_t *key, size_t keyLen, const uint8_
 /* --------------------------------------------------------------------------------------------- */
 /* Applies CTR mode encryption/decryption and encrypts/decrypts the tag using S_0.               */
 /* --------------------------------------------------------------------------------------------- */
-static void _SSFAESCCMCtr(const uint8_t *key, size_t keyLen, const uint8_t *nonce, size_t nonceLen,
+static void _SSFAESCCMCtr(const SSFAESKeySchedule_t *ks, const uint8_t *nonce, size_t nonceLen,
                           const uint8_t *in, size_t inLen, uint8_t *out, const uint8_t *tagIn,
                           uint8_t *tagOut, size_t tagLen)
 {
@@ -189,7 +189,7 @@ static void _SSFAESCCMCtr(const uint8_t *key, size_t keyLen, const uint8_t *nonc
         if (chunk > SSF_AESCCM_BLOCK_SIZE) chunk = SSF_AESCCM_BLOCK_SIZE;
 
         _SSFAESCCMFormatCtr(a, nonce, nonceLen, counter);
-        _SSFAESCCMEncBlock(key, keyLen, a, s);
+        _SSFAESCCMEncBlock(ks, a, s);
 
         for (j = 0; j < (uint32_t)chunk; j++)
         {
@@ -202,7 +202,7 @@ static void _SSFAESCCMCtr(const uint8_t *key, size_t keyLen, const uint8_t *nonc
 
     /* Encrypt/decrypt the tag using S_0 */
     _SSFAESCCMFormatCtr(a, nonce, nonceLen, 0);
-    _SSFAESCCMEncBlock(key, keyLen, a, s);
+    _SSFAESCCMEncBlock(ks, a, s);
     for (j = 0; j < (uint32_t)tagLen; j++)
     {
         tagOut[j] = tagIn[j] ^ s[j];
@@ -217,6 +217,7 @@ void SSFAESCCMEncrypt(const uint8_t *pt, size_t ptLen, const uint8_t *nonce, siz
                       uint8_t *tag, size_t tagSize, uint8_t *ct, size_t ctSize)
 {
     uint8_t cbcTag[SSF_AESCCM_BLOCK_SIZE];
+    SSFAESKeySchedule_t ks = {0};
 
     SSF_REQUIRE((pt != NULL) || (ptLen == 0));
     SSF_REQUIRE(nonce != NULL);
@@ -234,11 +235,16 @@ void SSFAESCCMEncrypt(const uint8_t *pt, size_t ptLen, const uint8_t *nonce, siz
         SSF_REQUIRE((L >= 8u) || ((uint64_t)ptLen < ((uint64_t)1u << (8u * L))));
     }
 
+    /* Expand the round keys once for the CBC-MAC and CTR passes. */
+    SSFAESKeyScheduleInit(&ks, key, keyLen);
+
     /* Step 1: Compute CBC-MAC tag over (B_0 || AAD || plaintext) */
-    _SSFAESCCMComputeTag(key, keyLen, nonce, nonceLen, aad, aadLen, pt, ptLen, tagSize, cbcTag);
+    _SSFAESCCMComputeTag(&ks, nonce, nonceLen, aad, aadLen, pt, ptLen, tagSize, cbcTag);
 
     /* Step 2: CTR encrypt the plaintext and encrypt the tag with S_0 */
-    _SSFAESCCMCtr(key, keyLen, nonce, nonceLen, pt, ptLen, ct, cbcTag, tag, tagSize);
+    _SSFAESCCMCtr(&ks, nonce, nonceLen, pt, ptLen, ct, cbcTag, tag, tagSize);
+
+    SSFAESKeyScheduleDeInit(&ks);
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -250,6 +256,7 @@ bool SSFAESCCMDecrypt(const uint8_t *ct, size_t ctLen, const uint8_t *nonce, siz
 {
     uint8_t decTag[SSF_AESCCM_BLOCK_SIZE];
     uint8_t cbcTag[SSF_AESCCM_BLOCK_SIZE];
+    SSFAESKeySchedule_t ks = {0};
 
     SSF_REQUIRE((ct != NULL) || (ctLen == 0));
     SSF_REQUIRE(nonce != NULL);
@@ -267,11 +274,16 @@ bool SSFAESCCMDecrypt(const uint8_t *ct, size_t ctLen, const uint8_t *nonce, siz
         if ((L < 8u) && ((uint64_t)ctLen >= ((uint64_t)1u << (8u * L)))) return false;
     }
 
+    /* Expand the round keys once for the CTR and CBC-MAC passes. */
+    SSFAESKeyScheduleInit(&ks, key, keyLen);
+
     /* Step 1: CTR decrypt the ciphertext and decrypt the tag */
-    _SSFAESCCMCtr(key, keyLen, nonce, nonceLen, ct, ctLen, pt, tag, decTag, tagLen);
+    _SSFAESCCMCtr(&ks, nonce, nonceLen, ct, ctLen, pt, tag, decTag, tagLen);
 
     /* Step 2: Compute CBC-MAC tag over (B_0 || AAD || decrypted plaintext) */
-    _SSFAESCCMComputeTag(key, keyLen, nonce, nonceLen, aad, aadLen, pt, ctLen, tagLen, cbcTag);
+    _SSFAESCCMComputeTag(&ks, nonce, nonceLen, aad, aadLen, pt, ctLen, tagLen, cbcTag);
+
+    SSFAESKeyScheduleDeInit(&ks);
 
     /* Step 3: Did the tags differ? (constant-time compare) */
     if (SSFCryptCTMemEq(cbcTag, decTag, tagLen) == false)

@@ -37,7 +37,11 @@
 #include "ssfport.h"
 #include "ssfassert.h"
 #include "ssfaes.h"
+#include "ssfcrypt.h"
 #include "ssfusexport.h"
+
+/* Set by SSFAESKeyScheduleInit, cleared by SSFAESKeyScheduleDeInit ('AESK'). */
+#define SSF_AES_KS_MAGIC (0x4145534Bul)
 
 /* State is four LE-packed u32 columns: c = row0 | (row1<<8) | (row2<<16) | (row3<<24). */
 #define FGFM2(x) ((x<<1) ^ (0x1b & -(x>>7)))
@@ -242,16 +246,124 @@ static void _SSFAESKeyExpansion(uint32_t *w, size_t wSize, const uint8_t *key, s
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Performs AES block encryption.                                                                */
+/* Internal: encrypt one block with a precomputed round-key schedule; wipes the working state.   */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAESEncryptRounds(const uint32_t *w, uint8_t nr, const uint8_t *in, uint8_t *out)
+{
+    uint32_t s[4];
+    uint8_t i;
+
+    ARRAY_TO_STATE(s, in);
+    ADD_KEY(s, w, 0);
+    for (i = 1; i < nr; i++)
+    {
+        SBOX_STATE(s);
+        MIX_COLUMNS(s);
+        ADD_KEY(s, w, (i << 2));
+    }
+    SBOX_STATE(s);
+    ADD_KEY(s, w, (nr << 2));
+    STATE_TO_ARRAY(s, out);
+
+    SSFCryptSecureZero(s, sizeof(s));
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: decrypt one block with a precomputed round-key schedule; wipes the working state.   */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAESDecryptRounds(const uint32_t *w, uint8_t nr, const uint8_t *in, uint8_t *out)
+{
+    uint32_t s[4];
+    uint8_t i;
+
+    ARRAY_TO_STATE(s, in);
+    ADD_KEY(s, w, (nr << 2));
+    for (i = (uint8_t)(nr - 1u); i > 0u; i--)
+    {
+        INV_SBOX_STATE(s);
+        ADD_KEY(s, w, (i << 2));
+        INV_MIX_COLUMNS(s);
+    }
+    INV_SBOX_STATE(s);
+    ADD_KEY(s, w, 0);
+    STATE_TO_ARRAY(s, out);
+
+    SSFCryptSecureZero(s, sizeof(s));
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Expand an AES key into a reusable round-key schedule (expand once, use for many blocks).      */
+/* --------------------------------------------------------------------------------------------- */
+void SSFAESKeyScheduleInit(SSFAESKeySchedule_t *ks, const uint8_t *key, size_t keyLen)
+{
+    uint8_t nk;
+    uint8_t nr;
+    size_t wSize;
+
+    SSF_REQUIRE(ks != NULL);
+    SSF_REQUIRE(ks->magic != SSF_AES_KS_MAGIC);
+    SSF_REQUIRE(key != NULL);
+    SSF_REQUIRE((keyLen == 16u) || (keyLen == 24u) || (keyLen == 32u));
+
+    nk = (uint8_t)(keyLen >> 2);  /* 4, 6, 8 */
+    nr = (uint8_t)(6u + nk);      /* 10, 12, 14 */
+    wSize = (((size_t)nr) + 1u) << 2;
+
+    _SSFAESKeyExpansion(ks->w, wSize, key, keyLen, nr, nk);
+    ks->nr = nr;
+    ks->magic = SSF_AES_KS_MAGIC;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Securely wipe a round-key schedule.                                                           */
+/* --------------------------------------------------------------------------------------------- */
+void SSFAESKeyScheduleDeInit(SSFAESKeySchedule_t *ks)
+{
+    SSF_REQUIRE(ks != NULL);
+    SSF_REQUIRE(ks->magic == SSF_AES_KS_MAGIC);
+
+    SSFCryptSecureZero(ks, sizeof(*ks));
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Encrypt one 16-byte block using a precomputed schedule.                                       */
+/* --------------------------------------------------------------------------------------------- */
+void SSFAESKSBlockEncrypt(const SSFAESKeySchedule_t *ks, const uint8_t *pt, size_t ptLen,
+                          uint8_t *ct, size_t ctSize)
+{
+    SSF_REQUIRE(ks != NULL);
+    SSF_REQUIRE(ks->magic == SSF_AES_KS_MAGIC);
+    SSF_REQUIRE(pt != NULL);
+    SSF_REQUIRE(ct != NULL);
+    SSF_REQUIRE(ptLen == SSF_AES_BLOCK_SIZE);
+    SSF_REQUIRE(ctSize == SSF_AES_BLOCK_SIZE);
+
+    _SSFAESEncryptRounds(ks->w, ks->nr, pt, ct);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Decrypt one 16-byte block using a precomputed schedule.                                       */
+/* --------------------------------------------------------------------------------------------- */
+void SSFAESKSBlockDecrypt(const SSFAESKeySchedule_t *ks, const uint8_t *ct, size_t ctLen,
+                          uint8_t *pt, size_t ptSize)
+{
+    SSF_REQUIRE(ks != NULL);
+    SSF_REQUIRE(ks->magic == SSF_AES_KS_MAGIC);
+    SSF_REQUIRE(ct != NULL);
+    SSF_REQUIRE(pt != NULL);
+    SSF_REQUIRE(ctLen == SSF_AES_BLOCK_SIZE);
+    SSF_REQUIRE(ptSize == SSF_AES_BLOCK_SIZE);
+
+    _SSFAESDecryptRounds(ks->w, ks->nr, ct, pt);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Performs AES block encryption (one-shot: expand schedule, encrypt, wipe schedule).            */
 /* --------------------------------------------------------------------------------------------- */
 void SSFAESBlockEncrypt(const uint8_t *pt, size_t ptLen, uint8_t *ct, size_t ctSize,
                         const uint8_t *key, size_t keyLen, uint8_t nr, uint8_t nk)
 {
-    uint32_t w[60];
-    uint32_t s[4];
-    uint8_t i;
-
-    size_t wSize = (((size_t) nr) + 1) << 2;
+    SSFAESKeySchedule_t ks = {0};
 
     SSF_REQUIRE(pt != NULL);
     SSF_REQUIRE(ct != NULL);
@@ -262,34 +374,18 @@ void SSFAESBlockEncrypt(const uint8_t *pt, size_t ptLen, uint8_t *ct, size_t ctS
     SSF_REQUIRE(((nr == 10) && (nk == 4)) || ((nr == 12) && (nk == 6)) ||
                 ((nr == 14) && (nk == 8)));
 
-    ARRAY_TO_STATE(s, pt);
-    _SSFAESKeyExpansion(w, wSize, key, keyLen, nr, nk);
-    ADD_KEY(s, w, 0);
-
-    for (i = 1; i < nr; i++)
-    {
-        SBOX_STATE(s);
-        MIX_COLUMNS(s);
-        ADD_KEY(s, w, (i << 2));
-    }
-
-    SBOX_STATE(s);
-    ADD_KEY(s, w, (nr << 2));
-
-    STATE_TO_ARRAY(s, ct);
+    SSFAESKeyScheduleInit(&ks, key, keyLen);
+    SSFAESKSBlockEncrypt(&ks, pt, ptLen, ct, ctSize);
+    SSFAESKeyScheduleDeInit(&ks);
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Performs AES block decryption.                                                                */
+/* Performs AES block decryption (one-shot: expand schedule, decrypt, wipe schedule).            */
 /* --------------------------------------------------------------------------------------------- */
 void SSFAESBlockDecrypt(const uint8_t *ct, size_t ctLen, uint8_t *pt, size_t ptSize,
                         const uint8_t *key, size_t keyLen, uint8_t nr, uint8_t nk)
 {
-    uint32_t w[60];
-    uint32_t s[4];
-    uint8_t i;
-
-    size_t wSize = (((size_t) nr) + 1) << 2;
+    SSFAESKeySchedule_t ks = {0};
 
     SSF_REQUIRE(ct != NULL);
     SSF_REQUIRE(pt != NULL);
@@ -300,20 +396,8 @@ void SSFAESBlockDecrypt(const uint8_t *ct, size_t ctLen, uint8_t *pt, size_t ptS
     SSF_REQUIRE(((nr == 10) && (nk == 4)) || ((nr == 12) && (nk == 6)) ||
                 ((nr == 14) && (nk == 8)));
 
-    ARRAY_TO_STATE(s, ct);
-    _SSFAESKeyExpansion(w, wSize, key, keyLen, nr, nk);
-    ADD_KEY(s, w, (nr << 2));
-
-    for (i = nr - 1; i > 0; i--)
-    {
-        INV_SBOX_STATE(s);
-        ADD_KEY(s, w, (i << 2));
-        INV_MIX_COLUMNS(s);
-    }
-
-    INV_SBOX_STATE(s);
-    ADD_KEY(s, w, 0);
-
-    STATE_TO_ARRAY(s, pt);
+    SSFAESKeyScheduleInit(&ks, key, keyLen);
+    SSFAESKSBlockDecrypt(&ks, ct, ctLen, pt, ptSize);
+    SSFAESKeyScheduleDeInit(&ks);
 }
 

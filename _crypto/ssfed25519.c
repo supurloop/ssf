@@ -82,10 +82,9 @@ static void _fe_add(_fe_t *r, const _fe_t *a, const _fe_t *b)
         r->v[i] = (uint32_t)carry;
         carry >>= 32;
     }
-    /* If carry, result >= 2^256; reduce by adding 19 and clearing bit 255. */
-    if (carry != 0u)
+    /* Fold the overflow past 2^256 back in unconditionally (constant time) */
     {
-        uint64_t c = 38u; /* 2^256 mod p = 2 * 19 = 38 */
+        uint64_t c = (uint64_t)carry * 38u;
         for (i = 0; i < 8u; i++)
         {
             c += (uint64_t)r->v[i];
@@ -116,13 +115,13 @@ static void _fe_sub(_fe_t *r, const _fe_t *a, const _fe_t *b)
         borrow = (diff >> 63) & 1u;
     }
 
-    /* If borrow, add 2p (since both inputs < p, result + 2p is in [0, 3p), fits in 257 bits) */
-    if (borrow != 0u)
+    /* Add 2p on borrow, masked and unconditional (constant time) */
     {
+        uint32_t mask = (uint32_t)(0u - (uint32_t)borrow);
         uint64_t carry = 0;
         for (i = 0; i < 8u; i++)
         {
-            carry += (uint64_t)r->v[i] + (uint64_t)_fe_p.v[i] + (uint64_t)_fe_p.v[i];
+            carry += (uint64_t)r->v[i] + 2u * (uint64_t)(_fe_p.v[i] & mask);
             r->v[i] = (uint32_t)carry;
             carry >>= 32;
         }
@@ -159,8 +158,7 @@ static void _fe_mul(_fe_t *r, const _fe_t *a, const _fe_t *b)
         carry >>= 32;
     }
 
-    /* Carry might remain (up to ~6 bits). Fold it back: carry * 38 */
-    if (carry != 0u)
+    /* Fold the residual reduction carry unconditionally (constant time) */
     {
         uint64_t c = carry * 38u;
         for (i = 0; i < 8u; i++)
@@ -748,7 +746,8 @@ static void _sc_pack(uint8_t out[32], const int64_t s[12])
     memset(out, 0, 32);
     for (i = 0; i < 12u; i++)
     {
-        acc |= ((uint64_t)(s[i] & 0x1FFFFF)) << accBits;
+        int64_t limbMask = (i < 11u) ? (int64_t)0x1FFFFF : (int64_t)0xFFFFFF;
+        acc |= ((uint64_t)(s[i] & limbMask)) << accBits;
         accBits += 21u;
         while ((accBits >= 8u) && (outIdx < 32u))
         {
@@ -764,6 +763,14 @@ static void _sc_pack(uint8_t out[32], const int64_t s[12])
         acc >>= 8u;
     }
 }
+
+#if SSF_CONFIG_ED25519_UNIT_TEST == 1
+/* Test-only wrapper exposing _sc_pack so a unit test can check the top-limb (bit 252) packing. */
+void _SSFEd25519ScPackForTest(uint8_t out[32], const int64_t s[12])
+{
+    _sc_pack(out, s);
+}
+#endif /* SSF_CONFIG_ED25519_UNIT_TEST */
 
 /* Load a 64-byte (512-bit) little-endian integer into 24 signed limbs of ~21 bits each,         */
 /* then reduce modulo L. Output: 32 bytes little-endian.                                         */

@@ -365,6 +365,19 @@ static void _HexToBytes(const char *hex, uint8_t *out, size_t outLen)
 /* --------------------------------------------------------------------------------------------- */
 void SSFEd25519UnitTest(void)
 {
+    /* ---- (Hardening) _sc_pack preserves bit 252 for scalars in [2^252, L) ---- */
+    /* The scalar is 12 limbs of 21 bits; the top limb carries bit 252, so masking it to 21 bits    */
+    /* would drop that bit. Pack the value 2^252 (top limb == 2^21) and confirm output bit 252 set.  */
+    /* Unreachable with random signatures (probability ~2^-127), so it needs a direct check.         */
+    {
+        int64_t s[12] = {0};
+        uint8_t out[32];
+
+        s[11] = (int64_t)1 << 21;                    /* value == 2^252 */
+        _SSFEd25519ScPackForTest(out, s);
+        SSF_ASSERT((out[31] & 0x10u) != 0u);         /* bit 252 = byte 31 bit 4 must be set */
+    }
+
     /* ---- RFC 8032 Test Vector 1: empty message ---- */
     {
         uint8_t seed[32], expectedPub[32], expectedSig[64];

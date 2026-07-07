@@ -64,6 +64,9 @@ bool SSFEd25519Verify(const uint8_t pubKey[SSF_ED25519_PUB_KEY_SIZE], const uint
 /* --------------------------------------------------------------------------------------------- */
 #if SSF_CONFIG_ED25519_UNIT_TEST == 1
 void SSFEd25519UnitTest(void);
+
+/* Test wrapper around the internal scalar-pack (12 x 21-bit limbs -> 32-byte LE scalar). */
+void _SSFEd25519ScPackForTest(uint8_t out[32], const int64_t s[12]);
 #endif /* SSF_CONFIG_ED25519_UNIT_TEST */
 
 #ifdef __cplusplus

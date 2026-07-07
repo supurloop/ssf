@@ -253,6 +253,19 @@ void SSFUBJsonUnitTest(void)
     uint8_t *outPtr;
     size_t outPtrLen;
 
+    /* (Hardening) A container whose last element/value ends exactly at the buffer end, and a      */
+    /* zero-length buffer, must be rejected without reading past the buffer (previously a 1-byte    */
+    /* over-read of js[jsLen] / js[0]). */
+    {
+        uint8_t poc1[] = { 0x5Bu, 0x23u, 0x55u, 0x00u };               /* [ # U 0 : count, no data  */
+        uint8_t poc2[] = { 0x7Bu, 0x69u, 0x01u, 0x6Bu, 0x55u, 0x00u }; /* { i1 'k' U 0 : no close   */
+        uint8_t oneByte[1] = { 0x00u };
+
+        SSF_ASSERT(SSFUBJsonIsValid(poc1, sizeof(poc1)) == false);
+        SSF_ASSERT(SSFUBJsonIsValid(poc2, sizeof(poc2)) == false);
+        SSF_ASSERT(SSFUBJsonIsValid(oneByte, 0) == false);   /* jsLen == 0 must not read js[0] */
+    }
+
     /* Test interface assertions */
     SSF_ASSERT_TEST(SSFUBJsonIsValid(NULL, 1));
     memset(path, 0, sizeof(path));

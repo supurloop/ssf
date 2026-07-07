@@ -475,6 +475,9 @@ bool SSFDecStrToXInt(SSFCStrIn_t str, int64_t *sval, uint64_t *uval)
                 /* Overflow? */
                 if ((tmp / 10) != fraction) return false;
 
+                /* Accumulator 0? */
+                if (tmp == 0) break;
+
                 fraction = tmp;
                 i--;
             }
@@ -488,6 +491,9 @@ bool SSFDecStrToXInt(SSFCStrIn_t str, int64_t *sval, uint64_t *uval)
 
             /* Check for overflow */
             if ((tmp / 10) != base) return false;
+
+            /* Accumulator 0 (base was 0)? */
+            if (tmp == 0) break;
 
             base = tmp;
             exponent--;

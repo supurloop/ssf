@@ -67,6 +67,16 @@ void SSFDecUnitTest(void)
     SSF_ASSERT_TEST(SSFDecStrToUInt(NULL, &u64));
     SSF_ASSERT_TEST(SSFDecStrToUInt("-1", NULL));
 
+    /* (Hardening) A huge exponent must be handled promptly, not spun over in a near-infinite loop. */
+    /* "1e<2^64-1>" overflows -> reject; "0e<2^64-1>" is 0 regardless of the exponent. Before the   */
+    /* zero-accumulator break these hung the parser (DoS). */
+    SSF_ASSERT(SSFDecStrToInt("1e18446744073709551615", &i) == false);
+    SSF_ASSERT(SSFDecStrToUInt("1e18446744073709551615", &u64) == false);
+    SSF_ASSERT(SSFDecStrToUInt("0e18446744073709551615", &u64) == true);
+    SSF_ASSERT(u64 == 0u);
+    SSF_ASSERT(SSFDecStrToInt("0e18446744073709551615", &i) == true);
+    SSF_ASSERT(i == 0);
+
     /* Test boundary conditions of SSFDecStrToInt() */
     for (j = -1000000; j < 1000000; j++)
     {

@@ -61,14 +61,18 @@ with those standards is required and/or when a tag length shorter than 16 bytes 
   | 12 | 3 | 16 MiB − 1 |
   | 13 | 2 | 65 535 bytes (IEEE 802.15.4 default) |
 
-  Exceeding the per-L length cap is **not** rejected by a `SSF_REQUIRE`; the high bits of the
-  length field silently truncate and decryption will then fail with a tag mismatch. Enforce
-  the cap at the call site if your upper layer does not already bound record size.
+  The per-L length cap is enforced so it can never silently truncate the length field (which
+  would wrap the CTR counter and reuse keystream). [`SSFAESCCMEncrypt()`](#ssfaesccmencrypt)
+  treats `ptLen < 2^(8·L)` as a caller contract and `SSF_REQUIRE`s it (a caller bug halts in
+  debug builds). [`SSFAESCCMDecrypt()`](#ssfaesccmdecrypt) sees an attacker-controlled
+  `ctLen`, so instead of asserting it returns `false` when `ctLen` exceeds the cap, rejecting
+  the message gracefully. When `L ≥ 8` (`nonceLen ≤ 7`) the cap exceeds `size_t` range and no
+  check is needed.
 - **AAD length cap.** This implementation uses the 2-byte AAD length encoding from RFC 3610
-  §2.2, which limits `aadLen` to `< 65 280` bytes (`0xFF00`). The 6-byte encoding for larger
-  AAD is not supported, and the cap is not enforced by `SSF_REQUIRE` — oversized AAD will
-  silently produce an incorrect tag. In practice every CCM-using protocol keeps AAD well
-  under this limit.
+  §2.2, which limits `aadLen` to `< 65 280` bytes (`0xFF00`); the extended 6-byte and 10-byte
+  encodings for larger AAD are not implemented. The cap is `SSF_REQUIRE`d at both encrypt and
+  decrypt, so oversized AAD halts in debug builds rather than silently producing an incorrect
+  tag. In practice every CCM-using protocol keeps AAD well under this limit.
 - Key length must be exactly `16` (AES-128), `24` (AES-192), or `32` (AES-256) bytes.
 - In-place operation (`ct == pt`) is supported for both encrypt and decrypt.
 - `pt` / `ct` may be `NULL` when the corresponding length is `0`; `aad` may be `NULL` when
@@ -77,6 +81,10 @@ with those standards is required and/or when a tag length shorter than 16 bytes 
   timing attacks on its S-box lookups. Do not deploy AES-CCM in environments where an
   attacker can measure per-block encryption time with ciphertext granularity (networked
   servers, shared hosts). This is a property of the block cipher, not of CCM itself.
+- **Key schedule is expanded once per operation.** Both the CBC-MAC and CTR passes share a
+  single AES round-key expansion (via the [`ssfaes`](ssfaes.md) key-schedule API) computed
+  once at the top of each call, rather than re-deriving it per block. This is an internal
+  performance improvement with no API impact.
 - The ciphertext output is exactly `ptLen` bytes; the tag is returned separately through the
   `tag` parameter rather than appended. Serialize them in whatever order your wire format
   requires at the call site.
@@ -130,11 +138,11 @@ authentication tag covering both the AAD and the plaintext. Ciphertext is writte
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
 | `pt` | in | `const uint8_t *` | Plaintext. May be `NULL` when `ptLen` is `0`. |
-| `ptLen` | in | `size_t` | Number of plaintext bytes. Must be `< 2^(8·L)` where `L = 15 - nonceLen`; the cap is **not** enforced — see [Notes](#notes). |
+| `ptLen` | in | `size_t` | Number of plaintext bytes. Must be `< 2^(8·L)` where `L = 15 - nonceLen`; enforced via `SSF_REQUIRE` (caller contract) — see [Notes](#notes). |
 | `nonce` | in | `const uint8_t *` | Nonce. Must not be `NULL`. **Must be unique per key.** |
 | `nonceLen` | in | `size_t` | Number of nonce bytes. Must be in `[7, 13]`. |
 | `aad` | in | `const uint8_t *` | Associated data (integrity-protected, not encrypted). May be `NULL` when `aadLen` is `0`. |
-| `aadLen` | in | `size_t` | Number of AAD bytes. Must be `< 0xFF00` (65 280); the cap is **not** enforced — see [Notes](#notes). |
+| `aadLen` | in | `size_t` | Number of AAD bytes. Must be `< 0xFF00` (65 280); enforced via `SSF_REQUIRE` — see [Notes](#notes). |
 | `key` | in | `const uint8_t *` | AES key. Must not be `NULL`. |
 | `keyLen` | in | `size_t` | Must be `16`, `24`, or `32`. |
 | `tag` | out | `uint8_t *` | Buffer receiving the tag. Must not be `NULL`. |
@@ -198,11 +206,11 @@ into `pt`. On tag-verify failure the entire `pt` buffer is memset to zero before
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
 | `ct` | in | `const uint8_t *` | Ciphertext. May be `NULL` when `ctLen` is `0`. |
-| `ctLen` | in | `size_t` | Number of ciphertext bytes. Must satisfy the same per-L cap as [`SSFAESCCMEncrypt()`](#ssfaesccmencrypt). |
+| `ctLen` | in | `size_t` | Number of ciphertext bytes. Must satisfy the same per-L cap as [`SSFAESCCMEncrypt()`](#ssfaesccmencrypt); because `ctLen` is attacker-controlled it is checked at runtime and the function returns `false` (rather than asserting) when it exceeds the cap. |
 | `nonce` | in | `const uint8_t *` | Nonce. Must not be `NULL`. Must match the nonce used to encrypt. |
 | `nonceLen` | in | `size_t` | Number of nonce bytes. Must be in `[7, 13]` and match the encrypt-side value. |
 | `aad` | in | `const uint8_t *` | Associated data. May be `NULL` when `aadLen` is `0`. Must bitwise match the AAD supplied to encrypt. |
-| `aadLen` | in | `size_t` | Number of AAD bytes. |
+| `aadLen` | in | `size_t` | Number of AAD bytes. Must be `< 0xFF00` (65 280); enforced via `SSF_REQUIRE` — see [Notes](#notes). |
 | `key` | in | `const uint8_t *` | AES key. Must not be `NULL`. |
 | `keyLen` | in | `size_t` | Must be `16`, `24`, or `32`. |
 | `tag` | in | `const uint8_t *` | Tag from the sender. Must not be `NULL`. |
@@ -211,8 +219,9 @@ into `pt`. On tag-verify failure the entire `pt` buffer is memset to zero before
 | `ptSize` | in | `size_t` | Size of `pt`. Must be `≥ ctLen`. |
 
 **Returns:** `true` if the tag is valid and `pt` holds the plaintext; `false` if the tag
-does not match, in which case `pt[0..ctLen-1]` has been zeroed. The comparison is constant
-time via [`SSFCryptCTMemEq()`](ssfcrypt.md).
+does not match, in which case `pt[0..ctLen-1]` has been zeroed. `false` is also returned
+without decrypting when `ctLen` exceeds the per-L length cap (see [Notes](#notes)). The tag
+comparison is constant time via [`SSFCryptCTMemEq()`](ssfcrypt.md).
 
 <a id="ex-decrypt"></a>
 

@@ -91,8 +91,10 @@ through the `ssfhkdf` API).
   ChaCha20-Poly1305. The record layer in this module does **not** track or enforce these
   thresholds — it tracks only the 64-bit sequence number for nonce construction. Callers
   driving a long-lived TLS session must monitor record counts themselves and trigger a
-  `KeyUpdate` (re-deriving traffic keys and creating a new `SSFTLSRecordState_t`) before
-  the threshold for the active suite is reached.
+  `KeyUpdate` (re-deriving traffic keys, then re-arming the `SSFTLSRecordState_t` with a
+  [`SSFTLSRecordStateDeInit`](#ssftlsrecordstatedeinit) followed by
+  [`SSFTLSRecordStateInit`](#ssftlsrecordstateinit)) before the threshold for the active
+  suite is reached.
 - **Sequence-number wrap is forbidden.** Both [`SSFTLSRecordEncrypt`](#ssftlsrecordencrypt)
   and [`SSFTLSRecordDecrypt`](#ssftlsrecorddecrypt) refuse a record when `state->seqNum` is
   already at `UINT64_MAX` — the next increment would wrap to `0` and reuse the nonce of
@@ -106,8 +108,10 @@ through the `ssfhkdf` API).
   [`SSFTLSRecordStateInit`](#ssftlsrecordstateinit). The sequence number increments
   internally after every encrypt. This matches RFC 8446 §5.3 exactly; callers must not
   re-use a `SSFTLSRecordState_t` across a re-key or a renegotiation, because the sequence
-  counter starts from zero and the IV is re-derived each time. After a KeyUpdate, create
-  a new `SSFTLSRecordState_t` rather than mutating the old one.
+  counter starts from zero and the IV is re-derived each time. After a KeyUpdate, re-arm
+  the `SSFTLSRecordState_t` via [`SSFTLSRecordStateDeInit`](#ssftlsrecordstatedeinit) then
+  [`SSFTLSRecordStateInit`](#ssftlsrecordstateinit) rather than mutating the live state in
+  place — the `magic` init-once guard forbids re-initialising an active state directly.
 - **Outer content type is always `application_data`.** TLS 1.3 wraps the inner content
   type (`handshake`, `application_data`, `alert`) inside the AEAD plaintext, then
   advertises `application_data` (`0x17`) in the record header. `SSFTLSRecordEncrypt`
@@ -136,7 +140,10 @@ through the `ssfhkdf` API).
   *handshake* traffic secret as `baseKey`, internally runs
   `HKDF-Expand-Label(baseKey, "finished", "", hashLen)` to derive the finished_key, then
   computes `HMAC(finished_key, transcriptHash)`. Callers pass the traffic secret
-  directly — they do **not** pre-compute the finished_key.
+  directly — they do **not** pre-compute the finished_key. The derived finished_key lives
+  only in a stack buffer that [`SSFTLSComputeFinished`](#ssftlscomputefinished)
+  `SSFCryptSecureZero`s before returning, so callers never see it and it does not linger
+  on the stack.
 - **Trace callbacks are per-connection and zero-overhead when disabled.** A caller that
   does not install a `SSFTLSTraceCtx_t` — or that installs one with `fn == NULL` — pays
   only a single null-check per would-be trace point (the `SSF_TLS_TRACE_*` macros
@@ -153,6 +160,17 @@ through the `ssfhkdf` API).
   its inputs explicitly. Callers are responsible for lifetime management and for wiping
   secret material (traffic secrets, handshake secrets, finished keys) when they go out
   of scope.
+- **Secure zeroization is handled for the module's own secrets.** The record layer wipes
+  its traffic key and IV when the caller invokes
+  [`SSFTLSRecordStateDeInit`](#ssftlsrecordstatedeinit) (on close or before a re-key), and
+  [`SSFTLSComputeFinished`](#ssftlscomputefinished) `SSFCryptSecureZero`s its stack-local
+  finished_key before returning. **Caveat:** the master / handshake / traffic *secrets*
+  themselves, and any handshake state machine that holds them, live **outside** this
+  module (see the "not in this module" list above). That state currently gets no
+  secure-lifecycle treatment here — whoever owns it must give it the same care: zero it
+  with `SSFCryptSecureZero` when it goes out of scope, and do not leave copies of a
+  traffic secret behind after deriving the key/IV that feed
+  [`SSFTLSRecordStateInit`](#ssftlsrecordstateinit).
 
 <a id="configuration"></a>
 
@@ -197,7 +215,7 @@ driving the handshake themselves will need. Grouped logically:
 
 | Symbol | Kind | Description |
 |--------|------|-------------|
-| <a id="ssftlsrecordstate-t"></a>`SSFTLSRecordState_t` | Struct | Per-direction record state: AEAD key, static IV, 64-bit sequence number, cipher-suite selector. |
+| <a id="ssftlsrecordstate-t"></a>`SSFTLSRecordState_t` | Struct | Per-direction record state: AEAD key, static IV, 64-bit sequence number, cipher-suite selector, and an init-once `magic` guard. Zero the struct before the first [`SSFTLSRecordStateInit`](#ssftlsrecordstateinit); wipe it with [`SSFTLSRecordStateDeInit`](#ssftlsrecordstatedeinit) on close or before a re-key. |
 | <a id="ssftlstranscript-t"></a>`SSFTLSTranscript_t` | Struct | Running transcript hash (union of `SSFSHA2_32Context_t` / `SSFSHA2_64Context_t`) plus the active hash length and `SSFHMACHash_t` selector. |
 | `SSFTLSIOResult_t` | Enum | Reserved I/O result codes (`SUCCESS`, `WANT_READ`, `WANT_WRITE`, `ERROR`) for a future non-blocking transport layer; not used by any currently-exposed function. |
 | `SSFTLSTraceLevel_t` / `SSFTLSTraceCategory_t` | Enum | Severity (`ERROR` / `WARN` / `INFO` / `DEBUG`) and category (`HANDSHAKE` / `RECORD` / `CRYPTO` / `CERT` / `ALERT`) for trace callback dispatch. |
@@ -229,7 +247,8 @@ driving the handshake themselves will need. Grouped logically:
 
 | | Function | Description |
 |---|----------|-------------|
-| [e.g.](#ex-record) | [`void SSFTLSRecordStateInit(state, cipherSuite, key, keyLen, iv, ivLen)`](#ssftlsrecordstateinit) | Install traffic keys for one direction |
+| [e.g.](#ex-record) | [`void SSFTLSRecordStateInit(state, cipherSuite, key, keyLen, iv, ivLen)`](#ssftlsrecordstateinit) | Install traffic keys for one direction (init-once; struct must be zeroed / de-inited first) |
+| [e.g.](#ex-record) | [`void SSFTLSRecordStateDeInit(state)`](#ssftlsrecordstatedeinit) | Securely wipe the traffic key + IV from an active state (call on close or before re-key) |
 | [e.g.](#ex-record) | [`bool SSFTLSRecordEncrypt(state, contentType, pt, ptLen, record, recordSize, recordLen)`](#ssftlsrecordencrypt) | Build one TLS 1.3 record: header + AEAD ciphertext + tag |
 | [e.g.](#ex-record) | [`bool SSFTLSRecordDecrypt(state, record, recordLen, pt, ptSize, ptLen, contentType)`](#ssftlsrecorddecrypt) | Verify + decrypt one record; returns the inner content type |
 
@@ -406,6 +425,29 @@ Populate `state` with the traffic key (from [`SSFTLSDeriveTrafficKeys`](#ssftlsd
 and zero the sequence counter. Create one `SSFTLSRecordState_t` per direction (client→server
 and server→client) and re-initialise after each key update — do not reuse a state across
 a re-key.
+
+**Init-once contract.** `SSFTLSRecordState_t` carries a `magic` field that guards against
+re-initialising a live state. The struct **must be zeroed before the first call**
+(`magic` must not already equal the active sentinel), and `SSFTLSRecordStateInit`
+`SSF_REQUIRE`s `magic != SSF_TLS_RECORD_MAGIC`, zeroes the struct, installs the key/IV,
+and sets `magic` last. [`SSFTLSRecordEncrypt`](#ssftlsrecordencrypt),
+[`SSFTLSRecordDecrypt`](#ssftlsrecorddecrypt), and
+[`SSFTLSRecordStateDeInit`](#ssftlsrecordstatedeinit) all `SSF_REQUIRE`
+`magic == SSF_TLS_RECORD_MAGIC`. Because Init refuses an already-active state, a re-key
+(TLS 1.3 `KeyUpdate`) **must** go DeInit-then-Init: call
+[`SSFTLSRecordStateDeInit`](#ssftlsrecordstatedeinit) first (which wipes the old traffic
+key before the new one is installed), then `SSFTLSRecordStateInit` with the freshly
+derived key/IV.
+
+<a id="ssftlsrecordstatedeinit"></a>
+```c
+void SSFTLSRecordStateDeInit(SSFTLSRecordState_t *state);
+```
+Securely wipe an active record state — the traffic key, IV, sequence number, cipher-suite
+selector, and `magic` guard — via `SSFCryptSecureZero`. Call this on connection close and
+before re-keying a direction. `SSF_REQUIRE`s `state->magic == SSF_TLS_RECORD_MAGIC`
+(the state must have been initialised); after the wipe `magic` is zero, so the struct is
+again eligible for a fresh [`SSFTLSRecordStateInit`](#ssftlsrecordstateinit).
 
 <a id="ssftlsrecordencrypt"></a>
 ```c

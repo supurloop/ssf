@@ -51,6 +51,10 @@ XORed against the plaintext. Encryption and decryption are the same operation.
 - **Counter overflow.** The 128-bit counter wraps at `2^128` blocks (i.e., `2^132` bytes —
   unreachable in practice). Wrap is not detected; if you need a hard limit, enforce it at the
   call site.
+- **Key schedule expanded once.** `SSFAESCTRBegin` derives the full AES round-key schedule from
+  the key a single time and stores it in the context; the raw key is not retained. Every
+  subsequent keystream block reuses those precomputed round keys instead of re-expanding the key,
+  so per-block cost is one AES block-encrypt rather than key-expansion plus encrypt.
 - **Strict zero-init contract on `Begin`.** `SSFAESCTRBegin` requires `ctx->magic !=
   SSF_AESCTR_CONTEXT_MAGIC`, so the caller must zero-initialize a stack-allocated context
   before first use, or call `SSFAESCTRDeInit` between successive `Begin` calls on the same
@@ -231,7 +235,8 @@ both directions. `in` and `out` may alias.
 void SSFAESCTRDeInit(SSFAESCTRContext_t *ctx);
 ```
 
-Securely zeroes the entire context, clearing the key, counter, and any buffered keystream.
+Securely zeroes the entire context, clearing the expanded key schedule, counter, and any
+buffered keystream.
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|

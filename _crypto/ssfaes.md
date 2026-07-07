@@ -9,6 +9,14 @@ block at a time. The base functions accept explicit round-count (`nr`) and key-w
 parameters; the fixed-key macros pre-set those parameters for a specific key length; and the
 `SSFAESXXX` macros derive both from `keyLen` at compile time.
 
+A reusable key-schedule API ([`SSFAESKeySchedule_t`](#ssf-aes-key-schedule) with
+[`SSFAESKeyScheduleInit()`](#ssfaeskeyscheduleinit), [`SSFAESKeyScheduleDeInit()`](#ssfaeskeyscheduledeinit),
+[`SSFAESKSBlockEncrypt()`](#ssfaesksblockencrypt), and [`SSFAESKSBlockDecrypt()`](#ssfaesksblockdecrypt))
+expands the round keys once so that many blocks can be processed without re-deriving the schedule
+on every call — useful for callers that chain many blocks, such as counter or authenticated-encryption
+modes. The one-shot block functions and macros above are thin wrappers that expand a schedule,
+process the single block, then securely wipe the schedule.
+
 [Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference)
 
 <a id="dependencies"></a>
@@ -32,6 +40,12 @@ parameters; the fixed-key macros pre-set those parameters for a specific key len
 - The `SSFAESXXX` macros derive `nr` and `nk` from `keyLen` at compile time; `keyLen` must be a
   compile-time constant of 16, 24, or 32. Any other value produces incorrect round counts without
   a compile-time diagnostic.
+- **No key material left on the stack:** the one-shot block functions and macros route through the
+  reusable key schedule internally and securely wipe both the expanded round-key schedule and the
+  per-block working state (via `SSFCryptSecureZero`) before returning.
+- A [`SSFAESKeySchedule_t`](#ssf-aes-key-schedule) holds the expanded round keys and is secret.
+  Zero it before its first [`SSFAESKeyScheduleInit()`](#ssfaeskeyscheduleinit) (e.g. `= {0}`), and
+  call [`SSFAESKeyScheduleDeInit()`](#ssfaeskeyscheduledeinit) to securely wipe it when finished.
 - This module is used internally by [`ssfaesgcm`](ssfaesgcm.md).
 
 <a id="configuration"></a>
@@ -49,6 +63,8 @@ This module has no compile-time configuration options in `ssfoptions.h`.
 | Symbol | Kind | Description |
 |--------|------|-------------|
 | <a id="ssf-aes-block-size"></a>`SSF_AES_BLOCK_SIZE` | Constant | `16` — size in bytes of one AES block; all encrypt/decrypt calls operate on exactly this many bytes |
+| <a id="ssf-aes-max-round-key-words"></a>`SSF_AES_MAX_ROUND_KEY_WORDS` | Constant | `60` — number of 32-bit expanded round-key words for the largest key (AES-256: `(Nr + 1) * Nb`); sizes the schedule's key store |
+| <a id="ssf-aes-key-schedule"></a>`SSFAESKeySchedule_t` | Type | Holds the expanded (secret) round keys and round count for a reusable key schedule; zero before first init and wipe with `SSFAESKeyScheduleDeInit()` |
 
 <a id="functions"></a>
 
@@ -56,6 +72,10 @@ This module has no compile-time configuration options in `ssfoptions.h`.
 
 | | Function | Description |
 |---|----------|-------------|
+| [e.g.](#ex-ks) | [`void SSFAESKeyScheduleInit(ks, key, keyLen)`](#ssfaeskeyscheduleinit) | Expand an AES key into a reusable round-key schedule (expand once, use for many blocks) |
+| [e.g.](#ex-ks) | [`void SSFAESKeyScheduleDeInit(ks)`](#ssfaeskeyscheduledeinit) | Securely wipe a round-key schedule |
+| [e.g.](#ex-ks) | [`void SSFAESKSBlockEncrypt(ks, pt, ptLen, ct, ctSize)`](#ssfaesksblockencrypt) | Encrypt a 16-byte block using a precomputed schedule |
+| [e.g.](#ex-ks) | [`void SSFAESKSBlockDecrypt(ks, ct, ctLen, pt, ptSize)`](#ssfaesksblockdecrypt) | Decrypt a 16-byte block using a precomputed schedule |
 | [e.g.](#ex-base) | [`void SSFAESBlockEncrypt(pt, ptLen, ct, ctSize, key, keyLen, nr, nk)`](#ssfaesblockencrypt) | Encrypt a 16-byte block using AES with explicit round and key-word counts |
 | [e.g.](#ex-base) | [`void SSFAESBlockDecrypt(ct, ctLen, pt, ptSize, key, keyLen, nr, nk)`](#ssfaesblockdecrypt) | Decrypt a 16-byte block using AES with explicit round and key-word counts |
 | [e.g.](#ex-128) | [`void SSFAES128BlockEncrypt(pt, ptLen, ct, ctSize, key, keyLen)`](#ssfaes128blockencrypt) | Encrypt with AES-128 (nr=10, nk=4); `keyLen` must be 16 |
@@ -70,6 +90,128 @@ This module has no compile-time configuration options in `ssfoptions.h`.
 <a id="function-reference"></a>
 
 ## [↑](#ssfaes--aes-block-cipher) Function Reference
+
+<a id="ssfaeskeyscheduleinit"></a>
+
+### [↑](#functions) [`void SSFAESKeyScheduleInit()`](#functions)
+
+```c
+void SSFAESKeyScheduleInit(SSFAESKeySchedule_t *ks, const uint8_t *key, size_t keyLen);
+```
+
+Expands the `keyLen`-byte AES key at `key` into the reusable round-key schedule `ks`, so that the
+same expanded key can encrypt or decrypt many blocks without re-deriving it per call. The schedule
+must be zeroed before its first init (e.g. declared as `SSFAESKeySchedule_t ks = {0};`): the
+function `SSF_REQUIRE`s that `ks` is not already an active schedule, rejecting re-initialization of
+a live schedule. Call [`SSFAESKeyScheduleDeInit()`](#ssfaeskeyscheduledeinit) to wipe the schedule
+when finished with it.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `ks` | out | `SSFAESKeySchedule_t *` | Schedule to initialize. Must not be `NULL` and must not already be an active (initialized) schedule. |
+| `key` | in | `const uint8_t *` | Pointer to the AES key bytes. Must not be `NULL`. |
+| `keyLen` | in | `size_t` | Number of key bytes. Must be 16 (AES-128), 24 (AES-192), or 32 (AES-256). |
+
+**Returns:** Nothing.
+
+---
+
+<a id="ssfaeskeyscheduledeinit"></a>
+
+### [↑](#functions) [`void SSFAESKeyScheduleDeInit()`](#functions)
+
+```c
+void SSFAESKeyScheduleDeInit(SSFAESKeySchedule_t *ks);
+```
+
+Securely wipes the round-key schedule `ks` (via `SSFCryptSecureZero`), erasing the expanded secret
+round keys and clearing its active state so the storage can be re-initialized or discarded. `ks`
+must be an active schedule initialized by [`SSFAESKeyScheduleInit()`](#ssfaeskeyscheduleinit).
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `ks` | in,out | `SSFAESKeySchedule_t *` | Active schedule to wipe. Must not be `NULL`. |
+
+**Returns:** Nothing.
+
+---
+
+<a id="ssfaesksblockencrypt"></a>
+
+### [↑](#functions) [`void SSFAESKSBlockEncrypt()`](#functions)
+
+```c
+void SSFAESKSBlockEncrypt(const SSFAESKeySchedule_t *ks, const uint8_t *pt, size_t ptLen,
+                          uint8_t *ct, size_t ctSize);
+```
+
+Encrypts the `ptLen`-byte plaintext block at `pt` into the `ctSize`-byte output buffer `ct` using
+the precomputed schedule `ks`. Both `ptLen` and `ctSize` must equal
+[`SSF_AES_BLOCK_SIZE`](#ssf-aes-block-size). The per-block working state is securely wiped before
+returning; the schedule `ks` is left intact for reuse.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `ks` | in | `const SSFAESKeySchedule_t *` | Active schedule from [`SSFAESKeyScheduleInit()`](#ssfaeskeyscheduleinit). Must not be `NULL`. |
+| `pt` | in | `const uint8_t *` | Pointer to the plaintext block. Must not be `NULL`. |
+| `ptLen` | in | `size_t` | Number of plaintext bytes. Must equal `SSF_AES_BLOCK_SIZE` (16). |
+| `ct` | out | `uint8_t *` | Buffer to receive the ciphertext block. Must not be `NULL`. |
+| `ctSize` | in | `size_t` | Size of `ct`. Must equal `SSF_AES_BLOCK_SIZE` (16) — strict equality. |
+
+**Returns:** Nothing.
+
+---
+
+<a id="ssfaesksblockdecrypt"></a>
+
+### [↑](#functions) [`void SSFAESKSBlockDecrypt()`](#functions)
+
+```c
+void SSFAESKSBlockDecrypt(const SSFAESKeySchedule_t *ks, const uint8_t *ct, size_t ctLen,
+                          uint8_t *pt, size_t ptSize);
+```
+
+Decrypts the `ctLen`-byte ciphertext block at `ct` into the `ptSize`-byte output buffer `pt` using
+the precomputed schedule `ks`. Both `ctLen` and `ptSize` must equal
+[`SSF_AES_BLOCK_SIZE`](#ssf-aes-block-size). The per-block working state is securely wiped before
+returning; the schedule `ks` is left intact for reuse.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `ks` | in | `const SSFAESKeySchedule_t *` | Active schedule from [`SSFAESKeyScheduleInit()`](#ssfaeskeyscheduleinit). Must not be `NULL`. |
+| `ct` | in | `const uint8_t *` | Pointer to the ciphertext block. Must not be `NULL`. |
+| `ctLen` | in | `size_t` | Number of ciphertext bytes. Must equal `SSF_AES_BLOCK_SIZE` (16). |
+| `pt` | out | `uint8_t *` | Buffer to receive the decrypted plaintext. Must not be `NULL`. |
+| `ptSize` | in | `size_t` | Size of `pt`. Must equal `SSF_AES_BLOCK_SIZE` (16) — strict equality. |
+
+**Returns:** Nothing.
+
+<a id="ex-ks"></a>
+
+**Example:**
+
+```c
+/* Expand the key once, then encrypt/decrypt many blocks with it. */
+uint8_t key[16] = {
+    0x2bu, 0x7eu, 0x15u, 0x16u, 0x28u, 0xaeu, 0xd2u, 0xa6u,
+    0xabu, 0xf7u, 0x15u, 0x88u, 0x09u, 0xcfu, 0x4fu, 0x3cu
+};
+uint8_t pt[SSF_AES_BLOCK_SIZE] = {
+    0x32u, 0x43u, 0xf6u, 0xa8u, 0x88u, 0x5au, 0x30u, 0x8du,
+    0x31u, 0x31u, 0x98u, 0xa2u, 0xe0u, 0x37u, 0x07u, 0x34u
+};
+uint8_t ct[SSF_AES_BLOCK_SIZE];
+uint8_t dt[SSF_AES_BLOCK_SIZE];
+SSFAESKeySchedule_t ks = {0};  /* must be zeroed before the first init */
+
+SSFAESKeyScheduleInit(&ks, key, sizeof(key));   /* expand round keys once */
+SSFAESKSBlockEncrypt(&ks, pt, sizeof(pt), ct, sizeof(ct));
+SSFAESKSBlockDecrypt(&ks, ct, sizeof(ct), dt, sizeof(dt));
+/* memcmp(dt, pt, SSF_AES_BLOCK_SIZE) == 0 */
+SSFAESKeyScheduleDeInit(&ks);                   /* securely wipe the schedule */
+```
+
+---
 
 <a id="ssfaesblockencrypt"></a>
 

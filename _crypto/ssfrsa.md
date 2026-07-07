@@ -23,15 +23,17 @@ comparable security.
 
 ## [↑](#ssfrsa--rsa-signatures-and-key-generation) Dependencies
 
-- [`ssfport.h`](../ssfport.h) — also supplies the platform entropy source used by keygen
-  and PSS salt generation (`/dev/urandom` on POSIX; see [Notes](#notes)).
+- [`ssfport.h`](../ssfport.h) — also supplies the platform entropy source used by keygen,
+  PSS salt generation, and the per-operation blinding applied to every private-key
+  operation (`/dev/urandom` on POSIX; see [Notes](#notes)).
 - [`ssfbn`](ssfbn.md) — big-number arithmetic including the constant-time
   [`SSFBNModExp`](ssfbn.md#modexp) Montgomery ladder used for every RSA private operation.
 - [`ssfasn1`](../_codec/ssfasn1.h) — DER encode / decode for PKCS#1 `RSAPublicKey` and
   `RSAPrivateKey`.
 - [`ssfsha2`](ssfsha2.md) — SHA-256 / SHA-384 / SHA-512 inside PKCS#1 v1.5 DigestInfo
   encoding, MGF1, and PSS `H` / `H'` computation.
-- [`ssfprng`](ssfprng.md) — seeded from platform entropy for prime generation and PSS salt.
+- [`ssfprng`](ssfprng.md) — seeded from platform entropy for prime generation, PSS salt,
+  and the message / exponent blinds drawn on each private-key operation.
 - [`ssfcrypt`](ssfcrypt.md) — constant-time comparison on the PKCS#1 v1.5 and PSS verify paths.
 
 <a id="notes"></a>
@@ -77,31 +79,46 @@ comparable security.
   or provision keys off-device at manufacture and only ever use sign / verify at
   runtime. **Never** ship `SSFRSAKeyGen` on a target without a genuine entropy source —
   predictable primes are catastrophic.
-- **PKCS#1 v1.5 signing is deterministic; PSS signing is not.** `SSFRSASignPKCS1` uses no
-  randomness at sign time — signing the same `(key, hash)` twice yields the same
-  signature. `SSFRSASignPSS` draws a fresh random salt (of length equal to the hash
-  output) from the platform entropy source on every call, so repeat calls produce
-  different signatures that all verify. PSS signing therefore requires
-  entropy availability at sign time as well as at key-gen time — on targets where runtime
-  entropy is scarce, prefer PKCS#1 v1.5 (for legacy protocols) or Ed25519 /
-  deterministic-ECDSA (for new ones).
+- **PKCS#1 v1.5 signatures are deterministic in value, but signing now requires entropy.**
+  `SSFRSASignPKCS1` still yields the same signature for the same `(key, hash)` — the value
+  is deterministic and interoperable. However, every private-key operation now draws
+  platform entropy at sign time for message and exponent blinding (see the CRT note below);
+  the blinding cancels out so the produced signature is unchanged, but **signing fails if
+  entropy is unavailable**. This is a behavior change: PKCS#1 v1.5 signing previously
+  consumed no randomness. `SSFRSASignPSS` additionally draws a fresh random salt (of length
+  equal to the hash output) on every call, so repeat PSS calls produce different signatures
+  that all verify. Both schemes therefore require entropy availability at sign time as well
+  as at key-gen time — on targets where runtime entropy is scarce, prefer Ed25519 /
+  deterministic-ECDSA.
 - **PSS salt length is fixed at the hash output length.** RFC 8017 §9.1.1 and TLS 1.3
   both use this convention; interop with verifiers that expect a different salt length
   (e.g., `sLen = 0` for some "fully-deterministic PSS" profiles) is not supported.
-- **Private-key operations run via CRT.** Signing performs `m^d mod n` by decomposing
-  into `m^dp mod p` and `m^dq mod q` then recombining with the precomputed inverse `qInv
-  = q⁻¹ mod p`. This is ~4× faster than direct exponentiation and uses shorter
-  intermediates. The well-known **CRT fault-injection attack** (Boneh–DeMillo–Lipton)
-  recovers the factors of `n` from a single faulty signature if an attacker can glitch
-  one of the two `modexp` branches during sign. This is not exploitable on pure-software
-  targets under normal conditions, but matters for secure-element integration — pair with
-  a verify-after-sign check at the application layer if the signing device is physically
-  accessible.
+- **Private-key operations run via CRT, constant-time and blinded.** Signing performs
+  `m^d mod n` by decomposing into `m^dp mod p` and `m^dq mod q` then recombining with the
+  precomputed inverse `qInv = q⁻¹ mod p`. This is ~4× faster than direct exponentiation and
+  uses shorter intermediates. The recombination is **constant-time**: the `m1 − m2` step and
+  the `qInv * (m1 − m2)` multiply use branchless modular subtraction and a constant-time
+  modular multiply, so no secret-dependent branch or variable-time multiply leaks the CRT
+  intermediates through timing. Each private-key operation also applies **message (base) and
+  exponent blinding**: a fresh random `r` is drawn, the input is blinded as `c · r^e mod n`,
+  the CRT exponents are blinded as `dp + eb·(p−1)` / `dq + eb·(q−1)`, and the result is
+  unblinded with `r⁻¹ mod n`. This randomizes the operand and exponent on every call,
+  frustrating differential power / timing analysis of the private op. The well-known
+  **CRT fault-injection attack** (Boneh–DeMillo–Lipton) recovers the factors of `n` from a
+  single faulty signature if an attacker can glitch one of the two `modexp` branches during
+  sign; this is defended by the built-in verify-after-sign check (see below). The blinding
+  and the fresh `r` are the reason signing now requires platform entropy on every call.
 - **Key storage format is PKCS#1 DER.** `RSAPublicKey` = `SEQUENCE { INTEGER n, INTEGER
   e }`; `RSAPrivateKey` = `SEQUENCE { version, n, e, d, p, q, dp, dq, qInv, ... }`, all
   unsigned big-endian. **This is not PKCS#8** (no `AlgorithmIdentifier` wrapper) and not
   PEM (no Base64, no `-----BEGIN-----` header). If your storage format is PKCS#8 or PEM,
   strip those layers at the call site before handing the bytes in.
+- **Malformed DER is rejected gracefully — untrusted input cannot abort the process.** The
+  DER key decoders bound-check the modulus / limb count and reject (return `false`) an empty
+  or oversized magnitude rather than passing it down into the big-number layer, where an
+  out-of-range width would trip a halting `SSF_REQUIRE`. As a result `SSFRSAPubKeyIsValid`,
+  `SSFRSAPrivKeyIsValid`, and the verify entry points return `false` on malformed or
+  hostile key / DER input instead of aborting — safe to call on attacker-controlled bytes.
 - **PSS verify is constant-time end-to-end.** The trailer byte, top-bit mask, MGF1 unmask,
   PS-zero scan, salt separator, and final `H == H'` comparison are all folded into a
   single-byte XOR/OR accumulator (`diff`) so the wall-clock time to reach the final
@@ -315,10 +332,13 @@ bool SSFRSASignPKCS1(const uint8_t *privKeyDer, size_t privKeyDerLen,
                      SSFRSAHash_t hash, const uint8_t *hashVal, size_t hashLen,
                      uint8_t *sig, size_t sigSize, size_t *sigLen);
 ```
-Produce an RSASSA-PKCS1-v1_5 signature (RFC 8017 §8.2). Deterministic — no entropy is
-consumed at sign time. The caller supplies `hashVal` as the raw output of the matching
-hash algorithm; the module wraps it in a `DigestInfo` ASN.1 structure and applies the
-`0x00 || 0x01 || 0xFF...FF || 0x00 || DigestInfo` padding before the RSA private
+Produce an RSASSA-PKCS1-v1_5 signature (RFC 8017 §8.2). The signature **value** is
+deterministic — the same `(key, hash)` always yields the same bytes — but the private
+operation draws platform entropy for blinding, so **the call requires an entropy source and
+returns `false` if entropy is unavailable** (the blinding cancels, leaving the output
+unchanged; see [Notes](#notes)). The caller supplies `hashVal` as the raw output of the
+matching hash algorithm; the module wraps it in a `DigestInfo` ASN.1 structure and applies
+the `0x00 || 0x01 || 0xFF...FF || 0x00 || DigestInfo` padding before the RSA private
 operation.
 
 <a id="ssfrsaverifypkcs1"></a>
@@ -407,8 +427,9 @@ if (!SSFRSASignPSS(privDer, privLen,
                    SSF_RSA_HASH_SHA256, hash, sizeof(hash),
                    sig, sizeof(sig), &sigLen))
 {
-    /* Entropy unavailable or sign failure. PSS needs randomness at sign
-       time — unlike PKCS#1 v1.5 which is fully deterministic. */
+    /* Entropy unavailable or sign failure. PSS needs randomness at sign time
+       for the salt; PKCS#1 v1.5 is deterministic in value but likewise needs
+       entropy for the private-op blinding. */
 }
 
 /* Verify. Same signature data will fail if any of the key / hash / message

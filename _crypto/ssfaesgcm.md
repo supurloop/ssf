@@ -44,6 +44,10 @@ for any unused field.
   and treat the output buffer as invalid when `false` is returned.
 - A common embedded IV strategy is to concatenate an 8-byte device EUI-64 with a 4-byte
   big-endian frame counter that increments monotonically.
+- Each `SSFAESGCMEncrypt()` / `SSFAESGCMDecrypt()` call expands the AES key schedule once and
+  reuses it for the hash subkey `H` and every GCTR keystream block, rather than re-expanding the
+  key per block. The expanded schedule is securely wiped before the function returns on every
+  path. This is an internal optimization with no effect on the public API, behavior, or output.
 
 <a id="configuration"></a>
 

@@ -704,9 +704,17 @@ also in Montgomery form. Constant-time. `r` may alias `a` or `b`.
 ```c
 void SSFBNMontSquare(SSFBN_t *r, const SSFBN_t *a, const SSFBNMont_t *ctx);
 ```
-Semantically equivalent to `SSFBNMontMul(r, a, a, ctx)`; exposed as a dedicated entry point
-so the squaring sites inside `SSFBNModExpMont` and the like can be accelerated by a future
-square-optimised CIOS loop without changing the caller. `r` may alias `a`.
+Semantically equivalent to `SSFBNMontMul(r, a, a, ctx)`, and the primitive the squaring
+sites inside `SSFBNModExpMont` call directly. Implemented as a dedicated square-optimised
+routine — a triangular full square (strict upper triangle accumulated once, doubled by a
+single shift-left, then the `a[i]·a[i]` diagonal added) followed by SOS Montgomery
+reduction — rather than a plain `MontMul(r, a, a, ctx)`. **Constant-time.** Both
+carry-propagation folds (the diagonal add and the Montgomery-reduction carry) run over
+fixed-length limb spans rather than value-dependent `while (carry != 0)` loops, so the
+squaring time depends only on `ctx->len`, never on the operand's limb values. This matches
+the constant-time guarantee `SSFBNMontMul` already provides, which is what lets the
+`SSFBNModExp` / `SSFBNModExpMont` path stay side-channel-resistant on secret exponents
+(RSA private-key CRT exponentiations, ECDSA Fermat nonce inversion). `r` may alias `a`.
 
 <a id="montconv"></a>
 ```c

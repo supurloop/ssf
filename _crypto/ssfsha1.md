@@ -33,7 +33,11 @@ whenever the protocol you are implementing allows a choice of hash.
   buffer must be at least that large.
 - The incremental interface (Begin / Update / End) allows hashing data that arrives in chunks
   without buffering the entire input; the result is identical to the one-shot interface.
-- After `SSFSHA1End()` the context is invalid; call `SSFSHA1Begin()` again before reuse.
+- `SSFSHA1End()` securely wipes the context (`SSFCryptSecureZero`) before returning, since its
+  `state[]` and last partial block can hold secret-derived data (e.g. the long-key pre-hash path
+  of HMAC-SHA-1). The context is therefore single-use per `Begin`/`End` cycle: after
+  `SSFSHA1End()` it is zeroed and invalid; call `SSFSHA1Begin()` again before reuse. This matches
+  the SHA-2 finalizers ([`ssfsha2`](ssfsha2.md)).
 - `SSFSHA1Context_t` should be treated as opaque; do not access its members directly.
 - The one-shot `SSFSHA1()` function and `SSFSHA1Update()` accept `in == NULL` only when
   `inLen == 0`. All other pointer parameters must be non-`NULL`.

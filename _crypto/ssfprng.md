@@ -2,12 +2,19 @@
 
 [SSF](../README.md) | [Cryptography](README.md)
 
-Cryptographically secure capable PRNG based on AES-CTR mode with a 128-bit seed.
+Cryptographically secure capable PRNG based on AES-128 in a NIST SP 800-90A CTR_DRBG-style
+construction with a 128-bit seed.
 
 Each call to `SSFPRNGGetRandom()` internally encrypts a monotonically increasing 64-bit counter
-(zero-padded to 128 bits) with the stored entropy as the AES-128 key, producing up to 16 bytes of
-pseudo-random output. Security depends entirely on the quality of the entropy supplied to
-`SSFPRNGInitContext()`.
+(zero-padded to 128 bits) with the current key as the AES-128 key, producing up to 16 bytes of
+pseudo-random output. After emitting output the call performs a CTR_DRBG-style Update (re-key): it
+derives a fresh AES key by encrypting a domain-separated block under the current key and overwrites
+the context key with it, destroying the key that produced the returned bytes. This gives
+**backtracking resistance** — a later compromise of the PRNG context cannot recover previously
+returned output — so the generator is no longer a fixed-key CTR keystream. The construction remains
+deterministic for a given seed (the same seed produces the same output stream), the first output
+block for a fresh context is unchanged, and the counter still advances by one per call. Security
+depends entirely on the quality of the entropy supplied to `SSFPRNGInitContext()`.
 
 [Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference)
 
@@ -26,15 +33,23 @@ pseudo-random output. Security depends entirely on the quality of the entropy su
   uses the timing-attack-vulnerable [`ssfaes`](ssfaes.md) block cipher with the entropy as
   the AES-128 key. In an ordinary AES use, recovering the key via timing observation
   compromises only the message protected with that key. Here, **the AES key IS the PRNG
-  seed**: an attacker who recovers the key from timing observations can predict every future
-  PRNG output (the counter is monotonic, so the keystream is deterministic) and reproduce
-  every past output (the counter is recoverable). Any keys, nonces, IVs, or other secrets
-  the higher-level code derived from this PRNG become predictable. Do not use in
+  state**: an attacker who recovers the current key from timing observations can predict every
+  future PRNG output (the key and counter evolve deterministically, so the forward keystream is
+  reproducible), and any keys, nonces, IVs, or other secrets the higher-level code derives from
+  current or future PRNG output become predictable. Output produced before the recovered key is
+  still protected by the per-call re-key (backtracking resistance), but that does not lessen the
+  exposure of all subsequent output. Do not use in
   environments where an attacker can observe precise execution times unless the consuming
   application is explicitly designed to tolerate seed-recovery (e.g., one-shot use with
   immediate re-seed from a fresh entropy source).
 - Cryptographic security depends entirely on the quality of the entropy provided to
   `SSFPRNGInitContext()`. Weak or predictable entropy produces weak output.
+- Each `SSFPRNGGetRandom()` call performs a CTR_DRBG-style re-key after producing output: it
+  derives a new AES key under the current key from a domain-separated block and overwrites the
+  seed stored in the context. The key that generated the returned bytes is destroyed, providing
+  **backtracking resistance** — a later compromise of the context cannot reconstruct previously
+  returned output. The generator is therefore no longer a fixed-key CTR stream, though it remains
+  fully deterministic for a given initial seed.
 - Each `SSFPRNGGetRandom()` call advances the internal counter by one regardless of `randomSize`;
   unused bytes from the AES block are discarded.
 - Re-seed with `SSFPRNGReInitContext()` when there is concern about the 64-bit counter eventually
@@ -191,9 +206,13 @@ void SSFPRNGGetRandom(SSFPRNGContext_t *context, uint8_t *random, size_t randomS
 ```
 
 Generates `randomSize` pseudo-random bytes into `random`. Internally, encrypts the current 64-bit
-counter (zero-padded to 128 bits) with the stored entropy as the AES-128 key, writes the first
-`randomSize` bytes of the result to `random`, then increments the counter. Unused bytes from the
-AES block are discarded; the counter always advances by one per call.
+counter (zero-padded to 128 bits) with the current key as the AES-128 key and writes the first
+`randomSize` bytes of the result to `random`. It then performs a CTR_DRBG-style Update: a fresh AES
+key is derived by encrypting a domain-separated block under the current key, that key overwrites the
+seed stored in the context, and the counter is incremented. Destroying the key that produced the
+output gives backtracking resistance — a later compromise of the context cannot recover previously
+returned bytes. Unused bytes from the AES block are discarded; the counter always advances by one
+per call.
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|

@@ -69,6 +69,7 @@ typedef struct
     SSFLL_t children;
     SSFObjType_t dataType;
     size_t dataSize;
+    uint16_t depth;
 } SSFGObj_t;
 
 typedef struct
@@ -92,6 +93,7 @@ bool SSFGObjGetLabel(SSFGObj_t *gobj, SSFCStrOut_t labelCStrOut, size_t labelCSt
 
 /* Object value accessors */
 SSFObjType_t SSFGObjGetType(SSFGObj_t *gobj);
+uint16_t SSFGObjGetDepth(SSFGObj_t *gobj);
 size_t SSFGObjGetSize(SSFGObj_t *gobj);
 bool SSFGObjSetNone(SSFGObj_t *gobj);
 bool SSFGObjSetString(SSFGObj_t *gobj, SSFCStrIn_t valueCStr);

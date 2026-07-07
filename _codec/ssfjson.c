@@ -902,11 +902,11 @@ static bool _SSFJsonGObjValue(SSFCStrIn_t js, size_t *index, SSFGObj_t *gobj, ui
                 if (SSFGObjSetLabel(child, strBuf) == false)
                 { SSFGObjDeInit(&child); return false; }
 
-                /* Recurse for value */
-                if (_SSFJsonGObjValue(js, index, child, maxChildren, depth + 1) == false)
-                { SSFGObjDeInit(&child); return false; }
+                /* Insert the still-empty child */
                 if (SSFGObjInsertChild(gobj, child) == false)
                 { SSFGObjDeInit(&child); return false; }
+                if (_SSFJsonGObjValue(js, index, child, maxChildren, depth + 1) == false)
+                { return false; }
 
                 _SSFJsonWhitespace(js, index);
                 if (js[*index] == '}') break;
@@ -932,11 +932,11 @@ static bool _SSFJsonGObjValue(SSFCStrIn_t js, size_t *index, SSFGObj_t *gobj, ui
                 child = NULL;
                 if (SSFGObjInit(&child, maxChildren) == false) return false;
 
-                /* Recurse for value */
-                if (_SSFJsonGObjValue(js, index, child, maxChildren, depth + 1) == false)
-                { SSFGObjDeInit(&child); return false; }
+                /* Insert the still-empty child and then populate */
                 if (SSFGObjInsertChild(gobj, child) == false)
                 { SSFGObjDeInit(&child); return false; }
+                if (_SSFJsonGObjValue(js, index, child, maxChildren, depth + 1) == false)
+                { return false; }
 
                 _SSFJsonWhitespace(js, index);
                 if (js[*index] == ']') break;
@@ -1108,6 +1108,8 @@ static bool _SSFJsonGObjPrintValue(SSFGObj_t *gobj, SSFCStrOut_t js, size_t size
 #endif /* SSF_JSON_CONFIG_ENABLE_FLOAT_GEN */
 
     SSF_ASSERT(gobj != NULL);
+
+    if (SSFGObjGetDepth(gobj) >= SSF_GOBJ_CONFIG_MAX_IN_DEPTH) return false;
 
     switch (SSFGObjGetType(gobj))
     {

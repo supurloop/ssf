@@ -35,7 +35,18 @@
 #include "ssfaesgcm.h"
 #include "ssfaesccm.h"
 #include "ssfchacha20poly1305.h"
+#include "ssfcrypt.h"
 #include "ssfusexport.h"
+
+/* --------------------------------------------------------------------------------------------- */
+/* Module Defines                                                                                */
+/* --------------------------------------------------------------------------------------------- */
+#define SSF_TLS_RECORD_MAGIC (0x544C5352ul)
+
+#if SSF_CONFIG_TLS_UNIT_TEST == 1
+void (*_SSFTLSFinishedKeyScrubTestHook)(void *ctx, const uint8_t *finishedKey, size_t len) = NULL;
+void *_SSFTLSFinishedKeyScrubTestHookCtx = NULL;
+#endif
 
 /* --------------------------------------------------------------------------------------------- */
 /* Key schedule: HKDF-Expand-Label (RFC 8446 Section 7.1)                                        */
@@ -140,6 +151,15 @@ void SSFTLSComputeFinished(SSFHMACHash_t hash, const uint8_t *baseKey, size_t ba
     /* verify_data = HMAC(finished_key, transcript_hash) */
     SSFHMAC(hash, finishedKey, verifyDataLen, transcriptHash, transcriptHashLen,
             verifyData, verifyDataLen);
+
+    SSFCryptSecureZero(finishedKey, sizeof(finishedKey));
+#if SSF_CONFIG_TLS_UNIT_TEST == 1
+    if (_SSFTLSFinishedKeyScrubTestHook != NULL)
+    {
+        _SSFTLSFinishedKeyScrubTestHook(_SSFTLSFinishedKeyScrubTestHookCtx,
+                                        finishedKey, sizeof(finishedKey));
+    }
+#endif
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -221,6 +241,7 @@ void SSFTLSRecordStateInit(SSFTLSRecordState_t *state, uint16_t cipherSuite, con
                            size_t keyLen, const uint8_t *iv, size_t ivLen)
 {
     SSF_REQUIRE(state != NULL);
+    SSF_REQUIRE(state->magic != SSF_TLS_RECORD_MAGIC);
     SSF_REQUIRE(key != NULL);
     SSF_REQUIRE(iv != NULL);
     SSF_REQUIRE(ivLen == SSF_TLS_IV_SIZE);
@@ -232,6 +253,18 @@ void SSFTLSRecordStateInit(SSFTLSRecordState_t *state, uint16_t cipherSuite, con
     state->keyLen = (uint16_t)keyLen;
     state->cipherSuite = cipherSuite;
     state->seqNum = 0;
+    state->magic = SSF_TLS_RECORD_MAGIC;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Securely wipe the traffic key/IV from a record state (call on connection close or rekey).     */
+/* --------------------------------------------------------------------------------------------- */
+void SSFTLSRecordStateDeInit(SSFTLSRecordState_t *state)
+{
+    SSF_REQUIRE(state != NULL);
+    SSF_REQUIRE(state->magic == SSF_TLS_RECORD_MAGIC);
+
+    SSFCryptSecureZero(state, sizeof(*state));
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -286,6 +319,7 @@ bool SSFTLSRecordEncrypt(SSFTLSRecordState_t *state, uint8_t contentType, const 
     uint8_t *ct;
 
     SSF_REQUIRE(state != NULL);
+    SSF_REQUIRE(state->magic == SSF_TLS_RECORD_MAGIC);
     SSF_REQUIRE(pt != NULL);
     SSF_REQUIRE(record != NULL);
     SSF_REQUIRE(recordLen != NULL);
@@ -375,6 +409,7 @@ bool SSFTLSRecordDecrypt(SSFTLSRecordState_t *state, const uint8_t *record, size
     const uint8_t *tag;
 
     SSF_REQUIRE(state != NULL);
+    SSF_REQUIRE(state->magic == SSF_TLS_RECORD_MAGIC);
     SSF_REQUIRE(record != NULL);
     SSF_REQUIRE(pt != NULL);
     SSF_REQUIRE(ptLen != NULL);

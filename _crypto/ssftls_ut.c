@@ -43,8 +43,72 @@
 #pragma warning(push)
 #pragma warning(disable:6262)
 #endif
+/* Blinding/zeroization audit hook: sets *ctx true iff the finished_key buffer is fully zeroed. */
+static void _SSFTLSFinishedScrubHook(void *ctx, const uint8_t *finishedKey, size_t len)
+{
+    bool allZero = true;
+    size_t i;
+    for (i = 0; i < len; i++) { if (finishedKey[i] != 0u) { allZero = false; break; } }
+    *(bool *)ctx = allZero;
+}
+
 void SSFTLSUnitTest(void)
 {
+    /* ---- (Hardening) RecordStateDeInit securely wipes the traffic key / IV ---- */
+    {
+        SSFTLSRecordState_t st = {0};   /* zero before first Init (magic guard) */
+        uint8_t key[16];
+        uint8_t iv[SSF_TLS_IV_SIZE];
+        uint8_t zeros[sizeof(st)];
+
+        memset(key, 0xC7, sizeof(key));
+        memset(iv, 0x39, sizeof(iv));
+        memset(zeros, 0, sizeof(zeros));
+
+        SSFTLSRecordStateInit(&st, SSF_TLS_CS_AES_128_GCM_SHA256, key, sizeof(key), iv, sizeof(iv));
+        SSF_ASSERT(memcmp(st.key, key, sizeof(key)) == 0);   /* key is present after init */
+        SSFTLSRecordStateDeInit(&st);
+        SSF_ASSERT(memcmp(&st, zeros, sizeof(st)) == 0);      /* DeInit wiped the whole state */
+    }
+
+    /* ---- (Hardening) record-state magic: reject re-init of an active state and use after DeInit -- */
+    {
+        SSFTLSRecordState_t st = {0};
+        uint8_t key[16];
+        uint8_t iv[SSF_TLS_IV_SIZE];
+
+        memset(key, 0x4E, sizeof(key));
+        memset(iv, 0x71, sizeof(iv));
+
+        SSFTLSRecordStateInit(&st, SSF_TLS_CS_AES_128_GCM_SHA256, key, sizeof(key), iv, sizeof(iv));
+        /* Re-initializing an already-active state (no DeInit) must be rejected by the magic guard. */
+        SSF_ASSERT_TEST(SSFTLSRecordStateInit(&st, SSF_TLS_CS_AES_128_GCM_SHA256,
+                                              key, sizeof(key), iv, sizeof(iv)));
+        SSFTLSRecordStateDeInit(&st);
+        /* DeInit again (state now inactive) must be rejected. */
+        SSF_ASSERT_TEST(SSFTLSRecordStateDeInit(&st));
+    }
+
+    /* ---- (Hardening) ComputeFinished wipes the finished_key before returning ---- */
+    {
+        uint8_t baseKey[32];
+        uint8_t transcript[32];
+        uint8_t verifyData[32];
+        bool sawZero = false;
+
+        memset(baseKey, 0x5A, sizeof(baseKey));
+        memset(transcript, 0x1D, sizeof(transcript));
+
+        _SSFTLSFinishedKeyScrubTestHookCtx = &sawZero;
+        _SSFTLSFinishedKeyScrubTestHook = _SSFTLSFinishedScrubHook;
+        SSFTLSComputeFinished(SSF_HMAC_HASH_SHA256, baseKey, sizeof(baseKey),
+                              transcript, sizeof(transcript), verifyData, sizeof(verifyData));
+        _SSFTLSFinishedKeyScrubTestHook = NULL;
+        _SSFTLSFinishedKeyScrubTestHookCtx = NULL;
+
+        SSF_ASSERT(sawZero == true);   /* the hook observed a zeroed finished_key */
+    }
+
     /* ---- Transcript hash: SHA-256 of empty string ---- */
     {
         SSFTLSTranscript_t t;
@@ -282,7 +346,7 @@ void SSFTLSUnitTest(void)
 
     /* ---- Record encrypt / decrypt roundtrip (AES-128-GCM) ---- */
     {
-        SSFTLSRecordState_t encState, decState;
+        SSFTLSRecordState_t encState = {0}, decState = {0};
         uint8_t key[16], iv[12];
         uint8_t plaintext[] = "Hello, TLS 1.3!";
         size_t ptLen = sizeof(plaintext) - 1u;
@@ -332,7 +396,7 @@ void SSFTLSUnitTest(void)
 
     /* ---- Record: corrupted ciphertext fails decryption ---- */
     {
-        SSFTLSRecordState_t encState, decState;
+        SSFTLSRecordState_t encState = {0}, decState = {0};
         uint8_t key[16], iv[12];
         uint8_t plaintext[] = "test";
         uint8_t record[128];
@@ -363,7 +427,7 @@ void SSFTLSUnitTest(void)
 
     /* ---- Record: AES-256-GCM roundtrip ---- */
     {
-        SSFTLSRecordState_t encState, decState;
+        SSFTLSRecordState_t encState = {0}, decState = {0};
         uint8_t key[32], iv[12];
         uint8_t plaintext[] = "AES-256-GCM test";
         uint8_t record[128];
@@ -392,7 +456,7 @@ void SSFTLSUnitTest(void)
 
     /* AES-128-CCM round trip (16-byte tag). */
     {
-        SSFTLSRecordState_t encState, decState;
+        SSFTLSRecordState_t encState = {0}, decState = {0};
         uint8_t key[16], iv[12];
         uint8_t plaintext[] = "AES-128-CCM test";
         uint8_t record[128];
@@ -427,7 +491,7 @@ void SSFTLSUnitTest(void)
      * spec-compliant peer. cipherLen must reflect the 8-byte tag, and Decrypt must
      * dispatch CCM_8 correctly. */
     {
-        SSFTLSRecordState_t encState, decState;
+        SSFTLSRecordState_t encState = {0}, decState = {0};
         uint8_t key[16], iv[12];
         uint8_t plaintext[] = "CCM-8 regression";
         uint8_t record[128];
@@ -462,7 +526,7 @@ void SSFTLSUnitTest(void)
     }
     /* ---- Record: ChaCha20-Poly1305 round-trip ---- */
     {
-        SSFTLSRecordState_t encState, decState;
+        SSFTLSRecordState_t encState = {0}, decState = {0};
         uint8_t key[32], iv[12];
         uint8_t plaintext[] = "ChaCha20-Poly1305 record test";
         uint8_t record[128];
@@ -501,7 +565,7 @@ void SSFTLSUnitTest(void)
      * AEAD contract catastrophically. Set state.seqNum to the boundary and confirm both
      * directions return false. */
     {
-        SSFTLSRecordState_t encState, decState;
+        SSFTLSRecordState_t encState = {0}, decState = {0};
         uint8_t key[16] = {0};
         uint8_t iv[12] = {0};
         uint8_t pt[16] = {0};
@@ -539,7 +603,7 @@ void SSFTLSUnitTest(void)
     /* must not produce a wire record. _SSFTLSAeadTagSize returns 0 for the unknown     */
     /* suite, and both encrypt and decrypt early-out on tagLen == 0.                    */
     {
-        SSFTLSRecordState_t state;
+        SSFTLSRecordState_t state = {0};
         uint8_t key[16] = {0};
         uint8_t iv[12] = {0};
         uint8_t pt[16] = {0};
@@ -693,7 +757,7 @@ void SSFTLSUnitTest(void)
 
     /* SSFTLSRecordStateInit: full DBC surface. */
     {
-        SSFTLSRecordState_t state;
+        SSFTLSRecordState_t state = {0};
         uint8_t key[32] = {0};
         uint8_t iv[12] = {0};
 
@@ -718,7 +782,7 @@ void SSFTLSUnitTest(void)
 
     /* SSFTLSRecordEncrypt: full DBC surface. */
     {
-        SSFTLSRecordState_t state;
+        SSFTLSRecordState_t state = {0};
         uint8_t key[16] = {0};
         uint8_t iv[12] = {0};
         uint8_t pt[16] = {0};
@@ -744,7 +808,7 @@ void SSFTLSUnitTest(void)
 
     /* SSFTLSRecordDecrypt: full DBC surface. */
     {
-        SSFTLSRecordState_t state;
+        SSFTLSRecordState_t state = {0};
         uint8_t key[16] = {0};
         uint8_t iv[12] = {0};
         uint8_t record[64] = {0};
@@ -776,7 +840,7 @@ void SSFTLSUnitTest(void)
      * must be rejected. Build a header with fragLen = 0x4101 (one past the limit) and check
      * that decrypt returns false rather than proceeding to the AEAD layer. */
     {
-        SSFTLSRecordState_t decState;
+        SSFTLSRecordState_t decState = {0};
         uint8_t key[16] = {0};
         uint8_t iv[12] = {0};
         uint8_t oversizedRecord[0x4106];   /* HEADER + 0x4101 */

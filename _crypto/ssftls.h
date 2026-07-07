@@ -214,6 +214,7 @@ typedef struct SSFTLSRecordState
     uint64_t seqNum;
     uint16_t keyLen;     /* 16 for AES-128, 32 for AES-256 */
     uint16_t cipherSuite;
+    uint32_t magic;
 } SSFTLSRecordState_t;
 
 /* --------------------------------------------------------------------------------------------- */
@@ -250,10 +251,9 @@ void SSFTLSTranscriptHash(const SSFTLSTranscript_t *t, uint8_t *out, size_t outS
 /* --------------------------------------------------------------------------------------------- */
 /* External interface: record layer                                                              */
 /* --------------------------------------------------------------------------------------------- */
-
-/* Initialize record state with derived traffic keys. */
 void SSFTLSRecordStateInit(SSFTLSRecordState_t *state, uint16_t cipherSuite, const uint8_t *key,
                            size_t keyLen, const uint8_t *iv, size_t ivLen);
+void SSFTLSRecordStateDeInit(SSFTLSRecordState_t *state);
 
 /* Encrypt plaintext into a TLS record (header + ciphertext + tag).                              */
 /* record must have room for SSF_TLS_RECORD_HEADER_SIZE + ptLen + 1 + SSF_TLS_AEAD_TAG_SIZE.     */
@@ -269,6 +269,8 @@ bool SSFTLSRecordDecrypt(SSFTLSRecordState_t *state, const uint8_t *record, size
 /* --------------------------------------------------------------------------------------------- */
 #if SSF_CONFIG_TLS_UNIT_TEST == 1
 void SSFTLSUnitTest(void);
+extern void (*_SSFTLSFinishedKeyScrubTestHook)(void *ctx, const uint8_t *finishedKey, size_t len);
+extern void *_SSFTLSFinishedKeyScrubTestHookCtx;
 #endif /* SSF_CONFIG_TLS_UNIT_TEST */
 
 #ifdef __cplusplus

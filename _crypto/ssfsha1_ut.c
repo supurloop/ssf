@@ -121,6 +121,21 @@ void SSFSHA1UnitTest(void)
 {
     uint8_t hash[SSF_SHA1_HASH_SIZE];
 
+    /* ---- (Hardening) SSFSHA1End wipes its context (matches the SHA-2 finalizers) ---- */
+    /* The context state + last partial block are secret-derived (e.g. the HMAC-SHA1 long-key      */
+    /* path hashes the key through it); End must scrub them before returning.                       */
+    {
+        SSFSHA1Context_t ctx;
+        uint8_t out[SSF_SHA1_HASH_SIZE];
+        uint8_t zeros[sizeof(ctx)];
+
+        memset(zeros, 0, sizeof(zeros));
+        SSFSHA1Begin(&ctx);
+        SSFSHA1Update(&ctx, (const uint8_t *)"secret-key-material", 19u);
+        SSFSHA1End(&ctx, out);
+        SSF_ASSERT(memcmp(&ctx, zeros, sizeof(ctx)) == 0);   /* End scrubbed the context */
+    }
+
     /* ---- Test vector 1: "abc" (RFC 3174) ---- */
     /* SHA1("abc") = A9993E36 4706816A BA3E2571 7850C26C 9CD0D89D */
     {

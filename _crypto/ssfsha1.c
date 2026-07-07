@@ -31,6 +31,7 @@
 /* --------------------------------------------------------------------------------------------- */
 #include "ssfassert.h"
 #include "ssfsha1.h"
+#include "ssfcrypt.h"
 #include "ssfusexport.h"
 
 /* --------------------------------------------------------------------------------------------- */
@@ -207,6 +208,9 @@ void SSFSHA1End(SSFSHA1Context_t *ctx, uint8_t out[SSF_SHA1_HASH_SIZE])
     {
         SSF_PUTU32BE(&out[i * 4u], ctx->state[i]);
     }
+
+    /* Wipe the context: state[] and the last partial block may hold secret-derived data */
+    SSFCryptSecureZero(ctx, sizeof(*ctx));
 }
 
 /* --------------------------------------------------------------------------------------------- */

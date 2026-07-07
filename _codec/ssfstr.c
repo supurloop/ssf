@@ -289,12 +289,12 @@ bool SSFStrTok(SSFCStrIn_t *cstr, size_t cstrSize, SSFCStrOut_t tokenStrOut, siz
 
     /* Iterate over cstr */
     cs = *cstr;
-    while ((*cs != 0) && (cstrSize > 0))
+    while ((cstrSize > 0) && (*cs != 0))
     {
         /* Iterate over delims */
         dlms = delims;
         dlmss = delimsSize;
-        while ((*dlms != 0) && (dlmss > 0))
+        while ((dlmss > 0) && (*dlms != 0))
         {
             /* Delim match? */
             if (*cs == *dlms)

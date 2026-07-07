@@ -377,6 +377,16 @@ void SSFStrUnitTest(void)
     SSF_ASSERT_TEST(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), NULL, " ,", 3));
     SSF_ASSERT_TEST(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), &len, NULL, 3));
 
+    /* (Hardening) cstrSize is a hard cap on bytes read from *cstr: with a size smaller than the    */
+    /* distance to the next delimiter/NUL, tokenizing stops at the size bound and never reads       */
+    /* cstr[cstrSize]. */
+    tok = dst;
+    SSF_ASSERT(SSFStrCpy(dst, sizeof(dst), &s1Len, "abcdef", 7));
+    SSF_ASSERT(SSFStrTok(&tok, 3, check, sizeof(check), &len, " ,", 3) == false);
+    SSF_ASSERT(tok == &dst[3]);
+    SSF_ASSERT(len == 3);
+    SSF_ASSERT(memcmp("abc", check, 3) == 0);
+
     tok = dst;
     SSF_ASSERT(SSFStrCpy(dst, sizeof(dst), &s1Len, "", 1));
     SSF_ASSERT(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), &len, " ,", 3) == false);

@@ -144,7 +144,7 @@ size_t SSFDecIntToStr(int64_t i, SSFCStrOut_t str, size_t strSize)
     if (i < 0)
     {
         /* Ensure that strSize big enough to fit -i plus a NULL */
-        u = (uint64_t)(-i);
+        u = 0u - (uint64_t)i;
         if ((strSize <= 2) || ((strSize < (SSF_DEC_NUM_LIM + 3)) &&
                                (u > _ssfDecStrSizeLim[strSize - 3])))
         { return 0; }
@@ -219,6 +219,7 @@ size_t SSFDecIntToStrPadded(int64_t i, SSFCStrOut_t str, size_t strSize, uint8_t
 {
     size_t len;
     char *tmp = NULL;
+    uint64_t u;
 
     SSF_ASSERT(str != NULL);
     SSF_ASSERT(minFieldWidth >= 2);
@@ -230,12 +231,16 @@ size_t SSFDecIntToStrPadded(int64_t i, SSFCStrOut_t str, size_t strSize, uint8_t
         tmp = str;
         str++;
         strSize--;
-        i = -i;
+        u = 0u - (uint64_t)i;
         minFieldWidth--;
+    }
+    else
+    {
+        u = (uint64_t)i;
     }
 
     /* Do int to decimal string conversion */
-    len = SSFDecUIntToStr((uint64_t)i, str, strSize);
+    len = SSFDecUIntToStr(u, str, strSize);
     if (len == 0) return 0;
 
     /* Add pad if necessary */
@@ -513,7 +518,8 @@ bool SSFDecStrToXInt(SSFCStrIn_t str, int64_t *sval, uint64_t *uval)
         {
             /* Check for signed overflow */
             if (tmp > 9223372036854775808ull) return false;
-            *sval = -((int64_t)tmp);
+            if (tmp == 9223372036854775808ull) *sval = INT64_MIN;
+            else *sval = -((int64_t)tmp);
         }
         else
         {

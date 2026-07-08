@@ -920,6 +920,15 @@ void SSFDecUnitTest(void)
     SSF_ASSERT(len1 != 0);
     SSF_ASSERT(memcmp(str2, "-9223372036854775808", len1 + 1) == 0);
 
+    /* (Hardening) INT64_MIN must round-trip through the negate paths (str->int, int->str, padded)  */
+    /* without relying on -INT64_MIN signed-overflow UB. */
+    i = 0;
+    SSF_ASSERT(SSFDecStrToInt("-9223372036854775808", &i) == true);
+    SSF_ASSERT(i == (-9223372036854775807ll - 1));                        /* SSFDecStrToXInt site */
+    len1 = SSFDecIntToStrPadded(-9223372036854775807ll - 1, str2, sizeof(str2), 22, '0');
+    SSF_ASSERT(len1 == 22);                                              /* SSFDecIntToStrPadded */
+    SSF_ASSERT(memcmp(str2, "-009223372036854775808", len1 + 1) == 0);
+
     /* SSFDecUIntToStr with UINT64_MAX */
     len1 = SSFDecUIntToStr(18446744073709551615ull, str2, sizeof(str2));
     SSF_ASSERT(len1 != 0);

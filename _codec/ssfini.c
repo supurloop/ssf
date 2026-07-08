@@ -85,6 +85,7 @@ typedef struct
     size_t nameLen;
     const char *value;
     size_t valueLen;
+    const char *iniEnd;
 } SSFINIContext_t;
 
 /* --------------------------------------------------------------------------------------------- */
@@ -100,13 +101,18 @@ static bool _SSFINIFindNextLine(SSFCStrIn_t ini, SSFINIContext_t *context)
 
     /* Is context initialized? */
     if (context->line == NULL)
-    /* No, set line to start of INI */
-    { context->line = ini; }
+    {
+        const char *nul = (const char *)memchr(ini, '\x00',
+                                               (size_t)SSF_INI_CONFIG_MAX_IN_LEN + 1u);
+        if (nul == NULL) return false;
+        context->iniEnd = nul;
+        context->line = ini;
+    }
     /* Yes, advance to next potential line */
     else
     {
         context->line += context->lineLen;
-        if (*(context->line) != '\x00') context->line++;
+        if (context->line < context->iniEnd) context->line++;
     }
 
     /* Can we find a line terminator? */
@@ -394,7 +400,7 @@ bool SSFINIGetStrValue(SSFCStrIn_t ini, SSFCStrIn_t section, SSFCStrIn_t name, u
 
     if (_SSFINIIsNameValuePresent(ini, section, name, index, &context) == false) return false;
     if (outLen != NULL) *outLen = context.valueLen;
-    if (outSize < (context.valueLen + 1)) return false;
+    if (outSize < (context.valueLen + 1)) { out[0] = 0; return false; }
     memcpy(out, context.value, context.valueLen);
     out[context.valueLen] = 0;
     return true;

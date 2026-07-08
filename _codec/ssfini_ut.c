@@ -720,8 +720,16 @@ void SSFINIUnitTest(void)
     SSF_ASSERT(SSFINIGetStrValue("name=hello", NULL, "name", 0, outStr, 6, &outStrLen));
     SSF_ASSERT(outStrLen == 5);
     SSF_ASSERT(strcmp(outStr, "hello") == 0);
+    /* (Hardening) On truncation, return false, leave out as a valid empty string (not the prior   */
+    /* uninitialized contents), and report the required length in outLen. */
+    outStr[0] = 'X';
+    outStrLen = 99;
     SSF_ASSERT(SSFINIGetStrValue("name=hello", NULL, "name", 0, outStr, 5, &outStrLen) == false);
+    SSF_ASSERT(outStr[0] == 0);
+    SSF_ASSERT(outStrLen == 5);
+    outStr[0] = 'X';
     SSF_ASSERT(SSFINIGetStrValue("name=hello", NULL, "name", 0, outStr, 1, &outStrLen) == false);
+    SSF_ASSERT(outStr[0] == 0);
 
     /* SSFINIGetBoolValue with present but non-boolean value */
     SSF_ASSERT(SSFINIGetBoolValue("name=maybe", NULL, "name", 0, &outBool) == false);
@@ -743,6 +751,19 @@ void SSFINIUnitTest(void)
     SSF_ASSERT(SSFINIGetStrValue("name=", NULL, "name", 0, outStr, sizeof(outStr), &outStrLen));
     SSF_ASSERT(outStrLen == 0);
     SSF_ASSERT(outStr[0] == 0);
+
+    /* (Hardening) An INI whose NULL terminator is beyond SSF_INI_CONFIG_MAX_IN_LEN is rejected     */
+    /* (bounded scan), so a valid pair at the start is not found; the same content terminated       */
+    /* within the max is parsed normally. */
+    {
+        static char bigIni[SSF_INI_CONFIG_MAX_IN_LEN + 2];
+        memset(bigIni, '\n', sizeof(bigIni));         /* blank lines, no NULL within the max window */
+        memcpy(bigIni, "name=value\n", 11);           /* a valid pair at the very start */
+        bigIni[SSF_INI_CONFIG_MAX_IN_LEN + 1] = 0;    /* NULL only just past the max probe window */
+        SSF_ASSERT(SSFINIIsNameValuePresent(bigIni, NULL, "name", 0) == false);
+        bigIni[SSF_INI_CONFIG_MAX_IN_LEN - 1] = 0;    /* NULL within the max */
+        SSF_ASSERT(SSFINIIsNameValuePresent(bigIni, NULL, "name", 0) == true);
+    }
 
     /* Generator returns false when buffer is already full */
     iniLen = 0;

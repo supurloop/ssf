@@ -157,10 +157,15 @@ Initializes the framework, allocating the internal event queue and timer table. 
 once before `SSFSMInitHandler()`, `SSFSMTask()`, or any event-posting function. Pass values
 that match `SSF_SM_MAX_ACTIVE_EVENTS` and `SSF_SM_MAX_ACTIVE_TIMERS` from `ssfoptions.h`.
 
+`maxEvents` and `maxTimers` are independent: each running timer holds its own event, and the
+framework sizes the internal event pool to `maxEvents + maxTimers` so a pending timer never
+consumes one of the `maxEvents` queued-event slots. Size `maxEvents` for your worst-case number of
+simultaneously queued events and `maxTimers` for your worst-case number of running timers.
+
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
-| `maxEvents` | in | `uint32_t` | Maximum simultaneously queued events. Must equal `SSF_SM_MAX_ACTIVE_EVENTS`. |
-| `maxTimers` | in | `uint32_t` | Maximum simultaneously running timers. Must equal `SSF_SM_MAX_ACTIVE_TIMERS`. |
+| `maxEvents` | in | `uint32_t` | Maximum simultaneously queued events, independent of timers. Must equal `SSF_SM_MAX_ACTIVE_EVENTS`. |
+| `maxTimers` | in | `uint32_t` | Maximum simultaneously running timers; each also reserves its own internal event. Must equal `SSF_SM_MAX_ACTIVE_TIMERS`. |
 
 **Returns:** Nothing.
 

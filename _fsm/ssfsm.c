@@ -256,9 +256,9 @@ void SSFSMInit(uint32_t maxEvents, uint32_t maxTimers)
 {
     SSF_ASSERT(_ssfsmIsInited == false);
 
-    SSFMPoolInit(&_ssfsmEventPool, maxEvents, sizeof(SSFSMEvent_t));
+    SSFMPoolInit(&_ssfsmEventPool, maxEvents + maxTimers, sizeof(SSFSMEvent_t));
     SSFMPoolInit(&_ssfsmTimerPool, maxTimers, sizeof(SSFSMTimer_t));
-    SSFLLInit(&_ssfsmEvents, maxEvents);
+    SSFLLInit(&_ssfsmEvents, maxEvents + maxTimers);
     SSFLLInit(&_ssfsmTimers, maxTimers);
 
 #if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1

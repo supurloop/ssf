@@ -876,6 +876,18 @@ void SSFSMUnitTest(void)
     SSF_ASSERT(SSFSMTask(&nextTimeout) == false);
     SSF_ASSERT(nextTimeout == SSF_SM_MAX_TIMEOUT);
 
+    /* (Hardening) The event pool is sized maxEvents + maxTimers, so pending timers cannot starve    */
+    /* queued events. Queue maxEvents + maxTimers events to exercise the full event-pool capacity;   */
+    /* with the old size-maxEvents pool this would exhaust and assert. DeInit drains them unprocessed. */
+    {
+        uint32_t ei;
+        SSFSMInitHandler(SSF_SM_UNIT_TEST_1, UT1TestHandler1);
+        SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_1, 0, SSF_SM_EVENT_ENTRY);
+        SSF_ASSERT(_SSFSMFlagsAreCleared());
+        for (ei = 0; ei < SSFSM_UT_MAX_EVENTS + SSFSM_UT_MAX_TIMERS; ei++)
+        { SSFSMPutEvent(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_UT1_1); }
+    }
+
     /* End test */
     SSFSMDeInit();
     SSF_ASSERT_TEST(SSFSMDeInit());

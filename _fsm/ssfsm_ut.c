@@ -117,6 +117,11 @@ void UT1TestHandler1(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t
         SSFSMPutEvent(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_UTX_1);
         SSFSMPutEvent(SSF_SM_UNIT_TEST_2, SSF_SM_EVENT_UT1_1);
         SSFSMPutEvent(SSF_SM_UNIT_TEST_2, SSF_SM_EVENT_UT1_2);
+        /* (Hardening) InitHandler/DeInitHandler must not be called from within a state handler;    */
+        /* the reentrancy guard traps it (matching SSFSMTask). UT_2 is initialized here, so the     */
+        /* guard -- not the "already de-initialized" precondition -- is what fires, and it aborts    */
+        /* before touching UT_2, leaving the rest of the test undisturbed. */
+        SSF_ASSERT_TEST(SSFSMDeInitHandler(SSF_SM_UNIT_TEST_2));
 #if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 0
         SSF_ASSERT_TEST(SSFSMPutEvent(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_UT1_1));
 #endif
@@ -793,6 +798,14 @@ void SSFSMUnitTest(void)
 
     /* Verify that super cannot have a super */
     SSF_ASSERT_TEST(SSFSMInitHandler(SSF_SM_UNIT_TEST_3, UT3TestHandler2));
+
+    /* The negative test above asserts partway through SSFSMInitHandler (after it has set the       */
+    /* active SM); the SSF_ASSERT_TEST longjmp skips the function's cleanup, leaving the framework  */
+    /* mid-init. In production the assert halts, so this never persists -- but the harness keeps    */
+    /* running, so reset the framework before the positive tests below (the new reentrancy guard    */
+    /* would otherwise trip on the stale active SM). */
+    SSFSMDeInit();
+    SSFSMInit(SSFSM_UT_MAX_EVENTS, SSFSM_UT_MAX_TIMERS);
 
     /* Verify that super entry called for nested initial state */
     _utTraceIndex = 0;

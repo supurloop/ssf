@@ -336,6 +336,7 @@ void SSFSMInitHandler(SSFSMId_t smid, SSFSMHandler_t initial)
     SSF_REQUIRE((smid > SSF_SM_MIN) && (smid < SSF_SM_MAX));
     SSF_REQUIRE(initial != NULL);
     SSF_ASSERT(_ssfsmIsInited);
+    SSF_ASSERT(_ssfsmActive >= SSF_SM_MAX);
     SSF_ASSERT(_SSFSMStates[smid].current == NULL);
 
     /* Allow state transistions */
@@ -379,6 +380,7 @@ void SSFSMDeInitHandler(SSFSMId_t smid)
 
     SSF_REQUIRE((smid > SSF_SM_MIN) && (smid < SSF_SM_MAX));
     SSF_ASSERT(_ssfsmIsInited);
+    SSF_ASSERT(_ssfsmActive >= SSF_SM_MAX);
     SSF_ASSERT(_SSFSMStates[smid].current != NULL);
 
     _ssfsmActive = smid;

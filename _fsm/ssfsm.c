@@ -425,7 +425,7 @@ void SSFSMPutEventData(SSFSMId_t smid, SSFSMEventId_t eid, const SSFSMData_t *da
     SSFSMEvent_t *e;
 
     SSF_REQUIRE((smid > SSF_SM_MIN) && (smid < SSF_SM_MAX));
-    SSF_REQUIRE((eid > SSF_SM_EVENT_EXIT) && (eid > SSF_SM_EVENT_MIN) && (eid < SSF_SM_EVENT_MAX));
+    SSF_REQUIRE((eid > SSF_SM_EVENT_SUPER) && (eid < SSF_SM_EVENT_MAX));
     SSF_REQUIRE(((data == NULL) && (dataLen == 0)) || ((data != NULL) && (dataLen > 0)));
     SSF_ASSERT(_ssfsmIsInited);
     SSF_ASSERT(_SSFSMStates[smid].current != NULL);
@@ -477,7 +477,7 @@ void SSFSMStartTimerData(SSFSMEventId_t eid, SSFSMTimeout_t interval, const SSFS
 {
     SSFSMTimer_t *tp;
 
-    SSF_REQUIRE((eid > SSF_SM_EVENT_EXIT) && (eid > SSF_SM_EVENT_MIN) && (eid < SSF_SM_EVENT_MAX));
+    SSF_REQUIRE((eid > SSF_SM_EVENT_SUPER) && (eid < SSF_SM_EVENT_MAX));
     SSF_REQUIRE(((data == NULL) && (dataLen == 0)) || ((data != NULL) && (dataLen > 0)));
     SSF_ASSERT((_ssfsmActive > SSF_SM_MIN) && (_ssfsmActive < SSF_SM_MAX));
     SSF_ASSERT(_ssfsmIsInited);

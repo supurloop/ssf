@@ -164,6 +164,7 @@ static void _SSFSMProcessEvent(SSFSMId_t smid, SSFSMEventId_t eid, const SSFSMDa
     /* Process event in context of current state */
     _ssfsmActive = smid;
     currentSuper = NULL;
+    SSF_ASSERT(_SSFSMStates[_ssfsmActive].current != NULL);
     _SSFSMStates[_ssfsmActive].current(eid, data, dataLen, (SSFVoidFn_t *)&currentSuper);
 
     /* Should super state also process event? */
@@ -381,6 +382,9 @@ void SSFSMDeInitHandler(SSFSMId_t smid)
     SSF_REQUIRE((smid > SSF_SM_MIN) && (smid < SSF_SM_MAX));
     SSF_ASSERT(_ssfsmIsInited);
     SSF_ASSERT(_ssfsmActive >= SSF_SM_MAX);
+#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
+    SSF_SM_THREAD_SYNC_ACQUIRE();
+#endif
     SSF_ASSERT(_SSFSMStates[smid].current != NULL);
 
     _ssfsmActive = smid;
@@ -414,6 +418,9 @@ void SSFSMDeInitHandler(SSFSMId_t smid)
 
     /* Reset the state machine */
     memset(&_SSFSMStates[smid], 0, sizeof(SSFSMState_t));
+#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
+    SSF_SM_THREAD_SYNC_RELEASE();
+#endif
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -428,9 +435,9 @@ void SSFSMPutEventData(SSFSMId_t smid, SSFSMEventId_t eid, const SSFSMData_t *da
     SSF_REQUIRE((eid > SSF_SM_EVENT_SUPER) && (eid < SSF_SM_EVENT_MAX));
     SSF_REQUIRE(((data == NULL) && (dataLen == 0)) || ((data != NULL) && (dataLen > 0)));
     SSF_ASSERT(_ssfsmIsInited);
-    SSF_ASSERT(_SSFSMStates[smid].current != NULL);
 
 #if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 0
+    SSF_ASSERT(_SSFSMStates[smid].current != NULL);
     /* In state handler or there are pending events? */
     if (((_ssfsmActive > SSF_SM_MIN) && (_ssfsmActive < SSF_SM_MAX)) ||
         (SSFLLIsEmpty(&_ssfsmEvents) == false))
@@ -438,6 +445,7 @@ void SSFSMPutEventData(SSFSMId_t smid, SSFSMEventId_t eid, const SSFSMData_t *da
 #endif
 #if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
         SSF_SM_THREAD_SYNC_ACQUIRE();
+        SSF_ASSERT(_SSFSMStates[smid].current != NULL);
 #endif
         /* Yes, queue event */
         e = (SSFSMEvent_t *)SSFMPoolAlloc(&_ssfsmEventPool, sizeof(SSFSMEvent_t), 0x11);

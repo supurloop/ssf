@@ -20,6 +20,12 @@ Portions of the framework will work on even smaller microcontrollers.
 
 <a id="designprinciples"></a>
 
+## Claude Code
+
+Core code modules in versions <= 0.1.7 were coded with little to no assistance from Claude Code. The main exceptions being some unit test enhancements, and documentation where Claude was used to significantly improve them.
+
+Going forward Claude is being used more extensively for coding core code modules. I will personally continue to ensure the same level of quality and consistency that SSF had prior to this change in development strategy.
+
 ## Design Principles
 
 ### No Dependencies 

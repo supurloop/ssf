@@ -940,7 +940,7 @@ void SSFASN1UnitTest(void)
     /* and isolated-edge tests above never reach. The goal is to exercise every public-API      */
     /* reject path with the minimum input that triggers it; comments name the source line(s).   */
     {
-        SSFASN1Cursor_t cur, next;
+        SSFASN1Cursor_t cur;
         uint16_t tag;
         const uint8_t *value;
         uint32_t valueLen;
@@ -949,64 +949,64 @@ void SSFASN1UnitTest(void)
 
         /* ssfasn1.c line 51: bufLen < 2u (cannot fit minimum tag+length). */
         {
-            uint8_t buf[1] = { 0x02u };
-            cur.buf = buf; cur.bufLen = 1u;
+            uint8_t der[1] = { 0x02u };
+            cur.buf = der; cur.bufLen = 1u;
             SSF_ASSERT(SSFASN1DecGetTLV(&cur, &tag, &value, &valueLen, &next) == false);
         }
 
         /* line 59: high-tag-number form with no extension byte. */
         {
-            uint8_t buf[2] = { 0x1Fu, 0x00u };  /* second byte interpreted as length, but no tag ext */
-            cur.buf = buf; cur.bufLen = 1u;     /* length 1 -> ParseTL bails after reading 0x1F */
+            uint8_t der[2] = { 0x1Fu, 0x00u };  /* 2nd byte read as length; no tag extension */
+            cur.buf = der; cur.bufLen = 1u;     /* length 1 -> ParseTL bails after reading 0x1F */
             SSF_ASSERT(SSFASN1DecGetTLV(&cur, &tag, &value, &valueLen, &next) == false);
         }
 
         /* line 63: extension byte high bit set (multi-byte tag continuation not supported). */
         {
-            uint8_t buf[3] = { 0x1Fu, 0xFFu, 0x00u };
-            cur.buf = buf; cur.bufLen = 3u;
+            uint8_t der[3] = { 0x1Fu, 0xFFu, 0x00u };
+            cur.buf = der; cur.bufLen = 3u;
             SSF_ASSERT(SSFASN1DecGetTLV(&cur, &tag, &value, &valueLen, &next) == false);
         }
 
         /* line 66: non-canonical short-form tag (extension byte < 31, should have used 1-byte). */
         {
-            uint8_t buf[3] = { 0x1Fu, 0x1Eu, 0x00u };
-            cur.buf = buf; cur.bufLen = 3u;
+            uint8_t der[3] = { 0x1Fu, 0x1Eu, 0x00u };
+            cur.buf = der; cur.bufLen = 3u;
             SSF_ASSERT(SSFASN1DecGetTLV(&cur, &tag, &value, &valueLen, &next) == false);
         }
 
         /* line 69: 2-byte tag consumed but no length byte follows. */
         {
-            uint8_t buf[2] = { 0x1Fu, 0x40u };
-            cur.buf = buf; cur.bufLen = 2u;
+            uint8_t der[2] = { 0x1Fu, 0x40u };
+            cur.buf = der; cur.bufLen = 2u;
             SSF_ASSERT(SSFASN1DecGetTLV(&cur, &tag, &value, &valueLen, &next) == false);
         }
 
         /* line 79: indefinite-form length (0x80) is BER, forbidden in DER. */
         {
-            uint8_t buf[3] = { 0x30u, 0x80u, 0x00u };
-            cur.buf = buf; cur.bufLen = 3u;
+            uint8_t der[3] = { 0x30u, 0x80u, 0x00u };
+            cur.buf = der; cur.bufLen = 3u;
             SSF_ASSERT(SSFASN1DecGetTLV(&cur, &tag, &value, &valueLen, &next) == false);
         }
 
         /* line 88: long-form length-of-length > 4 bytes. */
         {
-            uint8_t buf[6] = { 0x30u, 0x85u, 0x00u, 0x00u, 0x00u, 0x00u };
-            cur.buf = buf; cur.bufLen = 6u;
+            uint8_t der[6] = { 0x30u, 0x85u, 0x00u, 0x00u, 0x00u, 0x00u };
+            cur.buf = der; cur.bufLen = 6u;
             SSF_ASSERT(SSFASN1DecGetTLV(&cur, &tag, &value, &valueLen, &next) == false);
         }
 
         /* line 89: long-form length declares more bytes than the buffer holds. */
         {
-            uint8_t buf[2] = { 0x30u, 0x82u };  /* claims 2 length bytes, none present */
-            cur.buf = buf; cur.bufLen = 2u;
+            uint8_t der[2] = { 0x30u, 0x82u };  /* claims 2 length bytes, none present */
+            cur.buf = der; cur.bufLen = 2u;
             SSF_ASSERT(SSFASN1DecGetTLV(&cur, &tag, &value, &valueLen, &next) == false);
         }
 
         /* line 168: SSFASN1DecPeekTag returns false on a malformed header. */
         {
-            uint8_t buf[1] = { 0x02u };
-            cur.buf = buf; cur.bufLen = 1u;
+            uint8_t der[1] = { 0x02u };
+            cur.buf = der; cur.bufLen = 1u;
             SSF_ASSERT(SSFASN1DecPeekTag(&cur, &tag) == false);
         }
 
@@ -1311,84 +1311,84 @@ void SSFASN1UnitTest(void)
         /* lines 532/533/535/536/537: _SSFASN1ParseYMD branches via DecGetDate. Tag is 0x1F1F  */
         /* (multi-byte). Encode TL via the encoder so the tag-length serialization is correct. */
         {
-            uint8_t buf[64];
+            uint8_t der[64];
             uint32_t hdrLen;
             uint64_t decoded;
             uint8_t payload[10];
 
             /* line 532: year hi non-digit. "X024-06-15" */
             memcpy(payload, "X024-06-15", 10);
-            SSF_ASSERT(SSFASN1EncTagLen(buf, sizeof(buf), SSF_ASN1_TAG_DATE, 10u, &hdrLen) == true);
-            memcpy(&buf[hdrLen], payload, 10);
-            cur.buf = buf; cur.bufLen = hdrLen + 10u;
+            SSF_ASSERT(SSFASN1EncTagLen(der, sizeof(der), SSF_ASN1_TAG_DATE, 10u, &hdrLen) == true);
+            memcpy(&der[hdrLen], payload, 10);
+            cur.buf = der; cur.bufLen = hdrLen + 10u;
             SSF_ASSERT(SSFASN1DecGetDate(&cur, &decoded, &next) == false);
 
             /* line 533: year lo non-digit. */
             memcpy(payload, "20X4-06-15", 10);
-            SSF_ASSERT(SSFASN1EncTagLen(buf, sizeof(buf), SSF_ASN1_TAG_DATE, 10u, &hdrLen) == true);
-            memcpy(&buf[hdrLen], payload, 10);
-            cur.buf = buf; cur.bufLen = hdrLen + 10u;
+            SSF_ASSERT(SSFASN1EncTagLen(der, sizeof(der), SSF_ASN1_TAG_DATE, 10u, &hdrLen) == true);
+            memcpy(&der[hdrLen], payload, 10);
+            cur.buf = der; cur.bufLen = hdrLen + 10u;
             SSF_ASSERT(SSFASN1DecGetDate(&cur, &decoded, &next) == false);
 
             /* line 535: month non-digit. */
             memcpy(payload, "2024-X6-15", 10);
-            SSF_ASSERT(SSFASN1EncTagLen(buf, sizeof(buf), SSF_ASN1_TAG_DATE, 10u, &hdrLen) == true);
-            memcpy(&buf[hdrLen], payload, 10);
-            cur.buf = buf; cur.bufLen = hdrLen + 10u;
+            SSF_ASSERT(SSFASN1EncTagLen(der, sizeof(der), SSF_ASN1_TAG_DATE, 10u, &hdrLen) == true);
+            memcpy(&der[hdrLen], payload, 10);
+            cur.buf = der; cur.bufLen = hdrLen + 10u;
             SSF_ASSERT(SSFASN1DecGetDate(&cur, &decoded, &next) == false);
 
             /* line 536: missing dash at offset 7 (tested in existing block; harmless to repeat). */
             memcpy(payload, "2024-06X15", 10);
-            SSF_ASSERT(SSFASN1EncTagLen(buf, sizeof(buf), SSF_ASN1_TAG_DATE, 10u, &hdrLen) == true);
-            memcpy(&buf[hdrLen], payload, 10);
-            cur.buf = buf; cur.bufLen = hdrLen + 10u;
+            SSF_ASSERT(SSFASN1EncTagLen(der, sizeof(der), SSF_ASN1_TAG_DATE, 10u, &hdrLen) == true);
+            memcpy(&der[hdrLen], payload, 10);
+            cur.buf = der; cur.bufLen = hdrLen + 10u;
             SSF_ASSERT(SSFASN1DecGetDate(&cur, &decoded, &next) == false);
 
             /* line 537: day non-digit. */
             memcpy(payload, "2024-06-X5", 10);
-            SSF_ASSERT(SSFASN1EncTagLen(buf, sizeof(buf), SSF_ASN1_TAG_DATE, 10u, &hdrLen) == true);
-            memcpy(&buf[hdrLen], payload, 10);
-            cur.buf = buf; cur.bufLen = hdrLen + 10u;
+            SSF_ASSERT(SSFASN1EncTagLen(der, sizeof(der), SSF_ASN1_TAG_DATE, 10u, &hdrLen) == true);
+            memcpy(&der[hdrLen], payload, 10);
+            cur.buf = der; cur.bufLen = hdrLen + 10u;
             SSF_ASSERT(SSFASN1DecGetDate(&cur, &decoded, &next) == false);
         }
 
         /* lines 553-556: _SSFASN1YMDHMSToUnix range checks via DecGetDateTime. */
         {
-            uint8_t buf[64];
+            uint8_t der[64];
             uint32_t hdrLen;
             uint64_t decoded;
             uint8_t payload[19];
 
             /* line 553: year out of range (1969). */
             memcpy(payload, "1969-01-01T00:00:00", 19);
-            SSF_ASSERT(SSFASN1EncTagLen(buf, sizeof(buf), SSF_ASN1_TAG_DATE_TIME, 19u, &hdrLen)
+            SSF_ASSERT(SSFASN1EncTagLen(der, sizeof(der), SSF_ASN1_TAG_DATE_TIME, 19u, &hdrLen)
                        == true);
-            memcpy(&buf[hdrLen], payload, 19);
-            cur.buf = buf; cur.bufLen = hdrLen + 19u;
+            memcpy(&der[hdrLen], payload, 19);
+            cur.buf = der; cur.bufLen = hdrLen + 19u;
             SSF_ASSERT(SSFASN1DecGetDateTime(&cur, &decoded, &next) == false);
 
             /* line 554: month == 0. */
             memcpy(payload, "2024-00-01T00:00:00", 19);
-            SSF_ASSERT(SSFASN1EncTagLen(buf, sizeof(buf), SSF_ASN1_TAG_DATE_TIME, 19u, &hdrLen)
+            SSF_ASSERT(SSFASN1EncTagLen(der, sizeof(der), SSF_ASN1_TAG_DATE_TIME, 19u, &hdrLen)
                        == true);
-            memcpy(&buf[hdrLen], payload, 19);
-            cur.buf = buf; cur.bufLen = hdrLen + 19u;
+            memcpy(&der[hdrLen], payload, 19);
+            cur.buf = der; cur.bufLen = hdrLen + 19u;
             SSF_ASSERT(SSFASN1DecGetDateTime(&cur, &decoded, &next) == false);
 
             /* line 555: day == 0. */
             memcpy(payload, "2024-06-00T00:00:00", 19);
-            SSF_ASSERT(SSFASN1EncTagLen(buf, sizeof(buf), SSF_ASN1_TAG_DATE_TIME, 19u, &hdrLen)
+            SSF_ASSERT(SSFASN1EncTagLen(der, sizeof(der), SSF_ASN1_TAG_DATE_TIME, 19u, &hdrLen)
                        == true);
-            memcpy(&buf[hdrLen], payload, 19);
-            cur.buf = buf; cur.bufLen = hdrLen + 19u;
+            memcpy(&der[hdrLen], payload, 19);
+            cur.buf = der; cur.bufLen = hdrLen + 19u;
             SSF_ASSERT(SSFASN1DecGetDateTime(&cur, &decoded, &next) == false);
 
             /* line 556: minute > 59 (and second > 59 covered together via OR short-circuit). */
             memcpy(payload, "2024-06-15T12:60:00", 19);
-            SSF_ASSERT(SSFASN1EncTagLen(buf, sizeof(buf), SSF_ASN1_TAG_DATE_TIME, 19u, &hdrLen)
+            SSF_ASSERT(SSFASN1EncTagLen(der, sizeof(der), SSF_ASN1_TAG_DATE_TIME, 19u, &hdrLen)
                        == true);
-            memcpy(&buf[hdrLen], payload, 19);
-            cur.buf = buf; cur.bufLen = hdrLen + 19u;
+            memcpy(&der[hdrLen], payload, 19);
+            cur.buf = der; cur.bufLen = hdrLen + 19u;
             SSF_ASSERT(SSFASN1DecGetDateTime(&cur, &decoded, &next) == false);
         }
 
@@ -1409,7 +1409,7 @@ void SSFASN1UnitTest(void)
         }
         /* lines 616-620: DateTime hour / colon / minute / colon / second non-digit / wrong sep. */
         {
-            uint8_t buf[64];
+            uint8_t der[64];
             uint32_t hdrLen;
             uint64_t decoded;
             uint8_t payload[19];
@@ -1423,10 +1423,10 @@ void SSFASN1UnitTest(void)
             size_t i;
             for (i = 0; i < sizeof(bad_payloads) / sizeof(bad_payloads[0]); i++) {
                 memcpy(payload, bad_payloads[i], 19);
-                SSF_ASSERT(SSFASN1EncTagLen(buf, sizeof(buf), SSF_ASN1_TAG_DATE_TIME, 19u, &hdrLen)
+                SSF_ASSERT(SSFASN1EncTagLen(der, sizeof(der), SSF_ASN1_TAG_DATE_TIME, 19u, &hdrLen)
                            == true);
-                memcpy(&buf[hdrLen], payload, 19);
-                cur.buf = buf; cur.bufLen = hdrLen + 19u;
+                memcpy(&der[hdrLen], payload, 19);
+                cur.buf = der; cur.bufLen = hdrLen + 19u;
                 SSF_ASSERT(SSFASN1DecGetDateTime(&cur, &decoded, &next) == false);
             }
         }
@@ -1435,12 +1435,12 @@ void SSFASN1UnitTest(void)
 
         /* lines 637, 659: 3-byte length-field path (contentLen in 0x100..0xFFFF). */
         {
-            uint8_t buf[300];
+            uint8_t der[300];
             uint32_t written;
-            SSF_ASSERT(SSFASN1EncTagLen(buf, sizeof(buf), SSF_ASN1_TAG_OCTET_STRING, 300u,
+            SSF_ASSERT(SSFASN1EncTagLen(der, sizeof(der), SSF_ASN1_TAG_OCTET_STRING, 300u,
                                         &written) == true);
             SSF_ASSERT(written == 4u);   /* 1 tag + 1 lead (0x82) + 2 length bytes */
-            SSF_ASSERT(buf[1] == 0x82u);
+            SSF_ASSERT(der[1] == 0x82u);
         }
 
         /* line 728: SSFASN1EncTagLen rejects an output buffer smaller than the header. */
@@ -1453,19 +1453,19 @@ void SSFASN1UnitTest(void)
 
         /* line 771: SSFASN1EncInt rejects intLen that would overflow total. */
         {
-            uint8_t buf[16];
+            uint8_t der[16];
             uint32_t written;
-            SSF_ASSERT(SSFASN1EncInt(buf, sizeof(buf), &scratch, 0xFFFFFFFEu, &written) == false);
+            SSF_ASSERT(SSFASN1EncInt(der, sizeof(der), &scratch, 0xFFFFFFFEu, &written) == false);
         }
 
         /* lines 842, 850, 855: SSFASN1EncBitString overflow + buffer-too-small + empty bits. */
         {
-            uint8_t buf[16];
+            uint8_t der[16];
             uint32_t written;
             uint8_t stub = 0;
 
             /* line 842: bitsLen near uint32_t max trips total-overflow guard. */
-            SSF_ASSERT(SSFASN1EncBitString(buf, sizeof(buf), &stub, 0xFFFFFFFEu, 0u, &written)
+            SSF_ASSERT(SSFASN1EncBitString(der, sizeof(der), &stub, 0xFFFFFFFEu, 0u, &written)
                        == false);
 
             /* line 850: bufSize too small for the contentLen+header. */
@@ -1476,18 +1476,18 @@ void SSFASN1UnitTest(void)
             }
 
             /* line 855: bitsLen == 0 path skips the memcpy; round-trip the result. */
-            SSF_ASSERT(SSFASN1EncBitString(buf, sizeof(buf), NULL, 0u, 0u, &written) == true);
+            SSF_ASSERT(SSFASN1EncBitString(der, sizeof(der), NULL, 0u, 0u, &written) == true);
             SSF_ASSERT(written == 3u);
         }
 
         /* lines 936, 1034, 1057: encoder rejects unixSec values that cannot resolve to a date. */
         {
-            uint8_t buf[32];
+            uint8_t der[32];
             uint32_t written;
             uint64_t huge = 0xFFFFFFFFFFFFFFFFull;  /* > SSFDTIME_UNIX_EPOCH_SEC_MAX */
-            SSF_ASSERT(SSFASN1EncUTCTime(buf, sizeof(buf), huge, &written) == false);
-            SSF_ASSERT(SSFASN1EncDate(buf, sizeof(buf), huge, &written) == false);
-            SSF_ASSERT(SSFASN1EncDateTime(buf, sizeof(buf), huge, &written) == false);
+            SSF_ASSERT(SSFASN1EncUTCTime(der, sizeof(der), huge, &written) == false);
+            SSF_ASSERT(SSFASN1EncDate(der, sizeof(der), huge, &written) == false);
+            SSF_ASSERT(SSFASN1EncDateTime(der, sizeof(der), huge, &written) == false);
         }
 
         /* line 1098: SSFASN1EncDateTime rejects a buffer smaller than the encoded total. */
@@ -1500,9 +1500,9 @@ void SSFASN1UnitTest(void)
 
         /* line 1102: SSFASN1EncWrap with contentLen == 0 skips the memcpy (NULL content OK). */
         {
-            uint8_t buf[8];
+            uint8_t der[8];
             uint32_t written;
-            SSF_ASSERT(SSFASN1EncWrap(buf, sizeof(buf), SSF_ASN1_TAG_NULL, NULL, 0u, &written)
+            SSF_ASSERT(SSFASN1EncWrap(der, sizeof(der), SSF_ASN1_TAG_NULL, NULL, 0u, &written)
                        == true);
             SSF_ASSERT(written == 2u);  /* tag + 0-length */
         }

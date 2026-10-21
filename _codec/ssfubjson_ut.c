@@ -1626,58 +1626,51 @@ void SSFUBJsonUnitTest(void)
     /* key length, then the value token follows. Existing tests cover the path-not-found and  */
     /* underlying-type-too-narrow cases; these add the cross-type reject arms.                */
     {
-        SSFCStrIn_t path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH + 1];
-        char outStr[16];
-        size_t outStrLen;
+        SSFCStrIn_t cPath[SSF_UBJSON_CONFIG_MAX_IN_DEPTH + 1] = { NULL };
+        char shortStr[16];
         uint8_t outBuf[16];
         size_t outBufLen;
-        float outFloat;
         double outDbl;
 
-        memset(path, 0, sizeof(path));
-        path[0] = "k";
+        cPath[0] = "k";
 
         /* Object {key="k", value=uint8 0x05}: GetString rejects (type != STRING).  */
         SSF_ASSERT(SSFUBJsonGetString((uint8_t *)"{i\x01kU\x05}", 7,
-                                       path, outStr, sizeof(outStr), &outStrLen) == false);
+                                       cPath, shortStr, sizeof(shortStr), &outStrLen) == false);
         /* Same shape, GetHex rejects. */
         SSF_ASSERT(SSFUBJsonGetHex((uint8_t *)"{i\x01kU\x05}", 7,
-                                    path, outBuf, sizeof(outBuf), &outBufLen, false) == false);
+                                    cPath, outBuf, sizeof(outBuf), &outBufLen, false) == false);
         /* Same shape, GetBase64 rejects. */
         SSF_ASSERT(SSFUBJsonGetBase64((uint8_t *)"{i\x01kU\x05}", 7,
-                                       path, outBuf, sizeof(outBuf), &outBufLen) == false);
+                                       cPath, outBuf, sizeof(outBuf), &outBufLen) == false);
 
         /* GetFloat called against an int (uint8) value -- type / size mismatch. */
         SSF_ASSERT(SSFUBJsonGetFloat((uint8_t *)"{i\x01kU\x05}", 7,
-                                      path, &outFloat) == false);
+                                      cPath, &outFloat) == false);
         /* GetDouble called against a uint8 value (the dispatcher's case-by-case size guard
            rejects when end - start mismatches the case's type width). */
         SSF_ASSERT(SSFUBJsonGetDouble((uint8_t *)"{i\x01kU\x05}", 7,
-                                       path, &outDbl) == false);
+                                       cPath, &outDbl) == false);
     }
 
     /* ---- SSFUBJsonGetByteArrayPtr: reject every malformed strongly-typed-array header --- */
     /* The well-formed shape is `[$T#NL data...` where T is INT8/UINT8 and N is INT8/UINT8.   */
     /* Each line below mutates one byte to trip a specific guard (lines 697-707).             */
     {
-        SSFCStrIn_t path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH + 1];
-        uint8_t *outPtr;
-        size_t outPtrLen;
-
-        memset(path, 0, sizeof(path));
+        SSFCStrIn_t cPath[SSF_UBJSON_CONFIG_MAX_IN_DEPTH + 1] = { NULL };
 
         /* Reject: top-level value is not an array (jt != ARRAY at line 697). */
         SSF_ASSERT(SSFUBJsonGetByteArrayPtr((uint8_t *)"U\x05", 2,
-                                             path, &outPtr, &outPtrLen) == false);
+                                             cPath, &outPtr, &outPtrLen) == false);
         /* Reject: array body shorter than 6 bytes (line 698 guard). Empty array `[]` is 2.   */
         SSF_ASSERT(SSFUBJsonGetByteArrayPtr((uint8_t *)"[]", 2,
-                                             path, &outPtr, &outPtrLen) == false);
+                                             cPath, &outPtr, &outPtrLen) == false);
         /* Reject: missing $ marker after [ (line 701). Plain typed array syntax: [U\x05]. */
         SSF_ASSERT(SSFUBJsonGetByteArrayPtr((uint8_t *)"[U\x05]", 4,
-                                             path, &outPtr, &outPtrLen) == false);
+                                             cPath, &outPtr, &outPtrLen) == false);
         /* Reject: inner element type is S (string) not int8/uint8 (line 703). */
         SSF_ASSERT(SSFUBJsonGetByteArrayPtr((uint8_t *)"[$S#U\x01U\x02hi", 10,
-                                             path, &outPtr, &outPtrLen) == false);
+                                             cPath, &outPtr, &outPtrLen) == false);
     }
 
     /* ---- Print-side: SSFUBJsonPrintLabel rejects empty label (line 1038). -------------- */

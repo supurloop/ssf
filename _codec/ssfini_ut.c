@@ -1189,7 +1189,6 @@ void SSFINIUnitTest(void)
                                           /* the failure path; we just need to confirm reject */
         char longIni[SSF_INI_GOBJ_CONFIG_MAX_STR_SIZE + 16];
         size_t prefix = strlen("name=");
-        size_t i;
         memcpy(longIni, "name=", prefix);
         for (i = 0; i < SSF_INI_GOBJ_CONFIG_MAX_STR_SIZE + 1u; i++) longIni[prefix + i] = 'x';
         longIni[prefix + SSF_INI_GOBJ_CONFIG_MAX_STR_SIZE + 1u] = '\0';

@@ -1766,7 +1766,7 @@ void SSFJsonUnitTest(void)
     {
         char sOut[64];
         size_t lenOut;
-        SSFCStrIn_t path[SSF_JSON_CONFIG_MAX_IN_DEPTH + 1] = { "k", NULL, NULL, NULL, NULL };
+        SSFCStrIn_t cPath[SSF_JSON_CONFIG_MAX_IN_DEPTH + 1] = { "k", NULL, NULL, NULL, NULL };
 
         /* ssfjson.c:106 - non-zero "0" must be followed by '.', 'e', ',', ']', '}', or WS. */
         SSF_ASSERT(SSFJsonIsValid("[01]") == false);
@@ -1797,23 +1797,22 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(SSFJsonIsValid("[1,2") == false);
 
         /* GetString on a key whose value is not a string returns false. */
-        SSF_ASSERT(SSFJsonGetString("{\"k\":123}", path,
+        SSF_ASSERT(SSFJsonGetString("{\"k\":123}", cPath,
                                     sOut, sizeof(sOut), &lenOut) == false);
 
         /* GetString unescape: each escape sequence maps through ssfjson.c lines 410-414.   */
         SSF_ASSERT(SSFJsonGetString("{\"k\":\"a\\nb\\rc\\td\\fe\\bf\\\\g\\\"h\\/i\"}",
-                                    path, sOut, sizeof(sOut), &lenOut) == true);
+                                    cPath, sOut, sizeof(sOut), &lenOut) == true);
         SSF_ASSERT(strcmp(sOut, "a\nb\rc\td\fe\bf\\g\"h/i") == 0);
 
         /* \uXXXX with 4 valid hex digits unescapes (exercises both byte-pair conversions). */
-        SSF_ASSERT(SSFJsonGetString("{\"k\":\"\\u00FF\"}", path,
+        SSF_ASSERT(SSFJsonGetString("{\"k\":\"\\u00FF\"}", cPath,
                                     sOut, sizeof(sOut), &lenOut) == true);
     }
 
     /* ---- Printer-side escape and buffer-overflow paths --------------------------------- */
     {
         char buf[16];
-        size_t end;
 
         /* ssfjson.c:595-601 - PrintCString writes each escape pattern. */
         end = 0;

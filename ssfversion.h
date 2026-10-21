@@ -117,6 +117,13 @@
 /* 0.1.5 - Fixed nuisance compiler warnings.                                                     */
 /* 0.1.6 - Expanded all unit tests to improve code coverage.                                     */
 /*       - Documentation updates.                                                                */
+/* 0.1.7 - Added ssftrace debug tracing module.                                                  */
+/*       - Added generic object conversions to and from INI format.                              */
+/*       - Added generic object conversions to and from JSON format.                             */
+/*       - Added argument parser module.                                                         */
+/*       - Added CLI framework module.                                                           */
+/*       - Added ANSI/VT100 terminal line editor module.                                         */
+/*       - Resolved some typecast warnings occurring on some platforms.                          */
 /* 0.5.0 - Added ssfsha1, ssfhmac, ssfhkdf, ssfaesctr, and ssfaesccm crypto modules.             */
 /*       - Added ssfchacha20, ssfchacha20poly1305, and ssfpoly1305 crypto modules.               */
 /*       - Added ssfbn arbitrary-precision arithmetic crypto module.                             */

@@ -30,16 +30,18 @@
 /* OF THE POSSIBILITY OF SUCH DAMAGE.                                                            */
 /* --------------------------------------------------------------------------------------------- */
 #include <stdio.h>
-#if !defined(_WIN32)
+#include <stdlib.h>
+#include <string.h>
+#if defined(_WIN32)
+#include <crtdbg.h>
+#else /* _WIN32 */
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
-#include <stdlib.h>
-#include <string.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
-#endif /* !_WIN32 */
+#endif /* _WIN32 */
 #include "ssfassert.h"
 #include "ssfversion.h"
 #include "ssfbfifo.h"
@@ -500,32 +502,284 @@ int main(void)
 
 #else /* _WIN32 */
 
-/* --------------------------------------------------------------------------------------------- */
-/* SSF unit test entry point.                                                                    */
-/* --------------------------------------------------------------------------------------------- */
-int main(void)
+/* Cap on concurrent worker processes; WaitForMultipleObjects() cannot wait on more than this. */
+#define SSF_PARALLEL_MAX_WORKERS MAXIMUM_WAIT_OBJECTS
+
+/* Hidden command line switch that re-launches this executable as a single-test worker. */
+#define SSF_WORKER_ARG "--ssf-worker"
+
+typedef struct
 {
-    size_t i;
+    HANDLE process;
+    HANDLE reader;
+    HANDLE pipe;
+    size_t idx;
     SSFPortTick_t start;
+    char *buf;
+    size_t bufLen;
+    size_t bufCap;
+    bool inUse;
+} SSFTestRun_t;
 
-    printf("\r\n");
-    i = printf("Testing SSF Version %s", SSF_VERSION_STR);
-    SSF_ASSERT(i > 0);
-    printf("\r\n");
-    while (i--) { printf("-"); }
-    printf("\r\n");
+/* --------------------------------------------------------------------------------------------- */
+/* Returns count of logical processors clamped to [1, SSF_PARALLEL_MAX_WORKERS].                 */
+/* --------------------------------------------------------------------------------------------- */
+static int SSFCoreCount(void)
+{
+    SYSTEM_INFO si;
+    DWORD n;
 
-    for (i = 0; i < sizeof(unitTests) / sizeof(SSFUnitTest_t); i++)
+    GetSystemInfo(&si);
+    n = si.dwNumberOfProcessors;
+    if (n < 1) n = 1;
+    if (n > SSF_PARALLEL_MAX_WORKERS) n = SSF_PARALLEL_MAX_WORKERS;
+    return (int)n;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Reader thread: drains run->pipe into run->buf until the worker closes its end of the pipe.    */
+/* --------------------------------------------------------------------------------------------- */
+static DWORD WINAPI SSFReaderThread(LPVOID param)
+{
+    SSFTestRun_t *run = (SSFTestRun_t *)param;
+    char tmp[4096];
+    DWORD n;
+    size_t newCap;
+    char *p;
+
+    SSF_REQUIRE(run != NULL);
+
+    for (;;)
     {
-        printf("Running %20s (%30s) unit test...", unitTests[i].module, unitTests[i].description);
-        fflush(stdout);
-        start = SSFPortGetTick64();
-        unitTests[i].utf();
-        printf("PASSED in %llus\r\n", (SSFPortGetTick64() - start) / SSF_TICKS_PER_SEC);
+        n = 0;
+        if (!ReadFile(run->pipe, tmp, sizeof(tmp), &n, NULL) || (n == 0)) break;
+        if (run->bufLen + (size_t)n + 1 > run->bufCap)
+        {
+            newCap = run->bufCap == 0 ? 8192 : run->bufCap * 2;
+            while (newCap < run->bufLen + (size_t)n + 1) { newCap *= 2; }
+            p = (char *)realloc(run->buf, newCap);
+            SSF_ASSERT(p != NULL);
+            run->buf = p;
+            run->bufCap = newCap;
+        }
+        memcpy(run->buf + run->bufLen, tmp, (size_t)n);
+        run->bufLen += (size_t)n;
+        run->buf[run->bufLen] = '\0';
+    }
+    return 0;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Spawns a worker process to run unitTests[idx] with stdout/stderr captured. Returns true if    */
+/* started.                                                                                      */
+/* --------------------------------------------------------------------------------------------- */
+static bool SSFStartRun(SSFTestRun_t *run, size_t idx)
+{
+    SECURITY_ATTRIBUTES sa;
+    STARTUPINFOA si;
+    PROCESS_INFORMATION pi;
+    HANDLE readEnd;
+    HANDLE writeEnd;
+    char exePath[MAX_PATH];
+    char cmdLine[MAX_PATH + sizeof(SSF_WORKER_ARG) + 32];
+    DWORD len;
+    int n;
+    BOOL ok;
+
+    SSF_REQUIRE(run != NULL);
+    SSF_REQUIRE(idx < sizeof(unitTests) / sizeof(SSFUnitTest_t));
+
+    len = GetModuleFileNameA(NULL, exePath, (DWORD)sizeof(exePath));
+    if ((len == 0) || (len >= sizeof(exePath))) return false;
+    n = snprintf(cmdLine, sizeof(cmdLine), "\"%s\" %s %u", exePath, SSF_WORKER_ARG,
+                 (unsigned int)idx);
+    if ((n < 0) || ((size_t)n >= sizeof(cmdLine))) return false;
+
+    /* The worker inherits the write end only; keep the read end out of every worker process. */
+    memset(&sa, 0, sizeof(sa));
+    sa.nLength = sizeof(sa);
+    sa.bInheritHandle = TRUE;
+    if (!CreatePipe(&readEnd, &writeEnd, &sa, 0)) return false;
+    (void)SetHandleInformation(readEnd, HANDLE_FLAG_INHERIT, 0);
+
+    memset(&si, 0, sizeof(si));
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    si.hStdOutput = writeEnd;
+    si.hStdError = writeEnd;
+    memset(&pi, 0, sizeof(pi));
+
+    /* Workers are started one at a time and the write end is closed immediately, so a pipe is */
+    /* never inherited by any worker other than its own.                                        */
+    ok = CreateProcessA(exePath, cmdLine, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi);
+    (void)CloseHandle(writeEnd);
+    if (!ok) { (void)CloseHandle(readEnd); return false; }
+    (void)CloseHandle(pi.hThread);
+
+    run->process = pi.hProcess;
+    run->pipe = readEnd;
+    run->idx = idx;
+    run->start = SSFPortGetTick64();
+    run->buf = NULL;
+    run->bufLen = 0;
+    run->bufCap = 0;
+    run->inUse = true;
+    run->reader = CreateThread(NULL, 0, SSFReaderThread, run, 0, NULL);
+    if (run->reader == NULL)
+    {
+        (void)TerminateProcess(run->process, 1);
+        (void)CloseHandle(run->process);
+        (void)CloseHandle(run->pipe);
+        memset(run, 0, sizeof(*run));
+        return false;
+    }
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Reaps the finished worker, prints its result line and captured output. Returns true if passed.*/
+/* --------------------------------------------------------------------------------------------- */
+static bool SSFFinishRun(SSFTestRun_t *run)
+{
+    DWORD exitCode;
+    SSFPortTick_t elapsed;
+    bool passed;
+
+    SSF_REQUIRE(run != NULL);
+    SSF_REQUIRE(run->inUse);
+
+    (void)WaitForSingleObject(run->process, INFINITE);
+    /* The reader thread exits once the worker's end of the pipe closes. */
+    (void)WaitForSingleObject(run->reader, INFINITE);
+    exitCode = 1;
+    passed = GetExitCodeProcess(run->process, &exitCode) && (exitCode == 0);
+    (void)CloseHandle(run->reader);
+    (void)CloseHandle(run->process);
+    (void)CloseHandle(run->pipe);
+    elapsed = (SSFPortGetTick64() - run->start) / SSF_TICKS_PER_SEC;
+
+    printf("Running %20s (%30s) unit test...%s in %llus\r\n",
+           unitTests[run->idx].module, unitTests[run->idx].description,
+           passed ? "PASSED" : "FAILED", (unsigned long long)elapsed);
+    if (run->bufLen > 0) { (void)fwrite(run->buf, 1, run->bufLen, stdout); }
+    (void)fflush(stdout);
+    free(run->buf);
+    memset(run, 0, sizeof(*run));
+    return passed;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Worker entry point: runs the single test selected by idxStr. Returns 0 on pass, else non-zero.*/
+/* --------------------------------------------------------------------------------------------- */
+static int SSFWorkerMain(const char *idxStr)
+{
+    char *end;
+    unsigned long idx;
+
+    SSF_REQUIRE(idxStr != NULL);
+
+    /* Never stall a parallel run on a modal dialog: route crashes, abort() and CRT asserts to */
+    /* the exit code and stderr instead.                                                       */
+    (void)SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
+    (void)_set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
+#if defined(_DEBUG)
+    (void)_CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
+    (void)_CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
+    (void)_CrtSetReportMode(_CRT_ERROR, _CRTDBG_MODE_FILE);
+    (void)_CrtSetReportFile(_CRT_ERROR, _CRTDBG_FILE_STDERR);
+#endif /* _DEBUG */
+
+    end = NULL;
+    idx = strtoul(idxStr, &end, 10);
+    if ((end == idxStr) || (*end != '\0') || (idx >= sizeof(unitTests) / sizeof(SSFUnitTest_t)))
+    {
+        printf("SSF worker: invalid test index '%s'\r\n", idxStr);
+        return 2;
+    }
+    unitTests[idx].utf();
+    (void)fflush(stdout);
+    (void)fflush(stderr);
+    return 0;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* SSF unit test entry point. Runs tests in parallel up to host core count.                      */
+/* --------------------------------------------------------------------------------------------- */
+int main(int argc, char *argv[])
+{
+    size_t total;
+    size_t next;
+    size_t done;
+    int cores;
+    bool allPassed;
+    SSFTestRun_t *runs;
+    HANDLE *handles;
+    int *slots;
+    int i;
+    int nWait;
+    DWORD wr;
+    int hdrLen;
+
+    if ((argc == 3) && (strcmp(argv[1], SSF_WORKER_ARG) == 0)) { return SSFWorkerMain(argv[2]); }
+
+    total = sizeof(unitTests) / sizeof(SSFUnitTest_t);
+    next = 0;
+    done = 0;
+    cores = SSFCoreCount();
+    if (total > 0 && (size_t)cores > total) cores = (int)total;
+    if (cores < 1) cores = 1;
+    allPassed = true;
+
+    printf("\r\n");
+    hdrLen = printf("Testing SSF Version %s (parallel x%d)", SSF_VERSION_STR, cores);
+    SSF_ASSERT(hdrLen > 0);
+    printf("\r\n");
+    while (hdrLen--) { printf("-"); }
+    printf("\r\n");
+
+    if (total == 0) { printf("\r\n"); return 0; }
+
+    runs = (SSFTestRun_t *)calloc((size_t)cores, sizeof(SSFTestRun_t));
+    SSF_ASSERT(runs != NULL);
+    handles = (HANDLE *)calloc((size_t)cores, sizeof(HANDLE));
+    SSF_ASSERT(handles != NULL);
+    slots = (int *)calloc((size_t)cores, sizeof(int));
+    SSF_ASSERT(slots != NULL);
+
+    while (done < total)
+    {
+        for (i = 0; i < cores && next < total; i++)
+        {
+            if (!runs[i].inUse)
+            {
+                if (!SSFStartRun(&runs[i], next)) SSF_ERROR();
+                next++;
+            }
+        }
+        nWait = 0;
+        for (i = 0; i < cores; i++)
+        {
+            if (runs[i].inUse)
+            {
+                handles[nWait] = runs[i].process;
+                slots[nWait] = i;
+                nWait++;
+            }
+        }
+        SSF_ASSERT(nWait > 0);
+        wr = WaitForMultipleObjects((DWORD)nWait, handles, FALSE, INFINITE);
+        SSF_ASSERT((wr >= WAIT_OBJECT_0) && (wr < WAIT_OBJECT_0 + (DWORD)nWait));
+        i = slots[wr - WAIT_OBJECT_0];
+        if (!SSFFinishRun(&runs[i])) allPassed = false;
+        done++;
     }
 
+    free(runs);
+    free(handles);
+    free(slots);
     printf("\r\n");
-    return 0;
+    return allPassed ? 0 : 1;
 }
 
 #endif /* _WIN32 */

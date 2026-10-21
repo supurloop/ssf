@@ -79,18 +79,17 @@ SSF_LPTASK_THREAD_SYNC_DECLARATION;
 SSF_LPTASK_THREAD_WAKE_DECLARATION;
 SSF_MAIN_THREAD_WAKE_DECLARATION;
 
-#ifndef _WIN32
+#ifdef _WIN32
+static HANDLE _thread;
+#else
 static pthread_t _thread;
 #endif
 
 /* --------------------------------------------------------------------------------------------- */
-/* Background worker thread.                                                                     */
+/* Background worker thread body, shared by the Windows and pthread entry points below.          */
 /* --------------------------------------------------------------------------------------------- */
-#ifndef _WIN32
-static void *_SSFLPTaskThread(void *arg)
+static void _SSFLPTaskThreadBody(void)
 {
-    (void)arg;
-
     while (_running)
     {
         /* Wait for work (blocks until signalled or shutdown) */
@@ -167,6 +166,23 @@ static void *_SSFLPTaskThread(void *arg)
             SSF_MAIN_THREAD_WAKE_POST();
         }
     }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Platform thread entry points.                                                                 */
+/* --------------------------------------------------------------------------------------------- */
+#ifdef _WIN32
+static DWORD WINAPI _SSFLPTaskThread(LPVOID arg)
+{
+    (void)arg;
+    _SSFLPTaskThreadBody();
+    return 0;
+}
+#else /* _WIN32 */
+static void *_SSFLPTaskThread(void *arg)
+{
+    (void)arg;
+    _SSFLPTaskThreadBody();
     return NULL;
 }
 #endif /* _WIN32 */
@@ -199,9 +215,12 @@ void SSFLPTaskInit(void)
     SSF_LPTASK_THREAD_SYNC_INIT();
     SSF_LPTASK_THREAD_WAKE_INIT();
 
-#ifndef _WIN32
+#ifdef _WIN32
+    _thread = CreateThread(NULL, 0, _SSFLPTaskThread, NULL, 0, NULL);
+    SSF_ASSERT(_thread != NULL);
+#else /* _WIN32 */
     SSF_ASSERT(pthread_create(&_thread, NULL, _SSFLPTaskThread, NULL) == 0);
-#endif
+#endif /* _WIN32 */
 
     _magic = SSF_LPTASK_INIT_MAGIC;
 }
@@ -216,9 +235,13 @@ void SSFLPTaskDeInit(void)
     _running = false;
     SSF_LPTASK_THREAD_WAKE_POST();
 
-#ifndef _WIN32
+#ifdef _WIN32
+    SSF_ASSERT(WaitForSingleObject(_thread, INFINITE) == WAIT_OBJECT_0);
+    (void)CloseHandle(_thread);
+    _thread = NULL;
+#else /* _WIN32 */
     pthread_join(_thread, NULL);
-#endif
+#endif /* _WIN32 */
 
     SSF_LPTASK_THREAD_SYNC_DEINIT();
     SSF_LPTASK_THREAD_WAKE_DEINIT();

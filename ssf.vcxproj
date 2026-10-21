@@ -85,28 +85,30 @@
     <ClCompile>
       <WarningLevel>Level4</WarningLevel>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_DEBUG;_CONSOLE;SSF_CONFIG_HAVE_OPENSSL=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <DisableSpecificWarnings>4820;5045;%(DisableSpecificWarnings)</DisableSpecificWarnings>
-      <AdditionalIncludeDirectories>./_debug;./;./_time;./_struct;./_storage;./_fsm;./_edc;./_ecc;./_codec;./_crypto;./_ui</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>./_debug;./;./_opt;./_osal;./_time;./_struct;./_storage;./_fsm;./_edc;./_ecc;./_codec;./_crypto;./_ui</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>Bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
       <WarningLevel>Level4</WarningLevel>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_DEBUG;_CONSOLE;SSF_CONFIG_HAVE_OPENSSL=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <DisableSpecificWarnings>4820;5045</DisableSpecificWarnings>
-      <AdditionalIncludeDirectories>.\_debug;.\_time;.\_crypto;.\_storage;.\_fsm;.\_struct;.\_edc;.\_ecc;.\_codec;.\_ui;.\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>.\_osal;.\_debug;.\_opt;.\_time;.\_crypto;.\_storage;.\_fsm;.\_struct;.\_edc;.\_ecc;.\_codec;.\_ui;.\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>Bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -115,16 +117,17 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>NDEBUG;_CONSOLE;SSF_CONFIG_HAVE_OPENSSL=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <DisableSpecificWarnings>4820;5045;%(DisableSpecificWarnings)</DisableSpecificWarnings>
-      <AdditionalIncludeDirectories>.\_debug;.\;.\_time;.\_crypto;.\_struct;.\_storage;.\_fsm;.\_edc;.\_ecc;.\_debug;.\_codec;.\_ui</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>.\_debug;.\;.\_opt;.\_osal;.\_time;.\_crypto;.\_struct;.\_storage;.\_fsm;.\_edc;.\_ecc;.\_codec;.\_ui</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>Bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -133,10 +136,10 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>NDEBUG;_CONSOLE;SSF_CONFIG_HAVE_OPENSSL=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <DisableSpecificWarnings>4820;5045</DisableSpecificWarnings>
-      <AdditionalIncludeDirectories>.\_debug;.\_time;.\_codec;.\_crypto;.\_storage;.\_fsm;.\_edc;.\_ecc;.\_struct;.\;.\_ui;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>.\_osal;.\_debug;.\_opt;.\_time;.\_codec;.\_crypto;.\_storage;.\_fsm;.\_edc;.\_ecc;.\_struct;.\;.\_ui;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <Optimization>Full</Optimization>
     </ClCompile>
     <Link>
@@ -144,11 +147,14 @@
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>Bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="main.c" />
     <ClCompile Include="ssfport.c" />
+    <ClCompile Include="_codec\ssfasn1.c" />
+    <ClCompile Include="_codec\ssfasn1_ut.c" />
     <ClCompile Include="_codec\ssfbase64.c" />
     <ClCompile Include="_codec\ssfbase64_ut.c" />
     <ClCompile Include="_codec\ssfdec.c" />
@@ -168,13 +174,45 @@
     <ClCompile Include="_codec\ssfubjson.c" />
     <ClCompile Include="_codec\ssfubjson_ut.c" />
     <ClCompile Include="_crypto\ssfaes.c" />
+    <ClCompile Include="_crypto\ssfaesccm.c" />
+    <ClCompile Include="_crypto\ssfaesccm_ut.c" />
+    <ClCompile Include="_crypto\ssfaesctr.c" />
+    <ClCompile Include="_crypto\ssfaesctr_ut.c" />
     <ClCompile Include="_crypto\ssfaesgcm.c" />
     <ClCompile Include="_crypto\ssfaesgcm_ut.c" />
     <ClCompile Include="_crypto\ssfaes_ut.c" />
+    <ClCompile Include="_crypto\ssfbn.c" />
+    <ClCompile Include="_crypto\ssfbn_ut.c" />
+    <ClCompile Include="_crypto\ssfchacha20.c" />
+    <ClCompile Include="_crypto\ssfchacha20poly1305.c" />
+    <ClCompile Include="_crypto\ssfchacha20poly1305_ut.c" />
+    <ClCompile Include="_crypto\ssfchacha20_ut.c" />
+    <ClCompile Include="_crypto\ssfcrypt.c" />
+    <ClCompile Include="_crypto\ssfcrypt_ut.c" />
+    <ClCompile Include="_crypto\ssfec.c" />
+    <ClCompile Include="_crypto\ssfecdsa.c" />
+    <ClCompile Include="_crypto\ssfecdsa_ut.c" />
+    <ClCompile Include="_crypto\ssfec_ut.c" />
+    <ClCompile Include="_crypto\ssfed25519.c" />
+    <ClCompile Include="_crypto\ssfed25519_ut.c" />
+    <ClCompile Include="_crypto\ssfhkdf.c" />
+    <ClCompile Include="_crypto\ssfhkdf_ut.c" />
+    <ClCompile Include="_crypto\ssfhmac.c" />
+    <ClCompile Include="_crypto\ssfhmac_ut.c" />
+    <ClCompile Include="_crypto\ssfpoly1305.c" />
+    <ClCompile Include="_crypto\ssfpoly1305_ut.c" />
     <ClCompile Include="_crypto\ssfprng.c" />
     <ClCompile Include="_crypto\ssfprng_ut.c" />
+    <ClCompile Include="_crypto\ssfrsa.c" />
+    <ClCompile Include="_crypto\ssfrsa_ut.c" />
+    <ClCompile Include="_crypto\ssfsha1.c" />
+    <ClCompile Include="_crypto\ssfsha1_ut.c" />
     <ClCompile Include="_crypto\ssfsha2.c" />
     <ClCompile Include="_crypto\ssfsha2_ut.c" />
+    <ClCompile Include="_crypto\ssftls.c" />
+    <ClCompile Include="_crypto\ssftls_ut.c" />
+    <ClCompile Include="_crypto\ssfx25519.c" />
+    <ClCompile Include="_crypto\ssfx25519_ut.c" />
     <ClCompile Include="_debug\ssftrace.c" />
     <ClCompile Include="_debug\ssftrace_ut.c" />
     <ClCompile Include="_ecc\ssfrs.c" />
@@ -187,6 +225,8 @@
     <ClCompile Include="_edc\ssffcsum_ut.c" />
     <ClCompile Include="_fsm\ssfsm.c" />
     <ClCompile Include="_fsm\ssfsm_ut.c" />
+    <ClCompile Include="_osal\ssflptask.c" />
+    <ClCompile Include="_osal\ssflptask_ut.c" />
     <ClCompile Include="_storage\ssfcfg.c" />
     <ClCompile Include="_storage\ssfcfg_ut.c" />
     <ClCompile Include="_struct\ssfbfifo.c" />
@@ -197,6 +237,8 @@
     <ClCompile Include="_struct\ssfll_ut.c" />
     <ClCompile Include="_struct\ssfmpool.c" />
     <ClCompile Include="_struct\ssfmpool_ut.c" />
+    <ClCompile Include="_struct\ssfsll.c" />
+    <ClCompile Include="_struct\ssfsll_ut.c" />
     <ClCompile Include="_time\ssfdtime.c" />
     <ClCompile Include="_time\ssfdtime_ut.c" />
     <ClCompile Include="_time\ssfiso8601.c" />
@@ -217,6 +259,7 @@
     <ClInclude Include="ssfoptions.h" />
     <ClInclude Include="ssfport.h" />
     <ClInclude Include="ssfversion.h" />
+    <ClInclude Include="_codec\ssfasn1.h" />
     <ClInclude Include="_codec\ssfbase64.h" />
     <ClInclude Include="_codec\ssfdec.h" />
     <ClInclude Include="_codec\ssfgobj.h" />
@@ -226,21 +269,78 @@
     <ClInclude Include="_codec\ssfstr.h" />
     <ClInclude Include="_codec\ssftlv.h" />
     <ClInclude Include="_codec\ssfubjson.h" />
+    <ClInclude Include="_crypto\cavs_aes_kat.h" />
     <ClInclude Include="_crypto\ssfaes.h" />
+    <ClInclude Include="_crypto\ssfaesccm.h" />
+    <ClInclude Include="_crypto\ssfaesctr.h" />
     <ClInclude Include="_crypto\ssfaesgcm.h" />
+    <ClInclude Include="_crypto\ssfbn.h" />
+    <ClInclude Include="_crypto\ssfchacha20.h" />
+    <ClInclude Include="_crypto\ssfchacha20poly1305.h" />
+    <ClInclude Include="_crypto\ssfcrypt.h" />
+    <ClInclude Include="_crypto\ssfec.h" />
+    <ClInclude Include="_crypto\ssfec_p256_comb_table_h4.h" />
+    <ClInclude Include="_crypto\ssfec_p256_comb_table_h5.h" />
+    <ClInclude Include="_crypto\ssfec_p256_comb_table_h6.h" />
+    <ClInclude Include="_crypto\ssfec_p384_comb_table_h4.h" />
+    <ClInclude Include="_crypto\ssfec_p384_comb_table_h5.h" />
+    <ClInclude Include="_crypto\ssfec_p384_comb_table_h6.h" />
+    <ClInclude Include="_crypto\ssfecdsa.h" />
+    <ClInclude Include="_crypto\ssfed25519.h" />
+    <ClInclude Include="_crypto\ssfhkdf.h" />
+    <ClInclude Include="_crypto\ssfhmac.h" />
+    <ClInclude Include="_crypto\ssfpoly1305.h" />
     <ClInclude Include="_crypto\ssfprng.h" />
+    <ClInclude Include="_crypto\ssfrsa.h" />
+    <ClInclude Include="_crypto\ssfsha1.h" />
     <ClInclude Include="_crypto\ssfsha2.h" />
+    <ClInclude Include="_crypto\ssftls.h" />
+    <ClInclude Include="_crypto\ssfusexport.h" />
+    <ClInclude Include="_crypto\ssfx25519.h" />
+    <ClInclude Include="_crypto\wycheproof_ecdh_p256.h" />
+    <ClInclude Include="_crypto\wycheproof_ecdh_p384.h" />
+    <ClInclude Include="_crypto\wycheproof_ecdsa_p256.h" />
+    <ClInclude Include="_crypto\wycheproof_ecdsa_p384.h" />
+    <ClInclude Include="_crypto\wycheproof_ed25519.h" />
+    <ClInclude Include="_crypto\wycheproof_x25519.h" />
     <ClInclude Include="_debug\ssftrace.h" />
     <ClInclude Include="_ecc\ssfrs.h" />
     <ClInclude Include="_edc\ssfcrc16.h" />
     <ClInclude Include="_edc\ssfcrc32.h" />
     <ClInclude Include="_edc\ssffcsum.h" />
     <ClInclude Include="_fsm\ssfsm.h" />
+    <ClInclude Include="_opt\ssfasn1_opt.h" />
+    <ClInclude Include="_opt\ssfbfifo_opt.h" />
+    <ClInclude Include="_opt\ssfbn_opt.h" />
+    <ClInclude Include="_opt\ssfcfg_opt.h" />
+    <ClInclude Include="_opt\ssfcli_opt.h" />
+    <ClInclude Include="_opt\ssfcrypt_opt.h" />
+    <ClInclude Include="_opt\ssfdtime_opt.h" />
+    <ClInclude Include="_opt\ssfec_opt.h" />
+    <ClInclude Include="_opt\ssfecdsa_opt.h" />
+    <ClInclude Include="_opt\ssfgobj_opt.h" />
+    <ClInclude Include="_opt\ssfheap_opt.h" />
+    <ClInclude Include="_opt\ssfini_opt.h" />
+    <ClInclude Include="_opt\ssfiso8601_opt.h" />
+    <ClInclude Include="_opt\ssfjson_opt.h" />
+    <ClInclude Include="_opt\ssflptask_opt.h" />
+    <ClInclude Include="_opt\ssfmpool_opt.h" />
+    <ClInclude Include="_opt\ssfrs_opt.h" />
+    <ClInclude Include="_opt\ssfrsa_opt.h" />
+    <ClInclude Include="_opt\ssfrtc_opt.h" />
+    <ClInclude Include="_opt\ssfsm_opt.h" />
+    <ClInclude Include="_opt\ssftls_opt.h" />
+    <ClInclude Include="_opt\ssftlv_opt.h" />
+    <ClInclude Include="_opt\ssfubjson_opt.h" />
+    <ClInclude Include="_opt\ssfvted_opt.h" />
+    <ClInclude Include="_opt\ssfx25519_opt.h" />
+    <ClInclude Include="_osal\ssflptask.h" />
     <ClInclude Include="_storage\ssfcfg.h" />
     <ClInclude Include="_struct\ssfbfifo.h" />
     <ClInclude Include="_struct\ssfheap.h" />
     <ClInclude Include="_struct\ssfll.h" />
     <ClInclude Include="_struct\ssfmpool.h" />
+    <ClInclude Include="_struct\ssfsll.h" />
     <ClInclude Include="_time\ssfdtime.h" />
     <ClInclude Include="_time\ssfiso8601.h" />
     <ClInclude Include="_time\ssfrtc.h" />

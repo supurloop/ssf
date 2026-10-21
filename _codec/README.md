@@ -6,6 +6,7 @@ Encoding and decoding interfaces.
 
 | Module | Description | Source Files | Documentation |
 |--------|-------------|--------------|---------------|
+| ssfasn1 | ASN.1 DER encoder/decoder (zero-copy decode + measure-then-write encode; X.509 / PKCS#1 / SEC 1) | ssfasn1.c, ssfasn1.h | [ssfasn1.md](ssfasn1.md) |
 | ssfbase64 | Base64 encoder/decoder | ssfbase64.c, ssfbase64.h | [ssfbase64.md](ssfbase64.md) |
 | ssfdec | Integer to decimal string | ssfdec.c, ssfdec.h | [ssfdec.md](ssfdec.md) |
 | ssfgobj | Generic object parser/generator (BETA) | ssfgobj.c, ssfgobj.h | [ssfgobj.md](ssfgobj.md) |

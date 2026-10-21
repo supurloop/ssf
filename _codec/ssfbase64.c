@@ -72,6 +72,11 @@ uint8_t SSFBase64Dec32To24(const char *b32, uint8_t *b24out, size_t b24outSize)
 
     if (a >= 64 || b >= 64 || c >= 65 || d >= 65) return 0;
     if (c == 64 && d != 64) return 0;
+    /* RFC 4648 Sec. 3.5: when the final quantum of encoded input has fewer than 24 bits of
+     * decoded output, the low bits of the last non-pad character MUST be zero. Rejecting
+     * non-canonical encodings guarantees that decode(encode(x)) == x for every x. */
+    if (c == 64 && (b & 0x0Fu) != 0u) return 0;     /* 1-byte output: b's low 4 bits */
+    if (d == 64 && c != 64 && (c & 0x03u) != 0u) return 0; /* 2-byte output: c's low 2 bits */
     *b24out = (uint8_t)((a << 2) | (b >> 4));
     if (c == 64) return 1;
     if (b24outSize <= 1) return 0;
@@ -136,8 +141,7 @@ bool SSFBase64Encode(const uint8_t *in, size_t inLen, SSFCStrOut_t out, size_t o
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if C string input successfully decoded as output, else false.                    */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFBase64Decode(SSFCStrIn_t in, size_t inLenLim, uint8_t *out, size_t outSize,
-                     size_t *outLen)
+bool SSFBase64Decode(SSFCStrIn_t in, size_t inLenLim, uint8_t *out, size_t outSize, size_t *outLen)
 {
     uint8_t len;
 

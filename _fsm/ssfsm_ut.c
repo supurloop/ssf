@@ -117,9 +117,14 @@ void UT1TestHandler1(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t
         SSFSMPutEvent(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_UTX_1);
         SSFSMPutEvent(SSF_SM_UNIT_TEST_2, SSF_SM_EVENT_UT1_1);
         SSFSMPutEvent(SSF_SM_UNIT_TEST_2, SSF_SM_EVENT_UT1_2);
+        /* (Hardening) InitHandler/DeInitHandler must not be called from within a state handler;    */
+        /* the reentrancy guard traps it (matching SSFSMTask). UT_2 is initialized here, so the     */
+        /* guard -- not the "already de-initialized" precondition -- is what fires, and it aborts    */
+        /* before touching UT_2, leaving the rest of the test undisturbed. */
+        SSF_ASSERT_TEST(SSFSMDeInitHandler(SSF_SM_UNIT_TEST_2));
 #if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 0
         SSF_ASSERT_TEST(SSFSMPutEvent(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_UT1_1));
-#endif        
+#endif
         break;
     case SSF_SM_EVENT_UTX_1:
         if ((data != NULL) && (dataLen == 1))
@@ -558,12 +563,14 @@ void SSFSMUnitTest(void)
     SSF_ASSERT_TEST(SSFSMPutEvent(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_MAX));
     SSF_ASSERT_TEST(SSFSMPutEvent(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_ENTRY));
     SSF_ASSERT_TEST(SSFSMPutEvent(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_EXIT));
+    SSF_ASSERT_TEST(SSFSMPutEvent(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_SUPER));
     SSF_ASSERT_TEST(SSFSMPutEventData(SSF_SM_MIN, SSF_SM_EVENT_UT1_1, NULL, 0));
     SSF_ASSERT_TEST(SSFSMPutEventData(SSF_SM_MAX, SSF_SM_EVENT_UT1_1, NULL, 0));
     SSF_ASSERT_TEST(SSFSMPutEventData(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_MIN, NULL, 0));
     SSF_ASSERT_TEST(SSFSMPutEventData(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_MAX, NULL, 0));
     SSF_ASSERT_TEST(SSFSMPutEventData(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_ENTRY, NULL, 0));
     SSF_ASSERT_TEST(SSFSMPutEventData(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_EXIT, NULL, 0));
+    SSF_ASSERT_TEST(SSFSMPutEventData(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_SUPER, NULL, 0));
     SSF_ASSERT_TEST(SSFSMPutEventData(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_UT1_1, (SSFSMData_t *)"a", 0));
     SSF_ASSERT_TEST(SSFSMPutEventData(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_UT1_1, NULL, 1));
     SSF_ASSERT_TEST(SSFSMPutEventData(SSF_SM_MIN, SSF_SM_EVENT_UT1_1, (SSFSMData_t *)"a", 1));
@@ -572,6 +579,7 @@ void SSFSMUnitTest(void)
     SSF_ASSERT_TEST(SSFSMPutEventData(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_MAX, (SSFSMData_t *)"a", 1));
     SSF_ASSERT_TEST(SSFSMPutEventData(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_ENTRY, (SSFSMData_t *)"a", 1));
     SSF_ASSERT_TEST(SSFSMPutEventData(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_EXIT, (SSFSMData_t *)"a", 1));
+    SSF_ASSERT_TEST(SSFSMPutEventData(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_SUPER, (SSFSMData_t *)"a", 1));
     SSF_ASSERT_TEST(SSFSMPutEventData(SSF_SM_MIN, SSF_SM_EVENT_UT1_1,
                                       (SSFSMData_t *)"1234567890", 10));
     SSF_ASSERT_TEST(SSFSMPutEventData(SSF_SM_MAX, SSF_SM_EVENT_UT1_1,
@@ -585,7 +593,7 @@ void SSFSMUnitTest(void)
     SSF_ASSERT_TEST(SSFSMPutEventData(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_EXIT,
                                       (SSFSMData_t *)"1234567890", 10));
     SSF_ASSERT(SSFSMTask(NULL) == false);
-    nextTimeout = 0;
+    nextTimeout = SSF_SM_MAX_TIMEOUT;
     SSF_ASSERT(SSFSMTask(&nextTimeout) == false);
     SSF_ASSERT(nextTimeout == SSF_SM_MAX_TIMEOUT);
     SSF_ASSERT(_SSFSMFlagsAreCleared());
@@ -601,7 +609,7 @@ void SSFSMUnitTest(void)
     while (SSFSMTask(NULL));
 #else
     SSF_ASSERT(_SSFSMFlagsAreCleared());
-    nextTimeout = 0;
+    nextTimeout = SSF_SM_MAX_TIMEOUT;
     SSF_ASSERT(SSFSMTask(&nextTimeout) == false);
     SSF_ASSERT(nextTimeout == SSF_SM_MAX_TIMEOUT);
 #endif
@@ -671,7 +679,7 @@ void SSFSMUnitTest(void)
 
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_1, 0, SSF_SM_EVENT_UTX_1);
     SSF_ASSERT(_SSFSMFlagsAreCleared());
-    nextTimeout = 0;
+    nextTimeout = SSF_SM_MAX_TIMEOUT;
     SSF_ASSERT(SSFSMTask(&nextTimeout) == true);
     delta = nextTimeout;
     SSF_ASSERT((delta > (0.9 * SSF_TICKS_PER_SEC)) && (delta <= SSF_TICKS_PER_SEC));
@@ -679,7 +687,7 @@ void SSFSMUnitTest(void)
     while (lastTimeout >= nextTimeout)
     {
         lastTimeout = nextTimeout;
-        nextTimeout = 0;
+        nextTimeout = SSF_SM_MAX_TIMEOUT;
         SSF_ASSERT(SSFSMTask(&nextTimeout) == true);
     }
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_1, 0, SSF_SM_EVENT_UT1_1);
@@ -689,14 +697,14 @@ void SSFSMUnitTest(void)
     while (lastTimeout >= nextTimeout)
     {
         lastTimeout = nextTimeout;
-        nextTimeout = 0;
+        nextTimeout = SSF_SM_MAX_TIMEOUT;
         SSFSMTask(&nextTimeout);
     }
     lastTimeout = nextTimeout;
     while (lastTimeout >= nextTimeout)
     {
         lastTimeout = nextTimeout;
-        nextTimeout = 0;
+        nextTimeout = SSF_SM_MAX_TIMEOUT;
         SSFSMTask(&nextTimeout);
     }
     delta = SSFPortGetTick64() - start;
@@ -730,7 +738,7 @@ void SSFSMUnitTest(void)
     while (lastTimeout >= nextTimeout)
     {
         lastTimeout = nextTimeout;
-        nextTimeout = 0;
+        nextTimeout = SSF_SM_MAX_TIMEOUT;
         SSFSMTask(&nextTimeout);
     }
     SSF_ASSERT(SSFSMTask(&nextTimeout) == false);
@@ -753,7 +761,7 @@ void SSFSMUnitTest(void)
     while (lastTimeout >= nextTimeout)
     {
         lastTimeout = nextTimeout;
-        nextTimeout = 0;
+        nextTimeout = SSF_SM_MAX_TIMEOUT;
         SSFSMTask(&nextTimeout);
     }
     SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_2, 1, SSF_SM_EVENT_UT2_2);
@@ -794,6 +802,14 @@ void SSFSMUnitTest(void)
     /* Verify that super cannot have a super */
     SSF_ASSERT_TEST(SSFSMInitHandler(SSF_SM_UNIT_TEST_3, UT3TestHandler2));
 
+    /* The negative test above asserts partway through SSFSMInitHandler (after it has set the       */
+    /* active SM); the SSF_ASSERT_TEST longjmp skips the function's cleanup, leaving the framework  */
+    /* mid-init. In production the assert halts, so this never persists -- but the harness keeps    */
+    /* running, so reset the framework before the positive tests below (the new reentrancy guard    */
+    /* would otherwise trip on the stale active SM). */
+    SSFSMDeInit();
+    SSFSMInit(SSFSM_UT_MAX_EVENTS, SSFSM_UT_MAX_TIMERS);
+
     /* Verify that super entry called for nested initial state */
     _utTraceIndex = 0;
     memset(_utTrace, 0, sizeof(_utTrace));
@@ -819,6 +835,31 @@ void SSFSMUnitTest(void)
     SSF_ASSERT(_utTrace[0] == 2);
     SSF_ASSERT(_utTrace[1] == 1);
 
+    /* Drive runtime transitions to exercise super exit/entry across hierarchy boundaries. */
+    /* The existing init/deinit tests cover super entry/exit at framework boundaries; this  */
+    /* adds the inter-state transition path (ssfsm.c lines 199-216 -- currentSuper !=        */
+    /* nextSuper, with each side independently NULL or non-NULL).                            */
+    /* From the previous block, UT3 is currently initialized to Handler1 (has super).        */
+    {
+        /* Tran Handler1 (super = Handler1Super) -> Handler3 (no super). */
+        _utTraceIndex = 0;
+        memset(_utTrace, 0, sizeof(_utTrace));
+        SSFSMPutEvent(SSF_SM_UNIT_TEST_3, SSF_SM_EVENT_UNIT_TEST_1);
+        while (SSFSMTask(NULL));
+        SSF_ASSERT(_utTrace[0] == 3);   /* Handler1 EXIT */
+        SSF_ASSERT(_utTrace[1] == 4);   /* Handler1Super EXIT */
+        SSF_ASSERT(_utTrace[2] == 5);   /* Handler3 ENTRY */
+
+        /* Tran Handler3 (no super) -> Handler1 (super). */
+        _utTraceIndex = 0;
+        memset(_utTrace, 0, sizeof(_utTrace));
+        SSFSMPutEvent(SSF_SM_UNIT_TEST_3, SSF_SM_EVENT_UNIT_TEST_1);
+        while (SSFSMTask(NULL));
+        SSF_ASSERT(_utTrace[0] == 6);   /* Handler3 EXIT */
+        SSF_ASSERT(_utTrace[1] == 2);   /* Handler1Super ENTRY */
+        SSF_ASSERT(_utTrace[2] == 1);   /* Handler1 ENTRY */
+    }
+
 #if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
     SSFSMInitHandler(SSF_SM_UNIT_TEST_4, UT4TestHandler1);
     SSFSMPutEvent(SSF_SM_UNIT_TEST_4, SSF_SM_EVENT_ABORT_UT4);
@@ -831,8 +872,21 @@ void SSFSMUnitTest(void)
     SSFSMDeInit();
     SSFSMInit(SSFSM_UT_MAX_EVENTS, SSFSM_UT_MAX_TIMERS);
     SSF_ASSERT(SSFSMTask(NULL) == false);
+    nextTimeout = SSF_SM_MAX_TIMEOUT;
     SSF_ASSERT(SSFSMTask(&nextTimeout) == false);
     SSF_ASSERT(nextTimeout == SSF_SM_MAX_TIMEOUT);
+
+    /* (Hardening) The event pool is sized maxEvents + maxTimers, so pending timers cannot starve    */
+    /* queued events. Queue maxEvents + maxTimers events to exercise the full event-pool capacity;   */
+    /* with the old size-maxEvents pool this would exhaust and assert. DeInit drains them unprocessed. */
+    {
+        uint32_t ei;
+        SSFSMInitHandler(SSF_SM_UNIT_TEST_1, UT1TestHandler1);
+        SSF_ASSERT_CLEAR(SSF_SM_UNIT_TEST_1, 0, SSF_SM_EVENT_ENTRY);
+        SSF_ASSERT(_SSFSMFlagsAreCleared());
+        for (ei = 0; ei < SSFSM_UT_MAX_EVENTS + SSFSM_UT_MAX_TIMERS; ei++)
+        { SSFSMPutEvent(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_UT1_1); }
+    }
 
     /* End test */
     SSFSMDeInit();

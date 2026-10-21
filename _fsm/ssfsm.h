@@ -54,7 +54,7 @@ typedef SSFPortTick_t SSFSMTimeout_t;
 typedef void (*SSFSMHandler_t)(SSFSMEventId_t eid, const SSFSMData_t *data,
                                SSFSMDataLen_t dataLen, SSFVoidFn_t *superHandler);
 #define SSF_SM_SUPER(super) *superHandler = (SSFVoidFn_t)super;
-#define SSF_SM_MAX_TIMEOUT ((SSFSMTimeout_t) (-1))
+#define SSF_SM_MAX_TIMEOUT SSF_MAX_NEXT_TIMEOUT
 #define SSF_SM_EVENT_DATA_ALIGN(v) { \
       SSF_ASSERT((sizeof(v) >= dataLen) && (data != NULL)); \
       memcpy(&(v), data, dataLen); }
@@ -68,7 +68,7 @@ void SSFSMInit(uint32_t maxEvents, uint32_t maxTimers);
 void SSFSMDeInit(void);
 void SSFSMInitHandler(SSFSMId_t smid, SSFSMHandler_t initial);
 void SSFSMDeInitHandler(SSFSMId_t smid);
-bool SSFSMTask(SSFSMTimeout_t *nextTimeout);
+bool SSFSMTask(SSFPortTick_t *nextTimeout);
 
 /* May be called from any context when SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1, */
 /* Otherwise must be called from the same single threaded context as above functions */

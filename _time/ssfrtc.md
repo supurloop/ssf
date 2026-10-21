@@ -17,7 +17,7 @@ and resets the tick baseline.
 ## [↑](#ssfrtc--unix-time-rtc-interface) Dependencies
 
 - [`ssfport.h`](../ssfport.h)
-- [`ssfoptions.h`](../ssfoptions.h)
+- [`_opt/ssfrtc_opt.h`](../_opt/ssfrtc_opt.h) (aggregated through `ssfoptions.h`)
 
 <a id="notes"></a>
 
@@ -27,16 +27,17 @@ and resets the tick baseline.
 - `SSFRTCGetUnixNow()` returns time in system ticks (`SSFPortTick_t`); divide by
   `SSF_TICKS_PER_SEC` to obtain whole seconds.
 - When [`SSF_RTC_ENABLE_SIM`](#opt-sim) is `0`, implement the `SSF_RTC_WRITE(unixSec)` and
-  `SSF_RTC_READ(unixSecPtr)` macros in `ssfoptions.h` to map to the target hardware RTC driver.
+  `SSF_RTC_READ(unixSecPtr)` macros in [`_opt/ssfrtc_opt.h`](../_opt/ssfrtc_opt.h) to map to the
+  target hardware RTC driver.
 - The interface is thread-safe when `SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1` and the
-  `SSF_RTC_THREAD_SYNC_*` macros are implemented in `ssfport.h`.
+  `SSF_RTC_THREAD_SYNC_*` macros are implemented in [`_opt/ssfrtc_opt.h`](../_opt/ssfrtc_opt.h).
 - The supported time range is `1970-01-01T00:00:00Z` through `2199-12-31T23:59:59Z`.
 
 <a id="configuration"></a>
 
 ## [↑](#ssfrtc--unix-time-rtc-interface) Configuration
 
-All options are set in `ssfoptions.h`.
+Options live in [`_opt/ssfrtc_opt.h`](../_opt/ssfrtc_opt.h) (aggregated into the build via `ssfoptions.h`).
 
 | Option | Default | Description |
 |--------|---------|-------------|

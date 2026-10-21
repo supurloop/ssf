@@ -15,7 +15,7 @@ All time values are UTC. System ticks are whole seconds scaled by `SSF_TICKS_PER
 ## [↑](#ssfdtime--datetime-struct-conversion) Dependencies
 
 - [`ssfport.h`](../ssfport.h)
-- [`ssfoptions.h`](../ssfoptions.h)
+- [`_opt/ssfdtime_opt.h`](../_opt/ssfdtime_opt.h) (aggregated through `ssfoptions.h`)
 
 <a id="notes"></a>
 
@@ -37,7 +37,7 @@ All time values are UTC. System ticks are whole seconds scaled by `SSF_TICKS_PER
 
 ## [↑](#ssfdtime--datetime-struct-conversion) Configuration
 
-All options are set in `ssfoptions.h`.
+Options live in [`_opt/ssfdtime_opt.h`](../_opt/ssfdtime_opt.h) (aggregated into the build via `ssfoptions.h`).
 
 | Option | Default | Description |
 |--------|---------|-------------|

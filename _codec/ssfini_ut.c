@@ -720,8 +720,16 @@ void SSFINIUnitTest(void)
     SSF_ASSERT(SSFINIGetStrValue("name=hello", NULL, "name", 0, outStr, 6, &outStrLen));
     SSF_ASSERT(outStrLen == 5);
     SSF_ASSERT(strcmp(outStr, "hello") == 0);
+    /* (Hardening) On truncation, return false, leave out as a valid empty string (not the prior   */
+    /* uninitialized contents), and report the required length in outLen. */
+    outStr[0] = 'X';
+    outStrLen = 99;
     SSF_ASSERT(SSFINIGetStrValue("name=hello", NULL, "name", 0, outStr, 5, &outStrLen) == false);
+    SSF_ASSERT(outStr[0] == 0);
+    SSF_ASSERT(outStrLen == 5);
+    outStr[0] = 'X';
     SSF_ASSERT(SSFINIGetStrValue("name=hello", NULL, "name", 0, outStr, 1, &outStrLen) == false);
+    SSF_ASSERT(outStr[0] == 0);
 
     /* SSFINIGetBoolValue with present but non-boolean value */
     SSF_ASSERT(SSFINIGetBoolValue("name=maybe", NULL, "name", 0, &outBool) == false);
@@ -743,6 +751,19 @@ void SSFINIUnitTest(void)
     SSF_ASSERT(SSFINIGetStrValue("name=", NULL, "name", 0, outStr, sizeof(outStr), &outStrLen));
     SSF_ASSERT(outStrLen == 0);
     SSF_ASSERT(outStr[0] == 0);
+
+    /* (Hardening) An INI whose NULL terminator is beyond SSF_INI_CONFIG_MAX_IN_LEN is rejected     */
+    /* (bounded scan), so a valid pair at the start is not found; the same content terminated       */
+    /* within the max is parsed normally. */
+    {
+        static char bigIni[SSF_INI_CONFIG_MAX_IN_LEN + 2];
+        memset(bigIni, '\n', sizeof(bigIni));         /* blank lines, no NULL within the max window */
+        memcpy(bigIni, "name=value\n", 11);           /* a valid pair at the very start */
+        bigIni[SSF_INI_CONFIG_MAX_IN_LEN + 1] = 0;    /* NULL only just past the max probe window */
+        SSF_ASSERT(SSFINIIsNameValuePresent(bigIni, NULL, "name", 0) == false);
+        bigIni[SSF_INI_CONFIG_MAX_IN_LEN - 1] = 0;    /* NULL within the max */
+        SSF_ASSERT(SSFINIIsNameValuePresent(bigIni, NULL, "name", 0) == true);
+    }
 
     /* Generator returns false when buffer is already full */
     iniLen = 0;
@@ -1146,6 +1167,49 @@ void SSFINIUnitTest(void)
         SSF_ASSERT(strcmp(iniStr, srcIni) == 0);
 
         SSFGObjDeInit(&g);
+        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+    }
+
+    /* SSFINIGObjPrint rejects a root that is not an OBJECT type (ssfini.c:829). */
+    {
+        SSFGObj_t *g = NULL;
+        SSF_ASSERT(SSFGObjInit(&g, 0u) == true);
+        SSF_ASSERT(SSFGObjSetString(g, "not-an-object") == true);
+        iniLen = 0;
+        SSF_ASSERT(SSFINIGObjPrint(g, iniStr, sizeof(iniStr), &iniLen,
+                                   SSF_INI_BOOL_TRUE_FALSE, SSF_INI_LF) == false);
+        SSFGObjDeInit(&g);
+        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+    }
+
+    /* SSFINIGObjCreate rejects an INI whose value exceeds                                  */
+    /* SSF_INI_GOBJ_CONFIG_MAX_STR_SIZE (ssfini.c:758). Build "name=" + 257 'x'.              */
+    {
+        SSFGObj_t *g = (SSFGObj_t *)0x1;  /* must be NULL going in -- DeInit caller handles  */
+                                          /* the failure path; we just need to confirm reject */
+        char longIni[SSF_INI_GOBJ_CONFIG_MAX_STR_SIZE + 16];
+        size_t prefix = strlen("name=");
+        memcpy(longIni, "name=", prefix);
+        for (i = 0; i < SSF_INI_GOBJ_CONFIG_MAX_STR_SIZE + 1u; i++) longIni[prefix + i] = 'x';
+        longIni[prefix + SSF_INI_GOBJ_CONFIG_MAX_STR_SIZE + 1u] = '\0';
+        g = NULL;
+        SSF_ASSERT(SSFINIGObjCreate(longIni, &g, 8) == false);
+        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+    }
+
+    /* SSFINIGObjCreate rejects an INI section header with empty name (ssfini.c:704). */
+    {
+        SSFGObj_t *g = NULL;
+        SSF_ASSERT(SSFINIGObjCreate("[]\nname=val\n", &g, 8) == false);
+        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+    }
+
+    /* SSFINIGObjCreate rejects an INI name with empty name (ssfini.c:742). The parser only */
+    /* sets context->name when it sees a non-WS character before '='; an "=val" line ends   */
+    /* up with sectionLen == 0 / nameLen == 0 in the section/name path. Test via "[s]\n=v". */
+    {
+        SSFGObj_t *g = NULL;
+        SSF_ASSERT(SSFINIGObjCreate("[s]\n=val\n", &g, 8) == false);
         SSF_ASSERT(SSFGObjIsMemoryBalanced());
     }
 #endif /* SSF_INI_GOBJ_ENABLE */

@@ -15,7 +15,7 @@ interrupts disabled to safely read and write from the byte FIFO.
 ## [↑](#ssfbfifo--byte-fifo-interface) Dependencies
 
 - [`ssfport.h`](../ssfport.h)
-- [`ssfoptions.h`](../ssfoptions.h)
+- [`_opt/ssfbfifo_opt.h`](../_opt/ssfbfifo_opt.h) (aggregated through `ssfoptions.h`)
 
 <a id="notes"></a>
 
@@ -29,7 +29,7 @@ interrupts disabled to safely read and write from the byte FIFO.
 
 ## [↑](#ssfbfifo--byte-fifo-interface) Configuration
 
-All options are set in `ssfoptions.h`.
+Options live in [`_opt/ssfbfifo_opt.h`](../_opt/ssfbfifo_opt.h) (aggregated into the build via `ssfoptions.h`).
 
 | Option | Default | Description |
 |--------|---------|-------------|

@@ -45,8 +45,7 @@ extern "C" {
 /* --------------------------------------------------------------------------------------------- */
 bool SSFBase64Encode(const uint8_t *in, size_t inLen, SSFCStrOut_t out, size_t outSize,
                      size_t *outLen);
-bool SSFBase64Decode(SSFCStrIn_t in, size_t inLenLim, uint8_t *out, size_t outSize,
-                     size_t *outLen);
+bool SSFBase64Decode(SSFCStrIn_t in, size_t inLenLim, uint8_t *out, size_t outSize, size_t *outLen);
 
 /* --------------------------------------------------------------------------------------------- */
 /* Unit test                                                                                     */

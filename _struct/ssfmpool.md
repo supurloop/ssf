@@ -15,7 +15,7 @@ Each block is guarded by a canary value that detects buffer overruns at free tim
 ## [↑](#ssfmpool--memory-pool-interface) Dependencies
 
 - [`ssfport.h`](../ssfport.h)
-- [`ssfoptions.h`](../ssfoptions.h)
+- [`_opt/ssfmpool_opt.h`](../_opt/ssfmpool_opt.h) (aggregated through `ssfoptions.h`)
 - [ssfll](ssfll.md) — Linked list (used internally)
 
 <a id="notes"></a>
@@ -39,7 +39,7 @@ Each block is guarded by a canary value that detects buffer overruns at free tim
 
 ## [↑](#ssfmpool--memory-pool-interface) Configuration
 
-All options are set in `ssfoptions.h`.
+Options live in [`_opt/ssfmpool_opt.h`](../_opt/ssfmpool_opt.h) (aggregated into the build via `ssfoptions.h`).
 
 | Option | Default | Description |
 |--------|---------|-------------|

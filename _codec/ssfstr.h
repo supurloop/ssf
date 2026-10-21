@@ -56,6 +56,9 @@ typedef enum
 /* --------------------------------------------------------------------------------------------- */
 /* Public Interface                                                                              */
 /* --------------------------------------------------------------------------------------------- */
+char SSFStrCharToLower(char c);
+char SSFStrCharToUpper(char c);
+
 bool SSFStrIsValid(SSFCStrIn_t cstr, size_t cstrSize);
 bool SSFStrLen(SSFCStrIn_t cstr, size_t cstrSize, size_t *cstrLenOut);
 bool SSFStrCat(SSFCStrOut_t cstrDstOut, size_t cstrDstOutSize, size_t *cstrDstOutLenOut,
@@ -68,7 +71,7 @@ bool SSFStrStr(SSFCStrIn_t cstr, size_t cstrSize, SSFCStrIn_t *matchStrOptOut, S
                size_t substrSize);
 bool SSFStrTok(SSFCStrIn_t *cstr, size_t cstrSize, SSFCStrOut_t tokenStrOut, size_t tokenStrSize,
                int32_t *tokenStrLen, SSFCStrIn_t delims, size_t delimsSize);
-  
+
 /* --------------------------------------------------------------------------------------------- */
 /* Unit test                                                                                     */
 /* --------------------------------------------------------------------------------------------- */

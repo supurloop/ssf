@@ -33,6 +33,8 @@
 #include "ssfport.h"
 #include "ssfassert.h"
 #include "ssfsha2.h"
+#include "ssfcrypt.h"
+#include "ssfusexport.h"
 
 /* --------------------------------------------------------------------------------------------- */
 /* Local defines                                                                                 */
@@ -314,14 +316,7 @@ void SSFSHA2_32End(SSFSHA2_32Context_t *context, uint8_t *out, uint32_t outSize)
     }
 
     /* Append big-endian message bit length in last 8 bytes of pad */
-    pad[SSF_SHA256_BLOCK_SIZE_BYTES - 1] = (uint8_t)(totalBits & 0xff);
-    pad[SSF_SHA256_BLOCK_SIZE_BYTES - 2] = (uint8_t)((totalBits >> 8) & 0xff);
-    pad[SSF_SHA256_BLOCK_SIZE_BYTES - 3] = (uint8_t)((totalBits >> 16) & 0xff);
-    pad[SSF_SHA256_BLOCK_SIZE_BYTES - 4] = (uint8_t)((totalBits >> 24) & 0xff);
-    pad[SSF_SHA256_BLOCK_SIZE_BYTES - 5] = (uint8_t)((totalBits >> 32) & 0xff);
-    pad[SSF_SHA256_BLOCK_SIZE_BYTES - 6] = (uint8_t)((totalBits >> 40) & 0xff);
-    pad[SSF_SHA256_BLOCK_SIZE_BYTES - 7] = (uint8_t)((totalBits >> 48) & 0xff);
-    pad[SSF_SHA256_BLOCK_SIZE_BYTES - 8] = (uint8_t)((totalBits >> 56) & 0xff);
+    SSF_PUTU64BE(&pad[SSF_SHA256_BLOCK_SIZE_BYTES - 8], totalBits);
     _SSFSHA2_32Block(context->h, pad);
 
     /* Accumulate hash into out buffer */
@@ -332,10 +327,17 @@ void SSFSHA2_32End(SSFSHA2_32Context_t *context, uint8_t *out, uint32_t outSize)
     tmp = htonl(context->h[4]); memcpy(&out[16], &tmp, sizeof(uint32_t));
     tmp = htonl(context->h[5]); memcpy(&out[20], &tmp, sizeof(uint32_t));
     tmp = htonl(context->h[6]); memcpy(&out[24], &tmp, sizeof(uint32_t));
-    if (context->hashBitSize != 224) { tmp = htonl(context->h[7]); memcpy(&out[28], &tmp, sizeof(uint32_t)); }
+    if (context->hashBitSize != 224)
+    {
+        tmp = htonl(context->h[7]);
+        memcpy(&out[28], &tmp, sizeof(uint32_t));
+    }
+
+    /* Zeroize pad -- it holds trailing message bytes and the encoded bit length. */
+    SSFCryptSecureZero(pad, sizeof(pad));
 
     /* Invalidate context to prevent reuse without re-init */
-    memset(context, 0, sizeof(SSFSHA2_32Context_t));
+    SSFCryptSecureZero(context, sizeof(SSFSHA2_32Context_t));
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -452,15 +454,8 @@ void SSFSHA2_64End(SSFSHA2_64Context_t *context, uint8_t *out, uint32_t outSize)
         pad[context->bufLen] = 0x80;
     }
 
-    /* Append big-endian message bit length in last 16 bytes of pad */
-    pad[SSF_SHA512_BLOCK_SIZE_BYTES - 1] = (uint8_t)(totalBits & 0xff);
-    pad[SSF_SHA512_BLOCK_SIZE_BYTES - 2] = (uint8_t)((totalBits >> 8) & 0xff);
-    pad[SSF_SHA512_BLOCK_SIZE_BYTES - 3] = (uint8_t)((totalBits >> 16) & 0xff);
-    pad[SSF_SHA512_BLOCK_SIZE_BYTES - 4] = (uint8_t)((totalBits >> 24) & 0xff);
-    pad[SSF_SHA512_BLOCK_SIZE_BYTES - 5] = (uint8_t)((totalBits >> 32) & 0xff);
-    pad[SSF_SHA512_BLOCK_SIZE_BYTES - 6] = (uint8_t)((totalBits >> 40) & 0xff);
-    pad[SSF_SHA512_BLOCK_SIZE_BYTES - 7] = (uint8_t)((totalBits >> 48) & 0xff);
-    pad[SSF_SHA512_BLOCK_SIZE_BYTES - 8] = (uint8_t)((totalBits >> 56) & 0xff);
+    /* Append big-endian message bit length in last 16 bytes of pad (upper 8 bytes already zero). */
+    SSF_PUTU64BE(&pad[SSF_SHA512_BLOCK_SIZE_BYTES - 8], totalBits);
     _SSFSHA2_64Block(context->h, pad);
 
     /* Accumulate hash into out buffer */
@@ -484,6 +479,10 @@ void SSFSHA2_64End(SSFSHA2_64Context_t *context, uint8_t *out, uint32_t outSize)
         tmp = htonll(context->h[7]); memcpy(&out[56], &tmp, sizeof(uint64_t));
     }
 
+    /* Zeroize pad -- it holds trailing message bytes and the encoded bit length. */
+    SSFCryptSecureZero(pad, sizeof(pad));
+
     /* Invalidate context to prevent reuse without re-init */
-    memset(context, 0, sizeof(SSFSHA2_64Context_t));
+    SSFCryptSecureZero(context, sizeof(SSFSHA2_64Context_t));
 }
+

@@ -138,8 +138,8 @@ static void _SSFCLIWriteCmds(SSFCLIContext_t *context)
 /* --------------------------------------------------------------------------------------------- */
 /* Inits a CLI context.                                                                          */
 /* --------------------------------------------------------------------------------------------- */
-void SSFCLIInit(SSFCLIContext_t *context, uint16_t maxCmds, uint8_t maxCmdHist,
-                uint8_t *cmdHistBuf, size_t cmdHistBufSize, SSFVTEdContext_t *vtEdCtx)
+void SSFCLIInit(SSFCLIContext_t *context, uint16_t maxCmds, uint8_t maxCmdHist, uint8_t *cmdHistBuf,
+                size_t cmdHistBufSize, SSFVTEdContext_t *vtEdCtx)
 {
     SSF_REQUIRE(context != NULL);
     SSF_REQUIRE(context->magic == 0);

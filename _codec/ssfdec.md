@@ -12,7 +12,6 @@ padding, and parses decimal strings back to integers.
 ## [↑](#ssfdec--integer-to-decimal-string-converter) Dependencies
 
 - [`ssfport.h`](../ssfport.h)
-- [`ssfoptions.h`](../ssfoptions.h)
 
 <a id="notes"></a>
 

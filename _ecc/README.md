@@ -22,7 +22,7 @@ converge on a plausible but incorrect solution without detecting the failure. Se
 ## [↑](#ssfrs--reed-solomon-fec-encoderdecoder) Dependencies
 
 - [`ssfport.h`](../ssfport.h)
-- [`ssfoptions.h`](../ssfoptions.h)
+- [`_opt/ssfrs_opt.h`](../_opt/ssfrs_opt.h) (aggregated through `ssfoptions.h`)
 
 <a id="notes"></a>
 
@@ -51,7 +51,8 @@ converge on a plausible but incorrect solution without detecting the failure. Se
 
 ## [↑](#ssfrs--reed-solomon-fec-encoderdecoder) Configuration
 
-All options are set in `ssfoptions.h`.
+Options live in [`_opt/ssfrs_opt.h`](../_opt/ssfrs_opt.h) (aggregated into the build via
+`ssfoptions.h`).
 
 | Option | Default | Description |
 |--------|---------|-------------|

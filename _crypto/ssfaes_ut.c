@@ -37,6 +37,22 @@
 
 #if SSF_CONFIG_AES_UNIT_TEST == 1
 
+/* Cross-check the SSFAES implementation against OpenSSL's AES via EVP. Enabled when the build is */
+/* linking libcrypto (host macOS/Linux); disabled on cross builds via -DSSF_CONFIG_HAVE_OPENSSL=0  */
+/* (see ssfport.h). When disabled, the FIPS-197 round-trip and Monte-Carlo KAT vectors below are  */
+/* the load-bearing correctness coverage instead.                                                  */
+#if (SSF_CONFIG_HAVE_OPENSSL == 1)
+#define SSF_AES_OSSL_VERIFY 1
+#else
+#define SSF_AES_OSSL_VERIFY 0
+#endif
+
+#if SSF_AES_OSSL_VERIFY == 1
+#include <openssl/evp.h>
+#include <openssl/rand.h>
+#include <string.h>
+#endif
+
 typedef struct SSFAESUT
 {
     uint8_t *in;
@@ -44,7 +60,7 @@ typedef struct SSFAESUT
     uint8_t *out;
 } SSFAESUT_t;
 
-SSFAESUT_t _SSFAES128BlockEncryptMonteUT[] = 
+SSFAESUT_t _SSFAES128BlockEncryptMonteUT[] =
 {
     {
         (uint8_t *)"\xb9\x14\x5a\x76\x8b\x7d\xc4\x89\xa0\x96\xb5\x46\xf4\x3b\x23\x1f",
@@ -108,7 +124,7 @@ SSFAESUT_t _SSFAES128BlockEncryptMonteUT[] =
     }
 };
 
-SSFAESUT_t _SSFAES192BlockEncryptMonteUT[] = 
+SSFAESUT_t _SSFAES192BlockEncryptMonteUT[] =
 {
     {
         (uint8_t *)"\x85\xa1\xf7\xa5\x81\x67\xb3\x89\xcd\xdc\x8a\x9f\xf1\x75\xee\x26",
@@ -172,7 +188,7 @@ SSFAESUT_t _SSFAES192BlockEncryptMonteUT[] =
     }
 };
 
-SSFAESUT_t _SSFAES256BlockEncryptMonteUT[] = 
+SSFAESUT_t _SSFAES256BlockEncryptMonteUT[] =
 {
     {
         (uint8_t *)"\xb3\x79\x77\x7f\x90\x50\xe2\xa8\x18\xf2\x94\x0c\xbb\xd9\xab\xa4",
@@ -236,7 +252,7 @@ SSFAESUT_t _SSFAES256BlockEncryptMonteUT[] =
     }
 };
 
-SSFAESUT_t _SSFAES128BlockDecryptMonteUT[] = 
+SSFAESUT_t _SSFAES128BlockDecryptMonteUT[] =
 {
     {
         (uint8_t *)"\xb0\x8a\x29\xb1\x1a\x50\x0e\xa3\xac\xa4\x2c\x36\x67\x5b\x97\x85",
@@ -300,7 +316,7 @@ SSFAESUT_t _SSFAES128BlockDecryptMonteUT[] =
     }
 };
 
-SSFAESUT_t _SSFAES192BlockDecryptMonteUT[] = 
+SSFAESUT_t _SSFAES192BlockDecryptMonteUT[] =
 {
     {
         (uint8_t *)"\xd0\xbd\x0e\x02\xde\xd1\x55\xe4\x51\x6b\xe8\x3f\x42\xd3\x47\xa4",
@@ -364,7 +380,7 @@ SSFAESUT_t _SSFAES192BlockDecryptMonteUT[] =
     }
 };
 
-SSFAESUT_t _SSFAES256BlockDecryptMonteUT[] = 
+SSFAESUT_t _SSFAES256BlockDecryptMonteUT[] =
 {
     {
         (uint8_t *)"\x89\x64\x9b\xd0\x11\x5f\x30\xbd\x87\x85\x67\x61\x02\x23\xa5\x9d",
@@ -428,6 +444,186 @@ SSFAESUT_t _SSFAES256BlockDecryptMonteUT[] =
     }
 };
 
+#if SSF_AES_OSSL_VERIFY == 1
+
+/* --------------------------------------------------------------------------------------------- */
+/* OpenSSL cross-check helpers.                                                                  */
+/* --------------------------------------------------------------------------------------------- */
+
+/* Encrypt or decrypt one 16-byte AES-ECB block via OpenSSL EVP. Padding is disabled so the call */
+/* is a pure block primitive -- exactly comparable to SSFAESBlockEncrypt/Decrypt.                */
+static void _AESECBViaOpenSSL(uint8_t out[16], const uint8_t in[16],
+                              const uint8_t *key, size_t keyLen, bool encrypt)
+{
+    const EVP_CIPHER *cipher;
+    EVP_CIPHER_CTX *ctx;
+    int outLen = 0;
+    int finalLen = 0;
+
+    switch (keyLen)
+    {
+        case 16: cipher = EVP_aes_128_ecb(); break;
+        case 24: cipher = EVP_aes_192_ecb(); break;
+        case 32: cipher = EVP_aes_256_ecb(); break;
+        default: SSF_ASSERT(false); return;
+    }
+
+    ctx = EVP_CIPHER_CTX_new();
+    SSF_ASSERT(ctx != NULL);
+
+    if (encrypt)
+    {
+        SSF_ASSERT(EVP_EncryptInit_ex(ctx, cipher, NULL, key, NULL) == 1);
+        SSF_ASSERT(EVP_CIPHER_CTX_set_padding(ctx, 0) == 1);
+        SSF_ASSERT(EVP_EncryptUpdate(ctx, out, &outLen, in, 16) == 1);
+        SSF_ASSERT(outLen == 16);
+        SSF_ASSERT(EVP_EncryptFinal_ex(ctx, out + outLen, &finalLen) == 1);
+        SSF_ASSERT(finalLen == 0);
+    }
+    else
+    {
+        SSF_ASSERT(EVP_DecryptInit_ex(ctx, cipher, NULL, key, NULL) == 1);
+        SSF_ASSERT(EVP_CIPHER_CTX_set_padding(ctx, 0) == 1);
+        SSF_ASSERT(EVP_DecryptUpdate(ctx, out, &outLen, in, 16) == 1);
+        SSF_ASSERT(outLen == 16);
+        SSF_ASSERT(EVP_DecryptFinal_ex(ctx, out + outLen, &finalLen) == 1);
+        SSF_ASSERT(finalLen == 0);
+    }
+
+    EVP_CIPHER_CTX_free(ctx);
+}
+
+/* Verify one (key, pt) pair in both directions: SSF encrypt agrees with OpenSSL encrypt, and    */
+/* SSF decrypt of OpenSSL ciphertext recovers the plaintext.                                     */
+static void _VerifyOneAES(const uint8_t *key, size_t keyLen, const uint8_t pt[16])
+{
+    uint8_t ossl[16];
+    uint8_t ssf[16];
+    uint8_t back[16];
+
+    /* Encrypt: SSF must match OpenSSL byte-for-byte. */
+    _AESECBViaOpenSSL(ossl, pt, key, keyLen, true);
+    SSFAESXXXBlockEncrypt(pt, 16, ssf, 16, key, keyLen);
+    SSF_ASSERT(memcmp(ossl, ssf, 16) == 0);
+
+    /* Decrypt: SSF must invert OpenSSL's ciphertext. */
+    SSFAESXXXBlockDecrypt(ossl, 16, back, 16, key, keyLen);
+    SSF_ASSERT(memcmp(back, pt, 16) == 0);
+
+    /* And OpenSSL must invert SSF's ciphertext. */
+    _AESECBViaOpenSSL(back, ssf, key, keyLen, false);
+    SSF_ASSERT(memcmp(back, pt, 16) == 0);
+}
+
+/* Run `iters` random (key, plaintext) pairs at the given key size. */
+static void _VerifyRandomAES(size_t keyLen, uint32_t iters)
+{
+    uint8_t key[32];
+    uint8_t pt[16];
+    uint32_t i;
+
+    SSF_ASSERT(keyLen <= sizeof(key));
+
+    for (i = 0; i < iters; i++)
+    {
+        SSF_ASSERT(RAND_bytes(key, (int)keyLen) == 1);
+        SSF_ASSERT(RAND_bytes(pt, (int)sizeof(pt)) == 1);
+        _VerifyOneAES(key, keyLen, pt);
+    }
+}
+
+/* Cover fixed corner-case shapes (all-zero, all-ones, alternating bits, FIPS-197 example) for   */
+/* every key size. These aren't redundant with the random pass: they pin specific patterns that  */
+/* are likely to appear in regression KATs and worth checking explicitly.                        */
+static void _VerifyAESCornerCases(void)
+{
+    static const uint8_t zeros16[16] = {0};
+    static const uint8_t ones16[16] = {
+        0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu,
+        0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu
+    };
+    static const uint8_t alt55AA[16] = {
+        0x55u, 0xAAu, 0x55u, 0xAAu, 0x55u, 0xAAu, 0x55u, 0xAAu,
+        0x55u, 0xAAu, 0x55u, 0xAAu, 0x55u, 0xAAu, 0x55u, 0xAAu
+    };
+    /* FIPS-197 Appendix A example plaintext. */
+    static const uint8_t fipsPt[16] = {
+        0x00u, 0x11u, 0x22u, 0x33u, 0x44u, 0x55u, 0x66u, 0x77u,
+        0x88u, 0x99u, 0xAAu, 0xBBu, 0xCCu, 0xDDu, 0xEEu, 0xFFu
+    };
+    static const uint8_t keyZeros[32] = {0};
+    static const uint8_t keyOnes[32] = {
+        0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu,
+        0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu,
+        0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu,
+        0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu
+    };
+    static const uint8_t keySeq[32] = {
+        0x00u, 0x01u, 0x02u, 0x03u, 0x04u, 0x05u, 0x06u, 0x07u,
+        0x08u, 0x09u, 0x0Au, 0x0Bu, 0x0Cu, 0x0Du, 0x0Eu, 0x0Fu,
+        0x10u, 0x11u, 0x12u, 0x13u, 0x14u, 0x15u, 0x16u, 0x17u,
+        0x18u, 0x19u, 0x1Au, 0x1Bu, 0x1Cu, 0x1Du, 0x1Eu, 0x1Fu
+    };
+    static const size_t keyLens[] = { 16u, 24u, 32u };
+    size_t k;
+
+    for (k = 0; k < (sizeof(keyLens) / sizeof(keyLens[0])); k++)
+    {
+        size_t kl = keyLens[k];
+        _VerifyOneAES(keyZeros, kl, zeros16);
+        _VerifyOneAES(keyZeros, kl, ones16);
+        _VerifyOneAES(keyZeros, kl, alt55AA);
+        _VerifyOneAES(keyZeros, kl, fipsPt);
+        _VerifyOneAES(keyOnes,  kl, zeros16);
+        _VerifyOneAES(keyOnes,  kl, ones16);
+        _VerifyOneAES(keyOnes,  kl, fipsPt);
+        _VerifyOneAES(keySeq,   kl, zeros16);
+        _VerifyOneAES(keySeq,   kl, fipsPt);
+    }
+}
+
+static void _SSFAESVerifyAgainstOpenSSL(void)
+{
+    static const struct
+    {
+        const char *label;
+        size_t keyLen;
+        uint32_t iters;
+    } sizes[] = {
+        { "AES-128", 16u, 5000u },
+        { "AES-192", 24u, 5000u },
+        { "AES-256", 32u, 5000u },
+    };
+    size_t si;
+
+    /* Deterministic seed so test failures are reproducible. */
+    {
+        static const uint8_t seed[32] = {
+            0x53u, 0x53u, 0x46u, 0x41u, 0x45u, 0x53u, 0x2Du, 0x4Fu,
+            0x53u, 0x53u, 0x4Cu, 0x2Du, 0x56u, 0x45u, 0x52u, 0x49u,
+            0x46u, 0x59u, 0x2Du, 0x53u, 0x45u, 0x45u, 0x44u, 0x2Du,
+            0x32u, 0x30u, 0x32u, 0x36u, 0x2Du, 0x30u, 0x34u, 0x32u
+        };
+        RAND_seed(seed, (int)sizeof(seed));
+    }
+
+    SSF_UT_PRINTF("--- ssfaes OpenSSL cross-check ---\n");
+    SSF_UT_PRINTF("  corner cases (all-zero / all-ones / alt-bits / FIPS-197 PT, all key sizes)... ");
+    fflush(stdout);
+    _VerifyAESCornerCases();
+    SSF_UT_PRINTF("OK\n");
+    for (si = 0; si < (sizeof(sizes) / sizeof(sizes[0])); si++)
+    {
+        SSF_UT_PRINTF("  %-7s x %u iters... ", sizes[si].label, sizes[si].iters);
+        fflush(stdout);
+        _VerifyRandomAES(sizes[si].keyLen, sizes[si].iters);
+        SSF_UT_PRINTF("OK\n");
+    }
+    SSF_UT_PRINTF("--- end OpenSSL cross-check ---\n");
+}
+
+#endif /* SSF_AES_OSSL_VERIFY */
+
 /* --------------------------------------------------------------------------------------------- */
 /* Unit tests the AES external interface.                                                        */
 /* --------------------------------------------------------------------------------------------- */
@@ -437,6 +633,49 @@ void SSFAESUnitTest(void)
     uint8_t out[32];
     uint8_t key[32];
     uint8_t in[16];
+
+    /* ---- (Hardening) Key-schedule API: expand once, matches one-shot, DeInit wipes it ---- */
+    /* Covers AES-128 (nr=10) and AES-256 (nr=14). The one-shot API now routes through this same  */
+    /* schedule path, so all existing KATs also exercise it; this checks the direct entry points   */
+    /* and that DeInit securely zeroes the expanded round keys.                                     */
+    {
+        SSFAESKeySchedule_t sched = {0};   /* must be zeroed before the first Init (magic guard) */
+        uint8_t zeros[sizeof(sched)];
+        uint8_t ref[16];
+        uint8_t ksOut[16];
+        uint8_t back[16];
+        const struct { uint8_t *ky; size_t kl; uint8_t nr; uint8_t nk; } cases[2] = {
+            { _SSFAES128BlockEncryptMonteUT[0].key, 16u, 10u, 4u },
+            { _SSFAES256BlockEncryptMonteUT[0].key, 32u, 14u, 8u }
+        };
+        uint8_t c;
+
+        memset(zeros, 0, sizeof(zeros));
+        for (c = 0u; c < 2u; c++)
+        {
+            uint8_t *pt = _SSFAES128BlockEncryptMonteUT[0].in;
+
+            SSFAESBlockEncrypt(pt, 16, ref, 16, cases[c].ky, cases[c].kl, cases[c].nr, cases[c].nk);
+
+            SSFAESKeyScheduleInit(&sched, cases[c].ky, cases[c].kl);
+            SSFAESKSBlockEncrypt(&sched, pt, 16, ksOut, 16);
+            SSF_ASSERT(memcmp(ksOut, ref, 16) == 0);            /* KS path == one-shot */
+            SSFAESKSBlockEncrypt(&sched, pt, 16, ksOut, 16);    /* reuse the schedule again */
+            SSF_ASSERT(memcmp(ksOut, ref, 16) == 0);
+            SSFAESKSBlockDecrypt(&sched, ksOut, 16, back, 16);  /* round-trips */
+            SSF_ASSERT(memcmp(back, pt, 16) == 0);
+            SSFAESKeyScheduleDeInit(&sched);                    /* DeInit re-zeros for the next Init */
+            SSF_ASSERT(memcmp(&sched, zeros, sizeof(sched)) == 0); /* DeInit wiped the round keys */
+        }
+
+        /* Re-initializing a live (already-magic) schedule must be rejected by the init-once guard. */
+        {
+            SSFAESKeySchedule_t s2 = {0};
+            SSFAESKeyScheduleInit(&s2, _SSFAES128BlockEncryptMonteUT[0].key, 16);
+            SSF_ASSERT_TEST(SSFAESKeyScheduleInit(&s2, _SSFAES128BlockEncryptMonteUT[0].key, 16));
+            SSFAESKeyScheduleDeInit(&s2);
+        }
+    }
 
     SSF_ASSERT_TEST(SSFAES128BlockEncrypt(NULL, 16, out, 16, _SSFAES128BlockEncryptMonteUT[0].key,
                                           16));
@@ -477,7 +716,7 @@ void SSFAESUnitTest(void)
                                           32));
     SSF_ASSERT_TEST(SSFAES256BlockDecrypt(_SSFAES256BlockDecryptMonteUT[0].in, 16, NULL, 16,
                                      _SSFAES256BlockDecryptMonteUT[0].key, 32));
-    SSF_ASSERT_TEST(SSFAES256BlockDecrypt(_SSFAES256BlockDecryptMonteUT[0].in, 16, out, 16, NULL, 
+    SSF_ASSERT_TEST(SSFAES256BlockDecrypt(_SSFAES256BlockDecryptMonteUT[0].in, 16, out, 16, NULL,
                                           32));
 
     memcpy(in, _SSFAES128BlockEncryptMonteUT[0].in, 16);
@@ -513,7 +752,7 @@ void SSFAESUnitTest(void)
 
     memcpy(in, _SSFAES128BlockDecryptMonteUT[0].in, 16);
     memcpy(key, _SSFAES128BlockDecryptMonteUT[0].key, 16);
-    
+
     for (i = 0; i < (sizeof(_SSFAES128BlockDecryptMonteUT) / sizeof(SSFAESUT_t)); i++)
     {
         for (j = 0; j < 9; j++)
@@ -544,7 +783,7 @@ void SSFAESUnitTest(void)
 
     memcpy(in, _SSFAES192BlockEncryptMonteUT[0].in, 16);
     memcpy(key, _SSFAES192BlockEncryptMonteUT[0].key, 24);
-    
+
     for (i = 0; i < (sizeof(_SSFAES192BlockEncryptMonteUT) / sizeof(SSFAESUT_t)); i++)
     {
         for (j = 0; j < 9; j++)
@@ -581,10 +820,10 @@ void SSFAESUnitTest(void)
 
     memcpy(in, _SSFAES192BlockDecryptMonteUT[0].in, 16);
     memcpy(key, _SSFAES192BlockDecryptMonteUT[0].key, 24);
-    
+
     for (i = 0; i < (sizeof(_SSFAES192BlockDecryptMonteUT) / sizeof(SSFAESUT_t)); i++)
     {
-        for (j = 0; j < 9; j++) 
+        for (j = 0; j < 9; j++)
         {
             if (j == 0)
             {
@@ -618,7 +857,7 @@ void SSFAESUnitTest(void)
 
     memcpy(in, _SSFAES256BlockEncryptMonteUT[0].in, 16);
     memcpy(key, _SSFAES256BlockEncryptMonteUT[0].key, 32);
-    
+
     for (i = 0; i < (sizeof(_SSFAES256BlockEncryptMonteUT) / sizeof(SSFAESUT_t)); i++)
     {
         for (j = 0; j < 9; j++)
@@ -796,6 +1035,180 @@ void SSFAESUnitTest(void)
         SSFAES256BlockDecrypt(ct, 16, dec, 16, key256, 32);
         SSF_ASSERT(memcmp(dec, pt, 16) == 0);
     }
+
+    /* ====================================================================================== */
+    /* === NIST CAVS AES KAT vectors (ECB-mode, validates the AES block primitive) =========  */
+    /* ====================================================================================== */
+    /* 2078 vectors across GFSbox / KeySbox / VarKey / VarTxt x {128,192,256} x {ENC,DEC}.    */
+    /* Source: NIST CAVS 11.1 KAT_AES.zip (csrc.nist.gov/.../documents/aes/KAT_AES.zip).      */
+    /* The CAVS framework validates AES-CTR / AES-GCM / AES-CCM by validating the underlying  */
+    /* AES block primitive that they all share -- these vectors cover the structured-input    */
+    /* edge cases (S-box edges, walking-1s key, walking-1s plaintext) that random test sweeps */
+    /* don't reliably reach.                                                                   */
+    {
+        #include "cavs_aes_kat.h"
+
+        uint8_t actual[16];
+
+        /* AES-128 ENCRYPT */
+        for (i = 0; i < SSF_CAVS_AES_KAT_GFSBOX128_ENCRYPT_N; i++)
+        {
+            SSFAES128BlockEncrypt(_kat_GFSbox128_ENCRYPT[i].pt, 16, actual, 16,
+                                  _kat_GFSbox128_ENCRYPT[i].key, 16);
+            SSF_ASSERT(memcmp(actual, _kat_GFSbox128_ENCRYPT[i].ct, 16) == 0);
+        }
+        for (i = 0; i < SSF_CAVS_AES_KAT_KEYSBOX128_ENCRYPT_N; i++)
+        {
+            SSFAES128BlockEncrypt(_kat_KeySbox128_ENCRYPT[i].pt, 16, actual, 16,
+                                  _kat_KeySbox128_ENCRYPT[i].key, 16);
+            SSF_ASSERT(memcmp(actual, _kat_KeySbox128_ENCRYPT[i].ct, 16) == 0);
+        }
+        for (i = 0; i < SSF_CAVS_AES_KAT_VARKEY128_ENCRYPT_N; i++)
+        {
+            SSFAES128BlockEncrypt(_kat_VarKey128_ENCRYPT[i].pt, 16, actual, 16,
+                                  _kat_VarKey128_ENCRYPT[i].key, 16);
+            SSF_ASSERT(memcmp(actual, _kat_VarKey128_ENCRYPT[i].ct, 16) == 0);
+        }
+        for (i = 0; i < SSF_CAVS_AES_KAT_VARTXT128_ENCRYPT_N; i++)
+        {
+            SSFAES128BlockEncrypt(_kat_VarTxt128_ENCRYPT[i].pt, 16, actual, 16,
+                                  _kat_VarTxt128_ENCRYPT[i].key, 16);
+            SSF_ASSERT(memcmp(actual, _kat_VarTxt128_ENCRYPT[i].ct, 16) == 0);
+        }
+
+        /* AES-128 DECRYPT */
+        for (i = 0; i < SSF_CAVS_AES_KAT_GFSBOX128_DECRYPT_N; i++)
+        {
+            SSFAES128BlockDecrypt(_kat_GFSbox128_DECRYPT[i].ct, 16, actual, 16,
+                                  _kat_GFSbox128_DECRYPT[i].key, 16);
+            SSF_ASSERT(memcmp(actual, _kat_GFSbox128_DECRYPT[i].pt, 16) == 0);
+        }
+        for (i = 0; i < SSF_CAVS_AES_KAT_KEYSBOX128_DECRYPT_N; i++)
+        {
+            SSFAES128BlockDecrypt(_kat_KeySbox128_DECRYPT[i].ct, 16, actual, 16,
+                                  _kat_KeySbox128_DECRYPT[i].key, 16);
+            SSF_ASSERT(memcmp(actual, _kat_KeySbox128_DECRYPT[i].pt, 16) == 0);
+        }
+        for (i = 0; i < SSF_CAVS_AES_KAT_VARKEY128_DECRYPT_N; i++)
+        {
+            SSFAES128BlockDecrypt(_kat_VarKey128_DECRYPT[i].ct, 16, actual, 16,
+                                  _kat_VarKey128_DECRYPT[i].key, 16);
+            SSF_ASSERT(memcmp(actual, _kat_VarKey128_DECRYPT[i].pt, 16) == 0);
+        }
+        for (i = 0; i < SSF_CAVS_AES_KAT_VARTXT128_DECRYPT_N; i++)
+        {
+            SSFAES128BlockDecrypt(_kat_VarTxt128_DECRYPT[i].ct, 16, actual, 16,
+                                  _kat_VarTxt128_DECRYPT[i].key, 16);
+            SSF_ASSERT(memcmp(actual, _kat_VarTxt128_DECRYPT[i].pt, 16) == 0);
+        }
+
+        /* AES-192 ENCRYPT / DECRYPT */
+        for (i = 0; i < SSF_CAVS_AES_KAT_GFSBOX192_ENCRYPT_N; i++)
+        {
+            SSFAES192BlockEncrypt(_kat_GFSbox192_ENCRYPT[i].pt, 16, actual, 16,
+                                  _kat_GFSbox192_ENCRYPT[i].key, 24);
+            SSF_ASSERT(memcmp(actual, _kat_GFSbox192_ENCRYPT[i].ct, 16) == 0);
+        }
+        for (i = 0; i < SSF_CAVS_AES_KAT_KEYSBOX192_ENCRYPT_N; i++)
+        {
+            SSFAES192BlockEncrypt(_kat_KeySbox192_ENCRYPT[i].pt, 16, actual, 16,
+                                  _kat_KeySbox192_ENCRYPT[i].key, 24);
+            SSF_ASSERT(memcmp(actual, _kat_KeySbox192_ENCRYPT[i].ct, 16) == 0);
+        }
+        for (i = 0; i < SSF_CAVS_AES_KAT_VARKEY192_ENCRYPT_N; i++)
+        {
+            SSFAES192BlockEncrypt(_kat_VarKey192_ENCRYPT[i].pt, 16, actual, 16,
+                                  _kat_VarKey192_ENCRYPT[i].key, 24);
+            SSF_ASSERT(memcmp(actual, _kat_VarKey192_ENCRYPT[i].ct, 16) == 0);
+        }
+        for (i = 0; i < SSF_CAVS_AES_KAT_VARTXT192_ENCRYPT_N; i++)
+        {
+            SSFAES192BlockEncrypt(_kat_VarTxt192_ENCRYPT[i].pt, 16, actual, 16,
+                                  _kat_VarTxt192_ENCRYPT[i].key, 24);
+            SSF_ASSERT(memcmp(actual, _kat_VarTxt192_ENCRYPT[i].ct, 16) == 0);
+        }
+        for (i = 0; i < SSF_CAVS_AES_KAT_GFSBOX192_DECRYPT_N; i++)
+        {
+            SSFAES192BlockDecrypt(_kat_GFSbox192_DECRYPT[i].ct, 16, actual, 16,
+                                  _kat_GFSbox192_DECRYPT[i].key, 24);
+            SSF_ASSERT(memcmp(actual, _kat_GFSbox192_DECRYPT[i].pt, 16) == 0);
+        }
+        for (i = 0; i < SSF_CAVS_AES_KAT_KEYSBOX192_DECRYPT_N; i++)
+        {
+            SSFAES192BlockDecrypt(_kat_KeySbox192_DECRYPT[i].ct, 16, actual, 16,
+                                  _kat_KeySbox192_DECRYPT[i].key, 24);
+            SSF_ASSERT(memcmp(actual, _kat_KeySbox192_DECRYPT[i].pt, 16) == 0);
+        }
+        for (i = 0; i < SSF_CAVS_AES_KAT_VARKEY192_DECRYPT_N; i++)
+        {
+            SSFAES192BlockDecrypt(_kat_VarKey192_DECRYPT[i].ct, 16, actual, 16,
+                                  _kat_VarKey192_DECRYPT[i].key, 24);
+            SSF_ASSERT(memcmp(actual, _kat_VarKey192_DECRYPT[i].pt, 16) == 0);
+        }
+        for (i = 0; i < SSF_CAVS_AES_KAT_VARTXT192_DECRYPT_N; i++)
+        {
+            SSFAES192BlockDecrypt(_kat_VarTxt192_DECRYPT[i].ct, 16, actual, 16,
+                                  _kat_VarTxt192_DECRYPT[i].key, 24);
+            SSF_ASSERT(memcmp(actual, _kat_VarTxt192_DECRYPT[i].pt, 16) == 0);
+        }
+
+        /* AES-256 ENCRYPT / DECRYPT */
+        for (i = 0; i < SSF_CAVS_AES_KAT_GFSBOX256_ENCRYPT_N; i++)
+        {
+            SSFAES256BlockEncrypt(_kat_GFSbox256_ENCRYPT[i].pt, 16, actual, 16,
+                                  _kat_GFSbox256_ENCRYPT[i].key, 32);
+            SSF_ASSERT(memcmp(actual, _kat_GFSbox256_ENCRYPT[i].ct, 16) == 0);
+        }
+        for (i = 0; i < SSF_CAVS_AES_KAT_KEYSBOX256_ENCRYPT_N; i++)
+        {
+            SSFAES256BlockEncrypt(_kat_KeySbox256_ENCRYPT[i].pt, 16, actual, 16,
+                                  _kat_KeySbox256_ENCRYPT[i].key, 32);
+            SSF_ASSERT(memcmp(actual, _kat_KeySbox256_ENCRYPT[i].ct, 16) == 0);
+        }
+        for (i = 0; i < SSF_CAVS_AES_KAT_VARKEY256_ENCRYPT_N; i++)
+        {
+            SSFAES256BlockEncrypt(_kat_VarKey256_ENCRYPT[i].pt, 16, actual, 16,
+                                  _kat_VarKey256_ENCRYPT[i].key, 32);
+            SSF_ASSERT(memcmp(actual, _kat_VarKey256_ENCRYPT[i].ct, 16) == 0);
+        }
+        for (i = 0; i < SSF_CAVS_AES_KAT_VARTXT256_ENCRYPT_N; i++)
+        {
+            SSFAES256BlockEncrypt(_kat_VarTxt256_ENCRYPT[i].pt, 16, actual, 16,
+                                  _kat_VarTxt256_ENCRYPT[i].key, 32);
+            SSF_ASSERT(memcmp(actual, _kat_VarTxt256_ENCRYPT[i].ct, 16) == 0);
+        }
+        for (i = 0; i < SSF_CAVS_AES_KAT_GFSBOX256_DECRYPT_N; i++)
+        {
+            SSFAES256BlockDecrypt(_kat_GFSbox256_DECRYPT[i].ct, 16, actual, 16,
+                                  _kat_GFSbox256_DECRYPT[i].key, 32);
+            SSF_ASSERT(memcmp(actual, _kat_GFSbox256_DECRYPT[i].pt, 16) == 0);
+        }
+        for (i = 0; i < SSF_CAVS_AES_KAT_KEYSBOX256_DECRYPT_N; i++)
+        {
+            SSFAES256BlockDecrypt(_kat_KeySbox256_DECRYPT[i].ct, 16, actual, 16,
+                                  _kat_KeySbox256_DECRYPT[i].key, 32);
+            SSF_ASSERT(memcmp(actual, _kat_KeySbox256_DECRYPT[i].pt, 16) == 0);
+        }
+        for (i = 0; i < SSF_CAVS_AES_KAT_VARKEY256_DECRYPT_N; i++)
+        {
+            SSFAES256BlockDecrypt(_kat_VarKey256_DECRYPT[i].ct, 16, actual, 16,
+                                  _kat_VarKey256_DECRYPT[i].key, 32);
+            SSF_ASSERT(memcmp(actual, _kat_VarKey256_DECRYPT[i].pt, 16) == 0);
+        }
+        for (i = 0; i < SSF_CAVS_AES_KAT_VARTXT256_DECRYPT_N; i++)
+        {
+            SSFAES256BlockDecrypt(_kat_VarTxt256_DECRYPT[i].ct, 16, actual, 16,
+                                  _kat_VarTxt256_DECRYPT[i].key, 32);
+            SSF_ASSERT(memcmp(actual, _kat_VarTxt256_DECRYPT[i].pt, 16) == 0);
+        }
+
+        SSF_UT_PRINTF("--- NIST CAVS AES KATs: %u vectors pass ---\n",
+                      (unsigned)SSF_CAVS_AES_KAT_TOTAL_N);
+    }
+
+#if SSF_AES_OSSL_VERIFY == 1
+    _SSFAESVerifyAgainstOpenSSL();
+#endif
 }
 #endif /* SSF_CONFIG_AES_UNIT_TEST */
 

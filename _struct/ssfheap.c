@@ -433,8 +433,8 @@ bool SSFHeapAlloc(SSFHeapHandle_t handle, void **memOut, uint32_t memSize, uint8
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if newMemSize allocation returned with data copied, else false.                  */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFHeapAllocResize(SSFHeapHandle_t handle, void** memOut, uint32_t newMemSize,
-                        uint8_t newMark, bool newIsZeroed)
+bool SSFHeapAllocResize(SSFHeapHandle_t handle, void** memOut, uint32_t newMemSize, uint8_t newMark,
+                        bool newIsZeroed)
 {
     SSFHeapPrivateHandle_t *ph;
     SSFHeapBlock_t *hb;

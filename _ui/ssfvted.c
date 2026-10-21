@@ -44,8 +44,8 @@
 /* --------------------------------------------------------------------------------------------- */
 #define SSF_VTED_MAGIC      (0x6ace9108u)
 #define SSF_VTED_IN_ESC     ('\x1b')    /* ANSI ESC introducer */
-#define SSF_VTED_IN_CSI     ('[')       /* CSI — Control Sequence Introducer (after ESC) */
-#define SSF_VTED_IN_SS3     ('O')       /* SS3 — Single Shift 3 (xterm application cursor mode) */
+#define SSF_VTED_IN_CSI     ('[')       /* CSI -- Control Sequence Introducer (after ESC) */
+#define SSF_VTED_IN_SS3     ('O')       /* SS3 -- Single Shift 3 (xterm application cursor mode) */
 #define SSF_VTED_IN_UP      ('A')       /* CSI/SS3 final byte for Arrow Up */
 #define SSF_VTED_IN_DOWN    ('B')       /* CSI/SS3 final byte for Arrow Down */
 #define SSF_VTED_IN_RIGHT   ('C')       /* CSI/SS3 final byte for Arrow Right */
@@ -242,17 +242,17 @@ bool SSFVTEdProcessChar(SSFVTEdContext_t *context, uint8_t inChar, SSFVTEdEscCod
         break;
 
     case SSF_VTED_ESC_STATE_ESC:
-        /* CSI — Control Sequence Introducer */
+        /* CSI -- Control Sequence Introducer */
         if (inChar == SSF_VTED_IN_CSI)
         {
             context->escState = SSF_VTED_ESC_STATE_CSI;
         }
-        /* SS3 — xterm application cursor keys mode */
+        /* SS3 -- xterm application cursor keys mode */
         else if (inChar == SSF_VTED_IN_SS3)
         {
             context->escState = SSF_VTED_ESC_STATE_SS3;
         }
-        /* Another ESC restarts the sequence — stay in ESC state */
+        /* Another ESC restarts the sequence -- stay in ESC state */
         else if (inChar == SSF_VTED_IN_ESC)
         {
             /* No state change */

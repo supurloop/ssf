@@ -34,6 +34,24 @@
 #include "ssfstr.h"
 
 /* --------------------------------------------------------------------------------------------- */
+/* Converts a character to lowercase. Non-alpha characters are returned unchanged.               */
+/* --------------------------------------------------------------------------------------------- */
+char SSFStrCharToLower(char c)
+{
+    if (c >= 'A' && c <= 'Z') return (char)(c + ('a' - 'A'));
+    return c;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Converts a character to uppercase. Non-alpha characters are returned unchanged.               */
+/* --------------------------------------------------------------------------------------------- */
+char SSFStrCharToUpper(char c)
+{
+    if (c >= 'a' && c <= 'z') return (char)(c - ('a' - 'A'));
+    return c;
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Returns true if str is valid, else false.                                                     */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFStrIsValid(SSFCStrIn_t cstr, size_t cstrSize)
@@ -43,7 +61,7 @@ bool SSFStrIsValid(SSFCStrIn_t cstr, size_t cstrSize)
 
     /* Valid size? */
     if (cstrSize == 0) return false;
-    
+
     /* NULL within size bytes? */
     while (cstrSize)
     {
@@ -159,7 +177,6 @@ bool SSFStrCmp(SSFCStrIn_t cstr1, size_t cstr1Size, SSFCStrIn_t cstr2, size_t cs
 /* --------------------------------------------------------------------------------------------- */
 bool SSFStrToCase(SSFCStrOut_t cstrOut, size_t cstrOutSize, SSFSTRCase_t toCase)
 {
-    #define SSFSTR_UPPER_LOWER_DELTA ((int8_t)('a' - 'A'))
     size_t cstrOutLen;
 
     SSF_REQUIRE(cstrOut != NULL);
@@ -173,7 +190,7 @@ bool SSFStrToCase(SSFCStrOut_t cstrOut, size_t cstrOutSize, SSFSTRCase_t toCase)
         case SSF_STR_CASE_LOWER:
             while (cstrOutLen > 0)
             {
-                if ((*cstrOut >= 'A') && (*cstrOut <= 'Z')) (*cstrOut) += SSFSTR_UPPER_LOWER_DELTA;
+                *cstrOut = SSFStrCharToLower(*cstrOut);
                 cstrOut++;
                 cstrOutLen--;
             }
@@ -181,7 +198,7 @@ bool SSFStrToCase(SSFCStrOut_t cstrOut, size_t cstrOutSize, SSFSTRCase_t toCase)
         case SSF_STR_CASE_UPPER:
             while (cstrOutLen > 0)
             {
-                if ((*cstrOut >= 'a') && (*cstrOut <= 'z')) (*cstrOut) -= SSFSTR_UPPER_LOWER_DELTA;
+                *cstrOut = SSFStrCharToUpper(*cstrOut);
                 cstrOut++;
                 cstrOutLen--;
             }
@@ -272,12 +289,12 @@ bool SSFStrTok(SSFCStrIn_t *cstr, size_t cstrSize, SSFCStrOut_t tokenStrOut, siz
 
     /* Iterate over cstr */
     cs = *cstr;
-    while ((*cs != 0) && (cstrSize > 0))
+    while ((cstrSize > 0) && (*cs != 0))
     {
         /* Iterate over delims */
         dlms = delims;
         dlmss = delimsSize;
-        while ((*dlms != 0) && (dlmss > 0))
+        while ((dlmss > 0) && (*dlms != 0))
         {
             /* Delim match? */
             if (*cs == *dlms)
@@ -293,7 +310,7 @@ bool SSFStrTok(SSFCStrIn_t *cstr, size_t cstrSize, SSFCStrOut_t tokenStrOut, siz
         cstrSize--;
     }
 
-tokDone:    
+tokDone:
     /* Enough room to copy token? */
     if ((size_t)((cs - (*cstr)) + 1) <= tokenStrSize)
     {

@@ -118,6 +118,7 @@ static bool _SSFUBJsonArray(const uint8_t *js, size_t jsLen, size_t *index, size
         *index = 0;
     }
     if (depth >= SSF_UBJSON_CONFIG_MAX_IN_DEPTH) return false;
+    if (*index >= jsLen) return false;
     if (js[*index] != UBJ_TYPE_ARRAY_OPEN) return false;
 
     *astart = *index;
@@ -156,8 +157,9 @@ static bool _SSFUBJsonArray(const uint8_t *js, size_t jsLen, size_t *index, size
 
     if ((path != NULL) && (path[depth] != NULL)) memcpy(&pindex, path[depth], sizeof(size_t));
 
-    if (((js[*index] == UBJ_TYPE_ARRAY_CLOSE) && (len == (size_t)-1)) ||
-        ((len != (size_t)-1) && (len == 0))) goto valDone;
+    if ((len != (size_t)-1) && (len == 0)) goto valDone;
+    if (*index >= jsLen) return false;
+    if ((js[*index] == UBJ_TYPE_ARRAY_CLOSE) && (len == (size_t)-1)) goto valDone;
     while (_SSFUBJsonValue(js, jsLen, index, &valStart, &valEnd, path, depth, &djt, t))
     {
         if (pindex == curIndex) { *start = valStart; *end = valEnd; *jt = djt; }
@@ -165,6 +167,7 @@ static bool _SSFUBJsonArray(const uint8_t *js, size_t jsLen, size_t *index, size
         if ((len != (size_t)-1) && (len == 0)) break;
         if (isOpt == false)
         {
+            if (*index >= jsLen) return false;
             if ((js[*index] == UBJ_TYPE_ARRAY_CLOSE) && (len == (size_t)-1)) break;
         }
         curIndex++;
@@ -413,7 +416,7 @@ static bool _SSFJsonNameValue(const uint8_t *js, size_t jsLen, size_t *index, si
 /* Returns true if object found, else false; If true returns type/start/end on path match.       */
 /* --------------------------------------------------------------------------------------------- */
 bool _SSFUBJsonObject(const uint8_t *js, size_t jsLen, size_t *index, size_t *start, size_t *end,
-                     SSFCStrIn_t *path, uint8_t depth, SSFUBJsonType_t *jt)
+                      SSFCStrIn_t *path, uint8_t depth, SSFUBJsonType_t *jt)
 {
     SSF_REQUIRE(js != NULL);
     SSF_REQUIRE(index != NULL);
@@ -429,6 +432,7 @@ bool _SSFUBJsonObject(const uint8_t *js, size_t jsLen, size_t *index, size_t *st
     }
     if (depth >= SSF_UBJSON_CONFIG_MAX_IN_DEPTH) return false;
 
+    if (*index >= jsLen) return false;
     if (js[*index] != UBJ_TYPE_OBJ_OPEN) return false;
     if ((depth != 0) || ((depth == 0) && (path != NULL) && (path[0] == NULL))) *start = *index;
     (*index)++; if (*index >= jsLen) return false;
@@ -441,6 +445,7 @@ bool _SSFUBJsonObject(const uint8_t *js, size_t jsLen, size_t *index, size_t *st
         if (!_SSFJsonNameValue(js, jsLen, index, start, end, path, depth, jt)) return false;
         do
         {
+            if (*index >= jsLen) return false;
             while (js[*index] == UBJ_TYPE_NOOP)
             { (*index)++; if (*index >= jsLen) return false; }
             if (js[*index] == UBJ_TYPE_OBJ_CLOSE) break;
@@ -474,7 +479,7 @@ static bool _SSFUBJsonMessage(const uint8_t *js, size_t jsLen, size_t *index, si
     SSF_REQUIRE(jt != NULL);
 
     if (!_SSFUBJsonObject(js, jsLen, index, start, end, path, depth, jt))
-    { 
+    {
         if (!_SSFUBJsonArray(js, jsLen, index, start, end, &astart, &aend, path, depth, jt))
         { return false; }
     }
@@ -562,8 +567,8 @@ bool SSFUBJsonGetString(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, SSFCStrOut
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if found and converted ASCII Hex string to binary string, else false.            */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFUBJsonGetHex(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, uint8_t *out,
-                     size_t outSize, size_t *outLen, bool rev)
+bool SSFUBJsonGetHex(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, uint8_t *out, size_t outSize,
+                     size_t *outLen, bool rev)
 {
     size_t start;
     size_t end;
@@ -588,8 +593,8 @@ bool SSFUBJsonGetHex(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, uint8_t *out,
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if found and converted Base64 string to binary string, else false.               */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFUBJsonGetBase64(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, uint8_t *out,
-                        size_t outSize, size_t *outLen)
+bool SSFUBJsonGetBase64(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, uint8_t *out, size_t outSize,
+                        size_t *outLen)
 {
     size_t start;
     size_t end;
@@ -1006,7 +1011,7 @@ bool SSFUBJsonPrintHex(uint8_t *js, size_t size, size_t start, size_t *end, uint
 /* Returns true if in binary string added successfully as Base64 string, else false.             */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFUBJsonPrintBase64(uint8_t *js, size_t size, size_t start, size_t *end, uint8_t *in,
-                       size_t inLen)
+                          size_t inLen)
 {
     size_t outLen;
     size_t lenIndex;

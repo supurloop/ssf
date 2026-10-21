@@ -114,7 +114,7 @@ This means that calls into those interfaces from different execution contexts wi
 
 For example, you can have linked list object A in task 1 and linked list object B in task 2 and they will be managed independently and correctly, so long as they are only accessed from the context of their respective task.
 
-To ensure safe operation of the non-renetrant modules in a multi-threaded system SSF_SM_CONFIG_ENABLE_THREAD_SUPPORT must be enabled and synchronization macros must be implemented.
+To ensure safe operation of the non-reentrant modules in a multi-threaded system SSF_CONFIG_ENABLE_THREAD_SUPPORT must be enabled and synchronization macros must be implemented.
 
 ### Deinitialization
 
@@ -140,6 +140,7 @@ Efficient data structure primitives for embedded systems, designed to avoid dyna
 |--------|-------------|-------|------------|------------|------|-----------|
 | [Byte FIFO](_struct/ssfbfifo.md) | Interrupt-safe byte FIFO with single-byte and multi-byte put/get | ~900 B | — | ~80 B | — | Yes |
 | [Linked List](_struct/ssfll.md) | Doubly-linked list supporting FIFO and stack behaviors | ~800 B | — | ~64 B | — | Yes |
+| [Sorted Linked List](_struct/ssfsll.md) | Doubly-linked list with caller-supplied comparison + ascending/descending sort order | ~1 KB | — | ~80 B⁵¹ | — | Yes |
 | [Memory Pool](_struct/ssfmpool.md) | Fixed-size block memory pool with no fragmentation | ~800 B | — | ~96 B | — | Yes |
 | [Heap](_struct/ssfheap.md) | Integrity-checked heap with double-free detection and mark-based ownership tracking | ~3.5 KB | — | ~96 B | — | No¹⁹ |
 
@@ -149,6 +150,7 @@ Encoding and decoding interfaces for common data formats, all with strict buffer
 
 | Module | Description | Flash | Static RAM | Peak Stack | Heap | Reentrant |
 |--------|-------------|-------|------------|------------|------|-----------|
+| [ASN.1 DER](_codec/ssfasn1.md) | ASN.1 DER encoder/decoder (zero-copy decode + measure-then-write encode; X.509 / PKCS#1 / SEC 1 wire formats) | ~3.5 KB | — | ~160 B⁵² | — | Yes |
 | [Base64](_codec/ssfbase64.md) | Base64 encoder/decoder | ~700 B | — | ~64 B | — | Yes |
 | [Hex ASCII](_codec/ssfhex.md) | Binary-to-hex ASCII encoder/decoder | ~600 B | — | ~64 B | — | Yes |
 | [JSON](_codec/ssfjson.md) | JSON parser/generator with path-based field access and in-place update | ~7 KB | — | ~250 B⁹ | — | Yes |
@@ -197,9 +199,25 @@ Cryptographic primitives for hashing, encryption, and random number generation.
 
 | Module | Description | Flash | Static RAM | Peak Stack | Heap | Reentrant |
 |--------|-------------|-------|------------|------------|------|-----------|
+| [SHA-1](_crypto/ssfsha1.md) | SHA-1 hash (RFC 3174; legacy-protocol use only — e.g., RFC 6455 WebSocket handshake) | ~1.5 KB²⁶ | — | ~400 B²⁷ | — | Yes |
 | [SHA-2](_crypto/ssfsha2.md) | SHA-2 hash (SHA-224/256/384/512/512-224/512-256), one-shot and incremental | ~3 KB⁴ | — | ~800 B¹³ | — | Yes |
 | [AES](_crypto/ssfaes.md) | AES block cipher (128/192/256-bit key) | ~2 KB⁵ | — | ~300 B¹⁴ | — | Yes |
 | [AES-GCM](_crypto/ssfaesgcm.md) | AES-GCM authenticated encryption/decryption | ~3.5 KB⁶ | — | ~128 B | — | Yes |
+| [AES-CCM](_crypto/ssfaesccm.md) | AES-CCM AEAD (RFC 3610, NIST SP 800-38C) | ~1.5 KB³⁶ | — | ~450 B³⁷ | — | Yes |
+| [AES-CTR](_crypto/ssfaesctr.md) | AES-CTR confidentiality-only stream cipher (NIST SP 800-38A §6.5) | ~600 B | — | ~120 B | — | Yes |
+| [HMAC](_crypto/ssfhmac.md) | HMAC (RFC 2104) keyed-hash MAC over SHA-1 / SHA-256 / SHA-384 / SHA-512 | ~1 KB²⁸ | — | ~1.3 KB²⁹ | — | Yes |
+| [HKDF](_crypto/ssfhkdf.md) | HKDF (RFC 5869) HMAC-based extract-and-expand key derivation | ~600 B³⁰ | — | ~1.5 KB³¹ | — | Yes |
+| [Poly1305](_crypto/ssfpoly1305.md) | Poly1305 one-time MAC (RFC 7539/8439) | ~1.2 KB | — | ~250 B³² | — | Yes |
+| [ChaCha20](_crypto/ssfchacha20.md) | ChaCha20 stream cipher (RFC 7539/8439) | ~1 KB | — | ~250 B³³ | — | Yes |
+| [ChaCha20-Poly1305](_crypto/ssfchacha20poly1305.md) | ChaCha20-Poly1305 AEAD (RFC 7539/8439) | ~700 B³⁴ | — | ~400 B³⁵ | — | Yes |
+| [Crypto Helpers](_crypto/ssfcrypt.md) | Constant-time byte-buffer equality and secure zeroize for sensitive memory | ~80 B | — | ~32 B | — | Yes |
+| [Big Number](_crypto/ssfbn.md) | Multi-precision big-number arithmetic; foundation for RSA, ECC, and DH | ~10 KB | — | ~12 KB³⁸ | — | Yes |
+| [Elliptic Curve](_crypto/ssfec.md) | NIST P-256 / P-384 point arithmetic (constant-time scalar mul, SEC 1 codec) | ~10 KB³⁹ | — | ~7 KB⁴⁰ | — | Yes |
+| [ECDSA / ECDH](_crypto/ssfecdsa.md) | ECDSA signatures (RFC 6979 deterministic) + ECDH over NIST P-256 / P-384 | ~3.5 KB⁴¹ | — | ~16.5 KB⁴² | — | Yes |
+| [X25519](_crypto/ssfx25519.md) | X25519 key agreement over Curve25519 (RFC 7748) — self-contained, constant-time | ~4 KB⁴³ | — | ~700 B⁴⁴ | — | Yes |
+| [Ed25519](_crypto/ssfed25519.md) | Ed25519 signatures (RFC 8032 pure mode) — deterministic; uses SHA-512 from ssfsha2 | ~12 KB⁴⁵ | — | ~1.5 KB⁴⁶ | — | Yes |
+| [RSA](_crypto/ssfrsa.md) | RSA-2048/3072/4096 signatures (PKCS#1 v1.5 and PSS) + key generation; PKCS#1 DER key format | ~15 KB⁴⁷ | — | ~12 KB⁴⁸ | — | Yes |
+| [TLS 1.3](_crypto/ssftls.md) | TLS 1.3 core building blocks (key schedule, transcript hash, record layer); not a full TLS stack | ~2.5 KB⁴⁹ | — | ~1 KB⁵⁰ | — | Yes |
 | [PRNG](_crypto/ssfprng.md) | Cryptographically capable pseudo-random number generator | ~500 B | — | ~96 B | — | Yes |
 
 ⁴ Includes ~896 B of SHA-256 and SHA-512 round constants. ⁵ Includes 512 B S-box and inverse S-box tables. ⁶ Requires AES module; figure is for GCM logic only.
@@ -207,6 +225,56 @@ Cryptographic primitives for hashing, encryption, and random number generation.
 ¹³ SHA-512 block processing (`_SSFSHA2_64Block`) dominates: the message schedule `w[80]` of `uint64_t` alone consumes 640 B of stack. SHA-256 peak is ~400 B.
 
 ¹⁴ The AES key schedule is expanded into a local `w[60]` array of `uint32_t` (240 B) on every encrypt/decrypt call. The AES-256 key schedule is the worst case.
+
+²⁶ No lookup tables; round constants are four 32-bit immediates inlined into the compression function. Code size is dominated by the 80-round block function.
+
+²⁷ `_SSFSHA1ProcessBlock` allocates the message schedule `w[80]` as a local `uint32_t` array (320 B); the working variables and the call frame make up the remainder.
+
+²⁸ Requires SHA-1 and/or SHA-2 modules; figure is for HMAC dispatch, padding, and key-handling logic only.
+
+²⁹ Peak occurs with HMAC-SHA-512 and a key longer than the 128-byte block: `SSFHMACBegin` holds `keyPrime[128]` and `iKeyPad[128]` on its own frame, plus a temporary `SSFHMACContext_t` for the oversized-key pre-hash, on top of the SHA-512 backend's ~800 B schedule-dominated peak. HMAC-SHA-256 with a block-sized-or-smaller key is ~700 B.
+
+³⁰ Requires HMAC and SHA modules; figure is for HKDF extract/expand logic only.
+
+³¹ Peak occurs in `SSFHKDFExpand` with HKDF-SHA-512: the function frame holds `tPrev[64]`, `tCurr[64]`, and a live `SSFHMACContext_t` across the iteration loop, on top of each nested HMAC-SHA-512 call's own peak. HKDF-SHA-256 is ~1.2 KB.
+
+³² Single-function implementation. The frame holds the 5 × 26-bit accumulator limbs, the clamped `r` and `s` halves of the key, the precomputed `r * 5` reduction operands, 64-bit multiply-accumulate working values, and a 16-byte partial-block buffer.
+
+³³ `SSFChaCha20Encrypt` holds the 16-word `state` (64 B) and a 64-byte keystream `block` buffer; the nested `_SSFChaCha20Block` adds a 16-word working `x` array (64 B). No lookup tables — the round function uses only 32-bit add/XOR/rotate, which is why ChaCha20 is naturally constant-time.
+
+³⁶ Requires AES module; figure is for CCM orchestration, the B₀ / counter block formatting, and CBC-MAC / CTR drivers only.
+
+³⁷ Each outer frame (`SSFAESCCMEncrypt` or `Decrypt`) carries one or two 16-byte tag buffers, then calls `_SSFAESCCMComputeTag` or `_SSFAESCCMCtr` (each with two 16-byte working buffers), which in turn call `SSFAESXXXBlockEncrypt` whose key-schedule expansion dominates the path at ~300 B. The CCM-specific framing is small; the AES backend sets the peak.
+
+³⁸ Peak occurs in `SSFBNModExp` performing a modular exponentiation. `SSFBNModExp` now uses a constant-time fixed-window (k=4) Montgomery exponentiation rather than a bit-by-bit ladder; the working set is dominated by a 16-entry table of Montgomery powers. `SSF_BN_CONFIG_MAX_BITS` is now **auto-derived in `ssfbn.h`** from the enabled algorithm flags: `SSF_RSA_CONFIG_ENABLE_4096` → 8192, `RSA-3072` → 6144, `RSA-2048` → 4096, EC P-384 → 768, P-256-only → 512. At the default RSA-4096 build (cap = 8192) the outer frame holds an `SSFBNMont_t` via `SSFBNMONT_DEFINE` (mod + R² backing arrays + struct ≈ 2 KB), the nested `SSFBNModExpMont` carries `tableStorage[16][SSF_BN_MAX_LIMBS]` (~16 KB) plus three working `SSFBN_t` storage arrays (`aM`, `result`, `picked`, ~1 KB each = ~3 KB) plus the inner-block `one_storage` for the identity (~1 KB), and the deepest call (`SSFBNMontSquare`) adds a `t[(2 × SSF_BN_MAX_LIMBS) + 1]` working buffer (~2 KB). Stack scales linearly with `SSF_BN_CONFIG_MAX_BITS`: roughly halved at the RSA-2048-only cap (4096), and ~1/10 at the ECC-only cap (768). All other entry points are far below this peak.
+
+³⁹ Flash is dominated by the optional fixed-base Lim-Lee comb tables for `SSFECScalarMulBase{P256,P384}` (~12 KB rodata combined at the default `SSF_EC_FIXED_BASE_COMB_H = 6`). The NIST curve parameter constants (six `SSFBN_t` per curve — `p`, `a`, `b`, `gₓ`, `gᵧ`, `n`) are sized to the curve's actual limb count (8 limbs / 32 bytes for P-256, 12 limbs / 48 bytes for P-384) and do NOT scale with `SSF_BN_CONFIG_MAX_BITS` — the rodata cost is ~0.5 KB combined regardless of the BN cap. Disabling `SSF_EC_CONFIG_ENABLE_P384` auto-disables `SSF_EC_CONFIG_FIXED_BASE_P384` and drops ~6 KB; setting `SSF_EC_FIXED_BASE_COMB_H = 4` shrinks the remaining tables to ~2.6 KB at a ~22 % runtime cost in `[k]G`.
+
+⁴⁰ Peak is in `SSFECScalarMul`. ssfec.c's own locals are sized at `SSF_EC_MAX_LIMBS` (8 / 12 limbs for P-256 / P-384), NOT `SSF_BN_MAX_LIMBS` — so the EC-layer frames are independent of the BN cap (a few hundred bytes total: two `SSFECPoint_t` outer + six `SSFBN_t` working values inside `_SSFECPointAddFull`). The deepest call (`SSFBNModMulNIST` → internal `SSFBN_DEFINE(prod, SSF_BN_MAX_LIMBS)`) IS BN-cap sized and dominates the chain peak: ~1 KB at the auto-derived ECC-only cap of 768, scaling linearly to ~2 KB at the default RSA-4096 cap (8192). `SSFECScalarMulDual` has a similar peak (four `SSFECPoint_t` table entries, same inner depth).
+
+⁴¹ Requires ECC and BN modules; figure is for sign / verify / ECDH orchestration, RFC 6979 deterministic-nonce HMAC-DRBG, and DER signature codec only. Key-gen pulls in [`ssfprng`](_crypto/ssfprng.md) too.
+
+⁴² Peak is in `SSFECDSAVerify` on the `SSFECScalarMulDual` path (the 4-entry point table is the largest contributor — footnote ⁴⁰). Verify was refactored in 2026 into three helpers (`_SSFECDSAVerifyInit`, `_SSFECDSAVerifyGetR`, `_SSFECDSAVerifyCheckR`) so that stage-local `SSFBN_t`s (`s`, `e`, `w` in Init; `G` in GetR; `Rx`, `Ry`, `v` in CheckR) are released at helper boundaries and don't compound with the deep scalar-multiply chain. ssfecdsa.c also sizes its `SSFBN_t` and `SSFECPoint_t` locals at `SSF_EC_MAX_LIMBS` (curve-specific 8 / 12 limbs), so the ECDSA-layer frames are independent of `SSF_BN_CONFIG_MAX_BITS`. The chain peak still scales because the deepest `ssfbn` calls (`SSFBNModMulNIST`, `SSFBNModInvExt`) allocate at the BN cap. `SSFECDSASign` uses `SSFECScalarMul` (not Dual) and peaks below Verify; `SSFECDHComputeSecret` peaks lower still. The auto-derived cap (footnote ³⁸) makes ECC-only builds ~10× lighter than the table value, which is measured at the default RSA-4096 cap of 8192.
+
+⁴³ Self-contained — no `ssfbn` or `ssfec` dependency. Own GF(2²⁵⁵−19) arithmetic over 8 × 32-bit limbs (`_fe_t` = 32 B), a constant-time Montgomery ladder, one 32-byte field-prime constant, no lookup tables. Flash is largely independent of other config knobs.
+
+⁴⁴ Peak is in `_x25519_scalar_mul`: 15 `_fe_t` field-element locals (32 B each) plus a 32 B clamped-scalar copy — ~500 B on the ladder frame — plus the nested `_fe_inv` / `_fe_mul` call chain adds ~200 B. Fixed at ~700 B regardless of `SSF_BN_CONFIG_MAX_BITS` (this module does not use `ssfbn`).
+
+⁴⁵ Requires SHA-512 from `ssfsha2`; otherwise self-contained (own GF(2²⁵⁵−19) field arithmetic + twisted-Edwards point arithmetic + scalar-field reduction mod `L`, no `ssfbn` dependency). No precomputed base-point table — Sign and Verify compute scalar multiplication from the base point by double-and-add on demand. Flash is independent of `SSF_BN_CONFIG_MAX_BITS`.
+
+⁴⁶ Peak is along the Sign path: the outer frame carries `h[64] + r_hash[64] + hram[64] + a[32] + nonce[32]` ≈ 256 B plus a `_ge_t R` (~128 B) and a full `SSFSHA2_64Context_t` (~280 B), then nests into `SSFSHA512Update` whose block processing peaks at ~800 B (the SHA-512 message schedule — footnote ¹³). Verify has a similar peak. Fixed regardless of `SSF_BN_CONFIG_MAX_BITS`.
+
+⁴⁷ Requires BN, SHA-2, ASN.1, and PRNG modules; figure is for the RSA module itself — key parsing, PKCS#1 v1.5 + PSS padding, MGF1, CRT dispatch, prime generation, and Miller-Rabin. Disabling `SSF_RSA_CONFIG_ENABLE_KEYGEN` removes ~3 KB; disabling either signature scheme removes another ~1–2 KB.
+
+⁴⁸ Peak is in `SSFRSAKeyGen`. Original monolithic implementation had 13 `SSFBN_t` + block-scope locals in one frame (~9 KB at the prior 4096-bit BN cap), so the MillerRabin-nested chain (`_SSFRSAGenPrime` → `_SSFRSAMillerRabin` → `SSFBNModExp` → ladder) peaked at ~17.6 KB. Refactored in 2026 into three helpers (`_SSFRSAKeyGenPrimes`, `_SSFRSAKeyGenDerive`, `_SSFRSAKeyGenEncode`) so that stage-local `SSFBN_t`s die at helper boundaries: the outer now carries only 7 `SSFBN_t` (`p, q, n, d, dp, dq, qInv`), and the unused `phi` declaration was removed. Sign is the next-largest (outer 8 `SSFBN_t` + `em[512]` + `m, s`, plus the private-op CRT chain). Verify is the cheapest because `e = 65537` is only 17 bits and the public-op ModExp scales with exponent bit-length. All three scale linearly with `SSF_BN_CONFIG_MAX_BITS`: setting `SSF_RSA_CONFIG_ENABLE_4096 = 0` and leaving `ENABLE_2048 = 1` drops the auto-derived cap to 4096 (footnote ³⁸) and roughly halves every stack figure here.
+
+⁴⁹ Requires HMAC, SHA-2, and one or more AEAD backends (AES-GCM / AES-CCM / ChaCha20-Poly1305); figure is for the TLS 1.3 primitives themselves — HKDF-Expand-Label, Derive-Secret, traffic-key derivation, transcript hash wrappers, and record-layer nonce construction + AEAD dispatch. No handshake state machine, certificate validation, or transport I/O is included.
+
+⁵⁰ Peak is inherited from whichever AEAD backend the active cipher suite selects. All five supported suites now have comparable stack footprints in the few-hundred-byte range: AES-GCM and AES-CCM routes through the AES-backed dispatch (~450 B peak, dominated by the AES key schedule), and the ChaCha20-Poly1305 route (~400 B peak, dominated by the Poly1305 context and the ChaCha20 working state after the 2025 streaming refactor). The key-schedule and transcript-hash primitives on their own stay under ~1 KB. Overall TLS 1.3 record-layer peak is ~1 KB regardless of cipher suite.
+
+³⁴ Requires ChaCha20 and Poly1305 modules; figure is for AEAD orchestration and the `_SSFCCPComputeTag` construction helper only.
+
+³⁵ `_SSFCCPComputeTag` now streams the `auth ‖ pad ‖ ct ‖ pad ‖ lengths` construction through the incremental Poly1305 Begin/Update/End interface rather than materialising the full concatenation on the stack. Peak is ~`sizeof(SSFPoly1305Context_t)` (~100 B) + the per-message one-time-key buffer (32 B) + the nested ChaCha20 frame's working state — total ~400 B, independent of record size. (Before the 2025 refactor to the streaming Poly1305 API, the construction buffer was configurable via `SSF_CCP_POLY1305_MAX_INPUT` and defaulted to 17408 B.)
 
 #### [Storage](_storage/README.md)
 
@@ -239,6 +307,20 @@ Debug and diagnostic interfaces for runtime tracing.
 | [Debug Trace](_debug/ssftrace.md) | FIFO-backed debug trace buffer with automatic oldest-byte discard and optional mutex protection | ~200 B | — | ~48 B | — | Yes²⁰ |
 
 ²⁰ Each `SSFTrace_t` instance is independent. When `SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1`, the macros acquire and release a per-instance mutex around each access, making concurrent use from multiple contexts safe.
+
+#### [OS Abstraction](_osal/README.md)
+
+OS abstraction layer interfaces — primitives that wrap platform-specific threading, synchronization, and scheduling so application code can stay platform-neutral.
+
+| Module | Description | Flash | Static RAM | Peak Stack | Heap | Reentrant |
+|--------|-------------|-------|------------|------------|------|-----------|
+| [Low-Priority Task Queue](_osal/ssflptask.md) | Singleton FIFO worker-thread queue for offloading blocking / CPU-intensive work from the main loop; FIFO order, bounded queue depth, optional completion callback | ~1.2 KB | ~450 B⁵³ | ~120 B⁵⁴ | — | Yes⁵⁵ |
+
+⁵³ Static RAM scales with `SSF_LPTASK_CONFIG_MAX_QUEUE_DEPTH` (default `8`). Holds an entry pool sized at the depth (~36 B per entry on 32-bit), two `SSFLL_t` lists, the queue mutex, and the worker-wake primitive (semaphore on Windows; `pthread_cond` + `pthread_mutex` on POSIX). Setting the depth to `2` cuts the entry pool to ~80 B; setting it to `32` raises it to ~1.2 KB.
+
+⁵⁴ Framework-level peak; the user-supplied `workFn(ctx)` and `completeFn(ctx)` add their own peaks on top, executed in the worker-thread context.
+
+⁵⁵ Singleton — one process-wide queue, no per-instance handle. The public API is thread-safe (operations protected by an internal mutex). Multiple priority queues require multiple application-layer worker threads, each with its own [`ssfll`](_struct/ssfll.md)-based queue.
 
 #### [Time](_time/README.md)
 
@@ -275,6 +357,10 @@ User-facing input parsing and presentation interfaces.
 ¹⁵ Each `SSFGObjInit` call allocates one `SSFGObj_t` node struct (~48 B) via system `malloc`. `SSFGObjSetLabel` and `SSFGObjSet*` add further per-field allocations for labels and value data.
 
 ¹⁸ Concurrent calls to `SSFRTCGetUnixNow` from multiple contexts are safe (read-only after init). Enable `SSF_CONFIG_ENABLE_THREAD_SUPPORT` if `SSFRTCSetUnixNow` may be called concurrently with `SSFRTCGetUnixNow`.
+
+⁵¹ Peak stack is dominated by `SSFSLLInsertItem`'s linear scan: a few `SSFSLLItem_t *` working pointers plus the indirect call into the caller's three-way `SSFSLLCompareFn_t`. The caller's compare function adds its own frame on top.
+
+⁵² Peak stack is in the time decoders (`SSFASN1DecGetTime`, `SSFASN1DecGetDateTime`) — the frame holds a `SSFDTimeStruct_t` (~32 B) plus a handful of `uint32_t` field locals (year/month/day/hour/minute/second) plus the parent TLV cursor. All other decoders peak well under this; the encoder pass uses a smaller frame.
 
 <a id="conclusion"></a>
 

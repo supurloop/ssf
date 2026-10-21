@@ -28,146 +28,136 @@
 /* EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE */
 /* GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED    */
 /* AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING     */
-/* NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISE   */
+/* NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED  */
 /* OF THE POSSIBILITY OF SUCH DAMAGE.                                                            */
-/* --------------------------------------------------------------------------------------------- */
-
-/* --------------------------------------------------------------------------------------------- */
-/* Per US export restrictions for open source cryptographic software the Department of Commerce  */
-/* has been notified of the inclusion of cryptographic software in the SSF. This is a copy of    */
-/* the notice emailed on Nov 11, 2021:                                                           */
-/* --------------------------------------------------------------------------------------------- */
-/* Unrestricted Encryption Source Code Notification                                              */
-/* To : crypt@bis.doc.gov; enc@nsa.gov                                                           */
-/* Subject : Addition to SSF Source Code                                                         */
-/* Department of Commerce                                                                        */
-/* Bureau of Export Administration                                                               */
-/* Office of Strategic Trade and Foreign Policy Controls                                         */
-/* 14th Street and Pennsylvania Ave., N.W.                                                       */
-/* Room 2705                                                                                     */
-/* Washington, DC 20230                                                                          */
-/* Re: Unrestricted Encryption Source Code Notification Commodity : Addition to SSF Source Code  */
-/*                                                                                               */
-/* Dear Sir / Madam,                                                                             */
-/*                                                                                               */
-/* Pursuant to paragraph(e)(1) of Part 740.13 of the U.S.Export Administration Regulations       */
-/* ("EAR", 15 CFR Part 730 et seq.), we are providing this written notification of the Internet  */
-/* location of the unrestricted, publicly available Source Code being added to the Small System  */
-/* Framework (SSF) Source Code. SSF Source Code is a free embedded system application framework  */
-/* developed by Supurloop Software LLC in the Public Interest. This notification serves as a     */
-/* notification of an addition of new software to the SSF archive. This archive is updated from  */
-/* time to time, but its location is constant. Therefore this notification serves as a one-time  */
-/* notification for subsequent updates that may occur in the future to the software covered by   */
-/* this notification. Such updates may add or enhance cryptographic functionality of the SSF.    */
-/* The Internet location for the SSF Source Code is: https://github.com/supurloop/ssf            */
-/*                                                                                               */
-/* This site may be mirrored to a number of other sites located outside the United States.       */
-/*                                                                                               */
-/* The following software is being added to the SSF archive:                                     */
-/*                                                                                               */
-/* ssfaes.c, ssfaes.h - AES block encryption.                                                    */
-/* ssfaesgcm.c, ssfaesgcm.h - AES-GCM authenticated encryption.                                  */
-/*                                                                                               */
-/* If you have any questions, please email me at xxx@xxx, or call me on (XXX) XXX-XXXX.          */
-/*                                                                                               */
-/* Sincerely,                                                                                    */
-/* James Higgins                                                                                 */
-/* President                                                                                     */
-/* Supurloop Software LLC                                                                        */
 /* --------------------------------------------------------------------------------------------- */
 #include <stdint.h>
 #include <stdbool.h>
+#include <string.h>
 #include "ssfport.h"
 #include "ssfassert.h"
 #include "ssfaes.h"
+#include "ssfcrypt.h"
+#include "ssfusexport.h"
 
+/* Set by SSFAESKeyScheduleInit, cleared by SSFAESKeyScheduleDeInit ('AESK'). */
+#define SSF_AES_KS_MAGIC (0x4145534Bul)
+
+/* State is four LE-packed u32 columns: c = row0 | (row1<<8) | (row2<<16) | (row3<<24). */
 #define FGFM2(x) ((x<<1) ^ (0x1b & -(x>>7)))
 
-#define BOX_STATE(s, b) \
-    s[0][0] = b[s[0][0]]; s[0][1] = b[s[0][1]]; s[0][2] = b[s[0][2]]; s[0][3] = b[s[0][3]]; \
-    s[1][0] = b[s[1][0]]; s[1][1] = b[s[1][1]]; s[1][2] = b[s[1][2]]; s[1][3] = b[s[1][3]]; \
-    s[2][0] = b[s[2][0]]; s[2][1] = b[s[2][1]]; s[2][2] = b[s[2][2]]; s[2][3] = b[s[2][3]]; \
-    s[3][0] = b[s[3][0]]; s[3][1] = b[s[3][1]]; s[3][2] = b[s[3][2]]; s[3][3] = b[s[3][3]]
+#define ROTR8(x)  (((x) >> 8)  | ((x) << 24))
+#define ROTR16(x) (((x) >> 16) | ((x) << 16))
+#define ROTR24(x) (((x) >> 24) | ((x) << 8))
 
-#define SBOX_STATE(s) BOX_STATE(s, sbox)
-#define INV_SBOX_STATE(s) BOX_STATE(s, inv_sbox)
+/* Packed xtime: multiply each byte of x by 2 in GF(2^8) with poly 0x1B. */
+#define XTIME32(x) ((((x) << 1) & 0xFEFEFEFEu) ^ ((((x) >> 7) & 0x01010101u) * 0x1Bu))
 
-#define SBOX_WORD(x) (sbox[(x & 0xff)] ^ (sbox[((x >> 8) & 0xff)] << 8) \
-    ^ (sbox[((x >> 16) & 0xff)] << 16) ^ (sbox[((x >> 24) & 0xff)] << 24))
+/* Explicit shift-pack so packing matches the LE state convention on big-endian hosts too;
+   gcc/clang collapse this to a single load (+bswap on BE) at -O1+. */
+#define ARRAY_TO_STATE(s, a) do { \
+    (s)[0] =  (uint32_t)(a)[ 0]        | ((uint32_t)(a)[ 1] <<  8) | \
+             ((uint32_t)(a)[ 2] << 16) | ((uint32_t)(a)[ 3] << 24); \
+    (s)[1] =  (uint32_t)(a)[ 4]        | ((uint32_t)(a)[ 5] <<  8) | \
+             ((uint32_t)(a)[ 6] << 16) | ((uint32_t)(a)[ 7] << 24); \
+    (s)[2] =  (uint32_t)(a)[ 8]        | ((uint32_t)(a)[ 9] <<  8) | \
+             ((uint32_t)(a)[10] << 16) | ((uint32_t)(a)[11] << 24); \
+    (s)[3] =  (uint32_t)(a)[12]        | ((uint32_t)(a)[13] <<  8) | \
+             ((uint32_t)(a)[14] << 16) | ((uint32_t)(a)[15] << 24); \
+} while (0)
 
-#define SHIFT_ROWS(s, t) \
-    t = s[1][0]; s[1][0] = s[1][1]; s[1][1] = s[1][2]; s[1][2] = s[1][3]; s[1][3] = t; \
-    t = s[2][0]; s[2][0] = s[2][2]; s[2][2] = t; t = s[2][1]; s[2][1] = s[2][3]; s[2][3] = t; \
-    t = s[3][0]; s[3][0] = s[3][3]; s[3][3] = s[3][2]; s[3][2] = s[3][1]; s[3][1] = t
+#define STATE_TO_ARRAY(s, a) do { \
+    (a)[ 0] = (uint8_t) (s)[0];        (a)[ 1] = (uint8_t)((s)[0] >>  8); \
+    (a)[ 2] = (uint8_t)((s)[0] >> 16); (a)[ 3] = (uint8_t)((s)[0] >> 24); \
+    (a)[ 4] = (uint8_t) (s)[1];        (a)[ 5] = (uint8_t)((s)[1] >>  8); \
+    (a)[ 6] = (uint8_t)((s)[1] >> 16); (a)[ 7] = (uint8_t)((s)[1] >> 24); \
+    (a)[ 8] = (uint8_t) (s)[2];        (a)[ 9] = (uint8_t)((s)[2] >>  8); \
+    (a)[10] = (uint8_t)((s)[2] >> 16); (a)[11] = (uint8_t)((s)[2] >> 24); \
+    (a)[12] = (uint8_t) (s)[3];        (a)[13] = (uint8_t)((s)[3] >>  8); \
+    (a)[14] = (uint8_t)((s)[3] >> 16); (a)[15] = (uint8_t)((s)[3] >> 24); \
+} while (0)
 
-#define INV_SHIFT_ROWS(s, t) \
-    t = s[1][3]; s[1][3] = s[1][2]; s[1][2] = s[1][1]; s[1][1] = s[1][0]; s[1][0] = t; \
-    t = s[2][0]; s[2][0] = s[2][2]; s[2][2] = t; t = s[2][1]; s[2][1] = s[2][3]; s[2][3] = t; \
-    t = s[3][0]; s[3][0] = s[3][1]; s[3][1] = s[3][2]; s[3][2] = s[3][3]; s[3][3] = t
+#define ADD_KEY(s, w, i) do { \
+    (s)[0] ^= (w)[(i) + 0]; \
+    (s)[1] ^= (w)[(i) + 1]; \
+    (s)[2] ^= (w)[(i) + 2]; \
+    (s)[3] ^= (w)[(i) + 3]; \
+} while (0)
 
-#define MIX_COLUMN(s, i, t) \
-    t[4] = s[0][i] ^ s[1][i] ^ s[2][i] ^ s[3][i]; \
-    t[0] = s[0][i] ^ s[1][i]; \
-    t[0] = FGFM2(t[0]) ^ s[0][i] ^ t[4]; \
-    t[1] = s[1][i] ^ s[2][i]; \
-    t[1] = FGFM2(t[1]) ^ s[1][i] ^ t[4]; \
-    t[2] = s[2][i] ^ s[3][i]; \
-    t[2] = FGFM2(t[2]) ^ s[2][i] ^ t[4]; \
-    t[3] = s[3][i] ^ s[0][i]; \
-    t[3] = FGFM2(t[3]) ^ s[3][i] ^ t[4]; \
-    s[0][i] = t[0]; s[1][i] = t[1]; s[2][i] = t[2]; s[3][i] = t[3]
+/* SubBytes + ShiftRows fused: byte at row r col c gathered from col (c+r) mod 4. */
+#define SBOX_SHIFT_ROWS(s, b) do { \
+    uint32_t _c0 = (s)[0], _c1 = (s)[1], _c2 = (s)[2], _c3 = (s)[3]; \
+    (s)[0] = ((uint32_t)(b)[ _c0        & 0xFFu])        | \
+             ((uint32_t)(b)[(_c1 >>  8) & 0xFFu] <<  8)  | \
+             ((uint32_t)(b)[(_c2 >> 16) & 0xFFu] << 16)  | \
+             ((uint32_t)(b)[(_c3 >> 24) & 0xFFu] << 24); \
+    (s)[1] = ((uint32_t)(b)[ _c1        & 0xFFu])        | \
+             ((uint32_t)(b)[(_c2 >>  8) & 0xFFu] <<  8)  | \
+             ((uint32_t)(b)[(_c3 >> 16) & 0xFFu] << 16)  | \
+             ((uint32_t)(b)[(_c0 >> 24) & 0xFFu] << 24); \
+    (s)[2] = ((uint32_t)(b)[ _c2        & 0xFFu])        | \
+             ((uint32_t)(b)[(_c3 >>  8) & 0xFFu] <<  8)  | \
+             ((uint32_t)(b)[(_c0 >> 16) & 0xFFu] << 16)  | \
+             ((uint32_t)(b)[(_c1 >> 24) & 0xFFu] << 24); \
+    (s)[3] = ((uint32_t)(b)[ _c3        & 0xFFu])        | \
+             ((uint32_t)(b)[(_c0 >>  8) & 0xFFu] <<  8)  | \
+             ((uint32_t)(b)[(_c1 >> 16) & 0xFFu] << 16)  | \
+             ((uint32_t)(b)[(_c2 >> 24) & 0xFFu] << 24); \
+} while (0)
 
-#define MIX_COLUMNS(s, t) \
-    MIX_COLUMN(s, 0, t); MIX_COLUMN(s, 1, t); \
-    MIX_COLUMN(s, 2, t); MIX_COLUMN(s, 3, t)
+/* InvSubBytes + InvShiftRows fused: gather from col (c-r) mod 4 (gather pattern reverses). */
+#define INV_SBOX_SHIFT_ROWS(s, b) do { \
+    uint32_t _c0 = (s)[0], _c1 = (s)[1], _c2 = (s)[2], _c3 = (s)[3]; \
+    (s)[0] = ((uint32_t)(b)[ _c0        & 0xFFu])        | \
+             ((uint32_t)(b)[(_c3 >>  8) & 0xFFu] <<  8)  | \
+             ((uint32_t)(b)[(_c2 >> 16) & 0xFFu] << 16)  | \
+             ((uint32_t)(b)[(_c1 >> 24) & 0xFFu] << 24); \
+    (s)[1] = ((uint32_t)(b)[ _c1        & 0xFFu])        | \
+             ((uint32_t)(b)[(_c0 >>  8) & 0xFFu] <<  8)  | \
+             ((uint32_t)(b)[(_c3 >> 16) & 0xFFu] << 16)  | \
+             ((uint32_t)(b)[(_c2 >> 24) & 0xFFu] << 24); \
+    (s)[2] = ((uint32_t)(b)[ _c2        & 0xFFu])        | \
+             ((uint32_t)(b)[(_c1 >>  8) & 0xFFu] <<  8)  | \
+             ((uint32_t)(b)[(_c0 >> 16) & 0xFFu] << 16)  | \
+             ((uint32_t)(b)[(_c3 >> 24) & 0xFFu] << 24); \
+    (s)[3] = ((uint32_t)(b)[ _c3        & 0xFFu])        | \
+             ((uint32_t)(b)[(_c2 >>  8) & 0xFFu] <<  8)  | \
+             ((uint32_t)(b)[(_c1 >> 16) & 0xFFu] << 16)  | \
+             ((uint32_t)(b)[(_c0 >> 24) & 0xFFu] << 24); \
+} while (0)
 
-#define INV_MIX_COLUMNS_PREPROCESS_COLUMN(s, i, t) \
-    t[0] = s[0][i] ^ s[2][i]; \
-    t[0] = FGFM2(t[0]); \
-    t[0] = FGFM2(t[0]); \
-    t[1] = s[1][i] ^ s[3][i]; \
-    t[1] = FGFM2(t[1]); \
-    t[1] = FGFM2(t[1]); \
-    s[0][i] ^= t[0]; \
-    s[1][i] ^= t[1]; \
-    s[2][i] ^= t[0]; \
-    s[3][i] ^= t[1]
+#define SBOX_STATE(s)     SBOX_SHIFT_ROWS((s), sbox)
+#define INV_SBOX_STATE(s) INV_SBOX_SHIFT_ROWS((s), inv_sbox)
 
-#define INV_MIX_COLUMNS(s, t) \
-    INV_MIX_COLUMNS_PREPROCESS_COLUMN(s, 0, t); INV_MIX_COLUMNS_PREPROCESS_COLUMN(s, 1, t); \
-    INV_MIX_COLUMNS_PREPROCESS_COLUMN(s, 2, t); INV_MIX_COLUMNS_PREPROCESS_COLUMN(s, 3, t); \
-    MIX_COLUMNS(s, t)
+/* Word-form MixColumns: 2 rotates + 3 XORs + 1 packed xtime per column. */
+#define MIX_COL_WORD(c) do { \
+    uint32_t _E = (c) ^ ROTR8(c); \
+    uint32_t _T = _E ^ ROTR16(_E); \
+    (c) = (c) ^ _T ^ XTIME32(_E); \
+} while (0)
 
+#define MIX_COLUMNS(s) do { \
+    MIX_COL_WORD((s)[0]); MIX_COL_WORD((s)[1]); \
+    MIX_COL_WORD((s)[2]); MIX_COL_WORD((s)[3]); \
+} while (0)
 
-#define ADD_KEY(s, w, i) \
-    s[0][0] ^= w[i] & 0xff; \
-    s[1][0] ^= (w[i] >> 8) & 0xff; \
-    s[2][0] ^= (w[i] >> 16) & 0xff; \
-    s[3][0] ^= (w[i] >> 24) & 0xff; \
-    s[0][1] ^= w[i + 1] & 0xff; \
-    s[1][1] ^= (w[i + 1] >> 8) & 0xff; \
-    s[2][1] ^= (w[i + 1] >> 16) & 0xff; \
-    s[3][1] ^= (w[i + 1] >> 24) & 0xff; \
-    s[0][2] ^= w[i + 2] & 0xff; \
-    s[1][2] ^= (w[i + 2] >> 8) & 0xff; \
-    s[2][2] ^= (w[i + 2] >> 16) & 0xff; \
-    s[3][2] ^= (w[i + 2] >> 24) & 0xff; \
-    s[0][3] ^= w[i + 3] & 0xff; \
-    s[1][3] ^= (w[i + 3] >> 8) & 0xff; \
-    s[2][3] ^= (w[i + 3] >> 16) & 0xff; \
-    s[3][3] ^= (w[i + 3] >> 24) & 0xff
+/* Inverse MixColumns via Gladman's preprocess-then-MixColumns identity. */
+#define INV_MIX_PRE(c) do { \
+    uint32_t _e = (c) ^ ROTR16(c); \
+    (c) ^= XTIME32(XTIME32(_e)); \
+} while (0)
 
-#define ARRAY_TO_STATE(s, a) \
-    s[0][0] = a[0]; s[0][1] = a[4]; s[0][2] = a[8]; s[0][3] = a[12]; \
-    s[1][0] = a[1]; s[1][1] = a[5]; s[1][2] = a[9]; s[1][3] = a[13]; \
-    s[2][0] = a[2]; s[2][1] = a[6]; s[2][2] = a[10]; s[2][3] = a[14]; \
-    s[3][0] = a[3]; s[3][1] = a[7]; s[3][2] = a[11]; s[3][3] = a[15]
+#define INV_MIX_COLUMNS(s) do { \
+    INV_MIX_PRE((s)[0]); INV_MIX_PRE((s)[1]); \
+    INV_MIX_PRE((s)[2]); INV_MIX_PRE((s)[3]); \
+    MIX_COLUMNS(s); \
+} while (0)
 
-#define STATE_TO_ARRAY(s, a) \
-    a[0] = s[0][0]; a[4] = s[0][1]; a[8] = s[0][2]; a[12] = s[0][3]; \
-    a[1] = s[1][0]; a[5] = s[1][1]; a[9] = s[1][2]; a[13] = s[1][3]; \
-    a[2] = s[2][0]; a[6] = s[2][1]; a[10] = s[2][2]; a[14] = s[2][3]; \
-    a[3] = s[3][0]; a[7] = s[3][1]; a[11] = s[3][2]; a[15] = s[3][3]
+/* Used by key expansion: byte-wise SBOX over a u32 (no row shift). */
+#define SBOX_WORD(x) ((uint32_t)sbox[(x) & 0xFFu] \
+    | ((uint32_t)sbox[((x) >> 8)  & 0xFFu] << 8) \
+    | ((uint32_t)sbox[((x) >> 16) & 0xFFu] << 16) \
+    | ((uint32_t)sbox[((x) >> 24) & 0xFFu] << 24))
 
 
 static const uint8_t sbox[256] =
@@ -190,7 +180,7 @@ static const uint8_t sbox[256] =
     0x8c, 0xa1, 0x89, 0x0d, 0xbf, 0xe6, 0x42, 0x68, 0x41, 0x99, 0x2d, 0x0f, 0xb0, 0x54, 0xbb, 0x16
 };
 
-static const uint8_t inv_sbox[256] = 
+static const uint8_t inv_sbox[256] =
 {
     0x52, 0x09, 0x6a, 0xd5, 0x30, 0x36, 0xa5, 0x38, 0xbf, 0x40, 0xa3, 0x9e, 0x81, 0xf3, 0xd7, 0xfb,
     0x7c, 0xe3, 0x39, 0x82, 0x9b, 0x2f, 0xff, 0x87, 0x34, 0x8e, 0x43, 0x44, 0xc4, 0xde, 0xe9, 0xcb,
@@ -229,21 +219,26 @@ static void _SSFAESKeyExpansion(uint32_t *w, size_t wSize, const uint8_t *key, s
     for (i = 0; i < nk; i++)
     {
         t = i << 2;
-        w[i] = (key[t]) ^ (key[t + 1] << 8) ^ (key[t + 2] << 16) ^ (key[t + 3] << 24);
+        w[i] = ((uint32_t)key[t])              ^ ((uint32_t)key[t + 1] <<  8) ^
+               ((uint32_t)key[t + 2] << 16)    ^ ((uint32_t)key[t + 3] << 24);
     }
 
     for (i = nk; i < wSize; i++)
     {
         t = w[i - 1];
+        /* Is this word at the start of a new Nk-word group? */
         if ((i % nk) == 0)
         {
+            /* Yes, apply the round-key transform: RotWord, SubWord, then XOR Rcon. */
             t = ((t >> 8) | ((t << 24) & 0xffffffff));
             t = SBOX_WORD(t);
             t ^= rcon;
             rcon = FGFM2(rcon);
         }
+        /* No, but for AES-256 only, is this the mid-group SubWord position? */
         else if ((nk > 6) && ((i % nk) == 4))
         {
+            /* Yes, apply SubWord (no rotate, no Rcon). */
             t = SBOX_WORD(t);
         }
         w[i] = w[i - nk] ^ t;
@@ -251,17 +246,124 @@ static void _SSFAESKeyExpansion(uint32_t *w, size_t wSize, const uint8_t *key, s
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Performs AES block encryption.                                                                */
+/* Internal: encrypt one block with a precomputed round-key schedule; wipes the working state.   */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAESEncryptRounds(const uint32_t *w, uint8_t nr, const uint8_t *in, uint8_t *out)
+{
+    uint32_t s[4];
+    uint8_t i;
+
+    ARRAY_TO_STATE(s, in);
+    ADD_KEY(s, w, 0);
+    for (i = 1; i < nr; i++)
+    {
+        SBOX_STATE(s);
+        MIX_COLUMNS(s);
+        ADD_KEY(s, w, (i << 2));
+    }
+    SBOX_STATE(s);
+    ADD_KEY(s, w, (nr << 2));
+    STATE_TO_ARRAY(s, out);
+
+    SSFCryptSecureZero(s, sizeof(s));
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: decrypt one block with a precomputed round-key schedule; wipes the working state.   */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAESDecryptRounds(const uint32_t *w, uint8_t nr, const uint8_t *in, uint8_t *out)
+{
+    uint32_t s[4];
+    uint8_t i;
+
+    ARRAY_TO_STATE(s, in);
+    ADD_KEY(s, w, (nr << 2));
+    for (i = (uint8_t)(nr - 1u); i > 0u; i--)
+    {
+        INV_SBOX_STATE(s);
+        ADD_KEY(s, w, (i << 2));
+        INV_MIX_COLUMNS(s);
+    }
+    INV_SBOX_STATE(s);
+    ADD_KEY(s, w, 0);
+    STATE_TO_ARRAY(s, out);
+
+    SSFCryptSecureZero(s, sizeof(s));
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Expand an AES key into a reusable round-key schedule (expand once, use for many blocks).      */
+/* --------------------------------------------------------------------------------------------- */
+void SSFAESKeyScheduleInit(SSFAESKeySchedule_t *ks, const uint8_t *key, size_t keyLen)
+{
+    uint8_t nk;
+    uint8_t nr;
+    size_t wSize;
+
+    SSF_REQUIRE(ks != NULL);
+    SSF_REQUIRE(ks->magic != SSF_AES_KS_MAGIC);
+    SSF_REQUIRE(key != NULL);
+    SSF_REQUIRE((keyLen == 16u) || (keyLen == 24u) || (keyLen == 32u));
+
+    nk = (uint8_t)(keyLen >> 2);  /* 4, 6, 8 */
+    nr = (uint8_t)(6u + nk);      /* 10, 12, 14 */
+    wSize = (((size_t)nr) + 1u) << 2;
+
+    _SSFAESKeyExpansion(ks->w, wSize, key, keyLen, nr, nk);
+    ks->nr = nr;
+    ks->magic = SSF_AES_KS_MAGIC;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Securely wipe a round-key schedule.                                                           */
+/* --------------------------------------------------------------------------------------------- */
+void SSFAESKeyScheduleDeInit(SSFAESKeySchedule_t *ks)
+{
+    SSF_REQUIRE(ks != NULL);
+    SSF_REQUIRE(ks->magic == SSF_AES_KS_MAGIC);
+
+    SSFCryptSecureZero(ks, sizeof(*ks));
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Encrypt one 16-byte block using a precomputed schedule.                                       */
+/* --------------------------------------------------------------------------------------------- */
+void SSFAESKSBlockEncrypt(const SSFAESKeySchedule_t *ks, const uint8_t *pt, size_t ptLen,
+                          uint8_t *ct, size_t ctSize)
+{
+    SSF_REQUIRE(ks != NULL);
+    SSF_REQUIRE(ks->magic == SSF_AES_KS_MAGIC);
+    SSF_REQUIRE(pt != NULL);
+    SSF_REQUIRE(ct != NULL);
+    SSF_REQUIRE(ptLen == SSF_AES_BLOCK_SIZE);
+    SSF_REQUIRE(ctSize == SSF_AES_BLOCK_SIZE);
+
+    _SSFAESEncryptRounds(ks->w, ks->nr, pt, ct);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Decrypt one 16-byte block using a precomputed schedule.                                       */
+/* --------------------------------------------------------------------------------------------- */
+void SSFAESKSBlockDecrypt(const SSFAESKeySchedule_t *ks, const uint8_t *ct, size_t ctLen,
+                          uint8_t *pt, size_t ptSize)
+{
+    SSF_REQUIRE(ks != NULL);
+    SSF_REQUIRE(ks->magic == SSF_AES_KS_MAGIC);
+    SSF_REQUIRE(ct != NULL);
+    SSF_REQUIRE(pt != NULL);
+    SSF_REQUIRE(ctLen == SSF_AES_BLOCK_SIZE);
+    SSF_REQUIRE(ptSize == SSF_AES_BLOCK_SIZE);
+
+    _SSFAESDecryptRounds(ks->w, ks->nr, ct, pt);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Performs AES block encryption (one-shot: expand schedule, encrypt, wipe schedule).            */
 /* --------------------------------------------------------------------------------------------- */
 void SSFAESBlockEncrypt(const uint8_t *pt, size_t ptLen, uint8_t *ct, size_t ctSize,
                         const uint8_t *key, size_t keyLen, uint8_t nr, uint8_t nk)
 {
-    uint32_t w[60];
-    uint8_t t[5];
-    uint8_t s[4][4];
-    uint8_t i;
-
-    size_t wSize = (((size_t) nr) + 1) << 2;
+    SSFAESKeySchedule_t ks = {0};
 
     SSF_REQUIRE(pt != NULL);
     SSF_REQUIRE(ct != NULL);
@@ -272,37 +374,18 @@ void SSFAESBlockEncrypt(const uint8_t *pt, size_t ptLen, uint8_t *ct, size_t ctS
     SSF_REQUIRE(((nr == 10) && (nk == 4)) || ((nr == 12) && (nk == 6)) ||
                 ((nr == 14) && (nk == 8)));
 
-    ARRAY_TO_STATE(s, pt);
-    _SSFAESKeyExpansion(w, wSize, key, keyLen, nr, nk);
-    ADD_KEY(s, w, 0);
-
-    for (i = 1; i < nr; i++)
-    {
-        SBOX_STATE(s);
-        SHIFT_ROWS(s, t[0]);
-        MIX_COLUMNS(s, t);
-        ADD_KEY(s, w, (i << 2));
-    }
-
-    SBOX_STATE(s);
-    SHIFT_ROWS(s, t[0]);
-    ADD_KEY(s, w, (nr << 2));
-
-    STATE_TO_ARRAY(s, ct);
+    SSFAESKeyScheduleInit(&ks, key, keyLen);
+    SSFAESKSBlockEncrypt(&ks, pt, ptLen, ct, ctSize);
+    SSFAESKeyScheduleDeInit(&ks);
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Performs AES block decryption.                                                                */
+/* Performs AES block decryption (one-shot: expand schedule, decrypt, wipe schedule).            */
 /* --------------------------------------------------------------------------------------------- */
 void SSFAESBlockDecrypt(const uint8_t *ct, size_t ctLen, uint8_t *pt, size_t ptSize,
                         const uint8_t *key, size_t keyLen, uint8_t nr, uint8_t nk)
 {
-    uint32_t w[60];
-    uint8_t t[5];
-    uint8_t s[4][4];
-    uint8_t i;
-
-    size_t wSize = (((size_t) nr) + 1) << 2;
+    SSFAESKeySchedule_t ks = {0};
 
     SSF_REQUIRE(ct != NULL);
     SSF_REQUIRE(pt != NULL);
@@ -313,22 +396,8 @@ void SSFAESBlockDecrypt(const uint8_t *ct, size_t ctLen, uint8_t *pt, size_t ptS
     SSF_REQUIRE(((nr == 10) && (nk == 4)) || ((nr == 12) && (nk == 6)) ||
                 ((nr == 14) && (nk == 8)));
 
-    ARRAY_TO_STATE(s, ct);
-    _SSFAESKeyExpansion(w, wSize, key, keyLen, nr, nk);
-    ADD_KEY(s, w, (nr << 2));
-
-    for (i = nr - 1; i > 0; i--)
-    {
-        INV_SHIFT_ROWS(s, t[0]);
-        INV_SBOX_STATE(s);
-        ADD_KEY(s, w, (i << 2));
-        INV_MIX_COLUMNS(s, t);
-    }
-
-    INV_SHIFT_ROWS(s, t[0]);
-    INV_SBOX_STATE(s);
-    ADD_KEY(s, w, 0);
-
-    STATE_TO_ARRAY(s, pt);
+    SSFAESKeyScheduleInit(&ks, key, keyLen);
+    SSFAESKSBlockDecrypt(&ks, ct, ctLen, pt, ptSize);
+    SSFAESKeyScheduleDeInit(&ks);
 }
 

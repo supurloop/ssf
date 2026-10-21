@@ -464,6 +464,46 @@ void SSFGObjUnitTest(void)
     SSFGObjDeInit(&gobjChild3);
     SSF_ASSERT(SSFGObjIsMemoryBalanced());
 
+    /* (Hardening) Tree depth is capped at SSF_GOBJ_CONFIG_MAX_IN_DEPTH. InsertChild rejects an      */
+    /* insert that would push any node past the maximum supported depth, which keeps SSFGObjDeInit  */
+    /* and SSFJsonGObjPrint recursion bounded even for a programmatically-built tree. */
+    {
+        SSFGObj_t *chain[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
+        SSFGObj_t *deep = NULL;
+        SSFGObj_t *root = NULL;
+        uint32_t d;
+
+        /* Build the deepest legal chain: one child per level, deepest node at depth MAX_IN_DEPTH-1. */
+        for (d = 0; d < SSF_GOBJ_CONFIG_MAX_IN_DEPTH; d++)
+        {
+            chain[d] = NULL;
+            SSF_ASSERT(SSFGObjInit(&chain[d], 1));
+            if (d > 0)
+            {
+                SSF_ASSERT(SSFGObjSetObject(chain[d - 1]));
+                SSF_ASSERT(SSFGObjInsertChild(chain[d - 1], chain[d]));  /* lands at depth d < MAX */
+            }
+        }
+
+        /* One more level would land the new node at depth MAX_IN_DEPTH -> must be rejected. */
+        SSF_ASSERT(SSFGObjInit(&deep, 0));
+        SSF_ASSERT(SSFGObjSetObject(chain[SSF_GOBJ_CONFIG_MAX_IN_DEPTH - 1]));
+        SSF_ASSERT(SSFGObjInsertChild(chain[SSF_GOBJ_CONFIG_MAX_IN_DEPTH - 1], deep) == false);
+
+        /* Inserting the whole legal chain (height MAX-1) under a fresh root would push its deepest  */
+        /* node to depth MAX_IN_DEPTH -> must also be rejected. */
+        SSF_ASSERT(SSFGObjInit(&root, 1));
+        SSF_ASSERT(SSFGObjSetObject(root));
+        SSF_ASSERT(SSFGObjInsertChild(root, chain[0]) == false);
+
+        /* The rejected nodes were never attached, so free them independently; chain[0] frees the   */
+        /* whole attached chain. Memory must still balance. */
+        SSFGObjDeInit(&deep);
+        SSFGObjDeInit(&root);
+        SSFGObjDeInit(&chain[0]);
+        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+    }
+
     /* Test SSFGObjFindPath() */
     SSF_ASSERT(SSFGObjInit(&gobj, 3));
     SSF_ASSERT(SSFGObjGetType(gobj) == SSF_OBJ_TYPE_NONE);

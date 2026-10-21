@@ -15,7 +15,7 @@ use the `instance` parameter (0-based) to iterate over duplicates.
 ## [↑](#ssftlv--tlv-encoderdecoder) Dependencies
 
 - [`ssfport.h`](../ssfport.h)
-- [`ssfoptions.h`](../ssfoptions.h)
+- [`_opt/ssftlv_opt.h`](../_opt/ssftlv_opt.h) (aggregated through `ssfoptions.h`)
 
 <a id="notes"></a>
 
@@ -38,7 +38,7 @@ use the `instance` parameter (0-based) to iterate over duplicates.
 
 ## [↑](#ssftlv--tlv-encoderdecoder) Configuration
 
-All options are set in `ssfoptions.h`.
+Options live in [`_opt/ssftlv_opt.h`](../_opt/ssftlv_opt.h) (aggregated into the build via `ssfoptions.h`).
 
 | Option | Default | Description |
 |--------|---------|-------------|

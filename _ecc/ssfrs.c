@@ -148,7 +148,7 @@ static const uint8_t _gfInv[256] =
 typedef struct GFPoly
 {
     uint8_t array[SSF_RS_MAX_CHUNK_SIZE + SSF_RS_MAX_SYMBOLS];
-    size_t len; 
+    size_t len;
 } GFPoly_t;
 
 /* --------------------------------------------------------------------------------------------- */
@@ -234,6 +234,7 @@ static uint8_t _GFPolyEval(const GFPoly_t *p, uint8_t x)
     size_t rem;
 
     SSF_REQUIRE(p != NULL);
+    SSF_REQUIRE(p->len >= 1u);
 
     y = p->array[0];
     rem = p->len - 1;
@@ -392,7 +393,7 @@ static void _RSFindErrorEvaluator(GFPoly_t *synd, GFPoly_t *err_loc, uint8_t nsy
     _GFPolyMul(synd, err_loc, &tmp);
     tmp2.len = ((size_t) nsym) + 2;
     tmp2.array[0] = 1;
-    memset(&tmp2.array[1], 0, tmp2.len - 1);    
+    memset(&tmp2.array[1], 0, tmp2.len - 1);
     _GFPolyDiv(&tmp, &tmp2, &quotient, remainder);
 }
 
@@ -428,7 +429,7 @@ static bool _RSFindErrorLocator(const GFPoly_t *synd, uint8_t nsym, GFPoly_t *er
         {
             delta ^= GF_MUL(err_loc->array[err_loc->len - 1 - j], synd->array[K - j]);
         }
-        
+
         /* Shift polynomials to compute the next degree */
         old_loc.array[old_loc.len] = 0;
         old_loc.len++;
@@ -442,7 +443,7 @@ static bool _RSFindErrorLocator(const GFPoly_t *synd, uint8_t nsym, GFPoly_t *er
                 _GFPolyScale(err_loc, GF_INV(delta), &old_loc);
                 _GFPolyCopy(&new_loc, err_loc);
             }
-            
+
             /* Update with the discrepancy */
             _GFPolyScale(&old_loc, delta, &tmp);
             _GFPolyCopy(err_loc, &tmp2);
@@ -525,8 +526,7 @@ static void _RSFindErrataLocator(const GFPoly_t *e_pos, GFPoly_t *e_loc)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true is errata corrected else false.                                                  */
 /* --------------------------------------------------------------------------------------------- */
-static bool _RSCorrectErrata(GFPoly_t *msg_in, GFPoly_t *synd, GFPoly_t *err_pos,
-                             GFPoly_t *msg_out)
+static bool _RSCorrectErrata(GFPoly_t *msg_in, GFPoly_t *synd, GFPoly_t *err_pos, GFPoly_t *msg_out)
 {
     GFPoly_t coef_pos;
     GFPoly_t err_loc;
@@ -554,7 +554,7 @@ static bool _RSCorrectErrata(GFPoly_t *msg_in, GFPoly_t *synd, GFPoly_t *err_pos
     _GFPolyCopyRev(synd, &synd_rev);
     _RSFindErrorEvaluator(&synd_rev, &err_loc, (uint8_t) (err_loc.len - 1), &err_eval_rev);
     _GFPolyCopyRev(&err_eval_rev, &err_eval);
-    
+
     X.len = 0;
     for (i = 0; i < coef_pos.len; i++)
     {
@@ -676,7 +676,7 @@ void SSFRSEncode(const uint8_t *msg, uint16_t msgLen, uint8_t *eccBuf, uint16_t 
     /* Iterate over msg and encode chunks up to chunkSize with eccChunkBytes symbols */
     *eccBufLen = 0;
     while (msgLen)
-    {   
+    {
         SSF_ASSERT(eccBufSize >= eccNumBytes);
 
         /* Last chunk? If yes update chunkSize */
@@ -732,7 +732,7 @@ bool SSFRSDecode(uint8_t *msg, uint16_t msgSize, uint16_t *msgLen, uint8_t eccNu
     {
         /* If remaining message too small return false */
         if (tmpSize <= eccNumBytes) return false;
-        
+
         /* Last chunk? If yes update chunkSize */
         if ((tmpSize - eccNumBytes) < tmpChunkSize)
         { tmpChunkSize = (uint8_t) (tmpSize - eccNumBytes); }

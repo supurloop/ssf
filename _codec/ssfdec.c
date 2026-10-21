@@ -50,7 +50,7 @@ static const char *_ssfDecConv =
 
 #define SSF_DEC_NUM_LIM (SSF_DEC_MAX_STR_LEN - 1)
 static const uint64_t _ssfDecStrSizeLim[SSF_DEC_NUM_LIM] =
-{ 
+{
     9ull, 99ull, 999ull, 9999ull, 99999ull, 999999ull, 9999999ull, 99999999ull, 999999999ull,
     9999999999ull, 99999999999ull, 999999999999ull, 9999999999999ull, 99999999999999ull,
     999999999999999ull, 9999999999999999ull, 99999999999999999ull, 999999999999999999ull,
@@ -144,7 +144,7 @@ size_t SSFDecIntToStr(int64_t i, SSFCStrOut_t str, size_t strSize)
     if (i < 0)
     {
         /* Ensure that strSize big enough to fit -i plus a NULL */
-        u = (uint64_t)(-i);
+        u = 0u - (uint64_t)i;
         if ((strSize <= 2) || ((strSize < (SSF_DEC_NUM_LIM + 3)) &&
                                (u > _ssfDecStrSizeLim[strSize - 3])))
         { return 0; }
@@ -219,6 +219,7 @@ size_t SSFDecIntToStrPadded(int64_t i, SSFCStrOut_t str, size_t strSize, uint8_t
 {
     size_t len;
     char *tmp = NULL;
+    uint64_t u;
 
     SSF_ASSERT(str != NULL);
     SSF_ASSERT(minFieldWidth >= 2);
@@ -230,12 +231,16 @@ size_t SSFDecIntToStrPadded(int64_t i, SSFCStrOut_t str, size_t strSize, uint8_t
         tmp = str;
         str++;
         strSize--;
-        i = -i;
+        u = 0u - (uint64_t)i;
         minFieldWidth--;
+    }
+    else
+    {
+        u = (uint64_t)i;
     }
 
     /* Do int to decimal string conversion */
-    len = SSFDecUIntToStr((uint64_t)i, str, strSize);
+    len = SSFDecUIntToStr(u, str, strSize);
     if (len == 0) return 0;
 
     /* Add pad if necessary */
@@ -475,6 +480,9 @@ bool SSFDecStrToXInt(SSFCStrIn_t str, int64_t *sval, uint64_t *uval)
                 /* Overflow? */
                 if ((tmp / 10) != fraction) return false;
 
+                /* Accumulator 0? */
+                if (tmp == 0) break;
+
                 fraction = tmp;
                 i--;
             }
@@ -488,6 +496,9 @@ bool SSFDecStrToXInt(SSFCStrIn_t str, int64_t *sval, uint64_t *uval)
 
             /* Check for overflow */
             if ((tmp / 10) != base) return false;
+
+            /* Accumulator 0 (base was 0)? */
+            if (tmp == 0) break;
 
             base = tmp;
             exponent--;
@@ -507,7 +518,8 @@ bool SSFDecStrToXInt(SSFCStrIn_t str, int64_t *sval, uint64_t *uval)
         {
             /* Check for signed overflow */
             if (tmp > 9223372036854775808ull) return false;
-            *sval = -((int64_t)tmp);
+            if (tmp == 9223372036854775808ull) *sval = INT64_MIN;
+            else *sval = -((int64_t)tmp);
         }
         else
         {
@@ -524,6 +536,100 @@ bool SSFDecStrToXInt(SSFCStrIn_t str, int64_t *sval, uint64_t *uval)
         if ((*uval < base) || (*uval < fraction)) return false;
     }
 
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Formats an array of uint8_t values as a separator-delimited decimal string.                   */
+/* Returns 0 if unable to convert, else number of bytes written to str (not including NULL).      */
+/* --------------------------------------------------------------------------------------------- */
+size_t SSFDecOctetsToStr(const uint8_t *octets, uint8_t numOctets, char sep, SSFCStrOut_t str,
+                         size_t strSize)
+{
+    size_t totalLen = 0;
+    size_t len;
+    uint8_t i;
+
+    SSF_ASSERT(octets != NULL);
+    SSF_ASSERT(numOctets > 0);
+    SSF_ASSERT(str != NULL);
+    SSF_ASSERT(strSize > 0);
+
+    for (i = 0; i < numOctets; i++)
+    {
+        /* Add separator before all octets except the first */
+        if (i > 0)
+        {
+            if ((totalLen + 1u) >= strSize) return 0;
+            str[totalLen] = sep;
+            totalLen++;
+        }
+
+        /* Convert octet to decimal string */
+        len = SSFDecUIntToStr((uint64_t)octets[i], &str[totalLen], strSize - totalLen);
+        if (len == 0) return 0;
+        totalLen += len;
+    }
+    return totalLen;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Parses a separator-delimited decimal string into an array of uint8_t values.                  */
+/* Returns true if parsed, else false.                                                           */
+/* Each field must be 0-255 with no leading zeros (except "0" itself).                           */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFDecStrToOctets(SSFCStrIn_t str, char sep, uint8_t *octets, uint8_t octetsSize,
+                       uint8_t *numOctetsOut)
+{
+    uint8_t count = 0;
+    uint32_t val;
+    uint8_t digits;
+
+    SSF_REQUIRE(str != NULL);
+    SSF_REQUIRE(octets != NULL);
+    SSF_REQUIRE(octetsSize > 0);
+    SSF_REQUIRE(numOctetsOut != NULL);
+
+    while (*str != '\0')
+    {
+        const char *octetStart = str;
+
+        if (count >= octetsSize) return false;
+
+        /* Must start with a digit */
+        if (!SSFIsDigit(*str)) return false;
+
+        val = 0;
+        digits = 0;
+        while (SSFIsDigit(*str))
+        {
+            val = (val * 10u) + (uint32_t)(*str - '0');
+            digits++;
+            if (val > 255u) return false;
+            if (digits > 3u) return false;
+            str++;
+        }
+
+        /* Reject leading zeros (e.g., "01", "007") but allow "0" */
+        if ((digits > 1u) && (*octetStart == '0')) return false;
+
+        octets[count] = (uint8_t)val;
+        count++;
+
+        /* Expect separator or end of string */
+        if (*str == sep)
+        {
+            str++;
+            /* Reject trailing separator */
+            if (*str == '\0') return false;
+        }
+        else if (*str != '\0') return false;
+    }
+
+    /* Must have at least one octet */
+    if (count == 0) return false;
+
+    *numOctetsOut = count;
     return true;
 }
 

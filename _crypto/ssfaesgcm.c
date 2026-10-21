@@ -1,5 +1,4 @@
 /* --------------------------------------------------------------------------------------------- */
-/* --------------------------------------------------------------------------------------------- */
 /* Small System Framework                                                                        */
 /*                                                                                               */
 /* ssfaesgcm.c                                                                                   */
@@ -30,109 +29,27 @@
 /* EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE */
 /* GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED    */
 /* AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING     */
-/* NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISE   */
+/* NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED  */
 /* OF THE POSSIBILITY OF SUCH DAMAGE.                                                            */
 /* --------------------------------------------------------------------------------------------- */
-
-/* --------------------------------------------------------------------------------------------- */
-/* Per US export restrictions for open source cryptographic software the Department of Commerce  */
-/* has been notified of the inclusion of cryptographic software in the SSF. This is a copy of    */
-/* the notice emailed on Nov 11, 2021:                                                           */
-/* --------------------------------------------------------------------------------------------- */
-/* Unrestricted Encryption Source Code Notification                                              */
-/* To : crypt@bis.doc.gov; enc@nsa.gov                                                           */
-/* Subject : Addition to SSF Source Code                                                         */
-/* Department of Commerce                                                                        */
-/* Bureau of Export Administration                                                               */
-/* Office of Strategic Trade and Foreign Policy Controls                                         */
-/* 14th Street and Pennsylvania Ave., N.W.                                                       */
-/* Room 2705                                                                                     */
-/* Washington, DC 20230                                                                          */
-/* Re: Unrestricted Encryption Source Code Notification Commodity : Addition to SSF Source Code  */
-/*                                                                                               */
-/* Dear Sir / Madam,                                                                             */
-/*                                                                                               */
-/* Pursuant to paragraph(e)(1) of Part 740.13 of the U.S.Export Administration Regulations       */
-/* ("EAR", 15 CFR Part 730 et seq.), we are providing this written notification of the Internet  */
-/* location of the unrestricted, publicly available Source Code being added to the Small System  */
-/* Framework (SSF) Source Code. SSF Source Code is a free embedded system application framework  */
-/* developed by Supurloop Software LLC in the Public Interest. This notification serves as a     */
-/* notification of an addition of new software to the SSF archive. This archive is updated from  */
-/* time to time, but its location is constant. Therefore this notification serves as a one-time  */
-/* notification for subsequent updates that may occur in the future to the software covered by   */
-/* this notification. Such updates may add or enhance cryptographic functionality of the SSF.    */
-/* The Internet location for the SSF Source Code is: https://github.com/supurloop/ssf            */
-/*                                                                                               */
-/* This site may be mirrored to a number of other sites located outside the United States.       */
-/*                                                                                               */
-/* The following software is being added to the SSF archive:                                     */
-/*                                                                                               */
-/* ssfaes.c, ssfaes.h - AES block encryption.                                                    */
-/* ssfaesgcm.c, ssfaesgcm.h - AES-GCM authenticated encryption.                                  */
-/*                                                                                               */
-/* If you have any questions, please email me at xxx@xxx, or call me on (XXX) XXX-XXXX.          */
-/*                                                                                               */
-/* Sincerely,                                                                                    */
-/* James Higgins                                                                                 */
-/* President                                                                                     */
-/* Supurloop Software LLC                                                                        */
-/* --------------------------------------------------------------------------------------------- */
-#include <stdio.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include "ssfport.h"
 #include "ssfassert.h"
 #include "ssfaes.h"
 #include "ssfaesgcm.h"
+#include "ssfcrypt.h"
+#include "ssfusexport.h"
+
+/* Compile-time bounds checks via typedef-array idiom (size becomes -1 on failure). */
+typedef char _ssf_aesgcm_sa_size_at_least_32[(sizeof(size_t) >= 4) ? 1 : -1];
+typedef char _ssf_aesgcm_sa_u64_is_64_bit[(sizeof(uint64_t) == 8) ? 1 : -1];
 
 /* --------------------------------------------------------------------------------------------- */
 /* Local Helper Functions and Macros                                                             */
 /* --------------------------------------------------------------------------------------------- */
 
-/* --------------------------------------------------------------------------------------------- */
-/* --------------------------------------------------------------------------------------------- */
-static inline void PUT_32_LE(uint8_t *buf, uint32_t val)
-{
-    buf[0] = (val >> 24) & 0xff;
-    buf[1] = (val >> 16) & 0xff;
-    buf[2] = (val >> 8) & 0xff;
-    buf[3] = val & 0xff;
-}
-
-/* --------------------------------------------------------------------------------------------- */
-/* --------------------------------------------------------------------------------------------- */
-static inline void PUT_64_LE(uint8_t *buf, uint64_t val)
-{
-    buf[0] = (val >> 56) & 0xff;
-    buf[1] = (val >> 48) & 0xff;
-    buf[2] = (val >> 40) & 0xff;
-    buf[3] = (val >> 32) & 0xff;
-    buf[4] = (val >> 24) & 0xff;
-    buf[5] = (val >> 16) & 0xff;
-    buf[6] = (val >> 8) & 0xff;
-    buf[7] = val & 0xff;
-}
-
-/* --------------------------------------------------------------------------------------------- */
-/* --------------------------------------------------------------------------------------------- */
-static inline uint32_t GET_32_BE(const uint8_t *buf)
-{
-    uint32_t res;
-    res = buf[0] | (buf[1] << 8) | (buf[2] << 16) | (buf[3] << 24);
-    return res;
-}
-
-/* --------------------------------------------------------------------------------------------- */
-/* --------------------------------------------------------------------------------------------- */
-static inline uint32_t GET_32_LE(const uint8_t *buf)
-{
-    uint32_t res;
-    res = buf[3] | (buf[2] << 8) | (buf[1] << 16) | (buf[0] << 24);
-    return res;
-}
-
-/* --------------------------------------------------------------------------------------------- */
-/* --------------------------------------------------------------------------------------------- */
+/* XORs the 16 bytes at y into x in place. */
 #define BLOCK_XOR(x, y) \
     (x)[0] ^= (y)[0]; (x)[1] ^= (y)[1]; (x)[2] ^= (y)[2]; (x)[3] ^= (y)[3]; \
     (x)[4] ^= (y)[4]; (x)[5] ^= (y)[5]; (x)[6] ^= (y)[6]; (x)[7] ^= (y)[7]; \
@@ -140,17 +57,19 @@ static inline uint32_t GET_32_LE(const uint8_t *buf)
     (x)[12] ^= (y)[12]; (x)[13] ^= (y)[13]; (x)[14] ^= (y)[14]; (x)[15] ^= (y)[15]
 
 /* --------------------------------------------------------------------------------------------- */
+/* Increments the low 32 bits of the 16-byte counter block (GCM inc32, NIST SP 800-38D Sec. 6.2).*/
 /* --------------------------------------------------------------------------------------------- */
 static inline void _SSFAESGCMBlockInc32(uint8_t *in)
 {
     uint32_t x;
 
-    x = GET_32_LE(in + 12);
+    x = SSF_GETU32BE(in + 12);
     x += 1;
-    PUT_32_LE(in + 12, x);
+    SSF_PUTU32BE(in + 12, x);
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* 32-bit carryless multiply over GF(2); writes the 64-bit product into (l, r) low/high halves.  */
 /* --------------------------------------------------------------------------------------------- */
 static inline void _SSFAESGCMCarryless32Mult(uint32_t a, uint32_t b, uint32_t *l, uint32_t *r)
 {
@@ -169,13 +88,13 @@ static inline void _SSFAESGCMCarryless32Mult(uint32_t a, uint32_t b, uint32_t *l
     y[2] = b & 0x44444444;
     y[3] = b & 0x88888888;
 
-    z[0] = ((uint64_t)x[0] * (uint64_t)y[0]) ^ ((uint64_t)x[1] * (uint64_t)y[3]) 
+    z[0] = ((uint64_t)x[0] * (uint64_t)y[0]) ^ ((uint64_t)x[1] * (uint64_t)y[3])
          ^ ((uint64_t)x[2] * (uint64_t)y[2]) ^ ((uint64_t)x[3] * (uint64_t)y[1]);
-    z[1] = ((uint64_t)x[0] * (uint64_t)y[1]) ^ ((uint64_t)x[1] * (uint64_t)y[0]) 
+    z[1] = ((uint64_t)x[0] * (uint64_t)y[1]) ^ ((uint64_t)x[1] * (uint64_t)y[0])
          ^ ((uint64_t)x[2] * (uint64_t)y[3]) ^ ((uint64_t)x[3] * (uint64_t)y[2]);
-    z[2] = ((uint64_t)x[0] * (uint64_t)y[2]) ^ ((uint64_t)x[1] * (uint64_t)y[1]) 
+    z[2] = ((uint64_t)x[0] * (uint64_t)y[2]) ^ ((uint64_t)x[1] * (uint64_t)y[1])
          ^ ((uint64_t)x[2] * (uint64_t)y[0]) ^ ((uint64_t)x[3] * (uint64_t)y[3]);
-    z[3] = ((uint64_t)x[0] * (uint64_t)y[3]) ^ ((uint64_t)x[1] * (uint64_t)y[2]) 
+    z[3] = ((uint64_t)x[0] * (uint64_t)y[3]) ^ ((uint64_t)x[1] * (uint64_t)y[2])
          ^ ((uint64_t)x[2] * (uint64_t)y[1]) ^ ((uint64_t)x[3] * (uint64_t)y[0]);
 
     z[0] &= 0x1111111111111111;
@@ -190,6 +109,7 @@ static inline void _SSFAESGCMCarryless32Mult(uint32_t a, uint32_t b, uint32_t *l
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Reduces a 256-bit carryless product modulo the GCM polynomial x^128 + x^7 + x^2 + x + 1.      */
 /* --------------------------------------------------------------------------------------------- */
 static inline void _SSFAESGCMCarrylessReduce(uint32_t *in)
 {
@@ -220,10 +140,15 @@ static inline void _SSFAESGCMCarrylessReduce(uint32_t *in)
     r[0] = d ^ e[0] ^ f[0] ^ g[0] ^ x0;
     r[1] = x3 ^ e[1] ^ f[1] ^ g[1] ^ x1;
 
-    memcpy(in, r, 16);
+    /* Explicit LE word layout so the result matches across LE and BE hosts. */
+    in[0] = (uint32_t)(r[0]);
+    in[1] = (uint32_t)(r[0] >> 32);
+    in[2] = (uint32_t)(r[1]);
+    in[3] = (uint32_t)(r[1] >> 32);
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Bit-reverses a single byte.                                                                   */
 /* --------------------------------------------------------------------------------------------- */
 static inline uint32_t _SSFAESGCMReverseByte(uint8_t x)
 {
@@ -234,16 +159,18 @@ static inline uint32_t _SSFAESGCMReverseByte(uint8_t x)
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Bit-reverses each byte of a uint32_t independently.                                           */
 /* --------------------------------------------------------------------------------------------- */
 static inline uint32_t _SSFAESGCMReverseBytes(uint32_t x)
 {
-    return (_SSFAESGCMReverseByte(x & 0xff) 
+    return (_SSFAESGCMReverseByte(x & 0xff)
            ^ (_SSFAESGCMReverseByte((x >> 8) & 0xff) << 8)
-           ^ (_SSFAESGCMReverseByte((x >> 16) & 0xff) << 16) 
+           ^ (_SSFAESGCMReverseByte((x >> 16) & 0xff) << 16)
            ^ (_SSFAESGCMReverseByte((x >> 24) & 0xff) << 24));
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* In-place GF(2^128) multiply of in by con (Karatsuba carryless multiply + GCM reduction).      */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFAESGCMBlockMult(uint8_t *in, size_t inSize, const uint8_t *con, size_t conLen)
 {
@@ -266,20 +193,20 @@ static void _SSFAESGCMBlockMult(uint8_t *in, size_t inSize, const uint8_t *con, 
     SSF_REQUIRE(inSize == 16);
     SSF_REQUIRE(conLen == 16);
 
-    x[3] = GET_32_BE(in);
-    x[2] = GET_32_BE(&in[4]);
-    x[1] = GET_32_BE(&in[8]);
-    x[0] = GET_32_BE(&in[12]);
+    x[3] = SSF_GETU32LE(in);
+    x[2] = SSF_GETU32LE(&in[4]);
+    x[1] = SSF_GETU32LE(&in[8]);
+    x[0] = SSF_GETU32LE(&in[12]);
 
     x[0] = _SSFAESGCMReverseBytes(x[0]);
     x[1] = _SSFAESGCMReverseBytes(x[1]);
     x[2] = _SSFAESGCMReverseBytes(x[2]);
     x[3] = _SSFAESGCMReverseBytes(x[3]);
 
-    y[3] = GET_32_BE(con);
-    y[2] = GET_32_BE(&con[4]);
-    y[1] = GET_32_BE(&con[8]);
-    y[0] = GET_32_BE(&con[12]);
+    y[3] = SSF_GETU32LE(con);
+    y[2] = SSF_GETU32LE(&con[4]);
+    y[1] = SSF_GETU32LE(&con[8]);
+    y[0] = SSF_GETU32LE(&con[12]);
 
     y[0] = _SSFAESGCMReverseBytes(y[0]);
     y[1] = _SSFAESGCMReverseBytes(y[1]);
@@ -310,7 +237,7 @@ static void _SSFAESGCMBlockMult(uint8_t *in, size_t inSize, const uint8_t *con, 
 
     _SSFAESGCMCarryless32Mult((x[0] ^ x[2]), (y[0] ^ y[2]), &ac64[1], &ac64[0]);
     _SSFAESGCMCarryless32Mult((x[1] ^ x[3]), (y[1] ^ y[3]), &bd64[1], &bd64[0]);
-    _SSFAESGCMCarryless32Mult((x[0] ^ x[1] ^ x[2] ^ x[3]), 
+    _SSFAESGCMCarryless32Mult((x[0] ^ x[1] ^ x[2] ^ x[3]),
                               (y[0] ^ y[1] ^ y[2] ^ y[3]), &ab_cd64[1], &ab_cd64[0]);
     ab_cd64[0] ^= ac64[0] ^ bd64[0];
     ab_cd64[1] ^= ac64[1] ^ bd64[1];
@@ -341,39 +268,48 @@ static void _SSFAESGCMBlockMult(uint8_t *in, size_t inSize, const uint8_t *con, 
     res[2] = _SSFAESGCMReverseBytes(res[2]);
     res[3] = _SSFAESGCMReverseBytes(res[3]);
 
-    memcpy(in, res, 16);
+    /* Symmetric inverse of the SSF_GETU32LE reads above (host-endian-safe). */
+    SSF_PUTU32LE(&in[0],  res[0]);
+    SSF_PUTU32LE(&in[4],  res[1]);
+    SSF_PUTU32LE(&in[8],  res[2]);
+    SSF_PUTU32LE(&in[12], res[3]);
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Iterative GHASH update: out := (out XOR each 16-byte block of in) * h, in GF(2^128).          */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFAESGCMGHASH(const uint8_t *in, size_t inLen, const uint8_t *h, size_t hLen,
                             uint8_t *out, size_t outSize)
 {
     uint8_t buf[16] = {0};
-    uint32_t i, pos, iters;
+    size_t i;
+    size_t pos;
+    size_t iters;
 
-    if ((in == NULL) || (out == NULL) || (inLen == 0)) { return; }
+    /* inLen == 0 is the legitimate empty-AAD / empty-plaintext (auth-only GCM) case. */
+    if (inLen == 0u) return;
 
     SSF_REQUIRE(in != NULL);
     SSF_REQUIRE(h != NULL);
     SSF_REQUIRE(out != NULL);
 
-    SSF_REQUIRE(inLen > 0);
     SSF_REQUIRE(hLen == 16);
     SSF_REQUIRE(outSize == 16);
 
-    pos = 0;
-    iters = ((uint32_t)inLen) >> 4;
+    pos = 0u;
+    iters = inLen >> 4;
 
     for (i = 0; i < iters; i++)
     {
         BLOCK_XOR(out, &in[pos]);
         _SSFAESGCMBlockMult(out, outSize, h, hLen);
-        pos += 16;
+        pos += 16u;
     }
 
+    /* Is there a partial trailing block? */
     if (pos < inLen)
     {
+        /* Yes, zero-pad it to 16 bytes and absorb. */
         SSF_ASSERT((inLen - pos) <= sizeof(buf));
         memset(buf, 0, sizeof(buf));
         memcpy(buf, &in[pos], inLen - pos);
@@ -391,38 +327,42 @@ static void _SSFAESGCMGHASH(const uint8_t *in, size_t inLen, const uint8_t *h, s
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* GCTR mode: XORs in into out using AES-CTR keystream starting from initial counter block icb.  */
 /* --------------------------------------------------------------------------------------------- */
-static void _SSFAESGCMGCTR(const uint8_t *in, size_t inLen, const uint8_t *key, size_t keyLen,
+static void _SSFAESGCMGCTR(const uint8_t *in, size_t inLen, const SSFAESKeySchedule_t *ks,
                            const uint8_t *icb, size_t icbLen, uint8_t *out, size_t outSize)
 {
     uint8_t cb[16];
     uint8_t buf[16];
-    uint32_t i, n;
+    size_t i;
+    size_t n;
 
-    if ((in == NULL) || (out == NULL)) { return; }
-
-    SSF_REQUIRE(key != NULL);
+    SSF_REQUIRE(in != NULL);
+    SSF_REQUIRE(out != NULL);
+    SSF_REQUIRE(ks != NULL);
     SSF_REQUIRE(icb != NULL);
-    SSF_REQUIRE((keyLen == 16) || (keyLen == 24) || (keyLen == 32));
     SSF_REQUIRE(icbLen == 16);
+    SSF_REQUIRE(inLen > 0u);    /* Caller-side encrypt/decrypt guards inLen == 0 cases. */
     SSF_REQUIRE(inLen <= outSize);
 
     memcpy(cb, icb, sizeof(cb));
     memcpy(out, in, inLen);
 
-    n = inLen & 0xfffffff0;
-    for (i = 0; i < n; i += 16)
+    n = inLen & ~(size_t)0xFu;
+    for (i = 0; i < n; i += 16u)
     {
-        SSFAESXXXBlockEncrypt(cb, sizeof(cb), buf, sizeof(buf), key, keyLen);
+        SSFAESKSBlockEncrypt(ks, cb, sizeof(cb), buf, sizeof(buf));
         BLOCK_XOR(&out[i], buf);
         _SSFAESGCMBlockInc32(cb);
     }
 
+    /* Is there a partial trailing block? */
     if (i < inLen)
     {
-        SSFAESXXXBlockEncrypt(cb, sizeof(cb), buf, sizeof(buf), key, keyLen);
+        /* Yes, encrypt one more keystream block and XOR only the leftover bytes. */
+        SSFAESKSBlockEncrypt(ks, cb, sizeof(cb), buf, sizeof(buf));
 
-        for (i = 0; i < (inLen & 0xf); i++)
+        for (i = 0; i < (inLen & (size_t)0xFu); i++)
         {
             out[n + i] ^= buf[i];
         }
@@ -441,54 +381,68 @@ void SSFAESGCMEncrypt(const uint8_t *pt, size_t ptLen, const uint8_t *iv, size_t
     uint8_t j0[16] = {0};
     uint8_t j1[16] = {0};
     uint8_t buf[16] = {0};
-
-    uint32_t t;
+    uint64_t t;
+    SSFAESKeySchedule_t ks = {0};
 
     SSF_REQUIRE(iv != NULL);
     SSF_REQUIRE(key != NULL);
     SSF_REQUIRE(tag != NULL);
-    SSF_REQUIRE(ptLen < (512 * 1024 * 1024));
+    SSF_REQUIRE((pt != NULL) || (ptLen == 0u));
+    SSF_REQUIRE((ct != NULL) || (ptLen == 0u));
+    SSF_REQUIRE((auth != NULL) || (authLen == 0u));
+    SSF_REQUIRE(ptLen < (512u * 1024u * 1024u));
     SSF_REQUIRE(ptLen <= ctSize);
     SSF_REQUIRE(ivLen > 0);
     SSF_REQUIRE((keyLen == 16) || (keyLen == 24) || (keyLen == 32));
     SSF_REQUIRE(((tagSize >= 12) && (tagSize <= 16)) || (tagSize == 8) || (tagSize == 4));
 
-    SSFAESXXXBlockEncrypt(h, sizeof(h), h, sizeof(h), key, keyLen);
+    /* Expand the round keys once for the hash subkey H and every GCTR keystream block. */
+    SSFAESKeyScheduleInit(&ks, key, keyLen);
+    SSFAESKSBlockEncrypt(&ks, h, sizeof(h), h, sizeof(h));
 
+    /* Is the IV exactly 96 bits (the GCM fast path)? */
     if (ivLen == 12)
     {
+        /* Yes, J_0 = IV || 0x00000001 directly. */
         memcpy(j0, iv, ivLen);
-        PUT_32_LE(&j0[12], 1);
+        SSF_PUTU32BE(&j0[12], 1);
     }
     else
     {
+        /* No, J_0 = GHASH(IV || 0^s || len(IV)). */
         _SSFAESGCMGHASH(iv, ivLen, h, sizeof(h), j0, sizeof(j0));
-        t = ((uint32_t)ivLen << 3);
-        PUT_64_LE(&buf[8], t);
+        t = ((uint64_t)ivLen) << 3;
+        SSF_PUTU64BE(&buf[8], t);
         _SSFAESGCMGHASH(buf, sizeof(buf), h, sizeof(h), j0, sizeof(j0));
     }
 
     memcpy(j1, j0, sizeof(j1));
     _SSFAESGCMBlockInc32(j1);
 
-    _SSFAESGCMGCTR(pt, ptLen, key, keyLen, j1, sizeof(j1), ct, ptLen);
+    /* Is there plaintext to encrypt? (skip the GCTR call when ptLen == 0 / GMAC-only use.) */
+    if (ptLen > 0u)
+    {
+        /* Yes, encrypt under counter J_1. */
+        _SSFAESGCMGCTR(pt, ptLen, &ks, j1, sizeof(j1), ct, ptLen);
+    }
 
-    t = ((uint32_t)authLen << 3);
-    PUT_64_LE(buf, t);
-    t = ((uint32_t)ptLen << 3);
-    PUT_64_LE(&buf[8], t);
+    t = ((uint64_t)authLen) << 3;
+    SSF_PUTU64BE(buf, t);
+    t = ((uint64_t)ptLen) << 3;
+    SSF_PUTU64BE(&buf[8], t);
 
     _SSFAESGCMGHASH(auth, authLen, h, sizeof(h), s, sizeof(s));
     _SSFAESGCMGHASH(ct, ptLen, h, sizeof(h), s, sizeof(s));
     _SSFAESGCMGHASH(buf, sizeof(buf), h, sizeof(h), s, sizeof(s));
 
-    _SSFAESGCMGCTR(s, sizeof(s), key, keyLen, j0, sizeof(j0), s, sizeof(s));
+    _SSFAESGCMGCTR(s, sizeof(s), &ks, j0, sizeof(j0), s, sizeof(s));
 
     memcpy(tag, s, tagSize);
+    SSFAESKeyScheduleDeInit(&ks);
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if AES-GCM decryption/authentication successful else false.                      */
+/* If tag verifies, decrypts ct into pt, returns true, else zeroes pt and returns false.         */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFAESGCMDecrypt(const uint8_t *ct, size_t ctLen, const uint8_t *iv, size_t ivLen,
                       const uint8_t *auth, size_t authLen, const uint8_t *key, size_t keyLen,
@@ -499,50 +453,73 @@ bool SSFAESGCMDecrypt(const uint8_t *ct, size_t ctLen, const uint8_t *iv, size_t
     uint8_t j0[16] = { 0 };
     uint8_t j1[16] = { 0 };
     uint8_t buf[16] = { 0 };
-
-    uint32_t t;
+    uint64_t t;
+    SSFAESKeySchedule_t ks = {0};
 
     SSF_REQUIRE(iv != NULL);
     SSF_REQUIRE(key != NULL);
     SSF_REQUIRE(tag != NULL);
+    SSF_REQUIRE((ct != NULL) || (ctLen == 0u));
+    SSF_REQUIRE((pt != NULL) || (ctLen == 0u));
+    SSF_REQUIRE((auth != NULL) || (authLen == 0u));
 
-    SSF_REQUIRE(ctLen < (512 * 1024 * 1024));
+    SSF_REQUIRE(ctLen < (512u * 1024u * 1024u));
     SSF_REQUIRE(ctLen <= ptSize);
     SSF_REQUIRE(ivLen > 0);
     SSF_REQUIRE((keyLen == 16) || (keyLen == 24) || (keyLen == 32));
     SSF_REQUIRE(((tagLen >= 12) && (tagLen <= 16)) || (tagLen == 8) || (tagLen == 4));
 
-    SSFAESXXXBlockEncrypt(h, sizeof(h), h, sizeof(h), key, keyLen);
+    /* Expand the round keys once for the hash subkey H and every GCTR keystream block. */
+    SSFAESKeyScheduleInit(&ks, key, keyLen);
+    SSFAESKSBlockEncrypt(&ks, h, sizeof(h), h, sizeof(h));
 
+    /* Is the IV exactly 96 bits (the GCM fast path)? */
     if (ivLen == 12)
     {
+        /* Yes, J_0 = IV || 0x00000001 directly. */
         memcpy(j0, iv, ivLen);
-        PUT_32_LE(&j0[12], 1);
+        SSF_PUTU32BE(&j0[12], 1);
     }
     else
     {
+        /* No, J_0 = GHASH(IV || 0^s || len(IV)). */
         _SSFAESGCMGHASH(iv, ivLen, h, sizeof(h), j0, sizeof(j0));
-        t = ((uint32_t)ivLen << 3);
-        PUT_64_LE(&buf[8], t);
+        t = ((uint64_t)ivLen) << 3;
+        SSF_PUTU64BE(&buf[8], t);
         _SSFAESGCMGHASH(buf, sizeof(buf), h, sizeof(h), j0, sizeof(j0));
     }
 
     memcpy(j1, j0, sizeof(j1));
     _SSFAESGCMBlockInc32(j1);
 
-    _SSFAESGCMGCTR(ct, ctLen, key, keyLen, j1, sizeof(j1), pt, ptSize);
+    /* Is there ciphertext to decrypt? (skip GCTR when ctLen == 0 / GMAC-only use.) */
+    if (ctLen > 0u)
+    {
+        /* Yes, decrypt under counter J_1. */
+        _SSFAESGCMGCTR(ct, ctLen, &ks, j1, sizeof(j1), pt, ptSize);
+    }
 
-    t = ((uint32_t)authLen << 3);
-    PUT_64_LE(buf, t);
-    t = ((uint32_t)ctLen << 3);
-    PUT_64_LE(&buf[8], t);
+    t = ((uint64_t)authLen) << 3;
+    SSF_PUTU64BE(buf, t);
+    t = ((uint64_t)ctLen) << 3;
+    SSF_PUTU64BE(&buf[8], t);
 
     _SSFAESGCMGHASH(auth, authLen, h, sizeof(h), s, sizeof(s));
     _SSFAESGCMGHASH(ct, ctLen, h, sizeof(h), s, sizeof(s));
     _SSFAESGCMGHASH(buf, sizeof(buf), h, sizeof(h), s, sizeof(s));
 
-    _SSFAESGCMGCTR(s, sizeof(s), key, keyLen, j0, sizeof(j0), s, sizeof(s));
+    _SSFAESGCMGCTR(s, sizeof(s), &ks, j0, sizeof(j0), s, sizeof(s));
 
-    return memcmp(s, tag, tagLen) == 0;
+    SSFAESKeyScheduleDeInit(&ks);
+
+    /* Did the tags differ? (constant-time compare) */
+    if (SSFCryptCTMemEq(s, tag, tagLen) == false)
+    {
+        /* Yes, authentication failed; zero the plaintext. */
+        if (ctLen > 0u) memset(pt, 0, ctLen);
+        return false;
+    }
+    /* No, tags match; return success. */
+    return true;
 }
 

@@ -84,6 +84,7 @@ void SSFGObjDeInit(SSFGObj_t **gobj)
 
     SSF_REQUIRE(gobj != NULL);
     SSF_REQUIRE(*gobj != NULL);
+    SSF_ASSERT((*gobj)->depth < SSF_GOBJ_CONFIG_MAX_IN_DEPTH);
 
     /* Is a label allocated? */
     if ((*gobj)->labelCStr != NULL)
@@ -135,6 +136,15 @@ SSFObjType_t SSFGObjGetType(SSFGObj_t *gobj)
 {
     SSF_REQUIRE(gobj != NULL);
     return gobj->dataType;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns the object's tree depth (root == 0), capped at SSF_GOBJ_CONFIG_MAX_IN_DEPTH-1.         */
+/* --------------------------------------------------------------------------------------------- */
+uint16_t SSFGObjGetDepth(SSFGObj_t *gobj)
+{
+    SSF_REQUIRE(gobj != NULL);
+    return gobj->depth;
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -454,6 +464,40 @@ bool SSFGObjGetArrayLen(SSFGObj_t *gobj, uint32_t *numChildren)
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Returns the height of the subtree rooted at gobj (0 for a leaf).                              */
+/* --------------------------------------------------------------------------------------------- */
+static uint16_t _SSFGObjSubtreeHeight(SSFGObj_t *gobj)
+{
+    SSFLLItem_t *item;
+    uint16_t maxHeight = 0;
+
+    item = SSF_LL_HEAD(&(gobj->children));
+    while (item != NULL)
+    {
+        uint16_t height = (uint16_t)(_SSFGObjSubtreeHeight((SSFGObj_t *)item) + 1u);
+        if (height > maxHeight) maxHeight = height;
+        item = SSF_LL_NEXT_ITEM(item);
+    }
+    return maxHeight;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Sets gobj->depth = newDepth and rebases every descendant. Bounded by the depth invariant.     */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFGObjRebaseDepth(SSFGObj_t *gobj, uint16_t newDepth)
+{
+    SSFLLItem_t *item;
+
+    gobj->depth = newDepth;
+    item = SSF_LL_HEAD(&(gobj->children));
+    while (item != NULL)
+    {
+        _SSFGObjRebaseDepth((SSFGObj_t *)item, (uint16_t)(newDepth + 1u));
+        item = SSF_LL_NEXT_ITEM(item);
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Returns true if child is inserted into parent, else false.                                    */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFGObjInsertChild(SSFGObj_t *gobjParent, SSFGObj_t *gobjChild)
@@ -465,7 +509,16 @@ bool SSFGObjInsertChild(SSFGObj_t *gobjParent, SSFGObj_t *gobjChild)
 
     if (gobjParent->children.size == 0) return false;
     if (SSFLLIsFull(&(gobjParent->children))) return false;
+
+    /* Past the maximum supported tree depth? */
+    if (((size_t)gobjParent->depth + 1u + _SSFGObjSubtreeHeight(gobjChild)) >=
+        SSF_GOBJ_CONFIG_MAX_IN_DEPTH)
+    {
+        return false;
+    }
+
     SSFLLPutItem(&(gobjParent->children), (SSFLLItem_t *)gobjChild, SSF_LL_LOC_TAIL, NULL);
+    _SSFGObjRebaseDepth(gobjChild, (uint16_t)(gobjParent->depth + 1u));
     return true;
 }
 

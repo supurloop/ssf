@@ -81,8 +81,7 @@ bool SSFHeapAllocResize(SSFHeapHandle_t handle, void **heapMemOut, uint32_t newS
                               SSFHeapAllocResize(handle, (void **)heapMemOut, newSize, newMark, \
                                                  true)
 
-void SSFHeapDealloc(SSFHeapHandle_t handle, void **heapMemOut, uint8_t *markOutOpt,
-                    bool isZeroed);
+void SSFHeapDealloc(SSFHeapHandle_t handle, void **heapMemOut, uint8_t *markOutOpt, bool isZeroed);
 #define SSFHeapFree(handle, heapMemOut, markOutOpt) \
                     SSFHeapDealloc(handle, (void **)heapMemOut, markOutOpt, false)
 #define SSFHeapFreeAndZero(handle, heapMemOut, markOutOpt) \

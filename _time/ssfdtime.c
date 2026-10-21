@@ -187,7 +187,7 @@ void _SSFDTimeUnixToStruct(uint32_t unixDays, SSFDTimeStruct_t *ts)
         /* Is unixDays this year or earlier? */
         if (unixDays < _unixDaysToYear[i])
         {
-            if ((i == 0) || (unixDays >= _unixDaysToYear[i - 1])) 
+            if ((i == 0) || (unixDays >= _unixDaysToYear[i - 1]))
             {
                 /* Found year and yday */
                 ts->year = i;

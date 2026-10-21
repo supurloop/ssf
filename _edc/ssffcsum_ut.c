@@ -81,15 +81,15 @@ void SSFFCSumUnitTest(void)
         SSF_ASSERT(fc2 != fc1);
     }
 
-    /* All-zero input: single zero byte → s1=0, s2=0 */
+    /* All-zero input: single zero byte -> s1=0, s2=0 */
     SSF_ASSERT(SSFFCSum16((uint8_t *)"\x00", 1, SSF_FCSUM_INITIAL) == 0x0000);
     /* Multiple zero bytes stay at 0 */
     SSF_ASSERT(SSFFCSum16((uint8_t *)"\x00\x00\x00\x00", 4, SSF_FCSUM_INITIAL) == 0x0000);
 
     /* Single byte explicit values */
-    /* 0x01: s1=1, s2=1 → 0x0101 */
+    /* 0x01: s1=1, s2=1 -> 0x0101 */
     SSF_ASSERT(SSFFCSum16((uint8_t *)"\x01", 1, SSF_FCSUM_INITIAL) == 0x0101);
-    /* 0x80: s1=128, s2=128 → 0x8080 */
+    /* 0x80: s1=128, s2=128 -> 0x8080 */
     SSF_ASSERT(SSFFCSum16((uint8_t *)"\x80", 1, SSF_FCSUM_INITIAL) == 0x8080);
 
     /* Byte-by-byte incremental matches single-call */

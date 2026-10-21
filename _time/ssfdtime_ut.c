@@ -149,7 +149,7 @@ void SSFDTimeUnitTest(void)
     for (tsi.year = 0; tsi.year <= SSF_TS_YEAR_MAX; tsi.year++)
     {
         SSF_ASSERT(SSFDTimeStructInit(&ts, tsi.year, SSF_DTIME_MONTH_FEB,
-                                      _utDaysInMonth[SSF_DTIME_MONTH_FEB] + 
+                                      _utDaysInMonth[SSF_DTIME_MONTH_FEB] +
                                       (uint8_t)(SSFDTimeIsLeapYear(tsi.year)), 0, 0, 0, 0) ==
                                       false);
     }
@@ -315,7 +315,7 @@ void SSFDTimeUnitTest(void)
     {
         for (ts.month = 0; ts.month <= SSF_TS_MONTH_MAX; ts.month++)
         {
-            ts.day = _utDaysInMonth[ts.month] + 
+            ts.day = _utDaysInMonth[ts.month] +
                      (uint8_t) (SSFDTimeIsLeapYear(ts.year) && (ts.month == SSF_DTIME_MONTH_FEB))
                      - 1;
 #if SSF_DTIME_STRUCT_STRICT_CHECK == 1

@@ -66,10 +66,10 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdbool.h>
-#include <ctype.h>
 #include <stdlib.h>
 #include "ssfport.h"
 #include "ssfini.h"
+#include "ssfstr.h"
 #if SSF_INI_GOBJ_ENABLE == 1
 #include "ssfgobj.h"
 #endif /* SSF_INI_GOBJ_ENABLE */
@@ -85,6 +85,7 @@ typedef struct
     size_t nameLen;
     const char *value;
     size_t valueLen;
+    const char *iniEnd;
 } SSFINIContext_t;
 
 /* --------------------------------------------------------------------------------------------- */
@@ -100,13 +101,18 @@ static bool _SSFINIFindNextLine(SSFCStrIn_t ini, SSFINIContext_t *context)
 
     /* Is context initialized? */
     if (context->line == NULL)
-    /* No, set line to start of INI */
-    { context->line = ini; }
+    {
+        const char *nul = (const char *)memchr(ini, '\x00',
+                                               (size_t)SSF_INI_CONFIG_MAX_IN_LEN + 1u);
+        if (nul == NULL) return false;
+        context->iniEnd = nul;
+        context->line = ini;
+    }
     /* Yes, advance to next potential line */
     else
     {
         context->line += context->lineLen;
-        if (*(context->line) != '\x00') context->line++;
+        if (context->line < context->iniEnd) context->line++;
     }
 
     /* Can we find a line terminator? */
@@ -369,8 +375,7 @@ bool SSFINIIsSectionPresent(SSFCStrIn_t ini, SSFCStrIn_t section)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if the section with name field is found, else false.                             */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFINIIsNameValuePresent(SSFCStrIn_t ini, SSFCStrIn_t section, SSFCStrIn_t name,
-                              uint8_t index)
+bool SSFINIIsNameValuePresent(SSFCStrIn_t ini, SSFCStrIn_t section, SSFCStrIn_t name, uint8_t index)
 {
     SSFINIContext_t context;
 
@@ -395,7 +400,7 @@ bool SSFINIGetStrValue(SSFCStrIn_t ini, SSFCStrIn_t section, SSFCStrIn_t name, u
 
     if (_SSFINIIsNameValuePresent(ini, section, name, index, &context) == false) return false;
     if (outLen != NULL) *outLen = context.valueLen;
-    if (outSize < (context.valueLen + 1)) return false;
+    if (outSize < (context.valueLen + 1)) { out[0] = 0; return false; }
     memcpy(out, context.value, context.valueLen);
     out[context.valueLen] = 0;
     return true;
@@ -425,7 +430,7 @@ bool SSFINIGetBoolValue(SSFCStrIn_t ini, SSFCStrIn_t section, SSFCStrIn_t name, 
     memcpy(lcv, context.value, context.valueLen);
     lcv[context.valueLen] = 0;
     while (*lcvp != 0) {
-        *lcvp = (char) tolower((int)*lcvp); lcvp++;
+        *lcvp = SSFStrCharToLower(*lcvp); lcvp++;
     }
 
     /* Assume value matches a true string */
@@ -517,7 +522,7 @@ bool SSFINIPrintComment(SSFCStrOut_t ini, size_t iniSize, size_t *iniLen, SSFCSt
     /* Add line ending */
     if (lineEnding == SSF_INI_CRLF) { ini[*iniLen] = '\r'; *iniLen += 1; }
     ini[*iniLen] = '\n'; *iniLen += 1; ini[*iniLen] = 0;
-    
+
     return true;
 }
 
@@ -626,7 +631,7 @@ bool SSFINIPrintNameBoolValue(SSFCStrOut_t ini, size_t iniSize, size_t *iniLen, 
 {
     char *bstr = NULL;
     SSF_REQUIRE((boolType > SSF_INI_BOOL_MIN) && (boolType < SSF_INI_BOOL_MAX));
-    
+
     /* Convert boolean value to requested string type */
     switch (boolType)
     {
@@ -656,7 +661,7 @@ bool SSFINIPrintNameBoolValue(SSFCStrOut_t ini, size_t iniSize, size_t *iniLen, 
 /* Returns true if name/long int value added to ini, else false.                                 */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFINIPrintNameIntValue(SSFCStrOut_t ini, size_t iniSize, size_t *iniLen, SSFCStrIn_t name,
-                              int64_t value, SSFINILineEnd_t lineEnding)
+                             int64_t value, SSFINILineEnd_t lineEnding)
 {
     char nstr[32];
     size_t len;
@@ -778,8 +783,7 @@ bool SSFINIGObjCreate(SSFCStrIn_t ini, SSFGObj_t **gobj, uint16_t maxChildren)
 /* Returns true if a gobj child's value is printed as a name=value line, else false.             */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFINIGObjPrintChild(SSFGObj_t *child, SSFCStrOut_t ini, size_t iniSize,
-                                  size_t *iniLen, SSFINIBool_t boolType,
-                                  SSFINILineEnd_t lineEnding)
+                                  size_t *iniLen, SSFINIBool_t boolType, SSFINILineEnd_t lineEnding)
 {
     char label[SSF_INI_GOBJ_CONFIG_MAX_STR_SIZE + 1];
     char strVal[SSF_INI_GOBJ_CONFIG_MAX_STR_SIZE + 1];

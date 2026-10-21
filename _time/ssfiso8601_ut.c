@@ -1133,7 +1133,7 @@ break;
                     if (((sign == -1) && (unixSys < (((((SSFPortTick_t)hour * SSFDTIME_MIN_IN_HOUR) +
                                                      minute) * SSFDTIME_SEC_IN_MIN) *
                                                      SSF_TICKS_PER_SEC))) ||
-                        ((sign == 1) && (SSFDTIME_UNIX_EPOCH_SYS_MAX - unixSys) < 
+                        ((sign == 1) && (SSFDTIME_UNIX_EPOCH_SYS_MAX - unixSys) <
                                         (((((SSFPortTick_t)hour * SSFDTIME_MIN_IN_HOUR) + minute) *
                                         SSFDTIME_SEC_IN_MIN) * SSF_TICKS_PER_SEC)))
                     {
@@ -1200,7 +1200,7 @@ break;
                     if (((sign == -1) && (unixSys < (((((SSFPortTick_t)hour * SSFDTIME_MIN_IN_HOUR) +
                                                     minute) * SSFDTIME_SEC_IN_MIN) *
                                                     SSF_TICKS_PER_SEC))) ||
-                        ((sign == 1) && (SSFDTIME_UNIX_EPOCH_SYS_MAX - unixSys) < 
+                        ((sign == 1) && (SSFDTIME_UNIX_EPOCH_SYS_MAX - unixSys) <
                                         (((((SSFPortTick_t)hour * SSFDTIME_MIN_IN_HOUR) + minute) *
                                         SSFDTIME_SEC_IN_MIN) * SSF_TICKS_PER_SEC)))
                     {
@@ -1265,7 +1265,7 @@ break;
 
         if (ii == 0) unixSys = SSFDTIME_UNIX_EPOCH_SYS_MIN;
         else if (ii == 1) unixSys = SSFDTIME_UNIX_EPOCH_SYS_MAX;
-        
+
         if (unixSys < (SSFDTIME_UNIX_EPOCH_SYS_MIN + (SSFDTIME_MIN_IN_DAY * SSFDTIME_SEC_IN_MIN *
                                                       SSF_TICKS_PER_SEC)))
         {
@@ -1316,7 +1316,7 @@ break;
                 else sign = -1;
                 if (((sign == -1) && (unixSys < ((SSFPortTick_t)hour * SSFDTIME_MIN_IN_HOUR *
                                                  SSFDTIME_SEC_IN_MIN * SSF_TICKS_PER_SEC))) ||
-                    ((sign == 1) && (SSFDTIME_UNIX_EPOCH_SYS_MAX - unixSys) < 
+                    ((sign == 1) && (SSFDTIME_UNIX_EPOCH_SYS_MAX - unixSys) <
                                     ((SSFPortTick_t)hour * SSFDTIME_MIN_IN_HOUR *
                                     SSFDTIME_SEC_IN_MIN * SSF_TICKS_PER_SEC)))
                 {
@@ -1442,7 +1442,7 @@ break;
                     if (((sign == -1) && (unixSys < (((((SSFPortTick_t)hour * SSFDTIME_MIN_IN_HOUR) +
                                                      minute) * SSFDTIME_SEC_IN_MIN) *
                                                      SSF_TICKS_PER_SEC))) ||
-                        ((sign == 1) && (SSFDTIME_UNIX_EPOCH_SYS_MAX - unixSys) < 
+                        ((sign == 1) && (SSFDTIME_UNIX_EPOCH_SYS_MAX - unixSys) <
                                         (((((SSFPortTick_t)hour * SSFDTIME_MIN_IN_HOUR) + minute) *
                                         SSFDTIME_SEC_IN_MIN) * SSF_TICKS_PER_SEC)))
                     {
@@ -1540,4 +1540,28 @@ break;
     SSF_ASSERT(SSFISO8601ISOToUnix("1970-01-01T05:30:00+05:30", &unixSysOut, &zoneOffsetMin));
     SSF_ASSERT(zoneOffsetMin == 330);
     SSF_ASSERT(unixSysOut == 0);
+
+    /* Fractional seconds: 10+ digits trips the numDigs > 9 reject (ssfiso8601.c:281). */
+    SSF_ASSERT(SSFISO8601ISOToUnix("1970-01-01T00:00:00.1234567890Z",
+                                    &unixSysOut, &zoneOffsetMin) == false);
+
+    /* Timezone hour: non-digit at position 0 / 1 of "+HH". */
+    SSF_ASSERT(SSFISO8601ISOToUnix("1970-01-01T00:00:00+X5", &unixSysOut, &zoneOffsetMin)
+               == false);
+    SSF_ASSERT(SSFISO8601ISOToUnix("1970-01-01T00:00:00+0X", &unixSysOut, &zoneOffsetMin)
+               == false);
+
+    /* Timezone min: non-digit at position 0 / 1 of "+HH:MM". */
+    SSF_ASSERT(SSFISO8601ISOToUnix("1970-01-01T00:00:00+05:X0", &unixSysOut, &zoneOffsetMin)
+               == false);
+    SSF_ASSERT(SSFISO8601ISOToUnix("1970-01-01T00:00:00+05:0X", &unixSysOut, &zoneOffsetMin)
+               == false);
+
+    /* Timezone hour out of range. */
+    SSF_ASSERT(SSFISO8601ISOToUnix("1970-01-01T00:00:00+25:00", &unixSysOut, &zoneOffsetMin)
+               == false);
+
+    /* Timezone min out of range. */
+    SSF_ASSERT(SSFISO8601ISOToUnix("1970-01-01T00:00:00+05:60", &unixSysOut, &zoneOffsetMin)
+               == false);
 }

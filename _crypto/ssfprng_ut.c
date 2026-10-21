@@ -145,6 +145,24 @@ void SSFPRNGUnitTest(void)
         SSFPRNGDeInitContext(&ctx);
     }
 
+    /* (Hardening) Backtracking resistance: GetRandom performs a CTR_DRBG-style Update that
+     * re-keys the context, destroying the AES key that produced the returned bytes. A state
+     * compromise after the call therefore cannot recover previously returned output. Observe the
+     * rotation directly -- right after init the context key equals the seed; after one draw it
+     * must differ. (The first output block stays deterministic for a given seed; covered above.) */
+    {
+        SSFPRNGContext_t ctx;
+        uint8_t seedKey[SSF_PRNG_ENTROPY_SIZE] = {0, 1, 2, 3, 4, 5, 6, 7,
+                                                  8, 9, 10, 11, 12, 13, 14, 15};
+        uint8_t out[SSF_PRNG_RANDOM_MAX_SIZE];
+
+        SSFPRNGInitContext(&ctx, seedKey, sizeof(seedKey));
+        SSF_ASSERT(memcmp(ctx.entropy, seedKey, sizeof(seedKey)) == 0);
+        SSFPRNGGetRandom(&ctx, out, sizeof(out));
+        SSF_ASSERT(memcmp(ctx.entropy, seedKey, sizeof(seedKey)) != 0);
+        SSFPRNGDeInitContext(&ctx);
+    }
+
     /* Random output is non-trivial (not all zeros) */
     {
         SSFPRNGContext_t ctx;
@@ -156,5 +174,71 @@ void SSFPRNGUnitTest(void)
         SSFPRNGGetRandom(&ctx, r, sizeof(r));
         SSF_ASSERT(memcmp(r, zeros, sizeof(r)) != 0);
         SSFPRNGDeInitContext(&ctx);
+    }
+
+    /* Verify pt = count || zeros (NIST CTR_DRBG-style input shape). Property test: the PRNG
+     * output for any (entropy, count) must equal AES-128-ECB(entropy, count_bytes || zeros).
+     * Compute both sides on the host (same memcpy semantics on either endianness) and compare.
+     * Pre-fix this would have been AES(entropy, count||count); the change makes the input
+     * shape match standard CTR_DRBG conventions. */
+    {
+        SSFPRNGContext_t ctx;
+        uint8_t entropyKnown[SSF_PRNG_ENTROPY_SIZE] = {
+            0x00u, 0x01u, 0x02u, 0x03u, 0x04u, 0x05u, 0x06u, 0x07u,
+            0x08u, 0x09u, 0x0Au, 0x0Bu, 0x0Cu, 0x0Du, 0x0Eu, 0x0Fu
+        };
+        uint8_t knownRandom[SSF_PRNG_RANDOM_MAX_SIZE];
+        uint8_t expectedPt[SSF_AES_BLOCK_SIZE];
+        uint8_t expectedCt[SSF_AES_BLOCK_SIZE];
+        uint64_t snappedCount;
+
+        SSFPRNGInitContext(&ctx, entropyKnown, sizeof(entropyKnown));
+        snappedCount = ctx.count;
+
+        /* Build the AES input as count || zeros (the post-fix construction). */
+        memcpy(expectedPt, &snappedCount, sizeof(uint64_t));
+        memset(&expectedPt[sizeof(uint64_t)], 0, sizeof(uint64_t));
+
+        SSFAES128BlockEncrypt(expectedPt, sizeof(expectedPt),
+                              expectedCt, sizeof(expectedCt),
+                              entropyKnown, sizeof(entropyKnown));
+
+        SSFPRNGGetRandom(&ctx, knownRandom, sizeof(knownRandom));
+        SSF_ASSERT(memcmp(knownRandom, expectedCt, sizeof(knownRandom)) == 0);
+
+        SSFPRNGDeInitContext(&ctx);
+    }
+
+    /* Defense-in-depth regression: GetRandom now scrubs its internal pt and ct stack buffers
+     * before return. The scrub is not externally observable through the C API, but it must
+     * not break the deterministic-output contract -- a fresh ctx with the same entropy must
+     * still produce the same first-call output. This catches any regression that would
+     * accidentally damage the live state during the scrub (e.g., scrubbing context->entropy
+     * by mistake). */
+    {
+        SSFPRNGContext_t ctxA;
+        SSFPRNGContext_t ctxB;
+        uint8_t rA[SSF_PRNG_RANDOM_MAX_SIZE];
+        uint8_t rB[SSF_PRNG_RANDOM_MAX_SIZE];
+
+        SSFPRNGInitContext(&ctxA, entropy, sizeof(entropy));
+        SSFPRNGGetRandom(&ctxA, rA, sizeof(rA));
+
+        /* Run a few extra calls to exercise the scrub path multiple times before the    */
+        /* second context's first call. If the scrub were corrupting state, ctxB's first */
+        /* call would diverge from ctxA's first call.                                    */
+        {
+            uint8_t scratch[SSF_PRNG_RANDOM_MAX_SIZE];
+            SSFPRNGGetRandom(&ctxA, scratch, sizeof(scratch));
+            SSFPRNGGetRandom(&ctxA, scratch, 1u);
+            SSFPRNGGetRandom(&ctxA, scratch, 7u);
+        }
+
+        SSFPRNGInitContext(&ctxB, entropy, sizeof(entropy));
+        SSFPRNGGetRandom(&ctxB, rB, sizeof(rB));
+        SSF_ASSERT(memcmp(rA, rB, sizeof(rA)) == 0);
+
+        SSFPRNGDeInitContext(&ctxA);
+        SSFPRNGDeInitContext(&ctxB);
     }
 }

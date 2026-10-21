@@ -60,8 +60,8 @@ typedef enum
 bool SSFHexBinToByte(uint8_t in, char *out, size_t outSize, SSFHexCase_t hcase);
 bool SSFHexByteToBin(const char *hex, uint8_t *out);
 
-bool SSFHexBytesToBin(SSFCStrIn_t in, size_t inLenLim, uint8_t *out, size_t outSize,
-                      size_t *outLen, bool rev);
+bool SSFHexBytesToBin(SSFCStrIn_t in, size_t inLenLim, uint8_t *out, size_t outSize, size_t *outLen,
+                      bool rev);
 bool SSFHexBinToBytes(const uint8_t *in, size_t inLen, SSFCStrOut_t out, size_t outSize,
                       size_t *outLen, bool rev, SSFHexCase_t hcase);
 

@@ -35,6 +35,8 @@
 #include "ssfassert.h"
 #include "ssfaes.h"
 #include "ssfprng.h"
+#include "ssfcrypt.h"
+#include "ssfusexport.h"
 
 /* --------------------------------------------------------------------------------------------- */
 /* Module defines.                                                                               */
@@ -46,14 +48,14 @@
 /* --------------------------------------------------------------------------------------------- */
 void SSFPRNGInitContext(SSFPRNGContext_t *context, const uint8_t *entropy, size_t entropyLen)
 {
-	SSF_REQUIRE(context != NULL);
-	SSF_REQUIRE(entropy != NULL);
-	SSF_REQUIRE(entropyLen == SSF_PRNG_ENTROPY_SIZE);
+    SSF_REQUIRE(context != NULL);
+    SSF_REQUIRE(entropy != NULL);
+    SSF_REQUIRE(entropyLen == SSF_PRNG_ENTROPY_SIZE);
 
-	memcpy(context->entropy, entropy, SSF_PRNG_ENTROPY_SIZE);
-	memcpy(&context->count, entropy, sizeof(uint64_t));
-	context->count = (~context->count) + 1;
-	context->magic = SSF_PRNG_MAGIC;
+    memcpy(context->entropy, entropy, SSF_PRNG_ENTROPY_SIZE);
+    memcpy(&context->count, entropy, sizeof(uint64_t));
+    context->count = (~context->count) + 1;
+    context->magic = SSF_PRNG_MAGIC;
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -61,10 +63,10 @@ void SSFPRNGInitContext(SSFPRNGContext_t *context, const uint8_t *entropy, size_
 /* --------------------------------------------------------------------------------------------- */
 void SSFPRNGDeInitContext(SSFPRNGContext_t *context)
 {
-	SSF_REQUIRE(context != NULL);
+    SSF_REQUIRE(context != NULL);
     SSF_REQUIRE(context->magic == SSF_PRNG_MAGIC);
 
-	memset(context, 0, sizeof(SSFPRNGContext_t));
+    SSFCryptSecureZero(context, sizeof(SSFPRNGContext_t));
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -72,22 +74,34 @@ void SSFPRNGDeInitContext(SSFPRNGContext_t *context)
 /* --------------------------------------------------------------------------------------------- */
 void SSFPRNGGetRandom(SSFPRNGContext_t *context, uint8_t *random, size_t randomSize)
 {
-	uint8_t pt[SSF_AES_BLOCK_SIZE];
-	uint8_t ct[SSF_AES_BLOCK_SIZE];
+    uint8_t pt[SSF_AES_BLOCK_SIZE];
+    uint8_t ct[SSF_AES_BLOCK_SIZE];
+    uint8_t newKey[SSF_PRNG_ENTROPY_SIZE];
 
-	SSF_REQUIRE(context != NULL);
-	SSF_REQUIRE(random != NULL);
-	SSF_REQUIRE((randomSize > 0) && (randomSize <= SSF_PRNG_RANDOM_MAX_SIZE));
-	SSF_ASSERT(context->magic == SSF_PRNG_MAGIC);
+    SSF_REQUIRE(context != NULL);
+    SSF_REQUIRE(random != NULL);
+    SSF_REQUIRE((randomSize > 0) && (randomSize <= SSF_PRNG_RANDOM_MAX_SIZE));
+    SSF_ASSERT(context->magic == SSF_PRNG_MAGIC);
 
-	/* Prepare pt block with count, then advance count */
-	memcpy(pt, &context->count, sizeof(uint64_t));
-	memcpy(&pt[SSF_AES_BLOCK_SIZE >> 1], &context->count, sizeof(uint64_t));
-	context->count++;
+    /* Output block: ct = AES_key(count || zeros) (NIST SP 800-90A CTR_DRBG-style input shape). */
+    memcpy(pt, &context->count, sizeof(uint64_t));
+    memset(&pt[sizeof(uint64_t)], 0, SSF_AES_BLOCK_SIZE - sizeof(uint64_t));
+    SSFAES128BlockEncrypt(pt, sizeof(pt), ct, sizeof(ct), context->entropy, SSF_PRNG_ENTROPY_SIZE);
 
-	/* Generate next 16 bytes of random numbers from entropy */
-	SSFAES128BlockEncrypt(pt, sizeof(pt), ct, sizeof(ct), context->entropy, SSF_PRNG_ENTROPY_SIZE);
+    /* Copy requested number of random numbers to user buffer */
+    memcpy(random, ct, randomSize);
 
-	/* Copy requested number of random numbers to user buffer */
-	memcpy(random, ct, randomSize);
+    /* Backtracking resistance (CTR_DRBG-style Update): derive a fresh key under the CURRENT key */
+    pt[sizeof(uint64_t)] = 0x01u;
+    SSFAES128BlockEncrypt(pt, sizeof(pt), newKey, sizeof(newKey), context->entropy,
+                          SSF_PRNG_ENTROPY_SIZE);
+    memcpy(context->entropy, newKey, SSF_PRNG_ENTROPY_SIZE);
+    context->count++;
+
+    /* Scrub stack secrets before return: pt encodes the count, ct holds output/unused keystream, */
+    /* and newKey is a copy of the freshly installed key.                                          */
+    SSFCryptSecureZero(pt, sizeof(pt));
+    SSFCryptSecureZero(ct, sizeof(ct));
+    SSFCryptSecureZero(newKey, sizeof(newKey));
 }
+

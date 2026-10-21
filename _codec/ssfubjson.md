@@ -16,7 +16,7 @@ printer callbacks, one per object or array nesting level.
 ## [↑](#ssfubjson--ubjson-parsergenerator) Dependencies
 
 - [`ssfport.h`](../ssfport.h)
-- [`ssfoptions.h`](../ssfoptions.h)
+- [`_opt/ssfubjson_opt.h`](../_opt/ssfubjson_opt.h) (aggregated through `ssfoptions.h`)
 
 <a id="notes"></a>
 
@@ -36,7 +36,7 @@ printer callbacks, one per object or array nesting level.
 
 ## [↑](#ssfubjson--ubjson-parsergenerator) Configuration
 
-All options are set in `ssfoptions.h`.
+Options live in [`_opt/ssfubjson_opt.h`](../_opt/ssfubjson_opt.h) (aggregated into the build via `ssfoptions.h`).
 
 | Option | Default | Description |
 |--------|---------|-------------|

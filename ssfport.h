@@ -41,6 +41,8 @@ extern "C" {
 #else /* _WIN32 */
 #include <time.h>
 #endif /* _WIN32 */
+#include <stdint.h>
+#include <stdbool.h>
 #include "ssfassert.h"
 
 /* --------------------------------------------------------------------------------------------- */
@@ -48,6 +50,7 @@ extern "C" {
 /* --------------------------------------------------------------------------------------------- */
 
 /* _codec */
+#define SSF_CONFIG_ASN1_UNIT_TEST    (1u)
 #define SSF_CONFIG_BASE64_UNIT_TEST  (1u)
 #define SSF_CONFIG_DEC_UNIT_TEST     (1u)
 #define SSF_CONFIG_GOBJ_UNIT_TEST    (1u)
@@ -58,11 +61,39 @@ extern "C" {
 #define SSF_CONFIG_TLV_UNIT_TEST     (1u)
 #define SSF_CONFIG_UBJSON_UNIT_TEST  (1u)
 
+/* SSF_CONFIG_HAVE_OPENSSL -- set to 1 on host builds where libcrypto is linked at the build's   */
+/* command line (macOS/Linux native). Cross builds (e.g. mipsel under QEMU) override this to 0   */
+/* to skip OpenSSL cross-validation paths in the unit suite. Defined as a fall-through default   */
+/* so command-line -D wins.                                                                      */
+#ifndef SSF_CONFIG_HAVE_OPENSSL
+#define SSF_CONFIG_HAVE_OPENSSL      (1u)
+#endif
+
 /* _crypto */
 #define SSF_CONFIG_AES_UNIT_TEST     (1u)
+#define SSF_CONFIG_AESCCM_UNIT_TEST  (1u)
+#define SSF_CONFIG_AESCTR_UNIT_TEST  (1u)
 #define SSF_CONFIG_AESGCM_UNIT_TEST  (1u)
+#define SSF_CONFIG_BN_UNIT_TEST      (1u)
+#define SSF_CONFIG_BN_MICROBENCH     (1u)  /* 1 to run MontMul/MontSquare perf harness */
+#define SSF_CONFIG_CCP_UNIT_TEST     (1u)  /* ChaCha20-Poly1305 AEAD */
+#define SSF_CONFIG_CHACHA20_UNIT_TEST (1u)
+#define SSF_CONFIG_CRYPT_UNIT_TEST   (1u)
+#define SSF_CONFIG_CRYPT_CT_TIMING_TEST (1u)  /* 1 to run SSFCryptCTMemEq wall-clock CT check */
+#define SSF_CONFIG_EC_UNIT_TEST      (1u)
+#define SSF_CONFIG_EC_MICROBENCH     (1u)  /* 1 to run [k]G perf harness in ssfec_ut */
+#define SSF_CONFIG_ECDSA_UNIT_TEST   (1u)
+
+#define SSF_CONFIG_ED25519_UNIT_TEST (1u)
+#define SSF_CONFIG_HKDF_UNIT_TEST    (1u)
+#define SSF_CONFIG_HMAC_UNIT_TEST    (1u)
+#define SSF_CONFIG_POLY1305_UNIT_TEST (1u)
 #define SSF_CONFIG_PRNG_UNIT_TEST    (1u)
+#define SSF_CONFIG_RSA_UNIT_TEST     (1u)
+#define SSF_CONFIG_SHA1_UNIT_TEST    (1u)
 #define SSF_CONFIG_SHA2_UNIT_TEST    (1u)
+#define SSF_CONFIG_TLS_UNIT_TEST     (1u)
+#define SSF_CONFIG_X25519_UNIT_TEST  (1u)
 
 /* _ecc */
 #define SSF_CONFIG_RS_UNIT_TEST      (1u)
@@ -86,6 +117,7 @@ extern "C" {
 #define SSF_CONFIG_HEAP_UNIT_TEST    (1u)
 #define SSF_CONFIG_LL_UNIT_TEST      (1u)
 #define SSF_CONFIG_MPOOL_UNIT_TEST   (1u)
+#define SSF_CONFIG_SLL_UNIT_TEST     (1u)
 
 /* _time */
 #define SSF_CONFIG_DTIME_UNIT_TEST   (1u)
@@ -97,8 +129,12 @@ extern "C" {
 #define SSF_CONFIG_CLI_UNIT_TEST     (1u)
 #define SSF_CONFIG_VTED_UNIT_TEST    (1u)
 
+/* _osal */
+#define SSF_CONFIG_LPTASK_UNIT_TEST  (1u)
+
 /* If any unit test is enabled then enable unit test mode */
 #if /* _codec */ \
+    SSF_CONFIG_ASN1_UNIT_TEST == 1 || \
     SSF_CONFIG_BASE64_UNIT_TEST == 1 || \
     SSF_CONFIG_DEC_UNIT_TEST == 1 || \
     SSF_CONFIG_GOBJ_UNIT_TEST == 1 || \
@@ -110,9 +146,25 @@ extern "C" {
     SSF_CONFIG_UBJSON_UNIT_TEST == 1 || \
     /* _crypto */ \
     SSF_CONFIG_AES_UNIT_TEST == 1 || \
+    SSF_CONFIG_AESCCM_UNIT_TEST == 1 || \
+    SSF_CONFIG_AESCTR_UNIT_TEST == 1 || \
     SSF_CONFIG_AESGCM_UNIT_TEST == 1 || \
+    SSF_CONFIG_BN_UNIT_TEST == 1 || \
+    SSF_CONFIG_CCP_UNIT_TEST == 1 || \
+    SSF_CONFIG_CHACHA20_UNIT_TEST == 1 || \
+    SSF_CONFIG_CRYPT_UNIT_TEST == 1 || \
+    SSF_CONFIG_EC_UNIT_TEST == 1 || \
+    SSF_CONFIG_ECDSA_UNIT_TEST == 1 || \
+    SSF_CONFIG_ED25519_UNIT_TEST == 1 || \
+    SSF_CONFIG_HKDF_UNIT_TEST == 1 || \
+    SSF_CONFIG_HMAC_UNIT_TEST == 1 || \
+    SSF_CONFIG_POLY1305_UNIT_TEST == 1 || \
     SSF_CONFIG_PRNG_UNIT_TEST == 1 || \
+    SSF_CONFIG_RSA_UNIT_TEST == 1 || \
+    SSF_CONFIG_SHA1_UNIT_TEST == 1 || \
     SSF_CONFIG_SHA2_UNIT_TEST == 1 || \
+    SSF_CONFIG_TLS_UNIT_TEST == 1 || \
+    SSF_CONFIG_X25519_UNIT_TEST == 1 || \
     /* _ecc */ \
     SSF_CONFIG_RS_UNIT_TEST == 1 || \
     /* _edc */ \
@@ -130,6 +182,7 @@ extern "C" {
     SSF_CONFIG_HEAP_UNIT_TEST == 1 || \
     SSF_CONFIG_LL_UNIT_TEST == 1 || \
     SSF_CONFIG_MPOOL_UNIT_TEST == 1 || \
+    SSF_CONFIG_SLL_UNIT_TEST == 1 || \
     /* _time */ \
     SSF_CONFIG_DTIME_UNIT_TEST == 1 || \
     SSF_CONFIG_ISO8601_UNIT_TEST == 1 || \
@@ -137,10 +190,34 @@ extern "C" {
     /* _ui */ \
     SSF_CONFIG_ARGV_UNIT_TEST == 1 || \
     SSF_CONFIG_CLI_UNIT_TEST == 1 || \
-    SSF_CONFIG_VTED_UNIT_TEST == 1
+    SSF_CONFIG_VTED_UNIT_TEST == 1 || \
+    /* _osal */ \
+    SSF_CONFIG_LPTASK_UNIT_TEST == 1
 #define SSF_CONFIG_UNIT_TEST (1u)
 #else
 #define SSF_CONFIG_UNIT_TEST (0u)
+#endif
+
+/* SSF_CONFIG_UT_VERBOSE -- gate diagnostic stdout from unit tests (microbenchmark timings,       */
+/* OpenSSL cross-check banners, Wycheproof per-tcId mismatches, zeroization-audit failure         */
+/* details). Default 0 keeps the suite silent so main.c's "Running ... PASSED in Ns" line is the  */
+/* only output and aligned columns are not corrupted. Override with -DSSF_CONFIG_UT_VERBOSE=1     */
+/* to recover the diagnostic stream when profiling or debugging a failure.                        */
+#ifndef SSF_CONFIG_UT_VERBOSE
+#define SSF_CONFIG_UT_VERBOSE (0u)
+#endif
+
+#if SSF_CONFIG_UT_VERBOSE == 1
+#include <stdio.h>
+#define SSF_UT_PRINTF(...) printf(__VA_ARGS__)
+#else
+/* Disabled form: sizeof-of-call is unevaluated -- args are type-checked and "referenced" enough  */
+/* to suppress unused-variable warnings on counters that exist solely to drive these prints, but  */
+/* generate zero runtime code. Requires <stdio.h> in scope wherever SSF_UT_PRINTF appears so the  */
+/* printf prototype is visible to the sizeof expression; every unit test file that uses it        */
+/* already includes <stdio.h> for snprintf.                                                       */
+#include <stdio.h>
+#define SSF_UT_PRINTF(...) ((void)sizeof(printf(__VA_ARGS__)))
 #endif
 
 /* --------------------------------------------------------------------------------------------- */
@@ -171,7 +248,17 @@ typedef uint64_t SSFPortTick_t;
 #define SSF_CONFIG_LITTLE_ENDIAN (1u)
 #else
 #define SSF_CONFIG_BYTE_ORDER_MACROS (1u)
+/* Auto-detect endianness from the compiler when available (GCC/Clang expose
+ * __BYTE_ORDER__). Hardcoding LE here corrupted ntohl/htonl/ntohll/htonll on
+ * BE hosts, breaking SHA-2 (and any other consumer of those macros) on
+ * mips/mips64. Embedded targets without __BYTE_ORDER__ default to LE; flip
+ * SSF_CONFIG_LITTLE_ENDIAN by hand if you're on a non-GCC BE compiler. */
+#if defined(__BYTE_ORDER__) && defined(__ORDER_BIG_ENDIAN__) && \
+    (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
+#define SSF_CONFIG_LITTLE_ENDIAN (0u)
+#else
 #define SSF_CONFIG_LITTLE_ENDIAN (1u)
+#endif
 #endif
 
 #if SSF_CONFIG_BYTE_ORDER_MACROS == 1
@@ -253,10 +340,47 @@ typedef pthread_mutex_t SSFMutex_t;
 #endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
 
 /* --------------------------------------------------------------------------------------------- */
+/* Portable function attributes                                                                  */
+/* --------------------------------------------------------------------------------------------- */
+
+/* SSF_NOINLINE -- force the compiler to give the function its own stack frame and call site.    */
+/* Used by stack-scrub helpers and side-channel-sensitive routines that need a clean frame.      */
+#if defined(__GNUC__) || defined(__clang__)
+#define SSF_NOINLINE __attribute__((noinline))
+#elif defined(_MSC_VER)
+#define SSF_NOINLINE __declspec(noinline)
+#else
+#define SSF_NOINLINE
+#endif
+
+/* SSF_OPTIMIZER_BARRIER(p) -- force the compiler to materialize p (an address-taken object) and */
+/* fence all preceding/following memory operations across this point. Required at the end of     */
+/* stack-scrub helpers and pollute/scan probes so the compiler cannot reorder loads/stores       */
+/* across the function boundary or elide a "dead" stack buffer that the test framework relies    */
+/* on having a real, addressable stack location. `volatile` alone is not sufficient on MSVC      */
+/* because the optimizer may still place a volatile local at a stack offset that does not        */
+/* persist across the call (or coalesce loop iterations). The GCC variant uses an empty inline   */
+/* asm with `"r"(p)` to pin the address into a register and `"memory"` to clobber. The MSVC      */
+/* variant pairs the deprecated-but-effective _ReadWriteBarrier compiler fence with a volatile   */
+/* read of the first byte to force materialization.                                              */
+#if defined(__GNUC__) || defined(__clang__)
+#define SSF_OPTIMIZER_BARRIER(p) __asm__ __volatile__("" : : "r"(p) : "memory")
+#elif defined(_MSC_VER)
+#include <intrin.h>
+#pragma intrinsic(_ReadWriteBarrier)
+#define SSF_OPTIMIZER_BARRIER(p) \
+    do { _ReadWriteBarrier(); (void)(*(volatile uint8_t *)(p)); } while (0)
+#else
+#define SSF_OPTIMIZER_BARRIER(p) ((void)(p))
+#endif
+
+/* --------------------------------------------------------------------------------------------- */
 /* External interface                                                                            */
 /* --------------------------------------------------------------------------------------------- */
-#ifdef _WIN32
+#if defined(_WIN32)
 __declspec(noreturn)
+#elif defined(__GNUC__) || defined(__clang__)
+__attribute__((noreturn))
 #endif
 void SSFPortAssert(const char *file, unsigned int line);
 
@@ -265,6 +389,10 @@ void SSFPortAssert(const char *file, unsigned int line);
 #else /* _WIN32 */
 SSFPortTick_t SSFPortGetTick64(void);
 #endif /* _WIN32 */
+
+/* Platform entropy source. Returns true if bufLen bytes of entropy were copied into buf, else  */
+/* false. Backed by the OS CSPRNG (BCryptGenRandom on Windows, /dev/urandom on POSIX).          */
+bool SSFPortGetEntropy(uint8_t *buf, uint16_t bufLen);
 
 #include "ssf.h"
 #include "ssfoptions.h"

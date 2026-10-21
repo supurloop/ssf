@@ -64,7 +64,7 @@ uint8_t _ssfCfgStorageRAM[SSF_MAX_CFG_RAM_SECTORS][SSF_CFG_MAX_STORAGE_SIZE];
 #endif
 
 #if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
-bool _ssfcfgIsInited; 
+bool _ssfcfgIsInited;
 SSF_CFG_THREAD_SYNC_DECLARATION;
 #endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
 
@@ -141,7 +141,7 @@ bool SSFCfgWrite(uint8_t *data, uint16_t dataLen, dataId_t dataId, dataVersion_t
 
         /* If computed CRC matches data then nothing to do */
         if (crcData == crcStorage)
-        { 
+        {
             retVal = false;
             goto _ssfcfgReadExit;
         }

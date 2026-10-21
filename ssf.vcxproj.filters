@@ -177,6 +177,8 @@
     <ClCompile Include="_ui\ssfvted_ut.c">
       <Filter>_ui</Filter>
     </ClCompile>
+    <ClCompile Include="_ui\ssfcli.c" />
+    <ClCompile Include="_ui\ssfcli_ut.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="ssf.h" />
@@ -272,6 +274,7 @@
     <ClInclude Include="_ui\ssfvted.h">
       <Filter>_ui</Filter>
     </ClInclude>
+    <ClInclude Include="_ui\ssfcli.h" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="_codec">
@@ -304,8 +307,5 @@
     <Filter Include="_ui">
       <UniqueIdentifier>{bad8e4f2-1cf7-4fd6-bdc6-f5cc436dc44f}</UniqueIdentifier>
     </Filter>
-  </ItemGroup>
-  <ItemGroup>
-    <ResourceCompile Include="ssf.rc" />
   </ItemGroup>
 </Project>

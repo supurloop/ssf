@@ -117,7 +117,14 @@
 /* 0.1.5 - Fixed nuisance compiler warnings.                                                     */
 /* 0.1.6 - Expanded all unit tests to improve code coverage.                                     */
 /*       - Documentation updates.                                                                */
+/* 0.1.7 - Added ssftrace debug tracing module.                                                  */
+/*       - Added generic object conversions to and from INI format.                              */
+/*       - Added generic object conversions to and from JSON format.                             */
+/*       - Added argument parser module.                                                         */
+/*       - Added CLI framework module.                                                           */
+/*       - Added ANSI/VT100 terminal line editor module.                                         */
+/*       - Resolved some typecast warnings occurring on some platforms.                          */
 /* --------------------------------------------------------------------------------------------- */
-#define SSF_VERSION_STR "0.1.6"
+#define SSF_VERSION_STR "0.1.7"
 
 #endif /* SSF_VERSION_H_INCLUDE */

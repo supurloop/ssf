@@ -433,7 +433,7 @@ void SSFJsonUnitTest(void)
     size_t end;
     size_t aidx3;
     int64_t outI64;
-    char *path[SSF_JSON_CONFIG_MAX_IN_DEPTH + 1];
+    SSFCStrIn_t path[SSF_JSON_CONFIG_MAX_IN_DEPTH + 1];
 
     /* Parsing tests */
 
@@ -1171,7 +1171,7 @@ void SSFJsonUnitTest(void)
     outI64 = 0;
     aidx3 = 0;
     path[0] = (char *)&aidx3;
-    SSF_ASSERT(SSFJsonGetInt("[18]", (SSFCStrIn_t*)path, &outI64));
+    SSF_ASSERT(SSFJsonGetInt("[18]", path, &outI64));
     SSF_ASSERT(outI64 == 0x12ll);
 
     /* Generator tests */

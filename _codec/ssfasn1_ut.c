@@ -945,7 +945,7 @@ void SSFASN1UnitTest(void)
         const uint8_t *value;
         uint32_t valueLen;
         uint64_t u64;
-        uint8_t scratch;
+        uint8_t scratch = 0;
 
         /* ssfasn1.c line 51: bufLen < 2u (cannot fit minimum tag+length). */
         {

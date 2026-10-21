@@ -389,7 +389,7 @@ void SSFHKDFUnitTest(void)
         /* of the salt short-circuit unexercised.                                            */
         {
             uint8_t prkPtr0[32];
-            uint8_t saltPtr;
+            uint8_t saltPtr = 0;
             SSF_ASSERT(SSFHKDFExtract(SSF_HMAC_HASH_SHA256, &saltPtr, 0, ikm, sizeof(ikm),
                        prkPtr0, sizeof(prkPtr0)) == true);
             SSF_ASSERT(memcmp(prkPtr0, expectedPRK, sizeof(expectedPRK)) == 0);
@@ -405,7 +405,7 @@ void SSFHKDFUnitTest(void)
         /* cases. Existing tests only pair NULL with len=0.                                  */
         {
             uint8_t okmPtr0[42];
-            uint8_t infoPtr;
+            uint8_t infoPtr = 0;
             SSF_ASSERT(SSFHKDFExpand(SSF_HMAC_HASH_SHA256, prk, sizeof(prk), &infoPtr, 0,
                        okmPtr0, sizeof(okmPtr0)) == true);
             SSF_ASSERT(memcmp(okmPtr0, expectedOKM, sizeof(expectedOKM)) == 0);

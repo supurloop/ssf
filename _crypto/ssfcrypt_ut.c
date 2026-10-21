@@ -38,6 +38,43 @@
 #include "ssfport.h"
 
 #if SSF_CONFIG_CRYPT_UNIT_TEST == 1
+#if SSF_CONFIG_CRYPT_CT_TIMING_TEST == 1
+/* --------------------------------------------------------------------------------------------- */
+/* Module defines.                                                                               */
+/* --------------------------------------------------------------------------------------------- */
+#ifdef _WIN32
+/* GetTickCount64 steps every ~15.6ms, coarser than one timed loop, so Windows times in us. */
+#define SSF_CRYPT_UT_CT_UNITS "us"
+#define SSF_CRYPT_UT_CT_SLOP (5000ull)
+#else /* _WIN32 */
+#define SSF_CRYPT_UT_CT_UNITS "ms"
+#define SSF_CRYPT_UT_CT_SLOP (5ull)
+#endif /* _WIN32 */
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns a CT timing timestamp: microseconds from QPC on Windows, else SSFPortGetTick64().     */
+/* --------------------------------------------------------------------------------------------- */
+static uint64_t _SSFCryptUTCTNow(void)
+{
+#ifdef _WIN32
+    LARGE_INTEGER freq;
+    LARGE_INTEGER count;
+    uint64_t f;
+    uint64_t c;
+
+    QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&count);
+    f = (uint64_t)freq.QuadPart;
+    c = (uint64_t)count.QuadPart;
+
+    /* Split whole/fractional seconds so the 1e6 scale cannot overflow on long uptimes. */
+    return (((c / f) * 1000000ull) + (((c % f) * 1000000ull) / f));
+#else /* _WIN32 */
+    return (uint64_t)SSFPortGetTick64();
+#endif /* _WIN32 */
+}
+#endif /* SSF_CONFIG_CRYPT_CT_TIMING_TEST */
+
 /* --------------------------------------------------------------------------------------------- */
 /* Performs unit test on ssfcrypt external interface.                                            */
 /* --------------------------------------------------------------------------------------------- */
@@ -187,18 +224,19 @@ void SSFCryptUnitTest(void)
        at byte n-1 (memcmp would scan the entire buffer). The min-of-trials reduces
        scheduler / cache jitter. The 10x ratio threshold is far above typical wall-clock
        noise (even on QEMU) and far below the >>1000x speedup a memcmp-class regression
-       would produce. The +5ms slop guards against ms-quantized "early" measurements. */
+       would produce. The +5ms slop guards against ms-quantized "early" measurements.
+       Windows times with QPC (us) because GetTickCount64 steps every ~15.6ms. */
     {
         enum { CT_BUF_SIZE = 2048, CT_ITERS = 30000, CT_TRIALS = 3 };
         static uint8_t ctA[CT_BUF_SIZE];
         static uint8_t ctB[CT_BUF_SIZE];
         volatile uint64_t sink = 0;
-        uint64_t earlyMs[CT_TRIALS];
-        uint64_t lateMs[CT_TRIALS];
+        uint64_t earlyTime[CT_TRIALS];
+        uint64_t lateTime[CT_TRIALS];
         uint64_t earlyMin;
         uint64_t lateMin;
-        SSFPortTick_t t0;
-        SSFPortTick_t t1;
+        uint64_t t0;
+        uint64_t t1;
         uint32_t i;
         uint32_t trial;
 
@@ -215,42 +253,43 @@ void SSFCryptUnitTest(void)
         {
             /* Late mismatch: differs at byte n-1; CT impl must scan the whole buffer. */
             ctB[CT_BUF_SIZE - 1u] = 0x55u;
-            t0 = SSFPortGetTick64();
+            t0 = _SSFCryptUTCTNow();
             for (i = 0; i < CT_ITERS; i++)
             {
                 sink += (uint64_t)SSFCryptCTMemEq(ctA, ctB, sizeof(ctA));
             }
-            t1 = SSFPortGetTick64();
-            lateMs[trial] = (uint64_t)(t1 - t0);
+            t1 = _SSFCryptUTCTNow();
+            lateTime[trial] = t1 - t0;
             ctB[CT_BUF_SIZE - 1u] = 0xAAu;
 
             /* Early mismatch: differs at byte 0; a non-CT memcmp would return after one byte. */
             ctB[0] = 0x55u;
-            t0 = SSFPortGetTick64();
+            t0 = _SSFCryptUTCTNow();
             for (i = 0; i < CT_ITERS; i++)
             {
                 sink += (uint64_t)SSFCryptCTMemEq(ctA, ctB, sizeof(ctA));
             }
-            t1 = SSFPortGetTick64();
-            earlyMs[trial] = (uint64_t)(t1 - t0);
+            t1 = _SSFCryptUTCTNow();
+            earlyTime[trial] = t1 - t0;
             ctB[0] = 0xAAu;
         }
 
-        earlyMin = earlyMs[0];
-        lateMin = lateMs[0];
+        earlyMin = earlyTime[0];
+        lateMin = lateTime[0];
         for (trial = 1; trial < CT_TRIALS; trial++)
         {
-            if (earlyMs[trial] < earlyMin) earlyMin = earlyMs[trial];
-            if (lateMs[trial] < lateMin) lateMin = lateMs[trial];
+            if (earlyTime[trial] < earlyMin) earlyMin = earlyTime[trial];
+            if (lateTime[trial] < lateMin) lateMin = lateTime[trial];
         }
 
-        SSF_UT_PRINTF("ssfcrypt CT timing: early=%llums late=%llums "
+        SSF_UT_PRINTF("ssfcrypt CT timing: early=%llu" SSF_CRYPT_UT_CT_UNITS
+               " late=%llu" SSF_CRYPT_UT_CT_UNITS " "
                "(min over %u trials, %u iters x %u B)\n",
                (unsigned long long)earlyMin, (unsigned long long)lateMin,
                (unsigned)CT_TRIALS, (unsigned)CT_ITERS, (unsigned)CT_BUF_SIZE);
 
         /* CT property: late runtime must not exceed 10x the early runtime. */
-        SSF_ASSERT(lateMin <= ((10u * earlyMin) + 5u));
+        SSF_ASSERT(lateMin <= ((10u * earlyMin) + SSF_CRYPT_UT_CT_SLOP));
 
         /* Reference the volatile sink so the optimizer cannot drop the timing loops. */
         SSF_ASSERT(sink != UINT64_MAX);

@@ -382,10 +382,11 @@ void SSFSMDeInitHandler(SSFSMId_t smid)
     SSF_REQUIRE((smid > SSF_SM_MIN) && (smid < SSF_SM_MAX));
     SSF_ASSERT(_ssfsmIsInited);
     SSF_ASSERT(_ssfsmActive >= SSF_SM_MAX);
+    SSF_ASSERT(_SSFSMStates[smid].current != NULL);
+
 #if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
     SSF_SM_THREAD_SYNC_ACQUIRE();
 #endif
-    SSF_ASSERT(_SSFSMStates[smid].current != NULL);
 
     _ssfsmActive = smid;
     _ssfsmIsEntryExit = true;

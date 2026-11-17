@@ -50,16 +50,19 @@ extern "C" {
 /* --------------------------------------------------------------------------------------------- */
 
 /* _codec */
-#define SSF_CONFIG_ASN1_UNIT_TEST    (1u)
-#define SSF_CONFIG_BASE64_UNIT_TEST  (1u)
-#define SSF_CONFIG_DEC_UNIT_TEST     (1u)
-#define SSF_CONFIG_GOBJ_UNIT_TEST    (1u)
-#define SSF_CONFIG_HEX_UNIT_TEST     (1u)
-#define SSF_CONFIG_INI_UNIT_TEST     (1u)
-#define SSF_CONFIG_JSON_UNIT_TEST    (1u)
-#define SSF_CONFIG_STR_UNIT_TEST     (1u)
-#define SSF_CONFIG_TLV_UNIT_TEST     (1u)
-#define SSF_CONFIG_UBJSON_UNIT_TEST  (1u)
+#define SSF_CONFIG_ASN1_UNIT_TEST    (0u)
+#define SSF_CONFIG_BASE64_UNIT_TEST  (0u)
+#define SSF_CONFIG_BASE64URL_UNIT_TEST (1u)
+#define SSF_CONFIG_DEC_UNIT_TEST     (0u)
+#define SSF_CONFIG_GOBJ_UNIT_TEST    (0u)
+#define SSF_CONFIG_HEX_UNIT_TEST     (0u)
+#define SSF_CONFIG_INI_UNIT_TEST     (0u)
+#define SSF_CONFIG_JSON_UNIT_TEST    (0u)
+#define SSF_CONFIG_MATCH_UNIT_TEST   (1u)
+#define SSF_CONFIG_STR_UNIT_TEST     (0u)
+#define SSF_CONFIG_TLV_UNIT_TEST     (0u)
+#define SSF_CONFIG_UBJSON_UNIT_TEST  (0u)
+#define SSF_CONFIG_X509_UNIT_TEST    (1u)
 
 /* SSF_CONFIG_HAVE_OPENSSL -- set to 1 on host builds where libcrypto is linked at the build's   */
 /* command line (macOS/Linux native). Cross builds (e.g. mipsel under QEMU) override this to 0   */
@@ -70,80 +73,83 @@ extern "C" {
 #endif
 
 /* _crypto */
-#define SSF_CONFIG_AES_UNIT_TEST     (1u)
-#define SSF_CONFIG_AESCCM_UNIT_TEST  (1u)
-#define SSF_CONFIG_AESCTR_UNIT_TEST  (1u)
-#define SSF_CONFIG_AESGCM_UNIT_TEST  (1u)
-#define SSF_CONFIG_BN_UNIT_TEST      (1u)
+#define SSF_CONFIG_AES_UNIT_TEST     (0u)
+#define SSF_CONFIG_AESCCM_UNIT_TEST  (0u)
+#define SSF_CONFIG_AESCTR_UNIT_TEST  (0u)
+#define SSF_CONFIG_AESGCM_UNIT_TEST  (0u)
+#define SSF_CONFIG_BN_UNIT_TEST      (0u)
 #define SSF_CONFIG_BN_MICROBENCH     (1u)  /* 1 to run MontMul/MontSquare perf harness */
-#define SSF_CONFIG_CCP_UNIT_TEST     (1u)  /* ChaCha20-Poly1305 AEAD */
-#define SSF_CONFIG_CHACHA20_UNIT_TEST (1u)
-#define SSF_CONFIG_CRYPT_UNIT_TEST   (1u)
+#define SSF_CONFIG_CCP_UNIT_TEST     (0u)  /* ChaCha20-Poly1305 AEAD */
+#define SSF_CONFIG_CHACHA20_UNIT_TEST (0u)
+#define SSF_CONFIG_CRYPT_UNIT_TEST   (0u)
 #define SSF_CONFIG_CRYPT_CT_TIMING_TEST (1u)  /* 1 to run SSFCryptCTMemEq wall-clock CT check */
-#define SSF_CONFIG_EC_UNIT_TEST      (1u)
+#define SSF_CONFIG_EC_UNIT_TEST      (0u)
 #define SSF_CONFIG_EC_MICROBENCH     (1u)  /* 1 to run [k]G perf harness in ssfec_ut */
-#define SSF_CONFIG_ECDSA_UNIT_TEST   (1u)
+#define SSF_CONFIG_ECDSA_UNIT_TEST   (0u)
 
-#define SSF_CONFIG_ED25519_UNIT_TEST (1u)
-#define SSF_CONFIG_HKDF_UNIT_TEST    (1u)
-#define SSF_CONFIG_HMAC_UNIT_TEST    (1u)
-#define SSF_CONFIG_POLY1305_UNIT_TEST (1u)
-#define SSF_CONFIG_PRNG_UNIT_TEST    (1u)
-#define SSF_CONFIG_RSA_UNIT_TEST     (1u)
-#define SSF_CONFIG_SHA1_UNIT_TEST    (1u)
-#define SSF_CONFIG_SHA2_UNIT_TEST    (1u)
-#define SSF_CONFIG_TLS_UNIT_TEST     (1u)
-#define SSF_CONFIG_X25519_UNIT_TEST  (1u)
+#define SSF_CONFIG_ED25519_UNIT_TEST (0u)
+#define SSF_CONFIG_HKDF_UNIT_TEST    (0u)
+#define SSF_CONFIG_HMAC_UNIT_TEST    (0u)
+#define SSF_CONFIG_POLY1305_UNIT_TEST (0u)
+#define SSF_CONFIG_PRNG_UNIT_TEST    (0u)
+#define SSF_CONFIG_RSA_UNIT_TEST     (0u)
+#define SSF_CONFIG_SHA1_UNIT_TEST    (0u)
+#define SSF_CONFIG_SHA2_UNIT_TEST    (0u)
+#define SSF_CONFIG_TLS_UNIT_TEST     (0u)
+#define SSF_CONFIG_X25519_UNIT_TEST  (0u)
 
 /* _ecc */
-#define SSF_CONFIG_RS_UNIT_TEST      (1u)
+#define SSF_CONFIG_RS_UNIT_TEST      (0u)
 
 /* _edc */
-#define SSF_CONFIG_CRC16_UNIT_TEST   (1u)
-#define SSF_CONFIG_CRC32_UNIT_TEST   (1u)
-#define SSF_CONFIG_FCSUM_UNIT_TEST   (1u)
+#define SSF_CONFIG_CRC16_UNIT_TEST   (0u)
+#define SSF_CONFIG_CRC32_UNIT_TEST   (0u)
+#define SSF_CONFIG_FCSUM_UNIT_TEST   (0u)
 
 /* _fsm */
-#define SSF_CONFIG_SM_UNIT_TEST      (1u)
+#define SSF_CONFIG_SM_UNIT_TEST      (0u)
 
 /* _storage */
-#define SSF_CONFIG_CFG_UNIT_TEST     (1u)
+#define SSF_CONFIG_CFG_UNIT_TEST     (0u)
 
 /* _debug */
-#define SSF_CONFIG_TRACE_UNIT_TEST   (1u)
+#define SSF_CONFIG_TRACE_UNIT_TEST   (0u)
 
 /* _struct */
-#define SSF_CONFIG_BFIFO_UNIT_TEST   (1u)
-#define SSF_CONFIG_HEAP_UNIT_TEST    (1u)
-#define SSF_CONFIG_LL_UNIT_TEST      (1u)
-#define SSF_CONFIG_MPOOL_UNIT_TEST   (1u)
-#define SSF_CONFIG_SLL_UNIT_TEST     (1u)
+#define SSF_CONFIG_BFIFO_UNIT_TEST   (0u)
+#define SSF_CONFIG_HEAP_UNIT_TEST    (0u)
+#define SSF_CONFIG_LL_UNIT_TEST      (0u)
+#define SSF_CONFIG_MPOOL_UNIT_TEST   (0u)
+#define SSF_CONFIG_SLL_UNIT_TEST     (0u)
 
 /* _time */
-#define SSF_CONFIG_DTIME_UNIT_TEST   (1u)
-#define SSF_CONFIG_ISO8601_UNIT_TEST (1u)
-#define SSF_CONFIG_RTC_UNIT_TEST     (1u)
+#define SSF_CONFIG_DTIME_UNIT_TEST   (0u)
+#define SSF_CONFIG_ISO8601_UNIT_TEST (0u)
+#define SSF_CONFIG_RTC_UNIT_TEST     (0u)
 
 /* _ui */
-#define SSF_CONFIG_ARGV_UNIT_TEST    (1u)
-#define SSF_CONFIG_CLI_UNIT_TEST     (1u)
-#define SSF_CONFIG_VTED_UNIT_TEST    (1u)
+#define SSF_CONFIG_ARGV_UNIT_TEST    (0u)
+#define SSF_CONFIG_CLI_UNIT_TEST     (0u)
+#define SSF_CONFIG_VTED_UNIT_TEST    (0u)
 
 /* _osal */
-#define SSF_CONFIG_LPTASK_UNIT_TEST  (1u)
+#define SSF_CONFIG_LPTASK_UNIT_TEST  (0u)
 
 /* If any unit test is enabled then enable unit test mode */
 #if /* _codec */ \
     SSF_CONFIG_ASN1_UNIT_TEST == 1 || \
     SSF_CONFIG_BASE64_UNIT_TEST == 1 || \
+    SSF_CONFIG_BASE64URL_UNIT_TEST == 1 || \
     SSF_CONFIG_DEC_UNIT_TEST == 1 || \
     SSF_CONFIG_GOBJ_UNIT_TEST == 1 || \
     SSF_CONFIG_HEX_UNIT_TEST == 1 || \
     SSF_CONFIG_INI_UNIT_TEST == 1 || \
     SSF_CONFIG_JSON_UNIT_TEST == 1 || \
+    SSF_CONFIG_MATCH_UNIT_TEST == 1 || \
     SSF_CONFIG_STR_UNIT_TEST == 1 || \
     SSF_CONFIG_TLV_UNIT_TEST == 1 || \
     SSF_CONFIG_UBJSON_UNIT_TEST == 1 || \
+    SSF_CONFIG_X509_UNIT_TEST == 1 || \
     /* _crypto */ \
     SSF_CONFIG_AES_UNIT_TEST == 1 || \
     SSF_CONFIG_AESCCM_UNIT_TEST == 1 || \

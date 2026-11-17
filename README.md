@@ -157,7 +157,9 @@ Encoding and decoding interfaces for common data formats, all with strict buffer
 | Module | Description | Flash | Static RAM | Peak Stack | Heap | Reentrant |
 |--------|-------------|-------|------------|------------|------|-----------|
 | [ASN.1 DER](_codec/ssfasn1.md) | ASN.1 DER encoder/decoder (zero-copy decode + measure-then-write encode; X.509 / PKCS#1 / SEC 1 wire formats) | ~3.5 KB | — | ~160 B⁵² | — | Yes |
+| [X.509](_codec/ssfx509.md) | X.509 v3 certificate parser (zero-copy), generator, and RFC 5280 chain verifier (ECDSA / RSA / Ed25519, name constraints, hostname matching) | ~11 KB | ~8 B⁵⁹ | ~27 KB⁵⁸ | — | Yes⁵⁹ |
 | [Base64](_codec/ssfbase64.md) | Base64 encoder/decoder | ~700 B | — | ~64 B | — | Yes |
+| [Base64URL](_codec/ssfbase64url.md) | RFC 4648 §5 URL-safe Base64 encoder/decoder (unpadded output, strict decode; JWT convention) | ~300 B | — | ~1.1 KB⁵⁶ | — | Yes |
 | [Hex ASCII](_codec/ssfhex.md) | Binary-to-hex ASCII encoder/decoder | ~600 B | — | ~64 B | — | Yes |
 | [JSON](_codec/ssfjson.md) | JSON parser/generator with path-based field access and in-place update | ~7 KB | — | ~250 B⁹ | — | Yes |
 | [TLV](_codec/ssftlv.md) | Type-Length-Value encoder/decoder | ~1.2 KB | — | ~96 B | — | Yes |
@@ -165,6 +167,7 @@ Encoding and decoding interfaces for common data formats, all with strict buffer
 | [UBJSON](_codec/ssfubjson.md) | Universal Binary JSON parser/generator | ~9 KB | — | ~270 B¹⁰ | — | Yes |
 | [Decimal](_codec/ssfdec.md) | Integer-to-decimal string converter | ~2.5 KB | — | ~96 B | — | Yes |
 | [Safe Strings](_codec/ssfstr.md) | Safe C string interface replacing crash-prone standard functions | ~1.2 KB | — | ~64 B | — | Yes |
+| [Pattern Matching](_codec/ssfmatch.md) | Case-insensitive compare, `*`/`?` glob, URI path templates with `{param}` extraction, MQTT topic filters | ~800 B | — | ~100 B⁵⁷ | — | Yes |
 | [Generic Object](_codec/ssfgobj.md) | BETA: Hierarchical generic object parser/generator for cross-codec in-memory representation | ~3 KB | ~8 B | ~160 B¹¹ | yes¹⁵ | Yes¹⁷ |
 
 ⁹ Recursive parser; stack scales with `SSF_JSON_CONFIG_MAX_IN_DEPTH` (default 4). Estimate uses the default depth; each additional nesting level adds ~64 B.
@@ -172,6 +175,14 @@ Encoding and decoding interfaces for common data formats, all with strict buffer
 ¹⁰ Recursive parser; stack scales with `SSF_UBJSON_CONFIG_MAX_IN_DEPTH` (default 4). Estimate uses the default depth; each additional nesting level adds ~68 B.
 
 ¹¹ Recursive iteration; stack scales with `SSF_GOBJ_CONFIG_MAX_IN_DEPTH` (default 4). Estimate uses the default depth; each additional nesting level adds ~40 B.
+
+⁵⁶ Peak is in `SSFBase64URLDecode`, whose frame holds a `char[SSF_BASE64URL_CONFIG_MAX_ENCODED_LEN]` re-padding buffer (default 1024) plus the nested `SSFBase64Decode` frame. Setting the option to `256` drops the peak to ~300 B; `SSFBase64URLEncode` peaks under ~100 B regardless.
+
+⁵⁷ `SSFMatchGlob` / `SSFMatchGlobI` are recursive: each `*` in the pattern that must backtrack adds one ~96 B frame, so the peak scales with the number of wildcards in the pattern, not the input length. The non-glob functions (`SSFMatchStrI`, `SSFMatchStrNI`, `SSFMatchPath`, `SSFMatchTopic`) are iterative and peak under ~100 B.
+
+⁵⁸ Peak is in the generation path: `SSFX509EncodeTBS` nests several `uint8_t[SSF_X509_CONFIG_MAX_CERT_SIZE]` scratch buffers (default 4096) across its helpers, and `SSFX509EncodeCert` adds one more. Verification peaks lower, in `SSFX509VerifyChain`, which holds `SSF_X509_CONFIG_MAX_CHAIN_DEPTH` (default 8) parsed `SSFX509Cert_t` structures (~1 KB each on 32-bit targets; larger when the SAN / extension / Name Constraints limits are raised) plus one trust-anchor parse and the signature-verification chain of `ssfecdsa` / `ssfrsa` / `ssfed25519` (footnotes ⁴², ⁴⁸). `SSFX509Parse` alone peaks around ~600 B. Halving `SSF_X509_CONFIG_MAX_CERT_SIZE` and `SSF_X509_CONFIG_MAX_CHAIN_DEPTH` roughly halves both figures.
+
+⁵⁹ The only static state is the trace callback and its user pointer installed by `SSFX509SetTraceCtx` (two pointers). Parsing, generation, and verification hold all state in caller-supplied structures and on the stack, so they are safe to run concurrently as long as the trace callback is not changed while verifications are in flight.
 
 ¹⁷ No shared mutable state in production builds. Reentrancy depends on the platform `malloc`/`free` implementation; most production C libraries provide thread-safe allocators.
 

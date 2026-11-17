@@ -47,6 +47,7 @@ extern "C" {
 
 /* Per-module option files. Each is also includable directly by its module's source. */
 #include "ssfasn1_opt.h"
+#include "ssfbase64url_opt.h"
 #include "ssfbfifo_opt.h"
 #include "ssfbn_opt.h"
 #include "ssfcfg_opt.h"
@@ -70,6 +71,7 @@ extern "C" {
 #include "ssfubjson_opt.h"
 #include "ssfvted_opt.h"
 #include "ssfx25519_opt.h"
+#include "ssfx509_opt.h"
 
 #ifdef __cplusplus
 }

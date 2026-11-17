@@ -8,14 +8,17 @@ Encoding and decoding interfaces.
 |--------|-------------|--------------|---------------|
 | ssfasn1 | ASN.1 DER encoder/decoder (zero-copy decode + measure-then-write encode; X.509 / PKCS#1 / SEC 1) | ssfasn1.c, ssfasn1.h | [ssfasn1.md](ssfasn1.md) |
 | ssfbase64 | Base64 encoder/decoder | ssfbase64.c, ssfbase64.h | [ssfbase64.md](ssfbase64.md) |
+| ssfbase64url | Base64URL (RFC 4648 §5) encoder/decoder, unpadded output, strict decode | ssfbase64url.c, ssfbase64url.h | [ssfbase64url.md](ssfbase64url.md) |
 | ssfdec | Integer to decimal string | ssfdec.c, ssfdec.h | [ssfdec.md](ssfdec.md) |
 | ssfgobj | Generic object parser/generator (BETA) | ssfgobj.c, ssfgobj.h | [ssfgobj.md](ssfgobj.md) |
 | ssfhex | Binary to hex ASCII encoder/decoder | ssfhex.c, ssfhex.h | [ssfhex.md](ssfhex.md) |
 | ssfini | INI file parser/generator | ssfini.c, ssfini.h | [ssfini.md](ssfini.md) |
 | ssfjson | JSON parser/generator | ssfjson.c, ssfjson.h | [ssfjson.md](ssfjson.md) |
+| ssfmatch | Pattern matching: case-insensitive compare, glob, URI path templates, MQTT topic filters | ssfmatch.c, ssfmatch.h | [ssfmatch.md](ssfmatch.md) |
 | ssfstr | Safe C string interface | ssfstr.c, ssfstr.h | [ssfstr.md](ssfstr.md) |
 | ssftlv | TLV encoder/decoder | ssftlv.c, ssftlv.h | [ssftlv.md](ssftlv.md) |
 | ssfubjson | UBJSON (Universal Binary JSON) parser/generator | ssfubjson.c, ssfubjson.h | [ssfubjson.md](ssfubjson.md) |
+| ssfx509 | X.509 v3 certificate parser (zero-copy), generator, and RFC 5280 chain verifier | ssfx509.c, ssfx509.h | [ssfx509.md](ssfx509.md) |
 
 ## See Also
 

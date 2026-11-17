@@ -1,0 +1,31 @@
+/* --------------------------------------------------------------------------------------------- */
+/* Small System Framework -- ssfx509 configuration                                               */
+/* --------------------------------------------------------------------------------------------- */
+#ifndef SSF_X509_OPT_H_INCLUDE
+#define SSF_X509_OPT_H_INCLUDE
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* Maximum DER-encoded certificate size in bytes accepted by the parser and emitted by the        */
+/* encoder; also sizes the on-stack scratch buffers used during parsing and encoding.             */
+#define SSF_X509_CONFIG_MAX_CERT_SIZE        (4096u)
+
+/* Maximum number of certificates in a chain passed to SSFX509VerifyChain (leaf + intermediates). */
+#define SSF_X509_CONFIG_MAX_CHAIN_DEPTH      (8u)
+
+/* Maximum number of extensions retained in SSFX509Cert_t.exts; extras are skipped.              */
+#define SSF_X509_CONFIG_MAX_EXTENSIONS       (16u)
+
+/* Maximum permitted and maximum excluded Name Constraints subtrees retained per certificate.    */
+#define SSF_X509_CONFIG_MAX_NAME_CONSTRAINTS (8u)
+
+/* Maximum Subject Alternative Name entries retained in SSFX509Cert_t.san; extras are skipped.   */
+#define SSF_X509_CONFIG_MAX_SAN_ENTRIES      (8u)
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* SSF_X509_OPT_H_INCLUDE */

@@ -289,6 +289,24 @@
     <ClCompile Include="_codec\ssfasn1_ut.c">
       <Filter>_codec</Filter>
     </ClCompile>
+    <ClCompile Include="_codec\ssfbase64url.c">
+      <Filter>_codec</Filter>
+    </ClCompile>
+    <ClCompile Include="_codec\ssfbase64url_ut.c">
+      <Filter>_codec</Filter>
+    </ClCompile>
+    <ClCompile Include="_codec\ssfmatch.c">
+      <Filter>_codec</Filter>
+    </ClCompile>
+    <ClCompile Include="_codec\ssfmatch_ut.c">
+      <Filter>_codec</Filter>
+    </ClCompile>
+    <ClCompile Include="_codec\ssfx509.c">
+      <Filter>_codec</Filter>
+    </ClCompile>
+    <ClCompile Include="_codec\ssfx509_ut.c">
+      <Filter>_codec</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="ssf.h" />
@@ -354,6 +372,9 @@
       <Filter>_fsm</Filter>
     </ClInclude>
     <ClInclude Include="_opt\ssfasn1_opt.h">
+      <Filter>_opt</Filter>
+    </ClInclude>
+    <ClInclude Include="_opt\ssfbase64url_opt.h">
       <Filter>_opt</Filter>
     </ClInclude>
     <ClInclude Include="_opt\ssfbfifo_opt.h">
@@ -426,6 +447,9 @@
       <Filter>_opt</Filter>
     </ClInclude>
     <ClInclude Include="_opt\ssfx25519_opt.h">
+      <Filter>_opt</Filter>
+    </ClInclude>
+    <ClInclude Include="_opt\ssfx509_opt.h">
       <Filter>_opt</Filter>
     </ClInclude>
     <ClInclude Include="_osal\ssflptask.h">
@@ -555,6 +579,15 @@
       <Filter>_crypto</Filter>
     </ClInclude>
     <ClInclude Include="_codec\ssfasn1.h">
+      <Filter>_codec</Filter>
+    </ClInclude>
+    <ClInclude Include="_codec\ssfbase64url.h">
+      <Filter>_codec</Filter>
+    </ClInclude>
+    <ClInclude Include="_codec\ssfmatch.h">
+      <Filter>_codec</Filter>
+    </ClInclude>
+    <ClInclude Include="_codec\ssfx509.h">
       <Filter>_codec</Filter>
     </ClInclude>
   </ItemGroup>

@@ -14,7 +14,7 @@ Encoding and decoding interfaces.
 | ssfhex | Binary to hex ASCII encoder/decoder | ssfhex.c, ssfhex.h | [ssfhex.md](ssfhex.md) |
 | ssfini | INI file parser/generator | ssfini.c, ssfini.h | [ssfini.md](ssfini.md) |
 | ssfjson | JSON parser/generator | ssfjson.c, ssfjson.h | [ssfjson.md](ssfjson.md) |
-| ssfmatch | Pattern matching: case-insensitive compare, glob, URI path templates, MQTT topic filters | ssfmatch.c, ssfmatch.h | [ssfmatch.md](ssfmatch.md) |
+| ssfmatch | Pattern matching: case-insensitive compare, glob, URI path templates | ssfmatch.c, ssfmatch.h | [ssfmatch.md](ssfmatch.md) |
 | ssfstr | Safe C string interface | ssfstr.c, ssfstr.h | [ssfstr.md](ssfstr.md) |
 | ssftlv | TLV encoder/decoder | ssftlv.c, ssftlv.h | [ssftlv.md](ssftlv.md) |
 | ssfubjson | UBJSON (Universal Binary JSON) parser/generator | ssfubjson.c, ssfubjson.h | [ssfubjson.md](ssfubjson.md) |

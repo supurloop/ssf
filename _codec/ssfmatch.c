@@ -5,7 +5,7 @@
 /* Provides lightweight pattern matching interfaces.                                             */
 /*                                                                                               */
 /* BSD-3-Clause License                                                                          */
-/* Copyright 2020 Supurloop Software LLC                                                         */
+/* Copyright 2026 Supurloop Software LLC                                                         */
 /*                                                                                               */
 /* Redistribution and use in source and binary forms, with or without modification, are          */
 /* permitted provided that the following conditions are met:                                     */
@@ -34,86 +34,88 @@
 #include "ssfstr.h"
 
 /* --------------------------------------------------------------------------------------------- */
-/* Case-insensitive string comparison. Returns true if equal, else false.                        */
+/* Returns true if aStr and bStr are equal ignoring ASCII case, else false.                      */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFMatchStrI(SSFCStrIn_t a, SSFCStrIn_t b)
+bool SSFMatchStrI(SSFCStrIn_t aStr, SSFCStrIn_t bStr)
 {
-    SSF_REQUIRE(a != NULL);
-    SSF_REQUIRE(b != NULL);
+    SSF_REQUIRE(aStr != NULL);
+    SSF_REQUIRE(bStr != NULL);
 
-    while (*a != '\0' && *b != '\0')
+    while ((*aStr != '\0') && (*bStr != '\0'))
     {
-        if (SSFStrCharToLower(*a) != SSFStrCharToLower(*b)) return false;
-        a++;
-        b++;
+        if (SSFStrCharToLower(*aStr) != SSFStrCharToLower(*bStr)) return false;
+        aStr++;
+        bStr++;
     }
-    return (*a == '\0') && (*b == '\0');
+    return (*aStr == '\0') && (*bStr == '\0');
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Case-insensitive string comparison for a given length. Stops at '\0' in either input (POSIX  */
-/* strncasecmp semantics) so callers cannot accidentally read past the terminator when len is    */
-/* larger than the actual string length.                                                         */
+/* Returns true if up to len chars of aStr and bStr are equal ignoring ASCII case, else false.   */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFMatchStrNI(SSFCStrIn_t a, SSFCStrIn_t b, uint32_t len)
+bool SSFMatchStrNI(SSFCStrIn_t aStr, SSFCStrIn_t bStr, uint32_t len)
 {
     uint32_t i;
+    char ca;
+    char cb;
 
-    SSF_REQUIRE(a != NULL);
-    SSF_REQUIRE(b != NULL);
+    SSF_REQUIRE(aStr != NULL);
+    SSF_REQUIRE(bStr != NULL);
 
     for (i = 0; i < len; i++)
     {
-        char ca = SSFStrCharToLower(a[i]);
-        char cb = SSFStrCharToLower(b[i]);
+        ca = SSFStrCharToLower(aStr[i]);
+        cb = SSFStrCharToLower(bStr[i]);
         if (ca != cb) return false;
-        if (ca == '\0') return true;   /* Both hit terminator at same position → equal. */
+
+        /* Both strings ended at the same position, so stop before reading past a terminator */
+        if (ca == '\0') return true;
     }
     return true;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal glob matching implementation.                                                        */
+/* Returns true if str matches glob patternStr, else false.                                      */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFMatchGlobInternal(SSFCStrIn_t pattern, SSFCStrIn_t str, bool caseInsensitive)
+static bool _SSFMatchGlobInternal(SSFCStrIn_t patternStr, SSFCStrIn_t str, bool caseInsensitive)
 {
-    while (*pattern != '\0')
+    SSF_REQUIRE(patternStr != NULL);
+    SSF_REQUIRE(str != NULL);
+
+    while (*patternStr != '\0')
     {
-        if (*pattern == '*')
+        /* Run of '*' wildcards? */
+        if (*patternStr == '*')
         {
-            /* Skip consecutive stars */
-            while (*pattern == '*') pattern++;
+            /* Yes, collapse the run; a trailing run matches whatever remains of str */
+            while (*patternStr == '*') patternStr++;
+            if (*patternStr == '\0') return true;
 
-            /* Trailing * matches everything */
-            if (*pattern == '\0') return true;
-
-            /* Try matching the rest of the pattern at each position in str */
+            /* Try the rest of the pattern at each remaining position of str */
             while (*str != '\0')
             {
-                if (_SSFMatchGlobInternal(pattern, str, caseInsensitive)) return true;
+                if (_SSFMatchGlobInternal(patternStr, str, caseInsensitive)) return true;
                 str++;
             }
-            return _SSFMatchGlobInternal(pattern, str, caseInsensitive);
+            return _SSFMatchGlobInternal(patternStr, str, caseInsensitive);
         }
-        else if (*pattern == '?')
+        /* No, single char wildcard? */
+        else if (*patternStr == '?')
         {
-            /* ? matches any single character */
+            /* Yes, it must consume exactly one char */
             if (*str == '\0') return false;
-            pattern++;
+            patternStr++;
             str++;
         }
+        /* No, literal char must match, optionally ignoring ASCII case */
         else
         {
-            /* Literal character match */
             if (caseInsensitive)
             {
-                if (SSFStrCharToLower(*pattern) != SSFStrCharToLower(*str)) return false;
+                if (SSFStrCharToLower(*patternStr) != SSFStrCharToLower(*str)) return false;
             }
-            else
-            {
-                if (*pattern != *str) return false;
-            }
-            pattern++;
+            else if (*patternStr != *str) return false;
+            patternStr++;
             str++;
         }
     }
@@ -121,69 +123,126 @@ static bool _SSFMatchGlobInternal(SSFCStrIn_t pattern, SSFCStrIn_t str, bool cas
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Glob pattern matching with * and ? wildcards.                                                 */
+/* Returns true if patternStr has more than SSF_MATCH_CONFIG_MAX_GLOB_WILDCARDS '*' runs.        */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFMatchGlob(SSFCStrIn_t pattern, SSFCStrIn_t str)
+static bool _SSFMatchGlobTooManyWildcards(SSFCStrIn_t patternStr)
 {
-    SSF_REQUIRE(pattern != NULL);
-    SSF_REQUIRE(str != NULL);
+    uint32_t runs = 0;
+    bool inRun = false;
 
-    return _SSFMatchGlobInternal(pattern, str, false);
+    SSF_REQUIRE(patternStr != NULL);
+
+    while (*patternStr != '\0')
+    {
+        /* Start of a new '*' run? */
+        if ((*patternStr == '*') && !inRun)
+        {
+            /* Yes, count it and stop as soon as the limit is exceeded */
+            runs++;
+            if (runs > SSF_MATCH_CONFIG_MAX_GLOB_WILDCARDS) return true;
+        }
+        inRun = (*patternStr == '*');
+        patternStr++;
+    }
+    return false;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Case-insensitive glob pattern matching.                                                       */
+/* Returns true if str matches glob patternStr using '*' and '?' wildcards, else false.          */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFMatchGlobI(SSFCStrIn_t pattern, SSFCStrIn_t str)
+bool SSFMatchGlob(SSFCStrIn_t patternStr, SSFCStrIn_t str)
 {
-    SSF_REQUIRE(pattern != NULL);
+    SSF_REQUIRE(patternStr != NULL);
     SSF_REQUIRE(str != NULL);
 
-    return _SSFMatchGlobInternal(pattern, str, true);
+    /* Pattern within the configured wildcard bound? */
+    if (_SSFMatchGlobTooManyWildcards(patternStr))
+    {
+        /* No, refuse rather than risk exponential backtracking */
+        return false;
+    }
+    return _SSFMatchGlobInternal(patternStr, str, false);
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* URI path pattern matching with {param} placeholder extraction.                                */
+/* Returns true if str matches glob patternStr ignoring ASCII case, else false.                  */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFMatchPath(SSFCStrIn_t pattern, SSFCStrIn_t path, SSFMatchParam_t *paramsOut,
-                  uint32_t paramsSize, uint32_t *numParamsOut)
+bool SSFMatchGlobI(SSFCStrIn_t patternStr, SSFCStrIn_t str)
 {
-    const char *pp = pattern;
-    const char *rp = path;
+    SSF_REQUIRE(patternStr != NULL);
+    SSF_REQUIRE(str != NULL);
+
+    /* Pattern within the configured wildcard bound? */
+    if (_SSFMatchGlobTooManyWildcards(patternStr))
+    {
+        /* No, refuse rather than risk exponential backtracking */
+        return false;
+    }
+    return _SSFMatchGlobInternal(patternStr, str, true);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if pathStr matches patternStr and extracts its {param} values, else false.       */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFMatchPath(SSFCStrIn_t patternStr, SSFCStrIn_t pathStr, SSFMatchParam_t *paramsOutOpt,
+                  uint32_t paramsOutOptSize, uint32_t *numParamsOut)
+{
+    const char *pp = patternStr;
+    const char *rp = pathStr;
+    const char *nameStart;
+    const char *nameEnd;
+    const char *valStart;
     uint32_t paramIdx = 0;
 
-    SSF_REQUIRE(pattern != NULL);
-    SSF_REQUIRE(path != NULL);
-    SSF_REQUIRE((paramsOut != NULL) || (paramsSize == 0));
+    SSF_REQUIRE(patternStr != NULL);
+    SSF_REQUIRE(pathStr != NULL);
+    SSF_REQUIRE((paramsOutOpt != NULL) || (paramsOutOptSize == 0));
     SSF_REQUIRE(numParamsOut != NULL);
 
-    while (*pp != '\0' && *rp != '\0')
+    /* Every failure path reports zero parameters */
+    *numParamsOut = 0;
+
+    while ((*pp != '\0') && (*rp != '\0'))
     {
+        /* Placeholder? */
         if (*pp == '{')
         {
-            /* Extract parameter name from pattern */
-            const char *nameStart = pp + 1;
-            const char *nameEnd = nameStart;
-            while (*nameEnd != '}' && *nameEnd != '\0') nameEnd++;
-            if (*nameEnd != '}') return false;
-            if (nameEnd == nameStart) return false;  /* Reject empty placeholder name '{}'. */
+            /* Yes, find the end of its name */
+            nameStart = pp + 1;
+            nameEnd = nameStart;
+            while ((*nameEnd != '}') && (*nameEnd != '\0')) nameEnd++;
 
-            /* Extract parameter value from path (until next '/' or end or '?') */
+            /* Placeholder unterminated or named '{}'? */
+            if ((*nameEnd != '}') || (nameEnd == nameStart))
             {
-                const char *valStart = rp;
-                while (*rp != '/' && *rp != '\0' && *rp != '?') rp++;
-
-                if (paramIdx < paramsSize)
-                {
-                    paramsOut[paramIdx].name = nameStart;
-                    paramsOut[paramIdx].nameLen = (uint32_t)(nameEnd - nameStart);
-                    paramsOut[paramIdx].value = valStart;
-                    paramsOut[paramIdx].valueLen = (uint32_t)(rp - valStart);
-                }
-                paramIdx++;
+                /* Yes, malformed pattern */
+                return false;
             }
+
+            /* The value runs to the next '/', end of path, query '?' or fragment '#' */
+            valStart = rp;
+            while ((*rp != '/') && (*rp != '\0') && (*rp != '?') && (*rp != '#')) rp++;
+
+            /* Placeholder bound an empty segment? */
+            if (rp == valStart)
+            {
+                /* Yes, a placeholder must match one non-empty segment */
+                return false;
+            }
+
+            /* Room to store this parameter? */
+            if (paramIdx < paramsOutOptSize)
+            {
+                /* Yes, record it; otherwise it is only counted */
+                paramsOutOpt[paramIdx].name = nameStart;
+                paramsOutOpt[paramIdx].nameLen = (uint32_t)(nameEnd - nameStart);
+                paramsOutOpt[paramIdx].value = valStart;
+                paramsOutOpt[paramIdx].valueLen = (uint32_t)(rp - valStart);
+            }
+            paramIdx++;
             pp = nameEnd + 1;
         }
+        /* No, literal chars must match */
         else
         {
             if (*pp != *rp) return false;
@@ -192,98 +251,14 @@ bool SSFMatchPath(SSFCStrIn_t pattern, SSFCStrIn_t path, SSFMatchParam_t *params
         }
     }
 
-    /* Both must be exhausted (or path may have trailing query string) */
-    if (*pp != '\0') return false;
-    if (*rp != '\0' && *rp != '?') return false;
+    /* Pattern exhausted and path exhausted or at a query '?' or fragment '#' (RFC 3986 3.3)? */
+    if ((*pp != '\0') || ((*rp != '\0') && (*rp != '?') && (*rp != '#')))
+    {
+        /* No, mismatch */
+        return false;
+    }
 
+    /* Yes, matched */
     *numParamsOut = paramIdx;
     return true;
-}
-
-/* --------------------------------------------------------------------------------------------- */
-/* Validate a topic filter per MQTT v3.1.1 §4.7.1.2:                                             */
-/*   '+' MUST occupy an entire level (preceded by '/' or start, followed by '/' or end).         */
-/*   '#' MUST be the last character AND preceded by '/' (or be the whole filter).                */
-/* Returns true if filter is syntactically valid, false otherwise.                               */
-/* --------------------------------------------------------------------------------------------- */
-static bool _SSFMatchTopicFilterIsValid(SSFCStrIn_t filter)
-{
-    const char *p = filter;
-    char prev = '/';  /* Treat start-of-string as if it followed '/' so leading + / # is OK. */
-
-    while (*p != '\0')
-    {
-        if (*p == '+')
-        {
-            if (prev != '/') return false;
-            if (*(p + 1) != '/' && *(p + 1) != '\0') return false;
-        }
-        else if (*p == '#')
-        {
-            if (prev != '/') return false;
-            if (*(p + 1) != '\0') return false;
-        }
-        prev = *p;
-        p++;
-    }
-    return true;
-}
-
-/* --------------------------------------------------------------------------------------------- */
-/* MQTT topic filter matching per MQTT v3.1.1 §4.7. Validates the filter first (§4.7.1.2) and    */
-/* enforces the $-prefix rule (§4.7.2: filters starting with a wildcard do not match topics      */
-/* starting with '$'). Returns false for malformed filters or $-prefix exemption.                */
-/* --------------------------------------------------------------------------------------------- */
-bool SSFMatchTopic(SSFCStrIn_t filter, SSFCStrIn_t topic)
-{
-    SSF_REQUIRE(filter != NULL);
-    SSF_REQUIRE(topic != NULL);
-
-    /* §4.7.1.2: reject malformed filters up-front. */
-    if (!_SSFMatchTopicFilterIsValid(filter)) return false;
-
-    /* §4.7.2: a filter starting with a wildcard (# or +) does not match topics that
-     * start with '$'. This guards $SYS-style internal topics from wildcard subscriptions. */
-    if ((*filter == '+' || *filter == '#') && *topic == '$') return false;
-
-    while (*filter != '\0' && *topic != '\0')
-    {
-        if (*filter == '#')
-        {
-            /* # matches everything remaining */
-            return true;
-        }
-        else if (*filter == '+')
-        {
-            /* + matches one level: skip topic chars until next '/' or end */
-            while (*topic != '/' && *topic != '\0') topic++;
-            filter++;
-        }
-        else
-        {
-            /* Literal match */
-            if (*filter != *topic) return false;
-            filter++;
-            topic++;
-        }
-    }
-
-    /* Handle trailing # after / in filter: "sensor/#" matches "sensor" */
-    if (*filter == '/' && *(filter + 1) == '#' && *(filter + 2) == '\0' && *topic == '\0')
-    {
-        return true;
-    }
-
-    /* §4.7.1.2 example: "sport/tennis/+" matches "sport/tennis/ball/". A trailing '/'
-     * in the topic represents an optional empty final level; accept it when the
-     * filter has consumed the level just before it. */
-    if (*filter == '\0' && *topic == '/' && *(topic + 1) == '\0') return true;
-
-    /* Trailing '+' absorbs the empty final level after a '/': "a/+" matches "a/",
-     * "+" matches "a/" (after + has consumed the "a" level into the loop). */
-    if (*filter == '+' && *(filter + 1) == '\0' && *topic == '\0') return true;
-
-    /* Both must be exhausted, or filter ends with # */
-    if (*filter == '#') return true;
-    return (*filter == '\0') && (*topic == '\0');
 }

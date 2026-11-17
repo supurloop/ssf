@@ -419,6 +419,9 @@
     <ClInclude Include="_opt\ssflptask_opt.h">
       <Filter>_opt</Filter>
     </ClInclude>
+    <ClInclude Include="_opt\ssfmatch_opt.h">
+      <Filter>_opt</Filter>
+    </ClInclude>
     <ClInclude Include="_opt\ssfmpool_opt.h">
       <Filter>_opt</Filter>
     </ClInclude>

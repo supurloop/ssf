@@ -167,7 +167,7 @@ Encoding and decoding interfaces for common data formats, all with strict buffer
 | [UBJSON](_codec/ssfubjson.md) | Universal Binary JSON parser/generator | ~9 KB | — | ~270 B¹⁰ | — | Yes |
 | [Decimal](_codec/ssfdec.md) | Integer-to-decimal string converter | ~2.5 KB | — | ~96 B | — | Yes |
 | [Safe Strings](_codec/ssfstr.md) | Safe C string interface replacing crash-prone standard functions | ~1.2 KB | — | ~64 B | — | Yes |
-| [Pattern Matching](_codec/ssfmatch.md) | Case-insensitive compare, `*`/`?` glob, URI path templates with `{param}` extraction, MQTT topic filters | ~800 B | — | ~100 B⁵⁷ | — | Yes |
+| [Pattern Matching](_codec/ssfmatch.md) | Case-insensitive compare, `*`/`?` glob, URI path templates with `{param}` extraction | ~600 B | — | ~500 B⁵⁷ | — | Yes |
 | [Generic Object](_codec/ssfgobj.md) | BETA: Hierarchical generic object parser/generator for cross-codec in-memory representation | ~3 KB | ~8 B | ~160 B¹¹ | yes¹⁵ | Yes¹⁷ |
 
 ⁹ Recursive parser; stack scales with `SSF_JSON_CONFIG_MAX_IN_DEPTH` (default 4). Estimate uses the default depth; each additional nesting level adds ~64 B.
@@ -178,7 +178,7 @@ Encoding and decoding interfaces for common data formats, all with strict buffer
 
 ⁵⁶ Peak is in `SSFBase64URLDecode`, whose frame holds a `char[SSF_BASE64URL_CONFIG_MAX_ENCODED_LEN]` re-padding buffer (default 1024) plus the nested `SSFBase64Decode` frame. Setting the option to `256` drops the peak to ~300 B; `SSFBase64URLEncode` peaks under ~100 B regardless.
 
-⁵⁷ `SSFMatchGlob` / `SSFMatchGlobI` are recursive: each `*` in the pattern that must backtrack adds one ~96 B frame, so the peak scales with the number of wildcards in the pattern, not the input length. The non-glob functions (`SSFMatchStrI`, `SSFMatchStrNI`, `SSFMatchPath`, `SSFMatchTopic`) are iterative and peak under ~100 B.
+⁵⁷ `SSFMatchGlob` / `SSFMatchGlobI` are recursive: each `*` run in the pattern adds one ~96 B frame, and patterns with more than `SSF_MATCH_CONFIG_MAX_GLOB_WILDCARDS` runs (default 4) are rejected before matching, so the peak is bounded at about `(N + 1) × 96 B` (~500 B at the default) regardless of input length. The non-glob functions (`SSFMatchStrI`, `SSFMatchStrNI`, `SSFMatchPath`) are iterative and peak under ~100 B.
 
 ⁵⁸ Peak is in the generation path: `SSFX509EncodeTBS` nests several `uint8_t[SSF_X509_CONFIG_MAX_CERT_SIZE]` scratch buffers (default 4096) across its helpers, and `SSFX509EncodeCert` adds one more. Verification peaks lower, in `SSFX509VerifyChain`, which holds `SSF_X509_CONFIG_MAX_CHAIN_DEPTH` (default 8) parsed `SSFX509Cert_t` structures (~1 KB each on 32-bit targets; larger when the SAN / extension / Name Constraints limits are raised) plus one trust-anchor parse and the signature-verification chain of `ssfecdsa` / `ssfrsa` / `ssfed25519` (footnotes ⁴², ⁴⁸). `SSFX509Parse` alone peaks around ~600 B. Halving `SSF_X509_CONFIG_MAX_CERT_SIZE` and `SSF_X509_CONFIG_MAX_CHAIN_DEPTH` roughly halves both figures.
 

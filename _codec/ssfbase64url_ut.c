@@ -100,10 +100,7 @@ void SSFBase64URLUnitTest(void)
         SSF_ASSERT(outLen == 0u);
     }
 
-    /* ---- RFC 4648 §3.3: chars outside the §5 alphabet MUST be rejected on decode.
-           '+' and '/' belong to the §4 standard-Base64 alphabet, not §5 URL-safe. A
-           lenient decoder that silently reinterprets them would both violate the RFC
-           and let a malformed base64url slip further into the caller's pipeline. ---- */
+    /* ---- RFC 4648 Sec. 3.3: '+' and '/' are Sec. 4 chars outside the Sec. 5 alphabet. ---- */
     {
         uint8_t out[16];
         size_t outLen;
@@ -123,9 +120,7 @@ void SSFBase64URLUnitTest(void)
         SSF_ASSERT(SSFBase64URLDecode("YW_W",   4u, out, sizeof(out), &outLen) == true);
     }
 
-    /* ---- Round-trip the full 256-byte byte space: every encoded char is in §5 alphabet
-           and every decoded byte matches input. Sanity that the tighter decoder didn't
-           break canonical URL-safe output. ---- */
+    /* ---- Round-trip all 256 byte values: Sec. 5 alphabet only, decoded bytes match input. ---- */
     {
         uint8_t in[256];
         char    encoded[512];
@@ -150,13 +145,12 @@ void SSFBase64URLUnitTest(void)
         SSF_ASSERT(memcmp(decoded, in, sizeof(in)) == 0);
     }
 
-    /* ---- Padded input on decode (header contract: accepts padded or unpadded, §3.2). ---- */
+    /* ---- Padded input on decode (header contract: accepts padded or unpadded, Sec. 3.2). ---- */
     {
         uint8_t out[8];
         size_t outLen;
 
-        /* "Hello" padded. "SGVsbG8=" is standard base64; the URL decoder should accept
-           this too since we claim §3.2 compatibility. */
+        /* "Hello" padded: standard base64 "SGVsbG8=" must also decode per Sec. 3.2. */
         SSF_ASSERT(SSFBase64URLDecode("SGVsbG8=", 8u, out, sizeof(out), &outLen) == true);
         SSF_ASSERT(outLen == 5u);
         SSF_ASSERT(memcmp(out, "Hello", 5u) == 0);
@@ -182,7 +176,7 @@ void SSFBase64URLUnitTest(void)
         uint8_t out[16];
         size_t outLen;
 
-        memset(oversized, 'A', sizeof(oversized));  /* valid §5 chars */
+        memset(oversized, 'A', sizeof(oversized));  /* valid Sec. 5 chars */
 
         /* Exactly the guard threshold: rejected. */
         SSF_ASSERT(SSFBase64URLDecode(oversized,
@@ -195,7 +189,7 @@ void SSFBase64URLUnitTest(void)
                                       out, sizeof(out), &outLen) == false);
     }
 
-    /* ---- Output buffer too small — decode ---- */
+    /* ---- Output buffer too small - decode ---- */
     {
         uint8_t out[4];
         size_t outLen;
@@ -206,7 +200,7 @@ void SSFBase64URLUnitTest(void)
         SSF_ASSERT(SSFBase64URLDecode("YWI", 3u, out, 1u, &outLen) == false);
     }
 
-    /* ---- Output buffer too small — encode ---- */
+    /* ---- Output buffer too small - encode ---- */
     {
         char out[8];
         size_t outLen;
@@ -219,17 +213,16 @@ void SSFBase64URLUnitTest(void)
         SSF_ASSERT(outLen == 4u && memcmp(out, "YWJj", 4u) == 0);
     }
 
-    /* ---- Non-canonical inputs rejected via the URL wrapper (regression pin for the
-           §3.5 check inherited from ssfbase64). Covers both padded and unpadded forms. ---- */
+    /* ---- Non-canonical input rejected via the wrapper (ssfbase64 Sec. 3.5 check). ---- */
     {
         uint8_t out[8];
         size_t outLen;
 
-        /* "AP==" (padded) — b's low 4 bits non-zero. */
+        /* "AP==" (padded) - b's low 4 bits non-zero. */
         SSF_ASSERT(SSFBase64URLDecode("AP==", 4u, out, sizeof(out), &outLen) == false);
-        /* "AP" (unpadded) — padded to "AP==" internally, same rejection. */
+        /* "AP" (unpadded) - padded to "AP==" internally, same rejection. */
         SSF_ASSERT(SSFBase64URLDecode("AP",   2u, out, sizeof(out), &outLen) == false);
-        /* "AAB=" (padded) — c's low 2 bits non-zero. */
+        /* "AAB=" (padded) - c's low 2 bits non-zero. */
         SSF_ASSERT(SSFBase64URLDecode("AAB=", 4u, out, sizeof(out), &outLen) == false);
         /* "AAB" (unpadded). */
         SSF_ASSERT(SSFBase64URLDecode("AAB",  3u, out, sizeof(out), &outLen) == false);
@@ -243,8 +236,75 @@ void SSFBase64URLUnitTest(void)
         SSF_ASSERT(outLen == 0u);
     }
 
-    /* ---- inLen mod 4 == 1 is invalid (1 base64 char can't encode any byte). After
-           padding to "X===" the underlying decoder rejects the trailing-pad pattern. ---- */
+    /* ---- RFC 4648 Sec. 3.3 / 4: '=' only at the very end, else decoding is malleable. ---- */
+    {
+        uint8_t out[16];
+        size_t outLen;
+
+        SSF_ASSERT(SSFBase64URLDecode("AA==AAAA", 8u, out, sizeof(out), &outLen) == false);
+        SSF_ASSERT(SSFBase64URLDecode("AAA=AAAA", 8u, out, sizeof(out), &outLen) == false);
+        SSF_ASSERT(SSFBase64URLDecode("YQ==YQ==", 8u, out, sizeof(out), &outLen) == false);
+        /* Interior '=' that the re-padding step would otherwise complete into a valid block. */
+        SSF_ASSERT(SSFBase64URLDecode("AA=AAAA",  7u, out, sizeof(out), &outLen) == false);
+        /* Final-block padding is still accepted. */
+        SSF_ASSERT(SSFBase64URLDecode("AAAAAA==", 8u, out, sizeof(out), &outLen) == true);
+        SSF_ASSERT(outLen == 4u);
+    }
+
+    /* ---- RFC 4648 Sec. 3.2: padding is all-or-nothing, partial padding is rejected. ---- */
+    {
+        uint8_t out[16];
+        size_t outLen;
+
+        SSF_ASSERT(SSFBase64URLDecode("AA=",      3u, out, sizeof(out), &outLen) == false);
+        SSF_ASSERT(SSFBase64URLDecode("AAAAAA=",  7u, out, sizeof(out), &outLen) == false);
+        SSF_ASSERT(SSFBase64URLDecode("AAAAA=",   6u, out, sizeof(out), &outLen) == false);
+        SSF_ASSERT(SSFBase64URLDecode("YWI=YQ=",  7u, out, sizeof(out), &outLen) == false);
+        /* Fully padded and fully unpadded forms of the same data both still decode. */
+        SSF_ASSERT(SSFBase64URLDecode("AA==",     4u, out, sizeof(out), &outLen) == true);
+        SSF_ASSERT(outLen == 1u);
+        SSF_ASSERT(SSFBase64URLDecode("AA",       2u, out, sizeof(out), &outLen) == true);
+        SSF_ASSERT(outLen == 1u);
+        SSF_ASSERT(SSFBase64URLDecode("AAAAAAA=", 8u, out, sizeof(out), &outLen) == true);
+        SSF_ASSERT(outLen == 5u);
+        SSF_ASSERT(SSFBase64URLDecode("AAAAAAA",  7u, out, sizeof(out), &outLen) == true);
+        SSF_ASSERT(outLen == 5u);
+    }
+
+    /* ---- Failure contract: false leaves *outLen == 0 and no partial bytes in out. ---- */
+    {
+        uint8_t out[16];
+        size_t outLen;
+        char oversized[SSF_BASE64URL_CONFIG_MAX_ENCODED_LEN];
+
+        memset(oversized, 'A', sizeof(oversized));
+
+        memset(out, 0xEE, sizeof(out)); outLen = 99u;
+        SSF_ASSERT(SSFBase64URLDecode("AAAA!!!!", 8u, out, sizeof(out), &outLen) == false);
+        SSF_ASSERT(outLen == 0u);                              /* bad char after good block */
+        SSF_ASSERT(out[0] == 0u && out[1] == 0u && out[2] == 0u);
+        SSF_ASSERT(out[5] == 0xEEu);  /* scrub is bounded: 3 decoded + at most 2 partial bytes */
+
+        outLen = 99u;
+        SSF_ASSERT(SSFBase64URLDecode("AA+A", 4u, out, sizeof(out), &outLen) == false);
+        SSF_ASSERT(outLen == 0u);                              /* '+' rejected by wrapper */
+
+        outLen = 99u;
+        SSF_ASSERT(SSFBase64URLDecode("AA=", 3u, out, sizeof(out), &outLen) == false);
+        SSF_ASSERT(outLen == 0u);                              /* partial padding */
+
+        outLen = 99u;
+        SSF_ASSERT(SSFBase64URLDecode(oversized, sizeof(oversized), out, sizeof(out), &outLen)
+                   == false);
+        SSF_ASSERT(outLen == 0u);                              /* size guard */
+
+        memset(out, 0xEE, sizeof(out)); outLen = 99u;
+        SSF_ASSERT(SSFBase64URLDecode("SGVsbG8", 7u, out, 4u, &outLen) == false);
+        SSF_ASSERT(outLen == 0u);                              /* output buffer too small */
+        SSF_ASSERT(out[0] == 0u && out[1] == 0u && out[2] == 0u);
+    }
+
+    /* ---- inLen mod 4 == 1: one char cannot encode a byte, "X===" is rejected. ---- */
     {
         uint8_t out[4];
         size_t outLen;
@@ -252,9 +312,7 @@ void SSFBase64URLUnitTest(void)
         SSF_ASSERT(SSFBase64URLDecode("AAAAA", 5u, out, sizeof(out), &outLen) == false);
     }
 
-    /* ---- Exercise every character of the §5 alphabet in decode. The 64-char string
-           "ABCDEFGH...xyz0...9-_" decodes to 48 bytes; re-encoding them must produce
-           the identical input, which proves both substitution and the decode table. ---- */
+    /* ---- Decode all 64 Sec. 5 alphabet chars to 48 bytes, re-encode must match input. ---- */
     {
         static const char alpha64[] =
             "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
@@ -279,12 +337,15 @@ void SSFBase64URLUnitTest(void)
         SSF_ASSERT_TEST(SSFBase64URLEncode(NULL,  1u, (char *)buf, sizeof(buf), &outLen));
         SSF_ASSERT_TEST(SSFBase64URLEncode(buf,   1u, NULL,        sizeof(buf), &outLen));
         SSF_ASSERT_TEST(SSFBase64URLEncode(buf,   1u, (char *)buf, sizeof(buf), NULL));
+        /* outSize == 0 cannot hold even the NUL terminator: a precondition, not a false return. */
+        SSF_ASSERT_TEST(SSFBase64URLEncode(buf,   1u, (char *)buf, 0u,          &outLen));
+        SSF_ASSERT_TEST(SSFBase64URLEncode(buf,   0u, (char *)buf, 0u,          &outLen));
         SSF_ASSERT_TEST(SSFBase64URLDecode(NULL,  1u, buf,         sizeof(buf), &outLen));
         SSF_ASSERT_TEST(SSFBase64URLDecode("A",   1u, NULL,        sizeof(buf), &outLen));
         SSF_ASSERT_TEST(SSFBase64URLDecode("A",   1u, buf,         sizeof(buf), NULL));
     }
 
-    /* ---- Output-length formula: N bytes → ⌈4N/3⌉ chars unpadded, per RFC 4648 §5. ---- */
+    /* ---- Output-length formula: N bytes -> ceil(4N/3) chars unpadded per RFC 4648 Sec. 5. ---- */
     {
         static const struct { size_t inLen; size_t expectedOutLen; } cases[] = {
             { 0, 0 }, { 1, 2 }, { 2, 3 }, { 3, 4 },
@@ -348,8 +409,7 @@ void SSFBase64URLUnitTest(void)
         }
     }
 
-    /* ---- Embedded NUL in decode input: the decoder respects inLen, not strlen, but
-           NUL is not in the §5 alphabet so the byte is rejected as invalid. ---- */
+    /* ---- Embedded NUL: decoder honors inLen not strlen, NUL is not a Sec. 5 char. ---- */
     {
         static const char nulInMiddle[4] = { 'Y', 'W', '\0', 'j' };
         uint8_t out[4];

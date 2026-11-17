@@ -5,7 +5,7 @@
 /* Provides Base64URL encoder/decoder implementation per RFC 4648 Section 5.                     */
 /*                                                                                               */
 /* BSD-3-Clause License                                                                          */
-/* Copyright 2024 Supurloop Software LLC                                                         */
+/* Copyright 2026 Supurloop Software LLC                                                         */
 /*                                                                                               */
 /* Redistribution and use in source and binary forms, with or without modification, are          */
 /* permitted provided that the following conditions are met:                                     */
@@ -32,82 +32,134 @@
 #include "ssfassert.h"
 #include "ssfbase64url.h"
 #include "ssfbase64.h"
+#include "ssfcrypt.h"
 
-/* The decoder's padded-scratch buffer must have room for the largest expected input
- * plus up to 3 '=' padding chars and a NUL terminator. If the config drops below this
- * minimum, the sizeof(padded) - 4u expression in the length guard would underflow
- * (wrap to SIZE_MAX), silently disabling the guard and allowing a stack overrun. */
 #if SSF_BASE64URL_CONFIG_MAX_ENCODED_LEN < 8
 #error "SSF_BASE64URL_CONFIG_MAX_ENCODED_LEN must be >= 8 (4 input chars + 3 padding + NUL)"
 #endif
 
 /* --------------------------------------------------------------------------------------------- */
-/* Encode binary data to Base64URL string.                                                       */
-/* Standard Base64 encode then post-process for URL safety.                                      */
+/* Returns true if binary data encoded to Base64URL string, else false.                          */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFBase64URLEncode(const uint8_t *in, size_t inLen, SSFCStrOut_t out, size_t outSize,
-                        size_t *outLen)
+bool SSFBase64URLEncode(const uint8_t *in, size_t inLen, SSFCStrOut_t outStr, size_t outStrSize,
+                        size_t *outStrLen)
 {
     size_t b64Len;
     size_t i;
     size_t writePos;
 
     SSF_REQUIRE(in != NULL);
-    SSF_REQUIRE(out != NULL);
-    SSF_REQUIRE(outLen != NULL);
+    SSF_REQUIRE(outStr != NULL);
+    SSF_REQUIRE(outStrSize > 0);
+    SSF_REQUIRE(outStrLen != NULL);
 
-    /* Standard Base64 encode first */
-    if (!SSFBase64Encode(in, inLen, out, outSize, &b64Len)) return false;
+    /* Standard Base64 encode fits in outStr? */
+    if (!SSFBase64Encode(in, inLen, outStr, outStrSize, &b64Len))
+    {
+        /* No, output buffer too small */
+        return false;
+    }
 
-    /* Post-process: replace + with -, / with _, strip = padding */
+    /* Yes, convert in place to the URL-safe alphabet and strip padding */
     writePos = 0;
     for (i = 0; i < b64Len; i++)
     {
-        if (out[i] == '+') { out[writePos++] = '-'; }
-        else if (out[i] == '/') { out[writePos++] = '_'; }
-        else if (out[i] == '=') { /* skip padding */ }
-        else { out[writePos++] = out[i]; }
+        if (outStr[i] == '+') outStr[writePos++] = '-';
+        else if (outStr[i] == '/') outStr[writePos++] = '_';
+        else if (outStr[i] != '=') outStr[writePos++] = outStr[i];
     }
-    out[writePos] = '\0';
-    *outLen = writePos;
+    SSF_ENSURE(writePos < outStrSize);
+    outStr[writePos] = '\0';
+    *outStrLen = writePos;
     return true;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Decode Base64URL string to binary data.                                                       */
-/* Pre-process URL-safe chars back to standard, add padding, then standard Base64 decode.        */
+/* Returns true if Base64URL string decoded to binary data, else false.                          */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFBase64URLDecode(SSFCStrIn_t in, size_t inLen, uint8_t *out, size_t outSize,
+bool SSFBase64URLDecode(SSFCStrIn_t inStr, size_t inStrLen, uint8_t *out, size_t outSize,
                         size_t *outLen)
 {
     char padded[SSF_BASE64URL_CONFIG_MAX_ENCODED_LEN];
     size_t i;
     size_t paddedLen;
+    size_t padStart;
+    bool ok;
 
-    SSF_REQUIRE(in != NULL);
+    SSF_REQUIRE(inStr != NULL);
     SSF_REQUIRE(out != NULL);
     SSF_REQUIRE(outLen != NULL);
 
-    if (inLen >= sizeof(padded) - 4u) return false;
+    *outLen = 0;
 
-    /* Copy and replace URL-safe chars. RFC 4648 §3.3 requires rejection of characters
-     * outside the §5 alphabet; '+' and '/' are in §4 but not §5, so we reject them
-     * here rather than letting the underlying standard-Base64 decoder silently accept. */
-    for (i = 0; i < inLen; i++)
+    /* Input, up to 3 pad chars, and terminator fit in padded? */
+    if (inStrLen >= (sizeof(padded) - 4u))
     {
-        if (in[i] == '+' || in[i] == '/') return false;
-        if (in[i] == '-')      padded[i] = '+';
-        else if (in[i] == '_') padded[i] = '/';
-        else                   padded[i] = in[i];
+        /* No, input too long */
+        return false;
+    }
+
+    /* Yes, validate before copying; padStart == inStrLen means no pad char seen yet */
+    padStart = inStrLen;
+    for (i = 0; i < inStrLen; i++)
+    {
+        /* Standard alphabet char that is not in the URL-safe alphabet? */
+        if ((inStr[i] == '+') || (inStr[i] == '/'))
+        {
+            /* Yes, reject per RFC 4648 Sec. 3.3 */
+            return false;
+        }
+
+        /* Pad char? */
+        if (inStr[i] == '=')
+        {
+            /* Yes, remember where padding starts */
+            if (padStart == inStrLen) padStart = i;
+        }
+        /* No, data after padding started? */
+        else if (padStart != inStrLen)
+        {
+            /* Yes, padding is only valid at the end per RFC 4648 Sec. 3.3 */
+            return false;
+        }
+    }
+
+    /* Padding present? */
+    if (padStart != inStrLen)
+    {
+        /* Yes, at most 2 pad chars and length already a multiple of 4 per RFC 4648 Sec. 3.2 */
+        if ((inStrLen - padStart) > 2u) return false;
+        if ((inStrLen % 4u) != 0u) return false;
+    }
+
+    /* Copy and map URL-safe chars to the standard alphabet */
+    for (i = 0; i < inStrLen; i++)
+    {
+        if (inStr[i] == '-') padded[i] = '+';
+        else if (inStr[i] == '_') padded[i] = '/';
+        else padded[i] = inStr[i];
     }
 
     /* Add padding to make length multiple of 4 */
-    paddedLen = inLen;
+    paddedLen = inStrLen;
     while ((paddedLen % 4u) != 0u)
     {
         padded[paddedLen++] = '=';
     }
     padded[paddedLen] = '\0';
 
-    return SSFBase64Decode(padded, paddedLen, out, outSize, outLen);
+    /* Standard Base64 decode succeeded? */
+    ok = SSFBase64Decode(padded, paddedLen, out, outSize, outLen);
+    if (!ok)
+    {
+        /* No, zero partial output: completed blocks plus up to 2 bytes of the rejected block */
+        SSFCryptSecureZero(out, SSF_MIN(*outLen + 2u, outSize));
+        *outLen = 0;
+    }
+    SSF_ENSURE(*outLen <= outSize);
+
+    /* Scrub the stack copy since Base64URL commonly carries key material */
+    SSFCryptSecureZero(padded, paddedLen + 1u);
+    return ok;
 }
+

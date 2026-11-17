@@ -43,16 +43,9 @@ extern "C" {
 /* --------------------------------------------------------------------------------------------- */
 /* External Interface                                                                            */
 /* --------------------------------------------------------------------------------------------- */
-/* Encode: produces RFC 4648 §5 URL-safe output. Substitutes '+' -> '-', '/' -> '_', and
- * strips '=' padding (matches RFC 7515 JWT convention). */
-bool SSFBase64URLEncode(const uint8_t *in, size_t inLen, SSFCStrOut_t out, size_t outSize,
-                        size_t *outLen);
-/* Decode: strict RFC 4648 §5 decoder.
- *   - Accepts padded ('=' present) or unpadded input (§3.2).
- *   - Rejects characters outside the §5 alphabet, including '+' and '/' (§3.3).
- *   - Rejects non-canonical encodings, i.e. final-quantum low bits that are non-zero (§3.5).
- *   - Rejects inputs whose post-padding length is not a multiple of 4. */
-bool SSFBase64URLDecode(SSFCStrIn_t in, size_t inLen, uint8_t *out, size_t outSize,
+bool SSFBase64URLEncode(const uint8_t *in, size_t inLen, SSFCStrOut_t outStr, size_t outStrSize,
+                        size_t *outStrLen);
+bool SSFBase64URLDecode(SSFCStrIn_t inStr, size_t inStrLen, uint8_t *out, size_t outSize,
                         size_t *outLen);
 
 /* --------------------------------------------------------------------------------------------- */

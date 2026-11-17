@@ -334,6 +334,7 @@
     <ClInclude Include="_opt\ssfiso8601_opt.h" />
     <ClInclude Include="_opt\ssfjson_opt.h" />
     <ClInclude Include="_opt\ssflptask_opt.h" />
+    <ClInclude Include="_opt\ssfmatch_opt.h" />
     <ClInclude Include="_opt\ssfmpool_opt.h" />
     <ClInclude Include="_opt\ssfrs_opt.h" />
     <ClInclude Include="_opt\ssfrsa_opt.h" />

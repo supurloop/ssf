@@ -5,7 +5,7 @@
 /* Provides unit tests for ssfmatch's pattern matching interface.                                */
 /*                                                                                               */
 /* BSD-3-Clause License                                                                          */
-/* Copyright 2020 Supurloop Software LLC                                                         */
+/* Copyright 2026 Supurloop Software LLC                                                         */
 /*                                                                                               */
 /* Redistribution and use in source and binary forms, with or without modification, are          */
 /* permitted provided that the following conditions are met:                                     */
@@ -51,8 +51,6 @@ void SSFMatchUnitTest(void)
     SSF_ASSERT_TEST(SSFMatchPath(NULL, "/test", params, 4, &numParams));
     SSF_ASSERT_TEST(SSFMatchPath("/test", NULL, params, 4, &numParams));
     SSF_ASSERT_TEST(SSFMatchPath("/test", "/test", params, 4, NULL));
-    SSF_ASSERT_TEST(SSFMatchTopic(NULL, "test"));
-    SSF_ASSERT_TEST(SSFMatchTopic("test", NULL));
 
     /* ---- SSFMatchStrI ---- */
     SSF_ASSERT(SSFMatchStrI("hello", "hello") == true);
@@ -73,19 +71,17 @@ void SSFMatchUnitTest(void)
     SSF_ASSERT(SSFMatchStrNI("hello", "HELLX", 5) == false);
     SSF_ASSERT(SSFMatchStrNI("abc", "ABC", 0) == true);
 
-    /* POSIX strncasecmp semantics: stop at '\0' in either input so reads never
-       go past the terminator even when len exceeds string length. */
+    /* POSIX strncasecmp semantics: stop at the first terminator, never read past it */
     {
         char a[10] = { 'h','e','l','l','o', 0, 'A','A','A','A' };
         char b[10] = { 'h','e','l','l','o', 0, 'B','B','B','B' };
-        /* Both hit '\0' at position 5 with equal prefix → equal, regardless
-           of what follows the terminator in either buffer. */
+        /* Both end at position 5 with equal prefix, bytes after the terminator are ignored */
         SSF_ASSERT(SSFMatchStrNI(a, b, 10u) == true);
     }
     /* C-strings shorter than len still compare correctly when equal. */
     SSF_ASSERT(SSFMatchStrNI("abc", "abc", 10u) == true);
     SSF_ASSERT(SSFMatchStrNI("abc", "ABC", 10u) == true);
-    /* One terminator before the other → different lengths, not equal. */
+    /* One terminator before the other -> different lengths, not equal. */
     SSF_ASSERT(SSFMatchStrNI("ab",  "abc", 3u)  == false);
     SSF_ASSERT(SSFMatchStrNI("abc", "ab",  3u)  == false);
 
@@ -134,6 +130,55 @@ void SSFMatchUnitTest(void)
     SSF_ASSERT(SSFMatchGlobI("H*O", "hello") == true);
     SSF_ASSERT(SSFMatchGlobI("*.TXT", "file.txt") == true);
 
+    /* ---- Glob wildcard limit: over SSF_MATCH_CONFIG_MAX_GLOB_WILDCARDS '*' runs fails ---- */
+    {
+        char pat[(3u * SSF_MATCH_CONFIG_MAX_GLOB_WILDCARDS) + 4u];
+        char str[SSF_MATCH_CONFIG_MAX_GLOB_WILDCARDS + 2u];
+        uint32_t i;
+        size_t n;
+
+        /* Exactly the limit matches */
+        n = 0;
+        for (i = 0; i < SSF_MATCH_CONFIG_MAX_GLOB_WILDCARDS; i++)
+        {
+            pat[n++] = '*';
+            pat[n++] = 'a';
+            str[i] = 'a';
+        }
+        pat[n] = '\0';
+        str[SSF_MATCH_CONFIG_MAX_GLOB_WILDCARDS] = '\0';
+        SSF_ASSERT(SSFMatchGlob(pat, str) == true);
+        SSF_ASSERT(SSFMatchGlobI(pat, str) == true);
+
+        /* A run of consecutive '*' counts as one wildcard, so this is still within the limit */
+        n = 0;
+        for (i = 0; i < SSF_MATCH_CONFIG_MAX_GLOB_WILDCARDS; i++)
+        {
+            pat[n++] = '*';
+            pat[n++] = '*';
+            pat[n++] = 'a';
+        }
+        pat[n] = '\0';
+        SSF_ASSERT(SSFMatchGlob(pat, str) == true);
+
+        /* One over the limit never matches, even though the pattern otherwise would */
+        n = 0;
+        for (i = 0; i <= SSF_MATCH_CONFIG_MAX_GLOB_WILDCARDS; i++)
+        {
+            pat[n++] = '*';
+            pat[n++] = 'a';
+            str[i] = 'a';
+        }
+        pat[n] = '\0';
+        str[SSF_MATCH_CONFIG_MAX_GLOB_WILDCARDS + 1u] = '\0';
+        SSF_ASSERT(SSFMatchGlob(pat, str) == false);
+        SSF_ASSERT(SSFMatchGlobI(pat, str) == false);
+
+        /* Over the limit with a trailing '*' is rejected before the trailing-star shortcut */
+        pat[n - 1u] = '*';
+        SSF_ASSERT(SSFMatchGlob(pat, str) == false);
+    }
+
     /* ---- SSFMatchPath ---- */
     /* Exact match */
     SSF_ASSERT(SSFMatchPath("/api/status", "/api/status", params, 4, &numParams) == true);
@@ -177,7 +222,7 @@ void SSFMatchUnitTest(void)
     SSF_ASSERT(SSFMatchPath("/api/{id}", "/api/1", NULL, 0, &numParams) == true);
     SSF_ASSERT(numParams == 1);
 
-    /* Empty placeholder name '{}' is malformed — reject. */
+    /* Empty placeholder name '{}' is malformed - reject. */
     SSF_ASSERT(SSFMatchPath("{}",        "x",       params, 4, &numParams) == false);
     SSF_ASSERT(SSFMatchPath("/api/{}",   "/api/42", params, 4, &numParams) == false);
     /* Single-character name is still valid. */
@@ -185,91 +230,45 @@ void SSFMatchUnitTest(void)
     SSF_ASSERT(numParams == 1u);
     SSF_ASSERT(params[0].nameLen == 1u && params[0].name[0] == 'a');
 
-    /* ---- SSFMatchTopic ---- */
-    /* Exact match */
-    SSF_ASSERT(SSFMatchTopic("sensor/temp", "sensor/temp") == true);
-    SSF_ASSERT(SSFMatchTopic("sensor/temp", "sensor/humidity") == false);
+    /* A placeholder binds one non-empty segment: an empty value is a mismatch in every position */
+    SSF_ASSERT(SSFMatchPath("/a/{id}",     "/a/",          params, 4, &numParams) == false);
+    SSF_ASSERT(SSFMatchPath("/a/{id}",     "/a/?x=1",      params, 4, &numParams) == false);
+    SSF_ASSERT(SSFMatchPath("/a/{id}",     "/a/?",         params, 4, &numParams) == false);
+    SSF_ASSERT(SSFMatchPath("/a/{id}/b",   "/a//b",        params, 4, &numParams) == false);
+    SSF_ASSERT(SSFMatchPath("/{x}/{y}",    "/1//",         params, 4, &numParams) == false);
+    /* Non-empty values in the same positions still match */
+    SSF_ASSERT(SSFMatchPath("/a/{id}",     "/a/7?x=1",     params, 4, &numParams) == true);
+    SSF_ASSERT(numParams == 1u && params[0].valueLen == 1u && params[0].value[0] == '7');
+    SSF_ASSERT(SSFMatchPath("/a/{id}/b",   "/a/7/b",       params, 4, &numParams) == true);
 
-    /* Single level wildcard + */
-    SSF_ASSERT(SSFMatchTopic("sensor/+", "sensor/temp") == true);
-    SSF_ASSERT(SSFMatchTopic("sensor/+", "sensor/humidity") == true);
-    SSF_ASSERT(SSFMatchTopic("sensor/+", "sensor/temp/value") == false);
-    SSF_ASSERT(SSFMatchTopic("+/temp", "sensor/temp") == true);
-    SSF_ASSERT(SSFMatchTopic("+/temp", "device/temp") == true);
-    SSF_ASSERT(SSFMatchTopic("+/+", "sensor/temp") == true);
-    SSF_ASSERT(SSFMatchTopic("+/+", "a/b") == true);
+    /* RFC 3986 Sec. 3.3: '#' always starts the fragment, so it ends matching exactly like '?' */
+    SSF_ASSERT(SSFMatchPath("/a/{id}",     "/a/42#frag",   params, 4, &numParams) == true);
+    SSF_ASSERT(numParams == 1u && params[0].valueLen == 2u);
+    SSF_ASSERT(params[0].value[0] == '4' && params[0].value[1] == '2');
+    SSF_ASSERT(SSFMatchPath("/a",          "/a#x",         params, 4, &numParams) == true);
+    SSF_ASSERT(numParams == 0u);
+    SSF_ASSERT(SSFMatchPath("/a/{id}",     "/a/#frag",     params, 4, &numParams) == false);
+    SSF_ASSERT(SSFMatchPath("/a/{id}",     "/a/7?x=1#f",   params, 4, &numParams) == true);
+    SSF_ASSERT(numParams == 1u && params[0].valueLen == 1u);
 
-    /* Multi level wildcard # */
-    SSF_ASSERT(SSFMatchTopic("sensor/#", "sensor/temp") == true);
-    SSF_ASSERT(SSFMatchTopic("sensor/#", "sensor/temp/value") == true);
-    SSF_ASSERT(SSFMatchTopic("sensor/#", "sensor") == true);
-    SSF_ASSERT(SSFMatchTopic("#", "anything/goes/here") == true);
-    SSF_ASSERT(SSFMatchTopic("#", "") == true);
-
-    /* Combined */
-    SSF_ASSERT(SSFMatchTopic("+/temp/#", "sensor/temp/value") == true);
-    SSF_ASSERT(SSFMatchTopic("+/temp/#", "device/temp") == true);
-    SSF_ASSERT(SSFMatchTopic("+/temp/#", "sensor/humidity/value") == false);
-
-    /* Edge cases */
-    SSF_ASSERT(SSFMatchTopic("", "") == true);
-    SSF_ASSERT(SSFMatchTopic("a", "a") == true);
-    SSF_ASSERT(SSFMatchTopic("a", "b") == false);
-    SSF_ASSERT(SSFMatchTopic("/", "/") == true);
-    SSF_ASSERT(SSFMatchTopic("a/b/c", "a/b/c") == true);
-    SSF_ASSERT(SSFMatchTopic("a/b/c", "a/b") == false);
-
-    /* ---- MQTT v3.1.1 §4.7.1.2: '+' MUST occupy an entire level.
-       Filters that use '+' as part of a non-wildcard token are malformed and
-       must be rejected. ---- */
-    SSF_ASSERT(SSFMatchTopic("sport+",        "sport-foo")          == false);
-    SSF_ASSERT(SSFMatchTopic("+sport",        "xsport")             == false);
-    SSF_ASSERT(SSFMatchTopic("sport/+X",      "sport/abc")          == false);
-    SSF_ASSERT(SSFMatchTopic("sport/X+/p",    "sport/ABC/p")        == false);
-    SSF_ASSERT(SSFMatchTopic("a/b+",          "a/b")                == false);
-    SSF_ASSERT(SSFMatchTopic("a/+b/c",        "a/xb/c")             == false);
-
-    /* ---- MQTT v3.1.1 §4.7.1.2: '#' MUST be the last character AND preceded by '/'
-       (or be the whole filter). Any other placement is a malformed filter. ---- */
-    SSF_ASSERT(SSFMatchTopic("sport#",        "sport")              == false);
-    SSF_ASSERT(SSFMatchTopic("sport#",        "sportanything")      == false);
-    SSF_ASSERT(SSFMatchTopic("#/foo",         "x/foo")              == false);
-    SSF_ASSERT(SSFMatchTopic("sport/#/t",     "sport/t/t")          == false);
-    SSF_ASSERT(SSFMatchTopic("a/b#",          "a/banything")        == false);
-
-    /* ---- MQTT v3.1.1 §4.7.2: filters starting with a wildcard do NOT match topics
-       beginning with '$' (SHOULD-level requirement for access to $SYS-style topics). ---- */
-    SSF_ASSERT(SSFMatchTopic("#",             "$SYS/uptime")        == false);
-    SSF_ASSERT(SSFMatchTopic("+/uptime",      "$SYS/uptime")        == false);
-    SSF_ASSERT(SSFMatchTopic("+",             "$foo")               == false);
-    SSF_ASSERT(SSFMatchTopic("+/+",           "$SYS/uptime")        == false);
-    /* Literal '$' prefix in filter is fine — only wildcard-leading filters are rejected. */
-    SSF_ASSERT(SSFMatchTopic("$SYS/#",        "$SYS/uptime")        == true);
-    SSF_ASSERT(SSFMatchTopic("$SYS/+",        "$SYS/uptime")        == true);
-    SSF_ASSERT(SSFMatchTopic("$SYS/broker/u", "$SYS/broker/u")      == true);
-
-    /* ---- Sanity: all previously-valid filters still work. ---- */
-    SSF_ASSERT(SSFMatchTopic("sensor/+",      "sensor/temp")        == true);
-    SSF_ASSERT(SSFMatchTopic("sensor/#",      "sensor")             == true);
-    SSF_ASSERT(SSFMatchTopic("+",             "a")                  == true);
-    SSF_ASSERT(SSFMatchTopic("#",             "a/b/c")              == true);
-    SSF_ASSERT(SSFMatchTopic("+/+/#",         "a/b/c/d")            == true);
-
-    /* ---- MQTT v3.1.1 §4.7.1.2: trailing '/' in topic represents an optional empty
-       final level. The spec example explicitly requires that "sport/tennis/+" match
-       both "sport/tennis/ball" and "sport/tennis/ball/". ---- */
-    SSF_ASSERT(SSFMatchTopic("sport/tennis/+", "sport/tennis/ball/") == true);
-    SSF_ASSERT(SSFMatchTopic("sport/tennis/+", "sport/tennis/")      == true);
-    SSF_ASSERT(SSFMatchTopic("a/+",            "a/")                 == true);
-    SSF_ASSERT(SSFMatchTopic("+",              "a/")                 == true);
-
-    /* Level count still enforced: '+' matches exactly ONE level, not arbitrary
-       additional levels via trailing '/'. */
-    SSF_ASSERT(SSFMatchTopic("a/+",            "a/b/c")              == false);
-    SSF_ASSERT(SSFMatchTopic("+",              "a/b")                == false);
-    SSF_ASSERT(SSFMatchTopic("sport/tennis/+", "sport/tennis/ball/player1") == false);
-
-    /* '#' trailing semantics unchanged — it already matched trailing '/'. */
-    SSF_ASSERT(SSFMatchTopic("sport/#",        "sport/tennis/ball/") == true);
+    /* Failure contract: *numParamsOut is 0 after every false return */
+    numParams = 99u;
+    SSF_ASSERT(SSFMatchPath("/a/{id}",     "/b/1",         params, 4, &numParams) == false);
+    SSF_ASSERT(numParams == 0u);                                   /* literal mismatch */
+    numParams = 99u;
+    SSF_ASSERT(SSFMatchPath("/a/{id}/{x}", "/a/1",         params, 4, &numParams) == false);
+    SSF_ASSERT(numParams == 0u);                                   /* path too short */
+    numParams = 99u;
+    SSF_ASSERT(SSFMatchPath("/a/{id}",     "/a/1/2",       params, 4, &numParams) == false);
+    SSF_ASSERT(numParams == 0u);                                   /* path too long */
+    numParams = 99u;
+    SSF_ASSERT(SSFMatchPath("/a/{id",      "/a/1",         params, 4, &numParams) == false);
+    SSF_ASSERT(numParams == 0u);                                   /* unterminated placeholder */
+    numParams = 99u;
+    SSF_ASSERT(SSFMatchPath("/a/{}",       "/a/1",         params, 4, &numParams) == false);
+    SSF_ASSERT(numParams == 0u);                                   /* empty placeholder name */
+    numParams = 99u;
+    SSF_ASSERT(SSFMatchPath("/a/{id}",     "/a/",          params, 4, &numParams) == false);
+    SSF_ASSERT(numParams == 0u);                                   /* empty value */
 }
 #endif /* SSF_CONFIG_MATCH_UNIT_TEST */

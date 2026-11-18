@@ -658,6 +658,14 @@ bool SSFX509Parse(const uint8_t *der, uint32_t derLen, SSFX509Cert_t *cert)
                               &cert->outerSigAlgOidRawLen, &algInner))
         return false;
 
+    /* Outer algorithm parameters present? */
+    if (algInner.bufLen > 0)
+    {
+        /* Yes, keep them so the verifier can compare against the signed TBS copy */
+        cert->outerSigAlgParams = algInner.buf;
+        cert->outerSigAlgParamsLen = algInner.bufLen;
+    }
+
     /* signatureValue BIT STRING */
     if (!SSFASN1DecGetBitString(&certInner, &cert->signature, &cert->signatureLen,
                                 &cert->signatureUnusedBits, &certInner))
@@ -670,7 +678,9 @@ bool SSFX509Parse(const uint8_t *der, uint32_t derLen, SSFX509Cert_t *cert)
 bool SSFX509IsValid(const SSFX509Cert_t *cert, uint64_t nowUnixSec)
 {
     SSF_REQUIRE(cert != NULL);
-    return (nowUnixSec >= cert->notBefore && nowUnixSec < cert->notAfter);
+
+    /* RFC 5280 Section 4.1.2.5: the period is inclusive at both ends */
+    return (nowUnixSec >= cert->notBefore) && (nowUnixSec <= cert->notAfter);
 }
 
 bool SSFX509IsECDSA(const SSFX509Cert_t *cert)
@@ -2214,6 +2224,19 @@ bool SSFX509VerifyChain(const uint8_t **chainDer, const uint32_t *chainDerLen,
                   "Chain: cert[%u] TBS sigAlg OID (%u bytes) != outer sigAlg OID (%u bytes)",
                   i, certs[i].sigAlgOidRawLen, certs[i].outerSigAlgOidRawLen);
               return false; }
+
+            /* Parameters differ between the signed TBS copy and the unsigned outer copy? */
+            if ((certs[i].sigAlgParamsLen != certs[i].outerSigAlgParamsLen) ||
+                ((certs[i].sigAlgParamsLen > 0u) &&
+                 (memcmp(certs[i].sigAlgParams, certs[i].outerSigAlgParams,
+                         certs[i].sigAlgParamsLen) != 0)))
+            {
+                /* Yes, RFC 5280 Section 4.1.1.2 requires the identifiers to be identical */
+                SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+                    "Chain: cert[%u] TBS sigAlg params (%u bytes) != outer params (%u bytes)",
+                    i, certs[i].sigAlgParamsLen, certs[i].outerSigAlgParamsLen);
+                return false;
+            }
         }
     }
 
@@ -2231,6 +2254,16 @@ bool SSFX509VerifyChain(const uint8_t **chainDer, const uint32_t *chainDerLen,
     /* Verify signature chain: cert[i] signed by cert[i+1] */
     for (i = 0; i < (uint8_t)(chainLen - 1u); i++)
     {
+        /* Issuer name of cert[i] is the subject name of cert[i+1] (RFC 5280 6.1.3 (a)(4))? */
+        if ((certs[i].issuer.raw == NULL) || (certs[i + 1u].subject.raw == NULL) ||
+            (certs[i].issuer.rawLen != certs[i + 1u].subject.rawLen) ||
+            (memcmp(certs[i].issuer.raw, certs[i + 1u].subject.raw, certs[i].issuer.rawLen) != 0))
+        {
+            /* No, the chain is not linked by name even if the key happens to verify */
+            SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+                "Chain: cert[%u] issuer name does not match cert[%u] subject name", i, i + 1u);
+            return false;
+        }
         if (!SSFX509VerifyCertSignature(&certs[i], &certs[i + 1u]))
         { SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx, "Chain: cert[%u] signature by cert[%u] FAILED", i, i + 1u);
           return false; }

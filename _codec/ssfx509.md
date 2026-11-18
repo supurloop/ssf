@@ -92,16 +92,19 @@ X.509 v3 certificate support per RFC 5280, built on [`ssfasn1`](ssfasn1.md):
 - **Serial numbers** must be 1–20 bytes and non-negative (RFC 5280 §4.1.2.2). A zero serial is
   accepted, as the RFC asks verifiers to tolerate it.
 - **Signature algorithm consistency.** Both the TBS `signature` AlgorithmIdentifier and the outer
-  `signatureAlgorithm` OID are captured (`sigAlgOidRaw`, `outerSigAlgOidRaw`). The chain
-  verifier rejects certificates where the two differ (RFC 5280 §4.1.2.3).
+  `signatureAlgorithm` are captured, OID and raw parameters (`sigAlgOidRaw` / `sigAlgParams`
+  and `outerSigAlgOidRaw` / `outerSigAlgParams`). The chain verifier rejects certificates where
+  either part differs (RFC 5280 §4.1.1.2 and §4.1.2.3); only the TBS copy is covered by the
+  signature, so the outer copy is never used for verification decisions.
 - **Chain layout.** For [`SSFX509VerifyChain()`](#ssfx509verifychain), `chainDer[0]` is the leaf
   and each `chainDer[i]` must be signed by `chainDer[i + 1]`. The last chain certificate must be
   signed by one of the trust anchors; the anchors themselves are never part of the chain array.
   A self-signed leaf is verified by passing it as a one-element chain **and** as a trust anchor.
 - **Verification order.** The verifier runs these checks and stops at the first failure: parse
-  every chain cert; all certs are v3; TBS and outer signature algorithms agree; every cert is
-  within its validity window at `nowUnixSec`; each `cert[i]` is signed by `cert[i + 1]` and their
-  AKID / SKID agree when both are present; the last cert's issuer name matches a trust anchor's
+  every chain cert; all certs are v3; TBS and outer signature algorithm identifiers agree,
+  parameters included (§4.1.1.2); every cert is within its validity window at `nowUnixSec`; each
+  `cert[i]` names `cert[i + 1]`'s subject as its issuer (§6.1.3 (a)(4)), is signed by
+  `cert[i + 1]`, and their AKID / SKID agree when both are present; the last cert's issuer name matches a trust anchor's
   subject, that anchor is itself valid at `nowUnixSec`, its SKID agrees with the cert's AKID when
   both are present, and the anchor's key verifies the signature; every intermediate asserts
   `cA = TRUE` in Basic Constraints and, if Key Usage is present, includes `keyCertSign`; path
@@ -202,7 +205,7 @@ The unit-test entry point is gated by `SSF_CONFIG_X509_UNIT_TEST` in `ssfport.h`
 | <a id="type-ext"></a>`SSFX509Ext_t` | Struct | One raw extension: `oidRaw` / `oidRawLen` (OID body bytes), `critical`, and `value` / `valueLen` (the OCTET STRING contents). |
 | <a id="type-san"></a>`SSFX509SAN_t` | Struct | One SAN entry: `type` (GeneralName tag number) and `val` / `valLen` (the entry's content bytes; a DNS name is **not** null-terminated). |
 | <a id="type-nc"></a>`SSFX509NameConstraint_t` | Struct | One Name Constraints subtree: `type` is `SSF_X509_SAN_DNS` (`val` is a DNS suffix) or `SSF_X509_SAN_IP` (`val` is 8 bytes: IPv4 address then mask). |
-| <a id="type-cert"></a>`SSFX509Cert_t` | Struct | Parsed certificate. `version` (`0` = v1, `2` = v3); `serial`; TBS and outer signature algorithm OIDs plus `sigAlgParams`; `issuer` / `subject` names; `notBefore` / `notAfter` in Unix seconds; `pubKeyAlgOidRaw`, `pubKey` / `pubKeyLen` / `pubKeyUnusedBits`, `ecCurveOidRaw`; `exts[]` / `extsLen`; decoded flags `hasBasicConstraints`, `isCA`, `pathLenConstraint` (`-1` = absent), `hasKeyUsage`, `keyUsageBits`, `hasExtKeyUsage`, `ekuServerAuth`, `ekuClientAuth`; `san[]` / `sanLen`; `skid`, `akid`; `hasNameConstraints` with `permittedSubtrees[]` / `excludedSubtrees[]`; `tbsRaw` / `tbsRawLen` (bytes the signature covers); `signature` / `signatureLen` / `signatureUnusedBits`. All pointers reference the source DER buffer. |
+| <a id="type-cert"></a>`SSFX509Cert_t` | Struct | Parsed certificate. `version` (`0` = v1, `2` = v3); `serial`; TBS and outer signature algorithm OIDs plus their raw parameters (`sigAlgParams`, `outerSigAlgParams`); `issuer` / `subject` names; `notBefore` / `notAfter` in Unix seconds; `pubKeyAlgOidRaw`, `pubKey` / `pubKeyLen` / `pubKeyUnusedBits`, `ecCurveOidRaw`; `exts[]` / `extsLen`; decoded flags `hasBasicConstraints`, `isCA`, `pathLenConstraint` (`-1` = absent), `hasKeyUsage`, `keyUsageBits`, `hasExtKeyUsage`, `ekuServerAuth`, `ekuClientAuth`; `san[]` / `sanLen`; `skid`, `akid`; `hasNameConstraints` with `permittedSubtrees[]` / `excludedSubtrees[]`; `tbsRaw` / `tbsRawLen` (bytes the signature covers); `signature` / `signatureLen` / `signatureUnusedBits`. All pointers reference the source DER buffer. |
 | <a id="type-genname"></a>`SSFX509GenName_t` | Struct | Name attributes for generation as null-terminated strings: `cn`, `o`, `ou`, `c`, `st`, `l`. `NULL` omits the attribute. |
 | <a id="type-genparams"></a>`SSFX509GenParams_t` | Struct | Everything needed to build a certificate: `version` (`0` or `2`), `serial` / `serialLen`, signature algorithm OID and optional parameters, `issuer` / `subject`, `notBefore` / `notAfter`, public key algorithm OID, optional EC curve OID, `pubKey` / `pubKeyLen`; extension controls `addBasicConstraints` / `isCA` / `pathLenConstraint`, `addKeyUsage` / `keyUsageBits`, `addExtKeyUsage` / `ekuServerAuth` / `ekuClientAuth`, `sanDNSNames` / `sanIPAddrs`, `skid` / `skidLen`, `akid` / `akidLen`, one optional raw extension (`addRawExt`, `rawExtOid*`, `rawExtValue*`, `rawExtCritical`), and Name Constraints (`addNameConstraints`, `ncPermittedDNS`, `ncPermittedIPs`, `ncExcludedDNS`, `ncExcludedIPs`). |
 
@@ -213,7 +216,7 @@ The unit-test entry point is gated by `SSF_CONFIG_X509_UNIT_TEST` in `ssfport.h`
 | | Function | Description |
 |---|----------|-------------|
 | [e.g.](#ex-parse) | [`bool SSFX509Parse(der, derLen, cert)`](#ssfx509parse) | Zero-copy parse of a DER certificate |
-| [e.g.](#ex-parse) | [`bool SSFX509IsValid(cert, nowUnixSec)`](#ssfx509isvalid) | `notBefore <= now < notAfter` |
+| [e.g.](#ex-parse) | [`bool SSFX509IsValid(cert, nowUnixSec)`](#ssfx509isvalid) | `notBefore <= now <= notAfter` |
 | | [`bool SSFX509IsECDSA(cert)`](#ssfx509is-helpers) | Signature algorithm is `ecdsa-with-SHA256` |
 | | [`bool SSFX509IsECDSASHA384(cert)`](#ssfx509is-helpers) | Signature algorithm is `ecdsa-with-SHA384` |
 | | [`bool SSFX509IsRSA(cert)`](#ssfx509is-helpers) | Public key algorithm is `rsaEncryption` |
@@ -308,7 +311,8 @@ Checks the validity window.
 | `cert` | in | `const SSFX509Cert_t *` | Parsed certificate. Must not be `NULL`. |
 | `nowUnixSec` | in | `uint64_t` | Current time in Unix seconds. |
 
-**Returns:** `true` if `cert->notBefore <= nowUnixSec < cert->notAfter`.
+**Returns:** `true` if `cert->notBefore <= nowUnixSec <= cert->notAfter`. Both ends are
+inclusive per RFC 5280 §4.1.2.5.
 
 ---
 

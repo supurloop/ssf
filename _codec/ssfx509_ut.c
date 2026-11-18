@@ -429,6 +429,26 @@ static uint32_t _utBuildCertExts(uint32_t numExts, int32_t pathLen, uint8_t *out
     return w;
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Signs p with the given P-256 private key and returns the certificate DER length, else 0.      */
+/* --------------------------------------------------------------------------------------------- */
+static uint32_t _utSignCert(const SSFX509GenParams_t *p, const uint8_t *privKey, uint8_t *out,
+                            uint32_t outSize)
+{
+    static uint8_t tbs[SSF_X509_CONFIG_MAX_CERT_SIZE];
+    uint32_t tbsLen;
+    uint8_t hash[32];
+    uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
+    size_t sigLen;
+
+    tbsLen = SSFX509EncodeTBS(tbs, sizeof(tbs), p);
+    if (tbsLen == 0u) return 0;
+    SSFSHA256(tbs, tbsLen, hash, sizeof(hash));
+    if (!SSFECDSASign(SSF_EC_CURVE_P256, privKey, 32u, hash, 32u, sig, sizeof(sig), &sigLen))
+        return 0;
+    return SSFX509EncodeCert(out, outSize, p, sig, (uint32_t)sigLen);
+}
+
 void SSFX509UnitTest(void)
 {
     SSFX509Cert_t cert;
@@ -890,8 +910,8 @@ void SSFX509UnitTest(void)
         /* 3d. Time exactly at notBefore (inclusive) */
         SSF_ASSERT(SSFX509IsValid(&vc, vc.notBefore) == true);
 
-        /* 3e. Time exactly at notAfter (exclusive, open interval) */
-        SSF_ASSERT(SSFX509IsValid(&vc, vc.notAfter) == false);
+        /* 3e. Time exactly at notAfter (inclusive per RFC 5280 Section 4.1.2.5) */
+        SSF_ASSERT(SSFX509IsValid(&vc, vc.notAfter) == true);
     }
 
     /* ==================================================================== */
@@ -4374,6 +4394,106 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(n != 0u);
         SSF_ASSERT(SSFX509Parse(out, n, &parsed) == true);
         SSF_ASSERT(parsed.pathLenConstraint == 5);
+    }
+
+    /* ---- Conformance: inclusive notAfter, chain link names, signature algorithm parameters ---- */
+    {
+        static uint8_t caOut[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t leafOut[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t caPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        static uint8_t leafPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        static const char *sanX[] = { "x", NULL };
+        static const uint8_t nullParams[] = { 0x05u, 0x00u };
+        uint8_t caPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        uint8_t leafPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        size_t caPubLen;
+        size_t leafPubLen;
+        uint8_t serial[] = { 0x0Au };
+        SSFX509GenParams_t p;
+        SSFX509Cert_t parsed;
+        const uint8_t *chain[2];
+        uint32_t chainLen[2];
+        const uint8_t *trust[1];
+        uint32_t trustLen[1];
+        uint32_t caLen;
+        uint32_t leafLen;
+        uint32_t oidLen = sizeof(_utSigAlgOid);
+        uint32_t last;
+        uint32_t i;
+
+        /* RFC 5280 Section 4.1.2.5: the validity period includes the notAfter second */
+        SSF_ASSERT(SSFX509Parse(_utTestCertDER, sizeof(_utTestCertDER), &parsed) == true);
+        SSF_ASSERT(SSFX509IsValid(&parsed, parsed.notAfter) == true);
+        SSF_ASSERT(SSFX509IsValid(&parsed, parsed.notAfter + 1u) == false);
+        SSF_ASSERT(SSFX509IsValid(&parsed, parsed.notBefore) == true);
+        SSF_ASSERT(SSFX509IsValid(&parsed, parsed.notBefore - 1u) == false);
+
+        /* CA and leaf key pairs */
+        SSF_ASSERT(SSFECDSAKeyGen(SSF_EC_CURVE_P256, caPriv, sizeof(caPriv), caPub, sizeof(caPub),
+                                  &caPubLen) == true);
+        SSF_ASSERT(SSFECDSAKeyGen(SSF_EC_CURVE_P256, leafPriv, sizeof(leafPriv), leafPub,
+                                  sizeof(leafPub), &leafPubLen) == true);
+        _utGenBaseParams(&p, serial, caPub, (uint32_t)caPubLen);
+        p.issuer.cn = "ca";
+        p.subject.cn = "ca";
+        p.addBasicConstraints = true;
+        p.isCA = true;
+        p.addKeyUsage = true;
+        p.keyUsageBits = SSF_X509_KU_KEY_CERT_SIGN;
+        caLen = _utSignCert(&p, caPriv, caOut, sizeof(caOut));
+        SSF_ASSERT(caLen != 0u);
+        trust[0] = caOut;
+        trustLen[0] = caLen;
+        chain[1] = caOut;
+        chainLen[1] = caLen;
+
+        /* RFC 5280 Section 6.1.3 (a)(4): a leaf signed by the CA key but naming another issuer */
+        _utGenBaseParams(&p, serial, leafPub, (uint32_t)leafPubLen);
+        p.issuer.cn = "other";
+        p.subject.cn = "leaf";
+        p.sanDNSNames = sanX;
+        leafLen = _utSignCert(&p, caPriv, leafOut, sizeof(leafOut));
+        SSF_ASSERT(leafLen != 0u);
+        chain[0] = leafOut;
+        chainLen[0] = leafLen;
+        SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 2u, trust, trustLen, 1u, "x",
+                                      1800000000ull) == false);
+
+        /* Same leaf with the correct issuer name verifies */
+        p.issuer.cn = "ca";
+        leafLen = _utSignCert(&p, caPriv, leafOut, sizeof(leafOut));
+        SSF_ASSERT(leafLen != 0u);
+        chainLen[0] = leafLen;
+        SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 2u, trust, trustLen, 1u, "x",
+                                      1800000000ull) == true);
+
+        /* RFC 5280 Section 4.1.1.2: outer signatureAlgorithm parameters must equal the TBS copy */
+        _utGenBaseParams(&p, serial, leafPub, (uint32_t)leafPubLen);
+        p.sanDNSNames = sanX;
+        p.sigAlgParams = nullParams;
+        p.sigAlgParamsLen = sizeof(nullParams);
+        leafLen = _utSelfSign(&p, leafPub, sizeof(leafPub), leafOut, sizeof(leafOut));
+        SSF_ASSERT(leafLen != 0u);
+        chain[0] = leafOut;
+        chainLen[0] = leafLen;
+        SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, "x",
+                                      1800000000ull) == true);
+        last = 0;
+        for (i = 0; (i + oidLen + 3u) < leafLen; i++)
+        {
+            /* Locate every AlgorithmIdentifier { sigAlg OID, NULL }; the last one is the outer */
+            if ((leafOut[i] == 0x06u) && (leafOut[i + 1u] == (uint8_t)oidLen) &&
+                (memcmp(&leafOut[i + 2u], _utSigAlgOid, oidLen) == 0) &&
+                (leafOut[i + 2u + oidLen] == 0x05u) && (leafOut[i + 3u + oidLen] == 0x00u))
+            {
+                last = i + 2u + oidLen;
+            }
+        }
+        SSF_ASSERT(last != 0u);
+        leafOut[last] = 0x04u;
+        SSF_ASSERT(SSFX509Parse(leafOut, leafLen, &parsed) == true);
+        SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, "x",
+                                      1800000000ull) == false);
     }
 
 }

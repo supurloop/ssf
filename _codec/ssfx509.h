@@ -115,6 +115,7 @@ typedef struct SSFX509Cert
     const uint8_t *sigAlgOidRaw;   uint32_t sigAlgOidRawLen;   /* From TBS */
     const uint8_t *sigAlgParams;   uint32_t sigAlgParamsLen;  /* Raw DER of algorithm parameters */
     const uint8_t *outerSigAlgOidRaw; uint32_t outerSigAlgOidRawLen; /* From Certificate */
+    const uint8_t *outerSigAlgParams; uint32_t outerSigAlgParamsLen; /* Raw DER, Certificate */
 
     SSFX509Name_t issuer;
     SSFX509Name_t subject;

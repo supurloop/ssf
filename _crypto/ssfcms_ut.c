@@ -1256,9 +1256,16 @@ void SSFCMSUnitTest(void)
     SSF_ASSERT(alg == SSF_CMS_DIGEST_SHA384);
     SSF_ASSERT(_utSpanEq(sd.digestAlgOidRaw[0], sd.digestAlgOidRawLen[0], _utOidSha384,
                          sizeof(_utOidSha384)) == true);
+#if SSF_EC_CONFIG_ENABLE_P384 == 1
     SSF_ASSERT(SSFCMSVerifyDigest(&sd, sha384, sizeof(sha384), SSF_CMS_DIGEST_SHA384, trust,
                                   trustLen, 1u, now, &res) == true);
     SSF_ASSERT(memcmp(res.signerSubject.cn, "SSF Code Signer", 15u) == 0);
+#else
+    /* AUDIT CFG-1: the P-256 chain verifies, but the P-384 signer key is unsupported in this  */
+    /* build, so verify must return false (it used to halt in SSFECDSAVerify).                 */
+    SSF_ASSERT(SSFCMSVerifyDigest(&sd, sha384, sizeof(sha384), SSF_CMS_DIGEST_SHA384, trust,
+                                  trustLen, 1u, now, &res) == false);
+#endif
     SSF_ASSERT(SSFCMSVerifyDigest(&sd, sha256, sizeof(sha256), SSF_CMS_DIGEST_SHA256, trust,
                                   trustLen, 1u, now, &res) == false);
     SSF_ASSERT(SSFCMSVerifyAttached(&sd, trust, trustLen, 1u, now, &res) == false);

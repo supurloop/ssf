@@ -849,15 +849,30 @@ KEYGEN-1  Medium  FIXED (2026-11-18)  [verified]
              ssfecdsa.c:522  SSFPRNGInitContext(&prng, entropy, sizeof(entropy));
              ssfprng.h:44    #define SSF_PRNG_ENTROPY_SIZE (SSF_AES_BLOCK_SIZE)
 
-CFG-1  Untriaged  OPEN  (found 2026-11-18 while testing KEYGEN-1; not yet investigated)
-  Location:  ssfecdsa.c:814 (SSFECDSAVerify) reached from ssfx509 / ssfcms
-  Problem:   With SSF_EC_CONFIG_ENABLE_P384 = 0, the ssfcms and ssfx509 unit tests trip
-             SSF_REQUIRE(hashLen > 0u && hashLen <= c->bytes) at ssfecdsa.c:814 instead of the
-             verify returning false. Reproduced at HEAD 03bc6a8 with no other change, so it
-             predates KEYGEN-1. If a certificate or CMS message using P-384 (or a SHA-384 digest
-             over a P-256 key) can drive this in a P-384-disabled build, hostile input halts the
-             process (compare ECDSA-3, which notes ssfx509.c guards hashLen in the default build).
-             Needs triage: test-fixture gating vs. a real reduced-configuration input path.
+CFG-1  High (reduced configurations only)  FIXED (2026-11-18)  [verified 2026-11-18]
+  Location:  ssfx509.c:2262-2270 (SSFX509VerifySignature curve selection) -> ssfecdsa.c:814
+             (SSFECDSAVerify: SSF_REQUIRE(c != NULL)); reached via SSFX509VerifyCertSignature
+             (ssfx509.c:2437), chain verification, and ssfcms.
+  Problem:   SSFX509VerifySignature maps a key's curve OID to SSF_EC_CURVE_P256 / _P384 with
+             SSFX509IsP256 / SSFX509IsP384, which recognise both OIDs whatever the build enables.
+             When that curve is compiled out (SSF_EC_CONFIG_ENABLE_P384 = 0, or _P256 = 0),
+             SSFECGetCurveParams returns NULL and SSFECDSAVerify's precondition traps, so a
+             certificate halts the process instead of the documented false return. The key that
+             selects the curve is the issuer's, which in chain verification and CMS can be an
+             attacker-supplied intermediate, so the input is hostile and arrives before any trust.
+             Default build unaffected (both curves enabled).
+  Failure:   P-384-disabled build, SSFX509Parse + SSFX509VerifyCertSignature(cert, cert) on an
+             OpenSSL-generated P-384 self-signed certificate: P-384 enabled -> parse 1, verify 1;
+             P-384 disabled -> parse 1, then "SSF Assertion: _crypto/ssfecdsa.c:814".
+  Also:      The ssfcms and ssfx509 unit tests use P-384 fixtures without gating on
+             SSF_EC_CONFIG_ENABLE_P384, so those suites cannot pass in a P-384-off build even once
+             the trap is fixed (they will see false where they assert true).
+  Not affected: ssfx509 is the only module that turns input into an SSFECCurve_t. RSA keys
+             outside the enabled sizes are rejected by the RSA-1 decoder bounds (false, no trap).
+  Options:   (1) ssfx509: map only curves that are compiled in, else "curve not supported" ->
+             false; gate the P-384 unit-test assertions. (2) ssfecdsa: return false for a
+             disabled or unknown curve instead of SSF_REQUIRE (changes the ecdsa contract for a
+             caller-chosen parameter). (3) Both.
 
 ----------------------------------------------------------------------------------------------
 TEST COVERAGE NOTES (not defects)
@@ -871,6 +886,7 @@ TEST COVERAGE NOTES (not defects)
   - ssfbn_ut.c:1400 covers GenPrime only at 64/128/192 bits (BN-2).
   - No unit test exercises in-place SSFAESGCMDecrypt (GCM-1).
   - Only matched-hash Wycheproof ECDSA files are wired in (consistent with ECDSA-3).
+  - The ssfx509 and ssfcms unit tests assume P-256 is enabled; a P-256-off build is untested (CFG-1).
 
 ----------------------------------------------------------------------------------------------
 CHANGE LOG
@@ -1107,3 +1123,20 @@ CHANGE LOG
               ssfprng and all PRNG users pass. In both P-384-off builds ssfcms and ssfx509 trip
               ssfecdsa.c:814, which also happens at HEAD without this change; recorded as CFG-1.
               All _opt headers and ssfport.h restored after the runs.
+  2026-11-18  CFG-1 FIXED via option 1. SSFX509VerifySignature maps a key's curve OID to
+              SSF_EC_CURVE_P256 / _P384 only inside #if SSF_EC_CONFIG_ENABLE_P256 / _P384; a key on
+              a compiled-out curve now takes the "curve OID not recognized or not enabled" path and
+              returns false instead of reaching SSFECDSAVerify's curve precondition. ssfx509 stays
+              the only module that turns input into an SSFECCurve_t; ssfecdsa's curve parameter
+              remains a caller precondition. ssfx509.md updated (supported pairings, Returns).
+              Tests: the P-384 root self-verify in ssfx509_ut.c and the P-384-signer SHA-384 CMS
+              message in ssfcms_ut.c now expect true with P-384 enabled and false (AUDIT CFG-1)
+              with it disabled. RED (P-384 off): ssfx509 and ssfcms suites halted at
+              ssfecdsa.c:814. GREEN, ssfecdsa unit test enabled alongside the default ssfcms /
+              ssfx509 / ssfbase64url / ssfmatch: P-384-off build and default build both pass. A
+              P-256-off build also no longer traps in verify (ssfcms_ut.c:978 sees false where its
+              P-256 fixture expects true), but its remaining failures are test-data assumptions:
+              the ssfx509 and ssfcms unit tests use P-256 throughout (including direct
+              SSFECDSAKeyGen(P256) calls, ssfecdsa.c:516), so a P-256-off build is not covered by
+              the unit tests; gating them is left as a test-coverage gap. _opt headers and
+              ssfport.h restored.

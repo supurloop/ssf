@@ -2258,20 +2258,28 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
         }
         _SSFX509Digest(hashId, data, dataLen, hash, &hashLen);
 
-        /* Key on a supported curve? */
+        /* Key on a curve this build supports? Only compiled-in curves are mapped: the key may   */
+        /* be an untrusted intermediate's, and SSFECDSAVerify traps on a disabled curve (CFG-1). */
+#if SSF_EC_CONFIG_ENABLE_P256 == 1
         if (SSFX509IsP256(keyCert))
         {
+            /* Yes, P-256 */
             curve = SSF_EC_CURVE_P256;
         }
-        else if (SSFX509IsP384(keyCert))
+        else
+#endif
+#if SSF_EC_CONFIG_ENABLE_P384 == 1
+        if (SSFX509IsP384(keyCert))
         {
+            /* Yes, P-384 */
             curve = SSF_EC_CURVE_P384;
         }
         else
+#endif
         {
-            /* No, nothing to verify with */
+            /* No, unknown curve or one compiled out of this build; nothing to verify with */
             SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
-                "VerifySig: ECDSA key curve OID not recognized (%u bytes)",
+                "VerifySig: ECDSA key curve OID not recognized or not enabled (%u bytes)",
                 keyCert->ecCurveOidRawLen);
             return false;
         }

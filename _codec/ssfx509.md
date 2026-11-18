@@ -152,7 +152,9 @@ X.509 v3 certificate support per RFC 5280, built on [`ssfasn1`](ssfasn1.md):
   / curve from the **issuer's** SubjectPublicKeyInfo, so `ecdsa-with-SHA256` over a P-384 key
   (RFC 5758 §3.2) verifies correctly. The reverse, a hash longer than the key's curve order such as
   `ecdsa-with-SHA384` over a P-256 key, is refused rather than truncated. Supported pairings:
-  `ecdsa-with-SHA256` and `ecdsa-with-SHA384` with P-256 or P-384 keys of at least the hash size;
+  `ecdsa-with-SHA256` and `ecdsa-with-SHA384` with P-256 or P-384 keys of at least the hash size
+  (only curves enabled by `SSF_EC_CONFIG_ENABLE_P256` / `_P384`; a key on a curve compiled out of
+  the build is treated as unsupported and verification returns `false`);
   `sha256WithRSAEncryption`, `sha384WithRSAEncryption`, `sha512WithRSAEncryption`; plain
   `rsaEncryption` when a separate digest algorithm names the hash, as CMS allows (RFC 3370);
   `id-RSASSA-PSS` with SHA-256, SHA-384, or SHA-512 parameters; and `id-Ed25519`, which when a
@@ -527,8 +529,8 @@ primitive CMS and other detached-signature formats need; the supported pairings 
 | `sigLen` | in | `uint32_t` | Length of `sig`. |
 
 **Returns:** `true` if the signature verifies; `false` on a bad signature, an unsupported or
-inconsistent algorithm pairing, a key on an unsupported curve, or a hash longer than the curve
-order.
+inconsistent algorithm pairing, a key on an unsupported curve (including P-256 or P-384 when that
+curve is disabled in `ssfec_opt.h`), or a hash longer than the curve order.
 
 ---
 

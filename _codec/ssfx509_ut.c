@@ -4472,7 +4472,13 @@ void SSFX509UnitTest(void)
         /* Self-signed root: verify cert against itself. The verifier must derive the curve    */
         /* from cert.ecCurveOidRaw (P-384) rather than from the sigAlg OID (which would         */
         /* otherwise hardcode P-256 and incorrectly reject the cert).                            */
+#if SSF_EC_CONFIG_ENABLE_P384 == 1
         SSF_ASSERT(SSFX509VerifyCertSignature(&rootCert, &rootCert) == true);
+#else
+        /* AUDIT CFG-1: with P-384 compiled out the key's curve is unsupported, so verify must */
+        /* return false. It used to reach SSFECDSAVerify's curve precondition and halt.          */
+        SSF_ASSERT(SSFX509VerifyCertSignature(&rootCert, &rootCert) == false);
+#endif
     }
 
     /* ---- Generation: measured size equals written size and the output re-parses ---- */

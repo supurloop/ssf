@@ -70,21 +70,30 @@ extern "C" {
 /* Distinguished Name */
 typedef struct SSFX509Name
 {
-    const uint8_t *cn;  uint32_t cnLen;    /* Common Name */
-    const uint8_t *o;   uint32_t oLen;     /* Organization */
-    const uint8_t *ou;  uint32_t ouLen;    /* Organizational Unit */
-    const uint8_t *c;   uint32_t cLen;     /* Country */
-    const uint8_t *st;  uint32_t stLen;    /* State/Province */
-    const uint8_t *l;   uint32_t lLen;     /* Locality */
-    const uint8_t *raw; uint32_t rawLen;   /* Raw DER of the entire Name SEQUENCE */
+    const uint8_t *cn;             /* Common Name */
+    uint32_t cnLen;
+    const uint8_t *o;              /* Organization */
+    uint32_t oLen;
+    const uint8_t *ou;             /* Organizational Unit */
+    uint32_t ouLen;
+    const uint8_t *c;              /* Country */
+    uint32_t cLen;
+    const uint8_t *st;             /* State/Province */
+    uint32_t stLen;
+    const uint8_t *l;              /* Locality */
+    uint32_t lLen;
+    const uint8_t *raw;            /* Raw DER of the entire Name SEQUENCE */
+    uint32_t rawLen;
 } SSFX509Name_t;
 
 /* Extension */
 typedef struct SSFX509Ext
 {
-    const uint8_t *oidRaw;  uint32_t oidRawLen;
+    const uint8_t *oidRaw;
+    uint32_t oidRawLen;
     bool critical;
-    const uint8_t *value;   uint32_t valueLen;
+    const uint8_t *value;
+    uint32_t valueLen;
 } SSFX509Ext_t;
 
 /* SAN entry */
@@ -110,12 +119,17 @@ typedef struct SSFX509Cert
 {
     uint8_t version;                /* 0=v1, 1=v2, 2=v3 */
 
-    const uint8_t *serial;         uint32_t serialLen;
+    const uint8_t *serial;
+    uint32_t serialLen;
 
-    const uint8_t *sigAlgOidRaw;   uint32_t sigAlgOidRawLen;   /* From TBS */
-    const uint8_t *sigAlgParams;   uint32_t sigAlgParamsLen;  /* Raw DER of algorithm parameters */
-    const uint8_t *outerSigAlgOidRaw; uint32_t outerSigAlgOidRawLen; /* From Certificate */
-    const uint8_t *outerSigAlgParams; uint32_t outerSigAlgParamsLen; /* Raw DER, Certificate */
+    const uint8_t *sigAlgOidRaw;        /* From TBS */
+    uint32_t sigAlgOidRawLen;
+    const uint8_t *sigAlgParams;        /* Raw DER of algorithm parameters */
+    uint32_t sigAlgParamsLen;
+    const uint8_t *outerSigAlgOidRaw;   /* From Certificate */
+    uint32_t outerSigAlgOidRawLen;
+    const uint8_t *outerSigAlgParams;   /* Raw DER, Certificate */
+    uint32_t outerSigAlgParamsLen;
 
     SSFX509Name_t issuer;
     SSFX509Name_t subject;
@@ -124,10 +138,13 @@ typedef struct SSFX509Cert
     uint64_t notAfter;             /* Unix seconds */
 
     /* Subject Public Key Info */
-    const uint8_t *pubKeyAlgOidRaw; uint32_t pubKeyAlgOidRawLen;
-    const uint8_t *pubKey;          uint32_t pubKeyLen;
+    const uint8_t *pubKeyAlgOidRaw;
+    uint32_t pubKeyAlgOidRawLen;
+    const uint8_t *pubKey;
+    uint32_t pubKeyLen;
     uint8_t pubKeyUnusedBits;
-    const uint8_t *ecCurveOidRaw;   uint32_t ecCurveOidRawLen;
+    const uint8_t *ecCurveOidRaw;
+    uint32_t ecCurveOidRawLen;
 
     /* Extensions */
     SSFX509Ext_t exts[SSF_X509_CONFIG_MAX_EXTENSIONS];
@@ -148,8 +165,10 @@ typedef struct SSFX509Cert
     SSFX509SAN_t san[SSF_X509_CONFIG_MAX_SAN_ENTRIES];
     uint8_t sanLen;
 
-    const uint8_t *skid;           uint32_t skidLen;
-    const uint8_t *akid;           uint32_t akidLen;
+    const uint8_t *skid;
+    uint32_t skidLen;
+    const uint8_t *akid;
+    uint32_t akidLen;
 
     /* Name Constraints (RFC 5280 Section 4.2.1.10). Read from every cert.                       */
     bool hasNameConstraints;
@@ -159,10 +178,12 @@ typedef struct SSFX509Cert
     uint8_t excludedLen;
 
     /* TBSCertificate raw DER (for signature verification) */
-    const uint8_t *tbsRaw;         uint32_t tbsRawLen;
+    const uint8_t *tbsRaw;
+    uint32_t tbsRawLen;
 
     /* Signature */
-    const uint8_t *signature;      uint32_t signatureLen;
+    const uint8_t *signature;
+    uint32_t signatureLen;
     uint8_t signatureUnusedBits;
 } SSFX509Cert_t;
 

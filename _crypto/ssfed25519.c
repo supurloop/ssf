@@ -167,6 +167,16 @@ static void _fe_mul(_fe_t *r, const _fe_t *a, const _fe_t *b)
             r->v[i] = (uint32_t)c;
             c >>= 32;
         }
+
+        /* The fold above can carry out of 2^256 (c is 0 or 1); fold it once more (AUDIT E-1). */
+        /* When it does carry out, r < 38 * 9, so this second fold cannot carry out again.      */
+        c *= 38u;
+        for (i = 0; i < 8u; i++)
+        {
+            c += (uint64_t)r->v[i];
+            r->v[i] = (uint32_t)c;
+            c >>= 32;
+        }
     }
 
     /* Ensure result is in [0, 2p) for safe use in subsequent sub/add */
@@ -769,6 +779,46 @@ static void _sc_pack(uint8_t out[32], const int64_t s[12])
 void _SSFEd25519ScPackForTest(uint8_t out[32], const int64_t s[12])
 {
     _sc_pack(out, s);
+}
+
+/* Test-only wrapper exposing _fe_mul so a unit test can pin carry-fold edge inputs (AUDIT E-1). */
+void _SSFEd25519FeMulForTest(uint8_t out[32], const uint8_t a[32], const uint8_t b[32])
+{
+    _fe_t fa;
+    _fe_t fb;
+    _fe_t fr;
+
+    SSF_REQUIRE(out != NULL);
+    SSF_REQUIRE(a != NULL);
+    SSF_REQUIRE(b != NULL);
+
+    _fe_from_bytes(&fa, a);
+    _fe_from_bytes(&fb, b);
+    _fe_mul(&fr, &fa, &fb);
+    _fe_to_bytes(out, &fr);
+}
+
+/* Test-only wrapper exposing _ge_decode and returning the affine x of the decoded point. */
+bool _SSFEd25519GeDecodeForTest(uint8_t xOut[32], const uint8_t in[32])
+{
+    _ge_t pt;
+    _fe_t zInv;
+    _fe_t x;
+
+    SSF_REQUIRE(xOut != NULL);
+    SSF_REQUIRE(in != NULL);
+
+    /* Did the encoding decode to a curve point? */
+    if (!_ge_decode(&pt, in))
+    {
+        /* No, report failure */
+        return false;
+    }
+    /* Yes, convert X to affine */
+    _fe_inv(&zInv, &pt.Z);
+    _fe_mul(&x, &pt.X, &zInv);
+    _fe_to_bytes(xOut, &x);
+    return true;
 }
 #endif /* SSF_CONFIG_ED25519_UNIT_TEST */
 

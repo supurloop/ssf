@@ -67,6 +67,12 @@ void SSFEd25519UnitTest(void);
 
 /* Test wrapper around the internal scalar-pack (12 x 21-bit limbs -> 32-byte LE scalar). */
 void _SSFEd25519ScPackForTest(uint8_t out[32], const int64_t s[12]);
+
+/* Test wrapper around the internal field multiply: out = a * b mod p (32-byte LE in and out). */
+void _SSFEd25519FeMulForTest(uint8_t out[32], const uint8_t a[32], const uint8_t b[32]);
+
+/* Test wrapper around the internal point decode; on success xOut is the affine x (32-byte LE). */
+bool _SSFEd25519GeDecodeForTest(uint8_t xOut[32], const uint8_t in[32]);
 #endif /* SSF_CONFIG_ED25519_UNIT_TEST */
 
 #ifdef __cplusplus

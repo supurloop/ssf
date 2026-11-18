@@ -193,7 +193,7 @@ RSA-8  Low  OPEN (doc only)
 ssfx25519
 ----------------------------------------------------------------------------------------------
 
-X-1  High  OPEN  [verified by exact Python model of the routine]
+X-1  High  FIXED (2026-11-18)  [verified by exact Python model of the routine]
   Location:  ssfx25519.c:157-169 (_fe_mul, second carry fold)
   Problem:   After r = (low + 38*high) mod 2^256 with carry = (low + 38*high) >> 256 (carry can
              be 1..9 for operands < p), the code adds 38*carry to r but discards the final
@@ -243,7 +243,7 @@ X-2  Medium  OPEN  [verified]
 ssfed25519
 ----------------------------------------------------------------------------------------------
 
-E-1  High  OPEN  [verified; identical code to X-1]
+E-1  High  FIXED (2026-11-18)  [verified; identical code to X-1]
   Location:  ssfed25519.c:161-172 (_fe_mul, second carry fold)
   Problem:   Same dropped carry-out as X-1. Same (a, b) returns 0x1d instead of 0x43.
   Reach:     _ge_decode computes _fe_sqr(&u, &p->Y) on the supplied y. Of the 292 bad squares,
@@ -874,3 +874,32 @@ CHANGE LOG
               RSA-2/RSA-3/RSA-4"); confirmed red (MSVC RTC stack-corruption reports around em,
               emExpected, emFull and the ssfbn.c:1965 oddness assertion) then green. ssfrsa.md
               Notes bullet updated. CMS-1 remains OPEN as a defense-in-depth item.
+  2026-11-18  X-1 FIXED via option 1 (third fold). ssfx25519.c _fe_mul now folds the 0/1
+              carry-out of the second 38-fold once more; after a carry-out r < 38 * 9, so the
+              extra fold cannot carry again. Branch-free, no other routine changed. Test block
+              "AUDIT X-1" added to ssfx25519_ut.c: priv = bytes 0x01..0x20 against peer u = s - 1
+              (daa13e72...fdb59) and u = s + 1 (dca13e72...fdb59), expected secrets from an
+              independent RFC 7748 big-integer ladder (ee2ba9d0...b27e, b6c38a3d...4127). RED:
+              ComputeSecret returned true with c0f6aeac...e01e (the audit's wrong value) and
+              b6e50cc8...e341; assertion at ssfx25519_ut.c:529. GREEN after the fix, with ssfcms,
+              ssfx509, ssfbase64url, ssfmatch and ssfx25519 (incl. Wycheproof valid set) passing.
+              Built on Linux with gcc 14 -O3 using build-linux.ninja's flags and
+              -DSSF_CONFIG_HAVE_OPENSSL=0 (no ninja, MSBuild or OpenSSL headers on that machine);
+              SSF_CONFIG_X25519_UNIT_TEST flipped to 1 for the run and restored to 0.
+  2026-11-18  E-1 FIXED with the same third fold as X-1 in ssfed25519.c _fe_mul (code of the two
+              copies is again identical; only comments differ). No public-API vector exists (an
+              affected key has no known private key and Verify never decodes R), so two
+              test-only wrappers were added beside _SSFEd25519ScPackForTest, compiled only when
+              SSF_CONFIG_ED25519_UNIT_TEST == 1: _SSFEd25519FeMulForTest and
+              _SSFEd25519GeDecodeForTest (declared in ssfed25519.h). Test block "AUDIT E-1" in
+              ssfed25519_ut.c checks the audit's (a, b) gives 0x43, y = dba13e72...fdb59 decodes
+              (defect: rejected) and y = 18a203b3...df6b decodes to the RFC 8032 x (defect: wrong
+              x); expected x values checked on the curve in Python. RED: assertion at
+              ssfed25519_ut.c:432 (field multiply returned 0x1d). GREEN after the fix with ssfcms,
+              ssfx509, ssfbase64url, ssfmatch and ssfed25519 (incl. Wycheproof) passing. Same
+              Linux gcc build as X-1; SSF_CONFIG_ED25519_UNIT_TEST flipped to 1 and restored.
+              Bad inputs were enumerated as square roots mod p of small t (2^256 - 38 = 2p, so a
+              bad x satisfies x^2 = t mod 2p with t in [38, 38c + 37]): this search found 45 bad
+              squares and 25 valid y (15 rejected, 10 wrong x before the fix, all 25 correct
+              after), fewer than the 292 / 165 reported above; the original counts were not
+              re-derived.

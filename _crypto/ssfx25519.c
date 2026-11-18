@@ -163,6 +163,16 @@ static void _fe_mul(_fe_t *r, const _fe_t *a, const _fe_t *b)
             r->v[i] = (uint32_t)c;
             c >>= 32;
         }
+
+        /* The fold above can carry out of 2^256 (c is 0 or 1); fold it once more (AUDIT X-1). */
+        /* When it does carry out, r < 38 * 9, so this second fold cannot carry out again.      */
+        c *= 38u;
+        for (i = 0; i < 8u; i++)
+        {
+            c += (uint64_t)r->v[i];
+            r->v[i] = (uint32_t)c;
+            c >>= 32;
+        }
     }
 
     /* Final reduce so output is in [0, p) (handles residual fold-loop carry on edge inputs). */

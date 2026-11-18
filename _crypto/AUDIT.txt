@@ -669,7 +669,7 @@ TLS-7  Low  OPEN (doc only)
 ssfprng
 ----------------------------------------------------------------------------------------------
 
-PRNG-1  Medium  OPEN  [verified]
+PRNG-1  Medium  FIXED (2026-11-18)  [verified]
   Location:  ssfprng.c:55-57 (SSFPRNGInitContext) vs ssfprng.md:101, :140
   Problem:   The doc says Init/ReInit "resets the internal counter to zero". The code seeds the
              counter with the two's-complement negation of the first 8 entropy bytes in host
@@ -678,7 +678,7 @@ PRNG-1  Medium  OPEN  [verified]
   Evidence:  memcpy(&context->count, entropy, sizeof(uint64_t));
              context->count = (~context->count) + 1;
 
-PRNG-2  Low  OPEN
+PRNG-2  Low  FIXED (2026-11-18, with PRNG-1)
   Location:  ssfprng.c:57, :75 (SSFPRNGInitContext / SSFPRNGGetRandom)
   Problem:   The AES input block is the raw host-order bytes of count, so the same seed produces
              different output streams on big- vs little-endian hosts. Not a security defect, but
@@ -1042,3 +1042,21 @@ CHANGE LOG
               return false; the 16385-byte boundary is covered by the TLS-1 round trip. RED:
               ssftls_ut.c:955 (record accepted). GREEN with ssftls (TLS unit test enabled for the
               run), ssfcms, ssfx509, ssfbase64url, ssfmatch.
+  2026-11-18  PRNG-1 FIXED via option 1, with PRNG-2 folded in so seeded output streams change only
+              once. SSFPRNGInitContext / ReInitContext now set count = 0 (was -(first 8 seed bytes)
+              in host order); the key is replaced every GetRandom call, so the counter only
+              separates inputs and seeding it added no entropy. GetRandom writes count into the AES
+              input with SSF_PUTU64BE, so a seed gives the same stream on every host.
+              ssfprng.md: removed the stale "first output block is unchanged" sentence, documented
+              the zero start, big-endian encoding, a two-block known answer, and that seeded
+              streams from earlier versions differ. ssfprng_ut.c: the snapshot test (which copied
+              whatever ctx.count held) is replaced by "AUDIT PRNG-1/PRNG-2": count == 0 after Init,
+              known-answer outputs for seed 00..0F (out1 c6a13b37...d879, out2 b6d3903f...91f7,
+              computed independently with `openssl enc -aes-128-ecb -nopad`), count == 2 after two
+              calls, and ReInit on a used context resets to 0 and restarts the stream. RED in two
+              steps: before any fix, ssfprng_ut.c:208 (count != 0); with only the count reset
+              applied, ssfprng_ut.c:213 (second output differs: host little-endian counter).
+              GREEN with ssfprng, ssfbn, ssfec, ssfecdsa, ssfrsa (every module that seeds the PRNG
+              had its unit test enabled to catch any dependence on the old streams; none failed),
+              ssfcms, ssfx509, ssfbase64url, ssfmatch. The stream change matters for KEYGEN-1 if it
+              later widens the PRNG seed.

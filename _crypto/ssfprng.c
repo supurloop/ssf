@@ -53,8 +53,9 @@ void SSFPRNGInitContext(SSFPRNGContext_t *context, const uint8_t *entropy, size_
     SSF_REQUIRE(entropyLen == SSF_PRNG_ENTROPY_SIZE);
 
     memcpy(context->entropy, entropy, SSF_PRNG_ENTROPY_SIZE);
-    memcpy(&context->count, entropy, sizeof(uint64_t));
-    context->count = (~context->count) + 1;
+    /* The counter starts at zero as documented (AUDIT PRNG-1). The key is replaced on every */
+    /* GetRandom call, so the counter only separates inputs; seeding it adds no entropy.     */
+    context->count = 0u;
     context->magic = SSF_PRNG_MAGIC;
 }
 
@@ -84,7 +85,8 @@ void SSFPRNGGetRandom(SSFPRNGContext_t *context, uint8_t *random, size_t randomS
     SSF_ASSERT(context->magic == SSF_PRNG_MAGIC);
 
     /* Output block: ct = AES_key(count || zeros) (NIST SP 800-90A CTR_DRBG-style input shape). */
-    memcpy(pt, &context->count, sizeof(uint64_t));
+    /* count is written big-endian so the stream is identical on every host (AUDIT PRNG-2).    */
+    SSF_PUTU64BE(pt, context->count);
     memset(&pt[sizeof(uint64_t)], 0, SSF_AES_BLOCK_SIZE - sizeof(uint64_t));
     SSFAES128BlockEncrypt(pt, sizeof(pt), ct, sizeof(ct), context->entropy, SSF_PRNG_ENTROPY_SIZE);
 

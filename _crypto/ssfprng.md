@@ -12,9 +12,9 @@ derives a fresh AES key by encrypting a domain-separated block under the current
 the context key with it, destroying the key that produced the returned bytes. This gives
 **backtracking resistance** — a later compromise of the PRNG context cannot recover previously
 returned output — so the generator is no longer a fixed-key CTR keystream. The construction remains
-deterministic for a given seed (the same seed produces the same output stream), the first output
-block for a fresh context is unchanged, and the counter still advances by one per call. Security
-depends entirely on the quality of the entropy supplied to `SSFPRNGInitContext()`.
+deterministic for a given seed (the same seed produces the same output stream on every host), and
+the counter advances by one per call. Security depends entirely on the quality of the entropy
+supplied to `SSFPRNGInitContext()`.
 
 [Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference)
 
@@ -52,6 +52,12 @@ depends entirely on the quality of the entropy supplied to `SSFPRNGInitContext()
   fully deterministic for a given initial seed.
 - Each `SSFPRNGGetRandom()` call advances the internal counter by one regardless of `randomSize`;
   unused bytes from the AES block are discarded.
+- The counter starts at zero after `SSFPRNGInitContext()` / `SSFPRNGReInitContext()` and enters the
+  AES input as a big-endian 64-bit value, so a given seed yields the same byte stream on little-
+  and big-endian hosts. For seed `00 01 … 0F` the first two 16-byte outputs are
+  `c6a13b37878f5b826f4f8162a1c8d879` and `b6d3903fa2a87a2d49758c7fac6791f7`. (Before
+  2026-11-18 the counter started at the negated first 8 seed bytes in host byte order, so seeded
+  output streams from earlier versions differ.)
 - Re-seed with `SSFPRNGReInitContext()` when there is concern about the 64-bit counter eventually
   exhausting its period or when fresh entropy becomes available.
 - The PRNG is not thread-safe; use separate contexts per thread or protect access with a mutex.
@@ -206,7 +212,7 @@ void SSFPRNGGetRandom(SSFPRNGContext_t *context, uint8_t *random, size_t randomS
 ```
 
 Generates `randomSize` pseudo-random bytes into `random`. Internally, encrypts the current 64-bit
-counter (zero-padded to 128 bits) with the current key as the AES-128 key and writes the first
+counter (big-endian, zero-padded to 128 bits) with the current key as the AES-128 key and writes the first
 `randomSize` bytes of the result to `random`. It then performs a CTR_DRBG-style Update: a fresh AES
 key is derived by encrypting a domain-separated block under the current key, that key overwrites the
 seed stored in the context, and the counter is incremented. Destroying the key that produced the

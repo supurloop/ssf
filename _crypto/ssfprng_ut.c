@@ -176,35 +176,49 @@ void SSFPRNGUnitTest(void)
         SSFPRNGDeInitContext(&ctx);
     }
 
-    /* Verify pt = count || zeros (NIST CTR_DRBG-style input shape). Property test: the PRNG
-     * output for any (entropy, count) must equal AES-128-ECB(entropy, count_bytes || zeros).
-     * Compute both sides on the host (same memcpy semantics on either endianness) and compare.
-     * Pre-fix this would have been AES(entropy, count||count); the change makes the input
-     * shape match standard CTR_DRBG conventions. */
+    /* ---- AUDIT PRNG-1/PRNG-2: documented counter start and portable counter encoding ---- */
+    /* Init/ReInit must reset the counter to zero (it used to start at -(first 8 seed bytes)), */
+    /* and the counter must enter the AES input big-endian (it used to be the raw host-order */
+    /* uint64_t, so the stream differed between little- and big-endian hosts). Known answers */
+    /* computed independently with `openssl enc -aes-128-ecb -nopad`:                        */
+    /*   out1 = AES(K0, 0^16)                          (count 0, output block)               */
+    /*   K1   = AES(K0, 00*8 || 01 || 00*7)            (count 0, re-key block)               */
+    /*   out2 = AES(K1, 00*7 || 01 || 00*8)            (count 1 big-endian, output block)    */
     {
         SSFPRNGContext_t ctx;
-        uint8_t entropyKnown[SSF_PRNG_ENTROPY_SIZE] = {
+        static const uint8_t entropyKnown[SSF_PRNG_ENTROPY_SIZE] = {
             0x00u, 0x01u, 0x02u, 0x03u, 0x04u, 0x05u, 0x06u, 0x07u,
             0x08u, 0x09u, 0x0Au, 0x0Bu, 0x0Cu, 0x0Du, 0x0Eu, 0x0Fu
         };
+        static const uint8_t out1Known[SSF_PRNG_RANDOM_MAX_SIZE] = {
+            0xC6u, 0xA1u, 0x3Bu, 0x37u, 0x87u, 0x8Fu, 0x5Bu, 0x82u,
+            0x6Fu, 0x4Fu, 0x81u, 0x62u, 0xA1u, 0xC8u, 0xD8u, 0x79u
+        };
+        static const uint8_t out2Known[SSF_PRNG_RANDOM_MAX_SIZE] = {
+            0xB6u, 0xD3u, 0x90u, 0x3Fu, 0xA2u, 0xA8u, 0x7Au, 0x2Du,
+            0x49u, 0x75u, 0x8Cu, 0x7Fu, 0xACu, 0x67u, 0x91u, 0xF7u
+        };
+        static const uint8_t otherSeed[SSF_PRNG_ENTROPY_SIZE] = {
+            0xF0u, 0xE1u, 0xD2u, 0xC3u, 0xB4u, 0xA5u, 0x96u, 0x87u,
+            0x78u, 0x69u, 0x5Au, 0x4Bu, 0x3Cu, 0x2Du, 0x1Eu, 0x0Fu
+        };
         uint8_t knownRandom[SSF_PRNG_RANDOM_MAX_SIZE];
-        uint8_t expectedPt[SSF_AES_BLOCK_SIZE];
-        uint8_t expectedCt[SSF_AES_BLOCK_SIZE];
-        uint64_t snappedCount;
 
         SSFPRNGInitContext(&ctx, entropyKnown, sizeof(entropyKnown));
-        snappedCount = ctx.count;
-
-        /* Build the AES input as count || zeros (the post-fix construction). */
-        memcpy(expectedPt, &snappedCount, sizeof(uint64_t));
-        memset(&expectedPt[sizeof(uint64_t)], 0, sizeof(uint64_t));
-
-        SSFAES128BlockEncrypt(expectedPt, sizeof(expectedPt),
-                              expectedCt, sizeof(expectedCt),
-                              entropyKnown, sizeof(entropyKnown));
+        SSF_ASSERT(ctx.count == 0u);
 
         SSFPRNGGetRandom(&ctx, knownRandom, sizeof(knownRandom));
-        SSF_ASSERT(memcmp(knownRandom, expectedCt, sizeof(knownRandom)) == 0);
+        SSF_ASSERT(memcmp(knownRandom, out1Known, sizeof(knownRandom)) == 0);
+        SSFPRNGGetRandom(&ctx, knownRandom, sizeof(knownRandom));
+        SSF_ASSERT(memcmp(knownRandom, out2Known, sizeof(knownRandom)) == 0);
+        SSF_ASSERT(ctx.count == 2u);
+
+        /* ReInit on a used context resets the counter and restarts the documented stream. */
+        SSFPRNGReInitContext(&ctx, otherSeed, sizeof(otherSeed));
+        SSF_ASSERT(ctx.count == 0u);
+        SSFPRNGReInitContext(&ctx, entropyKnown, sizeof(entropyKnown));
+        SSFPRNGGetRandom(&ctx, knownRandom, sizeof(knownRandom));
+        SSF_ASSERT(memcmp(knownRandom, out1Known, sizeof(knownRandom)) == 0);
 
         SSFPRNGDeInitContext(&ctx);
     }

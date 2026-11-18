@@ -117,8 +117,11 @@ comparable security.
   sign; this is defended by the built-in verify-after-sign check (see below). The blinding
   and the fresh `r` are the reason signing now requires platform entropy on every call.
 - **Key storage format is PKCS#1 DER.** `RSAPublicKey` = `SEQUENCE { INTEGER n, INTEGER
-  e }`; `RSAPrivateKey` = `SEQUENCE { version, n, e, d, p, q, dp, dq, qInv, ... }`, all
-  unsigned big-endian. **This is not PKCS#8** (no `AlgorithmIdentifier` wrapper) and not
+  e }`; `RSAPrivateKey` = `SEQUENCE { version, n, e, d, p, q, dp, dq, qInv }` (version 0,
+  two-prime; `otherPrimeInfos` is not supported), all unsigned big-endian. Decoding is
+  strict: nothing may follow the last INTEGER inside the `SEQUENCE` or follow the `SEQUENCE`
+  itself, so pass the exact encoded length (`*pubKeyDerLen` / `*privKeyDerLen` from
+  `SSFRSAKeyGen`), not the size of a larger or zero-padded buffer. **This is not PKCS#8** (no `AlgorithmIdentifier` wrapper) and not
   PEM (no Base64, no `-----BEGIN-----` header). If your storage format is PKCS#8 or PEM,
   strip those layers at the call site before handing the bytes in.
 - **Malformed DER is rejected gracefully — untrusted input cannot abort the process.** The

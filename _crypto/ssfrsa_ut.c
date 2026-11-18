@@ -1421,6 +1421,58 @@ void SSFRSAUnitTest(void)
         _SSFRSAVerifyAgainstOpenSSL(foreignPriv, sizeof(foreignPriv),
                                     foreignPub,  sizeof(foreignPub));
 #endif
+
+        /* ---- AUDIT RSA-7: key decoders reject bytes after e / qInv and after the SEQUENCE ---- */
+        /* Both PKCS#1 decoders used to stop after the last INTEGER without checking that the    */
+        /* SEQUENCE, and the input after it, were exhausted. Variants of the foreign keys: one   */
+        /* trailing 0x00 after the SEQUENCE, and an extra INTEGER 0 (02 01 00) inside it with    */
+        /* the two-byte SEQUENCE length raised by 3. The unmodified keys still pass above.       */
+        {
+            static uint8_t pubX[sizeof(foreignPub) + 3u];
+            static uint8_t privX[sizeof(foreignPriv) + 3u];
+            uint16_t seqLen;
+
+            /* Trailing byte after the public-key SEQUENCE. */
+            memcpy(pubX, foreignPub, sizeof(foreignPub));
+            pubX[sizeof(foreignPub)] = 0x00u;
+            SSF_ASSERT(SSFRSAPubKeyIsValid(pubX, sizeof(foreignPub) + 1u) == false);
+            SSF_ASSERT(SSFRSAVerifyPKCS1(pubX, sizeof(foreignPub) + 1u, SSF_RSA_HASH_SHA256,
+                                         hashVal, sizeof(hashVal), foreignSig,
+                                         sizeof(foreignSig)) == false);
+
+            /* Extra INTEGER inside the public-key SEQUENCE after e. */
+            seqLen = (uint16_t)(((uint16_t)foreignPub[2] << 8) | foreignPub[3]);
+            seqLen = (uint16_t)(seqLen + 3u);
+            pubX[2] = (uint8_t)(seqLen >> 8);
+            pubX[3] = (uint8_t)(seqLen & 0xFFu);
+            pubX[sizeof(foreignPub)] = 0x02u;
+            pubX[sizeof(foreignPub) + 1u] = 0x01u;
+            pubX[sizeof(foreignPub) + 2u] = 0x00u;
+            SSF_ASSERT(SSFRSAPubKeyIsValid(pubX, sizeof(pubX)) == false);
+            SSF_ASSERT(SSFRSAVerifyPKCS1(pubX, sizeof(pubX), SSF_RSA_HASH_SHA256, hashVal,
+                                         sizeof(hashVal), foreignSig,
+                                         sizeof(foreignSig)) == false);
+
+            /* Trailing byte after the private-key SEQUENCE. */
+            memcpy(privX, foreignPriv, sizeof(foreignPriv));
+            privX[sizeof(foreignPriv)] = 0x00u;
+            SSF_ASSERT(SSFRSAPrivKeyIsValid(privX, sizeof(foreignPriv) + 1u) == false);
+            SSF_ASSERT(SSFRSASignPKCS1(privX, sizeof(foreignPriv) + 1u, SSF_RSA_HASH_SHA256,
+                                       hashVal, sizeof(hashVal), sig, sizeof(sig),
+                                       &sigLen) == false);
+
+            /* Extra INTEGER inside the private-key SEQUENCE after qInv. */
+            seqLen = (uint16_t)(((uint16_t)foreignPriv[2] << 8) | foreignPriv[3]);
+            seqLen = (uint16_t)(seqLen + 3u);
+            privX[2] = (uint8_t)(seqLen >> 8);
+            privX[3] = (uint8_t)(seqLen & 0xFFu);
+            privX[sizeof(foreignPriv)] = 0x02u;
+            privX[sizeof(foreignPriv) + 1u] = 0x01u;
+            privX[sizeof(foreignPriv) + 2u] = 0x00u;
+            SSF_ASSERT(SSFRSAPrivKeyIsValid(privX, sizeof(privX)) == false);
+            SSF_ASSERT(SSFRSASignPKCS1(privX, sizeof(privX), SSF_RSA_HASH_SHA256, hashVal,
+                                       sizeof(hashVal), sig, sizeof(sig), &sigLen) == false);
+        }
     }
 #endif /* SSF_RSA_CONFIG_ENABLE_PKCS1_V15 && SSF_RSA_CONFIG_ENABLE_2048 */
 

@@ -250,13 +250,17 @@ static bool _SSFRSAPubKeyDecode(const uint8_t *der, size_t derLen, SSFBN_t *n, S
     uint32_t nl;
     uint32_t el;
     uint16_t limbs;
+    SSFASN1Cursor_t after;
 
     cursor.buf = der;
     cursor.bufLen = (uint32_t)derLen;
 
-    if (!SSFASN1DecOpenConstructed(&cursor, SSF_ASN1_TAG_SEQUENCE, &inner, &next)) return false;
+    if (!SSFASN1DecOpenConstructed(&cursor, SSF_ASN1_TAG_SEQUENCE, &inner, &after)) return false;
     if (!SSFASN1DecGetInt(&inner, &nBuf, &nLen, &next)) return false;
     if (!SSFASN1DecGetInt(&next, &eBuf, &eLen, &next)) return false;
+
+    /* Strict DER: nothing may follow e inside the SEQUENCE, or the SEQUENCE itself (RSA-7). */
+    if ((!SSFASN1DecIsEmpty(&next)) || (!SSFASN1DecIsEmpty(&after))) return false;
 
     /* Strip ASN.1 INTEGER leading 0x00 sign byte; compute limbs from the trimmed length. */
     nb = nBuf;
@@ -365,11 +369,12 @@ static bool _SSFRSAPrivKeyDecode(const uint8_t *der, size_t derLen, SSFBN_t *n, 
     uint32_t bufLen;
     uint64_t version;
     uint16_t nl, hl;
+    SSFASN1Cursor_t after;
 
     cursor.buf = der;
     cursor.bufLen = (uint32_t)derLen;
 
-    if (!SSFASN1DecOpenConstructed(&cursor, SSF_ASN1_TAG_SEQUENCE, &inner, &next)) return false;
+    if (!SSFASN1DecOpenConstructed(&cursor, SSF_ASN1_TAG_SEQUENCE, &inner, &after)) return false;
 
     /* version */
     if (!SSFASN1DecGetIntU64(&inner, &version, &next)) return false;
@@ -418,6 +423,10 @@ static bool _SSFRSAPrivKeyDecode(const uint8_t *der, size_t derLen, SSFBN_t *n, 
     if (!_SSFRSADecIntToBN(&next, dp, hl, &next)) return false;
     if (!_SSFRSADecIntToBN(&next, dq, hl, &next)) return false;
     if (!_SSFRSADecIntToBN(&next, qInv, hl, &next)) return false;
+
+    /* Strict DER: version 0 has no otherPrimeInfos, so nothing may follow qInv inside the */
+    /* SEQUENCE, and nothing may follow the SEQUENCE itself (AUDIT RSA-7).                  */
+    if ((!SSFASN1DecIsEmpty(&next)) || (!SSFASN1DecIsEmpty(&after))) return false;
 
     *nLimbs = nl;
     return true;

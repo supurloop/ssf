@@ -165,7 +165,7 @@ RSA-6  Low  FIXED (2026-11-18)
              but verify does not). Not a forgery vector.
   Evidence:  1332  memcpy(em, &emFull[keyBytes - emLen], emLen);
 
-RSA-7  Low  OPEN
+RSA-7  Low  FIXED (2026-11-18)
   Location:  ssfrsa.c:257-259 (_SSFRSAPubKeyDecode)
   Problem:   No SSFASN1DecIsEmpty after e or after the outer SEQUENCE; trailing bytes are
              accepted (non-strict DER). No security impact.
@@ -1186,3 +1186,17 @@ CHANGE LOG
               invalid"). (openssl genrsa 2049 produced a 2048-bit key, hence the Python key.)
               RED: ssfrsa_ut.c:752 (SigHigh accepted). GREEN with ssfrsa (RSA unit test enabled
               for the run), ssfcms, ssfx509, ssfbase64url, ssfmatch.
+  2026-11-18  RSA-7 FIXED via option 1, in both decoders. _SSFRSAPubKeyDecode keeps the input
+              after the outer SEQUENCE in its own cursor (it was overwritten by the next GetInt)
+              and requires both it and the SEQUENCE remainder after e to be empty;
+              _SSFRSAPrivKeyDecode does the same after qInv (version 0 has no otherPrimeInfos).
+              ssfrsa.md now states strict decoding and that callers must pass the exact DER
+              length, not a padded buffer size. Test block "AUDIT RSA-7" in ssfrsa_ut.c uses the
+              OpenSSL-produced foreignPub / foreignPriv fixtures with a trailing 0x00 and with an
+              extra INTEGER 0 inside the SEQUENCE: PubKeyIsValid / VerifyPKCS1 and
+              PrivKeyIsValid / SignPKCS1 must all return false (the unmodified keys still verify
+              and sign byte-exactly in the existing block). RED: ssfrsa_ut.c:1438 (public key with
+              trailing byte accepted); with only the public-decoder fix applied, ssfrsa_ut.c:1459
+              (private key with trailing byte accepted). GREEN with ssfrsa (RSA unit test enabled
+              for the run), ssfcms and ssfx509 (RSA keys parsed from real certificates),
+              ssfbase64url, ssfmatch.

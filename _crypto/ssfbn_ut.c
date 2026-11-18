@@ -3081,6 +3081,38 @@ void SSFBNUnitTest(void)
         }
     }
 
+    /* ---- AUDIT BN-5: a^0 mod m is 1 mod m (0 when m == 1) on every exponentiation path ---- */
+    /* SSFBNModExpMontPub returned a literal 1 for e == 0, so with m == 1 it disagreed with the */
+    /* constant-time SSFBNModExp, which returns R mod 1 converted out, i.e. 0.                 */
+    {
+        SSFBNMONT_DEFINE(montOne, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(mOne, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(mSeven, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(base, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(eZero, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(r, SSF_BN_MAX_LIMBS);
+
+        SSFBNSetUint32(&mOne, 1u, 1u);
+        SSFBNSetUint32(&mSeven, 7u, 1u);
+        SSFBNSetUint32(&base, 5u, 1u);
+        SSFBNSetZero(&eZero, 1u);
+
+        /* m == 1: every path must give 0. */
+        SSFBNModExpPub(&r, &base, &eZero, &mOne);
+        SSF_ASSERT((r.len == 1u) && (r.limbs[0] == 0u));
+        SSFBNMontInit(&montOne, &mOne);
+        SSFBNModExpMontPub(&r, &base, &eZero, &montOne);
+        SSF_ASSERT((r.len == 1u) && (r.limbs[0] == 0u));
+        SSFBNModExp(&r, &base, &eZero, &mOne);
+        SSF_ASSERT((r.len == 1u) && (r.limbs[0] == 0u));
+
+        /* Control, m == 7: both paths give 1. */
+        SSFBNModExpPub(&r, &base, &eZero, &mSeven);
+        SSF_ASSERT((r.len == 1u) && (r.limbs[0] == 1u));
+        SSFBNModExp(&r, &base, &eZero, &mSeven);
+        SSF_ASSERT((r.len == 1u) && (r.limbs[0] == 1u));
+    }
+
     /* ---- AUDIT BN-4: Montgomery operands are used at their logical len, never stale limbs ---- */
     /* The Mont family processed ctx->len limbs of every operand, so limbs above a->len (left */
     /* over from an earlier, longer value) were silently folded in. ConvertIn now zero-extends */

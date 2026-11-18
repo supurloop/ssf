@@ -365,7 +365,7 @@ BN-4  Low  FIXED (2026-11-18)
   Evidence:  2012  SSF_REQUIRE(ctx->len <= a->cap);
              2013  SSF_REQUIRE(ctx->len <= b->cap);
 
-BN-5  Low  OPEN
+BN-5  Low  FIXED (2026-11-18)
   Location:  ssfbn.c:2435-2440 (SSFBNModExpMontPub)
   Problem:   e == 0 returns literal 1 without reducing mod m; for m == 1 the answer is 0 (the
              CT path SSFBNModExpMont returns 0).
@@ -1230,4 +1230,13 @@ CHANGE LOG
               ConvertOut with len 2, and ConvertIn with len 5, must trap. RED: ssfbn_ut.c:3119
               (round trip returned the junk-polluted value). GREEN with ssfbn, ssfec, ssfecdsa,
               ssfrsa, ssfprng (all modexp users enabled for the run), ssfcms, ssfx509,
+              ssfbase64url, ssfmatch.
+  2026-11-18  BN-5 FIXED via option 1. SSFBNModExpMontPub's e == 0 branch now returns 1 mod m:
+              it sets 1 and zeroes the result when the (public) modulus is 1, matching the
+              constant-time SSFBNModExpMont. ssfbn.md: SSFBNModExp's "e == 0 produces 1" now says
+              1 mod m (0 when m == 1), and the ModExpPub section states the same. Test block
+              "AUDIT BN-5" in ssfbn_ut.c: 5^0 mod 1 is 0 through SSFBNModExpPub, SSFBNModExpMontPub
+              and SSFBNModExp; control 5^0 mod 7 is 1 through ModExpPub and ModExp. RED:
+              ssfbn_ut.c:3102 (ModExpPub returned 1 for m == 1). GREEN with ssfbn and ssfrsa (the
+              only ModExpPub caller; BN/RSA unit tests enabled for the run), ssfcms, ssfx509,
               ssfbase64url, ssfmatch.

@@ -2467,8 +2467,15 @@ void SSFBNModExpMontPub(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SS
     /* Is the exponent zero? */
     if (eBits == 0u)
     {
-        /* Yes, a^0 = 1 by convention. */
+        /* Yes, a^0 mod m = 1 mod m, which matches SSFBNModExpMont (AUDIT BN-5). */
         SSFBNSetOne(r, ctx->len);
+
+        /* Is the modulus 1? (public value) */
+        if (SSFBNCmpUint32(&ctx->mod, 1u) == 0)
+        {
+            /* Yes, everything is 0 mod 1. */
+            SSFBNSetZero(r, ctx->len);
+        }
         return;
     }
 

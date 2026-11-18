@@ -800,15 +800,16 @@ DH key exchange, and `SSFBNModInv` (via Fermat) rely on for side-channel resista
   DH key refresh, the Miller-Rabin witness rounds).
 
 `a` should satisfy `a < m`. `e` is processed window-by-window up to the fixed window
-count; `e == 0` produces a result of `1` because every window is zero and `table[0] =
-Mont(1)`.
+count; `e == 0` produces `1 mod m` (so `0` when `m == 1`) because every window is zero and
+`table[0] = Mont(1)`.
 
 <a id="modexppub"></a>
 ```c
 void SSFBNModExpPub    (SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBN_t *m);
 void SSFBNModExpMontPub(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBNMont_t *ctx);
 ```
-Variable-time `r = aᵉ mod m` via left-to-right binary square-and-multiply: every iteration
+Variable-time `r = aᵉ mod m` via left-to-right binary square-and-multiply; like
+`SSFBNModExp`, `e == 0` gives `1 mod m` (`0` when `m == 1`). Every iteration
 squares; the multiply step runs only when the current bit of `e` is `1`. Typical 2–3×
 faster than `SSFBNModExp` for low-Hamming-weight exponents (e.g., RSA's `e = 65537 =
 0x10001` has only two set bits out of 17).

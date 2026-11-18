@@ -371,7 +371,7 @@ BN-5  Low  FIXED (2026-11-18)
              CT path SSFBNModExpMont returns 0).
   Evidence:  2435  if (eBits == 0u) { SSFBNSetOne(r, ctx->len); return; }
 
-BN-6  Low  OPEN
+BN-6  Low  FIXED (2026-11-18)
   Location:  ssfbn.c:884-953 (_SSFBNKaratsubaMul), step 7 at :938-945
   Problem:   Step 7 writes r[half + i] for i < n + 2, i.e. up to r[half + n + 1], which exceeds
              the 2n-limb result when n < 4. mid[n+1] is always 0 mathematically so the write is
@@ -1240,3 +1240,19 @@ CHANGE LOG
               ssfbn_ut.c:3102 (ModExpPub returned 1 for m == 1). GREEN with ssfbn and ssfrsa (the
               only ModExpPub caller; BN/RSA unit tests enabled for the run), ssfcms, ssfx509,
               ssfbase64url, ssfmatch.
+  2026-11-18  BN-6 FIXED via option 1. ssfbn.c now has #if SSF_BN_KARATSUBA_THRESHOLD < 4 ->
+              #error; with the existing n >= threshold REQUIRE, _SSFBNKaratsubaMul always sees
+              n >= 4, where step 7's last write r[half + n + 1] is inside the 2n-limb result.
+              Documented in _opt/ssfbn_opt.h and the ssfbn.md constants table. Defaults (32, and
+              16 in the MAX_PERF profile) are unaffected. Test block "AUDIT BN-6" in ssfbn_ut.c: a
+              2-limb multiply into an exactly 4-limb result against a Python product (schoolbook
+              at the default threshold; permanent regression for the exact-size case).
+              Evidence: RED, a standalone ASan program doing that multiply with
+              -DSSF_BN_KARATSUBA_THRESHOLD=2 reported stack-buffer-overflow in _SSFBNKaratsubaMul
+              (ssfbn.c:942, step 7). The same case inside the unit-test runner was not reported by
+              ASan (the local in the very large SSFBNUnitTest frame was evidently not
+              instrumented), so the runner is not evidence for this item. GREEN: ssfbn.c fails to
+              compile with threshold 2 (the new #error) and compiles with 4; an ASan n = 4
+              Karatsuba into an exact 8-limb result is clean and matches Python; default build
+              ssfbn and ssfrsa (BN/RSA unit tests enabled), ssfcms, ssfx509, ssfbase64url,
+              ssfmatch pass; a full build with threshold 4 also passes.

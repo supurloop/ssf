@@ -170,7 +170,7 @@ The `ssfrsa` and `ssfbn` modules sanity-check against this macro at compile time
 | <a id="ssf-bn-max-limbs"></a>`SSF_BN_MAX_LIMBS` | Constant | `SSF_BN_BITS_TO_LIMBS(SSF_BN_CONFIG_MAX_BITS)` — the maximum limb count any `SSFBN_t` may hold. |
 | <a id="ssf-bn-max-mod-limbs"></a>`SSF_BN_MAX_MOD_LIMBS` | Constant | Upper bound on `SSFBNMont_t::len` — the cap needed to hold a Montgomery residue mod `m`. See [Configuration](#configuration). |
 | `SSF_BN_MAX_BYTES` | Constant | `(SSF_BN_CONFIG_MAX_BITS + 7) / 8` — the maximum byte width for [serialization](#serialization). |
-| `SSF_BN_KARATSUBA_THRESHOLD` | Constant | `32` — limb count at or above which `SSFBNMul` dispatches to Karatsuba (same-size, even-length operands only); schoolbook is used below. |
+| `SSF_BN_KARATSUBA_THRESHOLD` | Constant | `32` — limb count at or above which `SSFBNMul` dispatches to Karatsuba (same-size, even-length operands only); schoolbook is used below. Must be `>= 4` (a smaller value is a compile-time `#error`: the Karatsuba step-7 add overruns the result for `n < 4`). |
 | `SSFBNLimb_t` | Typedef | `uint32_t` — the single-limb integer type. |
 | `SSFBNDLimb_t` | Typedef | `uint64_t` — the double-wide type used internally for carry propagation. |
 | <a id="ssfbn-t"></a>`SSFBN_t` | Struct | `{ SSFBNLimb_t *limbs; uint16_t len; uint16_t cap; }`. `limbs` points at caller-supplied limb storage in little-endian order (`limbs[0]` is least significant); `len` is the working limb count for the current operation (`1 ≤ len ≤ cap`); `cap` is the size of the storage in limbs. |

@@ -42,6 +42,12 @@
 
 /* SSF_BN_KARATSUBA_THRESHOLD and SSF_BN_MODEXP_WIN_K are configured in ssfbn_opt.h (or via the */
 /* SSF_CRYPT_CONFIG_PROFILE selector in ssfcrypt_opt.h).                                         */
+
+/* _SSFBNKaratsubaMul's step 7 writes r[n/2 .. n/2 + n + 1], inside the 2n-limb result only    */
+/* when n >= 4 (AUDIT BN-6). The dispatcher passes n >= threshold, so the threshold must be 4+. */
+#if SSF_BN_KARATSUBA_THRESHOLD < 4
+#error "SSF_BN_KARATSUBA_THRESHOLD must be >= 4 (Karatsuba step 7 overruns r for n < 4)"
+#endif
 #define SSF_BN_MODEXP_TBL_N        ((uint32_t)1u << SSF_BN_MODEXP_WIN_K)
 #define SSF_BN_NUM_SMALL_PRIMES    (sizeof(_ssfBNSmallPrimes) / sizeof(_ssfBNSmallPrimes[0]))
 

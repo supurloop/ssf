@@ -3081,6 +3081,28 @@ void SSFBNUnitTest(void)
         }
     }
 
+    /* ---- AUDIT BN-6: 2-limb multiply into an exactly 2n-limb result ---- */
+    /* _SSFBNKaratsubaMul's step 7 writes r[half + n + 1], one limb past a 2n-limb result when  */
+    /* n == 2. Karatsuba only sees n == 2 if SSF_BN_KARATSUBA_THRESHOLD <= 2, which ssfbn.c now */
+    /* rejects at compile time; this keeps the exact-size case covered (schoolbook at the      */
+    /* default threshold; ASan reported the overflow here with -DSSF_BN_KARATSUBA_THRESHOLD=2). */
+    {
+        SSFBN_DEFINE(a2, 2u);
+        SSFBN_DEFINE(b2, 2u);
+        SSFBN_DEFINE(prod4, 4u);
+
+        a2.len = 2u;
+        a2.limbs[0] = 0x01234567u;
+        a2.limbs[1] = 0x89ABCDEFu;
+        b2.len = 2u;
+        b2.limbs[0] = 0x76543210u;
+        b2.limbs[1] = 0xFEDCBA98u;
+        SSFBNMul(&prod4, &a2, &b2);
+        SSF_ASSERT(prod4.len == 4u);
+        SSF_ASSERT((prod4.limbs[0] == 0x358E7470u) && (prod4.limbs[1] == 0x09CA39E1u) &&
+                   (prod4.limbs[2] == 0xEDCA5E20u) && (prod4.limbs[3] == 0x890F2A50u));
+    }
+
     /* ---- AUDIT BN-5: a^0 mod m is 1 mod m (0 when m == 1) on every exponentiation path ---- */
     /* SSFBNModExpMontPub returned a literal 1 for e == 0, so with m == 1 it disagreed with the */
     /* constant-time SSFBNModExp, which returns R mod 1 converted out, i.e. 0.                 */

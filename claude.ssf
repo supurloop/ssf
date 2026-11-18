@@ -16,7 +16,7 @@ SSF module use DBC. All input parameters shall be checked against contact as app
 
 SSF shall following the coding and documentation style:
 - Function header comments in a block, shall be limited to 1 line of comment.
-- Non-trivial conditional statements shall be preceeded by a question that makes clear the purpose, the true clause comment shall start with 'Yes, ...', and the false clause commane shall start with 'No, ...'.
+- Non-trivial conditional statements shall be preceeded by a question that makes clear the purpose, the true clause comment shall start with 'Yes, ...', and the false clause comment shall start with 'No, ...'.
 - Other inline comments shall be limited to 1 line with not extra end of line padding.
 - ALL functions shall have comprehensive DBC assertions to check function parameters and invariants.
 - Initialization functions shall track module level or context level that it has been initialized before use.
@@ -24,9 +24,10 @@ SSF shall following the coding and documentation style:
 - Function arguments that are C string shall end with 'Str'.
 - Function arguments that are optional shall end with 'Opt'.
 - Function argument that indicate the size of a previous argument shall end with 'Size'
-- Function arguments that the lenght of a previous argument shall end with 'Len'.
+- Function arguments that the length of a previous argument shall end with 'Len'.
 - Buffers that have a variable size must pass the size along with the buffer pointer.
 - Multi-line comments that may be useful to callers of the API shall be put into the documentation file not the source code.
 - Non printable characters are not permitted in source or comments within any .c or .h file.
 - When making incremental changes to any module, they will made using a TDD (Test Driven Development) sequence.
 - No tabs, whitespace only, default 4 indent.
+- When an expression is non-trivial, (more than 1 expression to evaluate) each expression shall be enclosed in parentheses  even if not required by order of operations. This provides pedantic clarity.

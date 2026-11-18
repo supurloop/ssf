@@ -423,7 +423,7 @@ BN-9  Low  OPEN (doc only, conservative direction)
 ssfaesgcm
 ----------------------------------------------------------------------------------------------
 
-GCM-1  Medium  OPEN  [verified]
+GCM-1  Medium  FIXED (2026-11-18)  [verified]
   Location:  ssfaesgcm.c:499 and :508 (SSFAESGCMDecrypt)
   Problem:   In-place decrypt (pt == ct) always fails authentication. GCTR writes the plaintext
              into pt BEFORE GHASH is computed over ct; when they alias, GHASH is taken over
@@ -439,7 +439,7 @@ GCM-1  Medium  OPEN  [verified]
   Evidence:  499  _SSFAESGCMGCTR(ct, ctLen, &ks, j1, sizeof(j1), pt, ptSize);
              508  _SSFAESGCMGHASH(ct, ctLen, h, sizeof(h), s, sizeof(s));
 
-GCM-2  Low  OPEN
+GCM-2  Low  FIXED (2026-11-18)
   Location:  ssfaesgcm.c:349 (_SSFAESGCMGCTR), reached from :438, :511 and in-place encrypt
   Problem:   memcpy(out, in, inLen) executes with in == out on every tag encryption
              (_SSFAESGCMGCTR(s, ..., s, ...)) and on in-place encrypt. Overlapping memcpy is UB
@@ -903,3 +903,19 @@ CHANGE LOG
               squares and 25 valid y (15 rejected, 10 wrong x before the fix, all 25 correct
               after), fewer than the 292 / 165 reported above; the original counts were not
               re-derived.
+  2026-11-18  GCM-1 FIXED via option 1 (authenticate before decrypt) and GCM-2 FIXED with it.
+              SSFAESGCMDecrypt now computes GHASH over auth || ct || lengths and the tag, compares
+              in constant time, and runs GCTR into pt only on a match; on mismatch it still zeroes
+              pt[0..ctLen-1] and returns false (with pt == ct that also wipes ct). In-place decrypt
+              now works and unverified plaintext is never written. _SSFAESGCMGCTR skips its
+              memcpy(out, in) when in == out. ssfaesgcm.md updated: verify-then-decrypt order and
+              explicit in-place support for Encrypt and Decrypt (partial overlap unsupported).
+              Test block "AUDIT GCM-1/GCM-2" in ssfaesgcm_ut.c: in-place round trip with a 12-byte
+              and a 13-byte IV (37 bytes, 7-byte AAD), in-place tampered tag -> false and buffer
+              zeroed, separate-buffer tampered tag -> false and pt zeroed. RED: assertion at
+              ssfaesgcm_ut.c:3666 (in-place decrypt returned false). GREEN after the fix with
+              ssfaesgcm, ssftls, ssfcms, ssfx509, ssfbase64url and ssfmatch passing. GCM-2 has no
+              red evidence: an ASan build reports nothing because ASan's memcpy overlap check
+              deliberately skips to == from. Same Linux gcc build as X-1;
+              SSF_CONFIG_AESGCM_UNIT_TEST and SSF_CONFIG_TLS_UNIT_TEST flipped to 1 for the runs
+              and restored to 0.

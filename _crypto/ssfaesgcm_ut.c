@@ -3635,6 +3635,69 @@ void SSFAESGCMUnitTest(void)
         SSF_ASSERT(SSFAESGCMDecrypt(rtCt, 16, rtIv8, 8, NULL, 0, rtKey, 16, rtTag, 16, rtDec, 16) == false);
     }
 
+    /* ---- AUDIT GCM-1/GCM-2: in-place decrypt (pt == ct) must authenticate and decrypt.     */
+    /* GCM-1: GCTR used to write plaintext into pt before GHASH read ct, so in-place decrypt  */
+    /* always failed and zeroed the buffer. GCM-2: GCTR copied in to out with memcpy even     */
+    /* when in == out (overlapping memcpy is UB; ASan reports memcpy-param-overlap).          */
+    {
+        uint8_t ref[37];
+        uint8_t buf[37];
+        uint8_t sep[37];
+        uint8_t zero[37];
+        uint8_t ipTag[16];
+        uint8_t ipKey[16];
+        uint8_t ipIv[12];
+        uint8_t ipIv13[13];
+        uint8_t ipAad[7];
+        uint8_t k;
+
+        for (k = 0; k < (uint8_t)sizeof(ref); k++) ref[k] = (uint8_t)(0x30u + k);
+        for (k = 0; k < (uint8_t)sizeof(ipKey); k++) ipKey[k] = (uint8_t)(0xA0u + k);
+        for (k = 0; k < (uint8_t)sizeof(ipIv); k++) ipIv[k] = (uint8_t)(0x10u + k);
+        for (k = 0; k < (uint8_t)sizeof(ipIv13); k++) ipIv13[k] = (uint8_t)(0x50u + k);
+        for (k = 0; k < (uint8_t)sizeof(ipAad); k++) ipAad[k] = (uint8_t)(0x70u + k);
+        memset(zero, 0, sizeof(zero));
+
+        /* 12-byte IV: encrypt in place, then decrypt in place. */
+        memcpy(buf, ref, sizeof(buf));
+        SSFAESGCMEncrypt(buf, sizeof(buf), ipIv, sizeof(ipIv), ipAad, sizeof(ipAad), ipKey,
+                         sizeof(ipKey), ipTag, sizeof(ipTag), buf, sizeof(buf));
+        SSF_ASSERT(memcmp(buf, ref, sizeof(buf)) != 0);
+        SSF_ASSERT(SSFAESGCMDecrypt(buf, sizeof(buf), ipIv, sizeof(ipIv), ipAad, sizeof(ipAad),
+                                    ipKey, sizeof(ipKey), ipTag, sizeof(ipTag), buf,
+                                    sizeof(buf)) == true);
+        SSF_ASSERT(memcmp(buf, ref, sizeof(buf)) == 0);
+
+        /* 13-byte IV (GHASH-derived J0): encrypt in place, then decrypt in place. */
+        memcpy(buf, ref, sizeof(buf));
+        SSFAESGCMEncrypt(buf, sizeof(buf), ipIv13, sizeof(ipIv13), ipAad, sizeof(ipAad), ipKey,
+                         sizeof(ipKey), ipTag, sizeof(ipTag), buf, sizeof(buf));
+        SSF_ASSERT(SSFAESGCMDecrypt(buf, sizeof(buf), ipIv13, sizeof(ipIv13), ipAad,
+                                    sizeof(ipAad), ipKey, sizeof(ipKey), ipTag, sizeof(ipTag),
+                                    buf, sizeof(buf)) == true);
+        SSF_ASSERT(memcmp(buf, ref, sizeof(buf)) == 0);
+
+        /* Tampered tag, in place: false and the buffer is zeroed. */
+        memcpy(buf, ref, sizeof(buf));
+        SSFAESGCMEncrypt(buf, sizeof(buf), ipIv, sizeof(ipIv), ipAad, sizeof(ipAad), ipKey,
+                         sizeof(ipKey), ipTag, sizeof(ipTag), buf, sizeof(buf));
+        ipTag[0] ^= 0x01u;
+        SSF_ASSERT(SSFAESGCMDecrypt(buf, sizeof(buf), ipIv, sizeof(ipIv), ipAad, sizeof(ipAad),
+                                    ipKey, sizeof(ipKey), ipTag, sizeof(ipTag), buf,
+                                    sizeof(buf)) == false);
+        SSF_ASSERT(memcmp(buf, zero, sizeof(buf)) == 0);
+
+        /* Tampered tag, separate buffers: false and pt is zeroed (documented contract). */
+        SSFAESGCMEncrypt(ref, sizeof(ref), ipIv, sizeof(ipIv), ipAad, sizeof(ipAad), ipKey,
+                         sizeof(ipKey), ipTag, sizeof(ipTag), buf, sizeof(buf));
+        ipTag[0] ^= 0x01u;
+        memset(sep, 0xEEu, sizeof(sep));
+        SSF_ASSERT(SSFAESGCMDecrypt(buf, sizeof(buf), ipIv, sizeof(ipIv), ipAad, sizeof(ipAad),
+                                    ipKey, sizeof(ipKey), ipTag, sizeof(ipTag), sep,
+                                    sizeof(sep)) == false);
+        SSF_ASSERT(memcmp(sep, zero, sizeof(sep)) == 0);
+    }
+
 #if SSF_AESGCM_OSSL_VERIFY == 1
     _VerifyAESGCMAgainstOpenSSLRandom();
 #endif

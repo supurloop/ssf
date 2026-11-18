@@ -346,7 +346,14 @@ static void _SSFAESGCMGCTR(const uint8_t *in, size_t inLen, const SSFAESKeySched
     SSF_REQUIRE(inLen <= outSize);
 
     memcpy(cb, icb, sizeof(cb));
-    memcpy(out, in, inLen);
+
+    /* Are in and out different buffers? (memcpy with in == out is UB, C11 7.24.2.1; GCM-2) */
+    if (in != out)
+    {
+        /* Yes, copy the input to the output; the keystream is XORed into out below. */
+        memcpy(out, in, inLen);
+    }
+    /* No, in place; out already holds the input. */
 
     n = inLen & ~(size_t)0xFu;
     for (i = 0; i < n; i += 16u)
@@ -492,13 +499,8 @@ bool SSFAESGCMDecrypt(const uint8_t *ct, size_t ctLen, const uint8_t *iv, size_t
     memcpy(j1, j0, sizeof(j1));
     _SSFAESGCMBlockInc32(j1);
 
-    /* Is there ciphertext to decrypt? (skip GCTR when ctLen == 0 / GMAC-only use.) */
-    if (ctLen > 0u)
-    {
-        /* Yes, decrypt under counter J_1. */
-        _SSFAESGCMGCTR(ct, ctLen, &ks, j1, sizeof(j1), pt, ptSize);
-    }
-
+    /* Authenticate before decrypting (AUDIT GCM-1): GHASH reads ct, so it must run before   */
+    /* GCTR writes pt, which may alias ct. This also never releases unverified plaintext.    */
     t = ((uint64_t)authLen) << 3;
     SSF_PUTU64BE(buf, t);
     t = ((uint64_t)ctLen) << 3;
@@ -510,16 +512,25 @@ bool SSFAESGCMDecrypt(const uint8_t *ct, size_t ctLen, const uint8_t *iv, size_t
 
     _SSFAESGCMGCTR(s, sizeof(s), &ks, j0, sizeof(j0), s, sizeof(s));
 
-    SSFAESKeyScheduleDeInit(&ks);
-
     /* Did the tags differ? (constant-time compare) */
     if (SSFCryptCTMemEq(s, tag, tagLen) == false)
     {
         /* Yes, authentication failed; zero the plaintext. */
+        SSFAESKeyScheduleDeInit(&ks);
         if (ctLen > 0u) memset(pt, 0, ctLen);
         return false;
     }
-    /* No, tags match; return success. */
+
+    /* No, tags match. */
+
+    /* Is there ciphertext to decrypt? (skip GCTR when ctLen == 0 / GMAC-only use.) */
+    if (ctLen > 0u)
+    {
+        /* Yes, decrypt under counter J_1. */
+        _SSFAESGCMGCTR(ct, ctLen, &ks, j1, sizeof(j1), pt, ptSize);
+    }
+
+    SSFAESKeyScheduleDeInit(&ks);
     return true;
 }
 

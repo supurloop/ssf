@@ -37,11 +37,14 @@ for any unused field.
   fall back only when the protocol mandates a shorter tag.
 - `ptLen` (Encrypt) and `ctLen` (Decrypt) are capped at `512 MiB` (2²⁹) per call, mirroring
   [`ssfchacha20`](ssfchacha20.md). The cap is enforced by `SSF_REQUIRE`.
-- `SSFAESGCMDecrypt()` decrypts ciphertext into `pt` and then verifies the authentication
-  tag. On tag-verify failure it returns `false` **and** memsets `pt[0..ctLen-1]` to zero
-  before returning, so a buggy caller that forgets to check the return value cannot ship
-  unauthenticated plaintext. Still, the correct usage is to always check the return value
-  and treat the output buffer as invalid when `false` is returned.
+- `SSFAESGCMDecrypt()` verifies the authentication tag over `ct` first and decrypts into `pt`
+  only when the tag matches, so unverified plaintext is never written. On tag-verify failure it
+  returns `false` **and** memsets `pt[0..ctLen-1]` to zero before returning (when `pt == ct`
+  this also wipes the ciphertext), so a buggy caller that forgets to check the return value
+  cannot ship unauthenticated plaintext. Still, the correct usage is to always check the return
+  value and treat the output buffer as invalid when `false` is returned.
+- Both `SSFAESGCMEncrypt()` and `SSFAESGCMDecrypt()` may be called in place (`ct == pt`).
+  Partially overlapping (non-identical) input and output buffers are not supported.
 - A common embedded IV strategy is to concatenate an 8-byte device EUI-64 with a 4-byte
   big-endian frame counter that increments monotonically.
 - Each `SSFAESGCMEncrypt()` / `SSFAESGCMDecrypt()` call expands the AES key schedule once and

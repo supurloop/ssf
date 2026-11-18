@@ -769,7 +769,7 @@ CMS-4  Low  FIXED (2026-11-18)
 ssfsha1, ssfsha2, ssfhmac, ssfhkdf
 ----------------------------------------------------------------------------------------------
 
-SHA1-1  Low  OPEN
+SHA1-1  Low  FIXED (2026-11-18)
   Location:  ssfsha1.c:210-250 (SSFSHA1Begin/Update/End); ssfsha1.h:54-60; ssfsha1.md:38-39
   Problem:   Unlike ssfsha2, the context has no validity marker, so the documented "context is
              invalid after End" contract is not enforced. Update/End on a never-Begun or
@@ -1477,3 +1477,16 @@ CHANGE LOG
               RED: ssfsha2_ut.c:911 (high length word stayed zero). GREEN on x86-64 with SHA2,
               HMAC, HKDF, TLS, ECDSA, RSA, Ed25519 (11 suites) and on big-endian MIPS under
               qemu-mips with SHA2, HMAC, HKDF, TLS, Ed25519 (9 suites). No line over 100 columns.
+  2026-11-18  SHA1-1 FIXED via option 1, with the length check folded in. SSFSHA1Context_t gains
+              uint32_t magic (SSF_SHA1_CONTEXT_MAGIC), set by SSFSHA1Begin and cleared by End's
+              existing SSFCryptSecureZero; SSFSHA1Update and SSFSHA1End SSF_REQUIRE it, matching
+              ssfsha2 / ssfhmac / ssfpoly1305 (claude.ssf: initialization is tracked before use).
+              Update also SSF_REQUIREs that totalLen stays <= 2^61 - 1 bytes (FIPS 180-4: < 2^64
+              bits), the SHA-1 counterpart of SHA2-1. Begin on an active context stays allowed, as
+              in ssfsha2. ssfsha1.md documents both. Test block "AUDIT SHA1-1" in ssfsha1_ut.c:
+              Update and End on a never-begun context trap; a second End and an Update after End
+              trap; a context forced to 2^61 - 2 bytes traps on a 3-byte Update and accepts a
+              1-byte one. RED: ssfsha1_ut.c:301 (Update on a never-begun context did not trap).
+              GREEN: ssfsha1 (FIPS / RFC 3174 vectors) and ssfhmac (RFC 2202 HMAC-SHA-1), with
+              their unit tests enabled for the run, plus ssfcms, ssfx509, ssfbase64url, ssfmatch.
+              One-line comments, no line over 100 columns.

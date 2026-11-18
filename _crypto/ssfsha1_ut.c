@@ -291,6 +291,30 @@ void SSFSHA1UnitTest(void)
         }
     }
 
+    /* ---- AUDIT SHA1-1: the context tracks Begin; misuse traps instead of a bogus digest ---- */
+    {
+        SSFSHA1Context_t ctx;
+        uint8_t out[SSF_SHA1_HASH_SIZE];
+
+        /* Never begun: Update and End must trap. */
+        memset(&ctx, 0, sizeof(ctx));
+        SSF_ASSERT_TEST(SSFSHA1Update(&ctx, (const uint8_t *)"abc", 3u));
+        SSF_ASSERT_TEST(SSFSHA1End(&ctx, out));
+
+        /* After End the context is invalid: a second End or an Update must trap. */
+        SSFSHA1Begin(&ctx);
+        SSFSHA1Update(&ctx, (const uint8_t *)"abc", 3u);
+        SSFSHA1End(&ctx, out);
+        SSF_ASSERT_TEST(SSFSHA1End(&ctx, out));
+        SSF_ASSERT_TEST(SSFSHA1Update(&ctx, (const uint8_t *)"abc", 3u));
+
+        /* FIPS 180-4 caps SHA-1 below 2^64 bits (2^61 bytes): crossing it traps, not wraps. */
+        SSFSHA1Begin(&ctx);
+        ctx.totalLen = (((uint64_t)1u) << 61) - 2u;
+        SSF_ASSERT_TEST(SSFSHA1Update(&ctx, (const uint8_t *)"abc", 3u));
+        SSFSHA1Update(&ctx, (const uint8_t *)"a", 1u);       /* reaches 2^61 - 1: allowed */
+    }
+
 #if SSF_SHA1_OSSL_VERIFY == 1
     _VerifySHA1AgainstOpenSSLRandom();
 #endif

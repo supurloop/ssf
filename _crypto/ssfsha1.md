@@ -37,7 +37,11 @@ whenever the protocol you are implementing allows a choice of hash.
   `state[]` and last partial block can hold secret-derived data (e.g. the long-key pre-hash path
   of HMAC-SHA-1). The context is therefore single-use per `Begin`/`End` cycle: after
   `SSFSHA1End()` it is zeroed and invalid; call `SSFSHA1Begin()` again before reuse. This matches
-  the SHA-2 finalizers ([`ssfsha2`](ssfsha2.md)).
+  the SHA-2 finalizers ([`ssfsha2`](ssfsha2.md)). The context carries a validity marker set by
+  `SSFSHA1Begin()` and cleared by that wipe, so `SSFSHA1Update()` or `SSFSHA1End()` on a context
+  that was never begun or has already ended is an `SSF_REQUIRE` failure, not a bogus digest.
+- FIPS 180-4 limits SHA-1 messages to fewer than 2⁶⁴ bits; an `SSFSHA1Update()` that would take
+  the total past 2⁶¹ − 1 bytes is an `SSF_REQUIRE` failure rather than a silent length wrap.
 - `SSFSHA1Context_t` should be treated as opaque; do not access its members directly.
 - The one-shot `SSFSHA1()` function and `SSFSHA1Update()` accept `in == NULL` only when
   `inLen == 0`. All other pointer parameters must be non-`NULL`.

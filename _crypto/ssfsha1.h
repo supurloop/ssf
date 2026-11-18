@@ -57,6 +57,7 @@ typedef struct SSFSHA1Context
     uint64_t totalLen;                          /* Total bytes processed */
     uint8_t block[SSF_SHA1_BLOCK_SIZE];         /* Partial block accumulator */
     uint32_t blockLen;                          /* Bytes in partial block */
+    uint32_t magic;                             /* Context validity marker (AUDIT SHA1-1) */
 } SSFSHA1Context_t;
 
 /* --------------------------------------------------------------------------------------------- */

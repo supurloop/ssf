@@ -26,6 +26,7 @@ X.509 v3 certificate support per RFC 5280, built on [`ssfasn1`](ssfasn1.md):
 - [`ssfport.h`](../ssfport.h)
 - [`ssfasn1`](ssfasn1.md) — DER decoding and encoding
 - [`ssfmatch`](ssfmatch.md) — case-insensitive hostname comparison
+- [`ssfstr`](ssfstr.md) — bounded C-string length for every name the API receives as a string
 - [`ssfsha2`](../_crypto/ssfsha2.md) — SHA-256 / SHA-384 / SHA-512 TBS digests for signature verification
 - [`ssfecdsa`](../_crypto/ssfecdsa.md) — ECDSA signature verification over P-256 / P-384
 - [`ssfrsa`](../_crypto/ssfrsa.md) — RSA PKCS#1 v1.5 and RSA-PSS signature verification
@@ -45,6 +46,10 @@ X.509 v3 certificate support per RFC 5280, built on [`ssfasn1`](ssfasn1.md):
   Name attribute over its RFC 5280 Appendix A upper bound (CN, O, OU 64 characters; ST, L 128;
   C exactly 2), any `dNSName` over 253 octets, and any key identifier over 64 octets (the longest
   RFC 7093 method, SHA-512). Values are emitted as `UTF8String` regardless of attribute type.
+  String lengths are measured with a bounded scan of at most the limit plus one byte, so an
+  over-long or unterminated value is refused without reading past its bound; the same bound caps
+  the `hostnameStr` scan in [`SSFX509VerifyChain()`](#ssfx509verifychain), where a hostname over
+  253 characters simply never matches.
 - **Distinguished Names.** Only CN, O, OU, C, ST, and L are extracted into named fields. When an
   attribute repeats, the last occurrence wins. Attributes whose value is not one of the six
   DirectoryString types (for example an INTEGER `serialNumber`) are skipped rather than failing
@@ -132,19 +137,20 @@ X.509 v3 certificate support per RFC 5280, built on [`ssfasn1`](ssfasn1.md):
   `ecdsa-with-SHA384` with P-256 or P-384 keys; `sha256WithRSAEncryption`,
   `sha384WithRSAEncryption`, `sha512WithRSAEncryption`; `id-RSASSA-PSS` with SHA-256, SHA-384, or
   SHA-512 parameters; and `id-Ed25519`. Any other algorithm fails verification. RSA-PSS is
-  verified with the salt length equal to the hash length and MGF1 over the same hash, which is
-  what RFC 4055 recommends and what CAs issue in practice; a certificate using another salt
-  length fails to verify. Absent PSS parameters select SHA-1 per RFC 4055, which this module does
-  not support, so such certificates also fail to verify.
+  verified with the `saltLength` declared in the certificate's PSS parameters, or 20 when the
+  field is absent, since RFC 4055 declares `DEFAULT 20` and DER omits default values (OpenSSL
+  writes salt-20 certificates this way). Salt lengths above the hash length are rejected, and
+  MGF1 over the same hash is assumed. Absent PSS parameters select SHA-1 per RFC 4055, which this
+  module does not support, so such certificates fail to verify.
 - **Generation uses measure-then-write.** Call [`SSFX509EncodeTBS()`](#ssfx509encodetbs) or
-  [`SSFX509EncodeCert()`](#ssfx509encodecert) with `buf == NULL` to learn the exact size, then
-  again with a buffer. The usual flow is: encode the TBS, sign those exact bytes with
+  [`SSFX509EncodeCert()`](#ssfx509encodecert) with `bufOpt == NULL` to learn the exact size in
+  `*lenOut`, then again with a buffer. The usual flow is: encode the TBS, sign those exact bytes with
   [`ssfecdsa`](../_crypto/ssfecdsa.md) / [`ssfrsa`](../_crypto/ssfrsa.md) /
   [`ssfed25519`](../_crypto/ssfed25519.md), then encode the Certificate with that signature.
   `SSFX509EncodeCert()` re-encodes the TBS internally, so the same `params` must be passed to
   both calls. The write pass emits every element directly into the caller's buffer, header first
   using the measured content length, and asserts that the bytes written equal the bytes measured,
-  so a non-zero return is always a complete, well-formed encoding of exactly that length.
+  so a `true` return always leaves a complete, well-formed encoding of exactly `*lenOut` bytes.
 - **Generation parameters.** String fields in [`SSFX509GenName_t`](#type-genname) that are `NULL`
   are omitted from the Name. `sanDNSNames`, `sanIPAddrs`, and the four `nc*` arrays are
   `NULL`-terminated pointer arrays and may themselves be `NULL` when empty. `sanIPAddrs` entries
@@ -246,8 +252,8 @@ The unit-test entry point is gated by `SSF_CONFIG_X509_UNIT_TEST` in `ssfport.h`
 
 | | Function | Description |
 |---|----------|-------------|
-| [e.g.](#ex-generate) | [`uint32_t SSFX509EncodeTBS(buf, bufSize, params)`](#ssfx509encodetbs) | Encode a TBSCertificate; `buf == NULL` measures |
-| [e.g.](#ex-generate) | [`uint32_t SSFX509EncodeCert(buf, bufSize, params, signature, signatureLen)`](#ssfx509encodecert) | Encode a complete Certificate around a precomputed signature |
+| [e.g.](#ex-generate) | [`bool SSFX509EncodeTBS(bufOpt, bufOptSize, params, lenOut)`](#ssfx509encodetbs) | Encode a TBSCertificate; `bufOpt == NULL` measures |
+| [e.g.](#ex-generate) | [`bool SSFX509EncodeCert(bufOpt, bufOptSize, params, signature, signatureLen, lenOut)`](#ssfx509encodecert) | Encode a complete Certificate around a precomputed signature |
 
 <a id="functions-verify"></a>
 
@@ -256,9 +262,9 @@ The unit-test entry point is gated by `SSF_CONFIG_X509_UNIT_TEST` in `ssfport.h`
 | | Function | Description |
 |---|----------|-------------|
 | [e.g.](#ex-verify-sig) | [`bool SSFX509VerifyCertSignature(cert, issuer)`](#ssfx509verifycertsignature) | Verify `cert`'s signature with `issuer`'s public key |
-| [e.g.](#ex-verify-chain) | [`bool SSFX509VerifyChain(chainDer, chainDerLen, chainLen, trustDer, trustDerLen, trustCount, hostname, nowUnixSec)`](#ssfx509verifychain) | Full RFC 5280 path validation plus hostname match |
-| [e.g.](#ex-trace) | [`void SSFX509SetTraceCtx(fn, userCtx)`](#ssfx509settracectx) | Install the diagnostic trace callback |
-| | [`bool SSFX509MatchIPAddress(hostname, sanIP, sanIPLen)`](#ssfx509matchipaddress) | Match a dotted-decimal IPv4 string against an `iPAddress` SAN |
+| [e.g.](#ex-verify-chain) | [`bool SSFX509VerifyChain(chainDer, chainDerLen, chainLen, trustDer, trustDerLen, trustCount, hostnameStr, nowUnixSec)`](#ssfx509verifychain) | Full RFC 5280 path validation plus hostname match |
+| [e.g.](#ex-trace) | [`void SSFX509SetTraceCtx(fnOpt, userCtxOpt)`](#ssfx509settracectx) | Install the diagnostic trace callback |
+| | [`bool SSFX509MatchIPAddress(hostnameStr, sanIP, sanIPLen)`](#ssfx509matchipaddress) | Match a dotted-decimal IPv4 string against an `iPAddress` SAN |
 | | [`bool SSFX509CheckSKIDAKID(cert, issuer)`](#ssfx509checkskidakid) | AKID / SKID consistency between a cert and its issuer |
 
 <a id="function-reference"></a>
@@ -362,7 +368,8 @@ algorithm is `id-RSASSA-PSS`; the hash is carried in `sigAlgParams`, which
 ### [↑](#functions-gen) [`uint32_t SSFX509EncodeTBS()`](#functions-gen)
 
 ```c
-uint32_t SSFX509EncodeTBS(uint8_t *buf, uint32_t bufSize, const SSFX509GenParams_t *params);
+bool SSFX509EncodeTBS(uint8_t *bufOpt, uint32_t bufOptSize, const SSFX509GenParams_t *params,
+                      uint32_t *lenOut);
 ```
 
 Encodes a TBSCertificate SEQUENCE from `params`: version (omitted for v1), serial, signature
@@ -372,15 +379,15 @@ SAN, SKID, AKID, the raw extension, and Name Constraints are enabled in `params`
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
-| `buf` | out (opt) | `uint8_t *` | Output buffer, or `NULL` to measure. |
-| `bufSize` | in | `uint32_t` | Size of `buf` in bytes; ignored when `buf` is `NULL`. |
+| `bufOpt` | out (opt) | `uint8_t *` | Output buffer, or `NULL` to measure. |
+| `bufOptSize` | in | `uint32_t` | Size of `bufOpt` in bytes; must be `0` when `bufOpt` is `NULL`. |
 | `params` | in | `const SSFX509GenParams_t *` | Generation parameters. Must not be `NULL`. |
+| `lenOut` | out | `uint32_t *` | Receives the bytes written, or the bytes required when measuring; `0` on `false`. Must not be `NULL`. |
 
-**Returns:** The number of bytes written (or, when `buf == NULL`, the number of bytes required).
-Returns `0` if `bufSize` is too small, the encoding would exceed `SSF_X509_CONFIG_MAX_CERT_SIZE`,
-or an input exceeds one of the generation bounds listed under [Limitations](#limitations). A
-non-zero return is always the complete encoding; nothing is written on a `0` return beyond what
-`bufSize` allowed.
+**Returns:** `true` with `*lenOut` set on success. `false` if `bufOptSize` is too small, the
+encoding would exceed `SSF_X509_CONFIG_MAX_CERT_SIZE`, or an input exceeds one of the generation
+bounds listed under [Limitations](#limitations). A `true` return is always the complete encoding;
+nothing is written past `bufOptSize` on `false`.
 
 ---
 
@@ -389,8 +396,8 @@ non-zero return is always the complete encoding; nothing is written on a `0` ret
 ### [↑](#functions-gen) [`uint32_t SSFX509EncodeCert()`](#functions-gen)
 
 ```c
-uint32_t SSFX509EncodeCert(uint8_t *buf, uint32_t bufSize, const SSFX509GenParams_t *params,
-                           const uint8_t *signature, uint32_t signatureLen);
+bool SSFX509EncodeCert(uint8_t *bufOpt, uint32_t bufOptSize, const SSFX509GenParams_t *params,
+                       const uint8_t *signature, uint32_t signatureLen, uint32_t *lenOut);
 ```
 
 Encodes a complete Certificate: `SEQUENCE { tbsCertificate, signatureAlgorithm, signatureValue }`.
@@ -399,15 +406,16 @@ and `params->sigAlgParams`, and `signature` is wrapped in a BIT STRING with zero
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
-| `buf` | out (opt) | `uint8_t *` | Output buffer, or `NULL` to measure. |
-| `bufSize` | in | `uint32_t` | Size of `buf` in bytes; ignored when `buf` is `NULL`. |
+| `bufOpt` | out (opt) | `uint8_t *` | Output buffer, or `NULL` to measure. |
+| `bufOptSize` | in | `uint32_t` | Size of `bufOpt` in bytes; must be `0` when `bufOpt` is `NULL`. |
 | `params` | in | `const SSFX509GenParams_t *` | The same parameters used to encode the signed TBS. Must not be `NULL`. |
 | `signature` | in | `const uint8_t *` | Signature over the TBS bytes, already in the algorithm's wire form (DER `ECDSA-Sig-Value` for ECDSA, raw octets for RSA and Ed25519). Must not be `NULL`. |
 | `signatureLen` | in | `uint32_t` | Length of `signature`. |
+| `lenOut` | out | `uint32_t *` | Receives the bytes written, or the bytes required when measuring; `0` on `false`. Must not be `NULL`. |
 
-**Returns:** The number of bytes written (or required when `buf == NULL`); `0` if `bufSize` is too
-small, the result would exceed `SSF_X509_CONFIG_MAX_CERT_SIZE`, or `params` fails a generation
-bound. A non-zero return is always the complete encoding.
+**Returns:** `true` with `*lenOut` set on success; `false` if `bufOptSize` is too small, the result
+would exceed `SSF_X509_CONFIG_MAX_CERT_SIZE`, or `params` fails a generation bound. A `true`
+return is always the complete encoding.
 
 <a id="ex-generate"></a>
 
@@ -423,7 +431,8 @@ uint8_t cert[SSF_X509_CONFIG_MAX_CERT_SIZE];
 uint8_t hash[SSF_SHA2_256_BYTE_SIZE];
 uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
 size_t sigLen;
-uint32_t tbsLen, certLen;
+uint32_t tbsLen;
+uint32_t certLen;
 
 memset(&p, 0, sizeof(p));
 p.version = 2;                                 /* v3 */
@@ -439,8 +448,8 @@ p.addKeyUsage = true;           p.keyUsageBits = SSF_X509_KU_DIGITAL_SIGNATURE;
 p.addExtKeyUsage = true;        p.ekuServerAuth = true;
 p.sanDNSNames = sans;
 
-tbsLen = SSFX509EncodeTBS(tbs, sizeof(tbs), &p);
-if (tbsLen == 0) { /* params too large for SSF_X509_CONFIG_MAX_CERT_SIZE */ }
+if (!SSFX509EncodeTBS(tbs, sizeof(tbs), &p, &tbsLen))
+{ /* params too large for SSF_X509_CONFIG_MAX_CERT_SIZE or over a generation bound */ }
 
 /* Hash the exact TBS bytes with SHA-256 (matching ecdsa-with-SHA256) and sign the digest;  */
 /* ssfecdsa emits the DER ECDSA-Sig-Value that X.509 expects in signatureValue.             */
@@ -448,8 +457,10 @@ SSFSHA256(tbs, tbsLen, hash, sizeof(hash));
 if (!SSFECDSASign(SSF_EC_CURVE_P256, priv, privLen, hash, sizeof(hash), sig, sizeof(sig), &sigLen))
 { /* signing failed */ }
 
-certLen = SSFX509EncodeCert(cert, sizeof(cert), &p, sig, (uint32_t)sigLen);
-/* cert[0..certLen) is a self-signed DER certificate */
+if (SSFX509EncodeCert(cert, sizeof(cert), &p, sig, (uint32_t)sigLen, &certLen))
+{
+    /* cert[0..certLen) is a self-signed DER certificate */
+}
 ```
 
 ---
@@ -498,10 +509,10 @@ bool SSFX509VerifyChain(const uint8_t **chainDer, const uint32_t *chainDerLen,
                         uint8_t chainLen,
                         const uint8_t **trustDer, const uint32_t *trustDerLen,
                         uint8_t trustCount,
-                        const char *hostname, uint64_t nowUnixSec);
+                        const char *hostnameStr, uint64_t nowUnixSec);
 ```
 
-Validates a certificate chain against a trust store and checks the leaf against `hostname`. The
+Validates a certificate chain against a trust store and checks the leaf against `hostnameStr`. The
 full sequence of checks is given under **Verification order** in [Notes](#notes). Every
 certificate is parsed internally from DER; the caller never needs to parse first.
 
@@ -513,7 +524,7 @@ certificate is parsed internally from DER; the caller never needs to parse first
 | `trustDer` | in | `const uint8_t **` | Array of DER trust-anchor (CA) certificates. No entry may be `NULL`. |
 | `trustDerLen` | in | `const uint32_t *` | Length of each `trustDer[j]`. |
 | `trustCount` | in | `uint8_t` | Number of trust anchors; must be at least `1`. |
-| `hostname` | in | `const char *` | Null-terminated DNS name or dotted-decimal IPv4 address the leaf must be issued for. Must not be `NULL` or empty. |
+| `hostnameStr` | in | `const char *` | Null-terminated DNS name or dotted-decimal IPv4 address the leaf must be issued for. Must not be `NULL` or empty. |
 | `nowUnixSec` | in | `uint64_t` | Current time in Unix seconds used for every validity check. |
 
 **Returns:** `true` if every check passes; `false` at the first failure. The reason is reported
@@ -540,18 +551,18 @@ if (SSFX509VerifyChain(chain, chainLen, 2u, trust, trustLen, 1u, "api.example.co
 ### [↑](#functions-verify) [`void SSFX509SetTraceCtx()`](#functions-verify)
 
 ```c
-void SSFX509SetTraceCtx(void (*fn)(int, int, const char *, void *), void *userCtx);
+void SSFX509SetTraceCtx(void (*fnOpt)(int, int, const char *, void *), void *userCtxOpt);
 ```
 
-Installs the module-wide trace callback used by the verifier. `fn` has the shape of
+Installs the module-wide trace callback used by the verifier. `fnOpt` has the shape of
 [`SSFTLSTraceFn_t`](../_crypto/ssftls.md) and receives the level (`SSF_TLS_TRACE_ERROR` or
 `SSF_TLS_TRACE_DEBUG`), the category (always `SSF_TLS_TRACE_CERT`), a formatted message, and
-`userCtx`. Pass `NULL` to disable tracing. Set this before starting concurrent verifications.
+`userCtxOpt`. Pass `NULL` to disable tracing. Set this before starting concurrent verifications.
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
-| `fn` | in | `void (*)(int, int, const char *, void *)` | Trace callback, or `NULL` to disable. |
-| `userCtx` | in | `void *` | Opaque pointer passed back to `fn`. |
+| `fnOpt` | in (opt) | `void (*)(int, int, const char *, void *)` | Trace callback, or `NULL` to disable. |
+| `userCtxOpt` | in (opt) | `void *` | Opaque pointer passed back to `fnOpt`; may be `NULL`. |
 
 <a id="ex-trace"></a>
 
@@ -572,20 +583,20 @@ SSFX509SetTraceCtx(_trace, NULL);
 ### [↑](#functions-verify) [`bool SSFX509MatchIPAddress()`](#functions-verify)
 
 ```c
-bool SSFX509MatchIPAddress(const char *hostname, const uint8_t *sanIP, uint32_t sanIPLen);
+bool SSFX509MatchIPAddress(const char *hostnameStr, const uint8_t *sanIP, uint32_t sanIPLen);
 ```
 
-Parses `hostname` as a dotted-decimal IPv4 address and compares it with a 4-byte `iPAddress`
+Parses `hostnameStr` as a dotted-decimal IPv4 address and compares it with a 4-byte `iPAddress`
 SAN value. Used internally by the chain verifier and exposed for callers doing their own SAN
 matching.
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
-| `hostname` | in | `const char *` | Null-terminated string such as `"192.168.1.10"`. Must not be `NULL`. |
+| `hostnameStr` | in | `const char *` | Null-terminated string such as `"192.168.1.10"`. Must not be `NULL`. |
 | `sanIP` | in | `const uint8_t *` | SAN `iPAddress` content bytes. Must not be `NULL`. |
 | `sanIPLen` | in | `uint32_t` | Length of `sanIP`; only `4` can match. |
 
-**Returns:** `true` if `hostname` is a valid IPv4 literal equal to `sanIP`; `false` otherwise,
+**Returns:** `true` if `hostnameStr` is a valid IPv4 literal equal to `sanIP`; `false` otherwise,
 including for IPv6 SANs and non-numeric hostnames.
 
 ---

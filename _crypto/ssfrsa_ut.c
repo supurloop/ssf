@@ -325,7 +325,7 @@ static void _SSFRSAVerifyHashAtKey(const uint8_t *priv, size_t privLen,
 
     sigOSSLLen = sizeof(sigOSSL);
     SSF_ASSERT(_OSSLSignPSS(pkey, md, (int)hLen, msg, msgLen, sigOSSL, &sigOSSLLen));
-    SSF_ASSERT(SSFRSAVerifyPSS(pub, pubLen, ssfHash, hashVal, hLen,
+    SSF_ASSERT(SSFRSAVerifyPSS(pub, pubLen, ssfHash, hashVal, hLen, hLen,
                                sigOSSL, sigOSSLLen) == true);
 
     /* Tampered-signature negative: flip a byte in the OpenSSL signature; both verifiers   */
@@ -333,7 +333,7 @@ static void _SSFRSAVerifyHashAtKey(const uint8_t *priv, size_t privLen,
     sigOSSL[sigOSSLLen / 2u] ^= 0x01u;
     SSF_ASSERT(_OSSLVerifyPSS(pkeyPub, md, (int)hLen, msg, msgLen,
                               sigOSSL, sigOSSLLen) == false);
-    SSF_ASSERT(SSFRSAVerifyPSS(pub, pubLen, ssfHash, hashVal, hLen,
+    SSF_ASSERT(SSFRSAVerifyPSS(pub, pubLen, ssfHash, hashVal, hLen, hLen,
                                sigOSSL, sigOSSLLen) == false);
 }
 
@@ -403,7 +403,8 @@ static void _SSFRSACrossCheckForeignPSS(const uint8_t *foreignPriv, size_t forei
     SSF_ASSERT(_OSSLSignPSS(pkey, EVP_sha256(), 32, msg, sizeof(msg) - 1u,
                             sigOSSL, &sigOSSLLen));
     SSF_ASSERT(SSFRSAVerifyPSS(foreignPub, foreignPubLen, SSF_RSA_HASH_SHA256,
-                               hashVal, sizeof(hashVal), sigOSSL, sigOSSLLen) == true);
+                               hashVal, sizeof(hashVal), sizeof(hashVal),
+                               sigOSSL, sigOSSLLen) == true);
 
     EVP_PKEY_free(pkey);
     EVP_PKEY_free(pkeyPub);
@@ -507,6 +508,69 @@ static void _SSFRSABlindHook(void *ctx, const SSFBN_t *r, const SSFBN_t *rInv,
     SSFBNZeroize(&chk);
 }
 #endif /* SSF_RSA_CONFIG_ENABLE_KEYGEN && SSF_RSA_CONFIG_ENABLE_2048 */
+
+/* RSA-2048 RSAPublicKey and an OpenSSL RSASSA-PSS SHA-256 signature made with saltLength 20   */
+/* over SHA-256("SSF RSA-PSS salt length 20 vector"). SSF signs with salt == hash length, so   */
+/* this vector proves the verifier honors a caller-specified salt length.                       */
+/* PKCS#1 RSAPublicKey DER, 270 bytes */
+static const uint8_t _pssSalt20Pub[] = {
+    0x30, 0x82, 0x01, 0x0a, 0x02, 0x82, 0x01, 0x01, 0x00, 0xcd, 0x6a, 0xff,
+    0x4d, 0x7c, 0xba, 0xe3, 0x6e, 0xb0, 0xf1, 0xb0, 0x40, 0xc2, 0xfa, 0xcb,
+    0xc8, 0x5a, 0xdb, 0xe0, 0xa3, 0x35, 0xea, 0x27, 0xa9, 0xc9, 0x1d, 0x57,
+    0xed, 0x6c, 0x6d, 0x0a, 0xfa, 0xff, 0x7d, 0xe3, 0x72, 0x72, 0xeb, 0x85,
+    0xa5, 0x21, 0xa0, 0xea, 0xc1, 0x13, 0x33, 0x84, 0x23, 0xda, 0xd0, 0x9e,
+    0xb2, 0x1b, 0x46, 0x13, 0xd8, 0x84, 0x26, 0xab, 0x0d, 0x5b, 0xa4, 0x4b,
+    0x4f, 0x8d, 0xc9, 0x02, 0x51, 0x6c, 0x0b, 0xf9, 0xad, 0x46, 0x97, 0x22,
+    0x1e, 0x61, 0x14, 0x03, 0x3a, 0x3d, 0xb9, 0x54, 0x61, 0xe4, 0x8f, 0xff,
+    0x47, 0x1d, 0x84, 0x5d, 0x90, 0xe1, 0x45, 0xa9, 0x58, 0xea, 0xcf, 0xbe,
+    0x2c, 0x67, 0x91, 0x33, 0x10, 0x56, 0xa0, 0xd3, 0x89, 0x0d, 0x69, 0x95,
+    0xff, 0xe3, 0x40, 0x61, 0x6d, 0xf5, 0xd8, 0x59, 0xcb, 0x6f, 0xd6, 0xbe,
+    0xd6, 0x41, 0x35, 0xf1, 0x0e, 0x52, 0x97, 0xc4, 0x4d, 0x8f, 0xa0, 0x0c,
+    0xcd, 0xdf, 0xd8, 0x09, 0x08, 0x32, 0xdb, 0xfc, 0xfd, 0xfa, 0x52, 0x49,
+    0x70, 0xf0, 0xc3, 0xdc, 0xe5, 0xf0, 0x98, 0x95, 0x4f, 0x66, 0x64, 0xa8,
+    0x10, 0xcc, 0xb4, 0xf1, 0xae, 0x13, 0x31, 0x8e, 0x13, 0xd6, 0x15, 0xe3,
+    0x33, 0x18, 0xc4, 0xb5, 0x85, 0x1d, 0x51, 0x00, 0xe0, 0x5a, 0xc8, 0xfb,
+    0x5c, 0xf9, 0xfb, 0x6f, 0x60, 0x19, 0xa0, 0x23, 0xc7, 0x68, 0xbf, 0x7b,
+    0xe9, 0x7a, 0xdf, 0xb1, 0x6d, 0x27, 0x29, 0xa0, 0xfa, 0x4b, 0x91, 0x1f,
+    0x55, 0x90, 0xb8, 0x03, 0x1d, 0x3a, 0x62, 0xaa, 0x3d, 0xac, 0x60, 0x38,
+    0x6d, 0xa0, 0x61, 0x03, 0xc2, 0x4d, 0x17, 0x5e, 0x34, 0x45, 0xaa, 0xc1,
+    0x49, 0x21, 0x50, 0x53, 0x81, 0x8d, 0xf1, 0x94, 0x58, 0xcf, 0x2c, 0xb6,
+    0x64, 0x34, 0xd8, 0x1d, 0x79, 0x27, 0x2a, 0x90, 0x6d, 0xfd, 0xf6, 0x08,
+    0x97, 0x02, 0x03, 0x01, 0x00, 0x01
+};
+
+/* SHA-256 of the signed message */
+static const uint8_t _pssSalt20Hash[] = {
+    0x0e, 0xba, 0x02, 0xdb, 0x5d, 0x99, 0xfa, 0xe8, 0xf9, 0x73, 0xd1, 0x53,
+    0xd0, 0x26, 0xce, 0x89, 0xcf, 0x2a, 0x67, 0x00, 0xce, 0xd8, 0x36, 0x81,
+    0xb8, 0x00, 0xaf, 0x72, 0xf9, 0x79, 0xc7, 0xdc
+};
+
+/* RSASSA-PSS signature, saltLength 20, 256 bytes */
+static const uint8_t _pssSalt20Sig[] = {
+    0x87, 0xdf, 0x9e, 0x18, 0xcc, 0x8f, 0x69, 0x2f, 0x97, 0x14, 0x99, 0xb2,
+    0x28, 0xd6, 0x81, 0xe3, 0x3e, 0xce, 0xf4, 0x1c, 0x98, 0x79, 0x2a, 0xa6,
+    0x9e, 0x02, 0xd1, 0x56, 0xcd, 0x3f, 0x4e, 0x61, 0x94, 0xfb, 0x7b, 0x57,
+    0xc4, 0x2b, 0x17, 0xc8, 0xda, 0xf2, 0x9e, 0x2a, 0x83, 0xff, 0x61, 0x16,
+    0xe9, 0xfc, 0x85, 0x88, 0xc1, 0x35, 0x29, 0x83, 0x6f, 0xe0, 0xfd, 0xf8,
+    0x80, 0x5d, 0x33, 0xdf, 0xd8, 0x91, 0x70, 0xb2, 0x89, 0x62, 0x5a, 0xfb,
+    0x8e, 0x13, 0x2c, 0xb6, 0xee, 0x2a, 0x8c, 0x1a, 0xc7, 0xf3, 0x91, 0xf8,
+    0x7c, 0x92, 0x8f, 0x14, 0x6f, 0x9b, 0x6d, 0x64, 0xa8, 0xcd, 0x0c, 0x44,
+    0xba, 0x52, 0x85, 0x51, 0xb6, 0x83, 0xa3, 0x71, 0x89, 0x9a, 0x7b, 0xdb,
+    0x93, 0x12, 0xd1, 0x93, 0xbc, 0x44, 0xe3, 0x37, 0xeb, 0xde, 0xee, 0xb7,
+    0x9a, 0x43, 0x7b, 0x3c, 0x4e, 0xc3, 0x30, 0x34, 0xc3, 0xb6, 0x27, 0xd1,
+    0xa9, 0x56, 0xa3, 0xa1, 0xe3, 0x7f, 0x28, 0x1c, 0xcc, 0x86, 0x08, 0x85,
+    0x55, 0xbc, 0x83, 0x13, 0x8a, 0x18, 0x6d, 0x43, 0xbf, 0x3b, 0x0d, 0xd0,
+    0x2c, 0x3e, 0xa3, 0x1c, 0x6e, 0x07, 0x98, 0x35, 0xed, 0xa9, 0x5f, 0xba,
+    0x75, 0x23, 0xbd, 0xc9, 0x0d, 0xd8, 0xc6, 0x10, 0x1d, 0xb5, 0x44, 0x98,
+    0x20, 0xf7, 0x30, 0x13, 0x7b, 0x46, 0xee, 0x49, 0xc7, 0xc4, 0x7b, 0xcb,
+    0x2a, 0x83, 0x6e, 0x3d, 0x9b, 0xe0, 0xa3, 0x67, 0xb0, 0xef, 0x94, 0x7c,
+    0xdf, 0x98, 0x15, 0x5c, 0x6b, 0xc1, 0x29, 0x67, 0xb4, 0x79, 0x2d, 0xb9,
+    0xfc, 0xe2, 0x74, 0xdf, 0x70, 0x22, 0x7e, 0x8d, 0x71, 0xcf, 0xa4, 0xdb,
+    0xb7, 0xdc, 0xff, 0xee, 0x66, 0x78, 0x85, 0x39, 0x2c, 0xfe, 0x4c, 0x46,
+    0xef, 0x32, 0x85, 0x55, 0x6d, 0x26, 0x2b, 0xa3, 0xfc, 0xab, 0xd2, 0xef,
+    0x0e, 0x89, 0xd0, 0x7e
+};
 
 void SSFRSAUnitTest(void)
 {
@@ -645,7 +709,7 @@ void SSFRSAUnitTest(void)
         SSF_ASSERT(SSFRSAVerifyPKCS1(badDer, sizeof(badDer), SSF_RSA_HASH_SHA256,
                                      hash, sizeof(hash), sig, 256) == false);
         SSF_ASSERT(SSFRSAVerifyPSS(badDer, sizeof(badDer), SSF_RSA_HASH_SHA256,
-                                   hash, sizeof(hash), sig, 256) == false);
+                                   hash, sizeof(hash), sizeof(hash), sig, 256) == false);
     }
 
     /* ---- Sign / Verify reject signature-length and buffer-size mismatches ---- */
@@ -681,7 +745,7 @@ void SSFRSAUnitTest(void)
         SSF_ASSERT(SSFRSAVerifyPKCS1(pubKeyDer, pubKeyDerLen, SSF_RSA_HASH_SHA256,
                                      hash, sizeof(hash), sig, sigLen - 1u) == false);
         SSF_ASSERT(SSFRSAVerifyPSS(pubKeyDer, pubKeyDerLen, SSF_RSA_HASH_SHA256,
-                                   hash, sizeof(hash), sig, sigLen - 1u) == false);
+                                   hash, sizeof(hash), sizeof(hash), sig, sigLen - 1u) == false);
 
         /* VerifyPKCS1 with sig as integer >= n: an all-0xFF 256-byte sig is 2^2048 - 1, which */
         /* exceeds any 2048-bit modulus, so _SSFRSAPublicOp's `m >= n` arm rejects.            */
@@ -1073,6 +1137,25 @@ void SSFRSAUnitTest(void)
                        sigFault, sizeof(sigFault), &sigFaultLen) == false);
         }
 
+#if SSF_RSA_CONFIG_ENABLE_PSS == 1
+        /* ---- PSS saltLength is caller-specified: OpenSSL vector signed with saltLength 20 ---- */
+        {
+            SSF_ASSERT(SSFRSAVerifyPSS(_pssSalt20Pub, sizeof(_pssSalt20Pub), SSF_RSA_HASH_SHA256,
+                                       _pssSalt20Hash, sizeof(_pssSalt20Hash), 20u,
+                                       _pssSalt20Sig, sizeof(_pssSalt20Sig)) == true);
+            /* The hash-length salt SSF itself emits is not this signature's salt */
+            SSF_ASSERT(SSFRSAVerifyPSS(_pssSalt20Pub, sizeof(_pssSalt20Pub), SSF_RSA_HASH_SHA256,
+                                       _pssSalt20Hash, sizeof(_pssSalt20Hash), 32u,
+                                       _pssSalt20Sig, sizeof(_pssSalt20Sig)) == false);
+            SSF_ASSERT(SSFRSAVerifyPSS(_pssSalt20Pub, sizeof(_pssSalt20Pub), SSF_RSA_HASH_SHA256,
+                                       _pssSalt20Hash, sizeof(_pssSalt20Hash), 19u,
+                                       _pssSalt20Sig, sizeof(_pssSalt20Sig)) == false);
+            SSF_ASSERT(SSFRSAVerifyPSS(_pssSalt20Pub, sizeof(_pssSalt20Pub), SSF_RSA_HASH_SHA256,
+                                       _pssSalt20Hash, sizeof(_pssSalt20Hash), 0u,
+                                       _pssSalt20Sig, sizeof(_pssSalt20Sig)) == false);
+        }
+#endif /* SSF_RSA_CONFIG_ENABLE_PSS */
+
 #if SSF_RSA_OSSL_VERIFY == 1
         /* Comprehensive OpenSSL cross-check: PKCS#1-v1.5 (deterministic byte match), PSS in     */
         /* both directions, multiple hash sizes per key size. The foreignPriv / foreignPub       */
@@ -1210,13 +1293,13 @@ void SSFRSAUnitTest(void)
 
             /* Verify */
             SSF_ASSERT(SSFRSAVerifyPSS(pubKeyDer, pubKeyDerLen,
-                       SSF_RSA_HASH_SHA256, hashVal, sizeof(hashVal),
+                       SSF_RSA_HASH_SHA256, hashVal, sizeof(hashVal), sizeof(hashVal),
                        sig, sigLen) == true);
 
             /* Wrong hash fails */
             hashVal[0] ^= 0x01u;
             SSF_ASSERT(SSFRSAVerifyPSS(pubKeyDer, pubKeyDerLen,
-                       SSF_RSA_HASH_SHA256, hashVal, sizeof(hashVal),
+                       SSF_RSA_HASH_SHA256, hashVal, sizeof(hashVal), sizeof(hashVal),
                        sig, sigLen) == false);
             hashVal[0] ^= 0x01u;
 
@@ -1229,7 +1312,7 @@ void SSFRSAUnitTest(void)
                            sig2, sizeof(sig2), &sig2Len) == true);
                 /* Both should verify */
                 SSF_ASSERT(SSFRSAVerifyPSS(pubKeyDer, pubKeyDerLen,
-                           SSF_RSA_HASH_SHA256, hashVal, sizeof(hashVal),
+                           SSF_RSA_HASH_SHA256, hashVal, sizeof(hashVal), sizeof(hashVal),
                            sig2, sig2Len) == true);
                 /* But should be different (with overwhelming probability) */
                 SSF_ASSERT(memcmp(sig, sig2, sigLen) != 0);
@@ -1384,19 +1467,21 @@ void SSFRSAUnitTest(void)
                                       dbcSigBuf, sizeof(dbcSigBuf), &dbcLenA));
 
         /* ---- SSFRSAVerifyPSS ---- */
-        SSF_ASSERT_TEST(SSFRSAVerifyPSS(NULL, 16u, SSF_RSA_HASH_SHA256, dbcHashBuf, 32u,
+        SSF_ASSERT_TEST(SSFRSAVerifyPSS(NULL, 16u, SSF_RSA_HASH_SHA256, dbcHashBuf, 32u, 32u,
                                         dbcSigBuf, 256u));
-        SSF_ASSERT_TEST(SSFRSAVerifyPSS(dbcPubBuf, 16u, SSF_RSA_HASH_SHA256, NULL, 32u,
+        SSF_ASSERT_TEST(SSFRSAVerifyPSS(dbcPubBuf, 16u, SSF_RSA_HASH_SHA256, NULL, 32u, 32u,
                                         dbcSigBuf, 256u));
-        SSF_ASSERT_TEST(SSFRSAVerifyPSS(dbcPubBuf, 16u, SSF_RSA_HASH_SHA256, dbcHashBuf, 32u,
+        SSF_ASSERT_TEST(SSFRSAVerifyPSS(dbcPubBuf, 16u, SSF_RSA_HASH_SHA256, dbcHashBuf, 32u, 32u,
                                         NULL, 256u));
-        SSF_ASSERT_TEST(SSFRSAVerifyPSS(dbcPubBuf, 0u, SSF_RSA_HASH_SHA256, dbcHashBuf, 32u,
+        SSF_ASSERT_TEST(SSFRSAVerifyPSS(dbcPubBuf, 0u, SSF_RSA_HASH_SHA256, dbcHashBuf, 32u, 32u,
                                         dbcSigBuf, 256u));
-        SSF_ASSERT_TEST(SSFRSAVerifyPSS(dbcPubBuf, 16u, SSF_RSA_HASH_MIN, dbcHashBuf, 32u,
+        SSF_ASSERT_TEST(SSFRSAVerifyPSS(dbcPubBuf, 16u, SSF_RSA_HASH_MIN, dbcHashBuf, 32u, 32u,
                                         dbcSigBuf, 256u));
-        SSF_ASSERT_TEST(SSFRSAVerifyPSS(dbcPubBuf, 16u, SSF_RSA_HASH_MAX, dbcHashBuf, 32u,
+        SSF_ASSERT_TEST(SSFRSAVerifyPSS(dbcPubBuf, 16u, SSF_RSA_HASH_MAX, dbcHashBuf, 32u, 32u,
                                         dbcSigBuf, 256u));
-        SSF_ASSERT_TEST(SSFRSAVerifyPSS(dbcPubBuf, 16u, SSF_RSA_HASH_SHA256, dbcHashBuf, 31u,
+        SSF_ASSERT_TEST(SSFRSAVerifyPSS(dbcPubBuf, 16u, SSF_RSA_HASH_SHA256, dbcHashBuf, 31u, 32u,
+                                        dbcSigBuf, 256u));
+        SSF_ASSERT_TEST(SSFRSAVerifyPSS(dbcPubBuf, 16u, SSF_RSA_HASH_SHA256, dbcHashBuf, 32u, 33u,
                                         dbcSigBuf, 256u));
 #endif /* SSF_RSA_CONFIG_ENABLE_PSS */
     }

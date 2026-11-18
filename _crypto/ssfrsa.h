@@ -151,7 +151,8 @@ bool SSFRSASignPSS(const uint8_t *privKeyDer, size_t privKeyDerLen, SSFRSAHash_t
                    const uint8_t *hashVal, size_t hashLen, uint8_t *sig, size_t sigSize,
                    size_t *sigLen);
 bool SSFRSAVerifyPSS(const uint8_t *pubKeyDer, size_t pubKeyDerLen, SSFRSAHash_t hash,
-                     const uint8_t *hashVal, size_t hashLen, const uint8_t *sig, size_t sigLen);
+                     const uint8_t *hashVal, size_t hashLen, size_t saltLen,
+                     const uint8_t *sig, size_t sigLen);
 #endif /* SSF_RSA_CONFIG_ENABLE_PSS */
 
 #endif /* SSF_RSA_ANY_ENABLED == 1 -- end of API gated on at-least-one-size-enabled */

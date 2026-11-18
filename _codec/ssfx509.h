@@ -243,14 +243,13 @@ typedef struct SSFX509GenParams
     const uint8_t **ncExcludedIPs;
 } SSFX509GenParams_t;
 
-/* Encode a TBSCertificate structure into buf. Returns bytes written, 0 on error.                */
-/* When buf is NULL, returns the required buffer size (two-pass pattern).                         */
-uint32_t SSFX509EncodeTBS(uint8_t *buf, uint32_t bufSize, const SSFX509GenParams_t *params);
+/* Encode a TBSCertificate into bufOpt, or measure it when bufOpt is NULL; *lenOut gets the size. */
+bool SSFX509EncodeTBS(uint8_t *bufOpt, uint32_t bufOptSize, const SSFX509GenParams_t *params,
+                      uint32_t *lenOut);
 
-/* Encode a complete Certificate (TBS + signatureAlgorithm + signatureValue).                    */
-/* The caller provides the pre-computed signature over the TBS DER bytes.                        */
-uint32_t SSFX509EncodeCert(uint8_t *buf, uint32_t bufSize, const SSFX509GenParams_t *params,
-                           const uint8_t *signature, uint32_t signatureLen);
+/* Encode a Certificate around a precomputed signature over the TBS; NULL bufOpt measures.       */
+bool SSFX509EncodeCert(uint8_t *bufOpt, uint32_t bufOptSize, const SSFX509GenParams_t *params,
+                       const uint8_t *signature, uint32_t signatureLen, uint32_t *lenOut);
 
 /* --------------------------------------------------------------------------------------------- */
 /* Additional OID comparison helpers                                                             */
@@ -268,31 +267,26 @@ bool SSFX509IsEd25519(const SSFX509Cert_t *cert);
 /* Chain verification                                                                            */
 /* --------------------------------------------------------------------------------------------- */
 
-/* Verify the signature on a certificate using the issuer's public key (DER-encoded cert).       */
-/* Dispatches to ECDSA or RSA based on the signature algorithm OID.                              */
+/* Verify cert's signature with issuer's public key; ECDSA, RSA PKCS#1 v1.5, RSA-PSS, Ed25519.   */
 bool SSFX509VerifyCertSignature(const SSFX509Cert_t *cert, const SSFX509Cert_t *issuer);
 
-/* Verify a certificate chain. chain[0] is the leaf, chain[chainLen-1] closest to root.          */
-/* trustDer/trustDerLen arrays hold DER-encoded trusted CA certificates.                         */
-/* hostname is matched against the leaf certificate's SAN dNSName entries.                       */
-/* nowUnixSec is the current time for validity checking.                                         */
+/* Verify chainDer[0] (leaf) up to a trust anchor and match its SAN against hostnameStr.         */
 bool SSFX509VerifyChain(const uint8_t **chainDer, const uint32_t *chainDerLen,
                         uint8_t chainLen,
                         const uint8_t **trustDer, const uint32_t *trustDerLen,
                         uint8_t trustCount,
-                        const char *hostname, uint64_t nowUnixSec);
+                        const char *hostnameStr, uint64_t nowUnixSec);
 
-/* Set trace callback for chain verification. fn is a SSFTLSTraceFn_t (from ssftls.h). */
-void SSFX509SetTraceCtx(void (*fn)(int, int, const char *, void *), void *userCtx);
+/* Set trace callback for chain verification; fnOpt is a SSFTLSTraceFn_t, NULL disables.        */
+void SSFX509SetTraceCtx(void (*fnOpt)(int, int, const char *, void *), void *userCtxOpt);
 
 /* --------------------------------------------------------------------------------------------- */
 /* Unit test                                                                                     */
 /* --------------------------------------------------------------------------------------------- */
 /* Match an IPv4 address string against a SAN iPAddress entry (4-byte raw). */
-bool SSFX509MatchIPAddress(const char *hostname, const uint8_t *sanIP, uint32_t sanIPLen);
+bool SSFX509MatchIPAddress(const char *hostnameStr, const uint8_t *sanIP, uint32_t sanIPLen);
 
-/* Check SKID/AKID consistency between a cert and its issuer. Returns true if consistent         */
-/* (matching, or either field absent). Returns false only if both present and mismatched.         */
+/* Returns true if cert's AKID and issuer's SKID match or either is absent, else false.          */
 bool SSFX509CheckSKIDAKID(const SSFX509Cert_t *cert, const SSFX509Cert_t *issuer);
 
 #if SSF_CONFIG_X509_UNIT_TEST == 1

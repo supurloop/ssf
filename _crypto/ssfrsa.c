@@ -1279,7 +1279,8 @@ cleanup:
 /* If RSASSA-PSS signature verifies returns true, else false.                                    */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFRSAVerifyPSS(const uint8_t *pubKeyDer, size_t pubKeyDerLen, SSFRSAHash_t hash,
-                     const uint8_t *hashVal, size_t hashLen, const uint8_t *sig, size_t sigLen)
+                     const uint8_t *hashVal, size_t hashLen, size_t saltLen,
+                     const uint8_t *sig, size_t sigLen)
 {
     SSFBN_DEFINE(n, SSF_BN_MAX_LIMBS);
     SSFBN_DEFINE(e, SSF_BN_MAX_LIMBS);
@@ -1303,8 +1304,9 @@ bool SSFRSAVerifyPSS(const uint8_t *pubKeyDer, size_t pubKeyDerLen, SSFRSAHash_t
     SSF_REQUIRE((hash > SSF_RSA_HASH_MIN) && (hash < SSF_RSA_HASH_MAX));
 
     hLen = _SSFRSAGetHashSize(hash);
-    sLen = hLen;
     SSF_REQUIRE(hashLen == hLen);
+    SSF_REQUIRE(saltLen <= hLen);
+    sLen = saltLen;
 
     /* Early failures below depend only on public values (pubKey contents, sigLen). */
     if (!_SSFRSAPubKeyDecode(pubKeyDer, pubKeyDerLen, &n, &e, &keyLimbs))

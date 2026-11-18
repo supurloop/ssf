@@ -38,14 +38,18 @@
 #include "ssfrsa.h"
 #include "ssfed25519.h"
 #include "ssfmatch.h"
+#include "ssfstr.h"
 
 /* Module-scope trace context for chain verification (set by caller before SSFVerifyChain) */
 static SSFTLSTraceCtx_t _ssfx509TraceCtx;
 
-void SSFX509SetTraceCtx(void (*fn)(int, int, const char *, void *), void *userCtx)
+/* --------------------------------------------------------------------------------------------- */
+/* Installs the module-wide verification trace callback; a NULL fnOpt disables tracing.          */
+/* --------------------------------------------------------------------------------------------- */
+void SSFX509SetTraceCtx(void (*fnOpt)(int, int, const char *, void *), void *userCtxOpt)
 {
-    _ssfx509TraceCtx.fn = (SSFTLSTraceFn_t)fn;
-    _ssfx509TraceCtx.userCtx = userCtx;
+    _ssfx509TraceCtx.fn = (SSFTLSTraceFn_t)fnOpt;
+    _ssfx509TraceCtx.userCtx = userCtxOpt;
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -73,18 +77,26 @@ static const uint8_t _oidP384[] = { 0x2Bu, 0x81u, 0x04u, 0x00u, 0x22u };
 static const uint8_t _oidEcdsaSHA384[] = { 0x2Au, 0x86u, 0x48u, 0xCEu, 0x3Du, 0x04u, 0x03u, 0x03u };
 
 /* sha256WithRSAEncryption: 1.2.840.113549.1.1.11 */
-static const uint8_t _oidRSAPKCS1SHA256[] = { 0x2Au, 0x86u, 0x48u, 0x86u, 0xF7u, 0x0Du, 0x01u, 0x01u, 0x0Bu };
+static const uint8_t _oidRSAPKCS1SHA256[] = {
+    0x2Au, 0x86u, 0x48u, 0x86u, 0xF7u, 0x0Du, 0x01u, 0x01u, 0x0Bu
+};
 
 /* sha384WithRSAEncryption: 1.2.840.113549.1.1.12 */
-static const uint8_t _oidRSAPKCS1SHA384[] = { 0x2Au, 0x86u, 0x48u, 0x86u, 0xF7u, 0x0Du, 0x01u, 0x01u, 0x0Cu };
+static const uint8_t _oidRSAPKCS1SHA384[] = {
+    0x2Au, 0x86u, 0x48u, 0x86u, 0xF7u, 0x0Du, 0x01u, 0x01u, 0x0Cu
+};
 
 /* sha512WithRSAEncryption: 1.2.840.113549.1.1.13 */
-static const uint8_t _oidRSAPKCS1SHA512[] = { 0x2Au, 0x86u, 0x48u, 0x86u, 0xF7u, 0x0Du, 0x01u, 0x01u, 0x0Du };
+static const uint8_t _oidRSAPKCS1SHA512[] = {
+    0x2Au, 0x86u, 0x48u, 0x86u, 0xF7u, 0x0Du, 0x01u, 0x01u, 0x0Du
+};
 
 /* id-RSASSA-PSS: 1.2.840.113549.1.1.10 */
-static const uint8_t _oidRSAPSS[] = { 0x2Au, 0x86u, 0x48u, 0x86u, 0xF7u, 0x0Du, 0x01u, 0x01u, 0x0Au };
+static const uint8_t _oidRSAPSS[] = {
+    0x2Au, 0x86u, 0x48u, 0x86u, 0xF7u, 0x0Du, 0x01u, 0x01u, 0x0Au
+};
 
-/* id-Ed25519 (RFC 8410): 1.3.101.112 — used for both SubjectPublicKeyInfo algorithm and        */
+/* id-Ed25519 (RFC 8410): 1.3.101.112 - used for both SubjectPublicKeyInfo algorithm and        */
 /* signatureAlgorithm. No parameters.                                                            */
 static const uint8_t _oidEd25519[] = { 0x2Bu, 0x65u, 0x70u };
 
@@ -128,78 +140,84 @@ static const uint8_t _oidNameConstraints[]  = { 0x55u, 0x1Du, 0x1Eu }; /* 2.5.29
 /* --------------------------------------------------------------------------------------------- */
 static bool _OIDMatch(const uint8_t *a, uint32_t aLen, const uint8_t *b, uint32_t bLen)
 {
+    SSF_REQUIRE((a != NULL) || (aLen == 0u));
+    SSF_REQUIRE((b != NULL) || (bLen == 0u));
+
     if (aLen != bLen) return false;
     return (memcmp(a, b, aLen) == 0);
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Helper: determine RSA-PSS hash algorithm from sigAlg parameters (RFC 4055 Section 3.1).       */
-/* RSASSA-PSS-params ::= SEQUENCE {                                                              */
-/*     hashAlgorithm      [0] HashAlgorithm DEFAULT sha1,                                       */
-/*     maskGenAlgorithm   [1] MaskGenAlgorithm DEFAULT mgf1SHA1,                                */
-/*     saltLength         [2] INTEGER DEFAULT 20                                                 */
-/* }                                                                                             */
-/* Returns the RSA hash enum. If params are absent or unparseable, defaults to SHA-256.          */
+/* Decodes RSASSA-PSS-params (RFC 4055 Section 3.1) into the hash and salt length to verify with. */
 /* --------------------------------------------------------------------------------------------- */
-static SSFRSAHash_t _ParsePSSHashAlg(const uint8_t *params, uint32_t paramsLen)
+static void _ParsePSSParams(const uint8_t *params, uint32_t paramsLen, SSFRSAHash_t *hashOut,
+                            uint32_t *saltLenOut)
 {
     SSFASN1Cursor_t cursor;
     SSFASN1Cursor_t seqInner;
-    SSFASN1Cursor_t hashAlgInner;
+    SSFASN1Cursor_t fieldInner;
     SSFASN1Cursor_t algIdInner;
     const uint8_t *hashOidRaw;
     uint32_t hashOidRawLen;
+    uint64_t saltLen;
     uint16_t tag;
 
-    if (params == NULL || paramsLen == 0) return SSF_RSA_HASH_SHA256;
+    SSF_REQUIRE((params != NULL) || (paramsLen == 0u));
+    SSF_REQUIRE(hashOut != NULL);
+    SSF_REQUIRE(saltLenOut != NULL);
 
+    /* RFC 4055 DEFAULTs, which DER omits: hashAlgorithm sha1 (unsupported, so SHA-256 is used  */
+    /* and verification fails closed) and saltLength 20                                          */
+    *hashOut = SSF_RSA_HASH_SHA256;
+    *saltLenOut = 20u;
+
+    /* Parameters present? */
+    if ((params == NULL) || (paramsLen == 0u))
+    {
+        /* No, every field takes its default */
+        return;
+    }
     cursor.buf = params;
     cursor.bufLen = paramsLen;
+    if (!SSFASN1DecOpenConstructed(&cursor, SSF_ASN1_TAG_SEQUENCE, &seqInner, &cursor)) return;
 
-    /* PSS params is a SEQUENCE */
-    if (!SSFASN1DecOpenConstructed(&cursor, SSF_ASN1_TAG_SEQUENCE, &seqInner, &cursor))
+    /* [0] hashAlgorithm present? */
+    if (SSFASN1DecPeekTag(&seqInner, &tag) && (tag == SSF_ASN1_CONTEXT_EXPLICIT(0)))
     {
-        return SSF_RSA_HASH_SHA256;
+        /* Yes, map its OID; an unknown OID keeps SHA-256 so verification fails closed */
+        if (!SSFASN1DecOpenConstructed(&seqInner, SSF_ASN1_CONTEXT_EXPLICIT(0), &fieldInner,
+                                       &seqInner)) return;
+        if (!SSFASN1DecOpenConstructed(&fieldInner, SSF_ASN1_TAG_SEQUENCE, &algIdInner,
+                                       &fieldInner)) return;
+        if (!SSFASN1DecGetOIDRaw(&algIdInner, &hashOidRaw, &hashOidRawLen, &algIdInner)) return;
+        if (_OIDMatch(hashOidRaw, hashOidRawLen, _oidSHA384, sizeof(_oidSHA384)))
+        {
+            *hashOut = SSF_RSA_HASH_SHA384;
+        }
+        else if (_OIDMatch(hashOidRaw, hashOidRawLen, _oidSHA512, sizeof(_oidSHA512)))
+        {
+            *hashOut = SSF_RSA_HASH_SHA512;
+        }
     }
 
-    /* Look for [0] EXPLICIT hashAlgorithm */
-    if (!SSFASN1DecPeekTag(&seqInner, &tag)) return SSF_RSA_HASH_SHA256;
-    if (tag != SSF_ASN1_CONTEXT_EXPLICIT(0)) return SSF_RSA_HASH_SHA256; /* No hash param → default */
-
-    if (!SSFASN1DecOpenConstructed(&seqInner, SSF_ASN1_CONTEXT_EXPLICIT(0),
-                                    &hashAlgInner, &seqInner))
+    /* [1] maskGenAlgorithm present? */
+    if (SSFASN1DecPeekTag(&seqInner, &tag) && (tag == SSF_ASN1_CONTEXT_EXPLICIT(1)))
     {
-        return SSF_RSA_HASH_SHA256;
+        /* Yes, skip it; MGF1 over the same hash is the only form supported */
+        if (!SSFASN1DecSkip(&seqInner, &seqInner)) return;
     }
 
-    /* HashAlgorithm is AlgorithmIdentifier: SEQUENCE { OID, params } */
-    if (!SSFASN1DecOpenConstructed(&hashAlgInner, SSF_ASN1_TAG_SEQUENCE,
-                                    &algIdInner, &hashAlgInner))
+    /* [2] saltLength present? */
+    if (SSFASN1DecPeekTag(&seqInner, &tag) && (tag == SSF_ASN1_CONTEXT_EXPLICIT(2)))
     {
-        return SSF_RSA_HASH_SHA256;
+        /* Yes, take the declared value; oversize values are capped and rejected by the caller */
+        if (!SSFASN1DecOpenConstructed(&seqInner, SSF_ASN1_CONTEXT_EXPLICIT(2), &fieldInner,
+                                       &seqInner)) return;
+        if (SSFASN1DecGetIntU64(&fieldInner, &saltLen, &fieldInner))
+        {
+            *saltLenOut = (saltLen > 255u) ? 255u : (uint32_t)saltLen;
+        }
     }
-
-    if (!SSFASN1DecGetOIDRaw(&algIdInner, &hashOidRaw, &hashOidRawLen, &algIdInner))
-    {
-        return SSF_RSA_HASH_SHA256;
-    }
-
-    /* Match against known hash OIDs */
-    if (_OIDMatch(hashOidRaw, hashOidRawLen, _oidSHA256, sizeof(_oidSHA256)))
-    {
-        return SSF_RSA_HASH_SHA256;
-    }
-    if (_OIDMatch(hashOidRaw, hashOidRawLen, _oidSHA384, sizeof(_oidSHA384)))
-    {
-        return SSF_RSA_HASH_SHA384;
-    }
-    if (_OIDMatch(hashOidRaw, hashOidRawLen, _oidSHA512, sizeof(_oidSHA512)))
-    {
-        return SSF_RSA_HASH_SHA512;
-    }
-
-    /* Unknown hash OID — default to SHA-256 */
-    return SSF_RSA_HASH_SHA256;
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -215,6 +233,9 @@ static bool _ParseDN(const SSFASN1Cursor_t *nameCursor, SSFX509Name_t *name)
     const uint8_t *val;
     uint32_t valLen;
     uint16_t strTag;
+
+    SSF_REQUIRE(nameCursor != NULL);
+    SSF_REQUIRE(name != NULL);
 
     /* Name is a SEQUENCE of RelativeDistinguishedName (SET) */
     pos = *nameCursor;
@@ -269,6 +290,9 @@ static bool _ParseExtensions(const SSFASN1Cursor_t *extsCursor, SSFX509Cert_t *c
     uint32_t extValueLen;
     uint16_t tag;
 
+    SSF_REQUIRE(extsCursor != NULL);
+    SSF_REQUIRE(cert != NULL);
+
     pos = *extsCursor;
     while (!SSFASN1DecIsEmpty(&pos))
     {
@@ -276,8 +300,7 @@ static bool _ParseExtensions(const SSFASN1Cursor_t *extsCursor, SSFX509Cert_t *c
 
         if (!SSFASN1DecGetOIDRaw(&extInner, &oidRaw, &oidRawLen, &extInner)) return false;
 
-        /* RFC 5280 §4.2: "A certificate MUST NOT include more than one instance of a           */
-        /* particular extension." Reject any cert that contains a duplicate extension OID.      */
+        /* Duplicate of an extension already seen, which RFC 5280 Sec. 4.2 forbids? */
         {
             uint8_t dup;
             for (dup = 0; dup < cert->extsLen; dup++)
@@ -368,7 +391,8 @@ static bool _ParseExtensions(const SSFASN1Cursor_t *extsCursor, SSFX509Cert_t *c
             SSFASN1Cursor_t sanInner;
             if (SSFASN1DecOpenConstructed(&sanCursor, SSF_ASN1_TAG_SEQUENCE, &sanInner, &sanCursor))
             {
-                while (!SSFASN1DecIsEmpty(&sanInner) && cert->sanLen < SSF_X509_CONFIG_MAX_SAN_ENTRIES)
+                while (!SSFASN1DecIsEmpty(&sanInner) &&
+                       (cert->sanLen < SSF_X509_CONFIG_MAX_SAN_ENTRIES))
                 {
                     const uint8_t *sanVal;
                     uint32_t sanValLen;
@@ -403,7 +427,8 @@ static bool _ParseExtensions(const SSFASN1Cursor_t *extsCursor, SSFX509Cert_t *c
         {
             SSFASN1Cursor_t akidCursor = { extValue, extValueLen };
             SSFASN1Cursor_t akidInner;
-            if (SSFASN1DecOpenConstructed(&akidCursor, SSF_ASN1_TAG_SEQUENCE, &akidInner, &akidCursor))
+            if (SSFASN1DecOpenConstructed(&akidCursor, SSF_ASN1_TAG_SEQUENCE, &akidInner,
+                                          &akidCursor))
             {
                 if (!SSFASN1DecIsEmpty(&akidInner) && SSFASN1DecPeekTag(&akidInner, &tag))
                 {
@@ -448,12 +473,7 @@ static bool _ParseExtensions(const SSFASN1Cursor_t *extsCursor, SSFX509Cert_t *c
         else if (_OIDMatch(oidRaw, oidRawLen, _oidNameConstraints,
                             sizeof(_oidNameConstraints)))
         {
-            /* Name Constraints (RFC 5280 Section 4.2.1.10).                                    */
-            /* NameConstraints ::= SEQUENCE { permittedSubtrees [0] IMPLICIT OPTIONAL,          */
-            /*                                 excludedSubtrees  [1] IMPLICIT OPTIONAL }        */
-            /* GeneralSubtrees ::= SEQUENCE SIZE (1..MAX) OF GeneralSubtree                     */
-            /* GeneralSubtree ::= SEQUENCE { base GeneralName, minimum [0] DEFAULT 0,           */
-            /*                                maximum [1] OPTIONAL }                             */
+            /* NameConstraints { permittedSubtrees [0], excludedSubtrees [1] }, RFC 5280 4.2.1.10 */
             SSFASN1Cursor_t ncCursor = { extValue, extValueLen };
             SSFASN1Cursor_t ncInner;
             cert->hasNameConstraints = true;
@@ -495,10 +515,7 @@ static bool _ParseExtensions(const SSFASN1Cursor_t *extsCursor, SSFX509Cert_t *c
                         if (!SSFASN1DecGetTLV(&gsInner, &gnTag, &gnVal, &gnValLen,
                                                &gsInner)) continue;
 
-                        /* Tags: [2] IMPLICIT dNSName = 0x82, [7] IMPLICIT iPAddress = 0x87.    */
-                        /* Other GeneralName types are not enforced (constraints on unsupported  */
-                        /* types are ignored; since we also do not parse those SAN types, this   */
-                        /* is consistent behavior for dNSName/iPAddress-only deployments).        */
+                        /* Only [2] dNSName (0x82) and [7] iPAddress (0x87) subtrees are enforced */
                         if (gnTag == 0x82u || gnTag == 0x87u)
                         {
                             dest[*destLen].type = (gnTag == 0x82u) ? SSF_X509_SAN_DNS :
@@ -544,7 +561,7 @@ bool SSFX509Parse(const uint8_t *der, uint32_t derLen, SSFX509Cert_t *cert)
     if (!SSFASN1DecOpenConstructed(&cursor, SSF_ASN1_TAG_SEQUENCE, &certInner, &cursor))
         return false;
 
-    /* TBSCertificate SEQUENCE — record the raw bytes for signature verification */
+    /* TBSCertificate SEQUENCE - record the raw bytes for signature verification */
     tbsStart = certInner.buf;
     if (!SSFASN1DecOpenConstructed(&certInner, SSF_ASN1_TAG_SEQUENCE, &tbsInner, &certInner))
         return false;
@@ -575,17 +592,14 @@ bool SSFX509Parse(const uint8_t *der, uint32_t derLen, SSFX509Cert_t *cert)
     /* Serial number */
     if (!SSFASN1DecGetInt(&pos, &cert->serial, &cert->serialLen, &pos)) return false;
 
-    /* RFC 5280 §4.1.2.2: serial number MUST be a non-negative integer. Conforming CAs MUST NOT */
-    /* emit serials longer than 20 octets; verifiers MUST handle up to 20 octets. Reject:        */
-    /*   - zero-length content (malformed DER INTEGER)                                            */
-    /*   - lengths exceeding 20 octets                                                            */
-    /*   - negative values (high bit of first raw byte set — DER signed two's-complement)         */
-    /* Serial value of zero (single 0x00 byte) is accepted; RFC says verifiers SHOULD gracefully */
-    /* handle it even though conforming CAs MUST NOT emit it.                                     */
-    if (cert->serialLen == 0u || cert->serialLen > 20u) return false;
-    if ((cert->serial[0] & 0x80u) != 0u) return false;
+    /* Serial 1 to 20 octets and non-negative as RFC 5280 Sec. 4.1.2.2 requires (zero allowed)? */
+    if ((cert->serialLen == 0u) || (cert->serialLen > 20u) || ((cert->serial[0] & 0x80u) != 0u))
+    {
+        /* No, malformed */
+        return false;
+    }
 
-    /* Signature algorithm (in TBS) — extract OID and optional parameters */
+    /* Signature algorithm (in TBS) - extract OID and optional parameters */
     if (!SSFASN1DecOpenConstructed(&pos, SSF_ASN1_TAG_SEQUENCE, &algInner, &pos)) return false;
     if (!SSFASN1DecGetOIDRaw(&algInner, &cert->sigAlgOidRaw, &cert->sigAlgOidRawLen, &algInner))
         return false;
@@ -644,7 +658,7 @@ bool SSFX509Parse(const uint8_t *der, uint32_t derLen, SSFX509Cert_t *cert)
                                 &cert->pubKeyUnusedBits, &spkiInner))
         return false;
 
-    /* Optional: issuerUniqueID [1], subjectUniqueID [2] — skip if present */
+    /* Optional: issuerUniqueID [1], subjectUniqueID [2] - skip if present */
     while (SSFASN1DecPeekTag(&pos, &tag) &&
            (tag == SSF_ASN1_CONTEXT_IMPLICIT(1) || tag == SSF_ASN1_CONTEXT_IMPLICIT(2)))
     {
@@ -695,6 +709,9 @@ bool SSFX509IsValid(const SSFX509Cert_t *cert, uint64_t nowUnixSec)
     return (nowUnixSec >= cert->notBefore) && (nowUnixSec <= cert->notAfter);
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if the signature algorithm is ecdsa-with-SHA256, else false.                     */
+/* --------------------------------------------------------------------------------------------- */
 bool SSFX509IsECDSA(const SSFX509Cert_t *cert)
 {
     SSF_REQUIRE(cert != NULL);
@@ -702,6 +719,9 @@ bool SSFX509IsECDSA(const SSFX509Cert_t *cert)
                      _oidEcdsaSHA256, sizeof(_oidEcdsaSHA256));
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if the public key algorithm is rsaEncryption, else false.                        */
+/* --------------------------------------------------------------------------------------------- */
 bool SSFX509IsRSA(const SSFX509Cert_t *cert)
 {
     SSF_REQUIRE(cert != NULL);
@@ -709,6 +729,9 @@ bool SSFX509IsRSA(const SSFX509Cert_t *cert)
                      _oidRSA, sizeof(_oidRSA));
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if the EC public key is on P-256, else false.                                    */
+/* --------------------------------------------------------------------------------------------- */
 bool SSFX509IsP256(const SSFX509Cert_t *cert)
 {
     SSF_REQUIRE(cert != NULL);
@@ -795,100 +818,138 @@ typedef struct
 } _EncCert_t;
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns strlen of a C string, or 0 if NULL.                                                   */
-/* --------------------------------------------------------------------------------------------- */
-static uint32_t _StrLen(SSFCStrIn_t str)
-{
-    uint32_t len = 0;
-
-    if (str == NULL) return 0;
-    while (str[len] != '\0') len++;
-    return len;
-}
-
-/* --------------------------------------------------------------------------------------------- */
 /* Leaf encoders: return bytes written, or needed when buf is NULL, else 0 on failure.           */
+/* --------------------------------------------------------------------------------------------- */
+/* --------------------------------------------------------------------------------------------- */
+/* Returns bytes for tag wrapping content, or bytes needed when buf is NULL, else 0.            */
 /* --------------------------------------------------------------------------------------------- */
 static uint32_t _EncWrap(uint8_t *buf, uint32_t bufSize, uint16_t tag, const uint8_t *content,
                          uint32_t contentLen)
 {
     uint32_t n;
 
+    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
+
     if (!SSFASN1EncWrap(buf, bufSize, tag, content, contentLen, &n)) return 0;
     return n;
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Returns bytes for an OBJECT IDENTIFIER, or bytes needed when buf is NULL, else 0.           */
+/* --------------------------------------------------------------------------------------------- */
 static uint32_t _EncOIDRaw(uint8_t *buf, uint32_t bufSize, const uint8_t *oidRaw,
                            uint32_t oidRawLen)
 {
     uint32_t n;
 
+    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
+
     if (!SSFASN1EncOIDRaw(buf, bufSize, oidRaw, oidRawLen, &n)) return 0;
     return n;
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Returns bytes for a string of type strTag, or bytes needed when buf is NULL, else 0.         */
+/* --------------------------------------------------------------------------------------------- */
 static uint32_t _EncString(uint8_t *buf, uint32_t bufSize, uint16_t strTag, const uint8_t *str,
                            uint32_t strLen)
 {
     uint32_t n;
 
+    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
+
     if (!SSFASN1EncString(buf, bufSize, strTag, str, strLen, &n)) return 0;
     return n;
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Returns bytes for a BOOLEAN, or bytes needed when buf is NULL, else 0.                      */
+/* --------------------------------------------------------------------------------------------- */
 static uint32_t _EncBool(uint8_t *buf, uint32_t bufSize, bool val)
 {
     uint32_t n;
+
+    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
 
     if (!SSFASN1EncBool(buf, bufSize, val, &n)) return 0;
     return n;
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Returns bytes for an INTEGER from raw octets, or bytes needed when buf is NULL, else 0.      */
+/* --------------------------------------------------------------------------------------------- */
 static uint32_t _EncInt(uint8_t *buf, uint32_t bufSize, const uint8_t *intBuf, uint32_t intLen)
 {
     uint32_t n;
+
+    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
 
     if (!SSFASN1EncInt(buf, bufSize, intBuf, intLen, &n)) return 0;
     return n;
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Returns bytes for an INTEGER from a uint64_t, or bytes needed when buf is NULL, else 0.      */
+/* --------------------------------------------------------------------------------------------- */
 static uint32_t _EncIntU64(uint8_t *buf, uint32_t bufSize, uint64_t val)
 {
     uint32_t n;
+
+    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
 
     if (!SSFASN1EncIntU64(buf, bufSize, val, &n)) return 0;
     return n;
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Returns bytes for a BIT STRING, or bytes needed when buf is NULL, else 0.                   */
+/* --------------------------------------------------------------------------------------------- */
 static uint32_t _EncBitString(uint8_t *buf, uint32_t bufSize, const uint8_t *bits,
                               uint32_t bitsLen, uint8_t unusedBits)
 {
     uint32_t n;
 
+    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
+
     if (!SSFASN1EncBitString(buf, bufSize, bits, bitsLen, unusedBits, &n)) return 0;
     return n;
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Returns bytes for an OCTET STRING, or bytes needed when buf is NULL, else 0.                */
+/* --------------------------------------------------------------------------------------------- */
 static uint32_t _EncOctetString(uint8_t *buf, uint32_t bufSize, const uint8_t *octets,
                                 uint32_t octetsLen)
 {
     uint32_t n;
 
+    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
+
     if (!SSFASN1EncOctetString(buf, bufSize, octets, octetsLen, &n)) return 0;
     return n;
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Returns bytes for a UTCTime, or bytes needed when buf is NULL, else 0.                      */
+/* --------------------------------------------------------------------------------------------- */
 static uint32_t _EncUTCTime(uint8_t *buf, uint32_t bufSize, uint64_t unixSec)
 {
     uint32_t n;
+
+    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
 
     if (!SSFASN1EncUTCTime(buf, bufSize, unixSec, &n)) return 0;
     return n;
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Returns bytes for a tag and length header, or bytes needed when buf is NULL, else 0.        */
+/* --------------------------------------------------------------------------------------------- */
 static uint32_t _EncTagLen(uint8_t *buf, uint32_t bufSize, uint16_t tag, uint32_t contentLen)
 {
     uint32_t n;
+
+    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
 
     if (!SSFASN1EncTagLen(buf, bufSize, tag, contentLen, &n)) return 0;
     return n;
@@ -1061,21 +1122,21 @@ static uint32_t _EncDNAttr(uint8_t *buf, uint32_t bufSize, const uint8_t *oid, u
 {
     _EncDNAttr_t attr;
     _EncNested_t seq;
+    size_t valueLen;
 
     SSF_REQUIRE(oid != NULL);
     SSF_REQUIRE(valueStr != NULL);
 
-    attr.oid = oid;
-    attr.oidLen = oidLen;
-    attr.valueStr = valueStr;
-    attr.valueLen = _StrLen(valueStr);
-
-    /* Value within the RFC 5280 upper bound for this attribute? */
-    if (attr.valueLen > upperBound)
+    /* Value terminated within the RFC 5280 upper bound for this attribute? */
+    if (!SSFStrLen(valueStr, upperBound + 1u, &valueLen))
     {
         /* No, refuse to emit a non-conforming name */
         return 0;
     }
+    attr.oid = oid;
+    attr.oidLen = oidLen;
+    attr.valueStr = valueStr;
+    attr.valueLen = (uint32_t)valueLen;
     seq.tag = SSF_ASN1_TAG_SEQUENCE;
     seq.fn = _EncDNAttrSeqContent;
     seq.arg = &attr;
@@ -1089,12 +1150,18 @@ static bool _EncDNContent(uint8_t *buf, uint32_t bufSize, const void *arg, uint3
 {
     const SSFX509GenName_t *name = (const SSFX509GenName_t *)arg;
     uint32_t pos = 0;
+    size_t cLen;
 
     SSF_REQUIRE(name != NULL);
     SSF_REQUIRE(lenOut != NULL);
 
-    /* countryName is exactly two letters per RFC 5280 Appendix A */
-    if ((name->c != NULL) && (_StrLen(name->c) != _UB_COUNTRY_NAME)) return false;
+    /* countryName present but not exactly two letters (RFC 5280 Appendix A)? */
+    if ((name->c != NULL) &&
+        (!SSFStrLen(name->c, _UB_COUNTRY_NAME + 1u, &cLen) || (cLen != _UB_COUNTRY_NAME)))
+    {
+        /* Yes, malformed */
+        return false;
+    }
 
     if ((name->c != NULL) && !_Add(&pos, _EncDNAttr(_At(buf, pos), _Rem(buf, bufSize, pos),
         _oidC, sizeof(_oidC), name->c, _UB_COUNTRY_NAME))) return false;
@@ -1375,23 +1442,21 @@ static bool _EncSANSeqContent(uint8_t *buf, uint32_t bufSize, const void *arg, u
     const char **dns = p->sanDNSNames;
     const uint8_t **ip = p->sanIPAddrs;
     uint32_t pos = 0;
-    uint32_t dnsLen;
+    size_t dnsLen;
 
     SSF_REQUIRE(p != NULL);
     SSF_REQUIRE(lenOut != NULL);
 
     while ((dns != NULL) && (*dns != NULL))
     {
-        dnsLen = _StrLen(*dns);
-
-        /* dNSName within the DNS name length bound? */
-        if (dnsLen > _UB_DNS_NAME)
+        /* dNSName terminated within the DNS name length bound? */
+        if (!SSFStrLen(*dns, _UB_DNS_NAME + 1u, &dnsLen))
         {
             /* No, refuse to emit it */
             return false;
         }
         if (!_Add(&pos, _EncWrap(_At(buf, pos), _Rem(buf, bufSize, pos), 0x82u,
-                                 (const uint8_t *)*dns, dnsLen))) return false;
+                                 (const uint8_t *)*dns, (uint32_t)dnsLen))) return false;
         dns++;
     }
     while ((ip != NULL) && (*ip != NULL))
@@ -1462,22 +1527,22 @@ static bool _EncSubtreesContent(uint8_t *buf, uint32_t bufSize, const void *arg,
     const uint8_t **ips = s->ips;
     _EncTagged_t gn;
     uint32_t pos = 0;
+    size_t dnsLen;
 
     SSF_REQUIRE(s != NULL);
     SSF_REQUIRE(lenOut != NULL);
 
     while ((dns != NULL) && (*dns != NULL))
     {
-        gn.tag = 0x82u;
-        gn.data = (const uint8_t *)*dns;
-        gn.len = _StrLen(*dns);
-
-        /* dNSName within the DNS name length bound? */
-        if (gn.len > _UB_DNS_NAME)
+        /* dNSName terminated within the DNS name length bound? */
+        if (!SSFStrLen(*dns, _UB_DNS_NAME + 1u, &dnsLen))
         {
             /* No, refuse to emit it */
             return false;
         }
+        gn.tag = 0x82u;
+        gn.data = (const uint8_t *)*dns;
+        gn.len = (uint32_t)dnsLen;
         if (!_Add(&pos, _EncConstructed(_At(buf, pos), _Rem(buf, bufSize, pos),
                                         SSF_ASN1_TAG_SEQUENCE, _EncTaggedContent, &gn)))
             return false;
@@ -1665,25 +1730,36 @@ static bool _EncTBSContent(uint8_t *buf, uint32_t bufSize, const void *arg, uint
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns bytes written, or needed when buf is NULL, for a TBSCertificate, else 0 on failure.   */
+/* Returns true if TBSCertificate encoded, or measured when bufOpt is NULL, with *lenOut set.    */
 /* --------------------------------------------------------------------------------------------- */
-uint32_t SSFX509EncodeTBS(uint8_t *buf, uint32_t bufSize, const SSFX509GenParams_t *params)
+bool SSFX509EncodeTBS(uint8_t *bufOpt, uint32_t bufOptSize, const SSFX509GenParams_t *params,
+                      uint32_t *lenOut)
 {
     uint32_t total;
 
-    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
+    SSF_REQUIRE((bufOpt != NULL) || (bufOptSize == 0u));
     SSF_REQUIRE(params != NULL);
+    SSF_REQUIRE(lenOut != NULL);
 
+    *lenOut = 0;
     total = _EncConstructed(NULL, 0, SSF_ASN1_TAG_SEQUENCE, _EncTBSContent, params);
 
     /* Encodable and within the configured certificate size? */
     if ((total == 0u) || (total > SSF_X509_CONFIG_MAX_CERT_SIZE))
     {
         /* No, both passes report failure */
-        return 0;
+        return false;
     }
-    if (buf == NULL) return total;
-    return _EncConstructed(buf, bufSize, SSF_ASN1_TAG_SEQUENCE, _EncTBSContent, params);
+
+    /* Only measuring? */
+    if (bufOpt == NULL)
+    {
+        /* Yes, report the size needed */
+        *lenOut = total;
+        return true;
+    }
+    *lenOut = _EncConstructed(bufOpt, bufOptSize, SSF_ASN1_TAG_SEQUENCE, _EncTBSContent, params);
+    return (*lenOut != 0u);
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -1693,12 +1769,13 @@ static bool _EncCertContent(uint8_t *buf, uint32_t bufSize, const void *arg, uin
 {
     const _EncCert_t *c = (const _EncCert_t *)arg;
     uint32_t pos = 0;
+    uint32_t tbsLen;
 
     SSF_REQUIRE(c != NULL);
     SSF_REQUIRE(lenOut != NULL);
 
-    if (!_Add(&pos, SSFX509EncodeTBS(_At(buf, pos), _Rem(buf, bufSize, pos), c->params)))
-        return false;
+    if (!SSFX509EncodeTBS(_At(buf, pos), _Rem(buf, bufSize, pos), c->params, &tbsLen)) return false;
+    pos += tbsLen;
     if (!_Add(&pos, _EncAlgIdWithParams(_At(buf, pos), _Rem(buf, bufSize, pos),
                                         c->params->sigAlgOidRaw, c->params->sigAlgOidRawLen,
                                         c->params->sigAlgParams, c->params->sigAlgParamsLen)))
@@ -1710,18 +1787,20 @@ static bool _EncCertContent(uint8_t *buf, uint32_t bufSize, const void *arg, uin
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns bytes written, or needed when buf is NULL, for a Certificate, else 0 on failure.      */
+/* Returns true if Certificate encoded, or measured when bufOpt is NULL, with *lenOut set.       */
 /* --------------------------------------------------------------------------------------------- */
-uint32_t SSFX509EncodeCert(uint8_t *buf, uint32_t bufSize, const SSFX509GenParams_t *params,
-                           const uint8_t *signature, uint32_t signatureLen)
+bool SSFX509EncodeCert(uint8_t *bufOpt, uint32_t bufOptSize, const SSFX509GenParams_t *params,
+                       const uint8_t *signature, uint32_t signatureLen, uint32_t *lenOut)
 {
     _EncCert_t c;
     uint32_t total;
 
-    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
+    SSF_REQUIRE((bufOpt != NULL) || (bufOptSize == 0u));
     SSF_REQUIRE(params != NULL);
     SSF_REQUIRE(signature != NULL);
+    SSF_REQUIRE(lenOut != NULL);
 
+    *lenOut = 0;
     c.params = params;
     c.sig = signature;
     c.sigLen = signatureLen;
@@ -1731,10 +1810,18 @@ uint32_t SSFX509EncodeCert(uint8_t *buf, uint32_t bufSize, const SSFX509GenParam
     if ((total == 0u) || (total > SSF_X509_CONFIG_MAX_CERT_SIZE))
     {
         /* No, both passes report failure */
-        return 0;
+        return false;
     }
-    if (buf == NULL) return total;
-    return _EncConstructed(buf, bufSize, SSF_ASN1_TAG_SEQUENCE, _EncCertContent, &c);
+
+    /* Only measuring? */
+    if (bufOpt == NULL)
+    {
+        /* Yes, report the size needed */
+        *lenOut = total;
+        return true;
+    }
+    *lenOut = _EncConstructed(bufOpt, bufOptSize, SSF_ASN1_TAG_SEQUENCE, _EncCertContent, &c);
+    return (*lenOut != 0u);
 }
 
 /* ========================================================================================== */
@@ -1798,8 +1885,7 @@ bool SSFX509IsRSAPKCS1SHA512(const SSFX509Cert_t *cert)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* SSFX509IsEd25519                                                                              */
-/* Returns true if cert signature algorithm is Ed25519 (RFC 8410, OID 1.3.101.112).              */
+/* Returns true if the signature algorithm is id-Ed25519 (RFC 8410), else false.                 */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFX509IsEd25519(const SSFX509Cert_t *cert)
 {
@@ -1813,60 +1899,68 @@ bool SSFX509IsEd25519(const SSFX509Cert_t *cert)
 /* ========================================================================================== */
 
 /* --------------------------------------------------------------------------------------------- */
-/* Helper: match a hostname against a SAN dNSName entry.                                         */
-/* Simple case-insensitive comparison (no wildcard support).                                      */
+/* Returns true if hostnameStr matches a dNSName SAN value per RFC 6125 Sec. 6.4.3, else false.  */
 /* --------------------------------------------------------------------------------------------- */
-static bool _HostnameMatch(const char *hostname, const uint8_t *sanVal, uint32_t sanValLen)
+static bool _HostnameMatch(const char *hostnameStr, const uint8_t *sanVal, uint32_t sanValLen)
 {
+    const char *dot;
+    size_t hostLenSz;
     uint32_t hostLen;
+    uint32_t domainLen;
+    uint32_t sanDomainLen;
+    uint32_t b;
+    bool baseHasDot = false;
 
-    SSF_ASSERT(hostname != NULL);
-    SSF_ASSERT(sanVal != NULL);
+    SSF_REQUIRE(hostnameStr != NULL);
+    SSF_REQUIRE(sanVal != NULL);
 
-    hostLen = 0;
-    while (hostname[hostLen] != '\0') hostLen++;
-
-    /* Wildcard matching: *.example.com matches www.example.com (RFC 6125 Section 6.4.3).        */
-    /* Additional guard (CA/Browser Forum BRs §3.2.2.6): the base domain after "*." must contain */
-    /* at least one interior '.' so that the wildcard sits below a reasonably specific label.    */
-    /* This rejects "*.com", "*.net", etc. which would otherwise match any second-level domain.  */
-    /* Multi-label public suffixes (e.g. "*.co.uk") are not covered by this heuristic and remain */
-    /* accepted; a Public Suffix List integration would close that remaining gap.                 */
-    if (sanValLen >= 2u && sanVal[0] == '*' && sanVal[1] == '.')
+    /* Hostname terminated within the longest possible DNS name? */
+    if (!SSFStrLen(hostnameStr, _UB_DNS_NAME + 1u, &hostLenSz))
     {
-        /* Find the first '.' in the hostname */
-        const char *dot = hostname;
-        while (*dot != '\0' && *dot != '.') dot++;
-
-        /* Dot found with at least one character before it for the wildcard to match? */
-        if ((*dot == '.') && (dot != hostname))
-        {
-            /* Compare the domain part after the first dot */
-            uint32_t domainLen = hostLen - (uint32_t)(dot - hostname);
-            uint32_t sanDomainLen = sanValLen - 2u; /* skip "*." */
-            if (domainLen == sanDomainLen + 1u) /* +1 for the dot */
-            {
-                /* Label-count floor: the SAN's base (bytes after "*.") must contain a dot. */
-                uint32_t b;
-                bool baseHasDot = false;
-                for (b = 2u; b < sanValLen; b++)
-                {
-                    if (sanVal[b] == (uint8_t)'.') { baseHasDot = true; break; }
-                }
-                if (!baseHasDot) return false;
-                return SSFMatchStrNI(dot, (SSFCStrIn_t)&sanVal[1], sanDomainLen + 1u);
-            }
-        }
+        /* No, nothing that long can match a dNSName */
         return false;
     }
+    hostLen = (uint32_t)hostLenSz;
 
-    /* Exact match (case-insensitive) */
+    /* Wildcard SAN of the form "*.base"? */
+    if ((sanValLen >= 2u) && (sanVal[0] == (uint8_t)'*') && (sanVal[1] == (uint8_t)'.'))
+    {
+        /* Yes, the wildcard stands for exactly the leftmost hostname label */
+        dot = hostnameStr;
+        while ((*dot != '\0') && (*dot != '.')) dot++;
+
+        /* Leftmost label is non-empty and followed by a dot? */
+        if ((*dot != '.') || (dot == hostnameStr))
+        {
+            /* No, nothing for the wildcard to match */
+            return false;
+        }
+
+        /* Rest of the hostname is exactly ".base"? */
+        domainLen = hostLen - (uint32_t)(dot - hostnameStr);
+        sanDomainLen = sanValLen - 2u;
+        if (domainLen != (sanDomainLen + 1u)) return false;
+
+        /* Base has an interior dot, so "*.com" wildcards never match (CA/B Forum BR 3.2.2.6)? */
+        for (b = 2u; b < sanValLen; b++)
+        {
+            if (sanVal[b] == (uint8_t)'.')
+            {
+                baseHasDot = true;
+                break;
+            }
+        }
+        if (!baseHasDot) return false;
+        return SSFMatchStrNI(dot, (SSFCStrIn_t)&sanVal[1], sanDomainLen + 1u);
+    }
+
+    /* No, exact match ignoring ASCII case */
     if (hostLen != sanValLen) return false;
-    return SSFMatchStrNI(hostname, (SSFCStrIn_t)sanVal, hostLen);
+    return SSFMatchStrNI(hostnameStr, (SSFCStrIn_t)sanVal, hostLen);
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Helper: parse an IPv4 dotted-decimal string into 4 bytes. Returns true if valid.              */
+/* Returns true if str is a dotted-decimal IPv4 address written into ipOut, else false.          */
 /* --------------------------------------------------------------------------------------------- */
 static bool _ParseIPv4(const char *str, uint8_t ipOut[4])
 {
@@ -1874,21 +1968,27 @@ static bool _ParseIPv4(const char *str, uint8_t ipOut[4])
     uint32_t i;
     uint32_t digitCount;
 
+    SSF_REQUIRE(str != NULL);
+    SSF_REQUIRE(ipOut != NULL);
+
     for (i = 0; i < 4u; i++)
     {
         octet = 0;
         digitCount = 0;
-        while (*str >= '0' && *str <= '9')
+        while ((*str >= '0') && (*str <= '9'))
         {
-            octet = octet * 10u + (uint32_t)(*str - '0');
+            octet = (octet * 10u) + (uint32_t)(*str - '0');
             if (octet > 255u) return false;
             str++;
             digitCount++;
         }
         if (digitCount == 0u) return false;
         ipOut[i] = (uint8_t)octet;
+
+        /* More octets to come? */
         if (i < 3u)
         {
+            /* Yes, a dot must separate them */
             if (*str != '.') return false;
             str++;
         }
@@ -1897,53 +1997,52 @@ static bool _ParseIPv4(const char *str, uint8_t ipOut[4])
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Helper: match a hostname string against a SAN iPAddress entry (RFC 5280 Section 4.2.1.6).     */
+/* Returns true if hostnameStr is an IPv4 literal equal to a 4-byte iPAddress SAN, else false.   */
 /* --------------------------------------------------------------------------------------------- */
-static bool _IPAddressMatch(const char *hostname, const uint8_t *sanIP, uint32_t sanIPLen)
+static bool _IPAddressMatch(const char *hostnameStr, const uint8_t *sanIP, uint32_t sanIPLen)
 {
     uint8_t parsedIP[4];
 
-    /* Only support IPv4 (4 bytes) */
+    SSF_REQUIRE(hostnameStr != NULL);
+    SSF_REQUIRE(sanIP != NULL);
+
+    /* Only IPv4 SAN entries are supported */
     if (sanIPLen != 4u) return false;
-
-    /* Try to parse hostname as IPv4 */
-    if (!_ParseIPv4(hostname, parsedIP)) return false;
-
+    if (!_ParseIPv4(hostnameStr, parsedIP)) return false;
     return (memcmp(parsedIP, sanIP, 4u) == 0);
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Public wrapper for IP address SAN matching.                                                   */
+/* Returns true if hostnameStr is an IPv4 literal equal to the iPAddress SAN value, else false.   */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFX509MatchIPAddress(const char *hostname, const uint8_t *sanIP, uint32_t sanIPLen)
+bool SSFX509MatchIPAddress(const char *hostnameStr, const uint8_t *sanIP, uint32_t sanIPLen)
 {
-    SSF_REQUIRE(hostname != NULL);
+    SSF_REQUIRE(hostnameStr != NULL);
     SSF_REQUIRE(sanIP != NULL);
-    return _IPAddressMatch(hostname, sanIP, sanIPLen);
+
+    return _IPAddressMatch(hostnameStr, sanIP, sanIPLen);
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Verify the signature on cert using issuer's public key.                                       */
+/* Returns true if cert's signature over its TBS verifies with issuer's public key, else false.   */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFX509VerifyCertSignature(const SSFX509Cert_t *cert, const SSFX509Cert_t *issuer)
 {
+    SSFECCurve_t curve;
+    SSFRSAHash_t rsaHash;
+    uint8_t hash[SSF_SHA2_512_BYTE_SIZE];
+    size_t hashLen;
+    uint32_t saltLen;
+    bool ok;
+
     SSF_REQUIRE(cert != NULL);
     SSF_REQUIRE(issuer != NULL);
     SSF_REQUIRE(cert->tbsRaw != NULL);
     SSF_REQUIRE(cert->signature != NULL);
 
-    /* Determine signature algorithm and hash the TBS */
+    /* ECDSA: the sigAlg OID selects the hash, the issuer's SPKI selects the curve (RFC 5758 3.2) */
     if (SSFX509IsECDSA(cert) || SSFX509IsECDSASHA384(cert))
     {
-        /* ECDSA signature. Per RFC 5758 §3.2: the sigAlg OID specifies the HASH; the curve    */
-        /* comes from the ISSUER's SubjectPublicKeyInfo. The two are independent — e.g.         */
-        /* ecdsa-with-SHA256 may pair with a P-384 public key (real-world example: SSL.com Root */
-        /* Certification Authority ECC).                                                          */
-        SSFECCurve_t curve;
-        uint8_t hash[SSF_SHA2_384_BYTE_SIZE];
-        size_t hashLen;
-
-        /* Hash from sigAlg */
         if (SSFX509IsECDSA(cert))
         {
             hashLen = SSF_SHA2_256_BYTE_SIZE;
@@ -1955,7 +2054,7 @@ bool SSFX509VerifyCertSignature(const SSFX509Cert_t *cert, const SSFX509Cert_t *
             SSFSHA384(cert->tbsRaw, cert->tbsRawLen, hash, (uint32_t)hashLen);
         }
 
-        /* Curve from the issuer's SPKI (ecCurveOidRaw is the parameter of id-ecPublicKey). */
+        /* Issuer key on a supported curve? */
         if (SSFX509IsP256(issuer))
         {
             curve = SSF_EC_CURVE_P256;
@@ -1966,30 +2065,26 @@ bool SSFX509VerifyCertSignature(const SSFX509Cert_t *cert, const SSFX509Cert_t *
         }
         else
         {
+            /* No, nothing to verify with */
             SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
                 "VerifyCertSig: ECDSA issuer curve OID not recognized (%u bytes)",
                 issuer->ecCurveOidRawLen);
             return false;
         }
 
-        /* The issuer's pubKey is the BIT STRING content (unused-bits byte already stripped by    */
-        /* parser). It is SEC 1 uncompressed: 0x04 || X || Y.                                    */
-        {
-            bool ok = SSFECDSAVerify(curve, issuer->pubKey, (size_t)issuer->pubKeyLen,
-                                     hash, hashLen, cert->signature, (size_t)cert->signatureLen);
-            SSF_TLS_TRACE_CERT_DEBUG(&_ssfx509TraceCtx, "VerifyCertSig: ECDSA curve=%d pubKeyLen=%u sigLen=%u -> %s",
-                          curve, issuer->pubKeyLen, cert->signatureLen, ok ? "OK" : "FAIL");
-            return ok;
-        }
+        /* Issuer pubKey is the SEC 1 uncompressed point held in the SPKI BIT STRING */
+        ok = SSFECDSAVerify(curve, issuer->pubKey, (size_t)issuer->pubKeyLen, hash, hashLen,
+                            cert->signature, (size_t)cert->signatureLen);
+        SSF_TLS_TRACE_CERT_DEBUG(&_ssfx509TraceCtx,
+            "VerifyCertSig: ECDSA curve=%d pubKeyLen=%u sigLen=%u -> %s", curve, issuer->pubKeyLen,
+            cert->signatureLen, ok ? "OK" : "FAIL");
+        return ok;
     }
-    else if (SSFX509IsRSAPKCS1SHA256(cert) || SSFX509IsRSAPKCS1SHA384(cert) ||
-             SSFX509IsRSAPKCS1SHA512(cert))
-    {
-        /* RSA PKCS#1 v1.5 signature */
-        SSFRSAHash_t rsaHash;
-        uint8_t hash[SSF_SHA2_512_BYTE_SIZE];
-        size_t hashLen;
 
+    /* RSA PKCS#1 v1.5: the sigAlg OID selects the hash */
+    if (SSFX509IsRSAPKCS1SHA256(cert) || SSFX509IsRSAPKCS1SHA384(cert) ||
+        SSFX509IsRSAPKCS1SHA512(cert))
+    {
         if (SSFX509IsRSAPKCS1SHA256(cert))
         {
             rsaHash = SSF_RSA_HASH_SHA256;
@@ -2009,26 +2104,19 @@ bool SSFX509VerifyCertSignature(const SSFX509Cert_t *cert, const SSFX509Cert_t *
             SSFSHA512(cert->tbsRaw, cert->tbsRawLen, hash, (uint32_t)hashLen);
         }
 
-        /* The issuer's pubKey is the BIT STRING content of the SPKI, which for RSA is the       */
-        /* DER-encoded RSAPublicKey (SEQUENCE { INTEGER n, INTEGER e }).                          */
-        {
-            bool ok = SSFRSAVerifyPKCS1(issuer->pubKey, (size_t)issuer->pubKeyLen,
-                                        rsaHash, hash, hashLen,
-                                        cert->signature, (size_t)cert->signatureLen);
-            SSF_TLS_TRACE_CERT_DEBUG(&_ssfx509TraceCtx, "VerifyCertSig: RSA-PKCS1 hash=%d pubKeyLen=%u sigLen=%u -> %s",
-                          rsaHash, issuer->pubKeyLen, cert->signatureLen, ok ? "OK" : "FAIL");
-            return ok;
-        }
+        /* Issuer pubKey is the DER RSAPublicKey held in the SPKI BIT STRING */
+        ok = SSFRSAVerifyPKCS1(issuer->pubKey, (size_t)issuer->pubKeyLen, rsaHash, hash, hashLen,
+                               cert->signature, (size_t)cert->signatureLen);
+        SSF_TLS_TRACE_CERT_DEBUG(&_ssfx509TraceCtx,
+            "VerifyCertSig: RSA-PKCS1 hash=%d pubKeyLen=%u sigLen=%u -> %s", rsaHash,
+            issuer->pubKeyLen, cert->signatureLen, ok ? "OK" : "FAIL");
+        return ok;
     }
-    else if (SSFX509IsRSAPSSSHA256(cert))
+
+    /* RSA-PSS: the signed PSS parameters select the hash and salt length (RFC 4055) */
+    if (SSFX509IsRSAPSSSHA256(cert))
     {
-        /* RSA-PSS signature — determine hash algorithm from PSS parameters (RFC 4055).          */
-        SSFRSAHash_t rsaHash;
-        uint8_t hash[SSF_SHA2_512_BYTE_SIZE];
-        size_t hashLen;
-
-        rsaHash = _ParsePSSHashAlg(cert->sigAlgParams, cert->sigAlgParamsLen);
-
+        _ParsePSSParams(cert->sigAlgParams, cert->sigAlgParamsLen, &rsaHash, &saltLen);
         switch (rsaHash)
         {
             case SSF_RSA_HASH_SHA256:
@@ -2047,67 +2135,87 @@ bool SSFX509VerifyCertSignature(const SSFX509Cert_t *cert, const SSFX509Cert_t *
                 return false;
         }
 
+        /* Salt length within what the verifier supports? */
+        if (saltLen > hashLen)
         {
-            bool ok = SSFRSAVerifyPSS(issuer->pubKey, (size_t)issuer->pubKeyLen,
-                                       rsaHash, hash, hashLen,
-                                       cert->signature, (size_t)cert->signatureLen);
-            SSF_TLS_TRACE_CERT_DEBUG(&_ssfx509TraceCtx, "VerifyCertSig: RSA-PSS hash=%d pubKeyLen=%u sigLen=%u -> %s",
-                          rsaHash, issuer->pubKeyLen, cert->signatureLen, ok ? "OK" : "FAIL");
-            return ok;
-        }
-    }
-
-    else if (SSFX509IsEd25519(cert))
-    {
-        /* Ed25519 signs the raw message (TBS), not a pre-hash. RFC 8410.                         */
-        /* The issuer's subjectPublicKey (BIT STRING content) is the 32-byte compressed Edwards   */
-        /* point. Signature is 64 bytes.                                                          */
-        bool ok;
-        if (issuer->pubKeyLen != SSF_ED25519_PUB_KEY_SIZE ||
-            cert->signatureLen != SSF_ED25519_SIG_SIZE)
-        {
+            /* No, longer than the hash is never issued and is not accepted */
             SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
-                          "VerifyCertSig: Ed25519 bad key/sig size (pubKey=%u sig=%u)",
-                          issuer->pubKeyLen, cert->signatureLen);
+                "VerifyCertSig: RSA-PSS saltLength %u exceeds hash length %u", saltLen,
+                (unsigned int)hashLen);
             return false;
         }
-        ok = SSFEd25519Verify(issuer->pubKey, cert->tbsRaw, cert->tbsRawLen, cert->signature);
-        SSF_TLS_TRACE_CERT_DEBUG(&_ssfx509TraceCtx, "VerifyCertSig: Ed25519 pubKeyLen=%u sigLen=%u -> %s",
-                      issuer->pubKeyLen, cert->signatureLen, ok ? "OK" : "FAIL");
+        ok = SSFRSAVerifyPSS(issuer->pubKey, (size_t)issuer->pubKeyLen, rsaHash, hash, hashLen,
+                             (size_t)saltLen, cert->signature, (size_t)cert->signatureLen);
+        SSF_TLS_TRACE_CERT_DEBUG(&_ssfx509TraceCtx,
+            "VerifyCertSig: RSA-PSS hash=%d pubKeyLen=%u sigLen=%u -> %s", rsaHash,
+            issuer->pubKeyLen, cert->signatureLen, ok ? "OK" : "FAIL");
         return ok;
     }
 
-    /* Unsupported signature algorithm */
+    /* Ed25519 signs the TBS itself (RFC 8410); key and signature sizes are fixed */
+    if (SSFX509IsEd25519(cert))
+    {
+        /* Key and signature the sizes Ed25519 defines? */
+        if ((issuer->pubKeyLen != SSF_ED25519_PUB_KEY_SIZE) ||
+            (cert->signatureLen != SSF_ED25519_SIG_SIZE))
+        {
+            /* No, malformed */
+            SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+                "VerifyCertSig: Ed25519 bad key/sig size (pubKey=%u sig=%u)", issuer->pubKeyLen,
+                cert->signatureLen);
+            return false;
+        }
+        ok = SSFEd25519Verify(issuer->pubKey, cert->tbsRaw, cert->tbsRawLen, cert->signature);
+        SSF_TLS_TRACE_CERT_DEBUG(&_ssfx509TraceCtx,
+            "VerifyCertSig: Ed25519 pubKeyLen=%u sigLen=%u -> %s", issuer->pubKeyLen,
+            cert->signatureLen, ok ? "OK" : "FAIL");
+        return ok;
+    }
+
     SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx, "VerifyCertSig: unsupported sigAlg OID (%u bytes)",
-                  cert->sigAlgOidRawLen);
+                             cert->sigAlgOidRawLen);
     return false;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Check SKID/AKID consistency. Returns true if consistent (match or either absent).             */
+/* Returns true if cert's AKID and issuer's SKID match or either is absent, else false.          */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFX509CheckSKIDAKID(const SSFX509Cert_t *cert, const SSFX509Cert_t *issuer)
 {
     SSF_REQUIRE(cert != NULL);
     SSF_REQUIRE(issuer != NULL);
 
-    if (cert->akid == NULL || cert->akidLen == 0) return true;
-    if (issuer->skid == NULL || issuer->skidLen == 0) return true;
-
+    if ((cert->akid == NULL) || (cert->akidLen == 0u)) return true;
+    if ((issuer->skid == NULL) || (issuer->skidLen == 0u)) return true;
     if (cert->akidLen != issuer->skidLen) return false;
     return (memcmp(cert->akid, issuer->skid, cert->akidLen) == 0);
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Name Constraints matching helpers (RFC 5280 Section 4.2.1.10)                                 */
+/* Returns true if issuer and subject Names are byte-identical raw DER, else false.              */
 /* --------------------------------------------------------------------------------------------- */
-
-/* Match a DNS name against a dNSName constraint per RFC 5280 §4.2.1.10.                         */
-/* Constraint "example.com" matches "example.com" and "*.example.com" sub-labels (e.g.            */
-/* "foo.example.com") but not "notexample.com". Empty constraint matches any name.                */
-static bool _NCDNSMatch(const uint8_t *name, uint32_t nameLen,
-                         const uint8_t *constraint, uint32_t constraintLen)
+static bool _NameEquals(const SSFX509Name_t *issuer, const SSFX509Name_t *subject)
 {
+    SSF_REQUIRE(issuer != NULL);
+    SSF_REQUIRE(subject != NULL);
+
+    if ((issuer->raw == NULL) || (subject->raw == NULL)) return false;
+    if (issuer->rawLen != subject->rawLen) return false;
+    return (memcmp(issuer->raw, subject->raw, issuer->rawLen) == 0);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if a dNSName satisfies a dNSName constraint (RFC 5280 Sec. 4.2.1.10), else false. */
+/* --------------------------------------------------------------------------------------------- */
+static bool _NCDNSMatch(const uint8_t *name, uint32_t nameLen, const uint8_t *constraint,
+                        uint32_t constraintLen)
+{
+    uint32_t offset;
+
+    SSF_REQUIRE(name != NULL);
+    SSF_REQUIRE((constraint != NULL) || (constraintLen == 0u));
+
+    /* An empty constraint matches every name */
     if (constraintLen == 0u) return true;
 
     /* Leading-dot form used by some CAs, meaning proper subdomains only? */
@@ -2118,108 +2226,150 @@ static bool _NCDNSMatch(const uint8_t *name, uint32_t nameLen,
         return SSFMatchStrNI((const char *)&name[nameLen - constraintLen],
                              (SSFCStrIn_t)constraint, constraintLen);
     }
+
+    /* No, the name is the constraint itself or ends with "." followed by the constraint */
     if (nameLen < constraintLen) return false;
-    {
-        uint32_t offset = nameLen - constraintLen;
-        /* Exact match: offset == 0. Otherwise the char before the suffix must be '.' so that    */
-        /* the constraint applies at a label boundary (prevents "notexample.com" matching        */
-        /* "example.com").                                                                        */
-        if (offset != 0u && name[offset - 1u] != (uint8_t)'.') return false;
-        return SSFMatchStrNI((const char *)&name[offset],
-                              (SSFCStrIn_t)constraint, constraintLen);
-    }
+    offset = nameLen - constraintLen;
+    if ((offset != 0u) && (name[offset - 1u] != (uint8_t)'.')) return false;
+    return SSFMatchStrNI((const char *)&name[offset], (SSFCStrIn_t)constraint, constraintLen);
 }
 
-/* Match an IPv4 address against an iPAddress constraint (8 bytes: addr(4) || mask(4)).          */
-static bool _NCIPMatch(const uint8_t *ip, uint32_t ipLen,
-                        const uint8_t *constraint, uint32_t constraintLen)
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if a 4-byte IPv4 SAN lies within an 8-byte address plus mask constraint.         */
+/* --------------------------------------------------------------------------------------------- */
+static bool _NCIPMatch(const uint8_t *ip, uint32_t ipLen, const uint8_t *constraint,
+                       uint32_t constraintLen)
 {
-    if (ipLen == 4u && constraintLen == 8u)
+    uint32_t i;
+
+    SSF_REQUIRE(ip != NULL);
+    SSF_REQUIRE(constraint != NULL);
+
+    /* Only IPv4 constraints are supported */
+    if ((ipLen != 4u) || (constraintLen != 8u)) return false;
+    for (i = 0; i < 4u; i++)
     {
-        uint32_t i;
-        for (i = 0; i < 4u; i++)
-        {
-            if ((ip[i] & constraint[4u + i]) != (constraint[i] & constraint[4u + i]))
-                return false;
-        }
-        return true;
-    }
-    /* IPv6 (16 + 16 bytes) support could be added when IPv6 SANs are supported. */
-    return false;
-}
-
-/* Validate that a subordinate cert's SANs conform to the NC of an ancestor cert.                */
-/* Returns true if the cert is acceptable; false if any SAN violates permitted or excluded.      */
-/* The ancestor's name-constraint arrays must describe valid (type, val, valLen) entries.         */
-static bool _NCValidateCert(const SSFX509Cert_t *subCert, const SSFX509Cert_t *ncCert)
-{
-    uint8_t s;
-
-    for (s = 0; s < subCert->sanLen; s++)
-    {
-        const SSFX509SAN_t *san = &subCert->san[s];
-        uint8_t k;
-
-        /* Check excluded: any match means reject. */
-        for (k = 0; k < ncCert->excludedLen; k++)
-        {
-            const SSFX509NameConstraint_t *c = &ncCert->excludedSubtrees[k];
-            if (c->type != san->type) continue;
-            if (c->type == SSF_X509_SAN_DNS)
-            {
-                if (_NCDNSMatch(san->val, san->valLen, c->val, c->valLen)) return false;
-            }
-            else if (c->type == SSF_X509_SAN_IP)
-            {
-                if (_NCIPMatch(san->val, san->valLen, c->val, c->valLen)) return false;
-            }
-        }
-
-        /* Check permitted: if any permitted entry of the SAN's type exists, at least one must  */
-        /* match. If no permitted entry of the SAN's type exists, that type is unrestricted.     */
-        {
-            bool typeHasPermitted = false;
-            bool typeMatched = false;
-            for (k = 0; k < ncCert->permittedLen; k++)
-            {
-                const SSFX509NameConstraint_t *c = &ncCert->permittedSubtrees[k];
-                if (c->type != san->type) continue;
-                typeHasPermitted = true;
-                if (c->type == SSF_X509_SAN_DNS)
-                {
-                    if (_NCDNSMatch(san->val, san->valLen, c->val, c->valLen))
-                    {
-                        typeMatched = true;
-                        break;
-                    }
-                }
-                else if (c->type == SSF_X509_SAN_IP)
-                {
-                    if (_NCIPMatch(san->val, san->valLen, c->val, c->valLen))
-                    {
-                        typeMatched = true;
-                        break;
-                    }
-                }
-            }
-            if (typeHasPermitted && !typeMatched) return false;
-        }
+        if ((ip[i] & constraint[4u + i]) != (constraint[i] & constraint[4u + i])) return false;
     }
     return true;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Verify a certificate chain.                                                                   */
+/* Returns true if one SAN entry matches one Name Constraints subtree of the same type.          */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFX509VerifyChain(const uint8_t **chainDer, const uint32_t *chainDerLen,
-                        uint8_t chainLen,
-                        const uint8_t **trustDer, const uint32_t *trustDerLen,
-                        uint8_t trustCount,
-                        const char *hostname, uint64_t nowUnixSec)
+static bool _NCSubtreeMatch(const SSFX509SAN_t *san, const SSFX509NameConstraint_t *subtree)
+{
+    SSF_REQUIRE(san != NULL);
+    SSF_REQUIRE(subtree != NULL);
+
+    if (subtree->type != san->type) return false;
+    if (subtree->type == SSF_X509_SAN_DNS)
+    {
+        return _NCDNSMatch(san->val, san->valLen, subtree->val, subtree->valLen);
+    }
+    if (subtree->type == SSF_X509_SAN_IP)
+    {
+        return _NCIPMatch(san->val, san->valLen, subtree->val, subtree->valLen);
+    }
+    return false;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if every SAN of subCert satisfies ncCert's Name Constraints, else false.         */
+/* --------------------------------------------------------------------------------------------- */
+static bool _NCValidateCert(const SSFX509Cert_t *subCert, const SSFX509Cert_t *ncCert)
+{
+    const SSFX509SAN_t *san;
+    bool typeHasPermitted;
+    bool typeMatched;
+    uint8_t s;
+    uint8_t k;
+
+    SSF_REQUIRE(subCert != NULL);
+    SSF_REQUIRE(ncCert != NULL);
+
+    for (s = 0; s < subCert->sanLen; s++)
+    {
+        san = &subCert->san[s];
+
+        /* Any excluded subtree matching this SAN rejects the certificate */
+        for (k = 0; k < ncCert->excludedLen; k++)
+        {
+            if (_NCSubtreeMatch(san, &ncCert->excludedSubtrees[k])) return false;
+        }
+
+        /* With permitted subtrees of this SAN's type present, one of them must match */
+        typeHasPermitted = false;
+        typeMatched = false;
+        for (k = 0; k < ncCert->permittedLen; k++)
+        {
+            if (ncCert->permittedSubtrees[k].type != san->type) continue;
+            typeHasPermitted = true;
+            if (_NCSubtreeMatch(san, &ncCert->permittedSubtrees[k]))
+            {
+                typeMatched = true;
+                break;
+            }
+        }
+        if (typeHasPermitted && !typeMatched) return false;
+    }
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if a critical extension OID is one this verifier understands, else false.        */
+/* --------------------------------------------------------------------------------------------- */
+static bool _IsKnownExtension(const uint8_t *oidRaw, uint32_t oidRawLen)
+{
+    SSF_REQUIRE(oidRaw != NULL);
+
+    return _OIDMatch(oidRaw, oidRawLen, _oidBasicConstraints, sizeof(_oidBasicConstraints)) ||
+           _OIDMatch(oidRaw, oidRawLen, _oidKeyUsage, sizeof(_oidKeyUsage)) ||
+           _OIDMatch(oidRaw, oidRawLen, _oidSAN, sizeof(_oidSAN)) ||
+           _OIDMatch(oidRaw, oidRawLen, _oidSKID, sizeof(_oidSKID)) ||
+           _OIDMatch(oidRaw, oidRawLen, _oidAKID, sizeof(_oidAKID)) ||
+           _OIDMatch(oidRaw, oidRawLen, _oidEKU, sizeof(_oidEKU)) ||
+           _OIDMatch(oidRaw, oidRawLen, _oidNameConstraints, sizeof(_oidNameConstraints));
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if the trust anchor named as issuer of the last chain cert parses into *anchor.  */
+/* --------------------------------------------------------------------------------------------- */
+static bool _FindTrustAnchorByName(const SSFX509Cert_t *last, const uint8_t **trustDer,
+                                   const uint32_t *trustDerLen, uint8_t trustCount,
+                                   SSFX509Cert_t *anchor)
+{
+    uint8_t j;
+
+    SSF_REQUIRE(last != NULL);
+    SSF_REQUIRE(trustDer != NULL);
+    SSF_REQUIRE(trustDerLen != NULL);
+    SSF_REQUIRE(anchor != NULL);
+
+    for (j = 0; j < trustCount; j++)
+    {
+        if (!SSFX509Parse(trustDer[j], trustDerLen[j], anchor)) continue;
+        if (_NameEquals(&last->issuer, &anchor->subject)) return true;
+    }
+    return false;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if chainDer[0] validates to a trust anchor and is issued for hostnameStr.        */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFX509VerifyChain(const uint8_t **chainDer, const uint32_t *chainDerLen, uint8_t chainLen,
+                        const uint8_t **trustDer, const uint32_t *trustDerLen, uint8_t trustCount,
+                        const char *hostnameStr, uint64_t nowUnixSec)
 {
     SSFX509Cert_t certs[SSF_X509_CONFIG_MAX_CHAIN_DEPTH];
+    SSFX509Cert_t anchor;
+    const SSFX509Cert_t *last;
+    bool trusted = false;
+    bool matched = false;
+    uint8_t numSubCAs;
     uint8_t i;
     uint8_t j;
+    uint8_t e;
 
     SSF_REQUIRE(chainDer != NULL);
     SSF_REQUIRE(chainDerLen != NULL);
@@ -2228,312 +2378,238 @@ bool SSFX509VerifyChain(const uint8_t **chainDer, const uint32_t *chainDerLen,
     SSF_REQUIRE(trustDer != NULL);
     SSF_REQUIRE(trustDerLen != NULL);
     SSF_REQUIRE(trustCount >= 1u);
-    SSF_REQUIRE(hostname != NULL);
-    SSF_REQUIRE(hostname[0] != '\0');
+    SSF_REQUIRE(hostnameStr != NULL);
+    SSF_REQUIRE(hostnameStr[0] != '\0');
 
-    /* Parse all chain certificates */
     for (i = 0; i < chainLen; i++)
     {
         SSF_REQUIRE(chainDer[i] != NULL);
+
+        /* Chain certificate parses? */
         if (!SSFX509Parse(chainDer[i], chainDerLen[i], &certs[i]))
-        { SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx, "Chain: parse cert[%u] failed (%u bytes)", i, chainDerLen[i]);
-          return false; }
-    }
-
-    /* Reject v1/v2 certificates (RFC 5280 Section 6.1.1(c): all certs must be v3) */
-    for (i = 0; i < chainLen; i++)
-    {
-        if (certs[i].version != 2u)
-        { SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx, "Chain: cert[%u] is v%u (must be v3)",
-                        i, certs[i].version + 1u);
-          return false; }
-    }
-
-    /* Verify signature algorithm consistency (RFC 5280 Section 4.1.2.3) */
-    for (i = 0; i < chainLen; i++)
-    {
-        if (certs[i].outerSigAlgOidRaw != NULL && certs[i].sigAlgOidRaw != NULL)
         {
-            if (certs[i].sigAlgOidRawLen != certs[i].outerSigAlgOidRawLen ||
-                memcmp(certs[i].sigAlgOidRaw, certs[i].outerSigAlgOidRaw,
-                       certs[i].sigAlgOidRawLen) != 0)
-            { SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
-                  "Chain: cert[%u] TBS sigAlg OID (%u bytes) != outer sigAlg OID (%u bytes)",
-                  i, certs[i].sigAlgOidRawLen, certs[i].outerSigAlgOidRawLen);
-              return false; }
+            /* No, malformed */
+            SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx, "Chain: parse cert[%u] failed (%u bytes)",
+                                     i, chainDerLen[i]);
+            return false;
+        }
 
-            /* Parameters differ between the signed TBS copy and the unsigned outer copy? */
-            if ((certs[i].sigAlgParamsLen != certs[i].outerSigAlgParamsLen) ||
-                ((certs[i].sigAlgParamsLen > 0u) &&
-                 (memcmp(certs[i].sigAlgParams, certs[i].outerSigAlgParams,
-                         certs[i].sigAlgParamsLen) != 0)))
-            {
-                /* Yes, RFC 5280 Section 4.1.1.2 requires the identifiers to be identical */
-                SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
-                    "Chain: cert[%u] TBS sigAlg params (%u bytes) != outer params (%u bytes)",
-                    i, certs[i].sigAlgParamsLen, certs[i].outerSigAlgParamsLen);
-                return false;
-            }
+        /* Version 3 as RFC 5280 Sec. 6.1.1 (c) requires of every chain certificate? */
+        if (certs[i].version != 2u)
+        {
+            /* No, v1 and v2 certificates cannot carry the extensions this path relies on */
+            SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx, "Chain: cert[%u] is v%u (must be v3)", i,
+                                     certs[i].version + 1u);
+            return false;
+        }
+
+        /* TBS signature algorithm OID equals the outer signatureAlgorithm OID (Sec. 4.1.2.3)? */
+        if ((certs[i].sigAlgOidRawLen != certs[i].outerSigAlgOidRawLen) ||
+            (memcmp(certs[i].sigAlgOidRaw, certs[i].outerSigAlgOidRaw,
+                    certs[i].sigAlgOidRawLen) != 0))
+        {
+            /* No, the unsigned outer copy disagrees with the signed one */
+            SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+                "Chain: cert[%u] TBS sigAlg OID (%u bytes) != outer sigAlg OID (%u bytes)", i,
+                certs[i].sigAlgOidRawLen, certs[i].outerSigAlgOidRawLen);
+            return false;
+        }
+
+        /* Signature algorithm parameters identical as well (Sec. 4.1.1.2)? */
+        if ((certs[i].sigAlgParamsLen != certs[i].outerSigAlgParamsLen) ||
+            ((certs[i].sigAlgParamsLen > 0u) &&
+             (memcmp(certs[i].sigAlgParams, certs[i].outerSigAlgParams,
+                     certs[i].sigAlgParamsLen) != 0)))
+        {
+            /* No */
+            SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+                "Chain: cert[%u] TBS sigAlg params (%u bytes) != outer params (%u bytes)", i,
+                certs[i].sigAlgParamsLen, certs[i].outerSigAlgParamsLen);
+            return false;
+        }
+
+        /* Within its validity period at nowUnixSec? */
+        if (!SSFX509IsValid(&certs[i], nowUnixSec))
+        {
+            /* No */
+            SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+                "Chain: cert[%u] not valid at time %llu (notBefore=%llu notAfter=%llu)", i,
+                (unsigned long long)nowUnixSec, (unsigned long long)certs[i].notBefore,
+                (unsigned long long)certs[i].notAfter);
+            return false;
         }
     }
+    last = &certs[chainLen - 1u];
 
-    /* Verify temporal validity of each certificate */
-    for (i = 0; i < chainLen; i++)
-    {
-        if (!SSFX509IsValid(&certs[i], nowUnixSec))
-        { SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx, "Chain: cert[%u] not valid at time %llu (notBefore=%llu notAfter=%llu)",
-                        i, (unsigned long long)nowUnixSec,
-                        (unsigned long long)certs[i].notBefore,
-                        (unsigned long long)certs[i].notAfter);
-          return false; }
-    }
-
-    /* Verify signature chain: cert[i] signed by cert[i+1] */
+    /* Each cert[i] is named for, signed by, and key-linked to cert[i + 1] */
     for (i = 0; i < (uint8_t)(chainLen - 1u); i++)
     {
-        /* Issuer name of cert[i] is the subject name of cert[i+1] (RFC 5280 6.1.3 (a)(4))? */
-        if ((certs[i].issuer.raw == NULL) || (certs[i + 1u].subject.raw == NULL) ||
-            (certs[i].issuer.rawLen != certs[i + 1u].subject.rawLen) ||
-            (memcmp(certs[i].issuer.raw, certs[i + 1u].subject.raw, certs[i].issuer.rawLen) != 0))
+        /* Issuer name of cert[i] is the subject name of cert[i + 1] (Sec. 6.1.3 (a)(4))? */
+        if (!_NameEquals(&certs[i].issuer, &certs[i + 1u].subject))
         {
             /* No, the chain is not linked by name even if the key happens to verify */
             SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
                 "Chain: cert[%u] issuer name does not match cert[%u] subject name", i, i + 1u);
             return false;
         }
+
+        /* Signature of cert[i] verifies with the key of cert[i + 1]? */
         if (!SSFX509VerifyCertSignature(&certs[i], &certs[i + 1u]))
-        { SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx, "Chain: cert[%u] signature by cert[%u] FAILED", i, i + 1u);
-          return false; }
-
-        /* RFC 5280 Section 4.2.1.1: SKID/AKID cross-check.                                    */
-        /* If cert[i] has AKID and cert[i+1] has SKID, they must match.                         */
-        if (certs[i].akid != NULL && certs[i].akidLen > 0 &&
-            certs[i + 1u].skid != NULL && certs[i + 1u].skidLen > 0)
         {
-            if (certs[i].akidLen != certs[i + 1u].skidLen ||
-                memcmp(certs[i].akid, certs[i + 1u].skid, certs[i].akidLen) != 0)
-            { SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
-                  "Chain: cert[%u] AKID (%u bytes) does not match cert[%u] SKID (%u bytes)",
-                  i, certs[i].akidLen, i + 1u, certs[i + 1u].skidLen);
-              return false; }
-        }
-    }
-
-    /* Also cross-check AKID/SKID between last chain cert and trust anchor */
-
-    /* Verify the last chain cert against a trust anchor */
-    {
-        bool trusted = false;
-        SSFX509Cert_t trustCert;
-
-        for (j = 0; j < trustCount; j++)
-        {
-            SSF_REQUIRE(trustDer[j] != NULL);
-            if (!SSFX509Parse(trustDer[j], trustDerLen[j], &trustCert)) continue;
-
-            /* Match by subject name (raw DER comparison) */
-            if (certs[chainLen - 1u].issuer.raw == NULL || trustCert.subject.raw == NULL) continue;
-            if (certs[chainLen - 1u].issuer.rawLen != trustCert.subject.rawLen) continue;
-            if (memcmp(certs[chainLen - 1u].issuer.raw, trustCert.subject.raw,
-                       trustCert.subject.rawLen) != 0) continue;
-
-            /* Verify validity of the trust anchor */
-            if (!SSFX509IsValid(&trustCert, nowUnixSec)) continue;
-
-            /* SKID/AKID cross-check between last chain cert and trust anchor */
-            if (certs[chainLen - 1u].akid != NULL && certs[chainLen - 1u].akidLen > 0 &&
-                trustCert.skid != NULL && trustCert.skidLen > 0)
-            {
-                if (certs[chainLen - 1u].akidLen != trustCert.skidLen ||
-                    memcmp(certs[chainLen - 1u].akid, trustCert.skid,
-                           certs[chainLen - 1u].akidLen) != 0)
-                {
-                    continue; /* AKID/SKID mismatch — try next trust anchor */
-                }
-            }
-
-            /* Verify the last chain cert's signature using the trust anchor's public key */
-            if (SSFX509VerifyCertSignature(&certs[chainLen - 1u], &trustCert))
-            {
-                trusted = true;
-                break;
-            }
-        }
-        if (!trusted)
-        { SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx, "Chain: no trust anchor found for issuer of cert[%u] (%u CAs checked)",
-                        chainLen - 1u, trustCount);
-          return false; }
-    }
-
-    /* Verify intermediate certificates have isCA=true and pathLenConstraint */
-    for (i = 1; i < chainLen; i++)
-    {
-        if (!certs[i].hasBasicConstraints || !certs[i].isCA)
-        { SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx, "Chain: cert[%u] not a CA (hasBC=%d isCA=%d)",
-                        i, certs[i].hasBasicConstraints, certs[i].isCA);
-          return false; }
-
-        /* RFC 5280 Section 6.1.4(h): if Key Usage present, keyCertSign required */
-        if (certs[i].hasKeyUsage &&
-            (certs[i].keyUsageBits & SSF_X509_KU_KEY_CERT_SIGN) == 0)
-        { SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
-              "Chain: cert[%u] is CA but Key Usage lacks keyCertSign (KU=0x%04X)",
-              i, certs[i].keyUsageBits);
-          return false; }
-
-        /* RFC 5280 Section 6.1.4(k): path length constraint enforcement.       */
-        /* cert[i] is a CA at position i. Below it are CAs cert[1]..cert[i-1].  */
-        /* The number of subordinate CAs below cert[i] is (i - 1).              */
-        if (certs[i].pathLenConstraint >= 0)
-        {
-            if ((int8_t)(i - 1u) > certs[i].pathLenConstraint)
-            { SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
-                  "Chain: cert[%u] pathLenConstraint=%d but %u subordinate CAs present",
-                  i, certs[i].pathLenConstraint, i - 1u);
-              return false; }
-        }
-    }
-
-    /* Also check the trust anchor's pathLenConstraint against the full chain */
-    {
-        SSFX509Cert_t trustCertCheck;
-        for (j = 0; j < trustCount; j++)
-        {
-            if (!SSFX509Parse(trustDer[j], trustDerLen[j], &trustCertCheck)) continue;
-            if (trustCertCheck.issuer.raw == NULL || certs[chainLen - 1u].issuer.raw == NULL)
-                continue;
-            if (trustCertCheck.subject.rawLen != certs[chainLen - 1u].issuer.rawLen) continue;
-            if (memcmp(trustCertCheck.subject.raw, certs[chainLen - 1u].issuer.raw,
-                       trustCertCheck.subject.rawLen) != 0) continue;
-
-            /* This is the matching trust anchor — check its pathLenConstraint   */
-            /* The number of subordinate CAs below the trust anchor is chainLen-1*/
-            /* (all chain certs except the leaf are CAs).                        */
-            if (trustCertCheck.pathLenConstraint >= 0)
-            {
-                uint8_t numSubCAs = (chainLen >= 2u) ? (uint8_t)(chainLen - 1u) : 0u;
-                if ((int8_t)numSubCAs > trustCertCheck.pathLenConstraint)
-                { SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
-                      "Chain: trust anchor pathLenConstraint=%d but %u subordinate CAs in chain",
-                      trustCertCheck.pathLenConstraint, numSubCAs);
-                  return false; }
-            }
-            break;
-        }
-    }
-
-    /* Verify Extended Key Usage on leaf cert (RFC 5280 Section 4.2.1.12) */
-    /* If EKU is present, it must include serverAuth for server verification.                    */
-    /* If EKU is absent, the cert is unrestricted and allowed for any purpose.                   */
-    if (certs[0].hasExtKeyUsage && !certs[0].ekuServerAuth && !certs[0].ekuAnyPurpose)
-    { SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
-          "Chain: leaf cert has EKU but lacks serverAuth (serverAuth=%d clientAuth=%d)",
-          certs[0].ekuServerAuth, certs[0].ekuClientAuth);
-      return false; }
-
-    /* RFC 5280 Section 6.1.4(g): enforce Name Constraints across the chain.                     */
-    /* For each cert with a nameConstraints extension, all subordinate certs (those below it in  */
-    /* the chain) must have SANs that fall within permittedSubtrees and outside excludedSubtrees.*/
-    for (i = 1; i < chainLen; i++)
-    {
-        uint8_t jj;
-        if (!certs[i].hasNameConstraints) continue;
-        for (jj = 0; jj < i; jj++)
-        {
-            if (!_NCValidateCert(&certs[jj], &certs[i]))
-            { SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
-                  "Chain: cert[%u] SAN violates nameConstraints of cert[%u]", jj, i);
-              return false; }
-        }
-    }
-
-    /* Also enforce the trust anchor's nameConstraints against the entire chain. */
-    {
-        SSFX509Cert_t trustCertNC;
-        for (j = 0; j < trustCount; j++)
-        {
-            if (!SSFX509Parse(trustDer[j], trustDerLen[j], &trustCertNC)) continue;
-            if (trustCertNC.subject.raw == NULL || certs[chainLen - 1u].issuer.raw == NULL)
-                continue;
-            if (trustCertNC.subject.rawLen != certs[chainLen - 1u].issuer.rawLen) continue;
-            if (memcmp(trustCertNC.subject.raw, certs[chainLen - 1u].issuer.raw,
-                       trustCertNC.subject.rawLen) != 0) continue;
-
-            /* Matching trust anchor — enforce its name constraints against every chain cert. */
-            if (trustCertNC.hasNameConstraints)
-            {
-                uint8_t jj;
-                for (jj = 0; jj < chainLen; jj++)
-                {
-                    if (!_NCValidateCert(&certs[jj], &trustCertNC))
-                    { SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
-                          "Chain: cert[%u] SAN violates nameConstraints of trust anchor", jj);
-                      return false; }
-                }
-            }
-            break;
-        }
-    }
-
-    /* Reject certificates with unrecognized critical extensions (RFC 5280 Section 4.2) */
-    for (i = 0; i < chainLen; i++)
-    {
-        uint8_t e;
-        for (e = 0; e < certs[i].extsLen; e++)
-        {
-            if (!certs[i].exts[e].critical) continue;
-
-            /* Check if OID matches any recognized extension */
-            if (_OIDMatch(certs[i].exts[e].oidRaw, certs[i].exts[e].oidRawLen,
-                          _oidBasicConstraints, sizeof(_oidBasicConstraints))) continue;
-            if (_OIDMatch(certs[i].exts[e].oidRaw, certs[i].exts[e].oidRawLen,
-                          _oidKeyUsage, sizeof(_oidKeyUsage))) continue;
-            if (_OIDMatch(certs[i].exts[e].oidRaw, certs[i].exts[e].oidRawLen,
-                          _oidSAN, sizeof(_oidSAN))) continue;
-            if (_OIDMatch(certs[i].exts[e].oidRaw, certs[i].exts[e].oidRawLen,
-                          _oidSKID, sizeof(_oidSKID))) continue;
-            if (_OIDMatch(certs[i].exts[e].oidRaw, certs[i].exts[e].oidRawLen,
-                          _oidAKID, sizeof(_oidAKID))) continue;
-            if (_OIDMatch(certs[i].exts[e].oidRaw, certs[i].exts[e].oidRawLen,
-                          _oidEKU, sizeof(_oidEKU))) continue;
-            if (_OIDMatch(certs[i].exts[e].oidRaw, certs[i].exts[e].oidRawLen,
-                          _oidNameConstraints, sizeof(_oidNameConstraints))) continue;
-
-            /* Unknown critical extension — reject */
+            /* No */
             SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
-                "Chain: cert[%u] has unrecognized critical extension (OID %u bytes)",
-                i, certs[i].exts[e].oidRawLen);
+                "Chain: cert[%u] signature by cert[%u] FAILED", i, i + 1u);
+            return false;
+        }
+
+        /* AKID of cert[i] agrees with the SKID of cert[i + 1] when both are present (4.2.1.1)? */
+        if (!SSFX509CheckSKIDAKID(&certs[i], &certs[i + 1u]))
+        {
+            /* No */
+            SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+                "Chain: cert[%u] AKID (%u bytes) does not match cert[%u] SKID (%u bytes)", i,
+                certs[i].akidLen, i + 1u, certs[i + 1u].skidLen);
             return false;
         }
     }
 
-    /* Match hostname against the leaf certificate's SAN entries (DNS and IP) */
+    /* Some trust anchor names, is valid for, key-links to, and signs the last chain cert */
+    for (j = 0; (j < trustCount) && !trusted; j++)
     {
-        bool matched = false;
-        for (i = 0; i < certs[0].sanLen; i++)
-        {
-            if (certs[0].san[i].type == SSF_X509_SAN_DNS)
-            {
-                if (_HostnameMatch(hostname, certs[0].san[i].val, certs[0].san[i].valLen))
-                {
-                    matched = true;
-                    break;
-                }
-            }
-            else if (certs[0].san[i].type == SSF_X509_SAN_IP)
-            {
-                if (_IPAddressMatch(hostname, certs[0].san[i].val, certs[0].san[i].valLen))
-                {
-                    matched = true;
-                    break;
-                }
-            }
-        }
-        if (!matched)
-        { SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx, "Chain: hostname '%s' not matched in SAN (sanLen=%u)", hostname,
-                        certs[0].sanLen);
-          return false; }
+        SSF_REQUIRE(trustDer[j] != NULL);
+        if (!SSFX509Parse(trustDer[j], trustDerLen[j], &anchor)) continue;
+        if (!_NameEquals(&last->issuer, &anchor.subject)) continue;
+        if (!SSFX509IsValid(&anchor, nowUnixSec)) continue;
+        if (!SSFX509CheckSKIDAKID(last, &anchor)) continue;
+        trusted = SSFX509VerifyCertSignature(last, &anchor);
     }
 
+    /* Anchored? */
+    if (!trusted)
+    {
+        /* No */
+        SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+            "Chain: no trust anchor found for issuer of cert[%u] (%u CAs checked)", chainLen - 1u,
+            trustCount);
+        return false;
+    }
+
+    /* Every intermediate is a CA allowed to sign, within its path length (Sec. 6.1.4 (h), (k)) */
+    for (i = 1; i < chainLen; i++)
+    {
+        /* Basic Constraints present with cA TRUE? */
+        if (!certs[i].hasBasicConstraints || !certs[i].isCA)
+        {
+            /* No */
+            SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+                "Chain: cert[%u] not a CA (hasBC=%d isCA=%d)",
+                i, certs[i].hasBasicConstraints, certs[i].isCA);
+            return false;
+        }
+
+        /* Key Usage, when present, includes keyCertSign? */
+        if (certs[i].hasKeyUsage && ((certs[i].keyUsageBits & SSF_X509_KU_KEY_CERT_SIGN) == 0u))
+        {
+            /* No */
+            SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+                "Chain: cert[%u] is CA but Key Usage lacks keyCertSign (KU=0x%04X)", i,
+                certs[i].keyUsageBits);
+            return false;
+        }
+
+        /* Subordinate CA count below cert[i], which is (i - 1), within its pathLenConstraint? */
+        if ((certs[i].pathLenConstraint >= 0) && ((int8_t)(i - 1u) > certs[i].pathLenConstraint))
+        {
+            /* No */
+            SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+                "Chain: cert[%u] pathLenConstraint=%d but %u subordinate CAs present", i,
+                certs[i].pathLenConstraint, i - 1u);
+            return false;
+        }
+    }
+
+    /* Trust anchor found by name? */
+    if (_FindTrustAnchorByName(last, trustDer, trustDerLen, trustCount, &anchor))
+    {
+        /* Yes, its pathLenConstraint covers every chain cert but the leaf, and its Name     */
+        /* Constraints cover every chain cert                                                  */
+        numSubCAs = (chainLen >= 2u) ? (uint8_t)(chainLen - 1u) : 0u;
+        if ((anchor.pathLenConstraint >= 0) && ((int8_t)numSubCAs > anchor.pathLenConstraint))
+        {
+            SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+                "Chain: trust anchor pathLenConstraint=%d but %u subordinate CAs in chain",
+                anchor.pathLenConstraint, numSubCAs);
+            return false;
+        }
+        for (i = 0; anchor.hasNameConstraints && (i < chainLen); i++)
+        {
+            if (!_NCValidateCert(&certs[i], &anchor))
+            {
+                SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+                    "Chain: cert[%u] SAN violates nameConstraints of trust anchor", i);
+                return false;
+            }
+        }
+    }
+
+    /* Leaf Extended Key Usage, when present, allows server authentication (Sec. 4.2.1.12)? */
+    if (certs[0].hasExtKeyUsage && !certs[0].ekuServerAuth && !certs[0].ekuAnyPurpose)
+    {
+        /* No */
+        SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+            "Chain: leaf cert has EKU but lacks serverAuth (serverAuth=%d clientAuth=%d)",
+            certs[0].ekuServerAuth, certs[0].ekuClientAuth);
+        return false;
+    }
+
+    /* Every subordinate of a constrained intermediate satisfies its Name Constraints (6.1.4 (g)) */
+    for (i = 1; i < chainLen; i++)
+    {
+        for (j = 0; certs[i].hasNameConstraints && (j < i); j++)
+        {
+            if (!_NCValidateCert(&certs[j], &certs[i]))
+            {
+                SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+                    "Chain: cert[%u] SAN violates nameConstraints of cert[%u]", j, i);
+                return false;
+            }
+        }
+    }
+
+    /* No chain cert carries a critical extension this verifier does not understand (Sec. 4.2) */
+    for (i = 0; i < chainLen; i++)
+    {
+        for (e = 0; e < certs[i].extsLen; e++)
+        {
+            if (!certs[i].exts[e].critical) continue;
+            if (_IsKnownExtension(certs[i].exts[e].oidRaw, certs[i].exts[e].oidRawLen)) continue;
+            SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+                "Chain: cert[%u] has unrecognized critical extension (OID %u bytes)", i,
+                certs[i].exts[e].oidRawLen);
+            return false;
+        }
+    }
+
+    /* The leaf names hostnameStr in a dNSName or iPAddress SAN */
+    for (i = 0; (i < certs[0].sanLen) && !matched; i++)
+    {
+        if (certs[0].san[i].type == SSF_X509_SAN_DNS)
+        {
+            matched = _HostnameMatch(hostnameStr, certs[0].san[i].val, certs[0].san[i].valLen);
+        }
+        else if (certs[0].san[i].type == SSF_X509_SAN_IP)
+        {
+            matched = _IPAddressMatch(hostnameStr, certs[0].san[i].val, certs[0].san[i].valLen);
+        }
+    }
+
+    /* Hostname matched? */
+    if (!matched)
+    {
+        /* No */
+        SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+            "Chain: hostname '%s' not matched in SAN (sanLen=%u)", hostnameStr, certs[0].sanLen);
+        return false;
+    }
     return true;
 }

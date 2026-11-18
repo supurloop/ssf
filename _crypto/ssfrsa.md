@@ -217,7 +217,7 @@ stub so a pure-ECC build can keep `ssfrsa.c` in the project without dragging RSA
 | | Function | Description |
 |---|----------|-------------|
 | [e.g.](#ex-pss) | [`bool SSFRSASignPSS(privKeyDer, ..., hash, hashVal, hashLen, sig, sigSize, sigLen)`](#ssfrsasignpss) | Sign a hash with RSA-PSS (random salt, hash-length) |
-| [e.g.](#ex-pss) | [`bool SSFRSAVerifyPSS(pubKeyDer, ..., hash, hashVal, hashLen, sig, sigLen)`](#ssfrsaverifypss) | Verify an RSA-PSS signature |
+| [e.g.](#ex-pss) | [`bool SSFRSAVerifyPSS(pubKeyDer, ..., hash, hashVal, hashLen, saltLen, sig, sigLen)`](#ssfrsaverifypss) | Verify an RSA-PSS signature with the signer's salt length |
 
 <a id="function-reference"></a>
 
@@ -404,11 +404,15 @@ Non-deterministic: repeat calls produce different signatures that all verify.
 <a id="ssfrsaverifypss"></a>
 ```c
 bool SSFRSAVerifyPSS(const uint8_t *pubKeyDer, size_t pubKeyDerLen,
-                     SSFRSAHash_t hash, const uint8_t *hashVal, size_t hashLen,
+                     SSFRSAHash_t hash, const uint8_t *hashVal, size_t hashLen, size_t saltLen,
                      const uint8_t *sig, size_t sigLen);
 ```
 Verify an RSA-PSS signature. Performs `sig^e mod n`, recovers `EM`, extracts `H` and
-`salt`, recomputes `H'`, and compares. `H == H'` is constant-time; the intermediate
+`salt`, recomputes `H'`, and compares. `saltLen` is the salt length the signer used; RFC 8017 recommends the hash length,
+which is what [`SSFRSASignPSS()`](#ssfrsasignpss) emits and what X.509 certificates default to when
+their PSS parameters carry no `saltLength` (RFC 4055 declares DEFAULT 20). The verifier accepts
+`0 <= saltLen <= hashLen` and asserts on a larger value, since a salt longer than the hash has no
+security benefit and is not issued by any mainstream signer. `H == H'` is constant-time; the intermediate
 padding-pattern check is currently variable-time (see [Notes](#notes)).
 
 <a id="ex-pss"></a>
@@ -435,7 +439,7 @@ if (!SSFRSASignPSS(privDer, privLen,
 /* Verify. Same signature data will fail if any of the key / hash / message
    bytes differ between signer and verifier. */
 if (!SSFRSAVerifyPSS(pubDer, pubLen,
-                     SSF_RSA_HASH_SHA256, hash, sizeof(hash),
+                     SSF_RSA_HASH_SHA256, hash, sizeof(hash), sizeof(hash),
                      sig, sigLen))
 {
     /* Reject. */

@@ -156,14 +156,14 @@ static bool _GenTestCert(const char *cn, uint64_t notBefore, uint64_t notAfter,
     params.addKeyUsage = addKU;
     params.keyUsageBits = kuBits;
 
-    tbsLen = SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &params);
+    (void)SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &params, &tbsLen);
     if (tbsLen == 0u) return false;
 
     SSFSHA256(tbsDer, tbsLen, tbsHash, sizeof(tbsHash));
     if (!SSFECDSASign(SSF_EC_CURVE_P256, privKey, 32, tbsHash, 32,
                       sig, sizeof(sig), &sigLen)) return false;
 
-    *certDerLen = SSFX509EncodeCert(certDer, certDerSize, &params, sig, (uint32_t)sigLen);
+    (void)SSFX509EncodeCert(certDer, certDerSize, &params, sig, (uint32_t)sigLen, certDerLen);
     return (*certDerLen > 0u);
 }
 
@@ -213,14 +213,14 @@ static bool _GenSignedLeafCert(const char *leafCN, const char *issuerCN,
     params.keyUsageBits = 0u;
 
     /* Encode TBS, hash, sign with CA key */
-    tbsLen = SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &params);
+    (void)SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &params, &tbsLen);
     if (tbsLen == 0u) return false;
 
     SSFSHA256(tbsDer, tbsLen, tbsHash, sizeof(tbsHash));
     if (!SSFECDSASign(SSF_EC_CURVE_P256, caPrivKey, 32, tbsHash, 32,
                       sig, sizeof(sig), &sigLen)) return false;
 
-    *certDerLen = SSFX509EncodeCert(certDer, certDerSize, &params, sig, (uint32_t)sigLen);
+    (void)SSFX509EncodeCert(certDer, certDerSize, &params, sig, (uint32_t)sigLen, certDerLen);
     return (*certDerLen > 0u);
 }
 
@@ -258,13 +258,13 @@ static void _utGenCheckConsistent(const SSFX509GenParams_t *p, const uint8_t *si
     uint32_t measured;
     uint32_t written;
 
-    measured = SSFX509EncodeTBS(NULL, 0, p);
-    written = SSFX509EncodeTBS(out, outSize, p);
+    SSF_ASSERT(SSFX509EncodeTBS(NULL, 0, p, &measured) == true);
+    SSF_ASSERT(SSFX509EncodeTBS(out, outSize, p, &written) == true);
     SSF_ASSERT(measured != 0u);
     SSF_ASSERT(written == measured);
 
-    measured = SSFX509EncodeCert(NULL, 0, p, sig, sigLen);
-    written = SSFX509EncodeCert(out, outSize, p, sig, sigLen);
+    SSF_ASSERT(SSFX509EncodeCert(NULL, 0, p, sig, sigLen, &measured) == true);
+    SSF_ASSERT(SSFX509EncodeCert(out, outSize, p, sig, sigLen, &written) == true);
     SSF_ASSERT(measured != 0u);
     SSF_ASSERT(written == measured);
     SSF_ASSERT(SSFX509Parse(out, written, parsed) == true);
@@ -282,6 +282,7 @@ static uint32_t _utSelfSign(SSFX509GenParams_t *p, uint8_t *pubKey, size_t pubKe
     uint8_t privKey[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
     size_t pubKeyLen;
     uint32_t tbsLen;
+    uint32_t certLen;
     uint8_t hash[32];
     uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
     size_t sigLen;
@@ -290,12 +291,13 @@ static uint32_t _utSelfSign(SSFX509GenParams_t *p, uint8_t *pubKey, size_t pubKe
                         &pubKeyLen)) return 0;
     p->pubKey = pubKey;
     p->pubKeyLen = (uint32_t)pubKeyLen;
-    tbsLen = SSFX509EncodeTBS(tbs, sizeof(tbs), p);
+    (void)SSFX509EncodeTBS(tbs, sizeof(tbs), p, &tbsLen);
     if (tbsLen == 0u) return 0;
     SSFSHA256(tbs, tbsLen, hash, sizeof(hash));
     if (!SSFECDSASign(SSF_EC_CURVE_P256, privKey, 32u, hash, 32u, sig, sizeof(sig), &sigLen))
         return 0;
-    return SSFX509EncodeCert(out, outSize, p, sig, (uint32_t)sigLen);
+    if (!SSFX509EncodeCert(out, outSize, p, sig, (uint32_t)sigLen, &certLen)) return 0;
+    return certLen;
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -470,17 +472,22 @@ static uint32_t _utSignCert(const SSFX509GenParams_t *p, const uint8_t *privKey,
 {
     static uint8_t tbs[SSF_X509_CONFIG_MAX_CERT_SIZE];
     uint32_t tbsLen;
+    uint32_t certLen;
     uint8_t hash[32];
     uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
     size_t sigLen;
 
-    tbsLen = SSFX509EncodeTBS(tbs, sizeof(tbs), p);
+    (void)SSFX509EncodeTBS(tbs, sizeof(tbs), p, &tbsLen);
     if (tbsLen == 0u) return 0;
     SSFSHA256(tbs, tbsLen, hash, sizeof(hash));
     if (!SSFECDSASign(SSF_EC_CURVE_P256, privKey, 32u, hash, 32u, sig, sizeof(sig), &sigLen))
         return 0;
-    return SSFX509EncodeCert(out, outSize, p, sig, (uint32_t)sigLen);
+    if (!SSFX509EncodeCert(out, outSize, p, sig, (uint32_t)sigLen, &certLen)) return 0;
+    return certLen;
 }
+
+/* Receives lengths from encoder calls whose failure is the point of the test */
+static uint32_t _utScratchLen;
 
 void SSFX509UnitTest(void)
 {
@@ -637,13 +644,15 @@ void SSFX509UnitTest(void)
 
         /* ---- Two-pass: measure then encode ---- */
         {
-            uint32_t needed = SSFX509EncodeCert(NULL, 0, &genParams, fakeSig, sizeof(fakeSig));
+            uint32_t needed = 0u;
+            (void)SSFX509EncodeCert(NULL, 0, &genParams, fakeSig, sizeof(fakeSig), &needed);
             SSF_ASSERT(needed > 0);
             SSF_ASSERT(needed <= sizeof(derBuf));
         }
 
         /* ---- Encode the full certificate ---- */
-        derLen = SSFX509EncodeCert(derBuf, sizeof(derBuf), &genParams, fakeSig, sizeof(fakeSig));
+        (void)SSFX509EncodeCert(derBuf, sizeof(derBuf), &genParams, fakeSig, sizeof(fakeSig),
+         &derLen);
         SSF_ASSERT(derLen > 0);
 
         /* ---- Parse it back and verify ---- */
@@ -849,8 +858,7 @@ void SSFX509UnitTest(void)
                        trust, trustLens, 1, "future.test", nowTime) == false);
         }
 
-        /* 2f. Empty trust store: valid chain but trustCount=0 not possible (SSF_REQUIRE).
-               Instead: trust store has a different CA -> fails */
+        /* 2f. Empty trust store: trustCount=0 is a precondition violation, see the SSF_REQUIRE */
         {
             uint8_t caDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
             uint32_t caDerLen;
@@ -1053,7 +1061,7 @@ void SSFX509UnitTest(void)
             p.addBasicConstraints = false;
             p.addKeyUsage = false;
 
-            len = SSFX509EncodeCert(buf, sizeof(buf), &p, fakeSigV1, sizeof(fakeSigV1));
+            (void)SSFX509EncodeCert(buf, sizeof(buf), &p, fakeSigV1, sizeof(fakeSigV1), &len);
             SSF_ASSERT(len > 0u);
             SSF_ASSERT(SSFX509Parse(buf, len, &v1c) == true);
             SSF_ASSERT(v1c.version == 0u);
@@ -1110,7 +1118,7 @@ void SSFX509UnitTest(void)
             p.addBasicConstraints = false;
             p.addKeyUsage = false;
 
-            len = SSFX509EncodeCert(buf, sizeof(buf), &p, fakeSigDN, sizeof(fakeSigDN));
+            (void)SSFX509EncodeCert(buf, sizeof(buf), &p, fakeSigDN, sizeof(fakeSigDN), &len);
             SSF_ASSERT(len > 0u);
             SSF_ASSERT(SSFX509Parse(buf, len, &dnc) == true);
 
@@ -1195,7 +1203,7 @@ void SSFX509UnitTest(void)
 
             {
                 uint8_t tinyBuf[4];
-                SSF_ASSERT(SSFX509EncodeTBS(tinyBuf, sizeof(tinyBuf), &p) == 0u);
+                SSF_ASSERT(SSFX509EncodeTBS(tinyBuf, sizeof(tinyBuf), &p, &_utScratchLen) == false);
             }
         }
 
@@ -1229,7 +1237,7 @@ void SSFX509UnitTest(void)
             {
                 uint8_t tinyBuf[4];
                 SSF_ASSERT(SSFX509EncodeCert(tinyBuf, sizeof(tinyBuf), &p,
-                           fakeSigSmall, sizeof(fakeSigSmall)) == 0u);
+                           fakeSigSmall, sizeof(fakeSigSmall), &_utScratchLen) == false);
             }
         }
 
@@ -1266,21 +1274,21 @@ void SSFX509UnitTest(void)
             p.keyUsageBits = SSF_X509_KU_KEY_CERT_SIGN;
 
             /* Measure with NULL buf */
-            needed = SSFX509EncodeTBS(NULL, 0, &p);
+            (void)SSFX509EncodeTBS(NULL, 0, &p, &needed);
             SSF_ASSERT(needed > 0u);
 
             /* Encode and verify length matches */
             {
                 uint8_t tbsBuf[512];
                 uint32_t tbsLen;
-                tbsLen = SSFX509EncodeTBS(tbsBuf, sizeof(tbsBuf), &p);
+                (void)SSFX509EncodeTBS(tbsBuf, sizeof(tbsBuf), &p, &tbsLen);
                 SSF_ASSERT(tbsLen == needed);
             }
 
             /* Same for EncodeCert */
-            needed = SSFX509EncodeCert(NULL, 0, &p, fakeSig2P, sizeof(fakeSig2P));
+            (void)SSFX509EncodeCert(NULL, 0, &p, fakeSig2P, sizeof(fakeSig2P), &needed);
             SSF_ASSERT(needed > 0u);
-            len = SSFX509EncodeCert(buf, sizeof(buf), &p, fakeSig2P, sizeof(fakeSig2P));
+            (void)SSFX509EncodeCert(buf, sizeof(buf), &p, fakeSig2P, sizeof(fakeSig2P), &len);
             SSF_ASSERT(len == needed);
         }
     }
@@ -1370,7 +1378,7 @@ void SSFX509UnitTest(void)
     /* 8E. Extended Key Usage (EKU) Validation (RFC 5280 Section 4.2.1.12)  */
     /* ==================================================================== */
 
-    /* ---- EKU parsing: cert without EKU → hasExtKeyUsage is false ---- */
+    /* ---- EKU parsing: cert without EKU -> hasExtKeyUsage is false ---- */
     {
         SSFX509Cert_t certNoEku;
         SSF_ASSERT(SSFX509Parse(_utTestCertDER, sizeof(_utTestCertDER), &certNoEku) == true);
@@ -1379,7 +1387,7 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(certNoEku.ekuClientAuth == false);
     }
 
-    /* ---- EKU: generate cert with clientAuth only → VerifyChain rejects ---- */
+    /* ---- EKU: generate cert with clientAuth only -> VerifyChain rejects ---- */
     {
         uint8_t caPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
         uint8_t caPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
@@ -1436,16 +1444,16 @@ void SSFX509UnitTest(void)
             lp.pubKey = leafPub;
             lp.pubKeyLen = (uint32_t)leafPubLen;
             lp.addExtKeyUsage = true;
-            lp.ekuClientAuth = true;   /* Only clientAuth — no serverAuth */
+            lp.ekuClientAuth = true;   /* Only clientAuth - no serverAuth */
             lp.ekuServerAuth = false;
 
-            tbsLen = SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &lp);
+            (void)SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &lp, &tbsLen);
             SSF_ASSERT(tbsLen > 0u);
             SSFSHA256(tbsDer, tbsLen, tbsHash, sizeof(tbsHash));
             SSF_ASSERT(SSFECDSASign(SSF_EC_CURVE_P256, caPriv, 32,
                        tbsHash, 32, sig, sizeof(sig), &sigLen) == true);
-            leafCertLen = SSFX509EncodeCert(leafCert, sizeof(leafCert), &lp,
-                                             sig, (uint32_t)sigLen);
+            (void)SSFX509EncodeCert(leafCert, sizeof(leafCert), &lp,
+                                             sig, (uint32_t)sigLen, &leafCertLen);
             SSF_ASSERT(leafCertLen > 0u);
 
             /* Verify EKU was parsed correctly */
@@ -1458,7 +1466,7 @@ void SSFX509UnitTest(void)
             }
         }
 
-        /* VerifyChain with clientAuth-only leaf → must be rejected */
+        /* VerifyChain with clientAuth-only leaf -> must be rejected */
         chain[0] = leafCert;   chainLens[0] = leafCertLen;
         trust[0] = caCert;     trustLens[0] = caCertLen;
 
@@ -1467,7 +1475,7 @@ void SSFX509UnitTest(void)
                    "eku-leaf", 1800000000ull) == false);
     }
 
-    /* ---- EKU: cert without EKU → VerifyChain allows (no restriction) ---- */
+    /* ---- EKU: cert without EKU -> VerifyChain allows (no restriction) ---- */
     /* The existing _utTestCertDER has no EKU and self-signed, so it's       */
     /* accepted (already tested in section 8). This confirms EKU absence     */
     /* doesn't cause rejection.                                              */
@@ -1516,14 +1524,14 @@ void SSFX509UnitTest(void)
                    parsed.sigAlgOidRawLen) == 0);
     }
 
-    /* ---- Self-signed test cert in VerifyChain: sigAlg consistent → passes ---- */
+    /* ---- Self-signed test cert in VerifyChain: sigAlg consistent -> passes ---- */
     /* Already verified by existing chain tests with _utTestCertDER. */
 
     /* ==================================================================== */
     /* 8V. v1/v2 Certificate Rejection (RFC 5280 Section 6.1.1(c))        */
     /* ==================================================================== */
 
-    /* ---- v1 cert in chain → rejected ---- */
+    /* ---- v1 cert in chain -> rejected ---- */
     {
         /* Generate a self-signed v1 cert with a real key pair and signature */
         uint8_t v1Priv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
@@ -1551,7 +1559,7 @@ void SSFX509UnitTest(void)
 
             memset(&p, 0, sizeof(p));
             p.pathLenConstraint = -1;
-            p.version = 0u; /* v1 — no extensions */
+            p.version = 0u; /* v1 - no extensions */
             p.serial = serial;
             p.serialLen = 1u;
             p.sigAlgOidRaw = _utSigAlgOid;
@@ -1567,13 +1575,13 @@ void SSFX509UnitTest(void)
             p.pubKey = v1Pub;
             p.pubKeyLen = (uint32_t)v1PubLen;
 
-            tbsLen = SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &p);
+            (void)SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &p, &tbsLen);
             SSF_ASSERT(tbsLen > 0u);
             SSFSHA256(tbsDer, tbsLen, tbsHash, sizeof(tbsHash));
             SSF_ASSERT(SSFECDSASign(SSF_EC_CURVE_P256, v1Priv, 32,
                        tbsHash, 32, sig, sizeof(sig), &sigLen) == true);
-            v1CertLen = SSFX509EncodeCert(v1Cert, sizeof(v1Cert), &p,
-                                           sig, (uint32_t)sigLen);
+            (void)SSFX509EncodeCert(v1Cert, sizeof(v1Cert), &p,
+                                           sig, (uint32_t)sigLen, &v1CertLen);
             SSF_ASSERT(v1CertLen > 0u);
 
             /* Confirm it's v1 */
@@ -1600,7 +1608,7 @@ void SSFX509UnitTest(void)
     /* 8S. SKID/AKID Cross-Check (RFC 5280 Section 4.2.1.1)               */
     /* ==================================================================== */
 
-    /* ---- Matching SKID/AKID → consistent ---- */
+    /* ---- Matching SKID/AKID -> consistent ---- */
     {
         static const uint8_t keyId[] = { 0x01u, 0x02u, 0x03u, 0x04u };
         SSFX509Cert_t certStub;
@@ -1616,7 +1624,7 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(SSFX509CheckSKIDAKID(&certStub, &issuerStub) == true);
     }
 
-    /* ---- Mismatched SKID/AKID → inconsistent ---- */
+    /* ---- Mismatched SKID/AKID -> inconsistent ---- */
     {
         static const uint8_t akidVal[] = { 0x01u, 0x02u, 0x03u, 0x04u };
         static const uint8_t skidVal[] = { 0xAAu, 0xBBu, 0xCCu, 0xDDu };
@@ -1633,7 +1641,7 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(SSFX509CheckSKIDAKID(&certStub, &issuerStub) == false);
     }
 
-    /* ---- Different lengths → inconsistent ---- */
+    /* ---- Different lengths -> inconsistent ---- */
     {
         static const uint8_t akidVal[] = { 0x01u, 0x02u, 0x03u };
         static const uint8_t skidVal[] = { 0x01u, 0x02u, 0x03u, 0x04u };
@@ -1650,7 +1658,7 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(SSFX509CheckSKIDAKID(&certStub, &issuerStub) == false);
     }
 
-    /* ---- Cert has no AKID → consistent (AKID optional) ---- */
+    /* ---- Cert has no AKID -> consistent (AKID optional) ---- */
     {
         static const uint8_t skidVal[] = { 0x01u, 0x02u, 0x03u, 0x04u };
         SSFX509Cert_t certStub;
@@ -1665,7 +1673,7 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(SSFX509CheckSKIDAKID(&certStub, &issuerStub) == true);
     }
 
-    /* ---- Issuer has no SKID → consistent (SKID optional) ---- */
+    /* ---- Issuer has no SKID -> consistent (SKID optional) ---- */
     {
         static const uint8_t akidVal[] = { 0x01u, 0x02u, 0x03u, 0x04u };
         SSFX509Cert_t certStub;
@@ -1680,7 +1688,7 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(SSFX509CheckSKIDAKID(&certStub, &issuerStub) == true);
     }
 
-    /* ---- Neither has SKID/AKID → consistent ---- */
+    /* ---- Neither has SKID/AKID -> consistent ---- */
     {
         SSFX509Cert_t certStub;
         SSFX509Cert_t issuerStub;
@@ -1735,13 +1743,13 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(SSFX509MatchIPAddress("10.0.0.1", ip4, 4u) == true);
     }
 
-    /* ---- IPv4 matching: hostname is not an IP → no match ---- */
+    /* ---- IPv4 matching: hostname is not an IP -> no match ---- */
     {
         static const uint8_t ip4[] = { 10u, 0u, 0u, 1u };
         SSF_ASSERT(SSFX509MatchIPAddress("example.com", ip4, 4u) == false);
     }
 
-    /* ---- IPv4 matching: invalid IP format → no match ---- */
+    /* ---- IPv4 matching: invalid IP format -> no match ---- */
     {
         static const uint8_t ip4[] = { 10u, 0u, 0u, 1u };
         SSF_ASSERT(SSFX509MatchIPAddress("10.0.0.", ip4, 4u) == false);
@@ -1750,13 +1758,13 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(SSFX509MatchIPAddress("", ip4, 4u) == false);
     }
 
-    /* ---- IPv4 matching: wrong SAN length (not 4) → no match ---- */
+    /* ---- IPv4 matching: wrong SAN length (not 4) -> no match ---- */
     {
         static const uint8_t ip6[16] = { 0 };
         SSF_ASSERT(SSFX509MatchIPAddress("10.0.0.1", ip6, 16u) == false);
     }
 
-    /* ---- IPv4 matching: trailing text after valid IP → no match ---- */
+    /* ---- IPv4 matching: trailing text after valid IP -> no match ---- */
     {
         static const uint8_t ip4[] = { 10u, 0u, 0u, 1u };
         SSF_ASSERT(SSFX509MatchIPAddress("10.0.0.1extra", ip4, 4u) == false);
@@ -1772,7 +1780,7 @@ void SSFX509UnitTest(void)
         const uint8_t *trust[1] = { _utTestCertDER };
         uint32_t trustLens[1] = { sizeof(_utTestCertDER) };
 
-        /* IP hostname against DNS-only SANs → must fail */
+        /* IP hostname against DNS-only SANs -> must fail */
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLens, 1u,
                    trust, trustLens, 1u,
                    "192.168.1.1", 1775000000ull) == false);
@@ -1782,7 +1790,7 @@ void SSFX509UnitTest(void)
     /* 8K. Key Usage keyCertSign Validation (RFC 5280 Section 6.1.4(h))    */
     /* ==================================================================== */
 
-    /* ---- Intermediate CA with Key Usage but NO keyCertSign → rejected ---- */
+    /* ---- Intermediate CA with Key Usage but NO keyCertSign -> rejected ---- */
     {
         uint8_t rootPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
         uint8_t rootPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
@@ -1806,7 +1814,7 @@ void SSFX509UnitTest(void)
         const uint8_t *trust[1];
         uint32_t trustLens[1];
 
-        /* Generate root CA (with keyCertSign — proper CA) */
+        /* Generate root CA (with keyCertSign - proper CA) */
         memset(rootPriv, 0, sizeof(rootPriv));
         SSF_ASSERT(_GenTestCert("ku-root", 1700000000ull, 2000000000ull,
                    true, true, true,
@@ -1849,13 +1857,13 @@ void SSFX509UnitTest(void)
             ip.addKeyUsage = true;
             ip.keyUsageBits = SSF_X509_KU_DIGITAL_SIGNATURE; /* NO keyCertSign */
 
-            tbsLen = SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &ip);
+            (void)SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &ip, &tbsLen);
             SSF_ASSERT(tbsLen > 0u);
             SSFSHA256(tbsDer, tbsLen, tbsHash, sizeof(tbsHash));
             SSF_ASSERT(SSFECDSASign(SSF_EC_CURVE_P256, rootPriv, 32,
                        tbsHash, 32, sig, sizeof(sig), &sigLen) == true);
-            intCertLen = SSFX509EncodeCert(intCert, sizeof(intCert), &ip,
-                                            sig, (uint32_t)sigLen);
+            (void)SSFX509EncodeCert(intCert, sizeof(intCert), &ip,
+                                            sig, (uint32_t)sigLen, &intCertLen);
             SSF_ASSERT(intCertLen > 0u);
 
             /* Verify intermediate has KU but no keyCertSign */
@@ -1879,7 +1887,7 @@ void SSFX509UnitTest(void)
         trust[0] = rootCert;   trustLens[0] = rootCertLen;
 
         /* RFC 5280 Section 6.1.4(h): intermediate CA has Key Usage but       */
-        /* lacks keyCertSign → chain MUST be rejected.                         */
+        /* lacks keyCertSign -> chain MUST be rejected.                         */
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLens, 2u,
                    trust, trustLens, 1u,
                    "ku-leaf", 1800000000ull) == false);
@@ -1889,9 +1897,9 @@ void SSFX509UnitTest(void)
     /* 8X. Unknown Critical Extension Rejection (RFC 5280 Section 4.2)     */
     /* ==================================================================== */
 
-    /* ---- Self-signed cert with unknown critical extension → rejected ---- */
+    /* ---- Self-signed cert with unknown critical extension -> rejected ---- */
     {
-        /* Fake OID: 2.5.29.127 — not a recognized extension */
+        /* Fake OID: 2.5.29.127 - not a recognized extension */
         static const uint8_t unknownOid[] = { 0x55u, 0x1Du, 0x7Fu };
         static const uint8_t fakeValue[] = { 0x01u };
 
@@ -1944,13 +1952,13 @@ void SSFX509UnitTest(void)
             p.rawExtValueLen = sizeof(fakeValue);
             p.rawExtCritical = true;  /* CRITICAL unknown extension */
 
-            tbsLen = SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &p);
+            (void)SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &p, &tbsLen);
             SSF_ASSERT(tbsLen > 0u);
             SSFSHA256(tbsDer, tbsLen, tbsHash, sizeof(tbsHash));
             SSF_ASSERT(SSFECDSASign(SSF_EC_CURVE_P256, caPriv, 32,
                        tbsHash, 32, sig, sizeof(sig), &sigLen) == true);
-            caCertLen = SSFX509EncodeCert(caCert, sizeof(caCert), &p,
-                                           sig, (uint32_t)sigLen);
+            (void)SSFX509EncodeCert(caCert, sizeof(caCert), &p,
+                                           sig, (uint32_t)sigLen, &caCertLen);
             SSF_ASSERT(caCertLen > 0u);
 
             /* Verify the extension was parsed as critical */
@@ -1981,7 +1989,7 @@ void SSFX509UnitTest(void)
                    "crit-ext-test", 1800000000ull) == false);
     }
 
-    /* ---- Self-signed cert with unknown NON-critical extension → accepted ---- */
+    /* ---- Self-signed cert with unknown NON-critical extension -> accepted ---- */
     /* The existing _utTestCertDER has 5 recognized extensions, none unknown.    */
     /* Verify it still passes (regression check). Already tested in section 8.   */
 
@@ -2001,14 +2009,14 @@ void SSFX509UnitTest(void)
     /* 8P. Path Length Constraint Enforcement (RFC 5280 Section 6.1.4(k))   */
     /* ==================================================================== */
 
-    /* ---- pathLenConstraint=0 with subordinate CA → chain MUST be rejected ---- */
+    /* ---- pathLenConstraint=0 with subordinate CA -> chain MUST be rejected ---- */
     {
         /* Build a 3-level chain:                                                */
         /*   chain[0] = leaf (signed by intermediate)                            */
         /*   chain[1] = intermediate CA (isCA=true, signed by root)              */
         /*   trust[0] = root CA (isCA=true, pathLenConstraint=0)                 */
         /* The root says pathLenConstraint=0: NO subordinate CAs allowed.        */
-        /* But chain[1] IS a subordinate CA → violation.                         */
+        /* But chain[1] IS a subordinate CA -> violation.                         */
 
         uint8_t rootPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
         uint8_t rootPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
@@ -2066,13 +2074,13 @@ void SSFX509UnitTest(void)
             rp.addBasicConstraints = true;
             rp.isCA = true;
 
-            tbsLen = SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &rp);
+            (void)SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &rp, &tbsLen);
             SSF_ASSERT(tbsLen > 0u);
             SSFSHA256(tbsDer, tbsLen, tbsHash, sizeof(tbsHash));
             SSF_ASSERT(SSFECDSASign(SSF_EC_CURVE_P256, rootPriv, 32,
                        tbsHash, 32, sig, sizeof(sig), &sigLen) == true);
-            rootCertLen = SSFX509EncodeCert(rootCert, sizeof(rootCert), &rp,
-                                             sig, (uint32_t)sigLen);
+            (void)SSFX509EncodeCert(rootCert, sizeof(rootCert), &rp,
+                                             sig, (uint32_t)sigLen, &rootCertLen);
             SSF_ASSERT(rootCertLen > 0u);
         }
 
@@ -2109,13 +2117,13 @@ void SSFX509UnitTest(void)
             ip.addBasicConstraints = true;
             ip.isCA = true;
 
-            tbsLen = SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &ip);
+            (void)SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &ip, &tbsLen);
             SSF_ASSERT(tbsLen > 0u);
             SSFSHA256(tbsDer, tbsLen, tbsHash, sizeof(tbsHash));
             SSF_ASSERT(SSFECDSASign(SSF_EC_CURVE_P256, rootPriv, 32,
                        tbsHash, 32, sig, sizeof(sig), &sigLen) == true);
-            intCertLen = SSFX509EncodeCert(intCert, sizeof(intCert), &ip,
-                                            sig, (uint32_t)sigLen);
+            (void)SSFX509EncodeCert(intCert, sizeof(intCert), &ip,
+                                            sig, (uint32_t)sigLen, &intCertLen);
             SSF_ASSERT(intCertLen > 0u);
         }
 
@@ -2130,13 +2138,13 @@ void SSFX509UnitTest(void)
         trust[0] = rootCert;   trustLens[0] = rootCertLen;
 
         /* Path length constraint: root has pathLenConstraint=0, but there is 1  */
-        /* subordinate CA (intermediate) → MUST be rejected per RFC 5280.         */
+        /* subordinate CA (intermediate) -> MUST be rejected per RFC 5280.         */
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLens, 2u,
                    trust, trustLens, 1u,
                    "leaf-plc", 1800000000ull) == false);
     }
 
-    /* ---- pathLenConstraint=1 with one subordinate CA → chain accepted ---- */
+    /* ---- pathLenConstraint=1 with one subordinate CA -> chain accepted ---- */
     {
         uint8_t rootPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
         uint8_t rootPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
@@ -2193,13 +2201,13 @@ void SSFX509UnitTest(void)
             rp.addBasicConstraints = true;
             rp.isCA = true;
 
-            tbsLen = SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &rp);
+            (void)SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &rp, &tbsLen);
             SSF_ASSERT(tbsLen > 0u);
             SSFSHA256(tbsDer, tbsLen, tbsHash, sizeof(tbsHash));
             SSF_ASSERT(SSFECDSASign(SSF_EC_CURVE_P256, rootPriv, 32,
                        tbsHash, 32, sig, sizeof(sig), &sigLen) == true);
-            rootCertLen = SSFX509EncodeCert(rootCert, sizeof(rootCert), &rp,
-                                             sig, (uint32_t)sigLen);
+            (void)SSFX509EncodeCert(rootCert, sizeof(rootCert), &rp,
+                                             sig, (uint32_t)sigLen, &rootCertLen);
             SSF_ASSERT(rootCertLen > 0u);
         }
 
@@ -2236,13 +2244,13 @@ void SSFX509UnitTest(void)
             ip.addBasicConstraints = true;
             ip.isCA = true;
 
-            tbsLen = SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &ip);
+            (void)SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &ip, &tbsLen);
             SSF_ASSERT(tbsLen > 0u);
             SSFSHA256(tbsDer, tbsLen, tbsHash, sizeof(tbsHash));
             SSF_ASSERT(SSFECDSASign(SSF_EC_CURVE_P256, rootPriv, 32,
                        tbsHash, 32, sig, sizeof(sig), &sigLen) == true);
-            intCertLen = SSFX509EncodeCert(intCert, sizeof(intCert), &ip,
-                                            sig, (uint32_t)sigLen);
+            (void)SSFX509EncodeCert(intCert, sizeof(intCert), &ip,
+                                            sig, (uint32_t)sigLen, &intCertLen);
             SSF_ASSERT(intCertLen > 0u);
         }
 
@@ -2255,7 +2263,7 @@ void SSFX509UnitTest(void)
         chain[1] = intCert;    chainLens[1] = intCertLen;
         trust[0] = rootCert;   trustLens[0] = rootCertLen;
 
-        /* pathLenConstraint=1 allows 1 subordinate CA → should pass */
+        /* pathLenConstraint=1 allows 1 subordinate CA -> should pass */
         /* NOTE: This chain goes through VerifyChain which doesn't match    */
         /* hostnames on generated certs (no SAN). The hostname check will   */
         /* fail. But to test pathLen specifically, we need to get past       */
@@ -2265,10 +2273,10 @@ void SSFX509UnitTest(void)
     }
 
     /* ==================================================================== */
-    /* 9. RSA-PSS Hash Algorithm — Fixed Tests                              */
+    /* 9. RSA-PSS Hash Algorithm - Fixed Tests                              */
     /* ==================================================================== */
     /* The RSA-PSS OID (1.2.840.113549.1.1.10) does not encode the hash     */
-    /* algorithm — it's in the PSS parameters. The current implementation   */
+    /* algorithm - it's in the PSS parameters. The current implementation   */
     /* hardcodes SHA-256 regardless of actual parameters. These tests        */
     /* demonstrate the bug by constructing SSFX509Cert_t structs directly   */
     /* (bypassing the encoder's RSA SPKI buffer size limitation) and        */
@@ -2279,12 +2287,19 @@ void SSFX509UnitTest(void)
             0x2Au, 0x86u, 0x48u, 0x86u, 0xF7u, 0x0Du, 0x01u, 0x01u, 0x0Au
         };
 
+        /* RSASSA-PSS-params { [0] sha256, [2] saltLength 32 }: SSF signs with salt == hLen */
+        static const uint8_t pssParamsSHA256Salt32[] = {
+            0x30u, 0x16u, 0xA0u, 0x0Fu, 0x30u, 0x0Du, 0x06u, 0x09u,
+            0x60u, 0x86u, 0x48u, 0x01u, 0x65u, 0x03u, 0x04u, 0x02u, 0x01u, 0x05u, 0x00u,
+            0xA2u, 0x03u, 0x02u, 0x01u, 0x20u
+        };
+
         uint8_t rsaPriv[SSF_RSA_MAX_PRIV_KEY_DER_SIZE];
         uint8_t rsaPub[SSF_RSA_MAX_PUB_KEY_DER_SIZE];
         size_t rsaPrivLen;
         size_t rsaPubLen;
 
-        /* Arbitrary TBS content — just needs to be consistent between hash and sig */
+        /* Arbitrary TBS content - just needs to be consistent between hash and sig */
         static const uint8_t fakeTbs[] = "This is fake TBS content for RSA-PSS testing.";
         uint8_t hash256[SSF_SHA2_256_BYTE_SIZE];
         uint8_t hash384[SSF_SHA2_384_BYTE_SIZE];
@@ -2324,6 +2339,8 @@ void SSFX509UnitTest(void)
         certStub.tbsRawLen = sizeof(fakeTbs);
         certStub.signature = sig256;
         certStub.signatureLen = (uint32_t)sig256Len;
+        certStub.sigAlgParams = pssParamsSHA256Salt32;
+        certStub.sigAlgParamsLen = sizeof(pssParamsSHA256Salt32);
 
         SSF_ASSERT(SSFX509IsRSAPSSSHA256(&certStub) == true);
         SSF_ASSERT(SSFX509VerifyCertSignature(&certStub, &issuerStub) == true);
@@ -2335,13 +2352,14 @@ void SSFX509UnitTest(void)
             /* RSASSA-PSS-params with hashAlgorithm = SHA-384:                */
             /* SEQUENCE { [0] EXPLICIT SEQUENCE { OID sha384, NULL } }        */
             static const uint8_t pssParamsSHA384[] = {
-                0x30u, 0x11u,                   /* SEQUENCE len=17 */
+                0x30u, 0x16u,                   /* SEQUENCE len=22 */
                 0xA0u, 0x0Fu,                   /* [0] EXPLICIT len=15 */
                 0x30u, 0x0Du,                   /* SEQUENCE len=13 (AlgorithmIdentifier) */
                 0x06u, 0x09u,                   /* OID len=9 */
                 0x60u, 0x86u, 0x48u, 0x01u,     /* id-sha384: 2.16.840.1.101.3.4.2.2 */
                 0x65u, 0x03u, 0x04u, 0x02u, 0x02u,
-                0x05u, 0x00u                    /* NULL */
+                0x05u, 0x00u,                   /* NULL */
+                0xA2u, 0x03u, 0x02u, 0x01u, 0x30u /* [2] saltLength 48 */
             };
 
             certStub.signature = sig384;
@@ -2354,13 +2372,14 @@ void SSFX509UnitTest(void)
             SSF_ASSERT(SSFX509VerifyCertSignature(&certStub, &issuerStub) == true);
         }
 
-        /* ---- RSA-PSS without parameters: defaults to SHA-256 ---- */
+        /* ---- RSA-PSS without parameters: RFC 4055 defaults to SHA-1 and saltLength 20 ---- */
+        /* ---- so a SHA-256 signature made with a 32-byte salt must fail closed ---- */
         {
             certStub.signature = sig256;
             certStub.signatureLen = (uint32_t)sig256Len;
             certStub.sigAlgParams = NULL;
             certStub.sigAlgParamsLen = 0;
-            SSF_ASSERT(SSFX509VerifyCertSignature(&certStub, &issuerStub) == true);
+            SSF_ASSERT(SSFX509VerifyCertSignature(&certStub, &issuerStub) == false);
         }
 
         /* ---- RSA-PSS-SHA384 without parameters: fails (defaults to SHA-256) ---- */
@@ -2377,7 +2396,7 @@ void SSFX509UnitTest(void)
     /* 10. RSA-PSS Full Encode/Parse/Verify Round-Trip                      */
     /* ==================================================================== */
 
-    /* ---- RSA-PSS-SHA256: full cert encode → parse → verify ---- */
+    /* ---- RSA-PSS-SHA256: full cert encode -> parse -> verify ---- */
     {
         /* RSA-PSS OID: 1.2.840.113549.1.1.10 */
         static const uint8_t rsaPssOid[] = {
@@ -2394,6 +2413,12 @@ void SSFX509UnitTest(void)
         size_t rsaPubLen;
         SSFX509GenParams_t rp;
         uint8_t serial[] = { 0x20u };
+        /* RSASSA-PSS-params { [0] sha256, [2] saltLength 32 } matching SSFRSASignPSS */
+        static const uint8_t pssParamsSalt32[] = {
+            0x30u, 0x16u, 0xA0u, 0x0Fu, 0x30u, 0x0Du, 0x06u, 0x09u,
+            0x60u, 0x86u, 0x48u, 0x01u, 0x65u, 0x03u, 0x04u, 0x02u, 0x01u, 0x05u, 0x00u,
+            0xA2u, 0x03u, 0x02u, 0x01u, 0x20u
+        };
         uint8_t tbsDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
         uint32_t tbsLen;
         uint8_t tbsHash[SSF_SHA2_256_BYTE_SIZE];
@@ -2415,6 +2440,8 @@ void SSFX509UnitTest(void)
         rp.serialLen = 1u;
         rp.sigAlgOidRaw = rsaPssOid;
         rp.sigAlgOidRawLen = sizeof(rsaPssOid);
+        rp.sigAlgParams = pssParamsSalt32;
+        rp.sigAlgParamsLen = sizeof(pssParamsSalt32);
         rp.issuer.cn = "rsa-pss-full";
         rp.subject.cn = "rsa-pss-full";
         rp.notBefore = 1700000000ull;
@@ -2424,8 +2451,8 @@ void SSFX509UnitTest(void)
         rp.pubKey = rsaPub;
         rp.pubKeyLen = (uint32_t)rsaPubLen;
 
-        /* Encode TBS — this requires spkiBuf large enough for RSA pubkey */
-        tbsLen = SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &rp);
+        /* Encode TBS - this requires spkiBuf large enough for RSA pubkey */
+        (void)SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &rp, &tbsLen);
         SSF_ASSERT(tbsLen > 0u);
 
         /* Hash and sign with RSA-PSS-SHA256 */
@@ -2434,8 +2461,8 @@ void SSFX509UnitTest(void)
                    tbsHash, SSF_SHA2_256_BYTE_SIZE,
                    sig, sizeof(sig), &sigLen) == true);
 
-        certDerLen = SSFX509EncodeCert(certDer, sizeof(certDer), &rp,
-                                        sig, (uint32_t)sigLen);
+        (void)SSFX509EncodeCert(certDer, sizeof(certDer), &rp,
+                                        sig, (uint32_t)sigLen, &certDerLen);
         SSF_ASSERT(certDerLen > 0u);
 
         /* Parse and verify self-signed signature */
@@ -2443,7 +2470,7 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(SSFX509VerifyCertSignature(&parsed, &parsed) == true);
     }
 
-    /* ---- RSA-PSS-SHA384: full cert encode → parse → verify ---- */
+    /* ---- RSA-PSS-SHA384: full cert encode -> parse -> verify ---- */
     /* This test demonstrates that the encoder needs PSS parameters      */
     /* so the verifier can determine SHA-384 instead of defaulting to    */
     /* SHA-256.                                                          */
@@ -2456,12 +2483,13 @@ void SSFX509UnitTest(void)
         };
         /* PSS parameters for SHA-384 */
         static const uint8_t pssParamsSHA384[] = {
-            0x30u, 0x11u,
+            0x30u, 0x16u,
             0xA0u, 0x0Fu,
             0x30u, 0x0Du,
             0x06u, 0x09u,
             0x60u, 0x86u, 0x48u, 0x01u, 0x65u, 0x03u, 0x04u, 0x02u, 0x02u,
-            0x05u, 0x00u
+            0x05u, 0x00u,
+            0xA2u, 0x03u, 0x02u, 0x01u, 0x30u /* [2] saltLength 48 */
         };
 
         uint8_t rsaPriv[SSF_RSA_MAX_PRIV_KEY_DER_SIZE];
@@ -2501,7 +2529,7 @@ void SSFX509UnitTest(void)
         rp.pubKeyLen = (uint32_t)rsaPubLen;
 
         /* Encode TBS */
-        tbsLen = SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &rp);
+        (void)SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &rp, &tbsLen);
         SSF_ASSERT(tbsLen > 0u);
 
         /* Hash with SHA-384 and sign with RSA-PSS-SHA384 */
@@ -2510,8 +2538,8 @@ void SSFX509UnitTest(void)
                    tbsHash, SSF_SHA2_384_BYTE_SIZE,
                    sig, sizeof(sig), &sigLen) == true);
 
-        certDerLen = SSFX509EncodeCert(certDer, sizeof(certDer), &rp,
-                                        sig, (uint32_t)sigLen);
+        (void)SSFX509EncodeCert(certDer, sizeof(certDer), &rp,
+                                        sig, (uint32_t)sigLen, &certDerLen);
         SSF_ASSERT(certDerLen > 0u);
 
         /* Parse and verify: the verifier must read PSS params to use SHA-384 */
@@ -2525,7 +2553,7 @@ void SSFX509UnitTest(void)
     /* 11. SHA-512 Signature Algorithm Support                              */
     /* ==================================================================== */
 
-    /* ---- RSA PKCS#1 v1.5 SHA-512: full encode → parse → verify ---- */
+    /* ---- RSA PKCS#1 v1.5 SHA-512: full encode -> parse -> verify ---- */
     {
         /* sha512WithRSAEncryption: 1.2.840.113549.1.1.13 */
         static const uint8_t rsaPkcs1Sha512Oid[] = {
@@ -2569,7 +2597,7 @@ void SSFX509UnitTest(void)
         rp.pubKey = rsaPub;
         rp.pubKeyLen = (uint32_t)rsaPubLen;
 
-        tbsLen = SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &rp);
+        (void)SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &rp, &tbsLen);
         SSF_ASSERT(tbsLen > 0u);
 
         SSFSHA512(tbsDer, tbsLen, tbsHash, sizeof(tbsHash));
@@ -2577,8 +2605,8 @@ void SSFX509UnitTest(void)
                    tbsHash, SSF_SHA2_512_BYTE_SIZE,
                    sig, sizeof(sig), &sigLen) == true);
 
-        certDerLen = SSFX509EncodeCert(certDer, sizeof(certDer), &rp,
-                                        sig, (uint32_t)sigLen);
+        (void)SSFX509EncodeCert(certDer, sizeof(certDer), &rp,
+                                        sig, (uint32_t)sigLen, &certDerLen);
         SSF_ASSERT(certDerLen > 0u);
 
         SSF_ASSERT(SSFX509Parse(certDer, certDerLen, &parsed) == true);
@@ -2588,7 +2616,7 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(SSFX509VerifyCertSignature(&parsed, &parsed) == true);
     }
 
-    /* ---- RSA-PSS SHA-512: full encode → parse → verify ---- */
+    /* ---- RSA-PSS SHA-512: full encode -> parse -> verify ---- */
     {
         static const uint8_t rsaPssOid[] = {
             0x2Au, 0x86u, 0x48u, 0x86u, 0xF7u, 0x0Du, 0x01u, 0x01u, 0x0Au
@@ -2598,12 +2626,13 @@ void SSFX509UnitTest(void)
         };
         /* PSS parameters for SHA-512 */
         static const uint8_t pssParamsSHA512[] = {
-            0x30u, 0x11u,
+            0x30u, 0x16u,
             0xA0u, 0x0Fu,
             0x30u, 0x0Du,
             0x06u, 0x09u,
             0x60u, 0x86u, 0x48u, 0x01u, 0x65u, 0x03u, 0x04u, 0x02u, 0x03u, /* SHA-512 OID */
-            0x05u, 0x00u
+            0x05u, 0x00u,
+            0xA2u, 0x03u, 0x02u, 0x01u, 0x40u /* [2] saltLength 64 */
         };
 
         uint8_t rsaPriv[SSF_RSA_MAX_PRIV_KEY_DER_SIZE];
@@ -2642,7 +2671,7 @@ void SSFX509UnitTest(void)
         rp.pubKey = rsaPub;
         rp.pubKeyLen = (uint32_t)rsaPubLen;
 
-        tbsLen = SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &rp);
+        (void)SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &rp, &tbsLen);
         SSF_ASSERT(tbsLen > 0u);
 
         SSFSHA512(tbsDer, tbsLen, tbsHash, sizeof(tbsHash));
@@ -2650,8 +2679,8 @@ void SSFX509UnitTest(void)
                    tbsHash, SSF_SHA2_512_BYTE_SIZE,
                    sig, sizeof(sig), &sigLen) == true);
 
-        certDerLen = SSFX509EncodeCert(certDer, sizeof(certDer), &rp,
-                                        sig, (uint32_t)sigLen);
+        (void)SSFX509EncodeCert(certDer, sizeof(certDer), &rp,
+                                        sig, (uint32_t)sigLen, &certDerLen);
         SSF_ASSERT(certDerLen > 0u);
 
         SSF_ASSERT(SSFX509Parse(certDer, certDerLen, &parsed) == true);
@@ -2692,7 +2721,8 @@ void SSFX509UnitTest(void)
         p.pubKeyLen = sizeof(fakePubKeySAN);
         p.sanDNSNames = sanDNS;
 
-        derLen = SSFX509EncodeCert(derBuf, sizeof(derBuf), &p, fakeSigSAN, sizeof(fakeSigSAN));
+        (void)SSFX509EncodeCert(derBuf, sizeof(derBuf), &p, fakeSigSAN, sizeof(fakeSigSAN),
+         &derLen);
         SSF_ASSERT(derLen > 0u);
         SSF_ASSERT(SSFX509Parse(derBuf, derLen, &parsed) == true);
         SSF_ASSERT(parsed.sanLen == 2u);
@@ -2735,7 +2765,7 @@ void SSFX509UnitTest(void)
         p.pubKeyLen = sizeof(fakePubKeyIP);
         p.sanIPAddrs = sanIPs;
 
-        derLen = SSFX509EncodeCert(derBuf, sizeof(derBuf), &p, fakeSigIP, sizeof(fakeSigIP));
+        (void)SSFX509EncodeCert(derBuf, sizeof(derBuf), &p, fakeSigIP, sizeof(fakeSigIP), &derLen);
         SSF_ASSERT(derLen > 0u);
         SSF_ASSERT(SSFX509Parse(derBuf, derLen, &parsed) == true);
         SSF_ASSERT(parsed.sanLen == 1u);
@@ -2775,7 +2805,8 @@ void SSFX509UnitTest(void)
         p.skid = skidVal;
         p.skidLen = sizeof(skidVal);
 
-        derLen = SSFX509EncodeCert(derBuf, sizeof(derBuf), &p, fakeSigSKID, sizeof(fakeSigSKID));
+        (void)SSFX509EncodeCert(derBuf, sizeof(derBuf), &p, fakeSigSKID, sizeof(fakeSigSKID),
+         &derLen);
         SSF_ASSERT(derLen > 0u);
         SSF_ASSERT(SSFX509Parse(derBuf, derLen, &parsed) == true);
         SSF_ASSERT(parsed.skid != NULL);
@@ -2814,7 +2845,8 @@ void SSFX509UnitTest(void)
         p.akid = akidVal;
         p.akidLen = sizeof(akidVal);
 
-        derLen = SSFX509EncodeCert(derBuf, sizeof(derBuf), &p, fakeSigAKID, sizeof(fakeSigAKID));
+        (void)SSFX509EncodeCert(derBuf, sizeof(derBuf), &p, fakeSigAKID, sizeof(fakeSigAKID),
+         &derLen);
         SSF_ASSERT(derLen > 0u);
         SSF_ASSERT(SSFX509Parse(derBuf, derLen, &parsed) == true);
         SSF_ASSERT(parsed.akid != NULL);
@@ -2865,12 +2897,12 @@ void SSFX509UnitTest(void)
         p.keyUsageBits = SSF_X509_KU_KEY_CERT_SIGN | SSF_X509_KU_DIGITAL_SIGNATURE;
         p.sanDNSNames = sanDNSChain;
 
-        tbsLen = SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &p);
+        (void)SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &p, &tbsLen);
         SSF_ASSERT(tbsLen > 0u);
         SSFSHA256(tbsDer, tbsLen, tbsHash, sizeof(tbsHash));
         SSF_ASSERT(SSFECDSASign(SSF_EC_CURVE_P256, privKey, 32, tbsHash, 32,
                                 sig, sizeof(sig), &sigLen) == true);
-        certDerLen = SSFX509EncodeCert(certDer, sizeof(certDer), &p, sig, (uint32_t)sigLen);
+        (void)SSFX509EncodeCert(certDer, sizeof(certDer), &p, sig, (uint32_t)sigLen, &certDerLen);
         SSF_ASSERT(certDerLen > 0u);
 
         {
@@ -2898,7 +2930,9 @@ void SSFX509UnitTest(void)
 
     /* ---- Test: SKID/AKID cross-check with generated CA + leaf ---- */
     {
-        static const uint8_t keyIdVal[] = { 0x11u, 0x22u, 0x33u, 0x44u, 0x55u, 0x66u, 0x77u, 0x88u };
+        static const uint8_t keyIdVal[] = {
+            0x11u, 0x22u, 0x33u, 0x44u, 0x55u, 0x66u, 0x77u, 0x88u
+        };
         static const char *caSanDNS[] = { "ca.skid.test", NULL };
         static const char *leafSanDNS[] = { "leaf.skid.test", NULL };
         uint8_t caPrivKey[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
@@ -2952,12 +2986,13 @@ void SSFX509UnitTest(void)
         cp.skid = keyIdVal;
         cp.skidLen = sizeof(keyIdVal);
 
-        tbsLen = SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &cp);
+        (void)SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &cp, &tbsLen);
         SSF_ASSERT(tbsLen > 0u);
         SSFSHA256(tbsDer, tbsLen, tbsHash, sizeof(tbsHash));
         SSF_ASSERT(SSFECDSASign(SSF_EC_CURVE_P256, caPrivKey, 32, tbsHash, 32,
                                 sig, sizeof(sig), &sigLen) == true);
-        caCertDerLen = SSFX509EncodeCert(caCertDer, sizeof(caCertDer), &cp, sig, (uint32_t)sigLen);
+        (void)SSFX509EncodeCert(caCertDer, sizeof(caCertDer), &cp, sig, (uint32_t)sigLen,
+         &caCertDerLen);
         SSF_ASSERT(caCertDerLen > 0u);
 
         /* Verify CA has SKID */
@@ -2996,13 +3031,13 @@ void SSFX509UnitTest(void)
         lp.akid = keyIdVal;
         lp.akidLen = sizeof(keyIdVal);
 
-        tbsLen = SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &lp);
+        (void)SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &lp, &tbsLen);
         SSF_ASSERT(tbsLen > 0u);
         SSFSHA256(tbsDer, tbsLen, tbsHash, sizeof(tbsHash));
         SSF_ASSERT(SSFECDSASign(SSF_EC_CURVE_P256, caPrivKey, 32, tbsHash, 32,
                                 sig, sizeof(sig), &sigLen) == true);
-        leafCertDerLen = SSFX509EncodeCert(leafCertDer, sizeof(leafCertDer), &lp,
-                                           sig, (uint32_t)sigLen);
+        (void)SSFX509EncodeCert(leafCertDer, sizeof(leafCertDer), &lp,
+                                           sig, (uint32_t)sigLen, &leafCertDerLen);
         SSF_ASSERT(leafCertDerLen > 0u);
 
         /* Verify leaf has AKID */
@@ -3041,7 +3076,7 @@ void SSFX509UnitTest(void)
 
     /* ---- Ed25519 self-signed certificate round-trip (RFC 8410) ---- */
     {
-        /* id-Ed25519 OID 1.3.101.112 — same for sigAlg and pubKeyAlg */
+        /* id-Ed25519 OID 1.3.101.112 - same for sigAlg and pubKeyAlg */
         static const uint8_t edOid[] = { 0x2Bu, 0x65u, 0x70u };
         static const uint8_t edSerial[] = { 0x11u };
         static const char *edSanDNS[] = { "ed25519.ssf.local", NULL };
@@ -3078,14 +3113,14 @@ void SSFX509UnitTest(void)
         ep.pubKeyLen = SSF_ED25519_PUB_KEY_SIZE;
         ep.sanDNSNames = edSanDNS;
 
-        edTbsLen = SSFX509EncodeTBS(edTbs, sizeof(edTbs), &ep);
+        (void)SSFX509EncodeTBS(edTbs, sizeof(edTbs), &ep, &edTbsLen);
         SSF_ASSERT(edTbsLen > 0u);
 
         /* Ed25519 signs the raw TBS (no pre-hash). */
         SSFEd25519Sign(edSeed, edPubKey, edTbs, edTbsLen, edSig);
 
-        edCertDerLen = SSFX509EncodeCert(edCertDer, sizeof(edCertDer), &ep,
-                                          edSig, SSF_ED25519_SIG_SIZE);
+        (void)SSFX509EncodeCert(edCertDer, sizeof(edCertDer), &ep,
+                                          edSig, SSF_ED25519_SIG_SIZE, &edCertDerLen);
         SSF_ASSERT(edCertDerLen > 0u);
 
         /* Parse back and verify algorithm identification */
@@ -3121,7 +3156,7 @@ void SSFX509UnitTest(void)
                                            "ed25519.ssf.local", 1800000000ull) == true);
         }
 
-        /* Tamper with signature — verification must fail */
+        /* Tamper with signature - verification must fail */
         {
             uint8_t corruptCert[1024];
             SSFX509Cert_t corruptParsed;
@@ -3153,7 +3188,7 @@ void SSFX509UnitTest(void)
         SSFX509Cert_t parsed;
         uint32_t i;
 
-        /* 12 SAN DNS names, each 240 chars long — total ~2.9 KB of SAN content alone,          */
+        /* 12 SAN DNS names, each 240 chars long - total ~2.9 KB of SAN content alone,          */
         /* which pushes the overall cert DER well beyond 2048 bytes.                             */
         static char sanBuf[SSF_X509_CONFIG_MAX_SAN_ENTRIES][241];
         static const char *sanPtrs[SSF_X509_CONFIG_MAX_SAN_ENTRIES + 1];
@@ -3193,15 +3228,15 @@ void SSFX509UnitTest(void)
         p.pubKeyLen = (uint32_t)pubKeyLen;
         p.sanDNSNames = sanPtrs;
 
-        tbsLen = SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &p);
+        (void)SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &p, &tbsLen);
         SSF_ASSERT(tbsLen > 0u);
         SSFSHA256(tbsDer, tbsLen, tbsHash, sizeof(tbsHash));
         SSF_ASSERT(SSFECDSASign(SSF_EC_CURVE_P256, privKey, 32, tbsHash, 32,
                                 sig, sizeof(sig), &sigLen) == true);
-        certDerLen = SSFX509EncodeCert(certDer, sizeof(certDer), &p, sig, (uint32_t)sigLen);
+        (void)SSFX509EncodeCert(certDer, sizeof(certDer), &p, sig, (uint32_t)sigLen, &certDerLen);
         SSF_ASSERT(certDerLen > 0u);
 
-        /* Verify the DER actually exceeds the old 2048-byte ceiling — otherwise this test      */
+        /* Verify the DER actually exceeds the old 2048-byte ceiling - otherwise this test      */
         /* would not be exercising the raised limit.                                             */
         SSF_ASSERT(certDerLen > 2048u);
         SSF_ASSERT(certDerLen <= SSF_X509_CONFIG_MAX_CERT_SIZE);
@@ -3216,7 +3251,7 @@ void SSFX509UnitTest(void)
             SSF_ASSERT(memcmp(parsed.san[i].val, sanBuf[i], 240u) == 0);
         }
 
-        /* Signature verification (self-signed) — TBS + sig must round-trip through the parser  */
+        /* Signature verification (self-signed) - TBS + sig must round-trip through the parser  */
         /* and reproduce the same DER region that was signed.                                    */
         SSF_ASSERT(SSFX509VerifyCertSignature(&parsed, &parsed) == true);
 
@@ -3239,7 +3274,7 @@ void SSFX509UnitTest(void)
         }
     }
 
-    /* ---- Name Constraints (RFC 5280 §4.2.1.10) ---- */
+    /* ---- Name Constraints (RFC 5280 Sec. 4.2.1.10) ---- */
     /* Build a CA cert with nameConstraints, sign a leaf with it, verify that SAN-matching      */
     /* leafs pass and non-matching leafs are rejected.                                           */
     {
@@ -3301,12 +3336,13 @@ void SSFX509UnitTest(void)
             cp.ncPermittedIPs = caPermIPs;
             cp.ncExcludedDNS = caExclDNS;
 
-            caTbsLen = SSFX509EncodeTBS(caTbs, sizeof(caTbs), &cp);
+            (void)SSFX509EncodeTBS(caTbs, sizeof(caTbs), &cp, &caTbsLen);
             SSF_ASSERT(caTbsLen > 0u);
             SSFSHA256(caTbs, caTbsLen, caTbsHash, sizeof(caTbsHash));
             SSF_ASSERT(SSFECDSASign(SSF_EC_CURVE_P256, caPrivKey, 32,
                                      caTbsHash, 32, caSig, sizeof(caSig), &caSigLen) == true);
-            caDerLen = SSFX509EncodeCert(caDer, sizeof(caDer), &cp, caSig, (uint32_t)caSigLen);
+            (void)SSFX509EncodeCert(caDer, sizeof(caDer), &cp, caSig, (uint32_t)caSigLen,
+             &caDerLen);
             SSF_ASSERT(caDerLen > 0u);
         }
 
@@ -3355,18 +3391,18 @@ void SSFX509UnitTest(void)
             lp.pubKeyLen = (uint32_t)leafPubKeyLen; \
             lp.sanDNSNames = (_sanDNS); \
             lp.sanIPAddrs = (_sanIPs); \
-            leafTbsLen = SSFX509EncodeTBS(leafTbs, sizeof(leafTbs), &lp); \
+            (void)SSFX509EncodeTBS(leafTbs, sizeof(leafTbs), &lp, &leafTbsLen); \
             SSF_ASSERT(leafTbsLen > 0u); \
             SSFSHA256(leafTbs, leafTbsLen, leafTbsHash, sizeof(leafTbsHash)); \
             SSF_ASSERT(SSFECDSASign(SSF_EC_CURVE_P256, caPrivKey, 32, \
                                      leafTbsHash, 32, leafSig, sizeof(leafSig), \
                                      &leafSigLen) == true); \
-            (_leafDerLen) = SSFX509EncodeCert((_leafDer), SSF_X509_CONFIG_MAX_CERT_SIZE, &lp, \
-                                               leafSig, (uint32_t)leafSigLen); \
+            (void)SSFX509EncodeCert((_leafDer), SSF_X509_CONFIG_MAX_CERT_SIZE, &lp, \
+                                               leafSig, (uint32_t)leafSigLen, &(_leafDerLen)); \
             SSF_ASSERT((_leafDerLen) > 0u); \
         } while (0)
 
-        /* Case 1: leaf SAN "foo.example.com" — inside permittedSubtrees → accept. */
+        /* Case 1: leaf SAN "foo.example.com" - inside permittedSubtrees -> accept. */
         {
             static const char *san[] = { "foo.example.com", NULL };
             uint8_t leafDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
@@ -3380,7 +3416,7 @@ void SSFX509UnitTest(void)
                                            "foo.example.com", 1800000000ull) == true);
         }
 
-        /* Case 2: leaf SAN "evil.com" — outside permittedSubtrees → reject. */
+        /* Case 2: leaf SAN "evil.com" - outside permittedSubtrees -> reject. */
         {
             static const char *san[] = { "evil.com", NULL };
             uint8_t leafDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
@@ -3394,7 +3430,7 @@ void SSFX509UnitTest(void)
                                            "evil.com", 1800000000ull) == false);
         }
 
-        /* Case 3: leaf SAN "banned.example.com" — explicitly excluded → reject. */
+        /* Case 3: leaf SAN "banned.example.com" - explicitly excluded -> reject. */
         {
             static const char *san[] = { "banned.example.com", NULL };
             uint8_t leafDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
@@ -3408,7 +3444,7 @@ void SSFX509UnitTest(void)
                                            "banned.example.com", 1800000000ull) == false);
         }
 
-        /* Case 4: leaf with sub-label of an excluded name → also excluded. */
+        /* Case 4: leaf with sub-label of an excluded name -> also excluded. */
         {
             static const char *san[] = { "sub.banned.example.com", NULL };
             uint8_t leafDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
@@ -3422,7 +3458,7 @@ void SSFX509UnitTest(void)
                                            "sub.banned.example.com", 1800000000ull) == false);
         }
 
-        /* Case 5: exact match of permitted name (not a sub-label) → accept. */
+        /* Case 5: exact match of permitted name (not a sub-label) -> accept. */
         {
             static const char *san[] = { "example.com", NULL };
             uint8_t leafDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
@@ -3436,7 +3472,7 @@ void SSFX509UnitTest(void)
                                            "example.com", 1800000000ull) == true);
         }
 
-        /* Case 6: non-boundary suffix — "notexample.com" must NOT match "example.com". */
+        /* Case 6: non-boundary suffix - "notexample.com" must NOT match "example.com". */
         {
             static const char *san[] = { "notexample.com", NULL };
             uint8_t leafDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
@@ -3450,7 +3486,7 @@ void SSFX509UnitTest(void)
                                            "notexample.com", 1800000000ull) == false);
         }
 
-        /* Case 7: iPAddress SAN inside permitted 10.0.0.0/8 → accept. */
+        /* Case 7: iPAddress SAN inside permitted 10.0.0.0/8 -> accept. */
         {
             static const uint8_t ipBytes[] = { 10u, 5u, 6u, 7u };
             static const uint8_t *ips[] = { ipBytes, NULL };
@@ -3467,7 +3503,7 @@ void SSFX509UnitTest(void)
                                            "10.5.6.7", 1800000000ull) == true);
         }
 
-        /* Case 8: iPAddress SAN outside permitted 10.0.0.0/8 → reject. */
+        /* Case 8: iPAddress SAN outside permitted 10.0.0.0/8 -> reject. */
         {
             static const uint8_t ipBytes[] = { 192u, 168u, 1u, 1u };
             static const uint8_t *ips[] = { ipBytes, NULL };
@@ -3482,7 +3518,7 @@ void SSFX509UnitTest(void)
                                            "192.168.1.1", 1800000000ull) == false);
         }
 
-        /* Case 9: leaf with mixed SANs — DNS matches permitted but IP does not → reject       */
+        /* Case 9: leaf with mixed SANs - DNS matches permitted but IP does not -> reject       */
         /* (every SAN must pass).                                                                */
         {
             static const char *san[] = { "foo.example.com", NULL };
@@ -3502,10 +3538,10 @@ void SSFX509UnitTest(void)
         #undef _NC_BUILD_LEAF
     }
 
-    /* ---- Duplicate Extension Detection (RFC 5280 §4.2) ---- */
+    /* ---- Duplicate Extension Detection (RFC 5280 Sec. 4.2) ---- */
     /* "A certificate MUST NOT include more than one instance of a particular extension."        */
     /* Exercised by encoding a cert with addBasicConstraints=true plus addRawExt pointing at     */
-    /* the BasicConstraints OID — the resulting DER has two BC extensions and SSFX509Parse must  */
+    /* the BasicConstraints OID - the resulting DER has two BC extensions and SSFX509Parse must  */
     /* reject it.                                                                                 */
     {
         /* id-ce-basicConstraints: 2.5.29.19 */
@@ -3561,13 +3597,13 @@ void SSFX509UnitTest(void)
             p.pubKey = pubKey; \
             p.pubKeyLen = (uint32_t)pubKeyLen; \
             _configure(&p); \
-            tbsLen = SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &p); \
+            (void)SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &p, &tbsLen); \
             SSF_ASSERT(tbsLen > 0u); \
             SSFSHA256(tbsDer, tbsLen, tbsHash, sizeof(tbsHash)); \
             SSF_ASSERT(SSFECDSASign(SSF_EC_CURVE_P256, privKey, 32, tbsHash, 32, \
                                      sig, sizeof(sig), &sigLen) == true); \
-            certDerLen = SSFX509EncodeCert(certDer, sizeof(certDer), &p, sig, \
-                                            (uint32_t)sigLen); \
+            (void)SSFX509EncodeCert(certDer, sizeof(certDer), &p, sig, \
+                                            (uint32_t)sigLen, &certDerLen); \
             SSF_ASSERT(certDerLen > 0u); \
             SSF_ASSERT(SSFX509Parse(certDer, certDerLen, &parsed) == false); \
         } while (0)
@@ -3644,7 +3680,7 @@ void SSFX509UnitTest(void)
             p.ecCurveOidRawLen = sizeof(_utCurveOid);
             p.pubKey = pubKey;
             p.pubKeyLen = (uint32_t)pubKeyLen;
-            /* Only the rawExt carrying BC — no duplicate. */
+            /* Only the rawExt carrying BC - no duplicate. */
             p.addRawExt = true;
             p.rawExtOid = _bcOid;
             p.rawExtOidLen = sizeof(_bcOid);
@@ -3652,12 +3688,13 @@ void SSFX509UnitTest(void)
             p.rawExtValueLen = sizeof(_bcEmptyVal);
             p.rawExtCritical = true;
 
-            tbsLen = SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &p);
+            (void)SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &p, &tbsLen);
             SSF_ASSERT(tbsLen > 0u);
             SSFSHA256(tbsDer, tbsLen, tbsHash, sizeof(tbsHash));
             SSF_ASSERT(SSFECDSASign(SSF_EC_CURVE_P256, privKey, 32, tbsHash, 32,
                                      sig, sizeof(sig), &sigLen) == true);
-            certDerLen = SSFX509EncodeCert(certDer, sizeof(certDer), &p, sig, (uint32_t)sigLen);
+            (void)SSFX509EncodeCert(certDer, sizeof(certDer), &p, sig, (uint32_t)sigLen,
+             &certDerLen);
             SSF_ASSERT(certDerLen > 0u);
 
             /* Single-extension cert must parse. */
@@ -3668,8 +3705,8 @@ void SSFX509UnitTest(void)
         #undef _DUP_EXT_EXPECT_REJECT
     }
 
-    /* ---- Serial Number Validation (RFC 5280 §4.1.2.2) ---- */
-    /* Serial MUST be a non-negative integer ≤20 octets. Verify the parser accepts conforming   */
+    /* ---- Serial Number Validation (RFC 5280 Sec. 4.1.2.2) ---- */
+    /* Serial MUST be a non-negative integer <=20 octets. Verify the parser accepts conforming   */
     /* serials and rejects >20-octet or negative serials.                                         */
     {
         uint8_t privKey[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
@@ -3709,24 +3746,24 @@ void SSFX509UnitTest(void)
             p.ecCurveOidRawLen = sizeof(_utCurveOid); \
             p.pubKey = pubKey; \
             p.pubKeyLen = (uint32_t)pubKeyLen; \
-            tbsLen = SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &p); \
+            (void)SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &p, &tbsLen); \
             SSF_ASSERT(tbsLen > 0u); \
             SSFSHA256(tbsDer, tbsLen, tbsHash, sizeof(tbsHash)); \
             SSF_ASSERT(SSFECDSASign(SSF_EC_CURVE_P256, privKey, 32, tbsHash, 32, \
                                      sig, sizeof(sig), &sigLen) == true); \
-            certDerLen = SSFX509EncodeCert(certDer, sizeof(certDer), &p, sig, \
-                                            (uint32_t)sigLen); \
+            (void)SSFX509EncodeCert(certDer, sizeof(certDer), &p, sig, \
+                                            (uint32_t)sigLen, &certDerLen); \
             SSF_ASSERT(certDerLen > 0u); \
             SSF_ASSERT(SSFX509Parse(certDer, certDerLen, &parsed) == (_expect)); \
         } while (0)
 
-        /* Case 1: typical 1-byte positive serial → accept (baseline). */
+        /* Case 1: typical 1-byte positive serial -> accept (baseline). */
         {
             static const uint8_t s[] = { 0x2Au };
             _SERIAL_CASE(s, sizeof(s), true);
         }
 
-        /* Case 2: maximum conforming length of 20 octets → accept. First byte < 0x80 so value  */
+        /* Case 2: maximum conforming length of 20 octets -> accept. First byte < 0x80 so value  */
         /* is positive without a sign-padding byte.                                              */
         {
             static const uint8_t s[20] = {
@@ -3737,14 +3774,14 @@ void SSFX509UnitTest(void)
             _SERIAL_CASE(s, sizeof(s), true);
         }
 
-        /* Case 3: zero serial (value 0) — CAs MUST NOT emit, but RFC says verifiers SHOULD     */
+        /* Case 3: zero serial (value 0) - CAs MUST NOT emit, but RFC says verifiers SHOULD     */
         /* gracefully handle. We accept.                                                         */
         {
             static const uint8_t s[] = { 0x00u };
             _SERIAL_CASE(s, sizeof(s), true);
         }
 
-        /* Case 4: 21-octet serial → reject (exceeds RFC 5280 MUST NOT for CAs, and verifier    */
+        /* Case 4: 21-octet serial -> reject (exceeds RFC 5280 MUST NOT for CAs, and verifier    */
         /* capability limit).                                                                    */
         {
             static const uint8_t s[21] = {
@@ -3755,7 +3792,7 @@ void SSFX509UnitTest(void)
             _SERIAL_CASE(s, sizeof(s), false);
         }
 
-        /* Case 5: negative serial (high bit of first byte set → two's-complement negative).    */
+        /* Case 5: negative serial (high bit of first byte set -> two's-complement negative).    */
         /* 1-byte 0x80 encodes as value -128.                                                    */
         {
             static const uint8_t s[] = { 0x80u };
@@ -3783,7 +3820,7 @@ void SSFX509UnitTest(void)
         #undef _SERIAL_CASE
     }
 
-    /* ---- Wildcard SAN matching (RFC 6125 §6.4.3 + CA/B Forum BRs §3.2.2.6) ---- */
+    /* ---- Wildcard SAN matching (RFC 6125 Sec. 6.4.3 + CA/B Forum BRs Sec. 3.2.2.6) ---- */
     /* Verify the hostname-match path in SSFX509VerifyChain handles wildcards correctly,        */
     /* including the label-count floor that rejects public-suffix wildcards like *.com.         */
     {
@@ -3828,13 +3865,13 @@ void SSFX509UnitTest(void)
             p.pubKey = pubKey; \
             p.pubKeyLen = (uint32_t)pubKeyLen; \
             p.sanDNSNames = sanList; \
-            tbsLen = SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &p); \
+            (void)SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &p, &tbsLen); \
             SSF_ASSERT(tbsLen > 0u); \
             SSFSHA256(tbsDer, tbsLen, tbsHash, sizeof(tbsHash)); \
             SSF_ASSERT(SSFECDSASign(SSF_EC_CURVE_P256, privKey, 32, tbsHash, 32, \
                                      sig, sizeof(sig), &sigLen) == true); \
-            certDerLen = SSFX509EncodeCert(certDer, sizeof(certDer), &p, sig, \
-                                            (uint32_t)sigLen); \
+            (void)SSFX509EncodeCert(certDer, sizeof(certDer), &p, sig, \
+                                            (uint32_t)sigLen, &certDerLen); \
             SSF_ASSERT(certDerLen > 0u); \
             chain[0] = certDer; chainL[0] = certDerLen; \
             trust[0] = certDer; trustL[0] = certDerLen; \
@@ -3860,27 +3897,27 @@ void SSFX509UnitTest(void)
         /* Negative: suffix overlap without label boundary. */
         _WC_CASE("*.example.com", "fooexample.com", false);
 
-        /* Negative: label-count floor — *.com must NOT match foo.com (BR §3.2.2.6). */
+        /* Negative: label-count floor - *.com must NOT match foo.com (BR Sec. 3.2.2.6). */
         _WC_CASE("*.com", "foo.com", false);
 
-        /* Negative: label-count floor — *.net must NOT match anything.net. */
+        /* Negative: label-count floor - *.net must NOT match anything.net. */
         _WC_CASE("*.net", "example.net", false);
 
-        /* Negative: label-count floor — *.org must NOT match bar.org. */
+        /* Negative: label-count floor - *.org must NOT match bar.org. */
         _WC_CASE("*.org", "bar.org", false);
 
-        /* Positive: 4th-level wildcard — base "sub.example.com" has a dot, allowed. */
+        /* Positive: 4th-level wildcard - base "sub.example.com" has a dot, allowed. */
         _WC_CASE("*.sub.example.com", "foo.sub.example.com", true);
 
-        /* Negative: partial-label wildcard — current impl requires the leftmost label to be    */
+        /* Negative: partial-label wildcard - current impl requires the leftmost label to be    */
         /* exactly "*" (no partial-label matching per CA/B Forum BRs).                           */
         _WC_CASE("foo*.example.com", "foobar.example.com", false);
 
-        /* Negative: wildcard not in leftmost position — "foo.*.example.com" is invalid.        */
+        /* Negative: wildcard not in leftmost position - "foo.*.example.com" is invalid.        */
         _WC_CASE("foo.*.example.com", "foo.bar.example.com", false);
 
         /* Note: the label-count heuristic does NOT cover multi-label public suffixes like      */
-        /* "co.uk" or "github.io" — e.g. "*.co.uk" still matches "foo.co.uk" under this         */
+        /* "co.uk" or "github.io" - e.g. "*.co.uk" still matches "foo.co.uk" under this         */
         /* implementation. Documented as a known limitation; full coverage requires a Public    */
         /* Suffix List which is out of scope for this embedded profile.                          */
 
@@ -3900,7 +3937,7 @@ void SSFX509UnitTest(void)
         size_t pubKeyLen;
         uint8_t serial[] = { 0x44u };
         uint32_t idx;
-        /* KeyIdentifier payloads of varying lengths — each filled with a deterministic pattern */
+        /* KeyIdentifier payloads of varying lengths - each filled with a deterministic pattern */
         /* so round-trip equality can be asserted per-byte.                                      */
         static uint8_t kidBuf[64];
 
@@ -3947,13 +3984,13 @@ void SSFX509UnitTest(void)
             p.skidLen = (_kidLen); \
             p.akid = kidBuf; \
             p.akidLen = (_kidLen); \
-            tbsLen = SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &p); \
+            (void)SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &p, &tbsLen); \
             SSF_ASSERT(tbsLen > 0u); \
             SSFSHA256(tbsDer, tbsLen, tbsHash, sizeof(tbsHash)); \
             SSF_ASSERT(SSFECDSASign(SSF_EC_CURVE_P256, privKey, 32, tbsHash, 32, \
                                      sig, sizeof(sig), &sigLen) == true); \
-            certDerLen = SSFX509EncodeCert(certDer, sizeof(certDer), &p, sig, \
-                                            (uint32_t)sigLen); \
+            (void)SSFX509EncodeCert(certDer, sizeof(certDer), &p, sig, \
+                                            (uint32_t)sigLen, &certDerLen); \
             SSF_ASSERT(certDerLen > 0u); \
             SSF_ASSERT(SSFX509Parse(certDer, certDerLen, &parsed) == true); \
             SSF_ASSERT(parsed.skidLen == (_kidLen)); \
@@ -3962,21 +3999,21 @@ void SSFX509UnitTest(void)
             SSF_ASSERT(memcmp(parsed.akid, kidBuf, (_kidLen)) == 0); \
         } while (0)
 
-        /* 20 bytes — SHA-1 baseline (RFC 5280 §4.2.1.2 default). Regression guard. */
+        /* 20 bytes - SHA-1 baseline (RFC 5280 Sec. 4.2.1.2 default). Regression guard. */
         _KID_ROUND_TRIP(20u);
 
-        /* 30 bytes — just under the old 32-byte buffer ceiling. Used to work. */
+        /* 30 bytes - just under the old 32-byte buffer ceiling. Used to work. */
         _KID_ROUND_TRIP(30u);
 
-        /* 32 bytes — SHA-256 keyIdentifier (RFC 7093). This would have:                        */
+        /* 32 bytes - SHA-256 keyIdentifier (RFC 7093). This would have:                        */
         /*   - overflowed the old akidSeqBuf[32] by 2 bytes,                                    */
         /*   - silently truncated the SKID to empty via innerOctetBuf[32].                      */
         _KID_ROUND_TRIP(32u);
 
-        /* 48 bytes — SHA-384 keyIdentifier. Old AKID: 16-byte stack overflow. */
+        /* 48 bytes - SHA-384 keyIdentifier. Old AKID: 16-byte stack overflow. */
         _KID_ROUND_TRIP(48u);
 
-        /* 64 bytes — SHA-512 keyIdentifier. Maximum supported by the new buffers.              */
+        /* 64 bytes - SHA-512 keyIdentifier. Maximum supported by the new buffers.              */
         /* AKID length 64 also crosses the DER single-byte-length threshold (64 < 128 so still  */
         /* single-byte, but the test still exercises SSFASN1EncTagLen for consistency).          */
         _KID_ROUND_TRIP(64u);
@@ -4004,21 +4041,21 @@ void SSFX509UnitTest(void)
             p.pubKeyLen = (uint32_t)pubKeyLen;
             p.akid = kidBuf;
             p.akidLen = 65u;  /* > _UT_KID_MAX */
-            SSF_ASSERT(SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &p) == 0u);
+            SSF_ASSERT(SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &p, &_utScratchLen) == false);
 
             /* Same for SKID alone. */
             p.akid = NULL;
             p.akidLen = 0u;
             p.skid = kidBuf;
             p.skidLen = 65u;
-            SSF_ASSERT(SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &p) == 0u);
+            SSF_ASSERT(SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &p, &_utScratchLen) == false);
         }
 
         #undef _KID_ROUND_TRIP
     }
 
-    /* ---- Real-world cert: TeletexString in DN (RFC 5280 §4.1.2.4 legacy) ---- */
-    /* Entrust.net Certification Authority (2048) — a still-trusted root in macOS / Mozilla     */
+    /* ---- Real-world cert: TeletexString in DN (RFC 5280 Sec. 4.1.2.4 legacy) ---- */
+    /* Entrust.net Certification Authority (2048) - a still-trusted root in macOS / Mozilla     */
     /* trust stores. Its issuer/subject DN contains an OU encoded as TeletexString (T61String,  */
     /* tag 0x14): "www.entrust.net/CPS_2048 incorp. by ref. (limits liab.)". RFC 5280 says new  */
     /* certs SHOULD use UTF8/Printable but verifiers MUST handle TeletexString and             */
@@ -4128,7 +4165,7 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(rootCert.subject.ou != NULL);
     }
 
-    /* ---- ECDSA-with-SHA256 signature over a P-384 public key (RFC 5758 §3.2) ---- */
+    /* ---- ECDSA-with-SHA256 signature over a P-384 public key (RFC 5758 Sec. 3.2) ---- */
     /* RFC 5758 explicitly allows pairing the ecdsa-with-SHA256 signature algorithm with any   */
     /* ECDSA curve. Real-world example used here: "SSL.com Root Certification Authority ECC",  */
     /* a still-trusted root in the macOS / Mozilla trust stores. Its signatureAlgorithm is     */
@@ -4209,8 +4246,12 @@ void SSFX509UnitTest(void)
 
     /* ---- Generation: measured size equals written size and the output re-parses ---- */
     {
-        static const uint8_t rsaOid[] = { 0x2Au, 0x86u, 0x48u, 0x86u, 0xF7u, 0x0Du, 0x01u, 0x01u, 0x01u };
-        static const uint8_t rsaSha256Oid[] = { 0x2Au, 0x86u, 0x48u, 0x86u, 0xF7u, 0x0Du, 0x01u, 0x01u, 0x0Bu };
+        static const uint8_t rsaOid[] = {
+            0x2Au, 0x86u, 0x48u, 0x86u, 0xF7u, 0x0Du, 0x01u, 0x01u, 0x01u
+        };
+        static const uint8_t rsaSha256Oid[] = {
+            0x2Au, 0x86u, 0x48u, 0x86u, 0xF7u, 0x0Du, 0x01u, 0x01u, 0x0Bu
+        };
         static const uint8_t rawOid[] = { 0x55u, 0x1Du, 0x20u };
         static const uint8_t rawVal[] = { 0x30u, 0x00u };
         static const uint8_t ncIp[] = { 10u, 0u, 0u, 0u, 255u, 0u, 0u, 0u };
@@ -4316,28 +4357,30 @@ void SSFX509UnitTest(void)
         /* DN attribute over its upper bound: both passes report failure */
         _utGenBaseParams(&p, serial, bigKey, 65u);
         p.subject.cn = cn65;
-        SSF_ASSERT(SSFX509EncodeTBS(NULL, 0, &p) == 0u);
-        SSF_ASSERT(SSFX509EncodeTBS(out, sizeof(out), &p) == 0u);
+        SSF_ASSERT(SSFX509EncodeTBS(NULL, 0, &p, &_utScratchLen) == false);
+        SSF_ASSERT(SSFX509EncodeTBS(out, sizeof(out), &p, &_utScratchLen) == false);
 
         /* dNSName over 253 octets: both passes report failure */
         _utGenBaseParams(&p, serial, bigKey, 65u);
         p.sanDNSNames = sanOne;
-        SSF_ASSERT(SSFX509EncodeTBS(NULL, 0, &p) == 0u);
-        SSF_ASSERT(SSFX509EncodeTBS(out, sizeof(out), &p) == 0u);
+        SSF_ASSERT(SSFX509EncodeTBS(NULL, 0, &p, &_utScratchLen) == false);
+        SSF_ASSERT(SSFX509EncodeTBS(out, sizeof(out), &p, &_utScratchLen) == false);
 
         /* Certificate larger than SSF_X509_CONFIG_MAX_CERT_SIZE: both passes report failure */
         _utGenBaseParams(&p, serial, bigKey, 65u);
         p.sanDNSNames = sanPtrs;
-        n = SSFX509EncodeTBS(NULL, 0, &p);
+        (void)SSFX509EncodeTBS(NULL, 0, &p, &n);
         SSF_ASSERT((n != 0u) && ((n + sizeof(fakeSig)) > SSF_X509_CONFIG_MAX_CERT_SIZE));
-        SSF_ASSERT(SSFX509EncodeCert(NULL, 0, &p, fakeSig, sizeof(fakeSig)) == 0u);
-        SSF_ASSERT(SSFX509EncodeCert(out, sizeof(out), &p, fakeSig, sizeof(fakeSig)) == 0u);
+        SSF_ASSERT(SSFX509EncodeCert(NULL, 0, &p, fakeSig, sizeof(fakeSig),
+                   &_utScratchLen) == false);
+        SSF_ASSERT(SSFX509EncodeCert(out, sizeof(out), &p, fakeSig, sizeof(fakeSig),
+                   &_utScratchLen) == false);
 
         /* Output buffer one byte short: failure and nothing written past the buffer */
         _utGenBaseParams(&p, serial, bigKey, 65u);
-        n = SSFX509EncodeCert(NULL, 0, &p, fakeSig, 64u);
+        (void)SSFX509EncodeCert(NULL, 0, &p, fakeSig, 64u, &n);
         memset(out, 0xEEu, sizeof(out));
-        SSF_ASSERT(SSFX509EncodeCert(out, n - 1u, &p, fakeSig, 64u) == 0u);
+        SSF_ASSERT(SSFX509EncodeCert(out, n - 1u, &p, fakeSig, 64u, &_utScratchLen) == false);
         SSF_ASSERT((out[n - 1u] == 0xEEu) && (out[n] == 0xEEu));
     }
     /* ---- Fail-closed edges: version, empty names, wildcard label, extension cap, pathLen ---- */
@@ -4362,7 +4405,7 @@ void SSFX509UnitTest(void)
         /* A version field above v3 does not parse */
         _utGenBaseParams(&p, serial, pubKey, 65u);
         p.version = 3u;
-        n = SSFX509EncodeCert(out, sizeof(out), &p, fakeSig, sizeof(fakeSig));
+        (void)SSFX509EncodeCert(out, sizeof(out), &p, fakeSig, sizeof(fakeSig), &n);
         SSF_ASSERT(n != 0u);
         SSF_ASSERT(SSFX509Parse(out, n, &parsed) == false);
 
@@ -4375,13 +4418,13 @@ void SSFX509UnitTest(void)
         /* Empty and NUL-containing dNSName entries are dropped at parse */
         _utGenBaseParams(&p, serial, pubKey, 65u);
         p.sanDNSNames = sanEmpty;
-        n = SSFX509EncodeCert(out, sizeof(out), &p, fakeSig, sizeof(fakeSig));
+        (void)SSFX509EncodeCert(out, sizeof(out), &p, fakeSig, sizeof(fakeSig), &n);
         SSF_ASSERT(n != 0u);
         SSF_ASSERT(SSFX509Parse(out, n, &parsed) == true);
         SSF_ASSERT((parsed.sanLen == 1u) && (parsed.san[0].valLen == 2u));
         _utGenBaseParams(&p, serial, pubKey, 65u);
         p.sanDNSNames = sanNul;
-        n = SSFX509EncodeCert(out, sizeof(out), &p, fakeSig, sizeof(fakeSig));
+        (void)SSFX509EncodeCert(out, sizeof(out), &p, fakeSig, sizeof(fakeSig), &n);
         SSF_ASSERT(n != 0u);
         for (i = 0; (i + 3u) < n; i++)
         {
@@ -4429,7 +4472,7 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(parsed.pathLenConstraint == 5);
     }
 
-    /* ---- Conformance: inclusive notAfter, chain link names, signature algorithm parameters ---- */
+    /* ---- Conformance: inclusive notAfter, chain names, sigAlg params ---- */
     {
         static uint8_t caOut[SSF_X509_CONFIG_MAX_CERT_SIZE];
         static uint8_t leafOut[SSF_X509_CONFIG_MAX_CERT_SIZE];
@@ -4565,13 +4608,13 @@ void SSFX509UnitTest(void)
         _utGenBaseParams(&p, serial, leafPub, 65u);
         p.addKeyUsage = true;
         p.keyUsageBits = SSF_X509_KU_DIGITAL_SIGNATURE | 0x0080u;
-        n = SSFX509EncodeCert(out, sizeof(out), &p, fakeSig, sizeof(fakeSig));
+        (void)SSFX509EncodeCert(out, sizeof(out), &p, fakeSig, sizeof(fakeSig), &n);
         SSF_ASSERT(n != 0u);
         SSF_ASSERT(SSFX509Parse(out, n, &parsed) == true);
         SSF_ASSERT(parsed.hasKeyUsage == true);
         SSF_ASSERT(parsed.keyUsageBits == (SSF_X509_KU_DIGITAL_SIGNATURE | 0x0080u));
         p.keyUsageBits = SSF_X509_KU_KEY_CERT_SIGN;
-        n = SSFX509EncodeCert(out, sizeof(out), &p, fakeSig, sizeof(fakeSig));
+        (void)SSFX509EncodeCert(out, sizeof(out), &p, fakeSig, sizeof(fakeSig), &n);
         SSF_ASSERT(n != 0u);
         SSF_ASSERT(SSFX509Parse(out, n, &parsed) == true);
         SSF_ASSERT(parsed.keyUsageBits == SSF_X509_KU_KEY_CERT_SIGN);
@@ -4638,6 +4681,148 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(n != 0u);
         SSF_ASSERT(SSFX509Parse(out, n, &parsed) == true);
         SSF_ASSERT((parsed.subject.cnLen == 1u) && (parsed.subject.cn[0] == (uint8_t)'x'));
+    }
+
+    /* ---- RSA-PSS saltLength 20: OpenSSL self-signed cert, DER DEFAULT saltLength omitted ---- */
+    /* openssl req -x509 -sha256 -sigopt rsa_padding_mode:pss -sigopt rsa_pss_saltlen:20 ...      */
+    /* Valid Nov 18 2026 to Oct 25 2126. The PSS parameters carry [0] sha256 and [1] mgf1 only;  */
+    /* saltLength is absent because RFC 4055 declares DEFAULT 20 and DER omits default values.   */
+    {
+        static const uint8_t pss20Der[] = {
+            0x30, 0x82, 0x03, 0x92, 0x30, 0x82, 0x02, 0x4b, 0xa0, 0x03, 0x02, 0x01,
+            0x02, 0x02, 0x14, 0x36, 0xf3, 0x63, 0xf8, 0xfb, 0xde, 0xdf, 0x41, 0x14,
+            0x6d, 0x20, 0x50, 0x42, 0x5d, 0xea, 0xf6, 0x41, 0x06, 0x2e, 0xc8, 0x30,
+            0x3c, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0a,
+            0x30, 0x2f, 0xa0, 0x0f, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01,
+            0x65, 0x03, 0x04, 0x02, 0x01, 0x05, 0x00, 0xa1, 0x1c, 0x30, 0x1a, 0x06,
+            0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x08, 0x30, 0x0d,
+            0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01, 0x05,
+            0x00, 0x30, 0x15, 0x31, 0x13, 0x30, 0x11, 0x06, 0x03, 0x55, 0x04, 0x03,
+            0x0c, 0x0a, 0x70, 0x73, 0x73, 0x32, 0x30, 0x2e, 0x74, 0x65, 0x73, 0x74,
+            0x30, 0x20, 0x17, 0x0d, 0x32, 0x36, 0x31, 0x31, 0x31, 0x38, 0x30, 0x31,
+            0x33, 0x30, 0x33, 0x37, 0x5a, 0x18, 0x0f, 0x32, 0x31, 0x32, 0x36, 0x31,
+            0x30, 0x32, 0x35, 0x30, 0x31, 0x33, 0x30, 0x33, 0x37, 0x5a, 0x30, 0x15,
+            0x31, 0x13, 0x30, 0x11, 0x06, 0x03, 0x55, 0x04, 0x03, 0x0c, 0x0a, 0x70,
+            0x73, 0x73, 0x32, 0x30, 0x2e, 0x74, 0x65, 0x73, 0x74, 0x30, 0x82, 0x01,
+            0x22, 0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01,
+            0x01, 0x01, 0x05, 0x00, 0x03, 0x82, 0x01, 0x0f, 0x00, 0x30, 0x82, 0x01,
+            0x0a, 0x02, 0x82, 0x01, 0x01, 0x00, 0xcd, 0x6a, 0xff, 0x4d, 0x7c, 0xba,
+            0xe3, 0x6e, 0xb0, 0xf1, 0xb0, 0x40, 0xc2, 0xfa, 0xcb, 0xc8, 0x5a, 0xdb,
+            0xe0, 0xa3, 0x35, 0xea, 0x27, 0xa9, 0xc9, 0x1d, 0x57, 0xed, 0x6c, 0x6d,
+            0x0a, 0xfa, 0xff, 0x7d, 0xe3, 0x72, 0x72, 0xeb, 0x85, 0xa5, 0x21, 0xa0,
+            0xea, 0xc1, 0x13, 0x33, 0x84, 0x23, 0xda, 0xd0, 0x9e, 0xb2, 0x1b, 0x46,
+            0x13, 0xd8, 0x84, 0x26, 0xab, 0x0d, 0x5b, 0xa4, 0x4b, 0x4f, 0x8d, 0xc9,
+            0x02, 0x51, 0x6c, 0x0b, 0xf9, 0xad, 0x46, 0x97, 0x22, 0x1e, 0x61, 0x14,
+            0x03, 0x3a, 0x3d, 0xb9, 0x54, 0x61, 0xe4, 0x8f, 0xff, 0x47, 0x1d, 0x84,
+            0x5d, 0x90, 0xe1, 0x45, 0xa9, 0x58, 0xea, 0xcf, 0xbe, 0x2c, 0x67, 0x91,
+            0x33, 0x10, 0x56, 0xa0, 0xd3, 0x89, 0x0d, 0x69, 0x95, 0xff, 0xe3, 0x40,
+            0x61, 0x6d, 0xf5, 0xd8, 0x59, 0xcb, 0x6f, 0xd6, 0xbe, 0xd6, 0x41, 0x35,
+            0xf1, 0x0e, 0x52, 0x97, 0xc4, 0x4d, 0x8f, 0xa0, 0x0c, 0xcd, 0xdf, 0xd8,
+            0x09, 0x08, 0x32, 0xdb, 0xfc, 0xfd, 0xfa, 0x52, 0x49, 0x70, 0xf0, 0xc3,
+            0xdc, 0xe5, 0xf0, 0x98, 0x95, 0x4f, 0x66, 0x64, 0xa8, 0x10, 0xcc, 0xb4,
+            0xf1, 0xae, 0x13, 0x31, 0x8e, 0x13, 0xd6, 0x15, 0xe3, 0x33, 0x18, 0xc4,
+            0xb5, 0x85, 0x1d, 0x51, 0x00, 0xe0, 0x5a, 0xc8, 0xfb, 0x5c, 0xf9, 0xfb,
+            0x6f, 0x60, 0x19, 0xa0, 0x23, 0xc7, 0x68, 0xbf, 0x7b, 0xe9, 0x7a, 0xdf,
+            0xb1, 0x6d, 0x27, 0x29, 0xa0, 0xfa, 0x4b, 0x91, 0x1f, 0x55, 0x90, 0xb8,
+            0x03, 0x1d, 0x3a, 0x62, 0xaa, 0x3d, 0xac, 0x60, 0x38, 0x6d, 0xa0, 0x61,
+            0x03, 0xc2, 0x4d, 0x17, 0x5e, 0x34, 0x45, 0xaa, 0xc1, 0x49, 0x21, 0x50,
+            0x53, 0x81, 0x8d, 0xf1, 0x94, 0x58, 0xcf, 0x2c, 0xb6, 0x64, 0x34, 0xd8,
+            0x1d, 0x79, 0x27, 0x2a, 0x90, 0x6d, 0xfd, 0xf6, 0x08, 0x97, 0x02, 0x03,
+            0x01, 0x00, 0x01, 0xa3, 0x7a, 0x30, 0x78, 0x30, 0x1d, 0x06, 0x03, 0x55,
+            0x1d, 0x0e, 0x04, 0x16, 0x04, 0x14, 0x29, 0x74, 0xaa, 0xb8, 0x60, 0xe2,
+            0x72, 0xd0, 0x98, 0xde, 0xf9, 0x8e, 0x1f, 0x65, 0x6c, 0x58, 0x7c, 0xd2,
+            0xa9, 0x7d, 0x30, 0x1f, 0x06, 0x03, 0x55, 0x1d, 0x23, 0x04, 0x18, 0x30,
+            0x16, 0x80, 0x14, 0x29, 0x74, 0xaa, 0xb8, 0x60, 0xe2, 0x72, 0xd0, 0x98,
+            0xde, 0xf9, 0x8e, 0x1f, 0x65, 0x6c, 0x58, 0x7c, 0xd2, 0xa9, 0x7d, 0x30,
+            0x15, 0x06, 0x03, 0x55, 0x1d, 0x11, 0x04, 0x0e, 0x30, 0x0c, 0x82, 0x0a,
+            0x70, 0x73, 0x73, 0x32, 0x30, 0x2e, 0x74, 0x65, 0x73, 0x74, 0x30, 0x0f,
+            0x06, 0x03, 0x55, 0x1d, 0x13, 0x01, 0x01, 0xff, 0x04, 0x05, 0x30, 0x03,
+            0x01, 0x01, 0xff, 0x30, 0x0e, 0x06, 0x03, 0x55, 0x1d, 0x0f, 0x01, 0x01,
+            0xff, 0x04, 0x04, 0x03, 0x02, 0x02, 0x84, 0x30, 0x3c, 0x06, 0x09, 0x2a,
+            0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0a, 0x30, 0x2f, 0xa0, 0x0f,
+            0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02,
+            0x01, 0x05, 0x00, 0xa1, 0x1c, 0x30, 0x1a, 0x06, 0x09, 0x2a, 0x86, 0x48,
+            0x86, 0xf7, 0x0d, 0x01, 0x01, 0x08, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86,
+            0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01, 0x05, 0x00, 0x03, 0x82, 0x01,
+            0x01, 0x00, 0x76, 0xc6, 0x58, 0x94, 0xfa, 0x41, 0x41, 0x25, 0xf3, 0xe3,
+            0x72, 0x19, 0xd1, 0x12, 0x7c, 0xc3, 0x4f, 0x8a, 0xfe, 0x02, 0x49, 0xf6,
+            0x0a, 0xce, 0xb7, 0x89, 0x2e, 0x58, 0xf0, 0xcc, 0x15, 0xdc, 0xd5, 0xda,
+            0x40, 0x0e, 0x94, 0x1e, 0x17, 0xfd, 0x73, 0x50, 0x6d, 0x2e, 0xd8, 0x70,
+            0x6e, 0x2e, 0x51, 0xa4, 0x6d, 0xa9, 0xb2, 0x2b, 0x97, 0x21, 0xa4, 0x65,
+            0x5f, 0xa4, 0x1e, 0x31, 0x3d, 0xaf, 0x53, 0x68, 0xbe, 0x6d, 0xe6, 0x4f,
+            0x98, 0xb5, 0x48, 0x86, 0xfc, 0xfd, 0x08, 0xe5, 0x9d, 0x5d, 0x08, 0x9f,
+            0x42, 0x4b, 0x26, 0xaa, 0x38, 0x5e, 0x48, 0x84, 0xdb, 0x36, 0xfd, 0x11,
+            0x82, 0x3d, 0x47, 0xd8, 0x70, 0x20, 0x9b, 0x92, 0xf5, 0xfe, 0x77, 0x28,
+            0x80, 0x13, 0x27, 0x31, 0x90, 0x0a, 0xa6, 0xbb, 0xa0, 0xc5, 0x11, 0x04,
+            0x1c, 0xc8, 0xa4, 0x61, 0x7b, 0xde, 0xf2, 0x00, 0x6b, 0x53, 0x70, 0x6b,
+            0xd7, 0x80, 0xb5, 0x16, 0xf4, 0xa5, 0x5d, 0x83, 0xdb, 0x95, 0xeb, 0xb6,
+            0x47, 0x5f, 0xde, 0x85, 0x8b, 0xfb, 0x47, 0x42, 0x3e, 0xfc, 0x2f, 0xeb,
+            0x9c, 0x8b, 0x7e, 0x9b, 0x18, 0x7c, 0x66, 0x7a, 0xc2, 0xcf, 0x3b, 0x37,
+            0x92, 0x5a, 0x32, 0xe0, 0x62, 0x31, 0x50, 0x9e, 0xbb, 0x62, 0xb0, 0xe2,
+            0xa4, 0x49, 0x11, 0xf8, 0xb9, 0x0c, 0x86, 0x18, 0x0b, 0xa2, 0x89, 0x9b,
+            0x3b, 0x67, 0x3a, 0x31, 0xf4, 0x1b, 0x0f, 0xa9, 0x85, 0xc0, 0x76, 0xe2,
+            0x85, 0xa0, 0x6a, 0xe7, 0xa6, 0xda, 0x99, 0x67, 0xdf, 0xec, 0x59, 0x77,
+            0x85, 0xda, 0x3f, 0x20, 0xe3, 0xef, 0x9b, 0xcb, 0xb1, 0x73, 0xa4, 0x6b,
+            0x11, 0xff, 0x7c, 0xb3, 0xd5, 0xb7, 0x9e, 0x53, 0x32, 0xbf, 0x68, 0x13,
+            0x7c, 0xf8, 0x0d, 0xc1, 0xa7, 0xef, 0xd7, 0x71, 0xc0, 0xa4, 0xf4, 0xc1,
+            0x73, 0x72, 0xdd, 0x1a, 0x0b, 0xe5
+        };
+        SSFX509Cert_t pss;
+        const uint8_t *chain[1];
+        uint32_t chainLen[1];
+
+        SSF_ASSERT(SSFX509Parse(pss20Der, sizeof(pss20Der), &pss) == true);
+        SSF_ASSERT(SSFX509IsRSAPSSSHA256(&pss) == true);
+        SSF_ASSERT(SSFX509VerifyCertSignature(&pss, &pss) == true);
+        chain[0] = pss20Der;
+        chainLen[0] = sizeof(pss20Der);
+        SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, "pss20.test",
+                                      1800000000ull) == true);
+    }
+
+    /* ---- Bounded string lengths: 253-octet dNSName accepted, longer hostnames never match ---- */
+    {
+        static uint8_t out[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t pubKey[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        static uint8_t fakeSig[64];
+        static char san253[254];
+        static char host300[301];
+        static const char *sanMax[2];
+        static const char *sanX[] = { "x", NULL };
+        uint8_t serial[] = { 0x0Cu };
+        SSFX509GenParams_t p;
+        SSFX509Cert_t parsed;
+        const uint8_t *chain[1];
+        uint32_t chainLen[1];
+        uint32_t n;
+
+        memset(fakeSig, 0x55u, sizeof(fakeSig));
+        memset(pubKey, 0x04u, sizeof(pubKey));
+        memset(san253, 'd', 253u);
+        san253[253] = '\0';
+        sanMax[0] = san253;
+        sanMax[1] = NULL;
+        memset(host300, 'h', 300u);
+        host300[300] = '\0';
+
+        /* Exactly the RFC 1035 bound encodes and parses back with the same length */
+        _utGenBaseParams(&p, serial, pubKey, 65u);
+        p.sanDNSNames = sanMax;
+        SSF_ASSERT(SSFX509EncodeCert(out, sizeof(out), &p, fakeSig, sizeof(fakeSig), &n) == true);
+        SSF_ASSERT(SSFX509Parse(out, n, &parsed) == true);
+        SSF_ASSERT((parsed.sanLen == 1u) && (parsed.san[0].valLen == 253u));
+
+        /* A hostname longer than any valid dNSName is rejected before any SAN comparison */
+        _utGenBaseParams(&p, serial, pubKey, 65u);
+        p.sanDNSNames = sanX;
+        n = _utSelfSign(&p, pubKey, sizeof(pubKey), out, sizeof(out));
+        SSF_ASSERT(n != 0u);
+        chain[0] = out;
+        chainLen[0] = n;
+        SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, host300,
+                                      1800000000ull) == false);
+        SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, "x",
+                                      1800000000ull) == true);
     }
 
 }

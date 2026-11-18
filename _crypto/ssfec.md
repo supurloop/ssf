@@ -418,7 +418,9 @@ gives ~1.5 KB for P-256 and ~2.3 KB for P-384). ~3-4× faster than running the g
 amortises across every comb window. Used internally by ECDSA signing and key generation
 when the corresponding `SSF_EC_CONFIG_FIXED_BASE_*` is enabled.
 
-`k` must be in `[1, n-1]` (same precondition as `SSFECScalarMul`). The functions are
+`k` must satisfy `0 <= k < n` with `k->len` at most the curve's limb count; this is checked by
+`SSF_REQUIRE` (the comb's no-double addition is only valid below `n`; `k = 0` gives the
+identity). The functions are
 declared only when the matching `SSF_EC_CONFIG_FIXED_BASE_*` is `1` — guard call sites
 with `#ifdef` if your code might be built with the comb tables disabled.
 
@@ -437,4 +439,5 @@ verify than the table-free [`SSFECScalarMulDual()`](#ssfecscalarmuldual) for the
 inputs. When the selected curve's `SSF_EC_CONFIG_FIXED_BASE_*` flag is `0`, the `[u₁]G`
 half falls back to the constant-time [`SSFECScalarMul()`](#ssfecscalarmul) against `G`; the
 `[u₂]Q` half always uses the variable-time wNAF path. Same threat-model constraint: both
-scalars must be public.
+scalars must be public. With a fixed-base table, `u₁` is subject to the same `0 <= u₁ < n`
+check as [`SSFECScalarMulBaseP256/P384()`](#ssfecscalarmulbase) (`u₁ = 0` is valid).

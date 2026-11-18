@@ -567,7 +567,7 @@ ECDSA-4  Low  DOC (2026-11-18)
 ssfec
 ----------------------------------------------------------------------------------------------
 
-EC-1  Low  OPEN
+EC-1  Low  FIXED (2026-11-18)
   Location:  ssfec.c:1101-1174 (_SSFECScalarMulComb), :1157, :1226, :1263
   Problem:   The comb has no DBC check that k <= n. For k <= n it is proven that R != table[mask]
              at every strip (the -Q case only at k == n, strip 0, handled by the override). For
@@ -1366,3 +1366,19 @@ CHANGE LOG
               the SHA-384 OID still fails. ssfx509.md (signature-verification note and
               SSFX509VerifySignature Returns) updated. RED: ssfx509_ut.c:6638 (valid SHA-384 /
               P-256 signature refused). GREEN: ssfx509, ssfcms, ssfbase64url, ssfmatch.
+  2026-11-18  EC-1 FIXED via option 1, narrowed: the check sits in _SSFECScalarMulComb itself and
+              is the comb's real safety condition, 0 <= k < n with k->len <= c->limbs (compared at
+              curve width through a zero-padded copy with the constant-time SSFBNCmp; the copy is
+              zeroized). k = 0 stays valid (the comb returns the identity correctly), because the
+              OpenSSL-only ssfec_ut.c cross-check calls SSFECScalarMulBaseP256/P384 with k = 0 and
+              ECDSA verify can legitimately pass u1 = 0 to SSFECScalarMulDualBase (digest = 0 mod
+              n); requiring k >= 1 would have made the latter an input-driven trap. Both public
+              Base wrappers and DualBase's u1 inherit the check. ssfec.md: ScalarMulBase now
+              states 0 <= k < n (was [1, n-1], unenforced) and DualBase notes the u1 check. Test
+              block "AUDIT EC-1" in ssfec_ut.c, per fixed-base curve: k = n, k = n + 2, k->len =
+              limbs + 1 trap through the public entry point, and DualBase with u1 = n traps;
+              controls k = n - 1 (matches SSFECScalarMul), k = 0 (identity), DualBase u1 = 0
+              (equals [u2]G). The audit's specific identity-producing k = n + 2 bit pattern was not
+              reconstructed; n and n + 2 show the missing range check. RED: ssfec_ut.c:2657 (k = n
+              accepted). GREEN: ssfec, ssfecdsa (RFC 6979 KATs, Wycheproof), ssfbn (EC/ECDSA/BN unit
+              tests enabled), ssfcms, ssfx509, ssfbase64url, ssfmatch.

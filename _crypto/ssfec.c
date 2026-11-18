@@ -1117,6 +1117,19 @@ static void _SSFECScalarMulComb(SSFECPoint_t *r, const SSFBN_t *k, const SSFECCu
     SSF_REQUIRE(r->x.cap >= c->limbs);
     SSF_REQUIRE(r->y.cap >= c->limbs);
     SSF_REQUIRE(r->z.cap >= c->limbs);
+    /* The no-double addition below is valid only while R never equals the table entry, which */
+    /* holds for 0 <= k < n but not above (k = n + 2 can silently give the identity); bits past */
+    /* c->limbs would also be ignored. Compared at the curve width; Cmp is constant-time and   */
+    /* the REQUIRE only fails on caller misuse (AUDIT EC-1).                                    */
+    SSF_REQUIRE(k->len <= c->limbs);
+    {
+        SSFBN_DEFINE(kPad, SSF_EC_MAX_LIMBS);
+
+        SSFBNCopy(&kPad, k);
+        kPad.len = c->limbs;
+        SSF_REQUIRE(SSFBNCmp(&kPad, &c->n) < 0);
+        SSFBNZeroize(&kPad);
+    }
 
     /* R = identity */
     SSFBNSetZero(&r->x, c->limbs);

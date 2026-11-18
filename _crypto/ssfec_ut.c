@@ -638,6 +638,22 @@ static void _ECVerifyAtCurve(SSFECCurve_t curve, uint16_t iters)
 
 #endif /* SSF_EC_OSSL_VERIFY */
 
+#if (SSF_EC_CONFIG_FIXED_BASE_P256 == 1) || (SSF_EC_CONFIG_FIXED_BASE_P384 == 1)
+/* --------------------------------------------------------------------------------------------- */
+/* Calls the public fixed-base comb entry point for curve (AUDIT EC-1 test helper).              */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFECUTCombMul(SSFECPoint_t *r, const SSFBN_t *k, SSFECCurve_t curve)
+{
+#if SSF_EC_CONFIG_FIXED_BASE_P256 == 1
+    if (curve == SSF_EC_CURVE_P256) { SSFECScalarMulBaseP256(r, k); return; }
+#endif
+#if SSF_EC_CONFIG_FIXED_BASE_P384 == 1
+    if (curve == SSF_EC_CURVE_P384) { SSFECScalarMulBaseP384(r, k); return; }
+#endif
+    SSF_ERROR();
+}
+#endif /* SSF_EC_CONFIG_FIXED_BASE_P256 || SSF_EC_CONFIG_FIXED_BASE_P384 */
+
 /* Suppress C6262 (large stack frame). This unit-test entry point intentionally allocates many */
 /* curve-state locals across its sub-test blocks; the host test environment has ample stack.   */
 #ifdef _WIN32
@@ -2601,6 +2617,73 @@ void SSFECUnitTest(void)
         }
     }
 #endif
+
+    /* ---- AUDIT EC-1: the fixed-base comb requires k < n (and k->len <= the curve's limbs) ---- */
+    /* The comb adds table entries with the no-double addition, which is only valid while the  */
+    /* running sum never equals the entry -- guaranteed for k < n, not above (e.g. k = n + 2   */
+    /* could silently yield the identity). k == 0 is fine (identity). Out-of-range k now traps; */
+    /* DualBase's u1 goes through the same check.                                               */
+#if (SSF_EC_CONFIG_FIXED_BASE_P256 == 1) || (SSF_EC_CONFIG_FIXED_BASE_P384 == 1)
+    {
+        SSFECCurve_t combCurves[2];
+        uint8_t nCurves = 0u;
+        uint8_t ci;
+
+#if SSF_EC_CONFIG_FIXED_BASE_P256 == 1
+        combCurves[nCurves++] = SSF_EC_CURVE_P256;
+#endif
+#if SSF_EC_CONFIG_FIXED_BASE_P384 == 1
+        combCurves[nCurves++] = SSF_EC_CURVE_P384;
+#endif
+        for (ci = 0u; ci < nCurves; ci++)
+        {
+            SSFECCurve_t curve = combCurves[ci];
+            const SSFECCurveParams_t *c = SSFECGetCurveParams(curve);
+            SSFECPOINT_DEFINE(G, SSF_EC_MAX_LIMBS);
+            SSFECPOINT_DEFINE(R, SSF_EC_MAX_LIMBS);
+            SSFECPOINT_DEFINE(Rref, SSF_EC_MAX_LIMBS);
+            SSFBN_DEFINE(k, SSF_BN_MAX_LIMBS);
+            SSFBN_DEFINE(u2, SSF_BN_MAX_LIMBS);
+            SSFBN_DEFINE(ax, SSF_EC_MAX_LIMBS);
+            SSFBN_DEFINE(ay, SSF_EC_MAX_LIMBS);
+            SSFBN_DEFINE(bx, SSF_EC_MAX_LIMBS);
+            SSFBN_DEFINE(by, SSF_EC_MAX_LIMBS);
+
+            SSFECPointFromAffine(&G, &c->gx, &c->gy, curve);
+            SSFBNSetUint32(&u2, 5u, c->limbs);
+
+            /* k = n and k = n + 2 must trap (comb directly, and DualBase u1). */
+            SSFBNCopy(&k, &c->n);
+            SSF_ASSERT_TEST(_SSFECUTCombMul(&R, &k, curve));
+            SSF_ASSERT_TEST(SSFECScalarMulDualBase(&R, &k, &u2, &G, curve));
+            (void)SSFBNAddUint32(&k, &k, 2u);
+            SSF_ASSERT_TEST(_SSFECUTCombMul(&R, &k, curve));
+
+            /* k->len above the curve's limb count must trap. */
+            SSFBNSetUint32(&k, 1u, (uint16_t)(c->limbs + 1u));
+            SSF_ASSERT_TEST(_SSFECUTCombMul(&R, &k, curve));
+
+            /* Control: k = n - 1 gives -G, matching the generic constant-time ScalarMul. */
+            SSFBNCopy(&k, &c->n);
+            (void)SSFBNSubUint32(&k, &k, 1u);
+            _SSFECUTCombMul(&R, &k, curve);
+            SSFECScalarMul(&Rref, &k, &G, curve);
+            SSF_ASSERT(SSFECPointToAffine(&ax, &ay, &R, curve) == true);
+            SSF_ASSERT(SSFECPointToAffine(&bx, &by, &Rref, curve) == true);
+            SSF_ASSERT((SSFBNCmp(&ax, &bx) == 0) && (SSFBNCmp(&ay, &by) == 0));
+
+            /* Control: k = 0 gives the identity; DualBase with u1 = 0 equals [u2]G. */
+            SSFBNSetZero(&k, c->limbs);
+            _SSFECUTCombMul(&R, &k, curve);
+            SSF_ASSERT(SSFECPointIsIdentity(&R) == true);
+            SSFECScalarMulDualBase(&R, &k, &u2, &G, curve);
+            SSFECScalarMul(&Rref, &u2, &G, curve);
+            SSF_ASSERT(SSFECPointToAffine(&ax, &ay, &R, curve) == true);
+            SSF_ASSERT(SSFECPointToAffine(&bx, &by, &Rref, curve) == true);
+            SSF_ASSERT((SSFBNCmp(&ax, &bx) == 0) && (SSFBNCmp(&ay, &by) == 0));
+        }
+    }
+#endif /* SSF_EC_CONFIG_FIXED_BASE_P256 || SSF_EC_CONFIG_FIXED_BASE_P384 */
 
 #if SSF_CONFIG_EC_MICROBENCH == 1
     /* ====================================================================================== */

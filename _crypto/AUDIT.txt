@@ -522,7 +522,7 @@ ECDSA-1  Low  FIXED (2026-11-18)
   Evidence:  666  if (SSFBNIsZero(&r)) goto cleanup;
              676  if (SSFBNIsZero(&s)) goto cleanup;
 
-ECDSA-2  Low  OPEN
+ECDSA-2  Low  FIXED (2026-11-18)
   Location:  ssfecdsa.c:158-159, :189, :202, :213 (_SSFECDSAGenK); :91-103
   Problem:   The HMAC-DRBG hash is pinned to the curve (SHA-256 for P-256, SHA-384 for P-384)
              rather than to the hash that produced the digest. RFC 6979 3.2 specifies the same
@@ -1325,3 +1325,17 @@ CHANGE LOG
               ssfecdsa (incl. the RFC 6979 A.2.5 KAT and Wycheproof, unchanged), ssfec, ssfbn
               (ECDSA/EC/BN unit tests enabled), ssfcms, ssfx509, ssfbase64url, ssfmatch; the module
               also compiles cleanly with the ECDSA unit test off.
+  2026-11-18  ECDSA-2 FIXED via option 1. New _SSFECDSANonceHMACHash picks the RFC 6979 HMAC from
+              the digest length (20 -> SHA-1, 32 -> SHA-256, 48 -> SHA-384; any other length ->
+              the curve's hash, as before); _SSFECDSAGenK uses it instead of the curve-pinned
+              hash. Matched pairings (P-256 / SHA-256, P-384 / SHA-384) are unchanged byte for
+              byte; non-matching pairings now follow RFC 6979. ssfhmac always supports SHA-1, so
+              no new dependency. ssfecdsa.md describes the selection. Test block "AUDIT ECDSA-2"
+              in ssfecdsa_ut.c: RFC 6979 "sample" known answers for P-256 with SHA-1 (A.2.5) and
+              P-384 with SHA-256 (A.2.6, gated on P-384), from an independent Python model
+              validated against the suite's existing A.2.5 SHA-256 and A.2.6 SHA-384 KATs; the
+              model's r / s also agree with the RFC's published values for these pairings as
+              recalled. RED: ssfecdsa_ut.c:887 (P-256 / SHA-1 signature differed). GREEN:
+              ssfecdsa (incl. matched-pair RFC KATs, ECDSA-1 retry KATs, Wycheproof), ssfec,
+              ssfbn (ECDSA/EC/BN unit tests enabled), ssfcms, ssfx509, ssfbase64url, ssfmatch;
+              production compile clean.

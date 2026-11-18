@@ -11,7 +11,10 @@ Two design choices worth calling out up front:
 
 - **Signing is deterministic (RFC 6979).** The per-signature nonce `k` is derived from the
   private key and the message hash by the RFC 6979 §3.2 HMAC-DRBG procedure, not from a
-  live RNG. This eliminates the classic ECDSA vulnerability — if you ever sign two
+  live RNG. As RFC 6979 specifies, the HMAC uses the digest's own hash function, inferred from
+  `hashLen` (20 → SHA-1, 32 → SHA-256, 48 → SHA-384; any other length falls back to the
+  curve's hash), so non-matching pairings such as P-384 with SHA-256 reproduce the RFC 6979
+  vectors and other implementations. This eliminates the classic ECDSA vulnerability — if you ever sign two
   different messages with the same `k`, an attacker who sees both signatures recovers your
   private key. Since the spec is permissive about how `k` is chosen, getting this wrong is
   extremely common in real systems (Sony PlayStation 3, Bitcoin wallets, Android key store

@@ -37,6 +37,7 @@
 #include "ssfassert.h"
 #include "ssfecdsa.h"
 #include "ssfhmac.h"
+#include "ssfsha1.h"
 #include "ssfsha2.h"
 #if SSF_ECDSA_CONFIG_ENABLE_SIGN == 1
 #include "ssfasn1.h"  /* Sign's _SSFECDSASigEncode is the only consumer; verify is byte-level. */
@@ -126,6 +127,28 @@ static size_t _SSFECDSAGetHashSize(SSFECCurve_t curve)
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Internal: RFC 6979 nonce HMAC = the digest's hash, inferred from hashLen (else the curve's).  */
+/* --------------------------------------------------------------------------------------------- */
+static SSFHMACHash_t _SSFECDSANonceHMACHash(SSFECCurve_t curve, size_t hashLen, size_t *hlen)
+{
+    SSF_REQUIRE(hlen != NULL);
+
+    /* RFC 6979 Sec. 3.2 uses the message hash function H for the HMAC-DRBG (AUDIT ECDSA-2).   */
+    /* Sign receives only the digest, so infer H from its length; 64 cannot reach here since it */
+    /* exceeds every supported curve's coordinate size.                                          */
+    switch (hashLen)
+    {
+    case SSF_SHA1_HASH_SIZE: *hlen = SSF_SHA1_HASH_SIZE; return SSF_HMAC_HASH_SHA1;
+    case SSF_SHA2_256_BYTE_SIZE: *hlen = SSF_SHA2_256_BYTE_SIZE; return SSF_HMAC_HASH_SHA256;
+    case SSF_SHA2_384_BYTE_SIZE: *hlen = SSF_SHA2_384_BYTE_SIZE; return SSF_HMAC_HASH_SHA384;
+    default:
+        /* Not a SHA-1 / SHA-2 digest length: fall back to the curve's hash. */
+        *hlen = _SSFECDSAGetHashSize(curve);
+        return _SSFECDSAGetHMACHash(curve);
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Internal: bits2int per RFC 6979 Sec. 2.3.2 (hash bytes to integer, no shift for matched pairs).*/
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFECDSABits2Int(SSFBN_t *out, const uint8_t *hash, size_t hashLen,
@@ -161,8 +184,8 @@ static bool _SSFECDSAGenK(SSFECCurve_t curve, const uint8_t *privKey, size_t pri
                           const uint8_t *hash, size_t hashLen, const SSFECCurveParams_t *c,
                           uint8_t skip, SSFBN_t *k)
 {
-    SSFHMACHash_t hmacHash = _SSFECDSAGetHMACHash(curve);
-    size_t hlen = _SSFECDSAGetHashSize(curve);
+    size_t hlen;
+    SSFHMACHash_t hmacHash = _SSFECDSANonceHMACHash(curve, hashLen, &hlen);
     uint8_t V[SSF_HMAC_MAX_HASH_SIZE];
     uint8_t K[SSF_HMAC_MAX_HASH_SIZE];
     uint8_t h1Octets[SSF_EC_MAX_COORD_BYTES];

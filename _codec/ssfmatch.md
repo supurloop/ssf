@@ -55,6 +55,14 @@ Every function operates on caller-owned, null-terminated strings and allocates n
   whether the emptiness comes from the end of the path (`/a/{id}` vs `/a/`), a doubled slash
   (`/a/{id}/b` vs `/a//b`), or a query string directly after the slash (`/a/{id}` vs `/a/?x=1`).
   All three return `false`.
+- **A placeholder binds the whole rest of its segment.** The value runs from the placeholder to the
+  next `/`, `?`, `#`, or end of string with no lookahead for the literal that follows in the
+  pattern. Literal text *before* a placeholder in the same segment works (`/file{ext}` matches
+  `/filetxt` with `ext` = `txt`), but literal text *after* one can never match: `/{name}.json` vs
+  `/foo.json` and `/{a}-{b}` vs `/1-2` both return `false` because the first placeholder has
+  already consumed `.json` and `-2`. Two adjacent placeholders (`/{a}{b}`) always fail for the same
+  reason, the second one binds an empty segment. Put the varying part last in its segment or give it
+  its own segment.
 - **`{` always begins a placeholder.** There is no escape for a literal `{` in a path pattern. An
   unterminated `{name` or an empty `{}` placeholder causes `false`.
 
@@ -224,9 +232,12 @@ bool SSFMatchPath(SSFCStrIn_t patternStr, SSFCStrIn_t pathStr, SSFMatchParam_t *
 Matches a URI `pathStr` against a `patternStr` containing literal characters and `{name}`
 placeholders.
 Each placeholder binds one non-empty path segment: the bytes up to the next `/`, `?`, `#`, or end
-of string, of which there must be at least one. The match succeeds when the pattern is fully
-consumed and the path is exhausted or has reached a `?` query string or `#` fragment. Loosely follows the simple-string-expansion form of RFC 6570 §3.2.2 but is not a
-conformant URI Template implementation.
+of string, of which there must be at least one. The placeholder takes everything up to that
+boundary, so a literal that follows it within the same segment (as in `/{name}.json`) is never
+reachable and the match fails; see [Notes](#notes). The match succeeds when the pattern is fully
+consumed and the path is exhausted or has reached a `?` query string or `#` fragment. Loosely
+follows the simple-string-expansion form of RFC 6570 §3.2.2 but is not a conformant URI Template
+implementation.
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|

@@ -82,8 +82,13 @@ X.509 v3 certificate support per RFC 5280, built on [`ssfasn1`](ssfasn1.md):
   statically or on a stack you have sized for it.
 - **Parse is strict about DER but lenient about content.** Any structural DER error (bad tags,
   truncated lengths, non-minimal INTEGER, malformed serial number, missing mandatory field)
-  returns `false`. Unknown extensions and unknown SAN types are retained without interpretation
-  rather than rejected; policy decisions are left to [`SSFX509VerifyChain()`](#ssfx509verifychain).
+  returns `false`, as does a version field above v3 or more extensions than
+  [`SSF_X509_CONFIG_MAX_EXTENSIONS`](#cfg-max-extensions), since an extension that could not be
+  retained would escape the critical-extension and duplicate checks. Unknown extensions and
+  unknown SAN types are retained without interpretation rather than rejected; policy decisions
+  are left to [`SSFX509VerifyChain()`](#ssfx509verifychain). Two values are normalized at parse
+  time: a `dNSName` SAN that is empty or contains a NUL byte is dropped, because no hostname can
+  match it safely, and a `pathLenConstraint` above 127 is clamped to 127 so it stays a constraint.
 - **Serial numbers** must be 1–20 bytes and non-negative (RFC 5280 §4.1.2.2). A zero serial is
   accepted, as the RFC asks verifiers to tolerate it.
 - **Signature algorithm consistency.** Both the TBS `signature` AlgorithmIdentifier and the outer
@@ -107,10 +112,12 @@ X.509 v3 certificate support per RFC 5280, built on [`ssfasn1`](ssfasn1.md):
   Constraints, Key Usage, SAN, SKID, AKID, EKU, Name Constraints); and finally `hostname` matches
   a `dNSName` or `iPAddress` SAN of the leaf.
 - **Hostname matching** (RFC 6125 §6.4.3) is case-insensitive and exact against each `dNSName`.
-  A single leading `*.` wildcard label is honored only when the base domain after `*.` contains
-  at least one interior `.` (so `*.example.com` matches `www.example.com`, but `*.com` matches
-  nothing). A hostname written as a dotted-decimal IPv4 address is matched against 4-byte
-  `iPAddress` SANs instead. The Common Name is never consulted.
+  A single leading `*.` wildcard label is honored only when the hostname's leftmost label is
+  non-empty and the base domain after `*.` contains at least one interior `.` (so `*.example.com`
+  matches `www.example.com`, but matches neither `.example.com` nor, for `*.com`, anything). A
+  hostname written as a dotted-decimal IPv4 address is matched against 4-byte `iPAddress` SANs
+  instead. The Common Name is never consulted. `hostname` must be non-empty; an empty string is a
+  precondition violation and asserts.
 - **Signature verification** derives the hash from the signature algorithm OID and the key type
   / curve from the **issuer's** SubjectPublicKeyInfo, so `ecdsa-with-SHA256` over a P-384 key
   (RFC 5758 §3.2) verifies correctly. Supported pairings: `ecdsa-with-SHA256` and
@@ -155,7 +162,7 @@ Options live in [`_opt/ssfx509_opt.h`](../_opt/ssfx509_opt.h).
 |-------|---------|-------------|
 | <a id="cfg-max-cert-size"></a>`SSF_X509_CONFIG_MAX_CERT_SIZE` | `4096` | Largest DER TBSCertificate or Certificate [`SSFX509EncodeTBS()`](#ssfx509encodetbs) / [`SSFX509EncodeCert()`](#ssfx509encodecert) will produce. Both the measuring and the writing call return `0` when the result would exceed it. No buffers are sized from it. |
 | <a id="cfg-max-chain-depth"></a>`SSF_X509_CONFIG_MAX_CHAIN_DEPTH` | `8` | Maximum `chainLen` accepted by [`SSFX509VerifyChain()`](#ssfx509verifychain) (leaf plus intermediates). Sizes the on-stack array of parsed certificates. |
-| <a id="cfg-max-extensions"></a>`SSF_X509_CONFIG_MAX_EXTENSIONS` | `16` | Number of raw extension records retained in `SSFX509Cert_t.exts[]`. Additional extensions are decoded for known content but not stored, so unrecognized critical extensions beyond this count cannot be detected. |
+| <a id="cfg-max-extensions"></a>`SSF_X509_CONFIG_MAX_EXTENSIONS` | `16` | Number of extension records retained in `SSFX509Cert_t.exts[]`. A certificate with more extensions fails to parse, so the critical-extension and duplicate checks always see every extension. Raise it if a deployment's certificates legitimately carry more. |
 | <a id="cfg-max-name-constraints"></a>`SSF_X509_CONFIG_MAX_NAME_CONSTRAINTS` | `8` | Number of permitted subtrees and, separately, excluded subtrees retained per CA certificate. Excess subtrees are dropped. |
 | <a id="cfg-max-san-entries"></a>`SSF_X509_CONFIG_MAX_SAN_ENTRIES` | `8` | Number of Subject Alternative Name entries retained in `SSFX509Cert_t.san[]`. Excess entries are dropped and cannot match a hostname. |
 
@@ -491,7 +498,7 @@ certificate is parsed internally from DER; the caller never needs to parse first
 | `trustDer` | in | `const uint8_t **` | Array of DER trust-anchor (CA) certificates. No entry may be `NULL`. |
 | `trustDerLen` | in | `const uint32_t *` | Length of each `trustDer[j]`. |
 | `trustCount` | in | `uint8_t` | Number of trust anchors; must be at least `1`. |
-| `hostname` | in | `const char *` | Null-terminated DNS name or dotted-decimal IPv4 address the leaf must be issued for. Must not be `NULL`. |
+| `hostname` | in | `const char *` | Null-terminated DNS name or dotted-decimal IPv4 address the leaf must be issued for. Must not be `NULL` or empty. |
 | `nowUnixSec` | in | `uint64_t` | Current time in Unix seconds used for every validity check. |
 
 **Returns:** `true` if every check passes; `false` at the first failure. The reason is reported

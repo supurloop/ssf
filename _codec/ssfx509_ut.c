@@ -31,6 +31,7 @@
 /* --------------------------------------------------------------------------------------------- */
 #include "ssfassert.h"
 #include "ssfx509.h"
+#include "ssfasn1.h"
 #include "ssfecdsa.h"
 #include "ssfrsa.h"
 #include "ssfed25519.h"
@@ -269,6 +270,163 @@ static void _utGenCheckConsistent(const SSFX509GenParams_t *p, const uint8_t *si
     SSF_ASSERT(SSFX509Parse(out, written, parsed) == true);
     SSF_ASSERT(parsed->pubKeyLen == p->pubKeyLen);
     SSF_ASSERT(parsed->signatureLen == sigLen);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Generates a P-256 key, self-signs p with it, and returns the certificate DER length, else 0.   */
+/* --------------------------------------------------------------------------------------------- */
+static uint32_t _utSelfSign(SSFX509GenParams_t *p, uint8_t *pubKey, size_t pubKeySize,
+                            uint8_t *out, uint32_t outSize)
+{
+    static uint8_t tbs[SSF_X509_CONFIG_MAX_CERT_SIZE];
+    uint8_t privKey[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+    size_t pubKeyLen;
+    uint32_t tbsLen;
+    uint8_t hash[32];
+    uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
+    size_t sigLen;
+
+    if (!SSFECDSAKeyGen(SSF_EC_CURVE_P256, privKey, sizeof(privKey), pubKey, pubKeySize,
+                        &pubKeyLen)) return 0;
+    p->pubKey = pubKey;
+    p->pubKeyLen = (uint32_t)pubKeyLen;
+    tbsLen = SSFX509EncodeTBS(tbs, sizeof(tbs), p);
+    if (tbsLen == 0u) return 0;
+    SSFSHA256(tbs, tbsLen, hash, sizeof(hash));
+    if (!SSFECDSASign(SSF_EC_CURVE_P256, privKey, 32u, hash, 32u, sig, sizeof(sig), &sigLen))
+        return 0;
+    return SSFX509EncodeCert(out, outSize, p, sig, (uint32_t)sigLen);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Hand-builds a v3 cert with numExts unknown extensions and optional BasicConstraints pathLen.  */
+/* --------------------------------------------------------------------------------------------- */
+static uint32_t _utBuildCertExts(uint32_t numExts, int32_t pathLen, uint8_t *out, uint32_t outSize)
+{
+    static uint8_t exts[1024];
+    static uint8_t extsSeq[1040];
+    static uint8_t tbsContent[1280];
+    static uint8_t tbs[1300];
+    static uint8_t certContent[1400];
+    uint8_t tmp[128];
+    uint8_t tmp2[128];
+    uint8_t tmp3[128];
+    uint8_t pub[65];
+    uint8_t sig[64];
+    uint8_t serial[] = { 0x01u };
+    uint8_t oid[] = { 0x55u, 0x1Du, 0x00u };
+    uint32_t extsLen = 0;
+    uint32_t pos = 0;
+    uint32_t n;
+    uint32_t w;
+    uint32_t i;
+
+    memset(pub, 0x04u, sizeof(pub));
+    memset(sig, 0x33u, sizeof(sig));
+
+    /* Unknown, non-critical extensions 2.5.29.64 onward, each with a NULL value */
+    for (i = 0; i < numExts; i++)
+    {
+        oid[2] = (uint8_t)(0x40u + i);
+        n = 0;
+        if (!SSFASN1EncOIDRaw(tmp, sizeof(tmp), oid, sizeof(oid), &w)) return 0;
+        n += w;
+        if (!SSFASN1EncNull(tmp2, sizeof(tmp2), &w)) return 0;
+        if (!SSFASN1EncOctetString(&tmp[n], sizeof(tmp) - n, tmp2, w, &w)) return 0;
+        n += w;
+        if (!SSFASN1EncWrap(&exts[extsLen], sizeof(exts) - extsLen, SSF_ASN1_TAG_SEQUENCE, tmp, n,
+                            &w)) return 0;
+        extsLen += w;
+    }
+
+    /* Optional critical BasicConstraints { cA TRUE, pathLenConstraint } */
+    if (pathLen >= 0)
+    {
+        static const uint8_t bcOid[] = { 0x55u, 0x1Du, 0x13u };
+        n = 0;
+        if (!SSFASN1EncBool(tmp2, sizeof(tmp2), true, &w)) return 0;
+        n += w;
+        if (!SSFASN1EncIntU64(&tmp2[n], sizeof(tmp2) - n, (uint64_t)pathLen, &w)) return 0;
+        n += w;
+        if (!SSFASN1EncWrap(tmp3, sizeof(tmp3), SSF_ASN1_TAG_SEQUENCE, tmp2, n, &w)) return 0;
+        n = w;
+        if (!SSFASN1EncOctetString(tmp2, sizeof(tmp2), tmp3, n, &w)) return 0;
+        n = w;
+        pos = 0;
+        if (!SSFASN1EncOIDRaw(tmp, sizeof(tmp), bcOid, sizeof(bcOid), &w)) return 0;
+        pos += w;
+        if (!SSFASN1EncBool(&tmp[pos], sizeof(tmp) - pos, true, &w)) return 0;
+        pos += w;
+        memcpy(&tmp[pos], tmp2, n);
+        pos += n;
+        if (!SSFASN1EncWrap(&exts[extsLen], sizeof(exts) - extsLen, SSF_ASN1_TAG_SEQUENCE, tmp,
+                            pos, &w)) return 0;
+        extsLen += w;
+    }
+
+    /* TBSCertificate content */
+    pos = 0;
+    if (!SSFASN1EncIntU64(tmp, sizeof(tmp), 2u, &w)) return 0;
+    if (!SSFASN1EncWrap(&tbsContent[pos], sizeof(tbsContent) - pos, SSF_ASN1_CONTEXT_EXPLICIT(0),
+                        tmp, w, &w)) return 0;
+    pos += w;
+    if (!SSFASN1EncInt(&tbsContent[pos], sizeof(tbsContent) - pos, serial, sizeof(serial), &w))
+        return 0;
+    pos += w;
+    if (!SSFASN1EncOIDRaw(tmp, sizeof(tmp), _utSigAlgOid, sizeof(_utSigAlgOid), &w)) return 0;
+    if (!SSFASN1EncWrap(&tbsContent[pos], sizeof(tbsContent) - pos, SSF_ASN1_TAG_SEQUENCE, tmp, w,
+                        &w)) return 0;
+    pos += w;
+    if (!SSFASN1EncWrap(&tbsContent[pos], sizeof(tbsContent) - pos, SSF_ASN1_TAG_SEQUENCE, tmp, 0u,
+                        &w)) return 0;
+    pos += w;
+    n = 0;
+    if (!SSFASN1EncUTCTime(tmp, sizeof(tmp), 1700000000ull, &w)) return 0;
+    n += w;
+    if (!SSFASN1EncUTCTime(&tmp[n], sizeof(tmp) - n, 2000000000ull, &w)) return 0;
+    n += w;
+    if (!SSFASN1EncWrap(&tbsContent[pos], sizeof(tbsContent) - pos, SSF_ASN1_TAG_SEQUENCE, tmp, n,
+                        &w)) return 0;
+    pos += w;
+    if (!SSFASN1EncWrap(&tbsContent[pos], sizeof(tbsContent) - pos, SSF_ASN1_TAG_SEQUENCE, tmp, 0u,
+                        &w)) return 0;
+    pos += w;
+    n = 0;
+    if (!SSFASN1EncOIDRaw(tmp2, sizeof(tmp2), _utPubKeyAlgOid, sizeof(_utPubKeyAlgOid), &w))
+        return 0;
+    n += w;
+    if (!SSFASN1EncOIDRaw(&tmp2[n], sizeof(tmp2) - n, _utCurveOid, sizeof(_utCurveOid), &w))
+        return 0;
+    n += w;
+    if (!SSFASN1EncWrap(tmp, sizeof(tmp), SSF_ASN1_TAG_SEQUENCE, tmp2, n, &w)) return 0;
+    n = w;
+    if (!SSFASN1EncBitString(&tmp[n], sizeof(tmp) - n, pub, sizeof(pub), 0u, &w)) return 0;
+    n += w;
+    if (!SSFASN1EncWrap(&tbsContent[pos], sizeof(tbsContent) - pos, SSF_ASN1_TAG_SEQUENCE, tmp, n,
+                        &w)) return 0;
+    pos += w;
+    if (extsLen > 0u)
+    {
+        if (!SSFASN1EncWrap(extsSeq, sizeof(extsSeq), SSF_ASN1_TAG_SEQUENCE, exts, extsLen, &w))
+            return 0;
+        if (!SSFASN1EncWrap(&tbsContent[pos], sizeof(tbsContent) - pos,
+                            SSF_ASN1_CONTEXT_EXPLICIT(3), extsSeq, w, &w)) return 0;
+        pos += w;
+    }
+    if (!SSFASN1EncWrap(tbs, sizeof(tbs), SSF_ASN1_TAG_SEQUENCE, tbsContent, pos, &w)) return 0;
+
+    /* Certificate { tbs, signatureAlgorithm, signatureValue } */
+    pos = w;
+    memcpy(certContent, tbs, pos);
+    if (!SSFASN1EncOIDRaw(tmp, sizeof(tmp), _utSigAlgOid, sizeof(_utSigAlgOid), &w)) return 0;
+    if (!SSFASN1EncWrap(&certContent[pos], sizeof(certContent) - pos, SSF_ASN1_TAG_SEQUENCE, tmp,
+                        w, &w)) return 0;
+    pos += w;
+    if (!SSFASN1EncBitString(&certContent[pos], sizeof(certContent) - pos, sig, sizeof(sig), 0u,
+                             &w)) return 0;
+    pos += w;
+    if (!SSFASN1EncWrap(out, outSize, SSF_ASN1_TAG_SEQUENCE, certContent, pos, &w)) return 0;
+    return w;
 }
 
 void SSFX509UnitTest(void)
@@ -4129,5 +4287,94 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(SSFX509EncodeCert(out, n - 1u, &p, fakeSig, 64u) == 0u);
         SSF_ASSERT((out[n - 1u] == 0xEEu) && (out[n] == 0xEEu));
     }
+    /* ---- Fail-closed edges: version, empty names, wildcard label, extension cap, pathLen ---- */
+    {
+        static uint8_t out[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t pubKey[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        static uint8_t fakeSig[64];
+        static const char *sanWild[] = { "*.example.com", NULL };
+        static const char *sanEmpty[] = { "", "ok", NULL };
+        static const char *sanNul[] = { "ab", NULL };
+        uint8_t serial[] = { 0x09u };
+        SSFX509GenParams_t p;
+        SSFX509Cert_t parsed;
+        const uint8_t *chain[1];
+        uint32_t chainLen[1];
+        uint32_t n;
+        uint32_t i;
+
+        memset(fakeSig, 0x22u, sizeof(fakeSig));
+        memset(pubKey, 0x04u, sizeof(pubKey));
+
+        /* A version field above v3 does not parse */
+        _utGenBaseParams(&p, serial, pubKey, 65u);
+        p.version = 3u;
+        n = SSFX509EncodeCert(out, sizeof(out), &p, fakeSig, sizeof(fakeSig));
+        SSF_ASSERT(n != 0u);
+        SSF_ASSERT(SSFX509Parse(out, n, &parsed) == false);
+
+        /* An empty hostname is a contract violation, not a runtime mismatch */
+        chain[0] = _utTestCertDER;
+        chainLen[0] = sizeof(_utTestCertDER);
+        SSF_ASSERT_TEST(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, "",
+                                           1800000000ull));
+
+        /* Empty and NUL-containing dNSName entries are dropped at parse */
+        _utGenBaseParams(&p, serial, pubKey, 65u);
+        p.sanDNSNames = sanEmpty;
+        n = SSFX509EncodeCert(out, sizeof(out), &p, fakeSig, sizeof(fakeSig));
+        SSF_ASSERT(n != 0u);
+        SSF_ASSERT(SSFX509Parse(out, n, &parsed) == true);
+        SSF_ASSERT((parsed.sanLen == 1u) && (parsed.san[0].valLen == 2u));
+        _utGenBaseParams(&p, serial, pubKey, 65u);
+        p.sanDNSNames = sanNul;
+        n = SSFX509EncodeCert(out, sizeof(out), &p, fakeSig, sizeof(fakeSig));
+        SSF_ASSERT(n != 0u);
+        for (i = 0; (i + 3u) < n; i++)
+        {
+            /* Patch the dNSName "ab" into "a" followed by a NUL byte */
+            if ((out[i] == 0x82u) && (out[i + 1u] == 0x02u) && (out[i + 2u] == (uint8_t)'a') &&
+                (out[i + 3u] == (uint8_t)'b'))
+            {
+                out[i + 3u] = 0u;
+                break;
+            }
+        }
+        SSF_ASSERT((i + 3u) < n);
+        SSF_ASSERT(SSFX509Parse(out, n, &parsed) == true);
+        SSF_ASSERT(parsed.sanLen == 0u);
+
+        /* A wildcard must match at least one character in the leftmost label */
+        _utGenBaseParams(&p, serial, pubKey, 65u);
+        p.sanDNSNames = sanWild;
+        n = _utSelfSign(&p, pubKey, sizeof(pubKey), out, sizeof(out));
+        SSF_ASSERT(n != 0u);
+        chain[0] = out;
+        chainLen[0] = n;
+        SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, "www.example.com",
+                                      1800000000ull) == true);
+        SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, ".example.com",
+                                      1800000000ull) == false);
+
+        /* More extensions than SSF_X509_CONFIG_MAX_EXTENSIONS fails to parse, the cap parses */
+        n = _utBuildCertExts(SSF_X509_CONFIG_MAX_EXTENSIONS, -1, out, sizeof(out));
+        SSF_ASSERT(n != 0u);
+        SSF_ASSERT(SSFX509Parse(out, n, &parsed) == true);
+        SSF_ASSERT(parsed.extsLen == SSF_X509_CONFIG_MAX_EXTENSIONS);
+        n = _utBuildCertExts(SSF_X509_CONFIG_MAX_EXTENSIONS + 1u, -1, out, sizeof(out));
+        SSF_ASSERT(n != 0u);
+        SSF_ASSERT(SSFX509Parse(out, n, &parsed) == false);
+
+        /* pathLenConstraint above 127 clamps to 127 instead of wrapping to absent */
+        n = _utBuildCertExts(0u, 128, out, sizeof(out));
+        SSF_ASSERT(n != 0u);
+        SSF_ASSERT(SSFX509Parse(out, n, &parsed) == true);
+        SSF_ASSERT((parsed.hasBasicConstraints == true) && (parsed.pathLenConstraint == 127));
+        n = _utBuildCertExts(0u, 5, out, sizeof(out));
+        SSF_ASSERT(n != 0u);
+        SSF_ASSERT(SSFX509Parse(out, n, &parsed) == true);
+        SSF_ASSERT(parsed.pathLenConstraint == 5);
+    }
+
 }
 #endif /* SSF_CONFIG_X509_UNIT_TEST */

@@ -295,8 +295,14 @@ static bool _ParseExtensions(const SSFASN1Cursor_t *extsCursor, SSFX509Cert_t *c
         /* Extension value is an OCTET STRING wrapping the actual value */
         if (!SSFASN1DecGetOctetString(&extInner, &extValue, &extValueLen, &extInner)) return false;
 
-        /* Store in extension array */
-        if (cert->extsLen < SSF_X509_CONFIG_MAX_EXTENSIONS)
+        /* Room to retain this extension? */
+        if (cert->extsLen >= SSF_X509_CONFIG_MAX_EXTENSIONS)
+        {
+            /* No, an unretained extension would escape the critical and duplicate checks */
+            return false;
+        }
+
+        /* Yes, store in extension array */
         {
             cert->exts[cert->extsLen].oidRaw = oidRaw;
             cert->exts[cert->extsLen].oidRawLen = oidRawLen;
@@ -327,7 +333,8 @@ static bool _ParseExtensions(const SSFASN1Cursor_t *extsCursor, SSFX509Cert_t *c
                         uint64_t pl;
                         if (SSFASN1DecGetIntU64(&bcInner, &pl, &bcInner))
                         {
-                            cert->pathLenConstraint = (int8_t)pl;
+                            /* Clamp so a large value stays a constraint instead of wrapping */
+                            cert->pathLenConstraint = (pl > 127u) ? (int8_t)127 : (int8_t)pl;
                         }
                     }
                 }
@@ -362,6 +369,13 @@ static bool _ParseExtensions(const SSFASN1Cursor_t *extsCursor, SSFX509Cert_t *c
                         uint8_t sanType = tag & 0x1Fu;
                         if (SSFASN1DecGetTLV(&sanInner, &tag, &sanVal, &sanValLen, &sanInner))
                         {
+                            /* dNSName that is empty or embeds a NUL byte? */
+                            if ((sanType == SSF_X509_SAN_DNS) &&
+                                ((sanValLen == 0u) || (memchr(sanVal, 0, sanValLen) != NULL)))
+                            {
+                                /* Yes, drop it since no hostname can match it safely */
+                                continue;
+                            }
                             cert->san[cert->sanLen].type = sanType;
                             cert->san[cert->sanLen].val = sanVal;
                             cert->san[cert->sanLen].valLen = sanValLen;
@@ -536,6 +550,13 @@ bool SSFX509Parse(const uint8_t *der, uint32_t derLen, SSFX509Cert_t *cert)
         if (!SSFASN1DecOpenConstructed(&pos, SSF_ASN1_CONTEXT_EXPLICIT(0), &verInner, &pos))
             return false;
         if (!SSFASN1DecGetIntU64(&verInner, &ver, &verInner)) return false;
+
+        /* Version defined by RFC 5280 Section 4.1.2.1 (v1, v2, v3)? */
+        if (ver > 2u)
+        {
+            /* No, malformed certificate */
+            return false;
+        }
         cert->version = (uint8_t)ver;
     }
 
@@ -1778,7 +1799,9 @@ static bool _HostnameMatch(const char *hostname, const uint8_t *sanVal, uint32_t
         /* Find the first '.' in the hostname */
         const char *dot = hostname;
         while (*dot != '\0' && *dot != '.') dot++;
-        if (*dot == '.')
+
+        /* Dot found with at least one character before it for the wildcard to match? */
+        if ((*dot == '.') && (dot != hostname))
         {
             /* Compare the domain part after the first dot */
             uint32_t domainLen = hostLen - (uint32_t)(dot - hostname);
@@ -2159,6 +2182,7 @@ bool SSFX509VerifyChain(const uint8_t **chainDer, const uint32_t *chainDerLen,
     SSF_REQUIRE(trustDerLen != NULL);
     SSF_REQUIRE(trustCount >= 1u);
     SSF_REQUIRE(hostname != NULL);
+    SSF_REQUIRE(hostname[0] != '\0');
 
     /* Parse all chain certificates */
     for (i = 0; i < chainLen; i++)
@@ -2172,7 +2196,7 @@ bool SSFX509VerifyChain(const uint8_t **chainDer, const uint32_t *chainDerLen,
     /* Reject v1/v2 certificates (RFC 5280 Section 6.1.1(c): all certs must be v3) */
     for (i = 0; i < chainLen; i++)
     {
-        if (certs[i].version < 2u)
+        if (certs[i].version != 2u)
         { SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx, "Chain: cert[%u] is v%u (must be v3)",
                         i, certs[i].version + 1u);
           return false; }

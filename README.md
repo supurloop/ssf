@@ -157,7 +157,7 @@ Encoding and decoding interfaces for common data formats, all with strict buffer
 | Module | Description | Flash | Static RAM | Peak Stack | Heap | Reentrant |
 |--------|-------------|-------|------------|------------|------|-----------|
 | [ASN.1 DER](_codec/ssfasn1.md) | ASN.1 DER encoder/decoder (zero-copy decode + measure-then-write encode; X.509 / PKCS#1 / SEC 1 wire formats) | ~3.5 KB | — | ~160 B⁵² | — | Yes |
-| [X.509](_codec/ssfx509.md) | X.509 v3 certificate parser (zero-copy), generator, and RFC 5280 chain verifier (ECDSA / RSA / Ed25519, name constraints, hostname matching) | ~11 KB | ~8 B⁵⁹ | ~27 KB⁵⁸ | — | Yes⁵⁹ |
+| [X.509](_codec/ssfx509.md) | X.509 v3 certificate parser (zero-copy), generator, and RFC 5280 chain verifier (ECDSA / RSA / Ed25519, name constraints, hostname matching) | ~11 KB | ~8 B⁵⁹ | ~14 KB⁵⁸ | — | Yes⁵⁹ |
 | [Base64](_codec/ssfbase64.md) | Base64 encoder/decoder | ~700 B | — | ~64 B | — | Yes |
 | [Base64URL](_codec/ssfbase64url.md) | RFC 4648 §5 URL-safe Base64 encoder/decoder (unpadded output, strict decode; JWT convention) | ~300 B | — | ~1.1 KB⁵⁶ | — | Yes |
 | [Hex ASCII](_codec/ssfhex.md) | Binary-to-hex ASCII encoder/decoder | ~600 B | — | ~64 B | — | Yes |
@@ -180,7 +180,7 @@ Encoding and decoding interfaces for common data formats, all with strict buffer
 
 ⁵⁷ `SSFMatchGlob` / `SSFMatchGlobI` are recursive: each `*` run in the pattern adds one ~96 B frame, and patterns with more than `SSF_MATCH_CONFIG_MAX_GLOB_WILDCARDS` runs (default 4) are rejected before matching, so the peak is bounded at about `(N + 1) × 96 B` (~500 B at the default) regardless of input length. The non-glob functions (`SSFMatchStrI`, `SSFMatchStrNI`, `SSFMatchPath`) are iterative and peak under ~100 B.
 
-⁵⁸ Peak is in the generation path: `SSFX509EncodeTBS` nests several `uint8_t[SSF_X509_CONFIG_MAX_CERT_SIZE]` scratch buffers (default 4096) across its helpers, and `SSFX509EncodeCert` adds one more. Verification peaks lower, in `SSFX509VerifyChain`, which holds `SSF_X509_CONFIG_MAX_CHAIN_DEPTH` (default 8) parsed `SSFX509Cert_t` structures (~1 KB each on 32-bit targets; larger when the SAN / extension / Name Constraints limits are raised) plus one trust-anchor parse and the signature-verification chain of `ssfecdsa` / `ssfrsa` / `ssfed25519` (footnotes ⁴², ⁴⁸). `SSFX509Parse` alone peaks around ~600 B. Halving `SSF_X509_CONFIG_MAX_CERT_SIZE` and `SSF_X509_CONFIG_MAX_CHAIN_DEPTH` roughly halves both figures.
+⁵⁸ Peak is in `SSFX509VerifyChain`, which holds `SSF_X509_CONFIG_MAX_CHAIN_DEPTH` (default 8) parsed `SSFX509Cert_t` structures (~1 KB each on 32-bit targets, ~1.6 KB on 64-bit; larger when the SAN / extension / Name Constraints limits are raised) plus one trust-anchor parse and the signature-verification chain of `ssfecdsa` / `ssfrsa` / `ssfed25519` (footnotes ⁴², ⁴⁸). Halving `SSF_X509_CONFIG_MAX_CHAIN_DEPTH` roughly halves it. `SSFX509Parse` alone peaks around ~600 B. Generation (`SSFX509EncodeTBS` / `SSFX509EncodeCert`) writes every element directly into the caller's buffer with no scratch arrays, so it peaks at well under ~2 KB regardless of `SSF_X509_CONFIG_MAX_CERT_SIZE`.
 
 ⁵⁹ The only static state is the trace callback and its user pointer installed by `SSFX509SetTraceCtx` (two pointers). Parsing, generation, and verification hold all state in caller-supplied structures and on the stack, so they are safe to run concurrently as long as the trace callback is not changed while verifications are in flight.
 

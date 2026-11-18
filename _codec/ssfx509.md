@@ -38,9 +38,13 @@ X.509 v3 certificate support per RFC 5280, built on [`ssfasn1`](ssfasn1.md):
 ## [↑](#ssfx509--x509-certificate-parser-generator-and-chain-verifier) Limitations
 
 - **DER only, bounded size.** Certificates larger than
-  [`SSF_X509_CONFIG_MAX_CERT_SIZE`](#cfg-max-cert-size) cannot be generated; the encoders return
-  `0`. The parser itself is zero-copy and reads any length the caller presents, but the chain
-  verifier and generator allocate scratch buffers at this size.
+  [`SSF_X509_CONFIG_MAX_CERT_SIZE`](#cfg-max-cert-size) cannot be generated; both the measuring
+  and the writing call of each encoder return `0`. The parser itself is zero-copy and reads any
+  length the caller presents.
+- **Generation input bounds.** The encoders refuse, with `0` from both passes, any Distinguished
+  Name attribute over its RFC 5280 Appendix A upper bound (CN, O, OU 64 characters; ST, L 128;
+  C exactly 2), any `dNSName` over 253 octets, and any key identifier over 64 octets (the longest
+  RFC 7093 method, SHA-512). Values are emitted as `UTF8String` regardless of attribute type.
 - **Distinguished Names.** Only CN, O, OU, C, ST, and L are extracted into named fields. When an
   attribute repeats, the last occurrence wins. The raw DER of the whole Name is always retained in
   `raw` / `rawLen`, and the verifier compares issuer / subject names byte-for-byte on that raw DER.
@@ -119,7 +123,9 @@ X.509 v3 certificate support per RFC 5280, built on [`ssfasn1`](ssfasn1.md):
   [`ssfecdsa`](../_crypto/ssfecdsa.md) / [`ssfrsa`](../_crypto/ssfrsa.md) /
   [`ssfed25519`](../_crypto/ssfed25519.md), then encode the Certificate with that signature.
   `SSFX509EncodeCert()` re-encodes the TBS internally, so the same `params` must be passed to
-  both calls.
+  both calls. The write pass emits every element directly into the caller's buffer, header first
+  using the measured content length, and asserts that the bytes written equal the bytes measured,
+  so a non-zero return is always a complete, well-formed encoding of exactly that length.
 - **Generation parameters.** String fields in [`SSFX509GenName_t`](#type-genname) that are `NULL`
   are omitted from the Name. `sanDNSNames`, `sanIPAddrs`, and the four `nc*` arrays are
   `NULL`-terminated pointer arrays and may themselves be `NULL` when empty. `sanIPAddrs` entries
@@ -132,12 +138,12 @@ X.509 v3 certificate support per RFC 5280, built on [`ssfasn1`](ssfasn1.md):
   and `DEBUG`). When no callback is installed, tracing is a no-op. This callback pointer is the
   module's only static state; set it before concurrent use rather than while verifications are in
   flight.
-- **Stack usage is dominated by the configuration limits.** [`SSFX509VerifyChain()`](#ssfx509verifychain)
+- **Stack usage is dominated by the chain verifier.** [`SSFX509VerifyChain()`](#ssfx509verifychain)
   holds `SSF_X509_CONFIG_MAX_CHAIN_DEPTH` parsed certificates plus one trust-anchor parse on the
-  stack; [`SSFX509EncodeTBS()`](#ssfx509encodetbs) and [`SSFX509EncodeCert()`](#ssfx509encodecert)
-  nest several `SSF_X509_CONFIG_MAX_CERT_SIZE` scratch buffers. Reduce the limits in
-  [`_opt/ssfx509_opt.h`](../_opt/ssfx509_opt.h) to fit smaller stacks; see the module's footnotes
-  in the [SSF README](../README.md#codecs).
+  stack. Generation uses no scratch buffers: each nesting level of the encoder adds well under
+  200 bytes, and the output goes straight into the caller's buffer. Reduce the chain depth or the
+  SAN / extension / Name Constraints limits in [`_opt/ssfx509_opt.h`](../_opt/ssfx509_opt.h) to
+  fit smaller stacks; see the module's footnotes in the [SSF README](../README.md#codecs).
 
 <a id="configuration"></a>
 
@@ -147,7 +153,7 @@ Options live in [`_opt/ssfx509_opt.h`](../_opt/ssfx509_opt.h).
 
 | Macro | Default | Description |
 |-------|---------|-------------|
-| <a id="cfg-max-cert-size"></a>`SSF_X509_CONFIG_MAX_CERT_SIZE` | `4096` | Largest DER certificate the encoders will produce and the size of the on-stack scratch buffers used by [`SSFX509EncodeTBS()`](#ssfx509encodetbs) / [`SSFX509EncodeCert()`](#ssfx509encodecert). Encoders return `0` when the result would exceed it. |
+| <a id="cfg-max-cert-size"></a>`SSF_X509_CONFIG_MAX_CERT_SIZE` | `4096` | Largest DER TBSCertificate or Certificate [`SSFX509EncodeTBS()`](#ssfx509encodetbs) / [`SSFX509EncodeCert()`](#ssfx509encodecert) will produce. Both the measuring and the writing call return `0` when the result would exceed it. No buffers are sized from it. |
 | <a id="cfg-max-chain-depth"></a>`SSF_X509_CONFIG_MAX_CHAIN_DEPTH` | `8` | Maximum `chainLen` accepted by [`SSFX509VerifyChain()`](#ssfx509verifychain) (leaf plus intermediates). Sizes the on-stack array of parsed certificates. |
 | <a id="cfg-max-extensions"></a>`SSF_X509_CONFIG_MAX_EXTENSIONS` | `16` | Number of raw extension records retained in `SSFX509Cert_t.exts[]`. Additional extensions are decoded for known content but not stored, so unrecognized critical extensions beyond this count cannot be detected. |
 | <a id="cfg-max-name-constraints"></a>`SSF_X509_CONFIG_MAX_NAME_CONSTRAINTS` | `8` | Number of permitted subtrees and, separately, excluded subtrees retained per CA certificate. Excess subtrees are dropped. |
@@ -349,7 +355,10 @@ SAN, SKID, AKID, the raw extension, and Name Constraints are enabled in `params`
 | `params` | in | `const SSFX509GenParams_t *` | Generation parameters. Must not be `NULL`. |
 
 **Returns:** The number of bytes written (or, when `buf == NULL`, the number of bytes required).
-Returns `0` if `bufSize` is too small or the encoding would exceed `SSF_X509_CONFIG_MAX_CERT_SIZE`.
+Returns `0` if `bufSize` is too small, the encoding would exceed `SSF_X509_CONFIG_MAX_CERT_SIZE`,
+or an input exceeds one of the generation bounds listed under [Limitations](#limitations). A
+non-zero return is always the complete encoding; nothing is written on a `0` return beyond what
+`bufSize` allowed.
 
 ---
 
@@ -375,7 +384,8 @@ and `params->sigAlgParams`, and `signature` is wrapped in a BIT STRING with zero
 | `signatureLen` | in | `uint32_t` | Length of `signature`. |
 
 **Returns:** The number of bytes written (or required when `buf == NULL`); `0` if `bufSize` is too
-small or the result would exceed `SSF_X509_CONFIG_MAX_CERT_SIZE`.
+small, the result would exceed `SSF_X509_CONFIG_MAX_CERT_SIZE`, or `params` fails a generation
+bound. A non-zero return is always the complete encoding.
 
 <a id="ex-generate"></a>
 

@@ -677,33 +677,100 @@ bool SSFX509IsP256(const SSFX509Cert_t *cert)
 /* CERTIFICATE GENERATION                                                                     */
 /* ========================================================================================== */
 
+/* RFC 5280 Appendix A upper bounds on DN attribute values and a dNSName (RFC 1035 Sec. 2.3.4). */
+#define _UB_COMMON_NAME             (64u)
+#define _UB_ORGANIZATION_NAME       (64u)
+#define _UB_ORGANIZATIONAL_UNIT     (64u)
+#define _UB_STATE_NAME              (128u)
+#define _UB_LOCALITY_NAME           (128u)
+#define _UB_COUNTRY_NAME            (2u)
+#define _UB_DNS_NAME                (253u)
+/* Longest RFC 7093 key identifier method is SHA-512 */
+#define _UB_KEY_IDENTIFIER          (64u)
+
+/* Content emitter: writes, or only measures when buf is NULL, the content octets of one DER     */
+/* element. Returns true with *lenOut set to the octets written or needed, else false.           */
+typedef bool (*_EncContentFn_t)(uint8_t *buf, uint32_t bufSize, const void *arg, uint32_t *lenOut);
+
+/* Arguments for the generic content emitters below. */
+typedef struct
+{
+    uint16_t tag;
+    _EncContentFn_t fn;
+    const void *arg;
+} _EncNested_t;
+
+typedef struct
+{
+    uint16_t tag;
+    const uint8_t *data;
+    uint32_t len;
+} _EncTagged_t;
+
+typedef struct
+{
+    const uint8_t *data;
+    uint32_t len;
+} _EncBytes_t;
+
+typedef struct
+{
+    const uint8_t *oid;
+    uint32_t oidLen;
+    SSFCStrIn_t valueStr;
+    uint32_t valueLen;
+} _EncDNAttr_t;
+
+typedef struct
+{
+    const uint8_t *oid;
+    uint32_t oidLen;
+    const uint8_t *params;
+    uint32_t paramsLen;
+} _EncAlgId_t;
+
+typedef struct
+{
+    const uint8_t *oid;
+    uint32_t oidLen;
+    bool critical;
+    _EncContentFn_t valueFn;
+    const void *valueArg;
+} _EncExt_t;
+
+typedef struct
+{
+    const char **dns;
+    const uint8_t **ips;
+} _EncSubtrees_t;
+
+typedef struct
+{
+    const SSFX509GenParams_t *params;
+    const uint8_t *sig;
+    uint32_t sigLen;
+} _EncCert_t;
+
 /* --------------------------------------------------------------------------------------------- */
-/* Helper: returns strlen of a C string, or 0 if NULL.                                           */
+/* Returns strlen of a C string, or 0 if NULL.                                                   */
 /* --------------------------------------------------------------------------------------------- */
-static uint32_t _StrLen(SSFCStrIn_t s)
+static uint32_t _StrLen(SSFCStrIn_t str)
 {
     uint32_t len = 0;
-    if (s == NULL) return 0;
-    while (s[len] != '\0') len++;
+
+    if (str == NULL) return 0;
+    while (str[len] != '\0') len++;
     return len;
 }
 
-/* Upstream ssfasn1 encoder API moved from `uint32_t f(...)` to `bool f(..., uint32_t *bytesWritten)`. */
-/* These thin wrappers preserve the call shape used throughout this file: returns 0 on failure  */
-/* (including buffer-too-small), bytes written/needed otherwise.                                 */
-static uint32_t _EncWrap(uint8_t *buf, uint32_t bufSize, uint16_t tag,
-                         const uint8_t *content, uint32_t contentLen)
+/* --------------------------------------------------------------------------------------------- */
+/* Leaf encoders: return bytes written, or needed when buf is NULL, else 0 on failure.           */
+/* --------------------------------------------------------------------------------------------- */
+static uint32_t _EncWrap(uint8_t *buf, uint32_t bufSize, uint16_t tag, const uint8_t *content,
+                         uint32_t contentLen)
 {
     uint32_t n;
-    /* Legacy sizing pattern: callers pass (NULL, 0, tag, NULL, contentLen) to ask for the    */
-    /* total size of a wrap whose content has already been measured separately. The new       */
-    /* upstream contract rejects content==NULL with contentLen!=0, so route those calls       */
-    /* through SSFASN1EncTagLen (header bytes) and add contentLen ourselves.                  */
-    if (content == NULL && contentLen != 0u)
-    {
-        if (!SSFASN1EncTagLen(NULL, 0, tag, contentLen, &n)) return 0;
-        return n + contentLen;
-    }
+
     if (!SSFASN1EncWrap(buf, bufSize, tag, content, contentLen, &n)) return 0;
     return n;
 }
@@ -712,14 +779,16 @@ static uint32_t _EncOIDRaw(uint8_t *buf, uint32_t bufSize, const uint8_t *oidRaw
                            uint32_t oidRawLen)
 {
     uint32_t n;
+
     if (!SSFASN1EncOIDRaw(buf, bufSize, oidRaw, oidRawLen, &n)) return 0;
     return n;
 }
 
-static uint32_t _EncString(uint8_t *buf, uint32_t bufSize, uint16_t strTag,
-                           const uint8_t *str, uint32_t strLen)
+static uint32_t _EncString(uint8_t *buf, uint32_t bufSize, uint16_t strTag, const uint8_t *str,
+                           uint32_t strLen)
 {
     uint32_t n;
+
     if (!SSFASN1EncString(buf, bufSize, strTag, str, strLen, &n)) return 0;
     return n;
 }
@@ -727,6 +796,7 @@ static uint32_t _EncString(uint8_t *buf, uint32_t bufSize, uint16_t strTag,
 static uint32_t _EncBool(uint8_t *buf, uint32_t bufSize, bool val)
 {
     uint32_t n;
+
     if (!SSFASN1EncBool(buf, bufSize, val, &n)) return 0;
     return n;
 }
@@ -734,6 +804,7 @@ static uint32_t _EncBool(uint8_t *buf, uint32_t bufSize, bool val)
 static uint32_t _EncInt(uint8_t *buf, uint32_t bufSize, const uint8_t *intBuf, uint32_t intLen)
 {
     uint32_t n;
+
     if (!SSFASN1EncInt(buf, bufSize, intBuf, intLen, &n)) return 0;
     return n;
 }
@@ -741,6 +812,7 @@ static uint32_t _EncInt(uint8_t *buf, uint32_t bufSize, const uint8_t *intBuf, u
 static uint32_t _EncIntU64(uint8_t *buf, uint32_t bufSize, uint64_t val)
 {
     uint32_t n;
+
     if (!SSFASN1EncIntU64(buf, bufSize, val, &n)) return 0;
     return n;
 }
@@ -749,6 +821,7 @@ static uint32_t _EncBitString(uint8_t *buf, uint32_t bufSize, const uint8_t *bit
                               uint32_t bitsLen, uint8_t unusedBits)
 {
     uint32_t n;
+
     if (!SSFASN1EncBitString(buf, bufSize, bits, bitsLen, unusedBits, &n)) return 0;
     return n;
 }
@@ -757,12 +830,7 @@ static uint32_t _EncOctetString(uint8_t *buf, uint32_t bufSize, const uint8_t *o
                                 uint32_t octetsLen)
 {
     uint32_t n;
-    /* See _EncWrap: route legacy NULL-content sizing through SSFASN1EncTagLen + contentLen. */
-    if (octets == NULL && octetsLen != 0u)
-    {
-        if (!SSFASN1EncTagLen(NULL, 0, SSF_ASN1_TAG_OCTET_STRING, octetsLen, &n)) return 0;
-        return n + octetsLen;
-    }
+
     if (!SSFASN1EncOctetString(buf, bufSize, octets, octetsLen, &n)) return 0;
     return n;
 }
@@ -770,6 +838,7 @@ static uint32_t _EncOctetString(uint8_t *buf, uint32_t bufSize, const uint8_t *o
 static uint32_t _EncUTCTime(uint8_t *buf, uint32_t bufSize, uint64_t unixSec)
 {
     uint32_t n;
+
     if (!SSFASN1EncUTCTime(buf, bufSize, unixSec, &n)) return 0;
     return n;
 }
@@ -777,863 +846,836 @@ static uint32_t _EncUTCTime(uint8_t *buf, uint32_t bufSize, uint64_t unixSec)
 static uint32_t _EncTagLen(uint8_t *buf, uint32_t bufSize, uint16_t tag, uint32_t contentLen)
 {
     uint32_t n;
+
     if (!SSFASN1EncTagLen(buf, bufSize, tag, contentLen, &n)) return 0;
     return n;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Helper: encode a single DN attribute (SET { SEQUENCE { OID, UTF8String } }).                  */
-/* Returns bytes written/needed. buf may be NULL for measuring.                                  */
+/* Returns buf + pos, or NULL when only measuring.                                               */
 /* --------------------------------------------------------------------------------------------- */
-static uint32_t _EncDNAttr(uint8_t *buf, uint32_t bufSize, const uint8_t *oidRaw,
-                           uint32_t oidRawLen, SSFCStrIn_t value)
+static uint8_t *_At(uint8_t *buf, uint32_t pos)
 {
-    uint32_t valLen = _StrLen(value);
-    uint32_t oidEnc = _EncOIDRaw(NULL, 0, oidRaw, oidRawLen);
-    uint32_t strEnc = _EncString(NULL, 0, SSF_ASN1_TAG_UTF8_STRING,
-                                       (const uint8_t *)value, valLen);
-    uint32_t seqContent = oidEnc + strEnc;
-    uint32_t seqEnc = _EncWrap(NULL, 0, SSF_ASN1_TAG_SEQUENCE, NULL, seqContent);
-    uint32_t setEnc = _EncWrap(NULL, 0, SSF_ASN1_TAG_SET, NULL, seqEnc);
-
-    if (buf == NULL) return setEnc;
-    if (bufSize < setEnc) return 0;
-
-    {
-        uint32_t pos = 0;
-        uint8_t seqBuf[128];
-        uint32_t seqPos = 0;
-
-        /* Build inner SEQUENCE content */
-        seqPos += _EncOIDRaw(&seqBuf[seqPos], sizeof(seqBuf) - seqPos, oidRaw, oidRawLen);
-        seqPos += _EncString(&seqBuf[seqPos], sizeof(seqBuf) - seqPos,
-                                   SSF_ASN1_TAG_UTF8_STRING, (const uint8_t *)value, valLen);
-
-        /* Wrap in SEQUENCE, then in SET */
-        {
-            uint8_t setContentBuf[130];
-            uint32_t setContentLen;
-            setContentLen = _EncWrap(setContentBuf, sizeof(setContentBuf),
-                                           SSF_ASN1_TAG_SEQUENCE, seqBuf, seqPos);
-            pos = _EncWrap(buf, bufSize, SSF_ASN1_TAG_SET, setContentBuf, setContentLen);
-        }
-        return pos;
-    }
+    return (buf == NULL) ? NULL : &buf[pos];
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Helper: encode a Distinguished Name SEQUENCE.                                                 */
+/* Returns the bytes remaining in buf after pos, or 0 when only measuring.                       */
+/* --------------------------------------------------------------------------------------------- */
+static uint32_t _Rem(const uint8_t *buf, uint32_t bufSize, uint32_t pos)
+{
+    SSF_REQUIRE((buf == NULL) || (pos <= bufSize));
+
+    return (buf == NULL) ? 0u : (bufSize - pos);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if a child element produced n bytes and advances *pos by n, else false.          */
+/* --------------------------------------------------------------------------------------------- */
+static bool _Add(uint32_t *pos, uint32_t n)
+{
+    SSF_REQUIRE(pos != NULL);
+
+    if (n == 0u) return false;
+    *pos += n;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if len raw bytes fit at *pos, copying them when writing, and advances *pos.      */
+/* --------------------------------------------------------------------------------------------- */
+static bool _AddBytes(uint8_t *buf, uint32_t bufSize, uint32_t *pos, const uint8_t *data,
+                      uint32_t len)
+{
+    SSF_REQUIRE(pos != NULL);
+    SSF_REQUIRE((data != NULL) || (len == 0u));
+
+    /* Writing? */
+    if (buf != NULL)
+    {
+        /* Yes, the bytes must fit */
+        if (_Rem(buf, bufSize, *pos) < len) return false;
+        if (len > 0u) memcpy(&buf[*pos], data, len);
+    }
+    *pos += len;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns bytes written or needed for tag wrapping the content fn emits, else 0 on failure.     */
+/* --------------------------------------------------------------------------------------------- */
+static uint32_t _EncConstructed(uint8_t *buf, uint32_t bufSize, uint16_t tag,
+                                _EncContentFn_t fn, const void *arg)
+{
+    uint32_t innerLen;
+    uint32_t hdrLen;
+    uint32_t total;
+    uint32_t written;
+
+    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
+    SSF_REQUIRE(fn != NULL);
+
+    /* Content measurable? */
+    if (!fn(NULL, 0, arg, &innerLen))
+    {
+        /* No, propagate the failure */
+        return 0;
+    }
+    hdrLen = _EncTagLen(NULL, 0, tag, innerLen);
+    if (hdrLen == 0u) return 0;
+    total = hdrLen + innerLen;
+
+    /* Only measuring? */
+    if (buf == NULL) return total;
+
+    /* Header and content fit? */
+    if (bufSize < total)
+    {
+        /* No, caller's buffer too small */
+        return 0;
+    }
+
+    /* Yes, header first since its length octets need the measured content size */
+    if (_EncTagLen(buf, bufSize, tag, innerLen) != hdrLen) return 0;
+    if (!fn(&buf[hdrLen], bufSize - hdrLen, arg, &written)) return 0;
+    SSF_ENSURE(written == innerLen);
+    return total;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Content: one nested constructed element described by an _EncNested_t.                        */
+/* --------------------------------------------------------------------------------------------- */
+static bool _EncNestedContent(uint8_t *buf, uint32_t bufSize, const void *arg, uint32_t *lenOut)
+{
+    const _EncNested_t *n = (const _EncNested_t *)arg;
+    uint32_t pos = 0;
+
+    SSF_REQUIRE(n != NULL);
+    SSF_REQUIRE(lenOut != NULL);
+
+    if (!_Add(&pos, _EncConstructed(buf, bufSize, n->tag, n->fn, n->arg))) return false;
+    *lenOut = pos;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Content: one tagged primitive described by an _EncTagged_t.                                   */
+/* --------------------------------------------------------------------------------------------- */
+static bool _EncTaggedContent(uint8_t *buf, uint32_t bufSize, const void *arg, uint32_t *lenOut)
+{
+    const _EncTagged_t *t = (const _EncTagged_t *)arg;
+    uint32_t pos = 0;
+
+    SSF_REQUIRE(t != NULL);
+    SSF_REQUIRE(lenOut != NULL);
+
+    if (!_Add(&pos, _EncWrap(buf, bufSize, t->tag, t->data, t->len))) return false;
+    *lenOut = pos;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Content: raw bytes described by an _EncBytes_t.                                               */
+/* --------------------------------------------------------------------------------------------- */
+static bool _EncBytesContent(uint8_t *buf, uint32_t bufSize, const void *arg, uint32_t *lenOut)
+{
+    const _EncBytes_t *b = (const _EncBytes_t *)arg;
+    uint32_t pos = 0;
+
+    SSF_REQUIRE(b != NULL);
+    SSF_REQUIRE(lenOut != NULL);
+
+    if (!_AddBytes(buf, bufSize, &pos, b->data, b->len)) return false;
+    *lenOut = pos;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Content: AttributeTypeAndValue { OID, UTF8String }.                                           */
+/* --------------------------------------------------------------------------------------------- */
+static bool _EncDNAttrSeqContent(uint8_t *buf, uint32_t bufSize, const void *arg,
+                                 uint32_t *lenOut)
+{
+    const _EncDNAttr_t *a = (const _EncDNAttr_t *)arg;
+    uint32_t pos = 0;
+
+    SSF_REQUIRE(a != NULL);
+    SSF_REQUIRE(lenOut != NULL);
+
+    if (!_Add(&pos, _EncOIDRaw(_At(buf, pos), _Rem(buf, bufSize, pos), a->oid, a->oidLen)))
+        return false;
+    if (!_Add(&pos, _EncString(_At(buf, pos), _Rem(buf, bufSize, pos), SSF_ASN1_TAG_UTF8_STRING,
+                               (const uint8_t *)a->valueStr, a->valueLen))) return false;
+    *lenOut = pos;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns bytes for one RDN SET { SEQUENCE { OID, UTF8String } }, else 0 if over its bound.     */
+/* --------------------------------------------------------------------------------------------- */
+static uint32_t _EncDNAttr(uint8_t *buf, uint32_t bufSize, const uint8_t *oid, uint32_t oidLen,
+                           SSFCStrIn_t valueStr, uint32_t upperBound)
+{
+    _EncDNAttr_t attr;
+    _EncNested_t seq;
+
+    SSF_REQUIRE(oid != NULL);
+    SSF_REQUIRE(valueStr != NULL);
+
+    attr.oid = oid;
+    attr.oidLen = oidLen;
+    attr.valueStr = valueStr;
+    attr.valueLen = _StrLen(valueStr);
+
+    /* Value within the RFC 5280 upper bound for this attribute? */
+    if (attr.valueLen > upperBound)
+    {
+        /* No, refuse to emit a non-conforming name */
+        return 0;
+    }
+    seq.tag = SSF_ASN1_TAG_SEQUENCE;
+    seq.fn = _EncDNAttrSeqContent;
+    seq.arg = &attr;
+    return _EncConstructed(buf, bufSize, SSF_ASN1_TAG_SET, _EncNestedContent, &seq);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Content: Name as a sequence of RDNs in C, ST, L, O, OU, CN order.                             */
+/* --------------------------------------------------------------------------------------------- */
+static bool _EncDNContent(uint8_t *buf, uint32_t bufSize, const void *arg, uint32_t *lenOut)
+{
+    const SSFX509GenName_t *name = (const SSFX509GenName_t *)arg;
+    uint32_t pos = 0;
+
+    SSF_REQUIRE(name != NULL);
+    SSF_REQUIRE(lenOut != NULL);
+
+    /* countryName is exactly two letters per RFC 5280 Appendix A */
+    if ((name->c != NULL) && (_StrLen(name->c) != _UB_COUNTRY_NAME)) return false;
+
+    if ((name->c != NULL) && !_Add(&pos, _EncDNAttr(_At(buf, pos), _Rem(buf, bufSize, pos),
+        _oidC, sizeof(_oidC), name->c, _UB_COUNTRY_NAME))) return false;
+    if ((name->st != NULL) && !_Add(&pos, _EncDNAttr(_At(buf, pos), _Rem(buf, bufSize, pos),
+        _oidST, sizeof(_oidST), name->st, _UB_STATE_NAME))) return false;
+    if ((name->l != NULL) && !_Add(&pos, _EncDNAttr(_At(buf, pos), _Rem(buf, bufSize, pos),
+        _oidL, sizeof(_oidL), name->l, _UB_LOCALITY_NAME))) return false;
+    if ((name->o != NULL) && !_Add(&pos, _EncDNAttr(_At(buf, pos), _Rem(buf, bufSize, pos),
+        _oidO, sizeof(_oidO), name->o, _UB_ORGANIZATION_NAME))) return false;
+    if ((name->ou != NULL) && !_Add(&pos, _EncDNAttr(_At(buf, pos), _Rem(buf, bufSize, pos),
+        _oidOU, sizeof(_oidOU), name->ou, _UB_ORGANIZATIONAL_UNIT))) return false;
+    if ((name->cn != NULL) && !_Add(&pos, _EncDNAttr(_At(buf, pos), _Rem(buf, bufSize, pos),
+        _oidCN, sizeof(_oidCN), name->cn, _UB_COMMON_NAME))) return false;
+    *lenOut = pos;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns bytes for a Name SEQUENCE, else 0 on failure.                                         */
 /* --------------------------------------------------------------------------------------------- */
 static uint32_t _EncDN(uint8_t *buf, uint32_t bufSize, const SSFX509GenName_t *name)
 {
-    /* Measure inner content */
-    uint32_t innerLen = 0;
+    SSF_REQUIRE(name != NULL);
 
-    if (name->c != NULL) innerLen += _EncDNAttr(NULL, 0, _oidC, sizeof(_oidC), name->c);
-    if (name->st != NULL) innerLen += _EncDNAttr(NULL, 0, _oidST, sizeof(_oidST), name->st);
-    if (name->l != NULL) innerLen += _EncDNAttr(NULL, 0, _oidL, sizeof(_oidL), name->l);
-    if (name->o != NULL) innerLen += _EncDNAttr(NULL, 0, _oidO, sizeof(_oidO), name->o);
-    if (name->ou != NULL) innerLen += _EncDNAttr(NULL, 0, _oidOU, sizeof(_oidOU), name->ou);
-    if (name->cn != NULL) innerLen += _EncDNAttr(NULL, 0, _oidCN, sizeof(_oidCN), name->cn);
-
-    {
-        uint32_t total = _EncWrap(NULL, 0, SSF_ASN1_TAG_SEQUENCE, NULL, innerLen);
-        if (buf == NULL) return total;
-        if (bufSize < total) return 0;
-    }
-
-    /* Write: SEQUENCE header, then each attribute */
-    {
-        uint8_t innerBuf[256];
-        uint32_t pos = 0;
-
-        if (name->c != NULL)
-            pos += _EncDNAttr(&innerBuf[pos], sizeof(innerBuf) - pos, _oidC, sizeof(_oidC), name->c);
-        if (name->st != NULL)
-            pos += _EncDNAttr(&innerBuf[pos], sizeof(innerBuf) - pos, _oidST, sizeof(_oidST), name->st);
-        if (name->l != NULL)
-            pos += _EncDNAttr(&innerBuf[pos], sizeof(innerBuf) - pos, _oidL, sizeof(_oidL), name->l);
-        if (name->o != NULL)
-            pos += _EncDNAttr(&innerBuf[pos], sizeof(innerBuf) - pos, _oidO, sizeof(_oidO), name->o);
-        if (name->ou != NULL)
-            pos += _EncDNAttr(&innerBuf[pos], sizeof(innerBuf) - pos, _oidOU, sizeof(_oidOU), name->ou);
-        if (name->cn != NULL)
-            pos += _EncDNAttr(&innerBuf[pos], sizeof(innerBuf) - pos, _oidCN, sizeof(_oidCN), name->cn);
-
-        return _EncWrap(buf, bufSize, SSF_ASN1_TAG_SEQUENCE, innerBuf, pos);
-    }
+    return _EncConstructed(buf, bufSize, SSF_ASN1_TAG_SEQUENCE, _EncDNContent, name);
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Helper: encode the AlgorithmIdentifier SEQUENCE { OID, params }.                              */
-/* For ECDSA: SEQUENCE { OID }, for RSA: SEQUENCE { OID, NULL }.                                 */
+/* Content: AlgorithmIdentifier { OID, params... } with optional raw DER parameters.             */
 /* --------------------------------------------------------------------------------------------- */
-static uint32_t _EncAlgId(uint8_t *buf, uint32_t bufSize,
-                          const uint8_t *algOidRaw, uint32_t algOidRawLen)
+static bool _EncAlgIdContent(uint8_t *buf, uint32_t bufSize, const void *arg, uint32_t *lenOut)
 {
-    uint32_t innerLen = _EncOIDRaw(NULL, 0, algOidRaw, algOidRawLen);
-    uint32_t total = _EncWrap(NULL, 0, SSF_ASN1_TAG_SEQUENCE, NULL, innerLen);
+    const _EncAlgId_t *a = (const _EncAlgId_t *)arg;
+    uint32_t pos = 0;
 
-    if (buf == NULL) return total;
-    if (bufSize < total) return 0;
+    SSF_REQUIRE(a != NULL);
+    SSF_REQUIRE(lenOut != NULL);
 
-    {
-        uint8_t innerBuf[32];
-        uint32_t pos = 0;
-        pos += _EncOIDRaw(innerBuf, sizeof(innerBuf), algOidRaw, algOidRawLen);
-        return _EncWrap(buf, bufSize, SSF_ASN1_TAG_SEQUENCE, innerBuf, pos);
-    }
+    if (!_Add(&pos, _EncOIDRaw(_At(buf, pos), _Rem(buf, bufSize, pos), a->oid, a->oidLen)))
+        return false;
+    if (!_AddBytes(buf, bufSize, &pos, a->params, a->paramsLen)) return false;
+    *lenOut = pos;
+    return true;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Helper: encode AlgorithmIdentifier with optional parameters.                                  */
-/* SEQUENCE { OID, params... }                                                                   */
+/* Returns bytes for AlgorithmIdentifier SEQUENCE { OID, params }, else 0 on failure.            */
 /* --------------------------------------------------------------------------------------------- */
-static uint32_t _EncAlgIdWithParams(uint8_t *buf, uint32_t bufSize,
-                                     const uint8_t *algOidRaw, uint32_t algOidRawLen,
-                                     const uint8_t *params, uint32_t paramsLen)
+static uint32_t _EncAlgIdWithParams(uint8_t *buf, uint32_t bufSize, const uint8_t *algOidRaw,
+                                    uint32_t algOidRawLen, const uint8_t *params,
+                                    uint32_t paramsLen)
 {
-    uint32_t innerLen;
+    _EncAlgId_t a;
 
-    if (params == NULL || paramsLen == 0)
-    {
-        return _EncAlgId(buf, bufSize, algOidRaw, algOidRawLen);
-    }
+    SSF_REQUIRE(algOidRaw != NULL);
 
-    innerLen = _EncOIDRaw(NULL, 0, algOidRaw, algOidRawLen) + paramsLen;
-    {
-    uint32_t total = _EncWrap(NULL, 0, SSF_ASN1_TAG_SEQUENCE, NULL, innerLen);
-
-    if (buf == NULL) return total;
-    if (bufSize < total) return 0;
-
-    {
-        uint8_t innerBuf[64];
-        uint32_t pos = 0;
-        if (innerLen > sizeof(innerBuf)) return 0;
-        pos += _EncOIDRaw(innerBuf, sizeof(innerBuf), algOidRaw, algOidRawLen);
-        memcpy(&innerBuf[pos], params, paramsLen);
-        pos += paramsLen;
-        return _EncWrap(buf, bufSize, SSF_ASN1_TAG_SEQUENCE, innerBuf, pos);
-    }
-    }
+    a.oid = algOidRaw;
+    a.oidLen = algOidRawLen;
+    a.params = params;
+    a.paramsLen = (params == NULL) ? 0u : paramsLen;
+    return _EncConstructed(buf, bufSize, SSF_ASN1_TAG_SEQUENCE, _EncAlgIdContent, &a);
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Encodes a TBSCertificate.                                                                     */
+/* Returns bytes for AlgorithmIdentifier SEQUENCE { OID }, else 0 on failure.                    */
+/* --------------------------------------------------------------------------------------------- */
+static uint32_t _EncAlgId(uint8_t *buf, uint32_t bufSize, const uint8_t *algOidRaw,
+                          uint32_t algOidRawLen)
+{
+    return _EncAlgIdWithParams(buf, bufSize, algOidRaw, algOidRawLen, NULL, 0u);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Content: [0] EXPLICIT Version INTEGER.                                                        */
+/* --------------------------------------------------------------------------------------------- */
+static bool _EncVersionContent(uint8_t *buf, uint32_t bufSize, const void *arg, uint32_t *lenOut)
+{
+    const SSFX509GenParams_t *p = (const SSFX509GenParams_t *)arg;
+    uint32_t pos = 0;
+
+    SSF_REQUIRE(p != NULL);
+    SSF_REQUIRE(lenOut != NULL);
+
+    if (!_Add(&pos, _EncIntU64(_At(buf, pos), _Rem(buf, bufSize, pos), p->version))) return false;
+    *lenOut = pos;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Content: Validity { notBefore UTCTime, notAfter UTCTime }.                                    */
+/* --------------------------------------------------------------------------------------------- */
+static bool _EncValidityContent(uint8_t *buf, uint32_t bufSize, const void *arg,
+                                uint32_t *lenOut)
+{
+    const SSFX509GenParams_t *p = (const SSFX509GenParams_t *)arg;
+    uint32_t pos = 0;
+
+    SSF_REQUIRE(p != NULL);
+    SSF_REQUIRE(lenOut != NULL);
+
+    if (!_Add(&pos, _EncUTCTime(_At(buf, pos), _Rem(buf, bufSize, pos), p->notBefore)))
+        return false;
+    if (!_Add(&pos, _EncUTCTime(_At(buf, pos), _Rem(buf, bufSize, pos), p->notAfter)))
+        return false;
+    *lenOut = pos;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Content: EC AlgorithmIdentifier { OID id-ecPublicKey, OID namedCurve }.                       */
+/* --------------------------------------------------------------------------------------------- */
+static bool _EncECAlgContent(uint8_t *buf, uint32_t bufSize, const void *arg, uint32_t *lenOut)
+{
+    const SSFX509GenParams_t *p = (const SSFX509GenParams_t *)arg;
+    uint32_t pos = 0;
+
+    SSF_REQUIRE(p != NULL);
+    SSF_REQUIRE(lenOut != NULL);
+
+    if (!_Add(&pos, _EncOIDRaw(_At(buf, pos), _Rem(buf, bufSize, pos), p->pubKeyAlgOidRaw,
+                               p->pubKeyAlgOidRawLen))) return false;
+    if (!_Add(&pos, _EncOIDRaw(_At(buf, pos), _Rem(buf, bufSize, pos), p->ecCurveOidRaw,
+                               p->ecCurveOidRawLen))) return false;
+    *lenOut = pos;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Content: SubjectPublicKeyInfo { algorithm, subjectPublicKey BIT STRING }.                     */
+/* --------------------------------------------------------------------------------------------- */
+static bool _EncSPKIContent(uint8_t *buf, uint32_t bufSize, const void *arg, uint32_t *lenOut)
+{
+    const SSFX509GenParams_t *p = (const SSFX509GenParams_t *)arg;
+    uint32_t pos = 0;
+    uint32_t n;
+
+    SSF_REQUIRE(p != NULL);
+    SSF_REQUIRE(lenOut != NULL);
+
+    /* EC key? */
+    if (p->ecCurveOidRaw != NULL)
+    {
+        /* Yes, the algorithm carries the named curve as its parameter */
+        n = _EncConstructed(_At(buf, pos), _Rem(buf, bufSize, pos), SSF_ASN1_TAG_SEQUENCE,
+                            _EncECAlgContent, p);
+    }
+    else
+    {
+        /* No, bare algorithm identifier */
+        n = _EncAlgId(_At(buf, pos), _Rem(buf, bufSize, pos), p->pubKeyAlgOidRaw,
+                      p->pubKeyAlgOidRawLen);
+    }
+    if (!_Add(&pos, n)) return false;
+    if (!_Add(&pos, _EncBitString(_At(buf, pos), _Rem(buf, bufSize, pos), p->pubKey, p->pubKeyLen,
+                                  0u))) return false;
+    *lenOut = pos;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Content: Extension { OID, critical BOOLEAN OPTIONAL, extnValue OCTET STRING }.                */
+/* --------------------------------------------------------------------------------------------- */
+static bool _EncExtContent(uint8_t *buf, uint32_t bufSize, const void *arg, uint32_t *lenOut)
+{
+    const _EncExt_t *e = (const _EncExt_t *)arg;
+    uint32_t pos = 0;
+
+    SSF_REQUIRE(e != NULL);
+    SSF_REQUIRE(lenOut != NULL);
+
+    if (!_Add(&pos, _EncOIDRaw(_At(buf, pos), _Rem(buf, bufSize, pos), e->oid, e->oidLen)))
+        return false;
+    if (e->critical && !_Add(&pos, _EncBool(_At(buf, pos), _Rem(buf, bufSize, pos), true)))
+        return false;
+    if (!_Add(&pos, _EncConstructed(_At(buf, pos), _Rem(buf, bufSize, pos),
+                                    SSF_ASN1_TAG_OCTET_STRING, e->valueFn, e->valueArg)))
+        return false;
+    *lenOut = pos;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns bytes for one Extension SEQUENCE, else 0 on failure.                                  */
+/* --------------------------------------------------------------------------------------------- */
+static uint32_t _EncExtension(uint8_t *buf, uint32_t bufSize, const _EncExt_t *e)
+{
+    SSF_REQUIRE(e != NULL);
+
+    return _EncConstructed(buf, bufSize, SSF_ASN1_TAG_SEQUENCE, _EncExtContent, e);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Content: BasicConstraints { cA BOOLEAN DEFAULT FALSE, pathLenConstraint INTEGER OPTIONAL }.   */
+/* --------------------------------------------------------------------------------------------- */
+static bool _EncBCSeqContent(uint8_t *buf, uint32_t bufSize, const void *arg, uint32_t *lenOut)
+{
+    const SSFX509GenParams_t *p = (const SSFX509GenParams_t *)arg;
+    uint32_t pos = 0;
+    uint8_t plVal;
+
+    SSF_REQUIRE(p != NULL);
+    SSF_REQUIRE(lenOut != NULL);
+
+    if (p->isCA && !_Add(&pos, _EncBool(_At(buf, pos), _Rem(buf, bufSize, pos), true)))
+        return false;
+
+    /* Path length constraint present? */
+    if (p->pathLenConstraint >= 0)
+    {
+        /* Yes, single octet INTEGER */
+        plVal = (uint8_t)p->pathLenConstraint;
+        if (!_Add(&pos, _EncInt(_At(buf, pos), _Rem(buf, bufSize, pos), &plVal, 1u))) return false;
+    }
+    *lenOut = pos;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Content: KeyUsage BIT STRING carrying the high octet of keyUsageBits.                         */
+/* --------------------------------------------------------------------------------------------- */
+static bool _EncKUValueContent(uint8_t *buf, uint32_t bufSize, const void *arg, uint32_t *lenOut)
+{
+    const SSFX509GenParams_t *p = (const SSFX509GenParams_t *)arg;
+    uint32_t pos = 0;
+    uint8_t kuByte;
+
+    SSF_REQUIRE(p != NULL);
+    SSF_REQUIRE(lenOut != NULL);
+
+    kuByte = (uint8_t)(p->keyUsageBits >> 8);
+    if (!_Add(&pos, _EncBitString(_At(buf, pos), _Rem(buf, bufSize, pos), &kuByte, 1u, 0u)))
+        return false;
+    *lenOut = pos;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Content: ExtKeyUsageSyntax SEQUENCE OF KeyPurposeId.                                          */
+/* --------------------------------------------------------------------------------------------- */
+static bool _EncEKUSeqContent(uint8_t *buf, uint32_t bufSize, const void *arg, uint32_t *lenOut)
+{
+    const SSFX509GenParams_t *p = (const SSFX509GenParams_t *)arg;
+    uint32_t pos = 0;
+
+    SSF_REQUIRE(p != NULL);
+    SSF_REQUIRE(lenOut != NULL);
+
+    if (p->ekuServerAuth && !_Add(&pos, _EncOIDRaw(_At(buf, pos), _Rem(buf, bufSize, pos),
+        _oidEkuServerAuth, sizeof(_oidEkuServerAuth)))) return false;
+    if (p->ekuClientAuth && !_Add(&pos, _EncOIDRaw(_At(buf, pos), _Rem(buf, bufSize, pos),
+        _oidEkuClientAuth, sizeof(_oidEkuClientAuth)))) return false;
+    *lenOut = pos;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Content: GeneralNames with [2] dNSName and [7] iPAddress entries.                             */
+/* --------------------------------------------------------------------------------------------- */
+static bool _EncSANSeqContent(uint8_t *buf, uint32_t bufSize, const void *arg, uint32_t *lenOut)
+{
+    const SSFX509GenParams_t *p = (const SSFX509GenParams_t *)arg;
+    const char **dns = p->sanDNSNames;
+    const uint8_t **ip = p->sanIPAddrs;
+    uint32_t pos = 0;
+    uint32_t dnsLen;
+
+    SSF_REQUIRE(p != NULL);
+    SSF_REQUIRE(lenOut != NULL);
+
+    while ((dns != NULL) && (*dns != NULL))
+    {
+        dnsLen = _StrLen(*dns);
+
+        /* dNSName within the DNS name length bound? */
+        if (dnsLen > _UB_DNS_NAME)
+        {
+            /* No, refuse to emit it */
+            return false;
+        }
+        if (!_Add(&pos, _EncWrap(_At(buf, pos), _Rem(buf, bufSize, pos), 0x82u,
+                                 (const uint8_t *)*dns, dnsLen))) return false;
+        dns++;
+    }
+    while ((ip != NULL) && (*ip != NULL))
+    {
+        if (!_Add(&pos, _EncWrap(_At(buf, pos), _Rem(buf, bufSize, pos), 0x87u, *ip, 4u)))
+            return false;
+        ip++;
+    }
+    *lenOut = pos;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Content: SubjectKeyIdentifier OCTET STRING.                                                   */
+/* --------------------------------------------------------------------------------------------- */
+static bool _EncSKIDValueContent(uint8_t *buf, uint32_t bufSize, const void *arg,
+                                 uint32_t *lenOut)
+{
+    const SSFX509GenParams_t *p = (const SSFX509GenParams_t *)arg;
+    uint32_t pos = 0;
+
+    SSF_REQUIRE(p != NULL);
+    SSF_REQUIRE(lenOut != NULL);
+
+    /* Key identifier within the supported bound? */
+    if (p->skidLen > _UB_KEY_IDENTIFIER)
+    {
+        /* No, refuse to emit it */
+        return false;
+    }
+    if (!_Add(&pos, _EncOctetString(_At(buf, pos), _Rem(buf, bufSize, pos), p->skid, p->skidLen)))
+        return false;
+    *lenOut = pos;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Content: AuthorityKeyIdentifier { keyIdentifier [0] IMPLICIT OCTET STRING }.                  */
+/* --------------------------------------------------------------------------------------------- */
+static bool _EncAKIDSeqContent(uint8_t *buf, uint32_t bufSize, const void *arg, uint32_t *lenOut)
+{
+    const SSFX509GenParams_t *p = (const SSFX509GenParams_t *)arg;
+    uint32_t pos = 0;
+
+    SSF_REQUIRE(p != NULL);
+    SSF_REQUIRE(lenOut != NULL);
+
+    /* Key identifier within the supported bound? */
+    if (p->akidLen > _UB_KEY_IDENTIFIER)
+    {
+        /* No, refuse to emit it */
+        return false;
+    }
+    if (!_Add(&pos, _EncWrap(_At(buf, pos), _Rem(buf, bufSize, pos), 0x80u, p->akid, p->akidLen)))
+        return false;
+    *lenOut = pos;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Content: GeneralSubtrees, each SEQUENCE { base GeneralName } for the DNS and IP lists.         */
+/* --------------------------------------------------------------------------------------------- */
+static bool _EncSubtreesContent(uint8_t *buf, uint32_t bufSize, const void *arg,
+                                uint32_t *lenOut)
+{
+    const _EncSubtrees_t *s = (const _EncSubtrees_t *)arg;
+    const char **dns = s->dns;
+    const uint8_t **ips = s->ips;
+    _EncTagged_t gn;
+    uint32_t pos = 0;
+
+    SSF_REQUIRE(s != NULL);
+    SSF_REQUIRE(lenOut != NULL);
+
+    while ((dns != NULL) && (*dns != NULL))
+    {
+        gn.tag = 0x82u;
+        gn.data = (const uint8_t *)*dns;
+        gn.len = _StrLen(*dns);
+
+        /* dNSName within the DNS name length bound? */
+        if (gn.len > _UB_DNS_NAME)
+        {
+            /* No, refuse to emit it */
+            return false;
+        }
+        if (!_Add(&pos, _EncConstructed(_At(buf, pos), _Rem(buf, bufSize, pos),
+                                        SSF_ASN1_TAG_SEQUENCE, _EncTaggedContent, &gn)))
+            return false;
+        dns++;
+    }
+    while ((ips != NULL) && (*ips != NULL))
+    {
+        gn.tag = 0x87u;
+        gn.data = *ips;
+        gn.len = 8u;
+        if (!_Add(&pos, _EncConstructed(_At(buf, pos), _Rem(buf, bufSize, pos),
+                                        SSF_ASN1_TAG_SEQUENCE, _EncTaggedContent, &gn)))
+            return false;
+        ips++;
+    }
+    *lenOut = pos;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Content: NameConstraints { permittedSubtrees [0] OPTIONAL, excludedSubtrees [1] OPTIONAL }.   */
+/* --------------------------------------------------------------------------------------------- */
+static bool _EncNCSeqContent(uint8_t *buf, uint32_t bufSize, const void *arg, uint32_t *lenOut)
+{
+    const SSFX509GenParams_t *p = (const SSFX509GenParams_t *)arg;
+    _EncSubtrees_t sub;
+    uint32_t pos = 0;
+    uint8_t idx;
+    uint16_t tag;
+
+    SSF_REQUIRE(p != NULL);
+    SSF_REQUIRE(lenOut != NULL);
+
+    for (idx = 0; idx < 2u; idx++)
+    {
+        sub.dns = (idx == 0u) ? p->ncPermittedDNS : p->ncExcludedDNS;
+        sub.ips = (idx == 0u) ? p->ncPermittedIPs : p->ncExcludedIPs;
+        tag = (idx == 0u) ? SSF_ASN1_CONTEXT_EXPLICIT(0) : SSF_ASN1_CONTEXT_EXPLICIT(1);
+
+        /* Any subtree in this list? */
+        if (((sub.dns != NULL) && (*sub.dns != NULL)) || ((sub.ips != NULL) && (*sub.ips != NULL)))
+        {
+            /* Yes, emit the [n] IMPLICIT GeneralSubtrees */
+            if (!_Add(&pos, _EncConstructed(_At(buf, pos), _Rem(buf, bufSize, pos), tag,
+                                            _EncSubtreesContent, &sub))) return false;
+        }
+    }
+    *lenOut = pos;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Content: the Extensions SEQUENCE OF Extension in BC, KU, EKU, raw, SAN, SKID, AKID, NC order. */
+/* --------------------------------------------------------------------------------------------- */
+static bool _EncExtListContent(uint8_t *buf, uint32_t bufSize, const void *arg, uint32_t *lenOut)
+{
+    const SSFX509GenParams_t *p = (const SSFX509GenParams_t *)arg;
+    _EncNested_t seq;
+    _EncBytes_t raw;
+    _EncExt_t e;
+    uint32_t pos = 0;
+
+    SSF_REQUIRE(p != NULL);
+    SSF_REQUIRE(lenOut != NULL);
+
+    seq.tag = SSF_ASN1_TAG_SEQUENCE;
+    seq.arg = p;
+
+    if (p->addBasicConstraints)
+    {
+        seq.fn = _EncBCSeqContent;
+        e.oid = _oidBasicConstraints; e.oidLen = sizeof(_oidBasicConstraints);
+        e.critical = true; e.valueFn = _EncNestedContent; e.valueArg = &seq;
+        if (!_Add(&pos, _EncExtension(_At(buf, pos), _Rem(buf, bufSize, pos), &e))) return false;
+    }
+    if (p->addKeyUsage)
+    {
+        e.oid = _oidKeyUsage; e.oidLen = sizeof(_oidKeyUsage);
+        e.critical = true; e.valueFn = _EncKUValueContent; e.valueArg = p;
+        if (!_Add(&pos, _EncExtension(_At(buf, pos), _Rem(buf, bufSize, pos), &e))) return false;
+    }
+    if (p->addExtKeyUsage)
+    {
+        seq.fn = _EncEKUSeqContent;
+        e.oid = _oidEKU; e.oidLen = sizeof(_oidEKU);
+        e.critical = false; e.valueFn = _EncNestedContent; e.valueArg = &seq;
+        if (!_Add(&pos, _EncExtension(_At(buf, pos), _Rem(buf, bufSize, pos), &e))) return false;
+    }
+    if (p->addRawExt)
+    {
+        raw.data = p->rawExtValue; raw.len = p->rawExtValueLen;
+        e.oid = p->rawExtOid; e.oidLen = p->rawExtOidLen;
+        e.critical = p->rawExtCritical; e.valueFn = _EncBytesContent; e.valueArg = &raw;
+        if (!_Add(&pos, _EncExtension(_At(buf, pos), _Rem(buf, bufSize, pos), &e))) return false;
+    }
+    if ((p->sanDNSNames != NULL) || (p->sanIPAddrs != NULL))
+    {
+        seq.fn = _EncSANSeqContent;
+        e.oid = _oidSAN; e.oidLen = sizeof(_oidSAN);
+        e.critical = false; e.valueFn = _EncNestedContent; e.valueArg = &seq;
+        if (!_Add(&pos, _EncExtension(_At(buf, pos), _Rem(buf, bufSize, pos), &e))) return false;
+    }
+    if ((p->skid != NULL) && (p->skidLen > 0u))
+    {
+        e.oid = _oidSKID; e.oidLen = sizeof(_oidSKID);
+        e.critical = false; e.valueFn = _EncSKIDValueContent; e.valueArg = p;
+        if (!_Add(&pos, _EncExtension(_At(buf, pos), _Rem(buf, bufSize, pos), &e))) return false;
+    }
+    if ((p->akid != NULL) && (p->akidLen > 0u))
+    {
+        seq.fn = _EncAKIDSeqContent;
+        e.oid = _oidAKID; e.oidLen = sizeof(_oidAKID);
+        e.critical = false; e.valueFn = _EncNestedContent; e.valueArg = &seq;
+        if (!_Add(&pos, _EncExtension(_At(buf, pos), _Rem(buf, bufSize, pos), &e))) return false;
+    }
+    if (p->addNameConstraints)
+    {
+        seq.fn = _EncNCSeqContent;
+        e.oid = _oidNameConstraints; e.oidLen = sizeof(_oidNameConstraints);
+        e.critical = true; e.valueFn = _EncNestedContent; e.valueArg = &seq;
+        if (!_Add(&pos, _EncExtension(_At(buf, pos), _Rem(buf, bufSize, pos), &e))) return false;
+    }
+    *lenOut = pos;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if params request at least one extension, else false.                           */
+/* --------------------------------------------------------------------------------------------- */
+static bool _HasExtensions(const SSFX509GenParams_t *p)
+{
+    SSF_REQUIRE(p != NULL);
+
+    return (p->version >= 2u) && (p->addBasicConstraints || p->addKeyUsage || p->addExtKeyUsage ||
+                                   p->addRawExt || (p->sanDNSNames != NULL) ||
+                                   (p->sanIPAddrs != NULL) || (p->skid != NULL) ||
+                                   (p->akid != NULL) || p->addNameConstraints);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Content: TBSCertificate fields in RFC 5280 Section 4.1 order.                                 */
+/* --------------------------------------------------------------------------------------------- */
+static bool _EncTBSContent(uint8_t *buf, uint32_t bufSize, const void *arg, uint32_t *lenOut)
+{
+    const SSFX509GenParams_t *p = (const SSFX509GenParams_t *)arg;
+    _EncNested_t exts;
+    uint32_t pos = 0;
+
+    SSF_REQUIRE(p != NULL);
+    SSF_REQUIRE(lenOut != NULL);
+
+    /* Version present (v1 omits the field)? */
+    if (p->version >= 1u)
+    {
+        /* Yes, [0] EXPLICIT INTEGER */
+        if (!_Add(&pos, _EncConstructed(_At(buf, pos), _Rem(buf, bufSize, pos),
+                                        SSF_ASN1_CONTEXT_EXPLICIT(0), _EncVersionContent, p)))
+            return false;
+    }
+    if (!_Add(&pos, _EncInt(_At(buf, pos), _Rem(buf, bufSize, pos), p->serial, p->serialLen)))
+        return false;
+    if (!_Add(&pos, _EncAlgIdWithParams(_At(buf, pos), _Rem(buf, bufSize, pos), p->sigAlgOidRaw,
+                                        p->sigAlgOidRawLen, p->sigAlgParams, p->sigAlgParamsLen)))
+        return false;
+    if (!_Add(&pos, _EncDN(_At(buf, pos), _Rem(buf, bufSize, pos), &p->issuer))) return false;
+    if (!_Add(&pos, _EncConstructed(_At(buf, pos), _Rem(buf, bufSize, pos), SSF_ASN1_TAG_SEQUENCE,
+                                    _EncValidityContent, p))) return false;
+    if (!_Add(&pos, _EncDN(_At(buf, pos), _Rem(buf, bufSize, pos), &p->subject))) return false;
+    if (!_Add(&pos, _EncConstructed(_At(buf, pos), _Rem(buf, bufSize, pos), SSF_ASN1_TAG_SEQUENCE,
+                                    _EncSPKIContent, p))) return false;
+
+    /* Extensions requested? */
+    if (_HasExtensions(p))
+    {
+        /* Yes, [3] EXPLICIT SEQUENCE OF Extension */
+        exts.tag = SSF_ASN1_TAG_SEQUENCE;
+        exts.fn = _EncExtListContent;
+        exts.arg = p;
+        if (!_Add(&pos, _EncConstructed(_At(buf, pos), _Rem(buf, bufSize, pos),
+                                        SSF_ASN1_CONTEXT_EXPLICIT(3), _EncNestedContent, &exts)))
+            return false;
+    }
+    *lenOut = pos;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns bytes written, or needed when buf is NULL, for a TBSCertificate, else 0 on failure.   */
 /* --------------------------------------------------------------------------------------------- */
 uint32_t SSFX509EncodeTBS(uint8_t *buf, uint32_t bufSize, const SSFX509GenParams_t *params)
 {
-    uint32_t innerLen = 0;
     uint32_t total;
-    uint8_t innerBuf[SSF_X509_CONFIG_MAX_CERT_SIZE];
-    uint32_t pos;
 
+    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
     SSF_REQUIRE(params != NULL);
 
-    /* Measure inner content */
+    total = _EncConstructed(NULL, 0, SSF_ASN1_TAG_SEQUENCE, _EncTBSContent, params);
 
-    /* version [0] EXPLICIT INTEGER */
-    if (params->version >= 1u)
+    /* Encodable and within the configured certificate size? */
+    if ((total == 0u) || (total > SSF_X509_CONFIG_MAX_CERT_SIZE))
     {
-        uint32_t verInt = _EncIntU64(NULL, 0, params->version);
-        innerLen += _EncWrap(NULL, 0, SSF_ASN1_CONTEXT_EXPLICIT(0), NULL, verInt);
+        /* No, both passes report failure */
+        return 0;
     }
-
-    /* serial */
-    innerLen += _EncInt(NULL, 0, params->serial, params->serialLen);
-
-    /* signature algorithm (with optional PSS parameters) */
-    innerLen += _EncAlgIdWithParams(NULL, 0, params->sigAlgOidRaw, params->sigAlgOidRawLen,
-                                     params->sigAlgParams, params->sigAlgParamsLen);
-
-    /* issuer */
-    innerLen += _EncDN(NULL, 0, &params->issuer);
-
-    /* validity: SEQUENCE { notBefore, notAfter } */
-    {
-        uint32_t nb = _EncUTCTime(NULL, 0, params->notBefore);
-        uint32_t na = _EncUTCTime(NULL, 0, params->notAfter);
-        innerLen += _EncWrap(NULL, 0, SSF_ASN1_TAG_SEQUENCE, NULL, nb + na);
-    }
-
-    /* subject */
-    innerLen += _EncDN(NULL, 0, &params->subject);
-
-    /* subjectPublicKeyInfo: SEQUENCE { algorithm, BIT STRING } */
-    {
-        uint32_t algLen;
-        if (params->ecCurveOidRaw != NULL)
-        {
-            /* EC: algorithm = SEQUENCE { OID(ecPublicKey), OID(curve) } */
-            uint32_t algInner = _EncOIDRaw(NULL, 0, params->pubKeyAlgOidRaw,
-                                                  params->pubKeyAlgOidRawLen) +
-                                _EncOIDRaw(NULL, 0, params->ecCurveOidRaw,
-                                                  params->ecCurveOidRawLen);
-            algLen = _EncWrap(NULL, 0, SSF_ASN1_TAG_SEQUENCE, NULL, algInner);
-        }
-        else
-        {
-            algLen = _EncAlgId(NULL, 0, params->pubKeyAlgOidRaw, params->pubKeyAlgOidRawLen);
-        }
-        uint32_t bsLen = _EncBitString(NULL, 0, params->pubKey, params->pubKeyLen, 0);
-        innerLen += _EncWrap(NULL, 0, SSF_ASN1_TAG_SEQUENCE, NULL, algLen + bsLen);
-    }
-
-    /* extensions [3] EXPLICIT SEQUENCE { ... } */
-    if (params->version >= 2u && (params->addBasicConstraints || params->addKeyUsage ||
-                                   params->addExtKeyUsage || params->addRawExt ||
-                                   params->sanDNSNames != NULL || params->sanIPAddrs != NULL ||
-                                   params->skid != NULL || params->akid != NULL ||
-                                   params->addNameConstraints))
-    {
-        uint32_t extsInner = 0;
-
-        if (params->addBasicConstraints)
-        {
-            /* basicConstraints: SEQUENCE { OID, critical, OCTET STRING { SEQUENCE { BOOL, INT? } } } */
-            uint32_t bcSeqContent = 0;
-            uint32_t bcSeq;
-            if (params->isCA) bcSeqContent += _EncBool(NULL, 0, true);
-            if (params->pathLenConstraint >= 0)
-            {
-                uint8_t plVal = (uint8_t)params->pathLenConstraint;
-                bcSeqContent += _EncInt(NULL, 0, &plVal, 1u);
-            }
-            bcSeq = _EncWrap(NULL, 0, SSF_ASN1_TAG_SEQUENCE, NULL, bcSeqContent);
-            {
-            uint32_t bcOctet = _EncOctetString(NULL, 0, NULL, bcSeq);
-            uint32_t extInner = _EncOIDRaw(NULL, 0, _oidBasicConstraints,
-                                                  sizeof(_oidBasicConstraints)) +
-                                _EncBool(NULL, 0, true) + bcOctet;
-            extsInner += _EncWrap(NULL, 0, SSF_ASN1_TAG_SEQUENCE, NULL, extInner);
-            }
-        }
-
-        if (params->addKeyUsage)
-        {
-            uint8_t kuByte = (uint8_t)(params->keyUsageBits >> 8);
-            uint32_t bsLen = _EncBitString(NULL, 0, &kuByte, 1, 0);
-            uint32_t kuOctet = _EncOctetString(NULL, 0, NULL, bsLen);
-            uint32_t extInner = _EncOIDRaw(NULL, 0, _oidKeyUsage, sizeof(_oidKeyUsage)) +
-                                _EncBool(NULL, 0, true) + kuOctet;
-            extsInner += _EncWrap(NULL, 0, SSF_ASN1_TAG_SEQUENCE, NULL, extInner);
-        }
-
-        if (params->addExtKeyUsage)
-        {
-            /* extKeyUsage: SEQUENCE { OID, OCTET STRING { SEQUENCE OF OID } } */
-            uint32_t ekuSeqContent = 0;
-            uint32_t ekuSeq;
-            uint32_t ekuOctet;
-            uint32_t extInner;
-            if (params->ekuServerAuth)
-                ekuSeqContent += _EncOIDRaw(NULL, 0, _oidEkuServerAuth,
-                                                   sizeof(_oidEkuServerAuth));
-            if (params->ekuClientAuth)
-                ekuSeqContent += _EncOIDRaw(NULL, 0, _oidEkuClientAuth,
-                                                   sizeof(_oidEkuClientAuth));
-            ekuSeq = _EncWrap(NULL, 0, SSF_ASN1_TAG_SEQUENCE, NULL, ekuSeqContent);
-            ekuOctet = _EncOctetString(NULL, 0, NULL, ekuSeq);
-            extInner = _EncOIDRaw(NULL, 0, _oidEKU, sizeof(_oidEKU)) + ekuOctet;
-            extsInner += _EncWrap(NULL, 0, SSF_ASN1_TAG_SEQUENCE, NULL, extInner);
-        }
-
-        if (params->addRawExt)
-        {
-            uint32_t rawOctet = _EncOctetString(NULL, 0, NULL, params->rawExtValueLen);
-            uint32_t extInner = _EncOIDRaw(NULL, 0, params->rawExtOid,
-                                                  params->rawExtOidLen);
-            if (params->rawExtCritical) extInner += _EncBool(NULL, 0, true);
-            extInner += rawOctet;
-            extsInner += _EncWrap(NULL, 0, SSF_ASN1_TAG_SEQUENCE, NULL, extInner);
-        }
-
-        if (params->sanDNSNames != NULL || params->sanIPAddrs != NULL)
-        {
-            uint32_t sanSeqContent = 0;
-            /* Count DNS names */
-            if (params->sanDNSNames != NULL)
-            {
-                const char **dns = params->sanDNSNames;
-                while (*dns != NULL)
-                {
-                    uint32_t dnsLen = 0;
-                    while ((*dns)[dnsLen] != '\0') dnsLen++;
-                    /* [2] IMPLICIT: _EncTagLen measures tag + multi-byte length correctly */
-                    sanSeqContent += _EncTagLen(NULL, 0, 0x82u, dnsLen) + dnsLen;
-                    dns++;
-                }
-            }
-            /* Count IP addresses */
-            if (params->sanIPAddrs != NULL)
-            {
-                const uint8_t **ip = params->sanIPAddrs;
-                while (*ip != NULL)
-                {
-                    sanSeqContent += _EncTagLen(NULL, 0, 0x87u, 4u) + 4u;
-                    ip++;
-                }
-            }
-            {
-            uint32_t sanSeq = _EncWrap(NULL, 0, SSF_ASN1_TAG_SEQUENCE, NULL, sanSeqContent);
-            uint32_t sanOctet = _EncOctetString(NULL, 0, NULL, sanSeq);
-            uint32_t extInner = _EncOIDRaw(NULL, 0, _oidSAN, sizeof(_oidSAN)) + sanOctet;
-            extsInner += _EncWrap(NULL, 0, SSF_ASN1_TAG_SEQUENCE, NULL, extInner);
-            }
-        }
-
-        if (params->skid != NULL && params->skidLen > 0)
-        {
-            uint32_t skidInnerOctet = _EncOctetString(NULL, 0, NULL, params->skidLen);
-            uint32_t skidOctet = _EncOctetString(NULL, 0, NULL, skidInnerOctet);
-            uint32_t extInner = _EncOIDRaw(NULL, 0, _oidSKID, sizeof(_oidSKID)) + skidOctet;
-            extsInner += _EncWrap(NULL, 0, SSF_ASN1_TAG_SEQUENCE, NULL, extInner);
-        }
-
-        if (params->akid != NULL && params->akidLen > 0)
-        {
-            /* [0] IMPLICIT: tag(0x80) + multi-byte length + akidLen. _EncTagLen measures */
-            /* the tag + length header correctly for payload sizes beyond 127 bytes.             */
-            uint32_t akidTagged = _EncTagLen(NULL, 0, 0x80u, params->akidLen) +
-                                   params->akidLen;
-            uint32_t akidSeq = _EncWrap(NULL, 0, SSF_ASN1_TAG_SEQUENCE, NULL, akidTagged);
-            uint32_t akidOctet = _EncOctetString(NULL, 0, NULL, akidSeq);
-            uint32_t extInner = _EncOIDRaw(NULL, 0, _oidAKID, sizeof(_oidAKID)) + akidOctet;
-            extsInner += _EncWrap(NULL, 0, SSF_ASN1_TAG_SEQUENCE, NULL, extInner);
-        }
-
-        if (params->addNameConstraints)
-        {
-            /* Name Constraints (RFC 5280 §4.2.1.10) — always emitted as critical.               */
-            uint32_t ncContent = 0;
-            uint8_t pIdx;
-            for (pIdx = 0; pIdx < 2u; pIdx++)
-            {
-                const char **dns = (pIdx == 0u) ? params->ncPermittedDNS : params->ncExcludedDNS;
-                const uint8_t **ips = (pIdx == 0u) ? params->ncPermittedIPs : params->ncExcludedIPs;
-                uint32_t subtreesLen = 0;
-                bool hasAny = false;
-                if (dns != NULL)
-                {
-                    while (*dns != NULL)
-                    {
-                        uint32_t dLen = 0;
-                        while ((*dns)[dLen] != '\0') dLen++;
-                        /* GeneralSubtree SEQUENCE { [2] 0x82 DNS } */
-                        {
-                        uint32_t gnLen = _EncTagLen(NULL, 0, 0x82u, dLen) + dLen;
-                        subtreesLen += _EncWrap(NULL, 0, SSF_ASN1_TAG_SEQUENCE, NULL, gnLen);
-                        }
-                        hasAny = true;
-                        dns++;
-                    }
-                }
-                if (ips != NULL)
-                {
-                    while (*ips != NULL)
-                    {
-                        /* GeneralSubtree SEQUENCE { [7] 0x87 IP(4)+Mask(4) = 8 bytes } */
-                        uint32_t gnLen = _EncTagLen(NULL, 0, 0x87u, 8u) + 8u;
-                        subtreesLen += _EncWrap(NULL, 0, SSF_ASN1_TAG_SEQUENCE, NULL, gnLen);
-                        hasAny = true;
-                        ips++;
-                    }
-                }
-                if (hasAny)
-                {
-                    /* [0] or [1] IMPLICIT GeneralSubtrees — replaces the SEQUENCE tag. */
-                    uint8_t ctxTag = (pIdx == 0u) ?
-                        (uint8_t)(SSF_ASN1_CONTEXT_EXPLICIT(0)) :
-                        (uint8_t)(SSF_ASN1_CONTEXT_EXPLICIT(1));
-                    ncContent += _EncWrap(NULL, 0, ctxTag, NULL, subtreesLen);
-                }
-            }
-            {
-            uint32_t ncSeq = _EncWrap(NULL, 0, SSF_ASN1_TAG_SEQUENCE, NULL, ncContent);
-            uint32_t ncOctet = _EncOctetString(NULL, 0, NULL, ncSeq);
-            uint32_t extInner = _EncOIDRaw(NULL, 0, _oidNameConstraints,
-                                                  sizeof(_oidNameConstraints)) +
-                                _EncBool(NULL, 0, true) + ncOctet;
-            extsInner += _EncWrap(NULL, 0, SSF_ASN1_TAG_SEQUENCE, NULL, extInner);
-            }
-        }
-
-        {
-        uint32_t extsSeq = _EncWrap(NULL, 0, SSF_ASN1_TAG_SEQUENCE, NULL, extsInner);
-        innerLen += _EncWrap(NULL, 0, SSF_ASN1_CONTEXT_EXPLICIT(3), NULL, extsSeq);
-        }
-    }
-
-    total = _EncWrap(NULL, 0, SSF_ASN1_TAG_SEQUENCE, NULL, innerLen);
     if (buf == NULL) return total;
-    if (bufSize < total || total > SSF_X509_CONFIG_MAX_CERT_SIZE) return 0;
-
-    /* Second pass: actually encode into innerBuf, then wrap */
-    pos = 0;
-
-    /* version */
-    if (params->version >= 1u)
-    {
-        uint8_t verBuf[8];
-        uint32_t verLen = _EncIntU64(verBuf, sizeof(verBuf), params->version);
-        pos += _EncWrap(&innerBuf[pos], sizeof(innerBuf) - pos,
-                              SSF_ASN1_CONTEXT_EXPLICIT(0), verBuf, verLen);
-    }
-
-    /* serial */
-    pos += _EncInt(&innerBuf[pos], sizeof(innerBuf) - pos, params->serial, params->serialLen);
-
-    /* signature algorithm (with optional PSS parameters) */
-    pos += _EncAlgIdWithParams(&innerBuf[pos], sizeof(innerBuf) - pos,
-                                params->sigAlgOidRaw, params->sigAlgOidRawLen,
-                                params->sigAlgParams, params->sigAlgParamsLen);
-
-    /* issuer */
-    pos += _EncDN(&innerBuf[pos], sizeof(innerBuf) - pos, &params->issuer);
-
-    /* validity */
-    {
-        uint8_t valBuf[64];
-        uint32_t valPos = 0;
-        valPos += _EncUTCTime(&valBuf[valPos], sizeof(valBuf) - valPos, params->notBefore);
-        valPos += _EncUTCTime(&valBuf[valPos], sizeof(valBuf) - valPos, params->notAfter);
-        pos += _EncWrap(&innerBuf[pos], sizeof(innerBuf) - pos,
-                              SSF_ASN1_TAG_SEQUENCE, valBuf, valPos);
-    }
-
-    /* subject */
-    pos += _EncDN(&innerBuf[pos], sizeof(innerBuf) - pos, &params->subject);
-
-    /* subjectPublicKeyInfo */
-    {
-        uint8_t spkiBuf[512];
-        uint32_t spkiPos = 0;
-
-        if (params->ecCurveOidRaw != NULL)
-        {
-            uint8_t algBuf[32];
-            uint32_t algPos = 0;
-            algPos += _EncOIDRaw(&algBuf[algPos], sizeof(algBuf) - algPos,
-                                       params->pubKeyAlgOidRaw, params->pubKeyAlgOidRawLen);
-            algPos += _EncOIDRaw(&algBuf[algPos], sizeof(algBuf) - algPos,
-                                       params->ecCurveOidRaw, params->ecCurveOidRawLen);
-            spkiPos += _EncWrap(&spkiBuf[spkiPos], sizeof(spkiBuf) - spkiPos,
-                                      SSF_ASN1_TAG_SEQUENCE, algBuf, algPos);
-        }
-        else
-        {
-            spkiPos += _EncAlgId(&spkiBuf[spkiPos], sizeof(spkiBuf) - spkiPos,
-                                 params->pubKeyAlgOidRaw, params->pubKeyAlgOidRawLen);
-        }
-        spkiPos += _EncBitString(&spkiBuf[spkiPos], sizeof(spkiBuf) - spkiPos,
-                                       params->pubKey, params->pubKeyLen, 0);
-        pos += _EncWrap(&innerBuf[pos], sizeof(innerBuf) - pos,
-                              SSF_ASN1_TAG_SEQUENCE, spkiBuf, spkiPos);
-    }
-
-    /* extensions */
-    if (params->version >= 2u && (params->addBasicConstraints || params->addKeyUsage ||
-                                   params->addExtKeyUsage || params->addRawExt ||
-                                   params->sanDNSNames != NULL || params->sanIPAddrs != NULL ||
-                                   params->skid != NULL || params->akid != NULL ||
-                                   params->addNameConstraints))
-    {
-        /* Extensions aggregate buffer. Sized for worst-case SAN extension (~3.1 KB for 12 x   */
-        /* 253-byte DNS names) plus fixed-size extensions (BC, KU, EKU, SKID, AKID, rawExt,    */
-        /* nameConstraints).                                                                     */
-        uint8_t extsBuf[SSF_X509_CONFIG_MAX_CERT_SIZE];
-        uint32_t extsPos = 0;
-
-        if (params->addBasicConstraints)
-        {
-            uint8_t extBuf[64];
-            uint32_t extPos = 0;
-            uint8_t bcSeqBuf[8];
-            uint32_t bcSeqPos = 0;
-            uint8_t bcOctetBuf[16];
-            uint32_t bcOctetLen;
-
-            if (params->isCA) bcSeqPos += _EncBool(&bcSeqBuf[bcSeqPos],
-                                                          sizeof(bcSeqBuf) - bcSeqPos, true);
-            if (params->pathLenConstraint >= 0)
-            {
-                uint8_t plBuf[4];
-                uint8_t plVal = (uint8_t)params->pathLenConstraint;
-                uint32_t plLen = _EncInt(&bcSeqBuf[bcSeqPos],
-                                               sizeof(bcSeqBuf) - bcSeqPos, &plVal, 1u);
-                bcSeqPos += plLen;
-                (void)plBuf;
-            }
-            {
-                uint8_t bcSeqWrapped[16];
-                uint32_t bcSeqWrappedLen = _EncWrap(bcSeqWrapped, sizeof(bcSeqWrapped),
-                                                           SSF_ASN1_TAG_SEQUENCE, bcSeqBuf, bcSeqPos);
-                bcOctetLen = _EncOctetString(bcOctetBuf, sizeof(bcOctetBuf),
-                                                    bcSeqWrapped, bcSeqWrappedLen);
-            }
-            extPos += _EncOIDRaw(&extBuf[extPos], sizeof(extBuf) - extPos,
-                                       _oidBasicConstraints, sizeof(_oidBasicConstraints));
-            extPos += _EncBool(&extBuf[extPos], sizeof(extBuf) - extPos, true);
-            memcpy(&extBuf[extPos], bcOctetBuf, bcOctetLen);
-            extPos += bcOctetLen;
-            extsPos += _EncWrap(&extsBuf[extsPos], sizeof(extsBuf) - extsPos,
-                                      SSF_ASN1_TAG_SEQUENCE, extBuf, extPos);
-        }
-
-        if (params->addKeyUsage)
-        {
-            uint8_t extBuf[32];
-            uint32_t extPos = 0;
-            uint8_t kuByte = (uint8_t)(params->keyUsageBits >> 8);
-            uint8_t bsBuf[8];
-            uint32_t bsLen = _EncBitString(bsBuf, sizeof(bsBuf), &kuByte, 1, 0);
-            uint8_t octetBuf[16];
-            uint32_t octetLen = _EncOctetString(octetBuf, sizeof(octetBuf), bsBuf, bsLen);
-
-            extPos += _EncOIDRaw(&extBuf[extPos], sizeof(extBuf) - extPos,
-                                       _oidKeyUsage, sizeof(_oidKeyUsage));
-            extPos += _EncBool(&extBuf[extPos], sizeof(extBuf) - extPos, true);
-            memcpy(&extBuf[extPos], octetBuf, octetLen);
-            extPos += octetLen;
-            extsPos += _EncWrap(&extsBuf[extsPos], sizeof(extsBuf) - extsPos,
-                                      SSF_ASN1_TAG_SEQUENCE, extBuf, extPos);
-        }
-
-        if (params->addExtKeyUsage)
-        {
-            uint8_t extBuf[48];
-            uint32_t extPos = 0;
-            uint8_t ekuSeqBuf[32];
-            uint32_t ekuSeqPos = 0;
-            uint8_t ekuSeqWrapped[40];
-            uint32_t ekuSeqWrappedLen;
-            uint8_t octetBuf[48];
-            uint32_t octetLen;
-
-            if (params->ekuServerAuth)
-            {
-                ekuSeqPos += _EncOIDRaw(&ekuSeqBuf[ekuSeqPos],
-                    sizeof(ekuSeqBuf) - ekuSeqPos,
-                    _oidEkuServerAuth, sizeof(_oidEkuServerAuth));
-            }
-            if (params->ekuClientAuth)
-            {
-                ekuSeqPos += _EncOIDRaw(&ekuSeqBuf[ekuSeqPos],
-                    sizeof(ekuSeqBuf) - ekuSeqPos,
-                    _oidEkuClientAuth, sizeof(_oidEkuClientAuth));
-            }
-
-            ekuSeqWrappedLen = _EncWrap(ekuSeqWrapped, sizeof(ekuSeqWrapped),
-                                               SSF_ASN1_TAG_SEQUENCE, ekuSeqBuf, ekuSeqPos);
-            octetLen = _EncOctetString(octetBuf, sizeof(octetBuf),
-                                              ekuSeqWrapped, ekuSeqWrappedLen);
-            extPos += _EncOIDRaw(&extBuf[extPos], sizeof(extBuf) - extPos,
-                                       _oidEKU, sizeof(_oidEKU));
-            memcpy(&extBuf[extPos], octetBuf, octetLen);
-            extPos += octetLen;
-            extsPos += _EncWrap(&extsBuf[extsPos], sizeof(extsBuf) - extsPos,
-                                      SSF_ASN1_TAG_SEQUENCE, extBuf, extPos);
-        }
-
-        if (params->addRawExt)
-        {
-            uint8_t extBuf[64];
-            uint32_t extPos = 0;
-            uint8_t octetBuf[48];
-            uint32_t octetLen;
-
-            extPos += _EncOIDRaw(&extBuf[extPos], sizeof(extBuf) - extPos,
-                                       params->rawExtOid, params->rawExtOidLen);
-            if (params->rawExtCritical)
-            {
-                extPos += _EncBool(&extBuf[extPos], sizeof(extBuf) - extPos, true);
-            }
-            octetLen = _EncOctetString(octetBuf, sizeof(octetBuf),
-                                              params->rawExtValue, params->rawExtValueLen);
-            memcpy(&extBuf[extPos], octetBuf, octetLen);
-            extPos += octetLen;
-            extsPos += _EncWrap(&extsBuf[extsPos], sizeof(extsBuf) - extsPos,
-                                      SSF_ASN1_TAG_SEQUENCE, extBuf, extPos);
-        }
-
-        if (params->sanDNSNames != NULL || params->sanIPAddrs != NULL)
-        {
-            /* Buffers sized for SSF_X509_CONFIG_MAX_SAN_ENTRIES × 260 bytes each (DNS name      */
-            /* max 253 + 7 bytes DER tag/len overhead) + wrap headroom. DER length encoding is   */
-            /* multi-byte for lengths > 127 and must use _EncTagLen.                        */
-            #define _UT_SAN_CONTENT_MAX  ((SSF_X509_CONFIG_MAX_SAN_ENTRIES) * 260u)
-            uint8_t sanSeqBuf[_UT_SAN_CONTENT_MAX];
-            uint32_t sanSeqPos = 0;
-            uint8_t sanSeqWrapped[_UT_SAN_CONTENT_MAX + 8u];
-            uint32_t sanSeqWrappedLen;
-            uint8_t octetBuf[_UT_SAN_CONTENT_MAX + 16u];
-            uint32_t octetLen;
-            uint8_t extBuf[_UT_SAN_CONTENT_MAX + 32u];
-            uint32_t extPos = 0;
-
-            /* Encode DNS names as [2] IMPLICIT IA5String (0x82 primitive context tag) */
-            if (params->sanDNSNames != NULL)
-            {
-                const char **dns = params->sanDNSNames;
-                while (*dns != NULL)
-                {
-                    uint32_t dnsLen = 0;
-                    while ((*dns)[dnsLen] != '\0') dnsLen++;
-                    sanSeqPos += _EncTagLen(&sanSeqBuf[sanSeqPos],
-                                                   sizeof(sanSeqBuf) - sanSeqPos,
-                                                   0x82u, dnsLen);
-                    if (sanSeqPos + dnsLen > sizeof(sanSeqBuf)) return 0;
-                    memcpy(&sanSeqBuf[sanSeqPos], *dns, dnsLen);
-                    sanSeqPos += dnsLen;
-                    dns++;
-                }
-            }
-            /* Encode IP addresses as [7] IMPLICIT OCTET STRING */
-            if (params->sanIPAddrs != NULL)
-            {
-                const uint8_t **ip = params->sanIPAddrs;
-                while (*ip != NULL)
-                {
-                    sanSeqPos += _EncTagLen(&sanSeqBuf[sanSeqPos],
-                                                   sizeof(sanSeqBuf) - sanSeqPos,
-                                                   0x87u, 4u);
-                    if (sanSeqPos + 4u > sizeof(sanSeqBuf)) return 0;
-                    memcpy(&sanSeqBuf[sanSeqPos], *ip, 4u);
-                    sanSeqPos += 4u;
-                    ip++;
-                }
-            }
-
-            /* Wrap in SEQUENCE, then OCTET STRING */
-            sanSeqWrappedLen = _EncWrap(sanSeqWrapped, sizeof(sanSeqWrapped),
-                                               SSF_ASN1_TAG_SEQUENCE, sanSeqBuf, sanSeqPos);
-            octetLen = _EncOctetString(octetBuf, sizeof(octetBuf),
-                                              sanSeqWrapped, sanSeqWrappedLen);
-            extPos += _EncOIDRaw(&extBuf[extPos], sizeof(extBuf) - extPos,
-                                       _oidSAN, sizeof(_oidSAN));
-            if (extPos + octetLen > sizeof(extBuf)) return 0;
-            memcpy(&extBuf[extPos], octetBuf, octetLen);
-            extPos += octetLen;
-            extsPos += _EncWrap(&extsBuf[extsPos], sizeof(extsBuf) - extsPos,
-                                      SSF_ASN1_TAG_SEQUENCE, extBuf, extPos);
-            #undef _UT_SAN_CONTENT_MAX
-        }
-
-        if (params->skid != NULL && params->skidLen > 0)
-        {
-            /* Sized for keyIdentifiers up to 64 bytes (SHA-512 per RFC 7093). Each OCTET STRING */
-            /* wrap adds 2-4 bytes of DER overhead. The original `innerOctetBuf[32]` silently    */
-            /* truncated keyIdentifiers of 31+ bytes because _EncOctetString returned 0    */
-            /* when over-capacity, emitting a cert with an empty SKID value.                     */
-            #define _UT_KID_MAX 64u
-            uint8_t extBuf[_UT_KID_MAX + 32u];
-            uint32_t extPos = 0;
-            uint8_t innerOctetBuf[_UT_KID_MAX + 8u];
-            uint32_t innerOctetLen;
-            uint8_t octetBuf[_UT_KID_MAX + 16u];
-            uint32_t octetLen;
-
-            if (params->skidLen > _UT_KID_MAX) return 0;
-
-            innerOctetLen = _EncOctetString(innerOctetBuf, sizeof(innerOctetBuf),
-                                                   params->skid, params->skidLen);
-            octetLen = _EncOctetString(octetBuf, sizeof(octetBuf),
-                                              innerOctetBuf, innerOctetLen);
-            extPos += _EncOIDRaw(&extBuf[extPos], sizeof(extBuf) - extPos,
-                                       _oidSKID, sizeof(_oidSKID));
-            if (extPos + octetLen > sizeof(extBuf)) return 0;
-            memcpy(&extBuf[extPos], octetBuf, octetLen);
-            extPos += octetLen;
-            #undef _UT_KID_MAX
-
-            extsPos += _EncWrap(&extsBuf[extsPos], sizeof(extsBuf) - extsPos,
-                                      SSF_ASN1_TAG_SEQUENCE, extBuf, extPos);
-        }
-
-        if (params->akid != NULL && params->akidLen > 0)
-        {
-            /* Buffers sized for keyIdentifiers up to 64 bytes (RFC 7093 SHA-256/SHA-384/SHA-512 */
-            /* are 32/48/64 bytes respectively). Each wrapping layer adds ≤4 bytes of DER        */
-            /* tag+length overhead. _EncTagLen emits the proper multi-byte length form for */
-            /* payload sizes beyond 127 bytes — the old single-byte `(uint8_t)akidLen` produced  */
-            /* invalid DER and an unbounded memcpy that could overflow the 32-byte scratch buf.   */
-            #define _UT_KID_MAX 64u
-            uint8_t akidSeqBuf[_UT_KID_MAX + 8u];
-            uint32_t akidSeqPos = 0;
-            uint8_t akidSeqWrapped[_UT_KID_MAX + 16u];
-            uint32_t akidSeqWrappedLen;
-            uint8_t octetBuf[_UT_KID_MAX + 20u];
-            uint32_t octetLen;
-            uint8_t extBuf[_UT_KID_MAX + 32u];
-            uint32_t extPos = 0;
-
-            if (params->akidLen > _UT_KID_MAX) return 0;
-
-            /* [0] IMPLICIT: tag 0x80, multi-byte length (_EncTagLen), content */
-            akidSeqPos += _EncTagLen(&akidSeqBuf[akidSeqPos],
-                                            sizeof(akidSeqBuf) - akidSeqPos,
-                                            0x80u, params->akidLen);
-            if (akidSeqPos + params->akidLen > sizeof(akidSeqBuf)) return 0;
-            memcpy(&akidSeqBuf[akidSeqPos], params->akid, params->akidLen);
-            akidSeqPos += params->akidLen;
-
-            akidSeqWrappedLen = _EncWrap(akidSeqWrapped, sizeof(akidSeqWrapped),
-                                                SSF_ASN1_TAG_SEQUENCE,
-                                                akidSeqBuf, akidSeqPos);
-            octetLen = _EncOctetString(octetBuf, sizeof(octetBuf),
-                                              akidSeqWrapped, akidSeqWrappedLen);
-            extPos += _EncOIDRaw(&extBuf[extPos], sizeof(extBuf) - extPos,
-                                       _oidAKID, sizeof(_oidAKID));
-            if (extPos + octetLen > sizeof(extBuf)) return 0;
-            memcpy(&extBuf[extPos], octetBuf, octetLen);
-            extPos += octetLen;
-            #undef _UT_KID_MAX
-
-            extsPos += _EncWrap(&extsBuf[extsPos], sizeof(extsBuf) - extsPos,
-                                      SSF_ASN1_TAG_SEQUENCE, extBuf, extPos);
-        }
-
-        if (params->addNameConstraints)
-        {
-            /* Sized for up to SSF_X509_CONFIG_MAX_NAME_CONSTRAINTS × (~260) per subtree × 2    */
-            /* subtrees + headers. Using a generous 512 × 8 = 4 KB pair of scratch buffers.     */
-            #define _UT_NC_SUBTREE_MAX  (SSF_X509_CONFIG_MAX_NAME_CONSTRAINTS * 260u + 16u)
-            uint8_t subtreesBuf[_UT_NC_SUBTREE_MAX];
-            uint8_t ncContentBuf[(_UT_NC_SUBTREE_MAX + 8u) * 2u + 8u];
-            uint32_t ncContentPos = 0;
-            uint8_t pIdx;
-
-            for (pIdx = 0; pIdx < 2u; pIdx++)
-            {
-                const char **dns = (pIdx == 0u) ? params->ncPermittedDNS : params->ncExcludedDNS;
-                const uint8_t **ips = (pIdx == 0u) ? params->ncPermittedIPs : params->ncExcludedIPs;
-                uint32_t subtreesPos = 0;
-                bool hasAny = false;
-
-                /* Build GeneralSubtree SEQUENCE entries inside subtreesBuf. */
-                if (dns != NULL)
-                {
-                    while (*dns != NULL)
-                    {
-                        uint32_t dLen = 0;
-                        uint8_t gnBuf[260];
-                        uint32_t gnPos = 0;
-                        while ((*dns)[dLen] != '\0') dLen++;
-                        gnPos += _EncTagLen(&gnBuf[gnPos], sizeof(gnBuf) - gnPos,
-                                                   0x82u, dLen);
-                        if (gnPos + dLen > sizeof(gnBuf)) return 0;
-                        memcpy(&gnBuf[gnPos], *dns, dLen);
-                        gnPos += dLen;
-                        subtreesPos += _EncWrap(&subtreesBuf[subtreesPos],
-                                                      sizeof(subtreesBuf) - subtreesPos,
-                                                      SSF_ASN1_TAG_SEQUENCE, gnBuf, gnPos);
-                        hasAny = true;
-                        dns++;
-                    }
-                }
-                if (ips != NULL)
-                {
-                    while (*ips != NULL)
-                    {
-                        uint8_t gnBuf[16];
-                        uint32_t gnPos = 0;
-                        gnPos += _EncTagLen(&gnBuf[gnPos], sizeof(gnBuf) - gnPos,
-                                                   0x87u, 8u);
-                        memcpy(&gnBuf[gnPos], *ips, 8u);
-                        gnPos += 8u;
-                        subtreesPos += _EncWrap(&subtreesBuf[subtreesPos],
-                                                      sizeof(subtreesBuf) - subtreesPos,
-                                                      SSF_ASN1_TAG_SEQUENCE, gnBuf, gnPos);
-                        hasAny = true;
-                        ips++;
-                    }
-                }
-                if (hasAny)
-                {
-                    uint8_t ctxTag = (pIdx == 0u) ?
-                        (uint8_t)(SSF_ASN1_CONTEXT_EXPLICIT(0)) :
-                        (uint8_t)(SSF_ASN1_CONTEXT_EXPLICIT(1));
-                    ncContentPos += _EncWrap(&ncContentBuf[ncContentPos],
-                                                    sizeof(ncContentBuf) - ncContentPos,
-                                                    ctxTag, subtreesBuf, subtreesPos);
-                }
-            }
-
-            {
-                uint8_t ncSeqBuf[sizeof(ncContentBuf) + 8u];
-                uint32_t ncSeqLen = _EncWrap(ncSeqBuf, sizeof(ncSeqBuf),
-                                                    SSF_ASN1_TAG_SEQUENCE,
-                                                    ncContentBuf, ncContentPos);
-                uint8_t octetBuf[sizeof(ncSeqBuf) + 8u];
-                uint32_t octetLen = _EncOctetString(octetBuf, sizeof(octetBuf),
-                                                           ncSeqBuf, ncSeqLen);
-                uint8_t extBuf[sizeof(octetBuf) + 16u];
-                uint32_t extPos = 0;
-                extPos += _EncOIDRaw(&extBuf[extPos], sizeof(extBuf) - extPos,
-                                           _oidNameConstraints, sizeof(_oidNameConstraints));
-                extPos += _EncBool(&extBuf[extPos], sizeof(extBuf) - extPos, true);
-                if (extPos + octetLen > sizeof(extBuf)) return 0;
-                memcpy(&extBuf[extPos], octetBuf, octetLen);
-                extPos += octetLen;
-                extsPos += _EncWrap(&extsBuf[extsPos], sizeof(extsBuf) - extsPos,
-                                          SSF_ASN1_TAG_SEQUENCE, extBuf, extPos);
-            }
-            #undef _UT_NC_SUBTREE_MAX
-        }
-
-        {
-            /* extsSeqBuf wraps the entire extensions block. Sized to match extsBuf above plus */
-            /* SEQUENCE header. */
-            uint8_t extsSeqBuf[SSF_X509_CONFIG_MAX_CERT_SIZE + 8u];
-            uint32_t extsSeqLen = _EncWrap(extsSeqBuf, sizeof(extsSeqBuf),
-                                                  SSF_ASN1_TAG_SEQUENCE, extsBuf, extsPos);
-            pos += _EncWrap(&innerBuf[pos], sizeof(innerBuf) - pos,
-                                  SSF_ASN1_CONTEXT_EXPLICIT(3), extsSeqBuf, extsSeqLen);
-        }
-    }
-
-    return _EncWrap(buf, bufSize, SSF_ASN1_TAG_SEQUENCE, innerBuf, pos);
+    return _EncConstructed(buf, bufSize, SSF_ASN1_TAG_SEQUENCE, _EncTBSContent, params);
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Encodes a complete Certificate: SEQUENCE { TBS, signatureAlgorithm, signatureValue }.          */
+/* Content: Certificate { tbsCertificate, signatureAlgorithm, signatureValue BIT STRING }.       */
+/* --------------------------------------------------------------------------------------------- */
+static bool _EncCertContent(uint8_t *buf, uint32_t bufSize, const void *arg, uint32_t *lenOut)
+{
+    const _EncCert_t *c = (const _EncCert_t *)arg;
+    uint32_t pos = 0;
+
+    SSF_REQUIRE(c != NULL);
+    SSF_REQUIRE(lenOut != NULL);
+
+    if (!_Add(&pos, SSFX509EncodeTBS(_At(buf, pos), _Rem(buf, bufSize, pos), c->params)))
+        return false;
+    if (!_Add(&pos, _EncAlgIdWithParams(_At(buf, pos), _Rem(buf, bufSize, pos),
+                                        c->params->sigAlgOidRaw, c->params->sigAlgOidRawLen,
+                                        c->params->sigAlgParams, c->params->sigAlgParamsLen)))
+        return false;
+    if (!_Add(&pos, _EncBitString(_At(buf, pos), _Rem(buf, bufSize, pos), c->sig, c->sigLen, 0u)))
+        return false;
+    *lenOut = pos;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns bytes written, or needed when buf is NULL, for a Certificate, else 0 on failure.      */
 /* --------------------------------------------------------------------------------------------- */
 uint32_t SSFX509EncodeCert(uint8_t *buf, uint32_t bufSize, const SSFX509GenParams_t *params,
                            const uint8_t *signature, uint32_t signatureLen)
 {
-    uint32_t tbsLen;
-    uint32_t algLen;
-    uint32_t sigLen;
-    uint32_t innerLen;
+    _EncCert_t c;
     uint32_t total;
 
+    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
     SSF_REQUIRE(params != NULL);
     SSF_REQUIRE(signature != NULL);
 
-    tbsLen = SSFX509EncodeTBS(NULL, 0, params);
-    algLen = _EncAlgIdWithParams(NULL, 0, params->sigAlgOidRaw, params->sigAlgOidRawLen,
-                                  params->sigAlgParams, params->sigAlgParamsLen);
-    sigLen = _EncBitString(NULL, 0, signature, signatureLen, 0);
-    innerLen = tbsLen + algLen + sigLen;
-    total = _EncWrap(NULL, 0, SSF_ASN1_TAG_SEQUENCE, NULL, innerLen);
+    c.params = params;
+    c.sig = signature;
+    c.sigLen = signatureLen;
+    total = _EncConstructed(NULL, 0, SSF_ASN1_TAG_SEQUENCE, _EncCertContent, &c);
 
-    if (buf == NULL) return total;
-    if (bufSize < total) return 0;
-
+    /* Encodable and within the configured certificate size? */
+    if ((total == 0u) || (total > SSF_X509_CONFIG_MAX_CERT_SIZE))
     {
-        uint8_t innerBuf[SSF_X509_CONFIG_MAX_CERT_SIZE];
-        uint32_t pos = 0;
-
-        pos += SSFX509EncodeTBS(&innerBuf[pos], sizeof(innerBuf) - pos, params);
-        pos += _EncAlgIdWithParams(&innerBuf[pos], sizeof(innerBuf) - pos,
-                                    params->sigAlgOidRaw, params->sigAlgOidRawLen,
-                                    params->sigAlgParams, params->sigAlgParamsLen);
-        pos += _EncBitString(&innerBuf[pos], sizeof(innerBuf) - pos,
-                                   signature, signatureLen, 0);
-
-        return _EncWrap(buf, bufSize, SSF_ASN1_TAG_SEQUENCE, innerBuf, pos);
+        /* No, both passes report failure */
+        return 0;
     }
+    if (buf == NULL) return total;
+    return _EncConstructed(buf, bufSize, SSF_ASN1_TAG_SEQUENCE, _EncCertContent, &c);
 }
 
 /* ========================================================================================== */

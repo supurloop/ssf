@@ -223,6 +223,54 @@ static bool _GenSignedLeafCert(const char *leafCN, const char *issuerCN,
     return (*certDerLen > 0u);
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Fills p with a minimal v3 ECDSA P-256 self-issued parameter set for generation tests.         */
+/* --------------------------------------------------------------------------------------------- */
+static void _utGenBaseParams(SSFX509GenParams_t *p, const uint8_t *serial, const uint8_t *pubKey,
+                             uint32_t pubKeyLen)
+{
+    memset(p, 0, sizeof(*p));
+    p->version = 2u;
+    p->serial = serial;
+    p->serialLen = 1u;
+    p->sigAlgOidRaw = _utSigAlgOid;
+    p->sigAlgOidRawLen = sizeof(_utSigAlgOid);
+    p->issuer.cn = "ut";
+    p->subject.cn = "ut";
+    p->notBefore = 1700000000ull;
+    p->notAfter = 2000000000ull;
+    p->pubKeyAlgOidRaw = _utPubKeyAlgOid;
+    p->pubKeyAlgOidRawLen = sizeof(_utPubKeyAlgOid);
+    p->ecCurveOidRaw = _utCurveOid;
+    p->ecCurveOidRawLen = sizeof(_utCurveOid);
+    p->pubKey = pubKey;
+    p->pubKeyLen = pubKeyLen;
+    p->pathLenConstraint = -1;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Asserts EncodeTBS and EncodeCert write exactly what they measure and the output re-parses.    */
+/* --------------------------------------------------------------------------------------------- */
+static void _utGenCheckConsistent(const SSFX509GenParams_t *p, const uint8_t *sig, uint32_t sigLen,
+                                  uint8_t *out, uint32_t outSize, SSFX509Cert_t *parsed)
+{
+    uint32_t measured;
+    uint32_t written;
+
+    measured = SSFX509EncodeTBS(NULL, 0, p);
+    written = SSFX509EncodeTBS(out, outSize, p);
+    SSF_ASSERT(measured != 0u);
+    SSF_ASSERT(written == measured);
+
+    measured = SSFX509EncodeCert(NULL, 0, p, sig, sigLen);
+    written = SSFX509EncodeCert(out, outSize, p, sig, sigLen);
+    SSF_ASSERT(measured != 0u);
+    SSF_ASSERT(written == measured);
+    SSF_ASSERT(SSFX509Parse(out, written, parsed) == true);
+    SSF_ASSERT(parsed->pubKeyLen == p->pubKeyLen);
+    SSF_ASSERT(parsed->signatureLen == sigLen);
+}
+
 void SSFX509UnitTest(void)
 {
     SSFX509Cert_t cert;
@@ -3946,6 +3994,140 @@ void SSFX509UnitTest(void)
         /* from cert.ecCurveOidRaw (P-384) rather than from the sigAlg OID (which would         */
         /* otherwise hardcode P-256 and incorrectly reject the cert).                            */
         SSF_ASSERT(SSFX509VerifyCertSignature(&rootCert, &rootCert) == true);
+    }
+
+    /* ---- Generation: measured size equals written size and the output re-parses ---- */
+    {
+        static const uint8_t rsaOid[] = { 0x2Au, 0x86u, 0x48u, 0x86u, 0xF7u, 0x0Du, 0x01u, 0x01u, 0x01u };
+        static const uint8_t rsaSha256Oid[] = { 0x2Au, 0x86u, 0x48u, 0x86u, 0xF7u, 0x0Du, 0x01u, 0x01u, 0x0Bu };
+        static const uint8_t rawOid[] = { 0x55u, 0x1Du, 0x20u };
+        static const uint8_t rawVal[] = { 0x30u, 0x00u };
+        static const uint8_t ncIp[] = { 10u, 0u, 0u, 0u, 255u, 0u, 0u, 0u };
+        static const uint8_t *ncIps[] = { ncIp, NULL };
+        static const char *ncDns[] = { "example.com", NULL };
+        static uint8_t bigKey[560];
+        static uint8_t kid[64];
+        static uint8_t fakeSig[2000];
+        static uint8_t out[SSF_X509_CONFIG_MAX_CERT_SIZE + 2048u];
+        static char cn64[65];
+        static char cn65[66];
+        static char st128[129];
+        static char sanBuf[SSF_X509_CONFIG_MAX_SAN_ENTRIES][251];
+        static char san254[255];
+        static const char *sanPtrs[SSF_X509_CONFIG_MAX_SAN_ENTRIES + 1u];
+        static const char *sanOne[2];
+        uint8_t serial[] = { 0x07u };
+        SSFX509GenParams_t p;
+        SSFX509Cert_t parsed;
+        uint32_t i;
+        uint32_t n;
+
+        memset(bigKey, 0x5Au, sizeof(bigKey));
+        memset(kid, 0xA5u, sizeof(kid));
+        memset(fakeSig, 0x11u, sizeof(fakeSig));
+        memset(cn64, 'c', 64u);
+        cn64[64] = '\0';
+        memset(cn65, 'c', 65u);
+        cn65[65] = '\0';
+        memset(st128, 's', 128u);
+        st128[128] = '\0';
+        memset(san254, 'x', 254u);
+        san254[254] = '\0';
+        sanOne[0] = san254;
+        sanOne[1] = NULL;
+        for (i = 0; i < SSF_X509_CONFIG_MAX_SAN_ENTRIES; i++)
+        {
+            memset(sanBuf[i], (int)('a' + (char)i), 250u);
+            sanBuf[i][250] = '\0';
+            sanPtrs[i] = sanBuf[i];
+        }
+        sanPtrs[SSF_X509_CONFIG_MAX_SAN_ENTRIES] = NULL;
+
+        /* Baseline P-256 */
+        _utGenBaseParams(&p, serial, bigKey, 65u);
+        _utGenCheckConsistent(&p, fakeSig, 64u, out, sizeof(out), &parsed);
+
+        /* RSA-4096 sized SubjectPublicKeyInfo and signature */
+        _utGenBaseParams(&p, serial, bigKey, sizeof(bigKey));
+        p.pubKeyAlgOidRaw = rsaOid;
+        p.pubKeyAlgOidRawLen = sizeof(rsaOid);
+        p.ecCurveOidRaw = NULL;
+        p.ecCurveOidRawLen = 0u;
+        p.sigAlgOidRaw = rsaSha256Oid;
+        p.sigAlgOidRawLen = sizeof(rsaSha256Oid);
+        _utGenCheckConsistent(&p, fakeSig, 512u, out, sizeof(out), &parsed);
+        SSF_ASSERT(SSFX509IsRSA(&parsed) == true);
+
+        /* Every DN attribute at its RFC 5280 Appendix A upper bound */
+        _utGenBaseParams(&p, serial, bigKey, 65u);
+        p.subject.cn = cn64;
+        p.subject.o = cn64;
+        p.subject.ou = cn64;
+        p.subject.c = "US";
+        p.subject.st = st128;
+        p.subject.l = st128;
+        p.issuer = p.subject;
+        _utGenCheckConsistent(&p, fakeSig, 64u, out, sizeof(out), &parsed);
+        SSF_ASSERT(parsed.subject.cnLen == 64u && parsed.subject.stLen == 128u);
+        SSF_ASSERT(parsed.issuer.lLen == 128u && parsed.issuer.cLen == 2u);
+
+        /* Every extension at once, maximum SAN count, 64-byte key identifiers */
+        _utGenBaseParams(&p, serial, bigKey, 65u);
+        p.addBasicConstraints = true;
+        p.isCA = true;
+        p.pathLenConstraint = 3;
+        p.addKeyUsage = true;
+        p.keyUsageBits = SSF_X509_KU_KEY_CERT_SIGN | SSF_X509_KU_CRL_SIGN;
+        p.addExtKeyUsage = true;
+        p.ekuServerAuth = true;
+        p.ekuClientAuth = true;
+        p.sanDNSNames = sanPtrs;
+        p.skid = kid;
+        p.skidLen = sizeof(kid);
+        p.akid = kid;
+        p.akidLen = sizeof(kid);
+        p.addRawExt = true;
+        p.rawExtOid = rawOid;
+        p.rawExtOidLen = sizeof(rawOid);
+        p.rawExtValue = rawVal;
+        p.rawExtValueLen = sizeof(rawVal);
+        p.addNameConstraints = true;
+        p.ncPermittedDNS = ncDns;
+        p.ncPermittedIPs = ncIps;
+        p.ncExcludedDNS = ncDns;
+        _utGenCheckConsistent(&p, fakeSig, 64u, out, sizeof(out), &parsed);
+        SSF_ASSERT(parsed.sanLen == SSF_X509_CONFIG_MAX_SAN_ENTRIES);
+        SSF_ASSERT(parsed.skidLen == 64u && parsed.akidLen == 64u);
+        SSF_ASSERT(parsed.permittedLen == 2u && parsed.excludedLen == 1u);
+        SSF_ASSERT(parsed.pathLenConstraint == 3 && parsed.isCA == true);
+        SSF_ASSERT(parsed.ekuServerAuth == true && parsed.ekuClientAuth == true);
+
+        /* DN attribute over its upper bound: both passes report failure */
+        _utGenBaseParams(&p, serial, bigKey, 65u);
+        p.subject.cn = cn65;
+        SSF_ASSERT(SSFX509EncodeTBS(NULL, 0, &p) == 0u);
+        SSF_ASSERT(SSFX509EncodeTBS(out, sizeof(out), &p) == 0u);
+
+        /* dNSName over 253 octets: both passes report failure */
+        _utGenBaseParams(&p, serial, bigKey, 65u);
+        p.sanDNSNames = sanOne;
+        SSF_ASSERT(SSFX509EncodeTBS(NULL, 0, &p) == 0u);
+        SSF_ASSERT(SSFX509EncodeTBS(out, sizeof(out), &p) == 0u);
+
+        /* Certificate larger than SSF_X509_CONFIG_MAX_CERT_SIZE: both passes report failure */
+        _utGenBaseParams(&p, serial, bigKey, 65u);
+        p.sanDNSNames = sanPtrs;
+        n = SSFX509EncodeTBS(NULL, 0, &p);
+        SSF_ASSERT((n != 0u) && ((n + sizeof(fakeSig)) > SSF_X509_CONFIG_MAX_CERT_SIZE));
+        SSF_ASSERT(SSFX509EncodeCert(NULL, 0, &p, fakeSig, sizeof(fakeSig)) == 0u);
+        SSF_ASSERT(SSFX509EncodeCert(out, sizeof(out), &p, fakeSig, sizeof(fakeSig)) == 0u);
+
+        /* Output buffer one byte short: failure and nothing written past the buffer */
+        _utGenBaseParams(&p, serial, bigKey, 65u);
+        n = SSFX509EncodeCert(NULL, 0, &p, fakeSig, 64u);
+        memset(out, 0xEEu, sizeof(out));
+        SSF_ASSERT(SSFX509EncodeCert(out, n - 1u, &p, fakeSig, 64u) == 0u);
+        SSF_ASSERT((out[n - 1u] == 0xEEu) && (out[n] == 0xEEu));
     }
 }
 #endif /* SSF_CONFIG_X509_UNIT_TEST */

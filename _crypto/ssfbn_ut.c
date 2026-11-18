@@ -1266,9 +1266,10 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
 
     /* === ModMulCT: cross-check against ModMul + OpenSSL ============================== */
     /* The CT primitive must produce identical results to the data-dependent SSFBNModMul   */
-    /* across random inputs and edge cases. The strongest invariant: ModMulCT(a, b, m) ==  */
-    /* ModMul(a, b, m) for any (a, b, m). If the fixed-iteration mask logic is wrong, the   */
-    /* random cross-check or the (m-1)*(m-1) edge case will fail.                            */
+    /* across random inputs and edge cases. The invariant: ModMulCT(a, b, m) == ModMul(a,  */
+    /* b, m) whenever a < m or b < m (its precondition, AUDIT BN-1; the inputs here are    */
+    /* reduced). If the fixed-iteration mask logic is wrong, the random cross-check or the  */
+    /* (m-1)*(m-1) edge case will fail.                                                     */
     {
         SSFBN_DEFINE(rCT, SSF_BN_MAX_LIMBS);
         SSFBN_DEFINE(rGen, SSF_BN_MAX_LIMBS);
@@ -2250,6 +2251,46 @@ void SSFBNUnitTest(void)
         SSFBNSetUint32(&m, 7u, 4);
         SSFBNModMul(&r, &a, &b, &m);
         SSF_ASSERT(r.limbs[0] == 2u);
+    }
+
+    /* ---- AUDIT BN-1: SSFBNModMulCT requires at least one operand < m ---- */
+    /* The fixed-iteration reduction is only correct when a * b < m * 2^(32 * len + 1). With   */
+    /* both operands unreduced and a modulus whose top limb is zero it used to return a      */
+    /* truncated, non-reduced value (0x44b7baeace9af989 here instead of 0x5e8879ed).         */
+    {
+        static const uint8_t aBytes[8] = { 0x7Fu, 0x62u, 0x00u, 0xECu, 0x78u, 0x86u, 0x9Bu, 0x5Au };
+        static const uint8_t bBytes[8] = { 0xC0u, 0xFCu, 0x92u, 0x52u, 0xD0u, 0xDBu, 0x7Fu, 0xEDu };
+        static const uint8_t mBytes[8] = { 0x00u, 0x00u, 0x00u, 0x00u, 0x6Cu, 0xEDu, 0x81u, 0x37u };
+        static const uint8_t aRedBytes[8] = { 0x00u, 0x00u, 0x00u, 0x00u,
+                                              0x0Fu, 0x56u, 0xCBu, 0x30u };
+        static const uint8_t bRedBytes[8] = { 0x00u, 0x00u, 0x00u, 0x00u,
+                                              0x3Eu, 0xE8u, 0x33u, 0xC9u };
+        SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(b, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(m, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(aRed, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(bRed, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(r, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(rRef, SSF_BN_MAX_LIMBS);
+
+        SSF_ASSERT(SSFBNFromBytes(&a, aBytes, sizeof(aBytes), 2u) == true);
+        SSF_ASSERT(SSFBNFromBytes(&b, bBytes, sizeof(bBytes), 2u) == true);
+        SSF_ASSERT(SSFBNFromBytes(&m, mBytes, sizeof(mBytes), 2u) == true);
+        SSF_ASSERT(SSFBNFromBytes(&aRed, aRedBytes, sizeof(aRedBytes), 2u) == true);
+        SSF_ASSERT(SSFBNFromBytes(&bRed, bRedBytes, sizeof(bRedBytes), 2u) == true);
+
+        /* Both operands >= m: precondition violated, must trap. */
+        SSF_ASSERT_TEST(SSFBNModMulCT(&r, &a, &b, &m));
+
+        /* a >= m, b < m: allowed; must equal SSFBNModMul and the reference 0x5e8879ed. */
+        SSFBNModMulCT(&r, &a, &bRed, &m);
+        SSFBNModMul(&rRef, &a, &bRed, &m);
+        SSF_ASSERT(SSFBNCmp(&r, &rRef) == 0);
+        SSF_ASSERT((r.limbs[0] == 0x5E8879EDu) && (r.limbs[1] == 0u));
+
+        /* a < m, b >= m: allowed; same product mod m. */
+        SSFBNModMulCT(&r, &aRed, &b, &m);
+        SSF_ASSERT((r.limbs[0] == 0x5E8879EDu) && (r.limbs[1] == 0u));
     }
 
     /* ---- ModExp: 3^10 mod 7 = 59049 mod 7 = 4 ---- */

@@ -306,7 +306,7 @@ E-4  Low  OPEN (doc only; (c) FIXED 2026-11-18 with X-2)
 ssfbn
 ----------------------------------------------------------------------------------------------
 
-BN-1  Medium  OPEN  [verified]
+BN-1  Medium  FIXED (2026-11-18)  [verified]
   Location:  ssfbn.c:1303-1362 (SSFBNModMulCT); ssfbn.md:605; ssfbn_ut.c:1268-1270
   Problem:   The fixed-iteration shift-and-subtract starts with shifted = m << (len*32) and does
              one conditional subtract per iteration, so it is only correct when
@@ -981,3 +981,21 @@ CHANGE LOG
               Unit test flags and the opt headers were restored after the runs. Not changed:
               SSFEd25519KeyGen/PubKeyFromSeed perform the same secret scalar multiply but have
               never scrubbed (pre-existing; noted for Jim). E-4(a)/(b) remain OPEN.
+  2026-11-18  BN-1 FIXED via option 1 (state and enforce the precondition). SSFBNModMulCT now
+              requires at least one of a, b to be < m: both SSFBNCmp results are computed and
+              combined bitwise into one SSF_REQUIRE, so no new data-dependent branch is added.
+              ssfbn.md now states the precondition (and the a * b < m * 2^(32*len+1) reason)
+              instead of "mathematically equivalent to SSFBNModMul"; the ssfbn_ut.c OpenSSL
+              cross-check comment no longer claims equality "for any (a, b, m)". Callers checked:
+              ssfecdsa.c:672/:674 (r, d, kInv, tmp all < n) and ssfrsa.c:513/:535/:550 (rE < n,
+              h < p, mB/rInv < n) all satisfy it. Test block "AUDIT BN-1" in ssfbn_ut.c: the
+              audit's 2-limb case with both operands >= m must trap; a >= m with b < m and a < m
+              with b >= m must give 0x5e8879ed (and match SSFBNModMul). RED: no trap
+              (ssfbn_ut.c:2282). GREEN with ssfbn, ssfecdsa, ssfrsa (BN/ECDSA/RSA unit tests
+              enabled for the run), ssfcms, ssfx509, ssfbase64url, ssfmatch. A single-process
+              harness doing P-256 ECDSA keygen/sign/verify and RSA-2048 keygen/sign/verify hit
+              SSFBNModMulCT 5 times under gdb with all signatures verifying, confirming the new
+              check runs on the live signing paths. Noted, not changed: the OpenSSL-only
+              cross-check in ssfbn_ut.c calls SSFBNModMulCT(rand1, rand2, P-256) with operands
+              reduced mod the local random m, not mod p256 (would trap only if both exceed
+              p256, ~2^-64 for the fixed seed); could not be built here.

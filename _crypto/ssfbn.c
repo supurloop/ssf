@@ -1312,6 +1312,8 @@ void SSFBNModMulCT(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t
     uint32_t k;
     SSFBNLimb_t mask;
     SSFBNLimb_t borrow;
+    uint8_t aLtM;
+    uint8_t bLtM;
 
     SSF_REQUIRE(r != NULL);
     SSF_REQUIRE(r->limbs != NULL);
@@ -1327,6 +1329,13 @@ void SSFBNModMulCT(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t
     SSF_REQUIRE(SSFBNIsZero(m) == false);
     SSF_REQUIRE((uint16_t)(2u * m->len) <= SSF_BN_MAX_LIMBS);
     SSF_REQUIRE(m->len <= r->cap);
+
+    /* The fixed-iteration reduction is exact only when a * b < m * 2^(32 * len + 1), which    */
+    /* holds whenever at least one operand is < m (AUDIT BN-1). Both compares always run and  */
+    /* are combined bitwise so the check adds no data-dependent branch beyond the REQUIRE.    */
+    aLtM = (uint8_t)(SSFBNCmp(a, m) < 0);
+    bLtM = (uint8_t)(SSFBNCmp(b, m) < 0);
+    SSF_REQUIRE((aLtM | bLtM) != 0u);
 
     /* prod = a * b. SSFBNMul has no zero-limb shortcut so it is CT over (a, b). */
     SSFBNMul(&prod, a, b);

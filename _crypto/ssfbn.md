@@ -236,7 +236,7 @@ The `ssfrsa` and `ssfbn` modules sanity-check against this macro at compile time
 | | [`void SSFBNModAdd(r, a, b, m)`](#modaddsub) | `r = (a + b) mod m`; requires `a, b < m` |
 | | [`void SSFBNModSub(r, a, b, m)`](#modaddsub) | `r = (a − b) mod m`; requires `a, b < m` |
 | [e.g.](#ex-modmul) | [`void SSFBNModMul(r, a, b, m)`](#ssfbnmodmul) | `r = (a × b) mod m`; general-purpose |
-| | [`void SSFBNModMulCT(r, a, b, m)`](#ssfbnmodmulct) | `r = (a × b) mod m`, constant-time; for secret `a` or `b` |
+| | [`void SSFBNModMulCT(r, a, b, m)`](#ssfbnmodmulct) | `r = (a × b) mod m`, constant-time; for secret `a` or `b`; requires `a < m` or `b < m` |
 | | [`void SSFBNModSquare(r, a, m)`](#ssfbnmodsquare) | `r = (a²) mod m`; `Square` then `Mod` (variable-time) |
 | | [`void SSFBNModMulNIST(r, a, b, m)`](#modmulnist) | `r = (a × b) mod m` using NIST fast reduction for P-256 / P-384 |
 | | [`bool SSFBNModInv(r, a, m)`](#modinv) | `r = a⁻¹ mod m` via Fermat's little theorem (prime `m`) |
@@ -602,9 +602,11 @@ modulus (the RSA / DH case) — go through the Montgomery path
 ```c
 void SSFBNModMulCT(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *m);
 ```
-`r = (a × b) mod m`. Mathematically equivalent to [`SSFBNModMul`](#ssfbnmodmul) but the
-iteration count and per-iteration work do not depend on the values of `a`, `b`, or
-intermediate state — only on the limb count of `m`. **Constant-time** — use this when `a`
+`r = (a × b) mod m`. Same result as [`SSFBNModMul`](#ssfbnmodmul) **provided at least one of
+`a` or `b` is `< m`** (enforced by `SSF_REQUIRE`; the fixed-iteration reduction is only exact
+when `a × b < m × 2^(32·len+1)`, which that guarantees). The iteration count and per-iteration
+work do not depend on the values of `a`, `b`, or intermediate state — only on the limb count
+of `m`. **Constant-time** — use this when `a`
 or `b` are secret (e.g., ECDSA signing's `k⁻¹` and `d`-derived operands modulo the curve
 order). Cost: ~2–3× slower than `SSFBNModMul` for typical inputs because it always does
 worst-case work. Algorithm: schoolbook multiply (already CT) followed by fixed-iteration

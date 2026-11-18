@@ -167,7 +167,7 @@ static void _VerifyX25519AgainstOpenSSL(uint16_t iters)
 /* the bytes the polluter just wrote at the same stack offset, making the test always read 0    */
 /* sentinels regardless of whether the scrub helper ran.                                          */
 /* --------------------------------------------------------------------------------------------- */
-#define _SSFX25519_UT_STACK_PROBE_SIZE (4096u)
+#define _SSFX25519_UT_STACK_PROBE_SIZE (SSF_X25519_CONFIG_STACK_SCRUB_SIZE)
 #define _SSFX25519_UT_SENTINEL         (0xABu)
 
 #if defined(_MSC_VER)
@@ -210,6 +210,66 @@ static size_t _SSFX25519UTCountSentinel(uint8_t pattern)
         if (buf[i] == pattern) hits++;
     }
     return hits;
+}
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
+
+#if defined(_MSC_VER)
+#pragma runtime_checks("scu", restore)
+#endif
+
+/* --------------------------------------------------------------------------------------------- */
+/* Stack high-water-mark probe (AUDIT X-2). The polluter fills a large deep region with the  */
+/* sentinel; after the operation under test runs at the same call depth, the scanner finds the   */
+/* deepest byte no longer equal to the sentinel. Bytes from buf[0] (deepest address) up to that  */
+/* index were never touched, so (size - index) approximates the operation's peak stack use.      */
+/* --------------------------------------------------------------------------------------------- */
+#define _SSFX25519_UT_HWM_PROBE_SIZE (8192u)
+
+#if defined(_MSC_VER)
+#pragma runtime_checks("scu", off)
+#endif
+
+SSF_NOINLINE
+static void _SSFX25519UTPolluteDeep(uint8_t pattern)
+{
+    volatile uint8_t buf[_SSFX25519_UT_HWM_PROBE_SIZE];
+    size_t i;
+    for (i = 0; i < sizeof(buf); i++) buf[i] = pattern;
+    SSF_OPTIMIZER_BARRIER(buf);
+}
+
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wuninitialized"
+#if !defined(__clang__)
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#endif
+#endif
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable: 6001)
+#endif
+SSF_NOINLINE
+static size_t _SSFX25519UTStackUsed(uint8_t pattern)
+{
+    volatile uint8_t buf[_SSFX25519_UT_HWM_PROBE_SIZE];
+    size_t i;
+    for (i = 0; i < sizeof(buf); i++)
+    {
+        /* Is this the deepest byte the operation overwrote? */
+        if (buf[i] != pattern)
+        {
+            /* Yes, everything from here up to the frame top was used. */
+            return sizeof(buf) - i;
+        }
+        /* No, still untouched sentinel; keep scanning upward. */
+    }
+    return 0u;
 }
 #if defined(_MSC_VER)
 #pragma warning(pop)
@@ -453,6 +513,7 @@ void SSFX25519UnitTest(void)
         SSF_ASSERT(memcmp(pub1, pub2, 32) == 0);
     }
 
+#if SSF_X25519_CONFIG_ENABLE_STACK_SCRUB == 1
     /* ---- X3 regression: ComputeSecret performs a deep-stack scrub before returning.    */
     /* The Montgomery ladder leaves ~14 _fe_t locals (~448 bytes) in its freed frame, all  */
     /* derived from the secret scalar. Sentinel-residue test sandwiches a ComputeSecret    */
@@ -485,6 +546,26 @@ void SSFX25519UnitTest(void)
 #else
         SSF_ASSERT(hitsAfter < 64u);
 #endif
+    }
+#endif /* SSF_X25519_CONFIG_ENABLE_STACK_SCRUB */
+
+    /* ---- AUDIT X-2: peak stack of a public call must stay near the configured scrub size.  */
+    /* The scrub used to be a fixed 4 KiB frame, so ComputeSecret peaked at ~4 KiB although  */
+    /* the ladder chain needs ~1 KiB. Bound: the default 1536-byte scrub (or the ~1.2 KiB    */
+    /* ladder chain when the scrub is disabled) plus caller frame and compiler slack.        */
+    {
+        uint8_t priv[32], pub[32], peerPriv[32], peerPub[32], secret[32];
+        size_t used;
+
+        SSF_ASSERT(SSFX25519KeyGen(priv, pub) == true);
+        SSF_ASSERT(SSFX25519KeyGen(peerPriv, peerPub) == true);
+
+        _SSFX25519UTPolluteDeep(_SSFX25519_UT_SENTINEL);
+        SSF_ASSERT(SSFX25519ComputeSecret(priv, peerPub, secret) == true);
+        used = _SSFX25519UTStackUsed(_SSFX25519_UT_SENTINEL);
+        SSF_UT_PRINTF("--- ssfx25519 ComputeSecret peak stack ~%u bytes ---\n", (unsigned)used);
+        SSF_ASSERT(used > 0u);
+        SSF_ASSERT(used < 2560u);
     }
 
     /* ---- AUDIT X-1: _fe_mul dropped the carry-out of its second 38-fold. The first ladder    */

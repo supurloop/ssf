@@ -333,6 +333,7 @@
     <ClInclude Include="_opt\ssfdtime_opt.h" />
     <ClInclude Include="_opt\ssfec_opt.h" />
     <ClInclude Include="_opt\ssfecdsa_opt.h" />
+    <ClInclude Include="_opt\ssfed25519_opt.h" />
     <ClInclude Include="_opt\ssfgobj_opt.h" />
     <ClInclude Include="_opt\ssfheap_opt.h" />
     <ClInclude Include="_opt\ssfini_opt.h" />

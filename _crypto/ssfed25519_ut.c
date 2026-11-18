@@ -70,7 +70,7 @@
 /* the bytes the polluter just wrote at the same stack offset, making the test always read 0    */
 /* sentinels regardless of whether the scrub helper ran.                                          */
 /* --------------------------------------------------------------------------------------------- */
-#define _SSFED25519_UT_STACK_PROBE_SIZE (4096u)
+#define _SSFED25519_UT_STACK_PROBE_SIZE (SSF_ED25519_CONFIG_STACK_SCRUB_SIZE)
 #define _SSFED25519_UT_SENTINEL         (0xABu)
 
 #if defined(_MSC_VER)
@@ -113,6 +113,66 @@ static size_t _SSFEd25519UTCountSentinel(uint8_t pattern)
         if (buf[i] == pattern) hits++;
     }
     return hits;
+}
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
+
+#if defined(_MSC_VER)
+#pragma runtime_checks("scu", restore)
+#endif
+
+/* --------------------------------------------------------------------------------------------- */
+/* Stack high-water-mark probe (AUDIT X-2/E-4). The polluter fills a large deep region with the  */
+/* sentinel; after the operation under test runs at the same call depth, the scanner finds the   */
+/* deepest byte no longer equal to the sentinel. Bytes from buf[0] (deepest address) up to that  */
+/* index were never touched, so (size - index) approximates the operation's peak stack use.      */
+/* --------------------------------------------------------------------------------------------- */
+#define _SSFED25519_UT_HWM_PROBE_SIZE (8192u)
+
+#if defined(_MSC_VER)
+#pragma runtime_checks("scu", off)
+#endif
+
+SSF_NOINLINE
+static void _SSFEd25519UTPolluteDeep(uint8_t pattern)
+{
+    volatile uint8_t buf[_SSFED25519_UT_HWM_PROBE_SIZE];
+    size_t i;
+    for (i = 0; i < sizeof(buf); i++) buf[i] = pattern;
+    SSF_OPTIMIZER_BARRIER(buf);
+}
+
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wuninitialized"
+#if !defined(__clang__)
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#endif
+#endif
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable: 6001)
+#endif
+SSF_NOINLINE
+static size_t _SSFEd25519UTStackUsed(uint8_t pattern)
+{
+    volatile uint8_t buf[_SSFED25519_UT_HWM_PROBE_SIZE];
+    size_t i;
+    for (i = 0; i < sizeof(buf); i++)
+    {
+        /* Is this the deepest byte the operation overwrote? */
+        if (buf[i] != pattern)
+        {
+            /* Yes, everything from here up to the frame top was used. */
+            return sizeof(buf) - i;
+        }
+        /* No, still untouched sentinel; keep scanning upward. */
+    }
+    return 0u;
 }
 #if defined(_MSC_VER)
 #pragma warning(pop)
@@ -686,6 +746,7 @@ void SSFEd25519UnitTest(void)
         }
     }
 
+#if SSF_ED25519_CONFIG_ENABLE_STACK_SCRUB == 1
     /* ---- B1 regression: Sign performs a deep-stack scrub before returning. */
     /* Sentinel is written into a deep frame; Sign runs at the same call depth and its scrub   */
     /* helper must zero a generous deeper region. The post-Sign scanner allocates a fresh frame */
@@ -713,6 +774,25 @@ void SSFEd25519UnitTest(void)
 #else
         SSF_ASSERT(hitsAfter < 64u);
 #endif
+    }
+#endif /* SSF_ED25519_CONFIG_ENABLE_STACK_SCRUB */
+
+    /* ---- AUDIT X-2/E-4: Sign's peak stack. The scrub used to be a fixed 4 KiB frame under  */
+    /* Sign's ~1 KiB frame (~5 KiB peak). Now the verify-after-sign chain (~1.5-2 KiB below  */
+    /* Sign's frame) dominates, so the peak is ~2-3 KiB whether or not the scrub is enabled. */
+    {
+        uint8_t seed[32], pubKey[32], sig[64];
+        const uint8_t msg[] = "stack high-water probe";
+        size_t used;
+
+        SSF_ASSERT(SSFEd25519KeyGen(seed, pubKey) == true);
+
+        _SSFEd25519UTPolluteDeep(_SSFED25519_UT_SENTINEL);
+        SSF_ASSERT(SSFEd25519Sign(seed, pubKey, msg, sizeof(msg) - 1u, sig) == true);
+        used = _SSFEd25519UTStackUsed(_SSFED25519_UT_SENTINEL);
+        SSF_UT_PRINTF("--- ssfed25519 Sign peak stack ~%u bytes ---\n", (unsigned)used);
+        SSF_ASSERT(used > 0u);
+        SSF_ASSERT(used < 4096u);
     }
 
     /* ---- A3 regression: low-order pubkey signature attack must be rejected. */

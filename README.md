@@ -231,8 +231,8 @@ Cryptographic primitives for hashing, encryption, and random number generation.
 | [Big Number](_crypto/ssfbn.md) | Multi-precision big-number arithmetic; foundation for RSA, ECC, and DH | ~10 KB | — | ~12 KB³⁸ | — | Yes |
 | [Elliptic Curve](_crypto/ssfec.md) | NIST P-256 / P-384 point arithmetic (constant-time scalar mul, SEC 1 codec) | ~10 KB³⁹ | — | ~7 KB⁴⁰ | — | Yes |
 | [ECDSA / ECDH](_crypto/ssfecdsa.md) | ECDSA signatures (RFC 6979 deterministic) + ECDH over NIST P-256 / P-384 | ~3.5 KB⁴¹ | — | ~16.5 KB⁴² | — | Yes |
-| [X25519](_crypto/ssfx25519.md) | X25519 key agreement over Curve25519 (RFC 7748) — self-contained, constant-time | ~4 KB⁴³ | — | ~700 B⁴⁴ | — | Yes |
-| [Ed25519](_crypto/ssfed25519.md) | Ed25519 signatures (RFC 8032 pure mode) — deterministic; uses SHA-512 from ssfsha2 | ~12 KB⁴⁵ | — | ~1.5 KB⁴⁶ | — | Yes |
+| [X25519](_crypto/ssfx25519.md) | X25519 key agreement over Curve25519 (RFC 7748) — self-contained, constant-time | ~4 KB⁴³ | — | ~1.6 KB⁴⁴ | — | Yes |
+| [Ed25519](_crypto/ssfed25519.md) | Ed25519 signatures (RFC 8032 pure mode) — deterministic; uses SHA-512 from ssfsha2 | ~12 KB⁴⁵ | — | ~3.3 KB⁴⁶ | — | Yes |
 | [RSA](_crypto/ssfrsa.md) | RSA-2048/3072/4096 signatures (PKCS#1 v1.5 and PSS) + key generation; PKCS#1 DER key format | ~15 KB⁴⁷ | — | ~12 KB⁴⁸ | — | Yes |
 | [CMS](_crypto/ssfcms.md) | RFC 5652 CMS SignedData verifier (zero-copy parse; detached file signatures verified by digest; ECDSA / RSA / Ed25519; RFC 6211 algorithm protection) | ~6 KB | ~8 B⁶¹ | ~18 KB⁶⁰ | — | Yes⁶¹ |
 | [TLS 1.3](_crypto/ssftls.md) | TLS 1.3 core building blocks (key schedule, transcript hash, record layer); not a full TLS stack | ~2.5 KB⁴⁹ | — | ~1 KB⁵⁰ | — | Yes |
@@ -276,11 +276,11 @@ Cryptographic primitives for hashing, encryption, and random number generation.
 
 ⁴³ Self-contained — no `ssfbn` or `ssfec` dependency. Own GF(2²⁵⁵−19) arithmetic over 8 × 32-bit limbs (`_fe_t` = 32 B), a constant-time Montgomery ladder, one 32-byte field-prime constant, no lookup tables. Flash is largely independent of other config knobs.
 
-⁴⁴ Peak is in `_x25519_scalar_mul`: 15 `_fe_t` field-element locals (32 B each) plus a 32 B clamped-scalar copy — ~500 B on the ladder frame — plus the nested `_fe_inv` / `_fe_mul` call chain adds ~200 B. Fixed at ~700 B regardless of `SSF_BN_CONFIG_MAX_BITS` (this module does not use `ssfbn`).
+⁴⁴ Peak is set by the post-call stack scrub: `SSF_X25519_CONFIG_STACK_SCRUB_SIZE` (default 1536 B) plus a small entry frame, measured ~1.6 KB (gcc x86-64, `-O0`..`-O3`). With `SSF_X25519_CONFIG_ENABLE_STACK_SCRUB` set to 0 the peak is the ladder chain itself (`_x25519_scalar_mul`'s field-element locals plus the nested `_fe_inv` / `_fe_mul` frames), measured ~1.0-1.3 KB. Fixed regardless of `SSF_BN_CONFIG_MAX_BITS` (this module does not use `ssfbn`).
 
 ⁴⁵ Requires SHA-512 from `ssfsha2`; otherwise self-contained (own GF(2²⁵⁵−19) field arithmetic + twisted-Edwards point arithmetic + scalar-field reduction mod `L`, no `ssfbn` dependency). No precomputed base-point table — Sign and Verify compute scalar multiplication from the base point by double-and-add on demand. Flash is independent of `SSF_BN_CONFIG_MAX_BITS`.
 
-⁴⁶ Peak is along the Sign path: the outer frame carries `h[64] + r_hash[64] + hram[64] + a[32] + nonce[32]` ≈ 256 B plus a `_ge_t R` (~128 B) and a full `SSFSHA2_64Context_t` (~280 B), then nests into `SSFSHA512Update` whose block processing peaks at ~800 B (the SHA-512 message schedule — footnote ¹³). Verify has a similar peak. Fixed regardless of `SSF_BN_CONFIG_MAX_BITS`.
+⁴⁶ Peak is along the Sign path: Sign's own ~1 KB frame (`h`, `r_hash`, `hram`, `a`, `nonce`, a `_ge_t R` and a full `SSFSHA2_64Context_t`) plus the verify-after-sign chain, whose SHA-512 block processing is the deepest callee (footnote ¹³); measured ~2.4-3.3 KB (gcc x86-64, `-O0`..`-O3`). The optional stack scrub (`SSF_ED25519_CONFIG_STACK_SCRUB_SIZE`, default 1536 B) runs within that envelope, so disabling it does not lower the peak. Verify alone is lower. Fixed regardless of `SSF_BN_CONFIG_MAX_BITS`.
 
 ⁴⁷ Requires BN, SHA-2, ASN.1, and PRNG modules; figure is for the RSA module itself — key parsing, PKCS#1 v1.5 + PSS padding, MGF1, CRT dispatch, prime generation, and Miller-Rabin. Disabling `SSF_RSA_CONFIG_ENABLE_KEYGEN` removes ~3 KB; disabling either signature scheme removes another ~1–2 KB.
 

@@ -401,6 +401,9 @@
     <ClInclude Include="_opt\ssfecdsa_opt.h">
       <Filter>_opt</Filter>
     </ClInclude>
+    <ClInclude Include="_opt\ssfed25519_opt.h">
+      <Filter>_opt</Filter>
+    </ClInclude>
     <ClInclude Include="_opt\ssfgobj_opt.h">
       <Filter>_opt</Filter>
     </ClInclude>

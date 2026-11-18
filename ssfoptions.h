@@ -56,6 +56,7 @@ extern "C" {
 #include "ssfdtime_opt.h"
 #include "ssfec_opt.h"
 #include "ssfecdsa_opt.h"
+#include "ssfed25519_opt.h"
 #include "ssfgobj_opt.h"
 #include "ssfheap_opt.h"
 #include "ssfini_opt.h"

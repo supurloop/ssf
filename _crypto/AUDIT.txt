@@ -220,7 +220,7 @@ X-1  High  FIXED (2026-11-18)  [verified by exact Python model of the routine]
   Scripts:   scratchpad c25519/femul.py, sqr_search.py, harness_x.c (session scratchpad, may be
              gone; the Python model is trivial to recreate from the C).
 
-X-2  Medium  OPEN  [verified]
+X-2  Medium  FIXED (2026-11-18)  [verified]
   Location:  ssfx25519.c:357-363 (_x25519_stack_scrub), called from :467, :482, :499;
              ssfx25519.md:16
   Problem:   Every public call allocates volatile uint8_t scratch[4096]. ssfx25519.md promises
@@ -274,7 +274,7 @@ E-3  Low  OPEN
   Fix:       (0u - bits) in unsigned arithmetic.
   Evidence:  return (uint8_t)(1u ^ (((bits | ((uint32_t)(-(int32_t)bits))) >> 31) & 1u));
 
-E-4  Low  OPEN (doc only)
+E-4  Low  OPEN (doc only; (c) FIXED 2026-11-18 with X-2)
   Location:  ssfed25519.md:55-62, :101; ssfed25519.c:1289-1295
   Problem:   (a) Notes say Sign "does not detect or report" a seed/pubKey mismatch; the code
              detects it via verify-after-sign, returns false and zeroes sig (Function Reference
@@ -958,3 +958,26 @@ CHANGE LOG
               with an example caller-side bits check for externally supplied values. The bits
               parameter row names the SSF_RSA_CONFIG_ENABLE_* gating, and the example comment
               no longer says "bits unsupported". No code change, so no build or test run.
+  2026-11-18  X-2 FIXED and E-4(c) FIXED (stack scrub sized by configuration, optional). New
+              options SSF_X25519_CONFIG_ENABLE_STACK_SCRUB / _STACK_SCRUB_SIZE in
+              _opt/ssfx25519_opt.h and SSF_ED25519_CONFIG_ENABLE_STACK_SCRUB / _STACK_SCRUB_SIZE
+              in the new _opt/ssfed25519_opt.h (wired into ssfoptions.h, ssf.vcxproj and
+              ssf.vcxproj.filters); defaults 1 and 1536 bytes. #error checks: enable flag must be
+              0 or 1, size > 0 when enabled. Disabled, the scrub helpers compile to nothing.
+              Sizing: gcc -fcallgraph-info measured the deepest call chain below
+              SSFX25519ComputeSecret at 832-1160 B and the deepest secret-bearing chain below
+              SSFEd25519Sign (excluding verify-after-sign) at 792-1120 B across -O0/-O2/-O3/-Os.
+              Tests: new stack high-water-mark probe in ssfx25519_ut.c and ssfed25519_ut.c (8 KiB
+              sentinel fill, op, scan for deepest overwritten byte) bounding ComputeSecret < 2560 B
+              and Sign < 4096 B; the existing scrub-residue tests now probe the configured size and
+              run only when the scrub is enabled. RED (old fixed 4 KiB scrub): ComputeSecret
+              ~4112 B (ssfx25519_ut.c:568), Sign ~5136 B (ssfed25519_ut.c:795). GREEN peaks,
+              gcc x86-64 -O3 / -O0: scrub on: X25519 1552 / 1600 B, Ed25519 Sign 3280 / 2400 B;
+              scrub off: X25519 1256 / 1048 B, Ed25519 Sign 3280 / 2400 B (Sign's peak is its own
+              frame plus the verify-after-sign SHA-512 chain, so the scrub no longer adds to it).
+              All four configurations passed the full enabled suite (plus ssfcms, ssfx509,
+              ssfbase64url, ssfmatch). ssfx25519.md, ssfed25519.md (new Configuration table and
+              stack note) and README.md rows/footnotes 44 and 46 updated to the measured peaks.
+              Unit test flags and the opt headers were restored after the runs. Not changed:
+              SSFEd25519KeyGen/PubKeyFromSeed perform the same secret scalar multiply but have
+              never scrubbed (pre-existing; noted for Jim). E-4(a)/(b) remain OPEN.

@@ -360,17 +360,30 @@ static void _fe_inv(_fe_t *r, const _fe_t *a)
     _fe_mul(r, &t1, &t0);
 }
 
+#if (SSF_X25519_CONFIG_ENABLE_STACK_SCRUB != 0u) && (SSF_X25519_CONFIG_ENABLE_STACK_SCRUB != 1u)
+#error SSF_X25519_CONFIG_ENABLE_STACK_SCRUB must be 0 or 1.
+#endif
+
+#if SSF_X25519_CONFIG_ENABLE_STACK_SCRUB == 1
+#if SSF_X25519_CONFIG_STACK_SCRUB_SIZE < 1
+#error SSF_X25519_CONFIG_STACK_SCRUB_SIZE must be > 0 when the stack scrub is enabled.
+#endif
+
 /* --------------------------------------------------------------------------------------------- */
-/* Scrubs the deeper-stack region used by the Montgomery ladder.                                 */
+/* Zeroes SSF_X25519_CONFIG_STACK_SCRUB_SIZE bytes of stack below the caller (ladder residue).   */
 /* --------------------------------------------------------------------------------------------- */
 SSF_NOINLINE
 static void _x25519_stack_scrub(void)
 {
-    volatile uint8_t scratch[4096];
+    volatile uint8_t scratch[SSF_X25519_CONFIG_STACK_SCRUB_SIZE];
     size_t i;
     for (i = 0; i < sizeof(scratch); i++) scratch[i] = 0u;
     SSF_OPTIMIZER_BARRIER(scratch);
 }
+#else /* SSF_X25519_CONFIG_ENABLE_STACK_SCRUB */
+/* Stack scrub disabled by configuration; call sites compile to nothing. */
+#define _x25519_stack_scrub() do { } while (0)
+#endif /* SSF_X25519_CONFIG_ENABLE_STACK_SCRUB */
 
 /* --------------------------------------------------------------------------------------------- */
 /* X25519 scalar multiplication (RFC 7748 Sec. 5; constant-time Montgomery ladder on x-coords).  */

@@ -1332,17 +1332,30 @@ static bool _sc_is_lt_L(const uint8_t s[32])
     return false; /* Equal to L, not less than */
 }
 
+#if (SSF_ED25519_CONFIG_ENABLE_STACK_SCRUB != 0u) && (SSF_ED25519_CONFIG_ENABLE_STACK_SCRUB != 1u)
+#error SSF_ED25519_CONFIG_ENABLE_STACK_SCRUB must be 0 or 1.
+#endif
+
+#if SSF_ED25519_CONFIG_ENABLE_STACK_SCRUB == 1
+#if SSF_ED25519_CONFIG_STACK_SCRUB_SIZE < 1
+#error SSF_ED25519_CONFIG_STACK_SCRUB_SIZE must be > 0 when the stack scrub is enabled.
+#endif
+
 /* --------------------------------------------------------------------------------------------- */
-/* Scrubs the deeper-stack region used by Sign (overwrites freed-frame intermediates).          */
+/* Zeroes SSF_ED25519_CONFIG_STACK_SCRUB_SIZE bytes of stack below Sign (freed intermediates).   */
 /* --------------------------------------------------------------------------------------------- */
 SSF_NOINLINE
 static void _ed25519_stack_scrub(void)
 {
-    volatile uint8_t scratch[4096];
+    volatile uint8_t scratch[SSF_ED25519_CONFIG_STACK_SCRUB_SIZE];
     size_t i;
     for (i = 0; i < sizeof(scratch); i++) scratch[i] = 0u;
     SSF_OPTIMIZER_BARRIER(scratch);
 }
+#else /* SSF_ED25519_CONFIG_ENABLE_STACK_SCRUB */
+/* Stack scrub disabled by configuration; call sites compile to nothing. */
+#define _ed25519_stack_scrub() do { } while (0)
+#endif /* SSF_ED25519_CONFIG_ENABLE_STACK_SCRUB */
 
 /* --------------------------------------------------------------------------------------------- */
 /* Feeds an arbitrary-size buffer to a SHA-512 context, looping in UINT32_MAX-sized chunks.      */

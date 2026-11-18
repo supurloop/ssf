@@ -32,3 +32,5 @@ SSF shall following the coding and documentation style:
 - No tabs, whitespace only, default 4 indent.
 - When an expression is non-trivial, (more than 1 expression to evaluate) each expression shall be enclosed in parentheses  even if not required by order of operations. This provides pedantic clarity.
 - Each variable or field declaration shall be made separately and on its own line.
+- Function names including private static functions shall include the complete module name prefix. Ex. ssfx509 functions begin with SSFX509, private ones with _SSFX509. Unit test modules may implement a more relaxed policy regarding private function naming.
+- When a function argument is a struct, DBC should be applied to the struct's fields as appropriate.

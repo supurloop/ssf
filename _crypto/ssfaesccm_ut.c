@@ -526,6 +526,33 @@ void SSFAESCCMUnitTest(void)
                    key, sizeof(key), tag, sizeof(tag), NULL, 0) == true);
     }
 
+    /* ---- AUDIT CCM-1: auth-only decrypt with a bad tag returns false without memset(NULL) ---- */
+    /* With pt == NULL and ctLen == 0 (allowed by the preconditions), a tag mismatch used to run */
+    /* memset(pt, 0, ctLen) = memset(NULL, 0, 0), which is UB (C11 7.24.1p2) even at length 0.  */
+    {
+        static const uint8_t key[16] = {
+            0x10u, 0x21u, 0x32u, 0x43u, 0x54u, 0x65u, 0x76u, 0x87u,
+            0x98u, 0xA9u, 0xBAu, 0xCBu, 0xDCu, 0xEDu, 0xFEu, 0x0Fu
+        };
+        static const uint8_t nonce[13] = {
+            0x01u, 0x02u, 0x03u, 0x04u, 0x05u, 0x06u, 0x07u,
+            0x08u, 0x09u, 0x0Au, 0x0Bu, 0x0Cu, 0x0Du
+        };
+        static const uint8_t aad[20] = {
+            0xA0u, 0xA1u, 0xA2u, 0xA3u, 0xA4u, 0xA5u, 0xA6u, 0xA7u, 0xA8u, 0xA9u,
+            0xAAu, 0xABu, 0xACu, 0xADu, 0xAEu, 0xAFu, 0xB0u, 0xB1u, 0xB2u, 0xB3u
+        };
+        uint8_t tag[8];
+
+        SSFAESCCMEncrypt(NULL, 0, nonce, sizeof(nonce), aad, sizeof(aad), key, sizeof(key),
+                         tag, sizeof(tag), NULL, 0);
+        SSF_ASSERT(SSFAESCCMDecrypt(NULL, 0, nonce, sizeof(nonce), aad, sizeof(aad), key,
+                                    sizeof(key), tag, sizeof(tag), NULL, 0) == true);
+        tag[3] ^= 0x01u;
+        SSF_ASSERT(SSFAESCCMDecrypt(NULL, 0, nonce, sizeof(nonce), aad, sizeof(aad), key,
+                                    sizeof(key), tag, sizeof(tag), NULL, 0) == false);
+    }
+
     /* ---- 16-byte tag (TLS 1.3 CCM) ---- */
     {
         static const uint8_t key[16] = {

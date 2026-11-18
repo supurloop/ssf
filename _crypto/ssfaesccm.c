@@ -288,8 +288,9 @@ bool SSFAESCCMDecrypt(const uint8_t *ct, size_t ctLen, const uint8_t *nonce, siz
     /* Step 3: Did the tags differ? (constant-time compare) */
     if (SSFCryptCTMemEq(cbcTag, decTag, tagLen) == false)
     {
-        /* Yes, authentication failed; zero the plaintext. */
-        memset(pt, 0, ctLen);
+        /* Yes, authentication failed; zero the plaintext. pt may be NULL when ctLen == 0, and   */
+        /* memset(NULL, 0, 0) is UB, so only clear when there is plaintext (AUDIT CCM-1).        */
+        if (ctLen > 0u) memset(pt, 0, ctLen);
         return false;
     }
     /* No, tags match; return success. */

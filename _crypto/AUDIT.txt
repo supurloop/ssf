@@ -459,7 +459,7 @@ GCM-2  Low  FIXED (2026-11-18)
 ssfaesccm
 ----------------------------------------------------------------------------------------------
 
-CCM-1  Low  OPEN
+CCM-1  Low  FIXED (2026-11-18)
   Location:  ssfaesccm.c:292 (SSFAESCCMDecrypt)
   Problem:   On tag mismatch memset(pt, 0, ctLen) runs unconditionally. Preconditions allow
              pt == NULL when ctLen == 0 (:270), so a tampered tag in auth-only mode produces
@@ -1281,3 +1281,14 @@ CHANGE LOG
               (65535, 1) case at ssfbn_ut.c:3098. GREEN: ASan build clean; default build ssfbn,
               ssfec, ssfecdsa, ssfrsa (BN/EC/ECDSA/RSA unit tests enabled), ssfcms, ssfx509,
               ssfbase64url, ssfmatch pass.
+  2026-11-18  CCM-1 FIXED via option 1. SSFAESCCMDecrypt's tag-mismatch path now clears pt only
+              when ctLen > 0, as SSFAESGCMDecrypt does, so auth-only use (pt == NULL, ctLen == 0)
+              no longer calls memset(NULL, 0, 0). The CTR and CBC-MAC helpers and Encrypt were
+              checked and never pass a NULL pointer to memset / memcpy. No contract change, so no
+              .md edit. Test block "AUDIT CCM-1" in ssfaesccm_ut.c: an auth-only message (13-byte
+              nonce, 20-byte AAD, 8-byte tag) verifies with its tag and returns false with one tag
+              bit flipped. RED (UBSan -fsanitize=nonnull-attribute,null): "ssfaesccm.c:292:9:
+              runtime error: null pointer passed as argument 1, which is declared to never be
+              null". GREEN under the same sanitizer and in the normal -O3 build: ssfaesccm and
+              ssftls (AESCCM/TLS unit tests enabled for the runs), ssfcms, ssfx509, ssfbase64url,
+              ssfmatch.

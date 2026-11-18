@@ -1316,6 +1316,29 @@ void SSFCMSUnitTest(void)
     SSF_ASSERT(_utTraceSawSigFail == true);
     SSF_ASSERT(_utTraceSawChainFail == false);
 
+    /* ---- AUDIT CMS-4: chain building follows the key identifier, not just the issuer name ---- */
+    /* Two embedded intermediates share the subject "SSF Rollover CA" (old key first, as      */
+    /* OpenSSL's DER SET ordering left them); the signer was issued by the new one, which its */
+    /* AKID names. Taking the first name match picked the old CA and failed a valid message.  */
+    trust[0] = _utFixRollRootDer;
+    trustLen[0] = sizeof(_utFixRollRootDer);
+    SSF_ASSERT(SSFCMSParse(_utFixRollBoth, sizeof(_utFixRollBoth), &sd) == true);
+    SSF_ASSERT(sd.certsLen == 3u);
+    SSF_ASSERT(SSFCMSVerifyDigest(&sd, sha256, sizeof(sha256), SSF_CMS_DIGEST_SHA256, trust,
+                                  trustLen, 1u, now, &res) == true);
+
+    /* Only the old intermediate embedded: no path to the root exists, so it still fails. */
+    SSF_ASSERT(SSFCMSParse(_utFixRollOldOnly, sizeof(_utFixRollOldOnly), &sd) == true);
+    SSF_ASSERT(SSFCMSVerifyDigest(&sd, sha256, sizeof(sha256), SSF_CMS_DIGEST_SHA256, trust,
+                                  trustLen, 1u, now, &res) == false);
+
+    /* Without key identifiers the builder falls back to the first name match (old CA). */
+    SSF_ASSERT(SSFCMSParse(_utFixRollBothNoKid, sizeof(_utFixRollBothNoKid), &sd) == true);
+    SSF_ASSERT(SSFCMSVerifyDigest(&sd, sha256, sizeof(sha256), SSF_CMS_DIGEST_SHA256, trust,
+                                  trustLen, 1u, now, &res) == false);
+    trust[0] = _utFixRootDer;
+    trustLen[0] = sizeof(_utFixRootDer);
+
     /* ---- Trace callback reports the reason for a failure and is silent once disabled ---- */
     n = sizeof(_utFixEcdsaChainDetached);
     SSF_ASSERT(SSFCMSParse(_utFixEcdsaChainDetached, n, &sd) == true);

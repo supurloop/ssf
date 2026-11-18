@@ -1,6 +1,7 @@
 #!/bin/sh
 # Converts the DER files that gen.sh and gen_modeled.pl produced into ../ssfcms_ut_fix.h, one
 # static const uint8_t array per fixture. Run gen.sh, then gen_modeled.pl, then this.
+# gen_rollover.sh is optional; its arrays are appended when ../rollover exists.
 cd "$(dirname "$0")/out" || exit 1
 emit() {
   name=$1; file=$2
@@ -33,6 +34,13 @@ emit _utFixModRootDer ../modeled/root.der
 emit _utFixModFscaDer ../modeled/fsca.der
 emit _utFixModFmDer ../modeled/fm.der
 emit _utFixModeledCms ../modeled/modeled.der
+if [ -d ../rollover ]; then
+printf '/* CA key rollover (AUDIT CMS-4): see gen_rollover.sh. */\n\n'
+emit _utFixRollRootDer ../rollover/root.der
+emit _utFixRollBoth ../rollover/both.der
+emit _utFixRollOldOnly ../rollover/oldonly.der
+emit _utFixRollBothNoKid ../rollover/both_nokid.der
+fi
 } > ../../ssfcms_ut_fix.h
 wc -l -c ../../ssfcms_ut_fix.h
 awk 'length > 100 {print "long line " NR}' ../../ssfcms_ut_fix.h | head -3

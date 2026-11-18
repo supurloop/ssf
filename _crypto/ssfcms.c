@@ -672,12 +672,15 @@ static uint8_t _SSFCMSBuildChain(const SSFCMSSignedData_t *sd, const SSFX509Cert
 {
     const uint8_t *issuerRaw;
     uint32_t issuerRawLen;
+    const uint8_t *childAkid;
+    uint32_t childAkidLen;
     bool selfIssued;
     uint8_t n = 1;
     uint8_t i;
     uint8_t k;
+    uint8_t pick;
+    uint8_t firstMatch;
     bool used;
-    bool found;
 
     SSF_REQUIRE(sd != NULL);
     SSF_REQUIRE(signerCert != NULL);
@@ -690,6 +693,8 @@ static uint8_t _SSFCMSBuildChain(const SSFCMSSignedData_t *sd, const SSFX509Cert
 
     issuerRaw = signerCert->issuer.raw;
     issuerRawLen = signerCert->issuer.rawLen;
+    childAkid = signerCert->akid;
+    childAkidLen = signerCert->akidLen;
     selfIssued = _SSFCMSSpanEquals(signerCert->issuer.raw, signerCert->issuer.rawLen,
                              signerCert->subject.raw, signerCert->subject.rawLen);
     chain[0] = signerDer;
@@ -700,8 +705,10 @@ static uint8_t _SSFCMSBuildChain(const SSFCMSSignedData_t *sd, const SSFX509Cert
            (!_SSFCMSIssuerIsAnchor(issuerRaw, issuerRawLen, trustDer, trustDerLen, trustCount,
                                    scratch)))
     {
-        found = false;
-        for (i = 0; (i < sd->certsLen) && (!found); i++)
+        /* Prefer the name match whose SKID equals the child's AKID (RFC 5280, AUDIT CMS-4) */
+        pick = sd->certsLen;
+        firstMatch = sd->certsLen;
+        for (i = 0; (i < sd->certsLen) && (pick == sd->certsLen); i++)
         {
             /* Already in the chain? */
             used = false;
@@ -713,21 +720,44 @@ static uint8_t _SSFCMSBuildChain(const SSFCMSSignedData_t *sd, const SSFX509Cert
             if (!SSFX509Parse(sd->certs[i].der, sd->certs[i].derLen, scratch)) continue;
 
             /* This certificate's subject is the issuer sought? */
-            if (_SSFCMSSpanEquals(scratch->subject.raw, scratch->subject.rawLen, issuerRaw,
-                                  issuerRawLen))
+            if (!_SSFCMSSpanEquals(scratch->subject.raw, scratch->subject.rawLen, issuerRaw,
+                                   issuerRawLen))
             {
-                /* Yes, append it and continue from its issuer */
-                chain[n] = sd->certs[i].der;
-                chainLen[n] = sd->certs[i].derLen;
-                n++;
-                issuerRaw = scratch->issuer.raw;
-                issuerRawLen = scratch->issuer.rawLen;
-                selfIssued = _SSFCMSSpanEquals(scratch->issuer.raw, scratch->issuer.rawLen,
-                                         scratch->subject.raw, scratch->subject.rawLen);
-                found = true;
+                /* No, not a candidate */
+                continue;
             }
+            /* Yes, remember the first such candidate as the fallback */
+            if (firstMatch == sd->certsLen) firstMatch = i;
+
+            /* Does its SKID match the child's AKID? */
+            if ((childAkid != NULL) && (scratch->skid != NULL) &&
+                (_SSFCMSSpanEquals(scratch->skid, scratch->skidLen, childAkid, childAkidLen)))
+            {
+                /* Yes, this is the issuing key */
+                pick = i;
+            }
+            /* No, keep looking for a key identifier match */
         }
-        if (!found) break;
+
+        /* Was a key identifier match found? */
+        if (pick == sd->certsLen)
+        {
+            /* No, fall back to the first name match (none at all ends the chain) */
+            pick = firstMatch;
+        }
+        if (pick == sd->certsLen) break;
+
+        /* Append the chosen certificate and continue from its issuer */
+        if (!SSFX509Parse(sd->certs[pick].der, sd->certs[pick].derLen, scratch)) break;
+        chain[n] = sd->certs[pick].der;
+        chainLen[n] = sd->certs[pick].derLen;
+        n++;
+        issuerRaw = scratch->issuer.raw;
+        issuerRawLen = scratch->issuer.rawLen;
+        childAkid = scratch->akid;
+        childAkidLen = scratch->akidLen;
+        selfIssued = _SSFCMSSpanEquals(scratch->issuer.raw, scratch->issuer.rawLen,
+                                 scratch->subject.raw, scratch->subject.rawLen);
     }
     return n;
 }

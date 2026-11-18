@@ -735,7 +735,7 @@ CMS-3  Low  FIXED (2026-11-18)
                   &si->apSigAlgParamsLen);
              231  si->apSigAlgParams = NULL; si->apSigAlgParamsLen = 0;
 
-CMS-4  Low  OPEN (functional)
+CMS-4  Low  FIXED (2026-11-18)
   Location:  ssfcms.c:697-722 (_SSFCMSBuildChain)
   Problem:   The chain takes the first embedded certificate whose subject equals the sought
              issuer; with two embedded certs sharing a subject (CA key rollover, cross-cert)
@@ -1430,3 +1430,22 @@ CHANGE LOG
               verify. RED: ssfcms_ut.c:1501 (INTEGER parameters parsed). GREEN: ssfcms incl. the
               existing algorithm-protection tests, ssfx509, ssfbase64url, ssfmatch. One-line
               comments, no line over 100 columns.
+  2026-11-18  CMS-4 FIXED via option 1. _SSFCMSBuildChain now, at each step, considers every unused
+              embedded certificate whose subject equals the issuer sought and takes the one whose
+              SKID equals the child's AKID (RFC 5280 Sec. 4.2.1.1), falling back to the first
+              name match when the child has no AKID or no candidate's SKID matches; no extra
+              signature verification is done before trust. ssfcms.md: Verification order
+              describes the key-identifier preference, and the fixture notes name
+              gen_rollover.sh. New ssfcms_ut_fixtures/gen_rollover.sh (OpenSSL 3.5) makes a
+              rollover root, two intermediates both named "SSF Rollover CA" with different keys,
+              and a signer issued by the new one; it regenerates until OpenSSL's DER SET ordering
+              puts the old intermediate first, and cross-checks with openssl cms -verify (which
+              succeeds through the new intermediate). Four arrays (_utFixRollRootDer,
+              _utFixRollBoth, _utFixRollOldOnly, _utFixRollBothNoKid) were appended to
+              ssfcms_ut_fix.h in toc.sh's format, and toc.sh emits them when ../rollover exists;
+              rollover/ is git-ignored like out/. Test block "AUDIT CMS-4" in ssfcms_ut.c: both
+              intermediates embedded verifies; old intermediate only fails; the same pair without
+              key identifiers falls back to the first name match and fails. RED: ssfcms_ut.c:1327
+              (valid rollover message rejected). GREEN: ssfcms incl. the modeled production fixture
+              and CMS-1 ordering tests, ssfx509, ssfbase64url, ssfmatch. One-line comments, no
+              line over 100 columns.

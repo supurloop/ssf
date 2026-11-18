@@ -43,11 +43,12 @@ extern "C" {
 /* --------------------------------------------------------------------------------------------- */
 /* Defines and typedefs                                                                          */
 /* --------------------------------------------------------------------------------------------- */
+/* Views into the caller's pattern and path strings */
 typedef struct SSFMatchParam
 {
-    SSFCStrIn_t name;             /* parameter name (points into pattern string) */
+    const char *name;
     uint32_t nameLen;
-    SSFCStrIn_t value;            /* parameter value (points into path string) */
+    const char *value;
     uint32_t valueLen;
 } SSFMatchParam_t;
 

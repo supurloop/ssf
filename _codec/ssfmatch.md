@@ -86,7 +86,7 @@ The unit-test entry point is gated by `SSF_CONFIG_MATCH_UNIT_TEST` in `ssfport.h
 
 | Symbol | Kind | Description |
 |--------|------|-------------|
-| <a id="type-param"></a>`SSFMatchParam_t` | Struct | One extracted path parameter: `{ SSFCStrIn_t name; uint32_t nameLen; SSFCStrIn_t value; uint32_t valueLen; }`. `name` points into the pattern string, `value` into the path string; neither is null-terminated. |
+| <a id="type-param"></a>`SSFMatchParam_t` | Struct | One extracted path parameter: `{ const char *name; uint32_t nameLen; const char *value; uint32_t valueLen; }`. `name` points into the pattern string, `value` into the path string; neither is null-terminated. |
 
 <a id="functions"></a>
 

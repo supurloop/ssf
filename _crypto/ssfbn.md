@@ -657,10 +657,11 @@ bool SSFBNModInvExt(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m);
 
 - [`SSFBNModInv`](#modinv) computes `a^(m-2) mod m` via the constant-time
   [`SSFBNModExp`](#modexp), then verifies the result satisfies `a · r ≡ 1 (mod m)` and
-  returns `false` if not. **Constant-time on the success path** for prime `m`. For non-
-  prime `m` (or when `gcd(a, m) ≠ 1`) the verification check fails and the function
-  returns `false` — the post-Fermat verify makes the function safe to call on any modulus,
-  but it is only *useful* (yields a result) when `m` is prime. Use this on secret `a`
+  returns `false` if not. **Constant-time on the success path** for prime `m`. An even `m`
+  returns `false` immediately (the Montgomery exponentiation needs an odd modulus; `m` is
+  treated as public). For odd non-prime `m` (or when `gcd(a, m) ≠ 1`) the verification check
+  fails and the function returns `false`, so it is safe to call on any modulus, but it is only
+  *useful* (yields a result) when `m` is prime. Use this on secret `a`
   whenever `m` is a curve order, a field prime, or a Diffie-Hellman group order.
 - [`SSFBNModInvExt`](#modinv) uses the binary extended Euclidean algorithm. Works for any
   coprime `a` and `m`. **Variable-time** — do not use on secret inputs. Use this only when

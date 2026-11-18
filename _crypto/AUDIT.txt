@@ -344,7 +344,7 @@ BN-2  Medium  FIXED (2026-11-18)  [verified]
              2799  buf[0] |= 0xC0u;
              2801  buf[byteLen - 1u] |= 0x01u;
 
-BN-3  Medium  OPEN
+BN-3  Medium  FIXED (2026-11-18)
   Location:  ssfbn.c:1920-1947 (SSFBNModInv) -> ssfbn.c:1965 (SSFBNMontInit); ssfbn.md:660
   Problem:   ssfbn.md says the post-Fermat verify makes SSFBNModInv safe on any modulus and it
              returns false. For even m, SSFBNModExp -> SSFBNMontInit hits
@@ -1013,3 +1013,12 @@ CHANGE LOG
               ssfmatch. A seeded harness printed identical primes before and after the change for
               bitLen 16, 64, 512 and 1024, so RSA key generation from a given PRNG stream is
               unchanged.
+  2026-11-18  BN-3 FIXED via option 1. SSFBNModInv returns false for an even modulus before the
+              Fermat exponentiation (SSFBNMontInit requires an odd modulus); m is public in every
+              caller (ssfecdsa n, ssfec p, ssfrsa p), so the branch leaks nothing secret.
+              ssfbn.md updated. Test block "AUDIT BN-3" in ssfbn_ut.c: (a=3, m=10), (a=3, m=1) and
+              (a=3, m=15) must all return false. RED: SSF_REQUIRE at ssfbn.c:1974 (MontInit odd-
+              modulus check) on the m=10 case. GREEN with ssfbn, ssfec, ssfecdsa, ssfrsa (the
+              module and all three callers' unit tests enabled for the run), ssfcms, ssfx509,
+              ssfbase64url, ssfmatch. m = 1 already returned false (the a * r == 1 check fails
+              because everything is 0 mod 1), so no separate m < 3 guard was needed.

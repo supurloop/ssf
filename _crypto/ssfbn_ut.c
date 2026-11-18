@@ -2319,6 +2319,28 @@ void SSFBNUnitTest(void)
         SSF_ASSERT(r.limbs[0] == 4u);
     }
 
+    /* ---- AUDIT BN-3: ModInv returns false (never traps) for unusable moduli ---- */
+    /* The Fermat exponentiation goes through Montgomery, whose init requires an odd modulus, */
+    /* so an even m used to trip SSF_REQUIRE instead of returning false as documented.        */
+    {
+        SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(m, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(r, SSF_BN_MAX_LIMBS);
+
+        /* Even modulus. */
+        SSFBNSetUint32(&a, 3u, 4);
+        SSFBNSetUint32(&m, 10u, 4);
+        SSF_ASSERT(SSFBNModInv(&r, &a, &m) == false);
+
+        /* m == 1 (m - 2 underflows). */
+        SSFBNSetUint32(&m, 1u, 4);
+        SSF_ASSERT(SSFBNModInv(&r, &a, &m) == false);
+
+        /* Odd, non-prime modulus sharing a factor with a. */
+        SSFBNSetUint32(&m, 15u, 4);
+        SSF_ASSERT(SSFBNModInv(&r, &a, &m) == false);
+    }
+
     /* ---- ModInv: 0 has no inverse ---- */
     {
         SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);

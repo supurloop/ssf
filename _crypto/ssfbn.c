@@ -1942,6 +1942,14 @@ bool SSFBNModInv(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
 
     if (SSFBNIsZero(a)) return false;
 
+    /* Is m even? (m is public in every caller, so this branch leaks nothing secret.) */
+    if (SSFBNIsEven(m))
+    {
+        /* Yes, no Fermat inverse exists and Montgomery needs an odd modulus (AUDIT BN-3). */
+        return false;
+    }
+    /* No, odd modulus; the a * r == 1 check below rejects non-prime / non-coprime cases. */
+
     (void)SSFBNSubUint32(&exp, m, 2u);
     SSFBNModExp(r, a, &exp, m);
 

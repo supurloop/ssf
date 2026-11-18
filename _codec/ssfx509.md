@@ -64,10 +64,15 @@ X.509 v3 certificate support per RFC 5280, built on [`ssfasn1`](ssfasn1.md):
   only in its `keyIdentifier [0]` form. Extended Key Usage is reduced to three flags:
   `id-kp-serverAuth`, `id-kp-clientAuth`, and `anyExtendedKeyUsage`, the last of which satisfies
   the verifier's server-authentication requirement per RFC 5280 §4.2.1.12. Name Constraints are
-  parsed only for CA certificates and only for `dNSName` and IPv4 `iPAddress` subtrees; up to
+  read from every certificate but enforced only from intermediates and the trust anchor, and
+  only `dNSName` and `iPAddress` subtrees are kept, up to
   [`SSF_X509_CONFIG_MAX_NAME_CONSTRAINTS`](#cfg-max-name-constraints) permitted and the same
-  number of excluded subtrees are kept. A `dNSName` constraint may use the leading-dot form
-  (`.example.com`), which matches proper subdomains only, in line with OpenSSL, NSS, and Go.
+  number of excluded. A `dNSName` constraint may use the leading-dot form (`.example.com`),
+  which matches proper subdomains only, in line with OpenSSL, NSS, and Go. An `iPAddress`
+  subtree is matched by address family: a 16-byte (IPv6) permitted subtree never matches a
+  4-byte SAN, so a CA that permits only IPv6 space rejects every IPv4 `iPAddress` SAN while
+  leaving `dNSName` SANs unconstrained, and a 16-byte excluded subtree never excludes an IPv4
+  SAN.
 - **Not implemented.** Certificate revocation (CRL / OCSP), certificate policies and policy
   mappings, inhibit-anyPolicy, `issuerUniqueID` / `subjectUniqueID` (skipped), `otherName` /
   `rfc822Name` / URI SANs, IPv6 SANs and IPv6 Name Constraints, and Public Suffix List awareness
@@ -76,9 +81,11 @@ X.509 v3 certificate support per RFC 5280, built on [`ssfasn1`](ssfasn1.md):
   hostname and, when the leaf carries an Extended Key Usage extension, requires it to include
   `serverAuth`. Verifying client certificates needs a caller-side check on `ekuClientAuth`
   instead.
-- **Time.** Validity times are decoded by [`ssfasn1`](ssfasn1.md) into Unix seconds; the 1970
-  epoch is the floor, and the `99991231235959Z` "no expiry" convention is treated as an ordinary
-  far-future date.
+- **Time.** Validity times are decoded by [`ssfasn1`](ssfasn1.md) into Unix seconds from either
+  `UTCTime` or `GeneralizedTime`; the 1970 epoch is the floor, and the `99991231235959Z` "no
+  expiry" convention is treated as an ordinary far-future date. The generator emits `UTCTime`
+  only, so a `notBefore` or `notAfter` later than `2049-12-31T23:59:59Z` cannot be encoded and
+  both encoder passes return `false`.
 
 <a id="notes"></a>
 
@@ -90,14 +97,19 @@ X.509 v3 certificate support per RFC 5280, built on [`ssfasn1`](ssfasn1.md):
   hundred bytes, scaling with the SAN / extension / Name Constraints limits); allocate it
   statically or on a stack you have sized for it.
 - **Parse is strict about DER but lenient about content.** Any structural DER error (bad tags,
-  truncated lengths, non-minimal INTEGER, malformed serial number, missing mandatory field)
-  returns `false`, as does a version field above v3 or more extensions than
+  truncated lengths, non-minimal INTEGER, malformed serial number, missing mandatory field, a
+  SAN GeneralName whose declared length overruns the extension) returns `false`, as does a
+  version field above v3 or more extensions than
   [`SSF_X509_CONFIG_MAX_EXTENSIONS`](#cfg-max-extensions), since an extension that could not be
   retained would escape the critical-extension and duplicate checks. Unknown extensions and
   unknown SAN types are retained without interpretation rather than rejected; policy decisions
   are left to [`SSFX509VerifyChain()`](#ssfx509verifychain). Two values are normalized at parse
   time: a `dNSName` SAN that is empty or contains a NUL byte is dropped, because no hostname can
   match it safely, and a `pathLenConstraint` above 127 is clamped to 127 so it stays a constraint.
+  A recognized extension whose body is not the structure RFC 5280 defines (for example a Basic
+  Constraints value that is not a SEQUENCE) does not fail the parse; the extension's `has*` flag
+  is set and its decoded fields keep their fail-closed defaults, so such a certificate cannot act
+  as a CA, carries no key usage bits, no key purposes, no SANs, and no key identifier.
 - **Serial numbers** must be 1–20 bytes and non-negative (RFC 5280 §4.1.2.2). A zero serial is
   accepted, as the RFC asks verifiers to tolerate it.
 - **Signature algorithm consistency.** Both the TBS `signature` AlgorithmIdentifier and the outer
@@ -116,7 +128,9 @@ X.509 v3 certificate support per RFC 5280, built on [`ssfasn1`](ssfasn1.md):
   `cert[i + 1]`, and their AKID / SKID agree when both are present; if the leaf has Extended Key
   Usage it includes `serverAuth` or `anyExtendedKeyUsage`; the last cert's issuer name matches a trust anchor's
   subject, that anchor is itself valid at `nowUnixSec`, its SKID agrees with the cert's AKID when
-  both are present, and the anchor's key verifies the signature; every intermediate asserts
+  both are present, and the anchor's key verifies the signature (the anchor that verifies is the
+  one whose path length and Name Constraints are enforced below; other anchors that merely share
+  its subject name, as during a root key rollover, play no part); every intermediate asserts
   `cA = TRUE` in Basic Constraints and, if Key Usage is present, includes `keyCertSign`; path
   length constraints hold for intermediates and the trust anchor (RFC 5280 §6.1.4(k)); if the
   leaf has Extended Key Usage it includes `serverAuth`; Name Constraints of every intermediate
@@ -129,7 +143,9 @@ X.509 v3 certificate support per RFC 5280, built on [`ssfasn1`](ssfasn1.md):
   non-empty and the base domain after `*.` contains at least one interior `.` (so `*.example.com`
   matches `www.example.com`, but matches neither `.example.com` nor, for `*.com`, anything). A
   hostname written as a dotted-decimal IPv4 address is matched against 4-byte `iPAddress` SANs
-  instead. The Common Name is never consulted. `hostname` must be non-empty; an empty string is a
+  instead; each octet is read as decimal, so leading zeros are accepted (`010.0.0.1` equals
+  `10.0.0.1`). A trailing dot is not stripped, so `host.example.com.` never matches. The Common
+  Name is never consulted. `hostname` must be non-empty; an empty string is a
   precondition violation and asserts.
 - **Signature verification** derives the hash from the signature algorithm OID and the key type
   / curve from the **issuer's** SubjectPublicKeyInfo, so `ecdsa-with-SHA256` over a P-384 key
@@ -140,8 +156,11 @@ X.509 v3 certificate support per RFC 5280, built on [`ssfasn1`](ssfasn1.md):
   verified with the `saltLength` declared in the certificate's PSS parameters, or 20 when the
   field is absent, since RFC 4055 declares `DEFAULT 20` and DER omits default values (OpenSSL
   writes salt-20 certificates this way). Salt lengths above the hash length are rejected, and
-  MGF1 over the same hash is assumed. Absent PSS parameters select SHA-1 per RFC 4055, which this
-  module does not support, so such certificates fail to verify.
+  MGF1 over the same hash is assumed: a `maskGenAlgorithm` field, if present, is skipped unread.
+  Absent PSS parameters select SHA-1 per RFC 4055, which this module does not support, so such
+  certificates fail to verify. A `hashAlgorithm` OID other than SHA-384 or SHA-512 is treated as
+  SHA-256, so a signature made with SHA-256 under an unrecognized hash OID verifies and any other
+  fails.
 - **Generation uses measure-then-write.** Call [`SSFX509EncodeTBS()`](#ssfx509encodetbs) or
   [`SSFX509EncodeCert()`](#ssfx509encodecert) with `bufOpt == NULL` to learn the exact size in
   `*lenOut`, then again with a buffer. The usual flow is: encode the TBS, sign those exact bytes with

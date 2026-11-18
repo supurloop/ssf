@@ -150,7 +150,7 @@ typedef struct SSFX509Cert
     const uint8_t *skid;           uint32_t skidLen;
     const uint8_t *akid;           uint32_t akidLen;
 
-    /* Name Constraints (RFC 5280 Section 4.2.1.10). Parsed only for CA certs.                   */
+    /* Name Constraints (RFC 5280 Section 4.2.1.10). Read from every cert.                       */
     bool hasNameConstraints;
     SSFX509NameConstraint_t permittedSubtrees[SSF_X509_CONFIG_MAX_NAME_CONSTRAINTS];
     uint8_t permittedLen;

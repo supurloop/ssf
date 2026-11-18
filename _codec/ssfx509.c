@@ -396,32 +396,44 @@ static bool _ParseExtensions(const SSFASN1Cursor_t *extsCursor, SSFX509Cert_t *c
                 {
                     const uint8_t *sanVal;
                     uint32_t sanValLen;
-                    if (SSFASN1DecPeekTag(&sanInner, &tag))
+                    uint8_t sanType;
+
+                    /* GeneralName header readable and its content within the SEQUENCE? */
+                    if ((!SSFASN1DecPeekTag(&sanInner, &tag)) ||
+                        (!SSFASN1DecGetTLV(&sanInner, &tag, &sanVal, &sanValLen, &sanInner)))
                     {
-                        uint8_t sanType = tag & 0x1Fu;
-                        if (SSFASN1DecGetTLV(&sanInner, &tag, &sanVal, &sanValLen, &sanInner))
-                        {
-                            /* dNSName that is empty or embeds a NUL byte? */
-                            if ((sanType == SSF_X509_SAN_DNS) &&
-                                ((sanValLen == 0u) || (memchr(sanVal, 0, sanValLen) != NULL)))
-                            {
-                                /* Yes, drop it since no hostname can match it safely */
-                                continue;
-                            }
-                            cert->san[cert->sanLen].type = sanType;
-                            cert->san[cert->sanLen].val = sanVal;
-                            cert->san[cert->sanLen].valLen = sanValLen;
-                            cert->sanLen++;
-                        }
+                        /* No, structural DER error; the cursor could never advance past it */
+                        return false;
                     }
-                    else break;
+
+                    /* Yes, the low tag bits are the GeneralName choice */
+                    sanType = tag & 0x1Fu;
+
+                    /* dNSName that is empty or embeds a NUL byte? */
+                    if ((sanType == SSF_X509_SAN_DNS) &&
+                        ((sanValLen == 0u) || (memchr(sanVal, 0, sanValLen) != NULL)))
+                    {
+                        /* Yes, drop it since no hostname can match it safely */
+                        continue;
+                    }
+                    cert->san[cert->sanLen].type = sanType;
+                    cert->san[cert->sanLen].val = sanVal;
+                    cert->san[cert->sanLen].valLen = sanValLen;
+                    cert->sanLen++;
                 }
             }
         }
         else if (_OIDMatch(oidRaw, oidRawLen, _oidSKID, sizeof(_oidSKID)))
         {
             SSFASN1Cursor_t skidCursor = { extValue, extValueLen };
-            SSFASN1DecGetOctetString(&skidCursor, &cert->skid, &cert->skidLen, &skidCursor);
+
+            /* SubjectKeyIdentifier body is an OCTET STRING? */
+            if (!SSFASN1DecGetOctetString(&skidCursor, &cert->skid, &cert->skidLen, &skidCursor))
+            {
+                /* No, the decoder fills its outputs before checking the tag, so read as absent */
+                cert->skid = NULL;
+                cert->skidLen = 0;
+            }
         }
         else if (_OIDMatch(oidRaw, oidRawLen, _oidAKID, sizeof(_oidAKID)))
         {
@@ -2333,28 +2345,6 @@ static bool _IsKnownExtension(const uint8_t *oidRaw, uint32_t oidRawLen)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if the trust anchor named as issuer of the last chain cert parses into *anchor.  */
-/* --------------------------------------------------------------------------------------------- */
-static bool _FindTrustAnchorByName(const SSFX509Cert_t *last, const uint8_t **trustDer,
-                                   const uint32_t *trustDerLen, uint8_t trustCount,
-                                   SSFX509Cert_t *anchor)
-{
-    uint8_t j;
-
-    SSF_REQUIRE(last != NULL);
-    SSF_REQUIRE(trustDer != NULL);
-    SSF_REQUIRE(trustDerLen != NULL);
-    SSF_REQUIRE(anchor != NULL);
-
-    for (j = 0; j < trustCount; j++)
-    {
-        if (!SSFX509Parse(trustDer[j], trustDerLen[j], anchor)) continue;
-        if (_NameEquals(&last->issuer, &anchor->subject)) return true;
-    }
-    return false;
-}
-
-/* --------------------------------------------------------------------------------------------- */
 /* Returns true if chainDer[0] validates to a trust anchor and is issued for hostnameStr.        */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFX509VerifyChain(const uint8_t **chainDer, const uint32_t *chainDerLen, uint8_t chainLen,
@@ -2474,6 +2464,7 @@ bool SSFX509VerifyChain(const uint8_t **chainDer, const uint32_t *chainDerLen, u
     }
 
     /* Some trust anchor names, is valid for, key-links to, and signs the last chain cert */
+    memset(&anchor, 0, sizeof(anchor));
     for (j = 0; (j < trustCount) && !trusted; j++)
     {
         SSF_REQUIRE(trustDer[j] != NULL);
@@ -2528,27 +2519,28 @@ bool SSFX509VerifyChain(const uint8_t **chainDer, const uint32_t *chainDerLen, u
         }
     }
 
-    /* Trust anchor found by name? */
-    if (_FindTrustAnchorByName(last, trustDer, trustDerLen, trustCount, &anchor))
+    /* anchor is the one whose key verified the last chain cert; only its constraints apply */
+    numSubCAs = (chainLen >= 2u) ? (uint8_t)(chainLen - 1u) : 0u;
+
+    /* Subordinate CAs in the chain within the anchor's pathLenConstraint (Sec. 6.1.4 (k))? */
+    if ((anchor.pathLenConstraint >= 0) && ((int8_t)numSubCAs > anchor.pathLenConstraint))
     {
-        /* Yes, its pathLenConstraint covers every chain cert but the leaf, and its Name     */
-        /* Constraints cover every chain cert                                                  */
-        numSubCAs = (chainLen >= 2u) ? (uint8_t)(chainLen - 1u) : 0u;
-        if ((anchor.pathLenConstraint >= 0) && ((int8_t)numSubCAs > anchor.pathLenConstraint))
+        /* No */
+        SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+            "Chain: trust anchor pathLenConstraint=%d but %u subordinate CAs in chain",
+            anchor.pathLenConstraint, numSubCAs);
+        return false;
+    }
+
+    /* Every chain cert's SANs satisfy the anchor's Name Constraints (Sec. 6.1.4 (g))? */
+    for (i = 0; (anchor.hasNameConstraints) && (i < chainLen); i++)
+    {
+        if (!_NCValidateCert(&certs[i], &anchor))
         {
+            /* No */
             SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
-                "Chain: trust anchor pathLenConstraint=%d but %u subordinate CAs in chain",
-                anchor.pathLenConstraint, numSubCAs);
+                "Chain: cert[%u] SAN violates nameConstraints of trust anchor", i);
             return false;
-        }
-        for (i = 0; anchor.hasNameConstraints && (i < chainLen); i++)
-        {
-            if (!_NCValidateCert(&certs[i], &anchor))
-            {
-                SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
-                    "Chain: cert[%u] SAN violates nameConstraints of trust anchor", i);
-                return false;
-            }
         }
     }
 

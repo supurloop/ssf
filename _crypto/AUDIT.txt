@@ -1358,3 +1358,11 @@ CHANGE LOG
               ssfbase64url, ssfmatch; production compile clean. Not changed: ssfx509's own guard
               still refuses ecdsa-with-SHA384 over a P-256 key (ssfx509_ut.c ~6616 pins that);
               relaxing it to match RFC 5758 is an ssfx509 change awaiting Jim's decision.
+  2026-11-18  ECDSA-3 follow-up (Jim approved the ssfx509 change): SSFX509VerifySignature no
+              longer refuses an ECDSA digest longer than the key's curve order; ssfecdsa truncates
+              it, so ecdsa-with-SHA384 over a P-256 key (RFC 5758 Sec. 3.2) verifies. The
+              ssfx509_ut.c case that pinned the refusal now signs SHA-384(data) with the P-256
+              key and requires ecdsa-with-SHA384 to verify it, while the SHA-256 signature under
+              the SHA-384 OID still fails. ssfx509.md (signature-verification note and
+              SSFX509VerifySignature Returns) updated. RED: ssfx509_ut.c:6638 (valid SHA-384 /
+              P-256 signature refused). GREEN: ssfx509, ssfcms, ssfbase64url, ssfmatch.

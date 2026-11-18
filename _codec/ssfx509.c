@@ -2284,15 +2284,8 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
             return false;
         }
 
-        /* Hash no longer than the curve order, which ssfecdsa requires (no RFC 5758 truncation)? */
-        if (hashLen > ((curve == SSF_EC_CURVE_P256) ? 32u : 48u))
-        {
-            /* No, SHA-384 over a P-256 key is not supported */
-            SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
-                "VerifySig: ECDSA hash of %u bytes exceeds the key's curve order",
-                (unsigned int)hashLen);
-            return false;
-        }
+        /* A digest longer than the curve order (e.g. SHA-384 over a P-256 key, RFC 5758 Sec. 3.2) */
+        /* is truncated by ssfecdsa to its leftmost order-size bytes (AUDIT ECDSA-3).             */
 
         /* keyCert's pubKey is the SEC 1 uncompressed point held in the SPKI BIT STRING */
         ok = SSFECDSAVerify(curve, keyCert->pubKey, (size_t)keyCert->pubKeyLen, hash, hashLen, sig,

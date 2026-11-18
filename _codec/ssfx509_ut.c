@@ -6619,15 +6619,25 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(SSFX509VerifySignature(&c, sha256Oid, sizeof(sha256Oid), NULL, 0u, NULL, 0u,
                                           data, sizeof(data), sig, (uint32_t)sigLen) == false);
 
-        /* ecdsa-with-SHA384 against a P-256 key: the hash outruns the curve order, which the */
-        /* ECDSA primitive forbids, so this fails closed instead of asserting */
+        /* ecdsa-with-SHA384 against a P-256 key (AUDIT ECDSA-3): RFC 5758 Sec. 3.2 allows it and */
+        /* ssfecdsa now truncates the 48-byte digest to the curve order. It used to be refused  */
+        /* here; a SHA-384 signature must now verify, and a SHA-256 one must still not.          */
         {
             static const uint8_t ecdsaSha384Oid[] = {
                 0x2Au, 0x86u, 0x48u, 0xCEu, 0x3Du, 0x04u, 0x03u, 0x03u
             };
+            uint8_t sig384[SSF_ECDSA_MAX_SIG_SIZE];
+            size_t sig384Len;
+
             SSF_ASSERT(SSFX509VerifySignature(&c, ecdsaSha384Oid, sizeof(ecdsaSha384Oid), NULL, 0u,
                                               NULL, 0u, data, sizeof(data), sig,
                                               (uint32_t)sigLen) == false);
+            SSFSHA384(data, sizeof(data), hash, SSF_SHA2_384_BYTE_SIZE);
+            SSF_ASSERT(SSFECDSASign(SSF_EC_CURVE_P256, ecPriv, 32u, hash, SSF_SHA2_384_BYTE_SIZE,
+                                    sig384, sizeof(sig384), &sig384Len) == true);
+            SSF_ASSERT(SSFX509VerifySignature(&c, ecdsaSha384Oid, sizeof(ecdsaSha384Oid), NULL, 0u,
+                                              NULL, 0u, data, sizeof(data), sig384,
+                                              (uint32_t)sig384Len) == true);
         }
 
         /* RSA: rsaEncryption as the signature algorithm takes its hash from the digest */

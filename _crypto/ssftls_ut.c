@@ -631,11 +631,11 @@ void SSFTLSUnitTest(void)
         uint8_t scratchSecret[32] = {0};
         uint8_t scratchCtx[100];
         uint8_t scratchOut[32];
-        char    longLabel[80];
+        char    longLabel[251];
 
         memset(scratchCtx, 0xA5u, sizeof(scratchCtx));
         memset(longLabel, 'X', sizeof(longLabel));
-        longLabel[sizeof(longLabel) - 1u] = '\0';   /* 79-char label, just past the 64-byte cap */
+        longLabel[sizeof(longLabel) - 1u] = '\0';   /* 250-char label, one past the RFC cap */
 
         /* secret NULL */
         SSF_ASSERT_TEST(SSFTLSHkdfExpandLabel(SSF_HMAC_HASH_SHA256, NULL, 32u, "key",
@@ -661,10 +661,39 @@ void SSFTLSUnitTest(void)
                                               scratchSecret, sizeof(scratchSecret), "key",
                                               scratchCtx, sizeof(scratchCtx),
                                               scratchOut, sizeof(scratchOut)));
-        /* labelLen > 64 */
+        /* labelLen > 249 (RFC 8446 Sec. 7.1: "tls13 " + label must fit opaque label<7..255>) */
         SSF_ASSERT_TEST(SSFTLSHkdfExpandLabel(SSF_HMAC_HASH_SHA256,
                                               scratchSecret, sizeof(scratchSecret), longLabel,
                                               NULL, 0u, scratchOut, sizeof(scratchOut)));
+        /* AUDIT TLS-3: context NULL with ctxLen > 0 used to build a malformed HkdfLabel */
+        SSF_ASSERT_TEST(SSFTLSHkdfExpandLabel(SSF_HMAC_HASH_SHA256,
+                                              scratchSecret, sizeof(scratchSecret), "key",
+                                              NULL, 32u, scratchOut, sizeof(scratchOut)));
+    }
+
+    /* AUDIT TLS-4: a 249-byte label (the RFC 8446 maximum) is accepted and framed correctly. */
+    {
+        static const uint8_t expected[32] = {
+            0x7Au, 0xDEu, 0x0Du, 0x02u, 0xBBu, 0xFBu, 0x19u, 0x8Eu,
+            0xCDu, 0x6Du, 0xF3u, 0x02u, 0x42u, 0x1Eu, 0x30u, 0xAEu,
+            0xF3u, 0xF3u, 0x82u, 0xA9u, 0x1Au, 0x36u, 0x58u, 0x97u,
+            0x5Bu, 0xA5u, 0xDCu, 0xA2u, 0x17u, 0x18u, 0x1Bu, 0x9Bu
+        };
+        uint8_t secret[32];
+        uint8_t ctx[32];
+        uint8_t out[32];
+        char maxLabel[250];
+        uint8_t i;
+
+        for (i = 0u; i < (uint8_t)sizeof(secret); i++) secret[i] = i;
+        memset(ctx, 0xA5u, sizeof(ctx));
+        memset(maxLabel, 'X', sizeof(maxLabel));
+        maxLabel[sizeof(maxLabel) - 1u] = '\0';
+
+        /* Expected output from an independent Python RFC 5869 / RFC 8446 model. */
+        SSFTLSHkdfExpandLabel(SSF_HMAC_HASH_SHA256, secret, sizeof(secret), maxLabel, ctx,
+                              sizeof(ctx), out, sizeof(out));
+        SSF_ASSERT(memcmp(out, expected, sizeof(expected)) == 0);
     }
 
     /* SSFTLSDeriveSecret: adds transcriptHash NULL on top of HkdfExpandLabel's contracts. */

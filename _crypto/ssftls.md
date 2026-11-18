@@ -275,6 +275,14 @@ runs `HKDF-Expand` internally. This is the building block for every secret deriv
 TLS 1.3 — traffic secrets, application secrets, resumption secret, exporter secret, etc.
 all flow through this function.
 
+`context` may be `NULL` only when `ctxLen` is `0` (an empty context, as for the `"key"`,
+`"iv"` and `"finished"` labels); a `NULL` `context` with a non-zero `ctxLen` is a precondition
+violation (`SSF_REQUIRE`). `ctxLen` is at most `SSF_TLS_MAX_HASH_SIZE` (every TLS 1.3 context
+is a transcript or exporter-context hash), and `label` may be up to 249 bytes, the RFC 8446
+maximum (`"tls13 "` plus the label must fit a 255-byte field), which covers application-chosen
+exporter labels (§7.5). Both limits are `SSF_REQUIRE` preconditions. The `HkdfLabel` buffer
+costs about 300 bytes of stack during the call.
+
 <a id="ssftlsderivesecret"></a>
 ```c
 void SSFTLSDeriveSecret(SSFHMACHash_t hash,

@@ -43,6 +43,9 @@
 /* --------------------------------------------------------------------------------------------- */
 #define SSF_TLS_RECORD_MAGIC (0x544C5352ul)
 
+/* RFC 8446 Sec. 7.1: "tls13 " + label fills opaque label<7..255>, so a label is <= 249 bytes. */
+#define SSF_TLS_HKDF_LABEL_MAX_LEN (249u)
+
 #if SSF_CONFIG_TLS_UNIT_TEST == 1
 void (*_SSFTLSFinishedKeyScrubTestHook)(void *ctx, const uint8_t *finishedKey, size_t len) = NULL;
 void *_SSFTLSFinishedKeyScrubTestHookCtx = NULL;
@@ -58,7 +61,7 @@ void SSFTLSHkdfExpandLabel(SSFHMACHash_t hash, const uint8_t *secret, size_t sec
                            const char *label, const uint8_t *context, size_t ctxLen, uint8_t *out,
                            size_t outLen)
 {
-    uint8_t hkdfLabel[2 + 1 + 6 + 64 + 1 + SSF_TLS_MAX_HASH_SIZE];
+    uint8_t hkdfLabel[2 + 1 + 6 + SSF_TLS_HKDF_LABEL_MAX_LEN + 1 + SSF_TLS_MAX_HASH_SIZE];
     size_t labelLen;
     size_t pos = 0;
 
@@ -66,13 +69,11 @@ void SSFTLSHkdfExpandLabel(SSFHMACHash_t hash, const uint8_t *secret, size_t sec
     SSF_REQUIRE(label != NULL);
     SSF_REQUIRE(out != NULL);
     SSF_REQUIRE(outLen <= 255u);
-    /* hkdfLabel buffer is sized for at most SSF_TLS_MAX_HASH_SIZE bytes of context. RFC 8446 */
-    /* Sec. 7.1 permits up to 255 bytes, but real TLS 1.3 feeds transcript hashes (<= 48), so */
-    /* tightening to the buffer's slot is safe and matches actual usage.                     */
-    SSF_REQUIRE(ctxLen <= SSF_TLS_MAX_HASH_SIZE);
+    SSF_REQUIRE(ctxLen <= SSF_TLS_MAX_HASH_SIZE); /* every TLS 1.3 context is a hash */
+    SSF_REQUIRE((context != NULL) || (ctxLen == 0u)); /* ctxLen bytes must exist (AUDIT TLS-3) */
 
     labelLen = strlen(label);
-    SSF_REQUIRE(labelLen <= 64u);
+    SSF_REQUIRE(labelLen <= SSF_TLS_HKDF_LABEL_MAX_LEN); /* RFC 8446 maximum (AUDIT TLS-4) */
 
     /* uint16 Length */
     hkdfLabel[pos++] = (uint8_t)((outLen >> 8) & 0xFFu);
@@ -89,11 +90,15 @@ void SSFTLSHkdfExpandLabel(SSFHMACHash_t hash, const uint8_t *secret, size_t sec
 
     /* uint8 context length + context */
     hkdfLabel[pos++] = (uint8_t)ctxLen;
-    if ((context != NULL) && (ctxLen > 0u))
+
+    /* Is there context to append? */
+    if (ctxLen > 0u)
     {
+        /* Yes, copy it after its length byte. */
         memcpy(&hkdfLabel[pos], context, ctxLen);
         pos += ctxLen;
     }
+    /* No, the zero length byte alone encodes an empty context. */
 
     SSFHKDFExpand(hash, secret, secretLen, hkdfLabel, pos, out, outLen);
 }

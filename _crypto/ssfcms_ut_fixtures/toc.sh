@@ -25,6 +25,7 @@ emit _utFixEcdsaSkidAttached ecdsa_skid_attached.der
 emit _utFixRsaPkcs1Detached rsa_pkcs1_detached.der
 emit _utFixRsaPssDetached rsa_pss_detached.der
 emit _utFixTwoSignersDetached two_signers_detached.der
+emit _utFixRsaChainDetached rsa_chain_detached.der
 [ -s ed25519_detached.der ] && emit _utFixEd25519Detached ed25519_detached.der
 printf '/* Modeled firmware signature: see gen_modeled.pl, assembled around OpenSSL outputs. */\n\n'
 emit _utFixFwContent ../modeled/fw.bin

@@ -71,8 +71,11 @@ against a caller-supplied trust store. There is no encoder: the module verifies,
   digest and its algorithm; [`SSFCMSGetDigestAlg()`](#ssfcmsgetdigestalg) says which algorithm a
   signer used, so the natural order is parse, read the algorithm, hash the file, verify. When the
   message carries its content, [`SSFCMSVerifyAttached()`](#ssfcmsverifyattached) hashes it
-  internally. A digest supplied for a message with attached content is never ignored: it must
-  equal the digest of that content.
+  internally. A digest supplied for a message with attached content is never ignored: without
+  signed attributes it must equal the digest of that content; with signed attributes it is checked
+  against the signed `message-digest` attribute, which is what the signature binds, and the
+  attached copy of the content is not consulted. A caller who wants the attached copy itself
+  checked uses [`SSFCMSVerifyAttached()`](#ssfcmsverifyattached).
 - **Verification order, per signer.** The signer's digest algorithm is supported and listed in
   `digestAlgorithms`; the supplied digest is for that algorithm and length (or attached content
   is digested); if `CMSAlgorithmProtection` is present its digest and signature algorithms,
@@ -108,8 +111,8 @@ against a caller-supplied trust store. There is no encoder: the module verifies,
   production-shaped message below, and `toc.sh` converts the DER into the header. The content is
   24 bytes; the ECDSA chain message is `openssl cms -sign -binary -noindef -outform DER -in
   content.bin -signer leaf.pem -inkey leaf.key -certfile int.pem -md sha256`, and variants add
-  `-keyid`, `-nodetach`, `-noattr`, `-keyopt rsa_padding_mode:pss`, a second `-signer`, or drop
-  `-noindef` for the rejected BER form. Regenerating changes every key, so the tests assert only
+  `-keyid`, `-nodetach`, `-noattr`, `-keyopt rsa_padding_mode:pss`, a second `-signer`, an RSA
+  leaf issued by the P-256 intermediate, or drop `-noindef` for the rejected BER form. Regenerating changes every key, so the tests assert only
   on structure, names, serial prefixes and lengths. The unit test also builds its own messages for Ed25519,
   `CMSAlgorithmProtection`, the configured limits and malformed attribute sets. A further fixture
   models a production firmware signature: a root that is not embedded, two CA levels issued with

@@ -85,6 +85,14 @@ openssl x509 -req -in cs.csr -CA int.pem -CAkey int.key -set_serial 4 -days 7300
 openssl cms -sign -binary -noindef -outform DER -in content.bin -signer cs.pem -inkey cs.key \
     -certfile int.pem -md sha384 -out ecdsa_cs_sha384_detached.der
 
+# ---- RSA-2048 signer issued by the P-256 intermediate: an RSA leaf on an ECDSA chain ----
+openssl req -new -newkey rsa:2048 -noenc -keyout rsaleaf.key \
+    -subj "/O=SSF Test/OU=Firmware/CN=SSF RSA Chain Signer" -out rsaleaf.csr
+openssl x509 -req -in rsaleaf.csr -CA int.pem -CAkey int.key -set_serial 5 -days 7300 -sha256 \
+    -extfile ca.cnf -extensions leaf_ext -out rsaleaf.pem
+openssl cms -sign -binary -noindef -outform DER -in content.bin -signer rsaleaf.pem \
+    -inkey rsaleaf.key -certfile int.pem -md sha256 -out rsa_chain_detached.der
+
 # ---- No signed attributes (signature directly over content), attached ----
 openssl cms -sign -binary -noindef -outform DER -in content.bin -signer leaf.pem -inkey leaf.key \
     -md sha256 -noattr -nodetach -out ecdsa_noattr_attached.der

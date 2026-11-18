@@ -96,6 +96,8 @@ static bool _utSpanIn(const uint8_t *p, uint32_t len, const uint8_t *base, uint3
 static uint32_t _utTraceCount;
 static uint32_t _utTraceErrors;
 static int _utTraceLastLevel;
+static int _utTraceLastCategory;
+static void *_utTraceLastCtx;
 static char _utTraceLastMsg[256];
 static char _utTraceFirstMsg[256];
 
@@ -104,9 +106,9 @@ static void _utTrace(int level, int category, const char *msgStr, void *ctxOpt)
     size_t n = 0;
 
     SSF_REQUIRE(msgStr != NULL);
-    (void)category;
-    (void)ctxOpt;
 
+    _utTraceLastCategory = category;
+    _utTraceLastCtx = ctxOpt;
     _utTraceCount++;
     if (level == (int)SSF_TLS_TRACE_ERROR) _utTraceErrors++;
     _utTraceLastLevel = level;
@@ -251,6 +253,21 @@ typedef struct
     bool unsignedAttrs;
     uint8_t signerCopies;               /* zero means 1 */
     uint8_t trailingSi;                 /* junk bytes appended inside the SignerInfo */
+    bool wrongContentInfoOid;           /* ContentInfo names id-data instead of id-signedData */
+    bool junkInCi;                      /* a NULL after the [0] inside the ContentInfo */
+    bool junkInWrap;                    /* a NULL after SignedData inside the [0] */
+    bool junkInEcont;                   /* a NULL after the OCTET STRING inside eContent [0] */
+    bool noDigestAlgs;                  /* empty digestAlgorithms SET */
+    bool noSigners;                     /* empty signerInfos SET */
+    bool setDigestParamsBad;            /* INTEGER parameters on the digestAlgorithms entry */
+    bool sidBadTag;                     /* SignerIdentifier is an OCTET STRING */
+    bool skidEmpty;                     /* zero-length [0] subjectKeyIdentifier */
+    bool emptySig;                      /* zero-length signature OCTET STRING */
+    bool dupContentTypeValue;           /* two OIDs inside the content-type attribute's SET */
+    bool dupSigningTime;                /* two signing-time attributes */
+    bool dupAlgProt;                    /* two CMSAlgorithmProtection attributes */
+    bool apMac;                         /* a trailing [2] macAlgorithm inside the protection */
+    bool shortMessageDigest;            /* 20-byte message-digest attribute */
 } _utCmsSpec_t;
 
 /* --------------------------------------------------------------------------------------------- */
@@ -282,7 +299,7 @@ static bool _utEncAlgId(uint8_t *out, uint32_t outSize, const uint8_t *oid, uint
 static bool _utEncAttr(uint8_t *out, uint32_t outSize, const uint8_t *typeOid, uint32_t typeOidLen,
                        const uint8_t *val, uint32_t valLen, uint32_t *wOut)
 {
-    static uint8_t tmp[1200];
+    static uint8_t tmp[7900];
     uint32_t n;
     uint32_t w;
 
@@ -341,8 +358,10 @@ static void _utSpecDigest(const _utCmsSpec_t *s, const uint8_t **oidOut, uint32_
 static bool _utEncAttrsContent(const _utCmsSpec_t *s, const uint8_t *digest, uint32_t digestLen,
                                uint8_t *out, uint32_t outSize, uint32_t *wOut)
 {
-    static uint8_t val[1100];
-    static uint8_t pad[1024];
+    static uint8_t val[7800];
+    static uint8_t pad[7700];
+    static const uint8_t macAlg[] = { 0xA2u, 0x07u, 0x06u, 0x05u, 0x2Bu, 0x0Eu, 0x03u, 0x02u,
+                                      0x1Au };
     uint8_t md[SSF_SHA2_512_BYTE_SIZE];
     const uint8_t *ct;
     uint32_t ctLen;
@@ -354,6 +373,8 @@ static bool _utEncAttrsContent(const _utCmsSpec_t *s, const uint8_t *digest, uin
     uint32_t pos = 0;
     uint32_t n;
     uint32_t w;
+    uint8_t copies;
+    uint8_t c;
 
     SSF_REQUIRE(s != NULL);
     SSF_REQUIRE(digest != NULL);
@@ -368,8 +389,14 @@ static bool _utEncAttrsContent(const _utCmsSpec_t *s, const uint8_t *digest, uin
     if (!s->omitContentType)
     {
         if (!SSFASN1EncOIDRaw(val, sizeof(val), ct, ctLen, &w)) return false;
+        n = w;
+        if (s->dupContentTypeValue)
+        {
+            if (!SSFASN1EncOIDRaw(&val[n], sizeof(val) - n, ct, ctLen, &w)) return false;
+            n += w;
+        }
         if (!_utEncAttr(&out[pos], outSize - pos, _utOidAttrContentType,
-                        sizeof(_utOidAttrContentType), val, w, &w)) return false;
+                        sizeof(_utOidAttrContentType), val, n, &w)) return false;
         pos += w;
         if (s->dupContentType)
         {
@@ -380,8 +407,9 @@ static bool _utEncAttrsContent(const _utCmsSpec_t *s, const uint8_t *digest, uin
         }
     }
 
-    /* signing-time */
-    if (s->signingTime)
+    /* signing-time, once or twice */
+    copies = s->signingTime ? (s->dupSigningTime ? 2u : 1u) : 0u;
+    for (c = 0; c < copies; c++)
     {
         if (!SSFASN1EncUTCTime(val, sizeof(val), 1795000000ull, &w)) return false;
         if (!_utEncAttr(&out[pos], outSize - pos, _utOidAttrSigningTime,
@@ -389,8 +417,9 @@ static bool _utEncAttrsContent(const _utCmsSpec_t *s, const uint8_t *digest, uin
         pos += w;
     }
 
-    /* CMSAlgorithmProtection { digestAlgorithm, signatureAlgorithm [1] IMPLICIT } */
-    if (s->algProt)
+    /* CMSAlgorithmProtection { digestAlgorithm, signatureAlgorithm [1] IMPLICIT }, once or twice */
+    copies = s->algProt ? (s->dupAlgProt ? 2u : 1u) : 0u;
+    for (c = 0; c < copies; c++)
     {
         _utSpecDigest(s, &dOid, &dOidLen, &alg);
         if (s->apDigestOid != NULL)
@@ -418,6 +447,11 @@ static bool _utEncAttrsContent(const _utCmsSpec_t *s, const uint8_t *digest, uin
             if (!SSFASN1EncWrap(&pad[n], sizeof(pad) - n, 0xA1u, inner, m, &w)) return false;
             n += w;
         }
+        if (s->apMac)
+        {
+            memcpy(&pad[n], macAlg, sizeof(macAlg));
+            n += (uint32_t)sizeof(macAlg);
+        }
         if (!SSFASN1EncWrap(val, sizeof(val), SSF_ASN1_TAG_SEQUENCE, pad, n, &w)) return false;
         if (!_utEncAttr(&out[pos], outSize - pos, _utOidAttrAlgProt, sizeof(_utOidAttrAlgProt),
                         val, w, &w)) return false;
@@ -429,6 +463,7 @@ static bool _utEncAttrsContent(const _utCmsSpec_t *s, const uint8_t *digest, uin
     {
         memcpy(md, digest, digestLen);
         if (s->wrongMessageDigest) md[0] ^= 0x01u;
+        if (s->shortMessageDigest) digestLen = 20u;
         if (!SSFASN1EncOctetString(val, sizeof(val), md, digestLen, &w)) return false;
         if (!_utEncAttr(&out[pos], outSize - pos, _utOidAttrMessageDigest,
                         sizeof(_utOidAttrMessageDigest), val, w, &w)) return false;
@@ -454,13 +489,13 @@ static bool _utEncAttrsContent(const _utCmsSpec_t *s, const uint8_t *digest, uin
 /* --------------------------------------------------------------------------------------------- */
 static bool _utBuildCms(const _utCmsSpec_t *s, uint8_t *out, uint32_t outSize, uint32_t *lenOut)
 {
-    static uint8_t attrs[1400];
-    static uint8_t signedBytes[1404];
-    static uint8_t si[2200];
-    static uint8_t sis[6800];
+    static uint8_t attrs[8000];
+    static uint8_t signedBytes[8004];
+    static uint8_t si[8600];
+    static uint8_t sis[8700];
     static uint8_t certs[5000];
-    static uint8_t sd[SSF_CMS_CONFIG_MAX_DER_LEN + 64u];
-    static uint8_t wrap[SSF_CMS_CONFIG_MAX_DER_LEN + 72u];
+    static uint8_t sd[SSF_CMS_CONFIG_MAX_DER_LEN + 1400u];
+    static uint8_t wrap[SSF_CMS_CONFIG_MAX_DER_LEN + 1408u];
     uint8_t tmp[160];
     uint8_t tmp2[80];
     uint8_t digest[SSF_SHA2_512_BYTE_SIZE];
@@ -556,9 +591,18 @@ static bool _utBuildCms(const _utCmsSpec_t *s, uint8_t *out, uint32_t outSize, u
                           (s->siVersionOverride != 0u) ? s->siVersionOverride :
                           (s->useSkid ? 3u : 1u), &w)) return false;
     pos += w;
-    if (s->useSkid)
+    if (s->sidBadTag)
     {
-        if (!SSFASN1EncWrap(&si[pos], sizeof(si) - pos, 0x80u, cert.skid, cert.skidLen, &w))
+        if (!SSFASN1EncOctetString(&si[pos], sizeof(si) - pos, cert.skid, cert.skidLen, &w))
+        {
+            return false;
+        }
+        pos += w;
+    }
+    else if (s->useSkid)
+    {
+        if (!SSFASN1EncWrap(&si[pos], sizeof(si) - pos, 0x80u, cert.skid,
+                            s->skidEmpty ? 0u : cert.skidLen, &w))
         {
             return false;
         }
@@ -594,7 +638,8 @@ static bool _utBuildCms(const _utCmsSpec_t *s, uint8_t *out, uint32_t outSize, u
     }
     if (!_utEncAlgId(&si[pos], sizeof(si) - pos, sOid, sOidLen, NULL, 0u, &w)) return false;
     pos += w;
-    if (!SSFASN1EncOctetString(&si[pos], sizeof(si) - pos, sig, (uint32_t)sigLen, &w)) return false;
+    if (!SSFASN1EncOctetString(&si[pos], sizeof(si) - pos, sig, s->emptySig ? 0u : (uint32_t)sigLen,
+                               &w)) return false;
     pos += w;
     if (s->unsignedAttrs)
     {
@@ -630,10 +675,19 @@ static bool _utBuildCms(const _utCmsSpec_t *s, uint8_t *out, uint32_t outSize, u
         static uint8_t algs[200];
         uint32_t a = 0;
 
-        if (!_utEncAlgId(&algs[a], sizeof(algs) - a,
-                         (s->setDigestOid != NULL) ? s->setDigestOid : dOid,
-                         (s->setDigestOid != NULL) ? s->setDigestOidLen : dOidLen, NULL, 0u,
-                         &w)) return false;
+        if (s->setDigestParamsBad)
+        {
+            if (!SSFASN1EncIntU64(tmp2, sizeof(tmp2), 7u, &w)) return false;
+            if (!_utEncAlgId(&algs[a], sizeof(algs) - a, dOid, dOidLen, tmp2, w, &w)) return false;
+        }
+        else if (!s->noDigestAlgs)
+        {
+            if (!_utEncAlgId(&algs[a], sizeof(algs) - a,
+                             (s->setDigestOid != NULL) ? s->setDigestOid : dOid,
+                             (s->setDigestOid != NULL) ? s->setDigestOidLen : dOidLen, NULL, 0u,
+                             &w)) return false;
+        }
+        else w = 0;
         a += w;
         for (i = 0; i < s->extraDigestAlgs; i++)
         {
@@ -660,6 +714,11 @@ static bool _utBuildCms(const _utCmsSpec_t *s, uint8_t *out, uint32_t outSize, u
             if (!SSFASN1EncWrap(oct, sizeof(oct),
                                 s->constructedEContent ? 0x24u : SSF_ASN1_TAG_OCTET_STRING,
                                 s->content, s->contentLen, &w)) return false;
+            if (s->junkInEcont)
+            {
+                memcpy(&oct[w], _utDerNull, sizeof(_utDerNull));
+                w += (uint32_t)sizeof(_utDerNull);
+            }
             if (!SSFASN1EncWrap(&eci[e], sizeof(eci) - e, 0xA0u, oct, w, &w)) return false;
             e += w;
         }
@@ -699,7 +758,7 @@ static bool _utBuildCms(const _utCmsSpec_t *s, uint8_t *out, uint32_t outSize, u
         pos += w;
     }
     n = 0;
-    copies = (s->signerCopies == 0u) ? 1u : s->signerCopies;
+    copies = s->noSigners ? 0u : ((s->signerCopies == 0u) ? 1u : s->signerCopies);
     {
         uint32_t sisLen = 0;
 
@@ -723,12 +782,22 @@ static bool _utBuildCms(const _utCmsSpec_t *s, uint8_t *out, uint32_t outSize, u
 
     /* ContentInfo */
     if (!SSFASN1EncWrap(wrap, sizeof(wrap), SSF_ASN1_TAG_SEQUENCE, sd, pos, &w)) return false;
+    if (s->junkInWrap)
+    {
+        memcpy(&wrap[w], _utDerNull, sizeof(_utDerNull));
+        w += (uint32_t)sizeof(_utDerNull);
+    }
     if (!SSFASN1EncWrap(sd, sizeof(sd), 0xA0u, wrap, w, &w)) return false;
     n = w;
-    if (!SSFASN1EncOIDRaw(wrap, sizeof(wrap), _utOidSignedData, sizeof(_utOidSignedData), &w))
+    if (s->junkInCi)
     {
-        return false;
+        memcpy(&sd[n], _utDerNull, sizeof(_utDerNull));
+        n += (uint32_t)sizeof(_utDerNull);
     }
+    ct = s->wrongContentInfoOid ? _utOidData : _utOidSignedData;
+    ctLen = s->wrongContentInfoOid ? (uint32_t)sizeof(_utOidData) :
+                                     (uint32_t)sizeof(_utOidSignedData);
+    if (!SSFASN1EncOIDRaw(wrap, sizeof(wrap), ct, ctLen, &w)) return false;
     if ((w + n) > sizeof(wrap)) return false;
     memcpy(&wrap[w], sd, n);
     n += w;
@@ -736,10 +805,11 @@ static bool _utBuildCms(const _utCmsSpec_t *s, uint8_t *out, uint32_t outSize, u
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if a self-signed signer certificate for a fresh key is built with *lenOut set.    */
+/* Returns true if a certificate for a fresh key is built, self-signed or P-256 issued by a CA.   */
 /* --------------------------------------------------------------------------------------------- */
-static bool _utMakeSigner(bool ed25519, const char *cnStr, uint8_t *priv, uint8_t *pub,
-                          uint8_t *out, uint32_t outSize, uint32_t *lenOut)
+static bool _utMakeCert(bool ed25519, bool isCA, const char *cnStr, const char *issuerCnStrOpt,
+                        const uint8_t *issuerPrivOpt, uint8_t *priv, uint8_t *pub, uint8_t *out,
+                        uint32_t outSize, uint32_t *lenOut)
 {
     static uint8_t tbs[SSF_X509_CONFIG_MAX_CERT_SIZE];
     static const uint8_t skid[20] = { 0x5Au, 0x01u, 0x02u, 0x03u, 0x04u, 0x05u, 0x06u, 0x07u,
@@ -754,6 +824,8 @@ static bool _utMakeSigner(bool ed25519, const char *cnStr, uint8_t *priv, uint8_
     uint32_t tbsLen;
 
     SSF_REQUIRE(cnStr != NULL);
+    SSF_REQUIRE((issuerCnStrOpt == NULL) == (issuerPrivOpt == NULL));
+    SSF_REQUIRE((!ed25519) || (issuerPrivOpt == NULL));
     SSF_REQUIRE(priv != NULL);
     SSF_REQUIRE(pub != NULL);
     SSF_REQUIRE(out != NULL);
@@ -764,14 +836,15 @@ static bool _utMakeSigner(bool ed25519, const char *cnStr, uint8_t *priv, uint8_
     p.version = 2u;
     p.serial = serial;
     p.serialLen = sizeof(serial);
-    p.issuer.cn = cnStr;
+    p.issuer.cn = (issuerCnStrOpt != NULL) ? issuerCnStrOpt : cnStr;
     p.subject.cn = cnStr;
     p.notBefore = 1700000000ull;
     p.notAfter = 2000000000ull;
     p.pathLenConstraint = -1;
     p.addBasicConstraints = true;
+    p.isCA = isCA;
     p.addKeyUsage = true;
-    p.keyUsageBits = SSF_X509_KU_DIGITAL_SIGNATURE;
+    p.keyUsageBits = isCA ? SSF_X509_KU_KEY_CERT_SIGN : SSF_X509_KU_DIGITAL_SIGNATURE;
     p.skid = skid;
     p.skidLen = sizeof(skid);
     if (ed25519)
@@ -801,10 +874,25 @@ static bool _utMakeSigner(bool ed25519, const char *cnStr, uint8_t *priv, uint8_
         p.pubKeyLen = (uint32_t)pubLen;
         if (!SSFX509EncodeTBS(tbs, sizeof(tbs), &p, &tbsLen)) return false;
         SSFSHA256(tbs, tbsLen, hash, sizeof(hash));
-        if (!SSFECDSASign(SSF_EC_CURVE_P256, priv, 32u, hash, sizeof(hash), sig, sizeof(sig),
-                          &sigLen)) return false;
+        if (!SSFECDSASign(SSF_EC_CURVE_P256, (issuerPrivOpt != NULL) ? issuerPrivOpt : priv, 32u,
+                          hash, sizeof(hash), sig, sizeof(sig), &sigLen)) return false;
     }
     return SSFX509EncodeCert(out, outSize, &p, sig, (uint32_t)sigLen, lenOut);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if a self-signed signer certificate for a fresh key is built with *lenOut set.    */
+/* --------------------------------------------------------------------------------------------- */
+static bool _utMakeSigner(bool ed25519, const char *cnStr, uint8_t *priv, uint8_t *pub,
+                          uint8_t *out, uint32_t outSize, uint32_t *lenOut)
+{
+    SSF_REQUIRE(cnStr != NULL);
+    SSF_REQUIRE(priv != NULL);
+    SSF_REQUIRE(pub != NULL);
+    SSF_REQUIRE(out != NULL);
+    SSF_REQUIRE(lenOut != NULL);
+
+    return _utMakeCert(ed25519, false, cnStr, NULL, NULL, priv, pub, out, outSize, lenOut);
 }
 
 void SSFCMSUnitTest(void)
@@ -1104,6 +1192,33 @@ void SSFCMSUnitTest(void)
                                   trustLen, 2u, now, &res) == true);
     SSF_ASSERT(res.signerIndex == 1u);
 
+    /* ---- RSA signer issued by the P-256 intermediate: an RSA leaf on an ECDSA chain ---- */
+    n = sizeof(_utFixRsaChainDetached);
+    SSF_ASSERT(SSFCMSParse(_utFixRsaChainDetached, n, &sd) == true);
+    SSF_ASSERT((sd.signersLen == 1u) && (sd.certsLen == 2u));
+    si = &sd.signers[0];
+    SSF_ASSERT(_utSpanEq(si->sigAlgOidRaw, si->sigAlgOidRawLen, _utOidRsaEncryption,
+                         sizeof(_utOidRsaEncryption)) == true);
+    SSF_ASSERT(si->signatureLen == 256u);
+    trust[0] = _utFixRootDer;
+    trustLen[0] = sizeof(_utFixRootDer);
+    SSF_ASSERT(SSFCMSVerifyDigest(&sd, sha256, sizeof(sha256), SSF_CMS_DIGEST_SHA256, trust,
+                                  trustLen, 1u, now, &res) == true);
+    SSF_ASSERT(res.signerSubject.cnLen == 20u);
+    SSF_ASSERT(memcmp(res.signerSubject.cn, "SSF RSA Chain Signer", 20u) == 0);
+    trust[0] = _utFixIntDer;
+    trustLen[0] = sizeof(_utFixIntDer);
+    SSF_ASSERT(SSFCMSVerifyDigest(&sd, sha256, sizeof(sha256), SSF_CMS_DIGEST_SHA256, trust,
+                                  trustLen, 1u, now, &res) == true);
+    trust[0] = _utFixRsaDer;
+    trustLen[0] = sizeof(_utFixRsaDer);
+    SSF_ASSERT(SSFCMSVerifyDigest(&sd, sha256, sizeof(sha256), SSF_CMS_DIGEST_SHA256, trust,
+                                  trustLen, 1u, now, &res) == false);
+    trust[0] = _utFixOtherDer;
+    trustLen[0] = sizeof(_utFixOtherDer);
+    SSF_ASSERT(SSFCMSVerifyDigest(&sd, sha256, sizeof(sha256), SSF_CMS_DIGEST_SHA256, trust,
+                                  trustLen, 1u, now, &res) == false);
+
     /* ---- No signed attributes: the signature covers the attached content directly ---- */
     n = sizeof(_utFixEcdsaNoattrAttached);
     SSF_ASSERT(SSFCMSParse(_utFixEcdsaNoattrAttached, n, &sd) == true);
@@ -1201,6 +1316,21 @@ void SSFCMSUnitTest(void)
     {
         static uint8_t ecCert[SSF_X509_CONFIG_MAX_CERT_SIZE];
         static uint8_t edCert[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t caACert[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t caBCert[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t issCert[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t caAPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t caBPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t issPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t caAPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        static uint8_t caBPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        static uint8_t issPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        static const uint8_t sha1Oid[] = { 0x2Bu, 0x0Eu, 0x03u, 0x02u, 0x1Au };
+        static const uint8_t bogusCert[] = { 0x30u, 0x03u, 0x02u, 0x01u, 0x01u };
+        uint32_t caALen;
+        uint32_t caBLen;
+        uint32_t issLen;
+        int marker = 0;
         static uint8_t ecPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
         static uint8_t ecPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
         static uint8_t edSeed[SSF_ED25519_SEED_SIZE];
@@ -1503,6 +1633,259 @@ void SSFCMSUnitTest(void)
         SSF_ASSERT(SSFCMSParse(msg, len, &sd) == true);
         SSF_ASSERT(sd.version == 3u);
         SSF_ASSERT(_VERIFY256() == true);
+
+        /* A ContentInfo whose contentType is not id-signedData */
+        _SPEC_RESET();
+        s.wrongContentInfoOid = true;
+        _BUILD();
+        SSF_ASSERT(SSFCMSParse(msg, len, &sd) == false);
+
+        /* Junk after the last element inside each of the three wrappers */
+        _SPEC_RESET();
+        s.junkInCi = true;
+        _BUILD();
+        SSF_ASSERT(SSFCMSParse(msg, len, &sd) == false);
+        _SPEC_RESET();
+        s.junkInWrap = true;
+        _BUILD();
+        SSF_ASSERT(SSFCMSParse(msg, len, &sd) == false);
+        _SPEC_RESET();
+        s.attached = true;
+        s.junkInEcont = true;
+        _BUILD();
+        SSF_ASSERT(SSFCMSParse(msg, len, &sd) == false);
+
+        /* An empty digestAlgorithms set parses, but then no signer's algorithm is listed */
+        _SPEC_RESET();
+        s.noDigestAlgs = true;
+        _BUILD();
+        SSF_ASSERT(SSFCMSParse(msg, len, &sd) == true);
+        SSF_ASSERT(sd.digestAlgsLen == 0u);
+        SSF_ASSERT(_VERIFY256() == false);
+
+        /* An empty signerInfos set parses, and there is nothing to verify or to ask about */
+        _SPEC_RESET();
+        s.noSigners = true;
+        _BUILD();
+        SSF_ASSERT(SSFCMSParse(msg, len, &sd) == true);
+        SSF_ASSERT(sd.signersLen == 0u);
+        SSF_ASSERT(_VERIFY256() == false);
+        SSF_ASSERT_TEST(SSFCMSGetDigestAlg(&sd, 0u, &alg));
+
+        /* INTEGER parameters on the digestAlgorithms entry, as already tested on the signer's */
+        _SPEC_RESET();
+        s.setDigestParamsBad = true;
+        _BUILD();
+        SSF_ASSERT(SSFCMSParse(msg, len, &sd) == false);
+
+        /* Identifier that is neither form, an empty SKID, and an empty signature */
+        _SPEC_RESET();
+        s.sidBadTag = true;
+        _BUILD();
+        SSF_ASSERT(SSFCMSParse(msg, len, &sd) == false);
+        _SPEC_RESET();
+        s.useSkid = true;
+        s.skidEmpty = true;
+        _BUILD();
+        SSF_ASSERT(SSFCMSParse(msg, len, &sd) == false);
+        _SPEC_RESET();
+        s.emptySig = true;
+        _BUILD();
+        SSF_ASSERT(SSFCMSParse(msg, len, &sd) == false);
+
+        /* Exactly one value per attribute and at most one instance of each (Sec. 11) */
+        _SPEC_RESET();
+        s.dupContentTypeValue = true;
+        _BUILD();
+        SSF_ASSERT(SSFCMSParse(msg, len, &sd) == false);
+        _SPEC_RESET();
+        s.signingTime = true;
+        s.dupSigningTime = true;
+        _BUILD();
+        SSF_ASSERT(SSFCMSParse(msg, len, &sd) == false);
+        _SPEC_RESET();
+        s.algProt = true;
+        s.dupAlgProt = true;
+        _BUILD();
+        SSF_ASSERT(SSFCMSParse(msg, len, &sd) == false);
+
+        /* A trailing [2] macAlgorithm inside the protection attribute is tolerated unread */
+        _SPEC_RESET();
+        s.algProt = true;
+        s.apMac = true;
+        _BUILD();
+        SSF_ASSERT(SSFCMSParse(msg, len, &sd) == true);
+        SSF_ASSERT(sd.signers[0].hasAlgProtection == true);
+        SSF_ASSERT(_VERIFY256() == true);
+
+        /* Exactly the configured maximum length parses; one byte more does not */
+        {
+            int32_t pad = 4000;
+            uint32_t k;
+
+            _SPEC_RESET();
+            for (k = 0; k < 8u; k++)
+            {
+                s.padAttrLen = (uint32_t)pad;
+                _BUILD();
+                if (len == SSF_CMS_CONFIG_MAX_DER_LEN) break;
+                pad += ((int32_t)SSF_CMS_CONFIG_MAX_DER_LEN - (int32_t)len);
+            }
+            SSF_ASSERT(len == SSF_CMS_CONFIG_MAX_DER_LEN);
+            SSF_ASSERT(SSFCMSParse(msg, len, &sd) == true);
+            s.padAttrLen = (uint32_t)pad + 1u;
+            _BUILD();
+            SSF_ASSERT(len == (SSF_CMS_CONFIG_MAX_DER_LEN + 1u));
+            SSF_ASSERT(SSFCMSParse(msg, len, &sd) == false);
+        }
+
+        /* A SHA-1 signer parses, reports no supported digest algorithm, and never verifies */
+        _SPEC_RESET();
+        s.digestOid = sha1Oid;
+        s.digestOidLen = sizeof(sha1Oid);
+        _BUILD();
+        SSF_ASSERT(SSFCMSParse(msg, len, &sd) == true);
+        SSF_ASSERT(SSFCMSGetDigestAlg(&sd, 0u, &alg) == false);
+        SSF_ASSERT(_VERIFY256() == false);
+        SSF_ASSERT(SSFCMSVerifyDigest(&sd, sha384, sizeof(sha384), SSF_CMS_DIGEST_SHA384, trust,
+                                      trustLen, 1u, now, &res) == false);
+
+        /* A message-digest attribute of the wrong length takes the length branch */
+        _SPEC_RESET();
+        s.shortMessageDigest = true;
+        _BUILD();
+        SSF_ASSERT(SSFCMSParse(msg, len, &sd) == true);
+        SSF_ASSERT(sd.signers[0].messageDigestLen == 20u);
+        SSF_ASSERT(_VERIFY256() == false);
+
+        /* With signed attributes the digest attribute binds the content: a supplied digest */
+        /* that matches it verifies even when the attached copy of the content was altered,  */
+        /* while verifying the attached copy itself fails */
+        _SPEC_RESET();
+        s.attached = true;
+        _BUILD();
+        SSF_ASSERT(SSFCMSParse(msg, len, &sd) == true);
+        at = (uint32_t)(sd.eContent - msg);
+        msg[at] ^= 0x01u;
+        SSF_ASSERT(SSFCMSParse(msg, len, &sd) == true);
+        SSF_ASSERT(_VERIFY256() == true);
+        SSF_ASSERT(SSFCMSVerifyAttached(&sd, trust, trustLen, 1u, now, &res) == false);
+
+        /* Both verify functions zero the result on failure */
+        _SPEC_RESET();
+        s.signingTime = true;
+        _BUILD();
+        SSF_ASSERT(SSFCMSParse(msg, len, &sd) == true);
+        SSF_ASSERT(_VERIFY256() == true);
+        SSF_ASSERT((res.signerSubject.cn != NULL) && (res.hasSigningTime == true));
+        SSF_ASSERT(SSFCMSVerifyDigest(&sd, bad, sizeof(bad), SSF_CMS_DIGEST_SHA256, trust, trustLen,
+                                      1u, now, &res) == false);
+        SSF_ASSERT((res.signerIndex == 0u) && (res.signerSubject.cn == NULL));
+        SSF_ASSERT((res.hasSigningTime == false) && (res.signingTime == 0u));
+        SSF_ASSERT(_VERIFY256() == true);
+        SSF_ASSERT(SSFCMSVerifyAttached(&sd, trust, trustLen, 1u, now, &res) == false);
+        SSF_ASSERT((res.signerSubject.cn == NULL) && (res.hasSigningTime == false));
+
+        /* Chain assembly: a duplicated certificate and an unparseable one are both harmless */
+        _SPEC_RESET();
+        s.extraDer[0] = ecCert;
+        s.extraDerLen[0] = ecCertLen;
+        s.extraCount = 1u;
+        _BUILD();
+        SSF_ASSERT(SSFCMSParse(msg, len, &sd) == true);
+        SSF_ASSERT(sd.certsLen == 2u);
+        SSF_ASSERT(_VERIFY256() == true);
+        _SPEC_RESET();
+        s.extraDer[0] = bogusCert;
+        s.extraDerLen[0] = sizeof(bogusCert);
+        s.extraCount = 1u;
+        _BUILD();
+        SSF_ASSERT(SSFCMSParse(msg, len, &sd) == true);
+        SSF_ASSERT(sd.certsLen == 2u);
+        SSF_ASSERT(_VERIFY256() == true);
+
+        /* A signer issued by a CA: embedded it chains to the CA anchor; absent from the message */
+        /* it is found only when the trust store holds it, and anchors only through the CA */
+        SSF_ASSERT(_utMakeCert(false, true, "ec ca", NULL, NULL, caAPriv, caAPub, caACert,
+                               sizeof(caACert), &caALen) == true);
+        SSF_ASSERT(_utMakeCert(false, false, "issued signer", "ec ca", caAPriv, issPriv, issPub,
+                               issCert, sizeof(issCert), &issLen) == true);
+        _SPEC_RESET();
+        s.priv = issPriv;
+        s.certDer = issCert;
+        s.certDerLen = issLen;
+        trust[0] = caACert;
+        trustLen[0] = caALen;
+        _BUILD();
+        SSF_ASSERT(SSFCMSParse(msg, len, &sd) == true);
+        SSF_ASSERT(_VERIFY256() == true);
+        SSF_ASSERT(memcmp(res.signerSubject.cn, "issued signer", 13u) == 0);
+        s.omitCert = true;
+        _BUILD();
+        SSF_ASSERT(SSFCMSParse(msg, len, &sd) == true);
+        SSF_ASSERT(sd.certsLen == 0u);
+        SSF_ASSERT(_VERIFY256() == false);                       /* signer not found anywhere */
+        trust[0] = issCert;
+        trustLen[0] = issLen;
+        SSF_ASSERT(_VERIFY256() == false);                       /* found, but not self-signed */
+        trust[1] = caACert;
+        trustLen[1] = caALen;
+        SSF_ASSERT(SSFCMSVerifyDigest(&sd, sha256, sizeof(sha256), SSF_CMS_DIGEST_SHA256, trust,
+                                      trustLen, 2u, now, &res) == true);   /* found and anchored */
+
+        /* Two anchors sharing the subject "ec ca": the one whose key signed the signer decides */
+        SSF_ASSERT(_utMakeCert(false, true, "ec ca", NULL, NULL, caBPriv, caBPub, caBCert,
+                               sizeof(caBCert), &caBLen) == true);
+        SSF_ASSERT(_utMakeCert(false, false, "issued signer", "ec ca", caBPriv, issPriv, issPub,
+                               issCert, sizeof(issCert), &issLen) == true);
+        _SPEC_RESET();
+        s.priv = issPriv;
+        s.certDer = issCert;
+        s.certDerLen = issLen;
+        _BUILD();
+        SSF_ASSERT(SSFCMSParse(msg, len, &sd) == true);
+        trust[0] = caACert;
+        trustLen[0] = caALen;
+        trust[1] = caBCert;
+        trustLen[1] = caBLen;
+        SSF_ASSERT(SSFCMSVerifyDigest(&sd, sha256, sizeof(sha256), SSF_CMS_DIGEST_SHA256, trust,
+                                      trustLen, 2u, now, &res) == true);
+        trust[0] = caBCert;
+        trustLen[0] = caBLen;
+        trust[1] = caACert;
+        trustLen[1] = caALen;
+        SSF_ASSERT(SSFCMSVerifyDigest(&sd, sha256, sizeof(sha256), SSF_CMS_DIGEST_SHA256, trust,
+                                      trustLen, 2u, now, &res) == true);
+        trust[0] = caACert;
+        trustLen[0] = caALen;
+        SSF_ASSERT(_VERIFY256() == false);
+
+        /* Empty attached content digests the empty string */
+        _SPEC_RESET();
+        s.contentLen = 0u;
+        s.attached = true;
+        _BUILD();
+        SSF_ASSERT(SSFCMSParse(msg, len, &sd) == true);
+        SSF_ASSERT((sd.hasEContent == true) && (sd.eContentLen == 0u));
+        SSF_ASSERT(SSFCMSVerifyAttached(&sd, trust, trustLen, 1u, now, &res) == true);
+        SSFSHA256(content, 0u, bad, sizeof(bad));
+        SSF_ASSERT(SSFCMSVerifyDigest(&sd, bad, sizeof(bad), SSF_CMS_DIGEST_SHA256, trust, trustLen,
+                                      1u, now, &res) == true);
+        memcpy(bad, sha256, sizeof(bad));
+        bad[0] ^= 0x01u;
+
+        /* The trace callback receives the certificate category and the caller's context */
+        _SPEC_RESET();
+        _BUILD();
+        SSF_ASSERT(SSFCMSParse(msg, len, &sd) == true);
+        _utTraceLastCategory = -1;
+        _utTraceLastCtx = NULL;
+        SSFCMSSetTraceCtx(_utTrace, &marker);
+        SSF_ASSERT(SSFCMSVerifyDigest(&sd, bad, sizeof(bad), SSF_CMS_DIGEST_SHA256, trust, trustLen,
+                                      1u, now, &res) == false);
+        SSF_ASSERT(_utTraceLastCategory == (int)SSF_TLS_TRACE_CERT);
+        SSF_ASSERT(_utTraceLastCtx == (void *)&marker);
+        SSFCMSSetTraceCtx(NULL, NULL);
 
         #undef _VERIFY256
         #undef _BUILD

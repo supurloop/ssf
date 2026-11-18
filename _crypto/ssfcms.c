@@ -220,6 +220,8 @@ static bool _SSFCMSParseAlgProtection(SSFASN1Cursor_t *pos, SSFCMSSignerInfo_t *
     SSFASN1Cursor_t inner;
     SSFASN1Cursor_t sigInner;
     uint16_t tag;
+    const uint8_t *digestParams;
+    uint32_t digestParamsLen;
 
     SSF_REQUIRE(pos != NULL);
     SSF_REQUIRE(si != NULL);
@@ -227,9 +229,14 @@ static bool _SSFCMSParseAlgProtection(SSFASN1Cursor_t *pos, SSFCMSSignerInfo_t *
     /* CMSAlgorithmProtection ::= SEQUENCE { digestAlgorithm, signatureAlgorithm [1] IMPLICIT } */
     if (!SSFASN1DecOpenConstructed(pos, SSF_ASN1_TAG_SEQUENCE, &inner, pos)) return false;
     if (!_SSFCMSParseAlgId(&inner, &si->apDigestAlgOidRaw, &si->apDigestAlgOidRawLen,
-                     &si->apSigAlgParams, &si->apSigAlgParamsLen)) return false;
-    si->apSigAlgParams = NULL;
-    si->apSigAlgParamsLen = 0;
+                     &digestParams, &digestParamsLen)) return false;
+
+    /* Digest params absent or NULL, as the SignerInfo's must be (RFC 6211, AUDIT CMS-3)? */
+    if (!_SSFCMSParamsAbsentOrNull(digestParams, digestParamsLen))
+    {
+        /* No, the protected digestAlgorithm cannot match the SignerInfo's */
+        return false;
+    }
 
     /* signatureAlgorithm present? RFC 6211 Sec. 2 requires it for a SignerInfo */
     if ((!SSFASN1DecPeekTag(&inner, &tag)) || (tag != _TAG_CTX1_CONSTRUCTED))

@@ -60,8 +60,9 @@ against a caller-supplied trust store. There is no encoder: the module verifies,
   [`SSFCMSParse()`](#ssfcmsparse), which must outlive them. Certificates are kept as DER spans and
   parsed on demand, so the structure stays a few hundred bytes.
 - **Parse is strict.** Any structural DER error, trailing bytes at any level, an unexpected
-  `contentType`, an unsupported version, a digest `AlgorithmIdentifier` whose parameters are
-  anything but absent or `NULL`, a `signedAttrs` set missing `content-type` or `message-digest`
+  `contentType`, an unsupported version, a digest `AlgorithmIdentifier` (in `digestAlgorithms`,
+  a SignerInfo, or a `CMSAlgorithmProtection` attribute) whose parameters are anything but
+  absent or `NULL`, a `signedAttrs` set missing `content-type` or `message-digest`
   (RFC 5652 §5.3) or carrying any of `content-type`, `message-digest`, `signing-time` or
   `CMSAlgorithmProtection` more than once or with other than exactly one value (§11), or a
   `CMSAlgorithmProtection` without its `signatureAlgorithm` (RFC 6211 §2) returns `false`.

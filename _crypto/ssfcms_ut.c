@@ -254,6 +254,8 @@ typedef struct
     uint32_t apSigOidLen;
     const uint8_t *apSigParams;
     uint32_t apSigParamsLen;
+    const uint8_t *apDigestParams;      /* parameters on the protection's digestAlgorithm */
+    uint32_t apDigestParamsLen;
     bool apOmitSig;                     /* leave out the [1] signatureAlgorithm */
     uint32_t padAttrLen;                /* add an unknown attribute carrying this many bytes */
     bool unsignedAttrs;
@@ -439,7 +441,8 @@ static bool _utEncAttrsContent(const _utCmsSpec_t *s, const uint8_t *digest, uin
         sOidLen = (s->apSigOid != NULL) ? s->apSigOidLen :
                   ((s->sigOid != NULL) ? s->sigOidLen :
                    (s->ed25519 ? sizeof(_utOidEd25519) : sizeof(_utOidEcdsaSha256)));
-        if (!_utEncAlgId(pad, sizeof(pad), dOid, dOidLen, NULL, 0u, &w)) return false;
+        if (!_utEncAlgId(pad, sizeof(pad), dOid, dOidLen, s->apDigestParams, s->apDigestParamsLen,
+                         &w)) return false;
         n = w;
         if (!s->apOmitSig)
         {
@@ -1484,6 +1487,26 @@ void SSFCMSUnitTest(void)
         s.apOmitSig = true;
         _BUILD();
         SSF_ASSERT(SSFCMSParse(msg, len, &sd) == false);
+
+        /* AUDIT CMS-3: the protection's digestAlgorithm parameters must be absent or NULL, as  */
+        /* the SignerInfo's are (RFC 6211 compares the whole AlgorithmIdentifier).              */
+        {
+            static const uint8_t intParams[] = { 0x02u, 0x01u, 0x05u };
+
+            _SPEC_RESET();
+            s.algProt = true;
+            s.apDigestParams = intParams;
+            s.apDigestParamsLen = sizeof(intParams);
+            _BUILD();
+            SSF_ASSERT(SSFCMSParse(msg, len, &sd) == false);
+            _SPEC_RESET();
+            s.algProt = true;
+            s.apDigestParams = _utDerNull;
+            s.apDigestParamsLen = sizeof(_utDerNull);
+            _BUILD();
+            SSF_ASSERT(SSFCMSParse(msg, len, &sd) == true);
+            SSF_ASSERT(_VERIFY256() == true);
+        }
 
         /* Ed25519 with SHA-512 as RFC 8419 requires; any other digest is refused */
         _SPEC_RESET();

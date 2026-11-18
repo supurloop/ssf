@@ -724,7 +724,7 @@ CMS-2  Low  DOC (2026-11-18)
   Evidence:  269  OpenConstructed(&pos, SEQUENCE, &attr, &pos); GetOIDRaw(&attr, ...);
                   OpenConstructed(&attr, SET, &vals, &attr);   /* no IsEmpty(&attr) */
 
-CMS-3  Low  OPEN
+CMS-3  Low  FIXED (2026-11-18)
   Location:  ssfcms.c:228-232 (_SSFCMSParseAlgProtection)
   Problem:   The protection attribute's digestAlgorithm parameters are parsed and discarded, so
              only the digest OID is compared against SignerInfo (:813-814). RFC 6211 compares
@@ -1419,3 +1419,14 @@ CHANGE LOG
               16-byte key accepted). GREEN: ssftls (all existing record round trips already used
               matching key lengths), ssfcms, ssfx509, ssfbase64url, ssfmatch. One-line comments,
               no line over 100 columns.
+  2026-11-18  CMS-3 FIXED via option 1. _SSFCMSParseAlgProtection now parses the protection's
+              digestAlgorithm parameters into locals (it no longer borrows apSigAlgParams as
+              scratch) and fails the parse unless they are absent or NULL, the same rule already
+              applied to the SignerInfo's own digest parameters. Together with the existing OID
+              and signature-parameter checks this is RFC 6211's whole-AlgorithmIdentifier
+              comparison. ssfcms.md's "Parse is strict" list names the protection attribute.
+              Tests: the ssfcms_ut.c message builder gains an apDigestParams knob; "AUDIT CMS-3":
+              INTEGER 5 digest parameters make SSFCMSParse return false, NULL parameters parse and
+              verify. RED: ssfcms_ut.c:1501 (INTEGER parameters parsed). GREEN: ssfcms incl. the
+              existing algorithm-protection tests, ssfx509, ssfbase64url, ssfmatch. One-line
+              comments, no line over 100 columns.

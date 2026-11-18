@@ -266,7 +266,7 @@ E-2  Medium  FIXED (2026-11-18)  [verified: 115 occurrences]
   Fix:       ((int64_t)1 << 20) / ((int64_t)1 << 21). The 2097151u and 666643 literals are fine.
   Evidence:  carry0 = (s0 + (1 << 20)) >> 21; s1 += carry0; s0 -= carry0 * (1 << 21);
 
-E-3  Low  OPEN
+E-3  Low  FIXED (2026-11-18)
   Location:  ssfed25519.c:404 (_fe_iszero)
   Problem:   -(int32_t)bits is signed-overflow UB when bits == 0x80000000 (negating INT32_MIN).
              Reachable for the 256 field values whose limbs are each 0 or 0x80000000. Compilers
@@ -1200,3 +1200,17 @@ CHANGE LOG
               (private key with trailing byte accepted). GREEN with ssfrsa (RSA unit test enabled
               for the run), ssfcms and ssfx509 (RSA keys parsed from real certificates),
               ssfbase64url, ssfmatch.
+  2026-11-18  E-3 FIXED via option 1. _fe_iszero now negates in unsigned arithmetic,
+              ((uint32_t)0u - bits), instead of -(int32_t)bits, which was signed overflow (UB)
+              for bits == 0x80000000. Same result and code on mainstream compilers. A sweep of
+              every other -(intNN_t) negation in _crypto (ssfbn.c, ssfed25519.c:229,
+              ssfx25519.c:253, ssfec.c:1366) found only 0/1, odd, or small int8_t operands.
+              Test block "AUDIT E-3" in ssfed25519_ut.c decodes the point with x = 2^31 (y from
+              a Python model, checked on the curve) through _SSFEd25519GeDecodeForTest and
+              requires that exact x; _ge_decode passes that x to _fe_iszero. A normal build
+              passes before and after, so the evidence is a sanitizer build (-O1
+              -fsanitize=signed-integer-overflow -fno-sanitize-recover=all). RED: "ssfed25519.c:
+              414:49: runtime error: negation of -2147483648 cannot be represented in type
+              'int'". GREEN under the same sanitizer (ssfed25519 incl. RFC 8032 / Wycheproof,
+              ssfcms, ssfx509, ssfbase64url, ssfmatch, no other signed overflow reported) and in
+              the normal -O3 build. ED25519 unit test flag restored.

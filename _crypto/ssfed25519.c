@@ -410,8 +410,9 @@ static uint8_t _fe_iszero(const _fe_t *a)
     _fe_reduce(&t);
     bits = 0;
     for (i = 0; i < 8u; i++) bits |= t.v[i];
-    /* Constant-time: (bits | -bits) has bit 31 set iff bits != 0 */
-    return (uint8_t)(1u ^ (((bits | ((uint32_t)(-(int32_t)bits))) >> 31) & 1u));
+    /* Constant-time: (bits | -bits) has bit 31 set iff bits != 0. Negate in unsigned arithmetic: */
+    /* -(int32_t)bits overflowed (UB) for bits == 0x80000000 (AUDIT E-3).                        */
+    return (uint8_t)(1u ^ (((bits | ((uint32_t)0u - bits)) >> 31) & 1u));
 }
 
 /* r = -a mod p */

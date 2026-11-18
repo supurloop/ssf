@@ -497,6 +497,28 @@ void SSFEd25519UnitTest(void)
         SSF_ASSERT(memcmp(out, xWrong, sizeof(xWrong)) == 0);
     }
 
+    /* ---- AUDIT E-3: _fe_iszero must not negate INT32_MIN ---- */
+    /* _fe_iszero ORs the reduced limbs into bits and used -(int32_t)bits, which is signed     */
+    /* overflow (UB) when bits == 0x80000000, i.e. every limb is 0 or 0x80000000. _ge_decode  */
+    /* calls it on the decoded x, so the point with x = 2^31 (y below, from a Python model,    */
+    /* checked on the curve) reaches it. Passes in a normal build either way; the fix is      */
+    /* observable under -fsanitize=signed-integer-overflow -fno-sanitize-recover=all.         */
+    {
+        static const uint8_t yX2pow31[32] = {
+            0x87u, 0xD9u, 0x9Cu, 0xADu, 0x33u, 0x29u, 0xDDu, 0xF0u,
+            0xC1u, 0xC1u, 0xADu, 0xB2u, 0xC4u, 0x7Au, 0x50u, 0x47u,
+            0x34u, 0x95u, 0x6Au, 0xD5u, 0xF0u, 0x76u, 0xD8u, 0x20u,
+            0x87u, 0x7Bu, 0xB6u, 0xD6u, 0x32u, 0xC9u, 0x5Eu, 0x26u
+        };
+        uint8_t xGot[32];
+        uint8_t xWant[32];
+
+        memset(xWant, 0, sizeof(xWant));
+        xWant[3] = 0x80u;                       /* x = 2^31, little-endian */
+        SSF_ASSERT(_SSFEd25519GeDecodeForTest(xGot, yX2pow31) == true);
+        SSF_ASSERT(memcmp(xGot, xWant, sizeof(xWant)) == 0);
+    }
+
     /* ---- RFC 8032 Test Vector 1: empty message ---- */
     {
         uint8_t seed[32], expectedPub[32], expectedSig[64];

@@ -3081,6 +3081,39 @@ void SSFBNUnitTest(void)
         }
     }
 
+    /* ---- AUDIT BN-8: Mul / Square bound each operand len before summing ---- */
+    /* rLen = a->len + b->len (and 2 * a->len in Square) was truncated to uint16_t before the   */
+    /* MAX_LIMBS / cap checks, and no operand len was checked on its own, so a corrupt len     */
+    /* (65535 + 1 -> 0) passed and the loops ran far past r and a. Each must now trap.         */
+    {
+        SSFBN_DEFINE(mA, 4u);
+        SSFBN_DEFINE(mB, 4u);
+        SSFBN_DEFINE(mR, 8u);
+
+        SSFBNSetUint32(&mA, 3u, 4u);
+        SSFBNSetUint32(&mB, 5u, 4u);
+
+        mA.len = 65535u;                        /* 65535 + 1 wraps to 0 in uint16_t */
+        mB.len = 1u;
+        SSF_ASSERT_TEST(SSFBNMul(&mR, &mA, &mB));
+        mA.len = (uint16_t)(mA.cap + 1u);       /* len beyond the operand's storage */
+        mB.len = 1u;
+        SSF_ASSERT_TEST(SSFBNMul(&mR, &mA, &mB));
+        mA.len = 1u;
+        mB.len = (uint16_t)(mB.cap + 1u);
+        SSF_ASSERT_TEST(SSFBNMul(&mR, &mA, &mB));
+        mA.len = 32768u;                        /* 2 * 32768 wraps to 0 in uint16_t */
+        SSF_ASSERT_TEST(SSFBNSquare(&mR, &mA));
+        mA.len = (uint16_t)(mA.cap + 1u);
+        SSF_ASSERT_TEST(SSFBNSquare(&mR, &mA));
+
+        /* Well-formed operands still multiply: 3 * 5 = 15. */
+        mA.len = 1u;
+        mB.len = 1u;
+        SSFBNMul(&mR, &mA, &mB);
+        SSF_ASSERT((mR.len == 2u) && (mR.limbs[0] == 15u) && (mR.limbs[1] == 0u));
+    }
+
     /* ---- AUDIT BN-7: MontInit's R^2 loop is exact for moduli of 1024+ limbs ---- */
     /* The doubling loop bound was (uint16_t)(len * 64), which wraps at len >= 1024 (to 0 at    */
     /* exactly 1024, leaving rr = 1), so every Montgomery operation on such a modulus was     */

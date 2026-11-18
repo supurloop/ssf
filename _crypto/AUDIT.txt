@@ -388,7 +388,7 @@ BN-7  Low  FIXED (2026-11-18)
              Unreachable with any in-tree config (max 256 limbs).
   Evidence:  1984  for (i = 0; i < (uint16_t)(m->len * SSF_BN_LIMB_BITS * 2u); i++)
 
-BN-8  Low  OPEN
+BN-8  Low  FIXED (2026-11-18)
   Location:  ssfbn.c:974-975 (SSFBNMul); ssfbn.h:109-112
   Problem:   rLen = a->len + b->len is truncated to uint16_t before SSF_REQUIRE(rLen <=
              SSF_BN_MAX_LIMBS). Neither len is individually checked, so a->len = 65535,
@@ -1269,3 +1269,15 @@ CHANGE LOG
               trip wrong). GREEN in that build: the whole ssfbn suite passes (18 s); default
               build: ssfbn, ssfec, ssfecdsa, ssfrsa (BN/EC/ECDSA/RSA unit tests enabled),
               ssfcms, ssfx509, ssfbase64url, ssfmatch pass.
+  2026-11-18  BN-8 FIXED via option 1. SSFBNMul now requires a->len <= a->cap, b->len <= b->cap
+              and the 32-bit sum a->len + b->len <= SSF_BN_MAX_LIMBS before narrowing rLen;
+              SSFBNSquare requires a->len <= a->cap and 2 * a->len (32-bit) <= SSF_BN_MAX_LIMBS.
+              The cap checks also stop a too-long len from reading past a / b without any wrap.
+              The ssfbn.h static-assert comment now says what actually keeps the result len in
+              uint16_t. No contract change for valid operands, so no .md edit. Test block
+              "AUDIT BN-8" in ssfbn_ut.c: Mul with lens (65535, 1), (cap + 1, 1), (1, cap + 1)
+              and Square with lens 32768 and cap + 1 must trap; a well-formed 3 * 5 still gives
+              15. RED (ASan build): stack out-of-bounds READ in SSFBNMul (ssfbn.c:1017) from the
+              (65535, 1) case at ssfbn_ut.c:3098. GREEN: ASan build clean; default build ssfbn,
+              ssfec, ssfecdsa, ssfrsa (BN/EC/ECDSA/RSA unit tests enabled), ssfcms, ssfx509,
+              ssfbase64url, ssfmatch pass.

@@ -976,9 +976,13 @@ void SSFBNMul(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b)
     SSF_REQUIRE(r != b);
     SSF_REQUIRE(a->len >= 1u);
     SSF_REQUIRE(b->len >= 1u);
+    /* Bound each len before summing: a corrupt len could otherwise wrap the uint16_t sum past */
+    /* the checks below or index beyond the operand's storage (AUDIT BN-8).                    */
+    SSF_REQUIRE(a->len <= a->cap);
+    SSF_REQUIRE(b->len <= b->cap);
+    SSF_REQUIRE(((uint32_t)a->len + (uint32_t)b->len) <= (uint32_t)SSF_BN_MAX_LIMBS);
 
-    rLen = a->len + b->len;
-    SSF_REQUIRE(rLen <= SSF_BN_MAX_LIMBS);
+    rLen = (uint16_t)(a->len + b->len);
     SSF_REQUIRE(rLen <= r->cap);
 
     /* Is this a same-size, even-length multiply at or above the Karatsuba threshold? */
@@ -1069,10 +1073,12 @@ void SSFBNSquare(SSFBN_t *r, const SSFBN_t *a)
     SSF_REQUIRE(a->limbs != NULL);
     SSF_REQUIRE(r != a);
     SSF_REQUIRE(a->len >= 1u);
+    /* Bound len before doubling it, as in SSFBNMul (AUDIT BN-8). */
+    SSF_REQUIRE(a->len <= a->cap);
+    SSF_REQUIRE(((uint32_t)a->len * 2u) <= (uint32_t)SSF_BN_MAX_LIMBS);
 
     n = a->len;
     rLen = (uint16_t)(n * 2u);
-    SSF_REQUIRE(rLen <= SSF_BN_MAX_LIMBS);
     SSF_REQUIRE(rLen <= r->cap);
 
     memset(r->limbs, 0, (size_t)rLen * sizeof(SSFBNLimb_t));

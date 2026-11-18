@@ -243,7 +243,7 @@ Gated on `SSF_RSA_CONFIG_ENABLE_KEYGEN`. Generate a fresh RSA key pair.
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
-| `bits` | in | `uint16_t` | Key size. Must be `2048`, `3072`, or `4096`. |
+| `bits` | in | `uint16_t` | Key size. Must be `2048`, `3072`, or `4096`, and that size must be enabled by its `SSF_RSA_CONFIG_ENABLE_*` flag. |
 | `privKeyDer` | out | `uint8_t *` | Buffer for PKCS#1 `RSAPrivateKey` DER. |
 | `privKeyDerSize` | in | `size_t` | Must be ≥ [`SSF_RSA_MAX_PRIV_KEY_DER_SIZE`](#ssf-rsa-max-priv-key-der-size). |
 | `privKeyDerLen` | out | `size_t *` | Bytes actually written to `privKeyDer`. |
@@ -251,9 +251,34 @@ Gated on `SSF_RSA_CONFIG_ENABLE_KEYGEN`. Generate a fresh RSA key pair.
 | `pubKeyDerSize` | in | `size_t` | Must be ≥ [`SSF_RSA_MAX_PUB_KEY_DER_SIZE`](#ssf-rsa-max-pub-key-der-size). |
 | `pubKeyDerLen` | out | `size_t *` | Bytes actually written to `pubKeyDer`. |
 
-**Returns:** `true` on success; `false` if entropy is unavailable, if `bits` is not one of
-the supported sizes, or if the caller's DER buffers are undersized. **Runtime is
-seconds-to-minutes** — see [Notes](#notes).
+**Returns:** `true` on success; `false` if entropy is unavailable or if no acceptable key pair
+is found within the bounded search (prime generation exhausts its candidate budget, or every
+one of a fixed number of prime pairs fails the FIPS 186-4 post-checks). With a working entropy
+source the latter is vanishingly rare. **Runtime is seconds-to-minutes** — see [Notes](#notes).
+
+**Preconditions (trap via `SSF_REQUIRE`, never return `false`):** all pointers non-`NULL`;
+`bits` one of the build-enabled sizes; `privKeyDerSize >= SSF_RSA_MAX_PRIV_KEY_DER_SIZE` and
+`pubKeyDerSize >= SSF_RSA_MAX_PUB_KEY_DER_SIZE`. The buffer minimums are the build-wide maxima
+(sized for the largest enabled key), **not** the size of the key being generated: in a build
+with RSA-4096 enabled, a buffer sized for a 2048-bit key traps even when `bits == 2048`.
+If `bits` comes from outside the firmware (a provisioning command, a stored configuration
+field, a certificate being renewed), validate it before calling, e.g.:
+
+```c
+static bool AppRSAKeyGenBitsOK(uint16_t bits)
+{
+#if SSF_RSA_CONFIG_ENABLE_2048 == 1
+    if (bits == 2048u) return true;
+#endif
+#if SSF_RSA_CONFIG_ENABLE_3072 == 1
+    if (bits == 3072u) return true;
+#endif
+#if SSF_RSA_CONFIG_ENABLE_4096 == 1
+    if (bits == 4096u) return true;
+#endif
+    return false;
+}
+```
 
 <a id="ex-keygen"></a>
 
@@ -268,7 +293,7 @@ if (!SSFRSAKeyGen(2048,
                   priv, sizeof(priv), &privLen,
                   pub,  sizeof(pub),  &pubLen))
 {
-    /* Entropy unavailable, or bits unsupported. */
+    /* Entropy unavailable, or the bounded key search failed. */
 }
 /* priv[0..privLen-1] is the PKCS#1 RSAPrivateKey DER;
    pub[0..pubLen-1] is the PKCS#1 RSAPublicKey DER.

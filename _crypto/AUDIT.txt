@@ -149,7 +149,7 @@ RSA-4  Medium  FIXED (2026-11-18)
              1025  memset(&em[2], 0xFF, psLen);
              1219  memset(em, 0, dbLen);
 
-RSA-5  Medium  OPEN
+RSA-5  Medium  DOC (2026-11-18)
   Location:  ssfrsa.c:901-920 (SSFRSAKeyGen) vs ssfrsa.md "Returns"
   Problem:   The doc says false is returned when bits is not a supported size or the DER
              buffers are undersized. Both are SSF_REQUIREs (trap).
@@ -948,3 +948,13 @@ CHANGE LOG
               ssfed25519 (RFC 8032 vectors, Wycheproof, AUDIT E-1 block), ssfcms, ssfx509,
               ssfbase64url and ssfmatch pass. SSF_CONFIG_ED25519_UNIT_TEST flipped to 1 for the
               run and restored.
+  2026-11-18  RSA-5 DOC via option 1. Code and unit tests (ssfrsa_ut.c DBC block: bits 1024 /
+              5120 and an undersized private buffer are SSF_ASSERT_TEST traps) already treat
+              bits and the DER buffer sizes as preconditions; only ssfrsa.md disagreed. The
+              SSFRSAKeyGen Returns text now lists the real false paths (entropy unavailable,
+              prime search budget exhausted, FIPS post-checks failing on every bounded attempt);
+              a new Preconditions paragraph says bits must be a build-enabled size and that the
+              buffer minimums are the build-wide maxima rather than the requested key's size,
+              with an example caller-side bits check for externally supplied values. The bits
+              parameter row names the SSF_RSA_CONFIG_ENABLE_* gating, and the example comment
+              no longer says "bits unsupported". No code change, so no build or test run.

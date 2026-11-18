@@ -467,7 +467,7 @@ CCM-1  Low  FIXED (2026-11-18)
   Failure:   SSFAESCCMDecrypt(NULL, 0, nonce, 13, aad, n, key, 16, badTag, 8, NULL, 0).
   Evidence:  292  memset(pt, 0, ctLen);   vs   270  SSF_REQUIRE((pt != NULL) || (ctLen == 0));
 
-CCM-2  Low  OPEN (theoretical)
+CCM-2  Low  FIXED (2026-11-18)
   Location:  ssfaesccm.c:87, :180, :200 (_SSFAESCCMFormatCtr / _SSFAESCCMCtr)
   Problem:   The CTR block counter is uint32_t. For nonceLen <= 10 (L >= 5) the length
              precondition (:235) admits ptLen up to 2^40-1 on 64-bit size_t hosts, but the
@@ -1292,3 +1292,17 @@ CHANGE LOG
               null". GREEN under the same sanitizer and in the normal -O3 build: ssfaesccm and
               ssftls (AESCCM/TLS unit tests enabled for the runs), ssfcms, ssfx509, ssfbase64url,
               ssfmatch.
+  2026-11-18  CCM-2 FIXED via option 1. The CTR block counter in _SSFAESCCMCtr and the counter
+              parameter / working copy in _SSFAESCCMFormatCtr are now uint64_t. L <= 8, so 64 bits
+              cover the whole L-byte counter field and the counter cannot wrap within any length
+              the encrypt / decrypt checks allow; before, block 2^32 (64 GiB, reachable only for
+              nonceLen <= 10 on 64-bit size_t hosts) reused counter 0 (the tag's S_0) and then
+              repeated keystream. ssfaesccm.md now states the 64-bit counter. New test-only
+              wrapper _SSFAESCCMFormatCtrForTest (ssfaesccm.h / .c, compiled only when
+              SSF_CONFIG_AESCCM_UNIT_TEST == 1). Test block "AUDIT CCM-2" in ssfaesccm_ut.c formats
+              counter 2^32 + 0x0102 with a 10-byte nonce (L = 5) and requires the field
+              01 00 00 01 02. RED: ssfaesccm_ut.c:545 (the uint32_t formatter truncated the
+              counter). The loop counter itself cannot be exercised without a > 64 GiB message;
+              its type change is covered by review only. GREEN with ssfaesccm (RFC 3610 vectors)
+              and ssftls (AESCCM/TLS unit tests enabled for the run), ssfcms, ssfx509,
+              ssfbase64url, ssfmatch.

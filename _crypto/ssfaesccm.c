@@ -84,10 +84,10 @@ static void _SSFAESCCMFormatB0(uint8_t b0[SSF_AESCCM_BLOCK_SIZE], const uint8_t 
 /* Formats counter block A_i per RFC 3610 section 2.3.                                           */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFAESCCMFormatCtr(uint8_t a[SSF_AESCCM_BLOCK_SIZE], const uint8_t *nonce,
-                                size_t nonceLen, uint32_t counter)
+                                size_t nonceLen, uint64_t counter)
 {
     uint32_t L = (uint32_t)(15u - nonceLen);
-    uint32_t c = counter;
+    uint64_t c = counter;          /* L <= 8, so 64 bits cover the whole counter field (CCM-2) */
     uint32_t i;
 
     memset(a, 0, SSF_AESCCM_BLOCK_SIZE);
@@ -101,6 +101,19 @@ static void _SSFAESCCMFormatCtr(uint8_t a[SSF_AESCCM_BLOCK_SIZE], const uint8_t 
         c >>= 8;
     }
 }
+
+#if SSF_CONFIG_AESCCM_UNIT_TEST == 1
+/* Test-only wrapper exposing _SSFAESCCMFormatCtr so a unit test can pin counters >= 2^32. */
+void _SSFAESCCMFormatCtrForTest(uint8_t a[16], const uint8_t *nonce, size_t nonceLen,
+                                uint64_t counter)
+{
+    SSF_REQUIRE(a != NULL);
+    SSF_REQUIRE(nonce != NULL);
+    SSF_REQUIRE((nonceLen >= 7u) && (nonceLen <= 13u));
+
+    _SSFAESCCMFormatCtr(a, nonce, nonceLen, counter);
+}
+#endif /* SSF_CONFIG_AESCCM_UNIT_TEST */
 
 /* --------------------------------------------------------------------------------------------- */
 /* Computes CBC-MAC tag T over (B_0 || AAD || plaintext) per RFC 3610 section 2.2.               */
@@ -177,7 +190,7 @@ static void _SSFAESCCMCtr(const SSFAESKeySchedule_t *ks, const uint8_t *nonce, s
 {
     uint8_t a[SSF_AESCCM_BLOCK_SIZE];
     uint8_t s[SSF_AESCCM_BLOCK_SIZE];
-    uint32_t counter = 1;
+    uint64_t counter = 1;          /* uint32_t wrapped after 2^32 blocks (64 GiB) (CCM-2) */
     size_t done = 0;
     size_t chunk;
     uint32_t j;

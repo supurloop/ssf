@@ -526,6 +526,25 @@ void SSFAESCCMUnitTest(void)
                    key, sizeof(key), tag, sizeof(tag), NULL, 0) == true);
     }
 
+    /* ---- AUDIT CCM-2: the CTR block counter does not wrap at 2^32 ---- */
+    /* The counter was uint32_t, so for nonceLen <= 10 (L >= 5, allowed length > 2^32 blocks) */
+    /* block 2^32 reused counter 0 (the tag's S_0) and then repeated keystream. Format counter */
+    /* 2^32 + 0x0102 with a 10-byte nonce (L = 5): the field must read 01 00 00 01 02.         */
+    {
+        static const uint8_t nonce10[10] = {
+            0x50u, 0x51u, 0x52u, 0x53u, 0x54u, 0x55u, 0x56u, 0x57u, 0x58u, 0x59u
+        };
+        static const uint8_t want[16] = {
+            0x04u,                                                 /* flags = L - 1 */
+            0x50u, 0x51u, 0x52u, 0x53u, 0x54u, 0x55u, 0x56u, 0x57u, 0x58u, 0x59u,
+            0x01u, 0x00u, 0x00u, 0x01u, 0x02u                      /* counter, L = 5 bytes */
+        };
+        uint8_t a[16];
+
+        _SSFAESCCMFormatCtrForTest(a, nonce10, sizeof(nonce10), ((uint64_t)1u << 32) + 0x0102u);
+        SSF_ASSERT(memcmp(a, want, sizeof(want)) == 0);
+    }
+
     /* ---- AUDIT CCM-1: auth-only decrypt with a bad tag returns false without memset(NULL) ---- */
     /* With pt == NULL and ctLen == 0 (allowed by the preconditions), a tag mismatch used to run */
     /* memset(pt, 0, ctLen) = memset(NULL, 0, 0), which is UB (C11 7.24.1p2) even at length 0.  */

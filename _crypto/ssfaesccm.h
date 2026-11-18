@@ -61,6 +61,10 @@ bool SSFAESCCMDecrypt(const uint8_t *ct, size_t ctLen, const uint8_t *nonce, siz
 /* --------------------------------------------------------------------------------------------- */
 #if SSF_CONFIG_AESCCM_UNIT_TEST == 1
 void SSFAESCCMUnitTest(void);
+
+/* Test wrapper around the internal counter-block formatter (AUDIT CCM-2). */
+void _SSFAESCCMFormatCtrForTest(uint8_t a[16], const uint8_t *nonce, size_t nonceLen,
+                                uint64_t counter);
 #endif /* SSF_CONFIG_AESCCM_UNIT_TEST */
 
 #ifdef __cplusplus

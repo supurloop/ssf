@@ -30,6 +30,10 @@ the encoding used by JWS / JWT (RFC 7515) and other web token formats.
   standard Base64 encoding, then substitutes `+` → `-`, `/` → `_`, and removes trailing `=`. The
   result is always null-terminated. Because the padded form is produced first, `outStrSize` must
   still be large enough for the padded encoding: `((inLen + 2) / 3) * 4 + 1` bytes.
+- **Encode failure leaves nothing behind.** When [`SSFBase64URLEncode()`](#ssfbase64urlencode)
+  returns `false`, `*outStrLen` is `0` and all `outStrSize` bytes of `outStr` have been zeroed, so
+  `outStr` is the empty string. Without this a caller that ignored the return value could pick up
+  the partially written *standard* Base64 intermediate, complete with `+`, `/`, and `=`.
 - **Decode is strict.** [`SSFBase64URLDecode()`](#ssfbase64urldecode) accepts either fully
   padded or fully unpadded input (RFC 4648 §3.2), but returns `false` for: any character outside
   the §5 alphabet (including `+` and `/`, §3.3); `=` anywhere other than the final block
@@ -47,7 +51,7 @@ the encoding used by JWS / JWT (RFC 7515) and other web token formats.
   caller that reads `*outLen` without checking the return value cannot consume a partial result.
 - **Stack scratch is scrubbed.** Base64URL is the encoding of JWK private keys and JWS / HMAC
   secrets, so the re-padded stack copy is cleared with `SSFCryptSecureZero()` before return on
-  every path that writes it. Note that the underlying [`ssfbase64`](ssfbase64.md) alphabet lookup
+  every path that writes it, and a failed encode clears its output buffer the same way. Note that the underlying [`ssfbase64`](ssfbase64.md) alphabet lookup
   is not constant-time; decode timing can depend on the character values being processed.
 
 <a id="configuration"></a>
@@ -97,10 +101,11 @@ with `=` padding removed (the RFC 7515 JWT convention).
 | `inLen` | in | `size_t` | Number of bytes to encode from `in`. |
 | `outStr` | out | `SSFCStrOut_t` | Output buffer that receives the null-terminated Base64URL string. Must not be `NULL`. |
 | `outStrSize` | in | `size_t` | Total allocated size of `outStr` in bytes. Must be greater than `0` (asserts otherwise) and at least `((inLen + 2) / 3) * 4 + 1` for the encode to succeed, because the padded form is produced before padding is stripped. |
-| `outStrLen` | out | `size_t *` | Receives the number of characters written, excluding the null terminator. Must not be `NULL`. |
+| `outStrLen` | out | `size_t *` | Receives the number of characters written, excluding the null terminator, or `0` on failure. Must not be `NULL`. |
 
 **Returns:** `true` if encoding succeeded; `false` if `outStrSize` is too small to hold the padded
-intermediate result.
+intermediate result. On `false`, `*outStrLen` is `0` and `outStr` has been zeroed over its full
+`outStrSize`, leaving an empty string.
 
 <a id="ex-encode"></a>
 

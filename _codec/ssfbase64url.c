@@ -53,10 +53,14 @@ bool SSFBase64URLEncode(const uint8_t *in, size_t inLen, SSFCStrOut_t outStr, si
     SSF_REQUIRE(outStrSize > 0);
     SSF_REQUIRE(outStrLen != NULL);
 
+    /* Every failure path reports an empty string */
+    *outStrLen = 0;
+
     /* Standard Base64 encode fits in outStr? */
     if (!SSFBase64Encode(in, inLen, outStr, outStrSize, &b64Len))
     {
-        /* No, output buffer too small */
+        /* No, scrub the partial standard-alphabet encoding so nothing non-URL-safe remains */
+        SSFCryptSecureZero(outStr, outStrSize);
         return false;
     }
 

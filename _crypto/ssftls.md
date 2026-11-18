@@ -435,6 +435,17 @@ and zero the sequence counter. Create one `SSFTLSRecordState_t` per direction (c
 and server→client) and re-initialise after each key update — do not reuse a state across
 a re-key.
 
+`cipherSuite` must be one of the five supported TLS 1.3 suites and `keyLen` must be that
+suite's RFC 8446 key length; both are `SSF_REQUIRE` preconditions, so a mismatch traps instead
+of silently running, for example, AES-128-GCM under `TLS_AES_256_GCM_SHA384`:
+
+| Suite | `keyLen` |
+|---|---|
+| `SSF_TLS_CS_AES_128_GCM_SHA256`, `SSF_TLS_CS_AES_128_CCM_SHA256`, `SSF_TLS_CS_AES_128_CCM_8_SHA256` | 16 |
+| `SSF_TLS_CS_AES_256_GCM_SHA384`, `SSF_TLS_CS_CHACHA20_POLY1305_SHA256` | 32 |
+
+`ivLen` is always `SSF_TLS_IV_SIZE` (12).
+
 **Init-once contract.** `SSFTLSRecordState_t` carries a `magic` field that guards against
 re-initialising a live state. The struct **must be zeroed before the first call**
 (`magic` must not already equal the active sentinel), and `SSFTLSRecordStateInit`

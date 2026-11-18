@@ -240,6 +240,25 @@ void SSFTLSTranscriptHash(const SSFTLSTranscript_t *t, uint8_t *out, size_t outS
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Returns the RFC 8446 traffic key length for cipherSuite, or 0 if the suite is unsupported.    */
+/* --------------------------------------------------------------------------------------------- */
+static size_t _SSFTLSKeySizeForSuite(uint16_t cipherSuite)
+{
+    switch (cipherSuite)
+    {
+    case SSF_TLS_CS_AES_128_GCM_SHA256:
+    case SSF_TLS_CS_AES_128_CCM_SHA256:
+    case SSF_TLS_CS_AES_128_CCM_8_SHA256:
+        return 16u;
+    case SSF_TLS_CS_AES_256_GCM_SHA384:
+    case SSF_TLS_CS_CHACHA20_POLY1305_SHA256:
+        return 32u;
+    default:
+        return 0u;
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Record layer: initialize state                                                                */
 /* --------------------------------------------------------------------------------------------- */
 void SSFTLSRecordStateInit(SSFTLSRecordState_t *state, uint16_t cipherSuite, const uint8_t *key,
@@ -251,6 +270,8 @@ void SSFTLSRecordStateInit(SSFTLSRecordState_t *state, uint16_t cipherSuite, con
     SSF_REQUIRE(iv != NULL);
     SSF_REQUIRE(ivLen == SSF_TLS_IV_SIZE);
     SSF_REQUIRE(keyLen <= SSF_TLS_MAX_KEY_SIZE);
+    SSF_REQUIRE(_SSFTLSKeySizeForSuite(cipherSuite) != 0u); /* supported suite (AUDIT TLS-5) */
+    SSF_REQUIRE(keyLen == _SSFTLSKeySizeForSuite(cipherSuite)); /* key matches suite (TLS-5) */
 
     memset(state, 0, sizeof(*state));
     memcpy(state->key, key, keyLen);

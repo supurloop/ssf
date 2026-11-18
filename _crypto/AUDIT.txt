@@ -632,7 +632,7 @@ TLS-4  Low  FIXED (2026-11-18)
              undocumented API limits. RFC 8446 allows labels up to 249 bytes (exporter labels are
              application-chosen, 7.5). Built-in labels fit; custom exporter labels > 64 assert.
 
-TLS-5  Low  OPEN
+TLS-5  Low  FIXED (2026-11-18)
   Location:  ssftls.c:240-257 (SSFTLSRecordStateInit)
   Problem:   keyLen is only bounded (<= SSF_TLS_MAX_KEY_SIZE), not matched to the cipher suite.
              A 16-byte key installed for 0x1302 (AES-256-GCM) silently runs AES-128-GCM; a
@@ -1405,3 +1405,17 @@ CHANGE LOG
               RFC 8446 model. RED: ssftls.c:76 (labelLen <= 64 trapped on the 249-byte label).
               GREEN: ssftls incl. RFC 8448 vectors (TLS unit test enabled for the run), ssfcms,
               ssfx509, ssfbase64url, ssfmatch.
+  2026-11-18  TLS-5 FIXED via option 1. New private _SSFTLSKeySizeForSuite returns the RFC 8446
+              key length (16 for AES-128-GCM / CCM / CCM_8, 32 for AES-256-GCM and
+              ChaCha20-Poly1305, 0 if unsupported); SSFTLSRecordStateInit SSF_REQUIREs a supported
+              suite and keyLen equal to its key length, before touching the state. A 16-byte key
+              for AES-256-GCM no longer silently runs AES-128-GCM. ssftls.md gains the suite /
+              keyLen table. Tests: "AUDIT TLS-5" block in ssftls_ut.c traps 0x1302/16, 0x1301/32,
+              0x1304/24, 0x1303/16 and unknown suite 0x1399, and initializes all five valid
+              pairings. Intentional contract change: the existing "encrypt/decrypt reject an
+              unsupported suite" test initialized with suite 0xFFFF, which Init now refuses; it
+              now initializes a valid state and corrupts state.cipherSuite to keep covering the
+              tagLen == 0 early-out (defense in depth). RED: ssftls_ut.c:110 (0x1302 with a
+              16-byte key accepted). GREEN: ssftls (all existing record round trips already used
+              matching key lengths), ssfcms, ssfx509, ssfbase64url, ssfmatch. One-line comments,
+              no line over 100 columns.

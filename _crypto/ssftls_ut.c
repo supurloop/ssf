@@ -90,6 +90,41 @@ void SSFTLSUnitTest(void)
         SSF_ASSERT_TEST(SSFTLSRecordStateDeInit(&st));
     }
 
+    /* AUDIT TLS-5: the key length must match the cipher suite (RFC 8446 App. B.4). */
+    {
+        static const uint16_t suites[5] = {
+            SSF_TLS_CS_AES_128_GCM_SHA256, SSF_TLS_CS_AES_256_GCM_SHA384,
+            SSF_TLS_CS_CHACHA20_POLY1305_SHA256, SSF_TLS_CS_AES_128_CCM_SHA256,
+            SSF_TLS_CS_AES_128_CCM_8_SHA256
+        };
+        static const uint8_t keyLens[5] = { 16u, 32u, 32u, 16u, 16u };
+        SSFTLSRecordState_t st = {0};
+        uint8_t key[32];
+        uint8_t iv[SSF_TLS_IV_SIZE];
+        uint8_t i;
+
+        memset(key, 0x3Cu, sizeof(key));
+        memset(iv, 0x5Au, sizeof(iv));
+
+        /* Mismatched lengths and an unknown suite trap instead of running the wrong cipher. */
+        SSF_ASSERT_TEST(SSFTLSRecordStateInit(&st, SSF_TLS_CS_AES_256_GCM_SHA384, key, 16u, iv,
+                                              sizeof(iv)));
+        SSF_ASSERT_TEST(SSFTLSRecordStateInit(&st, SSF_TLS_CS_AES_128_GCM_SHA256, key, 32u, iv,
+                                              sizeof(iv)));
+        SSF_ASSERT_TEST(SSFTLSRecordStateInit(&st, SSF_TLS_CS_AES_128_CCM_SHA256, key, 24u, iv,
+                                              sizeof(iv)));
+        SSF_ASSERT_TEST(SSFTLSRecordStateInit(&st, SSF_TLS_CS_CHACHA20_POLY1305_SHA256, key, 16u,
+                                              iv, sizeof(iv)));
+        SSF_ASSERT_TEST(SSFTLSRecordStateInit(&st, 0x1399u, key, 16u, iv, sizeof(iv)));
+
+        /* Every valid pairing initializes. */
+        for (i = 0u; i < 5u; i++)
+        {
+            SSFTLSRecordStateInit(&st, suites[i], key, keyLens[i], iv, sizeof(iv));
+            SSFTLSRecordStateDeInit(&st);
+        }
+    }
+
     /* ---- (Hardening) ComputeFinished wipes the finished_key before returning ---- */
     {
         uint8_t baseKey[32];
@@ -600,9 +635,8 @@ void SSFTLSUnitTest(void)
     }
 
     /* ---- Record encrypt/decrypt reject when cipher suite is unsupported ---- */
-    /* SSFTLSRecordStateInit accepts any uint16_t; a caller that wires up a bogus suite */
-    /* must not produce a wire record. _SSFTLSAeadTagSize returns 0 for the unknown     */
-    /* suite, and both encrypt and decrypt early-out on tagLen == 0.                    */
+    /* Since AUDIT TLS-5 Init traps on an unknown suite, so reach the encrypt / decrypt     */
+    /* tagLen == 0 early-out (defense in depth) by corrupting a valid state's suite field.  */
     {
         SSFTLSRecordState_t state = {0};
         uint8_t key[16] = {0};
@@ -612,7 +646,9 @@ void SSFTLSUnitTest(void)
         size_t outLen;
         uint8_t innerCt;
 
-        SSFTLSRecordStateInit(&state, 0xFFFFu, key, sizeof(key), iv, sizeof(iv));
+        SSFTLSRecordStateInit(&state, SSF_TLS_CS_AES_128_GCM_SHA256, key, sizeof(key), iv,
+                              sizeof(iv));
+        state.cipherSuite = 0xFFFFu;
         SSF_ASSERT(SSFTLSRecordEncrypt(&state, SSF_TLS_CT_APPLICATION, pt, sizeof(pt),
                                        record, sizeof(record), &outLen) == false);
 

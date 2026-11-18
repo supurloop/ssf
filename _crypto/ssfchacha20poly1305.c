@@ -88,7 +88,7 @@ void SSFChaCha20Poly1305Encrypt(const uint8_t *pt, size_t ptLen, const uint8_t *
     SSF_REQUIRE(ivLen == SSF_CCP_NONCE_SIZE);
     SSF_REQUIRE(tagSize >= SSF_CCP_TAG_SIZE);
     SSF_REQUIRE(ptLen <= ctSize);
-    SSF_REQUIRE(ptLen < (512u * 1024u * 1024u));
+    SSF_REQUIRE(ptLen < ((uint32_t)512u * 1024u * 1024u));
     SSF_REQUIRE((auth != NULL) || (authLen == 0u));
 
     /* Generate Poly1305 one-time key using counter=0 */
@@ -129,7 +129,7 @@ bool SSFChaCha20Poly1305Decrypt(const uint8_t *ct, size_t ctLen, const uint8_t *
     SSF_REQUIRE(ivLen == SSF_CCP_NONCE_SIZE);
     SSF_REQUIRE(tagLen == SSF_CCP_TAG_SIZE);
     SSF_REQUIRE(ctLen <= ptSize);
-    SSF_REQUIRE(ctLen < (512u * 1024u * 1024u));
+    SSF_REQUIRE(ctLen < ((uint32_t)512u * 1024u * 1024u));
     SSF_REQUIRE((auth != NULL) || (authLen == 0u));
 
     /* Generate Poly1305 one-time key using counter=0 */

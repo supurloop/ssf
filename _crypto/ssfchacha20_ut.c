@@ -610,12 +610,14 @@ void SSFChaCha20UnitTest(void)
                                            scratchNonce, sizeof(scratchNonce),
                                            0u, scratchCt, sizeof(scratchPt) - 1u));
 
+#if (SIZE_MAX > 0x1FFFFFFFu) /* AUDIT PORT-1: a 512 MiB length needs a >= 30-bit size_t. */
         /* ptLen >= 512 MiB. ctSize matches so the size-bound assert fires; nothing derefs pt
          * or ct, so the absurd length never causes any actual allocation or access. */
-        SSF_ASSERT_TEST(SSFChaCha20Encrypt(scratchPt, 512u * 1024u * 1024u,
+        SSF_ASSERT_TEST(SSFChaCha20Encrypt(scratchPt, ((uint32_t)512u * 1024u * 1024u),
                                            scratchKey, sizeof(scratchKey),
                                            scratchNonce, sizeof(scratchNonce),
-                                           0u, scratchCt, 512u * 1024u * 1024u));
+                                           0u, scratchCt, ((uint32_t)512u * 1024u * 1024u)));
+#endif /* SIZE_MAX */
 
         /* pt NULL with ptLen > 0 */
         SSF_ASSERT_TEST(SSFChaCha20Encrypt(NULL, sizeof(scratchCt),

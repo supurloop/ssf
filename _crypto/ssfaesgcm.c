@@ -397,7 +397,7 @@ void SSFAESGCMEncrypt(const uint8_t *pt, size_t ptLen, const uint8_t *iv, size_t
     SSF_REQUIRE((pt != NULL) || (ptLen == 0u));
     SSF_REQUIRE((ct != NULL) || (ptLen == 0u));
     SSF_REQUIRE((auth != NULL) || (authLen == 0u));
-    SSF_REQUIRE(ptLen < (512u * 1024u * 1024u));
+    SSF_REQUIRE(ptLen < ((uint32_t)512u * 1024u * 1024u));
     SSF_REQUIRE(ptLen <= ctSize);
     SSF_REQUIRE(ivLen > 0);
     SSF_REQUIRE((keyLen == 16) || (keyLen == 24) || (keyLen == 32));
@@ -470,7 +470,7 @@ bool SSFAESGCMDecrypt(const uint8_t *ct, size_t ctLen, const uint8_t *iv, size_t
     SSF_REQUIRE((pt != NULL) || (ctLen == 0u));
     SSF_REQUIRE((auth != NULL) || (authLen == 0u));
 
-    SSF_REQUIRE(ctLen < (512u * 1024u * 1024u));
+    SSF_REQUIRE(ctLen < ((uint32_t)512u * 1024u * 1024u));
     SSF_REQUIRE(ctLen <= ptSize);
     SSF_REQUIRE(ivLen > 0);
     SSF_REQUIRE((keyLen == 16) || (keyLen == 24) || (keyLen == 32));

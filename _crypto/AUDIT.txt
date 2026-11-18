@@ -810,7 +810,7 @@ SHA2-2  Low  OPEN (portability; root cause in ssfport.h)
 CROSS-MODULE
 ----------------------------------------------------------------------------------------------
 
-PORT-1  Medium  OPEN  [verified]
+PORT-1  Medium  FIXED (2026-11-18)  [verified]
   Location:  ssfchacha20.c:106; ssfchacha20poly1305.c:91, :132; ssfpoly1305.c:91, :231;
              ssfaesgcm.c:45 (guard present), :393, :466
   Problem:   Top-level README.md:77 lists PIC24 (XC16) and MSP430 ports, both 16-bit int and
@@ -919,3 +919,22 @@ CHANGE LOG
               deliberately skips to == from. Same Linux gcc build as X-1;
               SSF_CONFIG_AESGCM_UNIT_TEST and SSF_CONFIG_TLS_UNIT_TEST flipped to 1 for the runs
               and restored to 0.
+  2026-11-18  PORT-1 FIXED via option 1 (width-explicit literals). The 512 MiB caps in
+              ssfchacha20.c:106, ssfchacha20poly1305.c:91/:132 and ssfaesgcm.c:400/:473 are now
+              ((uint32_t)512u * 1024u * 1024u); ssfpoly1305.c:91/:231 use ((uint32_t)1u << 24) and
+              ((uint32_t)1u << 26). A (uint32_t) cast was chosen over the repo's `ul` suffix so
+              the Poly1305 expressions stay exactly 32-bit on LP64 hosts. The ssfaesgcm
+              sizeof(size_t) >= 4 compile-time guard is kept (AES-GCM on a 16-bit size_t remains
+              unsupported/untested). A re-scan of every non-UT _crypto .c for plain-literal shifts
+              >= 16 and unsuffixed large decimal literals finds nothing else outside ssfed25519.c
+              (E-2). Unit tests: the existing 512 MiB cap tests in ssfchacha20_ut.c and
+              ssfchacha20poly1305_ut.c used the same 16-bit-unsafe literal; fixed and wrapped in
+              #if (SIZE_MAX > 0x1FFFFFFFu) since a 512 MiB length cannot be passed through a
+              16-bit size_t. Added the equivalent Encrypt/Decrypt cap tests to ssfaesgcm_ut.c,
+              which had none. No RED is possible on the available toolchain (64-bit gcc; no
+              XC16/MSP430/AVR compiler installed): the literals evaluate identically before and
+              after on any >= 32-bit int host. GREEN: ssfchacha20, ssfpoly1305 (RFC 8439
+              vectors exercise the 2^128 block bit and the final h >= p select),
+              ssfchacha20poly1305, ssfaesgcm, ssftls, ssfcms, ssfx509, ssfbase64url, ssfmatch
+              all pass; the AESGCM/CCP/CHACHA20/POLY1305/TLS unit test flags were flipped to 1
+              for the run and restored. A 16-bit target build remains the only true proof.

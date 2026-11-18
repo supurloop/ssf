@@ -3487,6 +3487,18 @@ void SSFAESGCMUnitTest(void)
                                          okKey, 16u, okTag, 16u, NULL, 16u));
         SSF_ASSERT_TEST(SSFAESGCMDecrypt(okBuf, 16u, okIv, 12u, NULL, 8u,
                                          okKey, 16u, okTag, 16u, okBuf, 16u));
+
+#if (SIZE_MAX > 0x1FFFFFFFu) /* AUDIT PORT-1: a 512 MiB length needs a >= 30-bit size_t. */
+        /* ptLen / ctLen >= 512 MiB must trip; the cap check fires before pt or ct is read. */
+        {
+            size_t capLen = (size_t)((uint32_t)512u * 1024u * 1024u);
+
+            SSF_ASSERT_TEST(SSFAESGCMEncrypt(okBuf, capLen, okIv, 12u, NULL, 0u,
+                                             okKey, 16u, okTag, 16u, okBuf, capLen));
+            SSF_ASSERT_TEST(SSFAESGCMDecrypt(okBuf, capLen, okIv, 12u, NULL, 0u,
+                                             okKey, 16u, okTag, 16u, okBuf, capLen));
+        }
+#endif /* SIZE_MAX */
     }
 
     /* Positive control: NULL + 0-length is the legitimate auth-only / no-AAD path and must

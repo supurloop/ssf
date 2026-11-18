@@ -88,7 +88,7 @@ static void _SSFPoly1305ProcessFullBlock(SSFPoly1305Context_t *ctx, const uint8_
     ctx->h1 += (SSF_GETU32LE(&block[3])  >> 2) & 0x3FFFFFFu;
     ctx->h2 += (SSF_GETU32LE(&block[6])  >> 4) & 0x3FFFFFFu;
     ctx->h3 += (SSF_GETU32LE(&block[9])  >> 6) & 0x3FFFFFFu;
-    ctx->h4 += (SSF_GETU32LE(&block[12]) >> 8) | (1u << 24);
+    ctx->h4 += (SSF_GETU32LE(&block[12]) >> 8) | ((uint32_t)1u << 24);
     _SSFPoly1305MulR(ctx);
 }
 
@@ -228,7 +228,7 @@ void SSFPoly1305End(SSFPoly1305Context_t *ctx, uint8_t *tag, size_t tagSize)
     g1 = ctx->h1 + c; c = g1 >> 26; g1 &= 0x3FFFFFFu;
     g2 = ctx->h2 + c; c = g2 >> 26; g2 &= 0x3FFFFFFu;
     g3 = ctx->h3 + c; c = g3 >> 26; g3 &= 0x3FFFFFFu;
-    g4 = ctx->h4 + c - (1u << 26);
+    g4 = ctx->h4 + c - ((uint32_t)1u << 26);
 
     /* Select h if h < p, else h - p. */
     mask = (g4 >> 31) - 1u;

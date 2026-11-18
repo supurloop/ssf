@@ -774,13 +774,15 @@ void SSFChaCha20Poly1305UnitTest(void)
                                                    scratchKey, sizeof(scratchKey),
                                                    scratchTag, sizeof(scratchTag),
                                                    scratchCt, sizeof(scratchPt) - 1u));
+#if (SIZE_MAX > 0x1FFFFFFFu) /* AUDIT PORT-1: a 512 MiB length needs a >= 30-bit size_t. */
         /* ptLen >= 512 MiB */
-        SSF_ASSERT_TEST(SSFChaCha20Poly1305Encrypt(scratchPt, 512u * 1024u * 1024u,
+        SSF_ASSERT_TEST(SSFChaCha20Poly1305Encrypt(scratchPt, ((uint32_t)512u * 1024u * 1024u),
                                                    scratchNonce, sizeof(scratchNonce),
                                                    NULL, 0u,
                                                    scratchKey, sizeof(scratchKey),
                                                    scratchTag, sizeof(scratchTag),
-                                                   scratchCt, 512u * 1024u * 1024u));
+                                                   scratchCt, ((uint32_t)512u * 1024u * 1024u)));
+#endif /* SIZE_MAX */
         /* pt NULL with ptLen > 0 */
         SSF_ASSERT_TEST(SSFChaCha20Poly1305Encrypt(NULL, sizeof(scratchCt),
                                                    scratchNonce, sizeof(scratchNonce),
@@ -910,13 +912,15 @@ void SSFChaCha20Poly1305UnitTest(void)
                                                    scratchKey, sizeof(scratchKey),
                                                    scratchTag, sizeof(scratchTag),
                                                    scratchPt, sizeof(scratchCt) - 1u));
+#if (SIZE_MAX > 0x1FFFFFFFu) /* AUDIT PORT-1: a 512 MiB length needs a >= 30-bit size_t. */
         /* ctLen >= 512 MiB */
-        SSF_ASSERT_TEST(SSFChaCha20Poly1305Decrypt(scratchCt, 512u * 1024u * 1024u,
+        SSF_ASSERT_TEST(SSFChaCha20Poly1305Decrypt(scratchCt, ((uint32_t)512u * 1024u * 1024u),
                                                    scratchNonce, sizeof(scratchNonce),
                                                    NULL, 0u,
                                                    scratchKey, sizeof(scratchKey),
                                                    scratchTag, sizeof(scratchTag),
-                                                   scratchPt, 512u * 1024u * 1024u));
+                                                   scratchPt, ((uint32_t)512u * 1024u * 1024u)));
+#endif /* SIZE_MAX */
         /* AAD NULL with authLen > 0 */
         SSF_ASSERT_TEST(SSFChaCha20Poly1305Decrypt(scratchCt, sizeof(scratchCt),
                                                    scratchNonce, sizeof(scratchNonce),

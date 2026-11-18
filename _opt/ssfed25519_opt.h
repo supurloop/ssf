@@ -8,12 +8,10 @@
 extern "C" {
 #endif
 
-/* 1 to zero a deep stack region at the end of SSFEd25519Sign so scalar-multiply residue        */
-/* derived from the secret scalar does not survive in freed frames; 0 to skip the scrub.        */
+/* 1 scrubs secret residue from the stack after Sign, 0 skips it (see ssfed25519.md) */
 #define SSF_ED25519_CONFIG_ENABLE_STACK_SCRUB (1u)
 
-/* Bytes zeroed by the scrub. Must cover the deepest secret-bearing call chain below Sign      */
-/* (measured 0.8-1.2 KB with gcc -O0..-O3 on x86-64); 1536 leaves margin for other compilers.  */
+/* Bytes the scrub zeroes; must cover Sign's secret call chain (see ssfed25519.md) */
 #define SSF_ED25519_CONFIG_STACK_SCRUB_SIZE   (1536u)
 
 #ifdef __cplusplus

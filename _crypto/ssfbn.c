@@ -43,8 +43,7 @@
 /* SSF_BN_KARATSUBA_THRESHOLD and SSF_BN_MODEXP_WIN_K are configured in ssfbn_opt.h (or via the */
 /* SSF_CRYPT_CONFIG_PROFILE selector in ssfcrypt_opt.h).                                         */
 
-/* _SSFBNKaratsubaMul's step 7 writes r[n/2 .. n/2 + n + 1], inside the 2n-limb result only    */
-/* when n >= 4 (AUDIT BN-6). The dispatcher passes n >= threshold, so the threshold must be 4+. */
+/* Karatsuba step 7 stays inside the 2n-limb result only for n >= 4 (AUDIT BN-6) */
 #if SSF_BN_KARATSUBA_THRESHOLD < 4
 #error "SSF_BN_KARATSUBA_THRESHOLD must be >= 4 (Karatsuba step 7 overruns r for n < 4)"
 #endif
@@ -976,8 +975,7 @@ void SSFBNMul(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b)
     SSF_REQUIRE(r != b);
     SSF_REQUIRE(a->len >= 1u);
     SSF_REQUIRE(b->len >= 1u);
-    /* Bound each len before summing: a corrupt len could otherwise wrap the uint16_t sum past */
-    /* the checks below or index beyond the operand's storage (AUDIT BN-8).                    */
+    /* Bound each len before summing so rLen cannot wrap (AUDIT BN-8) */
     SSF_REQUIRE(a->len <= a->cap);
     SSF_REQUIRE(b->len <= b->cap);
     SSF_REQUIRE(((uint32_t)a->len + (uint32_t)b->len) <= (uint32_t)SSF_BN_MAX_LIMBS);
@@ -1342,9 +1340,7 @@ void SSFBNModMulCT(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t
     SSF_REQUIRE((uint16_t)(2u * m->len) <= SSF_BN_MAX_LIMBS);
     SSF_REQUIRE(m->len <= r->cap);
 
-    /* The fixed-iteration reduction is exact only when a * b < m * 2^(32 * len + 1), which    */
-    /* holds whenever at least one operand is < m (AUDIT BN-1). Both compares always run and  */
-    /* are combined bitwise so the check adds no data-dependent branch beyond the REQUIRE.    */
+    /* Exact only if a < m or b < m; compares combined branch-free (AUDIT BN-1) */
     aLtM = (uint8_t)(SSFBNCmp(a, m) < 0);
     bLtM = (uint8_t)(SSFBNCmp(b, m) < 0);
     SSF_REQUIRE((aLtM | bLtM) != 0u);
@@ -2010,8 +2006,7 @@ void SSFBNMontInit(SSFBNMont_t *ctx, const SSFBN_t *m)
     }
 
     /* Compute R^2 mod m where R = 2^(len*32) by doubling 1 modulo m for 2*len*32 iterations. */
-    /* Count and bound are 32-bit: len * 64 exceeds 16 bits from 1024 limbs (AUDIT BN-7), and  */
-    /* SSF_BN_MAX_LIMBS <= 32767 keeps it below 2^21.                                          */
+    /* 32-bit count and bound: len * 64 exceeds 16 bits from 1024 limbs (AUDIT BN-7) */
     SSFBNSetOne(&r2, m->len);
     for (k = 0u; k < ((uint32_t)m->len * SSF_BN_LIMB_BITS * 2u); k++)
     {
@@ -2043,8 +2038,7 @@ void SSFBNMontMul(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBNMon
     SSF_REQUIRE(ctx->len <= r->cap);
     SSF_REQUIRE(ctx->len <= a->cap);
     SSF_REQUIRE(ctx->len <= b->cap);
-    /* Montgomery-form operands are always ctx->len limbs; a shorter len would fold stale */
-    /* limbs above len into the product (AUDIT BN-4).                                     */
+    /* Montgomery-form operands are exactly ctx->len limbs (AUDIT BN-4) */
     SSF_REQUIRE(a->len == ctx->len);
     SSF_REQUIRE(b->len == ctx->len);
 
@@ -2277,8 +2271,7 @@ void SSFBNMontConvertIn(SSFBN_t *aR, const SSFBN_t *a, const SSFBNMont_t *ctx)
     /* A longer a would be silently truncated to ctx->len limbs (AUDIT BN-4). */
     SSF_REQUIRE(a->len <= ctx->len);
 
-    /* Zero-extend a into aR in place so limbs above a->len are 0, never stale (AUDIT BN-4). */
-    /* Index-for-index copy is safe when aR aliases a; the loop bounds are public lengths.   */
+    /* Zero-extend a into aR in place; safe when aR aliases a (AUDIT BN-4) */
     for (i = 0u; i < a->len; i++) aR->limbs[i] = a->limbs[i];
     for (; i < ctx->len; i++) aR->limbs[i] = 0u;
     aR->len = ctx->len;
@@ -2831,8 +2824,7 @@ bool SSFBNGenPrime(SSFBN_t *p, uint16_t bitLen, uint16_t rounds, SSFPRNGContext_
 
     SSF_REQUIRE(p != NULL);
     SSF_REQUIRE(p->limbs != NULL);
-    /* Below 16 bits every candidate can lie inside the small-prime table, which trial division */
-    /* rejects; above MAX_BITS / 2 the Miller-Rabin Montgomery modexp has no room (BN-2).      */
+    /* 16 <= bitLen <= MAX_BITS / 2 keeps trial division and modexp valid (AUDIT BN-2) */
     SSF_REQUIRE(bitLen >= 16u);
     SSF_REQUIRE(bitLen <= (SSF_BN_CONFIG_MAX_BITS / 2u));
     SSF_REQUIRE(prng != NULL);
@@ -2840,8 +2832,7 @@ bool SSFBNGenPrime(SSFBN_t *p, uint16_t bitLen, uint16_t rounds, SSFPRNGContext_
     byteLen = (size_t)(bitLen + 7u) / 8u;
     limbs = SSF_BN_BITS_TO_LIMBS(bitLen);
 
-    /* buf is big-endian: bit b of the candidate lives in buf[byteLen - 1 - b / 8]. topMask   */
-    /* keeps only the bitLen - 8 * (byteLen - 1) low bits of buf[0] (0xFF when bitLen % 8 is 0). */
+    /* topMask keeps only the low bitLen - 8 * (byteLen - 1) bits of buf[0] (AUDIT BN-2) */
     topMask = (uint8_t)(0xFFu >> ((8u * (uint16_t)byteLen) - bitLen));
     topBit = (uint16_t)(bitLen - 1u);
     nextBit = (uint16_t)(bitLen - 2u);
@@ -2861,8 +2852,7 @@ bool SSFBNGenPrime(SSFBN_t *p, uint16_t bitLen, uint16_t rounds, SSFPRNGContext_
             generated += chunk;
         }
 
-        /* Clear bits above bitLen - 1, then force bits bitLen - 1 and bitLen - 2 so the prime */
-        /* has exactly bitLen bits and p * q has the full 2 * bitLen bit length.               */
+        /* Clear bits above bitLen - 1 and force bits bitLen - 1 and bitLen - 2 */
         buf[0] &= topMask;
         buf[byteLen - 1u - (size_t)(topBit / 8u)] |= (uint8_t)(1u << (topBit % 8u));
         buf[byteLen - 1u - (size_t)(nextBit / 8u)] |= (uint8_t)(1u << (nextBit % 8u));

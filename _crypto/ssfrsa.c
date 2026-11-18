@@ -259,8 +259,13 @@ static bool _SSFRSAPubKeyDecode(const uint8_t *der, size_t derLen, SSFBN_t *n, S
     if (!SSFASN1DecGetInt(&inner, &nBuf, &nLen, &next)) return false;
     if (!SSFASN1DecGetInt(&next, &eBuf, &eLen, &next)) return false;
 
-    /* Strict DER: nothing may follow e inside the SEQUENCE, or the SEQUENCE itself (RSA-7). */
-    if ((!SSFASN1DecIsEmpty(&next)) || (!SSFASN1DecIsEmpty(&after))) return false;
+    /* Anything after e inside the SEQUENCE, or after the SEQUENCE (AUDIT RSA-7)? */
+    if ((!SSFASN1DecIsEmpty(&next)) || (!SSFASN1DecIsEmpty(&after)))
+    {
+        /* Yes, not strict DER */
+        return false;
+    }
+    /* No, the encoding ends exactly after e */
 
     /* Strip ASN.1 INTEGER leading 0x00 sign byte; compute limbs from the trimmed length. */
     nb = nBuf;
@@ -424,9 +429,13 @@ static bool _SSFRSAPrivKeyDecode(const uint8_t *der, size_t derLen, SSFBN_t *n, 
     if (!_SSFRSADecIntToBN(&next, dq, hl, &next)) return false;
     if (!_SSFRSADecIntToBN(&next, qInv, hl, &next)) return false;
 
-    /* Strict DER: version 0 has no otherPrimeInfos, so nothing may follow qInv inside the */
-    /* SEQUENCE, and nothing may follow the SEQUENCE itself (AUDIT RSA-7).                  */
-    if ((!SSFASN1DecIsEmpty(&next)) || (!SSFASN1DecIsEmpty(&after))) return false;
+    /* Anything after qInv inside the SEQUENCE, or after the SEQUENCE (AUDIT RSA-7)? */
+    if ((!SSFASN1DecIsEmpty(&next)) || (!SSFASN1DecIsEmpty(&after)))
+    {
+        /* Yes, not strict DER (version 0 has no otherPrimeInfos) */
+        return false;
+    }
+    /* No, the encoding ends exactly after qInv */
 
     *nLimbs = nl;
     return true;
@@ -1369,10 +1378,7 @@ bool SSFRSAVerifyPSS(const uint8_t *pubKeyDer, size_t pubKeyDerLen, SSFRSAHash_t
     /* CT structural checks: fold every divergence into `diff`; run all stages unconditionally. */
     diff = 0u;
 
-    /* Export recovered EM (right-aligned to emLen within keyBytes). When bitLen(n) = 1 mod 8,  */
-    /* keyBytes = emLen + 1 and I2OSP(m, emLen) must fail if m >= 256^emLen (RFC 8017 Sec.      */
-    /* 9.1.2 step 2c), so every byte ahead of the emLen window must be zero (AUDIT RSA-6). The  */
-    /* loop count depends only on the public modulus.                                           */
+    /* Export EM; bytes ahead of the emLen window must be zero (RFC 8017, AUDIT RSA-6) */
     {
         uint8_t emFull[SSF_RSA_MAX_KEY_BYTES];
         if (!SSFBNToBytes(&m, emFull, keyBytes)) { return false; }

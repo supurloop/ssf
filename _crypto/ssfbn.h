@@ -106,9 +106,7 @@ typedef uint64_t SSFBNDLimb_t;
 typedef char _ssf_bn_sa_max_bits_aligned[
     ((SSF_BN_CONFIG_MAX_BITS) % SSF_BN_LIMB_BITS == 0u) ? 1 : -1];
 
-/* SSF_BN_MAX_LIMBS must fit in int16_t so that, once SSFBNMul / SSFBNSquare have checked each */
-/* len against its cap and the 32-bit sum against SSF_BN_MAX_LIMBS, the result len fits uint16_t.*/
-/* Same property as the matching #error in ssfbn.c, but visible at every include.               */
+/* MAX_LIMBS <= 32767 keeps a checked Mul / Square result len in uint16_t */
 typedef char _ssf_bn_sa_max_limbs_fits_int16[
     ((SSF_BN_MAX_LIMBS) <= 32767u) ? 1 : -1];
 

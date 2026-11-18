@@ -360,10 +360,13 @@ bool SSFTLSRecordEncrypt(SSFTLSRecordState_t *state, uint8_t contentType, const 
     tagLen = _SSFTLSAeadTagSize(state->cipherSuite);
     if (tagLen == 0u) return false;
 
-    /* RFC 8446 Sec. 5.1: TLSPlaintext.length MUST NOT exceed 2^14 (AUDIT TLS-1). Checked     */
-    /* before any arithmetic so ptLen + 1 below cannot wrap (AUDIT TLS-6). With no padding    */
-    /* added, this also keeps TLSInnerPlaintext <= 2^14 + 1 (Sec. 5.4).                       */
-    if (ptLen > 0x4000u) return false;
+    /* Is ptLen over the RFC 8446 Sec. 5.1 limit, checked before ptLen + 1 (TLS-1, TLS-6)? */
+    if (ptLen > 0x4000u)
+    {
+        /* Yes, record too large */
+        return false;
+    }
+    /* No, ptLen + 1 cannot wrap */
 
     innerLen  = ptLen + 1u;              /* plaintext + inner content type */
     cipherLen = innerLen + tagLen;
@@ -467,9 +470,13 @@ bool SSFTLSRecordDecrypt(SSFTLSRecordState_t *state, const uint8_t *record, size
     if (fragLen > 0x4000u + 256u) return false;
 
     innerLen = (size_t)fragLen - tagLen;
-    /* RFC 8446 Sec. 5.4: TLSInnerPlaintext (content || type || padding) MUST NOT exceed     */
-    /* 2^14 + 1 (AUDIT TLS-2). The length is public, so rejecting before the AEAD is safe.    */
-    if (innerLen > (0x4000u + 1u)) return false;
+    /* Is the inner plaintext over the RFC 8446 Sec. 5.4 limit of 2^14 + 1 (AUDIT TLS-2)? */
+    if (innerLen > (0x4000u + 1u))
+    {
+        /* Yes, record overflow */
+        return false;
+    }
+    /* No, length acceptable */
     if (ptSize < innerLen) return false;
 
     ct = &record[SSF_TLS_RECORD_HEADER_SIZE];

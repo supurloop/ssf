@@ -131,10 +131,11 @@ static size_t _SSFECDSAGetHashSize(SSFECCurve_t curve)
 /* --------------------------------------------------------------------------------------------- */
 static SSFHMACHash_t _SSFECDSANonceHMACHash(SSFECCurve_t curve, size_t hashLen, size_t *hlen)
 {
+    SSF_REQUIRE((curve > SSF_EC_CURVE_MIN) && (curve < SSF_EC_CURVE_MAX));
+    SSF_REQUIRE((hashLen > 0u) && (hashLen <= SSF_SHA2_512_BYTE_SIZE));
     SSF_REQUIRE(hlen != NULL);
 
-    /* RFC 6979 Sec. 3.2 uses the message hash function H for the HMAC-DRBG (AUDIT ECDSA-2).   */
-    /* Sign receives only the digest, so infer H from its length.                               */
+    /* RFC 6979 HMAC-DRBG uses the digest's hash, inferred from hashLen (AUDIT ECDSA-2) */
     switch (hashLen)
     {
     case SSF_SHA1_HASH_SIZE: *hlen = SSF_SHA1_HASH_SIZE; return SSF_HMAC_HASH_SHA1;
@@ -156,8 +157,7 @@ static void _SSFECDSABits2Int(SSFBN_t *out, const uint8_t *hash, size_t hashLen,
 {
     size_t useLen;
 
-    /* qlen is a whole number of bytes for every supported curve, so the leftmost qlen bits of */
-    /* a longer digest are its first c->bytes bytes (FIPS 186-4 Sec. 6.4, AUDIT ECDSA-3).       */
+    /* Leftmost qlen bits = first c->bytes bytes, qlen byte-aligned (AUDIT ECDSA-3) */
     SSF_REQUIRE((uint32_t)c->bytes * 8u == SSFBNBitLen(&c->n));
     useLen = hashLen;
 
@@ -279,8 +279,7 @@ static bool _SSFECDSAGenK(SSFECCurve_t curve, const uint8_t *privKey, size_t pri
                 SSFCryptSecureZero(T, sizeof(T));
                 return true;
             }
-            /* No, Sign rejected an earlier candidate (r or s == 0, RFC 6979 Sec. 3.4); continue */
-            /* the generator with the step h.3 update below (AUDIT ECDSA-1).                      */
+            /* No, Sign rejected an earlier k (r or s == 0); continue the generator */
             skip--;
         }
 
@@ -704,9 +703,7 @@ bool SSFECDSASign(SSFECCurve_t curve, const uint8_t *privKey, size_t privKeyLen,
     _SSFECDSABits2Int(&e, hash, hashLen, c);
     if (SSFBNCmp(&e, &c->n) >= 0) SSFBNSub(&e, &e, &c->n);
 
-    /* RFC 6979 Sec. 3.4 / FIPS 186-4 Sec. 6.4: if r or s is zero, continue the deterministic */
-    /* generator to the next k (AUDIT ECDSA-1). Each failure has probability ~2^-256, so the   */
-    /* bounded attempt count is never reached in practice; attempt 0 is the RFC 6979 k.        */
+    /* On r == 0 or s == 0 take the next RFC 6979 candidate k (AUDIT ECDSA-1) */
     for (attempt = 0u; attempt < SSF_ECDSA_SIGN_MAX_ATTEMPTS; attempt++)
     {
         /* Generate deterministic k per RFC 6979 */
@@ -720,8 +717,13 @@ bool SSFECDSASign(SSFECCurve_t curve, const uint8_t *privKey, size_t privKeyLen,
         _SSFECDSAReduceModN(&r, &Rx, c);
 
 #if SSF_CONFIG_ECDSA_UNIT_TEST == 1
-        /* Test-only fault injection: treat this attempt as r == 0. */
-        if (attempt < _SSFECDSASignTestForcedRetries) SSFBNSetZero(&r, c->limbs);
+        /* Is this attempt forced to fail (test-only fault injection)? */
+        if (attempt < _SSFECDSASignTestForcedRetries)
+        {
+            /* Yes, treat it as r == 0 */
+            SSFBNSetZero(&r, c->limbs);
+        }
+        /* No, keep the computed r */
 #endif /* SSF_CONFIG_ECDSA_UNIT_TEST */
 
         /* Is r zero? */

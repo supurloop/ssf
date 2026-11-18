@@ -2258,8 +2258,7 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
         }
         _SSFX509Digest(hashId, data, dataLen, hash, &hashLen);
 
-        /* Key on a curve this build supports? Only compiled-in curves are mapped: the key may   */
-        /* be an untrusted intermediate's, and SSFECDSAVerify traps on a disabled curve (CFG-1). */
+        /* Is the key on a curve compiled into this build (AUDIT CFG-1)? */
 #if SSF_EC_CONFIG_ENABLE_P256 == 1
         if (SSFX509IsP256(keyCert))
         {
@@ -2269,6 +2268,7 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
         else
 #endif
 #if SSF_EC_CONFIG_ENABLE_P384 == 1
+        /* Is the key on P-384? */
         if (SSFX509IsP384(keyCert))
         {
             /* Yes, P-384 */
@@ -2284,8 +2284,7 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
             return false;
         }
 
-        /* A digest longer than the curve order (e.g. SHA-384 over a P-256 key, RFC 5758 Sec. 3.2) */
-        /* is truncated by ssfecdsa to its leftmost order-size bytes (AUDIT ECDSA-3).             */
+        /* ssfecdsa truncates a digest longer than the curve order (AUDIT ECDSA-3) */
 
         /* keyCert's pubKey is the SEC 1 uncompressed point held in the SPKI BIT STRING */
         ok = SSFECDSAVerify(curve, keyCert->pubKey, (size_t)keyCert->pubKeyLen, hash, hashLen, sig,

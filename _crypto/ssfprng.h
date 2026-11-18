@@ -45,9 +45,7 @@ extern "C" {
 #error SSF_PRNG_CONFIG_KEY_BITS must be 128 or 256.
 #endif
 
-/* Effective AES key size (AUDIT KEYGEN-1). P-384 (192-bit strength) and RSA-4096 (~152-bit) key */
-/* generation draw every key byte from this PRNG, so either one forces a 256-bit key; otherwise  */
-/* SSF_PRNG_CONFIG_KEY_BITS applies. Derived here, after every _opt header has been included.  */
+/* Effective key size: P-384 or RSA-4096 forces 256 bits (AUDIT KEYGEN-1) */
 #if (SSF_EC_CONFIG_ENABLE_P384 == 1) || (SSF_RSA_CONFIG_ENABLE_4096 == 1) || \
     (SSF_PRNG_CONFIG_KEY_BITS == 256u)
 #define SSF_PRNG_KEY_BITS (256u)

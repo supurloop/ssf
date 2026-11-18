@@ -719,15 +719,20 @@ static uint8_t _SSFCMSBuildChain(const SSFCMSSignedData_t *sd, const SSFX509Cert
             if (used) continue;
             if (!SSFX509Parse(sd->certs[i].der, sd->certs[i].derLen, scratch)) continue;
 
-            /* This certificate's subject is the issuer sought? */
+            /* Is this certificate's subject the issuer sought? */
             if (!_SSFCMSSpanEquals(scratch->subject.raw, scratch->subject.rawLen, issuerRaw,
                                    issuerRawLen))
             {
                 /* No, not a candidate */
                 continue;
             }
-            /* Yes, remember the first such candidate as the fallback */
-            if (firstMatch == sd->certsLen) firstMatch = i;
+            /* Yes, is it the first such candidate? */
+            if (firstMatch == sd->certsLen)
+            {
+                /* Yes, remember it as the fallback */
+                firstMatch = i;
+            }
+            /* No, a fallback is already recorded */
 
             /* Does its SKID match the child's AKID? */
             if ((childAkid != NULL) && (scratch->skid != NULL) &&
@@ -745,7 +750,15 @@ static uint8_t _SSFCMSBuildChain(const SSFCMSSignedData_t *sd, const SSFX509Cert
             /* No, fall back to the first name match (none at all ends the chain) */
             pick = firstMatch;
         }
-        if (pick == sd->certsLen) break;
+        /* Yes, use the key identifier match */
+
+        /* Is there no candidate at all? */
+        if (pick == sd->certsLen)
+        {
+            /* Yes, the chain ends here */
+            break;
+        }
+        /* No, a candidate was chosen */
 
         /* Append the chosen certificate and continue from its issuer */
         if (!SSFX509Parse(sd->certs[pick].der, sd->certs[pick].derLen, scratch)) break;
@@ -936,9 +949,7 @@ static bool _SSFCMSVerifySigner(const SSFCMSSignedData_t *sd, uint8_t idx, const
         return false;
     }
 
-    /* Signer certificate chains to a trust anchor for signing? Checked before the signature so */
-    /* a public key from the (attacker-supplied) message is only used once it is trusted       */
-    /* (AUDIT CMS-1; same order as OpenSSL CMS_verify).                                         */
+    /* Is the signer chain trusted, checked before its key is used (AUDIT CMS-1)? */
     chainN = _SSFCMSBuildChain(sd, &signerCert, signerDer, signerDerLen, trustDer, trustDerLen,
                          trustCount, chain, chainLen, &scratch);
     if (!SSFX509VerifyChainPurpose(chain, chainLen, chainN, trustDer, trustDerLen, trustCount,

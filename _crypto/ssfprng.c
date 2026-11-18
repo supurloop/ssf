@@ -60,8 +60,7 @@ void SSFPRNGInitContext(SSFPRNGContext_t *context, const uint8_t *entropy, size_
     SSF_REQUIRE(entropyLen == SSF_PRNG_ENTROPY_SIZE);
 
     memcpy(context->entropy, entropy, SSF_PRNG_ENTROPY_SIZE);
-    /* The counter starts at zero as documented (AUDIT PRNG-1). The key is replaced on every */
-    /* GetRandom call, so the counter only separates inputs; seeding it adds no entropy.     */
+    /* The counter starts at zero as documented (AUDIT PRNG-1) */
     context->count = 0u;
     context->magic = SSF_PRNG_MAGIC;
 }
@@ -102,8 +101,7 @@ void SSFPRNGGetRandom(SSFPRNGContext_t *context, uint8_t *random, size_t randomS
     /* Copy requested number of random numbers to user buffer */
     memcpy(random, ct, randomSize);
 
-    /* Backtracking resistance (CTR_DRBG-style Update): derive a fresh key under the CURRENT key, */
-    /* one block per 16 key bytes with separator bytes 0x01, 0x02 (0x00 is the output block).     */
+    /* Re-key under the current key, one block per 16 key bytes, separators 0x01 / 0x02 */
     for (i = 0; i < (uint8_t)(SSF_PRNG_ENTROPY_SIZE / SSF_AES_BLOCK_SIZE); i++)
     {
         pt[sizeof(uint64_t)] = (uint8_t)(0x01u + i);

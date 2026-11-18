@@ -168,8 +168,7 @@ static void _fe_mul(_fe_t *r, const _fe_t *a, const _fe_t *b)
             c >>= 32;
         }
 
-        /* The fold above can carry out of 2^256 (c is 0 or 1); fold it once more (AUDIT E-1). */
-        /* When it does carry out, r < 38 * 9, so this second fold cannot carry out again.      */
+        /* Fold the 0/1 carry-out of the fold above once more; it cannot carry again (E-1) */
         c *= 38u;
         for (i = 0; i < 8u; i++)
         {
@@ -410,8 +409,7 @@ static uint8_t _fe_iszero(const _fe_t *a)
     _fe_reduce(&t);
     bits = 0;
     for (i = 0; i < 8u; i++) bits |= t.v[i];
-    /* Constant-time: (bits | -bits) has bit 31 set iff bits != 0. Negate in unsigned arithmetic: */
-    /* -(int32_t)bits overflowed (UB) for bits == 0x80000000 (AUDIT E-3).                        */
+    /* (bits | -bits) has bit 31 set iff bits != 0; unsigned negate (AUDIT E-3) */
     return (uint8_t)(1u ^ (((bits | ((uint32_t)0u - bits)) >> 31) & 1u));
 }
 

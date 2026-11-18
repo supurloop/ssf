@@ -521,8 +521,8 @@ void SSFECDSAUnitTest(void)
     /* The no-shift bits2int relied on two previously-unchecked properties, both now asserted in  */
     /* the helper. Drive each through the test wrapper -- the public Sign/Verify entry points      */
     /* reject an out-of-range hashLen upstream, so these asserts are otherwise unreachable:        */
-    /*   (1) SSFBNFromBytes must succeed. Since AUDIT ECDSA-3 a hashLen past the coordinate width  */
-    /*       is truncated to its leftmost c->bytes bytes (FIPS 186-4 Sec. 6.4) instead of asserting. */
+    /*   (1) SSFBNFromBytes must succeed. Since AUDIT ECDSA-3 a hashLen past the coordinate     */
+    /*       width is truncated to its leftmost c->bytes bytes (FIPS 186-4 Sec. 6.4).            */
     /*   (2) The order must fill the coordinate byte width (bitlen(n) == bytes*8) -- the condition  */
     /*       under which truncating the hash to c->bytes equals the RFC 6979 truncation to qlen.    */
     {
@@ -920,7 +920,7 @@ void SSFECDSAUnitTest(void)
 #endif /* SSF_EC_CONFIG_ENABLE_P384 */
     }
 
-    /* ---- AUDIT ECDSA-3: digests longer than the curve are truncated (FIPS 186-4 / RFC 6979) ---- */
+    /* ---- AUDIT ECDSA-3: digests longer than the curve are truncated (FIPS 186-4) ---- */
     /* hashLen > coordBytes used to trip SSF_REQUIRE in Sign and Verify; FIPS 186-4 Sec. 6.4,  */
     /* RFC 5758 Sec. 3.2 and RFC 6979 Sec. 2.3.2 take the leftmost qlen bits. Expected values */
     /* are the RFC 6979 "sample" signatures for P-256 with SHA-384 / SHA-512 (A.2.5) and      */

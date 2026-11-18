@@ -499,8 +499,7 @@ bool SSFAESGCMDecrypt(const uint8_t *ct, size_t ctLen, const uint8_t *iv, size_t
     memcpy(j1, j0, sizeof(j1));
     _SSFAESGCMBlockInc32(j1);
 
-    /* Authenticate before decrypting (AUDIT GCM-1): GHASH reads ct, so it must run before   */
-    /* GCTR writes pt, which may alias ct. This also never releases unverified plaintext.    */
+    /* Authenticate ct before GCTR overwrites a possibly aliased pt (AUDIT GCM-1) */
     t = ((uint64_t)authLen) << 3;
     SSF_PUTU64BE(buf, t);
     t = ((uint64_t)ctLen) << 3;

@@ -262,7 +262,19 @@ static bool _SSFRSAPubKeyDecode(const uint8_t *der, size_t derLen, SSFBN_t *n, S
     nb = nBuf;
     nl = nLen;
     while (nl > 0u && *nb == 0u) { nb++; nl--; }
-    if ((nl == 0u) || (nl > (uint32_t)SSF_BN_MAX_BYTES)) return false;
+
+    /* Is the modulus empty or wider than the largest configured key? */
+    if ((nl == 0u) || (nl > (uint32_t)SSF_RSA_MAX_KEY_BYTES))
+    {
+        /* Yes, refuse it here so every caller's SSF_RSA_MAX_KEY_BYTES buffer is safe. */
+        return false;
+    }
+    /* Is the modulus even? */
+    if ((nb[nl - 1u] & 0x01u) == 0u)
+    {
+        /* Yes, no RSA modulus is even and the Montgomery path requires an odd one. */
+        return false;
+    }
     limbs = (uint16_t)SSF_BN_BITS_TO_LIMBS(nl * 8u);
     if (!SSFBNFromBytes(n, nb, nl, limbs)) return false;
 
@@ -367,6 +379,19 @@ static bool _SSFRSAPrivKeyDecode(const uint8_t *der, size_t derLen, SSFBN_t *n, 
     peek = next;
     if (!SSFASN1DecGetInt(&peek, &buf, &bufLen, &peek)) return false;
     while (bufLen > 0u && *buf == 0u) { buf++; bufLen--; }
+
+    /* Is the modulus empty or wider than the largest configured key? */
+    if ((bufLen == 0u) || (bufLen > (uint32_t)SSF_RSA_MAX_KEY_BYTES))
+    {
+        /* Yes, refuse it here so every caller's SSF_RSA_MAX_KEY_BYTES buffer is safe. */
+        return false;
+    }
+    /* Is the modulus even? */
+    if ((buf[bufLen - 1u] & 0x01u) == 0u)
+    {
+        /* Yes, no RSA modulus is even and the Montgomery path requires an odd one. */
+        return false;
+    }
     nl = (uint16_t)SSF_BN_BITS_TO_LIMBS(bufLen * 8u);
     if (!_SSFRSADecIntToBN(&next, n, nl, &next)) return false;
 
@@ -379,6 +404,13 @@ static bool _SSFRSAPrivKeyDecode(const uint8_t *der, size_t derLen, SSFBN_t *n, 
     if (!SSFASN1DecGetInt(&peek, &buf, &bufLen, &peek)) return false;
     while (bufLen > 0u && *buf == 0u) { buf++; bufLen--; }
     hl = (uint16_t)SSF_BN_BITS_TO_LIMBS(bufLen * 8u);
+
+    /* Is p wider than half the modulus? */
+    if (hl > ((nl + 1u) / 2u))
+    {
+        /* Yes, the CRT half-width buffers and SSFBNMul(p, q) assume p, q <= n/2 limbs. */
+        return false;
+    }
     if (!_SSFRSADecIntToBN(&next, p, hl, &next)) return false;
 
     /* q, dp, dq, qInv are loaded at half-key width. */

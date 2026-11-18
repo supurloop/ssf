@@ -114,11 +114,17 @@ comparable security.
   PEM (no Base64, no `-----BEGIN-----` header). If your storage format is PKCS#8 or PEM,
   strip those layers at the call site before handing the bytes in.
 - **Malformed DER is rejected gracefully — untrusted input cannot abort the process.** The
-  DER key decoders bound-check the modulus / limb count and reject (return `false`) an empty
-  or oversized magnitude rather than passing it down into the big-number layer, where an
-  out-of-range width would trip a halting `SSF_REQUIRE`. As a result `SSFRSAPubKeyIsValid`,
+  DER key decoders bound every integer before it reaches the big-number layer or any
+  fixed-size buffer: a modulus that is empty, even, or wider than `SSF_RSA_MAX_KEY_BYTES`
+  (the largest build-enabled key) is rejected, and in `RSAPrivateKey` the CRT fields
+  `p / q / dp / dq / qInv` are rejected if wider than half the modulus. An out-of-range width
+  would otherwise overflow the `SSF_RSA_MAX_KEY_BYTES` encoded-message buffers in the verify
+  and sign paths or trip a halting `SSF_REQUIRE` in `ssfbn`. As a result `SSFRSAPubKeyIsValid`,
   `SSFRSAPrivKeyIsValid`, and the verify entry points return `false` on malformed or
   hostile key / DER input instead of aborting — safe to call on attacker-controlled bytes.
+  Note that the decoders enforce only these structural bounds; the exact-size and exponent
+  policy (bit length in the enabled set, `e >= 65537`) is applied by `SSFRSAPubKeyIsValid()`
+  and `SSFRSAPrivKeyIsValid()`, not by the verify entry points.
 - **PSS verify is constant-time end-to-end.** The trailer byte, top-bit mask, MGF1 unmask,
   PS-zero scan, salt separator, and final `H == H'` comparison are all folded into a
   single-byte XOR/OR accumulator (`diff`) so the wall-clock time to reach the final

@@ -572,6 +572,52 @@ static const uint8_t _pssSalt20Sig[] = {
     0x0e, 0x89, 0xd0, 0x7e
 };
 
+/* --------------------------------------------------------------------------------------------- */
+/* UT helper: emit a DER INTEGER of mag magnitude bytes (msb, 0xFF fill, lsb) at der[*pos].      */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFRSAUTPutIntTLV(uint8_t *der, uint32_t *pos, uint32_t mag, uint8_t msb,
+                               uint8_t lsb)
+{
+    uint32_t i;
+    uint32_t len = mag;
+
+    SSF_REQUIRE(der != NULL);
+    SSF_REQUIRE(pos != NULL);
+    SSF_REQUIRE(mag >= 2u);
+
+    /* Is the magnitude's top bit set? */
+    if ((msb & 0x80u) != 0u)
+    {
+        /* Yes, DER needs a leading 0x00 so the INTEGER stays positive. */
+        len++;
+    }
+    der[(*pos)++] = 0x02u;
+    der[(*pos)++] = 0x82u;
+    der[(*pos)++] = (uint8_t)(len >> 8);
+    der[(*pos)++] = (uint8_t)(len & 0xFFu);
+    if ((msb & 0x80u) != 0u) { der[(*pos)++] = 0x00u; }
+    der[(*pos)++] = msb;
+    for (i = 1u; i < (mag - 1u); i++) { der[(*pos)++] = 0xFFu; }
+    der[(*pos)++] = lsb;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* UT helper: close a hand-built SEQUENCE whose 0x30 0x82 hi lo header starts at der[0].         */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFRSAUTCloseSeq(uint8_t *der, uint32_t pos)
+{
+    uint32_t content;
+
+    SSF_REQUIRE(der != NULL);
+    SSF_REQUIRE(pos >= 4u);
+
+    content = pos - 4u;
+    der[0] = 0x30u;
+    der[1] = 0x82u;
+    der[2] = (uint8_t)(content >> 8);
+    der[3] = (uint8_t)(content & 0xFFu);
+}
+
 void SSFRSAUnitTest(void)
 {
 #if SSF_RSA_ANY_ENABLED == 0
@@ -612,6 +658,122 @@ void SSFRSAUnitTest(void)
         SSF_ASSERT((size_t)p <= sizeof(der));
         SSF_ASSERT(SSFRSAPubKeyIsValid(der, (size_t)p) == false);
     }
+
+    /* ---- (Hardening, AUDIT RSA-1/RSA-2/RSA-3/RSA-4) decoders bound every RSA integer ---- */
+    /* The verify and sign paths size their fixed EM buffers by SSF_RSA_MAX_KEY_BYTES but take    */
+    /* keyBytes from the DER modulus, so a modulus above the configured maximum (yet within the   */
+    /* 2x keygen bignum capacity) must be refused at decode time. Likewise an even modulus must   */
+    /* return false rather than trip the Montgomery oddness assertion, and CRT fields wider than */
+    /* half the modulus must be refused before SSFBNMul can assert.                               */
+#if (SSF_RSA_MAX_KEY_BYTES + 16u) <= SSF_BN_MAX_BYTES
+    {
+        static uint8_t der[SSF_RSA_MAX_KEY_BYTES + 64u];
+        static uint8_t sig[SSF_RSA_MAX_KEY_BYTES + 16u];
+        uint8_t hash[32];
+        const uint32_t nMag = (uint32_t)SSF_RSA_MAX_KEY_BYTES + 16u;
+        uint32_t p = 4u;
+
+        memset(hash, 0xA5, sizeof(hash));
+        memset(sig, 0x01, sizeof(sig));
+        sig[0] = 0x00u; /* s < n */
+
+        /* Odd modulus 16 bytes above the configured maximum; e = 65537. */
+        _SSFRSAUTPutIntTLV(der, &p, nMag, 0x7Fu, 0xFFu);
+        _SSFRSAUTPutIntTLV(der, &p, 3u, 0x01u, 0x01u);
+        _SSFRSAUTCloseSeq(der, p);
+        SSF_ASSERT((size_t)p <= sizeof(der));
+
+        SSF_ASSERT(SSFRSAPubKeyIsValid(der, (size_t)p) == false);
+#if SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1
+        SSF_ASSERT(SSFRSAVerifyPKCS1(der, (size_t)p, SSF_RSA_HASH_SHA256, hash, sizeof(hash),
+                                     sig, (size_t)nMag) == false);
+#endif /* SSF_RSA_CONFIG_ENABLE_PKCS1_V15 */
+#if SSF_RSA_CONFIG_ENABLE_PSS == 1
+        SSF_ASSERT(SSFRSAVerifyPSS(der, (size_t)p, SSF_RSA_HASH_SHA256, hash, sizeof(hash),
+                                   sizeof(hash), sig, (size_t)nMag) == false);
+#endif /* SSF_RSA_CONFIG_ENABLE_PSS */
+    }
+
+    {
+        static uint8_t der[SSF_RSA_MAX_KEY_BYTES + 64u];
+        static uint8_t sig[SSF_RSA_MAX_KEY_BYTES];
+        uint8_t hash[32];
+        const uint32_t nMag = (uint32_t)SSF_RSA_MAX_KEY_BYTES;
+        uint32_t p = 4u;
+
+        memset(hash, 0xA5, sizeof(hash));
+        memset(sig, 0x01, sizeof(sig));
+        sig[0] = 0x00u; /* s < n */
+
+        /* Even modulus of exactly the maximum size; e = 65537. */
+        _SSFRSAUTPutIntTLV(der, &p, nMag, 0xFFu, 0xFEu);
+        _SSFRSAUTPutIntTLV(der, &p, 3u, 0x01u, 0x01u);
+        _SSFRSAUTCloseSeq(der, p);
+        SSF_ASSERT((size_t)p <= sizeof(der));
+
+        SSF_ASSERT(SSFRSAPubKeyIsValid(der, (size_t)p) == false);
+#if SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1
+        SSF_ASSERT(SSFRSAVerifyPKCS1(der, (size_t)p, SSF_RSA_HASH_SHA256, hash, sizeof(hash),
+                                     sig, (size_t)nMag) == false);
+#endif /* SSF_RSA_CONFIG_ENABLE_PKCS1_V15 */
+#if SSF_RSA_CONFIG_ENABLE_PSS == 1
+        SSF_ASSERT(SSFRSAVerifyPSS(der, (size_t)p, SSF_RSA_HASH_SHA256, hash, sizeof(hash),
+                                   sizeof(hash), sig, (size_t)nMag) == false);
+#endif /* SSF_RSA_CONFIG_ENABLE_PSS */
+    }
+
+    {
+        /* Private key whose modulus is 16 bytes above the configured maximum (RSA-4). */
+        static uint8_t der[(3u * (SSF_RSA_MAX_KEY_BYTES + 32u)) + (5u * (SSF_RSA_MAX_KEY_BYTES)) +
+                           64u];
+        static uint8_t sig[SSF_RSA_MAX_KEY_BYTES + 16u];
+        uint8_t hash[32];
+        const uint32_t nMag = (uint32_t)SSF_RSA_MAX_KEY_BYTES + 16u;
+        const uint32_t hMag = nMag / 2u;
+        size_t sigLen = 0u;
+        uint32_t p = 4u;
+        uint32_t i;
+
+        memset(hash, 0xA5, sizeof(hash));
+
+        der[p++] = 0x02u; der[p++] = 0x01u; der[p++] = 0x00u; /* version 0 */
+        _SSFRSAUTPutIntTLV(der, &p, nMag, 0x7Fu, 0xFFu);     /* n (odd) */
+        _SSFRSAUTPutIntTLV(der, &p, 3u, 0x01u, 0x01u);       /* e = 65537 */
+        _SSFRSAUTPutIntTLV(der, &p, nMag, 0x01u, 0xFFu);     /* d (odd) */
+        for (i = 0; i < 5u; i++) { _SSFRSAUTPutIntTLV(der, &p, hMag, 0x7Fu, 0xFFu); }
+        _SSFRSAUTCloseSeq(der, p);
+        SSF_ASSERT((size_t)p <= sizeof(der));
+
+        SSF_ASSERT(SSFRSAPrivKeyIsValid(der, (size_t)p) == false);
+#if SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1
+        SSF_ASSERT(SSFRSASignPKCS1(der, (size_t)p, SSF_RSA_HASH_SHA256, hash, sizeof(hash),
+                                   sig, sizeof(sig), &sigLen) == false);
+#endif /* SSF_RSA_CONFIG_ENABLE_PKCS1_V15 */
+#if SSF_RSA_CONFIG_ENABLE_PSS == 1
+        SSF_ASSERT(SSFRSASignPSS(der, (size_t)p, SSF_RSA_HASH_SHA256, hash, sizeof(hash),
+                                 sig, sizeof(sig), &sigLen) == false);
+#endif /* SSF_RSA_CONFIG_ENABLE_PSS */
+    }
+#endif /* (SSF_RSA_MAX_KEY_BYTES + 16u) <= SSF_BN_MAX_BYTES */
+
+#if SSF_RSA_CONFIG_ENABLE_2048 == 1
+    {
+        /* Valid-looking 2048-bit n and e with p and q each a full 1024 bytes wide (RSA-3). */
+        static uint8_t der[(3u * 300u) + (5u * 1040u) + 64u];
+        uint32_t p = 4u;
+        uint32_t i;
+
+        der[p++] = 0x02u; der[p++] = 0x01u; der[p++] = 0x00u; /* version 0 */
+        _SSFRSAUTPutIntTLV(der, &p, 256u, 0x80u, 0xFFu);     /* n: exactly 2048 bits, odd */
+        _SSFRSAUTPutIntTLV(der, &p, 3u, 0x01u, 0x01u);       /* e = 65537 */
+        _SSFRSAUTPutIntTLV(der, &p, 256u, 0x01u, 0xFFu);     /* d (odd) */
+        for (i = 0; i < 5u; i++) { _SSFRSAUTPutIntTLV(der, &p, 1024u, 0x7Fu, 0xFFu); }
+        _SSFRSAUTCloseSeq(der, p);
+        SSF_ASSERT((size_t)p <= sizeof(der));
+
+        SSF_ASSERT(SSFRSAPrivKeyIsValid(der, (size_t)p) == false);
+    }
+#endif /* SSF_RSA_CONFIG_ENABLE_2048 */
 
     /* ---- ssfbn enhancement: GCD ---- */
     {

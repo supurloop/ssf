@@ -135,7 +135,7 @@ static bool _SSFMatchGlobTooManyWildcards(SSFCStrIn_t patternStr)
     while (*patternStr != '\0')
     {
         /* Start of a new '*' run? */
-        if ((*patternStr == '*') && !inRun)
+        if ((*patternStr == '*') && (!inRun))
         {
             /* Yes, count it and stop as soon as the limit is exceeded */
             runs++;

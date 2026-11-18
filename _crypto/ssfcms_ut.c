@@ -1718,12 +1718,18 @@ void SSFCMSUnitTest(void)
         SSF_ASSERT(sd.signers[0].hasAlgProtection == true);
         SSF_ASSERT(_VERIFY256() == true);
 
-        /* Exactly the configured maximum length parses; one byte more does not */
+        /* Exactly the configured maximum length parses; one byte more does not. The Ed25519 */
+        /* signer is used because its signature length is fixed, so the padding converges. */
         {
             int32_t pad = 4000;
             uint32_t k;
 
             _SPEC_RESET();
+            s.ed25519 = true;
+            s.priv = edSeed;
+            s.pub = edPub;
+            s.certDer = edCert;
+            s.certDerLen = edCertLen;
             for (k = 0; k < 8u; k++)
             {
                 s.padAttrLen = (uint32_t)pad;

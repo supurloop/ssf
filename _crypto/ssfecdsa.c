@@ -134,13 +134,13 @@ static SSFHMACHash_t _SSFECDSANonceHMACHash(SSFECCurve_t curve, size_t hashLen, 
     SSF_REQUIRE(hlen != NULL);
 
     /* RFC 6979 Sec. 3.2 uses the message hash function H for the HMAC-DRBG (AUDIT ECDSA-2).   */
-    /* Sign receives only the digest, so infer H from its length; 64 cannot reach here since it */
-    /* exceeds every supported curve's coordinate size.                                          */
+    /* Sign receives only the digest, so infer H from its length.                               */
     switch (hashLen)
     {
     case SSF_SHA1_HASH_SIZE: *hlen = SSF_SHA1_HASH_SIZE; return SSF_HMAC_HASH_SHA1;
     case SSF_SHA2_256_BYTE_SIZE: *hlen = SSF_SHA2_256_BYTE_SIZE; return SSF_HMAC_HASH_SHA256;
     case SSF_SHA2_384_BYTE_SIZE: *hlen = SSF_SHA2_384_BYTE_SIZE; return SSF_HMAC_HASH_SHA384;
+    case SSF_SHA2_512_BYTE_SIZE: *hlen = SSF_SHA2_512_BYTE_SIZE; return SSF_HMAC_HASH_SHA512;
     default:
         /* Not a SHA-1 / SHA-2 digest length: fall back to the curve's hash. */
         *hlen = _SSFECDSAGetHashSize(curve);
@@ -149,13 +149,25 @@ static SSFHMACHash_t _SSFECDSANonceHMACHash(SSFECCurve_t curve, size_t hashLen, 
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: bits2int per RFC 6979 Sec. 2.3.2 (hash bytes to integer, no shift for matched pairs).*/
+/* Internal: bits2int per RFC 6979 Sec. 2.3.2: the leftmost qlen bits of the hash as an integer. */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFECDSABits2Int(SSFBN_t *out, const uint8_t *hash, size_t hashLen,
                               const SSFECCurveParams_t *c)
 {
+    size_t useLen;
+
+    /* qlen is a whole number of bytes for every supported curve, so the leftmost qlen bits of */
+    /* a longer digest are its first c->bytes bytes (FIPS 186-4 Sec. 6.4, AUDIT ECDSA-3).       */
     SSF_REQUIRE((uint32_t)c->bytes * 8u == SSFBNBitLen(&c->n));
-    SSF_ASSERT(SSFBNFromBytes(out, hash, hashLen, c->limbs));
+    useLen = hashLen;
+
+    /* Is the digest longer than the curve order? */
+    if (useLen > c->bytes)
+    {
+        /* Yes, keep its leftmost c->bytes bytes. */
+        useLen = c->bytes;
+    }
+    SSF_ASSERT(SSFBNFromBytes(out, hash, useLen, c->limbs));
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -681,8 +693,8 @@ bool SSFECDSASign(SSFECCurve_t curve, const uint8_t *privKey, size_t privKeyLen,
     SSF_REQUIRE(sigLen != NULL);
     SSF_REQUIRE(c != NULL);
     SSF_REQUIRE(privKeyLen == c->bytes);
-    /* hashLen <= c->bytes (longer hashes would need bit-truncation, not implemented). */
-    SSF_REQUIRE(hashLen > 0u && hashLen <= c->bytes);
+    /* Digests up to SHA-512; longer than the curve order are truncated (AUDIT ECDSA-3). */
+    SSF_REQUIRE((hashLen > 0u) && (hashLen <= SSF_SHA2_512_BYTE_SIZE));
 
     /* Import private key */
     if (!SSFBNFromBytes(&d, privKey, privKeyLen, c->limbs)) goto cleanup;
@@ -876,8 +888,8 @@ bool SSFECDSAVerify(SSFECCurve_t curve, const uint8_t *pubKey, size_t pubKeyLen,
     SSF_REQUIRE(hash != NULL);
     SSF_REQUIRE(sig != NULL);
     SSF_REQUIRE(c != NULL);
-    /* See SSFECDSASign comment: any hash <= curve order length is mathematically valid. */
-    SSF_REQUIRE(hashLen > 0u && hashLen <= c->bytes);
+    /* Digests up to SHA-512; longer than the curve order are truncated (AUDIT ECDSA-3). */
+    SSF_REQUIRE((hashLen > 0u) && (hashLen <= SSF_SHA2_512_BYTE_SIZE));
 
     if (!_SSFECDSAVerifyInit(c, curve, pubKey, pubKeyLen, hash, hashLen, sig, sigLen,
                              &r, &u1, &u2, &Q)) return false;

@@ -12,7 +12,7 @@ Two design choices worth calling out up front:
 - **Signing is deterministic (RFC 6979).** The per-signature nonce `k` is derived from the
   private key and the message hash by the RFC 6979 §3.2 HMAC-DRBG procedure, not from a
   live RNG. As RFC 6979 specifies, the HMAC uses the digest's own hash function, inferred from
-  `hashLen` (20 → SHA-1, 32 → SHA-256, 48 → SHA-384; any other length falls back to the
+  `hashLen` (20 → SHA-1, 32 → SHA-256, 48 → SHA-384, 64 → SHA-512; any other length falls back to the
   curve's hash), so non-matching pairings such as P-384 with SHA-256 reproduce the RFC 6979
   vectors and other implementations. This eliminates the classic ECDSA vulnerability — if you ever sign two
   different messages with the same `k`, an attacker who sees both signatures recovers your
@@ -69,12 +69,13 @@ Two design choices worth calling out up front:
   | P-256 | SHA-256 | 32 |
   | P-384 | SHA-384 | 48 |
 
-  The code enforces only `1 ≤ hashLen ≤ coordBytes` (per FIPS 186-4 §6.4 / RFC 5758 §3.2,
-  which allow any hash no larger than the curve's coordinate size — `bits2int` handles the
-  variable length). Shorter-than-recommended hashes are accepted but reduce the effective
-  security level; use the recommended pairing unless you have a concrete interop reason to
-  deviate. Hashes *longer* than `coordBytes` are rejected by a `SSF_REQUIRE` — this
-  implementation does not do the RFC 5758 truncation-from-left step. Using the wrong hash
+  The code accepts any `1 ≤ hashLen ≤ 64` (up to SHA-512). Per FIPS 186-4 §6.4, RFC 5758 §3.2
+  and RFC 6979 §2.3.2, a digest longer than `coordBytes` is truncated to its leftmost
+  `coordBytes` bytes (the curve order is byte-aligned for P-256 and P-384), so P-256 with
+  SHA-384 / SHA-512 and P-384 with SHA-512 sign and verify as other implementations do.
+  Shorter-than-recommended hashes are accepted but reduce the effective security level; use
+  the recommended pairing unless you have a concrete interop reason to deviate. A `hashLen`
+  above 64 is a `SSF_REQUIRE` failure. Using the wrong hash
   *algorithm* (different construction at the same length) produces a technically valid
   signature that commits to the wrong value — a semantic failure, not a crypto-primitive
   failure. Sign and verify must agree on the hash algorithm.
@@ -289,7 +290,7 @@ matching the curve, so calling twice with the same inputs yields the same signat
 | `privKey` | in | `const uint8_t *` | Raw big-endian private key. Must not be `NULL`. |
 | `privKeyLen` | in | `size_t` | Must equal `coordBytes` for the curve (32 / 48). |
 | `hash` | in | `const uint8_t *` | Message digest. Must not be `NULL`. |
-| `hashLen` | in | `size_t` | Must be in `[1, coordBytes]` — 32 for P-256, 48 for P-384. The recommended pairing is SHA-256 / P-256 and SHA-384 / P-384; longer hashes are rejected and shorter ones reduce security (see [Notes](#notes)). |
+| `hashLen` | in | `size_t` | Must be in `[1, 64]`. The recommended pairing is SHA-256 / P-256 and SHA-384 / P-384; a longer digest is truncated to its leftmost `coordBytes` bytes and a shorter one reduces security (see [Notes](#notes)). |
 | `sig` | out | `uint8_t *` | Buffer for DER signature. Must not be `NULL`. |
 | `sigSize` | in | `size_t` | Size of `sig`. Must hold the encoded signature; [`SSF_ECDSA_MAX_SIG_SIZE`](#ssf-ecdsa-max-sig-size) always fits. A smaller buffer that cannot hold this signature makes the call return `false`. |
 | `sigLen` | out | `size_t *` | Actual bytes written to `sig`. |

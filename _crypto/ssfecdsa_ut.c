@@ -521,8 +521,8 @@ void SSFECDSAUnitTest(void)
     /* The no-shift bits2int relied on two previously-unchecked properties, both now asserted in  */
     /* the helper. Drive each through the test wrapper -- the public Sign/Verify entry points      */
     /* reject an out-of-range hashLen upstream, so these asserts are otherwise unreachable:        */
-    /*   (1) SSFBNFromBytes must succeed; an over-long hashLen leaves the output at len 0, which    */
-    /*       would otherwise surface only as a confusing length-mismatch assert inside the caller.  */
+    /*   (1) SSFBNFromBytes must succeed. Since AUDIT ECDSA-3 a hashLen past the coordinate width  */
+    /*       is truncated to its leftmost c->bytes bytes (FIPS 186-4 Sec. 6.4) instead of asserting. */
     /*   (2) The order must fill the coordinate byte width (bitlen(n) == bytes*8) -- the condition  */
     /*       under which truncating the hash to c->bytes equals the RFC 6979 truncation to qlen.    */
     {
@@ -534,8 +534,8 @@ void SSFECDSAUnitTest(void)
         uint8_t hash[SSF_EC_MAX_COORD_BYTES + 1u] = {0};
         SSFECCurveParams_t cBad;
 
-        /* (1) hashLen one byte past the coordinate width makes SSFBNFromBytes fail -> assert. */
-        SSF_ASSERT_TEST(_SSFECDSABits2IntForTest(cReal, hash, (size_t)cReal->bytes + 1u));
+        /* (1) hashLen one byte past the coordinate width is truncated, not asserted (ECDSA-3). */
+        _SSFECDSABits2IntForTest(cReal, hash, (size_t)cReal->bytes + 1u);
 
         /* A matched-width hashLen must NOT assert (the normal path still works). */
         _SSFECDSABits2IntForTest(cReal, hash, cReal->bytes);
@@ -916,6 +916,111 @@ void SSFECDSAUnitTest(void)
                                     sizeof(sha256Hash), sig, sizeof(sig), &sigLen) == true);
             SSF_ASSERT((sigLen == sizeof(sigP384Sha256)) &&
                        (memcmp(sig, sigP384Sha256, sizeof(sigP384Sha256)) == 0));
+        }
+#endif /* SSF_EC_CONFIG_ENABLE_P384 */
+    }
+
+    /* ---- AUDIT ECDSA-3: digests longer than the curve are truncated (FIPS 186-4 / RFC 6979) ---- */
+    /* hashLen > coordBytes used to trip SSF_REQUIRE in Sign and Verify; FIPS 186-4 Sec. 6.4,  */
+    /* RFC 5758 Sec. 3.2 and RFC 6979 Sec. 2.3.2 take the leftmost qlen bits. Expected values */
+    /* are the RFC 6979 "sample" signatures for P-256 with SHA-384 / SHA-512 (A.2.5) and      */
+    /* P-384 with SHA-512 (A.2.6) from the validated Python model; each must also verify.     */
+    {
+        static const uint8_t privKey256[] = {
+            0xC9u, 0xAFu, 0xA9u, 0xD8u, 0x45u, 0xBAu, 0x75u, 0x16u,
+            0x6Bu, 0x5Cu, 0x21u, 0x57u, 0x67u, 0xB1u, 0xD6u, 0x93u,
+            0x4Eu, 0x50u, 0xC3u, 0xDBu, 0x36u, 0xE8u, 0x9Bu, 0x12u,
+            0x7Bu, 0x8Au, 0x62u, 0x2Bu, 0x12u, 0x0Fu, 0x67u, 0x21u
+        };
+        static const uint8_t pubKey256[] = {
+            0x04u,
+            0x60u, 0xFEu, 0xD4u, 0xBAu, 0x25u, 0x5Au, 0x9Du, 0x31u,
+            0xC9u, 0x61u, 0xEBu, 0x74u, 0xC6u, 0x35u, 0x6Du, 0x68u,
+            0xC0u, 0x49u, 0xB8u, 0x92u, 0x3Bu, 0x61u, 0xFAu, 0x6Cu,
+            0xE6u, 0x69u, 0x62u, 0x2Eu, 0x60u, 0xF2u, 0x9Fu, 0xB6u,
+            0x79u, 0x03u, 0xFEu, 0x10u, 0x08u, 0xB8u, 0xBCu, 0x99u,
+            0xA4u, 0x1Au, 0xE9u, 0xE9u, 0x56u, 0x28u, 0xBCu, 0x64u,
+            0xF2u, 0xF1u, 0xB2u, 0x0Cu, 0x2Du, 0x7Eu, 0x9Fu, 0x51u,
+            0x77u, 0xA3u, 0xC2u, 0x94u, 0xD4u, 0x46u, 0x22u, 0x99u
+        };
+        static const uint8_t sigP256Sha384[70] = {
+            0x30u, 0x44u, 0x02u, 0x20u, 0x0Eu, 0xAFu, 0xEAu, 0x03u, 0x9Bu, 0x20u, 0xE9u, 0xB4u,
+            0x23u, 0x09u, 0xFBu, 0x1Du, 0x89u, 0xE2u, 0x13u, 0x05u, 0x7Cu, 0xBFu, 0x97u, 0x3Du,
+            0xC0u, 0xCFu, 0xC8u, 0xF1u, 0x29u, 0xEDu, 0xDDu, 0xC8u, 0x00u, 0xEFu, 0x77u, 0x19u,
+            0x02u, 0x20u, 0x48u, 0x61u, 0xF0u, 0x49u, 0x1Eu, 0x69u, 0x98u, 0xB9u, 0x45u, 0x51u,
+            0x93u, 0xE3u, 0x4Eu, 0x7Bu, 0x0Du, 0x28u, 0x4Du, 0xDDu, 0x71u, 0x49u, 0xA7u, 0x4Bu,
+            0x95u, 0xB9u, 0x26u, 0x1Fu, 0x13u, 0xABu, 0xDEu, 0x94u, 0x09u, 0x54u
+        };
+        static const uint8_t sigP256Sha512[71] = {
+            0x30u, 0x45u, 0x02u, 0x21u, 0x00u, 0x84u, 0x96u, 0xA6u, 0x0Bu, 0x5Eu, 0x9Bu, 0x47u,
+            0xC8u, 0x25u, 0x48u, 0x88u, 0x27u, 0xE0u, 0x49u, 0x5Bu, 0x0Eu, 0x3Fu, 0xA1u, 0x09u,
+            0xECu, 0x45u, 0x68u, 0xFDu, 0x3Fu, 0x8Du, 0x10u, 0x97u, 0x67u, 0x8Eu, 0xB9u, 0x7Fu,
+            0x00u, 0x02u, 0x20u, 0x23u, 0x62u, 0xABu, 0x1Au, 0xDBu, 0xE2u, 0xB8u, 0xADu, 0xF9u,
+            0xCBu, 0x9Eu, 0xDAu, 0xB7u, 0x40u, 0xEAu, 0x60u, 0x49u, 0xC0u, 0x28u, 0x11u, 0x4Fu,
+            0x24u, 0x60u, 0xF9u, 0x65u, 0x54u, 0xF6u, 0x1Fu, 0xAEu, 0x33u, 0x02u, 0xFEu
+        };
+        uint8_t h384[48];
+        uint8_t h512[64];
+        uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
+        size_t sigLen;
+
+        SSFSHA384((const uint8_t *)"sample", 6, h384, sizeof(h384));
+        SSFSHA512((const uint8_t *)"sample", 6, h512, sizeof(h512));
+
+        /* P-256 + SHA-384 (48-byte digest, truncated to 32). */
+        SSF_ASSERT(SSFECDSASign(SSF_EC_CURVE_P256, privKey256, sizeof(privKey256), h384,
+                                sizeof(h384), sig, sizeof(sig), &sigLen) == true);
+        SSF_ASSERT((sigLen == sizeof(sigP256Sha384)) &&
+                   (memcmp(sig, sigP256Sha384, sizeof(sigP256Sha384)) == 0));
+        SSF_ASSERT(SSFECDSAVerify(SSF_EC_CURVE_P256, pubKey256, sizeof(pubKey256), h384,
+                                  sizeof(h384), sig, sigLen) == true);
+
+        /* P-256 + SHA-512 (64-byte digest, truncated to 32). */
+        SSF_ASSERT(SSFECDSASign(SSF_EC_CURVE_P256, privKey256, sizeof(privKey256), h512,
+                                sizeof(h512), sig, sizeof(sig), &sigLen) == true);
+        SSF_ASSERT((sigLen == sizeof(sigP256Sha512)) &&
+                   (memcmp(sig, sigP256Sha512, sizeof(sigP256Sha512)) == 0));
+        SSF_ASSERT(SSFECDSAVerify(SSF_EC_CURVE_P256, pubKey256, sizeof(pubKey256), h512,
+                                  sizeof(h512), sig, sigLen) == true);
+
+        /* Longer than any supported digest still traps. */
+        SSF_ASSERT_TEST(SSFECDSAVerify(SSF_EC_CURVE_P256, pubKey256, sizeof(pubKey256), h512,
+                                       sizeof(h512) + 1u, sig, sigLen));
+
+#if SSF_EC_CONFIG_ENABLE_P384 == 1
+        {
+            static const uint8_t privKey384[] = {
+                0x6Bu, 0x9Du, 0x3Du, 0xADu, 0x2Eu, 0x1Bu, 0x8Cu, 0x1Cu,
+                0x05u, 0xB1u, 0x98u, 0x75u, 0xB6u, 0x65u, 0x9Fu, 0x4Du,
+                0xE2u, 0x3Cu, 0x3Bu, 0x66u, 0x7Bu, 0xF2u, 0x97u, 0xBAu,
+                0x9Au, 0xA4u, 0x77u, 0x40u, 0x78u, 0x71u, 0x37u, 0xD8u,
+                0x96u, 0xD5u, 0x72u, 0x4Eu, 0x4Cu, 0x70u, 0xA8u, 0x25u,
+                0xF8u, 0x72u, 0xC9u, 0xEAu, 0x60u, 0xD2u, 0xEDu, 0xF5u
+            };
+            static const uint8_t sigP384Sha512[103] = {
+                0x30u, 0x65u, 0x02u, 0x31u, 0x00u, 0xEDu, 0x09u, 0x59u, 0xD5u, 0x88u, 0x0Au, 0xB2u,
+                0xD8u, 0x69u, 0xAEu, 0x7Fu, 0x6Cu, 0x29u, 0x15u, 0xC6u, 0xD6u, 0x0Fu, 0x96u, 0x50u,
+                0x7Fu, 0x9Cu, 0xB3u, 0xE0u, 0x47u, 0xC0u, 0x04u, 0x68u, 0x61u, 0xDAu, 0x4Au, 0x79u,
+                0x9Cu, 0xFEu, 0x30u, 0xF3u, 0x5Cu, 0xC9u, 0x00u, 0x05u, 0x6Du, 0x7Cu, 0x99u, 0xCDu,
+                0x78u, 0x82u, 0x43u, 0x37u, 0x09u, 0x02u, 0x30u, 0x51u, 0x2Cu, 0x8Cu, 0xCEu, 0xEEu,
+                0x38u, 0x90u, 0xA8u, 0x40u, 0x58u, 0xCEu, 0x1Eu, 0x22u, 0xDBu, 0xC2u, 0x19u, 0x8Fu,
+                0x42u, 0x32u, 0x3Cu, 0xE8u, 0xACu, 0xA9u, 0x13u, 0x53u, 0x29u, 0xF0u, 0x3Cu, 0x06u,
+                0x8Eu, 0x51u, 0x12u, 0xDCu, 0x7Cu, 0xC3u, 0xEFu, 0x34u, 0x46u, 0xDEu, 0xFCu, 0xEBu,
+                0x01u, 0xA4u, 0x5Cu, 0x26u, 0x67u, 0xFDu, 0xD5u
+            };
+            uint8_t pubKey384[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+            size_t pubKey384Len;
+
+            /* P-384 + SHA-512 (64-byte digest, truncated to 48). */
+            SSF_ASSERT(SSFECDSAPubKeyFromPrivKey(SSF_EC_CURVE_P384, privKey384, sizeof(privKey384),
+                                                 pubKey384, sizeof(pubKey384),
+                                                 &pubKey384Len) == true);
+            SSF_ASSERT(SSFECDSASign(SSF_EC_CURVE_P384, privKey384, sizeof(privKey384), h512,
+                                    sizeof(h512), sig, sizeof(sig), &sigLen) == true);
+            SSF_ASSERT((sigLen == sizeof(sigP384Sha512)) &&
+                       (memcmp(sig, sigP384Sha512, sizeof(sigP384Sha512)) == 0));
+            SSF_ASSERT(SSFECDSAVerify(SSF_EC_CURVE_P384, pubKey384, pubKey384Len, h512,
+                                      sizeof(h512), sig, sigLen) == true);
         }
 #endif /* SSF_EC_CONFIG_ENABLE_P384 */
     }

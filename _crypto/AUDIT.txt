@@ -531,7 +531,7 @@ ECDSA-2  Low  FIXED (2026-11-18)
              or other implementations. Still a valid, deterministic, unbiased nonce.
   Evidence:  158  SSFHMACHash_t hmacHash = _SSFECDSAGetHMACHash(curve);
 
-ECDSA-3  Low  OPEN
+ECDSA-3  Low  FIXED (2026-11-18)
   Location:  ssfecdsa.c:646, :816 (SSFECDSASign / SSFECDSAVerify)
   Problem:   hashLen > coordBytes is an SSF_REQUIRE rather than return false, so P-256 with
              SHA-384/512 (legal per RFC 5758 with left truncation) is unsupported and a caller
@@ -1339,3 +1339,22 @@ CHANGE LOG
               ssfecdsa (incl. matched-pair RFC KATs, ECDSA-1 retry KATs, Wycheproof), ssfec,
               ssfbn (ECDSA/EC/BN unit tests enabled), ssfcms, ssfx509, ssfbase64url, ssfmatch;
               production compile clean.
+  2026-11-18  ECDSA-3 FIXED via option 1. _SSFECDSABits2Int now uses the leftmost c->bytes bytes
+              of a longer digest (qlen is byte-aligned for P-256 and P-384, so this is FIPS 186-4
+              Sec. 6.4 / RFC 5758 Sec. 3.2 / RFC 6979 Sec. 2.3.2 truncation); bits2octets for the
+              nonce follows. SSFECDSASign and SSFECDSAVerify accept 1 <= hashLen <= 64 (was
+              <= coordBytes) and still SSF_REQUIRE above 64; the ECDSA-2 nonce HMAC selection
+              gains 64 -> SHA-512. Digests up to coordBytes take the same path as before, so all
+              existing signatures are byte-identical. The (Hardening) bits2int test, which
+              asserted a trap for hashLen = coordBytes + 1, now expects truncation (intentional
+              contract change). ssfecdsa.md: the hash-length note, Sign's hashLen row and the
+              nonce-hash list updated. Test block "AUDIT ECDSA-3" in ssfecdsa_ut.c: RFC 6979
+              "sample" known answers for P-256 with SHA-384 and SHA-512 (A.2.5) and P-384 with
+              SHA-512 (A.2.6, gated on P-384), each signed byte-exactly and verified; hashLen 65
+              still traps. Expected values from the validated Python model; the P-256 ones match
+              the RFC's published r / s as recalled. RED: SSF_REQUIRE at ssfecdsa.c:685 (Sign's
+              hashLen <= c->bytes). GREEN: ssfecdsa (incl. all RFC KATs, ECDSA-1 / ECDSA-2 blocks,
+              Wycheproof), ssfec, ssfbn (ECDSA/EC/BN unit tests enabled), ssfcms, ssfx509,
+              ssfbase64url, ssfmatch; production compile clean. Not changed: ssfx509's own guard
+              still refuses ecdsa-with-SHA384 over a P-256 key (ssfx509_ut.c ~6616 pins that);
+              relaxing it to match RFC 5758 is an ssfx509 change awaiting Jim's decision.

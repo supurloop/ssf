@@ -176,20 +176,28 @@ void SSFPRNGUnitTest(void)
         SSFPRNGDeInitContext(&ctx);
     }
 
-    /* ---- AUDIT PRNG-1/PRNG-2: documented counter start and portable counter encoding ---- */
-    /* Init/ReInit must reset the counter to zero (it used to start at -(first 8 seed bytes)), */
-    /* and the counter must enter the AES input big-endian (it used to be the raw host-order */
-    /* uint64_t, so the stream differed between little- and big-endian hosts). Known answers */
-    /* computed independently with `openssl enc -aes-128-ecb -nopad`:                        */
-    /*   out1 = AES(K0, 0^16)                          (count 0, output block)               */
-    /*   K1   = AES(K0, 00*8 || 01 || 00*7)            (count 0, re-key block)               */
-    /*   out2 = AES(K1, 00*7 || 01 || 00*8)            (count 1 big-endian, output block)    */
+    /* ---- AUDIT PRNG-1/PRNG-2/KEYGEN-1: counter start, encoding and key size ---- */
+    /* Init/ReInit reset the counter to zero (PRNG-1), the counter enters the AES input big-  */
+    /* endian (PRNG-2), and the key is AES-256 whenever P-384 or RSA-4096 is enabled or       */
+    /* SSF_PRNG_CONFIG_KEY_BITS asks for it, else AES-128 (KEYGEN-1). Seed byte i = i. Known  */
+    /* answers computed independently with `openssl enc -aes-{128,256}-ecb -nopad`:           */
+    /*   out1 = AES(K0, 0^16)                                  (count 0, output block)       */
+    /*   K1   = AES(K0, 00*8 || 01 || 00*7) [|| AES(K0, 00*8 || 02 || 00*7) for AES-256]      */
+    /*   out2 = AES(K1, 00*7 || 01 || 00*8)                    (count 1 big-endian)          */
     {
-        SSFPRNGContext_t ctx;
-        static const uint8_t entropyKnown[SSF_PRNG_ENTROPY_SIZE] = {
-            0x00u, 0x01u, 0x02u, 0x03u, 0x04u, 0x05u, 0x06u, 0x07u,
-            0x08u, 0x09u, 0x0Au, 0x0Bu, 0x0Cu, 0x0Du, 0x0Eu, 0x0Fu
+#if (SSF_EC_CONFIG_ENABLE_P384 == 1) || (SSF_RSA_CONFIG_ENABLE_4096 == 1) || \
+    (SSF_PRNG_CONFIG_KEY_BITS == 256)
+        static const uint32_t expectBits = 256u;
+        static const uint8_t out1Known[SSF_PRNG_RANDOM_MAX_SIZE] = {
+            0xF2u, 0x90u, 0x00u, 0xB6u, 0x2Au, 0x49u, 0x9Fu, 0xD0u,
+            0xA9u, 0xF3u, 0x9Au, 0x6Au, 0xDDu, 0x2Eu, 0x77u, 0x80u
         };
+        static const uint8_t out2Known[SSF_PRNG_RANDOM_MAX_SIZE] = {
+            0x86u, 0x9Cu, 0xE1u, 0xC4u, 0xDCu, 0xB5u, 0x47u, 0x8Du,
+            0xD8u, 0x31u, 0xDBu, 0x73u, 0xC7u, 0xB2u, 0xF2u, 0x0Du
+        };
+#else
+        static const uint32_t expectBits = 128u;
         static const uint8_t out1Known[SSF_PRNG_RANDOM_MAX_SIZE] = {
             0xC6u, 0xA1u, 0x3Bu, 0x37u, 0x87u, 0x8Fu, 0x5Bu, 0x82u,
             0x6Fu, 0x4Fu, 0x81u, 0x62u, 0xA1u, 0xC8u, 0xD8u, 0x79u
@@ -198,11 +206,18 @@ void SSFPRNGUnitTest(void)
             0xB6u, 0xD3u, 0x90u, 0x3Fu, 0xA2u, 0xA8u, 0x7Au, 0x2Du,
             0x49u, 0x75u, 0x8Cu, 0x7Fu, 0xACu, 0x67u, 0x91u, 0xF7u
         };
-        static const uint8_t otherSeed[SSF_PRNG_ENTROPY_SIZE] = {
-            0xF0u, 0xE1u, 0xD2u, 0xC3u, 0xB4u, 0xA5u, 0x96u, 0x87u,
-            0x78u, 0x69u, 0x5Au, 0x4Bu, 0x3Cu, 0x2Du, 0x1Eu, 0x0Fu
-        };
+#endif
+        SSFPRNGContext_t ctx;
+        uint8_t entropyKnown[SSF_PRNG_ENTROPY_SIZE];
+        uint8_t otherSeed[SSF_PRNG_ENTROPY_SIZE];
         uint8_t knownRandom[SSF_PRNG_RANDOM_MAX_SIZE];
+        size_t k;
+
+        /* The seed size follows the derived key size. */
+        SSF_ASSERT(((uint32_t)SSF_PRNG_ENTROPY_SIZE * 8u) == expectBits);
+
+        for (k = 0; k < sizeof(entropyKnown); k++) entropyKnown[k] = (uint8_t)k;
+        for (k = 0; k < sizeof(otherSeed); k++) otherSeed[k] = (uint8_t)(0xF0u - k);
 
         SSFPRNGInitContext(&ctx, entropyKnown, sizeof(entropyKnown));
         SSF_ASSERT(ctx.count == 0u);

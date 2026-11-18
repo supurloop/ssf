@@ -2,11 +2,12 @@
 
 [SSF](../README.md) | [Cryptography](README.md)
 
-Cryptographically secure capable PRNG based on AES-128 in a NIST SP 800-90A CTR_DRBG-style
-construction with a 128-bit seed.
+Cryptographically secure capable PRNG based on AES in a NIST SP 800-90A CTR_DRBG-style
+construction with a 128-bit (AES-128) or 256-bit (AES-256) seed, selected at build time; see
+[Configuration](#configuration).
 
 Each call to `SSFPRNGGetRandom()` internally encrypts a monotonically increasing 64-bit counter
-(zero-padded to 128 bits) with the current key as the AES-128 key, producing up to 16 bytes of
+(zero-padded to 128 bits) with the current key as the AES key, producing up to 16 bytes of
 pseudo-random output. After emitting output the call performs a CTR_DRBG-style Update (re-key): it
 derives a fresh AES key by encrypting a domain-separated block under the current key and overwrites
 the context key with it, destroying the key that produced the returned bytes. This gives
@@ -31,7 +32,7 @@ supplied to `SSFPRNGInitContext()`.
 
 - **Timing attack warning — seed recovery, not just per-call leakage.** This implementation
   uses the timing-attack-vulnerable [`ssfaes`](ssfaes.md) block cipher with the entropy as
-  the AES-128 key. In an ordinary AES use, recovering the key via timing observation
+  the AES key. In an ordinary AES use, recovering the key via timing observation
   compromises only the message protected with that key. Here, **the AES key IS the PRNG
   state**: an attacker who recovers the current key from timing observations can predict every
   future PRNG output (the key and counter evolve deterministically, so the forward keystream is
@@ -54,10 +55,15 @@ supplied to `SSFPRNGInitContext()`.
   unused bytes from the AES block are discarded.
 - The counter starts at zero after `SSFPRNGInitContext()` / `SSFPRNGReInitContext()` and enters the
   AES input as a big-endian 64-bit value, so a given seed yields the same byte stream on little-
-  and big-endian hosts. For seed `00 01 … 0F` the first two 16-byte outputs are
-  `c6a13b37878f5b826f4f8162a1c8d879` and `b6d3903fa2a87a2d49758c7fac6791f7`. (Before
-  2026-11-18 the counter started at the negated first 8 seed bytes in host byte order, so seeded
-  output streams from earlier versions differ.)
+  and big-endian hosts. For the seed whose byte `i` is `i`, the first two 16-byte outputs are
+  `c6a13b37878f5b826f4f8162a1c8d879` and `b6d3903fa2a87a2d49758c7fac6791f7` with a 128-bit key
+  (seed `00 … 0F`), and `f29000b62a499fd0a9f39a6add2e7780` and
+  `869ce1c4dcb5478dd831db73c7b2f20d` with a 256-bit key (seed `00 … 1F`). (Before 2026-11-18
+  the key was always AES-128 and the counter started at the negated first 8 seed bytes in host
+  byte order, so seeded output streams from earlier versions differ.)
+- After each output block the key is replaced by one AES block per 16 key bytes under the
+  current key, with separator byte `0x01` (and `0x02` for the second half of a 256-bit key) in
+  place of the output block's `0x00`.
 - Re-seed with `SSFPRNGReInitContext()` when there is concern about the 64-bit counter eventually
   exhausting its period or when fresh entropy becomes available.
 - The PRNG is not thread-safe; use separate contexts per thread or protect access with a mutex.
@@ -67,7 +73,16 @@ supplied to `SSFPRNGInitContext()`.
 
 ## [↑](#ssfprng--pseudo-random-number-generator) Configuration
 
-This module has no compile-time configuration options in `ssfoptions.h`.
+Options live in [`_opt/ssfprng_opt.h`](../_opt/ssfprng_opt.h).
+
+| Macro | Default | Description |
+|-------|---------|-------------|
+| `SSF_PRNG_CONFIG_KEY_BITS` | `128` | Requested AES key (and seed) size, `128` or `256`. A minimum, not a cap: the effective size `SSF_PRNG_KEY_BITS` is forced to `256` whenever `SSF_EC_CONFIG_ENABLE_P384` or `SSF_RSA_CONFIG_ENABLE_4096` is `1`, because P-384 (192-bit strength) and RSA-4096 (~152-bit) key generation draw every key byte from this PRNG and need more than 128 bits of seed entropy. Both of those default to `1`, so the default build uses `256`. |
+
+`SSF_PRNG_ENTROPY_SIZE` follows the effective key size (16 or 32 bytes), so always size seed
+buffers with the macro rather than a literal. A 256-bit key costs about twice the per-call time
+of a 128-bit key (three AES-256 block encryptions instead of two AES-128 ones), 16 more bytes of
+context, and 32 rather than 16 bytes from the platform entropy source per seed.
 
 <a id="api-summary"></a>
 
@@ -77,7 +92,8 @@ This module has no compile-time configuration options in `ssfoptions.h`.
 
 | Symbol | Kind | Description |
 |--------|------|-------------|
-| <a id="ssf-prng-entropy-size"></a>`SSF_PRNG_ENTROPY_SIZE` | Constant | `16` — required size in bytes of the entropy buffer passed to `SSFPRNGInitContext()` and `SSFPRNGReInitContext()` |
+| <a id="ssf-prng-key-bits"></a>`SSF_PRNG_KEY_BITS` | Constant | Effective AES key size, `128` or `256` (see [Configuration](#configuration)) |
+| <a id="ssf-prng-entropy-size"></a>`SSF_PRNG_ENTROPY_SIZE` | Constant | `SSF_PRNG_KEY_BITS / 8` (16 or 32) — required size in bytes of the entropy buffer passed to `SSFPRNGInitContext()` and `SSFPRNGReInitContext()` |
 | <a id="ssf-prng-random-max-size"></a>`SSF_PRNG_RANDOM_MAX_SIZE` | Constant | `16` — maximum number of bytes that can be requested in a single `SSFPRNGGetRandom()` call |
 | <a id="ssfprngcontext-t"></a>`SSFPRNGContext_t` | Struct | PRNG context holding the entropy seed, internal counter, and state marker. Treat as opaque; pass by pointer to all API functions. |
 
@@ -87,7 +103,7 @@ This module has no compile-time configuration options in `ssfoptions.h`.
 
 | | Function | Description |
 |---|----------|-------------|
-| [e.g.](#ex-init) | [`void SSFPRNGInitContext(context, entropy, entropyLen)`](#ssfprnginitcontext) | Initialize a PRNG context with 16 bytes of entropy |
+| [e.g.](#ex-init) | [`void SSFPRNGInitContext(context, entropy, entropyLen)`](#ssfprnginitcontext) | Initialize a PRNG context with `SSF_PRNG_ENTROPY_SIZE` bytes of entropy |
 | [e.g.](#ex-reinit) | [`void SSFPRNGReInitContext(context, entropy, entropyLen)`](#ssfprngreinitcontext) | Re-seed an existing context with fresh entropy (alias for `SSFPRNGInitContext`) |
 | [e.g.](#ex-deinit) | [`void SSFPRNGDeInitContext(context)`](#ssfprngdeinitcontext) | De-initialize a context and clear its internal state |
 | [e.g.](#ex-getrandom) | [`void SSFPRNGGetRandom(context, random, randomSize)`](#ssfprnggetrandom) | Generate 1–16 bytes of pseudo-random data |
@@ -104,7 +120,7 @@ This module has no compile-time configuration options in `ssfoptions.h`.
 void SSFPRNGInitContext(SSFPRNGContext_t *context, const uint8_t *entropy, size_t entropyLen);
 ```
 
-Initializes a PRNG context using `entropy` as the 128-bit AES key and resets the internal counter
+Initializes a PRNG context using `entropy` as the AES key (128 or 256 bits) and resets the internal counter
 to zero. May also be called on an already-initialized context to re-seed it; the behaviour is
 identical to [`SSFPRNGReInitContext()`](#ssfprngreinitcontext). After this call the context is
 ready for use with `SSFPRNGGetRandom()`.
@@ -112,8 +128,8 @@ ready for use with `SSFPRNGGetRandom()`.
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
 | `context` | out | `SSFPRNGContext_t *` | Pointer to the context to initialize. Must not be `NULL`. |
-| `entropy` | in | `const uint8_t *` | Pointer to [`SSF_PRNG_ENTROPY_SIZE`](#ssf-prng-entropy-size) (16) bytes of entropy. Must not be `NULL`. The quality of the PRNG output depends entirely on the quality of this data. |
-| `entropyLen` | in | `size_t` | Must equal [`SSF_PRNG_ENTROPY_SIZE`](#ssf-prng-entropy-size) (16). |
+| `entropy` | in | `const uint8_t *` | Pointer to [`SSF_PRNG_ENTROPY_SIZE`](#ssf-prng-entropy-size) (16 or 32) bytes of entropy. Must not be `NULL`. The quality of the PRNG output depends entirely on the quality of this data. |
+| `entropyLen` | in | `size_t` | Must equal [`SSF_PRNG_ENTROPY_SIZE`](#ssf-prng-entropy-size) (16 or 32). |
 
 **Returns:** Nothing.
 
@@ -125,7 +141,7 @@ ready for use with `SSFPRNGGetRandom()`.
 uint8_t         entropy[SSF_PRNG_ENTROPY_SIZE];
 SSFPRNGContext_t ctx;
 
-/* Obtain 16 bytes of true entropy from a hardware source */
+/* Obtain SSF_PRNG_ENTROPY_SIZE bytes of true entropy from a hardware source */
 /* entropy <--- hardware RNG or other true entropy source */
 
 SSFPRNGInitContext(&ctx, entropy, sizeof(entropy));
@@ -212,7 +228,7 @@ void SSFPRNGGetRandom(SSFPRNGContext_t *context, uint8_t *random, size_t randomS
 ```
 
 Generates `randomSize` pseudo-random bytes into `random`. Internally, encrypts the current 64-bit
-counter (big-endian, zero-padded to 128 bits) with the current key as the AES-128 key and writes the first
+counter (big-endian, zero-padded to 128 bits) with the current key as the AES key and writes the first
 `randomSize` bytes of the result to `random`. It then performs a CTR_DRBG-style Update: a fresh AES
 key is derived by encrypting a domain-separated block under the current key, that key overwrites the
 seed stored in the context, and the counter is incremented. Destroying the key that produced the

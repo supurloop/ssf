@@ -181,8 +181,9 @@ bool SSFECDSAKeyGen(SSFECCurve_t curve,
                     uint8_t *pubKey,  size_t pubKeySize, size_t *pubKeyLen);
 ```
 Generate a fresh `(privKey, pubKey)` pair for `curve`. Draws
-[`SSF_PRNG_ENTROPY_SIZE`](ssfprng.md#ssf-prng-entropy-size) (16) bytes from the platform
-entropy source, seeds an internal [`SSFPRNGContext_t`](ssfprng.md#ssfprngcontext-t), and
+[`SSF_PRNG_ENTROPY_SIZE`](ssfprng.md#ssf-prng-entropy-size) bytes from the platform
+entropy source (32 whenever P-384 is enabled, so a P-384 key gets a 256-bit seed; see
+[`ssfprng` Configuration](ssfprng.md#configuration)), seeds an internal [`SSFPRNGContext_t`](ssfprng.md#ssfprngcontext-t), and
 rejection-samples a `d ∈ [1, n−1]` — then derives `Q = d·G` via constant-time scalar
 multiplication and encodes the result. Returns `false` if entropy is unavailable, if the
 100 rejection-sampling attempts all fail (overwhelmingly unlikely), or if the caller's

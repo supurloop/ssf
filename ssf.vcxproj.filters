@@ -428,6 +428,9 @@
     <ClInclude Include="_opt\ssfmpool_opt.h">
       <Filter>_opt</Filter>
     </ClInclude>
+    <ClInclude Include="_opt\ssfprng_opt.h">
+      <Filter>_opt</Filter>
+    </ClInclude>
     <ClInclude Include="_opt\ssfrs_opt.h">
       <Filter>_opt</Filter>
     </ClInclude>

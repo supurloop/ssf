@@ -79,6 +79,10 @@ comparable security.
   or provision keys off-device at manufacture and only ever use sign / verify at
   runtime. **Never** ship `SSFRSAKeyGen` on a target without a genuine entropy source —
   predictable primes are catastrophic.
+- **Key-generation seed size.** Each prime search seeds an [`ssfprng`](ssfprng.md) context with
+  `SSF_PRNG_ENTROPY_SIZE` bytes of platform entropy. With `SSF_RSA_CONFIG_ENABLE_4096` set that
+  is 32 bytes (AES-256), so RSA-4096 keys are not capped at 128-bit seed entropy; builds limited
+  to RSA-2048 / 3072 may use 16 bytes, which matches their 112 / 128-bit strength.
 - **PKCS#1 v1.5 signatures are deterministic in value, but signing now requires entropy.**
   `SSFRSASignPKCS1` still yields the same signature for the same `(key, hash)` — the value
   is deterministic and interoperable. However, every private-key operation now draws

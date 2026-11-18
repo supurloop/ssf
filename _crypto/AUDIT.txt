@@ -830,7 +830,7 @@ PORT-1  Medium  FIXED (2026-11-18)  [verified]
              ssfpoly1305.c:231  g4 = ctx->h4 + c - (1u << 26);
              ssfchacha20.c:106  SSF_REQUIRE(ptLen < (512u * 1024u * 1024u));
 
-KEYGEN-1  Medium  OPEN  [verified]
+KEYGEN-1  Medium  FIXED (2026-11-18)  [verified]
   Location:  ssfecdsa.c:506-522 (SSFECDSAKeyGen); ssfrsa.c:459-467, :749-761 (RSA keygen);
              ssfprng.h:44; ssfprng.c:49-58, :75-99
   Problem:   ECDSA and RSA key generation seed ssfprng with a 16-byte (128-bit) entropy draw and
@@ -848,6 +848,16 @@ KEYGEN-1  Medium  OPEN  [verified]
   Evidence:  ssfecdsa.c:521  if (!SSFPortGetEntropy(entropy, (uint16_t)sizeof(entropy))) ...
              ssfecdsa.c:522  SSFPRNGInitContext(&prng, entropy, sizeof(entropy));
              ssfprng.h:44    #define SSF_PRNG_ENTROPY_SIZE (SSF_AES_BLOCK_SIZE)
+
+CFG-1  Untriaged  OPEN  (found 2026-11-18 while testing KEYGEN-1; not yet investigated)
+  Location:  ssfecdsa.c:814 (SSFECDSAVerify) reached from ssfx509 / ssfcms
+  Problem:   With SSF_EC_CONFIG_ENABLE_P384 = 0, the ssfcms and ssfx509 unit tests trip
+             SSF_REQUIRE(hashLen > 0u && hashLen <= c->bytes) at ssfecdsa.c:814 instead of the
+             verify returning false. Reproduced at HEAD 03bc6a8 with no other change, so it
+             predates KEYGEN-1. If a certificate or CMS message using P-384 (or a SHA-384 digest
+             over a P-256 key) can drive this in a P-384-disabled build, hostile input halts the
+             process (compare ECDSA-3, which notes ssfx509.c guards hashLen in the default build).
+             Needs triage: test-fixture gating vs. a real reduced-configuration input path.
 
 ----------------------------------------------------------------------------------------------
 TEST COVERAGE NOTES (not defects)
@@ -1075,3 +1085,25 @@ CHANGE LOG
               reported, chain passed). RED: ssfcms_ut.c:1289 (chain failure not reported because
               the signature was checked first). GREEN with ssfcms and ssfx509 (both enabled by
               default), ssfbase64url, ssfmatch.
+  2026-11-18  KEYGEN-1 FIXED via a build option (Jim's choice: option 3, forced automatically).
+              New _opt/ssfprng_opt.h with SSF_PRNG_CONFIG_KEY_BITS (128 default, or 256), wired
+              into ssfoptions.h, ssf.vcxproj and ssf.vcxproj.filters. ssfprng.h derives the
+              effective SSF_PRNG_KEY_BITS after all _opt headers: 256 whenever
+              SSF_EC_CONFIG_ENABLE_P384 or SSF_RSA_CONFIG_ENABLE_4096 is 1 (both default 1, so the
+              default build is 256) or the option asks for it, else 128; #error unless the option
+              is 128 or 256. SSF_PRNG_ENTROPY_SIZE = SSF_PRNG_KEY_BITS / 8 (16 or 32). ssfprng.c
+              uses AES-256 for a 256-bit key and replaces the key with one block per 16 key bytes
+              (separators 0x01, 0x02). Every caller (ECDSA keygen, RSA keygen and blinding, unit
+              tests) already sizes its seed with the macro, so no caller changed. Docs:
+              ssfprng.md (construction, Configuration table, SSF_PRNG_KEY_BITS, cost, known
+              answers for both sizes), ssfecdsa.md (KeyGen seed size), ssfrsa.md (keygen seed
+              size note). ssfprng_ut.c: the PRNG known-answer block now derives the expected key
+              size from the same flags, asserts SSF_PRNG_ENTROPY_SIZE * 8 matches it, and pins
+              both outputs for either size (AES-256 values f29000b6...7780 / 869ce1c4...f20d from
+              `openssl enc -aes-256-ecb -nopad`, seed byte i = i). RED (default build):
+              ssfprng_ut.c:217 (16-byte seed where 32 expected). GREEN, PRNG/BN/EC/ECDSA/RSA unit
+              tests enabled: default build (256) all pass; P-384 and RSA-4096 off (128) ssfprng,
+              ssfbn, ssfec, ssfecdsa, ssfrsa pass; same plus SSF_PRNG_CONFIG_KEY_BITS 256 (opt-in)
+              ssfprng and all PRNG users pass. In both P-384-off builds ssfcms and ssfx509 trip
+              ssfecdsa.c:814, which also happens at HEAD without this change; recorded as CFG-1.
+              All _opt headers and ssfport.h restored after the runs.

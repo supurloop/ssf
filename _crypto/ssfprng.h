@@ -41,7 +41,22 @@ extern "C" {
 #include "ssfaes.h"
 #include "ssfport.h"
 
-#define SSF_PRNG_ENTROPY_SIZE (SSF_AES_BLOCK_SIZE)
+#if (SSF_PRNG_CONFIG_KEY_BITS != 128u) && (SSF_PRNG_CONFIG_KEY_BITS != 256u)
+#error SSF_PRNG_CONFIG_KEY_BITS must be 128 or 256.
+#endif
+
+/* Effective AES key size (AUDIT KEYGEN-1). P-384 (192-bit strength) and RSA-4096 (~152-bit) key */
+/* generation draw every key byte from this PRNG, so either one forces a 256-bit key; otherwise  */
+/* SSF_PRNG_CONFIG_KEY_BITS applies. Derived here, after every _opt header has been included.  */
+#if (SSF_EC_CONFIG_ENABLE_P384 == 1) || (SSF_RSA_CONFIG_ENABLE_4096 == 1) || \
+    (SSF_PRNG_CONFIG_KEY_BITS == 256u)
+#define SSF_PRNG_KEY_BITS (256u)
+#else
+#define SSF_PRNG_KEY_BITS (128u)
+#endif
+
+/* Seed (= AES key) size in bytes: 16 or 32. Always size seed buffers with this macro. */
+#define SSF_PRNG_ENTROPY_SIZE (SSF_PRNG_KEY_BITS / 8u)
 #define SSF_PRNG_RANDOM_MAX_SIZE (SSF_AES_BLOCK_SIZE)
 
 typedef struct

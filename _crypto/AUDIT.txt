@@ -354,7 +354,7 @@ BN-3  Medium  FIXED (2026-11-18)
   Evidence:  1936  (void)SSFBNSubUint32(&exp, m, 2u);
              1937  SSFBNModExp(r, a, &exp, m);
 
-BN-4  Low  OPEN
+BN-4  Low  FIXED (2026-11-18)
   Location:  ssfbn.c:1994-2013 (SSFBNMontMul), :2091-2111 (SSFBNMontSquare), ConvertIn/Out
   Problem:   Only ctx->len <= a->cap / b->cap is asserted; the loops read a->limbs[0..n-1]
              regardless of a->len. If a->len < ctx->len, stale limbs above len are silently
@@ -1214,3 +1214,20 @@ CHANGE LOG
               'int'". GREEN under the same sanitizer (ssfed25519 incl. RFC 8032 / Wycheproof,
               ssfcms, ssfx509, ssfbase64url, ssfmatch, no other signed overflow reported) and in
               the normal -O3 build. ED25519 unit test flag restored.
+  2026-11-18  BN-4 FIXED via option 1, in-place variant (Jim's choice after the cost estimate).
+              SSFBNMontConvertIn requires a->len <= ctx->len, copies a into aR index-for-index and
+              zero-fills aR up to ctx->len (safe when aR aliases a), sets aR->len = ctx->len, then
+              MontMul(aR, aR, rr). SSFBNMontMul (a, b), SSFBNMontSquare (a) and SSFBNMontConvertOut
+              (aR) now SSF_REQUIRE their Montgomery-form operands at exactly ctx->len. Lengths are
+              public, so constant-time behaviour is unchanged. Cost, gcc -O2 x86-64 default build:
+              ConvertIn frame 16 -> 32 B, every other Mont / ModExpMont frame unchanged, so peak
+              stack is unchanged (the ModExpMont -> MontSquare path, 12912 B, stays deepest);
+              compute adds <= ctx->len limb copies per ConvertIn and 1-2 compares per Mont call
+              (< 0.03% of an RSA-4096 CRT signature). ssfbn.md: new note on the Montgomery
+              family's length rules. Test block "AUDIT BN-4" in ssfbn_ut.c (4-limb modulus): x at
+              len 1 over junk limbs round-trips through ConvertIn / ConvertOut; SSFBNModExp with
+              that short base matches the padded base; MontMul (either operand), MontSquare and
+              ConvertOut with len 2, and ConvertIn with len 5, must trap. RED: ssfbn_ut.c:3119
+              (round trip returned the junk-polluted value). GREEN with ssfbn, ssfec, ssfecdsa,
+              ssfrsa, ssfprng (all modexp users enabled for the run), ssfcms, ssfx509,
+              ssfbase64url, ssfmatch.

@@ -51,6 +51,12 @@ other big-integer libraries.
   produces silently-wrong results, not a `SSF_REQUIRE` failure. The `*Uint32` variants
   (`AddUint32`, `SubUint32`, `MulUint32`, `CmpUint32`, `ModUint32`) take a single 32-bit
   scalar and have no corresponding constraint.
+- **The Montgomery family checks lengths.** `SSFBNMontMul`, `SSFBNMontSquare` and
+  `SSFBNMontConvertOut` take Montgomery-form operands, which are always `ctx->len` limbs, and
+  `SSF_REQUIRE` exactly that. `SSFBNMontConvertIn` accepts an ordinary-form `a` with
+  `a->len <= ctx->len` and zero-extends it into `aR`, so a shorter value (including the base
+  passed to `SSFBNModExp` / `SSFBNModExpMont`) is used at its logical length and never picks up
+  stale limbs above `a->len`.
 - **`ModAdd` / `ModSub` require pre-reduced operands.** Both expect `a, b < m` on input —
   their post-correction is a single conditional subtract (Add) or add (Sub) of `m`, so
   operands further out of range produce silently-wrong results. If operands may exceed

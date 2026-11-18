@@ -3081,6 +3081,64 @@ void SSFBNUnitTest(void)
         }
     }
 
+    /* ---- AUDIT BN-4: Montgomery operands are used at their logical len, never stale limbs ---- */
+    /* The Mont family processed ctx->len limbs of every operand, so limbs above a->len (left */
+    /* over from an earlier, longer value) were silently folded in. ConvertIn now zero-extends */
+    /* its ordinary-form input; MontMul / MontSquare / ConvertOut require Montgomery-form       */
+    /* operands at exactly ctx->len.                                                            */
+    {
+        SSFBNMONT_DEFINE(mont4, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(m4, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(x, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(xR, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(y, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(e, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(xPad, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(rShort, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(rPad, SSF_BN_MAX_LIMBS);
+        uint16_t k;
+
+        /* 4-limb odd modulus. */
+        m4.len = 4u;
+        m4.limbs[0] = 0x9ABCDEF1u;
+        m4.limbs[1] = 0x12345678u;
+        m4.limbs[2] = 0x0F0E0D0Cu;
+        m4.limbs[3] = 0xC0FFEE11u;
+        SSFBNMontInit(&mont4, &m4);
+
+        /* x = 0x12345678 at len 1 over junk left in limbs[1..3] by an earlier, longer value. */
+        x.len = 4u;
+        for (k = 1u; k < 4u; k++) x.limbs[k] = 0xDEADBEEFu;
+        x.limbs[0] = 0x12345678u;
+        x.len = 1u;
+
+        /* ConvertIn then ConvertOut must give x back (zero-extended to ctx->len). */
+        SSFBNMontConvertIn(&xR, &x, &mont4);
+        SSFBNMontConvertOut(&y, &xR, &mont4);
+        SSF_ASSERT(y.len == 4u);
+        SSF_ASSERT((y.limbs[0] == 0x12345678u) && (y.limbs[1] == 0u) && (y.limbs[2] == 0u) &&
+                   (y.limbs[3] == 0u));
+
+        /* ModExp with the short, junk-backed base must match the properly padded base. */
+        SSFBNSetUint32(&xPad, 0x12345678u, 4u);
+        SSFBNSetUint32(&e, 65537u, 4u);
+        rShort.len = 4u;
+        rPad.len = 4u;
+        SSFBNModExp(&rShort, &x, &e, &m4);
+        SSFBNModExp(&rPad, &xPad, &e, &m4);
+        SSF_ASSERT(SSFBNCmp(&rShort, &rPad) == 0);
+
+        /* Montgomery-form operands must be exactly ctx->len; ConvertIn input at most ctx->len. */
+        SSFBNMontConvertIn(&xR, &xPad, &mont4);
+        y.len = 2u;
+        SSF_ASSERT_TEST(SSFBNMontMul(&rShort, &xR, &y, &mont4));
+        SSF_ASSERT_TEST(SSFBNMontMul(&rShort, &y, &xR, &mont4));
+        SSF_ASSERT_TEST(SSFBNMontSquare(&rShort, &y, &mont4));
+        SSF_ASSERT_TEST(SSFBNMontConvertOut(&rShort, &y, &mont4));
+        y.len = 5u;
+        SSF_ASSERT_TEST(SSFBNMontConvertIn(&rShort, &y, &mont4));
+    }
+
 #if SSF_BN_OSSL_VERIFY == 1
     _SSFBNVerifyAgainstOpenSSL();
 #endif

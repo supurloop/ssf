@@ -2028,6 +2028,10 @@ void SSFBNMontMul(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBNMon
     SSF_REQUIRE(ctx->len <= r->cap);
     SSF_REQUIRE(ctx->len <= a->cap);
     SSF_REQUIRE(ctx->len <= b->cap);
+    /* Montgomery-form operands are always ctx->len limbs; a shorter len would fold stale */
+    /* limbs above len into the product (AUDIT BN-4).                                     */
+    SSF_REQUIRE(a->len == ctx->len);
+    SSF_REQUIRE(b->len == ctx->len);
 
     n = ctx->len;
     memset(t, 0, (size_t)(n + 2u) * sizeof(SSFBNLimb_t));
@@ -2126,6 +2130,7 @@ void SSFBNMontSquare(SSFBN_t *r, const SSFBN_t *a, const SSFBNMont_t *ctx)
     SSF_REQUIRE(n <= SSF_BN_MAX_LIMBS);
     SSF_REQUIRE(n <= r->cap);
     SSF_REQUIRE(n <= a->cap);
+    SSF_REQUIRE(a->len == n); /* Montgomery-form operand at ctx->len (AUDIT BN-4) */
 
     memset(t, 0, (size_t)(2u * n + 1u) * sizeof(SSFBNLimb_t));
 
@@ -2243,6 +2248,8 @@ void SSFBNMontSquare(SSFBN_t *r, const SSFBN_t *a, const SSFBNMont_t *ctx)
 /* --------------------------------------------------------------------------------------------- */
 void SSFBNMontConvertIn(SSFBN_t *aR, const SSFBN_t *a, const SSFBNMont_t *ctx)
 {
+    uint16_t i;
+
     SSF_REQUIRE(aR != NULL);
     SSF_REQUIRE(aR->limbs != NULL);
     SSF_REQUIRE(a != NULL);
@@ -2252,9 +2259,17 @@ void SSFBNMontConvertIn(SSFBN_t *aR, const SSFBN_t *a, const SSFBNMont_t *ctx)
     SSF_REQUIRE(ctx->rr.limbs != NULL);
     SSF_REQUIRE(ctx->len >= 1u);
     SSF_REQUIRE(ctx->len <= aR->cap);
+    /* A longer a would be silently truncated to ctx->len limbs (AUDIT BN-4). */
+    SSF_REQUIRE(a->len <= ctx->len);
 
-    /* aR = MontMul(a, R^2) = a * R^2 * R^(-1) mod m = a * R mod m */
-    SSFBNMontMul(aR, a, &ctx->rr, ctx);
+    /* Zero-extend a into aR in place so limbs above a->len are 0, never stale (AUDIT BN-4). */
+    /* Index-for-index copy is safe when aR aliases a; the loop bounds are public lengths.   */
+    for (i = 0u; i < a->len; i++) aR->limbs[i] = a->limbs[i];
+    for (; i < ctx->len; i++) aR->limbs[i] = 0u;
+    aR->len = ctx->len;
+
+    /* aR = MontMul(a, R^2) = a * R^2 * R^(-1) mod m = a * R mod m (MontMul allows r == a) */
+    SSFBNMontMul(aR, aR, &ctx->rr, ctx);
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -2272,6 +2287,7 @@ void SSFBNMontConvertOut(SSFBN_t *a, const SSFBN_t *aR, const SSFBNMont_t *ctx)
     SSF_REQUIRE(ctx->mod.limbs != NULL);
     SSF_REQUIRE(ctx->len >= 1u);
     SSF_REQUIRE(ctx->len <= a->cap);
+    SSF_REQUIRE(aR->len == ctx->len); /* Montgomery-form operand at ctx->len (AUDIT BN-4) */
 
     /* a = MontMul(aR, 1) = aR * 1 * R^(-1) mod m = a */
     SSFBNSetOne(&one, ctx->len);

@@ -65,22 +65,35 @@ typedef struct SSFCMSCert
 typedef struct SSFCMSSignerInfo
 {
     uint8_t version;                   /* 1 = issuerAndSerialNumber, 3 = subjectKeyIdentifier */
-    const uint8_t *sidIssuerRaw;       uint32_t sidIssuerRawLen;   /* v1: issuer Name DER */
-    const uint8_t *sidSerial;          uint32_t sidSerialLen;      /* v1: serial content */
-    const uint8_t *sidSkid;            uint32_t sidSkidLen;        /* v3: key identifier */
-    const uint8_t *digestAlgOidRaw;    uint32_t digestAlgOidRawLen;
-    const uint8_t *signedAttrs;        uint32_t signedAttrsLen;    /* [0] TLV, NULL if absent */
-    const uint8_t *contentTypeOidRaw;  uint32_t contentTypeOidRawLen;
-    const uint8_t *messageDigest;      uint32_t messageDigestLen;
+    const uint8_t *sidIssuerRaw;       /* v1: issuer Name DER */
+    uint32_t sidIssuerRawLen;
+    const uint8_t *sidSerial;          /* v1: serial content */
+    uint32_t sidSerialLen;
+    const uint8_t *sidSkid;            /* v3: key identifier */
+    uint32_t sidSkidLen;
+    const uint8_t *digestAlgOidRaw;
+    uint32_t digestAlgOidRawLen;
+    const uint8_t *signedAttrs;        /* whole [0] TLV, NULL if absent */
+    uint32_t signedAttrsLen;
+    const uint8_t *contentTypeOidRaw;
+    uint32_t contentTypeOidRawLen;
+    const uint8_t *messageDigest;
+    uint32_t messageDigestLen;
     bool hasSigningTime;
     uint64_t signingTime;              /* Unix seconds */
     bool hasAlgProtection;             /* RFC 6211 CMSAlgorithmProtection attribute */
-    const uint8_t *apDigestAlgOidRaw;  uint32_t apDigestAlgOidRawLen;
-    const uint8_t *apSigAlgOidRaw;     uint32_t apSigAlgOidRawLen;
-    const uint8_t *apSigAlgParams;     uint32_t apSigAlgParamsLen;
-    const uint8_t *sigAlgOidRaw;       uint32_t sigAlgOidRawLen;
-    const uint8_t *sigAlgParams;       uint32_t sigAlgParamsLen;
-    const uint8_t *signature;          uint32_t signatureLen;
+    const uint8_t *apDigestAlgOidRaw;
+    uint32_t apDigestAlgOidRawLen;
+    const uint8_t *apSigAlgOidRaw;
+    uint32_t apSigAlgOidRawLen;
+    const uint8_t *apSigAlgParams;
+    uint32_t apSigAlgParamsLen;
+    const uint8_t *sigAlgOidRaw;
+    uint32_t sigAlgOidRawLen;
+    const uint8_t *sigAlgParams;
+    uint32_t sigAlgParamsLen;
+    const uint8_t *signature;
+    uint32_t signatureLen;
 } SSFCMSSignerInfo_t;
 
 /* Parsed SignedData; every pointer is a view into the caller's CMS DER */
@@ -90,9 +103,11 @@ typedef struct SSFCMSSignedData
     const uint8_t *digestAlgOidRaw[SSF_CMS_CONFIG_MAX_DIGEST_ALGS];
     uint32_t digestAlgOidRawLen[SSF_CMS_CONFIG_MAX_DIGEST_ALGS];
     uint8_t digestAlgsLen;
-    const uint8_t *eContentTypeOidRaw; uint32_t eContentTypeOidRawLen;
+    const uint8_t *eContentTypeOidRaw;
+    uint32_t eContentTypeOidRawLen;
     bool hasEContent;
-    const uint8_t *eContent;           uint32_t eContentLen;
+    const uint8_t *eContent;
+    uint32_t eContentLen;
     SSFCMSCert_t certs[SSF_CMS_CONFIG_MAX_CERTS];
     uint8_t certsLen;
     SSFCMSSignerInfo_t signers[SSF_CMS_CONFIG_MAX_SIGNERS];

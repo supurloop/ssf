@@ -31,3 +31,4 @@ SSF shall following the coding and documentation style:
 - When making incremental changes to any module, they will made using a TDD (Test Driven Development) sequence.
 - No tabs, whitespace only, default 4 indent.
 - When an expression is non-trivial, (more than 1 expression to evaluate) each expression shall be enclosed in parentheses  even if not required by order of operations. This provides pedantic clarity.
+- Each variable or field declaration shall be made separately and on its own line.

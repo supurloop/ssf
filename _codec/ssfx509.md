@@ -61,9 +61,10 @@ X.509 v3 certificate support per RFC 5280, built on [`ssfasn1`](ssfasn1.md):
   are interpreted by hostname matching and Name Constraints. `iPAddress` matching is IPv4 only.
 - **Extensions.** Up to [`SSF_X509_CONFIG_MAX_EXTENSIONS`](#cfg-max-extensions) raw extensions are
   retained in `exts[]`; a certificate with more fails to parse. Authority Key Identifier is read
-  only in its `keyIdentifier [0]` form. Extended Key Usage is reduced to three flags:
-  `id-kp-serverAuth`, `id-kp-clientAuth`, and `anyExtendedKeyUsage`, the last of which satisfies
-  the verifier's server-authentication requirement per RFC 5280 §4.2.1.12. Name Constraints are
+  only in its `keyIdentifier [0]` form. Extended Key Usage is reduced to four flags:
+  `id-kp-serverAuth`, `id-kp-clientAuth`, `id-kp-codeSigning`, and `anyExtendedKeyUsage`, the
+  last of which satisfies whichever purpose the verifier is checking per RFC 5280 §4.2.1.12. Name
+  Constraints are
   read from every certificate but enforced only from intermediates and the trust anchor, and
   only `dNSName` and `iPAddress` subtrees are kept, up to
   [`SSF_X509_CONFIG_MAX_NAME_CONSTRAINTS`](#cfg-max-name-constraints) permitted and the same
@@ -149,10 +150,17 @@ X.509 v3 certificate support per RFC 5280, built on [`ssfasn1`](ssfasn1.md):
   precondition violation and asserts.
 - **Signature verification** derives the hash from the signature algorithm OID and the key type
   / curve from the **issuer's** SubjectPublicKeyInfo, so `ecdsa-with-SHA256` over a P-384 key
-  (RFC 5758 §3.2) verifies correctly. Supported pairings: `ecdsa-with-SHA256` and
-  `ecdsa-with-SHA384` with P-256 or P-384 keys; `sha256WithRSAEncryption`,
-  `sha384WithRSAEncryption`, `sha512WithRSAEncryption`; `id-RSASSA-PSS` with SHA-256, SHA-384, or
-  SHA-512 parameters; and `id-Ed25519`. Any other algorithm fails verification. RSA-PSS is
+  (RFC 5758 §3.2) verifies correctly. The reverse, a hash longer than the key's curve order such as
+  `ecdsa-with-SHA384` over a P-256 key, is refused rather than truncated. Supported pairings:
+  `ecdsa-with-SHA256` and `ecdsa-with-SHA384` with P-256 or P-384 keys of at least the hash size;
+  `sha256WithRSAEncryption`, `sha384WithRSAEncryption`, `sha512WithRSAEncryption`; plain
+  `rsaEncryption` when a separate digest algorithm names the hash, as CMS allows (RFC 3370);
+  `id-RSASSA-PSS` with SHA-256, SHA-384, or SHA-512 parameters; and `id-Ed25519`, which when a
+  digest algorithm is given accepts only SHA-512 (RFC 8419). A digest algorithm given alongside
+  any algorithm that already implies its hash must agree with it. Any other algorithm fails
+  verification. All of this is [`SSFX509VerifySignature()`](#ssfx509verifysignature);
+  [`SSFX509VerifyCertSignature()`](#ssfx509verifycertsignature) is that function applied to a
+  certificate's own TBS and signature. RSA-PSS is
   verified with the `saltLength` declared in the certificate's PSS parameters, or 20 when the
   field is absent, since RFC 4055 declares `DEFAULT 20` and DER omits default values (OpenSSL
   writes salt-20 certificates this way). Salt lengths above the hash length are rejected, and
@@ -241,9 +249,9 @@ The unit-test entry point is gated by `SSF_CONFIG_X509_UNIT_TEST` in `ssfport.h`
 | <a id="type-ext"></a>`SSFX509Ext_t` | Struct | One raw extension: `oidRaw` / `oidRawLen` (OID body bytes), `critical`, and `value` / `valueLen` (the OCTET STRING contents). |
 | <a id="type-san"></a>`SSFX509SAN_t` | Struct | One SAN entry: `type` (GeneralName tag number) and `val` / `valLen` (the entry's content bytes; a DNS name is **not** null-terminated). |
 | <a id="type-nc"></a>`SSFX509NameConstraint_t` | Struct | One Name Constraints subtree: `type` is `SSF_X509_SAN_DNS` (`val` is a DNS suffix) or `SSF_X509_SAN_IP` (`val` is 8 bytes: IPv4 address then mask). |
-| <a id="type-cert"></a>`SSFX509Cert_t` | Struct | Parsed certificate. `version` (`0` = v1, `2` = v3); `serial`; TBS and outer signature algorithm OIDs plus their raw parameters (`sigAlgParams`, `outerSigAlgParams`); `issuer` / `subject` names; `notBefore` / `notAfter` in Unix seconds; `pubKeyAlgOidRaw`, `pubKey` / `pubKeyLen` / `pubKeyUnusedBits`, `ecCurveOidRaw`; `exts[]` / `extsLen`; decoded flags `hasBasicConstraints`, `isCA`, `pathLenConstraint` (`-1` = absent), `hasKeyUsage`, `keyUsageBits`, `hasExtKeyUsage`, `ekuServerAuth`, `ekuClientAuth`, `ekuAnyPurpose`; `san[]` / `sanLen`; `skid`, `akid`; `hasNameConstraints` with `permittedSubtrees[]` / `excludedSubtrees[]`; `tbsRaw` / `tbsRawLen` (bytes the signature covers); `signature` / `signatureLen` / `signatureUnusedBits`. All pointers reference the source DER buffer. |
+| <a id="type-cert"></a>`SSFX509Cert_t` | Struct | Parsed certificate. `version` (`0` = v1, `2` = v3); `serial`; TBS and outer signature algorithm OIDs plus their raw parameters (`sigAlgParams`, `outerSigAlgParams`); `issuer` / `subject` names; `notBefore` / `notAfter` in Unix seconds; `pubKeyAlgOidRaw`, `pubKey` / `pubKeyLen` / `pubKeyUnusedBits`, `ecCurveOidRaw`; `exts[]` / `extsLen`; decoded flags `hasBasicConstraints`, `isCA`, `pathLenConstraint` (`-1` = absent), `hasKeyUsage`, `keyUsageBits`, `hasExtKeyUsage`, `ekuServerAuth`, `ekuClientAuth`, `ekuCodeSigning`, `ekuAnyPurpose`; `san[]` / `sanLen`; `skid`, `akid`; `hasNameConstraints` with `permittedSubtrees[]` / `excludedSubtrees[]`; `tbsRaw` / `tbsRawLen` (bytes the signature covers); `signature` / `signatureLen` / `signatureUnusedBits`. All pointers reference the source DER buffer. |
 | <a id="type-genname"></a>`SSFX509GenName_t` | Struct | Name attributes for generation as null-terminated strings: `cn`, `o`, `ou`, `c`, `st`, `l`. `NULL` omits the attribute. |
-| <a id="type-genparams"></a>`SSFX509GenParams_t` | Struct | Everything needed to build a certificate: `version` (`0` or `2`), `serial` / `serialLen`, signature algorithm OID and optional parameters, `issuer` / `subject`, `notBefore` / `notAfter`, public key algorithm OID, optional EC curve OID, `pubKey` / `pubKeyLen`; extension controls `addBasicConstraints` / `isCA` / `pathLenConstraint`, `addKeyUsage` / `keyUsageBits`, `addExtKeyUsage` / `ekuServerAuth` / `ekuClientAuth`, `sanDNSNames` / `sanIPAddrs`, `skid` / `skidLen`, `akid` / `akidLen`, one optional raw extension (`addRawExt`, `rawExtOid*`, `rawExtValue*`, `rawExtCritical`), and Name Constraints (`addNameConstraints`, `ncPermittedDNS`, `ncPermittedIPs`, `ncExcludedDNS`, `ncExcludedIPs`). |
+| <a id="type-genparams"></a>`SSFX509GenParams_t` | Struct | Everything needed to build a certificate: `version` (`0` or `2`), `serial` / `serialLen`, signature algorithm OID and optional parameters, `issuer` / `subject`, `notBefore` / `notAfter`, public key algorithm OID, optional EC curve OID, `pubKey` / `pubKeyLen`; extension controls `addBasicConstraints` / `isCA` / `pathLenConstraint`, `addKeyUsage` / `keyUsageBits`, `addExtKeyUsage` / `ekuServerAuth` / `ekuClientAuth` / `ekuCodeSigning`, `sanDNSNames` / `sanIPAddrs`, `skid` / `skidLen`, `akid` / `akidLen`, one optional raw extension (`addRawExt`, `rawExtOid*`, `rawExtValue*`, `rawExtCritical`), and Name Constraints (`addNameConstraints`, `ncPermittedDNS`, `ncPermittedIPs`, `ncExcludedDNS`, `ncExcludedIPs`). |
 
 <a id="functions-parse"></a>
 
@@ -280,8 +288,10 @@ The unit-test entry point is gated by `SSF_CONFIG_X509_UNIT_TEST` in `ssfport.h`
 
 | | Function | Description |
 |---|----------|-------------|
+| | [`bool SSFX509VerifySignature(keyCert, sigAlgOidRaw, sigAlgOidRawLen, sigAlgParamsOpt, sigAlgParamsLen, digestAlgOidRawOpt, digestAlgOidRawLen, data, dataLen, sig, sigLen)`](#ssfx509verifysignature) | Verify a signature over arbitrary bytes with a certificate's key |
 | [e.g.](#ex-verify-sig) | [`bool SSFX509VerifyCertSignature(cert, issuer)`](#ssfx509verifycertsignature) | Verify `cert`'s signature with `issuer`'s public key |
 | [e.g.](#ex-verify-chain) | [`bool SSFX509VerifyChain(chainDer, chainDerLen, chainLen, trustDer, trustDerLen, trustCount, hostnameStr, nowUnixSec)`](#ssfx509verifychain) | Full RFC 5280 path validation plus hostname match |
+| | [`bool SSFX509VerifyChainPurpose(chainDer, chainDerLen, chainLen, trustDer, trustDerLen, trustCount, purpose, hostnameStrOpt, nowUnixSec)`](#ssfx509verifychainpurpose) | Path validation for TLS server authentication or code signing |
 | [e.g.](#ex-trace) | [`void SSFX509SetTraceCtx(fnOpt, userCtxOpt)`](#ssfx509settracectx) | Install the diagnostic trace callback |
 | | [`bool SSFX509MatchIPAddress(hostnameStr, sanIP, sanIPLen)`](#ssfx509matchipaddress) | Match a dotted-decimal IPv4 string against an `iPAddress` SAN |
 | | [`bool SSFX509CheckSKIDAKID(cert, issuer)`](#ssfx509checkskidakid) | AKID / SKID consistency between a cert and its issuer |
@@ -484,6 +494,44 @@ if (SSFX509EncodeCert(cert, sizeof(cert), &p, sig, (uint32_t)sigLen, &certLen))
 
 ---
 
+<a id="ssfx509verifysignature"></a>
+
+### [↑](#functions-verify) [`bool SSFX509VerifySignature()`](#functions-verify)
+
+```c
+bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgOidRaw,
+                            uint32_t sigAlgOidRawLen, const uint8_t *sigAlgParamsOpt,
+                            uint32_t sigAlgParamsLen, const uint8_t *digestAlgOidRawOpt,
+                            uint32_t digestAlgOidRawLen, const uint8_t *data, uint32_t dataLen,
+                            const uint8_t *sig, uint32_t sigLen);
+```
+
+Verifies `sig` over `data` with the public key in `keyCert`. The signature algorithm OID selects
+the scheme and, where it implies one, the hash; the optional digest algorithm OID supplies the
+hash for `rsaEncryption` and must agree with the implied hash everywhere else. This is the
+primitive CMS and other detached-signature formats need; the supported pairings are listed under
+**Signature verification** in [Notes](#notes).
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `keyCert` | in | `const SSFX509Cert_t *` | Parsed certificate holding the verifying key. Must not be `NULL`. |
+| `sigAlgOidRaw` | in | `const uint8_t *` | Signature algorithm OID content bytes. Must not be `NULL`. |
+| `sigAlgOidRawLen` | in | `uint32_t` | Length of `sigAlgOidRaw`. |
+| `sigAlgParamsOpt` | in (opt) | `const uint8_t *` | Raw DER algorithm parameters (RSA-PSS), or `NULL` with a length of `0`. |
+| `sigAlgParamsLen` | in | `uint32_t` | Length of `sigAlgParamsOpt`. |
+| `digestAlgOidRawOpt` | in (opt) | `const uint8_t *` | Digest algorithm OID content bytes, or `NULL` with a length of `0`. |
+| `digestAlgOidRawLen` | in | `uint32_t` | Length of `digestAlgOidRawOpt`. |
+| `data` | in | `const uint8_t *` | Signed bytes. May be `NULL` only when `dataLen` is `0`. |
+| `dataLen` | in | `uint32_t` | Length of `data`. |
+| `sig` | in | `const uint8_t *` | Signature in wire form: DER `ECDSA-Sig-Value`, raw RSA octets, or 64 Ed25519 bytes. Must not be `NULL`. |
+| `sigLen` | in | `uint32_t` | Length of `sig`. |
+
+**Returns:** `true` if the signature verifies; `false` on a bad signature, an unsupported or
+inconsistent algorithm pairing, a key on an unsupported curve, or a hash longer than the curve
+order.
+
+---
+
 <a id="ssfx509verifycertsignature"></a>
 
 ### [↑](#functions-verify) [`bool SSFX509VerifyCertSignature()`](#functions-verify)
@@ -562,6 +610,43 @@ if (SSFX509VerifyChain(chain, chainLen, 2u, trust, trustLen, 1u, "api.example.co
     /* leaf is trusted for api.example.com at nowUnixSec */
 }
 ```
+
+---
+
+<a id="ssfx509verifychainpurpose"></a>
+
+### [↑](#functions-verify) [`bool SSFX509VerifyChainPurpose()`](#functions-verify)
+
+```c
+bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDerLen,
+                               uint8_t chainLen,
+                               const uint8_t **trustDer, const uint32_t *trustDerLen,
+                               uint8_t trustCount, SSFX509Purpose_t purpose,
+                               const char *hostnameStrOpt, uint64_t nowUnixSec);
+```
+
+The chain verifier with the leaf checks chosen by `purpose`. Every step listed under
+**Verification order** in [Notes](#notes) runs for either purpose except the last three, which
+depend on it:
+
+| `purpose` | Extended Key Usage, when present | Key Usage, when present | Hostname |
+|-----------|----------------------------------|--------------------------|----------|
+| `SSF_X509_PURPOSE_SERVER_AUTH` | must include `serverAuth` or `anyExtendedKeyUsage` | not checked on the leaf | `hostnameStrOpt` required and matched against the leaf's SANs |
+| `SSF_X509_PURPOSE_CODE_SIGNING` | must include `codeSigning` or `anyExtendedKeyUsage` | must include `digitalSignature` or `nonRepudiation` | ignored; may be `NULL` |
+
+[`SSFX509VerifyChain()`](#ssfx509verifychain) is this function with
+`SSF_X509_PURPOSE_SERVER_AUTH`. [`ssfcms`](../_crypto/ssfcms.md) uses
+`SSF_X509_PURPOSE_CODE_SIGNING` for the signer of a SignedData message.
+
+| Parameter | Direction | Type | Description |
+|-----------|-----------|------|-------------|
+| `purpose` | in | `SSFX509Purpose_t` | `SSF_X509_PURPOSE_SERVER_AUTH` or `SSF_X509_PURPOSE_CODE_SIGNING`; any other value asserts. |
+| `hostnameStrOpt` | in (opt) | `const char *` | Required and non-empty for server authentication (asserts otherwise); ignored for code signing. |
+
+The remaining parameters are those of [`SSFX509VerifyChain()`](#ssfx509verifychain).
+
+**Returns:** `true` if every check passes; `false` at the first failure, reported through the
+trace callback when one is installed.
 
 ---
 

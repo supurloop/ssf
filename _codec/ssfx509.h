@@ -142,6 +142,7 @@ typedef struct SSFX509Cert
     bool hasExtKeyUsage;
     bool ekuServerAuth;            /* 1.3.6.1.5.5.7.3.1 */
     bool ekuClientAuth;            /* 1.3.6.1.5.5.7.3.2 */
+    bool ekuCodeSigning;           /* 1.3.6.1.5.5.7.3.3 */
     bool ekuAnyPurpose;            /* 2.5.29.37.0 anyExtendedKeyUsage */
 
     SSFX509SAN_t san[SSF_X509_CONFIG_MAX_SAN_ENTRIES];
@@ -222,6 +223,7 @@ typedef struct SSFX509GenParams
     bool addExtKeyUsage;
     bool ekuServerAuth;
     bool ekuClientAuth;
+    bool ekuCodeSigning;
     const char **sanDNSNames;          /* NULL-terminated array of DNS name strings */
     const uint8_t **sanIPAddrs;        /* Array of 4-byte IPv4 addresses (NULL-terminated) */
     const uint8_t *skid;               /* Subject Key Identifier bytes (NULL if absent) */
@@ -267,6 +269,23 @@ bool SSFX509IsEd25519(const SSFX509Cert_t *cert);
 /* Chain verification                                                                            */
 /* --------------------------------------------------------------------------------------------- */
 
+/* What a chain is being validated for; selects the leaf checks SSFX509VerifyChainPurpose runs.   */
+typedef enum SSFX509Purpose
+{
+    SSF_X509_PURPOSE_MIN = -1,
+    SSF_X509_PURPOSE_SERVER_AUTH,   /* TLS server: hostname must match a SAN, EKU serverAuth */
+    SSF_X509_PURPOSE_CODE_SIGNING,  /* Signed data: no hostname, EKU codeSigning, KU digitalSig */
+    SSF_X509_PURPOSE_MAX
+} SSFX509Purpose_t;
+
+/* Verify sig over data with keyCert's public key; sigAlg selects the scheme, digestAlgOpt the   */
+/* hash when sigAlg does not imply one (rsaEncryption) and must agree with it when it does.      */
+bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgOidRaw,
+                            uint32_t sigAlgOidRawLen, const uint8_t *sigAlgParamsOpt,
+                            uint32_t sigAlgParamsLen, const uint8_t *digestAlgOidRawOpt,
+                            uint32_t digestAlgOidRawLen, const uint8_t *data, uint32_t dataLen,
+                            const uint8_t *sig, uint32_t sigLen);
+
 /* Verify cert's signature with issuer's public key; ECDSA, RSA PKCS#1 v1.5, RSA-PSS, Ed25519.   */
 bool SSFX509VerifyCertSignature(const SSFX509Cert_t *cert, const SSFX509Cert_t *issuer);
 
@@ -276,6 +295,14 @@ bool SSFX509VerifyChain(const uint8_t **chainDer, const uint32_t *chainDerLen,
                         const uint8_t **trustDer, const uint32_t *trustDerLen,
                         uint8_t trustCount,
                         const char *hostnameStr, uint64_t nowUnixSec);
+
+/* Verify chainDer[0] up to a trust anchor for purpose; hostnameStrOpt is required for           */
+/* SSF_X509_PURPOSE_SERVER_AUTH and ignored otherwise.                                           */
+bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDerLen,
+                               uint8_t chainLen,
+                               const uint8_t **trustDer, const uint32_t *trustDerLen,
+                               uint8_t trustCount, SSFX509Purpose_t purpose,
+                               const char *hostnameStrOpt, uint64_t nowUnixSec);
 
 /* Set trace callback for chain verification; fnOpt is a SSFTLSTraceFn_t, NULL disables.        */
 void SSFX509SetTraceCtx(void (*fnOpt)(int, int, const char *, void *), void *userCtxOpt);

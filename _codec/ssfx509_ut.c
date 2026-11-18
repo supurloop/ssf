@@ -6518,5 +6518,373 @@ void SSFX509UnitTest(void)
         SSF_ASSERT((parsed.subject.cLen == 2u) && (memcmp(parsed.subject.c, "US", 2u) == 0));
         SSF_ASSERT((parsed.issuer.cLen == 2u) && (memcmp(parsed.issuer.c, "GB", 2u) == 0));
     }
+
+    /* ---- SSFX509VerifySignature: a signature over arbitrary data, checked with a cert key ---- */
+    {
+        static const uint8_t sha256Oid[] = {
+            0x60u, 0x86u, 0x48u, 0x01u, 0x65u, 0x03u, 0x04u, 0x02u, 0x01u
+        };
+        static const uint8_t sha384Oid[] = {
+            0x60u, 0x86u, 0x48u, 0x01u, 0x65u, 0x03u, 0x04u, 0x02u, 0x02u
+        };
+        static const uint8_t sha512Oid[] = {
+            0x60u, 0x86u, 0x48u, 0x01u, 0x65u, 0x03u, 0x04u, 0x02u, 0x03u
+        };
+        static const uint8_t rsaEncryptionOid[] = {
+            0x2Au, 0x86u, 0x48u, 0x86u, 0xF7u, 0x0Du, 0x01u, 0x01u, 0x01u
+        };
+        static const uint8_t rsaSha256Oid[] = {
+            0x2Au, 0x86u, 0x48u, 0x86u, 0xF7u, 0x0Du, 0x01u, 0x01u, 0x0Bu
+        };
+        static const uint8_t rsaSha384Oid[] = {
+            0x2Au, 0x86u, 0x48u, 0x86u, 0xF7u, 0x0Du, 0x01u, 0x01u, 0x0Cu
+        };
+        static const uint8_t rsaPssOid[] = {
+            0x2Au, 0x86u, 0x48u, 0x86u, 0xF7u, 0x0Du, 0x01u, 0x01u, 0x0Au
+        };
+        static const uint8_t ed25519Oid[] = { 0x2Bu, 0x65u, 0x70u };
+        static const uint8_t pssSalt32[] = {
+            0x30u, 0x16u, 0xA0u, 0x0Fu, 0x30u, 0x0Du, 0x06u, 0x09u,
+            0x60u, 0x86u, 0x48u, 0x01u, 0x65u, 0x03u, 0x04u, 0x02u, 0x01u, 0x05u, 0x00u,
+            0xA2u, 0x03u, 0x02u, 0x01u, 0x20u
+        };
+        static uint8_t rsaPriv[SSF_RSA_MAX_PRIV_KEY_DER_SIZE];
+        static uint8_t rsaPub[SSF_RSA_MAX_PUB_KEY_DER_SIZE];
+        static uint8_t tbsDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t certDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t ecPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        static uint8_t data[64];
+        uint8_t ecPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        uint8_t edSeed[SSF_ED25519_SEED_SIZE];
+        uint8_t edPub[SSF_ED25519_PUB_KEY_SIZE];
+        uint8_t edSig[SSF_ED25519_SIG_SIZE];
+        uint8_t hash[SSF_SHA2_512_BYTE_SIZE];
+        uint8_t sig[SSF_RSA_MAX_SIG_SIZE];
+        size_t sigLen;
+        size_t ecPubLen;
+        size_t rsaPrivLen;
+        size_t rsaPubLen;
+        uint8_t serial[] = { 0x1Bu };
+        SSFX509GenParams_t p;
+        SSFX509Cert_t c;
+        uint32_t tbsLen;
+        uint32_t n;
+
+        memset(data, 0x5Au, sizeof(data));
+
+        /* ECDSA P-256: the signature algorithm implies SHA-256; a digest algorithm may confirm */
+        /* it but may not contradict it */
+        SSF_ASSERT(SSFECDSAKeyGen(SSF_EC_CURVE_P256, ecPriv, sizeof(ecPriv), ecPub, sizeof(ecPub),
+                                  &ecPubLen) == true);
+        _utGenBaseParams(&p, serial, ecPub, (uint32_t)ecPubLen);
+        n = _utSignCert(&p, ecPriv, certDer, sizeof(certDer));
+        SSF_ASSERT(n != 0u);
+        SSF_ASSERT(SSFX509Parse(certDer, n, &c) == true);
+        SSFSHA256(data, sizeof(data), hash, SSF_SHA2_256_BYTE_SIZE);
+        SSF_ASSERT(SSFECDSASign(SSF_EC_CURVE_P256, ecPriv, 32u, hash, SSF_SHA2_256_BYTE_SIZE, sig,
+                                sizeof(sig), &sigLen) == true);
+        SSF_ASSERT(SSFX509VerifySignature(&c, _utSigAlgOid, sizeof(_utSigAlgOid), NULL, 0u, NULL,
+                                          0u, data, sizeof(data), sig, (uint32_t)sigLen) == true);
+        SSF_ASSERT(SSFX509VerifySignature(&c, _utSigAlgOid, sizeof(_utSigAlgOid), NULL, 0u,
+                                          sha256Oid, sizeof(sha256Oid), data, sizeof(data), sig,
+                                          (uint32_t)sigLen) == true);
+        SSF_ASSERT(SSFX509VerifySignature(&c, _utSigAlgOid, sizeof(_utSigAlgOid), NULL, 0u,
+                                          sha384Oid, sizeof(sha384Oid), data, sizeof(data), sig,
+                                          (uint32_t)sigLen) == false);
+        data[7] ^= 0x01u;
+        SSF_ASSERT(SSFX509VerifySignature(&c, _utSigAlgOid, sizeof(_utSigAlgOid), NULL, 0u, NULL,
+                                          0u, data, sizeof(data), sig, (uint32_t)sigLen) == false);
+        data[7] ^= 0x01u;
+        sig[5] ^= 0x01u;
+        SSF_ASSERT(SSFX509VerifySignature(&c, _utSigAlgOid, sizeof(_utSigAlgOid), NULL, 0u, NULL,
+                                          0u, data, sizeof(data), sig, (uint32_t)sigLen) == false);
+        sig[5] ^= 0x01u;
+        SSF_ASSERT(SSFX509VerifySignature(&c, _utSigAlgOid, sizeof(_utSigAlgOid), NULL, 0u, NULL,
+                                          0u, data, sizeof(data) - 1u, sig,
+                                          (uint32_t)sigLen) == false);
+
+        /* The certificate's own signature verifies through the same entry point */
+        SSF_ASSERT(SSFX509VerifySignature(&c, c.sigAlgOidRaw, c.sigAlgOidRawLen, c.sigAlgParams,
+                                          c.sigAlgParamsLen, NULL, 0u, c.tbsRaw, c.tbsRawLen,
+                                          c.signature, c.signatureLen) == true);
+        SSF_ASSERT(SSFX509VerifyCertSignature(&c, &c) == true);
+
+        /* An unknown signature algorithm never verifies */
+        SSF_ASSERT(SSFX509VerifySignature(&c, sha256Oid, sizeof(sha256Oid), NULL, 0u, NULL, 0u,
+                                          data, sizeof(data), sig, (uint32_t)sigLen) == false);
+
+        /* ecdsa-with-SHA384 against a P-256 key: the hash outruns the curve order, which the */
+        /* ECDSA primitive forbids, so this fails closed instead of asserting */
+        {
+            static const uint8_t ecdsaSha384Oid[] = {
+                0x2Au, 0x86u, 0x48u, 0xCEu, 0x3Du, 0x04u, 0x03u, 0x03u
+            };
+            SSF_ASSERT(SSFX509VerifySignature(&c, ecdsaSha384Oid, sizeof(ecdsaSha384Oid), NULL, 0u,
+                                              NULL, 0u, data, sizeof(data), sig,
+                                              (uint32_t)sigLen) == false);
+        }
+
+        /* RSA: rsaEncryption as the signature algorithm takes its hash from the digest */
+        /* algorithm, so the digest is required there and must agree elsewhere */
+        SSF_ASSERT(SSFRSAKeyGen(2048, rsaPriv, sizeof(rsaPriv), &rsaPrivLen, rsaPub,
+                                sizeof(rsaPub), &rsaPubLen) == true);
+        _utGenBaseParams(&p, serial, rsaPub, (uint32_t)rsaPubLen);
+        p.ecCurveOidRaw = NULL;
+        p.ecCurveOidRawLen = 0u;
+        p.pubKeyAlgOidRaw = rsaEncryptionOid;
+        p.pubKeyAlgOidRawLen = sizeof(rsaEncryptionOid);
+        p.sigAlgOidRaw = rsaSha256Oid;
+        p.sigAlgOidRawLen = sizeof(rsaSha256Oid);
+        SSF_ASSERT(SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &p, &tbsLen) == true);
+        SSFSHA256(tbsDer, tbsLen, hash, SSF_SHA2_256_BYTE_SIZE);
+        SSF_ASSERT(SSFRSASignPKCS1(rsaPriv, rsaPrivLen, SSF_RSA_HASH_SHA256, hash,
+                                   SSF_SHA2_256_BYTE_SIZE, sig, sizeof(sig), &sigLen) == true);
+        SSF_ASSERT(SSFX509EncodeCert(certDer, sizeof(certDer), &p, sig, (uint32_t)sigLen,
+                                     &n) == true);
+        SSF_ASSERT(SSFX509Parse(certDer, n, &c) == true);
+        SSF_ASSERT(SSFX509VerifyCertSignature(&c, &c) == true);
+        SSFSHA256(data, sizeof(data), hash, SSF_SHA2_256_BYTE_SIZE);
+        SSF_ASSERT(SSFRSASignPKCS1(rsaPriv, rsaPrivLen, SSF_RSA_HASH_SHA256, hash,
+                                   SSF_SHA2_256_BYTE_SIZE, sig, sizeof(sig), &sigLen) == true);
+        SSF_ASSERT(SSFX509VerifySignature(&c, rsaEncryptionOid, sizeof(rsaEncryptionOid), NULL, 0u,
+                                          sha256Oid, sizeof(sha256Oid), data, sizeof(data), sig,
+                                          (uint32_t)sigLen) == true);
+        SSF_ASSERT(SSFX509VerifySignature(&c, rsaEncryptionOid, sizeof(rsaEncryptionOid), NULL, 0u,
+                                          sha384Oid, sizeof(sha384Oid), data, sizeof(data), sig,
+                                          (uint32_t)sigLen) == false);
+        SSF_ASSERT(SSFX509VerifySignature(&c, rsaEncryptionOid, sizeof(rsaEncryptionOid), NULL, 0u,
+                                          NULL, 0u, data, sizeof(data), sig,
+                                          (uint32_t)sigLen) == false);
+        SSF_ASSERT(SSFX509VerifySignature(&c, rsaSha256Oid, sizeof(rsaSha256Oid), NULL, 0u, NULL,
+                                          0u, data, sizeof(data), sig, (uint32_t)sigLen) == true);
+        SSF_ASSERT(SSFX509VerifySignature(&c, rsaSha256Oid, sizeof(rsaSha256Oid), NULL, 0u,
+                                          sha256Oid, sizeof(sha256Oid), data, sizeof(data), sig,
+                                          (uint32_t)sigLen) == true);
+        SSF_ASSERT(SSFX509VerifySignature(&c, rsaSha256Oid, sizeof(rsaSha256Oid), NULL, 0u,
+                                          sha384Oid, sizeof(sha384Oid), data, sizeof(data), sig,
+                                          (uint32_t)sigLen) == false);
+        SSF_ASSERT(SSFX509VerifySignature(&c, rsaSha384Oid, sizeof(rsaSha384Oid), NULL, 0u, NULL,
+                                          0u, data, sizeof(data), sig, (uint32_t)sigLen) == false);
+
+        /* The same key with SHA-384 */
+        SSFSHA384(data, sizeof(data), hash, SSF_SHA2_384_BYTE_SIZE);
+        SSF_ASSERT(SSFRSASignPKCS1(rsaPriv, rsaPrivLen, SSF_RSA_HASH_SHA384, hash,
+                                   SSF_SHA2_384_BYTE_SIZE, sig, sizeof(sig), &sigLen) == true);
+        SSF_ASSERT(SSFX509VerifySignature(&c, rsaEncryptionOid, sizeof(rsaEncryptionOid), NULL, 0u,
+                                          sha384Oid, sizeof(sha384Oid), data, sizeof(data), sig,
+                                          (uint32_t)sigLen) == true);
+        SSF_ASSERT(SSFX509VerifySignature(&c, rsaSha384Oid, sizeof(rsaSha384Oid), NULL, 0u, NULL,
+                                          0u, data, sizeof(data), sig, (uint32_t)sigLen) == true);
+        SSF_ASSERT(SSFX509VerifySignature(&c, rsaEncryptionOid, sizeof(rsaEncryptionOid), NULL, 0u,
+                                          sha256Oid, sizeof(sha256Oid), data, sizeof(data), sig,
+                                          (uint32_t)sigLen) == false);
+
+        /* RSA-PSS: the parameters select the hash and a digest algorithm must agree with them */
+        SSFSHA256(data, sizeof(data), hash, SSF_SHA2_256_BYTE_SIZE);
+        SSF_ASSERT(SSFRSASignPSS(rsaPriv, rsaPrivLen, SSF_RSA_HASH_SHA256, hash,
+                                 SSF_SHA2_256_BYTE_SIZE, sig, sizeof(sig), &sigLen) == true);
+        SSF_ASSERT(SSFX509VerifySignature(&c, rsaPssOid, sizeof(rsaPssOid), pssSalt32,
+                                          sizeof(pssSalt32), NULL, 0u, data, sizeof(data), sig,
+                                          (uint32_t)sigLen) == true);
+        SSF_ASSERT(SSFX509VerifySignature(&c, rsaPssOid, sizeof(rsaPssOid), pssSalt32,
+                                          sizeof(pssSalt32), sha256Oid, sizeof(sha256Oid), data,
+                                          sizeof(data), sig, (uint32_t)sigLen) == true);
+        SSF_ASSERT(SSFX509VerifySignature(&c, rsaPssOid, sizeof(rsaPssOid), pssSalt32,
+                                          sizeof(pssSalt32), sha512Oid, sizeof(sha512Oid), data,
+                                          sizeof(data), sig, (uint32_t)sigLen) == false);
+
+        /* Ed25519 signs the data itself; RFC 8419 pairs it only with SHA-512 */
+        SSF_ASSERT(SSFEd25519KeyGen(edSeed, edPub) == true);
+        _utGenBaseParams(&p, serial, edPub, SSF_ED25519_PUB_KEY_SIZE);
+        p.ecCurveOidRaw = NULL;
+        p.ecCurveOidRawLen = 0u;
+        p.pubKeyAlgOidRaw = ed25519Oid;
+        p.pubKeyAlgOidRawLen = sizeof(ed25519Oid);
+        p.sigAlgOidRaw = ed25519Oid;
+        p.sigAlgOidRawLen = sizeof(ed25519Oid);
+        SSF_ASSERT(SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &p, &tbsLen) == true);
+        SSF_ASSERT(SSFEd25519Sign(edSeed, edPub, tbsDer, tbsLen, edSig) == true);
+        SSF_ASSERT(SSFX509EncodeCert(certDer, sizeof(certDer), &p, edSig, sizeof(edSig),
+                                     &n) == true);
+        SSF_ASSERT(SSFX509Parse(certDer, n, &c) == true);
+        SSF_ASSERT(SSFX509VerifyCertSignature(&c, &c) == true);
+        SSF_ASSERT(SSFEd25519Sign(edSeed, edPub, data, sizeof(data), edSig) == true);
+        SSF_ASSERT(SSFX509VerifySignature(&c, ed25519Oid, sizeof(ed25519Oid), NULL, 0u, NULL, 0u,
+                                          data, sizeof(data), edSig, sizeof(edSig)) == true);
+        SSF_ASSERT(SSFX509VerifySignature(&c, ed25519Oid, sizeof(ed25519Oid), NULL, 0u, sha512Oid,
+                                          sizeof(sha512Oid), data, sizeof(data), edSig,
+                                          sizeof(edSig)) == true);
+        SSF_ASSERT(SSFX509VerifySignature(&c, ed25519Oid, sizeof(ed25519Oid), NULL, 0u, sha256Oid,
+                                          sizeof(sha256Oid), data, sizeof(data), edSig,
+                                          sizeof(edSig)) == false);
+        data[0] ^= 0x80u;
+        SSF_ASSERT(SSFX509VerifySignature(&c, ed25519Oid, sizeof(ed25519Oid), NULL, 0u, NULL, 0u,
+                                          data, sizeof(data), edSig, sizeof(edSig)) == false);
+        data[0] ^= 0x80u;
+        SSF_ASSERT(SSFX509VerifySignature(&c, ed25519Oid, sizeof(ed25519Oid), NULL, 0u, NULL, 0u,
+                                          data, sizeof(data), edSig, sizeof(edSig) - 1u) == false);
+
+        /* Preconditions */
+        SSF_ASSERT_TEST(SSFX509VerifySignature(NULL, ed25519Oid, sizeof(ed25519Oid), NULL, 0u, NULL,
+                                               0u, data, sizeof(data), edSig, sizeof(edSig)));
+        SSF_ASSERT_TEST(SSFX509VerifySignature(&c, NULL, sizeof(ed25519Oid), NULL, 0u, NULL, 0u,
+                                               data, sizeof(data), edSig, sizeof(edSig)));
+        SSF_ASSERT_TEST(SSFX509VerifySignature(&c, ed25519Oid, sizeof(ed25519Oid), NULL, 1u, NULL,
+                                               0u, data, sizeof(data), edSig, sizeof(edSig)));
+        SSF_ASSERT_TEST(SSFX509VerifySignature(&c, ed25519Oid, sizeof(ed25519Oid), NULL, 0u, NULL,
+                                               1u, data, sizeof(data), edSig, sizeof(edSig)));
+        SSF_ASSERT_TEST(SSFX509VerifySignature(&c, ed25519Oid, sizeof(ed25519Oid), NULL, 0u, NULL,
+                                               0u, NULL, sizeof(data), edSig, sizeof(edSig)));
+        SSF_ASSERT_TEST(SSFX509VerifySignature(&c, ed25519Oid, sizeof(ed25519Oid), NULL, 0u, NULL,
+                                               0u, data, sizeof(data), NULL, sizeof(edSig)));
+    }
+
+    /* ---- Code-signing chain purpose: no hostname, EKU codeSigning, KU digitalSignature ---- */
+    {
+        static uint8_t caOut[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t leafOut[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t caPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        static uint8_t leafPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        static const uint8_t ekuOid[] = { 0x55u, 0x1Du, 0x25u };
+        static const uint8_t anyEkuValue[] = { 0x30u, 0x06u, 0x06u, 0x04u,
+                                                0x55u, 0x1Du, 0x25u, 0x00u };
+        uint8_t caPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        uint8_t leafPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        size_t caPubLen;
+        size_t leafPubLen;
+        uint8_t serial[] = { 0x1Cu };
+        SSFX509GenParams_t p;
+        SSFX509Cert_t parsed;
+        const uint8_t *chain[2];
+        uint32_t chainLen[2];
+        const uint8_t *trust[1];
+        uint32_t trustLen[1];
+        const uint8_t *self[1];
+        uint32_t selfLen[1];
+        uint32_t caLen;
+        uint32_t leafLen;
+        const uint64_t now = 1800000000ull;
+
+        SSF_ASSERT(_utMakeCA("ca", serial, caPriv, caPub, &caPubLen, caOut, sizeof(caOut),
+                             &caLen) == true);
+        trust[0] = caOut;
+        trustLen[0] = caLen;
+        chain[1] = caOut;
+        chainLen[1] = caLen;
+        SSF_ASSERT(SSFECDSAKeyGen(SSF_EC_CURVE_P256, leafPriv, sizeof(leafPriv), leafPub,
+                                  sizeof(leafPub), &leafPubLen) == true);
+
+        /* Helper: sign the leaf described by p and point the chain at it */
+        #define _LEAF() do { \
+            leafLen = _utSignCert(&p, caPriv, leafOut, sizeof(leafOut)); \
+            SSF_ASSERT(leafLen != 0u); \
+            chain[0] = leafOut; \
+            chainLen[0] = leafLen; \
+        } while (0)
+
+        /* A signer with no SAN and no EKU, KU digitalSignature: code signing passes, a TLS */
+        /* server purpose has nothing to match the hostname against */
+        _utGenBaseParams(&p, serial, leafPub, (uint32_t)leafPubLen);
+        p.issuer.cn = "ca";
+        p.subject.cn = "signer";
+        p.addKeyUsage = true;
+        p.keyUsageBits = SSF_X509_KU_DIGITAL_SIGNATURE;
+        _LEAF();
+        SSF_ASSERT(SSFX509VerifyChainPurpose(chain, chainLen, 2u, trust, trustLen, 1u,
+                                             SSF_X509_PURPOSE_CODE_SIGNING, NULL, now) == true);
+        SSF_ASSERT(SSFX509VerifyChainPurpose(chain, chainLen, 2u, trust, trustLen, 1u,
+                                             SSF_X509_PURPOSE_CODE_SIGNING, "ignored",
+                                             now) == true);
+        SSF_ASSERT(SSFX509VerifyChainPurpose(chain, chainLen, 2u, trust, trustLen, 1u,
+                                             SSF_X509_PURPOSE_SERVER_AUTH, "signer", now) == false);
+        SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 2u, trust, trustLen, 1u, "signer",
+                                      now) == false);
+
+        /* Everything else about the chain is still enforced: expiry and a bad issuer name */
+        SSF_ASSERT(SSFX509VerifyChainPurpose(chain, chainLen, 2u, trust, trustLen, 1u,
+                                             SSF_X509_PURPOSE_CODE_SIGNING, NULL,
+                                             2000000001ull) == false);
+        p.issuer.cn = "other";
+        _LEAF();
+        SSF_ASSERT(SSFX509VerifyChainPurpose(chain, chainLen, 2u, trust, trustLen, 1u,
+                                             SSF_X509_PURPOSE_CODE_SIGNING, NULL, now) == false);
+        p.issuer.cn = "ca";
+
+        /* EKU codeSigning is parsed, generated, and honored */
+        p.addExtKeyUsage = true;
+        p.ekuCodeSigning = true;
+        _LEAF();
+        SSF_ASSERT(SSFX509Parse(leafOut, leafLen, &parsed) == true);
+        SSF_ASSERT((parsed.hasExtKeyUsage == true) && (parsed.ekuCodeSigning == true));
+        SSF_ASSERT((parsed.ekuServerAuth == false) && (parsed.ekuClientAuth == false));
+        SSF_ASSERT(SSFX509VerifyChainPurpose(chain, chainLen, 2u, trust, trustLen, 1u,
+                                             SSF_X509_PURPOSE_CODE_SIGNING, NULL, now) == true);
+
+        /* An EKU without codeSigning rejects the signer; anyExtendedKeyUsage satisfies it */
+        p.ekuCodeSigning = false;
+        p.ekuClientAuth = true;
+        _LEAF();
+        SSF_ASSERT(SSFX509VerifyChainPurpose(chain, chainLen, 2u, trust, trustLen, 1u,
+                                             SSF_X509_PURPOSE_CODE_SIGNING, NULL, now) == false);
+        p.ekuClientAuth = false;
+        p.ekuServerAuth = true;
+        _LEAF();
+        SSF_ASSERT(SSFX509VerifyChainPurpose(chain, chainLen, 2u, trust, trustLen, 1u,
+                                             SSF_X509_PURPOSE_CODE_SIGNING, NULL, now) == false);
+        p.addExtKeyUsage = false;
+        p.ekuServerAuth = false;
+        p.addRawExt = true;
+        p.rawExtOid = ekuOid;
+        p.rawExtOidLen = sizeof(ekuOid);
+        p.rawExtValue = anyEkuValue;
+        p.rawExtValueLen = sizeof(anyEkuValue);
+        _LEAF();
+        SSF_ASSERT(SSFX509VerifyChainPurpose(chain, chainLen, 2u, trust, trustLen, 1u,
+                                             SSF_X509_PURPOSE_CODE_SIGNING, NULL, now) == true);
+        p.addRawExt = false;
+
+        /* Key Usage, when present, must include digitalSignature or nonRepudiation */
+        p.keyUsageBits = SSF_X509_KU_KEY_ENCIPHERMENT;
+        _LEAF();
+        SSF_ASSERT(SSFX509VerifyChainPurpose(chain, chainLen, 2u, trust, trustLen, 1u,
+                                             SSF_X509_PURPOSE_CODE_SIGNING, NULL, now) == false);
+        p.keyUsageBits = SSF_X509_KU_NON_REPUDIATION;
+        _LEAF();
+        SSF_ASSERT(SSFX509VerifyChainPurpose(chain, chainLen, 2u, trust, trustLen, 1u,
+                                             SSF_X509_PURPOSE_CODE_SIGNING, NULL, now) == true);
+        p.addKeyUsage = false;
+        _LEAF();
+        SSF_ASSERT(SSFX509VerifyChainPurpose(chain, chainLen, 2u, trust, trustLen, 1u,
+                                             SSF_X509_PURPOSE_CODE_SIGNING, NULL, now) == true);
+        #undef _LEAF
+
+        /* The server-auth purpose is exactly the legacy entry point */
+        self[0] = _utTestCertDER;
+        selfLen[0] = sizeof(_utTestCertDER);
+        SSF_ASSERT(SSFX509Parse(_utTestCertDER, sizeof(_utTestCertDER), &parsed) == true);
+        SSF_ASSERT(SSFX509VerifyChainPurpose(self, selfLen, 1u, self, selfLen, 1u,
+                                             SSF_X509_PURPOSE_SERVER_AUTH, "test.ssf.local",
+                                             parsed.notBefore + 1u) == true);
+        SSF_ASSERT(SSFX509VerifyChainPurpose(self, selfLen, 1u, self, selfLen, 1u,
+                                             SSF_X509_PURPOSE_SERVER_AUTH, "nope.test",
+                                             parsed.notBefore + 1u) == false);
+        SSF_ASSERT(SSFX509VerifyChainPurpose(self, selfLen, 1u, self, selfLen, 1u,
+                                             SSF_X509_PURPOSE_CODE_SIGNING, NULL,
+                                             parsed.notBefore + 1u) == true);
+
+        /* Preconditions: server auth needs a hostname, the purpose must be in range */
+        SSF_ASSERT_TEST(SSFX509VerifyChainPurpose(self, selfLen, 1u, self, selfLen, 1u,
+                                                  SSF_X509_PURPOSE_SERVER_AUTH, NULL,
+                                                  parsed.notBefore + 1u));
+        SSF_ASSERT_TEST(SSFX509VerifyChainPurpose(self, selfLen, 1u, self, selfLen, 1u,
+                                                  SSF_X509_PURPOSE_SERVER_AUTH, "",
+                                                  parsed.notBefore + 1u));
+        SSF_ASSERT_TEST(SSFX509VerifyChainPurpose(self, selfLen, 1u, self, selfLen, 1u,
+                                                  SSF_X509_PURPOSE_MIN, NULL,
+                                                  parsed.notBefore + 1u));
+        SSF_ASSERT_TEST(SSFX509VerifyChainPurpose(self, selfLen, 1u, self, selfLen, 1u,
+                                                  SSF_X509_PURPOSE_MAX, NULL,
+                                                  parsed.notBefore + 1u));
+    }
 }
 #endif /* SSF_CONFIG_X509_UNIT_TEST */

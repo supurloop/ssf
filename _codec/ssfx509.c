@@ -123,6 +123,10 @@ static const uint8_t _oidEkuServerAuth[] = {
 static const uint8_t _oidEkuClientAuth[] = {
     0x2Bu, 0x06u, 0x01u, 0x05u, 0x05u, 0x07u, 0x03u, 0x02u
 };
+/* id-kp-codeSigning: 1.3.6.1.5.5.7.3.3 */
+static const uint8_t _oidEkuCodeSigning[] = {
+    0x2Bu, 0x06u, 0x01u, 0x05u, 0x05u, 0x07u, 0x03u, 0x03u
+};
 /* anyExtendedKeyUsage: 2.5.29.37.0 */
 static const uint8_t _oidEkuAny[] = { 0x55u, 0x1Du, 0x25u, 0x00u };
 
@@ -474,6 +478,11 @@ static bool _ParseExtensions(const SSFASN1Cursor_t *extsCursor, SSFX509Cert_t *c
                                        sizeof(_oidEkuClientAuth)))
                     {
                         cert->ekuClientAuth = true;
+                    }
+                    else if (_OIDMatch(ekuOid, ekuOidLen, _oidEkuCodeSigning,
+                                       sizeof(_oidEkuCodeSigning)))
+                    {
+                        cert->ekuCodeSigning = true;
                     }
                     else if (_OIDMatch(ekuOid, ekuOidLen, _oidEkuAny, sizeof(_oidEkuAny)))
                     {
@@ -1441,6 +1450,8 @@ static bool _EncEKUSeqContent(uint8_t *buf, uint32_t bufSize, const void *arg, u
         _oidEkuServerAuth, sizeof(_oidEkuServerAuth)))) return false;
     if (p->ekuClientAuth && !_Add(&pos, _EncOIDRaw(_At(buf, pos), _Rem(buf, bufSize, pos),
         _oidEkuClientAuth, sizeof(_oidEkuClientAuth)))) return false;
+    if (p->ekuCodeSigning && !_Add(&pos, _EncOIDRaw(_At(buf, pos), _Rem(buf, bufSize, pos),
+        _oidEkuCodeSigning, sizeof(_oidEkuCodeSigning)))) return false;
     *lenOut = pos;
     return true;
 }
@@ -2036,42 +2047,140 @@ bool SSFX509MatchIPAddress(const char *hostnameStr, const uint8_t *sanIP, uint32
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if cert's signature over its TBS verifies with issuer's public key, else false.   */
+/* Returns true if digestOidOpt is absent or is exactly expectedOid, else false.                  */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFX509VerifyCertSignature(const SSFX509Cert_t *cert, const SSFX509Cert_t *issuer)
+static bool _DigestAgrees(const uint8_t *digestOidOpt, uint32_t digestOidLen,
+                          const uint8_t *expectedOid, uint32_t expectedOidLen)
+{
+    SSF_REQUIRE((digestOidOpt != NULL) || (digestOidLen == 0u));
+    SSF_REQUIRE(expectedOid != NULL);
+
+    /* No digest algorithm given? */
+    if ((digestOidOpt == NULL) || (digestOidLen == 0u))
+    {
+        /* Yes, nothing to disagree with */
+        return true;
+    }
+
+    /* No, it must be the expected one */
+    return _OIDMatch(digestOidOpt, digestOidLen, expectedOid, expectedOidLen);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if oid names SHA-256, SHA-384 or SHA-512 with *hashOut set, else false.           */
+/* --------------------------------------------------------------------------------------------- */
+static bool _HashFromOID(const uint8_t *oid, uint32_t oidLen, SSFRSAHash_t *hashOut)
+{
+    SSF_REQUIRE((oid != NULL) || (oidLen == 0u));
+    SSF_REQUIRE(hashOut != NULL);
+
+    if (_OIDMatch(oid, oidLen, _oidSHA256, sizeof(_oidSHA256))) *hashOut = SSF_RSA_HASH_SHA256;
+    else if (_OIDMatch(oid, oidLen, _oidSHA384, sizeof(_oidSHA384))) *hashOut = SSF_RSA_HASH_SHA384;
+    else if (_OIDMatch(oid, oidLen, _oidSHA512, sizeof(_oidSHA512))) *hashOut = SSF_RSA_HASH_SHA512;
+    else return false;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns the SHA-2 OID naming hashId with *lenOut set.                                          */
+/* --------------------------------------------------------------------------------------------- */
+static const uint8_t *_OIDForHash(SSFRSAHash_t hashId, uint32_t *lenOut)
+{
+    SSF_REQUIRE(lenOut != NULL);
+
+    if (hashId == SSF_RSA_HASH_SHA384)
+    {
+        *lenOut = sizeof(_oidSHA384);
+        return _oidSHA384;
+    }
+    if (hashId == SSF_RSA_HASH_SHA512)
+    {
+        *lenOut = sizeof(_oidSHA512);
+        return _oidSHA512;
+    }
+    *lenOut = sizeof(_oidSHA256);
+    return _oidSHA256;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Digests data with the SHA-2 hash hashId selects into hash, setting *hashLenOut.                */
+/* --------------------------------------------------------------------------------------------- */
+static void _Digest(SSFRSAHash_t hashId, const uint8_t *data, uint32_t dataLen, uint8_t *hash,
+                    size_t *hashLenOut)
+{
+    SSF_REQUIRE((data != NULL) || (dataLen == 0u));
+    SSF_REQUIRE(hash != NULL);
+    SSF_REQUIRE(hashLenOut != NULL);
+
+    if (hashId == SSF_RSA_HASH_SHA384)
+    {
+        *hashLenOut = SSF_SHA2_384_BYTE_SIZE;
+        SSFSHA384(data, dataLen, hash, SSF_SHA2_384_BYTE_SIZE);
+    }
+    else if (hashId == SSF_RSA_HASH_SHA512)
+    {
+        *hashLenOut = SSF_SHA2_512_BYTE_SIZE;
+        SSFSHA512(data, dataLen, hash, SSF_SHA2_512_BYTE_SIZE);
+    }
+    else
+    {
+        *hashLenOut = SSF_SHA2_256_BYTE_SIZE;
+        SSFSHA256(data, dataLen, hash, SSF_SHA2_256_BYTE_SIZE);
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if sig over data verifies with keyCert's public key under sigAlg, else false.     */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgOidRaw,
+                            uint32_t sigAlgOidRawLen, const uint8_t *sigAlgParamsOpt,
+                            uint32_t sigAlgParamsLen, const uint8_t *digestAlgOidRawOpt,
+                            uint32_t digestAlgOidRawLen, const uint8_t *data, uint32_t dataLen,
+                            const uint8_t *sig, uint32_t sigLen)
 {
     SSFECCurve_t curve;
-    SSFRSAHash_t rsaHash;
+    SSFRSAHash_t hashId;
+    const uint8_t *impliedOid;
+    uint32_t impliedOidLen;
     uint8_t hash[SSF_SHA2_512_BYTE_SIZE];
     size_t hashLen;
     uint32_t saltLen;
+    bool isEcdsa256;
+    bool isRsaPlain;
     bool ok;
 
-    SSF_REQUIRE(cert != NULL);
-    SSF_REQUIRE(issuer != NULL);
-    SSF_REQUIRE(cert->tbsRaw != NULL);
-    SSF_REQUIRE(cert->signature != NULL);
+    SSF_REQUIRE(keyCert != NULL);
+    SSF_REQUIRE(sigAlgOidRaw != NULL);
+    SSF_REQUIRE((sigAlgParamsOpt != NULL) || (sigAlgParamsLen == 0u));
+    SSF_REQUIRE((digestAlgOidRawOpt != NULL) || (digestAlgOidRawLen == 0u));
+    SSF_REQUIRE((data != NULL) || (dataLen == 0u));
+    SSF_REQUIRE(sig != NULL);
 
-    /* ECDSA: the sigAlg OID selects the hash, the issuer's SPKI selects the curve (RFC 5758 3.2) */
-    if (SSFX509IsECDSA(cert) || SSFX509IsECDSASHA384(cert))
+    /* ECDSA with SHA-256 or SHA-384 (the OID selects the hash, the key its curve, RFC 5758)? */
+    isEcdsa256 = _OIDMatch(sigAlgOidRaw, sigAlgOidRawLen, _oidEcdsaSHA256, sizeof(_oidEcdsaSHA256));
+    if ((isEcdsa256) ||
+        (_OIDMatch(sigAlgOidRaw, sigAlgOidRawLen, _oidEcdsaSHA384, sizeof(_oidEcdsaSHA384))))
     {
-        if (SSFX509IsECDSA(cert))
-        {
-            hashLen = SSF_SHA2_256_BYTE_SIZE;
-            SSFSHA256(cert->tbsRaw, cert->tbsRawLen, hash, (uint32_t)hashLen);
-        }
-        else
-        {
-            hashLen = SSF_SHA2_384_BYTE_SIZE;
-            SSFSHA384(cert->tbsRaw, cert->tbsRawLen, hash, (uint32_t)hashLen);
-        }
+        /* Yes */
+        hashId = isEcdsa256 ? SSF_RSA_HASH_SHA256 : SSF_RSA_HASH_SHA384;
 
-        /* Issuer key on a supported curve? */
-        if (SSFX509IsP256(issuer))
+        /* Digest algorithm, when given, is the one the signature algorithm implies? */
+        impliedOid = _OIDForHash(hashId, &impliedOidLen);
+        if (!_DigestAgrees(digestAlgOidRawOpt, digestAlgOidRawLen, impliedOid, impliedOidLen))
+        {
+            /* No */
+            SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+                "VerifySig: digest algorithm disagrees with ECDSA signature algorithm");
+            return false;
+        }
+        _Digest(hashId, data, dataLen, hash, &hashLen);
+
+        /* Key on a supported curve? */
+        if (SSFX509IsP256(keyCert))
         {
             curve = SSF_EC_CURVE_P256;
         }
-        else if (SSFX509IsP384(issuer))
+        else if (SSFX509IsP384(keyCert))
         {
             curve = SSF_EC_CURVE_P384;
         }
@@ -2079,114 +2188,169 @@ bool SSFX509VerifyCertSignature(const SSFX509Cert_t *cert, const SSFX509Cert_t *
         {
             /* No, nothing to verify with */
             SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
-                "VerifyCertSig: ECDSA issuer curve OID not recognized (%u bytes)",
-                issuer->ecCurveOidRawLen);
+                "VerifySig: ECDSA key curve OID not recognized (%u bytes)",
+                keyCert->ecCurveOidRawLen);
             return false;
         }
 
-        /* Issuer pubKey is the SEC 1 uncompressed point held in the SPKI BIT STRING */
-        ok = SSFECDSAVerify(curve, issuer->pubKey, (size_t)issuer->pubKeyLen, hash, hashLen,
-                            cert->signature, (size_t)cert->signatureLen);
+        /* Hash no longer than the curve order, which ssfecdsa requires (no RFC 5758 truncation)? */
+        if (hashLen > ((curve == SSF_EC_CURVE_P256) ? 32u : 48u))
+        {
+            /* No, SHA-384 over a P-256 key is not supported */
+            SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+                "VerifySig: ECDSA hash of %u bytes exceeds the key's curve order",
+                (unsigned int)hashLen);
+            return false;
+        }
+
+        /* keyCert's pubKey is the SEC 1 uncompressed point held in the SPKI BIT STRING */
+        ok = SSFECDSAVerify(curve, keyCert->pubKey, (size_t)keyCert->pubKeyLen, hash, hashLen, sig,
+                            (size_t)sigLen);
         SSF_TLS_TRACE_CERT_DEBUG(&_ssfx509TraceCtx,
-            "VerifyCertSig: ECDSA curve=%d pubKeyLen=%u sigLen=%u -> %s", curve, issuer->pubKeyLen,
-            cert->signatureLen, ok ? "OK" : "FAIL");
+            "VerifySig: ECDSA curve=%d pubKeyLen=%u sigLen=%u -> %s", curve, keyCert->pubKeyLen,
+            sigLen, ok ? "OK" : "FAIL");
         return ok;
     }
 
-    /* RSA PKCS#1 v1.5: the sigAlg OID selects the hash */
-    if (SSFX509IsRSAPKCS1SHA256(cert) || SSFX509IsRSAPKCS1SHA384(cert) ||
-        SSFX509IsRSAPKCS1SHA512(cert))
+    /* RSA PKCS#1 v1.5, by a hashed-with-RSA OID or plain rsaEncryption (RFC 3370 Sec. 3.2)? */
+    isRsaPlain = _OIDMatch(sigAlgOidRaw, sigAlgOidRawLen, _oidRSA, sizeof(_oidRSA));
+    if ((isRsaPlain) ||
+        (_OIDMatch(sigAlgOidRaw, sigAlgOidRawLen, _oidRSAPKCS1SHA256,
+                   sizeof(_oidRSAPKCS1SHA256))) ||
+        (_OIDMatch(sigAlgOidRaw, sigAlgOidRawLen, _oidRSAPKCS1SHA384,
+                   sizeof(_oidRSAPKCS1SHA384))) ||
+        (_OIDMatch(sigAlgOidRaw, sigAlgOidRawLen, _oidRSAPKCS1SHA512,
+                   sizeof(_oidRSAPKCS1SHA512))))
     {
-        if (SSFX509IsRSAPKCS1SHA256(cert))
+        /* Yes, plain rsaEncryption? */
+        if (isRsaPlain)
         {
-            rsaHash = SSF_RSA_HASH_SHA256;
-            hashLen = SSF_SHA2_256_BYTE_SIZE;
-            SSFSHA256(cert->tbsRaw, cert->tbsRawLen, hash, (uint32_t)hashLen);
-        }
-        else if (SSFX509IsRSAPKCS1SHA384(cert))
-        {
-            rsaHash = SSF_RSA_HASH_SHA384;
-            hashLen = SSF_SHA2_384_BYTE_SIZE;
-            SSFSHA384(cert->tbsRaw, cert->tbsRawLen, hash, (uint32_t)hashLen);
+            /* Yes, the digest algorithm alone names the hash and must be a supported one */
+            if (!_HashFromOID(digestAlgOidRawOpt, digestAlgOidRawLen, &hashId))
+            {
+                SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+                    "VerifySig: rsaEncryption needs a SHA-2 digest algorithm (%u bytes given)",
+                    digestAlgOidRawLen);
+                return false;
+            }
         }
         else
         {
-            rsaHash = SSF_RSA_HASH_SHA512;
-            hashLen = SSF_SHA2_512_BYTE_SIZE;
-            SSFSHA512(cert->tbsRaw, cert->tbsRawLen, hash, (uint32_t)hashLen);
+            /* No, the OID names the hash and the digest algorithm, when given, must agree */
+            if (_OIDMatch(sigAlgOidRaw, sigAlgOidRawLen, _oidRSAPKCS1SHA256,
+                          sizeof(_oidRSAPKCS1SHA256)))
+            {
+                hashId = SSF_RSA_HASH_SHA256;
+            }
+            else if (_OIDMatch(sigAlgOidRaw, sigAlgOidRawLen, _oidRSAPKCS1SHA384,
+                               sizeof(_oidRSAPKCS1SHA384)))
+            {
+                hashId = SSF_RSA_HASH_SHA384;
+            }
+            else
+            {
+                hashId = SSF_RSA_HASH_SHA512;
+            }
+            impliedOid = _OIDForHash(hashId, &impliedOidLen);
+            if (!_DigestAgrees(digestAlgOidRawOpt, digestAlgOidRawLen, impliedOid, impliedOidLen))
+            {
+                SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+                    "VerifySig: digest algorithm disagrees with RSA signature algorithm");
+                return false;
+            }
         }
+        _Digest(hashId, data, dataLen, hash, &hashLen);
 
-        /* Issuer pubKey is the DER RSAPublicKey held in the SPKI BIT STRING */
-        ok = SSFRSAVerifyPKCS1(issuer->pubKey, (size_t)issuer->pubKeyLen, rsaHash, hash, hashLen,
-                               cert->signature, (size_t)cert->signatureLen);
+        /* keyCert's pubKey is the DER RSAPublicKey held in the SPKI BIT STRING */
+        ok = SSFRSAVerifyPKCS1(keyCert->pubKey, (size_t)keyCert->pubKeyLen, hashId, hash, hashLen,
+                               sig, (size_t)sigLen);
         SSF_TLS_TRACE_CERT_DEBUG(&_ssfx509TraceCtx,
-            "VerifyCertSig: RSA-PKCS1 hash=%d pubKeyLen=%u sigLen=%u -> %s", rsaHash,
-            issuer->pubKeyLen, cert->signatureLen, ok ? "OK" : "FAIL");
+            "VerifySig: RSA-PKCS1 hash=%d pubKeyLen=%u sigLen=%u -> %s", hashId,
+            keyCert->pubKeyLen, sigLen, ok ? "OK" : "FAIL");
         return ok;
     }
 
-    /* RSA-PSS: the signed PSS parameters select the hash and salt length (RFC 4055) */
-    if (SSFX509IsRSAPSSSHA256(cert))
+    /* RSA-PSS, whose parameters select the hash and salt length (RFC 4055)? */
+    if (_OIDMatch(sigAlgOidRaw, sigAlgOidRawLen, _oidRSAPSS, sizeof(_oidRSAPSS)))
     {
-        _ParsePSSParams(cert->sigAlgParams, cert->sigAlgParamsLen, &rsaHash, &saltLen);
-        switch (rsaHash)
+        /* Yes */
+        _ParsePSSParams(sigAlgParamsOpt, sigAlgParamsLen, &hashId, &saltLen);
+
+        /* Digest algorithm, when given, is the hash the parameters select? */
+        impliedOid = _OIDForHash(hashId, &impliedOidLen);
+        if (!_DigestAgrees(digestAlgOidRawOpt, digestAlgOidRawLen, impliedOid, impliedOidLen))
         {
-            case SSF_RSA_HASH_SHA256:
-                hashLen = SSF_SHA2_256_BYTE_SIZE;
-                SSFSHA256(cert->tbsRaw, cert->tbsRawLen, hash, (uint32_t)hashLen);
-                break;
-            case SSF_RSA_HASH_SHA384:
-                hashLen = SSF_SHA2_384_BYTE_SIZE;
-                SSFSHA384(cert->tbsRaw, cert->tbsRawLen, hash, (uint32_t)hashLen);
-                break;
-            case SSF_RSA_HASH_SHA512:
-                hashLen = SSF_SHA2_512_BYTE_SIZE;
-                SSFSHA512(cert->tbsRaw, cert->tbsRawLen, hash, (uint32_t)hashLen);
-                break;
-            default:
-                return false;
+            /* No */
+            SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+                "VerifySig: digest algorithm disagrees with RSA-PSS parameters");
+            return false;
         }
+        _Digest(hashId, data, dataLen, hash, &hashLen);
 
         /* Salt length within what the verifier supports? */
         if (saltLen > hashLen)
         {
             /* No, longer than the hash is never issued and is not accepted */
             SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
-                "VerifyCertSig: RSA-PSS saltLength %u exceeds hash length %u", saltLen,
+                "VerifySig: RSA-PSS saltLength %u exceeds hash length %u", saltLen,
                 (unsigned int)hashLen);
             return false;
         }
-        ok = SSFRSAVerifyPSS(issuer->pubKey, (size_t)issuer->pubKeyLen, rsaHash, hash, hashLen,
-                             (size_t)saltLen, cert->signature, (size_t)cert->signatureLen);
+        ok = SSFRSAVerifyPSS(keyCert->pubKey, (size_t)keyCert->pubKeyLen, hashId, hash, hashLen,
+                             (size_t)saltLen, sig, (size_t)sigLen);
         SSF_TLS_TRACE_CERT_DEBUG(&_ssfx509TraceCtx,
-            "VerifyCertSig: RSA-PSS hash=%d pubKeyLen=%u sigLen=%u -> %s", rsaHash,
-            issuer->pubKeyLen, cert->signatureLen, ok ? "OK" : "FAIL");
+            "VerifySig: RSA-PSS hash=%d pubKeyLen=%u sigLen=%u -> %s", hashId, keyCert->pubKeyLen,
+            sigLen, ok ? "OK" : "FAIL");
         return ok;
     }
 
-    /* Ed25519 signs the TBS itself (RFC 8410); key and signature sizes are fixed */
-    if (SSFX509IsEd25519(cert))
+    /* Ed25519, which signs the data itself (RFC 8410)? */
+    if (_OIDMatch(sigAlgOidRaw, sigAlgOidRawLen, _oidEd25519, sizeof(_oidEd25519)))
     {
+        /* Yes; RFC 8419 pairs it only with SHA-512, so a given digest algorithm is SHA-512? */
+        if (!_DigestAgrees(digestAlgOidRawOpt, digestAlgOidRawLen, _oidSHA512, sizeof(_oidSHA512)))
+        {
+            /* No */
+            SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+                "VerifySig: Ed25519 requires the SHA-512 digest algorithm");
+            return false;
+        }
+
         /* Key and signature the sizes Ed25519 defines? */
-        if ((issuer->pubKeyLen != SSF_ED25519_PUB_KEY_SIZE) ||
-            (cert->signatureLen != SSF_ED25519_SIG_SIZE))
+        if ((keyCert->pubKeyLen != SSF_ED25519_PUB_KEY_SIZE) || (sigLen != SSF_ED25519_SIG_SIZE))
         {
             /* No, malformed */
             SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
-                "VerifyCertSig: Ed25519 bad key/sig size (pubKey=%u sig=%u)", issuer->pubKeyLen,
-                cert->signatureLen);
+                "VerifySig: Ed25519 bad key/sig size (pubKey=%u sig=%u)", keyCert->pubKeyLen,
+                sigLen);
             return false;
         }
-        ok = SSFEd25519Verify(issuer->pubKey, cert->tbsRaw, cert->tbsRawLen, cert->signature);
+        ok = SSFEd25519Verify(keyCert->pubKey, data, dataLen, sig);
         SSF_TLS_TRACE_CERT_DEBUG(&_ssfx509TraceCtx,
-            "VerifyCertSig: Ed25519 pubKeyLen=%u sigLen=%u -> %s", issuer->pubKeyLen,
-            cert->signatureLen, ok ? "OK" : "FAIL");
+            "VerifySig: Ed25519 pubKeyLen=%u sigLen=%u -> %s", keyCert->pubKeyLen, sigLen,
+            ok ? "OK" : "FAIL");
         return ok;
     }
 
-    SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx, "VerifyCertSig: unsupported sigAlg OID (%u bytes)",
-                             cert->sigAlgOidRawLen);
+    SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx, "VerifySig: unsupported sigAlg OID (%u bytes)",
+                             sigAlgOidRawLen);
     return false;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if cert's signature over its TBS verifies with issuer's public key, else false.   */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFX509VerifyCertSignature(const SSFX509Cert_t *cert, const SSFX509Cert_t *issuer)
+{
+    SSF_REQUIRE(cert != NULL);
+    SSF_REQUIRE(issuer != NULL);
+    SSF_REQUIRE(cert->tbsRaw != NULL);
+    SSF_REQUIRE(cert->signature != NULL);
+
+    /* The signed TBS copy of the algorithm identifier is the one that selects the scheme */
+    return SSFX509VerifySignature(issuer, cert->sigAlgOidRaw, cert->sigAlgOidRawLen,
+                                  cert->sigAlgParams, cert->sigAlgParamsLen, NULL, 0u, cert->tbsRaw,
+                                  cert->tbsRawLen, cert->signature, cert->signatureLen);
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -2345,11 +2509,13 @@ static bool _IsKnownExtension(const uint8_t *oidRaw, uint32_t oidRawLen)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if chainDer[0] validates to a trust anchor and is issued for hostnameStr.        */
+/* Returns true if chainDer[0] validates to a trust anchor for purpose, else false.               */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFX509VerifyChain(const uint8_t **chainDer, const uint32_t *chainDerLen, uint8_t chainLen,
-                        const uint8_t **trustDer, const uint32_t *trustDerLen, uint8_t trustCount,
-                        const char *hostnameStr, uint64_t nowUnixSec)
+bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDerLen,
+                               uint8_t chainLen,
+                               const uint8_t **trustDer, const uint32_t *trustDerLen,
+                               uint8_t trustCount, SSFX509Purpose_t purpose,
+                               const char *hostnameStrOpt, uint64_t nowUnixSec)
 {
     SSFX509Cert_t certs[SSF_X509_CONFIG_MAX_CHAIN_DEPTH];
     SSFX509Cert_t anchor;
@@ -2368,8 +2534,9 @@ bool SSFX509VerifyChain(const uint8_t **chainDer, const uint32_t *chainDerLen, u
     SSF_REQUIRE(trustDer != NULL);
     SSF_REQUIRE(trustDerLen != NULL);
     SSF_REQUIRE(trustCount >= 1u);
-    SSF_REQUIRE(hostnameStr != NULL);
-    SSF_REQUIRE(hostnameStr[0] != '\0');
+    SSF_REQUIRE((purpose > SSF_X509_PURPOSE_MIN) && (purpose < SSF_X509_PURPOSE_MAX));
+    SSF_REQUIRE((purpose != SSF_X509_PURPOSE_SERVER_AUTH) ||
+                ((hostnameStrOpt != NULL) && (hostnameStrOpt[0] != '\0')));
 
     for (i = 0; i < chainLen; i++)
     {
@@ -2544,13 +2711,27 @@ bool SSFX509VerifyChain(const uint8_t **chainDer, const uint32_t *chainDerLen, u
         }
     }
 
-    /* Leaf Extended Key Usage, when present, allows server authentication (Sec. 4.2.1.12)? */
-    if (certs[0].hasExtKeyUsage && !certs[0].ekuServerAuth && !certs[0].ekuAnyPurpose)
+    /* Leaf EKU, when present, includes the purpose or anyExtendedKeyUsage (Sec. 4.2.1.12)? */
+    if ((certs[0].hasExtKeyUsage) && (!certs[0].ekuAnyPurpose) &&
+        (((purpose == SSF_X509_PURPOSE_SERVER_AUTH) && (!certs[0].ekuServerAuth)) ||
+         ((purpose == SSF_X509_PURPOSE_CODE_SIGNING) && (!certs[0].ekuCodeSigning))))
     {
         /* No */
         SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
-            "Chain: leaf cert has EKU but lacks serverAuth (serverAuth=%d clientAuth=%d)",
-            certs[0].ekuServerAuth, certs[0].ekuClientAuth);
+            "Chain: leaf EKU lacks the purpose %d (serverAuth=%d clientAuth=%d codeSigning=%d)",
+            purpose, certs[0].ekuServerAuth, certs[0].ekuClientAuth, certs[0].ekuCodeSigning);
+        return false;
+    }
+
+    /* Code signing: leaf Key Usage, when present, includes digitalSignature or nonRepudiation? */
+    if ((purpose == SSF_X509_PURPOSE_CODE_SIGNING) && (certs[0].hasKeyUsage) &&
+        ((certs[0].keyUsageBits &
+          (SSF_X509_KU_DIGITAL_SIGNATURE | SSF_X509_KU_NON_REPUDIATION)) == 0u))
+    {
+        /* No */
+        SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+            "Chain: leaf Key Usage lacks digitalSignature and nonRepudiation (KU=0x%04X)",
+            certs[0].keyUsageBits);
         return false;
     }
 
@@ -2582,26 +2763,47 @@ bool SSFX509VerifyChain(const uint8_t **chainDer, const uint32_t *chainDerLen, u
         }
     }
 
-    /* The leaf names hostnameStr in a dNSName or iPAddress SAN */
-    for (i = 0; (i < certs[0].sanLen) && !matched; i++)
+    /* Server authentication: the leaf names hostnameStrOpt in a dNSName or iPAddress SAN */
+    if (purpose == SSF_X509_PURPOSE_SERVER_AUTH)
     {
-        if (certs[0].san[i].type == SSF_X509_SAN_DNS)
+        for (i = 0; (i < certs[0].sanLen) && (!matched); i++)
         {
-            matched = _HostnameMatch(hostnameStr, certs[0].san[i].val, certs[0].san[i].valLen);
+            if (certs[0].san[i].type == SSF_X509_SAN_DNS)
+            {
+                matched = _HostnameMatch(hostnameStrOpt, certs[0].san[i].val,
+                                         certs[0].san[i].valLen);
+            }
+            else if (certs[0].san[i].type == SSF_X509_SAN_IP)
+            {
+                matched = _IPAddressMatch(hostnameStrOpt, certs[0].san[i].val,
+                                          certs[0].san[i].valLen);
+            }
         }
-        else if (certs[0].san[i].type == SSF_X509_SAN_IP)
-        {
-            matched = _IPAddressMatch(hostnameStr, certs[0].san[i].val, certs[0].san[i].valLen);
-        }
-    }
 
-    /* Hostname matched? */
-    if (!matched)
-    {
-        /* No */
-        SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
-            "Chain: hostname '%s' not matched in SAN (sanLen=%u)", hostnameStr, certs[0].sanLen);
-        return false;
+        /* Hostname matched? */
+        if (!matched)
+        {
+            /* No */
+            SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+                "Chain: hostname '%s' not matched in SAN (sanLen=%u)", hostnameStrOpt,
+                certs[0].sanLen);
+            return false;
+        }
     }
     return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if chainDer[0] validates to a trust anchor and is issued for hostnameStr.        */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFX509VerifyChain(const uint8_t **chainDer, const uint32_t *chainDerLen, uint8_t chainLen,
+                        const uint8_t **trustDer, const uint32_t *trustDerLen, uint8_t trustCount,
+                        const char *hostnameStr, uint64_t nowUnixSec)
+{
+    SSF_REQUIRE(hostnameStr != NULL);
+    SSF_REQUIRE(hostnameStr[0] != '\0');
+
+    return SSFX509VerifyChainPurpose(chainDer, chainDerLen, chainLen, trustDer, trustDerLen,
+                                     trustCount, SSF_X509_PURPOSE_SERVER_AUTH, hostnameStr,
+                                     nowUnixSec);
 }

@@ -67,7 +67,8 @@ typedef struct
     uint64_t h[8];                              /* Running hash state */
     uint8_t  buf[SSF_SHA2_64_BLOCK_BYTE_SIZE];  /* Partial block buffer */
     uint32_t bufLen;                            /* Bytes currently held in buf */
-    uint64_t totalBits;                         /* Total bits fed so far */
+    uint64_t totalBits;                         /* Total bits fed so far, low 64 bits */
+    uint64_t totalBitsHi;                       /* High 64 bits of the 128-bit length */
     uint16_t hashBitSize;                       /* 512 or 384 */
     uint16_t truncationBitSize;                 /* 0, 256, or 224 */
     uint32_t magic;                             /* Context validity marker */

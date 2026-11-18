@@ -272,6 +272,8 @@ void SSFSHA2_32Update(SSFSHA2_32Context_t *context, const uint8_t *in, uint32_t 
 
         memcpy(&context->buf[context->bufLen], in, copyLen);
         context->bufLen += copyLen;
+        /* FIPS 180-4 caps SHA-224/256 messages below 2^64 bits; never wrap (AUDIT SHA2-1) */
+        SSF_REQUIRE(context->totalBits <= (UINT64_MAX - (((uint64_t)copyLen) << 3)));
         context->totalBits += ((uint64_t)copyLen) << 3;
         in += copyLen;
         inLen -= copyLen;
@@ -410,6 +412,14 @@ void SSFSHA2_64Update(SSFSHA2_64Context_t *context, const uint8_t *in, uint32_t 
 
         memcpy(&context->buf[context->bufLen], in, copyLen);
         context->bufLen += copyLen;
+
+        /* Does this chunk carry out of the low 64 bits of the 128-bit length? */
+        if (context->totalBits > (UINT64_MAX - (((uint64_t)copyLen) << 3)))
+        {
+            /* Yes, carry into the high word (FIPS 180-4 Sec. 5.1.2, AUDIT SHA2-1) */
+            context->totalBitsHi++;
+        }
+        /* No, the low word alone holds the count */
         context->totalBits += ((uint64_t)copyLen) << 3;
         in += copyLen;
         inLen -= copyLen;
@@ -456,7 +466,8 @@ void SSFSHA2_64End(SSFSHA2_64Context_t *context, uint8_t *out, uint32_t outSize)
         pad[context->bufLen] = 0x80;
     }
 
-    /* Append big-endian message bit length in last 16 bytes of pad (upper 8 bytes already zero). */
+    /* Append the 128-bit big-endian message bit length in the last 16 bytes of pad */
+    SSF_PUTU64BE(&pad[SSF_SHA512_BLOCK_SIZE_BYTES - 16], context->totalBitsHi);
     SSF_PUTU64BE(&pad[SSF_SHA512_BLOCK_SIZE_BYTES - 8], totalBits);
     _SSFSHA2_64Block(context->h, pad);
 

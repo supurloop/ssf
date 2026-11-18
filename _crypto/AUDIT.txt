@@ -776,7 +776,7 @@ SHA1-1  Low  OPEN
              already-Ended (zeroed) context silently produce a digest from an all-zero state.
   Failure:   SSFSHA1End(&ctx) twice -> second call writes a non-SHA-1 value with no assertion.
 
-SHA2-1  Low  OPEN
+SHA2-1  Low  FIXED (2026-11-18)
   Location:  ssfsha2.c:457-458 (SSFSHA2_64End)
   Problem:   SHA-384/512 family encodes only the low 64 bits of the 128-bit length field;
              totalBits is a uint64_t of bits, so the engine is correct only for messages
@@ -1465,3 +1465,15 @@ CHANGE LOG
               HMAC, HKDF, TLS, Ed25519 unit tests enabled, plus ssfcms, ssfx509, ssfbase64url,
               ssfmatch). (3) Normal x86-64 build GREEN with SHA2, HMAC, HKDF, TLS, ECDSA, RSA,
               Ed25519 enabled. Unit test flags restored.
+  2026-11-18  SHA2-1 FIXED via option 1. SSFSHA2_64Context_t gains totalBitsHi (8 bytes);
+              SSFSHA2_64Update carries into it when the low 64-bit bit count would wrap, and
+              SSFSHA2_64End writes both words, so SHA-384/512/512-t encode the full FIPS 180-4
+              Sec. 5.1.2 128-bit length. SSFSHA2_32Update now SSF_REQUIREs that the 64-bit count
+              does not wrap (SHA-224/256's own limit is < 2^64 bits) instead of wrapping silently.
+              ssfsha2.md documents both. Test block "AUDIT SHA2-1" in ssfsha2_ut.c: a SHA-512
+              context forced to totalBits = 2^64 - 8 then fed "abc" must produce the digest a
+              pure-Python SHA-512 compression model (validated against hashlib) gives for a
+              2^64 + 16-bit length; a SHA-256 context forced likewise must trap on that Update.
+              RED: ssfsha2_ut.c:911 (high length word stayed zero). GREEN on x86-64 with SHA2,
+              HMAC, HKDF, TLS, ECDSA, RSA, Ed25519 (11 suites) and on big-endian MIPS under
+              qemu-mips with SHA2, HMAC, HKDF, TLS, Ed25519 (9 suites). No line over 100 columns.

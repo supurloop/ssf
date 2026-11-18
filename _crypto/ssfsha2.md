@@ -40,6 +40,10 @@ are provided.
   (`SSF_GETU32BE` / `SSF_PUTU64BE` and friends from `ssf.h`), so the output is correct on big-
   and little-endian hosts without relying on `ssfport.h` byte-order detection or
   `SSF_CONFIG_LITTLE_ENDIAN` (verified on big-endian MIPS under QEMU).
+- Message length: SHA-384 / SHA-512 / SHA-512/t keep the full 128-bit bit count FIPS 180-4
+  §5.1.2 encodes, so any message the standard allows hashes correctly. SHA-224 / SHA-256 are
+  limited by FIPS 180-4 to fewer than 2⁶⁴ bits; an `Update` that would exceed that is an
+  `SSF_REQUIRE` failure rather than a silent wrap.
 
 <a id="configuration"></a>
 

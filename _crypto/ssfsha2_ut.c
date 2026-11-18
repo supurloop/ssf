@@ -885,6 +885,37 @@ void SSFSHA2UnitTest(void)
                             "\x31\xad\x85\xc7\xa7\x1d\xd7\x03\x54\xec\x63\x12\x38\xca\x34\x45",
                       SSF_SHA2_512_BYTE_SIZE) == 0);
 
+    /* ---- AUDIT SHA2-1: SHA-384/512 encode a 128-bit length (FIPS 180-4 Sec. 5.1.2) ---- */
+    /* The 64-bit bit count wrapped silently past 2^64 bits. Force the count to 2^64 - 8 on a  */
+    /* fresh context and absorb "abc": the length field must become 2^64 + 16. Expected digest */
+    /* from a pure-Python SHA-512 compression model checked against hashlib.                  */
+    {
+        static const uint8_t expected[64] = {
+            0x3Fu, 0x5Fu, 0x80u, 0x4Cu, 0xB7u, 0x16u, 0x78u, 0x52u,
+            0x82u, 0xCEu, 0x9Cu, 0x51u, 0xC5u, 0x66u, 0xFCu, 0x5Fu,
+            0x80u, 0x71u, 0xAAu, 0xC5u, 0x7Eu, 0x75u, 0x71u, 0x60u,
+            0x05u, 0x39u, 0x1Cu, 0x8Du, 0xC1u, 0xD8u, 0xD1u, 0x03u,
+            0xA6u, 0xE1u, 0xC3u, 0x9Du, 0xE5u, 0x45u, 0x80u, 0x31u,
+            0x6Eu, 0x9Du, 0xC5u, 0x48u, 0x08u, 0xBCu, 0x51u, 0x84u,
+            0xD0u, 0x02u, 0x76u, 0xE5u, 0x54u, 0x92u, 0x27u, 0x52u,
+            0x55u, 0x81u, 0x91u, 0x37u, 0x8Eu, 0x5Au, 0x71u, 0xB3u
+        };
+        SSFSHA2_64Context_t ctx512;
+        SSFSHA2_32Context_t ctx256;
+        uint8_t out[64];
+
+        SSFSHA512Begin(&ctx512);
+        ctx512.totalBits = 0xFFFFFFFFFFFFFFF8ull;
+        SSFSHA512Update(&ctx512, (const uint8_t *)"abc", 3u);
+        SSFSHA512End(&ctx512, out, sizeof(out));
+        SSF_ASSERT(memcmp(out, expected, sizeof(expected)) == 0);
+
+        /* SHA-256's own limit is < 2^64 bits: crossing it must trap, not wrap. */
+        SSFSHA256Begin(&ctx256);
+        ctx256.totalBits = 0xFFFFFFFFFFFFFFF8ull;
+        SSF_ASSERT_TEST(SSFSHA256Update(&ctx256, (const uint8_t *)"abc", 3u));
+    }
+
 #if SSF_SHA2_OSSL_VERIFY == 1
     _VerifySHA2AgainstOpenSSLRandom();
 #endif

@@ -463,9 +463,12 @@ every suite except `TLS_AES_128_CCM_8_SHA256`, which uses 8 — see the cipher-s
 in [Notes](#notes)). `recordLen` reports the total wire-record size including header,
 ciphertext, and tag.
 
-Returns `false` if `recordSize` is too small or if the record would exceed the RFC 8446
-per-record ciphertext limit of `2^14 + 256` bytes. The sequence number is
-incremented internally on success.
+Returns `false` if `ptLen` exceeds the RFC 8446 §5.1 plaintext limit of `2^14` (16384) bytes,
+if `recordSize` is too small, or if the record would exceed the per-record ciphertext limit
+of `2^14 + 256` bytes. Callers sending more than 16384 bytes must split the data across
+records; a conforming peer aborts the connection with `record_overflow` on a larger
+plaintext. No padding is added, so the inner plaintext is at most `2^14 + 1` bytes. The
+sequence number is incremented internally on success.
 
 <a id="ssftlsrecorddecrypt"></a>
 ```c
@@ -477,8 +480,10 @@ bool SSFTLSRecordDecrypt(SSFTLSRecordState_t *state,
 Verify the AEAD tag on `record`, decrypt the payload into `pt`, and extract the inner
 content type (writing it to `*contentType`). Returns `false` on any parsing / size /
 tag-verification failure — the caller should treat all `false` outcomes identically and
-reject the record. On success, `*ptLen` is the length of the actual payload (the inner
-content-type byte has already been stripped).
+reject the record. Size failures include a ciphertext over `2^14 + 256` bytes and an inner
+plaintext (payload, content type and padding) over `2^14 + 1` bytes (RFC 8446 §5.2 / §5.4);
+the peer should answer either with a `record_overflow` alert. On success, `*ptLen` is the
+length of the actual payload (the inner content-type byte has already been stripped).
 
 <a id="ex-record"></a>
 

@@ -601,7 +601,7 @@ EC-2  Low  OPEN (doc only)
 ssftls
 ----------------------------------------------------------------------------------------------
 
-TLS-1  Medium  OPEN  [verified]
+TLS-1  Medium  FIXED (2026-11-18)  [verified]
   Location:  ssftls.c:337-342 (SSFTLSRecordEncrypt)
   Problem:   Only the ciphertext bound (2^14 + 256) is enforced on send. RFC 8446 5.1 requires
              TLSPlaintext.length <= 2^14 and 5.4 requires TLSInnerPlaintext <= 2^14 + 1. The
@@ -612,7 +612,7 @@ TLS-1  Medium  OPEN  [verified]
              337  cipherLen = innerLen + tagLen;
              341  if (cipherLen > 0x4000u + 256u) return false;   /* no ptLen > 0x4000u check */
 
-TLS-2  Low  OPEN
+TLS-2  Low  FIXED (2026-11-18)
   Location:  ssftls.c:436-439 (SSFTLSRecordDecrypt)
   Problem:   Mirror of TLS-1 on receive: innerLen = fragLen - tagLen may be up to 16624
              (> 2^14 + 1); such records are accepted rather than rejected with record_overflow.
@@ -640,7 +640,7 @@ TLS-5  Low  OPEN
              memory.
   Evidence:  SSF_REQUIRE(keyLen <= SSF_TLS_MAX_KEY_SIZE); memcpy(state->key, key, keyLen);
 
-TLS-6  Low  OPEN
+TLS-6  Low  FIXED (2026-11-18, with TLS-1)
   Location:  ssftls.c:337-353 (SSFTLSRecordEncrypt)
   Problem:   innerLen = ptLen + 1u is unchecked for wrap; ptLen == SIZE_MAX yields innerLen 0,
              passes both size checks, then memcpy(inner, pt, ptLen) overruns. Caller-bug
@@ -1022,3 +1022,23 @@ CHANGE LOG
               module and all three callers' unit tests enabled for the run), ssfcms, ssfx509,
               ssfbase64url, ssfmatch. m = 1 already returned false (the a * r == 1 check fails
               because everything is 0 mod 1), so no separate m < 3 guard was needed.
+  2026-11-18  TLS-1 FIXED via option 1, which also closes TLS-6. SSFTLSRecordEncrypt now returns
+              false when ptLen > 2^14 (RFC 8446 Sec. 5.1), checked before innerLen = ptLen + 1 so
+              that sum can no longer wrap; the 2^14 + 256 ciphertext check is kept as a backstop.
+              No padding is added, so TLSInnerPlaintext <= 2^14 + 1 follows. ssftls.md documents
+              the 16384-byte plaintext limit. Test block "AUDIT TLS-1/TLS-6" in ssftls_ut.c, for
+              AES-128-GCM and AES-128-CCM_8: ptLen 16384 encrypts and round-trips exactly; 16385
+              and SIZE_MAX return false. RED: ssftls_ut.c:904 (16385 accepted). The SIZE_MAX case
+              was not run red (the assertion before it stops the test; pre-fix it would overrun
+              memcpy). GREEN with ssftls (TLS unit test enabled for the run; the AEAD module tests
+              were left off because no AEAD code changed and the TLS test drives GCM and CCM
+              records), ssfcms, ssfx509, ssfbase64url, ssfmatch.
+  2026-11-18  TLS-2 FIXED. SSFTLSRecordDecrypt now returns false when the inner plaintext
+              (fragLen - tagLen) exceeds 2^14 + 1 (RFC 8446 Sec. 5.4), checked before the AEAD
+              (the length is in the clear header) and before ptSize; seqNum is not advanced.
+              ssftls.md lists both size limits among the false cases. Test block "AUDIT TLS-2"
+              in ssftls_ut.c builds an authentic AES-128-GCM record with a 16386-byte inner
+              plaintext directly via SSFAESGCMEncrypt (seq 0, nonce = IV) and requires decrypt to
+              return false; the 16385-byte boundary is covered by the TLS-1 round trip. RED:
+              ssftls_ut.c:955 (record accepted). GREEN with ssftls (TLS unit test enabled for the
+              run), ssfcms, ssfx509, ssfbase64url, ssfmatch.

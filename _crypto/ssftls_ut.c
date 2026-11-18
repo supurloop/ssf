@@ -33,6 +33,7 @@
 #include "ssfassert.h"
 #include "ssftls.h"
 #include "ssfhkdf.h"
+#include "ssfaesgcm.h"
 
 #if SSF_CONFIG_TLS_UNIT_TEST == 1
 
@@ -860,6 +861,100 @@ void SSFTLSUnitTest(void)
         SSF_ASSERT(SSFTLSRecordDecrypt(&decState, oversizedRecord, sizeof(oversizedRecord),
                                        scratchPt, sizeof(scratchPt),
                                        &scratchPtLen, &scratchCt) == false);
+    }
+
+    /* ---- AUDIT TLS-1/TLS-6: SSFTLSRecordEncrypt enforces TLSPlaintext.length <= 2^14 ---- */
+    /* Only the 2^14 + 256 ciphertext bound used to be checked, so up to 16623 (GCM) / 16631  */
+    /* (CCM_8) plaintext bytes were sent, which a conforming peer must reject with           */
+    /* record_overflow. ptLen == SIZE_MAX also wrapped innerLen to 0 and overran memcpy.     */
+    {
+        static const uint16_t suites[] = { SSF_TLS_CS_AES_128_GCM_SHA256,
+                                           SSF_TLS_CS_AES_128_CCM_8_SHA256 };
+        static uint8_t bigPt[0x4000u + 1u];
+        static uint8_t bigRecord[SSF_TLS_RECORD_HEADER_SIZE + 0x4000u + 256u];
+        static uint8_t bigDec[0x4000u + 1u];
+        uint8_t key[16];
+        uint8_t iv[12];
+        size_t bigRecordLen;
+        size_t bigDecLen;
+        uint8_t bigCt;
+        size_t k;
+
+        for (k = 0; k < sizeof(bigPt); k++) bigPt[k] = (uint8_t)(k * 7u);
+        for (k = 0; k < sizeof(key); k++) key[k] = (uint8_t)(0x20u + k);
+        for (k = 0; k < sizeof(iv); k++) iv[k] = (uint8_t)(0x40u + k);
+
+        for (k = 0; k < (sizeof(suites) / sizeof(suites[0])); k++)
+        {
+            SSFTLSRecordState_t encState = {0};
+            SSFTLSRecordState_t decState = {0};
+
+            SSFTLSRecordStateInit(&encState, suites[k], key, sizeof(key), iv, sizeof(iv));
+            SSFTLSRecordStateInit(&decState, suites[k], key, sizeof(key), iv, sizeof(iv));
+
+            /* Exactly 2^14 bytes: allowed, and round-trips. */
+            SSF_ASSERT(SSFTLSRecordEncrypt(&encState, SSF_TLS_CT_APPLICATION, bigPt, 0x4000u,
+                                           bigRecord, sizeof(bigRecord), &bigRecordLen) == true);
+            SSF_ASSERT(SSFTLSRecordDecrypt(&decState, bigRecord, bigRecordLen, bigDec,
+                                           sizeof(bigDec), &bigDecLen, &bigCt) == true);
+            SSF_ASSERT(bigDecLen == 0x4000u);
+            SSF_ASSERT(bigCt == SSF_TLS_CT_APPLICATION);
+            SSF_ASSERT(memcmp(bigDec, bigPt, 0x4000u) == 0);
+
+            /* 2^14 + 1 bytes: over the TLSPlaintext limit, must be refused. */
+            SSF_ASSERT(SSFTLSRecordEncrypt(&encState, SSF_TLS_CT_APPLICATION, bigPt, 0x4001u,
+                                           bigRecord, sizeof(bigRecord), &bigRecordLen) == false);
+
+            /* SIZE_MAX: must be refused before ptLen + 1 can wrap (TLS-6). */
+            SSF_ASSERT(SSFTLSRecordEncrypt(&encState, SSF_TLS_CT_APPLICATION, bigPt, SIZE_MAX,
+                                           bigRecord, sizeof(bigRecord), &bigRecordLen) == false);
+
+            SSFTLSRecordStateDeInit(&encState);
+            SSFTLSRecordStateDeInit(&decState);
+        }
+    }
+
+    /* ---- AUDIT TLS-2: SSFTLSRecordDecrypt rejects TLSInnerPlaintext > 2^14 + 1 ---- */
+    /* Only the 2^14 + 256 ciphertext bound used to be checked, so an authentic record whose  */
+    /* inner plaintext was up to 16624 bytes was accepted instead of being refused (RFC 8446  */
+    /* Sec. 5.4, record_overflow). The record is built here with the AEAD directly, since     */
+    /* SSFTLSRecordEncrypt can no longer produce one. Sequence number 0 -> nonce == IV.       */
+    {
+        static uint8_t ovRecord[SSF_TLS_RECORD_HEADER_SIZE + 0x4002u + 16u];
+        static uint8_t ovInner[0x4002u];
+        static uint8_t ovDec[0x4002u];
+        SSFTLSRecordState_t decState = {0};
+        uint8_t key[16];
+        uint8_t iv[12];
+        size_t innerLen;
+        size_t fragLen;
+        size_t ovDecLen;
+        uint8_t ovCt;
+        size_t k;
+
+        for (k = 0; k < sizeof(key); k++) key[k] = (uint8_t)(0x60u + k);
+        for (k = 0; k < sizeof(iv); k++) iv[k] = (uint8_t)(0x80u + k);
+
+        /* inner = 2^14 + 1 bytes of data || content type: one byte over the inner limit. */
+        innerLen = sizeof(ovInner);
+        for (k = 0; k < (innerLen - 1u); k++) ovInner[k] = (uint8_t)(k + 3u);
+        ovInner[innerLen - 1u] = SSF_TLS_CT_APPLICATION;
+        fragLen = innerLen + 16u;
+
+        ovRecord[0] = SSF_TLS_CT_APPLICATION;
+        ovRecord[1] = 0x03u;
+        ovRecord[2] = 0x03u;
+        ovRecord[3] = (uint8_t)((fragLen >> 8) & 0xFFu);
+        ovRecord[4] = (uint8_t)(fragLen & 0xFFu);
+        SSFAESGCMEncrypt(ovInner, innerLen, iv, sizeof(iv), ovRecord, SSF_TLS_RECORD_HEADER_SIZE,
+                         key, sizeof(key), &ovRecord[SSF_TLS_RECORD_HEADER_SIZE + innerLen], 16u,
+                         &ovRecord[SSF_TLS_RECORD_HEADER_SIZE], innerLen);
+
+        SSFTLSRecordStateInit(&decState, SSF_TLS_CS_AES_128_GCM_SHA256, key, sizeof(key), iv,
+                              sizeof(iv));
+        SSF_ASSERT(SSFTLSRecordDecrypt(&decState, ovRecord, sizeof(ovRecord), ovDec,
+                                       sizeof(ovDec), &ovDecLen, &ovCt) == false);
+        SSFTLSRecordStateDeInit(&decState);
     }
 }
 #ifdef _WIN32

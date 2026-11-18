@@ -10,7 +10,7 @@ on top of [`ssfec`](ssfec.md) and [`ssfbn`](ssfbn.md).
 Two design choices worth calling out up front:
 
 - **Signing is deterministic (RFC 6979).** The per-signature nonce `k` is derived from the
-  private key and the message hash via HMAC-SHA-based HKDF-style extraction, not from a
+  private key and the message hash by the RFC 6979 §3.2 HMAC-DRBG procedure, not from a
   live RNG. This eliminates the classic ECDSA vulnerability — if you ever sign two
   different messages with the same `k`, an attacker who sees both signatures recovers your
   private key. Since the spec is permissive about how `k` is chosen, getting this wrong is
@@ -45,10 +45,11 @@ Two design choices worth calling out up front:
 ## [↑](#ssfecdsa--ecdsa-signatures-and-ecdh-key-agreement) Notes
 
 - **Key-generation entropy is platform-dependent.** [`SSFECDSAKeyGen()`](#ssfecdsakeygen)
-  seeds [`SSFPRNGInitContext()`](ssfprng.md#ssfprnginitcontext) from `/dev/urandom` on
-  POSIX (macOS, Linux); on Windows it currently trips a `SSF_ASSERT(false)` and returns
-  `false`. On a bare-metal target the caller must either (a) patch the internal
-  `_SSFECDSAGetEntropy()` helper to read from a hardware RNG / TRNG or ROSC, or
+  seeds [`SSFPRNGInitContext()`](ssfprng.md#ssfprnginitcontext) from `SSFPortGetEntropy()`
+  in [`ssfport.c`](../ssfport.c), which reads `/dev/urandom` on POSIX (macOS, Linux) and
+  calls `BCryptGenRandom` on Windows, and returns `false` when no source is available. On a
+  bare-metal target the caller must either (a) implement `SSFPortGetEntropy()` to read from a
+  hardware RNG / TRNG or ROSC, or
   (b) perform key generation on a trusted build host and provision the derived
   `(privKey, pubKey)` pair into the device, using only
   [`SSFECDSAPubKeyFromPrivKey()`](#ssfecdsapubkeyfromprivkey) at runtime. **Never** use
@@ -84,8 +85,8 @@ Two design choices worth calling out up front:
 - **Signature format is DER `SEQUENCE { INTEGER r, INTEGER s }`** per SEC 1 / X.690.
   Length is variable (39–72 bytes for P-256, 71–104 for P-384) because each `INTEGER` may
   gain an extra `0x00` leading byte when its high bit is set. Size the output buffer to
-  [`SSF_ECDSA_MAX_SIG_SIZE`](#ssf-ecdsa-max-sig-size); the actual length is returned via
-  `*sigLen`.
+  [`SSF_ECDSA_MAX_SIG_SIZE`](#ssf-ecdsa-max-sig-size) to always fit; the actual length is
+  returned via `*sigLen`.
 - **ECDH output is the raw X coordinate of `d·P_peer`.** Feed it through
   [`ssfhkdf`](ssfhkdf.md) (NIST SP 800-56C extraction + expansion) to produce usable
   session keys. Do **not** use the raw ECDH bytes directly as a symmetric key — the
@@ -98,10 +99,12 @@ Two design choices worth calling out up front:
   runs, so invalid-curve attacks are closed by construction.
 - **Signing is constant-time; verification is not.** Sign uses the constant-time
   [`SSFECScalarMul`](ssfec.md#ssfecscalarmul) path and constant-time modular inverse
-  ([`SSFBNModInv`](ssfbn.md#modinv), which is Fermat-based over the prime curve order `n`)
-  and constant-time MAC compare via [`ssfcrypt`](ssfcrypt.md). Verify uses the variable-time
-  [`SSFECScalarMulDual`](ssfec.md#ssfecscalarmuldual) — fine because everything fed into
-  verify is public.
+  ([`SSFBNModInv`](ssfbn.md#modinv), which is Fermat-based over the prime curve order `n`),
+  and scrubs its secret intermediates with [`ssfcrypt`](ssfcrypt.md)'s
+  `SSFCryptSecureZero`. Verify is variable-time — fine because everything fed into verify is
+  public. It uses [`SSFECScalarMulDualBase`](ssfec.md#ssfecscalarmuldualbase) when a
+  fixed-base table is enabled (`SSF_EC_CONFIG_FIXED_BASE_P256` / `_P384`, the default) and
+  [`SSFECScalarMulDual`](ssfec.md#ssfecscalarmuldual) otherwise.
 - **Zero `r` or `s` in a signature is rejected.** Per FIPS 186-4 §6.4.2 the verifier
   rejects any signature where `r` or `s` is outside `[1, n-1]`; an all-zero `s` in
   particular would permit forgeries. This module enforces those ranges both during sign
@@ -213,8 +216,8 @@ if (!SSFECDSAKeyGen(SSF_EC_CURVE_P256,
                     priv, sizeof(priv),
                     pub,  sizeof(pub), &pubLen))
 {
-    /* Platform entropy unavailable — on a target without /dev/urandom,
-       wire up a TRNG in _SSFECDSAGetEntropy(). */
+    /* Platform entropy unavailable — on a target without /dev/urandom or
+       BCryptGenRandom, implement SSFPortGetEntropy() with a TRNG. */
 }
 /* priv holds the raw 32-byte scalar; pub holds 0x04 || X(32) || Y(32). */
 ```
@@ -282,7 +285,7 @@ matching the curve, so calling twice with the same inputs yields the same signat
 | `hash` | in | `const uint8_t *` | Message digest. Must not be `NULL`. |
 | `hashLen` | in | `size_t` | Must be in `[1, coordBytes]` — 32 for P-256, 48 for P-384. The recommended pairing is SHA-256 / P-256 and SHA-384 / P-384; longer hashes are rejected and shorter ones reduce security (see [Notes](#notes)). |
 | `sig` | out | `uint8_t *` | Buffer for DER signature. Must not be `NULL`. |
-| `sigSize` | in | `size_t` | Size of `sig`. Must be ≥ [`SSF_ECDSA_MAX_SIG_SIZE`](#ssf-ecdsa-max-sig-size). |
+| `sigSize` | in | `size_t` | Size of `sig`. Must hold the encoded signature; [`SSF_ECDSA_MAX_SIG_SIZE`](#ssf-ecdsa-max-sig-size) always fits. A smaller buffer that cannot hold this signature makes the call return `false`. |
 | `sigLen` | out | `size_t *` | Actual bytes written to `sig`. |
 
 **Returns:** `true` on success; `false` if the private key is invalid or the output buffer
@@ -323,7 +326,9 @@ bool SSFECDSAVerify(SSFECCurve_t curve,
 ```
 Verify a DER-encoded ECDSA signature. Validates the public key (decode + on-curve + in
 range), parses the signature, rejects out-of-range `r` or `s`, and performs the verify
-equation via the variable-time [`SSFECScalarMulDual`](ssfec.md#ssfecscalarmuldual).
+equation with the variable-time
+[`SSFECScalarMulDualBase`](ssfec.md#ssfecscalarmuldualbase) (fixed-base tables enabled, the
+default) or [`SSFECScalarMulDual`](ssfec.md#ssfecscalarmuldual).
 
 **Returns:** `true` iff the signature is well-formed **and** verifies against the public
 key and hash. Any parse failure, out-of-range component, or verify-equation mismatch

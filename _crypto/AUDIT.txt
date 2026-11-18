@@ -170,7 +170,7 @@ RSA-7  Low  OPEN
   Problem:   No SSFASN1DecIsEmpty after e or after the outer SEQUENCE; trailing bytes are
              accepted (non-strict DER). No security impact.
 
-RSA-8  Low  OPEN (doc only)
+RSA-8  Low  DOC (2026-11-18)
   Location:  ssfrsa.md Notes and SSFRSAVerifyPSS reference
   Problem:   (a) References a nonexistent _SSFRSAGetEntropy() helper and a Windows
              SSF_ASSERT(false); ssfport.c:81-104 uses BCryptGenRandom.
@@ -274,7 +274,7 @@ E-3  Low  OPEN
   Fix:       (0u - bits) in unsigned arithmetic.
   Evidence:  return (uint8_t)(1u ^ (((bits | ((uint32_t)(-(int32_t)bits))) >> 31) & 1u));
 
-E-4  Low  OPEN (doc only; (c) FIXED 2026-11-18 with X-2)
+E-4  Low  DOC (2026-11-18; (c) FIXED with X-2)
   Location:  ssfed25519.md:55-62, :101; ssfed25519.c:1289-1295
   Problem:   (a) Notes say Sign "does not detect or report" a seed/pubKey mismatch; the code
              detects it via verify-after-sign, returns false and zeroes sig (Function Reference
@@ -396,7 +396,7 @@ BN-8  Low  OPEN
              The header comment claims the MAX_LIMBS <= 32767 assert makes the sum unable to
              wrap, which only holds if each len is bounded. Requires a corrupt SSFBN_t.
 
-BN-9  Low  OPEN (doc only, conservative direction)
+BN-9  Low  DOC (2026-11-18)
   Location:  ssfbn.md
   Problem:   (a) Says SSFBNIsZero/IsOne short-circuit and are not constant-time; code
              (:434-468) is a full OR-fold with no early exit.
@@ -540,7 +540,7 @@ ECDSA-3  Low  OPEN
              documents the restriction. Noted because the failure is input-driven.
   Evidence:  646  SSF_REQUIRE(hashLen > 0u && hashLen <= c->bytes);
 
-ECDSA-4  Low  OPEN (doc only)
+ECDSA-4  Low  DOC (2026-11-18)
   Location:  ssfecdsa.md
   Problem:   (a) "Verify uses the variable-time SSFECScalarMulDual": with fixed-base enabled
              (default) verify uses SSFECScalarMulDualBase (:738-740).
@@ -578,7 +578,7 @@ EC-1  Low  OPEN
   Failure:   SSFECScalarMulBaseP256(r, k) with k = n + 2 and bits 43, 86, ... clear -> identity.
   Evidence:  1157  /* Comb-runtime guarantees R != table[mask] so the no-double variant is safe. */
 
-EC-2  Low  OPEN (doc only)
+EC-2  Low  DOC (2026-11-18)
   Location:  ssfec.md SSFECScalarMul section, Notes table, SSFECScalarMulDualBase section
   Problem:   (a) Doc says SSFECScalarMul is a Montgomery ladder with SSFBNCondSwap and warns of
              an identity-input timing corner case. The code (:877-993) is a 4-bit fixed-window
@@ -646,7 +646,7 @@ TLS-6  Low  FIXED (2026-11-18, with TLS-1)
              passes both size checks, then memcpy(inner, pt, ptLen) overruns. Caller-bug
              territory, but the DBC does not bound ptLen.
 
-TLS-7  Low  OPEN (doc only)
+TLS-7  Low  DOC (2026-11-18)
   Location:  ssftls.md:48, :60-62 vs ssftls.c:34, :98
   Problem:   The .md says the Derive-Secret/HKDF-Expand-Label helpers call HMAC directly rather
              than the ssfhkdf API and lists ssfhmac as the HKDF dependency. The code includes
@@ -715,7 +715,7 @@ CMS-1  Medium  FIXED (2026-11-18)  [verified]
              903  SSFX509VerifySignature(&signerCert, ...)
              914  _SSFCMSBuildChain / SSFX509VerifyChainPurpose
 
-CMS-2  Low  OPEN (doc mismatch: "Parse is strict ... trailing bytes at any level ... false")
+CMS-2  Low  DOC (2026-11-18)
   Location:  ssfcms.c:269-308 (_SSFCMSParseSignedAttrs)
   Problem:   After attrValues the Attribute SEQUENCE cursor attr is never checked empty, so
              trailing bytes inside an Attribute parse. Unknown attributes are also not checked
@@ -1140,3 +1140,38 @@ CHANGE LOG
               SSFECDSAKeyGen(P256) calls, ssfecdsa.c:516), so a P-256-off build is not covered by
               the unit tests; gating them is left as a test-coverage gap. _opt headers and
               ssfport.h restored.
+  2026-11-18  Documentation-only Low items closed as DOC after re-checking each claim against the
+              current code (no code changes, so no build or test run):
+              RSA-8 (ssfrsa.md): entropy comes from SSFPortGetEntropy (/dev/urandom on POSIX,
+                BCryptGenRandom on Windows), not a _SSFRSAGetEntropy helper or a Windows assert;
+                PSS verify is constant-time end to end (no early exit after unmasking, single
+                diff == 0); signing emits sLen = hashLen while verify accepts 0..hashLen; the
+                Miller-Rabin sentence now says 5 rounds meets FIPS 186-4 Table C.3 for every
+                supported size, with 1024-bit primes the most demanding (stated from the table's
+                structure; the exact per-size counts were not re-checked against the PDF). Also
+                corrected "each candidate draws fresh entropy" (candidates come from a PRNG seeded
+                once per prime pair).
+              E-4 (a)(b) (ssfed25519.md): Sign detects a seed/pubKey mismatch via verify-after-sign
+                (returns false, zeroes sig); verify uses _ge_double_scalarmult (Straus); stale
+                ssfed25519.c line numbers removed.
+              BN-9 (ssfbn.md): SSFBNIsZero/IsOne fold every limb with no early exit (moved to the
+                constant-time row, noting the bool result is one bit); SSFBNModMulNIST is
+                constant-time for the P-256/P-384 primes and falls back to variable-time
+                SSFBNModMul otherwise.
+              ECDSA-4 (ssfecdsa.md): RFC 6979 HMAC-DRBG (not "HKDF-style"); entropy from
+                SSFPortGetEntropy (no _SSFECDSAGetEntropy, no Windows assert); no "MAC compare"
+                (ssfcrypt is used for SecureZero); verify uses SSFECScalarMulDualBase when fixed-
+                base tables are enabled (default) else SSFECScalarMulDual; sigSize need only hold
+                the encoded signature (false otherwise). Left as-is: the Notes sentence saying sign
+                "loops until it produces a valid pair" describes the ECDSA-1 retry the code does
+                not yet do; it belongs to ECDSA-1.
+              EC-2 (ssfec.md): SSFECScalarMul is a 4-bit fixed-window scan with a full CondCopy
+                table sweep, no ladder / CondSwap; the identity timing caveat (no longer in the
+                header) removed; DualBase without a fixed-base table uses CT SSFECScalarMul for
+                [u1]G and always wNAF for [u2]Q.
+              TLS-7 (ssftls.md): dependencies list ssfhkdf (HKDF-Expand-Label / Derive-Secret via
+                SSFHKDFExpand) and ssfhmac (Finished HMAC); the "call HMAC directly" note fixed.
+              CMS-2 (ssfcms.md): "Parse is strict" now states the two signedAttrs exceptions
+                (bytes after an Attribute's value SET; unknown attributes' value count and
+                repetition), both inside the hashed signed bytes. A code fix (SSFASN1DecIsEmpty on
+                the Attribute cursor) remains possible if Jim prefers strictness over the note.

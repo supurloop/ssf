@@ -69,15 +69,16 @@ comparable security.
 - **Key generation is slow — orders of magnitude slower than any other SSF crypto
   operation.** Seconds on a desktop CPU, several minutes on an embedded microcontroller
   (Cortex-M4 / -M7 class). The runtime is dominated by probabilistic prime generation:
-  each candidate `p` / `q` draws fresh entropy, runs several Miller-Rabin rounds
+  each candidate `p` / `q` comes from a PRNG seeded with fresh platform entropy for that prime
+  pair, runs several Miller-Rabin rounds
   (`SSF_RSA_CONFIG_MILLER_RABIN_ROUNDS`, default 5), and may fail and retry. Do not
   generate keys inside a real-time loop or during startup on a device with a watchdog.
 - **Key-generation entropy is platform-dependent.** Keygen and PSS signing both pull
-  initial entropy from `/dev/urandom` on POSIX via the internal `_SSFRSAGetEntropy()`
-  helper; on Windows this currently `SSF_ASSERT(false)`s and returns `false`. On a
-  bare-metal target without `/dev/urandom`, patch the helper to read from a hardware TRNG
-  or provision keys off-device at manufacture and only ever use sign / verify at
-  runtime. **Never** ship `SSFRSAKeyGen` on a target without a genuine entropy source —
+  entropy from `SSFPortGetEntropy()` in [`ssfport.c`](../ssfport.c), which reads
+  `/dev/urandom` on POSIX hosts and calls `BCryptGenRandom` on Windows, and returns `false`
+  (failing keygen / signing) when no source is available. On a bare-metal target, implement
+  `SSFPortGetEntropy()` with a hardware TRNG, or provision keys off-device at manufacture and
+  only ever use sign / verify at runtime. **Never** ship `SSFRSAKeyGen` on a target without a genuine entropy source —
   predictable primes are catastrophic.
 - **Key-generation seed size.** Each prime search seeds an [`ssfprng`](ssfprng.md) context with
   `SSF_PRNG_ENTROPY_SIZE` bytes of platform entropy. With `SSF_RSA_CONFIG_ENABLE_4096` set that
@@ -94,9 +95,12 @@ comparable security.
   that all verify. Both schemes therefore require entropy availability at sign time as well
   as at key-gen time — on targets where runtime entropy is scarce, prefer Ed25519 /
   deterministic-ECDSA.
-- **PSS salt length is fixed at the hash output length.** RFC 8017 §9.1.1 and TLS 1.3
-  both use this convention; interop with verifiers that expect a different salt length
-  (e.g., `sLen = 0` for some "fully-deterministic PSS" profiles) is not supported.
+- **PSS signing uses a salt as long as the hash; verification accepts `0..hashLen`.**
+  [`SSFRSASignPSS()`](#ssfrsasignpss) always emits `sLen = hashLen` (the RFC 8017 §9.1.1 and
+  TLS 1.3 convention). [`SSFRSAVerifyPSS()`](#ssfrsaverifypss) takes the signer's `saltLen`
+  and accepts any `0 <= saltLen <= hashLen`, so it interoperates with signers using shorter
+  salts (e.g. `sLen = 0` or the RFC 4055 default of 20). Signing with any other salt length
+  is not supported.
 - **Private-key operations run via CRT, constant-time and blinded.** Signing performs
   `m^d mod n` by decomposing into `m^dp mod p` and `m^dq mod q` then recombining with the
   precomputed inverse `qInv = q⁻¹ mod p`. This is ~4× faster than direct exponentiation and
@@ -168,7 +172,7 @@ need — each compiles its entry points out of the build, reclaiming flash.
 | `SSF_RSA_CONFIG_ENABLE_KEYGEN` | `1` | Enable `SSFRSAKeyGen`. Disabling removes ~3 KB of code (Miller-Rabin, prime generation, CRT parameter setup) and drops peak stack significantly — sign/verify are much lighter than keygen. |
 | `SSF_RSA_CONFIG_ENABLE_PKCS1_V15` | `1` | Enable `SSFRSASignPKCS1` / `SSFRSAVerifyPKCS1`. |
 | `SSF_RSA_CONFIG_ENABLE_PSS` | `1` | Enable `SSFRSASignPSS` / `SSFRSAVerifyPSS`. |
-| `SSF_RSA_CONFIG_MILLER_RABIN_ROUNDS` | `5` | Number of Miller-Rabin witnesses per prime candidate in keygen. Five rounds gives a false-positive probability ≤ 2⁻¹⁰⁰ for random inputs (FIPS 186-4 §C.3 minimum is 4 for RSA-2048, 5 for RSA-3072/4096). Higher values slow keygen proportionally with marginal security gain. |
+| `SSF_RSA_CONFIG_MILLER_RABIN_ROUNDS` | `5` | Number of Miller-Rabin witnesses per prime candidate in keygen. Five rounds gives a false-positive probability ≤ 2⁻¹⁰⁰ for random inputs and meets the FIPS 186-4 Table C.3 minimum for every supported size (the required count falls as the primes grow, so RSA-2048's 1024-bit primes are the most demanding). Higher values slow keygen proportionally with marginal security gain. |
 
 Disabling unused sizes shrinks the public-key validator's accept set and lets the test
 harness drop unused size-specific test blocks. The header validates that the BN cap
@@ -447,8 +451,8 @@ Verify an RSA-PSS signature. Performs `sig^e mod n`, recovers `EM`, extracts `H`
 which is what [`SSFRSASignPSS()`](#ssfrsasignpss) emits and what X.509 certificates default to when
 their PSS parameters carry no `saltLength` (RFC 4055 declares DEFAULT 20). The verifier accepts
 `0 <= saltLen <= hashLen` and asserts on a larger value, since a salt longer than the hash has no
-security benefit and is not issued by any mainstream signer. `H == H'` is constant-time; the intermediate
-padding-pattern check is currently variable-time (see [Notes](#notes)).
+security benefit and is not issued by any mainstream signer. The whole check, including the
+padding pattern and `H == H'`, is constant-time (see [Notes](#notes)).
 
 <a id="ex-pss"></a>
 

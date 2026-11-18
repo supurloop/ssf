@@ -45,7 +45,8 @@ with the other SSF crypto modules for the handshake-side signature / KEM primiti
 ## [↑](#ssftls--tls-13-core-building-blocks) Dependencies
 
 - [`ssfport.h`](../ssfport.h)
-- [`ssfhmac`](ssfhmac.md) — underlying HKDF extract / expand for the key schedule
+- [`ssfhkdf`](ssfhkdf.md) — HKDF-Expand for `SSFTLSHkdfExpandLabel` / Derive-Secret
+- [`ssfhmac`](ssfhmac.md) — the Finished `verify_data` HMAC (and, through `ssfhkdf`, HKDF)
 - [`ssfsha2`](ssfsha2.md) — SHA-256 / SHA-384 for transcript hash and HKDF
 - [`ssfaesgcm`](ssfaesgcm.md) — AEAD backend for the `AES_*_GCM_*` cipher suites
 - [`ssfaesccm`](ssfaesccm.md) — AEAD backend for the `AES_*_CCM_*` cipher suites
@@ -57,9 +58,9 @@ the handshake-side crypto modules: one or more of
 [`ssfecdsa`](ssfecdsa.md) / [`ssfed25519`](ssfed25519.md) / [`ssfrsa`](ssfrsa.md) for
 CertificateVerify; [`ssfx25519`](ssfx25519.md) and / or
 [`ssfecdsa`'s ECDH](ssfecdsa.md#ecdh) for the key-share; and
-[`ssfhkdf`](ssfhkdf.md) for the master-secret extraction steps of the key schedule (the
-Derive-Secret / HKDF-Expand-Label helpers here call HMAC directly rather than going
-through the `ssfhkdf` API).
+[`ssfhkdf`](ssfhkdf.md)'s `SSFHKDFExtract` for the HKDF-Extract steps of the key schedule
+(early, handshake and master secret). The Derive-Secret / HKDF-Expand-Label helpers here
+already call `SSFHKDFExpand`; only the Finished computation calls HMAC directly.
 
 <a id="notes"></a>
 

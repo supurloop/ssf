@@ -62,8 +62,8 @@ other big-integer libraries.
 
   | Status | Functions |
   |---|---|
-  | **Constant-time** (safe on secrets) | [`SSFBNCmp`](#ssfbncmp), [`SSFBNModExp`/`SSFBNModExpMont`](#modexp), [`SSFBNMontMul`](#montmul), [`SSFBNMontSquare`](#montsquare), [`SSFBNMontConvertIn`/`Out`](#montconv), [`SSFBNCondSwap`](#condswap), [`SSFBNCondCopy`](#condswap), [`SSFBNAdd`](#ssfbnadd), [`SSFBNSub`](#ssfbnsub), [`SSFBNModAdd`](#modaddsub), [`SSFBNModSub`](#modaddsub), [`SSFBNModMulCT`](#ssfbnmodmulct), [`SSFBNMul`](#ssfbnmul), [`SSFBNSquare`](#ssfbnsquare), [`SSFBNIsEven`/`SSFBNIsOdd`](#predicates) |
-  | **Variable-time** (do not use on secrets) | [`SSFBNMod`](#ssfbnmod), [`SSFBNDivMod`](#ssfbndivmod), [`SSFBNModMul`](#ssfbnmodmul), [`SSFBNModSquare`](#ssfbnmodsquare), [`SSFBNGcd`](#ssfbngcd), [`SSFBNModInvExt`](#modinv), [`SSFBNModMulNIST`](#modmulnist), [`SSFBNModExpPub`/`SSFBNModExpMontPub`](#modexppub), [`SSFBNBitLen`](#bitlen), [`SSFBNTrailingZeros`](#trailingzeros), [`SSFBNIsZero`/`IsOne`](#predicates), [`SSFBNShiftLeft1`/`Right1`](#shift), [`SSFBNShiftLeft`/`Right`](#shift-multi), [`SSFBNIsProbablePrime`](#ssfbnisprobableprime), [`SSFBNGenPrime`](#ssfbngenprime) |
+  | **Constant-time** (safe on secrets) | [`SSFBNCmp`](#ssfbncmp), [`SSFBNModExp`/`SSFBNModExpMont`](#modexp), [`SSFBNMontMul`](#montmul), [`SSFBNMontSquare`](#montsquare), [`SSFBNMontConvertIn`/`Out`](#montconv), [`SSFBNCondSwap`](#condswap), [`SSFBNCondCopy`](#condswap), [`SSFBNAdd`](#ssfbnadd), [`SSFBNSub`](#ssfbnsub), [`SSFBNModAdd`](#modaddsub), [`SSFBNModSub`](#modaddsub), [`SSFBNModMulCT`](#ssfbnmodmulct), [`SSFBNMul`](#ssfbnmul), [`SSFBNSquare`](#ssfbnsquare), [`SSFBNIsEven`/`SSFBNIsOdd`](#predicates), [`SSFBNIsZero`/`IsOne`](#predicates) (the returned bool is itself one bit; branching on it reveals that bit) |
+  | **Variable-time** (do not use on secrets) | [`SSFBNMod`](#ssfbnmod), [`SSFBNDivMod`](#ssfbndivmod), [`SSFBNModMul`](#ssfbnmodmul), [`SSFBNModSquare`](#ssfbnmodsquare), [`SSFBNGcd`](#ssfbngcd), [`SSFBNModInvExt`](#modinv), [`SSFBNModMulNIST`](#modmulnist) (constant-time only for the P-256 / P-384 primes), [`SSFBNModExpPub`/`SSFBNModExpMontPub`](#modexppub), [`SSFBNBitLen`](#bitlen), [`SSFBNTrailingZeros`](#trailingzeros), [`SSFBNShiftLeft1`/`Right1`](#shift), [`SSFBNShiftLeft`/`Right`](#shift-multi), [`SSFBNIsProbablePrime`](#ssfbnisprobableprime), [`SSFBNGenPrime`](#ssfbngenprime) |
   | **Constant-time only when `m` is prime** | [`SSFBNModInv`](#modinv) — uses Fermat's little theorem (`a^(m-2) mod m`), which is constant-time but yields the correct answer only for prime `m`. After computing it, the function verifies `a · r ≡ 1 (mod m)` and returns `false` if it does not hold, so non-prime moduli are rejected (even when an inverse exists). |
 - **Secret scalars go through `SSFBNModInv` (with prime `m`) or the ModExp path, never
   `SSFBNModInvExt` or `SSFBNModExpPub`.** ECDSA signing, for instance, computes `s⁻¹ mod n`
@@ -111,9 +111,9 @@ other big-integer libraries.
 - **NIST-specific fast reduction** is available via [`SSFBNModMulNIST()`](#modmulnist) for
   the P-256 and P-384 primes (exposed as [`SSF_BN_NIST_P256`](#nist-constants) and
   [`SSF_BN_NIST_P384`](#nist-constants)). Replaces the general Barrett-style reduction with
-  a few add/sub steps using the sparse structure of those primes. Falls back to the
-  general `SSFBNModMul` if the modulus is neither. **Variable-time** — do not use on
-  secret inputs.
+  a few add/sub steps using the sparse structure of those primes. Constant-time for those two
+  primes (fixed-count, mask-committed correction); falls back to the variable-time general
+  `SSFBNModMul` if the modulus is neither.
 - **Primality testing and random-prime generation are first-class.**
   [`SSFBNIsProbablePrime()`](#ssfbnisprobableprime) is a Miller-Rabin test (fast paths
   for `n ≤ 3` and even `n`); [`SSFBNGenPrime()`](#ssfbngenprime) draws random
@@ -387,8 +387,10 @@ bool   SSFBNIsOne (const SSFBN_t *a);
 int8_t SSFBNCmp  (const SSFBN_t *a, const SSFBN_t *b);
 ```
 
-`SSFBNIsZero` / `SSFBNIsOne` are the obvious value checks; they short-circuit on the first
-non-matching limb and are **not** constant-time — do not use them to branch on secret values.
+`SSFBNIsZero` / `SSFBNIsOne` are the obvious value checks. Each ORs every limb into one
+accumulator with no early exit, so the running time depends only on `a->len`, never on the
+limb values. The result is still a single `bool`: branching on it for a secret value reveals
+that one bit.
 
 `SSFBNIsEven` and `SSFBNIsOdd` are macros that inspect only the low bit of `limbs[0]`, so
 they are constant-time (no per-limb scan) and have no call overhead — important for the hot
@@ -643,10 +645,11 @@ void SSFBNModMulNIST(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN
 Specialised modular multiplication for the NIST P-256 and P-384 primes (passed as
 [`SSF_BN_NIST_P256`](#nist-constants) or [`SSF_BN_NIST_P384`](#nist-constants)). Uses the
 sparse structure of those primes to replace a general Barrett reduction with a short
-sequence of adds and subtracts — significantly faster on a microcontroller. Falls back to
-[`SSFBNModMul()`](#ssfbnmodmul) for any other modulus. **Variable-time** (branches on the
-reduction result) — this is fine for the public curve arithmetic in ECDH and ECDSA
-verification, but inappropriate for secret scalars.
+sequence of adds and subtracts — significantly faster on a microcontroller. For those two
+primes the final correction runs a fixed number of mask-committed add/subtract passes, so the
+reduction is **constant-time** in the operand values (choosing the path compares only the
+public modulus). Any other modulus falls back to [`SSFBNModMul()`](#ssfbnmodmul), which is
+**variable-time**.
 
 <a id="modinv"></a>
 ```c

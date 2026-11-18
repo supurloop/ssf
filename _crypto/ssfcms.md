@@ -65,7 +65,11 @@ against a caller-supplied trust store. There is no encoder: the module verifies,
   (RFC 5652 §5.3) or carrying any of `content-type`, `message-digest`, `signing-time` or
   `CMSAlgorithmProtection` more than once or with other than exactly one value (§11), or a
   `CMSAlgorithmProtection` without its `signatureAlgorithm` (RFC 6211 §2) returns `false`.
-  Unknown attributes such as S/MIME capabilities are left unread.
+  Unknown attributes such as S/MIME capabilities are left unread. Two places inside
+  `signedAttrs` are not held to this: bytes after an `Attribute`'s value `SET` are not
+  rejected, and an unknown attribute is not checked for at least one value or for being
+  repeated. Both lie inside the signed bytes, which are hashed verbatim, so they cannot alter
+  what the signature covers.
 - **The content digest comes from the caller.** The primary use is a detached signature over a
   file the caller has already hashed. [`SSFCMSVerifyDigest()`](#ssfcmsverifydigest) takes that
   digest and its algorithm; [`SSFCMSGetDigestAlg()`](#ssfcmsgetdigestalg) says which algorithm a

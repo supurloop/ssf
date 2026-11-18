@@ -111,6 +111,8 @@ static const uint8_t _oidEkuServerAuth[] = {
 static const uint8_t _oidEkuClientAuth[] = {
     0x2Bu, 0x06u, 0x01u, 0x05u, 0x05u, 0x07u, 0x03u, 0x02u
 };
+/* anyExtendedKeyUsage: 2.5.29.37.0 */
+static const uint8_t _oidEkuAny[] = { 0x55u, 0x1Du, 0x25u, 0x00u };
 
 /* Extension OIDs (2.5.29.x) */
 static const uint8_t _oidBasicConstraints[] = { 0x55u, 0x1Du, 0x13u }; /* 2.5.29.19 */
@@ -227,7 +229,13 @@ static bool _ParseDN(const SSFASN1Cursor_t *nameCursor, SSFX509Name_t *name)
                 return false;
 
             if (!SSFASN1DecGetOIDRaw(&attrInner, &oidRaw, &oidRawLen, &attrInner)) return false;
-            if (!SSFASN1DecGetString(&attrInner, &val, &valLen, &strTag, &attrInner)) return false;
+
+            /* Attribute value is one of the supported string types? */
+            if (!SSFASN1DecGetString(&attrInner, &val, &valLen, &strTag, &attrInner))
+            {
+                /* No, leave it unnamed; the raw DN still serves name comparison */
+                continue;
+            }
 
             /* Match OID to DN field */
             if (_OIDMatch(oidRaw, oidRawLen, _oidCN, sizeof(_oidCN)))
@@ -429,6 +437,10 @@ static bool _ParseExtensions(const SSFASN1Cursor_t *extsCursor, SSFX509Cert_t *c
                                        sizeof(_oidEkuClientAuth)))
                     {
                         cert->ekuClientAuth = true;
+                    }
+                    else if (_OIDMatch(ekuOid, ekuOidLen, _oidEkuAny, sizeof(_oidEkuAny)))
+                    {
+                        cert->ekuAnyPurpose = true;
                     }
                 }
             }
@@ -1301,19 +1313,35 @@ static bool _EncBCSeqContent(uint8_t *buf, uint32_t bufSize, const void *arg, ui
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Content: KeyUsage BIT STRING carrying the high octet of keyUsageBits.                         */
+/* Content: KeyUsage BIT STRING as a DER named bit list, trailing zero bits trimmed.             */
 /* --------------------------------------------------------------------------------------------- */
 static bool _EncKUValueContent(uint8_t *buf, uint32_t bufSize, const void *arg, uint32_t *lenOut)
 {
     const SSFX509GenParams_t *p = (const SSFX509GenParams_t *)arg;
     uint32_t pos = 0;
-    uint8_t kuByte;
+    uint8_t kuBytes[2];
+    uint32_t kuLen;
+    uint8_t lastByte;
+    uint8_t unused = 0;
 
     SSF_REQUIRE(p != NULL);
     SSF_REQUIRE(lenOut != NULL);
 
-    kuByte = (uint8_t)(p->keyUsageBits >> 8);
-    if (!_Add(&pos, _EncBitString(_At(buf, pos), _Rem(buf, bufSize, pos), &kuByte, 1u, 0u)))
+    kuBytes[0] = (uint8_t)(p->keyUsageBits >> 8);
+    kuBytes[1] = (uint8_t)(p->keyUsageBits & 0xFFu);
+
+    /* DER drops trailing all-zero octets and counts the trailing zero bits of the last octet */
+    kuLen = (kuBytes[1] != 0u) ? 2u : ((kuBytes[0] != 0u) ? 1u : 0u);
+    if (kuLen > 0u)
+    {
+        lastByte = kuBytes[kuLen - 1u];
+        while ((lastByte & 0x01u) == 0u)
+        {
+            lastByte >>= 1;
+            unused++;
+        }
+    }
+    if (!_Add(&pos, _EncBitString(_At(buf, pos), _Rem(buf, bufSize, pos), kuBytes, kuLen, unused)))
         return false;
     *lenOut = pos;
     return true;
@@ -2081,6 +2109,15 @@ static bool _NCDNSMatch(const uint8_t *name, uint32_t nameLen,
                          const uint8_t *constraint, uint32_t constraintLen)
 {
     if (constraintLen == 0u) return true;
+
+    /* Leading-dot form used by some CAs, meaning proper subdomains only? */
+    if (constraint[0] == (uint8_t)'.')
+    {
+        /* Yes, the name must be longer than the constraint and end with it */
+        if (nameLen <= constraintLen) return false;
+        return SSFMatchStrNI((const char *)&name[nameLen - constraintLen],
+                             (SSFCStrIn_t)constraint, constraintLen);
+    }
     if (nameLen < constraintLen) return false;
     {
         uint32_t offset = nameLen - constraintLen;
@@ -2388,7 +2425,7 @@ bool SSFX509VerifyChain(const uint8_t **chainDer, const uint32_t *chainDerLen,
     /* Verify Extended Key Usage on leaf cert (RFC 5280 Section 4.2.1.12) */
     /* If EKU is present, it must include serverAuth for server verification.                    */
     /* If EKU is absent, the cert is unrestricted and allowed for any purpose.                   */
-    if (certs[0].hasExtKeyUsage && !certs[0].ekuServerAuth)
+    if (certs[0].hasExtKeyUsage && !certs[0].ekuServerAuth && !certs[0].ekuAnyPurpose)
     { SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
           "Chain: leaf cert has EKU but lacks serverAuth (serverAuth=%d clientAuth=%d)",
           certs[0].ekuServerAuth, certs[0].ekuClientAuth);

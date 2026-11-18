@@ -299,9 +299,11 @@ static uint32_t _utSelfSign(SSFX509GenParams_t *p, uint8_t *pubKey, size_t pubKe
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Hand-builds a v3 cert with numExts unknown extensions and optional BasicConstraints pathLen.  */
+/* Hand-builds a v3 cert with numExts unknown extensions, optional BasicConstraints pathLen, and  */
+/* optionally a subject DN whose first attribute (serialNumber) carries a non-string INTEGER.    */
 /* --------------------------------------------------------------------------------------------- */
-static uint32_t _utBuildCertExts(uint32_t numExts, int32_t pathLen, uint8_t *out, uint32_t outSize)
+static uint32_t _utBuildCertExts(uint32_t numExts, int32_t pathLen, bool oddDN, uint8_t *out,
+                                 uint32_t outSize)
 {
     static uint8_t exts[1024];
     static uint8_t extsSeq[1040];
@@ -388,8 +390,39 @@ static uint32_t _utBuildCertExts(uint32_t numExts, int32_t pathLen, uint8_t *out
     if (!SSFASN1EncWrap(&tbsContent[pos], sizeof(tbsContent) - pos, SSF_ASN1_TAG_SEQUENCE, tmp, n,
                         &w)) return 0;
     pos += w;
-    if (!SSFASN1EncWrap(&tbsContent[pos], sizeof(tbsContent) - pos, SSF_ASN1_TAG_SEQUENCE, tmp, 0u,
-                        &w)) return 0;
+    if (oddDN)
+    {
+        static const uint8_t snOid[] = { 0x55u, 0x04u, 0x05u };
+        static const uint8_t cnOid[] = { 0x55u, 0x04u, 0x03u };
+
+        /* SET { SEQUENCE { serialNumber OID, INTEGER 7 } }: a non-string attribute value */
+        n = 0;
+        if (!SSFASN1EncOIDRaw(tmp2, sizeof(tmp2), snOid, sizeof(snOid), &w)) return 0;
+        n += w;
+        if (!SSFASN1EncIntU64(&tmp2[n], sizeof(tmp2) - n, 7u, &w)) return 0;
+        n += w;
+        if (!SSFASN1EncWrap(tmp3, sizeof(tmp3), SSF_ASN1_TAG_SEQUENCE, tmp2, n, &w)) return 0;
+        if (!SSFASN1EncWrap(tmp, sizeof(tmp), SSF_ASN1_TAG_SET, tmp3, w, &w)) return 0;
+        n = w;
+
+        /* SET { SEQUENCE { commonName OID, UTF8String "x" } } */
+        i = 0;
+        if (!SSFASN1EncOIDRaw(tmp2, sizeof(tmp2), cnOid, sizeof(cnOid), &w)) return 0;
+        i += w;
+        if (!SSFASN1EncString(&tmp2[i], sizeof(tmp2) - i, SSF_ASN1_TAG_UTF8_STRING,
+                              (const uint8_t *)"x", 1u, &w)) return 0;
+        i += w;
+        if (!SSFASN1EncWrap(tmp3, sizeof(tmp3), SSF_ASN1_TAG_SEQUENCE, tmp2, i, &w)) return 0;
+        if (!SSFASN1EncWrap(&tmp[n], sizeof(tmp) - n, SSF_ASN1_TAG_SET, tmp3, w, &w)) return 0;
+        n += w;
+        if (!SSFASN1EncWrap(&tbsContent[pos], sizeof(tbsContent) - pos, SSF_ASN1_TAG_SEQUENCE, tmp,
+                            n, &w)) return 0;
+    }
+    else
+    {
+        if (!SSFASN1EncWrap(&tbsContent[pos], sizeof(tbsContent) - pos, SSF_ASN1_TAG_SEQUENCE, tmp,
+                            0u, &w)) return 0;
+    }
     pos += w;
     n = 0;
     if (!SSFASN1EncOIDRaw(tmp2, sizeof(tmp2), _utPubKeyAlgOid, sizeof(_utPubKeyAlgOid), &w))
@@ -4377,20 +4410,20 @@ void SSFX509UnitTest(void)
                                       1800000000ull) == false);
 
         /* More extensions than SSF_X509_CONFIG_MAX_EXTENSIONS fails to parse, the cap parses */
-        n = _utBuildCertExts(SSF_X509_CONFIG_MAX_EXTENSIONS, -1, out, sizeof(out));
+        n = _utBuildCertExts(SSF_X509_CONFIG_MAX_EXTENSIONS, -1, false, out, sizeof(out));
         SSF_ASSERT(n != 0u);
         SSF_ASSERT(SSFX509Parse(out, n, &parsed) == true);
         SSF_ASSERT(parsed.extsLen == SSF_X509_CONFIG_MAX_EXTENSIONS);
-        n = _utBuildCertExts(SSF_X509_CONFIG_MAX_EXTENSIONS + 1u, -1, out, sizeof(out));
+        n = _utBuildCertExts(SSF_X509_CONFIG_MAX_EXTENSIONS + 1u, -1, false, out, sizeof(out));
         SSF_ASSERT(n != 0u);
         SSF_ASSERT(SSFX509Parse(out, n, &parsed) == false);
 
         /* pathLenConstraint above 127 clamps to 127 instead of wrapping to absent */
-        n = _utBuildCertExts(0u, 128, out, sizeof(out));
+        n = _utBuildCertExts(0u, 128, false, out, sizeof(out));
         SSF_ASSERT(n != 0u);
         SSF_ASSERT(SSFX509Parse(out, n, &parsed) == true);
         SSF_ASSERT((parsed.hasBasicConstraints == true) && (parsed.pathLenConstraint == 127));
-        n = _utBuildCertExts(0u, 5, out, sizeof(out));
+        n = _utBuildCertExts(0u, 5, false, out, sizeof(out));
         SSF_ASSERT(n != 0u);
         SSF_ASSERT(SSFX509Parse(out, n, &parsed) == true);
         SSF_ASSERT(parsed.pathLenConstraint == 5);
@@ -4494,6 +4527,117 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(SSFX509Parse(leafOut, leafLen, &parsed) == true);
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, "x",
                                       1800000000ull) == false);
+    }
+
+    /* ---- Key Usage low octet, anyExtendedKeyUsage, leading-dot constraint, non-string DN ---- */
+    {
+        static uint8_t caOut[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t leafOut[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t out[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t caPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        static uint8_t leafPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        static uint8_t fakeSig[64];
+        static const char *sanA[] = { "a.example.com", NULL };
+        static const char *sanApex[] = { "example.com", NULL };
+        static const char *ncDot[] = { ".example.com", NULL };
+        static const uint8_t ekuOid[] = { 0x55u, 0x1Du, 0x25u };
+        static const uint8_t anyEkuValue[] = { 0x30u, 0x06u, 0x06u, 0x04u,
+                                                0x55u, 0x1Du, 0x25u, 0x00u };
+        uint8_t caPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        uint8_t leafPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        size_t caPubLen;
+        size_t leafPubLen;
+        uint8_t serial[] = { 0x0Bu };
+        SSFX509GenParams_t p;
+        SSFX509Cert_t parsed;
+        const uint8_t *chain[2];
+        uint32_t chainLen[2];
+        const uint8_t *trust[1];
+        uint32_t trustLen[1];
+        uint32_t caLen;
+        uint32_t leafLen;
+        uint32_t n;
+
+        memset(fakeSig, 0x44u, sizeof(fakeSig));
+        memset(leafPub, 0x04u, sizeof(leafPub));
+
+        /* Every Key Usage bit round-trips through generation, including decipherOnly (bit 8) */
+        _utGenBaseParams(&p, serial, leafPub, 65u);
+        p.addKeyUsage = true;
+        p.keyUsageBits = SSF_X509_KU_DIGITAL_SIGNATURE | 0x0080u;
+        n = SSFX509EncodeCert(out, sizeof(out), &p, fakeSig, sizeof(fakeSig));
+        SSF_ASSERT(n != 0u);
+        SSF_ASSERT(SSFX509Parse(out, n, &parsed) == true);
+        SSF_ASSERT(parsed.hasKeyUsage == true);
+        SSF_ASSERT(parsed.keyUsageBits == (SSF_X509_KU_DIGITAL_SIGNATURE | 0x0080u));
+        p.keyUsageBits = SSF_X509_KU_KEY_CERT_SIGN;
+        n = SSFX509EncodeCert(out, sizeof(out), &p, fakeSig, sizeof(fakeSig));
+        SSF_ASSERT(n != 0u);
+        SSF_ASSERT(SSFX509Parse(out, n, &parsed) == true);
+        SSF_ASSERT(parsed.keyUsageBits == SSF_X509_KU_KEY_CERT_SIGN);
+
+        /* anyExtendedKeyUsage satisfies the serverAuth requirement (RFC 5280 Section 4.2.1.12) */
+        SSF_ASSERT(SSFECDSAKeyGen(SSF_EC_CURVE_P256, leafPriv, sizeof(leafPriv), leafPub,
+                                  sizeof(leafPub), &leafPubLen) == true);
+        _utGenBaseParams(&p, serial, leafPub, (uint32_t)leafPubLen);
+        p.issuer.cn = "any";
+        p.subject.cn = "any";
+        p.sanDNSNames = sanApex;
+        p.addRawExt = true;
+        p.rawExtOid = ekuOid;
+        p.rawExtOidLen = sizeof(ekuOid);
+        p.rawExtValue = anyEkuValue;
+        p.rawExtValueLen = sizeof(anyEkuValue);
+        leafLen = _utSignCert(&p, leafPriv, leafOut, sizeof(leafOut));
+        SSF_ASSERT(leafLen != 0u);
+        SSF_ASSERT(SSFX509Parse(leafOut, leafLen, &parsed) == true);
+        SSF_ASSERT((parsed.hasExtKeyUsage == true) && (parsed.ekuAnyPurpose == true));
+        SSF_ASSERT(parsed.ekuServerAuth == false);
+        chain[0] = leafOut;
+        chainLen[0] = leafLen;
+        SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, "example.com",
+                                      1800000000ull) == true);
+
+        /* A leading-dot dNSName constraint permits proper subdomains only */
+        SSF_ASSERT(SSFECDSAKeyGen(SSF_EC_CURVE_P256, caPriv, sizeof(caPriv), caPub, sizeof(caPub),
+                                  &caPubLen) == true);
+        _utGenBaseParams(&p, serial, caPub, (uint32_t)caPubLen);
+        p.issuer.cn = "ca";
+        p.subject.cn = "ca";
+        p.addBasicConstraints = true;
+        p.isCA = true;
+        p.addKeyUsage = true;
+        p.keyUsageBits = SSF_X509_KU_KEY_CERT_SIGN;
+        p.addNameConstraints = true;
+        p.ncPermittedDNS = ncDot;
+        caLen = _utSignCert(&p, caPriv, caOut, sizeof(caOut));
+        SSF_ASSERT(caLen != 0u);
+        trust[0] = caOut;
+        trustLen[0] = caLen;
+        chain[1] = caOut;
+        chainLen[1] = caLen;
+        _utGenBaseParams(&p, serial, leafPub, (uint32_t)leafPubLen);
+        p.issuer.cn = "ca";
+        p.subject.cn = "leaf";
+        p.sanDNSNames = sanA;
+        leafLen = _utSignCert(&p, caPriv, leafOut, sizeof(leafOut));
+        SSF_ASSERT(leafLen != 0u);
+        chain[0] = leafOut;
+        chainLen[0] = leafLen;
+        SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 2u, trust, trustLen, 1u, "a.example.com",
+                                      1800000000ull) == true);
+        p.sanDNSNames = sanApex;
+        leafLen = _utSignCert(&p, caPriv, leafOut, sizeof(leafOut));
+        SSF_ASSERT(leafLen != 0u);
+        chainLen[0] = leafLen;
+        SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 2u, trust, trustLen, 1u, "example.com",
+                                      1800000000ull) == false);
+
+        /* A DN attribute with a non-string value is skipped and the rest of the name parses */
+        n = _utBuildCertExts(0u, -1, true, out, sizeof(out));
+        SSF_ASSERT(n != 0u);
+        SSF_ASSERT(SSFX509Parse(out, n, &parsed) == true);
+        SSF_ASSERT((parsed.subject.cnLen == 1u) && (parsed.subject.cn[0] == (uint8_t)'x'));
     }
 
 }

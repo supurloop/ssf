@@ -142,6 +142,7 @@ typedef struct SSFX509Cert
     bool hasExtKeyUsage;
     bool ekuServerAuth;            /* 1.3.6.1.5.5.7.3.1 */
     bool ekuClientAuth;            /* 1.3.6.1.5.5.7.3.2 */
+    bool ekuAnyPurpose;            /* 2.5.29.37.0 anyExtendedKeyUsage */
 
     SSFX509SAN_t san[SSF_X509_CONFIG_MAX_SAN_ENTRIES];
     uint8_t sanLen;

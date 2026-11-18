@@ -46,19 +46,23 @@ X.509 v3 certificate support per RFC 5280, built on [`ssfasn1`](ssfasn1.md):
   C exactly 2), any `dNSName` over 253 octets, and any key identifier over 64 octets (the longest
   RFC 7093 method, SHA-512). Values are emitted as `UTF8String` regardless of attribute type.
 - **Distinguished Names.** Only CN, O, OU, C, ST, and L are extracted into named fields. When an
-  attribute repeats, the last occurrence wins. The raw DER of the whole Name is always retained in
-  `raw` / `rawLen`, and the verifier compares issuer / subject names byte-for-byte on that raw DER.
+  attribute repeats, the last occurrence wins. Attributes whose value is not one of the six
+  DirectoryString types (for example an INTEGER `serialNumber`) are skipped rather than failing
+  the parse. The raw DER of the whole Name is always retained in `raw` / `rawLen`, and the
+  verifier compares issuer / subject names byte-for-byte on that raw DER.
 - **Subject Alternative Names.** Up to [`SSF_X509_CONFIG_MAX_SAN_ENTRIES`](#cfg-max-san-entries)
   GeneralName entries of any type are retained with their tag number in `type`; further entries
   are dropped silently. Only `dNSName` (`SSF_X509_SAN_DNS`) and `iPAddress` (`SSF_X509_SAN_IP`)
   are interpreted by hostname matching and Name Constraints. `iPAddress` matching is IPv4 only.
 - **Extensions.** Up to [`SSF_X509_CONFIG_MAX_EXTENSIONS`](#cfg-max-extensions) raw extensions are
-  retained in `exts[]`; further extensions are still decoded for their known content but not
-  stored. Authority Key Identifier is read only in its `keyIdentifier [0]` form. Extended Key
-  Usage is reduced to two flags: `id-kp-serverAuth` and `id-kp-clientAuth`. Name Constraints are
+  retained in `exts[]`; a certificate with more fails to parse. Authority Key Identifier is read
+  only in its `keyIdentifier [0]` form. Extended Key Usage is reduced to three flags:
+  `id-kp-serverAuth`, `id-kp-clientAuth`, and `anyExtendedKeyUsage`, the last of which satisfies
+  the verifier's server-authentication requirement per RFC 5280 §4.2.1.12. Name Constraints are
   parsed only for CA certificates and only for `dNSName` and IPv4 `iPAddress` subtrees; up to
   [`SSF_X509_CONFIG_MAX_NAME_CONSTRAINTS`](#cfg-max-name-constraints) permitted and the same
-  number of excluded subtrees are kept.
+  number of excluded subtrees are kept. A `dNSName` constraint may use the leading-dot form
+  (`.example.com`), which matches proper subdomains only, in line with OpenSSL, NSS, and Go.
 - **Not implemented.** Certificate revocation (CRL / OCSP), certificate policies and policy
   mappings, inhibit-anyPolicy, `issuerUniqueID` / `subjectUniqueID` (skipped), `otherName` /
   `rfc822Name` / URI SANs, IPv6 SANs and IPv6 Name Constraints, and Public Suffix List awareness
@@ -104,7 +108,8 @@ X.509 v3 certificate support per RFC 5280, built on [`ssfasn1`](ssfasn1.md):
   every chain cert; all certs are v3; TBS and outer signature algorithm identifiers agree,
   parameters included (§4.1.1.2); every cert is within its validity window at `nowUnixSec`; each
   `cert[i]` names `cert[i + 1]`'s subject as its issuer (§6.1.3 (a)(4)), is signed by
-  `cert[i + 1]`, and their AKID / SKID agree when both are present; the last cert's issuer name matches a trust anchor's
+  `cert[i + 1]`, and their AKID / SKID agree when both are present; if the leaf has Extended Key
+  Usage it includes `serverAuth` or `anyExtendedKeyUsage`; the last cert's issuer name matches a trust anchor's
   subject, that anchor is itself valid at `nowUnixSec`, its SKID agrees with the cert's AKID when
   both are present, and the anchor's key verifies the signature; every intermediate asserts
   `cA = TRUE` in Basic Constraints and, if Key Usage is present, includes `keyCertSign`; path
@@ -125,8 +130,12 @@ X.509 v3 certificate support per RFC 5280, built on [`ssfasn1`](ssfasn1.md):
   / curve from the **issuer's** SubjectPublicKeyInfo, so `ecdsa-with-SHA256` over a P-384 key
   (RFC 5758 §3.2) verifies correctly. Supported pairings: `ecdsa-with-SHA256` and
   `ecdsa-with-SHA384` with P-256 or P-384 keys; `sha256WithRSAEncryption`,
-  `sha384WithRSAEncryption`, `sha512WithRSAEncryption`; `id-RSASSA-PSS` with SHA-256 or SHA-384
-  parameters; and `id-Ed25519`. Any other algorithm fails verification.
+  `sha384WithRSAEncryption`, `sha512WithRSAEncryption`; `id-RSASSA-PSS` with SHA-256, SHA-384, or
+  SHA-512 parameters; and `id-Ed25519`. Any other algorithm fails verification. RSA-PSS is
+  verified with the salt length equal to the hash length and MGF1 over the same hash, which is
+  what RFC 4055 recommends and what CAs issue in practice; a certificate using another salt
+  length fails to verify. Absent PSS parameters select SHA-1 per RFC 4055, which this module does
+  not support, so such certificates also fail to verify.
 - **Generation uses measure-then-write.** Call [`SSFX509EncodeTBS()`](#ssfx509encodetbs) or
   [`SSFX509EncodeCert()`](#ssfx509encodecert) with `buf == NULL` to learn the exact size, then
   again with a buffer. The usual flow is: encode the TBS, sign those exact bytes with
@@ -141,7 +150,9 @@ X.509 v3 certificate support per RFC 5280, built on [`ssfasn1`](ssfasn1.md):
   `NULL`-terminated pointer arrays and may themselves be `NULL` when empty. `sanIPAddrs` entries
   are 4-byte IPv4 addresses; `ncPermittedIPs` / `ncExcludedIPs` entries are 8 bytes (address
   followed by mask). The Name Constraints extension is always emitted as critical, as RFC 5280
-  requires. `pathLenConstraint = -1` omits the field.
+  requires. `pathLenConstraint = -1` omits the field. Key Usage is emitted as a DER named bit
+  list covering both octets of `keyUsageBits` with trailing zero bits trimmed, so every bit
+  including `decipherOnly` round-trips through the parser.
 - **Trace output.** Verification failures and signature-dispatch decisions are reported through a
   module-wide [`ssftls`](../_crypto/ssftls.md) trace callback installed with
   [`SSFX509SetTraceCtx()`](#ssfx509settracectx) (category `SSF_TLS_TRACE_CERT`, levels `ERROR`
@@ -205,7 +216,7 @@ The unit-test entry point is gated by `SSF_CONFIG_X509_UNIT_TEST` in `ssfport.h`
 | <a id="type-ext"></a>`SSFX509Ext_t` | Struct | One raw extension: `oidRaw` / `oidRawLen` (OID body bytes), `critical`, and `value` / `valueLen` (the OCTET STRING contents). |
 | <a id="type-san"></a>`SSFX509SAN_t` | Struct | One SAN entry: `type` (GeneralName tag number) and `val` / `valLen` (the entry's content bytes; a DNS name is **not** null-terminated). |
 | <a id="type-nc"></a>`SSFX509NameConstraint_t` | Struct | One Name Constraints subtree: `type` is `SSF_X509_SAN_DNS` (`val` is a DNS suffix) or `SSF_X509_SAN_IP` (`val` is 8 bytes: IPv4 address then mask). |
-| <a id="type-cert"></a>`SSFX509Cert_t` | Struct | Parsed certificate. `version` (`0` = v1, `2` = v3); `serial`; TBS and outer signature algorithm OIDs plus their raw parameters (`sigAlgParams`, `outerSigAlgParams`); `issuer` / `subject` names; `notBefore` / `notAfter` in Unix seconds; `pubKeyAlgOidRaw`, `pubKey` / `pubKeyLen` / `pubKeyUnusedBits`, `ecCurveOidRaw`; `exts[]` / `extsLen`; decoded flags `hasBasicConstraints`, `isCA`, `pathLenConstraint` (`-1` = absent), `hasKeyUsage`, `keyUsageBits`, `hasExtKeyUsage`, `ekuServerAuth`, `ekuClientAuth`; `san[]` / `sanLen`; `skid`, `akid`; `hasNameConstraints` with `permittedSubtrees[]` / `excludedSubtrees[]`; `tbsRaw` / `tbsRawLen` (bytes the signature covers); `signature` / `signatureLen` / `signatureUnusedBits`. All pointers reference the source DER buffer. |
+| <a id="type-cert"></a>`SSFX509Cert_t` | Struct | Parsed certificate. `version` (`0` = v1, `2` = v3); `serial`; TBS and outer signature algorithm OIDs plus their raw parameters (`sigAlgParams`, `outerSigAlgParams`); `issuer` / `subject` names; `notBefore` / `notAfter` in Unix seconds; `pubKeyAlgOidRaw`, `pubKey` / `pubKeyLen` / `pubKeyUnusedBits`, `ecCurveOidRaw`; `exts[]` / `extsLen`; decoded flags `hasBasicConstraints`, `isCA`, `pathLenConstraint` (`-1` = absent), `hasKeyUsage`, `keyUsageBits`, `hasExtKeyUsage`, `ekuServerAuth`, `ekuClientAuth`, `ekuAnyPurpose`; `san[]` / `sanLen`; `skid`, `akid`; `hasNameConstraints` with `permittedSubtrees[]` / `excludedSubtrees[]`; `tbsRaw` / `tbsRawLen` (bytes the signature covers); `signature` / `signatureLen` / `signatureUnusedBits`. All pointers reference the source DER buffer. |
 | <a id="type-genname"></a>`SSFX509GenName_t` | Struct | Name attributes for generation as null-terminated strings: `cn`, `o`, `ou`, `c`, `st`, `l`. `NULL` omits the attribute. |
 | <a id="type-genparams"></a>`SSFX509GenParams_t` | Struct | Everything needed to build a certificate: `version` (`0` or `2`), `serial` / `serialLen`, signature algorithm OID and optional parameters, `issuer` / `subject`, `notBefore` / `notAfter`, public key algorithm OID, optional EC curve OID, `pubKey` / `pubKeyLen`; extension controls `addBasicConstraints` / `isCA` / `pathLenConstraint`, `addKeyUsage` / `keyUsageBits`, `addExtKeyUsage` / `ekuServerAuth` / `ekuClientAuth`, `sanDNSNames` / `sanIPAddrs`, `skid` / `skidLen`, `akid` / `akidLen`, one optional raw extension (`addRawExt`, `rawExtOid*`, `rawExtValue*`, `rawExtCritical`), and Name Constraints (`addNameConstraints`, `ncPermittedDNS`, `ncPermittedIPs`, `ncExcludedDNS`, `ncExcludedIPs`). |
 

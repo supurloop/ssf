@@ -256,7 +256,7 @@ E-1  High  FIXED (2026-11-18)  [verified; identical code to X-1]
              vector (mis-decoded point is off-curve, attacker lacks the discrete log).
   Fix:       Same as X-1. Keep the two copies in sync.
 
-E-2  Medium  OPEN  [verified: 115 occurrences]
+E-2  Medium  FIXED (2026-11-18)  [verified: 115 occurrences]
   Location:  ssfed25519.c _sc_reduce and _sc_muladd (e.g. :921, :1070, :1207)
   Problem:   (1 << 20) and (1 << 21) are int-typed shifts. On a 16-bit-int target (MSP430,
              AVR, PIC24, which the top-level README lists) shifting int by >= its width is
@@ -938,3 +938,13 @@ CHANGE LOG
               ssfchacha20poly1305, ssfaesgcm, ssftls, ssfcms, ssfx509, ssfbase64url, ssfmatch
               all pass; the AESGCM/CCP/CHACHA20/POLY1305/TLS unit test flags were flipped to 1
               for the run and restored. A 16-bit target build remains the only true proof.
+  2026-11-18  E-2 FIXED as suggested: all 115 (1 << 20) / (1 << 21) in ssfed25519.c _sc_reduce
+              and _sc_muladd are now ((int64_t)1 << 20) / ((int64_t)1 << 21); none remain. The
+              _sc_load3/_sc_load4 helpers already cast to uint64_t, and the large decimal
+              constants (666643 etc.) promote to long on 16-bit int, so no other change was
+              needed. No RED is possible on the available toolchain (64-bit gcc, no 16-bit
+              compiler). Evidence instead: the disassembly of ssfed25519.o before and after is
+              byte-for-byte identical at both -O0 and -O3 (5242 / 6209 lines, 0 diff lines), and
+              ssfed25519 (RFC 8032 vectors, Wycheproof, AUDIT E-1 block), ssfcms, ssfx509,
+              ssfbase64url and ssfmatch pass. SSF_CONFIG_ED25519_UNIT_TEST flipped to 1 for the
+              run and restored.

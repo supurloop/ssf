@@ -1975,6 +1975,7 @@ bool SSFBNModInv(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
 void SSFBNMontInit(SSFBNMont_t *ctx, const SSFBN_t *m)
 {
     uint16_t i;
+    uint32_t k;
     SSFBN_DEFINE(r2, SSF_BN_MAX_LIMBS);
 
     SSF_REQUIRE(ctx != NULL);
@@ -2003,8 +2004,10 @@ void SSFBNMontInit(SSFBNMont_t *ctx, const SSFBN_t *m)
     }
 
     /* Compute R^2 mod m where R = 2^(len*32) by doubling 1 modulo m for 2*len*32 iterations. */
+    /* Count and bound are 32-bit: len * 64 exceeds 16 bits from 1024 limbs (AUDIT BN-7), and  */
+    /* SSF_BN_MAX_LIMBS <= 32767 keeps it below 2^21.                                          */
     SSFBNSetOne(&r2, m->len);
-    for (i = 0; i < (uint16_t)(m->len * SSF_BN_LIMB_BITS * 2u); i++)
+    for (k = 0u; k < ((uint32_t)m->len * SSF_BN_LIMB_BITS * 2u); k++)
     {
         SSFBNModAdd(&r2, &r2, &r2, m);
     }

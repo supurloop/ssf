@@ -380,7 +380,7 @@ BN-6  Low  FIXED (2026-11-18)
              validates the threshold.
   Evidence:  940  for (i = 0; i < (uint16_t)(n + 2u); i++) { ... r[half + i] = ... }
 
-BN-7  Low  OPEN
+BN-7  Low  FIXED (2026-11-18)
   Location:  ssfbn.c:1984 (SSFBNMontInit)
   Problem:   Loop bound (uint16_t)(m->len * SSF_BN_LIMB_BITS * 2u) truncates to 16 bits; for
              m->len >= 1024 (needs SSF_BN_CONFIG_MAX_BITS >= 32768, which ssfbn.h permits) it
@@ -1256,3 +1256,16 @@ CHANGE LOG
               Karatsuba into an exact 8-limb result is clean and matches Python; default build
               ssfbn and ssfrsa (BN/RSA unit tests enabled), ssfcms, ssfx509, ssfbase64url,
               ssfmatch pass; a full build with threshold 4 also passes.
+  2026-11-18  BN-7 FIXED via option 1. SSFBNMontInit's R^2 doubling loop now uses a uint32_t
+              counter and a 32-bit bound ((uint32_t)m->len * 32 * 2); the old
+              (uint16_t)(len * 64) bound wrapped from 1024 limbs (to 0 at exactly 1024, leaving
+              rr = 1), and a widened bound alone would have looped forever on the uint16_t
+              counter. SSF_BN_MAX_LIMBS <= 32767 keeps the count below 2^21. No other uint16_t
+              bit-count expression in ssfbn.c can overflow (the rest are divisions). No contract
+              change, so no .md edit. Test block "AUDIT BN-7" in ssfbn_ut.c, compiled only when
+              SSF_BN_MAX_LIMBS >= 1024: MontInit on a 1024-limb odd modulus, then a ConvertIn /
+              ConvertOut round trip must return x (static storage keeps the operands off the
+              stack). RED, built with -DSSF_BN_CONFIG_MAX_BITS=65536u: ssfbn_ut.c:3120 (round
+              trip wrong). GREEN in that build: the whole ssfbn suite passes (18 s); default
+              build: ssfbn, ssfec, ssfecdsa, ssfrsa (BN/EC/ECDSA/RSA unit tests enabled),
+              ssfcms, ssfx509, ssfbase64url, ssfmatch pass.

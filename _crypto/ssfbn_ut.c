@@ -3081,6 +3081,46 @@ void SSFBNUnitTest(void)
         }
     }
 
+    /* ---- AUDIT BN-7: MontInit's R^2 loop is exact for moduli of 1024+ limbs ---- */
+    /* The doubling loop bound was (uint16_t)(len * 64), which wraps at len >= 1024 (to 0 at    */
+    /* exactly 1024, leaving rr = 1), so every Montgomery operation on such a modulus was     */
+    /* silently wrong. Only compiled when SSF_BN_CONFIG_MAX_BITS >= 32768 (e.g. a build with   */
+    /* -DSSF_BN_CONFIG_MAX_BITS=65536); no in-tree configuration is that large.               */
+#if SSF_BN_MAX_LIMBS >= 1024u
+    {
+        static SSFBNLimb_t bigModStorage[SSF_BN_MAX_LIMBS];
+        static SSFBNLimb_t bigRrStorage[SSF_BN_MAX_LIMBS];
+        static SSFBNLimb_t bigMStorage[SSF_BN_MAX_LIMBS];
+        static SSFBNLimb_t bigXStorage[SSF_BN_MAX_LIMBS];
+        static SSFBNLimb_t bigXRStorage[SSF_BN_MAX_LIMBS];
+        static SSFBNLimb_t bigYStorage[SSF_BN_MAX_LIMBS];
+        SSFBNMont_t bigMont = { { bigModStorage, 0u, SSF_BN_MAX_LIMBS },
+                                { bigRrStorage, 0u, SSF_BN_MAX_LIMBS }, 0u, 0u };
+        SSFBN_t bigM = { bigMStorage, 0u, SSF_BN_MAX_LIMBS };
+        SSFBN_t bigX = { bigXStorage, 0u, SSF_BN_MAX_LIMBS };
+        SSFBN_t bigXR = { bigXRStorage, 0u, SSF_BN_MAX_LIMBS };
+        SSFBN_t bigY = { bigYStorage, 0u, SSF_BN_MAX_LIMBS };
+        uint16_t k;
+
+        /* 1024-limb odd modulus with a non-zero top limb; x < m at the same length. */
+        bigM.len = 1024u;
+        bigX.len = 1024u;
+        for (k = 0u; k < 1024u; k++)
+        {
+            bigM.limbs[k] = (SSFBNLimb_t)(0x9E3779B9u * (uint32_t)(k + 1u));
+            bigX.limbs[k] = (SSFBNLimb_t)(0x7F4A7C15u * (uint32_t)(k + 3u));
+        }
+        bigM.limbs[0] |= 1u;
+        bigM.limbs[1023] |= 0x80000000u;
+        bigX.limbs[1023] &= 0x7FFFFFFFu;
+
+        SSFBNMontInit(&bigMont, &bigM);
+        SSFBNMontConvertIn(&bigXR, &bigX, &bigMont);
+        SSFBNMontConvertOut(&bigY, &bigXR, &bigMont);
+        SSF_ASSERT(SSFBNCmp(&bigY, &bigX) == 0);
+    }
+#endif /* SSF_BN_MAX_LIMBS >= 1024 */
+
     /* ---- AUDIT BN-6: 2-limb multiply into an exactly 2n-limb result ---- */
     /* _SSFBNKaratsubaMul's step 7 writes r[half + n + 1], one limb past a 2n-limb result when  */
     /* n == 2. Karatsuba only sees n == 2 if SSF_BN_KARATSUBA_THRESHOLD <= 2, which ssfbn.c now */

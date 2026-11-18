@@ -326,7 +326,7 @@ BN-1  Medium  FIXED (2026-11-18)  [verified]
              1349  borrow = _SSFBNRawSub(tmp.limbs, prod.limbs, shifted.limbs, prodLen);
              1359  /* After the loop, prod < m and the high m->len limbs of prod are zero. */
 
-BN-2  Medium  OPEN  [verified]
+BN-2  Medium  FIXED (2026-11-18)  [verified]
   Location:  ssfbn.c:2767-2829 (SSFBNGenPrime)
   Problem:   (a) Top-two-bit forcing is applied to the top BYTE (buf[0] |= 0xC0), not bit
              bitLen-1, so for bitLen not a multiple of 8 the prime has ceil(bitLen/8)*8 bits;
@@ -999,3 +999,17 @@ CHANGE LOG
               cross-check in ssfbn_ut.c calls SSFBNModMulCT(rand1, rand2, P-256) with operands
               reduced mod the local random m, not mod p256 (would trap only if both exceed
               p256, ~2^-64 for the fixed seed); could not be built here.
+  2026-11-18  BN-2 FIXED via option 1. SSFBNGenPrime now clears bits above bitLen - 1 in the top
+              byte and forces bits bitLen - 1 and bitLen - 2 exactly (big-endian byte/bit index),
+              so the prime has exactly bitLen bits for every bitLen; for multiples of 8 the
+              candidate bytes are unchanged. Preconditions tightened to 16 <= bitLen <=
+              SSF_BN_CONFIG_MAX_BITS / 2 (was 8 .. MAX_BITS). ssfbn.md updated. Test block
+              "AUDIT BN-2" in ssfbn_ut.c: bitLen 16, 17, 23, 31, 33, 63 must give BitLen ==
+              bitLen, bit bitLen - 2 set, odd, probable prime; bitLen 15 and MAX_BITS / 2 + 1 must
+              trap. RED: ssfbn_ut.c:2992 (bitLen 17 returned a 24-bit prime). The MAX_BITS / 2 + 1
+              trap cannot be shown red (it already asserted, but deep in SSFBNModExpMont); it now
+              trips the entry precondition. GREEN with ssfbn and ssfrsa (BN/RSA unit tests enabled
+              for the run; RSA keygen is the only caller), ssfcms, ssfx509, ssfbase64url,
+              ssfmatch. A seeded harness printed identical primes before and after the change for
+              bitLen 16, 64, 512 and 1024, so RSA key generation from a given PRNG stream is
+              unchanged.

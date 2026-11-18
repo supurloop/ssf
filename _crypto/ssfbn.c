@@ -2778,16 +2778,27 @@ bool SSFBNGenPrime(SSFBN_t *p, uint16_t bitLen, uint16_t rounds, SSFPRNGContext_
     size_t byteLen;
     uint16_t limbs;
     uint8_t buf[SSF_BN_MAX_BYTES];
+    uint8_t topMask;
+    uint16_t topBit;
+    uint16_t nextBit;
     uint32_t attempts;
 
     SSF_REQUIRE(p != NULL);
     SSF_REQUIRE(p->limbs != NULL);
-    SSF_REQUIRE(bitLen >= 8u);
-    SSF_REQUIRE(bitLen <= SSF_BN_CONFIG_MAX_BITS);
+    /* Below 16 bits every candidate can lie inside the small-prime table, which trial division */
+    /* rejects; above MAX_BITS / 2 the Miller-Rabin Montgomery modexp has no room (BN-2).      */
+    SSF_REQUIRE(bitLen >= 16u);
+    SSF_REQUIRE(bitLen <= (SSF_BN_CONFIG_MAX_BITS / 2u));
     SSF_REQUIRE(prng != NULL);
 
     byteLen = (size_t)(bitLen + 7u) / 8u;
     limbs = SSF_BN_BITS_TO_LIMBS(bitLen);
+
+    /* buf is big-endian: bit b of the candidate lives in buf[byteLen - 1 - b / 8]. topMask   */
+    /* keeps only the bitLen - 8 * (byteLen - 1) low bits of buf[0] (0xFF when bitLen % 8 is 0). */
+    topMask = (uint8_t)(0xFFu >> ((8u * (uint16_t)byteLen) - bitLen));
+    topBit = (uint16_t)(bitLen - 1u);
+    nextBit = (uint16_t)(bitLen - 2u);
 
     for (attempts = 0; attempts < 50000u; attempts++)
     {
@@ -2804,8 +2815,11 @@ bool SSFBNGenPrime(SSFBN_t *p, uint16_t bitLen, uint16_t rounds, SSFPRNGContext_
             generated += chunk;
         }
 
-        /* Force the top two bits so p * q has the full 2*bitLen bit length. */
-        buf[0] |= 0xC0u;
+        /* Clear bits above bitLen - 1, then force bits bitLen - 1 and bitLen - 2 so the prime */
+        /* has exactly bitLen bits and p * q has the full 2 * bitLen bit length.               */
+        buf[0] &= topMask;
+        buf[byteLen - 1u - (size_t)(topBit / 8u)] |= (uint8_t)(1u << (topBit % 8u));
+        buf[byteLen - 1u - (size_t)(nextBit / 8u)] |= (uint8_t)(1u << (nextBit % 8u));
         /* Force the low bit so the candidate is odd. */
         buf[byteLen - 1u] |= 0x01u;
 

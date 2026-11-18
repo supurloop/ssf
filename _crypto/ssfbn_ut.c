@@ -2971,6 +2971,38 @@ void SSFBNUnitTest(void)
         SSFPRNGDeInitContext(&prng);
     }
 
+    /* ---- AUDIT BN-2: GenPrime yields exactly bitLen bits for any bitLen in range ---- */
+    /* The top-two-bit forcing used to hit the top BYTE, so a bitLen that is not a multiple   */
+    /* of 8 produced a ceil(bitLen / 8) * 8-bit prime. bitLen < 16 could also be unsatisfiable */
+    /* (every candidate is in the small-prime table), and bitLen > MAX_BITS / 2 tripped an    */
+    /* assertion deep inside the Miller-Rabin modexp instead of the entry precondition.       */
+    {
+        static const uint16_t bitLens[] = { 16u, 17u, 23u, 31u, 33u, 63u };
+        SSFBN_DEFINE(p, SSF_BN_MAX_LIMBS);
+        SSFPRNGContext_t prng;
+        uint8_t seed[SSF_PRNG_ENTROPY_SIZE];
+        uint16_t i;
+
+        for (i = 0; i < sizeof(seed); i++) seed[i] = (uint8_t)(0xB2u ^ i);
+        SSFPRNGInitContext(&prng, seed, sizeof(seed));
+
+        for (i = 0; i < (uint16_t)(sizeof(bitLens) / sizeof(bitLens[0])); i++)
+        {
+            SSF_ASSERT(SSFBNGenPrime(&p, bitLens[i], 5u, &prng) == true);
+            SSF_ASSERT(SSFBNBitLen(&p) == (uint32_t)bitLens[i]);
+            SSF_ASSERT(SSFBNGetBit(&p, (uint32_t)bitLens[i] - 2u) == 1u);
+            SSF_ASSERT(SSFBNIsOdd(&p));
+            SSF_ASSERT(SSFBNIsProbablePrime(&p, 5u, &prng) == true);
+        }
+
+        /* Below the minimum and above MAX_BITS / 2 must trap at the entry precondition. */
+        SSF_ASSERT_TEST(SSFBNGenPrime(&p, 15u, 5u, &prng));
+        SSF_ASSERT_TEST(SSFBNGenPrime(&p, (uint16_t)((SSF_BN_CONFIG_MAX_BITS / 2u) + 1u), 5u,
+                                      &prng));
+
+        SSFPRNGDeInitContext(&prng);
+    }
+
     /* ---- Precondition assertions (SSF_REQUIRE) -- make sure the documented contracts trip ---- */
     {
         SSFBN_DEFINE(z, SSF_BN_MAX_LIMBS);

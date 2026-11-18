@@ -890,13 +890,17 @@ context is reused across rounds), and applies the standard Miller-Rabin inner lo
 ```c
 bool SSFBNGenPrime(SSFBN_t *p, uint16_t bitLen, uint16_t rounds, SSFPRNGContext_t *prng);
 ```
-Generate a random prime of exactly `bitLen` bits. The two top bits are forced high (so the
+Generate a random prime of exactly `bitLen` bits (any `bitLen` in range, not just multiples
+of 8). Bits `bitLen − 1` and `bitLen − 2` are forced high and any higher bits cleared (so the
 product of two such primes has the full `2 · bitLen` bit length), the low bit is forced to
 make the candidate odd, the candidate is trial-divided against the 256-entry small-prime
 table, and survivors go through `rounds` Miller-Rabin rounds. Returns `false` if no prime
 is found within an internal attempt cap (50000).
 
-`bitLen` must be `≥ 8` and `≤ SSF_BN_CONFIG_MAX_BITS`.
+`bitLen` must be `≥ 16` and `≤ SSF_BN_CONFIG_MAX_BITS / 2` (enforced by `SSF_REQUIRE`). Below 16
+bits every candidate can fall inside the small-prime table, which trial division rejects, so
+the search could never succeed; above `MAX_BITS / 2` the Miller-Rabin Montgomery
+exponentiation has no room for the double-width intermediates.
 
 ---
 

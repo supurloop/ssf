@@ -1357,15 +1357,19 @@ bool SSFRSAVerifyPSS(const uint8_t *pubKeyDer, size_t pubKeyDerLen, SSFRSAHash_t
     SSFBNFromBytes(&s, sig, sigLen, keyLimbs);
     if (!_SSFRSAPublicOp(&s, &e, &n, &m)) { return false; }
 
-    /* Export recovered EM (right-aligned to emLen within keyBytes) */
+    /* CT structural checks: fold every divergence into `diff`; run all stages unconditionally. */
+    diff = 0u;
+
+    /* Export recovered EM (right-aligned to emLen within keyBytes). When bitLen(n) = 1 mod 8,  */
+    /* keyBytes = emLen + 1 and I2OSP(m, emLen) must fail if m >= 256^emLen (RFC 8017 Sec.      */
+    /* 9.1.2 step 2c), so every byte ahead of the emLen window must be zero (AUDIT RSA-6). The  */
+    /* loop count depends only on the public modulus.                                           */
     {
         uint8_t emFull[SSF_RSA_MAX_KEY_BYTES];
         if (!SSFBNToBytes(&m, emFull, keyBytes)) { return false; }
+        for (i = 0; i < (keyBytes - emLen); i++) diff |= emFull[i];
         memcpy(em, &emFull[keyBytes - emLen], emLen);
     }
-
-    /* CT structural checks: fold every divergence into `diff`; run all stages unconditionally. */
-    diff = 0u;
     topMask = (uint8_t)(0xFFu >> (8u * emLen - emBits));
 
     /* Trailer byte must be 0xBC. */

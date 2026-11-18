@@ -157,7 +157,7 @@ RSA-5  Medium  DOC (2026-11-18)
              919   SSF_REQUIRE(privKeyDerSize >= SSF_RSA_MAX_PRIV_KEY_DER_SIZE);
              920   SSF_REQUIRE(pubKeyDerSize >= SSF_RSA_MAX_PUB_KEY_DER_SIZE);
 
-RSA-6  Low  OPEN
+RSA-6  Low  FIXED (2026-11-18)
   Location:  ssfrsa.c:1315-1333 (SSFRSAVerifyPSS)
   Problem:   RFC 8017 9.1.2 step 2c requires I2OSP(m, emLen) to fail when m >= 256^emLen. When
              bitLen(n) = 1 mod 8, emLen = keyBytes - 1 and emFull[0] is discarded without
@@ -1175,3 +1175,14 @@ CHANGE LOG
                 (bytes after an Attribute's value SET; unknown attributes' value count and
                 repetition), both inside the hashed signed bytes. A code fix (SSFASN1DecIsEmpty on
                 the Attribute cursor) remains possible if Jim prefers strictness over the note.
+  2026-11-18  RSA-6 FIXED via option 1. SSFRSAVerifyPSS now ORs every emFull byte ahead of the
+              emLen window into the constant-time diff accumulator, so when bitLen(n) = 1 mod 8
+              (keyBytes = emLen + 1) a recovered m >= 256^emLen is rejected as RFC 8017 Sec. 9.1.2
+              step 2c requires. The loop count (keyBytes - emLen) depends only on the public
+              modulus. Test block "AUDIT RSA-6" in ssfrsa_ut.c (gated on PSS enabled and
+              SSF_RSA_MAX_KEY_BYTES >= 257): a 2049-bit key generated in Python, PSS-SHA-256 with
+              a 32-byte salt; SigGood = EM^d must verify, SigHigh = (2^2048 + EM)^d must not.
+              OpenSSL pkeyutl independently verifies SigGood and rejects SigHigh ("first octet
+              invalid"). (openssl genrsa 2049 produced a 2048-bit key, hence the Python key.)
+              RED: ssfrsa_ut.c:752 (SigHigh accepted). GREEN with ssfrsa (RSA unit test enabled
+              for the run), ssfcms, ssfx509, ssfbase64url, ssfmatch.

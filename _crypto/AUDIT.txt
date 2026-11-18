@@ -514,7 +514,7 @@ ssfecdsa
 
   See KEYGEN-1 (cross-module) for the 128-bit seed issue in SSFECDSAKeyGen.
 
-ECDSA-1  Low  OPEN
+ECDSA-1  Low  FIXED (2026-11-18)
   Location:  ssfecdsa.c:666, :676 (SSFECDSASign)
   Problem:   RFC 6979 3.2 step h.3 and FIPS 186-4 6.4 require a new k and retry when r == 0 or
              s == 0. The implementation returns false. Probability ~2^-256 per signature, but a
@@ -1306,3 +1306,22 @@ CHANGE LOG
               its type change is covered by review only. GREEN with ssfaesccm (RFC 3610 vectors)
               and ssftls (AESCCM/TLS unit tests enabled for the run), ssfcms, ssfx509,
               ssfbase64url, ssfmatch.
+  2026-11-18  ECDSA-1 FIXED via option 1. _SSFECDSAGenK takes a skip count and returns the
+              (skip+1)-th RFC 6979 candidate in [1, n-1], continuing the generator with the step
+              h.3 update past skipped candidates. SSFECDSASign loops attempt = 0..7
+              (SSF_ECDSA_SIGN_MAX_ATTEMPTS), taking the next candidate whenever r == 0 or s == 0
+              (RFC 6979 Sec. 3.4, FIPS 186-4 Sec. 6.4) and returning false only if all 8 fail.
+              Attempt 0 is the RFC 6979 k, so every ordinary signature is byte-identical; the
+              extra cost (regenerating the DRBG from the start) arises only on a ~2^-256 retry.
+              ssfecdsa.md: the r / s note and Sign's Returns now describe the retry (this closes
+              the "loops until it produces a valid pair" sentence left open under ECDSA-4). New
+              test-only fault hook _SSFECDSASignTestForcedRetries (ssfecdsa.h / .c, compiled only
+              when SSF_CONFIG_ECDSA_UNIT_TEST == 1) makes Sign treat its first N attempts as
+              r == 0. Test block "AUDIT ECDSA-1" in ssfecdsa_ut.c (RFC 6979 A.2.5 key, SHA-256
+              "sample"): N = 1 and N = 2 must give the 2nd / 3rd RFC 6979 candidates' signatures
+              (computed by an independent Python model that reproduces the RFC's first k and
+              (r, s)) and verify; N = 8 returns false and N = 7 still signs. RED: with the hook
+              honoured by the unfixed code, Sign returned false at ssfecdsa_ut.c:830. GREEN:
+              ssfecdsa (incl. the RFC 6979 A.2.5 KAT and Wycheproof, unchanged), ssfec, ssfbn
+              (ECDSA/EC/BN unit tests enabled), ssfcms, ssfx509, ssfbase64url, ssfmatch; the module
+              also compiles cleanly with the ECDSA unit test off.

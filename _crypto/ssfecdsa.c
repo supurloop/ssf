@@ -45,6 +45,9 @@
 #include "ssfcrypt.h"
 #include "ssfusexport.h"
 
+/* Maximum RFC 6979 candidates Sign tries when r or s is zero (AUDIT ECDSA-1). */
+#define SSF_ECDSA_SIGN_MAX_ATTEMPTS (8u)
+
 #if SSF_CONFIG_ECDSA_UNIT_TEST == 1
 /* Test-only exit hooks fired AFTER zeroization, BEFORE return; NULL in production. */
 void (*_SSFECDSASignTestExitHook)(void *ctx,
@@ -64,6 +67,9 @@ void (*_SSFECDSAKeyGenTestExitHook)(void *ctx,
                                     const SSFBN_t *d,
                                     const uint8_t *entropy, size_t entropyLen) = NULL;
 void *_SSFECDSAKeyGenTestExitHookCtx = NULL;
+
+/* Test-only fault injection (AUDIT ECDSA-1): Sign treats its first N attempts as r == 0. */
+uint8_t _SSFECDSASignTestForcedRetries = 0u;
 #endif /* SSF_CONFIG_ECDSA_UNIT_TEST */
 
 /* --------------------------------------------------------------------------------------------- */
@@ -149,11 +155,11 @@ static void _SSFECDSABits2Octets(uint8_t *out, size_t outLen, const uint8_t *has
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: RFC 6979 deterministic nonce generation (HMAC-DRBG; k in [1, n-1]).                 */
+/* Internal: RFC 6979 nonce generation (HMAC-DRBG); k = the (skip+1)-th candidate in [1, n-1]. */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFECDSAGenK(SSFECCurve_t curve, const uint8_t *privKey, size_t privKeyLen,
                           const uint8_t *hash, size_t hashLen, const SSFECCurveParams_t *c,
-                          SSFBN_t *k)
+                          uint8_t skip, SSFBN_t *k)
 {
     SSFHMACHash_t hmacHash = _SSFECDSAGetHMACHash(curve);
     size_t hlen = _SSFECDSAGetHashSize(curve);
@@ -224,15 +230,23 @@ static bool _SSFECDSAGenK(SSFECCurve_t curve, const uint8_t *privKey, size_t pri
         /* Step h.3: k = bits2int(T) */
         _SSFECDSABits2Int(k, T, c->bytes, c);
 
-        /* Check k in [1, n-1] */
+        /* Is k in [1, n-1]? */
         if (!SSFBNIsZero(k) && (SSFBNCmp(k, &c->n) < 0))
         {
-            SSFHMACDeInit(&ctx);
-            SSFCryptSecureZero(V, sizeof(V));
-            SSFCryptSecureZero(K, sizeof(K));
-            SSFCryptSecureZero(h1Octets, sizeof(h1Octets));
-            SSFCryptSecureZero(T, sizeof(T));
-            return true;
+            /* Yes. Is it the candidate the caller asked for? */
+            if (skip == 0u)
+            {
+                /* Yes, done. */
+                SSFHMACDeInit(&ctx);
+                SSFCryptSecureZero(V, sizeof(V));
+                SSFCryptSecureZero(K, sizeof(K));
+                SSFCryptSecureZero(h1Octets, sizeof(h1Octets));
+                SSFCryptSecureZero(T, sizeof(T));
+                return true;
+            }
+            /* No, Sign rejected an earlier candidate (r or s == 0, RFC 6979 Sec. 3.4); continue */
+            /* the generator with the step h.3 update below (AUDIT ECDSA-1).                      */
+            skip--;
         }
 
         /* Step h.3 (retry): K = HMAC_K(V || 0x00), V = HMAC_K(V) */
@@ -634,6 +648,8 @@ bool SSFECDSASign(SSFECCurve_t curve, const uint8_t *privKey, size_t privKeyLen,
     SSFECPOINT_DEFINE(R, SSF_EC_MAX_LIMBS);
     SSFBN_DEFINE(Rx, SSF_EC_MAX_LIMBS);
     SSFBN_DEFINE(Ry, SSF_EC_MAX_LIMBS);
+    uint8_t attempt;
+    bool found = false;
     bool ok = false;
 
     SSF_REQUIRE(privKey != NULL);
@@ -653,27 +669,52 @@ bool SSFECDSASign(SSFECCurve_t curve, const uint8_t *privKey, size_t privKeyLen,
     _SSFECDSABits2Int(&e, hash, hashLen, c);
     if (SSFBNCmp(&e, &c->n) >= 0) SSFBNSub(&e, &e, &c->n);
 
-    /* Generate deterministic k per RFC 6979 */
-    if (!_SSFECDSAGenK(curve, privKey, privKeyLen, hash, hashLen, c, &k)) goto cleanup;
+    /* RFC 6979 Sec. 3.4 / FIPS 186-4 Sec. 6.4: if r or s is zero, continue the deterministic */
+    /* generator to the next k (AUDIT ECDSA-1). Each failure has probability ~2^-256, so the   */
+    /* bounded attempt count is never reached in practice; attempt 0 is the RFC 6979 k.        */
+    for (attempt = 0u; attempt < SSF_ECDSA_SIGN_MAX_ATTEMPTS; attempt++)
+    {
+        /* Generate deterministic k per RFC 6979 */
+        if (!_SSFECDSAGenK(curve, privKey, privKeyLen, hash, hashLen, c, attempt, &k)) goto cleanup;
 
-    /* R = k * G */
-    _SSFECDSAScalarMulBase(&R, &k, curve);
+        /* R = k * G */
+        _SSFECDSAScalarMulBase(&R, &k, curve);
 
-    /* Convert R to affine and get r = Rx mod n */
-    if (!SSFECPointToAffine(&Rx, &Ry, &R, curve)) goto cleanup;
-    _SSFECDSAReduceModN(&r, &Rx, c);
+        /* Convert R to affine and get r = Rx mod n */
+        if (!SSFECPointToAffine(&Rx, &Ry, &R, curve)) goto cleanup;
+        _SSFECDSAReduceModN(&r, &Rx, c);
 
-    if (SSFBNIsZero(&r)) goto cleanup;
+#if SSF_CONFIG_ECDSA_UNIT_TEST == 1
+        /* Test-only fault injection: treat this attempt as r == 0. */
+        if (attempt < _SSFECDSASignTestForcedRetries) SSFBNSetZero(&r, c->limbs);
+#endif /* SSF_CONFIG_ECDSA_UNIT_TEST */
 
-    /* s = k^(-1) * (e + r * d) mod n */
-    if (!SSFBNModInv(&kInv, &k, &c->n)) goto cleanup;
+        /* Is r zero? */
+        if (SSFBNIsZero(&r))
+        {
+            /* Yes, take the next k. */
+            continue;
+        }
 
-    /* CT mod-n arithmetic on secret operands (d, kInv): SSFBNModMulCT, SSFBNModAdd both CT. */
-    SSFBNModMulCT(&tmp, &r, &d, &c->n);     /* r * d mod n */
-    SSFBNModAdd(&tmp, &e, &tmp, &c->n);     /* e + r*d mod n */
-    SSFBNModMulCT(&s, &kInv, &tmp, &c->n);  /* k^(-1) * (e + r*d) mod n */
+        /* No, s = k^(-1) * (e + r * d) mod n */
+        if (!SSFBNModInv(&kInv, &k, &c->n)) goto cleanup;
 
-    if (SSFBNIsZero(&s)) goto cleanup;
+        /* CT mod-n arithmetic on secret operands (d, kInv): SSFBNModMulCT, SSFBNModAdd both CT. */
+        SSFBNModMulCT(&tmp, &r, &d, &c->n);     /* r * d mod n */
+        SSFBNModAdd(&tmp, &e, &tmp, &c->n);     /* e + r*d mod n */
+        SSFBNModMulCT(&s, &kInv, &tmp, &c->n);  /* k^(-1) * (e + r*d) mod n */
+
+        /* Is s non-zero? */
+        if (!SSFBNIsZero(&s))
+        {
+            /* Yes, (r, s) is a valid signature. */
+            found = true;
+            break;
+        }
+        /* No, take the next k. */
+    }
+    /* Did every attempt produce r == 0 or s == 0? */
+    if (!found) goto cleanup;
 
     /* DER-encode the signature. */
     ok = _SSFECDSASigEncode(&r, &s, c, sig, sigSize, sigLen);

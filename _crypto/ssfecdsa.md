@@ -107,8 +107,11 @@ Two design choices worth calling out up front:
   [`SSFECScalarMulDual`](ssfec.md#ssfecscalarmuldual) otherwise.
 - **Zero `r` or `s` in a signature is rejected.** Per FIPS 186-4 §6.4.2 the verifier
   rejects any signature where `r` or `s` is outside `[1, n-1]`; an all-zero `s` in
-  particular would permit forgeries. This module enforces those ranges both during sign
-  (loops until it produces a valid pair) and during verify (hard-rejects).
+  particular would permit forgeries. This module enforces those ranges both during sign and
+  during verify (hard-rejects). When signing yields `r == 0` or `s == 0` (probability ~2⁻²⁵⁶
+  each), it continues the RFC 6979 generator to the next candidate `k` (RFC 6979 §3.4, FIPS
+  186-4 §6.4), up to 8 candidates; the first candidate is the standard RFC 6979 `k`, so every
+  ordinary signature is unchanged.
 - **Private keys are zeroized before return from every function that touches them.**
   `SSFECDSAKeyGen`, `SSFECDSAPubKeyFromPrivKey`, `SSFECDSASign`, and
   `SSFECDHComputeSecret` all run [`SSFBNZeroize`](ssfbn.md#ssfbnzeroize) over the working
@@ -288,8 +291,8 @@ matching the curve, so calling twice with the same inputs yields the same signat
 | `sigSize` | in | `size_t` | Size of `sig`. Must hold the encoded signature; [`SSF_ECDSA_MAX_SIG_SIZE`](#ssf-ecdsa-max-sig-size) always fits. A smaller buffer that cannot hold this signature makes the call return `false`. |
 | `sigLen` | out | `size_t *` | Actual bytes written to `sig`. |
 
-**Returns:** `true` on success; `false` if the private key is invalid or the output buffer
-is too small.
+**Returns:** `true` on success; `false` if the private key is invalid, the output buffer is
+too small, or (never in practice) all 8 RFC 6979 candidates gave `r == 0` or `s == 0`.
 
 <a id="ex-sign"></a>
 

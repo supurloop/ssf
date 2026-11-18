@@ -778,6 +778,81 @@ void SSFECDSAUnitTest(void)
         }
     }
 
+    /* ---- AUDIT ECDSA-1: r == 0 / s == 0 continues the RFC 6979 generator to the next k ---- */
+    /* RFC 6979 Sec. 3.4 / FIPS 186-4 Sec. 6.4: if r or s is zero the signer must take the next */
+    /* candidate k (step h.3 retry update). Sign used to return false, permanently for that     */
+    /* (key, hash) since k is deterministic. r == 0 cannot be produced naturally, so the test   */
+    /* hook _SSFECDSASignTestForcedRetries makes Sign treat its first N attempts as r == 0.     */
+    /* Expected signatures: an independent Python RFC 6979 model (A.2.5 key, SHA-256 "sample")  */
+    /* that reproduces the RFC's first k and (r, s), then yields candidates 2 and 3.            */
+    {
+        static const uint8_t privKey[] = {
+            0xC9u, 0xAFu, 0xA9u, 0xD8u, 0x45u, 0xBAu, 0x75u, 0x16u,
+            0x6Bu, 0x5Cu, 0x21u, 0x57u, 0x67u, 0xB1u, 0xD6u, 0x93u,
+            0x4Eu, 0x50u, 0xC3u, 0xDBu, 0x36u, 0xE8u, 0x9Bu, 0x12u,
+            0x7Bu, 0x8Au, 0x62u, 0x2Bu, 0x12u, 0x0Fu, 0x67u, 0x21u
+        };
+        static const uint8_t pubKey[] = {
+            0x04u,
+            0x60u, 0xFEu, 0xD4u, 0xBAu, 0x25u, 0x5Au, 0x9Du, 0x31u,
+            0xC9u, 0x61u, 0xEBu, 0x74u, 0xC6u, 0x35u, 0x6Du, 0x68u,
+            0xC0u, 0x49u, 0xB8u, 0x92u, 0x3Bu, 0x61u, 0xFAu, 0x6Cu,
+            0xE6u, 0x69u, 0x62u, 0x2Eu, 0x60u, 0xF2u, 0x9Fu, 0xB6u,
+            0x79u, 0x03u, 0xFEu, 0x10u, 0x08u, 0xB8u, 0xBCu, 0x99u,
+            0xA4u, 0x1Au, 0xE9u, 0xE9u, 0x56u, 0x28u, 0xBCu, 0x64u,
+            0xF2u, 0xF1u, 0xB2u, 0x0Cu, 0x2Du, 0x7Eu, 0x9Fu, 0x51u,
+            0x77u, 0xA3u, 0xC2u, 0x94u, 0xD4u, 0x46u, 0x22u, 0x99u
+        };
+        static const uint8_t sigK2[71] = {
+            0x30u, 0x45u, 0x02u, 0x21u, 0x00u, 0xFEu, 0x96u, 0x83u, 0x88u, 0x6Au, 0x9Du, 0x10u,
+            0xF4u, 0x09u, 0x82u, 0xF0u, 0x01u, 0xE9u, 0xCAu, 0xF5u, 0x6Fu, 0x43u, 0x64u, 0xB1u,
+            0xECu, 0x18u, 0x42u, 0x2Cu, 0xAEu, 0xE5u, 0xB5u, 0xF3u, 0xFBu, 0x31u, 0x2Cu, 0x4Du,
+            0x6Bu, 0x02u, 0x20u, 0x1Du, 0x9Du, 0x98u, 0x11u, 0x93u, 0x18u, 0x8Cu, 0x31u, 0x5Cu,
+            0x46u, 0x2Du, 0x09u, 0xFFu, 0xACu, 0xEFu, 0x90u, 0x8Cu, 0x76u, 0x80u, 0x48u, 0xACu,
+            0x02u, 0xC5u, 0x2Du, 0xB0u, 0xE6u, 0x4Au, 0x5Bu, 0xAFu, 0x41u, 0x04u, 0xEAu
+        };
+        static const uint8_t sigK3[70] = {
+            0x30u, 0x44u, 0x02u, 0x20u, 0x57u, 0xD2u, 0xBBu, 0xEBu, 0x6Bu, 0x5Fu, 0x3Du, 0xBEu,
+            0xA8u, 0x9Eu, 0x3Du, 0x3Du, 0x7Cu, 0xB0u, 0xDFu, 0xE5u, 0xCDu, 0xB9u, 0x1Cu, 0xCDu,
+            0x3Bu, 0xE3u, 0x20u, 0xEFu, 0x31u, 0x92u, 0xA3u, 0xD5u, 0xBDu, 0x88u, 0xD4u, 0x17u,
+            0x02u, 0x20u, 0x24u, 0xD1u, 0x8Fu, 0xCBu, 0xCCu, 0xBEu, 0xE8u, 0x50u, 0x55u, 0xBDu,
+            0x25u, 0xACu, 0x78u, 0xC9u, 0x59u, 0xF4u, 0x7Du, 0xE8u, 0x32u, 0xA2u, 0x12u, 0xAAu,
+            0x6Eu, 0x25u, 0x90u, 0x11u, 0xEBu, 0xAEu, 0xA0u, 0x5Du, 0xB3u, 0x0Fu
+        };
+        uint8_t hash[32];
+        uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
+        size_t sigLen;
+
+        SSFSHA256((const uint8_t *)"sample", 6, hash, sizeof(hash));
+
+        /* One forced rejection: the second RFC 6979 candidate signs. */
+        _SSFECDSASignTestForcedRetries = 1u;
+        SSF_ASSERT(SSFECDSASign(SSF_EC_CURVE_P256, privKey, sizeof(privKey), hash, sizeof(hash),
+                                sig, sizeof(sig), &sigLen) == true);
+        _SSFECDSASignTestForcedRetries = 0u;
+        SSF_ASSERT((sigLen == sizeof(sigK2)) && (memcmp(sig, sigK2, sizeof(sigK2)) == 0));
+        SSF_ASSERT(SSFECDSAVerify(SSF_EC_CURVE_P256, pubKey, sizeof(pubKey), hash, sizeof(hash),
+                                  sig, sigLen) == true);
+
+        /* Two forced rejections: the third candidate signs. */
+        _SSFECDSASignTestForcedRetries = 2u;
+        SSF_ASSERT(SSFECDSASign(SSF_EC_CURVE_P256, privKey, sizeof(privKey), hash, sizeof(hash),
+                                sig, sizeof(sig), &sigLen) == true);
+        _SSFECDSASignTestForcedRetries = 0u;
+        SSF_ASSERT((sigLen == sizeof(sigK3)) && (memcmp(sig, sigK3, sizeof(sigK3)) == 0));
+        SSF_ASSERT(SSFECDSAVerify(SSF_EC_CURVE_P256, pubKey, sizeof(pubKey), hash, sizeof(hash),
+                                  sig, sigLen) == true);
+
+        /* Every attempt rejected: Sign gives up after its bounded attempt count (8). */
+        _SSFECDSASignTestForcedRetries = 8u;
+        SSF_ASSERT(SSFECDSASign(SSF_EC_CURVE_P256, privKey, sizeof(privKey), hash, sizeof(hash),
+                                sig, sizeof(sig), &sigLen) == false);
+        _SSFECDSASignTestForcedRetries = 7u;
+        SSF_ASSERT(SSFECDSASign(SSF_EC_CURVE_P256, privKey, sizeof(privKey), hash, sizeof(hash),
+                                sig, sizeof(sig), &sigLen) == true);
+        _SSFECDSASignTestForcedRetries = 0u;
+    }
+
     /* ---- Sign rejects undersized sig buffer without overflowing it ---- */
     /* The DER encoder's "totalLen > sigSize" guard is the last line of defense before any byte */
     /* lands in the caller's buffer. Bracket it: a 1-byte-short buffer must reject; an exactly- */

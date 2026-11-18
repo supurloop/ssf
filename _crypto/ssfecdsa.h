@@ -127,6 +127,9 @@ extern void (*_SSFECDSAKeyGenTestExitHook)(void *ctx,
                                            const SSFBN_t *d,
                                            const uint8_t *entropy, size_t entropyLen);
 extern void *_SSFECDSAKeyGenTestExitHookCtx;
+
+/* Test-only fault injection (AUDIT ECDSA-1): Sign treats its first N attempts as r == 0. */
+extern uint8_t _SSFECDSASignTestForcedRetries;
 #endif /* SSF_CONFIG_ECDSA_UNIT_TEST */
 
 #ifdef __cplusplus

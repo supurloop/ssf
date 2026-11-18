@@ -703,7 +703,7 @@ PRNG-2  Low  FIXED (2026-11-18, with PRNG-1)
 ssfcms
 ----------------------------------------------------------------------------------------------
 
-CMS-1  Medium  OPEN  [verified]
+CMS-1  Medium  FIXED (2026-11-18)  [verified]
   Location:  ssfcms.c:893-922 (_SSFCMSVerifySigner)
   Problem:   The signature is verified with the signer certificate taken from the message
              (attacker-controlled) before that certificate is chained to a trust anchor, and
@@ -1060,3 +1060,18 @@ CHANGE LOG
               had its unit test enabled to catch any dependence on the old streams; none failed),
               ssfcms, ssfx509, ssfbase64url, ssfmatch. The stream change matters for KEYGEN-1 if it
               later widens the PRNG seed.
+  2026-11-18  CMS-1 FIXED via option 1. _SSFCMSVerifySigner now builds and verifies the signer's
+              chain (SSFX509VerifyChainPurpose, code signing, at nowUnixSec) before calling
+              SSFX509VerifySignature, so a public key from the message is only used once its
+              certificate chains to a trust anchor (OpenSSL CMS_verify order). Accept/reject
+              results are unchanged; when both checks fail the trace now reports the chain failure.
+              The RSA-1/RSA-2 decoder bounds and the ECDSA/Ed25519 key checks already make the
+              primitives safe on hostile keys; this is defense in depth. ssfcms.md "Verification
+              order" updated. ssfcms_ut.c: the trace callback now also records whether "signature
+              FAILED" / "certificate chain FAILED" was emitted; test block "AUDIT CMS-1" uses the
+              P-256 chain fixture with one signature bit flipped and an unrelated anchor (chain
+              failure reported, signature never checked), then the good message with the unrelated
+              anchor (false) and the bad signature with the right anchor (false, signature failure
+              reported, chain passed). RED: ssfcms_ut.c:1289 (chain failure not reported because
+              the signature was checked first). GREEN with ssfcms and ssfx509 (both enabled by
+              default), ssfbase64url, ssfmatch.

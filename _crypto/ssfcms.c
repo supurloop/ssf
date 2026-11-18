@@ -899,6 +899,19 @@ static bool _SSFCMSVerifySigner(const SSFCMSSignedData_t *sd, uint8_t idx, const
         return false;
     }
 
+    /* Signer certificate chains to a trust anchor for signing? Checked before the signature so */
+    /* a public key from the (attacker-supplied) message is only used once it is trusted       */
+    /* (AUDIT CMS-1; same order as OpenSSL CMS_verify).                                         */
+    chainN = _SSFCMSBuildChain(sd, &signerCert, signerDer, signerDerLen, trustDer, trustDerLen,
+                         trustCount, chain, chainLen, &scratch);
+    if (!SSFX509VerifyChainPurpose(chain, chainLen, chainN, trustDer, trustDerLen, trustCount,
+                                   SSF_X509_PURPOSE_CODE_SIGNING, NULL, nowUnixSec))
+    {
+        /* No */
+        SSF_TLS_TRACE_CERT_ERROR(&_ssfcmsTraceCtx, "CMS: signer[%u] certificate chain FAILED", idx);
+        return false;
+    }
+
     /* Signature verifies with the signer's key under the declared algorithms? */
     if (!SSFX509VerifySignature(&signerCert, si->sigAlgOidRaw, si->sigAlgOidRawLen,
                                 si->sigAlgParams, si->sigAlgParamsLen, si->digestAlgOidRaw,
@@ -907,17 +920,6 @@ static bool _SSFCMSVerifySigner(const SSFCMSSignedData_t *sd, uint8_t idx, const
     {
         /* No */
         SSF_TLS_TRACE_CERT_ERROR(&_ssfcmsTraceCtx, "CMS: signer[%u] signature FAILED", idx);
-        return false;
-    }
-
-    /* Signer certificate chains to a trust anchor for signing? */
-    chainN = _SSFCMSBuildChain(sd, &signerCert, signerDer, signerDerLen, trustDer, trustDerLen,
-                         trustCount, chain, chainLen, &scratch);
-    if (!SSFX509VerifyChainPurpose(chain, chainLen, chainN, trustDer, trustDerLen, trustCount,
-                                   SSF_X509_PURPOSE_CODE_SIGNING, NULL, nowUnixSec))
-    {
-        /* No */
-        SSF_TLS_TRACE_CERT_ERROR(&_ssfcmsTraceCtx, "CMS: signer[%u] certificate chain FAILED", idx);
         return false;
     }
 

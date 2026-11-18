@@ -100,6 +100,10 @@ static int _utTraceLastCategory;
 static void *_utTraceLastCtx;
 static char _utTraceLastMsg[256];
 static char _utTraceFirstMsg[256];
+static bool _utTraceSawSigFail;
+static bool _utTraceSawChainFail;
+
+static bool _utContains(const char *hayStr, const char *needleStr);
 
 static void _utTrace(int level, int category, const char *msgStr, void *ctxOpt)
 {
@@ -119,6 +123,8 @@ static void _utTrace(int level, int category, const char *msgStr, void *ctxOpt)
     }
     _utTraceLastMsg[n] = '\0';
     if (_utTraceCount == 1u) memcpy(_utTraceFirstMsg, _utTraceLastMsg, n + 1u);
+    if (_utContains(_utTraceLastMsg, "signature FAILED")) _utTraceSawSigFail = true;
+    if (_utContains(_utTraceLastMsg, "certificate chain FAILED")) _utTraceSawChainFail = true;
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -1260,6 +1266,45 @@ void SSFCMSUnitTest(void)
     /* ---- The BER streaming form OpenSSL emits by default is rejected ---- */
     SSF_ASSERT(SSFCMSParse(_utFixEcdsaChainDetachedBer, sizeof(_utFixEcdsaChainDetachedBer),
                            &sd) == false);
+
+    /* ---- AUDIT CMS-1: the signer certificate is chained before its key is used ---- */
+    /* The signature used to be verified with the message-embedded (attacker-chosen) signer     */
+    /* key before the certificate was chained to a trust anchor. With a corrupted signature AND */
+    /* an unrelated anchor both checks fail; the chain failure must be the one reported and the */
+    /* signature must never be checked.                                                        */
+    n = sizeof(_utFixEcdsaChainDetached);
+    SSF_ASSERT(SSFCMSParse(_utFixEcdsaChainDetached, n, &sd) == true);
+    memcpy(buf, _utFixEcdsaChainDetached, n);
+    at = (uint32_t)(sd.signers[0].signature - _utFixEcdsaChainDetached) + 5u;
+    buf[at] ^= 0x01u;
+    SSF_ASSERT(SSFCMSParse(buf, n, &sd) == true);
+    trust[0] = _utFixOtherDer;
+    trustLen[0] = sizeof(_utFixOtherDer);
+    _utTraceSawSigFail = false;
+    _utTraceSawChainFail = false;
+    SSFCMSSetTraceCtx(_utTrace, NULL);
+    SSF_ASSERT(SSFCMSVerifyDigest(&sd, sha256, sizeof(sha256), SSF_CMS_DIGEST_SHA256, trust,
+                                  trustLen, 1u, now, &res) == false);
+    SSFCMSSetTraceCtx(NULL, NULL);
+    SSF_ASSERT(_utTraceSawChainFail == true);
+    SSF_ASSERT(_utTraceSawSigFail == false);
+
+    /* Each check still fails on its own: good signature with an unrelated anchor, and a bad */
+    /* signature with the right anchor.                                                      */
+    SSF_ASSERT(SSFCMSParse(_utFixEcdsaChainDetached, n, &sd) == true);
+    SSF_ASSERT(SSFCMSVerifyDigest(&sd, sha256, sizeof(sha256), SSF_CMS_DIGEST_SHA256, trust,
+                                  trustLen, 1u, now, &res) == false);
+    trust[0] = _utFixRootDer;
+    trustLen[0] = sizeof(_utFixRootDer);
+    SSF_ASSERT(SSFCMSParse(buf, n, &sd) == true);
+    _utTraceSawSigFail = false;
+    _utTraceSawChainFail = false;
+    SSFCMSSetTraceCtx(_utTrace, NULL);
+    SSF_ASSERT(SSFCMSVerifyDigest(&sd, sha256, sizeof(sha256), SSF_CMS_DIGEST_SHA256, trust,
+                                  trustLen, 1u, now, &res) == false);
+    SSFCMSSetTraceCtx(NULL, NULL);
+    SSF_ASSERT(_utTraceSawSigFail == true);
+    SSF_ASSERT(_utTraceSawChainFail == false);
 
     /* ---- Trace callback reports the reason for a failure and is silent once disabled ---- */
     n = sizeof(_utFixEcdsaChainDetached);

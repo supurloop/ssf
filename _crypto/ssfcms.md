@@ -84,14 +84,16 @@ against a caller-supplied trust store. There is no encoder: the module verifies,
   content digest in constant time, then the attributes re-tagged from `[0] IMPLICIT` to `SET`
   (§5.4) are what the signature covers; without signed attributes the content itself is covered,
   so it must be attached `id-data`; the signer certificate is located by issuer and serial or by
-  SKID among the embedded certificates and then the trust anchors; the signature verifies with
-  that certificate's key under the declared algorithms through `SSFX509VerifySignature()`; the
-  embedded certificates are ordered into a chain by issuer-to-subject links up to the first one a
-  trust anchor issued, and that chain passes `SSFX509VerifyChainPurpose()` for
-  `SSF_X509_PURPOSE_CODE_SIGNING` at `nowUnixSec`: validity, CA constraints, path length, Key
-  Usage `digitalSignature` or `nonRepudiation` on the signer when Key Usage is present, EKU
-  `codeSigning` or `anyExtendedKeyUsage` when EKU is present, Name Constraints and no unknown
-  critical extension. The first signer that passes every step wins; the result reports which one.
+  SKID among the embedded certificates and then the trust anchors; the embedded certificates are
+  ordered into a chain by issuer-to-subject links up to the first one a trust anchor issued, and
+  that chain passes `SSFX509VerifyChainPurpose()` for `SSF_X509_PURPOSE_CODE_SIGNING` at
+  `nowUnixSec`: validity, CA constraints, path length, Key Usage `digitalSignature` or
+  `nonRepudiation` on the signer when Key Usage is present, EKU `codeSigning` or
+  `anyExtendedKeyUsage` when EKU is present, Name Constraints and no unknown critical extension;
+  only then does the signature verify with that certificate's key under the declared algorithms
+  through `SSFX509VerifySignature()`, so a public key taken from the message is never used before
+  its certificate is trusted (the same order as OpenSSL `CMS_verify`). The first signer that
+  passes every step wins; the result reports which one.
 - **Trust anchors.** The anchor is typically the root or an intermediate the caller trusts and is
   not usually embedded in the message. A signer certificate that is itself a trust anchor is
   accepted when it is self-signed. Anchors sharing a subject name are distinguished by the key

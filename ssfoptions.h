@@ -52,6 +52,7 @@ extern "C" {
 #include "ssfbn_opt.h"
 #include "ssfcfg_opt.h"
 #include "ssfcli_opt.h"
+#include "ssfcms_opt.h"
 #include "ssfdtime_opt.h"
 #include "ssfec_opt.h"
 #include "ssfecdsa_opt.h"

@@ -81,6 +81,7 @@ extern "C" {
 #define SSF_CONFIG_BN_MICROBENCH     (1u)  /* 1 to run MontMul/MontSquare perf harness */
 #define SSF_CONFIG_CCP_UNIT_TEST     (0u)  /* ChaCha20-Poly1305 AEAD */
 #define SSF_CONFIG_CHACHA20_UNIT_TEST (0u)
+#define SSF_CONFIG_CMS_UNIT_TEST     (1u)
 #define SSF_CONFIG_CRYPT_UNIT_TEST   (0u)
 #define SSF_CONFIG_CRYPT_CT_TIMING_TEST (1u)  /* 1 to run SSFCryptCTMemEq wall-clock CT check */
 #define SSF_CONFIG_EC_UNIT_TEST      (0u)
@@ -158,6 +159,7 @@ extern "C" {
     SSF_CONFIG_BN_UNIT_TEST == 1 || \
     SSF_CONFIG_CCP_UNIT_TEST == 1 || \
     SSF_CONFIG_CHACHA20_UNIT_TEST == 1 || \
+    SSF_CONFIG_CMS_UNIT_TEST == 1 || \
     SSF_CONFIG_CRYPT_UNIT_TEST == 1 || \
     SSF_CONFIG_EC_UNIT_TEST == 1 || \
     SSF_CONFIG_ECDSA_UNIT_TEST == 1 || \

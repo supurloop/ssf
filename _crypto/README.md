@@ -26,6 +26,7 @@ Cryptographic interfaces.
 | ssfed25519 | Ed25519 signatures (RFC 8032 pure mode) — deterministic, self-contained | ssfed25519.c, ssfed25519.h | [ssfed25519.md](ssfed25519.md) |
 | ssfrsa | RSA signatures (PKCS#1 v1.5 and PSS) + key generation over 2048/3072/4096-bit keys | ssfrsa.c, ssfrsa.h | [ssfrsa.md](ssfrsa.md) |
 | ssftls | TLS 1.3 core building blocks: key schedule, transcript hash, record layer (no handshake state machine) | ssftls.c, ssftls.h | [ssftls.md](ssftls.md) |
+| ssfcms | RFC 5652 CMS SignedData verifier (zero-copy parse, detached file signatures by digest, ECDSA / RSA / Ed25519, RFC 6211 algorithm protection) | ssfcms.c, ssfcms.h | [ssfcms.md](ssfcms.md) |
 
 ## See Also
 

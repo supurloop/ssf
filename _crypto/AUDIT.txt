@@ -783,7 +783,7 @@ SHA2-1  Low  OPEN
              < 2^61 bytes. Unreachable on target hardware; spec deviation.
   Evidence:  SSF_PUTU64BE(&pad[SSF_SHA512_BLOCK_SIZE_BYTES - 8], totalBits);
 
-SHA2-2  Low  OPEN (portability; root cause in ssfport.h)
+SHA2-2  Low  FIXED (2026-11-18)
   Location:  ssfsha2.c:158, :199, :323-333, :462-479; ssfport.h:264-268
   Problem:   SHA-2 byte order relies on ntohl/ntohll/htonl/htonll macros that ssfport.h derives
              from __BYTE_ORDER__ and otherwise defaults to little-endian. On a big-endian
@@ -1449,3 +1449,19 @@ CHANGE LOG
               (valid rollover message rejected). GREEN: ssfcms incl. the modeled production fixture
               and CMS-1 ordering tests, ssfx509, ssfbase64url, ssfmatch. One-line comments, no
               line over 100 columns.
+  2026-11-18  SHA2-2 FIXED via option 1. ssfsha2.c no longer uses htonl / ntohl / htonll / ntohll:
+              block loads use SSF_GETU32BE / SSF_GETU64BE and the digest is written with
+              SSF_PUTU32BE / SSF_PUTU64BE (SHA-512/224 takes the high 32 bits of h[3]), so SHA-2
+              is correct on any byte order without ssfport.h's __BYTE_ORDER__ detection. The
+              truncated outputs gained Is/Yes/No comments; the two now-unused tmp locals were
+              removed. ssfport.h is unchanged (ubjson still uses the macros; outside this audit).
+              ssfsha2.md notes the byte-order independence. Evidence: (1) little-endian host with
+              -D__BYTE_ORDER__=__ORDER_BIG_ENDIAN__ (macros wrong for the host): old code RED at
+              ssfsha2_ut.c:355 (plus ssfcms / ssfx509), new code GREEN. (2) Big-endian MIPS
+              (mips-linux-gnu-gcc 14.2, static, run under qemu-mips 10.0) with -U__BYTE_ORDER__
+              so ssfport.h falls to its little-endian default: old code RED (ssfsha2_ut.c:355,
+              ssfhmac_ut.c:266, ssfhkdf_ut.c:285, ssftls_ut.c:162, ssfcms_ut.c:965,
+              ssfed25519_ut.c:537), new code GREEN; normal big-endian build GREEN too (SHA2,
+              HMAC, HKDF, TLS, Ed25519 unit tests enabled, plus ssfcms, ssfx509, ssfbase64url,
+              ssfmatch). (3) Normal x86-64 build GREEN with SHA2, HMAC, HKDF, TLS, ECDSA, RSA,
+              Ed25519 enabled. Unit test flags restored.

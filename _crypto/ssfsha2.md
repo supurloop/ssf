@@ -36,6 +36,10 @@ are provided.
 - The one-shot `SSFSHA2_32` / `SSFSHA2_64` (and the macro forms) require a non-`NULL` `in` even
   when `inLen` is `0` — pass any valid pointer (e.g., a pointer to a zero-length string literal).
   The incremental `Update` interface accepts `in == NULL` when `inLen == 0`.
+- Message words and the digest are read and written with SSF's shift-based big-endian helpers
+  (`SSF_GETU32BE` / `SSF_PUTU64BE` and friends from `ssf.h`), so the output is correct on big-
+  and little-endian hosts without relying on `ssfport.h` byte-order detection or
+  `SSF_CONFIG_LITTLE_ENDIAN` (verified on big-endian MIPS under QEMU).
 
 <a id="configuration"></a>
 

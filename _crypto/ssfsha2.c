@@ -151,11 +151,11 @@ static void _SSFSHA2_32Block(uint32_t *hs, const uint8_t *block)
     uint32_t i, j;
     uint32_t w[SSF_SHA256_BLOCK_SIZE_BYTES];
 
+    /* Big-endian word loads independent of host byte order (AUDIT SHA2-2) */
     for (i = 0; i < 16; i++)
     {
         j = i << 2;
-        memcpy(&w[i], &block[j], sizeof(uint32_t));
-        w[i] = ntohl(w[i]);
+        w[i] = SSF_GETU32BE(&block[j]);
     }
 
     for (i = 16; i < SSF_SHA256_BLOCK_SIZE_BYTES; i++)
@@ -193,10 +193,11 @@ static void _SSFSHA2_64Block(uint64_t *hs, const uint8_t *block)
     uint32_t i, j;
     uint64_t w[SSF_SHA512_INTERNAL_SIZE_BYTES];
 
+    /* Big-endian word loads independent of host byte order (AUDIT SHA2-2) */
     for (i = 0; i < 16; i++)
     {
         j = i << 3;
-        memcpy(&w[i], &block[j], sizeof(uint64_t)); w[i] = ntohll(w[i]);
+        w[i] = SSF_GETU64BE(&block[j]);
     }
 
     for (i = 16; i < 80; i++)
@@ -290,7 +291,6 @@ void SSFSHA2_32End(SSFSHA2_32Context_t *context, uint8_t *out, uint32_t outSize)
 {
     uint8_t pad[SSF_SHA256_BLOCK_SIZE_BYTES];
     uint64_t totalBits;
-    uint32_t tmp;
 
     SSF_ASSERT(context != NULL);
     SSF_ASSERT(context->magic == SSF_SHA2_32_CONTEXT_MAGIC);
@@ -319,19 +319,22 @@ void SSFSHA2_32End(SSFSHA2_32Context_t *context, uint8_t *out, uint32_t outSize)
     SSF_PUTU64BE(&pad[SSF_SHA256_BLOCK_SIZE_BYTES - 8], totalBits);
     _SSFSHA2_32Block(context->h, pad);
 
-    /* Accumulate hash into out buffer */
-    tmp = htonl(context->h[0]); memcpy(&out[0],  &tmp, sizeof(uint32_t));
-    tmp = htonl(context->h[1]); memcpy(&out[4],  &tmp, sizeof(uint32_t));
-    tmp = htonl(context->h[2]); memcpy(&out[8],  &tmp, sizeof(uint32_t));
-    tmp = htonl(context->h[3]); memcpy(&out[12], &tmp, sizeof(uint32_t));
-    tmp = htonl(context->h[4]); memcpy(&out[16], &tmp, sizeof(uint32_t));
-    tmp = htonl(context->h[5]); memcpy(&out[20], &tmp, sizeof(uint32_t));
-    tmp = htonl(context->h[6]); memcpy(&out[24], &tmp, sizeof(uint32_t));
+    /* Accumulate hash into out buffer as big-endian words (AUDIT SHA2-2) */
+    SSF_PUTU32BE(&out[0], context->h[0]);
+    SSF_PUTU32BE(&out[4], context->h[1]);
+    SSF_PUTU32BE(&out[8], context->h[2]);
+    SSF_PUTU32BE(&out[12], context->h[3]);
+    SSF_PUTU32BE(&out[16], context->h[4]);
+    SSF_PUTU32BE(&out[20], context->h[5]);
+    SSF_PUTU32BE(&out[24], context->h[6]);
+
+    /* Is this full SHA-256 rather than SHA-224? */
     if (context->hashBitSize != 224)
     {
-        tmp = htonl(context->h[7]);
-        memcpy(&out[28], &tmp, sizeof(uint32_t));
+        /* Yes, emit the eighth word */
+        SSF_PUTU32BE(&out[28], context->h[7]);
     }
+    /* No, SHA-224 stops after seven words */
 
     /* Zeroize pad -- it holds trailing message bytes and the encoded bit length. */
     SSFCryptSecureZero(pad, sizeof(pad));
@@ -426,7 +429,6 @@ void SSFSHA2_64End(SSFSHA2_64Context_t *context, uint8_t *out, uint32_t outSize)
 {
     uint8_t pad[SSF_SHA512_BLOCK_SIZE_BYTES];
     uint64_t totalBits;
-    uint64_t tmp;
 
     SSF_ASSERT(context != NULL);
     SSF_ASSERT(context->magic == SSF_SHA2_64_CONTEXT_MAGIC);
@@ -458,26 +460,40 @@ void SSFSHA2_64End(SSFSHA2_64Context_t *context, uint8_t *out, uint32_t outSize)
     SSF_PUTU64BE(&pad[SSF_SHA512_BLOCK_SIZE_BYTES - 8], totalBits);
     _SSFSHA2_64Block(context->h, pad);
 
-    /* Accumulate hash into out buffer */
-    tmp = htonll(context->h[0]); memcpy(&out[0],  &tmp, sizeof(uint64_t));
-    tmp = htonll(context->h[1]); memcpy(&out[8],  &tmp, sizeof(uint64_t));
-    tmp = htonll(context->h[2]); memcpy(&out[16], &tmp, sizeof(uint64_t));
-    tmp = htonll(context->h[3]);
+    /* Accumulate hash into out buffer as big-endian words (AUDIT SHA2-2) */
+    SSF_PUTU64BE(&out[0], context->h[0]);
+    SSF_PUTU64BE(&out[8], context->h[1]);
+    SSF_PUTU64BE(&out[16], context->h[2]);
+
+    /* Is this SHA-512/224? */
     if (context->truncationBitSize == 224)
     {
-        memcpy(&out[24], &tmp, 4);
+        /* Yes, only the high 32 bits of the fourth word are output */
+        SSF_PUTU32BE(&out[24], (uint32_t)(context->h[3] >> 32));
     }
-    else memcpy(&out[24], &tmp, sizeof(uint64_t));
+    else
+    {
+        /* No, the whole fourth word is output */
+        SSF_PUTU64BE(&out[24], context->h[3]);
+    }
+
+    /* Is the output longer than 256 bits (SHA-384 or SHA-512)? */
     if (context->truncationBitSize == 0)
     {
-        tmp = htonll(context->h[4]); memcpy(&out[32], &tmp, sizeof(uint64_t));
-        tmp = htonll(context->h[5]); memcpy(&out[40], &tmp, sizeof(uint64_t));
+        /* Yes, words five and six */
+        SSF_PUTU64BE(&out[32], context->h[4]);
+        SSF_PUTU64BE(&out[40], context->h[5]);
     }
+    /* No, SHA-512/224 and SHA-512/256 stop at four words */
+
+    /* Is this untruncated SHA-512? */
     if ((context->hashBitSize == 512) && (context->truncationBitSize == 0))
     {
-        tmp = htonll(context->h[6]); memcpy(&out[48], &tmp, sizeof(uint64_t));
-        tmp = htonll(context->h[7]); memcpy(&out[56], &tmp, sizeof(uint64_t));
+        /* Yes, words seven and eight */
+        SSF_PUTU64BE(&out[48], context->h[6]);
+        SSF_PUTU64BE(&out[56], context->h[7]);
     }
+    /* No, SHA-384 stops at six words */
 
     /* Zeroize pad -- it holds trailing message bytes and the encoded bit length. */
     SSFCryptSecureZero(pad, sizeof(pad));

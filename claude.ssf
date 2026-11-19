@@ -34,3 +34,4 @@ SSF shall following the coding and documentation style:
 - Each variable or field declaration shall be made separately and on its own line.
 - Function names including private static functions shall include the complete module name prefix. Ex. ssfx509 functions begin with SSFX509, private ones with _SSFX509. Unit test modules may implement a more relaxed policy regarding private function naming.
 - When a function argument is a struct, DBC should be applied to the struct's fields as appropriate.
+- Assertions should not have comments, they should be self evident, anything that is not can be put into the readme.

@@ -3548,6 +3548,56 @@ void SSFBNUnitTest(void)
 #endif
     }
 
+    /* ---- OPTIMIZE BN-O2 / BN-O3: exhaustive carry-extreme grid ---- */
+    /* Every 1- and 2-limb odd modulus and operand whose limbs are drawn from the values below */
+    /* (where carry and borrow bugs surface); MontMul / MontSquare checked as above, against   */
+    /* SSFBNModMul, for b = a and b = m - 1.                                                  */
+    {
+        static const SSFBNLimb_t gridV[] = { 0u, 1u, 2u, 0x7FFFFFFFu, 0x80000000u, 0x80000001u,
+                                             0xFFFFFFFEu, 0xFFFFFFFFu };
+        SSFBN_DEFINE(m, 2u);
+        SSFBN_DEFINE(a, 2u);
+        SSFBN_DEFINE(mm1, 2u);
+        uint32_t gridN;
+        uint32_t mc;
+        uint32_t ac;
+        uint32_t tot;
+        uint32_t checks = 0u;
+        uint16_t n;
+
+        gridN = (uint32_t)(sizeof(gridV) / sizeof(gridV[0]));
+        for (n = 1u; n <= 2u; n++)
+        {
+            tot = (n == 1u) ? gridN : (gridN * gridN);
+            for (mc = 0u; mc < tot; mc++)
+            {
+                m.len = n;
+                m.limbs[0] = gridV[mc % gridN];
+                if (n == 2u) m.limbs[1] = gridV[mc / gridN];
+
+                /* Odd, top limb non-zero, and above 1 */
+                if (((m.limbs[0] & 1u) == 0u) || (m.limbs[n - 1u] == 0u) ||
+                    ((n == 1u) && (m.limbs[0] == 1u))) continue;
+
+                SSFBNCopy(&mm1, &m);
+                mm1.limbs[0] -= 1u;
+                for (ac = 0u; ac < tot; ac++)
+                {
+                    a.len = n;
+                    a.limbs[0] = gridV[ac % gridN];
+                    if (n == 2u) a.limbs[1] = gridV[ac / gridN];
+                    if (SSFBNCmp(&a, &m) >= 0) continue;
+
+                    _SSFBNUTCheckMont(&m, &a, &a);
+                    _SSFBNUTCheckMont(&m, &a, &mm1);
+                    checks++;
+                }
+            }
+        }
+        /* 15 one-limb pairs (3 moduli) and 1008 two-limb pairs (4 odd low x 7 non-zero top) */
+        SSF_ASSERT(checks == 1023u);
+    }
+
     /* ---- AUDIT BN-7: MontInit's R^2 loop is exact for moduli of 1024+ limbs ---- */
     /* The doubling loop bound was (uint16_t)(len * 64), which wraps at len >= 1024 (to 0 at    */
     /* exactly 1024, leaving rr = 1), so every Montgomery operation on such a modulus was     */

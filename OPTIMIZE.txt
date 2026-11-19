@@ -750,3 +750,26 @@ CHANGE LOG
               (Fermat inverses); EC verify / ECDH unchanged (they do not use Montgomery).
               Docs: ssfbn.md (SSFBNMontMul CIOS note; SSFBNMontSquare constant-time paragraph
               rewritten, duplicate aliasing sentence from BN-O1 removed).
+  2026-11-19  BN-O2 / BN-O3 post-implementation audit (Jim: "do an audit on the two changes").
+              Verified by hand: MontMul's fused shift reproduces the old post-shift state, and
+              t[n] = t[n + 1] + hi cannot overflow (both <= 1). MontSquare's diagonal carry is
+              <= 1 (sums < 2^33) and its final carry is 0 (a^2 < R^2). Each deferred reduction
+              carry is owed to t[i + n + 1], exactly where the next row adds it; no row writes
+              that word first, the next row's u reads a lower word, and the last carry lands in
+              the still-zero t[2n]. Every index is in bounds and every loop length depends only
+              on n. Exhaustive carry-extreme grid (1-3 limbs over 0, 1, 2, 0x7FFFFFFF,
+              0x80000000, 0x80000001, 0xFFFFFFFE, 0xFFFFFFFF; 65535 cases): old and new outputs
+              bit-identical, MontSquare == MontMul(a, a), all equal to Python a^2 * R^-1 mod
+              m, ASan + UBSan clean.
+              Findings fixed: (1) ssfbn.md said the deferred carry is added "at that same word";
+              it is owed to t[i + n + 1] (the source comment was already right). (2) The grid
+              is now a unit test: "OPTIMIZE BN-O2 / BN-O3: exhaustive carry-extreme grid", 1-2
+              limbs, 1023 (m, a) pairs, each checked with b = a and b = m - 1. Mutation check:
+              five injected carry bugs (MontSquare deferred carry dropped, final carry dropped,
+              diagonal carry dropped; MontMul top word dropped, word-0 carry dropped) are each
+              caught by the grid on its own (run first, before any other test).
+              Open: (3) BN-O3 removed a #pragma warning(disable:6385) from the old MontSquare
+              carry loop. The new indices are in bounds, but MSVC /analyze was not run here;
+              restore the pragma if it reports C6385.
+              GREEN x86-64: ssfbn, ssfrsa, ssfec, ssfecdsa, ssfx509, ssfcms, ssfbase64url,
+              ssfmatch. Library code unchanged by this follow-up (test and docs only).

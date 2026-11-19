@@ -739,8 +739,9 @@ routine — a triangular full square (strict upper triangle accumulated once, do
 single shift-left, then the `a[i]·a[i]` diagonal added) followed by SOS Montgomery
 reduction — rather than a plain `MontMul(r, a, a, ctx)`. **Constant-time.** Neither carry
 fold uses a value-dependent `while (carry != 0)` loop: the diagonal add is one pass with a
-running carry, and each reduction row defers its carry out of `t[i + n]` to the next row,
-which adds it at that same word. Both are fixed-length and O(n), so the squaring time
+running carry, and each reduction row defers its carry out of `t[i + n]` (owed to
+`t[i + n + 1]`) to the next row, which adds it there together with its own carry. Both are
+fixed-length and O(n), so the squaring time
 depends only on `ctx->len`, never on the operand's limb values. This matches the
 constant-time guarantee `SSFBNMontMul` already provides, which is what lets the
 `SSFBNModExp` / `SSFBNModExpMont` path stay side-channel-resistant on secret exponents

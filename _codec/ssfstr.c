@@ -225,7 +225,8 @@ bool SSFStrStr(SSFCStrIn_t cstr, size_t cstrSize, SSFCStrIn_t *matchStrOptOut, S
     ss = substr;
     sss = substrSize;
     cstrs = NULL;
-    while ((*cstr != 0) && (cstrSize > 0) && (*ss != 0) && (sss > 1))
+    /* Each size is checked before its byte is read (AUDIT STR-2) */
+    while ((cstrSize > 0u) && (*cstr != 0) && (sss > 1u) && (*ss != 0))
     {
         /* Character match? */
         if (*cstr == *ss)
@@ -257,7 +258,14 @@ bool SSFStrStr(SSFCStrIn_t cstr, size_t cstrSize, SSFCStrIn_t *matchStrOptOut, S
                 cstr = cstrs;
                 cstrs = NULL;
             }
-            if (cstrSize <= 1) return false;
+            /* Is this the last byte of cstr? */
+            if (cstrSize <= 1u)
+            {
+                /* Yes, no match; clear the output as every false return does (AUDIT STR-6) */
+                if (matchStrOptOut != NULL) *matchStrOptOut = NULL;
+                return false;
+            }
+            /* No */
         }
 
         /* Advance */

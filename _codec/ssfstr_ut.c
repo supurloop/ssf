@@ -92,6 +92,30 @@ void SSFStrUnitTest(void)
     SSF_ASSERT(memcmp(dst, "1231", 5) == 0);
     SSF_ASSERT(dst[5] == 0x55);
 
+    /* AUDIT STR-2: SSFStrStr never reads past cstrSize or substrSize, even with no NUL; run */
+    /* under ASan to catch the old one-byte over-read. AUDIT STR-6: every false clears the   */
+    /* match output.                                                                         */
+    {
+        static const char hay[3] = { 'a', 'b', 'c' };
+        static const char one[1] = { 'a' };
+
+        matchStrOptOut = hay;
+        SSF_ASSERT(SSFStrStr(hay, sizeof(hay), &matchStrOptOut, "cd", 3) == false);
+        SSF_ASSERT(matchStrOptOut == NULL);
+        SSF_ASSERT(SSFStrStr(hay, sizeof(hay), &matchStrOptOut, "bc", 3));
+        SSF_ASSERT(matchStrOptOut == &hay[1]);
+        SSF_ASSERT(SSFStrStr(hay, sizeof(hay), &matchStrOptOut, "abcd", 5) == false);
+        SSF_ASSERT(SSFStrStr(&hay[2], 1u, &matchStrOptOut, "c", 2));
+        SSF_ASSERT(matchStrOptOut == &hay[2]);
+        SSF_ASSERT(SSFStrStr(&hay[2], 0u, NULL, "x", 2) == false);
+        SSF_ASSERT(SSFStrStr(hay, sizeof(hay), NULL, "a", 0u) == false);
+
+        /* STR-6: a mismatch on the last byte takes the early return; it must clear the output */
+        matchStrOptOut = hay;
+        SSF_ASSERT(SSFStrStr(one, sizeof(one), &matchStrOptOut, "x", 2) == false);
+        SSF_ASSERT(matchStrOptOut == NULL);
+    }
+
     /* AUDIT STR-3: the length output of SSFStrCpy / SSFStrCat is optional, as documented */
     {
         char small[3];

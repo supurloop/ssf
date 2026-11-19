@@ -1036,7 +1036,7 @@ STR-1  Medium  FIXED (2026-11-18)  [demonstrated]
              (2) Keep the signature, document cstrSize as "bytes remaining from *cstr", and fix
              the .md example to pass sizeof(src) - (pos - src).
 
-STR-2  Medium  OPEN  [demonstrated] [verified 2026-11-18]
+STR-2  Medium  FIXED (2026-11-18)  [demonstrated] [verified 2026-11-18]
   Location:  _codec/ssfstr.c:230 (SSFStrStr)
   Problem:   The loop condition dereferences *cstr before it tests cstrSize > 0, and *ss
              before it tests sss > 1. When cstrSize reaches 0, the function reads one byte past
@@ -1126,7 +1126,7 @@ STR-5  Medium  FIXED (2026-11-18)  [demonstrated]
              set tokenStrOut[0] = 0 when tokenStrSize > 0, and document that the caller must
              check for -1.
 
-STR-6  Low  OPEN  [demonstrated]
+STR-6  Low  FIXED (2026-11-18)  [demonstrated]
   Location:  _codec/ssfstr.c:262 (SSFStrStr)
   Problem:   The early "return false" on line 262 does not clear *matchStrOptOut, but the
              other false exit (line 269) sets it to NULL. The .md and the UT
@@ -1458,3 +1458,15 @@ CHANGE LOG
               a NULL length traps were removed. RED: "SSF Assertion: _codec/ssfstr.c:134".
               GREEN: ssfstr, ssfx509, ssfcms, ssfbase64url, ssfmatch (STR unit test enabled for
               the run; flag restored).
+  2026-11-18  STR-2 FIXED via option 1, with STR-6 folded in. SSFStrStr's loop now tests each
+              size before reading its byte: (cstrSize > 0) && (*cstr != 0) && (sss > 1) &&
+              (*ss != 0), so it never reads past cstrSize or substrSize (the *(ss + 1)
+              lookahead was already guarded by sss > 1). The early false return on a mismatch at
+              the last byte now clears *matchStrOptOut like the other false exit (STR-6). No .md
+              change. Test block "AUDIT STR-2" in ssfstr_ut.c on a 3-byte array with no NUL:
+              "cd" false with the output cleared, "bc" found at +1, "abcd" false, "c" found at
+              +2, size 0 and substrSize 0 return false; a 1-byte haystack mismatch clears a
+              preset output (STR-6). RED: under ASan the old code reports a global-buffer-
+              overflow read in SSFStrStr just past the 3-byte array. GREEN: ssfstr, ssfx509,
+              ssfcms, ssfbase64url, ssfmatch, plain and under ASan + UBSan (STR unit test
+              enabled for the run; flag restored).

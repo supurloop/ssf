@@ -754,6 +754,7 @@ callback is stored but never called.
 <a id="ex-trace"></a>
 
 ```c
+/* Messages are sent only when _opt/ssftls_opt.h sets SSF_TLS_CONFIG_ENABLE_TRACE to 1 */
 static void _trace(int level, int category, const char *msg, void *ctx)
 {
     (void)category; (void)ctx;

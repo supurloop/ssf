@@ -810,3 +810,17 @@ CHANGE LOG
               Docs: ssftls.md (trace note, configuration row), ssfx509.md and ssfcms.md (trace
               notes and SetTraceCtx descriptions).
               Found while measuring, pre-existing: TRACE-1 (ssfx509 section), OPEN.
+  2026-11-19  X509-O1 / CMS-O1 post-implementation audit (Jim: "Commit and then audit"). With
+              tracing compiled out the build behaves as today's no-callback path, because the
+              old macro evaluated its arguments only inside if (fn != NULL). All 57 call sites
+              (40 ssfx509, 17 ssfcms) have side-effect-free arguments, and the context
+              argument is always &_ssfx509TraceCtx / &_ssfcmsTraceCtx. Both macro forms are a
+              single do-while statement and every use is a statement. snprintf references
+              confirm the defaults and overrides: test build on, test build with -D 0 off,
+              production (x509 / CMS unit tests 0) off, production with -D 1 on. ssftls_opt.h
+              is reached only through ssfport.h, after the unit-test flags.
+              Fixed (1), Low doc: the ssfx509.md SSFX509SetTraceCtx example now says messages
+              need SSF_TLS_CONFIG_ENABLE_TRACE 1. Noted (2), design: a callback installed in a
+              trace-off build silently receives nothing. Kept, because an assert in SetTraceCtx
+              would crash existing firmware; the change is documented in the option comment,
+              ssftls.md, ssfx509.md, ssfcms.md and commit 577aaac.

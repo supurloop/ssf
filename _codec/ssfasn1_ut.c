@@ -97,6 +97,69 @@ void SSFASN1UnitTest(void)
         SSF_ASSERT(val == 0xDEADBEEFCAFEull);
     }
 
+    /* ---- AUDIT ASN1-7: a decoder that returns false leaves *next untouched ---- */
+    {
+        /* Each input is followed by a trailing NULL so an unwanted advance is visible */
+        static const uint8_t wrongTag[] = { 0x05u, 0x00u, 0x05u, 0x00u };
+        static const uint8_t nullForNull[] = { 0x04u, 0x00u, 0x05u, 0x00u };
+        static const uint8_t badBool[] = { 0x01u, 0x02u, 0xFFu, 0xFFu, 0x05u, 0x00u };
+        static const uint8_t negInt[] = { 0x02u, 0x01u, 0xFFu, 0x05u, 0x00u };
+        static const uint8_t bigInt[] = {
+            0x02u, 0x0Au, 0x01u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u,
+            0x05u, 0x00u
+        };
+        static const uint8_t emptyBits[] = { 0x03u, 0x00u, 0x05u, 0x00u };
+        static const uint8_t badNull[] = { 0x05u, 0x01u, 0x00u, 0x05u, 0x00u };
+        static const uint8_t badTime[] = { 0x17u, 0x01u, 0x30u, 0x05u, 0x00u };
+        static const uint8_t sentinel[1] = { 0x00u };
+        SSFASN1Cursor_t inner;
+        const uint8_t *p;
+        uint32_t plen;
+        uint8_t unused;
+        uint16_t strTag;
+        uint32_t arcs[8];
+        uint8_t arcsLen;
+        uint64_t u64;
+        bool b;
+
+        #define _ASN1_NO_ADVANCE(_der, _call) do { \
+            cursor.buf = (_der); cursor.bufLen = (uint32_t)sizeof(_der); \
+            next.buf = sentinel; next.bufLen = 0x5A5Au; \
+            SSF_ASSERT((_call) == false); \
+            SSF_ASSERT((next.buf == sentinel) && (next.bufLen == 0x5A5Au)); \
+        } while (0)
+
+        /* Wrong tag, every typed decoder */
+        _ASN1_NO_ADVANCE(wrongTag, SSFASN1DecOpenConstructed(&cursor, SSF_ASN1_TAG_SEQUENCE,
+                                                             &inner, &next));
+        _ASN1_NO_ADVANCE(wrongTag, SSFASN1DecGetBool(&cursor, &b, &next));
+        _ASN1_NO_ADVANCE(wrongTag, SSFASN1DecGetInt(&cursor, &p, &plen, &next));
+        _ASN1_NO_ADVANCE(wrongTag, SSFASN1DecGetIntU64(&cursor, &u64, &next));
+        _ASN1_NO_ADVANCE(wrongTag, SSFASN1DecGetBitString(&cursor, &p, &plen, &unused, &next));
+        _ASN1_NO_ADVANCE(wrongTag, SSFASN1DecGetOctetString(&cursor, &p, &plen, &next));
+        _ASN1_NO_ADVANCE(nullForNull, SSFASN1DecGetNull(&cursor, &next));
+        _ASN1_NO_ADVANCE(wrongTag, SSFASN1DecGetOID(&cursor, arcs, 8u, &arcsLen, &next));
+        _ASN1_NO_ADVANCE(wrongTag, SSFASN1DecGetOIDRaw(&cursor, &p, &plen, &next));
+        _ASN1_NO_ADVANCE(wrongTag, SSFASN1DecGetString(&cursor, &p, &plen, &strTag, &next));
+        _ASN1_NO_ADVANCE(wrongTag, SSFASN1DecGetTime(&cursor, &u64, &next));
+        _ASN1_NO_ADVANCE(wrongTag, SSFASN1DecGetDate(&cursor, &u64, &next));
+        _ASN1_NO_ADVANCE(wrongTag, SSFASN1DecGetDateTime(&cursor, &u64, &next));
+
+        /* Right tag, bad content */
+        _ASN1_NO_ADVANCE(badBool, SSFASN1DecGetBool(&cursor, &b, &next));
+        _ASN1_NO_ADVANCE(negInt, SSFASN1DecGetIntU64(&cursor, &u64, &next));
+        _ASN1_NO_ADVANCE(bigInt, SSFASN1DecGetIntU64(&cursor, &u64, &next));
+        _ASN1_NO_ADVANCE(emptyBits, SSFASN1DecGetBitString(&cursor, &p, &plen, &unused, &next));
+        _ASN1_NO_ADVANCE(badNull, SSFASN1DecGetNull(&cursor, &next));
+        _ASN1_NO_ADVANCE(badTime, SSFASN1DecGetTime(&cursor, &u64, &next));
+        #undef _ASN1_NO_ADVANCE
+
+        /* A successful decode still advances past exactly one element */
+        cursor.buf = wrongTag; cursor.bufLen = sizeof(wrongTag);
+        SSF_ASSERT(SSFASN1DecGetNull(&cursor, &next) == true);
+        SSF_ASSERT((next.buf == &wrongTag[2]) && (next.bufLen == 2u));
+    }
+
     /* ---- AUDIT ASN1-1: IntU64 rejects negative, empty and non-minimal INTEGERs ---- */
     {
         static const uint8_t negOne[] = { 0x02u, 0x01u, 0xFFu };

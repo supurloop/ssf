@@ -237,7 +237,7 @@ ASN1-6  Medium  OPEN  [demonstrated]
              (2) Add an "unsigned magnitude" encoder that strips zeros and adds the 00, and
              move ssfx509 serial, ssfecdsa and ssfrsa to it.
 
-ASN1-7  Medium  OPEN  [demonstrated] [verified 2026-11-18]
+ASN1-7  Medium  FIXED (2026-11-18)  [demonstrated] [verified 2026-11-18]
   Location:  ssfasn1.c:204-205, 221-222, 268-270, 289-290, 304-305, 320-321, 408-418, 457,
              584-586, 610-612 (all typed decoders); ssfasn1.md:76-77, :372-373
   Problem:   The .md says that on false "*next is not advanced". Every typed decoder calls
@@ -565,7 +565,7 @@ X509-5  Medium  OPEN  [demonstrated]
              (recommended)
              (2) At least refuse wildcard matching when the hostname is all digits and dots.
 
-X509-6  Medium  OPEN  [demonstrated] [verified 2026-11-18]  (root cause ASN1-7, ASN1-4)
+X509-6  Medium  FIXED (2026-11-18)  [demonstrated] [verified 2026-11-18]  (root cause ASN1-7, ASN1-4)
   Location:  ssfx509.c:320-328 (_SSFX509ParseExtensions), also 362-365 (basicConstraints cA)
   Problem:   ssfx509 ignores the return value of SSFASN1DecGetBool and aliases next to the
              cursor. Because of ASN1-7, a BOOLEAN that fails to decode (length other than 1) is
@@ -1247,3 +1247,23 @@ CHANGE LOG
               ssfasn1_ut.c:123 and ssfx509_ut.c:5369 (the PSS case already failed and guards
               the new path). GREEN: ssfasn1, ssfx509, ssfcms, ssfrsa, ssfbase64url, ssfmatch
               (ASN1 and RSA unit tests enabled for the run; flags restored).
+  2026-11-18  ASN1-7 and X509-6 FIXED together via option 1. ssfasn1: all 13 typed decoders
+              (OpenConstructed, GetBool, GetInt, GetIntU64, GetBitString, GetOctetString,
+              GetNull, GetOIDRaw, GetOID, GetString, GetTime, GetDate, GetDateTime) decode into
+              a local cursor and write *next only on success, as ssfasn1.md:77 already
+              promised, so aliased calls no longer consume an element that fails to decode.
+              Callers in ssfx509, ssfcms, ssfrsa and ssfecdsa were checked: every decode failure
+              inside a loop returns or breaks, so none can spin. ssfx509: the four ignored
+              results now fail the parse - the extension critical BOOLEAN, the basicConstraints
+              cA BOOLEAN, the AKID keyIdentifier and the EC curve OID. ASN1-4 (BOOLEAN values
+              other than 00 / FF) is not included. ssfx509.md documents the new failures.
+              Tests: "AUDIT ASN1-7" in ssfasn1_ut.c (each of the 13 decoders with a wrong tag,
+              plus bad-content cases for Bool, IntU64 (negative, 9 bytes), BitString, Null,
+              Time, must return false with next holding its sentinel; a successful decode still
+              advances one element) and "AUDIT X509-6" in ssfx509_ut.c (critical flag 01 02 FF
+              FF, cA flag 01 02 FF FF, overrunning keyIdentifier, overrunning curve OID: each
+              fails to parse; well-formed controls parse). RED: ssfasn1_ut.c:133
+              (OpenConstructed advanced next on a wrong tag) and ssfx509_ut.c:5405 (malformed
+              critical flag parsed as non-critical). GREEN: ssfasn1, ssfx509, ssfcms, ssfrsa,
+              ssfecdsa, ssfbase64url, ssfmatch (ASN1, RSA and ECDSA unit tests enabled for the
+              run; flags restored).

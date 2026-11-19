@@ -108,7 +108,9 @@ X.509 v3 certificate support per RFC 5280, built on [`ssfasn1`](ssfasn1.md):
   time: a `dNSName` SAN that is empty or contains a NUL byte is dropped, because no hostname can
   match it safely, and a `pathLenConstraint` above 127 is clamped to 127 so it stays a constraint.
   A `pathLenConstraint` that is not a valid unsigned INTEGER fails the parse, and an RSA-PSS
-  `saltLength` that is not one fails verification.
+  `saltLength` that is not one fails verification. Likewise, an extension's `critical` flag, the
+  Basic Constraints `cA` flag, the Authority Key Identifier `keyIdentifier`, or the EC curve OID
+  that is present but does not decode fails the parse rather than reading as absent or false.
   A recognized extension whose body is not the structure RFC 5280 defines (for example a Basic
   Constraints value that is not a SEQUENCE) does not fail the parse; the extension's `has*` flag
   is set and its decoded fields keep their fail-closed defaults, so such a certificate cannot act

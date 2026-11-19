@@ -139,6 +139,7 @@ bool SSFASN1DecGetTLV(const SSFASN1Cursor_t *cursor, uint16_t *tagOut, const uin
 bool SSFASN1DecOpenConstructed(const SSFASN1Cursor_t *cursor, uint16_t expectedTag,
                                SSFASN1Cursor_t *inner, SSFASN1Cursor_t *next)
 {
+    SSFASN1Cursor_t after;
     uint16_t tag;
     const uint8_t *value;
     uint32_t valueLen;
@@ -147,11 +148,12 @@ bool SSFASN1DecOpenConstructed(const SSFASN1Cursor_t *cursor, uint16_t expectedT
     SSF_REQUIRE(inner != NULL);
     SSF_REQUIRE(next != NULL);
 
-    if (!SSFASN1DecGetTLV(cursor, &tag, &value, &valueLen, next)) return false;
+    if (!SSFASN1DecGetTLV(cursor, &tag, &value, &valueLen, &after)) return false;
     if (tag != expectedTag) return false;
 
     inner->buf = value;
     inner->bufLen = valueLen;
+    *next = after; /* Advance only on success (AUDIT ASN1-7) */
     return true;
 }
 
@@ -193,6 +195,7 @@ bool SSFASN1DecIsEmpty(const SSFASN1Cursor_t *cursor)
 /* --------------------------------------------------------------------------------------------- */
 bool SSFASN1DecGetBool(const SSFASN1Cursor_t *cursor, bool *valOut, SSFASN1Cursor_t *next)
 {
+    SSFASN1Cursor_t after;
     uint16_t tag;
     const uint8_t *value;
     uint32_t valueLen;
@@ -201,9 +204,10 @@ bool SSFASN1DecGetBool(const SSFASN1Cursor_t *cursor, bool *valOut, SSFASN1Curso
     SSF_REQUIRE(valOut != NULL);
     SSF_REQUIRE(next != NULL);
 
-    if (!SSFASN1DecGetTLV(cursor, &tag, &value, &valueLen, next)) return false;
+    if (!SSFASN1DecGetTLV(cursor, &tag, &value, &valueLen, &after)) return false;
     if (tag != SSF_ASN1_TAG_BOOLEAN || valueLen != 1u) return false;
     *valOut = (value[0] != 0x00u);
+    *next = after; /* Advance only on success (AUDIT ASN1-7) */
     return true;
 }
 
@@ -211,6 +215,7 @@ bool SSFASN1DecGetBool(const SSFASN1Cursor_t *cursor, bool *valOut, SSFASN1Curso
 bool SSFASN1DecGetInt(const SSFASN1Cursor_t *cursor, const uint8_t **intBufOut, uint32_t *intLenOut,
                       SSFASN1Cursor_t *next)
 {
+    SSFASN1Cursor_t after;
     uint16_t tag;
 
     SSF_REQUIRE(cursor != NULL);
@@ -218,8 +223,9 @@ bool SSFASN1DecGetInt(const SSFASN1Cursor_t *cursor, const uint8_t **intBufOut, 
     SSF_REQUIRE(intLenOut != NULL);
     SSF_REQUIRE(next != NULL);
 
-    if (!SSFASN1DecGetTLV(cursor, &tag, intBufOut, intLenOut, next)) return false;
+    if (!SSFASN1DecGetTLV(cursor, &tag, intBufOut, intLenOut, &after)) return false;
     if (tag != SSF_ASN1_TAG_INTEGER) return false;
+    *next = after; /* Advance only on success (AUDIT ASN1-7) */
     return true;
 }
 
@@ -249,6 +255,7 @@ static bool _SSFASN1IsMinimalUnsigned(const uint8_t *intBuf, uint32_t intLen)
 /* --------------------------------------------------------------------------------------------- */
 bool SSFASN1DecGetIntU64(const SSFASN1Cursor_t *cursor, uint64_t *valOut, SSFASN1Cursor_t *next)
 {
+    SSFASN1Cursor_t after;
     const uint8_t *intBuf;
     uint32_t intLen;
     uint32_t i;
@@ -258,7 +265,7 @@ bool SSFASN1DecGetIntU64(const SSFASN1Cursor_t *cursor, uint64_t *valOut, SSFASN
     SSF_REQUIRE(valOut != NULL);
     SSF_REQUIRE(next != NULL);
 
-    if (!SSFASN1DecGetInt(cursor, &intBuf, &intLen, next)) return false;
+    if (!SSFASN1DecGetInt(cursor, &intBuf, &intLen, &after)) return false;
 
     /* Is the INTEGER empty, negative or non-minimal (AUDIT ASN1-1)? */
     if (!_SSFASN1IsMinimalUnsigned(intBuf, intLen))
@@ -276,6 +283,7 @@ bool SSFASN1DecGetIntU64(const SSFASN1Cursor_t *cursor, uint64_t *valOut, SSFASN
     {
         *valOut = (*valOut << 8) | intBuf[i];
     }
+    *next = after; /* Advance only on success (AUDIT ASN1-7) */
     return true;
 }
 
@@ -283,6 +291,7 @@ bool SSFASN1DecGetIntU64(const SSFASN1Cursor_t *cursor, uint64_t *valOut, SSFASN
 bool SSFASN1DecGetBitString(const SSFASN1Cursor_t *cursor, const uint8_t **bitsOut,
                             uint32_t *bitsLenOut, uint8_t *unusedBitsOut, SSFASN1Cursor_t *next)
 {
+    SSFASN1Cursor_t after;
     uint16_t tag;
     const uint8_t *value;
     uint32_t valueLen;
@@ -293,13 +302,14 @@ bool SSFASN1DecGetBitString(const SSFASN1Cursor_t *cursor, const uint8_t **bitsO
     SSF_REQUIRE(unusedBitsOut != NULL);
     SSF_REQUIRE(next != NULL);
 
-    if (!SSFASN1DecGetTLV(cursor, &tag, &value, &valueLen, next)) return false;
+    if (!SSFASN1DecGetTLV(cursor, &tag, &value, &valueLen, &after)) return false;
     if (tag != SSF_ASN1_TAG_BIT_STRING) return false;
     if (valueLen < 1u) return false;
 
     *unusedBitsOut = value[0];
     *bitsOut = &value[1];
     *bitsLenOut = valueLen - 1u;
+    *next = after; /* Advance only on success (AUDIT ASN1-7) */
     return true;
 }
 
@@ -307,6 +317,7 @@ bool SSFASN1DecGetBitString(const SSFASN1Cursor_t *cursor, const uint8_t **bitsO
 bool SSFASN1DecGetOctetString(const SSFASN1Cursor_t *cursor, const uint8_t **octetsOut,
                               uint32_t *octetsLenOut, SSFASN1Cursor_t *next)
 {
+    SSFASN1Cursor_t after;
     uint16_t tag;
 
     SSF_REQUIRE(cursor != NULL);
@@ -314,14 +325,16 @@ bool SSFASN1DecGetOctetString(const SSFASN1Cursor_t *cursor, const uint8_t **oct
     SSF_REQUIRE(octetsLenOut != NULL);
     SSF_REQUIRE(next != NULL);
 
-    if (!SSFASN1DecGetTLV(cursor, &tag, octetsOut, octetsLenOut, next)) return false;
+    if (!SSFASN1DecGetTLV(cursor, &tag, octetsOut, octetsLenOut, &after)) return false;
     if (tag != SSF_ASN1_TAG_OCTET_STRING) return false;
+    *next = after; /* Advance only on success (AUDIT ASN1-7) */
     return true;
 }
 
 /* --------------------------------------------------------------------------------------------- */
 bool SSFASN1DecGetNull(const SSFASN1Cursor_t *cursor, SSFASN1Cursor_t *next)
 {
+    SSFASN1Cursor_t after;
     uint16_t tag;
     const uint8_t *value;
     uint32_t valueLen;
@@ -329,8 +342,9 @@ bool SSFASN1DecGetNull(const SSFASN1Cursor_t *cursor, SSFASN1Cursor_t *next)
     SSF_REQUIRE(cursor != NULL);
     SSF_REQUIRE(next != NULL);
 
-    if (!SSFASN1DecGetTLV(cursor, &tag, &value, &valueLen, next)) return false;
+    if (!SSFASN1DecGetTLV(cursor, &tag, &value, &valueLen, &after)) return false;
     if (tag != SSF_ASN1_TAG_NULL || valueLen != 0u) return false;
+    *next = after; /* Advance only on success (AUDIT ASN1-7) */
     return true;
 }
 
@@ -338,6 +352,7 @@ bool SSFASN1DecGetNull(const SSFASN1Cursor_t *cursor, SSFASN1Cursor_t *next)
 bool SSFASN1DecGetOIDRaw(const SSFASN1Cursor_t *cursor, const uint8_t **oidRawOut,
                          uint32_t *oidRawLenOut, SSFASN1Cursor_t *next)
 {
+    SSFASN1Cursor_t after;
     uint16_t tag;
 
     SSF_REQUIRE(cursor != NULL);
@@ -345,8 +360,9 @@ bool SSFASN1DecGetOIDRaw(const SSFASN1Cursor_t *cursor, const uint8_t **oidRawOu
     SSF_REQUIRE(oidRawLenOut != NULL);
     SSF_REQUIRE(next != NULL);
 
-    if (!SSFASN1DecGetTLV(cursor, &tag, oidRawOut, oidRawLenOut, next)) return false;
+    if (!SSFASN1DecGetTLV(cursor, &tag, oidRawOut, oidRawLenOut, &after)) return false;
     if (tag != SSF_ASN1_TAG_OID) return false;
+    *next = after; /* Advance only on success (AUDIT ASN1-7) */
     return true;
 }
 
@@ -354,6 +370,7 @@ bool SSFASN1DecGetOIDRaw(const SSFASN1Cursor_t *cursor, const uint8_t **oidRawOu
 bool SSFASN1DecGetOID(const SSFASN1Cursor_t *cursor, uint32_t *oidArcsOut, uint8_t oidArcsSize,
                       uint8_t *oidArcsLenOut, SSFASN1Cursor_t *next)
 {
+    SSFASN1Cursor_t after;
     const uint8_t *raw;
     uint32_t rawLen;
     uint32_t pos;
@@ -367,7 +384,7 @@ bool SSFASN1DecGetOID(const SSFASN1Cursor_t *cursor, uint32_t *oidArcsOut, uint8
     SSF_REQUIRE(oidArcsLenOut != NULL);
     SSF_REQUIRE(next != NULL);
 
-    if (!SSFASN1DecGetOIDRaw(cursor, &raw, &rawLen, next)) return false;
+    if (!SSFASN1DecGetOIDRaw(cursor, &raw, &rawLen, &after)) return false;
     if (rawLen == 0) return false;
 
     /* Decode the first sub-identifier (base-128) which encodes arc0*40 + arc1.          */
@@ -419,6 +436,7 @@ bool SSFASN1DecGetOID(const SSFASN1Cursor_t *cursor, uint32_t *oidArcsOut, uint8
     }
 
     *oidArcsLenOut = arcCount;
+    *next = after; /* Advance only on success (AUDIT ASN1-7) */
     return true;
 }
 
@@ -426,6 +444,7 @@ bool SSFASN1DecGetOID(const SSFASN1Cursor_t *cursor, uint32_t *oidArcsOut, uint8
 bool SSFASN1DecGetString(const SSFASN1Cursor_t *cursor, const uint8_t **strOut, uint32_t *strLenOut,
                          uint16_t *strTagOut, SSFASN1Cursor_t *next)
 {
+    SSFASN1Cursor_t after;
     uint16_t tag;
 
     SSF_REQUIRE(cursor != NULL);
@@ -433,7 +452,7 @@ bool SSFASN1DecGetString(const SSFASN1Cursor_t *cursor, const uint8_t **strOut, 
     SSF_REQUIRE(strLenOut != NULL);
     SSF_REQUIRE(next != NULL);
 
-    if (!SSFASN1DecGetTLV(cursor, &tag, strOut, strLenOut, next)) return false;
+    if (!SSFASN1DecGetTLV(cursor, &tag, strOut, strLenOut, &after)) return false;
 
     /* Accept all string types per RFC 5280 Sec. 4.1.2.4 DirectoryString. New certs SHOULD use */
     /* UTF-8 / Printable; legacy certs (e.g. early Entrust roots) carry TeletexString or       */
@@ -445,6 +464,7 @@ bool SSFASN1DecGetString(const SSFASN1Cursor_t *cursor, const uint8_t **strOut, 
         return false;
     }
     if (strTagOut != NULL) *strTagOut = tag;
+    *next = after; /* Advance only on success (AUDIT ASN1-7) */
     return true;
 }
 
@@ -465,6 +485,7 @@ static bool _SSFASN1Parse2Digit(const uint8_t *p, uint32_t *valOut)
 /* --------------------------------------------------------------------------------------------- */
 bool SSFASN1DecGetTime(const SSFASN1Cursor_t *cursor, uint64_t *unixSecOut, SSFASN1Cursor_t *next)
 {
+    SSFASN1Cursor_t after;
     uint16_t tag;
     const uint8_t *value;
     uint32_t valueLen;
@@ -482,7 +503,7 @@ bool SSFASN1DecGetTime(const SSFASN1Cursor_t *cursor, uint64_t *unixSecOut, SSFA
     SSF_REQUIRE(unixSecOut != NULL);
     SSF_REQUIRE(next != NULL);
 
-    if (!SSFASN1DecGetTLV(cursor, &tag, &value, &valueLen, next)) return false;
+    if (!SSFASN1DecGetTLV(cursor, &tag, &value, &valueLen, &after)) return false;
 
     if (tag == SSF_ASN1_TAG_UTC_TIME)
     {
@@ -540,6 +561,7 @@ bool SSFASN1DecGetTime(const SSFASN1Cursor_t *cursor, uint64_t *unixSecOut, SSFA
     if (!SSFDTimeStructToUnix(&ts, &unixSys)) return false;
 
     *unixSecOut = (uint64_t)(unixSys / SSF_TICKS_PER_SEC);
+    *next = after; /* Advance only on success (AUDIT ASN1-7) */
     return true;
 }
 
@@ -598,6 +620,7 @@ static bool _SSFASN1YMDHMSToUnix(uint32_t year, uint32_t month, uint32_t day, ui
 /* --------------------------------------------------------------------------------------------- */
 bool SSFASN1DecGetDate(const SSFASN1Cursor_t *cursor, uint64_t *unixSecOut, SSFASN1Cursor_t *next)
 {
+    SSFASN1Cursor_t after;
     uint16_t tag;
     const uint8_t *value;
     uint32_t valueLen;
@@ -609,18 +632,21 @@ bool SSFASN1DecGetDate(const SSFASN1Cursor_t *cursor, uint64_t *unixSecOut, SSFA
     SSF_REQUIRE(unixSecOut != NULL);
     SSF_REQUIRE(next != NULL);
 
-    if (!SSFASN1DecGetTLV(cursor, &tag, &value, &valueLen, next)) return false;
+    if (!SSFASN1DecGetTLV(cursor, &tag, &value, &valueLen, &after)) return false;
     if (tag != SSF_ASN1_TAG_DATE) return false;
     if (valueLen != 10u) return false; /* "YYYY-MM-DD" */
     if (!_SSFASN1ParseYMD(value, &year, &month, &day)) return false;
 
-    return _SSFASN1YMDHMSToUnix(year, month, day, 0u, 0u, 0u, unixSecOut);
+    if (!_SSFASN1YMDHMSToUnix(year, month, day, 0u, 0u, 0u, unixSecOut)) return false;
+    *next = after; /* Advance only on success (AUDIT ASN1-7) */
+    return true;
 }
 
 /* --------------------------------------------------------------------------------------------- */
 bool SSFASN1DecGetDateTime(const SSFASN1Cursor_t *cursor, uint64_t *unixSecOut,
                            SSFASN1Cursor_t *next)
 {
+    SSFASN1Cursor_t after;
     uint16_t tag;
     const uint8_t *value;
     uint32_t valueLen;
@@ -635,7 +661,7 @@ bool SSFASN1DecGetDateTime(const SSFASN1Cursor_t *cursor, uint64_t *unixSecOut,
     SSF_REQUIRE(unixSecOut != NULL);
     SSF_REQUIRE(next != NULL);
 
-    if (!SSFASN1DecGetTLV(cursor, &tag, &value, &valueLen, next)) return false;
+    if (!SSFASN1DecGetTLV(cursor, &tag, &value, &valueLen, &after)) return false;
     if (tag != SSF_ASN1_TAG_DATE_TIME) return false;
     if (valueLen != 19u) return false; /* "YYYY-MM-DDTHH:MM:SS" */
 
@@ -647,7 +673,9 @@ bool SSFASN1DecGetDateTime(const SSFASN1Cursor_t *cursor, uint64_t *unixSecOut,
     if (value[16] != (uint8_t)':') return false;
     if (!_SSFASN1Parse2Digit(&value[17], &second)) return false;
 
-    return _SSFASN1YMDHMSToUnix(year, month, day, hour, minute, second, unixSecOut);
+    if (!_SSFASN1YMDHMSToUnix(year, month, day, hour, minute, second, unixSecOut)) return false;
+    *next = after; /* Advance only on success (AUDIT ASN1-7) */
+    return true;
 }
 
 /* ========================================================================================== */

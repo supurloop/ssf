@@ -330,7 +330,13 @@ static bool _SSFX509ParseExtensions(const SSFASN1Cursor_t *extsCursor, SSFX509Ce
         {
             if (SSFASN1DecPeekTag(&extInner, &tag) && tag == SSF_ASN1_TAG_BOOLEAN)
             {
-                SSFASN1DecGetBool(&extInner, &critical, &extInner);
+                /* Does the critical flag decode (AUDIT X509-6)? */
+                if (!SSFASN1DecGetBool(&extInner, &critical, &extInner))
+                {
+                    /* No, it must never silently read as non-critical */
+                    return false;
+                }
+                /* Yes */
             }
         }
 
@@ -368,7 +374,13 @@ static bool _SSFX509ParseExtensions(const SSFASN1Cursor_t *extsCursor, SSFX509Ce
                 {
                     if (SSFASN1DecPeekTag(&bcInner, &tag) && tag == SSF_ASN1_TAG_BOOLEAN)
                     {
-                        SSFASN1DecGetBool(&bcInner, &cert->isCA, &bcInner);
+                        /* Does the cA flag decode (AUDIT X509-6)? */
+                        if (!SSFASN1DecGetBool(&bcInner, &cert->isCA, &bcInner))
+                        {
+                            /* No, malformed */
+                            return false;
+                        }
+                        /* Yes */
                     }
                     if (!SSFASN1DecIsEmpty(&bcInner))
                     {
@@ -461,7 +473,14 @@ static bool _SSFX509ParseExtensions(const SSFASN1Cursor_t *extsCursor, SSFX509Ce
                 {
                     if (tag == SSF_ASN1_CONTEXT_IMPLICIT(0))
                     {
-                        SSFASN1DecGetTLV(&akidInner, &tag, &cert->akid, &cert->akidLen, &akidInner);
+                        /* Does the keyIdentifier decode (AUDIT X509-6)? */
+                        if (!SSFASN1DecGetTLV(&akidInner, &tag, &cert->akid, &cert->akidLen,
+                                              &akidInner))
+                        {
+                            /* No, malformed */
+                            return false;
+                        }
+                        /* Yes */
                     }
                 }
             }
@@ -715,8 +734,14 @@ bool SSFX509Parse(const uint8_t *der, uint32_t derLen, SSFX509Cert_t *cert)
         {
             if (SSFASN1DecPeekTag(&pkAlgInner, &tag) && tag == SSF_ASN1_TAG_OID)
             {
-                SSFASN1DecGetOIDRaw(&pkAlgInner, &cert->ecCurveOidRaw, &cert->ecCurveOidRawLen,
-                                     &pkAlgInner);
+                /* Does the curve OID decode (AUDIT X509-6)? */
+                if (!SSFASN1DecGetOIDRaw(&pkAlgInner, &cert->ecCurveOidRaw,
+                                         &cert->ecCurveOidRawLen, &pkAlgInner))
+                {
+                    /* No, malformed */
+                    return false;
+                }
+                /* Yes */
             }
         }
     }

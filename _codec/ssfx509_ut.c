@@ -5368,6 +5368,80 @@ void SSFX509UnitTest(void)
                                          &n) == true);
             SSF_ASSERT(SSFX509Parse(caOut, n, &parsed) == false);
         }
+
+        /* AUDIT X509-6: a present field that does not decode fails the parse, never defaults */
+        {
+            static const uint8_t unkOid[] = { 0x2Au, 0x03u, 0x04u };
+            static const uint8_t bcOid[] = { 0x55u, 0x1Du, 0x13u };
+            static const uint8_t akidOid[] = { 0x55u, 0x1Du, 0x23u };
+            static const uint8_t unkValue[] = { 0xAAu, 0xBBu };
+            /* critical TRUE + OCTET STRING { AA BB } as encoded, and the same 7 bytes with a */
+            /* 2-byte BOOLEAN that cannot decode followed by OCTET STRING { AA } */
+            static const uint8_t critGood[] = { 0x01u, 0x01u, 0xFFu, 0x04u, 0x02u, 0xAAu, 0xBBu };
+            static const uint8_t critBad[] = { 0x01u, 0x02u, 0xFFu, 0xFFu, 0x04u, 0x01u, 0xAAu };
+            /* BasicConstraints SEQUENCE { BOOLEAN with 2 content bytes } */
+            static const uint8_t bcBadCA[] = { 0x30u, 0x04u, 0x01u, 0x02u, 0xFFu, 0xFFu };
+            /* AKID SEQUENCE { [0] keyIdentifier whose length overruns the SEQUENCE } */
+            static const uint8_t akidOverrun[] = { 0x30u, 0x04u, 0x80u, 0x05u, 0xAAu, 0xBBu };
+            /* AKID SEQUENCE { [0] AA BB }: the control */
+            static const uint8_t akidGood[] = { 0x30u, 0x04u, 0x80u, 0x02u, 0xAAu, 0xBBu };
+            uint8_t curvePat[2u + sizeof(_utCurveOid)];
+            uint32_t at;
+
+            /* Critical flag that does not decode: must not read as non-critical */
+            _utGenBaseParams(&p, serial, caPub, (uint32_t)caPubLen);
+            p.addRawExt = true;
+            p.rawExtOid = unkOid;
+            p.rawExtOidLen = sizeof(unkOid);
+            p.rawExtValue = unkValue;
+            p.rawExtValueLen = sizeof(unkValue);
+            p.rawExtCritical = true;
+            SSF_ASSERT(SSFX509EncodeCert(caOut, sizeof(caOut), &p, fakeSig, sizeof(fakeSig),
+                                         &n) == true);
+            SSF_ASSERT(SSFX509Parse(caOut, n, &parsed) == true);
+            SSF_ASSERT((parsed.extsLen == 1u) && (parsed.exts[0].critical == true));
+            SSF_ASSERT(_utFind(caOut, n, critGood, sizeof(critGood), &at) == true);
+            memcpy(&caOut[at], critBad, sizeof(critBad));
+            SSF_ASSERT(SSFX509Parse(caOut, n, &parsed) == false);
+
+            /* cA flag that does not decode */
+            p.rawExtOid = bcOid;
+            p.rawExtOidLen = sizeof(bcOid);
+            p.rawExtValue = bcBadCA;
+            p.rawExtValueLen = sizeof(bcBadCA);
+            SSF_ASSERT(SSFX509EncodeCert(caOut, sizeof(caOut), &p, fakeSig, sizeof(fakeSig),
+                                         &n) == true);
+            SSF_ASSERT(SSFX509Parse(caOut, n, &parsed) == false);
+
+            /* AKID keyIdentifier that does not decode; a good one is read */
+            p.rawExtOid = akidOid;
+            p.rawExtOidLen = sizeof(akidOid);
+            p.rawExtCritical = false;
+            p.rawExtValue = akidGood;
+            p.rawExtValueLen = sizeof(akidGood);
+            SSF_ASSERT(SSFX509EncodeCert(caOut, sizeof(caOut), &p, fakeSig, sizeof(fakeSig),
+                                         &n) == true);
+            SSF_ASSERT(SSFX509Parse(caOut, n, &parsed) == true);
+            SSF_ASSERT((parsed.akidLen == 2u) && (parsed.akid[0] == 0xAAu));
+            p.rawExtValue = akidOverrun;
+            p.rawExtValueLen = sizeof(akidOverrun);
+            SSF_ASSERT(SSFX509EncodeCert(caOut, sizeof(caOut), &p, fakeSig, sizeof(fakeSig),
+                                         &n) == true);
+            SSF_ASSERT(SSFX509Parse(caOut, n, &parsed) == false);
+
+            /* EC curve OID whose length overruns the AlgorithmIdentifier */
+            _utGenBaseParams(&p, serial, caPub, (uint32_t)caPubLen);
+            SSF_ASSERT(SSFX509EncodeCert(caOut, sizeof(caOut), &p, fakeSig, sizeof(fakeSig),
+                                         &n) == true);
+            SSF_ASSERT(SSFX509Parse(caOut, n, &parsed) == true);
+            SSF_ASSERT(parsed.ecCurveOidRaw != NULL);
+            curvePat[0] = 0x06u;
+            curvePat[1] = (uint8_t)sizeof(_utCurveOid);
+            memcpy(&curvePat[2], _utCurveOid, sizeof(_utCurveOid));
+            SSF_ASSERT(_utFind(caOut, n, curvePat, sizeof(curvePat), &at) == true);
+            caOut[at + 1u]++;
+            SSF_ASSERT(SSFX509Parse(caOut, n, &parsed) == false);
+        }
     }
 
     /* ---- A SAN GeneralName whose length overruns its SEQUENCE fails to parse ---- */

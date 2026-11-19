@@ -52,7 +52,7 @@
 #define SSF_BN_NUM_SMALL_PRIMES    (sizeof(_ssfBNSmallPrimes) / sizeof(_ssfBNSmallPrimes[0]))
 
 #if SSF_CONFIG_BN_UNIT_TEST == 1
-/* Test-only count of variable-time SSFBNMod calls (AUDIT BN-10). */
+/* Test-only count of SSFBNMod calls (AUDIT BN-10). */
 uint32_t _SSFBNModCallCount = 0u;
 
 /* Test-only hook fired after each secret local is wiped; NULL in production (AUDIT BN-11). */

@@ -4182,7 +4182,7 @@ void SSFBNUnitTest(void)
         /* None of the odd moduli took the variable-time shift-and-subtract path */
         SSF_ASSERT(_SSFBNModShiftCalls == 0u);
 
-        /* The work depends on the lengths only: all-zero and all-ones a, same MontMul count */
+        /* The work does not depend on a's value: all-zero and all-ones a, same MontMul count */
         SSFBNCopy(&om, &SSF_BN_NIST_P256);
         SSFBNSetZero(&ox, 16u);
         _SSFBNMontMulIters = 0u;

@@ -596,8 +596,10 @@ depends only on the parity and length of `m`, which are public:
   (OPTIMIZE BN-O7). `a` is split as `hi × R + lo` with `R = 2^(32 × m->len)`; a context built
   for the call gives `a × R = MontMul(hi × R, R²) + lo × R (mod m)`, and one conversion out
   returns `a mod m`. Every product is exact because each chunk is `< R` and `R² mod m < m`.
-  The work depends only on `a->len` and `m->len`; the intermediates and the context are
-  wiped. About 5.6× faster than shift-and-subtract at 2048 mod 1024 bits on x86-64 (7.3× on
+  The work depends only on `a->len`, `m->len` and the bit length of `m` (through
+  [`SSFBNMontInit`](#montinit)'s doubling count), never on the value of `a` or on `m`'s other
+  bits; the intermediates and the context are wiped. About 5.6× faster than
+  shift-and-subtract at 2048 mod 1024 bits on x86-64 (7.3× on
   32-bit ARM), which also takes RSA's CRT split `cB mod p`, `cB mod q` off a
   secret-dependent branch.
 - **Even `m`, or wider `m`**: shift-and-subtract long division, **variable-time** (it
@@ -867,7 +869,10 @@ void SSFBNModExpMont(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBN
 
 The table-scan address pattern and per-window timing are independent of the secret
 exponent value, and the window count is fixed at `max(e->len, ctx->len) · 32 / 4` — which
-depends only on public storage lengths. Cost is ~1.25 multiplications per bit (4 squares
+depends only on public storage lengths. `SSFBNModExp` also builds its context with
+[`SSFBNMontInit`](#montinit), whose doubling count depends on the bit length of `m`; that is
+public for RSA moduli and fixed by the key size for their primes. Cost is ~1.25
+multiplications per bit (4 squares
 + 1 multiply per 4-bit window) versus 2 per bit for a bit-by-bit ladder, after
 amortising the 14-MontMul precompute. This is the primitive that RSA private operations,
 DH key exchange, and `SSFBNModInv` (via Fermat) rely on for side-channel resistance.

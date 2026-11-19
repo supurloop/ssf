@@ -1213,3 +1213,23 @@ CHANGE LOG
               would show verify +2.1 KB).
               Docs: ssfbn.md (timing table, SSFBNMod, ModMul, ModSquare, DivMod note),
               ssfrsa.md (RSA-9 note: one variable-time step left; key checks).
+  2026-11-19  BN-O7 AUDIT (Jim: "Commit then correctness and security audit", then "Yes" to the
+              fixes). Review: MontInit's R^2 is fully reduced (built from ModAdd and
+              MontSquare, both < m), so every product is < 2m and one conditional subtraction
+              suffices, also for zero top limbs and m = 1; aliasing r = a and r = m safe;
+              RSA nl <= 2 * hl at every accepted size; the CRT op's only variable-time step
+              is ModInvExt (r^-1 mod n), as ssfrsa.md now says. Timing (x86-64, 2048 mod
+              1024): nine combinations of all-zero / all-ones / random a and m within 9.83 -
+              9.96 us. 64 KB secret-residue scan after keygen and sign: clean (20 keys per
+              configuration, plus RSA-4096). Findings, both fixed (docs / comments only):
+              1. The odd path's work also depends on m's bit length (SSFBNMontInit's doubling
+                 count: 9.82 -> 10.45 us from 1024 to 993 bits at 32 limbs); ssfbn.md said
+                 lengths only. Corrected in ssfbn.md (SSFBNMod; SSFBNModExp now points to the
+                 same MontInit property) and in the BN-O7 test comment. No new leak for RSA:
+                 the CRT exponentiation already built a context on p, and prime bit lengths
+                 are fixed by key generation.
+              2. _SSFBNModCallCount was still labelled "variable-time SSFBNMod calls"; now
+                 "SSFBNMod calls" (ssfbn.h, ssfbn.c).
+              Info, unchanged: keygen and key validation still reduce by the even p - 1 and
+              q - 1 on the variable-time path (once per key; documented in ssfrsa.md).
+

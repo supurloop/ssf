@@ -306,7 +306,7 @@ extern const SSFBN_t SSF_BN_NIST_P384;
 #if SSF_CONFIG_BN_UNIT_TEST == 1
 void SSFBNUnitTest(void);
 
-/* Test-only count of variable-time SSFBNMod calls (AUDIT BN-10). */
+/* Test-only count of SSFBNMod calls (AUDIT BN-10). */
 extern uint32_t _SSFBNModCallCount;
 
 /* Test-only hook fired after each secret local is wiped (AUDIT BN-11). */

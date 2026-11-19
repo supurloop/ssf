@@ -241,9 +241,11 @@ X.509 v3 certificate support per RFC 5280, built on [`ssfasn1`](ssfasn1.md):
 - **Trace output.** Verification failures and signature-dispatch decisions are reported through a
   module-wide [`ssftls`](../_crypto/ssftls.md) trace callback installed with
   [`SSFX509SetTraceCtx()`](#ssfx509settracectx) (category `SSF_TLS_TRACE_CERT`, levels `ERROR`
-  and `DEBUG`). When no callback is installed, tracing is a no-op. This callback pointer is the
-  module's only static state; set it before concurrent use rather than while verifications are in
-  flight.
+  and `DEBUG`). Messages are compiled in only when
+  [`SSF_TLS_CONFIG_ENABLE_TRACE`](../_crypto/ssftls.md#configuration) is `1` (default `0`);
+  otherwise the callback is never called. When no callback is installed, tracing is a no-op.
+  This callback pointer is the module's only static state; set it before concurrent use rather
+  than while verifications are in flight.
 - **Stack usage is dominated by the chain verifier.** [`SSFX509VerifyChain()`](#ssfx509verifychain)
   holds `SSF_X509_CONFIG_MAX_CHAIN_DEPTH` parsed certificates plus one trust-anchor parse on the
   stack. Generation uses no scratch buffers: each nesting level of the encoder adds well under
@@ -741,6 +743,8 @@ Installs the module-wide trace callback used by the verifier. `fnOpt` has the sh
 [`SSFTLSTraceFn_t`](../_crypto/ssftls.md) and receives the level (`SSF_TLS_TRACE_ERROR` or
 `SSF_TLS_TRACE_DEBUG`), the category (always `SSF_TLS_TRACE_CERT`), a formatted message, and
 `userCtxOpt`. Pass `NULL` to disable tracing. Set this before starting concurrent verifications.
+With [`SSF_TLS_CONFIG_ENABLE_TRACE`](../_crypto/ssftls.md#configuration) at its default `0` the
+callback is stored but never called.
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|

@@ -145,11 +145,14 @@ already call `SSFHKDFExpand`; only the Finished computation calls HMAC directly.
   only in a stack buffer that [`SSFTLSComputeFinished`](#ssftlscomputefinished)
   `SSFCryptSecureZero`s before returning, so callers never see it and it does not linger
   on the stack.
-- **Trace callbacks are per-connection and zero-overhead when disabled.** A caller that
-  does not install a `SSFTLSTraceCtx_t` — or that installs one with `fn == NULL` — pays
-  only a single null-check per would-be trace point (the `SSF_TLS_TRACE_*` macros
-  short-circuit). Installing a trace callback formats into a 256-byte stack buffer per
-  call; keep this in mind if stack is tight.
+- **Tracing is compiled out by default.** The `SSF_TLS_TRACE_*` macros (used by
+  [`ssfx509`](../_codec/ssfx509.md) and [`ssfcms`](ssfcms.md)) expand to nothing unless
+  [`SSF_TLS_CONFIG_ENABLE_TRACE`](#configuration) is `1`. Compiled out, they cost no flash
+  (about 5 KB of messages and call setup on Cortex-M), no `snprintf` dependency, and no
+  stack. Compiled in, a caller that installs no callback — or one with `fn == NULL` — pays a
+  single null-check per trace point, and an installed callback formats into a 256-byte stack
+  buffer per call; keep this in mind if stack is tight. The x509 and CMS unit-test builds
+  turn tracing on, since they check the messages.
 - **Configuration options are forward-looking.** `SSF_TLS_CONFIG_MAX_RECORD_SIZE`,
   `SSF_TLS_CONFIG_MAX_CHAIN_DEPTH`, `SSF_TLS_CONFIG_MAX_TRUSTED_CAS`,
   `SSF_TLS_CONFIG_PSK_ENABLE`, `SSF_TLS_CONFIG_TICKET_LIFETIME_SEC`, and
@@ -189,6 +192,7 @@ for a future handshake / transport layer.
 | `SSF_TLS_CONFIG_PSK_ENABLE` | `1` | Reserved for PSK handshake support. Unused today. |
 | `SSF_TLS_CONFIG_TICKET_LIFETIME_SEC` | `3600` | Reserved for session-ticket lifetime. Unused today. |
 | `SSF_TLS_CONFIG_MAX_ALPN_LEN` | `32` | Reserved for ALPN protocol list sizing. Unused today. |
+| `SSF_TLS_CONFIG_ENABLE_TRACE` | `0` (`1` when `SSF_CONFIG_X509_UNIT_TEST` or `SSF_CONFIG_CMS_UNIT_TEST` is `1`) | `1` compiles in the trace messages that `SSFX509SetTraceCtx()` / `SSFCMSSetTraceCtx()` callbacks receive. `0` compiles them out: on Cortex-M about 3.7 KB less flash in ssfx509 and 1.4 KB in ssfcms, no `snprintf` reference (newlib-nano's formatter is about 3.8 KB, full newlib's about 26 KB, if nothing else uses it), and 240-272 B less stack in each tracing function. The `SetTraceCtx` functions remain but no message is sent. |
 
 <a id="api-summary"></a>
 

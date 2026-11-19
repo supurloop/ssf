@@ -494,6 +494,12 @@ static uint32_t _utScratchLen;
 /* Verifier trace callback: counts calls and keeps the last level, category, message and ctx.    */
 /* --------------------------------------------------------------------------------------------- */
 static uint32_t _utTraceCount;
+/* Trace checks run when tracing is compiled in; with it out the callback must never fire */
+#if SSF_TLS_CONFIG_ENABLE_TRACE == 1
+#define _UT_TRACE_ASSERT(x) SSF_ASSERT(x)
+#else
+#define _UT_TRACE_ASSERT(x) SSF_ASSERT(_utTraceCount == 0u)
+#endif
 static uint32_t _utTraceErrors;
 static int _utTraceLastLevel;
 static int _utTraceLastCategory;
@@ -6631,32 +6637,32 @@ void SSFX509UnitTest(void)
         /* A hostname mismatch reports one ERROR in the CERT category naming the hostname */
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, "nope.test",
                                       c.notBefore + 1u) == false);
-        SSF_ASSERT(_utTraceErrors == 1u);
-        SSF_ASSERT(_utTraceLastLevel == (int)SSF_TLS_TRACE_ERROR);
-        SSF_ASSERT(_utTraceLastCategory == (int)SSF_TLS_TRACE_CERT);
-        SSF_ASSERT(_utTraceLastCtx == (void *)&marker);
-        SSF_ASSERT(_utContains(_utTraceLastMsg, "nope.test") == true);
+        _UT_TRACE_ASSERT(_utTraceErrors == 1u);
+        _UT_TRACE_ASSERT(_utTraceLastLevel == (int)SSF_TLS_TRACE_ERROR);
+        _UT_TRACE_ASSERT(_utTraceLastCategory == (int)SSF_TLS_TRACE_CERT);
+        _UT_TRACE_ASSERT(_utTraceLastCtx == (void *)&marker);
+        _UT_TRACE_ASSERT(_utContains(_utTraceLastMsg, "nope.test") == true);
 
         /* An expired chain reports the validity failure */
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, "test.ssf.local",
                                       c.notAfter + 1u) == false);
-        SSF_ASSERT(_utTraceErrors == 2u);
-        SSF_ASSERT(_utContains(_utTraceLastMsg, "not valid") == true);
+        _UT_TRACE_ASSERT(_utTraceErrors == 2u);
+        _UT_TRACE_ASSERT(_utContains(_utTraceLastMsg, "not valid") == true);
 
         /* A successful verification emits DEBUG traces and no ERROR */
         before = _utTraceCount;
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, "test.ssf.local",
                                       c.notBefore + 1u) == true);
-        SSF_ASSERT(_utTraceCount > before);
-        SSF_ASSERT(_utTraceErrors == 2u);
-        SSF_ASSERT(_utTraceLastLevel == (int)SSF_TLS_TRACE_DEBUG);
+        _UT_TRACE_ASSERT(_utTraceCount > before);
+        _UT_TRACE_ASSERT(_utTraceErrors == 2u);
+        _UT_TRACE_ASSERT(_utTraceLastLevel == (int)SSF_TLS_TRACE_DEBUG);
 
         /* NULL disables tracing: a failure is still a failure but produces no callback */
         SSFX509SetTraceCtx(NULL, NULL);
         before = _utTraceCount;
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, "nope.test",
                                       c.notBefore + 1u) == false);
-        SSF_ASSERT(_utTraceCount == before);
+        _UT_TRACE_ASSERT(_utTraceCount == before);
     }
 
     /* ---- Validity edges: expired or future intermediate, expired anchor, inverted window, ---- */
@@ -7439,8 +7445,8 @@ void SSFX509UnitTest(void)
         SSFX509SetTraceCtx(_utTrace, &marker);
         _PSS_CERT(pssSalt33);
         SSF_ASSERT(SSFX509VerifyCertSignature(&rsaCert, &rsaCert) == false);
-        SSF_ASSERT(_utTraceErrors == 1u);
-        SSF_ASSERT(_utContains(_utTraceLastMsg, "saltLength") == true);
+        _UT_TRACE_ASSERT(_utTraceErrors == 1u);
+        _UT_TRACE_ASSERT(_utContains(_utTraceLastMsg, "saltLength") == true);
         SSFX509SetTraceCtx(NULL, NULL);
 
         /* An unrecognized hashAlgorithm OID fails verification, never treated as SHA-256 */

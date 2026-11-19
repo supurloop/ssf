@@ -94,6 +94,12 @@ static bool _utSpanIn(const uint8_t *p, uint32_t len, const uint8_t *base, uint3
 /* Verifier trace callback: counts calls and keeps the last level and message.                   */
 /* --------------------------------------------------------------------------------------------- */
 static uint32_t _utTraceCount;
+/* Trace checks run when tracing is compiled in; with it out the callback must never fire */
+#if SSF_TLS_CONFIG_ENABLE_TRACE == 1
+#define _UT_TRACE_ASSERT(x) SSF_ASSERT(x)
+#else
+#define _UT_TRACE_ASSERT(x) SSF_ASSERT(_utTraceCount == 0u)
+#endif
 static uint32_t _utTraceErrors;
 static int _utTraceLastLevel;
 static int _utTraceLastCategory;
@@ -1296,8 +1302,8 @@ void SSFCMSUnitTest(void)
     SSF_ASSERT(SSFCMSVerifyDigest(&sd, sha256, sizeof(sha256), SSF_CMS_DIGEST_SHA256, trust,
                                   trustLen, 1u, now, &res) == false);
     SSFCMSSetTraceCtx(NULL, NULL);
-    SSF_ASSERT(_utTraceSawChainFail == true);
-    SSF_ASSERT(_utTraceSawSigFail == false);
+    _UT_TRACE_ASSERT(_utTraceSawChainFail == true);
+    _UT_TRACE_ASSERT(_utTraceSawSigFail == false);
 
     /* Each check still fails on its own: good signature with an unrelated anchor, and a bad */
     /* signature with the right anchor.                                                      */
@@ -1313,8 +1319,8 @@ void SSFCMSUnitTest(void)
     SSF_ASSERT(SSFCMSVerifyDigest(&sd, sha256, sizeof(sha256), SSF_CMS_DIGEST_SHA256, trust,
                                   trustLen, 1u, now, &res) == false);
     SSFCMSSetTraceCtx(NULL, NULL);
-    SSF_ASSERT(_utTraceSawSigFail == true);
-    SSF_ASSERT(_utTraceSawChainFail == false);
+    _UT_TRACE_ASSERT(_utTraceSawSigFail == true);
+    _UT_TRACE_ASSERT(_utTraceSawChainFail == false);
 
     /* ---- AUDIT CMS-4: chain building follows the key identifier, not just the issuer name ---- */
     /* Two embedded intermediates share the subject "SSF Rollover CA" (old key first, as      */
@@ -1348,17 +1354,17 @@ void SSFCMSUnitTest(void)
     SSFCMSSetTraceCtx(_utTrace, NULL);
     SSF_ASSERT(SSFCMSVerifyDigest(&sd, bad, sizeof(bad), SSF_CMS_DIGEST_SHA256, trust, trustLen,
                                   1u, now, &res) == false);
-    SSF_ASSERT(_utTraceErrors >= 1u);
-    SSF_ASSERT(_utTraceLastLevel == (int)SSF_TLS_TRACE_ERROR);
-    SSF_ASSERT(_utContains(_utTraceLastMsg, "CMS:") == true);
+    _UT_TRACE_ASSERT(_utTraceErrors >= 1u);
+    _UT_TRACE_ASSERT(_utTraceLastLevel == (int)SSF_TLS_TRACE_ERROR);
+    _UT_TRACE_ASSERT(_utContains(_utTraceLastMsg, "CMS:") == true);
     SSF_ASSERT(SSFCMSVerifyDigest(&sd, sha256, sizeof(sha256), SSF_CMS_DIGEST_SHA256, trust,
                                   trustLen, 1u, now, &res) == true);
-    SSF_ASSERT(_utTraceLastLevel == (int)SSF_TLS_TRACE_DEBUG);
+    _UT_TRACE_ASSERT(_utTraceLastLevel == (int)SSF_TLS_TRACE_DEBUG);
     SSFCMSSetTraceCtx(NULL, NULL);
     i = _utTraceCount;
     SSF_ASSERT(SSFCMSVerifyDigest(&sd, bad, sizeof(bad), SSF_CMS_DIGEST_SHA256, trust, trustLen,
                                   1u, now, &res) == false);
-    SSF_ASSERT(_utTraceCount == i);
+    _UT_TRACE_ASSERT(_utTraceCount == i);
 
     /* ---- Preconditions ---- */
     SSF_ASSERT_TEST(SSFCMSParse(NULL, n, &sd));
@@ -1494,7 +1500,7 @@ void SSFCMSUnitTest(void)
         _utTraceFirstMsg[0] = '\0';
         SSFCMSSetTraceCtx(_utTrace, NULL);
         SSF_ASSERT(_VERIFY256() == false);
-        SSF_ASSERT(_utContains(_utTraceFirstMsg, "CMSAlgorithmProtection") == true);
+        _UT_TRACE_ASSERT(_utContains(_utTraceFirstMsg, "CMSAlgorithmProtection") == true);
         SSFCMSSetTraceCtx(NULL, NULL);
         _SPEC_RESET();
         s.algProt = true;
@@ -1987,8 +1993,8 @@ void SSFCMSUnitTest(void)
         SSFCMSSetTraceCtx(_utTrace, &marker);
         SSF_ASSERT(SSFCMSVerifyDigest(&sd, bad, sizeof(bad), SSF_CMS_DIGEST_SHA256, trust, trustLen,
                                       1u, now, &res) == false);
-        SSF_ASSERT(_utTraceLastCategory == (int)SSF_TLS_TRACE_CERT);
-        SSF_ASSERT(_utTraceLastCtx == (void *)&marker);
+        _UT_TRACE_ASSERT(_utTraceLastCategory == (int)SSF_TLS_TRACE_CERT);
+        _UT_TRACE_ASSERT(_utTraceLastCtx == (void *)&marker);
         SSFCMSSetTraceCtx(NULL, NULL);
 
         #undef _VERIFY256
@@ -2140,7 +2146,7 @@ void SSFCMSUnitTest(void)
         SSFCMSSetTraceCtx(_utTrace, NULL);
         SSF_ASSERT(SSFCMSVerifyDigest(&sd, fwDigest, sizeof(fwDigest), SSF_CMS_DIGEST_SHA256, trust,
                                       trustLen, 1u, now, &res) == false);
-        SSF_ASSERT(_utContains(_utTraceFirstMsg, "CMSAlgorithmProtection") == true);
+        _UT_TRACE_ASSERT(_utContains(_utTraceFirstMsg, "CMSAlgorithmProtection") == true);
         SSFCMSSetTraceCtx(NULL, NULL);
         buf[at] = 0x01u;
 

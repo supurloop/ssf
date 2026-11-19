@@ -109,8 +109,9 @@ against a caller-supplied trust store. There is no encoder: the module verifies,
   `signing-time`, which is reported in the result for the caller's own policy.
 - **Trace output.** Failure reasons and the verified signer are reported through a module-wide
   [`ssftls`](ssftls.md) trace callback installed with [`SSFCMSSetTraceCtx()`](#ssfcmssettracectx),
-  category `SSF_TLS_TRACE_CERT`. Messages begin with `CMS:`. The callback pointer is the module's
-  only static state.
+  category `SSF_TLS_TRACE_CERT`. Messages begin with `CMS:`, and are compiled in only when
+  [`SSF_TLS_CONFIG_ENABLE_TRACE`](ssftls.md#configuration) is `1` (default `0`). The callback
+  pointer is the module's only static state.
 - **Stack usage.** The verifier holds two parsed `SSFX509Cert_t` structures, a re-tagging buffer of
   `SSF_CMS_CONFIG_MAX_SIGNED_ATTRS_LEN` bytes and the chain arrays, on top of whatever
   `SSFX509VerifyChainPurpose()` uses (see the `ssfx509` footnotes in the [SSF
@@ -306,6 +307,8 @@ void SSFCMSSetTraceCtx(void (*fnOpt)(int, int, const char *, void *), void *user
 Installs the module-wide trace callback, with the shape of
 [`SSFTLSTraceFn_t`](ssftls.md), receiving `SSF_TLS_TRACE_ERROR` or `SSF_TLS_TRACE_DEBUG`, the
 category `SSF_TLS_TRACE_CERT`, a formatted message and `userCtxOpt`. Pass `NULL` to disable.
+With [`SSF_TLS_CONFIG_ENABLE_TRACE`](ssftls.md#configuration) at its default `0` the callback is
+stored but never called.
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|

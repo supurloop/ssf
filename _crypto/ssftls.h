@@ -76,6 +76,7 @@ typedef struct SSFTLSTraceCtx
     void *userCtx;
 } SSFTLSTraceCtx_t;
 
+#if SSF_TLS_CONFIG_ENABLE_TRACE == 1
 /* Internal trace macro: formats and invokes the callback if set. Zero overhead when fn is NULL. */
 #define _SSF_TLS_TRACE(tctx, level, cat, ...) do { \
     if ((tctx) != NULL && (tctx)->fn != NULL) { \
@@ -83,6 +84,10 @@ typedef struct SSFTLSTraceCtx
         snprintf(_tlsTraceBuf, sizeof(_tlsTraceBuf), __VA_ARGS__); \
         (tctx)->fn(level, cat, _tlsTraceBuf, (tctx)->userCtx); \
     } } while (0)
+#else
+/* Tracing compiled out (OPTIMIZE X509-O1 / CMS-O1): no strings, no snprintf, no buffer */
+#define _SSF_TLS_TRACE(tctx, level, cat, ...) do { (void)(tctx); } while (0)
+#endif /* SSF_TLS_CONFIG_ENABLE_TRACE */
 
 /* Convenience macros -- use T as the SSFTLSTraceCtx_t pointer */
 #define SSF_TLS_TRACE_HS_INFO(T, ...)    _SSF_TLS_TRACE(T, SSF_TLS_TRACE_INFO, SSF_TLS_TRACE_HANDSHAKE, __VA_ARGS__)

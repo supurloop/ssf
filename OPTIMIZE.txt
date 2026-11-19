@@ -63,7 +63,7 @@ SUMMARY
   BN-O5    Speed         RSA sign -1.8 ms (about -35% after O1..O3)            M       OPEN
   BN-O6    Speed+stack   ECC 1.5-2.5x on Cortex-M with RSA-4096 enabled (est.) M       OPEN
   ED-O1    Size          -7 KB (Ed25519 scalar arithmetic)                     M       OPEN
-  X509-O1  Size          -4.5 KB x509, -1.7 KB cms measured, plus printf       S       OPEN
+  X509-O1  Size          -3.7 KB x509, -1.4 KB cms (Cortex-M4), plus printf    S       DONE
            (CMS-O1)
   BN-O4    Speed         RSA sign -0.6 ms                                      M       OPEN
   ED-O3    Speed         Ed25519 verify 1.4x                                   M       OPEN
@@ -605,7 +605,7 @@ TLS-O1  Speed  OPEN  Effort M
 ssfcms
 ----------------------------------------------------------------------------------------------
 
-CMS-O1  Size  OPEN  Effort S  (same change as X509-O1)
+CMS-O1  Size  DONE (2026-11-19)  Effort S  (same change as X509-O1)
   Where:     17 SSF_TLS_TRACE_CERT_* call sites
   Change:    Compile-time trace switch (X509-O1).
   Probable:  -1654 B measured (gcc -Os x86-64), 828 B of it format strings.
@@ -619,7 +619,7 @@ CMS-O1  Size  OPEN  Effort S  (same change as X509-O1)
 ssfx509
 ----------------------------------------------------------------------------------------------
 
-X509-O1  Size  OPEN  Effort S
+X509-O1  Size  DONE (2026-11-19)  Effort S
   Where:     40 SSF_TLS_TRACE_CERT_ERROR / DEBUG call sites. _SSF_TLS_TRACE is gated only at
              run time (callback pointer), so every build carries the format strings, the
              snprintf argument setup at each site, a 256-byte buffer in the frame of each
@@ -662,6 +662,15 @@ X509-O4  Stack  OPEN  Effort L
 
   Reviewed, no change worth making: SSFX509Parse (4 KB, one pass, every check an RFC 5280
   rule from the AUDIT files).
+
+TRACE-1  Portability  OPEN  Effort S  (found 2026-11-19 during X509-O1)
+  Where:     ssfx509.c and ssfcms.c trace format strings (23 sites)
+  Problem:   uint32_t arguments printed with %u. On arm-none-eabi uint32_t is unsigned long,
+             so gcc -Wall reports 23 -Wformat mismatches when tracing is compiled in. Harmless
+             on 32-bit ARM (both types are 32 bits) but undefined behaviour by the letter, and
+             wrong on any LP64 target where uint32_t were unsigned long.
+  Change:    Cast the arguments to (unsigned int), or use PRIu32 from <inttypes.h>.
+  Probable:  Zero size or speed effect; -Wall-clean trace builds on Cortex-M.
 
 ----------------------------------------------------------------------------------------------
 CHANGE LOG
@@ -773,3 +782,31 @@ CHANGE LOG
               restore the pragma if it reports C6385.
               GREEN x86-64: ssfbn, ssfrsa, ssfec, ssfecdsa, ssfx509, ssfcms, ssfbase64url,
               ssfmatch. Library code unchanged by this follow-up (test and docs only).
+  2026-11-19  X509-O1 / CMS-O1 DONE (Jim chose default 0, tracing off). New option
+              SSF_TLS_CONFIG_ENABLE_TRACE in _opt/ssftls_opt.h (#ifndef-guarded, so -D or a
+              project copy overrides it). Default 0, or 1 when SSF_CONFIG_X509_UNIT_TEST or
+              SSF_CONFIG_CMS_UNIT_TEST is 1, since those suites check trace messages. ssftls.h
+              defines _SSF_TLS_TRACE as the snprintf + callback block only when it is 1, and
+              otherwise as do { (void)(tctx); } while (0). SSFX509SetTraceCtx /
+              SSFCMSSetTraceCtx are unchanged (they store the callback, which is then never
+              called). Behaviour change: builds that relied on trace messages must set it to 1.
+              Tests: the 26 trace-state assertions in ssfx509_ut.c and ssfcms_ut.c (13 each)
+              use _UT_TRACE_ASSERT, which with tracing off checks that the callback never fired
+              (_utTraceCount == 0) at each of those points. RED: built with
+              -DSSF_TLS_CONFIG_ENABLE_TRACE=0 before the ssftls.h change, ssfcms_ut.c:1305
+              and ssfx509_ut.c:6640 (callback still fired).
+              GREEN x86-64 with tracing on (default test build) and forced off: ssfx509,
+              ssfcms, ssfbase64url, ssfmatch. Warnings with tracing off: none new (x86-64 0;
+              Cortex-M4 only the 2 pre-existing SetTraceCtx function-cast warnings).
+              Size (arm-none-eabi-gcc -Os, on -> off): Cortex-M4 ssfx509 16512 -> 12819 B
+              (-3693), ssfcms 5174 -> 3809 B (-1365); Cortex-M0+ 17882 -> 14113 B (-3769),
+              5782 -> 4317 B (-1465). Neither object references snprintf when off (newlib-nano
+              formatter 3781 B, full newlib 26600 B in a minimal link, saved if nothing else
+              uses it).
+              Stack (Cortex-M4, on -> off): SSFX509VerifyChainPurpose 8360 -> 8088 B (-272, the
+              module's peak), SSFX509VerifySignature 440 -> 200 (-240), _SSFCMSVerifySigner
+              2792 -> 2536, SSFCMSVerifyAttached 320 -> 64, SSFCMSVerifyDigest 328 -> 72
+              (-256 each); Cortex-M0+ the same within 8 B. Speed: no change.
+              Docs: ssftls.md (trace note, configuration row), ssfx509.md and ssfcms.md (trace
+              notes and SetTraceCtx descriptions).
+              Found while measuring, pre-existing: TRACE-1 (ssfx509 section), OPEN.

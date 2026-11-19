@@ -129,7 +129,7 @@ ASN1-1  High  FIXED (2026-11-18)  [demonstrated] [verified 2026-11-18]
              SSFASN1DecGetInt can use too (see ASN1-3) (recommended)
              (2) Change the .md to say the value is an unsigned magnitude (not recommended).
 
-ASN1-2  Medium  OPEN  [demonstrated]
+ASN1-2  Medium  FIXED (2026-11-18)  [demonstrated]
   Location:  ssfasn1.c:84-97 (_SSFASN1ParseTL)
   Problem:   Long-form lengths are not checked for minimality. A length below 0x80 in long
              form is accepted (30 81 03), and so are leading zero length octets
@@ -1267,3 +1267,14 @@ CHANGE LOG
               critical flag parsed as non-critical). GREEN: ssfasn1, ssfx509, ssfcms, ssfrsa,
               ssfecdsa, ssfbase64url, ssfmatch (ASN1, RSA and ECDSA unit tests enabled for the
               run; flags restored).
+  2026-11-18  ASN1-2 FIXED via option 1. _SSFASN1ParseTL rejects a long-form length whose first
+              length octet is 0x00 or whose value is below 0x80 (X.690 10.1 shortest form), so
+              every decoder, PeekTag and Skip included, refuses non-minimal lengths. The encoder
+              already emitted minimal lengths. ssfecdsa's own strict signature parser is left
+              as is (simplifying it would be a _crypto change). ssfasn1.md lists the new
+              failure. Test block "AUDIT ASN1-2" in ssfasn1_ut.c: 30 81 03, 30 82 00 03,
+              30 84 00 00 00 03 and 30 82 00 80 fail OpenConstructed, GetTLV, Skip and
+              PeekTag; 30 81 80 (128 bytes) and 30 82 01 00 (256 bytes) still decode. No
+              existing fixture used a non-minimal length. RED: ssfasn1_ut.c:132. GREEN:
+              ssfasn1, ssfx509, ssfcms, ssfrsa, ssfecdsa, ssfbase64url, ssfmatch (ASN1, RSA and
+              ECDSA unit tests enabled for the run; flags restored).

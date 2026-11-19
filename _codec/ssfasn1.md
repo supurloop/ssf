@@ -72,8 +72,9 @@ context-implicit constructed, etc.).
   or SET. Holding two cursors simultaneously (e.g., one inside an opened SEQUENCE and one
   for the parent) is the normal pattern.
 - **All decoders return `bool`.** `false` is returned on any DER malformation: tag
-  mismatch, length out-of-range, truncated buffer, invalid encoding (e.g., an INTEGER
-  with non-minimal sign byte). On `false`, all output parameters are left undefined and
+  mismatch, length out-of-range, truncated buffer, a length not in its shortest form (long
+  form below 128, or a leading `0x00` length octet; X.690 §10.1), indefinite length, invalid
+  encoding (e.g., an INTEGER with non-minimal sign byte). On `false`, all output parameters are left undefined and
   `*next` is not advanced — the caller must treat the decode as having consumed nothing.
 - **Encoders use the two-pass measure-then-write pattern.** Call any encoder with
   `buf == NULL` and `bufSize == 0` to compute the required byte count into `*bytesWritten`

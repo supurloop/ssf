@@ -97,6 +97,56 @@ void SSFASN1UnitTest(void)
         SSF_ASSERT(val == 0xDEADBEEFCAFEull);
     }
 
+    /* ---- AUDIT ASN1-2: long-form lengths must be minimal (X.690 10.1) ---- */
+    {
+        static const uint8_t len81For3[] = { 0x30u, 0x81u, 0x03u, 0x02u, 0x01u, 0x05u };
+        static const uint8_t len82For3[] = { 0x30u, 0x82u, 0x00u, 0x03u, 0x02u, 0x01u, 0x05u };
+        static const uint8_t len84For3[] = {
+            0x30u, 0x84u, 0x00u, 0x00u, 0x00u, 0x03u, 0x02u, 0x01u, 0x05u
+        };
+        static uint8_t len82For128[4u + 128u];
+        static uint8_t len81For128[3u + 128u];
+        static uint8_t len82For256[4u + 256u];
+        static const struct { const uint8_t *der; uint32_t len; } bad[] = {
+            { len81For3, sizeof(len81For3) }, { len82For3, sizeof(len82For3) },
+            { len84For3, sizeof(len84For3) }, { len82For128, sizeof(len82For128) }
+        };
+        SSFASN1Cursor_t inner;
+        const uint8_t *val;
+        uint32_t valLen;
+        uint16_t tag;
+        uint32_t i;
+
+        memset(len82For128, 0, sizeof(len82For128));
+        len82For128[0] = 0x30u; len82For128[1] = 0x82u; len82For128[2] = 0x00u;
+        len82For128[3] = 0x80u;
+        memset(len81For128, 0, sizeof(len81For128));
+        len81For128[0] = 0x30u; len81For128[1] = 0x81u; len81For128[2] = 0x80u;
+        memset(len82For256, 0, sizeof(len82For256));
+        len82For256[0] = 0x30u; len82For256[1] = 0x82u; len82For256[2] = 0x01u;
+        len82For256[3] = 0x00u;
+
+        for (i = 0; i < (uint32_t)(sizeof(bad) / sizeof(bad[0])); i++)
+        {
+            cursor.buf = bad[i].der; cursor.bufLen = bad[i].len;
+            SSF_ASSERT(SSFASN1DecOpenConstructed(&cursor, SSF_ASN1_TAG_SEQUENCE, &inner,
+                                                 &next) == false);
+            SSF_ASSERT(SSFASN1DecGetTLV(&cursor, &tag, &val, &valLen, &next) == false);
+            SSF_ASSERT(SSFASN1DecSkip(&cursor, &next) == false);
+            SSF_ASSERT(SSFASN1DecPeekTag(&cursor, &tag) == false);
+        }
+
+        /* Minimal long forms still decode */
+        cursor.buf = len81For128; cursor.bufLen = sizeof(len81For128);
+        SSF_ASSERT(SSFASN1DecOpenConstructed(&cursor, SSF_ASN1_TAG_SEQUENCE, &inner,
+                                             &next) == true);
+        SSF_ASSERT((inner.bufLen == 128u) && (next.bufLen == 0u));
+        cursor.buf = len82For256; cursor.bufLen = sizeof(len82For256);
+        SSF_ASSERT(SSFASN1DecOpenConstructed(&cursor, SSF_ASN1_TAG_SEQUENCE, &inner,
+                                             &next) == true);
+        SSF_ASSERT((inner.bufLen == 256u) && (next.bufLen == 0u));
+    }
+
     /* ---- AUDIT ASN1-7: a decoder that returns false leaves *next untouched ---- */
     {
         /* Each input is followed by a trailing NULL so an unwanted advance is visible */

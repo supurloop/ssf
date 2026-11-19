@@ -88,12 +88,28 @@ static uint32_t _SSFASN1ParseTL(const uint8_t *buf, uint32_t bufLen, uint16_t *t
         if (numLenBytes > 4u) return 0; /* Too large */
         if (pos + numLenBytes > bufLen) return 0;
 
+        /* Is the long form longer than needed: a leading 0x00 octet (AUDIT ASN1-2)? */
+        if (buf[pos] == 0x00u)
+        {
+            /* Yes, DER requires the minimum number of length octets (X.690 10.1) */
+            return 0;
+        }
+        /* No */
+
         len = 0;
         while (numLenBytes > 0u)
         {
             len = (len << 8) | buf[pos++];
             numLenBytes--;
         }
+
+        /* Would the short form have held this length? */
+        if (len < 0x80u)
+        {
+            /* Yes, so the long form is not DER */
+            return 0;
+        }
+        /* No, minimal long form */
     }
 
     *contentLenOut = len;

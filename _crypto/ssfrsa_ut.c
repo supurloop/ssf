@@ -618,6 +618,27 @@ static void _SSFRSAUTCloseSeq(uint8_t *der, uint32_t pos)
     der[3] = (uint8_t)(content & 0xFFu);
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* UT helper: append INTEGER of mag (< 127) bytes msb, 0xFF.., lsb in short-form DER (RSA-11).   */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFRSAUTPutShortIntTLV(uint8_t *der, uint32_t *pos, uint32_t mag, uint8_t msb,
+                                    uint8_t lsb)
+{
+    uint32_t i;
+
+    SSF_REQUIRE(der != NULL);
+    SSF_REQUIRE(pos != NULL);
+    SSF_REQUIRE(mag >= 2u);
+    SSF_REQUIRE(mag < 127u);
+    SSF_REQUIRE((msb & 0x80u) == 0u);
+
+    der[(*pos)++] = 0x02u;
+    der[(*pos)++] = (uint8_t)mag;
+    der[(*pos)++] = msb;
+    for (i = 1u; i < (mag - 1u); i++) { der[(*pos)++] = 0xFFu; }
+    der[(*pos)++] = lsb;
+}
+
 void SSFRSAUnitTest(void)
 {
 #if SSF_RSA_ANY_ENABLED == 0
@@ -658,6 +679,40 @@ void SSFRSAUnitTest(void)
         SSF_ASSERT((size_t)p <= sizeof(der));
         SSF_ASSERT(SSFRSAPubKeyIsValid(der, (size_t)p) == false);
     }
+
+    /* ---- AUDIT RSA-11: CRT primes narrower than half the modulus are refused, not trapped ---- */
+    /* The decoder bounded p only from above. A 2048-bit n with 16-byte p and q decoded, then  */
+    /* the sign paths' SSFBNMod(cB, p) tripped SSF_REQUIRE(a->len <= 2 * m->len). Sign must   */
+    /* return false; IsValid already rejects such a key and must keep doing so.               */
+#if SSF_RSA_CONFIG_ENABLE_2048 == 1
+    {
+        static uint8_t der[4u + 3u + (3u * 260u) + (5u * 20u)];
+        static uint8_t sig[SSF_RSA_MAX_KEY_BYTES];
+        uint8_t hash[32];
+        size_t sigLen = 0u;
+        uint32_t p = 4u;
+        uint32_t i;
+
+        memset(hash, 0x5A, sizeof(hash));
+        der[p++] = 0x02u; der[p++] = 0x01u; der[p++] = 0x00u;
+        _SSFRSAUTPutIntTLV(der, &p, 256u, 0xC5u, 0x01u);
+        _SSFRSAUTPutShortIntTLV(der, &p, 3u, 0x01u, 0x01u);
+        _SSFRSAUTPutIntTLV(der, &p, 256u, 0x41u, 0x01u);
+        for (i = 0; i < 5u; i++) { _SSFRSAUTPutShortIntTLV(der, &p, 16u, 0x41u, 0x03u); }
+        _SSFRSAUTCloseSeq(der, p);
+        SSF_ASSERT((size_t)p <= sizeof(der));
+
+        SSF_ASSERT(SSFRSAPrivKeyIsValid(der, (size_t)p) == false);
+#if SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1
+        SSF_ASSERT(SSFRSASignPKCS1(der, (size_t)p, SSF_RSA_HASH_SHA256, hash, sizeof(hash),
+                                   sig, sizeof(sig), &sigLen) == false);
+#endif /* SSF_RSA_CONFIG_ENABLE_PKCS1_V15 */
+#if SSF_RSA_CONFIG_ENABLE_PSS == 1
+        SSF_ASSERT(SSFRSASignPSS(der, (size_t)p, SSF_RSA_HASH_SHA256, hash, sizeof(hash),
+                                 sig, sizeof(sig), &sigLen) == false);
+#endif /* SSF_RSA_CONFIG_ENABLE_PSS */
+    }
+#endif /* SSF_RSA_CONFIG_ENABLE_2048 */
 
     /* ---- AUDIT RSA-6: PSS verify checks the byte dropped when bitLen(n) = 1 mod 8 ---- */
     /* For a 2049-bit modulus keyBytes = 257 but emLen = 256, so I2OSP(m, emLen) must fail when  */

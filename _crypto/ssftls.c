@@ -195,6 +195,9 @@ void SSFTLSTranscriptUpdate(SSFTLSTranscript_t *t, const uint8_t *data, size_t l
 {
     SSF_REQUIRE(t != NULL);
     SSF_REQUIRE((data != NULL) || (len == 0));
+#if SIZE_MAX > UINT32_MAX
+    SSF_REQUIRE(len <= (size_t)UINT32_MAX);
+#endif
 
     switch (t->hmac)
     {
@@ -349,6 +352,10 @@ bool SSFTLSRecordEncrypt(SSFTLSRecordState_t *state, uint8_t contentType, const 
     SSF_REQUIRE(pt != NULL);
     SSF_REQUIRE(record != NULL);
     SSF_REQUIRE(recordLen != NULL);
+    SSF_REQUIRE(contentType != 0u);
+    SSF_REQUIRE((pt == &record[SSF_TLS_RECORD_HEADER_SIZE]) ||
+                ((((uintptr_t)pt) + ptLen) <= ((uintptr_t)record)) ||
+                (((uintptr_t)pt) >= (((uintptr_t)record) + recordSize)));
 
     /* RFC 8446 Sec. 5.5: refuse to encrypt when seqNum is at the wrap boundary. The next */
     /* increment would wrap to 0 and re-use the nonce of record 0 -- catastrophic.   */
@@ -384,7 +391,14 @@ bool SSFTLSRecordEncrypt(SSFTLSRecordState_t *state, uint8_t contentType, const 
 
     /* Build inner plaintext: plaintext || content_type */
     inner = &record[SSF_TLS_RECORD_HEADER_SIZE];
-    memcpy(inner, pt, ptLen);
+
+    /* Is the plaintext somewhere other than the record body (AUDIT TLS-8)? */
+    if (pt != inner)
+    {
+        /* Yes, copy it in */
+        memcpy(inner, pt, ptLen);
+    }
+    /* No, it is already in place */
     inner[ptLen] = contentType;
 
     /* Build nonce */

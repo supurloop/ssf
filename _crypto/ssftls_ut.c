@@ -1021,6 +1021,61 @@ void SSFTLSUnitTest(void)
                                        sizeof(ovDec), &ovDecLen, &ovCt) == false);
         SSFTLSRecordStateDeInit(&decState);
     }
+
+    /* ---- AUDIT TLS-8: in-place plaintext, partial overlap, content type 0, length cast ---- */
+    /* (a) pt already at record + 5 must work without an overlapping memcpy; a partially       */
+    /* overlapping pt must trap. (b) contentType 0 is padding on the wire and must trap.      */
+    /* (c) A transcript length above UINT32_MAX was silently truncated and must trap.         */
+    {
+        SSFTLSRecordState_t enc = { 0 };
+        SSFTLSRecordState_t dec = { 0 };
+        SSFTLSTranscript_t t;
+        uint8_t key[16];
+        uint8_t iv[SSF_TLS_IV_SIZE];
+        uint8_t record[5u + 64u + 1u + 16u];
+        uint8_t msg[64];
+        uint8_t out[80];
+        size_t recordLen;
+        size_t outLen;
+        uint8_t ct;
+
+        memset(key, 0x4E, sizeof(key));
+        memset(iv, 0x71, sizeof(iv));
+        memset(msg, 0x3C, sizeof(msg));
+        SSFTLSRecordStateInit(&enc, SSF_TLS_CS_AES_128_GCM_SHA256, key, sizeof(key), iv,
+                              sizeof(iv));
+        SSFTLSRecordStateInit(&dec, SSF_TLS_CS_AES_128_GCM_SHA256, key, sizeof(key), iv,
+                              sizeof(iv));
+
+        /* (a) In place: the plaintext is already where the record body goes. */
+        memcpy(&record[5], msg, sizeof(msg));
+        SSF_ASSERT(SSFTLSRecordEncrypt(&enc, SSF_TLS_CT_APPLICATION, &record[5], sizeof(msg),
+                                       record, sizeof(record), &recordLen) == true);
+        SSF_ASSERT(SSFTLSRecordDecrypt(&dec, record, recordLen, out, sizeof(out), &outLen,
+                                       &ct) == true);
+        SSF_ASSERT((outLen == sizeof(msg)) && (memcmp(out, msg, sizeof(msg)) == 0));
+        SSF_ASSERT(ct == SSF_TLS_CT_APPLICATION);
+
+        /* (a) Partial overlap with the record body. */
+        SSF_ASSERT_TEST(SSFTLSRecordEncrypt(&enc, SSF_TLS_CT_APPLICATION, &record[6], 16u,
+                                            record, sizeof(record), &recordLen));
+
+        /* (b) Content type 0. */
+        SSF_ASSERT_TEST(SSFTLSRecordEncrypt(&enc, 0u, msg, sizeof(msg), record, sizeof(record),
+                                            &recordLen));
+        SSFTLSRecordStateDeInit(&enc);
+        SSFTLSRecordStateDeInit(&dec);
+
+        /* (c) Length that does not fit the SHA update's uint32_t. */
+#if SIZE_MAX > UINT32_MAX
+        SSFTLSTranscriptInit(&t, SSF_HMAC_HASH_SHA256);
+        SSF_ASSERT_TEST(SSFTLSTranscriptUpdate(&t, msg, ((size_t)UINT32_MAX) + 1u));
+        SSFTLSTranscriptInit(&t, SSF_HMAC_HASH_SHA384);
+        SSF_ASSERT_TEST(SSFTLSTranscriptUpdate(&t, msg, ((size_t)UINT32_MAX) + 1u));
+#else
+        (void)t;
+#endif
+    }
 }
 #ifdef _WIN32
 #pragma warning(pop)

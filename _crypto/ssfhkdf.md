@@ -124,7 +124,7 @@ hold on to the intermediate PRK.
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
 | `hash` | in | `SSFHMACHash_t` | Hash algorithm; one of the four variants defined by [`ssfhmac`](ssfhmac.md). |
-| `salt` | in | `const uint8_t *` | Optional non-secret salt. May be `NULL` when `saltLen` is `0`, in which case a `HashLen`-byte zero salt is used per RFC 5869 §2.2. |
+| `salt` | in | `const uint8_t *` | Optional non-secret salt. May be `NULL` when `saltLen` is `0`, in which case a `HashLen`-byte zero salt is used per RFC 5869 §2.2. `NULL` with `saltLen > 0` is a contract violation and traps. |
 | `saltLen` | in | `size_t` | Number of salt bytes. |
 | `ikm` | in | `const uint8_t *` | Input keying material (the secret). Must not be `NULL`. |
 | `ikmLen` | in | `size_t` | Number of IKM bytes. |
@@ -194,7 +194,7 @@ later Expand calls will reuse the same PRK to derive several keys without re-run
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
 | `hash` | in | `SSFHMACHash_t` | Hash algorithm. |
-| `salt` | in | `const uint8_t *` | Optional salt. May be `NULL` when `saltLen` is `0`, in which case a `HashLen`-byte zero salt is used. |
+| `salt` | in | `const uint8_t *` | Optional salt. May be `NULL` when `saltLen` is `0`, in which case a `HashLen`-byte zero salt is used. `NULL` with `saltLen > 0` traps. |
 | `saltLen` | in | `size_t` | Number of salt bytes. |
 | `ikm` | in | `const uint8_t *` | Input keying material (secret). Must not be `NULL`. |
 | `ikmLen` | in | `size_t` | Number of IKM bytes. |

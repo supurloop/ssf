@@ -2918,6 +2918,25 @@ void SSFECUnitTest(void)
         SSFPRNGDeInitContext(&prng);
     }
 #endif /* SSF_CONFIG_EC_MICROBENCH */
+
+    /* ---- AUDIT EC-3: SSFECScalarMul rejects a scalar wider than the curve ---- */
+    /* The window loop reads only curve-width bits, so a wider k was silently truncated and   */
+    /* the product was wrong. A k with more limbs than the curve must trap.                   */
+#if SSF_EC_CONFIG_ENABLE_P256 == 1
+    {
+        const SSFECCurveParams_t *c = SSFECGetCurveParams(SSF_EC_CURVE_P256);
+        SSFECPOINT_DEFINE(G, SSF_EC_MAX_LIMBS);
+        SSFECPOINT_DEFINE(R, SSF_EC_MAX_LIMBS);
+        SSFBN_DEFINE(k, SSF_BN_MAX_LIMBS);
+
+        SSFECPointFromAffine(&G, &c->gx, &c->gy, SSF_EC_CURVE_P256);
+        SSFBNSetUint32(&k, 5u, (uint16_t)(c->limbs + 1u));
+        SSF_ASSERT_TEST(SSFECScalarMul(&R, &k, &G, SSF_EC_CURVE_P256));
+        k.len = c->limbs;
+        SSFECScalarMul(&R, &k, &G, SSF_EC_CURVE_P256);
+        SSF_ASSERT(SSFECPointIsIdentity(&R) == false);
+    }
+#endif /* SSF_EC_CONFIG_ENABLE_P256 */
 }
 #ifdef _WIN32
 #pragma warning(pop)

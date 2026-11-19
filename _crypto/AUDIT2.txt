@@ -48,8 +48,8 @@ SUMMARY
   High       0
   Medium     2       BN-10 (FIXED), ECDSA-5 (FIXED, opt-in)
   Low        17      FIXED (Batch A): CHACHA-1, GCM-3, CCM-3, SHA1-2, SHA2-3
-                     OPEN: HMAC-1, HKDF-1, PRNG-3, BN-11, BN-12, BN-13, EC-3, RSA-9, RSA-10,
-                           RSA-11, RSA-12, TLS-8
+                     FIXED (Batch B): HKDF-1, EC-3, RSA-11, TLS-8
+                     OPEN: HMAC-1, PRNG-3, BN-11, BN-12, BN-13, RSA-9, RSA-10, RSA-12
 
   No memory-safety defect reachable from hostile input was found. The first-pass fixes
   (decoder bounds, carry folds, authenticate-before-decrypt, CT nonce/blind handling) hold.
@@ -114,7 +114,7 @@ HMAC-1  Low  OPEN  [code-read]
   Options:   (1) Accept keyLen == 0 with key == NULL allowed (zero-padded K'). (2) Keep the
              restriction (documented).  Recommend (1) if any caller needs it; otherwise (2).
 
-HKDF-1  Low  OPEN  [code-read]
+HKDF-1  Low  FIXED (2026-11-19, Batch B)  [code-read; fix verified red/green]
   Location:  ssfhkdf.c:53-59 (SSFHKDFExtract)
   Problem:   "if (salt == NULL || saltLen == 0)" substitutes the zero salt. A call with
              salt == NULL and saltLen > 0 (a caller bug, e.g. a lost pointer) silently runs
@@ -297,7 +297,7 @@ BN-13  Low  OPEN  [code-read]
 ssfec
 ----------------------------------------------------------------------------------------------
 
-EC-3  Low  OPEN  [code-read]
+EC-3  Low  FIXED (2026-11-19, Batch B)  [code-read; fix verified red/green]
   Location:  ssfec.c:879-993 (SSFECScalarMul); ssfec.h prototype
   Problem:   The header comment says k must be in [1, n-1], but nothing checks it. The window
              loop reads only c->limbs * 32 bits of k, so a k with more limbs than the curve
@@ -381,7 +381,7 @@ RSA-10  Low  OPEN  [code-read]
              (e.g. 2048) and e >= 3 odd check inside the verify entry points. (3) Document the
              expectation for callers.  Recommend (1).
 
-RSA-11  Low  OPEN  [code-read]
+RSA-11  Low  FIXED (2026-11-19, Batch B)  [code-read; fix verified red/green]
   Location:  ssfrsa.c:419 (_SSFRSAPrivKeyDecode p width check), :534-535 (SSFBNMod in
              _SSFRSAPrivateOpCRT), ssfbn.c:1240 (SSF_REQUIRE(a->len <= 2u * m->len))
   Problem:   The decoder bounds p only from above (hl <= ceil(nl/2)). A structurally valid
@@ -428,7 +428,7 @@ ssfx25519 / ssfed25519
 ssftls
 ----------------------------------------------------------------------------------------------
 
-TLS-8  Low  OPEN  [code-read]
+TLS-8  Low  FIXED (2026-11-19, Batch B)  [code-read; fix verified red/green]
   Location:  ssftls.c:387 (SSFTLSRecordEncrypt memcpy(inner, pt, ptLen)), :388 (contentType not
              validated), :202/:205 (SSFTLSTranscriptUpdate (uint32_t)len)
   Problem:   (a) A zero-copy caller that builds the plaintext in place at record + 5 makes
@@ -571,3 +571,30 @@ CHANGE LOG
               compiles): +807 bytes at -O2, +607 at -Os, mostly GCM (+516 / +366, the multiply is
               inlined at several call sites). Linux direct gcc build; ssfport.h test flags
               restored with git checkout.
+  2026-11-19  Batch B FIXED (Jim's choice: recommended options): HKDF-1, EC-3, RSA-11, TLS-8.
+              HKDF-1: SSFHKDFExtract and SSFHKDF SSF_REQUIRE((salt != NULL) || (saltLen == 0));
+              the zero-salt branch now tests saltLen == 0 only.
+              EC-3: SSFECScalarMul SSF_REQUIRE(k->len <= c->limbs).
+              RSA-11: _SSFRSAPrivKeyDecode requires p exactly ceil(nl / 2) limbs (was <=), so a
+              key with narrow CRT primes decodes to false and Sign returns false instead of
+              tripping SSFBNMod's a->len <= 2 * m->len REQUIRE.
+              TLS-8: SSFTLSRecordEncrypt requires contentType != 0 and pt either == record + 5
+              (then no memcpy, encrypted in place) or wholly outside record; TranscriptUpdate
+              requires len <= UINT32_MAX on hosts where size_t is wider (#if SIZE_MAX > UINT32_MAX).
+              Tests ("AUDIT <label>" blocks): HKDF Extract and SSFHKDF with (NULL, 32) trap and
+              (NULL, 0) still extracts; ScalarMul with a 9-limb k on P-256 traps and the 8-limb
+              k works; RSA-11 hand-built 2048-bit RSAPrivateKey with 16-byte p, q, dp, dq, qInv
+              (new UT helper _SSFRSAUTPutShortIntTLV for short-form DER) gives IsValid false and
+              SignPKCS1 / SignPSS false; TLS in-place encrypt round-trips, a partially
+              overlapping pt traps, contentType 0 traps, and a transcript len of UINT32_MAX + 1
+              traps for SHA-256 and SHA-384.
+              RED: ssfhkdf_ut.c:656, ssfec_ut.c:2934 (SSF_ASSERT_TEST did not trap);
+              ssfrsa: "SSF Assertion: _crypto/ssfbn.c:1249" (the predicted SSFBNMod REQUIRE);
+              ssftls_ut.c:1060 (overlap), then :1064 (contentType) and :1072 (length) in turn
+              as each earlier TLS check was fixed.
+              GREEN: ssfhkdf, ssfec, ssfecdsa, ssfrsa, ssftls, ssfcms, ssfx509, ssfbase64url,
+              ssfmatch. ssftls.c also compiles warning-free for 32-bit MIPS (SIZE_MAX guard).
+              No other in-tree callers of the tightened APIs. Docs: ssfhkdf.md (salt rows),
+              ssfec.md (SSFECScalarMul k width), ssfrsa.md (decoder half-width rule), ssftls.md
+              (contentType, in-place pt, transcript len). Linux direct gcc build; ssfport.h test
+              flags restored with git checkout.

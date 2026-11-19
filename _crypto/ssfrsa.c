@@ -415,12 +415,13 @@ static bool _SSFRSAPrivKeyDecode(const uint8_t *der, size_t derLen, SSFBN_t *n, 
     while (bufLen > 0u && *buf == 0u) { buf++; bufLen--; }
     hl = (uint16_t)SSF_BN_BITS_TO_LIMBS(bufLen * 8u);
 
-    /* Is p wider than half the modulus? */
-    if (hl > ((nl + 1u) / 2u))
+    /* Is p other than exactly half the modulus width (AUDIT RSA-3, RSA-11)? */
+    if (hl != ((nl + 1u) / 2u))
     {
-        /* Yes, the CRT half-width buffers and SSFBNMul(p, q) assume p, q <= n/2 limbs. */
+        /* Yes, the CRT buffers and SSFBNMul(p, q) need p, q <= n/2 and SSFBNMod needs >= n/2 */
         return false;
     }
+    /* No, p and q are loaded at exactly half the modulus width */
     if (!_SSFRSADecIntToBN(&next, p, hl, &next)) return false;
 
     /* q, dp, dq, qInv are loaded at half-key width. */

@@ -384,7 +384,8 @@ Append `len` bytes of handshake-message data to the running transcript. Each ful
 handshake message (its 4-byte header plus its body) must be fed exactly once, in
 wire-order, on both sides. Missing or mis-ordering a message produces a mismatched
 transcript hash — detected later as a Finished MAC failure, which looks cryptic unless
-you know to check the transcript ordering first.
+you know to check the transcript ordering first. `len` must not exceed `UINT32_MAX` (the
+underlying SHA update length); a larger value traps.
 
 <a id="ssftlstranscripthash"></a>
 ```c
@@ -482,6 +483,10 @@ Produce one TLS 1.3 record containing `pt` as the protected payload with inner t
 every suite except `TLS_AES_128_CCM_8_SHA256`, which uses 8 — see the cipher-suite table
 in [Notes](#notes)). `recordLen` reports the total wire-record size including header,
 ciphertext, and tag.
+
+`contentType` must be non-zero (a zero byte is padding on the wire). `pt` may already sit at
+`&record[5]`, in which case it is encrypted in place without a copy; otherwise it must not
+overlap `record` at all. Either violation traps.
 
 Returns `false` if `ptLen` exceeds the RFC 8446 §5.1 plaintext limit of `2^14` (16384) bytes,
 if `recordSize` is too small, or if the record would exceed the per-record ciphertext limit

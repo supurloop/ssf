@@ -644,5 +644,21 @@ void SSFHKDFUnitTest(void)
     _VerifyHKDFAgainstOpenSSLRandom();
     _VerifyHKDFExpandLongPRK();
 #endif
+
+    /* ---- AUDIT HKDF-1: a NULL salt with saltLen > 0 is a caller bug, not "no salt" ---- */
+    /* Extract treated (NULL, saltLen > 0) as the RFC 5869 zero salt and silently ran. Both    */
+    /* Extract and the one-shot SSFHKDF must trap; (NULL, 0) still selects the zero salt.      */
+    {
+        static const uint8_t ikm[22] = { 0x0Bu };
+        uint8_t prk[SSF_HMAC_MAX_HASH_SIZE];
+        uint8_t okm[42];
+
+        SSF_ASSERT_TEST(SSFHKDFExtract(SSF_HMAC_HASH_SHA256, NULL, 32u, ikm, sizeof(ikm), prk,
+                                       sizeof(prk)));
+        SSF_ASSERT_TEST(SSFHKDF(SSF_HMAC_HASH_SHA256, NULL, 32u, ikm, sizeof(ikm), NULL, 0u, okm,
+                                sizeof(okm)));
+        SSF_ASSERT(SSFHKDFExtract(SSF_HMAC_HASH_SHA256, NULL, 0u, ikm, sizeof(ikm), prk,
+                                  sizeof(prk)) == true);
+    }
 }
 #endif /* SSF_CONFIG_HKDF_UNIT_TEST */

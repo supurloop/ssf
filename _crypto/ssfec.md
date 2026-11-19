@@ -343,6 +343,9 @@ work is identical for every scalar. Working
 points are [`SSFBNZeroize`](ssfbn.md#ssfbnzeroize)'d before return to keep key-derived
 state out of the stack.
 
+`k->len` must not exceed the curve's limb count (8 for P-256, 12 for P-384); a wider `k`
+traps rather than being silently truncated to the curve width.
+
 `k` must be in `[1, n-1]` (non-zero and less than the curve order). The caller is
 responsible for ensuring that — e.g., by rejection-sampling from
 [`ssfprng`](ssfprng.md) output until the candidate is in range, or by reducing mod `n` with

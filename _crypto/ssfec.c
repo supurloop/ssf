@@ -904,6 +904,7 @@ void SSFECScalarMul(SSFECPoint_t *r, const SSFBN_t *k, const SSFECPoint_t *p, SS
     SSF_REQUIRE(r->x.cap >= c->limbs);
     SSF_REQUIRE(r->y.cap >= c->limbs);
     SSF_REQUIRE(r->z.cap >= c->limbs);
+    SSF_REQUIRE(k->len <= c->limbs);
 
     bits = (uint32_t)c->limbs * SSF_BN_LIMB_BITS;
 

@@ -171,6 +171,10 @@ bool SSFASN1EncTagLen(uint8_t *buf, uint32_t bufSize, uint16_t tag, uint32_t con
 bool SSFASN1EncBool(uint8_t *buf, uint32_t bufSize, bool val, uint32_t *bytesWritten);
 bool SSFASN1EncInt(uint8_t *buf, uint32_t bufSize, const uint8_t *intBuf, uint32_t intLen,
                    uint32_t *bytesWritten);
+/* Encode a big-endian unsigned magnitude as a minimal, non-negative INTEGER (zeros stripped,  */
+/* 0x00 added when the top bit is set).                                                        */
+bool SSFASN1EncUInt(uint8_t *buf, uint32_t bufSize, const uint8_t *magBuf, uint32_t magLen,
+                    uint32_t *bytesWritten);
 bool SSFASN1EncIntU64(uint8_t *buf, uint32_t bufSize, uint64_t val, uint32_t *bytesWritten);
 bool SSFASN1EncBitString(uint8_t *buf, uint32_t bufSize, const uint8_t *bits, uint32_t bitsLen,
                          uint8_t unusedBits, uint32_t *bytesWritten);

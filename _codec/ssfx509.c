@@ -1006,6 +1006,20 @@ static uint32_t _SSFX509EncInt(uint8_t *buf, uint32_t bufSize, const uint8_t *in
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Returns bytes for a positive INTEGER from a magnitude, or bytes needed if buf NULL, else 0.  */
+/* --------------------------------------------------------------------------------------------- */
+static uint32_t _SSFX509EncUInt(uint8_t *buf, uint32_t bufSize, const uint8_t *magBuf,
+                                uint32_t magLen)
+{
+    uint32_t n;
+
+    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
+
+    if (!SSFASN1EncUInt(buf, bufSize, magBuf, magLen, &n)) return 0;
+    return n;
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Returns bytes for an INTEGER from a uint64_t, or bytes needed when buf is NULL, else 0.      */
 /* --------------------------------------------------------------------------------------------- */
 static uint32_t _SSFX509EncIntU64(uint8_t *buf, uint32_t bufSize, uint64_t val)
@@ -1880,8 +1894,9 @@ static bool _SSFX509EncTBSContent(uint8_t *buf, uint32_t bufSize, const void *ar
                                         _SSFX509EncVersionContent, p)))
             return false;
     }
-    if (!_SSFX509Add(&pos, _SSFX509EncInt(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
-                                          p->serial, p->serialLen)))
+    /* The serial is an unsigned magnitude; encode it as a positive INTEGER (AUDIT ASN1-6) */
+    if (!_SSFX509Add(&pos, _SSFX509EncUInt(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
+                                           p->serial, p->serialLen)))
         return false;
     if (!_SSFX509Add(&pos, _SSFX509EncAlgIdWithParams(_SSFX509At(buf, pos), _SSFX509Rem(buf,
         bufSize, pos), p->sigAlgOidRaw,

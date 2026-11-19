@@ -214,7 +214,7 @@ ASN1-5  Medium  FIXED (2026-11-18)  [demonstrated]
              byte whose low value[0] bits are nonzero (recommended)
              (2) Change only the range check, and make ssfx509 mask the padding bits.
 
-ASN1-6  Medium  OPEN  [demonstrated]
+ASN1-6  Medium  FIXED (2026-11-18)  [demonstrated]
   Location:  ssfasn1.c:759-786 (SSFASN1EncInt); ssfasn1.md:564-566
   Problem:   The .md says the encoder "strips redundant leading sign bytes ... and adds a
              leading 0x00 when the unsigned value's high bit is set". The code copies intBuf
@@ -1329,3 +1329,27 @@ CHANGE LOG
               ssfasn1_ut.c:128 and ssfx509_ut.c:5492 (keyUsageBits read as 0xFF00). GREEN:
               ssfasn1, ssfx509, ssfcms, ssfbase64url, ssfmatch (ASN1 unit test enabled for the
               run; flag restored).
+  2026-11-18  ASN1-6 FIXED via option 1. SSFASN1EncInt keeps its write-as-given behaviour, and
+              ssfasn1.md now says so: intBuf must be a minimal two's-complement body, enforced
+              with SSF_REQUIRE(_SSFASN1IsMinimalSigned) in both measure and write paths (placed
+              after the size checks so the existing overflow tests with a 1-byte stub stay in
+              bounds). New SSFASN1EncUInt encodes an unsigned big-endian magnitude (leading
+              zeros dropped, 0x00 added when the top bit is set, zero as 02 01 00). ssfx509's
+              certificate generator writes the serial with it (new _SSFX509EncUInt), so
+              SSFX509GenParams_t.serial is an unsigned magnitude and a high-bit serial is no
+              longer emitted negative. ssfecdsa and ssfrsa are unchanged (they already
+              canonicalize; the new DBC check passes for all their tests). ssfasn1.md (EncInt
+              contract, EncUInt entry and table row) and ssfx509.md (serial semantics) updated.
+              Tests: "AUDIT ASN1-6" in ssfasn1_ut.c (EncUInt 80 -> 02 02 00 80, 00 00 01 ->
+              02 01 01, 00 and 00 00 -> 02 01 00, 7F -> 02 01 7F, measure lengths match,
+              round-trips through DecGetUInt, short buffer fails; EncInt writes 80 and 00 80 as
+              given and traps on 00 7F, FF 80, and 00 7F in measure mode) and in ssfx509_ut.c
+              (serial 80 01 parses back as 00 80 01). Existing tests updated for the new serial
+              semantics: serial cases 5 and 6 ({80}, {FF 01 02}) now generate positive serials
+              and parse; a new case 8 patches 02 01 01 -> 02 01 80 and 02 03 01 01 02 -> 02 03
+              FF 01 02 on the wire and checks both negative serials are rejected; the ASN1-3
+              padded-serial test now patches an encoded 02 02 01 05 to 02 02 00 05. RED:
+              ssfx509_ut.c:5524 (generated high-bit serial did not parse; the ssfasn1 test could
+              not compile before EncUInt existed). GREEN: ssfasn1, ssfx509, ssfcms, ssfrsa,
+              ssfecdsa, ssfbase64url, ssfmatch (ASN1, RSA and ECDSA unit tests enabled for the
+              run; flags restored).

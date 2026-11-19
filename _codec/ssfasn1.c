@@ -936,14 +936,66 @@ bool SSFASN1EncInt(uint8_t *buf, uint32_t bufSize, const uint8_t *intBuf, uint32
 
     if (buf == NULL)
     {
+        /* intBuf must already be a minimal two's-complement body (AUDIT ASN1-6) */
+        SSF_REQUIRE(_SSFASN1IsMinimalSigned(intBuf, intLen));
+        *bytesWritten = total;
+        return true;
+    }
+    if (bufSize < total) return false;
+    SSF_REQUIRE(_SSFASN1IsMinimalSigned(intBuf, intLen));
+
+    buf[0] = SSF_ASN1_TAG_INTEGER;
+    _SSFASN1WriteLenField(&buf[1], intLen);
+    memcpy(&buf[headerLen], intBuf, intLen);
+    *bytesWritten = total;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+bool SSFASN1EncUInt(uint8_t *buf, uint32_t bufSize, const uint8_t *magBuf, uint32_t magLen,
+                    uint32_t *bytesWritten)
+{
+    uint32_t contentLen;
+    uint32_t headerLen;
+    uint32_t total;
+    bool pad;
+
+    SSF_REQUIRE(magBuf != NULL);
+    SSF_REQUIRE(magLen > 0u);
+    SSF_REQUIRE(bytesWritten != NULL);
+
+    *bytesWritten = 0;
+
+    /* Drop leading zero octets, keeping one octet so zero encodes as 02 01 00 (AUDIT ASN1-6) */
+    while ((magLen > 1u) && (magBuf[0] == 0x00u))
+    {
+        magBuf++;
+        magLen--;
+    }
+
+    pad = ((magBuf[0] & 0x80u) != 0u); /* top bit set: a 0x00 sign octet keeps it positive */
+    if (magLen > (0xFFFFFFFFu - 6u)) return false; /* Overflow guard */
+    contentLen = magLen + (pad ? 1u : 0u);
+    headerLen = 1u + _SSFASN1LenFieldSize(contentLen);
+    total = headerLen + contentLen;
+
+    if (buf == NULL)
+    {
         *bytesWritten = total;
         return true;
     }
     if (bufSize < total) return false;
 
     buf[0] = SSF_ASN1_TAG_INTEGER;
-    _SSFASN1WriteLenField(&buf[1], intLen);
-    memcpy(&buf[headerLen], intBuf, intLen);
+    _SSFASN1WriteLenField(&buf[1], contentLen);
+    /* Is a 0x00 sign octet needed ahead of the magnitude? */
+    if (pad)
+    {
+        /* Yes, keep the value positive */
+        buf[headerLen] = 0x00u;
+    }
+    /* No, the magnitude is already a positive body */
+    memcpy(&buf[headerLen + (pad ? 1u : 0u)], magBuf, magLen);
     *bytesWritten = total;
     return true;
 }

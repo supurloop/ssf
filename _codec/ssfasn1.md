@@ -232,6 +232,7 @@ All encoders return `true` on success and write the byte count to `*bytesWritten
 | [e.g.](#ex-encode) | [`bool SSFASN1EncTagLen(buf, bufSize, tag, contentLen, bytesWritten)`](#ssfasn1enctaglen) | Emit just the T+L bytes; caller writes the V separately |
 | | [`bool SSFASN1EncBool(buf, bufSize, val, bytesWritten)`](#ssfasn1encbool) | Encode BOOLEAN |
 | | [`bool SSFASN1EncInt(buf, bufSize, intBuf, intLen, bytesWritten)`](#ssfasn1encint) | Encode INTEGER from raw bytes |
+| | [`bool SSFASN1EncUInt(buf, bufSize, magBuf, magLen, bytesWritten)`](#ssfasn1encuint) | Encode INTEGER from an unsigned big-endian magnitude |
 | | [`bool SSFASN1EncIntU64(buf, bufSize, val, bytesWritten)`](#ssfasn1encintu64) | Encode INTEGER from a `uint64_t` |
 | | [`bool SSFASN1EncBitString(buf, bufSize, bits, bitsLen, unusedBits, bytesWritten)`](#ssfasn1encbitstring) | Encode BIT STRING |
 | | [`bool SSFASN1EncOctetString(buf, bufSize, octets, octetsLen, bytesWritten)`](#ssfasn1encoctetstring) | Encode OCTET STRING |
@@ -578,9 +579,20 @@ Encode BOOLEAN. Writes 3 bytes: tag `0x01`, length `0x01`, value `0xFF` (true) o
 bool SSFASN1EncInt(uint8_t *buf, uint32_t bufSize, const uint8_t *intBuf, uint32_t intLen,
                    uint32_t *bytesWritten);
 ```
-Encode INTEGER from a caller-supplied two's-complement big-endian byte buffer. The
-encoder strips redundant leading sign bytes per DER's minimal-encoding rule and adds a
-leading `0x00` when the unsigned value's high bit is set.
+Encode INTEGER from a caller-supplied two's-complement big-endian byte buffer, written as
+given. `intBuf` must already be a minimal DER INTEGER body (non-empty, no leading `0x00`
+before a byte below `0x80`, no leading `0xFF` before a byte of `0x80` or more); anything else
+is a caller error (`SSF_REQUIRE`). To encode an unsigned value, use
+[`SSFASN1EncUInt()`](#ssfasn1encuint).
+
+<a id="ssfasn1encuint"></a>
+```c
+bool SSFASN1EncUInt(uint8_t *buf, uint32_t bufSize, const uint8_t *magBuf, uint32_t magLen,
+                    uint32_t *bytesWritten);
+```
+Encode a big-endian unsigned magnitude as a minimal, non-negative INTEGER: leading zero bytes
+are dropped (zero is written as `02 01 00`) and a `0x00` sign byte is added when the top bit
+is set. Measure with `buf == NULL`.
 
 <a id="ssfasn1encintu64"></a>
 ```c

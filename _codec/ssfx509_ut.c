@@ -4023,17 +4023,17 @@ void SSFX509UnitTest(void)
             _SERIAL_CASE(s, sizeof(s), false);
         }
 
-        /* Case 5: negative serial (high bit of first byte set -> two's-complement negative).    */
-        /* 1-byte 0x80 encodes as value -128.                                                    */
+        /* Case 5: serial bytes with the high bit set. The generator treats serial as an       */
+        /* unsigned magnitude and adds the 0x00 sign byte, so the cert parses (AUDIT ASN1-6).  */
         {
             static const uint8_t s[] = { 0x80u };
-            _SERIAL_CASE(s, sizeof(s), false);
+            _SERIAL_CASE(s, sizeof(s), true);
         }
 
-        /* Case 6: multi-byte negative serial (first byte 0xFF). */
+        /* Case 6: multi-byte high-bit serial: likewise written as a positive INTEGER. */
         {
             static const uint8_t s[] = { 0xFFu, 0x01u, 0x02u };
-            _SERIAL_CASE(s, sizeof(s), false);
+            _SERIAL_CASE(s, sizeof(s), true);
         }
 
         /* Case 7: large positive serial that needs a sign-padding byte. Raw bytes              */
@@ -4049,6 +4049,36 @@ void SSFX509UnitTest(void)
         }
 
         #undef _SERIAL_CASE
+
+        /* Case 8: a negative serial on the wire is rejected. The generator cannot emit one  */
+        /* (AUDIT ASN1-6), so encode 01 / 01 01 02 and patch the first content byte.          */
+        {
+            static uint8_t certDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
+            static uint8_t fakeSig[64];
+            static const uint8_t ser1[] = { 0x02u, 0x01u, 0x01u };
+            static const uint8_t ser3[] = { 0x02u, 0x03u, 0x01u, 0x01u, 0x02u };
+            uint8_t s1[] = { 0x01u };
+            uint8_t s3[] = { 0x01u, 0x01u, 0x02u };
+            SSFX509GenParams_t p;
+            SSFX509Cert_t parsed;
+            uint32_t certDerLen;
+            uint32_t at;
+
+            memset(fakeSig, 0x55u, sizeof(fakeSig));
+            _utGenBaseParams(&p, s1, pubKey, (uint32_t)pubKeyLen);
+            SSF_ASSERT(SSFX509EncodeCert(certDer, sizeof(certDer), &p, fakeSig, sizeof(fakeSig),
+                                         &certDerLen) == true);
+            SSF_ASSERT(_utFind(certDer, certDerLen, ser1, sizeof(ser1), &at) == true);
+            certDer[at + 2u] = 0x80u;
+            SSF_ASSERT(SSFX509Parse(certDer, certDerLen, &parsed) == false);
+            _utGenBaseParams(&p, s3, pubKey, (uint32_t)pubKeyLen);
+            p.serialLen = sizeof(s3);
+            SSF_ASSERT(SSFX509EncodeCert(certDer, sizeof(certDer), &p, fakeSig, sizeof(fakeSig),
+                                         &certDerLen) == true);
+            SSF_ASSERT(_utFind(certDer, certDerLen, ser3, sizeof(ser3), &at) == true);
+            certDer[at + 2u] = 0xFFu;
+            SSF_ASSERT(SSFX509Parse(certDer, certDerLen, &parsed) == false);
+        }
     }
 
     /* ---- Wildcard SAN matching (RFC 6125 Sec. 6.4.3 + CA/B Forum BRs Sec. 3.2.2.6) ---- */
@@ -5512,10 +5542,26 @@ void SSFX509UnitTest(void)
             SSF_ASSERT(SSFX509Parse(caOut, n, &parsed) == false);
         }
 
+        /* AUDIT ASN1-6: the generator writes the serial as an unsigned magnitude, so a */
+        /* high-bit serial stays positive and parses back with its 0x00 sign byte */
+        {
+            uint8_t hiSerial[] = { 0x80u, 0x01u };
+
+            _utGenBaseParams(&p, hiSerial, caPub, (uint32_t)caPubLen);
+            p.serialLen = sizeof(hiSerial);
+            SSF_ASSERT(SSFX509EncodeCert(caOut, sizeof(caOut), &p, fakeSig, sizeof(fakeSig),
+                                         &n) == true);
+            SSF_ASSERT(SSFX509Parse(caOut, n, &parsed) == true);
+            SSF_ASSERT((parsed.serialLen == 3u) && (parsed.serial[0] == 0x00u));
+            SSF_ASSERT((parsed.serial[1] == 0x80u) && (parsed.serial[2] == 0x01u));
+        }
+
         /* AUDIT ASN1-3: a serial with an unneeded leading 0x00 is not DER and fails to parse */
         {
-            uint8_t padSerial[] = { 0x00u, 0x05u };
+            static const uint8_t serial0105[] = { 0x02u, 0x02u, 0x01u, 0x05u };
+            uint8_t padSerial[] = { 0x01u, 0x05u };
             uint8_t okSerial[] = { 0x00u, 0x85u };
+            uint32_t at;
 
             _utGenBaseParams(&p, okSerial, caPub, (uint32_t)caPubLen);
             p.serialLen = sizeof(okSerial);
@@ -5523,10 +5569,14 @@ void SSFX509UnitTest(void)
                                          &n) == true);
             SSF_ASSERT(SSFX509Parse(caOut, n, &parsed) == true);
             SSF_ASSERT((parsed.serialLen == 2u) && (parsed.serial[1] == 0x85u));
+            /* Encode serial 01 05, then patch it on the wire to the non-minimal 00 05 */
             _utGenBaseParams(&p, padSerial, caPub, (uint32_t)caPubLen);
             p.serialLen = sizeof(padSerial);
             SSF_ASSERT(SSFX509EncodeCert(caOut, sizeof(caOut), &p, fakeSig, sizeof(fakeSig),
                                          &n) == true);
+            SSF_ASSERT(SSFX509Parse(caOut, n, &parsed) == true);
+            SSF_ASSERT(_utFind(caOut, n, serial0105, sizeof(serial0105), &at) == true);
+            caOut[at + 2u] = 0x00u;
             SSF_ASSERT(SSFX509Parse(caOut, n, &parsed) == false);
         }
     }

@@ -97,6 +97,50 @@ void SSFASN1UnitTest(void)
         SSF_ASSERT(val == 0xDEADBEEFCAFEull);
     }
 
+    /* ---- AUDIT ASN1-6: EncUInt encodes a magnitude; EncInt requires minimal input ---- */
+    {
+        static const uint8_t m80[] = { 0x80u };
+        static const uint8_t m0001[] = { 0x00u, 0x00u, 0x01u };
+        static const uint8_t m00[] = { 0x00u };
+        static const uint8_t m0000[] = { 0x00u, 0x00u };
+        static const uint8_t m7F[] = { 0x7Fu };
+        static const uint8_t m0080[] = { 0x00u, 0x80u };
+        static const uint8_t mPad007F[] = { 0x00u, 0x7Fu };
+        static const uint8_t mPadFF80[] = { 0xFFu, 0x80u };
+        static const struct { const uint8_t *in; uint32_t inLen; uint8_t outLen;
+                              uint8_t out[4]; } vec[] = {
+            { m80, sizeof(m80), 4u, { 0x02u, 0x02u, 0x00u, 0x80u } },
+            { m0001, sizeof(m0001), 3u, { 0x02u, 0x01u, 0x01u, 0x00u } },
+            { m00, sizeof(m00), 3u, { 0x02u, 0x01u, 0x00u, 0x00u } },
+            { m0000, sizeof(m0000), 3u, { 0x02u, 0x01u, 0x00u, 0x00u } },
+            { m7F, sizeof(m7F), 3u, { 0x02u, 0x01u, 0x7Fu, 0x00u } }
+        };
+        const uint8_t *mag;
+        uint32_t magLen;
+        uint32_t measured;
+        uint32_t i;
+
+        for (i = 0; i < (uint32_t)(sizeof(vec) / sizeof(vec[0])); i++)
+        {
+            SSF_ASSERT(SSFASN1EncUInt(NULL, 0, vec[i].in, vec[i].inLen, &measured) == true);
+            SSF_ASSERT(measured == vec[i].outLen);
+            SSF_ASSERT(SSFASN1EncUInt(buf, sizeof(buf), vec[i].in, vec[i].inLen, &len) == true);
+            SSF_ASSERT((len == vec[i].outLen) && (memcmp(buf, vec[i].out, len) == 0));
+            cursor.buf = buf; cursor.bufLen = len;
+            SSF_ASSERT(SSFASN1DecGetUInt(&cursor, &mag, &magLen, &next) == true);
+        }
+        SSF_ASSERT(SSFASN1EncUInt(buf, 3u, m80, sizeof(m80), &len) == false);
+
+        /* EncInt writes a minimal two's-complement body as given, and traps on any other */
+        SSF_ASSERT(SSFASN1EncInt(buf, sizeof(buf), m80, sizeof(m80), &len) == true);
+        SSF_ASSERT((len == 3u) && (buf[2] == 0x80u));
+        SSF_ASSERT(SSFASN1EncInt(buf, sizeof(buf), m0080, sizeof(m0080), &len) == true);
+        SSF_ASSERT((len == 4u) && (buf[2] == 0x00u) && (buf[3] == 0x80u));
+        SSF_ASSERT_TEST(SSFASN1EncInt(buf, sizeof(buf), mPad007F, sizeof(mPad007F), &len));
+        SSF_ASSERT_TEST(SSFASN1EncInt(buf, sizeof(buf), mPadFF80, sizeof(mPadFF80), &len));
+        SSF_ASSERT_TEST(SSFASN1EncInt(NULL, 0, mPad007F, sizeof(mPad007F), &len));
+    }
+
     /* ---- AUDIT ASN1-5: BIT STRING unused count 0..7, 0 when empty, zero padding ---- */
     {
         static const uint8_t bsUnused8[] = { 0x03u, 0x02u, 0x08u, 0xFFu };

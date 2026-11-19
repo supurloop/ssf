@@ -160,8 +160,10 @@ X.509 v3 certificate support per RFC 5280, built on [`ssfasn1`](ssfasn1.md):
   non-empty and the base domain after `*.` contains at least one interior `.` (so `*.example.com`
   matches `www.example.com`, but matches neither `.example.com` nor, for `*.com`, anything). A
   hostname written as a dotted-decimal IPv4 address is matched against 4-byte `iPAddress` SANs
-  instead; each octet is read as decimal, so leading zeros are accepted (`010.0.0.1` equals
-  `10.0.0.1`). A trailing dot is not stripped, so `host.example.com.` never matches. The Common
+  only, never against `dNSName` SANs (RFC 9525 §6.3), so a `dNSName` of `8.8.8.8` or `*.0.0.1`
+  cannot satisfy it; each octet is read as decimal, so leading zeros are accepted (`010.0.0.1`
+  equals `10.0.0.1`). A hostname containing `:` (an IPv6 literal, not supported) matches no
+  SAN. A trailing dot is not stripped, so `host.example.com.` never matches. The Common
   Name is never consulted. `hostname` must be non-empty; an empty string is a
   precondition violation and asserts.
 - **Signature verification** derives the hash from the signature algorithm OID and the key type

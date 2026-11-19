@@ -3016,18 +3016,34 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
     /* Server authentication: the leaf names hostnameStrOpt in a dNSName or iPAddress SAN */
     if (purpose == SSF_X509_PURPOSE_SERVER_AUTH)
     {
+        uint8_t hostIP[4];
+        size_t hostLen;
+        bool hostIsIPv4;
+        bool hostIsIPv6;
+
+        /* The reference identity type picks the one SAN type it may match (RFC 9525 6.3); */
+        /* a ':' (IPv6, unsupported) or an over-long hostname is treated as matching nothing */
+        hostIsIPv4 = _SSFX509ParseIPv4(hostnameStrOpt, hostIP);
+        hostIsIPv6 = ((!SSFStrLen(hostnameStrOpt, _UB_DNS_NAME + 1u, &hostLen)) ||
+                      (memchr(hostnameStrOpt, ':', hostLen) != NULL));
+
         for (i = 0; (i < certs[0].sanLen) && (!matched); i++)
         {
-            if (certs[0].san[i].type == SSF_X509_SAN_DNS)
+            /* Is the hostname a DNS name and this SAN a dNSName (AUDIT X509-5)? */
+            if ((!hostIsIPv4) && (!hostIsIPv6) && (certs[0].san[i].type == SSF_X509_SAN_DNS))
             {
+                /* Yes */
                 matched = _SSFX509HostnameMatch(hostnameStrOpt, certs[0].san[i].val,
                                          certs[0].san[i].valLen);
             }
-            else if (certs[0].san[i].type == SSF_X509_SAN_IP)
+            /* No, is the hostname an IPv4 literal and this SAN an iPAddress? */
+            else if (hostIsIPv4 && (certs[0].san[i].type == SSF_X509_SAN_IP))
             {
+                /* Yes */
                 matched = _SSFX509IPAddressMatch(hostnameStrOpt, certs[0].san[i].val,
                                           certs[0].san[i].valLen);
             }
+            /* No, the types differ, or an IPv6 literal, which is not supported, never matches */
         }
 
         /* Hostname matched? */

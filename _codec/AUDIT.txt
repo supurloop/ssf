@@ -541,7 +541,7 @@ X509-4  Medium  FIXED (2026-11-18)  [demonstrated]
              (2) Implement directoryName constraints (prefix match on raw RDN sequence) and
              reject the remaining forms.
 
-X509-5  Medium  OPEN  [demonstrated]
+X509-5  Medium  FIXED (2026-11-18)  [demonstrated]
   Location:  ssfx509.c:2857-2869 (SSFX509VerifyChainPurpose); 2003-2060 (_SSFX509HostnameMatch)
   Problem:   A hostname that is an IPv4 literal is also matched against dNSName SANs, both
              exactly and by wildcard. RFC 6125 6.2.1 / RFC 9525 6.3 say an IP-address reference
@@ -1394,3 +1394,14 @@ CHANGE LOG
               accepted under dirName O=Good). GREEN: ssfx509, ssfcms, ssfasn1, ssfecdsa,
               ssfbase64url, ssfmatch (ASN1 and ECDSA unit tests enabled for the run; flags
               restored).
+  2026-11-18  X509-5 FIXED via option 1. SSFX509VerifyChainPurpose's server-auth loop classifies
+              the hostname once: an IPv4 literal (_SSFX509ParseIPv4) matches only iPAddress
+              SANs, any other hostname matches only dNSName SANs, and a hostname containing ':'
+              (IPv6, unsupported) or longer than the DNS bound matches nothing (RFC 9525 6.3).
+              A dNSName that looks like an IPv4 address can therefore no longer slip past an
+              IP-only Name Constraint and match an IP hostname. ssfx509.md hostname paragraph
+              updated. Test block "AUDIT X509-5" in ssfx509_ut.c (anchor with NC permitted IP
+              10.0.0.0/8): dNSName 8.8.8.8 does not match host 8.8.8.8; iPAddress 10.1.2.3
+              matches host 10.1.2.3; dNSName *.0.0.1 and 10.0.0.1 do not match host 10.0.0.1;
+              dNSName ::1 does not match host ::1. RED: ssfx509_ut.c:5818 (the NC bypass
+              matched). GREEN: ssfx509, ssfcms, ssfbase64url, ssfmatch (default set).

@@ -5753,6 +5753,79 @@ void SSFX509UnitTest(void)
         #undef _X5094_VERIFY
     }
 
+    /* ---- AUDIT X509-5: an IP-literal hostname matches only iPAddress SANs ---- */
+    {
+        static uint8_t caOut[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t leafOut[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t caPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        static uint8_t leafPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        static const uint8_t ip10Net[] = { 10u, 0u, 0u, 0u, 255u, 0u, 0u, 0u };
+        static const uint8_t *ncIPs[] = { ip10Net, NULL };
+        static const uint8_t ip10123[] = { 10u, 1u, 2u, 3u };
+        static const uint8_t *sanIP10123[] = { ip10123, NULL };
+        static const char *sanDns8888[] = { "8.8.8.8", NULL };
+        static const char *sanWild001[] = { "*.0.0.1", NULL };
+        static const char *sanDns10001[] = { "10.0.0.1", NULL };
+        static const char *sanDnsV6[] = { "::1", NULL };
+        uint8_t caPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        uint8_t leafPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        size_t caPubLen;
+        size_t leafPubLen;
+        uint8_t serial[] = { 0x5Du };
+        SSFX509GenParams_t p;
+        const uint8_t *chain[1];
+        uint32_t chainLen[1];
+        const uint8_t *trust[1];
+        uint32_t trustLen[1];
+        uint32_t caLen;
+        uint32_t leafLen;
+
+        SSF_ASSERT(SSFECDSAKeyGen(SSF_EC_CURVE_P256, caPriv, sizeof(caPriv), caPub,
+                                  sizeof(caPub), &caPubLen) == true);
+        SSF_ASSERT(SSFECDSAKeyGen(SSF_EC_CURVE_P256, leafPriv, sizeof(leafPriv), leafPub,
+                                  sizeof(leafPub), &leafPubLen) == true);
+
+        /* Anchor "ca" constrained to 10.0.0.0/8, with no DNS subtrees */
+        _utGenBaseParams(&p, serial, caPub, (uint32_t)caPubLen);
+        p.issuer.cn = "ca";
+        p.subject.cn = "ca";
+        p.addBasicConstraints = true;
+        p.isCA = true;
+        p.addKeyUsage = true;
+        p.keyUsageBits = SSF_X509_KU_KEY_CERT_SIGN;
+        p.addNameConstraints = true;
+        p.ncPermittedIPs = ncIPs;
+        caLen = _utSignCert(&p, caPriv, caOut, sizeof(caOut));
+        SSF_ASSERT(caLen != 0u);
+        trust[0] = caOut;
+        trustLen[0] = caLen;
+
+        #define _X5095_CASE(_dns, _ips, _host, _expect) do { \
+            _utGenBaseParams(&p, serial, leafPub, (uint32_t)leafPubLen); \
+            p.issuer.cn = "ca"; \
+            p.subject.cn = "leaf"; \
+            p.sanDNSNames = (_dns); \
+            p.sanIPAddrs = (_ips); \
+            leafLen = _utSignCert(&p, caPriv, leafOut, sizeof(leafOut)); \
+            SSF_ASSERT(leafLen != 0u); \
+            chain[0] = leafOut; \
+            chainLen[0] = leafLen; \
+            SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, trust, trustLen, 1u, (_host), \
+                                          1800000000ull) == (_expect)); \
+        } while (0)
+
+        /* dNSName "8.8.8.8" escapes the IP constraint and must not match host 8.8.8.8 */
+        _X5095_CASE(sanDns8888, NULL, "8.8.8.8", false);
+        /* A proper iPAddress SAN inside the permitted range still matches */
+        _X5095_CASE(NULL, sanIP10123, "10.1.2.3", true);
+        /* Wildcard and exact dNSNames that look like IPv4 never match an IP literal */
+        _X5095_CASE(sanWild001, NULL, "10.0.0.1", false);
+        _X5095_CASE(sanDns10001, NULL, "10.0.0.1", false);
+        /* A hostname with ':' is an (unsupported) IPv6 literal, never a DNS name */
+        _X5095_CASE(sanDnsV6, NULL, "::1", false);
+        #undef _X5095_CASE
+    }
+
     /* ---- A SAN GeneralName whose length overruns its SEQUENCE fails to parse ---- */
     /* The element's header is readable, so a tag peek succeeds, but the content does not fit.  */
     /* The parser must report a structural error rather than loop without advancing.            */

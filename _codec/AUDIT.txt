@@ -417,7 +417,7 @@ build-linux.ninja (main.c and ssfx509.c excluded).
 
 ----------------------------------------------------------------------------------------------
 
-X509-1  High  OPEN  [demonstrated] [verified 2026-11-18]
+X509-1  High  FIXED (2026-11-18)  [demonstrated] [verified 2026-11-18]
   Location:  ssfx509.c:682-687 (SSFX509Parse)
   Problem:   The issuerUniqueID / subjectUniqueID skip loop ignores the return value of
              SSFASN1DecSkip. SSFASN1DecPeekTag succeeds when only the tag and length octets
@@ -1189,3 +1189,13 @@ CHANGE LOG
 ----------------------------------------------------------------------------------------------
 
   2026-11-18  Audit created: 39 findings across ssfasn1, ssfx509, ssfmatch, ssfstr.
+  2026-11-18  X509-1 FIXED via option 1. SSFX509Parse's issuerUniqueID / subjectUniqueID skip
+              loop now returns false when SSFASN1DecSkip fails (a failed skip leaves pos
+              unchanged, so the loop used to spin forever), with Is/Yes/No comments. ssfasn1 is
+              unchanged (the PeekTag root cause stays with ASN1-13). ssfx509.md already promises
+              false for malformed input, so it is unchanged. Test block "AUDIT X509-1" in
+              ssfx509_ut.c: the unique-ID certificate variant with the [1] length byte, and
+              separately the [2] length byte, set to 0x7F (overrunning the TBS) must make
+              SSFX509Parse return false. RED: the ssfx509 suite hung and the run was killed by
+              a 120 s timeout (exit 124; ssfbase64url, ssfmatch, ssfcms passed). GREEN: ssfx509,
+              ssfcms, ssfbase64url, ssfmatch pass (default unit test set).

@@ -683,7 +683,13 @@ bool SSFX509Parse(const uint8_t *der, uint32_t derLen, SSFX509Cert_t *cert)
     while (SSFASN1DecPeekTag(&pos, &tag) &&
            (tag == SSF_ASN1_CONTEXT_IMPLICIT(1) || tag == SSF_ASN1_CONTEXT_IMPLICIT(2)))
     {
-        SSFASN1DecSkip(&pos, &pos);
+        /* Does the unique ID's encoded length overrun the TBSCertificate (AUDIT X509-1)? */
+        if (!SSFASN1DecSkip(&pos, &pos))
+        {
+            /* Yes, malformed; a failed skip leaves pos unchanged, so stop rather than spin */
+            return false;
+        }
+        /* No, pos is past the unique ID */
     }
 
     /* Extensions [3] EXPLICIT (OPTIONAL, v3 only) */

@@ -6182,6 +6182,22 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(SSFX509Parse(out, n, &parsed) == true);
         SSF_ASSERT(parsed.extsLen == 1u);
 
+        /* AUDIT X509-1: a unique ID whose length overruns the TBS fails, not loops forever */
+        {
+            static const uint8_t issuerUid[] = { 0x81u, 0x02u, 0x00u, 0xAAu };
+            static const uint8_t subjectUid[] = { 0x82u, 0x02u, 0x00u, 0xBBu };
+
+            SSF_ASSERT(_utBuildCertVariant(false, true, out, sizeof(out), &n) == true);
+            SSF_ASSERT(_utFind(out, n, issuerUid, sizeof(issuerUid), &at) == true);
+            out[at + 1u] = 0x7Fu;
+            SSF_ASSERT(SSFX509Parse(out, n, &parsed) == false);
+
+            SSF_ASSERT(_utBuildCertVariant(false, true, out, sizeof(out), &n) == true);
+            SSF_ASSERT(_utFind(out, n, subjectUid, sizeof(subjectUid), &at) == true);
+            out[at + 1u] = 0x7Fu;
+            SSF_ASSERT(SSFX509Parse(out, n, &parsed) == false);
+        }
+
         /* An explicitly encoded critical FALSE reads as non-critical */
         _utGenBaseParams(&p, serial, pubKey, 65u);
         p.addRawExt = true;

@@ -71,6 +71,9 @@ uint32_t _SSFBNMontInitDoublings = 0u;
 uint32_t _SSFBNMontMulIters = 0u;
 uint32_t _SSFBNMontSqrCarryIters = 0u;
 
+/* Test-only count of SSFBNSquare's diagonal carry steps, fixed at a->len (SQ-CT audit) */
+uint32_t _SSFBNSquareCarryIters = 0u;
+
 /* Test-only count of full-width entry points (ModExpMont[Pub], ModMulCT, ModInvExt, ModMul). */
 uint32_t _SSFBNFullWidthCalls = 0u;
 
@@ -1165,42 +1168,24 @@ void SSFBNSquare(SSFBN_t *r, const SSFBN_t *a)
         shiftCarry = newCarry;
     }
 
-    /* Step 3: add diagonal a[i]*a[i] terms at offset 2i; propagate any carry forward. */
-    for (i = 0; i < n; i++)
+    /* Step 3: add diagonal a[i]*a[i] at 2i, one fixed pass with a running carry (SQ-CT audit) */
     {
-        SSFBNDLimb_t sq = (SSFBNDLimb_t)a->limbs[i] * (SSFBNDLimb_t)a->limbs[i];
-        SSFBNDLimb_t sum;
-        SSFBNLimb_t carry;
-        uint16_t pos;
+        SSFBNLimb_t carry = 0u;
 
-        /* Low half of the square into r[2i]. */
-        sum = (SSFBNDLimb_t)r->limbs[2u * i] + (SSFBNDLimb_t)(SSFBNLimb_t)sq;
-        r->limbs[2u * i] = (SSFBNLimb_t)sum;
-        carry = (SSFBNLimb_t)(sum >> SSF_BN_LIMB_BITS);
-
-        /* High half of the square plus incoming carry into r[2i+1]. */
-        sum = (SSFBNDLimb_t)r->limbs[2u * i + 1u] +
-              (SSFBNDLimb_t)(SSFBNLimb_t)(sq >> SSF_BN_LIMB_BITS) +
-              (SSFBNDLimb_t)carry;
-        r->limbs[2u * i + 1u] = (SSFBNLimb_t)sum;
-        carry = (SSFBNLimb_t)(sum >> SSF_BN_LIMB_BITS);
-
-        /* Propagate any remaining carry through higher limbs. */
-        pos = (uint16_t)(2u * i + 2u);
-        while ((carry != 0u) && (pos < rLen))
+        for (i = 0; i < n; i++)
         {
-/* Disable false positive Visual Studio Code Analysis warning */
-#ifdef _WIN32
-#pragma warning(push)
-#pragma warning(disable:6385)
-#endif
-            sum = (SSFBNDLimb_t)r->limbs[pos] + (SSFBNDLimb_t)carry;
-#ifdef _WIN32
-#pragma warning(pop)
-#endif
-            r->limbs[pos] = (SSFBNLimb_t)sum;
+            SSFBNDLimb_t sq = (SSFBNDLimb_t)a->limbs[i] * (SSFBNDLimb_t)a->limbs[i];
+            SSFBNDLimb_t sum;
+
+            /* r[2i] += low(sq) + carry; r[2i + 1] += high(sq) + that carry (a^2 < 2^(64n)) */
+            sum = (SSFBNDLimb_t)r->limbs[2u * i] + (SSFBNDLimb_t)(SSFBNLimb_t)sq +
+                  (SSFBNDLimb_t)carry;
+            r->limbs[2u * i] = (SSFBNLimb_t)sum;
+            sum = (SSFBNDLimb_t)r->limbs[2u * i + 1u] + (sq >> SSF_BN_LIMB_BITS) +
+                  (sum >> SSF_BN_LIMB_BITS);
+            r->limbs[2u * i + 1u] = (SSFBNLimb_t)sum;
             carry = (SSFBNLimb_t)(sum >> SSF_BN_LIMB_BITS);
-            pos++;
+            _SSF_BN_COUNT(_SSFBNSquareCarryIters);
         }
     }
 }

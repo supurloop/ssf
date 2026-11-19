@@ -72,7 +72,8 @@ SUMMARY
   FE-O1    Speed         X25519 / Ed25519 +15-35%                              S-M     OPEN
   X509-O4  Stack         chain verify 14.5 KB -> about 4 KB (high risk)        L       OPEN
   ED-O2    Speed         Ed25519 sign 1.3x, keygen 1.6x (+1-2 KB ROM)          M       OPEN
-  EC-O1    Speed         ECC +8-12%                                            S       OPEN
+  EC-O4    Speed         ECC probably 1.5-2x (NIST reduction correction)        M       OPEN
+  EC-O1    Speed         ECC 1-8% measured (prototype)                         S       OPEN
   HMAC-O1  Speed         every HMAC about +25%                                 M       OPEN
   GCM-O1   Speed         GHASH +15-20% (GCM +7-10%)                            S       OPEN
   SHA1-O2  Speed+stack   SHA-1 1.2-2x, -256 B stack                            S       OPEN
@@ -522,7 +523,27 @@ EC-O1  Speed  OPEN  Effort S
              products.
   Probable:  About 40% of the field multiplies in a doubling-heavy scalar multiply are
              squares: ECC +8-12%.
-  Risk:      SSFBNSquare must stay free of operand-dependent shortcuts (it is, like SSFBNMul).
+  Risk:      SSFBNSquare must stay free of operand-dependent shortcuts. It was not: its
+             diagonal carry loop was a while (carry != 0); fixed first (SQ-CT, 2026-11-19).
+  Measured (prototype, 2026-11-19): 18 square sites in ssfec (not 7). The product is only
+             15-20% of SSFBNModMulNIST; squaring trims it 25-35%, so P-256 verify / ECDH
+             gain 7-8% on emulated ARM32 and 1-4% on x86-64, P-384 1-3%, sign within noise.
+             Code +66 B Cortex-M4 (ssfbn + ssfec). The NIST reduction dominates: see EC-O4.
+
+EC-O4  Speed  OPEN  Effort M  [found while measuring EC-O1, 2026-11-19]
+  Where:     _SSFBNReduceP256 / _SSFBNReduceP384: 9 / 10 fold passes, then a constant-time
+             correction that always runs 23 full passes (an add or subtract plus a masked
+             select each: 8 + 12 + 3 for P-256, 6 + 14 + 3 for P-384) sized for worst-case
+             carries, where about 4-7 are needed. Reduction and overhead are about 85% of a
+             field multiply (P-256: 193 of 227 ns x86-64, 910 of 1110 ns ARM32).
+  Change:    Fold the net signed carry (about -4..+7) in one constant-time step using the
+             prime's special form, then one or two conditional subtractions: about 15
+             pass-equivalents instead of about 55.
+  Probable:  Reduction 3-4x, field multiply about 2-2.5x, ECDSA / ECDH probably 1.5-2x (to
+             be confirmed by a prototype). Code about the same or smaller.
+  Risk:      Must stay constant-time; needs a written carry-range argument, a differential
+             against the current reductions, and boundary vectors near p, 2p and the
+             folding limits.
 
 EC-O2  Speed  OPEN  Effort S
   Where:     SSFECPointToAffine (SSFBNModInv Fermat: MontInit plus a 256-bit exponentiation
@@ -1278,4 +1299,20 @@ CHANGE LOG
               value; gcc -Wconversion -Wsign-conversion -pedantic clean over the new code.
               No stray references to the removed _sc_pack / _sc_load3 / 4. Reduce's cleared
               upper half is unused by every caller (nonce and hram are read as 32 bytes).
+  2026-11-19  SQ-CT (security, pre-existing; found while prototyping EC-O1; Jim: "Yes").
+              SSFBNSquare's diagonal add propagated carries with while (carry != 0), an
+              operand-dependent step count, so SSFBNModSquare (Miller-Rabin's squaring of
+              the secret RSA prime candidate) was not constant-time, although ssfbn.md and
+              BN-O7 said so. Now one fixed pass with a running carry (a^2 < 2^(64n) bounds
+              it). Test counter _SSFBNSquareCarryIters.
+              RED: ssfbn_ut.c "SQ-CT audit" (widths 1-32, zero / all-ones / alternating /
+              pseudo-random operands: exactly a->len carry steps, square == SSFBNMul) failed
+              at ssfbn_ut.c:4128.
+              GREEN: all 9 suites normal and ASan + UBSan. Differential: 300000 operands
+              (widths 1..MAX / 2, all-ones, alternating, top-bit, random) match the committed
+              SSFBNSquare's digest, sanitizer clean. Mutation: dropping either carry fails it.
+              Code: Cortex-M4 ssfbn 16265 -> 16234 B (-31; SSFBNSquare 364 -> 324),
+              Cortex-M0+ 18923 -> 18896 B (-27). Stack: frame unchanged (56 / 128 B). Speed:
+              neutral (n = 8..64, x86-64 and ARM32); GenPrime identical primes, 53.4 ->
+              53.2 ms. Docs: ssfbn.md SSFBNSquare.
 

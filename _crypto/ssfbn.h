@@ -323,6 +323,9 @@ extern uint32_t _SSFBNMontInitDoublings;
 extern uint32_t _SSFBNMontMulIters;
 extern uint32_t _SSFBNMontSqrCarryIters;
 
+/* Test-only count of SSFBNSquare's diagonal carry steps, fixed at a->len (SQ-CT audit) */
+extern uint32_t _SSFBNSquareCarryIters;
+
 /* Test-only count of full-width entry points (ModExpMont[Pub], ModMulCT, ModInvExt, ModMul). */
 extern uint32_t _SSFBNFullWidthCalls;
 

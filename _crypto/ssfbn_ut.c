@@ -4096,6 +4096,42 @@ void SSFBNUnitTest(void)
         SSF_ASSERT(_scrubDirty == 0u);
     }
 
+    /* ---- SQ-CT audit: SSFBNSquare's diagonal add runs a fixed a->len carry steps ---- */
+    /* Its carry propagation was a while (carry != 0) loop, so the step count, and the time,  */
+    /* depended on the operand. SSFBNModSquare runs it on Miller-Rabin's secret candidate.    */
+    /* Every operand of a width must take the same count, with the square still exact.        */
+    {
+        static const uint16_t sqWidths[] = { 1u, 2u, 3u, 8u, 12u, 32u };
+        SSFBN_DEFINE(sa, 64u);
+        SSFBN_DEFINE(sr, 128u);
+        SSFBN_DEFINE(sref, 128u);
+        uint16_t wi;
+        uint16_t k;
+        uint16_t pat;
+
+        for (wi = 0u; wi < (uint16_t)(sizeof(sqWidths) / sizeof(sqWidths[0])); wi++)
+        {
+            uint16_t n = sqWidths[wi];
+
+            for (pat = 0u; pat < 4u; pat++)
+            {
+                /* Patterns: zero, all-ones, alternating all-ones / zero limbs, pseudo-random */
+                sa.len = n;
+                for (k = 0u; k < n; k++)
+                {
+                    sa.limbs[k] = (pat == 0u) ? 0u : (pat == 1u) ? 0xFFFFFFFFu :
+                                  (pat == 2u) ? (((k & 1u) == 0u) ? 0xFFFFFFFFu : 0u) :
+                                  (0x9E3779B9u * (uint32_t)(k + 1u)) ^ 0x5A5A5A5Au;
+                }
+                _SSFBNSquareCarryIters = 0u;
+                SSFBNSquare(&sr, &sa);
+                SSF_ASSERT(_SSFBNSquareCarryIters == (uint32_t)n);
+                SSFBNMul(&sref, &sa, &sa);
+                SSF_ASSERT((sr.len == sref.len) && (SSFBNCmp(&sr, &sref) == 0));
+            }
+        }
+    }
+
     /* ---- OPTIMIZE BN-O7: SSFBNMod reduces an odd modulus by constant-time Montgomery ---- */
     /* RSA signing splits the blinded value with cB mod p and cB mod q, and Miller-Rabin       */
     /* squares mod the secret candidate; shift-and-subtract branched on every step's borrow.  */

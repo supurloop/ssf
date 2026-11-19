@@ -548,7 +548,10 @@ void SSFBNSquare(SSFBN_t *r, const SSFBN_t *a);
 ```
 Computes `r = a²`. Faster than `SSFBNMul(r, a, a)` because the off-diagonal partial products
 are computed once and doubled rather than computed twice. `r->len` is set to `2 × a->len`;
-that must be `≤ SSF_BN_MAX_LIMBS` and `≤ r->cap`. `r` must not alias `a`.
+that must be `≤ SSF_BN_MAX_LIMBS` and `≤ r->cap`. `r` must not alias `a`. **Constant-time:**
+the diagonal terms are added in one fixed pass with a running carry. Before 2026-11-19 a
+`while (carry != 0)` propagation made the step count depend on the operand, so
+`SSFBNModSquare` was not constant-time on Miller-Rabin's secret candidate (SQ-CT audit).
 
 <a id="ex-arith"></a>
 

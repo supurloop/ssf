@@ -1860,6 +1860,60 @@ static void _SSFBNUTCheckModAdd(const SSFBN_t *m, const SSFBN_t *a, const SSFBN_
 #pragma warning(push)
 #pragma warning(disable:6262)
 #endif
+/* --------------------------------------------------------------------------------------------- */
+/* Stack hygiene probes: fill, then read back, the region just below the caller's frame. A      */
+/* callee that returned without wiping a local leaves it in this region (OPTIMIZE RSA-STK).      */
+/* --------------------------------------------------------------------------------------------- */
+#define _SSFBN_UT_PROBE_BYTES (8u * 1024u)
+SSF_NOINLINE
+static void _SSFBNUTPolluteStack(void)
+{
+    volatile uint8_t buf[_SSFBN_UT_PROBE_BYTES];
+    size_t i;
+    for (i = 0u; i < sizeof(buf); i++) buf[i] = 0xA5u;
+}
+
+/* Reading uninitialized stack is the test, so silence the uninitialized-read warnings here */
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wuninitialized"
+#if !defined(__clang__)
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#endif
+#endif
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable: 6001)
+#endif
+SSF_NOINLINE
+static uint32_t _SSFBNUTScanStack(const uint8_t *n1, const uint8_t *n2, size_t len)
+{
+    volatile uint8_t buf[_SSFBN_UT_PROBE_BYTES];
+    uint32_t found = 0u;
+    size_t i;
+    size_t j;
+
+    for (i = 0u; (i + len) <= sizeof(buf); i++)
+    {
+        bool m1 = true;
+        bool m2 = true;
+        for (j = 0u; j < len; j++)
+        {
+            if (buf[i + j] != n1[j]) m1 = false;
+            if (buf[i + j] != n2[j]) m2 = false;
+        }
+        if (m1 || m2) found++;
+    }
+    buf[0] = (uint8_t)found;
+    return found;
+}
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
+
 void SSFBNUnitTest(void)
 {
     /* ---- SetZero, SetUint32, IsZero, IsOne ---- */
@@ -4038,6 +4092,97 @@ void SSFBNUnitTest(void)
         SSF_ASSERT(_scrubCalls == 4u);
         _SSFBNScrubTestHook = NULL;
         SSF_ASSERT(_scrubDirty == 0u);
+    }
+
+    /* ---- OPTIMIZE RSA-STK: MontMul / MontSquare leave no product in their freed scratch ---- */
+    /* Their t scratch ends holding the unreduced result, r or r + m. During Miller-Rabin that   */
+    /* is p - 1, whose top bytes are the secret prime's; RSA keygen left it on the stack.       */
+    {
+        SSFBNMONT_DEFINE(hm, 8u);
+        SSFBN_DEFINE(hmod, 8u);
+        SSFBN_DEFINE(ha, 8u);
+        SSFBN_DEFINE(hb, 8u);
+        SSFBN_DEFINE(hr, 8u);
+        SSFBN_DEFINE(hrm, 8u);
+        uint16_t k;
+        uint16_t op;
+
+        hmod.len = 8u;
+        ha.len = 8u;
+        hb.len = 8u;
+        for (k = 0u; k < 8u; k++)
+        {
+            hmod.limbs[k] = 0x9E3779B9u * (uint32_t)(k + 1u);
+            ha.limbs[k] = 0x7F4A7C15u * (uint32_t)(k + 3u);
+            hb.limbs[k] = 0x94D049BBu * (uint32_t)(k + 5u);
+        }
+        hmod.limbs[7] |= 0x80000000u;
+        hmod.limbs[0] |= 1u;
+        ha.limbs[7] &= 0x3FFFFFFFu;
+        hb.limbs[7] &= 0x3FFFFFFFu;
+        SSFBNMontInit(&hm, &hmod);
+        for (op = 0u; op < 2u; op++)
+        {
+            /* Is this pass the multiply? */
+            _SSFBNUTPolluteStack();
+            if (op == 0u)
+            {
+                /* Yes */
+                SSFBNMontMul(&hr, &ha, &hb, &hm);
+            }
+            else
+            {
+                /* No, the square */
+                SSFBNMontSquare(&hr, &ha, &hm);
+            }
+            /* Look for the top four limbs of r and of r + m mod 2^256 (the values t can hold) */
+            (void)SSFBNAdd(&hrm, &hr, &hmod);
+            SSF_ASSERT(_SSFBNUTScanStack((const uint8_t *)&hr.limbs[4],
+                                         (const uint8_t *)&hrm.limbs[4], 16u) == 0u);
+        }
+    }
+
+    /* ---- OPTIMIZE RSA-STK: a Montgomery modulus is at most SSF_BN_MAX_MOD_LIMBS limbs ---- */
+    /* MontMul / MontSquare / ConvertOut size their scratch for SSF_BN_MAX_MOD_LIMBS, so        */
+    /* SSFBNMontInit must refuse anything wider, even into a context with room for it.          */
+    {
+        SSFBNMONT_DEFINE(wideMont, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(wideM, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(okM, SSF_BN_MAX_LIMBS);
+        uint16_t k;
+
+        /* The widest allowed modulus initialises */
+        okM.len = SSF_BN_MAX_MOD_LIMBS;
+        for (k = 0u; k < okM.len; k++) okM.limbs[k] = 0xFFFFFFFFu;
+        SSFBNMontInit(&wideMont, &okM);
+        SSF_ASSERT(wideMont.len == SSF_BN_MAX_MOD_LIMBS);
+
+        /* One limb wider is a precondition violation */
+        wideM.len = (uint16_t)(SSF_BN_MAX_MOD_LIMBS + 1u);
+        for (k = 0u; k < wideM.len; k++) wideM.limbs[k] = 0xFFFFFFFFu;
+        SSF_ASSERT_TEST(SSFBNMontInit(&wideMont, &wideM));
+
+        /* Every entry point that builds or takes a Montgomery context states the same bound */
+        {
+            SSFBN_DEFINE(wideR, SSF_BN_MAX_LIMBS);
+            SSFBN_DEFINE(wideA, SSF_BN_MAX_LIMBS);
+            SSFBN_DEFINE(wideE, SSF_BN_MAX_LIMBS);
+
+            wideA.len = wideM.len;
+            wideA.limbs[0] = 2u;
+            wideE.len = 1u;
+            wideE.limbs[0] = 3u;
+            SSF_ASSERT_TEST(SSFBNModExp(&wideR, &wideA, &wideE, &wideM));
+            SSF_ASSERT_TEST(SSFBNModExpPub(&wideR, &wideA, &wideE, &wideM));
+            SSF_ASSERT_TEST(SSFBNModInv(&wideR, &wideA, &wideM));
+
+            /* A hand-built context one limb too wide is refused before any scratch is used */
+            wideMont.len = wideM.len;
+            wideMont.mod.len = wideM.len;
+            for (k = 0u; k < wideM.len; k++) wideMont.mod.limbs[k] = 0xFFFFFFFFu;
+            SSF_ASSERT_TEST(SSFBNModExpMontPub(&wideR, &wideA, &wideE, &wideMont));
+            SSF_ASSERT_TEST(SSFBNModExpMont(&wideR, &wideA, &wideE, &wideMont));
+        }
     }
 
     /* ---- AUDIT BN-7: MontInit's R^2 loop is exact for moduli of 1024+ limbs ---- */

@@ -148,7 +148,7 @@ you will operate on.
 | Macro | Default | Description |
 |-------|---------|-------------|
 | <a id="ssf-bn-config-max-bits"></a>`SSF_BN_CONFIG_MAX_BITS` | auto | Maximum big-number width in bits. **Auto-derived in `ssfbn.h`** as `2 × largest enabled operand` from [`SSF_EC_CONFIG_ENABLE_P256/P384`](ssfec.md#configuration) and [`SSF_RSA_CONFIG_ENABLE_2048/3072/4096`](ssfrsa.md#configuration). The doubling is mandatory: multiplication produces a `2N`-limb intermediate, and `SSFBNMul` / `SSFBNModMul` / `SSFBNModMulNIST` / `SSFBNModInvExt` all gate on `2N <= MAX_LIMBS`. Resulting values: `512` for P-256-only, `768` for P-256+P-384, `4096` for RSA-2048, `6144` for RSA-3072, `8192` for RSA-4096 — the maximum across all enabled algorithms wins. Override in [`_opt/ssfbn_opt.h`](../_opt/ssfbn_opt.h) only when an out-of-tree consumer needs a wider cap; the in-tree consumers self-size correctly. |
-| <a id="ssf-bn-max-mod-limbs"></a>`SSF_BN_MAX_MOD_LIMBS` | `(SSF_BN_MAX_LIMBS + 1) / 2` | Upper bound on `SSFBNMont_t::len` — the cap needed to hold a Montgomery residue (mod `m`). The `2N` derivation of `SSF_BN_CONFIG_MAX_BITS` makes `MAX_LIMBS / 2` exactly the largest possible modulus for any enabled algorithm; per-algo static asserts in `ssfbn.h` enforce this. [`SSFBNModExpMont`](#modexpmont) sizes its 16-entry window table and residue locals at this width — sticking to `SSF_BN_MAX_LIMBS` would inflate the function's stack frame by ~10 KB without ever using the extra capacity. Override in [`_opt/ssfbn_opt.h`](../_opt/ssfbn_opt.h) only when pinning `SSF_BN_CONFIG_MAX_BITS` to a non-`2N` value (no algorithm flags enabled, or an out-of-tree modulus wider than `MAX_LIMBS / 2`). |
+| <a id="ssf-bn-max-mod-limbs"></a>`SSF_BN_MAX_MOD_LIMBS` | `(SSF_BN_MAX_LIMBS + 1) / 2` | Upper bound on `SSFBNMont_t::len` — the cap needed to hold a Montgomery residue (mod `m`). The `2N` derivation of `SSF_BN_CONFIG_MAX_BITS` makes `MAX_LIMBS / 2` exactly the largest possible modulus for any enabled algorithm; per-algo static asserts in `ssfbn.h` enforce this. [`SSFBNMontInit`](#montinit) rejects a wider modulus (`SSF_REQUIRE`), so every Montgomery buffer is sized at this width: [`SSFBNModExpMont`](#modexpmont)'s 16-entry window table and residue locals, the `SSFBNMontMul` / `SSFBNMontSquare` scratch, the `SSFBNModExp` / `SSFBNModExpPub` contexts, `SSFBNMontConvertOut` and `SSFBNIsProbablePrime` (OPTIMIZE RSA-STK). Sizing them at `SSF_BN_MAX_LIMBS` would double their stack without ever using the extra capacity. Override in [`_opt/ssfbn_opt.h`](../_opt/ssfbn_opt.h) only when pinning `SSF_BN_CONFIG_MAX_BITS` to a non-`2N` value (no algorithm flags enabled, or an out-of-tree modulus wider than `MAX_LIMBS / 2`). |
 
 The `SSFBN_t` struct itself is small (a pointer plus two `uint16_t` fields); the actual
 limb storage lives in whatever array the caller supplies. Dropping `SSF_BN_CONFIG_MAX_BITS`
@@ -689,7 +689,8 @@ bool SSFBNModInvExt(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m);
   treated as public). For odd non-prime `m` (or when `gcd(a, m) ≠ 1`) the verification check
   fails and the function returns `false`, so it is safe to call on any modulus, but it is only
   *useful* (yields a result) when `m` is prime. Use this on secret `a`
-  whenever `m` is a curve order, a field prime, or a Diffie-Hellman group order.
+  whenever `m` is a curve order, a field prime, or a Diffie-Hellman group order. `m->len`
+  must not exceed [`SSF_BN_MAX_MOD_LIMBS`](#ssf-bn-max-mod-limbs).
 - [`SSFBNModInvExt`](#modinv) works for any coprime `a` and `m`. For odd `m` and
   `0 < a < m` it runs the binary extended GCD (halvings and subtractions only; OPTIMIZE BN-O5,
   about 6× faster at 2048 bits); for even `m` (RSA keygen's `λ(n)`) or an unreduced `a` it
@@ -751,7 +752,8 @@ void SSFBNMontInit(SSFBNMont_t *ctx, const SSFBN_t *m);
 ```
 Initialise `ctx` for modulus `m`. Precomputes `rr = R² mod m` and `mp = -m⁻¹ mod 2³²`. `m`
 must be odd (every cryptographic modulus used with this module is). `ctx->len` and the
-embedded `mod`/`rr` lengths are set from `m->len`. `R²` is built from `2^(L-1)`, where `L` is
+embedded `mod`/`rr` lengths are set from `m->len`, which must not exceed
+[`SSF_BN_MAX_MOD_LIMBS`](#ssf-bn-max-mod-limbs). `R²` is built from `2^(L-1)`, where `L` is
 the bit length of `m`: `w - L + 1 + j` modular doublings reach `2^(w+j) mod m`, with
 `w = 32 × len = j × 2^s` and `j` odd, then `s` Montgomery squarings each double the exponent
 offset up to `2^(2w)`. A full-width 2048-bit modulus takes 2 doublings and 11 squarings. The
@@ -765,7 +767,9 @@ void SSFBNMontMul(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBNMon
 ```
 `r = a × b × R⁻¹ mod m`. Both `a` and `b` must already be in Montgomery form; the result is
 also in Montgomery form. Constant-time. `r` may alias `a` or `b`. CIOS, with the one-word
-shift of each row folded into its reduction pass.
+shift of each row folded into its reduction pass. The `t` scratch, which ends holding the
+unreduced result, is zeroized before returning: during RSA key generation it held `p − 1` and
+`q⁻¹ mod p`, which a stack scan found left behind (OPTIMIZE RSA-STK audit).
 
 <a id="montsquare"></a>
 ```c
@@ -784,7 +788,8 @@ depends only on `ctx->len`, never on the operand's limb values. This matches the
 constant-time guarantee `SSFBNMontMul` already provides, which is what lets the
 `SSFBNModExp` / `SSFBNModExpMont` path stay side-channel-resistant on secret exponents
 (RSA private-key CRT exponentiations, ECDSA Fermat nonce inversion). `r` may alias `a`
-(`SSFBNMontInit` squares in place).
+(`SSFBNMontInit` squares in place). Like `SSFBNMontMul`, it zeroizes its `t` scratch before
+returning.
 
 <a id="montconv"></a>
 ```c
@@ -834,7 +839,9 @@ void SSFBNModExp    (SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBN
 void SSFBNModExpMont(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBNMont_t *ctx);
 ```
 
-`r = aᵉ mod m`. Uses a **constant-time fixed-window** algorithm with window width `k = 4`:
+`r = aᵉ mod m`. `m->len` (or `ctx->len`) must not exceed
+[`SSF_BN_MAX_MOD_LIMBS`](#ssf-bn-max-mod-limbs) (enforced by `SSF_REQUIRE`). Uses a
+**constant-time fixed-window** algorithm with window width `k = 4`:
 
 1. Convert `a` into Montgomery form (`aM`).
 2. Build a 16-entry table of Montgomery powers — `table[0] = Mont(1)`, `table[1] = aM`,
@@ -870,7 +877,8 @@ Variable-time `r = aᵉ mod m` via left-to-right binary square-and-multiply; lik
 `SSFBNModExp`, `e == 0` gives `1 mod m` (`0` when `m == 1`). Every iteration
 squares; the multiply step runs only when the current bit of `e` is `1`. Typical 2–3×
 faster than `SSFBNModExp` for low-Hamming-weight exponents (e.g., RSA's `e = 65537 =
-0x10001` has only two set bits out of 17).
+0x10001` has only two set bits out of 17). As with `SSFBNModExp`, `m->len` (or
+`ctx->len`) must not exceed [`SSF_BN_MAX_MOD_LIMBS`](#ssf-bn-max-mod-limbs).
 
 **Public-input only.** Timing and memory access pattern depend on the bit pattern of `e`.
 Use only when `e` is public — RSA verify, signature verification, public-key operations.
@@ -948,7 +956,8 @@ Miller-Rabin primality test. Returns `true` if `n` is probably prime after `roun
 witness trials (each round bounds the false-positive probability at ~1/4). Fast paths
 return immediately for `n ≤ 1` (false), `n ∈ {2, 3}` (true), and even `n > 3` (false).
 Suitable rounds for cryptographic use: `≥ 5`. RSA key generation typically uses 5–40
-depending on modulus size.
+depending on modulus size. `n` is a Montgomery modulus, so `n->len` must not exceed
+[`SSF_BN_MAX_MOD_LIMBS`](#ssf-bn-max-mod-limbs).
 
 Internally writes `n − 1 = 2ˢ · d` (using `SSFBNTrailingZeros` and `SSFBNShiftRight`),
 then for each round picks a random witness `a ∈ [2, n − 2]` (via `SSFBNRandom` with
@@ -970,10 +979,11 @@ table, and survivors go through `rounds` Miller-Rabin rounds. Returns `false` if
 is found within an internal attempt cap (50000). The local buffer that held the candidate
 bytes is zeroized on both the success and the failure return; the prime itself is only in `p`.
 
-`bitLen` must be `≥ 16` and `≤ SSF_BN_CONFIG_MAX_BITS / 2` (enforced by `SSF_REQUIRE`). Below 16
-bits every candidate can fall inside the small-prime table, which trial division rejects, so
-the search could never succeed; above `MAX_BITS / 2` the Miller-Rabin Montgomery
-exponentiation has no room for the double-width intermediates.
+`bitLen` must be `≥ 16`, `≤ SSF_BN_CONFIG_MAX_BITS / 2` and `≤ SSF_BN_MAX_MOD_LIMBS × 32`
+(enforced by `SSF_REQUIRE`; the two upper bounds match unless `SSF_BN_MAX_MOD_LIMBS` is
+overridden). Below 16 bits every candidate can fall inside the small-prime table, which trial
+division rejects, so the search could never succeed; above the upper bound the candidate is
+too wide for the Miller-Rabin Montgomery exponentiation.
 
 ---
 

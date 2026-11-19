@@ -63,6 +63,7 @@ SUMMARY
   BN-O5    Speed         with BN-O4: RSA-2048 sign 2.0x (5.4 -> 2.7 ms)        M       DONE
   BN-O6    Speed+size    ECC 1.23-1.46x emulated ARM32, -381 B M4               M       DONE
   EC-O3    Stack         ECC op peaks 17.5-18.4 KB -> 5.1-7.8 KB on Cortex-M4    M       DONE
+  RSA-STK  Stack         RSA sign peak 35.9 -> 24.9 KB (Phase 1 done; 2 open)     M       P1 DONE
   ED-O1    Size          -7 KB (Ed25519 scalar arithmetic)                     M       OPEN
   X509-O1  Size          -3.7 KB x509, -1.4 KB cms (Cortex-M4), plus printf    S       DONE
            (CMS-O1)
@@ -655,7 +656,7 @@ ssfrsa
   ModMulCT 0.6 ms, SSFBNMod 0.1 ms. Projected with BN-O4 and BN-O5: about 2.5-3 ms, against
   7.7 ms today.
 
-RSA-O1  Stack  OPEN  Effort M
+RSA-O1  Stack  OPEN  Effort M  (superseded by RSA-STK below, which measures and extends it)
   Where:     SSFRSAKeyGen, SSFRSAPrivKeyIsValid, _SSFRSAPrivKeyDecode callers (10-15 locals at
              SSF_BN_MAX_LIMBS each, 1 KB apiece at the default cap, all zero-filled per call)
   Change:    Size working values at SSF_BN_MAX_MOD_LIMBS (the modulus width) where they never
@@ -663,6 +664,42 @@ RSA-O1  Stack  OPEN  Effort M
   Probable:  Several KB less stack and zero-fill per call; speed effect small next to the
              exponentiations.
   Risk:      Each resized local must be shown never to hold a 2n-limb product.
+
+RSA-STK  Stack  Phase 1 DONE (2026-11-19), Phase 2 OPEN  Effort M  [both measured]
+  Where:     RSA signing and key generation peak at about 36 KB of stack on Cortex-M4 in the
+             default (RSA-4096 capable) build. Deepest signing chain, measured: SSFRSASignPKCS1
+             12.0 KB (11 locals at SSF_BN_MAX_LIMBS, 1 KB each, holding at most modulus-width
+             values) > _SSFRSAPrivateOpCRT 10.1 KB (17 locals at modulus width, 9 of them
+             prime-sized) > SSFBNModExp 2.1 KB (its Montgomery context at SSF_BN_MAX_LIMBS) >
+             SSFBNModExpMont 10.4 KB (16-entry window table) > ConvertOut / MontMul 2.2 KB.
+  Phase 1:   Size every local to its real width: Montgomery contexts and scratch at
+             SSF_BN_MAX_MOD_LIMBS (the documented bound on SSFBNMont_t::len) in ModExp,
+             ModExpPub, ConvertOut, MontMul, MontSquare and IsProbablePrime; in RSA sign, PSS,
+             keygen and the CRT op, n-width values at SSF_RSA_MAX_KEY_BITS and prime-width
+             values at half that (blinded CRT exponents at half + 2). The CRT's double-width
+             recombination product is left at the cap.
+             Prototype: all 8 suites pass, normal and ASan + UBSan. Speed neutral (RSA-2048 sign
+             x86-64 2668-3030 -> 2716-2752 us, emulated ARM32 15918 -> 15512 us). Code
+             (ssfbn + ssfrsa, arm-none-eabi-gcc -Os): +70 B Cortex-M4, +100 B Cortex-M0+.
+  Phase 2:   Smaller window table in SSFBNModExpMont. SSF_BN_MODEXP_WIN_K must divide 32, so a
+             3-bit window is not an option (an earlier estimate assumed one). Choices: the
+             existing option SSF_BN_MODEXP_WIN_K = 2 (4-entry table, no code change), measured
+             +12% RSA-2048 sign time on x86-64 and +15% on emulated ARM32; or signed 4-bit
+             digits (8-entry table with constant-time negation), about today's speed, which
+             needs code and is computed here rather than measured (8 entries x 512 B fewer at
+             the default cap, x 256 B in an RSA-2048-only build).
+  Measured:  Reachable call-graph peaks on Cortex-M4 (the old Euclid / shift-subtract bodies,
+             unreachable for signing's odd moduli, excluded), RSA-2048 PKCS#1 sign / PSS sign:
+               default build, window 4:  35.9 / 36.6 KB -> Phase 1 24.9 / 25.6 KB
+               default build, window 2:  29.8 / 30.6 KB -> Phase 1 18.8 / 19.6 KB
+               RSA-2048-only, window 4:  18.4 / 18.9 KB -> Phase 1 12.9 / 13.4 KB
+               RSA-2048-only, window 2:  15.3 / 15.8 KB -> Phase 1 10.6 / 11.1 KB
+             Signed 4-bit digits (computed): Phase 1 + 8-entry table about 20.9 KB default,
+             about 10.9 KB RSA-2048-only.
+             Key generation (static peak): default 35.7 -> 26.5 KB (window 4), 29.6 -> 22.8 KB
+             (window 2); RSA-2048-only 18.2 -> 13.6 / 15.7 -> 13.3 KB. Its peak goes through the
+             Euclid inverse over the even lambda(n) (9.4 KB frame), which Phase 1 does not yet
+             resize. Verify: default 12.4 -> 10.4 KB.
 
 ----------------------------------------------------------------------------------------------
 ssftls
@@ -1065,3 +1102,77 @@ CHANGE LOG
               SSFBNCmp, which stops at the first differing limb, so its time depends slightly on
               the secret operand's top limbs although its comment says branch-free.
               GREEN after the fixes: x86-64 normal and ASan + UBSan, all 8 suites, no warnings.
+  2026-11-19  RSA-STK Phase 1 DONE (Jim: "Ok, implement phase 1"). ssfbn: SSFBNMontInit now
+              REQUIREs m->len <= SSF_BN_MAX_MOD_LIMBS (the documented bound on SSFBNMont_t::len,
+              which every Montgomery buffer now relies on); MontMul / MontSquare scratch,
+              ConvertOut's one, the ModExp / ModExpPub contexts and IsProbablePrime's five
+              locals and context are sized at SSF_BN_MAX_MOD_LIMBS (IsProbablePrime REQUIREs
+              n->len within it). ssfrsa: SSF_RSA_MAX_N_LIMBS / SSF_RSA_MAX_HALF_LIMBS from
+              SSF_RSA_MAX_KEY_BITS size the sign (PKCS#1, PSS) and keygen locals (n, e, d, m, s,
+              mCheck at modulus width; p, q, dp, dq, qInv at prime width) and the CRT op's
+              (prime-sized values at prime width, blinded exponents at prime width + 2,
+              n-sized ones at modulus width). The CRT recombination product stays at the cap.
+              No functional red is possible (sizes only). RED for the enforced bound:
+              ssfbn_ut.c "OPTIMIZE RSA-STK" (MontInit at SSF_BN_MAX_MOD_LIMBS works, one limb
+              wider must assert) failed at ssfbn_ut.c:4061.
+              GREEN: all 8 suites on x86-64 (normal and ASan + UBSan), in an RSA-2048-only
+              build, and on 32-bit ARM (qemu-arm).
+              Stack (Cortex-M4 call-graph peaks, test hooks verified absent; signing excludes
+              the never-taken odd-modulus fallbacks): default build PKCS#1 sign 35.9 -> 24.9 KB,
+              PSS 36.6 -> 25.6 KB, keygen 35.7 -> 26.5 KB, verify 12.4 -> 10.4 KB; RSA-2048-only
+              18.4 -> 12.9, 18.9 -> 13.4, 18.2 -> 13.6, 6.4 -> 5.4 KB.
+              Code (ssfbn + ssfrsa, arm-none-eabi-gcc -Os): default Cortex-M4 24600 -> 24516 B
+              (-84), Cortex-M0+ 27634 -> 27600 B (-34); RSA-2048-only Cortex-M4 24222 ->
+              23812 B (-410).
+              Speed: neutral (RSA-2048 sign x86-64 2787-2839 -> 2754-2827 us; emulated ARM32
+              13881 -> 14474 us, within that emulator's run-to-run spread seen this session).
+              Docs: README footnotes 38 and 48 (sizing, measured peaks, compile-time dependence
+              on the largest enabled key), ssfbn.md (SSF_BN_MAX_MOD_LIMBS row, SSFBNMontInit,
+              SSFBNIsProbablePrime).
+  2026-11-19  RSA-STK Phase 1 AUDIT (Jim: "Do audit pass first", then "Yes" to fixes 1 and 2).
+              Review: every resized buffer checked against its largest content (MontMul /
+              MontSquare index n + 1 / 2n; n, e, d at nl <= RSA max; p, q, dp, dq, qInv at hl
+              = ceil(nl / 2), decoder-enforced; blinded exponents hl + 2 for the 2-limb random
+              multiplier); ssfbn.h's per-size static asserts already force SSF_BN_MAX_MOD_LIMBS
+              to hold the largest enabled modulus. Harness under ASan + UBSan: two keys each at
+              2048 / 3072 / 4096 generated by the new code, both validators, PKCS#1 and PSS
+              sign / verify, PKCS#1 signatures byte-identical to the committed code. Clean.
+              Fix 1 (contract): SSFBNModExp, SSFBNModExpPub, SSFBNModExpMontPub and SSFBNModInv
+              REQUIRE the modulus within SSF_BN_MAX_MOD_LIMBS at entry (new for the ModExpPub
+              pair, which had cap-sized scratch; implied before for the others via
+              SSFBNModExpMont). SSFBNGenPrime also REQUIREs bitLen <= SSF_BN_MAX_MOD_LIMBS * 32
+              (the same as MAX_BITS / 2 unless the constant is overridden). No red possible:
+              over-wide moduli already asserted deep in SSFBNMontInit; ssfbn_ut.c "Every entry
+              point that builds or takes a Montgomery context" checks each entry point asserts
+              (passed before and after, ASan clean). Docs: ssfbn.md ModExp, ModExpPub,
+              ModInv, GenPrime.
+              Fix 2 (test gap): RSA-3072 / 4096 keygen and signing ran only in the OpenSSL
+              cross-check, never in this box's builds. ssfrsa_ut.c "OPTIMIZE RSA-STK: every
+              enabled key size runs end to end without OpenSSL": keygen, both validators,
+              PKCS#1 and PSS sign / verify and changed-hash rejection at each enabled size
+              (+3 s). Mutation check: prime-width buffers one limb short fails it (assertion
+              in ssfbn.c) and passes the committed RSA tests.
+              Found while running fix 2's RSA-2048-only build (security, pre-existing): the
+              ssfrsa_ut.c keygen hygiene test (no top bytes of p left on the stack) failed in
+              2 of 12 runs. Cause: SSFBNMontMul / SSFBNMontSquare never wiped their t scratch,
+              which ends holding the unreduced result: p - 1 during Miller-Rabin and q^-1 mod p
+              from qInv's conversion out of Montgomery form. _SSFRSAStackScrub's fixed 8 KB did
+              not reach that deep. The committed code leaked too, below the test's 16 KB probe;
+              Phase 1's smaller frames moved the residue into it. A 64 KB scan for d, p, q, dp,
+              dq, qInv (x86-64 -O3): committed keygen leaves qInv every time and p or q in about
+              30% (RSA-2048 both configurations, 3072, 4096); signing left none. Elimination:
+              only wiping t removes it (wiping Mod / DivMod, Gcd, the FIPS e-coprime check,
+              ModInv's p - 2 or ModExp's context does not).
+              RED: ssfbn_ut.c "OPTIMIZE RSA-STK: MontMul / MontSquare leave no product in their
+              freed scratch" (stack scan for r and r + m) failed at ssfbn_ut.c:4140.
+              FIX: _SSFBNWipeLimbs (volatile) on t at the end of both primitives; no scrub hook,
+              which would swamp the exact scrub counts other tests check.
+              GREEN: all 8 suites normal, ASan + UBSan, 32-bit ARM; RSA-2048-only 12 of 12 runs.
+              The 64 KB scan finds none of the six secrets after keygen or signing (30 keys per
+              configuration at 2048, 8 each at 3072 and 4096).
+              Cost: speed x86-64 none measurable (MontMul n = 64 3029 -> 2992 ns, best of 7);
+              emulated ARM32 MontMul / MontSquare n = 64 +0.6% / +1.2%, n = 8 +1.2% / +5.4%,
+              n = 12 +4.1% / +4.2%; RSA-2048 sign and ECDSA within run-to-run noise. Code
+              Cortex-M4 +42 B (wipe) and +60 B (fix 1 REQUIREs) over Phase 1: ssfbn + ssfrsa
+              24602 (committed) -> 24618 B default, 24224 -> 23914 B RSA-2048-only; Cortex-M0+
+              27636 -> 27686 B. Stack: wipe inlined, no frame change; every peak as Phase 1.

@@ -2195,6 +2195,7 @@ bool SSFBNModInv(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
     SSF_REQUIRE(a->len == m->len);
     SSF_REQUIRE(m->len >= 1u);
     SSF_REQUIRE(m->len <= r->cap);
+    SSF_REQUIRE(m->len <= SSF_BN_MAX_MOD_LIMBS);
 
     if (SSFBNIsZero(a)) return false;
 
@@ -2379,6 +2380,7 @@ void SSFBNMontInit(SSFBNMont_t *ctx, const SSFBN_t *m)
     SSF_REQUIRE(m->len >= 1u);
     SSF_REQUIRE(m->len <= ctx->mod.cap);
     SSF_REQUIRE(m->len <= ctx->rr.cap);
+    SSF_REQUIRE(m->len <= SSF_BN_MAX_MOD_LIMBS);
     SSF_REQUIRE((m->limbs[0] & 1u) != 0u);
 
     SSFBNCopy(&ctx->mod, m);
@@ -2440,11 +2442,23 @@ void SSFBNMontInit(SSFBNMont_t *ctx, const SSFBN_t *m)
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Zeroes len limbs through a volatile pointer so the stores cannot be optimized away.          */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFBNWipeLimbs(SSFBNLimb_t *p, size_t len)
+{
+    volatile SSFBNLimb_t *v = (volatile SSFBNLimb_t *)p;
+
+    SSF_REQUIRE(p != NULL);
+
+    while (len > 0u) { *v++ = 0u; len--; }
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* r = a * b * R^(-1) mod m. a and b must be in Montgomery form. CIOS algorithm.                 */
 /* --------------------------------------------------------------------------------------------- */
 void SSFBNMontMul(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBNMont_t *ctx)
 {
-    SSFBNLimb_t t[SSF_BN_MAX_LIMBS + 2];
+    SSFBNLimb_t t[SSF_BN_MAX_MOD_LIMBS + 2]; /* modulus width, not the BN cap (RSA-STK) */
     uint16_t n;
     uint16_t i;
     SSFBNLimb_t borrow;
@@ -2458,7 +2472,7 @@ void SSFBNMontMul(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBNMon
     SSF_REQUIRE(ctx != NULL);
     SSF_REQUIRE(ctx->mod.limbs != NULL);
     SSF_REQUIRE(ctx->len >= 1u);
-    SSF_REQUIRE(ctx->len <= SSF_BN_MAX_LIMBS);
+    SSF_REQUIRE(ctx->len <= SSF_BN_MAX_MOD_LIMBS);
     SSF_REQUIRE(ctx->len <= r->cap);
     SSF_REQUIRE(ctx->len <= a->cap);
     SSF_REQUIRE(ctx->len <= b->cap);
@@ -2533,6 +2547,9 @@ void SSFBNMontMul(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBNMon
             addCarry >>= SSF_BN_LIMB_BITS;
         }
     }
+
+    /* t ends holding the unreduced result, secret whenever m or an operand is (RSA-STK) */
+    _SSFBNWipeLimbs(t, (size_t)n + 2u);
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -2541,7 +2558,7 @@ void SSFBNMontMul(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBNMon
 void SSFBNMontSquare(SSFBN_t *r, const SSFBN_t *a, const SSFBNMont_t *ctx)
 {
     /* Cannot reuse SSFBNSquare: its rLen<=MAX_LIMBS assertion caps n at MAX_LIMBS/2. */
-    SSFBNLimb_t t[(2u * SSF_BN_MAX_LIMBS) + 1u];
+    SSFBNLimb_t t[(2u * SSF_BN_MAX_MOD_LIMBS) + 1u]; /* modulus width (RSA-STK) */
     uint16_t n;
     uint16_t i;
     SSFBNLimb_t shiftCarry;
@@ -2556,7 +2573,7 @@ void SSFBNMontSquare(SSFBN_t *r, const SSFBN_t *a, const SSFBNMont_t *ctx)
 
     n = ctx->len;
     SSF_REQUIRE(n >= 1u);
-    SSF_REQUIRE(n <= SSF_BN_MAX_LIMBS);
+    SSF_REQUIRE(n <= SSF_BN_MAX_MOD_LIMBS);
     SSF_REQUIRE(n <= r->cap);
     SSF_REQUIRE(n <= a->cap);
     SSF_REQUIRE(a->len == n); /* Montgomery-form operand at ctx->len (AUDIT BN-4) */
@@ -2660,6 +2677,9 @@ void SSFBNMontSquare(SSFBN_t *r, const SSFBN_t *a, const SSFBNMont_t *ctx)
             addCarry >>= SSF_BN_LIMB_BITS;
         }
     }
+
+    /* t ends holding the unreduced result, secret whenever m or an operand is (RSA-STK) */
+    _SSFBNWipeLimbs(t, (2u * (size_t)n) + 1u);
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -2695,7 +2715,7 @@ void SSFBNMontConvertIn(SSFBN_t *aR, const SSFBN_t *a, const SSFBNMont_t *ctx)
 /* --------------------------------------------------------------------------------------------- */
 void SSFBNMontConvertOut(SSFBN_t *a, const SSFBN_t *aR, const SSFBNMont_t *ctx)
 {
-    SSFBN_DEFINE(one, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(one, SSF_BN_MAX_MOD_LIMBS); /* at ctx->len, never above it (RSA-STK) */
 
     SSF_REQUIRE(a != NULL);
     SSF_REQUIRE(a->limbs != NULL);
@@ -2717,7 +2737,7 @@ void SSFBNMontConvertOut(SSFBN_t *a, const SSFBN_t *aR, const SSFBNMont_t *ctx)
 /* --------------------------------------------------------------------------------------------- */
 void SSFBNModExp(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBN_t *m)
 {
-    SSFBNMONT_DEFINE(mont, SSF_BN_MAX_LIMBS);
+    SSFBNMONT_DEFINE(mont, SSF_BN_MAX_MOD_LIMBS); /* a modulus is at most this wide (RSA-STK) */
 
     SSF_REQUIRE(r != NULL);
     SSF_REQUIRE(r->limbs != NULL);
@@ -2729,6 +2749,7 @@ void SSFBNModExp(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBN_t *
     SSF_REQUIRE(m->limbs != NULL);
     SSF_REQUIRE(m->len >= 1u);
     SSF_REQUIRE(m->len <= r->cap);
+    SSF_REQUIRE(m->len <= SSF_BN_MAX_MOD_LIMBS);
 
     SSFBNMontInit(&mont, m);
     SSFBNModExpMont(r, a, e, &mont);
@@ -2844,7 +2865,7 @@ void SSFBNModExpMont(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBN
 /* --------------------------------------------------------------------------------------------- */
 void SSFBNModExpPub(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBN_t *m)
 {
-    SSFBNMONT_DEFINE(mont, SSF_BN_MAX_LIMBS);
+    SSFBNMONT_DEFINE(mont, SSF_BN_MAX_MOD_LIMBS); /* a modulus is at most this wide (RSA-STK) */
 
     SSF_REQUIRE(r != NULL);
     SSF_REQUIRE(r->limbs != NULL);
@@ -2856,6 +2877,7 @@ void SSFBNModExpPub(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBN_
     SSF_REQUIRE(m->limbs != NULL);
     SSF_REQUIRE(m->len >= 1u);
     SSF_REQUIRE(m->len <= r->cap);
+    SSF_REQUIRE(m->len <= SSF_BN_MAX_MOD_LIMBS);
 
     SSFBNMontInit(&mont, m);
     SSFBNModExpMontPub(r, a, e, &mont);
@@ -2883,6 +2905,7 @@ void SSFBNModExpMontPub(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SS
     SSF_REQUIRE(ctx->mod.limbs != NULL);
     SSF_REQUIRE(ctx->len >= 1u);
     SSF_REQUIRE(ctx->len <= r->cap);
+    SSF_REQUIRE(ctx->len <= SSF_BN_MAX_MOD_LIMBS);
 
     eBits = SSFBNBitLen(e);
 
@@ -3109,18 +3132,19 @@ bool SSFBNRandomBelow(SSFBN_t *a, const SSFBN_t *bound, SSFPRNGContext_t *prng)
 /* --------------------------------------------------------------------------------------------- */
 bool SSFBNIsProbablePrime(const SSFBN_t *n, uint16_t rounds, SSFPRNGContext_t *prng)
 {
-    SSFBN_DEFINE(nm1, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(d, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(x, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(nm3, SSF_BN_MAX_LIMBS);
-    SSFBNMONT_DEFINE(mont, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(nm1, SSF_BN_MAX_MOD_LIMBS);
+    SSFBN_DEFINE(d, SSF_BN_MAX_MOD_LIMBS);
+    SSFBN_DEFINE(a, SSF_BN_MAX_MOD_LIMBS);
+    SSFBN_DEFINE(x, SSF_BN_MAX_MOD_LIMBS);
+    SSFBN_DEFINE(nm3, SSF_BN_MAX_MOD_LIMBS);
+    SSFBNMONT_DEFINE(mont, SSF_BN_MAX_MOD_LIMBS); /* candidate is a Montgomery modulus (RSA-STK) */
     uint32_t s = 0;
     uint16_t round;
     bool ok = false;
 
     SSF_REQUIRE(n != NULL);
     SSF_REQUIRE(n->limbs != NULL);
+    SSF_REQUIRE(n->len <= SSF_BN_MAX_MOD_LIMBS);
     SSF_REQUIRE(prng != NULL);
 
     /* Small-case fast paths: witness range [2, n-2] is empty for n <= 3;handle 0..3 explicitly. */
@@ -3260,6 +3284,7 @@ bool SSFBNGenPrime(SSFBN_t *p, uint16_t bitLen, uint16_t rounds, SSFPRNGContext_
     /* 16 <= bitLen <= MAX_BITS / 2 keeps trial division and modexp valid (AUDIT BN-2) */
     SSF_REQUIRE(bitLen >= 16u);
     SSF_REQUIRE(bitLen <= (SSF_BN_CONFIG_MAX_BITS / 2u));
+    SSF_REQUIRE(bitLen <= (SSF_BN_MAX_MOD_LIMBS * SSF_BN_LIMB_BITS));
     SSF_REQUIRE(prng != NULL);
 
     byteLen = (size_t)(bitLen + 7u) / 8u;

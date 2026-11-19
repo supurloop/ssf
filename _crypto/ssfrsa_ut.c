@@ -1999,6 +1999,62 @@ void SSFRSAUnitTest(void)
 #endif /* SSF_RSA_CONFIG_ENABLE_PSS */
     }
 
+    /* ---- OPTIMIZE RSA-STK: every enabled key size runs end to end without OpenSSL ---- */
+    /* Buffers are sized exactly for the largest enabled key, so the largest size must run in  */
+    /* every build, not only the OpenSSL cross-check: keygen, both validators, PKCS#1 and PSS  */
+    /* sign / verify, and rejection of a changed hash.                                          */
+    {
+        static const uint16_t sizes[] = {
+#if SSF_RSA_CONFIG_ENABLE_2048 == 1
+            2048u,
+#endif
+#if SSF_RSA_CONFIG_ENABLE_3072 == 1
+            3072u,
+#endif
+#if SSF_RSA_CONFIG_ENABLE_4096 == 1
+            4096u,
+#endif
+        };
+        static uint8_t privKeyDer[SSF_RSA_MAX_PRIV_KEY_DER_SIZE];
+        static uint8_t pubKeyDer[SSF_RSA_MAX_PUB_KEY_DER_SIZE];
+        uint8_t hash[32];
+        uint8_t sig[SSF_RSA_MAX_SIG_SIZE];
+        size_t privKeyDerLen;
+        size_t pubKeyDerLen;
+        size_t sigLen;
+        uint16_t si;
+
+        SSFSHA256((const uint8_t *)"every size", 10, hash, sizeof(hash));
+        for (si = 0u; si < (uint16_t)(sizeof(sizes) / sizeof(sizes[0])); si++)
+        {
+            SSF_ASSERT(SSFRSAKeyGen(sizes[si], privKeyDer, sizeof(privKeyDer), &privKeyDerLen,
+                                    pubKeyDer, sizeof(pubKeyDer), &pubKeyDerLen) == true);
+            SSF_ASSERT(SSFRSAPrivKeyIsValid(privKeyDer, privKeyDerLen) == true);
+            SSF_ASSERT(SSFRSAPubKeyIsValid(pubKeyDer, pubKeyDerLen) == true);
+#if SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1
+            SSF_ASSERT(SSFRSASignPKCS1(privKeyDer, privKeyDerLen, SSF_RSA_HASH_SHA256, hash,
+                                       sizeof(hash), sig, sizeof(sig), &sigLen) == true);
+            SSF_ASSERT(sigLen == ((size_t)sizes[si] / 8u));
+            SSF_ASSERT(SSFRSAVerifyPKCS1(pubKeyDer, pubKeyDerLen, SSF_RSA_HASH_SHA256, hash,
+                                         sizeof(hash), sig, sigLen) == true);
+            hash[0] ^= 1u;
+            SSF_ASSERT(SSFRSAVerifyPKCS1(pubKeyDer, pubKeyDerLen, SSF_RSA_HASH_SHA256, hash,
+                                         sizeof(hash), sig, sigLen) == false);
+            hash[0] ^= 1u;
+#endif /* SSF_RSA_CONFIG_ENABLE_PKCS1_V15 */
+#if SSF_RSA_CONFIG_ENABLE_PSS == 1
+            SSF_ASSERT(SSFRSASignPSS(privKeyDer, privKeyDerLen, SSF_RSA_HASH_SHA256, hash,
+                                     sizeof(hash), sig, sizeof(sig), &sigLen) == true);
+            SSF_ASSERT(SSFRSAVerifyPSS(pubKeyDer, pubKeyDerLen, SSF_RSA_HASH_SHA256, hash,
+                                       sizeof(hash), sizeof(hash), sig, sigLen) == true);
+            hash[0] ^= 1u;
+            SSF_ASSERT(SSFRSAVerifyPSS(pubKeyDer, pubKeyDerLen, SSF_RSA_HASH_SHA256, hash,
+                                       sizeof(hash), sizeof(hash), sig, sigLen) == false);
+            hash[0] ^= 1u;
+#endif /* SSF_RSA_CONFIG_ENABLE_PSS */
+        }
+    }
+
 #if (SSF_CONFIG_BN_UNIT_TEST == 1) && (SSF_RSA_CONFIG_ENABLE_2048 == 1)
     /* ---- OPTIMIZE BN-O4 / BN-O5: RSA signing never takes the slow ModMulCT / ModInvExt ---- */
     /* Every modulus a signature uses (n, p, q) is odd, so the blinding inverse must take the  */

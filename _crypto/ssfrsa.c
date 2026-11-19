@@ -51,6 +51,10 @@ void (*_SSFRSAScrubTestHook)(const void *buf, size_t len) = NULL;
 #define _SSF_RSA_SCRUB_HOOK(p, n) do { } while (0)
 #endif /* SSF_CONFIG_RSA_UNIT_TEST */
 
+/* Largest modulus and prime the enabled key sizes allow, in limbs (OPTIMIZE RSA-STK) */
+#define SSF_RSA_MAX_N_LIMBS        SSF_BN_BITS_TO_LIMBS(SSF_RSA_MAX_KEY_BITS)
+#define SSF_RSA_MAX_HALF_LIMBS     ((SSF_RSA_MAX_N_LIMBS + 1u) / 2u)
+
 /* --------------------------------------------------------------------------------------------- */
 /* Prime-candidate screening (small-prime trial division, Miller-Rabin, and the random-prime     */
 /* generator) now lives in ssfbn. See SSFBNModUint32, SSFBNIsProbablePrime, SSFBNGenPrime.       */
@@ -528,26 +532,26 @@ static bool _SSFRSAPrivateOpCRT(const SSFBN_t *c, uint16_t nLimbs, const SSFBN_t
                                 const SSFBN_t *dp, const SSFBN_t *dq, const SSFBN_t *qInv,
                                 SSFBN_t *result)
 {
-    SSFBN_DEFINE(cp, SSF_BN_MAX_MOD_LIMBS);
-    SSFBN_DEFINE(cq, SSF_BN_MAX_MOD_LIMBS);
-    SSFBN_DEFINE(m1, SSF_BN_MAX_MOD_LIMBS);
-    SSFBN_DEFINE(m2, SSF_BN_MAX_MOD_LIMBS);
-    SSFBN_DEFINE(h, SSF_BN_MAX_MOD_LIMBS);
-    SSFBN_DEFINE(m2Full, SSF_BN_MAX_MOD_LIMBS);
-    SSFBN_DEFINE(hFull, SSF_BN_MAX_MOD_LIMBS);
-    SSFBN_DEFINE(qFull, SSF_BN_MAX_MOD_LIMBS);
+    SSFBN_DEFINE(cp, SSF_RSA_MAX_HALF_LIMBS);
+    SSFBN_DEFINE(cq, SSF_RSA_MAX_HALF_LIMBS);
+    SSFBN_DEFINE(m1, SSF_RSA_MAX_HALF_LIMBS);
+    SSFBN_DEFINE(m2, SSF_RSA_MAX_HALF_LIMBS);
+    SSFBN_DEFINE(h, SSF_RSA_MAX_HALF_LIMBS);
+    SSFBN_DEFINE(m2Full, SSF_RSA_MAX_N_LIMBS);
+    SSFBN_DEFINE(hFull, SSF_RSA_MAX_N_LIMBS);
+    SSFBN_DEFINE(qFull, SSF_RSA_MAX_N_LIMBS);
     SSFBN_DEFINE(prod, SSF_BN_MAX_LIMBS); /* hFull*qFull is 2n limbs; the only full-width local */
-    SSFBN_DEFINE(mB, SSF_BN_MAX_MOD_LIMBS);
-    SSFBN_DEFINE(r, SSF_BN_MAX_MOD_LIMBS);
-    SSFBN_DEFINE(rInv, SSF_BN_MAX_MOD_LIMBS);
-    SSFBN_DEFINE(rE, SSF_BN_MAX_MOD_LIMBS);
-    SSFBN_DEFINE(cB, SSF_BN_MAX_MOD_LIMBS);
-    SSFBN_DEFINE(pm1, SSF_BN_MAX_MOD_LIMBS);
-    SSFBN_DEFINE(qm1, SSF_BN_MAX_MOD_LIMBS);
+    SSFBN_DEFINE(mB, SSF_RSA_MAX_N_LIMBS);
+    SSFBN_DEFINE(r, SSF_RSA_MAX_N_LIMBS);
+    SSFBN_DEFINE(rInv, SSF_RSA_MAX_N_LIMBS);
+    SSFBN_DEFINE(rE, SSF_RSA_MAX_N_LIMBS);
+    SSFBN_DEFINE(cB, SSF_RSA_MAX_N_LIMBS);
+    SSFBN_DEFINE(pm1, SSF_RSA_MAX_HALF_LIMBS);
+    SSFBN_DEFINE(qm1, SSF_RSA_MAX_HALF_LIMBS);
     SSFBN_DEFINE(eb1, 2u); /* 64-bit exponent-blind randomizers */
     SSFBN_DEFINE(eb2, 2u);
-    SSFBN_DEFINE(dpb, SSF_BN_MAX_MOD_LIMBS);
-    SSFBN_DEFINE(dqb, SSF_BN_MAX_MOD_LIMBS);
+    SSFBN_DEFINE(dpb, SSF_RSA_MAX_HALF_LIMBS + 2u);
+    SSFBN_DEFINE(dqb, SSF_RSA_MAX_HALF_LIMBS + 2u);
     SSFPRNGContext_t prng;
     uint8_t entropy[SSF_PRNG_ENTROPY_SIZE];
     uint16_t hl = p->len;
@@ -1002,13 +1006,13 @@ static bool _SSFRSAKeyGenEncode(const SSFBN_t *n, const SSFBN_t *d, const SSFBN_
 bool SSFRSAKeyGen(uint16_t bits, uint8_t *privKeyDer, size_t privKeyDerSize, size_t *privKeyDerLen,
                   uint8_t *pubKeyDer, size_t pubKeyDerSize, size_t *pubKeyDerLen)
 {
-    SSFBN_DEFINE(p, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(q, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(n, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(d, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(dp, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(dq, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(qInv, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(p, SSF_RSA_MAX_HALF_LIMBS);
+    SSFBN_DEFINE(q, SSF_RSA_MAX_HALF_LIMBS);
+    SSFBN_DEFINE(n, SSF_RSA_MAX_N_LIMBS);
+    SSFBN_DEFINE(d, SSF_RSA_MAX_N_LIMBS);
+    SSFBN_DEFINE(dp, SSF_RSA_MAX_HALF_LIMBS);
+    SSFBN_DEFINE(dq, SSF_RSA_MAX_HALF_LIMBS);
+    SSFBN_DEFINE(qInv, SSF_RSA_MAX_HALF_LIMBS);
     uint16_t nLimbs;
     uint16_t halfBits;
     uint32_t attempts;
@@ -1087,17 +1091,17 @@ bool SSFRSASignPKCS1(const uint8_t *privKeyDer, size_t privKeyDerLen, SSFRSAHash
                      const uint8_t *hashVal, size_t hashLen, uint8_t *sig, size_t sigSize,
                      size_t *sigLen)
 {
-    SSFBN_DEFINE(n, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(e, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(d, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(p, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(q, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(dp, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(dq, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(qInv, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(m, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(s, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(mCheck, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(n, SSF_RSA_MAX_N_LIMBS);
+    SSFBN_DEFINE(e, SSF_RSA_MAX_N_LIMBS);
+    SSFBN_DEFINE(d, SSF_RSA_MAX_N_LIMBS);
+    SSFBN_DEFINE(p, SSF_RSA_MAX_HALF_LIMBS);
+    SSFBN_DEFINE(q, SSF_RSA_MAX_HALF_LIMBS);
+    SSFBN_DEFINE(dp, SSF_RSA_MAX_HALF_LIMBS);
+    SSFBN_DEFINE(dq, SSF_RSA_MAX_HALF_LIMBS);
+    SSFBN_DEFINE(qInv, SSF_RSA_MAX_HALF_LIMBS);
+    SSFBN_DEFINE(m, SSF_RSA_MAX_N_LIMBS);
+    SSFBN_DEFINE(s, SSF_RSA_MAX_N_LIMBS);
+    SSFBN_DEFINE(mCheck, SSF_RSA_MAX_N_LIMBS);
     uint16_t nLimbs;
     size_t keyBytes;
     size_t hLen;
@@ -1275,17 +1279,17 @@ bool SSFRSASignPSS(const uint8_t *privKeyDer, size_t privKeyDerLen, SSFRSAHash_t
                    const uint8_t *hashVal, size_t hashLen, uint8_t *sig, size_t sigSize,
                    size_t *sigLen)
 {
-    SSFBN_DEFINE(n, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(e, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(d, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(p, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(q, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(dp, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(dq, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(qInv, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(m, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(s, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(mCheck, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(n, SSF_RSA_MAX_N_LIMBS);
+    SSFBN_DEFINE(e, SSF_RSA_MAX_N_LIMBS);
+    SSFBN_DEFINE(d, SSF_RSA_MAX_N_LIMBS);
+    SSFBN_DEFINE(p, SSF_RSA_MAX_HALF_LIMBS);
+    SSFBN_DEFINE(q, SSF_RSA_MAX_HALF_LIMBS);
+    SSFBN_DEFINE(dp, SSF_RSA_MAX_HALF_LIMBS);
+    SSFBN_DEFINE(dq, SSF_RSA_MAX_HALF_LIMBS);
+    SSFBN_DEFINE(qInv, SSF_RSA_MAX_HALF_LIMBS);
+    SSFBN_DEFINE(m, SSF_RSA_MAX_N_LIMBS);
+    SSFBN_DEFINE(s, SSF_RSA_MAX_N_LIMBS);
+    SSFBN_DEFINE(mCheck, SSF_RSA_MAX_N_LIMBS);
     uint16_t nLimbs;
     size_t keyBytes, emBits, emLen;
     size_t hLen, sLen, dbLen;

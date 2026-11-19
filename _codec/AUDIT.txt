@@ -1,0 +1,1191 @@
+SSF _codec CORRECTNESS AND SECURITY AUDIT
+=========================================
+
+Date:        2026-11-18
+Branch:      x509 (HEAD 6768015)
+Scope:       ssfasn1, ssfx509, ssfmatch, ssfstr (the _codec modules _crypto depends on:
+             ssfasn1 directly from ssfcms / ssfrsa / ssfecdsa, ssfx509 from ssfcms, ssfmatch
+             and ssfstr through ssfx509). Implementation .c/.h and their .md contracts; the
+             _ut.c files were used for intent and coverage. Style, naming and comment issues
+             were out of scope.
+Method:      Audited sequentially, one module at a time, each reviewer given the earlier
+             modules' findings so cross-module issues are reported once at their root cause and
+             cross-referenced (e.g. X509-6 "root cause ASN1-7"). Every line of each .c was read.
+             Linux x86-64 gcc harnesses with -fsanitize=address,undefined demonstrated findings
+             (marked [demonstrated]); fuzzing: 3,000,000 mutated inputs through every ssfasn1
+             decoder and 5,000,000 mutated certificates through SSFX509Parse and the matchers
+             found no out-of-bounds access or UB (the X509-1 hang was patched out of the fuzz
+             build). Certificates for chain tests were made with the openssl CLI and checked
+             against openssl verify. The lead reviewer re-read the source for every High
+             finding and for ASN1-7 / X509-6 and STR-2 (marked [verified 2026-11-18]).
+             Repository files were not modified by the audit.
+
+Severity scale
+  Critical  wrong results, memory corruption or security break in normal use
+  High      wrong result on reachable edge cases, undefined behaviour, process halt on
+            hostile input where the contract says "returns false"
+  Medium    contract/doc mismatch, missing DBC that permits corruption, portability break,
+            weakened security margin
+  Low       minor correctness nit, latent UB, doc drift
+
+Status values: OPEN, FIXED (date), WONTFIX (reason), DOC (fixed by documentation change)
+               The commit for a FIXED item is found with: git log --oneline --grep=<label>
+
+----------------------------------------------------------------------------------------------
+FIX PROCESS
+----------------------------------------------------------------------------------------------
+
+  Same process as _crypto/AUDIT.txt "FIX PROCESS": Jim names an item by label; Claude briefs
+  it (problem, impact, options, recommendation) with no code changes; Jim picks the option;
+  Claude implements it TDD style (failing test in the module's _ut.c in a block naming the
+  label, RED, fix per claude.ssf, GREEN), updates the module's .md and this file (status plus a
+  change-log entry with the RED/GREEN evidence), and commits only when Jim asks. Do not change
+  other modules (e.g. _crypto) to fix one of these unless Jim approves.
+
+Line numbers refer to the working copy at the date above and will drift as fixes land.
+
+----------------------------------------------------------------------------------------------
+SUMMARY
+----------------------------------------------------------------------------------------------
+
+  Severity   Count   Labels
+  Critical   0       -
+  High       4       ASN1-1, X509-1, X509-2, X509-3
+  Medium     16      ASN1-2, ASN1-3, ASN1-4, ASN1-5, ASN1-6, ASN1-7, X509-4, X509-5,
+                     X509-6, X509-7, X509-8, STR-1, STR-2, STR-3, STR-4, STR-5
+  Low        19      ASN1-8, ASN1-9, ASN1-10, ASN1-11, ASN1-12, ASN1-13, X509-9, X509-10,
+                     X509-11, X509-12, X509-13, X509-14, X509-15, MATCH-1, MATCH-2,
+                     MATCH-3, STR-6, STR-7, STR-8
+
+  Per module   ssfasn1 13 (1 High, 6 Medium, 6 Low)    ssfx509 15 (3 High, 5 Medium, 7 Low)
+               ssfmatch 3 (3 Low)                      ssfstr 8 (5 Medium, 3 Low)
+
+  Memory safety: no out-of-bounds access or UB was found on any hostile-input path (certificate
+  or DER bytes). The ssfstr Medium overreads (STR-1, STR-2) are in APIs with no in-tree caller.
+  The serious findings are availability (X509-1 hang, X509-2 trap) and RFC 5280 / DER
+  strictness gaps that fail open (X509-3, X509-6, X509-8 and their ASN1 root causes).
+
+Suggested fix order
+  1. X509-1        check SSFASN1DecSkip's return in the uniqueID skip loop (one-line fix; any
+                   certificate from the network can hang the device today).
+  2. X509-2        reject an empty / malformed RSA (and ECDSA) key in ssfx509 before calling
+                   verify, so a hostile intermediate returns false instead of trapping.
+  3. X509-3        Name Constraints fail closed: reject when excluded subtrees exceed the cap
+                   or the body is malformed.
+  4. ASN1-7 + X509-6, ASN1-1 + X509-8
+                   don't advance *next on failure / check the critical BOOLEAN's return; reject
+                   negative and non-minimal INTEGERs in DecGetIntU64 and fail closed on pathLen.
+  5. ASN1-2..6     DER strictness (minimal lengths, INTEGER, BOOLEAN, BIT STRING, EncInt).
+  6. X509-4, -5, -7  remaining Medium path-validation gaps; then STR-1..5 (unused APIs, but
+                   public), then Low items at discretion.
+
+----------------------------------------------------------------------------------------------
+ssfasn1
+----------------------------------------------------------------------------------------------
+
+Branch x509, HEAD 6768015. Scope: _codec/ssfasn1.c (1108 lines), ssfasn1.h, ssfasn1.md; the
+_ut.c and the callers in ssfx509.c, ssfcms.c, ssfrsa.c and ssfecdsa.c were read to learn
+intended use and reach. Every line of ssfasn1.c was read. That covers the TL parser
+(_SSFASN1ParseTL), every typed decoder, the time decoders and how they hand off to ssfdtime
+(SSFDTimeStructInit range checks return false, never trap), and every encoder's measure and
+write paths. Memory safety is solid: no out-of-bounds read or write, no arithmetic overflow and
+no data-reachable SSF_REQUIRE was found. All length arithmetic is uint32_t, guarded as
+"contentLen > bufLen - headerLen". A random mutation fuzzer ran 3,000,000 inputs through every
+decoder with recursive descent into constructed elements, built with
+-fsanitize=address,undefined: zero findings. The weaknesses are in DER strictness. The decoder
+is much more lenient than the .md says (lengths, INTEGER, BOOLEAN, BIT STRING, cursor behaviour
+on failure). Separately, the .md says SSFASN1EncInt makes INTEGERs canonical, and it does not.
+Harness: asn1/h.c (behaviour probes), asn1/fz.c (fuzzer); output in asn1/h.out. Both are in the
+scratch dir. Build: gcc -fsanitize=address,undefined with _codec/ssfasn1.c, _time/ssfdtime.c
+and _edc/ssffcsum.c.
+
+----------------------------------------------------------------------------------------------
+
+ASN1-1  High  OPEN  [demonstrated] [verified 2026-11-18]
+  Location:  ssfasn1.c:227-252 (SSFASN1DecGetIntU64)
+  Problem:   The sign bit is never checked. The bytes are treated as an unsigned magnitude, so
+             a negative INTEGER decodes to a large positive value. The .md promises false for
+             a negative INTEGER. An empty INTEGER (02 00) decodes as 0, and non-minimal forms
+             (02 03 00 00 01) decode as 1. The .md says such INTEGERs are rejected.
+  Failure:   02 01 FF (-1) -> true, 255.  02 01 80 (-128) -> true, 128.  02 00 -> true, 0.
+             In ssfx509 (ssfx509.c:369-372), a basicConstraints pathLenConstraint of -1, which
+             is invalid, becomes 255 and is clamped to 127. A malformed CA constraint therefore
+             becomes "nearly unlimited" when it should fail the parse. A negative PSS
+             saltLength (ssfx509.c:220) reads as 255.
+  Reach:     Certificate and CMS bytes reach this through ssfx509 (version, pathLen, PSS
+             saltLength), ssfcms (versions at ssfcms.c:348/497) and ssfrsa (private key
+             version, ssfrsa.c:385). The current callers reject most out-of-range results.
+             pathLen is the case where the wrong value is accepted.
+  Evidence:  242   if (intLen > 1u && intBuf[0] == 0x00u) start = 1;
+             244   if ((intLen - start) > 8u) return false; /* Too large for uint64_t */
+             md:397 "Returns `false` if the INTEGER is negative or its unsigned value would
+                    exceed `UINT64_MAX`."
+             harness: "B IntU64 02 01 FF (-1) -> ret=1 val=255"
+                      "B IntU64 02 01 80 (-128) -> ret=1 val=128"
+                      "C IntU64 02 00 (empty) -> ret=1 val=0"
+                      "C IntU64 02 03 00 00 01 (non-minimal) -> ret=1 val=1"
+  Options:   (1) Reject intLen == 0, reject (intBuf[0] & 0x80) != 0, and reject a leading 00
+             when the next byte is < 0x80. Put this in one shared minimal-INTEGER check that
+             SSFASN1DecGetInt can use too (see ASN1-3) (recommended)
+             (2) Change the .md to say the value is an unsigned magnitude (not recommended).
+
+ASN1-2  Medium  OPEN  [demonstrated]
+  Location:  ssfasn1.c:84-97 (_SSFASN1ParseTL)
+  Problem:   Long-form lengths are not checked for minimality. A length below 0x80 in long
+             form is accepted (30 81 03), and so are leading zero length octets
+             (30 84 00 00 00 03). X.690 10.1 / 8.1.3.5 require the shortest form in DER. The
+             .md says the decoder is DER and "false is returned on any DER malformation".
+             ssfecdsa had to add its own strict parser (_SSFECDSASigParseStrictDER, which
+             checks "seqLen < 0x80") because this layer does not enforce DER.
+  Failure:   30 81 03 02 01 05 -> OpenConstructed true. 30 84 00 00 00 03 02 01 05 -> true.
+             One certificate, key or CMS structure can then have many byte encodings that
+             all parse. Byte-level identity (fingerprints, dedup, pinning, "is this the same
+             cert") no longer matches semantic identity. Every caller also silently accepts
+             non-DER input. Signatures still cover the raw tbs bytes, so this is not a
+             signature forgery.
+  Reach:     Hostile certificate, CMS and key bytes, through every decoder (every decoder
+             goes through _SSFASN1ParseTL).
+  Evidence:  87    uint8_t numLenBytes = buf[pos++] & 0x7Fu;
+             88    if (numLenBytes > 4u) return 0; /* Too large */
+             91-96 len = (len << 8) | buf[pos++];   (no minimality check)
+             harness: "D Seq 30 81 03 (long form for 3) -> ret=1"
+                      "D Seq 30 84 00 00 00 03 -> ret=1 inner=3"
+  Options:   (1) After the loop, reject a first length octet of 0x00, and reject
+             numLenBytes == 1 with len < 0x80 (equivalently, reject unless
+             _SSFASN1LenFieldSize(len) == headerLenBytes) (recommended)
+             (2) Document BER-length tolerance and leave strictness to the callers.
+
+ASN1-3  Medium  OPEN  [demonstrated]
+  Location:  ssfasn1.c:211-224 (SSFASN1DecGetInt)
+  Problem:   No INTEGER validation at all. A zero-length body is accepted, and so are
+             non-minimal leading 00/FF octets and negative values. md:74-77 gives "an INTEGER
+             with non-minimal sign byte" as an example of what returns false.
+  Failure:   02 00 -> true, len 0. ssfrsa._SSFRSAPubKeyDecode (ssfrsa.c:259-273) and
+             _SSFRSADecIntToBN strip leading zeros and import the bytes as a magnitude. So a
+             negative modulus (02 81 80 C0 ...) or a padded one (02 82 01 01 00 00 C0 ...)
+             is accepted as an ordinary positive n. ssfx509 checks only the serial number's
+             sign and length itself (ssfx509.c:617). It does not check minimality.
+  Reach:     Hostile SubjectPublicKeyInfo / RSAPublicKey / RSAPrivateKey / CMS bytes, through
+             SSFRSAPubKeyDecode and the ssfx509 parser.
+  Evidence:  221   if (!SSFASN1DecGetTLV(cursor, &tag, intBufOut, intLenOut, next)) return false;
+             222   if (tag != SSF_ASN1_TAG_INTEGER) return false;
+             harness: "C GetInt 02 00 -> ret=1 len=0"
+  Options:   (1) Reject an empty body. Reject 00 followed by a byte < 0x80, and FF followed by
+             a byte >= 0x80. Leave the sign to the caller, but document that the body is
+             two's complement and minimal (recommended)
+             (2) Add SSFASN1DecGetUInt, which also rejects negatives, for the key and serial
+             callers.
+
+ASN1-4  Medium  OPEN  [demonstrated]
+  Location:  ssfasn1.c:194-208 (SSFASN1DecGetBool)
+  Problem:   Any nonzero byte decodes as true. md:379-380 says DER requires 0xFF / 0x00 and
+             that "any other value is rejected" (X.690 11.1).
+  Failure:   01 01 01 -> true, val = true. A certificate whose basicConstraints cA or
+             extension critical flag is encoded 0x01 is accepted. Other DER parsers reject
+             it, so implementations disagree about whether the certificate is valid at all.
+  Reach:     Hostile certificate bytes, through ssfx509 (extension critical, ssfx509.c:326;
+             basicConstraints cA, ssfx509.c:364).
+  Evidence:  205   if (tag != SSF_ASN1_TAG_BOOLEAN || valueLen != 1u) return false;
+             206   *valOut = (value[0] != 0x00u);
+             harness: "A Bool 01 01 01 -> ret=1 val=1 (md: rejected)"
+  Options:   (1) Return false unless value[0] is 0x00 or 0xFF (recommended)
+             (2) Correct the .md.
+
+ASN1-5  Medium  OPEN  [demonstrated]
+  Location:  ssfasn1.c:255-276 (SSFASN1DecGetBitString)
+  Problem:   The unused-bits octet is passed through unchecked. Values above 7 are accepted.
+             A nonzero count with an empty payload is accepted. Nonzero padding bits are
+             accepted, although DER requires them to be zero (X.690 11.2.1). md:406-409 gives
+             the range as 0..7. No caller checks the count: ssfx509 stores pubKeyUnusedBits
+             and signatureUnusedBits and never reads them, and the keyUsage parse ignores
+             kuUnused.
+  Failure:   03 02 08 FF -> true, unused = 8.  03 01 05 -> true, unused = 5, len 0.
+             03 02 07 FF -> true with byte FF. Only digitalSignature is declared there, but
+             ssfx509.c:388 copies the whole byte into keyUsageBits, so the padding bits read
+             as keyEncipherment, keyCertSign, cRLSign and more.
+  Reach:     Hostile certificate bytes, through ssfx509 (SPKI, keyUsage, signature).
+  Evidence:  272   *unusedBitsOut = value[0];
+             273   *bitsOut = &value[1];
+             274   *bitsLenOut = valueLen - 1u;
+             harness: "E BitString unused=8 -> ret=1 unused=8"
+                      "E BitString empty with unused=5 -> ret=1 unused=5 len=0"
+                      "E BitString unused=7 byte FF (padding bits set) -> ret=1 byte=FF"
+  Options:   (1) Reject value[0] > 7. Reject value[0] != 0 when valueLen == 1. Reject a last
+             byte whose low value[0] bits are nonzero (recommended)
+             (2) Change only the range check, and make ssfx509 mask the padding bits.
+
+ASN1-6  Medium  OPEN  [demonstrated]
+  Location:  ssfasn1.c:759-786 (SSFASN1EncInt); ssfasn1.md:564-566
+  Problem:   The .md says the encoder "strips redundant leading sign bytes ... and adds a
+             leading 0x00 when the unsigned value's high bit is set". The code copies intBuf
+             unchanged. A caller who trusts the .md emits negative or non-minimal INTEGERs.
+  Failure:   EncInt({80}) -> 02 01 80 (that is -128). EncInt({00 00 01}) -> 02 03 00 00 01.
+             SSFX509 certificate generation passes params->serial straight through
+             (ssfx509.c:1790-1791). A serial whose first byte is >= 0x80 is written as a
+             negative serial, which SSFX509's own parser then rejects (ssfx509.c:617).
+             ssfecdsa and ssfrsa are safe today only because they canonicalize first
+             (_SSFECDSACanonicalizeInt, _SSFRSANormalizeMag).
+  Reach:     Caller input (certificate generation and any future caller relying on the .md).
+             Not reachable from hostile input.
+  Evidence:  781   buf[0] = SSF_ASN1_TAG_INTEGER;
+             782   _SSFASN1WriteLenField(&buf[1], intLen);
+             783   memcpy(&buf[headerLen], intBuf, intLen);
+             harness: "J EncInt {80} -> 02 01 80 (md: adds 00)"
+                      "J EncInt {00 00 01} -> 02 03 00 00 01 (md: strips)"
+  Options:   (1) Fix the .md: intBuf must already be a minimal two's-complement body. Add a
+             DBC check for minimality (recommended)
+             (2) Add an "unsigned magnitude" encoder that strips zeros and adds the 00, and
+             move ssfx509 serial, ssfecdsa and ssfrsa to it.
+
+ASN1-7  Medium  OPEN  [demonstrated] [verified 2026-11-18]
+  Location:  ssfasn1.c:204-205, 221-222, 268-270, 289-290, 304-305, 320-321, 408-418, 457,
+             584-586, 610-612 (all typed decoders); ssfasn1.md:76-77, :372-373
+  Problem:   The .md says that on false "*next is not advanced". Every typed decoder calls
+             SSFASN1DecGetTLV first, which writes *next. Only after that does it check the
+             tag, length or content. A tag mismatch or bad content therefore returns false
+             with *next already past the element. Callers often alias next to the cursor,
+             as in GetX(&c, ..., &c). In that case a failed decode silently consumes the
+             element.
+  Failure:   GetBool on 04 01 AA 05 00 -> false, and next is now at offset 3 (past the OCTET
+             STRING). In ssfx509.c:324-327 the return of SSFASN1DecGetBool(&extInner,
+             &critical, &extInner) is ignored. A critical flag encoded as 01 02 FF FF is
+             therefore skipped and critical stays false. A critical extension silently
+             becomes non-critical and escapes the unknown-critical-extension rejection.
+  Reach:     Hostile certificate bytes, through ssfx509 extension parsing. In general,
+             through any caller that trusts the .md's "consumed nothing" guarantee.
+  Evidence:  133-134 next->buf = ...; next->bufLen = ...;   (inside GetTLV, before callers'
+                                                            tag checks)
+             205   if (tag != SSF_ASN1_TAG_BOOLEAN || valueLen != 1u) return false;
+             md:77 "On `false` ... `*next` is not advanced"
+             harness: "F GetBool on OCTET STRING -> ret=0 next advanced: off=3 len=2"
+  Options:   (1) Decode into a local cursor and copy it to *next only on success, in every
+             typed decoder (recommended). This also makes aliased calls safe.
+             (2) Correct the .md, and separately fix ssfx509.c:326 to check the return value.
+
+ASN1-8  Low  OPEN  [demonstrated]
+  Location:  ssfasn1.c:826-836 (SSFASN1EncBitString); ssfasn1.md:581-582
+  Problem:   The .md says an encoder "returns `false` if `unusedBits > 7`". The code traps via
+             SSF_REQUIRE. It also traps on bitsLen == 0 with unusedBits != 0, which the .md
+             does not mention. Padding bits in the last byte are not cleared or checked, so
+             the output can be non-DER.
+  Failure:   EncBitString(..., unusedBits = 8) -> SSF_ASSERT at ssfasn1.c:834 (halt).
+  Reach:     Caller misuse only. A trap is acceptable, but the .md is wrong.
+  Evidence:  834   SSF_REQUIRE(unusedBits <= 7u);
+             harness: "L EncBitString unused=8 (md: returns false) -> ASSERT _codec/ssfasn1.c:834"
+  Options:   (1) Fix the .md to say these are DBC traps, and add a DBC check that padding bits
+             are zero (recommended)  (2) Return false instead of trapping.
+
+ASN1-9  Low  OPEN  [demonstrated]
+  Location:  ssfasn1.c:689-708 (_SSFASN1TagFieldSize/_SSFASN1WriteTagField), 711-734, 900-905,
+             1077-1108
+  Problem:   Encoders never validate the uint16_t tag. With low 5 bits 0x1F and an extension
+             byte below 31 or at least 0x80, the encoder emits DER that SSFASN1 itself refuses
+             to decode. A nonzero high byte without 0x1F is silently dropped.
+             SSFASN1EncString does not check that strTag is one of the six string tags
+             (md:611-613 says it "must be").
+  Failure:   EncTagLen(tag 0x001F) -> 1F 00 00, which SSFASN1DecGetTLV rejects.
+             EncTagLen(tag 0x0530) -> 30 00 (number 5 lost).
+  Reach:     Caller misuse only.
+  Evidence:  691   return ((tag & 0x1Fu) == 0x1Fu) ? 2u : 1u;
+             harness: "K EncTagLen tag 0x001F -> ret=1 out=1F 00 00  redecode=0"
+                      "K EncTagLen tag 0x0530 -> ret=1 out=30 00"
+  Options:   (1) Add a shared DBC tag-validity check (high byte 0 for a single-byte tag, 31..127
+             for the 0x1F form) to every encoder, plus the string-tag check in EncString
+             (recommended)  (2) Document the restriction.
+
+ASN1-10  Low  OPEN  [demonstrated]
+  Location:  ssfasn1.c:398-421 (SSFASN1DecGetString)
+  Problem:   String bodies are not validated against their tag. Embedded NULs pass in
+             UTF8/IA5/Printable. PrintableString accepts characters outside its set.
+             BMPString of odd length and UniversalString with a length not a multiple of 4
+             are accepted. UTF-8 well-formedness is not checked. The .md promises nothing
+             here, but downstream name and hostname matching gets bytes that cannot be
+             represented in the declared type.
+  Failure:   0C 03 'a' 00 'b' -> true.  1E 03 00 'a' 00 -> true.
+  Reach:     Hostile certificate DN and SAN bytes, through ssfx509.
+  Evidence:  413-418 (tag set check only)
+             harness: "I UTF8String with NUL -> ret=1"; "I BMPString odd length -> ret=1"
+  Options:   (1) Reject odd BMP lengths, UniversalString lengths not a multiple of 4, and NUL
+             in the 8-bit types. Optionally check the PrintableString set (recommended)
+             (2) Document that callers must validate.
+
+ASN1-11  Low  OPEN  [demonstrated]
+  Location:  ssfasn1.c:468-478 (SSFASN1DecGetTime)
+  Problem:   GeneralizedTime is accepted for years up to 2049. RFC 5280 4.1.2.5 says
+             certificate validity through 2049 MUST be UTCTime. The .md does not mention this
+             leniency. A UTCTime with YY 50-69 is rejected because ssfdtime starts at 1970,
+             which is documented.
+  Failure:   18 0F "20240101000000Z" -> true.
+  Reach:     Hostile certificate bytes, through ssfx509 validity.
+  Evidence:  harness: "H GeneralizedTime 2024 (<2050) -> ret=1"
+  Options:   (1) Document the leniency (recommended; many verifiers accept this)
+             (2) Add a strict-profile option.
+
+ASN1-12  Low  OPEN  [reviewed]
+  Location:  ssfasn1.c:1077-1105 (SSFASN1EncWrap), 861-867, 900-905
+  Problem:   If content overlaps buf (for example an in-place wrap, where content was written
+             at &buf[headerLen]), the memcpy is undefined behaviour. There is no DBC check
+             and the .md has no note. Current repo callers use separate buffers (checked in
+             ssfx509.c, ssfcms_ut.c).
+  Failure:   EncWrap(buf, n, SEQ, &buf[2], len, &w) -> memcpy with to == from (UB).
+  Reach:     Caller misuse.
+  Evidence:  1104  memcpy(&buf[headerLen], content, contentLen);
+  Options:   (1) Use memmove, which makes in-place wrapping legal and useful (recommended)
+             (2) Add a DBC no-overlap check and a note in the .md.
+
+ASN1-13  Low  OPEN  [reviewed]
+  Location:  ssfasn1.c:139-156, 159-171, 326-339; ssfasn1.md:277-278, :284-286, :429-432,
+             :621-622
+  Problem:   Doc drift:
+             (a) OpenConstructed "returns false if ... the element is primitive". In fact the
+             constructed bit is only checked through expectedTag, so a primitive expectedTag
+             succeeds.
+             (b) PeekTag returns true even when the length is truncated or exceeds the buffer.
+             The .md says false only if the cursor is empty.
+             (c) GetOID REQUIREs oidArcsSize >= 2. This is not documented, and passing 1
+             traps.
+             (d) EncUTCTime's .md says years 1950-2049, but 1970-2049 is all that can be
+             produced.
+             (e) GetTLV accepts universal tag 0 (EOC) as an ordinary element.
+  Failure:   GetTLV on 00 00 -> true (harness "G ... ret=1"). The others follow from the code
+             as quoted.
+  Reach:     Caller misuse, and (e) is reachable from hostile input, but harmless.
+  Evidence:  151   if (tag != expectedTag) return false;   338 SSF_REQUIRE(oidArcsSize >= 2u);
+  Options:   (1) Update the .md. Optionally have OpenConstructed REQUIRE expectedTag & 0x20,
+             and reject tag 0x00 in GetTLV (recommended)
+
+----------------------------------------------------------------------------------------------
+Checked, no issue
+----------------------------------------------------------------------------------------------
+- _SSFASN1ParseTL bounds. bufLen < 2 is rejected. Truncation is checked after the
+  high-tag-form extension byte. The "pos + numLenBytes > bufLen" check cannot wrap
+  (pos <= 3). Indefinite length (0x80) is rejected. More than 4 length bytes is rejected.
+- High-tag form: a continuation bit is rejected (number >= 128), and an extension byte < 31
+  is rejected (non-minimal tag number).
+- GetTLV overflow-safe subtraction "contentLen > bufLen - headerLen". The next cursor
+  arithmetic stays within the buffer. bufLen == 0 is handled before any dereference.
+- GetOID: rejects a leading 0x80 on every sub-identifier, rejects a truncated final
+  sub-identifier, has a correct 32-bit overflow guard ((arc >> 25) != 0 at byte 5), splits
+  the first arc correctly for arc0 = 2 with arc1 >= 40, bounds the output array, and needs
+  rawLen > 0.
+- Time decoders: exact lengths (13/15/10/19), digit checks, a required 'Z', a year range
+  check before the (uint16_t) cast, and month/day >= 1 before the -1. SSFDTimeStructInit
+  rejects out-of-range hour/min/sec/day (including Feb 29 off leap years and 2100 as
+  non-leap) by returning false. It does not trap, so hostile times cannot halt the device.
+- Encoder measure/write consistency. The NULL-buf pass returns the same total as the write
+  pass in every encoder. All totals are overflow-guarded against 0xFFFFFFFF.
+  bytesWritten = 0 on failure. EncIntU64 keeps intBuf[9] in bounds (at most 8 bytes + 00)
+  and uses memmove correctly.
+- _SSFASN1LenFieldSize and _SSFASN1WriteLenField agree on every boundary
+  (0x7F/0x80/0xFF/0x100/0xFFFF/0x10000/0xFFFFFF/0x1000000), and the encoder always emits
+  minimal lengths.
+- Time encoders: the year range is enforced (UTCTime <= 2049, ssfdtime <= 2199). The
+  unixSec * 1000 multiplication is in a uint64_t SSFPortTick_t and is bounded by
+  SSFDTIME_UNIX_EPOCH_SEC_MAX.
+- Word size and endianness: there are no size_t or int width assumptions. Every
+  multi-byte value is assembled byte by byte. The shifts are on uint32_t/uint64_t, and
+  the uint16_t << 8 of a value <= 127 is safe with 16-bit int.
+- No recursion and no unbounded loops. Every loop is bounded by bufLen or rawLen.
+- Fuzz: 3,000,000 mutated and random inputs under ASan and UBSan, through every decoder,
+  with recursive descent into constructed elements to depth 8: clean.
+
+----------------------------------------------------------------------------------------------
+ssfx509
+----------------------------------------------------------------------------------------------
+
+Branch x509, HEAD 6768015. Scope: _codec/ssfx509.c (2897 lines), ssfx509.h, ssfx509.md. The
+ssfx509_ut.c was grepped for intent, and the callers in ssfcms.c were read for reach. Every line
+of the parser (SSFX509Parse, _SSFX509ParseDN, _SSFX509ParseExtensions, _SSFX509ParsePSSParams),
+the signature dispatcher (SSFX509VerifySignature), the chain verifier
+(SSFX509VerifyChainPurpose), the Name Constraints and hostname/IP matchers was read. The
+certificate generator was read at a lower priority. ssfasn1 findings (asn1.txt) are not
+repeated; where one has a further consequence inside ssfx509 it is cross-referenced. Memory
+safety of the parser is good: a 5,000,000-input mutation fuzzer (6 seed certs: RSA, RSA-PSS, EC,
+NC-bearing CAs) through SSFX509Parse, NC validation, hostname/IP matching and PSS param parsing,
+built with -fsanitize=address,undefined -fno-sanitize-recover=all and exact-size heap copies,
+found no out-of-bounds access or UB. (The fuzz build patches X509-1 out, because that hang would
+stop the run. Random mutation did not hit the hang in 100k unpatched runs; it needs a crafted
+input.) The serious problems are two denial-of-service paths reachable from unauthenticated
+certificate bytes (an infinite loop, and a data-reachable SSF_REQUIRE in ssfrsa), and several
+fail-open paths in Name Constraints and hostname matching.
+Harnesses, all in the scratch dir x509/: h_chain.c (real chains built with the openssl CLI,
+certs/mk.sh), h_parse.c (crafted DER, made with mut.py / vec.h), fz/fz.c (fuzzer). Outputs are
+in h_chain.out, h_parse.out and fz/fz.out. Build: gcc -fsanitize=address,undefined
+-DSSF_CONFIG_HAVE_OPENSSL=0 with the brief's include paths. The harness #includes ssfx509.c to
+reach the static helpers. It links against an archive of every other source in
+build-linux.ninja (main.c and ssfx509.c excluded).
+
+----------------------------------------------------------------------------------------------
+
+X509-1  High  OPEN  [demonstrated] [verified 2026-11-18]
+  Location:  ssfx509.c:682-687 (SSFX509Parse)
+  Problem:   The issuerUniqueID / subjectUniqueID skip loop ignores the return value of
+             SSFASN1DecSkip. SSFASN1DecPeekTag succeeds when only the tag and length octets
+             are present (ASN1-13b). SSFASN1DecGetTLV refuses a content length that overruns
+             the buffer, and then leaves *next untouched. When that happens pos never
+             advances, and the loop spins forever.
+  Failure:   A TBSCertificate with the 4 bytes 81 82 FF FF after SubjectPublicKeyInfo
+             ([1] with length 65535 and no content). SSFX509Parse never returns, so the device
+             hangs. This is worse than a trap: no assert fires and no watchdog-friendly exit
+             happens.
+  Reach:     Hostile, unauthenticated input. Parsing runs before any signature check. The
+             paths are: any certificate given to SSFX509Parse / SSFX509VerifyChain[Purpose]
+             (a TLS peer's chain), and every certificate in a CMS SignedData certificates
+             set (ssfcms.c:616, 720, 764 parse sd->certs before any trust decision).
+  Evidence:  683   while (SSFASN1DecPeekTag(&pos, &tag) &&
+             684          (tag == SSF_ASN1_CONTEXT_IMPLICIT(1) || tag == ..._IMPLICIT(2)))
+             686       SSFASN1DecSkip(&pos, &pos);
+             harness (h_parse.out, child process with a 5 s alarm):
+               "A issuerUniqueID-tag with overlong length: child killed by signal 14
+                (SIGALRM after 5 s: infinite loop)"
+  Options:   (1) "if (!SSFASN1DecSkip(&pos, &pos)) return false;" (recommended). The fuzz copy
+             with exactly this change ran clean.
+             (2) Also bound the loop to the two optional fields: at most one [1], then at most
+             one [2], in order, as RFC 5280 4.1 defines.
+
+X509-2  High  OPEN  [demonstrated] [verified 2026-11-18]
+  Location:  ssfx509.c:2349-2350, 2384-2385 (SSFX509VerifySignature); ssfrsa.c:1127, 1351
+  Problem:   SSFX509VerifySignature passes keyCert->pubKey / pubKeyLen to SSFRSAVerifyPKCS1 /
+             SSFRSAVerifyPSS without checking pubKeyLen. Both functions
+             SSF_REQUIRE(pubKeyDerLen > 0u). An SPKI BIT STRING of 03 01 00 parses (ASN1-5
+             allows an empty payload), so pubKeyLen == 0 reaches the DBC trap. The key-holding
+             certificate is not yet trusted when its key is used. VerifyChainPurpose checks
+             cert[i]'s signature with cert[i+1]'s key (line 2701) before anything anchors
+             cert[i+1].
+  Failure:   chain = { any leaf whose TBS sigAlg is sha*WithRSAEncryption or id-RSASSA-PSS,
+             a forged "issuer" with subject = leaf issuer and SPKI {rsaEncryption, BIT STRING
+             03 01 00} }. SSFX509VerifyChain gives "SSF Assertion: _crypto/ssfrsa.c:1127",
+             and the device halts. The .md promises false.
+  Reach:     Hostile, unauthenticated input. A TLS peer's certificate list through
+             SSFX509VerifyChain[Purpose]. A CMS message's certificate set through ssfcms
+             (_SSFCMSBuildChain picks the issuer from sd->certs by name, then
+             SSFX509VerifyChainPurpose). SSFX509VerifySignature is also called directly by
+             ssfcms.c:964 with the signer certificate. That certificate is chain-verified
+             first, so it is not reachable there on its own.
+  Evidence:  2349  ok = SSFRSAVerifyPKCS1(keyCert->pubKey, (size_t)keyCert->pubKeyLen, hashId, ...
+             ssfrsa.c:1127  SSF_REQUIRE(pubKeyDerLen > 0u);
+             harness (h_parse.out): "emptykey.der parses: 1 pubKeyLen=0"
+                                    "SSF Assertion: _crypto/ssfrsa.c:1127"
+                                    "B chain whose issuer cert has empty RSA BIT STRING: child
+                                     exit status 1"
+  Options:   (1) In SSFX509VerifySignature, return false when keyCert->pubKeyLen == 0, and
+             also check that the key algorithm matches the scheme (see X509-11) (recommended)
+             (2) Have SSFX509Parse reject an empty SPKI BIT STRING or one with nonzero unused
+             bits. That also covers the ASN1-5 consequence for keys.
+
+X509-3  High  OPEN  [demonstrated] [verified 2026-11-18]
+  Location:  ssfx509.c:494-551 (_SSFX509ParseExtensions, Name Constraints); 2542-2579;
+             ssfx509.md:111-113, :216
+  Problem:   Name Constraints fail open in three ways. A constrained CA can therefore issue
+             names its issuer excluded:
+             (a) Excluded subtrees beyond SSF_X509_CONFIG_MAX_NAME_CONSTRAINTS (8) are dropped
+                 silently (525-526). Dropping permitted entries only tightens the check.
+                 Dropping excluded entries removes prohibitions.
+             (b) An NC body that is not the expected structure (not a SEQUENCE, a wrong
+                 subtree tag at 519, a GeneralSubtree that fails to open at 533-534) sets
+                 hasNameConstraints with no subtrees, so nothing is enforced. The .md says
+                 malformed recognized extensions keep "fail-closed defaults". For NC the
+                 default is "unconstrained".
+             (c) NC is in the recognized set (2595), so the critical flag that RFC 5280
+                 mandates for it never triggers rejection, even when it was not understood.
+  Failure:   root -> inter (critical NC: excluded a1.com ... a8.com, evil.com) -> leaf SAN
+             evil.com. SSF accepts for both purposes. openssl verify rejects.
+             root -> inter (critical NC whose body is SET {}) -> leaf SAN evil.com. SSF
+             accepts. openssl rejects ("invalid certificate").
+  Reach:     A constrained intermediate CA, whose operator or key is the adversary, which is
+             exactly the threat NC exists for. TLS (SSFX509VerifyChain) and code signing
+             (ssfcms through SSFX509VerifyChainPurpose).
+  Evidence:  525   while (!SSFASN1DecIsEmpty(&subtreesInner) &&
+             526          *destLen < SSF_X509_CONFIG_MAX_NAME_CONSTRAINTS)
+             501   if (SSFASN1DecOpenConstructed(&ncCursor, SSF_ASN1_TAG_SEQUENCE, ...)) {...}
+                   (no else: hasNameConstraints already true, lists empty)
+             harness (h_chain.out):
+               "NC excluded #9 evil.com (8 kept): VerifyChainPurpose(purpose=0 host=evil.com)
+                -> 1"   (and purpose=1 -> 1)
+               "NC body is SET not SEQUENCE (unparseable): VerifyChainPurpose(purpose=0
+                host=evil.com) -> 1"
+  Options:   (1) Make _SSFX509ParseExtensions return false (parse failure) when an NC body is
+             malformed in any way, or holds more permitted or excluded subtrees than fit
+             (recommended)
+             (2) Keep parsing, but add an "ncUnprocessable" flag that the chain verifier
+             treats as reject whenever the NC cert is used as an issuer.
+
+X509-4  Medium  OPEN  [demonstrated]
+  Location:  ssfx509.c:539-547 (NC parse keeps only 0x82 / 0x87); 2542-2579
+             (_SSFX509NCValidateCert checks SANs only); ssfx509.md:67-70
+  Problem:   Constraints on directoryName, rfc822Name, URI, otherName and the like are
+             discarded. The subject DN is never checked. RFC 5280 4.2.1.10 says: if a critical
+             NC "imposes constraints on a particular name form, and an instance of that name
+             form appears in the subject field or subjectAltName ... the application MUST
+             either process the constraint or reject the certificate". A permitted list that
+             holds only unsupported forms becomes empty, which means "everything permitted".
+             The .md documents that only dNSName/iPAddress subtrees are kept. It does not say
+             that this breaks the RFC MUST and turns a restrictive constraint into none.
+  Failure:   inter with critical NC permitted;dirName:O=Good -> leaf subject O=Evil, CN=evil:
+             SSF accepts for code signing and for TLS. openssl rejects.
+             inter with permitted;email:good.com -> leaf SAN email:x@evil.com: SSF accepts
+             (code signing). openssl rejects.
+             This matters most for SSF_X509_PURPOSE_CODE_SIGNING (ssfcms), where
+             directoryName and rfc822Name constraints are the usual way to scope a sub-CA.
+  Reach:     A constrained intermediate CA (the adversary), through
+             SSFX509VerifyChainPurpose / ssfcms and SSFX509VerifyChain.
+  Evidence:  540   if (gnTag == 0x82u || gnTag == 0x87u)   (anything else silently skipped)
+             harness (h_chain.out):
+               "NC permitted dirName O=Good, leaf O=Evil: VerifyChainPurpose(purpose=1 ...) -> 1"
+               "NC permitted email good.com, leaf email evil: VerifyChainPurpose(purpose=1 ...)
+                -> 1"
+  Options:   (1) Record that an NC carries a name form the verifier does not process, and
+             reject any subordinate certificate that has an instance of that form. A
+             non-empty subject DN counts for directoryName. Per the RFC, rejecting
+             unconditionally is also allowed (recommended)
+             (2) Implement directoryName constraints (prefix match on raw RDN sequence) and
+             reject the remaining forms.
+
+X509-5  Medium  OPEN  [demonstrated]
+  Location:  ssfx509.c:2857-2869 (SSFX509VerifyChainPurpose); 2003-2060 (_SSFX509HostnameMatch)
+  Problem:   A hostname that is an IPv4 literal is also matched against dNSName SANs, both
+             exactly and by wildcard. RFC 6125 6.2.1 / RFC 9525 6.3 say an IP-address reference
+             identity is matched only against iPAddress SANs. Name Constraints are applied per
+             type, so a CA whose NC permits only an IP range (no DNS subtrees) can issue a
+             dNSName "8.8.8.8". That dNSName passes NC (the DNS type is unconstrained) and then
+             matches the hostname "8.8.8.8". The wildcard form "*.0.0.1" also matches
+             "10.0.0.1", because the base "0.0.1" contains a dot.
+  Failure:   root -> inter (NC permitted IP 10.0.0.0/8) -> leaf SAN dNSName:8.8.8.8, host
+             "8.8.8.8": VerifyChain -> true. The IP constraint is bypassed.
+  Reach:     A constrained intermediate CA, or any CA willing to put an IP string into a
+             dNSName, through SSFX509VerifyChain[Purpose] with an IP-literal hostname.
+  Evidence:  2859  if (certs[0].san[i].type == SSF_X509_SAN_DNS)
+             2861      matched = _SSFX509HostnameMatch(hostnameStrOpt, ...);
+             harness: "NC permitted IP 10/8, leaf dNSName 8.8.8.8: VerifyChainPurpose(purpose=0
+                       host=8.8.8.8) -> 1"
+                      "I host 10.0.0.1 vs dNSName *.0.0.1 -> 1"
+                      "I host 10.0.0.1 vs dNSName 10.0.0.1 -> 1"
+  Options:   (1) Parse the hostname once. If it is an IPv4 literal (_SSFX509ParseIPv4
+             succeeds), match only iPAddress SANs. Otherwise match only dNSName SANs
+             (recommended)
+             (2) At least refuse wildcard matching when the hostname is all digits and dots.
+
+X509-6  Medium  OPEN  [demonstrated] [verified 2026-11-18]  (root cause ASN1-7, ASN1-4)
+  Location:  ssfx509.c:320-328 (_SSFX509ParseExtensions), also 362-365 (basicConstraints cA)
+  Problem:   ssfx509 ignores the return value of SSFASN1DecGetBool and aliases next to the
+             cursor. Because of ASN1-7, a BOOLEAN that fails to decode (length other than 1) is
+             consumed anyway, and critical keeps its default of false. The extension then
+             escapes the unknown-critical-extension rejection at 2840-2852. ASN1-7 already
+             describes this consequence. It is listed here as the ssfx509-side API misuse the
+             brief asks for. A malformed cA BOOLEAN fails closed (isCA stays false). Also,
+             because of ASN1-4, critical encoded as 0x01 is accepted, and an explicitly
+             encoded FALSE (forbidden in DER, a DEFAULT value) is accepted silently.
+  Failure:   Extension { OID 1.2.3.4, BOOLEAN 01 02 FF FF, OCTET STRING 05 00 } -> parse
+             true, exts[0].critical = 0, so the chain check never sees a critical unknown
+             extension.
+  Reach:     Certificate bytes, but only inside a signed TBS. An issuing CA must have
+             produced the malformed encoding, so this weakens the margin rather than being a
+             practical forgery.
+  Evidence:  324   if (SSFASN1DecPeekTag(&extInner, &tag) && tag == SSF_ASN1_TAG_BOOLEAN)
+             326       SSFASN1DecGetBool(&extInner, &critical, &extInner);
+             harness: "C unknown ext, critical BOOLEAN len 2: ret=1 extsLen=1 crit0=0 ..."
+                      "   IsKnown=0 -> unknown-critical check sees critical=0"
+  Options:   (1) "if (!SSFASN1DecGetBool(...)) return false;" here and at 364
+             (recommended). This is needed even after ASN1-7 is fixed, because the value
+             would otherwise stay silently non-critical.
+             (2) Treat any BOOLEAN-tagged element that does not decode as critical = true.
+
+X509-7  Medium  OPEN  [demonstrated]
+  Location:  ssfx509.c:157-225 (_SSFX509ParsePSSParams), 2358-2390; ssfx509.md:170-174
+  Problem:   The .md says "Absent PSS parameters select SHA-1 per RFC 4055, which this module
+             does not support, so such certificates fail to verify". The code comment at
+             173-174 says the same ("fails closed"). In fact absent parameters select SHA-256
+             with salt 20, and the signature verifies. Parameters that do not parse at all are
+             handled the same way: not a SEQUENCE, a NULL, a structure with trailing junk, an
+             undecodable [0], or an undecodable saltLength (220-223 keeps 20). The function
+             cannot report an error (it returns void), so a malformed AlgorithmIdentifier is
+             never rejected. The signed algorithm (SHA-1) and the verified algorithm (SHA-256)
+             differ without notice. trailerField is never checked.
+  Failure:   An RSASSA-PSS signature made with SHA-256 / MGF1-SHA-256 / salt 20 gives true
+             from SSFX509VerifySignature(id-RSASSA-PSS) with params absent, with params 05 00,
+             and with params 30 03 02 01 05 AA.
+  Reach:     Certificate TBS sigAlg (through VerifyChain) and CMS SignerInfo
+             signatureAlgorithm (through ssfcms.c:964). This is not a forgery, since the key
+             holder must still have produced a SHA-256 PSS signature. It is a contract
+             mismatch, and parsing malformed algorithm parameters silently accepts them.
+  Evidence:  175   *hashOut = SSF_RSA_HASH_SHA256;
+             179   if ((params == NULL) || (paramsLen == 0u)) { return; }
+             186   if (!SSFASN1DecOpenConstructed(...)) return;   (defaults kept, no error)
+             harness: "H PSS sig (SHA-256/MGF1-SHA256/salt20), params absent -> 1 (md: SHA-1
+                       default, fails)"
+                      "H   params = NULL (05 00) -> 1"
+                      "H   params = SEQ{INTEGER 5} + junk -> 1"
+  Options:   (1) Make the parser return bool. Return false for absent params, for an
+             unknown/SHA-1 hash, for an MGF that is not MGF1 with the same hash, for
+             trailerField != 1, for trailing bytes, and for an undecodable saltLength. Have
+             VerifySignature fail on false (recommended)
+             (2) Keep the leniency and correct the .md and the comment.
+
+X509-8  Medium  OPEN  [demonstrated]  (related ASN1-1)
+  Location:  ssfx509.c:351-377 (basicConstraints); ssfx509.md:109-113
+  Problem:   pathLenConstraint fails open. If the element after cA is present but
+             SSFASN1DecGetIntU64 rejects it (a wrong tag, or an INTEGER longer than 8 octets),
+             pathLenConstraint stays -1, which means "no limit". The .md says recognized
+             extensions with a malformed body keep "fail-closed defaults". Trailing bytes after
+             pathLen, and after the SEQUENCE inside the OCTET STRING, are also ignored. (ASN1-1
+             already covers a negative pathLen being read as 255 -> 127.)
+  Failure:   BC { cA TRUE, OCTET STRING 00 } -> isCA=1 pathLen=-1.
+             BC { cA TRUE, INTEGER 9 octets } + trailing 05 00 -> isCA=1 pathLen=-1.
+  Reach:     Certificate bytes inside a signed TBS. The issuing CA must emit the malformed
+             value, so the security margin is weakened rather than broken.
+  Evidence:  369   if (SSFASN1DecGetIntU64(&bcInner, &pl, &bcInner)) { ... }   (no else)
+             harness: "E BC cA=TRUE, pathLen as OCTET STRING: ... isCA=1 pathLen=-1"
+                      "D BC cA=TRUE, pathLen 9-byte INTEGER, trailing 05 00 in OCTET: ... isCA=1
+                       pathLen=-1"
+  Options:   (1) If anything remains after cA and it is not a valid non-negative INTEGER,
+             leave isCA false (or fail the parse), and require bcInner and bcCursor to be
+             empty at the end (recommended)
+             (2) Treat an undecodable pathLen as 0.
+
+X509-9  Low  OPEN  [demonstrated]
+  Location:  ssfx509.c:405-426 (SAN parse)
+  Problem:   The GeneralName choice is taken as tag & 0x1F. Class and the constructed bit are
+             ignored, so a universal INTEGER (0x02), a constructed [2] (0xA2) or a universal
+             0x07 element in the SAN SEQUENCE is stored as dNSName or iPAddress and is then
+             used for hostname matching and NC. The NC parser checks the exact tags 0x82/0x87
+             (540), so the two parsers disagree. Only primitive context tags 0x82 / 0x87 are
+             valid.
+  Failure:   SAN SEQUENCE { 02 08 "evil.com" } -> san[0].type = 2 (DNS), val "evil.com".
+  Reach:     Certificate bytes inside a signed TBS (a CA must emit them).
+  Evidence:  414   sanType = tag & 0x1Fu;
+             harness: "F SAN entry encoded as universal INTEGER (tag 0x02): ... san0.type=2
+                       val=evil.com"
+  Options:   (1) Require (tag & 0xC0) == 0x80. Require primitive for dNSName/iPAddress and
+             store other choices under their real number (recommended)  (2) Document.
+
+X509-10  Low  OPEN  [demonstrated]
+  Location:  ssfx509.c:2720-2787 (anchor selection and anchor pathLen)
+  Problem:   (a) When the chain's last certificate is the trust anchor itself (TLS servers
+             often send the root), numSubCAs counts the root as its own subordinate. A root
+             with pathLenConstraint 0 then rejects every leaf it directly issues. The .md says
+             anchors are never in the chain array, so this is documented-ish, but it is a
+             spurious failure.
+             (b) The anchor's basicConstraints / keyUsage are never checked, so an end-entity
+             certificate placed in trustDer can act as a CA. RFC 5280 makes anchor constraints
+             optional, so this is policy, but it is not mentioned in the .md.
+  Failure:   chain [leaf0, root0(pathlen:0)], anchor root0 -> false. [leaf0] alone -> true.
+             openssl accepts both.
+  Reach:     Server chain layout (a); caller trust-store configuration (b).
+  Evidence:  2777  numSubCAs = (chainLen >= 2u) ? (uint8_t)(chainLen - 1u) : 0u;
+             harness: "K chain [leaf, root(pathlen:0)] anchor root -> 0 (openssl: OK)"
+  Options:   (1) If the last chain cert is byte-identical to the chosen anchor, drop it from
+             the count (and from the intermediate checks). Document (b) (recommended)
+             (2) Document both.
+
+X509-11  Low  OPEN  [reviewed]
+  Location:  ssfx509.c:2240-2419 (SSFX509VerifySignature)
+  Problem:   Nothing ties the signature algorithm to the key's SubjectPublicKeyInfo algorithm.
+             The ECDSA branch takes the curve from ecCurveOidRaw alone. A pubKeyAlg of
+             rsaEncryption with a P-256 OID parameter would be used as an EC point. The
+             Ed25519 branch takes any 32-byte BIT STRING whatever its algorithm OID. The RSA
+             branches take any key bytes. RFC 5758 3.2 and RFC 8410 3 require the parameters
+             for ecdsa-with-SHA* and id-Ed25519 to be absent. That is never checked (the chain
+             only checks that inner and outer are equal).
+  Failure:   No practical forgery. One set of key bytes is interpreted under a scheme the
+             certificate did not declare for it (cross-algorithm key confusion).
+  Reach:     Certificate / CMS bytes.
+  Evidence:  2263  if (SSFX509IsP256(keyCert))      (no SSFX509 pubKeyAlg == id-ecPublicKey test)
+             2406  if ((keyCert->pubKeyLen != SSF_ED25519_PUB_KEY_SIZE) || ...)   (no OID test)
+  Options:   (1) Check pubKeyAlgOidRaw in each branch (id-ecPublicKey / rsaEncryption /
+             id-Ed25519), require sigAlg params to be absent for ECDSA and Ed25519, and
+             require pubKeyLen > 0 (with X509-2) (recommended)
+
+X509-12  Low  OPEN  [demonstrated]  (related ASN1-2, ASN1-3, ASN1-5)
+  Location:  ssfx509.c:559-722 (SSFX509Parse), 256-263 (_SSFX509ParseDN), 350-551;
+             ssfx509.md:100-104
+  Problem:   The .md says "Parse is strict about DER" (it lists non-minimal INTEGER and bad
+             tags). The parser does not check:
+             - bytes after signatureValue inside the Certificate SEQUENCE (not covered by the
+               signature, so a certificate can be altered without breaking it);
+             - bytes after the outer SEQUENCE (derLen larger than the certificate);
+             - unknown elements after the extensions in the TBS, trailing bytes inside
+               Extensions [3] after the SEQUENCE, and trailing bytes inside an extension's
+               OCTET STRING after its value;
+             - unusedBits of signatureValue and of the SPKI BIT STRING (stored, never read),
+               and keyUsage padding bits (ASN1-5: KU 03 02 07 FF gives keyUsageBits 0xFF00,
+               which includes keyCertSign);
+             - a DN attribute value with a structurally bad TLV, which is skipped by
+               "continue" instead of failing;
+             - extensions in a v1 / v2 certificate (the chain rejects non-v3; Parse users do
+               not).
+             The ignored return values at 672 (ecCurveOid) and 453 (AKID) are harmless,
+             because GetTLV writes nothing on failure.
+  Failure:   A certificate with 05 00 appended after signatureValue -> Parse true. The
+             fingerprint changes while the signature still verifies.
+  Reach:     Hostile certificate bytes. Malleability and parser differentials only.
+  Evidence:  717-721 (GetBitString of signature then "return true", certInner not checked
+             empty)
+             harness: "J cert with 05 00 after signatureValue (unsigned) -> Parse 1"
+                      "G KU unused=7 byte FF (only digitalSignature declared): ... KU=0xFF00"
+  Options:   (1) Require cursor, certInner, extsOuter and every extension value cursor to be
+             empty at the end. Reject unusedBits != 0 for the signature and the key. Mask KU
+             padding bits. Fix the .md wording (recommended)  (2) Document the leniency.
+
+X509-13  Low  OPEN  [reviewed]
+  Location:  ssfx509.c:2801-2823 (purpose checks)
+  Problem:   For SSF_X509_PURPOSE_CODE_SIGNING, a leaf with no EKU is accepted (RFC 5280
+             allows this, but most code-signing verifiers require id-kp-codeSigning).
+             Intermediate EKUs are never considered, so an intermediate that is EKU-restricted
+             to serverAuth can issue code-signing leaves that ssfcms accepts. This is policy;
+             the .md describes the leaf rule but not the absence of an intermediate EKU
+             restriction.
+  Failure:   A TLS-only sub-CA (EKU serverAuth) issues a codeSigning leaf. CMS verification
+             succeeds when the same root is in the code-signing trust store.
+  Reach:     A CA in the caller's trust hierarchy.
+  Evidence:  2802  if ((certs[0].hasExtKeyUsage) && ...)   (only certs[0] examined)
+  Options:   (1) For CODE_SIGNING, require leaf EKU codeSigning, and reject when an
+             intermediate carries an EKU without codeSigning/anyEKU (recommended)
+             (2) Document it in the .md.
+
+X509-14  Low  OPEN  [reviewed]
+  Location:  ssfx509.c:1758-1765, 1412-1435, 1478-1540, 1640-1670 (generator)
+  Problem:   The generator can emit structures that RFC 5280 forbids, with no DBC check or
+             false return. An empty Extensions SEQUENCE: skid != NULL with skidLen 0 makes
+             _SSFX509HasExtensions true but emits no SKID (the same holds for akid). An empty
+             EKU SEQUENCE (addExtKeyUsage with no flags; SIZE (1..MAX)). An empty SAN
+             SEQUENCE (sanDNSNames == {NULL}). An empty NameConstraints (addNameConstraints
+             with all lists NULL; "MUST NOT be empty"). An empty dNSName. pathLenConstraint
+             with isCA false. params->version is not validated (any value is emitted; the
+             .md says 0 or 2). The serial is passed through (ASN1-6 already covers this).
+  Failure:   Caller-built certificates that other verifiers reject.
+  Reach:     Caller misuse only.
+  Evidence:  1764  (p->skid != NULL) ... (p->akid != NULL)   vs 1728 "(p->skid != NULL) &&
+                   (p->skidLen > 0u)"
+  Options:   (1) Add DBC or false returns for each case, and make the HasExtensions test use
+             the same predicates as the emitters (recommended)
+
+X509-15  Low  OPEN  [reviewed]
+  Location:  ssfx509.h:197; ssfx509.c:734-741; ssfx509.md:125-141
+  Problem:   Doc drift:
+             (a) The header says SSFX509IsValid is "notBefore <= now < notAfter". The code and
+             the .md are inclusive at both ends, which is correct per RFC 5280.
+             (b) SSFX509IsECDSA is true only for ecdsa-with-SHA256, and false for SHA-384,
+             which the name does not suggest.
+             (c) The .md "Verification order" places the EKU check before the anchor search,
+             and lists the leaf EKU check twice. The code runs EKU after anchoring and
+             pathLen.
+             (d) The .md lists "non-minimal INTEGER" as rejected, which ASN1-3 shows is false.
+  Reach:     Documentation.
+  Options:   (1) Fix the header and .md text, and rename or document SSFX509IsECDSA
+             (recommended)
+
+----------------------------------------------------------------------------------------------
+Checked, no issue
+----------------------------------------------------------------------------------------------
+- Parser bounds: every pointer stored in SSFX509Cert_t comes from SSFASN1DecGetTLV and stays
+  inside der[]. tbsRawLen and the Name rawLen are computed from cursor differences within one
+  buffer. A 5M-input ASan/UBSan fuzz (with X509-1 patched) was clean, including the hostname,
+  IP, NC and PSS helpers run on fuzzed SANs and params.
+- Array limits: exts[] (a parse failure on overflow, so the critical and duplicate checks see
+  every extension), san[] and the NC lists are bounded by their uint8_t counters. Duplicate
+  extension OIDs are rejected.
+- Serial: 1-20 octets and a non-negative first octet are enforced (minimality is ASN1-3).
+  Version > 2 is rejected. The chain requires v3 for every chain certificate.
+- Inner vs outer signature AlgorithmIdentifier: OID and raw params are compared exactly
+  (2651-2673), and only the signed TBS copy selects the scheme (2437).
+- Chain linking: issuer/subject raw-DN byte equality (stricter than RFC 5280's comparison, and
+  fails closed); a signature for every link; AKID/SKID agreement; a validity window on every
+  chain cert and the anchor; chainLen bounded by DBC to MAX_CHAIN_DEPTH. A chain array cannot
+  loop.
+- CA checks: every chain cert above the leaf needs BC cA TRUE, keyCertSign when KU is present,
+  and an intermediate pathLen of (i - 1) <= pathLen. The int8 casts are safe because
+  chainLen <= 8.
+- Unknown critical extensions on chain certs are rejected (subject to X509-6). An extension
+  count overflow fails the parse instead of hiding extensions.
+- Hostname: SSFStrLen is bounded at 254. Wildcards need exactly "*." plus a base with an
+  interior dot, and match exactly one non-empty label. The length equality checks make
+  SSFMatchStrNI read exactly len bytes of the non-NUL-terminated SAN. A dNSName containing NUL
+  or of zero length is dropped at parse. A trailing dot never matches (documented).
+  _SSFX509ParseIPv4 has an octet overflow guard, exactly four octets and a required
+  terminator.
+- NC DNS matching: label-boundary suffix match, the leading-dot form, case-insensitive. The
+  IPv4 address/mask match is correct. Excluded subtrees are checked before permitted ones.
+  Intermediate NCs are applied to all lower certs, and the anchor's NC to the whole chain.
+- ECDSA hash/curve pairing and compiled-out curves (CFG-1 / ECDSA-3 fixes intact). The RSA
+  salt > hLen check comes before SSFRSAVerifyPSS's DBC. Ed25519 key and signature sizes are
+  checked before SSFEd25519Verify. The digest-OID agreement checks are correct for every
+  branch.
+- Generator: measure/write consistency in _SSFX509EncConstructed (SSF_ENSURE written ==
+  measured). Each emitter checks remaining space. DN, dNSName and key-identifier upper bounds
+  use bounded SSFStrLen. KU is emitted as a DER named bit list with correct unused-bit counting.
+  The total is capped at SSF_X509_CONFIG_MAX_CERT_SIZE.
+- Word size and endianness: all lengths are uint32_t from ssfasn1. The only size_t uses are
+  casts to the crypto APIs and SSFStrLen results bounded by 254. There are no multi-byte loads.
+
+----------------------------------------------------------------------------------------------
+ssfmatch
+----------------------------------------------------------------------------------------------
+
+Branch x509, HEAD 6768015. Scope: _codec/ssfmatch.c (264 lines), ssfmatch.h, ssfmatch.md,
+_opt/ssfmatch_opt.h; ssfmatch_ut.c read for intent and coverage, and SSFStrCharToLower
+(ssfstr.c:39) read because every case-insensitive path uses it. Callers: a repo-wide grep finds
+ssfmatch used only by ssfx509, and ssfx509 calls only SSFMatchStrNI, at four sites:
+_SSFX509HostnameMatch exact (ssfx509.c:2059) and wildcard (2054), and _SSFX509NCDNSMatch
+leading-dot (2488) and label-suffix (2496). In all four, one argument is a DER content buffer
+(SAN dNSName or NC dNSName constraint) that is NOT NUL-terminated, and len is set so that only
+in-bounds bytes are read. SSFMatchGlob/GlobI/StrI/Path are not reachable from certificate
+input. Every line of ssfmatch.c was read. Harness match/h.c (built with -fsanitize=address,
+undefined -fno-sanitize-recover=all, with exact-size heap buffers for the non-terminated case)
+and an -O2 timing build (h2) were run; outputs are in match/h.out and match/h2.out. Results:
+there are no memory-safety defects, and no SSF_REQUIRE can be reached from data (the only
+REQUIREs are NULL checks on caller pointers). The four ssfx509 call sites were each checked for
+the hostile-input path and are correct. The NUL-stop semantics of SSFMatchStrNI are
+safe there only because ssfx509 drops dNSName SANs that contain a NUL and checks lengths
+first (MATCH-1). The findings are Low: API/doc hazards and a documented
+polynomial-time glob. No ssfmatch defect is the root cause of, or worsens, X509-3, X509-4,
+X509-5 or X509-9. Those are caller-side dispatch/parse decisions; see the cross-reference
+notes in the entries and in "Checked, no issue".
+
+----------------------------------------------------------------------------------------------
+
+MATCH-1  Low  OPEN  [demonstrated]
+  Location:  ssfmatch.c:56-75 (SSFMatchStrNI); ssfmatch.md:7, :145-156; callers
+             ssfx509.c:2054, 2059, 2488, 2496
+  Problem:   SSFMatchStrNI has strncasecmp semantics: it returns true as soon as both inputs
+             hold a NUL at the same index, even though len bytes have not been compared.
+             ssfx509 uses it as a length-bounded case-insensitive memcmp on DER content that is
+             not NUL-terminated. That use is outside the module contract: ssfmatch.md:7 says
+             "Every function operates on caller-owned, null-terminated strings". It is also
+             not the function's semantics, because an embedded NUL ends the comparison early
+             with a true result. The current callers are safe only because of guards on the
+             caller side: (a) _SSFX509HostnameMatch requires hostLen == sanValLen (or
+             domainLen == sanDomainLen+1), and the hostname has no NUL inside hostLen
+             (SSFStrLen); (b) ssfx509.c:417-418 drops any dNSName SAN that contains a NUL, so
+             the "name" side of _SSFX509NCDNSMatch never has a NUL. NC constraint values
+             are not NUL-filtered (ssfx509.c ~540-552). That is safe today only because the
+             other side (the SAN) never has one, so a NUL in a constraint always mismatches. If
+             the parse-time memchr filter is removed or bypassed (for example a new SAN type
+             or a CN fallback that is routed to these helpers), the result is the classic
+             "good.com\0.evil.com" prefix acceptance.
+  Failure:   SSFMatchStrNI("good", "good\0evil", 9) -> true. SSFMatchStrNI("good\0x",
+             "good\0y", 6) -> true. Neither is reachable through ssfx509 today.
+  Reach:     Not reachable from certificate bytes with the current ssfx509 guards. This is a
+             latent hazard for any length-bounded caller.
+  Evidence:  71   /* Both strings ended at the same position, so stop before reading past ... */
+             72   if (ca == '\0') return true;
+             ssfx509.c:417  if ((sanType == SSF_X509_SAN_DNS) &&
+             ssfx509.c:418      ((sanValLen == 0u) || (memchr(sanVal, 0, sanValLen) != NULL)))
+             h.out: "B StrNI("good", "good\0evil", 9) -> 1  (true: stops at shared NUL)"
+                    "A StrNI exact-size non-terminated, len=8 -> 1"  (no ASan report: reads
+                    stay within len)
+  Options:   (1) Add a length-bounded API, for example SSFMatchMemI(a, b, len), that compares
+             exactly len bytes and does not treat NUL specially. Switch the four ssfx509 call
+             sites to it, and document SSFMatchStrNI as being for C strings only
+             (recommended)
+             (2) Keep the API, and document in ssfmatch.md and at each ssfx509 call site that
+             correctness depends on the NUL filter and the length-equality pre-checks.
+
+MATCH-2  Low  OPEN  [demonstrated]
+  Location:  ssfmatch.c:80-123 (_SSFMatchGlobInternal), 128-148, 153-182;
+             _opt/ssfmatch_opt.h:13; ssfmatch.md:31-37, :77
+  Problem:   The glob matcher backtracks recursively, so its worst case is about
+             len^N comparisons. With the default cap N = 4 the cost is quartic in the subject
+             length, and the subject length is unbounded (NUL-terminated, no length limit).
+             This is documented, and the cap does bound recursion depth to N+1 frames.
+             However, '*'/'?' globbing can be done in O(len*patLen) time with O(1) stack by the
+             standard iterative two-pointer algorithm, which backtracks only to the most
+             recent '*'. That algorithm needs no cap, and the cap also refuses legitimate
+             patterns with 5 or more '*' runs.
+  Failure:   SSFMatchGlob("*a*a*a*b", "a" x 800) takes 16.6 s on an x86-64 desktop at -O2.
+             It grows x16 per doubling, so it would take minutes to hours on an MCU for a
+             subject of a few hundred bytes.
+             SSFMatchGlob("*a*b*c*d*e", "abcde") -> false (refused by the cap, though it
+             matches).
+  Reach:     Not reachable from ssfx509 or other in-tree callers. It applies to any
+             application that globs an attacker-supplied subject (an HTTP path, a topic name)
+             against a fixed pattern with several '*'.
+  Evidence:  95   while (*str != '\0')
+             97       if (_SSFMatchGlobInternal(patternStr, str, caseInsensitive)) return true;
+             h2.out (pattern "*a*a*a*b"; the printf label still reads "*a*a*a*a*b", which is a
+             harness typo):
+               'a'x100 -> 0.009 s, x200 -> 0.108 s, x400 -> 1.077 s, x800 -> 16.561 s
+             h.out: "G Glob 5 star runs "*a*b*c*d*e" vs "abcde" -> 0 (cap)"
+  Options:   (1) Replace the recursion with the iterative last-star backtracking algorithm
+             (O(n*m) worst case, no recursion), then remove or relax
+             SSF_MATCH_CONFIG_MAX_GLOB_WILDCARDS (recommended)
+             (2) Keep it, and add an explicit subject-length bound to the .md guidance.
+
+MATCH-3  Low  OPEN  [demonstrated]
+  Location:  ssfmatch.md:24-26 (Notes, case folding); ssfmatch.c:88-101 (glob '*')
+  Problem:   The .md says that ASCII-only folding is "the right behavior for ... DNS labels".
+             That invites SSFMatchGlobI for certificate or hostname wildcards. Glob '*' matches
+             across '.' and matches the empty string, so "*.example.com" accepts
+             "a.b.example.com" and ".example.com". RFC 6125 6.4.3 / RFC 9525 6.3 require a
+             wildcard to match exactly one non-empty leftmost label. ssfx509 correctly does not
+             use glob (it has its own label logic at ssfx509.c:2024-2054). This is a doc trap
+             for other callers, not a live bug.
+  Failure:   SSFMatchGlobI("*.example.com", "a.b.example.com") -> true.
+             SSFMatchGlobI("*.example.com", ".example.com") -> true.
+  Reach:     Application code that adopts SSFMatchGlobI for TLS/hostname wildcard matching.
+  Evidence:  h.out lines E and F.
+  Options:   (1) Add a note to ssfmatch.md that glob '*' crosses label boundaries and must not
+             be used for RFC 6125/9525 wildcard matching. Point to ssfx509's hostname matcher
+             (recommended)  (2) Add a dedicated label-aware wildcard API.
+
+----------------------------------------------------------------------------------------------
+
+Checked, no issue
+- SSFMatchStrNI bounds: reads aStr[i]/bStr[i] only for i < len, and stops early only when both
+  sides hold NUL. A NUL on only one side is a mismatch and returns before that string is read
+  past. ASan with exact-size, non-terminated heap buffers is clean. The uint32_t index is safe
+  on 16-bit size_t targets for objects that fit in memory. len == 0 -> true (strncasecmp
+  semantics). No ssfx509 site can pass 0, because empty dNSNames are dropped and the wildcard
+  path passes sanDomainLen+1 >= 1 with no wrap (sanValLen >= 2).
+- All four ssfx509 call sites: the length arithmetic keeps both pointers in bounds.
+  2054: domainLen == sanDomainLen+1 is checked first, and the hostname substring at dot has
+  exactly that many non-NUL bytes. 2059: hostLen == sanValLen. 2488: nameLen > constraintLen.
+  2496: nameLen >= constraintLen, with the label boundary checked. A NUL inside an NC
+  constraint value can only cause a mismatch, because SAN names are NUL-filtered. An excluded
+  constraint with a NUL is then a no-op; that is the issuer's own malformed data, the same
+  theme as X509-3(b).
+- Case folding (SSFStrCharToLower): only 'A'-'Z' are folded. Bytes >= 0x80 (negative when char
+  is signed) compare exactly, and there is no UB or table lookup with a negative index.
+  Non-ASCII/IDN U-labels are not folded. That is correct for A-label DNS matching.
+- Cross-reference: X509-5 (an IPv4 literal is matched against dNSName SANs) is a dispatch
+  decision in SSFX509VerifyChainPurpose. SSFMatchStrNI only compares bytes and adds nothing to
+  it. X509-9 (SAN choice taken as tag & 0x1F) feeds mis-typed entries into the same matchers,
+  but they go through the same NUL/empty filter, so ssfmatch adds no extra exposure. X509-3/4
+  (NC fail-open, unsupported name forms) are decisions in the NC parser/validator.
+  _SSFX509NCDNSMatch's use of ssfmatch is correct.
+- Glob recursion depth is bounded by (star runs + 1) <= SSF_MATCH_CONFIG_MAX_GLOB_WILDCARDS+1,
+  and the cap is checked before any matching. Runs of consecutive '*' collapse, and the trailing
+  run short-circuits. '?' never reads past the NUL. The loops terminate.
+- SSFMatchPath: the placeholder name scan stops at '}' or NUL. The value scan stops at '/', '?',
+  '#' or NUL. Params are written only while paramIdx < paramsOutOptSize. *numParamsOut is 0 on
+  every false return. Pointer differences are cast to uint32_t only for in-string spans. An
+  empty or unterminated placeholder is rejected. A literal '?' in the caller's pattern is
+  matched literally against the path's query separator; that is a caller-chosen pattern, not a
+  data-path issue.
+- DBC: all pointer arguments are SSF_REQUIREd. No REQUIRE/ASSERT depends on string contents, so
+  hostile strings cannot trap.
+
+----------------------------------------------------------------------------------------------
+ssfstr
+----------------------------------------------------------------------------------------------
+
+Overview. Every line of ssfstr.c/.h was read against ssfstr.md, using ssfstr_ut.c for intended
+behaviour. Callers were found by a repo-wide grep. ssfx509.c calls only SSFStrLen, at
+ssfx509.c:1162, 1191, 1518, 1608 and 2018, each time as a bounded strnlen with bound
+(upper bound + 1) on caller-supplied C strings: DN attribute values, countryName, dNSName SANs
+being encoded, and the hostname given to SSFX509MatchHostname. ssfmatch.c calls
+SSFStrCharToLower (covered by match.txt). No _crypto module and no ssfasn1 path calls ssfstr.
+No certificate or other attacker-supplied DER bytes reach ssfstr, so no hostile-input path
+in ssfstr can trap or over-read. SSFStrLen is correct for those uses: it stops at the first NUL
+or at the bound, it never reads past min(NUL, bound), it never traps on data, and it returns
+false when no NUL is found within the bound, which x509 treats as "too long". No finding in
+asn1.txt, x509.txt or match.txt has an ssfstr root cause. Outside x509, the other non-test
+callers are ssfargv.c:151 (SSFStrLen) and ssfcli.c:282 (SSFStrCmp). Nothing outside the unit
+test calls SSFStrStr, SSFStrTok, SSFStrCpy or SSFStrCat, so the defects below are latent for
+the current tree but sit on the public API. The whole module was then audited for
+general correctness. A gcc -fsanitize=address,undefined harness (str/h.c, output in str/h.out)
+uses exact-size heap buffers and a stub SSFPortAssert that prints the trapping line. Its runs
+demonstrate every Medium finding and most of the Low ones.
+
+----------------------------------------------------------------------------------------------
+
+STR-1  Medium  OPEN  [demonstrated]
+  Location:  _codec/ssfstr.c:276-327 (SSFStrTok)
+  Problem:   cstrSize is the bound relative to *cstr on entry, but the function advances *cstr
+             and does not tell the caller how many bytes it consumed. The .md describes
+             cstrSize as the "Total allocated size of the source string buffer", and its
+             example passes sizeof(src) on every call. A caller that follows the .md therefore
+             passes a bound that grows past the end of the buffer as *cstr advances. The scan
+             then reads up to (consumed) bytes past the buffer when the source has no NUL
+             within its allocation. In that case the "bounded" guarantee does not hold.
+  Failure:   src = 7-byte heap buffer "one,two" (no NUL). Call 1 (size 7) returns "one" and
+             sets pos = src+4. Call 2 (size 7) scans 't','w','o' and then reads src[7]: ASan
+             reports a heap-buffer-overflow at ssfstr.c:292.
+  Reach:     Caller usage as documented (no in-tree caller). The bytes are external whenever
+             a caller tokenizes a received buffer, e.g. a CLI or protocol line that is not
+             guaranteed to be NUL-terminated.
+  Evidence:  292  while ((cstrSize > 0) && (*cs != 0))
+             326  if (retVal) *cstr = cs + 1;
+             .md:346 "cstrSize | in | size_t | Total allocated size of the source string buffer"
+             .md:363 while (SSFStrTok(&pos, sizeof(src), token, ...))
+             harness: "tok1 r=1 'one' l=3" then
+             "ERROR: AddressSanitizer: heap-buffer-overflow ... READ of size 1
+              #0 SSFStrTok _codec/ssfstr.c:292"
+  Options:   (1) Change cstrSize to an in/out size_t * that is decremented by the bytes
+             consumed, and update the .md and its example (recommended).
+             (2) Keep the signature, document cstrSize as "bytes remaining from *cstr", and fix
+             the .md example to pass sizeof(src) - (pos - src).
+
+STR-2  Medium  OPEN  [demonstrated] [verified 2026-11-18]
+  Location:  _codec/ssfstr.c:230 (SSFStrStr)
+  Problem:   The loop condition dereferences *cstr before it tests cstrSize > 0, and *ss
+             before it tests sss > 1. When cstrSize reaches 0, the function reads one byte past
+             the declared cstr buffer. That happens either on entry with cstrSize == 0, or
+             after a partial match advances to the end of a buffer with no NUL. With
+             substrSize == 0 it likewise reads substr[0]. The .md promises a "Bounded
+             equivalent of strstr()".
+  Failure:   (a) 3-byte heap "abc" (no NUL), SSFStrStr(s,3,NULL,"cd",3): 'c' matches, cstr
+             advances to s+3 with cstrSize 0, and the loop test reads s[3]. ASan reports a
+             heap-buffer-overflow at ssfstr.c:230.
+             (b) SSFStrStr(s+3, 0, NULL, "x", 2) reads s[3] in the same way.
+             The unit tests at ssfstr_ut.c:211-212 call it with size 0 on in-bounds string
+             literals, so the over-read is not caught.
+  Reach:     Caller usage (no in-tree caller other than the UT). The over-read is one byte.
+             It is reachable whenever the haystack is a received, possibly unterminated
+             buffer.
+  Evidence:  230  while ((*cstr != 0) && (cstrSize > 0) && (*ss != 0) && (sss > 1))
+             harness: "READ of size 1 ... #0 SSFStrStr _codec/ssfstr.c:230" for both (a)
+             and (b).
+  Options:   (1) Reorder the conditions to (cstrSize > 0) && (*cstr != 0) && (sss > 1) &&
+             (*ss != 0) (recommended). (2) Add an early return when cstrSize == 0 or
+             substrSize == 0. That is not sufficient for (a) on its own.
+
+STR-3  Medium  OPEN  [demonstrated]
+  Location:  _codec/ssfstr.c:105, 134, 287 (SSFStrCat, SSFStrCpy, SSFStrTok); ssfstr.md:156,
+             175, 199, 211, 277, 349
+  Problem:   The .md marks cstrDstOutLenOut (Cpy, Cat) and tokenStrLen (Tok) as "out (opt)":
+             "If not NULL, receives ...". The code requires them with SSF_REQUIRE(... !=
+             NULL), and the unit tests (ssfstr_ut.c:81, 97) assert that NULL traps. The .md's
+             own examples pass NULL: the SSFStrCpy "small" example, the setup line of the
+             SSFStrCat example, and the setup line of the SSFStrToCase example. Code copied
+             from the .md halts the device.
+  Failure:   SSFStrCpy(small, 3, NULL, "hello", 6) -> "ASSERT _codec/ssfstr.c:134" (the .md
+             says it returns false and leaves small unmodified). SSFStrTok(..., NULL, ...)
+             -> "ASSERT _codec/ssfstr.c:287".
+  Reach:     Caller code written to the documented contract.
+  Evidence:  134  SSF_REQUIRE(cstrDstOutLenOut != NULL);
+             287  SSF_REQUIRE(tokenStrLen != NULL);
+             .md:156 "`cstrDstOutLenOut` | out (opt) | ... If not `NULL`, receives ..."
+             .md:175 if (SSFStrCpy(small, sizeof(small), NULL, "hello", sizeof("hello")) ...
+  Options:   (1) Fix the .md: mark these parameters required and pass &len in all examples.
+             This keeps the full DBC that claude.ssf favours (recommended).
+             (2) Make them truly optional in code, and update the UT.
+
+STR-4  Medium  OPEN  [demonstrated]
+  Location:  _codec/ssfstr.c:313-329 (SSFStrTok); ssfstr.md:25, 339-370
+  Problem:   The code's semantics differ from the .md in three ways.
+             (a) The final token, which has no trailing delimiter, is copied out, but the
+             function returns false. The .md says false means "no more tokens remain", and
+             its example loop drops the final token: the loop runs twice, and "Iteration 3:
+             token == three" never happens.
+             (b) The .md says tokenStrLen is -1 "when no more tokens remain". In code, -1
+             means only that the token did not fit in tokenStrOut. At end of input, the code
+             returns false with tokenStrLen == 0 and an empty token.
+             (c) The Notes say "the destination buffer is never partially modified when false
+             is returned", but on the false return the code writes tokenStrOut.
+  Failure:   The .md example on "one,two,three" yields 'one' and 'two' inside the loop. After
+             the loop, token == 'three' and len == 5, but the caller's loop never processed
+             it.
+  Reach:     Caller code written to the documented contract (silent data loss).
+  Evidence:  303  retVal = true;   (set only when a delimiter is found)
+             315  if ((size_t)((cs - (*cstr)) + 1) <= tokenStrSize)  (copies regardless of
+             retVal)
+             harness: " in-loop 'one' 3 / in-loop 'two' 3 / loop ran 2 times; after loop
+             token='three' len=5"
+  Options:   (1) Return true whenever a non-empty token was produced, including at end of
+             input, and false only when no characters remain. Document that tokenStrLen == -1
+             means the token did not fit (recommended). (2) Keep the code and rewrite the .md
+             contract and example to match the current semantics: the caller must check
+             tokenStrLen >= 0 after the false return.
+
+STR-5  Medium  OPEN  [demonstrated]
+  Location:  _codec/ssfstr.c:315-326 (SSFStrTok)
+  Problem:   When the token does not fit in tokenStrOut, the function sets tokenStrLen = -1
+             and leaves tokenStrOut untouched. It still advances *cstr past the token and its
+             delimiter and returns true. The .md says true means "a token was extracted and
+             written to tokenStrOut". The oversize token is silently consumed, and a caller
+             that checks only the return value then reads a stale tokenStrOut.
+  Failure:   src "toolongtoken,b", tokenStrSize 4, token preset "zz" -> r=1 len=-1 token='zz',
+             pos now 'b'. The oversize field is lost, and the caller sees a "token" with the
+             previous contents.
+  Reach:     Caller usage. When the input is external, an over-long field can cause a field
+             to be skipped silently or stale data to be reused.
+  Evidence:  harness: "r=1 len=-1 token='zz' pos now 'b'"
+  Options:   (1) On overflow, return false and leave *cstr unchanged so that the caller can
+             detect the error and recover. Document this (recommended). (2) Keep true/-1 but
+             set tokenStrOut[0] = 0 when tokenStrSize > 0, and document that the caller must
+             check for -1.
+
+STR-6  Low  OPEN  [demonstrated]
+  Location:  _codec/ssfstr.c:262 (SSFStrStr)
+  Problem:   The early "return false" on line 262 does not clear *matchStrOptOut, but the
+             other false exit (line 269) sets it to NULL. The .md and the UT
+             (ssfstr_ut.c:204, 226 etc.) treat NULL-on-false as the behaviour. This path is
+             reachable only when the mismatching byte is the last byte of the declared
+             buffer, which means a buffer with no NUL inside cstrSize.
+  Failure:   3-byte buffer "ab" passed with size 2, search "x", match preset to 0x1234 ->
+             r=0, match=0x1234.
+  Reach:     Caller usage with an unterminated haystack.
+  Evidence:  262  if (cstrSize <= 1) return false;
+             269  if (matchStrOptOut != NULL) *matchStrOptOut = NULL;
+             harness: "r=0 match=0x1234 (expected NULL)"
+  Options:   (1) Set *matchStrOptOut = NULL once at entry (recommended). (2) Replace line 262
+             with a break.
+
+STR-7  Low  OPEN  [demonstrated]
+  Location:  _codec/ssfstr.c:118, 144 (SSFStrCat, SSFStrCpy); ssfstr.md
+  Problem:   Overlapping source and destination reach memcpy, which is UB. The .md does not
+             forbid overlap, and there is no DBC check. SSFStrCpy(b, n, &l, b+1, n-1), a left
+             shift in place, is the natural misuse. A Cat whose src lies inside dst after the
+             NUL also overlaps. (A self-Cat with src == dst does not overlap and is fine.)
+  Failure:   ASan: "memcpy-param-overlap ... #1 SSFStrCpy _codec/ssfstr.c:144".
+  Reach:     Caller misuse only.
+  Evidence:  144  memcpy(cstrDstOut, cstrSrc, srcLen);
+  Options:   (1) Use memmove, so that overlap is well defined (recommended: cheap, and it
+             removes the UB). (2) Document "must not overlap" and add an SSF_REQUIRE
+             range-disjoint check.
+
+STR-8  Low  OPEN  [demonstrated]
+  Location:  _codec/ssfstr.c:57-93, 217-271; ssfstr.md:82, 123, 297-307
+  Problem:   Minor doc drift:
+             (a) SSFStrIsValid(NULL, n) returns false. The .md says cstr "Must not be NULL",
+             which implies a trap. The lenient code is harmless, but the contract is unclear.
+             (b) On a false return, SSFStrLen leaves *cstrLenOut == cstrSize. The .md says the
+             value is set only on true. No in-tree caller uses it after false.
+             (c) SSFStrStr with an empty substr ("") returns false, but strstr returns the
+             haystack. The .md calls it a strstr equivalent and does not specify this.
+             (d) tokenStrLen is int32_t, so a token over INT32_MAX bytes wraps on 64-bit
+             targets (theoretical).
+  Failure:   harness: "IsValid(NULL)=0"; "Len fail r=0 lenOut=4"; 'StrStr("abc","") -> 0'.
+  Reach:     Caller expectations only.
+  Evidence:  60  if (cstr == NULL) return false;   88  (*cstrLenOut)++;
+             230 ... (*ss != 0) ...
+  Options:   (1) Document each behaviour in the .md (recommended). (2) Change the code to
+             match strstr for the empty needle.
+
+----------------------------------------------------------------------------------------------
+Checked, no issue
+- x509 call sites: every SSFStrLen bound is ub + 1 (<= 255), the value is used only after a
+  true return, and the size_t -> uint32_t casts are safe (< 256). The inputs are caller C
+  strings, never certificate bytes, so no hostile-input trap or over-read is possible in
+  ssfstr.
+- SSFStrLen: no read at or past cstr[cstrSize]; cstrSize == 0 -> false with len 0 and no read.
+- SSFStrCpy/Cat at an exactly full buffer: srcLen == size-1 (Cpy) or dstLen+srcLen == size-1
+  (Cat) succeeds, with the NUL written at size-1. One byte more returns false.
+  dstSize == 0 -> false and nothing is written. On every false path, dst and *lenOut are left
+  untouched, which matches the "never partially modified" note for Cpy and Cat. On success,
+  the result is always NUL-terminated.
+- SSFStrCat: dstLen + srcLen cannot wrap for distinct objects. Each length is <= its size - 1,
+  and two objects cannot together exceed SIZE_MAX, which also holds for a 16-bit size_t.
+- SSFStrCmp: both strings are validated, then compared by length before memcmp. Neither
+  string is read past its NUL. Two invalid strings compare unequal.
+- SSFStrToCase: modifies the string only after SSFStrLen succeeds, and it touches only bytes
+  before the NUL. An invalid enum traps (SSF_REQUIRE), which is correct DBC. The default
+  branch is unreachable.
+- SSFStrCharToLower/Upper: only ASCII A-Z/a-z are changed. Negative (high-bit) char values
+  are returned unchanged, with no UB and no table lookup.
+- SSFStrStr matching logic: the restart-at-start+1 backtracking is correct ("subsubstr" and
+  the UT fuzz against strstr). substr ends only at a NUL found strictly inside substrSize, so
+  *(ss+1) at line 243 is in bounds when sss > 1.
+- SSFStrTok: the delimiter scan is bounded by delimsSize, and the delimiters are NUL-stopped.
+  The token copy is bounded by the tokenStrSize check, which also leaves room for the NUL.
+  tokenStrSize == 0 -> -1 and nothing is written. No global state, so the function is
+  re-entrant.
+- No endianness or word-size assumptions. No recursion. Every loop is bounded by a size
+  counter that strictly decreases. The one exception is SSFStrStr's backtrack, which restores
+  cstrSize and then advances by one, so it is still bounded by O(cstrSize * substrSize).
+
+----------------------------------------------------------------------------------------------
+CHANGE LOG
+----------------------------------------------------------------------------------------------
+
+  2026-11-18  Audit created: 39 findings across ssfasn1, ssfx509, ssfmatch, ssfstr.

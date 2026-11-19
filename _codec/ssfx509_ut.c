@@ -720,6 +720,74 @@ static bool _utMakeCA(const char *cnStr, const uint8_t *serial, uint8_t *priv, u
     return (*lenOut != 0u);
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Returns bytes written to out: in with 05 00 appended inside the element path names, else 0.   */
+/* path[k] is the child index to descend into at depth k; pathLen 0 appends to in's content.     */
+/* --------------------------------------------------------------------------------------------- */
+static uint32_t _utAppendJunk(const uint8_t *in, uint32_t inLen, const uint8_t *path,
+                              uint32_t pathLen, uint8_t *out, uint32_t outSize)
+{
+    static uint8_t content[5][SSF_X509_CONFIG_MAX_CERT_SIZE + 16u];
+    SSFASN1Cursor_t c;
+    SSFASN1Cursor_t next;
+    SSFASN1Cursor_t child;
+    const uint8_t *val;
+    uint32_t valLen;
+    uint32_t len = 0;
+    uint32_t idx = 0;
+    uint32_t w;
+    uint16_t tag;
+    uint8_t *buf;
+
+    SSF_REQUIRE(in != NULL);
+    SSF_REQUIRE((path != NULL) || (pathLen == 0u));
+    SSF_REQUIRE(pathLen < 5u);
+    SSF_REQUIRE(out != NULL);
+
+    buf = content[pathLen];
+    c.buf = in;
+    c.bufLen = inLen;
+    if (!SSFASN1DecGetTLV(&c, &tag, &val, &valLen, &next)) return 0;
+    if (pathLen == 0u)
+    {
+        memcpy(buf, val, valLen);
+        len = valLen;
+        buf[len++] = 0x05u;
+        buf[len++] = 0x00u;
+    }
+    else
+    {
+        child.buf = val;
+        child.bufLen = valLen;
+        while (!SSFASN1DecIsEmpty(&child))
+        {
+            const uint8_t *start = child.buf;
+            const uint8_t *cv;
+            uint32_t cvLen;
+            uint16_t ct;
+            uint32_t childLen;
+
+            if (!SSFASN1DecGetTLV(&child, &ct, &cv, &cvLen, &child)) return 0;
+            childLen = (uint32_t)(child.buf - start);
+            if (idx == path[0])
+            {
+                w = _utAppendJunk(start, childLen, &path[1], pathLen - 1u, &buf[len],
+                                  (uint32_t)sizeof(content[0]) - len);
+                if (w == 0u) return 0;
+                len += w;
+            }
+            else
+            {
+                memcpy(&buf[len], start, childLen);
+                len += childLen;
+            }
+            idx++;
+        }
+    }
+    if (!SSFASN1EncWrap(out, outSize, tag, buf, len, &w)) return 0;
+    return w;
+}
+
 void SSFX509UnitTest(void)
 {
     SSFX509Cert_t cert;
@@ -2518,6 +2586,9 @@ void SSFX509UnitTest(void)
             0x2Au, 0x86u, 0x48u, 0x86u, 0xF7u, 0x0Du, 0x01u, 0x01u, 0x0Au
         };
 
+        static const uint8_t rsaKeyOidStub[] = {
+            0x2Au, 0x86u, 0x48u, 0x86u, 0xF7u, 0x0Du, 0x01u, 0x01u, 0x01u
+        };
         /* RSASSA-PSS-params { [0] sha256, [1] mgf1-sha256, [2] 32 }: SSF signs with salt == hLen */
         static const uint8_t pssParamsSHA256Salt32[] = {
             0x30u, 0x34u, 0xA0u, 0x0Fu, 0x30u, 0x0Du, 0x06u, 0x09u,
@@ -2561,10 +2632,12 @@ void SSFX509UnitTest(void)
                    hash384, SSF_SHA2_384_BYTE_SIZE,
                    sig384, sizeof(sig384), &sig384Len) == true);
 
-        /* Build issuer stub with RSA public key */
+        /* Build issuer stub with RSA public key, labelled rsaEncryption (AUDIT X509-11) */
         memset(&issuerStub, 0, sizeof(issuerStub));
         issuerStub.pubKey = rsaPub;
         issuerStub.pubKeyLen = (uint32_t)rsaPubLen;
+        issuerStub.pubKeyAlgOidRaw = rsaKeyOidStub;
+        issuerStub.pubKeyAlgOidRawLen = sizeof(rsaKeyOidStub);
 
         /* ---- RSA-PSS-SHA256: verify succeeds (correct hash) ---- */
         memset(&certStub, 0, sizeof(certStub));
@@ -4830,7 +4903,9 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 2u, trust, trustLen, 1u, "x",
                                       1800000000ull) == true);
 
-        /* RFC 5280 Section 4.1.1.2: outer signatureAlgorithm parameters must equal the TBS copy */
+        /* RFC 5280 Section 4.1.1.2: outer signatureAlgorithm parameters must equal the TBS copy. */
+        /* ECDSA with NULL parameters is itself rejected (RFC 5758 3.2, AUDIT X509-11); the     */
+        /* tampered copy below still fails at the earlier parameter comparison.                */
         _utGenBaseParams(&p, serial, leafPub, (uint32_t)leafPubLen);
         p.sanDNSNames = sanX;
         p.sigAlgParams = nullParams;
@@ -4840,7 +4915,7 @@ void SSFX509UnitTest(void)
         chain[0] = leafOut;
         chainLen[0] = leafLen;
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, "x",
-                                      1800000000ull) == true);
+                                      1800000000ull) == false);
         last = 0;
         for (i = 0; (i + oidLen + 3u) < leafLen; i++)
         {
@@ -5480,6 +5555,141 @@ void SSFX509UnitTest(void)
                                          &n) == true);
             SSF_ASSERT(SSFX509Parse(caOut, n, &parsed) == true);
             SSF_ASSERT((parsed.isCA == false) && (parsed.pathLenConstraint == -1));
+        }
+
+        /* ---- AUDIT X509-9/10/11/12 and MATCH-1 (Low batch 2) ---- */
+        {
+            static uint8_t junkOut[SSF_X509_CONFIG_MAX_CERT_SIZE + 32u];
+            static const uint8_t sanOid9[] = { 0x55u, 0x1Du, 0x11u };
+            static const uint8_t rsaOid11[] = {
+                0x2Au, 0x86u, 0x48u, 0x86u, 0xF7u, 0x0Du, 0x01u, 0x01u, 0x01u
+            };
+            static const uint8_t nullParams[] = { 0x05u, 0x00u };
+            /* SAN { [2] "evil.com" } (control), { INTEGER "evil.com" }, { constructed [2] } */
+            static const uint8_t sanDnsOk[] = {
+                0x30u, 0x0Au, 0x82u, 0x08u, 'e', 'v', 'i', 'l', '.', 'c', 'o', 'm'
+            };
+            static const uint8_t sanInt[] = {
+                0x30u, 0x0Au, 0x02u, 0x08u, 'e', 'v', 'i', 'l', '.', 'c', 'o', 'm'
+            };
+            static const uint8_t sanCons[] = {
+                0x30u, 0x0Cu, 0xA2u, 0x0Au, 0x04u, 0x08u, 'e', 'v', 'i', 'l', '.', 'c', 'o', 'm'
+            };
+            /* SAN { [2] "evil.com" } followed by a stray NULL inside the extension value */
+            static const uint8_t sanTrail[] = {
+                0x30u, 0x0Au, 0x82u, 0x08u, 'e', 'v', 'i', 'l', '.', 'c', 'o', 'm', 0x05u, 0x00u
+            };
+            static const uint8_t pathCert[] = { 0u };
+            static const uint8_t pathTbs[] = { 0u };
+            static const uint8_t pathExts[] = { 0u, 7u };
+            static const uint8_t pathExt0[] = { 0u, 7u, 0u, 0u };
+            static const uint8_t ver2[] = { 0xA0u, 0x03u, 0x02u, 0x01u, 0x02u };
+            static const char *sanGood10[] = { "good.com", NULL };
+            uint32_t w;
+            uint32_t at;
+
+            /* X509-9: a SAN entry must be a primitive context-specific dNSName to count as one */
+            _utGenBaseParams(&p, serial, caPub, (uint32_t)caPubLen);
+            p.addRawExt = true;
+            p.rawExtOid = sanOid9;
+            p.rawExtOidLen = sizeof(sanOid9);
+            p.rawExtValue = sanDnsOk;
+            p.rawExtValueLen = sizeof(sanDnsOk);
+            SSF_ASSERT(SSFX509EncodeCert(caOut, sizeof(caOut), &p, fakeSig, sizeof(fakeSig),
+                                         &n) == true);
+            SSF_ASSERT(SSFX509Parse(caOut, n, &parsed) == true);
+            SSF_ASSERT((parsed.sanLen == 1u) && (parsed.san[0].type == SSF_X509_SAN_DNS));
+            p.rawExtValue = sanInt;
+            p.rawExtValueLen = sizeof(sanInt);
+            SSF_ASSERT(SSFX509EncodeCert(caOut, sizeof(caOut), &p, fakeSig, sizeof(fakeSig),
+                                         &n) == true);
+            SSF_ASSERT(SSFX509Parse(caOut, n, &parsed) == false);
+            p.rawExtValue = sanCons;
+            p.rawExtValueLen = sizeof(sanCons);
+            SSF_ASSERT(SSFX509EncodeCert(caOut, sizeof(caOut), &p, fakeSig, sizeof(fakeSig),
+                                         &n) == true);
+            SSF_ASSERT(SSFX509Parse(caOut, n, &parsed) == false);
+
+            /* X509-12: trailing data at each level fails the parse */
+            p.rawExtValue = sanTrail;
+            p.rawExtValueLen = sizeof(sanTrail);
+            SSF_ASSERT(SSFX509EncodeCert(caOut, sizeof(caOut), &p, fakeSig, sizeof(fakeSig),
+                                         &n) == true);
+            SSF_ASSERT(SSFX509Parse(caOut, n, &parsed) == false);
+            p.rawExtValue = sanDnsOk;
+            p.rawExtValueLen = sizeof(sanDnsOk);
+            SSF_ASSERT(SSFX509EncodeCert(caOut, sizeof(caOut), &p, fakeSig, sizeof(fakeSig),
+                                         &n) == true);
+            SSF_ASSERT(SSFX509Parse(caOut, n, &parsed) == true);
+            w = _utAppendJunk(caOut, n, pathCert, 0u, junkOut, sizeof(junkOut));
+            SSF_ASSERT((w != 0u) && (SSFX509Parse(junkOut, w, &parsed) == false));
+            w = _utAppendJunk(caOut, n, pathTbs, 1u, junkOut, sizeof(junkOut));
+            SSF_ASSERT((w != 0u) && (SSFX509Parse(junkOut, w, &parsed) == false));
+            w = _utAppendJunk(caOut, n, pathExts, 2u, junkOut, sizeof(junkOut));
+            SSF_ASSERT((w != 0u) && (SSFX509Parse(junkOut, w, &parsed) == false));
+            w = _utAppendJunk(caOut, n, pathExt0, 4u, junkOut, sizeof(junkOut));
+            SSF_ASSERT((w != 0u) && (SSFX509Parse(junkOut, w, &parsed) == false));
+            memcpy(junkOut, caOut, n);
+            junkOut[n] = 0x05u;
+            junkOut[n + 1u] = 0x00u;
+            SSF_ASSERT(SSFX509Parse(junkOut, n + 2u, &parsed) == false);
+            SSF_ASSERT(SSFX509Parse(junkOut, n, &parsed) == true);
+            /* A v1 certificate (version patched to 0) must not carry extensions */
+            SSF_ASSERT(_utFind(caOut, n, ver2, sizeof(ver2), &at) == true);
+            caOut[at + 4u] = 0x00u;
+            SSF_ASSERT(SSFX509Parse(caOut, n, &parsed) == false);
+
+            /* X509-11: an EC key labelled rsaEncryption is not used as an EC point; ECDSA */
+            /* signature algorithm parameters must be absent                               */
+            _utGenBaseParams(&p, serial, caPub, (uint32_t)caPubLen);
+            caLen = _utSignCert(&p, caPriv, caOut, sizeof(caOut));
+            SSF_ASSERT((caLen != 0u) && (SSFX509Parse(caOut, caLen, &parsed) == true));
+            SSF_ASSERT(SSFX509VerifyCertSignature(&parsed, &parsed) == true);
+            p.pubKeyAlgOidRaw = rsaOid11;
+            p.pubKeyAlgOidRawLen = sizeof(rsaOid11);
+            caLen = _utSignCert(&p, caPriv, caOut, sizeof(caOut));
+            SSF_ASSERT((caLen != 0u) && (SSFX509Parse(caOut, caLen, &parsed) == true));
+            SSF_ASSERT(SSFX509VerifyCertSignature(&parsed, &parsed) == false);
+            _utGenBaseParams(&p, serial, caPub, (uint32_t)caPubLen);
+            p.sigAlgParams = nullParams;
+            p.sigAlgParamsLen = sizeof(nullParams);
+            caLen = _utSignCert(&p, caPriv, caOut, sizeof(caOut));
+            SSF_ASSERT((caLen != 0u) && (SSFX509Parse(caOut, caLen, &parsed) == true));
+            SSF_ASSERT(SSFX509VerifyCertSignature(&parsed, &parsed) == false);
+
+            /* X509-10: a server that sends the root as the last chain cert; the root's own */
+            /* pathLenConstraint 0 still allows the leaf it directly issued                  */
+            _utGenBaseParams(&p, serial, caPub, (uint32_t)caPubLen);
+            p.issuer.cn = "root10";
+            p.subject.cn = "root10";
+            p.addBasicConstraints = true;
+            p.isCA = true;
+            p.pathLenConstraint = 0;
+            p.addKeyUsage = true;
+            p.keyUsageBits = SSF_X509_KU_KEY_CERT_SIGN;
+            caLen = _utSignCert(&p, caPriv, caOut, sizeof(caOut));
+            SSF_ASSERT(caLen != 0u);
+            _utGenBaseParams(&p, serial, leafPub, (uint32_t)leafPubLen);
+            p.issuer.cn = "root10";
+            p.subject.cn = "leaf10";
+            p.sanDNSNames = sanGood10;
+            leafLen = _utSignCert(&p, caPriv, leafOut, sizeof(leafOut));
+            SSF_ASSERT(leafLen != 0u);
+            {
+                const uint8_t *chain10[2];
+                uint32_t chainLen10[2];
+
+                chain10[0] = leafOut;
+                chainLen10[0] = leafLen;
+                chain10[1] = caOut;
+                chainLen10[1] = caLen;
+                trust[0] = caOut;
+                trustLen[0] = caLen;
+                SSF_ASSERT(SSFX509VerifyChain(chain10, chainLen10, 1u, trust, trustLen, 1u,
+                                              "good.com", 1800000000ull) == true);
+                SSF_ASSERT(SSFX509VerifyChain(chain10, chainLen10, 2u, trust, trustLen, 1u,
+                                              "good.com", 1800000000ull) == true);
+            }
         }
 
         /* AUDIT X509-6: a present field that does not decode fails the parse, never defaults */
@@ -7678,6 +7888,23 @@ void SSFX509UnitTest(void)
                                           sizeof(pssSalt32), sha512Oid, sizeof(sha512Oid), data,
                                           sizeof(data), sig, (uint32_t)sigLen) == false);
 
+        /* AUDIT X509-11: an RSA key labelled anything but rsaEncryption does not verify RSA */
+        /* PKCS#1 v1.5; RSA-PSS also accepts an id-RSASSA-PSS key (RFC 4055)                  */
+        {
+            SSFX509Cert_t k = c;
+
+            k.pubKeyAlgOidRaw = ed25519Oid;
+            k.pubKeyAlgOidRawLen = sizeof(ed25519Oid);
+            SSF_ASSERT(SSFX509VerifySignature(&k, rsaPssOid, sizeof(rsaPssOid), pssSalt32,
+                                              sizeof(pssSalt32), NULL, 0u, data, sizeof(data),
+                                              sig, (uint32_t)sigLen) == false);
+            k.pubKeyAlgOidRaw = rsaPssOid;
+            k.pubKeyAlgOidRawLen = sizeof(rsaPssOid);
+            SSF_ASSERT(SSFX509VerifySignature(&k, rsaPssOid, sizeof(rsaPssOid), pssSalt32,
+                                              sizeof(pssSalt32), NULL, 0u, data, sizeof(data),
+                                              sig, (uint32_t)sigLen) == true);
+        }
+
         /* Ed25519 signs the data itself; RFC 8419 pairs it only with SHA-512 */
         SSF_ASSERT(SSFEd25519KeyGen(edSeed, edPub) == true);
         _utGenBaseParams(&p, serial, edPub, SSF_ED25519_PUB_KEY_SIZE);
@@ -7702,6 +7929,23 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(SSFX509VerifySignature(&c, ed25519Oid, sizeof(ed25519Oid), NULL, 0u, sha256Oid,
                                           sizeof(sha256Oid), data, sizeof(data), edSig,
                                           sizeof(edSig)) == false);
+        /* AUDIT X509-11: Ed25519 needs an id-Ed25519 key and absent algorithm parameters */
+        {
+            static const uint8_t edNull[] = { 0x05u, 0x00u };
+            static const uint8_t ecPubOid[] = {
+                0x2Au, 0x86u, 0x48u, 0xCEu, 0x3Du, 0x02u, 0x01u
+            };
+            SSFX509Cert_t k = c;
+
+            SSF_ASSERT(SSFX509VerifySignature(&c, ed25519Oid, sizeof(ed25519Oid), edNull,
+                                              sizeof(edNull), NULL, 0u, data, sizeof(data),
+                                              edSig, sizeof(edSig)) == false);
+            k.pubKeyAlgOidRaw = ecPubOid;
+            k.pubKeyAlgOidRawLen = sizeof(ecPubOid);
+            SSF_ASSERT(SSFX509VerifySignature(&k, ed25519Oid, sizeof(ed25519Oid), NULL, 0u, NULL,
+                                              0u, data, sizeof(data), edSig,
+                                              sizeof(edSig)) == false);
+        }
         data[0] ^= 0x80u;
         SSF_ASSERT(SSFX509VerifySignature(&c, ed25519Oid, sizeof(ed25519Oid), NULL, 0u, NULL, 0u,
                                           data, sizeof(data), edSig, sizeof(edSig)) == false);

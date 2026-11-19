@@ -25,7 +25,6 @@ X.509 v3 certificate support per RFC 5280, built on [`ssfasn1`](ssfasn1.md):
 
 - [`ssfport.h`](../ssfport.h)
 - [`ssfasn1`](ssfasn1.md) — DER decoding and encoding
-- [`ssfmatch`](ssfmatch.md) — case-insensitive hostname comparison
 - [`ssfstr`](ssfstr.md) — bounded C-string length for every name the API receives as a string
 - [`ssfsha2`](../_crypto/ssfsha2.md) — SHA-256 / SHA-384 / SHA-512 TBS digests for signature verification
 - [`ssfecdsa`](../_crypto/ssfecdsa.md) — ECDSA signature verification over P-256 / P-384
@@ -107,8 +106,14 @@ X.509 v3 certificate support per RFC 5280, built on [`ssfasn1`](ssfasn1.md):
   SAN GeneralName whose declared length overruns the extension) returns `false`, as does a
   version field above v3 or more extensions than
   [`SSF_X509_CONFIG_MAX_EXTENSIONS`](#cfg-max-extensions), since an extension that could not be
-  retained would escape the critical-extension and duplicate checks. Unknown extensions and
-  unknown SAN types are retained without interpretation rather than rejected; policy decisions
+  retained would escape the critical-extension and duplicate checks. Trailing data is rejected
+  everywhere: after the signature, after the certificate (so `derLen` must be exactly the
+  certificate's length), after the TBS fields, after the Extensions SEQUENCE, after an
+  extension's value, and after a recognized extension's decoded body. Extensions in a v1 or v2
+  certificate are rejected. A SAN entry must be a context-specific GeneralName choice `[0]`..`[8]`,
+  constructed exactly for `otherName`, `x400Address`, `directoryName` and `ediPartyName`; any
+  other element fails the parse. Unknown extensions and unknown SAN types are retained without
+  interpretation rather than rejected; policy decisions
   are left to [`SSFX509VerifyChain()`](#ssfx509verifychain). Two values are normalized at parse
   time: a `dNSName` SAN that is empty or contains a NUL byte is dropped, because no hostname can
   match it safely, and a `pathLenConstraint` above 127 is clamped to 127 so it stays a constraint.
@@ -134,7 +139,15 @@ X.509 v3 certificate support per RFC 5280, built on [`ssfasn1`](ssfasn1.md):
   `signatureAlgorithm` are captured, OID and raw parameters (`sigAlgOidRaw` / `sigAlgParams`
   and `outerSigAlgOidRaw` / `outerSigAlgParams`). The chain verifier rejects certificates where
   either part differs (RFC 5280 §4.1.1.2 and §4.1.2.3); only the TBS copy is covered by the
-  signature, so the outer copy is never used for verification decisions.
+  signature, so the outer copy is never used for verification decisions. The signature algorithm
+  must also match the signing key's algorithm: ECDSA needs an `id-ecPublicKey` key, RSA PKCS#1
+  v1.5 an `rsaEncryption` key, RSA-PSS an `rsaEncryption` or `id-RSASSA-PSS` key, and Ed25519 an
+  `id-Ed25519` key; ECDSA and Ed25519 algorithm parameters must be absent (RFC 5758 §3.2,
+  RFC 8410 §3), so a NULL there fails verification.
+- **Trust anchors.** An anchor's own Basic Constraints and Key Usage are not checked (RFC 5280
+  leaves anchor constraints to policy), so put only CA certificates in the trust store. A chain
+  whose last certificate is the anchor itself, as many TLS servers send it, is handled: that copy
+  is not counted as a subordinate CA against the anchor's `pathLenConstraint`.
 - **Chain layout.** For [`SSFX509VerifyChain()`](#ssfx509verifychain), `chainDer[0]` is the leaf
   and each `chainDer[i]` must be signed by `chainDer[i + 1]`. The last chain certificate must be
   signed by one of the trust anchors; the anchors themselves are never part of the chain array.

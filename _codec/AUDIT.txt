@@ -642,7 +642,7 @@ X509-8  Medium  FIXED (2026-11-18)  [demonstrated]  (related ASN1-1)
              empty at the end (recommended)
              (2) Treat an undecodable pathLen as 0.
 
-X509-9  Low  OPEN  [demonstrated]
+X509-9  Low  FIXED (2026-11-18)  [demonstrated]
   Location:  ssfx509.c:405-426 (SAN parse)
   Problem:   The GeneralName choice is taken as tag & 0x1F. Class and the constructed bit are
              ignored, so a universal INTEGER (0x02), a constructed [2] (0xA2) or a universal
@@ -658,7 +658,7 @@ X509-9  Low  OPEN  [demonstrated]
   Options:   (1) Require (tag & 0xC0) == 0x80. Require primitive for dNSName/iPAddress and
              store other choices under their real number (recommended)  (2) Document.
 
-X509-10  Low  OPEN  [demonstrated]
+X509-10  Low  FIXED (2026-11-18)  [demonstrated]
   Location:  ssfx509.c:2720-2787 (anchor selection and anchor pathLen)
   Problem:   (a) When the chain's last certificate is the trust anchor itself (TLS servers
              often send the root), numSubCAs counts the root as its own subordinate. A root
@@ -677,7 +677,7 @@ X509-10  Low  OPEN  [demonstrated]
              the count (and from the intermediate checks). Document (b) (recommended)
              (2) Document both.
 
-X509-11  Low  OPEN  [reviewed]
+X509-11  Low  FIXED (2026-11-18)  [reviewed]
   Location:  ssfx509.c:2240-2419 (SSFX509VerifySignature)
   Problem:   Nothing ties the signature algorithm to the key's SubjectPublicKeyInfo algorithm.
              The ECDSA branch takes the curve from ecCurveOidRaw alone. A pubKeyAlg of
@@ -695,7 +695,7 @@ X509-11  Low  OPEN  [reviewed]
              id-Ed25519), require sigAlg params to be absent for ECDSA and Ed25519, and
              require pubKeyLen > 0 (with X509-2) (recommended)
 
-X509-12  Low  OPEN  [demonstrated]  (related ASN1-2, ASN1-3, ASN1-5)
+X509-12  Low  FIXED (2026-11-18)  [demonstrated]  (related ASN1-2, ASN1-3, ASN1-5)
   Location:  ssfx509.c:559-722 (SSFX509Parse), 256-263 (_SSFX509ParseDN), 350-551;
              ssfx509.md:100-104
   Problem:   The .md says "Parse is strict about DER" (it lists non-minimal INTEGER and bad
@@ -864,7 +864,7 @@ notes in the entries and in "Checked, no issue".
 
 ----------------------------------------------------------------------------------------------
 
-MATCH-1  Low  OPEN  [demonstrated]
+MATCH-1  Low  FIXED (2026-11-18)  [demonstrated]
   Location:  ssfmatch.c:56-75 (SSFMatchStrNI); ssfmatch.md:7, :145-156; callers
              ssfx509.c:2054, 2059, 2488, 2496
   Problem:   SSFMatchStrNI has strncasecmp semantics: it returns true as soon as both inputs
@@ -1516,3 +1516,44 @@ CHANGE LOG
               trap missing); ASan memcpy-param-overlap in SSFStrCpy. GREEN: ssfasn1, ssfstr,
               ssfx509, ssfcms, ssfrsa, ssfecdsa, ssfbase64url, ssfmatch, and the same set except
               RSA / ECDSA under ASan + UBSan (unit test flags restored).
+  2026-11-18  Low batch 2 (Jim: "Do batch 2 as described"): X509-9, X509-10, X509-11, X509-12,
+              MATCH-1 FIXED. No API change (no signature or struct change).
+              - X509-9: a SAN entry must be a context-specific GeneralName [0]..[8], constructed
+                exactly for otherName / x400Address / directoryName / ediPartyName; anything
+                else (e.g. universal INTEGER 02 08 "evil.com", constructed [2]) fails the parse.
+              - X509-10: when the chain's last cert is byte-identical to the anchor that verified
+                it, it is not counted as a subordinate CA against the anchor's pathLen, so a
+                server that sends a pathLen-0 root no longer has its direct leaf rejected.
+                ssfx509.md documents that anchor Basic Constraints / Key Usage are not checked.
+              - X509-11: SSFX509VerifySignature checks the key algorithm OID per scheme (new
+                helper _SSFX509KeyAlgIs): ECDSA needs id-ecPublicKey, RSA PKCS#1 v1.5
+                rsaEncryption, RSA-PSS rsaEncryption or id-RSASSA-PSS, Ed25519 id-Ed25519; ECDSA
+                and Ed25519 parameters must be absent (RFC 5758 3.2, RFC 8410 3).
+              - X509-12: SSFX509Parse fails on trailing data after the signature, after the
+                Certificate (derLen must be exact), after the TBS fields, after the Extensions
+                SEQUENCE, after an extension's OCTET STRING, and after the decoded body of SAN,
+                Key Usage, EKU, SKID and AKID (BC and NC were done in X509-8 / X509-3); and on
+                extensions in a v1 / v2 certificate. Bodies with the wrong structure keep their
+                documented fail-closed defaults.
+              - MATCH-1: ssfx509 compares DER names with a new private exact-length,
+                ASCII-case-insensitive _SSFX509MemEqI at its 4 former SSFMatchStrNI sites, so an
+                embedded NUL no longer ends a comparison early; ssfx509 no longer depends on
+                ssfmatch (include and .md dependency removed). ssfmatch.md notes that
+                SSFMatchStrNI is not a length-exact compare.
+              Tests: one "AUDIT X509-9/10/11/12 and MATCH-1" block in ssfx509_ut.c (SAN INTEGER
+              and constructed [2] fail, [2] control parses; trailing junk via the new
+              _utAppendJunk helper inside the Certificate, TBS, [3] and an Extension, after
+              the cert and inside a SAN value all fail, exact-length control parses; v1 with
+              extensions fails; EC key labelled rsaEncryption and ECDSA with NULL params do not
+              verify; [leaf, pathLen-0 root] anchored at that root verifies), plus X509-11 cases
+              in the RSA / Ed25519 block (RSA key labelled id-Ed25519 fails PSS, id-RSASSA-PSS
+              key passes; Ed25519 with NULL params, and an Ed25519 key labelled id-ecPublicKey,
+              fail). Existing tests updated: the hand-built RSA-PSS issuer stub now carries an
+              rsaEncryption key OID; the RFC 5280 4.1.1.2 parameter-equality test now expects
+              its NULL-parameter ECDSA chain to fail (the tampered copy still fails at the
+              earlier comparison). MATCH-1 is covered by the existing hostname and Name
+              Constraints tests. RED, item by item as each fix landed: ssfx509_ut.c:5599
+              (X509-9), :5611 (X509-12), :5645 (X509-11), :5690 (X509-10); the X509-11 RSA /
+              Ed25519 assertions ran only after the fix. GREEN: ssfx509, ssfcms, ssfasn1,
+              ssfstr, ssfrsa, ssfecdsa, ssfed25519, ssfbase64url, ssfmatch, and the non-RSA /
+              ECDSA / Ed25519 set under ASan + UBSan (unit test flags restored).

@@ -148,7 +148,9 @@ bool SSFMatchStrNI(SSFCStrIn_t aStr, SSFCStrIn_t bStr, uint32_t len);
 
 Compares at most `len` characters of two strings under ASCII case folding, with POSIX
 `strncasecmp()` semantics: comparison stops at the first `'\0'` in either input, so passing a `len`
-larger than the actual string length is safe.
+larger than the actual string length is safe. Because a NUL ends the comparison with `true`, this
+is not a length-exact compare of binary or DER content (which may contain NUL bytes); compare such
+buffers with an exact-length routine instead.
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|

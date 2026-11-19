@@ -75,76 +75,71 @@ bool SSFMatchStrNI(SSFCStrIn_t aStr, SSFCStrIn_t bStr, uint32_t len)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if str matches glob patternStr, else false.                                      */
+/* Returns true if pattern char pc matches str char sc, optionally ignoring ASCII case.          */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFMatchGlobCharEq(char pc, char sc, bool caseInsensitive)
+{
+    /* Is the comparison case-insensitive? */
+    if (caseInsensitive)
+    {
+        /* Yes */
+        return (SSFStrCharToLower(pc) == SSFStrCharToLower(sc));
+    }
+    /* No */
+    return (pc == sc);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if str matches glob patternStr (O(len * patLen) time, O(1) stack), else false.   */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFMatchGlobInternal(SSFCStrIn_t patternStr, SSFCStrIn_t str, bool caseInsensitive)
 {
+    SSFCStrIn_t starPat = NULL;
+    SSFCStrIn_t starStr = NULL;
+
     SSF_REQUIRE(patternStr != NULL);
     SSF_REQUIRE(str != NULL);
 
-    while (*patternStr != '\0')
+    /* Only the most recent '*' is ever retried, which is sufficient (AUDIT MATCH-2) */
+    while (*str != '\0')
     {
-        /* Run of '*' wildcards? */
+        /* Is the pattern at a run of '*' wildcards? */
         if (*patternStr == '*')
         {
             /* Yes, collapse the run; a trailing run matches whatever remains of str */
             while (*patternStr == '*') patternStr++;
             if (*patternStr == '\0') return true;
 
-            /* Try the rest of the pattern at each remaining position of str */
-            while (*str != '\0')
-            {
-                if (_SSFMatchGlobInternal(patternStr, str, caseInsensitive)) return true;
-                str++;
-            }
-            return _SSFMatchGlobInternal(patternStr, str, caseInsensitive);
+            /* Remember where to resume if the rest of the pattern fails here */
+            starPat = patternStr;
+            starStr = str;
         }
-        /* No, single char wildcard? */
-        else if (*patternStr == '?')
+        /* No, does '?' or a literal char match the current char of str? */
+        else if ((*patternStr != '\0') &&
+                 ((*patternStr == '?') || _SSFMatchGlobCharEq(*patternStr, *str, caseInsensitive)))
         {
-            /* Yes, it must consume exactly one char */
-            if (*str == '\0') return false;
+            /* Yes, consume one char of each */
             patternStr++;
             str++;
         }
-        /* No, literal char must match, optionally ignoring ASCII case */
+        /* No, is there an earlier '*' that can absorb one more char? */
+        else if (starPat != NULL)
+        {
+            /* Yes, retry the rest of the pattern one char further along str */
+            starStr++;
+            str = starStr;
+            patternStr = starPat;
+        }
         else
         {
-            if (caseInsensitive)
-            {
-                if (SSFStrCharToLower(*patternStr) != SSFStrCharToLower(*str)) return false;
-            }
-            else if (*patternStr != *str) return false;
-            patternStr++;
-            str++;
+            /* No, mismatch */
+            return false;
         }
     }
-    return (*str == '\0');
-}
 
-/* --------------------------------------------------------------------------------------------- */
-/* Returns true if patternStr has more than SSF_MATCH_CONFIG_MAX_GLOB_WILDCARDS '*' runs.        */
-/* --------------------------------------------------------------------------------------------- */
-static bool _SSFMatchGlobTooManyWildcards(SSFCStrIn_t patternStr)
-{
-    uint32_t runs = 0;
-    bool inRun = false;
-
-    SSF_REQUIRE(patternStr != NULL);
-
-    while (*patternStr != '\0')
-    {
-        /* Start of a new '*' run? */
-        if ((*patternStr == '*') && (!inRun))
-        {
-            /* Yes, count it and stop as soon as the limit is exceeded */
-            runs++;
-            if (runs > SSF_MATCH_CONFIG_MAX_GLOB_WILDCARDS) return true;
-        }
-        inRun = (*patternStr == '*');
-        patternStr++;
-    }
-    return false;
+    /* str is used up, so only '*' wildcards may remain in the pattern */
+    while (*patternStr == '*') patternStr++;
+    return (*patternStr == '\0');
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -155,12 +150,6 @@ bool SSFMatchGlob(SSFCStrIn_t patternStr, SSFCStrIn_t str)
     SSF_REQUIRE(patternStr != NULL);
     SSF_REQUIRE(str != NULL);
 
-    /* Pattern within the configured wildcard bound? */
-    if (_SSFMatchGlobTooManyWildcards(patternStr))
-    {
-        /* No, refuse rather than risk exponential backtracking */
-        return false;
-    }
     return _SSFMatchGlobInternal(patternStr, str, false);
 }
 
@@ -172,13 +161,31 @@ bool SSFMatchGlobI(SSFCStrIn_t patternStr, SSFCStrIn_t str)
     SSF_REQUIRE(patternStr != NULL);
     SSF_REQUIRE(str != NULL);
 
-    /* Pattern within the configured wildcard bound? */
-    if (_SSFMatchGlobTooManyWildcards(patternStr))
-    {
-        /* No, refuse rather than risk exponential backtracking */
-        return false;
-    }
     return _SSFMatchGlobInternal(patternStr, str, true);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if the name in [nameStart, nameEnd) holds '/', '{', '?' or '#', else false.      */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFMatchPathNameHasDelim(const char *nameStart, const char *nameEnd)
+{
+    SSF_REQUIRE(nameStart != NULL);
+    SSF_REQUIRE(nameEnd != NULL);
+    SSF_REQUIRE(nameStart <= nameEnd);
+
+    while (nameStart < nameEnd)
+    {
+        /* Is this a path delimiter or the start of another placeholder? */
+        if ((*nameStart == '/') || (*nameStart == '{') || (*nameStart == '?') ||
+            (*nameStart == '#'))
+        {
+            /* Yes */
+            return true;
+        }
+        /* No */
+        nameStart++;
+    }
+    return false;
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -218,6 +225,14 @@ bool SSFMatchPath(SSFCStrIn_t patternStr, SSFCStrIn_t pathStr, SSFMatchParam_t *
                 /* Yes, malformed pattern */
                 return false;
             }
+
+            /* Does the name hold a path delimiter or '{', the mark of a mistyped pattern? */
+            if (_SSFMatchPathNameHasDelim(nameStart, nameEnd))
+            {
+                /* Yes, malformed pattern (AUDIT MATCH-5) */
+                return false;
+            }
+            /* No */
 
             /* The value runs to the next '/', end of path, query '?' or fragment '#' */
             valStart = rp;

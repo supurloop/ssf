@@ -8,9 +8,7 @@
 extern "C" {
 #endif
 
-/* Maximum number of '*' wildcards (a run of consecutive '*' counts as one) allowed in a glob    */
-/* pattern. Patterns with more never match. Bounds glob worst-case time and recursion depth.      */
-#define SSF_MATCH_CONFIG_MAX_GLOB_WILDCARDS  (4u)
+/* No configuration options: glob matching is iterative and needs no wildcard cap (MATCH-2).   */
 
 #ifdef __cplusplus
 }

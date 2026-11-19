@@ -36,12 +36,13 @@ SUMMARY
   Critical   0
   High       0
   Medium     1       ASN1-14 (FIXED)
-  Low        5       FIXED: X509-17, X509-18, X509-19, X509-20   OPEN: MATCH-4
+  Low        9       FIXED: X509-17, X509-18, X509-19, X509-20   DOC: MATCH-4
+                     ssfmatch third pass: FIXED: MATCH-5   DOC: MATCH-6, MATCH-7, MATCH-8
 
   Carried over from AUDIT.txt, re-checked (not re-counted): X509-16 (SANs past
   SSF_X509_CONFIG_MAX_SAN_ENTRIES escaped dNSName / iPAddress Name Constraints), FIXED
   2026-11-19 with X509-17/18; MATCH-2 (recursive glob backtracking; a linear algorithm needs no
-  cap), still OPEN.
+  cap), FIXED 2026-11-19.
 
   No memory-safety defect reachable from hostile input was found. Every decoder bounds its
   reads by the cursor length, the first-pass DER-strictness fixes hold, and the chain verifier
@@ -69,7 +70,7 @@ ssfstr
 ssfmatch
 ----------------------------------------------------------------------------------------------
 
-MATCH-4  Low  OPEN  [code-read]
+MATCH-4  Low  DOC (2026-11-19)  [code-read]
   Location:  ssfmatch.c:187-264 (SSFMatchPath); ssfmatch.md:51-53
   Problem:   A {param} binds any non-empty path segment byte for byte, including "." and "..",
              and percent-encoded forms such as "%2e%2e" or "%2F" are not decoded. ssfmatch.md
@@ -88,6 +89,68 @@ MATCH-4  Low  OPEN  [code-read]
   bounds every write by paramsOutOptSize, reports the true placeholder count, zeroes the count
   on every false return, and treats '?' / '#' as the end of the path only after the pattern is
   exhausted.
+
+  Third pass, ssfmatch only (2026-11-19), after the MATCH-2 rewrite (uncommitted at the time):
+  every line of ssfmatch.c / .h / .md and _opt/ssfmatch_opt.h re-read; a 3,000,000-iteration
+  random fuzz of all five functions under ASan + UBSan (glob cross-checked against a recursive
+  reference with bytes 0x80 / 0xFF in pattern and subject, SSFMatchPath checked for non-empty
+  values free of '/', '?', '#' and a zero count on every false return): no sanitizer report,
+  no mismatch. Probes in scratchpad only.
+
+MATCH-5  Low  FIXED (2026-11-19)  [demonstrated; fix verified red/green]
+  Location:  ssfmatch.c SSFMatchPath, placeholder-name scan
+             (while ((*nameEnd != '}') && (*nameEnd != '\0')) nameEnd++;)
+  Problem:   A placeholder name runs to the next '}' and may contain any byte, including '/',
+             '{', '?', '#' and space. A mistyped pattern is therefore not rejected as malformed
+             but silently changes the route's shape: "/a/{id/{x}" is one placeholder named
+             "id/{x" and "/a/{id/b}" one named "id/b", so both match the one-segment path
+             "/a/7" instead of failing. Patterns are developer-supplied, so this is a
+             robustness issue, not an attacker-reachable one.
+  Failure:   SSFMatchPath("/a/{id/{x}", "/a/7", p, 4, &n) -> true, n = 1, name = "id/{x".
+  Options:   (1) Treat a name containing '/', '{', '?' or '#' as a malformed pattern and return
+             false, as an unterminated '{' or an empty '{}' already does (recommended).
+             (2) Restrict names to [A-Za-z0-9_] (RFC 6570 varchar without pct-encoding).
+             (3) Document.
+
+MATCH-6  Low  DOC (2026-11-19)  [demonstrated]
+  Location:  ssfmatch.md Notes (glob); ssfmatch.c _SSFMatchGlobInternal
+  Problem:   Glob applies no path semantics: '*' crosses '/' and matches "..", and nothing is
+             normalized. ssfmatch.md warns that '*' crosses '.' for hostnames (MATCH-3) and that
+             SSFMatchPath values may be ".." (MATCH-4), but not that a glob used as a path
+             access-control check is bypassable: "/public/*" accepts "/public/../admin", and
+             "/admin/*" is evaded by "//admin/x" or "/./admin/x".
+  Failure:   SSFMatchGlob("/public/*", "/public/../admin") -> true.
+  Options:   (1) Document: glob is plain string matching; normalize (and percent-decode) a path
+             before using a glob on it for access control (recommended). (2) None in code: a
+             path-aware glob would be a different function.
+
+MATCH-7  Low  DOC (2026-11-19)  [demonstrated]
+  Location:  ssfmatch.md SSFMatchGlob description and Notes ("'?' (exactly one character)")
+  Problem:   '?' matches exactly one byte, not one character, and '*' can end inside a
+             multi-byte UTF-8 sequence. For UTF-8 subjects "?" does not match "\xC3\xA9" (e
+             acute) but "??" does. The case-folding note already says folding is ASCII-only;
+             the byte unit is not stated.
+  Failure:   SSFMatchGlob("?", "\xC3\xA9") -> false; SSFMatchGlob("??", "\xC3\xA9") -> true.
+  Options:   (1) Document that patterns and subjects are byte strings and '?' matches one
+             byte (recommended). (2) UTF-8-aware '?' (more code, and the API is byte-oriented
+             everywhere else).
+
+MATCH-8  Low  DOC (2026-11-19)  [code-read]  (introduced by the uncommitted MATCH-2 change)
+  Location:  ssfmatch.md Configuration
+  Problem:   The section now reads "Options live in _opt/ssfmatch_opt.h." immediately followed
+             by "There are no configuration options.", which contradicts itself.
+  Options:   (1) Reword: ssfmatch has no options; _opt/ssfmatch_opt.h is kept (empty) so
+             existing include paths and per-project copies still build (recommended).
+
+  Verified correct (third pass): the iterative glob terminates (each backtrack advances the
+  resume point, which never passes a non-NUL position of str) and runs in O(strLen * patLen);
+  its result equals the recursive definition (exhaustive unit test plus fuzz); case folding
+  touches only A-Z, so bytes >= 0x80 compare exactly on signed- and unsigned-char targets;
+  StrI / StrNI read no byte past the first NUL of either input and StrNI with len 0 returns
+  true; SSFMatchPath reads no byte past either NUL, writes only paramsOutOpt[0 ..
+  paramsOutOptSize - 1], binds only non-empty values that contain no '/', '?' or '#', treats
+  '?' / '#' in the pattern as literals, and is O(patternLen + pathLen); all functions are
+  stateless and reentrant. Stack is a small fixed frame (README footnote 57).
 
 ----------------------------------------------------------------------------------------------
 ssfasn1
@@ -298,3 +361,23 @@ CHANGE LOG
               character are refused; "a'" and "9?" are accepted.
               RED: ssfx509_ut.c:8862. GREEN: ssfx509, ssfcms, ssfbase64url, ssfmatch. No docs
               changed, per Jim. Linux direct gcc build.
+  2026-11-19  MATCH-4 resolved by documentation (option 1). ssfmatch.md Notes gains "Parameter
+              values are untrusted raw segments": {param} binds ".", ".." and percent-encoded
+              forms as is, with the /files/{name} vs /files/.. example, and callers must
+              validate values (after any percent-decoding) before using them as paths or keys.
+              No code change. With this entry every AUDIT2.txt item is FIXED or DOC.
+  2026-11-19  ssfmatch third pass (Jim: "complete correctness and security audit of ssfmatch"),
+              run on the working tree with the uncommitted MATCH-2 / MATCH-4 changes. New:
+              MATCH-5, MATCH-6, MATCH-7, MATCH-8, all Low, all OPEN. No memory-safety, UB or
+              algorithmic-complexity defect found; ASan + UBSan fuzz clean.
+  2026-11-19  MATCH-5 FIXED via option 1; MATCH-6, MATCH-7, MATCH-8 resolved by documentation
+              (option 1 each). SSFMatchPath returns false for a placeholder name containing '/',
+              '{', '?' or '#' (new private _SSFMatchPathNameHasDelim); other name bytes are
+              still accepted. ssfmatch_ut.c "AUDIT MATCH-5": "/a/{id/{x}", "/a/{id/b}",
+              "/a/{id{x}", "/a/{id?}", "/a/{id#}" fail (count 0, also with NULL params);
+              "/a/{my-id_2.x}" and "/a/{id}/{x}" still match. RED: ssfmatch_ut.c:624. GREEN:
+              ssfmatch, ssfx509, ssfcms, ssfbase64url; the ASan + UBSan fuzz re-run is clean.
+              ssfmatch.md: glob works on bytes ('?' is one byte, MATCH-7) and has no path
+              semantics (normalize before a glob ACL, MATCH-6); the '{' note and the
+              SSFMatchPath Returns list the new rejection (MATCH-5); Configuration reworded
+              (MATCH-8). Every AUDIT2.txt item is now FIXED or DOC.

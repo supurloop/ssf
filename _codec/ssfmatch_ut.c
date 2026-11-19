@@ -34,6 +34,32 @@
 
 #if SSF_CONFIG_MATCH_UNIT_TEST == 1
 
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if s matches glob p by plain recursion; a reference for tiny exhaustive inputs.  */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFMatchUTGlobRef(const char *p, const char *s, bool ci)
+{
+    char a;
+    char b;
+
+    SSF_REQUIRE(p != NULL);
+    SSF_REQUIRE(s != NULL);
+
+    if (*p == '\0') return (*s == '\0');
+    if (*p == '*')
+    {
+        return (_SSFMatchUTGlobRef(p + 1, s, ci) ||
+                ((*s != '\0') && _SSFMatchUTGlobRef(p, s + 1, ci)));
+    }
+    if (*s == '\0') return false;
+    a = *p;
+    b = *s;
+    if (ci && (a >= 'A') && (a <= 'Z')) a = (char)(a + ('a' - 'A'));
+    if (ci && (b >= 'A') && (b <= 'Z')) b = (char)(b + ('a' - 'A'));
+    if ((*p != '?') && (a != b)) return false;
+    return _SSFMatchUTGlobRef(p + 1, s + 1, ci);
+}
+
 void SSFMatchUnitTest(void)
 {
     SSFMatchParam_t params[4];
@@ -254,77 +280,82 @@ void SSFMatchUnitTest(void)
     SSF_ASSERT(SSFMatchGlobI("a@b", "A`B") == false);
     SSF_ASSERT(SSFMatchGlobI("*@", "x`") == false);
 
-    /* ---- Glob wildcard limit: over SSF_MATCH_CONFIG_MAX_GLOB_WILDCARDS '*' runs fails ---- */
+    /* ---- AUDIT MATCH-2: glob has no '*' cap and runs in O(len * patLen) time ---- */
     {
-        char pat[(3u * SSF_MATCH_CONFIG_MAX_GLOB_WILDCARDS) + 4u];
-        char str[SSF_MATCH_CONFIG_MAX_GLOB_WILDCARDS + 2u];
+        static char big[4097];
+        static char pat[64];
+        static const char patAlpha[] = { 'a', 'b', '*', '?', 'A' };
+        static const char strAlpha[] = { 'a', 'b', 'A' };
+        char sp[8];
+        char ss[8];
         uint32_t i;
-        size_t n;
+        uint32_t k;
+        uint32_t pl;
+        uint32_t sl;
+        uint32_t pCount;
+        uint32_t sCount;
+        uint32_t pCode;
+        uint32_t sCode;
+        uint32_t digits;
 
-        /* Exactly the limit matches */
-        n = 0;
-        for (i = 0; i < SSF_MATCH_CONFIG_MAX_GLOB_WILDCARDS; i++)
+        /* Five or more '*' runs match (the removed cap refused these) */
+        SSF_ASSERT(SSFMatchGlob("*a*b*c*d*e", "abcde") == true);
+        SSF_ASSERT(SSFMatchGlobI("*A*B*C*D*E", "xaxbxcxdxe") == true);
+        SSF_ASSERT(SSFMatchGlobI("*A*B*C*D*E", "xaxbxcxdxex") == false);
+        SSF_ASSERT(SSFMatchGlob("*a*b*c*d*e", "abcd") == false);
+        for (i = 0; i < 20u; i++)
         {
-            pat[n++] = '*';
-            pat[n++] = 'a';
-            str[i] = 'a';
+            pat[(2u * i)] = '*';
+            pat[(2u * i) + 1u] = '?';
         }
-        pat[n] = '\0';
-        str[SSF_MATCH_CONFIG_MAX_GLOB_WILDCARDS] = '\0';
-        SSF_ASSERT(SSFMatchGlob(pat, str) == true);
-        SSF_ASSERT(SSFMatchGlobI(pat, str) == true);
+        pat[40] = '\0';
+        SSF_ASSERT(SSFMatchGlob(pat, "abcdefghijklmnopqrst") == true);
+        SSF_ASSERT(SSFMatchGlob(pat, "abcdefghijklmnopqrs") == false);
 
-        /* A run of consecutive '*' counts as one wildcard, so this is still within the limit */
-        n = 0;
-        for (i = 0; i < SSF_MATCH_CONFIG_MAX_GLOB_WILDCARDS; i++)
+        /* Near-miss subjects that took the recursive matcher minutes finish immediately */
+        memset(big, 'a', sizeof(big) - 1u);
+        big[sizeof(big) - 1u] = '\0';
+        SSF_ASSERT(SSFMatchGlob("*a*a*a*b", big) == false);
+        SSF_ASSERT(SSFMatchGlobI("*a*a*a*a*a*a*a*a*a*a*b", big) == false);
+        SSF_ASSERT(SSFMatchGlob("*a*a*a*a*a*a*a*a*a*a*a", big) == true);
+        big[sizeof(big) - 2u] = 'b';
+        SSF_ASSERT(SSFMatchGlob("*a*a*a*b", big) == true);
+        SSF_ASSERT(SSFMatchGlob("*a*a*a*bb", big) == false);
+
+        /* Exhaustive check against a reference matcher: every pattern of up to 4 characters */
+        /* over a, b, *, ?, A against every subject of up to 4 characters over a, b, A       */
+        for (pl = 0; pl <= 4u; pl++)
         {
-            pat[n++] = '*';
-            pat[n++] = '*';
-            pat[n++] = 'a';
+            pCount = 1u;
+            for (k = 0; k < pl; k++) pCount *= 5u;
+            for (pCode = 0; pCode < pCount; pCode++)
+            {
+                digits = pCode;
+                for (k = 0; k < pl; k++)
+                {
+                    sp[k] = patAlpha[digits % 5u];
+                    digits /= 5u;
+                }
+                sp[pl] = '\0';
+                for (sl = 0; sl <= 4u; sl++)
+                {
+                    sCount = 1u;
+                    for (k = 0; k < sl; k++) sCount *= 3u;
+                    for (sCode = 0; sCode < sCount; sCode++)
+                    {
+                        digits = sCode;
+                        for (k = 0; k < sl; k++)
+                        {
+                            ss[k] = strAlpha[digits % 3u];
+                            digits /= 3u;
+                        }
+                        ss[sl] = '\0';
+                        SSF_ASSERT(SSFMatchGlob(sp, ss) == _SSFMatchUTGlobRef(sp, ss, false));
+                        SSF_ASSERT(SSFMatchGlobI(sp, ss) == _SSFMatchUTGlobRef(sp, ss, true));
+                    }
+                }
+            }
         }
-        pat[n] = '\0';
-        SSF_ASSERT(SSFMatchGlob(pat, str) == true);
-
-        /* One over the limit never matches, even though the pattern otherwise would */
-        n = 0;
-        for (i = 0; i <= SSF_MATCH_CONFIG_MAX_GLOB_WILDCARDS; i++)
-        {
-            pat[n++] = '*';
-            pat[n++] = 'a';
-            str[i] = 'a';
-        }
-        pat[n] = '\0';
-        str[SSF_MATCH_CONFIG_MAX_GLOB_WILDCARDS + 1u] = '\0';
-        SSF_ASSERT(SSFMatchGlob(pat, str) == false);
-        SSF_ASSERT(SSFMatchGlobI(pat, str) == false);
-
-        /* Over the limit with a trailing '*' is rejected before the trailing-star shortcut */
-        pat[n - 1u] = '*';
-        SSF_ASSERT(SSFMatchGlob(pat, str) == false);
-        SSF_ASSERT(SSFMatchGlobI(pat, str) == false);
-
-        /* '?' never backtracks so it is not counted: exactly the limit of '*' runs separated */
-        /* by '?' still matches (str holds MAX + 1 'a's) */
-        n = 0;
-        for (i = 0; i < SSF_MATCH_CONFIG_MAX_GLOB_WILDCARDS; i++)
-        {
-            pat[n++] = '*';
-            pat[n++] = '?';
-        }
-        pat[n] = '\0';
-        SSF_ASSERT(SSFMatchGlob(pat, str) == true);
-        SSF_ASSERT(SSFMatchGlobI(pat, str) == true);
-
-        /* But a '?' between two '*' does not merge them into one run: one more run and the */
-        /* pattern is rejected even though it would otherwise match */
-        pat[n++] = '*';
-        pat[n++] = '?';
-        pat[n] = '\0';
-        SSF_ASSERT(SSFMatchGlob(pat, str) == false);
-        SSF_ASSERT(SSFMatchGlobI(pat, str) == false);
-
-        /* The cap applies before matching, so an over-limit pattern fails on any input */
-        SSF_ASSERT(SSFMatchGlob(pat, "") == false);
     }
 
     /* ---- SSFMatchPath ---- */
@@ -588,5 +619,19 @@ void SSFMatchUnitTest(void)
     SSF_ASSERT(SSFMatchPath("/a/{id}",     "/a?x=1",       params, 4, &numParams) == false);
     SSF_ASSERT(SSFMatchPath("/a/{id}",     "/a#f",         params, 4, &numParams) == false);
     SSF_ASSERT(SSFMatchPath("/a/{id}/{x}", "/a/1?x",       params, 4, &numParams) == false);
+
+    /* ---- AUDIT MATCH-5: a placeholder name holding '/', '{', '?' or '#' is malformed ---- */
+    SSF_ASSERT(SSFMatchPath("/a/{id/{x}", "/a/7", params, 4, &numParams) == false);
+    SSF_ASSERT(numParams == 0u);
+    SSF_ASSERT(SSFMatchPath("/a/{id/b}", "/a/7", params, 4, &numParams) == false);
+    SSF_ASSERT(SSFMatchPath("/a/{id{x}", "/a/7", params, 4, &numParams) == false);
+    SSF_ASSERT(SSFMatchPath("/a/{id?}", "/a/7", params, 4, &numParams) == false);
+    SSF_ASSERT(SSFMatchPath("/a/{id#}", "/a/7", params, 4, &numParams) == false);
+    SSF_ASSERT(SSFMatchPath("/a/{id/x}", "/a/7", NULL, 0, &numParams) == false);
+    /* Other name bytes are still accepted as is */
+    SSF_ASSERT(SSFMatchPath("/a/{my-id_2.x}", "/a/7", params, 4, &numParams) == true);
+    SSF_ASSERT((numParams == 1u) && (params[0].nameLen == 9u));
+    SSF_ASSERT(SSFMatchPath("/a/{id}/{x}", "/a/7/8", params, 4, &numParams) == true);
+    SSF_ASSERT(numParams == 2u);
 }
 #endif /* SSF_CONFIG_MATCH_UNIT_TEST */

@@ -30,15 +30,19 @@ Every function operates on caller-owned, null-terminated strings and allocates n
   [`ssfx509`](ssfx509.md)'s hostname matching (`SSFX509VerifyChain()`) for that, never glob.
 - **Glob is a deliberate subset.** [`SSFMatchGlob()`](#ssfmatchglob) and
   [`SSFMatchGlobI()`](#ssfmatchglobi) implement only `*` (any sequence, including empty) and `?`
-  (exactly one character) from POSIX.1-2017 §2.13. Bracket expressions `[...]` and `\` escapes are
+  (exactly one byte) from POSIX.1-2017 §2.13. Bracket expressions `[...]` and `\` escapes are
   **not** supported; every other character matches itself literally.
-- **Glob wildcards are capped.** Each `*` in the pattern opens a recursion level that tries every
-  remaining suffix of the input, so cost grows roughly as the input length raised to the number of
-  `*` wildcards. To keep that bounded, [`SSFMatchGlob()`](#ssfmatchglob) and
-  [`SSFMatchGlobI()`](#ssfmatchglobi) return `false` without matching when the pattern contains
-  more than [`SSF_MATCH_CONFIG_MAX_GLOB_WILDCARDS`](#cfg-max-glob-wildcards) runs of `*`. A run of
-  consecutive `*` counts as one; `?` is not counted because it never backtracks. The cap also
-  bounds recursion depth, so stack use is known at compile time.
+- **Glob works on bytes, not characters.** Patterns and subjects are byte strings: `?` matches
+  exactly one byte and `*` may end inside a multi-byte UTF-8 sequence, so `?` does not match `é`
+  (`C3 A9`) but `??` does.
+- **Glob has no path semantics.** `*` crosses `/` and matches `..`, and nothing is normalized, so a
+  glob on a raw path is not an access-control check: `"/public/*"` accepts `"/public/../admin"`,
+  and `"/admin/*"` misses `"//admin/x"` and `"/./admin/x"`. Percent-decode and normalize a path
+  (resolve `.` and `..`, collapse `//`) before matching it against a glob used for access control.
+- **Glob time is bounded by input size, not by wildcard count.** [`SSFMatchGlob()`](#ssfmatchglob)
+  and [`SSFMatchGlobI()`](#ssfmatchglobi) are iterative and only ever retry the most recent `*`,
+  so the worst case is about `strLen × patternLen` character comparisons with a small fixed stack
+  frame, for any number of `*` wildcards.
 - **Path parameters are zero-copy and not null-terminated.** [`SSFMatchPath()`](#ssfmatchpath)
   fills each [`SSFMatchParam_t`](#type-param) with pointers into the caller's `patternStr` (name)
   and `pathStr` (value) strings plus explicit lengths. Use `nameLen` / `valueLen`; do not treat
@@ -52,6 +56,12 @@ Every function operates on caller-owned, null-terminated strings and allocates n
   need RFC 3986 §2.1 normalized comparison must percent-decode `pathStr` before matching. A `?` or
   `#` in the path ends matching: anything after it is a query string or fragment (RFC 3986 §3.3,
   neither character can appear unencoded inside a path) and is ignored.
+- **Parameter values are untrusted raw segments.** A `{param}` binds any non-empty segment as is,
+  including `.`, `..` and percent-encoded forms such as `%2e%2e` or `%2F`, so
+  `SSFMatchPath("/files/{name}", "/files/..", ...)` matches with `name` = `..`. Validate every
+  value before using it as a file path, object key or similar: a handler that joins `..` onto a
+  directory walks out of it (path traversal). Reject `.` and `..` after any percent-decoding the
+  application applies.
 - **Outputs on failure.** Whenever [`SSFMatchPath()`](#ssfmatchpath) returns `false`,
   `*numParamsOut` is `0`. Entries in `paramsOut` may hold values bound before the mismatch was
   found and must not be read.
@@ -68,17 +78,16 @@ Every function operates on caller-owned, null-terminated strings and allocates n
   reason, the second one binds an empty segment. Put the varying part last in its segment or give it
   its own segment.
 - **`{` always begins a placeholder.** There is no escape for a literal `{` in a path pattern. An
-  unterminated `{name` or an empty `{}` placeholder causes `false`.
+  unterminated `{name`, an empty `{}` placeholder, or a name containing `/`, `{`, `?` or `#`
+  (usually a mistyped pattern such as `/a/{id/{x}`) causes `false`. Any other byte may appear in
+  a name.
 
 <a id="configuration"></a>
 
 ## [↑](#ssfmatch--pattern-matching) Configuration
 
-Options live in [`_opt/ssfmatch_opt.h`](../_opt/ssfmatch_opt.h).
-
-| Macro | Default | Description |
-|-------|---------|-------------|
-| <a id="cfg-max-glob-wildcards"></a>`SSF_MATCH_CONFIG_MAX_GLOB_WILDCARDS` | `4` | Maximum number of `*` runs a glob pattern may contain. Patterns with more are rejected by [`SSFMatchGlob()`](#ssfmatchglob) / [`SSFMatchGlobI()`](#ssfmatchglobi) with `false` before any matching. Worst-case matching time is roughly `inputLen ^ N` character comparisons and recursion depth is `N + 1` frames, so lower it on small targets or where inputs are long. |
+ssfmatch has no configuration options. [`_opt/ssfmatch_opt.h`](../_opt/ssfmatch_opt.h) is kept,
+empty, so existing include paths and per-project copies of the options file still build.
 
 The unit-test entry point is gated by `SSF_CONFIG_MATCH_UNIT_TEST` in `ssfport.h`.
 
@@ -181,8 +190,8 @@ if (SSFMatchStrNI(line, "host:", 5u))
 bool SSFMatchGlob(SSFCStrIn_t patternStr, SSFCStrIn_t str);
 ```
 
-Matches `str` against a glob `patternStr` where `*` matches any sequence of characters (including
-none) and `?` matches exactly one character. All other characters match literally; there are no
+Matches `str` against a glob `patternStr` where `*` matches any sequence of bytes (including
+none) and `?` matches exactly one byte. All other characters match literally; there are no
 bracket expressions or escapes. Case-sensitive.
 
 | Parameter | Direction | Type | Description |
@@ -190,9 +199,7 @@ bracket expressions or escapes. Case-sensitive.
 | `patternStr` | in | `SSFCStrIn_t` | Null-terminated glob pattern. Must not be `NULL`. |
 | `str` | in | `SSFCStrIn_t` | Null-terminated string to test. Must not be `NULL`. |
 
-**Returns:** `true` if the whole of `str` matches `patternStr`; `false` on mismatch or when
-`patternStr` contains more than `SSF_MATCH_CONFIG_MAX_GLOB_WILDCARDS` runs of `*` (see
-[Notes](#notes)).
+**Returns:** `true` if the whole of `str` matches `patternStr`; `false` on mismatch.
 
 <a id="ex-glob"></a>
 
@@ -222,7 +229,7 @@ folding.
 | `str` | in | `SSFCStrIn_t` | Null-terminated string to test. Must not be `NULL`. |
 
 **Returns:** `true` if the whole of `str` matches `patternStr` ignoring ASCII case; `false` on
-mismatch or when `patternStr` exceeds the `SSF_MATCH_CONFIG_MAX_GLOB_WILDCARDS` cap.
+mismatch.
 
 ---
 
@@ -254,7 +261,8 @@ implementation.
 | `numParamsOut` | out | `uint32_t *` | Receives the number of placeholders in `patternStr` (which may exceed `paramsOutOptSize`) on `true`, and `0` on `false`. Must not be `NULL`. |
 
 **Returns:** `true` if `pathStr` matches `patternStr`; `false` on mismatch, a placeholder that
-would bind an empty segment, an unterminated `{`, or an empty `{}` placeholder.
+would bind an empty segment, an unterminated `{`, an empty `{}` placeholder, or a placeholder name
+containing `/`, `{`, `?` or `#`.
 
 <a id="ex-path"></a>
 

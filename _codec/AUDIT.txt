@@ -901,7 +901,7 @@ MATCH-1  Low  FIXED (2026-11-18)  [demonstrated]
              (2) Keep the API, and document in ssfmatch.md and at each ssfx509 call site that
              correctness depends on the NUL filter and the length-equality pre-checks.
 
-MATCH-2  Low  OPEN  [demonstrated]
+MATCH-2  Low  FIXED (2026-11-19)  [demonstrated; fix verified red/green]
   Location:  ssfmatch.c:80-123 (_SSFMatchGlobInternal), 128-148, 153-182;
              _opt/ssfmatch_opt.h:13; ssfmatch.md:31-37, :77
   Problem:   The glob matcher backtracks recursively, so its worst case is about
@@ -1610,3 +1610,15 @@ CHANGE LOG
               the dropping behaviour (chain passed with the excluded name as the dropped 9th
               SAN), now expects the parse and the chain to fail. ssfx509.md SAN note and
               SSF_X509_CONFIG_MAX_SAN_ENTRIES row updated.
+  2026-11-19  MATCH-2 FIXED via option 1 (with AUDIT2.txt MATCH-4). _SSFMatchGlobInternal is now
+              the iterative last-star matcher: O(strLen * patLen) time, fixed stack, no
+              recursion. _SSFMatchGlobTooManyWildcards and SSF_MATCH_CONFIG_MAX_GLOB_WILDCARDS
+              are removed, so patterns with any number of '*' runs are matched instead of
+              refused. ssfmatch_ut.c "AUDIT MATCH-2" replaces the cap tests: 5 and 20 '*' runs
+              match; "*a*a*a*b" and an 11-run pattern against 4096 'a's finish at once; an
+              exhaustive comparison with a recursive reference matcher over every pattern of up
+              to 4 chars from {a, b, *, ?, A} and every subject of up to 4 chars from {a, b, A},
+              in both case modes, agrees. RED: ssfmatch_ut.c:302 (5-run pattern refused). GREEN:
+              ssfmatch, ssfx509, ssfcms, ssfbase64url. Docs: ssfmatch.md (Notes, Configuration,
+              both Returns), _opt/ssfmatch_opt.h, README footnote 57 and stack column (~500 B ->
+              ~100 B). Linux direct gcc build.

@@ -5404,6 +5404,13 @@ void SSFX509UnitTest(void)
             memcpy(&caOut[at], critBad, sizeof(critBad));
             SSF_ASSERT(SSFX509Parse(caOut, n, &parsed) == false);
 
+            /* AUDIT ASN1-4: a critical flag of 0x01 is not DER TRUE and fails the parse */
+            SSF_ASSERT(SSFX509EncodeCert(caOut, sizeof(caOut), &p, fakeSig, sizeof(fakeSig),
+                                         &n) == true);
+            SSF_ASSERT(_utFind(caOut, n, critGood, sizeof(critGood), &at) == true);
+            caOut[at + 2u] = 0x01u;
+            SSF_ASSERT(SSFX509Parse(caOut, n, &parsed) == false);
+
             /* cA flag that does not decode */
             p.rawExtOid = bcOid;
             p.rawExtOidLen = sizeof(bcOid);
@@ -5412,6 +5419,17 @@ void SSFX509UnitTest(void)
             SSF_ASSERT(SSFX509EncodeCert(caOut, sizeof(caOut), &p, fakeSig, sizeof(fakeSig),
                                          &n) == true);
             SSF_ASSERT(SSFX509Parse(caOut, n, &parsed) == false);
+
+            /* AUDIT ASN1-4: a cA flag of 0x01 fails the parse */
+            {
+                static const uint8_t bcCA01[] = { 0x30u, 0x03u, 0x01u, 0x01u, 0x01u };
+
+                p.rawExtValue = bcCA01;
+                p.rawExtValueLen = sizeof(bcCA01);
+                SSF_ASSERT(SSFX509EncodeCert(caOut, sizeof(caOut), &p, fakeSig,
+                                             sizeof(fakeSig), &n) == true);
+                SSF_ASSERT(SSFX509Parse(caOut, n, &parsed) == false);
+            }
 
             /* AKID keyIdentifier that does not decode; a good one is read */
             p.rawExtOid = akidOid;

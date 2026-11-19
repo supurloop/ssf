@@ -222,7 +222,15 @@ bool SSFASN1DecGetBool(const SSFASN1Cursor_t *cursor, bool *valOut, SSFASN1Curso
 
     if (!SSFASN1DecGetTLV(cursor, &tag, &value, &valueLen, &after)) return false;
     if (tag != SSF_ASN1_TAG_BOOLEAN || valueLen != 1u) return false;
-    *valOut = (value[0] != 0x00u);
+
+    /* Is the value something other than DER FALSE (0x00) or TRUE (0xFF) (AUDIT ASN1-4)? */
+    if ((value[0] != 0x00u) && (value[0] != 0xFFu))
+    {
+        /* Yes, X.690 11.1 */
+        return false;
+    }
+    /* No */
+    *valOut = (value[0] == 0xFFu);
     *next = after; /* Advance only on success (AUDIT ASN1-7) */
     return true;
 }

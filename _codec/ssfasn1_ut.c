@@ -97,6 +97,31 @@ void SSFASN1UnitTest(void)
         SSF_ASSERT(val == 0xDEADBEEFCAFEull);
     }
 
+    /* ---- AUDIT ASN1-4: BOOLEAN content must be 0x00 or 0xFF (X.690 11.1) ---- */
+    {
+        static const uint8_t b01[] = { 0x01u, 0x01u, 0x01u };
+        static const uint8_t b7F[] = { 0x01u, 0x01u, 0x7Fu };
+        static const uint8_t bFE[] = { 0x01u, 0x01u, 0xFEu };
+        static const uint8_t b00[] = { 0x01u, 0x01u, 0x00u };
+        static const uint8_t bFF[] = { 0x01u, 0x01u, 0xFFu };
+        static const uint8_t *bad[] = { b01, b7F, bFE };
+        static const uint8_t sentinel[1] = { 0x00u };
+        bool bv;
+        uint32_t i;
+
+        for (i = 0; i < (uint32_t)(sizeof(bad) / sizeof(bad[0])); i++)
+        {
+            cursor.buf = bad[i]; cursor.bufLen = 3u;
+            next.buf = sentinel; next.bufLen = 0x5A5Au;
+            SSF_ASSERT(SSFASN1DecGetBool(&cursor, &bv, &next) == false);
+            SSF_ASSERT((next.buf == sentinel) && (next.bufLen == 0x5A5Au));
+        }
+        cursor.buf = b00; cursor.bufLen = sizeof(b00);
+        SSF_ASSERT((SSFASN1DecGetBool(&cursor, &bv, &next) == true) && (bv == false));
+        cursor.buf = bFF; cursor.bufLen = sizeof(bFF);
+        SSF_ASSERT((SSFASN1DecGetBool(&cursor, &bv, &next) == true) && (bv == true));
+    }
+
     /* ---- AUDIT ASN1-3: GetInt requires a minimal two's-complement INTEGER ---- */
     {
         static const uint8_t iEmpty[] = { 0x02u, 0x00u };

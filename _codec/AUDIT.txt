@@ -176,7 +176,7 @@ ASN1-3  Medium  FIXED (2026-11-18)  [demonstrated]
              (2) Add SSFASN1DecGetUInt, which also rejects negatives, for the key and serial
              callers.
 
-ASN1-4  Medium  OPEN  [demonstrated]
+ASN1-4  Medium  FIXED (2026-11-18)  [demonstrated]
   Location:  ssfasn1.c:194-208 (SSFASN1DecGetBool)
   Problem:   Any nonzero byte decodes as true. md:379-380 says DER requires 0xFF / 0x00 and
              that "any other value is rejected" (X.690 11.1).
@@ -1299,3 +1299,14 @@ CHANGE LOG
               ssfasn1_ut.c:125, ssfrsa_ut.c:1493, ssfx509_ut.c:5461. GREEN: ssfasn1, ssfrsa,
               ssfx509, ssfcms, ssfecdsa, ssfbase64url, ssfmatch (ASN1, RSA and ECDSA unit tests
               enabled for the run; flags restored).
+  2026-11-18  ASN1-4 FIXED via option 1. SSFASN1DecGetBool returns false unless the value octet is
+              0x00 or 0xFF (X.690 11.1), as ssfasn1.md already stated; *next is not advanced on
+              that failure (ASN1-7). Since X509-6 the ssfx509 callers fail the parse on a false
+              return, so a critical or cA flag of 0x01..0xFE now fails to parse. An explicitly
+              encoded DEFAULT FALSE (01 01 00) is still tolerated by ssfx509, as agreed, for
+              compatibility. No .md change. Tests: "AUDIT ASN1-4" in ssfasn1_ut.c (01 01 01,
+              01 01 7F, 01 01 FE rejected with next untouched; 00 -> false, FF -> true) and in
+              ssfx509_ut.c (unknown extension with critical 0x01, basicConstraints with cA
+              0x01: both fail to parse). RED: ssfasn1_ut.c:116, ssfx509_ut.c:5412. GREEN:
+              ssfasn1, ssfx509, ssfcms, ssfbase64url, ssfmatch (ASN1 unit test enabled for the
+              run; flag restored).

@@ -149,6 +149,8 @@ bool SSFASN1DecGetOIDRaw(const SSFASN1Cursor_t *cursor, const uint8_t **oidRawOu
                          uint32_t *oidRawLenOut, SSFASN1Cursor_t *next);
 bool SSFASN1DecGetString(const SSFASN1Cursor_t *cursor, const uint8_t **strOut, uint32_t *strLenOut,
                          uint16_t *strTagOut, SSFASN1Cursor_t *next);
+/* A valid time after 2199-12-31T23:59:59Z decodes to this saturated "far future" value.      */
+#define SSF_ASN1_TIME_FAR_FUTURE        (7258118400ull) /* 2200-01-01T00:00:00Z (AUDIT ASN1-14) */
 bool SSFASN1DecGetTime(const SSFASN1Cursor_t *cursor, uint64_t *unixSecOut, SSFASN1Cursor_t *next);
 /* DATE: decodes a "YYYY-MM-DD" payload. Returns Unix seconds for 00:00:00 UTC of that date.     */
 bool SSFASN1DecGetDate(const SSFASN1Cursor_t *cursor, uint64_t *unixSecOut, SSFASN1Cursor_t *next);

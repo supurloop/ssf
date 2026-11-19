@@ -529,6 +529,15 @@ strict forms only:
 
 Pre-1970 dates and any non-conforming format produce `false`.
 
+A valid GeneralizedTime after `2199-12-31T23:59:59Z`, the end of the
+[`ssfdtime`](../_time/ssfdtime.md) range, decodes to the saturated value
+`SSF_ASN1_TIME_FAR_FUTURE` (`7258118400`, which is 2200-01-01T00:00:00Z) instead of failing.
+This is what lets RFC 5280 §4.1.2.5's `99991231235959Z` ("no well-defined expiration date", used
+by IEEE 802.1AR device certificates) decode. Such times are still fully validated (month, days
+in month with the Gregorian leap-year rule, hour, minute, second, trailing `Z`), but every one
+of them maps to the same value, so two post-2199 times compare equal. `SSF_ASN1_TIME_FAR_FUTURE`
+is above the encoders' range, so passing it back to an encoder returns `false`.
+
 <a id="ex-time"></a>
 
 **Example:**

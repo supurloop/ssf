@@ -87,10 +87,12 @@ X.509 v3 certificate support per RFC 5280, built on [`ssfasn1`](ssfasn1.md):
   `serverAuth`. Verifying client certificates needs a caller-side check on `ekuClientAuth`
   instead.
 - **Time.** Validity times are decoded by [`ssfasn1`](ssfasn1.md) into Unix seconds from either
-  `UTCTime` or `GeneralizedTime`; the 1970 epoch is the floor, and the `99991231235959Z` "no
-  expiry" convention is treated as an ordinary far-future date. The generator emits `UTCTime`
-  only, so a `notBefore` or `notAfter` later than `2049-12-31T23:59:59Z` cannot be encoded and
-  both encoder passes return `false`.
+  `UTCTime` or `GeneralizedTime`; the 1970 epoch is the floor. Any valid time after 2199,
+  including RFC 5280's `99991231235959Z` "no expiry" convention, decodes to
+  `SSF_ASN1_TIME_FAR_FUTURE` (see [`ssfasn1`](ssfasn1.md#ssfasn1decgettime)): a `notAfter` that
+  far out never expires, and a `notBefore` that far out is never yet valid. The generator emits
+  `UTCTime` only, so a `notBefore` or `notAfter` later than `2049-12-31T23:59:59Z` cannot be
+  encoded and both encoder passes return `false`.
 
 <a id="notes"></a>
 

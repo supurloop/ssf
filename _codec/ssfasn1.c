@@ -33,6 +33,10 @@
 #include "ssfasn1.h"
 #include "ssfdtime.h"
 
+#if SSF_ASN1_TIME_FAR_FUTURE != (SSFDTIME_UNIX_EPOCH_SEC_MAX + 1u)
+#error SSF_ASN1_TIME_FAR_FUTURE must be the first second after the ssfdtime range.
+#endif
+
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if tag encodes as DER this module decodes: single byte, or 1F with 31..127.      */
 /* --------------------------------------------------------------------------------------------- */
@@ -632,6 +636,44 @@ static bool _SSFASN1Parse2Digit(const uint8_t *p, uint32_t *valOut)
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Returns true if a time after the ssfdtime range is a valid Gregorian UTC time, else false.    */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFASN1IsValidFarFutureTime(uint32_t year, uint32_t month, uint32_t day,
+                                         uint32_t hour, uint32_t minute, uint32_t second)
+{
+    static const uint8_t daysInMonth[12] = { 31u, 28u, 31u, 30u, 31u, 30u, 31u, 31u, 30u, 31u,
+                                             30u, 31u };
+    uint32_t dim;
+
+    SSF_REQUIRE(year > SSFDTIME_EPOCH_YEAR_MAX);
+    SSF_REQUIRE(year <= 9999u);
+
+    /* Is the month out of range? */
+    if ((month < 1u) || (month > 12u))
+    {
+        /* Yes */
+        return false;
+    }
+    /* No, is it February of a Gregorian leap year? */
+    dim = daysInMonth[month - 1u];
+    if ((month == 2u) && ((((year % 4u) == 0u) && ((year % 100u) != 0u)) || ((year % 400u) == 0u)))
+    {
+        /* Yes, it has 29 days */
+        dim = 29u;
+    }
+    /* No, the table length applies */
+
+    /* Is the day, hour, minute or second out of range? */
+    if ((day < 1u) || (day > dim) || (hour > 23u) || (minute > 59u) || (second > 59u))
+    {
+        /* Yes */
+        return false;
+    }
+    /* No */
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
 bool SSFASN1DecGetTime(const SSFASN1Cursor_t *cursor, uint64_t *unixSecOut, SSFASN1Cursor_t *next)
 {
     SSFASN1Cursor_t after;
@@ -692,6 +734,17 @@ bool SSFASN1DecGetTime(const SSFASN1Cursor_t *cursor, uint64_t *unixSecOut, SSFA
 
     /* Trailing 'Z' required per DER X.509 profile (no offsets, no fractional seconds). */
     if (value[pos] != (uint8_t)'Z') return false;
+
+    /* Is the year past ssfdtime's range, as RFC 5280's 99991231235959Z is (AUDIT ASN1-14)? */
+    if (year > SSFDTIME_EPOCH_YEAR_MAX)
+    {
+        /* Yes, validate it here and saturate to the far-future value */
+        if (!_SSFASN1IsValidFarFutureTime(year, month, day, hour, minute, second)) return false;
+        *unixSecOut = SSF_ASN1_TIME_FAR_FUTURE;
+        *next = after; /* Advance only on success (AUDIT ASN1-7) */
+        return true;
+    }
+    /* No, convert it exactly through ssfdtime */
 
     /* Year must fit in ssfdtime's supported range (1970 + [0..229]). Month must be >= 1 so    */
     /* (month - 1) fits in the 0-indexed ssfdtime contract.                                    */

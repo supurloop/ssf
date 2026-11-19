@@ -989,15 +989,40 @@ void SSFASN1UnitTest(void)
         SSF_ASSERT(decoded == 7258118399ull); /* 2199-12-31T23:59:59Z */
     }
 
-    /* ---- Time range #4: GeneralizedTime 2200-01-01 rejected (above ssfdtime range) ---- */
+    /* ---- Time range #4, AUDIT ASN1-14: GeneralizedTime after 2199 saturates, not rejected ---- */
+    /* RFC 5280 4.1.2.5 uses 99991231235959Z for "no well-defined expiration". A valid time past */
+    /* ssfdtime's 2199 limit decodes to SSF_ASN1_TIME_FAR_FUTURE; an invalid one is refused.    */
     {
-        static const uint8_t bad[] = {
-            SSF_ASN1_TAG_GENERALIZED_TIME, 0x0Fu,
-            '2','2','0','0','0','1','0','1','0','0','0','0','0','0','Z'
+        static const char *const goodFar[] = {
+            "99991231235959Z", "22000101000000Z", "24000229120000Z"
         };
+        static const char *const badFar[] = {
+            "23000229000000Z", "99991301000000Z", "99990001000000Z", "99991200000000Z",
+            "99991231240000Z", "99991231236000Z", "99991231235960Z", "99991231235959X"
+        };
+        uint8_t der[17];
         uint64_t decoded;
-        cursor.buf = bad; cursor.bufLen = sizeof(bad);
-        SSF_ASSERT(SSFASN1DecGetTime(&cursor, &decoded, &next) == false);
+        uint32_t i;
+
+        der[0] = (uint8_t)SSF_ASN1_TAG_GENERALIZED_TIME;
+        der[1] = 0x0Fu;
+        for (i = 0; i < (uint32_t)(sizeof(goodFar) / sizeof(goodFar[0])); i++)
+        {
+            memcpy(&der[2], goodFar[i], 15u);
+            cursor.buf = der;
+            cursor.bufLen = sizeof(der);
+            decoded = 0u;
+            SSF_ASSERT(SSFASN1DecGetTime(&cursor, &decoded, &next) == true);
+            SSF_ASSERT(decoded == SSF_ASN1_TIME_FAR_FUTURE);
+            SSF_ASSERT((next.buf == &der[sizeof(der)]) && (next.bufLen == 0u));
+        }
+        for (i = 0; i < (uint32_t)(sizeof(badFar) / sizeof(badFar[0])); i++)
+        {
+            memcpy(&der[2], badFar[i], 15u);
+            cursor.buf = der;
+            cursor.bufLen = sizeof(der);
+            SSF_ASSERT(SSFASN1DecGetTime(&cursor, &decoded, &next) == false);
+        }
     }
 
     /* ---- Time range #5: GeneralizedTime 1969 rejected ---- */

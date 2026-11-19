@@ -8822,5 +8822,68 @@ void SSFX509UnitTest(void)
             SSF_ASSERT(SSFX509Parse(gen, genLen, &c) == rawCases[i].ok);
         }
     }
+
+    /* ---- AUDIT X509-20: generated countryName is a PrintableString (RFC 5280 App. A) ---- */
+    {
+        static uint8_t gen[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t fakeSig[64];
+        static uint8_t key[65];
+        /* AttributeTypeAndValue { id-at-countryName, PrintableString "US" } */
+        static const uint8_t cPrintable[] = {
+            0x06u, 0x03u, 0x55u, 0x04u, 0x06u, 0x13u, 0x02u, 'U', 'S'
+        };
+        /* AttributeTypeAndValue { id-at-countryName, UTF8String "US" } */
+        static const uint8_t cUTF8[] = {
+            0x06u, 0x03u, 0x55u, 0x04u, 0x06u, 0x0Cu, 0x02u, 'U', 'S'
+        };
+        uint8_t serial[] = { 0x20u };
+        SSFX509GenParams_t p;
+        SSFX509Cert_t c;
+        uint32_t genLen;
+        uint32_t i;
+        uint32_t printableHits;
+        uint32_t utf8Hits;
+
+        memset(fakeSig, 0x66, sizeof(fakeSig));
+        memset(key, 0x04, sizeof(key));
+        _utGenBaseParams(&p, serial, key, sizeof(key));
+        p.issuer.c = "US";
+        p.subject.c = "US";
+        p.subject.o = "Org";
+        SSF_ASSERT(SSFX509EncodeCert(gen, sizeof(gen), &p, fakeSig, sizeof(fakeSig),
+                                     &genLen) == true);
+        printableHits = 0;
+        utf8Hits = 0;
+        for (i = 0; (i + sizeof(cPrintable)) <= genLen; i++)
+        {
+            if (memcmp(&gen[i], cPrintable, sizeof(cPrintable)) == 0) printableHits++;
+            if (memcmp(&gen[i], cUTF8, sizeof(cUTF8)) == 0) utf8Hits++;
+        }
+        SSF_ASSERT(printableHits == 2u);
+        SSF_ASSERT(utf8Hits == 0u);
+        SSF_ASSERT(SSFX509Parse(gen, genLen, &c) == true);
+        SSF_ASSERT((c.subject.cLen == 2u) && (memcmp(c.subject.c, "US", 2u) == 0));
+        SSF_ASSERT((c.issuer.cLen == 2u) && (memcmp(c.issuer.c, "US", 2u) == 0));
+        SSF_ASSERT((c.subject.oLen == 3u) && (memcmp(c.subject.o, "Org", 3u) == 0));
+
+        /* A country character outside the PrintableString set is refused */
+        p.subject.c = "U*";
+        SSF_ASSERT(SSFX509EncodeCert(gen, sizeof(gen), &p, fakeSig, sizeof(fakeSig),
+                                     &genLen) == false);
+        p.subject.c = "U@";
+        SSF_ASSERT(SSFX509EncodeCert(gen, sizeof(gen), &p, fakeSig, sizeof(fakeSig),
+                                     &genLen) == false);
+        p.subject.c = "\xC3\x9C";
+        SSF_ASSERT(SSFX509EncodeCert(gen, sizeof(gen), &p, fakeSig, sizeof(fakeSig),
+                                     &genLen) == false);
+
+        /* Every PrintableString punctuation character is accepted */
+        p.subject.c = "a'";
+        SSF_ASSERT(SSFX509EncodeCert(gen, sizeof(gen), &p, fakeSig, sizeof(fakeSig),
+                                     &genLen) == true);
+        p.subject.c = "9?";
+        SSF_ASSERT(SSFX509EncodeCert(gen, sizeof(gen), &p, fakeSig, sizeof(fakeSig),
+                                     &genLen) == true);
+    }
 }
 #endif /* SSF_CONFIG_X509_UNIT_TEST */

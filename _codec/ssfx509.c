@@ -1535,13 +1535,30 @@ static bool _SSFX509EncBytesContent(uint8_t *buf, uint32_t bufSize, const void *
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Content: AttributeTypeAndValue { OID, UTF8String }.                                           */
+/* Returns true if ch is in the ASN.1 PrintableString character set, else false.                 */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFX509IsPrintableChar(char ch)
+{
+    /* Is it a letter or a digit? */
+    if (((ch >= 'A') && (ch <= 'Z')) || ((ch >= 'a') && (ch <= 'z')) ||
+        ((ch >= '0') && (ch <= '9')))
+    {
+        /* Yes */
+        return true;
+    }
+    /* No, is it a PrintableString punctuation character? */
+    return ((ch != '\0') && (strchr(" '()+,-./:=?", ch) != NULL));
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Content: AttributeTypeAndValue { OID, PrintableString for countryName else UTF8String }.      */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFX509EncDNAttrSeqContent(uint8_t *buf, uint32_t bufSize, const void *arg,
                                  uint32_t *lenOut)
 {
     const _EncDNAttr_t *a = (const _EncDNAttr_t *)arg;
     uint32_t pos = 0;
+    uint16_t strTag;
 
     SSF_REQUIRE(a != NULL);
     SSF_REQUIRE(lenOut != NULL);
@@ -1549,8 +1566,19 @@ static bool _SSFX509EncDNAttrSeqContent(uint8_t *buf, uint32_t bufSize, const vo
     if (!_SSFX509Add(&pos, _SSFX509EncOIDRaw(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
                                              a->oid, a->oidLen)))
         return false;
+    /* Is it countryName, which RFC 5280 Appendix A defines as PrintableString (AUDIT X509-20)? */
+    if (_SSFX509OIDMatch(a->oid, a->oidLen, _oidC, sizeof(_oidC)))
+    {
+        /* Yes */
+        strTag = SSF_ASN1_TAG_PRINTABLE_STRING;
+    }
+    else
+    {
+        /* No */
+        strTag = SSF_ASN1_TAG_UTF8_STRING;
+    }
     if (!_SSFX509Add(&pos, _SSFX509EncString(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
-                                             SSF_ASN1_TAG_UTF8_STRING,
+                                             strTag,
                                (const uint8_t *)a->valueStr, a->valueLen))) return false;
     *lenOut = pos;
     return true;
@@ -1605,6 +1633,15 @@ static bool _SSFX509EncDNContent(uint8_t *buf, uint32_t bufSize, const void *arg
         /* Yes, malformed */
         return false;
     }
+
+    /* countryName present with a character outside PrintableString (AUDIT X509-20)? */
+    if ((name->c != NULL) &&
+        ((!_SSFX509IsPrintableChar(name->c[0])) || (!_SSFX509IsPrintableChar(name->c[1]))))
+    {
+        /* Yes, malformed */
+        return false;
+    }
+    /* No */
 
     if ((name->c != NULL) && !_SSFX509Add(&pos, _SSFX509EncDNAttr(_SSFX509At(buf, pos),
                                                                   _SSFX509Rem(buf, bufSize, pos),

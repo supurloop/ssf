@@ -36,7 +36,7 @@ SUMMARY
   Critical   0
   High       0
   Medium     1       ASN1-14 (FIXED)
-  Low        5       FIXED: X509-17, X509-18, X509-19   OPEN: X509-20, MATCH-4
+  Low        5       FIXED: X509-17, X509-18, X509-19, X509-20   OPEN: MATCH-4
 
   Carried over from AUDIT.txt, re-checked (not re-counted): X509-16 (SANs past
   SSF_X509_CONFIG_MAX_SAN_ENTRIES escaped dNSName / iPAddress Name Constraints), FIXED
@@ -182,7 +182,7 @@ X509-19  Low  FIXED (2026-11-19)  [code-read; fix verified red/green]
   Options:   (1) Add the missing IsEmpty / field checks, rejecting as AUDIT X509-12 did for the
              other structures (recommended). (2) Document the leniency.
 
-X509-20  Low  OPEN  [code-read]
+X509-20  Low  FIXED (2026-11-19)  [code-read; fix verified red/green]
   Location:  ssfx509.c:1468-1485 (_SSFX509EncDNAttrSeqContent), :1520-1560 (_SSFX509EncDNContent)
   Problem:   The certificate generator encodes every Name attribute, countryName included, as
              UTF8String. RFC 5280 Appendix A defines X520countryName as PrintableString
@@ -289,3 +289,12 @@ CHANGE LOG
               GREEN: ssfx509, ssfcms, ssfbase64url, ssfmatch; existing v1, RSA and real-world
               certificate vectors unchanged. Docs: ssfx509.md parse-strictness note. Linux direct
               gcc build.
+  2026-11-19  X509-20 FIXED via option 1 (Jim: no compatibility note, the generator has no
+              deployed users). _SSFX509EncDNAttrSeqContent emits countryName as PrintableString;
+              other attributes stay UTF8String. _SSFX509EncDNContent refuses a country whose
+              characters are outside the PrintableString set (new _SSFX509IsPrintableChar).
+              Tests: ssfx509_ut.c "AUDIT X509-20": issuer and subject C=US are both encoded with
+              tag 0x13 and none with 0x0C, and parse back; "U*", "U@" and a UTF-8 two-byte
+              character are refused; "a'" and "9?" are accepted.
+              RED: ssfx509_ut.c:8862. GREEN: ssfx509, ssfcms, ssfbase64url, ssfmatch. No docs
+              changed, per Jim. Linux direct gcc build.

@@ -488,6 +488,14 @@ static bool _SSFX509ParseExtensions(const SSFASN1Cursor_t *extsCursor, SSFX509Ce
                         cert->pathLenConstraint = (pl > 127u) ? (int8_t)127 : (int8_t)pl;
                     }
                 }
+
+                /* Is anything left after pathLen, or after the SEQUENCE (AUDIT X509-8)? */
+                if ((!SSFASN1DecIsEmpty(&bcInner)) || (!SSFASN1DecIsEmpty(&bcCursor)))
+                {
+                    /* Yes, not the BasicConstraints DER structure */
+                    return false;
+                }
+                /* No */
             }
         }
         else if (_SSFX509OIDMatch(oidRaw, oidRawLen, _oidKeyUsage, sizeof(_oidKeyUsage)))

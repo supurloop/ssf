@@ -5419,6 +5419,69 @@ void SSFX509UnitTest(void)
             SSF_ASSERT(SSFX509Parse(caOut, n, &parsed) == false);
         }
 
+        /* AUDIT X509-8: basicConstraints with an undecodable pathLen or trailing data fails */
+        {
+            static const uint8_t bcOid8[] = { 0x55u, 0x1Du, 0x13u };
+            /* { cA TRUE, OCTET STRING 00 } and { cA TRUE, 9-byte INTEGER } (audit cases) */
+            static const uint8_t bcOctetPl[] = {
+                0x30u, 0x06u, 0x01u, 0x01u, 0xFFu, 0x04u, 0x01u, 0x00u
+            };
+            static const uint8_t bcBigPl[] = {
+                0x30u, 0x0Eu, 0x01u, 0x01u, 0xFFu, 0x02u, 0x09u,
+                0x01u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u
+            };
+            /* { cA TRUE, pathLen 0, NULL } and { cA TRUE, pathLen 0 } followed by 05 00 */
+            static const uint8_t bcInnerTrail[] = {
+                0x30u, 0x08u, 0x01u, 0x01u, 0xFFu, 0x02u, 0x01u, 0x00u, 0x05u, 0x00u
+            };
+            static const uint8_t bcOuterTrail[] = {
+                0x30u, 0x06u, 0x01u, 0x01u, 0xFFu, 0x02u, 0x01u, 0x00u, 0x05u, 0x00u
+            };
+            /* Controls: { cA TRUE, pathLen 0 }, { cA TRUE }, {} */
+            static const uint8_t bcPl0[] = {
+                0x30u, 0x06u, 0x01u, 0x01u, 0xFFu, 0x02u, 0x01u, 0x00u
+            };
+            static const uint8_t bcCAOnly[] = { 0x30u, 0x03u, 0x01u, 0x01u, 0xFFu };
+            static const uint8_t bcEmpty[] = { 0x30u, 0x00u };
+            static const struct { const uint8_t *v; uint32_t len; } bad[] = {
+                { bcOctetPl, sizeof(bcOctetPl) }, { bcBigPl, sizeof(bcBigPl) },
+                { bcInnerTrail, sizeof(bcInnerTrail) }, { bcOuterTrail, sizeof(bcOuterTrail) }
+            };
+            uint32_t k;
+
+            _utGenBaseParams(&p, serial, caPub, (uint32_t)caPubLen);
+            p.addRawExt = true;
+            p.rawExtOid = bcOid8;
+            p.rawExtOidLen = sizeof(bcOid8);
+            p.rawExtCritical = true;
+            for (k = 0; k < (uint32_t)(sizeof(bad) / sizeof(bad[0])); k++)
+            {
+                p.rawExtValue = bad[k].v;
+                p.rawExtValueLen = bad[k].len;
+                SSF_ASSERT(SSFX509EncodeCert(caOut, sizeof(caOut), &p, fakeSig, sizeof(fakeSig),
+                                             &n) == true);
+                SSF_ASSERT(SSFX509Parse(caOut, n, &parsed) == false);
+            }
+            p.rawExtValue = bcPl0;
+            p.rawExtValueLen = sizeof(bcPl0);
+            SSF_ASSERT(SSFX509EncodeCert(caOut, sizeof(caOut), &p, fakeSig, sizeof(fakeSig),
+                                         &n) == true);
+            SSF_ASSERT(SSFX509Parse(caOut, n, &parsed) == true);
+            SSF_ASSERT((parsed.isCA == true) && (parsed.pathLenConstraint == 0));
+            p.rawExtValue = bcCAOnly;
+            p.rawExtValueLen = sizeof(bcCAOnly);
+            SSF_ASSERT(SSFX509EncodeCert(caOut, sizeof(caOut), &p, fakeSig, sizeof(fakeSig),
+                                         &n) == true);
+            SSF_ASSERT(SSFX509Parse(caOut, n, &parsed) == true);
+            SSF_ASSERT((parsed.isCA == true) && (parsed.pathLenConstraint == -1));
+            p.rawExtValue = bcEmpty;
+            p.rawExtValueLen = sizeof(bcEmpty);
+            SSF_ASSERT(SSFX509EncodeCert(caOut, sizeof(caOut), &p, fakeSig, sizeof(fakeSig),
+                                         &n) == true);
+            SSF_ASSERT(SSFX509Parse(caOut, n, &parsed) == true);
+            SSF_ASSERT((parsed.isCA == false) && (parsed.pathLenConstraint == -1));
+        }
+
         /* AUDIT X509-6: a present field that does not decode fails the parse, never defaults */
         {
             static const uint8_t unkOid[] = { 0x2Au, 0x03u, 0x04u };

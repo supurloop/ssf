@@ -621,7 +621,7 @@ X509-7  Medium  FIXED (2026-11-18)  [demonstrated]
              VerifySignature fail on false (recommended)
              (2) Keep the leniency and correct the .md and the comment.
 
-X509-8  Medium  OPEN  [demonstrated]  (related ASN1-1)
+X509-8  Medium  FIXED (2026-11-18)  [demonstrated]  (related ASN1-1)
   Location:  ssfx509.c:351-377 (basicConstraints); ssfx509.md:109-113
   Problem:   pathLenConstraint fails open. If the element after cA is present but
              SSFASN1DecGetIntU64 rejects it (a wrong tag, or an INTEGER longer than 8 octets),
@@ -1470,3 +1470,16 @@ CHANGE LOG
               overflow read in SSFStrStr just past the 3-byte array. GREEN: ssfstr, ssfx509,
               ssfcms, ssfbase64url, ssfmatch, plain and under ASan + UBSan (STR unit test
               enabled for the run; flag restored).
+  2026-11-18  X509-8 FIXED. The fail-open part (a present pathLenConstraint that does not
+              decode, e.g. a wrong tag or an INTEGER over 8 octets, left the limit at -1) was
+              already closed by the ASN1-1 change (ac3e834), which fails the parse whenever
+              SSFASN1DecGetIntU64 rejects a present pathLen. This change adds the remaining
+              strictness via option 1: basicConstraints fails the parse when anything follows
+              pathLen inside the SEQUENCE or follows the SEQUENCE inside the extension value. A
+              body that is not a SEQUENCE keeps its documented fail-closed default (present, not
+              a CA). ssfx509.md updated. Test block "AUDIT X509-8" in ssfx509_ut.c: { cA TRUE,
+              OCTET STRING 00 } and { cA TRUE, 9-byte INTEGER } (the audit cases, regression
+              guards), { cA TRUE, pathLen 0, NULL } and { cA TRUE, pathLen 0 } + 05 00 all fail
+              to parse; { cA TRUE, pathLen 0 } -> isCA, pathLen 0; { cA TRUE } -> isCA, pathLen
+              -1; {} -> not a CA. RED: ssfx509_ut.c:5461 (trailing data parsed). GREEN: ssfx509,
+              ssfcms, ssfbase64url, ssfmatch (default set).

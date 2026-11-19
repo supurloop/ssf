@@ -69,7 +69,8 @@ other big-integer libraries.
   | Status | Functions |
   |---|---|
   | **Constant-time** (safe on secrets) | [`SSFBNCmp`](#ssfbncmp), [`SSFBNModExp`/`SSFBNModExpMont`](#modexp), [`SSFBNMontMul`](#montmul), [`SSFBNMontSquare`](#montsquare), [`SSFBNMontConvertIn`/`Out`](#montconv), [`SSFBNCondSwap`](#condswap), [`SSFBNCondCopy`](#condswap), [`SSFBNAdd`](#ssfbnadd), [`SSFBNSub`](#ssfbnsub), [`SSFBNModAdd`](#modaddsub), [`SSFBNModSub`](#modaddsub), [`SSFBNModMulCT`](#ssfbnmodmulct), [`SSFBNMul`](#ssfbnmul), [`SSFBNSquare`](#ssfbnsquare), [`SSFBNIsEven`/`SSFBNIsOdd`](#predicates), [`SSFBNIsZero`/`IsOne`](#predicates) (the returned bool is itself one bit; branching on it reveals that bit) |
-  | **Variable-time** (do not use on secrets) | [`SSFBNMod`](#ssfbnmod), [`SSFBNDivMod`](#ssfbndivmod), [`SSFBNModMul`](#ssfbnmodmul), [`SSFBNModSquare`](#ssfbnmodsquare), [`SSFBNGcd`](#ssfbngcd), [`SSFBNModInvExt`](#modinv), [`SSFBNModMulNIST`](#modmulnist) (constant-time only for the P-256 / P-384 primes), [`SSFBNModExpPub`/`SSFBNModExpMontPub`](#modexppub), [`SSFBNBitLen`](#bitlen), [`SSFBNTrailingZeros`](#trailingzeros), [`SSFBNShiftLeft1`/`Right1`](#shift), [`SSFBNShiftLeft`/`Right`](#shift-multi), [`SSFBNIsProbablePrime`](#ssfbnisprobableprime), [`SSFBNGenPrime`](#ssfbngenprime) |
+  | **Constant-time when `m` is odd and at most [`SSF_BN_MAX_MOD_LIMBS`](#ssf-bn-max-mod-limbs) limbs** (variable-time otherwise; parity and length are public) | [`SSFBNMod`](#ssfbnmod), [`SSFBNModMul`](#ssfbnmodmul), [`SSFBNModSquare`](#ssfbnmodsquare) |
+  | **Variable-time** (do not use on secrets) | [`SSFBNDivMod`](#ssfbndivmod), [`SSFBNGcd`](#ssfbngcd), [`SSFBNModInvExt`](#modinv), [`SSFBNModMulNIST`](#modmulnist) (constant-time only for the P-256 / P-384 primes), [`SSFBNModExpPub`/`SSFBNModExpMontPub`](#modexppub), [`SSFBNBitLen`](#bitlen), [`SSFBNTrailingZeros`](#trailingzeros), [`SSFBNShiftLeft1`/`Right1`](#shift), [`SSFBNShiftLeft`/`Right`](#shift-multi), [`SSFBNIsProbablePrime`](#ssfbnisprobableprime), [`SSFBNGenPrime`](#ssfbngenprime) |
   | **Constant-time only when `m` is prime** | [`SSFBNModInvSmall`](#modinvsmall) — the same Fermat inverse at curve width (at most `SSF_BN_SMALL_MAX_LIMBS` limbs), with the same `a · r ≡ 1` check. [`SSFBNModInv`](#modinv) — uses Fermat's little theorem (`a^(m-2) mod m`), which is constant-time but yields the correct answer only for prime `m`. After computing it, the function verifies `a · r ≡ 1 (mod m)` with the constant-time [`SSFBNModMulCT`](#ssfbnmodmulct) and returns `false` if it does not hold, so non-prime moduli are rejected (even when an inverse exists). |
 - **Secret scalars go through `SSFBNModInv` / `SSFBNModInvSmall` (with prime `m`) or the ModExp
   path, never `SSFBNModInvExt` or `SSFBNModExpPub`.** ECDSA signing, for instance, computes
@@ -89,7 +90,8 @@ other big-integer libraries.
   timing is independent of operand bit pattern on secret-data paths.
 - **`SSFBNDivMod` is the full division.** `SSFBNMod` is the right primitive when only the
   remainder is wanted; `SSFBNDivMod` produces both quotient and remainder via shift-and-
-  subtract long division. Both are variable-time.
+  subtract long division and is variable-time. `SSFBNMod` is constant-time for an odd
+  modulus of at most `SSF_BN_MAX_MOD_LIMBS` limbs and variable-time otherwise.
 - **`SSFBNModExp` uses a constant-time fixed-window (k=4) algorithm**, not a Montgomery
   ladder. It precomputes a 16-entry table of Montgomery powers, then for each 4-bit window
   of the exponent: squares the running result four times, decodes the window, scans the
@@ -586,9 +588,20 @@ strictly less than `m`.
 void SSFBNMod(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m);
 ```
 `r = a mod m`. `a->len` may be as large as `2 × m->len` (supports reducing the output of
-`SSFBNMul` / `SSFBNSquare`). `r->len` is set to `m->len`. **Variable-time** — shift-and-
-subtract long division branches on the bit pattern of `a`; do not call on secret `a` or
-`m`.
+`SSFBNMul` / `SSFBNSquare`). `r->len` is set to `m->len`. `r` may alias `a`. The algorithm
+depends only on the parity and length of `m`, which are public:
+
+- **Odd `m` of at most [`SSF_BN_MAX_MOD_LIMBS`](#ssf-bn-max-mod-limbs) limbs** (RSA's `n`,
+  `p`, `q`; prime candidates; curve primes and orders): **constant-time** Montgomery reduction
+  (OPTIMIZE BN-O7). `a` is split as `hi × R + lo` with `R = 2^(32 × m->len)`; a context built
+  for the call gives `a × R = MontMul(hi × R, R²) + lo × R (mod m)`, and one conversion out
+  returns `a mod m`. Every product is exact because each chunk is `< R` and `R² mod m < m`.
+  The work depends only on `a->len` and `m->len`; the intermediates and the context are
+  wiped. About 5.6× faster than shift-and-subtract at 2048 mod 1024 bits on x86-64 (7.3× on
+  32-bit ARM), which also takes RSA's CRT split `cB mod p`, `cB mod q` off a
+  secret-dependent branch.
+- **Even `m`, or wider `m`**: shift-and-subtract long division, **variable-time** (it
+  branches on each step's borrow); do not call on secret `a` or `m` in this case.
 
 <a id="ssfbndivmod"></a>
 ```c
@@ -610,8 +623,9 @@ void SSFBNModSub(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *
 void SSFBNModMul(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *m);
 ```
 `r = (a × b) mod m` using `SSFBNMul` (which itself dispatches to Karatsuba when applicable)
-followed by `SSFBNMod`. General-purpose; works for any modulus. **Variable-time** —
-inherits the bit-pattern-dependent timing of `SSFBNMod`, so do not call on secret operands.
+followed by `SSFBNMod`. General-purpose; works for any modulus. Inherits `SSFBNMod`'s
+timing: constant-time for an odd `m` of at most `SSF_BN_MAX_MOD_LIMBS` limbs, variable-time
+otherwise.
 For modular multiplications on secret data — and for many multiplications against the same
 modulus (the RSA / DH case) — go through the Montgomery path
 ([`SSFBNMontMul`](#montmul) / [`SSFBNMontSquare`](#montsquare)).
@@ -637,9 +651,9 @@ parity of `m`, which is public:
 ```c
 void SSFBNModSquare(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m);
 ```
-`r = a² mod m` using `SSFBNSquare` followed by `SSFBNMod`. `r` may alias `a`. Inherits the
-**variable-time** behaviour of `SSFBNMod` — public input only. Used by
-`SSFBNIsProbablePrime` for the witness inner squaring loop.
+`r = a² mod m` using `SSFBNSquare` followed by `SSFBNMod`. `r` may alias `a`. Inherits
+`SSFBNMod`'s timing: constant-time for an odd `m` of at most `SSF_BN_MAX_MOD_LIMBS` limbs,
+variable-time otherwise. Used by `SSFBNIsProbablePrime` for the witness inner squaring loop.
 
 <a id="ex-modmul"></a>
 

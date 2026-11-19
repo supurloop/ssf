@@ -2637,11 +2637,13 @@ void SSFBNUnitTest(void)
         SSF_ASSERT(_scrubCalls >= 8u);
 
         /* Composite 221 = 13 * 17 leaves through the Miller-Rabin reject path: its 7 locals */
-        /* plus SSFBNMontInit's R^2 copy (OPTIMIZE BN-O1).                                  */
+        /* plus SSFBNMontInit's R^2 copy (OPTIMIZE BN-O1), and 5 per odd-modulus SSFBNMod   */
+        /* (its acc, c, context mod and R^2, and its own MontInit's R^2: OPTIMIZE BN-O7).   */
         calls = _scrubCalls;
+        _SSFBNModCallCount = 0u;
         SSFBNSetUint32(&c, 221u, 8u);
         SSF_ASSERT(SSFBNIsProbablePrime(&c, 5u, &prng) == false);
-        SSF_ASSERT(_scrubCalls == (calls + 8u));
+        SSF_ASSERT(_scrubCalls == (calls + 8u + (5u * _SSFBNModCallCount)));
 
         _SSFBNScrubTestHook = NULL;
         SSF_ASSERT(_scrubDirty == 0u);
@@ -4092,6 +4094,112 @@ void SSFBNUnitTest(void)
         SSF_ASSERT(_scrubCalls == 4u);
         _SSFBNScrubTestHook = NULL;
         SSF_ASSERT(_scrubDirty == 0u);
+    }
+
+    /* ---- OPTIMIZE BN-O7: SSFBNMod reduces an odd modulus by constant-time Montgomery ---- */
+    /* RSA signing splits the blinded value with cB mod p and cB mod q, and Miller-Rabin       */
+    /* squares mod the secret candidate; shift-and-subtract branched on every step's borrow.  */
+    /* Oracle: x = q * m + rem with rem < m must reduce to rem, at every width and in place.  */
+    {
+        static const uint16_t widths[] = { 1u, 2u, 3u, 8u, 12u, 32u, SSF_BN_MAX_MOD_LIMBS };
+        SSFBN_DEFINE(om, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(oq, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(orem, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(oprod, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(ox, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(or1, SSF_BN_MAX_LIMBS);
+        uint16_t wi;
+        uint16_t k;
+        uint16_t qLen;
+        uint32_t seed;
+        uint32_t iters0;
+
+        _SSFBNModShiftCalls = 0u;
+        for (wi = 0u; wi < (uint16_t)(sizeof(widths) / sizeof(widths[0])); wi++)
+        {
+            uint16_t n = widths[wi];
+
+            for (seed = 1u; seed <= 4u; seed++)
+            {
+                /* Odd m; seeds 1-2 full width, 3-4 a small top limb */
+                om.len = n;
+                for (k = 0u; k < n; k++) om.limbs[k] = (0x9E3779B9u * (seed + k)) ^ (k << 7);
+                om.limbs[n - 1u] = (seed <= 2u) ? (om.limbs[n - 1u] | 0x80000000u) : 1u;
+                om.limbs[0] |= 1u;
+
+                for (qLen = 0u; qLen <= n; qLen = (uint16_t)((qLen == 0u) ? 1u : (2u * qLen)))
+                {
+                    /* rem < m, then x = q * m + rem (qLen 0: x is rem itself) */
+                    _SSFBNUTFillBelow(&orem, &om, seed * 31u + qLen);
+                    if (qLen == 0u)
+                    {
+                        SSFBNCopy(&ox, &orem);
+                    }
+                    else
+                    {
+                        oq.len = qLen;
+                        for (k = 0u; k < qLen; k++) oq.limbs[k] = 0xC2B2AE35u * (seed + k + 1u);
+                        SSFBNMul(&oprod, &oq, &om);
+                        SSFBNSetZero(&ox, oprod.len);
+                        memcpy(ox.limbs, orem.limbs, (size_t)n * sizeof(SSFBNLimb_t));
+                        SSF_ASSERT(SSFBNAdd(&ox, &oprod, &ox) == 0u);
+                    }
+                    SSFBNMod(&or1, &ox, &om);
+                    SSF_ASSERT((or1.len == n) && (SSFBNCmp(&or1, &orem) == 0));
+
+                    /* In place, as _SSFBNModInvExtEuclid calls it */
+                    SSFBNMod(&ox, &ox, &om);
+                    SSF_ASSERT((ox.len == n) && (SSFBNCmp(&ox, &orem) == 0));
+                }
+
+                /* A shorter than m: a single small limb is its own remainder */
+                SSFBNSetUint32(&ox, 0x1234567u, 1u);
+                SSFBNMod(&or1, &ox, &om);
+                SSFBNSetUint32(&orem, (n == 1u && seed > 2u) ? (0x1234567u % om.limbs[0]) :
+                                      0x1234567u, n);
+                SSF_ASSERT(SSFBNCmp(&or1, &orem) == 0);
+            }
+        }
+
+        /* m = 1: everything reduces to 0 */
+        SSFBNSetOne(&om, 1u);
+        SSFBNSetUint32(&ox, 0xFFFFFFFFu, 2u);
+        ox.limbs[1] = 0xFFFFFFFFu;
+        SSFBNMod(&or1, &ox, &om);
+        SSF_ASSERT((or1.len == 1u) && (or1.limbs[0] == 0u));
+
+        /* m with zero top limbs: value 2^32 + 5 stored in 4 limbs */
+        SSFBNSetZero(&om, 4u);
+        om.limbs[0] = 5u;
+        om.limbs[1] = 1u;
+        SSFBNSetZero(&ox, 8u);
+        for (k = 0u; k < 8u; k++) ox.limbs[k] = 0xFFFFFFFFu;
+        SSFBNMod(&or1, &ox, &om);
+        /* (2^256 - 1) mod (2^32 + 5) is 390624 (Python) */
+        SSF_ASSERT((or1.len == 4u) && (or1.limbs[0] == 390624u) && (or1.limbs[1] == 0u));
+        SSF_ASSERT((or1.limbs[2] == 0u) && (or1.limbs[3] == 0u));
+
+        /* None of the odd moduli took the variable-time shift-and-subtract path */
+        SSF_ASSERT(_SSFBNModShiftCalls == 0u);
+
+        /* The work depends on the lengths only: all-zero and all-ones a, same MontMul count */
+        SSFBNCopy(&om, &SSF_BN_NIST_P256);
+        SSFBNSetZero(&ox, 16u);
+        _SSFBNMontMulIters = 0u;
+        SSFBNMod(&or1, &ox, &om);
+        iters0 = _SSFBNMontMulIters;
+        SSF_ASSERT((iters0 > 0u) && SSFBNIsZero(&or1));
+        for (k = 0u; k < 16u; k++) ox.limbs[k] = 0xFFFFFFFFu;
+        _SSFBNMontMulIters = 0u;
+        SSFBNMod(&or1, &ox, &om);
+        SSF_ASSERT(_SSFBNMontMulIters == iters0);
+
+        /* An even modulus keeps shift-and-subtract: 999999 mod 1000 */
+        SSFBNSetUint32(&om, 1000u, 1u);
+        SSFBNSetUint32(&ox, 999999u, 1u);
+        SSFBNMod(&or1, &ox, &om);
+        SSF_ASSERT((or1.len == 1u) && (or1.limbs[0] == 999u));
+        SSF_ASSERT(_SSFBNModShiftCalls == 1u);
     }
 
     /* ---- OPTIMIZE RSA-STK: MontMul / MontSquare leave no product in their freed scratch ---- */

@@ -91,9 +91,9 @@ SUMMARY
     Code size         about -17 KB from ED-O1, X509-O1, CMS-O1, FE-O2, SHA2-O2, ASN1-O1..O4
                       (more if the trace switch also drops snprintf)
 
-  Security note raised during the review (not an optimization; see BN-O7): SSFBNMod branches
-  on each subtraction's borrow and ssfrsa uses it on the blinded value with the secret primes
-  p and q.
+  Security note raised during the review (not an optimization; see BN-O7): SSFBNMod branched
+  on each subtraction's borrow and ssfrsa used it on the blinded value with the secret primes
+  p and q. Fixed by BN-O7 (constant-time for odd moduli).
 
   Suggested order: BN-O1..O3 first (prototyped, small, large measured gain, all suites
   pass), then X509-O1 / CMS-O1 (small, large size win), then BN-O6 (largest Cortex-M win),
@@ -478,7 +478,7 @@ BN-O6  Speed + stack  DONE (2026-11-19)  Effort M  [implemented; measured below]
              code on the host and models no Cortex-M timing (no wait states, no memset
              implementation differences), so only a board measurement settles the real figure.
 
-BN-O7  Speed  OPEN  Effort M
+BN-O7  Speed  DONE (2026-11-19)  Effort M
   Where:     SSFBNMod (bit-serial shift-and-subtract; 55 us for 2048 mod 1024, 230 us for
              4096 mod 2048), used for the RSA CRT split cB mod p, cB mod q, in key checks,
              and by SSFBNModMul (ECDSA verify u1, u2).
@@ -1176,3 +1176,40 @@ CHANGE LOG
               Cortex-M4 +42 B (wipe) and +60 B (fix 1 REQUIREs) over Phase 1: ssfbn + ssfrsa
               24602 (committed) -> 24618 B default, 24224 -> 23914 B RSA-2048-only; Cortex-M0+
               27636 -> 27686 B. Stack: wipe inlined, no frame change; every peak as Phase 1.
+  2026-11-19  BN-O7 DONE (Jim: "Yes" to starting it). SSFBNMod is a dispatcher: an odd m of at
+              most SSF_BN_MAX_MOD_LIMBS limbs goes to _SSFBNModMont, constant-time (a = hi * R
+              + lo; acc = MontMul(ConvertIn(hi), R^2) + ConvertIn(lo) mod m; ConvertOut; each
+              chunk < R and R^2 mod m < m keep every product exact, no full-width m needed;
+              work depends on a->len and m->len only; intermediates and context wiped). Even
+              or wider m keeps shift-and-subtract (_SSFBNModShift, counted by the new test
+              counter _SSFBNModShiftCalls). SSFBNModMul / ModSquare inherit it, so the RSA CRT
+              split (cB mod p, cB mod q) and Miller-Rabin's squaring mod the secret candidate
+              no longer branch on secret data. Key checks and keygen's d mod (p - 1) keep the
+              variable-time path (even moduli).
+              RED: ssfbn_ut.c "OPTIMIZE BN-O7" (oracle x = q * m + rem at widths 1..MAX_MOD,
+              a shorter than m, in place, m = 1, m with zero top limbs, equal MontMul counts for
+              all-zero / all-ones a, no shift path for odd m) failed at its shift-count check;
+              its oracles all passed on the old algorithm first. ssfrsa_ut.c signing test (no
+              shift-path SSFBNMod) failed at ssfrsa_ut.c:2087.
+              GREEN: all 8 suites normal, ASan + UBSan, RSA-2048-only, 32-bit ARM. One existing
+              exact scrub count (IsProbablePrime composite path) now adds 5 per odd-modulus
+              SSFBNMod (its four locals plus MontInit's R^2); _scrubDirty still 0.
+              Differential: 40000 random (a, m) cases, widths 1..MAX_MOD, a up to 2 * m, full /
+              short / zero top limbs, all-ones runs: result digest identical to the committed
+              code, ASan + UBSan clean. Mutation: dropping the hi fold, the add, the convert
+              out, an off-by-one hi chunk, or sending even m to Montgomery all fail the suite;
+              a->len >= n for > n is equivalent (empty hi chunk).
+              Speed: SSFBNMod 2048 mod 1024 x86-64 55.2 -> 9.8 us (5.6x), ARM32 420 -> 57 us
+              (7.3x); 4096 mod 2048 221 -> 39 us; 512 mod 256 3.7 -> 1.1 us. RSA-2048 sign
+              x86-64 2758-2795 -> 2653-2676 us (-4%), ARM32 16.3 -> 15.7 ms; GenPrime 1024-bit
+              (fixed seed, identical primes) 56.3 -> 52.9 ms x86-64, 532 -> 504 ms ARM32;
+              verify and ECDSA unchanged (ECDSA does not call SSFBNMod).
+              Code (ssfbn, arm-none-eabi-gcc -Os): Cortex-M4 15968 -> 16365 B (+397; the
+              Montgomery path is 352 B), RSA-2048-only +389 B, Cortex-M0+ 18596 -> 19023 B
+              (+427). Stack: SSFBNMod's odd path peaks 2128 -> 4352 B on its own (default
+              build) but sits on no deepest chain: RSA sign / PSS / keygen / verify and ECDSA
+              sign / verify / ECDH peaks unchanged (ECDSA excluding SSFBNModMulNIST's generic
+              fallback, never taken for the P-256 / P-384 primes; counted unconditionally it
+              would show verify +2.1 KB).
+              Docs: ssfbn.md (timing table, SSFBNMod, ModMul, ModSquare, DivMod note),
+              ssfrsa.md (RSA-9 note: one variable-time step left; key checks).

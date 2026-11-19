@@ -76,6 +76,9 @@ uint32_t _SSFBNFullWidthCalls = 0u;
 
 /* Test-only count of the slow ModMulCT / ModInvExt algorithms (shift-subtract, Euclid: BN-O4/5) */
 uint32_t _SSFBNSlowPathCalls = 0u;
+
+/* Test-only count of SSFBNMod's variable-time shift-and-subtract reductions (OPTIMIZE BN-O7) */
+uint32_t _SSFBNModShiftCalls = 0u;
 #define _SSF_BN_COUNT(c) do { (c)++; } while (0)
 #else
 #define _SSF_BN_SCRUB_HOOK(p, n) do { } while (0)
@@ -1281,9 +1284,9 @@ void SSFBNModSub(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* r = a mod m via shift-and-subtract. a->len may be up to 2 * m->len.                           */
+/* r = a mod m by shift-and-subtract: any nonzero m; branches on each step's borrow.            */
 /* --------------------------------------------------------------------------------------------- */
-void SSFBNMod(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
+static void _SSFBNModShift(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
 {
     SSFBN_DEFINE(rem, SSF_BN_MAX_LIMBS);
     SSFBN_DEFINE(shifted, SSF_BN_MAX_LIMBS);
@@ -1291,21 +1294,8 @@ void SSFBNMod(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
     uint32_t mBits;
     int32_t shift;
 
-#if SSF_CONFIG_BN_UNIT_TEST == 1
-    _SSFBNModCallCount++;
-#endif /* SSF_CONFIG_BN_UNIT_TEST */
-
-    SSF_REQUIRE(r != NULL);
-    SSF_REQUIRE(r->limbs != NULL);
-    SSF_REQUIRE(a != NULL);
-    SSF_REQUIRE(a->limbs != NULL);
-    SSF_REQUIRE(m != NULL);
-    SSF_REQUIRE(m->limbs != NULL);
-    SSF_REQUIRE(SSFBNIsZero(m) == false);
-    SSF_REQUIRE(a->len <= 2u * m->len);
-    SSF_REQUIRE(a->len <= SSF_BN_MAX_LIMBS);
-    SSF_REQUIRE(m->len >= 1u);
-    SSF_REQUIRE(m->len <= r->cap);
+    /* Parameters were validated by SSFBNMod, this helper's only caller (BN-O7) */
+    _SSF_BN_COUNT(_SSFBNModShiftCalls);
 
     /* Copy a into working remainder at the larger length */
     SSFBNSetZero(&rem, (a->len > m->len) ? a->len : m->len);
@@ -1345,6 +1335,95 @@ void SSFBNMod(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
     /* Copy result into r at m's limb count */
     r->len = m->len;
     memcpy(r->limbs, rem.limbs, (size_t)m->len * sizeof(SSFBNLimb_t));
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* r = a mod m for odd m, constant-time: a in modulus-width chunks folded in Montgomery form.   */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFBNModMont(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
+{
+    SSFBNMONT_DEFINE(ctx, SSF_BN_MAX_MOD_LIMBS);
+    SSFBN_DEFINE(acc, SSF_BN_MAX_MOD_LIMBS);
+    SSFBN_DEFINE(c, SSF_BN_MAX_MOD_LIMBS);
+    uint16_t n;
+
+    SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(a != NULL);
+    SSF_REQUIRE(m != NULL);
+    SSF_REQUIRE(m->len <= SSF_BN_MAX_MOD_LIMBS);
+    SSF_REQUIRE(a->len <= (2u * m->len));
+    SSF_REQUIRE((m->limbs[0] & 1u) != 0u);
+
+    n = m->len;
+    SSFBNMontInit(&ctx, m);
+
+    /* Is a wider than m? (lengths are public) */
+    if (a->len > n)
+    {
+        /* Yes, a = hi * R + lo: acc = hi * R^2, c = lo * R, so acc + c = a * R (mod m) */
+        c.len = (uint16_t)(a->len - n);
+        memcpy(c.limbs, &a->limbs[n], (size_t)c.len * sizeof(SSFBNLimb_t));
+        SSFBNMontConvertIn(&acc, &c, &ctx);
+        SSFBNMontMul(&acc, &acc, &ctx.rr, &ctx);
+        c.len = n;
+        memcpy(c.limbs, a->limbs, (size_t)n * sizeof(SSFBNLimb_t));
+        SSFBNMontConvertIn(&c, &c, &ctx);
+        SSFBNModAdd(&acc, &acc, &c, m);
+    }
+    else
+    {
+        /* No, acc = a * R (mod m) directly */
+        c.len = a->len;
+        memcpy(c.limbs, a->limbs, (size_t)a->len * sizeof(SSFBNLimb_t));
+        SSFBNMontConvertIn(&acc, &c, &ctx);
+    }
+
+    /* Each chunk is < R and R^2 mod m < m, so every product is exact; r = acc * R^-1 = a */
+    SSFBNMontConvertOut(r, &acc, &ctx);
+
+    /* Zeroize the intermediates and the context, since m may be a secret prime */
+    SSFBNZeroize(&acc);
+    _SSF_BN_SCRUB_HOOK(acc.limbs, (size_t)acc.cap * sizeof(SSFBNLimb_t));
+    SSFBNZeroize(&c);
+    _SSF_BN_SCRUB_HOOK(c.limbs, (size_t)c.cap * sizeof(SSFBNLimb_t));
+    SSFBNZeroize(&ctx.mod);
+    _SSF_BN_SCRUB_HOOK(ctx.mod.limbs, (size_t)ctx.mod.cap * sizeof(SSFBNLimb_t));
+    SSFBNZeroize(&ctx.rr);
+    _SSF_BN_SCRUB_HOOK(ctx.rr.limbs, (size_t)ctx.rr.cap * sizeof(SSFBNLimb_t));
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* r = a mod m. a->len may be up to 2 * m->len. Constant-time for odd m (OPTIMIZE BN-O7).       */
+/* --------------------------------------------------------------------------------------------- */
+void SSFBNMod(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
+{
+#if SSF_CONFIG_BN_UNIT_TEST == 1
+    _SSFBNModCallCount++;
+#endif /* SSF_CONFIG_BN_UNIT_TEST */
+
+    SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(r->limbs != NULL);
+    SSF_REQUIRE(a != NULL);
+    SSF_REQUIRE(a->limbs != NULL);
+    SSF_REQUIRE(m != NULL);
+    SSF_REQUIRE(m->limbs != NULL);
+    SSF_REQUIRE(SSFBNIsZero(m) == false);
+    SSF_REQUIRE(a->len <= 2u * m->len);
+    SSF_REQUIRE(a->len <= SSF_BN_MAX_LIMBS);
+    SSF_REQUIRE(m->len >= 1u);
+    SSF_REQUIRE(m->len <= r->cap);
+
+    /* Is m odd and no wider than a Montgomery modulus, as RSA's p, q and n are? */
+    if (((m->limbs[0] & 1u) != 0u) && (m->len <= SSF_BN_MAX_MOD_LIMBS))
+    {
+        /* Yes, constant-time Montgomery reduction; m's parity and length are public */
+        _SSFBNModMont(r, a, m);
+    }
+    else
+    {
+        /* No, Montgomery needs an odd modulus: shift-and-subtract */
+        _SSFBNModShift(r, a, m);
+    }
 }
 
 /* --------------------------------------------------------------------------------------------- */

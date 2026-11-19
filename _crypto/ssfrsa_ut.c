@@ -2072,6 +2072,7 @@ void SSFRSAUnitTest(void)
         SSF_ASSERT(SSFRSAKeyGen(2048u, privKeyDer, sizeof(privKeyDer), &privKeyDerLen,
                                 pubKeyDer, sizeof(pubKeyDer), &pubKeyDerLen) == true);
         _SSFBNSlowPathCalls = 0u;
+        _SSFBNModShiftCalls = 0u;
         SSF_ASSERT(SSFRSASignPKCS1(privKeyDer, privKeyDerLen, SSF_RSA_HASH_SHA256, hash,
                                    sizeof(hash), sig, sizeof(sig), &sigLen) == true);
         SSF_ASSERT(SSFRSAVerifyPKCS1(pubKeyDer, pubKeyDerLen, SSF_RSA_HASH_SHA256, hash,
@@ -2081,6 +2082,9 @@ void SSFRSAUnitTest(void)
                                  sizeof(hash), sig, sizeof(sig), &sigLen) == true);
 #endif /* SSF_RSA_CONFIG_ENABLE_PSS */
         SSF_ASSERT(_SSFBNSlowPathCalls == 0u);
+
+        /* The CRT split cB mod p, cB mod q is constant-time Montgomery, not shift-subtract */
+        SSF_ASSERT(_SSFBNModShiftCalls == 0u);
     }
 #endif /* SSF_CONFIG_BN_UNIT_TEST && SSF_RSA_CONFIG_ENABLE_2048 */
 #endif /* SSF_RSA_ANY_ENABLED */

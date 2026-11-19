@@ -328,6 +328,9 @@ extern uint32_t _SSFBNFullWidthCalls;
 
 /* Test-only count of the slow ModMulCT / ModInvExt algorithms (shift-subtract, Euclid: BN-O4/5) */
 extern uint32_t _SSFBNSlowPathCalls;
+
+/* Test-only count of SSFBNMod's variable-time shift-and-subtract reductions (OPTIMIZE BN-O7) */
+extern uint32_t _SSFBNModShiftCalls;
 #endif /* SSF_CONFIG_BN_UNIT_TEST */
 
 #ifdef __cplusplus

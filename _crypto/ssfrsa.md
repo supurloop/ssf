@@ -116,17 +116,18 @@ comparable security.
   single faulty signature if an attacker can glitch one of the two `modexp` branches during
   sign; this is defended by the built-in verify-after-sign check (see below). The blinding
   and the fresh `r` are the reason signing now requires platform entropy on every call.
-- **Two steps of the private-key operation are variable-time, by design.** `r⁻¹ mod n` is
+- **One step of the private-key operation is variable-time, by design.** `r⁻¹ mod n` is
   computed with [`SSFBNModInvExt()`](ssfbn.md#modinv) (the binary extended GCD for odd `n`),
-  whose run time depends on `r`, and the blinded input is reduced by the secret primes with
-  [`SSFBNMod()`](ssfbn.md#ssfbnmod) (`cB mod p`, `cB mod q`), whose run time depends on the
-  quotient bits. Neither exposes the message or the CRT exponents directly: `r` is fresh
-  random on every call and never reused, `cB` is randomized by `r^e`, and the exponentiations
-  that use `dp` / `dq` are constant-time and exponent-blinded. What a precise timing observer
-  could learn is information about a single call's blinding factor, which weakens base
-  blinding for that call only. This was reviewed and accepted (AUDIT2 RSA-9). Deployments
-  where an attacker can take very fine-grained timing or power measurements of individual
-  signatures should treat RSA signing here as blinded but not fully constant-time.
+  whose run time depends on `r`. It does not expose the message or the CRT exponents: `r` is
+  fresh random on every call and never reused, and the exponentiations that use `dp` / `dq`
+  are constant-time and exponent-blinded. What a precise timing observer could learn is
+  information about a single call's blinding factor, which weakens base blinding for that
+  call only. This was reviewed and accepted (AUDIT2 RSA-9). The reduction of the blinded
+  input by the secret primes (`cB mod p`, `cB mod q`) was the second such step; since
+  OPTIMIZE BN-O7 [`SSFBNMod()`](ssfbn.md#ssfbnmod) reduces an odd modulus by constant-time
+  Montgomery reduction. Deployments where an attacker can take very fine-grained timing or
+  power measurements of individual signatures should treat RSA signing here as blinded but
+  not fully constant-time.
 - **Key storage format is PKCS#1 DER.** `RSAPublicKey` = `SEQUENCE { INTEGER n, INTEGER
   e }`; `RSAPrivateKey` = `SEQUENCE { version, n, e, d, p, q, dp, dq, qInv }` (version 0,
   two-prime; `otherPrimeInfos` is not supported), all unsigned big-endian. Decoding is
@@ -353,8 +354,9 @@ modulus in the supported size range). Counterpart of
 malformed key material at ingestion time before passing it to the sign entry points.
 
 Every decoded private field and intermediate is zeroized before the function returns, on
-both the accept and the reject paths. The consistency checks are **variable-time** (they use
-`SSFBNMod` / `SSFBNModMul`, whose run time depends on the key values): call it once when a key
+both the accept and the reject paths. The consistency checks are **variable-time** (they
+reduce by the even `p − 1` and `q − 1`, where `SSFBNMod` / `SSFBNModMul` run shift-and-subtract,
+whose run time depends on the key values): call it once when a key
 is loaded or imported, not in a loop whose timing an attacker can observe. Before 2026-11-19
 only `dp = d mod (p − 1)` and `dq = d mod (q − 1)` were checked, so a key with consistent but
 wrong `d`, `dp`, `dq` was accepted (signing it then failed verify-after-sign).

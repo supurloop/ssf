@@ -6355,6 +6355,54 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(SSFX509IsRSA(&rsaCert) == true);
         SSF_ASSERT(SSFX509VerifyCertSignature(&rsaCert, &rsaCert) == true);
 
+        /* AUDIT X509-2: an issuer whose RSA key BIT STRING is empty fails, never traps */
+        {
+            static const uint8_t rsaPkcs1Sha256Oid[] = {
+                0x2Au, 0x86u, 0x48u, 0x86u, 0xF7u, 0x0Du, 0x01u, 0x01u, 0x0Bu
+            };
+            static uint8_t emptyKeyDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
+            uint32_t emptyKeyDerLen;
+            SSFX509Cert_t emptyKeyCert;
+            const uint8_t *chainDer[2];
+            uint32_t chainDerLen[2];
+            const uint8_t *trustDer[1];
+            uint32_t trustDerLen[1];
+
+            _utGenBaseParams(&p, serial, rsaPub, 0u);
+            p.ecCurveOidRaw = NULL;
+            p.ecCurveOidRawLen = 0u;
+            p.pubKeyAlgOidRaw = rsaPubKeyOid;
+            p.pubKeyAlgOidRawLen = sizeof(rsaPubKeyOid);
+            p.sigAlgOidRaw = rsaPssOid;
+            p.sigAlgOidRawLen = sizeof(rsaPssOid);
+            p.sigAlgParams = pssSalt32;
+            p.sigAlgParamsLen = sizeof(pssSalt32);
+            p.addBasicConstraints = true;
+            p.isCA = true;
+            SSF_ASSERT(SSFX509EncodeCert(emptyKeyDer, sizeof(emptyKeyDer), &p, sig,
+                                         (uint32_t)sigLen, &emptyKeyDerLen) == true);
+            SSF_ASSERT(SSFX509Parse(emptyKeyDer, emptyKeyDerLen, &emptyKeyCert) == true);
+            SSF_ASSERT(emptyKeyCert.pubKeyLen == 0u);
+
+            /* RSA-PSS and RSA PKCS#1 v1.5 with the empty key */
+            SSF_ASSERT(SSFX509VerifyCertSignature(&rsaCert, &emptyKeyCert) == false);
+            SSF_ASSERT(SSFX509VerifySignature(&emptyKeyCert, rsaPkcs1Sha256Oid,
+                                              sizeof(rsaPkcs1Sha256Oid), NULL, 0u, NULL, 0u,
+                                              rsaCert.tbsRaw, rsaCert.tbsRawLen,
+                                              rsaCert.signature, rsaCert.signatureLen) == false);
+
+            /* A hostile chain: real RSA-PSS leaf, forged issuer with the empty key */
+            chainDer[0] = certDer;
+            chainDerLen[0] = certLen;
+            chainDer[1] = emptyKeyDer;
+            chainDerLen[1] = emptyKeyDerLen;
+            trustDer[0] = _utTestCertDER;
+            trustDerLen[0] = sizeof(_utTestCertDER);
+            SSF_ASSERT(SSFX509VerifyChainPurpose(chainDer, chainDerLen, 2u, trustDer,
+                                                 trustDerLen, 1u, SSF_X509_PURPOSE_CODE_SIGNING,
+                                                 NULL, 1800000000ull) == false);
+        }
+
         /* An ECDSA-signed cert cannot be verified with an RSA issuer: no curve to use */
         SSF_ASSERT(SSFX509Parse(_utTestCertDER, sizeof(_utTestCertDER), &ecCert) == true);
         SSF_ASSERT(SSFX509VerifyCertSignature(&ecCert, &ecCert) == true);

@@ -443,7 +443,7 @@ X509-1  High  FIXED (2026-11-18)  [demonstrated] [verified 2026-11-18]
              (2) Also bound the loop to the two optional fields: at most one [1], then at most
              one [2], in order, as RFC 5280 4.1 defines.
 
-X509-2  High  OPEN  [demonstrated] [verified 2026-11-18]
+X509-2  High  FIXED (2026-11-18)  [demonstrated] [verified 2026-11-18]
   Location:  ssfx509.c:2349-2350, 2384-2385 (SSFX509VerifySignature); ssfrsa.c:1127, 1351
   Problem:   SSFX509VerifySignature passes keyCert->pubKey / pubKeyLen to SSFRSAVerifyPKCS1 /
              SSFRSAVerifyPSS without checking pubKeyLen. Both functions
@@ -1199,3 +1199,15 @@ CHANGE LOG
               SSFX509Parse return false. RED: the ssfx509 suite hung and the run was killed by
               a 120 s timeout (exit 124; ssfbase64url, ssfmatch, ssfcms passed). GREEN: ssfx509,
               ssfcms, ssfbase64url, ssfmatch pass (default unit test set).
+  2026-11-18  X509-2 FIXED via option 1. SSFX509VerifySignature returns false (with a trace
+              message) when keyCert's public key is NULL or empty, before dispatching to any
+              scheme, so an untrusted issuer's empty RSA key no longer reaches SSFRSAVerifyPKCS1
+              / SSFRSAVerifyPSS's SSF_REQUIRE(pubKeyDerLen > 0u). Key-algorithm / scheme
+              consistency is left to X509-11. ssfrsa and ssfx509.md are unchanged (the .md
+              already promises false). Test block "AUDIT X509-2" in ssfx509_ut.c: a parsed
+              certificate whose RSA SubjectPublicKeyInfo BIT STRING is empty, used as the key
+              holder for RSA-PSS (SSFX509VerifyCertSignature), RSA PKCS#1 v1.5
+              (SSFX509VerifySignature), and as the forged issuer of a real RSA-PSS leaf in
+              SSFX509VerifyChainPurpose, must give false each time. RED: "SSF Assertion:
+              _crypto/ssfrsa.c:1351" on the first (PSS) case. GREEN: ssfx509, ssfcms,
+              ssfbase64url, ssfmatch pass.

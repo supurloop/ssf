@@ -2243,6 +2243,15 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
     SSF_REQUIRE((data != NULL) || (dataLen == 0u));
     SSF_REQUIRE(sig != NULL);
 
+    /* Is the key empty (an untrusted issuer's key reaches here, AUDIT X509-2)? */
+    if ((keyCert->pubKey == NULL) || (keyCert->pubKeyLen == 0u))
+    {
+        /* Yes, nothing to verify with; the verifiers would trap on it */
+        SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx, "VerifySig: empty public key");
+        return false;
+    }
+    /* No, hand the key to the scheme the signature algorithm selects */
+
     /* ECDSA with SHA-256 or SHA-384 (the OID selects the hash, the key its curve, RFC 5758)? */
     isEcdsa256 = _SSFX509OIDMatch(sigAlgOidRaw, sigAlgOidRawLen, _oidEcdsaSHA256,
                                   sizeof(_oidEcdsaSHA256));

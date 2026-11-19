@@ -69,8 +69,9 @@ bool SSFStrCmp(SSFCStrIn_t cstr1, size_t cstr1Size, SSFCStrIn_t cstr2, size_t cs
 bool SSFStrToCase(SSFCStrOut_t cstrOut, size_t cstrOutSize, SSFSTRCase_t toCase);
 bool SSFStrStr(SSFCStrIn_t cstr, size_t cstrSize, SSFCStrIn_t *matchStrOptOut, SSFCStrIn_t substr,
                size_t substrSize);
-bool SSFStrTok(SSFCStrIn_t *cstr, size_t cstrSize, SSFCStrOut_t tokenStrOut, size_t tokenStrSize,
-               int32_t *tokenStrLen, SSFCStrIn_t delims, size_t delimsSize);
+bool SSFStrTok(SSFCStrIn_t *cstr, size_t *cstrSizeInOut, SSFCStrOut_t tokenStrOut,
+               size_t tokenStrSize, size_t *tokenStrLenOutOpt, SSFCStrIn_t delims,
+               size_t delimsSize);
 
 /* --------------------------------------------------------------------------------------------- */
 /* Unit test                                                                                     */

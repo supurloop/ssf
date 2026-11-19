@@ -271,60 +271,80 @@ bool SSFStrStr(SSFCStrIn_t cstr, size_t cstrSize, SSFCStrIn_t *matchStrOptOut, S
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if delim found in cstr, else false. tokenStrLen >= 0 when tokenStr is set.       */
+/* Returns true and the next token (final one included) if it fits, else false, nothing used.  */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFStrTok(SSFCStrIn_t *cstr, size_t cstrSize, SSFCStrOut_t tokenStrOut, size_t tokenStrSize,
-               int32_t *tokenStrLen, SSFCStrIn_t delims, size_t delimsSize)
+bool SSFStrTok(SSFCStrIn_t *cstr, size_t *cstrSizeInOut, SSFCStrOut_t tokenStrOut,
+               size_t tokenStrSize, size_t *tokenStrLenOutOpt, SSFCStrIn_t delims,
+               size_t delimsSize)
 {
     SSFCStrIn_t cs;
     SSFCStrIn_t dlms;
+    size_t remaining;
     size_t dlmss;
-    bool retVal = false;
+    size_t tokLen;
+    bool delimFound = false;
 
     SSF_REQUIRE(cstr != NULL);
     SSF_REQUIRE(*cstr != NULL);
+    SSF_REQUIRE(cstrSizeInOut != NULL);
     SSF_REQUIRE(tokenStrOut != NULL);
-    SSF_REQUIRE(tokenStrLen != NULL);
+    SSF_REQUIRE(tokenStrSize > 0u);
     SSF_REQUIRE(delims != NULL);
 
-    /* Iterate over cstr */
-    cs = *cstr;
-    while ((cstrSize > 0) && (*cs != 0))
+    /* On false the token is empty and nothing is consumed (AUDIT STR-4/5) */
+    tokenStrOut[0] = 0;
+    if (tokenStrLenOutOpt != NULL) *tokenStrLenOutOpt = 0;
+
+    /* Is there input left within the remaining size (AUDIT STR-1)? */
+    if ((*cstrSizeInOut == 0u) || (**cstr == 0))
     {
-        /* Iterate over delims */
+        /* No, end of input */
+        return false;
+    }
+    /* Yes, scan to a delimiter, the NUL, or the end of the remaining size */
+    cs = *cstr;
+    remaining = *cstrSizeInOut;
+    while ((remaining > 0u) && (*cs != 0) && (!delimFound))
+    {
         dlms = delims;
         dlmss = delimsSize;
-        while ((dlmss > 0) && (*dlms != 0))
+        while ((dlmss > 0u) && (*dlms != 0) && (!delimFound))
         {
-            /* Delim match? */
-            if (*cs == *dlms)
-            {
-                /* Yes, return token */
-                retVal = true;
-                goto tokDone;
-            }
+            delimFound = (*cs == *dlms);
             dlms++;
             dlmss--;
         }
-        cs++;
-        cstrSize--;
+        /* Is this character part of the token? */
+        if (!delimFound)
+        {
+            /* Yes */
+            cs++;
+            remaining--;
+        }
+        /* No, it is the delimiter that ends the token */
     }
+    tokLen = (size_t)(cs - *cstr);
 
-tokDone:
-    /* Enough room to copy token? */
-    if ((size_t)((cs - (*cstr)) + 1) <= tokenStrSize)
+    /* Does the token and its terminator fit (AUDIT STR-5)? */
+    if (tokLen >= tokenStrSize)
     {
-        /* Yes, copy into token buffer */
-        *tokenStrLen = (int32_t) (cs - (*cstr));
-        memcpy(tokenStrOut, *cstr, (size_t)*tokenStrLen);
-        tokenStrOut[*tokenStrLen] = 0;
+        /* No, return false without consuming it so the caller can retry with more room */
+        return false;
     }
-    /* No, tokenStr not set */
-    else *tokenStrLen = -1;
+    /* Yes */
+    memcpy(tokenStrOut, *cstr, tokLen);
+    tokenStrOut[tokLen] = 0;
+    if (tokenStrLenOutOpt != NULL) *tokenStrLenOutOpt = tokLen;
 
-    /* Set next token  */
-    if (retVal) *cstr = cs + 1;
-    else *cstr = cs;
-
-    return retVal;
+    /* Did a delimiter end the token? */
+    if (delimFound)
+    {
+        /* Yes, consume it too */
+        cs++;
+        remaining--;
+    }
+    /* No, the final token ended at the NUL or the end of the size */
+    *cstr = cs;
+    *cstrSizeInOut = remaining;
+    return true;
 }

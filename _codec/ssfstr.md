@@ -22,7 +22,8 @@ functions that can silently truncate or omit the null terminator.
 
 - All functions require the total allocated size of every buffer argument, not the string length.
 - All functions return `false` if the operation cannot complete safely; the destination buffer is
-  never partially modified when `false` is returned.
+  never partially modified when `false` is returned. [`SSFStrTok()`](#ssfstrtok) instead sets its
+  token buffer to the empty string on `false`, so it never holds a stale token.
 - A successful [`SSFStrCpy()`](#ssfstrcpy) or [`SSFStrCat()`](#ssfstrcat) always null-terminates
   the destination, unlike `strncpy()`.
 - [`SSFStrTok()`](#ssfstrtok) is re-entrant; it does not use any global state.
@@ -60,7 +61,7 @@ This module has no compile-time configuration options in `ssfoptions.h`.
 | [e.g.](#ex-cmp) | [`bool SSFStrCmp(cstr1, cstr1Size, cstr2, cstr2Size)`](#ssfstrcmp) | Safe string equality comparison |
 | [e.g.](#ex-tocase) | [`bool SSFStrToCase(cstrOut, cstrOutSize, toCase)`](#ssfstrtocase) | Convert string to upper or lower case in-place |
 | [e.g.](#ex-str) | [`bool SSFStrStr(cstr, cstrSize, matchStrOptOut, substr, substrSize)`](#ssfstrstr) | Find the first occurrence of a substring |
-| [e.g.](#ex-tok) | [`bool SSFStrTok(cstr, cstrSize, tokenOut, tokenSize, tokenLenOut, delims, delimsSize)`](#ssfstrtok) | Extract the next token from a string |
+| [e.g.](#ex-tok) | [`bool SSFStrTok(cstr, cstrSizeInOut, tokenOut, tokenSize, tokenLenOutOpt, delims, delimsSize)`](#ssfstrtok) | Extract the next token from a string |
 
 <a id="function-reference"></a>
 
@@ -331,36 +332,44 @@ if (SSFStrStr(haystack, sizeof(haystack), NULL, "cat", sizeof("cat")) == false)
 ### [↑](#ssfstr--safe-c-string-interface) [`bool SSFStrTok()`](#functions)
 
 ```c
-bool SSFStrTok(SSFCStrIn_t *cstr, size_t cstrSize, SSFCStrOut_t tokenStrOut,
-               size_t tokenStrSize, int32_t *tokenStrLen,
-               SSFCStrIn_t delims, size_t delimsSize);
+bool SSFStrTok(SSFCStrIn_t *cstr, size_t *cstrSizeInOut, SSFCStrOut_t tokenStrOut,
+               size_t tokenStrSize, size_t *tokenStrLenOutOpt, SSFCStrIn_t delims,
+               size_t delimsSize);
 ```
 
-Extracts the next token from a string, advancing `*cstr` past the consumed token and its
-delimiter on each call. Re-entrant bounded replacement for `strtok_r()`. Call repeatedly until it
-returns `false` to consume all tokens.
+Extracts the next token from a string. A token ends at a delimiter, at the null terminator, or at
+the end of the remaining size; on success `*cstr` and `*cstrSizeInOut` advance past the token and
+the delimiter that ended it. Re-entrant bounded replacement for `strtok_r()`. Call repeatedly
+until it returns `false`. An empty token (between two delimiters, or a leading delimiter) is
+returned as `""`; a trailing delimiter ends the last token and does not produce an extra empty
+one.
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
-| `cstr` | in-out | `const char **` | Pointer to the current position in the source string. Updated on each call to point past the consumed token and delimiter. Must not be `NULL`; `*cstr` must not be `NULL`. |
-| `cstrSize` | in | `size_t` | Total allocated size of the source string buffer. |
-| `tokenStrOut` | out | [`SSFCStrOut_t`](#type-ssfcstrout-t) | Buffer that receives the extracted token as a null-terminated string. Must not be `NULL`. |
-| `tokenStrSize` | in | `size_t` | Allocated size of `tokenStrOut`. |
-| `tokenStrLen` | out (opt) | `int32_t *` | If not `NULL`, receives the length of the extracted token (excluding null terminator), or `-1` when no more tokens remain. |
+| `cstr` | in-out | `const char **` | Current position in the source string; advanced only when `true` is returned. Must not be `NULL`; `*cstr` must not be `NULL`. |
+| `cstrSizeInOut` | in-out | `size_t *` | Bytes available from `*cstr`. Initialize it to the source buffer size; it is decremented by the bytes consumed, so no call reads past the buffer even when the source has no null terminator. Must not be `NULL`. |
+| `tokenStrOut` | out | [`SSFCStrOut_t`](#type-ssfcstrout-t) | Receives the token as a null-terminated string on `true`, and an empty string on `false`. Must not be `NULL`. |
+| `tokenStrSize` | in | `size_t` | Allocated size of `tokenStrOut`; must be at least 1. |
+| `tokenStrLenOutOpt` | out (opt) | `size_t *` | If not `NULL`, receives the token length (excluding the terminator) on `true`, and 0 on `false`. |
 | `delims` | in | [`SSFCStrIn_t`](#type-ssfcstrin-t) | String whose individual characters are treated as delimiters. Must not be `NULL`. |
 | `delimsSize` | in | `size_t` | Total allocated size of `delims` buffer. |
 
-**Returns:** `true` if a token was extracted and written to `tokenStrOut`; `false` if no more tokens remain or an error occurred.
+**Returns:** `true` if a token, including a final token with no trailing delimiter, was extracted
+in full. `false` at the end of input, or when the next token does not fit in `tokenStrOut`; in
+both cases nothing is consumed. After `false`, input remains (`*cstrSizeInOut > 0` and
+`**cstr != '\0'`) only when the token was too long, so the caller can retry with a larger buffer
+or skip it.
 
 <a id="ex-tok"></a>
 
 ```c
-const char src[]  = "one,two,three";
-const char *pos   = src;
+const char src[] = "one,two,three";
+const char *pos  = src;
+size_t posSize   = sizeof(src);
 char token[16];
-int32_t tokLen;
+size_t tokLen;
 
-while (SSFStrTok(&pos, sizeof(src), token, sizeof(token), &tokLen, ",", sizeof(",")))
+while (SSFStrTok(&pos, &posSize, token, sizeof(token), &tokLen, ",", sizeof(",")))
 {
     /* Iteration 1: token == "one",   tokLen == 3 */
     /* Iteration 2: token == "two",   tokLen == 3 */

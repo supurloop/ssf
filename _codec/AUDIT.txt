@@ -1009,7 +1009,7 @@ demonstrate every Medium finding and most of the Low ones.
 
 ----------------------------------------------------------------------------------------------
 
-STR-1  Medium  OPEN  [demonstrated]
+STR-1  Medium  FIXED (2026-11-18)  [demonstrated]
   Location:  _codec/ssfstr.c:276-327 (SSFStrTok)
   Problem:   cstrSize is the bound relative to *cstr on entry, but the function advances *cstr
              and does not tell the caller how many bytes it consumed. The .md describes
@@ -1060,7 +1060,7 @@ STR-2  Medium  OPEN  [demonstrated] [verified 2026-11-18]
              (*ss != 0) (recommended). (2) Add an early return when cstrSize == 0 or
              substrSize == 0. That is not sufficient for (a) on its own.
 
-STR-3  Medium  OPEN  [demonstrated]
+STR-3  Medium  OPEN (SSFStrTok part FIXED 2026-11-18; SSFStrCpy / SSFStrCat remain)  [demonstrated]
   Location:  _codec/ssfstr.c:105, 134, 287 (SSFStrCat, SSFStrCpy, SSFStrTok); ssfstr.md:156,
              175, 199, 211, 277, 349
   Problem:   The .md marks cstrDstOutLenOut (Cpy, Cat) and tokenStrLen (Tok) as "out (opt)":
@@ -1081,7 +1081,7 @@ STR-3  Medium  OPEN  [demonstrated]
              This keeps the full DBC that claude.ssf favours (recommended).
              (2) Make them truly optional in code, and update the UT.
 
-STR-4  Medium  OPEN  [demonstrated]
+STR-4  Medium  FIXED (2026-11-18)  [demonstrated]
   Location:  _codec/ssfstr.c:313-329 (SSFStrTok); ssfstr.md:25, 339-370
   Problem:   The code's semantics differ from the .md in three ways.
              (a) The final token, which has no trailing delimiter, is copied out, but the
@@ -1108,7 +1108,7 @@ STR-4  Medium  OPEN  [demonstrated]
              contract and example to match the current semantics: the caller must check
              tokenStrLen >= 0 after the false return.
 
-STR-5  Medium  OPEN  [demonstrated]
+STR-5  Medium  FIXED (2026-11-18)  [demonstrated]
   Location:  _codec/ssfstr.c:315-326 (SSFStrTok)
   Problem:   When the token does not fit in tokenStrOut, the function sets tokenStrLen = -1
              and leaves tokenStrOut untouched. It still advances *cstr past the token and its
@@ -1424,3 +1424,26 @@ CHANGE LOG
               ssfx509_ut.c:7214 (params without [0] verified). GREEN: ssfx509, ssfcms, ssfrsa,
               ssfasn1, ssfbase64url, ssfmatch (RSA and ASN1 unit tests enabled for the run; flags
               restored).
+  2026-11-18  STR-1, STR-4, STR-5 FIXED, and the SSFStrTok part of STR-3, by one rework of
+              SSFStrTok (option 3, API change). New prototype: SSFStrTok(SSFCStrIn_t *cstr,
+              size_t *cstrSizeInOut, SSFCStrOut_t tokenStrOut, size_t tokenStrSize,
+              size_t *tokenStrLenOutOpt, SSFCStrIn_t delims, size_t delimsSize). The source
+              size is in/out and decremented by the bytes consumed, so later calls stay inside
+              the buffer (STR-1). true means a token, including a final token with no trailing
+              delimiter, was extracted in full (STR-4a). false means end of input or a token too
+              long for tokenStrOut; nothing is consumed in either case, the token buffer is
+              set to "" and the optional length to 0 (STR-4b/c, STR-5). The length output is
+              size_t and may be NULL (STR-3 for SSFStrTok; also removes STR-8's int32_t wrap
+              note). tokenStrSize must be >= 1 (SSF_REQUIRE). STR-3 stays OPEN for SSFStrCpy /
+              SSFStrCat. No in-tree callers besides the unit test. ssfstr.md section, example
+              and function table rewritten. Tests: the SSFStrTok tests in ssfstr_ut.c rewritten
+              for the new contract (size cap, empty input, single / multiple / empty / leading
+              / trailing-delimiter tokens) plus AUDIT blocks: STR-1 (7-byte source with no NUL
+              tokenizes to "one", "two", then false, size reaching 0), STR-4 (the .md example
+              loop sees all three tokens), STR-3 (NULL length), STR-5 (oversize token returns
+              false, is not consumed, buffer left empty, then retried with a larger buffer).
+              RED: the new tests do not compile against the old prototype (int / pointer
+              mismatch on cstrSize and tokenStrLen); behavioural RED for the old code is the
+              audit harness (ASan heap-buffer-overflow at ssfstr.c:292 and the STR-4/5
+              outputs). GREEN: ssfstr, ssfx509, ssfcms, ssfbase64url, ssfmatch, also under ASan
+              and UBSan (STR unit test enabled for the run; flag restored).

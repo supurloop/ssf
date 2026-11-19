@@ -50,7 +50,8 @@ SUMMARY
   Low        17      FIXED (Batch A): CHACHA-1, GCM-3, CCM-3, SHA1-2, SHA2-3
                      FIXED (Batch B): HKDF-1, EC-3, RSA-11, TLS-8
                      FIXED (Batch C): BN-11, RSA-12
-                     OPEN: HMAC-1, PRNG-3, BN-12, BN-13, RSA-9, RSA-10
+                     FIXED (Batch D): BN-12, BN-13
+                     OPEN: HMAC-1, PRNG-3, RSA-9, RSA-10
 
   No memory-safety defect reachable from hostile input was found. The first-pass fixes
   (decoder bounds, carry folds, authenticate-before-decrypt, CT nonce/blind handling) hold.
@@ -260,7 +261,7 @@ BN-11  Low  FIXED (2026-11-19, Batch C)  [code-read; fix verified red/green]
   Options:   (1) SSFCryptSecureZero(buf) on every return of GenPrime; SSFBNZeroize the
              IsProbablePrime locals and the mont context. (2) Document.  Recommend (1).
 
-BN-12  Low  OPEN  [code-read]
+BN-12  Low  FIXED (2026-11-19, Batch D)  [code-read; fix verified red/green]
   Location:  ssfbn.c:925-957 (_SSFBNKaratsubaMul steps 5-7, tail loop)
   Problem:   ssfbn.md lists SSFBNMul as constant-time and the schoolbook paths say "No zero-limb
              skip: secret-data paths require timing independent of operand bits". The Karatsuba
@@ -274,7 +275,7 @@ BN-12  Low  OPEN  [code-read]
              pattern SSFBNMontSquare uses). (2) Document Karatsuba as not strictly CT.
              Recommend (1).
 
-BN-13  Low  OPEN  [code-read]
+BN-13  Low  FIXED (2026-11-19, Batch D)  [code-read; fix verified red/green]
   Location:  ssfbn.c:265-335 (SSFBNToBytes), :382-430 (SSFBNToBytesLE)
   Problem:   Both exporters scan down from the top limb to the first non-zero limb and then
              count bytes, so run time reveals the number of leading zero limbs and bytes of the
@@ -630,3 +631,30 @@ CHANGE LOG
               +268. Docs: ssfbn.md (SSFBNIsProbablePrime, SSFBNGenPrime), ssfrsa.md
               (SSFRSAPrivKeyIsValid checks, wiping, variable-time note). Linux direct gcc build;
               ssfport.h test flags restored with git checkout.
+  2026-11-19  Batch D FIXED (Jim's choice: recommended options): BN-12, BN-13.
+              BN-12: _SSFBNKaratsubaMul's step 5 / step 6 borrow loops always run their two
+              limbs and the tail carry loop always runs to the top of r (subtracting or adding a
+              zero borrow / carry is a no-op), so the iteration count no longer depends on the
+              operands.
+              BN-13: SSFBNToBytes and SSFBNToBytesLE skip the significance scan whenever
+              outSize >= a->len * 4 and write every limb; only a narrower buffer runs the
+              variable-time scan that decides whether the value fits. Output is unchanged.
+              Tests: new test-only counters _SSFBNKaratsubaPropIters and _SSFBNToBytesScans.
+              ssfbn_ut.c "AUDIT BN-12": SSFBNMul at the Karatsuba threshold with all-zero and
+              all-ones operands must take the same (non-zero) propagation count, and the
+              all-ones square must equal 2^(64n) - 2^(32n+1) + 1. "AUDIT BN-13": full-width BE
+              and LE exports run no scan and produce the expected bytes; 4-byte and 3-byte
+              buffers still scan, fit and refuse as before (4 scans).
+              RED: ssfbn_ut.c:2466 (itZero == itOnes), then after the BN-12 fix ssfbn_ut.c:2496
+              (_SSFBNToBytesScans == 0).
+              GREEN: ssfbn, ssfec, ssfecdsa, ssfrsa, ssfcms, ssfx509, ssfbase64url, ssfmatch, at
+              the default SSF_BN_KARATSUBA_THRESHOLD (32) and with -DSSF_BN_KARATSUBA_THRESHOLD=16u
+              (the MAX_PERF value).
+              Cost vs HEAD b831703 (x86-64 -O2, hooks compiled out; five alternating rounds for
+              the first three): RSA-2048 SignPKCS1 mean 7491 -> 7384 us (min 7105 -> 7195),
+              SSFBNMul 64 x 64 limbs mean 1.39 -> 1.28 us (min 1.20 -> 1.18), SSFBNToBytes 256 B
+              0.06 us both; P-256 PubKeyFromPrivKey 285-289 -> 285-287 us, ECDSA Sign 344-354 ->
+              345 us, ECDH 1135-1137 -> 1116-1145 us. No measurable slowdown. Object size:
+              ssfbn +232 bytes at -O2, +36 at -Os. Docs: ssfbn.md (ToBytes / ToBytesLE timing
+              rule, SSFBNMul Karatsuba note). Linux direct gcc build; ssfport.h test flags
+              restored with git checkout.

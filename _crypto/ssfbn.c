@@ -59,8 +59,14 @@ uint32_t _SSFBNModCallCount = 0u;
 void (*_SSFBNScrubTestHook)(const void *buf, size_t len) = NULL;
 #define _SSF_BN_SCRUB_HOOK(p, n) \
     do { if (_SSFBNScrubTestHook != NULL) { _SSFBNScrubTestHook((p), (n)); } } while (0)
+
+/* Test-only counters: Karatsuba propagation iterations, exporter scans (AUDIT BN-12, BN-13). */
+uint32_t _SSFBNKaratsubaPropIters = 0u;
+uint32_t _SSFBNToBytesScans = 0u;
+#define _SSF_BN_COUNT(c) do { (c)++; } while (0)
 #else
 #define _SSF_BN_SCRUB_HOOK(p, n) do { } while (0)
+#define _SSF_BN_COUNT(c) do { } while (0)
 #endif /* SSF_CONFIG_BN_UNIT_TEST */
 
 /* --------------------------------------------------------------------------------------------- */
@@ -284,39 +290,46 @@ bool SSFBNToBytes(const SSFBN_t *a, uint8_t *out, size_t outSize)
     SSF_REQUIRE(a->len >= 1u);
     SSF_REQUIRE(out != NULL);
 
-    /* Find the minimum byte length needed to represent a. */
+    /* Is out narrower than a's limbs, so whether a fits depends on its value (AUDIT BN-13)? */
+    if (outSize < ((size_t)a->len * sizeof(SSFBNLimb_t)))
     {
-        size_t actualBytes;
-        int16_t li;
-        for (li = (int16_t)(a->len - 1u); li >= 0; li--)
+        /* Yes, find the minimum byte length needed to represent a (variable-time) */
         {
-            if (a->limbs[li] != 0u) break;
-        }
-        /* Does a have any non-zero limbs? */
-        if (li >= 0)
-        {
-            /* Yes, count the significant bytes in the top non-zero limb. */
-            SSFBNLimb_t top = a->limbs[li];
-            actualBytes = (size_t)li * sizeof(SSFBNLimb_t);
-            while (top != 0u)
+            size_t actualBytes;
+            int16_t li;
+
+            _SSF_BN_COUNT(_SSFBNToBytesScans);
+            for (li = (int16_t)(a->len - 1u); li >= 0; li--)
             {
-                actualBytes++;
-                top >>= 8;
+                if (a->limbs[li] != 0u) break;
+            }
+            /* Does a have any non-zero limbs? */
+            if (li >= 0)
+            {
+                /* Yes, count the significant bytes in the top non-zero limb. */
+                SSFBNLimb_t top = a->limbs[li];
+                actualBytes = (size_t)li * sizeof(SSFBNLimb_t);
+                while (top != 0u)
+                {
+                    actualBytes++;
+                    top >>= 8;
+                }
+            }
+            else
+            {
+                /* No, represent zero as a single 0x00 byte. */
+                actualBytes = 1u;
+            }
+
+            /* Is the caller's buffer large enough to hold the significant bytes? */
+            if (outSize < actualBytes)
+            {
+                /* No, report failure so the caller can grow the buffer. */
+                return false;
             }
         }
-        else
-        {
-            /* No, represent zero as a single 0x00 byte. */
-            actualBytes = 1u;
-        }
-
-        /* Is the caller's buffer large enough to hold the significant bytes? */
-        if (outSize < actualBytes)
-        {
-            /* No, report failure so the caller can grow the buffer. */
-            return false;
-        }
     }
+    /* No, every limb fits, so no value-dependent scan is needed */
 
     memset(out, 0, outSize);
 
@@ -403,35 +416,44 @@ bool SSFBNToBytesLE(const SSFBN_t *a, uint8_t *out, size_t outSize)
     SSF_REQUIRE(a->len >= 1u);
     SSF_REQUIRE(out != NULL);
 
-    /* Count the minimum bytes needed to represent a (same logic as SSFBNToBytes). */
-    for (li = (int16_t)(a->len - 1u); li >= 0; li--)
-    {
-        if (a->limbs[li] != 0u) break;
-    }
-    /* Does a have any non-zero limbs? */
-    if (li >= 0)
-    {
-        /* Yes, count significant bytes within the top non-zero limb. */
-        SSFBNLimb_t top = a->limbs[li];
-        actualBytes = (size_t)li * sizeof(SSFBNLimb_t);
-        while (top != 0u)
-        {
-            actualBytes++;
-            top >>= 8;
-        }
-    }
-    else
-    {
-        /* No, the value is zero -- represent as a single 0x00 byte. */
-        actualBytes = 1u;
-    }
+    /* Write every limb unless out is narrower than a's limbs (AUDIT BN-13) */
+    actualBytes = (size_t)a->len * sizeof(SSFBNLimb_t);
 
-    /* Is the caller's buffer large enough for the significant bytes? */
+    /* Is out narrower than a's limbs, so whether a fits depends on its value? */
     if (outSize < actualBytes)
     {
-        /* No, report failure. */
-        return false;
+        /* Yes, count the minimum bytes needed to represent a (variable-time) */
+        _SSF_BN_COUNT(_SSFBNToBytesScans);
+        for (li = (int16_t)(a->len - 1u); li >= 0; li--)
+        {
+            if (a->limbs[li] != 0u) break;
+        }
+        /* Does a have any non-zero limbs? */
+        if (li >= 0)
+        {
+            /* Yes, count significant bytes within the top non-zero limb. */
+            SSFBNLimb_t top = a->limbs[li];
+            actualBytes = (size_t)li * sizeof(SSFBNLimb_t);
+            while (top != 0u)
+            {
+                actualBytes++;
+                top >>= 8;
+            }
+        }
+        else
+        {
+            /* No, the value is zero -- represent as a single 0x00 byte. */
+            actualBytes = 1u;
+        }
+
+        /* Is the caller's buffer large enough for the significant bytes? */
+        if (outSize < actualBytes)
+        {
+            /* No, report failure. */
+            return false;
+        }
     }
+    /* No, every limb fits, so no value-dependent scan is needed */
 
     memset(out, 0, outSize);
 
@@ -937,8 +959,10 @@ static void _SSFBNKaratsubaMul(SSFBNLimb_t *r, const SSFBNLimb_t *a, const SSFBN
 
     /* Step 5: mid -= z0 (occupying r[0..n-1]). */
     borrow = _SSFBNRawSub(mid, mid, r, n);
-    for (i = n; (borrow != 0u) && (i < (uint16_t)(n + 2u)); i++)
+    /* Fixed two-limb borrow propagation; a zero borrow subtracts nothing (AUDIT BN-12) */
+    for (i = n; i < (uint16_t)(n + 2u); i++)
     {
+        _SSF_BN_COUNT(_SSFBNKaratsubaPropIters);
         SSFBNDLimb_t diff = (SSFBNDLimb_t)mid[i] - (SSFBNDLimb_t)borrow;
         mid[i] = (SSFBNLimb_t)diff;
         borrow = (SSFBNLimb_t)((diff >> SSF_BN_LIMB_BITS) & 1u);
@@ -946,8 +970,10 @@ static void _SSFBNKaratsubaMul(SSFBNLimb_t *r, const SSFBNLimb_t *a, const SSFBN
 
     /* Step 6: mid -= z2 (occupying r[n..2n-1]). */
     borrow = _SSFBNRawSub(mid, mid, &r[n], n);
-    for (i = n; (borrow != 0u) && (i < (uint16_t)(n + 2u)); i++)
+    /* Fixed two-limb borrow propagation; a zero borrow subtracts nothing (AUDIT BN-12) */
+    for (i = n; i < (uint16_t)(n + 2u); i++)
     {
+        _SSF_BN_COUNT(_SSFBNKaratsubaPropIters);
         SSFBNDLimb_t diff = (SSFBNDLimb_t)mid[i] - (SSFBNDLimb_t)borrow;
         mid[i] = (SSFBNLimb_t)diff;
         borrow = (SSFBNLimb_t)((diff >> SSF_BN_LIMB_BITS) & 1u);
@@ -961,9 +987,10 @@ static void _SSFBNKaratsubaMul(SSFBNLimb_t *r, const SSFBNLimb_t *a, const SSFBN
         r[half + i] = (SSFBNLimb_t)addCarry;
         addCarry >>= SSF_BN_LIMB_BITS;
     }
-    /* Tail carry-propagation: empirically never fires (safety net for adversarial inputs). */
-    for (i = (uint16_t)(half + n + 2u); (addCarry != 0u) && (i < (uint16_t)(2u * n)); i++)
+    /* Tail carry propagation to the top of r, fixed length; a zero carry adds nothing (BN-12) */
+    for (i = (uint16_t)(half + n + 2u); i < (uint16_t)(2u * n); i++)
     {
+        _SSF_BN_COUNT(_SSFBNKaratsubaPropIters);
         addCarry += (SSFBNDLimb_t)r[i];
         r[i] = (SSFBNLimb_t)addCarry;
         addCarry >>= SSF_BN_LIMB_BITS;

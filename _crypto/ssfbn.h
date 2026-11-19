@@ -301,6 +301,10 @@ extern uint32_t _SSFBNModCallCount;
 
 /* Test-only hook fired after each secret local is wiped (AUDIT BN-11). */
 extern void (*_SSFBNScrubTestHook)(const void *buf, size_t len);
+
+/* Test-only counters (AUDIT BN-12, BN-13). */
+extern uint32_t _SSFBNKaratsubaPropIters;
+extern uint32_t _SSFBNToBytesScans;
 #endif /* SSF_CONFIG_BN_UNIT_TEST */
 
 #ifdef __cplusplus

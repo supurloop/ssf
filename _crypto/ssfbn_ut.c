@@ -2433,6 +2433,84 @@ void SSFBNUnitTest(void)
         SSFPRNGDeInitContext(&prng);
     }
 
+    /* ---- AUDIT BN-12: Karatsuba carry / borrow propagation runs a fixed iteration count ---- */
+    /* Steps 5 and 6 and the tail loop stopped as soon as the borrow or carry was zero, so the */
+    /* trip count depended on the secret operands. All-zero and all-ones operands must take   */
+    /* the same number of propagation iterations, and the all-ones product must be exact.     */
+#if ((2u * (SSF_BN_KARATSUBA_THRESHOLD + (SSF_BN_KARATSUBA_THRESHOLD & 1u))) <= SSF_BN_MAX_LIMBS)
+    {
+        SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(b, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(r, SSF_BN_MAX_LIMBS);
+        const uint16_t n =
+            (uint16_t)(SSF_BN_KARATSUBA_THRESHOLD + (SSF_BN_KARATSUBA_THRESHOLD & 1u));
+        uint32_t itZero;
+        uint32_t itOnes;
+        uint16_t i;
+
+        SSFBNSetZero(&a, n);
+        SSFBNSetZero(&b, n);
+        _SSFBNKaratsubaPropIters = 0u;
+        SSFBNMul(&r, &a, &b);
+        itZero = _SSFBNKaratsubaPropIters;
+
+        for (i = 0; i < n; i++)
+        {
+            a.limbs[i] = 0xFFFFFFFFu;
+            b.limbs[i] = 0xFFFFFFFFu;
+        }
+        _SSFBNKaratsubaPropIters = 0u;
+        SSFBNMul(&r, &a, &b);
+        itOnes = _SSFBNKaratsubaPropIters;
+
+        SSF_ASSERT(itZero == itOnes);
+        SSF_ASSERT(itZero > 0u);
+
+        /* (2^(32n) - 1)^2 = 2^(64n) - 2^(32n+1) + 1 */
+        SSF_ASSERT(r.len == (uint16_t)(2u * n));
+        SSF_ASSERT(r.limbs[0] == 1u);
+        for (i = 1; i < n; i++) SSF_ASSERT(r.limbs[i] == 0u);
+        SSF_ASSERT(r.limbs[n] == 0xFFFFFFFEu);
+        for (i = (uint16_t)(n + 1u); i < (uint16_t)(2u * n); i++)
+        {
+            SSF_ASSERT(r.limbs[i] == 0xFFFFFFFFu);
+        }
+    }
+#endif /* Karatsuba-size operands fit */
+
+    /* ---- AUDIT BN-13: full-width ToBytes / ToBytesLE export without a significance scan ---- */
+    /* Both exporters scanned down for the top non-zero limb and byte, so their run time       */
+    /* leaked the value's leading zeros (ECDH secrets, private keys). A buffer covering every  */
+    /* limb must be written without the scan; a narrower buffer still sizes the value.        */
+    {
+        SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
+        uint8_t out[32];
+        uint8_t outLE[32];
+        uint16_t i;
+
+        SSFBNSetZero(&a, 8);
+        a.limbs[0] = 0x01020304u;
+        _SSFBNToBytesScans = 0u;
+        SSF_ASSERT(SSFBNToBytes(&a, out, sizeof(out)) == true);
+        SSF_ASSERT(SSFBNToBytesLE(&a, outLE, sizeof(outLE)) == true);
+        SSF_ASSERT(_SSFBNToBytesScans == 0u);
+        for (i = 0; i < 28u; i++) SSF_ASSERT(out[i] == 0u);
+        SSF_ASSERT((out[28] == 0x01u) && (out[29] == 0x02u) && (out[30] == 0x03u));
+        SSF_ASSERT(out[31] == 0x04u);
+        SSF_ASSERT((outLE[0] == 0x04u) && (outLE[1] == 0x03u) && (outLE[2] == 0x02u));
+        SSF_ASSERT(outLE[3] == 0x01u);
+        for (i = 4; i < 32u; i++) SSF_ASSERT(outLE[i] == 0u);
+
+        /* Narrower than the limbs: the scan still decides fit, then the value is written. */
+        SSF_ASSERT(SSFBNToBytes(&a, out, 4u) == true);
+        SSF_ASSERT((out[0] == 0x01u) && (out[3] == 0x04u));
+        SSF_ASSERT(SSFBNToBytes(&a, out, 3u) == false);
+        SSF_ASSERT(SSFBNToBytesLE(&a, outLE, 4u) == true);
+        SSF_ASSERT((outLE[0] == 0x04u) && (outLE[3] == 0x01u));
+        SSF_ASSERT(SSFBNToBytesLE(&a, outLE, 3u) == false);
+        SSF_ASSERT(_SSFBNToBytesScans == 4u);
+    }
+
     /* ---- ModInv: 0 has no inverse ---- */
     {
         SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);

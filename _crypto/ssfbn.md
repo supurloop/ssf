@@ -332,7 +332,11 @@ Big-endian byte-buffer conversion, matching the wire format of PKCS#1, SEC1, ASN
 and X.509 subjects. `SSFBNFromBytes` zero-pads `data` (if shorter than `numLimbs × 4` bytes)
 and sets `a->len` to `numLimbs`; returns `false` if `data` cannot fit in `numLimbs`.
 `SSFBNToBytes` writes exactly `outSize` bytes, zero-padding the leading positions; returns
-`false` if `outSize` is too small to represent the value.
+`false` if `outSize` is too small to represent the value. When `outSize ≥ a->len × 4` (the
+fixed-width export used for keys, shared secrets and signatures) every limb is written with
+no scan for the most significant non-zero byte, so the run time does not depend on the
+value's leading zeros. Only a buffer narrower than `a`'s limbs triggers the variable-time
+significance scan that decides whether the value fits.
 
 <a id="serialization-le"></a>
 ```c
@@ -342,7 +346,8 @@ bool SSFBNToBytesLE(const SSFBN_t *a, uint8_t *out, size_t outSize);
 Little-endian counterparts of the BE pair. `data[0]` is the lowest byte of `limbs[0]`. Used
 by RFC 8032 (Ed25519) and RFC 7748 (X25519) scalar / point encodings, and by any
 LE-native algorithm being ported in. Same zero-pad / too-large semantics as the BE
-versions.
+versions, and the same rule: a buffer covering all of `a`'s limbs is written without the
+value-dependent scan.
 
 <a id="ex-init"></a>
 
@@ -517,8 +522,9 @@ Unsigned multi-precision multiply. `r->len` is set to `a->len + b->len`; that su
 `≤ SSF_BN_MAX_LIMBS` and `≤ r->cap`. **`r` must not alias `a` or `b`.** Same-size,
 even-length operands at or above `SSF_BN_KARATSUBA_THRESHOLD` (32 limbs) take a one-level
 Karatsuba path (~0.75 · n² single-limb multiplies); everything else uses schoolbook (n²).
-The schoolbook inner loop deliberately performs no zero-limb skipping, so timing depends
-only on `a->len` and `b->len`, not on operand values.
+The schoolbook inner loop deliberately performs no zero-limb skipping, and the Karatsuba
+borrow and carry propagation runs a fixed number of iterations, so timing depends only on
+`a->len` and `b->len`, not on operand values.
 
 For modular multiplication, prefer [`SSFBNModMul`](#ssfbnmodmul) (no expansion) or
 [`SSFBNMontMul`](#montmul) (Montgomery-form inputs).

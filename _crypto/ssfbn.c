@@ -50,6 +50,11 @@
 #define SSF_BN_MODEXP_TBL_N        ((uint32_t)1u << SSF_BN_MODEXP_WIN_K)
 #define SSF_BN_NUM_SMALL_PRIMES    (sizeof(_ssfBNSmallPrimes) / sizeof(_ssfBNSmallPrimes[0]))
 
+#if SSF_CONFIG_BN_UNIT_TEST == 1
+/* Test-only count of variable-time SSFBNMod calls (AUDIT BN-10). */
+uint32_t _SSFBNModCallCount = 0u;
+#endif /* SSF_CONFIG_BN_UNIT_TEST */
+
 /* --------------------------------------------------------------------------------------------- */
 /* Module data.                                                                                  */
 /* --------------------------------------------------------------------------------------------- */
@@ -1230,6 +1235,10 @@ void SSFBNMod(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
     uint32_t mBits;
     int32_t shift;
 
+#if SSF_CONFIG_BN_UNIT_TEST == 1
+    _SSFBNModCallCount++;
+#endif /* SSF_CONFIG_BN_UNIT_TEST */
+
     SSF_REQUIRE(r != NULL);
     SSF_REQUIRE(r->limbs != NULL);
     SSF_REQUIRE(a != NULL);
@@ -1961,10 +1970,10 @@ bool SSFBNModInv(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
     (void)SSFBNSubUint32(&exp, m, 2u);
     SSFBNModExp(r, a, &exp, m);
 
-    /* Verify a * r mod m == 1; if a and m are not coprime the result will fail this check. */
+    /* Verify a * r mod m == 1 in constant time (r < m meets ModMulCT's precondition, BN-10) */
     {
         SSFBN_DEFINE(check, SSF_BN_MAX_LIMBS);
-        SSFBNModMul(&check, a, r, m);
+        SSFBNModMulCT(&check, a, r, m);
         if (SSFBNIsOne(&check) == false) return false;
     }
 

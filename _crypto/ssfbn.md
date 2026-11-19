@@ -70,7 +70,7 @@ other big-integer libraries.
   |---|---|
   | **Constant-time** (safe on secrets) | [`SSFBNCmp`](#ssfbncmp), [`SSFBNModExp`/`SSFBNModExpMont`](#modexp), [`SSFBNMontMul`](#montmul), [`SSFBNMontSquare`](#montsquare), [`SSFBNMontConvertIn`/`Out`](#montconv), [`SSFBNCondSwap`](#condswap), [`SSFBNCondCopy`](#condswap), [`SSFBNAdd`](#ssfbnadd), [`SSFBNSub`](#ssfbnsub), [`SSFBNModAdd`](#modaddsub), [`SSFBNModSub`](#modaddsub), [`SSFBNModMulCT`](#ssfbnmodmulct), [`SSFBNMul`](#ssfbnmul), [`SSFBNSquare`](#ssfbnsquare), [`SSFBNIsEven`/`SSFBNIsOdd`](#predicates), [`SSFBNIsZero`/`IsOne`](#predicates) (the returned bool is itself one bit; branching on it reveals that bit) |
   | **Variable-time** (do not use on secrets) | [`SSFBNMod`](#ssfbnmod), [`SSFBNDivMod`](#ssfbndivmod), [`SSFBNModMul`](#ssfbnmodmul), [`SSFBNModSquare`](#ssfbnmodsquare), [`SSFBNGcd`](#ssfbngcd), [`SSFBNModInvExt`](#modinv), [`SSFBNModMulNIST`](#modmulnist) (constant-time only for the P-256 / P-384 primes), [`SSFBNModExpPub`/`SSFBNModExpMontPub`](#modexppub), [`SSFBNBitLen`](#bitlen), [`SSFBNTrailingZeros`](#trailingzeros), [`SSFBNShiftLeft1`/`Right1`](#shift), [`SSFBNShiftLeft`/`Right`](#shift-multi), [`SSFBNIsProbablePrime`](#ssfbnisprobableprime), [`SSFBNGenPrime`](#ssfbngenprime) |
-  | **Constant-time only when `m` is prime** | [`SSFBNModInv`](#modinv) — uses Fermat's little theorem (`a^(m-2) mod m`), which is constant-time but yields the correct answer only for prime `m`. After computing it, the function verifies `a · r ≡ 1 (mod m)` and returns `false` if it does not hold, so non-prime moduli are rejected (even when an inverse exists). |
+  | **Constant-time only when `m` is prime** | [`SSFBNModInv`](#modinv) — uses Fermat's little theorem (`a^(m-2) mod m`), which is constant-time but yields the correct answer only for prime `m`. After computing it, the function verifies `a · r ≡ 1 (mod m)` with the constant-time [`SSFBNModMulCT`](#ssfbnmodmulct) and returns `false` if it does not hold, so non-prime moduli are rejected (even when an inverse exists). |
 - **Secret scalars go through `SSFBNModInv` (with prime `m`) or the ModExp path, never
   `SSFBNModInvExt` or `SSFBNModExpPub`.** ECDSA signing, for instance, computes `s⁻¹ mod n`
   where `n` is the curve order (prime); use `SSFBNModInv` there. Reserve `SSFBNModInvExt`
@@ -665,8 +665,11 @@ bool SSFBNModInvExt(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m);
 `r = a⁻¹ mod m`. Both return `false` if the inverse does not exist (`gcd(a, m) ≠ 1`).
 
 - [`SSFBNModInv`](#modinv) computes `a^(m-2) mod m` via the constant-time
-  [`SSFBNModExp`](#modexp), then verifies the result satisfies `a · r ≡ 1 (mod m)` and
-  returns `false` if not. **Constant-time on the success path** for prime `m`. An even `m`
+  [`SSFBNModExp`](#modexp), then verifies the result satisfies `a · r ≡ 1 (mod m)` with the
+  constant-time [`SSFBNModMulCT`](#ssfbnmodmulct) (`r < m` meets its precondition) and
+  returns `false` if not. **Constant-time on the success path** for prime `m`: neither step
+  depends on the value of `a` (before 2026-11-19 the check used the variable-time
+  `SSFBNModMul`, whose run time tracked the bit length of `a · r`). An even `m`
   returns `false` immediately (the Montgomery exponentiation needs an odd modulus; `m` is
   treated as public). For odd non-prime `m` (or when `gcd(a, m) ≠ 1`) the verification check
   fails and the function returns `false`, so it is safe to call on any modulus, but it is only

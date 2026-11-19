@@ -46,7 +46,7 @@ SUMMARY
   Severity   Count   Labels
   Critical   0
   High       0
-  Medium     2       BN-10, ECDSA-5 (FIXED)
+  Medium     2       BN-10 (FIXED), ECDSA-5 (FIXED, opt-in)
   Low        17      CHACHA-1, GCM-3, CCM-3, SHA1-2, SHA2-3, HMAC-1, HKDF-1, PRNG-3, BN-11,
                      BN-12, BN-13, EC-3, RSA-9, RSA-10, RSA-11, RSA-12, TLS-8
 
@@ -218,7 +218,7 @@ CHACHA-1  Low  OPEN  [measured at -O0 and -O2]
 ssfbn
 ----------------------------------------------------------------------------------------------
 
-BN-10  Medium  OPEN  [measured]
+BN-10  Medium  FIXED (2026-11-19)  [measured; fix verified red/green]
   Location:  ssfbn.c:1937-1972 (SSFBNModInv; verification at :1965-1969); ssfbn.md:73, :667-669;
              ssfecdsa.md:104-107; callers ssfecdsa.c:737 (k^-1), ssfec.c:662
              (SSFECPointToAffine z^-1, used for ECDSA R, ECDH S, KeyGen/PubKeyFromPrivKey Q),
@@ -518,3 +518,19 @@ CHANGE LOG
               build (ecdsa, cms, x509, base64url, match pass) and with
               -DSSF_ECDSA_CONFIG_VERIFY_AFTER_SIGN=1 (same set pass, ECDSA-5 test runs).
               SSF_CONFIG_ECDSA_UNIT_TEST restored to 0.
+  2026-11-19  BN-10 FIXED via option 1 (Jim's choice). SSFBNModInv's a * r == 1 check now uses
+              SSFBNModMulCT instead of the variable-time SSFBNModMul; r < m from the Fermat
+              exponentiation meets ModMulCT's precondition, and the non-prime-modulus rejection
+              is kept. Test (ssfbn_ut.c "AUDIT BN-10"): new test-only counter _SSFBNModCallCount
+              (incremented in SSFBNMod) must stay 0 across SSFBNModInv for a full-length and a
+              short a mod the P-256 prime, a * r mod p == 1 for both, and 2 mod 15 (coprime,
+              non-prime: Fermat gives 2, not an inverse) still returns false.
+              RED: "SSF Assertion: _crypto/ssfbn_ut.c:2370" (calls == 0 failed).
+              GREEN: ssfbn, ssfec, ssfecdsa, ssfrsa, ssfcms, ssfx509, ssfbase64url, ssfmatch.
+              Timing re-measured with the earlier harness, P-256 n, 6000 interleaved samples per
+              class: SSFBNModInv total 52.42 us (full-length k) vs 52.54 us (k with top 48 bits
+              zero), two runs agree; before the fix 53.5 vs 51.1 us. The total cost is unchanged.
+              ssfbn.md (constant-time table and SSFBNModInv reference) now names ModMulCT as the
+              check. ssfecdsa.md's constant-time signing claim is now accurate; no edit needed.
+              Linux direct gcc build; BN/EC/ECDSA/RSA unit-test flags flipped to 1 for the run and
+              restored to 0.

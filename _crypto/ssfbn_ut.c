@@ -2341,6 +2341,44 @@ void SSFBNUnitTest(void)
         SSF_ASSERT(SSFBNModInv(&r, &a, &m) == false);
     }
 
+    /* ---- AUDIT BN-10: ModInv's a * r == 1 check is constant-time (no SSFBNMod) ---- */
+    /* The Fermat exponentiation was constant-time but the check used SSFBNModMul, whose       */
+    /* SSFBNMod loop length and add-backs depend on a * r; with a = ECDSA nonce that leaks its  */
+    /* bit length. ModInv must not reach SSFBNMod, must still invert full-length and short a,  */
+    /* and must still reject a non-prime modulus where Fermat gives a wrong inverse.           */
+#if SSF_BN_CONFIG_MAX_BITS >= 512
+    {
+        SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(r, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(check, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(m, SSF_BN_MAX_LIMBS);
+        uint32_t calls;
+        uint16_t i;
+
+        /* Full-length a, then a short a (top 48 bits zero), modulo the P-256 prime. */
+        for (i = 0; i < 2u; i++)
+        {
+            SSFBNSetZero(&a, 8);
+            a.limbs[0] = 0x12345679u;
+            a.limbs[3] = 0x9ABCDEF0u;
+            a.limbs[5] = 0x0F1E2D3Cu;
+            a.limbs[6] = (i == 0u) ? 0xDEADBEEFu : 0x0000BEEFu;
+            a.limbs[7] = (i == 0u) ? 0xC0FFEE00u : 0u;
+            _SSFBNModCallCount = 0u;
+            SSF_ASSERT(SSFBNModInv(&r, &a, &SSF_BN_NIST_P256) == true);
+            calls = _SSFBNModCallCount;
+            SSF_ASSERT(calls == 0u);
+            SSFBNModMul(&check, &a, &r, &SSF_BN_NIST_P256);
+            SSF_ASSERT(SSFBNIsOne(&check));
+        }
+
+        /* Coprime to a non-prime modulus: Fermat 2^13 mod 15 = 2 is not an inverse. */
+        SSFBNSetUint32(&a, 2u, 4);
+        SSFBNSetUint32(&m, 15u, 4);
+        SSF_ASSERT(SSFBNModInv(&r, &a, &m) == false);
+    }
+#endif /* SSF_BN_CONFIG_MAX_BITS >= 512 */
+
     /* ---- ModInv: 0 has no inverse ---- */
     {
         SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);

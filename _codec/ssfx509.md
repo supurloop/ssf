@@ -444,6 +444,15 @@ AlgorithmIdentifier, issuer, validity (UTCTime), subject, SubjectPublicKeyInfo, 
 `extensions [3]` block containing whichever of Basic Constraints, Key Usage, Extended Key Usage,
 SAN, SKID, AKID, the raw extension, and Name Constraints are enabled in `params`.
 
+`params` must describe a certificate RFC 5280 allows; this function and
+[`SSFX509EncodeCert()`](#ssfx509encodecert) treat anything else as a caller error
+(`SSF_REQUIRE`), so sanitize externally supplied values before calling. Specifically: `version`
+is 0 (v1) or 2 (v3); `skid` and `skidLen` (and `akid` / `akidLen`) are both set or both absent;
+`addExtKeyUsage` needs at least one of `ekuServerAuth`, `ekuClientAuth`, `ekuCodeSigning`; a
+non-`NULL` `sanDNSNames` or `sanIPAddrs` must hold at least one entry between them, and no
+dNSName may be empty; `addNameConstraints` needs at least one non-empty subtree list; and a
+`pathLenConstraint` of 0 or more needs `addBasicConstraints` with `isCA`.
+
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
 | `bufOpt` | out (opt) | `uint8_t *` | Output buffer, or `NULL` to measure. |
@@ -676,6 +685,15 @@ depend on it:
 [`SSFX509VerifyChain()`](#ssfx509verifychain) is this function with
 `SSF_X509_PURPOSE_SERVER_AUTH`. [`ssfcms`](../_crypto/ssfcms.md) uses
 `SSF_X509_PURPOSE_CODE_SIGNING` for the signer of a SignedData message.
+
+**Purpose is enforced on the leaf only.** Both columns above apply to the leaf (`chainDer[0]`):
+a leaf with no Extended Key Usage extension satisfies either purpose (RFC 5280 §4.2.1.12), and
+the Extended Key Usage of intermediates and of the trust anchor is not consulted. A CA that is
+EKU-restricted to `serverAuth` can therefore issue a leaf that verifies for code signing. The
+trust store passed as `trustDer` is the policy boundary: give each purpose its own trust store
+and put in it only roots trusted for that purpose (for code signing, only the roots allowed to
+sign firmware). The anchor's own Basic Constraints and Key Usage are not checked either (see
+**Trust anchors** in [Notes](#notes)).
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|

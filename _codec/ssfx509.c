@@ -2160,6 +2160,33 @@ static bool _SSFX509EncTBSContent(uint8_t *buf, uint32_t bufSize, const void *ar
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Asserts that p only asks for structures RFC 5280 allows (AUDIT X509-14).                     */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFX509RequireGenParams(const SSFX509GenParams_t *p)
+{
+    const char **dns;
+
+    SSF_REQUIRE(p != NULL);
+    SSF_REQUIRE((p->version == 0u) || (p->version == 2u));
+    SSF_REQUIRE((p->skid == NULL) == (p->skidLen == 0u));
+    SSF_REQUIRE((p->akid == NULL) == (p->akidLen == 0u));
+    SSF_REQUIRE((!p->addExtKeyUsage) || p->ekuServerAuth || p->ekuClientAuth || p->ekuCodeSigning);
+    SSF_REQUIRE(((p->sanDNSNames == NULL) && (p->sanIPAddrs == NULL)) ||
+                ((p->sanDNSNames != NULL) && (p->sanDNSNames[0] != NULL)) ||
+                ((p->sanIPAddrs != NULL) && (p->sanIPAddrs[0] != NULL)));
+    for (dns = p->sanDNSNames; (dns != NULL) && (*dns != NULL); dns++)
+    {
+        SSF_REQUIRE((*dns)[0] != '\0');
+    }
+    SSF_REQUIRE((!p->addNameConstraints) ||
+                ((p->ncPermittedDNS != NULL) && (p->ncPermittedDNS[0] != NULL)) ||
+                ((p->ncPermittedIPs != NULL) && (p->ncPermittedIPs[0] != NULL)) ||
+                ((p->ncExcludedDNS != NULL) && (p->ncExcludedDNS[0] != NULL)) ||
+                ((p->ncExcludedIPs != NULL) && (p->ncExcludedIPs[0] != NULL)));
+    SSF_REQUIRE((p->pathLenConstraint < 0) || (p->addBasicConstraints && p->isCA));
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Returns true if TBSCertificate encoded, or measured when bufOpt is NULL, with *lenOut set.    */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFX509EncodeTBS(uint8_t *bufOpt, uint32_t bufOptSize, const SSFX509GenParams_t *params,
@@ -2169,6 +2196,7 @@ bool SSFX509EncodeTBS(uint8_t *bufOpt, uint32_t bufOptSize, const SSFX509GenPara
 
     SSF_REQUIRE((bufOpt != NULL) || (bufOptSize == 0u));
     SSF_REQUIRE(params != NULL);
+    _SSFX509RequireGenParams(params);
     SSF_REQUIRE(lenOut != NULL);
 
     *lenOut = 0;
@@ -2232,6 +2260,7 @@ bool SSFX509EncodeCert(uint8_t *bufOpt, uint32_t bufOptSize, const SSFX509GenPar
 
     SSF_REQUIRE((bufOpt != NULL) || (bufOptSize == 0u));
     SSF_REQUIRE(params != NULL);
+    _SSFX509RequireGenParams(params);
     SSF_REQUIRE(signature != NULL);
     SSF_REQUIRE(lenOut != NULL);
 

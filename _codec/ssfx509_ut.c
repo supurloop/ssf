@@ -4749,7 +4749,12 @@ void SSFX509UnitTest(void)
         static uint8_t pubKey[SSF_ECDSA_MAX_PUB_KEY_SIZE];
         static uint8_t fakeSig[64];
         static const char *sanWild[] = { "*.example.com", NULL };
-        static const char *sanEmpty[] = { "", "ok", NULL };
+        static const uint8_t verV3[] = { 0xA0u, 0x03u, 0x02u, 0x01u, 0x02u };
+        static const uint8_t sanOidE[] = { 0x55u, 0x1Du, 0x11u };
+        /* SAN { [2] "", [2] "ok" }, built raw since the generator refuses an empty dNSName */
+        static const uint8_t sanEmptyRaw[] = {
+            0x30u, 0x06u, 0x82u, 0x00u, 0x82u, 0x02u, 'o', 'k'
+        };
         static const char *sanNul[] = { "ab", NULL };
         uint8_t serial[] = { 0x09u };
         SSFX509GenParams_t p;
@@ -4762,11 +4767,13 @@ void SSFX509UnitTest(void)
         memset(fakeSig, 0x22u, sizeof(fakeSig));
         memset(pubKey, 0x04u, sizeof(pubKey));
 
-        /* A version field above v3 does not parse */
+        /* A version field above v3 does not parse. The generator refuses to emit one (AUDIT */
+        /* X509-14), so encode v3 and patch the version INTEGER to 3 on the wire.             */
         _utGenBaseParams(&p, serial, pubKey, 65u);
-        p.version = 3u;
         (void)SSFX509EncodeCert(out, sizeof(out), &p, fakeSig, sizeof(fakeSig), &n);
         SSF_ASSERT(n != 0u);
+        SSF_ASSERT(_utFind(out, n, verV3, sizeof(verV3), &i) == true);
+        out[i + 4u] = 0x03u;
         SSF_ASSERT(SSFX509Parse(out, n, &parsed) == false);
 
         /* An empty hostname is a contract violation, not a runtime mismatch */
@@ -4777,7 +4784,11 @@ void SSFX509UnitTest(void)
 
         /* Empty and NUL-containing dNSName entries are dropped at parse */
         _utGenBaseParams(&p, serial, pubKey, 65u);
-        p.sanDNSNames = sanEmpty;
+        p.addRawExt = true;
+        p.rawExtOid = sanOidE;
+        p.rawExtOidLen = sizeof(sanOidE);
+        p.rawExtValue = sanEmptyRaw;
+        p.rawExtValueLen = sizeof(sanEmptyRaw);
         (void)SSFX509EncodeCert(out, sizeof(out), &p, fakeSig, sizeof(fakeSig), &n);
         SSF_ASSERT(n != 0u);
         SSF_ASSERT(SSFX509Parse(out, n, &parsed) == true);
@@ -5555,6 +5566,58 @@ void SSFX509UnitTest(void)
                                          &n) == true);
             SSF_ASSERT(SSFX509Parse(caOut, n, &parsed) == true);
             SSF_ASSERT((parsed.isCA == false) && (parsed.pathLenConstraint == -1));
+        }
+
+        /* AUDIT X509-14: generator parameters RFC 5280 forbids are caller errors (DBC) */
+        {
+            static const uint8_t kid[] = { 0x01u, 0x02u };
+            static const char *sanNone[] = { NULL };
+            static const char *sanEmptyName[] = { "", NULL };
+            static const char *sanOk14[] = { "ok.com", NULL };
+
+            #define _X14(_setup) do { \
+                _utGenBaseParams(&p, serial, caPub, (uint32_t)caPubLen); \
+                _setup; \
+                SSF_ASSERT_TEST(SSFX509EncodeTBS(caOut, sizeof(caOut), &p, &n)); \
+                SSF_ASSERT_TEST(SSFX509EncodeCert(caOut, sizeof(caOut), &p, fakeSig, \
+                                                  sizeof(fakeSig), &n)); \
+            } while (0)
+
+            _X14(p.skid = kid; p.skidLen = 0u);
+            _X14(p.akid = kid; p.akidLen = 0u);
+            _X14(p.skidLen = sizeof(kid));
+            _X14(p.addNameConstraints = true);
+            _X14(p.addExtKeyUsage = true);
+            _X14(p.sanDNSNames = sanNone);
+            _X14(p.sanDNSNames = sanEmptyName);
+            _X14(p.addBasicConstraints = true; p.isCA = false; p.pathLenConstraint = 0);
+            _X14(p.pathLenConstraint = 0);
+            _X14(p.version = 1u);
+            _X14(p.version = 3u);
+            #undef _X14
+
+            /* Valid counterparts still encode */
+            _utGenBaseParams(&p, serial, caPub, (uint32_t)caPubLen);
+            p.skid = kid;
+            p.skidLen = sizeof(kid);
+            p.addExtKeyUsage = true;
+            p.ekuCodeSigning = true;
+            p.sanDNSNames = sanOk14;
+            p.addBasicConstraints = true;
+            p.isCA = true;
+            p.pathLenConstraint = 0;
+            SSF_ASSERT(SSFX509EncodeCert(caOut, sizeof(caOut), &p, fakeSig, sizeof(fakeSig),
+                                         &n) == true);
+            SSF_ASSERT(SSFX509Parse(caOut, n, &parsed) == true);
+            p.version = 0u;
+            p.skid = NULL;
+            p.skidLen = 0u;
+            p.addExtKeyUsage = false;
+            p.sanDNSNames = NULL;
+            p.addBasicConstraints = false;
+            p.pathLenConstraint = -1;
+            SSF_ASSERT(SSFX509EncodeCert(caOut, sizeof(caOut), &p, fakeSig, sizeof(fakeSig),
+                                         &n) == true);
         }
 
         /* ---- AUDIT X509-9/10/11/12 and MATCH-1 (Low batch 2) ---- */
@@ -7662,15 +7725,20 @@ void SSFX509UnitTest(void)
         memset(fakeSig, 0xAAu, sizeof(fakeSig));
         memset(pubKey, 0x04u, sizeof(pubKey));
 
-        /* Version 2 (v2) with extensions requested: the version is emitted, the extensions are */
-        /* not, since only v3 may carry them */
+        /* Version 2 (v2) is not generated (AUDIT X509-14: version must be 0 or 2), but parses: */
+        /* encode v3 without extensions and patch the version INTEGER to 1                     */
         _utGenBaseParams(&p, serial, pubKey, 65u);
         p.version = 1u;
-        p.addBasicConstraints = true;
-        p.isCA = true;
-        p.addKeyUsage = true;
-        p.keyUsageBits = SSF_X509_KU_KEY_CERT_SIGN;
+        SSF_ASSERT_TEST(SSFX509EncodeCert(out, sizeof(out), &p, fakeSig, sizeof(fakeSig), &n));
+        _utGenBaseParams(&p, serial, pubKey, 65u);
         SSF_ASSERT(SSFX509EncodeCert(out, sizeof(out), &p, fakeSig, sizeof(fakeSig), &n) == true);
+        {
+            static const uint8_t verV3b[] = { 0xA0u, 0x03u, 0x02u, 0x01u, 0x02u };
+            uint32_t at;
+
+            SSF_ASSERT(_utFind(out, n, verV3b, sizeof(verV3b), &at) == true);
+            out[at + 4u] = 0x01u;
+        }
         SSF_ASSERT(SSFX509Parse(out, n, &parsed) == true);
         SSF_ASSERT((parsed.version == 1u) && (parsed.extsLen == 0u));
         SSF_ASSERT((parsed.hasBasicConstraints == false) && (parsed.hasKeyUsage == false));

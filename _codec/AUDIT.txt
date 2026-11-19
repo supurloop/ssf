@@ -726,7 +726,7 @@ X509-12  Low  FIXED (2026-11-18)  [demonstrated]  (related ASN1-2, ASN1-3, ASN1-
              empty at the end. Reject unusedBits != 0 for the signature and the key. Mask KU
              padding bits. Fix the .md wording (recommended)  (2) Document the leniency.
 
-X509-13  Low  OPEN  [reviewed]
+X509-13  Low  DOC (2026-11-18)  [reviewed]
   Location:  ssfx509.c:2801-2823 (purpose checks)
   Problem:   For SSF_X509_PURPOSE_CODE_SIGNING, a leaf with no EKU is accepted (RFC 5280
              allows this, but most code-signing verifiers require id-kp-codeSigning).
@@ -742,7 +742,7 @@ X509-13  Low  OPEN  [reviewed]
              intermediate carries an EKU without codeSigning/anyEKU (recommended)
              (2) Document it in the .md.
 
-X509-14  Low  OPEN  [reviewed]
+X509-14  Low  FIXED (2026-11-18)  [reviewed]
   Location:  ssfx509.c:1758-1765, 1412-1435, 1478-1540, 1640-1670 (generator)
   Problem:   The generator can emit structures that RFC 5280 forbids, with no DBC check or
              false return. An empty Extensions SEQUENCE: skid != NULL with skidLen 0 makes
@@ -1576,3 +1576,29 @@ CHANGE LOG
               same run and were not separately shown failing first. GREEN: ssfasn1, ssfx509,
               ssfcms, ssfrsa, ssfecdsa, ssfbase64url, ssfmatch, and the non-RSA / ECDSA set
               under ASan + UBSan (unit test flags restored).
+  2026-11-18  X509-13 DOC via option (c). Jim's rationale: the code-signing trust store is
+              controlled, so a CA in it that can sign firmware is a trust-store policy question,
+              not a code defect. ssfx509.md (SSFX509VerifyChainPurpose) now states that purpose
+              is enforced on the leaf only, that a leaf without EKU satisfies either purpose,
+              that intermediate and trust-anchor EKUs are not consulted (so a serverAuth-only CA
+              can issue a code-signing leaf), and that the trust store is the policy boundary:
+              one trust store per purpose, holding only roots trusted for that purpose. No code
+              change.
+  2026-11-18  X509-14 FIXED via option 2 (DBC traps; Jim: callers sanitize generator inputs
+              first). New private _SSFX509RequireGenParams, called by SSFX509EncodeTBS and
+              SSFX509EncodeCert, SSF_REQUIREs: version 0 or 2; skid / skidLen and akid / akidLen
+              both set or both absent (so _SSFX509HasExtensions can no longer announce an empty
+              Extensions block); addExtKeyUsage with at least one purpose; a non-NULL SAN list
+              holding at least one entry and no empty dNSName; addNameConstraints with at least
+              one non-empty subtree list (the generator could otherwise emit an NC that SSF's
+              own parser rejects since X509-3); pathLenConstraint >= 0 only with cA. The
+              assertions carry no comments (claude.ssf); ssfx509.md lists the rules under
+              SSFX509EncodeTBS. Test block "AUDIT X509-14" in ssfx509_ut.c: each of eleven
+              invalid parameter sets traps in both EncodeTBS and EncodeCert; valid counterparts
+              (v3 with SKID, EKU, SAN, CA pathLen 0; plain v1) still encode. Three existing
+              tests that used the generator to build invalid certificates for parser checks now
+              build them by patching (version 3 rejected; version 1 parses) or with a raw SAN
+              extension (empty dNSName dropped), and the v2 generation case now expects the
+              trap. RED: ssfx509_ut.c:5575 (zero-length SKID did not trap). GREEN: ssfx509,
+              ssfcms, ssfasn1, ssfrsa, ssfecdsa, ssfed25519, ssfbase64url, ssfmatch (unit test
+              flags restored).

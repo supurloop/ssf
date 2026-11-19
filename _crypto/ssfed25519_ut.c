@@ -425,17 +425,153 @@ static void _HexToBytes(const char *hex, uint8_t *out, size_t outLen)
 /* --------------------------------------------------------------------------------------------- */
 void SSFEd25519UnitTest(void)
 {
-    /* ---- (Hardening) _sc_pack preserves bit 252 for scalars in [2^252, L) ---- */
-    /* The scalar is 12 limbs of 21 bits; the top limb carries bit 252, so masking it to 21 bits    */
-    /* would drop that bit. Pack the value 2^252 (top limb == 2^21) and confirm output bit 252 set.  */
-    /* Unreachable with random signatures (probability ~2^-127), so it needs a direct check.         */
+    /* ---- OPTIMIZE ED-O1: scalar reduce and multiply-add mod L, against Python oracles ---- */
+    /* Covers 0, L - 1, L, 2^252 (bit 252 kept, as the old _sc_pack hardening test checked),   */
+    /* multiples of L, all-ones 512-bit input, all-ones 256-bit operands and a clamped-style   */
+    /* scalar. The upper 32 bytes of reduce's buffer are cleared.                               */
     {
-        int64_t s[12] = {0};
+        static const uint8_t _lBytes[32] = {
+            0xEDu, 0xD3u, 0xF5u, 0x5Cu, 0x1Au, 0x63u, 0x12u, 0x58u,
+            0xD6u, 0x9Cu, 0xF7u, 0xA2u, 0xDEu, 0xF9u, 0xDEu, 0x14u,
+            0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u,
+            0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x10u
+        };
+        static const uint8_t _rAllOnes[32] = {
+            0x00u, 0x0Fu, 0x9Cu, 0x44u, 0xE3u, 0x11u, 0x06u, 0xA4u,
+            0x47u, 0x93u, 0x85u, 0x68u, 0xA7u, 0x1Bu, 0x0Eu, 0xD0u,
+            0x65u, 0xBEu, 0xF5u, 0x17u, 0xD2u, 0x73u, 0xECu, 0xCEu,
+            0x3Du, 0x9Au, 0x30u, 0x7Cu, 0x1Bu, 0x41u, 0x99u, 0x03u
+        };
+        static const uint8_t _rMixed[32] = {
+            0xB0u, 0x34u, 0xF5u, 0xDAu, 0x21u, 0x20u, 0xA9u, 0xEBu,
+            0xB6u, 0xC1u, 0x21u, 0x0Eu, 0x20u, 0xACu, 0x7Cu, 0x13u,
+            0x1Eu, 0xDFu, 0xFAu, 0x0Bu, 0xE9u, 0x39u, 0x76u, 0xE7u,
+            0x1Eu, 0x4Du, 0x18u, 0xBEu, 0x8Du, 0xA0u, 0xCCu, 0x09u
+        };
+        static const uint8_t _mAllOnes[32] = {
+            0xD1u, 0x4Du, 0xF9u, 0x13u, 0x89u, 0x43u, 0x2Cu, 0x25u,
+            0xADu, 0x60u, 0xFFu, 0x97u, 0x91u, 0xB9u, 0xFDu, 0x1Du,
+            0x67u, 0xBEu, 0xF5u, 0x17u, 0xD2u, 0x73u, 0xECu, 0xCEu,
+            0x3Du, 0x9Au, 0x30u, 0x7Cu, 0x1Bu, 0x41u, 0x99u, 0x03u
+        };
+        static const uint8_t _mA[32] = {
+            0xB1u, 0x68u, 0xDEu, 0x3Au, 0x00u, 0x00u, 0x00u, 0x00u,
+            0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u,
+            0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u,
+            0x00u, 0x2Eu, 0x1Du, 0x3Cu, 0x5Fu, 0x00u, 0x00u, 0x00u
+        };
+        static const uint8_t _mB[32] = {
+            0x90u, 0x56u, 0xF8u, 0x58u, 0x67u, 0x4Cu, 0xA5u, 0x5Au,
+            0x05u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u,
+            0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u,
+            0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x40u
+        };
+        static const uint8_t _mC[32] = {
+            0xEBu, 0xD3u, 0xF5u, 0x5Cu, 0x1Au, 0x63u, 0x12u, 0x58u,
+            0xD6u, 0x9Cu, 0xF7u, 0xA2u, 0xDEu, 0xF9u, 0xDEu, 0x14u,
+            0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u,
+            0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x10u
+        };
+        static const uint8_t _mExp[32] = {
+            0x7Eu, 0x73u, 0x07u, 0x12u, 0x70u, 0x06u, 0xB1u, 0x20u,
+            0x0Cu, 0xBFu, 0x52u, 0xE2u, 0x44u, 0xE8u, 0x78u, 0x35u,
+            0x2Du, 0xEAu, 0x24u, 0xEBu, 0x20u, 0x26u, 0x3Du, 0xDCu,
+            0xC5u, 0xB6u, 0x31u, 0xC9u, 0x51u, 0xDDu, 0x37u, 0x05u
+        };
+        uint8_t buf[64];
+        uint8_t a[32];
+        uint8_t b[32];
+        uint8_t c[32];
         uint8_t out[32];
+        uint8_t lm1[32];
+        uint16_t k;
+        uint16_t carry;
 
-        s[11] = (int64_t)1 << 21;                    /* value == 2^252 */
-        _SSFEd25519ScPackForTest(out, s);
-        SSF_ASSERT((out[31] & 0x10u) != 0u);         /* bit 252 = byte 31 bit 4 must be set */
+        /* lm1 = L - 1 (L's low byte is 0xED, so no borrow) */
+        memcpy(lm1, _lBytes, 32);
+        lm1[0]--;
+
+        /* reduce(0) = 0 */
+        memset(buf, 0, sizeof(buf));
+        _SSFEd25519ScReduceForTest(buf);
+        for (k = 0u; k < 64u; k++) SSF_ASSERT(buf[k] == 0u);
+
+        /* reduce(L - 1) = L - 1 */
+        memset(buf, 0, sizeof(buf));
+        memcpy(buf, lm1, 32);
+        _SSFEd25519ScReduceForTest(buf);
+        SSF_ASSERT(memcmp(buf, lm1, 32) == 0);
+        for (k = 32u; k < 64u; k++) SSF_ASSERT(buf[k] == 0u);
+
+        /* reduce(L) = 0 */
+        memset(buf, 0, sizeof(buf));
+        memcpy(buf, _lBytes, 32);
+        _SSFEd25519ScReduceForTest(buf);
+        for (k = 0u; k < 32u; k++) SSF_ASSERT(buf[k] == 0u);
+
+        /* reduce(2^252) = 2^252: bit 252 (byte 31 bit 4) survives */
+        memset(buf, 0, sizeof(buf));
+        buf[31] = 0x10u;
+        _SSFEd25519ScReduceForTest(buf);
+        for (k = 0u; k < 31u; k++) SSF_ASSERT(buf[k] == 0u);
+        SSF_ASSERT(buf[31] == 0x10u);
+
+        /* reduce(6 * L - 1) = L - 1: 6 * L - 1 = 5 * L + (L - 1), built bytewise */
+        memset(buf, 0, sizeof(buf));
+        carry = 0u;
+        for (k = 0u; k < 32u; k++)
+        {
+            carry = (uint16_t)(carry + (6u * (uint16_t)_lBytes[k]));
+            buf[k] = (uint8_t)carry;
+            carry >>= 8;
+        }
+        buf[32] = (uint8_t)carry;
+        buf[0]--;
+        _SSFEd25519ScReduceForTest(buf);
+        SSF_ASSERT(memcmp(buf, lm1, 32) == 0);
+
+        /* reduce(2^512 - 1) */
+        memset(buf, 0xFF, sizeof(buf));
+        _SSFEd25519ScReduceForTest(buf);
+        SSF_ASSERT(memcmp(buf, _rAllOnes, 32) == 0);
+
+        /* The upper half, which held the rest of the secret nonce hash, is cleared */
+        for (k = 32u; k < 64u; k++) SSF_ASSERT(buf[k] == 0u);
+
+        /* reduce(2^511 + 2^260 + 12345) */
+        memset(buf, 0, sizeof(buf));
+        buf[0] = 0x39u;
+        buf[1] = 0x30u;
+        buf[32] = 0x10u;
+        buf[63] = 0x80u;
+        _SSFEd25519ScReduceForTest(buf);
+        SSF_ASSERT(memcmp(buf, _rMixed, 32) == 0);
+
+        /* muladd((2^256 - 1), (2^256 - 1), (2^256 - 1)) */
+        memset(a, 0xFF, 32);
+        memset(b, 0xFF, 32);
+        memset(c, 0xFF, 32);
+        _SSFEd25519ScMulAddForTest(out, a, b, c);
+        SSF_ASSERT(memcmp(out, _mAllOnes, 32) == 0);
+
+        /* muladd(L - 1, L - 1, L - 1) = (L - 1) * L = 0 mod L */
+        _SSFEd25519ScMulAddForTest(out, lm1, lm1, lm1);
+        for (k = 0u; k < 32u; k++) SSF_ASSERT(out[k] == 0u);
+
+        /* muladd(0, 0, L - 1) = L - 1 */
+        memset(a, 0, 32);
+        memset(b, 0, 32);
+        _SSFEd25519ScMulAddForTest(out, a, b, lm1);
+        SSF_ASSERT(memcmp(out, lm1, 32) == 0);
+
+        /* muladd with a clamped-style 2^254 + ... operand, c = L - 2 */
+        _SSFEd25519ScMulAddForTest(out, _mA, _mB, _mC);
+        SSF_ASSERT(memcmp(out, _mExp, 32) == 0);
+
+        /* out may alias an input, as Sign's S = h * a + r does not but a caller could */
+        memcpy(a, _mA, 32);
+        _SSFEd25519ScMulAddForTest(a, a, _mB, _mC);
+        SSF_ASSERT(memcmp(a, _mExp, 32) == 0);
     }
 
     /* ---- AUDIT E-1: _fe_mul dropped the carry-out of its second 38-fold. Inputs whose     */

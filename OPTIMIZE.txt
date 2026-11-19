@@ -64,7 +64,7 @@ SUMMARY
   BN-O6    Speed+size    ECC 1.23-1.46x emulated ARM32, -381 B M4               M       DONE
   EC-O3    Stack         ECC op peaks 17.5-18.4 KB -> 5.1-7.8 KB on Cortex-M4    M       DONE
   RSA-STK  Stack         RSA sign peak 35.9 -> 24.9 KB (Phase 1 done; 2 open)     M       P1 DONE
-  ED-O1    Size          -7 KB (Ed25519 scalar arithmetic)                     M       OPEN
+  ED-O1    Size          -11.5 KB Cortex-M4 (Ed25519 scalar arithmetic), meas.  M       DONE
   X509-O1  Size          -3.7 KB x509, -1.4 KB cms (Cortex-M4), plus printf    S       DONE
            (CMS-O1)
   BN-O4    Speed         ModMulCT 6.3x at 2048 bits (counted under BN-O5)      M       DONE
@@ -589,7 +589,7 @@ ssfed25519, ssfx25519
   Measured: Ed25519 sign 637 us = fixed-base multiply (about 315 us) + verify-after-sign
   (about 320 us, a deliberate fault-attack countermeasure). Verify 324 us. X25519 172 us.
 
-ED-O1  Size  OPEN  Effort M
+ED-O1  Size  DONE (2026-11-19)  Effort M
   Where:     _sc_muladd (5531 B) and _sc_reduce (2517 B): SUPERCOP ref10's fully unrolled
              scalar arithmetic mod L, 8 KB of the module's 15.5 KB
   Change:    A compact loop-based reduction mod L (the TweetNaCl modL shape: 64 signed
@@ -1232,4 +1232,50 @@ CHANGE LOG
                  "SSFBNMod calls" (ssfbn.h, ssfbn.c).
               Info, unchanged: keygen and key validation still reduce by the even p - 1 and
               q - 1 on the variable-time path (once per key; documented in ssfrsa.md).
+  2026-11-19  ED-O1 DONE (Jim: "Yes"). ref10's unrolled _sc_reduce and _sc_muladd (24 x 21-bit
+              limbs) replaced by one loop-based _sc_modL (TweetNaCl modL shape: 64 signed byte
+              limbs; fold 63..32 down by 2^252 == -(L - 2^252), subtract (x >> 252) * L, one
+              final conditional subtract), shared by reduce and multiply-add. Fixed loops, no
+              data-dependent branches; negative carries use * 256, never a left shift of a
+              negative value. x (the secret nonce or h * a + r) is wiped, and reduce now
+              clears the upper 32 bytes of its buffer (the rest of the nonce hash). _sc_pack,
+              _sc_load3 / 4 and the _sc_pack test wrapper removed; _sc_muladd is SSF_NOINLINE
+              so its 512-byte x stays off Sign's deepest chain.
+              Tests: ssfed25519_ut.c "OPTIMIZE ED-O1" with Python-computed vectors (reduce of
+              0, L - 1, L, 2^252 (bit 252 kept, replacing the old _sc_pack test), 6L - 1,
+              2^512 - 1, a mixed value; muladd of all-ones, (L - 1)^3, 0, a clamped-style
+              operand, aliasing). Every vector passed on the ref10 code first. RED: the
+              upper-half clearing check failed at ssfed25519_ut.c:539 on ref10.
+              GREEN: all 9 suites normal, ASan + UBSan (with the Sign stack-limit test raised
+              for ASan's padded frames: the committed code fails it there too), 32-bit ARM.
+              Differential: 200000 reduce and 200000 muladd cases (random, all-ones,
+              all-zero, clamped b) give the same digest as ref10, every result < L, ASan clean.
+              Mutation: dropping the final subtract, the c term or the top-limb fold, a wrong
+              shift for q, or not clearing the upper half fail the suite; a shorter fold loop
+              (skips a zero byte of L) and floor instead of rounded carries are equivalent
+              (same 400000-case digest).
+              Code (ssfed25519): Cortex-M4 15791 -> 4286 B (-11505), Cortex-M0+ 18063 -> 4684 B
+              (-13379), x86-64 -Os 15208 -> 7216 B. (The -7 KB estimate used function sizes
+              from a different build; at -Os on Cortex-M the inlined ref10 multiply-add made
+              SSFEd25519Sign 7.8 KB by itself.)
+              Stack (Cortex-M4 call graph): Sign peak 2856 -> 2560 B (Sign frame 952 -> 656,
+              _sc_muladd 544 and _sc_reduce 528 are siblings of the verify-after-sign chain);
+              verify 1904 and PubKeyFromSeed 1472 unchanged.
+              Speed: neutral (x86-64 sign 598-605 -> 600-608 us, verify 300-304 -> 302 us;
+              emulated ARM32 3216 -> 3158 / 1605 -> 1579 us); signatures byte-identical.
+              Docs: README Ed25519 row (~12 -> ~7 KB) and footnotes 45 / 46.
+  2026-11-19  ED-O1 AUDIT (Jim: "Do audit first"). Exact Python model of _sc_modL over the
+              all-ones muladd, 3000 random muladd and 3000 random reduce inputs and 2^512 - 1:
+              all correct; largest intermediate 2^31.5 (int64 limit 2^63; int32 would not
+              do). The final carry is 0 or -1, not 0 or 1: subtracting (x >> 252) * L can take
+              x negative since L > 2^252, and the last pass then adds L back. The code is
+              right; two comments said otherwise and are fixed. Constant time: fixed loop
+              bounds, index-only conditionals, no secret-dependent branch. Cortex-M3 note
+              (pre-existing): long multiplies (UMULL / SMULL) on secret limbs are early-
+              terminating there; ref10 used 312 of them, the new loops 4; Cortex-M4 / M7 are
+              fixed-time. Portability: arithmetic right shift of negative int64 is
+              implementation-defined, as ref10 already relied on; no left shift of a negative
+              value; gcc -Wconversion -Wsign-conversion -pedantic clean over the new code.
+              No stray references to the removed _sc_pack / _sc_load3 / 4. Reduce's cleared
+              upper half is unused by every caller (nonce and hram are read as 32 bytes).
 

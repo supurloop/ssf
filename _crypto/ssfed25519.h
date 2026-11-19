@@ -65,8 +65,10 @@ bool SSFEd25519Verify(const uint8_t pubKey[SSF_ED25519_PUB_KEY_SIZE], const uint
 #if SSF_CONFIG_ED25519_UNIT_TEST == 1
 void SSFEd25519UnitTest(void);
 
-/* Test wrapper around the internal scalar-pack (12 x 21-bit limbs -> 32-byte LE scalar). */
-void _SSFEd25519ScPackForTest(uint8_t out[32], const int64_t s[12]);
+/* Test wrappers around the internal scalar reduce (64 bytes in place) and s = a * b + c mod L. */
+void _SSFEd25519ScReduceForTest(uint8_t s[64]);
+void _SSFEd25519ScMulAddForTest(uint8_t s[32], const uint8_t a[32], const uint8_t b[32],
+                                const uint8_t c[32]);
 
 /* Test wrapper around the internal field multiply: out = a * b mod p (32-byte LE in and out). */
 void _SSFEd25519FeMulForTest(uint8_t out[32], const uint8_t a[32], const uint8_t b[32]);

@@ -730,56 +730,56 @@ static void _ge_double_scalarmult(_ge_t *r, const uint8_t a[32], const _ge_t *A,
 /* Scalar arithmetic modulo L (group order, SUPERCOP ref10 24-limb signed representation).       */
 /* --------------------------------------------------------------------------------------------- */
 
-/* Helper functions for scalar loading (21-bit limb representation).                             */
-static uint64_t _sc_load3(const uint8_t *in)
+/* --------------------------------------------------------------------------------------------- */
+/* Writes x mod L to r (32 bytes LE) and wipes x; x is 64 signed byte limbs (OPTIMIZE ED-O1).   */
+/* --------------------------------------------------------------------------------------------- */
+static void _sc_modL(uint8_t r[32], int64_t x[64])
 {
-    return (uint64_t)in[0] | ((uint64_t)in[1] << 8) | ((uint64_t)in[2] << 16);
-}
+    int64_t carry;
+    int64_t q;
+    uint16_t i;
+    uint16_t j;
 
-static uint64_t _sc_load4(const uint8_t *in)
-{
-    return (uint64_t)in[0] | ((uint64_t)in[1] << 8) | ((uint64_t)in[2] << 16) |
-           ((uint64_t)in[3] << 24);
-}
+    SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(x != NULL);
 
-/* Pack 12 signed 21-bit limbs into 32 little-endian bytes.                                      */
-/* Limbs represent value = s0 + s1*2^21 + s2*2^42 + ... + s11*2^231.                            */
-static void _sc_pack(uint8_t out[32], const int64_t s[12])
-{
-    /* Reconstruct the bit stream and pack byte by byte */
-    uint8_t i;
-    uint64_t acc = 0;
-    uint8_t accBits = 0;
-    uint8_t outIdx = 0;
-
-    memset(out, 0, 32);
-    for (i = 0; i < 12u; i++)
+    /* Fold limbs 63..32 down: 2^252 == -(L - 2^252) mod L, so 2^(8i) folds into limbs i - 32.. */
+    for (i = 63u; i >= 32u; i--)
     {
-        int64_t limbMask = (i < 11u) ? (int64_t)0x1FFFFF : (int64_t)0xFFFFFF;
-        acc |= ((uint64_t)(s[i] & limbMask)) << accBits;
-        accBits += 21u;
-        while ((accBits >= 8u) && (outIdx < 32u))
+        carry = 0;
+        for (j = (uint16_t)(i - 32u); j < (uint16_t)(i - 12u); j++)
         {
-            out[outIdx++] = (uint8_t)(acc & 0xFFu);
-            acc >>= 8u;
-            accBits -= 8u;
+            x[j] += carry - (16 * x[i] * (int64_t)_ed_L[j - (i - 32u)]);
+            carry = (x[j] + 128) >> 8;
+            x[j] -= carry * 256;
         }
+        x[j] += carry;
+        x[i] = 0;
     }
-    /* Flush remaining bits */
-    while (outIdx < 32u)
+
+    /* Subtract (x >> 252) * L; L > 2^252, so x may go negative (carry -1); limbs to 8 bits */
+    q = x[31] >> 4;
+    carry = 0;
+    for (j = 0u; j < 32u; j++)
     {
-        out[outIdx++] = (uint8_t)(acc & 0xFFu);
-        acc >>= 8u;
+        x[j] += carry - (q * (int64_t)_ed_L[j]);
+        carry = x[j] >> 8;
+        x[j] &= 255;
     }
+
+    /* The final carry is 0 or -1: subtracting it times L adds L back if x went negative */
+    for (j = 0u; j < 32u; j++) x[j] -= carry * (int64_t)_ed_L[j];
+    for (i = 0u; i < 32u; i++)
+    {
+        x[i + 1u] += x[i] >> 8;
+        r[i] = (uint8_t)(x[i] & 255);
+    }
+
+    /* x held the secret nonce or h * a + r */
+    SSFCryptSecureZero(x, 64u * sizeof(int64_t));
 }
 
 #if SSF_CONFIG_ED25519_UNIT_TEST == 1
-/* Test-only wrapper exposing _sc_pack so a unit test can check the top-limb (bit 252) packing. */
-void _SSFEd25519ScPackForTest(uint8_t out[32], const int64_t s[12])
-{
-    _sc_pack(out, s);
-}
-
 /* Test-only wrapper exposing _fe_mul so a unit test can pin carry-fold edge inputs (AUDIT E-1). */
 void _SSFEd25519FeMulForTest(uint8_t out[32], const uint8_t a[32], const uint8_t b[32])
 {
@@ -821,502 +821,69 @@ bool _SSFEd25519GeDecodeForTest(uint8_t xOut[32], const uint8_t in[32])
 }
 #endif /* SSF_CONFIG_ED25519_UNIT_TEST */
 
-/* Load a 64-byte (512-bit) little-endian integer into 24 signed limbs of ~21 bits each,         */
-/* then reduce modulo L. Output: 32 bytes little-endian.                                         */
+/* --------------------------------------------------------------------------------------------- */
+/* Reduces the 64-byte LE integer in s mod L into s[0..31]; clears s[32..63] (OPTIMIZE ED-O1).  */
+/* --------------------------------------------------------------------------------------------- */
 static void _sc_reduce(uint8_t s[64])
 {
-    int64_t s0  = (int64_t)(2097151u & _sc_load3(&s[0]));
-    int64_t s1  = (int64_t)(2097151u & (_sc_load4(&s[2])  >> 5));
-    int64_t s2  = (int64_t)(2097151u & (_sc_load3(&s[5])  >> 2));
-    int64_t s3  = (int64_t)(2097151u & (_sc_load4(&s[7])  >> 7));
-    int64_t s4  = (int64_t)(2097151u & (_sc_load4(&s[10]) >> 4));
-    int64_t s5  = (int64_t)(2097151u & (_sc_load3(&s[13]) >> 1));
-    int64_t s6  = (int64_t)(2097151u & (_sc_load4(&s[15]) >> 6));
-    int64_t s7  = (int64_t)(2097151u & (_sc_load3(&s[18]) >> 3));
-    int64_t s8  = (int64_t)(2097151u & _sc_load3(&s[21]));
-    int64_t s9  = (int64_t)(2097151u & (_sc_load4(&s[23]) >> 5));
-    int64_t s10 = (int64_t)(2097151u & (_sc_load3(&s[26]) >> 2));
-    int64_t s11 = (int64_t)(2097151u & (_sc_load4(&s[28]) >> 7));
-    int64_t s12 = (int64_t)(2097151u & (_sc_load4(&s[31]) >> 4));
-    int64_t s13 = (int64_t)(2097151u & (_sc_load3(&s[34]) >> 1));
-    int64_t s14 = (int64_t)(2097151u & (_sc_load4(&s[36]) >> 6));
-    int64_t s15 = (int64_t)(2097151u & (_sc_load3(&s[39]) >> 3));
-    int64_t s16 = (int64_t)(2097151u & _sc_load3(&s[42]));
-    int64_t s17 = (int64_t)(2097151u & (_sc_load4(&s[44]) >> 5));
-    int64_t s18 = (int64_t)(2097151u & (_sc_load3(&s[47]) >> 2));
-    int64_t s19 = (int64_t)(2097151u & (_sc_load4(&s[49]) >> 7));
-    int64_t s20 = (int64_t)(2097151u & (_sc_load4(&s[52]) >> 4));
-    int64_t s21 = (int64_t)(2097151u & (_sc_load3(&s[55]) >> 1));
-    int64_t s22 = (int64_t)(2097151u & (_sc_load4(&s[57]) >> 6));
-    int64_t s23 = (int64_t)(_sc_load4(&s[60]) >> 3);
-    int64_t carry0, carry1, carry2, carry3, carry4, carry5, carry6, carry7;
-    int64_t carry8, carry9, carry10, carry11, carry12, carry13, carry14, carry15;
-    int64_t carry16;
+    int64_t x[64];
+    uint16_t i;
 
-    /* Reduce limbs 23..12 into 0..11 by subtracting s_i * L for each high limb. */
+    SSF_REQUIRE(s != NULL);
 
-    s11 += s23 * 666643;
-    s12 += s23 * 470296;
-    s13 += s23 * 654183;
-    s14 -= s23 * 997805;
-    s15 += s23 * 136657;
-    s16 -= s23 * 683901;
-    s23 = 0;
-
-    s10 += s22 * 666643;
-    s11 += s22 * 470296;
-    s12 += s22 * 654183;
-    s13 -= s22 * 997805;
-    s14 += s22 * 136657;
-    s15 -= s22 * 683901;
-    s22 = 0;
-
-    s9  += s21 * 666643;
-    s10 += s21 * 470296;
-    s11 += s21 * 654183;
-    s12 -= s21 * 997805;
-    s13 += s21 * 136657;
-    s14 -= s21 * 683901;
-    s21 = 0;
-
-    s8  += s20 * 666643;
-    s9  += s20 * 470296;
-    s10 += s20 * 654183;
-    s11 -= s20 * 997805;
-    s12 += s20 * 136657;
-    s13 -= s20 * 683901;
-    s20 = 0;
-
-    s7  += s19 * 666643;
-    s8  += s19 * 470296;
-    s9  += s19 * 654183;
-    s10 -= s19 * 997805;
-    s11 += s19 * 136657;
-    s12 -= s19 * 683901;
-    s19 = 0;
-
-    s6  += s18 * 666643;
-    s7  += s18 * 470296;
-    s8  += s18 * 654183;
-    s9  -= s18 * 997805;
-    s10 += s18 * 136657;
-    s11 -= s18 * 683901;
-    s18 = 0;
-
-    /* Carry propagation */
-    carry6  = (s6  + ((int64_t)1 << 20)) >> 21; s7  += carry6;  s6  -= carry6  * ((int64_t)1 << 21);
-    carry8  = (s8  + ((int64_t)1 << 20)) >> 21; s9  += carry8;  s8  -= carry8  * ((int64_t)1 << 21);
-    carry10 = (s10 + ((int64_t)1 << 20)) >> 21; s11 += carry10; s10 -= carry10 * ((int64_t)1 << 21);
-    carry12 = (s12 + ((int64_t)1 << 20)) >> 21; s13 += carry12; s12 -= carry12 * ((int64_t)1 << 21);
-    carry14 = (s14 + ((int64_t)1 << 20)) >> 21; s15 += carry14; s14 -= carry14 * ((int64_t)1 << 21);
-    carry16 = (s16 + ((int64_t)1 << 20)) >> 21; s17 += carry16; s16 -= carry16 * ((int64_t)1 << 21);
-
-    carry7  = (s7  + ((int64_t)1 << 20)) >> 21; s8  += carry7;  s7  -= carry7  * ((int64_t)1 << 21);
-    carry9  = (s9  + ((int64_t)1 << 20)) >> 21; s10 += carry9;  s9  -= carry9  * ((int64_t)1 << 21);
-    carry11 = (s11 + ((int64_t)1 << 20)) >> 21; s12 += carry11; s11 -= carry11 * ((int64_t)1 << 21);
-    carry13 = (s13 + ((int64_t)1 << 20)) >> 21; s14 += carry13; s13 -= carry13 * ((int64_t)1 << 21);
-    carry15 = (s15 + ((int64_t)1 << 20)) >> 21; s16 += carry15; s15 -= carry15 * ((int64_t)1 << 21);
-
-    /* Second reduction round: s12..s17 into s0..s11 */
-    s5  += s17 * 666643;
-    s6  += s17 * 470296;
-    s7  += s17 * 654183;
-    s8  -= s17 * 997805;
-    s9  += s17 * 136657;
-    s10 -= s17 * 683901;
-    s17 = 0;
-
-    s4  += s16 * 666643;
-    s5  += s16 * 470296;
-    s6  += s16 * 654183;
-    s7  -= s16 * 997805;
-    s8  += s16 * 136657;
-    s9  -= s16 * 683901;
-    s16 = 0;
-
-    s3  += s15 * 666643;
-    s4  += s15 * 470296;
-    s5  += s15 * 654183;
-    s6  -= s15 * 997805;
-    s7  += s15 * 136657;
-    s8  -= s15 * 683901;
-    s15 = 0;
-
-    s2  += s14 * 666643;
-    s3  += s14 * 470296;
-    s4  += s14 * 654183;
-    s5  -= s14 * 997805;
-    s6  += s14 * 136657;
-    s7  -= s14 * 683901;
-    s14 = 0;
-
-    s1  += s13 * 666643;
-    s2  += s13 * 470296;
-    s3  += s13 * 654183;
-    s4  -= s13 * 997805;
-    s5  += s13 * 136657;
-    s6  -= s13 * 683901;
-    s13 = 0;
-
-    s0  += s12 * 666643;
-    s1  += s12 * 470296;
-    s2  += s12 * 654183;
-    s3  -= s12 * 997805;
-    s4  += s12 * 136657;
-    s5  -= s12 * 683901;
-    s12 = 0;
-
-    /* Final carry propagation */
-    carry0  = (s0  + ((int64_t)1 << 20)) >> 21; s1  += carry0;  s0  -= carry0  * ((int64_t)1 << 21);
-    carry2  = (s2  + ((int64_t)1 << 20)) >> 21; s3  += carry2;  s2  -= carry2  * ((int64_t)1 << 21);
-    carry4  = (s4  + ((int64_t)1 << 20)) >> 21; s5  += carry4;  s4  -= carry4  * ((int64_t)1 << 21);
-    carry6  = (s6  + ((int64_t)1 << 20)) >> 21; s7  += carry6;  s6  -= carry6  * ((int64_t)1 << 21);
-    carry8  = (s8  + ((int64_t)1 << 20)) >> 21; s9  += carry8;  s8  -= carry8  * ((int64_t)1 << 21);
-    carry10 = (s10 + ((int64_t)1 << 20)) >> 21; s11 += carry10; s10 -= carry10 * ((int64_t)1 << 21);
-
-    carry1  = (s1  + ((int64_t)1 << 20)) >> 21; s2  += carry1;  s1  -= carry1  * ((int64_t)1 << 21);
-    carry3  = (s3  + ((int64_t)1 << 20)) >> 21; s4  += carry3;  s3  -= carry3  * ((int64_t)1 << 21);
-    carry5  = (s5  + ((int64_t)1 << 20)) >> 21; s6  += carry5;  s5  -= carry5  * ((int64_t)1 << 21);
-    carry7  = (s7  + ((int64_t)1 << 20)) >> 21; s8  += carry7;  s7  -= carry7  * ((int64_t)1 << 21);
-    carry9  = (s9  + ((int64_t)1 << 20)) >> 21; s10 += carry9;  s9  -= carry9  * ((int64_t)1 << 21);
-    carry11 = (s11 + ((int64_t)1 << 20)) >> 21; s12 += carry11; s11 -= carry11 * ((int64_t)1 << 21);
-
-    /* One more reduction of s12 */
-    s0  += s12 * 666643;
-    s1  += s12 * 470296;
-    s2  += s12 * 654183;
-    s3  -= s12 * 997805;
-    s4  += s12 * 136657;
-    s5  -= s12 * 683901;
-    s12 = 0;
-
-    carry0  = s0  >> 21; s1  += carry0;  s0  -= carry0  * ((int64_t)1 << 21);
-    carry1  = s1  >> 21; s2  += carry1;  s1  -= carry1  * ((int64_t)1 << 21);
-    carry2  = s2  >> 21; s3  += carry2;  s2  -= carry2  * ((int64_t)1 << 21);
-    carry3  = s3  >> 21; s4  += carry3;  s3  -= carry3  * ((int64_t)1 << 21);
-    carry4  = s4  >> 21; s5  += carry4;  s4  -= carry4  * ((int64_t)1 << 21);
-    carry5  = s5  >> 21; s6  += carry5;  s5  -= carry5  * ((int64_t)1 << 21);
-    carry6  = s6  >> 21; s7  += carry6;  s6  -= carry6  * ((int64_t)1 << 21);
-    carry7  = s7  >> 21; s8  += carry7;  s7  -= carry7  * ((int64_t)1 << 21);
-    carry8  = s8  >> 21; s9  += carry8;  s8  -= carry8  * ((int64_t)1 << 21);
-    carry9  = s9  >> 21; s10 += carry9;  s9  -= carry9  * ((int64_t)1 << 21);
-    carry10 = s10 >> 21; s11 += carry10; s10 -= carry10 * ((int64_t)1 << 21);
-    carry11 = s11 >> 21; s12 += carry11; s11 -= carry11 * ((int64_t)1 << 21);
-
-    s0  += s12 * 666643;
-    s1  += s12 * 470296;
-    s2  += s12 * 654183;
-    s3  -= s12 * 997805;
-    s4  += s12 * 136657;
-    s5  -= s12 * 683901;
-    s12 = 0;
-
-    carry0  = s0  >> 21; s1  += carry0;  s0  -= carry0  * ((int64_t)1 << 21);
-    carry1  = s1  >> 21; s2  += carry1;  s1  -= carry1  * ((int64_t)1 << 21);
-    carry2  = s2  >> 21; s3  += carry2;  s2  -= carry2  * ((int64_t)1 << 21);
-    carry3  = s3  >> 21; s4  += carry3;  s3  -= carry3  * ((int64_t)1 << 21);
-    carry4  = s4  >> 21; s5  += carry4;  s4  -= carry4  * ((int64_t)1 << 21);
-    carry5  = s5  >> 21; s6  += carry5;  s5  -= carry5  * ((int64_t)1 << 21);
-    carry6  = s6  >> 21; s7  += carry6;  s6  -= carry6  * ((int64_t)1 << 21);
-    carry7  = s7  >> 21; s8  += carry7;  s7  -= carry7  * ((int64_t)1 << 21);
-    carry8  = s8  >> 21; s9  += carry8;  s8  -= carry8  * ((int64_t)1 << 21);
-    carry9  = s9  >> 21; s10 += carry9;  s9  -= carry9  * ((int64_t)1 << 21);
-    carry10 = s10 >> 21; s11 += carry10; s10 -= carry10 * ((int64_t)1 << 21);
-
-    /* Pack 12 limbs into 32 bytes */
-    {
-        int64_t limbs[12];
-        limbs[0] = s0; limbs[1] = s1; limbs[2] = s2; limbs[3] = s3;
-        limbs[4] = s4; limbs[5] = s5; limbs[6] = s6; limbs[7] = s7;
-        limbs[8] = s8; limbs[9] = s9; limbs[10] = s10; limbs[11] = s11;
-        _sc_pack(s, limbs);
-    }
+    for (i = 0u; i < 64u; i++) x[i] = (int64_t)s[i];
+    memset(s, 0, 64u);
+    _sc_modL(s, x);
 }
 
-/* Compute s = (a * b + c) mod L.                                                                */
-/* a, b, c are 32-byte LE scalars (already reduced mod L).                                       */
-/* Output s is 32 bytes LE.                                                                      */
+#if SSF_CONFIG_ED25519_UNIT_TEST == 1
+/* Test-only wrapper exposing _sc_reduce: 64-byte LE in, s mod L in the low 32 bytes. */
+void _SSFEd25519ScReduceForTest(uint8_t s[64])
+{
+    SSF_REQUIRE(s != NULL);
+
+    _sc_reduce(s);
+}
+#endif /* SSF_CONFIG_ED25519_UNIT_TEST */
+
+/* --------------------------------------------------------------------------------------------- */
+/* s = (a * b + c) mod L, 32-byte LE operands of any value; s may alias any (OPTIMIZE ED-O1).   */
+/* --------------------------------------------------------------------------------------------- */
+/* Not inlined: its 512-byte x stays off Sign's verify-after-sign chain, the stack peak */
+SSF_NOINLINE
 static void _sc_muladd(uint8_t s[32], const uint8_t a[32], const uint8_t b[32], const uint8_t c[32])
 {
-    int64_t a0  = (int64_t)(2097151u & _sc_load3(&a[0]));
-    int64_t a1  = (int64_t)(2097151u & (_sc_load4(&a[2])  >> 5));
-    int64_t a2  = (int64_t)(2097151u & (_sc_load3(&a[5])  >> 2));
-    int64_t a3  = (int64_t)(2097151u & (_sc_load4(&a[7])  >> 7));
-    int64_t a4  = (int64_t)(2097151u & (_sc_load4(&a[10]) >> 4));
-    int64_t a5  = (int64_t)(2097151u & (_sc_load3(&a[13]) >> 1));
-    int64_t a6  = (int64_t)(2097151u & (_sc_load4(&a[15]) >> 6));
-    int64_t a7  = (int64_t)(2097151u & (_sc_load3(&a[18]) >> 3));
-    int64_t a8  = (int64_t)(2097151u & _sc_load3(&a[21]));
-    int64_t a9  = (int64_t)(2097151u & (_sc_load4(&a[23]) >> 5));
-    int64_t a10 = (int64_t)(2097151u & (_sc_load3(&a[26]) >> 2));
-    int64_t a11 = (int64_t)(_sc_load4(&a[28]) >> 7);
+    int64_t x[64];
+    uint16_t i;
+    uint16_t j;
 
-    int64_t b0  = (int64_t)(2097151u & _sc_load3(&b[0]));
-    int64_t b1  = (int64_t)(2097151u & (_sc_load4(&b[2])  >> 5));
-    int64_t b2  = (int64_t)(2097151u & (_sc_load3(&b[5])  >> 2));
-    int64_t b3  = (int64_t)(2097151u & (_sc_load4(&b[7])  >> 7));
-    int64_t b4  = (int64_t)(2097151u & (_sc_load4(&b[10]) >> 4));
-    int64_t b5  = (int64_t)(2097151u & (_sc_load3(&b[13]) >> 1));
-    int64_t b6  = (int64_t)(2097151u & (_sc_load4(&b[15]) >> 6));
-    int64_t b7  = (int64_t)(2097151u & (_sc_load3(&b[18]) >> 3));
-    int64_t b8  = (int64_t)(2097151u & _sc_load3(&b[21]));
-    int64_t b9  = (int64_t)(2097151u & (_sc_load4(&b[23]) >> 5));
-    int64_t b10 = (int64_t)(2097151u & (_sc_load3(&b[26]) >> 2));
-    int64_t b11 = (int64_t)(_sc_load4(&b[28]) >> 7);
+    SSF_REQUIRE(s != NULL);
+    SSF_REQUIRE(a != NULL);
+    SSF_REQUIRE(b != NULL);
+    SSF_REQUIRE(c != NULL);
 
-    int64_t c0  = (int64_t)(2097151u & _sc_load3(&c[0]));
-    int64_t c1  = (int64_t)(2097151u & (_sc_load4(&c[2])  >> 5));
-    int64_t c2  = (int64_t)(2097151u & (_sc_load3(&c[5])  >> 2));
-    int64_t c3  = (int64_t)(2097151u & (_sc_load4(&c[7])  >> 7));
-    int64_t c4  = (int64_t)(2097151u & (_sc_load4(&c[10]) >> 4));
-    int64_t c5  = (int64_t)(2097151u & (_sc_load3(&c[13]) >> 1));
-    int64_t c6  = (int64_t)(2097151u & (_sc_load4(&c[15]) >> 6));
-    int64_t c7  = (int64_t)(2097151u & (_sc_load3(&c[18]) >> 3));
-    int64_t c8  = (int64_t)(2097151u & _sc_load3(&c[21]));
-    int64_t c9  = (int64_t)(2097151u & (_sc_load4(&c[23]) >> 5));
-    int64_t c10 = (int64_t)(2097151u & (_sc_load3(&c[26]) >> 2));
-    int64_t c11 = (int64_t)(_sc_load4(&c[28]) >> 7);
-
-    int64_t s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11, s12;
-    int64_t s13, s14, s15, s16, s17, s18, s19, s20, s21, s22, s23;
-    int64_t carry0, carry1, carry2, carry3, carry4, carry5, carry6, carry7;
-    int64_t carry8, carry9, carry10, carry11, carry12, carry13, carry14, carry15;
-    int64_t carry16, carry17, carry18, carry19, carry20, carry21, carry22;
-
-    s0  = c0  + a0*b0;
-    s1  = c1  + a0*b1  + a1*b0;
-    s2  = c2  + a0*b2  + a1*b1  + a2*b0;
-    s3  = c3  + a0*b3  + a1*b2  + a2*b1  + a3*b0;
-    s4  = c4  + a0*b4  + a1*b3  + a2*b2  + a3*b1  + a4*b0;
-    s5  = c5  + a0*b5  + a1*b4  + a2*b3  + a3*b2  + a4*b1  + a5*b0;
-    s6  = c6  + a0*b6  + a1*b5  + a2*b4  + a3*b3  + a4*b2  + a5*b1  + a6*b0;
-    s7  = c7  + a0*b7  + a1*b6  + a2*b5  + a3*b4  + a4*b3  + a5*b2  + a6*b1  + a7*b0;
-    s8  = c8  + a0*b8  + a1*b7  + a2*b6  + a3*b5  + a4*b4  + a5*b3  + a6*b2  + a7*b1
-          + a8*b0;
-    s9  = c9  + a0*b9  + a1*b8  + a2*b7  + a3*b6  + a4*b5  + a5*b4  + a6*b3  + a7*b2
-          + a8*b1  + a9*b0;
-    s10 = c10 + a0*b10 + a1*b9  + a2*b8  + a3*b7  + a4*b6  + a5*b5  + a6*b4  + a7*b3
-          + a8*b2  + a9*b1  + a10*b0;
-    s11 = c11 + a0*b11 + a1*b10 + a2*b9  + a3*b8  + a4*b7  + a5*b6  + a6*b5  + a7*b4
-          + a8*b3  + a9*b2  + a10*b1 + a11*b0;
-    s12 =       a1*b11 + a2*b10 + a3*b9  + a4*b8  + a5*b7  + a6*b6  + a7*b5  + a8*b4
-          + a9*b3  + a10*b2 + a11*b1;
-    s13 =       a2*b11 + a3*b10 + a4*b9  + a5*b8  + a6*b7  + a7*b6  + a8*b5  + a9*b4
-          + a10*b3 + a11*b2;
-    s14 =       a3*b11 + a4*b10 + a5*b9  + a6*b8  + a7*b7  + a8*b6  + a9*b5  + a10*b4
-          + a11*b3;
-    s15 =       a4*b11 + a5*b10 + a6*b9  + a7*b8  + a8*b7  + a9*b6  + a10*b5 + a11*b4;
-    s16 =       a5*b11 + a6*b10 + a7*b9  + a8*b8  + a9*b7  + a10*b6 + a11*b5;
-    s17 =       a6*b11 + a7*b10 + a8*b9  + a9*b8  + a10*b7 + a11*b6;
-    s18 =       a7*b11 + a8*b10 + a9*b9  + a10*b8 + a11*b7;
-    s19 =       a8*b11 + a9*b10 + a10*b9 + a11*b8;
-    s20 =       a9*b11 + a10*b10 + a11*b9;
-    s21 =       a10*b11 + a11*b10;
-    s22 =       a11*b11;
-    s23 = 0;
-
-    /* Now reduce exactly as in _sc_reduce */
-    carry0  = (s0  + ((int64_t)1 << 20)) >> 21; s1  += carry0;  s0  -= carry0  * ((int64_t)1 << 21);
-    carry2  = (s2  + ((int64_t)1 << 20)) >> 21; s3  += carry2;  s2  -= carry2  * ((int64_t)1 << 21);
-    carry4  = (s4  + ((int64_t)1 << 20)) >> 21; s5  += carry4;  s4  -= carry4  * ((int64_t)1 << 21);
-    carry6  = (s6  + ((int64_t)1 << 20)) >> 21; s7  += carry6;  s6  -= carry6  * ((int64_t)1 << 21);
-    carry8  = (s8  + ((int64_t)1 << 20)) >> 21; s9  += carry8;  s8  -= carry8  * ((int64_t)1 << 21);
-    carry10 = (s10 + ((int64_t)1 << 20)) >> 21; s11 += carry10; s10 -= carry10 * ((int64_t)1 << 21);
-    carry12 = (s12 + ((int64_t)1 << 20)) >> 21; s13 += carry12; s12 -= carry12 * ((int64_t)1 << 21);
-    carry14 = (s14 + ((int64_t)1 << 20)) >> 21; s15 += carry14; s14 -= carry14 * ((int64_t)1 << 21);
-    carry16 = (s16 + ((int64_t)1 << 20)) >> 21; s17 += carry16; s16 -= carry16 * ((int64_t)1 << 21);
-    carry18 = (s18 + ((int64_t)1 << 20)) >> 21; s19 += carry18; s18 -= carry18 * ((int64_t)1 << 21);
-    carry20 = (s20 + ((int64_t)1 << 20)) >> 21; s21 += carry20; s20 -= carry20 * ((int64_t)1 << 21);
-    carry22 = (s22 + ((int64_t)1 << 20)) >> 21; s23 += carry22; s22 -= carry22 * ((int64_t)1 << 21);
-
-    carry1  = (s1  + ((int64_t)1 << 20)) >> 21; s2  += carry1;  s1  -= carry1  * ((int64_t)1 << 21);
-    carry3  = (s3  + ((int64_t)1 << 20)) >> 21; s4  += carry3;  s3  -= carry3  * ((int64_t)1 << 21);
-    carry5  = (s5  + ((int64_t)1 << 20)) >> 21; s6  += carry5;  s5  -= carry5  * ((int64_t)1 << 21);
-    carry7  = (s7  + ((int64_t)1 << 20)) >> 21; s8  += carry7;  s7  -= carry7  * ((int64_t)1 << 21);
-    carry9  = (s9  + ((int64_t)1 << 20)) >> 21; s10 += carry9;  s9  -= carry9  * ((int64_t)1 << 21);
-    carry11 = (s11 + ((int64_t)1 << 20)) >> 21; s12 += carry11; s11 -= carry11 * ((int64_t)1 << 21);
-    carry13 = (s13 + ((int64_t)1 << 20)) >> 21; s14 += carry13; s13 -= carry13 * ((int64_t)1 << 21);
-    carry15 = (s15 + ((int64_t)1 << 20)) >> 21; s16 += carry15; s15 -= carry15 * ((int64_t)1 << 21);
-    carry17 = (s17 + ((int64_t)1 << 20)) >> 21; s18 += carry17; s17 -= carry17 * ((int64_t)1 << 21);
-    carry19 = (s19 + ((int64_t)1 << 20)) >> 21; s20 += carry19; s19 -= carry19 * ((int64_t)1 << 21);
-    carry21 = (s21 + ((int64_t)1 << 20)) >> 21; s22 += carry21; s21 -= carry21 * ((int64_t)1 << 21);
-
-    /* Reduce high limbs */
-    s11 += s23 * 666643;
-    s12 += s23 * 470296;
-    s13 += s23 * 654183;
-    s14 -= s23 * 997805;
-    s15 += s23 * 136657;
-    s16 -= s23 * 683901;
-    s23 = 0;
-
-    s10 += s22 * 666643;
-    s11 += s22 * 470296;
-    s12 += s22 * 654183;
-    s13 -= s22 * 997805;
-    s14 += s22 * 136657;
-    s15 -= s22 * 683901;
-    s22 = 0;
-
-    s9  += s21 * 666643;
-    s10 += s21 * 470296;
-    s11 += s21 * 654183;
-    s12 -= s21 * 997805;
-    s13 += s21 * 136657;
-    s14 -= s21 * 683901;
-    s21 = 0;
-
-    s8  += s20 * 666643;
-    s9  += s20 * 470296;
-    s10 += s20 * 654183;
-    s11 -= s20 * 997805;
-    s12 += s20 * 136657;
-    s13 -= s20 * 683901;
-    s20 = 0;
-
-    s7  += s19 * 666643;
-    s8  += s19 * 470296;
-    s9  += s19 * 654183;
-    s10 -= s19 * 997805;
-    s11 += s19 * 136657;
-    s12 -= s19 * 683901;
-    s19 = 0;
-
-    s6  += s18 * 666643;
-    s7  += s18 * 470296;
-    s8  += s18 * 654183;
-    s9  -= s18 * 997805;
-    s10 += s18 * 136657;
-    s11 -= s18 * 683901;
-    s18 = 0;
-
-    carry6  = (s6  + ((int64_t)1 << 20)) >> 21; s7  += carry6;  s6  -= carry6  * ((int64_t)1 << 21);
-    carry8  = (s8  + ((int64_t)1 << 20)) >> 21; s9  += carry8;  s8  -= carry8  * ((int64_t)1 << 21);
-    carry10 = (s10 + ((int64_t)1 << 20)) >> 21; s11 += carry10; s10 -= carry10 * ((int64_t)1 << 21);
-    carry12 = (s12 + ((int64_t)1 << 20)) >> 21; s13 += carry12; s12 -= carry12 * ((int64_t)1 << 21);
-    carry14 = (s14 + ((int64_t)1 << 20)) >> 21; s15 += carry14; s14 -= carry14 * ((int64_t)1 << 21);
-    carry16 = (s16 + ((int64_t)1 << 20)) >> 21; s17 += carry16; s16 -= carry16 * ((int64_t)1 << 21);
-
-    carry7  = (s7  + ((int64_t)1 << 20)) >> 21; s8  += carry7;  s7  -= carry7  * ((int64_t)1 << 21);
-    carry9  = (s9  + ((int64_t)1 << 20)) >> 21; s10 += carry9;  s9  -= carry9  * ((int64_t)1 << 21);
-    carry11 = (s11 + ((int64_t)1 << 20)) >> 21; s12 += carry11; s11 -= carry11 * ((int64_t)1 << 21);
-    carry13 = (s13 + ((int64_t)1 << 20)) >> 21; s14 += carry13; s13 -= carry13 * ((int64_t)1 << 21);
-    carry15 = (s15 + ((int64_t)1 << 20)) >> 21; s16 += carry15; s15 -= carry15 * ((int64_t)1 << 21);
-
-    /* Second reduction round */
-    s5  += s17 * 666643;
-    s6  += s17 * 470296;
-    s7  += s17 * 654183;
-    s8  -= s17 * 997805;
-    s9  += s17 * 136657;
-    s10 -= s17 * 683901;
-    s17 = 0;
-
-    s4  += s16 * 666643;
-    s5  += s16 * 470296;
-    s6  += s16 * 654183;
-    s7  -= s16 * 997805;
-    s8  += s16 * 136657;
-    s9  -= s16 * 683901;
-    s16 = 0;
-
-    s3  += s15 * 666643;
-    s4  += s15 * 470296;
-    s5  += s15 * 654183;
-    s6  -= s15 * 997805;
-    s7  += s15 * 136657;
-    s8  -= s15 * 683901;
-    s15 = 0;
-
-    s2  += s14 * 666643;
-    s3  += s14 * 470296;
-    s4  += s14 * 654183;
-    s5  -= s14 * 997805;
-    s6  += s14 * 136657;
-    s7  -= s14 * 683901;
-    s14 = 0;
-
-    s1  += s13 * 666643;
-    s2  += s13 * 470296;
-    s3  += s13 * 654183;
-    s4  -= s13 * 997805;
-    s5  += s13 * 136657;
-    s6  -= s13 * 683901;
-    s13 = 0;
-
-    s0  += s12 * 666643;
-    s1  += s12 * 470296;
-    s2  += s12 * 654183;
-    s3  -= s12 * 997805;
-    s4  += s12 * 136657;
-    s5  -= s12 * 683901;
-    s12 = 0;
-
-    /* Final carry propagation */
-    carry0  = (s0  + ((int64_t)1 << 20)) >> 21; s1  += carry0;  s0  -= carry0  * ((int64_t)1 << 21);
-    carry2  = (s2  + ((int64_t)1 << 20)) >> 21; s3  += carry2;  s2  -= carry2  * ((int64_t)1 << 21);
-    carry4  = (s4  + ((int64_t)1 << 20)) >> 21; s5  += carry4;  s4  -= carry4  * ((int64_t)1 << 21);
-    carry6  = (s6  + ((int64_t)1 << 20)) >> 21; s7  += carry6;  s6  -= carry6  * ((int64_t)1 << 21);
-    carry8  = (s8  + ((int64_t)1 << 20)) >> 21; s9  += carry8;  s8  -= carry8  * ((int64_t)1 << 21);
-    carry10 = (s10 + ((int64_t)1 << 20)) >> 21; s11 += carry10; s10 -= carry10 * ((int64_t)1 << 21);
-
-    carry1  = (s1  + ((int64_t)1 << 20)) >> 21; s2  += carry1;  s1  -= carry1  * ((int64_t)1 << 21);
-    carry3  = (s3  + ((int64_t)1 << 20)) >> 21; s4  += carry3;  s3  -= carry3  * ((int64_t)1 << 21);
-    carry5  = (s5  + ((int64_t)1 << 20)) >> 21; s6  += carry5;  s5  -= carry5  * ((int64_t)1 << 21);
-    carry7  = (s7  + ((int64_t)1 << 20)) >> 21; s8  += carry7;  s7  -= carry7  * ((int64_t)1 << 21);
-    carry9  = (s9  + ((int64_t)1 << 20)) >> 21; s10 += carry9;  s9  -= carry9  * ((int64_t)1 << 21);
-    carry11 = (s11 + ((int64_t)1 << 20)) >> 21; s12 += carry11; s11 -= carry11 * ((int64_t)1 << 21);
-
-    s0  += s12 * 666643;
-    s1  += s12 * 470296;
-    s2  += s12 * 654183;
-    s3  -= s12 * 997805;
-    s4  += s12 * 136657;
-    s5  -= s12 * 683901;
-    s12 = 0;
-
-    carry0  = s0  >> 21; s1  += carry0;  s0  -= carry0  * ((int64_t)1 << 21);
-    carry1  = s1  >> 21; s2  += carry1;  s1  -= carry1  * ((int64_t)1 << 21);
-    carry2  = s2  >> 21; s3  += carry2;  s2  -= carry2  * ((int64_t)1 << 21);
-    carry3  = s3  >> 21; s4  += carry3;  s3  -= carry3  * ((int64_t)1 << 21);
-    carry4  = s4  >> 21; s5  += carry4;  s4  -= carry4  * ((int64_t)1 << 21);
-    carry5  = s5  >> 21; s6  += carry5;  s5  -= carry5  * ((int64_t)1 << 21);
-    carry6  = s6  >> 21; s7  += carry6;  s6  -= carry6  * ((int64_t)1 << 21);
-    carry7  = s7  >> 21; s8  += carry7;  s7  -= carry7  * ((int64_t)1 << 21);
-    carry8  = s8  >> 21; s9  += carry8;  s8  -= carry8  * ((int64_t)1 << 21);
-    carry9  = s9  >> 21; s10 += carry9;  s9  -= carry9  * ((int64_t)1 << 21);
-    carry10 = s10 >> 21; s11 += carry10; s10 -= carry10 * ((int64_t)1 << 21);
-    carry11 = s11 >> 21; s12 += carry11; s11 -= carry11 * ((int64_t)1 << 21);
-
-    s0  += s12 * 666643;
-    s1  += s12 * 470296;
-    s2  += s12 * 654183;
-    s3  -= s12 * 997805;
-    s4  += s12 * 136657;
-    s5  -= s12 * 683901;
-    s12 = 0;
-
-    carry0  = s0  >> 21; s1  += carry0;  s0  -= carry0  * ((int64_t)1 << 21);
-    carry1  = s1  >> 21; s2  += carry1;  s1  -= carry1  * ((int64_t)1 << 21);
-    carry2  = s2  >> 21; s3  += carry2;  s2  -= carry2  * ((int64_t)1 << 21);
-    carry3  = s3  >> 21; s4  += carry3;  s3  -= carry3  * ((int64_t)1 << 21);
-    carry4  = s4  >> 21; s5  += carry4;  s4  -= carry4  * ((int64_t)1 << 21);
-    carry5  = s5  >> 21; s6  += carry5;  s5  -= carry5  * ((int64_t)1 << 21);
-    carry6  = s6  >> 21; s7  += carry6;  s6  -= carry6  * ((int64_t)1 << 21);
-    carry7  = s7  >> 21; s8  += carry7;  s7  -= carry7  * ((int64_t)1 << 21);
-    carry8  = s8  >> 21; s9  += carry8;  s8  -= carry8  * ((int64_t)1 << 21);
-    carry9  = s9  >> 21; s10 += carry9;  s9  -= carry9  * ((int64_t)1 << 21);
-    carry10 = s10 >> 21; s11 += carry10; s10 -= carry10 * ((int64_t)1 << 21);
-
-    /* Pack 12 limbs into 32 bytes */
+    /* Schoolbook a * b + c in byte limbs: each limb stays below 32 * 255^2 + 255 */
+    for (i = 0u; i < 64u; i++) x[i] = (i < 32u) ? (int64_t)c[i] : 0;
+    for (i = 0u; i < 32u; i++)
     {
-        int64_t limbs[12];
-        limbs[0] = s0; limbs[1] = s1; limbs[2] = s2; limbs[3] = s3;
-        limbs[4] = s4; limbs[5] = s5; limbs[6] = s6; limbs[7] = s7;
-        limbs[8] = s8; limbs[9] = s9; limbs[10] = s10; limbs[11] = s11;
-        _sc_pack(s, limbs);
+        for (j = 0u; j < 32u; j++) x[i + j] += (int64_t)a[i] * (int64_t)b[j];
     }
+    _sc_modL(s, x);
 }
+
+#if SSF_CONFIG_ED25519_UNIT_TEST == 1
+/* Test-only wrapper exposing _sc_muladd: s = (a * b + c) mod L, 32-byte LE operands. */
+void _SSFEd25519ScMulAddForTest(uint8_t s[32], const uint8_t a[32], const uint8_t b[32],
+                                const uint8_t c[32])
+{
+    SSF_REQUIRE(s != NULL);
+    SSF_REQUIRE(a != NULL);
+    SSF_REQUIRE(b != NULL);
+    SSF_REQUIRE(c != NULL);
+
+    _sc_muladd(s, a, b, c);
+}
+#endif /* SSF_CONFIG_ED25519_UNIT_TEST */
 
 /* Check if a 32-byte scalar is less than L. Returns true if s < L. */
 static bool _sc_is_lt_L(const uint8_t s[32])

@@ -24,6 +24,13 @@ extern "C" {
 /* Maximum Subject Alternative Name entries retained in SSFX509Cert_t.san; extras are skipped.   */
 #define SSF_X509_CONFIG_MAX_SAN_ENTRIES      (8u)
 
+/* Minimum RSA modulus size in bits for any RSA key used to verify a signature (certificates,   */
+/* chains, CMS signers). Smaller keys are refused even when the signature is mathematically     */
+/* valid, as are keys whose public exponent is even or below 3 (AUDIT RSA-10). Must be >= 1024. */
+#ifndef SSF_X509_CONFIG_RSA_MIN_BITS
+#define SSF_X509_CONFIG_RSA_MIN_BITS         (2048u)
+#endif
+
 #ifdef __cplusplus
 }
 #endif

@@ -150,7 +150,11 @@ comparable security.
   hostile key / DER input instead of aborting — safe to call on attacker-controlled bytes.
   Note that the decoders enforce only these structural bounds; the exact-size and exponent
   policy (bit length in the enabled set, `e >= 65537`) is applied by `SSFRSAPubKeyIsValid()`
-  and `SSFRSAPrivKeyIsValid()`, not by the verify entry points.
+  and `SSFRSAPrivKeyIsValid()`, not by the verify entry points. Certificate and CMS
+  verification apply their own key-strength rule before calling them (modulus at least
+  `SSF_X509_CONFIG_RSA_MIN_BITS`, default 2048, and an odd `e >= 3`; see
+  [`ssfx509`](../_codec/ssfx509.md#ssfx509verifysignature)); direct callers of the verify
+  functions should check the key themselves.
 - **PSS verify is constant-time end-to-end.** The trailer byte, top-bit mask, MGF1 unmask,
   PS-zero scan, salt separator, and final `H == H'` comparison are all folded into a
   single-byte XOR/OR accumulator (`diff`) so the wall-clock time to reach the final

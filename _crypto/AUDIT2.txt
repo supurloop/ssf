@@ -52,7 +52,8 @@ SUMMARY
                      FIXED (Batch C): BN-11, RSA-12
                      FIXED (Batch D): BN-12, BN-13
                      DOC (Batch E): RSA-9, HMAC-1, PRNG-3
-                     OPEN: RSA-10
+                     FIXED (Batch F): RSA-10
+                     OPEN: none
 
   No memory-safety defect reachable from hostile input was found. The first-pass fixes
   (decoder bounds, carry folds, authenticate-before-decrypt, CT nonce/blind handling) hold.
@@ -367,7 +368,7 @@ RSA-9  Low  DOC (2026-11-19, Batch E)  [code-read]
              (3) Document as accepted given blinding.  Recommend (3) now, (1)/(2) if RSA
              signing is used where timing is observable.
 
-RSA-10  Low  OPEN  [code-read]
+RSA-10  Low  FIXED (2026-11-19, Batch F)  [code-read; fix verified red/green]
   Location:  ssfrsa.c:242-297 (_SSFRSAPubKeyDecode), :1111 SSFRSAVerifyPKCS1, :1331 SSFRSAVerifyPSS;
              ssfrsa.md:139-141; callers ../_codec/ssfx509.c:2752, :2803
   Problem:   The verify entry points apply only structural bounds: any odd modulus up to
@@ -677,3 +678,22 @@ CHANGE LOG
               state (key = new entropy, counter = 0) rather than mixing like an SP 800-90A
               reseed, that every reseed therefore needs full-strength entropy, and that this is
               deliberate so a seed always reproduces the same stream.
+  2026-11-19  Batch F: RSA-10 FIXED via option 2 (Jim approved the _codec change). New build
+              option SSF_X509_CONFIG_RSA_MIN_BITS (default 2048, _opt/ssfx509_opt.h, #error if
+              < 1024). New private _SSFX509RSAKeyPolicyOK parses the RSAPublicKey and requires
+              bitLen(n) >= SSF_X509_CONFIG_RSA_MIN_BITS and an odd e >= 3; SSFX509VerifySignature
+              calls it before SSFRSAVerifyPKCS1 and before SSFRSAVerifyPSS and returns false
+              (with a trace) when the key fails. Every certificate, chain and CMS signer RSA check
+              goes through SSFX509VerifySignature, so the policy covers them all.
+              Test (ssfx509_ut.c "AUDIT RSA-10", stub SSFX509Cert_t with an rsaEncryption key):
+              OpenSSL-generated RSA-2048 e = 3 key and SHA-256 PKCS#1 signature must verify
+              (allowed side of the boundary); OpenSSL RSA-1024 key with a valid signature must be
+              refused (gated on MIN_BITS > 1024); a 2048-bit odd n with e = 1 and the PKCS#1 EM
+              itself as the "signature" must be refused.
+              RED: ssfx509_ut.c:8304 (RSA-1024 accepted); with HEAD's ssfx509.c and
+              -DSSF_X509_CONFIG_RSA_MIN_BITS=1024u, ssfx509_ut.c:8329 (e = 1 accepted).
+              GREEN: ssfx509, ssfcms, ssfbase64url, ssfmatch at the default and at
+              MIN_BITS=1024. The existing x509 / CMS fixtures use only RSA-2048/3072/4096 and pass
+              unchanged. Docs: ssfx509.md (configuration row, SSFX509VerifySignature policy),
+              ssfrsa.md (verify entry points vs certificate policy). Linux direct gcc build.
+              With this, every AUDIT2 item is FIXED or DOC.

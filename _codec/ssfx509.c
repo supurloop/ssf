@@ -39,6 +39,10 @@
 #include "ssfed25519.h"
 #include "ssfstr.h"
 
+#if SSF_X509_CONFIG_RSA_MIN_BITS < 1024u
+#error SSF_X509_CONFIG_RSA_MIN_BITS must be >= 1024.
+#endif
+
 /* Module-scope trace context for chain verification (set by caller before SSFVerifyChain) */
 static SSFTLSTraceCtx_t _ssfx509TraceCtx;
 
@@ -2510,6 +2514,65 @@ static bool _SSFX509DigestAgrees(const uint8_t *digestOidOpt, uint32_t digestOid
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Returns true if RSAPublicKey der has n of at least the minimum size and an odd e >= 3.        */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFX509RSAKeyPolicyOK(const uint8_t *der, uint32_t derLen)
+{
+    SSFASN1Cursor_t cursor;
+    SSFASN1Cursor_t inner;
+    SSFASN1Cursor_t next;
+    const uint8_t *n;
+    uint32_t nLen;
+    const uint8_t *e;
+    uint32_t eLen;
+    uint32_t nBits;
+    uint8_t top;
+
+    SSF_REQUIRE(der != NULL);
+    SSF_REQUIRE(derLen > 0u);
+
+    cursor.buf = der;
+    cursor.bufLen = derLen;
+    if (!SSFASN1DecOpenConstructed(&cursor, SSF_ASN1_TAG_SEQUENCE, &inner, &next)) return false;
+    if (!SSFASN1DecGetUInt(&inner, &n, &nLen, &inner)) return false;
+    if (!SSFASN1DecGetUInt(&inner, &e, &eLen, &inner)) return false;
+
+    /* Drop the INTEGER sign bytes to get the magnitudes */
+    while ((nLen > 0u) && (*n == 0u)) { n++; nLen--; }
+    while ((eLen > 0u) && (*e == 0u)) { e++; eLen--; }
+
+    /* Is either value zero? */
+    if ((nLen == 0u) || (eLen == 0u))
+    {
+        /* Yes, not a usable RSA key */
+        return false;
+    }
+    /* No, measure the modulus */
+    nBits = (nLen - 1u) * 8u;
+    top = n[0];
+    while (top != 0u)
+    {
+        nBits++;
+        top >>= 1;
+    }
+
+    /* Is the modulus smaller than the configured minimum (AUDIT RSA-10)? */
+    if (nBits < SSF_X509_CONFIG_RSA_MIN_BITS)
+    {
+        /* Yes, a key this short may be factorable */
+        return false;
+    }
+    /* No, is the exponent even, or 1 (a signature that anyone can produce)? */
+    if (((e[eLen - 1u] & 1u) == 0u) || ((eLen == 1u) && (e[0] < 3u)))
+    {
+        /* Yes, refuse it */
+        return false;
+    }
+    /* No, the key meets the policy */
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Returns true if oid names SHA-256, SHA-384 or SHA-512 with *hashOut set, else false.           */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFX509HashFromOID(const uint8_t *oid, uint32_t oidLen, SSFRSAHash_t *hashOut)
@@ -2748,6 +2811,16 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
         }
         _SSFX509Digest(hashId, data, dataLen, hash, &hashLen);
 
+        /* Does the RSA key meet the size and exponent policy (AUDIT RSA-10)? */
+        if (!_SSFX509RSAKeyPolicyOK(keyCert->pubKey, keyCert->pubKeyLen))
+        {
+            /* No, refuse it even if the signature would verify */
+            SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+                "VerifySig: RSA key below policy (min %u bits, odd e >= 3)",
+                (unsigned int)SSF_X509_CONFIG_RSA_MIN_BITS);
+            return false;
+        }
+        /* Yes, verify the signature */
         /* keyCert's pubKey is the DER RSAPublicKey held in the SPKI BIT STRING */
         ok = SSFRSAVerifyPKCS1(keyCert->pubKey, (size_t)keyCert->pubKeyLen, hashId, hash, hashLen,
                                sig, (size_t)sigLen);
@@ -2800,6 +2873,16 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
                 (unsigned int)hashLen);
             return false;
         }
+        /* Does the RSA key meet the size and exponent policy (AUDIT RSA-10)? */
+        if (!_SSFX509RSAKeyPolicyOK(keyCert->pubKey, keyCert->pubKeyLen))
+        {
+            /* No, refuse it even if the signature would verify */
+            SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+                "VerifySig: RSA key below policy (min %u bits, odd e >= 3)",
+                (unsigned int)SSF_X509_CONFIG_RSA_MIN_BITS);
+            return false;
+        }
+        /* Yes, verify the signature */
         ok = SSFRSAVerifyPSS(keyCert->pubKey, (size_t)keyCert->pubKeyLen, hashId, hash, hashLen,
                              (size_t)saltLen, sig, (size_t)sigLen);
         SSF_TLS_TRACE_CERT_DEBUG(&_ssfx509TraceCtx,

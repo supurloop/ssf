@@ -250,6 +250,7 @@ Options live in [`_opt/ssfx509_opt.h`](../_opt/ssfx509_opt.h).
 | <a id="cfg-max-extensions"></a>`SSF_X509_CONFIG_MAX_EXTENSIONS` | `16` | Number of extension records retained in `SSFX509Cert_t.exts[]`. A certificate with more extensions fails to parse, so the critical-extension and duplicate checks always see every extension. Raise it if a deployment's certificates legitimately carry more. |
 | <a id="cfg-max-name-constraints"></a>`SSF_X509_CONFIG_MAX_NAME_CONSTRAINTS` | `8` | Number of `dNSName` / `iPAddress` permitted subtrees and, separately, excluded subtrees retained per CA certificate. A certificate with more fails to parse, because dropping an exclusion would loosen the constraint. Raise it if a deployment's CAs legitimately carry more. |
 | <a id="cfg-max-san-entries"></a>`SSF_X509_CONFIG_MAX_SAN_ENTRIES` | `8` | Number of Subject Alternative Name entries retained in `SSFX509Cert_t.san[]`. Excess entries are dropped and cannot match a hostname. |
+| <a id="cfg-rsa-min-bits"></a>`SSF_X509_CONFIG_RSA_MIN_BITS` | `2048` | Smallest RSA modulus, in bits, accepted for any RSA key used to verify a signature (certificate signatures, chains, CMS signers). Smaller keys are refused even when the signature is mathematically valid, because keys that short can be factored. Must be `>= 1024`; lower it to `1024` only to interoperate with legacy certificates you trust. |
 
 The unit-test entry point is gated by `SSF_CONFIG_X509_UNIT_TEST` in `ssfport.h`.
 
@@ -558,6 +559,13 @@ the scheme and, where it implies one, the hash; the optional digest algorithm OI
 hash for `rsaEncryption` and must agree with the implied hash everywhere else. This is the
 primitive CMS and other detached-signature formats need; the supported pairings are listed under
 **Signature verification** in [Notes](#notes).
+
+For RSA (PKCS#1 v1.5 and PSS) the key must also pass a strength policy before the signature is
+checked: the modulus must be at least [`SSF_X509_CONFIG_RSA_MIN_BITS`](#cfg-rsa-min-bits) bits
+(default 2048) and the public exponent must be odd and at least 3. A key that fails returns
+`false` even if the signature would verify: a short key can be factored and an exponent of 1
+makes the padded message its own signature. Because certificate, chain and CMS verification all
+go through this function, the policy applies to every RSA key they use.
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|

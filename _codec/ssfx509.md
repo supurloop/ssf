@@ -184,12 +184,13 @@ X.509 v3 certificate support per RFC 5280, built on [`ssfasn1`](ssfasn1.md):
   certificate's own TBS and signature. RSA-PSS is
   verified with the `saltLength` declared in the certificate's PSS parameters, or 20 when the
   field is absent, since RFC 4055 declares `DEFAULT 20` and DER omits default values (OpenSSL
-  writes salt-20 certificates this way). Salt lengths above the hash length are rejected, and
-  MGF1 over the same hash is assumed: a `maskGenAlgorithm` field, if present, is skipped unread.
-  Absent PSS parameters select SHA-1 per RFC 4055, which this module does not support, so such
-  certificates fail to verify. A `hashAlgorithm` OID other than SHA-384 or SHA-512 is treated as
-  SHA-256, so a signature made with SHA-256 under an unrecognized hash OID verifies and any other
-  fails.
+  writes salt-20 certificates this way). Salt lengths above the hash length are rejected. The
+  parameters are parsed strictly and fail verification unless they are one SEQUENCE with, in
+  order: `hashAlgorithm` SHA-256, SHA-384 or SHA-512 (NULL or absent parameters); a
+  `maskGenAlgorithm` of MGF1 over that same hash; an optional valid `saltLength`; an optional
+  `trailerField` of 1; and nothing else. Because `hashAlgorithm` and `maskGenAlgorithm` default
+  to SHA-1 and MGF1-SHA-1 in RFC 4055, which this module does not support, absent parameters, or
+  parameters that omit either field, fail to verify; no other hash is ever substituted.
 - **Generation uses measure-then-write.** Call [`SSFX509EncodeTBS()`](#ssfx509encodetbs) or
   [`SSFX509EncodeCert()`](#ssfx509encodecert) with `bufOpt == NULL` to learn the exact size in
   `*lenOut`, then again with a buffer. The usual flow is: encode the TBS, sign those exact bytes with

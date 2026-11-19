@@ -590,7 +590,7 @@ X509-6  Medium  FIXED (2026-11-18)  [demonstrated] [verified 2026-11-18]  (root 
              would otherwise stay silently non-critical.
              (2) Treat any BOOLEAN-tagged element that does not decode as critical = true.
 
-X509-7  Medium  OPEN  [demonstrated]
+X509-7  Medium  FIXED (2026-11-18)  [demonstrated]
   Location:  ssfx509.c:157-225 (_SSFX509ParsePSSParams), 2358-2390; ssfx509.md:170-174
   Problem:   The .md says "Absent PSS parameters select SHA-1 per RFC 4055, which this module
              does not support, so such certificates fail to verify". The code comment at
@@ -1405,3 +1405,22 @@ CHANGE LOG
               matches host 10.1.2.3; dNSName *.0.0.1 and 10.0.0.1 do not match host 10.0.0.1;
               dNSName ::1 does not match host ::1. RED: ssfx509_ut.c:5818 (the NC bypass
               matched). GREEN: ssfx509, ssfcms, ssfbase64url, ssfmatch (default set).
+  2026-11-18  X509-7 FIXED via option 1 (strict). _SSFX509ParsePSSParams now returns bool, and
+              SSFX509VerifySignature fails (with a trace) when it returns false. It requires one
+              SEQUENCE holding, in order: [0] hashAlgorithm SHA-256/384/512 with NULL or absent
+              parameters; [1] maskGenAlgorithm id-mgf1 over that same hash; optional [2]
+              saltLength (valid unsigned INTEGER, default 20); optional [3] trailerField equal to
+              1; nothing else and nothing after. New helper _SSFX509PSSHashAlgId and OID
+              _oidMGF1. Absent parameters, NULL, SHA-1 (also by default), unknown hashes,
+              absent or mismatched MGF, bad trailerField, trailing bytes and out-of-order fields
+              all fail; no hash is substituted. ssfx509.md PSS paragraph rewritten. Test block
+              "AUDIT X509-7" in ssfx509_ut.c: 14 parameter encodings generated with computed DER
+              lengths, each in a cert self-signed with SHA-256 / MGF1-SHA-256 / salt 32; three
+              valid forms verify (NULL hash params, absent hash params, trailerField 1) and
+              eleven invalid forms do not. Existing tests: nine SHA-2 PSS fixtures that omitted
+              [1] (so declared MGF1-SHA-1 while SSF signs with MGF1 over the same hash) gained an
+              explicit [1] MGF1 field; "unknown hash OID verifies" and "maskGenAlgorithm is
+              skipped" now expect false. ssfcms fixtures needed no change. RED:
+              ssfx509_ut.c:7214 (params without [0] verified). GREEN: ssfx509, ssfcms, ssfrsa,
+              ssfasn1, ssfbase64url, ssfmatch (RSA and ASN1 unit tests enabled for the run; flags
+              restored).

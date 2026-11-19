@@ -116,6 +116,10 @@ static const uint8_t _oidSHA384[] = {
 static const uint8_t _oidSHA512[] = {
     0x60u, 0x86u, 0x48u, 0x01u, 0x65u, 0x03u, 0x04u, 0x02u, 0x03u
 };
+/* id-mgf1: 1.2.840.113549.1.1.8 */
+static const uint8_t _oidMGF1[] = {
+    0x2Au, 0x86u, 0x48u, 0x86u, 0xF7u, 0x0Du, 0x01u, 0x01u, 0x08u
+};
 
 /* Extended Key Usage OIDs (RFC 5280 Section 4.2.1.12) */
 /* id-kp-serverAuth: 1.3.6.1.5.5.7.3.1 */
@@ -155,83 +159,160 @@ static bool _SSFX509OIDMatch(const uint8_t *a, uint32_t aLen, const uint8_t *b, 
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Decodes RSASSA-PSS-params (RFC 4055 Section 3.1) into the hash and salt length to verify with. */
+/* Returns true if cursor holds exactly one SHA-2 AlgorithmIdentifier, setting *hashOut.          */
 /* --------------------------------------------------------------------------------------------- */
-static void _SSFX509ParsePSSParams(const uint8_t *params, uint32_t paramsLen, SSFRSAHash_t *hashOut,
-                            uint32_t *saltLenOut)
+static bool _SSFX509PSSHashAlgId(const SSFASN1Cursor_t *cursor, SSFRSAHash_t *hashOut)
+{
+    SSFASN1Cursor_t algIdInner;
+    SSFASN1Cursor_t after;
+    const uint8_t *oidRaw;
+    uint32_t oidRawLen;
+
+    SSF_REQUIRE(cursor != NULL);
+    SSF_REQUIRE(hashOut != NULL);
+
+    /* Is it one AlgorithmIdentifier SEQUENCE starting with an OID, and nothing after it? */
+    if ((!SSFASN1DecOpenConstructed(cursor, SSF_ASN1_TAG_SEQUENCE, &algIdInner, &after)) ||
+        (!SSFASN1DecIsEmpty(&after)) ||
+        (!SSFASN1DecGetOIDRaw(&algIdInner, &oidRaw, &oidRawLen, &algIdInner)))
+    {
+        /* No */
+        return false;
+    }
+    /* Yes, are parameters present that are anything other than a lone NULL? */
+    if ((!SSFASN1DecIsEmpty(&algIdInner)) &&
+        ((!SSFASN1DecGetNull(&algIdInner, &algIdInner)) || (!SSFASN1DecIsEmpty(&algIdInner))))
+    {
+        /* Yes */
+        return false;
+    }
+    /* No, absent or NULL; is the OID a supported SHA-2 hash? */
+    if (_SSFX509OIDMatch(oidRaw, oidRawLen, _oidSHA256, sizeof(_oidSHA256)))
+    {
+        /* Yes, SHA-256 */
+        *hashOut = SSF_RSA_HASH_SHA256;
+    }
+    else if (_SSFX509OIDMatch(oidRaw, oidRawLen, _oidSHA384, sizeof(_oidSHA384)))
+    {
+        /* Yes, SHA-384 */
+        *hashOut = SSF_RSA_HASH_SHA384;
+    }
+    else if (_SSFX509OIDMatch(oidRaw, oidRawLen, _oidSHA512, sizeof(_oidSHA512)))
+    {
+        /* Yes, SHA-512 */
+        *hashOut = SSF_RSA_HASH_SHA512;
+    }
+    else
+    {
+        /* No, SHA-1 or unknown */
+        return false;
+    }
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if params are RSASSA-PSS-params SSF verifies (RFC 4055 3.1), setting hash/salt.   */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFX509ParsePSSParams(const uint8_t *params, uint32_t paramsLen, SSFRSAHash_t *hashOut,
+                                   uint32_t *saltLenOut)
 {
     SSFASN1Cursor_t cursor;
     SSFASN1Cursor_t seqInner;
     SSFASN1Cursor_t fieldInner;
-    SSFASN1Cursor_t algIdInner;
-    const uint8_t *hashOidRaw;
-    uint32_t hashOidRawLen;
-    uint64_t saltLen;
+    SSFASN1Cursor_t mgfInner;
+    SSFASN1Cursor_t after;
+    const uint8_t *oidRaw;
+    uint32_t oidRawLen;
+    SSFRSAHash_t mgfHash;
+    uint64_t val;
     uint16_t tag;
 
     SSF_REQUIRE((params != NULL) || (paramsLen == 0u));
     SSF_REQUIRE(hashOut != NULL);
     SSF_REQUIRE(saltLenOut != NULL);
 
-    /* RFC 4055 DEFAULTs, which DER omits: hashAlgorithm sha1 (unsupported, so SHA-256 is used  */
-    /* and verification fails closed) and saltLength 20                                          */
-    *hashOut = SSF_RSA_HASH_SHA256;
-    *saltLenOut = 20u;
-
-    /* Parameters present? */
+    /* Are the parameters absent (AUDIT X509-7)? */
     if ((params == NULL) || (paramsLen == 0u))
     {
-        /* No, every field takes its default */
-        return;
+        /* Yes, the RFC 4055 defaults select SHA-1, which is not supported */
+        return false;
     }
+    /* No, are they exactly one SEQUENCE? */
     cursor.buf = params;
     cursor.bufLen = paramsLen;
-    if (!SSFASN1DecOpenConstructed(&cursor, SSF_ASN1_TAG_SEQUENCE, &seqInner, &cursor)) return;
-
-    /* [0] hashAlgorithm present? */
-    if (SSFASN1DecPeekTag(&seqInner, &tag) && (tag == SSF_ASN1_CONTEXT_EXPLICIT(0)))
+    if ((!SSFASN1DecOpenConstructed(&cursor, SSF_ASN1_TAG_SEQUENCE, &seqInner, &after)) ||
+        (!SSFASN1DecIsEmpty(&after)))
     {
-        /* Yes, map its OID; an unknown OID keeps SHA-256 so verification fails closed */
-        if (!SSFASN1DecOpenConstructed(&seqInner, SSF_ASN1_CONTEXT_EXPLICIT(0), &fieldInner,
-                                       &seqInner)) return;
-        if (!SSFASN1DecOpenConstructed(&fieldInner, SSF_ASN1_TAG_SEQUENCE, &algIdInner,
-                                       &fieldInner)) return;
-        if (!SSFASN1DecGetOIDRaw(&algIdInner, &hashOidRaw, &hashOidRawLen, &algIdInner)) return;
-        if (_SSFX509OIDMatch(hashOidRaw, hashOidRawLen, _oidSHA384, sizeof(_oidSHA384)))
-        {
-            *hashOut = SSF_RSA_HASH_SHA384;
-        }
-        else if (_SSFX509OIDMatch(hashOidRaw, hashOidRawLen, _oidSHA512, sizeof(_oidSHA512)))
-        {
-            *hashOut = SSF_RSA_HASH_SHA512;
-        }
+        /* No */
+        return false;
     }
+    /* Yes */
 
-    /* [1] maskGenAlgorithm present? */
-    if (SSFASN1DecPeekTag(&seqInner, &tag) && (tag == SSF_ASN1_CONTEXT_EXPLICIT(1)))
+    /* Is [0] hashAlgorithm present and a supported SHA-2 hash (its default SHA-1 is not)? */
+    if ((!SSFASN1DecOpenConstructed(&seqInner, SSF_ASN1_CONTEXT_EXPLICIT(0), &fieldInner,
+                                    &seqInner)) || (!_SSFX509PSSHashAlgId(&fieldInner, hashOut)))
     {
-        /* Yes, skip it; MGF1 over the same hash is the only form supported */
-        if (!SSFASN1DecSkip(&seqInner, &seqInner)) return;
+        /* No */
+        return false;
     }
+    /* Yes */
 
-    /* [2] saltLength present? */
+    /* Is [1] maskGenAlgorithm present as MGF1 over that same hash (default MGF1-SHA-1 is not)? */
+    if ((!SSFASN1DecOpenConstructed(&seqInner, SSF_ASN1_CONTEXT_EXPLICIT(1), &fieldInner,
+                                    &seqInner)) ||
+        (!SSFASN1DecOpenConstructed(&fieldInner, SSF_ASN1_TAG_SEQUENCE, &mgfInner, &after)) ||
+        (!SSFASN1DecIsEmpty(&after)) ||
+        (!SSFASN1DecGetOIDRaw(&mgfInner, &oidRaw, &oidRawLen, &mgfInner)) ||
+        (!_SSFX509OIDMatch(oidRaw, oidRawLen, _oidMGF1, sizeof(_oidMGF1))) ||
+        (!_SSFX509PSSHashAlgId(&mgfInner, &mgfHash)) || (mgfHash != *hashOut))
+    {
+        /* No */
+        return false;
+    }
+    /* Yes */
+
+    /* Is [2] saltLength present? */
+    *saltLenOut = 20u;
     if (SSFASN1DecPeekTag(&seqInner, &tag) && (tag == SSF_ASN1_CONTEXT_EXPLICIT(2)))
     {
-        /* Yes, take the declared value; oversize values are capped and rejected by the caller */
-        if (!SSFASN1DecOpenConstructed(&seqInner, SSF_ASN1_CONTEXT_EXPLICIT(2), &fieldInner,
-                                       &seqInner)) return;
-        /* Is the saltLength a valid unsigned INTEGER (AUDIT ASN1-1)? */
-        if (SSFASN1DecGetIntU64(&fieldInner, &saltLen, &fieldInner))
+        /* Yes, is it exactly one valid unsigned INTEGER (AUDIT ASN1-1)? */
+        if ((!SSFASN1DecOpenConstructed(&seqInner, SSF_ASN1_CONTEXT_EXPLICIT(2), &fieldInner,
+                                        &seqInner)) ||
+            (!SSFASN1DecGetIntU64(&fieldInner, &val, &fieldInner)) ||
+            (!SSFASN1DecIsEmpty(&fieldInner)))
         {
-            /* Yes */
-            *saltLenOut = (saltLen > 255u) ? 255u : (uint32_t)saltLen;
+            /* No */
+            return false;
         }
-        else
-        {
-            /* No, never fall back to the default; 255 exceeds every hash and is rejected */
-            *saltLenOut = 255u;
-        }
+        /* Yes, oversize values are capped and rejected by the caller */
+        *saltLenOut = (val > 255u) ? 255u : (uint32_t)val;
     }
+    /* No, the default 20 applies */
+
+    /* Is [3] trailerField present? */
+    if (SSFASN1DecPeekTag(&seqInner, &tag) && (tag == SSF_ASN1_CONTEXT_EXPLICIT(3)))
+    {
+        /* Yes, it must be exactly INTEGER 1 (trailerFieldBC) */
+        if ((!SSFASN1DecOpenConstructed(&seqInner, SSF_ASN1_CONTEXT_EXPLICIT(3), &fieldInner,
+                                        &seqInner)) ||
+            (!SSFASN1DecGetIntU64(&fieldInner, &val, &fieldInner)) ||
+            (!SSFASN1DecIsEmpty(&fieldInner)) || (val != 1u))
+        {
+            /* No */
+            return false;
+        }
+        /* Yes */
+    }
+    /* No, the default 1 applies */
+
+    /* Is anything left: an unknown, repeated or out-of-order field? */
+    if (!SSFASN1DecIsEmpty(&seqInner))
+    {
+        /* Yes */
+        return false;
+    }
+    /* No */
+    return true;
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -2506,7 +2587,15 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
     if (_SSFX509OIDMatch(sigAlgOidRaw, sigAlgOidRawLen, _oidRSAPSS, sizeof(_oidRSAPSS)))
     {
         /* Yes */
-        _SSFX509ParsePSSParams(sigAlgParamsOpt, sigAlgParamsLen, &hashId, &saltLen);
+        /* Are the RSASSA-PSS-params well formed and supported (AUDIT X509-7)? */
+        if (!_SSFX509ParsePSSParams(sigAlgParamsOpt, sigAlgParamsLen, &hashId, &saltLen))
+        {
+            /* No, never verify under substituted defaults */
+            SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+                "VerifySig: RSA-PSS parameters absent, malformed or unsupported");
+            return false;
+        }
+        /* Yes */
 
         /* Digest algorithm, when given, is the hash the parameters select? */
         impliedOid = _SSFX509OIDForHash(hashId, &impliedOidLen);

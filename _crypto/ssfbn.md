@@ -250,7 +250,7 @@ The `ssfrsa` and `ssfbn` modules sanity-check against this macro at compile time
 | | [`bool SSFBNModInv(r, a, m)`](#modinv) | `r = a⁻¹ mod m` via Fermat's little theorem (prime `m`) |
 | | [`bool SSFBNModInvSmall(r, a, m)`](#modinvsmall) | `r = a⁻¹ mod m`, Fermat at curve width (prime `m` of at most `SSF_BN_SMALL_MAX_LIMBS` limbs); constant-time |
 | | [`void SSFBNModMulSmall(r, a, b, m)`](#modinvsmall) | `r = (a × b) mod m` at curve width (odd `m`, `b < m`); constant-time |
-| | [`bool SSFBNModInvExt(r, a, m)`](#modinv) | `r = a⁻¹ mod m` via binary extended GCD (any coprime `m`) |
+| | [`bool SSFBNModInvExt(r, a, m)`](#modinv) | `r = a⁻¹ mod m` via binary extended GCD (odd `m`) or extended Euclid (any coprime `m`); variable-time |
 | | [`void SSFBNGcd(r, a, b)`](#ssfbngcd) | `r = gcd(a, b)` via binary GCD |
 
 **[Montgomery multiplication](#mont)**
@@ -621,14 +621,17 @@ modulus (the RSA / DH case) — go through the Montgomery path
 void SSFBNModMulCT(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *m);
 ```
 `r = (a × b) mod m`. Same result as [`SSFBNModMul`](#ssfbnmodmul) **provided at least one of
-`a` or `b` is `< m`** (enforced by `SSF_REQUIRE`; the fixed-iteration reduction is only exact
-when `a × b < m × 2^(32·len+1)`, which that guarantees). The iteration count and per-iteration
-work do not depend on the values of `a`, `b`, or intermediate state — only on the limb count
-of `m`. **Constant-time** — use this when `a`
-or `b` are secret (e.g., ECDSA signing's `k⁻¹` and `d`-derived operands modulo the curve
-order). Cost: ~2–3× slower than `SSFBNModMul` for typical inputs because it always does
-worst-case work. Algorithm: schoolbook multiply (already CT) followed by fixed-iteration
-shift-and-subtract reduction with branchless mask-conditional commits.
+`a` or `b` is `< m`** (enforced by `SSF_REQUIRE`). **Constant-time** — use this when `a` or `b`
+are secret (e.g., RSA's blinding and CRT recombination). The algorithm depends only on the
+parity of `m`, which is public:
+
+- **Odd `m`** (every in-tree caller: RSA's `n`, `p`, `q` and the prime moduli of
+  [`SSFBNModInv`](#modinv)'s check): `MontMul(MontMul(a, b), R²)` through a Montgomery context
+  built for the call, exact because `a × b < m × R` when one operand is `< m` (OPTIMIZE BN-O4,
+  about 7× faster than the fallback at 2048 bits). Its intermediate and context are wiped.
+- **Even `m`**: schoolbook multiply (already CT) followed by a fixed-iteration
+  shift-and-subtract reduction with branchless mask-conditional commits; the iteration count
+  and per-iteration work depend only on the limb count of `m`.
 
 <a id="ssfbnmodsquare"></a>
 ```c
@@ -687,10 +690,12 @@ bool SSFBNModInvExt(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m);
   fails and the function returns `false`, so it is safe to call on any modulus, but it is only
   *useful* (yields a result) when `m` is prime. Use this on secret `a`
   whenever `m` is a curve order, a field prime, or a Diffie-Hellman group order.
-- [`SSFBNModInvExt`](#modinv) uses the binary extended Euclidean algorithm. Works for any
-  coprime `a` and `m`. **Variable-time** — do not use on secret inputs. Use this only when
-  the modulus is known non-prime (e.g., RSA's `phi(n)` or CRT helpers) and the inputs are
-  not secret.
+- [`SSFBNModInvExt`](#modinv) works for any coprime `a` and `m`. For odd `m` and
+  `0 < a < m` it runs the binary extended GCD (halvings and subtractions only; OPTIMIZE BN-O5,
+  about 6× faster at 2048 bits); for even `m` (RSA keygen's `λ(n)`) or an unreduced `a` it
+  runs extended Euclid. **Variable-time** in both paths — do not use on long-term secrets.
+  RSA signing uses it for the per-signature blinding inverse `r⁻¹ mod n` of a fresh random
+  `r`, the timing exposure accepted in AUDIT RSA-9; the binary path's intermediates are wiped.
 
 <a id="modinvsmall"></a>
 ```c

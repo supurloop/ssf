@@ -117,8 +117,8 @@ comparable security.
   sign; this is defended by the built-in verify-after-sign check (see below). The blinding
   and the fresh `r` are the reason signing now requires platform entropy on every call.
 - **Two steps of the private-key operation are variable-time, by design.** `r⁻¹ mod n` is
-  computed with the extended-Euclid [`SSFBNModInvExt()`](ssfbn.md#modinv), whose run time
-  depends on `r`, and the blinded input is reduced by the secret primes with
+  computed with [`SSFBNModInvExt()`](ssfbn.md#modinv) (the binary extended GCD for odd `n`),
+  whose run time depends on `r`, and the blinded input is reduced by the secret primes with
   [`SSFBNMod()`](ssfbn.md#ssfbnmod) (`cB mod p`, `cB mod q`), whose run time depends on the
   quotient bits. Neither exposes the message or the CRT exponents directly: `r` is fresh
   random on every call and never reused, `cB` is randomized by `r^e`, and the exponentiations

@@ -325,6 +325,9 @@ extern uint32_t _SSFBNMontSqrCarryIters;
 
 /* Test-only count of full-width entry points (ModExpMont[Pub], ModMulCT, ModInvExt, ModMul). */
 extern uint32_t _SSFBNFullWidthCalls;
+
+/* Test-only count of the slow ModMulCT / ModInvExt algorithms (shift-subtract, Euclid: BN-O4/5) */
+extern uint32_t _SSFBNSlowPathCalls;
 #endif /* SSF_CONFIG_BN_UNIT_TEST */
 
 #ifdef __cplusplus

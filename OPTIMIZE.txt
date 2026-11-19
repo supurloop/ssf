@@ -60,13 +60,13 @@ SUMMARY
   BN-O3    Speed         MontSquare 2.1x measured; with O1+O2 RSA verify 5.3x  S       DONE
   BN-O1    Speed         MontInit 5.8x; RSA-2048 verify 2.7x measured          S       DONE
   BN-O2    Speed         MontMul +20% measured (1.6x on emulated ARM32)        S       DONE
-  BN-O5    Speed         RSA sign -1.8 ms (about -35% after O1..O3)            M       OPEN
+  BN-O5    Speed         with BN-O4: RSA-2048 sign 2.0x (5.4 -> 2.7 ms)        M       DONE
   BN-O6    Speed+size    ECC 1.23-1.46x emulated ARM32, -381 B M4               M       DONE
   EC-O3    Stack         ECC op peaks 17.5-18.4 KB -> 5.1-7.8 KB on Cortex-M4    M       DONE
   ED-O1    Size          -7 KB (Ed25519 scalar arithmetic)                     M       OPEN
   X509-O1  Size          -3.7 KB x509, -1.4 KB cms (Cortex-M4), plus printf    S       DONE
            (CMS-O1)
-  BN-O4    Speed         RSA sign -0.6 ms                                      M       OPEN
+  BN-O4    Speed         ModMulCT 6.3x at 2048 bits (counted under BN-O5)      M       DONE
   ED-O3    Speed         Ed25519 verify 1.4x                                   M       OPEN
   FE-O1    Speed         X25519 / Ed25519 +15-35%                              S-M     OPEN
   X509-O4  Stack         chain verify 14.5 KB -> about 4 KB (high risk)        L       OPEN
@@ -388,7 +388,7 @@ BN-O3  Speed  DONE (2026-11-19)  Effort S  [implemented, red/green]
              unchanged (< 2m). Covered by every Montgomery vector; add a randomized
              MontSquare == MontMul(a, a) cross-check to ssfbn_ut when implementing.
 
-BN-O4  Speed  OPEN  Effort M
+BN-O4  Speed  DONE (2026-11-19)  Effort M  [with BN-O5; measured under BN-O5]
   Where:     SSFBNModMulCT (fixed 32n + 1 rounds of a 2n-limb subtract, select and
              shift-right-by-one: about 190 n^2 limb operations; 283 us at 2048 bits). RSA
              signing calls it 3 times (blinding c * r^e, CRT recombination h * qInv, unblinding
@@ -401,7 +401,7 @@ BN-O4  Speed  OPEN  Effort M
   Risk:      MontMul requires a->len == b->len == m->len and a, b < m (the BN-10 precondition
              ModMulCT already documents). Constant-time: MontMul is CT.
 
-BN-O5  Speed  OPEN  Effort M
+BN-O5  Speed  DONE (2026-11-19)  Effort M  [with BN-O4]
   Where:     SSFBNModInvExt (extended Euclid built on SSFBNDivMod, which is bit-serial: 2.2 ms
              at 2048 bits, 44 us at 256 bits). RSA signing calls it once for the blinding
              inverse r^-1 mod n: after BN-O1..O3 that is about 40% of RSA-2048 sign time.
@@ -415,6 +415,23 @@ BN-O5  Speed  OPEN  Effort M
              factor r (AUDIT RSA-9 accepted that timing). A binary xgcd is also variable-time
              in its inputs, so this does not change the accepted exposure. The Fermat-in-CRT
              alternative is CT if constant-time behaviour is wanted.
+  Prototype (scratchpad; ssfbn, ssfrsa, ssfec, ssfecdsa, ssfx509, ssfcms tests pass):
+             BN-O4: SSFBNModMulCT dispatches odd m to MontMul(MontMul(a, b), R^2) and keeps
+             the shift-subtract body for even m (and keeps the AUDIT BN-1 "a < m or b < m"
+             REQUIRE). BN-O5: SSFBNModInvExt dispatches odd m with 0 < a < m to a binary
+             extended GCD (u, v, x1, x2; halving mod m; subtract the smaller) and keeps the
+             Euclid body for even m (RSA keygen's d = e^-1 mod lambda) and other inputs. Both
+             old bodies move to static helpers so the fast paths do not zero-fill their
+             buffers.
+  Measured:  2048-bit, x86-64 -O2: SSFBNModMulCT 282 -> 42 us (6.8x), SSFBNModInvExt
+             2223 -> 391 us (5.7x). RSA-2048 sign (both together): x86-64 5528-5622 ->
+             2737-2802 us (2.0x); emulated ARM32 32689 -> 16637 us (1.96x). Verify unchanged.
+             Code (arm-none-eabi-gcc -Os, ssfbn): Cortex-M4 14979 -> 15747 B (+768),
+             Cortex-M0+ 17555 -> 18309 B (+754), prototype quality (no full DBC).
+             Stack (Cortex-M4): fast-path frames ModMulCT 3144 -> 24 + 1600 B, ModInvExt
+             9352 -> 16 + 2120 B; call-graph peaks unchanged (RSA sign 36.7 KB, keygen
+             36.6 KB), because the old bodies stay reachable and the peak is elsewhere in the
+             private-key chain.
 
 BN-O6  Speed + stack  DONE (2026-11-19)  Effort M  [implemented; measured below]
   Where:     SSFBN_DEFINE zero-fills its whole storage. Locals declared at SSF_BN_MAX_LIMBS
@@ -990,3 +1007,61 @@ CHANGE LOG
               GREEN x86-64 (normal and ASan + UBSan): all 8 suites. Sizes after the fixes,
               Cortex-M4: SSFBNModInvSmall 580 B, SSFBNModMulSmall 288 B (M0+ 596 / 348 B);
               frames unchanged (1216 / 208 B).
+  2026-11-19  BN-O4 and BN-O5 DONE (Jim: "Do both"). SSFBNModMulCT and SSFBNModInvExt are
+              dispatchers; their old bodies are the static _SSFBNModMulCTShift and
+              _SSFBNModInvExtEuclid (unchanged, still used for even m, and for ModInvExt when a
+              is 0 or not below m). Odd m goes to _SSFBNModMulCTMont (MontMul(MontMul(a, b),
+              R^2) at SSF_BN_MAX_MOD_LIMBS, CT, AUDIT BN-1's "a < m or b < m" REQUIRE kept in
+              the dispatcher, intermediate and context wiped) and to _SSFBNModInvBinary
+              (binary extended GCD with _SSFBNHalveMod; variable-time like the Euclid path; u,
+              v, x1, x2 wiped).
+              Test hook _SSFBNSlowPathCalls counts entries to the two old bodies. RED:
+              ssfrsa_ut.c "OPTIMIZE BN-O4 / BN-O5" (RSA-2048 PKCS#1 and PSS signing must not
+              enter them) failed at ssfrsa_ut.c:2027. ssfbn_ut.c "OPTIMIZE BN-O4 / BN-O5":
+              ModMulCT against SSFBNModMul for odd moduli of 1-64 limbs (full-width, all-ones,
+              top limb 1, a composite 3 * odd), also in place and with an all-ones a >= m;
+              ModInvExt true exactly when SSFBNGcd(a, m) == 1, then a * r == 1 and r < m, in
+              place; 5^-1 mod 21 = 17 and 3 mod 21 rejected; an even modulus still takes both
+              old paths (counter == 2); fast-path wipes (4 scrub calls each). A degenerate
+              m == 1 case in my first test draft was a test bug (the Euclid path, correctly,
+              has always rejected it) and is skipped.
+              Mutation check (new block run first): halving without adding m, returning x1
+              instead of x2 and a Montgomery path without the R^2 step are caught by the block;
+              a flipped u >= v comparison makes the binary GCD loop forever, so the suite
+              never completes (exit 124 under timeout) rather than failing an assertion.
+              GREEN x86-64 (normal and ASan + UBSan) and 32-bit ARM (qemu-arm): all 8 suites.
+              Code and stack: see the audit entry below (the first figures recorded here were
+              measured with the unit-test hooks compiled in and are withdrawn).
+              Speed, 2048-bit, x86-64 -O2: SSFBNModMulCT 277 -> 44 us (6.3x), SSFBNModInvExt
+              2238 -> 393 us (5.7x). RSA-2048 sign: x86-64 5317-5500 -> 2709-2781 us (2.0x);
+              emulated ARM32 28641 -> 14268 us (2.0x). Verify unchanged.
+              Docs: ssfbn.md (ModMulCT section, ModInvExt bullet and API row; the old text called
+              the Euclid path "binary extended Euclidean"), ssfrsa.md (variable-time note).
+  2026-11-19  BN-O4 / BN-O5 short audit (Jim: "short audit that includes fixes to 1 and 2").
+              (2) Fixed: _SSFBNModInvBinary asserts if it passes 2 * 32 * len + 1 times (each
+              pass after a subtraction halves at least once, and u + v has at most 64 * len
+              bits to lose). The flipped-comparison mutant that hung the suite now fails at
+              that assertion at once; correct code never nears it.
+              (1) Code size: the extra size is SSF_REQUIRE sites. Jim chose to drop only the
+              checks in the two old bodies (_SSFBNModMulCTShift, _SSFBNModInvExtEuclid) that
+              repeat, word for word, those of their only callers; each now carries a one-line
+              note that its caller validates. The three new helpers keep full DBC.
+              Measurement correction: ssfassert.h includes the repository's ssfport.h from its
+              own directory, so a "clean" -I copy does not shield a compile from the background
+              ARM build's temporary unit-test flags. The BN-O4 / BN-O5 sizes first reported
+              (committed 15916, current 17380, trimmed 15788 B) mixed hook-on and hook-off
+              objects; the "128 B smaller than committed" claim made when Jim chose the trim
+              was wrong. Re-measured with every object checked for _SSFBNScrubTestHook (absent)
+              and ssfport.h confirmed clean: Cortex-M4 ssfbn 14952 -> 16088 B before the trim
+              -> 15812 B final (+860 B); Cortex-M0+ 17528 -> 18804 -> 18424 B (+896 B). The
+              BN-O6 and EC-O3 objects were re-checked: no hooks, figures stand.
+              Stack (Cortex-M4 frames, clean): SSFBNModMulCT 3144 B -> 32 B + 1600 B
+              (_SSFBNModMulCTMont), SSFBNModInvExt 9352 B -> 16 B + 2120 B (_SSFBNModInvBinary);
+              the old bodies keep their frames, so call-graph peaks do not move.
+              Oracle: 3000 random odd moduli of 1-64 limbs (all-ones, small top limb,
+              composites 3 * odd; a = 1, m - 1, 3 and random) against Python under ASan + UBSan:
+              ModMulCT and ModInvExt match in every case (810 with gcd != 1), no report.
+              Noted, pre-existing (AUDIT BN-1): ModMulCT's "a < m or b < m" REQUIRE uses
+              SSFBNCmp, which stops at the first differing limb, so its time depends slightly on
+              the secret operand's top limbs although its comment says branch-free.
+              GREEN after the fixes: x86-64 normal and ASan + UBSan, all 8 suites, no warnings.

@@ -1998,6 +1998,35 @@ void SSFRSAUnitTest(void)
                                         dbcSigBuf, 256u));
 #endif /* SSF_RSA_CONFIG_ENABLE_PSS */
     }
+
+#if (SSF_CONFIG_BN_UNIT_TEST == 1) && (SSF_RSA_CONFIG_ENABLE_2048 == 1)
+    /* ---- OPTIMIZE BN-O4 / BN-O5: RSA signing never takes the slow ModMulCT / ModInvExt ---- */
+    /* Every modulus a signature uses (n, p, q) is odd, so the blinding inverse must take the  */
+    /* binary GCD and every constant-time product the Montgomery path.                         */
+    {
+        static uint8_t privKeyDer[SSF_RSA_MAX_PRIV_KEY_DER_SIZE];
+        static uint8_t pubKeyDer[SSF_RSA_MAX_PUB_KEY_DER_SIZE];
+        uint8_t hash[32];
+        uint8_t sig[SSF_RSA_MAX_KEY_BYTES];
+        size_t privKeyDerLen;
+        size_t pubKeyDerLen;
+        size_t sigLen;
+
+        SSFSHA256((const uint8_t *)"slow path", 9, hash, sizeof(hash));
+        SSF_ASSERT(SSFRSAKeyGen(2048u, privKeyDer, sizeof(privKeyDer), &privKeyDerLen,
+                                pubKeyDer, sizeof(pubKeyDer), &pubKeyDerLen) == true);
+        _SSFBNSlowPathCalls = 0u;
+        SSF_ASSERT(SSFRSASignPKCS1(privKeyDer, privKeyDerLen, SSF_RSA_HASH_SHA256, hash,
+                                   sizeof(hash), sig, sizeof(sig), &sigLen) == true);
+        SSF_ASSERT(SSFRSAVerifyPKCS1(pubKeyDer, pubKeyDerLen, SSF_RSA_HASH_SHA256, hash,
+                                     sizeof(hash), sig, sigLen) == true);
+#if SSF_RSA_CONFIG_ENABLE_PSS == 1
+        SSF_ASSERT(SSFRSASignPSS(privKeyDer, privKeyDerLen, SSF_RSA_HASH_SHA256, hash,
+                                 sizeof(hash), sig, sizeof(sig), &sigLen) == true);
+#endif /* SSF_RSA_CONFIG_ENABLE_PSS */
+        SSF_ASSERT(_SSFBNSlowPathCalls == 0u);
+    }
+#endif /* SSF_CONFIG_BN_UNIT_TEST && SSF_RSA_CONFIG_ENABLE_2048 */
 #endif /* SSF_RSA_ANY_ENABLED */
 }
 #ifdef _WIN32

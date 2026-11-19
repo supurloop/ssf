@@ -3918,6 +3918,128 @@ void SSFBNUnitTest(void)
         SSF_ASSERT(_scrubDirty == 0u);
     }
 
+    /* ---- OPTIMIZE BN-O4 / BN-O5: Montgomery ModMulCT and binary-GCD ModInvExt (odd m) ---- */
+    /* ModMulCT against SSFBNModMul for odd moduli of 1-64 limbs (one operand may be >= m), an */
+    /* even modulus still on the shift-subtract path; ModInvExt by a * r == 1 and r < m, false  */
+    /* exactly when gcd(a, m) != 1 (SSFBNGcd), odd composites included; both wipe.             */
+    {
+        static const uint16_t lens[] = { 1u, 2u, 3u, 5u, 8u, 12u, 16u, 32u, 33u, 64u };
+        SSFBN_DEFINE(m, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(b, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(r, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(ref, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(g, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(one, SSF_BN_MAX_LIMBS);
+        uint16_t li;
+        uint16_t k;
+        uint32_t seed;
+        uint32_t slow;
+        bool coprime;
+
+        for (li = 0u; li < (uint16_t)(sizeof(lens) / sizeof(lens[0])); li++)
+        {
+            uint16_t n = lens[li];
+
+            if (n > (SSF_BN_MAX_LIMBS / 2u)) continue;
+            for (seed = 1u; seed <= 6u; seed++)
+            {
+                /* Seed 3 at one limb would be m == 1 (no meaningful inverse): skip it */
+                if ((seed == 3u) && (n == 1u)) continue;
+
+                /* Odd modulus: full width, all-ones, or a top limb of 1; seed 6 is composite */
+                m.len = n;
+                for (k = 0u; k < n; k++)
+                {
+                    m.limbs[k] = (SSFBNLimb_t)(0x9E3779B9u * (uint32_t)(k + (seed * 7u)));
+                }
+                if (seed == 2u) for (k = 0u; k < n; k++) m.limbs[k] = 0xFFFFFFFFu;
+                if (seed == 3u) m.limbs[n - 1u] = 1u;
+                m.limbs[0] |= 1u;
+                if ((seed != 3u) && (seed != 6u)) m.limbs[n - 1u] |= 0x80000000u;
+                if (seed == 6u)
+                {
+                    /* Composite: 3 * (odd base with two bits of headroom), still n limbs */
+                    m.limbs[n - 1u] = (SSFBNLimb_t)((m.limbs[n - 1u] & 0x3FFFFFFFu) | 1u);
+                    SSFBNMulUint32(&g, &m, 3u);
+                    SSFBNCopy(&m, &g);
+                    m.len = n;
+                    SSF_ASSERT(SSFBNModUint32(&m, 3u) == 0u);
+                }
+                SSFBNSetOne(&one, n);
+
+                _SSFBNUTFillBelow(&a, &m, seed * 11u);
+                _SSFBNUTFillBelow(&b, &m, seed * 13u);
+
+                /* ModMulCT: b < m, a < m and then a >= m (all-ones), and in place */
+                _SSFBNSlowPathCalls = 0u;
+                SSFBNModMulCT(&r, &a, &b, &m);
+                SSFBNModMul(&ref, &a, &b, &m);
+                SSF_ASSERT((r.len == n) && (SSFBNCmp(&r, &ref) == 0));
+                SSFBNCopy(&r, &a);
+                SSFBNModMulCT(&r, &r, &b, &m);
+                SSF_ASSERT(SSFBNCmp(&r, &ref) == 0);
+                for (k = 0u; k < n; k++) g.limbs[k] = 0xFFFFFFFFu;
+                g.len = n;
+                SSFBNModMulCT(&r, &g, &b, &m);
+                SSFBNModMul(&ref, &g, &b, &m);
+                SSF_ASSERT(SSFBNCmp(&r, &ref) == 0);
+
+                /* ModInvExt: an inverse exactly when gcd(a, m) == 1 */
+                if (SSFBNIsZero(&a)) SSFBNSetOne(&a, n);
+                SSFBNGcd(&g, &a, &m);
+                coprime = SSFBNIsOne(&g);
+                SSF_ASSERT(SSFBNModInvExt(&r, &a, &m) == coprime);
+                if (coprime)
+                {
+                    SSF_ASSERT((r.len == n) && (SSFBNCmp(&r, &m) < 0));
+                    SSFBNModMul(&ref, &a, &r, &m);
+                    SSF_ASSERT(SSFBNCmp(&ref, &one) == 0);
+                    SSFBNCopy(&ref, &a);
+                    SSF_ASSERT(SSFBNModInvExt(&ref, &ref, &m) == true);
+                    SSF_ASSERT(SSFBNCmp(&ref, &r) == 0);
+                }
+                SSF_ASSERT(_SSFBNSlowPathCalls == 0u);
+            }
+        }
+
+        /* A shared factor: m = 3 * odd, a = 3 has no inverse */
+        SSFBNSetUint32(&m, 21u, 1u);
+        SSFBNSetUint32(&a, 3u, 1u);
+        SSF_ASSERT(SSFBNModInvExt(&r, &a, &m) == false);
+        SSFBNSetUint32(&a, 5u, 1u);
+        SSF_ASSERT(SSFBNModInvExt(&r, &a, &m) == true);
+        SSF_ASSERT((r.len == 1u) && (r.limbs[0] == 17u));
+
+        /* Even modulus keeps the old algorithms: ModMulCT shift-subtract, ModInvExt Euclid */
+        SSFBNSetUint32(&m, 1000u, 1u);
+        SSFBNSetUint32(&a, 7u, 1u);
+        SSFBNSetUint32(&b, 999u, 1u);
+        _SSFBNSlowPathCalls = 0u;
+        SSFBNModMulCT(&r, &a, &b, &m);
+        SSF_ASSERT((r.len == 1u) && (r.limbs[0] == 993u));
+        SSF_ASSERT(SSFBNModInvExt(&r, &a, &m) == true);
+        SSF_ASSERT((r.len == 1u) && (r.limbs[0] == 143u));
+        SSF_ASSERT(_SSFBNSlowPathCalls == 2u);
+
+        /* The fast paths wipe their intermediates (BN-11 scrub hook) */
+        SSFBNCopy(&m, &SSF_BN_NIST_P256);
+        _SSFBNUTFillBelow(&a, &m, 77u);
+        _SSFBNUTFillBelow(&b, &m, 88u);
+        _scrubCalls = 0u;
+        _scrubDirty = 0u;
+        _SSFBNScrubTestHook = _ScrubCheck;
+        /* ModMulCT: t, ctx.mod, ctx.rr, plus SSFBNMontInit's R^2 copy */
+        SSFBNModMulCT(&r, &a, &b, &m);
+        SSF_ASSERT(_scrubCalls == 4u);
+        /* ModInvExt: u, v, x1, x2 */
+        _scrubCalls = 0u;
+        SSF_ASSERT(SSFBNModInvExt(&r, &a, &m) == true);
+        SSF_ASSERT(_scrubCalls == 4u);
+        _SSFBNScrubTestHook = NULL;
+        SSF_ASSERT(_scrubDirty == 0u);
+    }
+
     /* ---- AUDIT BN-7: MontInit's R^2 loop is exact for moduli of 1024+ limbs ---- */
     /* The doubling loop bound was (uint16_t)(len * 64), which wraps at len >= 1024 (to 0 at    */
     /* exactly 1024, leaving rr = 1), so every Montgomery operation on such a modulus was     */

@@ -1694,6 +1694,39 @@ static void _ScrubCheck(const void *buf, size_t len)
     }
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Writes R^2 mod m into r2 (R = 2^(32 * m->len)) by doubling 1 modulo m 2 * 32 * len times.     */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFBNUTRefR2(SSFBN_t *r2, const SSFBN_t *m)
+{
+    uint32_t k;
+
+    SSF_REQUIRE(r2 != NULL);
+    SSF_REQUIRE(m != NULL);
+
+    SSFBNSetOne(r2, m->len);
+    for (k = 0u; k < ((uint32_t)m->len * SSF_BN_LIMB_BITS * 2u); k++)
+    {
+        SSFBNModAdd(r2, r2, r2, m);
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Asserts that SSFBNMontInit(m) yields R^2 mod m equal to the doubling reference.               */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFBNUTCheckMontInitR2(const SSFBN_t *m)
+{
+    SSFBNMONT_DEFINE(mont, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(ref, SSF_BN_MAX_LIMBS);
+
+    SSF_REQUIRE(m != NULL);
+
+    SSFBNMontInit(&mont, m);
+    _SSFBNUTRefR2(&ref, m);
+    SSF_ASSERT(mont.rr.len == m->len);
+    SSF_ASSERT(SSFBNCmp(&mont.rr, &ref) == 0);
+}
+
 /* Suppress C6262 (large stack frame). This unit-test entry point intentionally allocates many */
 /* SSFBN_DEFINE locals across its sub-test blocks; the host test environment has ample stack.  */
 #ifdef _WIN32
@@ -2422,11 +2455,12 @@ void SSFBNUnitTest(void)
         SSF_ASSERT(SSFBNGenPrime(&p, 256u, 5u, &prng) == true);
         SSF_ASSERT(_scrubCalls >= 8u);
 
-        /* Composite 221 = 13 * 17 leaves through the Miller-Rabin reject path. */
+        /* Composite 221 = 13 * 17 leaves through the Miller-Rabin reject path: its 7 locals */
+        /* plus SSFBNMontInit's R^2 copy (OPTIMIZE BN-O1).                                  */
         calls = _scrubCalls;
         SSFBNSetUint32(&c, 221u, 8u);
         SSF_ASSERT(SSFBNIsProbablePrime(&c, 5u, &prng) == false);
-        SSF_ASSERT(_scrubCalls == (calls + 7u));
+        SSF_ASSERT(_scrubCalls == (calls + 8u));
 
         _SSFBNScrubTestHook = NULL;
         SSF_ASSERT(_scrubDirty == 0u);
@@ -3282,6 +3316,90 @@ void SSFBNUnitTest(void)
         mB.len = 1u;
         SSFBNMul(&mR, &mA, &mB);
         SSF_ASSERT((mR.len == 2u) && (mR.limbs[0] == 15u) && (mR.limbs[1] == 0u));
+    }
+
+    /* ---- OPTIMIZE BN-O1: MontInit builds R^2 from a few doublings plus squarings ---- */
+    /* R^2 mod m is compared bit for bit against the old 2 * 32 * len doubling loop for every  */
+    /* shape the setup distinguishes: full-width moduli (w a power of two and w = 3 * 2^s), a */
+    /* top bit inside a limb, a padded modulus (top limb zero), one limb, and m == 1.         */
+    {
+        SSFBNMONT_DEFINE(mont, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(m, SSF_BN_MAX_LIMBS);
+        uint16_t k;
+
+        /* NIST field primes and the P-256 group order */
+        _SSFBNUTCheckMontInitR2(&SSF_BN_NIST_P256);
+#if SSF_BN_CONFIG_MAX_BITS >= 768
+        _SSFBNUTCheckMontInitR2(&SSF_BN_NIST_P384);
+#endif
+        SSFBNSetZero(&m, 8u);
+        m.limbs[0] = 0xFC632551u; m.limbs[1] = 0xF3B9CAC2u; m.limbs[2] = 0xA7179E84u;
+        m.limbs[3] = 0xBCE6FAADu; m.limbs[4] = 0xFFFFFFFFu; m.limbs[5] = 0xFFFFFFFFu;
+        m.limbs[6] = 0x00000000u; m.limbs[7] = 0xFFFFFFFFu;
+        _SSFBNUTCheckMontInitR2(&m);
+
+        /* 3 limbs (w = 96 = 3 * 2^5) with the top bit set, then inside the top limb */
+        m.len = 3u;
+        m.limbs[0] = 0x89ABCDEFu; m.limbs[1] = 0x01234567u; m.limbs[2] = 0x80000001u;
+        _SSFBNUTCheckMontInitR2(&m);
+        m.limbs[2] = 0x00012345u;
+        _SSFBNUTCheckMontInitR2(&m);
+
+        /* Padded: 4 limbs whose top limb is zero (bit length 37) */
+        SSFBNSetZero(&m, 4u);
+        m.limbs[0] = 0x2468ACE1u;
+        m.limbs[1] = 0x00000017u;
+        _SSFBNUTCheckMontInitR2(&m);
+
+        /* One limb: smallest odd moduli above 1 and the full-width extreme */
+        SSFBNSetUint32(&m, 3u, 1u);
+        _SSFBNUTCheckMontInitR2(&m);
+        SSFBNSetUint32(&m, 0xFFFFFFFFu, 1u);
+        _SSFBNUTCheckMontInitR2(&m);
+
+        /* m == 1: R^2 mod 1 is 0 */
+        SSFBNSetUint32(&m, 1u, 1u);
+        SSFBNMontInit(&mont, &m);
+        SSF_ASSERT((mont.rr.len == 1u) && (mont.rr.limbs[0] == 0u));
+
+        /* The local R^2 copy, key-derived for a secret prime, is wiped before return */
+        _scrubCalls = 0u;
+        _scrubDirty = 0u;
+        _SSFBNScrubTestHook = _ScrubCheck;
+        SSFBNMontInit(&mont, &SSF_BN_NIST_P256);
+        _SSFBNScrubTestHook = NULL;
+        SSF_ASSERT(_scrubCalls == 1u);
+        SSF_ASSERT(_scrubDirty == 0u);
+        _SSFBNUTCheckMontInitR2(&SSF_BN_NIST_P256);
+
+#if SSF_BN_CONFIG_MAX_BITS >= 4096
+        /* 2048-bit full-width modulus: R^2 matches, using only 2 doublings */
+        m.len = 64u;
+        for (k = 0u; k < 64u; k++)
+        {
+            m.limbs[k] = (SSFBNLimb_t)(0x9E3779B9u * (uint32_t)(k + 1u));
+        }
+        m.limbs[0] |= 1u;
+        m.limbs[63] |= 0x80000000u;
+        _SSFBNUTCheckMontInitR2(&m);
+        _SSFBNMontInitDoublings = 0u;
+        SSFBNMontInit(&mont, &m);
+        SSF_ASSERT(_SSFBNMontInitDoublings == 2u);
+#endif
+#if SSF_BN_CONFIG_MAX_BITS >= 6144
+        /* 3072-bit full-width modulus (w = 3 * 2^10): 4 doublings */
+        m.len = 96u;
+        for (k = 0u; k < 96u; k++)
+        {
+            m.limbs[k] = (SSFBNLimb_t)(0x7F4A7C15u * (uint32_t)(k + 5u));
+        }
+        m.limbs[0] |= 1u;
+        m.limbs[95] |= 0x80000000u;
+        _SSFBNUTCheckMontInitR2(&m);
+        _SSFBNMontInitDoublings = 0u;
+        SSFBNMontInit(&mont, &m);
+        SSF_ASSERT(_SSFBNMontInitDoublings == 4u);
+#endif
     }
 
     /* ---- AUDIT BN-7: MontInit's R^2 loop is exact for moduli of 1024+ limbs ---- */

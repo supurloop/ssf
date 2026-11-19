@@ -305,6 +305,9 @@ extern void (*_SSFBNScrubTestHook)(const void *buf, size_t len);
 /* Test-only counters (AUDIT BN-12, BN-13). */
 extern uint32_t _SSFBNKaratsubaPropIters;
 extern uint32_t _SSFBNToBytesScans;
+
+/* Test-only count of the modular doublings SSFBNMontInit runs (OPTIMIZE BN-O1). */
+extern uint32_t _SSFBNMontInitDoublings;
 #endif /* SSF_CONFIG_BN_UNIT_TEST */
 
 #ifdef __cplusplus

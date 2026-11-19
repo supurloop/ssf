@@ -99,7 +99,8 @@ other big-integer libraries.
   (4 squares + 1 multiply per 4 bits) versus 2 per bit for a bit-by-bit ladder, after
   amortising the 14-MontMul precompute.
 - **Montgomery context reuse is an important optimisation.** Initializing a `SSFBNMont_t`
-  with [`SSFBNMontInit()`](#montinit) is relatively expensive (it computes `R² mod m`). For
+  with [`SSFBNMontInit()`](#montinit) costs about a dozen Montgomery squarings (it computes
+  `R² mod m`), as much as a short exponentiation. For
   repeated operations against the same modulus — RSA sign/verify loops, DH key rotation,
   Miller-Rabin witness rounds — initialise once and reuse the context across
   [`SSFBNModExpMont()`](#modexp) / [`SSFBNMontMul()`](#montmul) /
@@ -712,7 +713,13 @@ void SSFBNMontInit(SSFBNMont_t *ctx, const SSFBN_t *m);
 ```
 Initialise `ctx` for modulus `m`. Precomputes `rr = R² mod m` and `mp = -m⁻¹ mod 2³²`. `m`
 must be odd (every cryptographic modulus used with this module is). `ctx->len` and the
-embedded `mod`/`rr` lengths are set from `m->len`.
+embedded `mod`/`rr` lengths are set from `m->len`. `R²` is built from `2^(L-1)`, where `L` is
+the bit length of `m`: `w - L + 1 + j` modular doublings reach `2^(w+j) mod m`, with
+`w = 32 × len = j × 2^s` and `j` odd, then `s` Montgomery squarings each double the exponent
+offset up to `2^(2w)`. A full-width 2048-bit modulus takes 2 doublings and 11 squarings. The
+doubling count depends only on `L` and `len`, which are public for RSA moduli and fixed by the
+key size for their primes. Every step is constant-time. `m` may carry leading zero limbs (it
+then takes more doublings), and `m == 1` gives `rr == 0`.
 
 <a id="montmul"></a>
 ```c
@@ -726,7 +733,8 @@ also in Montgomery form. Constant-time. `r` may alias `a` or `b`.
 void SSFBNMontSquare(SSFBN_t *r, const SSFBN_t *a, const SSFBNMont_t *ctx);
 ```
 Semantically equivalent to `SSFBNMontMul(r, a, a, ctx)`, and the primitive the squaring
-sites inside `SSFBNModExpMont` call directly. Implemented as a dedicated square-optimised
+sites inside `SSFBNModExpMont` call directly. `r` may alias `a` (`SSFBNMontInit` squares in
+place). Implemented as a dedicated square-optimised
 routine — a triangular full square (strict upper triangle accumulated once, doubled by a
 single shift-left, then the `a[i]·a[i]` diagonal added) followed by SOS Montgomery
 reduction — rather than a plain `MontMul(r, a, a, ctx)`. **Constant-time.** Both

@@ -63,6 +63,9 @@ void (*_SSFBNScrubTestHook)(const void *buf, size_t len) = NULL;
 /* Test-only counters: Karatsuba propagation iterations, exporter scans (AUDIT BN-12, BN-13). */
 uint32_t _SSFBNKaratsubaPropIters = 0u;
 uint32_t _SSFBNToBytesScans = 0u;
+
+/* Test-only count of the modular doublings SSFBNMontInit runs (OPTIMIZE BN-O1). */
+uint32_t _SSFBNMontInitDoublings = 0u;
 #define _SSF_BN_COUNT(c) do { (c)++; } while (0)
 #else
 #define _SSF_BN_SCRUB_HOOK(p, n) do { } while (0)
@@ -2022,6 +2025,10 @@ void SSFBNMontInit(SSFBNMont_t *ctx, const SSFBN_t *m)
 {
     uint16_t i;
     uint32_t k;
+    uint32_t w;
+    uint32_t bitLen;
+    uint32_t j;
+    uint32_t s;
     SSFBN_DEFINE(r2, SSF_BN_MAX_LIMBS);
 
     SSF_REQUIRE(ctx != NULL);
@@ -2049,14 +2056,47 @@ void SSFBNMontInit(SSFBNMont_t *ctx, const SSFBN_t *m)
         ctx->mp = (SSFBNLimb_t)(-(int32_t)x);
     }
 
-    /* Compute R^2 mod m where R = 2^(len*32) by doubling 1 modulo m for 2*len*32 iterations. */
-    /* 32-bit count and bound: len * 64 exceeds 16 bits from 1024 limbs (AUDIT BN-7) */
-    SSFBNSetOne(&r2, m->len);
-    for (k = 0u; k < ((uint32_t)m->len * SSF_BN_LIMB_BITS * 2u); k++)
+    /* R^2 mod m, R = 2^w with w = 32 * len and w = j * 2^s (j odd) (OPTIMIZE BN-O1). */
+    /* 32-bit counts: w exceeds 16 bits from 2048 limbs (AUDIT BN-7) */
+    w = (uint32_t)m->len * SSF_BN_LIMB_BITS;
+    bitLen = SSFBNBitLen(m);
+    SSFBNSetZero(&r2, m->len);
+
+    /* Is m == 1, where R^2 mod m is 0? */
+    if (bitLen > 1u)
     {
-        SSFBNModAdd(&r2, &r2, &r2, m);
+        /* No, start at 2^(bitLen - 1), the largest power of two below m */
+        r2.limbs[(bitLen - 1u) / SSF_BN_LIMB_BITS] =
+            (SSFBNLimb_t)((SSFBNLimb_t)1u << ((bitLen - 1u) % SSF_BN_LIMB_BITS));
+
+        /* Split w into its odd part j and power-of-two exponent s */
+        j = w;
+        s = 0u;
+        while ((j & 1u) == 0u)
+        {
+            j >>= 1;
+            s++;
+        }
+
+        /* Double to 2^(w + j) mod m, which is 2^j in Montgomery form */
+        for (k = 0u; k < ((w - bitLen) + 1u + j); k++)
+        {
+            SSFBNModAdd(&r2, &r2, &r2, m);
+            _SSF_BN_COUNT(_SSFBNMontInitDoublings);
+        }
+
+        /* Each Montgomery square doubles the offset: 2^(w + j) to 2^(w + j * 2^s) = 2^(2w) */
+        for (k = 0u; k < s; k++)
+        {
+            SSFBNMontSquare(&r2, &r2, ctx);
+        }
     }
+    /* Yes, r2 stays 0 */
     SSFBNCopy(&ctx->rr, &r2);
+
+    /* r2 is key-derived when m is a secret prime; ctx->rr holds the only copy kept */
+    SSFBNZeroize(&r2);
+    _SSF_BN_SCRUB_HOOK(r2.limbs, (size_t)r2.cap * sizeof(SSFBNLimb_t));
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -2278,6 +2318,7 @@ void SSFBNMontSquare(SSFBN_t *r, const SSFBN_t *a, const SSFBNMont_t *ctx)
     }
 
     /* Final conditional subtraction: result in [0, 2m), want [0, m). */
+    /* a is not read past this point, so r may alias a (SSFBNMontInit squares in place) */
     r->len = n;
     memcpy(r->limbs, &t[n], (size_t)n * sizeof(SSFBNLimb_t));
 

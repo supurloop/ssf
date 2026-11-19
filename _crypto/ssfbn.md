@@ -662,7 +662,9 @@ sequence of adds and subtracts — significantly faster on a microcontroller. Fo
 primes the final correction runs a fixed number of mask-committed add/subtract passes, so the
 reduction is **constant-time** in the operand values (choosing the path compares only the
 public modulus). Any other modulus falls back to [`SSFBNModMul()`](#ssfbnmodmul), which is
-**variable-time**.
+**variable-time**. The NIST paths keep their product and reduction scratch at curve width
+(24 limbs at most), so their stack does not grow with `SSF_BN_CONFIG_MAX_BITS`; the generic
+fallback's does.
 
 <a id="modinv"></a>
 ```c

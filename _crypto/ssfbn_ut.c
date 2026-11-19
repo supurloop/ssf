@@ -1785,6 +1785,75 @@ static void _SSFBNUTCheckMont(const SSFBN_t *m, const SSFBN_t *a, const SSFBN_t 
     SSF_ASSERT(SSFBNCmp(&r2, &r) == 0);
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Asserts SSFBNModAdd(a + b mod m) against a limb-by-limb reference, in place and not.          */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFBNUTCheckModAdd(const SSFBN_t *m, const SSFBN_t *a, const SSFBN_t *b)
+{
+    SSFBN_DEFINE(r, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(ref, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(x, SSF_BN_MAX_LIMBS);
+    SSFBNDLimb_t acc;
+    SSFBNLimb_t top;
+    uint16_t k;
+    int16_t q;
+    bool geM;
+
+    SSF_REQUIRE(m != NULL);
+    SSF_REQUIRE(a != NULL);
+    SSF_REQUIRE(b != NULL);
+
+    /* Reference: s = a + b with its carry word, then s - m when s >= m */
+    ref.len = m->len;
+    acc = 0u;
+    for (k = 0u; k < m->len; k++)
+    {
+        acc += (SSFBNDLimb_t)a->limbs[k] + (SSFBNDLimb_t)b->limbs[k];
+        ref.limbs[k] = (SSFBNLimb_t)acc;
+        acc >>= SSF_BN_LIMB_BITS;
+    }
+    top = (SSFBNLimb_t)acc;
+    geM = (top != 0u);
+    if (!geM)
+    {
+        geM = true;
+        for (q = (int16_t)(m->len - 1u); q >= 0; q--)
+        {
+            if (ref.limbs[q] != m->limbs[q])
+            {
+                geM = (ref.limbs[q] > m->limbs[q]);
+                break;
+            }
+        }
+    }
+    if (geM)
+    {
+        acc = 0u;
+        for (k = 0u; k < m->len; k++)
+        {
+            SSFBNDLimb_t d = (SSFBNDLimb_t)ref.limbs[k] - (SSFBNDLimb_t)m->limbs[k] - acc;
+            ref.limbs[k] = (SSFBNLimb_t)d;
+            acc = (d >> SSF_BN_LIMB_BITS) & 1u;
+        }
+    }
+
+    /* Out of place, then r aliasing a, r aliasing b, and r == a == b when a equals b */
+    SSFBNModAdd(&r, a, b, m);
+    SSF_ASSERT((r.len == m->len) && (SSFBNCmp(&r, &ref) == 0));
+    SSFBNCopy(&x, a);
+    SSFBNModAdd(&x, &x, b, m);
+    SSF_ASSERT(SSFBNCmp(&x, &ref) == 0);
+    SSFBNCopy(&x, b);
+    SSFBNModAdd(&x, a, &x, m);
+    SSF_ASSERT(SSFBNCmp(&x, &ref) == 0);
+    if (SSFBNCmp(a, b) == 0)
+    {
+        SSFBNCopy(&x, a);
+        SSFBNModAdd(&x, &x, &x, m);
+        SSF_ASSERT(SSFBNCmp(&x, &ref) == 0);
+    }
+}
+
 /* Suppress C6262 (large stack frame). This unit-test entry point intentionally allocates many */
 /* SSFBN_DEFINE locals across its sub-test blocks; the host test environment has ample stack.  */
 #ifdef _WIN32
@@ -3596,6 +3665,107 @@ void SSFBNUnitTest(void)
         }
         /* 15 one-limb pairs (3 moduli) and 1008 two-limb pairs (4 odd low x 7 non-zero top) */
         SSF_ASSERT(checks == 1023u);
+    }
+
+    /* ---- OPTIMIZE BN-O6: ModAdd without a temporary, NIST paths at curve width ---- */
+    /* ModAdd over an exhaustive 1- and 2-limb carry / borrow grid (every m, every a, b < m),  */
+    /* plus the P-256 / P-384 primes; ModMulNIST against the generic SSFBNModMul at edge and   */
+    /* pseudo-random operands for both primes.                                                 */
+    {
+        static const SSFBNLimb_t gridV[] = { 0u, 1u, 2u, 0x7FFFFFFFu, 0x80000000u, 0x80000001u,
+                                             0xFFFFFFFEu, 0xFFFFFFFFu };
+        const SSFBN_t *primes[2];
+        SSFBN_DEFINE(m, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(b, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(r, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(ref, SSF_BN_MAX_LIMBS);
+        uint32_t gridN;
+        uint32_t tot;
+        uint32_t mc;
+        uint32_t ac;
+        uint32_t bc;
+        uint32_t pairs = 0u;
+        uint16_t n;
+        uint16_t pi;
+        uint16_t numPrimes = 1u;
+        uint16_t ea;
+        uint16_t eb;
+
+        gridN = (uint32_t)(sizeof(gridV) / sizeof(gridV[0]));
+        for (n = 1u; n <= 2u; n++)
+        {
+            tot = (n == 1u) ? gridN : (gridN * gridN);
+            for (mc = 0u; mc < tot; mc++)
+            {
+                m.len = n;
+                m.limbs[0] = gridV[mc % gridN];
+                if (n == 2u) m.limbs[1] = gridV[mc / gridN];
+                if (m.limbs[n - 1u] == 0u) continue;
+                for (ac = 0u; ac < tot; ac++)
+                {
+                    a.len = n;
+                    a.limbs[0] = gridV[ac % gridN];
+                    if (n == 2u) a.limbs[1] = gridV[ac / gridN];
+                    if (SSFBNCmp(&a, &m) >= 0) continue;
+                    for (bc = 0u; bc < tot; bc++)
+                    {
+                        b.len = n;
+                        b.limbs[0] = gridV[bc % gridN];
+                        if (n == 2u) b.limbs[1] = gridV[bc / gridN];
+                        if (SSFBNCmp(&b, &m) >= 0) continue;
+                        _SSFBNUTCheckModAdd(&m, &a, &b);
+                        pairs++;
+                    }
+                }
+            }
+        }
+        SSF_ASSERT(pairs == 85344u);
+
+        primes[0] = &SSF_BN_NIST_P256;
+#if SSF_BN_CONFIG_MAX_BITS >= 768
+        primes[1] = &SSF_BN_NIST_P384;
+        numPrimes = 2u;
+#endif
+        for (pi = 0u; pi < numPrimes; pi++)
+        {
+            SSFBNCopy(&m, primes[pi]);
+
+            /* Edge operands 0, 1, p - 2, p - 1, and two pseudo-random values, all pairs */
+            for (ea = 0u; ea < 6u; ea++)
+            {
+                for (eb = 0u; eb < 6u; eb++)
+                {
+                    SSFBN_t *v[2];
+                    uint16_t e[2];
+                    uint16_t w;
+
+                    v[0] = &a;
+                    v[1] = &b;
+                    e[0] = ea;
+                    e[1] = eb;
+                    for (w = 0u; w < 2u; w++)
+                    {
+                        switch (e[w])
+                        {
+                        case 0u: SSFBNSetZero(v[w], m.len); break;
+                        case 1u: SSFBNSetOne(v[w], m.len); break;
+                        case 2u: SSFBNCopy(v[w], &m); v[w]->limbs[0] -= 2u; break;
+                        case 3u: SSFBNCopy(v[w], &m); v[w]->limbs[0] -= 1u; break;
+                        default: _SSFBNUTFillBelow(v[w], &m, (uint32_t)(e[w] + (w * 17u)));
+                            break;
+                        }
+                    }
+                    _SSFBNUTCheckModAdd(&m, &a, &b);
+                    SSFBNModMulNIST(&r, &a, &b, &m);
+                    SSFBNModMul(&ref, &a, &b, &m);
+                    SSF_ASSERT((r.len == m.len) && (SSFBNCmp(&r, &ref) == 0));
+                    SSFBNCopy(&r, &a);
+                    SSFBNModMulNIST(&r, &r, &b, &m);
+                    SSF_ASSERT(SSFBNCmp(&r, &ref) == 0);
+                }
+            }
+        }
     }
 
     /* ---- AUDIT BN-7: MontInit's R^2 loop is exact for moduli of 1024+ limbs ---- */

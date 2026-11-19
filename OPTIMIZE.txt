@@ -61,7 +61,8 @@ SUMMARY
   BN-O1    Speed         MontInit 5.8x; RSA-2048 verify 2.7x measured          S       DONE
   BN-O2    Speed         MontMul +20% measured (1.6x on emulated ARM32)        S       DONE
   BN-O5    Speed         RSA sign -1.8 ms (about -35% after O1..O3)            M       OPEN
-  BN-O6    Speed+stack   ECC 1.5-2.5x on Cortex-M with RSA-4096 enabled (est.) M       OPEN
+  BN-O6    Speed+size    ECC 1.23-1.46x emulated ARM32, -381 B M4               M       DONE
+  EC-O3    Stack         ECC op peaks about 18 KB -> 7-10 KB (with BN-O6)        M       OPEN
   ED-O1    Size          -7 KB (Ed25519 scalar arithmetic)                     M       OPEN
   X509-O1  Size          -3.7 KB x509, -1.4 KB cms (Cortex-M4), plus printf    S       DONE
            (CMS-O1)
@@ -415,7 +416,7 @@ BN-O5  Speed  OPEN  Effort M
              in its inputs, so this does not change the accepted exposure. The Fermat-in-CRT
              alternative is CT if constant-time behaviour is wanted.
 
-BN-O6  Speed + stack  OPEN  Effort M
+BN-O6  Speed + stack  DONE (2026-11-19)  Effort M  [implemented; measured below]
   Where:     SSFBN_DEFINE zero-fills its whole storage. Locals declared at SSF_BN_MAX_LIMBS
              (256 limbs = 1 KB when RSA-4096 is enabled, the default, which sets the cap to
              8192 bits) sit on the EC field-arithmetic path: SSFBNModMulNIST (prod),
@@ -433,6 +434,31 @@ BN-O6  Speed + stack  OPEN  Effort M
   Risk:      Sizes must cover the largest NIST operand (P-384: 24-limb product); add
              SSF_REQUIRE on caps. The ModAdd rewrite must stay constant-time (masked add,
              no branch on the borrow). EC and ECDSA vectors cover both curves.
+  Prototype (scratchpad; ssfbn, ssfrsa, ssfec, ssfecdsa, ssfx509, ssfcms tests pass):
+             P-256 reduction s / tmp at 8 limbs, P-384 at 12, NIST product at 24, and
+             SSFBNModAdd without the temporary (in-place subtract of m, then a masked
+             add-back iff no carry and a borrow).
+  Measured:  Code (arm-none-eabi-gcc -Os, ssfbn total): Cortex-M4 14463 -> 14084 B (-379),
+             Cortex-M0+ 17171 -> 16572 B (-599), mostly SSFBNModMulNIST (the reductions are
+             inlined into it): M4 1988 -> 1636 B.
+             Stack frames (Cortex-M4): SSFBNModMulNIST 3120 -> 232 B, SSFBNModAdd 1072 -> 24
+             B. Reachable call-graph peaks (-fcallgraph-info, excluding SSFBNModMulNIST's
+             never-taken generic fallback): SSFECScalarMul 9592 -> 6704 B,
+             SSFECScalarMulDualBase 12104 -> 9216 B (-2888 each). The operation peaks do NOT
+             move: ECDSA sign 18392 B, verify 18256 B, ECDH 18016 B, keygen 17504 B. Each is
+             set by the one Fermat inverse per operation (SSFECPointToAffine -> SSFBNModInv ->
+             SSFBNModExp -> SSFBNModExpMont, a 10.4 KB window table sized for the 8192-bit
+             cap); see EC-O3. The earlier "several KB less stack" estimate was wrong for whole
+             operations.
+             Speed, x86-64 -O2 (two interleaved runs): P-256 verify 1230-1255 -> 1097-1129 us
+             (-9%), ECDH 1158-1180 -> 1046-1070 us (-9%), P-384 sign 645 -> 600-604 us (-7%),
+             P-384 verify 2223-2261 -> 2051-2110 us (-7%), P-256 sign within noise.
+             Emulated 32-bit ARM (qemu-arm, Cortex-A7 code): P-256 sign 2613 -> 2027 us
+             (1.29x), verify 9209 -> 6590 us (1.40x), ECDH 8567 -> 5973 us (1.43x), P-384
+             sign 4824 -> 4102 us (1.18x), verify 17075 -> 13580 us (1.26x). This revises the
+             1.5-2.5x Cortex-M estimate to about 1.2-1.5x. QEMU user mode runs translated
+             code on the host and models no Cortex-M timing (no wait states, no memset
+             implementation differences), so only a board measurement settles the real figure.
 
 BN-O7  Speed  OPEN  Effort M
   Where:     SSFBNMod (bit-serial shift-and-subtract; 55 us for 2048 mod 1024, 230 us for
@@ -488,6 +514,22 @@ EC-O2  Speed  OPEN  Effort S
              before).
   Probable:  ECDSA sign / ECDH -1-2% after BN-O1.
   Risk:      Constant tables; check them against MontInit in the unit tests.
+
+EC-O3  Stack + speed  OPEN  Effort M  (found 2026-11-19 while measuring BN-O6)
+  Where:     the curve-width modular arithmetic ssfec / ssfecdsa run through the 8192-bit-cap
+             ssfbn paths: SSFECPointToAffine and ECDSA k^-1 use SSFBNModInv (Fermat:
+             SSFBNModExp -> SSFBNModExpMont with a 16-entry table of SSF_BN_MAX_LIMBS-limb
+             values, 10.4 KB on Cortex-M4); ECDSA verify uses SSFBNModInvExt and SSFBNModMul
+             (several 1 KB locals each).
+  Change:    Curve-width versions: a Fermat inverse for p and n through SSFBNModMulNIST /
+             Montgomery at 8 or 12 limbs with a fixed addition chain or a small window, and
+             mod-n multiply / inverse with locals sized SSF_EC_MAX_LIMBS.
+  Probable:  With BN-O6, call-graph peaks (Cortex-M4) fall from about 18 KB to about 7-10 KB:
+             ECDSA sign 18392 -> about 8300 B, ECDH 18016 -> about 7250 B, keygen 17504 ->
+             about 7260 B, verify 18256 -> about 10000 B. Speed: Fermat inverses at curve
+             width, a few percent.
+  Risk:      The inverses take secret inputs (k, Z of a secret multiple): they must stay
+             constant-time, as SSFBNModInv is today. Needs new tests at both curves.
 
   Reviewed, no change worth making: the 4-bit fixed-window CT variable-base multiply (a
   signed 5-bit window saves about 10 additions of 334 point operations: 3%), the comb
@@ -824,3 +866,52 @@ CHANGE LOG
               trace-off build silently receives nothing. Kept, because an assert in SetTraceCtx
               would crash existing firmware; the change is documented in the option comment,
               ssftls.md, ssfx509.md, ssfcms.md and commit 577aaac.
+  2026-11-19  BN-O6 DONE (Jim: "Just do BN-06 now", without EC-O3). _SSFBNReduceP256 keeps s /
+              tmp at 8 limbs, _SSFBNReduceP384 at 12, and SSFBNModMulNIST's product at 24
+              (16 when the cap is below 768 bits). SSFBNModAdd has no temporary: it subtracts m
+              in place and adds it back under a mask iff the add did not carry and the subtract
+              borrowed (the SSFBNModSub pattern, constant-time).
+              No red is possible: results are unchanged by design. Tests (ssfbn_ut.c "OPTIMIZE
+              BN-O6"): ModAdd against a limb-by-limb reference in the test over an exhaustive
+              1- and 2-limb carry / borrow grid (85344 (m, a, b) cases), each also in place
+              (r = a, r = b, r = a = b); ModAdd and ModMulNIST at P-256 and P-384 for all
+              pairs of 0, 1, p - 2, p - 1 and two pseudo-random operands, ModMulNIST against
+              the generic SSFBNModMul, also in place. Mutation check, new block run first: four
+              wrong add-back conditions (carry inverted, borrow ignored, never add back, carry
+              ignored) are all caught by it.
+              GREEN x86-64 (normal and ASan + UBSan, no report) and 32-bit ARM (qemu-arm):
+              ssfbn, ssfrsa, ssfec, ssfecdsa, ssfx509, ssfcms, ssfbase64url, ssfmatch.
+              Size (arm-none-eabi-gcc -Os, ssfbn text): Cortex-M4 14469 -> 14088 B (-381),
+              Cortex-M0+ 17177 -> 16568 B (-609); SSFBNModMulNIST M4 1988 -> 1636 B, ModAdd
+              244 -> 216 B (M0+ 280 -> 296 B).
+              Stack (Cortex-M4 frames): SSFBNModMulNIST 3120 -> 232 B, SSFBNModAdd 1072 -> 24 B.
+              Reachable call-graph peaks (SSFBNModMulNIST's generic fallback, never taken for
+              the NIST primes, excluded): SSFECScalarMul 9592 -> 6704 B, SSFECScalarMulDualBase
+              12104 -> 9216 B, SSFECScalarMulBaseP256 6896 -> 4008 B; ECDSA sign / verify /
+              ECDH / keygen unchanged (18392 / 18256 / 18016 / 17504 B, set by the full-width
+              Fermat inverse: EC-O3).
+              Speed: x86-64 -O2, two interleaved runs: P-256 verify 1217-1262 -> 1090-1097 us,
+              ECDH 1171-1181 -> 1049 us, P-384 sign 646-656 -> 592-616 us, P-384 verify
+              2243-2259 -> 2059-2093 us, P-256 sign within noise. Emulated ARM32: P-256 sign
+              2562 -> 2011 us (1.27x), verify 8795 -> 6109 us (1.44x), ECDH 8117 -> 5554 us
+              (1.46x), P-384 sign 4720 -> 3836 us (1.23x), verify 16642 -> 12852 us (1.29x).
+              Docs: ssfbn.md (NIST scratch at curve width); README footnotes 40 and 42 rewritten
+              (40 named the cap-sized ModMulNIST product as the scalar-multiply peak; 42 put the
+              verify peak on the dual scalar multiply, but the call graph shows the inverse).
+  2026-11-19  BN-O6 post-implementation audit (Jim: "Do an audit first"). SSFBNModAdd proved
+              equivalent to the old code for all inputs (same decision: keep r - m iff carry or
+              no borrow), and 200000 random 1-12-limb cases with unreduced operands hash
+              identically under old and new. The NIST buffers are indexed only to limb 7 / 11;
+              the product's capacity is enforced by SSFBNMul's REQUIRE. ASan + UBSan suites
+              clean. Python oracle: 40000 ModMulNIST / ModAdd cases at P-256 and P-384 (14322
+              with an operand within 1000 of p), no mismatch. Cortex-M4 machine code for
+              ModAdd: the only branches are the REQUIREs and the loop; the add-back condition is
+              an IT block and is applied as m * cond (MULS, fixed latency on every Cortex-M).
+              Fixed (docs only): (1) the scalar-multiply peaks in README footnote 40 and this
+              log were static call-graph figures that counted SSFBNModMulNIST's never-taken
+              generic fallback; they are now reachable peaks (M4 SSFECScalarMul 9.6 -> 6.7 KB,
+              DualBase 12.1 -> 9.2 KB, fixed-base P-256 6.9 -> 4.0 KB; x86-64 12.7 -> 7.8,
+              15.6 -> 10.7, 9.7 -> 4.8 KB). (2) README footnotes 40 and 42 say their figures are
+              Cortex-M4 and that the table values are an earlier x86-64 measurement.
+              Noted, pre-existing: the field-arithmetic scratch (prod, s, tmp) is not wiped on
+              return, as before (zero-filling on entry was never a wipe on exit).

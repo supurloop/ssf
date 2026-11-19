@@ -1203,7 +1203,9 @@ void SSFBNModAdd(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *
 {
     SSFBNLimb_t carry;
     SSFBNLimb_t borrow;
-    SSFBN_DEFINE(tmp, SSF_BN_MAX_LIMBS);
+    SSFBNLimb_t mask;
+    SSFBNDLimb_t addCarry;
+    uint16_t i;
 
     SSF_REQUIRE(r != NULL);
     SSF_REQUIRE(r->limbs != NULL);
@@ -1221,12 +1223,18 @@ void SSFBNModAdd(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *
     r->len = m->len;
     carry = _SSFBNRawAdd(r->limbs, a->limbs, b->limbs, m->len);
 
-    /* If carry or r >= m, subtract m */
-    tmp.len = m->len;
-    borrow = _SSFBNRawSub(tmp.limbs, r->limbs, m->limbs, m->len);
+    /* Subtract m in place, no temporary (OPTIMIZE BN-O6) */
+    borrow = _SSFBNRawSub(r->limbs, r->limbs, m->limbs, m->len);
 
-    /* CT-pick subtraction result iff carry from add OR no borrow from sub. */
-    SSFBNCondCopy(r, &tmp, (SSFBNLimb_t)((carry != 0u) | (borrow == 0u)));
+    /* a + b < m exactly when the add did not carry and the subtract borrowed: add m back, CT */
+    mask = (SSFBNLimb_t)(-(int32_t)((SSFBNLimb_t)(carry == 0u) & (SSFBNLimb_t)(borrow != 0u)));
+    addCarry = 0u;
+    for (i = 0u; i < m->len; i++)
+    {
+        addCarry += (SSFBNDLimb_t)r->limbs[i] + (SSFBNDLimb_t)(m->limbs[i] & mask);
+        r->limbs[i] = (SSFBNLimb_t)addCarry;
+        addCarry >>= SSF_BN_LIMB_BITS;
+    }
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -1700,8 +1708,8 @@ static void _SSFBNReduceP256(SSFBN_t *r, const SSFBN_t *t)
     const SSFBNLimb_t *c;
     SSFBNLimb_t carry;
     SSFBNLimb_t borrow;
-    SSFBN_DEFINE(s, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(tmp, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(s, 8u);   /* P-256 width, not the BN cap (OPTIMIZE BN-O6) */
+    SSFBN_DEFINE(tmp, 8u);
 
     SSF_REQUIRE(r != NULL);
     SSF_REQUIRE(r->limbs != NULL);
@@ -1828,8 +1836,8 @@ static void _SSFBNReduceP384(SSFBN_t *r, const SSFBN_t *t)
     const SSFBNLimb_t *c;
     SSFBNLimb_t carry = 0;
     SSFBNLimb_t borrow = 0;
-    SSFBN_DEFINE(s, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(tmp, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(s, 12u);  /* P-384 width, not the BN cap (OPTIMIZE BN-O6) */
+    SSFBN_DEFINE(tmp, 12u);
 
     SSF_REQUIRE(r != NULL);
     SSF_REQUIRE(r->limbs != NULL);
@@ -1945,7 +1953,12 @@ static void _SSFBNReduceP384(SSFBN_t *r, const SSFBN_t *t)
 /* --------------------------------------------------------------------------------------------- */
 void SSFBNModMulNIST(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *m)
 {
-    SSFBN_DEFINE(prod, SSF_BN_MAX_LIMBS);
+    /* Product of two curve-width operands: 2 x 12 limbs for P-384, 2 x 8 for P-256 (BN-O6) */
+#if SSF_BN_CONFIG_MAX_BITS >= 768
+    SSFBN_DEFINE(prod, 24u);
+#else
+    SSFBN_DEFINE(prod, 16u);
+#endif
 
     SSF_REQUIRE(r != NULL);
     SSF_REQUIRE(r->limbs != NULL);

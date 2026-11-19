@@ -51,7 +51,8 @@ SUMMARY
                      FIXED (Batch B): HKDF-1, EC-3, RSA-11, TLS-8
                      FIXED (Batch C): BN-11, RSA-12
                      FIXED (Batch D): BN-12, BN-13
-                     OPEN: HMAC-1, PRNG-3, RSA-9, RSA-10
+                     DOC (Batch E): RSA-9, HMAC-1, PRNG-3
+                     OPEN: RSA-10
 
   No memory-safety defect reachable from hostile input was found. The first-pass fixes
   (decoder bounds, carry folds, authenticate-before-decrypt, CT nonce/blind handling) hold.
@@ -105,7 +106,7 @@ SHA2-3  Low  FIXED (2026-11-19, Batch A)  [code-read]
 ssfhmac / ssfhkdf
 ----------------------------------------------------------------------------------------------
 
-HMAC-1  Low  OPEN  [code-read]
+HMAC-1  Low  DOC (2026-11-19, Batch E)  [code-read]
   Location:  ssfhmac.c:175 (SSFHMACBegin), :290 (SSFHMAC); ssfhmac.md:120,185
   Problem:   A zero-length key halts the process. RFC 2104 defines HMAC for any key length,
              including empty (K' is the all-zero block), and Wycheproof has empty-key vectors.
@@ -133,7 +134,7 @@ HKDF-1  Low  FIXED (2026-11-19, Batch B)  [code-read; fix verified red/green]
 ssfprng
 ----------------------------------------------------------------------------------------------
 
-PRNG-3  Low  OPEN  [code-read]
+PRNG-3  Low  DOC (2026-11-19, Batch E)  [code-read]
   Location:  ssfprng.c:56-66 (SSFPRNGInitContext / SSFPRNGReInitContext alias); ssfprng.md:67
   Problem:   "Re-seed" replaces the key with the new entropy instead of mixing it into the
              current state (SP 800-90A reseed combines old state and new input). A reseed with
@@ -349,7 +350,7 @@ ECDSA-5  Medium  FIXED (2026-11-19, opt-in; default off)  [code-read; fix verifi
 ssfrsa
 ----------------------------------------------------------------------------------------------
 
-RSA-9  Low  OPEN  [code-read]
+RSA-9  Low  DOC (2026-11-19, Batch E)  [code-read]
   Location:  ssfrsa.c:525, :534-535 (_SSFRSAPrivateOpCRT)
   Problem:   The private operation uses two routines ssfbn.md lists as variable-time on
              secret data: SSFBNModInvExt on the blinding factor r (extended Euclid, branch
@@ -658,3 +659,21 @@ CHANGE LOG
               ssfbn +232 bytes at -O2, +36 at -Os. Docs: ssfbn.md (ToBytes / ToBytesLE timing
               rule, SSFBNMul Karatsuba note). Linux direct gcc build; ssfport.h test flags
               restored with git checkout.
+  2026-11-19  Batch E resolved as documentation (Jim's choices), no code change: RSA-9, HMAC-1,
+              PRNG-3.
+              RSA-9 (option: document): ssfrsa.md gains a Notes entry that the private
+              operation's r^-1 (SSFBNModInvExt) and cB mod p / cB mod q (SSFBNMod) are
+              variable-time, why the exposure is limited to a single call's blinding factor (fresh
+              r per call, cB randomized by r^e, constant-time exponent-blinded exponentiations),
+              and that RSA signing is "blinded but not fully constant-time" for deployments with
+              fine-grained timing or power observers.
+              HMAC-1 (option: keep the restriction, document): ssfhmac.md explains that zero-length
+              keys are rejected on purpose (an empty key is not a secret and a zero keyLen is
+              usually a caller bug), and that a caller needing the RFC 2104 empty-key result can
+              pass hashSize zero bytes, which zero-pads to the same all-zero block. Verified with
+              Python hmac for SHA-1/256/384/512 (empty key == hashSize zero bytes) and the
+              HMAC-SHA-256("", "") value quoted in the doc.
+              PRNG-3 (option: document): ssfprng.md states that SSFPRNGReInitContext replaces the
+              state (key = new entropy, counter = 0) rather than mixing like an SP 800-90A
+              reseed, that every reseed therefore needs full-strength entropy, and that this is
+              deliberate so a seed always reproduces the same stream.

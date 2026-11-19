@@ -116,6 +116,17 @@ comparable security.
   single faulty signature if an attacker can glitch one of the two `modexp` branches during
   sign; this is defended by the built-in verify-after-sign check (see below). The blinding
   and the fresh `r` are the reason signing now requires platform entropy on every call.
+- **Two steps of the private-key operation are variable-time, by design.** `r⁻¹ mod n` is
+  computed with the extended-Euclid [`SSFBNModInvExt()`](ssfbn.md#modinv), whose run time
+  depends on `r`, and the blinded input is reduced by the secret primes with
+  [`SSFBNMod()`](ssfbn.md#ssfbnmod) (`cB mod p`, `cB mod q`), whose run time depends on the
+  quotient bits. Neither exposes the message or the CRT exponents directly: `r` is fresh
+  random on every call and never reused, `cB` is randomized by `r^e`, and the exponentiations
+  that use `dp` / `dq` are constant-time and exponent-blinded. What a precise timing observer
+  could learn is information about a single call's blinding factor, which weakens base
+  blinding for that call only. This was reviewed and accepted (AUDIT2 RSA-9). Deployments
+  where an attacker can take very fine-grained timing or power measurements of individual
+  signatures should treat RSA signing here as blinded but not fully constant-time.
 - **Key storage format is PKCS#1 DER.** `RSAPublicKey` = `SEQUENCE { INTEGER n, INTEGER
   e }`; `RSAPrivateKey` = `SEQUENCE { version, n, e, d, p, q, dp, dq, qInv }` (version 0,
   two-prime; `otherPrimeInfos` is not supported), all unsigned big-endian. Decoding is

@@ -66,6 +66,15 @@ supplied to `SSFPRNGInitContext()`.
   place of the output block's `0x00`.
 - Re-seed with `SSFPRNGReInitContext()` when there is concern about the 64-bit counter eventually
   exhausting its period or when fresh entropy becomes available.
+- **Re-seeding replaces the state; it does not mix.** `SSFPRNGReInitContext()` is an alias for
+  `SSFPRNGInitContext()`: the new entropy becomes the AES key outright and the counter restarts
+  at zero, discarding the previous key. This differs from an SP 800-90A reseed, which combines
+  the old state with the new input. The consequence is that every reseed must supply
+  full-strength entropy: reseeding from a source that is weak, stuck or attacker-influenced
+  throws away whatever strength the earlier seed provided, rather than adding to it. If your
+  entropy source can degrade, check its health before reseeding (or keep the existing context)
+  rather than reseeding unconditionally. The behaviour is deliberate so that a given seed always
+  reproduces the same output stream (AUDIT2 PRNG-3).
 - The PRNG is not thread-safe; use separate contexts per thread or protect access with a mutex.
 - Call `SSFPRNGDeInitContext()` when finished to clear the seed material from memory.
 

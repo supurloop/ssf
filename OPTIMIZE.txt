@@ -57,9 +57,9 @@ SUMMARY
   aesccm, ssfpoly1305 or ssfecdsa beyond the shared bn / ec items). Ranked by probable payoff:
 
   ID       Kind          Probable effect                                       Effort  Status
-  BN-O3    Speed         MontSquare 2.1x measured; with O1+O2 RSA verify 5.2x  S       proto
+  BN-O3    Speed         MontSquare 2.1x measured; with O1+O2 RSA verify 5.3x  S       DONE
   BN-O1    Speed         MontInit 5.8x; RSA-2048 verify 2.7x measured          S       DONE
-  BN-O2    Speed         MontMul +25% measured                                 S       proto
+  BN-O2    Speed         MontMul +20% measured (1.6x on emulated ARM32)        S       DONE
   BN-O5    Speed         RSA sign -1.8 ms (about -35% after O1..O3)            M       OPEN
   BN-O6    Speed+stack   ECC 1.5-2.5x on Cortex-M with RSA-4096 enabled (est.) M       OPEN
   ED-O1    Size          -7 KB (Ed25519 scalar arithmetic)                     M       OPEN
@@ -365,7 +365,7 @@ BN-O1  Speed  DONE (2026-11-19)  Effort S  [implemented, red/green]
              the CT ModAdd / MontSquare. Bit-exact R^2 is checked by every Montgomery test in
              ssfbn_ut, ssfrsa_ut and the EC suites.
 
-BN-O2  Speed  OPEN  Effort S  [prototyped and measured]
+BN-O2  Speed  DONE (2026-11-19)  Effort S  [implemented, red/green]
   Where:     SSFBNMontMul (after each row's reduction, a separate n+1-word shift loop moves
              t down by one word: n^2 extra loads and stores)
   Change:    Standard CIOS: the reduction loop writes t[j - 1] directly, so the shift is
@@ -373,7 +373,7 @@ BN-O2  Speed  OPEN  Effort S  [prototyped and measured]
   Probable:  MontMul +25% (3.85 -> 3.09 us measured at 2048 bits). Smaller code.
   Risk:      Fixed-length loops, no data-dependent branch: constant-time behaviour unchanged.
 
-BN-O3  Speed  OPEN  Effort S  [prototyped and measured]
+BN-O3  Speed  DONE (2026-11-19)  Effort S  [implemented, red/green]
   Where:     SSFBNMontSquare: step 3 propagates each diagonal term's carry to the end of t
              (sum over i of 2n - 2i iterations, about n^2), and the SOS reduction propagates
              each row's carry to t[2n] (about n^2 / 2). Both were made fixed-length for
@@ -712,3 +712,41 @@ CHANGE LOG
               GREEN x86-64: ssfbn, ssfrsa, ssfec, ssfecdsa, ssfx509, ssfcms, ssfbase64url,
               ssfmatch. GREEN 32-bit ARM (qemu-arm): the same 8 suites. Size with the wipe:
               SSFBNMontInit 356 B Cortex-M4 (+132 vs HEAD), 384 B Cortex-M0+ (+104).
+  2026-11-19  BN-O2 and BN-O3 DONE (Jim: "Yes, do both"; stack deltas now reported for every
+              change).
+              BN-O2: SSFBNMontMul is standard CIOS. The reduction pass writes t[j - 1], so the
+              separate n+1-word shift loop per row is gone.
+              BN-O3: SSFBNMontSquare's diagonal add is one pass with a running carry, and each
+              reduction row defers its carry out of t[i + n] to the next row, which adds it at
+              that word. Both are fixed-length and O(n) (they were O(n^2) since AUDIT BN-12),
+              so they stay constant-time.
+              Test hooks _SSFBNMontMulIters and _SSFBNMontSqrCarryIters (ssfbn.h unit-test
+              section). ssfbn_ut.c "OPTIMIZE BN-O2 / BN-O3" checks MontMul against SSFBNModMul
+              (through R^2), MontSquare against MontMul(a, a), also in place, and MontMul(x, 1)
+              against ConvertOut, at 1, 2, 3, 4, 5, 7, 8, 12, 16, 31, 32 and 33 limbs, the
+              P-256 / P-384 primes and 2048 bits, with pseudo-random, all-ones and
+              minimal-top-limb moduli, a = b = m - 1 and a = 0. It pins 2n^2 - n MontMul inner
+              steps and 2n MontSquare carry steps.
+              RED: ssfbn_ut.c:3519 (the shift counter was non-zero). Instrumented HEAD shows
+              both new assertions fail: at n = 8, MontMul 200 steps (expected 120) and
+              MontSquare 100 carry steps (expected 16).
+              Oracle: 3000 random cases up to 256 limbs (padded and all-ones moduli, operands
+              0, m - 1, random) against Python a * b * R^-1 mod m under ASan + UBSan: no
+              mismatch, no report. Timing at 2048 bits for zero, m - 1 and random operands:
+              identical medians (MontMul 3607-3609 ns, MontSquare 2942-2943 ns).
+              GREEN x86-64 and 32-bit ARM (qemu-arm): ssfbn, ssfrsa, ssfec, ssfecdsa, ssfx509,
+              ssfcms, ssfbase64url, ssfmatch.
+              Size (arm-none-eabi-gcc -Os): Cortex-M4 MontMul 500 -> 524 B, MontSquare
+              628 -> 576 B (net -28 B); Cortex-M0+ 680 -> 700 B, 852 -> 816 B (net -16 B).
+              Stack (-fstack-usage): Cortex-M4 MontMul 1104 -> 1112 B, MontSquare 2120 -> 2128 B;
+              Cortex-M0+ 1168 -> 1184 B, 2240 -> 2240 B. The working buffers are unchanged, so
+              every chain grows by at most 8 B (M4) or 16 B (M0+).
+              Speed, 2048-bit primitives: x86-64 MontMul 3.85 -> 3.21 us, MontSquare
+              5.34 -> 2.45 us, MontInit 59 -> 27 us. Emulated ARM32: MontMul 22.2 -> 14.4 us
+              (1.6x), MontSquare 33.5 -> 11.7 us (2.9x), MontInit 378 -> 139 us.
+              End to end, x86-64 -O2, unloaded, against the BN-O1 commit: RSA-2048 verify
+              168.9 -> 84.7 us (449 -> 85 us since BN-O1, 5.3x), sign 7097 -> 5349 us (1.44x
+              since BN-O1). ECDSA P-256 sign 336.7 -> 324.6 us, P-384 sign 704.4 -> 643.0 us
+              (Fermat inverses); EC verify / ECDH unchanged (they do not use Montgomery).
+              Docs: ssfbn.md (SSFBNMontMul CIOS note; SSFBNMontSquare constant-time paragraph
+              rewritten, duplicate aliasing sentence from BN-O1 removed).

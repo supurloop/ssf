@@ -1727,6 +1727,64 @@ static void _SSFBNUTCheckMontInitR2(const SSFBN_t *m)
     SSF_ASSERT(SSFBNCmp(&mont.rr, &ref) == 0);
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Fills a->limbs[0..n-1] with a pseudo-random pattern below m (top limb cleared); sets a->len.  */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFBNUTFillBelow(SSFBN_t *a, const SSFBN_t *m, uint32_t seed)
+{
+    uint16_t k;
+
+    SSF_REQUIRE(a != NULL);
+    SSF_REQUIRE(m != NULL);
+
+    a->len = m->len;
+    for (k = 0u; k < m->len; k++)
+    {
+        seed = (seed * 1664525u) + 1013904223u;
+        a->limbs[k] = (SSFBNLimb_t)seed;
+    }
+    a->limbs[m->len - 1u] = (SSFBNLimb_t)(a->limbs[m->len - 1u] % m->limbs[m->len - 1u]);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Asserts MontMul(a, b) == a * b * R^-1 via ModMul, and MontSquare(a) == MontMul(a, a).         */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFBNUTCheckMont(const SSFBN_t *m, const SSFBN_t *a, const SSFBN_t *b)
+{
+    SSFBNMONT_DEFINE(mont, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(r, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(r2, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(ref, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(one, SSF_BN_MAX_LIMBS);
+
+    SSF_REQUIRE(m != NULL);
+    SSF_REQUIRE(a != NULL);
+    SSF_REQUIRE(b != NULL);
+
+    SSFBNMontInit(&mont, m);
+
+    /* MontMul(a, b) * R mod m must equal a * b mod m; MontMul(x, R^2) is x * R mod m */
+    SSFBNMontMul(&r, a, b, &mont);
+    SSFBNMontMul(&r2, &r, &mont.rr, &mont);
+    SSFBNModMul(&ref, a, b, m);
+    SSF_ASSERT(r2.len == m->len);
+    SSF_ASSERT(SSFBNCmp(&r2, &ref) == 0);
+
+    /* MontSquare(a) must equal MontMul(a, a), also when r aliases a */
+    SSFBNMontMul(&r, a, a, &mont);
+    SSFBNMontSquare(&r2, a, &mont);
+    SSF_ASSERT(SSFBNCmp(&r2, &r) == 0);
+    SSFBNCopy(&r2, a);
+    SSFBNMontSquare(&r2, &r2, &mont);
+    SSF_ASSERT(SSFBNCmp(&r2, &r) == 0);
+
+    /* Round trip through ConvertOut: MontMul(x, 1) is x * R^-1 */
+    SSFBNSetOne(&one, m->len);
+    SSFBNMontMul(&r, a, &one, &mont);
+    SSFBNMontConvertOut(&r2, a, &mont);
+    SSF_ASSERT(SSFBNCmp(&r2, &r) == 0);
+}
+
 /* Suppress C6262 (large stack frame). This unit-test entry point intentionally allocates many */
 /* SSFBN_DEFINE locals across its sub-test blocks; the host test environment has ample stack.  */
 #ifdef _WIN32
@@ -3399,6 +3457,94 @@ void SSFBNUnitTest(void)
         _SSFBNMontInitDoublings = 0u;
         SSFBNMontInit(&mont, &m);
         SSF_ASSERT(_SSFBNMontInitDoublings == 4u);
+#endif
+    }
+
+    /* ---- OPTIMIZE BN-O2 / BN-O3: MontMul fuses its shift, MontSquare carries in O(n) ---- */
+    /* Results are checked against SSFBNModMul and MontMul(a, a) at many widths and at the     */
+    /* operands with the most carries (all-ones m, a = b = m - 1); the counters pin the work:  */
+    /* 2n^2 - n MontMul inner steps (no shift pass), exactly 2n MontSquare carry steps.        */
+    {
+        static const uint16_t lens[] = { 1u, 2u, 3u, 4u, 5u, 7u, 8u, 12u, 16u, 31u, 32u, 33u };
+        SSFBNMONT_DEFINE(mont, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(m, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(b, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(r, SSF_BN_MAX_LIMBS);
+        uint16_t li;
+        uint16_t k;
+        uint32_t seed;
+
+        for (li = 0u; li < (uint16_t)(sizeof(lens) / sizeof(lens[0])); li++)
+        {
+            uint16_t n = lens[li];
+
+            if (n > (SSF_BN_MAX_LIMBS / 2u)) continue;
+
+            /* Pseudo-random full-width odd modulus, several operand pairs */
+            for (seed = 1u; seed <= 4u; seed++)
+            {
+                m.len = n;
+                for (k = 0u; k < n; k++)
+                {
+                    m.limbs[k] = (SSFBNLimb_t)(0x9E3779B9u * (uint32_t)(k + seed));
+                }
+                m.limbs[0] |= 1u;
+                m.limbs[n - 1u] |= 0x80000000u;
+                _SSFBNUTFillBelow(&a, &m, seed * 7u);
+                _SSFBNUTFillBelow(&b, &m, seed * 13u);
+                _SSFBNUTCheckMont(&m, &a, &b);
+            }
+
+            /* All-ones modulus with a = b = m - 1: every partial product and carry is maximal */
+            m.len = n;
+            for (k = 0u; k < n; k++) m.limbs[k] = 0xFFFFFFFFu;
+            SSFBNCopy(&a, &m);
+            a.limbs[0] = 0xFFFFFFFEu;
+            _SSFBNUTCheckMont(&m, &a, &a);
+
+            /* Minimal top limb (bit length 32n - 31), a = b = m - 1, and a = 0 */
+            for (k = 0u; k < n; k++) m.limbs[k] = 0xFFFFFFFFu;
+            m.limbs[n - 1u] = 1u;
+            SSFBNCopy(&a, &m);
+            a.limbs[0] = 0xFFFFFFFEu;
+            _SSFBNUTCheckMont(&m, &a, &a);
+            SSFBNSetZero(&b, n);
+            _SSFBNUTCheckMont(&m, &a, &b);
+
+            /* Work counters on this width */
+            SSFBNMontInit(&mont, &m);
+            _SSFBNMontMulIters = 0u;
+            SSFBNMontMul(&r, &a, &a, &mont);
+            SSF_ASSERT(_SSFBNMontMulIters == ((2u * (uint32_t)n * (uint32_t)n) - (uint32_t)n));
+            _SSFBNMontSqrCarryIters = 0u;
+            SSFBNMontSquare(&r, &a, &mont);
+            SSF_ASSERT(_SSFBNMontSqrCarryIters == (2u * (uint32_t)n));
+        }
+
+        /* NIST P-256 and P-384 primes */
+        SSFBNCopy(&m, &SSF_BN_NIST_P256);
+        _SSFBNUTFillBelow(&a, &m, 99u);
+        _SSFBNUTFillBelow(&b, &m, 77u);
+        _SSFBNUTCheckMont(&m, &a, &b);
+#if SSF_BN_CONFIG_MAX_BITS >= 768
+        SSFBNCopy(&m, &SSF_BN_NIST_P384);
+        _SSFBNUTFillBelow(&a, &m, 55u);
+        _SSFBNUTFillBelow(&b, &m, 33u);
+        _SSFBNUTCheckMont(&m, &a, &b);
+#endif
+#if SSF_BN_CONFIG_MAX_BITS >= 4096
+        /* 2048-bit (the RSA width) */
+        m.len = 64u;
+        for (k = 0u; k < 64u; k++)
+        {
+            m.limbs[k] = (SSFBNLimb_t)(0x7F4A7C15u * (uint32_t)(k + 9u));
+        }
+        m.limbs[0] |= 1u;
+        m.limbs[63] |= 0x80000000u;
+        _SSFBNUTFillBelow(&a, &m, 5u);
+        _SSFBNUTFillBelow(&b, &m, 6u);
+        _SSFBNUTCheckMont(&m, &a, &b);
 #endif
     }
 

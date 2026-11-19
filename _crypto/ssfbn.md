@@ -726,24 +726,26 @@ then takes more doublings), and `m == 1` gives `rr == 0`.
 void SSFBNMontMul(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBNMont_t *ctx);
 ```
 `r = a × b × R⁻¹ mod m`. Both `a` and `b` must already be in Montgomery form; the result is
-also in Montgomery form. Constant-time. `r` may alias `a` or `b`.
+also in Montgomery form. Constant-time. `r` may alias `a` or `b`. CIOS, with the one-word
+shift of each row folded into its reduction pass.
 
 <a id="montsquare"></a>
 ```c
 void SSFBNMontSquare(SSFBN_t *r, const SSFBN_t *a, const SSFBNMont_t *ctx);
 ```
 Semantically equivalent to `SSFBNMontMul(r, a, a, ctx)`, and the primitive the squaring
-sites inside `SSFBNModExpMont` call directly. `r` may alias `a` (`SSFBNMontInit` squares in
-place). Implemented as a dedicated square-optimised
+sites inside `SSFBNModExpMont` call directly. Implemented as a dedicated square-optimised
 routine — a triangular full square (strict upper triangle accumulated once, doubled by a
 single shift-left, then the `a[i]·a[i]` diagonal added) followed by SOS Montgomery
-reduction — rather than a plain `MontMul(r, a, a, ctx)`. **Constant-time.** Both
-carry-propagation folds (the diagonal add and the Montgomery-reduction carry) run over
-fixed-length limb spans rather than value-dependent `while (carry != 0)` loops, so the
-squaring time depends only on `ctx->len`, never on the operand's limb values. This matches
-the constant-time guarantee `SSFBNMontMul` already provides, which is what lets the
+reduction — rather than a plain `MontMul(r, a, a, ctx)`. **Constant-time.** Neither carry
+fold uses a value-dependent `while (carry != 0)` loop: the diagonal add is one pass with a
+running carry, and each reduction row defers its carry out of `t[i + n]` to the next row,
+which adds it at that same word. Both are fixed-length and O(n), so the squaring time
+depends only on `ctx->len`, never on the operand's limb values. This matches the
+constant-time guarantee `SSFBNMontMul` already provides, which is what lets the
 `SSFBNModExp` / `SSFBNModExpMont` path stay side-channel-resistant on secret exponents
-(RSA private-key CRT exponentiations, ECDSA Fermat nonce inversion). `r` may alias `a`.
+(RSA private-key CRT exponentiations, ECDSA Fermat nonce inversion). `r` may alias `a`
+(`SSFBNMontInit` squares in place).
 
 <a id="montconv"></a>
 ```c

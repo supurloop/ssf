@@ -66,6 +66,10 @@ uint32_t _SSFBNToBytesScans = 0u;
 
 /* Test-only count of the modular doublings SSFBNMontInit runs (OPTIMIZE BN-O1). */
 uint32_t _SSFBNMontInitDoublings = 0u;
+
+/* Test-only counts: MontMul inner-loop and MontSquare carry-loop iterations (BN-O2, BN-O3). */
+uint32_t _SSFBNMontMulIters = 0u;
+uint32_t _SSFBNMontSqrCarryIters = 0u;
 #define _SSF_BN_COUNT(c) do { (c)++; } while (0)
 #else
 #define _SSF_BN_SCRUB_HOOK(p, n) do { } while (0)
@@ -2142,42 +2146,38 @@ void SSFBNMontMul(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBNMon
                                 (SSFBNDLimb_t)t[j] + carry;
             t[j] = (SSFBNLimb_t)prod;
             carry = prod >> SSF_BN_LIMB_BITS;
+            _SSF_BN_COUNT(_SSFBNMontMulIters);
         }
         t[n] += (SSFBNLimb_t)carry;
         t[n + 1u] = (SSFBNLimb_t)((SSFBNDLimb_t)t[n] < carry ? 1u : 0u);
 
-        /* t = (t + (t[0] * mp mod 2^32) * m) / 2^32 */
+        /* t = (t + (t[0] * mp mod 2^32) * m) / 2^32, the word shift fused in (OPTIMIZE BN-O2) */
         u = t[0] * ctx->mp;
 
-        carry = 0;
-        for (j = 0; j < n; j++)
+        /* Word 0 of t + u * m is zero by the choice of u; only its carry is kept */
+        carry = ((SSFBNDLimb_t)u * (SSFBNDLimb_t)ctx->mod.limbs[0] + (SSFBNDLimb_t)t[0]) >>
+                SSF_BN_LIMB_BITS;
+        for (j = 1u; j < n; j++)
         {
             SSFBNDLimb_t prod = (SSFBNDLimb_t)u * (SSFBNDLimb_t)ctx->mod.limbs[j] +
                                 (SSFBNDLimb_t)t[j] + carry;
-            t[j] = (SSFBNLimb_t)prod;
+            t[j - 1u] = (SSFBNLimb_t)prod;
             carry = prod >> SSF_BN_LIMB_BITS;
+            _SSF_BN_COUNT(_SSFBNMontMulIters);
         }
         {
             SSFBNDLimb_t sum = (SSFBNDLimb_t)t[n] + carry;
-            t[n] = (SSFBNLimb_t)sum;
+            t[n - 1u] = (SSFBNLimb_t)sum;
 /* Disable false positive Visual Studio Code Analysis warning */
 #ifdef _WIN32
 #pragma warning(push)
 #pragma warning(disable:6385)
 #endif
-            t[n + 1u] += (SSFBNLimb_t)(sum >> SSF_BN_LIMB_BITS);
+            t[n] = t[n + 1u] + (SSFBNLimb_t)(sum >> SSF_BN_LIMB_BITS);
+            t[n + 1u] = 0;
 #ifdef _WIN32
 #pragma warning(pop)
 #endif
-        }
-
-        {
-            uint16_t k;
-            for (k = 0; k < n + 1u; k++)
-            {
-                t[k] = t[k + 1u];
-            }
-            t[n + 1u] = 0;
         }
     }
 
@@ -2256,65 +2256,54 @@ void SSFBNMontSquare(SSFBN_t *r, const SSFBN_t *a, const SSFBNMont_t *ctx)
         shiftCarry = newCarry;
     }
 
-    /* Step 3: add diagonal a[i]*a[i] terms at offset 2i, propagating carries forward. */
-    for (i = 0; i < n; i++)
+    /* Step 3: add the a[i]*a[i] diagonal with one running carry (fixed length, OPTIMIZE BN-O3) */
     {
-        SSFBNDLimb_t sq = (SSFBNDLimb_t)a->limbs[i] * (SSFBNDLimb_t)a->limbs[i];
-        SSFBNDLimb_t sum;
-        SSFBNLimb_t carry;
-        uint16_t pos;
+        SSFBNLimb_t carry = 0;
 
-        sum = (SSFBNDLimb_t)t[2u * i] + (SSFBNDLimb_t)(SSFBNLimb_t)sq;
-        t[2u * i] = (SSFBNLimb_t)sum;
-        carry = (SSFBNLimb_t)(sum >> SSF_BN_LIMB_BITS);
-
-        sum = (SSFBNDLimb_t)t[2u * i + 1u] +
-              (SSFBNDLimb_t)(SSFBNLimb_t)(sq >> SSF_BN_LIMB_BITS) +
-              (SSFBNDLimb_t)carry;
-        t[2u * i + 1u] = (SSFBNLimb_t)sum;
-        carry = (SSFBNLimb_t)(sum >> SSF_BN_LIMB_BITS);
-
-        /* Fixed-length carry propagation (constant-time): a*a fits in 2n limbs */
-        for (pos = (uint16_t)(2u * i + 2u); pos < (uint16_t)(2u * n); pos++)
+        for (i = 0; i < n; i++)
         {
-/* Disable false positive Visual Studio Code Analysis warning */
-#ifdef _WIN32
-#pragma warning(push)
-#pragma warning(disable:6385)
-#endif
-            sum = (SSFBNDLimb_t)t[pos] + (SSFBNDLimb_t)carry;
-#ifdef _WIN32
-#pragma warning(pop)
-#endif
-            t[pos] = (SSFBNLimb_t)sum;
+            SSFBNDLimb_t sq = (SSFBNDLimb_t)a->limbs[i] * (SSFBNDLimb_t)a->limbs[i];
+            SSFBNDLimb_t sum;
+
+            sum = (SSFBNDLimb_t)t[2u * i] + (SSFBNDLimb_t)(SSFBNLimb_t)sq + (SSFBNDLimb_t)carry;
+            t[2u * i] = (SSFBNLimb_t)sum;
+            sum = (SSFBNDLimb_t)t[2u * i + 1u] + (sq >> SSF_BN_LIMB_BITS) +
+                  (sum >> SSF_BN_LIMB_BITS);
+            t[2u * i + 1u] = (SSFBNLimb_t)sum;
             carry = (SSFBNLimb_t)(sum >> SSF_BN_LIMB_BITS);
+            _SSF_BN_COUNT(_SSFBNMontSqrCarryIters);
         }
+        /* a * a < R^2 fits in 2n limbs, so the final carry is 0 */
     }
 
     /* Montgomery reduction (SOS): clear low half, upper half holds a*a*R^-1 mod m (up to one m). */
-    for (i = 0; i < n; i++)
+    /* Each row's carry out of t[i + n] is deferred to the next row, which adds it at the same */
+    /* word as its own carry; nothing writes that word in between (fixed length, BN-O3).     */
     {
-        SSFBNLimb_t u = (SSFBNLimb_t)(t[i] * ctx->mp);
-        SSFBNDLimb_t carry = 0;
-        uint16_t j;
-        uint16_t k;
+        SSFBNLimb_t hi = 0;
 
-        /* t[i..i+n-1] += u * m (low n limbs of the product). */
-        for (j = 0; j < n; j++)
+        for (i = 0; i < n; i++)
         {
-            SSFBNDLimb_t prod = (SSFBNDLimb_t)u * (SSFBNDLimb_t)ctx->mod.limbs[j] +
-                                (SSFBNDLimb_t)t[i + j] + carry;
-            t[i + j] = (SSFBNLimb_t)prod;
-            carry = prod >> SSF_BN_LIMB_BITS;
-        }
+            SSFBNLimb_t u = (SSFBNLimb_t)(t[i] * ctx->mp);
+            SSFBNDLimb_t carry = 0;
+            SSFBNDLimb_t sum;
+            uint16_t j;
 
-        /* Fixed-length carry propagation (constant-time): the reduction result is < 2m < 2R */
-        for (k = (uint16_t)(i + n); k <= (uint16_t)(2u * n); k++)
-        {
-            SSFBNDLimb_t sum = (SSFBNDLimb_t)t[k] + carry;
-            t[k] = (SSFBNLimb_t)sum;
-            carry = sum >> SSF_BN_LIMB_BITS;
+            /* t[i..i+n-1] += u * m (low n limbs of the product). */
+            for (j = 0; j < n; j++)
+            {
+                SSFBNDLimb_t prod = (SSFBNDLimb_t)u * (SSFBNDLimb_t)ctx->mod.limbs[j] +
+                                    (SSFBNDLimb_t)t[i + j] + carry;
+                t[i + j] = (SSFBNLimb_t)prod;
+                carry = prod >> SSF_BN_LIMB_BITS;
+            }
+            sum = (SSFBNDLimb_t)t[i + n] + carry + (SSFBNDLimb_t)hi;
+            t[i + n] = (SSFBNLimb_t)sum;
+            hi = (SSFBNLimb_t)(sum >> SSF_BN_LIMB_BITS);
+            _SSF_BN_COUNT(_SSFBNMontSqrCarryIters);
         }
+        /* The result is < 2m < 2R, so the last deferred carry is t[2n]'s only bit */
+        t[2u * n] = (SSFBNLimb_t)(t[2u * n] + hi);
     }
 
     /* Final conditional subtraction: result in [0, 2m), want [0, m). */

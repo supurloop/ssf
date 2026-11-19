@@ -308,6 +308,10 @@ extern uint32_t _SSFBNToBytesScans;
 
 /* Test-only count of the modular doublings SSFBNMontInit runs (OPTIMIZE BN-O1). */
 extern uint32_t _SSFBNMontInitDoublings;
+
+/* Test-only counts: MontMul inner-loop and MontSquare carry-loop iterations (BN-O2, BN-O3). */
+extern uint32_t _SSFBNMontMulIters;
+extern uint32_t _SSFBNMontSqrCarryIters;
 #endif /* SSF_CONFIG_BN_UNIT_TEST */
 
 #ifdef __cplusplus

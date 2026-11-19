@@ -142,7 +142,7 @@ if (SSFStrLen(str, sizeof(str), &len))
 ### [↑](#ssfstr--safe-c-string-interface) [`bool SSFStrCpy()`](#functions)
 
 ```c
-bool SSFStrCpy(SSFCStrOut_t cstrDstOut, size_t cstrDstOutSize, size_t *cstrDstOutLenOut,
+bool SSFStrCpy(SSFCStrOut_t cstrDstOut, size_t cstrDstOutSize, size_t *cstrDstOutLenOutOpt,
                SSFCStrIn_t cstrSrc, size_t cstrSrcSize);
 ```
 
@@ -154,7 +154,7 @@ null terminator, and it returns `false` rather than silently truncating.
 |-----------|-----------|------|-------------|
 | `cstrDstOut` | out | [`SSFCStrOut_t`](#type-ssfcstrout-t) | Destination buffer. Must not be `NULL`. |
 | `cstrDstOutSize` | in | `size_t` | Total allocated size of `cstrDstOut` in bytes. Must be at least `strlen(src) + 1`. |
-| `cstrDstOutLenOut` | out (opt) | `size_t *` | If not `NULL`, receives the length of the copied string (excluding null terminator). |
+| `cstrDstOutLenOutOpt` | out (opt) | `size_t *` | If not `NULL`, receives the length of the copied string (excluding null terminator). |
 | `cstrSrc` | in | [`SSFCStrIn_t`](#type-ssfcstrin-t) | Source null-terminated string to copy. Must not be `NULL`. |
 | `cstrSrcSize` | in | `size_t` | Total allocated size of `cstrSrc` buffer. Used for bounds validation of the source. |
 
@@ -186,7 +186,7 @@ if (SSFStrCpy(small, sizeof(small), NULL, "hello", sizeof("hello")) == false)
 ### [↑](#ssfstr--safe-c-string-interface) [`bool SSFStrCat()`](#functions)
 
 ```c
-bool SSFStrCat(SSFCStrOut_t cstrDstOut, size_t cstrDstOutSize, size_t *cstrDstOutLenOut,
+bool SSFStrCat(SSFCStrOut_t cstrDstOut, size_t cstrDstOutSize, size_t *cstrDstOutLenOutOpt,
                SSFCStrIn_t cstrSrc, size_t cstrSrcSize);
 ```
 
@@ -197,7 +197,7 @@ null-terminates on success. Returns `false` rather than silently truncating.
 |-----------|-----------|------|-------------|
 | `cstrDstOut` | in-out | [`SSFCStrOut_t`](#type-ssfcstrout-t) | Destination buffer containing an existing null-terminated string to append to. Must not be `NULL`. |
 | `cstrDstOutSize` | in | `size_t` | Total allocated size of `cstrDstOut`. Must accommodate the existing content plus the appended string plus the null terminator. |
-| `cstrDstOutLenOut` | out (opt) | `size_t *` | If not `NULL`, receives the total length of the resulting string (excluding null terminator). |
+| `cstrDstOutLenOutOpt` | out (opt) | `size_t *` | If not `NULL`, receives the total length of the resulting string (excluding null terminator). |
 | `cstrSrc` | in | [`SSFCStrIn_t`](#type-ssfcstrin-t) | Source null-terminated string to append. Must not be `NULL`. |
 | `cstrSrcSize` | in | `size_t` | Total allocated size of `cstrSrc` buffer. |
 

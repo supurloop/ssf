@@ -95,14 +95,13 @@ bool SSFStrLen(SSFCStrIn_t cstr, size_t cstrSize, size_t *cstrLenOut)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if src fully catted to dst with NULL terminator cstrDstOutLenOut set, else false.*/
 /* --------------------------------------------------------------------------------------------- */
-bool SSFStrCat(SSFCStrOut_t cstrDstOut, size_t cstrDstOutSize, size_t *cstrDstOutLenOut,
+bool SSFStrCat(SSFCStrOut_t cstrDstOut, size_t cstrDstOutSize, size_t *cstrDstOutLenOutOpt,
                SSFCStrIn_t cstrSrc, size_t cstrSrcSize)
 {
     size_t dstLen;
     size_t srcLen;
 
     SSF_REQUIRE(cstrDstOut != NULL);
-    SSF_REQUIRE(cstrDstOutLenOut != NULL);
     SSF_REQUIRE(cstrSrc != NULL);
 
     /* Determine length of dst */
@@ -114,10 +113,10 @@ bool SSFStrCat(SSFCStrOut_t cstrDstOut, size_t cstrDstOutSize, size_t *cstrDstOu
     /* Will src fully cat to dst? */
     if ((dstLen + srcLen) >= cstrDstOutSize) return false;
 
-    /* Perform cat, update out len, and NULL terminate dst */
+    /* Perform cat, NULL terminate dst, and report the length if asked (AUDIT STR-3) */
     memcpy(&cstrDstOut[dstLen], cstrSrc, srcLen);
-    *cstrDstOutLenOut = dstLen + srcLen;
-    cstrDstOut[*cstrDstOutLenOut] = 0;
+    cstrDstOut[dstLen + srcLen] = 0;
+    if (cstrDstOutLenOutOpt != NULL) *cstrDstOutLenOutOpt = dstLen + srcLen;
 
     return true;
 }
@@ -125,13 +124,12 @@ bool SSFStrCat(SSFCStrOut_t cstrDstOut, size_t cstrDstOutSize, size_t *cstrDstOu
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if src fully copied to dst with NULL terminator cstrDstOutLenOut set, else false.*/
 /* --------------------------------------------------------------------------------------------- */
-bool SSFStrCpy(SSFCStrOut_t cstrDstOut, size_t cstrDstOutSize, size_t *cstrDstOutLenOut,
+bool SSFStrCpy(SSFCStrOut_t cstrDstOut, size_t cstrDstOutSize, size_t *cstrDstOutLenOutOpt,
                SSFCStrIn_t cstrSrc, size_t cstrSrcSize)
 {
     size_t srcLen;
 
     SSF_REQUIRE(cstrDstOut != NULL);
-    SSF_REQUIRE(cstrDstOutLenOut != NULL);
     SSF_REQUIRE(cstrSrc != NULL);
 
     /* Determine length of src */
@@ -140,10 +138,10 @@ bool SSFStrCpy(SSFCStrOut_t cstrDstOut, size_t cstrDstOutSize, size_t *cstrDstOu
     /* Will src fully cpy to dst? */
     if (srcLen >= cstrDstOutSize) return false;
 
-    /* Perform cpy, update out len, and NULL terminate dst */
+    /* Perform cpy, NULL terminate dst, and report the length if asked (AUDIT STR-3) */
     memcpy(cstrDstOut, cstrSrc, srcLen);
-    *cstrDstOutLenOut = srcLen;
-    cstrDstOut[*cstrDstOutLenOut] = 0;
+    cstrDstOut[srcLen] = 0;
+    if (cstrDstOutLenOutOpt != NULL) *cstrDstOutLenOutOpt = srcLen;
 
     return true;
 }

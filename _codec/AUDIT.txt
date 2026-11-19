@@ -1060,7 +1060,7 @@ STR-2  Medium  OPEN  [demonstrated] [verified 2026-11-18]
              (*ss != 0) (recommended). (2) Add an early return when cstrSize == 0 or
              substrSize == 0. That is not sufficient for (a) on its own.
 
-STR-3  Medium  OPEN (SSFStrTok part FIXED 2026-11-18; SSFStrCpy / SSFStrCat remain)  [demonstrated]
+STR-3  Medium  FIXED (2026-11-18)  [demonstrated]
   Location:  _codec/ssfstr.c:105, 134, 287 (SSFStrCat, SSFStrCpy, SSFStrTok); ssfstr.md:156,
              175, 199, 211, 277, 349
   Problem:   The .md marks cstrDstOutLenOut (Cpy, Cat) and tokenStrLen (Tok) as "out (opt)":
@@ -1447,3 +1447,14 @@ CHANGE LOG
               audit harness (ASan heap-buffer-overflow at ssfstr.c:292 and the STR-4/5
               outputs). GREEN: ssfstr, ssfx509, ssfcms, ssfbase64url, ssfmatch, also under ASan
               and UBSan (STR unit test enabled for the run; flag restored).
+  2026-11-18  STR-3 FIXED (remaining SSFStrCpy / SSFStrCat part) via option 2: the length output
+              is optional in code, as ssfstr.md already documented. The parameter is renamed
+              cstrDstOutLenOutOpt (SSF ...Opt convention; source compatible), the SSF_REQUIRE is
+              removed, and the single write is guarded; the NUL is now written from a local
+              length. This matches SSFStrTok's optional tokenStrLenOutOpt. ssfstr.md parameter
+              names updated. Test block "AUDIT STR-3" in ssfstr_ut.c: SSFStrCpy with NULL
+              length into a too-small buffer returns false and leaves it unchanged, into a
+              large buffer copies; SSFStrCat likewise; the two SSF_ASSERT_TEST lines asserting
+              a NULL length traps were removed. RED: "SSF Assertion: _codec/ssfstr.c:134".
+              GREEN: ssfstr, ssfx509, ssfcms, ssfbase64url, ssfmatch (STR unit test enabled for
+              the run; flag restored).

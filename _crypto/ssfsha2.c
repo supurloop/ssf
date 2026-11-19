@@ -36,6 +36,15 @@
 #include "ssfcrypt.h"
 #include "ssfusexport.h"
 
+#if SSF_CONFIG_SHA2_UNIT_TEST == 1
+/* Test-only hook fired after each secret local is wiped; NULL in production (AUDIT SHA2-3). */
+void (*_SSFSHA2ScrubTestHook)(const void *buf, size_t len) = NULL;
+#define _SSF_SHA2_SCRUB_HOOK(b) \
+    do { if (_SSFSHA2ScrubTestHook != NULL) _SSFSHA2ScrubTestHook((b), sizeof(b)); } while (0)
+#else
+#define _SSF_SHA2_SCRUB_HOOK(b) do { } while (0)
+#endif /* SSF_CONFIG_SHA2_UNIT_TEST */
+
 /* --------------------------------------------------------------------------------------------- */
 /* Local defines                                                                                 */
 /* --------------------------------------------------------------------------------------------- */
@@ -180,6 +189,8 @@ static void _SSFSHA2_32Block(uint32_t *hs, const uint8_t *block)
     }
 
     hs[0] += a; hs[1] += b; hs[2] += c; hs[3] += d; hs[4] += e; hs[5] += f; hs[6] += g; hs[7] += hh;
+    SSFCryptSecureZero(w, sizeof(w));
+    _SSF_SHA2_SCRUB_HOOK(w);
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -222,6 +233,8 @@ static void _SSFSHA2_64Block(uint64_t *hs, const uint8_t *block)
     }
 
     hs[0] += a; hs[1] += b; hs[2] += c; hs[3] += d; hs[4] += e; hs[5] += f; hs[6] += g; hs[7] += hh;
+    SSFCryptSecureZero(w, sizeof(w));
+    _SSF_SHA2_SCRUB_HOOK(w);
 }
 
 /* --------------------------------------------------------------------------------------------- */

@@ -353,5 +353,30 @@ void SSFCryptUnitTest(void)
         for (i = 3u; i < 10u; i++) SSF_ASSERT(buf[i] == 0u);
         SSF_ASSERT(buf[10] == 0xAAu);
     }
+
+    /* ---- AUDIT Batch A: word-store SSFCryptSecureZero, every start alignment and length ---- */
+    /* SecureZero writes bytes up to a word boundary, whole words, then the tail bytes. Sweep */
+    /* start offsets across two words and lengths 0..80 inside a sentinel buffer so every     */
+    /* head / middle / tail split is checked for full coverage and no write outside [p, p+n). */
+    {
+        static uint8_t buf[128];
+        size_t off;
+        size_t len;
+        size_t i;
+
+        for (off = 0; off < (2u * sizeof(uintptr_t)); off++)
+        {
+            for (len = 0; len <= 80u; len++)
+            {
+                memset(buf, 0x5Au, sizeof(buf));
+                SSFCryptSecureZero(&buf[16u + off], len);
+                for (i = 0; i < sizeof(buf); i++)
+                {
+                    if ((i >= (16u + off)) && (i < (16u + off + len))) SSF_ASSERT(buf[i] == 0u);
+                    else SSF_ASSERT(buf[i] == 0x5Au);
+                }
+            }
+        }
+    }
 }
 #endif /* SSF_CONFIG_CRYPT_UNIT_TEST */

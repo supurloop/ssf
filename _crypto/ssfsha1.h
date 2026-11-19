@@ -73,6 +73,9 @@ void SSFSHA1End(SSFSHA1Context_t *ctx, uint8_t out[SSF_SHA1_HASH_SIZE]);
 /* --------------------------------------------------------------------------------------------- */
 #if SSF_CONFIG_SHA1_UNIT_TEST == 1
 void SSFSHA1UnitTest(void);
+
+/* Test-only hook fired after each secret local is wiped (AUDIT SHA1-2). */
+extern void (*_SSFSHA1ScrubTestHook)(const void *buf, size_t len);
 #endif /* SSF_CONFIG_SHA1_UNIT_TEST */
 
 #ifdef __cplusplus

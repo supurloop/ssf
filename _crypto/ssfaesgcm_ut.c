@@ -3426,6 +3426,28 @@ static void _VerifyAESGCMAgainstOpenSSLRandom(void)
 #endif /* SSF_AESGCM_OSSL_VERIFY */
 
 /* --------------------------------------------------------------------------------------------- */
+/* AUDIT GCM-3: scrub-hook callback; counts calls and any buffer that is not all zero.          */
+/* --------------------------------------------------------------------------------------------- */
+static uint32_t _scrubCalls;
+static uint32_t _scrubDirty;
+static void _ScrubCheck(const void *buf, size_t len)
+{
+    const uint8_t *b = (const uint8_t *)buf;
+    size_t i;
+
+    SSF_ASSERT(buf != NULL);
+    _scrubCalls++;
+    for (i = 0; i < len; i++)
+    {
+        if (b[i] != 0u)
+        {
+            _scrubDirty++;
+            break;
+        }
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Unit tests the AESGCM external interface.                                                     */
 /* --------------------------------------------------------------------------------------------- */
 void SSFAESGCMUnitTest(void)
@@ -3713,6 +3735,36 @@ void SSFAESGCMUnitTest(void)
 #if SSF_AESGCM_OSSL_VERIFY == 1
     _VerifyAESGCMAgainstOpenSSLRandom();
 #endif
+
+    /* ---- AUDIT GCM-3: secret locals are wiped before return (scrub hook sees zeros) ---- */
+    {
+        _scrubCalls = 0u;
+        _scrubDirty = 0u;
+        static const uint8_t key[16] = { 0x66u };
+        static const uint8_t iv[12] = { 0x77u };
+        uint8_t pt[40];
+        uint8_t ct[40];
+        uint8_t out[40];
+        uint8_t tag[16];
+        uint32_t calls;
+
+        memset(pt, 0x88, sizeof(pt));
+        _SSFAESGCMScrubTestHook = _ScrubCheck;
+        SSFAESGCMEncrypt(pt, sizeof(pt), iv, sizeof(iv), NULL, 0, key, sizeof(key), tag,
+                         sizeof(tag), ct, sizeof(ct));
+        calls = _scrubCalls;
+        SSF_ASSERT(calls > 0u);
+        SSF_ASSERT(SSFAESGCMDecrypt(ct, sizeof(ct), iv, sizeof(iv), NULL, 0, key, sizeof(key),
+                                    tag, sizeof(tag), out, sizeof(out)) == true);
+        SSF_ASSERT(_scrubCalls > calls);
+        calls = _scrubCalls;
+        tag[0] ^= 1u;
+        SSF_ASSERT(SSFAESGCMDecrypt(ct, sizeof(ct), iv, sizeof(iv), NULL, 0, key, sizeof(key),
+                                    tag, sizeof(tag), out, sizeof(out)) == false);
+        _SSFAESGCMScrubTestHook = NULL;
+        SSF_ASSERT(_scrubCalls > calls);
+        SSF_ASSERT(_scrubDirty == 0u);
+    }
 }
 
 #endif /* SSF_CONFIG_AESGCM_UNIT_TEST */

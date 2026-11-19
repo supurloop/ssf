@@ -319,6 +319,28 @@ static const uint8_t *_sha512_256MonteUT[] =
 };
 
 /* --------------------------------------------------------------------------------------------- */
+/* AUDIT SHA2-3: scrub-hook callback; counts calls and any buffer that is not all zero.         */
+/* --------------------------------------------------------------------------------------------- */
+static uint32_t _scrubCalls;
+static uint32_t _scrubDirty;
+static void _ScrubCheck(const void *buf, size_t len)
+{
+    const uint8_t *b = (const uint8_t *)buf;
+    size_t i;
+
+    SSF_ASSERT(buf != NULL);
+    _scrubCalls++;
+    for (i = 0; i < len; i++)
+    {
+        if (b[i] != 0u)
+        {
+            _scrubDirty++;
+            break;
+        }
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Performs unit test on SHA2 external interface.                                                */
 /* --------------------------------------------------------------------------------------------- */
 void SSFSHA2UnitTest(void)
@@ -919,5 +941,21 @@ void SSFSHA2UnitTest(void)
 #if SSF_SHA2_OSSL_VERIFY == 1
     _VerifySHA2AgainstOpenSSLRandom();
 #endif
+
+    /* ---- AUDIT SHA2-3: secret locals are wiped before return (scrub hook sees zeros) ---- */
+    {
+        _scrubCalls = 0u;
+        _scrubDirty = 0u;
+        uint8_t msg[100];
+        uint8_t out[SSF_SHA2_512_BYTE_SIZE];
+
+        memset(msg, 0x55, sizeof(msg));
+        _SSFSHA2ScrubTestHook = _ScrubCheck;
+        SSFSHA256(msg, sizeof(msg), out, sizeof(out));
+        SSFSHA512(msg, sizeof(msg), out, sizeof(out));
+        _SSFSHA2ScrubTestHook = NULL;
+        SSF_ASSERT(_scrubCalls == 3u);
+        SSF_ASSERT(_scrubDirty == 0u);
+    }
 }
 #endif /* SSF_CONFIG_SHA2_UNIT_TEST */

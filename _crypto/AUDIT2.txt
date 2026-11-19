@@ -47,8 +47,9 @@ SUMMARY
   Critical   0
   High       0
   Medium     2       BN-10 (FIXED), ECDSA-5 (FIXED, opt-in)
-  Low        17      CHACHA-1, GCM-3, CCM-3, SHA1-2, SHA2-3, HMAC-1, HKDF-1, PRNG-3, BN-11,
-                     BN-12, BN-13, EC-3, RSA-9, RSA-10, RSA-11, RSA-12, TLS-8
+  Low        17      FIXED (Batch A): CHACHA-1, GCM-3, CCM-3, SHA1-2, SHA2-3
+                     OPEN: HMAC-1, HKDF-1, PRNG-3, BN-11, BN-12, BN-13, EC-3, RSA-9, RSA-10,
+                           RSA-11, RSA-12, TLS-8
 
   No memory-safety defect reachable from hostile input was found. The first-pass fixes
   (decoder bounds, carry folds, authenticate-before-decrypt, CT nonce/blind handling) hold.
@@ -74,7 +75,7 @@ ssfcrypt
 ssfsha1 / ssfsha2
 ----------------------------------------------------------------------------------------------
 
-SHA1-2  Low  OPEN  [code-read]
+SHA1-2  Low  FIXED (2026-11-19, Batch A)  [code-read]
   Location:  ssfsha1.c:56-123 (_SSFSHA1ProcessBlock)
   Problem:   The message schedule w[80] and working variables a..e are left on the stack after
              each block. End wipes the context but not this frame.
@@ -85,7 +86,7 @@ SHA1-2  Low  OPEN  [code-read]
              function (~80 words per block, small cost). (2) Leave as is and document that
              hashing does not scrub its frame.  Recommend (1).
 
-SHA2-3  Low  OPEN  [code-read]
+SHA2-3  Low  FIXED (2026-11-19, Batch A)  [code-read]
   Location:  ssfsha2.c:146-182 (_SSFSHA2_32Block), :188-224 (_SSFSHA2_64Block)
   Problem:   Same as SHA1-2: w[64] / w[80] and a..hh are not wiped. SSFSHA2_32End /
              SSFSHA2_64End wipe pad and the context, so the module already treats this data as
@@ -161,7 +162,7 @@ ssfaes / ssfaesctr
 ssfaesgcm / ssfaesccm
 ----------------------------------------------------------------------------------------------
 
-GCM-3  Low  OPEN  [measured at -O0; code-read at -O2]
+GCM-3  Low  FIXED (2026-11-19, Batch A)  [measured at -O0; code-read at -O2]
   Location:  ssfaesgcm.c:382-449 (SSFAESGCMEncrypt), :454-535 (SSFAESGCMDecrypt) locals h, s, j0,
              buf; :332-377 (_SSFAESGCMGCTR cb, buf); :281-327 (_SSFAESGCMGHASH buf)
   Problem:   None of the GCM locals are scrubbed. h is the GHASH subkey H = E_K(0^128); s is
@@ -176,7 +177,7 @@ GCM-3  Low  OPEN  [measured at -O0; code-read at -O2]
   Options:   (1) SSFCryptSecureZero h, s, j0, j1, buf before every return of Encrypt/Decrypt
              and cb/buf in GCTR/GHASH. (2) Document.  Recommend (1).
 
-CCM-3  Low  OPEN  [measured at -O0; code-read at -O2]
+CCM-3  Low  FIXED (2026-11-19, Batch A)  [measured at -O0; code-read at -O2]
   Location:  ssfaesccm.c:121-182 (_SSFAESCCMComputeTag x, b), :187-223 (_SSFAESCCMCtr a, s),
              :266-316 (SSFAESCCMDecrypt decTag, cbcTag)
   Problem:   As GCM-3. On a failed Decrypt, cbcTag holds the raw CBC-MAC T and decTag holds
@@ -194,7 +195,7 @@ CCM-3  Low  OPEN  [measured at -O0; code-read at -O2]
 ssfchacha20 / ssfpoly1305 / ssfchacha20poly1305
 ----------------------------------------------------------------------------------------------
 
-CHACHA-1  Low  OPEN  [measured at -O0 and -O2]
+CHACHA-1  Low  FIXED (2026-11-19, Batch A)  [measured at -O0 and -O2]
   Location:  ssfchacha20.c:56-86 (_SSFChaCha20Block local x[16])
   Problem:   SSFChaCha20Encrypt scrubs state[] ("holds the key") and block[] (keystream) but
              the block function's own working array x[16] is not scrubbed. After the last block
@@ -534,3 +535,39 @@ CHANGE LOG
               check. ssfecdsa.md's constant-time signing claim is now accurate; no edit needed.
               Linux direct gcc build; BN/EC/ECDSA/RSA unit-test flags flipped to 1 for the run and
               restored to 0.
+  2026-11-19  Batch A FIXED (Jim's choice: per-block wipes plus a word-store SSFCryptSecureZero):
+              CHACHA-1, GCM-3, CCM-3, SHA1-2, SHA2-3.
+              ssfcrypt (approved for this batch): SSFCryptSecureZero clears bytes up to a
+              uintptr_t boundary, then one aligned volatile uintptr_t store per word, then tail
+              bytes. No contract change; ssfcrypt.md documents the store pattern and the
+              aliasing note (a port may substitute explicit_bzero / memset_s). New ssfcrypt_ut.c
+              sweep: start offsets 0..2*sizeof(uintptr_t)-1 x lengths 0..80 in a sentinel buffer
+              (full coverage, no write outside [p, p+n)). This passes on the old byte loop too;
+              it pins the head / middle / tail edge cases the word path introduces.
+              Wipes added (each followed by a test-only scrub hook): ssfchacha20.c x[16] at the
+              end of _SSFChaCha20Block; ssfsha1.c w[80] in _SSFSHA1ProcessBlock; ssfsha2.c w[] in
+              both block functions; ssfaesgcm.c _SSFAESGCMBlockMult x, y (= H), res, ac128, bd128,
+              ab_cd128, _SSFAESGCMGCTR buf (keystream / tag mask), and h, s on every return of
+              Encrypt and Decrypt; ssfaesccm.c _SSFAESCCMComputeTag x, b, _SSFAESCCMCtr s, Encrypt
+              cbcTag, and decTag, cbcTag on both returns of Decrypt. Not wiped, as public: GHASH
+              input buf (AAD / ciphertext / lengths / IV), counter blocks (IV-derived), CCM A_i.
+              Not wiped: scalar working variables (SHA a..h, ChaCha20 quarter-round temporaries,
+              GF(2^128) inline-helper locals), which live in registers and cannot be cleared
+              portably from C.
+              Tests: each module's _ut.c gains a scrub-hook callback that counts calls and flags
+              any buffer that is not all zero, plus an "AUDIT <label>" block: ChaCha20 100 bytes
+              (2 calls), SHA-1 100 bytes (2 calls), SHA-256 + SHA-512 100 bytes (3 calls), GCM and
+              CCM encrypt, good decrypt and forged-tag decrypt (calls on every path).
+              RED (hooks in place, no wipes): ssfaesccm_ut.c:650, ssfaesgcm_ut.c:3766,
+              ssfchacha20_ut.c:715, ssfsha1_ut.c:356, ssfsha2_ut.c:958, all "_scrubDirty == 0".
+              GREEN: every _crypto suite (aes, aesccm, aesctr, aesgcm, bn, chacha20, ccp, cms,
+              crypt, ec, ecdsa, ed25519, hkdf, hmac, poly1305, prng, rsa, sha1, sha2, tls, x25519)
+              plus x509, base64url, match. Big-endian strict-alignment check: crypt, sha1, sha2,
+              chacha20, aesgcm, aesccm pass on 32-bit MIPS BE under qemu-mips (static build).
+              Cost vs HEAD 2118c2f, x86-64 -O2, production build (hooks compiled out), two runs:
+              SHA-1 4 KB +6%, SHA-256 4 KB +2..6%, SHA-512 4 KB +4%, ChaCha20 / GCM / CCM within
+              +-3%; short inputs are faster because existing wipes got cheaper (SHA-512 64 B
+              229 -> 195 ns, HMAC-SHA-256 64 B 813 -> 732 ns). Object size (text, same-path
+              compiles): +807 bytes at -O2, +607 at -Os, mostly GCM (+516 / +366, the multiply is
+              inlined at several call sites). Linux direct gcc build; ssfport.h test flags
+              restored with git checkout.

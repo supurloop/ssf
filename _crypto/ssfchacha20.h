@@ -58,6 +58,9 @@ void SSFChaCha20Encrypt(const uint8_t *pt, size_t ptLen, const uint8_t *key, siz
 
 #if SSF_CONFIG_CHACHA20_UNIT_TEST == 1
 void SSFChaCha20UnitTest(void);
+
+/* Test-only hook fired after each secret local is wiped (AUDIT CHACHA-1). */
+extern void (*_SSFChaCha20ScrubTestHook)(const void *buf, size_t len);
 #endif /* SSF_CONFIG_CHACHA20_UNIT_TEST */
 
 #ifdef __cplusplus

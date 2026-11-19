@@ -41,6 +41,15 @@
 #include "ssfcrypt.h"
 #include "ssfusexport.h"
 
+#if SSF_CONFIG_AESGCM_UNIT_TEST == 1
+/* Test-only hook fired after each secret local is wiped; NULL in production (AUDIT GCM-3). */
+void (*_SSFAESGCMScrubTestHook)(const void *buf, size_t len) = NULL;
+#define _SSF_AESGCM_SCRUB_HOOK(b) \
+    do { if (_SSFAESGCMScrubTestHook != NULL) _SSFAESGCMScrubTestHook((b), sizeof(b)); } while (0)
+#else
+#define _SSF_AESGCM_SCRUB_HOOK(b) do { } while (0)
+#endif /* SSF_CONFIG_AESGCM_UNIT_TEST */
+
 /* Compile-time bounds checks via typedef-array idiom (size becomes -1 on failure). */
 typedef char _ssf_aesgcm_sa_size_at_least_32[(sizeof(size_t) >= 4) ? 1 : -1];
 typedef char _ssf_aesgcm_sa_u64_is_64_bit[(sizeof(uint64_t) == 8) ? 1 : -1];
@@ -273,6 +282,18 @@ static void _SSFAESGCMBlockMult(uint8_t *in, size_t inSize, const uint8_t *con, 
     SSF_PUTU32LE(&in[4],  res[1]);
     SSF_PUTU32LE(&in[8],  res[2]);
     SSF_PUTU32LE(&in[12], res[3]);
+    SSFCryptSecureZero(x, sizeof(x));
+    _SSF_AESGCM_SCRUB_HOOK(x);
+    SSFCryptSecureZero(y, sizeof(y));
+    _SSF_AESGCM_SCRUB_HOOK(y);
+    SSFCryptSecureZero(res, sizeof(res));
+    _SSF_AESGCM_SCRUB_HOOK(res);
+    SSFCryptSecureZero(ac128, sizeof(ac128));
+    _SSF_AESGCM_SCRUB_HOOK(ac128);
+    SSFCryptSecureZero(bd128, sizeof(bd128));
+    _SSF_AESGCM_SCRUB_HOOK(bd128);
+    SSFCryptSecureZero(ab_cd128, sizeof(ab_cd128));
+    _SSF_AESGCM_SCRUB_HOOK(ab_cd128);
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -374,6 +395,8 @@ static void _SSFAESGCMGCTR(const uint8_t *in, size_t inLen, const SSFAESKeySched
             out[n + i] ^= buf[i];
         }
     }
+    SSFCryptSecureZero(buf, sizeof(buf));
+    _SSF_AESGCM_SCRUB_HOOK(buf);
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -446,6 +469,10 @@ void SSFAESGCMEncrypt(const uint8_t *pt, size_t ptLen, const uint8_t *iv, size_t
 
     memcpy(tag, s, tagSize);
     SSFAESKeyScheduleDeInit(&ks);
+    SSFCryptSecureZero(h, sizeof(h));
+    _SSF_AESGCM_SCRUB_HOOK(h);
+    SSFCryptSecureZero(s, sizeof(s));
+    _SSF_AESGCM_SCRUB_HOOK(s);
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -517,6 +544,10 @@ bool SSFAESGCMDecrypt(const uint8_t *ct, size_t ctLen, const uint8_t *iv, size_t
         /* Yes, authentication failed; zero the plaintext. */
         SSFAESKeyScheduleDeInit(&ks);
         if (ctLen > 0u) memset(pt, 0, ctLen);
+        SSFCryptSecureZero(h, sizeof(h));
+        _SSF_AESGCM_SCRUB_HOOK(h);
+        SSFCryptSecureZero(s, sizeof(s));
+        _SSF_AESGCM_SCRUB_HOOK(s);
         return false;
     }
 
@@ -530,6 +561,10 @@ bool SSFAESGCMDecrypt(const uint8_t *ct, size_t ctLen, const uint8_t *iv, size_t
     }
 
     SSFAESKeyScheduleDeInit(&ks);
+    SSFCryptSecureZero(h, sizeof(h));
+    _SSF_AESGCM_SCRUB_HOOK(h);
+    SSFCryptSecureZero(s, sizeof(s));
+    _SSF_AESGCM_SCRUB_HOOK(s);
     return true;
 }
 

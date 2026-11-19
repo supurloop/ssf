@@ -59,6 +59,9 @@ bool SSFAESGCMDecrypt(const uint8_t *ct, size_t ctLen, const uint8_t *iv, size_t
 /* --------------------------------------------------------------------------------------------- */
 #if SSF_CONFIG_AESGCM_UNIT_TEST == 1
 void SSFAESGCMUnitTest(void);
+
+/* Test-only hook fired after each secret local is wiped (AUDIT GCM-3). */
+extern void (*_SSFAESGCMScrubTestHook)(const void *buf, size_t len);
 #endif /* SSF_CONFIG_AESGCM_UNIT_TEST */
 
 #ifdef __cplusplus

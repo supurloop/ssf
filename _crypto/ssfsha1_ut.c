@@ -117,6 +117,28 @@ static void _VerifySHA1AgainstOpenSSLRandom(void)
 }
 #endif /* SSF_SHA1_OSSL_VERIFY */
 
+/* --------------------------------------------------------------------------------------------- */
+/* AUDIT SHA1-2: scrub-hook callback; counts calls and any buffer that is not all zero.         */
+/* --------------------------------------------------------------------------------------------- */
+static uint32_t _scrubCalls;
+static uint32_t _scrubDirty;
+static void _ScrubCheck(const void *buf, size_t len)
+{
+    const uint8_t *b = (const uint8_t *)buf;
+    size_t i;
+
+    SSF_ASSERT(buf != NULL);
+    _scrubCalls++;
+    for (i = 0; i < len; i++)
+    {
+        if (b[i] != 0u)
+        {
+            _scrubDirty++;
+            break;
+        }
+    }
+}
+
 void SSFSHA1UnitTest(void)
 {
     uint8_t hash[SSF_SHA1_HASH_SIZE];
@@ -318,5 +340,20 @@ void SSFSHA1UnitTest(void)
 #if SSF_SHA1_OSSL_VERIFY == 1
     _VerifySHA1AgainstOpenSSLRandom();
 #endif
+
+    /* ---- AUDIT SHA1-2: secret locals are wiped before return (scrub hook sees zeros) ---- */
+    {
+        _scrubCalls = 0u;
+        _scrubDirty = 0u;
+        uint8_t msg[100];
+        uint8_t out[SSF_SHA1_HASH_SIZE];
+
+        memset(msg, 0x44, sizeof(msg));
+        _SSFSHA1ScrubTestHook = _ScrubCheck;
+        SSFSHA1(msg, sizeof(msg), out);
+        _SSFSHA1ScrubTestHook = NULL;
+        SSF_ASSERT(_scrubCalls == 2u);
+        SSF_ASSERT(_scrubDirty == 0u);
+    }
 }
 #endif /* SSF_CONFIG_SHA1_UNIT_TEST */

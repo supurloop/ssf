@@ -263,6 +263,28 @@ static void _VerifyAESCCMAgainstOpenSSLRandom(void)
 }
 #endif /* SSF_AESCCM_OSSL_VERIFY */
 
+/* --------------------------------------------------------------------------------------------- */
+/* AUDIT CCM-3: scrub-hook callback; counts calls and any buffer that is not all zero.          */
+/* --------------------------------------------------------------------------------------------- */
+static uint32_t _scrubCalls;
+static uint32_t _scrubDirty;
+static void _ScrubCheck(const void *buf, size_t len)
+{
+    const uint8_t *b = (const uint8_t *)buf;
+    size_t i;
+
+    SSF_ASSERT(buf != NULL);
+    _scrubCalls++;
+    for (i = 0; i < len; i++)
+    {
+        if (b[i] != 0u)
+        {
+            _scrubDirty++;
+            break;
+        }
+    }
+}
+
 void SSFAESCCMUnitTest(void)
 {
     /* ---- (Hardening) Reject a message too long for the L-byte length / counter field ---- */
@@ -597,5 +619,35 @@ void SSFAESCCMUnitTest(void)
 #if SSF_AESCCM_OSSL_VERIFY == 1
     _VerifyAESCCMAgainstOpenSSLRandom();
 #endif
+
+    /* ---- AUDIT CCM-3: secret locals are wiped before return (scrub hook sees zeros) ---- */
+    {
+        _scrubCalls = 0u;
+        _scrubDirty = 0u;
+        static const uint8_t key[16] = { 0x66u };
+        static const uint8_t nonce[13] = { 0x77u };
+        uint8_t pt[40];
+        uint8_t ct[40];
+        uint8_t out[40];
+        uint8_t tag[16];
+        uint32_t calls;
+
+        memset(pt, 0x88, sizeof(pt));
+        _SSFAESCCMScrubTestHook = _ScrubCheck;
+        SSFAESCCMEncrypt(pt, sizeof(pt), nonce, sizeof(nonce), NULL, 0, key, sizeof(key), tag,
+                         sizeof(tag), ct, sizeof(ct));
+        calls = _scrubCalls;
+        SSF_ASSERT(calls > 0u);
+        SSF_ASSERT(SSFAESCCMDecrypt(ct, sizeof(ct), nonce, sizeof(nonce), NULL, 0, key,
+                                    sizeof(key), tag, sizeof(tag), out, sizeof(out)) == true);
+        SSF_ASSERT(_scrubCalls > calls);
+        calls = _scrubCalls;
+        tag[0] ^= 1u;
+        SSF_ASSERT(SSFAESCCMDecrypt(ct, sizeof(ct), nonce, sizeof(nonce), NULL, 0, key,
+                                    sizeof(key), tag, sizeof(tag), out, sizeof(out)) == false);
+        _SSFAESCCMScrubTestHook = NULL;
+        SSF_ASSERT(_scrubCalls > calls);
+        SSF_ASSERT(_scrubDirty == 0u);
+    }
 }
 #endif /* SSF_CONFIG_AESCCM_UNIT_TEST */

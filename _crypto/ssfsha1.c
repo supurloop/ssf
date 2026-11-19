@@ -34,6 +34,15 @@
 #include "ssfcrypt.h"
 #include "ssfusexport.h"
 
+#if SSF_CONFIG_SHA1_UNIT_TEST == 1
+/* Test-only hook fired after each secret local is wiped; NULL in production (AUDIT SHA1-2). */
+void (*_SSFSHA1ScrubTestHook)(const void *buf, size_t len) = NULL;
+#define _SSF_SHA1_SCRUB_HOOK(b) \
+    do { if (_SSFSHA1ScrubTestHook != NULL) _SSFSHA1ScrubTestHook((b), sizeof(b)); } while (0)
+#else
+#define _SSF_SHA1_SCRUB_HOOK(b) do { } while (0)
+#endif /* SSF_CONFIG_SHA1_UNIT_TEST */
+
 /* --------------------------------------------------------------------------------------------- */
 /* SHA-1 constants (RFC 3174 section 5)                                                          */
 /* --------------------------------------------------------------------------------------------- */
@@ -122,6 +131,8 @@ static void _SSFSHA1ProcessBlock(SSFSHA1Context_t *ctx, const uint8_t block[SSF_
     ctx->state[2] += c;
     ctx->state[3] += d;
     ctx->state[4] += e;
+    SSFCryptSecureZero(w, sizeof(w));
+    _SSF_SHA1_SCRUB_HOOK(w);
 }
 
 /* --------------------------------------------------------------------------------------------- */

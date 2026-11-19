@@ -68,9 +68,30 @@ void SSFCryptSecureZero(void *p, size_t n)
     SSF_REQUIRE(p != NULL);
 
     v = (volatile uint8_t *)p;
-    for (i = 0u; i < n; i++)
+    i = 0u;
+
+    /* Is the next byte inside the buffer and short of a word boundary? */
+    while ((i < n) && ((((uintptr_t)&v[i]) & (sizeof(uintptr_t) - 1u)) != 0u))
     {
+        /* Yes, clear it as a byte */
         v[i] = 0u;
+        i++;
+    }
+
+    /* Does a whole aligned word remain? */
+    while ((n - i) >= sizeof(uintptr_t))
+    {
+        /* Yes, clear it with one volatile word store (AUDIT Batch A) */
+        *((volatile uintptr_t *)&v[i]) = 0u;
+        i += sizeof(uintptr_t);
+    }
+
+    /* Is a tail byte left? */
+    while (i < n)
+    {
+        /* Yes, clear it as a byte */
+        v[i] = 0u;
+        i++;
     }
 }
 

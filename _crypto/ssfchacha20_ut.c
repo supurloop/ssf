@@ -140,6 +140,28 @@ static void _VerifyChaCha20AgainstOpenSSLRandom(void)
 #endif /* SSF_CHACHA20_OSSL_VERIFY */
 
 /* --------------------------------------------------------------------------------------------- */
+/* AUDIT CHACHA-1: scrub-hook callback; counts calls and any buffer that is not all zero.       */
+/* --------------------------------------------------------------------------------------------- */
+static uint32_t _scrubCalls;
+static uint32_t _scrubDirty;
+static void _ScrubCheck(const void *buf, size_t len)
+{
+    const uint8_t *b = (const uint8_t *)buf;
+    size_t i;
+
+    SSF_ASSERT(buf != NULL);
+    _scrubCalls++;
+    for (i = 0; i < len; i++)
+    {
+        if (b[i] != 0u)
+        {
+            _scrubDirty++;
+            break;
+        }
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* RFC 7539 Section 2.4.2 test vector                                                            */
 /* --------------------------------------------------------------------------------------------- */
 void SSFChaCha20UnitTest(void)
@@ -674,6 +696,24 @@ void SSFChaCha20UnitTest(void)
 #if SSF_CHACHA20_OSSL_VERIFY == 1
     _VerifyChaCha20AgainstOpenSSLRandom();
 #endif
+
+    /* ---- AUDIT CHACHA-1: secret locals are wiped before return (scrub hook sees zeros) ---- */
+    {
+        _scrubCalls = 0u;
+        _scrubDirty = 0u;
+        static const uint8_t key[32] = { 0x11u };
+        static const uint8_t nonce[12] = { 0x22u };
+        uint8_t pt[100];
+        uint8_t ct[100];
+
+        memset(pt, 0x33, sizeof(pt));
+        _SSFChaCha20ScrubTestHook = _ScrubCheck;
+        SSFChaCha20Encrypt(pt, sizeof(pt), key, sizeof(key), nonce, sizeof(nonce), 1u, ct,
+                           sizeof(ct));
+        _SSFChaCha20ScrubTestHook = NULL;
+        SSF_ASSERT(_scrubCalls == 2u);
+        SSF_ASSERT(_scrubDirty == 0u);
+    }
 }
 
 #endif /* SSF_CONFIG_CHACHA20_UNIT_TEST */

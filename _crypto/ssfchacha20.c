@@ -37,6 +37,16 @@
 #include "ssfcrypt.h"
 #include "ssfusexport.h"
 
+#if SSF_CONFIG_CHACHA20_UNIT_TEST == 1
+/* Test-only hook fired after each secret local is wiped; NULL in production (AUDIT CHACHA-1). */
+void (*_SSFChaCha20ScrubTestHook)(const void *buf, size_t len) = NULL;
+#define _SSF_CHACHA20_SCRUB_HOOK(b) \
+    do { if (_SSFChaCha20ScrubTestHook != NULL) { _SSFChaCha20ScrubTestHook((b), sizeof(b)); } } \
+    while (0)
+#else
+#define _SSF_CHACHA20_SCRUB_HOOK(b) do { } while (0)
+#endif /* SSF_CONFIG_CHACHA20_UNIT_TEST */
+
 /* --------------------------------------------------------------------------------------------- */
 /* Module Defines                                                                                */
 /* --------------------------------------------------------------------------------------------- */
@@ -83,6 +93,8 @@ static void _SSFChaCha20Block(const uint32_t *input, size_t inputLen, uint8_t *o
     {
         SSF_PUTU32LE(&out[i * 4], x[i] + input[i]);
     }
+    SSFCryptSecureZero(x, sizeof(x));
+    _SSF_CHACHA20_SCRUB_HOOK(x);
 }
 
 /* --------------------------------------------------------------------------------------------- */

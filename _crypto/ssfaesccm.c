@@ -35,6 +35,15 @@
 #include "ssfcrypt.h"
 #include "ssfusexport.h"
 
+#if SSF_CONFIG_AESCCM_UNIT_TEST == 1
+/* Test-only hook fired after each secret local is wiped; NULL in production (AUDIT CCM-3). */
+void (*_SSFAESCCMScrubTestHook)(const void *buf, size_t len) = NULL;
+#define _SSF_AESCCM_SCRUB_HOOK(b) \
+    do { if (_SSFAESCCMScrubTestHook != NULL) _SSFAESCCMScrubTestHook((b), sizeof(b)); } while (0)
+#else
+#define _SSF_AESCCM_SCRUB_HOOK(b) do { } while (0)
+#endif /* SSF_CONFIG_AESCCM_UNIT_TEST */
+
 /* --------------------------------------------------------------------------------------------- */
 /* XOR 16 bytes: dst ^= src                                                                      */
 /* --------------------------------------------------------------------------------------------- */
@@ -179,6 +188,10 @@ static void _SSFAESCCMComputeTag(const SSFAESKeySchedule_t *ks, const uint8_t *n
 
     /* Tag is the first tagLen bytes of x */
     memcpy(tagOut, x, tagLen);
+    SSFCryptSecureZero(x, sizeof(x));
+    _SSF_AESCCM_SCRUB_HOOK(x);
+    SSFCryptSecureZero(b, sizeof(b));
+    _SSF_AESCCM_SCRUB_HOOK(b);
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -220,6 +233,8 @@ static void _SSFAESCCMCtr(const SSFAESKeySchedule_t *ks, const uint8_t *nonce, s
     {
         tagOut[j] = tagIn[j] ^ s[j];
     }
+    SSFCryptSecureZero(s, sizeof(s));
+    _SSF_AESCCM_SCRUB_HOOK(s);
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -258,6 +273,8 @@ void SSFAESCCMEncrypt(const uint8_t *pt, size_t ptLen, const uint8_t *nonce, siz
     _SSFAESCCMCtr(&ks, nonce, nonceLen, pt, ptLen, ct, cbcTag, tag, tagSize);
 
     SSFAESKeyScheduleDeInit(&ks);
+    SSFCryptSecureZero(cbcTag, sizeof(cbcTag));
+    _SSF_AESCCM_SCRUB_HOOK(cbcTag);
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -308,9 +325,17 @@ bool SSFAESCCMDecrypt(const uint8_t *ct, size_t ctLen, const uint8_t *nonce, siz
             memset(pt, 0, ctLen);
         }
         /* No, nothing was decrypted */
+        SSFCryptSecureZero(decTag, sizeof(decTag));
+        _SSF_AESCCM_SCRUB_HOOK(decTag);
+        SSFCryptSecureZero(cbcTag, sizeof(cbcTag));
+        _SSF_AESCCM_SCRUB_HOOK(cbcTag);
         return false;
     }
     /* No, tags match; return success. */
+    SSFCryptSecureZero(decTag, sizeof(decTag));
+    _SSF_AESCCM_SCRUB_HOOK(decTag);
+    SSFCryptSecureZero(cbcTag, sizeof(cbcTag));
+    _SSF_AESCCM_SCRUB_HOOK(cbcTag);
     return true;
 }
 

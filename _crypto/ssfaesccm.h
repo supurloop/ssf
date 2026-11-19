@@ -65,6 +65,9 @@ void SSFAESCCMUnitTest(void);
 /* Test wrapper around the internal counter-block formatter (AUDIT CCM-2). */
 void _SSFAESCCMFormatCtrForTest(uint8_t a[16], const uint8_t *nonce, size_t nonceLen,
                                 uint64_t counter);
+
+/* Test-only hook fired after each secret local is wiped (AUDIT CCM-3). */
+extern void (*_SSFAESCCMScrubTestHook)(const void *buf, size_t len);
 #endif /* SSF_CONFIG_AESCCM_UNIT_TEST */
 
 #ifdef __cplusplus

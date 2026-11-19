@@ -398,6 +398,21 @@ bool SSFASN1DecGetBitString(const SSFASN1Cursor_t *cursor, const uint8_t **bitsO
     if (tag != SSF_ASN1_TAG_BIT_STRING) return false;
     if (valueLen < 1u) return false;
 
+    /* Is the unused count over 7, or nonzero with no bits (X.690 8.6.2, AUDIT ASN1-5)? */
+    if ((value[0] > 7u) || ((valueLen == 1u) && (value[0] != 0u)))
+    {
+        /* Yes */
+        return false;
+    }
+    /* No, are any of the last octet's unused (padding) bits set (DER 11.2.1)? */
+    if ((valueLen > 1u) &&
+        ((value[valueLen - 1u] & (uint8_t)((1u << value[0]) - 1u)) != 0u))
+    {
+        /* Yes, DER requires them to be zero */
+        return false;
+    }
+    /* No */
+
     *unusedBitsOut = value[0];
     *bitsOut = &value[1];
     *bitsLenOut = valueLen - 1u;

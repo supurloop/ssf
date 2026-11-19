@@ -5461,6 +5461,57 @@ void SSFX509UnitTest(void)
             SSF_ASSERT(SSFX509Parse(caOut, n, &parsed) == false);
         }
 
+        /* AUDIT ASN1-5: BIT STRING padding never adds key usages; keys and signatures */
+        /* must be whole octets */
+        {
+            static const uint8_t kuOid[] = { 0x55u, 0x1Du, 0x0Fu };
+            /* digitalSignature only, but the seven padding bits are set */
+            static const uint8_t kuPadSet[] = { 0x03u, 0x02u, 0x07u, 0xFFu };
+            /* digitalSignature only, DER: the control */
+            static const uint8_t kuDigSig[] = { 0x03u, 0x02u, 0x07u, 0x80u };
+            uint32_t at;
+
+            _utGenBaseParams(&p, serial, caPub, (uint32_t)caPubLen);
+            p.addRawExt = true;
+            p.rawExtOid = kuOid;
+            p.rawExtOidLen = sizeof(kuOid);
+            p.rawExtCritical = true;
+            p.rawExtValue = kuDigSig;
+            p.rawExtValueLen = sizeof(kuDigSig);
+            SSF_ASSERT(SSFX509EncodeCert(caOut, sizeof(caOut), &p, fakeSig, sizeof(fakeSig),
+                                         &n) == true);
+            SSF_ASSERT(SSFX509Parse(caOut, n, &parsed) == true);
+            SSF_ASSERT(parsed.keyUsageBits == SSF_X509_KU_DIGITAL_SIGNATURE);
+            /* Padding bits set: the BIT STRING is not DER, so keyUsage keeps its fail-closed */
+            /* default of no usages (ssfx509.md), never keyCertSign and the rest */
+            p.rawExtValue = kuPadSet;
+            p.rawExtValueLen = sizeof(kuPadSet);
+            SSF_ASSERT(SSFX509EncodeCert(caOut, sizeof(caOut), &p, fakeSig, sizeof(fakeSig),
+                                         &n) == true);
+            SSF_ASSERT(SSFX509Parse(caOut, n, &parsed) == true);
+            SSF_ASSERT((parsed.hasKeyUsage == true) && (parsed.keyUsageBits == 0u));
+
+            /* Public key BIT STRING with one unused bit (padding bit itself zero) */
+            _utGenBaseParams(&p, serial, caPub, (uint32_t)caPubLen);
+            SSF_ASSERT(SSFX509EncodeCert(caOut, sizeof(caOut), &p, fakeSig, sizeof(fakeSig),
+                                         &n) == true);
+            SSF_ASSERT(SSFX509Parse(caOut, n, &parsed) == true);
+            SSF_ASSERT(_utFind(caOut, n, caPub, (uint32_t)caPubLen, &at) == true);
+            SSF_ASSERT((at >= 3u) && (caOut[at - 3u] == 0x03u) && (caOut[at - 1u] == 0x00u));
+            caOut[at - 1u] = 0x01u;
+            caOut[at + (uint32_t)caPubLen - 1u] &= 0xFEu;
+            SSF_ASSERT(SSFX509Parse(caOut, n, &parsed) == false);
+
+            /* Signature BIT STRING (the last element) with one unused bit */
+            SSF_ASSERT(SSFX509EncodeCert(caOut, sizeof(caOut), &p, fakeSig, sizeof(fakeSig),
+                                         &n) == true);
+            SSF_ASSERT((caOut[n - sizeof(fakeSig) - 3u] == 0x03u) &&
+                       (caOut[n - sizeof(fakeSig) - 1u] == 0x00u));
+            caOut[n - sizeof(fakeSig) - 1u] = 0x01u;
+            caOut[n - 1u] &= 0xFEu;
+            SSF_ASSERT(SSFX509Parse(caOut, n, &parsed) == false);
+        }
+
         /* AUDIT ASN1-3: a serial with an unneeded leading 0x00 is not DER and fails to parse */
         {
             uint8_t padSerial[] = { 0x00u, 0x05u };
@@ -6538,7 +6589,8 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(SSFX509Parse(out, n, &parsed) == true);
         SSF_ASSERT((parsed.hasKeyUsage == true) && (parsed.keyUsageBits == 0u));
 
-        /* Nonzero unused bits on the public key and signature BIT STRINGs are recorded */
+        /* Nonzero unused bits on the public key or signature BIT STRING fail the parse: no */
+        /* supported key or signature is a partial octet (AUDIT ASN1-5) */
         _utGenBaseParams(&p, serial, pubKey, 65u);
         (void)SSFX509EncodeCert(out, sizeof(out), &p, fakeSig, sizeof(fakeSig), &n);
         SSF_ASSERT(n != 0u);
@@ -6546,12 +6598,11 @@ void SSFX509UnitTest(void)
         SSF_ASSERT((parsed.pubKeyUnusedBits == 0u) && (parsed.signatureUnusedBits == 0u));
         SSF_ASSERT(_utFind(out, n, spkiPattern, sizeof(spkiPattern), &at) == true);
         out[at + 2u] = 0x03u;
-        SSF_ASSERT(SSFX509Parse(out, n, &parsed) == true);
-        SSF_ASSERT((parsed.pubKeyUnusedBits == 3u) && (parsed.pubKeyLen == 65u));
+        SSF_ASSERT(SSFX509Parse(out, n, &parsed) == false);
+        out[at + 2u] = 0x00u;
         SSF_ASSERT(_utFind(out, n, sigPattern, sizeof(sigPattern), &at) == true);
         out[at + 2u] = 0x02u;
-        SSF_ASSERT(SSFX509Parse(out, n, &parsed) == true);
-        SSF_ASSERT((parsed.signatureUnusedBits == 2u) && (parsed.signatureLen == 64u));
+        SSF_ASSERT(SSFX509Parse(out, n, &parsed) == false);
 
         /* An unsupported signature algorithm parses but never verifies */
         _utGenBaseParams(&p, serial, pubKey, 65u);

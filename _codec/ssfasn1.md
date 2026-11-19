@@ -422,7 +422,8 @@ bool SSFASN1DecGetBitString(const SSFASN1Cursor_t *cursor, const uint8_t **bitsO
 Decode BIT STRING. `*bitsOut` points at the bit-payload bytes (DER stores them
 big-endian-byte-order, MSB of byte 0 is bit 0 of the string). `*bitsLenOut` is the byte
 length; `*unusedBitsOut` is the count of bits at the end of the last byte that should be
-ignored (`0..7`).
+ignored (`0..7`). Returns `false` for an unused count above 7, a nonzero count with no payload,
+or any unused (padding) bit that is not zero (X.690 §11.2.1).
 
 <a id="ssfasn1decgetoctetstring"></a>
 ```c

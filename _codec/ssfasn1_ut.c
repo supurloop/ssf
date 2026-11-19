@@ -97,6 +97,47 @@ void SSFASN1UnitTest(void)
         SSF_ASSERT(val == 0xDEADBEEFCAFEull);
     }
 
+    /* ---- AUDIT ASN1-5: BIT STRING unused count 0..7, 0 when empty, zero padding ---- */
+    {
+        static const uint8_t bsUnused8[] = { 0x03u, 0x02u, 0x08u, 0xFFu };
+        static const uint8_t bsEmpty5[] = { 0x03u, 0x01u, 0x05u };
+        static const uint8_t bsPad7[] = { 0x03u, 0x02u, 0x07u, 0xFFu };
+        static const uint8_t bsPad1[] = { 0x03u, 0x02u, 0x01u, 0x81u };
+        static const uint8_t bsEmpty[] = { 0x03u, 0x01u, 0x00u };
+        static const uint8_t bs780[] = { 0x03u, 0x02u, 0x07u, 0x80u };
+        static const uint8_t bs0FF[] = { 0x03u, 0x02u, 0x00u, 0xFFu };
+        static const uint8_t bs1FFFE[] = { 0x03u, 0x03u, 0x01u, 0xFFu, 0xFEu };
+        static const struct { const uint8_t *der; uint32_t len; } bad[] = {
+            { bsUnused8, sizeof(bsUnused8) }, { bsEmpty5, sizeof(bsEmpty5) },
+            { bsPad7, sizeof(bsPad7) }, { bsPad1, sizeof(bsPad1) }
+        };
+        static const struct { const uint8_t *der; uint32_t len; uint8_t unused; } good[] = {
+            { bsEmpty, sizeof(bsEmpty), 0u }, { bs780, sizeof(bs780), 7u },
+            { bs0FF, sizeof(bs0FF), 0u }, { bs1FFFE, sizeof(bs1FFFE), 1u }
+        };
+        static const uint8_t sentinel[1] = { 0x00u };
+        const uint8_t *bits;
+        uint32_t bitsLen;
+        uint8_t unusedBits;
+        uint32_t i;
+
+        for (i = 0; i < (uint32_t)(sizeof(bad) / sizeof(bad[0])); i++)
+        {
+            cursor.buf = bad[i].der; cursor.bufLen = bad[i].len;
+            next.buf = sentinel; next.bufLen = 0x5A5Au;
+            SSF_ASSERT(SSFASN1DecGetBitString(&cursor, &bits, &bitsLen, &unusedBits,
+                                              &next) == false);
+            SSF_ASSERT((next.buf == sentinel) && (next.bufLen == 0x5A5Au));
+        }
+        for (i = 0; i < (uint32_t)(sizeof(good) / sizeof(good[0])); i++)
+        {
+            cursor.buf = good[i].der; cursor.bufLen = good[i].len;
+            SSF_ASSERT(SSFASN1DecGetBitString(&cursor, &bits, &bitsLen, &unusedBits,
+                                              &next) == true);
+            SSF_ASSERT((unusedBits == good[i].unused) && (bitsLen == (good[i].len - 3u)));
+        }
+    }
+
     /* ---- AUDIT ASN1-4: BOOLEAN content must be 0x00 or 0xFF (X.690 11.1) ---- */
     {
         static const uint8_t b01[] = { 0x01u, 0x01u, 0x01u };

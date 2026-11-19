@@ -191,7 +191,7 @@ ASN1-4  Medium  FIXED (2026-11-18)  [demonstrated]
   Options:   (1) Return false unless value[0] is 0x00 or 0xFF (recommended)
              (2) Correct the .md.
 
-ASN1-5  Medium  OPEN  [demonstrated]
+ASN1-5  Medium  FIXED (2026-11-18)  [demonstrated]
   Location:  ssfasn1.c:255-276 (SSFASN1DecGetBitString)
   Problem:   The unused-bits octet is passed through unchecked. Values above 7 are accepted.
              A nonzero count with an empty payload is accepted. Nonzero padding bits are
@@ -1308,5 +1308,24 @@ CHANGE LOG
               01 01 7F, 01 01 FE rejected with next untouched; 00 -> false, FF -> true) and in
               ssfx509_ut.c (unknown extension with critical 0x01, basicConstraints with cA
               0x01: both fail to parse). RED: ssfasn1_ut.c:116, ssfx509_ut.c:5412. GREEN:
+              ssfasn1, ssfx509, ssfcms, ssfbase64url, ssfmatch (ASN1 unit test enabled for the
+              run; flag restored).
+  2026-11-18  ASN1-5 FIXED via option 1, with the ssfx509 whole-octet checks included.
+              SSFASN1DecGetBitString returns false for an unused count above 7, a nonzero count
+              with no payload, or nonzero padding bits (X.690 8.6.2, 11.2.1). ssfx509 now fails
+              the parse when the public key or signature BIT STRING has a nonzero unused count
+              (the "unused bits ignored" part of X509-12). keyUsage needed no change: a BIT
+              STRING that no longer decodes leaves the documented fail-closed default (present,
+              no usage bits), so padding bits can no longer read as keyCertSign etc. Trailing
+              zero bits in named-bit lists (11.2.2) are still tolerated. ssfasn1.md and
+              ssfx509.md updated. Tests: "AUDIT ASN1-5" in ssfasn1_ut.c (03 02 08 FF, 03 01 05,
+              03 02 07 FF, 03 02 01 81 rejected with next untouched; 03 01 00, 03 02 07 80,
+              03 02 00 FF, 03 03 01 FF FE accepted) and in ssfx509_ut.c (keyUsage 03 02 07 FF
+              parses with keyUsageBits 0, 03 02 07 80 control reads digitalSignature; public key
+              and signature with one unused bit fail to parse). The plan said the padded
+              keyUsage would fail to parse; the test was corrected to the documented
+              fail-closed outcome. The earlier test pinning "nonzero unused bits are recorded"
+              for key and signature now expects a parse failure. RED (old code):
+              ssfasn1_ut.c:128 and ssfx509_ut.c:5492 (keyUsageBits read as 0xFF00). GREEN:
               ssfasn1, ssfx509, ssfcms, ssfbase64url, ssfmatch (ASN1 unit test enabled for the
               run; flag restored).

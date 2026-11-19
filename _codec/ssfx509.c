@@ -750,6 +750,14 @@ bool SSFX509Parse(const uint8_t *der, uint32_t derLen, SSFX509Cert_t *cert)
                                 &cert->pubKeyUnusedBits, &spkiInner))
         return false;
 
+    /* Is the public key a partial octet (no supported key format is, AUDIT ASN1-5)? */
+    if (cert->pubKeyUnusedBits != 0u)
+    {
+        /* Yes, malformed */
+        return false;
+    }
+    /* No */
+
     /* Optional: issuerUniqueID [1], subjectUniqueID [2] - skip if present */
     while (SSFASN1DecPeekTag(&pos, &tag) &&
            (tag == SSF_ASN1_CONTEXT_IMPLICIT(1) || tag == SSF_ASN1_CONTEXT_IMPLICIT(2)))
@@ -794,6 +802,14 @@ bool SSFX509Parse(const uint8_t *der, uint32_t derLen, SSFX509Cert_t *cert)
     if (!SSFASN1DecGetBitString(&certInner, &cert->signature, &cert->signatureLen,
                                 &cert->signatureUnusedBits, &certInner))
         return false;
+
+    /* Is the signature a partial octet (no supported scheme is, AUDIT ASN1-5)? */
+    if (cert->signatureUnusedBits != 0u)
+    {
+        /* Yes, malformed */
+        return false;
+    }
+    /* No */
 
     return true;
 }

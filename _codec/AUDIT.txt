@@ -774,7 +774,7 @@ X509-15  Low  DOC (2026-11-18)  [reviewed]
   Options:   (1) Fix the header and .md text, and rename or document SSFX509IsECDSA
              (recommended)
 
-X509-16  Low  OPEN  [reviewed]  (found while fixing X509-4, 2026-11-18)
+X509-16  Low  FIXED (2026-11-19)  [reviewed; red/green]  (found while fixing X509-4, 2026-11-18)
   Location:  ssfx509.c _SSFX509ParseExtensions (SAN parse), _SSFX509NCValidateCert;
              ssfx509.md SSF_X509_CONFIG_MAX_SAN_ENTRIES row
   Problem:   SANs past SSF_X509_CONFIG_MAX_SAN_ENTRIES (8) are dropped at parse time, and the
@@ -1602,3 +1602,11 @@ CHANGE LOG
               trap. RED: ssfx509_ut.c:5575 (zero-length SKID did not trap). GREEN: ssfx509,
               ssfcms, ssfasn1, ssfrsa, ssfecdsa, ssfed25519, ssfbase64url, ssfmatch (unit test
               flags restored).
+  2026-11-19  X509-16 FIXED via option 1 (fixed together with AUDIT2.txt X509-17 / X509-18; see the
+              AUDIT2.txt change log for the shared test run). _SSFX509ParseExtensions now fails
+              the parse when a certificate carries more SANs than SSF_X509_CONFIG_MAX_SAN_ENTRIES
+              instead of dropping the extras. ssfx509_ut.c "AUDIT X509-16/17/18": MAX SANs parse,
+              MAX + 1 do not (RED: ssfx509_ut.c:8449). The existing "SAN cap" test, which pinned
+              the dropping behaviour (chain passed with the excluded name as the dropped 9th
+              SAN), now expects the parse and the chain to fail. ssfx509.md SAN note and
+              SSF_X509_CONFIG_MAX_SAN_ENTRIES row updated.

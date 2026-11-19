@@ -36,11 +36,12 @@ SUMMARY
   Critical   0
   High       0
   Medium     1       ASN1-14 (FIXED)
-  Low        5       X509-17, X509-18, X509-19, X509-20, MATCH-4
+  Low        5       FIXED: X509-17, X509-18   OPEN: X509-19, X509-20, MATCH-4
 
-  Carried over from AUDIT.txt, re-checked and still OPEN (unchanged code, not re-counted):
-  X509-16 (SANs past SSF_X509_CONFIG_MAX_SAN_ENTRIES escape dNSName / iPAddress Name
-  Constraints) and MATCH-2 (recursive glob backtracking; a linear algorithm needs no cap).
+  Carried over from AUDIT.txt, re-checked (not re-counted): X509-16 (SANs past
+  SSF_X509_CONFIG_MAX_SAN_ENTRIES escaped dNSName / iPAddress Name Constraints), FIXED
+  2026-11-19 with X509-17/18; MATCH-2 (recursive glob backtracking; a linear algorithm needs no
+  cap), still OPEN.
 
   No memory-safety defect reachable from hostile input was found. Every decoder bounds its
   reads by the cursor length, the first-pass DER-strictness fixes hold, and the chain verifier
@@ -131,7 +132,7 @@ ASN1-14  Medium  FIXED (2026-11-19)  [measured; fix verified red/green]
 ssfx509
 ----------------------------------------------------------------------------------------------
 
-X509-17  Low  OPEN  [measured]
+X509-17  Low  FIXED (2026-11-19)  [measured; fix verified red/green]
   Location:  ssfx509.c:2435-2465 (_SSFX509ParseIPv4), used by _SSFX509IPAddressMatch and the
              server-auth hostname check in SSFX509VerifyChainPurpose
   Problem:   The IPv4 reference-identity parser accepts leading zeros and reads every octet as
@@ -147,7 +148,7 @@ X509-17  Low  OPEN  [measured]
              IPv4 literal nor (with its dots and digits) a plausible DNS match (recommended).
              (2) Document that callers must pass a canonical dotted-decimal address.
 
-X509-18  Low  OPEN  [code-read]
+X509-18  Low  FIXED (2026-11-19)  [code-read; fix verified red/green]
   Location:  ssfx509.c:806-822 (Name Constraints parse stores every iPAddress subtree),
              :3012-3026 (_SSFX509NCIPMatch IPv4 only), :3052-3100 (_SSFX509NCValidateCert)
   Problem:   iPAddress subtrees are stored as enforced whatever their length, but the matcher
@@ -243,3 +244,29 @@ CHANGE LOG
               warning-free for 32-bit MIPS. Docs: ssfasn1.md (SSFASN1DecGetTime saturation),
               ssfx509.md (Time note, replacing the incorrect "ordinary far-future date" claim).
               Linux direct gcc build; SSF_CONFIG_ASN1_UNIT_TEST flipped for the run and restored.
+  2026-11-19  X509-17 and X509-18 FIXED, together with AUDIT.txt X509-16 (Jim's choices:
+              recommended options; for X509-18 the family-precise variant).
+              X509-17 (option 1): _SSFX509ParseIPv4 rejects a multi-digit octet with a leading
+              zero, and the server-auth check in SSFX509VerifyChainPurpose skips dNSName matching
+              for a hostname made only of digits and dots (new private _SSFX509IsNumericHost), so
+              "010.0.0.1" matches neither an iPAddress nor a dNSName SAN.
+              X509-18 (family-precise, chosen over the briefed "unenforced form" option because an
+              existing test pins that a CA excluding IPv6 space can still issue IPv4-SAN leaves):
+              iPAddress subtrees are still stored; new private _SSFX509NCIPExclUnchecked makes an
+              excluded subtree that _SSFX509NCIPMatch cannot evaluate reject every SAN it could
+              cover: an 8-byte IPv4 exclusion rejects a malformed-length IP SAN, a 16- or 32-byte
+              (IPv6) exclusion rejects every non-IPv4 IP SAN, and any other length rejects every
+              IP SAN. Permitted-subtree handling is unchanged (already fail-closed).
+              Tests: ssfx509_ut.c "AUDIT X509-16/17/18": X509-16 SAN count (see AUDIT.txt);
+              SSFX509MatchIPAddress("010.0.0.1" / "10.0.0.01") false, "10.0.0.1" true; a
+              self-signed leaf with dNSName "010.0.0.1" and iPAddress 10.0.0.1 verifies for
+              "10.0.0.1" and not for "010.0.0.1"; a CA with excluded 2001:db8::/32 (32 bytes)
+              rejects a leaf with IPv6 SAN 2001:db8::1 and still accepts a leaf with IPv4 SAN
+              10.0.0.1 (code-signing purpose).
+              RED: ssfx509_ut.c:8451 (leading zero matched), then :8523 (IPv6 SAN in the excluded
+              range accepted). The existing "Hostname edges" test that pinned leading zeros as
+              decimal matches now expects them to match nothing; the existing IPv6 Name
+              Constraints test passes unchanged.
+              GREEN: ssfx509, ssfcms, ssfbase64url, ssfmatch. Docs: ssfx509.md (SAN note, Name
+              Constraints iPAddress note, hostname matching, SSFX509MatchIPAddress, MAX_SAN_ENTRIES
+              row). Linux direct gcc build.

@@ -55,8 +55,9 @@ X.509 v3 certificate support per RFC 5280, built on [`ssfasn1`](ssfasn1.md):
   the parse. The raw DER of the whole Name is always retained in `raw` / `rawLen`, and the
   verifier compares issuer / subject names byte-for-byte on that raw DER.
 - **Subject Alternative Names.** Up to [`SSF_X509_CONFIG_MAX_SAN_ENTRIES`](#cfg-max-san-entries)
-  GeneralName entries of any type are retained with their tag number in `type`; further entries
-  are dropped silently. Only `dNSName` (`SSF_X509_SAN_DNS`) and `iPAddress` (`SSF_X509_SAN_IP`)
+  GeneralName entries of any type are retained with their tag number in `type`; a certificate
+  with more fails to parse, because a dropped SAN would escape the Name Constraints check
+  (AUDIT X509-16). Only `dNSName` (`SSF_X509_SAN_DNS`) and `iPAddress` (`SSF_X509_SAN_IP`)
   are interpreted by hostname matching and Name Constraints. `iPAddress` matching is IPv4 only.
 - **Extensions.** Up to [`SSF_X509_CONFIG_MAX_EXTENSIONS`](#cfg-max-extensions) raw extensions are
   retained in `exts[]`; a certificate with more fails to parse. Authority Key Identifier is read
@@ -77,7 +78,10 @@ X.509 v3 certificate support per RFC 5280, built on [`ssfasn1`](ssfasn1.md):
   subtree is matched by address family: a 16-byte (IPv6) permitted subtree never matches a
   4-byte SAN, so a CA that permits only IPv6 space rejects every IPv4 `iPAddress` SAN while
   leaving `dNSName` SANs unconstrained, and a 16-byte excluded subtree never excludes an IPv4
-  SAN.
+  SAN. Only 8-byte IPv4 address-and-mask subtrees are evaluated. An excluded subtree that cannot
+  be evaluated rejects every SAN it could cover: a 16- or 32-byte (IPv6) exclusion rejects every
+  non-IPv4 `iPAddress` SAN, and an exclusion of any other length rejects every `iPAddress` SAN
+  (AUDIT X509-18).
 - **Not implemented.** Certificate revocation (CRL / OCSP), certificate policies and policy
   mappings, inhibit-anyPolicy, `issuerUniqueID` / `subjectUniqueID` (skipped), `otherName` /
   `rfc822Name` / URI SANs, IPv6 SANs and IPv6 Name Constraints, and Public Suffix List awareness
@@ -173,17 +177,19 @@ X.509 v3 certificate support per RFC 5280, built on [`ssfasn1`](ssfasn1.md):
   outside the recognized set (Basic Constraints, Key Usage, SAN, SKID, AKID, EKU, Name
   Constraints). (9) For server authentication, the hostname matches a `dNSName` or `iPAddress`
   SAN of the leaf.
-- **Hostname matching** (RFC 6125 §6.4.3) is case-insensitive and exact against each `dNSName`.
-  A single leading `*.` wildcard label is honored only when the hostname's leftmost label is
+- **Hostname matching** (RFC 6125 §6.4.3) is case-insensitive and exact against each `dNSName`. A
+  single leading `*.` wildcard label is honored only when the hostname's leftmost label is
   non-empty and the base domain after `*.` contains at least one interior `.` (so `*.example.com`
   matches `www.example.com`, but matches neither `.example.com` nor, for `*.com`, anything). A
   hostname written as a dotted-decimal IPv4 address is matched against 4-byte `iPAddress` SANs
   only, never against `dNSName` SANs (RFC 9525 §6.3), so a `dNSName` of `8.8.8.8` or `*.0.0.1`
-  cannot satisfy it; each octet is read as decimal, so leading zeros are accepted (`010.0.0.1`
-  equals `10.0.0.1`). A hostname containing `:` (an IPv6 literal, not supported) matches no
-  SAN. A trailing dot is not stripped, so `host.example.com.` never matches. The Common
-  Name is never consulted. `hostname` must be non-empty; an empty string is a
-  precondition violation and asserts.
+  cannot satisfy it. An octet with a leading zero (`010.0.0.1`, `10.0.0.01`) is rejected, because
+  the C library's `inet_aton` reads it as octal (`010.0.0.1` is `8.0.0.1` there); such a hostname,
+  like any hostname of only digits and dots that is not a canonical IPv4 address, matches no SAN
+  (AUDIT X509-17). A hostname containing `:` (an IPv6 literal, not supported) matches no SAN. A
+  trailing dot is not stripped, so `host.example.com.` never matches. The Common Name is never
+  consulted. `hostname` must be non-empty; an empty string is a precondition violation and
+  asserts.
 - **Signature verification** derives the hash from the signature algorithm OID and the key type
   / curve from the **issuer's** SubjectPublicKeyInfo, so `ecdsa-with-SHA256` over a P-384 key
   (RFC 5758 §3.2) verifies correctly. The reverse, a hash longer than the key's curve order such as
@@ -251,7 +257,7 @@ Options live in [`_opt/ssfx509_opt.h`](../_opt/ssfx509_opt.h).
 | <a id="cfg-max-chain-depth"></a>`SSF_X509_CONFIG_MAX_CHAIN_DEPTH` | `8` | Maximum `chainLen` accepted by [`SSFX509VerifyChain()`](#ssfx509verifychain) (leaf plus intermediates). Sizes the on-stack array of parsed certificates. |
 | <a id="cfg-max-extensions"></a>`SSF_X509_CONFIG_MAX_EXTENSIONS` | `16` | Number of extension records retained in `SSFX509Cert_t.exts[]`. A certificate with more extensions fails to parse, so the critical-extension and duplicate checks always see every extension. Raise it if a deployment's certificates legitimately carry more. |
 | <a id="cfg-max-name-constraints"></a>`SSF_X509_CONFIG_MAX_NAME_CONSTRAINTS` | `8` | Number of `dNSName` / `iPAddress` permitted subtrees and, separately, excluded subtrees retained per CA certificate. A certificate with more fails to parse, because dropping an exclusion would loosen the constraint. Raise it if a deployment's CAs legitimately carry more. |
-| <a id="cfg-max-san-entries"></a>`SSF_X509_CONFIG_MAX_SAN_ENTRIES` | `8` | Number of Subject Alternative Name entries retained in `SSFX509Cert_t.san[]`. Excess entries are dropped and cannot match a hostname. |
+| <a id="cfg-max-san-entries"></a>`SSF_X509_CONFIG_MAX_SAN_ENTRIES` | `8` | Number of Subject Alternative Name entries retained in `SSFX509Cert_t.san[]`. A certificate with more fails to parse, because a dropped SAN would escape the Name Constraints check. Raise it if a deployment's certificates legitimately carry more. |
 | <a id="cfg-rsa-min-bits"></a>`SSF_X509_CONFIG_RSA_MIN_BITS` | `2048` | Smallest RSA modulus, in bits, accepted for any RSA key used to verify a signature (certificate signatures, chains, CMS signers). Smaller keys are refused even when the signature is mathematically valid, because keys that short can be factored. Must be `>= 1024`; lower it to `1024` only to interoperate with legacy certificates you trust. |
 
 The unit-test entry point is gated by `SSF_CONFIG_X509_UNIT_TEST` in `ssfport.h`.
@@ -759,7 +765,8 @@ bool SSFX509MatchIPAddress(const char *hostnameStr, const uint8_t *sanIP, uint32
 
 Parses `hostnameStr` as a dotted-decimal IPv4 address and compares it with a 4-byte `iPAddress`
 SAN value. Used internally by the chain verifier and exposed for callers doing their own SAN
-matching.
+matching. An octet with a leading zero (`010.0.0.1`) is not accepted, since `inet_aton` would
+read it as octal, so such a string never matches.
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|

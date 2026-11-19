@@ -7024,8 +7024,8 @@ void SSFX509UnitTest(void)
                                       trustLen, 1u, "deep.test", 1800000000ull) == false);
     }
 
-    /* ---- SAN cap: entries past SSF_X509_CONFIG_MAX_SAN_ENTRIES are dropped, so they can ---- */
-    /* ---- neither match a hostname nor be checked against Name Constraints.                 */
+    /* ---- SAN cap: a certificate with more than SSF_X509_CONFIG_MAX_SAN_ENTRIES SANs does ---- */
+    /* ---- not parse, so no SAN can escape the Name Constraints check (AUDIT X509-16).       */
     {
         static uint8_t caOut[SSF_X509_CONFIG_MAX_CERT_SIZE];
         static uint8_t leafOut[SSF_X509_CONFIG_MAX_CERT_SIZE];
@@ -7089,20 +7089,19 @@ void SSFX509UnitTest(void)
         chain[1] = caOut;
         chainLen[1] = caLen;
 
-        /* The excluded name is the (MAX + 1)th SAN: dropped, so the chain passes for a kept */
-        /* name and the dropped name can never be authenticated */
+        /* The excluded name is the (MAX + 1)th SAN: the leaf no longer parses, so the chain */
+        /* fails for every hostname instead of passing with the excluded name unchecked     */
         _utGenBaseParams(&p, serial, leafPub, (uint32_t)leafPubLen);
         p.issuer.cn = "ca";
         p.subject.cn = "leaf";
         p.sanDNSNames = sans;
         leafLen = _utSignCert(&p, caPriv, leafOut, sizeof(leafOut));
         SSF_ASSERT(leafLen != 0u);
-        SSF_ASSERT(SSFX509Parse(leafOut, leafLen, &parsed) == true);
-        SSF_ASSERT(parsed.sanLen == SSF_X509_CONFIG_MAX_SAN_ENTRIES);
+        SSF_ASSERT(SSFX509Parse(leafOut, leafLen, &parsed) == false);
         chain[0] = leafOut;
         chainLen[0] = leafLen;
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 2u, trust, trustLen, 1u, names[0],
-                                      1800000000ull) == true);
+                                      1800000000ull) == false);
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 2u, trust, trustLen, 1u, "evil.com",
                                       1800000000ull) == false);
 
@@ -7683,13 +7682,14 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, "bar.example.net.",
                                       now) == false);
 
-        /* IPv4 literals with leading zeros are read as decimal, so they match */
+        /* IPv4 literals with leading zeros are ambiguous (inet_aton reads them as octal), */
+        /* so they match nothing (AUDIT X509-17); only the canonical form matches          */
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, "10.0.0.1",
                                       now) == true);
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, "010.0.0.1",
-                                      now) == true);
+                                      now) == false);
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, "10.0.0.01",
-                                      now) == true);
+                                      now) == false);
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, "10.0.0.10",
                                       now) == false);
 
@@ -8384,6 +8384,156 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(SSFX509VerifyChainPurpose(chain9999, chain9999Len, 1u, chain9999, chain9999Len,
                                              1u, SSF_X509_PURPOSE_CODE_SIGNING, NULL,
                                              1795000000ull) == true);
+    }
+#endif /* SSF_EC_CONFIG_ENABLE_P256 */
+
+    /* ---- AUDIT X509-16/17/18: identity and Name Constraints checks that could fail open ---- */
+    /* X509-16: SANs past SSF_X509_CONFIG_MAX_SAN_ENTRIES were dropped, escaping the Name       */
+    /* Constraints check; such a certificate must now fail to parse. X509-17: "010.0.0.1" was   */
+    /* read as 10.0.0.1 while inet_aton reads 8.0.0.1; it must match neither an iPAddress nor   */
+    /* a dNSName SAN. X509-18: a non-IPv4 (here IPv6) iPAddress subtree was stored but could    */
+    /* never match, so an excluded IPv6 range was not enforced for IPv6 SANs; it now is.       */
+#if SSF_EC_CONFIG_ENABLE_P256 == 1
+    {
+        static uint8_t der[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t tbs[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static char sanNames[SSF_X509_CONFIG_MAX_SAN_ENTRIES + 1u][16];
+        static const char *sanPtrs[SSF_X509_CONFIG_MAX_SAN_ENTRIES + 2u];
+        static const uint8_t ncOid[] = { 0x55u, 0x1Du, 0x1Eu };
+        /* NameConstraints { excludedSubtrees [1] { GeneralSubtree { [7] 2001:db8::/32 } } } */
+        static const uint8_t ncIPv6Excl[] = {
+            0x30u, 0x26u, 0xA1u, 0x24u, 0x30u, 0x22u, 0x87u, 0x20u,
+            0x20u, 0x01u, 0x0Du, 0xB8u, 0x00u, 0x00u, 0x00u, 0x00u,
+            0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u,
+            0xFFu, 0xFFu, 0xFFu, 0xFFu, 0x00u, 0x00u, 0x00u, 0x00u,
+            0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u
+        };
+        static uint8_t caDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static const uint8_t sanOid[] = { 0x55u, 0x1Du, 0x11u };
+        /* SubjectAltName { [7] 2001:db8::1 } */
+        static const uint8_t sanV6InRange[] = {
+            0x30u, 0x12u, 0x87u, 0x10u,
+            0x20u, 0x01u, 0x0Du, 0xB8u, 0x00u, 0x00u, 0x00u, 0x00u,
+            0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x01u
+        };
+        static const uint8_t ip10[4] = { 10u, 0u, 0u, 1u };
+        static const char *sanLeading[] = { "010.0.0.1", NULL };
+        static const uint8_t *ipSans[] = { ip10, NULL };
+        uint8_t leafPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        uint8_t leafPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        size_t leafPubLen;
+        uint32_t caLen;
+        const uint8_t *ch2[2];
+        uint32_t ch2Len[2];
+        const uint8_t *tr[1];
+        uint32_t trLen[1];
+        uint8_t priv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        uint8_t pub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        uint8_t hash[SSF_SHA2_256_BYTE_SIZE];
+        uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
+        uint8_t serial[] = { 0x5Au };
+        size_t pubLen;
+        size_t sigLen;
+        uint32_t tbsLen;
+        uint32_t derLen;
+        uint32_t i;
+        SSFX509GenParams_t p;
+        SSFX509Cert_t c;
+        const uint8_t *ch[1];
+        uint32_t chLen[1];
+
+        SSF_ASSERT(SSFECDSAKeyGen(SSF_EC_CURVE_P256, priv, sizeof(priv), pub, sizeof(pub),
+                                  &pubLen) == true);
+
+        /* X509-16: MAX_SAN_ENTRIES SANs parse; one more must not. */
+        for (i = 0; i < (SSF_X509_CONFIG_MAX_SAN_ENTRIES + 1u); i++)
+        {
+            (void)snprintf(sanNames[i], sizeof(sanNames[i]), "h%u.example.com", (unsigned)i);
+            sanPtrs[i] = sanNames[i];
+        }
+        _utGenBaseParams(&p, serial, pub, (uint32_t)pubLen);
+        sanPtrs[SSF_X509_CONFIG_MAX_SAN_ENTRIES] = NULL;
+        p.sanDNSNames = sanPtrs;
+        SSF_ASSERT(SSFX509EncodeCert(der, sizeof(der), &p, sig, 64u, &derLen) == true);
+        SSF_ASSERT(SSFX509Parse(der, derLen, &c) == true);
+        SSF_ASSERT(c.sanLen == SSF_X509_CONFIG_MAX_SAN_ENTRIES);
+        sanPtrs[SSF_X509_CONFIG_MAX_SAN_ENTRIES] = sanNames[SSF_X509_CONFIG_MAX_SAN_ENTRIES];
+        sanPtrs[SSF_X509_CONFIG_MAX_SAN_ENTRIES + 1u] = NULL;
+        SSF_ASSERT(SSFX509EncodeCert(der, sizeof(der), &p, sig, 64u, &derLen) == true);
+        SSF_ASSERT(SSFX509Parse(der, derLen, &c) == false);
+
+        /* X509-17: leading-zero octets are not IPv4 literals. */
+        SSF_ASSERT(SSFX509MatchIPAddress("010.0.0.1", ip10, 4u) == false);
+        SSF_ASSERT(SSFX509MatchIPAddress("10.0.0.01", ip10, 4u) == false);
+        SSF_ASSERT(SSFX509MatchIPAddress("10.0.0.1", ip10, 4u) == true);
+
+        /* X509-17: a self-signed leaf with dNSName "010.0.0.1" and iPAddress 10.0.0.1. */
+        _utGenBaseParams(&p, serial, pub, (uint32_t)pubLen);
+        p.sanDNSNames = sanLeading;
+        p.sanIPAddrs = ipSans;
+        SSF_ASSERT(SSFX509EncodeTBS(tbs, sizeof(tbs), &p, &tbsLen) == true);
+        SSFSHA256(tbs, tbsLen, hash, sizeof(hash));
+        SSF_ASSERT(SSFECDSASign(SSF_EC_CURVE_P256, priv, 32u, hash, sizeof(hash), sig,
+                                sizeof(sig), &sigLen) == true);
+        SSF_ASSERT(SSFX509EncodeCert(der, sizeof(der), &p, sig, (uint32_t)sigLen, &derLen) == true);
+        ch[0] = der;
+        chLen[0] = derLen;
+        SSF_ASSERT(SSFX509VerifyChain(ch, chLen, 1u, ch, chLen, 1u, "10.0.0.1",
+                                      1800000000ull) == true);
+        SSF_ASSERT(SSFX509VerifyChain(ch, chLen, 1u, ch, chLen, 1u, "010.0.0.1",
+                                      1800000000ull) == false);
+
+        /* X509-18: a CA excluding 2001:db8::/32 rejects an IPv6 SAN leaf, not an IPv4 one. */
+        SSF_ASSERT(SSFECDSAKeyGen(SSF_EC_CURVE_P256, leafPriv, sizeof(leafPriv), leafPub,
+                                  sizeof(leafPub), &leafPubLen) == true);
+        _utGenBaseParams(&p, serial, pub, (uint32_t)pubLen);
+        p.issuer.cn = "ca";
+        p.subject.cn = "ca";
+        p.addBasicConstraints = true;
+        p.isCA = true;
+        p.addKeyUsage = true;
+        p.keyUsageBits = SSF_X509_KU_KEY_CERT_SIGN;
+        p.addRawExt = true;
+        p.rawExtOid = ncOid;
+        p.rawExtOidLen = sizeof(ncOid);
+        p.rawExtValue = ncIPv6Excl;
+        p.rawExtValueLen = sizeof(ncIPv6Excl);
+        p.rawExtCritical = true;
+        caLen = _utSignCert(&p, priv, caDer, sizeof(caDer));
+        SSF_ASSERT(caLen != 0u);
+        SSF_ASSERT(SSFX509Parse(caDer, caLen, &c) == true);
+        SSF_ASSERT((c.excludedLen == 1u) && (c.excludedSubtrees[0].valLen == 32u));
+        ch2[1] = caDer;
+        ch2Len[1] = caLen;
+        tr[0] = caDer;
+        trLen[0] = caLen;
+
+        _utGenBaseParams(&p, serial, leafPub, (uint32_t)leafPubLen);
+        p.issuer.cn = "ca";
+        p.subject.cn = "leaf";
+        p.addRawExt = true;
+        p.rawExtOid = sanOid;
+        p.rawExtOidLen = sizeof(sanOid);
+        p.rawExtValue = sanV6InRange;
+        p.rawExtValueLen = sizeof(sanV6InRange);
+        derLen = _utSignCert(&p, priv, der, sizeof(der));
+        SSF_ASSERT(derLen != 0u);
+        ch2[0] = der;
+        ch2Len[0] = derLen;
+        SSF_ASSERT(SSFX509VerifyChainPurpose(ch2, ch2Len, 2u, tr, trLen, 1u,
+                                             SSF_X509_PURPOSE_CODE_SIGNING, NULL,
+                                             1800000000ull) == false);
+
+        _utGenBaseParams(&p, serial, leafPub, (uint32_t)leafPubLen);
+        p.issuer.cn = "ca";
+        p.subject.cn = "leaf";
+        p.sanIPAddrs = ipSans;
+        derLen = _utSignCert(&p, priv, der, sizeof(der));
+        SSF_ASSERT(derLen != 0u);
+        ch2Len[0] = derLen;
+        SSF_ASSERT(SSFX509VerifyChainPurpose(ch2, ch2Len, 2u, tr, trLen, 1u,
+                                             SSF_X509_PURPOSE_CODE_SIGNING, NULL,
+                                             1800000000ull) == true);
     }
 #endif /* SSF_EC_CONFIG_ENABLE_P256 */
 }

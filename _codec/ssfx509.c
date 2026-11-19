@@ -590,11 +590,11 @@ static bool _SSFX509ParseExtensions(const SSFASN1Cursor_t *extsCursor, SSFX509Ce
                     /* Record every form present, kept or not, for Name Constraints (X509-4) */
                     if (sanType < 16u) cert->sanForms |= (uint16_t)(1u << sanType);
 
-                    /* Is the SAN table full? */
+                    /* Is the SAN table full (AUDIT X509-16)? */
                     if (cert->sanLen >= SSF_X509_CONFIG_MAX_SAN_ENTRIES)
                     {
-                        /* Yes, the entry is dropped as documented */
-                        continue;
+                        /* Yes, a dropped SAN would escape the Name Constraints check */
+                        return false;
                     }
                     /* No */
 
@@ -2447,6 +2447,13 @@ static bool _SSFX509ParseIPv4(const char *str, uint8_t ipOut[4])
         digitCount = 0;
         while ((*str >= '0') && (*str <= '9'))
         {
+            /* Is this a second digit after a leading zero, which inet_aton reads as octal? */
+            if ((digitCount == 1u) && (octet == 0u))
+            {
+                /* Yes, "010" is ambiguous, so it is not an IPv4 literal (AUDIT X509-17) */
+                return false;
+            }
+            /* No */
             octet = (octet * 10u) + (uint32_t)(*str - '0');
             if (octet > 255u) return false;
             str++;
@@ -2464,6 +2471,28 @@ static bool _SSFX509ParseIPv4(const char *str, uint8_t ipOut[4])
         }
     }
     return (*str == '\0');
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if str holds only ASCII digits and dots (no DNS name is all-numeric), else false. */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFX509IsNumericHost(const char *str)
+{
+    uint32_t n;
+
+    SSF_REQUIRE(str != NULL);
+
+    for (n = 0; (str[n] != '\0') && (n <= _UB_DNS_NAME); n++)
+    {
+        /* Is this character something other than a digit or a dot? */
+        if (((str[n] < '0') || (str[n] > '9')) && (str[n] != '.'))
+        {
+            /* Yes */
+            return false;
+        }
+        /* No */
+    }
+    return (n > 0u);
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -3047,6 +3076,44 @@ static bool _SSFX509NCSubtreeMatch(const SSFX509SAN_t *san, const SSFX509NameCon
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Returns true if an excluded iPAddress subtree cannot be evaluated against san, else false.    */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFX509NCIPExclUnchecked(const SSFX509SAN_t *san,
+                                      const SSFX509NameConstraint_t *subtree)
+{
+    bool sanIsV4;
+    bool sanIsV6;
+
+    SSF_REQUIRE(san != NULL);
+    SSF_REQUIRE(subtree != NULL);
+
+    /* Is this anything other than an iPAddress subtree against an iPAddress SAN? */
+    if ((subtree->type != SSF_X509_SAN_IP) || (san->type != SSF_X509_SAN_IP))
+    {
+        /* Yes, not an iPAddress pairing */
+        return false;
+    }
+    /* No */
+    sanIsV4 = (san->valLen == 4u);
+    sanIsV6 = (san->valLen == 16u);
+
+    /* Is the subtree an IPv4 address and mask, which _SSFX509NCIPMatch evaluates? */
+    if (subtree->valLen == 8u)
+    {
+        /* Yes, only a malformed SAN length escapes it */
+        return ((!sanIsV4) && (!sanIsV6));
+    }
+    /* No, is it IPv6-sized (32-byte address and mask, or a 16-byte address)? */
+    if ((subtree->valLen == 32u) || (subtree->valLen == 16u))
+    {
+        /* Yes, it cannot be evaluated for any SAN that is not IPv4 (AUDIT X509-18) */
+        return (!sanIsV4);
+    }
+    /* No, a malformed length could cover any address */
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Returns true if every SAN of subCert satisfies ncCert's Name Constraints, else false.         */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFX509NCValidateCert(const SSFX509Cert_t *subCert, const SSFX509Cert_t *ncCert)
@@ -3082,6 +3149,8 @@ static bool _SSFX509NCValidateCert(const SSFX509Cert_t *subCert, const SSFX509Ce
         for (k = 0; k < ncCert->excludedLen; k++)
         {
             if (_SSFX509NCSubtreeMatch(san, &ncCert->excludedSubtrees[k])) return false;
+            /* An exclusion that cannot be evaluated for this SAN rejects it (AUDIT X509-18) */
+            if (_SSFX509NCIPExclUnchecked(san, &ncCert->excludedSubtrees[k])) return false;
         }
 
         /* With permitted subtrees of this SAN's type present, one of them must match */
@@ -3391,17 +3460,21 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
         size_t hostLen;
         bool hostIsIPv4;
         bool hostIsIPv6;
+        bool hostIsNumeric;
 
         /* The reference identity type picks the one SAN type it may match (RFC 9525 6.3); */
         /* a ':' (IPv6, unsupported) or an over-long hostname is treated as matching nothing */
         hostIsIPv4 = _SSFX509ParseIPv4(hostnameStrOpt, hostIP);
         hostIsIPv6 = ((!SSFStrLen(hostnameStrOpt, _UB_DNS_NAME + 1u, &hostLen)) ||
                       (memchr(hostnameStrOpt, ':', hostLen) != NULL));
+        /* A non-canonical numeric host ("010.0.0.1") matches nothing (AUDIT X509-17) */
+        hostIsNumeric = _SSFX509IsNumericHost(hostnameStrOpt);
 
         for (i = 0; (i < certs[0].sanLen) && (!matched); i++)
         {
             /* Is the hostname a DNS name and this SAN a dNSName (AUDIT X509-5)? */
-            if ((!hostIsIPv4) && (!hostIsIPv6) && (certs[0].san[i].type == SSF_X509_SAN_DNS))
+            if ((!hostIsIPv4) && (!hostIsIPv6) && (!hostIsNumeric) &&
+                (certs[0].san[i].type == SSF_X509_SAN_DNS))
             {
                 /* Yes */
                 matched = _SSFX509HostnameMatch(hostnameStrOpt, certs[0].san[i].val,

@@ -97,6 +97,41 @@ void SSFASN1UnitTest(void)
         SSF_ASSERT(val == 0xDEADBEEFCAFEull);
     }
 
+    /* ---- AUDIT ASN1-1: IntU64 rejects negative, empty and non-minimal INTEGERs ---- */
+    {
+        static const uint8_t negOne[] = { 0x02u, 0x01u, 0xFFu };
+        static const uint8_t neg128[] = { 0x02u, 0x01u, 0x80u };
+        static const uint8_t empty[] = { 0x02u, 0x00u };
+        static const uint8_t padded7F[] = { 0x02u, 0x02u, 0x00u, 0x7Fu };
+        static const uint8_t padded1[] = { 0x02u, 0x03u, 0x00u, 0x00u, 0x01u };
+        static const uint8_t zero[] = { 0x02u, 0x01u, 0x00u };
+        static const uint8_t v127[] = { 0x02u, 0x01u, 0x7Fu };
+        static const uint8_t v128[] = { 0x02u, 0x02u, 0x00u, 0x80u };
+        static const uint8_t vMax[] = {
+            0x02u, 0x09u, 0x00u, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu
+        };
+        static const struct { const uint8_t *der; uint32_t len; } bad[] = {
+            { negOne, sizeof(negOne) }, { neg128, sizeof(neg128) }, { empty, sizeof(empty) },
+            { padded7F, sizeof(padded7F) }, { padded1, sizeof(padded1) }
+        };
+        uint64_t val;
+        uint32_t i;
+
+        for (i = 0; i < (uint32_t)(sizeof(bad) / sizeof(bad[0])); i++)
+        {
+            cursor.buf = bad[i].der; cursor.bufLen = bad[i].len;
+            SSF_ASSERT(SSFASN1DecGetIntU64(&cursor, &val, &next) == false);
+        }
+        cursor.buf = zero; cursor.bufLen = sizeof(zero);
+        SSF_ASSERT((SSFASN1DecGetIntU64(&cursor, &val, &next) == true) && (val == 0u));
+        cursor.buf = v127; cursor.bufLen = sizeof(v127);
+        SSF_ASSERT((SSFASN1DecGetIntU64(&cursor, &val, &next) == true) && (val == 127u));
+        cursor.buf = v128; cursor.bufLen = sizeof(v128);
+        SSF_ASSERT((SSFASN1DecGetIntU64(&cursor, &val, &next) == true) && (val == 128u));
+        cursor.buf = vMax; cursor.bufLen = sizeof(vMax);
+        SSF_ASSERT((SSFASN1DecGetIntU64(&cursor, &val, &next) == true) && (val == UINT64_MAX));
+    }
+
     /* ---- INTEGER: raw bytes ---- */
     {
         static const uint8_t rawInt[] = { 0x00u, 0xFFu, 0x01u };

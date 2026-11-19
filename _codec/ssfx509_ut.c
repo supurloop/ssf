@@ -5338,6 +5338,36 @@ void SSFX509UnitTest(void)
         chainLen[0] = leafLen;
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, trust, trustLen, 1u, "good.com",
                                       1800000000ull) == true);
+
+        /* AUDIT ASN1-1: a pathLenConstraint that is not a valid unsigned INTEGER fails */
+        {
+            static const uint8_t bcOid[] = { 0x55u, 0x1Du, 0x13u };
+            /* SEQUENCE { cA TRUE, pathLenConstraint -1 } */
+            static const uint8_t bcNegPathLen[] = {
+                0x30u, 0x06u, 0x01u, 0x01u, 0xFFu, 0x02u, 0x01u, 0xFFu
+            };
+            /* SEQUENCE { cA TRUE, pathLenConstraint 0 }: the control */
+            static const uint8_t bcPathLen0[] = {
+                0x30u, 0x06u, 0x01u, 0x01u, 0xFFu, 0x02u, 0x01u, 0x00u
+            };
+
+            _utGenBaseParams(&p, serial, caPub, (uint32_t)caPubLen);
+            p.addRawExt = true;
+            p.rawExtOid = bcOid;
+            p.rawExtOidLen = sizeof(bcOid);
+            p.rawExtCritical = true;
+            p.rawExtValue = bcPathLen0;
+            p.rawExtValueLen = sizeof(bcPathLen0);
+            SSF_ASSERT(SSFX509EncodeCert(caOut, sizeof(caOut), &p, fakeSig, sizeof(fakeSig),
+                                         &n) == true);
+            SSF_ASSERT(SSFX509Parse(caOut, n, &parsed) == true);
+            SSF_ASSERT((parsed.isCA == true) && (parsed.pathLenConstraint == 0));
+            p.rawExtValue = bcNegPathLen;
+            p.rawExtValueLen = sizeof(bcNegPathLen);
+            SSF_ASSERT(SSFX509EncodeCert(caOut, sizeof(caOut), &p, fakeSig, sizeof(fakeSig),
+                                         &n) == true);
+            SSF_ASSERT(SSFX509Parse(caOut, n, &parsed) == false);
+        }
     }
 
     /* ---- A SAN GeneralName whose length overruns its SEQUENCE fails to parse ---- */
@@ -6449,6 +6479,12 @@ void SSFX509UnitTest(void)
             0x60u, 0x86u, 0x48u, 0x01u, 0x65u, 0x03u, 0x04u, 0x02u, 0x01u, 0x05u, 0x00u,
             0xA2u, 0x03u, 0x02u, 0x01u, 0x20u
         };
+        /* saltLength -1: not a valid unsigned INTEGER (AUDIT ASN1-1) */
+        static const uint8_t pssSaltNeg[] = {
+            0x30u, 0x16u, 0xA0u, 0x0Fu, 0x30u, 0x0Du, 0x06u, 0x09u,
+            0x60u, 0x86u, 0x48u, 0x01u, 0x65u, 0x03u, 0x04u, 0x02u, 0x01u, 0x05u, 0x00u,
+            0xA2u, 0x03u, 0x02u, 0x01u, 0xFFu
+        };
         /* saltLength 33, one more than SHA-256 produces */
         static const uint8_t pssSalt33[] = {
             0x30u, 0x16u, 0xA0u, 0x0Fu, 0x30u, 0x0Du, 0x06u, 0x09u,
@@ -6592,6 +6628,10 @@ void SSFX509UnitTest(void)
         /* A maskGenAlgorithm field is skipped: MGF1 over the same hash is assumed */
         _PSS_CERT(pssOddMgf);
         SSF_ASSERT(SSFX509VerifyCertSignature(&rsaCert, &rsaCert) == true);
+
+        /* AUDIT ASN1-1: a negative saltLength fails verification, never defaults to 20 */
+        _PSS_CERT(pssSaltNeg);
+        SSF_ASSERT(SSFX509VerifyCertSignature(&rsaCert, &rsaCert) == false);
 
         /* Absent parameters select SHA-1 per RFC 4055, which is unsupported: fails closed */
         _utGenBaseParams(&p, serial, rsaPub, (uint32_t)rsaPubLen);

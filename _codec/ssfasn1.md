@@ -394,8 +394,9 @@ the first byte being the sign). The caller is responsible for any conversion (e.
 bool SSFASN1DecGetIntU64(const SSFASN1Cursor_t *cursor, uint64_t *valOut,
                          SSFASN1Cursor_t *next);
 ```
-Decode INTEGER into a `uint64_t`. Returns `false` if the INTEGER is negative or its
-unsigned value would exceed `UINT64_MAX`.
+Decode INTEGER into a `uint64_t`. Returns `false` if the INTEGER is empty, negative, not
+minimally encoded (a leading `0x00` the next byte does not need), or its unsigned value would
+exceed `UINT64_MAX`.
 
 <a id="ssfasn1decgetbitstring"></a>
 ```c

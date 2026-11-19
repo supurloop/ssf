@@ -224,6 +224,29 @@ bool SSFASN1DecGetInt(const SSFASN1Cursor_t *cursor, const uint8_t **intBufOut, 
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Returns true if INTEGER content is non-empty, non-negative and minimal DER (X.690 8.3.2).     */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFASN1IsMinimalUnsigned(const uint8_t *intBuf, uint32_t intLen)
+{
+    SSF_REQUIRE((intBuf != NULL) || (intLen == 0u));
+
+    /* Is the content empty or the sign bit set? */
+    if ((intLen == 0u) || ((intBuf[0] & 0x80u) != 0u))
+    {
+        /* Yes, empty or negative */
+        return false;
+    }
+    /* No, is a leading 0x00 present that the next byte does not need? */
+    if ((intLen > 1u) && (intBuf[0] == 0x00u) && ((intBuf[1] & 0x80u) == 0u))
+    {
+        /* Yes, not minimal */
+        return false;
+    }
+    /* No, minimal non-negative encoding */
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
 bool SSFASN1DecGetIntU64(const SSFASN1Cursor_t *cursor, uint64_t *valOut, SSFASN1Cursor_t *next)
 {
     const uint8_t *intBuf;
@@ -237,9 +260,14 @@ bool SSFASN1DecGetIntU64(const SSFASN1Cursor_t *cursor, uint64_t *valOut, SSFASN
 
     if (!SSFASN1DecGetInt(cursor, &intBuf, &intLen, next)) return false;
 
-    /* Skip leading zero (sign byte for positive integers) */
-    start = 0;
-    if (intLen > 1u && intBuf[0] == 0x00u) start = 1;
+    /* Is the INTEGER empty, negative or non-minimal (AUDIT ASN1-1)? */
+    if (!_SSFASN1IsMinimalUnsigned(intBuf, intLen))
+    {
+        /* Yes */
+        return false;
+    }
+    /* No, skip the sign byte a value with its top bit set carries */
+    start = (intBuf[0] == 0x00u) ? 1u : 0u;
 
     if ((intLen - start) > 8u) return false; /* Too large for uint64_t */
 

@@ -101,7 +101,7 @@ and _edc/ssffcsum.c.
 
 ----------------------------------------------------------------------------------------------
 
-ASN1-1  High  OPEN  [demonstrated] [verified 2026-11-18]
+ASN1-1  High  FIXED (2026-11-18)  [demonstrated] [verified 2026-11-18]
   Location:  ssfasn1.c:227-252 (SSFASN1DecGetIntU64)
   Problem:   The sign bit is never checked. The bytes are treated as an unsigned magnitude, so
              a negative INTEGER decodes to a large positive value. The .md promises false for
@@ -1229,3 +1229,21 @@ CHANGE LOG
               behaviour (non-SEQUENCE NC parsed with no subtrees) now expects a parse failure.
               RED: ssfx509_ut.c:5281 (9 exclusions parsed). GREEN: ssfx509, ssfcms,
               ssfbase64url, ssfmatch pass.
+  2026-11-18  ASN1-1 FIXED via option 1. New private _SSFASN1IsMinimalUnsigned (non-empty, sign
+              bit clear, no unneeded leading 0x00); SSFASN1DecGetIntU64 uses it, so negative,
+              empty and non-minimal INTEGERs return false. SSFASN1DecGetInt is unchanged (ASN1-3
+              decides whether it adopts the helper). The two lenient callers now fail closed:
+              ssfx509 basicConstraints fails the parse when a present pathLenConstraint does not
+              decode (previously -1 read as 255, clamped to 127; without this change it would
+              have become unlimited), and _SSFX509ParsePSSParams sets the 255 sentinel, which
+              verification rejects, when a present saltLength does not decode (without this the
+              default 20 would have applied). This closes the undecodable-INTEGER half of X509-8
+              and the negative-saltLength case of X509-7; their other cases stay open. The
+              version callers (ssfx509, ssfcms, ssfrsa) already returned false on failure.
+              ssfasn1.md and ssfx509.md updated. Tests: "AUDIT ASN1-1" in ssfasn1_ut.c (02 01 FF,
+              02 01 80, 02 00, 02 02 00 7F, 02 03 00 00 01 rejected; 0, 127, 128, UINT64_MAX
+              accepted) and in ssfx509_ut.c (CA with pathLen -1 fails to parse, pathLen 0
+              control parses; RSA-PSS cert with saltLength -1 fails verification). RED:
+              ssfasn1_ut.c:123 and ssfx509_ut.c:5369 (the PSS case already failed and guards
+              the new path). GREEN: ssfasn1, ssfx509, ssfcms, ssfrsa, ssfbase64url, ssfmatch
+              (ASN1 and RSA unit tests enabled for the run; flags restored).

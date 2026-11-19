@@ -217,9 +217,16 @@ static void _SSFX509ParsePSSParams(const uint8_t *params, uint32_t paramsLen, SS
         /* Yes, take the declared value; oversize values are capped and rejected by the caller */
         if (!SSFASN1DecOpenConstructed(&seqInner, SSF_ASN1_CONTEXT_EXPLICIT(2), &fieldInner,
                                        &seqInner)) return;
+        /* Is the saltLength a valid unsigned INTEGER (AUDIT ASN1-1)? */
         if (SSFASN1DecGetIntU64(&fieldInner, &saltLen, &fieldInner))
         {
+            /* Yes */
             *saltLenOut = (saltLen > 255u) ? 255u : (uint32_t)saltLen;
+        }
+        else
+        {
+            /* No, never fall back to the default; 255 exceeds every hash and is rejected */
+            *saltLenOut = 255u;
         }
     }
 }
@@ -366,11 +373,15 @@ static bool _SSFX509ParseExtensions(const SSFASN1Cursor_t *extsCursor, SSFX509Ce
                     if (!SSFASN1DecIsEmpty(&bcInner))
                     {
                         uint64_t pl;
-                        if (SSFASN1DecGetIntU64(&bcInner, &pl, &bcInner))
+
+                        /* Is the pathLenConstraint a valid unsigned INTEGER (AUDIT ASN1-1)? */
+                        if (!SSFASN1DecGetIntU64(&bcInner, &pl, &bcInner))
                         {
-                            /* Clamp so a large value stays a constraint instead of wrapping */
-                            cert->pathLenConstraint = (pl > 127u) ? (int8_t)127 : (int8_t)pl;
+                            /* No, a CA constraint that cannot be read must not become unlimited */
+                            return false;
                         }
+                        /* Yes, clamp so a large value stays a constraint instead of wrapping */
+                        cert->pathLenConstraint = (pl > 127u) ? (int8_t)127 : (int8_t)pl;
                     }
                 }
             }

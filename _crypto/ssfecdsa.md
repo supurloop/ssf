@@ -133,7 +133,8 @@ Two design choices worth calling out up front:
   runs, so invalid-curve attacks are closed by construction.
 - **Signing is constant-time; verification is not.** Sign uses the constant-time
   [`SSFECScalarMul`](ssfec.md#ssfecscalarmul) path and constant-time modular inverse
-  ([`SSFBNModInv`](ssfbn.md#modinv), which is Fermat-based over the prime curve order `n`),
+  ([`SSFBNModInvSmall`](ssfbn.md#modinvsmall), Fermat-based over the prime curve order `n` at
+  curve width) and products ([`SSFBNModMulSmall`](ssfbn.md#modinvsmall)),
   and scrubs its secret intermediates with [`ssfcrypt`](ssfcrypt.md)'s
   `SSFCryptSecureZero`. Verify is variable-time — fine because everything fed into verify is
   public. It uses [`SSFECScalarMulDualBase`](ssfec.md#ssfecscalarmuldualbase) when a

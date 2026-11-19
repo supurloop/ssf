@@ -3768,6 +3768,156 @@ void SSFBNUnitTest(void)
         }
     }
 
+    /* ---- OPTIMIZE EC-O3: curve-width CT inverse and multiply (ModInvSmall / ModMulSmall) ---- */
+    /* Inverses are checked against SSFBNModInv (the full-width Fermat path) and by a * r == 1  */
+    /* through SSFBNModMul; products against SSFBNModMul. Moduli: the P-256 / P-384 primes and */
+    /* group orders and small primes of 1-4 limbs; failures follow SSFBNModInv's contract.      */
+    {
+        static const SSFBNLimb_t primeLimbs[][4] = {
+            { 0x7FFFFFFFu, 0u, 0u, 0u },                                 /* 2^31 - 1 */
+            { 0xFFFFFFFBu, 0u, 0u, 0u },                                 /* 2^32 - 5 */
+            { 0xFFFFFFFFu, 0x1FFFFFFFu, 0u, 0u },                        /* 2^61 - 1 */
+            { 0xFFFFFFC5u, 0xFFFFFFFFu, 0u, 0u },                        /* 2^64 - 59 */
+            { 0xFFFFFFFFu, 0xFFFFFFFFu, 0x01FFFFFFu, 0u },               /* 2^89 - 1 */
+            { 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0x7FFFFFFFu }       /* 2^127 - 1 */
+        };
+        static const uint16_t primeLens[] = { 1u, 1u, 2u, 2u, 3u, 4u };
+        static const SSFBNLimb_t p256n[8] = { 0xFC632551u, 0xF3B9CAC2u, 0xA7179E84u,
+                                              0xBCE6FAADu, 0xFFFFFFFFu, 0xFFFFFFFFu,
+                                              0x00000000u, 0xFFFFFFFFu };
+#if SSF_BN_CONFIG_MAX_BITS >= 768
+        static const SSFBNLimb_t p384n[12] = { 0xCCC52973u, 0xECEC196Au, 0x48B0A77Au,
+                                               0x581A0DB2u, 0xF4372DDFu, 0xC7634D81u,
+                                               0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu,
+                                               0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu };
+#endif
+        SSFBN_DEFINE(m, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(b, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(r, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(ref, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(one, SSF_BN_MAX_LIMBS);
+        uint16_t mi;
+        uint16_t numMod;
+        uint16_t vi;
+        uint16_t k;
+
+        numMod = (uint16_t)(sizeof(primeLens) / sizeof(primeLens[0])) + 2u;
+#if SSF_BN_CONFIG_MAX_BITS >= 768
+        numMod += 2u;
+#endif
+        for (mi = 0u; mi < numMod; mi++)
+        {
+            /* Pick the modulus: small primes, then P-256 p and n, then P-384 p and n */
+            if (mi < (uint16_t)(sizeof(primeLens) / sizeof(primeLens[0])))
+            {
+                m.len = primeLens[mi];
+                for (k = 0u; k < m.len; k++) m.limbs[k] = primeLimbs[mi][k];
+            }
+            else
+            {
+                uint16_t which;
+
+                which = (uint16_t)(mi - (uint16_t)(sizeof(primeLens) / sizeof(primeLens[0])));
+
+                if (which == 0u) SSFBNCopy(&m, &SSF_BN_NIST_P256);
+                else if (which == 1u)
+                {
+                    m.len = 8u;
+                    for (k = 0u; k < 8u; k++) m.limbs[k] = p256n[k];
+                }
+#if SSF_BN_CONFIG_MAX_BITS >= 768
+                else if (which == 2u) SSFBNCopy(&m, &SSF_BN_NIST_P384);
+                else
+                {
+                    m.len = 12u;
+                    for (k = 0u; k < 12u; k++) m.limbs[k] = p384n[k];
+                }
+#endif
+            }
+            SSFBNSetOne(&one, m.len);
+
+            /* a = 1, 2, m - 2, m - 1 and three pseudo-random values below m */
+            for (vi = 0u; vi < 7u; vi++)
+            {
+                if (vi == 0u) SSFBNSetOne(&a, m.len);
+                else if (vi == 1u) SSFBNSetUint32(&a, 2u, m.len);
+                else if (vi == 2u) { SSFBNCopy(&a, &m); a.limbs[0] -= 2u; }
+                else if (vi == 3u) { SSFBNCopy(&a, &m); a.limbs[0] -= 1u; }
+                else _SSFBNUTFillBelow(&a, &m, (uint32_t)((mi * 31u) + vi));
+                if (SSFBNIsZero(&a)) continue;
+
+                SSF_ASSERT(SSFBNModInvSmall(&r, &a, &m) == true);
+                SSF_ASSERT(r.len == m.len);
+                SSF_ASSERT(SSFBNModInv(&ref, &a, &m) == true);
+                SSF_ASSERT(SSFBNCmp(&r, &ref) == 0);
+                SSFBNModMul(&ref, &a, &r, &m);
+                SSF_ASSERT(SSFBNCmp(&ref, &one) == 0);
+
+                /* In place: r aliasing a */
+                SSFBNCopy(&ref, &a);
+                SSF_ASSERT(SSFBNModInvSmall(&ref, &ref, &m) == true);
+                SSF_ASSERT(SSFBNCmp(&ref, &r) == 0);
+
+                /* Product against the generic SSFBNModMul, also with a >= m (a < R) and in place */
+                _SSFBNUTFillBelow(&b, &m, (uint32_t)((mi * 17u) + vi + 3u));
+                SSFBNModMulSmall(&r, &a, &b, &m);
+                SSFBNModMul(&ref, &a, &b, &m);
+                SSF_ASSERT((r.len == m.len) && (SSFBNCmp(&r, &ref) == 0));
+                SSFBNCopy(&r, &a);
+                SSFBNModMulSmall(&r, &r, &b, &m);
+                SSF_ASSERT(SSFBNCmp(&r, &ref) == 0);
+                SSFBNCopy(&r, &b);
+                SSFBNModMulSmall(&r, &a, &r, &m);
+                SSF_ASSERT(SSFBNCmp(&r, &ref) == 0);
+                for (k = 0u; k < m.len; k++) a.limbs[k] = 0xFFFFFFFFu;
+                SSFBNModMulSmall(&r, &a, &b, &m);
+                SSFBNModMul(&ref, &a, &b, &m);
+                SSF_ASSERT(SSFBNCmp(&r, &ref) == 0);
+            }
+
+            /* a = 0 has no inverse */
+            SSFBNSetZero(&a, m.len);
+            SSF_ASSERT(SSFBNModInvSmall(&r, &a, &m) == false);
+        }
+
+        /* Composite odd moduli: gcd(a, m) != 1, and a Fermat-failing coprime a (as ModInv) */
+        SSFBNSetUint32(&m, 15u, 1u);
+        SSFBNSetUint32(&a, 5u, 1u);
+        SSF_ASSERT(SSFBNModInvSmall(&r, &a, &m) == false);
+        SSFBNSetUint32(&a, 2u, 1u);
+        SSF_ASSERT(SSFBNModInvSmall(&r, &a, &m) == false);
+        SSF_ASSERT(SSFBNModInv(&r, &a, &m) == false);
+
+        /* Even modulus: no Fermat inverse, rejected as SSFBNModInv does (AUDIT BN-3) */
+        SSFBNSetUint32(&m, 14u, 1u);
+        SSFBNSetUint32(&a, 3u, 1u);
+        SSF_ASSERT(SSFBNModInvSmall(&r, &a, &m) == false);
+
+        /* m == 1 has no Fermat exponent m - 2: rejected, as SSFBNModInv rejects it */
+        SSFBNSetOne(&m, 1u);
+        SSFBNSetOne(&a, 1u);
+        SSF_ASSERT(SSFBNModInvSmall(&r, &a, &m) == false);
+        SSF_ASSERT(SSFBNModInv(&r, &a, &m) == false);
+
+        /* Secret-derived locals are wiped before return (BN-11 scrub hook) */
+        SSFBNCopy(&m, &SSF_BN_NIST_P256);
+        _SSFBNUTFillBelow(&a, &m, 123u);
+        _SSFBNUTFillBelow(&b, &m, 321u);
+        _scrubCalls = 0u;
+        _scrubDirty = 0u;
+        _SSFBNScrubTestHook = _ScrubCheck;
+        /* ModInvSmall: table, acc, aR, e, ctx.mod, ctx.rr, plus SSFBNMontInit's own R^2 copy */
+        SSF_ASSERT(SSFBNModInvSmall(&r, &a, &m) == true);
+        SSF_ASSERT(_scrubCalls == 7u);
+        /* ModMulSmall: t, ctx.mod, ctx.rr, plus SSFBNMontInit's R^2 copy */
+        _scrubCalls = 0u;
+        SSFBNModMulSmall(&r, &a, &b, &m);
+        SSF_ASSERT(_scrubCalls == 4u);
+        _SSFBNScrubTestHook = NULL;
+        SSF_ASSERT(_scrubDirty == 0u);
+    }
+
     /* ---- AUDIT BN-7: MontInit's R^2 loop is exact for moduli of 1024+ limbs ---- */
     /* The doubling loop bound was (uint16_t)(len * 64), which wraps at len >= 1024 (to 0 at    */
     /* exactly 1024, leaving rr = 1), so every Montgomery operation on such a modulus was     */

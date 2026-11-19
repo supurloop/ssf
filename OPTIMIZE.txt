@@ -62,7 +62,7 @@ SUMMARY
   BN-O2    Speed         MontMul +20% measured (1.6x on emulated ARM32)        S       DONE
   BN-O5    Speed         RSA sign -1.8 ms (about -35% after O1..O3)            M       OPEN
   BN-O6    Speed+size    ECC 1.23-1.46x emulated ARM32, -381 B M4               M       DONE
-  EC-O3    Stack         ECC op peaks about 18 KB -> 7-10 KB (with BN-O6)        M       OPEN
+  EC-O3    Stack         ECC op peaks 17.5-18.4 KB -> 5.1-7.8 KB on Cortex-M4    M       DONE
   ED-O1    Size          -7 KB (Ed25519 scalar arithmetic)                     M       OPEN
   X509-O1  Size          -3.7 KB x509, -1.4 KB cms (Cortex-M4), plus printf    S       DONE
            (CMS-O1)
@@ -515,7 +515,7 @@ EC-O2  Speed  OPEN  Effort S
   Probable:  ECDSA sign / ECDH -1-2% after BN-O1.
   Risk:      Constant tables; check them against MontInit in the unit tests.
 
-EC-O3  Stack + speed  OPEN  Effort M  (found 2026-11-19 while measuring BN-O6)
+EC-O3  Stack + speed  DONE (2026-11-19)  Effort M  (found while measuring BN-O6)
   Where:     the curve-width modular arithmetic ssfec / ssfecdsa run through the 8192-bit-cap
              ssfbn paths: SSFECPointToAffine and ECDSA k^-1 use SSFBNModInv (Fermat:
              SSFBNModExp -> SSFBNModExpMont with a 16-entry table of SSF_BN_MAX_LIMBS-limb
@@ -530,6 +530,26 @@ EC-O3  Stack + speed  OPEN  Effort M  (found 2026-11-19 while measuring BN-O6)
              width, a few percent.
   Risk:      The inverses take secret inputs (k, Z of a secret multiple): they must stay
              constant-time, as SSFBNModInv is today. Needs new tests at both curves.
+  Prototype (scratchpad, 2026-11-19; ssfbn, ssfrsa, ssfec, ssfecdsa, ssfx509, ssfcms tests
+             pass): SSFBNModInvSmall (Fermat a^(m-2) mod m in Montgomery form at <= 12 limbs,
+             4-bit window; the exponent is public, so the table is indexed directly and the
+             operation sequence never depends on the secret base; a * r == 1 checked as
+             today) and SSFBNModMulSmall (MontMul(MontMul(a, b), R^2)), used for
+             SSFECPointToAffine's Z^-1, ECDSA sign's k^-1 and both SSFBNModMulCT calls, and
+             verify's SSFBNModInvExt and both SSFBNModMul calls.
+  Measured:  Stack, Cortex-M4 reachable call-graph peaks (excluding SSFBNModMulNIST's generic
+             fallback and SSFBNMul's Karatsuba path, neither reachable at 8 / 12 limbs):
+             ECDSA sign 18392 -> 6120 B, verify 18256 -> 7832 B, ECDH 18016 -> 5640 B, keygen
+             17504 -> 5128 B. The scalar multiplies are now the deepest chains. New frames:
+             SSFBNModInvSmall 1216 B (against SSFBNModInv 2088 B + SSFBNModExpMont 10440 B).
+             Code: SSFBNModInvSmall 480 B, SSFBNModMulSmall 168 B on Cortex-M4 (460 / 164 B on
+             M0+). In a linked Cortex-M4 image using ECDSA + ECDH but not RSA (gc-sections,
+             newlib-nano): 43972 -> 42108 B (-1864 B), because SSFBNModExpMont,
+             SSFBNModInvExt and SSFBNModMulCT are no longer linked. With RSA also linked they
+             stay, so the net is about +650 B.
+             Speed, x86-64 -O2: P-256 sign 322 -> 283-298 us (-8 to -12%), P-384 sign 600 ->
+             565 us (-6%), verify and ECDH within noise. Emulated ARM32: P-384 sign 4235 ->
+             3783 us (-11%), P-256 sign, verify and ECDH within 1-2%.
 
   Reviewed, no change worth making: the 4-bit fixed-window CT variable-base multiply (a
   signed 5-bit window saves about 10 additions of 334 point operations: 3%), the comb
@@ -915,3 +935,58 @@ CHANGE LOG
               Cortex-M4 and that the table values are an earlier x86-64 measurement.
               Noted, pre-existing: the field-arithmetic scratch (prod, s, tmp) is not wiped on
               return, as before (zero-filling on entry was never a wipe on exit).
+  2026-11-19  EC-O3 DONE (Jim: Option A, public helpers in ssfbn; verify moved to the CT inverse
+              as recommended). New in ssfbn.h: SSF_BN_SMALL_MAX_LIMBS (12, or the cap when
+              narrower), SSFBNModInvSmall (Fermat a^(m-2) mod m in Montgomery form, 4-bit
+              windows over the public exponent, direct table index; the a * r == 1 check and
+              the false returns for a = 0, even m, composite m and gcd(a, m) != 1 match
+              SSFBNModInv; r may alias a; the table, acc, aR, e and the context are wiped) and
+              SSFBNModMulSmall (MontMul(MontMul(a, b), R^2), exact for any a < R when b < m,
+              CT, r may alias a or b, intermediate wiped). ssfec's SSFECPointToAffine, ECDSA
+              sign (k^-1 and both SSFBNModMulCT) and both verify paths (SSFBNModInvExt and both
+              SSFBNModMul) use them.
+              Test hook _SSFBNFullWidthCalls counts entries to SSFBNModExpMont[Pub],
+              SSFBNModMulCT, SSFBNModInvExt and SSFBNModMul. RED: ssfecdsa_ut.c "OPTIMIZE EC-O3"
+              (keygen, sign, verify, ECDH on each curve must not enter them) failed at
+              ssfecdsa_ut.c:2179. ssfbn_ut.c "OPTIMIZE EC-O3" checks the helpers against
+              SSFBNModInv and SSFBNModMul at six small primes of 1-4 limbs (2^31-1 to 2^127-1)
+              and the P-256 / P-384 primes and orders, for a = 1, 2, m - 2, m - 1 and random
+              values, in place, an unreduced a for the product, the false cases, and the wipes
+              (7 and 2 scrub calls including SSFBNMontInit's). Mutation check: a skipped last
+              window, an off-by-one table index, a missing second multiply and a removed check
+              are each caught by that block. (A P-384 order typo of mine in a scratch check was
+              caught when both inverses rejected it; the test constant matches ssfec.c.)
+              GREEN x86-64 (normal and ASan + UBSan, no report) and 32-bit ARM (qemu-arm):
+              ssfbn, ssfrsa, ssfec, ssfecdsa, ssfx509, ssfcms, ssfbase64url, ssfmatch.
+              Stack, Cortex-M4 reachable call-graph peaks: ECDSA sign 18392 -> 6120 B, verify
+              18256 -> 7832 B, ECDH 18016 -> 5640 B, keygen 17504 -> 5128 B,
+              SSFECPointToAffine 17008 -> 4632 B. New frames: SSFBNModInvSmall 1216 B,
+              SSFBNModMulSmall 208 B.
+              Code (arm-none-eabi-gcc -Os): SSFBNModInvSmall 568 B / SSFBNModMulSmall 276 B on
+              Cortex-M4 (584 / 336 B on M0+); ssfbn + ssfec + ssfecdsa objects +841 B (M4),
+              +917 B (M0+). Linked Cortex-M4 images (gc-sections, newlib-nano): ECDSA + ECDH
+              without RSA 44260 -> 42332 B (-1928 B: the full-width ModExpMont, ModInvExt and
+              ModMulCT are no longer linked); with RSA also linked 49157 -> 49773 B (+616 B).
+              Speed, x86-64 -O2 (two interleaved runs): P-256 sign 300-339 -> 277-282 us, P-384
+              sign 588-594 -> 552 us, verify and ECDH within noise. Emulated ARM32: P-256 sign
+              1815 -> 1595 us (1.14x), P-384 sign 3800 -> 3463 us (1.10x), P-256 verify / ECDH
+              and P-384 verify 1-3% faster over two interleaved reruns.
+              Docs: ssfbn.md (new reference section, API table, constant-time table and the
+              secret-scalar note), ssfecdsa.md (signing uses the curve-width helpers), README
+              footnote 42 (the ECC peak is now the scalar multiply).
+  2026-11-19  EC-O3 post-implementation audit (Jim: "Do an audit first"). SSFBNModInvSmall's
+              operation sequence and table reads depend only on m (the table index comes from
+              the public exponent m - 2); the only branches on a are the a = 0 rejection and
+              the final check, as in SSFBNModInv. Timing on P-256 for a = 1, p - 1, 2^255 and
+              random: medians 24516-24559 ns, identical spreads. Every call site meets the
+              preconditions (Z < p, k < n, s < n checked in verify, e reduced below n, and
+              ModMulSmall's b always < n). ECDSA known-answer vectors unchanged.
+              Fixed: (1) Contract: for m == 1 SSFBNModInvSmall returned true (r = 0, and m - 2
+              underflowed) where SSFBNModInv returns false; it now returns false (test added,
+              RED at ssfbn_ut.c:3900). (2) Doc: ssfbn.md compared ModInvSmall's frame with a
+              wrong chain figure; it now gives the Cortex-M4 chains, about 4.4 KB against about
+              16.8 KB. (3) Hygiene: SSFBNModMulSmall now also wipes its Montgomery context, as
+              ModInvSmall does (scrub count 2 -> 4, RED at ssfbn_ut.c:3916).
+              GREEN x86-64 (normal and ASan + UBSan): all 8 suites. Sizes after the fixes,
+              Cortex-M4: SSFBNModInvSmall 580 B, SSFBNModMulSmall 288 B (M0+ 596 / 348 B);
+              frames unchanged (1216 / 208 B).

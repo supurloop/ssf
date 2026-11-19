@@ -2140,5 +2140,45 @@ void SSFECDSAUnitTest(void)
         SSF_ASSERT(mismatches == 0u);
     }
 #endif /* SSF_EC_CONFIG_ENABLE_P384 */
+
+#if SSF_CONFIG_BN_UNIT_TEST == 1
+    /* ---- OPTIMIZE EC-O3: ECDSA / ECDH never enter a full-width (BN-cap sized) routine ---- */
+    /* Keygen, sign, verify and ECDH on each curve must run all modular inverses and mod-n    */
+    /* products at curve width (SSFBNModInvSmall / SSFBNModMulSmall).                        */
+    {
+        static const SSFECCurve_t curves[] = {
+#if SSF_EC_CONFIG_ENABLE_P256 == 1
+            SSF_EC_CURVE_P256,
+#endif
+#if SSF_EC_CONFIG_ENABLE_P384 == 1
+            SSF_EC_CURVE_P384,
+#endif
+        };
+        uint8_t priv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        uint8_t pub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
+        uint8_t secret[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        uint8_t hash[48];
+        size_t pubLen;
+        size_t sigLen;
+        size_t secretLen;
+        size_t privLen;
+        uint16_t ci;
+
+        memset(hash, 0x5A, sizeof(hash));
+        for (ci = 0u; ci < (uint16_t)(sizeof(curves) / sizeof(curves[0])); ci++)
+        {
+            privLen = (curves[ci] == SSF_EC_CURVE_P256) ? 32u : 48u;
+            _SSFBNFullWidthCalls = 0u;
+            SSF_ASSERT(SSFECDSAKeyGen(curves[ci], priv, privLen, pub, sizeof(pub), &pubLen));
+            SSF_ASSERT(SSFECDSASign(curves[ci], priv, privLen, hash, privLen, sig, sizeof(sig),
+                                    &sigLen));
+            SSF_ASSERT(SSFECDSAVerify(curves[ci], pub, pubLen, hash, privLen, sig, sigLen));
+            SSF_ASSERT(SSFECDHComputeSecret(curves[ci], priv, privLen, pub, pubLen, secret,
+                                            sizeof(secret), &secretLen));
+            SSF_ASSERT(_SSFBNFullWidthCalls == 0u);
+        }
+    }
+#endif /* SSF_CONFIG_BN_UNIT_TEST */
 }
 #endif /* SSF_CONFIG_ECDSA_UNIT_TEST */

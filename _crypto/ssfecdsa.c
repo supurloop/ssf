@@ -753,13 +753,13 @@ bool SSFECDSASign(SSFECCurve_t curve, const uint8_t *privKey, size_t privKeyLen,
         if (_SSFECDSASignTestFault == 3u) e.limbs[0] ^= 1u;
 #endif /* SSF_CONFIG_ECDSA_UNIT_TEST */
 
-        /* No, s = k^(-1) * (e + r * d) mod n */
-        if (!SSFBNModInv(&kInv, &k, &c->n)) goto cleanup;
+        /* No, s = k^(-1) * (e + r * d) mod n, all at curve width (OPTIMIZE EC-O3) */
+        if (!SSFBNModInvSmall(&kInv, &k, &c->n)) goto cleanup;
 
-        /* CT mod-n arithmetic on secret operands (d, kInv): SSFBNModMulCT, SSFBNModAdd both CT. */
-        SSFBNModMulCT(&tmp, &r, &d, &c->n);     /* r * d mod n */
-        SSFBNModAdd(&tmp, &e, &tmp, &c->n);     /* e + r*d mod n */
-        SSFBNModMulCT(&s, &kInv, &tmp, &c->n);  /* k^(-1) * (e + r*d) mod n */
+        /* CT mod-n arithmetic on secret operands (d, kInv): ModMulSmall, ModAdd both CT. */
+        SSFBNModMulSmall(&tmp, &r, &d, &c->n);     /* r * d mod n */
+        SSFBNModAdd(&tmp, &e, &tmp, &c->n);        /* e + r*d mod n */
+        SSFBNModMulSmall(&s, &kInv, &tmp, &c->n);  /* k^(-1) * (e + r*d) mod n */
 
         /* Is s non-zero? */
         if (!SSFBNIsZero(&s))
@@ -832,11 +832,11 @@ static bool _SSFECDSAVerifyInit(const SSFECCurveParams_t *c, SSFECCurve_t curve,
     _SSFECDSABits2Int(&e, hash, hashLen, c);
     if (SSFBNCmp(&e, &c->n) >= 0) SSFBNSub(&e, &e, &c->n);
 
-    /* s is public, so non-CT SSFBNModInvExt is faster than the CT SSFBNModInv. */
-    if (!SSFBNModInvExt(&w, &s, &c->n)) return false;
+    /* Curve-width inverse and products (OPTIMIZE EC-O3); CT, though s, e and r are public */
+    if (!SSFBNModInvSmall(&w, &s, &c->n)) return false;
 
-    SSFBNModMul(u1Out, &e, &w, &c->n);
-    SSFBNModMul(u2Out, rOut, &w, &c->n);
+    SSFBNModMulSmall(u1Out, &e, &w, &c->n);
+    SSFBNModMulSmall(u2Out, rOut, &w, &c->n);
     return true;
 }
 
@@ -930,9 +930,9 @@ static bool _SSFECDSASignSelfCheck(SSFECCurve_t curve, const SSFECCurveParams_t 
     if (SSFBNCmp(&e, &c->n) >= 0) SSFBNSub(&e, &e, &c->n);
 
     /* Standard verify on the public (r, s): u1 = e / s, u2 = r / s, R = u1 * G + u2 * Q */
-    if (!SSFBNModInvExt(&w, s, &c->n)) goto cleanup;
-    SSFBNModMul(&u1, &e, &w, &c->n);
-    SSFBNModMul(&u2, r, &w, &c->n);
+    if (!SSFBNModInvSmall(&w, s, &c->n)) goto cleanup;
+    SSFBNModMulSmall(&u1, &e, &w, &c->n);
+    SSFBNModMulSmall(&u2, r, &w, &c->n);
     if (!_SSFECDSAVerifyGetR(c, curve, &u1, &u2, &Q, &R)) goto cleanup;
     ok = _SSFECDSAVerifyCheckR(c, curve, &R, r);
 

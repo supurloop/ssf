@@ -70,6 +70,9 @@ uint32_t _SSFBNMontInitDoublings = 0u;
 /* Test-only counts: MontMul inner-loop and MontSquare carry-loop iterations (BN-O2, BN-O3). */
 uint32_t _SSFBNMontMulIters = 0u;
 uint32_t _SSFBNMontSqrCarryIters = 0u;
+
+/* Test-only count of full-width entry points (ModExpMont[Pub], ModMulCT, ModInvExt, ModMul). */
+uint32_t _SSFBNFullWidthCalls = 0u;
 #define _SSF_BN_COUNT(c) do { (c)++; } while (0)
 #else
 #define _SSF_BN_SCRUB_HOOK(p, n) do { } while (0)
@@ -1348,6 +1351,8 @@ void SSFBNModMul(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *
 {
     SSFBN_DEFINE(prod, SSF_BN_MAX_LIMBS);
 
+    _SSF_BN_COUNT(_SSFBNFullWidthCalls);
+
     SSF_REQUIRE(r != NULL);
     SSF_REQUIRE(r->limbs != NULL);
     SSF_REQUIRE(a != NULL);
@@ -1383,6 +1388,8 @@ void SSFBNModMulCT(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t
     SSFBNLimb_t borrow;
     uint8_t aLtM;
     uint8_t bLtM;
+
+    _SSF_BN_COUNT(_SSFBNFullWidthCalls);
 
     SSF_REQUIRE(r != NULL);
     SSF_REQUIRE(r->limbs != NULL);
@@ -1596,6 +1603,8 @@ bool SSFBNModInvExt(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
     bool old_s_neg = false;
     bool cur_s_neg = false;
     uint16_t len;
+
+    _SSF_BN_COUNT(_SSFBNFullWidthCalls);
 
     SSF_REQUIRE(r != NULL);
     SSF_REQUIRE(r->limbs != NULL);
@@ -2036,6 +2045,145 @@ bool SSFBNModInv(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* If a^(-1) mod m exists for prime m of <= SSF_BN_SMALL_MAX_LIMBS limbs, sets r, returns true.  */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFBNModInvSmall(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
+{
+    SSFBNMONT_DEFINE(ctx, SSF_BN_SMALL_MAX_LIMBS);
+    SSFBNLimb_t tableStorage[16][SSF_BN_SMALL_MAX_LIMBS];
+    SSFBN_t table[16];
+    SSFBN_DEFINE(e, SSF_BN_SMALL_MAX_LIMBS);
+    SSFBN_DEFINE(acc, SSF_BN_SMALL_MAX_LIMBS);
+    SSFBN_DEFINE(aR, SSF_BN_SMALL_MAX_LIMBS);
+    uint16_t i;
+    int32_t bit;
+    uint32_t w;
+    bool ok;
+
+    SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(r->limbs != NULL);
+    SSF_REQUIRE(a != NULL);
+    SSF_REQUIRE(a->limbs != NULL);
+    SSF_REQUIRE(m != NULL);
+    SSF_REQUIRE(m->limbs != NULL);
+    SSF_REQUIRE(m->len >= 1u);
+    SSF_REQUIRE(m->len <= SSF_BN_SMALL_MAX_LIMBS);
+    SSF_REQUIRE(a->len == m->len);
+    SSF_REQUIRE(m->len <= r->cap);
+
+    /* Is a zero, which has no inverse? */
+    if (SSFBNIsZero(a))
+    {
+        /* Yes */
+        return false;
+    }
+    /* No, is m even (no Fermat inverse, and Montgomery needs an odd modulus, AUDIT BN-3)? */
+    if (SSFBNIsEven(m))
+    {
+        /* Yes, m is public in every caller, so this branch leaks nothing secret */
+        return false;
+    }
+    /* No, is m one, which has no Fermat exponent m - 2 (rejected as SSFBNModInv rejects it)? */
+    if (SSFBNIsOne(m))
+    {
+        /* Yes */
+        return false;
+    }
+    /* No */
+
+    /* r = a^(m - 2) mod m in Montgomery form at curve width, not the BN cap (OPTIMIZE EC-O3) */
+    SSFBNMontInit(&ctx, m);
+    for (i = 0u; i < 16u; i++)
+    {
+        table[i].limbs = tableStorage[i];
+        table[i].cap = SSF_BN_SMALL_MAX_LIMBS;
+        table[i].len = m->len;
+    }
+
+    /* table[w] = a^w in Montgomery form; table[0] is 1 (R mod m) */
+    SSFBNMontConvertIn(&aR, a, &ctx);
+    SSFBNSetOne(&e, m->len);
+    SSFBNMontConvertIn(&table[0], &e, &ctx);
+    SSFBNCopy(&table[1], &aR);
+    for (i = 2u; i < 16u; i++)
+    {
+        SSFBNMontMul(&table[i], &table[i - 1u], &aR, &ctx);
+    }
+
+    /* Left-to-right 4-bit windows over the public exponent m - 2: the sequence of squares and */
+    /* table reads depends only on m, never on a, so a direct table index is constant-time.  */
+    (void)SSFBNSubUint32(&e, m, 2u);
+    SSFBNCopy(&acc, &table[0]);
+    for (bit = (int32_t)(((uint32_t)m->len * SSF_BN_LIMB_BITS) - 4u); bit >= 0; bit -= 4)
+    {
+        w = (uint32_t)((e.limbs[(uint32_t)bit / SSF_BN_LIMB_BITS] >>
+                        ((uint32_t)bit % SSF_BN_LIMB_BITS)) & 0xFu);
+        SSFBNMontSquare(&acc, &acc, &ctx);
+        SSFBNMontSquare(&acc, &acc, &ctx);
+        SSFBNMontSquare(&acc, &acc, &ctx);
+        SSFBNMontSquare(&acc, &acc, &ctx);
+        SSFBNMontMul(&acc, &acc, &table[w], &ctx);
+    }
+
+    /* a * r == 1 (mod m), checked in Montgomery form as aR * rR * R^-1 == R mod m */
+    SSFBNMontMul(&e, &aR, &acc, &ctx);
+    ok = (SSFBNCmp(&e, &table[0]) == 0);
+    SSFBNMontConvertOut(r, &acc, &ctx);
+
+    /* Zeroize everything derived from a, and the context in case m is a secret prime */
+    SSFCryptSecureZero(tableStorage, sizeof(tableStorage));
+    _SSF_BN_SCRUB_HOOK(tableStorage, sizeof(tableStorage));
+    SSFBNZeroize(&acc);
+    _SSF_BN_SCRUB_HOOK(acc.limbs, (size_t)acc.cap * sizeof(SSFBNLimb_t));
+    SSFBNZeroize(&aR);
+    _SSF_BN_SCRUB_HOOK(aR.limbs, (size_t)aR.cap * sizeof(SSFBNLimb_t));
+    SSFBNZeroize(&e);
+    _SSF_BN_SCRUB_HOOK(e.limbs, (size_t)e.cap * sizeof(SSFBNLimb_t));
+    SSFBNZeroize(&ctx.mod);
+    _SSF_BN_SCRUB_HOOK(ctx.mod.limbs, (size_t)ctx.mod.cap * sizeof(SSFBNLimb_t));
+    SSFBNZeroize(&ctx.rr);
+    _SSF_BN_SCRUB_HOOK(ctx.rr.limbs, (size_t)ctx.rr.cap * sizeof(SSFBNLimb_t));
+    return ok;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* r = (a * b) mod m for odd m of <= SSF_BN_SMALL_MAX_LIMBS limbs and b < m; constant-time.      */
+/* --------------------------------------------------------------------------------------------- */
+void SSFBNModMulSmall(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *m)
+{
+    SSFBNMONT_DEFINE(ctx, SSF_BN_SMALL_MAX_LIMBS);
+    SSFBN_DEFINE(t, SSF_BN_SMALL_MAX_LIMBS);
+
+    SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(r->limbs != NULL);
+    SSF_REQUIRE(a != NULL);
+    SSF_REQUIRE(a->limbs != NULL);
+    SSF_REQUIRE(b != NULL);
+    SSF_REQUIRE(b->limbs != NULL);
+    SSF_REQUIRE(m != NULL);
+    SSF_REQUIRE(m->limbs != NULL);
+    SSF_REQUIRE(m->len >= 1u);
+    SSF_REQUIRE(m->len <= SSF_BN_SMALL_MAX_LIMBS);
+    SSF_REQUIRE(a->len == m->len);
+    SSF_REQUIRE(b->len == m->len);
+    SSF_REQUIRE(m->len <= r->cap);
+    SSF_REQUIRE((m->limbs[0] & 1u) != 0u);
+
+    /* a * b * R^-1, then times R^2 * R^-1: exact for any a < R when b < m (OPTIMIZE EC-O3) */
+    SSFBNMontInit(&ctx, m);
+    SSFBNMontMul(&t, a, b, &ctx);
+    SSFBNMontMul(r, &t, &ctx.rr, &ctx);
+
+    /* Zeroize the intermediate, and the context in case m is a secret prime */
+    SSFBNZeroize(&t);
+    _SSF_BN_SCRUB_HOOK(t.limbs, (size_t)t.cap * sizeof(SSFBNLimb_t));
+    SSFBNZeroize(&ctx.mod);
+    _SSF_BN_SCRUB_HOOK(ctx.mod.limbs, (size_t)ctx.mod.cap * sizeof(SSFBNLimb_t));
+    SSFBNZeroize(&ctx.rr);
+    _SSF_BN_SCRUB_HOOK(ctx.rr.limbs, (size_t)ctx.rr.cap * sizeof(SSFBNLimb_t));
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Initializes Montgomery context for the given odd modulus m.                                   */
 /* --------------------------------------------------------------------------------------------- */
 void SSFBNMontInit(SSFBNMont_t *ctx, const SSFBN_t *m)
@@ -2430,6 +2578,8 @@ void SSFBNModExpMont(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBN
     uint32_t bitOffset;
     int32_t i;
 
+    _SSF_BN_COUNT(_SSFBNFullWidthCalls);
+
     SSF_REQUIRE(r != NULL);
     SSF_REQUIRE(r->limbs != NULL);
     SSF_REQUIRE(a != NULL);
@@ -2545,6 +2695,8 @@ void SSFBNModExpMontPub(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SS
     SSFBN_DEFINE(aM, SSF_BN_MAX_LIMBS);
     uint32_t eBits;
     int32_t i;
+
+    _SSF_BN_COUNT(_SSFBNFullWidthCalls);
 
     SSF_REQUIRE(r != NULL);
     SSF_REQUIRE(r->limbs != NULL);

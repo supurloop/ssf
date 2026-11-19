@@ -70,11 +70,12 @@ other big-integer libraries.
   |---|---|
   | **Constant-time** (safe on secrets) | [`SSFBNCmp`](#ssfbncmp), [`SSFBNModExp`/`SSFBNModExpMont`](#modexp), [`SSFBNMontMul`](#montmul), [`SSFBNMontSquare`](#montsquare), [`SSFBNMontConvertIn`/`Out`](#montconv), [`SSFBNCondSwap`](#condswap), [`SSFBNCondCopy`](#condswap), [`SSFBNAdd`](#ssfbnadd), [`SSFBNSub`](#ssfbnsub), [`SSFBNModAdd`](#modaddsub), [`SSFBNModSub`](#modaddsub), [`SSFBNModMulCT`](#ssfbnmodmulct), [`SSFBNMul`](#ssfbnmul), [`SSFBNSquare`](#ssfbnsquare), [`SSFBNIsEven`/`SSFBNIsOdd`](#predicates), [`SSFBNIsZero`/`IsOne`](#predicates) (the returned bool is itself one bit; branching on it reveals that bit) |
   | **Variable-time** (do not use on secrets) | [`SSFBNMod`](#ssfbnmod), [`SSFBNDivMod`](#ssfbndivmod), [`SSFBNModMul`](#ssfbnmodmul), [`SSFBNModSquare`](#ssfbnmodsquare), [`SSFBNGcd`](#ssfbngcd), [`SSFBNModInvExt`](#modinv), [`SSFBNModMulNIST`](#modmulnist) (constant-time only for the P-256 / P-384 primes), [`SSFBNModExpPub`/`SSFBNModExpMontPub`](#modexppub), [`SSFBNBitLen`](#bitlen), [`SSFBNTrailingZeros`](#trailingzeros), [`SSFBNShiftLeft1`/`Right1`](#shift), [`SSFBNShiftLeft`/`Right`](#shift-multi), [`SSFBNIsProbablePrime`](#ssfbnisprobableprime), [`SSFBNGenPrime`](#ssfbngenprime) |
-  | **Constant-time only when `m` is prime** | [`SSFBNModInv`](#modinv) — uses Fermat's little theorem (`a^(m-2) mod m`), which is constant-time but yields the correct answer only for prime `m`. After computing it, the function verifies `a · r ≡ 1 (mod m)` with the constant-time [`SSFBNModMulCT`](#ssfbnmodmulct) and returns `false` if it does not hold, so non-prime moduli are rejected (even when an inverse exists). |
-- **Secret scalars go through `SSFBNModInv` (with prime `m`) or the ModExp path, never
-  `SSFBNModInvExt` or `SSFBNModExpPub`.** ECDSA signing, for instance, computes `s⁻¹ mod n`
-  where `n` is the curve order (prime); use `SSFBNModInv` there. Reserve `SSFBNModInvExt`
-  for cases where the modulus is known non-prime *and* none of the inputs are secret.
+  | **Constant-time only when `m` is prime** | [`SSFBNModInvSmall`](#modinvsmall) — the same Fermat inverse at curve width (at most `SSF_BN_SMALL_MAX_LIMBS` limbs), with the same `a · r ≡ 1` check. [`SSFBNModInv`](#modinv) — uses Fermat's little theorem (`a^(m-2) mod m`), which is constant-time but yields the correct answer only for prime `m`. After computing it, the function verifies `a · r ≡ 1 (mod m)` with the constant-time [`SSFBNModMulCT`](#ssfbnmodmulct) and returns `false` if it does not hold, so non-prime moduli are rejected (even when an inverse exists). |
+- **Secret scalars go through `SSFBNModInv` / `SSFBNModInvSmall` (with prime `m`) or the ModExp
+  path, never `SSFBNModInvExt` or `SSFBNModExpPub`.** ECDSA signing, for instance, computes
+  `k⁻¹ mod n` where `n` is the curve order (prime); ssfecdsa uses `SSFBNModInvSmall` there.
+  Reserve `SSFBNModInvExt` for cases where the modulus is known non-prime *and* none of the
+  inputs are secret.
   Reserve `SSFBNModExpPub` / `SSFBNModExpMontPub` for public-exponent operations such as
   RSA verify (`e = 65537`).
 - **`SSFBNMul` and `SSFBNSquare` expand; the caller must size the destination.** For
@@ -247,6 +248,8 @@ The `ssfrsa` and `ssfbn` modules sanity-check against this macro at compile time
 | | [`void SSFBNModSquare(r, a, m)`](#ssfbnmodsquare) | `r = (a²) mod m`; `Square` then `Mod` (variable-time) |
 | | [`void SSFBNModMulNIST(r, a, b, m)`](#modmulnist) | `r = (a × b) mod m` using NIST fast reduction for P-256 / P-384 |
 | | [`bool SSFBNModInv(r, a, m)`](#modinv) | `r = a⁻¹ mod m` via Fermat's little theorem (prime `m`) |
+| | [`bool SSFBNModInvSmall(r, a, m)`](#modinvsmall) | `r = a⁻¹ mod m`, Fermat at curve width (prime `m` of at most `SSF_BN_SMALL_MAX_LIMBS` limbs); constant-time |
+| | [`void SSFBNModMulSmall(r, a, b, m)`](#modinvsmall) | `r = (a × b) mod m` at curve width (odd `m`, `b < m`); constant-time |
 | | [`bool SSFBNModInvExt(r, a, m)`](#modinv) | `r = a⁻¹ mod m` via binary extended GCD (any coprime `m`) |
 | | [`void SSFBNGcd(r, a, b)`](#ssfbngcd) | `r = gcd(a, b)` via binary GCD |
 
@@ -688,6 +691,34 @@ bool SSFBNModInvExt(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m);
   coprime `a` and `m`. **Variable-time** — do not use on secret inputs. Use this only when
   the modulus is known non-prime (e.g., RSA's `phi(n)` or CRT helpers) and the inputs are
   not secret.
+
+<a id="modinvsmall"></a>
+```c
+bool SSFBNModInvSmall(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m);
+void SSFBNModMulSmall(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *m);
+```
+Curve-width counterparts of [`SSFBNModInv`](#modinv) and [`SSFBNModMulCT`](#ssfbnmodmulct) for
+moduli of at most `SSF_BN_SMALL_MAX_LIMBS` limbs (12, a P-384 value, or the whole BN cap in
+builds narrower than that). Their working storage is sized by that constant rather than by
+`SSF_BN_CONFIG_MAX_BITS`, so in a build that also enables RSA they need a small fraction of the
+stack of the full-width routines: on Cortex-M4 (default RSA-4096 cap) the call chain under
+`SSFBNModInvSmall` peaks at about 4.4 KB, against about 16.8 KB under `SSFBNModInv` →
+`SSFBNModExp` → `SSFBNModExpMont`. ssfec and ssfecdsa use them for every inverse and mod-n
+product (OPTIMIZE EC-O3).
+
+- `SSFBNModInvSmall` computes `a^(m-2) mod m` in Montgomery form with 4-bit windows. The
+  exponent `m - 2` is public, so the sequence of squares and table reads depends only on `m`
+  and the table is indexed directly: **constant-time** in `a`. It then checks
+  `a · r ≡ 1 (mod m)` and returns `false` if that fails, exactly like `SSFBNModInv`: `false`
+  for `a = 0`, an even `m` (treated as public), `m = 1`, a composite `m`, or `gcd(a, m) ≠ 1`.
+  `r` may alias `a`. Every value derived from `a`, and the Montgomery context, is wiped before
+  return.
+- `SSFBNModMulSmall` computes `MontMul(MontMul(a, b), R²)`: exact for any `a < R` (that is,
+  any `a` at `m->len` limbs, reduced or not) when `b < m`. `m` must be odd (it asserts
+  otherwise). **Constant-time.** `r` may alias `a` or `b`. Its intermediate and its Montgomery
+  context are wiped.
+
+Both require `a->len` (and `b->len`) to equal `m->len`, and `m->len <= r->cap`.
 
 <a id="ssfbngcd"></a>
 ```c

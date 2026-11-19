@@ -92,6 +92,14 @@ typedef uint64_t SSFBNDLimb_t;
 #define SSF_BN_MAX_MOD_LIMBS       (((SSF_BN_MAX_LIMBS) + 1u) / 2u)
 #endif
 
+/* Largest modulus SSFBNModInvSmall / SSFBNModMulSmall accept: a P-384-sized value, or the whole */
+/* cap in builds narrower than that. Their working storage is sized here, not by the BN cap.    */
+#if SSF_BN_MAX_LIMBS >= 12u
+#define SSF_BN_SMALL_MAX_LIMBS     (12u)
+#else
+#define SSF_BN_SMALL_MAX_LIMBS     (SSF_BN_MAX_LIMBS)
+#endif
+
 /* --------------------------------------------------------------------------------------------- */
 /* Static-assert defense-in-depth on the derived width.                                          */
 /*                                                                                                */
@@ -245,6 +253,8 @@ void SSFBNModMul(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *
 void SSFBNModMulCT(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *m);
 void SSFBNModSquare(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m);
 bool SSFBNModInv(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m);
+bool SSFBNModInvSmall(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m);
+void SSFBNModMulSmall(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *m);
 void SSFBNModMulNIST(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *m);
 void SSFBNMod(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m);
 void SSFBNDivMod(SSFBN_t *q, SSFBN_t *rem, const SSFBN_t *a, const SSFBN_t *b);
@@ -312,6 +322,9 @@ extern uint32_t _SSFBNMontInitDoublings;
 /* Test-only counts: MontMul inner-loop and MontSquare carry-loop iterations (BN-O2, BN-O3). */
 extern uint32_t _SSFBNMontMulIters;
 extern uint32_t _SSFBNMontSqrCarryIters;
+
+/* Test-only count of full-width entry points (ModExpMont[Pub], ModMulCT, ModInvExt, ModMul). */
+extern uint32_t _SSFBNFullWidthCalls;
 #endif /* SSF_CONFIG_BN_UNIT_TEST */
 
 #ifdef __cplusplus

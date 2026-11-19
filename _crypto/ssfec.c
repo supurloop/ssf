@@ -658,8 +658,8 @@ bool SSFECPointToAffine(SSFBN_t *x, SSFBN_t *y, const SSFECPoint_t *pt, SSFECCur
     /* Reject identity (Z=0) -- undefined affine coordinate. */
     if (SSFBNIsZero(&pt->z)) return false;
 
-    /* zInv = Z^(-1) mod p */
-    if (!SSFBNModInv(&zInv, &pt->z, &c->p)) return false;
+    /* zInv = Z^(-1) mod p, CT at curve width (OPTIMIZE EC-O3) */
+    if (!SSFBNModInvSmall(&zInv, &pt->z, &c->p)) return false;
 
     /* zInv2 = Z^(-2), zInv3 = Z^(-3) */
     SSFBNModMulNIST(&zInv2, &zInv, &zInv, &c->p);

@@ -473,7 +473,7 @@ X509-2  High  FIXED (2026-11-18)  [demonstrated] [verified 2026-11-18]
              (2) Have SSFX509Parse reject an empty SPKI BIT STRING or one with nonzero unused
              bits. That also covers the ASN1-5 consequence for keys.
 
-X509-3  High  OPEN  [demonstrated] [verified 2026-11-18]
+X509-3  High  FIXED (2026-11-18)  [demonstrated] [verified 2026-11-18]
   Location:  ssfx509.c:494-551 (_SSFX509ParseExtensions, Name Constraints); 2542-2579;
              ssfx509.md:111-113, :216
   Problem:   Name Constraints fail open in three ways. A constrained CA can therefore issue
@@ -1210,4 +1210,22 @@ CHANGE LOG
               (SSFX509VerifySignature), and as the forged issuer of a real RSA-PSS leaf in
               SSFX509VerifyChainPurpose, must give false each time. RED: "SSF Assertion:
               _crypto/ssfrsa.c:1351" on the first (PSS) case. GREEN: ssfx509, ssfcms,
+              ssfbase64url, ssfmatch pass.
+  2026-11-18  X509-3 FIXED via option 1. _SSFX509ParseExtensions now fails the parse for a Name
+              Constraints value that is not exactly one non-empty SEQUENCE, has an unknown,
+              out-of-order or trailing field, an empty GeneralSubtrees list, a GeneralSubtree
+              that is not a SEQUENCE or whose GeneralName does not decode, or more dNSName /
+              iPAddress subtrees (permitted or excluded) than SSF_X509_CONFIG_MAX_NAME_CONSTRAINTS.
+              Other GeneralName forms are still skipped, as agreed (they are X509-4). With the
+              parser unable to fail open, part (c) (NC counted as recognized) needs no separate
+              change. ssfx509.md: the malformed-extension note gains the NC exception and the
+              SSF_X509_CONFIG_MAX_NAME_CONSTRAINTS row now says over-cap certificates fail to
+              parse. Test block "AUDIT X509-3" in ssfx509_ut.c: 9 excluded and 9 permitted
+              dNSName subtrees fail to parse; a well-formed raw NC body parses while SET, empty
+              SEQUENCE, [2] list tag, inner and outer trailing data, [1] before [0], empty [1],
+              GeneralSubtree as SET and an overrunning GeneralName all fail; a CA with exactly 8
+              exclusions (evil.com last) parses with excludedLen 8, rejects an evil.com leaf and
+              accepts a good.com leaf. The earlier raw-extension test that pinned the old
+              behaviour (non-SEQUENCE NC parsed with no subtrees) now expects a parse failure.
+              RED: ssfx509_ut.c:5281 (9 exclusions parsed). GREEN: ssfx509, ssfcms,
               ssfbase64url, ssfmatch pass.

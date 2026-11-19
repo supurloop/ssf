@@ -5186,6 +5186,160 @@ void SSFX509UnitTest(void)
                                       1800000000ull) == true);
     }
 
+    /* ---- AUDIT X509-3: Name Constraints that cannot be held in full fail the parse ---- */
+    {
+        static uint8_t caOut[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t leafOut[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t caPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        static uint8_t leafPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        static uint8_t fakeSig[64];
+        static const uint8_t ncOid[] = { 0x55u, 0x1Du, 0x1Eu };
+        static const char *excl9[] = { "a1.com", "a2.com", "a3.com", "a4.com", "a5.com",
+                                       "a6.com", "a7.com", "a8.com", "evil.com", NULL };
+        static const char *excl8[] = { "a1.com", "a2.com", "a3.com", "a4.com", "a5.com",
+                                       "a6.com", "a7.com", "evil.com", NULL };
+        static const char *perm9[] = { "p1.com", "p2.com", "p3.com", "p4.com", "p5.com",
+                                       "p6.com", "p7.com", "p8.com", "p9.com", NULL };
+        static const char *sanEvil[] = { "evil.com", NULL };
+        static const char *sanGood[] = { "good.com", NULL };
+        /* SEQUENCE { [1] { SEQUENCE { [2] "evil.com" } } }: well formed, the control */
+        static const uint8_t ncGood[] = {
+            0x30u, 0x0Eu, 0xA1u, 0x0Cu, 0x30u, 0x0Au, 0x82u, 0x08u,
+            'e', 'v', 'i', 'l', '.', 'c', 'o', 'm'
+        };
+        /* Body is a SET, not a SEQUENCE */
+        static const uint8_t ncSet[] = { 0x31u, 0x00u };
+        /* Empty SEQUENCE: neither subtree list present */
+        static const uint8_t ncEmpty[] = { 0x30u, 0x00u };
+        /* Subtree list with the unknown tag [2] */
+        static const uint8_t ncBadTag[] = {
+            0x30u, 0x0Eu, 0xA2u, 0x0Cu, 0x30u, 0x0Au, 0x82u, 0x08u,
+            'e', 'v', 'i', 'l', '.', 'c', 'o', 'm'
+        };
+        /* Excluded list followed by a stray NULL inside the SEQUENCE */
+        static const uint8_t ncInnerTrail[] = {
+            0x30u, 0x10u, 0xA1u, 0x0Cu, 0x30u, 0x0Au, 0x82u, 0x08u,
+            'e', 'v', 'i', 'l', '.', 'c', 'o', 'm', 0x05u, 0x00u
+        };
+        /* Well-formed SEQUENCE followed by a stray NULL inside the extension value */
+        static const uint8_t ncOuterTrail[] = {
+            0x30u, 0x0Eu, 0xA1u, 0x0Cu, 0x30u, 0x0Au, 0x82u, 0x08u,
+            'e', 'v', 'i', 'l', '.', 'c', 'o', 'm', 0x05u, 0x00u
+        };
+        /* excludedSubtrees [1] before permittedSubtrees [0] */
+        static const uint8_t ncOutOfOrder[] = {
+            0x30u, 0x1Cu,
+            0xA1u, 0x0Cu, 0x30u, 0x0Au, 0x82u, 0x08u, 'e', 'v', 'i', 'l', '.', 'c', 'o', 'm',
+            0xA0u, 0x0Cu, 0x30u, 0x0Au, 0x82u, 0x08u, 'g', 'o', 'o', 'd', '.', 'c', 'o', 'm'
+        };
+        /* Empty excluded list (GeneralSubtrees is SIZE (1..MAX)) */
+        static const uint8_t ncEmptyList[] = { 0x30u, 0x02u, 0xA1u, 0x00u };
+        /* GeneralSubtree that is a SET, not a SEQUENCE */
+        static const uint8_t ncSubtreeSet[] = {
+            0x30u, 0x0Eu, 0xA1u, 0x0Cu, 0x31u, 0x0Au, 0x82u, 0x08u,
+            'e', 'v', 'i', 'l', '.', 'c', 'o', 'm'
+        };
+        /* GeneralName whose length overruns its GeneralSubtree */
+        static const uint8_t ncNameOverrun[] = {
+            0x30u, 0x0Au, 0xA1u, 0x08u, 0x30u, 0x06u, 0x82u, 0x08u, 'e', 'v', 'i', 'l'
+        };
+        static const struct { const uint8_t *body; uint32_t len; } bad[] = {
+            { ncSet, sizeof(ncSet) }, { ncEmpty, sizeof(ncEmpty) },
+            { ncBadTag, sizeof(ncBadTag) }, { ncInnerTrail, sizeof(ncInnerTrail) },
+            { ncOuterTrail, sizeof(ncOuterTrail) }, { ncOutOfOrder, sizeof(ncOutOfOrder) },
+            { ncEmptyList, sizeof(ncEmptyList) }, { ncSubtreeSet, sizeof(ncSubtreeSet) },
+            { ncNameOverrun, sizeof(ncNameOverrun) }
+        };
+        uint8_t caPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        uint8_t leafPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        size_t caPubLen;
+        size_t leafPubLen;
+        uint8_t serial[] = { 0x1Du };
+        SSFX509GenParams_t p;
+        SSFX509Cert_t parsed;
+        const uint8_t *chain[1];
+        uint32_t chainLen[1];
+        const uint8_t *trust[1];
+        uint32_t trustLen[1];
+        uint32_t caLen;
+        uint32_t leafLen;
+        uint32_t n;
+        uint32_t i;
+
+        memset(fakeSig, 0x55u, sizeof(fakeSig));
+        SSF_ASSERT(SSFECDSAKeyGen(SSF_EC_CURVE_P256, caPriv, sizeof(caPriv), caPub,
+                                  sizeof(caPub), &caPubLen) == true);
+        SSF_ASSERT(SSFECDSAKeyGen(SSF_EC_CURVE_P256, leafPriv, sizeof(leafPriv), leafPub,
+                                  sizeof(leafPub), &leafPubLen) == true);
+
+        /* More excluded, or more permitted, subtrees than fit: dropping any would loosen */
+        _utGenBaseParams(&p, serial, caPub, (uint32_t)caPubLen);
+        p.addNameConstraints = true;
+        p.ncExcludedDNS = excl9;
+        SSF_ASSERT(SSFX509EncodeCert(caOut, sizeof(caOut), &p, fakeSig, sizeof(fakeSig),
+                                     &n) == true);
+        SSF_ASSERT(SSFX509Parse(caOut, n, &parsed) == false);
+        p.ncExcludedDNS = NULL;
+        p.ncPermittedDNS = perm9;
+        SSF_ASSERT(SSFX509EncodeCert(caOut, sizeof(caOut), &p, fakeSig, sizeof(fakeSig),
+                                     &n) == true);
+        SSF_ASSERT(SSFX509Parse(caOut, n, &parsed) == false);
+
+        /* Malformed bodies: the control parses, every broken variant fails */
+        _utGenBaseParams(&p, serial, caPub, (uint32_t)caPubLen);
+        p.addRawExt = true;
+        p.rawExtOid = ncOid;
+        p.rawExtOidLen = sizeof(ncOid);
+        p.rawExtCritical = true;
+        p.rawExtValue = ncGood;
+        p.rawExtValueLen = sizeof(ncGood);
+        SSF_ASSERT(SSFX509EncodeCert(caOut, sizeof(caOut), &p, fakeSig, sizeof(fakeSig),
+                                     &n) == true);
+        SSF_ASSERT(SSFX509Parse(caOut, n, &parsed) == true);
+        SSF_ASSERT((parsed.hasNameConstraints == true) && (parsed.excludedLen == 1u));
+        for (i = 0; i < (uint32_t)(sizeof(bad) / sizeof(bad[0])); i++)
+        {
+            p.rawExtValue = bad[i].body;
+            p.rawExtValueLen = bad[i].len;
+            SSF_ASSERT(SSFX509EncodeCert(caOut, sizeof(caOut), &p, fakeSig, sizeof(fakeSig),
+                                         &n) == true);
+            SSF_ASSERT(SSFX509Parse(caOut, n, &parsed) == false);
+        }
+
+        /* Exactly the cap: every exclusion is kept, including the last one */
+        _utGenBaseParams(&p, serial, caPub, (uint32_t)caPubLen);
+        p.issuer.cn = "ca";
+        p.subject.cn = "ca";
+        p.addBasicConstraints = true;
+        p.isCA = true;
+        p.addKeyUsage = true;
+        p.keyUsageBits = SSF_X509_KU_KEY_CERT_SIGN;
+        p.addNameConstraints = true;
+        p.ncExcludedDNS = excl8;
+        caLen = _utSignCert(&p, caPriv, caOut, sizeof(caOut));
+        SSF_ASSERT(caLen != 0u);
+        SSF_ASSERT(SSFX509Parse(caOut, caLen, &parsed) == true);
+        SSF_ASSERT(parsed.excludedLen == SSF_X509_CONFIG_MAX_NAME_CONSTRAINTS);
+        trust[0] = caOut;
+        trustLen[0] = caLen;
+        _utGenBaseParams(&p, serial, leafPub, (uint32_t)leafPubLen);
+        p.issuer.cn = "ca";
+        p.subject.cn = "leaf";
+        p.sanDNSNames = sanEvil;
+        leafLen = _utSignCert(&p, caPriv, leafOut, sizeof(leafOut));
+        SSF_ASSERT(leafLen != 0u);
+        chain[0] = leafOut;
+        chainLen[0] = leafLen;
+        SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, trust, trustLen, 1u, "evil.com",
+                                      1800000000ull) == false);
+        p.sanDNSNames = sanGood;
+        leafLen = _utSignCert(&p, caPriv, leafOut, sizeof(leafOut));
+        SSF_ASSERT(leafLen != 0u);
+        chainLen[0] = leafLen;
+        SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, trust, trustLen, 1u, "good.com",
+                                      1800000000ull) == true);
+    }
+
     /* ---- A SAN GeneralName whose length overruns its SEQUENCE fails to parse ---- */
     /* The element's header is readable, so a tag peek succeeds, but the content does not fit.  */
     /* The parser must report a structural error rather than loop without advancing.            */
@@ -5399,11 +5553,20 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(SSFX509Parse(_utTestCertDER, sizeof(_utTestCertDER), &issuer) == true);
         SSF_ASSERT(SSFX509CheckSKIDAKID(&parsed, &issuer) == true);
 
-        /* Name Constraints body that is not a SEQUENCE: present with no subtrees */
-        _RAW_EXT_PARSE(ncOid, ncEmptyOctets, true);
-        SSF_ASSERT((parsed.hasNameConstraints == true) && (parsed.permittedLen == 0u));
-        SSF_ASSERT(parsed.excludedLen == 0u);
         #undef _RAW_EXT_PARSE
+
+        /* Name Constraints body that is not a SEQUENCE fails the parse (AUDIT X509-3): */
+        /* unconstrained is not a fail-closed default for NC */
+        _utGenBaseParams(&p, serial, pubKey, 65u);
+        p.addRawExt = true;
+        p.rawExtOid = ncOid;
+        p.rawExtOidLen = sizeof(ncOid);
+        p.rawExtValue = ncEmptyOctets;
+        p.rawExtValueLen = sizeof(ncEmptyOctets);
+        p.rawExtCritical = true;
+        (void)SSFX509EncodeCert(out, sizeof(out), &p, fakeSig, sizeof(fakeSig), &n);
+        SSF_ASSERT(n != 0u);
+        SSF_ASSERT(SSFX509Parse(out, n, &parsed) == false);
 
         /* A CA whose Basic Constraints body is malformed cannot issue: the chain is rejected */
         SSF_ASSERT(SSFECDSAKeyGen(SSF_EC_CURVE_P256, caPriv, sizeof(caPriv), caPub, sizeof(caPub),

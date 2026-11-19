@@ -497,57 +497,92 @@ static bool _SSFX509ParseExtensions(const SSFASN1Cursor_t *extsCursor, SSFX509Ce
             /* NameConstraints { permittedSubtrees [0], excludedSubtrees [1] }, RFC 5280 4.2.1.10 */
             SSFASN1Cursor_t ncCursor = { extValue, extValueLen };
             SSFASN1Cursor_t ncInner;
+            SSFASN1Cursor_t ncAfter;
+            uint8_t subtreeIdx;
+
             cert->hasNameConstraints = true;
-            if (SSFASN1DecOpenConstructed(&ncCursor, SSF_ASN1_TAG_SEQUENCE,
-                                          &ncInner, &ncCursor))
+
+            /* Is the body exactly one non-empty SEQUENCE (AUDIT X509-3)? */
+            if ((!SSFASN1DecOpenConstructed(&ncCursor, SSF_ASN1_TAG_SEQUENCE, &ncInner,
+                                            &ncAfter)) || (!SSFASN1DecIsEmpty(&ncAfter)) ||
+                (SSFASN1DecIsEmpty(&ncInner)))
             {
-                uint8_t subtreeIdx;
-                for (subtreeIdx = 0; subtreeIdx < 2u; subtreeIdx++)
+                /* No, constraints that cannot be read must not be ignored */
+                return false;
+            }
+            /* Yes, read permittedSubtrees [0] then excludedSubtrees [1] */
+
+            for (subtreeIdx = 0; subtreeIdx < 2u; subtreeIdx++)
+            {
+                SSFASN1Cursor_t subtreesInner;
+                uint16_t expectTag = (subtreeIdx == 0u) ?
+                    (uint16_t)(SSF_ASN1_CONTEXT_EXPLICIT(0)) :
+                    (uint16_t)(SSF_ASN1_CONTEXT_EXPLICIT(1));
+                SSFX509NameConstraint_t *dest = (subtreeIdx == 0u) ?
+                    cert->permittedSubtrees : cert->excludedSubtrees;
+                uint8_t *destLen = (subtreeIdx == 0u) ?
+                    &cert->permittedLen : &cert->excludedLen;
+
+                /* Is this subtree list next? */
+                if ((SSFASN1DecIsEmpty(&ncInner)) || (!SSFASN1DecPeekTag(&ncInner, &tag)) ||
+                    (tag != expectTag))
                 {
-                    SSFASN1Cursor_t subtreesOuter;
-                    SSFASN1Cursor_t subtreesInner;
-                    uint16_t expectTag = (subtreeIdx == 0u) ?
-                        (uint16_t)(SSF_ASN1_CONTEXT_EXPLICIT(0)) :
-                        (uint16_t)(SSF_ASN1_CONTEXT_EXPLICIT(1));
-                    SSFX509NameConstraint_t *dest = (subtreeIdx == 0u) ?
-                        cert->permittedSubtrees : cert->excludedSubtrees;
-                    uint8_t *destLen = (subtreeIdx == 0u) ?
-                        &cert->permittedLen : &cert->excludedLen;
+                    /* No, it is absent; anything left over is rejected below */
+                    continue;
+                }
+                /* Yes, is it a well-formed, non-empty GeneralSubtrees (SIZE (1..MAX))? */
+                if ((!SSFASN1DecOpenConstructed(&ncInner, expectTag, &subtreesInner,
+                                                &ncInner)) || (SSFASN1DecIsEmpty(&subtreesInner)))
+                {
+                    /* No */
+                    return false;
+                }
+                /* Yes */
 
-                    if (SSFASN1DecIsEmpty(&ncInner)) break;
-                    if (!SSFASN1DecPeekTag(&ncInner, &tag)) break;
-                    if (tag != expectTag) continue;
-                    if (!SSFASN1DecOpenConstructed(&ncInner, expectTag, &subtreesOuter,
-                                                   &ncInner)) break;
+                while (!SSFASN1DecIsEmpty(&subtreesInner))
+                {
+                    SSFASN1Cursor_t gsInner;
+                    uint16_t gnTag;
+                    const uint8_t *gnVal;
+                    uint32_t gnValLen;
 
-                    /* subtreesOuter is already the implicit SEQUENCE content (GeneralSubtree*) */
-                    subtreesInner = subtreesOuter;
-                    while (!SSFASN1DecIsEmpty(&subtreesInner) &&
-                           *destLen < SSF_X509_CONFIG_MAX_NAME_CONSTRAINTS)
+                    /* Is the GeneralSubtree a SEQUENCE that starts with a GeneralName? */
+                    if ((!SSFASN1DecOpenConstructed(&subtreesInner, SSF_ASN1_TAG_SEQUENCE,
+                                                    &gsInner, &subtreesInner)) ||
+                        (!SSFASN1DecGetTLV(&gsInner, &gnTag, &gnVal, &gnValLen, &gsInner)))
                     {
-                        SSFASN1Cursor_t gsInner;
-                        uint16_t gnTag;
-                        const uint8_t *gnVal;
-                        uint32_t gnValLen;
-
-                        if (!SSFASN1DecOpenConstructed(&subtreesInner, SSF_ASN1_TAG_SEQUENCE,
-                                                        &gsInner, &subtreesInner)) break;
-                        if (!SSFASN1DecPeekTag(&gsInner, &gnTag)) continue;
-                        if (!SSFASN1DecGetTLV(&gsInner, &gnTag, &gnVal, &gnValLen,
-                                               &gsInner)) continue;
-
-                        /* Only [2] dNSName (0x82) and [7] iPAddress (0x87) subtrees are enforced */
-                        if (gnTag == 0x82u || gnTag == 0x87u)
-                        {
-                            dest[*destLen].type = (gnTag == 0x82u) ? SSF_X509_SAN_DNS :
-                                                                      SSF_X509_SAN_IP;
-                            dest[*destLen].val = gnVal;
-                            dest[*destLen].valLen = gnValLen;
-                            (*destLen)++;
-                        }
+                        /* No, a subtree that cannot be read must not be dropped */
+                        return false;
                     }
+                    /* Yes */
+
+                    /* Is it a dNSName [2] or iPAddress [7], the forms that are enforced? */
+                    if ((gnTag == 0x82u) || (gnTag == 0x87u))
+                    {
+                        /* Yes, is there room to keep it? */
+                        if (*destLen >= SSF_X509_CONFIG_MAX_NAME_CONSTRAINTS)
+                        {
+                            /* No, dropping it would loosen the constraint */
+                            return false;
+                        }
+                        /* Yes */
+                        dest[*destLen].type = (gnTag == 0x82u) ? SSF_X509_SAN_DNS :
+                                                                  SSF_X509_SAN_IP;
+                        dest[*destLen].val = gnVal;
+                        dest[*destLen].valLen = gnValLen;
+                        (*destLen)++;
+                    }
+                    /* No, other name forms are not enforced (AUDIT X509-4) */
                 }
             }
+
+            /* Is anything left after the subtree lists (unknown or out-of-order field)? */
+            if (!SSFASN1DecIsEmpty(&ncInner))
+            {
+                /* Yes */
+                return false;
+            }
+            /* No, the whole extension was read */
         }
     }
     return true;

@@ -111,6 +111,11 @@ X.509 v3 certificate support per RFC 5280, built on [`ssfasn1`](ssfasn1.md):
   Constraints value that is not a SEQUENCE) does not fail the parse; the extension's `has*` flag
   is set and its decoded fields keep their fail-closed defaults, so such a certificate cannot act
   as a CA, carries no key usage bits, no key purposes, no SANs, and no key identifier.
+  Name Constraints are the exception, because "no constraints" is not a fail-closed default: a
+  Name Constraints value that is not exactly one non-empty SEQUENCE of an optional non-empty
+  `[0]` followed by an optional non-empty `[1]`, or whose GeneralSubtree or GeneralName does not
+  decode, fails the parse. GeneralName forms other than `dNSName` and `iPAddress` are still
+  skipped (not enforced).
 - **Serial numbers** must be 1–20 bytes and non-negative (RFC 5280 §4.1.2.2). A zero serial is
   accepted, as the RFC asks verifiers to tolerate it.
 - **Signature algorithm consistency.** Both the TBS `signature` AlgorithmIdentifier and the outer
@@ -213,7 +218,7 @@ Options live in [`_opt/ssfx509_opt.h`](../_opt/ssfx509_opt.h).
 | <a id="cfg-max-cert-size"></a>`SSF_X509_CONFIG_MAX_CERT_SIZE` | `4096` | Largest DER TBSCertificate or Certificate [`SSFX509EncodeTBS()`](#ssfx509encodetbs) / [`SSFX509EncodeCert()`](#ssfx509encodecert) will produce. Both the measuring and the writing call return `0` when the result would exceed it. No buffers are sized from it. |
 | <a id="cfg-max-chain-depth"></a>`SSF_X509_CONFIG_MAX_CHAIN_DEPTH` | `8` | Maximum `chainLen` accepted by [`SSFX509VerifyChain()`](#ssfx509verifychain) (leaf plus intermediates). Sizes the on-stack array of parsed certificates. |
 | <a id="cfg-max-extensions"></a>`SSF_X509_CONFIG_MAX_EXTENSIONS` | `16` | Number of extension records retained in `SSFX509Cert_t.exts[]`. A certificate with more extensions fails to parse, so the critical-extension and duplicate checks always see every extension. Raise it if a deployment's certificates legitimately carry more. |
-| <a id="cfg-max-name-constraints"></a>`SSF_X509_CONFIG_MAX_NAME_CONSTRAINTS` | `8` | Number of permitted subtrees and, separately, excluded subtrees retained per CA certificate. Excess subtrees are dropped. |
+| <a id="cfg-max-name-constraints"></a>`SSF_X509_CONFIG_MAX_NAME_CONSTRAINTS` | `8` | Number of `dNSName` / `iPAddress` permitted subtrees and, separately, excluded subtrees retained per CA certificate. A certificate with more fails to parse, because dropping an exclusion would loosen the constraint. Raise it if a deployment's CAs legitimately carry more. |
 | <a id="cfg-max-san-entries"></a>`SSF_X509_CONFIG_MAX_SAN_ENTRIES` | `8` | Number of Subject Alternative Name entries retained in `SSFX509Cert_t.san[]`. Excess entries are dropped and cannot match a hostname. |
 
 The unit-test entry point is gated by `SSF_CONFIG_X509_UNIT_TEST` in `ssfport.h`.

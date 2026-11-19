@@ -275,7 +275,7 @@ ASN1-8  Low  FIXED (2026-11-18)  [demonstrated]
   Options:   (1) Fix the .md to say these are DBC traps, and add a DBC check that padding bits
              are zero (recommended)  (2) Return false instead of trapping.
 
-ASN1-9  Low  OPEN  [demonstrated]
+ASN1-9  Low  FIXED (2026-11-18)  [demonstrated]
   Location:  ssfasn1.c:689-708 (_SSFASN1TagFieldSize/_SSFASN1WriteTagField), 711-734, 900-905,
              1077-1108
   Problem:   Encoders never validate the uint16_t tag. With low 5 bits 0x1F and an extension
@@ -293,7 +293,7 @@ ASN1-9  Low  OPEN  [demonstrated]
              for the 0x1F form) to every encoder, plus the string-tag check in EncString
              (recommended)  (2) Document the restriction.
 
-ASN1-10  Low  OPEN  [demonstrated]
+ASN1-10  Low  FIXED (2026-11-18)  [demonstrated]
   Location:  ssfasn1.c:398-421 (SSFASN1DecGetString)
   Problem:   String bodies are not validated against their tag. Embedded NULs pass in
              UTF8/IA5/Printable. PrintableString accepts characters outside its set.
@@ -1557,3 +1557,22 @@ CHANGE LOG
               Ed25519 assertions ran only after the fix. GREEN: ssfx509, ssfcms, ssfasn1,
               ssfstr, ssfrsa, ssfecdsa, ssfed25519, ssfbase64url, ssfmatch, and the non-RSA /
               ECDSA / Ed25519 set under ASan + UBSan (unit test flags restored).
+  2026-11-18  Low batch 3 (Jim: "Do Batch 3"): ASN1-9 and ASN1-10 FIXED (the optional
+              PrintableString character-set check left out, as proposed).
+              - ASN1-9: new private _SSFASN1IsEncodableTag (single byte other than 0x00 with a
+                zero high byte, or 0x1F with an extension byte of 31..127); SSFASN1EncTagLen and
+                SSFASN1EncWrap SSF_REQUIRE it. New private _SSFASN1IsStringTag;
+                SSFASN1EncString SSF_REQUIREs it (the .md already said "must be"). All in-tree
+                callers pass valid tags (SEQUENCE, SET, [0], [1], 0x80, string tags).
+              - ASN1-10: SSFASN1DecGetString (now using _SSFASN1IsStringTag) returns false for
+                an odd-length BMPString, a UniversalString length not a multiple of 4, and a NUL
+                in a UTF-8 / Printable / IA5 / T61 body. ssfx509 already treats a DN attribute
+                that fails GetString as unnamed, so such names are simply not exposed.
+              ssfasn1.md documents both. Tests: "AUDIT ASN1-9" (SEQUENCE and the two-byte DATE
+              tag encode; 0x001F, 0x801F, 0x0530, 0x0000 trap in EncTagLen, 0x0530 in EncWrap,
+              OCTET STRING in EncString) and "AUDIT ASN1-10" (six bad bodies rejected, three
+              good ones accepted with the right length and tag) in ssfasn1_ut.c. RED:
+              ssfasn1_ut.c:107 (0x001F did not trap); the ASN1-10 assertions follow it in the
+              same run and were not separately shown failing first. GREEN: ssfasn1, ssfx509,
+              ssfcms, ssfrsa, ssfecdsa, ssfbase64url, ssfmatch, and the non-RSA / ECDSA set
+              under ASan + UBSan (unit test flags restored).

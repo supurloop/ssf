@@ -97,6 +97,61 @@ void SSFASN1UnitTest(void)
         SSF_ASSERT(val == 0xDEADBEEFCAFEull);
     }
 
+    /* ---- AUDIT ASN1-9: encoders accept only tags they can encode as decodable DER ---- */
+    {
+        static const uint8_t ab[] = { 'a', 'b' };
+
+        SSF_ASSERT(SSFASN1EncTagLen(buf, sizeof(buf), SSF_ASN1_TAG_SEQUENCE, 0u, &len) == true);
+        SSF_ASSERT(SSFASN1EncTagLen(buf, sizeof(buf), SSF_ASN1_TAG_DATE, 0u, &len) == true);
+        SSF_ASSERT((len == 3u) && (buf[0] == 0x1Fu) && (buf[1] == 0x1Fu));
+        SSF_ASSERT_TEST(SSFASN1EncTagLen(buf, sizeof(buf), 0x001Fu, 0u, &len));
+        SSF_ASSERT_TEST(SSFASN1EncTagLen(buf, sizeof(buf), 0x801Fu, 0u, &len));
+        SSF_ASSERT_TEST(SSFASN1EncTagLen(buf, sizeof(buf), 0x0530u, 0u, &len));
+        SSF_ASSERT_TEST(SSFASN1EncTagLen(buf, sizeof(buf), 0x0000u, 0u, &len));
+        SSF_ASSERT_TEST(SSFASN1EncWrap(buf, sizeof(buf), 0x0530u, ab, sizeof(ab), &len));
+        SSF_ASSERT(SSFASN1EncString(buf, sizeof(buf), SSF_ASN1_TAG_UTF8_STRING, ab, sizeof(ab),
+                                    &len) == true);
+        SSF_ASSERT_TEST(SSFASN1EncString(buf, sizeof(buf), SSF_ASN1_TAG_OCTET_STRING, ab,
+                                         sizeof(ab), &len));
+    }
+
+    /* ---- AUDIT ASN1-10: string bodies must fit their type ---- */
+    {
+        static const uint8_t utf8Nul[] = { 0x0Cu, 0x03u, 'a', 0x00u, 'b' };
+        static const uint8_t printNul[] = { 0x13u, 0x02u, 'a', 0x00u };
+        static const uint8_t ia5Nul[] = { 0x16u, 0x02u, 0x00u, 'b' };
+        static const uint8_t t61Nul[] = { 0x14u, 0x01u, 0x00u };
+        static const uint8_t bmpOdd[] = { 0x1Eu, 0x03u, 0x00u, 'A', 0x00u };
+        static const uint8_t univBad[] = { 0x1Cu, 0x06u, 0x00u, 0x00u, 0x00u, 'A', 0x00u, 0x00u };
+        static const uint8_t utf8Ok[] = { 0x0Cu, 0x02u, 'a', 'b' };
+        static const uint8_t bmpOk[] = { 0x1Eu, 0x02u, 0x00u, 'A' };
+        static const uint8_t univOk[] = { 0x1Cu, 0x04u, 0x00u, 0x00u, 0x00u, 'A' };
+        static const struct { const uint8_t *der; uint32_t len; } bad[] = {
+            { utf8Nul, sizeof(utf8Nul) }, { printNul, sizeof(printNul) },
+            { ia5Nul, sizeof(ia5Nul) }, { t61Nul, sizeof(t61Nul) },
+            { bmpOdd, sizeof(bmpOdd) }, { univBad, sizeof(univBad) }
+        };
+        static const struct { const uint8_t *der; uint32_t len; } good[] = {
+            { utf8Ok, sizeof(utf8Ok) }, { bmpOk, sizeof(bmpOk) }, { univOk, sizeof(univOk) }
+        };
+        const uint8_t *str;
+        uint32_t strLen;
+        uint16_t strTag;
+        uint32_t i;
+
+        for (i = 0; i < (uint32_t)(sizeof(bad) / sizeof(bad[0])); i++)
+        {
+            cursor.buf = bad[i].der; cursor.bufLen = bad[i].len;
+            SSF_ASSERT(SSFASN1DecGetString(&cursor, &str, &strLen, &strTag, &next) == false);
+        }
+        for (i = 0; i < (uint32_t)(sizeof(good) / sizeof(good[0])); i++)
+        {
+            cursor.buf = good[i].der; cursor.bufLen = good[i].len;
+            SSF_ASSERT(SSFASN1DecGetString(&cursor, &str, &strLen, &strTag, &next) == true);
+            SSF_ASSERT((strLen == (good[i].len - 2u)) && (strTag == good[i].der[0]));
+        }
+    }
+
     /* ---- AUDIT ASN1-8 / ASN1-12 / ASN1-13: encoder and decoder contract edges ---- */
     {
         static const uint8_t bits80[] = { 0x80u };

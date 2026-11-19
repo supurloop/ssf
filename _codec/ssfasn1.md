@@ -494,7 +494,10 @@ bool SSFASN1DecGetString(const SSFASN1Cursor_t *cursor, const uint8_t **strOut,
 Decode any of the six string variants permitted by RFC 5280 §4.1.2.4 DirectoryString:
 UTF-8, Printable, IA5, BMP, T61 (TeletexString — legacy), or UniversalString. Returns
 pointer + length into the DER buffer; if `strTagOut != NULL`, also writes which of the
-six tag types matched, so the caller can re-encode in the same type.
+six tag types matched, so the caller can re-encode in the same type. Returns `false` for a
+body its type cannot hold: an odd-length BMPString, a UniversalString whose length is not a
+multiple of 4, or a NUL byte in a UTF-8, Printable, IA5 or T61 string. Character sets (for
+example PrintableString's) and UTF-8 well-formedness are not checked.
 
 <a id="ex-string"></a>
 
@@ -573,7 +576,10 @@ bool SSFASN1EncTagLen(uint8_t *buf, uint32_t bufSize, uint16_t tag, uint32_t con
 ```
 Emit just the tag and length bytes for a TLV whose value the caller will write
 separately. Useful for streaming a long OCTET STRING or BIT STRING out of a stable
-location without first materialising it in `buf`.
+location without first materialising it in `buf`. `tag` (here and in
+[`SSFASN1EncWrap()`](#ssfasn1encwrap)) must be encodable as DER this module decodes: a
+single-byte tag other than `0x00` with a zero high byte, or the `0x1F` high-tag-number form
+with an extension byte of 31–127. Anything else is a caller error (`SSF_REQUIRE`).
 
 <a id="ssfasn1encbool"></a>
 ```c
@@ -649,8 +655,8 @@ bool SSFASN1EncString(uint8_t *buf, uint32_t bufSize, uint16_t strTag, const uin
 ```
 Encode a string under one of the six DirectoryString tag types. `strTag` must be one of
 `SSF_ASN1_TAG_UTF8_STRING`, `_PRINTABLE_STRING`, `_T61_STRING`, `_IA5_STRING`,
-`_UNIVERSAL_STRING`, `_BMP_STRING`. Body bytes are not validated against the tag's
-character class — caller is responsible for that.
+`_UNIVERSAL_STRING`, `_BMP_STRING`; any other tag is a caller error (`SSF_REQUIRE`). Body
+bytes are not validated against the tag's character class — caller is responsible for that.
 
 <a id="ssfasn1encutctime"></a>
 ```c

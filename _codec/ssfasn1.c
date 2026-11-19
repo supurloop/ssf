@@ -34,6 +34,33 @@
 #include "ssfdtime.h"
 
 /* --------------------------------------------------------------------------------------------- */
+/* Returns true if tag encodes as DER this module decodes: single byte, or 1F with 31..127.      */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFASN1IsEncodableTag(uint16_t tag)
+{
+    uint16_t ext = (uint16_t)(tag >> 8);
+
+    /* Is it the high-tag-number form? */
+    if ((tag & 0x1Fu) == 0x1Fu)
+    {
+        /* Yes, its one extension byte must hold a number the single-byte form cannot */
+        return ((ext >= 31u) && (ext <= 127u));
+    }
+    /* No, a single-byte tag other than 0 (end-of-contents) with nothing above it */
+    return ((ext == 0u) && (tag != 0u));
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if tag is one of the six DirectoryString tags SSFASN1 encodes and decodes.       */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFASN1IsStringTag(uint16_t tag)
+{
+    return ((tag == SSF_ASN1_TAG_UTF8_STRING) || (tag == SSF_ASN1_TAG_PRINTABLE_STRING) ||
+            (tag == SSF_ASN1_TAG_IA5_STRING) || (tag == SSF_ASN1_TAG_BMP_STRING) ||
+            (tag == SSF_ASN1_TAG_T61_STRING) || (tag == SSF_ASN1_TAG_UNIVERSAL_STRING));
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Internal: parse tag + length from a DER buffer. Returns total header size (tag + length        */
 /* bytes), or 0 if the buffer is too short or the encoding is invalid.                           */
 /* --------------------------------------------------------------------------------------------- */
@@ -569,15 +596,22 @@ bool SSFASN1DecGetString(const SSFASN1Cursor_t *cursor, const uint8_t **strOut, 
 
     if (!SSFASN1DecGetTLV(cursor, &tag, strOut, strLenOut, &after)) return false;
 
-    /* Accept all string types per RFC 5280 Sec. 4.1.2.4 DirectoryString. New certs SHOULD use */
-    /* UTF-8 / Printable; legacy certs (e.g. early Entrust roots) carry TeletexString or       */
-    /* UniversalString and verifiers MUST handle them.                                          */
-    if (tag != SSF_ASN1_TAG_UTF8_STRING && tag != SSF_ASN1_TAG_PRINTABLE_STRING &&
-        tag != SSF_ASN1_TAG_IA5_STRING && tag != SSF_ASN1_TAG_BMP_STRING &&
-        tag != SSF_ASN1_TAG_T61_STRING && tag != SSF_ASN1_TAG_UNIVERSAL_STRING)
+    /* Is it one of the DirectoryString types (RFC 5280 4.1.2.4, legacy T61 / Universal too)? */
+    if (!_SSFASN1IsStringTag(tag))
     {
+        /* No */
         return false;
     }
+    /* Yes, is the body impossible for its type (AUDIT ASN1-10)? */
+    if (((tag == SSF_ASN1_TAG_BMP_STRING) && ((*strLenOut % 2u) != 0u)) ||
+        ((tag == SSF_ASN1_TAG_UNIVERSAL_STRING) && ((*strLenOut % 4u) != 0u)) ||
+        ((tag != SSF_ASN1_TAG_BMP_STRING) && (tag != SSF_ASN1_TAG_UNIVERSAL_STRING) &&
+         (*strLenOut > 0u) && (memchr(*strOut, 0, *strLenOut) != NULL)))
+    {
+        /* Yes: odd BMP length, Universal length not a multiple of 4, or a NUL in an 8-bit type */
+        return false;
+    }
+    /* No */
     if (strTagOut != NULL) *strTagOut = tag;
     *next = after; /* Advance only on success (AUDIT ASN1-7) */
     return true;
@@ -886,6 +920,7 @@ bool SSFASN1EncTagLen(uint8_t *buf, uint32_t bufSize, uint16_t tag, uint32_t con
     uint32_t headerLen;
 
     SSF_REQUIRE(bytesWritten != NULL);
+    SSF_REQUIRE(_SSFASN1IsEncodableTag(tag));
 
     *bytesWritten = 0;
     tagLen = _SSFASN1TagFieldSize(tag);
@@ -1125,6 +1160,7 @@ bool SSFASN1EncString(uint8_t *buf, uint32_t bufSize, uint16_t strTag, const uin
                       uint32_t strLen, uint32_t *bytesWritten)
 {
     SSF_REQUIRE((str != NULL) || (strLen == 0u));
+    SSF_REQUIRE(_SSFASN1IsStringTag(strTag));
     return SSFASN1EncWrap(buf, bufSize, strTag, str, strLen, bytesWritten);
 }
 
@@ -1307,6 +1343,7 @@ bool SSFASN1EncWrap(uint8_t *buf, uint32_t bufSize, uint16_t tag, const uint8_t 
 
     SSF_REQUIRE((content != NULL) || (contentLen == 0u));
     SSF_REQUIRE(bytesWritten != NULL);
+    SSF_REQUIRE(_SSFASN1IsEncodableTag(tag));
 
     *bytesWritten = 0;
     tagLen = _SSFASN1TagFieldSize(tag);

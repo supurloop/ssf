@@ -66,9 +66,14 @@ X.509 v3 certificate support per RFC 5280, built on [`ssfasn1`](ssfasn1.md):
   last of which satisfies whichever purpose the verifier is checking per RFC 5280 §4.2.1.12. Name
   Constraints are
   read from every certificate but enforced only from intermediates and the trust anchor, and
-  only `dNSName` and `iPAddress` subtrees are kept, up to
+  only `dNSName` and `iPAddress` subtrees are enforced, up to
   [`SSF_X509_CONFIG_MAX_NAME_CONSTRAINTS`](#cfg-max-name-constraints) permitted and the same
-  number of excluded. A `dNSName` constraint may use the leading-dot form (`.example.com`),
+  number of excluded. A constraint on any other name form (`directoryName`, `rfc822Name`, URI,
+  `otherName`, and so on) is recorded but not enforced, so, as RFC 5280 §4.2.1.10 allows, a
+  subordinate certificate carrying an instance of that form is rejected: a non-empty subject DN
+  is a `directoryName` instance, and an `rfc822Name` SAN or an `emailAddress` subject attribute
+  is an `rfc822Name` instance. In practice a CA with a `directoryName` constraint therefore
+  cannot issue certificates that have a subject. A `dNSName` constraint may use the leading-dot form (`.example.com`),
   which matches proper subdomains only, in line with OpenSSL, NSS, and Go. An `iPAddress`
   subtree is matched by address family: a 16-byte (IPv6) permitted subtree never matches a
   4-byte SAN, so a CA that permits only IPv6 space rejects every IPv4 `iPAddress` SAN while

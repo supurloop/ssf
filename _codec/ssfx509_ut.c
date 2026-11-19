@@ -5581,6 +5581,178 @@ void SSFX509UnitTest(void)
         }
     }
 
+    /* ---- AUDIT X509-4: a Name Constraint on a form SSF does not enforce rejects any ---- */
+    /* subordinate that carries an instance of that form (RFC 5280 4.2.1.10 "or reject")   */
+    {
+        static uint8_t caOut[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t leafOut[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t tbsDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t certContent[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t caPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        static uint8_t leafPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        static const uint8_t ncOid[] = { 0x55u, 0x1Du, 0x1Eu };
+        static const uint8_t sanOid[] = { 0x55u, 0x1Du, 0x11u };
+        /* permitted [0] { GeneralSubtree { [4] Name { O=Good } } } */
+        static const uint8_t ncDirGood[] = {
+            0x30u, 0x17u, 0xA0u, 0x15u, 0x30u, 0x13u, 0xA4u, 0x11u,
+            0x30u, 0x0Fu, 0x31u, 0x0Du, 0x30u, 0x0Bu, 0x06u, 0x03u, 0x55u, 0x04u, 0x0Au,
+            0x0Cu, 0x04u, 'G', 'o', 'o', 'd'
+        };
+        /* permitted [0] { GeneralSubtree { [1] rfc822Name "good.com" } } */
+        static const uint8_t ncEmailGood[] = {
+            0x30u, 0x0Eu, 0xA0u, 0x0Cu, 0x30u, 0x0Au, 0x81u, 0x08u,
+            'g', 'o', 'o', 'd', '.', 'c', 'o', 'm'
+        };
+        /* permitted [0] { GeneralSubtree { [6] URI "good.com" } } */
+        static const uint8_t ncUriGood[] = {
+            0x30u, 0x0Eu, 0xA0u, 0x0Cu, 0x30u, 0x0Au, 0x86u, 0x08u,
+            'g', 'o', 'o', 'd', '.', 'c', 'o', 'm'
+        };
+        /* SAN { [1] "x@evil.com" } and SAN { [6] "https://x" } */
+        static const uint8_t sanEmail[] = {
+            0x30u, 0x0Cu, 0x81u, 0x0Au, 'x', '@', 'e', 'v', 'i', 'l', '.', 'c', 'o', 'm'
+        };
+        static const uint8_t sanUri[] = {
+            0x30u, 0x0Bu, 0x86u, 0x09u, 'h', 't', 't', 'p', 's', ':', '/', '/', 'x'
+        };
+        /* RDN CN="cccccccccccccc" and an equal-length RDN emailAddress="x@ev.com" */
+        static const uint8_t rdnCN[] = {
+            0x31u, 0x17u, 0x30u, 0x15u, 0x06u, 0x03u, 0x55u, 0x04u, 0x03u, 0x0Cu, 0x0Eu,
+            'c', 'c', 'c', 'c', 'c', 'c', 'c', 'c', 'c', 'c', 'c', 'c', 'c', 'c'
+        };
+        static const uint8_t rdnEmail[] = {
+            0x31u, 0x17u, 0x30u, 0x15u, 0x06u, 0x09u, 0x2Au, 0x86u, 0x48u, 0x86u, 0xF7u,
+            0x0Du, 0x01u, 0x09u, 0x01u, 0x16u, 0x08u, 'x', '@', 'e', 'v', '.', 'c', 'o', 'm'
+        };
+        static const uint8_t ecdsaSha256Oid[] = {
+            0x2Au, 0x86u, 0x48u, 0xCEu, 0x3Du, 0x04u, 0x03u, 0x02u
+        };
+        static const char *sanGood[] = { "good.com", NULL };
+        uint8_t caPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        uint8_t leafPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        uint8_t tbsHash[SSF_SHA2_256_BYTE_SIZE];
+        uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
+        uint8_t algId[16];
+        size_t caPubLen;
+        size_t leafPubLen;
+        size_t sigLen;
+        uint8_t serial[] = { 0x4Du };
+        SSFX509GenParams_t p;
+        const uint8_t *chain[1];
+        uint32_t chainLen[1];
+        const uint8_t *trust[1];
+        uint32_t trustLen[1];
+        uint32_t caLen;
+        uint32_t leafLen;
+        uint32_t tbsLen;
+        uint32_t algIdLen;
+        uint32_t n;
+        uint32_t w;
+        uint32_t at;
+
+        SSF_ASSERT(SSFECDSAKeyGen(SSF_EC_CURVE_P256, caPriv, sizeof(caPriv), caPub,
+                                  sizeof(caPub), &caPubLen) == true);
+        SSF_ASSERT(SSFECDSAKeyGen(SSF_EC_CURVE_P256, leafPriv, sizeof(leafPriv), leafPub,
+                                  sizeof(leafPub), &leafPubLen) == true);
+
+        /* Anchor "ca" carrying one raw critical Name Constraints body */
+        #define _X5094_ANCHOR(_nc) do { \
+            _utGenBaseParams(&p, serial, caPub, (uint32_t)caPubLen); \
+            p.issuer.cn = "ca"; p.subject.cn = "ca"; \
+            p.addBasicConstraints = true; p.isCA = true; \
+            p.addKeyUsage = true; p.keyUsageBits = SSF_X509_KU_KEY_CERT_SIGN; \
+            p.addRawExt = true; p.rawExtOid = ncOid; p.rawExtOidLen = sizeof(ncOid); \
+            p.rawExtValue = (_nc); p.rawExtValueLen = sizeof(_nc); p.rawExtCritical = true; \
+            caLen = _utSignCert(&p, caPriv, caOut, sizeof(caOut)); \
+            SSF_ASSERT(caLen != 0u); \
+            trust[0] = caOut; trustLen[0] = caLen; \
+        } while (0)
+        /* Code-signing leaf issued by "ca"; the caller sets subject and SANs afterwards */
+        #define _X5094_LEAF_BASE() do { \
+            _utGenBaseParams(&p, serial, leafPub, (uint32_t)leafPubLen); \
+            p.issuer.cn = "ca"; p.subject.cn = NULL; \
+            p.addKeyUsage = true; p.keyUsageBits = SSF_X509_KU_DIGITAL_SIGNATURE; \
+            p.addExtKeyUsage = true; p.ekuCodeSigning = true; \
+        } while (0)
+        #define _X5094_VERIFY(_expect) do { \
+            leafLen = _utSignCert(&p, caPriv, leafOut, sizeof(leafOut)); \
+            SSF_ASSERT(leafLen != 0u); \
+            chain[0] = leafOut; chainLen[0] = leafLen; \
+            SSF_ASSERT(SSFX509VerifyChainPurpose(chain, chainLen, 1u, trust, trustLen, 1u, \
+                                                 SSF_X509_PURPOSE_CODE_SIGNING, NULL, \
+                                                 1800000000ull) == (_expect)); \
+        } while (0)
+
+        /* directoryName constraint: a leaf with a subject is rejected; with none, accepted */
+        _X5094_ANCHOR(ncDirGood);
+        _X5094_LEAF_BASE();
+        p.subject.o = "Evil";
+        p.subject.cn = "evil";
+        _X5094_VERIFY(false);
+        _X5094_LEAF_BASE();
+        p.subject.o = "Good";
+        _X5094_VERIFY(false);
+        _X5094_LEAF_BASE();
+        p.sanDNSNames = sanGood;
+        _X5094_VERIFY(true);
+
+        /* rfc822Name constraint: an email SAN rejects; DNS-only and no subject is accepted */
+        _X5094_ANCHOR(ncEmailGood);
+        _X5094_LEAF_BASE();
+        p.addRawExt = true; p.rawExtOid = sanOid; p.rawExtOidLen = sizeof(sanOid);
+        p.rawExtValue = sanEmail; p.rawExtValueLen = sizeof(sanEmail);
+        _X5094_VERIFY(false);
+        _X5094_LEAF_BASE();
+        p.sanDNSNames = sanGood;
+        _X5094_VERIFY(true);
+
+        /* rfc822Name constraint and an emailAddress attribute in the subject DN: rejected. */
+        /* Encode the leaf TBS with CN="cccccccccccccc", swap that RDN for the equal-length */
+        /* emailAddress RDN, sign the patched TBS and wrap it as a Certificate by hand.     */
+        _X5094_LEAF_BASE();
+        p.subject.cn = "cccccccccccccc";
+        SSF_ASSERT(SSFX509EncodeTBS(tbsDer, sizeof(tbsDer), &p, &tbsLen) == true);
+        SSF_ASSERT(_utFind(tbsDer, tbsLen, rdnCN, sizeof(rdnCN), &at) == true);
+        memcpy(&tbsDer[at], rdnEmail, sizeof(rdnEmail));
+        SSFSHA256(tbsDer, tbsLen, tbsHash, sizeof(tbsHash));
+        SSF_ASSERT(SSFECDSASign(SSF_EC_CURVE_P256, caPriv, 32u, tbsHash, sizeof(tbsHash), sig,
+                                sizeof(sig), &sigLen) == true);
+        SSF_ASSERT(SSFASN1EncOIDRaw(tbsHash, sizeof(tbsHash), ecdsaSha256Oid,
+                                    sizeof(ecdsaSha256Oid), &w) == true);
+        SSF_ASSERT(SSFASN1EncWrap(algId, sizeof(algId), SSF_ASN1_TAG_SEQUENCE, tbsHash, w,
+                                  &algIdLen) == true);
+        memcpy(certContent, tbsDer, tbsLen);
+        n = tbsLen;
+        memcpy(&certContent[n], algId, algIdLen);
+        n += algIdLen;
+        SSF_ASSERT(SSFASN1EncBitString(&certContent[n], sizeof(certContent) - n, sig,
+                                       (uint32_t)sigLen, 0u, &w) == true);
+        n += w;
+        SSF_ASSERT(SSFASN1EncWrap(leafOut, sizeof(leafOut), SSF_ASN1_TAG_SEQUENCE, certContent,
+                                  n, &leafLen) == true);
+        chain[0] = leafOut;
+        chainLen[0] = leafLen;
+        SSF_ASSERT(SSFX509VerifyChainPurpose(chain, chainLen, 1u, trust, trustLen, 1u,
+                                             SSF_X509_PURPOSE_CODE_SIGNING, NULL,
+                                             1800000000ull) == false);
+        /* Control: the unpatched CN leaf, also with a subject, is accepted under the email */
+        /* constraint because it carries no email instance                                 */
+        _X5094_VERIFY(true);
+
+        /* URI constraint: a URI SAN rejects; DNS-only is accepted */
+        _X5094_ANCHOR(ncUriGood);
+        _X5094_LEAF_BASE();
+        p.addRawExt = true; p.rawExtOid = sanOid; p.rawExtOidLen = sizeof(sanOid);
+        p.rawExtValue = sanUri; p.rawExtValueLen = sizeof(sanUri);
+        _X5094_VERIFY(false);
+        _X5094_LEAF_BASE();
+        p.sanDNSNames = sanGood;
+        _X5094_VERIFY(true);
+        #undef _X5094_ANCHOR
+        #undef _X5094_LEAF_BASE
+        #undef _X5094_VERIFY
+    }
+
     /* ---- A SAN GeneralName whose length overruns its SEQUENCE fails to parse ---- */
     /* The element's header is readable, so a tag peek succeeds, but the content does not fit.  */
     /* The parser must report a structural error rather than loop without advancing.            */

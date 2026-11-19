@@ -53,11 +53,11 @@ SUMMARY
   High       4       ASN1-1, X509-1, X509-2, X509-3
   Medium     16      ASN1-2, ASN1-3, ASN1-4, ASN1-5, ASN1-6, ASN1-7, X509-4, X509-5,
                      X509-6, X509-7, X509-8, STR-1, STR-2, STR-3, STR-4, STR-5
-  Low        19      ASN1-8, ASN1-9, ASN1-10, ASN1-11, ASN1-12, ASN1-13, X509-9, X509-10,
-                     X509-11, X509-12, X509-13, X509-14, X509-15, MATCH-1, MATCH-2,
-                     MATCH-3, STR-6, STR-7, STR-8
+  Low        20      ASN1-8, ASN1-9, ASN1-10, ASN1-11, ASN1-12, ASN1-13, X509-9, X509-10,
+                     X509-11, X509-12, X509-13, X509-14, X509-15, X509-16, MATCH-1,
+                     MATCH-2, MATCH-3, STR-6, STR-7, STR-8
 
-  Per module   ssfasn1 13 (1 High, 6 Medium, 6 Low)    ssfx509 15 (3 High, 5 Medium, 7 Low)
+  Per module   ssfasn1 13 (1 High, 6 Medium, 6 Low)    ssfx509 16 (3 High, 5 Medium, 8 Low)
                ssfmatch 3 (3 Low)                      ssfstr 8 (5 Medium, 3 Low)
 
   Memory safety: no out-of-bounds access or UB was found on any hostile-input path (certificate
@@ -510,7 +510,7 @@ X509-3  High  FIXED (2026-11-18)  [demonstrated] [verified 2026-11-18]
              (2) Keep parsing, but add an "ncUnprocessable" flag that the chain verifier
              treats as reject whenever the NC cert is used as an issuer.
 
-X509-4  Medium  OPEN  [demonstrated]
+X509-4  Medium  FIXED (2026-11-18)  [demonstrated]
   Location:  ssfx509.c:539-547 (NC parse keeps only 0x82 / 0x87); 2542-2579
              (_SSFX509NCValidateCert checks SANs only); ssfx509.md:67-70
   Problem:   Constraints on directoryName, rfc822Name, URI, otherName and the like are
@@ -773,6 +773,27 @@ X509-15  Low  OPEN  [reviewed]
   Reach:     Documentation.
   Options:   (1) Fix the header and .md text, and rename or document SSFX509IsECDSA
              (recommended)
+
+X509-16  Low  OPEN  [reviewed]  (found while fixing X509-4, 2026-11-18)
+  Location:  ssfx509.c _SSFX509ParseExtensions (SAN parse), _SSFX509NCValidateCert;
+             ssfx509.md SSF_X509_CONFIG_MAX_SAN_ENTRIES row
+  Problem:   SANs past SSF_X509_CONFIG_MAX_SAN_ENTRIES (8) are dropped at parse time, and the
+             dNSName / iPAddress Name Constraints checks only see the stored entries. A
+             subordinate whose 9th or later SAN falls in an excluded subtree (or outside every
+             permitted subtree) therefore passes the NC check. Same fail-open pattern as
+             X509-3(a). Since X509-4 the dropped entries' forms are counted in sanForms, so
+             unenforced forms cannot hide this way; only DNS / IP subtree matching is affected.
+  Failure:   CA with excluded dNSName evil.com -> leaf with SANs a1..a8.com, evil.com: the
+             leaf passes the NC check.
+  Reach:     A constrained CA (the adversary). Low impact: hostname matching also uses only
+             the stored SANs, so the dropped name cannot be matched for TLS, and code signing
+             does not use SAN names.
+  Evidence:  SAN loop stores while sanLen < SSF_X509_CONFIG_MAX_SAN_ENTRIES and skips the
+             rest ("the entry is dropped as documented"); _SSFX509NCValidateCert iterates
+             subCert->san[0 .. sanLen).
+  Options:   (1) Fail the parse when a certificate has more SANs than fit, as with
+             SSF_X509_CONFIG_MAX_EXTENSIONS (recommended)
+             (2) Run the NC check over the raw SAN extension instead of the stored table.
 
 ----------------------------------------------------------------------------------------------
 Checked, no issue
@@ -1353,3 +1374,23 @@ CHANGE LOG
               not compile before EncUInt existed). GREEN: ssfasn1, ssfx509, ssfcms, ssfrsa,
               ssfecdsa, ssfbase64url, ssfmatch (ASN1, RSA and ECDSA unit tests enabled for the
               run; flags restored).
+  2026-11-18  X509-4 FIXED via option 1 (reject when a constraint cannot be enforced). The NC
+              parser records each context-specific GeneralName form [0]..[8] other than dNSName
+              / iPAddress in the new SSFX509Cert_t.ncUnenforcedForms bitmask (any other tag now
+              fails the parse). The SAN parser records every SAN form present, kept or dropped
+              past SSF_X509_CONFIG_MAX_SAN_ENTRIES, in the new sanForms bitmask, and
+              _SSFX509ParseDN sets the new SSFX509Name_t.hasEmailAddress for an emailAddress
+              attribute. _SSFX509NCValidateCert rejects a subordinate whose forms (SANs, plus
+              directoryName when the subject DN is non-empty and rfc822Name when it has an
+              emailAddress) intersect the constraining certificate's ncUnenforcedForms (RFC 5280
+              4.2.1.10 "process the constraint or reject the certificate"). Consequence,
+              documented in ssfx509.md: a CA with any directoryName constraint cannot issue
+              certificates with a subject. Test block "AUDIT X509-4" in ssfx509_ut.c (anchor with
+              a raw critical NC, code-signing leaf): dirName permitted O=Good rejects O=Evil,CN
+              and O=Good leaves, accepts an empty-subject DNS-SAN leaf; rfc822Name permitted
+              rejects an email SAN leaf and a leaf whose subject has an emailAddress (TBS
+              patched and signed by hand), accepts DNS-only and CN-only leaves; URI permitted
+              rejects a URI SAN leaf, accepts DNS-only. RED: ssfx509_ut.c:5691 (O=Evil leaf
+              accepted under dirName O=Good). GREEN: ssfx509, ssfcms, ssfasn1, ssfecdsa,
+              ssfbase64url, ssfmatch (ASN1 and ECDSA unit tests enabled for the run; flags
+              restored).

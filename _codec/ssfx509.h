@@ -84,6 +84,7 @@ typedef struct SSFX509Name
     uint32_t lLen;
     const uint8_t *raw;            /* Raw DER of the entire Name SEQUENCE */
     uint32_t rawLen;
+    bool hasEmailAddress;          /* emailAddress (1.2.840.113549.1.9.1) attribute present */
 } SSFX509Name_t;
 
 /* Extension */
@@ -164,6 +165,7 @@ typedef struct SSFX509Cert
 
     SSFX509SAN_t san[SSF_X509_CONFIG_MAX_SAN_ENTRIES];
     uint8_t sanLen;
+    uint16_t sanForms;             /* Bit n: a GeneralName [n] SAN is present (every entry) */
 
     const uint8_t *skid;
     uint32_t skidLen;
@@ -176,6 +178,7 @@ typedef struct SSFX509Cert
     uint8_t permittedLen;
     SSFX509NameConstraint_t excludedSubtrees[SSF_X509_CONFIG_MAX_NAME_CONSTRAINTS];
     uint8_t excludedLen;
+    uint16_t ncUnenforcedForms;    /* Bit n: NC constrains form [n], which is not enforced */
 
     /* TBSCertificate raw DER (for signature verification) */
     const uint8_t *tbsRaw;

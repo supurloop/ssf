@@ -58,6 +58,9 @@ void SSFX509SetTraceCtx(void (*fnOpt)(int, int, const char *, void *), void *use
 
 /* DN attribute OIDs (2.5.4.x) */
 static const uint8_t _oidCN[]  = { 0x55u, 0x04u, 0x03u }; /* 2.5.4.3 commonName */
+static const uint8_t _oidEmailAddress[] = {                 /* 1.2.840.113549.1.9.1 */
+    0x2Au, 0x86u, 0x48u, 0x86u, 0xF7u, 0x0Du, 0x01u, 0x09u, 0x01u
+};
 static const uint8_t _oidC[]   = { 0x55u, 0x04u, 0x06u }; /* 2.5.4.6 countryName */
 static const uint8_t _oidL[]   = { 0x55u, 0x04u, 0x07u }; /* 2.5.4.7 localityName */
 static const uint8_t _oidST[]  = { 0x55u, 0x04u, 0x08u }; /* 2.5.4.8 stateOrProvinceName */
@@ -262,6 +265,14 @@ static bool _SSFX509ParseDN(const SSFASN1Cursor_t *nameCursor, SSFX509Name_t *na
 
             if (!SSFASN1DecGetOIDRaw(&attrInner, &oidRaw, &oidRawLen, &attrInner)) return false;
 
+            /* Is it an emailAddress, an rfc822Name instance for Name Constraints (X509-4)? */
+            if (_SSFX509OIDMatch(oidRaw, oidRawLen, _oidEmailAddress, sizeof(_oidEmailAddress)))
+            {
+                /* Yes, recorded before the value is read so any string type counts */
+                name->hasEmailAddress = true;
+            }
+            /* No */
+
             /* Attribute value is one of the supported string types? */
             if (!SSFASN1DecGetString(&attrInner, &val, &valLen, &strTag, &attrInner))
             {
@@ -418,8 +429,7 @@ static bool _SSFX509ParseExtensions(const SSFASN1Cursor_t *extsCursor, SSFX509Ce
             SSFASN1Cursor_t sanInner;
             if (SSFASN1DecOpenConstructed(&sanCursor, SSF_ASN1_TAG_SEQUENCE, &sanInner, &sanCursor))
             {
-                while (!SSFASN1DecIsEmpty(&sanInner) &&
-                       (cert->sanLen < SSF_X509_CONFIG_MAX_SAN_ENTRIES))
+                while (!SSFASN1DecIsEmpty(&sanInner))
                 {
                     const uint8_t *sanVal;
                     uint32_t sanValLen;
@@ -435,6 +445,17 @@ static bool _SSFX509ParseExtensions(const SSFASN1Cursor_t *extsCursor, SSFX509Ce
 
                     /* Yes, the low tag bits are the GeneralName choice */
                     sanType = tag & 0x1Fu;
+
+                    /* Record every form present, kept or not, for Name Constraints (X509-4) */
+                    if (sanType < 16u) cert->sanForms |= (uint16_t)(1u << sanType);
+
+                    /* Is the SAN table full? */
+                    if (cert->sanLen >= SSF_X509_CONFIG_MAX_SAN_ENTRIES)
+                    {
+                        /* Yes, the entry is dropped as documented */
+                        continue;
+                    }
+                    /* No */
 
                     /* dNSName that is empty or embeds a NUL byte? */
                     if ((sanType == SSF_X509_SAN_DNS) &&
@@ -602,7 +623,17 @@ static bool _SSFX509ParseExtensions(const SSFASN1Cursor_t *extsCursor, SSFX509Ce
                         dest[*destLen].valLen = gnValLen;
                         (*destLen)++;
                     }
-                    /* No, other name forms are not enforced (AUDIT X509-4) */
+                    /* No, is it a context-specific GeneralName choice [0]..[8]? */
+                    else if (((gnTag & 0xC0u) == 0x80u) && ((gnTag & 0x1Fu) <= 8u))
+                    {
+                        /* Yes, not enforced; subordinates using this form are rejected (X509-4) */
+                        cert->ncUnenforcedForms |= (uint16_t)(1u << (gnTag & 0x1Fu));
+                    }
+                    else
+                    {
+                        /* No, not a GeneralName */
+                        return false;
+                    }
                 }
             }
 
@@ -2659,6 +2690,7 @@ static bool _SSFX509NCSubtreeMatch(const SSFX509SAN_t *san, const SSFX509NameCon
 static bool _SSFX509NCValidateCert(const SSFX509Cert_t *subCert, const SSFX509Cert_t *ncCert)
 {
     const SSFX509SAN_t *san;
+    uint16_t forms;
     bool typeHasPermitted;
     bool typeMatched;
     uint8_t s;
@@ -2666,6 +2698,19 @@ static bool _SSFX509NCValidateCert(const SSFX509Cert_t *subCert, const SSFX509Ce
 
     SSF_REQUIRE(subCert != NULL);
     SSF_REQUIRE(ncCert != NULL);
+
+    /* Name forms of subCert that ncCert constrains but this verifier cannot enforce */
+    forms = subCert->sanForms;
+    if (subCert->subject.rawLen > 2u) forms |= (uint16_t)(1u << 4); /* non-empty: directoryName */
+    if (subCert->subject.hasEmailAddress) forms |= (uint16_t)(1u << 1); /* rfc822Name */
+
+    /* Does subCert carry an instance of a constrained form that is not enforced (X509-4)? */
+    if ((ncCert->ncUnenforcedForms & forms) != 0u)
+    {
+        /* Yes, RFC 5280 4.2.1.10: process the constraint or reject the certificate */
+        return false;
+    }
+    /* No */
 
     for (s = 0; s < subCert->sanLen; s++)
     {

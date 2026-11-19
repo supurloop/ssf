@@ -262,7 +262,7 @@ ASN1-7  Medium  FIXED (2026-11-18)  [demonstrated] [verified 2026-11-18]
              typed decoder (recommended). This also makes aliased calls safe.
              (2) Correct the .md, and separately fix ssfx509.c:326 to check the return value.
 
-ASN1-8  Low  OPEN  [demonstrated]
+ASN1-8  Low  FIXED (2026-11-18)  [demonstrated]
   Location:  ssfasn1.c:826-836 (SSFASN1EncBitString); ssfasn1.md:581-582
   Problem:   The .md says an encoder "returns `false` if `unusedBits > 7`". The code traps via
              SSF_REQUIRE. It also traps on bitsLen == 0 with unusedBits != 0, which the .md
@@ -309,7 +309,7 @@ ASN1-10  Low  OPEN  [demonstrated]
              in the 8-bit types. Optionally check the PrintableString set (recommended)
              (2) Document that callers must validate.
 
-ASN1-11  Low  OPEN  [demonstrated]
+ASN1-11  Low  DOC (2026-11-18)  [demonstrated]
   Location:  ssfasn1.c:468-478 (SSFASN1DecGetTime)
   Problem:   GeneralizedTime is accepted for years up to 2049. RFC 5280 4.1.2.5 says
              certificate validity through 2049 MUST be UTCTime. The .md does not mention this
@@ -321,7 +321,7 @@ ASN1-11  Low  OPEN  [demonstrated]
   Options:   (1) Document the leniency (recommended; many verifiers accept this)
              (2) Add a strict-profile option.
 
-ASN1-12  Low  OPEN  [reviewed]
+ASN1-12  Low  FIXED (2026-11-18)  [reviewed]
   Location:  ssfasn1.c:1077-1105 (SSFASN1EncWrap), 861-867, 900-905
   Problem:   If content overlaps buf (for example an in-place wrap, where content was written
              at &buf[headerLen]), the memcpy is undefined behaviour. There is no DBC check
@@ -333,7 +333,7 @@ ASN1-12  Low  OPEN  [reviewed]
   Options:   (1) Use memmove, which makes in-place wrapping legal and useful (recommended)
              (2) Add a DBC no-overlap check and a note in the .md.
 
-ASN1-13  Low  OPEN  [reviewed]
+ASN1-13  Low  FIXED (2026-11-18)  [reviewed]
   Location:  ssfasn1.c:139-156, 159-171, 326-339; ssfasn1.md:277-278, :284-286, :429-432,
              :621-622
   Problem:   Doc drift:
@@ -759,7 +759,7 @@ X509-14  Low  OPEN  [reviewed]
   Options:   (1) Add DBC or false returns for each case, and make the HasExtensions test use
              the same predicates as the emitters (recommended)
 
-X509-15  Low  OPEN  [reviewed]
+X509-15  Low  DOC (2026-11-18)  [reviewed]
   Location:  ssfx509.h:197; ssfx509.c:734-741; ssfx509.md:125-141
   Problem:   Doc drift:
              (a) The header says SSFX509IsValid is "notBefore <= now < notAfter". The code and
@@ -931,7 +931,7 @@ MATCH-2  Low  OPEN  [demonstrated]
              SSF_MATCH_CONFIG_MAX_GLOB_WILDCARDS (recommended)
              (2) Keep it, and add an explicit subject-length bound to the .md guidance.
 
-MATCH-3  Low  OPEN  [demonstrated]
+MATCH-3  Low  DOC (2026-11-18)  [demonstrated]
   Location:  ssfmatch.md:24-26 (Notes, case folding); ssfmatch.c:88-101 (glob '*')
   Problem:   The .md says that ASCII-only folding is "the right behavior for ... DNS labels".
              That invites SSFMatchGlobI for certificate or hostname wildcards. Glob '*' matches
@@ -1142,7 +1142,7 @@ STR-6  Low  FIXED (2026-11-18)  [demonstrated]
   Options:   (1) Set *matchStrOptOut = NULL once at entry (recommended). (2) Replace line 262
              with a break.
 
-STR-7  Low  OPEN  [demonstrated]
+STR-7  Low  FIXED (2026-11-18)  [demonstrated]
   Location:  _codec/ssfstr.c:118, 144 (SSFStrCat, SSFStrCpy); ssfstr.md
   Problem:   Overlapping source and destination reach memcpy, which is UB. The .md does not
              forbid overlap, and there is no DBC check. SSFStrCpy(b, n, &l, b+1, n-1), a left
@@ -1155,7 +1155,7 @@ STR-7  Low  OPEN  [demonstrated]
              removes the UB). (2) Document "must not overlap" and add an SSF_REQUIRE
              range-disjoint check.
 
-STR-8  Low  OPEN  [demonstrated]
+STR-8  Low  DOC (2026-11-18)  [demonstrated]
   Location:  _codec/ssfstr.c:57-93, 217-271; ssfstr.md:82, 123, 297-307
   Problem:   Minor doc drift:
              (a) SSFStrIsValid(NULL, n) returns false. The .md says cstr "Must not be NULL",
@@ -1483,3 +1483,36 @@ CHANGE LOG
               to parse; { cA TRUE, pathLen 0 } -> isCA, pathLen 0; { cA TRUE } -> isCA, pathLen
               -1; {} -> not a CA. RED: ssfx509_ut.c:5461 (trailing data parsed). GREEN: ssfx509,
               ssfcms, ssfbase64url, ssfmatch (default set).
+  2026-11-18  Low batch 1 (Jim: "Do batch 1"): ASN1-8, ASN1-12, ASN1-13, STR-7 FIXED; ASN1-11,
+              STR-8, MATCH-3, X509-15 DOC.
+              - ASN1-8: SSFASN1EncBitString SSF_REQUIREs zero padding bits (checked after the size
+                guards so the existing overflow tests with a 1-byte stub stay in bounds);
+                ssfasn1.md now says bad unusedBits / padding are DBC traps, not false returns.
+              - ASN1-12: SSFASN1EncWrap uses memmove and moves the content before writing the
+                header. The new in-place test showed the old order was also wrong, not only the
+                memcpy: the header overwrote the first content byte when content sat in buf.
+                ssfasn1.md documents that content may overlap buf.
+              - ASN1-13: OpenConstructed SSF_REQUIREs a constructed expectedTag (no caller passes
+                a primitive one); _SSFASN1ParseTL rejects tag 0x00 (EOC), so GetTLV, PeekTag and
+                Skip return false on it. .md corrected for OpenConstructed, PeekTag (true does
+                not mean the content fits; kept as documented behaviour rather than changed, to
+                avoid turning "malformed" into "absent" at optional-field callers), GetOID
+                (oidArcsSize >= 2 is required), EncUTCTime (1970-2049) and GetTLV (tag 0).
+              - STR-7: SSFStrCpy / SSFStrCat use memmove; ssfstr.md allows overlap.
+              - ASN1-11: ssfasn1.md documents GeneralizedTime acceptance for years before 2050.
+              - STR-8: ssfstr.md documents SSFStrIsValid(NULL) -> false, SSFStrLen leaving
+                *cstrLenOut == cstrSize on false, and SSFStrStr returning false for an empty
+                substr (and clearing the match on every false). (d) was resolved by the
+                SSFStrTok rework.
+              - MATCH-3: ssfmatch.md warns that glob '*' crosses '.' and matches empty, and must
+                not be used for certificate wildcards.
+              - X509-15: ssfx509.h IsValid comment now inclusive; SSFX509IsECDSA documented as
+                SHA-256 only (not renamed, to avoid an API change); ssfx509.md "Verification
+                order" rewritten to the code's actual order. (d) was resolved by ASN1-3.
+              Tests: "AUDIT ASN1-8 / ASN1-12 / ASN1-13" in ssfasn1_ut.c (padding-bit and
+              unusedBits 8 traps, an in-place EncWrap producing 30 03 02 01 01, OpenConstructed
+              with INTEGER traps, 00 00 rejected by GetTLV / PeekTag / Skip) and "AUDIT STR-7" in
+              ssfstr_ut.c (in-place left shift via SSFStrCpy). RED: ssfasn1_ut.c:114 (padding
+              trap missing); ASan memcpy-param-overlap in SSFStrCpy. GREEN: ssfasn1, ssfstr,
+              ssfx509, ssfcms, ssfrsa, ssfecdsa, ssfbase64url, ssfmatch, and the same set except
+              RSA / ECDSA under ASan + UBSan (unit test flags restored).

@@ -80,7 +80,7 @@ validate externally-sourced buffers before passing them to other `SSFStr` functi
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
-| `cstr` | in | [`SSFCStrIn_t`](#type-ssfcstrin-t) | Pointer to the buffer to validate. Must not be `NULL`. |
+| `cstr` | in | [`SSFCStrIn_t`](#type-ssfcstrin-t) | Pointer to the buffer to validate. `NULL` is allowed and returns `false`. |
 | `cstrSize` | in | `size_t` | Total allocated size of the buffer in bytes. |
 
 **Returns:** `true` if a null terminator is found within `cstrSize` bytes; `false` otherwise.
@@ -121,7 +121,7 @@ because it will not read past the declared buffer boundary.
 | `cstrSize` | in | `size_t` | Total allocated size of the buffer containing `cstr`. |
 | `cstrLenOut` | out | `size_t *` | Receives the string length (number of characters excluding the null terminator). Must not be `NULL`. |
 
-**Returns:** `true` if a null terminator was found within `cstrSize` bytes and `*cstrLenOut` was set; `false` if no null terminator exists within the buffer.
+**Returns:** `true` if a null terminator was found within `cstrSize` bytes and `*cstrLenOut` was set; `false` if no null terminator exists within the buffer, in which case `*cstrLenOut` is left equal to `cstrSize`.
 
 <a id="ex-len"></a>
 
@@ -158,7 +158,7 @@ null terminator, and it returns `false` rather than silently truncating.
 | `cstrSrc` | in | [`SSFCStrIn_t`](#type-ssfcstrin-t) | Source null-terminated string to copy. Must not be `NULL`. |
 | `cstrSrcSize` | in | `size_t` | Total allocated size of `cstrSrc` buffer. Used for bounds validation of the source. |
 
-**Returns:** `true` if the copy succeeded and `cstrDstOut` is null-terminated; `false` if `cstrDstOutSize` is too small to hold the source string and its null terminator.
+**Returns:** `true` if the copy succeeded and `cstrDstOut` is null-terminated; `false` if `cstrDstOutSize` is too small to hold the source string and its null terminator. `cstrSrc` may overlap `cstrDstOut` (for example, shifting a string left in place).
 
 <a id="ex-cpy"></a>
 
@@ -201,7 +201,7 @@ null-terminates on success. Returns `false` rather than silently truncating.
 | `cstrSrc` | in | [`SSFCStrIn_t`](#type-ssfcstrin-t) | Source null-terminated string to append. Must not be `NULL`. |
 | `cstrSrcSize` | in | `size_t` | Total allocated size of `cstrSrc` buffer. |
 
-**Returns:** `true` if the concatenation succeeded and `cstrDstOut` is null-terminated; `false` if the combined result would not fit in `cstrDstOut`.
+**Returns:** `true` if the concatenation succeeded and `cstrDstOut` is null-terminated; `false` if the combined result would not fit in `cstrDstOut`. `cstrSrc` may overlap `cstrDstOut`.
 
 <a id="ex-cat"></a>
 
@@ -305,7 +305,7 @@ Searches for the first occurrence of `substr` within `cstr`. Bounded equivalent 
 | `substr` | in | [`SSFCStrIn_t`](#type-ssfcstrin-t) | Substring to search for. Must not be `NULL`. |
 | `substrSize` | in | `size_t` | Total allocated size of `substr` buffer. |
 
-**Returns:** `true` if `substr` is found within `cstr`; `false` if not found or either string is invalid.
+**Returns:** `true` if `substr` is found within `cstr`; `false` if not found or either string is invalid. Unlike `strstr()`, an empty `substr` (`""`) is never found and returns `false`. On every `false` return `*matchStrOptOut` is set to `NULL`.
 
 <a id="ex-str"></a>
 

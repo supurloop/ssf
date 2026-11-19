@@ -24,6 +24,10 @@ Every function operates on caller-owned, null-terminated strings and allocates n
 - **Case folding is ASCII-only.** The `I` variants fold `A–Z` to `a–z` and nothing else; they are
   not Unicode-aware. This is the right behavior for HTTP field names (RFC 7230 §3.2) and DNS
   labels, and the wrong behavior for user-visible text.
+- **Glob is not certificate wildcard matching.** Glob `*` matches across `.` and matches the empty
+  string, so `SSFMatchGlobI("*.example.com", ...)` accepts `a.b.example.com` and `.example.com`.
+  RFC 6125 / RFC 9525 wildcards match exactly one non-empty leftmost label; use
+  [`ssfx509`](ssfx509.md)'s hostname matching (`SSFX509VerifyChain()`) for that, never glob.
 - **Glob is a deliberate subset.** [`SSFMatchGlob()`](#ssfmatchglob) and
   [`SSFMatchGlobI()`](#ssfmatchglobi) implement only `*` (any sequence, including empty) and `?`
   (exactly one character) from POSIX.1-2017 §2.13. Bracket expressions `[...]` and `\` escapes are

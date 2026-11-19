@@ -261,7 +261,8 @@ bool SSFASN1DecGetTLV(const SSFASN1Cursor_t *cursor, uint16_t *tagOut,
 ```
 Reads the tag, value pointer, and value length of the TLV at `cursor`. Writes a fresh
 cursor pointing past the entire TLV to `*next`. Returns `false` on malformed DER (truncated
-buffer, length out of range). The returned `*valueOut` points into the source buffer; do
+buffer, length out of range, or tag `0x00`, which is BER end-of-contents and never a DER
+element). The returned `*valueOut` points into the source buffer; do
 not write through it and keep the buffer alive while it is used.
 
 <a id="ssfasn1decopenconstructed"></a>
@@ -277,8 +278,9 @@ Verifies the cursor's current TLV has tag `expectedTag` (typically `SSF_ASN1_TAG
 - `*next` is scoped past the entire element (use this to continue with the constructed
   element's siblings).
 
-Returns `false` if the tag doesn't match, the encoded length runs off the end, or the
-element is primitive instead of constructed.
+Returns `false` if the tag doesn't match or the encoded length runs off the end.
+`expectedTag` must itself be a constructed tag (the `SSF_ASN1_CONSTRUCTED` bit set); passing a
+primitive tag is a caller error (`SSF_REQUIRE`).
 
 <a id="ssfasn1decpeektag"></a>
 ```c
@@ -286,7 +288,9 @@ bool SSFASN1DecPeekTag(const SSFASN1Cursor_t *cursor, uint16_t *tagOut);
 ```
 Reads the tag at the cursor's current position without advancing. Useful for
 OPTIONAL-field branching: peek the tag, decide which decoder to call. Returns `false` if
-the cursor is empty.
+the cursor is empty or the tag and length header cannot be read (including tag `0x00`). It
+does not check that the content fits in the buffer, so `true` does not mean the element
+decodes; always check the result of the decoder or `SSFASN1DecSkip()` that follows.
 
 <a id="ex-peek"></a>
 
@@ -445,7 +449,8 @@ bool SSFASN1DecGetOID(const SSFASN1Cursor_t *cursor, uint32_t *oidArcsOut,
                       uint8_t oidArcsSize, uint8_t *oidArcsLenOut, SSFASN1Cursor_t *next);
 ```
 Decode OID into a caller-supplied `uint32_t[]` array. Writes the actual arc count to
-`*oidArcsLenOut`. Returns `false` if the OID requires more than `oidArcsSize` arcs (the
+`*oidArcsLenOut`. `oidArcsSize` must be at least 2 (`SSF_REQUIRE`), since every OID has two
+leading arcs. Returns `false` if the OID requires more than `oidArcsSize` arcs (the
 caller should retry with a larger buffer or fall back to
 [`SSFASN1DecGetOIDRaw()`](#ssfasn1decgetoidraw)).
 
@@ -514,7 +519,10 @@ strict forms only:
 
 - UTCTime: exactly `YYMMDDHHMMSSZ` (13 bytes). Years `00..49` are interpreted as
   `2000..2049`; years `50..99` as `1950..1999`.
-- GeneralizedTime: exactly `YYYYMMDDHHMMSSZ` (15 bytes).
+- GeneralizedTime: exactly `YYYYMMDDHHMMSSZ` (15 bytes). It is accepted for any year,
+  including years before 2050 that RFC 5280 §4.1.2.5 says certificates MUST encode as UTCTime;
+  this leniency matches common verifiers. Callers that need the strict profile must check the
+  tag themselves.
 
 Pre-1970 dates and any non-conforming format produce `false`.
 
@@ -608,7 +616,9 @@ bool SSFASN1EncBitString(uint8_t *buf, uint32_t bufSize, const uint8_t *bits,
                          uint32_t bitsLen, uint8_t unusedBits, uint32_t *bytesWritten);
 ```
 Encode BIT STRING. `bits` / `bitsLen` is the byte payload; `unusedBits` is the trailing-
-bit-ignore count (`0..7`). Returns `false` if `unusedBits > 7`.
+bit-ignore count (`0..7`). DER requires those trailing bits of the last byte to be zero.
+`unusedBits > 7`, a nonzero `unusedBits` with an empty payload, and set padding bits are caller
+errors (`SSF_REQUIRE`), not `false` returns.
 
 <a id="ssfasn1encoctetstring"></a>
 ```c
@@ -647,8 +657,9 @@ character class — caller is responsible for that.
 bool SSFASN1EncUTCTime(uint8_t *buf, uint32_t bufSize, uint64_t unixSec,
                        uint32_t *bytesWritten);
 ```
-Encode UTCTime as `YYMMDDHHMMSSZ`. Years are formatted in two-digit form per X.509 (years
-1950–2049 only); a `unixSec` outside that range returns `false`.
+Encode UTCTime as `YYMMDDHHMMSSZ`. Years are formatted in two-digit form per X.509. Because
+`unixSec` starts at 1970, the years produced are 1970–2049; a `unixSec` after 2049 returns
+`false`.
 
 <a id="ssfasn1encgeneralizedtime"></a>
 ```c
@@ -680,7 +691,9 @@ bool SSFASN1EncWrap(uint8_t *buf, uint32_t bufSize, uint16_t tag, const uint8_t 
 ```
 Wrap an already-encoded inner blob with a SEQUENCE / SET / context-tagged constructed
 header. Useful as the final step of building a SEQUENCE: encode each child into a
-contiguous buffer, then call `EncWrap` to prepend the sequence T + L.
+contiguous buffer, then call `EncWrap` to prepend the sequence T + L. `content` may overlap
+`buf` (for example, children already encoded at `&buf[n]`): the content is moved into place
+before the header is written.
 
 <a id="ex-encode"></a>
 

@@ -151,7 +151,7 @@ void SSFSHA1Update(SSFSHA1Context_t *ctx, const uint8_t *in, uint32_t inLen)
     SSF_REQUIRE(ctx != NULL);
     SSF_REQUIRE(ctx->magic == SSF_SHA1_CONTEXT_MAGIC);
     SSF_REQUIRE((in != NULL) || (inLen == 0));
-    SSF_REQUIRE((uint64_t)inLen <= (SSF_SHA1_MAX_BYTES - ctx->totalLen)); /* no length wrap */
+    SSF_REQUIRE((uint64_t)inLen <= (SSF_SHA1_MAX_BYTES - ctx->totalLen));
 
     for (i = 0; i < inLen; i++)
     {

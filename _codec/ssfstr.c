@@ -114,7 +114,7 @@ bool SSFStrCat(SSFCStrOut_t cstrDstOut, size_t cstrDstOutSize, size_t *cstrDstOu
     if ((dstLen + srcLen) >= cstrDstOutSize) return false;
 
     /* Perform cat, NULL terminate dst, and report the length if asked (AUDIT STR-3) */
-    memcpy(&cstrDstOut[dstLen], cstrSrc, srcLen);
+    memmove(&cstrDstOut[dstLen], cstrSrc, srcLen); /* src may overlap dst (AUDIT STR-7) */
     cstrDstOut[dstLen + srcLen] = 0;
     if (cstrDstOutLenOutOpt != NULL) *cstrDstOutLenOutOpt = dstLen + srcLen;
 
@@ -139,7 +139,7 @@ bool SSFStrCpy(SSFCStrOut_t cstrDstOut, size_t cstrDstOutSize, size_t *cstrDstOu
     if (srcLen >= cstrDstOutSize) return false;
 
     /* Perform cpy, NULL terminate dst, and report the length if asked (AUDIT STR-3) */
-    memcpy(cstrDstOut, cstrSrc, srcLen);
+    memmove(cstrDstOut, cstrSrc, srcLen); /* src may overlap dst (AUDIT STR-7) */
     cstrDstOut[srcLen] = 0;
     if (cstrDstOutLenOutOpt != NULL) *cstrDstOutLenOutOpt = srcLen;
 

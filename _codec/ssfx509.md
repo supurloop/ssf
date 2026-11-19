@@ -112,7 +112,8 @@ X.509 v3 certificate support per RFC 5280, built on [`ssfasn1`](ssfasn1.md):
   are left to [`SSFX509VerifyChain()`](#ssfx509verifychain). Two values are normalized at parse
   time: a `dNSName` SAN that is empty or contains a NUL byte is dropped, because no hostname can
   match it safely, and a `pathLenConstraint` above 127 is clamped to 127 so it stays a constraint.
-  A `pathLenConstraint` that is not a valid unsigned INTEGER fails the parse, and an RSA-PSS
+  A `pathLenConstraint` that is not a valid unsigned INTEGER, or any data after it or after the
+  Basic Constraints SEQUENCE, fails the parse, and an RSA-PSS
   `saltLength` that is not one fails verification. Likewise, an extension's `critical` flag, the
   Basic Constraints `cA` flag, the Authority Key Identifier `keyIdentifier`, or the EC curve OID
   that is present but does not decode fails the parse rather than reading as absent or false.
@@ -138,23 +139,25 @@ X.509 v3 certificate support per RFC 5280, built on [`ssfasn1`](ssfasn1.md):
   and each `chainDer[i]` must be signed by `chainDer[i + 1]`. The last chain certificate must be
   signed by one of the trust anchors; the anchors themselves are never part of the chain array.
   A self-signed leaf is verified by passing it as a one-element chain **and** as a trust anchor.
-- **Verification order.** The verifier runs these checks and stops at the first failure: parse
-  every chain cert; all certs are v3; TBS and outer signature algorithm identifiers agree,
-  parameters included (§4.1.1.2); every cert is within its validity window at `nowUnixSec`; each
-  `cert[i]` names `cert[i + 1]`'s subject as its issuer (§6.1.3 (a)(4)), is signed by
-  `cert[i + 1]`, and their AKID / SKID agree when both are present; if the leaf has Extended Key
-  Usage it includes `serverAuth` or `anyExtendedKeyUsage`; the last cert's issuer name matches a trust anchor's
-  subject, that anchor is itself valid at `nowUnixSec`, its SKID agrees with the cert's AKID when
-  both are present, and the anchor's key verifies the signature (the anchor that verifies is the
-  one whose path length and Name Constraints are enforced below; other anchors that merely share
-  its subject name, as during a root key rollover, play no part); every intermediate asserts
-  `cA = TRUE` in Basic Constraints and, if Key Usage is present, includes `keyCertSign`; path
-  length constraints hold for intermediates and the trust anchor (RFC 5280 §6.1.4(k)); if the
-  leaf has Extended Key Usage it includes `serverAuth`; Name Constraints of every intermediate
-  and of the trust anchor are satisfied by every subordinate certificate's SANs
-  (§6.1.4(g)); no cert carries a critical extension outside the recognized set (Basic
-  Constraints, Key Usage, SAN, SKID, AKID, EKU, Name Constraints); and finally `hostname` matches
-  a `dNSName` or `iPAddress` SAN of the leaf.
+- **Verification order.** The verifier runs these checks in this order and stops at the first
+  failure: (1) parse every chain cert; all are v3; the TBS and outer signature algorithm
+  identifiers agree, parameters included (§4.1.1.2); every cert is within its validity window at
+  `nowUnixSec`. (2) Each `cert[i]` names `cert[i + 1]`'s subject as its issuer (§6.1.3 (a)(4)),
+  is signed by `cert[i + 1]`, and their AKID / SKID agree when both are present. (3) The last
+  cert's issuer matches a trust anchor's subject, that anchor is valid at `nowUnixSec`, its SKID
+  agrees with the cert's AKID when both are present, and its key verifies the signature (the
+  anchor that verifies is the one whose path length and Name Constraints are enforced below;
+  other anchors that merely share its subject name, as during a root key rollover, play no part).
+  (4) Every intermediate asserts `cA = TRUE` in Basic Constraints, includes `keyCertSign` if Key
+  Usage is present, and is within its own path length; the chain is within the anchor's path
+  length (§6.1.4 (h), (k)). (5) The anchor's Name Constraints are satisfied by every chain cert
+  (§6.1.4 (g)). (6) If the leaf has Extended Key Usage it includes the purpose's key purpose
+  (`serverAuth` or `codeSigning`) or `anyExtendedKeyUsage`; for code signing, a leaf Key Usage,
+  when present, includes `digitalSignature` or `nonRepudiation`. (7) The Name Constraints of every
+  intermediate are satisfied by its subordinates. (8) No cert carries a critical extension
+  outside the recognized set (Basic Constraints, Key Usage, SAN, SKID, AKID, EKU, Name
+  Constraints). (9) For server authentication, the hostname matches a `dNSName` or `iPAddress`
+  SAN of the leaf.
 - **Hostname matching** (RFC 6125 §6.4.3) is case-insensitive and exact against each `dNSName`.
   A single leading `*.` wildcard label is honored only when the hostname's leftmost label is
   non-empty and the base domain after `*.` contains at least one interior `.` (so `*.example.com`

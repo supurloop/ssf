@@ -68,6 +68,13 @@ static uint32_t _SSFASN1ParseTL(const uint8_t *buf, uint32_t bufLen, uint16_t *t
         /* Still need at least one length byte after the two-byte tag. */
         if (pos >= bufLen) return 0;
     }
+    /* Is it tag 0, end-of-contents, which exists only in BER indefinite form (AUDIT ASN1-13)? */
+    if (tag == 0x0000u)
+    {
+        /* Yes, not a DER element */
+        return 0;
+    }
+    /* No */
     *tagOut = tag;
 
     /* Length byte(s) */
@@ -161,6 +168,7 @@ bool SSFASN1DecOpenConstructed(const SSFASN1Cursor_t *cursor, uint16_t expectedT
     uint32_t valueLen;
 
     SSF_REQUIRE(cursor != NULL);
+    SSF_REQUIRE((expectedTag & SSF_ASN1_CONSTRUCTED) != 0u);
     SSF_REQUIRE(inner != NULL);
     SSF_REQUIRE(next != NULL);
 
@@ -936,7 +944,6 @@ bool SSFASN1EncInt(uint8_t *buf, uint32_t bufSize, const uint8_t *intBuf, uint32
 
     if (buf == NULL)
     {
-        /* intBuf must already be a minimal two's-complement body (AUDIT ASN1-6) */
         SSF_REQUIRE(_SSFASN1IsMinimalSigned(intBuf, intLen));
         *bytesWritten = total;
         return true;
@@ -1063,6 +1070,8 @@ bool SSFASN1EncBitString(uint8_t *buf, uint32_t bufSize, const uint8_t *bits, ui
         return true;
     }
     if (bufSize < total) return false;
+    SSF_REQUIRE((bitsLen == 0u) ||
+                ((bits[bitsLen - 1u] & (uint8_t)((1u << unusedBits) - 1u)) == 0u));
 
     buf[0] = SSF_ASN1_TAG_BIT_STRING;
     _SSFASN1WriteLenField(&buf[1], contentLen);
@@ -1312,12 +1321,15 @@ bool SSFASN1EncWrap(uint8_t *buf, uint32_t bufSize, uint16_t tag, const uint8_t 
     }
     if (bufSize < total) return false;
 
-    (void)_SSFASN1WriteTagField(buf, tag);
-    _SSFASN1WriteLenField(&buf[tagLen], contentLen);
+    /* Is there content to place? */
     if (contentLen > 0u)
     {
-        memcpy(&buf[headerLen], content, contentLen);
+        /* Yes, move it before writing the header, since it may already lie in buf (ASN1-12) */
+        memmove(&buf[headerLen], content, contentLen);
     }
+    /* No */
+    (void)_SSFASN1WriteTagField(buf, tag);
+    _SSFASN1WriteLenField(&buf[tagLen], contentLen);
     *bytesWritten = total;
     return true;
 }

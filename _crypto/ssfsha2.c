@@ -272,7 +272,6 @@ void SSFSHA2_32Update(SSFSHA2_32Context_t *context, const uint8_t *in, uint32_t 
 
         memcpy(&context->buf[context->bufLen], in, copyLen);
         context->bufLen += copyLen;
-        /* FIPS 180-4 caps SHA-224/256 messages below 2^64 bits; never wrap (AUDIT SHA2-1) */
         SSF_REQUIRE(context->totalBits <= (UINT64_MAX - (((uint64_t)copyLen) << 3)));
         context->totalBits += ((uint64_t)copyLen) << 3;
         in += copyLen;

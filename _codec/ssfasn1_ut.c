@@ -97,6 +97,40 @@ void SSFASN1UnitTest(void)
         SSF_ASSERT(val == 0xDEADBEEFCAFEull);
     }
 
+    /* ---- AUDIT ASN1-8 / ASN1-12 / ASN1-13: encoder and decoder contract edges ---- */
+    {
+        static const uint8_t bits80[] = { 0x80u };
+        static const uint8_t bitsFF[] = { 0xFFu };
+        static const uint8_t eoc[] = { 0x00u, 0x00u, 0x05u, 0x00u };
+        static const uint8_t intOne[] = { 0x02u, 0x01u, 0x01u };
+        uint8_t wrapBuf[16];
+        SSFASN1Cursor_t inner;
+        const uint8_t *val;
+        uint32_t valLen;
+        uint16_t tag;
+
+        /* ASN1-8: EncBitString traps (DBC) on a bad unused count and on set padding bits */
+        SSF_ASSERT(SSFASN1EncBitString(buf, sizeof(buf), bits80, 1u, 7u, &len) == true);
+        SSF_ASSERT_TEST(SSFASN1EncBitString(buf, sizeof(buf), bitsFF, 1u, 7u, &len));
+        SSF_ASSERT_TEST(SSFASN1EncBitString(buf, sizeof(buf), bits80, 1u, 8u, &len));
+
+        /* ASN1-12: EncWrap may wrap content already placed in buf (in place, overlapping) */
+        memset(wrapBuf, 0, sizeof(wrapBuf));
+        memcpy(&wrapBuf[1], intOne, sizeof(intOne));
+        SSF_ASSERT(SSFASN1EncWrap(wrapBuf, sizeof(wrapBuf), SSF_ASN1_TAG_SEQUENCE, &wrapBuf[1],
+                                  sizeof(intOne), &len) == true);
+        SSF_ASSERT((len == 5u) && (wrapBuf[0] == 0x30u) && (wrapBuf[1] == 0x03u));
+        SSF_ASSERT(memcmp(&wrapBuf[2], intOne, sizeof(intOne)) == 0);
+
+        /* ASN1-13: OpenConstructed requires a constructed tag; tag 0 (EOC) is not an element */
+        cursor.buf = intOne; cursor.bufLen = sizeof(intOne);
+        SSF_ASSERT_TEST(SSFASN1DecOpenConstructed(&cursor, SSF_ASN1_TAG_INTEGER, &inner, &next));
+        cursor.buf = eoc; cursor.bufLen = sizeof(eoc);
+        SSF_ASSERT(SSFASN1DecGetTLV(&cursor, &tag, &val, &valLen, &next) == false);
+        SSF_ASSERT(SSFASN1DecPeekTag(&cursor, &tag) == false);
+        SSF_ASSERT(SSFASN1DecSkip(&cursor, &next) == false);
+    }
+
     /* ---- AUDIT ASN1-6: EncUInt encodes a magnitude; EncInt requires minimal input ---- */
     {
         static const uint8_t m80[] = { 0x80u };

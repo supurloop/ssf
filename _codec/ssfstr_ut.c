@@ -92,6 +92,15 @@ void SSFStrUnitTest(void)
     SSF_ASSERT(memcmp(dst, "1231", 5) == 0);
     SSF_ASSERT(dst[5] == 0x55);
 
+    /* AUDIT STR-7: overlapping source and destination are well defined (memmove) */
+    {
+        char ov[8];
+
+        memcpy(ov, "xabcde", 7);
+        SSF_ASSERT(SSFStrCpy(ov, sizeof(ov), &s1Len, &ov[1], sizeof(ov) - 1u));
+        SSF_ASSERT((s1Len == 5u) && (memcmp(ov, "abcde", 6) == 0));
+    }
+
     /* AUDIT STR-2: SSFStrStr never reads past cstrSize or substrSize, even with no NUL; run */
     /* under ASan to catch the old one-byte over-read. AUDIT STR-6: every false clears the   */
     /* match output.                                                                         */

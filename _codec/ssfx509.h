@@ -197,10 +197,10 @@ typedef struct SSFX509Cert
 /* Parse a DER-encoded X.509 certificate. All pointer fields in cert point into der[].           */
 bool SSFX509Parse(const uint8_t *der, uint32_t derLen, SSFX509Cert_t *cert);
 
-/* Validity check: returns true if notBefore <= nowUnixSec < notAfter. */
+/* Validity check: returns true if notBefore <= nowUnixSec <= notAfter (RFC 5280, inclusive).  */
 bool SSFX509IsValid(const SSFX509Cert_t *cert, uint64_t nowUnixSec);
 
-/* OID comparison helpers */
+/* OID comparison helpers. SSFX509IsECDSA is ecdsa-with-SHA256 only; see IsECDSASHA384.        */
 bool SSFX509IsECDSA(const SSFX509Cert_t *cert);
 bool SSFX509IsRSA(const SSFX509Cert_t *cert);
 bool SSFX509IsP256(const SSFX509Cert_t *cert);

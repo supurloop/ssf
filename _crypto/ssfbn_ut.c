@@ -4096,6 +4096,118 @@ void SSFBNUnitTest(void)
         SSF_ASSERT(_scrubDirty == 0u);
     }
 
+    /* ---- OPTIMIZE EC-O4: P-256 / P-384 reductions correct in 3 passes, results exact ---- */
+    /* The correction ran 23 fixed passes sized for worst-case carries. Oracle: SSFBNMod.      */
+    /* Inputs: every all-zero / all-ones pattern of the upper limbs, with low half zero or all */
+    /* ones (they reach the extreme net carries), plus pseudo-random values of every width.    */
+    {
+        SSFBN_DEFINE(nt, 24u);
+        SSFBN_DEFINE(nr, 12u);
+        SSFBN_DEFINE(nref, 12u);
+        const SSFBN_t *np;
+        uint16_t nLimbs;
+        uint16_t curve;
+        uint32_t pat;
+        uint32_t lcg = 12345u;
+        uint16_t k;
+
+        for (curve = 0u; curve < 2u; curve++)
+        {
+#if SSF_BN_CONFIG_MAX_BITS < 768
+            /* P-384 needs the 768-bit cap */
+            if (curve == 1u) break;
+#endif
+            np = (curve == 0u) ? &SSF_BN_NIST_P256 : &SSF_BN_NIST_P384;
+            nLimbs = np->len;
+            for (pat = 0u; pat < ((uint32_t)2u << nLimbs) + 2000u; pat++)
+            {
+                /* Is this a structured pattern or a pseudo-random input? */
+                nt.len = (uint16_t)(2u * nLimbs);
+                if (pat < ((uint32_t)2u << nLimbs))
+                {
+                    /* Structured: bit k of pat picks upper limb k, the top bit the low half */
+                    for (k = 0u; k < nLimbs; k++)
+                    {
+                        nt.limbs[k] = ((pat >> nLimbs) != 0u) ? 0xFFFFFFFFu : 0u;
+                        nt.limbs[nLimbs + k] = (((pat >> k) & 1u) != 0u) ? 0xFFFFFFFFu : 0u;
+                    }
+                }
+                else
+                {
+                    /* Pseudo-random */
+                    for (k = 0u; k < nt.len; k++)
+                    {
+                        lcg = (lcg * 1664525u) + 1013904223u;
+                        nt.limbs[k] = lcg;
+                    }
+                }
+                _SSFBNNistCorrPasses = 0u;
+                _SSFBNReduceNISTForTest(&nr, &nt, np);
+                SSF_ASSERT(_SSFBNNistCorrPasses == 3u);
+                SSFBNMod(&nref, &nt, np);
+                SSF_ASSERT((nr.len == nLimbs) && (SSFBNCmp(&nr, &nref) == 0));
+            }
+        }
+    }
+
+    /* The second fold only runs when the first crosses 0 or 2^w (net value within about k of an */
+    /* edge, never hit at random). Inputs solved for in Python so that it does, results there.   */
+    {
+        static const SSFBNLimb_t _e0T[16] = {
+            0x560E3EAAu, 0x83CF3687u, 0x16A35571u, 0xC09516C8u,
+            0x7C30C978u, 0x007A4CF9u, 0xAA6C0E51u, 0xD23F0820u,
+            0x00000000u, 0x6513270Eu, 0x00000000u, 0xD23F0824u,
+            0xFFFFFFFFu, 0x00000000u, 0xE8E25D94u, 0x00000000u
+        };
+        static const SSFBNLimb_t _e0R[8] = {
+            0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0x00000001u,
+            0x00000000u, 0x00000000u, 0x00000002u, 0xFFFFFFFEu
+        };
+        static const SSFBNLimb_t _e1T[16] = {
+            0x05F43E7Cu, 0x07B8B571u, 0x6487B144u, 0xB13080D3u,
+            0x4CA8CF8Fu, 0x38B5146Du, 0x42E70233u, 0xA9DA040Bu,
+            0xFFFFFFFFu, 0xA5AA3C81u, 0xFE3B890Bu, 0xFFFFFFFFu,
+            0x48DB40AFu, 0x62C33A4Fu, 0x00000000u, 0xFFFFFFFFu
+        };
+        static const SSFBNLimb_t _e1R[8] = {
+            0x00000001u, 0x00000000u, 0x00000000u, 0xFFFFFFFEu,
+            0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFDu, 0x00000001u
+        };
+        static const SSFBNLimb_t _e2T[24] = {
+            0x7BBF97D9u, 0x84406826u, 0x00000000u, 0x2F479642u,
+            0xC8379970u, 0x00000002u, 0x591CC17Au, 0x0DF33B58u,
+            0x7BBF97D8u, 0x29D52B35u, 0xA594C311u, 0x7BBF97DBu,
+            0x00000000u, 0x00000000u, 0x00000000u, 0x4C780197u,
+            0x00000000u, 0x00000000u, 0x5A6B3CF0u, 0xFFFFFFFFu,
+            0x84406825u, 0x00000000u, 0x00000000u, 0xFFFFFFFFu
+        };
+        static const SSFBNLimb_t _e2R[12] = {
+            0x00000002u, 0xFFFFFFFDu, 0xFFFFFFFFu, 0x00000002u,
+            0x00000003u, 0x00000000u, 0x00000000u, 0x00000000u,
+            0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u
+        };
+        SSFBN_DEFINE(nt, 24u);
+        SSFBN_DEFINE(nr, 12u);
+
+        /* P-256: net carry -1, first fold underflows (e = -1) */
+        nt.len = 16u;
+        memcpy(nt.limbs, _e0T, sizeof(_e0T));
+        _SSFBNReduceNISTForTest(&nr, &nt, &SSF_BN_NIST_P256);
+        SSF_ASSERT((nr.len == 8u) && (memcmp(nr.limbs, _e0R, sizeof(_e0R)) == 0));
+        /* P-256: net carry 1, first fold overflows (e = 1) */
+        nt.len = 16u;
+        memcpy(nt.limbs, _e1T, sizeof(_e1T));
+        _SSFBNReduceNISTForTest(&nr, &nt, &SSF_BN_NIST_P256);
+        SSF_ASSERT((nr.len == 8u) && (memcmp(nr.limbs, _e1R, sizeof(_e1R)) == 0));
+#if SSF_BN_CONFIG_MAX_BITS >= 768
+        /* P-384: net carry 2, first fold overflows (e = 1) */
+        nt.len = 24u;
+        memcpy(nt.limbs, _e2T, sizeof(_e2T));
+        _SSFBNReduceNISTForTest(&nr, &nt, &SSF_BN_NIST_P384);
+        SSF_ASSERT((nr.len == 12u) && (memcmp(nr.limbs, _e2R, sizeof(_e2R)) == 0));
+#endif /* SSF_BN_CONFIG_MAX_BITS >= 768 */
+    }
+
     /* ---- SQ-CT audit: SSFBNSquare's diagonal add runs a fixed a->len carry steps ---- */
     /* Its carry propagation was a while (carry != 0) loop, so the step count, and the time,  */
     /* depended on the operand. SSFBNModSquare runs it on Miller-Rabin's secret candidate.    */
@@ -4113,6 +4225,13 @@ void SSFBNUnitTest(void)
         {
             uint16_t n = sqWidths[wi];
 
+            /* Is this width beyond the build's cap (2n limbs must fit SSF_BN_MAX_LIMBS)? */
+            if ((2u * (uint32_t)n) > (uint32_t)SSF_BN_MAX_LIMBS)
+            {
+                /* Yes, skip it */
+                continue;
+            }
+            /* No */
             for (pat = 0u; pat < 4u; pat++)
             {
                 /* Patterns: zero, all-ones, alternating all-ones / zero limbs, pseudo-random */
@@ -4155,6 +4274,13 @@ void SSFBNUnitTest(void)
         {
             uint16_t n = widths[wi];
 
+            /* Is this modulus wider than the build's Montgomery limit? */
+            if (n > SSF_BN_MAX_MOD_LIMBS)
+            {
+                /* Yes, skip it */
+                continue;
+            }
+            /* No */
             for (seed = 1u; seed <= 4u; seed++)
             {
                 /* Odd m; seeds 1-2 full width, 3-4 a small top limb */

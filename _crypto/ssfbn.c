@@ -74,6 +74,9 @@ uint32_t _SSFBNMontSqrCarryIters = 0u;
 /* Test-only count of SSFBNSquare's diagonal carry steps, fixed at a->len (SQ-CT audit) */
 uint32_t _SSFBNSquareCarryIters = 0u;
 
+/* Test-only count of the P-256 / P-384 reductions' correction passes (OPTIMIZE EC-O4) */
+uint32_t _SSFBNNistCorrPasses = 0u;
+
 /* Test-only count of full-width entry points (ModExpMont[Pub], ModMulCT, ModInvExt, ModMul). */
 uint32_t _SSFBNFullWidthCalls = 0u;
 
@@ -1946,6 +1949,34 @@ bool SSFBNModInvExt(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
     return _SSFBNModInvExtEuclid(r, a, m);
 }
 
+#if SSF_BN_CONFIG_MAX_BITS >= 512
+/* --------------------------------------------------------------------------------------------- */
+/* r += c * k over n limbs, k = 2^(32n) mod p given as coefficients in {-1, 0, 1}; returns      */
+/* the signed carry out. Constant-time; c is the reduction's net carry (OPTIMIZE EC-O4).        */
+/* --------------------------------------------------------------------------------------------- */
+static int32_t _SSFBNNistFold(SSFBNLimb_t *r, const int8_t *coef, uint16_t n, int32_t c)
+{
+    int32_t carry = 0;
+    uint64_t w;
+    uint16_t i;
+
+    SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(coef != NULL);
+    SSF_REQUIRE(n >= 1u);
+    SSF_REQUIRE((c >= -8) && (c <= 8));
+
+    for (i = 0u; i < n; i++)
+    {
+        /* w = v + 64 for v = r[i] + coef * c + carry; the bias keeps every operand unsigned */
+        w = (uint64_t)r[i] + (uint64_t)(uint32_t)(((int32_t)coef[i] * c) + carry + 64);
+        r[i] = (SSFBNLimb_t)(w - 64u);
+        /* floor(v / 2^32) is -1, 0 or 1: no division and no shift of a negative value */
+        carry = (int32_t)((w + 0xFFFFFFC0u) >> 32) - 1;
+    }
+    return carry;
+}
+#endif /* SSF_BN_CONFIG_MAX_BITS >= 512 */
+
 /* --------------------------------------------------------------------------------------------- */
 /* Reduces a 512-bit product (16 limbs) modulo NIST P-256 to 8 limbs. NIST SP 800-186 D.2.1.     */
 /* --------------------------------------------------------------------------------------------- */
@@ -2024,52 +2055,31 @@ static void _SSFBNReduceP256(SSFBN_t *r, const SSFBN_t *t)
     s.limbs[6] = 0; s.limbs[7] = c[13];
     borrow += _SSFBNRawSub(r->limbs, r->limbs, s.limbs, 8);
 
-    /* CT correction loops preserve V mod p; decrement borrow/carry only on boundary crossings. */
-    tmp.len = 8;
+    /* r + (carry - borrow) * 2^256 is the value, carry - borrow in [-4, 6]; 2^256 == k mod p */
     {
-        SSFBNLimb_t mask, lim, addCarry, subBorrow;
-        uint16_t k, j;
+        static const int8_t k256[8] = { 1, 0, 0, -1, 0, 0, -1, 1 };
+        SSFBNLimb_t subBorrow;
+        SSFBNLimb_t mask;
+        int32_t e;
+        uint16_t j;
 
-        /* Loop 1: while (borrow > carry), add p. Decrement borrow ONLY when the add overflows. */
-        for (k = 0; k < 8u; k++)
+        /* k = 2^224 - 2^192 - 2^96 + 1; |net * k| < 2^227, so e is -1, 0 or 1 */
+        _SSF_BN_COUNT(_SSFBNNistCorrPasses);
+        e = _SSFBNNistFold(r->limbs, k256, 8u, (int32_t)carry - (int32_t)borrow);
+
+        /* Folding e cannot carry again: r + e * k stays in [0, 2^256) (OPTIMIZE EC-O4) */
+        _SSF_BN_COUNT(_SSFBNNistCorrPasses);
+        e = _SSFBNNistFold(r->limbs, k256, 8u, e);
+        SSF_ASSERT(e == 0);
+
+        /* r < 2^256 < 2p: one masked conditional subtraction gives [0, p) */
+        _SSF_BN_COUNT(_SSFBNNistCorrPasses);
+        tmp.len = 8;
+        subBorrow = _SSFBNRawSub(tmp.limbs, r->limbs, SSF_BN_NIST_P256.limbs, 8);
+        mask = (SSFBNLimb_t)(subBorrow - 1u);
+        for (j = 0u; j < 8u; j++)
         {
-            addCarry = _SSFBNRawAdd(tmp.limbs, r->limbs, SSF_BN_NIST_P256.limbs, 8);
-            /* mask = all-ones if (borrow > carry); use unsigned wraparound on (carry - borrow). */
-            lim = carry - borrow;
-            mask = (SSFBNLimb_t)0u - (SSFBNLimb_t)(lim >> (SSF_BN_LIMB_BITS - 1u));
-            for (j = 0; j < 8u; j++)
-            {
-                r->limbs[j] = (tmp.limbs[j] & mask) | (r->limbs[j] & ~mask);
-            }
-            borrow -= (mask & 1u) & (addCarry & 1u);
-        }
-
-        /* Now borrow <= carry; collapse to a single net carry. */
-        carry -= borrow;
-
-        /* Loop 2: while (carry > 0), subtract p. Decrement carry ONLY when the sub underflows. */
-        for (k = 0; k < 12u; k++)
-        {
-            subBorrow = _SSFBNRawSub(tmp.limbs, r->limbs, SSF_BN_NIST_P256.limbs, 8);
-            /* mask = all-ones if carry != 0. */
-            mask = (SSFBNLimb_t)0u -
-                   (SSFBNLimb_t)(((carry | (SSFBNLimb_t)(0u - carry)) >> (SSF_BN_LIMB_BITS - 1u)));
-            for (j = 0; j < 8u; j++)
-            {
-                r->limbs[j] = (tmp.limbs[j] & mask) | (r->limbs[j] & ~mask);
-            }
-            carry -= (mask & 1u) & (subBorrow & 1u);
-        }
-
-        /* Loop 3: final reduce. mask is set when the trial subtract did not underflow. */
-        for (k = 0; k < 3u; k++)
-        {
-            subBorrow = _SSFBNRawSub(tmp.limbs, r->limbs, SSF_BN_NIST_P256.limbs, 8);
-            mask = (SSFBNLimb_t)(subBorrow - 1u);
-            for (j = 0; j < 8u; j++)
-            {
-                r->limbs[j] = (tmp.limbs[j] & mask) | (r->limbs[j] & ~mask);
-            }
+            r->limbs[j] = (tmp.limbs[j] & mask) | (r->limbs[j] & ~mask);
         }
     }
 }
@@ -2151,50 +2161,68 @@ static void _SSFBNReduceP384(SSFBN_t *r, const SSFBN_t *t)
     s.limbs[3] = c[23]; s.limbs[4] = c[23];
     borrow += _SSFBNRawSub(r->limbs, r->limbs, s.limbs, 12);
 
-    /* CT correction loops -- same as _SSFBNReduceP256; bounds doubled for sparse-coord inputs. */
-    tmp.len = 12;
+    /* r + (carry - borrow) * 2^384 is the value, carry - borrow in [-3, 7]; 2^384 == k mod p */
     {
-        SSFBNLimb_t mask, lim, addCarry, subBorrow;
-        uint16_t k, j;
+        static const int8_t k384[12] = { 1, -1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0 };
+        SSFBNLimb_t subBorrow;
+        SSFBNLimb_t mask;
+        int32_t e;
+        uint16_t j;
 
-        for (k = 0; k < 6u; k++)  /* original max borrow = 3, doubled */
+        /* k = 2^128 + 2^96 - 2^32 + 1; |net * k| < 2^132, so e is -1, 0 or 1 */
+        _SSF_BN_COUNT(_SSFBNNistCorrPasses);
+        e = _SSFBNNistFold(r->limbs, k384, 12u, (int32_t)carry - (int32_t)borrow);
+
+        /* Folding e cannot carry again: r + e * k stays in [0, 2^384) (OPTIMIZE EC-O4) */
+        _SSF_BN_COUNT(_SSFBNNistCorrPasses);
+        e = _SSFBNNistFold(r->limbs, k384, 12u, e);
+        SSF_ASSERT(e == 0);
+
+        /* r < 2^384 < 2p: one masked conditional subtraction gives [0, p) */
+        _SSF_BN_COUNT(_SSFBNNistCorrPasses);
+        tmp.len = 12;
+        subBorrow = _SSFBNRawSub(tmp.limbs, r->limbs, SSF_BN_NIST_P384.limbs, 12);
+        mask = (SSFBNLimb_t)(subBorrow - 1u);
+        for (j = 0u; j < 12u; j++)
         {
-            addCarry = _SSFBNRawAdd(tmp.limbs, r->limbs, SSF_BN_NIST_P384.limbs, 12);
-            lim = carry - borrow;
-            mask = (SSFBNLimb_t)0u - (SSFBNLimb_t)(lim >> (SSF_BN_LIMB_BITS - 1u));
-            for (j = 0; j < 12u; j++)
-            {
-                r->limbs[j] = (tmp.limbs[j] & mask) | (r->limbs[j] & ~mask);
-            }
-            borrow -= (mask & 1u) & (addCarry & 1u);
-        }
-
-        carry -= borrow;
-
-        for (k = 0; k < 14u; k++)  /* original max carry = 7, doubled */
-        {
-            subBorrow = _SSFBNRawSub(tmp.limbs, r->limbs, SSF_BN_NIST_P384.limbs, 12);
-            mask = (SSFBNLimb_t)0u -
-                   (SSFBNLimb_t)(((carry | (SSFBNLimb_t)(0u - carry)) >> (SSF_BN_LIMB_BITS - 1u)));
-            for (j = 0; j < 12u; j++)
-            {
-                r->limbs[j] = (tmp.limbs[j] & mask) | (r->limbs[j] & ~mask);
-            }
-            carry -= (mask & 1u) & (subBorrow & 1u);
-        }
-
-        for (k = 0; k < 3u; k++)
-        {
-            subBorrow = _SSFBNRawSub(tmp.limbs, r->limbs, SSF_BN_NIST_P384.limbs, 12);
-            mask = (SSFBNLimb_t)(subBorrow - 1u);
-            for (j = 0; j < 12u; j++)
-            {
-                r->limbs[j] = (tmp.limbs[j] & mask) | (r->limbs[j] & ~mask);
-            }
+            r->limbs[j] = (tmp.limbs[j] & mask) | (r->limbs[j] & ~mask);
         }
     }
 }
 #endif /* SSF_BN_CONFIG_MAX_BITS >= 768 */
+
+#if SSF_CONFIG_BN_UNIT_TEST == 1
+/* --------------------------------------------------------------------------------------------- */
+/* Test-only: r = t mod m via the P-256 / P-384 fast reduction; m must be one of the two.       */
+/* --------------------------------------------------------------------------------------------- */
+void _SSFBNReduceNISTForTest(SSFBN_t *r, const SSFBN_t *t, const SSFBN_t *m)
+{
+    SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(t != NULL);
+    SSF_REQUIRE(m != NULL);
+
+#if SSF_BN_CONFIG_MAX_BITS >= 512
+    /* Is m the P-256 prime? */
+    if ((m->len == 8u) && (_SSFBNRawCmp(m->limbs, SSF_BN_NIST_P256.limbs, 8) == 0))
+    {
+        /* Yes */
+        _SSFBNReduceP256(r, t);
+        return;
+    }
+#endif /* SSF_BN_CONFIG_MAX_BITS >= 512 */
+#if SSF_BN_CONFIG_MAX_BITS >= 768
+    /* Is m the P-384 prime? */
+    if ((m->len == 12u) && (_SSFBNRawCmp(m->limbs, SSF_BN_NIST_P384.limbs, 12) == 0))
+    {
+        /* Yes */
+        _SSFBNReduceP384(r, t);
+        return;
+    }
+#endif /* SSF_BN_CONFIG_MAX_BITS >= 768 */
+    /* No, not a supported prime */
+    SSF_REQUIRE(false);
+}
+#endif /* SSF_CONFIG_BN_UNIT_TEST */
 
 /* --------------------------------------------------------------------------------------------- */
 /* r = (a * b) mod m via NIST fast reduction for P-256/P-384, else falls back to SSFBNModMul.    */

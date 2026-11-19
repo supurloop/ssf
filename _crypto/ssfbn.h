@@ -326,6 +326,12 @@ extern uint32_t _SSFBNMontSqrCarryIters;
 /* Test-only count of SSFBNSquare's diagonal carry steps, fixed at a->len (SQ-CT audit) */
 extern uint32_t _SSFBNSquareCarryIters;
 
+/* Test-only count of the P-256 / P-384 reductions' correction passes (OPTIMIZE EC-O4) */
+extern uint32_t _SSFBNNistCorrPasses;
+
+/* Test-only wrapper: r = t mod m through the P-256 / P-384 fast reduction (m must be one) */
+void _SSFBNReduceNISTForTest(SSFBN_t *r, const SSFBN_t *t, const SSFBN_t *m);
+
 /* Test-only count of full-width entry points (ModExpMont[Pub], ModMulCT, ModInvExt, ModMul). */
 extern uint32_t _SSFBNFullWidthCalls;
 

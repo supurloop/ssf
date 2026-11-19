@@ -72,7 +72,7 @@ SUMMARY
   FE-O1    Speed         X25519 / Ed25519 +15-35%                              S-M     OPEN
   X509-O4  Stack         chain verify 14.5 KB -> about 4 KB (high risk)        L       OPEN
   ED-O2    Speed         Ed25519 sign 1.3x, keygen 1.6x (+1-2 KB ROM)          M       OPEN
-  EC-O4    Speed         ECC probably 1.5-2x (NIST reduction correction)        M       OPEN
+  EC-O4    Speed         ECC 1.5-2.2x measured (NIST reduction correction)      M       DONE
   EC-O1    Speed         ECC 1-8% measured (prototype)                         S       OPEN
   HMAC-O1  Speed         every HMAC about +25%                                 M       OPEN
   GCM-O1   Speed         GHASH +15-20% (GCM +7-10%)                            S       OPEN
@@ -530,7 +530,7 @@ EC-O1  Speed  OPEN  Effort S
              gain 7-8% on emulated ARM32 and 1-4% on x86-64, P-384 1-3%, sign within noise.
              Code +66 B Cortex-M4 (ssfbn + ssfec). The NIST reduction dominates: see EC-O4.
 
-EC-O4  Speed  OPEN  Effort M  [found while measuring EC-O1, 2026-11-19]
+EC-O4  Speed  DONE (2026-11-19)  Effort M  [found while measuring EC-O1]
   Where:     _SSFBNReduceP256 / _SSFBNReduceP384: 9 / 10 fold passes, then a constant-time
              correction that always runs 23 full passes (an add or subtract plus a masked
              select each: 8 + 12 + 3 for P-256, 6 + 14 + 3 for P-384) sized for worst-case
@@ -1327,4 +1327,56 @@ CHANGE LOG
               lengths, ModInv's a == 0 rejection, documented). No further findings.
               SSFBNModSquare is now constant-time for odd moduli within SSF_BN_MAX_MOD_LIMBS,
               as BN-O7 documented.
+  2026-11-19  EC-O4 DONE (Jim: "stage next fix"). _SSFBNReduceP256 / P384 keep their fold
+              passes; the correction is now two folds of the net carry and one masked
+              conditional subtraction. The folds leave the value r + c * 2^w with c = carry -
+              borrow in [-4, 6] (P-256: 6 adds, 4 subtracts) or [-3, 7] (P-384: 7, 3); 2^w mod
+              p = k is sparse (P-256 {1,0,0,-1,0,0,-1,1}, P-384 {1,-1,0,1,1,0..0}), so
+              _SSFBNNistFold adds c * k in one limb pass. |c * k| < 2^227 / 2^132 leaves a
+              carry e in {-1, 0, 1}; r + e * k then stays in [0, 2^w) (e = 1 leaves r < 2^227 /
+              2^132, e = -1 leaves r > 2^w - 2^226 / 2^132), asserted; 2^w < 2p, so one
+              subtraction finishes. _SSFBNNistFold uses only unsigned arithmetic with a bias
+              (no division, no shift of a negative value); no libgcc division helper in any
+              build (the only uldivmod in ssfbn is SSFBNModUint32, as before). P-384's e = -1
+              is unreachable (the high limbs' contribution is >= -0.9999999998 * 2^384).
+              RED: ssfbn_ut.c "OPTIMIZE EC-O4" requires 3 correction passes per reduction
+              (test counter _SSFBNNistCorrPasses, wrapper _SSFBNReduceNISTForTest); the old
+              code took 23 (failed at ssfbn_ut.c:4146). Its oracle half (SSFBNMod) over every
+              all-zero / all-ones upper-limb pattern with either low half (reaching net
+              carries -4..4 / -1..3) plus 2000 random inputs per curve passed on the old code
+              first. Three inputs solved in Python force the second fold (P-256 e = -1 and +1,
+              P-384 e = +1) with Python-computed results.
+              GREEN: all 9 suites normal, ASan + UBSan, 32-bit ARM. Differential: 3000000
+              inputs per curve (random, all-ones-heavy, all-zero-heavy, mixed patterns) give
+              the committed code's digest, every result < p, sanitizer clean. Mutation: a
+              wrong k limb (each curve), folding only the carry count, a wrong carry bias, no
+              final subtraction, no second fold (each curve, the P-384 one caught only by its
+              solved vector) all fail.
+              Speed: P-256 field multiply 225 -> 92 ns x86-64, 1105 -> 483 ns ARM32; P-384 288
+              -> 144 / 1785 -> 829 ns. End to end, x86-64: P-256 verify 1054-1096 -> 501-514 us,
+              ECDH 1020-1054 -> 464-489, sign 284-340 -> 166-210, P-384 sign 555-572 -> 376-382,
+              verify 2010-2046 -> 1144-1153; emulated ARM32: P-256 verify 5767-6316 -> 3211-
+              3238 us, ECDH 5508-5552 -> 2973-2995, sign 1614-1941 -> 1094-1106, P-384 sign
+              3500-3591 -> 2387-2395, verify 12565-12698 -> 6808-6939.
+              Code: Cortex-M4 ssfbn 16330 -> 16198 B (-132; ssfbn + ssfec + ssfecdsa 41635 ->
+              41503), Cortex-M0+ ssfbn 18896 -> 18844 B (-52). Stack: ModMulNIST frame 232 B
+              unchanged; ECDSA sign 8288, verify 10000, ECDH 7248, keygen 7256 B unchanged.
+              Docs: ssfbn.md SSFBNModMulNIST (also: the generic fallback is constant-time for
+              odd moduli since BN-O7).
+  2026-11-19  EC-O4 AUDIT (Jim: "Audit first"). Carry ranges recounted from the code (P-256:
+              6 adds, 4 subtracts; P-384: 7, 3); fold bounds re-derived (P-256 e = 1 leaves r <
+              2^227, e = -1 leaves r > 2^256 - 2^226; P-384 the same with 2^132); 2^w < 2p for
+              both primes. _SSFBNNistFold's bias arithmetic checked exhaustively at its limits
+              (1989 combinations of r, coef, c, carry: limb and carry exact, carry in {-1, 0,
+              1}). Codegen: at -Os on Cortex-M0+ / M3 / M4 the only branches are the two
+              contract checks (never taken) and the loop counter; the arithmetic is mla /
+              adds / adc / sbc; at -O2 it is inlined; no libgcc division or multiply helper.
+              P-256-only build (cap 512, RSA and P-384 off): ssfbn / ssfec / ssfecdsa compile
+              clean with -Wall -Wextra -pedantic and their suites pass under ASan + UBSan.
+              Finding (test gap, from earlier this session, fixed): the SQ-CT test squared
+              widths up to 32 limbs and the BN-O7 test used 12- and 32-limb moduli
+              unconditionally, so the bn suite asserted in a 512-bit-cap build; both now skip
+              widths beyond SSF_BN_MAX_LIMBS / 2 and SSF_BN_MAX_MOD_LIMBS. The full runner
+              cannot be built without RSA there (ssfx509 needs SSFRSAHash_t; pre-existing).
+              Default and RSA-2048-only builds: all 9 suites pass after the change.
 

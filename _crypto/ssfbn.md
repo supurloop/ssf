@@ -683,11 +683,16 @@ void SSFBNModMulNIST(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN
 Specialised modular multiplication for the NIST P-256 and P-384 primes (passed as
 [`SSF_BN_NIST_P256`](#nist-constants) or [`SSF_BN_NIST_P384`](#nist-constants)). Uses the
 sparse structure of those primes to replace a general Barrett reduction with a short
-sequence of adds and subtracts — significantly faster on a microcontroller. For those two
-primes the final correction runs a fixed number of mask-committed add/subtract passes, so the
+sequence of adds and subtracts — significantly faster on a microcontroller. Those leave the
+value as `r + c × 2^w` with a small signed net carry `c`; since `2^w mod p` is sparse (P-256:
+`2^224 − 2^192 − 2^96 + 1`, P-384: `2^128 + 2^96 − 2^32 + 1`), the correction folds `c` back
+in with one limb pass, folds the resulting −1/0/+1 carry once more (it cannot carry again),
+and finishes with one masked conditional subtraction: three fixed passes, where the original
+ran 23 sized for worst-case carries (OPTIMIZE EC-O4, about 2.3× faster per multiply). The
 reduction is **constant-time** in the operand values (choosing the path compares only the
-public modulus). Any other modulus falls back to [`SSFBNModMul()`](#ssfbnmodmul), which is
-**variable-time**. The NIST paths keep their product and reduction scratch at curve width
+public modulus). Any other modulus falls back to [`SSFBNModMul()`](#ssfbnmodmul), constant-time
+for an odd modulus of at most `SSF_BN_MAX_MOD_LIMBS` limbs and variable-time otherwise. The NIST
+paths keep their product and reduction scratch at curve width
 (24 limbs at most), so their stack does not grow with `SSF_BN_CONFIG_MAX_BITS`; the generic
 fallback's does.
 

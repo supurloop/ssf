@@ -171,6 +171,9 @@ extern void (*_SSFRSASignBlindTestHook)(void *ctx, const SSFBN_t *r, const SSFBN
                                         const SSFBN_t *cIn, const SSFBN_t *cBlind,
                                         const SSFBN_t *n);
 extern void *_SSFRSASignBlindTestHookCtx;
+
+/* Test-only hook fired after each secret local is wiped (AUDIT RSA-12). */
+extern void (*_SSFRSAScrubTestHook)(const void *buf, size_t len);
 #endif /* SSF_CONFIG_RSA_UNIT_TEST */
 
 #ifdef __cplusplus

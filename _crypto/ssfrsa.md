@@ -330,10 +330,19 @@ return `true` here. Use this to reject mis-encoded or size-wrong keys at ingesti
 bool SSFRSAPrivKeyIsValid(const uint8_t *privKeyDer, size_t privKeyDerLen);
 ```
 Parse the DER blob and return whether it is a well-formed PKCS#1 `RSAPrivateKey` (version
-0, all eight integers `n / e / d / p / q / dp / dq / qInv` present, `n = p · q`, `e · d ≡ 1
-(mod λ(n))`, `qInv = q⁻¹ mod p`, modulus in the supported size range). Counterpart of
+0, all eight integers `n / e / d / p / q / dp / dq / qInv` present, `n = p · q`,
+`dp = d mod (p − 1)` and `dq = d mod (q − 1)`, `e · dp ≡ 1 (mod p − 1)` and
+`e · dq ≡ 1 (mod q − 1)` (together equivalent to `e · d ≡ 1 (mod λ(n))`), `qInv = q⁻¹ mod p`,
+modulus in the supported size range). Counterpart of
 [`SSFRSAPubKeyIsValid()`](#ssfrsapubkeyisvalid) for the private blob. Use this to reject
 malformed key material at ingestion time before passing it to the sign entry points.
+
+Every decoded private field and intermediate is zeroized before the function returns, on
+both the accept and the reject paths. The consistency checks are **variable-time** (they use
+`SSFBNMod` / `SSFBNModMul`, whose run time depends on the key values): call it once when a key
+is loaded or imported, not in a loop whose timing an attacker can observe. Before 2026-11-19
+only `dp = d mod (p − 1)` and `dq = d mod (q − 1)` were checked, so a key with consistent but
+wrong `d`, `dp`, `dq` was accepted (signing it then failed verify-after-sign).
 
 ---
 

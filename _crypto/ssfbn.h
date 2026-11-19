@@ -298,6 +298,9 @@ void SSFBNUnitTest(void);
 
 /* Test-only count of variable-time SSFBNMod calls (AUDIT BN-10). */
 extern uint32_t _SSFBNModCallCount;
+
+/* Test-only hook fired after each secret local is wiped (AUDIT BN-11). */
+extern void (*_SSFBNScrubTestHook)(const void *buf, size_t len);
 #endif /* SSF_CONFIG_BN_UNIT_TEST */
 
 #ifdef __cplusplus

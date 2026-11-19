@@ -619,6 +619,54 @@ static void _SSFRSAUTCloseSeq(uint8_t *der, uint32_t pos)
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* UT helper: add 1 to the last byte of INTEGER number idx in a DER SEQUENCE (AUDIT RSA-12).     */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFRSAUTBumpInt(uint8_t *der, size_t derLen, uint8_t idx)
+{
+    size_t pos;
+    size_t len;
+    uint8_t i;
+    uint8_t k;
+
+    SSF_REQUIRE(der != NULL);
+    SSF_REQUIRE(derLen > 4u);
+    SSF_REQUIRE(der[0] == 0x30u);
+
+    pos = ((der[1] & 0x80u) != 0u) ? (2u + (size_t)(der[1] & 0x7Fu)) : 2u;
+    for (i = 0; ; i++)
+    {
+        SSF_REQUIRE((pos + 2u) < derLen);
+        SSF_REQUIRE(der[pos] == 0x02u);
+        pos++;
+        /* Is the length in long form? */
+        if ((der[pos] & 0x80u) != 0u)
+        {
+            /* Yes, read the k length bytes */
+            k = (uint8_t)(der[pos] & 0x7Fu);
+            pos++;
+            len = 0u;
+            while (k > 0u) { len = (len << 8) | der[pos]; pos++; k--; }
+        }
+        else
+        {
+            /* No, the byte is the length */
+            len = der[pos];
+            pos++;
+        }
+        SSF_REQUIRE((pos + len) <= derLen);
+        /* Is this the INTEGER to bump? */
+        if (i == idx)
+        {
+            /* Yes, increment its last byte (never 0xFF, so the length is unchanged) */
+            SSF_REQUIRE(der[pos + len - 1u] != 0xFFu);
+            der[pos + len - 1u]++;
+            return;
+        }
+        pos += len;
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* UT helper: append INTEGER of mag (< 127) bytes msb, 0xFF.., lsb in short-form DER (RSA-11).   */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFRSAUTPutShortIntTLV(uint8_t *der, uint32_t *pos, uint32_t mag, uint8_t msb,
@@ -637,6 +685,28 @@ static void _SSFRSAUTPutShortIntTLV(uint8_t *der, uint32_t *pos, uint32_t mag, u
     der[(*pos)++] = msb;
     for (i = 1u; i < (mag - 1u); i++) { der[(*pos)++] = 0xFFu; }
     der[(*pos)++] = lsb;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* AUDIT RSA-12: scrub-hook callback; counts calls and any buffer that is not all zero.        */
+/* --------------------------------------------------------------------------------------------- */
+static uint32_t _scrubCalls;
+static uint32_t _scrubDirty;
+static void _ScrubCheck(const void *buf, size_t len)
+{
+    const uint8_t *b = (const uint8_t *)buf;
+    size_t i;
+
+    SSF_ASSERT(buf != NULL);
+    _scrubCalls++;
+    for (i = 0; i < len; i++)
+    {
+        if (b[i] != 0u)
+        {
+            _scrubDirty++;
+            break;
+        }
+    }
 }
 
 void SSFRSAUnitTest(void)
@@ -679,6 +749,28 @@ void SSFRSAUnitTest(void)
         SSF_ASSERT((size_t)p <= sizeof(der));
         SSF_ASSERT(SSFRSAPubKeyIsValid(der, (size_t)p) == false);
     }
+
+    /* ---- AUDIT RSA-12: KeyGen wipes the private-key DER scratch buffer ---- */
+    /* _SSFRSAPrivKeyEncode serialized every private field through a local buffer and left the */
+    /* last one there. The scrub hook must see that buffer zeroed after a 2048-bit KeyGen.     */
+#if (SSF_RSA_CONFIG_ENABLE_KEYGEN == 1) && (SSF_RSA_CONFIG_ENABLE_2048 == 1)
+    {
+        static uint8_t privDer[SSF_RSA_MAX_PRIV_KEY_DER_SIZE];
+        static uint8_t pubDer[SSF_RSA_MAX_PUB_KEY_DER_SIZE];
+        size_t privLen;
+        size_t pubLen;
+
+        _scrubCalls = 0u;
+        _scrubDirty = 0u;
+        _SSFRSAScrubTestHook = _ScrubCheck;
+        SSF_ASSERT(SSFRSAKeyGen(2048u, privDer, sizeof(privDer), &privLen, pubDer, sizeof(pubDer),
+                                &pubLen) == true);
+        _SSFRSAScrubTestHook = NULL;
+        SSF_ASSERT(_scrubCalls == 1u);
+        SSF_ASSERT(_scrubDirty == 0u);
+        SSF_ASSERT(SSFRSAPrivKeyIsValid(privDer, privLen) == true);
+    }
+#endif /* SSF_RSA_CONFIG_ENABLE_KEYGEN && SSF_RSA_CONFIG_ENABLE_2048 */
 
     /* ---- AUDIT RSA-11: CRT primes narrower than half the modulus are refused, not trapped ---- */
     /* The decoder bounded p only from above. A 2048-bit n with 16-byte p and q decoded, then  */
@@ -1403,6 +1495,32 @@ void SSFRSAUnitTest(void)
 
         /* ---- SSFRSAPrivKeyIsValid: positive case (foreign-format key) ---- */
         SSF_ASSERT(SSFRSAPrivKeyIsValid(foreignPriv, sizeof(foreignPriv)) == true);
+
+        /* ---- AUDIT RSA-12: IsValid wipes private fields and checks e * dp, e * dq == 1 ---- */
+        /* IsValid left d, p, q, dp, dq, qInv and its intermediates on the stack, and only      */
+        /* checked dp == d mod (p - 1). Bumping d, dp and dq by one keeps those congruences but */
+        /* breaks e * d == 1, so only the new e * dp / e * dq checks catch it.                  */
+        {
+            uint8_t bad[sizeof(foreignPriv)];
+
+            _scrubCalls = 0u;
+            _scrubDirty = 0u;
+            _SSFRSAScrubTestHook = _ScrubCheck;
+            SSF_ASSERT(SSFRSAPrivKeyIsValid(foreignPriv, sizeof(foreignPriv)) == true);
+            SSF_ASSERT(_scrubCalls == 11u);
+            memcpy(bad, foreignPriv, sizeof(bad));
+            bad[100] ^= 0x01u;
+            SSF_ASSERT(SSFRSAPrivKeyIsValid(bad, sizeof(bad)) == false);
+            SSF_ASSERT(_scrubCalls == 22u);
+            _SSFRSAScrubTestHook = NULL;
+            SSF_ASSERT(_scrubDirty == 0u);
+
+            memcpy(bad, foreignPriv, sizeof(bad));
+            _SSFRSAUTBumpInt(bad, sizeof(bad), 3u);
+            _SSFRSAUTBumpInt(bad, sizeof(bad), 6u);
+            _SSFRSAUTBumpInt(bad, sizeof(bad), 7u);
+            SSF_ASSERT(SSFRSAPrivKeyIsValid(bad, sizeof(bad)) == false);
+        }
 
         /* ---- SSFRSAPrivKeyIsValid: tampered components must reject ---- */
         /* Each test copies foreignPriv into a mutable buffer and flips a single byte at an     */

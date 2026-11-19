@@ -1672,6 +1672,28 @@ static void _SSFBNVerifyAgainstOpenSSL(void)
 
 #endif /* SSF_BN_OSSL_VERIFY */
 
+/* --------------------------------------------------------------------------------------------- */
+/* AUDIT BN-11: scrub-hook callback; counts calls and any buffer that is not all zero.         */
+/* --------------------------------------------------------------------------------------------- */
+static uint32_t _scrubCalls;
+static uint32_t _scrubDirty;
+static void _ScrubCheck(const void *buf, size_t len)
+{
+    const uint8_t *b = (const uint8_t *)buf;
+    size_t i;
+
+    SSF_ASSERT(buf != NULL);
+    _scrubCalls++;
+    for (i = 0; i < len; i++)
+    {
+        if (b[i] != 0u)
+        {
+            _scrubDirty++;
+            break;
+        }
+    }
+}
+
 /* Suppress C6262 (large stack frame). This unit-test entry point intentionally allocates many */
 /* SSFBN_DEFINE locals across its sub-test blocks; the host test environment has ample stack.  */
 #ifdef _WIN32
@@ -2378,6 +2400,38 @@ void SSFBNUnitTest(void)
         SSF_ASSERT(SSFBNModInv(&r, &a, &m) == false);
     }
 #endif /* SSF_BN_CONFIG_MAX_BITS >= 512 */
+
+    /* ---- AUDIT BN-11: GenPrime and IsProbablePrime wipe the candidate and MR state ---- */
+    /* GenPrime returned with the accepted prime's bytes in its local buf, and IsProbablePrime */
+    /* left n - 1, d, the witness, x and a Montgomery context of n on the stack. The scrub    */
+    /* hook must see only zeros, on the accept path and on the composite (goto) path.         */
+    {
+        SSFPRNGContext_t prng;
+        uint8_t seed[SSF_PRNG_ENTROPY_SIZE];
+        SSFBN_DEFINE(p, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(c, SSF_BN_MAX_LIMBS);
+        uint32_t calls;
+
+        memset(seed, 0x2B, sizeof(seed));
+        SSFPRNGInitContext(&prng, seed, sizeof(seed));
+        _scrubCalls = 0u;
+        _scrubDirty = 0u;
+        _SSFBNScrubTestHook = _ScrubCheck;
+
+        /* Accept path: 7 locals from the final IsProbablePrime plus GenPrime's buf. */
+        SSF_ASSERT(SSFBNGenPrime(&p, 256u, 5u, &prng) == true);
+        SSF_ASSERT(_scrubCalls >= 8u);
+
+        /* Composite 221 = 13 * 17 leaves through the Miller-Rabin reject path. */
+        calls = _scrubCalls;
+        SSFBNSetUint32(&c, 221u, 8u);
+        SSF_ASSERT(SSFBNIsProbablePrime(&c, 5u, &prng) == false);
+        SSF_ASSERT(_scrubCalls == (calls + 7u));
+
+        _SSFBNScrubTestHook = NULL;
+        SSF_ASSERT(_scrubDirty == 0u);
+        SSFPRNGDeInitContext(&prng);
+    }
 
     /* ---- ModInv: 0 has no inverse ---- */
     {

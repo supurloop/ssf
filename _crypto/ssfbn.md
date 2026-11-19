@@ -898,7 +898,10 @@ depending on modulus size.
 Internally writes `n − 1 = 2ˢ · d` (using `SSFBNTrailingZeros` and `SSFBNShiftRight`),
 then for each round picks a random witness `a ∈ [2, n − 2]` (via `SSFBNRandom` with
 post-mask), computes `x = aᵈ mod n` via `SSFBNModExpMont` (the precomputed Montgomery
-context is reused across rounds), and applies the standard Miller-Rabin inner loop.
+context is reused across rounds), and applies the standard Miller-Rabin inner loop. Every
+working value derived from `n` (`n − 1`, `d`, the witness, `x`, `n − 3` and the Montgomery
+context) is zeroized before the function returns, since `n` is typically a secret RSA prime
+candidate.
 
 <a id="ssfbngenprime"></a>
 ```c
@@ -909,7 +912,8 @@ of 8). Bits `bitLen − 1` and `bitLen − 2` are forced high and any higher bit
 product of two such primes has the full `2 · bitLen` bit length), the low bit is forced to
 make the candidate odd, the candidate is trial-divided against the 256-entry small-prime
 table, and survivors go through `rounds` Miller-Rabin rounds. Returns `false` if no prime
-is found within an internal attempt cap (50000).
+is found within an internal attempt cap (50000). The local buffer that held the candidate
+bytes is zeroized on both the success and the failure return; the prime itself is only in `p`.
 
 `bitLen` must be `≥ 16` and `≤ SSF_BN_CONFIG_MAX_BITS / 2` (enforced by `SSF_REQUIRE`). Below 16
 bits every candidate can fall inside the small-prime table, which trial division rejects, so

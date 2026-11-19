@@ -42,6 +42,15 @@
 
 #if SSF_RSA_ANY_ENABLED == 1
 
+#if SSF_CONFIG_RSA_UNIT_TEST == 1
+/* Test-only hook fired after each secret local is wiped; NULL in production (AUDIT RSA-12). */
+void (*_SSFRSAScrubTestHook)(const void *buf, size_t len) = NULL;
+#define _SSF_RSA_SCRUB_HOOK(p, n) \
+    do { if (_SSFRSAScrubTestHook != NULL) { _SSFRSAScrubTestHook((p), (n)); } } while (0)
+#else
+#define _SSF_RSA_SCRUB_HOOK(p, n) do { } while (0)
+#endif /* SSF_CONFIG_RSA_UNIT_TEST */
+
 /* --------------------------------------------------------------------------------------------- */
 /* Prime-candidate screening (small-prime trial division, Miller-Rabin, and the random-prime     */
 /* generator) now lives in ssfbn. See SSFBNModUint32, SSFBNIsProbablePrime, SSFBNGenPrime.       */
@@ -297,15 +306,14 @@ static bool _SSFRSAPubKeyDecode(const uint8_t *der, size_t derLen, SSFBN_t *n, S
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: DER-encode an RSA private key (PKCS#1 RSAPrivateKey, 9 INTEGERs).                  */
+/* Internal: DER-encode an RSA private key (PKCS#1 RSAPrivateKey) using caller scratch buf.     */
 /* --------------------------------------------------------------------------------------------- */
 #if SSF_RSA_CONFIG_ENABLE_KEYGEN == 1
-static bool _SSFRSAPrivKeyEncode(const SSFBN_t *n, const SSFBN_t *e, const SSFBN_t *d,
-                                 const SSFBN_t *p, const SSFBN_t *q, const SSFBN_t *dp,
-                                 const SSFBN_t *dq, const SSFBN_t *qInv, uint8_t *der,
-                                 size_t derSize, size_t *derLen)
+static bool _SSFRSAPrivKeyEncodeBuf(const SSFBN_t *n, const SSFBN_t *e, const SSFBN_t *d,
+                                    const SSFBN_t *p, const SSFBN_t *q, const SSFBN_t *dp,
+                                    const SSFBN_t *dq, const SSFBN_t *qInv, uint8_t *der,
+                                    size_t derSize, size_t *derLen, uint8_t *buf)
 {
-    uint8_t buf[SSF_BN_MAX_BYTES + 1u];
     uint32_t encLens[9];
     uint32_t contentLen = 0;
     uint32_t seqHdrLen;
@@ -315,6 +323,18 @@ static bool _SSFRSAPrivKeyEncode(const SSFBN_t *n, const SSFBN_t *e, const SSFBN
     /* Fields: version=0, n, e, d, p, q, dp, dq, qInv */
     const SSFBN_t *fields[] = { NULL, n, e, d, p, q, dp, dq, qInv };
     size_t fieldBytes[9];
+
+    SSF_REQUIRE(n != NULL);
+    SSF_REQUIRE(e != NULL);
+    SSF_REQUIRE(d != NULL);
+    SSF_REQUIRE(p != NULL);
+    SSF_REQUIRE(q != NULL);
+    SSF_REQUIRE(dp != NULL);
+    SSF_REQUIRE(dq != NULL);
+    SSF_REQUIRE(qInv != NULL);
+    SSF_REQUIRE(der != NULL);
+    SSF_REQUIRE(derLen != NULL);
+    SSF_REQUIRE(buf != NULL);
 
     /* Version = 0 */
     if (!SSFASN1EncIntU64(NULL, 0, 0, &encLens[0])) return false;
@@ -359,6 +379,28 @@ static bool _SSFRSAPrivKeyEncode(const SSFBN_t *n, const SSFBN_t *e, const SSFBN
 
     *derLen = (size_t)offset;
     return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: DER-encode an RSA private key, wiping the serialization scratch on every return.    */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFRSAPrivKeyEncode(const SSFBN_t *n, const SSFBN_t *e, const SSFBN_t *d,
+                                 const SSFBN_t *p, const SSFBN_t *q, const SSFBN_t *dp,
+                                 const SSFBN_t *dq, const SSFBN_t *qInv, uint8_t *der,
+                                 size_t derSize, size_t *derLen)
+{
+    uint8_t buf[SSF_BN_MAX_BYTES + 1u];
+    bool ok;
+
+    SSF_REQUIRE(der != NULL);
+    SSF_REQUIRE(derLen != NULL);
+
+    ok = _SSFRSAPrivKeyEncodeBuf(n, e, d, p, q, dp, dq, qInv, der, derSize, derLen, buf);
+
+    /* buf held each private field's magnitude in turn (AUDIT RSA-12) */
+    SSFCryptSecureZero(buf, sizeof(buf));
+    _SSF_RSA_SCRUB_HOOK(buf, sizeof(buf));
+    return ok;
 }
 #endif /* SSF_RSA_CONFIG_ENABLE_KEYGEN */
 
@@ -734,56 +776,79 @@ bool SSFRSAPrivKeyIsValid(const uint8_t *privKeyDer, size_t privKeyDerLen)
     SSFBN_DEFINE(dp, SSF_BN_MAX_LIMBS);
     SSFBN_DEFINE(dq, SSF_BN_MAX_LIMBS);
     SSFBN_DEFINE(qInv, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(prod, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(pm1, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(qm1, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(check, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(eRed, SSF_BN_MAX_LIMBS);
     uint16_t nLimbs;
+    bool ok = false;
 
     SSF_REQUIRE(privKeyDer != NULL);
     SSF_REQUIRE(privKeyDerLen > 0u);
 
     if (!_SSFRSAPrivKeyDecode(privKeyDer, privKeyDerLen, &n, &e, &d,
-                              &p, &q, &dp, &dq, &qInv, &nLimbs)) return false;
+                              &p, &q, &dp, &dq, &qInv, &nLimbs)) goto cleanup;
 
     /* Public-side rules (n size, e bounds, e < n). */
-    if (!_SSFRSAValidatePubFields(&n, &e)) return false;
+    if (!_SSFRSAValidatePubFields(&n, &e)) goto cleanup;
 
-    /* d, p, q must be odd and > 1. */
-    if (SSFBNIsZero(&d) || SSFBNIsOne(&d)) return false;
-    if (SSFBNIsEven(&p) || SSFBNIsOne(&p)) return false;
-    if (SSFBNIsEven(&q) || SSFBNIsOne(&q)) return false;
+    /* d > 1; p and q odd and > 1. */
+    if (SSFBNIsZero(&d) || SSFBNIsOne(&d)) goto cleanup;
+    if (SSFBNIsEven(&p) || SSFBNIsOne(&p)) goto cleanup;
+    if (SSFBNIsEven(&q) || SSFBNIsOne(&q)) goto cleanup;
 
     /* n == p * q (both p and q have len = nLimbs/2). */
-    {
-        SSFBN_DEFINE(prod, SSF_BN_MAX_LIMBS);
-        SSFBNMul(&prod, &p, &q);
-        if (prod.len != n.len) return false;
-        if (SSFBNCmp(&prod, &n) != 0) return false;
-    }
+    SSFBNMul(&prod, &p, &q);
+    if (prod.len != n.len) goto cleanup;
+    if (SSFBNCmp(&prod, &n) != 0) goto cleanup;
 
-    /* dp == d mod (p - 1). */
-    {
-        SSFBN_DEFINE(pm1, SSF_BN_MAX_LIMBS);
-        SSFBN_DEFINE(check, SSF_BN_MAX_LIMBS);
-        (void)SSFBNSubUint32(&pm1, &p, 1u);
-        SSFBNMod(&check, &d, &pm1);
-        if (SSFBNCmp(&check, &dp) != 0) return false;
-    }
+    /* dp == d mod (p - 1) and e * dp == 1 mod (p - 1) (AUDIT RSA-12). */
+    (void)SSFBNSubUint32(&pm1, &p, 1u);
+    SSFBNMod(&check, &d, &pm1);
+    if (SSFBNCmp(&check, &dp) != 0) goto cleanup;
+    SSFBNMod(&eRed, &e, &pm1);
+    SSFBNModMul(&check, &eRed, &dp, &pm1);
+    if (!SSFBNIsOne(&check)) goto cleanup;
 
-    /* dq == d mod (q - 1). */
-    {
-        SSFBN_DEFINE(qm1, SSF_BN_MAX_LIMBS);
-        SSFBN_DEFINE(check, SSF_BN_MAX_LIMBS);
-        (void)SSFBNSubUint32(&qm1, &q, 1u);
-        SSFBNMod(&check, &d, &qm1);
-        if (SSFBNCmp(&check, &dq) != 0) return false;
-    }
+    /* dq == d mod (q - 1) and e * dq == 1 mod (q - 1) (AUDIT RSA-12). */
+    (void)SSFBNSubUint32(&qm1, &q, 1u);
+    SSFBNMod(&check, &d, &qm1);
+    if (SSFBNCmp(&check, &dq) != 0) goto cleanup;
+    SSFBNMod(&eRed, &e, &qm1);
+    SSFBNModMul(&check, &eRed, &dq, &qm1);
+    if (!SSFBNIsOne(&check)) goto cleanup;
 
     /* qInv * q == 1 (mod p). */
-    {
-        SSFBN_DEFINE(prod, SSF_BN_MAX_LIMBS);
-        SSFBNModMul(&prod, &qInv, &q, &p);
-        if (!SSFBNIsOne(&prod)) return false;
-    }
+    SSFBNModMul(&prod, &qInv, &q, &p);
+    if (!SSFBNIsOne(&prod)) goto cleanup;
+    ok = true;
 
-    return true;
+cleanup:
+    /* Wipe every private field and intermediate on every return (AUDIT RSA-12) */
+    SSFBNZeroize(&d);
+    _SSF_RSA_SCRUB_HOOK(d.limbs, (size_t)d.cap * sizeof(SSFBNLimb_t));
+    SSFBNZeroize(&p);
+    _SSF_RSA_SCRUB_HOOK(p.limbs, (size_t)p.cap * sizeof(SSFBNLimb_t));
+    SSFBNZeroize(&q);
+    _SSF_RSA_SCRUB_HOOK(q.limbs, (size_t)q.cap * sizeof(SSFBNLimb_t));
+    SSFBNZeroize(&dp);
+    _SSF_RSA_SCRUB_HOOK(dp.limbs, (size_t)dp.cap * sizeof(SSFBNLimb_t));
+    SSFBNZeroize(&dq);
+    _SSF_RSA_SCRUB_HOOK(dq.limbs, (size_t)dq.cap * sizeof(SSFBNLimb_t));
+    SSFBNZeroize(&qInv);
+    _SSF_RSA_SCRUB_HOOK(qInv.limbs, (size_t)qInv.cap * sizeof(SSFBNLimb_t));
+    SSFBNZeroize(&prod);
+    _SSF_RSA_SCRUB_HOOK(prod.limbs, (size_t)prod.cap * sizeof(SSFBNLimb_t));
+    SSFBNZeroize(&pm1);
+    _SSF_RSA_SCRUB_HOOK(pm1.limbs, (size_t)pm1.cap * sizeof(SSFBNLimb_t));
+    SSFBNZeroize(&qm1);
+    _SSF_RSA_SCRUB_HOOK(qm1.limbs, (size_t)qm1.cap * sizeof(SSFBNLimb_t));
+    SSFBNZeroize(&check);
+    _SSF_RSA_SCRUB_HOOK(check.limbs, (size_t)check.cap * sizeof(SSFBNLimb_t));
+    SSFBNZeroize(&eRed);
+    _SSF_RSA_SCRUB_HOOK(eRed.limbs, (size_t)eRed.cap * sizeof(SSFBNLimb_t));
+    return ok;
 }
 
 /* --------------------------------------------------------------------------------------------- */

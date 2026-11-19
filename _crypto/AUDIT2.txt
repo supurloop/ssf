@@ -49,7 +49,8 @@ SUMMARY
   Medium     2       BN-10 (FIXED), ECDSA-5 (FIXED, opt-in)
   Low        17      FIXED (Batch A): CHACHA-1, GCM-3, CCM-3, SHA1-2, SHA2-3
                      FIXED (Batch B): HKDF-1, EC-3, RSA-11, TLS-8
-                     OPEN: HMAC-1, PRNG-3, BN-11, BN-12, BN-13, RSA-9, RSA-10, RSA-12
+                     FIXED (Batch C): BN-11, RSA-12
+                     OPEN: HMAC-1, PRNG-3, BN-12, BN-13, RSA-9, RSA-10
 
   No memory-safety defect reachable from hostile input was found. The first-pass fixes
   (decoder bounds, carry folds, authenticate-before-decrypt, CT nonce/blind handling) hold.
@@ -245,7 +246,7 @@ BN-10  Medium  FIXED (2026-11-19)  [measured; fix verified red/green]
              Recommend (1). A unit test can assert that SSFBNModInv no longer calls SSFBNMod
              (or compare iteration counts through a test hook) rather than timing.
 
-BN-11  Low  OPEN  [code-read]
+BN-11  Low  FIXED (2026-11-19, Batch C)  [code-read; fix verified red/green]
   Location:  ssfbn.c:2815-2889 (SSFBNGenPrime buf[SSF_BN_MAX_BYTES]),
              :2696-2810 (SSFBNIsProbablePrime locals nm1, d, a, x, nm3, mont)
   Problem:   SSFBNGenPrime returns with the accepted prime's big-endian bytes still in buf;
@@ -394,7 +395,7 @@ RSA-11  Low  FIXED (2026-11-19, Batch B)  [code-read; fix verified red/green]
              which SSFRSAKeyGen always produces). (2) Run SSFRSAPrivKeyIsValid at the top of
              both sign paths (extra cost).  Recommend (1).
 
-RSA-12  Low  OPEN  [code-read]
+RSA-12  Low  FIXED (2026-11-19, Batch C)  [code-read; fix verified red/green]
   Location:  ssfrsa.c:726-786 (SSFRSAPrivKeyIsValid), :303-362 (_SSFRSAPrivKeyEncode buf)
   Problem:   (a) SSFRSAPrivKeyIsValid decodes d, p, q, dp, dq, qInv into stack BNs and never
              zeroizes them, and runs the variable-time SSFBNMod / SSFBNModMul on them.
@@ -598,3 +599,34 @@ CHANGE LOG
               ssfec.md (SSFECScalarMul k width), ssfrsa.md (decoder half-width rule), ssftls.md
               (contentType, in-place pt, transcript len). Linux direct gcc build; ssfport.h test
               flags restored with git checkout.
+  2026-11-19  Batch C FIXED (Jim's choice: recommended options, variable-time consistency
+              checks): BN-11, RSA-12.
+              BN-11: SSFBNIsProbablePrime now leaves through one cleanup that SSFBNZeroizes nm1,
+              d, a, x, nm3 and the Montgomery context (mod, rr); SSFBNGenPrime wipes its
+              candidate buf with SSFCryptSecureZero on the accept and the give-up return
+              (ssfbn.c now includes ssfcrypt.h).
+              RSA-12: _SSFRSAPrivKeyEncode is a wrapper that owns buf, calls the renamed
+              _SSFRSAPrivKeyEncodeBuf (now with DBC) and wipes buf on every return.
+              SSFRSAPrivKeyIsValid leaves through one cleanup that zeroizes d, p, q, dp, dq,
+              qInv and every intermediate, and adds e * dp == 1 mod (p - 1) and
+              e * dq == 1 mod (q - 1) with SSFBNModMul (variable-time by Jim's choice; the
+              constant-time ModMulCT variant measured +65%). ssfrsa.md previously claimed
+              e * d == 1 (mod lambda(n)) was checked; it now is, through these two congruences.
+              Tests: new test-only scrub hooks _SSFBNScrubTestHook / _SSFRSAScrubTestHook.
+              ssfbn_ut.c "AUDIT BN-11": GenPrime(256) from a fixed seed (>= 8 hook calls) and
+              IsProbablePrime(221 = 13 * 17) (exactly 7 calls, reject path), all buffers zero.
+              ssfrsa_ut.c "AUDIT RSA-12": KeyGen 2048 (1 call, the encode buf, then IsValid true);
+              IsValid on the OpenSSL fixture key, accept (11 calls) and reject (11 more), all
+              zero; and the fixture with d, dp, dq each incremented by one (new UT helper
+              _SSFRSAUTBumpInt) must be rejected.
+              RED (wipes and new checks stripped): ssfbn_ut.c:2432 and ssfrsa_ut.c:770
+              (_scrubDirty == 0). RED (wipes in, checks stripped): ssfrsa_ut.c:1522 (bumped key
+              accepted).
+              GREEN: ssfbn, ssfrsa, ssfec, ssfecdsa, ssfcms, ssfx509, ssfbase64url, ssfmatch.
+              Cost vs HEAD a0ae746 (x86-64 -O2, hooks compiled out, two runs): SSFBNGenPrime
+              1024-bit from 6 fixed seeds and SSFBNIsProbablePrime 1024-bit unchanged within
+              noise; SSFRSAPrivKeyIsValid 2048 157-162 us -> 165 us (+2..5%). Object size: ssfbn
+              +1091 / +152 bytes (-O2 / -Os, the seven inlined SSFBNZeroize calls), ssfrsa +352 /
+              +268. Docs: ssfbn.md (SSFBNIsProbablePrime, SSFBNGenPrime), ssfrsa.md
+              (SSFRSAPrivKeyIsValid checks, wiping, variable-time note). Linux direct gcc build;
+              ssfport.h test flags restored with git checkout.

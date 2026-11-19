@@ -30,6 +30,7 @@
 /* --------------------------------------------------------------------------------------------- */
 #include "ssfassert.h"
 #include "ssfbn.h"
+#include "ssfcrypt.h"
 #include "ssfusexport.h"
 
 /* --------------------------------------------------------------------------------------------- */
@@ -53,6 +54,13 @@
 #if SSF_CONFIG_BN_UNIT_TEST == 1
 /* Test-only count of variable-time SSFBNMod calls (AUDIT BN-10). */
 uint32_t _SSFBNModCallCount = 0u;
+
+/* Test-only hook fired after each secret local is wiped; NULL in production (AUDIT BN-11). */
+void (*_SSFBNScrubTestHook)(const void *buf, size_t len) = NULL;
+#define _SSF_BN_SCRUB_HOOK(p, n) \
+    do { if (_SSFBNScrubTestHook != NULL) { _SSFBNScrubTestHook((p), (n)); } } while (0)
+#else
+#define _SSF_BN_SCRUB_HOOK(p, n) do { } while (0)
 #endif /* SSF_CONFIG_BN_UNIT_TEST */
 
 /* --------------------------------------------------------------------------------------------- */
@@ -2712,6 +2720,7 @@ bool SSFBNIsProbablePrime(const SSFBN_t *n, uint16_t rounds, SSFPRNGContext_t *p
     SSFBNMONT_DEFINE(mont, SSF_BN_MAX_LIMBS);
     uint32_t s = 0;
     uint16_t round;
+    bool ok = false;
 
     SSF_REQUIRE(n != NULL);
     SSF_REQUIRE(n->limbs != NULL);
@@ -2803,7 +2812,7 @@ bool SSFBNIsProbablePrime(const SSFBN_t *n, uint16_t rounds, SSFPRNGContext_t *p
             if (SSFBNIsOne(&x))
             {
                 /* Yes, definitive composite via non-trivial sqrt(1). */
-                return false;
+                goto cleanup;
             }
         }
 
@@ -2811,11 +2820,29 @@ bool SSFBNIsProbablePrime(const SSFBN_t *n, uint16_t rounds, SSFPRNGContext_t *p
         if (cont == false)
         {
             /* No, this witness proves n composite. */
-            return false;
+            goto cleanup;
         }
     }
 
-    return true;
+    ok = true;
+
+cleanup:
+    /* Wipe every working value derived from the candidate (AUDIT BN-11) */
+    SSFBNZeroize(&nm1);
+    _SSF_BN_SCRUB_HOOK(nm1.limbs, (size_t)nm1.cap * sizeof(SSFBNLimb_t));
+    SSFBNZeroize(&d);
+    _SSF_BN_SCRUB_HOOK(d.limbs, (size_t)d.cap * sizeof(SSFBNLimb_t));
+    SSFBNZeroize(&a);
+    _SSF_BN_SCRUB_HOOK(a.limbs, (size_t)a.cap * sizeof(SSFBNLimb_t));
+    SSFBNZeroize(&x);
+    _SSF_BN_SCRUB_HOOK(x.limbs, (size_t)x.cap * sizeof(SSFBNLimb_t));
+    SSFBNZeroize(&nm3);
+    _SSF_BN_SCRUB_HOOK(nm3.limbs, (size_t)nm3.cap * sizeof(SSFBNLimb_t));
+    SSFBNZeroize(&mont.mod);
+    _SSF_BN_SCRUB_HOOK(mont.mod.limbs, (size_t)mont.mod.cap * sizeof(SSFBNLimb_t));
+    SSFBNZeroize(&mont.rr);
+    _SSF_BN_SCRUB_HOOK(mont.rr.limbs, (size_t)mont.rr.cap * sizeof(SSFBNLimb_t));
+    return ok;
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -2890,9 +2917,19 @@ bool SSFBNGenPrime(SSFBN_t *p, uint16_t bitLen, uint16_t rounds, SSFPRNGContext_
         }
 
         /* Yes, confirm with Miller-Rabin. */
-        if (SSFBNIsProbablePrime(p, rounds, prng)) return true;
+        /* Is the candidate a probable prime? */
+        if (SSFBNIsProbablePrime(p, rounds, prng))
+        {
+            /* Yes, wipe the candidate bytes and accept (AUDIT BN-11) */
+            SSFCryptSecureZero(buf, sizeof(buf));
+            _SSF_BN_SCRUB_HOOK(buf, sizeof(buf));
+            return true;
+        }
+        /* No, draw another candidate */
     }
 
+    SSFCryptSecureZero(buf, sizeof(buf));
+    _SSF_BN_SCRUB_HOOK(buf, sizeof(buf));
     return false;
 }
 

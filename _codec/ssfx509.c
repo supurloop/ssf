@@ -383,9 +383,18 @@ static bool _SSFX509ParseDN(const SSFASN1Cursor_t *nameCursor, SSFX509Name_t *na
             /* Attribute value is one of the supported string types? */
             if (!SSFASN1DecGetString(&attrInner, &val, &valLen, &strTag, &attrInner))
             {
-                /* No, leave it unnamed; the raw DN still serves name comparison */
+                /* No, it must still be one TLV; leave it unnamed, the raw DN serves comparison */
+                if (!SSFASN1DecGetTLV(&attrInner, &strTag, &val, &valLen, &attrInner)) return false;
+                if (!SSFASN1DecIsEmpty(&attrInner)) return false;
                 continue;
             }
+            /* Is anything left after the attribute value (AUDIT X509-19)? */
+            if (!SSFASN1DecIsEmpty(&attrInner))
+            {
+                /* Yes, malformed */
+                return false;
+            }
+            /* No */
 
             /* Match OID to DN field */
             if (_SSFX509OIDMatch(oidRaw, oidRawLen, _oidCN, sizeof(_oidCN)))
@@ -646,6 +655,9 @@ static bool _SSFX509ParseExtensions(const SSFASN1Cursor_t *extsCursor, SSFX509Ce
             if (SSFASN1DecOpenConstructed(&akidCursor, SSF_ASN1_TAG_SEQUENCE, &akidInner,
                                           &akidCursor))
             {
+                const uint8_t *akidVal;
+                uint32_t akidValLen;
+
                 if (!SSFASN1DecIsEmpty(&akidInner) && SSFASN1DecPeekTag(&akidInner, &tag))
                 {
                     if (tag == SSF_ASN1_CONTEXT_IMPLICIT(0))
@@ -660,6 +672,27 @@ static bool _SSFX509ParseExtensions(const SSFASN1Cursor_t *extsCursor, SSFX509Ce
                         /* Yes */
                     }
                 }
+                /* Is the next field authorityCertIssuer [1]? */
+                if (SSFASN1DecPeekTag(&akidInner, &tag) && (tag == 0xA1u))
+                {
+                    /* Yes, skip it */
+                    if (!SSFASN1DecGetTLV(&akidInner, &tag, &akidVal, &akidValLen, &akidInner))
+                        return false;
+                }
+                /* No, is the next field authorityCertSerialNumber [2]? */
+                if (SSFASN1DecPeekTag(&akidInner, &tag) && (tag == 0x82u))
+                {
+                    /* Yes, skip it */
+                    if (!SSFASN1DecGetTLV(&akidInner, &tag, &akidVal, &akidValLen, &akidInner))
+                        return false;
+                }
+                /* Is anything else, or anything out of order, in the SEQUENCE (AUDIT X509-19)? */
+                if (!SSFASN1DecIsEmpty(&akidInner))
+                {
+                    /* Yes, malformed */
+                    return false;
+                }
+                /* No */
                 /* Is anything left after the AuthorityKeyIdentifier SEQUENCE (AUDIT X509-12)? */
                 if (!SSFASN1DecIsEmpty(&akidCursor))
                 {
@@ -682,7 +715,9 @@ static bool _SSFX509ParseExtensions(const SSFASN1Cursor_t *extsCursor, SSFX509Ce
                 {
                     const uint8_t *ekuOid;
                     uint32_t ekuOidLen;
-                    if (!SSFASN1DecGetOIDRaw(&ekuInner, &ekuOid, &ekuOidLen, &ekuInner)) break;
+                    /* A non-OID element is malformed, not the end of the list (X509-19) */
+                    if (!SSFASN1DecGetOIDRaw(&ekuInner, &ekuOid, &ekuOidLen, &ekuInner))
+                        return false;
                     if (_SSFX509OIDMatch(ekuOid, ekuOidLen, _oidEkuServerAuth,
                                   sizeof(_oidEkuServerAuth)))
                     {
@@ -775,7 +810,13 @@ static bool _SSFX509ParseExtensions(const SSFASN1Cursor_t *extsCursor, SSFX509Ce
                         /* No, a subtree that cannot be read must not be dropped */
                         return false;
                     }
-                    /* Yes */
+                    /* Yes, is minimum (DEFAULT 0) or maximum encoded (AUDIT X509-19)? */
+                    if (!SSFASN1DecIsEmpty(&gsInner))
+                    {
+                        /* Yes, RFC 5280 forbids both, so the subtree is malformed */
+                        return false;
+                    }
+                    /* No */
 
                     /* Is it a dNSName [2] or iPAddress [7], the forms that are enforced? */
                     if ((gnTag == 0x82u) || (gnTag == 0x87u))
@@ -867,8 +908,8 @@ bool SSFX509Parse(const uint8_t *der, uint32_t derLen, SSFX509Cert_t *cert)
             return false;
         if (!SSFASN1DecGetIntU64(&verInner, &ver, &verInner)) return false;
 
-        /* Version defined by RFC 5280 Section 4.1.2.1 (v1, v2, v3)? */
-        if (ver > 2u)
+        /* Version v2 or v3 (v1 is DEFAULT, so DER omits it, AUDIT X509-19)? */
+        if ((ver == 0u) || (ver > 2u) || (!SSFASN1DecIsEmpty(&verInner)))
         {
             /* No, malformed certificate */
             return false;
@@ -912,6 +953,14 @@ bool SSFX509Parse(const uint8_t *der, uint32_t derLen, SSFX509Cert_t *cert)
     if (!SSFASN1DecGetTime(&validityInner, &cert->notBefore, &validityInner)) return false;
     if (!SSFASN1DecGetTime(&validityInner, &cert->notAfter, &validityInner)) return false;
 
+    /* Is anything left after notAfter (AUDIT X509-19)? */
+    if (!SSFASN1DecIsEmpty(&validityInner))
+    {
+        /* Yes, malformed */
+        return false;
+    }
+    /* No */
+
     /* Subject Name */
     {
         const uint8_t *subjectStart = pos.buf;
@@ -944,12 +993,35 @@ bool SSFX509Parse(const uint8_t *der, uint32_t derLen, SSFX509Cert_t *cert)
                 }
                 /* Yes */
             }
+            /* No, is it one other parameter TLV (RSA NULL, RSA-PSS SEQUENCE)? */
+            else
+            {
+                const uint8_t *pkParam;
+                uint32_t pkParamLen;
+                if (!SSFASN1DecGetTLV(&pkAlgInner, &tag, &pkParam, &pkParamLen, &pkAlgInner))
+                    return false;
+            }
+            /* Is anything left after the algorithm parameter (AUDIT X509-19)? */
+            if (!SSFASN1DecIsEmpty(&pkAlgInner))
+            {
+                /* Yes, malformed */
+                return false;
+            }
+            /* No */
         }
     }
     /* Public key BIT STRING */
     if (!SSFASN1DecGetBitString(&spkiInner, &cert->pubKey, &cert->pubKeyLen,
                                 &cert->pubKeyUnusedBits, &spkiInner))
         return false;
+
+    /* Is anything left after the public key BIT STRING (AUDIT X509-19)? */
+    if (!SSFASN1DecIsEmpty(&spkiInner))
+    {
+        /* Yes, malformed */
+        return false;
+    }
+    /* No */
 
     /* Is the public key a partial octet (no supported key format is, AUDIT ASN1-5)? */
     if (cert->pubKeyUnusedBits != 0u)

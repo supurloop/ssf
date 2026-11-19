@@ -36,7 +36,7 @@ SUMMARY
   Critical   0
   High       0
   Medium     1       ASN1-14 (FIXED)
-  Low        5       FIXED: X509-17, X509-18   OPEN: X509-19, X509-20, MATCH-4
+  Low        5       FIXED: X509-17, X509-18, X509-19   OPEN: X509-20, MATCH-4
 
   Carried over from AUDIT.txt, re-checked (not re-counted): X509-16 (SANs past
   SSF_X509_CONFIG_MAX_SAN_ENTRIES escaped dNSName / iPAddress Name Constraints), FIXED
@@ -164,7 +164,7 @@ X509-18  Low  FIXED (2026-11-19)  [code-read; fix verified red/green]
              subordinate with an iPAddress SAN is rejected as for other unenforced forms
              (recommended). (2) Implement 32-byte IPv6 address+mask matching.
 
-X509-19  Low  OPEN  [code-read]
+X509-19  Low  FIXED (2026-11-19)  [code-read; fix verified red/green]
   Location:  ssfx509.c _SSFX509ParseDN (:347-408), SSFX509Parse validity (:909-913) and SPKI
              (:924-957), AKID (:642-670), EKU (:672-715), Name Constraints GeneralSubtree
              (:770-800), version (:860-876)
@@ -270,3 +270,22 @@ CHANGE LOG
               GREEN: ssfx509, ssfcms, ssfbase64url, ssfmatch. Docs: ssfx509.md (SAN note, Name
               Constraints iPAddress note, hostname matching, SSFX509MatchIPAddress, MAX_SAN_ENTRIES
               row). Linux direct gcc build.
+  2026-11-19  X509-19 FIXED via option 1. SSFX509Parse and its helpers now reject: data after
+              notAfter in Validity; data after the key algorithm parameter (an EC curve OID, or
+              any one other TLV such as RSA NULL or RSA-PSS parameters) and after the
+              subjectPublicKey BIT STRING; a Name attribute with no value or with data after
+              it; in the AKID, anything other than [0], [1], [2] in that order (the finding's
+              "nothing after keyIdentifier" was corrected while fixing: authorityCertIssuer [1]
+              and authorityCertSerialNumber [2] are legal and still accepted); a non-OID EKU
+              element (was a silent break); a GeneralSubtree with minimum or maximum; and an
+              explicitly encoded [0] version of v1.
+              Tests: ssfx509_ut.c "AUDIT X509-19": an OpenSSL 3.5 self-signed P-256 certificate
+              parses, and five copies of it each with one structure altered and re-encoded
+              (parse-only, signature not valid) do not; generated certificates cover AKID with
+              all three fields (accepted), AKID with a trailing NULL or out of order, EKU with a
+              NULL element, and GeneralSubtree with maximum or minimum (all rejected).
+              RED: ssfx509_ut.c:8801 (Validity trailing NULL accepted). Every negative case was
+              also confirmed to parse with the old ssfx509.c, so each assertion tests a new check.
+              GREEN: ssfx509, ssfcms, ssfbase64url, ssfmatch; existing v1, RSA and real-world
+              certificate vectors unchanged. Docs: ssfx509.md parse-strictness note. Linux direct
+              gcc build.

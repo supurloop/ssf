@@ -115,7 +115,13 @@ X.509 v3 certificate support per RFC 5280, built on [`ssfasn1`](ssfasn1.md):
   retained would escape the critical-extension and duplicate checks. Trailing data is rejected
   everywhere: after the signature, after the certificate (so `derLen` must be exactly the
   certificate's length), after the TBS fields, after the Extensions SEQUENCE, after an
-  extension's value, and after a recognized extension's decoded body. Extensions in a v1 or v2
+  extension's value, and after a recognized extension's decoded body. Inside the TBS the
+  structures are also closed (AUDIT X509-19): nothing may follow `notAfter` in Validity, the
+  subjectPublicKey BIT STRING, the key algorithm's single parameter (curve OID, RSA NULL or
+  RSA-PSS parameters), or an attribute value in a Name; an Authority Key Identifier holds only
+  `[0]`, `[1]`, `[2]` in that order; every Extended Key Usage element must be an OID; a Name
+  Constraints GeneralSubtree carries no `minimum` or `maximum`; and an explicit `[0]` version of
+  v1, a DEFAULT value DER omits, is rejected. Extensions in a v1 or v2
   certificate are rejected. A SAN entry must be a context-specific GeneralName choice `[0]`..`[8]`,
   constructed exactly for `otherName`, `x400Address`, `directoryName` and `ediPartyName`; any
   other element fails the parse. Unknown extensions and unknown SAN types are retained without

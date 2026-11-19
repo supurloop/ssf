@@ -49,6 +49,10 @@
 /* Maximum RFC 6979 candidates Sign tries when r or s is zero (AUDIT ECDSA-1). */
 #define SSF_ECDSA_SIGN_MAX_ATTEMPTS (8u)
 
+#if (SSF_ECDSA_CONFIG_VERIFY_AFTER_SIGN != 0u) && (SSF_ECDSA_CONFIG_VERIFY_AFTER_SIGN != 1u)
+#error SSF_ECDSA_CONFIG_VERIFY_AFTER_SIGN must be 0 or 1.
+#endif
+
 #if SSF_CONFIG_ECDSA_UNIT_TEST == 1
 /* Test-only exit hooks fired AFTER zeroization, BEFORE return; NULL in production. */
 void (*_SSFECDSASignTestExitHook)(void *ctx,
@@ -71,6 +75,9 @@ void *_SSFECDSAKeyGenTestExitHookCtx = NULL;
 
 /* Test-only fault injection (AUDIT ECDSA-1): Sign treats its first N attempts as r == 0. */
 uint8_t _SSFECDSASignTestForcedRetries = 0u;
+
+/* Test-only fault injection (AUDIT ECDSA-5): 1 flips r, 2 flips d, 3 flips e before s. */
+uint8_t _SSFECDSASignTestFault = 0u;
 #endif /* SSF_CONFIG_ECDSA_UNIT_TEST */
 
 /* --------------------------------------------------------------------------------------------- */
@@ -665,6 +672,12 @@ bool SSFECDSAPubKeyIsValid(SSFECCurve_t curve, const uint8_t *pubKey, size_t pub
 }
 
 #if SSF_ECDSA_CONFIG_ENABLE_SIGN == 1
+#if SSF_ECDSA_CONFIG_VERIFY_AFTER_SIGN == 1
+static bool _SSFECDSASignSelfCheck(SSFECCurve_t curve, const SSFECCurveParams_t *c,
+                                   const uint8_t *privKey, size_t privKeyLen, const uint8_t *hash,
+                                   size_t hashLen, const SSFBN_t *r, const SSFBN_t *s);
+#endif /* SSF_ECDSA_CONFIG_VERIFY_AFTER_SIGN */
+
 /* --------------------------------------------------------------------------------------------- */
 /* Signs a message hash using ECDSA with deterministic nonce (RFC 6979 / FIPS 186-4 Sec. 6.4).   */
 /* --------------------------------------------------------------------------------------------- */
@@ -733,6 +746,13 @@ bool SSFECDSASign(SSFECCurve_t curve, const uint8_t *privKey, size_t privKeyLen,
             continue;
         }
 
+#if SSF_CONFIG_ECDSA_UNIT_TEST == 1
+        /* Test-only fault injection into r, d or e before s is computed (AUDIT ECDSA-5) */
+        if (_SSFECDSASignTestFault == 1u) r.limbs[0] ^= 1u;
+        if (_SSFECDSASignTestFault == 2u) d.limbs[0] ^= 1u;
+        if (_SSFECDSASignTestFault == 3u) e.limbs[0] ^= 1u;
+#endif /* SSF_CONFIG_ECDSA_UNIT_TEST */
+
         /* No, s = k^(-1) * (e + r * d) mod n */
         if (!SSFBNModInv(&kInv, &k, &c->n)) goto cleanup;
 
@@ -753,10 +773,23 @@ bool SSFECDSASign(SSFECCurve_t curve, const uint8_t *privKey, size_t privKeyLen,
     /* Did every attempt produce r == 0 or s == 0? */
     if (!found) goto cleanup;
 
+#if SSF_ECDSA_CONFIG_VERIFY_AFTER_SIGN == 1
+    /* Does (r, s) verify under a fresh Q = d * G and e, ruling out a fault (AUDIT ECDSA-5)? */
+    if (!_SSFECDSASignSelfCheck(curve, c, privKey, privKeyLen, hash, hashLen, &r, &s))
+    {
+        /* No, a fault corrupted the signature; release nothing */
+        goto cleanup;
+    }
+    /* Yes, the signature is consistent with privKey and hash */
+#endif /* SSF_ECDSA_CONFIG_VERIFY_AFTER_SIGN */
+
     /* DER-encode the signature. */
     ok = _SSFECDSASigEncode(&r, &s, c, sig, sigSize, sigLen);
 
 cleanup:
+    /* Wipe r and s too: a faulty (r, s) next to a correct one reveals d (AUDIT ECDSA-5). */
+    SSFBNZeroize(&r);
+    SSFBNZeroize(&s);
     /* Wipe every secret-derived limb (d, k, kInv, tmp, R/Rx/Ry; e wiped for audit uniformity). */
     SSFBNZeroize(&d);
     SSFBNZeroize(&k);
@@ -857,6 +890,63 @@ static bool _SSFECDSAVerifyCheckR(const SSFECCurveParams_t *c, SSFECCurve_t curv
     }
     return false;
 }
+
+#if (SSF_ECDSA_CONFIG_ENABLE_SIGN == 1) && (SSF_ECDSA_CONFIG_VERIFY_AFTER_SIGN == 1)
+/* --------------------------------------------------------------------------------------------- */
+/* If (r, s) verifies under freshly derived Q = d * G and e returns true, else false.            */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFECDSASignSelfCheck(SSFECCurve_t curve, const SSFECCurveParams_t *c,
+                                   const uint8_t *privKey, size_t privKeyLen, const uint8_t *hash,
+                                   size_t hashLen, const SSFBN_t *r, const SSFBN_t *s)
+{
+    SSFBN_DEFINE(dQ, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(e, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(w, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(u1, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(u2, SSF_EC_MAX_LIMBS);
+    SSFECPOINT_DEFINE(Q, SSF_EC_MAX_LIMBS);
+    SSFECPOINT_DEFINE(R, SSF_EC_MAX_LIMBS);
+    bool ok = false;
+
+    SSF_REQUIRE((curve > SSF_EC_CURVE_MIN) && (curve < SSF_EC_CURVE_MAX));
+    SSF_REQUIRE(c != NULL);
+    SSF_REQUIRE(privKey != NULL);
+    SSF_REQUIRE(privKeyLen == c->bytes);
+    SSF_REQUIRE(hash != NULL);
+    SSF_REQUIRE((hashLen > 0u) && (hashLen <= SSF_SHA2_512_BYTE_SIZE));
+    SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(r->limbs != NULL);
+    SSF_REQUIRE(r->len == c->limbs);
+    SSF_REQUIRE(s != NULL);
+    SSF_REQUIRE(s->limbs != NULL);
+    SSF_REQUIRE(s->len == c->limbs);
+
+    /* Q = d * G from a second import of privKey, independent of the d that signed */
+    if (!SSFBNFromBytes(&dQ, privKey, privKeyLen, c->limbs)) goto cleanup;
+    _SSFECDSAScalarMulBase(&Q, &dQ, curve);
+
+    /* e recomputed from hash, independent of the e that signed */
+    _SSFECDSABits2Int(&e, hash, hashLen, c);
+    if (SSFBNCmp(&e, &c->n) >= 0) SSFBNSub(&e, &e, &c->n);
+
+    /* Standard verify on the public (r, s): u1 = e / s, u2 = r / s, R = u1 * G + u2 * Q */
+    if (!SSFBNModInvExt(&w, s, &c->n)) goto cleanup;
+    SSFBNModMul(&u1, &e, &w, &c->n);
+    SSFBNModMul(&u2, r, &w, &c->n);
+    if (!_SSFECDSAVerifyGetR(c, curve, &u1, &u2, &Q, &R)) goto cleanup;
+    ok = _SSFECDSAVerifyCheckR(c, curve, &R, r);
+
+cleanup:
+    SSFBNZeroize(&dQ);
+    SSFBNZeroize(&Q.x);
+    SSFBNZeroize(&Q.y);
+    SSFBNZeroize(&Q.z);
+    SSFBNZeroize(&R.x);
+    SSFBNZeroize(&R.y);
+    SSFBNZeroize(&R.z);
+    return ok;
+}
+#endif /* SSF_ECDSA_CONFIG_ENABLE_SIGN && SSF_ECDSA_CONFIG_VERIFY_AFTER_SIGN */
 
 #if SSF_CONFIG_ECDSA_UNIT_TEST == 1
 /* Test-only wrapper that exposes _SSFECDSAVerifyCheckR for unit tests that synthesize R.        */

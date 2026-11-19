@@ -130,6 +130,9 @@ extern void *_SSFECDSAKeyGenTestExitHookCtx;
 
 /* Test-only fault injection (AUDIT ECDSA-1): Sign treats its first N attempts as r == 0. */
 extern uint8_t _SSFECDSASignTestForcedRetries;
+
+/* Test-only fault injection (AUDIT ECDSA-5): 1 flips r, 2 flips d, 3 flips e before s. */
+extern uint8_t _SSFECDSASignTestFault;
 #endif /* SSF_CONFIG_ECDSA_UNIT_TEST */
 
 #ifdef __cplusplus

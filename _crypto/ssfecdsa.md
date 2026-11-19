@@ -62,6 +62,36 @@ Two design choices worth calling out up front:
   [`SSFECDSASign()`](#ssfecdsasign) consumes randomness. The signature nonce is
   `HMAC-SHA(privateKey, hash)`-derived per RFC 6979. Signatures are deterministic:
   identical inputs produce identical signatures.
+- **Fault-attack defence is optional and off by default.** Deterministic nonces make a single
+  faulty signature dangerous: a glitch, brownout or bit flip during signing yields a bad
+  `(r', s')` that, together with a correct signature of the same hash, reveals the private key
+  (differential fault attack on deterministic ECDSA). Setting
+  `SSF_ECDSA_CONFIG_VERIFY_AFTER_SIGN` to `1` makes [`SSFECDSASign()`](#ssfecdsasign) verify
+  every signature before releasing it: it re-derives the public key `Q = d·G` from a second
+  import of `privKey` and the digest integer `e` from `hash`, runs the standard verify on
+  `(r, s)`, and returns `false` without writing `sig` or `sigLen` if the check fails. This is
+  the same verify-after-sign defence [`ssfed25519`](ssfed25519.md) and [`ssfrsa`](ssfrsa.md)
+  always apply.
+
+  The option defaults to `0` because the check costs one fixed-base scalar multiplication plus
+  one verify per signature, which makes signing about 5× slower. Measured on an x86-64 host,
+  P-256 signing goes from ~0.36 ms to ~1.8 ms and P-384 from ~0.7 ms to ~3.4 ms; on an MCU the
+  absolute cost scales accordingly. With the default, a fault during signing is not detected
+  and the faulty signature is returned as if it were valid.
+
+  Turn it on when both of these apply:
+  - an attacker can get physical access to the device and inject faults (voltage or clock
+    glitching, EM or laser pulses), or the device runs where natural faults (unstable supply,
+    radiation, marginal flash) are plausible; **and**
+  - the device may sign the same hash more than once, or an attacker can obtain a second,
+    correct signature of a hash whose faulty signature was released (for example by asking
+    again after a glitched attempt).
+
+  Leaving it off is reasonable when signing happens in a controlled environment (a host or
+  HSM-adjacent service with no physical attacker), or when each hash is signed exactly once.
+  With the option off, a caller can still protect selected signatures by passing each one to
+  [`SSFECDSAVerify()`](#ssfecdsaverify) with its public key before releasing it. That is the
+  same check at a similar cost, applied only where the caller chooses.
 - **Hash-algorithm pinning per curve.** The recommended pairing is:
 
   | Curve | Recommended hash | `hashLen` |
@@ -132,6 +162,7 @@ through from [`ssfec`](ssfec.md#configuration) via `SSF_EC_CONFIG_ENABLE_P256` /
 
 | Macro | Default | Description |
 |-------|---------|-------------|
+| `SSF_ECDSA_CONFIG_VERIFY_AFTER_SIGN` | `0` | When `1`, `SSFECDSASign` verifies every signature before releasing it, so a fault during signing returns `false` instead of a faulty signature that could reveal the private key. Off by default because it makes signing about 5× slower; turn it on for devices exposed to fault injection that may sign the same hash more than once (see [Notes](#notes)). Ignored when `SSF_ECDSA_CONFIG_ENABLE_SIGN` is `0`. |
 | `SSF_ECDSA_CONFIG_ENABLE_SIGN` | `1` | Compile `SSFECDSASign` and the DER-encode helper. Setting to `0` drops them — and drops the only `ssfasn1` reference in this module. The verify path was refactored so DER-input parsing is purely byte-level (no `ssfasn1` calls), so a verify-only build can omit the entire `ssfasn1` module from its project. `SSFECDSAVerify`, `SSFECDSAKeyGen`, and `SSFECDHComputeSecret` are unaffected. |
 
 The [`SSF_CRYPT_PROFILE_MIN_MEMORY`](ssfcrypt.md#configuration) profile defaults
@@ -296,7 +327,9 @@ matching the curve, so calling twice with the same inputs yields the same signat
 | `sigLen` | out | `size_t *` | Actual bytes written to `sig`. |
 
 **Returns:** `true` on success; `false` if the private key is invalid, the output buffer is
-too small, or (never in practice) all 8 RFC 6979 candidates gave `r == 0` or `s == 0`.
+too small, (never in practice) all 8 RFC 6979 candidates gave `r == 0` or `s == 0`, or,
+with `SSF_ECDSA_CONFIG_VERIFY_AFTER_SIGN` set to `1` (default `0`), the produced signature failed its own
+verification (a fault during signing). A signature that fails that check is never written to `sig`.
 
 <a id="ex-sign"></a>
 

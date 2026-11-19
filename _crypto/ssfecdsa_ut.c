@@ -854,6 +854,59 @@ void SSFECDSAUnitTest(void)
         _SSFECDSASignTestForcedRetries = 0u;
     }
 
+    /* ---- AUDIT ECDSA-5: a faulted signature is never released (verify-after-sign) ---- */
+    /* RFC 6979 k is deterministic, so one faulty plus one correct signature of the same hash  */
+    /* reveal d. The hook _SSFECDSASignTestFault flips bit 0 of r (a fault in R = kG), of d or */
+    /* of e just before s is computed. Sign must return false with sig and sigLen untouched,  */
+    /* and the same call without a fault must still sign and verify.                           */
+#if SSF_ECDSA_CONFIG_VERIFY_AFTER_SIGN == 1
+    {
+        static const uint8_t privKey[] = {
+            0xC9u, 0xAFu, 0xA9u, 0xD8u, 0x45u, 0xBAu, 0x75u, 0x16u,
+            0x6Bu, 0x5Cu, 0x21u, 0x57u, 0x67u, 0xB1u, 0xD6u, 0x93u,
+            0x4Eu, 0x50u, 0xC3u, 0xDBu, 0x36u, 0xE8u, 0x9Bu, 0x12u,
+            0x7Bu, 0x8Au, 0x62u, 0x2Bu, 0x12u, 0x0Fu, 0x67u, 0x21u
+        };
+        static const uint8_t pubKey[] = {
+            0x04u,
+            0x60u, 0xFEu, 0xD4u, 0xBAu, 0x25u, 0x5Au, 0x9Du, 0x31u,
+            0xC9u, 0x61u, 0xEBu, 0x74u, 0xC6u, 0x35u, 0x6Du, 0x68u,
+            0xC0u, 0x49u, 0xB8u, 0x92u, 0x3Bu, 0x61u, 0xFAu, 0x6Cu,
+            0xE6u, 0x69u, 0x62u, 0x2Eu, 0x60u, 0xF2u, 0x9Fu, 0xB6u,
+            0x79u, 0x03u, 0xFEu, 0x10u, 0x08u, 0xB8u, 0xBCu, 0x99u,
+            0xA4u, 0x1Au, 0xE9u, 0xE9u, 0x56u, 0x28u, 0xBCu, 0x64u,
+            0xF2u, 0xF1u, 0xB2u, 0x0Cu, 0x2Du, 0x7Eu, 0x9Fu, 0x51u,
+            0x77u, 0xA3u, 0xC2u, 0x94u, 0xD4u, 0x46u, 0x22u, 0x99u
+        };
+        uint8_t hash[32];
+        uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
+        size_t sigLen;
+        size_t i;
+        uint8_t mode;
+
+        SSFSHA256((const uint8_t *)"sample", 6, hash, sizeof(hash));
+
+        /* Fault in r, d, then e: each must be caught. */
+        for (mode = 1u; mode <= 3u; mode++)
+        {
+            memset(sig, 0xA5, sizeof(sig));
+            sigLen = 0x5A5Au;
+            _SSFECDSASignTestFault = mode;
+            SSF_ASSERT(SSFECDSASign(SSF_EC_CURVE_P256, privKey, sizeof(privKey), hash,
+                                    sizeof(hash), sig, sizeof(sig), &sigLen) == false);
+            _SSFECDSASignTestFault = 0u;
+            SSF_ASSERT(sigLen == 0x5A5Au);
+            for (i = 0; i < sizeof(sig); i++) SSF_ASSERT(sig[i] == 0xA5u);
+        }
+
+        /* No fault: the same call signs and the signature verifies. */
+        SSF_ASSERT(SSFECDSASign(SSF_EC_CURVE_P256, privKey, sizeof(privKey), hash, sizeof(hash),
+                                sig, sizeof(sig), &sigLen) == true);
+        SSF_ASSERT(SSFECDSAVerify(SSF_EC_CURVE_P256, pubKey, sizeof(pubKey), hash, sizeof(hash),
+                                  sig, sigLen) == true);
+    }
+#endif /* SSF_ECDSA_CONFIG_VERIFY_AFTER_SIGN */
+
     /* ---- AUDIT ECDSA-2: the RFC 6979 nonce HMAC follows the digest's hash, not the curve ---- */
     /* RFC 6979 Sec. 3.2 derives k with HMAC over the message hash function H. Sign used the     */
     /* curve's hash (SHA-256 for P-256, SHA-384 for P-384) for any digest, so non-matching      */

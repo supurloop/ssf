@@ -1315,4 +1315,16 @@ CHANGE LOG
               Cortex-M0+ 18923 -> 18896 B (-27). Stack: frame unchanged (56 / 128 B). Speed:
               neutral (n = 8..64, x86-64 and ARM32); GenPrime identical primes, 53.4 ->
               53.2 ms. Docs: ssfbn.md SSFBNSquare.
+  2026-11-19  SQ-CT AUDIT (Jim: "Commit, then do audit"). Bounds: r[2i] + low(sq) + carry
+              <= 3 * (2^32 - 1); high(sq) <= 2^32 - 2, so r[2i + 1] + high(sq) + 1 fits; the
+              carry is 0 or 1 and the dropped final carry is 0 because a^2 < 2^(64n).
+              Sweep for the same defect: every while loop in ssfbn.c is in a function
+              documented variable-time (BitLen, TrailingZeros, shift-subtract Mod / DivMod,
+              Gcd, both ModInvExt paths) or bounded by a public length or count (MontInit's
+              w, the wipe, Random / GenPrime byte counts); ToBytes' value-dependent scan is in
+              its minimal-length path, not a constant-time entry. Every branch in the
+              constant-time list depends only on public data (modulus parity, operand
+              lengths, ModInv's a == 0 rejection, documented). No further findings.
+              SSFBNModSquare is now constant-time for odd moduli within SSF_BN_MAX_MOD_LIMBS,
+              as BN-O7 documented.
 

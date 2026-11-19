@@ -155,7 +155,7 @@ ASN1-2  Medium  FIXED (2026-11-18)  [demonstrated]
              _SSFASN1LenFieldSize(len) == headerLenBytes) (recommended)
              (2) Document BER-length tolerance and leave strictness to the callers.
 
-ASN1-3  Medium  OPEN  [demonstrated]
+ASN1-3  Medium  FIXED (2026-11-18)  [demonstrated]
   Location:  ssfasn1.c:211-224 (SSFASN1DecGetInt)
   Problem:   No INTEGER validation at all. A zero-length body is accepted, and so are
              non-minimal leading 00/FF octets and negative values. md:74-77 gives "an INTEGER
@@ -1278,3 +1278,24 @@ CHANGE LOG
               existing fixture used a non-minimal length. RED: ssfasn1_ut.c:132. GREEN:
               ssfasn1, ssfx509, ssfcms, ssfrsa, ssfecdsa, ssfbase64url, ssfmatch (ASN1, RSA and
               ECDSA unit tests enabled for the run; flags restored).
+  2026-11-18  ASN1-3 FIXED via option 1, with certificate serials included (Jim approved the
+              ssfrsa change). ssfasn1: new private _SSFASN1IsMinimalSigned; SSFASN1DecGetInt
+              rejects an empty body, a leading 00 before a byte < 0x80 and a leading FF before a
+              byte >= 0x80 (values stay two's complement; negatives accepted). New public
+              SSFASN1DecGetUInt: same rules plus non-negative, returns the magnitude with the
+              0x00 sign octet removed (zero is one 00 byte). ssfrsa: its 5 SSFASN1DecGetInt
+              calls (_SSFRSADecIntToBN, n and e in _SSFRSAPubKeyDecode, the n and p width peeks
+              in the private-key decoder) now use SSFASN1DecGetUInt; the existing leading-zero
+              loops are left as harmless no-ops. ssfx509 serial (which already rejected
+              negatives) and the ssfcms signer serial now get the minimal check through
+              SSFASN1DecGetInt. ssfasn1.md (GetInt rules, GetUInt entry and table row) and
+              ssfrsa.md (key INTEGERs must be minimal and non-negative) updated. Tests: "AUDIT
+              ASN1-3" in ssfasn1_ut.c (GetInt rejects 02 00, 02 02 00 7F, 02 02 FF 80 and
+              accepts 0, 127, 128, -128, -1, -129 with the right body; GetUInt also rejects the
+              three negatives and returns 00, 7F, 80), ssfrsa_ut.c (the foreign 2048-bit key
+              with its sign byte removed, n negative, and with an extra 00, n padded, fail
+              SSFRSAPubKeyIsValid; the padded one also fails SSFRSAVerifyPKCS1) and
+              ssfx509_ut.c (serial 00 05 fails to parse, 00 85 parses). RED:
+              ssfasn1_ut.c:125, ssfrsa_ut.c:1493, ssfx509_ut.c:5461. GREEN: ssfasn1, ssfrsa,
+              ssfx509, ssfcms, ssfecdsa, ssfbase64url, ssfmatch (ASN1, RSA and ECDSA unit tests
+              enabled for the run; flags restored).

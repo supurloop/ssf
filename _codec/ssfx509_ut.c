@@ -5442,6 +5442,24 @@ void SSFX509UnitTest(void)
             caOut[at + 1u]++;
             SSF_ASSERT(SSFX509Parse(caOut, n, &parsed) == false);
         }
+
+        /* AUDIT ASN1-3: a serial with an unneeded leading 0x00 is not DER and fails to parse */
+        {
+            uint8_t padSerial[] = { 0x00u, 0x05u };
+            uint8_t okSerial[] = { 0x00u, 0x85u };
+
+            _utGenBaseParams(&p, okSerial, caPub, (uint32_t)caPubLen);
+            p.serialLen = sizeof(okSerial);
+            SSF_ASSERT(SSFX509EncodeCert(caOut, sizeof(caOut), &p, fakeSig, sizeof(fakeSig),
+                                         &n) == true);
+            SSF_ASSERT(SSFX509Parse(caOut, n, &parsed) == true);
+            SSF_ASSERT((parsed.serialLen == 2u) && (parsed.serial[1] == 0x85u));
+            _utGenBaseParams(&p, padSerial, caPub, (uint32_t)caPubLen);
+            p.serialLen = sizeof(padSerial);
+            SSF_ASSERT(SSFX509EncodeCert(caOut, sizeof(caOut), &p, fakeSig, sizeof(fakeSig),
+                                         &n) == true);
+            SSF_ASSERT(SSFX509Parse(caOut, n, &parsed) == false);
+        }
     }
 
     /* ---- A SAN GeneralName whose length overruns its SEQUENCE fails to parse ---- */

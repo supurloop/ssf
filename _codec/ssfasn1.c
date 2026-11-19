@@ -228,6 +228,31 @@ bool SSFASN1DecGetBool(const SSFASN1Cursor_t *cursor, bool *valOut, SSFASN1Curso
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Returns true if INTEGER content is non-empty, minimal two's complement DER (X.690 8.3.2).     */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFASN1IsMinimalSigned(const uint8_t *intBuf, uint32_t intLen)
+{
+    SSF_REQUIRE((intBuf != NULL) || (intLen == 0u));
+
+    /* Is the content empty? */
+    if (intLen == 0u)
+    {
+        /* Yes */
+        return false;
+    }
+    /* No, is the first octet a 0x00 or 0xFF that only repeats the next octet's sign bit? */
+    if ((intLen > 1u) &&
+        (((intBuf[0] == 0x00u) && ((intBuf[1] & 0x80u) == 0u)) ||
+         ((intBuf[0] == 0xFFu) && ((intBuf[1] & 0x80u) != 0u))))
+    {
+        /* Yes, not minimal */
+        return false;
+    }
+    /* No, minimal encoding */
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
 bool SSFASN1DecGetInt(const SSFASN1Cursor_t *cursor, const uint8_t **intBufOut, uint32_t *intLenOut,
                       SSFASN1Cursor_t *next)
 {
@@ -241,6 +266,14 @@ bool SSFASN1DecGetInt(const SSFASN1Cursor_t *cursor, const uint8_t **intBufOut, 
 
     if (!SSFASN1DecGetTLV(cursor, &tag, intBufOut, intLenOut, &after)) return false;
     if (tag != SSF_ASN1_TAG_INTEGER) return false;
+
+    /* Is the INTEGER empty or not minimally encoded (AUDIT ASN1-3)? */
+    if (!_SSFASN1IsMinimalSigned(*intBufOut, *intLenOut))
+    {
+        /* Yes */
+        return false;
+    }
+    /* No */
     *next = after; /* Advance only on success (AUDIT ASN1-7) */
     return true;
 }
@@ -299,6 +332,41 @@ bool SSFASN1DecGetIntU64(const SSFASN1Cursor_t *cursor, uint64_t *valOut, SSFASN
     {
         *valOut = (*valOut << 8) | intBuf[i];
     }
+    *next = after; /* Advance only on success (AUDIT ASN1-7) */
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+bool SSFASN1DecGetUInt(const SSFASN1Cursor_t *cursor, const uint8_t **uintBufOut,
+                       uint32_t *uintLenOut, SSFASN1Cursor_t *next)
+{
+    SSFASN1Cursor_t after;
+    const uint8_t *intBuf;
+    uint32_t intLen;
+
+    SSF_REQUIRE(cursor != NULL);
+    SSF_REQUIRE(uintBufOut != NULL);
+    SSF_REQUIRE(uintLenOut != NULL);
+    SSF_REQUIRE(next != NULL);
+
+    if (!SSFASN1DecGetInt(cursor, &intBuf, &intLen, &after)) return false;
+
+    /* Is the INTEGER negative (AUDIT ASN1-3)? */
+    if (!_SSFASN1IsMinimalUnsigned(intBuf, intLen))
+    {
+        /* Yes, not an unsigned value */
+        return false;
+    }
+    /* No, is there a 0x00 sign octet ahead of a set top bit? */
+    if ((intLen > 1u) && (intBuf[0] == 0x00u))
+    {
+        /* Yes, return the magnitude without it */
+        intBuf++;
+        intLen--;
+    }
+    /* No, the content is already the magnitude */
+    *uintBufOut = intBuf;
+    *uintLenOut = intLen;
     *next = after; /* Advance only on success (AUDIT ASN1-7) */
     return true;
 }

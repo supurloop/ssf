@@ -209,6 +209,7 @@ The unit-test entry point is gated by `SSF_CONFIG_ASN1_UNIT_TEST` in `ssfport.h`
 | | [`bool SSFASN1DecGetBool(cursor, valOut, next)`](#ssfasn1decgetbool) | Decode BOOLEAN |
 | | [`bool SSFASN1DecGetInt(cursor, intBufOut, intLenOut, next)`](#ssfasn1decgetint) | Decode INTEGER as a pointer into the source bytes |
 | | [`bool SSFASN1DecGetIntU64(cursor, valOut, next)`](#ssfasn1decgetintu64) | Decode INTEGER as a `uint64_t` |
+| | [`bool SSFASN1DecGetUInt(cursor, uintBufOut, uintLenOut, next)`](#ssfasn1decgetuint) | Decode a non-negative INTEGER as its magnitude bytes |
 | | [`bool SSFASN1DecGetBitString(cursor, bitsOut, bitsLenOut, unusedBitsOut, next)`](#ssfasn1decgetbitstring) | Decode BIT STRING — pointer + length + unused-bit count |
 | | [`bool SSFASN1DecGetOctetString(cursor, octetsOut, octetsLenOut, next)`](#ssfasn1decgetoctetstring) | Decode OCTET STRING |
 | | [`bool SSFASN1DecGetNull(cursor, next)`](#ssfasn1decgetnull) | Decode NULL |
@@ -387,8 +388,21 @@ bool SSFASN1DecGetInt(const SSFASN1Cursor_t *cursor, const uint8_t **intBufOut,
 ```
 Decode INTEGER as a pointer + length into the DER buffer. `*intBufOut` points at the
 INTEGER body bytes (the DER encoding — two's-complement big-endian, with the high bit of
-the first byte being the sign). The caller is responsible for any conversion (e.g., to a
+the first byte being the sign). Returns `false` for an empty body or one that is not minimal
+(a leading `0x00` before a byte below `0x80`, or a leading `0xFF` before a byte of `0x80` or
+more). Negative values are accepted; use [`SSFASN1DecGetUInt()`](#ssfasn1decgetuint) when the
+field must be non-negative. The caller is responsible for any conversion (e.g., to a
 `SSFBN_t` for arbitrary-precision use).
+
+<a id="ssfasn1decgetuint"></a>
+```c
+bool SSFASN1DecGetUInt(const SSFASN1Cursor_t *cursor, const uint8_t **uintBufOut,
+                       uint32_t *uintLenOut, SSFASN1Cursor_t *next);
+```
+Decode a non-negative INTEGER as a pointer + length into the DER buffer. Same minimal-form
+rules as `SSFASN1DecGetInt()`, and additionally returns `false` for a negative value. The
+`0x00` sign octet that a value with its top bit set carries is removed, so `*uintBufOut` /
+`*uintLenOut` are the big-endian magnitude (zero is one `0x00` byte).
 
 <a id="ssfasn1decgetintu64"></a>
 ```c

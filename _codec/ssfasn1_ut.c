@@ -97,6 +97,63 @@ void SSFASN1UnitTest(void)
         SSF_ASSERT(val == 0xDEADBEEFCAFEull);
     }
 
+    /* ---- AUDIT ASN1-3: GetInt requires a minimal two's-complement INTEGER ---- */
+    {
+        static const uint8_t iEmpty[] = { 0x02u, 0x00u };
+        static const uint8_t iPad00[] = { 0x02u, 0x02u, 0x00u, 0x7Fu };
+        static const uint8_t iPadFF[] = { 0x02u, 0x02u, 0xFFu, 0x80u };
+        static const uint8_t iZero[] = { 0x02u, 0x01u, 0x00u };
+        static const uint8_t i7F[] = { 0x02u, 0x01u, 0x7Fu };
+        static const uint8_t i128[] = { 0x02u, 0x02u, 0x00u, 0x80u };
+        static const uint8_t iNeg128[] = { 0x02u, 0x01u, 0x80u };
+        static const uint8_t iNeg1[] = { 0x02u, 0x01u, 0xFFu };
+        static const uint8_t iNeg129[] = { 0x02u, 0x02u, 0xFFu, 0x7Fu };
+        static const struct { const uint8_t *der; uint32_t len; } bad[] = {
+            { iEmpty, sizeof(iEmpty) }, { iPad00, sizeof(iPad00) }, { iPadFF, sizeof(iPadFF) }
+        };
+        static const struct { const uint8_t *der; uint32_t len; } good[] = {
+            { iZero, sizeof(iZero) }, { i7F, sizeof(i7F) }, { i128, sizeof(i128) },
+            { iNeg128, sizeof(iNeg128) }, { iNeg1, sizeof(iNeg1) }, { iNeg129, sizeof(iNeg129) }
+        };
+        const uint8_t *iBuf;
+        uint32_t iLen;
+        uint32_t i;
+
+        for (i = 0; i < (uint32_t)(sizeof(bad) / sizeof(bad[0])); i++)
+        {
+            cursor.buf = bad[i].der; cursor.bufLen = bad[i].len;
+            SSF_ASSERT(SSFASN1DecGetInt(&cursor, &iBuf, &iLen, &next) == false);
+        }
+        for (i = 0; i < (uint32_t)(sizeof(good) / sizeof(good[0])); i++)
+        {
+            cursor.buf = good[i].der; cursor.bufLen = good[i].len;
+            SSF_ASSERT(SSFASN1DecGetInt(&cursor, &iBuf, &iLen, &next) == true);
+            SSF_ASSERT((iBuf == &good[i].der[2]) && (iLen == (good[i].len - 2u)));
+        }
+
+        /* GetUInt: the same minimal forms, negatives rejected, sign octet removed */
+        for (i = 0; i < (uint32_t)(sizeof(bad) / sizeof(bad[0])); i++)
+        {
+            cursor.buf = bad[i].der; cursor.bufLen = bad[i].len;
+            SSF_ASSERT(SSFASN1DecGetUInt(&cursor, &iBuf, &iLen, &next) == false);
+        }
+        cursor.buf = iNeg128; cursor.bufLen = sizeof(iNeg128);
+        SSF_ASSERT(SSFASN1DecGetUInt(&cursor, &iBuf, &iLen, &next) == false);
+        cursor.buf = iNeg1; cursor.bufLen = sizeof(iNeg1);
+        SSF_ASSERT(SSFASN1DecGetUInt(&cursor, &iBuf, &iLen, &next) == false);
+        cursor.buf = iNeg129; cursor.bufLen = sizeof(iNeg129);
+        SSF_ASSERT(SSFASN1DecGetUInt(&cursor, &iBuf, &iLen, &next) == false);
+        cursor.buf = iZero; cursor.bufLen = sizeof(iZero);
+        SSF_ASSERT(SSFASN1DecGetUInt(&cursor, &iBuf, &iLen, &next) == true);
+        SSF_ASSERT((iLen == 1u) && (iBuf[0] == 0x00u) && (next.bufLen == 0u));
+        cursor.buf = i7F; cursor.bufLen = sizeof(i7F);
+        SSF_ASSERT(SSFASN1DecGetUInt(&cursor, &iBuf, &iLen, &next) == true);
+        SSF_ASSERT((iLen == 1u) && (iBuf[0] == 0x7Fu));
+        cursor.buf = i128; cursor.bufLen = sizeof(i128);
+        SSF_ASSERT(SSFASN1DecGetUInt(&cursor, &iBuf, &iLen, &next) == true);
+        SSF_ASSERT((iLen == 1u) && (iBuf == &i128[3]) && (iBuf[0] == 0x80u));
+    }
+
     /* ---- AUDIT ASN1-2: long-form lengths must be minimal (X.690 10.1) ---- */
     {
         static const uint8_t len81For3[] = { 0x30u, 0x81u, 0x03u, 0x02u, 0x01u, 0x05u };

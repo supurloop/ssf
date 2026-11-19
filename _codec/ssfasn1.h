@@ -135,6 +135,9 @@ bool SSFASN1DecGetBool(const SSFASN1Cursor_t *cursor, bool *valOut, SSFASN1Curso
 bool SSFASN1DecGetInt(const SSFASN1Cursor_t *cursor, const uint8_t **intBufOut, uint32_t *intLenOut,
                       SSFASN1Cursor_t *next);
 bool SSFASN1DecGetIntU64(const SSFASN1Cursor_t *cursor, uint64_t *valOut, SSFASN1Cursor_t *next);
+/* Non-negative INTEGER as a big-endian magnitude (0x00 sign octet removed) into the DER buffer. */
+bool SSFASN1DecGetUInt(const SSFASN1Cursor_t *cursor, const uint8_t **uintBufOut,
+                       uint32_t *uintLenOut, SSFASN1Cursor_t *next);
 bool SSFASN1DecGetBitString(const SSFASN1Cursor_t *cursor, const uint8_t **bitsOut,
                             uint32_t *bitsLenOut, uint8_t *unusedBitsOut, SSFASN1Cursor_t *next);
 bool SSFASN1DecGetOctetString(const SSFASN1Cursor_t *cursor, const uint8_t **octetsOut,

@@ -1473,6 +1473,36 @@ void SSFRSAUnitTest(void)
             SSF_ASSERT(SSFRSASignPKCS1(privX, sizeof(privX), SSF_RSA_HASH_SHA256, hashVal,
                                        sizeof(hashVal), sig, sizeof(sig), &sigLen) == false);
         }
+
+        /* ---- AUDIT ASN1-3: a negative or padded modulus is refused, never read as magnitude ---- */
+        /* foreignPub is 30 82 01 0A 02 82 01 01 00 <n: 256 bytes, top bit set> <e TLV>. The     */
+        /* variants drop the 0x00 sign byte (n becomes negative) or add a second 0x00 (padded). */
+        {
+            static uint8_t pubNeg[sizeof(foreignPub) - 1u];
+            static uint8_t pubPad[sizeof(foreignPub) + 1u];
+            const uint32_t eAt = 9u + 256u;
+
+            SSF_ASSERT((foreignPub[4] == 0x02u) && (foreignPub[5] == 0x82u));
+            SSF_ASSERT((foreignPub[6] == 0x01u) && (foreignPub[7] == 0x01u));
+            SSF_ASSERT((foreignPub[8] == 0x00u) && ((foreignPub[9] & 0x80u) != 0u));
+
+            memcpy(pubNeg, foreignPub, 8u);
+            pubNeg[3] = (uint8_t)(foreignPub[3] - 1u);
+            pubNeg[7] = 0x00u;
+            memcpy(&pubNeg[8], &foreignPub[9], sizeof(foreignPub) - 9u);
+            SSF_ASSERT(SSFRSAPubKeyIsValid(pubNeg, sizeof(pubNeg)) == false);
+
+            memcpy(pubPad, foreignPub, 9u);
+            pubPad[3] = (uint8_t)(foreignPub[3] + 1u);
+            pubPad[7] = 0x02u;
+            pubPad[9] = 0x00u;
+            memcpy(&pubPad[10], &foreignPub[9], sizeof(foreignPub) - 9u);
+            SSF_ASSERT(SSFRSAPubKeyIsValid(pubPad, sizeof(pubPad)) == false);
+            SSF_ASSERT(SSFRSAVerifyPKCS1(pubPad, sizeof(pubPad), SSF_RSA_HASH_SHA256, hashVal,
+                                         sizeof(hashVal), foreignSig,
+                                         sizeof(foreignSig)) == false);
+            SSF_ASSERT(foreignPub[eAt] == 0x02u);
+        }
     }
 #endif /* SSF_RSA_CONFIG_ENABLE_PKCS1_V15 && SSF_RSA_CONFIG_ENABLE_2048 */
 

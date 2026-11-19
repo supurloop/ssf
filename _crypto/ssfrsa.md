@@ -128,7 +128,10 @@ comparable security.
   DER key decoders bound every integer before it reaches the big-number layer or any
   fixed-size buffer: a modulus that is empty, even, or wider than `SSF_RSA_MAX_KEY_BYTES`
   (the largest build-enabled key) is rejected, and in `RSAPrivateKey` the CRT fields
-  `p / q / dp / dq / qInv` are rejected if wider than half the modulus. An out-of-range width
+  `p / q / dp / dq / qInv` are rejected if wider than half the modulus. Every key INTEGER must
+  be a minimal, non-negative DER INTEGER
+  ([`SSFASN1DecGetUInt`](../_codec/ssfasn1.md#ssfasn1decgetuint)), so a negative or
+  zero-padded modulus is rejected rather than read as a magnitude. An out-of-range width
   would otherwise overflow the `SSF_RSA_MAX_KEY_BYTES` encoded-message buffers in the verify
   and sign paths or trip a halting `SSF_REQUIRE` in `ssfbn`. As a result `SSFRSAPubKeyIsValid`,
   `SSFRSAPrivKeyIsValid`, and the verify entry points return `false` on malformed or

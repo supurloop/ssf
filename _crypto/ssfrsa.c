@@ -127,7 +127,7 @@ static bool _SSFRSADecIntToBN(const SSFASN1Cursor_t *cursor, SSFBN_t *bn, uint16
     uint32_t bufLen;
 
     if ((limbs < 1u) || (limbs > SSF_BN_MAX_LIMBS)) return false;
-    if (!SSFASN1DecGetInt(cursor, &buf, &bufLen, next)) return false;
+    if (!SSFASN1DecGetUInt(cursor, &buf, &bufLen, next)) return false;
     while (bufLen > 0u && *buf == 0u) { buf++; bufLen--; }
     return SSFBNFromBytes(bn, buf, bufLen, limbs);
 }
@@ -256,8 +256,8 @@ static bool _SSFRSAPubKeyDecode(const uint8_t *der, size_t derLen, SSFBN_t *n, S
     cursor.bufLen = (uint32_t)derLen;
 
     if (!SSFASN1DecOpenConstructed(&cursor, SSF_ASN1_TAG_SEQUENCE, &inner, &after)) return false;
-    if (!SSFASN1DecGetInt(&inner, &nBuf, &nLen, &next)) return false;
-    if (!SSFASN1DecGetInt(&next, &eBuf, &eLen, &next)) return false;
+    if (!SSFASN1DecGetUInt(&inner, &nBuf, &nLen, &next)) return false;
+    if (!SSFASN1DecGetUInt(&next, &eBuf, &eLen, &next)) return false;
 
     /* Anything after e inside the SEQUENCE, or after the SEQUENCE (AUDIT RSA-7)? */
     if ((!SSFASN1DecIsEmpty(&next)) || (!SSFASN1DecIsEmpty(&after)))
@@ -387,7 +387,7 @@ static bool _SSFRSAPrivKeyDecode(const uint8_t *der, size_t derLen, SSFBN_t *n, 
 
     /* n: peek to derive nl from the magnitude length, then import via the helper. */
     peek = next;
-    if (!SSFASN1DecGetInt(&peek, &buf, &bufLen, &peek)) return false;
+    if (!SSFASN1DecGetUInt(&peek, &buf, &bufLen, &peek)) return false;
     while (bufLen > 0u && *buf == 0u) { buf++; bufLen--; }
 
     /* Is the modulus empty or wider than the largest configured key? */
@@ -411,7 +411,7 @@ static bool _SSFRSAPrivKeyDecode(const uint8_t *der, size_t derLen, SSFBN_t *n, 
 
     /* p: peek to derive hl from the magnitude length. */
     peek = next;
-    if (!SSFASN1DecGetInt(&peek, &buf, &bufLen, &peek)) return false;
+    if (!SSFASN1DecGetUInt(&peek, &buf, &bufLen, &peek)) return false;
     while (bufLen > 0u && *buf == 0u) { buf++; bufLen--; }
     hl = (uint16_t)SSF_BN_BITS_TO_LIMBS(bufLen * 8u);
 

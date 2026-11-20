@@ -1771,7 +1771,7 @@ void SSFUBJsonUnitTest(void)
     /* key length, then the value token follows. Existing tests cover the path-not-found and  */
     /* underlying-type-too-narrow cases; these add the cross-type reject arms.                */
     {
-        SSFGPath_t cPath[SSF_UBJSON_CONFIG_MAX_IN_DEPTH + 1] = { { SSF_GPATH_END } };
+        SSFGPath_t cPath[SSF_UBJSON_CONFIG_MAX_IN_DEPTH + 1] = { { SSF_GPATH_END, { NULL } } };
         char shortStr[16];
         uint8_t outBuf[16];
         size_t outBufLen;
@@ -1802,7 +1802,7 @@ void SSFUBJsonUnitTest(void)
     /* The well-formed shape is `[$T#NL data...` where T is INT8/UINT8 and N is INT8/UINT8.   */
     /* Each line below mutates one byte to trip a specific guard (lines 697-707).             */
     {
-        SSFGPath_t cPath[SSF_UBJSON_CONFIG_MAX_IN_DEPTH + 1] = { { SSF_GPATH_END } };
+        SSFGPath_t cPath[SSF_UBJSON_CONFIG_MAX_IN_DEPTH + 1] = { { SSF_GPATH_END, { NULL } } };
 
         /* Reject: top-level value is not an array (jt != ARRAY at line 697). */
         SSF_ASSERT(SSFUBJsonGetByteArrayPtr((uint8_t *)"U\x05", 2,

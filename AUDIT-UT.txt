@@ -45,8 +45,8 @@ SUMMARY
                      JSON-7 (FIXED), JSON-8 (FIXED), UBJSON-2 (FIXED), GOBJ-1 (FIXED)
   Medium     0
   Low        13      UBJSON-1 (FIXED), DEC-1 (FIXED), DEC-2 (FIXED), JSON-4 (DOC), HEX-1 (FIXED),
-                     B64-1 (FIXED), JSON-3 (FIXED), RSA-13 (FIXED), RSA-14, CMS-5, X509-21, E-5,
-                     X-3
+                     B64-1 (FIXED), JSON-3 (FIXED), RSA-13 (FIXED), RSA-14, CMS-5 (FIXED),
+                     X509-21 (FIXED), E-5, X-3
 
   By fault:  CODE   JSON-1, JSON-2, JSON-4, JSON-5, JSON-6, JSON-7, JSON-8, UBJSON-1,
                     UBJSON-2, GOBJ-1, DEC-1, RSA-14 (style)
@@ -332,14 +332,16 @@ RSA-14  Low  OPEN  CODE (style)  [measured]
 ssfcms, ssfx509
 ----------------------------------------------------------------------------------------------
 
-CMS-5  Low  OPEN  TEST  [measured]
+CMS-5  Low  FIXED (2026-11-20)  TEST  [measured; fix verified]
   Location:  ssfcms_ut.c:1000 (with SSF_EC_CONFIG_ENABLE_P256 == 0)
-X509-21  Low  OPEN  TEST  [measured]
+X509-21  Low  FIXED (2026-11-20)  TEST  [measured; fix verified]
   Location:  ssfx509_ut.c (first P-256 ECDSA use; asserts in ssfecdsa.c:571)
   Problem:   Both suites build their fixtures and generated certificates on P-256, so with
              P-256 disabled (a supported option) they fail instead of skipping those cases.
   Options:   Guard the P-256 cases on SSF_EC_CONFIG_ENABLE_P256 (and add P-384 equivalents
              where coverage would otherwise be lost).
+  Fix:       Option 3 (Jim: "3"): both suites run on P-384 when P-256 is off, P-384 CMS
+             fixtures included. See the change log.
 
 ----------------------------------------------------------------------------------------------
 ssfed25519, ssfx25519
@@ -706,3 +708,23 @@ CHANGE LOG
               PKCS#1 off, with PSS off, and in the default build; 0 scheme calls survive in each
               single-scheme config; the default config compiles the same 49 PKCS#1 and 41 PSS
               calls as before; all 54 suites pass with every test on.
+  2026-11-20  CMS-5, X509-21 FIXED (Jim: "3"). Both suites now run on P-384 when P-256 is off.
+              CMS: gen.sh, gen_modeled.pl, gen_rollover.sh and toc.sh take SSF_CMS_FIX_CURVE
+              (default prime256v1) and SSF_CMS_FIX_SUFFIX (default none, so the existing
+              outputs are unchanged); with secp384r1 / _p384 they produced
+              ssfcms_ut_fix_p384.h (OpenSSL 3.5.7, the same 24 fixtures), which ssfcms_ut.c
+              includes when P-256 is off. The test's generated certificates use _UT_CURVE /
+              _UT_PRIV_LEN / _utOidCurve (P-256, else P-384 with a 48-byte root key), and the
+              two fixture signature-length checks use the curve's DER range (70..72 / 100..104).
+              X509: every helper and call site takes the curve and private-key length from
+              _UT_CURVE / _UT_PRIV_LEN, with _utCurveOid and _UT_PUB_LEN to match; _utTestCertDER
+              has a P-384 twin (same subject, serial, validity, SAN, BC, KU, SKID / AKID with
+              keyid:always; its key identifiers differ), and the five checks that name the curve
+              or point length follow the build's curve. The blocks already guarded on P-256
+              (fixed P-256 certificates) are unchanged. RED: with P-256 off, ssfcms fails (first
+              at ssfcms_ut.c:1827) and ssfx509 halts at ssfecdsa.c:571 (SSF_REQUIRE privKeySize).
+              GREEN (fresh copy of the working tree, 0 warnings): P-384 only and P-256 only,
+              CMS + X509 + ECDSA pass plain and ASan + UBSan; both curves with every test on, all
+              54 suites pass plain and ASan + UBSan. A soft-assert run with P-256 off logs no
+              failing check in either suite. Test-only change: no library code, size or stack
+              change.

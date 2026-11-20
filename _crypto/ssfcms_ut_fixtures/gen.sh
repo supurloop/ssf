@@ -5,7 +5,11 @@ set -e
 export MSYS_NO_PATHCONV=1
 export MSYS2_ARG_CONV_EXCL="*"
 cd "$(dirname "$0")"
-rm -rf out && mkdir out && cd out
+# SSF_CMS_FIX_CURVE picks the ECDSA curve (default prime256v1), SSF_CMS_FIX_SUFFIX the output
+# directory suffix (default none: ./out); toc.sh takes the same suffix.
+CURVE=${SSF_CMS_FIX_CURVE:-prime256v1}
+OUT=out${SSF_CMS_FIX_SUFFIX:-}
+rm -rf "$OUT" && mkdir "$OUT" && cd "$OUT"
 
 printf 'SSF CMS fixture content\n' > content.bin
 
@@ -37,14 +41,14 @@ authorityKeyIdentifier = keyid
 EOF
 
 # ---- ECDSA P-256 three-level chain: root -> intermediate -> signer ----
-openssl ecparam -name prime256v1 -genkey -noout -out root.key
+openssl ecparam -name "$CURVE" -genkey -noout -out root.key
 openssl req -new -x509 -key root.key -days 7300 -subj "/O=SSF Test/CN=SSF Test Root CA" \
     -extensions ca_ext -config ca.cnf -sha256 -out root.pem
-openssl ecparam -name prime256v1 -genkey -noout -out int.key
+openssl ecparam -name "$CURVE" -genkey -noout -out int.key
 openssl req -new -key int.key -subj "/O=SSF Test/CN=SSF Test Signing CA" -out int.csr
 openssl x509 -req -in int.csr -CA root.pem -CAkey root.key -set_serial 2 -days 7300 -sha256 \
     -extfile ca.cnf -extensions int_ext -out int.pem
-openssl ecparam -name prime256v1 -genkey -noout -out leaf.key
+openssl ecparam -name "$CURVE" -genkey -noout -out leaf.key
 openssl req -new -key leaf.key -subj "/O=SSF Test/OU=Firmware/CN=SSF Test Signer" -out leaf.csr
 openssl x509 -req -in leaf.csr -CA int.pem -CAkey int.key -set_serial 3 -days 7300 -sha256 \
     -extfile ca.cnf -extensions leaf_ext -out leaf.pem
@@ -106,7 +110,7 @@ openssl x509 -in root.pem -outform DER -out root.der
 openssl x509 -in int.pem -outform DER -out int.der
 openssl x509 -in rsa.pem -outform DER -out rsa.der
 openssl x509 -in ed.pem -outform DER -out ed.der
-openssl ecparam -name prime256v1 -genkey -noout -out other.key
+openssl ecparam -name "$CURVE" -genkey -noout -out other.key
 openssl req -new -x509 -key other.key -days 7300 -subj "/O=Other/CN=Other Root CA" \
     -extensions ca_ext -config ca.cnf -sha256 -out other.pem
 openssl x509 -in other.pem -outform DER -out other.der

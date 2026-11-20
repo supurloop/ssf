@@ -5,7 +5,9 @@
 # intermediate is encoded first (the order that defeats a first-name-match chain builder).
 set -e
 cd "$(dirname "$0")"
-rm -rf rollover && mkdir rollover && cd rollover
+CURVE=${SSF_CMS_FIX_CURVE:-prime256v1}
+OUT=rollover${SSF_CMS_FIX_SUFFIX:-}
+rm -rf "$OUT" && mkdir "$OUT" && cd "$OUT"
 printf 'SSF CMS fixture content\n' > content.bin
 
 cat > ca.cnf <<CNF
@@ -36,7 +38,7 @@ subjectKeyIdentifier = none
 authorityKeyIdentifier = none
 CNF
 
-openssl ecparam -name prime256v1 -genkey -noout -out root.key
+openssl ecparam -name "$CURVE" -genkey -noout -out root.key
 openssl req -new -x509 -key root.key -days 7300 -subj "/O=SSF Test/CN=SSF Rollover Root" \
     -extensions ca_ext -config ca.cnf -sha256 -out root.pem
 openssl x509 -in root.pem -outform DER -out root.der
@@ -46,7 +48,7 @@ make_set() {
     sfx=$1; iext=$2; lext=$3
     while :; do
         for which in old new; do
-            openssl ecparam -name prime256v1 -genkey -noout -out int_${which}${sfx}.key
+            openssl ecparam -name "$CURVE" -genkey -noout -out int_${which}${sfx}.key
             openssl req -new -key int_${which}${sfx}.key -subj "/O=SSF Test/CN=SSF Rollover CA" \
                 -out int_${which}${sfx}.csr
         done
@@ -54,7 +56,7 @@ make_set() {
             -days 7300 -sha256 -extfile ca.cnf -extensions ${iext} -out int_old${sfx}.pem
         openssl x509 -req -in int_new${sfx}.csr -CA root.pem -CAkey root.key -set_serial 3 \
             -days 7300 -sha256 -extfile ca.cnf -extensions ${iext} -out int_new${sfx}.pem
-        openssl ecparam -name prime256v1 -genkey -noout -out leaf${sfx}.key
+        openssl ecparam -name "$CURVE" -genkey -noout -out leaf${sfx}.key
         openssl req -new -key leaf${sfx}.key -subj "/O=SSF Test/CN=SSF Rollover Signer" \
             -out leaf${sfx}.csr
         openssl x509 -req -in leaf${sfx}.csr -CA int_new${sfx}.pem -CAkey int_new${sfx}.key \

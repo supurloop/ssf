@@ -59,7 +59,12 @@
 /* Fixtures generated with OpenSSL 3.2.4 by the gen.sh script recorded in ssfcms.md: a P-256     */
 /* root -> intermediate -> signer chain, an RSA-2048 self-signed signer, and a 24-byte content.   */
 /* Every CMS fixture is DER with definite lengths (-noindef) except the one marked Ber.          */
+/* AUDIT CMS-5: the fixtures' ECDSA keys are P-256; a P-384-only build uses the same set on P-384 */
+#if SSF_EC_CONFIG_ENABLE_P256 == 1
 #include "ssfcms_ut_fix.h"
+#else
+#include "ssfcms_ut_fix_p384.h"
+#endif /* SSF_EC_CONFIG_ENABLE_P256 */
 
 /* OIDs the tests compare against */
 static const uint8_t _utOidData[] = {
@@ -208,7 +213,20 @@ static const uint8_t _utOidEcdsaSha384[] = {
 };
 static const uint8_t _utOidEd25519[] = { 0x2Bu, 0x65u, 0x70u };
 static const uint8_t _utOidEcPubKey[] = { 0x2Au, 0x86u, 0x48u, 0xCEu, 0x3Du, 0x02u, 0x01u };
-static const uint8_t _utOidP256[] = { 0x2Au, 0x86u, 0x48u, 0xCEu, 0x3Du, 0x03u, 0x01u, 0x07u };
+/* AUDIT CMS-5: generated certificates use P-256 when it is enabled, else P-384 */
+#if SSF_EC_CONFIG_ENABLE_P256 == 1
+#define _UT_CURVE SSF_EC_CURVE_P256
+#define _UT_PRIV_LEN (32u)
+#define _UT_FIX_SIG_MIN (70u)
+#define _UT_FIX_SIG_MAX (72u)
+static const uint8_t _utOidCurve[] = { 0x2Au, 0x86u, 0x48u, 0xCEu, 0x3Du, 0x03u, 0x01u, 0x07u };
+#else
+#define _UT_CURVE SSF_EC_CURVE_P384
+#define _UT_PRIV_LEN (48u)
+#define _UT_FIX_SIG_MIN (100u)
+#define _UT_FIX_SIG_MAX (104u)
+static const uint8_t _utOidCurve[] = { 0x2Bu, 0x81u, 0x04u, 0x00u, 0x22u };
+#endif /* SSF_EC_CONFIG_ENABLE_P256 */
 static const uint8_t _utOidAttrContentType[] = {
     0x2Au, 0x86u, 0x48u, 0x86u, 0xF7u, 0x0Du, 0x01u, 0x09u, 0x03u
 };
@@ -611,7 +629,7 @@ static bool _utBuildCms(const _utCmsSpec_t *s, uint8_t *out, uint32_t outSize, u
     else
     {
         SSFSHA256(signedPtr, signedLen, hash, SSF_SHA2_256_BYTE_SIZE);
-        if (!SSFECDSASign(SSF_EC_CURVE_P256, s->priv, 32u, hash, SSF_SHA2_256_BYTE_SIZE, sig,
+        if (!SSFECDSASign(_UT_CURVE, s->priv, _UT_PRIV_LEN, hash, SSF_SHA2_256_BYTE_SIZE, sig,
                           sizeof(sig), &sigLen)) return false;
     }
 
@@ -892,19 +910,19 @@ static bool _utMakeCert(bool ed25519, bool isCA, const char *cnStr, const char *
     }
     else
     {
-        if (!SSFECDSAKeyGen(SSF_EC_CURVE_P256, priv, SSF_ECDSA_MAX_PRIV_KEY_SIZE, pub,
+        if (!SSFECDSAKeyGen(_UT_CURVE, priv, SSF_ECDSA_MAX_PRIV_KEY_SIZE, pub,
                             SSF_ECDSA_MAX_PUB_KEY_SIZE, &pubLen)) return false;
         p.sigAlgOidRaw = _utOidEcdsaSha256;
         p.sigAlgOidRawLen = sizeof(_utOidEcdsaSha256);
         p.pubKeyAlgOidRaw = _utOidEcPubKey;
         p.pubKeyAlgOidRawLen = sizeof(_utOidEcPubKey);
-        p.ecCurveOidRaw = _utOidP256;
-        p.ecCurveOidRawLen = sizeof(_utOidP256);
+        p.ecCurveOidRaw = _utOidCurve;
+        p.ecCurveOidRawLen = sizeof(_utOidCurve);
         p.pubKey = pub;
         p.pubKeyLen = (uint32_t)pubLen;
         if (!SSFX509EncodeTBS(tbs, sizeof(tbs), &p, &tbsLen)) return false;
         SSFSHA256(tbs, tbsLen, hash, sizeof(hash));
-        if (!SSFECDSASign(SSF_EC_CURVE_P256, (issuerPrivOpt != NULL) ? issuerPrivOpt : priv, 32u,
+        if (!SSFECDSASign(_UT_CURVE, (issuerPrivOpt != NULL) ? issuerPrivOpt : priv, _UT_PRIV_LEN,
                           hash, sizeof(hash), sig, sizeof(sig), &sigLen)) return false;
     }
     return SSFX509EncodeCert(out, outSize, &p, sig, (uint32_t)sigLen, lenOut);
@@ -958,11 +976,19 @@ static const uint8_t _utOidAttrTstToken[] = {
 static const uint8_t _utOidTstInfo[] = {
     0x2Au, 0x86u, 0x48u, 0x86u, 0xF7u, 0x0Du, 0x01u, 0x09u, 0x10u, 0x01u, 0x04u };
 
-/* P-256 private key of the unit test's own root CA */
+/* Private key of the unit test's own root CA, on the generated certificates' curve */
+#if SSF_EC_CONFIG_ENABLE_P256 == 1
 static const uint8_t _utGenRootPriv[32] = {
     0x81u, 0x07u, 0x6Du, 0xB6u, 0xE7u, 0xDEu, 0x01u, 0xECu, 0xCFu, 0xD9u, 0xB8u, 0x99u, 0xB9u,
     0x29u, 0x0Au, 0x26u, 0x82u, 0x11u, 0x5Eu, 0xBBu, 0xE4u, 0x2Eu, 0x12u, 0x81u, 0x58u, 0x80u,
     0x71u, 0x2Au, 0x58u, 0xA5u, 0x20u, 0xFBu };
+#else
+static const uint8_t _utGenRootPriv[48] = {
+    0x81u, 0x07u, 0x6Du, 0xB6u, 0xE7u, 0xDEu, 0x01u, 0xECu, 0xCFu, 0xD9u, 0xB8u, 0x99u, 0xB9u,
+    0x29u, 0x0Au, 0x26u, 0x82u, 0x11u, 0x5Eu, 0xBBu, 0xE4u, 0x2Eu, 0x12u, 0x81u, 0x58u, 0x80u,
+    0x71u, 0x2Au, 0x58u, 0xA5u, 0x20u, 0xFBu, 0x3Cu, 0x5Au, 0x96u, 0x0Fu, 0x27u, 0xE4u, 0x48u,
+    0xB1u, 0x6Du, 0x93u, 0x05u, 0xC8u, 0x7Au, 0x1Eu, 0xD2u, 0x44u };
+#endif /* SSF_EC_CONFIG_ENABLE_P256 */
 
 /* One AttributeTypeAndValue of a Name, in encoding order */
 typedef struct
@@ -1044,9 +1070,9 @@ static void _utGenKey(SSFPRNGContext_t *prng, const uint8_t *privOpt, _utGenCert
 
     for (tries = 0; (tries < 8u) && (!ok); tries++)
     {
-        if (privOpt != NULL) memcpy(c->priv, privOpt, 32u);
-        else _utGenRandom(prng, c->priv, 32u);
-        ok = SSFECDSAPubKeyFromPrivKey(SSF_EC_CURVE_P256, c->priv, 32u, c->pub, sizeof(c->pub),
+        if (privOpt != NULL) memcpy(c->priv, privOpt, _UT_PRIV_LEN);
+        else _utGenRandom(prng, c->priv, _UT_PRIV_LEN);
+        ok = SSFECDSAPubKeyFromPrivKey(_UT_CURVE, c->priv, _UT_PRIV_LEN, c->pub, sizeof(c->pub),
                                        &pubLen);
     }
     SSF_ASSERT(ok);
@@ -1337,7 +1363,7 @@ static bool _utGenEncCert(_utGenCert_t *c, const _utGenCert_t *issuer)
         return false;
     }
     n = w;
-    if (!SSFASN1EncOIDRaw(&tmp[n], sizeof(tmp) - n, _utOidP256, sizeof(_utOidP256), &w))
+    if (!SSFASN1EncOIDRaw(&tmp[n], sizeof(tmp) - n, _utOidCurve, sizeof(_utOidCurve), &w))
     {
         return false;
     }
@@ -1361,7 +1387,7 @@ static bool _utGenEncCert(_utGenCert_t *c, const _utGenCert_t *issuer)
 
     /* Certificate { tbsCertificate, signatureAlgorithm, signatureValue } */
     SSFSHA256(tbs, tbsLen, hash, sizeof(hash));
-    if (!SSFECDSASign(SSF_EC_CURVE_P256, issuer->priv, 32u, hash, sizeof(hash), sig, sizeof(sig),
+    if (!SSFECDSASign(_UT_CURVE, issuer->priv, _UT_PRIV_LEN, hash, sizeof(hash), sig, sizeof(sig),
                       &sigLen)) return false;
     memcpy(body, tbs, tbsLen);
     pos = tbsLen;
@@ -1441,7 +1467,7 @@ static bool _utGenBuildCms(SSFPRNGContext_t *prng, const _utGenCert_t *ca,
     /* The signature covers the attributes as a SET (RFC 5652 Sec. 5.4) */
     if (!SSFASN1EncWrap(a, sizeof(a), SSF_ASN1_TAG_SET, attrs, attrsLen, &w)) return false;
     SSFSHA256(a, w, hash, sizeof(hash));
-    if (!SSFECDSASign(SSF_EC_CURVE_P256, leaf->priv, 32u, hash, sizeof(hash), sig, sizeof(sig),
+    if (!SSFECDSASign(_UT_CURVE, leaf->priv, _UT_PRIV_LEN, hash, sizeof(hash), sig, sizeof(sig),
                       &sigLen)) return false;
 
     /* SignerInfo v1 { issuerAndSerialNumber, sha256, [0] attrs, ecdsa-with-SHA256, sig, [1] } */
@@ -1815,7 +1841,7 @@ void SSFCMSUnitTest(void)
     SSF_ASSERT(_utSpanEq(si->sigAlgOidRaw, si->sigAlgOidRawLen, _utOidEcdsaSha256,
                          sizeof(_utOidEcdsaSha256)) == true);
     SSF_ASSERT((si->sigAlgParams == NULL) && (si->sigAlgParamsLen == 0u));
-    SSF_ASSERT((si->signatureLen >= 70u) && (si->signatureLen <= 72u));
+    SSF_ASSERT((si->signatureLen >= _UT_FIX_SIG_MIN) && (si->signatureLen <= _UT_FIX_SIG_MAX));
     SSF_ASSERT(si->signature[0] == 0x30u);
     SSF_ASSERT(_utSpanIn(si->signature, si->signatureLen, _utFixEcdsaChainDetached, n) == true);
     SSF_ASSERT(SSFCMSGetDigestAlg(&sd, 0u, &alg) == true);
@@ -2979,7 +3005,7 @@ void SSFCMSUnitTest(void)
         SSF_ASSERT((si->apSigAlgParams == NULL) && (si->apSigAlgParamsLen == 0u));
         SSF_ASSERT(_utSpanEq(si->sigAlgOidRaw, si->sigAlgOidRawLen, _utOidEcdsaSha256,
                              sizeof(_utOidEcdsaSha256)) == true);
-        SSF_ASSERT((si->signatureLen >= 70u) && (si->signatureLen <= 72u));
+        SSF_ASSERT((si->signatureLen >= _UT_FIX_SIG_MIN) && (si->signatureLen <= _UT_FIX_SIG_MAX));
         SSF_ASSERT(SSFCMSGetDigestAlg(&sd, 0u, &alg) == true);
         SSF_ASSERT(alg == SSF_CMS_DIGEST_SHA256);
 

@@ -10,7 +10,8 @@ use warnings;
 use Digest::SHA qw(sha256);
 
 $ENV{MSYS_NO_PATHCONV} = 1;
-my $out = "modeled";
+my $out = "modeled" . ($ENV{SSF_CMS_FIX_SUFFIX} // "");
+my $curve = $ENV{SSF_CMS_FIX_CURVE} // "prime256v1";
 system("rm -rf $out") == 0 or die;
 mkdir $out or die; chdir $out or die;
 mkdir "cadb"; mkdir "cadb/newcerts"; open(my $ix, ">", "cadb/index.txt") or die; close $ix;
@@ -101,23 +102,23 @@ ess_cert_id_alg = sha256
 EOF
 
 # ---- the signing chain: root (not embedded) -> Firmware Signing CA -> Firmware Master -> leaf ----
-run("openssl ecparam -name prime256v1 -genkey -noout -out root.key");
+run("openssl ecparam -name $curve -genkey -noout -out root.key");
 run("openssl req -new -x509 -key root.key -days 20000 -subj \"/O=SSF Test/CN=SSF Test Root CA\" " .
     "-set_serial 0x3300000001 -extensions ca_ext -config ca.cnf -sha256 -out root.pem");
 
-run("openssl ecparam -name prime256v1 -genkey -noout -out fsca.key");
+run("openssl ecparam -name $curve -genkey -noout -out fsca.key");
 run("openssl req -new -key fsca.key -subj \"/O=SSF Test/CN=SSF Firmware Signing CA\" -config ca.cnf -out fsca.csr");
 spit("cadb/serial", "3300000003A1B2C3D4E5F60718293A4B5C0003\n");
 run("openssl ca -config ca.cnf -cert root.pem -keyfile root.key -in fsca.csr -out fsca.pem -extensions fsca_ext " .
     "-startdate 20150519093553Z -enddate 20750519091650Z -batch -notext -preserveDN");
 
-run("openssl ecparam -name prime256v1 -genkey -noout -out fm.key");
+run("openssl ecparam -name $curve -genkey -noout -out fm.key");
 run("openssl req -new -key fm.key -subj \"/O=SSF Test/OU=Firmware Master/CN=SSF Firmware Master\" -config ca.cnf -out fm.csr");
 spit("cadb/serial", "3300000010B1C2D3E4F506172839404B5C0010\n");
 run("openssl ca -config ca.cnf -cert fsca.pem -keyfile fsca.key -in fm.csr -out fm.pem -extensions fm_ext " .
     "-startdate 20180228090904Z -enddate 20750519091650Z -batch -notext -preserveDN");
 
-run("openssl ecparam -name prime256v1 -genkey -noout -out leaf.key");
+run("openssl ecparam -name $curve -genkey -noout -out leaf.key");
 run("openssl req -new -key leaf.key -subj \"/CN=SSF Firmware Signature/serialNumber=1/OU=Firmware Signature/O=SSF Test\" " .
     "-config req_utf8.cnf -out leaf.csr");
 spit("cadb/serial", "4A1F014CBC7A6862FC4CB46897FB27C1DA599028\n");
@@ -125,10 +126,10 @@ run("openssl ca -config ca.cnf -cert fm.pem -keyfile fm.key -in leaf.csr -out le
     "-startdate 20261015073703Z -enddate 20561007073702Z -batch -notext -preserveDN");
 
 # ---- a separate timestamp authority ----
-run("openssl ecparam -name prime256v1 -genkey -noout -out tsaroot.key");
+run("openssl ecparam -name $curve -genkey -noout -out tsaroot.key");
 run("openssl req -new -x509 -key tsaroot.key -days 20000 -subj \"/O=SSF Test/CN=SSF Test Timestamp CA\" " .
     "-set_serial 0x3300000002 -extensions ca_ext -config ca.cnf -sha256 -out tsaroot.pem");
-run("openssl ecparam -name prime256v1 -genkey -noout -out tsa/tsa.key");
+run("openssl ecparam -name $curve -genkey -noout -out tsa/tsa.key");
 run("openssl req -new -key tsa/tsa.key -subj \"/O=SSF Test/OU=Timestamping/CN=SSF Test TSA\" -config ca.cnf -out tsa.csr");
 spit("cadb/serial", "3300000003AD0A076D2BC0B24C00000000000A\n");
 run("openssl ca -config ca.cnf -cert tsaroot.pem -keyfile tsaroot.key -in tsa.csr -out tsa/tsa.pem -extensions tsa_ext " .

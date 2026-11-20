@@ -1,3 +1,6 @@
 out/
 modeled/
 rollover/
+out_*/
+modeled_*/
+rollover_*/

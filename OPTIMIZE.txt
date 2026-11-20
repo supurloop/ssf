@@ -104,7 +104,7 @@ SUMMARY
 ssfstr
 ----------------------------------------------------------------------------------------------
 
-STR-O1  Speed  OPEN  Effort S
+STR-O1  Speed  SKIPPED (2026-11-19, measured)  Effort S
   Where:     SSFStrLen (byte loop)
   Change:    Use memchr(cstr, 0, cstrSize) and take the length from the returned pointer.
              Every SSFStr* function and SSFX509 / SSFMatch callers go through it.
@@ -114,13 +114,13 @@ STR-O1  Speed  OPEN  Effort S
              cstrSize (current contract). memchr reads at most cstrSize bytes. ssfstr_ut
              covers it.
 
-STR-O2  Size  OPEN  Effort S
+STR-O2  Size  DONE (2026-11-19)  Effort S
   Where:     SSFStrToCase (two copies of the same loop)
   Change:    One loop that calls SSFStrCharToLower or SSFStrCharToUpper chosen before it.
   Probable:  About -50 B. No speed change.
   Risk:      None beyond the existing unit tests.
 
-STR-O3  Speed  OPEN  Effort S
+STR-O3  Speed  SKIPPED (2026-11-19, measured: grew code)  Effort S
   Where:     SSFStrCmp (SSFStrLen twice, then memcmp: three passes)
   Change:    Single pass comparing bytes and checking both terminators within their sizes.
   Probable:  About 2x faster on equal strings; about -40 B.
@@ -260,7 +260,7 @@ HMAC-O2  Speed  SKIPPED (2026-11-19, with HMAC-O1)  Effort M
              dominated by the scalar multiply, so the effect there is a few percent.
   Risk:      New API surface; the copied state must be wiped by the caller's DeInit.
 
-HMAC-O3  Size  OPEN  Effort S
+HMAC-O3  Size  SKIPPED (2026-11-19, measured: no saving)  Effort S
   Where:     _SSFHMACGetBlockSize, SSFHMACGetHashSize, and the four dispatch switches
   Change:    Two small const tables indexed by hash; keep the switches only where they call
              different functions.
@@ -1546,4 +1546,17 @@ CHANGE LOG
               wrapper), DecGetTime 184 -> 224 M4 (240 -> 280 M0+); DecGetDateTime already
               peaked at 224 M4 / 272 M0+, so the module's worst decode peak is unchanged on M4,
               +8 B on M0+. Speed: not hot (one encode / decode per certificate field).
+  2026-11-19  STR / HMAC-O3 batch (Jim: "Commit, then do STR and HMAC-O3"). Prototyped each;
+              ssfstr / ssfhmac text, Cortex-M4 / M0+ -Os:
+                STR-O1 memchr in SSFStrLen      915 -> 909 / 969 -> 963 B (-6), but pulls in
+                       libc memchr (116 B on M0+ newlib) in builds where ssfasn1 / ssfini /
+                       ssfx509 do not already link it: SKIPPED
+                STR-O2 one SSFStrToCase loop     915 -> 905 / 969 -> 959 B (-10): DONE
+                STR-O3 single-pass SSFStrCmp     915 -> 937 / 969 -> 987 B (+22): SKIPPED
+                HMAC-O3 size tables (+ merged SHA-384 / 512 switch cases)
+                       1015 -> 1022 (1024) / 1055 -> 1054 (1056) B: gcc already emits the
+                       switches as lookups: SKIPPED
+              STR-O2: the converter is chosen per character inside one loop. No red possible;
+              ssfstr_ut covers both cases. GREEN: all 15 suites normal and ASan + UBSan; a
+              mutant swapping the case choice fails ssfstr_ut.
 

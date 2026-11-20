@@ -183,27 +183,13 @@ bool SSFStrToCase(SSFCStrOut_t cstrOut, size_t cstrOutSize, SSFSTRCase_t toCase)
     /* Determine length of cstrOut */
     if (SSFStrLen(cstrOut, cstrOutSize, &cstrOutLen) == false) return false;
 
-    switch(toCase)
+    /* One loop for both cases (OPTIMIZE STR-O2) */
+    while (cstrOutLen > 0)
     {
-        case SSF_STR_CASE_LOWER:
-            while (cstrOutLen > 0)
-            {
-                *cstrOut = SSFStrCharToLower(*cstrOut);
-                cstrOut++;
-                cstrOutLen--;
-            }
-            break;
-        case SSF_STR_CASE_UPPER:
-            while (cstrOutLen > 0)
-            {
-                *cstrOut = SSFStrCharToUpper(*cstrOut);
-                cstrOut++;
-                cstrOutLen--;
-            }
-            break;
-        default:
-            SSF_ERROR();
-            break;
+        *cstrOut = (toCase == SSF_STR_CASE_LOWER) ? SSFStrCharToLower(*cstrOut) :
+                                                    SSFStrCharToUpper(*cstrOut);
+        cstrOut++;
+        cstrOutLen--;
     }
 
     return true;

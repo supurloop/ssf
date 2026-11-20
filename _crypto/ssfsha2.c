@@ -237,6 +237,28 @@ static void _SSFSHA2_64Block(uint64_t *hs, const uint8_t *block)
     _SSF_SHA2_SCRUB_HOOK(w);
 }
 
+/* SHA-256 and SHA-224 initial hash values (FIPS 180-4 5.3.3, 5.3.2) */
+static const uint32_t _ssfSHA2_32IV[2][8] =
+{
+    { 0x6a09e667u, 0xbb67ae85u, 0x3c6ef372u, 0xa54ff53au,
+      0x510e527fu, 0x9b05688cu, 0x1f83d9abu, 0x5be0cd19u },
+    { 0xc1059ed8u, 0x367cd507u, 0x3070dd17u, 0xf70e5939u,
+      0xffc00b31u, 0x68581511u, 0x64f98fa7u, 0xbefa4fa4u }
+};
+
+/* SHA-512, SHA-384, SHA-512/256 and SHA-512/224 initial hash values (FIPS 180-4 5.3.4-5.3.6) */
+static const uint64_t _ssfSHA2_64IV[4][8] =
+{
+    { 0x6a09e667f3bcc908ull, 0xbb67ae8584caa73bull, 0x3c6ef372fe94f82bull, 0xa54ff53a5f1d36f1ull,
+      0x510e527fade682d1ull, 0x9b05688c2b3e6c1full, 0x1f83d9abfb41bd6bull, 0x5be0cd19137e2179ull },
+    { 0xcbbb9d5dc1059ed8ull, 0x629a292a367cd507ull, 0x9159015a3070dd17ull, 0x152fecd8f70e5939ull,
+      0x67332667ffc00b31ull, 0x8eb44a8768581511ull, 0xdb0c2e0d64f98fa7ull, 0x47b5481dbefa4fa4ull },
+    { 0x22312194FC2BF72Cull, 0x9F555FA3C84C64C2ull, 0x2393B86B6F53B151ull, 0x963877195940EABDull,
+      0x96283EE2A88EFFE3ull, 0xBE5E1E2553863992ull, 0x2B0199FC2C85B8AAull, 0x0EB72DDC81C52CA2ull },
+    { 0x8C3D37C819544DA2ull, 0x73E1996689DCD4D6ull, 0x1DFAB7AE32FF9C82ull, 0x679DD514582F9FCFull,
+      0x0F6D2B697BD44DA8ull, 0x77E36F7304C48942ull, 0x3F9D85A86A1D36C8ull, 0x1112E6AD91D692A1ull }
+};
+
 /* --------------------------------------------------------------------------------------------- */
 /* Begins a SHA256 or SHA224 incremental hash context.                                           */
 /* --------------------------------------------------------------------------------------------- */
@@ -248,24 +270,11 @@ void SSFSHA2_32Begin(SSFSHA2_32Context_t *context, uint16_t hashBitSize)
     memset(context, 0, sizeof(SSFSHA2_32Context_t));
     context->hashBitSize = hashBitSize;
 
-    if (hashBitSize == 256)
-    {
-        /* SHA-256 */
-        context->h[0] = 0x6a09e667; context->h[1] = 0xbb67ae85;
-        context->h[2] = 0x3c6ef372; context->h[3] = 0xa54ff53a;
-        context->h[4] = 0x510e527f; context->h[5] = 0x9b05688c;
-        context->h[6] = 0x1f83d9ab; context->h[7] = 0x5be0cd19;
-    }
-    else
-    {
-        /* SHA-224 */
-        context->h[0] = 0xc1059ed8; context->h[1] = 0x367cd507;
-        context->h[2] = 0x3070dd17; context->h[3] = 0xf70e5939;
-        context->h[4] = 0xffc00b31; context->h[5] = 0x68581511;
-        context->h[6] = 0x64f98fa7; context->h[7] = 0xbefa4fa4;
-    }
+    /* Row 0 is SHA-256, row 1 SHA-224 (OPTIMIZE SHA2-O2) */
+    memcpy(context->h, _ssfSHA2_32IV[(hashBitSize == 256u) ? 0u : 1u], sizeof(context->h));
     context->magic = SSF_SHA2_32_CONTEXT_MAGIC;
 }
+
 
 /* --------------------------------------------------------------------------------------------- */
 /* Feeds a chunk of input data into a SHA256 or SHA224 incremental hash context.                 */
@@ -362,6 +371,8 @@ void SSFSHA2_32End(SSFSHA2_32Context_t *context, uint8_t *out, uint32_t outSize)
 /* --------------------------------------------------------------------------------------------- */
 void SSFSHA2_64Begin(SSFSHA2_64Context_t *context, uint16_t hashBitSize, uint16_t truncationBitSize)
 {
+    uint8_t row;
+
     SSF_ASSERT(context != NULL);
     SSF_ASSERT(((hashBitSize == 512) && ((truncationBitSize == 0) || (truncationBitSize == 256) ||
                                          (truncationBitSize == 224))) ||
@@ -371,40 +382,33 @@ void SSFSHA2_64Begin(SSFSHA2_64Context_t *context, uint16_t hashBitSize, uint16_
     context->hashBitSize = hashBitSize;
     context->truncationBitSize = truncationBitSize;
 
-    if ((hashBitSize == 512) && (truncationBitSize == 0))
+    /* Is it SHA-384? (rows: SHA-512, SHA-384, SHA-512/256, SHA-512/224; OPTIMIZE SHA2-O2) */
+    if (hashBitSize == 384)
     {
-        /* SHA-512 */
-        context->h[0] = 0x6a09e667f3bcc908; context->h[1] = 0xbb67ae8584caa73b;
-        context->h[2] = 0x3c6ef372fe94f82b; context->h[3] = 0xa54ff53a5f1d36f1;
-        context->h[4] = 0x510e527fade682d1; context->h[5] = 0x9b05688c2b3e6c1f;
-        context->h[6] = 0x1f83d9abfb41bd6b; context->h[7] = 0x5be0cd19137e2179;
+        /* Yes */
+        row = 1u;
     }
-    else if (hashBitSize == 384)
+    /* No, is it SHA-512 untruncated? */
+    else if (truncationBitSize == 0)
     {
-        /* SHA-384 */
-        context->h[0] = 0xcbbb9d5dc1059ed8; context->h[1] = 0x629a292a367cd507;
-        context->h[2] = 0x9159015a3070dd17; context->h[3] = 0x152fecd8f70e5939;
-        context->h[4] = 0x67332667ffc00b31; context->h[5] = 0x8eb44a8768581511;
-        context->h[6] = 0xdb0c2e0d64f98fa7; context->h[7] = 0x47b5481dbefa4fa4;
+        /* Yes */
+        row = 0u;
     }
+    /* No, is it SHA-512/256? */
     else if (truncationBitSize == 256)
     {
-        /* SHA-512/256 */
-        context->h[0] = 0x22312194FC2BF72C; context->h[1] = 0x9F555FA3C84C64C2;
-        context->h[2] = 0x2393B86B6F53B151; context->h[3] = 0x963877195940EABD;
-        context->h[4] = 0x96283EE2A88EFFE3; context->h[5] = 0xBE5E1E2553863992;
-        context->h[6] = 0x2B0199FC2C85B8AA; context->h[7] = 0x0EB72DDC81C52CA2;
+        /* Yes */
+        row = 2u;
     }
     else
     {
-        /* SHA-512/224 */
-        context->h[0] = 0x8C3D37C819544DA2; context->h[1] = 0x73E1996689DCD4D6;
-        context->h[2] = 0x1DFAB7AE32FF9C82; context->h[3] = 0x679DD514582F9FCF;
-        context->h[4] = 0x0F6D2B697BD44DA8; context->h[5] = 0x77E36F7304C48942;
-        context->h[6] = 0x3F9D85A86A1D36C8; context->h[7] = 0x1112E6AD91D692A1;
+        /* No, SHA-512/224 */
+        row = 3u;
     }
+    memcpy(context->h, _ssfSHA2_64IV[row], sizeof(context->h));
     context->magic = SSF_SHA2_64_CONTEXT_MAGIC;
 }
+
 
 /* --------------------------------------------------------------------------------------------- */
 /* Feeds a chunk of input data into a SHA512/384/512-224/512-256 incremental hash context.       */

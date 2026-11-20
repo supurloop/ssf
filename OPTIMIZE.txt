@@ -222,7 +222,7 @@ SHA2-O1  Speed + stack  SKIPPED (2026-11-19, measured)  Effort S
              way (64 -> 16 and 160 -> 32 word stores on a 32-bit target). Speed +5-10%.
   Risk:      Keep the SHA2-3 scrub of the (smaller) schedule. FIPS vectors in ssfsha2_ut.
 
-SHA2-O2  Size  OPEN  Effort S
+SHA2-O2  Size  DONE (2026-11-19)  Effort S
   Where:     SSFSHA2_32Begin, SSFSHA2_64Begin (IVs written as 8 or 32 immediate assignments)
   Change:    static const IV tables (2 x 8 words, 4 x 8 double-words) and one memcpy.
   Probable:  About -400 B (SSFSHA2_64Begin is 512 B, SSFSHA2_32Begin about 170 B). No speed
@@ -1509,4 +1509,16 @@ CHANGE LOG
                 + split SHA-256 loop  SHA-256 +4.6% / +13%, +202 B; 336 -> 144 B
               Digests identical in every variant. Not adopted; the SHA-512 block frame stays
               800 B (the deepest call under Ed25519 signing).
+  2026-11-19  SHA2-O2 DONE (Jim: "Yes, do SHA2-O2"). SSFSHA2_32Begin / SSFSHA2_64Begin wrote
+              the initial hash values as 16 / 32 immediate assignments; they now copy a row of
+              _ssfSHA2_32IV[2][8] / _ssfSHA2_64IV[4][8] (FIPS 180-4 5.3) with one memcpy, the
+              64-bit row picked by an Is / Yes / No if chain (smaller than a nested ternary).
+              No red possible (pure refactor): KAT ("", "abc") and Monte Carlo vectors for all
+              six variants run without OpenSSL. GREEN: all 13 suites normal, ASan + UBSan,
+              32-bit ARM. Mutation: swapped SHA-224 / SHA-256 rows, a wrong 384 or 512/256 row
+              index, and one changed IV constant all fail.
+              Code (ssfsha2, -Os, text includes the 320 B of tables): Cortex-M4 4180 -> 3876 B
+              (-304), Cortex-M0+ 4412 -> 4076 B (-336); Begin functions 876 -> 252 B (M4).
+              Stack: Begin frames 32 / 88 -> 16 / 16 B (M4). Speed: one-block hashes +24 / +32
+              instructions (M4, +0.6% / +0.2%), M0+ +9 / -23 (memcpy call vs immediates).
 

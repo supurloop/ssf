@@ -1418,4 +1418,15 @@ CHANGE LOG
               Cortex-M0+ X25519 -7%, Ed25519 sign / verify -12%; Cortex-M4 0 / -5 / -4%;
               ARMv7-A X25519 +7%; x86-64 0. Code +222 B Cortex-M4, +302 B Cortex-M0+. A
               variant selecting it only on ARMv6-M was offered and not chosen.
+  2026-11-19  FE-O2 AUDIT (Jim: "Do an audit of FE-O2", then "Yes fix #1 and commit"). The
+              nine shared functions and p are identical to both former private copies
+              (comments, renames and DBC aside); the rest of each module differs only by the
+              new #include. No name collisions; the header compiles standalone (C99) and as
+              C++; ssf.vcxproj / .filters are well-formed with entries matching ssfed25519's;
+              each ninja file has both rules and both link entries. Fixed: ssffe25519.md's
+              title used superscripts and U+2212 (the only such heading in the repo), so its
+              back-to-top anchors were unverified; it is now "Curve25519 Field Arithmetic".
+              Noted, unchanged: the header includes ssfassert.h directly (redundant via
+              ssfport.h, keeps it self-contained); projects that add sources by hand now need
+              ssffe25519.c with ssfx25519.c / ssfed25519.c (documented).
 

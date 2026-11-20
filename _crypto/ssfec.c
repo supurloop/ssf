@@ -1041,6 +1041,8 @@ void SSFECScalarMulDual(SSFECPoint_t *r, const SSFBN_t *u1, const SSFECPoint_t *
     SSF_REQUIRE(r->x.cap >= c->limbs);
     SSF_REQUIRE(r->y.cap >= c->limbs);
     SSF_REQUIRE(r->z.cap >= c->limbs);
+    SSF_REQUIRE(u1->len <= c->limbs);
+    SSF_REQUIRE(u2->len <= c->limbs);
 
     bits = (uint32_t)c->limbs * SSF_BN_LIMB_BITS;
 
@@ -1337,6 +1339,7 @@ static void _SSFECScalarMulVTwNAF(SSFECPoint_t *r, const SSFBN_t *k, const SSFEC
     SSF_REQUIRE(r->x.cap >= c->limbs);
     SSF_REQUIRE(r->y.cap >= c->limbs);
     SSF_REQUIRE(r->z.cap >= c->limbs);
+    SSF_REQUIRE(k->len <= c->limbs);
 
     /* Wire up table descriptors. */
     for (i = 0; i < _SSF_EC_VTWNAF_TABLE_SIZE; i++)
@@ -1504,6 +1507,8 @@ void SSFECScalarMulDualBase(SSFECPoint_t *r, const SSFBN_t *u1, const SSFBN_t *u
     SSF_REQUIRE(r->x.cap >= c->limbs);
     SSF_REQUIRE(r->y.cap >= c->limbs);
     SSF_REQUIRE(r->z.cap >= c->limbs);
+    SSF_REQUIRE(u1->len <= c->limbs);
+    SSF_REQUIRE(u2->len <= c->limbs);
 
 #if SSF_EC_CONFIG_FIXED_BASE_P256 == 1
     if (curve == SSF_EC_CURVE_P256)

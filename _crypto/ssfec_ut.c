@@ -2872,10 +2872,19 @@ void SSFECUnitTest(void)
         SSFECPOINT_DEFINE(G, SSF_EC_MAX_LIMBS);
         SSFECPOINT_DEFINE(R, SSF_EC_MAX_LIMBS);
         SSFBN_DEFINE(k, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(u, SSF_BN_MAX_LIMBS);
 
         SSFECPointFromAffine(&G, &c->gx, &c->gy, SSF_EC_CURVE_P256);
         SSFBNSetUint32(&k, 5u, (uint16_t)(c->limbs + 1u));
         SSF_ASSERT_TEST(SSFECScalarMul(&R, &k, &G, SSF_EC_CURVE_P256));
+        /* The dual and variable-time multiplies trap the same way (EC-S1) */
+        SSFBNSetUint32(&u, 3u, c->limbs);
+        SSF_ASSERT_TEST(SSFECScalarMulDual(&R, &k, &G, &u, &G, SSF_EC_CURVE_P256));
+        SSF_ASSERT_TEST(SSFECScalarMulDual(&R, &u, &G, &k, &G, SSF_EC_CURVE_P256));
+#if SSF_EC_CONFIG_FIXED_BASE_P256 == 1
+        SSF_ASSERT_TEST(SSFECScalarMulDualBase(&R, &u, &k, &G, SSF_EC_CURVE_P256));
+        SSF_ASSERT_TEST(_SSFECScalarMulVTwNAFForTest(&R, &k, &G, SSF_EC_CURVE_P256));
+#endif /* SSF_EC_CONFIG_FIXED_BASE_P256 */
         k.len = c->limbs;
         SSFECScalarMul(&R, &k, &G, SSF_EC_CURVE_P256);
         SSF_ASSERT(SSFECPointIsIdentity(&R) == false);

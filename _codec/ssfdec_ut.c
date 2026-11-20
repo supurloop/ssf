@@ -51,6 +51,26 @@ void SSFDecUnitTest(void)
     uint8_t minFieldWidth;
     uint64_t r = 1;
 
+    /* ---- AUDIT DEC-1: INT64_MIN is parsed without signed overflow ---- */
+    /* "-9223372036854775808" negated 2^63 as an int64_t (undefined), once in the integer   */
+    /* parser and again when the exponent parser negated the base; seen under UBSan.         */
+    {
+        int64_t v = 0;
+
+        SSF_ASSERT(SSFDecStrToInt("-9223372036854775808", &v) == true);
+        SSF_ASSERT(v == INT64_MIN);
+        SSF_ASSERT(SSFDecStrToInt("-9223372036854775809", &v) == false);
+        SSF_ASSERT(SSFDecStrToInt("-9223372036854775807", &v) == true);
+        SSF_ASSERT(v == (INT64_MIN + 1));
+        SSF_ASSERT(SSFDecStrToInt("-0", &v) == true);
+        SSF_ASSERT(v == 0);
+        SSF_ASSERT(SSFDecStrToXInt("-9223372036854775808e0", &v, NULL) == true);
+        SSF_ASSERT(v == INT64_MIN);
+        SSF_ASSERT(SSFDecStrToXInt("-9223372036854775808e1", &v, NULL) == false);
+        SSF_ASSERT(SSFDecStrToXInt("-922337203685477580.8e1", &v, NULL) == true);
+        SSF_ASSERT(v == INT64_MIN);
+    }
+
     srand((unsigned int)SSFPortGetTick64());
 
     /* Test assertions */
@@ -604,7 +624,8 @@ void SSFDecUnitTest(void)
         SSF_ASSERT(SSFDecIntToStr(-i64 + 1, str2, len1) == 0);
         SSF_ASSERT(SSFDecIntToStr(-i64 + 1, str2, len1 + 1) != 0);
 
-        i64 *= 10;
+        /* The step after the last power (10^18) would overflow int64_t */
+        if (i64 <= (INT64_MAX / 10)) i64 *= 10;
     }
 
     /* Test boundary conditions of SSFDecUIntToStr() */

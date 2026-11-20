@@ -1118,6 +1118,7 @@ bool SSFUBJsonPrintInt(uint8_t *js, size_t size, size_t start, size_t *end, int6
     uint8_t ui8;
     int16_t i16;
     int32_t i32;
+    uint64_t u64;
 
     SSF_REQUIRE(js != NULL);
     SSF_REQUIRE(end != NULL);
@@ -1181,7 +1182,8 @@ bool SSFUBJsonPrintInt(uint8_t *js, size_t size, size_t start, size_t *end, int6
         i32 = (int32_t)in; i32 = htonl(i32); pi = (uint8_t *)&i32; len = sizeof(i32);
         break;
     case UBJ_TYPE_INT64:
-        in = htonll(in); pi = (uint8_t *)&in; len = sizeof(in);
+        /* Byte-swap the value's two's complement bits as unsigned, so no shift overflows */
+        u64 = (uint64_t)in; u64 = htonll(u64); pi = (uint8_t *)&u64; len = sizeof(u64);
         break;
     default:
         SSF_ERROR();

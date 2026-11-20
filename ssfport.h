@@ -292,14 +292,14 @@ typedef uint64_t SSFPortTick_t;
                       (((x) & 0x000000ffu) << 24))
     #define ntohl(x) htonl(x)
 
-    #define htonll(x) ((((x) & 0xff00000000000000u) >> 56) | \
-                       (((x) & 0x00ff000000000000u) >> 40) | \
-                       (((x) & 0x0000ff0000000000u) >> 24) | \
-                       (((x) & 0x000000ff00000000u) >> 8) | \
-                       (((x) & 0x00000000ff000000u) << 8) | \
-                       (((x) & 0x0000000000ff0000u) << 24) | \
-                       (((x) & 0x000000000000ff00u) << 40) | \
-                       (((x) & 0x00000000000000ffu) << 56))
+    #define htonll(x) (((((uint64_t)(x)) & 0xff00000000000000ull) >> 56) | \
+                       ((((uint64_t)(x)) & 0x00ff000000000000ull) >> 40) | \
+                       ((((uint64_t)(x)) & 0x0000ff0000000000ull) >> 24) | \
+                       ((((uint64_t)(x)) & 0x000000ff00000000ull) >> 8) | \
+                       ((((uint64_t)(x)) & 0x00000000ff000000ull) << 8) | \
+                       ((((uint64_t)(x)) & 0x0000000000ff0000ull) << 24) | \
+                       ((((uint64_t)(x)) & 0x000000000000ff00ull) << 40) | \
+                       ((((uint64_t)(x)) & 0x00000000000000ffull) << 56))
     #define ntohll(x) htonll(x)
 #endif /* SSF_CONFIG_LITTLE_ENDIAN */
 #endif /* SSF_CONFIG_BYTE_ORDER_MACROS */

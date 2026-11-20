@@ -328,8 +328,15 @@ static bool _SSFDecStrToInt(SSFCStrIn_t str, int64_t *val, SSFCStrIn_t *next, ui
         else break;
     }
 
-    /* Adjust sign */
-    if (isNeg) *val = -((int64_t)u64);
+    /* Adjust sign: is the value negative? */
+    if (isNeg)
+    {
+        /* Yes, is it INT64_MIN, whose magnitude no int64_t can hold? */
+        if (u64 == ((uint64_t)INT64_MAX + 1u)) *val = INT64_MIN;
+        /* No, negate it */
+        else *val = -((int64_t)u64);
+    }
+    /* No */
     else *val = (int64_t)u64;
     if (next != NULL) *next = str;
     return true;
@@ -413,7 +420,8 @@ bool SSFDecStrToXInt(SSFCStrIn_t str, int64_t *sval, uint64_t *uval)
         if (sbase < 0)
         {
             negBase = true;
-            base = (uint64_t)(-sbase);
+            /* Magnitude by unsigned negation, which is defined for INT64_MIN too */
+            base = (uint64_t)0u - (uint64_t)sbase;
         }
         else base = (uint64_t)sbase;
     }

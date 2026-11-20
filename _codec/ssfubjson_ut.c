@@ -253,6 +253,37 @@ void SSFUBJsonUnitTest(void)
     uint8_t *outPtr;
     size_t outPtrLen;
 
+    /* ---- AUDIT UBJSON-1: 64-bit integers are encoded without signed shift overflow ---- */
+    /* htonll was applied to the signed value; its low-byte mask is an unsigned int, so the  */
+    /* arithmetic stayed signed and a low byte >= 0x80 shifted left by 56 overflowed (UBSan). */
+    {
+        static const int64_t vals[] = { -2147483649ll, INT64_MIN + 255, INT64_MAX, INT64_MIN };
+        static const uint8_t enc0[] = { 'L', 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0x7Fu, 0xFFu, 0xFFu,
+                                        0xFFu };
+        uint8_t buf[16];
+        size_t bufEnd;
+        uint32_t k;
+        int64_t back;
+        size_t i0 = 0u;
+
+        for (k = 0u; k < (uint32_t)(sizeof(vals) / sizeof(vals[0])); k++)
+        {
+            /* [ L <8 bytes> ] then read element 0 back */
+            buf[0] = '[';
+            SSF_ASSERT(SSFUBJsonPrintInt(buf, sizeof(buf), 1u, &bufEnd, vals[k], false,
+                                         SSF_UBJSON_TYPE_ERROR) == true);
+            SSF_ASSERT((bufEnd == 10u) && (buf[1] == 'L'));
+            if (k == 0u) { SSF_ASSERT(memcmp(&buf[1], enc0, sizeof(enc0)) == 0); }
+            buf[bufEnd] = ']';
+            memset(path, 0, sizeof(path));
+            SSF_GPATH_SET_INDEX(path[0], &i0);
+            back = 0;
+            SSF_ASSERT(SSFUBJsonGetInt64(buf, bufEnd + 1u, path, &back) == true);
+            SSF_ASSERT(back == vals[k]);
+        }
+        memset(path, 0, sizeof(path));
+    }
+
     /* ---- AUDIT UBJSON-2: a path only matches a document of its shape; first key wins ---- */
     /* Path entries were untyped and handed to every element and member, so a key string was  */
     /* read as a size_t index (an over-read and a wrong element); a value's type was reported */

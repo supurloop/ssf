@@ -1164,7 +1164,15 @@ void SSFBNSquare(SSFBN_t *r, const SSFBN_t *a)
             r->limbs[i + j] = (SSFBNLimb_t)prod;
             carry = prod >> SSF_BN_LIMB_BITS;
         }
+/* Disable false positive Visual Studio Code Analysis warning */
+#ifdef _WIN32
+#pragma warning(push)
+#pragma warning(disable:6385)
+#endif
         r->limbs[i + n] += (SSFBNLimb_t)carry;
+#ifdef _WIN32
+#pragma warning(pop)
+#endif
     }
 
     /* Step 2: double the upper triangle via a single shift-left-by-1 across 2n limbs. */
@@ -2736,8 +2744,16 @@ void SSFBNMontSquare(SSFBN_t *r, const SSFBN_t *a, const SSFBNMont_t *ctx)
 
             sum = (SSFBNDLimb_t)t[2u * i] + (SSFBNDLimb_t)(SSFBNLimb_t)sq + (SSFBNDLimb_t)carry;
             t[2u * i] = (SSFBNLimb_t)sum;
+/* Disable false positive Visual Studio Code Analysis warning */
+#ifdef _WIN32
+#pragma warning(push)
+#pragma warning(disable:6385)
+#endif
             sum = (SSFBNDLimb_t)t[2u * i + 1u] + (sq >> SSF_BN_LIMB_BITS) +
                   (sum >> SSF_BN_LIMB_BITS);
+#ifdef _WIN32
+#pragma warning(pop)
+#endif
             t[2u * i + 1u] = (SSFBNLimb_t)sum;
             carry = (SSFBNLimb_t)(sum >> SSF_BN_LIMB_BITS);
             _SSF_BN_COUNT(_SSFBNMontSqrCarryIters);

@@ -5,7 +5,7 @@
 Universal Binary JSON (UBJSON) parser and printer-callback generator.
 
 UBJSON is a binary encoding that is type-compatible with JSON while being more compact. The parser
-searches a binary buffer in place using a zero-terminated path array to locate values. The
+searches a binary buffer in place using a lookup path of typed entries to locate values. The
 generator builds a UBJSON binary message into a caller-supplied buffer through a chain of
 printer callbacks, one per object or array nesting level.
 
@@ -16,14 +16,24 @@ printer callbacks, one per object or array nesting level.
 ## [↑](#ssfubjson--ubjson-parsergenerator) Dependencies
 
 - [`ssfport.h`](../ssfport.h)
+- [`ssfjsonpath.h`](ssfjsonpath.h) — the lookup path type shared with [`ssfjson`](ssfjson.md)
 - [`_opt/ssfubjson_opt.h`](../_opt/ssfubjson_opt.h) (aggregated through `ssfoptions.h`)
 
 <a id="notes"></a>
 
 ## [↑](#ssfubjson--ubjson-parsergenerator) Notes
 
-- Path arrays must be fully zeroed with `memset` before use; set each element to a
-  null-terminated key string, a `size_t *` array index, or leave as `NULL` to terminate.
+- A lookup path is an array of [`SSFJsonPath_t`](ssfjson.md#ssfjsonpath-t) entries (declared in
+  `ssfjsonpath.h`, shared with ssfjson). Zero it with `memset` before use, then set each entry
+  with `SSF_JSON_PATH_SET_KEY()` (an object member name) or `SSF_JSON_PATH_SET_INDEX()` (a
+  pointer to a `size_t` array element index); an END entry, or a zeroed one, ends the path.
+- A path matches only a message of the same shape: a key entry where the message has an
+  array, an index entry where it has an object, or any entry left over at a scalar means the
+  value is not found. A key entry with a `NULL` name, an index entry with a `NULL` pointer, or
+  an unknown kind asserts.
+- Messages with duplicate object keys are valid; a path matches only the first occurrence.
+  Many other parsers use the last occurrence, so do not rely on two parsers agreeing about a
+  message with duplicate keys.
 - UBJSON data is binary and not null-terminated; always track message length separately in
   a `size_t` variable (`end` after generation, `jsLen` for parsing).
 - Generator functions accept a write offset `start` by value and write the new offset to
@@ -145,7 +155,7 @@ uint8_t ub[] = {
 Path arrays must be zeroed before each use:
 
 ```c
-SSFCStrIn_t path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH + 1];
+SSFJsonPath_t path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH + 1];
 memset(path, 0, sizeof(path));
 ```
 
@@ -165,7 +175,7 @@ SSFUBJsonIsValid(bad, sizeof(bad)); /* returns false */
 ### [↑](#ssfubjson--ubjson-parsergenerator) [`SSFUBJsonType_t SSFUBJsonGetType()`](#functions)
 
 ```c
-SSFUBJsonType_t SSFUBJsonGetType(uint8_t *js, size_t jsLen, SSFCStrIn_t *path);
+SSFUBJsonType_t SSFUBJsonGetType(uint8_t *js, size_t jsLen, const SSFJsonPath_t *path);
 ```
 
 Returns the UBJSON type of the value located at `path`. Zero the path array with `memset` before
@@ -175,7 +185,7 @@ use and set each element to a key string (object field) or a `size_t *` index (a
 |-----------|-----------|------|-------------|
 | `js` | in | `uint8_t *` | UBJSON binary data. Must not be `NULL`. |
 | `jsLen` | in | `size_t` | Length of `js` in bytes. |
-| `path` | in | `const char **` | Zero-terminated path array. Must not be `NULL`. Array must be zeroed before use. |
+| `path` | in | [`const SSFJsonPath_t *`](ssfjson.md#ssfjsonpath-t) | Lookup path ending in an END entry; zero it before use. Must not be `NULL`. |
 
 **Returns:** A [`SSFUBJsonType_t`](#type-ssfubjsontype-t) enum value indicating the type at `path`, or `SSF_UBJSON_TYPE_ERROR` if the path is not found or the message is malformed.
 
@@ -183,15 +193,15 @@ use and set each element to a key string (object field) or a `size_t *` index (a
 
 ```c
 memset(path, 0, sizeof(path));
-path[0] = "name";
+SSF_JSON_PATH_SET_KEY(path[0], "name");
 SSFUBJsonGetType(ub, sizeof(ub), path);    /* returns SSF_UBJSON_TYPE_STRING */
 
 memset(path, 0, sizeof(path));
-path[0] = "count";
+SSF_JSON_PATH_SET_KEY(path[0], "count");
 SSFUBJsonGetType(ub, sizeof(ub), path);    /* returns SSF_UBJSON_TYPE_NUMBER_INT8 */
 
 memset(path, 0, sizeof(path));
-path[0] = "missing";
+SSF_JSON_PATH_SET_KEY(path[0], "missing");
 SSFUBJsonGetType(ub, sizeof(ub), path);    /* returns SSF_UBJSON_TYPE_ERROR */
 ```
 
@@ -202,7 +212,7 @@ SSFUBJsonGetType(ub, sizeof(ub), path);    /* returns SSF_UBJSON_TYPE_ERROR */
 ### [↑](#ssfubjson--ubjson-parsergenerator) [`bool SSFUBJsonGetString()`](#functions)
 
 ```c
-bool SSFUBJsonGetString(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, SSFCStrOut_t out,
+bool SSFUBJsonGetString(uint8_t *js, size_t jsLen, const SSFJsonPath_t *path, SSFCStrOut_t out,
                         size_t outSize, size_t *outLen);
 ```
 
@@ -212,7 +222,7 @@ Finds the UBJSON string value at `path` and copies it as a null-terminated C str
 |-----------|-----------|------|-------------|
 | `js` | in | `uint8_t *` | UBJSON binary data. Must not be `NULL`. |
 | `jsLen` | in | `size_t` | Length of `js` in bytes. |
-| `path` | in | `const char **` | Zero-terminated path array. Must not be `NULL`. Array must be zeroed before use. |
+| `path` | in | [`const SSFJsonPath_t *`](ssfjson.md#ssfjsonpath-t) | Lookup path ending in an END entry; zero it before use. Must not be `NULL`. |
 | `out` | out | `char *` | Buffer receiving the null-terminated string. Must not be `NULL`. |
 | `outSize` | in | `size_t` | Allocated size of `out` in bytes. |
 | `outLen` | out (opt) | `size_t *` | If not `NULL`, receives the string length (excluding null terminator). |
@@ -226,7 +236,7 @@ char out[32];
 size_t outLen;
 
 memset(path, 0, sizeof(path));
-path[0] = "name";
+SSF_JSON_PATH_SET_KEY(path[0], "name");
 if (SSFUBJsonGetString(ub, sizeof(ub), path, out, sizeof(out), &outLen))
 {
     /* out == "Alice", outLen == 5 */
@@ -249,7 +259,7 @@ if (SSFUBJsonGetString(ub, sizeof(ub), path, out, sizeof(out), &outLen))
 #define SSFUBJsonGetInt64(js, jsLen, path, out)  SSFUBJsonGetInt(js, jsLen, path, out, 8, true)
 #define SSFUBJsonGetUInt64(js, jsLen, path, out) SSFUBJsonGetInt(js, jsLen, path, out, 8, false)
 
-bool SSFUBJsonGetInt(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, void *out, uint8_t size,
+bool SSFUBJsonGetInt(uint8_t *js, size_t jsLen, const SSFJsonPath_t *path, void *out, uint8_t size,
                      bool isSigned);
 ```
 
@@ -261,7 +271,7 @@ appropriately-typed macro rather than `SSFUBJsonGetInt()` directly.
 |-----------|-----------|------|-------------|
 | `js` | in | `uint8_t *` | UBJSON binary data. Must not be `NULL`. |
 | `jsLen` | in | `size_t` | Length of `js` in bytes. |
-| `path` | in | `const char **` | Zero-terminated path array. Must not be `NULL`. Array must be zeroed before use. |
+| `path` | in | [`const SSFJsonPath_t *`](ssfjson.md#ssfjsonpath-t) | Lookup path ending in an END entry; zero it before use. Must not be `NULL`. |
 | `out` | out | typed pointer | Pointer to the variable receiving the integer. Must not be `NULL`. Type must match the chosen macro (e.g. `int32_t *` for `SSFUBJsonGetInt32`). |
 
 **Returns:** `true` if a numeric value was found at `path` and converted successfully; `false` otherwise.
@@ -274,7 +284,7 @@ int32_t n32;
 uint8_t u8;
 
 memset(path, 0, sizeof(path));
-path[0] = "count";
+SSF_JSON_PATH_SET_KEY(path[0], "count");
 
 SSFUBJsonGetInt8 (ub, sizeof(ub), path, &n8);    /* n8  == 42 */
 SSFUBJsonGetInt32(ub, sizeof(ub), path, &n32);   /* n32 == 42 */
@@ -288,8 +298,8 @@ SSFUBJsonGetUInt8(ub, sizeof(ub), path, &u8);    /* u8  == 42 */
 ### [↑](#ssfubjson--ubjson-parsergenerator) [`bool SSFUBJsonGetFloat()` / `bool SSFUBJsonGetDouble()`](#functions)
 
 ```c
-bool SSFUBJsonGetFloat(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, float *out);
-bool SSFUBJsonGetDouble(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, double *out);
+bool SSFUBJsonGetFloat(uint8_t *js, size_t jsLen, const SSFJsonPath_t *path, float *out);
+bool SSFUBJsonGetDouble(uint8_t *js, size_t jsLen, const SSFJsonPath_t *path, double *out);
 ```
 
 Finds a UBJSON float32 (`d`) or float64 (`D`) value at `path` and copies it to `*out`.
@@ -298,7 +308,7 @@ Finds a UBJSON float32 (`d`) or float64 (`D`) value at `path` and copies it to `
 |-----------|-----------|------|-------------|
 | `js` | in | `uint8_t *` | UBJSON binary data. Must not be `NULL`. |
 | `jsLen` | in | `size_t` | Length of `js` in bytes. |
-| `path` | in | `const char **` | Zero-terminated path array. Must not be `NULL`. Array must be zeroed before use. |
+| `path` | in | [`const SSFJsonPath_t *`](ssfjson.md#ssfjsonpath-t) | Lookup path ending in an END entry; zero it before use. Must not be `NULL`. |
 | `out` | out | `float *` or `double *` | Receives the floating-point value. Must not be `NULL`. |
 
 **Returns:** `true` if a matching float or double was found at `path`; `false` otherwise.
@@ -321,7 +331,7 @@ float   f;
 if (SSFUBJsonPrintObject(buf, sizeof(buf), 0, &end, buildFloat, NULL))
 {
     memset(path, 0, sizeof(path));
-    path[0] = "temp";
+    SSF_JSON_PATH_SET_KEY(path[0], "temp");
     if (SSFUBJsonGetFloat(buf, end, path, &f))
     {
         /* f ~= 3.14 */
@@ -347,7 +357,7 @@ double  d;
 if (SSFUBJsonPrintObject(buf, sizeof(buf), 0, &end, buildDouble, NULL))
 {
     memset(path, 0, sizeof(path));
-    path[0] = "val";
+    SSF_JSON_PATH_SET_KEY(path[0], "val");
     if (SSFUBJsonGetDouble(buf, end, path, &d))
     {
         /* d ~= 2.718281828 */
@@ -362,8 +372,8 @@ if (SSFUBJsonPrintObject(buf, sizeof(buf), 0, &end, buildDouble, NULL))
 ### [↑](#ssfubjson--ubjson-parsergenerator) [`bool SSFUBJsonGetHex()`](#functions)
 
 ```c
-bool SSFUBJsonGetHex(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, uint8_t *out, size_t outSize,
-                     size_t *outLen, bool rev);
+bool SSFUBJsonGetHex(uint8_t *js, size_t jsLen, const SSFJsonPath_t *path, uint8_t *out,
+                     size_t outSize, size_t *outLen, bool rev);
 ```
 
 Finds a UBJSON string value at `path`, interprets it as a lowercase hexadecimal-encoded binary
@@ -374,7 +384,7 @@ sequence, and decodes it into `out`. Set `rev` to `true` to reverse byte order a
 |-----------|-----------|------|-------------|
 | `js` | in | `uint8_t *` | UBJSON binary data. Must not be `NULL`. |
 | `jsLen` | in | `size_t` | Length of `js` in bytes. |
-| `path` | in | `const char **` | Zero-terminated path array. Must not be `NULL`. Array must be zeroed before use. |
+| `path` | in | [`const SSFJsonPath_t *`](ssfjson.md#ssfjsonpath-t) | Lookup path ending in an END entry; zero it before use. Must not be `NULL`. |
 | `out` | out | `uint8_t *` | Buffer receiving the decoded bytes. Must not be `NULL`. |
 | `outSize` | in | `size_t` | Allocated size of `out` in bytes. Must be at least half the hex string length. |
 | `outLen` | out (opt) | `size_t *` | If not `NULL`, receives the number of decoded bytes. |
@@ -402,7 +412,7 @@ size_t  decodedLen;
 if (SSFUBJsonPrintObject(buf, sizeof(buf), 0, &end, buildHex, NULL))
 {
     memset(path, 0, sizeof(path));
-    path[0] = "raw";
+    SSF_JSON_PATH_SET_KEY(path[0], "raw");
     if (SSFUBJsonGetHex(buf, end, path, decoded, sizeof(decoded), &decodedLen, false))
     {
         /* decoded[0..3] == {0xDE, 0xAD, 0xBE, 0xEF}, decodedLen == 4 */
@@ -417,7 +427,7 @@ if (SSFUBJsonPrintObject(buf, sizeof(buf), 0, &end, buildHex, NULL))
 ### [↑](#ssfubjson--ubjson-parsergenerator) [`bool SSFUBJsonGetBase64()`](#functions)
 
 ```c
-bool SSFUBJsonGetBase64(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, uint8_t *out,
+bool SSFUBJsonGetBase64(uint8_t *js, size_t jsLen, const SSFJsonPath_t *path, uint8_t *out,
                         size_t outSize, size_t *outLen);
 ```
 
@@ -428,7 +438,7 @@ decodes it into `out`.
 |-----------|-----------|------|-------------|
 | `js` | in | `uint8_t *` | UBJSON binary data. Must not be `NULL`. |
 | `jsLen` | in | `size_t` | Length of `js` in bytes. |
-| `path` | in | `const char **` | Zero-terminated path array. Must not be `NULL`. Array must be zeroed before use. |
+| `path` | in | [`const SSFJsonPath_t *`](ssfjson.md#ssfjsonpath-t) | Lookup path ending in an END entry; zero it before use. Must not be `NULL`. |
 | `out` | out | `uint8_t *` | Buffer receiving the decoded bytes. Must not be `NULL`. |
 | `outSize` | in | `size_t` | Allocated size of `out` in bytes. |
 | `outLen` | out (opt) | `size_t *` | If not `NULL`, receives the number of decoded bytes. |
@@ -455,7 +465,7 @@ size_t  decodedLen;
 if (SSFUBJsonPrintObject(buf, sizeof(buf), 0, &end, buildB64, NULL))
 {
     memset(path, 0, sizeof(path));
-    path[0] = "b64";
+    SSF_JSON_PATH_SET_KEY(path[0], "b64");
     if (SSFUBJsonGetBase64(buf, end, path, decoded, sizeof(decoded), &decodedLen))
     {
         /* decoded[0..4] == "hello", decodedLen == 5 */
@@ -470,7 +480,7 @@ if (SSFUBJsonPrintObject(buf, sizeof(buf), 0, &end, buildB64, NULL))
 ### [↑](#ssfubjson--ubjson-parsergenerator) [`bool SSFUBJsonGetByteArrayPtr()`](#functions)
 
 ```c
-bool SSFUBJsonGetByteArrayPtr(uint8_t *js, size_t jsLen, SSFCStrIn_t *path, uint8_t **out,
+bool SSFUBJsonGetByteArrayPtr(uint8_t *js, size_t jsLen, const SSFJsonPath_t *path, uint8_t **out,
                               size_t *outLen);
 ```
 
@@ -482,7 +492,7 @@ pointer.
 |-----------|-----------|------|-------------|
 | `js` | in | `uint8_t *` | UBJSON binary data. Must not be `NULL`. |
 | `jsLen` | in | `size_t` | Length of `js` in bytes. |
-| `path` | in | `const char **` | Zero-terminated path array. Must not be `NULL`. Array must be zeroed before use. |
+| `path` | in | [`const SSFJsonPath_t *`](ssfjson.md#ssfjsonpath-t) | Lookup path ending in an END entry; zero it before use. Must not be `NULL`. |
 | `out` | out | `uint8_t **` | Receives a pointer into `js` at the start of the byte array data. Must not be `NULL`. |
 | `outLen` | out | `size_t *` | Receives the number of bytes in the array. Must not be `NULL`. |
 
@@ -504,7 +514,7 @@ uint8_t *ptr;
 size_t   len;
 
 memset(path, 0, sizeof(path));
-path[0] = "data";
+SSF_JSON_PATH_SET_KEY(path[0], "data");
 if (SSFUBJsonGetByteArrayPtr(ubArr, sizeof(ubArr), path, &ptr, &len))
 {
     /* ptr points into ubArr at 0x01, len == 3 — no copy made */

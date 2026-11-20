@@ -232,7 +232,7 @@ void SSFUBJsonUnitTest(void)
 {
     uint16_t i;
     uint16_t j;
-    char *path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH + 1];
+    SSFJsonPath_t path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH + 1];
     size_t aidx1;
     char outStr[128];
     size_t outStrLen;
@@ -253,6 +253,120 @@ void SSFUBJsonUnitTest(void)
     uint8_t *outPtr;
     size_t outPtrLen;
 
+    /* ---- AUDIT UBJSON-2: a path only matches a document of its shape; first key wins ---- */
+    /* Path entries were untyped and handed to every element and member, so a key string was  */
+    /* read as a size_t index (an over-read and a wrong element); a value's type was reported */
+    /* before the path was checked; a miss inside an element reported the element; the last  */
+    /* duplicate key won.                                                                     */
+    {
+        static uint8_t jsSib[] = { '[', '[', 'i', 7, ']', '{', 'i', 3, 'h', 'e', 'x', 'i', 5, '}',
+                                   ']' };
+        static uint8_t jsSkip[] = { '{', 'i', 1, 'x', '[', 'i', 1, ']', 'i', 1, 'a', '{', 'i', 3,
+                                    'h', 'e', 'x', 'i', 5, '}', '}' };
+        static uint8_t jsKeyArr[] = { '{', 'i', 1, 'a', '[', 'i', 1, 'i', 2, ']', '}' };
+        static uint8_t jsIdxObj[] = { '{', 'i', 1, 'a', '{', 'i', 0, 'i', 1, '}', '}' };
+        static uint8_t jsStr[] = { '{', 'i', 1, 'a', 'S', 'i', 1, 's', '}' };
+        static uint8_t jsObjMiss[] = { '{', 'i', 1, 'a', '{', 'i', 1, 'c', 'i', 1, '}', '}' };
+        static uint8_t jsEmpty[] = { '{', 'i', 1, 'a', '{', '}', '}' };
+        static uint8_t jsElemMiss[] = { '[', '{', 'i', 1, 'b', 'i', 1, '}', ']' };
+        static uint8_t jsDup[] = { '{', 'i', 1, 'a', 'S', 'i', 1, '1', 'i', 1, 'a', 'S', 'i', 1,
+                                   '2', '}' };
+        static uint8_t jsDupLater[] = { '{', 'i', 1, 'x', 'i', 0, 'i', 1, 'a', 'S', 'i', 1, '1',
+                                        'i', 1, 'y', 'i', 0, 'i', 1, 'a', 'S', 'i', 1, '2', '}' };
+        static uint8_t jsCfg[256];
+        static const char keyA[8] = "a";
+        char key[4];
+        char sOut[4];
+        size_t sLen;
+        size_t i0 = 0u;
+        size_t i1 = 1u;
+        size_t q = 0u;
+        uint32_t k;
+        int8_t i8 = 0;
+
+        /* The key lives in a 4-byte buffer, as a caller's would */
+        memcpy(key, "hex", sizeof(key));
+
+        /* Array sibling and skipped member: the lookup works and never reads the key as an */
+        /* index                                                                             */
+        memset(path, 0, sizeof(path));
+        SSF_JSON_PATH_SET_INDEX(path[0], &i1);
+        SSF_JSON_PATH_SET_KEY(path[1], key);
+        SSF_ASSERT(SSFUBJsonGetInt8(jsSib, sizeof(jsSib), path, &i8) == true);
+        SSF_ASSERT(i8 == 5);
+        SSF_JSON_PATH_SET_KEY(path[0], "a");
+        SSF_ASSERT(SSFUBJsonGetInt8(jsSkip, sizeof(jsSkip), path, &i8) == true);
+        SSF_ASSERT(i8 == 5);
+
+        /* A key where the document has an array, and an index where it has an object */
+        SSF_ASSERT(SSFUBJsonGetType(jsKeyArr, sizeof(jsKeyArr), path) ==
+                   SSF_UBJSON_TYPE_ERROR);
+        SSF_JSON_PATH_SET_INDEX(path[1], &i0);
+        SSF_ASSERT(SSFUBJsonGetType(jsIdxObj, sizeof(jsIdxObj), path) ==
+                   SSF_UBJSON_TYPE_ERROR);
+
+        /* A key whose bytes happen to read as index 97 does not select element 97 */
+        jsCfg[q++] = '{'; jsCfg[q++] = 'i'; jsCfg[q++] = 3;
+        memcpy(&jsCfg[q], "cfg", 3u);
+        q += 3u;
+        jsCfg[q++] = '[';
+        for (k = 0u; k < 100u; k++) { jsCfg[q++] = 'i'; jsCfg[q++] = (uint8_t)k; }
+        jsCfg[q++] = ']'; jsCfg[q++] = '}';
+        memset(path, 0, sizeof(path));
+        SSF_JSON_PATH_SET_KEY(path[0], "cfg");
+        SSF_JSON_PATH_SET_KEY(path[1], keyA);
+        SSF_ASSERT(SSFUBJsonGetType(jsCfg, q, path) == SSF_UBJSON_TYPE_ERROR);
+
+        /* A path past a scalar, past an object without the key, or into an empty object */
+        memset(path, 0, sizeof(path));
+        SSF_JSON_PATH_SET_KEY(path[0], "a");
+        SSF_ASSERT(SSFUBJsonGetType(jsStr, sizeof(jsStr), path) ==
+                   SSF_UBJSON_TYPE_STRING);
+        SSF_ASSERT(SSFUBJsonGetType(jsEmpty, sizeof(jsEmpty), path) ==
+                   SSF_UBJSON_TYPE_OBJECT);
+        SSF_JSON_PATH_SET_KEY(path[1], "b");
+        SSF_ASSERT(SSFUBJsonGetType(jsStr, sizeof(jsStr), path) ==
+                   SSF_UBJSON_TYPE_ERROR);
+        SSF_ASSERT(SSFUBJsonGetString(jsStr, sizeof(jsStr), path, sOut, sizeof(sOut),
+                                      &sLen) == false);
+        SSF_ASSERT(SSFUBJsonGetType(jsObjMiss, sizeof(jsObjMiss), path) ==
+                   SSF_UBJSON_TYPE_ERROR);
+        SSF_ASSERT(SSFUBJsonGetType(jsEmpty, sizeof(jsEmpty), path) ==
+                   SSF_UBJSON_TYPE_ERROR);
+
+        /* A miss inside an array element is not found */
+        memset(path, 0, sizeof(path));
+        SSF_JSON_PATH_SET_INDEX(path[0], &i0);
+        SSF_JSON_PATH_SET_KEY(path[1], "zz");
+        SSF_ASSERT(SSFUBJsonGetType(jsElemMiss, sizeof(jsElemMiss), path) ==
+                   SSF_UBJSON_TYPE_ERROR);
+        SSF_JSON_PATH_SET_KEY(path[1], "b");
+        SSF_ASSERT(SSFUBJsonGetInt8(jsElemMiss, sizeof(jsElemMiss), path, &i8) ==
+                   true);
+        SSF_ASSERT(i8 == 1);
+
+        /* Only the first occurrence of a duplicate key matches, wherever it is */
+        memset(path, 0, sizeof(path));
+        SSF_JSON_PATH_SET_KEY(path[0], "a");
+        SSF_ASSERT(SSFUBJsonGetString(jsDup, sizeof(jsDup), path, sOut, sizeof(sOut),
+                                      &sLen) == true);
+        SSF_ASSERT((sLen == 1u) && (sOut[0] == '1'));
+        SSF_ASSERT(SSFUBJsonGetString(jsDupLater, sizeof(jsDupLater), path, sOut,
+                                      sizeof(sOut), &sLen) == true);
+        SSF_ASSERT((sLen == 1u) && (sOut[0] == '1'));
+        SSF_ASSERT(SSFUBJsonIsValid(jsDup, sizeof(jsDup)) == true);
+
+        /* Typed entries: a key needs a name, an index a variable, and the kind must be known */
+        memset(path, 0, sizeof(path));
+        SSF_JSON_PATH_SET_KEY(path[0], NULL);
+        SSF_ASSERT_TEST(SSFUBJsonGetType(jsStr, sizeof(jsStr), path));
+        SSF_JSON_PATH_SET_INDEX(path[0], NULL);
+        SSF_ASSERT_TEST(SSFUBJsonGetType(jsSib, sizeof(jsSib), path));
+        path[0].kind = SSF_JSON_PATH_MAX;
+        SSF_ASSERT_TEST(SSFUBJsonGetType(jsSib, sizeof(jsSib), path));
+        memset(path, 0, sizeof(path));
+    }
+
     /* (Hardening) A container whose last element/value ends exactly at the buffer end, and a      */
     /* zero-length buffer, must be rejected without reading past the buffer (previously a 1-byte    */
     /* over-read of js[jsLen] / js[0]). */
@@ -270,52 +384,52 @@ void SSFUBJsonUnitTest(void)
     SSF_ASSERT_TEST(SSFUBJsonIsValid(NULL, 1));
     memset(path, 0, sizeof(path));
     SSF_ASSERT_TEST(SSFUBJsonGetType(NULL, 1, NULL));
-    path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH] = "bad";
-    SSF_ASSERT_TEST(SSFUBJsonGetType(NULL, 1, (SSFCStrIn_t *)path));
-    path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH] = NULL;
-    SSF_ASSERT_TEST(SSFUBJsonGetString(NULL, 1, (SSFCStrIn_t *)path, outStr, sizeof(outStr), &outStrLen));
+    SSF_JSON_PATH_SET_KEY(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH], "bad");
+    SSF_ASSERT_TEST(SSFUBJsonGetType(NULL, 1, path));
+    SSF_JSON_PATH_SET_END(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH]);
+    SSF_ASSERT_TEST(SSFUBJsonGetString(NULL, 1, path, outStr, sizeof(outStr), &outStrLen));
     SSF_ASSERT_TEST(SSFUBJsonGetString((uint8_t *)"{}", 1, NULL, outStr, sizeof(outStr), &outStrLen));
-    path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH] = "bad";
-    SSF_ASSERT_TEST(SSFUBJsonGetString((uint8_t *)"{}", 1, (SSFCStrIn_t *)path, outStr, sizeof(outStr), &outStrLen));
-    path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH] = NULL;
-    SSF_ASSERT_TEST(SSFUBJsonGetString((uint8_t *)"{}", 1, (SSFCStrIn_t *)path, NULL, sizeof(outStr), &outStrLen));
-    SSF_ASSERT_TEST(SSFUBJsonGetHex(NULL, 1, (SSFCStrIn_t *)path, jsOut, sizeof(jsOut), &outStrLen, false));
+    SSF_JSON_PATH_SET_KEY(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH], "bad");
+    SSF_ASSERT_TEST(SSFUBJsonGetString((uint8_t *)"{}", 1, path, outStr, sizeof(outStr), &outStrLen));
+    SSF_JSON_PATH_SET_END(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH]);
+    SSF_ASSERT_TEST(SSFUBJsonGetString((uint8_t *)"{}", 1, path, NULL, sizeof(outStr), &outStrLen));
+    SSF_ASSERT_TEST(SSFUBJsonGetHex(NULL, 1, path, jsOut, sizeof(jsOut), &outStrLen, false));
     SSF_ASSERT_TEST(SSFUBJsonGetHex((uint8_t *)"{}", 1, NULL, jsOut, sizeof(jsOut), &outStrLen, false));
-    path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH] = "bad";
-    SSF_ASSERT_TEST(SSFUBJsonGetHex((uint8_t *)"{}", 1, (SSFCStrIn_t *)path, jsOut, sizeof(jsOut), &outStrLen, false));
-    path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH] = NULL;
-    SSF_ASSERT_TEST(SSFUBJsonGetHex((uint8_t *)"{}", 1, (SSFCStrIn_t *)path, NULL, sizeof(jsOut), &outStrLen, false));
-    SSF_ASSERT_TEST(SSFUBJsonGetHex((uint8_t *)"{}", 1, (SSFCStrIn_t *)path, jsOut, sizeof(jsOut), NULL, false));
-    SSF_ASSERT_TEST(SSFUBJsonGetBase64(NULL, 1, (SSFCStrIn_t *)path, jsOut, sizeof(jsOut), &outStrLen));
+    SSF_JSON_PATH_SET_KEY(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH], "bad");
+    SSF_ASSERT_TEST(SSFUBJsonGetHex((uint8_t *)"{}", 1, path, jsOut, sizeof(jsOut), &outStrLen, false));
+    SSF_JSON_PATH_SET_END(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH]);
+    SSF_ASSERT_TEST(SSFUBJsonGetHex((uint8_t *)"{}", 1, path, NULL, sizeof(jsOut), &outStrLen, false));
+    SSF_ASSERT_TEST(SSFUBJsonGetHex((uint8_t *)"{}", 1, path, jsOut, sizeof(jsOut), NULL, false));
+    SSF_ASSERT_TEST(SSFUBJsonGetBase64(NULL, 1, path, jsOut, sizeof(jsOut), &outStrLen));
     SSF_ASSERT_TEST(SSFUBJsonGetBase64((uint8_t *)"{}", 1, NULL, jsOut, sizeof(jsOut), &outStrLen));
-    path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH] = "bad";
-    SSF_ASSERT_TEST(SSFUBJsonGetBase64((uint8_t *)"{}", 1, (SSFCStrIn_t *)path, jsOut, sizeof(jsOut), &outStrLen));
-    path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH] = NULL;
-    SSF_ASSERT_TEST(SSFUBJsonGetBase64((uint8_t *)"{}", 1, (SSFCStrIn_t *)path, NULL, sizeof(jsOut), &outStrLen));
-    SSF_ASSERT_TEST(SSFUBJsonGetFloat(NULL, 1, (SSFCStrIn_t *)path, &outFloat));
+    SSF_JSON_PATH_SET_KEY(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH], "bad");
+    SSF_ASSERT_TEST(SSFUBJsonGetBase64((uint8_t *)"{}", 1, path, jsOut, sizeof(jsOut), &outStrLen));
+    SSF_JSON_PATH_SET_END(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH]);
+    SSF_ASSERT_TEST(SSFUBJsonGetBase64((uint8_t *)"{}", 1, path, NULL, sizeof(jsOut), &outStrLen));
+    SSF_ASSERT_TEST(SSFUBJsonGetFloat(NULL, 1, path, &outFloat));
     SSF_ASSERT_TEST(SSFUBJsonGetFloat((uint8_t *)"{}", 1, NULL, &outFloat));
-    path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH] = "bad";
-    SSF_ASSERT_TEST(SSFUBJsonGetFloat((uint8_t *)"{}", 1, (SSFCStrIn_t *)path, &outFloat));
-    path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH] = NULL;
-    SSF_ASSERT_TEST(SSFUBJsonGetFloat((uint8_t *)"{}", 1, (SSFCStrIn_t *)path, NULL));
-    SSF_ASSERT_TEST(SSFUBJsonGetDouble(NULL, 1, (SSFCStrIn_t *)path, &outDouble));
+    SSF_JSON_PATH_SET_KEY(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH], "bad");
+    SSF_ASSERT_TEST(SSFUBJsonGetFloat((uint8_t *)"{}", 1, path, &outFloat));
+    SSF_JSON_PATH_SET_END(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH]);
+    SSF_ASSERT_TEST(SSFUBJsonGetFloat((uint8_t *)"{}", 1, path, NULL));
+    SSF_ASSERT_TEST(SSFUBJsonGetDouble(NULL, 1, path, &outDouble));
     SSF_ASSERT_TEST(SSFUBJsonGetDouble((uint8_t *)"{}", 1, NULL, &outDouble));
-    path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH] = "bad";
-    SSF_ASSERT_TEST(SSFUBJsonGetDouble((uint8_t *)"{}", 1, (SSFCStrIn_t *)path, &outDouble));
-    path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH] = NULL;
-    SSF_ASSERT_TEST(SSFUBJsonGetDouble((uint8_t *)"{}", 1, (SSFCStrIn_t *)path, NULL));
-    SSF_ASSERT_TEST(SSFUBJsonGetInt(NULL, 1, (SSFCStrIn_t *)path, &outU8, 1, false));
+    SSF_JSON_PATH_SET_KEY(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH], "bad");
+    SSF_ASSERT_TEST(SSFUBJsonGetDouble((uint8_t *)"{}", 1, path, &outDouble));
+    SSF_JSON_PATH_SET_END(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH]);
+    SSF_ASSERT_TEST(SSFUBJsonGetDouble((uint8_t *)"{}", 1, path, NULL));
+    SSF_ASSERT_TEST(SSFUBJsonGetInt(NULL, 1, path, &outU8, 1, false));
     SSF_ASSERT_TEST(SSFUBJsonGetInt((uint8_t *)"{}", 1, NULL, &outU8, 1, false));
-    path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH] = "bad";
-    SSF_ASSERT_TEST(SSFUBJsonGetInt((uint8_t *)"{}", 1, (SSFCStrIn_t *)path, &outU8, 1, false));
-    path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH] = NULL;
-    SSF_ASSERT_TEST(SSFUBJsonGetInt((uint8_t *)"{}", 1, (SSFCStrIn_t *)path, NULL, 1, false));
-    SSF_ASSERT_TEST(SSFUBJsonGetInt((uint8_t *)"{}", 1, (SSFCStrIn_t *)path, &outU8, 0, false));
-    SSF_ASSERT_TEST(SSFUBJsonGetInt((uint8_t *)"{}", 1, (SSFCStrIn_t *)path, &outU8, 3, false));
-    SSF_ASSERT_TEST(SSFUBJsonGetInt((uint8_t *)"{}", 1, (SSFCStrIn_t *)path, &outU8, 5, false));
-    SSF_ASSERT_TEST(SSFUBJsonGetInt((uint8_t *)"{}", 1, (SSFCStrIn_t *)path, &outU8, 6, false));
-    SSF_ASSERT_TEST(SSFUBJsonGetInt((uint8_t *)"{}", 1, (SSFCStrIn_t *)path, &outU8, 7, false));
-    SSF_ASSERT_TEST(SSFUBJsonGetInt((uint8_t *)"{}", 1, (SSFCStrIn_t *)path, &outU8, 9, false));
+    SSF_JSON_PATH_SET_KEY(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH], "bad");
+    SSF_ASSERT_TEST(SSFUBJsonGetInt((uint8_t *)"{}", 1, path, &outU8, 1, false));
+    SSF_JSON_PATH_SET_END(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH]);
+    SSF_ASSERT_TEST(SSFUBJsonGetInt((uint8_t *)"{}", 1, path, NULL, 1, false));
+    SSF_ASSERT_TEST(SSFUBJsonGetInt((uint8_t *)"{}", 1, path, &outU8, 0, false));
+    SSF_ASSERT_TEST(SSFUBJsonGetInt((uint8_t *)"{}", 1, path, &outU8, 3, false));
+    SSF_ASSERT_TEST(SSFUBJsonGetInt((uint8_t *)"{}", 1, path, &outU8, 5, false));
+    SSF_ASSERT_TEST(SSFUBJsonGetInt((uint8_t *)"{}", 1, path, &outU8, 6, false));
+    SSF_ASSERT_TEST(SSFUBJsonGetInt((uint8_t *)"{}", 1, path, &outU8, 7, false));
+    SSF_ASSERT_TEST(SSFUBJsonGetInt((uint8_t *)"{}", 1, path, &outU8, 9, false));
     SSF_ASSERT_TEST(SSFUBJsonPrintChar(NULL, 1, jsOutStart, &jsOutEnd, 'c'));
     SSF_ASSERT_TEST(SSFUBJsonPrintChar(jsOut, 1, jsOutStart, NULL, 'c'));
     SSF_ASSERT_TEST(SSFUBJsonPrintLabel(NULL, sizeof(jsOut), jsOutStart, &jsOutEnd, "label"));
@@ -350,609 +464,609 @@ void SSFUBJsonUnitTest(void)
 
     /* Parse opt integer arrays */
     memset(path, 0, sizeof(path));
-    path[0] = "a";
-    path[1] = (char *)&aidx1;
+    SSF_JSON_PATH_SET_KEY(path[0], "a");
+    SSF_JSON_PATH_SET_INDEX(path[1], &aidx1);
     for (aidx1 = 0;; aidx1++)
     {
-        if (SSFUBJsonGetInt8(_ubjOptArray1, _ubjOptArray1Len, (SSFCStrIn_t *)path, &outI8) == false) break;
+        if (SSFUBJsonGetInt8(_ubjOptArray1, _ubjOptArray1Len, path, &outI8) == false) break;
         SSF_ASSERT(outI8 == (int8_t) (aidx1 + 1));
     }
     SSF_ASSERT(aidx1 == 10);
 
     memset(path, 0, sizeof(path));
-    path[0] = "a";
-    path[1] = (char *)&aidx1;
+    SSF_JSON_PATH_SET_KEY(path[0], "a");
+    SSF_JSON_PATH_SET_INDEX(path[1], &aidx1);
     for (aidx1 = 0;; aidx1++)
     {
-        if (SSFUBJsonGetInt8(_ubjOptArray2, _ubjOptArray2Len, (SSFCStrIn_t *)path, &outI8) == false) break;
+        if (SSFUBJsonGetInt8(_ubjOptArray2, _ubjOptArray2Len, path, &outI8) == false) break;
         SSF_ASSERT(outI8 == (int8_t) (aidx1 + 1));
     }
     SSF_ASSERT(aidx1 == 10);
 
-    path[1] = NULL;
-    SSF_ASSERT(SSFUBJsonGetByteArrayPtr(_ubjOptArray2, _ubjOptArray2Len, (SSFCStrIn_t *)path, &outPtr, &outPtrLen));
+    SSF_JSON_PATH_SET_END(path[1]);
+    SSF_ASSERT(SSFUBJsonGetByteArrayPtr(_ubjOptArray2, _ubjOptArray2Len, path, &outPtr, &outPtrLen));
     SSF_ASSERT(outPtrLen == 10);
     SSF_ASSERT(memcmp(outPtr, "\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a", outPtrLen) == 0);
-    SSF_ASSERT(SSFUBJsonGetByteArrayPtr((uint8_t *)"{i\x01" "a[$i#i\x00}", 11, (SSFCStrIn_t *)path, &outPtr, &outPtrLen));
+    SSF_ASSERT(SSFUBJsonGetByteArrayPtr((uint8_t *)"{i\x01" "a[$i#i\x00}", 11, path, &outPtr, &outPtrLen));
     SSF_ASSERT(outPtrLen == 0);
-    SSF_ASSERT(SSFUBJsonGetByteArrayPtr((uint8_t *)"{i\x01" "a[$i#i\x01]}", 12, (SSFCStrIn_t *)path, &outPtr, &outPtrLen));
+    SSF_ASSERT(SSFUBJsonGetByteArrayPtr((uint8_t *)"{i\x01" "a[$i#i\x01]}", 12, path, &outPtr, &outPtrLen));
     SSF_ASSERT(outPtrLen == 1);
     SSF_ASSERT(*outPtr == ']');
 
     memset(path, 0, sizeof(path));
-    path[0] = "a";
-    path[1] = (char*)&aidx1;
+    SSF_JSON_PATH_SET_KEY(path[0], "a");
+    SSF_JSON_PATH_SET_INDEX(path[1], &aidx1);
     for (aidx1 = 0;; aidx1++)
     {
-        if (SSFUBJsonGetInt16(_ubjOptArray3, _ubjOptArray3Len, (SSFCStrIn_t*)path, &outI16) == false) break;
+        if (SSFUBJsonGetInt16(_ubjOptArray3, _ubjOptArray3Len, path, &outI16) == false) break;
         SSF_ASSERT(outI16 == (int16_t)(aidx1 + 1 + 256));
     }
     SSF_ASSERT(aidx1 == 10);
 
     memset(path, 0, sizeof(path));
-    path[0] = "n";
+    SSF_JSON_PATH_SET_KEY(path[0], "n");
 
     /* SSFUBJsonGetInt8() */
-    SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01ni\x01}", 7, (SSFCStrIn_t *)path, &outI8));
+    SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01ni\x01}", 7, path, &outI8));
     SSF_ASSERT(outI8 == 1l);
-    SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01ni\x7f}", 7, (SSFCStrIn_t *)path, &outI8));
+    SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01ni\x7f}", 7, path, &outI8));
     SSF_ASSERT(outI8 == 127l);
-    SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01ni\x80}", 7, (SSFCStrIn_t *)path, &outI8));
+    SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01ni\x80}", 7, path, &outI8));
     SSF_ASSERT(outI8 == -128l);
-    SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01ni\xff}", 7, (SSFCStrIn_t *)path, &outI8));
+    SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01ni\xff}", 7, path, &outI8));
     SSF_ASSERT(outI8 == -1l);
-    SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01nU\x01}", 7, (SSFCStrIn_t *)path, &outI8));
+    SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01nU\x01}", 7, path, &outI8));
     SSF_ASSERT(outI8 == 1l);
-    SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01nU\x7f}", 7, (SSFCStrIn_t *)path, &outI8));
+    SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01nU\x7f}", 7, path, &outI8));
     SSF_ASSERT(outI8 == 127l);
-    SSF_ASSERT(false == SSFUBJsonGetInt8((uint8_t *)"{i\x01nU\x80}", 7, (SSFCStrIn_t *)path, &outI8));
+    SSF_ASSERT(false == SSFUBJsonGetInt8((uint8_t *)"{i\x01nU\x80}", 7, path, &outI8));
     //SSF_ASSERT(outI8 == -128l);
-    SSF_ASSERT(false == SSFUBJsonGetInt8((uint8_t *)"{i\x01nU\xff}", 7, (SSFCStrIn_t *)path, &outI8));
+    SSF_ASSERT(false == SSFUBJsonGetInt8((uint8_t *)"{i\x01nU\xff}", 7, path, &outI8));
     //SSF_ASSERT(outI8 == -1l);
-    SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01nI\x00\x01}", 8, (SSFCStrIn_t *)path, &outI8));
+    SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01nI\x00\x01}", 8, path, &outI8));
     SSF_ASSERT(outI8 == 1l);
-    SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01nI\x00\x7f}", 8, (SSFCStrIn_t *)path, &outI8));
+    SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01nI\x00\x7f}", 8, path, &outI8));
     SSF_ASSERT(outI8 == 127l);
-    SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01nI\x00\x80}", 8, (SSFCStrIn_t *)path, &outI8) == false);
-    SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01nI\xff\x7f}", 8, (SSFCStrIn_t *)path, &outI8) == false);
-    SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01nI\xff\x80}", 8, (SSFCStrIn_t *)path, &outI8));
+    SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01nI\x00\x80}", 8, path, &outI8) == false);
+    SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01nI\xff\x7f}", 8, path, &outI8) == false);
+    SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01nI\xff\x80}", 8, path, &outI8));
     SSF_ASSERT(outI8 == -128l);
-    SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01nI\xff\xff}", 8, (SSFCStrIn_t *)path, &outI8));
+    SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01nI\xff\xff}", 8, path, &outI8));
     SSF_ASSERT(outI8 == -1l);
-    SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01nl\x00\x00\x00\x01}", 10, (SSFCStrIn_t *)path, &outI8));
+    SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01nl\x00\x00\x00\x01}", 10, path, &outI8));
     SSF_ASSERT(outI8 == 1l);
-    SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01nl\x00\x00\x00\x7f}", 10, (SSFCStrIn_t *)path, &outI8));
+    SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01nl\x00\x00\x00\x7f}", 10, path, &outI8));
     SSF_ASSERT(outI8 == 127l);
-    SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01nl\x00\x00\x00\x80}", 10, (SSFCStrIn_t *)path, &outI8) == false);
-    SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01nl\xff\xff\xff\x7f}", 10, (SSFCStrIn_t *)path, &outI8) == false);
-    SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01nl\xff\xff\xff\xff}", 10, (SSFCStrIn_t *)path, &outI8));
+    SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01nl\x00\x00\x00\x80}", 10, path, &outI8) == false);
+    SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01nl\xff\xff\xff\x7f}", 10, path, &outI8) == false);
+    SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01nl\xff\xff\xff\xff}", 10, path, &outI8));
     SSF_ASSERT(outI8 == -1l);
-    SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01nI\xff\x80}", 8, (SSFCStrIn_t *)path, &outI8));
+    SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01nI\xff\x80}", 8, path, &outI8));
     SSF_ASSERT(outI8 == -128l);
-    SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x00\x01}", 14, (SSFCStrIn_t *)path, &outI8));
+    SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x00\x01}", 14, path, &outI8));
     SSF_ASSERT(outI8 == 1l);
-    SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x00\x7f}", 14, (SSFCStrIn_t *)path, &outI8));
+    SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x00\x7f}", 14, path, &outI8));
     SSF_ASSERT(outI8 == 127l);
-    SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x00\x80}", 14, (SSFCStrIn_t *)path, &outI8)== false);
-    SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\xff\x7f}", 14, (SSFCStrIn_t *)path, &outI8) == false);
-    SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\xff\xff}", 14, (SSFCStrIn_t *)path, &outI8));
+    SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x00\x80}", 14, path, &outI8)== false);
+    SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\xff\x7f}", 14, path, &outI8) == false);
+    SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\xff\xff}", 14, path, &outI8));
     SSF_ASSERT(outI8 == -1l);
-    SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\xff\x80}", 14, (SSFCStrIn_t *)path, &outI8));
+    SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\xff\x80}", 14, path, &outI8));
     SSF_ASSERT(outI8 == -128l);
 
     /* SSFUBJsonGetUInt8() */
-    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01ni\x01}", 7, (SSFCStrIn_t *)path, &outU8));
+    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01ni\x01}", 7, path, &outU8));
     SSF_ASSERT(outU8 == 1ul);
-    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01ni\x7f}", 7, (SSFCStrIn_t *)path, &outU8));
+    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01ni\x7f}", 7, path, &outU8));
     SSF_ASSERT(outU8 == 127ul);
-    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01ni\x80}", 7, (SSFCStrIn_t *)path, &outU8));
+    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01ni\x80}", 7, path, &outU8));
     SSF_ASSERT(outU8 == 128ul);
-    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01ni\xff}", 7, (SSFCStrIn_t *)path, &outU8));
+    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01ni\xff}", 7, path, &outU8));
     SSF_ASSERT(outU8 == 255ul);
-    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nU\x01}", 7, (SSFCStrIn_t *)path, &outU8));
+    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nU\x01}", 7, path, &outU8));
     SSF_ASSERT(outU8 == 1ul);
-    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nU\x7f}", 7, (SSFCStrIn_t *)path, &outU8));
+    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nU\x7f}", 7, path, &outU8));
     SSF_ASSERT(outU8 == 127ul);
-    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nU\x80}", 7, (SSFCStrIn_t *)path, &outU8));
+    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nU\x80}", 7, path, &outU8));
     SSF_ASSERT(outU8 == 128ul);
-    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nU\xff}", 7, (SSFCStrIn_t *)path, &outU8));
+    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nU\xff}", 7, path, &outU8));
     SSF_ASSERT(outU8 == 255ul);
-    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nI\x00\x01}", 8, (SSFCStrIn_t *)path, &outU8));
+    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nI\x00\x01}", 8, path, &outU8));
     SSF_ASSERT(outU8 == 1ul);
-    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nI\x00\x7f}", 8, (SSFCStrIn_t *)path, &outU8));
+    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nI\x00\x7f}", 8, path, &outU8));
     SSF_ASSERT(outU8 == 127ul);
-    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nI\x00\x80}", 8, (SSFCStrIn_t *)path, &outU8));
+    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nI\x00\x80}", 8, path, &outU8));
     SSF_ASSERT(outU8 == 128ul);
-    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nI\x00\xff}", 8, (SSFCStrIn_t *)path, &outU8));
+    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nI\x00\xff}", 8, path, &outU8));
     SSF_ASSERT(outU8 == 255ul);
-    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nI\xff\x7f}", 8, (SSFCStrIn_t *)path, &outU8) == false);
-    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nI\xff\x80}", 8, (SSFCStrIn_t *)path, &outU8) == false);
-    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nI\xff\xff}", 8, (SSFCStrIn_t *)path, &outU8) == false);
-    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nl\x00\x00\x00\x01}", 10, (SSFCStrIn_t *)path, &outU8));
+    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nI\xff\x7f}", 8, path, &outU8) == false);
+    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nI\xff\x80}", 8, path, &outU8) == false);
+    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nI\xff\xff}", 8, path, &outU8) == false);
+    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nl\x00\x00\x00\x01}", 10, path, &outU8));
     SSF_ASSERT(outU8 == 1ul);
-    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nl\x00\x00\x00\x7f}", 10, (SSFCStrIn_t *)path, &outU8));
+    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nl\x00\x00\x00\x7f}", 10, path, &outU8));
     SSF_ASSERT(outU8 == 127ul);
-    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nl\x00\x00\x00\x80}", 10, (SSFCStrIn_t *)path, &outU8));
+    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nl\x00\x00\x00\x80}", 10, path, &outU8));
     SSF_ASSERT(outU8 == 128ul);
-    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nl\x00\x00\x00\xff}", 10, (SSFCStrIn_t *)path, &outU8));
+    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nl\x00\x00\x00\xff}", 10, path, &outU8));
     SSF_ASSERT(outU8 == 255ul);
-    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nl\xff\xff\xff\x7f}", 10, (SSFCStrIn_t *)path, &outU8) == false);
-    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nl\xff\xff\xff\xff}", 10, (SSFCStrIn_t *)path, &outU8) == false);
-    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nI\xff\x80}", 8, (SSFCStrIn_t *)path, &outU8) == false);
-    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x00\x01}", 14, (SSFCStrIn_t *)path, &outU8));
+    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nl\xff\xff\xff\x7f}", 10, path, &outU8) == false);
+    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nl\xff\xff\xff\xff}", 10, path, &outU8) == false);
+    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nI\xff\x80}", 8, path, &outU8) == false);
+    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x00\x01}", 14, path, &outU8));
     SSF_ASSERT(outU8 == 1ul);
-    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x00\x7f}", 14, (SSFCStrIn_t *)path, &outU8));
+    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x00\x7f}", 14, path, &outU8));
     SSF_ASSERT(outU8 == 127ul);
-    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x00\x80}", 14, (SSFCStrIn_t *)path, &outU8));
+    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x00\x80}", 14, path, &outU8));
     SSF_ASSERT(outU8 == 128ul);
-    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x00\xff}", 14, (SSFCStrIn_t *)path, &outU8));
+    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x00\xff}", 14, path, &outU8));
     SSF_ASSERT(outU8 == 255ul);
-    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\xff\x7f}", 14, (SSFCStrIn_t *)path, &outU8) == false);
-    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\xff\xff}", 14, (SSFCStrIn_t *)path, &outU8) == false);
-    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\xff\x80}", 14, (SSFCStrIn_t *)path, &outU8) == false);
+    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\xff\x7f}", 14, path, &outU8) == false);
+    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\xff\xff}", 14, path, &outU8) == false);
+    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\xff\x80}", 14, path, &outU8) == false);
 
     /* SSFUBJsonGetInt16() */
-    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01ni\x01}", 7, (SSFCStrIn_t *)path, &outI16));
+    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01ni\x01}", 7, path, &outI16));
     SSF_ASSERT(outI16 == 1l);
-    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01ni\x7f}", 7, (SSFCStrIn_t *)path, &outI16));
+    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01ni\x7f}", 7, path, &outI16));
     SSF_ASSERT(outI16 == 127l);
-    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01ni\x80}", 7, (SSFCStrIn_t *)path, &outI16));
+    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01ni\x80}", 7, path, &outI16));
     SSF_ASSERT(outI16 == -128l);
-    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01ni\xff}", 7, (SSFCStrIn_t *)path, &outI16));
+    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01ni\xff}", 7, path, &outI16));
     SSF_ASSERT(outI16 == -1l);
-    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nU\x01}", 7, (SSFCStrIn_t *)path, &outI16));
+    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nU\x01}", 7, path, &outI16));
     SSF_ASSERT(outI16 == 1l);
-    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nU\x7f}", 7, (SSFCStrIn_t *)path, &outI16));
+    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nU\x7f}", 7, path, &outI16));
     SSF_ASSERT(outI16 == 127l);
-    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nU\x80}", 7, (SSFCStrIn_t *)path, &outI16));
+    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nU\x80}", 7, path, &outI16));
     SSF_ASSERT(outI16 == 128l);
-    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nU\xff}", 7, (SSFCStrIn_t *)path, &outI16));
+    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nU\xff}", 7, path, &outI16));
     SSF_ASSERT(outI16 == 255l);
-    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nI\x00\x01}", 8, (SSFCStrIn_t *)path, &outI16));
+    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nI\x00\x01}", 8, path, &outI16));
     SSF_ASSERT(outI16 == 1l);
-    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nI\x00\x7f}", 8, (SSFCStrIn_t *)path, &outI16));
+    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nI\x00\x7f}", 8, path, &outI16));
     SSF_ASSERT(outI16 == 127l);
-    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nI\x00\x80}", 8, (SSFCStrIn_t *)path, &outI16));
+    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nI\x00\x80}", 8, path, &outI16));
     SSF_ASSERT(outI16 == 128l);
-    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nI\x7f\xff}", 8, (SSFCStrIn_t *)path, &outI16));
+    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nI\x7f\xff}", 8, path, &outI16));
     SSF_ASSERT(outI16 == 32767l);
-    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nI\xff\x7f}", 8, (SSFCStrIn_t *)path, &outI16));
+    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nI\xff\x7f}", 8, path, &outI16));
     SSF_ASSERT(outI16 == -129l);
-    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nI\x80\x00}", 8, (SSFCStrIn_t *)path, &outI16));
+    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nI\x80\x00}", 8, path, &outI16));
     SSF_ASSERT(outI16 == -32768l);
-    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nI\xff\x80}", 8, (SSFCStrIn_t *)path, &outI16));
+    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nI\xff\x80}", 8, path, &outI16));
     SSF_ASSERT(outI16 == -128l);
-    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nI\xff\xff}", 8, (SSFCStrIn_t *)path, &outI16));
+    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nI\xff\xff}", 8, path, &outI16));
     SSF_ASSERT(outI16 == -1l);
-    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nl\x00\x00\x00\x01}", 10, (SSFCStrIn_t *)path, &outI16));
+    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nl\x00\x00\x00\x01}", 10, path, &outI16));
     SSF_ASSERT(outI16 == 1l);
-    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nl\x00\x00\x00\x7f}", 10, (SSFCStrIn_t *)path, &outI16));
+    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nl\x00\x00\x00\x7f}", 10, path, &outI16));
     SSF_ASSERT(outI16 == 127l);
-    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nl\x00\x00\x00\x80}", 10, (SSFCStrIn_t *)path, &outI16));
+    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nl\x00\x00\x00\x80}", 10, path, &outI16));
     SSF_ASSERT(outI16 == 128l);
-    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nl\x00\x00\x7f\xff}", 10, (SSFCStrIn_t *)path, &outI16));
+    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nl\x00\x00\x7f\xff}", 10, path, &outI16));
     SSF_ASSERT(outI16 == 32767l);
-    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nl\xff\xff\x80\x00}", 10, (SSFCStrIn_t *)path, &outI16));
+    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nl\xff\xff\x80\x00}", 10, path, &outI16));
     SSF_ASSERT(outI16 == -32768l);
-    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nl\xff\xff\x7f\xff}", 10, (SSFCStrIn_t *)path, &outI16) == false);
-    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nl\x00\x00\x80\x00}", 10, (SSFCStrIn_t *)path, &outI16) == false);
-    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nl\xff\xff\xff\x7f}", 10, (SSFCStrIn_t *)path, &outI16));
+    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nl\xff\xff\x7f\xff}", 10, path, &outI16) == false);
+    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nl\x00\x00\x80\x00}", 10, path, &outI16) == false);
+    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nl\xff\xff\xff\x7f}", 10, path, &outI16));
     SSF_ASSERT(outI16 == -129l);
-    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nl\xff\xff\xff\xff}", 10, (SSFCStrIn_t *)path, &outI16));
+    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nl\xff\xff\xff\xff}", 10, path, &outI16));
     SSF_ASSERT(outI16 == -1l);
-    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nI\xff\x80}", 8, (SSFCStrIn_t *)path, &outI16));
+    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nI\xff\x80}", 8, path, &outI16));
     SSF_ASSERT(outI16 == -128l);
-    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x00\x01}", 14, (SSFCStrIn_t *)path, &outI16));
+    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x00\x01}", 14, path, &outI16));
     SSF_ASSERT(outI16 == 1l);
-    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x00\x7f}", 14, (SSFCStrIn_t *)path, &outI16));
+    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x00\x7f}", 14, path, &outI16));
     SSF_ASSERT(outI16 == 127l);
-    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x00\x80}", 14, (SSFCStrIn_t *)path, &outI16));
+    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x00\x80}", 14, path, &outI16));
     SSF_ASSERT(outI16 == 128l);
-    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x7f\xff}", 14, (SSFCStrIn_t *)path, &outI16));
+    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x7f\xff}", 14, path, &outI16));
     SSF_ASSERT(outI16 == 32767l);
-    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x80\x00}", 14, (SSFCStrIn_t *)path, &outI16) == false);
-    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\x80\x00}", 14, (SSFCStrIn_t *)path, &outI16));
+    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x80\x00}", 14, path, &outI16) == false);
+    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\x80\x00}", 14, path, &outI16));
     SSF_ASSERT(outI16 == -32768l);
-    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\x7f\xff}", 14, (SSFCStrIn_t *)path, &outI16) == false);
-    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\xff\x7f}", 14, (SSFCStrIn_t *)path, &outI16));
+    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\x7f\xff}", 14, path, &outI16) == false);
+    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\xff\x7f}", 14, path, &outI16));
     SSF_ASSERT(outI16 == -129l);
-    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\xff\xff}", 14, (SSFCStrIn_t *)path, &outI16));
+    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\xff\xff}", 14, path, &outI16));
     SSF_ASSERT(outI16 == -1l);
-    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\xff\x80}", 14, (SSFCStrIn_t *)path, &outI16));
+    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\xff\x80}", 14, path, &outI16));
     SSF_ASSERT(outI16 == -128l);
 
     /* SSFUBJsonGetUInt16() */
-    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01ni\x01}", 7, (SSFCStrIn_t *)path, &outU16));
+    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01ni\x01}", 7, path, &outU16));
     SSF_ASSERT(outU16 == 1ul);
-    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01ni\x7f}", 7, (SSFCStrIn_t *)path, &outU16));
+    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01ni\x7f}", 7, path, &outU16));
     SSF_ASSERT(outU16 == 127ul);
-    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01ni\x80}", 7, (SSFCStrIn_t *)path, &outU16));
+    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01ni\x80}", 7, path, &outU16));
     SSF_ASSERT(outU16 == 128ul);
-    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01ni\xff}", 7, (SSFCStrIn_t *)path, &outU16));
+    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01ni\xff}", 7, path, &outU16));
     SSF_ASSERT(outU16 == 255ul);
-    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nU\x01}", 7, (SSFCStrIn_t *)path, &outU16));
+    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nU\x01}", 7, path, &outU16));
     SSF_ASSERT(outU16 == 1ul);
-    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nU\x7f}", 7, (SSFCStrIn_t *)path, &outU16));
+    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nU\x7f}", 7, path, &outU16));
     SSF_ASSERT(outU16 == 127ul);
-    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nU\x80}", 7, (SSFCStrIn_t *)path, &outU16));
+    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nU\x80}", 7, path, &outU16));
     SSF_ASSERT(outU16 == 128ul);
-    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nU\xff}", 7, (SSFCStrIn_t *)path, &outU16));
+    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nU\xff}", 7, path, &outU16));
     SSF_ASSERT(outU16 == 255ul);
-    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nI\x00\x01}", 8, (SSFCStrIn_t *)path, &outU16));
+    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nI\x00\x01}", 8, path, &outU16));
     SSF_ASSERT(outU16 == 1ul);
-    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nI\x00\x7f}", 8, (SSFCStrIn_t *)path, &outU16));
+    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nI\x00\x7f}", 8, path, &outU16));
     SSF_ASSERT(outU16 == 127ul);
-    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nI\x00\x80}", 8, (SSFCStrIn_t *)path, &outU16));
+    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nI\x00\x80}", 8, path, &outU16));
     SSF_ASSERT(outU16 == 128ul);
-    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nI\x7f\xff}", 8, (SSFCStrIn_t *)path, &outU16));
+    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nI\x7f\xff}", 8, path, &outU16));
     SSF_ASSERT(outU16 == 32767ul);
-    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nI\xff\x7f}", 8, (SSFCStrIn_t *)path, &outU16));
+    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nI\xff\x7f}", 8, path, &outU16));
     SSF_ASSERT(outU16 == 65407ul);
-    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nI\x80\x00}", 8, (SSFCStrIn_t *)path, &outU16));
+    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nI\x80\x00}", 8, path, &outU16));
     SSF_ASSERT(outU16 == 32768ul);
-    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nI\xff\x80}", 8, (SSFCStrIn_t *)path, &outU16));
+    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nI\xff\x80}", 8, path, &outU16));
     SSF_ASSERT(outU16 == 65408ul);
-    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nI\xff\xff}", 8, (SSFCStrIn_t *)path, &outU16));
+    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nI\xff\xff}", 8, path, &outU16));
     SSF_ASSERT(outU16 == 65535ul);
-    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nl\x00\x00\x00\x01}", 10, (SSFCStrIn_t *)path, &outU16));
+    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nl\x00\x00\x00\x01}", 10, path, &outU16));
     SSF_ASSERT(outU16 == 1ul);
-    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nl\x00\x00\x00\x7f}", 10, (SSFCStrIn_t *)path, &outU16));
+    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nl\x00\x00\x00\x7f}", 10, path, &outU16));
     SSF_ASSERT(outU16 == 127ul);
-    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nl\x00\x00\x00\x80}", 10, (SSFCStrIn_t *)path, &outU16));
+    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nl\x00\x00\x00\x80}", 10, path, &outU16));
     SSF_ASSERT(outU16 == 128ul);
-    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nl\x00\x00\x7f\xff}", 10, (SSFCStrIn_t *)path, &outU16));
+    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nl\x00\x00\x7f\xff}", 10, path, &outU16));
     SSF_ASSERT(outU16 == 32767ul);
-    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nl\x00\x00\xff\xff}", 10, (SSFCStrIn_t *)path, &outU16));
+    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nl\x00\x00\xff\xff}", 10, path, &outU16));
     SSF_ASSERT(outU16 == 65535ul);
-    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nl\xff\xff\x80\x00}", 10, (SSFCStrIn_t *)path, &outU16) == false);
-    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nl\xff\xff\x7f\xff}", 10, (SSFCStrIn_t *)path, &outU16) == false);
-    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nl\x00\x00\x80\x00}", 10, (SSFCStrIn_t *)path, &outU16));
+    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nl\xff\xff\x80\x00}", 10, path, &outU16) == false);
+    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nl\xff\xff\x7f\xff}", 10, path, &outU16) == false);
+    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nl\x00\x00\x80\x00}", 10, path, &outU16));
     SSF_ASSERT(outU16 == 32768ul);
-    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nl\xff\xff\xff\x7f}", 10, (SSFCStrIn_t *)path, &outU16) == false);
-    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nl\xff\xff\xff\xff}", 10, (SSFCStrIn_t *)path, &outU16) == false);
-    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nI\xff\x80}", 8, (SSFCStrIn_t *)path, &outU16));
+    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nl\xff\xff\xff\x7f}", 10, path, &outU16) == false);
+    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nl\xff\xff\xff\xff}", 10, path, &outU16) == false);
+    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nI\xff\x80}", 8, path, &outU16));
     SSF_ASSERT(outU16 == 65408ul);
-    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x00\x01}", 14, (SSFCStrIn_t *)path, &outU16));
+    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x00\x01}", 14, path, &outU16));
     SSF_ASSERT(outU16 == 1ul);
-    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x00\x7f}", 14, (SSFCStrIn_t *)path, &outU16));
+    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x00\x7f}", 14, path, &outU16));
     SSF_ASSERT(outU16 == 127ul);
-    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x00\x80}", 14, (SSFCStrIn_t *)path, &outU16));
+    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x00\x80}", 14, path, &outU16));
     SSF_ASSERT(outU16 == 128ul);
-    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x7f\xff}", 14, (SSFCStrIn_t *)path, &outU16));
+    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x7f\xff}", 14, path, &outU16));
     SSF_ASSERT(outU16 == 32767ul);
-    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x80\x00}", 14, (SSFCStrIn_t *)path, &outU16));
+    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x80\x00}", 14, path, &outU16));
     SSF_ASSERT(outU16 == 32768ul);
-    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\xff\xff}", 14, (SSFCStrIn_t *)path, &outU16));
+    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\xff\xff}", 14, path, &outU16));
     SSF_ASSERT(outU16 == 65535ul);
-    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\x80\x00}", 14, (SSFCStrIn_t *)path, &outU16) == false);
-    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\x7f\xff}", 14, (SSFCStrIn_t *)path, &outU16) == false);
-    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\xff\x7f}", 14, (SSFCStrIn_t *)path, &outU16) == false);
-    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\xff\xff}", 14, (SSFCStrIn_t *)path, &outU16) == false);
-    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\xff\x80}", 14, (SSFCStrIn_t *)path, &outU16) == false);
+    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\x80\x00}", 14, path, &outU16) == false);
+    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\x7f\xff}", 14, path, &outU16) == false);
+    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\xff\x7f}", 14, path, &outU16) == false);
+    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\xff\xff}", 14, path, &outU16) == false);
+    SSF_ASSERT(SSFUBJsonGetUInt16((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\xff\x80}", 14, path, &outU16) == false);
 
     /* SSFUBJsonGetInt32() */
-    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01ni\x01}", 7, (SSFCStrIn_t *)path, &outI32));
+    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01ni\x01}", 7, path, &outI32));
     SSF_ASSERT(outI32 == 1ll);
-    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01ni\x7f}", 7, (SSFCStrIn_t *)path, &outI32));
+    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01ni\x7f}", 7, path, &outI32));
     SSF_ASSERT(outI32 == 127ll);
-    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01ni\x80}", 7, (SSFCStrIn_t *)path, &outI32));
+    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01ni\x80}", 7, path, &outI32));
     SSF_ASSERT(outI32 == -128ll);
-    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01ni\xff}", 7, (SSFCStrIn_t *)path, &outI32));
+    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01ni\xff}", 7, path, &outI32));
     SSF_ASSERT(outI32 == -1ll);
-    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nU\x01}", 7, (SSFCStrIn_t *)path, &outI32));
+    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nU\x01}", 7, path, &outI32));
     SSF_ASSERT(outI32 == 1ll);
-    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nU\x7f}", 7, (SSFCStrIn_t *)path, &outI32));
+    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nU\x7f}", 7, path, &outI32));
     SSF_ASSERT(outI32 == 127ll);
-    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nU\x80}", 7, (SSFCStrIn_t *)path, &outI32));
+    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nU\x80}", 7, path, &outI32));
     SSF_ASSERT(outI32 == 128ll);
-    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nU\xff}", 7, (SSFCStrIn_t *)path, &outI32));
+    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nU\xff}", 7, path, &outI32));
     SSF_ASSERT(outI32 == 255ll);
-    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nI\x00\x01}", 8, (SSFCStrIn_t *)path, &outI32));
+    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nI\x00\x01}", 8, path, &outI32));
     SSF_ASSERT(outI32 == 1ll);
-    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nI\x00\x7f}", 8, (SSFCStrIn_t *)path, &outI32));
+    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nI\x00\x7f}", 8, path, &outI32));
     SSF_ASSERT(outI32 == 127ll);
-    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nI\x00\x80}", 8, (SSFCStrIn_t *)path, &outI32));
+    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nI\x00\x80}", 8, path, &outI32));
     SSF_ASSERT(outI32 == 128ll);
-    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nI\x7f\xff}", 8, (SSFCStrIn_t *)path, &outI32));
+    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nI\x7f\xff}", 8, path, &outI32));
     SSF_ASSERT(outI32 == 32767ll);
-    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nI\xff\x7f}", 8, (SSFCStrIn_t *)path, &outI32));
+    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nI\xff\x7f}", 8, path, &outI32));
     SSF_ASSERT(outI32 == -129ll);
-    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nI\x80\x00}", 8, (SSFCStrIn_t *)path, &outI32));
+    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nI\x80\x00}", 8, path, &outI32));
     SSF_ASSERT(outI32 == -32768ll);
-    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nI\xff\x80}", 8, (SSFCStrIn_t *)path, &outI32));
+    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nI\xff\x80}", 8, path, &outI32));
     SSF_ASSERT(outI32 == -128ll);
-    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nI\xff\xff}", 8, (SSFCStrIn_t *)path, &outI32));
+    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nI\xff\xff}", 8, path, &outI32));
     SSF_ASSERT(outI32 == -1ll);
-    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nl\x00\x00\x00\x01}", 10, (SSFCStrIn_t *)path, &outI32));
+    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nl\x00\x00\x00\x01}", 10, path, &outI32));
     SSF_ASSERT(outI32 == 1ll);
-    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nl\x00\x00\x00\x7f}", 10, (SSFCStrIn_t *)path, &outI32));
+    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nl\x00\x00\x00\x7f}", 10, path, &outI32));
     SSF_ASSERT(outI32 == 127ll);
-    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nl\x00\x00\x00\x80}", 10, (SSFCStrIn_t *)path, &outI32));
+    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nl\x00\x00\x00\x80}", 10, path, &outI32));
     SSF_ASSERT(outI32 == 128ll);
-    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nl\x00\x00\x7f\xff}", 10, (SSFCStrIn_t *)path, &outI32));
+    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nl\x00\x00\x7f\xff}", 10, path, &outI32));
     SSF_ASSERT(outI32 == 32767ll);
-    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nl\xff\xff\x80\x00}", 10, (SSFCStrIn_t *)path, &outI32));
+    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nl\xff\xff\x80\x00}", 10, path, &outI32));
     SSF_ASSERT(outI32 == -32768ll);
-    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nl\x80\x00\x00\x00}", 10, (SSFCStrIn_t *)path, &outI32));
+    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nl\x80\x00\x00\x00}", 10, path, &outI32));
     SSF_ASSERT(outI32 == -2147483648ll);
-    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nl\x7f\xff\xff\xff}", 10, (SSFCStrIn_t *)path, &outI32));
+    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nl\x7f\xff\xff\xff}", 10, path, &outI32));
     SSF_ASSERT(outI32 == 2147483647ll);
-    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nl\xff\xff\x7f\xff}", 10, (SSFCStrIn_t *)path, &outI32));
+    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nl\xff\xff\x7f\xff}", 10, path, &outI32));
     SSF_ASSERT(outI32 == -32769ll);
-    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nl\x00\x00\x80\x00}", 10, (SSFCStrIn_t *)path, &outI32));
+    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nl\x00\x00\x80\x00}", 10, path, &outI32));
     SSF_ASSERT(outI32 == 32768ll);
-    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nl\xff\xff\xff\x7f}", 10, (SSFCStrIn_t *)path, &outI32));
+    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nl\xff\xff\xff\x7f}", 10, path, &outI32));
     SSF_ASSERT(outI32 == -129ll);
-    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nl\xff\xff\xff\xff}", 10, (SSFCStrIn_t *)path, &outI32));
+    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nl\xff\xff\xff\xff}", 10, path, &outI32));
     SSF_ASSERT(outI32 == -1ll);
-    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nI\xff\x80}", 8, (SSFCStrIn_t *)path, &outI32));
+    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nI\xff\x80}", 8, path, &outI32));
     SSF_ASSERT(outI32 == -128ll);
-    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x00\x01}", 14, (SSFCStrIn_t *)path, &outI32));
+    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x00\x01}", 14, path, &outI32));
     SSF_ASSERT(outI32 == 1ll);
-    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x00\x7f}", 14, (SSFCStrIn_t *)path, &outI32));
+    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x00\x7f}", 14, path, &outI32));
     SSF_ASSERT(outI32 == 127ll);
-    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x00\x80}", 14, (SSFCStrIn_t *)path, &outI32));
+    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x00\x80}", 14, path, &outI32));
     SSF_ASSERT(outI32 == 128ll);
-    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x7f\xff}", 14, (SSFCStrIn_t *)path, &outI32));
+    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x7f\xff}", 14, path, &outI32));
     SSF_ASSERT(outI32 == 32767ll);
-    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x80\x00}", 14, (SSFCStrIn_t *)path, &outI32));
+    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x80\x00}", 14, path, &outI32));
     SSF_ASSERT(outI32 == 32768ll);
-    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\x80\x00}", 14, (SSFCStrIn_t *)path, &outI32));
+    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\x80\x00}", 14, path, &outI32));
     SSF_ASSERT(outI32 == -32768ll);
-    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\x7f\xff}", 14, (SSFCStrIn_t *)path, &outI32));
+    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\x7f\xff}", 14, path, &outI32));
     SSF_ASSERT(outI32 == -32769ll);
-    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nL\xff\xff\xff\xff\x80\x00\x00\x00}", 14, (SSFCStrIn_t *)path, &outI32));
+    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nL\xff\xff\xff\xff\x80\x00\x00\x00}", 14, path, &outI32));
     SSF_ASSERT(outI32 == -2147483648ll);
-    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nL\xff\xff\xff\xff\x7f\xff\xff\xff}", 14, (SSFCStrIn_t *)path, &outI32) == false);
-    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x7f\xff\xff\xff}", 14, (SSFCStrIn_t *)path, &outI32));
+    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nL\xff\xff\xff\xff\x7f\xff\xff\xff}", 14, path, &outI32) == false);
+    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x7f\xff\xff\xff}", 14, path, &outI32));
     SSF_ASSERT(outI32 == 2147483647ll);
-    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x80\x00\x00\x00}", 14, (SSFCStrIn_t *)path, &outI32) == false);
-    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\xff\x7f}", 14, (SSFCStrIn_t *)path, &outI32));
+    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x80\x00\x00\x00}", 14, path, &outI32) == false);
+    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\xff\x7f}", 14, path, &outI32));
     SSF_ASSERT(outI32 == -129ll);
-    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\xff\xff}", 14, (SSFCStrIn_t *)path, &outI32));
+    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\xff\xff}", 14, path, &outI32));
     SSF_ASSERT(outI32 == -1ll);
-    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\xff\x80}", 14, (SSFCStrIn_t *)path, &outI32));
+    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\xff\x80}", 14, path, &outI32));
     SSF_ASSERT(outI32 == -128ll);
 
     /* SSFUBJsonGetUInt32() */
-    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01ni\x01}", 7, (SSFCStrIn_t *)path, &outU32));
+    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01ni\x01}", 7, path, &outU32));
     SSF_ASSERT(outU32 == 1ull);
-    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01ni\x7f}", 7, (SSFCStrIn_t *)path, &outU32));
+    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01ni\x7f}", 7, path, &outU32));
     SSF_ASSERT(outU32 == 127ull);
-    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01ni\x80}", 7, (SSFCStrIn_t *)path, &outU32));
+    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01ni\x80}", 7, path, &outU32));
     SSF_ASSERT(outU32 == 128ull);
-    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01ni\xff}", 7, (SSFCStrIn_t *)path, &outU32));
+    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01ni\xff}", 7, path, &outU32));
     SSF_ASSERT(outU32 == 255ull);
-    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nU\x01}", 7, (SSFCStrIn_t *)path, &outU32));
+    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nU\x01}", 7, path, &outU32));
     SSF_ASSERT(outU32 == 1ull);
-    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nU\x7f}", 7, (SSFCStrIn_t *)path, &outU32));
+    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nU\x7f}", 7, path, &outU32));
     SSF_ASSERT(outU32 == 127ull);
-    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nU\x80}", 7, (SSFCStrIn_t *)path, &outU32));
+    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nU\x80}", 7, path, &outU32));
     SSF_ASSERT(outU32 == 128ull);
-    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nU\xff}", 7, (SSFCStrIn_t *)path, &outU32));
+    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nU\xff}", 7, path, &outU32));
     SSF_ASSERT(outU32 == 255ull);
-    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nI\x00\x01}", 8, (SSFCStrIn_t *)path, &outU32));
+    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nI\x00\x01}", 8, path, &outU32));
     SSF_ASSERT(outU32 == 1ull);
-    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nI\x00\x7f}", 8, (SSFCStrIn_t *)path, &outU32));
+    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nI\x00\x7f}", 8, path, &outU32));
     SSF_ASSERT(outU32 == 127ull);
-    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nI\x00\x80}", 8, (SSFCStrIn_t *)path, &outU32));
+    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nI\x00\x80}", 8, path, &outU32));
     SSF_ASSERT(outU32 == 128ull);
-    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nI\x7f\xff}", 8, (SSFCStrIn_t *)path, &outU32));
+    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nI\x7f\xff}", 8, path, &outU32));
     SSF_ASSERT(outU32 == 32767ull);
-    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nI\xff\x7f}", 8, (SSFCStrIn_t *)path, &outU32));
+    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nI\xff\x7f}", 8, path, &outU32));
     SSF_ASSERT(outU32 == 65407ull);
-    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nI\x80\x00}", 8, (SSFCStrIn_t *)path, &outU32));
+    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nI\x80\x00}", 8, path, &outU32));
     SSF_ASSERT(outU32 == 32768ull);
-    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nI\xff\x80}", 8, (SSFCStrIn_t *)path, &outU32));
+    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nI\xff\x80}", 8, path, &outU32));
     SSF_ASSERT(outU32 == 65408ull);
-    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nI\xff\xff}", 8, (SSFCStrIn_t *)path, &outU32));
+    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nI\xff\xff}", 8, path, &outU32));
     SSF_ASSERT(outU32 == 65535ull);
-    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nl\x00\x00\x00\x01}", 10, (SSFCStrIn_t *)path, &outU32));
+    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nl\x00\x00\x00\x01}", 10, path, &outU32));
     SSF_ASSERT(outU32 == 1ull);
-    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nl\x00\x00\x00\x7f}", 10, (SSFCStrIn_t *)path, &outU32));
+    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nl\x00\x00\x00\x7f}", 10, path, &outU32));
     SSF_ASSERT(outU32 == 127ull);
-    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nl\x00\x00\x00\x80}", 10, (SSFCStrIn_t *)path, &outU32));
+    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nl\x00\x00\x00\x80}", 10, path, &outU32));
     SSF_ASSERT(outU32 == 128ull);
-    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nl\x00\x00\x7f\xff}", 10, (SSFCStrIn_t *)path, &outU32));
+    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nl\x00\x00\x7f\xff}", 10, path, &outU32));
     SSF_ASSERT(outU32 == 32767ull);
-    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nl\xff\xff\x80\x00}", 10, (SSFCStrIn_t *)path, &outU32));
+    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nl\xff\xff\x80\x00}", 10, path, &outU32));
     SSF_ASSERT(outU32 == 4294934528ull);
-    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nl\x80\x00\x00\x00}", 10, (SSFCStrIn_t *)path, &outU32));
+    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nl\x80\x00\x00\x00}", 10, path, &outU32));
     SSF_ASSERT(outU32 == 2147483648ull);
-    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nl\x7f\xff\xff\xff}", 10, (SSFCStrIn_t *)path, &outU32));
+    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nl\x7f\xff\xff\xff}", 10, path, &outU32));
     SSF_ASSERT(outU32 == 2147483647ull);
-    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nl\xff\xff\x7f\xff}", 10, (SSFCStrIn_t *)path, &outU32));
+    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nl\xff\xff\x7f\xff}", 10, path, &outU32));
     SSF_ASSERT(outU32 == 4294934527ull);
-    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nl\x00\x00\x80\x00}", 10, (SSFCStrIn_t *)path, &outU32));
+    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nl\x00\x00\x80\x00}", 10, path, &outU32));
     SSF_ASSERT(outU32 == 32768ull);
-    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nl\xff\xff\xff\x7f}", 10, (SSFCStrIn_t *)path, &outU32));
+    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nl\xff\xff\xff\x7f}", 10, path, &outU32));
     SSF_ASSERT(outU32 == 4294967167ull);
-    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nl\xff\xff\xff\xff}", 10, (SSFCStrIn_t *)path, &outU32));
+    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nl\xff\xff\xff\xff}", 10, path, &outU32));
     SSF_ASSERT(outU32 == 4294967295ull);
-    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x00\x01}", 14, (SSFCStrIn_t *)path, &outU32));
+    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x00\x01}", 14, path, &outU32));
     SSF_ASSERT(outU32 == 1ull);
-    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x00\x7f}", 14, (SSFCStrIn_t *)path, &outU32));
+    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x00\x7f}", 14, path, &outU32));
     SSF_ASSERT(outU32 == 127ull);
-    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x00\x80}", 14, (SSFCStrIn_t *)path, &outU32));
+    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x00\x80}", 14, path, &outU32));
     SSF_ASSERT(outU32 == 128ull);
-    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x7f\xff}", 14, (SSFCStrIn_t *)path, &outU32));
+    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x7f\xff}", 14, path, &outU32));
     SSF_ASSERT(outU32 == 32767ull);
-    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x80\x00}", 14, (SSFCStrIn_t *)path, &outU32));
+    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x80\x00}", 14, path, &outU32));
     SSF_ASSERT(outU32 == 32768ull);
-    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\x80\x00}", 14, (SSFCStrIn_t *)path, &outU32) == false);
-    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\x7f\xff}", 14, (SSFCStrIn_t *)path, &outU32) == false);
-    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nL\xff\xff\xff\xff\x80\x00\x00\x00}", 14, (SSFCStrIn_t *)path, &outU32) == false);
-    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nL\xff\xff\xff\xff\x7f\xff\xff\xff}", 14, (SSFCStrIn_t *)path, &outU32) == false);
-    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x7f\xff\xff\xff}", 14, (SSFCStrIn_t *)path, &outU32));
+    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\x80\x00}", 14, path, &outU32) == false);
+    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\x7f\xff}", 14, path, &outU32) == false);
+    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nL\xff\xff\xff\xff\x80\x00\x00\x00}", 14, path, &outU32) == false);
+    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nL\xff\xff\xff\xff\x7f\xff\xff\xff}", 14, path, &outU32) == false);
+    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x7f\xff\xff\xff}", 14, path, &outU32));
     SSF_ASSERT(outU32 == 2147483647ull);
-    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x80\x00\x00\x00}", 14, (SSFCStrIn_t *)path, &outU32));
+    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x80\x00\x00\x00}", 14, path, &outU32));
     SSF_ASSERT(outU32 == 2147483648ull);
-    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nL\x00\x00\x00\x00\xff\xff\xff\xff}", 14, (SSFCStrIn_t *)path, &outU32));
+    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nL\x00\x00\x00\x00\xff\xff\xff\xff}", 14, path, &outU32));
     SSF_ASSERT(outU32 == 4294967295ull);
-    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\xff\xff}", 14, (SSFCStrIn_t *)path, &outU32) == false);
-    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\xff\x80}", 14, (SSFCStrIn_t *)path, &outU32) == false);
+    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\xff\xff}", 14, path, &outU32) == false);
+    SSF_ASSERT(SSFUBJsonGetUInt32((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\xff\x80}", 14, path, &outU32) == false);
 
     /* SSFUBJsonGetInt64() */
-    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01ni\x01}", 7, (SSFCStrIn_t *)path, &outI64));
+    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01ni\x01}", 7, path, &outI64));
     SSF_ASSERT(outI64 == 1ll);
-    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01ni\x7f}", 7, (SSFCStrIn_t *)path, &outI64));
+    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01ni\x7f}", 7, path, &outI64));
     SSF_ASSERT(outI64 == 127ll);
-    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01ni\x80}", 7, (SSFCStrIn_t *)path, &outI64));
+    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01ni\x80}", 7, path, &outI64));
     SSF_ASSERT(outI64 == -128ll);
-    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01ni\xff}", 7, (SSFCStrIn_t *)path, &outI64));
+    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01ni\xff}", 7, path, &outI64));
     SSF_ASSERT(outI64 == -1ll);
-    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nU\x01}", 7, (SSFCStrIn_t *)path, &outI64));
+    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nU\x01}", 7, path, &outI64));
     SSF_ASSERT(outI64 == 1ll);
-    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nU\x7f}", 7, (SSFCStrIn_t *)path, &outI64));
+    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nU\x7f}", 7, path, &outI64));
     SSF_ASSERT(outI64 == 127ll);
-    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nU\x80}", 7, (SSFCStrIn_t *)path, &outI64));
+    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nU\x80}", 7, path, &outI64));
     SSF_ASSERT(outI64 == 128ll);
-    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nU\xff}", 7, (SSFCStrIn_t *)path, &outI64));
+    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nU\xff}", 7, path, &outI64));
     SSF_ASSERT(outI64 == 255ll);
-    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nI\x00\x01}", 8, (SSFCStrIn_t *)path, &outI64));
+    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nI\x00\x01}", 8, path, &outI64));
     SSF_ASSERT(outI64 == 1ll);
-    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nI\x00\x7f}", 8, (SSFCStrIn_t *)path, &outI64));
+    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nI\x00\x7f}", 8, path, &outI64));
     SSF_ASSERT(outI64 == 127ll);
-    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nI\x00\x80}", 8, (SSFCStrIn_t *)path, &outI64));
+    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nI\x00\x80}", 8, path, &outI64));
     SSF_ASSERT(outI64 == 128ll);
-    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nI\x7f\xff}", 8, (SSFCStrIn_t *)path, &outI64));
+    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nI\x7f\xff}", 8, path, &outI64));
     SSF_ASSERT(outI64 == 32767ll);
-    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nI\xff\x7f}", 8, (SSFCStrIn_t *)path, &outI64));
+    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nI\xff\x7f}", 8, path, &outI64));
     SSF_ASSERT(outI64 == -129ll);
-    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nI\x80\x00}", 8, (SSFCStrIn_t *)path, &outI64));
+    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nI\x80\x00}", 8, path, &outI64));
     SSF_ASSERT(outI64 == -32768ll);
-    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nI\xff\x80}", 8, (SSFCStrIn_t *)path, &outI64));
+    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nI\xff\x80}", 8, path, &outI64));
     SSF_ASSERT(outI64 == -128ll);
-    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nI\xff\xff}", 8, (SSFCStrIn_t *)path, &outI64));
+    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nI\xff\xff}", 8, path, &outI64));
     SSF_ASSERT(outI64 == -1ll);
-    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nl\x00\x00\x00\x01}", 10, (SSFCStrIn_t *)path, &outI64));
+    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nl\x00\x00\x00\x01}", 10, path, &outI64));
     SSF_ASSERT(outI64 == 1ll);
-    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nl\x00\x00\x00\x7f}", 10, (SSFCStrIn_t *)path, &outI64));
+    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nl\x00\x00\x00\x7f}", 10, path, &outI64));
     SSF_ASSERT(outI64 == 127ll);
-    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nl\x00\x00\x00\x80}", 10, (SSFCStrIn_t *)path, &outI64));
+    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nl\x00\x00\x00\x80}", 10, path, &outI64));
     SSF_ASSERT(outI64 == 128ll);
-    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nl\x00\x00\x7f\xff}", 10, (SSFCStrIn_t *)path, &outI64));
+    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nl\x00\x00\x7f\xff}", 10, path, &outI64));
     SSF_ASSERT(outI64 == 32767ll);
-    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nl\xff\xff\x80\x00}", 10, (SSFCStrIn_t *)path, &outI64));
+    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nl\xff\xff\x80\x00}", 10, path, &outI64));
     SSF_ASSERT(outI64 == -32768ll);
-    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nl\x80\x00\x00\x00}", 10, (SSFCStrIn_t *)path, &outI64));
+    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nl\x80\x00\x00\x00}", 10, path, &outI64));
     SSF_ASSERT(outI64 == -2147483648ll);
-    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nl\x7f\xff\xff\xff}", 10, (SSFCStrIn_t *)path, &outI64));
+    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nl\x7f\xff\xff\xff}", 10, path, &outI64));
     SSF_ASSERT(outI64 == 2147483647ll);
-    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nl\xff\xff\x7f\xff}", 10, (SSFCStrIn_t *)path, &outI64));
+    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nl\xff\xff\x7f\xff}", 10, path, &outI64));
     SSF_ASSERT(outI64 == -32769ll);
-    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nl\x00\x00\x80\x00}", 10, (SSFCStrIn_t *)path, &outI64));
+    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nl\x00\x00\x80\x00}", 10, path, &outI64));
     SSF_ASSERT(outI64 == 32768ll);
-    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nl\xff\xff\xff\x7f}", 10, (SSFCStrIn_t *)path, &outI64));
+    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nl\xff\xff\xff\x7f}", 10, path, &outI64));
     SSF_ASSERT(outI64 == -129ll);
-    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nl\xff\xff\xff\xff}", 10, (SSFCStrIn_t *)path, &outI64));
+    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nl\xff\xff\xff\xff}", 10, path, &outI64));
     SSF_ASSERT(outI64 == -1ll);
-    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nI\xff\x80}", 8, (SSFCStrIn_t *)path, &outI64));
+    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nI\xff\x80}", 8, path, &outI64));
     SSF_ASSERT(outI64 == -128ll);
-    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x00\x01}", 14, (SSFCStrIn_t *)path, &outI64));
+    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x00\x01}", 14, path, &outI64));
     SSF_ASSERT(outI64 == 1ll);
-    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x00\x7f}", 14, (SSFCStrIn_t *)path, &outI64));
+    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x00\x7f}", 14, path, &outI64));
     SSF_ASSERT(outI64 == 127ll);
-    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x00\x80}", 14, (SSFCStrIn_t *)path, &outI64));
+    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x00\x80}", 14, path, &outI64));
     SSF_ASSERT(outI64 == 128ll);
-    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x7f\xff}", 14, (SSFCStrIn_t *)path, &outI64));
+    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x7f\xff}", 14, path, &outI64));
     SSF_ASSERT(outI64 == 32767ll);
-    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x80\x00}", 14, (SSFCStrIn_t *)path, &outI64));
+    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x80\x00}", 14, path, &outI64));
     SSF_ASSERT(outI64 == 32768ll);
-    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\x80\x00}", 14, (SSFCStrIn_t *)path, &outI64));
+    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\x80\x00}", 14, path, &outI64));
     SSF_ASSERT(outI64 == -32768ll);
-    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\x7f\xff}", 14, (SSFCStrIn_t *)path, &outI64));
+    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\x7f\xff}", 14, path, &outI64));
     SSF_ASSERT(outI64 == -32769ll);
-    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nL\xff\xff\xff\xff\x80\x00\x00\x00}", 14, (SSFCStrIn_t *)path, &outI64));
+    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nL\xff\xff\xff\xff\x80\x00\x00\x00}", 14, path, &outI64));
     SSF_ASSERT(outI64 == -2147483648ll);
-    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nL\xff\xff\xff\xff\x7f\xff\xff\xff}", 14, (SSFCStrIn_t *)path, &outI64));
-    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x7f\xff\xff\xff}", 14, (SSFCStrIn_t *)path, &outI64));
+    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nL\xff\xff\xff\xff\x7f\xff\xff\xff}", 14, path, &outI64));
+    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x7f\xff\xff\xff}", 14, path, &outI64));
     SSF_ASSERT(outI64 == 2147483647ll);
-    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x80\x00\x00\x00}", 14, (SSFCStrIn_t *)path, &outI64));
-    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\xff\x7f}", 14, (SSFCStrIn_t *)path, &outI64));
+    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x80\x00\x00\x00}", 14, path, &outI64));
+    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\xff\x7f}", 14, path, &outI64));
     SSF_ASSERT(outI64 == -129ll);
-    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\xff\xff}", 14, (SSFCStrIn_t *)path, &outI64));
+    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\xff\xff}", 14, path, &outI64));
     SSF_ASSERT(outI64 == -1ll);
-    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\xff\x80}", 14, (SSFCStrIn_t *)path, &outI64));
+    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\xff\x80}", 14, path, &outI64));
     SSF_ASSERT(outI64 == -128ll);
 
     /* SSFUBJsonGetUInt64() */
-    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01ni\x01}", 7, (SSFCStrIn_t *)path, &outU64));
+    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01ni\x01}", 7, path, &outU64));
     SSF_ASSERT(outU64 == 1ull);
-    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01ni\x7f}", 7, (SSFCStrIn_t *)path, &outU64));
+    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01ni\x7f}", 7, path, &outU64));
     SSF_ASSERT(outU64 == 127ull);
-    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01ni\x80}", 7, (SSFCStrIn_t *)path, &outU64));
+    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01ni\x80}", 7, path, &outU64));
     SSF_ASSERT(outU64 == 128ull);
-    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01ni\xff}", 7, (SSFCStrIn_t *)path, &outU64));
+    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01ni\xff}", 7, path, &outU64));
     SSF_ASSERT(outU64 == 255ull);
-    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nU\x01}", 7, (SSFCStrIn_t *)path, &outU64));
+    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nU\x01}", 7, path, &outU64));
     SSF_ASSERT(outU64 == 1ull);
-    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nU\x7f}", 7, (SSFCStrIn_t *)path, &outU64));
+    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nU\x7f}", 7, path, &outU64));
     SSF_ASSERT(outU64 == 127ull);
-    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nU\x80}", 7, (SSFCStrIn_t *)path, &outU64));
+    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nU\x80}", 7, path, &outU64));
     SSF_ASSERT(outU64 == 128ull);
-    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nU\xff}", 7, (SSFCStrIn_t *)path, &outU64));
+    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nU\xff}", 7, path, &outU64));
     SSF_ASSERT(outU64 == 255ull);
-    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nI\x00\x01}", 8, (SSFCStrIn_t *)path, &outU64));
+    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nI\x00\x01}", 8, path, &outU64));
     SSF_ASSERT(outU64 == 1ull);
-    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nI\x00\x7f}", 8, (SSFCStrIn_t *)path, &outU64));
+    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nI\x00\x7f}", 8, path, &outU64));
     SSF_ASSERT(outU64 == 127ull);
-    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nI\x00\x80}", 8, (SSFCStrIn_t *)path, &outU64));
+    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nI\x00\x80}", 8, path, &outU64));
     SSF_ASSERT(outU64 == 128ull);
-    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nI\x7f\xff}", 8, (SSFCStrIn_t *)path, &outU64));
+    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nI\x7f\xff}", 8, path, &outU64));
     SSF_ASSERT(outU64 == 32767ull);
-    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nI\xff\x7f}", 8, (SSFCStrIn_t *)path, &outU64));
+    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nI\xff\x7f}", 8, path, &outU64));
     SSF_ASSERT(outU64 == 65407ull);
-    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nI\x80\x00}", 8, (SSFCStrIn_t *)path, &outU64));
+    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nI\x80\x00}", 8, path, &outU64));
     SSF_ASSERT(outU64 == 32768ull);
-    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nI\xff\x80}", 8, (SSFCStrIn_t *)path, &outU64));
+    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nI\xff\x80}", 8, path, &outU64));
     SSF_ASSERT(outU64 == 65408ull);
-    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nI\xff\xff}", 8, (SSFCStrIn_t *)path, &outU64));
+    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nI\xff\xff}", 8, path, &outU64));
     SSF_ASSERT(outU64 == 65535ull);
-    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nl\x00\x00\x00\x01}", 10, (SSFCStrIn_t *)path, &outU64));
+    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nl\x00\x00\x00\x01}", 10, path, &outU64));
     SSF_ASSERT(outU64 == 1ull);
-    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nl\x00\x00\x00\x7f}", 10, (SSFCStrIn_t *)path, &outU64));
+    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nl\x00\x00\x00\x7f}", 10, path, &outU64));
     SSF_ASSERT(outU64 == 127ull);
-    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nl\x00\x00\x00\x80}", 10, (SSFCStrIn_t *)path, &outU64));
+    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nl\x00\x00\x00\x80}", 10, path, &outU64));
     SSF_ASSERT(outU64 == 128ull);
-    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nl\x00\x00\x7f\xff}", 10, (SSFCStrIn_t *)path, &outU64));
+    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nl\x00\x00\x7f\xff}", 10, path, &outU64));
     SSF_ASSERT(outU64 == 32767ull);
-    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nl\xff\xff\x80\x00}", 10, (SSFCStrIn_t *)path, &outU64));
+    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nl\xff\xff\x80\x00}", 10, path, &outU64));
     SSF_ASSERT(outU64 == 4294934528ull);
-    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nl\x80\x00\x00\x00}", 10, (SSFCStrIn_t *)path, &outU64));
+    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nl\x80\x00\x00\x00}", 10, path, &outU64));
     SSF_ASSERT(outU64 == 2147483648ull);
-    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nl\x7f\xff\xff\xff}", 10, (SSFCStrIn_t *)path, &outU64));
+    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nl\x7f\xff\xff\xff}", 10, path, &outU64));
     SSF_ASSERT(outU64 == 2147483647ull);
-    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nl\xff\xff\x7f\xff}", 10, (SSFCStrIn_t *)path, &outU64));
+    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nl\xff\xff\x7f\xff}", 10, path, &outU64));
     SSF_ASSERT(outU64 == 4294934527ull);
-    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nl\x00\x00\x80\x00}", 10, (SSFCStrIn_t *)path, &outU64));
+    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nl\x00\x00\x80\x00}", 10, path, &outU64));
     SSF_ASSERT(outU64 == 32768ull);
-    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nl\xff\xff\xff\x7f}", 10, (SSFCStrIn_t *)path, &outU64));
+    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nl\xff\xff\xff\x7f}", 10, path, &outU64));
     SSF_ASSERT(outU64 == 4294967167ull);
-    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nl\xff\xff\xff\xff}", 10, (SSFCStrIn_t *)path, &outU64));
+    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nl\xff\xff\xff\xff}", 10, path, &outU64));
     SSF_ASSERT(outU64 == 4294967295ull);
-    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x00\x01}", 14, (SSFCStrIn_t *)path, &outU64));
+    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x00\x01}", 14, path, &outU64));
     SSF_ASSERT(outU64 == 1ull);
-    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x00\x7f}", 14, (SSFCStrIn_t *)path, &outU64));
+    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x00\x7f}", 14, path, &outU64));
     SSF_ASSERT(outU64 == 127ull);
-    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x00\x80}", 14, (SSFCStrIn_t *)path, &outU64));
+    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x00\x80}", 14, path, &outU64));
     SSF_ASSERT(outU64 == 128ull);
-    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x7f\xff}", 14, (SSFCStrIn_t *)path, &outU64));
+    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x7f\xff}", 14, path, &outU64));
     SSF_ASSERT(outU64 == 32767ull);
-    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x80\x00}", 14, (SSFCStrIn_t *)path, &outU64));
+    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x00\x00\x80\x00}", 14, path, &outU64));
     SSF_ASSERT(outU64 == 32768ull);
-    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\x80\x00}", 14, (SSFCStrIn_t *)path, &outU64));
-    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\x7f\xff}", 14, (SSFCStrIn_t *)path, &outU64));
-    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nL\xff\xff\xff\xff\x80\x00\x00\x00}", 14, (SSFCStrIn_t *)path, &outU64));
-    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nL\xff\xff\xff\xff\x7f\xff\xff\xff}", 14, (SSFCStrIn_t *)path, &outU64));
-    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x7f\xff\xff\xff}", 14, (SSFCStrIn_t *)path, &outU64));
+    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\x80\x00}", 14, path, &outU64));
+    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\x7f\xff}", 14, path, &outU64));
+    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nL\xff\xff\xff\xff\x80\x00\x00\x00}", 14, path, &outU64));
+    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nL\xff\xff\xff\xff\x7f\xff\xff\xff}", 14, path, &outU64));
+    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x7f\xff\xff\xff}", 14, path, &outU64));
     SSF_ASSERT(outU64 == 2147483647ull);
-    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x80\x00\x00\x00}", 14, (SSFCStrIn_t *)path, &outU64));
+    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x80\x00\x00\x00}", 14, path, &outU64));
     SSF_ASSERT(outU64 == 2147483648ull);
-    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nL\x00\x00\x00\x00\xff\xff\xff\xff}", 14, (SSFCStrIn_t *)path, &outU64));
+    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nL\x00\x00\x00\x00\xff\xff\xff\xff}", 14, path, &outU64));
     SSF_ASSERT(outU64 == 4294967295ull);
-    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\xff\xff}", 14, (SSFCStrIn_t *)path, &outU64));
-    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\xff\x80}", 14, (SSFCStrIn_t *)path, &outU64));
+    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\xff\xff}", 14, path, &outU64));
+    SSF_ASSERT(SSFUBJsonGetUInt64((uint8_t *)"{i\x01nL\xff\xff\xff\xff\xff\xff\xff\x80}", 14, path, &outU64));
 
     /* Validate parser can determine if valid */
     for (i = 0; i < (sizeof(_ubjs) / sizeof(SSFUBJSONUT_t)); i++)
@@ -973,68 +1087,68 @@ void SSFUBJsonUnitTest(void)
 
     /* Validate parser on number types */
     memset(path, 0, sizeof(path));
-    path[0] = "n";
+    SSF_JSON_PATH_SET_KEY(path[0], "n");
     for (i = 0; i < UBJTS_NUM_ITEMS(_ubjtsTypeNumber, sizeof(SSFUBJSONNUM_t)); i++)
     {
-        SSF_ASSERT(SSFUBJsonGetType(_ubjtsTypeNumber[i].js, _ubjtsTypeNumber[i].jsLen, (SSFCStrIn_t *)path) == _ubjtsTypeNumber[i].type);
+        SSF_ASSERT(SSFUBJsonGetType(_ubjtsTypeNumber[i].js, _ubjtsTypeNumber[i].jsLen, path) == _ubjtsTypeNumber[i].type);
     }
 
     /* Validate parser on string types */
     memset(path, 0, sizeof(path));
-    path[0] = "s";
+    SSF_JSON_PATH_SET_KEY(path[0], "s");
     for (i = 0; i < UBJTS_NUM_ITEMS(_ubjtsTypeString, sizeof(SSFUBJSONSTR_t)); i++)
     {
-        SSF_ASSERT(SSFUBJsonGetType(_ubjtsTypeString[i].js, _ubjtsTypeString[i].jsLen, (SSFCStrIn_t *)path) == SSF_UBJSON_TYPE_STRING);
+        SSF_ASSERT(SSFUBJsonGetType(_ubjtsTypeString[i].js, _ubjtsTypeString[i].jsLen, path) == SSF_UBJSON_TYPE_STRING);
     }
 
     /* Validate parser on object types */
     memset(path, 0, sizeof(path));
-    path[0] = "o";
+    SSF_JSON_PATH_SET_KEY(path[0], "o");
     for (i = 0; i < UBJTS_NUM_ITEMS(_ubjtsTypeObject, sizeof(SSFUBJSONOBJ_t)); i++)
     {
-        SSF_ASSERT(SSFUBJsonGetType(_ubjtsTypeObject[i].js, _ubjtsTypeObject[i].jsLen, (SSFCStrIn_t *)path) == SSF_UBJSON_TYPE_OBJECT);
+        SSF_ASSERT(SSFUBJsonGetType(_ubjtsTypeObject[i].js, _ubjtsTypeObject[i].jsLen, path) == SSF_UBJSON_TYPE_OBJECT);
     }
-    path[1] = "o2";
-    SSF_ASSERT(SSFUBJsonGetType((uint8_t *)"{i\x01o{i\x02o2{}}}", 13, (SSFCStrIn_t *)path) == SSF_UBJSON_TYPE_OBJECT);
+    SSF_JSON_PATH_SET_KEY(path[1], "o2");
+    SSF_ASSERT(SSFUBJsonGetType((uint8_t *)"{i\x01o{i\x02o2{}}}", 13, path) == SSF_UBJSON_TYPE_OBJECT);
 
-    path[2] = (char *)&aidx1;
+    SSF_JSON_PATH_SET_INDEX(path[2], &aidx1);
     aidx1 = 0;
-    SSF_ASSERT(SSFUBJsonGetType((uint8_t *)"{i\x01o{i\x02o2[{}i\x08]}}", 17, (SSFCStrIn_t *)path) == SSF_UBJSON_TYPE_OBJECT);
+    SSF_ASSERT(SSFUBJsonGetType((uint8_t *)"{i\x01o{i\x02o2[{}i\x08]}}", 17, path) == SSF_UBJSON_TYPE_OBJECT);
     aidx1 = 1;
-    SSF_ASSERT(SSFUBJsonGetType((uint8_t *)"{i\x01o{i\x02o2[{}i\x08]}}", 17, (SSFCStrIn_t *)path) == SSF_UBJSON_TYPE_NUMBER_INT8);
+    SSF_ASSERT(SSFUBJsonGetType((uint8_t *)"{i\x01o{i\x02o2[{}i\x08]}}", 17, path) == SSF_UBJSON_TYPE_NUMBER_INT8);
 
     /* Validate parser on array types */
     memset(path, 0, sizeof(path));
-    path[0] = "a";
+    SSF_JSON_PATH_SET_KEY(path[0], "a");
     for (i = 0; i < UBJTS_NUM_ITEMS(_ubjtsTypeArray, sizeof(SSFUBJSONARR_t)); i++)
     {
-        SSF_ASSERT(SSFUBJsonGetType(_ubjtsTypeArray[i].js, _ubjtsTypeArray[i].jsLen, (SSFCStrIn_t *)path) == SSF_UBJSON_TYPE_ARRAY);
+        SSF_ASSERT(SSFUBJsonGetType(_ubjtsTypeArray[i].js, _ubjtsTypeArray[i].jsLen, path) == SSF_UBJSON_TYPE_ARRAY);
     }
-    SSF_ASSERT(SSFUBJsonGetType((uint8_t *)"{i\x01" "a[[]i\x03]}", 11, (SSFCStrIn_t *)path) == SSF_UBJSON_TYPE_ARRAY);
-    path[1] = (char *)&aidx1;
+    SSF_ASSERT(SSFUBJsonGetType((uint8_t *)"{i\x01" "a[[]i\x03]}", 11, path) == SSF_UBJSON_TYPE_ARRAY);
+    SSF_JSON_PATH_SET_INDEX(path[1], &aidx1);
     aidx1 = 0;
-    SSF_ASSERT(SSFUBJsonGetType((uint8_t *)"{i\x01" "a[[]i\x03]}", 11, (SSFCStrIn_t *)path) == SSF_UBJSON_TYPE_ARRAY);
+    SSF_ASSERT(SSFUBJsonGetType((uint8_t *)"{i\x01" "a[[]i\x03]}", 11, path) == SSF_UBJSON_TYPE_ARRAY);
     aidx1 = 1;
-    SSF_ASSERT(SSFUBJsonGetType((uint8_t *)"{i\x01" "a[[]i\x03]}", 11, (SSFCStrIn_t *)path) == SSF_UBJSON_TYPE_NUMBER_INT8);
+    SSF_ASSERT(SSFUBJsonGetType((uint8_t *)"{i\x01" "a[[]i\x03]}", 11, path) == SSF_UBJSON_TYPE_NUMBER_INT8);
 
     /* Validate parser on true, false, null types */
     memset(path, 0, sizeof(path));
-    path[0] = "t";
-    SSF_ASSERT(SSFUBJsonGetType((uint8_t *)"{i\x01tT}", 6, (SSFCStrIn_t *)path) == SSF_UBJSON_TYPE_TRUE);
-    path[0] = "f";
-    SSF_ASSERT(SSFUBJsonGetType((uint8_t *)"{i\x01" "fF}", 6, (SSFCStrIn_t *)path) == SSF_UBJSON_TYPE_FALSE);
-    path[0] = "n";
-    SSF_ASSERT(SSFUBJsonGetType((uint8_t *)"{i\x01nZ}", 6, (SSFCStrIn_t *)path) == SSF_UBJSON_TYPE_NULL);
-    SSF_ASSERT(SSFUBJsonGetType((uint8_t *)"{i\x01n}", 5, (SSFCStrIn_t *)path) == SSF_UBJSON_TYPE_ERROR);
+    SSF_JSON_PATH_SET_KEY(path[0], "t");
+    SSF_ASSERT(SSFUBJsonGetType((uint8_t *)"{i\x01tT}", 6, path) == SSF_UBJSON_TYPE_TRUE);
+    SSF_JSON_PATH_SET_KEY(path[0], "f");
+    SSF_ASSERT(SSFUBJsonGetType((uint8_t *)"{i\x01" "fF}", 6, path) == SSF_UBJSON_TYPE_FALSE);
+    SSF_JSON_PATH_SET_KEY(path[0], "n");
+    SSF_ASSERT(SSFUBJsonGetType((uint8_t *)"{i\x01nZ}", 6, path) == SSF_UBJSON_TYPE_NULL);
+    SSF_ASSERT(SSFUBJsonGetType((uint8_t *)"{i\x01n}", 5, path) == SSF_UBJSON_TYPE_ERROR);
 
     /* Read string types */
     memset(path, 0, sizeof(path));
-    path[0] = "s";
+    SSF_JSON_PATH_SET_KEY(path[0], "s");
     memset(outStr, 0xff, sizeof(outStr));
     outStrLen = sizeof(outStr) + 1;
-    SSF_ASSERT(SSFUBJsonGetString((uint8_t *)"{i\x01sSi\x05world}", 13, (SSFCStrIn_t *)path, outStr, sizeof(outStr),
+    SSF_ASSERT(SSFUBJsonGetString((uint8_t *)"{i\x01sSi\x05world}", 13, path, outStr, sizeof(outStr),
                                   &outStrLen));
-    SSF_ASSERT_TEST(SSFUBJsonGetString((uint8_t*)"{i\x01sSi\x05world}", 13, (SSFCStrIn_t*)path, outStr, 0,
+    SSF_ASSERT_TEST(SSFUBJsonGetString((uint8_t*)"{i\x01sSi\x05world}", 13, path, outStr, 0,
                                        &outStrLen));
 
     SSF_ASSERT(outStrLen == 5);
@@ -1043,14 +1157,14 @@ void SSFUBJsonUnitTest(void)
 
     memset(outStr, 0xff, sizeof(outStr));
     outStrLen = sizeof(outStr) + 1;
-    SSF_ASSERT(SSFUBJsonGetString((uint8_t *)"{i\x01sSi\x00}", 8, (SSFCStrIn_t *)path, outStr, sizeof(outStr),
+    SSF_ASSERT(SSFUBJsonGetString((uint8_t *)"{i\x01sSi\x00}", 8, path, outStr, sizeof(outStr),
                                   &outStrLen));
     SSF_ASSERT(outStrLen == 0);
     SSF_ASSERT(outStr[outStrLen] == 0);
 
     memset(outStr, 0xff, sizeof(outStr));
     outStrLen = sizeof(outStr) + 1;
-    SSF_ASSERT(SSFUBJsonGetString((uint8_t *)"{i\x01sSi\x05w\trld}", 13, (SSFCStrIn_t *)path, outStr, sizeof(outStr),
+    SSF_ASSERT(SSFUBJsonGetString((uint8_t *)"{i\x01sSi\x05w\trld}", 13, path, outStr, sizeof(outStr),
                                   &outStrLen));
     SSF_ASSERT(outStrLen == 5);
     SSF_ASSERT(memcmp(outStr, "w\trld", outStrLen) == 0);
@@ -1058,43 +1172,43 @@ void SSFUBJsonUnitTest(void)
 
     /* Read float type */
     memset(path, 0, sizeof(path));
-    path[0] = "f";
+    SSF_JSON_PATH_SET_KEY(path[0], "f");
     outFloat = -1;
-    SSF_ASSERT(SSFUBJsonGetFloat((uint8_t *)"{i\x01" "fdO\x00\x00\x00}", 10, (SSFCStrIn_t *)path, &outFloat));
+    SSF_ASSERT(SSFUBJsonGetFloat((uint8_t *)"{i\x01" "fdO\x00\x00\x00}", 10, path, &outFloat));
     SSF_ASSERT((outFloat >= 2147483647.0) && (outFloat <= 2147483649.0));
 
     /* Read double type */
     memset(path, 0, sizeof(path));
-    path[0] = "d";
+    SSF_JSON_PATH_SET_KEY(path[0], "d");
     outDouble = -1;
-    SSF_ASSERT(SSFUBJsonGetDouble((uint8_t *)"{i\x01" "dDA\xE0\x00\x00\x1F\x9C\x08" "1}", 14, (SSFCStrIn_t *)path, &outDouble));
+    SSF_ASSERT(SSFUBJsonGetDouble((uint8_t *)"{i\x01" "dDA\xE0\x00\x00\x1F\x9C\x08" "1}", 14, path, &outDouble));
     SSF_ASSERT((outDouble >= 2147483899.0) && (outDouble <= 2147483901.0));
-    SSF_ASSERT(SSFUBJsonGetDouble((uint8_t *)"{i\x01" "ddO\x00\x00\x00}", 10, (SSFCStrIn_t *)path, &outDouble));
+    SSF_ASSERT(SSFUBJsonGetDouble((uint8_t *)"{i\x01" "ddO\x00\x00\x00}", 10, path, &outDouble));
     SSF_ASSERT((outDouble >= 2147483647.0) && (outDouble <= 2147483649.0));
 
     /* Read int types */
     memset(path, 0, sizeof(path));
-    path[0] = "n";
+    SSF_JSON_PATH_SET_KEY(path[0], "n");
     outI8 = -1;
     outU8 = 255;
     outI16 = -1;
     outI32 = -1;
     outI64 = -1;
-    SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01ni\x01}", 7, (SSFCStrIn_t *)path, &outI8));
+    SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01ni\x01}", 7, path, &outI8));
     SSF_ASSERT(outI8 == 1);
-    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nU\x81}", 7, (SSFCStrIn_t *)path, &outU8));
+    SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nU\x81}", 7, path, &outU8));
     SSF_ASSERT(outU8 == 129);
-    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nI\x12" "4}", 8, (SSFCStrIn_t *)path, &outI16));
+    SSF_ASSERT(SSFUBJsonGetInt16((uint8_t *)"{i\x01nI\x12" "4}", 8, path, &outI16));
     SSF_ASSERT(outI16 == 0x1234);
-    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nl\x7F\xFF\xFF\xFF}", 10, (SSFCStrIn_t *)path, &outI32));
+    SSF_ASSERT(SSFUBJsonGetInt32((uint8_t *)"{i\x01nl\x7F\xFF\xFF\xFF}", 10, path, &outI32));
     SSF_ASSERT(outI32 == 0x7fffffffl);
-    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x80\x00\x00\x00}", 14, (SSFCStrIn_t *)path, &outI64));
+    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t *)"{i\x01nL\x00\x00\x00\x00\x80\x00\x00\x00}", 14, path, &outI64));
     SSF_ASSERT(outI64 == 0x0000000080000000ll);
 
     memset(path, 0, sizeof(path));
     aidx1 = 0;
-    path[0] = (char *)&aidx1;
-    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t*)"[U\x12]", 4, (SSFCStrIn_t*)path, &outI64));
+    SSF_JSON_PATH_SET_INDEX(path[0], &aidx1);
+    SSF_ASSERT(SSFUBJsonGetInt64((uint8_t*)"[U\x12]", 4, path, &outI64));
     SSF_ASSERT(outI64 == 0x12ll);
 
     memset(jsOut, 0xff, sizeof(jsOut));
@@ -1407,18 +1521,18 @@ void SSFUBJsonUnitTest(void)
 
     /* ASCII Hex */
     memset(path, 0, sizeof(path));
-    path[0] = "h";
-    SSF_ASSERT(SSFUBJsonGetHex((uint8_t *)"{U\x01hSU\x0c" "11AA22BB99FE}", 20, (SSFCStrIn_t*) path, jsOut,
+    SSF_JSON_PATH_SET_KEY(path[0], "h");
+    SSF_ASSERT(SSFUBJsonGetHex((uint8_t *)"{U\x01hSU\x0c" "11AA22BB99FE}", 20, path, jsOut,
         sizeof(jsOut), &outStrLen, false));
     SSF_ASSERT(outStrLen == 6);
     SSF_ASSERT(memcmp(jsOut, "\x11\xAA\x22\xBB\x99\xFE", outStrLen) == 0);
 
-    SSF_ASSERT(SSFUBJsonGetHex((uint8_t*)"{U\x01hSU\x0c" "11AA22BB99FE}", 20, (SSFCStrIn_t*)path, jsOut,
+    SSF_ASSERT(SSFUBJsonGetHex((uint8_t*)"{U\x01hSU\x0c" "11AA22BB99FE}", 20, path, jsOut,
         sizeof(jsOut), &outStrLen, true));
     SSF_ASSERT(outStrLen == 6);
     SSF_ASSERT(memcmp(jsOut, "\xFE\x99\xBB\x22\xAA\x11", outStrLen) == 0);
 
-    SSF_ASSERT(SSFUBJsonGetHex((uint8_t*)"{U\x01hSU\x0c" "11AA22BB99F}", 19, (SSFCStrIn_t*)path, jsOut,
+    SSF_ASSERT(SSFUBJsonGetHex((uint8_t*)"{U\x01hSU\x0c" "11AA22BB99F}", 19, path, jsOut,
         sizeof(jsOut), &outStrLen, true) == false);
 
     jsOutStart = 0;
@@ -1429,8 +1543,8 @@ void SSFUBJsonUnitTest(void)
 
     /* Base64 */
     memset(path, 0, sizeof(path));
-    path[0] = "b";
-    SSF_ASSERT(SSFUBJsonGetBase64((uint8_t *)"{U\x01" "bSU\x08" "aGVsbG8=}", 16, (SSFCStrIn_t*) path, jsOut,
+    SSF_JSON_PATH_SET_KEY(path[0], "b");
+    SSF_ASSERT(SSFUBJsonGetBase64((uint8_t *)"{U\x01" "bSU\x08" "aGVsbG8=}", 16, path, jsOut,
         sizeof(jsOut), &outStrLen));
     SSF_ASSERT(outStrLen == 5);
     SSF_ASSERT(memcmp(jsOut, "hello", outStrLen) == 0);
@@ -1450,14 +1564,14 @@ void SSFUBJsonUnitTest(void)
 
         memset(path, 0, sizeof(path));
         aidx1 = 0;
-        path[0] = (char *)&aidx1;
+        SSF_JSON_PATH_SET_INDEX(path[0], &aidx1);
         SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"[$i#U\x02\x0a\x0b", 8,
-                                     (SSFCStrIn_t *)path, &outVal) == true);
+                                     path, &outVal) == true);
         SSF_ASSERT(outVal == 10);
 
         aidx1 = 1;
         SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"[$i#U\x02\x0a\x0b", 8,
-                                     (SSFCStrIn_t *)path, &outVal) == true);
+                                     path, &outVal) == true);
         SSF_ASSERT(outVal == 11);
     }
 
@@ -1468,16 +1582,16 @@ void SSFUBJsonUnitTest(void)
         int8_t outVal;
 
         memset(path, 0, sizeof(path));
-        path[0] = "abi";
+        SSF_JSON_PATH_SET_KEY(path[0], "abi");
         SSF_ASSERT(SSFUBJsonGetType((uint8_t *)"{i\x02" "ab" "i\x05}", 8,
-                                     (SSFCStrIn_t *)path) == SSF_UBJSON_TYPE_ERROR);
+                                     path) == SSF_UBJSON_TYPE_ERROR);
         SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x02" "ab" "i\x05}", 8,
-                                     (SSFCStrIn_t *)path, &outVal) == false);
+                                     path, &outVal) == false);
 
         /* Verify the correct key "ab" still matches */
-        path[0] = "ab";
+        SSF_JSON_PATH_SET_KEY(path[0], "ab");
         SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x02" "ab" "i\x05}", 8,
-                                     (SSFCStrIn_t *)path, &outVal) == true);
+                                     path, &outVal) == true);
         SSF_ASSERT(outVal == 5);
     }
 
@@ -1487,16 +1601,16 @@ void SSFUBJsonUnitTest(void)
         size_t outStrLen2;
 
         memset(path, 0, sizeof(path));
-        path[0] = "s";
+        SSF_JSON_PATH_SET_KEY(path[0], "s");
         /* "world" is 5 chars, outSize=6 succeeds (5 + null) */
         SSF_ASSERT(SSFUBJsonGetString((uint8_t *)"{i\x01sSi\x05world}", 13,
-                                       (SSFCStrIn_t *)path, outStr2, 6, &outStrLen2));
+                                       path, outStr2, 6, &outStrLen2));
         SSF_ASSERT(outStrLen2 == 5);
         /* outSize=5 fails (no room for null after 5 chars) */
         SSF_ASSERT(SSFUBJsonGetString((uint8_t *)"{i\x01sSi\x05world}", 13,
-                                       (SSFCStrIn_t *)path, outStr2, 5, &outStrLen2) == false);
+                                       path, outStr2, 5, &outStrLen2) == false);
         SSF_ASSERT(SSFUBJsonGetString((uint8_t *)"{i\x01sSi\x05world}", 13,
-                                       (SSFCStrIn_t *)path, outStr2, 1, &outStrLen2) == false);
+                                       path, outStr2, 1, &outStrLen2) == false);
     }
 
     /* SSFUBJsonGetString with outLen == NULL */
@@ -1504,10 +1618,10 @@ void SSFUBJsonUnitTest(void)
         char outStr2[16];
 
         memset(path, 0, sizeof(path));
-        path[0] = "s";
+        SSF_JSON_PATH_SET_KEY(path[0], "s");
         memset(outStr2, 0xff, sizeof(outStr2));
         SSF_ASSERT(SSFUBJsonGetString((uint8_t *)"{i\x01sSi\x05world}", 13,
-                                       (SSFCStrIn_t *)path, outStr2, sizeof(outStr2), NULL));
+                                       path, outStr2, sizeof(outStr2), NULL));
         SSF_ASSERT(memcmp(outStr2, "world", 6) == 0);
     }
 
@@ -1517,23 +1631,23 @@ void SSFUBJsonUnitTest(void)
         uint8_t outU8t;
 
         memset(path, 0, sizeof(path));
-        path[0] = "n";
+        SSF_JSON_PATH_SET_KEY(path[0], "n");
         /* Int8 max is 127, uint8 value 128 should fail for signed int8 */
         SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01nU\x80}", 7,
-                                     (SSFCStrIn_t *)path, &outI8t) == false);
+                                     path, &outI8t) == false);
         /* Int8 max is 127, uint8 value 255 should fail for signed int8 */
         SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01nU\xFF}", 7,
-                                     (SSFCStrIn_t *)path, &outI8t) == false);
+                                     path, &outI8t) == false);
         /* UInt8 max is 255, int16 value 256 (big-endian 0x0100) should fail for uint8 */
         SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nI\x01\x00}", 8,
-                                      (SSFCStrIn_t *)path, &outU8t) == false);
+                                      path, &outU8t) == false);
         /* Int8 boundary: value 127 (as uint8) should succeed */
         SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01nU\x7F}", 7,
-                                     (SSFCStrIn_t *)path, &outI8t));
+                                     path, &outI8t));
         SSF_ASSERT(outI8t == 127);
         /* UInt8 boundary: value 255 should succeed */
         SSF_ASSERT(SSFUBJsonGetUInt8((uint8_t *)"{i\x01nU\xFF}", 7,
-                                      (SSFCStrIn_t *)path, &outU8t));
+                                      path, &outU8t));
         SSF_ASSERT(outU8t == 255);
     }
 
@@ -1543,19 +1657,19 @@ void SSFUBJsonUnitTest(void)
         double outD;
 
         memset(path, 0, sizeof(path));
-        path[0] = "n";
+        SSF_JSON_PATH_SET_KEY(path[0], "n");
         /* Value is int8, not float32 */
         SSF_ASSERT(SSFUBJsonGetFloat((uint8_t *)"{i\x01ni\x05}", 7,
-                                      (SSFCStrIn_t *)path, &outF) == false);
+                                      path, &outF) == false);
         /* Value is int8, not float64 */
         SSF_ASSERT(SSFUBJsonGetDouble((uint8_t *)"{i\x01ni\x05}", 7,
-                                       (SSFCStrIn_t *)path, &outD) == false);
+                                       path, &outD) == false);
         /* Value is string, not float */
-        path[0] = "s";
+        SSF_JSON_PATH_SET_KEY(path[0], "s");
         SSF_ASSERT(SSFUBJsonGetFloat((uint8_t *)"{i\x01sSi\x02hi}", 10,
-                                      (SSFCStrIn_t *)path, &outF) == false);
+                                      path, &outF) == false);
         SSF_ASSERT(SSFUBJsonGetDouble((uint8_t *)"{i\x01sSi\x02hi}", 10,
-                                       (SSFCStrIn_t *)path, &outD) == false);
+                                       path, &outD) == false);
     }
 
     /* SSFUBJsonPrintInt/SSFUBJsonPrintString with insufficient buffer */
@@ -1586,19 +1700,19 @@ void SSFUBJsonUnitTest(void)
         SSF_ASSERT(SSFUBJsonIsValid(rtUbj, rtUbjLen));
 
         memset(path, 0, sizeof(path));
-        path[0] = "s";
-        SSF_ASSERT(SSFUBJsonGetString(rtUbj, rtUbjLen, (SSFCStrIn_t *)path, rtStr,
+        SSF_JSON_PATH_SET_KEY(path[0], "s");
+        SSF_ASSERT(SSFUBJsonGetString(rtUbj, rtUbjLen, path, rtStr,
                                        sizeof(rtStr), &rtStrLen));
         SSF_ASSERT(rtStrLen == 5);
         SSF_ASSERT(memcmp(rtStr, "hello", 5) == 0);
 
-        path[0] = "n";
-        SSF_ASSERT(SSFUBJsonGetInt8(rtUbj, rtUbjLen, (SSFCStrIn_t *)path, &rtI8));
+        SSF_JSON_PATH_SET_KEY(path[0], "n");
+        SSF_ASSERT(SSFUBJsonGetInt8(rtUbj, rtUbjLen, path, &rtI8));
         SSF_ASSERT(rtI8 == 42);
 
         /* Non-existent key returns false */
-        path[0] = "x";
-        SSF_ASSERT(SSFUBJsonGetInt8(rtUbj, rtUbjLen, (SSFCStrIn_t *)path, &rtI8) == false);
+        SSF_JSON_PATH_SET_KEY(path[0], "x");
+        SSF_ASSERT(SSFUBJsonGetInt8(rtUbj, rtUbjLen, path, &rtI8) == false);
     }
 
     /* Verify top-level optimized string array parses when last element data ends at jsLen */
@@ -1612,9 +1726,9 @@ void SSFUBJsonUnitTest(void)
 
         memset(path, 0, sizeof(path));
         aidx1 = 0;
-        path[0] = (char *)&aidx1;
+        SSF_JSON_PATH_SET_INDEX(path[0], &aidx1);
         SSF_ASSERT(SSFUBJsonGetString((uint8_t *)"[$S#U\x01U\x02hi", 10,
-                                       (SSFCStrIn_t *)path, outStr2, sizeof(outStr2),
+                                       path, outStr2, sizeof(outStr2),
                                        &outStrLen2) == true);
         SSF_ASSERT(outStrLen2 == 2);
         SSF_ASSERT(memcmp(outStr2, "hi", 2) == 0);
@@ -1626,13 +1740,13 @@ void SSFUBJsonUnitTest(void)
     /* key length, then the value token follows. Existing tests cover the path-not-found and  */
     /* underlying-type-too-narrow cases; these add the cross-type reject arms.                */
     {
-        SSFCStrIn_t cPath[SSF_UBJSON_CONFIG_MAX_IN_DEPTH + 1] = { NULL };
+        SSFJsonPath_t cPath[SSF_UBJSON_CONFIG_MAX_IN_DEPTH + 1] = { { SSF_JSON_PATH_END } };
         char shortStr[16];
         uint8_t outBuf[16];
         size_t outBufLen;
         double outDbl;
 
-        cPath[0] = "k";
+        SSF_JSON_PATH_SET_KEY(cPath[0], "k");
 
         /* Object {key="k", value=uint8 0x05}: GetString rejects (type != STRING).  */
         SSF_ASSERT(SSFUBJsonGetString((uint8_t *)"{i\x01kU\x05}", 7,
@@ -1657,7 +1771,7 @@ void SSFUBJsonUnitTest(void)
     /* The well-formed shape is `[$T#NL data...` where T is INT8/UINT8 and N is INT8/UINT8.   */
     /* Each line below mutates one byte to trip a specific guard (lines 697-707).             */
     {
-        SSFCStrIn_t cPath[SSF_UBJSON_CONFIG_MAX_IN_DEPTH + 1] = { NULL };
+        SSFJsonPath_t cPath[SSF_UBJSON_CONFIG_MAX_IN_DEPTH + 1] = { { SSF_JSON_PATH_END } };
 
         /* Reject: top-level value is not an array (jt != ARRAY at line 697). */
         SSF_ASSERT(SSFUBJsonGetByteArrayPtr((uint8_t *)"U\x05", 2,

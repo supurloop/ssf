@@ -15,6 +15,7 @@ nesting depth, not message size. The generator uses a chained-callback pattern w
 ## [↑](#ssfjson--json-parsergenerator) Dependencies
 
 - [`ssfport.h`](../ssfport.h)
+- [`ssfjsonpath.h`](ssfjsonpath.h) — the lookup path type shared with [`ssfubjson`](ssfubjson.md)
 - [`_opt/ssfjson_opt.h`](../_opt/ssfjson_opt.h) (aggregated through `ssfoptions.h`)
 - [`ssfgobj.h`](ssfgobj.h) — only when `SSF_JSON_GOBJ_ENABLE == 1`
 
@@ -71,7 +72,7 @@ Options live in [`_opt/ssfjson_opt.h`](../_opt/ssfjson_opt.h) (aggregated into t
 |--------|------|-------------|
 | <a id="ssfjsontype-t"></a>`SSFJsonType_t` | Enum | JSON value type returned by [`SSFJsonGetType()`](#ssfjsongettype): `SSF_JSON_TYPE_STRING`, `SSF_JSON_TYPE_NUMBER`, `SSF_JSON_TYPE_OBJECT`, `SSF_JSON_TYPE_ARRAY`, `SSF_JSON_TYPE_TRUE`, `SSF_JSON_TYPE_FALSE`, `SSF_JSON_TYPE_NULL`, `SSF_JSON_TYPE_ERROR` |
 | <a id="ssfjsonfltfmt-t"></a>`SSFJsonFltFmt_t` | Enum (requires `SSF_JSON_CONFIG_ENABLE_FLOAT_GEN == 1`) | Float format for [`SSFJsonPrintDouble()`](#ssfjsonprintdouble): `SSF_JSON_FLT_FMT_PREC_0`–`SSF_JSON_FLT_FMT_PREC_9` for fixed decimal places; `SSF_JSON_FLT_FMT_STD` for `%g`; `SSF_JSON_FLT_FMT_SHORT` for shortest representation |
-| <a id="ssfjsonpath-t"></a>`SSFJsonPath_t` | Struct | One lookup path entry: `kind` (`SSFJsonPathKind_t`: `SSF_JSON_PATH_END`, `SSF_JSON_PATH_KEY` or `SSF_JSON_PATH_INDEX`) and `u.key` (member name) or `u.index` (pointer to a `size_t` index). Set entries with `SSF_JSON_PATH_SET_KEY(e, k)`, `SSF_JSON_PATH_SET_INDEX(e, i)` and `SSF_JSON_PATH_SET_END(e)`. A path is an array of `SSF_JSON_CONFIG_MAX_IN_DEPTH + 1` entries ending in an END entry; `SSF_JSON_PATH_END` is 0, so a zeroed array is an empty path. A key entry with a `NULL` name, an index entry with a `NULL` pointer, or an unknown kind asserts. |
+| <a id="ssfjsonpath-t"></a>`SSFJsonPath_t` | Struct | Declared in [`ssfjsonpath.h`](ssfjsonpath.h) and shared with [`ssfubjson`](ssfubjson.md). One lookup path entry: `kind` (`SSFJsonPathKind_t`: `SSF_JSON_PATH_END`, `SSF_JSON_PATH_KEY` or `SSF_JSON_PATH_INDEX`) and `u.key` (member name) or `u.index` (pointer to a `size_t` index). Set entries with `SSF_JSON_PATH_SET_KEY(e, k)`, `SSF_JSON_PATH_SET_INDEX(e, i)` and `SSF_JSON_PATH_SET_END(e)`. A path is an array of `SSF_JSON_CONFIG_MAX_IN_DEPTH + 1` entries ending in an END entry; `SSF_JSON_PATH_END` is 0, so a zeroed array is an empty path. A key entry with a `NULL` name, an index entry with a `NULL` pointer, or an unknown kind asserts. |
 | <a id="ssfjsonprintfn-t"></a>`SSFJsonPrintFn_t` | Typedef | `bool (*)(char *js, size_t size, size_t start, size_t *end, void *in)` — callback type passed to generator functions |
 
 <a id="functions"></a>

@@ -45,7 +45,7 @@ SUMMARY
                      JSON-7 (FIXED), JSON-8 (FIXED), UBJSON-2 (FIXED), GOBJ-1 (FIXED)
   Medium     0
   Low        13      UBJSON-1 (FIXED), DEC-1 (FIXED), DEC-2 (FIXED), JSON-4 (DOC), HEX-1 (FIXED),
-                     B64-1 (FIXED), JSON-3, RSA-13, RSA-14, CMS-5, X509-21, E-5, X-3
+                     B64-1 (FIXED), JSON-3 (FIXED), RSA-13, RSA-14, CMS-5, X509-21, E-5, X-3
 
   By fault:  CODE   JSON-1, JSON-2, JSON-4, JSON-5, JSON-6, JSON-7, JSON-8, UBJSON-1,
                     UBJSON-2, GOBJ-1, DEC-1, RSA-14 (style)
@@ -93,13 +93,14 @@ JSON-2  High  FIXED (2026-11-19)  CODE  [measured; fix verified red/green]
   Options:   (1) Pass depth (not 0) on the non-matching branch (chosen). (2) A separate
              never-reset recursion counter (rejected: the existing limit already means this).
 
-JSON-3  Low  OPEN  TEST  [measured, compile error]
+JSON-3  Low  FIXED (2026-11-20)  TEST  [measured, compile error; fix verified]
   Location:  ssfjson_ut.c:1409
   Problem:   The JSON unit test calls SSFGObjIsMemoryBalanced(), which ssfgobj.h declares only
              when SSF_CONFIG_GOBJ_UNIT_TEST == 1. With the JSON test on and the GObj test off
              the runner does not compile.
-  Options:   Guard the call with SSF_CONFIG_GOBJ_UNIT_TEST, or declare the helper whenever
-             any unit test that uses it is enabled.
+  Options:   (1) Guard the calls in ssfjson_ut.c with SSF_CONFIG_GOBJ_UNIT_TEST (chosen).
+             (2) Declare the helper whenever any unit test that uses it is enabled.
+             (3) Require the GObj test whenever the JSON test is on.
 
 JSON-4  Low  DOC (2026-11-20)  CODE  [measured]
   Location:  ssfjson.c (_SSFJsonGObjValue depth check, every value); ssfgobj.c:514
@@ -681,3 +682,11 @@ CHANGE LOG
               "" directly. RED: the previous test, ASan global-buffer-overflow at ssfbase64.c:69.
               GREEN: ssfbase64 passes ASan + UBSan and the plain build, built from a fresh copy of
               the working tree. Test-only change.
+  2026-11-20  JSON-3 FIXED (option 1). The 25 SSF_ASSERT(SSFGObjIsMemoryBalanced()) calls in
+              ssfjson_ut.c use _SSF_JSON_UT_GOBJ_BALANCED(), which asserts the balance when
+              SSF_CONFIG_GOBJ_UNIT_TEST == 1 (ssfgobj.c compiles the helper and its allocation
+              counters only then) and does nothing otherwise. RED: the previous test with the
+              JSON test on and the GObj test off fails to compile (implicit declaration).
+              GREEN: that configuration builds and ssfjson passes; with every test on, all 54
+              suites pass and the preprocessed test still holds 23 balance checks, the same as
+              HEAD (the other two sit in blocks another option compiles out).

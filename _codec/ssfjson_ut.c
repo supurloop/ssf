@@ -40,6 +40,12 @@
 #include "ssfport.h"
 
 #if SSF_CONFIG_JSON_UNIT_TEST == 1
+/* AUDIT JSON-3: the gobj leak check exists only when ssfgobj's own unit test is compiled in */
+#if SSF_CONFIG_GOBJ_UNIT_TEST == 1
+#define _SSF_JSON_UT_GOBJ_BALANCED() SSF_ASSERT(SSFGObjIsMemoryBalanced())
+#else
+#define _SSF_JSON_UT_GOBJ_BALANCED() do { } while (0)
+#endif /* SSF_CONFIG_GOBJ_UNIT_TEST */
     #define JTS_NUM_ITEMS(x, s) (sizeof((x)) / (s))
 const char *_jtsIsValid[] =
 {
@@ -1750,7 +1756,7 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(SSFJsonGObjCreate("{}", &g, 8));
         SSF_ASSERT(SSFGObjGetType(g) == SSF_OBJ_TYPE_OBJECT);
         SSFGObjDeInit(&g);
-        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+        _SSF_JSON_UT_GOBJ_BALANCED();
     }
 
     /* Empty array */
@@ -1759,7 +1765,7 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(SSFJsonGObjCreate("[]", &g, 8));
         SSF_ASSERT(SSFGObjGetType(g) == SSF_OBJ_TYPE_ARRAY);
         SSFGObjDeInit(&g);
-        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+        _SSF_JSON_UT_GOBJ_BALANCED();
     }
 
     /* Object with string value */
@@ -1778,7 +1784,7 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(SSFGObjGetString(child, val, sizeof(val)));
         SSF_ASSERT(strcmp(val, "value") == 0);
         SSFGObjDeInit(&g);
-        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+        _SSF_JSON_UT_GOBJ_BALANCED();
     }
 
     /* Object with integer value */
@@ -1796,7 +1802,7 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(SSFGObjGetInt(child, &intVal));
         SSF_ASSERT(intVal == -42);
         SSFGObjDeInit(&g);
-        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+        _SSF_JSON_UT_GOBJ_BALANCED();
     }
 
     /* Object with bool and null values */
@@ -1830,7 +1836,7 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(SSFGObjGetType(child) == SSF_OBJ_TYPE_NULL);
 
         SSFGObjDeInit(&g);
-        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+        _SSF_JSON_UT_GOBJ_BALANCED();
     }
 
     /* Array with mixed types */
@@ -1866,7 +1872,7 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(SSFGObjGetType(child) == SSF_OBJ_TYPE_BOOL);
 
         SSFGObjDeInit(&g);
-        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+        _SSF_JSON_UT_GOBJ_BALANCED();
     }
 
     /* Nested object */
@@ -1886,7 +1892,7 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(strcmp(val, "deep") == 0);
 
         SSFGObjDeInit(&g);
-        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+        _SSF_JSON_UT_GOBJ_BALANCED();
     }
 
     /* String with escape sequences */
@@ -1905,7 +1911,7 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(strcmp(val, "a\tb\nc") == 0);
 
         SSFGObjDeInit(&g);
-        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+        _SSF_JSON_UT_GOBJ_BALANCED();
     }
 
     /* Whitespace in JSON */
@@ -1932,7 +1938,7 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(intVal == 2);
 
         SSFGObjDeInit(&g);
-        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+        _SSF_JSON_UT_GOBJ_BALANCED();
     }
 
     /* Test SSFJsonGObjPrint */
@@ -1949,7 +1955,7 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(strcmp(_jsOut, "{}") == 0);
         SSF_ASSERT(len == 2);
         SSFGObjDeInit(&g);
-        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+        _SSF_JSON_UT_GOBJ_BALANCED();
     }
 
     /* Empty array */
@@ -1963,7 +1969,7 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(strcmp(_jsOut, "[]") == 0);
         SSF_ASSERT(len == 2);
         SSFGObjDeInit(&g);
-        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+        _SSF_JSON_UT_GOBJ_BALANCED();
     }
 
     /* Object with string value */
@@ -1982,7 +1988,7 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(SSFJsonGObjPrint(g, _jsOut, sizeof(_jsOut), &len));
         SSF_ASSERT(strcmp(_jsOut, "{\"key\":\"value\"}") == 0);
         SSFGObjDeInit(&g);
-        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+        _SSF_JSON_UT_GOBJ_BALANCED();
     }
 
     /* Object with int, bool, null */
@@ -2014,7 +2020,7 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(SSFJsonGObjPrint(g, _jsOut, sizeof(_jsOut), &len));
         SSF_ASSERT(strcmp(_jsOut, "{\"n\":-42,\"b\":true,\"z\":null}") == 0);
         SSFGObjDeInit(&g);
-        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+        _SSF_JSON_UT_GOBJ_BALANCED();
     }
 
     /* Array with mixed types */
@@ -2043,7 +2049,7 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(SSFJsonGObjPrint(g, _jsOut, sizeof(_jsOut), &len));
         SSF_ASSERT(strcmp(_jsOut, "[\"hello\",123,false]") == 0);
         SSFGObjDeInit(&g);
-        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+        _SSF_JSON_UT_GOBJ_BALANCED();
     }
 
     /* Nested object */
@@ -2070,7 +2076,7 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(SSFJsonGObjPrint(g, _jsOut, sizeof(_jsOut), &len));
         SSF_ASSERT(strcmp(_jsOut, "{\"outer\":{\"inner\":\"deep\"}}") == 0);
         SSFGObjDeInit(&g);
-        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+        _SSF_JSON_UT_GOBJ_BALANCED();
     }
 
     /* Buffer too small */
@@ -2086,7 +2092,7 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(SSFJsonGObjPrint(g, _jsOut, 3, &len));
 
         SSFGObjDeInit(&g);
-        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+        _SSF_JSON_UT_GOBJ_BALANCED();
     }
 
     /* Round-trip: JSON -> gobj -> JSON */
@@ -2099,7 +2105,7 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT(SSFJsonGObjPrint(g, _jsOut, sizeof(_jsOut), &len));
         SSF_ASSERT(strcmp(_jsOut, src) == 0);
         SSFGObjDeInit(&g);
-        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+        _SSF_JSON_UT_GOBJ_BALANCED();
     }
 #endif /* SSF_JSON_GOBJ_ENABLE */
 
@@ -2226,38 +2232,38 @@ void SSFJsonUnitTest(void)
                 outLen = 0;
                 SSF_ASSERT(SSFJsonGObjPrint(g, _jsOut, sizeof(_jsOut), &outLen) == true);
                 SSFGObjDeInit(&g);
-                SSF_ASSERT(SSFGObjIsMemoryBalanced());
+                _SSF_JSON_UT_GOBJ_BALANCED();
             }
         }
 #if SSF_JSON_CONFIG_ENABLE_FLOAT_PARSE == 1
         /* Number with '.' or 'e' triggers the float-parse path (lines 979/983). */
         SSF_ASSERT(SSFJsonGObjCreate("{\"k\":1.5}", &g, 8u) == true);
         SSFGObjDeInit(&g);
-        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+        _SSF_JSON_UT_GOBJ_BALANCED();
         SSF_ASSERT(SSFJsonGObjCreate("{\"k\":1e10}", &g, 8u) == true);
         SSFGObjDeInit(&g);
-        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+        _SSF_JSON_UT_GOBJ_BALANCED();
 #endif /* SSF_JSON_CONFIG_ENABLE_FLOAT_PARSE */
 
         /* Empty object / array. */
         SSF_ASSERT(SSFJsonGObjCreate("{}", &g, 8u) == true);
         SSFGObjDeInit(&g);
-        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+        _SSF_JSON_UT_GOBJ_BALANCED();
         SSF_ASSERT(SSFJsonGObjCreate("[]", &g, 8u) == true);
         SSFGObjDeInit(&g);
-        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+        _SSF_JSON_UT_GOBJ_BALANCED();
 
         /* Object with bad key (key not a string -> _SSFJsonString fails at line 890). */
         SSF_ASSERT(SSFJsonGObjCreate("{1:2}", &g, 8u) == false);
-        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+        _SSF_JSON_UT_GOBJ_BALANCED();
 
         /* Object key without colon (line 896). */
         SSF_ASSERT(SSFJsonGObjCreate("{\"a\" 1}", &g, 8u) == false);
-        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+        _SSF_JSON_UT_GOBJ_BALANCED();
 
         /* Array with bad element (line 936 -> _SSFJsonGObjValue fails on garbage). */
         SSF_ASSERT(SSFJsonGObjCreate("[zzz]", &g, 8u) == false);
-        SSF_ASSERT(SSFGObjIsMemoryBalanced());
+        _SSF_JSON_UT_GOBJ_BALANCED();
     }
 #endif /* SSF_JSON_GOBJ_ENABLE */
 }

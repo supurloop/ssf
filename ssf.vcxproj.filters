@@ -189,10 +189,6 @@
     <ClCompile Include="_ui\ssfvted_ut.c">
       <Filter>_ui</Filter>
     </ClCompile>
-    <ClCompile Include="_crypto\ssfcrypt.c" />
-    <ClCompile Include="_crypto\ssfcrypt_ut.c" />
-    <ClCompile Include="_ui\ssfcli.c" />
-    <ClCompile Include="_ui\ssfcli_ut.c" />
     <ClCompile Include="_crypto\ssfbn.c">
       <Filter>_crypto</Filter>
     </ClCompile>
@@ -312,6 +308,24 @@
     </ClCompile>
     <ClCompile Include="_codec\ssfx509_ut.c">
       <Filter>_codec</Filter>
+    </ClCompile>
+    <ClCompile Include="_ui\ssfcli.c">
+      <Filter>_ui</Filter>
+    </ClCompile>
+    <ClCompile Include="_ui\ssfcli_ut.c">
+      <Filter>_ui</Filter>
+    </ClCompile>
+    <ClCompile Include="_crypto\ssfcms.c">
+      <Filter>_crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="_crypto\ssfcms_ut.c">
+      <Filter>_crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="_crypto\ssfcrypt.c">
+      <Filter>_crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="_crypto\ssfcrypt_ut.c">
+      <Filter>_crypto</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -507,8 +521,6 @@
     <ClInclude Include="_ui\ssfvted.h">
       <Filter>_ui</Filter>
     </ClInclude>
-    <ClInclude Include="_crypto\ssfcrypt.h" />
-    <ClInclude Include="_ui\ssfcli.h" />
     <ClInclude Include="_crypto\ssfbn.h">
       <Filter>_crypto</Filter>
     </ClInclude>
@@ -607,6 +619,21 @@
     </ClInclude>
     <ClInclude Include="_codec\ssfx509.h">
       <Filter>_codec</Filter>
+    </ClInclude>
+    <ClInclude Include="_ui\ssfcli.h">
+      <Filter>_ui</Filter>
+    </ClInclude>
+    <ClInclude Include="_crypto\ssfcms.h">
+      <Filter>_crypto</Filter>
+    </ClInclude>
+    <ClInclude Include="_opt\ssfcms_opt.h">
+      <Filter>_crypto</Filter>
+    </ClInclude>
+    <ClInclude Include="_crypto\ssfcms_ut_fix.h">
+      <Filter>_crypto</Filter>
+    </ClInclude>
+    <ClInclude Include="_crypto\ssfcrypt.h">
+      <Filter>_crypto</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

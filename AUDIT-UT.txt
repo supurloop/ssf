@@ -46,7 +46,7 @@ SUMMARY
   Medium     0
   Low        13      UBJSON-1 (FIXED), DEC-1 (FIXED), DEC-2 (FIXED), JSON-4 (DOC), HEX-1 (FIXED),
                      B64-1 (FIXED), JSON-3 (FIXED), RSA-13 (FIXED), RSA-14, CMS-5 (FIXED),
-                     X509-21 (FIXED), E-5, X-3
+                     X509-21 (FIXED), E-5 (FIXED), X-3 (FIXED)
 
   By fault:  CODE   JSON-1, JSON-2, JSON-4, JSON-5, JSON-6, JSON-7, JSON-8, UBJSON-1,
                     UBJSON-2, GOBJ-1, DEC-1, RSA-14 (style)
@@ -347,14 +347,16 @@ X509-21  Low  FIXED (2026-11-20)  TEST  [measured; fix verified]
 ssfed25519, ssfx25519
 ----------------------------------------------------------------------------------------------
 
-E-5  Low  OPEN  TEST  [measured]
+E-5  Low  FIXED (2026-11-19, f9e208f)  TEST  [measured; fix verified]
   Location:  ssfed25519_ut.c:953 (Sign peak stack < 4096)
-X-3  Low  OPEN  TEST  [measured]
+X-3  Low  FIXED (2026-11-19, f9e208f)  TEST  [measured; fix verified]
   Location:  ssfx25519_ut.c:568 (ComputeSecret peak stack < 2560)
   Problem:   The stack-usage probes fail under ASan, which enlarges frames; both pass in the
              normal build. The ASan run reports them as failures and masks real ones.
   Options:   Skip the bound when built with ASan (__SANITIZE_ADDRESS__ /
              __has_feature(address_sanitizer)), keep it in normal builds.
+  Fix:       f9e208f (Jim): _SSF{ED,X}25519_UT_STACK_BOUNDS is 0 under ASan or MSVC Debug,
+             else 1; the bound asserts compile only when it is 1. See the change log.
 
 ----------------------------------------------------------------------------------------------
 CHANGE LOG
@@ -728,3 +730,8 @@ CHANGE LOG
               54 suites pass plain and ASan + UBSan. A soft-assert run with P-256 off logs no
               failing check in either suite. Test-only change: no library code, size or stack
               change.
+  2026-11-20  E-5, X-3 FIXED by f9e208f (Jim, 2026-11-19), verified here. Preprocessing each
+              test shows _SSFED25519_UT_STACK_BOUNDS and _SSFX25519_UT_STACK_BOUNDS are 1 in the
+              plain -O3 build (bounds kept) and 0 with -fsanitize=address (bounds skipped, probes
+              still run). With every test on, both suites pass plain and ASan + UBSan in a fresh
+              copy of 2bb28dd's tree (all 54 suites pass in each). No code change here.

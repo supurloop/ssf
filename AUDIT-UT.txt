@@ -41,8 +41,9 @@ SUMMARY
 
   Severity   Count   Labels
   Critical   0
-  High       5       JSON-1 (FIXED), JSON-2 (FIXED), JSON-5, JSON-6 (FIXED), JSON-7
-  Medium     1       JSON-8
+  High       6       JSON-1 (FIXED), JSON-2 (FIXED), JSON-5, JSON-6 (FIXED), JSON-7,
+                     JSON-8 (FIXED)
+  Medium     0
   Low        12      UBJSON-1, DEC-1, HEX-1, B64-1, JSON-3, JSON-4, RSA-13, RSA-14, CMS-5,
                      X509-21, E-5, X-3
 
@@ -52,6 +53,7 @@ SUMMARY
 
   Suggested order: JSON-7 / JSON-5 together (both are a path whose shape does not match the
   document; JSON-7 needs an API decision), then UBJSON-1 / DEC-1, then the test items.
+  Open decision from JSON-8: whether to reject duplicate keys (see JSON-8 Follow-up).
 
 ----------------------------------------------------------------------------------------------
 ssfjson
@@ -161,19 +163,36 @@ JSON-7  High  OPEN  CODE  [measured]  (found in the JSON-1 change audit; pre-exi
              possible with untyped pointers. Related to JSON-5 (path longer than the
              document): both are a path whose shape does not match the document.
 
-JSON-8  Medium  OPEN  CODE  [measured]  (found in the JSON-6 change audit; pre-existing)
-  Location:  ssfjson.c:264-268 (_SSFJsonNameValue match branch); ssfjson.md (Limitations)
+JSON-8  High  FIXED (2026-11-20)  CODE  [measured, ASan global-buffer-overflow; fix verified
+                    red/green]  (found in the JSON-6 change audit; pre-existing)
+  Location:  ssfjson.c:264-268 (_SSFJsonNameValue match branch), ssfjson.c:304 (_SSFJsonObject
+             records *start on entry), ssfjson.c:406-412 (SSFJsonGetString span); ssfjson.md
+             (Limitations)
   Problem:   ssfjson.md says the parser "matches only the first occurrence" of a duplicate key,
-             but every member whose key matches is parsed with the caller's results, so each
-             later duplicate overwrites the earlier one: the last occurrence wins.
-  Failure:   {"a":"1","a":"2"} with path a, and [{"a":"1","a":"2"}] with [0].a, return "2"
-             (same at 2658829, before JSON-6). Duplicate-key handling is a known source of
-             parser differentials: a gateway or validator that reads the first value and a
-             device using ssfjson that reads the last can disagree about the same document.
-  Options:   (1) Match only the first occurrence, as documented: after a member matches, parse
-             later duplicates without the path (recommended). (2) Reject documents with
-             duplicate keys (stricter; RFC 8259 leaves duplicates' meaning undefined).
-             (3) Document "last occurrence wins".
+             but every member whose key matches is parsed with the caller's results. Each
+             later duplicate writes them again, so the last occurrence wins; and a later
+             duplicate that does not complete the path still writes *start (every nested
+             object records its start on entry) while the type and end stay from the earlier
+             match. The getters trust that span.
+  Failure:   (1) {"a":"1","a":"2"} with path a, and [{"a":"1","a":"2"}] with [0].a, return "2".
+             (2) {"a":{"b":"x"},"a":{"c":2}} with path a.b: type STRING, start 19 (the second
+             object), end 12 (the first string). SSFJsonGetString computes len = end - start
+             + 1, which wraps to a huge size_t, and reads past the end of the document (ASan
+             global-buffer-overflow at ssfjson.c:416) until the output buffer is full,
+             copying bytes from beyond the document into out. The document alone triggers it;
+             the caller's path is valid. (3) {"a":{"b":"x"},"a":"y"} with a.b returns "y" (with
+             JSON-5). Same spans at fb11856, before the JSON-1 / 2 / 6 fixes. Duplicate keys
+             are also a known source of parser differentials: a validator that reads the first
+             value and a device that reads the last can disagree about one document.
+  Options:   (1) Match only the first occurrence, as documented: once a member has matched,
+             parse later duplicates without the path, so only one match ever writes the
+             results. (2) Reject documents with duplicate keys (stricter; RFC 8259 leaves
+             their meaning undefined). (3) In addition to either, reject a span with
+             end < start before any getter uses it (cheap defence in depth). Chosen: 1 + 3.
+  Follow-up: First-occurrence matches ssfjson.md, but JavaScript's JSON.parse and Python's
+             json take the LAST occurrence, so a peer using them and a device using ssfjson
+             can still read different values from a document with duplicate keys. Only
+             option 2 closes that; it rejects documents some senders produce. OPEN decision.
 
 ----------------------------------------------------------------------------------------------
 ssfhex
@@ -371,3 +390,46 @@ CHANGE LOG
               its result makes the parse return false, so the result is discarded as before.
               The locals are now only written, never read. Found JSON-8 (duplicate keys: last
               occurrence wins, contrary to ssfjson.md; pre-existing, unchanged by JSON-6).
+  2026-11-20  JSON-8 FIXED (options 1 + 3, Jim's choice). _SSFJsonNameValue reports whether its
+              name matched the next path entry; _SSFJsonObject parses every member after the
+              first match with a NULL path, so only the first occurrence of a key follows the
+              path and writes the results. SSFJsonMessage, which every getter calls, reports
+              a top-level (depth 0) result whose span has end < start as not found; the guard
+              on depth keeps it from reading *jt (an output) on a non-zero-depth call, where
+              the parser does not initialise it. New test "AUDIT JSON-8" in ssfjson_ut.c:
+              first occurrence at the top level, inside an array element, when it is not the
+              first member, and in a nested object, with the first duplicate's span from
+              Message; the inverted-span document {"a":{"b":"x"},"a":{"c":2}} a.b read with a
+              64-byte buffer; {"a":{"b":"x"},"a":"y"} a.b; a first occurrence lacking the rest
+              of the path is not found even when a later duplicate has it; documents with
+              duplicates still validate. Linux direct gcc build, all unit tests on.
+              RED: ssfjson_ut.c:656 (last occurrence returned), plain and ASan; with soft
+              asserts the ASan build reaches the inverted span and reports a
+              global-buffer-overflow at :670 (an 8-byte buffer had stayed inside the
+              document, so that case uses 64). GREEN: plain 54 / 54; pattern-init all but
+              the ed25519 / x25519 stack probes; ASan + UBSan 48 / 54 with ssfjson passing
+              and the six baseline failures. Mutation: no first-occurrence (:658), the reset
+              only after the first member (:686, caught by the not-first-member case added for
+              it) and keyMatched always true (:684) fail; the span check removed passes, as
+              expected (unreachable once option 1 holds); option 1 reverted with the span
+              check kept gives wrong duplicate results but no ASan over-read, so option 3
+              alone contains the memory error. Code (-Os text, vs 4323bf5): Cortex-M4 5901 ->
+              6013 B (+112), M0+ 6261 -> 6389 B (+128). Stack: _SSFJsonObject frame 48 -> 64 B
+              on both (+16 per nested object, at most +64 B at the default depth of 4); other
+              frames unchanged. Speed (702-byte benchmark): about +2% x86-64, +0.3-3% emulated
+              ARM32 (M0+).
+  2026-11-20  Audit of the JSON-8 change (uncommitted at the time), twice: before and after
+              the depth guard. First occurrence holds per object instance (each nested object
+              has its own memberPath), inside the selected array element, and with the target
+              object still reporting its own span and type (it uses the original path). Later
+              members are still parsed and depth-counted, so whole-document validation is
+              unchanged; a matched member whose value fails still fails the parse. The span
+              check never rejects a real match (every valid span has end >= start, one-char
+              numbers included). Harness under ASan + UBSan + pattern-init: duplicate objects,
+              duplicates down the path, inside an array element, the whole document, and a
+              one-char number all correct, no report. First audit found the span check read
+              *jt on a non-zero-depth call (Low, in the change): fixed with the depth == 0
+              guard (+8 B M4, -4 B M0+); with depth 0 both entry paths set *jt before the
+              check and the && never reads *start / *end when *jt is ERROR. Re-audit after the
+              guard: harness identical, all three builds and every mutant as above. Noted the
+              duplicate-key parser differential (JSON-8 Follow-up).

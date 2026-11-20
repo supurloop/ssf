@@ -254,9 +254,11 @@ static bool _SSFJsonValue(SSFCStrIn_t js, size_t *index, size_t *start, size_t *
 
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if name/value found, else false; If true returns type/start/end on path match.   */
+/* Sets *keyMatched true if the name is the next path entry, else false.                         */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFJsonNameValue(SSFCStrIn_t js, size_t *index, size_t *start, size_t *end,
-                              SSFCStrIn_t *path, uint8_t depth, SSFJsonType_t *jt)
+                              SSFCStrIn_t *path, uint8_t depth, SSFJsonType_t *jt,
+                              bool *keyMatched)
 {
     size_t valStart;
     size_t valEnd;
@@ -267,17 +269,24 @@ static bool _SSFJsonNameValue(SSFCStrIn_t js, size_t *index, size_t *start, size
     SSF_REQUIRE(start != NULL);
     SSF_REQUIRE(end != NULL);
     SSF_REQUIRE(jt != NULL);
+    SSF_REQUIRE(keyMatched != NULL);
 
+    *keyMatched = false;
     if (_SSFJsonString(js, index, &valStart, &valEnd) == false) return false;
     _SSFJsonWhitespace(js, index);
     if (js[*index] != ':') return false;
     (*index)++;
+    /* Is the name the next path entry? */
     if ((path != NULL) && (path[depth] != NULL) &&
         ((valEnd - valStart - 1) == (size_t)strlen(path[depth])) &&
         (strncmp(path[depth], &js[valStart + 1], (valEnd - valStart - 1)) == 0))
-    {return _SSFJsonValue(js, index, start, end, path, depth, jt); }
+    {
+        /* Yes, the value follows the path and reports into the caller's results */
+        *keyMatched = true;
+        return _SSFJsonValue(js, index, start, end, path, depth, jt);
+    }
     /* No, parse the value only to skip it; its nesting counts toward the depth limit */
-    else return _SSFJsonValue(js, index, &valStart, &valEnd, NULL, depth, &djt);
+    return _SSFJsonValue(js, index, &valStart, &valEnd, NULL, depth, &djt);
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -286,6 +295,9 @@ static bool _SSFJsonNameValue(SSFCStrIn_t js, size_t *index, size_t *start, size
 static bool _SSFJsonObject(SSFCStrIn_t js, size_t *index, size_t *start, size_t *end,
                            SSFCStrIn_t *path, uint8_t depth, SSFJsonType_t *jt)
 {
+    SSFCStrIn_t *memberPath = path;
+    bool keyMatched;
+
     SSF_REQUIRE(js != NULL);
     SSF_REQUIRE(index != NULL);
     SSF_REQUIRE(start != NULL);
@@ -310,14 +322,19 @@ static bool _SSFJsonObject(SSFCStrIn_t js, size_t *index, size_t *start, size_t 
     _SSFJsonWhitespace(js, index);
     if (js[*index] != '}')
     {
-        if (!_SSFJsonNameValue(js, index, start, end, path, depth, jt)) return false;
+        /* Only the first member whose name matches follows the path; later duplicates skip */
+        if (!_SSFJsonNameValue(js, index, start, end, memberPath, depth, jt, &keyMatched))
+        { return false; }
+        if (keyMatched) memberPath = NULL;
         do
         {
             _SSFJsonWhitespace(js, index);
             if (js[*index] == '}') break;
             if (js[*index] != ',') return false;
             (*index)++;
-            if (!_SSFJsonNameValue(js, index, start, end, path, depth, jt)) return false;
+            if (!_SSFJsonNameValue(js, index, start, end, memberPath, depth, jt, &keyMatched))
+            { return false; }
+            if (keyMatched) memberPath = NULL;
         } while (true);
         if (js[*index] != '}') return false;
     }
@@ -346,6 +363,13 @@ bool SSFJsonMessage(SSFCStrIn_t js, size_t *index, size_t *start, size_t *end, S
     if (!_SSFJsonObject(js, index, start, end, path, depth, jt))
     {
         if (!_SSFJsonArray(js, index, start, end, path, depth, jt)) return false;
+    }
+
+    /* Is this a top-level parse (which sets *jt) whose found value's span is inverted? */
+    if ((depth == 0u) && (*jt != SSF_JSON_TYPE_ERROR) && (*end < *start))
+    {
+        /* Yes, report it as not found rather than hand back an unusable span */
+        *jt = SSF_JSON_TYPE_ERROR;
     }
     return true;
 }

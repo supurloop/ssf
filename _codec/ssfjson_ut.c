@@ -632,6 +632,70 @@ void SSFJsonUnitTest(void)
         SSF_ASSERT((strOutLen == 1u) && (strOut[0] == 's'));
     }
 
+    /* ---- AUDIT JSON-8: only the first occurrence of a duplicate key matches ---- */
+    /* Every matching member wrote the results, so the last occurrence won, and a later       */
+    /* duplicate that did not complete the path left a span with end before start, which    */
+    /* SSFJsonGetString read past the end of the document.                                   */
+    {
+        static const char *jsDupTop = "{\"a\":\"1\",\"a\":\"2\"}";
+        static const char *jsDupElem = "[{\"a\":\"1\",\"a\":\"2\"}]";
+        static const char *jsDupSpan = "{\"a\":{\"b\":\"x\"},\"a\":{\"c\":2}}";
+        static const char *jsDupScalar = "{\"a\":{\"b\":\"x\"},\"a\":\"y\"}";
+        static const char *jsDupFirstMiss = "{\"a\":{\"c\":1},\"a\":{\"b\":\"z\"}}";
+        static const char *jsDupNested = "{\"o\":{\"k\":1,\"k\":2}}";
+        static const char *jsDupLater = "{\"x\":0,\"a\":\"1\",\"y\":0,\"a\":\"2\"}";
+        char strOut[8];
+        char wideOut[64];
+        size_t strOutLen;
+        size_t i0 = 0u;
+        size_t msgIndex;
+        int64_t si = 0;
+        SSFJsonType_t jt;
+
+        memset((void *)path, 0, sizeof(path));
+        path[0] = "a";
+        SSF_ASSERT(SSFJsonGetString(jsDupTop, path, strOut, sizeof(strOut), &strOutLen) == true);
+        SSF_ASSERT((strOutLen == 1u) && (strOut[0] == '1'));
+        SSF_ASSERT(SSFJsonMessage(jsDupTop, &msgIndex, &start, &end, path, 0, &jt) == true);
+        SSF_ASSERT((jt == SSF_JSON_TYPE_STRING) && (start == 5u) && (end == 7u));
+
+        path[0] = (SSFCStrIn_t)&i0;
+        path[1] = "a";
+        SSF_ASSERT(SSFJsonGetString(jsDupElem, path, strOut, sizeof(strOut), &strOutLen) == true);
+        SSF_ASSERT((strOutLen == 1u) && (strOut[0] == '1'));
+
+        /* A later duplicate that does not complete the path cannot disturb the first match; */
+        /* the wide buffer let the broken span read well past the end of the document        */
+        path[0] = "a";
+        path[1] = "b";
+        SSF_ASSERT(SSFJsonGetString(jsDupSpan, path, wideOut, sizeof(wideOut), &strOutLen) ==
+                   true);
+        SSF_ASSERT((strOutLen == 1u) && (wideOut[0] == 'x'));
+        SSF_ASSERT(SSFJsonGetString(jsDupScalar, path, strOut, sizeof(strOut), &strOutLen) ==
+                   true);
+        SSF_ASSERT((strOutLen == 1u) && (strOut[0] == 'x'));
+
+        /* The first occurrence is the member: a later duplicate cannot supply what it lacks */
+        SSF_ASSERT(SSFJsonGetType(jsDupFirstMiss, path) == SSF_JSON_TYPE_ERROR);
+
+        /* The first occurrence need not be the first member */
+        memset((void *)path, 0, sizeof(path));
+        path[0] = "a";
+        SSF_ASSERT(SSFJsonGetString(jsDupLater, path, strOut, sizeof(strOut), &strOutLen) ==
+                   true);
+        SSF_ASSERT((strOutLen == 1u) && (strOut[0] == '1'));
+
+        /* Duplicates inside a nested object */
+        path[0] = "o";
+        path[1] = "k";
+        SSF_ASSERT(SSFJsonGetInt(jsDupNested, path, &si) == true);
+        SSF_ASSERT(si == 1);
+
+        /* Documents with duplicate keys are still valid */
+        SSF_ASSERT(SSFJsonIsValid(jsDupTop) == true);
+        SSF_ASSERT(SSFJsonIsValid(jsDupSpan) == true);
+    }
+
     /* Parsing tests */
 
     /* Validate parser on valid JSON strings */

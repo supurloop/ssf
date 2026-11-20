@@ -25,8 +25,11 @@ nesting depth, not message size. The generator uses a chained-callback pattern w
 - Path arrays must be fully zeroed before use (e.g., `memset(path, 0, sizeof(path))`).
 - For array element access, set a path element to point to a `size_t` index variable.
 - Top-level arrays are supported; start the path with a `size_t *` index pointer.
-- Each `{` or `[` level of nesting consumes one level of stack; keep nesting within
-  `SSF_JSON_CONFIG_MAX_IN_DEPTH`.
+- Each `{` or `[` level of nesting consumes one level of parser recursion (about 180 bytes of
+  stack per level on Cortex-M). Input nested deeper than `SSF_JSON_CONFIG_MAX_IN_DEPTH` is
+  rejected as invalid by every parsing function, including nesting inside members and array
+  elements that are not on the requested path, so the limit bounds the parser's stack use for
+  any input.
 - The parser considers inputs with duplicate object keys valid and matches only the first
   occurrence.
 - Only 8-bit ASCII-encoded strings are accepted; an embedded `\0` terminates input.
@@ -43,7 +46,7 @@ Options live in [`_opt/ssfjson_opt.h`](../_opt/ssfjson_opt.h) (aggregated into t
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `SSF_JSON_CONFIG_MAX_IN_DEPTH` | `4` | Maximum nesting depth for the parser; each `{` or `[` counts as one level |
+| `SSF_JSON_CONFIG_MAX_IN_DEPTH` | `4` | Maximum nesting depth for the parser; each `{` or `[` counts as one level, anywhere in the input; deeper input is invalid |
 | `SSF_JSON_CONFIG_MAX_IN_LEN` | `2047` | Maximum JSON string length accepted by the parser in bytes |
 | `SSF_JSON_CONFIG_ENABLE_FLOAT_PARSE` | `0` | `1` to compile `SSFJsonGetDouble()`; `0` to omit floating-point parsing |
 | `SSF_JSON_CONFIG_ENABLE_FLOAT_GEN` | `1` | `1` to compile `SSFJsonPrintDouble()`; `0` to omit floating-point generation |

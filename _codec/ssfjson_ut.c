@@ -426,6 +426,38 @@ bool p3fn(char *js, size_t size, size_t start, size_t *end, void *in)
 /* --------------------------------------------------------------------------------------------- */
 /* Performs unit test on ssfjson's external interface.                                           */
 /* --------------------------------------------------------------------------------------------- */
+/* --------------------------------------------------------------------------------------------- */
+/* Writes depth nested objects {"a":...{"a":1}...} into out; returns false if it does not fit.   */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFJsonUTNest(char *out, size_t outSize, uint32_t depth)
+{
+    size_t need;
+    size_t pos = 0;
+    uint32_t i;
+
+    SSF_REQUIRE(out != NULL);
+    SSF_REQUIRE(outSize > 0u);
+    SSF_REQUIRE(depth > 0u);
+
+    /* Is there room for depth openers, the value, depth closers and the terminator? */
+    need = ((size_t)depth * 6u) + 2u;
+    if (need > outSize)
+    {
+        /* No */
+        return false;
+    }
+    /* Yes */
+    for (i = 0; i < depth; i++)
+    {
+        memcpy(&out[pos], "{\"a\":", 5u);
+        pos += 5u;
+    }
+    out[pos++] = '1';
+    for (i = 0; i < depth; i++) out[pos++] = '}';
+    out[pos] = '\0';
+    return true;
+}
+
 void SSFJsonUnitTest(void)
 {
     uint32_t i;
@@ -434,6 +466,54 @@ void SSFJsonUnitTest(void)
     size_t aidx3;
     int64_t outI64;
     SSFCStrIn_t path[SSF_JSON_CONFIG_MAX_IN_DEPTH + 1];
+
+    /* ---- AUDIT JSON-2: object nesting counts toward SSF_JSON_CONFIG_MAX_IN_DEPTH ---- */
+    /* A skipped member was parsed with depth reset to 0, so objects nested under any key not */
+    /* on the path had no depth limit: 340 levels in 2 KB recursed through ~60 KB of stack.   */
+    {
+        static char nest[SSF_JSON_CONFIG_MAX_IN_LEN + 1u];
+        uint32_t d;
+
+        for (d = 1u; d <= SSF_JSON_CONFIG_MAX_IN_DEPTH; d++)
+        {
+            SSF_ASSERT(_SSFJsonUTNest(nest, sizeof(nest), d) == true);
+            SSF_ASSERT(SSFJsonIsValid(nest) == true);
+        }
+        SSF_ASSERT(_SSFJsonUTNest(nest, sizeof(nest), SSF_JSON_CONFIG_MAX_IN_DEPTH + 1u) == true);
+        SSF_ASSERT(SSFJsonIsValid(nest) == false);
+        /* A lookup that matches the first level used to succeed on the too-deep input */
+        memset((void *)path, 0, sizeof(path));
+        path[0] = "a";
+        SSF_ASSERT(SSFJsonGetType(nest, path) == SSF_JSON_TYPE_ERROR);
+        SSF_ASSERT(_SSFJsonUTNest(nest, sizeof(nest), SSF_JSON_CONFIG_MAX_IN_LEN / 6u) == true);
+        SSF_ASSERT(SSFJsonIsValid(nest) == false);
+
+        /* A path down the deepest allowed nesting still reaches the value */
+        SSF_ASSERT(_SSFJsonUTNest(nest, sizeof(nest), SSF_JSON_CONFIG_MAX_IN_DEPTH) == true);
+        memset((void *)path, 0, sizeof(path));
+        for (d = 0u; d < SSF_JSON_CONFIG_MAX_IN_DEPTH; d++) path[d] = "a";
+        SSF_ASSERT(SSFJsonGetType(nest, path) == SSF_JSON_TYPE_NUMBER);
+
+#if SSF_JSON_CONFIG_MAX_IN_DEPTH >= 2u
+        /* Nesting under a sibling member counts too: one level past the limit fails the */
+        /* lookup of a shallow member, at the limit it succeeds                           */
+        memset((void *)path, 0, sizeof(path));
+        path[0] = "x";
+        for (d = 0u; d < 2u; d++)
+        {
+            size_t len;
+
+            memcpy(nest, "{\"x\":1,\"y\":", 11u);
+            SSF_ASSERT(_SSFJsonUTNest(&nest[11], sizeof(nest) - 12u,
+                                      SSF_JSON_CONFIG_MAX_IN_DEPTH - d) == true);
+            len = strlen(nest);
+            nest[len] = '}';
+            nest[len + 1u] = '\0';
+            SSF_ASSERT(SSFJsonGetType(nest, path) ==
+                       ((d == 0u) ? SSF_JSON_TYPE_ERROR : SSF_JSON_TYPE_NUMBER));
+        }
+#endif /* SSF_JSON_CONFIG_MAX_IN_DEPTH >= 2 */
+    }
 
     /* Parsing tests */
 

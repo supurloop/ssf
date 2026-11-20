@@ -264,7 +264,8 @@ static bool _SSFJsonNameValue(SSFCStrIn_t js, size_t *index, size_t *start, size
         ((valEnd - valStart - 1) == (size_t)strlen(path[depth])) &&
         (strncmp(path[depth], &js[valStart + 1], (valEnd - valStart - 1)) == 0))
     {return _SSFJsonValue(js, index, start, end, path, depth, jt); }
-    else return _SSFJsonValue(js, index, &valStart, &valEnd, NULL, 0, &djt);
+    /* No, parse the value only to skip it; its nesting counts toward the depth limit */
+    else return _SSFJsonValue(js, index, &valStart, &valEnd, NULL, depth, &djt);
 }
 
 /* --------------------------------------------------------------------------------------------- */

@@ -73,6 +73,19 @@
 #define _SSFED25519_UT_STACK_PROBE_SIZE (SSF_ED25519_CONFIG_STACK_SCRUB_SIZE)
 #define _SSFED25519_UT_SENTINEL         (0xABu)
 
+/* Stack bounds assume optimized frames; unoptimized MSVC and ASan builds enlarge them (E-5) */
+#if (defined(_MSC_VER) && defined(_DEBUG)) || defined(__SANITIZE_ADDRESS__)
+#define _SSFED25519_UT_STACK_BOUNDS (0u)
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define _SSFED25519_UT_STACK_BOUNDS (0u)
+#else
+#define _SSFED25519_UT_STACK_BOUNDS (1u)
+#endif
+#else
+#define _SSFED25519_UT_STACK_BOUNDS (1u)
+#endif
+
 #if defined(_MSC_VER)
 #pragma runtime_checks("scu", off)
 #endif
@@ -927,11 +940,14 @@ void SSFEd25519UnitTest(void)
         /* from the polluter's by a handful of bytes, so allow a small residue. The pre-fix    */
         /* failure mode leaves thousands of sentinel bytes, well above this threshold.         */
         /* MSVC tolerance is higher -- see equivalent comment in ssfx25519_ut.c.               */
+        SSF_UT_PRINTF("--- ssfed25519 Sign scrub residue %u bytes ---\n", (unsigned)hitsAfter);
+#if _SSFED25519_UT_STACK_BOUNDS == 1
 #if defined(_MSC_VER)
         SSF_ASSERT(hitsAfter < 512u);
 #else
         SSF_ASSERT(hitsAfter < 64u);
 #endif
+#endif /* _SSFED25519_UT_STACK_BOUNDS */
     }
 #endif /* SSF_ED25519_CONFIG_ENABLE_STACK_SCRUB */
 
@@ -950,7 +966,9 @@ void SSFEd25519UnitTest(void)
         used = _SSFEd25519UTStackUsed(_SSFED25519_UT_SENTINEL);
         SSF_UT_PRINTF("--- ssfed25519 Sign peak stack ~%u bytes ---\n", (unsigned)used);
         SSF_ASSERT(used > 0u);
+#if _SSFED25519_UT_STACK_BOUNDS == 1
         SSF_ASSERT(used < 4096u);
+#endif
     }
 
     /* ---- A3 regression: low-order pubkey signature attack must be rejected. */

@@ -1262,19 +1262,39 @@ bool SSFUBJsonPrintInt(uint8_t *js, size_t jsSize, size_t start, size_t *end, in
         switch(optType)
         {
             case SSF_UBJSON_TYPE_NUMBER_INT8:
-                if (in >= 128l) return false;
+                /* Is the value outside the int8 range? */
+                if ((in < INT8_MIN) || (in > INT8_MAX))
+                {
+                    /* Yes, it cannot be written as this type */
+                    return false;
+                }
                 type = UBJ_TYPE_INT8;
                 break;
             case SSF_UBJSON_TYPE_NUMBER_UINT8:
-                if (in >= 256l) return false;
+                /* Is the value outside the uint8 range? */
+                if ((in < 0) || (in > UINT8_MAX))
+                {
+                    /* Yes, it cannot be written as this type */
+                    return false;
+                }
                 type = UBJ_TYPE_UINT8;
                 break;
             case SSF_UBJSON_TYPE_NUMBER_INT16:
-                if (in >= 32768l) return false;
+                /* Is the value outside the int16 range? */
+                if ((in < INT16_MIN) || (in > INT16_MAX))
+                {
+                    /* Yes, it cannot be written as this type */
+                    return false;
+                }
                 type = UBJ_TYPE_INT16;
                 break;
             case SSF_UBJSON_TYPE_NUMBER_INT32:
-                if (in >= 2147483648ll) return false;
+                /* Is the value outside the int32 range? */
+                if ((in < INT32_MIN) || (in > INT32_MAX))
+                {
+                    /* Yes, it cannot be written as this type */
+                    return false;
+                }
                 type = UBJ_TYPE_INT32;
                 break;
             case SSF_UBJSON_TYPE_NUMBER_INT64:

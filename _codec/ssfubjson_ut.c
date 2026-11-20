@@ -1680,6 +1680,44 @@ void SSFUBJsonUnitTest(void)
                                  true, SSF_UBJSON_TYPE_NUMBER_INT32));
     SSF_ASSERT(jsOutEnd == 4);
     SSF_ASSERT(memcmp(jsOut, "\x7f\xff\xff\xff", jsOutEnd) == 0);
+
+    /* Optimized types reject values below their minimum and accept the minimum itself */
+    {
+        static const struct
+        {
+            int64_t in;
+            SSFUBJsonType_t optType;
+            bool ok;
+            size_t len;
+            const char *out;
+        } lo[] =
+        {
+            { -129ll, SSF_UBJSON_TYPE_NUMBER_INT8, false, 0, "" },
+            { -128ll, SSF_UBJSON_TYPE_NUMBER_INT8, true, 1, "\x80" },
+            { -1ll, SSF_UBJSON_TYPE_NUMBER_UINT8, false, 0, "" },
+            { -32769ll, SSF_UBJSON_TYPE_NUMBER_INT16, false, 0, "" },
+            { -32768ll, SSF_UBJSON_TYPE_NUMBER_INT16, true, 2, "\x80\x00" },
+            { -2147483649ll, SSF_UBJSON_TYPE_NUMBER_INT32, false, 0, "" },
+            { -2147483647ll - 1ll, SSF_UBJSON_TYPE_NUMBER_INT32, true, 4, "\x80\x00\x00\x00" },
+        };
+        size_t li;
+
+        for (li = 0; li < (sizeof(lo) / sizeof(lo[0])); li++)
+        {
+            jsOutStart = 0;
+            jsOutEnd = (size_t)-1;
+            SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, lo[li].in,
+                                         true, lo[li].optType) == lo[li].ok);
+            /* Was the value written? */
+            if (lo[li].ok)
+            {
+                /* Yes, check its encoding */
+                SSF_ASSERT(jsOutEnd == lo[li].len);
+                SSF_ASSERT(memcmp(jsOut, lo[li].out, jsOutEnd) == 0);
+            }
+        }
+    }
+
     jsOutStart = 0;
     jsOutEnd = (size_t)-1;
     SSF_ASSERT(SSFUBJsonPrintInt(jsOut, sizeof(jsOut), jsOutStart, &jsOutEnd, (int64_t)1l, true,

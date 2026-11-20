@@ -105,7 +105,7 @@ SUMMARY
 
   Severity Count   Labels
   High     1       UBJSON-S1 (FIXED)
-  Medium   10      TLV-S1, TLV-S2, TLV-S3, HEX-S1, JSON-S1 (FIXED), JSON-S2, UBJSON-S2,
+  Medium   10      TLV-S1, TLV-S2, TLV-S3, HEX-S1, JSON-S1 (FIXED), JSON-S2, UBJSON-S2 (FIXED),
                    X509-S2 (FIXED), EC-S1 (FIXED), ECDSA-S5
   Low      95      ASN1-S1, ASN1-S2, ASN1-S3, ASN1-S4, TLV-S4, B64-S1, B64-S2, B64-S3, DEC-S1,
                    DEC-S2, DEC-S3, DEC-S4, HEX-S2, HEX-S3, HEX-S4, HEX-S5, INI-S1, INI-S2, INI-S3,
@@ -119,7 +119,7 @@ SUMMARY
                    HMAC-S1, HMAC-S2, HKDF-S1, PRNG-S1, CRYPT-S1, TLS-S1, TLS-S2, TLS-S3, USEX-S1,
                    GEN-S1, CFG-S1, DBC-S1, STYLE-S1
 
-  Total 106 findings; 6 FIXED, 1 DOC (DBC-S1), the rest OPEN.
+  Total 106 findings; 7 FIXED, 1 DOC (DBC-S1), the rest OPEN.
 
   Worth acting on first:
     UBJSON-S1  heap over-read in SSFUBJsonIsValid on a 5-byte input (reproduced with ASan)
@@ -323,6 +323,9 @@ FINDINGS (by module, in pass order)
                    (opt == true) checks only the upper bound: INT8 accepts in < -128 and
                    INT16/INT32 accept values below their minimum, all silently truncated. UINT8
                    accepts negative values. Fix: check both bounds for each optType.
+                   Status: FIXED 2026-11-20. Each optimized type now checks both bounds
+                   (INT8/INT16/INT32 MIN..MAX, UINT8 0..UINT8_MAX). UT adds below-minimum and
+                   at-minimum cases (red at ssfubjson_ut.c:1709).
     UBJSON-S3 Low    _codec/ssfubjson.c:152,472,847  16  Container and string counts with type
                    'i' (int8) are read as an unsigned byte. A negative int8 count (0x80-0xFF) is
                    taken as 128-255 instead of being rejected, and SSFUBJsonGetByteArrayPtr
@@ -1233,3 +1236,5 @@ CHANGE LOG (audit file)
 2026-11-20  EC-S1 fixed (option A without the digit-loop assert; spot-checked EC + ECDSA unit
             tests plain and ASan+UBSan, fixed-base on and off). Size: ssfec +72 / +96 B (M4 /
             M0+); ECDSA P-256 verify +1.6%, sign +0.3% (noise level).
+2026-11-20  UBJSON-S2 fixed (spot-checked UBJSON unit test plain and ASan+UBSan). Size:
+            ssfubjson +20 / +36 B (M4 / M0+), stack unchanged.

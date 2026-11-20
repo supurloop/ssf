@@ -41,18 +41,18 @@ SUMMARY
 
   Severity   Count   Labels
   Critical   0
-  High       6       JSON-1 (FIXED), JSON-2 (FIXED), JSON-5, JSON-6 (FIXED), JSON-7,
-                     JSON-8 (FIXED)
+  High       8       JSON-1 (FIXED), JSON-2 (FIXED), JSON-5 (FIXED), JSON-6 (FIXED),
+                     JSON-7 (FIXED), JSON-8 (FIXED), UBJSON-2 (suspected), GOBJ-1 (suspected)
   Medium     0
   Low        12      UBJSON-1, DEC-1, HEX-1, B64-1, JSON-3, JSON-4, RSA-13, RSA-14, CMS-5,
                      X509-21, E-5, X-3
 
-  By fault:  CODE   JSON-1, JSON-2, JSON-4, JSON-5, JSON-6, JSON-7, JSON-8, UBJSON-1, DEC-1,
-                    RSA-14 (style)
+  By fault:  CODE   JSON-1, JSON-2, JSON-4, JSON-5, JSON-6, JSON-7, JSON-8, UBJSON-1,
+                    UBJSON-2, GOBJ-1, DEC-1, RSA-14 (style)
              TEST   HEX-1, B64-1, JSON-3, RSA-13, CMS-5, X509-21, E-5, X-3
 
-  Suggested order: JSON-7 / JSON-5 together (both are a path whose shape does not match the
-  document; JSON-7 needs an API decision), then UBJSON-1 / DEC-1, then the test items.
+  Suggested order: UBJSON-2 and GOBJ-1 (confirm, then port the ssfjson fixes), then
+  UBJSON-1 / DEC-1, then the test items.
   Open decision from JSON-8: whether to reject duplicate keys (see JSON-8 Follow-up).
 
 ----------------------------------------------------------------------------------------------
@@ -112,7 +112,7 @@ JSON-4  Low  OPEN  CODE  [measured]
   Options:   Align the GObj parser's count with the validator, or document that GObj
              conversion allows one level less.
 
-JSON-5  High  OPEN  CODE  [measured]
+JSON-5  High  FIXED (2026-11-20, with JSON-7)  CODE  [measured; fix verified red/green]
   Location:  ssfjson.c:212-240 (_SSFJsonValue scalar cases), reached from _SSFJsonNameValue and
              _SSFJsonArray on a path match
   Problem:   A path that continues past a scalar still matches. When a key or index on the path
@@ -144,7 +144,8 @@ JSON-6  High  FIXED (2026-11-20)  CODE  [measured; fix verified red/green]  (fou
              only (chosen). (2) Set djt = SSF_JSON_TYPE_ERROR before each element and copy
              start / end only with a real type.
 
-JSON-7  High  OPEN  CODE  [measured]  (found in the JSON-1 change audit; pre-existing)
+JSON-7  High  FIXED (2026-11-20)  CODE  [measured; fix verified red/green]  (found in the
+                    JSON-1 change audit; pre-existing)
   Location:  ssfjson.c:190 (memcpy of path[depth] as a size_t index), ssfjson.c:262-264 (key
              compare of path[depth] as a string)
   Problem:   Path entries are untyped: an array reads its entry as a size_t index, an object
@@ -156,12 +157,11 @@ JSON-7  High  OPEN  CODE  [measured]  (found in the JSON-1 change audit; pre-exi
              stack-buffer-overflow, 8-byte read. (2) Key "a" followed by zero bytes reads as
              index 97: SSFJsonGetInt on {"cfg":[1000,...,1099]} with path cfg.a returns true and
              1097, an array element returned for a member lookup. Same at HEAD.
-  Options:   Needs an API decision: the parser must know each entry's kind. (1) A distinct
-             index entry type the parser can recognise (e.g. a tagged index object, or a
-             parallel kind array / bitmask passed with the path). (2) Keep the API and reject
-             a lookup whose next entry cannot be the kind the document requires, which is not
-             possible with untyped pointers. Related to JSON-5 (path longer than the
-             document): both are a path whose shape does not match the document.
+  Options:   Needs an API decision: the parser must know each entry's kind. (1) Typed path
+             entries (SSFJsonPath_t: kind + key or index pointer) (chosen; also fixes JSON-5).
+             (2) A parallel kind bitmask / array (a wrong bit brings the over-read back).
+             (3) A tagged index entry (old callers break silently at run time). (4) Checks
+             only (impossible with untyped pointers).
 
 JSON-8  High  FIXED (2026-11-20)  CODE  [measured, ASan global-buffer-overflow; fix verified
                     red/green]  (found in the JSON-6 change audit; pre-existing)
@@ -232,6 +232,33 @@ UBJSON-1  Low  OPEN  CODE  [measured, UBSan]
              may miscompile it.
   Options:   Convert to uint64_t before htonll (and back) in ssfubjson (recommended), and/or
              cast inside the htonll / ntohll macros.
+
+
+UBJSON-2  High  OPEN  CODE  [suspected, code-read only]  (found while briefing JSON-7)
+  Location:  ssfubjson.c:158 (memcpy of path[depth] as a size_t index), ssfubjson.c:404-405
+             (key compare of path[depth] as a string), ssfubjson.c:445 / 452 (every member of
+             an object parsed with the caller's results)
+  Problem:   ssfubjson uses the same untyped SSFCStrIn_t path as ssfjson did before JSON-7:
+             an array reads the entry as a size_t, an object as a key string, so the
+             document's shape, not the caller, decides which. The structure mirrors the
+             ssfjson parser, so the JSON-1 (path passed to unselected elements), JSON-5
+             (path continuing past a scalar), JSON-6 (selected element's result copied when
+             unset) and JSON-8 (duplicate keys) equivalents may also be present.
+  Options:   Reproduce each under ASan with UBJSON documents first; then move ssfubjson to the
+             same typed path entries as ssfjson (JSON-7) and port the JSON-1/5/6/8 fixes that
+             apply.
+----------------------------------------------------------------------------------------------
+ssfgobj
+----------------------------------------------------------------------------------------------
+
+GOBJ-1  High  OPEN  CODE  [suspected, code-read only]  (found while briefing JSON-7)
+  Location:  ssfgobj.c:556-620 (_SSFGObjFindPath: memcpy of path[depth] as a size_t when the
+             node is an array, key compare when it is an object)
+  Problem:   SSFGObjFindPath takes the same untyped SSFCStrIn_t path. The tree's shape can come
+             from an untrusted document (SSFJsonGObjCreate), so the same type confusion is
+             likely: an 8-byte read of a shorter key string where the tree has an array, and
+             a key that reads as a valid index selecting an array element.
+  Options:   Reproduce under ASan; then the same typed path entries as ssfjson (JSON-7).
 
 ----------------------------------------------------------------------------------------------
 ssfdec
@@ -433,3 +460,58 @@ CHANGE LOG
               check and the && never reads *start / *end when *jt is ERROR. Re-audit after the
               guard: harness identical, all three builds and every mutant as above. Noted the
               duplicate-key parser differential (JSON-8 Follow-up).
+  2026-11-20  UBJSON-2 and GOBJ-1 recorded (suspected, code-read) while briefing JSON-7: both
+              parse the same untyped SSFCStrIn_t paths with memcpy-as-index for arrays.
+  2026-11-20  JSON-7 and JSON-5 FIXED (option 1, Jim's choice). API change: lookup paths are
+              arrays of SSFJsonPath_t { kind; union { key; const size_t *index; } u; } set with
+              SSF_JSON_PATH_SET_KEY / _INDEX / _END; SSF_JSON_PATH_END is 0, so a zeroed path
+              is empty. Every parser getter and SSFJsonMessage take const SSFJsonPath_t *.
+              Arrays select an element only for an INDEX entry, objects compare a name only
+              for a KEY entry, and scalars report a match only where the path ends, so a path
+              whose shape differs from the document is not found (JSON-5 included).
+              SSFJsonMessage asserts that every entry up to the first END has a known kind and
+              a non-NULL key or index pointer. Index entries point at the caller's size_t, as
+              before, so loops that change the variable still work. ssfgobj keeps its untyped
+              path (GOBJ-1); the GObj tests in ssfjson_ut.c use a separate gpath. ssfjson.md:
+              notes, type table, signatures, parameter rows and examples updated.
+              RED (old API, before the change): every scalar type with a path one entry too
+              long (ssfjson_ut.c:722) and an array element (:727) matched; a key at an array
+              with a 4-byte stack key was an ASan stack-buffer-overflow (:735); a zero-padded
+              key "a" selected element 97 (:747); an index at an object matched the empty key
+              (:752). GREEN (new API, same cases plus assertion tests for a NULL key, a NULL
+              index and kinds MIN / MAX): plain 54 / 54; pattern-init all but the ed25519 /
+              x25519 stack probes; ASan + UBSan 48 / 54 with ssfjson passing and the six
+              baseline failures; -Werror clean with float parsing on and off, and both pass.
+              Mutation: scalars always reporting (:723), arrays reading any entry as an
+              index (:748), objects comparing any entry as a name (:753), the entry check
+              always true (crash on the NULL-key test) and checking the wrong path level
+              (:496) all fail. Code (-Os text, vs 37dd3f5): Cortex-M4 6013 -> 6117 B (+104),
+              M0+ 6389 -> 6485 B (+96). Stack (M4 / M0+): _SSFJsonValue 56 -> 72 / 56 -> 72,
+              _SSFJsonNameValue 72 -> 80 / 80, SSFJsonMessage 48 -> 56 / 48, SSFJsonIsValid
+              64 -> 80 / 72 -> 88 (its path array of larger entries); the path validator is
+              inlined. Path arrays: 8 B per entry on 32-bit (was 4), 16 B on 64-bit (was 8).
+              Speed (702-byte benchmark, best of 7): x86-64 about +5%, emulated ARM32 (M0+)
+              about +1%, from the per-call entry check and the scalar copy.
+  2026-11-20  Audit of the JSON-7 / JSON-5 change (uncommitted at the time), twice. Every
+              path[] read is bounded: _SSFJsonValue's path[depth + 1] is reached only from the
+              array loop or _SSFJsonNameValue, after the container's depth >= MAX check, so it
+              is at most path[MAX]; the union is read only under its kind (u.index for INDEX,
+              u.key for KEY, both in the validator); no read goes past the first END entry, as
+              a level is reached with the path only after the previous entry matched.
+              SSF_REQUIRE is always compiled in, so the entry check always runs. Harness under
+              ASan + UBSan + pattern-init, new API: key at an array (4-byte stack key), the
+              former index-97 key, index at an object with an empty key, a path past a
+              scalar, past an array element, and a mismatch three levels down all not found;
+              [0].k[1].m resolves; an all-END path gives the whole document; a NULL path, an
+              index past the end and SIZE_MAX (the "no index" sentinel; no array is that long)
+              give ERROR; no sanitizer report. First audit found the SET_KEY / SET_INDEX /
+              SET_END macros evaluated their entry argument twice (Low, in the change):
+              SSF_JSON_PATH_SET_KEY(path[n++], "a") would step n twice and split kind from key.
+              Fixed: each macro takes the entry's address once. New test (n++ in all three
+              setters steps n once and sets the named entry): red with the previous macros
+              (ssfjson_ut.c:763), green after. Re-audit: plain 54 / 54, pattern-init all but
+              the ed25519 / x25519 stack probes, ASan + UBSan 48 / 54 with ssfjson passing and
+              the six baseline failures, -Werror -Wshadow clean; the compiler now rejects an
+              index pointing at an int, a non-string key and an entry that is not an
+              SSFJsonPath_t. ssfjson.c is unchanged by the macro fix, so code size and stack
+              are as recorded above.

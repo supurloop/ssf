@@ -127,17 +127,17 @@ void SSFStrUnitTest(void)
 
     /* AUDIT STR-3: the length output of SSFStrCpy / SSFStrCat is optional, as documented */
     {
-        char small[3];
+        char shortDst[3];
 
-        memcpy(small, "xy", 3);
-        SSF_ASSERT(SSFStrCpy(small, sizeof(small), NULL, "hello", 6) == false);
-        SSF_ASSERT(memcmp(small, "xy", 3) == 0);
+        memcpy(shortDst, "xy", 3);
+        SSF_ASSERT(SSFStrCpy(shortDst, sizeof(shortDst), NULL, "hello", 6) == false);
+        SSF_ASSERT(memcmp(shortDst, "xy", 3) == 0);
         SSF_ASSERT(SSFStrCpy(dst, sizeof(dst), NULL, "abc", 4));
         SSF_ASSERT(memcmp(dst, "abc", 4) == 0);
         SSF_ASSERT(SSFStrCat(dst, sizeof(dst), NULL, "de", 3));
         SSF_ASSERT(memcmp(dst, "abcde", 6) == 0);
-        SSF_ASSERT(SSFStrCat(small, sizeof(small), NULL, "z", 2) == false);
-        SSF_ASSERT(memcmp(small, "xy", 3) == 0);
+        SSF_ASSERT(SSFStrCat(shortDst, sizeof(shortDst), NULL, "z", 2) == false);
+        SSF_ASSERT(memcmp(shortDst, "xy", 3) == 0);
     }
 
     /* Test SSFStrCpy() */

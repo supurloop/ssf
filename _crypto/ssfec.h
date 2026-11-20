@@ -5,8 +5,8 @@
 /* Provides elliptic curve point arithmetic over NIST prime curves P-256 and P-384.              */
 /*                                                                                               */
 /* FIPS 186-4: Digital Signature Standard (DSS)                                                  */
-/* NIST SP 800-186: Recommendations for Discrete Logarithm-based Cryptography                   */
-/* SEC 1 v2: Elliptic Curve Cryptography                                                        */
+/* NIST SP 800-186: Recommendations for Discrete Logarithm-based Cryptography                    */
+/* SEC 1 v2: Elliptic Curve Cryptography                                                         */
 /*                                                                                               */
 /* BSD-3-Clause License                                                                          */
 /* Copyright 2024 Supurloop Software LLC                                                         */
@@ -71,7 +71,7 @@ extern "C" {
 #error At least one EC curve must be enabled.
 #endif
 
-#define SSF_EC_MAX_ENCODED_SIZE (1u + 2u * SSF_EC_MAX_COORD_BYTES)
+#define SSF_EC_MAX_ENCODED_SIZE (1u + (2u * SSF_EC_MAX_COORD_BYTES))
 
 /* Widest ECC scalar / field element in limbs, derived from the enabled-curves configuration. */
 #define SSF_EC_MAX_LIMBS (SSF_EC_MAX_COORD_BYTES / 4u)
@@ -85,7 +85,7 @@ typedef enum
     SSF_EC_CURVE_MAX,
 } SSFECCurve_t;
 
-/* Jacobian point: affine (x,y) = (X/Z^2, Y/Z^3). Identity when Z = 0.                         */
+/* Jacobian point: affine (x,y) = (X/Z^2, Y/Z^3). Identity when Z = 0. */
 typedef struct SSFECPoint
 {
     SSFBN_t x;
@@ -104,7 +104,7 @@ typedef struct SSFECPoint
         { name##_z_storage, 0u, (uint16_t)(nlimbs) } \
     }
 
-/* Curve parameters (FIPS 186-4 / NIST SP 800-186).                                             */
+/* Curve parameters (FIPS 186-4 / NIST SP 800-186). */
 typedef struct SSFECCurveParams
 {
     SSFBN_t p;       /* Field prime */

@@ -37,7 +37,7 @@
 #include "ssfusexport.h"
 
 /* --------------------------------------------------------------------------------------------- */
-/* If the first n bytes at a and b are equal, inspecting every byte, returns true, else false.  */
+/* If the first n bytes at a and b are equal, inspecting every byte, returns true, else false.   */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFCryptCTMemEq(const void *a, const void *b, size_t n)
 {
@@ -81,9 +81,7 @@ void SSFCryptSecureZero(void *p, size_t n)
     /* Does a whole aligned word remain? */
     while ((n - i) >= sizeof(uintptr_t))
     {
-        /* Yes, clear it with one volatile word store (AUDIT Batch A); the cast goes through */
-        /* volatile void * because the loop above guarantees &v[i] is word aligned here,     */
-        /* which -Wcast-align cannot see                                                     */
+        /* Yes, one volatile word store; &v[i] is aligned here (void * cast for -Wcast-align) */
         *((volatile uintptr_t *)(volatile void *)&v[i]) = 0u;
         i += sizeof(uintptr_t);
     }

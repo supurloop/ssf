@@ -55,7 +55,7 @@
 #define _SSF_X509_RSA_PSS (0u)
 #endif
 
-/* Module-scope trace context for chain verification (set by caller before SSFVerifyChain) */
+/* Module-scope trace context for chain verification, installed by SSFX509SetTraceCtx() */
 static SSFTLSTraceCtx_t _ssfx509TraceCtx;
 
 /* --------------------------------------------------------------------------------------------- */
@@ -114,12 +114,10 @@ static const uint8_t _oidRSAPSS[] = {
     0x2Au, 0x86u, 0x48u, 0x86u, 0xF7u, 0x0Du, 0x01u, 0x01u, 0x0Au
 };
 
-/* id-Ed25519 (RFC 8410): 1.3.101.112 - used for both SubjectPublicKeyInfo algorithm and        */
-/* signatureAlgorithm. No parameters.                                                            */
+/* id-Ed25519 (RFC 8410): 1.3.101.112, for both the SPKI and signature algorithm, no parameters */
 static const uint8_t _oidEd25519[] = { 0x2Bu, 0x65u, 0x70u };
 
-/* Hash algorithm OIDs for PSS parameter parsing (RFC 4055) */
-/* id-sha256: 2.16.840.1.101.3.4.2.1 */
+/* id-sha256: 2.16.840.1.101.3.4.2.1 (RFC 4055 hash algorithm OIDs follow) */
 static const uint8_t _oidSHA256[] = {
     0x60u, 0x86u, 0x48u, 0x01u, 0x65u, 0x03u, 0x04u, 0x02u, 0x01u
 };
@@ -138,8 +136,7 @@ static const uint8_t _oidMGF1[] = {
 };
 #endif /* _SSF_X509_RSA_PSS == 1 */
 
-/* Extended Key Usage OIDs (RFC 5280 Section 4.2.1.12) */
-/* id-kp-serverAuth: 1.3.6.1.5.5.7.3.1 */
+/* id-kp-serverAuth: 1.3.6.1.5.5.7.3.1 (RFC 5280 Section 4.2.1.12 EKU OIDs follow) */
 static const uint8_t _oidEkuServerAuth[] = {
     0x2Bu, 0x06u, 0x01u, 0x05u, 0x05u, 0x07u, 0x03u, 0x01u
 };
@@ -164,7 +161,7 @@ static const uint8_t _oidEKU[]              = { 0x55u, 0x1Du, 0x25u }; /* 2.5.29
 static const uint8_t _oidNameConstraints[]  = { 0x55u, 0x1Du, 0x1Eu }; /* 2.5.29.30 */
 
 /* --------------------------------------------------------------------------------------------- */
-/* Helper: compare raw OID bytes.                                                                */
+/* Returns true if raw OID a equals raw OID b, else false.                                       */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFX509OIDMatch(const uint8_t *a, uint32_t aLen, const uint8_t *b, uint32_t bLen)
 {
@@ -187,7 +184,7 @@ static bool _SSFX509MemEqI(const uint8_t *a, const uint8_t *b, uint32_t len)
 
     for (k = 0; k < len; k++)
     {
-        /* Do the bytes differ even after ASCII case folding (AUDIT MATCH-1)? */
+        /* Do the bytes differ even after ASCII case folding? */
         if (SSFStrCharToLower((char)a[k]) != SSFStrCharToLower((char)b[k]))
         {
             /* Yes */
@@ -200,7 +197,7 @@ static bool _SSFX509MemEqI(const uint8_t *a, const uint8_t *b, uint32_t len)
 
 #if _SSF_X509_RSA_PSS == 1
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if cursor holds exactly one SHA-2 AlgorithmIdentifier, setting *hashOut.          */
+/* Returns true if cursor holds exactly one SHA-2 AlgorithmIdentifier, setting *hashOut.         */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFX509PSSHashAlgId(const SSFASN1Cursor_t *cursor, SSFRSAHash_t *hashOut)
 {
@@ -252,10 +249,10 @@ static bool _SSFX509PSSHashAlgId(const SSFASN1Cursor_t *cursor, SSFRSAHash_t *ha
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if params are RSASSA-PSS-params SSF verifies (RFC 4055 3.1), setting hash/salt.   */
+/* Returns true if paramsOpt are supported RSASSA-PSS-params (RFC 4055 3.1), setting hash/salt.  */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFX509ParsePSSParams(const uint8_t *params, uint32_t paramsLen, SSFRSAHash_t *hashOut,
-                                   uint32_t *saltLenOut)
+static bool _SSFX509ParsePSSParams(const uint8_t *paramsOpt, uint32_t paramsLen,
+                                   SSFRSAHash_t *hashOut, uint32_t *saltLenOut)
 {
     SSFASN1Cursor_t cursor;
     SSFASN1Cursor_t seqInner;
@@ -268,18 +265,18 @@ static bool _SSFX509ParsePSSParams(const uint8_t *params, uint32_t paramsLen, SS
     uint64_t val;
     uint16_t tag;
 
-    SSF_REQUIRE((params != NULL) || (paramsLen == 0u));
+    SSF_REQUIRE((paramsOpt != NULL) || (paramsLen == 0u));
     SSF_REQUIRE(hashOut != NULL);
     SSF_REQUIRE(saltLenOut != NULL);
 
-    /* Are the parameters absent (AUDIT X509-7)? */
-    if ((params == NULL) || (paramsLen == 0u))
+    /* Are the parameters absent? */
+    if ((paramsOpt == NULL) || (paramsLen == 0u))
     {
         /* Yes, the RFC 4055 defaults select SHA-1, which is not supported */
         return false;
     }
     /* No, are they exactly one SEQUENCE? */
-    cursor.buf = params;
+    cursor.buf = paramsOpt;
     cursor.bufLen = paramsLen;
     if ((!SSFASN1DecOpenConstructed(&cursor, SSF_ASN1_TAG_SEQUENCE, &seqInner, &after)) ||
         (!SSFASN1DecIsEmpty(&after)))
@@ -312,11 +309,12 @@ static bool _SSFX509ParsePSSParams(const uint8_t *params, uint32_t paramsLen, SS
     }
     /* Yes */
 
-    /* Is [2] saltLength present? */
     *saltLenOut = 20u;
-    if (SSFASN1DecPeekTag(&seqInner, &tag) && (tag == SSF_ASN1_CONTEXT_EXPLICIT(2)))
+
+    /* Is [2] saltLength present? */
+    if ((SSFASN1DecPeekTag(&seqInner, &tag)) && (tag == SSF_ASN1_CONTEXT_EXPLICIT(2)))
     {
-        /* Yes, is it exactly one valid unsigned INTEGER (AUDIT ASN1-1)? */
+        /* Yes, is it exactly one valid unsigned INTEGER? */
         if ((!SSFASN1DecOpenConstructed(&seqInner, SSF_ASN1_CONTEXT_EXPLICIT(2), &fieldInner,
                                         &seqInner)) ||
             (!SSFASN1DecGetIntU64(&fieldInner, &val, &fieldInner)) ||
@@ -331,7 +329,7 @@ static bool _SSFX509ParsePSSParams(const uint8_t *params, uint32_t paramsLen, SS
     /* No, the default 20 applies */
 
     /* Is [3] trailerField present? */
-    if (SSFASN1DecPeekTag(&seqInner, &tag) && (tag == SSF_ASN1_CONTEXT_EXPLICIT(3)))
+    if ((SSFASN1DecPeekTag(&seqInner, &tag)) && (tag == SSF_ASN1_CONTEXT_EXPLICIT(3)))
     {
         /* Yes, it must be exactly INTEGER 1 (trailerFieldBC) */
         if ((!SSFASN1DecOpenConstructed(&seqInner, SSF_ASN1_CONTEXT_EXPLICIT(3), &fieldInner,
@@ -358,7 +356,7 @@ static bool _SSFX509ParsePSSParams(const uint8_t *params, uint32_t paramsLen, SS
 #endif /* _SSF_X509_RSA_PSS == 1 */
 
 /* --------------------------------------------------------------------------------------------- */
-/* Parses a Distinguished Name (SEQUENCE of SET of SEQUENCE of {OID, value}).                     */
+/* Returns true if nameCursor holds a well-formed Name, setting name's attributes, else false.   */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFX509ParseDN(const SSFASN1Cursor_t *nameCursor, SSFX509Name_t *name)
 {
@@ -388,7 +386,7 @@ static bool _SSFX509ParseDN(const SSFASN1Cursor_t *nameCursor, SSFX509Name_t *na
 
             if (!SSFASN1DecGetOIDRaw(&attrInner, &oidRaw, &oidRawLen, &attrInner)) return false;
 
-            /* Is it an emailAddress, an rfc822Name instance for Name Constraints (X509-4)? */
+            /* Is it an emailAddress, an rfc822Name instance for Name Constraints? */
             if (_SSFX509OIDMatch(oidRaw, oidRawLen, _oidEmailAddress, sizeof(_oidEmailAddress)))
             {
                 /* Yes, recorded before the value is read so any string type counts */
@@ -396,7 +394,7 @@ static bool _SSFX509ParseDN(const SSFASN1Cursor_t *nameCursor, SSFX509Name_t *na
             }
             /* No */
 
-            /* Attribute value is one of the supported string types? */
+            /* Is the attribute value one of the supported string types? */
             if (!SSFASN1DecGetString(&attrInner, &val, &valLen, &strTag, &attrInner))
             {
                 /* No, it must still be one TLV; leave it unnamed, the raw DN serves comparison */
@@ -404,7 +402,7 @@ static bool _SSFX509ParseDN(const SSFASN1Cursor_t *nameCursor, SSFX509Name_t *na
                 if (!SSFASN1DecIsEmpty(&attrInner)) return false;
                 continue;
             }
-            /* Is anything left after the attribute value (AUDIT X509-19)? */
+            /* Yes, is anything left after the attribute value? */
             if (!SSFASN1DecIsEmpty(&attrInner))
             {
                 /* Yes, malformed */
@@ -431,7 +429,7 @@ static bool _SSFX509ParseDN(const SSFASN1Cursor_t *nameCursor, SSFX509Name_t *na
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Parses the Extensions SEQUENCE.                                                               */
+/* Returns true if extsCursor holds well-formed Extensions, recorded into cert, else false.      */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFX509ParseExtensions(const SSFASN1Cursor_t *extsCursor, SSFX509Cert_t *cert)
 {
@@ -454,26 +452,29 @@ static bool _SSFX509ParseExtensions(const SSFASN1Cursor_t *extsCursor, SSFX509Ce
 
         if (!SSFASN1DecGetOIDRaw(&extInner, &oidRaw, &oidRawLen, &extInner)) return false;
 
-        /* Duplicate of an extension already seen, which RFC 5280 Sec. 4.2 forbids? */
         {
             uint8_t dup;
             for (dup = 0; dup < cert->extsLen; dup++)
             {
+                /* Is it a duplicate of an extension already seen (RFC 5280 Sec. 4.2 forbids)? */
                 if (_SSFX509OIDMatch(cert->exts[dup].oidRaw, cert->exts[dup].oidRawLen,
-                              oidRaw, oidRawLen))
+                                     oidRaw, oidRawLen))
                 {
+                    /* Yes */
                     return false;
                 }
+                /* No */
             }
         }
 
-        /* Optional critical BOOLEAN (default false) */
+        /* critical BOOLEAN is optional (default false) */
         critical = false;
         if (!SSFASN1DecIsEmpty(&extInner))
         {
-            if (SSFASN1DecPeekTag(&extInner, &tag) && tag == SSF_ASN1_TAG_BOOLEAN)
+            /* Is the next field the optional critical BOOLEAN? */
+            if ((SSFASN1DecPeekTag(&extInner, &tag)) && (tag == SSF_ASN1_TAG_BOOLEAN))
             {
-                /* Does the critical flag decode (AUDIT X509-6)? */
+                /* Yes, does the critical flag decode? */
                 if (!SSFASN1DecGetBool(&extInner, &critical, &extInner))
                 {
                     /* No, it must never silently read as non-critical */
@@ -485,7 +486,7 @@ static bool _SSFX509ParseExtensions(const SSFASN1Cursor_t *extsCursor, SSFX509Ce
 
         /* Extension value is an OCTET STRING wrapping the actual value */
         if (!SSFASN1DecGetOctetString(&extInner, &extValue, &extValueLen, &extInner)) return false;
-        /* Is anything left after the extension value (AUDIT X509-12)? */
+        /* Is anything left after the extension value? */
         if (!SSFASN1DecIsEmpty(&extInner))
         {
             /* Yes */
@@ -493,7 +494,7 @@ static bool _SSFX509ParseExtensions(const SSFASN1Cursor_t *extsCursor, SSFX509Ce
         }
         /* No */
 
-        /* Room to retain this extension? */
+        /* Is there room to retain this extension? */
         if (cert->extsLen >= SSF_X509_CONFIG_MAX_EXTENSIONS)
         {
             /* No, an unretained extension would escape the critical and duplicate checks */
@@ -522,9 +523,10 @@ static bool _SSFX509ParseExtensions(const SSFASN1Cursor_t *extsCursor, SSFX509Ce
             {
                 if (!SSFASN1DecIsEmpty(&bcInner))
                 {
-                    if (SSFASN1DecPeekTag(&bcInner, &tag) && tag == SSF_ASN1_TAG_BOOLEAN)
+                    /* Is the next field the optional cA BOOLEAN? */
+                    if ((SSFASN1DecPeekTag(&bcInner, &tag)) && (tag == SSF_ASN1_TAG_BOOLEAN))
                     {
-                        /* Does the cA flag decode (AUDIT X509-6)? */
+                        /* Yes, does the cA flag decode? */
                         if (!SSFASN1DecGetBool(&bcInner, &cert->isCA, &bcInner))
                         {
                             /* No, malformed */
@@ -536,7 +538,7 @@ static bool _SSFX509ParseExtensions(const SSFASN1Cursor_t *extsCursor, SSFX509Ce
                     {
                         uint64_t pl;
 
-                        /* Is the pathLenConstraint a valid unsigned INTEGER (AUDIT ASN1-1)? */
+                        /* Is the pathLenConstraint a valid unsigned INTEGER? */
                         if (!SSFASN1DecGetIntU64(&bcInner, &pl, &bcInner))
                         {
                             /* No, a CA constraint that cannot be read must not become unlimited */
@@ -547,7 +549,7 @@ static bool _SSFX509ParseExtensions(const SSFASN1Cursor_t *extsCursor, SSFX509Ce
                     }
                 }
 
-                /* Is anything left after pathLen, or after the SEQUENCE (AUDIT X509-8)? */
+                /* Is anything left after pathLen, or after the SEQUENCE? */
                 if ((!SSFASN1DecIsEmpty(&bcInner)) || (!SSFASN1DecIsEmpty(&bcCursor)))
                 {
                     /* Yes, not the BasicConstraints DER structure */
@@ -566,9 +568,9 @@ static bool _SSFX509ParseExtensions(const SSFASN1Cursor_t *extsCursor, SSFX509Ce
             if (SSFASN1DecGetBitString(&kuCursor, &kuBits, &kuBitsLen, &kuUnused, &kuCursor))
             {
                 cert->keyUsageBits = 0;
-                if (kuBitsLen >= 1u) cert->keyUsageBits = (uint16_t)kuBits[0] << 8;
+                if (kuBitsLen >= 1u) cert->keyUsageBits = ((uint16_t)kuBits[0]) << 8;
                 if (kuBitsLen >= 2u) cert->keyUsageBits |= (uint16_t)kuBits[1];
-                /* Is anything left after the Key Usage BIT STRING (AUDIT X509-12)? */
+                /* Is anything left after the Key Usage BIT STRING? */
                 if (!SSFASN1DecIsEmpty(&kuCursor))
                 {
                     /* Yes */
@@ -589,7 +591,7 @@ static bool _SSFX509ParseExtensions(const SSFASN1Cursor_t *extsCursor, SSFX509Ce
                     uint32_t sanValLen;
                     uint8_t sanType;
 
-                    /* GeneralName header readable and its content within the SEQUENCE? */
+                    /* Is the GeneralName header readable with its content inside the SEQUENCE? */
                     if ((!SSFASN1DecPeekTag(&sanInner, &tag)) ||
                         (!SSFASN1DecGetTLV(&sanInner, &tag, &sanVal, &sanValLen, &sanInner)))
                     {
@@ -600,8 +602,7 @@ static bool _SSFX509ParseExtensions(const SSFASN1Cursor_t *extsCursor, SSFX509Ce
                     /* Yes, the low tag bits are the GeneralName choice */
                     sanType = (uint8_t)(tag & 0x1Fu);
 
-                    /* Is it a context-specific choice [0]..[8], constructed exactly for    */
-                    /* otherName, x400Address, directoryName and ediPartyName (X509-9)?      */
+                    /* Is it a GeneralName [0]..[8], constructed exactly for choices 0, 3, 4, 5? */
                     if (((tag & 0xFFC0u) != 0x0080u) || (sanType > 8u) ||
                         (((tag & SSF_ASN1_CONSTRUCTED) != 0u) !=
                          ((sanType == 0u) || (sanType == 3u) || (sanType == 4u) ||
@@ -612,10 +613,10 @@ static bool _SSFX509ParseExtensions(const SSFASN1Cursor_t *extsCursor, SSFX509Ce
                     }
                     /* Yes */
 
-                    /* Record every form present, kept or not, for Name Constraints (X509-4) */
+                    /* Record every form present, kept or not, for Name Constraints */
                     if (sanType < 16u) cert->sanForms |= (uint16_t)(1u << sanType);
 
-                    /* Is the SAN table full (AUDIT X509-16)? */
+                    /* Is the SAN table full? */
                     if (cert->sanLen >= SSF_X509_CONFIG_MAX_SAN_ENTRIES)
                     {
                         /* Yes, a dropped SAN would escape the Name Constraints check */
@@ -623,19 +624,20 @@ static bool _SSFX509ParseExtensions(const SSFASN1Cursor_t *extsCursor, SSFX509Ce
                     }
                     /* No */
 
-                    /* dNSName that is empty or embeds a NUL byte? */
+                    /* Is it a dNSName that is empty or embeds a NUL byte? */
                     if ((sanType == SSF_X509_SAN_DNS) &&
                         ((sanValLen == 0u) || (memchr(sanVal, 0, sanValLen) != NULL)))
                     {
                         /* Yes, drop it since no hostname can match it safely */
                         continue;
                     }
+                    /* No, retain it */
                     cert->san[cert->sanLen].type = sanType;
                     cert->san[cert->sanLen].val = sanVal;
                     cert->san[cert->sanLen].valLen = sanValLen;
                     cert->sanLen++;
                 }
-                /* Is anything left after the SAN SEQUENCE (AUDIT X509-12)? */
+                /* Is anything left after the SAN SEQUENCE? */
                 if (!SSFASN1DecIsEmpty(&sanCursor))
                 {
                     /* Yes */
@@ -648,14 +650,14 @@ static bool _SSFX509ParseExtensions(const SSFASN1Cursor_t *extsCursor, SSFX509Ce
         {
             SSFASN1Cursor_t skidCursor = { extValue, extValueLen };
 
-            /* SubjectKeyIdentifier body is an OCTET STRING? */
+            /* Is the SubjectKeyIdentifier body an OCTET STRING? */
             if (!SSFASN1DecGetOctetString(&skidCursor, &cert->skid, &cert->skidLen, &skidCursor))
             {
                 /* No, the decoder fills its outputs before checking the tag, so read as absent */
                 cert->skid = NULL;
                 cert->skidLen = 0;
             }
-            /* Yes, is anything left after it (AUDIT X509-12)? */
+            /* Yes, is anything left after it? */
             else if (!SSFASN1DecIsEmpty(&skidCursor))
             {
                 /* Yes */
@@ -674,11 +676,13 @@ static bool _SSFX509ParseExtensions(const SSFASN1Cursor_t *extsCursor, SSFX509Ce
                 const uint8_t *akidVal;
                 uint32_t akidValLen;
 
-                if (!SSFASN1DecIsEmpty(&akidInner) && SSFASN1DecPeekTag(&akidInner, &tag))
+                /* Is there a first field with a readable tag? */
+                if ((!SSFASN1DecIsEmpty(&akidInner)) && (SSFASN1DecPeekTag(&akidInner, &tag)))
                 {
+                    /* Yes, is it keyIdentifier [0]? */
                     if (tag == SSF_ASN1_CONTEXT_IMPLICIT(0))
                     {
-                        /* Does the keyIdentifier decode (AUDIT X509-6)? */
+                        /* Yes, does the keyIdentifier decode? */
                         if (!SSFASN1DecGetTLV(&akidInner, &tag, &cert->akid, &cert->akidLen,
                                               &akidInner))
                         {
@@ -689,27 +693,26 @@ static bool _SSFX509ParseExtensions(const SSFASN1Cursor_t *extsCursor, SSFX509Ce
                     }
                 }
                 /* Is the next field authorityCertIssuer [1]? */
-                if (SSFASN1DecPeekTag(&akidInner, &tag) && (tag == 0xA1u))
+                if ((SSFASN1DecPeekTag(&akidInner, &tag)) && (tag == 0xA1u))
                 {
                     /* Yes, skip it */
                     if (!SSFASN1DecGetTLV(&akidInner, &tag, &akidVal, &akidValLen, &akidInner))
                         return false;
                 }
                 /* No, is the next field authorityCertSerialNumber [2]? */
-                if (SSFASN1DecPeekTag(&akidInner, &tag) && (tag == 0x82u))
+                if ((SSFASN1DecPeekTag(&akidInner, &tag)) && (tag == 0x82u))
                 {
                     /* Yes, skip it */
                     if (!SSFASN1DecGetTLV(&akidInner, &tag, &akidVal, &akidValLen, &akidInner))
                         return false;
                 }
-                /* Is anything else, or anything out of order, in the SEQUENCE (AUDIT X509-19)? */
+                /* Is anything else, or anything out of order, in the SEQUENCE? */
                 if (!SSFASN1DecIsEmpty(&akidInner))
                 {
                     /* Yes, malformed */
                     return false;
                 }
-                /* No */
-                /* Is anything left after the AuthorityKeyIdentifier SEQUENCE (AUDIT X509-12)? */
+                /* No, is anything left after the AuthorityKeyIdentifier SEQUENCE? */
                 if (!SSFASN1DecIsEmpty(&akidCursor))
                 {
                     /* Yes */
@@ -731,21 +734,21 @@ static bool _SSFX509ParseExtensions(const SSFASN1Cursor_t *extsCursor, SSFX509Ce
                 {
                     const uint8_t *ekuOid;
                     uint32_t ekuOidLen;
-                    /* A non-OID element is malformed, not the end of the list (X509-19) */
+                    /* A non-OID element is malformed, not the end of the list */
                     if (!SSFASN1DecGetOIDRaw(&ekuInner, &ekuOid, &ekuOidLen, &ekuInner))
                         return false;
                     if (_SSFX509OIDMatch(ekuOid, ekuOidLen, _oidEkuServerAuth,
-                                  sizeof(_oidEkuServerAuth)))
+                                         sizeof(_oidEkuServerAuth)))
                     {
                         cert->ekuServerAuth = true;
                     }
                     else if (_SSFX509OIDMatch(ekuOid, ekuOidLen, _oidEkuClientAuth,
-                                       sizeof(_oidEkuClientAuth)))
+                                              sizeof(_oidEkuClientAuth)))
                     {
                         cert->ekuClientAuth = true;
                     }
                     else if (_SSFX509OIDMatch(ekuOid, ekuOidLen, _oidEkuCodeSigning,
-                                       sizeof(_oidEkuCodeSigning)))
+                                              sizeof(_oidEkuCodeSigning)))
                     {
                         cert->ekuCodeSigning = true;
                     }
@@ -754,7 +757,7 @@ static bool _SSFX509ParseExtensions(const SSFASN1Cursor_t *extsCursor, SSFX509Ce
                         cert->ekuAnyPurpose = true;
                     }
                 }
-                /* Is anything left after the EKU SEQUENCE (AUDIT X509-12)? */
+                /* Is anything left after the EKU SEQUENCE? */
                 if (!SSFASN1DecIsEmpty(&ekuCursor))
                 {
                     /* Yes */
@@ -764,7 +767,7 @@ static bool _SSFX509ParseExtensions(const SSFASN1Cursor_t *extsCursor, SSFX509Ce
             }
         }
         else if (_SSFX509OIDMatch(oidRaw, oidRawLen, _oidNameConstraints,
-                            sizeof(_oidNameConstraints)))
+                                  sizeof(_oidNameConstraints)))
         {
             /* NameConstraints { permittedSubtrees [0], excludedSubtrees [1] }, RFC 5280 4.2.1.10 */
             SSFASN1Cursor_t ncCursor = { extValue, extValueLen };
@@ -774,7 +777,7 @@ static bool _SSFX509ParseExtensions(const SSFASN1Cursor_t *extsCursor, SSFX509Ce
 
             cert->hasNameConstraints = true;
 
-            /* Is the body exactly one non-empty SEQUENCE (AUDIT X509-3)? */
+            /* Is the body exactly one non-empty SEQUENCE? */
             if ((!SSFASN1DecOpenConstructed(&ncCursor, SSF_ASN1_TAG_SEQUENCE, &ncInner,
                                             &ncAfter)) || (!SSFASN1DecIsEmpty(&ncAfter)) ||
                 (SSFASN1DecIsEmpty(&ncInner)))
@@ -826,7 +829,7 @@ static bool _SSFX509ParseExtensions(const SSFASN1Cursor_t *extsCursor, SSFX509Ce
                         /* No, a subtree that cannot be read must not be dropped */
                         return false;
                     }
-                    /* Yes, is minimum (DEFAULT 0) or maximum encoded (AUDIT X509-19)? */
+                    /* Yes, is minimum (DEFAULT 0) or maximum encoded? */
                     if (!SSFASN1DecIsEmpty(&gsInner))
                     {
                         /* Yes, RFC 5280 forbids both, so the subtree is malformed */
@@ -853,7 +856,7 @@ static bool _SSFX509ParseExtensions(const SSFASN1Cursor_t *extsCursor, SSFX509Ce
                     /* No, is it a context-specific GeneralName choice [0]..[8]? */
                     else if (((gnTag & 0xC0u) == 0x80u) && ((gnTag & 0x1Fu) <= 8u))
                     {
-                        /* Yes, not enforced; subordinates using this form are rejected (X509-4) */
+                        /* Yes, not enforced; subordinates using this form are rejected */
                         cert->ncUnenforcedForms |= (uint16_t)(1u << (gnTag & 0x1Fu));
                     }
                     else
@@ -877,7 +880,7 @@ static bool _SSFX509ParseExtensions(const SSFASN1Cursor_t *extsCursor, SSFX509Ce
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Parse a DER-encoded X.509 certificate.                                                        */
+/* Returns true if der is one well-formed X.509 certificate, parsed into cert, else false.       */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFX509Parse(const uint8_t *der, uint32_t derLen, SSFX509Cert_t *cert)
 {
@@ -914,17 +917,20 @@ bool SSFX509Parse(const uint8_t *der, uint32_t derLen, SSFX509Cert_t *cert)
 
     pos = tbsInner;
 
-    /* Version [0] EXPLICIT INTEGER (OPTIONAL, default v1=0) */
     cert->version = 0;
-    if (SSFASN1DecPeekTag(&pos, &tag) && tag == SSF_ASN1_CONTEXT_EXPLICIT(0))
+
+    /* Is the optional [0] EXPLICIT version present (default v1 = 0)? */
+    if ((SSFASN1DecPeekTag(&pos, &tag)) && (tag == SSF_ASN1_CONTEXT_EXPLICIT(0)))
     {
         SSFASN1Cursor_t verInner;
         uint64_t ver;
+
+        /* Yes, decode it */
         if (!SSFASN1DecOpenConstructed(&pos, SSF_ASN1_CONTEXT_EXPLICIT(0), &verInner, &pos))
             return false;
         if (!SSFASN1DecGetIntU64(&verInner, &ver, &verInner)) return false;
 
-        /* Version v2 or v3 (v1 is DEFAULT, so DER omits it, AUDIT X509-19)? */
+        /* Is it v2 or v3 with nothing after it (DER omits the DEFAULT v1)? */
         if ((ver == 0u) || (ver > 2u) || (!SSFASN1DecIsEmpty(&verInner)))
         {
             /* No, malformed certificate */
@@ -969,7 +975,7 @@ bool SSFX509Parse(const uint8_t *der, uint32_t derLen, SSFX509Cert_t *cert)
     if (!SSFASN1DecGetTime(&validityInner, &cert->notBefore, &validityInner)) return false;
     if (!SSFASN1DecGetTime(&validityInner, &cert->notAfter, &validityInner)) return false;
 
-    /* Is anything left after notAfter (AUDIT X509-19)? */
+    /* Is anything left after notAfter? */
     if (!SSFASN1DecIsEmpty(&validityInner))
     {
         /* Yes, malformed */
@@ -998,9 +1004,10 @@ bool SSFX509Parse(const uint8_t *der, uint32_t derLen, SSFX509Cert_t *cert)
         /* EC curve OID (parameter of the algorithm) */
         if (!SSFASN1DecIsEmpty(&pkAlgInner))
         {
-            if (SSFASN1DecPeekTag(&pkAlgInner, &tag) && tag == SSF_ASN1_TAG_OID)
+            /* Is the parameter an EC curve OID? */
+            if ((SSFASN1DecPeekTag(&pkAlgInner, &tag)) && (tag == SSF_ASN1_TAG_OID))
             {
-                /* Does the curve OID decode (AUDIT X509-6)? */
+                /* Yes, does the curve OID decode? */
                 if (!SSFASN1DecGetOIDRaw(&pkAlgInner, &cert->ecCurveOidRaw,
                                          &cert->ecCurveOidRawLen, &pkAlgInner))
                 {
@@ -1009,15 +1016,16 @@ bool SSFX509Parse(const uint8_t *der, uint32_t derLen, SSFX509Cert_t *cert)
                 }
                 /* Yes */
             }
-            /* No, is it one other parameter TLV (RSA NULL, RSA-PSS SEQUENCE)? */
             else
             {
                 const uint8_t *pkParam;
                 uint32_t pkParamLen;
+
+                /* No, it must be one other parameter TLV (RSA NULL, RSA-PSS SEQUENCE) */
                 if (!SSFASN1DecGetTLV(&pkAlgInner, &tag, &pkParam, &pkParamLen, &pkAlgInner))
                     return false;
             }
-            /* Is anything left after the algorithm parameter (AUDIT X509-19)? */
+            /* Is anything left after the algorithm parameter? */
             if (!SSFASN1DecIsEmpty(&pkAlgInner))
             {
                 /* Yes, malformed */
@@ -1031,7 +1039,7 @@ bool SSFX509Parse(const uint8_t *der, uint32_t derLen, SSFX509Cert_t *cert)
                                 &cert->pubKeyUnusedBits, &spkiInner))
         return false;
 
-    /* Is anything left after the public key BIT STRING (AUDIT X509-19)? */
+    /* Is anything left after the public key BIT STRING? */
     if (!SSFASN1DecIsEmpty(&spkiInner))
     {
         /* Yes, malformed */
@@ -1039,7 +1047,7 @@ bool SSFX509Parse(const uint8_t *der, uint32_t derLen, SSFX509Cert_t *cert)
     }
     /* No */
 
-    /* Is the public key a partial octet (no supported key format is, AUDIT ASN1-5)? */
+    /* Is the public key a partial octet (no supported key format is)? */
     if (cert->pubKeyUnusedBits != 0u)
     {
         /* Yes, malformed */
@@ -1047,11 +1055,11 @@ bool SSFX509Parse(const uint8_t *der, uint32_t derLen, SSFX509Cert_t *cert)
     }
     /* No */
 
-    /* Optional: issuerUniqueID [1], subjectUniqueID [2] - skip if present */
-    while (SSFASN1DecPeekTag(&pos, &tag) &&
-           (tag == SSF_ASN1_CONTEXT_IMPLICIT(1) || tag == SSF_ASN1_CONTEXT_IMPLICIT(2)))
+    /* Is an optional issuerUniqueID [1] or subjectUniqueID [2] next? */
+    while ((SSFASN1DecPeekTag(&pos, &tag)) &&
+           ((tag == SSF_ASN1_CONTEXT_IMPLICIT(1)) || (tag == SSF_ASN1_CONTEXT_IMPLICIT(2))))
     {
-        /* Does the unique ID's encoded length overrun the TBSCertificate (AUDIT X509-1)? */
+        /* Yes, does its encoded length overrun the TBSCertificate? */
         if (!SSFASN1DecSkip(&pos, &pos))
         {
             /* Yes, malformed; a failed skip leaves pos unchanged, so stop rather than spin */
@@ -1060,13 +1068,13 @@ bool SSFX509Parse(const uint8_t *der, uint32_t derLen, SSFX509Cert_t *cert)
         /* No, pos is past the unique ID */
     }
 
-    /* Extensions [3] EXPLICIT (OPTIONAL, v3 only) */
-    if (SSFASN1DecPeekTag(&pos, &tag) && tag == SSF_ASN1_CONTEXT_EXPLICIT(3))
+    /* Are the optional Extensions [3] EXPLICIT present? */
+    if ((SSFASN1DecPeekTag(&pos, &tag)) && (tag == SSF_ASN1_CONTEXT_EXPLICIT(3)))
     {
         SSFASN1Cursor_t extsOuter;
         SSFASN1Cursor_t extsSeq;
 
-        /* Are extensions present in a v1 or v2 certificate (RFC 5280 4.1.2.9, AUDIT X509-12)? */
+        /* Yes, is this a v1 or v2 certificate, which may not carry them (RFC 5280 4.1.2.9)? */
         if (cert->version != 2u)
         {
             /* Yes */
@@ -1078,7 +1086,7 @@ bool SSFX509Parse(const uint8_t *der, uint32_t derLen, SSFX509Cert_t *cert)
         if (!SSFASN1DecOpenConstructed(&extsOuter, SSF_ASN1_TAG_SEQUENCE, &extsSeq, &extsOuter))
             return false;
 
-        /* Is anything left after the Extensions SEQUENCE (AUDIT X509-12)? */
+        /* Is anything left after the Extensions SEQUENCE? */
         if (!SSFASN1DecIsEmpty(&extsOuter))
         {
             /* Yes */
@@ -1088,7 +1096,7 @@ bool SSFX509Parse(const uint8_t *der, uint32_t derLen, SSFX509Cert_t *cert)
         if (!_SSFX509ParseExtensions(&extsSeq, cert)) return false;
     }
 
-    /* Is anything left in the TBSCertificate after its last field (AUDIT X509-12)? */
+    /* Is anything left in the TBSCertificate after its last field? */
     if (!SSFASN1DecIsEmpty(&pos))
     {
         /* Yes */
@@ -1116,7 +1124,7 @@ bool SSFX509Parse(const uint8_t *der, uint32_t derLen, SSFX509Cert_t *cert)
                                 &cert->signatureUnusedBits, &certInner))
         return false;
 
-    /* Is anything left after the signature, or after the Certificate (AUDIT X509-12)? */
+    /* Is anything left after the signature, or after the Certificate? */
     if ((!SSFASN1DecIsEmpty(&certInner)) || (!SSFASN1DecIsEmpty(&cursor)))
     {
         /* Yes, bytes the signature does not cover */
@@ -1124,7 +1132,7 @@ bool SSFX509Parse(const uint8_t *der, uint32_t derLen, SSFX509Cert_t *cert)
     }
     /* No */
 
-    /* Is the signature a partial octet (no supported scheme is, AUDIT ASN1-5)? */
+    /* Is the signature a partial octet (no supported scheme is)? */
     if (cert->signatureUnusedBits != 0u)
     {
         /* Yes, malformed */
@@ -1135,6 +1143,8 @@ bool SSFX509Parse(const uint8_t *der, uint32_t derLen, SSFX509Cert_t *cert)
     return true;
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if nowUnixSec is within cert's validity period, else false.                      */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFX509IsValid(const SSFX509Cert_t *cert, uint64_t nowUnixSec)
 {
@@ -1151,7 +1161,7 @@ bool SSFX509IsECDSA(const SSFX509Cert_t *cert)
 {
     SSF_REQUIRE(cert != NULL);
     return _SSFX509OIDMatch(cert->sigAlgOidRaw, cert->sigAlgOidRawLen,
-                     _oidEcdsaSHA256, sizeof(_oidEcdsaSHA256));
+                            _oidEcdsaSHA256, sizeof(_oidEcdsaSHA256));
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -1161,7 +1171,7 @@ bool SSFX509IsRSA(const SSFX509Cert_t *cert)
 {
     SSF_REQUIRE(cert != NULL);
     return _SSFX509OIDMatch(cert->pubKeyAlgOidRaw, cert->pubKeyAlgOidRawLen,
-                     _oidRSA, sizeof(_oidRSA));
+                            _oidRSA, sizeof(_oidRSA));
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -1171,12 +1181,13 @@ bool SSFX509IsP256(const SSFX509Cert_t *cert)
 {
     SSF_REQUIRE(cert != NULL);
     return _SSFX509OIDMatch(cert->ecCurveOidRaw, cert->ecCurveOidRawLen,
-                     _oidP256, sizeof(_oidP256));
+                            _oidP256, sizeof(_oidP256));
+
 }
 
-/* ========================================================================================== */
-/* CERTIFICATE GENERATION                                                                     */
-/* ========================================================================================== */
+/* --------------------------------------------------------------------------------------------- */
+/* CERTIFICATE GENERATION                                                                        */
+/* --------------------------------------------------------------------------------------------- */
 
 /* RFC 5280 Appendix A upper bounds on DN attribute values and a dNSName (RFC 1035 Sec. 2.3.4). */
 #define _UB_COMMON_NAME             (64u)
@@ -1189,8 +1200,7 @@ bool SSFX509IsP256(const SSFX509Cert_t *cert)
 /* Longest RFC 7093 key identifier method is SHA-512 */
 #define _UB_KEY_IDENTIFIER          (64u)
 
-/* Content emitter: writes, or only measures when buf is NULL, the content octets of one DER     */
-/* element. Returns true with *lenOut set to the octets written or needed, else false.           */
+/* Content emitter: true with *lenOut = content octets written, or needed when buf is NULL */
 typedef bool (*_EncContentFn_t)(uint8_t *buf, uint32_t bufSize, const void *arg, uint32_t *lenOut);
 
 /* Arguments for the generic content emitters below. */
@@ -1253,14 +1263,10 @@ typedef struct
 } _EncCert_t;
 
 /* --------------------------------------------------------------------------------------------- */
-/* Leaf encoders: return bytes written, or needed when buf is NULL, else 0 on failure.           */
-/* --------------------------------------------------------------------------------------------- */
-/* --------------------------------------------------------------------------------------------- */
-/* Returns bytes for tag wrapping content, or bytes needed when buf is NULL, else 0.            */
+/* Returns bytes for tag wrapping content, or bytes needed when buf is NULL, else 0.             */
 /* --------------------------------------------------------------------------------------------- */
 static uint32_t _SSFX509EncWrap(uint8_t *buf, uint32_t bufSize, uint16_t tag,
-                                const uint8_t *content,
-                         uint32_t contentLen)
+                                const uint8_t *content, uint32_t contentLen)
 {
     uint32_t n;
 
@@ -1271,10 +1277,10 @@ static uint32_t _SSFX509EncWrap(uint8_t *buf, uint32_t bufSize, uint16_t tag,
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns bytes for an OBJECT IDENTIFIER, or bytes needed when buf is NULL, else 0.           */
+/* Returns bytes for an OBJECT IDENTIFIER, or bytes needed when buf is NULL, else 0.             */
 /* --------------------------------------------------------------------------------------------- */
 static uint32_t _SSFX509EncOIDRaw(uint8_t *buf, uint32_t bufSize, const uint8_t *oidRaw,
-                           uint32_t oidRawLen)
+                                  uint32_t oidRawLen)
 {
     uint32_t n;
 
@@ -1285,11 +1291,10 @@ static uint32_t _SSFX509EncOIDRaw(uint8_t *buf, uint32_t bufSize, const uint8_t 
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns bytes for a string of type strTag, or bytes needed when buf is NULL, else 0.         */
+/* Returns bytes for a string of type strTag, or bytes needed when buf is NULL, else 0.          */
 /* --------------------------------------------------------------------------------------------- */
 static uint32_t _SSFX509EncString(uint8_t *buf, uint32_t bufSize, uint16_t strTag,
-                                  const uint8_t *str,
-                           uint32_t strLen)
+                                  const uint8_t *str, uint32_t strLen)
 {
     uint32_t n;
 
@@ -1300,7 +1305,7 @@ static uint32_t _SSFX509EncString(uint8_t *buf, uint32_t bufSize, uint16_t strTa
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns bytes for a BOOLEAN, or bytes needed when buf is NULL, else 0.                      */
+/* Returns bytes for a BOOLEAN, or bytes needed when buf is NULL, else 0.                        */
 /* --------------------------------------------------------------------------------------------- */
 static uint32_t _SSFX509EncBool(uint8_t *buf, uint32_t bufSize, bool val)
 {
@@ -1313,7 +1318,7 @@ static uint32_t _SSFX509EncBool(uint8_t *buf, uint32_t bufSize, bool val)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns bytes for an INTEGER from raw octets, or bytes needed when buf is NULL, else 0.      */
+/* Returns bytes for an INTEGER from raw octets, or bytes needed when buf is NULL, else 0.       */
 /* --------------------------------------------------------------------------------------------- */
 static uint32_t _SSFX509EncInt(uint8_t *buf, uint32_t bufSize, const uint8_t *intBuf,
                                uint32_t intLen)
@@ -1327,7 +1332,7 @@ static uint32_t _SSFX509EncInt(uint8_t *buf, uint32_t bufSize, const uint8_t *in
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns bytes for a positive INTEGER from a magnitude, or bytes needed if buf NULL, else 0.  */
+/* Returns bytes for a positive INTEGER from a magnitude, or bytes needed if buf NULL, else 0.   */
 /* --------------------------------------------------------------------------------------------- */
 static uint32_t _SSFX509EncUInt(uint8_t *buf, uint32_t bufSize, const uint8_t *magBuf,
                                 uint32_t magLen)
@@ -1341,7 +1346,7 @@ static uint32_t _SSFX509EncUInt(uint8_t *buf, uint32_t bufSize, const uint8_t *m
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns bytes for an INTEGER from a uint64_t, or bytes needed when buf is NULL, else 0.      */
+/* Returns bytes for an INTEGER from a uint64_t, or bytes needed when buf is NULL, else 0.       */
 /* --------------------------------------------------------------------------------------------- */
 static uint32_t _SSFX509EncIntU64(uint8_t *buf, uint32_t bufSize, uint64_t val)
 {
@@ -1354,10 +1359,10 @@ static uint32_t _SSFX509EncIntU64(uint8_t *buf, uint32_t bufSize, uint64_t val)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns bytes for a BIT STRING, or bytes needed when buf is NULL, else 0.                   */
+/* Returns bytes for a BIT STRING, or bytes needed when buf is NULL, else 0.                     */
 /* --------------------------------------------------------------------------------------------- */
 static uint32_t _SSFX509EncBitString(uint8_t *buf, uint32_t bufSize, const uint8_t *bits,
-                              uint32_t bitsLen, uint8_t unusedBits)
+                                     uint32_t bitsLen, uint8_t unusedBits)
 {
     uint32_t n;
 
@@ -1368,10 +1373,10 @@ static uint32_t _SSFX509EncBitString(uint8_t *buf, uint32_t bufSize, const uint8
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns bytes for an OCTET STRING, or bytes needed when buf is NULL, else 0.                */
+/* Returns bytes for an OCTET STRING, or bytes needed when buf is NULL, else 0.                  */
 /* --------------------------------------------------------------------------------------------- */
 static uint32_t _SSFX509EncOctetString(uint8_t *buf, uint32_t bufSize, const uint8_t *octets,
-                                uint32_t octetsLen)
+                                       uint32_t octetsLen)
 {
     uint32_t n;
 
@@ -1382,7 +1387,7 @@ static uint32_t _SSFX509EncOctetString(uint8_t *buf, uint32_t bufSize, const uin
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns bytes for a UTCTime, or bytes needed when buf is NULL, else 0.                      */
+/* Returns bytes for a UTCTime, or bytes needed when buf is NULL, else 0.                        */
 /* --------------------------------------------------------------------------------------------- */
 static uint32_t _SSFX509EncUTCTime(uint8_t *buf, uint32_t bufSize, uint64_t unixSec)
 {
@@ -1395,7 +1400,7 @@ static uint32_t _SSFX509EncUTCTime(uint8_t *buf, uint32_t bufSize, uint64_t unix
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns bytes for a tag and length header, or bytes needed when buf is NULL, else 0.        */
+/* Returns bytes for a tag and length header, or bytes needed when buf is NULL, else 0.          */
 /* --------------------------------------------------------------------------------------------- */
 static uint32_t _SSFX509EncTagLen(uint8_t *buf, uint32_t bufSize, uint16_t tag, uint32_t contentLen)
 {
@@ -1441,7 +1446,7 @@ static bool _SSFX509Add(uint32_t *pos, uint32_t n)
 /* Returns true if len raw bytes fit at *pos, copying them when writing, and advances *pos.      */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFX509AddBytes(uint8_t *buf, uint32_t bufSize, uint32_t *pos, const uint8_t *data,
-                      uint32_t len)
+                             uint32_t len)
 {
     SSF_REQUIRE(pos != NULL);
     SSF_REQUIRE((data != NULL) || (len == 0u));
@@ -1461,7 +1466,7 @@ static bool _SSFX509AddBytes(uint8_t *buf, uint32_t bufSize, uint32_t *pos, cons
 /* Returns bytes written or needed for tag wrapping the content fn emits, else 0 on failure.     */
 /* --------------------------------------------------------------------------------------------- */
 static uint32_t _SSFX509EncConstructed(uint8_t *buf, uint32_t bufSize, uint16_t tag,
-                                _EncContentFn_t fn, const void *arg)
+                                       _EncContentFn_t fn, const void *arg)
 {
     uint32_t innerLen;
     uint32_t hdrLen;
@@ -1471,7 +1476,7 @@ static uint32_t _SSFX509EncConstructed(uint8_t *buf, uint32_t bufSize, uint16_t 
     SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
     SSF_REQUIRE(fn != NULL);
 
-    /* Content measurable? */
+    /* Is the content measurable? */
     if (!fn(NULL, 0, arg, &innerLen))
     {
         /* No, propagate the failure */
@@ -1484,7 +1489,7 @@ static uint32_t _SSFX509EncConstructed(uint8_t *buf, uint32_t bufSize, uint16_t 
     /* Only measuring? */
     if (buf == NULL) return total;
 
-    /* Header and content fit? */
+    /* Do the header and content fit? */
     if (bufSize < total)
     {
         /* No, caller's buffer too small */
@@ -1499,7 +1504,7 @@ static uint32_t _SSFX509EncConstructed(uint8_t *buf, uint32_t bufSize, uint16_t 
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Content: one nested constructed element described by an _EncNested_t.                        */
+/* Returns true if the nested constructed element arg describes is emitted, else false.          */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFX509EncNestedContent(uint8_t *buf, uint32_t bufSize, const void *arg,
                                      uint32_t *lenOut)
@@ -1517,7 +1522,7 @@ static bool _SSFX509EncNestedContent(uint8_t *buf, uint32_t bufSize, const void 
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Content: one tagged primitive described by an _EncTagged_t.                                   */
+/* Returns true if the tagged primitive arg describes is emitted, else false.                    */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFX509EncTaggedContent(uint8_t *buf, uint32_t bufSize, const void *arg,
                                      uint32_t *lenOut)
@@ -1534,7 +1539,7 @@ static bool _SSFX509EncTaggedContent(uint8_t *buf, uint32_t bufSize, const void 
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Content: raw bytes described by an _EncBytes_t.                                               */
+/* Returns true if the raw bytes arg describes are emitted, else false.                          */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFX509EncBytesContent(uint8_t *buf, uint32_t bufSize, const void *arg,
                                     uint32_t *lenOut)
@@ -1570,7 +1575,7 @@ static bool _SSFX509IsPrintableChar(char ch)
 /* Content: AttributeTypeAndValue { OID, PrintableString for countryName else UTF8String }.      */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFX509EncDNAttrSeqContent(uint8_t *buf, uint32_t bufSize, const void *arg,
-                                 uint32_t *lenOut)
+                                        uint32_t *lenOut)
 {
     const _EncDNAttr_t *a = (const _EncDNAttr_t *)arg;
     uint32_t pos = 0;
@@ -1582,7 +1587,7 @@ static bool _SSFX509EncDNAttrSeqContent(uint8_t *buf, uint32_t bufSize, const vo
     if (!_SSFX509Add(&pos, _SSFX509EncOIDRaw(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
                                              a->oid, a->oidLen)))
         return false;
-    /* Is it countryName, which RFC 5280 Appendix A defines as PrintableString (AUDIT X509-20)? */
+    /* Is it countryName, which RFC 5280 Appendix A defines as PrintableString? */
     if (_SSFX509OIDMatch(a->oid, a->oidLen, _oidC, sizeof(_oidC)))
     {
         /* Yes */
@@ -1594,8 +1599,8 @@ static bool _SSFX509EncDNAttrSeqContent(uint8_t *buf, uint32_t bufSize, const vo
         strTag = SSF_ASN1_TAG_UTF8_STRING;
     }
     if (!_SSFX509Add(&pos, _SSFX509EncString(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
-                                             strTag,
-                               (const uint8_t *)a->valueStr, a->valueLen))) return false;
+                                             strTag, (const uint8_t *)a->valueStr,
+                                             a->valueLen))) return false;
     *lenOut = pos;
     return true;
 }
@@ -1604,17 +1609,17 @@ static bool _SSFX509EncDNAttrSeqContent(uint8_t *buf, uint32_t bufSize, const vo
 /* Returns bytes for one RDN SET { SEQUENCE { OID, UTF8String } }, else 0 if over its bound.     */
 /* --------------------------------------------------------------------------------------------- */
 static uint32_t _SSFX509EncDNAttr(uint8_t *buf, uint32_t bufSize, const uint8_t *oid,
-                                  uint32_t oidLen,
-                           SSFCStrIn_t valueStr, uint32_t upperBound)
+                                  uint32_t oidLen, SSFCStrIn_t valueStr, uint32_t upperBound)
 {
     _EncDNAttr_t attr;
     _EncNested_t seq;
     size_t valueLen;
 
+    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
     SSF_REQUIRE(oid != NULL);
     SSF_REQUIRE(valueStr != NULL);
 
-    /* Value terminated within the RFC 5280 upper bound for this attribute? */
+    /* Is the value terminated within the RFC 5280 upper bound for this attribute? */
     if (!SSFStrLen(valueStr, upperBound + 1u, &valueLen))
     {
         /* No, refuse to emit a non-conforming name */
@@ -1642,15 +1647,15 @@ static bool _SSFX509EncDNContent(uint8_t *buf, uint32_t bufSize, const void *arg
     SSF_REQUIRE(name != NULL);
     SSF_REQUIRE(lenOut != NULL);
 
-    /* countryName present but not exactly two letters (RFC 5280 Appendix A)? */
+    /* Is countryName present but not exactly two letters (RFC 5280 Appendix A)? */
     if ((name->c != NULL) &&
-        (!SSFStrLen(name->c, _UB_COUNTRY_NAME + 1u, &cLen) || (cLen != _UB_COUNTRY_NAME)))
+        ((!SSFStrLen(name->c, _UB_COUNTRY_NAME + 1u, &cLen)) || (cLen != _UB_COUNTRY_NAME)))
     {
         /* Yes, malformed */
         return false;
     }
 
-    /* countryName present with a character outside PrintableString (AUDIT X509-20)? */
+    /* Is countryName present with a character outside PrintableString? */
     if ((name->c != NULL) &&
         ((!_SSFX509IsPrintableChar(name->c[0])) || (!_SSFX509IsPrintableChar(name->c[1]))))
     {
@@ -1659,24 +1664,56 @@ static bool _SSFX509EncDNContent(uint8_t *buf, uint32_t bufSize, const void *arg
     }
     /* No */
 
-    if ((name->c != NULL) && !_SSFX509Add(&pos, _SSFX509EncDNAttr(_SSFX509At(buf, pos),
-                                                                  _SSFX509Rem(buf, bufSize, pos),
-        _oidC, sizeof(_oidC), name->c, _UB_COUNTRY_NAME))) return false;
-    if ((name->st != NULL) && !_SSFX509Add(&pos, _SSFX509EncDNAttr(_SSFX509At(buf, pos),
-                                                                   _SSFX509Rem(buf, bufSize, pos),
-        _oidST, sizeof(_oidST), name->st, _UB_STATE_NAME))) return false;
-    if ((name->l != NULL) && !_SSFX509Add(&pos, _SSFX509EncDNAttr(_SSFX509At(buf, pos),
-                                                                  _SSFX509Rem(buf, bufSize, pos),
-        _oidL, sizeof(_oidL), name->l, _UB_LOCALITY_NAME))) return false;
-    if ((name->o != NULL) && !_SSFX509Add(&pos, _SSFX509EncDNAttr(_SSFX509At(buf, pos),
-                                                                  _SSFX509Rem(buf, bufSize, pos),
-        _oidO, sizeof(_oidO), name->o, _UB_ORGANIZATION_NAME))) return false;
-    if ((name->ou != NULL) && !_SSFX509Add(&pos, _SSFX509EncDNAttr(_SSFX509At(buf, pos),
-                                                                   _SSFX509Rem(buf, bufSize, pos),
-        _oidOU, sizeof(_oidOU), name->ou, _UB_ORGANIZATIONAL_UNIT))) return false;
-    if ((name->cn != NULL) && !_SSFX509Add(&pos, _SSFX509EncDNAttr(_SSFX509At(buf, pos),
-                                                                   _SSFX509Rem(buf, bufSize, pos),
-        _oidCN, sizeof(_oidCN), name->cn, _UB_COMMON_NAME))) return false;
+    /* Is countryName present and not encodable? */
+    if ((name->c != NULL) &&
+        (!_SSFX509Add(&pos, _SSFX509EncDNAttr(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
+                                              _oidC, sizeof(_oidC), name->c, _UB_COUNTRY_NAME))))
+    {
+        /* Yes */
+        return false;
+    }
+    /* Is stateOrProvinceName present and not encodable? */
+    if ((name->st != NULL) &&
+        (!_SSFX509Add(&pos, _SSFX509EncDNAttr(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
+                                              _oidST, sizeof(_oidST), name->st, _UB_STATE_NAME))))
+    {
+        /* Yes */
+        return false;
+    }
+    /* Is localityName present and not encodable? */
+    if ((name->l != NULL) &&
+        (!_SSFX509Add(&pos, _SSFX509EncDNAttr(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
+                                              _oidL, sizeof(_oidL), name->l, _UB_LOCALITY_NAME))))
+    {
+        /* Yes */
+        return false;
+    }
+    /* Is organizationName present and not encodable? */
+    if ((name->o != NULL) &&
+        (!_SSFX509Add(&pos, _SSFX509EncDNAttr(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
+                                              _oidO, sizeof(_oidO), name->o,
+                                              _UB_ORGANIZATION_NAME))))
+    {
+        /* Yes */
+        return false;
+    }
+    /* Is organizationalUnitName present and not encodable? */
+    if ((name->ou != NULL) &&
+        (!_SSFX509Add(&pos, _SSFX509EncDNAttr(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
+                                              _oidOU, sizeof(_oidOU), name->ou,
+                                              _UB_ORGANIZATIONAL_UNIT))))
+    {
+        /* Yes */
+        return false;
+    }
+    /* Is commonName present and not encodable? */
+    if ((name->cn != NULL) &&
+        (!_SSFX509Add(&pos, _SSFX509EncDNAttr(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
+                                              _oidCN, sizeof(_oidCN), name->cn, _UB_COMMON_NAME))))
+    {
+        /* Yes */
+        return false;
+    }
     *lenOut = pos;
     return true;
 }
@@ -1686,13 +1723,14 @@ static bool _SSFX509EncDNContent(uint8_t *buf, uint32_t bufSize, const void *arg
 /* --------------------------------------------------------------------------------------------- */
 static uint32_t _SSFX509EncDN(uint8_t *buf, uint32_t bufSize, const SSFX509GenName_t *name)
 {
+    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
     SSF_REQUIRE(name != NULL);
 
     return _SSFX509EncConstructed(buf, bufSize, SSF_ASN1_TAG_SEQUENCE, _SSFX509EncDNContent, name);
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Content: AlgorithmIdentifier { OID, params... } with optional raw DER parameters.             */
+/* Content: AlgorithmIdentifier { OID, params } with optional raw DER parameters.                */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFX509EncAlgIdContent(uint8_t *buf, uint32_t bufSize, const void *arg,
                                     uint32_t *lenOut)
@@ -1715,17 +1753,18 @@ static bool _SSFX509EncAlgIdContent(uint8_t *buf, uint32_t bufSize, const void *
 /* Returns bytes for AlgorithmIdentifier SEQUENCE { OID, params }, else 0 on failure.            */
 /* --------------------------------------------------------------------------------------------- */
 static uint32_t _SSFX509EncAlgIdWithParams(uint8_t *buf, uint32_t bufSize, const uint8_t *algOidRaw,
-                                    uint32_t algOidRawLen, const uint8_t *params,
-                                    uint32_t paramsLen)
+                                           uint32_t algOidRawLen, const uint8_t *paramsOpt,
+                                           uint32_t paramsLen)
 {
     _EncAlgId_t a;
 
+    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
     SSF_REQUIRE(algOidRaw != NULL);
 
     a.oid = algOidRaw;
     a.oidLen = algOidRawLen;
-    a.params = params;
-    a.paramsLen = (params == NULL) ? 0u : paramsLen;
+    a.params = paramsOpt;
+    a.paramsLen = (paramsOpt == NULL) ? 0u : paramsLen;
     return _SSFX509EncConstructed(buf, bufSize, SSF_ASN1_TAG_SEQUENCE, _SSFX509EncAlgIdContent, &a);
 }
 
@@ -1733,8 +1772,11 @@ static uint32_t _SSFX509EncAlgIdWithParams(uint8_t *buf, uint32_t bufSize, const
 /* Returns bytes for AlgorithmIdentifier SEQUENCE { OID }, else 0 on failure.                    */
 /* --------------------------------------------------------------------------------------------- */
 static uint32_t _SSFX509EncAlgId(uint8_t *buf, uint32_t bufSize, const uint8_t *algOidRaw,
-                          uint32_t algOidRawLen)
+                                 uint32_t algOidRawLen)
 {
+    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
+    SSF_REQUIRE(algOidRaw != NULL);
+
     return _SSFX509EncAlgIdWithParams(buf, bufSize, algOidRaw, algOidRawLen, NULL, 0u);
 }
 
@@ -1760,7 +1802,7 @@ static bool _SSFX509EncVersionContent(uint8_t *buf, uint32_t bufSize, const void
 /* Content: Validity { notBefore UTCTime, notAfter UTCTime }.                                    */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFX509EncValidityContent(uint8_t *buf, uint32_t bufSize, const void *arg,
-                                uint32_t *lenOut)
+                                       uint32_t *lenOut)
 {
     const SSFX509GenParams_t *p = (const SSFX509GenParams_t *)arg;
     uint32_t pos = 0;
@@ -1791,11 +1833,11 @@ static bool _SSFX509EncECAlgContent(uint8_t *buf, uint32_t bufSize, const void *
     SSF_REQUIRE(lenOut != NULL);
 
     if (!_SSFX509Add(&pos, _SSFX509EncOIDRaw(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
-                                             p->pubKeyAlgOidRaw,
-                               p->pubKeyAlgOidRawLen))) return false;
+                                             p->pubKeyAlgOidRaw, p->pubKeyAlgOidRawLen)))
+        return false;
     if (!_SSFX509Add(&pos, _SSFX509EncOIDRaw(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
-                                             p->ecCurveOidRaw,
-                               p->ecCurveOidRawLen))) return false;
+                                             p->ecCurveOidRaw, p->ecCurveOidRawLen)))
+        return false;
     *lenOut = pos;
     return true;
 }
@@ -1813,25 +1855,23 @@ static bool _SSFX509EncSPKIContent(uint8_t *buf, uint32_t bufSize, const void *a
     SSF_REQUIRE(p != NULL);
     SSF_REQUIRE(lenOut != NULL);
 
-    /* EC key? */
+    /* Is it an EC key? */
     if (p->ecCurveOidRaw != NULL)
     {
         /* Yes, the algorithm carries the named curve as its parameter */
         n = _SSFX509EncConstructed(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
-                                   SSF_ASN1_TAG_SEQUENCE,
-                            _SSFX509EncECAlgContent, p);
+                                   SSF_ASN1_TAG_SEQUENCE, _SSFX509EncECAlgContent, p);
     }
     else
     {
         /* No, bare algorithm identifier */
         n = _SSFX509EncAlgId(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
-                             p->pubKeyAlgOidRaw,
-                      p->pubKeyAlgOidRawLen);
+                             p->pubKeyAlgOidRaw, p->pubKeyAlgOidRawLen);
     }
     if (!_SSFX509Add(&pos, n)) return false;
-    if (!_SSFX509Add(&pos, _SSFX509EncBitString(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize,
-        pos), p->pubKey, p->pubKeyLen,
-                                  0u))) return false;
+    if (!_SSFX509Add(&pos, _SSFX509EncBitString(_SSFX509At(buf, pos),
+                                                _SSFX509Rem(buf, bufSize, pos), p->pubKey,
+                                                p->pubKeyLen, 0u))) return false;
     *lenOut = pos;
     return true;
 }
@@ -1850,12 +1890,18 @@ static bool _SSFX509EncExtContent(uint8_t *buf, uint32_t bufSize, const void *ar
     if (!_SSFX509Add(&pos, _SSFX509EncOIDRaw(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
                                              e->oid, e->oidLen)))
         return false;
-    if (e->critical && !_SSFX509Add(&pos, _SSFX509EncBool(_SSFX509At(buf, pos), _SSFX509Rem(buf,
-        bufSize, pos), true)))
+    /* Is the extension critical and its BOOLEAN not encodable? */
+    if ((e->critical) &&
+        (!_SSFX509Add(&pos, _SSFX509EncBool(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
+                                            true))))
+    {
+        /* Yes */
         return false;
-    if (!_SSFX509Add(&pos, _SSFX509EncConstructed(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize,
-                                                                                    pos),
-                                    SSF_ASN1_TAG_OCTET_STRING, e->valueFn, e->valueArg)))
+    }
+    if (!_SSFX509Add(&pos, _SSFX509EncConstructed(_SSFX509At(buf, pos),
+                                                  _SSFX509Rem(buf, bufSize, pos),
+                                                  SSF_ASN1_TAG_OCTET_STRING, e->valueFn,
+                                                  e->valueArg)))
         return false;
     *lenOut = pos;
     return true;
@@ -1866,6 +1912,7 @@ static bool _SSFX509EncExtContent(uint8_t *buf, uint32_t bufSize, const void *ar
 /* --------------------------------------------------------------------------------------------- */
 static uint32_t _SSFX509EncExtension(uint8_t *buf, uint32_t bufSize, const _EncExt_t *e)
 {
+    SSF_REQUIRE((buf != NULL) || (bufSize == 0u));
     SSF_REQUIRE(e != NULL);
 
     return _SSFX509EncConstructed(buf, bufSize, SSF_ASN1_TAG_SEQUENCE, _SSFX509EncExtContent, e);
@@ -1884,11 +1931,16 @@ static bool _SSFX509EncBCSeqContent(uint8_t *buf, uint32_t bufSize, const void *
     SSF_REQUIRE(p != NULL);
     SSF_REQUIRE(lenOut != NULL);
 
-    if (p->isCA && !_SSFX509Add(&pos, _SSFX509EncBool(_SSFX509At(buf, pos), _SSFX509Rem(buf,
-        bufSize, pos), true)))
+    /* Is it a CA and its cA BOOLEAN not encodable? */
+    if ((p->isCA) &&
+        (!_SSFX509Add(&pos, _SSFX509EncBool(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
+                                            true))))
+    {
+        /* Yes */
         return false;
+    }
 
-    /* Path length constraint present? */
+    /* Is a path length constraint present? */
     if (p->pathLenConstraint >= 0)
     {
         /* Yes, single octet INTEGER */
@@ -1930,8 +1982,9 @@ static bool _SSFX509EncKUValueContent(uint8_t *buf, uint32_t bufSize, const void
             unused++;
         }
     }
-    if (!_SSFX509Add(&pos, _SSFX509EncBitString(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize,
-        pos), kuBytes, kuLen, unused)))
+    if (!_SSFX509Add(&pos, _SSFX509EncBitString(_SSFX509At(buf, pos),
+                                                _SSFX509Rem(buf, bufSize, pos), kuBytes, kuLen,
+                                                unused)))
         return false;
     *lenOut = pos;
     return true;
@@ -1949,15 +2002,30 @@ static bool _SSFX509EncEKUSeqContent(uint8_t *buf, uint32_t bufSize, const void 
     SSF_REQUIRE(p != NULL);
     SSF_REQUIRE(lenOut != NULL);
 
-    if (p->ekuServerAuth && !_SSFX509Add(&pos, _SSFX509EncOIDRaw(_SSFX509At(buf, pos),
-                                                                 _SSFX509Rem(buf, bufSize, pos),
-        _oidEkuServerAuth, sizeof(_oidEkuServerAuth)))) return false;
-    if (p->ekuClientAuth && !_SSFX509Add(&pos, _SSFX509EncOIDRaw(_SSFX509At(buf, pos),
-                                                                 _SSFX509Rem(buf, bufSize, pos),
-        _oidEkuClientAuth, sizeof(_oidEkuClientAuth)))) return false;
-    if (p->ekuCodeSigning && !_SSFX509Add(&pos, _SSFX509EncOIDRaw(_SSFX509At(buf, pos),
-                                                                  _SSFX509Rem(buf, bufSize, pos),
-        _oidEkuCodeSigning, sizeof(_oidEkuCodeSigning)))) return false;
+    /* Is serverAuth requested and not encodable? */
+    if ((p->ekuServerAuth) &&
+        (!_SSFX509Add(&pos, _SSFX509EncOIDRaw(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
+                                              _oidEkuServerAuth, sizeof(_oidEkuServerAuth)))))
+    {
+        /* Yes */
+        return false;
+    }
+    /* Is clientAuth requested and not encodable? */
+    if ((p->ekuClientAuth) &&
+        (!_SSFX509Add(&pos, _SSFX509EncOIDRaw(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
+                                              _oidEkuClientAuth, sizeof(_oidEkuClientAuth)))))
+    {
+        /* Yes */
+        return false;
+    }
+    /* Is codeSigning requested and not encodable? */
+    if ((p->ekuCodeSigning) &&
+        (!_SSFX509Add(&pos, _SSFX509EncOIDRaw(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
+                                              _oidEkuCodeSigning, sizeof(_oidEkuCodeSigning)))))
+    {
+        /* Yes */
+        return false;
+    }
     *lenOut = pos;
     return true;
 }
@@ -1977,21 +2045,24 @@ static bool _SSFX509EncSANSeqContent(uint8_t *buf, uint32_t bufSize, const void 
     SSF_REQUIRE(p != NULL);
     SSF_REQUIRE(lenOut != NULL);
 
+    /* Is there another dNSName to emit? */
     while ((dns != NULL) && (*dns != NULL))
     {
-        /* dNSName terminated within the DNS name length bound? */
+        /* Yes, is it terminated within the DNS name length bound? */
         if (!SSFStrLen(*dns, _UB_DNS_NAME + 1u, &dnsLen))
         {
             /* No, refuse to emit it */
             return false;
         }
         if (!_SSFX509Add(&pos, _SSFX509EncWrap(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
-                                               0x82u,
-                                 (const uint8_t *)*dns, (uint32_t)dnsLen))) return false;
+                                               0x82u, (const uint8_t *)*dns, (uint32_t)dnsLen)))
+            return false;
         dns++;
     }
+    /* Is there another iPAddress to emit? */
     while ((ip != NULL) && (*ip != NULL))
     {
+        /* Yes */
         if (!_SSFX509Add(&pos, _SSFX509EncWrap(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
                                                0x87u, *ip, 4u)))
             return false;
@@ -2005,7 +2076,7 @@ static bool _SSFX509EncSANSeqContent(uint8_t *buf, uint32_t bufSize, const void 
 /* Content: SubjectKeyIdentifier OCTET STRING.                                                   */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFX509EncSKIDValueContent(uint8_t *buf, uint32_t bufSize, const void *arg,
-                                 uint32_t *lenOut)
+                                        uint32_t *lenOut)
 {
     const SSFX509GenParams_t *p = (const SSFX509GenParams_t *)arg;
     uint32_t pos = 0;
@@ -2013,14 +2084,15 @@ static bool _SSFX509EncSKIDValueContent(uint8_t *buf, uint32_t bufSize, const vo
     SSF_REQUIRE(p != NULL);
     SSF_REQUIRE(lenOut != NULL);
 
-    /* Key identifier within the supported bound? */
+    /* Is the key identifier beyond the supported bound? */
     if (p->skidLen > _UB_KEY_IDENTIFIER)
     {
-        /* No, refuse to emit it */
+        /* Yes, refuse to emit it */
         return false;
     }
-    if (!_SSFX509Add(&pos, _SSFX509EncOctetString(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize,
-        pos), p->skid, p->skidLen)))
+    if (!_SSFX509Add(&pos, _SSFX509EncOctetString(_SSFX509At(buf, pos),
+                                                  _SSFX509Rem(buf, bufSize, pos), p->skid,
+                                                  p->skidLen)))
         return false;
     *lenOut = pos;
     return true;
@@ -2038,10 +2110,10 @@ static bool _SSFX509EncAKIDSeqContent(uint8_t *buf, uint32_t bufSize, const void
     SSF_REQUIRE(p != NULL);
     SSF_REQUIRE(lenOut != NULL);
 
-    /* Key identifier within the supported bound? */
+    /* Is the key identifier beyond the supported bound? */
     if (p->akidLen > _UB_KEY_IDENTIFIER)
     {
-        /* No, refuse to emit it */
+        /* Yes, refuse to emit it */
         return false;
     }
     if (!_SSFX509Add(&pos, _SSFX509EncWrap(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
@@ -2052,10 +2124,10 @@ static bool _SSFX509EncAKIDSeqContent(uint8_t *buf, uint32_t bufSize, const void
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Content: GeneralSubtrees, each SEQUENCE { base GeneralName } for the DNS and IP lists.         */
+/* Content: GeneralSubtrees, each SEQUENCE { base GeneralName }, for the DNS and IP lists.       */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFX509EncSubtreesContent(uint8_t *buf, uint32_t bufSize, const void *arg,
-                                uint32_t *lenOut)
+                                       uint32_t *lenOut)
 {
     const _EncSubtrees_t *s = (const _EncSubtrees_t *)arg;
     const char **dns = s->dns;
@@ -2067,9 +2139,10 @@ static bool _SSFX509EncSubtreesContent(uint8_t *buf, uint32_t bufSize, const voi
     SSF_REQUIRE(s != NULL);
     SSF_REQUIRE(lenOut != NULL);
 
+    /* Is there another dNSName subtree to emit? */
     while ((dns != NULL) && (*dns != NULL))
     {
-        /* dNSName terminated within the DNS name length bound? */
+        /* Yes, is it terminated within the DNS name length bound? */
         if (!SSFStrLen(*dns, _UB_DNS_NAME + 1u, &dnsLen))
         {
             /* No, refuse to emit it */
@@ -2078,20 +2151,24 @@ static bool _SSFX509EncSubtreesContent(uint8_t *buf, uint32_t bufSize, const voi
         gn.tag = 0x82u;
         gn.data = (const uint8_t *)*dns;
         gn.len = (uint32_t)dnsLen;
-        if (!_SSFX509Add(&pos, _SSFX509EncConstructed(_SSFX509At(buf, pos), _SSFX509Rem(buf,
-            bufSize, pos),
-                                        SSF_ASN1_TAG_SEQUENCE, _SSFX509EncTaggedContent, &gn)))
+        if (!_SSFX509Add(&pos, _SSFX509EncConstructed(_SSFX509At(buf, pos),
+                                                      _SSFX509Rem(buf, bufSize, pos),
+                                                      SSF_ASN1_TAG_SEQUENCE,
+                                                      _SSFX509EncTaggedContent, &gn)))
             return false;
         dns++;
     }
+    /* Is there another iPAddress subtree to emit? */
     while ((ips != NULL) && (*ips != NULL))
     {
+        /* Yes */
         gn.tag = 0x87u;
         gn.data = *ips;
         gn.len = 8u;
-        if (!_SSFX509Add(&pos, _SSFX509EncConstructed(_SSFX509At(buf, pos), _SSFX509Rem(buf,
-            bufSize, pos),
-                                        SSF_ASN1_TAG_SEQUENCE, _SSFX509EncTaggedContent, &gn)))
+        if (!_SSFX509Add(&pos, _SSFX509EncConstructed(_SSFX509At(buf, pos),
+                                                      _SSFX509Rem(buf, bufSize, pos),
+                                                      SSF_ASN1_TAG_SEQUENCE,
+                                                      _SSFX509EncTaggedContent, &gn)))
             return false;
         ips++;
     }
@@ -2120,13 +2197,15 @@ static bool _SSFX509EncNCSeqContent(uint8_t *buf, uint32_t bufSize, const void *
         sub.ips = (idx == 0u) ? p->ncPermittedIPs : p->ncExcludedIPs;
         tag = (idx == 0u) ? SSF_ASN1_CONTEXT_EXPLICIT(0) : SSF_ASN1_CONTEXT_EXPLICIT(1);
 
-        /* Any subtree in this list? */
+        /* Is there any subtree in this list? */
         if (((sub.dns != NULL) && (*sub.dns != NULL)) || ((sub.ips != NULL) && (*sub.ips != NULL)))
         {
             /* Yes, emit the [n] IMPLICIT GeneralSubtrees */
-            if (!_SSFX509Add(&pos, _SSFX509EncConstructed(_SSFX509At(buf, pos), _SSFX509Rem(buf,
-                bufSize, pos), tag,
-                                            _SSFX509EncSubtreesContent, &sub))) return false;
+            if (!_SSFX509Add(&pos, _SSFX509EncConstructed(_SSFX509At(buf, pos),
+                                                          _SSFX509Rem(buf, bufSize, pos), tag,
+                                                          _SSFX509EncSubtreesContent, &sub)))
+                return false;
+
         }
     }
     *lenOut = pos;
@@ -2182,23 +2261,29 @@ static bool _SSFX509EncExtListContent(uint8_t *buf, uint32_t bufSize, const void
         if (!_SSFX509Add(&pos, _SSFX509EncExtension(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize,
             pos), &e))) return false;
     }
+    /* Is a Subject Alternative Name requested? */
     if ((p->sanDNSNames != NULL) || (p->sanIPAddrs != NULL))
     {
+        /* Yes */
         seq.fn = _SSFX509EncSANSeqContent;
         e.oid = _oidSAN; e.oidLen = sizeof(_oidSAN);
         e.critical = false; e.valueFn = _SSFX509EncNestedContent; e.valueArg = &seq;
         if (!_SSFX509Add(&pos, _SSFX509EncExtension(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize,
             pos), &e))) return false;
     }
+    /* Is a Subject Key Identifier requested? */
     if ((p->skid != NULL) && (p->skidLen > 0u))
     {
+        /* Yes */
         e.oid = _oidSKID; e.oidLen = sizeof(_oidSKID);
         e.critical = false; e.valueFn = _SSFX509EncSKIDValueContent; e.valueArg = p;
         if (!_SSFX509Add(&pos, _SSFX509EncExtension(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize,
             pos), &e))) return false;
     }
+    /* Is an Authority Key Identifier requested? */
     if ((p->akid != NULL) && (p->akidLen > 0u))
     {
+        /* Yes */
         seq.fn = _SSFX509EncAKIDSeqContent;
         e.oid = _oidAKID; e.oidLen = sizeof(_oidAKID);
         e.critical = false; e.valueFn = _SSFX509EncNestedContent; e.valueArg = &seq;
@@ -2218,16 +2303,16 @@ static bool _SSFX509EncExtListContent(uint8_t *buf, uint32_t bufSize, const void
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if params request at least one extension, else false.                           */
+/* Returns true if p requests at least one extension in a v3 certificate, else false.            */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFX509HasExtensions(const SSFX509GenParams_t *p)
 {
     SSF_REQUIRE(p != NULL);
 
-    return (p->version >= 2u) && (p->addBasicConstraints || p->addKeyUsage || p->addExtKeyUsage ||
-                                   p->addRawExt || (p->sanDNSNames != NULL) ||
-                                   (p->sanIPAddrs != NULL) || (p->skid != NULL) ||
-                                   (p->akid != NULL) || p->addNameConstraints);
+    return ((p->version >= 2u) &&
+            ((p->addBasicConstraints) || (p->addKeyUsage) || (p->addExtKeyUsage) ||
+             (p->addRawExt) || (p->sanDNSNames != NULL) || (p->sanIPAddrs != NULL) ||
+             (p->skid != NULL) || (p->akid != NULL) || (p->addNameConstraints)));
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -2242,46 +2327,49 @@ static bool _SSFX509EncTBSContent(uint8_t *buf, uint32_t bufSize, const void *ar
     SSF_REQUIRE(p != NULL);
     SSF_REQUIRE(lenOut != NULL);
 
-    /* Version present (v1 omits the field)? */
+    /* Is the version present (v1 omits the field)? */
     if (p->version >= 1u)
     {
         /* Yes, [0] EXPLICIT INTEGER */
-        if (!_SSFX509Add(&pos, _SSFX509EncConstructed(_SSFX509At(buf, pos), _SSFX509Rem(buf,
-            bufSize, pos),
-                                        SSF_ASN1_CONTEXT_EXPLICIT(0),
-                                        _SSFX509EncVersionContent, p)))
+        if (!_SSFX509Add(&pos, _SSFX509EncConstructed(_SSFX509At(buf, pos),
+                                                      _SSFX509Rem(buf, bufSize, pos),
+                                                      SSF_ASN1_CONTEXT_EXPLICIT(0),
+                                                      _SSFX509EncVersionContent, p)))
             return false;
     }
-    /* The serial is an unsigned magnitude; encode it as a positive INTEGER (AUDIT ASN1-6) */
+    /* The serial is an unsigned magnitude; encode it as a positive INTEGER */
     if (!_SSFX509Add(&pos, _SSFX509EncUInt(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
                                            p->serial, p->serialLen)))
         return false;
-    if (!_SSFX509Add(&pos, _SSFX509EncAlgIdWithParams(_SSFX509At(buf, pos), _SSFX509Rem(buf,
-        bufSize, pos), p->sigAlgOidRaw,
-                                        p->sigAlgOidRawLen, p->sigAlgParams, p->sigAlgParamsLen)))
+    if (!_SSFX509Add(&pos, _SSFX509EncAlgIdWithParams(_SSFX509At(buf, pos),
+                                                      _SSFX509Rem(buf, bufSize, pos),
+                                                      p->sigAlgOidRaw, p->sigAlgOidRawLen,
+                                                      p->sigAlgParams, p->sigAlgParamsLen)))
         return false;
     if (!_SSFX509Add(&pos, _SSFX509EncDN(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
                                          &p->issuer))) return false;
-    if (!_SSFX509Add(&pos, _SSFX509EncConstructed(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize,
-        pos), SSF_ASN1_TAG_SEQUENCE,
-                                    _SSFX509EncValidityContent, p))) return false;
+    if (!_SSFX509Add(&pos, _SSFX509EncConstructed(_SSFX509At(buf, pos),
+                                                  _SSFX509Rem(buf, bufSize, pos),
+                                                  SSF_ASN1_TAG_SEQUENCE,
+                                                  _SSFX509EncValidityContent, p))) return false;
     if (!_SSFX509Add(&pos, _SSFX509EncDN(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos),
                                          &p->subject))) return false;
-    if (!_SSFX509Add(&pos, _SSFX509EncConstructed(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize,
-        pos), SSF_ASN1_TAG_SEQUENCE,
-                                    _SSFX509EncSPKIContent, p))) return false;
+    if (!_SSFX509Add(&pos, _SSFX509EncConstructed(_SSFX509At(buf, pos),
+                                                  _SSFX509Rem(buf, bufSize, pos),
+                                                  SSF_ASN1_TAG_SEQUENCE,
+                                                  _SSFX509EncSPKIContent, p))) return false;
 
-    /* Extensions requested? */
+    /* Are extensions requested? */
     if (_SSFX509HasExtensions(p))
     {
         /* Yes, [3] EXPLICIT SEQUENCE OF Extension */
         exts.tag = SSF_ASN1_TAG_SEQUENCE;
         exts.fn = _SSFX509EncExtListContent;
         exts.arg = p;
-        if (!_SSFX509Add(&pos, _SSFX509EncConstructed(_SSFX509At(buf, pos), _SSFX509Rem(buf,
-            bufSize, pos),
-                                        SSF_ASN1_CONTEXT_EXPLICIT(3),
-                                        _SSFX509EncNestedContent, &exts)))
+        if (!_SSFX509Add(&pos, _SSFX509EncConstructed(_SSFX509At(buf, pos),
+                                                      _SSFX509Rem(buf, bufSize, pos),
+                                                      SSF_ASN1_CONTEXT_EXPLICIT(3),
+                                                      _SSFX509EncNestedContent, &exts)))
             return false;
     }
     *lenOut = pos;
@@ -2289,7 +2377,7 @@ static bool _SSFX509EncTBSContent(uint8_t *buf, uint32_t bufSize, const void *ar
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Asserts that p only asks for structures RFC 5280 allows (AUDIT X509-14).                     */
+/* Asserts that p only asks for structures RFC 5280 allows.                                      */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFX509RequireGenParams(const SSFX509GenParams_t *p)
 {
@@ -2299,7 +2387,8 @@ static void _SSFX509RequireGenParams(const SSFX509GenParams_t *p)
     SSF_REQUIRE((p->version == 0u) || (p->version == 2u));
     SSF_REQUIRE((p->skid == NULL) == (p->skidLen == 0u));
     SSF_REQUIRE((p->akid == NULL) == (p->akidLen == 0u));
-    SSF_REQUIRE((!p->addExtKeyUsage) || p->ekuServerAuth || p->ekuClientAuth || p->ekuCodeSigning);
+    SSF_REQUIRE((!p->addExtKeyUsage) || (p->ekuServerAuth) || (p->ekuClientAuth) ||
+                (p->ekuCodeSigning));
     SSF_REQUIRE(((p->sanDNSNames == NULL) && (p->sanIPAddrs == NULL)) ||
                 ((p->sanDNSNames != NULL) && (p->sanDNSNames[0] != NULL)) ||
                 ((p->sanIPAddrs != NULL) && (p->sanIPAddrs[0] != NULL)));
@@ -2312,7 +2401,7 @@ static void _SSFX509RequireGenParams(const SSFX509GenParams_t *p)
                 ((p->ncPermittedIPs != NULL) && (p->ncPermittedIPs[0] != NULL)) ||
                 ((p->ncExcludedDNS != NULL) && (p->ncExcludedDNS[0] != NULL)) ||
                 ((p->ncExcludedIPs != NULL) && (p->ncExcludedIPs[0] != NULL)));
-    SSF_REQUIRE((p->pathLenConstraint < 0) || (p->addBasicConstraints && p->isCA));
+    SSF_REQUIRE((p->pathLenConstraint < 0) || ((p->addBasicConstraints) && (p->isCA)));
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -2331,20 +2420,21 @@ bool SSFX509EncodeTBS(uint8_t *bufOpt, uint32_t bufOptSize, const SSFX509GenPara
     *lenOut = 0;
     total = _SSFX509EncConstructed(NULL, 0, SSF_ASN1_TAG_SEQUENCE, _SSFX509EncTBSContent, params);
 
-    /* Encodable and within the configured certificate size? */
+    /* Is it unencodable or over the configured certificate size? */
     if ((total == 0u) || (total > SSF_X509_CONFIG_MAX_CERT_SIZE))
     {
-        /* No, both passes report failure */
+        /* Yes, both passes report failure */
         return false;
     }
 
-    /* Only measuring? */
+    /* No, only measuring? */
     if (bufOpt == NULL)
     {
         /* Yes, report the size needed */
         *lenOut = total;
         return true;
     }
+    /* No, write it */
     *lenOut = _SSFX509EncConstructed(bufOpt, bufOptSize, SSF_ASN1_TAG_SEQUENCE,
                                      _SSFX509EncTBSContent, params);
     return (*lenOut != 0u);
@@ -2366,13 +2456,16 @@ static bool _SSFX509EncCertContent(uint8_t *buf, uint32_t bufSize, const void *a
     if (!SSFX509EncodeTBS(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize, pos), c->params,
                           &tbsLen)) return false;
     pos += tbsLen;
-    if (!_SSFX509Add(&pos, _SSFX509EncAlgIdWithParams(_SSFX509At(buf, pos), _SSFX509Rem(buf,
-        bufSize, pos),
-                                        c->params->sigAlgOidRaw, c->params->sigAlgOidRawLen,
-                                        c->params->sigAlgParams, c->params->sigAlgParamsLen)))
+    if (!_SSFX509Add(&pos, _SSFX509EncAlgIdWithParams(_SSFX509At(buf, pos),
+                                                      _SSFX509Rem(buf, bufSize, pos),
+                                                      c->params->sigAlgOidRaw,
+                                                      c->params->sigAlgOidRawLen,
+                                                      c->params->sigAlgParams,
+                                                      c->params->sigAlgParamsLen)))
         return false;
-    if (!_SSFX509Add(&pos, _SSFX509EncBitString(_SSFX509At(buf, pos), _SSFX509Rem(buf, bufSize,
-        pos), c->sig, c->sigLen, 0u)))
+    if (!_SSFX509Add(&pos, _SSFX509EncBitString(_SSFX509At(buf, pos),
+                                                _SSFX509Rem(buf, bufSize, pos), c->sig, c->sigLen,
+                                                0u)))
         return false;
     *lenOut = pos;
     return true;
@@ -2399,83 +2492,98 @@ bool SSFX509EncodeCert(uint8_t *bufOpt, uint32_t bufOptSize, const SSFX509GenPar
     c.sigLen = signatureLen;
     total = _SSFX509EncConstructed(NULL, 0, SSF_ASN1_TAG_SEQUENCE, _SSFX509EncCertContent, &c);
 
-    /* Encodable and within the configured certificate size? */
+    /* Is it unencodable or over the configured certificate size? */
     if ((total == 0u) || (total > SSF_X509_CONFIG_MAX_CERT_SIZE))
     {
-        /* No, both passes report failure */
+        /* Yes, both passes report failure */
         return false;
     }
 
-    /* Only measuring? */
+    /* No, only measuring? */
     if (bufOpt == NULL)
     {
         /* Yes, report the size needed */
         *lenOut = total;
         return true;
     }
+    /* No, write it */
     *lenOut = _SSFX509EncConstructed(bufOpt, bufOptSize, SSF_ASN1_TAG_SEQUENCE,
                                      _SSFX509EncCertContent, &c);
     return (*lenOut != 0u);
 }
 
-/* ========================================================================================== */
-/* ADDITIONAL OID HELPERS                                                                     */
-/* ========================================================================================== */
+/* --------------------------------------------------------------------------------------------- */
+/* ADDITIONAL OID HELPERS                                                                        */
+/* --------------------------------------------------------------------------------------------- */
 
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if the EC public key is on P-384, else false.                                    */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFX509IsP384(const SSFX509Cert_t *cert)
 {
     SSF_REQUIRE(cert != NULL);
     return _SSFX509OIDMatch(cert->ecCurveOidRaw, cert->ecCurveOidRawLen,
-                     _oidP384, sizeof(_oidP384));
+                            _oidP384, sizeof(_oidP384));
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if the signature algorithm is ecdsa-with-SHA384, else false.                     */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFX509IsECDSASHA384(const SSFX509Cert_t *cert)
 {
     SSF_REQUIRE(cert != NULL);
     return _SSFX509OIDMatch(cert->sigAlgOidRaw, cert->sigAlgOidRawLen,
-                     _oidEcdsaSHA384, sizeof(_oidEcdsaSHA384));
+                            _oidEcdsaSHA384, sizeof(_oidEcdsaSHA384));
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if the signature algorithm is id-RSASSA-PSS (hash not checked), else false.      */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFX509IsRSAPSSSHA256(const SSFX509Cert_t *cert)
 {
     SSF_REQUIRE(cert != NULL);
     return _SSFX509OIDMatch(cert->sigAlgOidRaw, cert->sigAlgOidRawLen,
-                     _oidRSAPSS, sizeof(_oidRSAPSS));
+                            _oidRSAPSS, sizeof(_oidRSAPSS));
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if the signature algorithm is id-RSASSA-PSS (hash not checked), else false.      */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFX509IsRSAPSSSHA384(const SSFX509Cert_t *cert)
 {
     SSF_REQUIRE(cert != NULL);
     return _SSFX509OIDMatch(cert->sigAlgOidRaw, cert->sigAlgOidRawLen,
-                     _oidRSAPSS, sizeof(_oidRSAPSS));
+                            _oidRSAPSS, sizeof(_oidRSAPSS));
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if the signature algorithm is sha256WithRSAEncryption, else false.               */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFX509IsRSAPKCS1SHA256(const SSFX509Cert_t *cert)
 {
     SSF_REQUIRE(cert != NULL);
     return _SSFX509OIDMatch(cert->sigAlgOidRaw, cert->sigAlgOidRawLen,
-                     _oidRSAPKCS1SHA256, sizeof(_oidRSAPKCS1SHA256));
+                            _oidRSAPKCS1SHA256, sizeof(_oidRSAPKCS1SHA256));
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if the signature algorithm is sha384WithRSAEncryption, else false.               */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFX509IsRSAPKCS1SHA384(const SSFX509Cert_t *cert)
 {
     SSF_REQUIRE(cert != NULL);
     return _SSFX509OIDMatch(cert->sigAlgOidRaw, cert->sigAlgOidRawLen,
-                     _oidRSAPKCS1SHA384, sizeof(_oidRSAPKCS1SHA384));
+                            _oidRSAPKCS1SHA384, sizeof(_oidRSAPKCS1SHA384));
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if the signature algorithm is sha512WithRSAEncryption, else false.               */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFX509IsRSAPKCS1SHA512(const SSFX509Cert_t *cert)
 {
     SSF_REQUIRE(cert != NULL);
     return _SSFX509OIDMatch(cert->sigAlgOidRaw, cert->sigAlgOidRawLen,
-                     _oidRSAPKCS1SHA512, sizeof(_oidRSAPKCS1SHA512));
+                            _oidRSAPKCS1SHA512, sizeof(_oidRSAPKCS1SHA512));
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -2485,12 +2593,13 @@ bool SSFX509IsEd25519(const SSFX509Cert_t *cert)
 {
     SSF_REQUIRE(cert != NULL);
     return _SSFX509OIDMatch(cert->sigAlgOidRaw, cert->sigAlgOidRawLen,
-                     _oidEd25519, sizeof(_oidEd25519));
+                            _oidEd25519, sizeof(_oidEd25519));
+
 }
 
-/* ========================================================================================== */
-/* CHAIN VERIFICATION                                                                         */
-/* ========================================================================================== */
+/* --------------------------------------------------------------------------------------------- */
+/* CHAIN VERIFICATION                                                                            */
+/* --------------------------------------------------------------------------------------------- */
 
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if hostnameStr matches a dNSName SAN value per RFC 6125 Sec. 6.4.3, else false.  */
@@ -2509,7 +2618,7 @@ static bool _SSFX509HostnameMatch(const char *hostnameStr, const uint8_t *sanVal
     SSF_REQUIRE(hostnameStr != NULL);
     SSF_REQUIRE(sanVal != NULL);
 
-    /* Hostname terminated within the longest possible DNS name? */
+    /* Is the hostname terminated within the longest possible DNS name? */
     if (!SSFStrLen(hostnameStr, _UB_DNS_NAME + 1u, &hostLenSz))
     {
         /* No, nothing that long can match a dNSName */
@@ -2517,26 +2626,32 @@ static bool _SSFX509HostnameMatch(const char *hostnameStr, const uint8_t *sanVal
     }
     hostLen = (uint32_t)hostLenSz;
 
-    /* Wildcard SAN of the form "*.base"? */
+    /* Is it a wildcard SAN of the form "*.base"? */
     if ((sanValLen >= 2u) && (sanVal[0] == (uint8_t)'*') && (sanVal[1] == (uint8_t)'.'))
     {
         /* Yes, the wildcard stands for exactly the leftmost hostname label */
         dot = hostnameStr;
-        while ((*dot != '\0') && (*dot != '.')) dot++;
 
-        /* Leftmost label is non-empty and followed by a dot? */
+        /* Is dot still inside the leftmost label? */
+        while ((*dot != '\0') && (*dot != '.'))
+        {
+            /* Yes */
+            dot++;
+        }
+
+        /* Is the leftmost label non-empty and followed by a dot? */
         if ((*dot != '.') || (dot == hostnameStr))
         {
             /* No, nothing for the wildcard to match */
             return false;
         }
 
-        /* Rest of the hostname is exactly ".base"? */
+        /* Is the rest of the hostname exactly as long as ".base"? */
         domainLen = hostLen - (uint32_t)(dot - hostnameStr);
         sanDomainLen = sanValLen - 2u;
         if (domainLen != (sanDomainLen + 1u)) return false;
 
-        /* Base has an interior dot, so "*.com" wildcards never match (CA/B Forum BR 3.2.2.6)? */
+        /* Does base have an interior dot, so "*.com" never matches (CA/B Forum BR 3.2.2.6)? */
         for (b = 2u; b < sanValLen; b++)
         {
             if (sanVal[b] == (uint8_t)'.')
@@ -2555,62 +2670,64 @@ static bool _SSFX509HostnameMatch(const char *hostnameStr, const uint8_t *sanVal
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if str is a dotted-decimal IPv4 address written into ipOut, else false.          */
+/* Returns true if ipStr is a dotted-decimal IPv4 address written into ipOut, else false.        */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFX509ParseIPv4(const char *str, uint8_t ipOut[4])
+static bool _SSFX509ParseIPv4(const char *ipStr, uint8_t ipOut[4])
 {
     uint32_t octet;
     uint32_t i;
     uint32_t digitCount;
 
-    SSF_REQUIRE(str != NULL);
+    SSF_REQUIRE(ipStr != NULL);
     SSF_REQUIRE(ipOut != NULL);
 
     for (i = 0; i < 4u; i++)
     {
         octet = 0;
         digitCount = 0;
-        while ((*str >= '0') && (*str <= '9'))
+
+        /* Is the next character a decimal digit? */
+        while ((*ipStr >= '0') && (*ipStr <= '9'))
         {
-            /* Is this a second digit after a leading zero, which inet_aton reads as octal? */
+            /* Yes, is it a second digit after a leading zero, which inet_aton reads as octal? */
             if ((digitCount == 1u) && (octet == 0u))
             {
-                /* Yes, "010" is ambiguous, so it is not an IPv4 literal (AUDIT X509-17) */
+                /* Yes, "010" is ambiguous, so it is not an IPv4 literal */
                 return false;
             }
             /* No */
-            octet = (octet * 10u) + (uint32_t)(*str - '0');
+            octet = (octet * 10u) + (uint32_t)(*ipStr - '0');
             if (octet > 255u) return false;
-            str++;
+            ipStr++;
             digitCount++;
         }
         if (digitCount == 0u) return false;
         ipOut[i] = (uint8_t)octet;
 
-        /* More octets to come? */
+        /* Are more octets to come? */
         if (i < 3u)
         {
             /* Yes, a dot must separate them */
-            if (*str != '.') return false;
-            str++;
+            if (*ipStr != '.') return false;
+            ipStr++;
         }
     }
-    return (*str == '\0');
+    return (*ipStr == '\0');
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if str holds only ASCII digits and dots (no DNS name is all-numeric), else false. */
+/* Returns true if hostStr is only ASCII digits and dots (no DNS name is all-numeric).           */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFX509IsNumericHost(const char *str)
+static bool _SSFX509IsNumericHost(const char *hostStr)
 {
     uint32_t n;
 
-    SSF_REQUIRE(str != NULL);
+    SSF_REQUIRE(hostStr != NULL);
 
-    for (n = 0; (str[n] != '\0') && (n <= _UB_DNS_NAME); n++)
+    for (n = 0; (hostStr[n] != '\0') && (n <= _UB_DNS_NAME); n++)
     {
         /* Is this character something other than a digit or a dot? */
-        if (((str[n] < '0') || (str[n] > '9')) && (str[n] != '.'))
+        if (((hostStr[n] < '0') || (hostStr[n] > '9')) && (hostStr[n] != '.'))
         {
             /* Yes */
             return false;
@@ -2637,7 +2754,7 @@ static bool _SSFX509IPAddressMatch(const char *hostnameStr, const uint8_t *sanIP
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if hostnameStr is an IPv4 literal equal to the iPAddress SAN value, else false.   */
+/* Returns true if hostnameStr is an IPv4 literal equal to the iPAddress SAN value, else false.  */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFX509MatchIPAddress(const char *hostnameStr, const uint8_t *sanIP, uint32_t sanIPLen)
 {
@@ -2648,15 +2765,15 @@ bool SSFX509MatchIPAddress(const char *hostnameStr, const uint8_t *sanIP, uint32
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if digestOidOpt is absent or is exactly expectedOid, else false.                  */
+/* Returns true if digestOidOpt is absent or is exactly expectedOid, else false.                 */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFX509DigestAgrees(const uint8_t *digestOidOpt, uint32_t digestOidLen,
-                          const uint8_t *expectedOid, uint32_t expectedOidLen)
+                                 const uint8_t *expectedOid, uint32_t expectedOidLen)
 {
     SSF_REQUIRE((digestOidOpt != NULL) || (digestOidLen == 0u));
     SSF_REQUIRE(expectedOid != NULL);
 
-    /* No digest algorithm given? */
+    /* Is no digest algorithm given? */
     if ((digestOidOpt == NULL) || (digestOidLen == 0u))
     {
         /* Yes, nothing to disagree with */
@@ -2692,9 +2809,20 @@ static bool _SSFX509RSAKeyPolicyOK(const uint8_t *der, uint32_t derLen)
     if (!SSFASN1DecGetUInt(&inner, &n, &nLen, &inner)) return false;
     if (!SSFASN1DecGetUInt(&inner, &e, &eLen, &inner)) return false;
 
-    /* Drop the INTEGER sign bytes to get the magnitudes */
-    while ((nLen > 0u) && (*n == 0u)) { n++; nLen--; }
-    while ((eLen > 0u) && (*e == 0u)) { e++; eLen--; }
+    /* Is a leading zero (INTEGER sign) byte left on the modulus? */
+    while ((nLen > 0u) && (*n == 0u))
+    {
+        /* Yes, drop it */
+        n++;
+        nLen--;
+    }
+    /* Is a leading zero (INTEGER sign) byte left on the exponent? */
+    while ((eLen > 0u) && (*e == 0u))
+    {
+        /* Yes, drop it */
+        e++;
+        eLen--;
+    }
 
     /* Is either value zero? */
     if ((nLen == 0u) || (eLen == 0u))
@@ -2711,7 +2839,7 @@ static bool _SSFX509RSAKeyPolicyOK(const uint8_t *der, uint32_t derLen)
         top >>= 1;
     }
 
-    /* Is the modulus smaller than the configured minimum (AUDIT RSA-10)? */
+    /* Is the modulus smaller than the configured minimum? */
     if (nBits < SSF_X509_CONFIG_RSA_MIN_BITS)
     {
         /* Yes, a key this short may be factorable */
@@ -2730,26 +2858,35 @@ static bool _SSFX509RSAKeyPolicyOK(const uint8_t *der, uint32_t derLen)
 
 #if _SSF_X509_RSA_PKCS1 == 1
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if oid names SHA-256, SHA-384 or SHA-512 with *hashOut set, else false.           */
+/* Returns true if oid names SHA-256, SHA-384 or SHA-512 with *hashOut set, else false.          */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFX509HashFromOID(const uint8_t *oid, uint32_t oidLen, SSFRSAHash_t *hashOut)
 {
     SSF_REQUIRE((oid != NULL) || (oidLen == 0u));
     SSF_REQUIRE(hashOut != NULL);
 
-    if (_SSFX509OIDMatch(oid, oidLen, _oidSHA256,
-                         sizeof(_oidSHA256))) *hashOut = SSF_RSA_HASH_SHA256;
-    else if (_SSFX509OIDMatch(oid, oidLen, _oidSHA384,
-                              sizeof(_oidSHA384))) *hashOut = SSF_RSA_HASH_SHA384;
-    else if (_SSFX509OIDMatch(oid, oidLen, _oidSHA512,
-                              sizeof(_oidSHA512))) *hashOut = SSF_RSA_HASH_SHA512;
-    else return false;
+    if (_SSFX509OIDMatch(oid, oidLen, _oidSHA256, sizeof(_oidSHA256)))
+    {
+        *hashOut = SSF_RSA_HASH_SHA256;
+    }
+    else if (_SSFX509OIDMatch(oid, oidLen, _oidSHA384, sizeof(_oidSHA384)))
+    {
+        *hashOut = SSF_RSA_HASH_SHA384;
+    }
+    else if (_SSFX509OIDMatch(oid, oidLen, _oidSHA512, sizeof(_oidSHA512)))
+    {
+        *hashOut = SSF_RSA_HASH_SHA512;
+    }
+    else
+    {
+        return false;
+    }
     return true;
 }
 #endif /* _SSF_X509_RSA_PKCS1 == 1 */
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns the SHA-2 OID naming hashId with *lenOut set.                                          */
+/* Returns the SHA-2 OID naming hashId with *lenOut set.                                         */
 /* --------------------------------------------------------------------------------------------- */
 static const uint8_t *_SSFX509OIDForHash(SSFRSAHash_t hashId, uint32_t *lenOut)
 {
@@ -2770,11 +2907,10 @@ static const uint8_t *_SSFX509OIDForHash(SSFRSAHash_t hashId, uint32_t *lenOut)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Digests data with the SHA-2 hash hashId selects into hash, setting *hashLenOut.                */
+/* Digests data with the SHA-2 hash hashId selects into hash, setting *hashLenOut.               */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFX509Digest(SSFRSAHash_t hashId, const uint8_t *data, uint32_t dataLen,
-                           uint8_t *hash,
-                    size_t *hashLenOut)
+                           uint8_t *hash, size_t *hashLenOut)
 {
     SSF_REQUIRE((data != NULL) || (dataLen == 0u));
     SSF_REQUIRE(hash != NULL);
@@ -2809,7 +2945,7 @@ static bool _SSFX509KeyAlgIs(const SSFX509Cert_t *keyCert, const uint8_t *oid, u
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if sig over data verifies with keyCert's public key under sigAlg, else false.     */
+/* Returns true if sig over data verifies with keyCert's public key under sigAlg, else false.    */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgOidRaw,
                             uint32_t sigAlgOidRawLen, const uint8_t *sigAlgParamsOpt,
@@ -2839,7 +2975,7 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
     SSF_REQUIRE((data != NULL) || (dataLen == 0u));
     SSF_REQUIRE(sig != NULL);
 
-    /* Is the key empty (an untrusted issuer's key reaches here, AUDIT X509-2)? */
+    /* Is the key empty (an untrusted issuer's key can reach here)? */
     if ((keyCert->pubKey == NULL) || (keyCert->pubKeyLen == 0u))
     {
         /* Yes, nothing to verify with; the verifiers would trap on it */
@@ -2854,7 +2990,7 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
     if ((isEcdsa256) ||
         (_SSFX509OIDMatch(sigAlgOidRaw, sigAlgOidRawLen, _oidEcdsaSHA384, sizeof(_oidEcdsaSHA384))))
     {
-        /* Yes, is the key an EC key and are the parameters absent (RFC 5758 3.2, X509-11)? */
+        /* Yes, is the key an EC key and are the parameters absent (RFC 5758 3.2)? */
         if ((!_SSFX509KeyAlgIs(keyCert, _oidEcPubKey, sizeof(_oidEcPubKey))) ||
             (sigAlgParamsLen != 0u))
         {
@@ -2866,7 +3002,7 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
         /* Yes */
         hashId = isEcdsa256 ? SSF_RSA_HASH_SHA256 : SSF_RSA_HASH_SHA384;
 
-        /* Digest algorithm, when given, is the one the signature algorithm implies? */
+        /* Is the digest algorithm, when given, the one the signature algorithm implies? */
         impliedOid = _SSFX509OIDForHash(hashId, &impliedOidLen);
         if (!_SSFX509DigestAgrees(digestAlgOidRawOpt, digestAlgOidRawLen, impliedOid,
                                   impliedOidLen))
@@ -2878,8 +3014,8 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
         }
         _SSFX509Digest(hashId, data, dataLen, hash, &hashLen);
 
-        /* Is the key on a curve compiled into this build (AUDIT CFG-1)? */
 #if SSF_EC_CONFIG_ENABLE_P256 == 1
+        /* Is the key on P-256? */
         if (SSFX509IsP256(keyCert))
         {
             /* Yes, P-256 */
@@ -2904,9 +3040,7 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
             return false;
         }
 
-        /* ssfecdsa truncates a digest longer than the curve order (AUDIT ECDSA-3) */
-
-        /* keyCert's pubKey is the SEC 1 uncompressed point held in the SPKI BIT STRING */
+        /* keyCert's pubKey is the SEC 1 point; ssfecdsa truncates a long digest (RFC 5758 3.2) */
         ok = SSFECDSAVerify(curve, keyCert->pubKey, (size_t)keyCert->pubKeyLen, hash, hashLen, sig,
                             (size_t)sigLen);
         SSF_TLS_TRACE_CERT_DEBUG(&_ssfx509TraceCtx,
@@ -2917,17 +3051,17 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
 
     /* Compiled out schemes fall through to the unsupported-algorithm rejection below */
 #if _SSF_X509_RSA_PKCS1 == 1
-    /* RSA PKCS#1 v1.5, by a hashed-with-RSA OID or plain rsaEncryption (RFC 3370 Sec. 3.2)? */
+    /* Is it RSA PKCS#1 v1.5, by a hashed-with-RSA OID or plain rsaEncryption (RFC 3370 3.2)? */
     isRsaPlain = _SSFX509OIDMatch(sigAlgOidRaw, sigAlgOidRawLen, _oidRSA, sizeof(_oidRSA));
     if ((isRsaPlain) ||
         (_SSFX509OIDMatch(sigAlgOidRaw, sigAlgOidRawLen, _oidRSAPKCS1SHA256,
-                   sizeof(_oidRSAPKCS1SHA256))) ||
+                          sizeof(_oidRSAPKCS1SHA256))) ||
         (_SSFX509OIDMatch(sigAlgOidRaw, sigAlgOidRawLen, _oidRSAPKCS1SHA384,
-                   sizeof(_oidRSAPKCS1SHA384))) ||
+                          sizeof(_oidRSAPKCS1SHA384))) ||
         (_SSFX509OIDMatch(sigAlgOidRaw, sigAlgOidRawLen, _oidRSAPKCS1SHA512,
-                   sizeof(_oidRSAPKCS1SHA512))))
+                          sizeof(_oidRSAPKCS1SHA512))))
     {
-        /* Yes, is the key an rsaEncryption key (AUDIT X509-11)? */
+        /* Yes, is the key an rsaEncryption key? */
         if (!_SSFX509KeyAlgIs(keyCert, _oidRSA, sizeof(_oidRSA)))
         {
             /* No */
@@ -2938,9 +3072,10 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
         /* Yes, plain rsaEncryption? */
         if (isRsaPlain)
         {
-            /* Yes, the digest algorithm alone names the hash and must be a supported one */
+            /* Yes, does the digest algorithm, which alone names the hash, name a supported one? */
             if (!_SSFX509HashFromOID(digestAlgOidRawOpt, digestAlgOidRawLen, &hashId))
             {
+                /* No */
                 SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
                     "VerifySig: rsaEncryption needs a SHA-2 digest algorithm (%u bytes given)",
                     digestAlgOidRawLen);
@@ -2951,12 +3086,12 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
         {
             /* No, the OID names the hash and the digest algorithm, when given, must agree */
             if (_SSFX509OIDMatch(sigAlgOidRaw, sigAlgOidRawLen, _oidRSAPKCS1SHA256,
-                          sizeof(_oidRSAPKCS1SHA256)))
+                                 sizeof(_oidRSAPKCS1SHA256)))
             {
                 hashId = SSF_RSA_HASH_SHA256;
             }
             else if (_SSFX509OIDMatch(sigAlgOidRaw, sigAlgOidRawLen, _oidRSAPKCS1SHA384,
-                               sizeof(_oidRSAPKCS1SHA384)))
+                                      sizeof(_oidRSAPKCS1SHA384)))
             {
                 hashId = SSF_RSA_HASH_SHA384;
             }
@@ -2965,9 +3100,12 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
                 hashId = SSF_RSA_HASH_SHA512;
             }
             impliedOid = _SSFX509OIDForHash(hashId, &impliedOidLen);
+
+            /* Does the digest algorithm, when given, agree with the OID's hash? */
             if (!_SSFX509DigestAgrees(digestAlgOidRawOpt, digestAlgOidRawLen, impliedOid,
                                       impliedOidLen))
             {
+                /* No */
                 SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
                     "VerifySig: digest algorithm disagrees with RSA signature algorithm");
                 return false;
@@ -2975,7 +3113,7 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
         }
         _SSFX509Digest(hashId, data, dataLen, hash, &hashLen);
 
-        /* Does the RSA key meet the size and exponent policy (AUDIT RSA-10)? */
+        /* Does the RSA key meet the size and exponent policy? */
         if (!_SSFX509RSAKeyPolicyOK(keyCert->pubKey, keyCert->pubKeyLen))
         {
             /* No, refuse it even if the signature would verify */
@@ -2984,8 +3122,7 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
                 (unsigned int)SSF_X509_CONFIG_RSA_MIN_BITS);
             return false;
         }
-        /* Yes, verify the signature */
-        /* keyCert's pubKey is the DER RSAPublicKey held in the SPKI BIT STRING */
+        /* Yes, verify with keyCert's pubKey, the DER RSAPublicKey from the SPKI BIT STRING */
         ok = SSFRSAVerifyPKCS1(keyCert->pubKey, (size_t)keyCert->pubKeyLen, hashId, hash, hashLen,
                                sig, (size_t)sigLen);
         SSF_TLS_TRACE_CERT_DEBUG(&_ssfx509TraceCtx,
@@ -2996,10 +3133,10 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
 #endif /* _SSF_X509_RSA_PKCS1 == 1 */
 
 #if _SSF_X509_RSA_PSS == 1
-    /* RSA-PSS, whose parameters select the hash and salt length (RFC 4055)? */
+    /* Is it RSA-PSS, whose parameters select the hash and salt length (RFC 4055)? */
     if (_SSFX509OIDMatch(sigAlgOidRaw, sigAlgOidRawLen, _oidRSAPSS, sizeof(_oidRSAPSS)))
     {
-        /* Yes, is the key rsaEncryption or id-RSASSA-PSS (RFC 4055 1.2, AUDIT X509-11)? */
+        /* Yes, is the key rsaEncryption or id-RSASSA-PSS (RFC 4055 1.2)? */
         if ((!_SSFX509KeyAlgIs(keyCert, _oidRSA, sizeof(_oidRSA))) &&
             (!_SSFX509KeyAlgIs(keyCert, _oidRSAPSS, sizeof(_oidRSAPSS))))
         {
@@ -3008,7 +3145,7 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
                 "VerifySig: RSA-PSS needs an rsaEncryption or id-RSASSA-PSS key");
             return false;
         }
-        /* Yes, are the RSASSA-PSS-params well formed and supported (AUDIT X509-7)? */
+        /* Yes, are the RSASSA-PSS-params well formed and supported? */
         if (!_SSFX509ParsePSSParams(sigAlgParamsOpt, sigAlgParamsLen, &hashId, &saltLen))
         {
             /* No, never verify under substituted defaults */
@@ -3018,7 +3155,7 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
         }
         /* Yes */
 
-        /* Digest algorithm, when given, is the hash the parameters select? */
+        /* Is the digest algorithm, when given, the hash the parameters select? */
         impliedOid = _SSFX509OIDForHash(hashId, &impliedOidLen);
         if (!_SSFX509DigestAgrees(digestAlgOidRawOpt, digestAlgOidRawLen, impliedOid,
                                   impliedOidLen))
@@ -3030,16 +3167,16 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
         }
         _SSFX509Digest(hashId, data, dataLen, hash, &hashLen);
 
-        /* Salt length within what the verifier supports? */
+        /* Is the salt length longer than the hash, which the verifier does not support? */
         if (saltLen > hashLen)
         {
-            /* No, longer than the hash is never issued and is not accepted */
+            /* Yes, longer than the hash is never issued and is not accepted */
             SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
                 "VerifySig: RSA-PSS saltLength %u exceeds hash length %u", saltLen,
                 (unsigned int)hashLen);
             return false;
         }
-        /* Does the RSA key meet the size and exponent policy (AUDIT RSA-10)? */
+        /* No, does the RSA key meet the size and exponent policy? */
         if (!_SSFX509RSAKeyPolicyOK(keyCert->pubKey, keyCert->pubKeyLen))
         {
             /* No, refuse it even if the signature would verify */
@@ -3058,10 +3195,10 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
     }
 #endif /* _SSF_X509_RSA_PSS == 1 */
 
-    /* Ed25519, which signs the data itself (RFC 8410)? */
+    /* Is it Ed25519, which signs the data itself (RFC 8410)? */
     if (_SSFX509OIDMatch(sigAlgOidRaw, sigAlgOidRawLen, _oidEd25519, sizeof(_oidEd25519)))
     {
-        /* Yes, is the key id-Ed25519 and are the parameters absent (RFC 8410 3, X509-11)? */
+        /* Yes, is the key id-Ed25519 and are the parameters absent (RFC 8410 3)? */
         if ((!_SSFX509KeyAlgIs(keyCert, _oidEd25519, sizeof(_oidEd25519))) ||
             (sigAlgParamsLen != 0u))
         {
@@ -3080,7 +3217,7 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
             return false;
         }
 
-        /* Key and signature the sizes Ed25519 defines? */
+        /* Are the key and signature the sizes Ed25519 defines? */
         if ((keyCert->pubKeyLen != SSF_ED25519_PUB_KEY_SIZE) || (sigLen != SSF_ED25519_SIG_SIZE))
         {
             /* No, malformed */
@@ -3102,7 +3239,7 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if cert's signature over its TBS verifies with issuer's public key, else false.   */
+/* Returns true if cert's signature over its TBS verifies with issuer's public key, else false.  */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFX509VerifyCertSignature(const SSFX509Cert_t *cert, const SSFX509Cert_t *issuer)
 {
@@ -3125,8 +3262,19 @@ bool SSFX509CheckSKIDAKID(const SSFX509Cert_t *cert, const SSFX509Cert_t *issuer
     SSF_REQUIRE(cert != NULL);
     SSF_REQUIRE(issuer != NULL);
 
-    if ((cert->akid == NULL) || (cert->akidLen == 0u)) return true;
-    if ((issuer->skid == NULL) || (issuer->skidLen == 0u)) return true;
+    /* Is cert's AKID absent? */
+    if ((cert->akid == NULL) || (cert->akidLen == 0u))
+    {
+        /* Yes, nothing to compare */
+        return true;
+    }
+    /* No, is issuer's SKID absent? */
+    if ((issuer->skid == NULL) || (issuer->skidLen == 0u))
+    {
+        /* Yes, nothing to compare */
+        return true;
+    }
+    /* No, they must be identical */
     if (cert->akidLen != issuer->skidLen) return false;
     return (memcmp(cert->akid, issuer->skid, cert->akidLen) == 0);
 }
@@ -3139,16 +3287,22 @@ static bool _SSFX509NameEquals(const SSFX509Name_t *issuer, const SSFX509Name_t 
     SSF_REQUIRE(issuer != NULL);
     SSF_REQUIRE(subject != NULL);
 
-    if ((issuer->raw == NULL) || (subject->raw == NULL)) return false;
+    /* Is either raw Name missing? */
+    if ((issuer->raw == NULL) || (subject->raw == NULL))
+    {
+        /* Yes */
+        return false;
+    }
+    /* No */
     if (issuer->rawLen != subject->rawLen) return false;
     return (memcmp(issuer->raw, subject->raw, issuer->rawLen) == 0);
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if a dNSName satisfies a dNSName constraint (RFC 5280 Sec. 4.2.1.10), else false. */
+/* Returns true if a dNSName satisfies a dNSName constraint (RFC 5280 4.2.1.10), else false.     */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFX509NCDNSMatch(const uint8_t *name, uint32_t nameLen, const uint8_t *constraint,
-                        uint32_t constraintLen)
+                               uint32_t constraintLen)
 {
     uint32_t offset;
 
@@ -3158,7 +3312,7 @@ static bool _SSFX509NCDNSMatch(const uint8_t *name, uint32_t nameLen, const uint
     /* An empty constraint matches every name */
     if (constraintLen == 0u) return true;
 
-    /* Leading-dot form used by some CAs, meaning proper subdomains only? */
+    /* Is it the leading-dot form some CAs use, meaning proper subdomains only? */
     if (constraint[0] == (uint8_t)'.')
     {
         /* Yes, the name must be longer than the constraint and end with it */
@@ -3169,7 +3323,14 @@ static bool _SSFX509NCDNSMatch(const uint8_t *name, uint32_t nameLen, const uint
     /* No, the name is the constraint itself or ends with "." followed by the constraint */
     if (nameLen < constraintLen) return false;
     offset = nameLen - constraintLen;
-    if ((offset != 0u) && (name[offset - 1u] != (uint8_t)'.')) return false;
+
+    /* Is the name longer than the constraint without a "." before the suffix? */
+    if ((offset != 0u) && (name[offset - 1u] != (uint8_t)'.'))
+    {
+        /* Yes */
+        return false;
+    }
+    /* No */
     return _SSFX509MemEqI(&name[offset], constraint, constraintLen);
 }
 
@@ -3177,15 +3338,20 @@ static bool _SSFX509NCDNSMatch(const uint8_t *name, uint32_t nameLen, const uint
 /* Returns true if a 4-byte IPv4 SAN lies within an 8-byte address plus mask constraint.         */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFX509NCIPMatch(const uint8_t *ip, uint32_t ipLen, const uint8_t *constraint,
-                       uint32_t constraintLen)
+                              uint32_t constraintLen)
 {
     uint32_t i;
 
     SSF_REQUIRE(ip != NULL);
     SSF_REQUIRE(constraint != NULL);
 
-    /* Only IPv4 constraints are supported */
-    if ((ipLen != 4u) || (constraintLen != 8u)) return false;
+    /* Is it other than an IPv4 SAN against an IPv4 constraint, the only form supported? */
+    if ((ipLen != 4u) || (constraintLen != 8u))
+    {
+        /* Yes */
+        return false;
+    }
+    /* No */
     for (i = 0; i < 4u; i++)
     {
         if ((ip[i] & constraint[4u + i]) != (constraint[i] & constraint[4u + i])) return false;
@@ -3244,7 +3410,7 @@ static bool _SSFX509NCIPExclUnchecked(const SSFX509SAN_t *san,
     /* No, is it IPv6-sized (32-byte address and mask, or a 16-byte address)? */
     if ((subtree->valLen == 32u) || (subtree->valLen == 16u))
     {
-        /* Yes, it cannot be evaluated for any SAN that is not IPv4 (AUDIT X509-18) */
+        /* Yes, it cannot be evaluated for any SAN that is not IPv4 */
         return (!sanIsV4);
     }
     /* No, a malformed length could cover any address */
@@ -3266,12 +3432,12 @@ static bool _SSFX509NCValidateCert(const SSFX509Cert_t *subCert, const SSFX509Ce
     SSF_REQUIRE(subCert != NULL);
     SSF_REQUIRE(ncCert != NULL);
 
-    /* Name forms of subCert that ncCert constrains but this verifier cannot enforce */
+    /* Collect subCert's name forms: SANs, a non-empty subject (directoryName), rfc822Name */
     forms = subCert->sanForms;
-    if (subCert->subject.rawLen > 2u) forms |= (uint16_t)(1u << 4); /* non-empty: directoryName */
-    if (subCert->subject.hasEmailAddress) forms |= (uint16_t)(1u << 1); /* rfc822Name */
+    if (subCert->subject.rawLen > 2u) forms |= (uint16_t)(1u << 4);
+    if (subCert->subject.hasEmailAddress) forms |= (uint16_t)(1u << 1);
 
-    /* Does subCert carry an instance of a constrained form that is not enforced (X509-4)? */
+    /* Does subCert carry an instance of a constrained form that is not enforced? */
     if ((ncCert->ncUnenforcedForms & forms) != 0u)
     {
         /* Yes, RFC 5280 4.2.1.10: process the constraint or reject the certificate */
@@ -3287,7 +3453,7 @@ static bool _SSFX509NCValidateCert(const SSFX509Cert_t *subCert, const SSFX509Ce
         for (k = 0; k < ncCert->excludedLen; k++)
         {
             if (_SSFX509NCSubtreeMatch(san, &ncCert->excludedSubtrees[k])) return false;
-            /* An exclusion that cannot be evaluated for this SAN rejects it (AUDIT X509-18) */
+            /* An exclusion that cannot be evaluated for this SAN rejects it */
             if (_SSFX509NCIPExclUnchecked(san, &ncCert->excludedSubtrees[k])) return false;
         }
 
@@ -3304,7 +3470,13 @@ static bool _SSFX509NCValidateCert(const SSFX509Cert_t *subCert, const SSFX509Ce
                 break;
             }
         }
-        if (typeHasPermitted && !typeMatched) return false;
+        /* Do permitted subtrees of this type exist with none matching? */
+        if ((typeHasPermitted) && (!typeMatched))
+        {
+            /* Yes */
+            return false;
+        }
+        /* No */
     }
     return true;
 }
@@ -3326,13 +3498,13 @@ static bool _SSFX509IsKnownExtension(const uint8_t *oidRaw, uint32_t oidRawLen)
            _SSFX509OIDMatch(oidRaw, oidRawLen, _oidNameConstraints, sizeof(_oidNameConstraints));
 }
 
-/* Stack use is by design and sized by SSF_X509_CONFIG_MAX_CHAIN_DEPTH; see ssfx509.md */
+/* Stack use is sized by SSF_X509_CONFIG_MAX_CHAIN_DEPTH; see ssfx509.md */
 #ifdef _WIN32
 #pragma warning(push)
 #pragma warning(disable:6262)
 #endif
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if chainDer[0] validates to a trust anchor for purpose, else false.               */
+/* Returns true if chainDer[0] validates to a trust anchor for purpose, else false.              */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDerLen,
                                uint8_t chainLen,
@@ -3365,7 +3537,7 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
     {
         SSF_REQUIRE(chainDer[i] != NULL);
 
-        /* Chain certificate parses? */
+        /* Does the chain certificate parse? */
         if (!SSFX509Parse(chainDer[i], chainDerLen[i], &certs[i]))
         {
             /* No, malformed */
@@ -3374,7 +3546,7 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
             return false;
         }
 
-        /* Version 3 as RFC 5280 Sec. 6.1.1 (c) requires of every chain certificate? */
+        /* Is it v3, as RFC 5280 Sec. 6.1.1 (c) requires of every chain certificate? */
         if (certs[i].version != 2u)
         {
             /* No, v1 and v2 certificates cannot carry the extensions this path relies on */
@@ -3383,7 +3555,7 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
             return false;
         }
 
-        /* TBS signature algorithm OID equals the outer signatureAlgorithm OID (Sec. 4.1.2.3)? */
+        /* Does the TBS signature algorithm OID equal the outer one (Sec. 4.1.2.3)? */
         if ((certs[i].sigAlgOidRawLen != certs[i].outerSigAlgOidRawLen) ||
             (memcmp(certs[i].sigAlgOidRaw, certs[i].outerSigAlgOidRaw,
                     certs[i].sigAlgOidRawLen) != 0))
@@ -3395,7 +3567,7 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
             return false;
         }
 
-        /* Signature algorithm parameters identical as well (Sec. 4.1.1.2)? */
+        /* Are the signature algorithm parameters identical as well (Sec. 4.1.1.2)? */
         if ((certs[i].sigAlgParamsLen != certs[i].outerSigAlgParamsLen) ||
             ((certs[i].sigAlgParamsLen > 0u) &&
              (memcmp(certs[i].sigAlgParams, certs[i].outerSigAlgParams,
@@ -3408,7 +3580,7 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
             return false;
         }
 
-        /* Within its validity period at nowUnixSec? */
+        /* Is it within its validity period at nowUnixSec? */
         if (!SSFX509IsValid(&certs[i], nowUnixSec))
         {
             /* No */
@@ -3424,7 +3596,7 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
     /* Each cert[i] is named for, signed by, and key-linked to cert[i + 1] */
     for (i = 0; i < (uint8_t)(chainLen - 1u); i++)
     {
-        /* Issuer name of cert[i] is the subject name of cert[i + 1] (Sec. 6.1.3 (a)(4))? */
+        /* Is the issuer name of cert[i] the subject name of cert[i + 1] (Sec. 6.1.3 (a)(4))? */
         if (!_SSFX509NameEquals(&certs[i].issuer, &certs[i + 1u].subject))
         {
             /* No, the chain is not linked by name even if the key happens to verify */
@@ -3433,7 +3605,7 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
             return false;
         }
 
-        /* Signature of cert[i] verifies with the key of cert[i + 1]? */
+        /* Does the signature of cert[i] verify with the key of cert[i + 1]? */
         if (!SSFX509VerifyCertSignature(&certs[i], &certs[i + 1u]))
         {
             /* No */
@@ -3442,7 +3614,7 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
             return false;
         }
 
-        /* AKID of cert[i] agrees with the SKID of cert[i + 1] when both are present (4.2.1.1)? */
+        /* Does cert[i]'s AKID agree with cert[i + 1]'s SKID when both are present (4.2.1.1)? */
         if (!SSFX509CheckSKIDAKID(&certs[i], &certs[i + 1u]))
         {
             /* No */
@@ -3455,7 +3627,7 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
 
     /* Some trust anchor names, is valid for, key-links to, and signs the last chain cert */
     memset(&anchor, 0, sizeof(anchor));
-    for (j = 0; (j < trustCount) && !trusted; j++)
+    for (j = 0; (j < trustCount) && (!trusted); j++)
     {
         SSF_REQUIRE(trustDer[j] != NULL);
         if (!SSFX509Parse(trustDer[j], trustDerLen[j], &anchor)) continue;
@@ -3465,7 +3637,7 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
         trusted = SSFX509VerifyCertSignature(last, &anchor);
     }
 
-    /* Anchored? */
+    /* Is the chain anchored? */
     if (!trusted)
     {
         /* No */
@@ -3478,8 +3650,8 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
     /* Every intermediate is a CA allowed to sign, within its path length (Sec. 6.1.4 (h), (k)) */
     for (i = 1; i < chainLen; i++)
     {
-        /* Basic Constraints present with cA TRUE? */
-        if (!certs[i].hasBasicConstraints || !certs[i].isCA)
+        /* Are Basic Constraints present with cA TRUE? */
+        if ((!certs[i].hasBasicConstraints) || (!certs[i].isCA))
         {
             /* No */
             SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
@@ -3488,8 +3660,8 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
             return false;
         }
 
-        /* Key Usage, when present, includes keyCertSign? */
-        if (certs[i].hasKeyUsage && ((certs[i].keyUsageBits & SSF_X509_KU_KEY_CERT_SIGN) == 0u))
+        /* Does Key Usage, when present, include keyCertSign? */
+        if ((certs[i].hasKeyUsage) && ((certs[i].keyUsageBits & SSF_X509_KU_KEY_CERT_SIGN) == 0u))
         {
             /* No */
             SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
@@ -3498,7 +3670,7 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
             return false;
         }
 
-        /* Subordinate CA count below cert[i], which is (i - 1), within its pathLenConstraint? */
+        /* Is the subordinate CA count below cert[i], (i - 1), within its pathLenConstraint? */
         if ((certs[i].pathLenConstraint >= 0) && ((int8_t)(i - 1u) > certs[i].pathLenConstraint))
         {
             /* No */
@@ -3512,7 +3684,7 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
     /* anchor is the one whose key verified the last chain cert; only its constraints apply */
     numSubCAs = (chainLen >= 2u) ? (uint8_t)(chainLen - 1u) : 0u;
 
-    /* Is the last chain cert the anchor itself, as servers that send the root do (X509-10)? */
+    /* Is the last chain cert the anchor itself, as servers that send the root do? */
     if ((numSubCAs > 0u) && (chainDerLen[chainLen - 1u] == trustDerLen[j - 1u]) &&
         (memcmp(chainDer[chainLen - 1u], trustDer[j - 1u], trustDerLen[j - 1u]) == 0))
     {
@@ -3521,7 +3693,7 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
     }
     /* No */
 
-    /* Subordinate CAs in the chain within the anchor's pathLenConstraint (Sec. 6.1.4 (k))? */
+    /* Are the chain's subordinate CAs within the anchor's pathLenConstraint (Sec. 6.1.4 (k))? */
     if ((anchor.pathLenConstraint >= 0) && ((int8_t)numSubCAs > anchor.pathLenConstraint))
     {
         /* No */
@@ -3531,9 +3703,10 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
         return false;
     }
 
-    /* Every chain cert's SANs satisfy the anchor's Name Constraints (Sec. 6.1.4 (g))? */
+    /* Every chain cert's SANs must satisfy the anchor's Name Constraints (Sec. 6.1.4 (g)) */
     for (i = 0; (anchor.hasNameConstraints) && (i < chainLen); i++)
     {
+        /* Does cert[i] satisfy them? */
         if (!_SSFX509NCValidateCert(&certs[i], &anchor))
         {
             /* No */
@@ -3543,7 +3716,7 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
         }
     }
 
-    /* Leaf EKU, when present, includes the purpose or anyExtendedKeyUsage (Sec. 4.2.1.12)? */
+    /* Does leaf EKU, when present, include the purpose or anyExtendedKeyUsage (Sec. 4.2.1.12)? */
     if ((certs[0].hasExtKeyUsage) && (!certs[0].ekuAnyPurpose) &&
         (((purpose == SSF_X509_PURPOSE_SERVER_AUTH) && (!certs[0].ekuServerAuth)) ||
          ((purpose == SSF_X509_PURPOSE_CODE_SIGNING) && (!certs[0].ekuCodeSigning))))
@@ -3555,7 +3728,7 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
         return false;
     }
 
-    /* Code signing: leaf Key Usage, when present, includes digitalSignature or nonRepudiation? */
+    /* Code signing: does leaf KU, when present, include digitalSignature or nonRepudiation? */
     if ((purpose == SSF_X509_PURPOSE_CODE_SIGNING) && (certs[0].hasKeyUsage) &&
         ((certs[0].keyUsageBits &
           (SSF_X509_KU_DIGITAL_SIGNATURE | SSF_X509_KU_NON_REPUDIATION)) == 0u))
@@ -3570,10 +3743,12 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
     /* Every subordinate of a constrained intermediate satisfies its Name Constraints (6.1.4 (g)) */
     for (i = 1; i < chainLen; i++)
     {
-        for (j = 0; certs[i].hasNameConstraints && (j < i); j++)
+        for (j = 0; (certs[i].hasNameConstraints) && (j < i); j++)
         {
+            /* Does cert[j] violate them? */
             if (!_SSFX509NCValidateCert(&certs[j], &certs[i]))
             {
+                /* Yes */
                 SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
                     "Chain: cert[%u] SAN violates nameConstraints of cert[%u]", j, i);
                 return false;
@@ -3605,35 +3780,36 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
         bool hostIsIPv6;
         bool hostIsNumeric;
 
-        /* The reference identity type picks the one SAN type it may match (RFC 9525 6.3); */
-        /* a ':' (IPv6, unsupported) or an over-long hostname is treated as matching nothing */
+        /* The reference identity type picks the one SAN type it may match (RFC 9525 6.3) */
         hostIsIPv4 = _SSFX509ParseIPv4(hostnameStrOpt, hostIP);
+        /* A ':' (IPv6, unsupported) or an over-long hostname matches nothing */
         hostIsIPv6 = ((!SSFStrLen(hostnameStrOpt, _UB_DNS_NAME + 1u, &hostLen)) ||
                       (memchr(hostnameStrOpt, ':', hostLen) != NULL));
-        /* A non-canonical numeric host ("010.0.0.1") matches nothing (AUDIT X509-17) */
+        /* A non-canonical numeric host ("010.0.0.1") matches nothing */
         hostIsNumeric = _SSFX509IsNumericHost(hostnameStrOpt);
 
         for (i = 0; (i < certs[0].sanLen) && (!matched); i++)
         {
-            /* Is the hostname a DNS name and this SAN a dNSName (AUDIT X509-5)? */
+            /* Is the hostname a DNS name and this SAN a dNSName? */
             if ((!hostIsIPv4) && (!hostIsIPv6) && (!hostIsNumeric) &&
                 (certs[0].san[i].type == SSF_X509_SAN_DNS))
             {
                 /* Yes */
                 matched = _SSFX509HostnameMatch(hostnameStrOpt, certs[0].san[i].val,
-                                         certs[0].san[i].valLen);
+                                                certs[0].san[i].valLen);
             }
             /* No, is the hostname an IPv4 literal and this SAN an iPAddress? */
-            else if (hostIsIPv4 && (certs[0].san[i].type == SSF_X509_SAN_IP))
+            else if ((hostIsIPv4) && (certs[0].san[i].type == SSF_X509_SAN_IP))
             {
                 /* Yes */
                 matched = _SSFX509IPAddressMatch(hostnameStrOpt, certs[0].san[i].val,
-                                          certs[0].san[i].valLen);
+                                                 certs[0].san[i].valLen);
             }
             /* No, the types differ, or an IPv6 literal, which is not supported, never matches */
         }
 
-        /* Hostname matched? */
+        /* Was the hostname matched? */
+
         if (!matched)
         {
             /* No */

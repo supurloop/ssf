@@ -2,7 +2,7 @@
 /* Small System Framework                                                                        */
 /*                                                                                               */
 /* ssfasn1_ut.c                                                                                  */
-/* Provides unit tests for the ssfasn1 ASN.1 DER encode/decode module.                          */
+/* Provides unit tests for the ssfasn1 ASN.1 DER encode/decode module.                           */
 /*                                                                                               */
 /* BSD-3-Clause License                                                                          */
 /* Copyright 2020 Supurloop Software LLC                                                         */
@@ -47,7 +47,7 @@ void SSFASN1UnitTest(void)
 
         SSF_ASSERT(SSFASN1EncBool(buf, sizeof(buf), true, &len) == true);
         SSF_ASSERT(len == 3u);
-        SSF_ASSERT(buf[0] == 0x01u && buf[1] == 0x01u && buf[2] == 0xFFu);
+        SSF_ASSERT((buf[0] == 0x01u) && (buf[1] == 0x01u) && (buf[2] == 0xFFu));
 
         cursor.buf = buf; cursor.bufLen = len;
         SSF_ASSERT(SSFASN1DecGetBool(&cursor, &val, &next) == true);
@@ -80,7 +80,8 @@ void SSFASN1UnitTest(void)
         SSF_ASSERT(SSFASN1DecGetIntU64(&cursor, &val, &next) == true);
         SSF_ASSERT(val == 128);
         /* 128 requires leading zero: 02 02 00 80 */
-        SSF_ASSERT(buf[0] == 0x02u && buf[1] == 0x02u && buf[2] == 0x00u && buf[3] == 0x80u);
+        SSF_ASSERT((buf[0] == 0x02u) && (buf[1] == 0x02u) && (buf[2] == 0x00u) &&
+                   (buf[3] == 0x80u));
 
         SSF_ASSERT(SSFASN1EncIntU64(buf, sizeof(buf), 256, &len) == true);
         cursor.buf = buf; cursor.bufLen = len;
@@ -518,7 +519,7 @@ void SSFASN1UnitTest(void)
     {
         SSF_ASSERT(SSFASN1EncNull(buf, sizeof(buf), &len) == true);
         SSF_ASSERT(len == 2u);
-        SSF_ASSERT(buf[0] == 0x05u && buf[1] == 0x00u);
+        SSF_ASSERT((buf[0] == 0x05u) && (buf[1] == 0x00u));
 
         cursor.buf = buf; cursor.bufLen = len;
         SSF_ASSERT(SSFASN1DecGetNull(&cursor, &next) == true);
@@ -537,7 +538,7 @@ void SSFASN1UnitTest(void)
                    &next) == true);
         SSF_ASSERT(bitsLenOut == 2u);
         SSF_ASSERT(unusedBits == 1u);
-        SSF_ASSERT(bitsOut[0] == 0xFFu && bitsOut[1] == 0x80u);
+        SSF_ASSERT((bitsOut[0] == 0xFFu) && (bitsOut[1] == 0x80u));
     }
 
     /* ---- OCTET STRING encode/decode ---- */
@@ -575,7 +576,7 @@ void SSFASN1UnitTest(void)
                    &next) == true);
         /* 0x55 = 2*40+5 -> arcs 2,5; 0x04 -> arc 4; 0x03 -> arc 3 = OID 2.5.4.3 */
         SSF_ASSERT(arcsLen == 4u);
-        SSF_ASSERT(arcs[0] == 2u && arcs[1] == 5u && arcs[2] == 4u && arcs[3] == 3u);
+        SSF_ASSERT((arcs[0] == 2u) && (arcs[1] == 5u) && (arcs[2] == 4u) && (arcs[3] == 3u));
     }
 
     /* ---- OID: 1.2.840.113549.1.1.11 (sha256WithRSAEncryption) with multi-byte arcs ---- */
@@ -763,17 +764,12 @@ void SSFASN1UnitTest(void)
         cursor.buf = buf; cursor.bufLen = len;
         SSF_ASSERT(SSFASN1DecGetOctetString(&cursor, &octets, &octetsLen, &next) == true);
         SSF_ASSERT(octetsLen == 200u);
-        SSF_ASSERT(octets[0] == 0xABu && octets[199] == 0xABu);
+        SSF_ASSERT((octets[0] == 0xABu) && (octets[199] == 0xABu));
     }
 
-    /* ====================================================================================== */
-    /* Hardening regression tests                                                               */
-    /* ====================================================================================== */
+    /* ==== Hardening regression tests ==== */
 
-    /* ---- Fix #1: integer-overflow in TLV bounds check ---- */
-    /* Craft a TLV whose advertised content length plus header wraps uint32_t. A bounds check  */
-    /* using "headerLen + contentLen > bufLen" wraps and accepts the malformed TLV, causing    */
-    /* out-of-bounds reads downstream.                                                          */
+    /* ---- Fix #1: TLV whose content length plus header wraps uint32_t is rejected ---- */
     {
         uint8_t trunc[6];
         const uint8_t *val;
@@ -790,8 +786,7 @@ void SSFASN1UnitTest(void)
         SSF_ASSERT(SSFASN1DecGetTLV(&cursor, &tag, &val, &valLen, &next) == false);
     }
 
-    /* ---- Fix #2a: OID arc0=2, arc1>=40 split correctly ---- */
-    /* OID 2.100.3 encodes as 0x81 0x34 0x03 (first sub-id 180 -> arc0=2, arc1=100).            */
+    /* ---- Fix #2a: OID 2.100.3 (81 34 03, first sub-id 180) splits to arc0=2, arc1=100 ---- */
     {
         static const uint8_t oidRaw[] = { 0x81u, 0x34u, 0x03u };
         uint32_t arcs[SSF_ASN1_CONFIG_MAX_OID_ARCS];
@@ -807,8 +802,7 @@ void SSFASN1UnitTest(void)
         SSF_ASSERT(arcs[2] == 3u);
     }
 
-    /* ---- Fix #2b: OID first-byte >= 80 maps arc0=2 (not arc0=3) ---- */
-    /* Single-byte first sub-id of 0x82 = 130 -> arc0=2, arc1=50 per X.690 Sec. 8.19.4.         */
+    /* ---- Fix #2b: OID first sub-id 0x82 = 130 maps to arc0=2, arc1=50 (X.690 8.19.4) ---- */
     {
         static const uint8_t oidRaw[] = { 0x82u, 0x01u }; /* Invalid continuation -> reject */
         uint32_t arcs[SSF_ASN1_CONFIG_MAX_OID_ARCS];
@@ -986,12 +980,11 @@ void SSFASN1UnitTest(void)
         uint64_t decoded;
         cursor.buf = good; cursor.bufLen = sizeof(good);
         SSF_ASSERT(SSFASN1DecGetTime(&cursor, &decoded, &next) == true);
-        SSF_ASSERT(decoded == 7258118399ull); /* 2199-12-31T23:59:59Z */
+        /* 2199-12-31T23:59:59Z */
+        SSF_ASSERT(decoded == 7258118399ull);
     }
 
-    /* ---- Time range #4, AUDIT ASN1-14: GeneralizedTime after 2199 saturates, not rejected ---- */
-    /* RFC 5280 4.1.2.5 uses 99991231235959Z for "no well-defined expiration". A valid time past */
-    /* ssfdtime's 2199 limit decodes to SSF_ASN1_TIME_FAR_FUTURE; an invalid one is refused.    */
+    /* ---- Time range #4, AUDIT ASN1-14: valid time after 2199 saturates, invalid refused ---- */
     {
         static const char *const goodFar[] = {
             "99991231235959Z", "22000101000000Z", "24000229120000Z"
@@ -1036,9 +1029,7 @@ void SSFASN1UnitTest(void)
         SSF_ASSERT(SSFASN1DecGetTime(&cursor, &decoded, &next) == false);
     }
 
-    /* ---- Time range #6: encode UTCTime for year 2050 must fail (UTCTime ambiguous) ---- */
-    /* Unix 2524608000 = 2050-01-01T00:00:00Z. UTCTime would encode YY=50 which decodes as      */
-    /* 1950 per RFC 5280, silently corrupting the value. Encoder must refuse.                   */
+    /* ---- Time range #6: UTCTime 2050-01-01 (YY=50 would decode as 1950) must fail ---- */
     {
         uint32_t r;
         SSF_ASSERT(SSFASN1EncUTCTime(buf, sizeof(buf), 2524608000ull, &r) == false);
@@ -1087,9 +1078,7 @@ void SSFASN1UnitTest(void)
         SSF_ASSERT(r == 0u);
     }
 
-    /* ====================================================================================== */
-    /* Bool-return API conformance tests                                                        */
-    /* ====================================================================================== */
+    /* ==== Bool-return API conformance tests ==== */
 
     /* ---- API #1: measure mode (buf == NULL) returns true and reports required size ---- */
     {
@@ -1103,7 +1092,8 @@ void SSFASN1UnitTest(void)
 
         needed = 0xDEADBEEFu;
         SSF_ASSERT(SSFASN1EncIntU64(NULL, 0, 999u, &needed) == true);
-        SSF_ASSERT(needed == 4u); /* tag(1) + len(1) + 02 E7 */
+        /* tag(1) + len(1) + 02 E7 */
+        SSF_ASSERT(needed == 4u);
     }
 
     /* ---- API #2: happy path returns true with bytesWritten == actual encoding length ---- */
@@ -1111,12 +1101,12 @@ void SSFASN1UnitTest(void)
         uint32_t written = 0;
         SSF_ASSERT(SSFASN1EncNull(buf, sizeof(buf), &written) == true);
         SSF_ASSERT(written == 2u);
-        SSF_ASSERT(buf[0] == 0x05u && buf[1] == 0x00u);
+        SSF_ASSERT((buf[0] == 0x05u) && (buf[1] == 0x00u));
 
         written = 0;
         SSF_ASSERT(SSFASN1EncBool(buf, sizeof(buf), true, &written) == true);
         SSF_ASSERT(written == 3u);
-        SSF_ASSERT(buf[0] == 0x01u && buf[1] == 0x01u && buf[2] == 0xFFu);
+        SSF_ASSERT((buf[0] == 0x01u) && (buf[1] == 0x01u) && (buf[2] == 0xFFu));
     }
 
     /* ---- API #3: buffer too small returns false and sets bytesWritten = 0 ---- */
@@ -1186,9 +1176,7 @@ void SSFASN1UnitTest(void)
         SSF_ASSERT(needed == written);
     }
 
-    /* ====================================================================================== */
-    /* DATE (tag 31) and DATE-TIME (tag 33) multi-byte-tag tests                               */
-    /* ====================================================================================== */
+    /* ==== DATE (tag 31) and DATE-TIME (tag 33) multi-byte-tag tests ==== */
 
     /* ---- DATE #1: round-trip 2024-06-15 (midnight-aligned Unix 1718409600) ---- */
     {
@@ -1198,7 +1186,7 @@ void SSFASN1UnitTest(void)
         SSF_ASSERT(SSFASN1EncDate(buf, sizeof(buf), unixSec, &len) == true);
         /* DER: tag 0x1F 0x1F (2), length 0x0A (1), "2024-06-15" (10) = 13 bytes */
         SSF_ASSERT(len == 13u);
-        SSF_ASSERT(buf[0] == 0x1Fu && buf[1] == 0x1Fu);
+        SSF_ASSERT((buf[0] == 0x1Fu) && (buf[1] == 0x1Fu));
         SSF_ASSERT(buf[2] == 0x0Au);
         SSF_ASSERT(memcmp(&buf[3], "2024-06-15", 10) == 0);
 
@@ -1216,7 +1204,8 @@ void SSFASN1UnitTest(void)
         SSF_ASSERT(SSFASN1EncDate(buf, sizeof(buf), unixSec, &len) == true);
         cursor.buf = buf; cursor.bufLen = len;
         SSF_ASSERT(SSFASN1DecGetDate(&cursor, &decoded, &next) == true);
-        SSF_ASSERT(decoded == 1718409600ull); /* Midnight of 2024-06-15 */
+        /* Midnight of 2024-06-15 */
+        SSF_ASSERT(decoded == 1718409600ull);
     }
 
     /* ---- DATE #3: leap-year Feb 29 round-trip ---- */
@@ -1273,7 +1262,7 @@ void SSFASN1UnitTest(void)
         SSF_ASSERT(SSFASN1EncDateTime(buf, sizeof(buf), unixSec, &len) == true);
         /* DER: tag 0x1F 0x21, length 0x13 (19), then "2024-06-15T12:00:00" */
         SSF_ASSERT(len == 22u);
-        SSF_ASSERT(buf[0] == 0x1Fu && buf[1] == 0x21u);
+        SSF_ASSERT((buf[0] == 0x1Fu) && (buf[1] == 0x21u));
         SSF_ASSERT(buf[2] == 0x13u);
         SSF_ASSERT(memcmp(&buf[3], "2024-06-15T12:00:00", 19) == 0);
 
@@ -1342,8 +1331,7 @@ void SSFASN1UnitTest(void)
         SSF_ASSERT(SSFASN1DecOpenConstructed(&cursor, SSF_ASN1_TAG_SEQUENCE, &seqInner,
                    &next) == true);
 
-        /* Walk past the DATE via generic Skip. This proves the TLV parser now handles the    */
-        /* 2-byte high-tag-number form.                                                       */
+        /* Walk past the DATE via generic Skip, proving the TLV parser takes the 2-byte tag */
         SSF_ASSERT(SSFASN1DecSkip(&seqInner, &seqInner) == true);
         SSF_ASSERT(SSFASN1DecGetBool(&seqInner, &bval, &seqInner) == true);
         SSF_ASSERT(bval == true);
@@ -1364,10 +1352,7 @@ void SSFASN1UnitTest(void)
         SSF_ASSERT(decoded == 1718409600ull);
     }
 
-    /* ---- Branch sweep: every reject path in the decoder + encoder ------------------------ */
-    /* Each block below targets a specific branch in ssfasn1.c that the existing happy-path     */
-    /* and isolated-edge tests above never reach. The goal is to exercise every public-API      */
-    /* reject path with the minimum input that triggers it; comments name the source line(s).   */
+    /* ---- Branch sweep: each reject path in the decoder + encoder, minimum input each ---- */
     {
         SSFASN1Cursor_t cur;
         uint16_t tag;
@@ -1427,7 +1412,7 @@ void SSFASN1UnitTest(void)
 
         /* line 89: long-form length declares more bytes than the buffer holds. */
         {
-            uint8_t der[2] = { 0x30u, 0x82u };  /* claims 2 length bytes, none present */
+            uint8_t der[2] = { 0x30u, 0x82u }; /* claims 2 length bytes, none present */
             cur.buf = der; cur.bufLen = 2u;
             SSF_ASSERT(SSFASN1DecGetTLV(&cur, &tag, &value, &valueLen, &next) == false);
         }
@@ -1444,13 +1429,15 @@ void SSFASN1UnitTest(void)
             uint8_t bad[1] = { 0x30u };
             SSFASN1Cursor_t inner;
             cur.buf = bad; cur.bufLen = 1u;
-            SSF_ASSERT(SSFASN1DecOpenConstructed(&cur, SSF_ASN1_TAG_SEQUENCE, &inner, &next) == false);
+            SSF_ASSERT(SSFASN1DecOpenConstructed(&cur, SSF_ASN1_TAG_SEQUENCE, &inner, &next) ==
+                       false);
         }
         {
             uint8_t intDer[3] = { 0x02u, 0x01u, 0x05u };
             SSFASN1Cursor_t inner;
             cur.buf = intDer; cur.bufLen = 3u;
-            SSF_ASSERT(SSFASN1DecOpenConstructed(&cur, SSF_ASN1_TAG_SEQUENCE, &inner, &next) == false);
+            SSF_ASSERT(SSFASN1DecOpenConstructed(&cur, SSF_ASN1_TAG_SEQUENCE, &inner, &next) ==
+                       false);
         }
 
         /* lines 204/205: DecGetBool TLV failure + tag/length checks. */
@@ -1462,13 +1449,13 @@ void SSFASN1UnitTest(void)
         }
         {
             bool b;
-            uint8_t wrongTag[3] = { 0x02u, 0x01u, 0x01u };  /* INTEGER instead of BOOLEAN */
+            uint8_t wrongTag[3] = { 0x02u, 0x01u, 0x01u }; /* INTEGER instead of BOOLEAN */
             cur.buf = wrongTag; cur.bufLen = 3u;
             SSF_ASSERT(SSFASN1DecGetBool(&cur, &b, &next) == false);
         }
         {
             bool b;
-            uint8_t wrongLen[4] = { 0x01u, 0x02u, 0xFFu, 0x00u };  /* BOOLEAN with len 2 */
+            uint8_t wrongLen[4] = { 0x01u, 0x02u, 0xFFu, 0x00u }; /* BOOLEAN with len 2 */
             cur.buf = wrongLen; cur.bufLen = 4u;
             SSF_ASSERT(SSFASN1DecGetBool(&cur, &b, &next) == false);
         }
@@ -1476,7 +1463,7 @@ void SSFASN1UnitTest(void)
         /* line 244: DecGetIntU64 rejects integers wider than 8 bytes after leading-zero strip. */
         {
             uint8_t big[12] = { 0x02u, 0x0Au, 0x00u, 0x80u, 0x01u, 0x02u, 0x03u, 0x04u,
-                                0x05u, 0x06u, 0x07u, 0x08u };  /* 10 content -> strip 1 -> 9 > 8 */
+                                0x05u, 0x06u, 0x07u, 0x08u }; /* 10 content -> strip 1 -> 9 > 8 */
             cur.buf = big; cur.bufLen = 12u;
             SSF_ASSERT(SSFASN1DecGetIntU64(&cur, &u64, &next) == false);
         }
@@ -1494,7 +1481,7 @@ void SSFASN1UnitTest(void)
             const uint8_t *bits;
             uint32_t bitsLen;
             uint8_t unused;
-            uint8_t wrongTag[3] = { 0x04u, 0x01u, 0x00u };  /* OCTET STRING tag */
+            uint8_t wrongTag[3] = { 0x04u, 0x01u, 0x00u }; /* OCTET STRING tag */
             cur.buf = wrongTag; cur.bufLen = 3u;
             SSF_ASSERT(SSFASN1DecGetBitString(&cur, &bits, &bitsLen, &unused, &next) == false);
         }
@@ -1502,7 +1489,7 @@ void SSFASN1UnitTest(void)
             const uint8_t *bits;
             uint32_t bitsLen;
             uint8_t unused;
-            uint8_t empty[2] = { 0x03u, 0x00u };  /* BIT STRING with valueLen 0 */
+            uint8_t empty[2] = { 0x03u, 0x00u }; /* BIT STRING with valueLen 0 */
             cur.buf = empty; cur.bufLen = 2u;
             SSF_ASSERT(SSFASN1DecGetBitString(&cur, &bits, &bitsLen, &unused, &next) == false);
         }
@@ -1575,7 +1562,7 @@ void SSFASN1UnitTest(void)
             }
             /* line 353: first sub-id continuation runs past raw end. */
             {
-                uint8_t truncFirst[3] = { 0x06u, 0x01u, 0x81u };  /* high bit set, no follow */
+                uint8_t truncFirst[3] = { 0x06u, 0x01u, 0x81u }; /* high bit set, no follow */
                 cur.buf = truncFirst; cur.bufLen = 3u;
                 SSF_ASSERT(SSFASN1DecGetOID(&cur, arcs, 16u, &arcsLen, &next) == false);
             }
@@ -1593,7 +1580,7 @@ void SSFASN1UnitTest(void)
             }
             /* line 378: non-canonical leading 0x80 on a subsequent arc. */
             {
-                uint8_t nonCanon2[4] = { 0x06u, 0x02u, 0x2Au, 0x80u };  /* OK first, then 0x80 */
+                uint8_t nonCanon2[4] = { 0x06u, 0x02u, 0x2Au, 0x80u }; /* OK first, then 0x80 */
                 cur.buf = nonCanon2; cur.bufLen = 4u;
                 SSF_ASSERT(SSFASN1DecGetOID(&cur, arcs, 16u, &arcsLen, &next) == false);
             }
@@ -1618,7 +1605,7 @@ void SSFASN1UnitTest(void)
             }
             /* line 389: OID has more arcs than oidArcsSize. Limit caller buffer to 2. */
             {
-                uint8_t threeArc[5] = { 0x06u, 0x03u, 0x2Au, 0x03u, 0x04u };  /* 1.2.3.4 */
+                uint8_t threeArc[5] = { 0x06u, 0x03u, 0x2Au, 0x03u, 0x04u }; /* 1.2.3.4 */
                 uint32_t smallBuf[2];
                 cur.buf = threeArc; cur.bufLen = 5u;
                 SSF_ASSERT(SSFASN1DecGetOID(&cur, smallBuf, 2u, &arcsLen, &next) == false);
@@ -1638,7 +1625,7 @@ void SSFASN1UnitTest(void)
             const uint8_t *str;
             uint32_t strLen;
             uint16_t strTag;
-            uint8_t notString[3] = { 0x02u, 0x01u, 0x01u };  /* INTEGER -> not in string set */
+            uint8_t notString[3] = { 0x02u, 0x01u, 0x01u }; /* INTEGER -> not in string set */
             cur.buf = notString; cur.bufLen = 3u;
             SSF_ASSERT(SSFASN1DecGetString(&cur, &str, &strLen, &strTag, &next) == false);
         }
@@ -1720,7 +1707,7 @@ void SSFASN1UnitTest(void)
             cur.buf = badSec; cur.bufLen = 17u;
             SSF_ASSERT(SSFASN1DecGetTime(&cur, &u64, &next) == false);
         }
-        /* line 501: year out of range (e.g. 1969 — below SSFDTIME_EPOCH_YEAR_MIN). */
+        /* line 501: year out of range (e.g. 1969 -- below SSFDTIME_EPOCH_YEAR_MIN). */
         {
             uint8_t oldYear[17] = {
                 0x18u, 0x0Fu, '1','9','6','9','0','1','0','1','0','0','0','0','0','0','Z'
@@ -1737,8 +1724,7 @@ void SSFASN1UnitTest(void)
             SSF_ASSERT(SSFASN1DecGetTime(&cur, &u64, &next) == false);
         }
 
-        /* lines 532/533/535/536/537: _SSFASN1ParseYMD branches via DecGetDate. Tag is 0x1F1F  */
-        /* (multi-byte). Encode TL via the encoder so the tag-length serialization is correct. */
+        /* _SSFASN1ParseYMD branches via DecGetDate, the 0x1F1F TL written by the encoder */
         {
             uint8_t der[64];
             uint32_t hdrLen;
@@ -1824,7 +1810,7 @@ void SSFASN1UnitTest(void)
         /* line 584: DecGetDate TLV fail. */
         {
             uint64_t decoded;
-            uint8_t bad[1] = { 0x1Fu };  /* multi-byte tag start, no follow-up */
+            uint8_t bad[1] = { 0x1Fu }; /* multi-byte tag start, no follow-up */
             cur.buf = bad; cur.bufLen = 1u;
             SSF_ASSERT(SSFASN1DecGetDate(&cur, &decoded, &next) == false);
         }
@@ -1868,7 +1854,8 @@ void SSFASN1UnitTest(void)
             uint32_t written;
             SSF_ASSERT(SSFASN1EncTagLen(der, sizeof(der), SSF_ASN1_TAG_OCTET_STRING, 300u,
                                         &written) == true);
-            SSF_ASSERT(written == 4u);   /* 1 tag + 1 lead (0x82) + 2 length bytes */
+            /* 1 tag + 1 lead (0x82) + 2 length bytes */
+            SSF_ASSERT(written == 4u);
             SSF_ASSERT(der[1] == 0x82u);
         }
 
@@ -1913,7 +1900,7 @@ void SSFASN1UnitTest(void)
         {
             uint8_t der[32];
             uint32_t written;
-            uint64_t huge = 0xFFFFFFFFFFFFFFFFull;  /* > SSFDTIME_UNIX_EPOCH_SEC_MAX */
+            uint64_t huge = 0xFFFFFFFFFFFFFFFFull; /* > SSFDTIME_UNIX_EPOCH_SEC_MAX */
             SSF_ASSERT(SSFASN1EncUTCTime(der, sizeof(der), huge, &written) == false);
             SSF_ASSERT(SSFASN1EncDate(der, sizeof(der), huge, &written) == false);
             SSF_ASSERT(SSFASN1EncDateTime(der, sizeof(der), huge, &written) == false);
@@ -1933,7 +1920,8 @@ void SSFASN1UnitTest(void)
             uint32_t written;
             SSF_ASSERT(SSFASN1EncWrap(der, sizeof(der), SSF_ASN1_TAG_NULL, NULL, 0u, &written)
                        == true);
-            SSF_ASSERT(written == 2u);  /* tag + 0-length */
+            /* tag + 0-length */
+            SSF_ASSERT(written == 2u);
         }
     }
 }

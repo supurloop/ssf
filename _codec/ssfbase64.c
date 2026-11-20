@@ -47,7 +47,12 @@ static uint8_t _SSFBase64GetEncoding(uint8_t e)
 {
     const uint8_t *p = _b64;
 
-    while ((*p != e) && (*p != 0)) p++;
+    /* Is this table entry neither the char sought nor the terminator? */
+    while ((*p != e) && (*p != 0))
+    {
+        /* Yes, try the next entry */
+        p++;
+    }
     return (uint8_t)(p - _b64);
 }
 
@@ -70,13 +75,30 @@ uint8_t SSFBase64Dec32To24(const char *b32, uint8_t *b24out, size_t b24outSize)
     c = _SSFBase64GetEncoding(*(b32 + 2));
     d = _SSFBase64GetEncoding(*(b32 + 3));
 
-    if (a >= 64 || b >= 64 || c >= 65 || d >= 65) return 0;
-    if (c == 64 && d != 64) return 0;
-    /* RFC 4648 Sec. 3.5: when the final quantum of encoded input has fewer than 24 bits of
-     * decoded output, the low bits of the last non-pad character MUST be zero. Rejecting
-     * non-canonical encodings guarantees that decode(encode(x)) == x for every x. */
-    if (c == 64 && (b & 0x0Fu) != 0u) return 0;     /* 1-byte output: b's low 4 bits */
-    if (d == 64 && c != 64 && (c & 0x03u) != 0u) return 0; /* 2-byte output: c's low 2 bits */
+    /* Is any char invalid or is the first or second char a pad? */
+    if ((a >= 64) || (b >= 64) || (c >= 65) || (d >= 65))
+    {
+        /* Yes, block is not valid */
+        return 0;
+    }
+    /* Is the third char a pad without the fourth char being a pad? */
+    if ((c == 64) && (d != 64))
+    {
+        /* Yes, block is not valid */
+        return 0;
+    }
+    /* Is this a 1-byte block with any low 4 bits of b set (RFC 4648 Sec. 3.5 non-canonical)? */
+    if ((c == 64) && ((b & 0x0Fu) != 0u))
+    {
+        /* Yes, block is not valid */
+        return 0;
+    }
+    /* Is this a 2-byte block with any low 2 bits of c set (RFC 4648 Sec. 3.5 non-canonical)? */
+    if ((d == 64) && (c != 64) && ((c & 0x03u) != 0u))
+    {
+        /* Yes, block is not valid */
+        return 0;
+    }
     *b24out = (uint8_t)((a << 2) | (b >> 4));
     if (c == 64) return 1;
     if (b24outSize <= 1) return 0;
@@ -90,72 +112,77 @@ uint8_t SSFBase64Dec32To24(const char *b32, uint8_t *b24out, size_t b24outSize)
 /* --------------------------------------------------------------------------------------------- */
 /* Encodes 24-bit input block as 32-bit output.                                                  */
 /* --------------------------------------------------------------------------------------------- */
-void SSFBase64Enc24To32(const uint8_t *b24in, size_t b24len, char *b32out, size_t b32outSize)
+void SSFBase64Enc24To32(const uint8_t *b24in, size_t b24inLen, char *b32out, size_t b32outSize)
 {
     uint8_t b24[3];
 
     SSF_REQUIRE(b24in != NULL);
-    SSF_REQUIRE(b24len > 0);
+    SSF_REQUIRE(b24inLen > 0);
     SSF_REQUIRE(b32out != NULL);
     SSF_REQUIRE(b32outSize >= 4);
 
     b24[0] = b24in[0];
-    if (b24len >= 2)  b24[1] = b24in[1];
+    if (b24inLen >= 2) b24[1] = b24in[1];
     else b24[1] = 0;
-    if (b24len >= 3) b24[2] = b24in[2];
+    if (b24inLen >= 3) b24[2] = b24in[2];
     else b24[2] = 0;
     *b32out = _b64[*b24 >> 2];
     *(b32out + 1) = _b64[((*b24 << 4) & 0x3f) | (*(b24 + 1) >> 4)];
-    if (b24len >= 2) *(b32out + 2) = _b64[((*(b24 + 1) << 2) & 0x3f) | (*(b24 + 2) >> 6)];
+    if (b24inLen >= 2) *(b32out + 2) = _b64[((*(b24 + 1) << 2) & 0x3f) | (*(b24 + 2) >> 6)];
     else b32out[2] = '=';
-    if (b24len >= 3) *(b32out + 3) = _b64[*(b24 + 2) & 0x3f];
+    if (b24inLen >= 3) *(b32out + 3) = _b64[*(b24 + 2) & 0x3f];
     else b32out[3] = '=';
 }
 
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if input successfully encoded as C string output, else false.                    */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFBase64Encode(const uint8_t *in, size_t inLen, SSFCStrOut_t out, size_t outSize,
-                     size_t *outLen)
+bool SSFBase64Encode(const uint8_t *in, size_t inLen, SSFCStrOut_t outStr, size_t outSize,
+                     size_t *outLenOpt)
 {
     SSF_REQUIRE(in != NULL);
     SSF_REQUIRE(outSize > 0);
-    SSF_REQUIRE(out != NULL);
+    SSF_REQUIRE(outStr != NULL);
 
-    if (outLen != NULL) *outLen = 0;
+    if (outLenOpt != NULL) *outLenOpt = 0;
+    /* Is there input left and room for another block plus the terminator? */
     while ((inLen > 0) && (outSize >= 5))
     {
-        SSFBase64Enc24To32(in, inLen, out, outSize);
+        /* Yes, encode the next block */
+        SSFBase64Enc24To32(in, inLen, outStr, outSize);
         in += 3;
         if (inLen >= 3) inLen -= 3;
         else inLen = 0;
-        out += 4;
+        outStr += 4;
         outSize -= 4;
-        if (outLen != NULL) *outLen += 4;
+        if (outLenOpt != NULL) *outLenOpt += 4;
     }
     SSF_ASSERT(outSize > 0);
-    *out = 0;
+    *outStr = 0;
     return inLen == 0;
 }
 
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if C string input successfully decoded as output, else false.                    */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFBase64Decode(SSFCStrIn_t in, size_t inLenLim, uint8_t *out, size_t outSize, size_t *outLen)
+bool SSFBase64Decode(SSFCStrIn_t inStr, size_t inLenLim, uint8_t *out, size_t outSize,
+                     size_t *outLen)
 {
     uint8_t len;
 
-    SSF_REQUIRE(in != NULL);
+    SSF_REQUIRE(inStr != NULL);
     SSF_REQUIRE(out != NULL);
     SSF_REQUIRE(outLen != NULL);
 
     if ((inLenLim & 0x03) != 0) return false;
     *outLen = 0;
+    /* Is there another input block and room for output? */
     while ((inLenLim >= 4) && (outSize >= 1))
     {
-        if ((len = SSFBase64Dec32To24(in, out, outSize)) == 0) return false;
+        /* Yes, decode the next block */
+        if ((len = SSFBase64Dec32To24(inStr, out, outSize)) == 0) return false;
         inLenLim -= 4;
-        in += 4;
+        inStr += 4;
         out += len;
         *outLen += len;
         if (outSize >= len) outSize -= len;

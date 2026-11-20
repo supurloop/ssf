@@ -101,9 +101,7 @@ void SSFStrUnitTest(void)
         SSF_ASSERT((s1Len == 5u) && (memcmp(ov, "abcde", 6) == 0));
     }
 
-    /* AUDIT STR-2: SSFStrStr never reads past cstrSize or substrSize, even with no NUL; run */
-    /* under ASan to catch the old one-byte over-read. AUDIT STR-6: every false clears the   */
-    /* match output.                                                                         */
+    /* AUDIT STR-2/6: SSFStrStr stays within both sizes without a NUL; false clears match */
     {
         static const char hay[3] = { 'a', 'b', 'c' };
         static const char one[1] = { 'a' };
@@ -225,7 +223,12 @@ void SSFStrUnitTest(void)
     for (i = 0; i < sizeof(check); i++)
     {
         check[i] = (i + 1) & 0xff;
-        if ((check[i] >= 'A') && (check[i] <= 'Z')) check[i] += 32;
+        /* Is this an uppercase letter? */
+        if ((check[i] >= 'A') && (check[i] <= 'Z'))
+        {
+            /* Yes, expect its lowercase */
+            check[i] += 32;
+        }
     }
     SSF_ASSERT(memcmp(dst, check, sizeof(dst)) == 0);
     SSF_ASSERT(dst[sizeof(dst) - 1] == 1);
@@ -234,7 +237,12 @@ void SSFStrUnitTest(void)
     for (i = 0; i < sizeof(check); i++)
     {
         check[i] = (i + 1) & 0xff;
-        if ((check[i] >= 'a') && (check[i] <= 'z')) check[i] -= 32;
+        /* Is this a lowercase letter? */
+        if ((check[i] >= 'a') && (check[i] <= 'z'))
+        {
+            /* Yes, expect its uppercase */
+            check[i] -= 32;
+        }
     }
     SSF_ASSERT(memcmp(dst, check, sizeof(dst)) == 0);
     SSF_ASSERT(dst[sizeof(dst) - 1] == 1);
@@ -415,8 +423,7 @@ void SSFStrUnitTest(void)
         }
     }
 
-    /* Test SSFStrTok() (AUDIT STR-1/3/4/5: in/out source size, final token returns true, */
-    /* an oversize token is not consumed, optional length, empty token on false)           */
+    /* Test SSFStrTok() (AUDIT STR-1/3/4/5: in/out size, final token, oversize, empty on false) */
     #define _TOK_START(_str) do { \
         SSF_ASSERT(SSFStrCpy(dst, sizeof(dst), &s1Len, (_str), sizeof(_str))); \
         tok = dst; tokSize = sizeof(_str); \
@@ -444,8 +451,7 @@ void SSFStrUnitTest(void)
     {
         size_t tokSizeStart;
 
-        /* The source size is a hard cap that shrinks as input is consumed: "abcdef" bounded */
-        /* to 3 bytes yields the final token "abc", then end of input, never reading dst[3] */
+        /* Source size is a shrinking hard cap: "abcdef" bounded to 3 gives "abc" then end */
         SSF_ASSERT(SSFStrCpy(dst, sizeof(dst), &s1Len, "abcdef", 7));
         tok = dst; tokSize = 3u; tokSizeStart = 3u;
         _TOK_NEXT(true, "abc", 3);
@@ -477,8 +483,7 @@ void SSFStrUnitTest(void)
         _TOK_NEXT(true, "subst!ubstrr", 12);
         _TOK_NEXT(false, "", 12);
 
-        /* Leading and trailing delimiters: a leading one gives an empty token; a trailing one */
-        /* ends the last token and no empty token follows it                                */
+        /* Leading delimiter gives an empty token; trailing one ends the last, nothing after */
         _TOK_START(",substubstr "); tokSizeStart = sizeof(",substubstr ");
         _TOK_NEXT(true, "", 1);
         _TOK_NEXT(true, "substubstr", 12);
@@ -508,8 +513,7 @@ void SSFStrUnitTest(void)
     #undef _TOK_START
     #undef _TOK_NEXT
 
-    /* AUDIT STR-1: a source with no NUL, bounded only by its size, is never over-read. The */
-    /* old fixed cstrSize let the second call scan past the end of these 7 bytes.           */
+    /* AUDIT STR-1: a source with no NUL, bounded only by its size, is never over-read */
     {
         static const char raw[7] = { 'o', 'n', 'e', ',', 't', 'w', 'o' };
         SSFCStrIn_t rp = raw;
@@ -585,8 +589,7 @@ void SSFStrUnitTest(void)
     SSF_ASSERT(dst[0] == 0);
     SSF_ASSERT(dst[1] == 0x55);
 
-    /* AUDIT STR-5: a token too big for the token buffer returns false and is not consumed, */
-    /* so a larger buffer can retry it; the token buffer is left empty, never stale         */
+    /* AUDIT STR-5: oversize token returns false, not consumed, token buffer left empty */
     SSF_ASSERT(SSFStrCpy(dst, sizeof(dst), &s1Len, "hello,world", 12));
     tok = dst;
     tokSize = 12u;
@@ -673,9 +676,9 @@ void SSFStrUnitTest(void)
         SSF_ASSERT(SSFStrCharToLower('_') == '_');
         SSF_ASSERT(SSFStrCharToLower('.') == '.');
 
-        /* Boundary chars adjacent to A-Z range are unchanged */
-        SSF_ASSERT(SSFStrCharToLower('@') == '@');  /* 0x40, one before 'A' */
-        SSF_ASSERT(SSFStrCharToLower('[') == '[');  /* 0x5B, one after 'Z' */
+        /* Boundary chars adjacent to A-Z are unchanged: 0x40 before 'A', 0x5B after 'Z' */
+        SSF_ASSERT(SSFStrCharToLower('@') == '@');
+        SSF_ASSERT(SSFStrCharToLower('[') == '[');
 
         /* Full 0-255 sweep: every char either converts or is unchanged */
         {
@@ -683,8 +686,10 @@ void SSFStrUnitTest(void)
             for (c = 0; c < 256; c++)
             {
                 char result = SSFStrCharToLower((char)c);
-                if (c >= 'A' && c <= 'Z')
+                /* Is c an uppercase letter? */
+                if ((c >= 'A') && (c <= 'Z'))
                 {
+                    /* Yes, it converts */
                     SSF_ASSERT(result == (char)(c + ('a' - 'A')));
                 }
                 else
@@ -753,9 +758,9 @@ void SSFStrUnitTest(void)
         SSF_ASSERT(SSFStrCharToUpper('_') == '_');
         SSF_ASSERT(SSFStrCharToUpper('.') == '.');
 
-        /* Boundary chars adjacent to a-z range are unchanged */
-        SSF_ASSERT(SSFStrCharToUpper('`') == '`');  /* 0x60, one before 'a' */
-        SSF_ASSERT(SSFStrCharToUpper('{') == '{');  /* 0x7B, one after 'z' */
+        /* Boundary chars adjacent to a-z are unchanged: 0x60 before 'a', 0x7B after 'z' */
+        SSF_ASSERT(SSFStrCharToUpper('`') == '`');
+        SSF_ASSERT(SSFStrCharToUpper('{') == '{');
 
         /* Full 0-255 sweep: every char either converts or is unchanged */
         {
@@ -763,8 +768,10 @@ void SSFStrUnitTest(void)
             for (c = 0; c < 256; c++)
             {
                 char result = SSFStrCharToUpper((char)c);
-                if (c >= 'a' && c <= 'z')
+                /* Is c a lowercase letter? */
+                if ((c >= 'a') && (c <= 'z'))
                 {
+                    /* Yes, it converts */
                     SSF_ASSERT(result == (char)(c - ('a' - 'A')));
                 }
                 else
@@ -780,32 +787,29 @@ void SSFStrUnitTest(void)
         int c;
         for (c = 0; c < 256; c++)
         {
-            /* Lower then upper of any alpha char returns the uppercase original */
-            if (c >= 'A' && c <= 'Z')
+            /* Is c uppercase (lower then upper must return the original)? */
+            if ((c >= 'A') && (c <= 'Z'))
             {
+                /* Yes */
                 SSF_ASSERT(SSFStrCharToUpper(SSFStrCharToLower((char)c)) == (char)c);
             }
-            /* Upper then lower of any alpha char returns the lowercase original */
-            if (c >= 'a' && c <= 'z')
+            /* Is c lowercase (upper then lower must return the original)? */
+            if ((c >= 'a') && (c <= 'z'))
             {
+                /* Yes */
                 SSF_ASSERT(SSFStrCharToLower(SSFStrCharToUpper((char)c)) == (char)c);
             }
-            /* Non-alpha chars survive both directions unchanged */
-            if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')))
+            /* Is c non-alpha (must survive both directions unchanged)? */
+            if (!(((c >= 'A') && (c <= 'Z')) || ((c >= 'a') && (c <= 'z'))))
             {
+                /* Yes */
                 SSF_ASSERT(SSFStrCharToLower((char)c) == (char)c);
                 SSF_ASSERT(SSFStrCharToUpper((char)c) == (char)c);
             }
         }
     }
 
-    /* SSFStrStr: post-mismatch reset path where remaining haystack is exactly 1 byte and the   */
-    /* match has not been found. Existing tests pass null-terminated haystacks so the loop      */
-    /* exits via *cstr == 0 before reaching the cstrSize <= 1 check at ssfstr.c:262. Pass an    */
-    /* unterminated 2-char buffer that mismatches throughout: after one iteration cstrSize is   */
-    /* 1, no terminator seen, and the next iter trips the explicit reject.                       */
-    /* The function early-returns at line 262 without writing matchStrOptOut, so just confirm   */
-    /* the return value -- testing matchOut here would observe stack garbage.                    */
+    /* SSFStrStr: unterminated 2-char haystack that never matches hits the cstrSize <= 1 reject */
     SSF_ASSERT(SSFStrStr("xx", 2, NULL, "abc", 4) == false);
 }
 #endif /* SSF_CONFIG_STR_UNIT_TEST */

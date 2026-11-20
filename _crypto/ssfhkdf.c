@@ -51,17 +51,16 @@ bool SSFHKDFExtract(SSFHMACHash_t hash, const uint8_t *salt, size_t saltLen, con
     hashSize = SSFHMACGetHashSize(hash);
     SSF_REQUIRE(prkOutSize >= hashSize);
 
-    /* Was a salt provided (a NULL salt with saltLen > 0 traps above, AUDIT HKDF-1)? */
+    /* Is the salt empty? */
     if (saltLen == 0u)
     {
-        /* No, use a zero-filled HashLen-byte salt (RFC 5869 Sec. 2.2). */
+        /* Yes, use a zero-filled HashLen-byte salt (RFC 5869 Sec. 2.2). */
         memset(zeroSalt, 0, hashSize);
         salt = zeroSalt;
         saltLen = hashSize;
     }
 
-    /* PRK = HMAC-Hash(salt, IKM) -- HMAC writes exactly hashSize bytes; any caller-supplied */
-    /* tail in prkOut beyond hashSize is left as-is (RFC 5869: PRK length is HashLen). */
+    /* PRK = HMAC-Hash(salt, IKM); exactly hashSize bytes are written, any tail is untouched. */
     return SSFHMAC(hash, salt, saltLen, ikm, ikmLen, prkOut, hashSize);
 }
 
@@ -86,12 +85,12 @@ bool SSFHKDFExpand(SSFHMACHash_t hash, const uint8_t *prk, size_t prkLen, const 
 
     hashSize = SSFHMACGetHashSize(hash);
     SSF_REQUIRE(prkLen >= hashSize);
-    SSF_REQUIRE(okmLen <= 255u * hashSize);
+    SSF_REQUIRE(okmLen <= (255u * hashSize));
 
     if (okmLen == 0) return true;
 
     /* N = ceil(okmLen / hashSize) */
-    n = (okmLen + hashSize - 1u) / hashSize;
+    n = ((okmLen + hashSize) - 1u) / hashSize;
 
     for (i = 1; i <= n; i++)
     {
@@ -108,7 +107,7 @@ bool SSFHKDFExpand(SSFHMACHash_t hash, const uint8_t *prk, size_t prkLen, const 
         }
 
         /* Did the caller provide info? */
-        if (info != NULL && infoLen > 0)
+        if ((info != NULL) && (infoLen > 0))
         {
             /* Yes, feed it into the HMAC. */
             SSFHMACUpdate(&ctx, info, infoLen);
@@ -148,15 +147,14 @@ bool SSFHKDF(SSFHMACHash_t hash, const uint8_t *salt, size_t saltLen, const uint
     size_t hashSize;
     bool ok;
 
-    /* Pre-validate Expand's contract here so a contract failure aborts before prk is populated, */
-    /* otherwise the live PRK would linger on the stack past the abort (coredump / no-scrub HW). */
+    /* Pre-validate Expand's contract so a failure aborts before prk holds a live PRK. */
     SSF_REQUIRE((salt != NULL) || (saltLen == 0u));
     SSF_REQUIRE(okmOut != NULL);
     SSF_REQUIRE((info != NULL) || (infoLen == 0));
     SSF_REQUIRE((hash > SSF_HMAC_HASH_MIN) && (hash < SSF_HMAC_HASH_MAX));
 
     hashSize = SSFHMACGetHashSize(hash);
-    SSF_REQUIRE(okmLen <= 255u * hashSize);
+    SSF_REQUIRE(okmLen <= (255u * hashSize));
 
     /* Did Extract succeed? */
     if (SSFHKDFExtract(hash, salt, saltLen, ikm, ikmLen, prk, sizeof(prk)))

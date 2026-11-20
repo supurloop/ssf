@@ -45,8 +45,10 @@ nesting depth, not message size. The generator uses a chained-callback pattern w
 - Only 8-bit ASCII-encoded strings are accepted; an embedded `\0` terminates input.
 - Generator print functions return `false` when the output buffer is too small; no partial output
   is guaranteed.
-- The `comma` pointer passed to generator functions may be `NULL` to suppress automatic comma
+- The `commaOpt` pointer passed to generator functions may be `NULL` to suppress automatic comma
   insertion.
+- Path keys are matched literally against the member names as written in the JSON text; escape
+  sequences in member names are not decoded before the comparison.
 
 <a id="configuration"></a>
 
@@ -74,7 +76,7 @@ Options live in [`_opt/ssfjson_opt.h`](../_opt/ssfjson_opt.h) (aggregated into t
 | <a id="ssfjsontype-t"></a>`SSFJsonType_t` | Enum | JSON value type returned by [`SSFJsonGetType()`](#ssfjsongettype): `SSF_JSON_TYPE_STRING`, `SSF_JSON_TYPE_NUMBER`, `SSF_JSON_TYPE_OBJECT`, `SSF_JSON_TYPE_ARRAY`, `SSF_JSON_TYPE_TRUE`, `SSF_JSON_TYPE_FALSE`, `SSF_JSON_TYPE_NULL`, `SSF_JSON_TYPE_ERROR` |
 | <a id="ssfjsonfltfmt-t"></a>`SSFJsonFltFmt_t` | Enum (requires `SSF_JSON_CONFIG_ENABLE_FLOAT_GEN == 1`) | Float format for [`SSFJsonPrintDouble()`](#ssfjsonprintdouble): `SSF_JSON_FLT_FMT_PREC_0`–`SSF_JSON_FLT_FMT_PREC_9` for fixed decimal places; `SSF_JSON_FLT_FMT_STD` for `%g`; `SSF_JSON_FLT_FMT_SHORT` for shortest representation |
 | <a id="ssfgpath-t"></a>[`SSFGPath_t`](ssfgpath.md#ssfgpath-t) | Struct | One lookup path entry (key or index), declared in [`ssfgpath.h`](ssfgpath.h) and shared with [`ssfubjson`](ssfubjson.md) and [`ssfgobj`](ssfgobj.md). A path for these functions holds `SSF_JSON_CONFIG_MAX_IN_DEPTH + 1` entries. See [ssfgpath](ssfgpath.md). |
-| <a id="ssfjsonprintfn-t"></a>`SSFJsonPrintFn_t` | Typedef | `bool (*)(char *js, size_t size, size_t start, size_t *end, void *in)` — callback type passed to generator functions |
+| <a id="ssfjsonprintfn-t"></a>`SSFJsonPrintFn_t` | Typedef | `bool (*)(char *js, size_t jsSize, size_t start, size_t *end, void *in)` — callback type passed to generator functions |
 
 <a id="functions"></a>
 
@@ -82,23 +84,23 @@ Options live in [`_opt/ssfjson_opt.h`](../_opt/ssfjson_opt.h) (aggregated into t
 
 | | Function | Description |
 |---|----------|-------------|
-| [e.g.](#ex-isvalid) | [`bool SSFJsonIsValid(js)`](#ssfjsonisvalid) | Validate that `js` is well-formed JSON |
-| [e.g.](#ex-gettype) | [`SSFJsonType_t SSFJsonGetType(js, path)`](#ssfjsongettype) | Return the JSON type of the value at `path` |
-| [e.g.](#ex-getstring) | [`bool SSFJsonGetString(js, path, out, outSize, outLen)`](#ssfjsongetstring) | Extract and unescape a string value |
-| [e.g.](#ex-getint) | [`bool SSFJsonGetInt(js, path, out)` / `bool SSFJsonGetUInt(js, path, out)`](#ssfjsongetint) | Parse a signed or unsigned 64-bit integer value |
-| [e.g.](#ex-getdouble) | [`bool SSFJsonGetDouble(js, path, out)`](#ssfjsongetdouble) | Parse a floating-point value (requires `SSF_JSON_CONFIG_ENABLE_FLOAT_PARSE == 1`) |
-| [e.g.](#ex-gethex) | [`bool SSFJsonGetHex(js, path, out, outSize, outLen, rev)`](#ssfjsongethex) | Decode a hex-encoded binary string value |
-| [e.g.](#ex-getbase64) | [`bool SSFJsonGetBase64(js, path, out, outSize, outLen)`](#ssfjsongetbase64) | Decode a Base64-encoded binary string value |
-| [e.g.](#ex-message) | [`bool SSFJsonMessage(js, index, start, end, path, depth, jt)`](#ssfjsonmessage) | Low-level SAX iterator |
-| [e.g.](#ex-printobject) | [`bool SSFJsonPrintObject(js, size, start, end, fn, in, comma)` / `bool SSFJsonPrintArray(...)`](#ssfjsonprintobject) | Generate a JSON object or array via callback |
-| [e.g.](#ex-printlabel) | [`bool SSFJsonPrintLabel(js, size, start, end, in, comma)`](#ssfjsonprintlabel) | Append a quoted key label followed by `:` |
-| [e.g.](#ex-printstring) | [`bool SSFJsonPrintString(js, size, start, end, in, comma)`](#ssfjsonprintstring) | Append a quoted, escaped string value |
-| [e.g.](#ex-printint) | [`bool SSFJsonPrintInt(js, size, start, end, in, comma)` / `bool SSFJsonPrintUInt(...)`](#ssfjsonprintint) | Append a signed or unsigned integer value |
-| [e.g.](#ex-printdouble) | [`bool SSFJsonPrintDouble(js, size, start, end, in, fmt, comma)`](#ssfjsonprintdouble) | Append a floating-point value (requires `SSF_JSON_CONFIG_ENABLE_FLOAT_GEN == 1`) |
-| [e.g.](#ex-printtrue) | [`bool SSFJsonPrintTrue(js, size, start, end, comma)` / `bool SSFJsonPrintFalse(...)` / `bool SSFJsonPrintNull(...)`](#ssfjsonprinttrue) | Append JSON literal `true`, `false`, or `null` |
-| [e.g.](#ex-printhex) | [`bool SSFJsonPrintHex(js, size, start, end, in, inLen, rev, comma)`](#ssfjsonprinthex) | Append binary data as a hex-encoded string value |
-| [e.g.](#ex-printbase64) | [`bool SSFJsonPrintBase64(js, size, start, end, in, inLen, comma)`](#ssfjsonprintbase64) | Append binary data as a Base64-encoded string value |
-| [e.g.](#ex-gobjcreate) | [`bool SSFJsonGObjCreate(js, gobj, maxChildren)`](#ssfjsongobjcreate) | Convert a JSON string to a gobj tree (`SSF_JSON_GOBJ_ENABLE`) |
+| [e.g.](#ex-isvalid) | [`bool SSFJsonIsValid(jsStr)`](#ssfjsonisvalid) | Validate that `jsStr` is well-formed JSON |
+| [e.g.](#ex-gettype) | [`SSFJsonType_t SSFJsonGetType(jsStr, path)`](#ssfjsongettype) | Return the JSON type of the value at `path` |
+| [e.g.](#ex-getstring) | [`bool SSFJsonGetString(jsStr, path, out, outSize, outLen)`](#ssfjsongetstring) | Extract and unescape a string value |
+| [e.g.](#ex-getint) | [`bool SSFJsonGetInt(jsStr, path, out)` / `bool SSFJsonGetUInt(jsStr, path, out)`](#ssfjsongetint) | Parse a signed or unsigned 64-bit integer value |
+| [e.g.](#ex-getdouble) | [`bool SSFJsonGetDouble(jsStr, path, out)`](#ssfjsongetdouble) | Parse a floating-point value (requires `SSF_JSON_CONFIG_ENABLE_FLOAT_PARSE == 1`) |
+| [e.g.](#ex-gethex) | [`bool SSFJsonGetHex(jsStr, path, out, outSize, outLen, rev)`](#ssfjsongethex) | Decode a hex-encoded binary string value |
+| [e.g.](#ex-getbase64) | [`bool SSFJsonGetBase64(jsStr, path, out, outSize, outLen)`](#ssfjsongetbase64) | Decode a Base64-encoded binary string value |
+| [e.g.](#ex-message) | [`bool SSFJsonMessage(jsStr, index, start, end, pathOpt, depth, jt)`](#ssfjsonmessage) | Low-level SAX iterator |
+| [e.g.](#ex-printobject) | [`bool SSFJsonPrintObject(js, jsSize, start, end, fnOpt, in, commaOpt)` / `bool SSFJsonPrintArray(...)`](#ssfjsonprintobject) | Generate a JSON object or array via callback |
+| [e.g.](#ex-printlabel) | [`bool SSFJsonPrintLabel(js, jsSize, start, end, inStr, commaOpt)`](#ssfjsonprintlabel) | Append a quoted key label followed by `:` |
+| [e.g.](#ex-printstring) | [`bool SSFJsonPrintString(js, jsSize, start, end, inStr, commaOpt)`](#ssfjsonprintstring) | Append a quoted, escaped string value |
+| [e.g.](#ex-printint) | [`bool SSFJsonPrintInt(js, jsSize, start, end, in, commaOpt)` / `bool SSFJsonPrintUInt(...)`](#ssfjsonprintint) | Append a signed or unsigned integer value |
+| [e.g.](#ex-printdouble) | [`bool SSFJsonPrintDouble(js, jsSize, start, end, in, fmt, commaOpt)`](#ssfjsonprintdouble) | Append a floating-point value (requires `SSF_JSON_CONFIG_ENABLE_FLOAT_GEN == 1`) |
+| [e.g.](#ex-printtrue) | [`bool SSFJsonPrintTrue(js, jsSize, start, end, commaOpt)` / `bool SSFJsonPrintFalse(...)` / `bool SSFJsonPrintNull(...)`](#ssfjsonprinttrue) | Append JSON literal `true`, `false`, or `null` |
+| [e.g.](#ex-printhex) | [`bool SSFJsonPrintHex(js, jsSize, start, end, in, inLen, rev, commaOpt)`](#ssfjsonprinthex) | Append binary data as a hex-encoded string value |
+| [e.g.](#ex-printbase64) | [`bool SSFJsonPrintBase64(js, jsSize, start, end, in, inLen, commaOpt)`](#ssfjsonprintbase64) | Append binary data as a Base64-encoded string value |
+| [e.g.](#ex-gobjcreate) | [`bool SSFJsonGObjCreate(jsStr, gobj, maxChildren)`](#ssfjsongobjcreate) | Convert a JSON string to a gobj tree (`SSF_JSON_GOBJ_ENABLE`) |
 | [e.g.](#ex-gobjprint) | [`bool SSFJsonGObjPrint(gobj, js, jsSize, jsLen)`](#ssfjsongobjprint) | Convert a gobj tree to a JSON string (`SSF_JSON_GOBJ_ENABLE`) |
 
 <a id="function-reference"></a>
@@ -110,17 +112,17 @@ Options live in [`_opt/ssfjson_opt.h`](../_opt/ssfjson_opt.h) (aggregated into t
 ### [↑](#ssfjson--json-parsergenerator) [`bool SSFJsonIsValid()`](#functions)
 
 ```c
-bool SSFJsonIsValid(SSFCStrIn_t js);
+bool SSFJsonIsValid(SSFCStrIn_t jsStr);
 ```
 
-Validates that `js` is a well-formed JSON string per RFC 8259. Does not check for duplicate
+Validates that `jsStr` is a well-formed JSON string per RFC 8259. Does not check for duplicate
 object keys.
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
-| `js` | in | `const char *` | Null-terminated JSON string to validate. Must not be `NULL`. |
+| `jsStr` | in | `const char *` | Null-terminated JSON string to validate. Must not be `NULL`. |
 
-**Returns:** `true` if `js` is valid JSON; `false` otherwise.
+**Returns:** `true` if `jsStr` is valid JSON; `false` otherwise.
 
 ```c
 /* JSON string used in parser examples */
@@ -148,14 +150,14 @@ if (SSFJsonIsValid(js))
 ### [↑](#ssfjson--json-parsergenerator) [`SSFJsonType_t SSFJsonGetType()`](#functions)
 
 ```c
-SSFJsonType_t SSFJsonGetType(SSFCStrIn_t js, const SSFGPath_t *path);
+SSFJsonType_t SSFJsonGetType(SSFCStrIn_t jsStr, const SSFGPath_t *path);
 ```
 
-Returns the [`SSFJsonType_t`](#ssfjsontype-t) of the value found at `path` within `js`.
+Returns the [`SSFJsonType_t`](#ssfjsontype-t) of the value found at `path` within `jsStr`.
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
-| `js` | in | `const char *` | Null-terminated JSON string. Must not be `NULL`. |
+| `jsStr` | in | `const char *` | Null-terminated JSON string. Must not be `NULL`. |
 | `path` | in | [`const SSFGPath_t *`](ssfgpath.md#ssfgpath-t) | Lookup path: key and index entries ending in an `SSF_GPATH_END` entry. Zero it before use. Must not be `NULL`. |
 
 **Returns:** [`SSFJsonType_t`](#ssfjsontype-t) identifying the JSON value type, or
@@ -184,8 +186,8 @@ jt = SSFJsonGetType(js, path);
 ### [↑](#ssfjson--json-parsergenerator) [`bool SSFJsonGetString()`](#functions)
 
 ```c
-bool SSFJsonGetString(SSFCStrIn_t js, const SSFGPath_t *path, SSFCStrOut_t out, size_t outSize,
-                      size_t *outLen);
+bool SSFJsonGetString(SSFCStrIn_t jsStr, const SSFGPath_t *path, SSFCStrOut_t out,
+                      size_t outSize, size_t *outLen);
 ```
 
 Finds the JSON string value at `path` and copies it unescaped (without surrounding quotes) into
@@ -193,7 +195,7 @@ Finds the JSON string value at `path` and copies it unescaped (without surroundi
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
-| `js` | in | `const char *` | Null-terminated JSON string. Must not be `NULL`. |
+| `jsStr` | in | `const char *` | Null-terminated JSON string. Must not be `NULL`. |
 | `path` | in | [`const SSFGPath_t *`](ssfgpath.md#ssfgpath-t) | Lookup path ending in an `SSF_GPATH_END` entry; zero it before use. Must not be `NULL`. |
 | `out` | out | `char *` | Buffer receiving the unescaped string. Must not be `NULL`. |
 | `outSize` | in | `size_t` | Allocated size of `out` in bytes. |
@@ -222,15 +224,15 @@ if (SSFJsonGetString(js, path, out, sizeof(out), &outLen))
 ### [↑](#ssfjson--json-parsergenerator) [`bool SSFJsonGetInt()` / `bool SSFJsonGetUInt()`](#functions)
 
 ```c
-bool SSFJsonGetInt(SSFCStrIn_t js, const SSFGPath_t *path, int64_t *out);
-bool SSFJsonGetUInt(SSFCStrIn_t js, const SSFGPath_t *path, uint64_t *out);
+bool SSFJsonGetInt(SSFCStrIn_t jsStr, const SSFGPath_t *path, int64_t *out);
+bool SSFJsonGetUInt(SSFCStrIn_t jsStr, const SSFGPath_t *path, uint64_t *out);
 ```
 
 Finds a JSON number value at `path` and parses it as a signed or unsigned 64-bit integer.
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
-| `js` | in | `const char *` | Null-terminated JSON string. Must not be `NULL`. |
+| `jsStr` | in | `const char *` | Null-terminated JSON string. Must not be `NULL`. |
 | `path` | in | [`const SSFGPath_t *`](ssfgpath.md#ssfgpath-t) | Lookup path ending in an `SSF_GPATH_END` entry; zero it before use. Must not be `NULL`. |
 | `out` | out | `int64_t *` or `uint64_t *` | Receives the parsed integer value. Must not be `NULL`. |
 
@@ -271,7 +273,7 @@ for (idx = 0;; idx++)
 
 ```c
 /* Requires SSF_JSON_CONFIG_ENABLE_FLOAT_PARSE == 1 */
-bool SSFJsonGetDouble(SSFCStrIn_t js, const SSFGPath_t *path, double *out);
+bool SSFJsonGetDouble(SSFCStrIn_t jsStr, const SSFGPath_t *path, double *out);
 ```
 
 Finds a JSON number value at `path` and parses it as a `double`. Requires
@@ -279,7 +281,7 @@ Finds a JSON number value at `path` and parses it as a `double`. Requires
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
-| `js` | in | `const char *` | Null-terminated JSON string. Must not be `NULL`. |
+| `jsStr` | in | `const char *` | Null-terminated JSON string. Must not be `NULL`. |
 | `path` | in | [`const SSFGPath_t *`](ssfgpath.md#ssfgpath-t) | Lookup path ending in an `SSF_GPATH_END` entry; zero it before use. Must not be `NULL`. |
 | `out` | out | `double *` | Receives the parsed floating-point value. Must not be `NULL`. |
 
@@ -307,7 +309,7 @@ if (SSFJsonGetDouble(jsf, path, &d))
 ### [↑](#ssfjson--json-parsergenerator) [`bool SSFJsonGetHex()`](#functions)
 
 ```c
-bool SSFJsonGetHex(SSFCStrIn_t js, const SSFGPath_t *path, uint8_t *out, size_t outSize,
+bool SSFJsonGetHex(SSFCStrIn_t jsStr, const SSFGPath_t *path, uint8_t *out, size_t outSize,
                    size_t *outLen, bool rev);
 ```
 
@@ -315,11 +317,11 @@ Finds a JSON string value at `path` and decodes it as a hexadecimal-encoded bina
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
-| `js` | in | `const char *` | Null-terminated JSON string. Must not be `NULL`. |
+| `jsStr` | in | `const char *` | Null-terminated JSON string. Must not be `NULL`. |
 | `path` | in | [`const SSFGPath_t *`](ssfgpath.md#ssfgpath-t) | Lookup path ending in an `SSF_GPATH_END` entry; zero it before use. Must not be `NULL`. |
 | `out` | out | `uint8_t *` | Buffer receiving the decoded binary bytes. Must not be `NULL`. |
 | `outSize` | in | `size_t` | Allocated size of `out` in bytes. |
-| `outLen` | out | `size_t *` | If not `NULL`, receives the number of bytes decoded. |
+| `outLen` | out | `size_t *` | Receives the number of bytes decoded. Must not be `NULL`. |
 | `rev` | in | `bool` | `true` to reverse the byte order of the decoded output. |
 
 **Returns:** `true` if a valid hex string was found and decoded; `false` otherwise.
@@ -345,7 +347,7 @@ if (SSFJsonGetHex(js, path, bin, sizeof(bin), &binLen, false))
 ### [↑](#ssfjson--json-parsergenerator) [`bool SSFJsonGetBase64()`](#functions)
 
 ```c
-bool SSFJsonGetBase64(SSFCStrIn_t js, const SSFGPath_t *path, uint8_t *out, size_t outSize,
+bool SSFJsonGetBase64(SSFCStrIn_t jsStr, const SSFGPath_t *path, uint8_t *out, size_t outSize,
                       size_t *outLen);
 ```
 
@@ -353,11 +355,11 @@ Finds a JSON string value at `path` and decodes it as a Base64-encoded binary ar
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
-| `js` | in | `const char *` | Null-terminated JSON string. Must not be `NULL`. |
+| `jsStr` | in | `const char *` | Null-terminated JSON string. Must not be `NULL`. |
 | `path` | in | [`const SSFGPath_t *`](ssfgpath.md#ssfgpath-t) | Lookup path ending in an `SSF_GPATH_END` entry; zero it before use. Must not be `NULL`. |
 | `out` | out | `uint8_t *` | Buffer receiving the decoded binary bytes. Must not be `NULL`. |
 | `outSize` | in | `size_t` | Allocated size of `out` in bytes. |
-| `outLen` | out | `size_t *` | If not `NULL`, receives the number of bytes decoded. |
+| `outLen` | out | `size_t *` | Receives the number of bytes decoded. Must not be `NULL`. |
 
 **Returns:** `true` if a valid Base64 string was found and decoded; `false` otherwise.
 
@@ -382,21 +384,21 @@ if (SSFJsonGetBase64(js, path, bin, sizeof(bin), &binLen))
 ### [↑](#ssfjson--json-parsergenerator) [`bool SSFJsonMessage()`](#functions)
 
 ```c
-bool SSFJsonMessage(SSFCStrIn_t js, size_t *index, size_t *start, size_t *end,
-                    const SSFGPath_t *path, uint8_t depth, SSFJsonType_t *jt);
+bool SSFJsonMessage(SSFCStrIn_t jsStr, size_t *index, size_t *start, size_t *end,
+                    const SSFGPath_t *pathOpt, uint8_t depth, SSFJsonType_t *jt);
 ```
 
-Low-level SAX iterator used internally by all `SSFJsonGet*` functions. Walks `js` starting at
-`*index` and reports the next value that matches `path`. Exposed for advanced use cases requiring
-fine-grained control over parsing.
+Low-level SAX iterator used internally by all `SSFJsonGet*` functions. Walks `jsStr` starting
+at `*index` and reports the next value that matches `pathOpt`. Exposed for advanced use cases
+requiring fine-grained control over parsing.
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
-| `js` | in | `const char *` | Null-terminated JSON string. Must not be `NULL`. |
-| `index` | in-out | `size_t *` | Current byte offset into `js`. Initialize to `0` before the first call; updated on each call. Must not be `NULL`. |
-| `start` | out | `size_t *` | Receives the start offset of the matched value within `js`. Must not be `NULL`. |
-| `end` | out | `size_t *` | Receives the end offset (exclusive) of the matched value within `js`. Must not be `NULL`. |
-| `path` | in | [`const SSFGPath_t *`](ssfgpath.md#ssfgpath-t) | Lookup path to match, ending in an `SSF_GPATH_END` entry; zero it before use. Must not be `NULL`. |
+| `jsStr` | in | `const char *` | Null-terminated JSON string. Must not be `NULL`. |
+| `index` | in-out | `size_t *` | Current byte offset into `jsStr`. Initialize to `0` before the first call; updated on each call. Must not be `NULL`. |
+| `start` | out | `size_t *` | Receives the start offset of the matched value within `jsStr`. Must not be `NULL`. |
+| `end` | out | `size_t *` | Receives the end offset (exclusive) of the matched value within `jsStr`. Must not be `NULL`. |
+| `pathOpt` | in | [`const SSFGPath_t *`](ssfgpath.md#ssfgpath-t) | Lookup path to match, ending in an `SSF_GPATH_END` entry; zero it before use. May be `NULL` to only walk the input; `*start`, `*end` and `*jt` are then unspecified. |
 | `depth` | in | `uint8_t` | Current nesting depth. Pass `0` for a top-level call. |
 | `jt` | out | [`SSFJsonType_t *`](#ssfjsontype-t) | Receives the JSON type of the matched value. Must not be `NULL`. |
 
@@ -426,27 +428,27 @@ if (SSFJsonMessage(js, &index, &start, &end, path, 0, &jt))
 ### [↑](#ssfjson--json-parsergenerator) [`bool SSFJsonPrintObject()` / `bool SSFJsonPrintArray()`](#functions)
 
 ```c
-#define SSFJsonPrintObject(js, size, start, end, fn, in, comma) \
-        SSFJsonPrint(js, size, start, end, fn, in, "{}", comma)
-#define SSFJsonPrintArray(js, size, start, end, fn, in, comma) \
-        SSFJsonPrint(js, size, start, end, fn, in, "[]", comma)
+#define SSFJsonPrintObject(js, jsSize, start, end, fnOpt, in, commaOpt) \
+        SSFJsonPrint(js, jsSize, start, end, fnOpt, in, "{}", commaOpt)
+#define SSFJsonPrintArray(js, jsSize, start, end, fnOpt, in, commaOpt) \
+        SSFJsonPrint(js, jsSize, start, end, fnOpt, in, "[]", commaOpt)
 ```
 
-Generates a JSON object or array by writing the opening bracket, invoking `fn` to fill the
-contents, then writing the closing bracket. `fn` receives the output buffer and advances the
+Generates a JSON object or array by writing the opening bracket, invoking `fnOpt` to fill the
+contents, then writing the closing bracket. `fnOpt` receives the output buffer and advances the
 `start`/`end` cursor.
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
 | `js` | in-out | `char *` | JSON output buffer. Must not be `NULL`. |
-| `size` | in | `size_t` | Total allocated size of `js`. |
+| `jsSize` | in | `size_t` | Total allocated size of `js`. |
 | `start` | in | `size_t` | Current write offset into `js`. |
 | `end` | out | `size_t *` | Receives the write offset after the closing bracket. Must not be `NULL`. |
-| `fn` | in | [`SSFJsonPrintFn_t`](#ssfjsonprintfn-t) | Callback that writes the object or array body. Must not be `NULL`. |
-| `in` | in | `void *` | Opaque context pointer passed through to `fn`. May be `NULL`. |
-| `comma` | in-out | `bool *` | If not `NULL`, a comma is prepended when `*comma` is `true`, then `*comma` is set to `true`. Pass `NULL` to suppress comma handling. |
+| `fnOpt` | in | [`SSFJsonPrintFn_t`](#ssfjsonprintfn-t) | Callback that writes the object or array body. May be `NULL` for an empty body. |
+| `in` | in | `void *` | Opaque context pointer passed through to `fnOpt`. May be `NULL`. |
+| `commaOpt` | in-out | `bool *` | If not `NULL`, a comma is prepended when `*commaOpt` is `true`, then `*commaOpt` is set to `true`. Pass `NULL` to suppress comma handling. |
 
-**Returns:** `true` if generation succeeded (`fn` returned `true` and the buffer was large
+**Returns:** `true` if generation succeeded (`fnOpt` returned `true` and the buffer was large
 enough); `false` otherwise.
 
 <a id="ex-printobject"></a>
@@ -494,8 +496,8 @@ if (SSFJsonPrintArray(out, sizeof(out), 0, &end, ArrFn, NULL, NULL))
 ### [↑](#ssfjson--json-parsergenerator) [`bool SSFJsonPrintLabel()`](#functions)
 
 ```c
-bool SSFJsonPrintLabel(SSFCStrOut_t js, size_t size, size_t start, size_t *end,
-                       SSFCStrIn_t in, bool *comma);
+bool SSFJsonPrintLabel(SSFCStrOut_t js, size_t jsSize, size_t start, size_t *end,
+                       SSFCStrIn_t inStr, bool *commaOpt);
 ```
 
 Appends a JSON object key label (quoted string followed by `:`) to the output buffer. Optionally
@@ -504,11 +506,11 @@ prepends a comma separator.
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
 | `js` | in-out | `char *` | JSON output buffer. Must not be `NULL`. |
-| `size` | in | `size_t` | Total allocated size of `js`. |
+| `jsSize` | in | `size_t` | Total allocated size of `js`. |
 | `start` | in | `size_t` | Current write offset. |
 | `end` | out | `size_t *` | Receives the new write offset after appending. Must not be `NULL`. |
-| `in` | in | `const char *` | Null-terminated label string. Must not be `NULL`. |
-| `comma` | in-out | `bool *` | Comma control: prepends `,` when `*comma` is `true`, then sets `*comma` to `true`. Pass `NULL` to suppress. |
+| `inStr` | in | `const char *` | Null-terminated label string. Must not be `NULL`. |
+| `commaOpt` | in-out | `bool *` | Comma control: prepends `,` when `*commaOpt` is `true`, then sets `*commaOpt` to `true`. Pass `NULL` to suppress. |
 
 **Returns:** `true` if the label was appended; `false` if the buffer is too small.
 
@@ -540,8 +542,8 @@ if (SSFJsonPrintObject(out, sizeof(out), 0, &end, PrintFn, NULL, NULL))
 ### [↑](#ssfjson--json-parsergenerator) [`bool SSFJsonPrintString()`](#functions)
 
 ```c
-bool SSFJsonPrintString(SSFCStrOut_t js, size_t size, size_t start, size_t *end,
-                        SSFCStrIn_t in, bool *comma);
+bool SSFJsonPrintString(SSFCStrOut_t js, size_t jsSize, size_t start, size_t *end,
+                        SSFCStrIn_t inStr, bool *commaOpt);
 ```
 
 Appends a JSON string value (quoted and escaped) to the output buffer. Optionally prepends a
@@ -550,11 +552,11 @@ comma separator.
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
 | `js` | in-out | `char *` | JSON output buffer. Must not be `NULL`. |
-| `size` | in | `size_t` | Total allocated size of `js`. |
+| `jsSize` | in | `size_t` | Total allocated size of `js`. |
 | `start` | in | `size_t` | Current write offset. |
 | `end` | out | `size_t *` | Receives the new write offset. Must not be `NULL`. |
-| `in` | in | `const char *` | Null-terminated string value to append. Must not be `NULL`. |
-| `comma` | in-out | `bool *` | Comma control (same as [`SSFJsonPrintLabel()`](#ssfjsonprintlabel)). |
+| `inStr` | in | `const char *` | Null-terminated string value to append. Must not be `NULL`. |
+| `commaOpt` | in-out | `bool *` | Comma control (same as [`SSFJsonPrintLabel()`](#ssfjsonprintlabel)). |
 
 **Returns:** `true` if the value was appended; `false` if the buffer is too small.
 
@@ -586,10 +588,10 @@ if (SSFJsonPrintObject(out, sizeof(out), 0, &end, PrintFn, NULL, NULL))
 ### [↑](#ssfjson--json-parsergenerator) [`bool SSFJsonPrintInt()` / `bool SSFJsonPrintUInt()`](#functions)
 
 ```c
-bool SSFJsonPrintInt(SSFCStrOut_t js, size_t size, size_t start, size_t *end,
-                     int64_t in, bool *comma);
-bool SSFJsonPrintUInt(SSFCStrOut_t js, size_t size, size_t start, size_t *end,
-                      uint64_t in, bool *comma);
+bool SSFJsonPrintInt(SSFCStrOut_t js, size_t jsSize, size_t start, size_t *end,
+                     int64_t in, bool *commaOpt);
+bool SSFJsonPrintUInt(SSFCStrOut_t js, size_t jsSize, size_t start, size_t *end,
+                      uint64_t in, bool *commaOpt);
 ```
 
 Appends a JSON integer number (signed or unsigned) to the output buffer.
@@ -597,11 +599,11 @@ Appends a JSON integer number (signed or unsigned) to the output buffer.
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
 | `js` | in-out | `char *` | JSON output buffer. Must not be `NULL`. |
-| `size` | in | `size_t` | Total allocated size of `js`. |
+| `jsSize` | in | `size_t` | Total allocated size of `js`. |
 | `start` | in | `size_t` | Current write offset. |
 | `end` | out | `size_t *` | Receives the new write offset. Must not be `NULL`. |
 | `in` | in | `int64_t` or `uint64_t` | Integer value to print. |
-| `comma` | in-out | `bool *` | Comma control. |
+| `commaOpt` | in-out | `bool *` | Comma control. |
 
 **Returns:** `true` if the value was appended; `false` if the buffer is too small.
 
@@ -636,8 +638,8 @@ if (SSFJsonPrintObject(out, sizeof(out), 0, &end, PrintFn, NULL, NULL))
 
 ```c
 /* Requires SSF_JSON_CONFIG_ENABLE_FLOAT_GEN == 1 */
-bool SSFJsonPrintDouble(SSFCStrOut_t js, size_t size, size_t start, size_t *end,
-                        double in, SSFJsonFltFmt_t fmt, bool *comma);
+bool SSFJsonPrintDouble(SSFCStrOut_t js, size_t jsSize, size_t start, size_t *end,
+                        double in, SSFJsonFltFmt_t fmt, bool *commaOpt);
 ```
 
 Appends a JSON floating-point number to the output buffer. Requires
@@ -646,12 +648,12 @@ Appends a JSON floating-point number to the output buffer. Requires
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
 | `js` | in-out | `char *` | JSON output buffer. Must not be `NULL`. |
-| `size` | in | `size_t` | Total allocated size of `js`. |
+| `jsSize` | in | `size_t` | Total allocated size of `js`. |
 | `start` | in | `size_t` | Current write offset. |
 | `end` | out | `size_t *` | Receives the new write offset. Must not be `NULL`. |
 | `in` | in | `double` | Floating-point value to print. |
 | `fmt` | in | [`SSFJsonFltFmt_t`](#ssfjsonfltfmt-t) | Output format: `SSF_JSON_FLT_FMT_PREC_0`–`SSF_JSON_FLT_FMT_PREC_9` for fixed decimal places; `SSF_JSON_FLT_FMT_STD` for `%g`; `SSF_JSON_FLT_FMT_SHORT` for shortest representation. |
-| `comma` | in-out | `bool *` | Comma control. |
+| `commaOpt` | in-out | `bool *` | Comma control. |
 
 **Returns:** `true` if the value was appended; `false` if the buffer is too small.
 
@@ -685,12 +687,12 @@ if (SSFJsonPrintObject(out, sizeof(out), 0, &end, PrintFn, NULL, NULL))
 ### [↑](#ssfjson--json-parsergenerator) [`bool SSFJsonPrintTrue()` / `bool SSFJsonPrintFalse()` / `bool SSFJsonPrintNull()`](#functions)
 
 ```c
-#define SSFJsonPrintTrue(js, size, start, end, comma)  \
-        SSFJsonPrintCString(js, size, start, end, "true", comma)
-#define SSFJsonPrintFalse(js, size, start, end, comma) \
-        SSFJsonPrintCString(js, size, start, end, "false", comma)
-#define SSFJsonPrintNull(js, size, start, end, comma)  \
-        SSFJsonPrintCString(js, size, start, end, "null", comma)
+#define SSFJsonPrintTrue(js, jsSize, start, end, commaOpt)  \
+        SSFJsonPrintCString(js, jsSize, start, end, "true", commaOpt)
+#define SSFJsonPrintFalse(js, jsSize, start, end, commaOpt) \
+        SSFJsonPrintCString(js, jsSize, start, end, "false", commaOpt)
+#define SSFJsonPrintNull(js, jsSize, start, end, commaOpt)  \
+        SSFJsonPrintCString(js, jsSize, start, end, "null", commaOpt)
 ```
 
 Convenience macros that append the JSON literals `true`, `false`, or `null` to the output
@@ -700,10 +702,10 @@ except there is no `in` argument.
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
 | `js` | in-out | `char *` | JSON output buffer. Must not be `NULL`. |
-| `size` | in | `size_t` | Total allocated size of `js`. |
+| `jsSize` | in | `size_t` | Total allocated size of `js`. |
 | `start` | in | `size_t` | Current write offset. |
 | `end` | out | `size_t *` | Receives the new write offset. Must not be `NULL`. |
-| `comma` | in-out | `bool *` | Comma control. |
+| `commaOpt` | in-out | `bool *` | Comma control. |
 
 **Returns:** `true` if the literal was appended; `false` if the buffer is too small.
 
@@ -739,8 +741,8 @@ if (SSFJsonPrintObject(out, sizeof(out), 0, &end, PrintFn, NULL, NULL))
 ### [↑](#ssfjson--json-parsergenerator) [`bool SSFJsonPrintHex()`](#functions)
 
 ```c
-bool SSFJsonPrintHex(SSFCStrOut_t js, size_t size, size_t start, size_t *end,
-                     const uint8_t *in, size_t inLen, bool rev, bool *comma);
+bool SSFJsonPrintHex(SSFCStrOut_t js, size_t jsSize, size_t start, size_t *end,
+                     const uint8_t *in, size_t inLen, bool rev, bool *commaOpt);
 ```
 
 Encodes `in` as a lowercase hexadecimal string and appends it as a quoted JSON string value.
@@ -748,13 +750,13 @@ Encodes `in` as a lowercase hexadecimal string and appends it as a quoted JSON s
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
 | `js` | in-out | `char *` | JSON output buffer. Must not be `NULL`. |
-| `size` | in | `size_t` | Total allocated size of `js`. |
+| `jsSize` | in | `size_t` | Total allocated size of `js`. |
 | `start` | in | `size_t` | Current write offset. |
 | `end` | out | `size_t *` | Receives the new write offset. Must not be `NULL`. |
 | `in` | in | `const uint8_t *` | Binary data to encode. May be `NULL` when `inLen` is `0`. |
 | `inLen` | in | `size_t` | Number of bytes to encode. |
 | `rev` | in | `bool` | `true` to encode bytes in reverse order. |
-| `comma` | in-out | `bool *` | Comma control. |
+| `commaOpt` | in-out | `bool *` | Comma control. |
 
 **Returns:** `true` if appended successfully; `false` if the buffer is too small.
 
@@ -787,21 +789,21 @@ if (SSFJsonPrintObject(out, sizeof(out), 0, &end, PrintFn, NULL, NULL))
 ### [↑](#ssfjson--json-parsergenerator) [`bool SSFJsonPrintBase64()`](#functions)
 
 ```c
-bool SSFJsonPrintBase64(SSFCStrOut_t jstr, size_t size, size_t start, size_t *end,
-                        const uint8_t *in, size_t inLen, bool *comma);
+bool SSFJsonPrintBase64(SSFCStrOut_t js, size_t jsSize, size_t start, size_t *end,
+                        const uint8_t *in, size_t inLen, bool *commaOpt);
 ```
 
 Encodes `in` as a Base64 string and appends it as a quoted JSON string value.
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
-| `jstr` | in-out | `char *` | JSON output buffer. Must not be `NULL`. |
-| `size` | in | `size_t` | Total allocated size of `jstr`. |
+| `js` | in-out | `char *` | JSON output buffer. Must not be `NULL`. |
+| `jsSize` | in | `size_t` | Total allocated size of `js`. |
 | `start` | in | `size_t` | Current write offset. |
 | `end` | out | `size_t *` | Receives the new write offset. Must not be `NULL`. |
 | `in` | in | `const uint8_t *` | Binary data to encode. May be `NULL` when `inLen` is `0`. |
 | `inLen` | in | `size_t` | Number of bytes to encode. |
-| `comma` | in-out | `bool *` | Comma control. |
+| `commaOpt` | in-out | `bool *` | Comma control. |
 
 **Returns:** `true` if appended successfully; `false` if the buffer is too small.
 
@@ -836,7 +838,7 @@ if (SSFJsonPrintObject(out, sizeof(out), 0, &end, PrintFn, NULL, NULL))
 Requires `SSF_JSON_GOBJ_ENABLE == 1`.
 
 ```c
-bool SSFJsonGObjCreate(SSFCStrIn_t js, SSFGObj_t **gobj, uint16_t maxChildren);
+bool SSFJsonGObjCreate(SSFCStrIn_t jsStr, SSFGObj_t **gobj, uint16_t maxChildren);
 ```
 
 Parses a null-terminated JSON string and builds a generic object tree (`SSFGObj_t`)
@@ -869,7 +871,7 @@ deepest nesting you need to convert (this also raises the depth `SSFJsonIsValid(
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
-| `js` | in | `const char *` | Null-terminated JSON string to parse. Must not be `NULL`. |
+| `jsStr` | in | `const char *` | Null-terminated JSON string to parse. Must not be `NULL`. |
 | `gobj` | out | `SSFGObj_t **` | Receives the root of the newly allocated gobj tree. Must not be `NULL`. |
 | `maxChildren` | in | `uint16_t` | Maximum number of children for each container node (objects and arrays). |
 

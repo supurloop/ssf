@@ -51,9 +51,7 @@ void SSFDecUnitTest(void)
     uint8_t minFieldWidth;
     uint64_t r = 1;
 
-    /* ---- AUDIT DEC-1: INT64_MIN is parsed without signed overflow ---- */
-    /* "-9223372036854775808" negated 2^63 as an int64_t (undefined), once in the integer   */
-    /* parser and again when the exponent parser negated the base; seen under UBSan.         */
+    /* ---- AUDIT DEC-1: INT64_MIN parses without signed overflow (int and exponent paths) ---- */
     {
         int64_t v = 0;
 
@@ -87,9 +85,7 @@ void SSFDecUnitTest(void)
     SSF_ASSERT_TEST(SSFDecStrToUInt(NULL, &u64));
     SSF_ASSERT_TEST(SSFDecStrToUInt("-1", NULL));
 
-    /* (Hardening) A huge exponent must be handled promptly, not spun over in a near-infinite loop. */
-    /* "1e<2^64-1>" overflows -> reject; "0e<2^64-1>" is 0 regardless of the exponent. Before the   */
-    /* zero-accumulator break these hung the parser (DoS). */
+    /* (Hardening) Huge exponent ends promptly: "1e<2^64-1>" rejects, "0e<2^64-1>" is 0 (DoS) */
     SSF_ASSERT(SSFDecStrToInt("1e18446744073709551615", &i) == false);
     SSF_ASSERT(SSFDecStrToUInt("1e18446744073709551615", &u64) == false);
     SSF_ASSERT(SSFDecStrToUInt("0e18446744073709551615", &u64) == true);
@@ -276,8 +272,7 @@ void SSFDecUnitTest(void)
     SSF_ASSERT(SSFDecStrToUInt("184467440737095516150", &u64) == false);
     SSF_ASSERT(SSFDecStrToUInt("184467440737095516.150e03", &u64) == false);
 
-    /* Verify _SSFDecStrToUInt overflow check does not reject valid 20-digit values where the */
-    /* first 19 digits are below the threshold but the last digit is > '5'. */
+    /* UInt overflow check accepts 20-digit values with first 19 below threshold, last > '5' */
     SSF_ASSERT(SSFDecStrToUInt("10000000000000000006", &u64));
     SSF_ASSERT(u64 == 10000000000000000006ull);
     SSF_ASSERT(SSFDecStrToUInt("10000000000000000009", &u64));
@@ -285,9 +280,7 @@ void SSFDecUnitTest(void)
     SSF_ASSERT(SSFDecStrToUInt("18446744073709551609", &u64));
     SSF_ASSERT(u64 == 18446744073709551609ull);
 
-    /* Verify _SSFDecStrToInt overflow check does not reject valid 19-digit values where the */
-    /* first 18 digits are below the threshold but the last digit is > '7' (positive) or > '8' */
-    /* (negative). */
+    /* Int overflow check accepts 19-digit values, first 18 below threshold, last > '7'/'8' */
     SSF_ASSERT(SSFDecStrToInt("1000000000000000008", &i64));
     SSF_ASSERT(i64 == 1000000000000000008ll);
     SSF_ASSERT(SSFDecStrToInt("1000000000000000009", &i64));
@@ -941,13 +934,14 @@ void SSFDecUnitTest(void)
     SSF_ASSERT(len1 != 0);
     SSF_ASSERT(memcmp(str2, "-9223372036854775808", len1 + 1) == 0);
 
-    /* (Hardening) INT64_MIN must round-trip through the negate paths (str->int, int->str, padded)  */
-    /* without relying on -INT64_MIN signed-overflow UB. */
+    /* (Hardening) INT64_MIN round-trips the negate paths without -INT64_MIN signed overflow */
     i = 0;
+    /* SSFDecStrToXInt site */
     SSF_ASSERT(SSFDecStrToInt("-9223372036854775808", &i) == true);
-    SSF_ASSERT(i == (-9223372036854775807ll - 1));                        /* SSFDecStrToXInt site */
+    SSF_ASSERT(i == (-9223372036854775807ll - 1));
+    /* SSFDecIntToStrPadded site */
     len1 = SSFDecIntToStrPadded(-9223372036854775807ll - 1, str2, sizeof(str2), 22, '0');
-    SSF_ASSERT(len1 == 22);                                              /* SSFDecIntToStrPadded */
+    SSF_ASSERT(len1 == 22);
     SSF_ASSERT(memcmp(str2, "-009223372036854775808", len1 + 1) == 0);
 
     /* SSFDecUIntToStr with UINT64_MAX */
@@ -996,8 +990,7 @@ void SSFDecUnitTest(void)
     SSF_ASSERT(i64 == 1000000000000000000ll);
     SSF_ASSERT(SSFDecStrToInt("1e19", &i64) == false);
 
-    /* SSFDecIntToStrPadded with negative values */
-    /* minFieldWidth includes the '-' sign, so -5 w/minFieldWidth=4 -> "-005" (len=4) */
+    /* SSFDecIntToStrPadded negative: width includes '-', -5 w/minFieldWidth=4 -> "-005" */
     len1 = SSFDecIntToStrPadded(-5, str2, sizeof(str2), 4, '0');
     SSF_ASSERT(len1 == 4);
     SSF_ASSERT(memcmp(str2, "-005", 4) == 0);
@@ -1165,23 +1158,16 @@ void SSFDecUnitTest(void)
         SSF_ASSERT_TEST(SSFDecStrToOctets("1.2", '.', octets, 0, &numOctets));
         SSF_ASSERT_TEST(SSFDecStrToOctets("1.2", '.', octets, sizeof(octets), NULL));
 
-        /* SSFDecStrToOctets: starts with non-digit (ssfdec.c:588). Existing rejects all start  */
-        /* with a digit and only fail on later parsing; this hits the very first guard.          */
+        /* SSFDecStrToOctets: starts with non-digit, hits the very first guard */
         SSF_ASSERT(SSFDecStrToOctets("x.1.2.3", '.', octets, sizeof(octets), &numOctets)
                    == false);
 
-        /* SSFDecStrToOctets: octet field with 4+ digits (ssfdec.c:597). Need val <= 255 with    */
-        /* digits > 3, which only happens with leading zeros: "0001" reaches digits == 4 with    */
-        /* val == 1, trips the digit-cap before the leading-zero rule.                            */
+        /* SSFDecStrToOctets: "0001" hits the 3-digit cap (val 1) before the leading-zero rule */
         SSF_ASSERT(SSFDecStrToOctets("0001.2.3.4", '.', octets, sizeof(octets), &numOctets)
                    == false);
     }
 
-    /* ---- SSFDecOctetsToStr: separator overflow path (ssfdec.c:551) ---- */
-    /* Existing buffer-too-small tests bail inside SSFDecUIntToStr when the integer write       */
-    /* itself can't fit; the explicit `(totalLen + 1u) >= strSize` separator-write check is     */
-    /* only reached when the prior octet exactly filled the buffer. Pick an strSize that fits   */
-    /* the first octet but leaves no room for the separator.                                     */
+    /* ---- SSFDecOctetsToStr: first octet fills strSize, no room for the separator ---- */
     {
         uint8_t octets2[2] = { 1u, 2u };
         char ostr[8];

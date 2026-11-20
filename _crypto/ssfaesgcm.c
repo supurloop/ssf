@@ -42,14 +42,14 @@
 #include "ssfusexport.h"
 
 #if SSF_CONFIG_AESGCM_UNIT_TEST == 1
-/* Test-only hook fired after each secret local is wiped; NULL in production (AUDIT GCM-3). */
+/* Test-only hook fired after each secret local is wiped; NULL in production. */
 void (*_SSFAESGCMScrubTestHook)(const void *buf, size_t len) = NULL;
 #define _SSF_AESGCM_SCRUB_HOOK(b) \
     do { if (_SSFAESGCMScrubTestHook != NULL) _SSFAESGCMScrubTestHook((b), sizeof(b)); } while (0)
 #define _SSF_AESGCM_SCRUB_HOOK_OBJ(o) \
     do { if (_SSFAESGCMScrubTestHook != NULL) _SSFAESGCMScrubTestHook(&(o), sizeof(o)); } while (0)
 
-/* Test-only count of GHASH key (H) preparations: once per GHASH call (OPTIMIZE GCM-O1) */
+/* Test-only count of GHASH key (H) preparations: once per GHASH call */
 uint32_t _SSFAESGCMHPreps = 0u;
 #define _SSF_AESGCM_COUNT(c) do { (c)++; } while (0)
 #else
@@ -74,11 +74,13 @@ typedef char _ssf_aesgcm_sa_u64_is_64_bit[(sizeof(uint64_t) == 8) ? 1 : -1];
     (x)[12] ^= (y)[12]; (x)[13] ^= (y)[13]; (x)[14] ^= (y)[14]; (x)[15] ^= (y)[15]
 
 /* --------------------------------------------------------------------------------------------- */
-/* Increments the low 32 bits of the 16-byte counter block (GCM inc32, NIST SP 800-38D Sec. 6.2).*/
+/* Increments the low 32 bits of the counter block (GCM inc32, NIST SP 800-38D Sec. 6.2).        */
 /* --------------------------------------------------------------------------------------------- */
 static inline void _SSFAESGCMBlockInc32(uint8_t *in)
 {
     uint32_t x;
+
+    SSF_REQUIRE(in != NULL);
 
     x = SSF_GETU32BE(in + 12);
     x += 1;
@@ -130,10 +132,21 @@ static inline void _SSFAESGCMCarryless32Mult(uint32_t a, uint32_t b, uint32_t *l
 /* --------------------------------------------------------------------------------------------- */
 static inline void _SSFAESGCMCarrylessReduce(uint32_t *in)
 {
-    uint64_t x0, x1, x2, x3;
-    uint64_t a, b, c, d;
-    uint64_t t[2], e[2], f[2], g[2];
+    uint64_t x0;
+    uint64_t x1;
+    uint64_t x2;
+    uint64_t x3;
+    uint64_t a;
+    uint64_t b;
+    uint64_t c;
+    uint64_t d;
+    uint64_t t[2];
+    uint64_t e[2];
+    uint64_t f[2];
+    uint64_t g[2];
     uint64_t r[2];
+
+    SSF_REQUIRE(in != NULL);
 
     x0 = ((uint64_t)in[6] << 32) ^ ((uint64_t)in[7]);
     x1 = ((uint64_t)in[4] << 32) ^ ((uint64_t)in[5]);
@@ -169,9 +182,9 @@ static inline void _SSFAESGCMCarrylessReduce(uint32_t *in)
 /* --------------------------------------------------------------------------------------------- */
 static inline uint32_t _SSFAESGCMReverseByte(uint8_t x)
 {
-    x = (x & 0xf0) >> 4 | (x & 0x0f) << 4;
-    x = (x & 0xcc) >> 2 | (x & 0x33) << 2;
-    x = (x & 0xaa) >> 1 | (x & 0x55) << 1;
+    x = ((x & 0xf0) >> 4) | ((x & 0x0f) << 4);
+    x = ((x & 0xcc) >> 2) | ((x & 0x33) << 2);
+    x = ((x & 0xaa) >> 1) | ((x & 0x55) << 1);
     return x;
 }
 
@@ -186,7 +199,7 @@ static inline uint32_t _SSFAESGCMReverseBytes(uint32_t x)
            ^ (_SSFAESGCMReverseByte((x >> 24) & 0xff) << 24));
 }
 
-/* GHASH key H, bit-reversed into the multiply's word order once per GHASH call (GCM-O1) */
+/* GHASH key H, bit-reversed into the multiply's word order once per GHASH call */
 typedef struct
 {
     uint32_t y[4];
@@ -197,7 +210,7 @@ typedef struct
     uint32_t y0123;
 } _SSFAESGCMHKey_t;
 
-/* GF(2^128) multiply scratch, kept in GHASH's frame and wiped once per call (GCM-O1) */
+/* GF(2^128) multiply scratch, kept in GHASH's frame and wiped once per call */
 typedef struct
 {
     uint32_t x[4];
@@ -208,7 +221,7 @@ typedef struct
 } _SSFAESGCMWork_t;
 
 /* --------------------------------------------------------------------------------------------- */
-/* Prepares H for the multiply: words bit-reversed and Karatsuba operand sums (OPTIMIZE GCM-O1). */
+/* Prepares H for the multiply: words bit-reversed and Karatsuba operand sums.                   */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFAESGCMPrepH(_SSFAESGCMHKey_t *hk, const uint8_t *h, size_t hLen)
 {
@@ -392,12 +405,12 @@ static void _SSFAESGCMGCTR(const uint8_t *in, size_t inLen, const SSFAESKeySched
     SSF_REQUIRE(ks != NULL);
     SSF_REQUIRE(icb != NULL);
     SSF_REQUIRE(icbLen == 16);
-    SSF_REQUIRE(inLen > 0u);    /* Caller-side encrypt/decrypt guards inLen == 0 cases. */
+    SSF_REQUIRE(inLen > 0u);
     SSF_REQUIRE(inLen <= outSize);
 
     memcpy(cb, icb, sizeof(cb));
 
-    /* Are in and out different buffers? (memcpy with in == out is UB, C11 7.24.2.1; GCM-2) */
+    /* Are in and out different buffers? (memcpy with in == out is UB, C11 7.24.2.1) */
     if (in != out)
     {
         /* Yes, copy the input to the output; the keystream is XORed into out below. */
@@ -405,7 +418,7 @@ static void _SSFAESGCMGCTR(const uint8_t *in, size_t inLen, const SSFAESKeySched
     }
     /* No, in place; out already holds the input. */
 
-    n = inLen & ~(size_t)0xFu;
+    n = inLen & (~(size_t)0xFu);
     for (i = 0; i < n; i += 16u)
     {
         SSFAESKSBlockEncrypt(ks, cb, sizeof(cb), buf, sizeof(buf));
@@ -555,7 +568,7 @@ bool SSFAESGCMDecrypt(const uint8_t *ct, size_t ctLen, const uint8_t *iv, size_t
     memcpy(j1, j0, sizeof(j1));
     _SSFAESGCMBlockInc32(j1);
 
-    /* Authenticate ct before GCTR overwrites a possibly aliased pt (AUDIT GCM-1) */
+    /* Authenticate ct before GCTR overwrites a possibly aliased pt */
     t = ((uint64_t)authLen) << 3;
     SSF_PUTU64BE(buf, t);
     t = ((uint64_t)ctLen) << 3;

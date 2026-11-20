@@ -9,7 +9,7 @@ constants and helpers for X.509 OPTIONAL / IMPLICIT / EXPLICIT context tagging.
 
 The decoder is **zero-copy** — every Get function returns pointers directly into the input
 buffer rather than allocating or memcpying. The encoder uses a **two-pass measure-then-write**
-pattern: call with `buf == NULL` to compute the byte count needed, then again with a
+pattern: call with `bufOpt == NULL` to compute the byte count needed, then again with a
 correctly sized buffer to write.
 
 [Dependencies](#dependencies) | [Limitations](#limitations) | [Tag Representation](#tag-representation) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference)
@@ -77,9 +77,9 @@ context-implicit constructed, etc.).
   encoding (e.g., an INTEGER with non-minimal sign byte). On `false`, all output parameters are left undefined and
   `*next` is not advanced — the caller must treat the decode as having consumed nothing.
 - **Encoders use the two-pass measure-then-write pattern.** Call any encoder with
-  `buf == NULL` and `bufSize == 0` to compute the required byte count into `*bytesWritten`
-  without writing. Then allocate / size a buffer and call again with `buf` non-`NULL`.
-  When `buf == NULL`, no read of `buf` happens. The pattern allows precise sizing of
+  `bufOpt == NULL` and `bufOptSize == 0` to compute the required byte count into `*bytesWritten`
+  without writing. Then allocate / size a buffer and call again with `bufOpt` non-`NULL`.
+  When `bufOpt == NULL`, no read of `bufOpt` happens. The pattern allows precise sizing of
   multi-element constructions:
 
   ```c
@@ -101,7 +101,7 @@ context-implicit constructed, etc.).
 - **Strings: any of six tag types are accepted on decode.**
   [`SSFASN1DecGetString()`](#ssfasn1decgetstring) accepts UTF-8, Printable, IA5, BMP, T61
   (TeletexString — legacy), and UniversalString tags per RFC 5280 §4.1.2.4 DirectoryString.
-  The actual tag is returned via the optional `strTagOut` parameter so callers can
+  The actual tag is returned via the optional `strTagOutOpt` parameter so callers can
   re-encode in the same string type if needed. Encoders take an explicit tag.
 - **Time / Date / DateTime decoders return Unix seconds.** UTCTime requires the X.509
   profile's exact `YYMMDDHHMMSSZ` form (13 bytes). GeneralizedTime accepts the X.509
@@ -215,7 +215,7 @@ The unit-test entry point is gated by `SSF_CONFIG_ASN1_UNIT_TEST` in `ssfport.h`
 | | [`bool SSFASN1DecGetNull(cursor, next)`](#ssfasn1decgetnull) | Decode NULL |
 | [e.g.](#ex-oid) | [`bool SSFASN1DecGetOID(cursor, oidArcsOut, oidArcsSize, oidArcsLenOut, next)`](#ssfasn1decgetoid) | Decode OID into an arc array |
 | | [`bool SSFASN1DecGetOIDRaw(cursor, oidRawOut, oidRawLenOut, next)`](#ssfasn1decgetoidraw) | Get OID body bytes for byte-level comparison |
-| [e.g.](#ex-string) | [`bool SSFASN1DecGetString(cursor, strOut, strLenOut, strTagOut, next)`](#ssfasn1decgetstring) | Decode any of the six DirectoryString variants |
+| [e.g.](#ex-string) | [`bool SSFASN1DecGetString(cursor, strOut, strLenOut, strTagOutOpt, next)`](#ssfasn1decgetstring) | Decode any of the six DirectoryString variants |
 | [e.g.](#ex-time) | [`bool SSFASN1DecGetTime(cursor, unixSecOut, next)`](#ssfasn1decgettime) | Decode UTCTime or GeneralizedTime → Unix seconds |
 | | [`bool SSFASN1DecGetDate(cursor, unixSecOut, next)`](#ssfasn1decgetdate) | Decode DATE (universal 31) → Unix seconds at midnight UTC |
 | | [`bool SSFASN1DecGetDateTime(cursor, unixSecOut, next)`](#ssfasn1decgetdatetime) | Decode DATE-TIME (universal 33) → Unix seconds |
@@ -225,25 +225,25 @@ The unit-test entry point is gated by `SSF_CONFIG_ASN1_UNIT_TEST` in `ssfport.h`
 ### Encoder
 
 All encoders return `true` on success and write the byte count to `*bytesWritten`. Pass
-`buf == NULL`, `bufSize == 0` to measure without writing.
+`bufOpt == NULL`, `bufOptSize == 0` to measure without writing.
 
 | | Function | Description |
 |---|----------|-------------|
-| [e.g.](#ex-encode) | [`bool SSFASN1EncTagLen(buf, bufSize, tag, contentLen, bytesWritten)`](#ssfasn1enctaglen) | Emit just the T+L bytes; caller writes the V separately |
-| | [`bool SSFASN1EncBool(buf, bufSize, val, bytesWritten)`](#ssfasn1encbool) | Encode BOOLEAN |
-| | [`bool SSFASN1EncInt(buf, bufSize, intBuf, intLen, bytesWritten)`](#ssfasn1encint) | Encode INTEGER from raw bytes |
-| | [`bool SSFASN1EncUInt(buf, bufSize, magBuf, magLen, bytesWritten)`](#ssfasn1encuint) | Encode INTEGER from an unsigned big-endian magnitude |
-| | [`bool SSFASN1EncIntU64(buf, bufSize, val, bytesWritten)`](#ssfasn1encintu64) | Encode INTEGER from a `uint64_t` |
-| | [`bool SSFASN1EncBitString(buf, bufSize, bits, bitsLen, unusedBits, bytesWritten)`](#ssfasn1encbitstring) | Encode BIT STRING |
-| | [`bool SSFASN1EncOctetString(buf, bufSize, octets, octetsLen, bytesWritten)`](#ssfasn1encoctetstring) | Encode OCTET STRING |
-| | [`bool SSFASN1EncNull(buf, bufSize, bytesWritten)`](#ssfasn1encnull) | Encode NULL |
-| | [`bool SSFASN1EncOIDRaw(buf, bufSize, oidRaw, oidRawLen, bytesWritten)`](#ssfasn1encoidraw) | Encode OID from raw DER body bytes |
-| | [`bool SSFASN1EncString(buf, bufSize, strTag, str, strLen, bytesWritten)`](#ssfasn1encstring) | Encode any of the six string variants |
-| | [`bool SSFASN1EncUTCTime(buf, bufSize, unixSec, bytesWritten)`](#ssfasn1encutctime) | Encode UTCTime from Unix seconds |
-| | [`bool SSFASN1EncGeneralizedTime(buf, bufSize, unixSec, bytesWritten)`](#ssfasn1encgeneralizedtime) | Encode GeneralizedTime from Unix seconds |
-| | [`bool SSFASN1EncDate(buf, bufSize, unixSec, bytesWritten)`](#ssfasn1encdate) | Encode DATE (universal 31) — sub-day truncated to midnight UTC |
-| | [`bool SSFASN1EncDateTime(buf, bufSize, unixSec, bytesWritten)`](#ssfasn1encdatetime) | Encode DATE-TIME (universal 33) UTC |
-| [e.g.](#ex-encode) | [`bool SSFASN1EncWrap(buf, bufSize, tag, content, contentLen, bytesWritten)`](#ssfasn1encwrap) | Wrap an already-encoded inner blob with a constructed-type T+L header |
+| [e.g.](#ex-encode) | [`bool SSFASN1EncTagLen(bufOpt, bufOptSize, tag, contentLen, bytesWritten)`](#ssfasn1enctaglen) | Emit just the T+L bytes; caller writes the V separately |
+| | [`bool SSFASN1EncBool(bufOpt, bufOptSize, val, bytesWritten)`](#ssfasn1encbool) | Encode BOOLEAN |
+| | [`bool SSFASN1EncInt(bufOpt, bufOptSize, intBuf, intLen, bytesWritten)`](#ssfasn1encint) | Encode INTEGER from raw bytes |
+| | [`bool SSFASN1EncUInt(bufOpt, bufOptSize, magBuf, magLen, bytesWritten)`](#ssfasn1encuint) | Encode INTEGER from an unsigned big-endian magnitude |
+| | [`bool SSFASN1EncIntU64(bufOpt, bufOptSize, val, bytesWritten)`](#ssfasn1encintu64) | Encode INTEGER from a `uint64_t` |
+| | [`bool SSFASN1EncBitString(bufOpt, bufOptSize, bits, bitsLen, unusedBits, bytesWritten)`](#ssfasn1encbitstring) | Encode BIT STRING |
+| | [`bool SSFASN1EncOctetString(bufOpt, bufOptSize, octets, octetsLen, bytesWritten)`](#ssfasn1encoctetstring) | Encode OCTET STRING |
+| | [`bool SSFASN1EncNull(bufOpt, bufOptSize, bytesWritten)`](#ssfasn1encnull) | Encode NULL |
+| | [`bool SSFASN1EncOIDRaw(bufOpt, bufOptSize, oidRaw, oidRawLen, bytesWritten)`](#ssfasn1encoidraw) | Encode OID from raw DER body bytes |
+| | [`bool SSFASN1EncString(bufOpt, bufOptSize, strTag, str, strLen, bytesWritten)`](#ssfasn1encstring) | Encode any of the six string variants |
+| | [`bool SSFASN1EncUTCTime(bufOpt, bufOptSize, unixSec, bytesWritten)`](#ssfasn1encutctime) | Encode UTCTime from Unix seconds |
+| | [`bool SSFASN1EncGeneralizedTime(bufOpt, bufOptSize, unixSec, bytesWritten)`](#ssfasn1encgeneralizedtime) | Encode GeneralizedTime from Unix seconds |
+| | [`bool SSFASN1EncDate(bufOpt, bufOptSize, unixSec, bytesWritten)`](#ssfasn1encdate) | Encode DATE (universal 31) — sub-day truncated to midnight UTC |
+| | [`bool SSFASN1EncDateTime(bufOpt, bufOptSize, unixSec, bytesWritten)`](#ssfasn1encdatetime) | Encode DATE-TIME (universal 33) UTC |
+| [e.g.](#ex-encode) | [`bool SSFASN1EncWrap(bufOpt, bufOptSize, tag, content, contentLen, bytesWritten)`](#ssfasn1encwrap) | Wrap an already-encoded inner blob with a constructed-type T+L header |
 
 <a id="function-reference"></a>
 
@@ -488,12 +488,12 @@ if (SSFASN1DecGetOIDRaw(&cur, &oid, &oidLen, &next) &&
 <a id="ssfasn1decgetstring"></a>
 ```c
 bool SSFASN1DecGetString(const SSFASN1Cursor_t *cursor, const uint8_t **strOut,
-                         uint32_t *strLenOut, uint16_t *strTagOut,
+                         uint32_t *strLenOut, uint16_t *strTagOutOpt,
                          SSFASN1Cursor_t *next);
 ```
 Decode any of the six string variants permitted by RFC 5280 §4.1.2.4 DirectoryString:
 UTF-8, Printable, IA5, BMP, T61 (TeletexString — legacy), or UniversalString. Returns
-pointer + length into the DER buffer; if `strTagOut != NULL`, also writes which of the
+pointer + length into the DER buffer; if `strTagOutOpt != NULL`, also writes which of the
 six tag types matched, so the caller can re-encode in the same type. Returns `false` for a
 body its type cannot hold: an odd-length BMPString, a UniversalString whose length is not a
 multiple of 4, or a NUL byte in a UTF-8, Printable, IA5 or T61 string. Character sets (for
@@ -572,35 +572,35 @@ Unix seconds.
 
 ### [↑](#functions-encode) Encoders
 
-Every encoder shares the contract: pass `buf == NULL, bufSize == 0` to measure (the
-required byte count is written to `*bytesWritten`); pass a non-`NULL` `buf` with
-`bufSize` ≥ the measured count to write. On any failure (invalid input, buffer too small,
+Every encoder shares the contract: pass `bufOpt == NULL, bufOptSize == 0` to measure (the
+required byte count is written to `*bytesWritten`); pass a non-`NULL` `bufOpt` with
+`bufOptSize` ≥ the measured count to write. On any failure (invalid input, buffer too small,
 overflow) the encoder returns `false` and sets `*bytesWritten = 0`. `bytesWritten` must
 not be `NULL` — that is enforced by `SSF_REQUIRE`.
 
 <a id="ssfasn1enctaglen"></a>
 ```c
-bool SSFASN1EncTagLen(uint8_t *buf, uint32_t bufSize, uint16_t tag, uint32_t contentLen,
+bool SSFASN1EncTagLen(uint8_t *bufOpt, uint32_t bufOptSize, uint16_t tag, uint32_t contentLen,
                       uint32_t *bytesWritten);
 ```
 Emit just the tag and length bytes for a TLV whose value the caller will write
 separately. Useful for streaming a long OCTET STRING or BIT STRING out of a stable
-location without first materialising it in `buf`. `tag` (here and in
+location without first materialising it in `bufOpt`. `tag` (here and in
 [`SSFASN1EncWrap()`](#ssfasn1encwrap)) must be encodable as DER this module decodes: a
 single-byte tag other than `0x00` with a zero high byte, or the `0x1F` high-tag-number form
 with an extension byte of 31–127. Anything else is a caller error (`SSF_REQUIRE`).
 
 <a id="ssfasn1encbool"></a>
 ```c
-bool SSFASN1EncBool(uint8_t *buf, uint32_t bufSize, bool val, uint32_t *bytesWritten);
+bool SSFASN1EncBool(uint8_t *bufOpt, uint32_t bufOptSize, bool val, uint32_t *bytesWritten);
 ```
 Encode BOOLEAN. Writes 3 bytes: tag `0x01`, length `0x01`, value `0xFF` (true) or `0x00`
 (false).
 
 <a id="ssfasn1encint"></a>
 ```c
-bool SSFASN1EncInt(uint8_t *buf, uint32_t bufSize, const uint8_t *intBuf, uint32_t intLen,
-                   uint32_t *bytesWritten);
+bool SSFASN1EncInt(uint8_t *bufOpt, uint32_t bufOptSize, const uint8_t *intBuf,
+                   uint32_t intLen, uint32_t *bytesWritten);
 ```
 Encode INTEGER from a caller-supplied two's-complement big-endian byte buffer, written as
 given. `intBuf` must already be a minimal DER INTEGER body (non-empty, no leading `0x00`
@@ -610,16 +610,16 @@ is a caller error (`SSF_REQUIRE`). To encode an unsigned value, use
 
 <a id="ssfasn1encuint"></a>
 ```c
-bool SSFASN1EncUInt(uint8_t *buf, uint32_t bufSize, const uint8_t *magBuf, uint32_t magLen,
-                    uint32_t *bytesWritten);
+bool SSFASN1EncUInt(uint8_t *bufOpt, uint32_t bufOptSize, const uint8_t *magBuf,
+                    uint32_t magLen, uint32_t *bytesWritten);
 ```
 Encode a big-endian unsigned magnitude as a minimal, non-negative INTEGER: leading zero bytes
 are dropped (zero is written as `02 01 00`) and a `0x00` sign byte is added when the top bit
-is set. Measure with `buf == NULL`.
+is set. Measure with `bufOpt == NULL`.
 
 <a id="ssfasn1encintu64"></a>
 ```c
-bool SSFASN1EncIntU64(uint8_t *buf, uint32_t bufSize, uint64_t val,
+bool SSFASN1EncIntU64(uint8_t *bufOpt, uint32_t bufOptSize, uint64_t val,
                       uint32_t *bytesWritten);
 ```
 Encode an unsigned 64-bit value as INTEGER. Output is between 3 bytes (for `val == 0`)
@@ -627,7 +627,7 @@ and 11 bytes (for `val > INT64_MAX`, which forces a leading `0x00`).
 
 <a id="ssfasn1encbitstring"></a>
 ```c
-bool SSFASN1EncBitString(uint8_t *buf, uint32_t bufSize, const uint8_t *bits,
+bool SSFASN1EncBitString(uint8_t *bufOpt, uint32_t bufOptSize, const uint8_t *bits,
                          uint32_t bitsLen, uint8_t unusedBits, uint32_t *bytesWritten);
 ```
 Encode BIT STRING. `bits` / `bitsLen` is the byte payload; `unusedBits` is the trailing-
@@ -637,20 +637,20 @@ errors (`SSF_REQUIRE`), not `false` returns.
 
 <a id="ssfasn1encoctetstring"></a>
 ```c
-bool SSFASN1EncOctetString(uint8_t *buf, uint32_t bufSize, const uint8_t *octets,
+bool SSFASN1EncOctetString(uint8_t *bufOpt, uint32_t bufOptSize, const uint8_t *octets,
                            uint32_t octetsLen, uint32_t *bytesWritten);
 ```
 Encode OCTET STRING. The body is `octets[0..octetsLen-1]` verbatim.
 
 <a id="ssfasn1encnull"></a>
 ```c
-bool SSFASN1EncNull(uint8_t *buf, uint32_t bufSize, uint32_t *bytesWritten);
+bool SSFASN1EncNull(uint8_t *bufOpt, uint32_t bufOptSize, uint32_t *bytesWritten);
 ```
 Encode NULL. Writes 2 bytes: tag `0x05`, length `0x00`.
 
 <a id="ssfasn1encoidraw"></a>
 ```c
-bool SSFASN1EncOIDRaw(uint8_t *buf, uint32_t bufSize, const uint8_t *oidRaw,
+bool SSFASN1EncOIDRaw(uint8_t *bufOpt, uint32_t bufOptSize, const uint8_t *oidRaw,
                       uint32_t oidRawLen, uint32_t *bytesWritten);
 ```
 Encode OBJECT IDENTIFIER from raw DER body bytes. The caller is responsible for the
@@ -659,7 +659,7 @@ T + L.
 
 <a id="ssfasn1encstring"></a>
 ```c
-bool SSFASN1EncString(uint8_t *buf, uint32_t bufSize, uint16_t strTag, const uint8_t *str,
+bool SSFASN1EncString(uint8_t *bufOpt, uint32_t bufOptSize, uint16_t strTag, const uint8_t *str,
                       uint32_t strLen, uint32_t *bytesWritten);
 ```
 Encode a string under one of the six DirectoryString tag types. `strTag` must be one of
@@ -669,7 +669,7 @@ bytes are not validated against the tag's character class — caller is responsi
 
 <a id="ssfasn1encutctime"></a>
 ```c
-bool SSFASN1EncUTCTime(uint8_t *buf, uint32_t bufSize, uint64_t unixSec,
+bool SSFASN1EncUTCTime(uint8_t *bufOpt, uint32_t bufOptSize, uint64_t unixSec,
                        uint32_t *bytesWritten);
 ```
 Encode UTCTime as `YYMMDDHHMMSSZ`. Years are formatted in two-digit form per X.509. Because
@@ -678,15 +678,15 @@ Encode UTCTime as `YYMMDDHHMMSSZ`. Years are formatted in two-digit form per X.5
 
 <a id="ssfasn1encgeneralizedtime"></a>
 ```c
-bool SSFASN1EncGeneralizedTime(uint8_t *buf, uint32_t bufSize, uint64_t unixSec,
+bool SSFASN1EncGeneralizedTime(uint8_t *bufOpt, uint32_t bufOptSize, uint64_t unixSec,
                                uint32_t *bytesWritten);
 ```
-Encode GeneralizedTime as `YYYYMMDDHHMMSSZ`. No date-range restriction beyond Unix epoch
-(1970-01-01).
+Encode GeneralizedTime as `YYYYMMDDHHMMSSZ`. `unixSec` must lie in the `ssfdtime` range
+(1970-01-01 through 2199-12-31); a later value returns `false`.
 
 <a id="ssfasn1encdate"></a>
 ```c
-bool SSFASN1EncDate(uint8_t *buf, uint32_t bufSize, uint64_t unixSec,
+bool SSFASN1EncDate(uint8_t *bufOpt, uint32_t bufOptSize, uint64_t unixSec,
                     uint32_t *bytesWritten);
 ```
 Encode the universal-31 DATE tag with body `YYYY-MM-DD`. Sub-day resolution in `unixSec`
@@ -694,20 +694,20 @@ is truncated (rounded down) to midnight UTC.
 
 <a id="ssfasn1encdatetime"></a>
 ```c
-bool SSFASN1EncDateTime(uint8_t *buf, uint32_t bufSize, uint64_t unixSec,
+bool SSFASN1EncDateTime(uint8_t *bufOpt, uint32_t bufOptSize, uint64_t unixSec,
                         uint32_t *bytesWritten);
 ```
 Encode the universal-33 DATE-TIME tag with body `YYYY-MM-DDTHH:MM:SS` (UTC).
 
 <a id="ssfasn1encwrap"></a>
 ```c
-bool SSFASN1EncWrap(uint8_t *buf, uint32_t bufSize, uint16_t tag, const uint8_t *content,
+bool SSFASN1EncWrap(uint8_t *bufOpt, uint32_t bufOptSize, uint16_t tag, const uint8_t *content,
                     uint32_t contentLen, uint32_t *bytesWritten);
 ```
 Wrap an already-encoded inner blob with a SEQUENCE / SET / context-tagged constructed
 header. Useful as the final step of building a SEQUENCE: encode each child into a
 contiguous buffer, then call `EncWrap` to prepend the sequence T + L. `content` may overlap
-`buf` (for example, children already encoded at `&buf[n]`): the content is moved into place
+`bufOpt` (for example, children already encoded at `&bufOpt[n]`): the content is moved into place
 before the header is written.
 
 <a id="ex-encode"></a>

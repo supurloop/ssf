@@ -82,8 +82,7 @@ void SSFCryptUnitTest(void)
 {
     /* ---- SSFCryptCTMemEq ---- */
 
-    /* NULL-argument assertions. The contract requires non-NULL pointers even when n is 0,
-       so exercise both n>0 and n==0 to pin the documented behavior. */
+    /* NULL arguments must assert for both n > 0 and n == 0. */
     {
         uint8_t buf[4] = {0};
         SSF_ASSERT_TEST(SSFCryptCTMemEq(NULL, buf, 4u));
@@ -117,8 +116,7 @@ void SSFCryptUnitTest(void)
         SSF_ASSERT(SSFCryptCTMemEq(a, a, 6u) == true);
     }
 
-    /* Mismatch at first, middle, and last positions. Each must return false --
-       proves the whole-buffer scan behavior by induction. */
+    /* Mismatch at first, middle, and last positions must each return false. */
     {
         const uint8_t base[6]    = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
         uint8_t       diffFirst[6] = {0x01, 0x11, 0x22, 0x33, 0x44, 0x55};
@@ -166,8 +164,7 @@ void SSFCryptUnitTest(void)
         SSF_ASSERT(SSFCryptCTMemEq(s1, s3, 5u) == false);
     }
 
-    /* Sweep every byte position: a single-bit flip at any index must register false.
-       Catches off-by-one errors in the loop bound (e.g., scanning n-1 bytes instead of n). */
+    /* A single-bit flip at any byte position must return false (loop-bound check). */
     {
         uint8_t a[64];
         uint8_t b[64];
@@ -181,9 +178,7 @@ void SSFCryptUnitTest(void)
         }
     }
 
-    /* Multi-position mismatch: two or more differing bytes must still return false.
-       The OR-accumulator is monotonic so no XOR cancellation can mask the mismatch,
-       but exercise it explicitly with values whose XOR results overlap. */
+    /* Two or more differing bytes with overlapping XOR values must still return false. */
     {
         uint8_t a[16];
         uint8_t b[16];
@@ -197,8 +192,7 @@ void SSFCryptUnitTest(void)
         SSF_ASSERT(SSFCryptCTMemEq(a, b, sizeof(a)) == false);
     }
 
-    /* Misaligned pointers: the byte-by-byte read path must not depend on word alignment.
-       Sweep both arguments through every offset 0..7 within a backing array. */
+    /* Misaligned pointers: sweep both arguments through offsets 0..7. */
     {
         uint8_t bufA[40];
         uint8_t bufB[40];
@@ -218,14 +212,7 @@ void SSFCryptUnitTest(void)
     }
 
 #if SSF_CONFIG_CRYPT_CT_TIMING_TEST == 1
-    /* Wall-clock check that runtime is independent of the position of the first differing
-       byte. Times CT_ITERS calls of SSFCryptCTMemEq with a mismatch at byte 0 (a non-CT
-       memcmp would short-circuit immediately) and another CT_ITERS calls with a mismatch
-       at byte n-1 (memcmp would scan the entire buffer). The min-of-trials reduces
-       scheduler / cache jitter. The 10x ratio threshold is far above typical wall-clock
-       noise (even on QEMU) and far below the >>1000x speedup a memcmp-class regression
-       would produce. The +5ms slop guards against ms-quantized "early" measurements.
-       Windows times with QPC (us) because GetTickCount64 steps every ~15.6ms. */
+    /* Runtime must not depend on the first mismatch position (min-of-trials, 10x + 5ms slack). */
     {
         enum { CT_BUF_SIZE = 2048, CT_ITERS = 30000, CT_TRIALS = 3 };
         static uint8_t ctA[CT_BUF_SIZE];
@@ -314,8 +301,7 @@ void SSFCryptUnitTest(void)
         SSF_ASSERT_TEST(SSFCryptSecureZero(NULL, 1));
     }
 
-    /* Size sweep: tag-sized, key-sized, block-aligned, off-by-one, and large. Catches any
-       length-dependent bug (final-byte, word-aligned-only, capped-at-256, etc.). */
+    /* Size sweep: tag-sized, key-sized, block-aligned, off-by-one, and large. */
     {
         static const size_t sizes[] = {1u, 7u, 15u, 16u, 17u, 31u, 32u, 64u, 257u, 1024u};
         static uint8_t buf[1024];
@@ -329,9 +315,7 @@ void SSFCryptUnitTest(void)
         }
     }
 
-    /* No out-of-bounds writes: zero a window in the middle of a sentinel-filled buffer
-       and verify the bytes outside the window are untouched. Catches any length+1 or
-       wraparound bug in the loop bound. */
+    /* Zeroing a window of a sentinel-filled buffer must not touch bytes outside it. */
     {
         uint8_t buf[64];
         size_t i;
@@ -342,8 +326,7 @@ void SSFCryptUnitTest(void)
         for (i = 32u; i < 64u; i++) SSF_ASSERT(buf[i] == 0xEEu);
     }
 
-    /* Misaligned target: odd-offset start, odd length. Verifies the byte-by-byte path
-       does not depend on word alignment. */
+    /* Misaligned target: odd-offset start, odd length. */
     {
         uint8_t buf[16];
         size_t i;
@@ -354,10 +337,7 @@ void SSFCryptUnitTest(void)
         SSF_ASSERT(buf[10] == 0xAAu);
     }
 
-    /* ---- AUDIT Batch A: word-store SSFCryptSecureZero, every start alignment and length ---- */
-    /* SecureZero writes bytes up to a word boundary, whole words, then the tail bytes. Sweep */
-    /* start offsets across two words and lengths 0..80 inside a sentinel buffer so every     */
-    /* head / middle / tail split is checked for full coverage and no write outside [p, p+n). */
+    /* AUDIT Batch A: word-store SecureZero, every start alignment x length 0..80, no overrun */
     {
         static uint8_t buf[128];
         size_t off;
@@ -372,8 +352,17 @@ void SSFCryptUnitTest(void)
                 SSFCryptSecureZero(&buf[16u + off], len);
                 for (i = 0; i < sizeof(buf); i++)
                 {
-                    if ((i >= (16u + off)) && (i < (16u + off + len))) SSF_ASSERT(buf[i] == 0u);
-                    else SSF_ASSERT(buf[i] == 0x5Au);
+                    /* Is byte i inside the zeroed window? */
+                    if ((i >= (16u + off)) && (i < ((16u + off) + len)))
+                    {
+                        /* Yes, it must be zero */
+                        SSF_ASSERT(buf[i] == 0u);
+                    }
+                    else
+                    {
+                        /* No, it must keep the sentinel */
+                        SSF_ASSERT(buf[i] == 0x5Au);
+                    }
                 }
             }
         }

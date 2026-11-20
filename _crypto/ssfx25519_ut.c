@@ -36,8 +36,7 @@
 #include "ssfx25519.h"
 #include "ssfsha2.h"
 
-/* Cross-validate X25519 derive / pubkey-from-priv against OpenSSL on host builds where         */
-/* libcrypto is linked. Same gating pattern as ssfecdsa_ut.c / ssfed25519_ut.c.                  */
+/* Cross-validate X25519 derive / pubkey-from-priv against OpenSSL when libcrypto is linked */
 #if (SSF_CONFIG_HAVE_OPENSSL == 1) && (SSF_CONFIG_X25519_UNIT_TEST == 1)
 #define SSF_X25519_OSSL_VERIFY 1
 #else
@@ -53,10 +52,7 @@
 
 #if SSF_X25519_OSSL_VERIFY == 1
 /* --------------------------------------------------------------------------------------------- */
-/* X25519 OpenSSL cross-check helpers.                                                            */
-/* OpenSSL exposes X25519 only through the EVP one-shot API: a 32-byte private key becomes an    */
-/* opaque EVP_PKEY via EVP_PKEY_new_raw_private_key, key derivation runs through                 */
-/* EVP_PKEY_derive after EVP_PKEY_derive_set_peer.                                                */
+/* Returns an OpenSSL EVP_PKEY for a raw 32-byte X25519 private key.                             */
 /* --------------------------------------------------------------------------------------------- */
 static EVP_PKEY *_X25519OSSLPrivFromBytes(const uint8_t priv[32])
 {
@@ -65,6 +61,9 @@ static EVP_PKEY *_X25519OSSLPrivFromBytes(const uint8_t priv[32])
     return pkey;
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Returns an OpenSSL EVP_PKEY for a raw 32-byte X25519 public key.                              */
+/* --------------------------------------------------------------------------------------------- */
 static EVP_PKEY *_X25519OSSLPubFromBytes(const uint8_t pub[32])
 {
     EVP_PKEY *pkey = EVP_PKEY_new_raw_public_key(EVP_PKEY_X25519, NULL, pub, 32);
@@ -72,6 +71,9 @@ static EVP_PKEY *_X25519OSSLPubFromBytes(const uint8_t pub[32])
     return pkey;
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Computes the X25519 shared secret of priv and peer with OpenSSL.                              */
+/* --------------------------------------------------------------------------------------------- */
 static void _X25519OSSLDerive(EVP_PKEY *priv, EVP_PKEY *peer, uint8_t out[32])
 {
     EVP_PKEY_CTX *ctx = EVP_PKEY_CTX_new(priv, NULL);
@@ -84,7 +86,11 @@ static void _X25519OSSLDerive(EVP_PKEY *priv, EVP_PKEY *peer, uint8_t out[32])
     EVP_PKEY_CTX_free(ctx);
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Computes the X25519 public key of priv with OpenSSL.                                          */
+/* --------------------------------------------------------------------------------------------- */
 static void _X25519OSSLPubFromPriv(const uint8_t priv[32], uint8_t pubOut[32])
+
 {
     EVP_PKEY *p = _X25519OSSLPrivFromBytes(priv);
     size_t pubLen = 32;
@@ -94,8 +100,7 @@ static void _X25519OSSLPubFromPriv(const uint8_t priv[32], uint8_t pubOut[32])
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Random fuzz: per iteration draw two random privs and check that SSF and OpenSSL agree on      */
-/* both pubkey-from-priv and the ECDH shared secret in both directions.                          */
+/* Checks SSF against OpenSSL on random keys: pubkey-from-priv and ECDH in both directions.      */
 /* --------------------------------------------------------------------------------------------- */
 static void _VerifyX25519AgainstOpenSSL(uint16_t iters)
 {
@@ -106,10 +111,14 @@ static void _VerifyX25519AgainstOpenSSL(uint16_t iters)
 
     for (iter = 0; iter < iters; iter++)
     {
-        uint8_t privA[32], privB[32];
-        uint8_t pubSSF_A[32], pubSSF_B[32];
-        uint8_t pubOSSL_A[32], pubOSSL_B[32];
-        uint8_t secretSSF[32], secretOSSL[32];
+        uint8_t privA[32];
+        uint8_t privB[32];
+        uint8_t pubSSF_A[32];
+        uint8_t pubSSF_B[32];
+        uint8_t pubOSSL_A[32];
+        uint8_t pubOSSL_B[32];
+        uint8_t secretSSF[32];
+        uint8_t secretOSSL[32];
 
         SSF_ASSERT(RAND_bytes(privA, 32) == 1);
         SSF_ASSERT(RAND_bytes(privB, 32) == 1);
@@ -149,26 +158,10 @@ static void _VerifyX25519AgainstOpenSSL(uint16_t iters)
 }
 #endif /* SSF_X25519_OSSL_VERIFY */
 
-/* --------------------------------------------------------------------------------------------- */
-/* Stack scrub probe helpers (X3 regression). Polluter writes a sentinel pattern into a deep     */
-/* frame, returns; ComputeSecret runs at the same call depth and must scrub its freed frame      */
-/* before returning. The scanner allocates a deep frame at the same depth and reads its          */
-/* uninitialised contents -- those reflect what the previous frame at that depth wrote. After    */
-/* scrub the sentinel count must drop to near-zero; pre-scrub thousands of bytes survive.        */
-/*                                                                                               */
-/* The sentinel value MUST NOT be 0xCC: MSVC's /RTC1 (Debug runtime checks) initializes every    */
-/* stack frame with 0xCCCCCCCC on entry, so 0xCC bytes in the scanner would be indistinguishable */
-/* from the polluter's writes versus RTC1's own fill. 0xAB is arbitrary and outside both the     */
-/* RTC1 fill (0xCC) and the heap-debug fill (0xFD / 0xCD).                                       */
-/*                                                                                               */
-/* The polluter and scanner also disable /RTC1 for their own bodies via                          */
-/* `#pragma runtime_checks("scu", off)`. With RTC1 active MSVC writes 0xCC into every newly      */
-/* allocated stack frame on function entry -- including the scanner's `buf` -- which would erase */
-/* the bytes the polluter just wrote at the same stack offset, making the test always read 0    */
-/* sentinels regardless of whether the scrub helper ran.                                          */
-/* --------------------------------------------------------------------------------------------- */
+/* Stack scrub probe (X3): polluter fills a deep frame; scanner counts survivors at that depth */
 #define _SSFX25519_UT_STACK_PROBE_SIZE (SSF_X25519_CONFIG_STACK_SCRUB_SIZE)
-#define _SSFX25519_UT_SENTINEL         (0xABu)
+/* Not 0xCC (MSVC /RTC1 frame fill) nor 0xFD / 0xCD (MSVC heap-debug fill) */
+#define _SSFX25519_UT_SENTINEL (0xABu)
 
 /* Stack bounds assume optimized frames; unoptimized MSVC and ASan builds enlarge them (X-3) */
 #if (defined(_MSC_VER) && defined(_DEBUG)) || defined(__SANITIZE_ADDRESS__)
@@ -183,10 +176,14 @@ static void _VerifyX25519AgainstOpenSSL(uint16_t iters)
 #define _SSFX25519_UT_STACK_BOUNDS (1u)
 #endif
 
+/* /RTC1 would refill the scanner's frame with 0xCC on entry, erasing the polluter's bytes */
 #if defined(_MSC_VER)
 #pragma runtime_checks("scu", off)
 #endif
 
+/* --------------------------------------------------------------------------------------------- */
+/* Fills a scrub-sized deep stack frame with pattern.                                            */
+/* --------------------------------------------------------------------------------------------- */
 SSF_NOINLINE
 static void _SSFX25519UTPolluteStack(uint8_t pattern)
 {
@@ -196,8 +193,7 @@ static void _SSFX25519UTPolluteStack(uint8_t pattern)
     SSF_OPTIMIZER_BARRIER(buf);
 }
 
-/* Reading uninitialized stack is the test -- silence GCC/clang's -Wuninitialized and MSVC      */
-/* /analyze's C6001 for this body.                                                              */
+/* Reading uninitialized stack is the test; silence -Wuninitialized and MSVC C6001 here */
 #if defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wuninitialized"
@@ -209,15 +205,16 @@ static void _SSFX25519UTPolluteStack(uint8_t pattern)
 #pragma warning(push)
 #pragma warning(disable: 6001)
 #endif
+/* --------------------------------------------------------------------------------------------- */
+/* Returns the number of bytes equal to pattern in an uninitialized scrub-sized stack frame.     */
+/* --------------------------------------------------------------------------------------------- */
 SSF_NOINLINE
 static size_t _SSFX25519UTCountSentinel(uint8_t pattern)
 {
     volatile uint8_t buf[_SSFX25519_UT_STACK_PROBE_SIZE];
     size_t hits = 0;
     size_t i;
-    /* The volatile reads in the loop force the compiler to materialize buf at a real stack     */
-    /* slot, so a pre-loop barrier is not required (and would warn C4700 reading uninitialised  */
-    /* memory under the MSVC variant of SSF_OPTIMIZER_BARRIER).                                 */
+    /* Volatile reads materialize buf; a pre-loop barrier would warn C4700 on MSVC */
     for (i = 0; i < sizeof(buf); i++)
     {
         if (buf[i] == pattern) hits++;
@@ -235,18 +232,16 @@ static size_t _SSFX25519UTCountSentinel(uint8_t pattern)
 #pragma runtime_checks("scu", restore)
 #endif
 
-/* --------------------------------------------------------------------------------------------- */
-/* Stack high-water-mark probe (AUDIT X-2). The polluter fills a large deep region with the  */
-/* sentinel; after the operation under test runs at the same call depth, the scanner finds the   */
-/* deepest byte no longer equal to the sentinel. Bytes from buf[0] (deepest address) up to that  */
-/* index were never touched, so (size - index) approximates the operation's peak stack use.      */
-/* --------------------------------------------------------------------------------------------- */
+/* Stack high-water-mark probe (AUDIT X-2): peak use is size minus deepest overwritten index */
 #define _SSFX25519_UT_HWM_PROBE_SIZE (8192u)
 
 #if defined(_MSC_VER)
 #pragma runtime_checks("scu", off)
 #endif
 
+/* --------------------------------------------------------------------------------------------- */
+/* Fills an 8 KiB deep stack frame with pattern.                                                 */
+/* --------------------------------------------------------------------------------------------- */
 SSF_NOINLINE
 static void _SSFX25519UTPolluteDeep(uint8_t pattern)
 {
@@ -267,6 +262,9 @@ static void _SSFX25519UTPolluteDeep(uint8_t pattern)
 #pragma warning(push)
 #pragma warning(disable: 6001)
 #endif
+/* --------------------------------------------------------------------------------------------- */
+/* Returns the stack bytes used since _SSFX25519UTPolluteDeep(), or 0 if none were touched.      */
+/* --------------------------------------------------------------------------------------------- */
 SSF_NOINLINE
 static size_t _SSFX25519UTStackUsed(uint8_t pattern)
 {
@@ -296,9 +294,7 @@ static size_t _SSFX25519UTStackUsed(uint8_t pattern)
 #endif
 
 /* --------------------------------------------------------------------------------------------- */
-/* SSF-internal deterministic fuzz. Runs without OpenSSL. Uses ECDH's commutative property as    */
-/* the oracle: privA*pubB must byte-equal privB*pubA. State is advanced via a SHA-512 chain      */
-/* from a fixed master seed so failures reproduce across runs.                                    */
+/* Checks privA * pubB == privB * pubA over keys from a fixed-seed SHA-512 chain (reproducible). */
 /* --------------------------------------------------------------------------------------------- */
 static void _X25519SelfFuzz(uint16_t iters)
 {
@@ -311,9 +307,12 @@ static void _X25519SelfFuzz(uint16_t iters)
 
     for (iter = 0; iter < iters; iter++)
     {
-        uint8_t privA[32], privB[32];
-        uint8_t pubA[32], pubB[32];
-        uint8_t secretA[32], secretB[32];
+        uint8_t privA[32];
+        uint8_t privB[32];
+        uint8_t pubA[32];
+        uint8_t pubB[32];
+        uint8_t secretA[32];
+        uint8_t secretB[32];
 
         /* Advance state := SHA-512(state || iter). */
         {
@@ -339,6 +338,9 @@ static void _X25519SelfFuzz(uint16_t iters)
     SSF_UT_PRINTF("--- end ssfx25519 self-fuzz ---\n");
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Performs unit test on ssfx25519 external interface.                                           */
+/* --------------------------------------------------------------------------------------------- */
 void SSFX25519UnitTest(void)
 {
     /* ---- RFC 7748 Section 6.1: Test Vector 1 ---- */
@@ -378,7 +380,10 @@ void SSFX25519UnitTest(void)
             0xE0u, 0x7Eu, 0x21u, 0xC9u, 0x47u, 0xD1u, 0x9Eu, 0x33u,
             0x76u, 0xF0u, 0x9Bu, 0x3Cu, 0x1Eu, 0x16u, 0x17u, 0x42u
         };
-        uint8_t pubA[32], pubB[32], secretA[32], secretB[32];
+        uint8_t pubA[32];
+        uint8_t pubB[32];
+        uint8_t secretA[32];
+        uint8_t secretB[32];
 
         /* Compute public keys */
         SSFX25519PubKeyFromPrivKey(privA, pubA);
@@ -414,9 +419,7 @@ void SSFX25519UnitTest(void)
         SSF_ASSERT(memcmp(out, expected1, 32) == 0);
     }
 
-    /* ---- RFC 7748 Sec. 5.2 Iterated test: 1000 iterations ---- */
-    /* Per RFC: k = u = 9 initially; each iter computes new_k = X25519(k, u) then sets u = old k.*/
-    /* Expected final k after 1000 iters: 684CF59BA83309552800EF566F2F4D3C1C3887C49360E3875F2EB94D99532C51 */
+    /* ---- RFC 7748 Sec. 5.2 Iterated test: 1000 iterations (k' = X25519(k, u), u = old k) ---- */
     {
         uint8_t k[32] = { 9 };
         uint8_t u[32] = { 9 };
@@ -443,9 +446,12 @@ void SSFX25519UnitTest(void)
 
     /* ---- Key generation + ECDHE roundtrip ---- */
     {
-        uint8_t privA[32], pubA[32];
-        uint8_t privB[32], pubB[32];
-        uint8_t secretA[32], secretB[32];
+        uint8_t privA[32];
+        uint8_t pubA[32];
+        uint8_t privB[32];
+        uint8_t pubB[32];
+        uint8_t secretA[32];
+        uint8_t secretB[32];
 
         SSF_ASSERT(SSFX25519KeyGen(privA, pubA) == true);
         SSF_ASSERT(SSFX25519KeyGen(privB, pubB) == true);
@@ -458,7 +464,9 @@ void SSFX25519UnitTest(void)
 
     /* ---- All-zero peer key rejection ---- */
     {
-        uint8_t priv[32], pub[32], secret[32];
+        uint8_t priv[32];
+        uint8_t pub[32];
+        uint8_t secret[32];
         uint8_t zeroPub[32];
 
         SSF_ASSERT(SSFX25519KeyGen(priv, pub) == true);
@@ -466,13 +474,7 @@ void SSFX25519UnitTest(void)
         SSF_ASSERT(SSFX25519ComputeSecret(priv, zeroPub, secret) == false);
     }
 
-    /* ---- X10b: low-order peer-key rejection coverage. */
-    /* The 7 known small-order encodings on Curve25519 / its twist (per libsodium's              */
-    /* has_small_order_blocklist). RFC 7748 Sec. 6.1's all-zero-output check rejects any peer key*/
-    /* that produces a zero shared secret; the design assumption is that all small-order points  */
-    /* satisfy that. This test verifies the assumption empirically -- if any entry comes back as */
-    /* a non-rejected (true) result, that's evidence the all-zero check is insufficient and we   */
-    /* need an explicit input blocklist (X6).                                                     */
+    /* ---- X10b: all 7 small-order encodings (libsodium blocklist) give a zero secret ---- */
     {
         static const uint8_t lowOrderPub[][32] = {
             /* 0 -- order 4. */
@@ -481,12 +483,13 @@ void SSFX25519UnitTest(void)
             /* 1 -- order 4 on twist. */
             { 1, 0, 0, 0, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0,
               0, 0, 0, 0, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0, 0, 0 },
-            /* 325606250916557431795983626356110631294008115727848805560023387167927233504 -- order 8. */
+            /* First order-8 point (u ends ...233504 in decimal). */
             { 0xe0, 0xeb, 0x7a, 0x7c, 0x3b, 0x41, 0xb8, 0xae,
               0x16, 0x56, 0xe3, 0xfa, 0xf1, 0x9f, 0xc4, 0x6a,
               0xda, 0x09, 0x8d, 0xeb, 0x9c, 0x32, 0xb1, 0xfd,
               0x86, 0x62, 0x05, 0x16, 0x5f, 0x49, 0xb8, 0x00 },
-            /* 39382357235489614581723060781553021112529911719440698176882885853963445705823 -- order 8. */
+            /* Second order-8 point (u ends ...705823 in decimal). */
+
             { 0x5f, 0x9c, 0x95, 0xbc, 0xa3, 0x50, 0x8c, 0x24,
               0xb1, 0xd0, 0xb1, 0x55, 0x9c, 0x83, 0xef, 0x5b,
               0x04, 0x44, 0x5c, 0xc4, 0x58, 0x1c, 0x8e, 0x86,
@@ -507,11 +510,13 @@ void SSFX25519UnitTest(void)
               0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
               0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f },
         };
-        uint8_t priv[32], pub[32], secret[32];
+        uint8_t priv[32];
+        uint8_t pub[32];
+        uint8_t secret[32];
         size_t i;
 
         SSF_ASSERT(SSFX25519KeyGen(priv, pub) == true);
-        for (i = 0; i < sizeof(lowOrderPub) / sizeof(lowOrderPub[0]); i++)
+        for (i = 0; i < (sizeof(lowOrderPub) / sizeof(lowOrderPub[0])); i++)
         {
             SSF_ASSERT(SSFX25519ComputeSecret(priv, lowOrderPub[i], secret) == false);
         }
@@ -519,7 +524,9 @@ void SSFX25519UnitTest(void)
 
     /* ---- Pub key derivation consistency ---- */
     {
-        uint8_t priv[32], pub1[32], pub2[32];
+        uint8_t priv[32];
+        uint8_t pub1[32];
+        uint8_t pub2[32];
 
         SSF_ASSERT(SSFX25519KeyGen(priv, pub1) == true);
         SSFX25519PubKeyFromPrivKey(priv, pub2);
@@ -527,14 +534,13 @@ void SSFX25519UnitTest(void)
     }
 
 #if SSF_X25519_CONFIG_ENABLE_STACK_SCRUB == 1
-    /* ---- X3 regression: ComputeSecret performs a deep-stack scrub before returning.    */
-    /* The Montgomery ladder leaves ~14 _fe_t locals (~448 bytes) in its freed frame, all  */
-    /* derived from the secret scalar. Sentinel-residue test sandwiches a ComputeSecret    */
-    /* call between a polluter (writes 0xCC into a 4 KiB deep frame) and a scanner (counts */
-    /* surviving 0xCC bytes at the same call depth). After the scrub helper executes, the */
-    /* count must drop to near zero.                                                        */
+    /* ---- X3 regression: ComputeSecret scrubs the ladder's secret-derived freed frame ---- */
     {
-        uint8_t priv[32], pub[32], peerPriv[32], peerPub[32], secret[32];
+        uint8_t priv[32];
+        uint8_t pub[32];
+        uint8_t peerPriv[32];
+        uint8_t peerPub[32];
+        uint8_t secret[32];
         size_t hitsAfter;
 
         SSF_ASSERT(SSFX25519KeyGen(priv, pub) == true);
@@ -544,16 +550,7 @@ void SSFX25519UnitTest(void)
         SSF_ASSERT(SSFX25519ComputeSecret(priv, peerPub, secret) == true);
         hitsAfter = _SSFX25519UTCountSentinel(_SSFX25519_UT_SENTINEL);
 
-        /* Pre-fix: thousands of sentinels survive (no scrub). Post-fix: scrub helper      */
-        /* zeroes the deep region; small residue tolerated for scanner's own frame layout. */
-        /*                                                                                  */
-        /* The threshold is platform-tuned. On GCC/clang the call-frame overhead between    */
-        /* the polluter and the scrub is ~50 bytes, so residue stays well under 64. MSVC    */
-        /* /RTC1 + /GS produce ~80-400 byte frame overheads (RTC1 fill on padding, /GS      */
-        /* canaries, larger spill slots) that are NOT secret-bearing -- they're saved-reg   */
-        /* values, return addresses, and uninit fill -- but they happen to fall inside the  */
-        /* polluter's address range and get counted. 512 is comfortably below the ~4 KiB    */
-        /* unscrubbed total and still rejects a regression that disabled the scrub.          */
+        /* No scrub leaves thousands; MSVC /RTC1 + /GS non-secret frame overhead needs 512 */
         SSF_UT_PRINTF("--- ssfx25519 ComputeSecret scrub residue %u bytes ---\n",
                       (unsigned)hitsAfter);
 #if _SSFX25519_UT_STACK_BOUNDS == 1
@@ -566,12 +563,13 @@ void SSFX25519UnitTest(void)
     }
 #endif /* SSF_X25519_CONFIG_ENABLE_STACK_SCRUB */
 
-    /* ---- AUDIT X-2: peak stack of a public call must stay near the configured scrub size.  */
-    /* The scrub used to be a fixed 4 KiB frame, so ComputeSecret peaked at ~4 KiB although  */
-    /* the ladder chain needs ~1 KiB. Bound: the default 1536-byte scrub (or the ~1.2 KiB    */
-    /* ladder chain when the scrub is disabled) plus caller frame and compiler slack.        */
+    /* ---- AUDIT X-2: peak stack is near the 1536-byte scrub (or ~1.2 KiB ladder) + slack ---- */
     {
-        uint8_t priv[32], pub[32], peerPriv[32], peerPub[32], secret[32];
+        uint8_t priv[32];
+        uint8_t pub[32];
+        uint8_t peerPriv[32];
+        uint8_t peerPub[32];
+        uint8_t secret[32];
         size_t used;
 
         SSF_ASSERT(SSFX25519KeyGen(priv, pub) == true);
@@ -587,11 +585,8 @@ void SSFX25519UnitTest(void)
 #endif
     }
 
-    /* ---- AUDIT X-1: _fe_mul dropped the carry-out of its second 38-fold. The first ladder    */
-    /* step squares A = u + 1 and B = u - 1 directly, so a peer u adjacent to one of the field */
-    /* elements whose square hits r + 38 * carry >= 2^256 produced a wrong shared secret.      */
-    /* Expected values are from an independent RFC 7748 big-integer reference ladder. The two  */
-    /* peers are s - 1 (A = s) and s + 1 (B = s) for the same bad square input s.              */
+    /* ---- AUDIT X-1: Mul second-fold carry; peers s -/+ 1 square s with r + 38c >= 2^256 ---- */
+
     {
         static const uint8_t priv[32] = {
             0x01u, 0x02u, 0x03u, 0x04u, 0x05u, 0x06u, 0x07u, 0x08u,
@@ -631,28 +626,26 @@ void SSFX25519UnitTest(void)
         SSF_ASSERT(memcmp(secret, sharedB, sizeof(sharedB)) == 0);
     }
 
-    /* SSF-internal deterministic ECDH fuzz. Independent of OpenSSL -- exercises the             */
-    /* commutative property privA*pubB == privB*pubA across 256 deterministic random keypairs.   */
+    /* Deterministic ECDH commutativity fuzz over 256 key pairs (no OpenSSL needed) */
     _X25519SelfFuzz(256u);
 
-    /* === Wycheproof X25519 vectors (Google adversarial test suite) === */
-    /* X25519 has 264 "valid" cases (must match expected shared byte-for-byte) and 254             */
-    /* "acceptable" cases (RFC 7748 doesn't strictly require either accept or reject -- typically  */
-    /* twist points / low-order edge cases). 0 "invalid" cases for X25519. This harness asserts    */
-    /* zero new mismatches on the valid set; acceptable cases are tracked separately and don't     */
-    /* count toward mismatches either way.                                                          */
+    /* === Wycheproof X25519: 264 valid must match, 254 acceptable only counted, 0 invalid === */
     {
         #include "wycheproof_x25519.h"
         uint8_t secret[32];
         uint16_t i;
-        uint16_t pass = 0, mismatches = 0, acceptableAccepted = 0, acceptableRejected = 0;
+        uint16_t pass = 0;
+        uint16_t mismatches = 0;
+        uint16_t acceptableAccepted = 0;
+        uint16_t acceptableRejected = 0;
 
         SSF_UT_PRINTF("--- Wycheproof X25519 (%u tests) ---\n",
                (unsigned)SSF_WYCHEPROOF_X25519_NTESTS);
         for (i = 0; i < (uint16_t)SSF_WYCHEPROOF_X25519_NTESTS; i++)
         {
             const _SSFWycheproofX25519Test_t *t = &_wp_X25519_tests[i];
-            bool got, sharedOk = false;
+            bool got;
+            bool sharedOk = false;
 
             got = SSFX25519ComputeSecret(t->privKey, t->pubKey, secret);
             if (got) sharedOk = (memcmp(secret, t->shared, t->sharedLen) == 0);
@@ -665,8 +658,7 @@ void SSFX25519UnitTest(void)
                 continue;
             }
 
-            /* expectedValid == true: must accept and shared must match.                          */
-            /* expectedValid == false (none today for X25519, future-proof): must reject.        */
+            /* Valid must accept with matching shared; invalid (none today) must reject */
             {
                 bool expectedOk = t->expectedValid ? (got && sharedOk) : (!got);
                 if (expectedOk) pass++;
@@ -688,10 +680,9 @@ void SSFX25519UnitTest(void)
     }
 
 #if SSF_X25519_OSSL_VERIFY == 1
-    /* Comprehensive OpenSSL cross-check: random privs, byte-equal pubkeys, byte-equal shared    */
-    /* secrets in both directions. Catches any divergence in scalar clamping, ladder formulae,    */
-    /* field-arithmetic carry handling, or output reduction.                                       */
+    /* OpenSSL cross-check catches clamping, ladder, carry or reduction divergence */
     _VerifyX25519AgainstOpenSSL(64u);
+
 #endif
 }
 #endif /* SSF_CONFIG_X25519_UNIT_TEST */

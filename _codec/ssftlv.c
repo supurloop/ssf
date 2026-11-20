@@ -35,59 +35,39 @@
 #include "ssfassert.h"
 #include "ssftlv.h"
 
-/* --------------------------------------------------------------------------------------------- */
-/* SSF_TLV_ENABLE_FIXED_MODE == 1                                                                */
-/* --------------------------------------------------------------------------------------------- */
-/* Every TLV field in the TLV buffer is composed of a 1 byte TAG, followed by a 1 byte LEN,      */
-/* followed by 0-255 LEN bytes of VALUE.                                                         */
-/* Every TLV field in the TLV buffer may be followed immediately by another TLV field.           */
-/* --------------------------------------------------------------------------------------------- */
-
-/* --------------------------------------------------------------------------------------------- */
-/* SSF_TLV_ENABLE_FIXED_MODE == 0                                                                */
-/* --------------------------------------------------------------------------------------------- */
-/* Every TLV field in the TLV buffer is composed of a variable 1-4 byte TAG, followed by a       */
-/* variable 1-4 byte LEN, followed by 0-2^30-1 LEN bytes of value.                               */
-/* Every TLV field in the TLV buffer may be followed immediately by another TLV field.           */
-/* The TAG and LEN are encoded in Big Endian byte order in the TLV buffer.                       */
-/* The 2 most significant bits of TAG and LEN indicate the number of bytes used to represent TAG */
-/* and LEN.                                                                                      */
-/* TAG and LEN are encoded with the minimum number of bytes that can properly represent their    */
-/* values.                                                                                       */
-/* When both the values of TAG and LEN are < 64 then the TLV field encoding is the same as if    */
-/* SSF_TLV_ENABLE_FIXED_MODE == 1.                                                               */
-/* --------------------------------------------------------------------------------------------- */
+/* The fixed and variable mode TLV field encodings are described in ssftlv.md Notes. */
 
 /* --------------------------------------------------------------------------------------------- */
 /* Local defines.                                                                                */
 /* --------------------------------------------------------------------------------------------- */
 #define _SSF_TLV_PUT_VAR_FIELD(tlv, v, vLen) \
-    tlv->buf[tlv->bufLen] = ((vLen - 1) << 6); \
-    if (v < 64ul) { \
-        tlv->buf[tlv->bufLen] += (uint8_t)(v & 0xff); } \
-    else if (v < 16384ul) { \
-        tlv->buf[tlv->bufLen] += (v >> 8) & 0xff; \
-        tlv->buf[tlv->bufLen + 1] = v & 0xff; } \
-    else if (v < 4194304ul) { \
-        tlv->buf[tlv->bufLen] += (v >> 16) & 0xff; \
-        tlv->buf[tlv->bufLen + 1] = (v >> 8) & 0xff; \
-        tlv->buf[tlv->bufLen + 2] = v & 0xff; } \
+    (tlv)->buf[(tlv)->bufLen] = (((vLen) - 1) << 6); \
+    if ((v) < 64ul) { \
+        (tlv)->buf[(tlv)->bufLen] += (uint8_t)((v) & 0xff); } \
+    else if ((v) < 16384ul) { \
+        (tlv)->buf[(tlv)->bufLen] += ((v) >> 8) & 0xff; \
+        (tlv)->buf[(tlv)->bufLen + 1] = (v) & 0xff; } \
+    else if ((v) < 4194304ul) { \
+        (tlv)->buf[(tlv)->bufLen] += ((v) >> 16) & 0xff; \
+        (tlv)->buf[(tlv)->bufLen + 1] = ((v) >> 8) & 0xff; \
+        (tlv)->buf[(tlv)->bufLen + 2] = (v) & 0xff; } \
     else { \
-        tlv->buf[tlv->bufLen] += (v >> 24) & 0xff; \
-        tlv->buf[tlv->bufLen + 1] = (v >> 16) & 0xff; \
-        tlv->buf[tlv->bufLen + 2] = (v >> 8) & 0xff; \
-        tlv->buf[tlv->bufLen + 3] = v & 0xff; }
+        (tlv)->buf[(tlv)->bufLen] += ((v) >> 24) & 0xff; \
+        (tlv)->buf[(tlv)->bufLen + 1] = ((v) >> 16) & 0xff; \
+        (tlv)->buf[(tlv)->bufLen + 2] = ((v) >> 8) & 0xff; \
+        (tlv)->buf[(tlv)->bufLen + 3] = (v) & 0xff; }
 
 #define _SSF_TLV_GET_VAR_FIELD(tlv, index, v, vLen) \
-    vLen = (tlv->buf[index] >> 6) + 1; \
-    if (vLen > remaining) break; \
-    v = tlv->buf[index] & 0x3f; \
-    if (vLen >= 2) v = (v << 8) + tlv->buf[index + 1]; \
-    if (vLen >= 3) v = (v << 8) + tlv->buf[index + 2]; \
-    if (vLen == 4) v = (v << 8) + tlv->buf[index + 3];
+    (vLen) = ((tlv)->buf[(index)] >> 6) + 1; \
+    if ((vLen) > remaining) break; \
+    (v) = (tlv)->buf[(index)] & 0x3f; \
+    if ((vLen) >= 2) (v) = ((v) << 8) + (tlv)->buf[(index) + 1]; \
+    if ((vLen) >= 3) (v) = ((v) << 8) + (tlv)->buf[(index) + 2]; \
+    if ((vLen) == 4) (v) = ((v) << 8) + (tlv)->buf[(index) + 3];
 
-#define _SSF_TLV_FIELD_CALC_LEN(v) (v < 64ul) ? 1 : ((v < 16384ul) ? 2: ((v < 4194304ul) ? 3 : 4))
-#define _SSF_TLV_FIELD_READ_LEN(tlv, index, v) v = (tlv->buf[index] >> 6) + 1
+#define _SSF_TLV_FIELD_CALC_LEN(v) \
+    (((v) < 64ul) ? 1 : (((v) < 16384ul) ? 2 : (((v) < 4194304ul) ? 3 : 4)))
+#define _SSF_TLV_FIELD_READ_LEN(tlv, index, v) (v) = ((tlv)->buf[(index)] >> 6) + 1
 #define _SSF_TLV_MAGIC (0x544C5621ul)
 
 /* --------------------------------------------------------------------------------------------- */
@@ -118,7 +98,7 @@ void SSFTLVDeInit(SSFTLV_t *tlv)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if val successfully put item into TLV, else false.                              */
+/* Returns true if val successfully put item into TLV, else false.                               */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFTLVPut(SSFTLV_t *tlv, SSFTLVVar_t tag, const uint8_t *val, SSFTLVVar_t valLen)
 {
@@ -143,8 +123,10 @@ bool SSFTLVPut(SSFTLV_t *tlv, SSFTLVVar_t tag, const uint8_t *val, SSFTLVVar_t v
 
     SSF_ASSERT(tlv->bufLen <= tlv->bufSize);
     remaining = tlv->bufSize - tlv->bufLen;
-    if (remaining >= (tagLen + lenLen + ((uint32_t) valLen)))
+    /* Is there room for the TAG, LEN and VALUE fields? */
+    if (remaining >= ((tagLen + lenLen) + ((uint32_t) valLen)))
     {
+        /* Yes */
 #if SSF_TLV_ENABLE_FIXED_MODE == 1
         /* Add TAG field */
         tlv->buf[tlv->bufLen] = tag;
@@ -169,15 +151,15 @@ bool SSFTLVPut(SSFTLV_t *tlv, SSFTLVVar_t tag, const uint8_t *val, SSFTLVVar_t v
         SSF_ENSURE(tlv->bufLen <= tlv->bufSize);
         return true;
     }
-    /* No room to put item */
+    /* No, no room to put item */
     return false;
 }
 
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if val and valLen contain desired TLV instance, else false.                      */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFTLVRead(const SSFTLV_t *tlv, SSFTLVVar_t tag, uint16_t instance, uint8_t *val,
-                uint32_t valSize, uint8_t **valPtr, SSFTLVVar_t *valLen)
+bool SSFTLVRead(const SSFTLV_t *tlv, SSFTLVVar_t tag, uint16_t instance, uint8_t *valOpt,
+                uint32_t valOptSize, uint8_t **valPtrOpt, SSFTLVVar_t *valLen)
 {
     uint32_t remaining;
     SSFTLVVar_t curTag;
@@ -188,8 +170,8 @@ bool SSFTLVRead(const SSFTLV_t *tlv, SSFTLVVar_t tag, uint16_t instance, uint8_t
 
     SSF_REQUIRE(tlv != NULL);
     SSF_REQUIRE(tlv->magic == _SSF_TLV_MAGIC);
-    SSF_REQUIRE(((val != NULL) && (valPtr == NULL)) ||
-                ((val == NULL) && (valSize == 0) && (valPtr != NULL)));
+    SSF_REQUIRE(((valOpt != NULL) && (valPtrOpt == NULL)) ||
+                ((valOpt == NULL) && (valOptSize == 0) && (valPtrOpt != NULL)));
     SSF_REQUIRE(valLen != NULL);
 
 #if SSF_TLV_ENABLE_FIXED_MODE == 0
@@ -234,30 +216,36 @@ bool SSFTLVRead(const SSFTLV_t *tlv, SSFTLVVar_t tag, uint16_t instance, uint8_t
         /* Interpret VALUE field */
         if (curLen > remaining) break;
 
-        /* Match desired tag? */
+        /* Is it the desired tag? */
         if (tag == curTag)
         {
-            /* Yes, desired instance? */
+            /* Yes, is it the desired instance? */
             if (instance == 0)
             {
                 /* Yes, copy to user val buffer? */
-                if (val != NULL)
+                if (valOpt != NULL)
                 {
-                    /* Yes, enough room in val to store data? */
-                    if (curLen > valSize) break;
+                    /* Yes, stop if val is too small for the data */
+                    if (curLen > valOptSize) break;
 
-                    /* Yes, copy data to user val and set len */
-                    memcpy(val, &tlv->buf[index], curLen);
+                    /* Copy data to user val */
+                    memcpy(valOpt, &tlv->buf[index], curLen);
                 }
-                /* No, set user pointer to value */
-                else { *valPtr = &tlv->buf[index]; }
+                else
+                {
+                    /* No, set user pointer to value */
+                    *valPtrOpt = &tlv->buf[index];
+                }
 
                 /* Pass back value length */
                 *valLen = curLen;
                 return true;
             }
-            /* No, decrement */
-            else { instance--; }
+            else
+            {
+                /* No, decrement */
+                instance--;
+            }
         }
         index += curLen;
         remaining -= curLen;

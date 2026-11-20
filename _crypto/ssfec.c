@@ -5,8 +5,8 @@
 /* Provides elliptic curve point arithmetic over NIST prime curves P-256 and P-384.              */
 /*                                                                                               */
 /* FIPS 186-4: Digital Signature Standard (DSS)                                                  */
-/* NIST SP 800-186: Recommendations for Discrete Logarithm-based Cryptography                   */
-/* SEC 1 v2: Elliptic Curve Cryptography                                                        */
+/* NIST SP 800-186: Recommendations for Discrete Logarithm-based Cryptography                    */
+/* SEC 1 v2: Elliptic Curve Cryptography                                                         */
 /*                                                                                               */
 /* BSD-3-Clause License                                                                          */
 /* Copyright 2026 Supurloop Software LLC                                                         */
@@ -72,7 +72,7 @@ static const SSFBNLimb_t _ssfECP256_n[8] = {
 };
 static const SSFECCurveParams_t _ssfECP256 =
 {
-    { (SSFBNLimb_t *)SSF_BN_NIST_P256_LIMBS, 8, 8 }, /* p: shared with ssfbn (BN-O8) */
+    { (SSFBNLimb_t *)SSF_BN_NIST_P256_LIMBS, 8, 8 }, /* p: shared with ssfbn */
     { (SSFBNLimb_t *)_ssfECP256_a,  8, 8 },
     { (SSFBNLimb_t *)_ssfECP256_b,  8, 8 },
     { (SSFBNLimb_t *)_ssfECP256_gx, 8, 8 },
@@ -93,29 +93,25 @@ static const SSFBNLimb_t _ssfECP384_a[12] = {
     0xFFFFFFFEul, 0xFFFFFFFFul, 0xFFFFFFFFul, 0xFFFFFFFFul,
     0xFFFFFFFFul, 0xFFFFFFFFul, 0xFFFFFFFFul, 0xFFFFFFFFul
 };
-/* b = B3312FA7E23EE7E4988E056BE3F82D19181D9C6EFE8141120314088F5013875A */
-/*     C656398D8A2ED19D2A85C8EDD3EC2AEF                                   */
+/* b = B3312FA7E23EE7E4...2A85C8EDD3EC2AEF (FIPS 186-4 D.1.2.4) */
 static const SSFBNLimb_t _ssfECP384_b[12] = {
     0xD3EC2AEFul, 0x2A85C8EDul, 0x8A2ED19Dul, 0xC656398Dul,
     0x5013875Aul, 0x0314088Ful, 0xFE814112ul, 0x181D9C6Eul,
     0xE3F82D19ul, 0x988E056Bul, 0xE23EE7E4ul, 0xB3312FA7ul
 };
-/* Gx = AA87CA22BE8B05378EB1C71EF320AD746E1D3B628BA79B9859F741E082542A38 */
-/*      5502F25DBF55296C3A545E3872760AB7                                   */
+/* Gx = AA87CA22BE8B0537...3A545E3872760AB7 (FIPS 186-4 D.1.2.4) */
 static const SSFBNLimb_t _ssfECP384_gx[12] = {
     0x72760AB7ul, 0x3A545E38ul, 0xBF55296Cul, 0x5502F25Dul,
     0x82542A38ul, 0x59F741E0ul, 0x8BA79B98ul, 0x6E1D3B62ul,
     0xF320AD74ul, 0x8EB1C71Eul, 0xBE8B0537ul, 0xAA87CA22ul
 };
-/* Gy = 3617DE4A96262C6F5D9E98BF9292DC29F8F41DBD289A147CE9DA3113B5F0B8C0 */
-/*      0A60B1CE1D7E819D7A431D7C90EA0E5F                                   */
+/* Gy = 3617DE4A96262C6F...7A431D7C90EA0E5F (FIPS 186-4 D.1.2.4) */
 static const SSFBNLimb_t _ssfECP384_gy[12] = {
     0x90EA0E5Ful, 0x7A431D7Cul, 0x1D7E819Dul, 0x0A60B1CEul,
     0xB5F0B8C0ul, 0xE9DA3113ul, 0x289A147Cul, 0xF8F41DBDul,
     0x9292DC29ul, 0x5D9E98BFul, 0x96262C6Ful, 0x3617DE4Aul
 };
-/* n = FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFC7634D81F4372DDF581A0DB2 */
-/*     48B0A77AECEC196ACCC52973                                           */
+/* n = FFFFFFFFFFFFFFFF...ECEC196ACCC52973 (FIPS 186-4 D.1.2.4) */
 static const SSFBNLimb_t _ssfECP384_n[12] = {
     0xCCC52973ul, 0xECEC196Aul, 0x48B0A77Aul, 0x581A0DB2ul,
     0xF4372DDFul, 0xC7634D81ul, 0xFFFFFFFFul, 0xFFFFFFFFul,
@@ -123,7 +119,7 @@ static const SSFBNLimb_t _ssfECP384_n[12] = {
 };
 static const SSFECCurveParams_t _ssfECP384 =
 {
-    { (SSFBNLimb_t *)SSF_BN_NIST_P384_LIMBS, 12, 12 }, /* p: shared with ssfbn (BN-O8) */
+    { (SSFBNLimb_t *)SSF_BN_NIST_P384_LIMBS, 12, 12 }, /* p: shared with ssfbn */
     { (SSFBNLimb_t *)_ssfECP384_a,  12, 12 },
     { (SSFBNLimb_t *)_ssfECP384_b,  12, 12 },
     { (SSFBNLimb_t *)_ssfECP384_gx, 12, 12 },
@@ -202,17 +198,17 @@ static void _SSFECPointDouble(SSFECPoint_t *r, const SSFECPoint_t *p, const SSFE
     /* X3 = alpha^2 - 8 * beta */
     SSFBNModMulNIST(&r->x, &alpha, &alpha, &c->p);
     SSFBNModAdd(&tmp, &beta, &beta, &c->p);
-    SSFBNModAdd(&tmp, &tmp, &tmp, &c->p);         /* 4 * beta */
-    SSFBNModAdd(&delta, &tmp, &tmp, &c->p);       /* 8 * beta (reuse delta) */
+    SSFBNModAdd(&tmp, &tmp, &tmp, &c->p); /* 4 * beta */
+    SSFBNModAdd(&delta, &tmp, &tmp, &c->p); /* 8 * beta (reuse delta) */
     SSFBNModSub(&r->x, &r->x, &delta, &c->p);
 
     /* Y3 = alpha * (4 * beta - X3) - 8 * gamma^2 */
-    SSFBNModSub(&tmp, &tmp, &r->x, &c->p);        /* 4*beta - X3 (tmp was 4*beta) */
+    SSFBNModSub(&tmp, &tmp, &r->x, &c->p); /* 4*beta - X3 (tmp was 4*beta) */
     SSFBNModMulNIST(&tmp, &alpha, &tmp, &c->p);
     SSFBNModMulNIST(&gamma, &gamma, &gamma, &c->p); /* gamma^2 = Y1^4 */
-    SSFBNModAdd(&gamma, &gamma, &gamma, &c->p);   /* 2 * Y1^4 */
-    SSFBNModAdd(&gamma, &gamma, &gamma, &c->p);   /* 4 * Y1^4 */
-    SSFBNModAdd(&gamma, &gamma, &gamma, &c->p);   /* 8 * Y1^4 */
+    SSFBNModAdd(&gamma, &gamma, &gamma, &c->p); /* 2 * Y1^4 */
+    SSFBNModAdd(&gamma, &gamma, &gamma, &c->p); /* 4 * Y1^4 */
+    SSFBNModAdd(&gamma, &gamma, &gamma, &c->p); /* 8 * Y1^4 */
     SSFBNModSub(&r->y, &tmp, &gamma, &c->p);
 
     /* Zeroize scratch holding values derived from the secret scalar. */
@@ -239,7 +235,12 @@ static void _SSFECPointAddFull(SSFECPoint_t *r, const SSFECPoint_t *p, const SSF
     SSFECPOINT_DEFINE(Q, SSF_EC_MAX_LIMBS);
     SSFECPOINT_DEFINE(dblP, SSF_EC_MAX_LIMBS);
     SSFECPOINT_DEFINE(zeroPt, SSF_EC_MAX_LIMBS);
-    SSFBNLimb_t z1z, z2z, hz, rz, hzAndRz, hzAndNotRz;
+    SSFBNLimb_t z1z;
+    SSFBNLimb_t z2z;
+    SSFBNLimb_t hz;
+    SSFBNLimb_t rz;
+    SSFBNLimb_t hzAndRz;
+    SSFBNLimb_t hzAndNotRz;
 
     SSF_REQUIRE(r != NULL);
     SSF_REQUIRE(r->x.limbs != NULL);
@@ -271,30 +272,30 @@ static void _SSFECPointAddFull(SSFECPoint_t *r, const SSFECPoint_t *p, const SSF
     SSFBNSetZero(&zeroPt.z, c->limbs);
 
     /* z1_sq = Z1^2, z2_sq = Z2^2 */
-    SSFBNModMulNIST(&t1, &P.z, &P.z, &c->p);     /* t1 = Z1^2 */
-    SSFBNModMulNIST(&t2, &Q.z, &Q.z, &c->p);     /* t2 = Z2^2 */
+    SSFBNModMulNIST(&t1, &P.z, &P.z, &c->p); /* t1 = Z1^2 */
+    SSFBNModMulNIST(&t2, &Q.z, &Q.z, &c->p); /* t2 = Z2^2 */
 
     /* z1_cu = Z1 * Z1^2, z2_cu = Z2 * Z2^2 */
-    SSFBNModMulNIST(&t3, &P.z, &t1, &c->p);      /* t3 = Z1^3 */
-    SSFBNModMulNIST(&t4, &Q.z, &t2, &c->p);      /* t4 = Z2^3 */
+    SSFBNModMulNIST(&t3, &P.z, &t1, &c->p); /* t3 = Z1^3 */
+    SSFBNModMulNIST(&t4, &Q.z, &t2, &c->p); /* t4 = Z2^3 */
 
     /* U1 = X1 * Z2^2, U2 = X2 * Z1^2 */
-    SSFBNModMulNIST(&t5, &P.x, &t2, &c->p);      /* t5 = U1 = X1*Z2^2 */
-    SSFBNModMulNIST(&t2, &Q.x, &t1, &c->p);      /* t2 = U2 = X2*Z1^2 (reuse t2) */
+    SSFBNModMulNIST(&t5, &P.x, &t2, &c->p); /* t5 = U1 = X1*Z2^2 */
+    SSFBNModMulNIST(&t2, &Q.x, &t1, &c->p); /* t2 = U2 = X2*Z1^2 (reuse t2) */
 
     /* S1 = Y1 * Z2^3, S2 = Y2 * Z1^3 */
-    SSFBNModMulNIST(&t1, &P.y, &t4, &c->p);      /* t1 = S1 = Y1*Z2^3 (reuse t1) */
-    SSFBNModMulNIST(&t4, &Q.y, &t3, &c->p);      /* t4 = S2 = Y2*Z1^3 (reuse t4) */
+    SSFBNModMulNIST(&t1, &P.y, &t4, &c->p); /* t1 = S1 = Y1*Z2^3 (reuse t1) */
+    SSFBNModMulNIST(&t4, &Q.y, &t3, &c->p); /* t4 = S2 = Y2*Z1^3 (reuse t4) */
 
     /* H = U2 - U1, R = S2 - S1 */
-    SSFBNModSub(&t3, &t2, &t5, &c->p);           /* t3 = H = U2 - U1 (reuse t3) */
-    SSFBNModSub(&t2, &t4, &t1, &c->p);           /* t2 = R = S2 - S1 (reuse t2) */
+    SSFBNModSub(&t3, &t2, &t5, &c->p); /* t3 = H = U2 - U1 (reuse t3) */
+    SSFBNModSub(&t2, &t4, &t1, &c->p); /* t2 = R = S2 - S1 (reuse t2) */
 
     /* Capture special-case flags before the formulas overwrite their inputs. */
     z1z = (SSFBNLimb_t)SSFBNIsZero(&P.z);
     z2z = (SSFBNLimb_t)SSFBNIsZero(&Q.z);
-    hz  = (SSFBNLimb_t)SSFBNIsZero(&t3);         /* H == 0 */
-    rz  = (SSFBNLimb_t)SSFBNIsZero(&t2);         /* R == 0 */
+    hz  = (SSFBNLimb_t)SSFBNIsZero(&t3); /* H == 0 */
+    rz  = (SSFBNLimb_t)SSFBNIsZero(&t2); /* R == 0 */
 
     /* t4 = H^2 */
     SSFBNModMulNIST(&t4, &t3, &t3, &c->p);
@@ -363,7 +364,12 @@ static void _SSFECPointAddMixed(SSFECPoint_t *r, const SSFECPoint_t *p, const SS
     SSFECPOINT_DEFINE(Q, SSF_EC_MAX_LIMBS);
     SSFECPOINT_DEFINE(dblP, SSF_EC_MAX_LIMBS);
     SSFECPOINT_DEFINE(zeroPt, SSF_EC_MAX_LIMBS);
-    SSFBNLimb_t z1z, z2z, hz, rz, hzAndRz, hzAndNotRz;
+    SSFBNLimb_t z1z;
+    SSFBNLimb_t z2z;
+    SSFBNLimb_t hz;
+    SSFBNLimb_t rz;
+    SSFBNLimb_t hzAndRz;
+    SSFBNLimb_t hzAndNotRz;
 
     SSF_REQUIRE(r != NULL);
     SSF_REQUIRE(r->x.limbs != NULL);
@@ -395,12 +401,12 @@ static void _SSFECPointAddMixed(SSFECPoint_t *r, const SSFECPoint_t *p, const SS
     SSFBNSetZero(&zeroPt.z, c->limbs);
 
     /* General mixed-coordinate add (assume Z2 = 1; U1 = X1, S1 = Y1). */
-    SSFBNModMulNIST(&t1, &P.z, &P.z, &c->p);          /* t1 = Z1^2                      */
-    SSFBNModMulNIST(&t3, &P.z, &t1, &c->p);            /* t3 = Z1^3                      */
-    SSFBNModMulNIST(&t2, &Q.x, &t1, &c->p);            /* t2 = U2 = X2 * Z1^2           */
-    SSFBNModMulNIST(&t4, &Q.y, &t3, &c->p);            /* t4 = S2 = Y2 * Z1^3           */
-    SSFBNModSub(&t3, &t2, &P.x, &c->p);                /* t3 = H = U2 - X1 (U1 = X1)    */
-    SSFBNModSub(&t2, &t4, &P.y, &c->p);                /* t2 = R = S2 - Y1 (S1 = Y1)    */
+    SSFBNModMulNIST(&t1, &P.z, &P.z, &c->p); /* t1 = Z1^2 */
+    SSFBNModMulNIST(&t3, &P.z, &t1, &c->p); /* t3 = Z1^3 */
+    SSFBNModMulNIST(&t2, &Q.x, &t1, &c->p); /* t2 = U2 = X2 * Z1^2 */
+    SSFBNModMulNIST(&t4, &Q.y, &t3, &c->p); /* t4 = S2 = Y2 * Z1^3 */
+    SSFBNModSub(&t3, &t2, &P.x, &c->p); /* t3 = H = U2 - X1 (U1 = X1) */
+    SSFBNModSub(&t2, &t4, &P.y, &c->p); /* t2 = R = S2 - Y1 (S1 = Y1) */
 
     /* Capture flags before continuing. */
     z1z = (SSFBNLimb_t)SSFBNIsZero(&P.z);
@@ -408,9 +414,9 @@ static void _SSFECPointAddMixed(SSFECPoint_t *r, const SSFECPoint_t *p, const SS
     hz  = (SSFBNLimb_t)SSFBNIsZero(&t3);
     rz  = (SSFBNLimb_t)SSFBNIsZero(&t2);
 
-    SSFBNModMulNIST(&t4, &t3, &t3, &c->p);             /* t4 = H^2                      */
-    SSFBNModMulNIST(&t6, &t3, &t4, &c->p);             /* t6 = H^3                      */
-    SSFBNModMulNIST(&t5, &P.x, &t4, &c->p);            /* t5 = U1*H^2 = X1*H^2          */
+    SSFBNModMulNIST(&t4, &t3, &t3, &c->p); /* t4 = H^2 */
+    SSFBNModMulNIST(&t6, &t3, &t4, &c->p); /* t6 = H^3 */
+    SSFBNModMulNIST(&t5, &P.x, &t4, &c->p); /* t5 = U1*H^2 = X1*H^2 */
 
     /* Z3 = Z1 * H (skipping the Z1*Z2 step from the full add). */
     SSFBNModMulNIST(&r->z, &P.z, &t3, &c->p);
@@ -424,7 +430,7 @@ static void _SSFECPointAddMixed(SSFECPoint_t *r, const SSFECPoint_t *p, const SS
     /* Y3 = R * (U1*H^2 - X3) - S1 * H^3 = R * (X1*H^2 - X3) - Y1 * H^3 */
     SSFBNModSub(&t5, &t5, &r->x, &c->p);
     SSFBNModMulNIST(&t5, &t2, &t5, &c->p);
-    SSFBNModMulNIST(&t1, &P.y, &t6, &c->p);            /* t1 = Y1 * H^3 (reuse t1)      */
+    SSFBNModMulNIST(&t1, &P.y, &t6, &c->p); /* t1 = Y1 * H^3 (reuse t1) */
     SSFBNModSub(&r->y, &t5, &t1, &c->p);
 
     /* CT cascade -- same priority order as the full add. */
@@ -456,15 +462,22 @@ static void _SSFECPointAddMixed(SSFECPoint_t *r, const SSFECPoint_t *p, const SS
 }
 
 #if SSF_CONFIG_EC_UNIT_TEST == 1
+/* --------------------------------------------------------------------------------------------- */
+/* Unit test access to _SSFECPointAddMixed.                                                      */
+/* --------------------------------------------------------------------------------------------- */
 void _SSFECPointAddMixedForTest(SSFECPoint_t *r, const SSFECPoint_t *p, const SSFECPoint_t *q,
                                 SSFECCurve_t curve)
 {
+    SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(p != NULL);
+    SSF_REQUIRE(q != NULL);
+
     _SSFECPointAddMixed(r, p, q, SSFECGetCurveParams(curve));
 }
 #endif
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: comb-runtime mixed addition; caller MUST guarantee P != Q (skips Double(P) setup). */
+/* Internal: comb-runtime mixed addition; caller MUST guarantee P != Q (skips Double(P) setup).  */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFECPointAddMixedNoDouble(SSFECPoint_t *r, const SSFECPoint_t *p,
                                         const SSFECPoint_t *q, const SSFECCurveParams_t *c)
@@ -478,7 +491,11 @@ static void _SSFECPointAddMixedNoDouble(SSFECPoint_t *r, const SSFECPoint_t *p,
     SSFECPOINT_DEFINE(P, SSF_EC_MAX_LIMBS);
     SSFECPOINT_DEFINE(Q, SSF_EC_MAX_LIMBS);
     SSFECPOINT_DEFINE(zeroPt, SSF_EC_MAX_LIMBS);
-    SSFBNLimb_t z1z, z2z, hz, rz, hzAndNotRz;
+    SSFBNLimb_t z1z;
+    SSFBNLimb_t z2z;
+    SSFBNLimb_t hz;
+    SSFBNLimb_t rz;
+    SSFBNLimb_t hzAndNotRz;
 
     SSF_REQUIRE(r != NULL);
     SSF_REQUIRE(r->x.limbs != NULL);
@@ -557,9 +574,16 @@ static void _SSFECPointAddMixedNoDouble(SSFECPoint_t *r, const SSFECPoint_t *p,
 }
 
 #if SSF_CONFIG_EC_UNIT_TEST == 1
+/* --------------------------------------------------------------------------------------------- */
+/* Unit test access to _SSFECPointAddMixedNoDouble.                                              */
+/* --------------------------------------------------------------------------------------------- */
 void _SSFECPointAddMixedNoDoubleForTest(SSFECPoint_t *r, const SSFECPoint_t *p,
                                         const SSFECPoint_t *q, SSFECCurve_t curve)
 {
+    SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(p != NULL);
+    SSF_REQUIRE(q != NULL);
+
     _SSFECPointAddMixedNoDouble(r, p, q, SSFECGetCurveParams(curve));
 }
 #endif
@@ -646,7 +670,7 @@ bool SSFECPointToAffine(SSFBN_t *x, SSFBN_t *y, const SSFECPoint_t *pt, SSFECCur
     /* Reject identity (Z=0) -- undefined affine coordinate. */
     if (SSFBNIsZero(&pt->z)) return false;
 
-    /* zInv = Z^(-1) mod p, CT at curve width (OPTIMIZE EC-O3) */
+    /* zInv = Z^(-1) mod p, constant-time at curve width */
     if (!SSFBNModInvSmall(&zInv, &pt->z, &c->p)) return false;
 
     /* zInv2 = Z^(-2), zInv3 = Z^(-3) */
@@ -661,24 +685,21 @@ bool SSFECPointToAffine(SSFBN_t *x, SSFBN_t *y, const SSFECPoint_t *pt, SSFECCur
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if point lies on the curve y^2 = x^3 + ax + b (mod p).                          */
+/* Returns true if point lies on the curve y^2 = x^3 + ax + b (mod p).                           */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFECPointOnCurve(const SSFECPoint_t *pt, SSFECCurve_t curve)
 {
     const SSFECCurveParams_t *c = SSFECGetCurveParams(curve);
     SSFBN_DEFINE(ax, SSF_EC_MAX_LIMBS);
     SSFBN_DEFINE(ay, SSF_EC_MAX_LIMBS);
-
-    SSF_REQUIRE(pt != NULL);
-    SSF_REQUIRE(pt->x.limbs != NULL);
-    SSF_REQUIRE(pt->y.limbs != NULL);
-    SSF_REQUIRE(pt->z.limbs != NULL);
-    SSF_REQUIRE(c != NULL);
     SSFBN_DEFINE(lhs, SSF_EC_MAX_LIMBS);
     SSFBN_DEFINE(rhs, SSF_EC_MAX_LIMBS);
     SSFBN_DEFINE(tmp, SSF_EC_MAX_LIMBS);
 
     SSF_REQUIRE(pt != NULL);
+    SSF_REQUIRE(pt->x.limbs != NULL);
+    SSF_REQUIRE(pt->y.limbs != NULL);
+    SSF_REQUIRE(pt->z.limbs != NULL);
     SSF_REQUIRE(c != NULL);
 
     if (SSFBNIsZero(&pt->z)) return false;
@@ -698,11 +719,11 @@ bool SSFECPointOnCurve(const SSFECPoint_t *pt, SSFECCurve_t curve)
     SSFBNModMulNIST(&lhs, &ay, &ay, &c->p);
 
     /* rhs = x^3 + a*x + b mod p */
-    SSFBNModMulNIST(&rhs, &ax, &ax, &c->p);       /* x^2 */
-    SSFBNModMulNIST(&rhs, &rhs, &ax, &c->p);      /* x^3 */
-    SSFBNModMulNIST(&tmp, &c->a, &ax, &c->p);     /* a*x */
-    SSFBNModAdd(&rhs, &rhs, &tmp, &c->p);          /* x^3 + a*x */
-    SSFBNModAdd(&rhs, &rhs, &c->b, &c->p);         /* x^3 + a*x + b */
+    SSFBNModMulNIST(&rhs, &ax, &ax, &c->p); /* x^2 */
+    SSFBNModMulNIST(&rhs, &rhs, &ax, &c->p); /* x^3 */
+    SSFBNModMulNIST(&tmp, &c->a, &ax, &c->p); /* a*x */
+    SSFBNModAdd(&rhs, &rhs, &tmp, &c->p); /* x^3 + a*x */
+    SSFBNModAdd(&rhs, &rhs, &c->b, &c->p); /* x^3 + a*x + b */
 
     return (SSFBNCmp(&lhs, &rhs) == 0);
 }
@@ -747,7 +768,7 @@ bool SSFECPointValidate(const SSFECPoint_t *pt, SSFECCurve_t curve)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Encode point in SEC 1 uncompressed format: 0x04 || X || Y.                                   */
+/* Encode point in SEC 1 uncompressed format: 0x04 || X || Y.                                    */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFECPointEncode(const SSFECPoint_t *pt, SSFECCurve_t curve, uint8_t *out, size_t outSize,
                       size_t *outLen)
@@ -765,7 +786,7 @@ bool SSFECPointEncode(const SSFECPoint_t *pt, SSFECCurve_t curve, uint8_t *out, 
     SSF_REQUIRE(outLen != NULL);
     SSF_REQUIRE(c != NULL);
 
-    encLen = 1u + 2u * (size_t)c->bytes;
+    encLen = 1u + (2u * (size_t)c->bytes);
     if (outSize < encLen) return false;
 
     /* Convert to affine */
@@ -800,7 +821,7 @@ bool SSFECPointDecode(SSFECPoint_t *pt, SSFECCurve_t curve, const uint8_t *data,
     SSF_REQUIRE(pt->y.cap >= c->limbs);
     SSF_REQUIRE(pt->z.cap >= c->limbs);
 
-    encLen = 1u + 2u * (size_t)c->bytes;
+    encLen = 1u + (2u * (size_t)c->bytes);
     if (dataLen != encLen) return false;
 
     /* Must be uncompressed format */
@@ -844,14 +865,17 @@ void SSFECPointAdd(SSFECPoint_t *r, const SSFECPoint_t *p, const SSFECPoint_t *q
     SSF_REQUIRE(r->y.cap >= c->limbs);
     SSF_REQUIRE(r->z.cap >= c->limbs);
 
+    /* Is q affine (Z = 1)? */
     if ((q->z.len >= 1u) && SSFBNIsOne(&q->z))
     {
+        /* Yes, use the mixed-coordinate add. */
         _SSFECPointAddMixed(r, p, q, c);
         return;
     }
+    /* Is p affine (Z = 1)? */
     if ((p->z.len >= 1u) && SSFBNIsOne(&p->z))
     {
-        /* Symmetric: swap operands so the Z=1 one is q in the mixed-add contract. */
+        /* Yes, swap operands so the Z=1 one is q in the mixed-add contract. */
         _SSFECPointAddMixed(r, q, p, c);
         return;
     }
@@ -945,11 +969,11 @@ void SSFECScalarMul(SSFECPoint_t *r, const SSFBN_t *k, const SSFECPoint_t *p, SS
         }
 
         /* Decode this window's value (MSB first within k). */
-        bitOffset = (nWindows - 1u - winIdx) * _SSF_EC_VAR_WINDOW_K;
+        bitOffset = ((nWindows - 1u) - winIdx) * _SSF_EC_VAR_WINDOW_K;
         w = 0u;
         for (step = 0; step < _SSF_EC_VAR_WINDOW_K; step++)
         {
-            bp = bitOffset + (_SSF_EC_VAR_WINDOW_K - 1u - step);
+            bp = bitOffset + ((_SSF_EC_VAR_WINDOW_K - 1u) - step);
             w = (w << 1) | (uint32_t)SSFBNGetBit(k, bp);
         }
 
@@ -1075,18 +1099,16 @@ void SSFECScalarMulDual(SSFECPoint_t *r, const SSFBN_t *u1, const SSFECPoint_t *
 #define _SSF_EC_COMB_H      (SSF_EC_FIXED_BASE_COMB_H)
 #define _SSF_EC_COMB_NTABLE (1u << _SSF_EC_COMB_H)
 
-/* Affine-only comb table descriptor: just X and Y (Z is implicitly 1 for the precomputed       */
-/* multiples of G; entry 0 is encoded as (0, 1) and treated as the identity by the runtime via  */
-/* a CT mask-on-zero override). Dropping Z saves 33% of the comb-table Flash footprint and ~16  */
-/* CondCopy operations per comb iteration.                                                       */
+/* Affine comb entry (Z is implicitly 1); entry 0 is a sentinel handled as the identity. */
 typedef struct
 {
     SSFBN_t x;
     SSFBN_t y;
 } _SSFECCombAffine_t;
 
-/* Common comb runtime. Per-curve wrappers below pass the curve params, the precomputed table,  */
-/* and the strip width d.                                                                         */
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: constant-time comb scalar mul r = k * G over table with strip width dBits.          */
+/* --------------------------------------------------------------------------------------------- */
 static void _SSFECScalarMulComb(SSFECPoint_t *r, const SSFBN_t *k, const SSFECCurveParams_t *c,
                                 const _SSFECCombAffine_t *table, uint32_t dBits)
 {
@@ -1106,7 +1128,6 @@ static void _SSFECScalarMulComb(SSFECPoint_t *r, const SSFBN_t *k, const SSFECCu
     SSF_REQUIRE(r->x.cap >= c->limbs);
     SSF_REQUIRE(r->y.cap >= c->limbs);
     SSF_REQUIRE(r->z.cap >= c->limbs);
-    /* No-double addition is valid only for 0 <= k < n at the curve width (AUDIT EC-1) */
     SSF_REQUIRE(k->len <= c->limbs);
     {
         SSFBN_DEFINE(kPad, SSF_EC_MAX_LIMBS);
@@ -1134,7 +1155,7 @@ static void _SSFECScalarMulComb(SSFECPoint_t *r, const SSFBN_t *k, const SSFECCu
         mask = 0u;
         for (i = 0u; i < (uint8_t)_SSF_EC_COMB_H; i++)
         {
-            mask |= (uint8_t)((uint8_t)SSFBNGetBit(k, (uint32_t)j + (uint32_t)i * dBits) << i);
+            mask |= (uint8_t)((uint8_t)SSFBNGetBit(k, (uint32_t)j + ((uint32_t)i * dBits)) << i);
         }
 
         /* Constant-time table lookup: scan only X and Y (Z is implicitly 1, set below). */
@@ -1174,12 +1195,11 @@ static void _SSFECScalarMulComb(SSFECPoint_t *r, const SSFBN_t *k, const SSFECCu
 
 #endif /* SSF_EC_CONFIG_FIXED_BASE_P256 || SSF_EC_CONFIG_FIXED_BASE_P384 */
 
-/* Per-curve strip width d = ceil(nbits / h). Multiplied by h it covers >= nbits.                */
-#define _SSF_EC_P256_COMB_D ((256u + _SSF_EC_COMB_H - 1u) / _SSF_EC_COMB_H)
-#define _SSF_EC_P384_COMB_D ((384u + _SSF_EC_COMB_H - 1u) / _SSF_EC_COMB_H)
+/* Per-curve strip width d = ceil(nbits / h). Multiplied by h it covers >= nbits. */
+#define _SSF_EC_P256_COMB_D (((256u + _SSF_EC_COMB_H) - 1u) / _SSF_EC_COMB_H)
+#define _SSF_EC_P384_COMB_D (((384u + _SSF_EC_COMB_H) - 1u) / _SSF_EC_COMB_H)
 
-/* Initializer-list helpers: expand M(0)..M(N-1) inside an aggregate initializer. Used to wire   */
-/* up the comb-table descriptors from the storage arrays without writing 16/32/64 lines by hand. */
+/* Initializer-list helpers: expand M(0)..M(N-1) to build the comb-table descriptors. */
 #define _SSF_EC_LIST_16(M) \
     M( 0),M( 1),M( 2),M( 3),M( 4),M( 5),M( 6),M( 7), \
     M( 8),M( 9),M(10),M(11),M(12),M(13),M(14),M(15)
@@ -1216,12 +1236,14 @@ static void _SSFECScalarMulComb(SSFECPoint_t *r, const SSFBN_t *k, const SSFECCu
         { (SSFBNLimb_t *)_ssfECP256CombStorage[(idx)][1], 8u, 8u },               \
     }
 
-/* Descriptor table -- const, lives in .rodata next to the storage. The const-cast on .limbs is */
-/* safe because every consumer of these descriptors only READS through them.                    */
+/* Comb descriptor table in .rodata; the const-cast on .limbs is safe (read-only access). */
 static const _SSFECCombAffine_t _ssfECP256CombTable[_SSF_EC_COMB_NTABLE] = {
     _SSF_EC_LIST_NTABLE(_SSF_EC_P256_COMB_ENTRY)
 };
 
+/* --------------------------------------------------------------------------------------------- */
+/* Constant-time fixed-base scalar multiplication r = k * G on P-256 via the comb table.         */
+/* --------------------------------------------------------------------------------------------- */
 void SSFECScalarMulBaseP256(SSFECPoint_t *r, const SSFBN_t *k)
 {
     SSF_REQUIRE(r != NULL);
@@ -1259,6 +1281,9 @@ static const _SSFECCombAffine_t _ssfECP384CombTable[_SSF_EC_COMB_NTABLE] = {
     _SSF_EC_LIST_NTABLE(_SSF_EC_P384_COMB_ENTRY)
 };
 
+/* --------------------------------------------------------------------------------------------- */
+/* Constant-time fixed-base scalar multiplication r = k * G on P-384 via the comb table.         */
+/* --------------------------------------------------------------------------------------------- */
 void SSFECScalarMulBaseP384(SSFECPoint_t *r, const SSFBN_t *k)
 {
     SSF_REQUIRE(r != NULL);
@@ -1354,25 +1379,30 @@ static void _SSFECScalarMulVTwNAF(SSFECPoint_t *r, const SSFBN_t *k, const SSFEC
     while (!SSFBNIsZero(&kCopy))
     {
         int8_t d;
+
+        /* Is kCopy odd? */
         if ((kCopy.limbs[0] & 1u) != 0u)
         {
-            uint32_t lo = kCopy.limbs[0] & ((1u << _SSF_EC_VTWNAF_W) - 1u); /* low 5 bits */
+            /* Yes, emit a non-zero odd digit from the low 5 bits. */
+            uint32_t lo = kCopy.limbs[0] & ((1u << _SSF_EC_VTWNAF_W) - 1u);
+
+            /* Is the window value in the upper half (negative digit)? */
             if (lo >= (1u << (_SSF_EC_VTWNAF_W - 1u)))
             {
-                /* Map to negative: lo - 32 */
+                /* Yes, d = lo - 32, then kCopy -= d (kCopy += |d|). */
                 d = (int8_t)((int32_t)lo - (1 << _SSF_EC_VTWNAF_W));
-                /* kCopy -= d  ==  kCopy += |d| */
                 (void)SSFBNAddUint32(&kCopy, &kCopy, (uint32_t)(-(int32_t)d));
             }
             else
             {
+                /* No, d = lo, then kCopy -= d. */
                 d = (int8_t)lo;
-                /* kCopy -= d */
                 (void)SSFBNSubUint32(&kCopy, &kCopy, (uint32_t)d);
             }
         }
         else
         {
+            /* No, emit a zero digit. */
             d = 0;
         }
         if (nDigits < _SSF_EC_VTWNAF_MAX_DIGITS)
@@ -1395,28 +1425,37 @@ static void _SSFECScalarMulVTwNAF(SSFECPoint_t *r, const SSFBN_t *k, const SSFEC
         if (d > 0)
         {
             int32_t idx = (d - 1) / 2;
+
+            /* Is this the affine table[0] entry? */
             if ((idx == 0) && inputAffine)
             {
+                /* Yes, use the mixed-coordinate add. */
                 _SSFECPointAddMixed(r, r, &table[0], c);
             }
             else
             {
+                /* No, use the full Jacobian add. */
                 _SSFECPointAddFull(r, r, &table[idx], c);
             }
         }
         else if (d < 0)
         {
-            int32_t idx = (-d - 1) / 2;
+            int32_t idx = ((-d) - 1) / 2;
+
             /* neg = -table[idx] = (X, p - Y, Z) */
             SSFBNCopy(&neg.x, &table[idx].x);
             SSFBNSub(&neg.y, &c->p, &table[idx].y);
             SSFBNCopy(&neg.z, &table[idx].z);
+
+            /* Is this the affine table[0] entry? */
             if ((idx == 0) && inputAffine)
             {
+                /* Yes, use the mixed-coordinate add. */
                 _SSFECPointAddMixed(r, r, &neg, c);
             }
             else
             {
+                /* No, use the full Jacobian add. */
                 _SSFECPointAddFull(r, r, &neg, c);
             }
         }
@@ -1424,9 +1463,16 @@ static void _SSFECScalarMulVTwNAF(SSFECPoint_t *r, const SSFBN_t *k, const SSFEC
 }
 
 #if SSF_CONFIG_EC_UNIT_TEST == 1
+/* --------------------------------------------------------------------------------------------- */
+/* Unit test access to _SSFECScalarMulVTwNAF.                                                    */
+/* --------------------------------------------------------------------------------------------- */
 void _SSFECScalarMulVTwNAFForTest(SSFECPoint_t *r, const SSFBN_t *k, const SSFECPoint_t *p,
                                   SSFECCurve_t curve)
 {
+    SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(k != NULL);
+    SSF_REQUIRE(p != NULL);
+
     _SSFECScalarMulVTwNAF(r, k, p, SSFECGetCurveParams(curve));
 }
 #endif
@@ -1438,8 +1484,8 @@ void SSFECScalarMulDualBase(SSFECPoint_t *r, const SSFBN_t *u1, const SSFBN_t *u
                             const SSFECPoint_t *q, SSFECCurve_t curve)
 {
     const SSFECCurveParams_t *c = SSFECGetCurveParams(curve);
-    SSFECPOINT_DEFINE(R1, SSF_EC_MAX_LIMBS); /* [u1] G          */
-    SSFECPOINT_DEFINE(R2, SSF_EC_MAX_LIMBS); /* [u2] q          */
+    SSFECPOINT_DEFINE(R1, SSF_EC_MAX_LIMBS); /* [u1] G */
+    SSFECPOINT_DEFINE(R2, SSF_EC_MAX_LIMBS); /* [u2] q */
     bool didFixedBase = false;
 
     SSF_REQUIRE(r != NULL);
@@ -1487,7 +1533,7 @@ void SSFECScalarMulDualBase(SSFECPoint_t *r, const SSFBN_t *u1, const SSFBN_t *u
     /* r = R1 + R2 */
     SSFECPointAdd(r, &R1, &R2, curve);
 
-    /* Inputs are public, but zeroizing is cheap and consistent with the rest of the module. */
+    /* Zeroize scratch for consistency with the rest of the module. */
     SSFBNZeroize(&R1.x); SSFBNZeroize(&R1.y); SSFBNZeroize(&R1.z);
     SSFBNZeroize(&R2.x); SSFBNZeroize(&R2.y); SSFBNZeroize(&R2.z);
 }

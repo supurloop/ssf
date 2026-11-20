@@ -79,32 +79,46 @@ typedef struct SSFTLSTraceCtx
 #if SSF_TLS_CONFIG_ENABLE_TRACE == 1
 /* Internal trace macro: formats and invokes the callback if set. Zero overhead when fn is NULL. */
 #define _SSF_TLS_TRACE(tctx, level, cat, ...) do { \
-    if ((tctx) != NULL && (tctx)->fn != NULL) { \
+    /* Is a trace callback installed? */ \
+    if (((tctx) != NULL) && ((tctx)->fn != NULL)) { \
+        /* Yes, format the message and deliver it */ \
         char _tlsTraceBuf[256]; \
         snprintf(_tlsTraceBuf, sizeof(_tlsTraceBuf), __VA_ARGS__); \
-        (tctx)->fn(level, cat, _tlsTraceBuf, (tctx)->userCtx); \
+        (tctx)->fn((level), (cat), _tlsTraceBuf, (tctx)->userCtx); \
     } } while (0)
 #else
-/* Tracing compiled out (OPTIMIZE X509-O1 / CMS-O1): no strings, no snprintf, no buffer */
+/* Tracing compiled out: no strings, no snprintf, no buffer */
 #define _SSF_TLS_TRACE(tctx, level, cat, ...) do { (void)(tctx); } while (0)
 #endif /* SSF_TLS_CONFIG_ENABLE_TRACE */
 
 /* Convenience macros -- use T as the SSFTLSTraceCtx_t pointer */
-#define SSF_TLS_TRACE_HS_INFO(T, ...)    _SSF_TLS_TRACE(T, SSF_TLS_TRACE_INFO, SSF_TLS_TRACE_HANDSHAKE, __VA_ARGS__)
-#define SSF_TLS_TRACE_HS_ERROR(T, ...)   _SSF_TLS_TRACE(T, SSF_TLS_TRACE_ERROR, SSF_TLS_TRACE_HANDSHAKE, __VA_ARGS__)
-#define SSF_TLS_TRACE_HS_DEBUG(T, ...)   _SSF_TLS_TRACE(T, SSF_TLS_TRACE_DEBUG, SSF_TLS_TRACE_HANDSHAKE, __VA_ARGS__)
-#define SSF_TLS_TRACE_REC_DEBUG(T, ...)  _SSF_TLS_TRACE(T, SSF_TLS_TRACE_DEBUG, SSF_TLS_TRACE_RECORD, __VA_ARGS__)
-#define SSF_TLS_TRACE_REC_ERROR(T, ...)  _SSF_TLS_TRACE(T, SSF_TLS_TRACE_ERROR, SSF_TLS_TRACE_RECORD, __VA_ARGS__)
-#define SSF_TLS_TRACE_CRYPTO_INFO(T, ...) _SSF_TLS_TRACE(T, SSF_TLS_TRACE_INFO, SSF_TLS_TRACE_CRYPTO, __VA_ARGS__)
-#define SSF_TLS_TRACE_CRYPTO_ERROR(T, ...) _SSF_TLS_TRACE(T, SSF_TLS_TRACE_ERROR, SSF_TLS_TRACE_CRYPTO, __VA_ARGS__)
-#define SSF_TLS_TRACE_CRYPTO_DEBUG(T, ...) _SSF_TLS_TRACE(T, SSF_TLS_TRACE_DEBUG, SSF_TLS_TRACE_CRYPTO, __VA_ARGS__)
-#define SSF_TLS_TRACE_CERT_INFO(T, ...)  _SSF_TLS_TRACE(T, SSF_TLS_TRACE_INFO, SSF_TLS_TRACE_CERT, __VA_ARGS__)
-#define SSF_TLS_TRACE_CERT_ERROR(T, ...) _SSF_TLS_TRACE(T, SSF_TLS_TRACE_ERROR, SSF_TLS_TRACE_CERT, __VA_ARGS__)
-#define SSF_TLS_TRACE_CERT_DEBUG(T, ...) _SSF_TLS_TRACE(T, SSF_TLS_TRACE_DEBUG, SSF_TLS_TRACE_CERT, __VA_ARGS__)
-#define SSF_TLS_TRACE_ALERT(T, ...)      _SSF_TLS_TRACE(T, SSF_TLS_TRACE_WARN, SSF_TLS_TRACE_ALERT, __VA_ARGS__)
+#define SSF_TLS_TRACE_HS_INFO(T, ...) \
+    _SSF_TLS_TRACE(T, SSF_TLS_TRACE_INFO, SSF_TLS_TRACE_HANDSHAKE, __VA_ARGS__)
+#define SSF_TLS_TRACE_HS_ERROR(T, ...) \
+    _SSF_TLS_TRACE(T, SSF_TLS_TRACE_ERROR, SSF_TLS_TRACE_HANDSHAKE, __VA_ARGS__)
+#define SSF_TLS_TRACE_HS_DEBUG(T, ...) \
+    _SSF_TLS_TRACE(T, SSF_TLS_TRACE_DEBUG, SSF_TLS_TRACE_HANDSHAKE, __VA_ARGS__)
+#define SSF_TLS_TRACE_REC_DEBUG(T, ...) \
+    _SSF_TLS_TRACE(T, SSF_TLS_TRACE_DEBUG, SSF_TLS_TRACE_RECORD, __VA_ARGS__)
+#define SSF_TLS_TRACE_REC_ERROR(T, ...) \
+    _SSF_TLS_TRACE(T, SSF_TLS_TRACE_ERROR, SSF_TLS_TRACE_RECORD, __VA_ARGS__)
+#define SSF_TLS_TRACE_CRYPTO_INFO(T, ...) \
+    _SSF_TLS_TRACE(T, SSF_TLS_TRACE_INFO, SSF_TLS_TRACE_CRYPTO, __VA_ARGS__)
+#define SSF_TLS_TRACE_CRYPTO_ERROR(T, ...) \
+    _SSF_TLS_TRACE(T, SSF_TLS_TRACE_ERROR, SSF_TLS_TRACE_CRYPTO, __VA_ARGS__)
+#define SSF_TLS_TRACE_CRYPTO_DEBUG(T, ...) \
+    _SSF_TLS_TRACE(T, SSF_TLS_TRACE_DEBUG, SSF_TLS_TRACE_CRYPTO, __VA_ARGS__)
+#define SSF_TLS_TRACE_CERT_INFO(T, ...) \
+    _SSF_TLS_TRACE(T, SSF_TLS_TRACE_INFO, SSF_TLS_TRACE_CERT, __VA_ARGS__)
+#define SSF_TLS_TRACE_CERT_ERROR(T, ...) \
+    _SSF_TLS_TRACE(T, SSF_TLS_TRACE_ERROR, SSF_TLS_TRACE_CERT, __VA_ARGS__)
+#define SSF_TLS_TRACE_CERT_DEBUG(T, ...) \
+    _SSF_TLS_TRACE(T, SSF_TLS_TRACE_DEBUG, SSF_TLS_TRACE_CERT, __VA_ARGS__)
+#define SSF_TLS_TRACE_ALERT(T, ...) \
+    _SSF_TLS_TRACE(T, SSF_TLS_TRACE_WARN, SSF_TLS_TRACE_ALERT, __VA_ARGS__)
 
-/* Legacy compatibility macro -- uses session->trace as the context */
-#define SSF_TLS_TRACE(...)  /* removed -- use category-specific macros instead */
+/* Legacy macro: expands to nothing; use the category-specific macros instead */
+#define SSF_TLS_TRACE(...)
 
 /* --------------------------------------------------------------------------------------------- */
 /* Defines                                                                                       */
@@ -157,10 +171,7 @@ typedef struct SSFTLSTraceCtx
 #define SSF_TLS_SIG_RSA_PKCS1_SHA384       (0x0501u)
 #define SSF_TLS_SIG_ED25519                (0x0807u)
 
-/* Maximum size of the CertificateVerify "signed content" bytes that are handed to the           */
-/* signature primitive. RFC 8446 Section 4.4.3 defines this as 64 filler bytes + 33 context      */
-/* bytes + 1 separator + transcript hash (up to 48 bytes for SHA-384). Ed25519 signs this raw    */
-/* buffer (no pre-hash), so crypto work structs need a buffer at least this size.                 */
+/* Max CertificateVerify signed content (RFC 8446 4.4.3): 64 + 33 + 1 + hash (<= 48) bytes. */
 #define SSF_TLS_CV_SIGN_CONTENT_MAX_SIZE   (98u + 48u)
 
 /* Extension types */
@@ -185,7 +196,7 @@ typedef struct SSFTLSTraceCtx
 #define SSF_TLS_ALERT_INTERNAL_ERROR      ((uint8_t)80u)
 
 /* --------------------------------------------------------------------------------------------- */
-/* TLS transport I/O result (supports non-blocking operation)                                     */
+/* TLS transport I/O result (supports non-blocking operation)                                    */
 /* --------------------------------------------------------------------------------------------- */
 typedef enum
 {
@@ -228,17 +239,18 @@ typedef struct SSFTLSRecordState
 
 /* HKDF-Expand-Label (RFC 8446 Section 7.1). */
 void SSFTLSHkdfExpandLabel(SSFHMACHash_t hash, const uint8_t *secret, size_t secretLen,
-                           const char *label, const uint8_t *context, size_t ctxLen, uint8_t *out,
-                           size_t outLen);
+                           const char *labelStr, const uint8_t *context, size_t contextLen,
+                           uint8_t *out, size_t outLen);
 
 /* Derive-Secret = HKDF-Expand-Label(secret, label, Transcript-Hash, hashLen). */
 void SSFTLSDeriveSecret(SSFHMACHash_t hash, const uint8_t *secret, size_t secretLen,
-                        const char *label, const uint8_t *transcriptHash, size_t transcriptHashLen,
-                        uint8_t *out, size_t outLen);
+                        const char *labelStr, const uint8_t *transcriptHash,
+                        size_t transcriptHashLen, uint8_t *out, size_t outLen);
 
 /* Derive traffic key and IV from a traffic secret. */
-void SSFTLSDeriveTrafficKeys(SSFHMACHash_t hash, const uint8_t *trafficSecret, size_t secretLen,
-                             uint8_t *key, size_t keyLen, uint8_t *iv, size_t ivLen);
+void SSFTLSDeriveTrafficKeys(SSFHMACHash_t hash, const uint8_t *trafficSecret,
+                             size_t trafficSecretLen, uint8_t *key, size_t keyLen, uint8_t *iv,
+                             size_t ivLen);
 
 /* Compute the Finished verify_data: HMAC(finished_key, transcript_hash). */
 void SSFTLSComputeFinished(SSFHMACHash_t hash, const uint8_t *baseKey, size_t baseKeyLen,
@@ -250,7 +262,7 @@ void SSFTLSComputeFinished(SSFHMACHash_t hash, const uint8_t *baseKey, size_t ba
 /* --------------------------------------------------------------------------------------------- */
 
 void SSFTLSTranscriptInit(SSFTLSTranscript_t *t, SSFHMACHash_t hash);
-void SSFTLSTranscriptUpdate(SSFTLSTranscript_t *t, const uint8_t *data, size_t len);
+void SSFTLSTranscriptUpdate(SSFTLSTranscript_t *t, const uint8_t *data, size_t dataLen);
 void SSFTLSTranscriptHash(const SSFTLSTranscript_t *t, uint8_t *out, size_t outSize);
 
 /* --------------------------------------------------------------------------------------------- */
@@ -260,12 +272,11 @@ void SSFTLSRecordStateInit(SSFTLSRecordState_t *state, uint16_t cipherSuite, con
                            size_t keyLen, const uint8_t *iv, size_t ivLen);
 void SSFTLSRecordStateDeInit(SSFTLSRecordState_t *state);
 
-/* Encrypt plaintext into a TLS record (header + ciphertext + tag).                              */
-/* record must have room for SSF_TLS_RECORD_HEADER_SIZE + ptLen + 1 + SSF_TLS_AEAD_TAG_SIZE.     */
+/* Encrypt plaintext into a TLS record (header + ciphertext + tag); see ssftls.md for sizing. */
 bool SSFTLSRecordEncrypt(SSFTLSRecordState_t *state, uint8_t contentType, const uint8_t *pt,
                          size_t ptLen, uint8_t *record, size_t recordSize, size_t *recordLen);
 
-/* Decrypt a TLS record. Validates AEAD tag and extracts inner content type.                     */
+/* Decrypt a TLS record. Validates AEAD tag and extracts inner content type. */
 bool SSFTLSRecordDecrypt(SSFTLSRecordState_t *state, const uint8_t *record, size_t recordLen,
                          uint8_t *pt, size_t ptSize, size_t *ptLen, uint8_t *contentType);
 

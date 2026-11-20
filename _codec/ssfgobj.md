@@ -30,7 +30,7 @@ translate between JSON, UBJSON, and other encoding types.
   returns `false` for a node initialized with `maxChildren = 0`.
 - `*gobj` must be `NULL` before [`SSFGObjInit()`](#ssfgobjinit); must not be `NULL` before
   [`SSFGObjDeInit()`](#ssfgobjdeinit). Both assert otherwise.
-- [`SSFGObjSetLabel()`](#ssfgobjsetlabel) accepts `NULL` for `labelCStr` — this clears any
+- [`SSFGObjSetLabel()`](#ssfgobjsetlabel) accepts `NULL` for `labelCStrOpt` — this clears any
   existing label.
 - [`SSFGObjSetBin()`](#ssfgobjsetbin) accepts `valueLen = 0` — this stores an empty binary node.
 - [`SSFGObjInsertChild()`](#ssfgobjinsertchild) asserts if the parent type is not
@@ -102,7 +102,7 @@ Options live in [`_opt/ssfgobj_opt.h`](../_opt/ssfgobj_opt.h) (aggregated into t
 |---|---------|-------------|
 | [e.g.](#ex-init) | [`bool SSFGObjInit(gobj, maxChildren)`](#ssfgobjinit) | Allocate and initialize a new node |
 | [e.g.](#ex-deinit) | [`void SSFGObjDeInit(gobj)`](#ssfgobjdeinit) | Free a node and all its children |
-| [e.g.](#ex-setlabel) | [`bool SSFGObjSetLabel(gobj, labelCStr)`](#ssfgobjsetlabel) | Set or clear the node's label |
+| [e.g.](#ex-setlabel) | [`bool SSFGObjSetLabel(gobj, labelCStrOpt)`](#ssfgobjsetlabel) | Set or clear the node's label |
 | [e.g.](#ex-getlabel) | [`bool SSFGObjGetLabel(gobj, labelCStrOut, labelCStrOutSize)`](#ssfgobjgetlabel) | Copy the node's label into a buffer |
 | [e.g.](#ex-gettype) | [`SSFObjType_t SSFGObjGetType(gobj)`](#ssfgobjgettype) | Return the node's current value type |
 | [e.g.](#ex-getsize) | [`size_t SSFGObjGetSize(gobj)`](#ssfgobjgetsize) | Return the size of the node's stored value |
@@ -199,16 +199,16 @@ SSFGObjDeInit(&g);
 ### [↑](#ssfgobj--generic-object-beta) [`bool SSFGObjSetLabel()`](#functions)
 
 ```c
-bool SSFGObjSetLabel(SSFGObj_t *gobj, SSFCStrIn_t labelCStr);
+bool SSFGObjSetLabel(SSFGObj_t *gobj, SSFCStrIn_t labelCStrOpt);
 ```
 
-Assigns a label to the node, replacing any existing one. Passing `NULL` for `labelCStr` clears
+Assigns a label to the node, replacing any existing one. Passing `NULL` for `labelCStrOpt` clears
 the label without error.
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
 | `gobj` | in | [`SSFGObj_t *`](#type-ssfgobj-t) | Pointer to the node. Must not be `NULL`. |
-| `labelCStr` | in | `SSFCStrIn_t` | Null-terminated label to copy, or `NULL` to clear. |
+| `labelCStrOpt` | in | `SSFCStrIn_t` | Null-terminated label to copy, or `NULL` to clear. |
 
 **Returns:** `true` if the label was set or cleared; `false` if `malloc` failed when setting.
 

@@ -477,16 +477,14 @@ void SSFGObjUnitTest(void)
     SSFGObjDeInit(&gobjChild3);
     SSF_ASSERT(SSFGObjIsMemoryBalanced());
 
-    /* (Hardening) Tree depth is capped at SSF_GOBJ_CONFIG_MAX_IN_DEPTH. InsertChild rejects an      */
-    /* insert that would push any node past the maximum supported depth, which keeps SSFGObjDeInit  */
-    /* and SSFJsonGObjPrint recursion bounded even for a programmatically-built tree. */
+    /* (Hardening) InsertChild rejects any insert that would push a node past the depth limit */
     {
         SSFGObj_t *chain[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
         SSFGObj_t *deep = NULL;
         SSFGObj_t *root = NULL;
         uint32_t d;
 
-        /* Build the deepest legal chain: one child per level, deepest node at depth MAX_IN_DEPTH-1. */
+        /* Build the deepest legal chain: one child per level, deepest node at MAX_IN_DEPTH-1 */
         for (d = 0; d < SSF_GOBJ_CONFIG_MAX_IN_DEPTH; d++)
         {
             chain[d] = NULL;
@@ -494,7 +492,7 @@ void SSFGObjUnitTest(void)
             if (d > 0)
             {
                 SSF_ASSERT(SSFGObjSetObject(chain[d - 1]));
-                SSF_ASSERT(SSFGObjInsertChild(chain[d - 1], chain[d]));  /* lands at depth d < MAX */
+                SSF_ASSERT(SSFGObjInsertChild(chain[d - 1], chain[d]));
             }
         }
 
@@ -503,14 +501,12 @@ void SSFGObjUnitTest(void)
         SSF_ASSERT(SSFGObjSetObject(chain[SSF_GOBJ_CONFIG_MAX_IN_DEPTH - 1]));
         SSF_ASSERT(SSFGObjInsertChild(chain[SSF_GOBJ_CONFIG_MAX_IN_DEPTH - 1], deep) == false);
 
-        /* Inserting the whole legal chain (height MAX-1) under a fresh root would push its deepest  */
-        /* node to depth MAX_IN_DEPTH -> must also be rejected. */
+        /* The whole chain under a fresh root would reach depth MAX_IN_DEPTH -> rejected */
         SSF_ASSERT(SSFGObjInit(&root, 1));
         SSF_ASSERT(SSFGObjSetObject(root));
         SSF_ASSERT(SSFGObjInsertChild(root, chain[0]) == false);
 
-        /* The rejected nodes were never attached, so free them independently; chain[0] frees the   */
-        /* whole attached chain. Memory must still balance. */
+        /* Free the unattached nodes separately; chain[0] frees the chain; memory must balance */
         SSFGObjDeInit(&deep);
         SSFGObjDeInit(&root);
         SSFGObjDeInit(&chain[0]);
@@ -518,9 +514,7 @@ void SSFGObjUnitTest(void)
     }
 
     /* ---- AUDIT GOBJ-1: a path only matches a tree of its shape ---- */
-    /* Path entries were untyped: an array node read a key string as a size_t index (an       */
-    /* over-read and a wrong element), an object node compared an index as a label, and a     */
-    /* scalar node compared its own label with the entry after it.                            */
+    /* Keys never match array nodes, indexes never match object nodes, scalars match nothing */
     {
         SSFGObj_t *root = NULL;
         SSFGObj_t *node;

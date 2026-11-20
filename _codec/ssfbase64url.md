@@ -37,7 +37,7 @@ the encoding used by JWS / JWT (RFC 7515) and other web token formats.
 - **Decode is strict.** [`SSFBase64URLDecode()`](#ssfbase64urldecode) accepts either fully
   padded or fully unpadded input (RFC 4648 §3.2), but returns `false` for: any character outside
   the §5 alphabet (including `+` and `/`, §3.3); `=` anywhere other than the final block
-  (§3.3 / §4); partially padded input, i.e. any `=` present when `inLen` is not already a
+  (§3.3 / §4); partially padded input, i.e. any `=` present when `inStrLen` is not already a
   multiple of 4; non-canonical encodings whose final-quantum low bits are not zero (§3.5); and
   inputs whose length after re-padding is not a multiple of 4.
 - **Decode input length is bounded.** The decoder re-pads into an on-stack buffer of

@@ -58,6 +58,8 @@ for any unused field.
   are wiped once at the end of the pass rather than after every block (OPTIMIZE GCM-O1: GHASH
   about 1.5–1.9× faster on x86-64, ARMv7-A and Cortex-M4, about 1.1× on Cortex-M0+, whose
   64-bit multiplies are library calls). Output is unchanged.
+- DBC exception (timing-critical): `_SSFAESGCMCarryless32Mult` run per block or per arithmetic
+  step and carry no parameter asserts; their callers validate every argument.
 
 <a id="configuration"></a>
 

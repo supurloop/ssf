@@ -60,6 +60,8 @@ authenticated encryption, pair this module with [`ssfpoly1305`](ssfpoly1305.md) 
 - `ctSize` must be `≥ ptLen`; the output has the same length as the input. Extra bytes in
   `ct` beyond `ptLen` are not touched.
 - `ptLen == 0` is a no-op. When `ptLen > 0`, `pt` and `ct` must be non-`NULL`.
+- DBC exception (timing-critical): `_SSFChaCha20Block` runs once per 64-byte block and keeps
+  only its two block-size checks; its callers validate the pointers.
 
 <a id="configuration"></a>
 

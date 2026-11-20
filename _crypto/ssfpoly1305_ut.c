@@ -36,10 +36,7 @@
 #include "ssfassert.h"
 #include "ssfpoly1305.h"
 
-/* Cross-validate Poly1305 against OpenSSL on host builds where libcrypto is linked. Same      */
-/* gating pattern as ssfaesctr_ut.c. When disabled (cross builds with                          */
-/* -DSSF_CONFIG_HAVE_OPENSSL=0) the RFC 8439 KAT plus internal corner cases are the load-      */
-/* bearing correctness coverage.                                                                */
+/* Cross-validate against OpenSSL when libcrypto is linked, else RFC 8439 KATs cover it. */
 #if (SSF_CONFIG_HAVE_OPENSSL == 1) && (SSF_CONFIG_POLY1305_UNIT_TEST == 1)
 #define SSF_POLY1305_OSSL_VERIFY 1
 #else
@@ -86,9 +83,7 @@ static void _OSSLPoly1305(const uint8_t key[SSF_POLY1305_KEY_SIZE],
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Random fuzz across message lengths spanning the 16-byte Poly1305 block boundary plus the    */
-/* multi-block / partial-final-block paths. Each cell hashes via SSF one-shot AND incremental   */
-/* (mid-message split) and compares both against OpenSSL.                                        */
+/* Random fuzz over lengths around the 16-byte block: SSF one-shot and split vs OpenSSL.         */
 /* --------------------------------------------------------------------------------------------- */
 static void _VerifyPoly1305AgainstOpenSSLRandom(void)
 {
@@ -159,8 +154,7 @@ void SSFPoly1305UnitTest(void)
     SSFPoly1305Mac(msg, sizeof(msg), key, sizeof(key), tag, sizeof(tag));
     SSF_ASSERT(memcmp(tag, expected_tag, sizeof(expected_tag)) == 0);
 
-    /* Empty message with r=1, s=0 -> tag = (h=0) + s = 0. Asserts the empty-message path
-     * actually emits the algebraically-required all-zero tag, instead of just "doesn't crash". */
+    /* Empty message with r=1, s=0 must emit the all-zero tag. */
     {
         static const uint8_t zeroKey[32] = {
             0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -175,9 +169,7 @@ void SSFPoly1305UnitTest(void)
         SSF_ASSERT(memcmp(emptyTag, expectedZeroTag, sizeof(expectedZeroTag)) == 0);
     }
 
-    /* RFC 8439 Sec. A.3 Test Vector #1: all-zero key + 64-byte all-zero msg -> all-zero tag.
-     * Catches any path that would fail to emit zero when both r and s are zero (defensive
-     * floor for the corner case where the multiply produces no contribution). */
+    /* RFC 8439 Sec. A.3 TV1: all-zero key + 64-byte all-zero msg -> all-zero tag. */
     {
         static const uint8_t tv1Key[32] = {0};
         static const uint8_t tv1Msg[64] = {0};
@@ -188,12 +180,7 @@ void SSFPoly1305UnitTest(void)
         SSF_ASSERT(memcmp(tv1Tag, expectedTag, sizeof(expectedTag)) == 0);
     }
 
-    /* RFC 8439 Sec. A.3 Test Vector #5: r=2 (clamped from `02 00...`), s=0, msg = `ff x 16`.
-     * Specifically chosen to exercise the modular reduction near 2^130: the single block
-     * `ff x 16 || 01` interpreted as a 130-bit number is 2^128 + (2^128 - 1); multiplying
-     * by 2 wraps past 2^130, exercising the `c * 5` carry-propagation path. Expected
-     * tag = 0x03 in low byte, rest zero. Cross-build coverage for the carry-edge case
-     * that the OpenSSL fuzz catches on host. */
+    /* RFC 8439 Sec. A.3 TV5: r=2, s=0, msg=ff x 16 wraps past 2^130 (c * 5 carry path). */
     {
         static const uint8_t tv5Key[32] = {
             0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -215,12 +202,7 @@ void SSFPoly1305UnitTest(void)
         SSF_ASSERT(memcmp(tv5Tag, expectedTag, sizeof(expectedTag)) == 0);
     }
 
-    /* r=0 algebraic edge: with r clamped from `00 x 16` to 0, every multiply yields 0, so
-     * the accumulator stays 0 regardless of message content and the final tag is exactly s.
-     * Reuses the RFC 8439 Sec. A.3 TV2 key (s = `36 e5 f6 b5 ...`) but pairs it with the Sec. 2.5.2
-     * 34-byte message rather than TV2's 375-byte IETF text -- the result is algebraically
-     * determined by r=0 and is independent of message content. Catches a class of bugs
-     * where the multiply path leaks state into the output even when r is zero. */
+    /* r=0 edge (A.3 TV2 key, Sec. 2.5.2 msg): the tag is exactly s for any message. */
     {
         static const uint8_t r0Key[32] = {
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -238,9 +220,7 @@ void SSFPoly1305UnitTest(void)
         SSF_ASSERT(memcmp(r0Tag, expectedTag, sizeof(expectedTag)) == 0);
     }
 
-    /* RFC 8439 Sec. A.3 Test Vector #3: r != 0, s = 0, with a 375-byte multi-block IETF text.
-     * Complement to the r=0 case above -- exercises the pure-r-mixing path across many MulR
-     * iterations. Ensures multi-block reductions converge to the canonical h with no s-add. */
+    /* RFC 8439 Sec. A.3 TV3: r != 0, s = 0, 375-byte multi-block text (pure r mixing). */
     {
         static const uint8_t tv3Key[] = {
             0x36u, 0xE5u, 0xF6u, 0xB5u, 0xC5u, 0xE0u, 0x60u, 0x70u,
@@ -307,9 +287,7 @@ void SSFPoly1305UnitTest(void)
         SSF_ASSERT(memcmp(tv3Tag, expectedTag, sizeof(expectedTag)) == 0);
     }
 
-    /* RFC 8439 Sec. A.3 Test Vector #6: r=2, s=ffx16, msg=`02 00...00`. Stresses the s-addition
-     * carry propagation in the tag-write loop -- adding s=ffx16 to a non-zero h forces the
-     * carry to walk through all four 32-bit assembly words. */
+    /* RFC 8439 Sec. A.3 TV6: r=2, s=ff x 16 -- s-addition carry through all four words. */
     {
         static const uint8_t tv6Key[] = {
             0x02u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u,
@@ -331,9 +309,7 @@ void SSFPoly1305UnitTest(void)
         SSF_ASSERT(memcmp(tv6Tag, expectedTag, sizeof(expectedTag)) == 0);
     }
 
-    /* RFC 8439 Sec. A.3 Test Vector #7: r=1, s=0, 48-byte msg crafted to push h to/past p across
-     * three blocks. Specifically tests the constant-time `h - p` selection in End -- the
-     * mask = (g4 >> 31) - 1u branch where the high-bit underflow distinguishes h<p from h>=p. */
+    /* RFC 8439 Sec. A.3 TV7: r=1, s=0, h pushed to/past p -- constant-time h - p select. */
     {
         static const uint8_t tv7Key[] = {
             0x01u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u,
@@ -359,8 +335,7 @@ void SSFPoly1305UnitTest(void)
         SSF_ASSERT(memcmp(tv7Tag, expectedTag, sizeof(expectedTag)) == 0);
     }
 
-    /* RFC 8439 Sec. A.3 Test Vector #9: r=2, s=0, msg=`fd ff...ff`. Reduction edge complementary to
-     * TV5 -- different upper-boundary pattern through MulR's `c * 5` carry-back-into-h0 path. */
+    /* RFC 8439 Sec. A.3 TV9: r=2, s=0, msg=fd ff..ff -- MulR c * 5 carry-back edge. */
     {
         static const uint8_t tv9Key[] = {
             0x02u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u,
@@ -382,10 +357,7 @@ void SSFPoly1305UnitTest(void)
         SSF_ASSERT(memcmp(tv9Tag, expectedTag, sizeof(expectedTag)) == 0);
     }
 
-    /* Streaming API: Begin/Update/End over the RFC 7539 vector must produce the same tag
-     * as the one-shot Mac. Run it several ways to exercise the partial-block hold-back
-     * across the 16-byte block boundary: byte-by-byte, uneven chunks, and chunks that
-     * straddle the boundary. */
+    /* Streaming Begin/Update/End must match one-shot Mac for several chunkings. */
     {
         SSFPoly1305Context_t ctx = {0};
         uint8_t streamTag[16];
@@ -403,8 +375,7 @@ void SSFPoly1305UnitTest(void)
         SSFPoly1305End(&ctx, streamTag, sizeof(streamTag));
         SSF_ASSERT(memcmp(streamTag, expected_tag, sizeof(expected_tag)) == 0);
 
-        /* Boundary-straddling chunks: 1, 15, 17, 1 -- forces drain, then drain+block,
-         * then block+partial, then final partial. Total = 34 = sizeof(msg). */
+        /* Boundary-straddling chunks 1, 15, 17, 1 (total 34 = sizeof(msg)). */
         SSFPoly1305Begin(&ctx, key, sizeof(key));
         SSFPoly1305Update(&ctx, &msg[0],  1u);
         SSFPoly1305Update(&ctx, &msg[1],  15u);
@@ -434,9 +405,7 @@ void SSFPoly1305UnitTest(void)
         }
     }
 
-    /* Tag-buffer write boundary: an oversized tag buffer must leave bytes 16..N-1 untouched.
-     * Pins down the .md guarantee "Oversized buffers are not padded -- byte 16 onward is left
-     * untouched" -- currently asserted nowhere else. */
+    /* An oversized tag buffer must leave bytes 16..N-1 untouched. */
     {
         uint8_t oversizedTag[32];
         size_t i;
@@ -447,9 +416,7 @@ void SSFPoly1305UnitTest(void)
         for (i = 16u; i < sizeof(oversizedTag); i++) SSF_ASSERT(oversizedTag[i] == 0xCCu);
     }
 
-    /* Length walk 0..32: for every msg length, one-shot Mac and byte-by-byte streaming must
-     * produce the same tag. Walks bufLen through every 0..15 value across two block boundaries
-     * and pins down one-shot/streaming agreement at each length. */
+    /* Length walk 0..32: one-shot Mac and byte-by-byte streaming give the same tag. */
     {
         static const uint8_t walkKey[32] = {
             0xABu, 0xCDu, 0xEFu, 0x01u, 0x23u, 0x45u, 0x67u, 0x89u,
@@ -479,9 +446,7 @@ void SSFPoly1305UnitTest(void)
         }
     }
 
-    /* Exhaustive 2-chunk split equivalence: for a fixed 64-byte message, every possible split
-     * point 0..64 of two Update calls must produce the same tag as one-shot Mac. Catches off-
-     * by-one bugs in the partial-block drain at every possible (bufLen, remaining) state pair. */
+    /* Every 2-chunk split point 0..64 of a 64-byte message must match one-shot Mac. */
     {
         static const uint8_t splitKey[32] = {
             0x10u, 0x21u, 0x32u, 0x43u, 0x54u, 0x65u, 0x76u, 0x87u,
@@ -516,8 +481,7 @@ void SSFPoly1305UnitTest(void)
         SSF_ASSERT(SSFPoly1305Verify(msg, sizeof(msg), key, sizeof(key), expected_tag) == true);
     }
 
-    /* SSFPoly1305Verify: negative correctness -- single-bit flip rejects. Verifies the function
-     * actually compares all 16 bytes rather than e.g. always returning true. */
+    /* SSFPoly1305Verify: a single-bit flip in any of the 16 bytes rejects. */
     {
         uint8_t wrongTag[16];
         size_t i;
@@ -555,8 +519,7 @@ void SSFPoly1305UnitTest(void)
         }
     }
 
-    /* SSFPoly1305Verify: DBC coverage. msg may be NULL only when msgLen == 0; key must be
-     * non-NULL with length exactly SSF_POLY1305_KEY_SIZE; expectedTag must be non-NULL. */
+    /* SSFPoly1305Verify DBC: msg NULL only with msgLen 0; key and expectedTag non-NULL. */
     {
         static const uint8_t scratchKey[32] = {0};
         static const uint8_t scratchMsg[16] = {0};
@@ -574,16 +537,11 @@ void SSFPoly1305UnitTest(void)
         SSF_ASSERT_TEST(SSFPoly1305Verify(scratchMsg, sizeof(scratchMsg), scratchKey,
                                           sizeof(scratchKey), NULL));
 
-        /* msg == NULL with msgLen == 0 is permitted and must not assert. Return value is
-         * unconstrained (depends on whether the all-zeros tag matches the all-zeros key's
-         * empty-message MAC), but the call must complete. */
+        /* msg == NULL with msgLen == 0 is permitted; the result is unconstrained. */
         (void)SSFPoly1305Verify(NULL, 0u, scratchKey, sizeof(scratchKey), scratchTag);
     }
 
-    /* Defensive: the context-magic check rejects any call sequence that violates
-     * Begin -> (Update*) -> End. Begin requires `magic == 0` on entry (stricter than
-     * HMAC's `!= MAGIC` convention), so a non-zero context -- whether previously
-     * initialised or stack residue -- is rejected. */
+    /* Context-magic checks reject sequences other than Begin -> (Update*) -> End. */
     {
         SSFPoly1305Context_t ctx = {0};
         uint8_t scratchTag[16];
@@ -593,9 +551,7 @@ void SSFPoly1305UnitTest(void)
         SSF_ASSERT_TEST(SSFPoly1305Begin(&ctx, key, sizeof(key)));
         SSFPoly1305End(&ctx, scratchTag, sizeof(scratchTag));   /* End wipes ctx -> magic == 0. */
 
-        /* Begin must refuse a context filled with non-zero garbage. Stricter than HMAC, where
-         * any pattern != MAGIC is accepted; forces callers to use `... ctx = {0};` rather than
-         * relying on stack residue happening not to collide with MAGIC. */
+        /* Begin must refuse a context filled with non-zero garbage (requires magic == 0). */
         memset(&ctx, 0xC3u, sizeof(ctx));
         SSF_ASSERT_TEST(SSFPoly1305Begin(&ctx, key, sizeof(key)));
         memset(&ctx, 0, sizeof(ctx));   /* restore zero-init for the cases below */
@@ -604,19 +560,14 @@ void SSFPoly1305UnitTest(void)
         SSF_ASSERT_TEST(SSFPoly1305Update(&ctx, msg, sizeof(msg)));
         SSF_ASSERT_TEST(SSFPoly1305End(&ctx, scratchTag, sizeof(scratchTag)));
 
-        /* End wipes ctx -> Update / End on the wiped context must also assert. Catches the
-         * common "Begin once, MAC twice" bug: silently emitting `tag = s = 0` for the second
-         * message (since r and s are zero post-wipe) would otherwise be a hard-to-spot
-         * MAC-collapse rather than a loud failure. */
+        /* End wipes ctx, so a second Update / End on it must assert (no silent tag = s). */
         SSFPoly1305Begin(&ctx, key, sizeof(key));
         SSFPoly1305End(&ctx, scratchTag, sizeof(scratchTag));
         SSF_ASSERT_TEST(SSFPoly1305Update(&ctx, msg, 1u));
         SSF_ASSERT_TEST(SSFPoly1305End(&ctx, scratchTag, sizeof(scratchTag)));
     }
 
-    /* SSFPoly1305Begin: DBC coverage. ctx must be non-NULL and zero-initialised; key must be
-     * non-NULL with length exactly SSF_POLY1305_KEY_SIZE. The magic-field requirement
-     * (ctx->magic == 0u) is exercised separately above. */
+    /* SSFPoly1305Begin DBC: ctx non-NULL; key non-NULL with length SSF_POLY1305_KEY_SIZE. */
     {
         SSFPoly1305Context_t scratchCtx = {0};
         static const uint8_t scratchKey[32] = {0};
@@ -631,8 +582,7 @@ void SSFPoly1305UnitTest(void)
         /* scratchCtx remains zero-init since every assert fires before Begin sets magic. */
     }
 
-    /* SSFPoly1305Update: DBC coverage. ctx must be non-NULL and initialised; msg may only be
-     * NULL when msgLen == 0. Magic-required-for-init is exercised above. */
+    /* SSFPoly1305Update DBC: ctx non-NULL and initialised; msg NULL only with msgLen 0. */
     {
         SSFPoly1305Context_t scratchCtx = {0};
         static const uint8_t scratchKey[32] = {0};
@@ -650,8 +600,7 @@ void SSFPoly1305UnitTest(void)
         SSFPoly1305End(&scratchCtx, scratchTag, sizeof(scratchTag));
     }
 
-    /* SSFPoly1305End: DBC coverage. ctx must be non-NULL and initialised; tag must be non-NULL;
-     * tagSize must be >= SSF_POLY1305_TAG_SIZE. Magic-required is exercised above. */
+    /* SSFPoly1305End DBC: ctx initialised; tag non-NULL; tagSize >= SSF_POLY1305_TAG_SIZE. */
     {
         SSFPoly1305Context_t scratchCtx = {0};
         static const uint8_t scratchKey[32] = {0};
@@ -668,9 +617,7 @@ void SSFPoly1305UnitTest(void)
         SSFPoly1305End(&scratchCtx, scratchTag, sizeof(scratchTag));
     }
 
-    /* SSFPoly1305Mac: DBC coverage. The one-shot wrapper has no own SSF_REQUIRE -- every
-     * contract violation fires inside Begin / Update / End. Mac has no ctx parameter (the
-     * context is internally allocated), so no NULL-ctx case applies. */
+    /* SSFPoly1305Mac DBC: each contract violation must assert. */
     {
         static const uint8_t scratchKey[32] = {0};
         static const uint8_t scratchMsg[8] = {0};

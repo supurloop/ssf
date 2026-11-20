@@ -102,8 +102,7 @@ void SSFHexUnitTest(void)
         SSF_ASSERT(SSFHexBytesToBin("111x", strlen("111x"), binout, sizeof(binout), &outlen,
                                     (bool)i) == false);
 
-        /* AUDIT HEX-1: a limit past the end of the hex string fails at the terminator; the  */
-        /* strings sit in zero-padded buffers so the limit never runs past the buffer itself */
+        /* AUDIT HEX-1: limit past string end fails at the terminator (zero-padded buffers) */
         {
             static const char pad1234[208] = "1234";
             static const char pad123[8] = "123";
@@ -238,8 +237,7 @@ void SSFHexUnitTest(void)
     SSF_ASSERT(hexout[1] == 'B');
     SSF_ASSERT(hexout[2] == 0);
 
-    /* SSFHexBinToBytes exactly-sized output buffer */
-    /* 1 binary byte needs 3 bytes output (2 hex + null) */
+    /* SSFHexBinToBytes exactly-sized output: 1 binary byte needs 3 bytes (2 hex + null) */
     memset(hexout, 0xff, sizeof(hexout));
     SSF_ASSERT(SSFHexBinToBytes((uint8_t *)"\x12", 1, hexout, 3, &outlen, false,
                                 SSF_HEX_CASE_UPPER) == true);

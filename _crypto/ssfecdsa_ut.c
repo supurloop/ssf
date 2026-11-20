@@ -2,8 +2,8 @@
 /* Small System Framework                                                                        */
 /*                                                                                               */
 /* ssfecdsa_ut.c                                                                                 */
-/* Provides unit tests for the ssfecdsa ECDSA/ECDH module.                                      */
-/* Test vectors from RFC 6979 appendix A.2.5 (P-256/SHA-256).                                   */
+/* Provides unit tests for the ssfecdsa ECDSA/ECDH module.                                       */
+/* Test vectors from RFC 6979 appendix A.2.5 (P-256/SHA-256).                                    */
 /*                                                                                               */
 /* BSD-3-Clause License                                                                          */
 /* Copyright 2026 Supurloop Software LLC                                                         */
@@ -35,8 +35,7 @@
 #include "ssfsha2.h"
 #include "ssfsha1.h"
 
-/* Cross-validate ECDSA sign/verify with OpenSSL on host builds where libcrypto is linked. Gated */
-/* on SSF_CONFIG_HAVE_OPENSSL (1 on native macOS/Linux, 0 on cross builds -- see ssfport.h).     */
+/* Cross-validate ECDSA sign/verify with OpenSSL when SSF_CONFIG_HAVE_OPENSSL is 1. */
 #if (SSF_CONFIG_HAVE_OPENSSL == 1) && (SSF_CONFIG_ECDSA_UNIT_TEST == 1)
 #define SSF_ECDSA_OSSL_VERIFY 1
 #else
@@ -44,9 +43,7 @@
 #endif
 
 #if SSF_ECDSA_OSSL_VERIFY == 1
-/* This test file uses the legacy EC_KEY / ECDSA_do_* / ECDH_compute_key API as an interop oracle. */
-/* Pin the exposed API to OpenSSL 1.1.1 so the 3.0+ deprecation markers don't fire here. Scoped to */
-/* this translation unit; production code keeps -Wdeprecated-declarations active.                  */
+/* Pin OpenSSL to the 1.1.1 API so the legacy EC_KEY/ECDSA/ECDH oracle has no deprecations. */
 #define OPENSSL_API_COMPAT 10101
 #include <openssl/bn.h>
 #include <openssl/ec.h>
@@ -60,9 +57,7 @@
 
 #if SSF_ECDSA_OSSL_VERIFY == 1
 /* --------------------------------------------------------------------------------------------- */
-/* ECDSA sign/verify interop helpers -- bridge SSF privKey/pubKey/sig bytes to OpenSSL EC_KEY    */
-/* and ECDSA_SIG, and back. Used to catch DER encoding / signature serialization bugs that       */
-/* self-consistency tests miss.                                                                   */
+/* Interop helpers bridging SSF key/sig bytes to OpenSSL EC_KEY and ECDSA_SIG, and back. */
 /* --------------------------------------------------------------------------------------------- */
 
 /* Build an OpenSSL EC_KEY for the given curve, with the SSF-format pubKey loaded. */
@@ -90,14 +85,13 @@ static void _ECDSAOSSLSetPriv(EC_KEY *eckey, const uint8_t *privKey, size_t priv
     BN_free(bnD);
 }
 
-/* Curve metadata bundle: byte sizes and OpenSSL NID. Avoids scattering the curve->{nid,sizes}    */
-/* mapping across each cross-check function.                                                       */
+/* Curve metadata bundle: byte sizes and OpenSSL NID. */
 typedef struct
 {
-    int      nid;        /* OpenSSL NID for the curve. */
-    size_t   privBytes;  /* Private-key serialized size. */
-    size_t   pubBytes;   /* Public-key uncompressed size (1 + 2 * field). */
-    size_t   hashBytes;  /* Recommended hash size (matches the curve's bit size). */
+    int      nid; /* OpenSSL NID for the curve. */
+    size_t   privBytes; /* Private-key serialized size. */
+    size_t   pubBytes; /* Public-key uncompressed size (1 + 2 * field). */
+    size_t   hashBytes; /* Recommended hash size (matches the curve's bit size). */
     size_t   secretBytes;/* ECDH shared-secret size (== field size). */
 } _ECDSAOSSLCurveInfo_t;
 
@@ -119,10 +113,7 @@ static void _ECDSAOSSLCurveInfo(SSFECCurve_t curve, _ECDSAOSSLCurveInfo_t *info)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Random fuzz: per curve x iters, exercise every cross-direction (SSF<->OpenSSL) on randomly    */
-/* generated keys and randomly generated hashes. Catches DER edge cases, leftmost-bits truncation */
-/* off-by-ones, and any state-corruption between operations that the fixed-message interop misses */
-/* by reusing one keypair.                                                                         */
+/* Random fuzz: every SSF<->OpenSSL direction on random keys and hashes per curve. */
 /* --------------------------------------------------------------------------------------------- */
 static void _VerifyECDSARandomAgainstOpenSSL(SSFECCurve_t curve, uint16_t iters)
 {
@@ -148,8 +139,7 @@ static void _VerifyECDSARandomAgainstOpenSSL(SSFECCurve_t curve, uint16_t iters)
         {
             EC_KEY *eckey = _ECDSAOSSLKeyFromPub(curve, pubKey, pubKeyLen);
             _ECDSAOSSLSetPriv(eckey, privKey, info.privBytes);
-            /* OpenSSL's EC_KEY_check_key validates: priv in [1, n-1], pub on curve, and         */
-            /* priv * G == pub. A failure here means SSF's KeyGen produced an inconsistent pair.  */
+            /* EC_KEY_check_key: priv in [1, n-1], pub on curve, priv * G == pub. */
             SSF_ASSERT(EC_KEY_check_key(eckey) == 1);
             EC_KEY_free(eckey);
         }
@@ -183,7 +173,7 @@ static void _VerifyECDSARandomAgainstOpenSSL(SSFECCurve_t curve, uint16_t iters)
             osslSig = ECDSA_do_sign(hash, (int)info.hashBytes, eckey);
             SSF_ASSERT(osslSig != NULL);
             derLen = i2d_ECDSA_SIG(osslSig, &derP);
-            SSF_ASSERT(derLen > 0 && derLen <= (int)sizeof(osslDer));
+            SSF_ASSERT((derLen > 0) && (derLen <= (int)sizeof(osslDer)));
             ECDSA_SIG_free(osslSig);
 
             SSF_ASSERT(SSFECDSAVerify(curve, pubKey, pubKeyLen,
@@ -222,8 +212,7 @@ static void _VerifyECDSARandomAgainstOpenSSL(SSFECCurve_t curve, uint16_t iters)
                                       hash, info.hashBytes,
                                       osslDer, (size_t)derLen) == true);
 
-            /* Validity oracle: SSFECDSAPubKeyIsValid must agree with EC_KEY_check_key on the     */
-            /* OpenSSL-generated public key (which is on-curve by construction).                  */
+            /* SSFECDSAPubKeyIsValid must agree with EC_KEY_check_key on the OpenSSL key. */
             SSF_ASSERT(SSFECDSAPubKeyIsValid(curve, osslPub, osslPubLen) == true);
 
             EC_KEY_free(osslKey);
@@ -232,10 +221,7 @@ static void _VerifyECDSARandomAgainstOpenSSL(SSFECCurve_t curve, uint16_t iters)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* ECDH cross-check: SSF and OpenSSL must derive the same shared secret given the same           */
-/* (private, peer-public) inputs. Run with mixed origins -- keys from SSF, keys from OpenSSL,    */
-/* and one of each -- to catch any corner where an SSF-imported pubkey and an OpenSSL-imported   */
-/* pubkey diverge.                                                                                */
+/* ECDH cross-check: SSF and OpenSSL derive the same secret for mixed-origin keys. */
 /* --------------------------------------------------------------------------------------------- */
 static void _VerifyECDHAgainstOpenSSL(SSFECCurve_t curve, uint16_t iters)
 {
@@ -322,10 +308,7 @@ static void _VerifyECDHAgainstOpenSSL(SSFECCurve_t curve, uint16_t iters)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Corner-case verification against OpenSSL.                                                      */
-/*                                                                                                */
-/* Random fuzz can miss identity-shaped inputs (all-zero hash, all-0xFF hash) and the DER         */
-/* round-trip property. This routine drives those explicitly per curve.                           */
+/* Corner cases vs OpenSSL: all-zero hash, all-0xFF hash, and the DER round-trip property. */
 /* --------------------------------------------------------------------------------------------- */
 static void _VerifyECDSACornerCasesAgainstOpenSSL(SSFECCurve_t curve)
 {
@@ -372,9 +355,7 @@ static void _VerifyECDSACornerCasesAgainstOpenSSL(SSFECCurve_t curve)
         EC_KEY_free(eckey);
     }
 
-    /* DER round-trip property: parse SSF's signature with OpenSSL, re-encode, expect byte-      */
-    /* identical output. Catches superfluous-leading-byte and length-encoding deviations from    */
-    /* canonical DER (which OpenSSL would re-canonicalize on the way out).                       */
+    /* DER round-trip: OpenSSL must re-encode SSF's signature byte-identically. */
     SSF_ASSERT(SSFECDSASign(curve, privKey, info.privBytes,
                             zeroHash, info.hashBytes,
                             sig, sizeof(sig), &sigLen) == true);
@@ -422,10 +403,7 @@ static void _VerifyECDSACornerCasesAgainstOpenSSL(SSFECCurve_t curve)
 /* --------------------------------------------------------------------------------------------- */
 /* Zeroization audit hooks                                                                       */
 /* --------------------------------------------------------------------------------------------- */
-/* The hardening invariant we want to enforce: by the time SSFECDSASign / SSFECDHComputeSecret / */
-/* SSFECDSAKeyGen returns, every stack-local that ever held secret-derived material must have    */
-/* been wiped. The hook fires from each function's unified cleanup label after the explicit       */
-/* SSFBNZeroize calls -- a non-zero limb here means a code path slipped past zeroization.         */
+/* Exit hooks check every secret-derived stack local was wiped by the cleanup label. */
 typedef struct
 {
     bool sawHook;
@@ -436,7 +414,13 @@ typedef struct
 static bool _ECDSAUTLimbsAllZero(const SSFBN_t *bn)
 {
     uint16_t i;
-    if (bn == NULL || bn->limbs == NULL) return true;
+
+    /* Is there no limb storage to inspect? */
+    if ((bn == NULL) || (bn->limbs == NULL))
+    {
+        /* Yes, nothing to leak. */
+        return true;
+    }
     for (i = 0; i < bn->cap; i++)
     {
         if (bn->limbs[i] != 0u) return false;
@@ -503,8 +487,11 @@ static void _ECDSAUTKeyGenHook(void *ctx,
     size_t i;
     a->sawHook = true;
     _ECDSAUTRecordBN(a, d, "d");
-    if (entropy != NULL && !a->nonZero)
+
+    /* Is there entropy to scan and no leak recorded yet? */
+    if ((entropy != NULL) && (!a->nonZero))
     {
+        /* Yes, record the first non-zero entropy byte. */
         for (i = 0; i < entropyLen; i++)
         {
             if (entropy[i] != 0u)
@@ -520,14 +507,7 @@ static void _ECDSAUTKeyGenHook(void *ctx,
 
 void SSFECDSAUnitTest(void)
 {
-    /* ---- (Hardening) _SSFECDSABits2Int self-guards its RFC 6979 bits2int preconditions ---- */
-    /* The no-shift bits2int relied on two previously-unchecked properties, both now asserted in  */
-    /* the helper. Drive each through the test wrapper -- the public Sign/Verify entry points      */
-    /* reject an out-of-range hashLen upstream, so these asserts are otherwise unreachable:        */
-    /*   (1) SSFBNFromBytes must succeed. Since AUDIT ECDSA-3 a hashLen past the coordinate     */
-    /*       width is truncated to its leftmost c->bytes bytes (FIPS 186-4 Sec. 6.4).            */
-    /*   (2) The order must fill the coordinate byte width (bitlen(n) == bytes*8) -- the condition  */
-    /*       under which truncating the hash to c->bytes equals the RFC 6979 truncation to qlen.    */
+    /* ---- (Hardening) _SSFECDSABits2Int: (1) long hashLen truncates; (2) bitlen(n) assert ---- */
     {
 #if SSF_EC_CONFIG_ENABLE_P256 == 1
         const SSFECCurveParams_t *cReal = SSFECGetCurveParams(SSF_EC_CURVE_P256);
@@ -543,8 +523,7 @@ void SSFECDSAUnitTest(void)
         /* A matched-width hashLen must NOT assert (the normal path still works). */
         _SSFECDSABits2IntForTest(cReal, hash, cReal->bytes);
 
-        /* (2) Shrink `bytes` on a shallow params copy (the limb pointers stay valid) so bytes*8   */
-        /* no longer equals bitlen(n); the byte-aligned-order assert must fire.                     */
+        /* (2) bytes*8 != bitlen(n) on a shallow params copy must fire the assert. */
         cBad = *cReal;
         cBad.bytes = (uint16_t)(cReal->bytes - 1u);
         SSF_ASSERT_TEST(_SSFECDSABits2IntForTest(&cBad, hash, 1u));
@@ -553,9 +532,6 @@ void SSFECDSAUnitTest(void)
 #if SSF_ECDSA_CONFIG_ENABLE_SIGN == 1
 #if SSF_EC_CONFIG_ENABLE_P256 == 1
     /* ---- Zeroization audit: Sign success path leaves no secret-derived limbs on stack ---- */
-    /* The hook fires from Sign's unified cleanup label after explicit SSFBNZeroize. Any non-zero */
-    /* limb is a slot that the implementation forgot to wipe. d, k, kInv are the obvious privacy- */
-    /* sensitive ones; Rx/Ry/R.{x,y,z}/tmp/e are computed from k or d and must also be wiped.     */
     {
         static const uint8_t privKey[] = {
             0xC9u, 0xAFu, 0xA9u, 0xD8u, 0x45u, 0xBAu, 0x75u, 0x16u,
@@ -595,7 +571,7 @@ void SSFECDSAUnitTest(void)
         size_t sigLen;
         _SSFECDSAZeroAudit_t audit = { false, false, NULL };
 
-        /* d = n exactly: SSFBNFromBytes succeeds but _SSFECDSAPrivKeyIsValid rejects (d >= n).   */
+        /* d = n exactly: SSFBNFromBytes succeeds but _SSFECDSAPrivKeyIsValid rejects (d >= n). */
         SSFBNToBytes(&c->n, badPrivKey, sizeof(badPrivKey));
         SSFSHA256((const uint8_t *)"audit-sign-fail", 15, hash, sizeof(hash));
 
@@ -615,10 +591,7 @@ void SSFECDSAUnitTest(void)
         SSF_ASSERT(audit.nonZero == false);
     }
 
-    /* ---- Zeroization audit: ECDH success path leaves no shared-secret limbs on stack ---- */
-    /* d (local privKey) and S/Sx/Sy (the shared point and its affine coords -- i.e., the raw   */
-    /* ECDH output) all need to be wiped at exit. Sy is wiped both as defense-in-depth and to   */
-    /* prevent any future code change that exposes y from leaking it through stack memory.       */
+    /* ---- Zeroization audit: ECDH success path leaves no d, S, Sx or Sy limbs on stack ---- */
     {
         uint8_t privA[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
         uint8_t pubA[SSF_ECDSA_MAX_PUB_KEY_SIZE];
@@ -665,7 +638,7 @@ void SSFECDSAUnitTest(void)
                    privKey, sizeof(privKey), pubKey, sizeof(pubKey), &pubKeyLen) == true);
 
         memset(badPub, 0, sizeof(badPub));
-        badPub[0] = 0x04u;  /* Identity-shaped -- rejected by SSFECPointDecode */
+        badPub[0] = 0x04u; /* Identity-shaped -- rejected by SSFECPointDecode */
 
         _SSFECDSAECDHTestExitHookCtx = &audit;
         _SSFECDSAECDHTestExitHook = _ECDSAUTECDHHook;
@@ -684,8 +657,6 @@ void SSFECDSAUnitTest(void)
     }
 
     /* ---- Zeroization audit: KeyGen wipes both d and the entropy seed buffer ---- */
-    /* The entropy[] buffer is what feeds SSFPRNGInitContext, which produces d. Leaving entropy */
-    /* on the stack defeats the privacy of d as effectively as leaving d itself.                 */
     {
         uint8_t privKey[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
         uint8_t pubKey[SSF_ECDSA_MAX_PUB_KEY_SIZE];
@@ -709,10 +680,7 @@ void SSFECDSAUnitTest(void)
         SSF_ASSERT(audit.nonZero == false);
     }
 
-    /* ---- RFC 6979 A.2.5: canonical (r, s) KAT for P-256/SHA-256 "sample" ---- */
-    /* Pins the deterministic nonce derivation, the (r, s) computation, and the DER wrapping     */
-    /* against the RFC. Also exercises the non-CT s^-1 path in Verify on a known-good s -- if   */
-    /* SSFBNModInvExt ever regressed for canonical-spec inputs this test would catch it.         */
+    /* ---- RFC 6979 A.2.5: canonical (r, s) and DER KAT for P-256/SHA-256 "sample" ---- */
     {
         static const uint8_t privKey[] = {
             0xC9u, 0xAFu, 0xA9u, 0xD8u, 0x45u, 0xBAu, 0x75u, 0x16u,
@@ -752,13 +720,11 @@ void SSFECDSAUnitTest(void)
         SSF_ASSERT(SSFECDSASign(SSF_EC_CURVE_P256, privKey, sizeof(privKey),
                    hash, sizeof(hash), sig, sizeof(sig), &sigLen) == true);
 
-        /* DER layout: 30 LL 02 RL r... 02 SL s... For RFC 6979 A.2.5 / "sample": both r and s  */
-        /* have their MSB set (0xEF, 0xF7), so each INTEGER is 33 bytes (0x00 sign-pad + 32),   */
-        /* yielding a 70-byte SEQUENCE content and a 72-byte total signature.                    */
+        /* DER: r and s have MSB set, so each INTEGER is 33 bytes and the total is 72 bytes. */
         SSF_ASSERT(sigLen == 72u);
         SSF_ASSERT(sig[0] == 0x30u);
         SSF_ASSERT(sig[2] == 0x02u);
-        SSF_ASSERT(sig[3] == 0x21u);  /* 33 = 0x21 */
+        SSF_ASSERT(sig[3] == 0x21u);
         SSF_ASSERT(sig[4] == 0x00u);
         SSF_ASSERT(memcmp(&sig[5], expR, 32) == 0);
         SSF_ASSERT(sig[37] == 0x02u);
@@ -766,13 +732,11 @@ void SSFECDSAUnitTest(void)
         SSF_ASSERT(sig[39] == 0x00u);
         SSF_ASSERT(memcmp(&sig[40], expS, 32) == 0);
 
-        /* Round-trip verify: confirms the non-CT s^-1 path reaches the right answer for the    */
-        /* canonical s. */
+        /* Round-trip verify of the canonical signature. */
         SSF_ASSERT(SSFECDSAVerify(SSF_EC_CURVE_P256, pubKey, sizeof(pubKey),
                    hash, sizeof(hash), sig, sigLen) == true);
 
-        /* Negative: tampering s by one bit must reject. Targets the last byte of s, well past  */
-        /* the DER header. */
+        /* Negative: flipping a bit in the last byte of s must reject. */
         {
             uint8_t bad[SSF_ECDSA_MAX_SIG_SIZE];
             memcpy(bad, sig, sigLen);
@@ -782,13 +746,7 @@ void SSFECDSAUnitTest(void)
         }
     }
 
-    /* ---- AUDIT ECDSA-1: r == 0 / s == 0 continues the RFC 6979 generator to the next k ---- */
-    /* RFC 6979 Sec. 3.4 / FIPS 186-4 Sec. 6.4: if r or s is zero the signer must take the next */
-    /* candidate k (step h.3 retry update). Sign used to return false, permanently for that     */
-    /* (key, hash) since k is deterministic. r == 0 cannot be produced naturally, so the test   */
-    /* hook _SSFECDSASignTestForcedRetries makes Sign treat its first N attempts as r == 0.     */
-    /* Expected signatures: an independent Python RFC 6979 model (A.2.5 key, SHA-256 "sample")  */
-    /* that reproduces the RFC's first k and (r, s), then yields candidates 2 and 3.            */
+    /* ---- AUDIT ECDSA-1: forced r == 0 continues the RFC 6979 generator (Python model KAT) ---- */
     {
         static const uint8_t privKey[] = {
             0xC9u, 0xAFu, 0xA9u, 0xD8u, 0x45u, 0xBAu, 0x75u, 0x16u,
@@ -858,10 +816,6 @@ void SSFECDSAUnitTest(void)
     }
 
     /* ---- AUDIT ECDSA-5: a faulted signature is never released (verify-after-sign) ---- */
-    /* RFC 6979 k is deterministic, so one faulty plus one correct signature of the same hash  */
-    /* reveal d. The hook _SSFECDSASignTestFault flips bit 0 of r (a fault in R = kG), of d or */
-    /* of e just before s is computed. Sign must return false with sig and sigLen untouched,  */
-    /* and the same call without a fault must still sign and verify.                           */
 #if SSF_ECDSA_CONFIG_VERIFY_AFTER_SIGN == 1
     {
         static const uint8_t privKey[] = {
@@ -911,12 +865,6 @@ void SSFECDSAUnitTest(void)
 #endif /* SSF_ECDSA_CONFIG_VERIFY_AFTER_SIGN */
 
     /* ---- AUDIT ECDSA-2: the RFC 6979 nonce HMAC follows the digest's hash, not the curve ---- */
-    /* RFC 6979 Sec. 3.2 derives k with HMAC over the message hash function H. Sign used the     */
-    /* curve's hash (SHA-256 for P-256, SHA-384 for P-384) for any digest, so non-matching      */
-    /* pairings disagreed with RFC 6979 and other implementations. Expected signatures are the  */
-    /* RFC 6979 "sample" vectors for P-256 with SHA-1 (A.2.5) and P-384 with SHA-256 (A.2.6),   */
-    /* produced by an independent Python model that also reproduces the suite's SHA-256 /       */
-    /* SHA-384 RFC KATs (and the published r / s values for these pairings).                    */
     {
         static const uint8_t privKey256[] = {
             0xC9u, 0xAFu, 0xA9u, 0xD8u, 0x45u, 0xBAu, 0x75u, 0x16u,
@@ -976,11 +924,7 @@ void SSFECDSAUnitTest(void)
 #endif /* SSF_EC_CONFIG_ENABLE_P384 */
     }
 
-    /* ---- AUDIT ECDSA-3: digests longer than the curve are truncated (FIPS 186-4) ---- */
-    /* hashLen > coordBytes used to trip SSF_REQUIRE in Sign and Verify; FIPS 186-4 Sec. 6.4,  */
-    /* RFC 5758 Sec. 3.2 and RFC 6979 Sec. 2.3.2 take the leftmost qlen bits. Expected values */
-    /* are the RFC 6979 "sample" signatures for P-256 with SHA-384 / SHA-512 (A.2.5) and      */
-    /* P-384 with SHA-512 (A.2.6) from the validated Python model; each must also verify.     */
+    /* ---- AUDIT ECDSA-3: digests longer than the curve are truncated (FIPS 186-4 6.4) ---- */
     {
         static const uint8_t privKey256[] = {
             0xC9u, 0xAFu, 0xA9u, 0xD8u, 0x45u, 0xBAu, 0x75u, 0x16u,
@@ -1081,10 +1025,7 @@ void SSFECDSAUnitTest(void)
 #endif /* SSF_EC_CONFIG_ENABLE_P384 */
     }
 
-    /* ---- Sign rejects undersized sig buffer without overflowing it ---- */
-    /* The DER encoder's "totalLen > sigSize" guard is the last line of defense before any byte */
-    /* lands in the caller's buffer. Bracket it: a 1-byte-short buffer must reject; an exactly- */
-    /* sized buffer must accept; the 1-byte-short buffer's tail must remain unwritten.           */
+    /* ---- Sign rejects a 1-byte-short sig buffer without writing past it ---- */
     {
         static const uint8_t privKey[] = {
             0xC9u, 0xAFu, 0xA9u, 0xD8u, 0x45u, 0xBAu, 0x75u, 0x16u,
@@ -1103,12 +1044,9 @@ void SSFECDSAUnitTest(void)
                    hash, sizeof(hash), sigFull, sizeof(sigFull), &sigFullLen) == true);
         SSF_ASSERT(sigFullLen == 72u);
 
-        /* Sign into a buffer one byte too small. The DER encoder must reject (return false)    */
-        /* without writing a byte. Detect any spurious write by surrounding the small buffer    */
-        /* with sentinel bytes and confirming all bytes (including the head/tail sentinels) are */
-        /* untouched.                                                                            */
+        /* Sign into a buffer one byte too small, bracketed by head/tail sentinel bytes. */
         {
-            uint8_t guarded[1u + (72u - 1u) + 1u];   /* head sentinel | sig buffer | tail sentinel */
+            uint8_t guarded[(1u + (72u - 1u)) + 1u]; /* head sentinel | sig | tail sentinel */
             uint8_t *sigSmall = &guarded[1];
             size_t sigSmallSize = 71u;
             size_t sigOutLen = 999u;
@@ -1117,13 +1055,9 @@ void SSFECDSAUnitTest(void)
             SSF_ASSERT(SSFECDSASign(SSF_EC_CURVE_P256, privKey, sizeof(privKey),
                        hash, sizeof(hash), sigSmall, sigSmallSize, &sigOutLen) == false);
 
-            SSF_ASSERT(guarded[0] == 0xA5u);                      /* head sentinel intact */
-            SSF_ASSERT(guarded[sizeof(guarded) - 1u] == 0xA5u);   /* tail sentinel intact */
-            /* The DER encoder is allowed to scribble the SEQUENCE header into the buffer head  */
-            /* before the totalLen check fires (current implementation in fact does so via the  */
-            /* pass-2 EncTagLen call), but it must not write past sigSmallSize. Verify the head */
-            /* sentinel above already covers the lower-OOB direction; the assertion that the    */
-            /* tail sentinel is intact covers the upper-OOB direction.                           */
+            SSF_ASSERT(guarded[0] == 0xA5u);
+            SSF_ASSERT(guarded[sizeof(guarded) - 1u] == 0xA5u);
+            /* The head may hold the SEQUENCE header; the tail sentinel must be intact. */
         }
 
         /* Sign into an exactly-sized buffer succeeds and produces the same DER bytes. */
@@ -1137,9 +1071,7 @@ void SSFECDSAUnitTest(void)
         }
     }
 
-    /* ---- Verify rejects sig buffers below the strict-DER minimum without overflow ---- */
-    /* Strict DER validator's first check is `sigLen < 8u`, well before any sig-byte read past  */
-    /* the first. Hand it lengths 0..7 and confirm rejection without crash.                      */
+    /* ---- Verify rejects sig lengths 0..7 (below the strict-DER minimum) without overflow ---- */
     {
         static const uint8_t pubKey[] = {
             0x04u,
@@ -1165,11 +1097,7 @@ void SSFECDSAUnitTest(void)
         }
     }
 
-    /* ---- Verify rejects DER with non-canonical leading 0x00 in an INTEGER ---- */
-    /* Strict-DER decoder rejects an INTEGER whose first content byte is 0x00 unless the     */
-    /* second byte's MSB is set. Construct a valid SEQUENCE { INTEGER, INTEGER } where the   */
-    /* first INTEGER carries an extra leading 0x00 followed by a byte < 0x80; the verify     */
-    /* must reject without ever reaching the curve-arithmetic stage.                          */
+    /* ---- Verify rejects an INTEGER with an extra leading 0x00 before a byte < 0x80 ---- */
     {
         static const uint8_t pubKey[] = {
             0x04u,
@@ -1187,8 +1115,8 @@ void SSFECDSAUnitTest(void)
         uint8_t badSig[73] = {
             0x30u, 0x47u,
             0x02u, 0x21u,
-            0x00u,                                  /* extra leading zero */
-            0x01u, 0x02u, 0x03u, 0x04u, 0x05u, 0x06u, 0x07u, 0x08u,  /* next byte 0x01 < 0x80 */
+            0x00u, /* extra leading zero */
+            0x01u, 0x02u, 0x03u, 0x04u, 0x05u, 0x06u, 0x07u, 0x08u, /* next byte 0x01 < 0x80 */
             0x09u, 0x0Au, 0x0Bu, 0x0Cu, 0x0Du, 0x0Eu, 0x0Fu, 0x10u,
             0x11u, 0x12u, 0x13u, 0x14u, 0x15u, 0x16u, 0x17u, 0x18u,
             0x19u, 0x1Au, 0x1Bu, 0x1Cu, 0x1Du, 0x1Eu, 0x1Fu, 0x20u,
@@ -1204,9 +1132,7 @@ void SSFECDSAUnitTest(void)
                                   hash, sizeof(hash), badSig, sizeof(badSig)) == false);
     }
 
-    /* ---- Sign / PubKeyFromPrivKey reject the d == 0 private key ---- */
-    /* _SSFECDSAPrivKeyIsValid rejects d outside [1, n-1]; the existing audit covers d == n.  */
-    /* This adds the d == 0 arm: an all-zero 32-byte private key must fail at the same gate. */
+    /* ---- Sign / PubKeyFromPrivKey reject the all-zero (d == 0) private key ---- */
     {
         uint8_t zeroPriv[32] = {0};
         uint8_t pubKey[SSF_ECDSA_MAX_PUB_KEY_SIZE];
@@ -1406,8 +1332,10 @@ void SSFECDSAUnitTest(void)
             0x7Bu, 0x8Au, 0x62u, 0x2Bu, 0x12u, 0x0Fu, 0x67u, 0x21u
         };
         uint8_t hash[32];
-        uint8_t sig1[SSF_ECDSA_MAX_SIG_SIZE], sig2[SSF_ECDSA_MAX_SIG_SIZE];
-        size_t sig1Len, sig2Len;
+        uint8_t sig1[SSF_ECDSA_MAX_SIG_SIZE];
+        uint8_t sig2[SSF_ECDSA_MAX_SIG_SIZE];
+        size_t sig1Len;
+        size_t sig2Len;
 
         SSFSHA256((const uint8_t *)"deterministic", 13, hash, sizeof(hash));
 
@@ -1422,10 +1350,7 @@ void SSFECDSAUnitTest(void)
     }
 
 #if SSF_EC_CONFIG_FIXED_BASE_P256 == 1
-    /* ---- P-256: projective verify check accepts a Jacobian R with non-1 Z ---- */
-    /* Builds R = [k]G with k > 1 (so Z != 1 in Jacobian form) and confirms the new projective    */
-    /* _SSFECDSAVerifyCheckR accepts the matching r and rejects a tampered r. Gated on            */
-    /* FIXED_BASE_P256 because SSFECScalarMulBaseP256 is only compiled when the comb table is in. */
+    /* ---- P-256: projective verify check accepts a Jacobian R with Z != 1 ---- */
     {
         SSFBN_DEFINE(k, SSF_EC_MAX_LIMBS);
         SSFBN_DEFINE(rx, SSF_EC_MAX_LIMBS);
@@ -1452,11 +1377,7 @@ void SSFECDSAUnitTest(void)
     }
 #endif /* SSF_EC_CONFIG_FIXED_BASE_P256 */
 
-    /* ---- P-256: projective verify check exercises the wraparound branch ---- */
-    /* Builds a synthetic R with Z=1 and X = n (smallest value triggering wraparound), then sets  */
-    /* r = X - n = 0... no, r=0 is rejected upstream. Use X = n + 1 so r = 1 is a valid scalar.   */
-    /* _SSFECDSAVerifyCheckR doesn't validate curve membership; it only does the projective       */
-    /* comparison. r < p - n must hold for the wraparound branch to fire.                          */
+    /* ---- P-256: projective verify wraparound branch: synthetic R with X = n + 1, r = 1 ---- */
     {
         SSFBN_DEFINE(rWrap, SSF_EC_MAX_LIMBS);
         SSFBN_DEFINE(rNotMatch, SSF_EC_MAX_LIMBS);
@@ -1472,21 +1393,17 @@ void SSFECDSAUnitTest(void)
         /* Synthetic R: affine (Z=1), X = n + 1, Y arbitrary. (X - n) mod n = 1 = r. */
         SSFBNSetZero(&R.y, c->limbs);
         SSFBNSetOne(&R.z, c->limbs);
-        (void)SSFBNAdd(&R.x, &c->n, &rWrap);  /* R.x = n + 1, < p since 1 < p - n */
+        (void)SSFBNAdd(&R.x, &c->n, &rWrap); /* R.x = n + 1, < p since 1 < p - n */
 
         /* Wraparound branch: accepts r=1 because (1 + n) * 1^2 == n + 1 == R.x (mod p). */
         SSF_ASSERT(_SSFECDSAVerifyCheckRForTest(SSF_EC_CURVE_P256, &R, &rWrap) == true);
 
-        /* Negative: r=2 should NOT match. (2+n)*1^2 = n+2 != n+1, and 2*1^2 = 2 != n+1.          */
+        /* Negative: r=2 should NOT match. (2+n)*1^2 = n+2 != n+1, and 2*1^2 = 2 != n+1. */
         SSFBNSetUint32(&rNotMatch, 2u, c->limbs);
         SSF_ASSERT(_SSFECDSAVerifyCheckRForTest(SSF_EC_CURVE_P256, &R, &rNotMatch) == false);
     }
 
     /* ---- (Gap 6) RFC 5903 Sec. 8.1 ECDH P-256 known-answer test ---- */
-    /* Verifies SSFECDHComputeSecret produces the documented shared secret for a known privKey  */
-    /* + peerPubKey pair from RFC 5903 Sec. 8.1. The Alice/Bob roundtrip test only verifies     */
-    /* self-consistency -- this catches arithmetic bugs that would silently produce mutually-    */
-    /* matching but incorrect shared secrets.                                                    */
     {
         /* RFC 5903 Sec. 8.1: i (initiator's privKey) */
         static const uint8_t privKey[] = {
@@ -1530,9 +1447,6 @@ void SSFECDSAUnitTest(void)
 
 #if SSF_EC_CONFIG_ENABLE_P384 == 1
     /* ---- RFC 6979 Sec. A.2.6: P-384/SHA-384 sign and verify KAT for "sample" ---- */
-    /* Pins the deterministic-nonce derivation, (r, s) computation, and DER wrapping for the    */
-    /* P-384 curve. Until this test, P-384 was covered only by ECDH-KAT and Wycheproof verify;  */
-    /* this is the first P-384 *sign* known-answer test in the suite.                            */
     {
         /* RFC 6979 Sec. A.2.6: x (privKey, 48 bytes) */
         static const uint8_t privKey[] = {
@@ -1591,17 +1505,15 @@ void SSFECDSAUnitTest(void)
         SSF_ASSERT(pubKeyLen == sizeof(expPub));
         SSF_ASSERT(memcmp(pubKey, expPub, sizeof(expPub)) == 0);
 
-        /* Sign and check the canonical (r, s). r=0x94..., s=0x99... -- both have MSB set, so  */
-        /* each INTEGER is 49 bytes (0x00 sign-pad + 48), giving a 102-byte SEQUENCE content    */
-        /* and a 104-byte total signature (the P-384 max).                                       */
+        /* r and s have MSB set: each INTEGER is 49 bytes and the total is 104 bytes (max). */
         SSFSHA384((const uint8_t *)"sample", 6, hash, sizeof(hash));
         SSF_ASSERT(SSFECDSASign(SSF_EC_CURVE_P384, privKey, sizeof(privKey),
                    hash, sizeof(hash), sig, sizeof(sig), &sigLen) == true);
         SSF_ASSERT(sigLen == 104u);
         SSF_ASSERT(sig[0] == 0x30u);
-        SSF_ASSERT(sig[1] == 0x66u);  /* 102 = 0x66 */
+        SSF_ASSERT(sig[1] == 0x66u);
         SSF_ASSERT(sig[2] == 0x02u);
-        SSF_ASSERT(sig[3] == 0x31u);  /* 49 = 0x31 */
+        SSF_ASSERT(sig[3] == 0x31u);
         SSF_ASSERT(sig[4] == 0x00u);
         SSF_ASSERT(memcmp(&sig[5], expR, 48) == 0);
         SSF_ASSERT(sig[53] == 0x02u);
@@ -1623,9 +1535,7 @@ void SSFECDSAUnitTest(void)
         }
     }
 
-    /* ---- RFC 5903 Sec. 8.2 ECDH P-384 known-answer test (using the symmetric (r, gi) -> z form) ---- */
-    /* ECDH is symmetric: [i]gr = [r]gi = z. We use (r, gi) here (responder's privKey + initiator's */
-    /* pubKey) which gives the same expected zx.                                                     */
+    /* ---- RFC 5903 Sec. 8.2 ECDH P-384 KAT using the symmetric (r, gi) -> z form ---- */
     {
         /* RFC 5903 Sec. 8.2: r (responder's privKey, 48 bytes) */
         static const uint8_t privKey[] = {
@@ -1674,18 +1584,8 @@ void SSFECDSAUnitTest(void)
         SSF_ASSERT(memcmp(shared, expectedZ, sizeof(expectedZ)) == 0);
     }
 
-    /* ---- P-384: modular reduction edge case (sparse coordinate bug regression test) ---- */
-    /* Tests the fix for unconditional borrow/carry decrements in _SSFBNReduceP384.         */
-    /* Uses SSFBNModMulNIST to trigger the internal _SSFBNReduceP384 with inputs that would */
-    /* expose the bug where borrow/carry counters were unconditionally decremented instead  */
-    /* of only when add/sub operations actually overflow/underflow.                          */
+    /* ---- P-384: _SSFBNReduceP384 borrow/carry regression via (p-1) * (p-1) mod p ---- */
     {
-        /* This test exercises the specific bug pattern by using multiplication that        */
-        /* creates large intermediate values requiring multiple correction iterations where  */
-        /* some iterations don't cross the 2^384 boundary. The old code would incorrectly  */
-        /* decrement borrow/carry on every iteration; the fixed code only decrements on     */
-        /* actual overflow/underflow.                                                        */
-
         SSFBN_DEFINE(a, SSF_EC_MAX_LIMBS);
         SSFBN_DEFINE(b, SSF_EC_MAX_LIMBS);
         SSFBN_DEFINE(result, SSF_EC_MAX_LIMBS);
@@ -1703,19 +1603,14 @@ void SSFECDSAUnitTest(void)
         SSFBNCopy(&b, &a);
         b.len = c->limbs;
 
-        /* Computing (p-1) * (p-1) mod p = (p^2 - 2p + 1) mod p = 1 mod p */
-        /* But the intermediate product p^2 - 2p + 1 is much larger than p and will       */
-        /* trigger the reduction bug pattern with multiple correction iterations.          */
-        /* The expected result should be 1.                                                */
+        /* (p-1) * (p-1) mod p = 1; the large product needs multiple correction iterations. */
         SSFBNCopy(&expected, &one);
         expected.len = c->limbs;
 
-        /* Perform the modular multiplication that will trigger _SSFBNReduceP384 */
-        /* This creates the large intermediate product that exercises the correction loops */
+        /* Perform the modular multiplication that triggers _SSFBNReduceP384. */
         SSFBNModMulNIST(&result, &a, &b, &c->p);
 
-        /* Verify the result matches expected value */
-        /* With the old buggy code, this would fail due to incorrect counter management */
+        /* Verify the result matches the expected value. */
         SSF_ASSERT(SSFBNCmp(&result, &expected) == 0);
 
         /* Additional verification: result should be < p */
@@ -1741,12 +1636,7 @@ void SSFECDSAUnitTest(void)
 #endif /* SSF_EC_CONFIG_ENABLE_P384 */
 
 #if SSF_ECDSA_OSSL_VERIFY == 1
-    /* ====================================================================================== */
-    /* === Sign-with-SSF / verify-with-OpenSSL (and reverse) interop ========================  */
-    /* ====================================================================================== */
-    /* Catches DER signature encoding bugs (length fields, ASN.1 INTEGER tag/leading-zero      */
-    /* handling) and end-to-end serialization mismatches that the per-primitive KATs miss.     */
-    /* Run for both directions on each enabled curve.                                           */
+    /* === Sign-with-SSF / verify-with-OpenSSL (and reverse) interop ======================= */
     SSF_UT_PRINTF("--- ssfecdsa OpenSSL sign/verify interop ---\n");
 
 #if SSF_EC_CONFIG_ENABLE_P256 == 1
@@ -1784,7 +1674,7 @@ void SSFECDSAUnitTest(void)
             eckey = _ECDSAOSSLKeyFromPub(SSF_EC_CURVE_P256, pubKey, pubKeyLen);
             p = sig;
             osslSig = d2i_ECDSA_SIG(NULL, &p, (long)sigLen);
-            SSF_ASSERT(osslSig != NULL);  /* DER must parse */
+            SSF_ASSERT(osslSig != NULL);
             verifyResult = ECDSA_do_verify(hash, sizeof(hash), osslSig, eckey);
             SSF_ASSERT(verifyResult == 1);
             ECDSA_SIG_free(osslSig);
@@ -1809,7 +1699,7 @@ void SSFECDSAUnitTest(void)
             SSF_ASSERT(osslSig != NULL);
 
             derLen = i2d_ECDSA_SIG(osslSig, &derP);
-            SSF_ASSERT(derLen > 0 && derLen <= (int)sizeof(osslDer));
+            SSF_ASSERT((derLen > 0) && (derLen <= (int)sizeof(osslDer)));
             ECDSA_SIG_free(osslSig);
 
             SSF_ASSERT(SSFECDSAVerify(SSF_EC_CURVE_P256,
@@ -1877,7 +1767,7 @@ void SSFECDSAUnitTest(void)
             SSF_ASSERT(osslSig != NULL);
 
             derLen = i2d_ECDSA_SIG(osslSig, &derP);
-            SSF_ASSERT(derLen > 0 && derLen <= (int)sizeof(osslDer));
+            SSF_ASSERT((derLen > 0) && (derLen <= (int)sizeof(osslDer)));
             ECDSA_SIG_free(osslSig);
 
             SSF_ASSERT(SSFECDSAVerify(SSF_EC_CURVE_P384,
@@ -1890,10 +1780,7 @@ void SSFECDSAUnitTest(void)
 
     SSF_UT_PRINTF("--- end ssfecdsa OpenSSL interop ---\n");
 
-    /* Comprehensive OpenSSL cross-validation, mirroring the ssfbn pattern: random fuzz across   */
-    /* both curves (catches DER-edge / leftmost-bits / state-corruption bugs the fixed-message   */
-    /* interop above can miss with one keypair), ECDH cross-check (no prior coverage), and       */
-    /* corner cases (zero hash, all-0xFF hash, DER round-trip, pubkey derivation).               */
+    /* OpenSSL cross-validation: random fuzz, ECDH cross-check and corner cases per curve. */
     SSF_UT_PRINTF("--- ssfecdsa OpenSSL random fuzz + ECDH + corner cases ---\n");
 #if SSF_EC_CONFIG_ENABLE_P256 == 1
     _VerifyECDSARandomAgainstOpenSSL(SSF_EC_CURVE_P256, 25u);
@@ -1908,8 +1795,7 @@ void SSFECDSAUnitTest(void)
     SSF_UT_PRINTF("--- end ssfecdsa OpenSSL random fuzz + ECDH + corner cases ---\n");
 #endif /* SSF_ECDSA_OSSL_VERIFY */
 
-#endif /* SSF_ECDSA_CONFIG_ENABLE_SIGN -- Sign-using blocks above; Wycheproof verify vectors */
-       /* and ECDH below run regardless because they do not use SSFECDSASign.                 */
+#endif /* SSF_ECDSA_CONFIG_ENABLE_SIGN; the Wycheproof verify and ECDH vectors below always run */
 
 #if SSF_EC_CONFIG_ENABLE_P256 == 1
     /* ---- P-256: SSFECDSAPubKeyIsValid oracle (runs in verify-only builds too) ---- */
@@ -1935,13 +1821,7 @@ void SSFECDSAUnitTest(void)
         SSF_ASSERT(SSFECDSAPubKeyIsValid(SSF_EC_CURVE_P256, badPub, sizeof(badPub)) == false);
     }
 
-    /* ====================================================================================== */
-    /* === Wycheproof ECDSA P-256/SHA-256 verify vectors (Google adversarial test suite) ====  */
-    /* ====================================================================================== */
-    /* 482 vectors covering edge cases that random KAT can't reach: malformed DER, integer    */
-    /* overflow patterns, edge-case public keys, Shamir multiplication corner cases, BER vs   */
-    /* DER encodings, invalid r/s ranges, etc. Counts mismatches without aborting on the      */
-    /* first failure so we can survey the entire vector set in one run.                        */
+    /* === Wycheproof ECDSA P-256/SHA-256 verify vectors (counts mismatches, no early abort) === */
     {
         #include "wycheproof_ecdsa_p256.h"
         uint8_t hash[32];
@@ -2025,17 +1905,10 @@ void SSFECDSAUnitTest(void)
 #endif /* SSF_EC_CONFIG_ENABLE_P384 */
 
 #if SSF_EC_CONFIG_ENABLE_P256 == 1
-    /* === Wycheproof ECDH P-256 vectors ===                                                */
-    /* Each test case: privKey + peer pubKey -> expected shared secret. SSF accepts only     */
-    /* uncompressed SEC1 pubkeys; SPKI-wrapped ones were stripped at codegen and tests where */
-    /* SPKI was malformed are marked with the original bytes (SSF must reject them).         */
-    /* "acceptable" Wycheproof results don't increment mismatches either way.                */
+    /* === Wycheproof ECDH P-256 vectors ("acceptable" results never count as mismatches) === */
     {
         #include "wycheproof_ecdh_p256.h"
-        /* Remaining known-mismatch tcIds (now only category B): Wycheproof tests with malformed */
-        /* curve parameters embedded in SubjectPublicKeyInfo DER. SSF's API takes raw SEC1 bytes  */
-        /* and the codegen strips the SPKI wrapper, so these specific Wycheproof failure modes   */
-        /* are not applicable to SSF's design.                                                   */
+        /* Known mismatches: malformed SPKI curve params, not applicable to raw SEC1 input. */
         static const uint16_t knownEcdhP256Mismatches[] = {
             352u, 353u, 358u, 359u, 363u
         };
@@ -2049,10 +1922,14 @@ void SSFECDSAUnitTest(void)
         for (i = 0; i < (uint16_t)SSF_WYCHEPROOF_ECDH_P256_NTESTS; i++)
         {
             const _SSFWycheproofEcdhP256Test_t *t = &_wp_P256_ecdh_tests[i];
-            bool got, sharedOk = false, isKnown = false;
+            bool got;
+            bool sharedOk = false;
+            bool isKnown = false;
             uint16_t ki;
 
-            for (ki = 0; ki < sizeof(knownEcdhP256Mismatches) / sizeof(knownEcdhP256Mismatches[0]); ki++)
+            for (ki = 0;
+                 ki < (sizeof(knownEcdhP256Mismatches) / sizeof(knownEcdhP256Mismatches[0]));
+                 ki++)
             {
                 if (knownEcdhP256Mismatches[ki] == t->tcId) { isKnown = true; break; }
             }
@@ -2082,8 +1959,10 @@ void SSFECDSAUnitTest(void)
                        got ? (sharedOk ? "valid" : "wrong-shared") : "rejected");
             }
         }
-        SSF_UT_PRINTF("--- Wycheproof ECDH P-256: %u pass, %u acceptable, %u known-issue, %u new-mismatches ---\n",
-               (unsigned)pass, (unsigned)acceptableSkipped, (unsigned)knownIssue, (unsigned)mismatches);
+        SSF_UT_PRINTF("--- Wycheproof ECDH P-256: %u pass, %u acceptable, %u known-issue, "
+                      "%u new-mismatches ---\n",
+                      (unsigned)pass, (unsigned)acceptableSkipped, (unsigned)knownIssue,
+                      (unsigned)mismatches);
         SSF_ASSERT(mismatches == 0u);
     }
 #endif /* SSF_EC_CONFIG_ENABLE_P256 */
@@ -2092,8 +1971,7 @@ void SSFECDSAUnitTest(void)
     /* === Wycheproof ECDH P-384 vectors === */
     {
         #include "wycheproof_ecdh_p384.h"
-        /* P-384 known-issue allowlist will be populated based on first run. Built up the same  */
-        /* way as P-256: empty initial list, run, populate from output, re-run.                  */
+        /* P-384 known-issue allowlist (empty; populate from a first run as for P-256). */
         uint8_t shared[SSF_ECDH_MAX_SECRET_SIZE];
         size_t sharedLen;
         uint16_t i;
@@ -2106,7 +1984,8 @@ void SSFECDSAUnitTest(void)
         for (i = 0; i < (uint16_t)SSF_WYCHEPROOF_ECDH_P384_NTESTS; i++)
         {
             const _SSFWycheproofEcdhP384Test_t *t = &_wp_P384_ecdh_tests[i];
-            bool got, sharedOk = false;
+            bool got;
+            bool sharedOk = false;
 
             got = SSFECDHComputeSecret(SSF_EC_CURVE_P384,
                                        t->privKey, t->privKeyLen,
@@ -2136,7 +2015,10 @@ void SSFECDSAUnitTest(void)
         {
             uint16_t k;
             SSF_UT_PRINTF(" (first fails:");
-            for (k = 0; k < nFirstFails && k < 8u; k++) SSF_UT_PRINTF(" %u", (unsigned)firstFails[k]);
+            for (k = 0; (k < nFirstFails) && (k < 8u); k++)
+            {
+                SSF_UT_PRINTF(" %u", (unsigned)firstFails[k]);
+            }
             SSF_UT_PRINTF(")");
         }
         SSF_UT_PRINTF(" ---\n");
@@ -2145,9 +2027,7 @@ void SSFECDSAUnitTest(void)
 #endif /* SSF_EC_CONFIG_ENABLE_P384 */
 
 #if SSF_CONFIG_BN_UNIT_TEST == 1
-    /* ---- OPTIMIZE EC-O3: ECDSA / ECDH never enter a full-width (BN-cap sized) routine ---- */
-    /* Keygen, sign, verify and ECDH on each curve must run all modular inverses and mod-n    */
-    /* products at curve width (SSFBNModInvSmall / SSFBNModMulSmall).                        */
+    /* ---- OPTIMIZE EC-O3: keygen/sign/verify/ECDH use only curve-width ModInv/ModMul ---- */
     {
         static const SSFECCurve_t curves[] = {
 #if SSF_EC_CONFIG_ENABLE_P256 == 1

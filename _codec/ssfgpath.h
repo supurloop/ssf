@@ -83,8 +83,7 @@ typedef struct
 /* External interface                                                                            */
 /* --------------------------------------------------------------------------------------------- */
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if every entry up to the first END is a known kind with its pointer set; the     */
-/* path must hold maxDepth + 1 entries.                                                          */
+/* Returns true if every entry up to the first END is a known kind with its pointer set.         */
 /* --------------------------------------------------------------------------------------------- */
 static inline bool SSFGPathIsValid(const SSFGPath_t *path, uint8_t maxDepth)
 {

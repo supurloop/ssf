@@ -54,9 +54,24 @@ static bool _SSFMatchUTGlobRef(const char *p, const char *s, bool ci)
     if (*s == '\0') return false;
     a = *p;
     b = *s;
-    if (ci && (a >= 'A') && (a <= 'Z')) a = (char)(a + ('a' - 'A'));
-    if (ci && (b >= 'A') && (b <= 'Z')) b = (char)(b + ('a' - 'A'));
-    if ((*p != '?') && (a != b)) return false;
+    /* Is the match case-insensitive and is the pattern char upper case? */
+    if (ci && (a >= 'A') && (a <= 'Z'))
+    {
+        /* Yes, fold it to lower case */
+        a = (char)(a + ('a' - 'A'));
+    }
+    /* Is the match case-insensitive and is the subject char upper case? */
+    if (ci && (b >= 'A') && (b <= 'Z'))
+    {
+        /* Yes, fold it to lower case */
+        b = (char)(b + ('a' - 'A'));
+    }
+    /* Is the pattern char a literal that differs from the subject char? */
+    if ((*p != '?') && (a != b))
+    {
+        /* Yes, mismatch */
+        return false;
+    }
     return _SSFMatchUTGlobRef(p + 1, s + 1, ci);
 }
 
@@ -130,8 +145,7 @@ void SSFMatchUnitTest(void)
     SSF_ASSERT(SSFMatchStrNI("ab",  "abc", 3u)  == false);
     SSF_ASSERT(SSFMatchStrNI("abc", "ab",  3u)  == false);
 
-    /* Prefix compare: one string ends exactly at len while the other continues. The x509 SAN */
-    /* and name-constraint matchers rely on this. */
+    /* Prefix compare: one string ends at len, other continues (x509 SAN/name constraints) */
     SSF_ASSERT(SSFMatchStrNI("abc", "abcd", 3u) == true);
     SSF_ASSERT(SSFMatchStrNI("abcd", "abc", 3u) == true);
     SSF_ASSERT(SSFMatchStrNI("abc", "abcd", 4u) == false);
@@ -232,9 +246,12 @@ void SSFMatchUnitTest(void)
     SSF_ASSERT(SSFMatchGlob("[a]", "[a]") == true);
     SSF_ASSERT(SSFMatchGlob("[a]", "a") == false);
     SSF_ASSERT(SSFMatchGlob("[!a]", "b") == false);
-    SSF_ASSERT(SSFMatchGlob("\\*", "\\x") == true);      /* '\' literal then '*' wildcard */
-    SSF_ASSERT(SSFMatchGlob("\\*", "*") == false);       /* '\' does not escape the '*' */
-    SSF_ASSERT(SSFMatchGlob("\\?", "\\") == false);      /* '?' still needs one char */
+    /* '\' literal then '*' wildcard */
+    SSF_ASSERT(SSFMatchGlob("\\*", "\\x") == true);
+    /* '\' does not escape the '*' */
+    SSF_ASSERT(SSFMatchGlob("\\*", "*") == false);
+    /* '?' still needs one char */
+    SSF_ASSERT(SSFMatchGlob("\\?", "\\") == false);
     SSF_ASSERT(SSFMatchGlob("\\?", "\\\\") == true);
 
     /* '*' and '?' in the string are ordinary characters */
@@ -322,8 +339,7 @@ void SSFMatchUnitTest(void)
         SSF_ASSERT(SSFMatchGlob("*a*a*a*b", big) == true);
         SSF_ASSERT(SSFMatchGlob("*a*a*a*bb", big) == false);
 
-        /* Exhaustive check against a reference matcher: every pattern of up to 4 characters */
-        /* over a, b, *, ?, A against every subject of up to 4 characters over a, b, A       */
+        /* Exhaustive vs reference: patterns <= 4 chars of a,b,*,?,A; subjects <= 4 of a,b,A */
         for (pl = 0; pl <= 4u; pl++)
         {
             pCount = 1u;
@@ -430,37 +446,44 @@ void SSFMatchUnitTest(void)
     SSF_ASSERT(SSFMatchPath("/a/{id}",     "/a/7?x=1#f",   params, 4, &numParams) == true);
     SSF_ASSERT(numParams == 1u && params[0].valueLen == 1u);
 
-    /* Failure contract: *numParamsOut is 0 after every false return */
+    /* Failure contract: *numParamsOut is 0 after every false return; literal mismatch */
     numParams = 99u;
     SSF_ASSERT(SSFMatchPath("/a/{id}",     "/b/1",         params, 4, &numParams) == false);
-    SSF_ASSERT(numParams == 0u);                                   /* literal mismatch */
+    SSF_ASSERT(numParams == 0u);
+    /* Path too short */
     numParams = 99u;
     SSF_ASSERT(SSFMatchPath("/a/{id}/{x}", "/a/1",         params, 4, &numParams) == false);
-    SSF_ASSERT(numParams == 0u);                                   /* path too short */
+    SSF_ASSERT(numParams == 0u);
+    /* Path too long */
     numParams = 99u;
     SSF_ASSERT(SSFMatchPath("/a/{id}",     "/a/1/2",       params, 4, &numParams) == false);
-    SSF_ASSERT(numParams == 0u);                                   /* path too long */
+    SSF_ASSERT(numParams == 0u);
+    /* Unterminated placeholder */
     numParams = 99u;
     SSF_ASSERT(SSFMatchPath("/a/{id",      "/a/1",         params, 4, &numParams) == false);
-    SSF_ASSERT(numParams == 0u);                                   /* unterminated placeholder */
+    SSF_ASSERT(numParams == 0u);
+    /* Empty placeholder name */
     numParams = 99u;
     SSF_ASSERT(SSFMatchPath("/a/{}",       "/a/1",         params, 4, &numParams) == false);
-    SSF_ASSERT(numParams == 0u);                                   /* empty placeholder name */
+    SSF_ASSERT(numParams == 0u);
+    /* Empty value */
     numParams = 99u;
     SSF_ASSERT(SSFMatchPath("/a/{id}",     "/a/",          params, 4, &numParams) == false);
-    SSF_ASSERT(numParams == 0u);                                   /* empty value */
+    SSF_ASSERT(numParams == 0u);
+    /* Unterminated placeholder never reached */
     numParams = 99u;
     SSF_ASSERT(SSFMatchPath("/a/{id",      "/a/",          params, 4, &numParams) == false);
-    SSF_ASSERT(numParams == 0u);                       /* unterminated placeholder never reached */
+    SSF_ASSERT(numParams == 0u);
+    /* Query reached with pattern left over */
     numParams = 99u;
     SSF_ASSERT(SSFMatchPath("/a/b",        "/a?x",         params, 4, &numParams) == false);
-    SSF_ASSERT(numParams == 0u);                       /* query reached with pattern left over */
+    SSF_ASSERT(numParams == 0u);
+    /* Literal left over after placeholder */
     numParams = 99u;
     SSF_ASSERT(SSFMatchPath("/{n}.json",   "/foo.json",    params, 4, &numParams) == false);
-    SSF_ASSERT(numParams == 0u);                       /* literal left over after placeholder */
+    SSF_ASSERT(numParams == 0u);
 
-    /* Overflow: more placeholders than storage. The match still succeeds, every placeholder is */
-    /* counted, only the first paramsOutOptSize are stored, and later slots are untouched. */
+    /* Overflow: match succeeds, all counted, first paramsOutOptSize stored, rest untouched */
     {
         SSFMatchParam_t few[3];
         SSFCStrIn_t sentinel = "sentinel";
@@ -471,7 +494,8 @@ void SSFMatchUnitTest(void)
         few[2].valueLen = 0xBEEFu;
         SSF_ASSERT(SSFMatchPath("/{a}/{b}/{c}", "/1/2/3", few, 2, &numParams) == true);
         SSF_ASSERT(numParams == 3u);
-        SSF_ASSERT(numParams > 2u);                    /* this is how a caller detects overflow */
+        /* This is how a caller detects overflow */
+        SSF_ASSERT(numParams > 2u);
         SSF_ASSERT(few[0].nameLen == 1u && few[0].name[0] == 'a');
         SSF_ASSERT(few[0].valueLen == 1u && few[0].value[0] == '1');
         SSF_ASSERT(few[1].nameLen == 1u && few[1].name[0] == 'b');
@@ -579,8 +603,7 @@ void SSFMatchUnitTest(void)
     SSF_ASSERT(SSFMatchPath("{a}/{b}",     "x/y",          params, 4, &numParams) == true);
     SSF_ASSERT(numParams == 2u);
 
-    /* A placeholder binds the whole segment up to '/', '?', '#' or end. Literal text in the */
-    /* same segment after it can never match; literal text before it in the segment can. */
+    /* Placeholder binds the whole segment: literal text after it never matches, before can */
     SSF_ASSERT(SSFMatchPath("/{n}.json",   "/foo.json",    params, 4, &numParams) == false);
     SSF_ASSERT(SSFMatchPath("/{a}-{b}",    "/1-2",         params, 4, &numParams) == false);
     SSF_ASSERT(SSFMatchPath("/{a}{b}",     "/12",          params, 4, &numParams) == false);

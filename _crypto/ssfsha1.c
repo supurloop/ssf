@@ -35,7 +35,7 @@
 #include "ssfusexport.h"
 
 #if SSF_CONFIG_SHA1_UNIT_TEST == 1
-/* Test-only hook fired after each secret local is wiped; NULL in production (AUDIT SHA1-2). */
+/* Test-only hook fired after each secret local is wiped; NULL in production. */
 void (*_SSFSHA1ScrubTestHook)(const void *buf, size_t len) = NULL;
 #define _SSF_SHA1_SCRUB_HOOK(b) \
     do { if (_SSFSHA1ScrubTestHook != NULL) _SSFSHA1ScrubTestHook((b), sizeof(b)); } while (0)
@@ -162,6 +162,7 @@ void SSFSHA1Update(SSFSHA1Context_t *ctx, const uint8_t *in, uint32_t inLen)
     SSF_REQUIRE(ctx != NULL);
     SSF_REQUIRE(ctx->magic == SSF_SHA1_CONTEXT_MAGIC);
     SSF_REQUIRE((in != NULL) || (inLen == 0));
+    SSF_REQUIRE(ctx->blockLen < SSF_SHA1_BLOCK_SIZE);
     SSF_REQUIRE((uint64_t)inLen <= (SSF_SHA1_MAX_BYTES - ctx->totalLen));
 
     for (i = 0; i < inLen; i++)
@@ -188,6 +189,7 @@ void SSFSHA1End(SSFSHA1Context_t *ctx, uint8_t out[SSF_SHA1_HASH_SIZE])
 
     SSF_REQUIRE(ctx != NULL);
     SSF_REQUIRE(ctx->magic == SSF_SHA1_CONTEXT_MAGIC);
+    SSF_REQUIRE(ctx->blockLen < SSF_SHA1_BLOCK_SIZE);
     SSF_REQUIRE(out != NULL);
 
     totalBits = ctx->totalLen * 8ull;

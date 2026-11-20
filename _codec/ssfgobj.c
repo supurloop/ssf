@@ -51,7 +51,7 @@ bool SSFGObjIsMemoryBalanced(void)
 #endif /* SSF_CONFIG_GOBJ_UNIT_TEST */
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if object is initialize, else false.                                             */
+/* Returns true if object is initialized, else false.                                            */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFGObjInit(SSFGObj_t **gobj, uint16_t maxChildren)
 {
@@ -139,7 +139,7 @@ SSFObjType_t SSFGObjGetType(SSFGObj_t *gobj)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns the object's tree depth (root == 0), capped at SSF_GOBJ_CONFIG_MAX_IN_DEPTH-1.         */
+/* Returns the object's tree depth (root == 0), capped at SSF_GOBJ_CONFIG_MAX_IN_DEPTH-1.        */
 /* --------------------------------------------------------------------------------------------- */
 uint16_t SSFGObjGetDepth(SSFGObj_t *gobj)
 {
@@ -159,12 +159,12 @@ size_t SSFGObjGetSize(SSFGObj_t *gobj)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if field is set, else false.                                                     */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFGObjSetField(SSFGObj_t *gobj, void **dst, const void *src, size_t srcSize,
+static bool _SSFGObjSetField(SSFGObj_t *gobj, void **dst, const void *srcOpt, size_t srcSize,
                              SSFObjType_t srcType, bool isLabel)
 {
     SSF_REQUIRE(gobj != NULL);
     SSF_REQUIRE(dst != NULL);
-    SSF_REQUIRE((src != NULL) || ((src == NULL) && (srcSize == 0)));
+    SSF_REQUIRE((srcOpt != NULL) || ((srcOpt == NULL) && (srcSize == 0)));
     SSF_REQUIRE((srcType > SSF_OBJ_TYPE_MIN) && (srcType < SSF_OBJ_TYPE_MAX));
 
     /* Is field already allocated? */
@@ -179,7 +179,7 @@ static bool _SSFGObjSetField(SSFGObj_t *gobj, void **dst, const void *src, size_
     }
 
     /* Is there data to set to field? */
-    if (src != NULL)
+    if (srcOpt != NULL)
     {
         /* Yes, allocate room to set data to field */
         *dst = SSF_MALLOC(srcSize);
@@ -199,7 +199,7 @@ static bool _SSFGObjSetField(SSFGObj_t *gobj, void **dst, const void *src, size_
         _ssfgobjTotalAllocations++;
 #endif
         /* Copy data to field */
-        memcpy(*dst, src, srcSize);
+        memcpy(*dst, srcOpt, srcSize);
     }
 
     /* Conditionally save the user supplied data type */
@@ -212,15 +212,15 @@ static bool _SSFGObjSetField(SSFGObj_t *gobj, void **dst, const void *src, size_
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true of the object's label is set, else false.                                        */
+/* Returns true if the object's label is set, else false.                                        */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFGObjSetLabel(SSFGObj_t *gobj, SSFCStrIn_t labelCStr)
+bool SSFGObjSetLabel(SSFGObj_t *gobj, SSFCStrIn_t labelCStrOpt)
 {
     SSF_REQUIRE(gobj != NULL);
 
-    return _SSFGObjSetField(gobj, (void *)&gobj->labelCStr, labelCStr,
-                            labelCStr == NULL ? 0 : strlen(labelCStr) + 1, SSF_OBJ_TYPE_NONE,
-                            true);
+    return _SSFGObjSetField(gobj, (void *)&gobj->labelCStr, labelCStrOpt,
+                            (labelCStrOpt == NULL) ? 0 : (strlen(labelCStrOpt) + 1),
+                            SSF_OBJ_TYPE_NONE, true);
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -471,6 +471,8 @@ static uint16_t _SSFGObjSubtreeHeight(SSFGObj_t *gobj)
     SSFLLItem_t *item;
     uint16_t maxHeight = 0;
 
+    SSF_REQUIRE(gobj != NULL);
+
     item = SSF_LL_HEAD(&(gobj->children));
     while (item != NULL)
     {
@@ -487,6 +489,8 @@ static uint16_t _SSFGObjSubtreeHeight(SSFGObj_t *gobj)
 static void _SSFGObjRebaseDepth(SSFGObj_t *gobj, uint16_t newDepth)
 {
     SSFLLItem_t *item;
+
+    SSF_REQUIRE(gobj != NULL);
 
     gobj->depth = newDepth;
     item = SSF_LL_HEAD(&(gobj->children));
@@ -510,10 +514,11 @@ bool SSFGObjInsertChild(SSFGObj_t *gobjParent, SSFGObj_t *gobjChild)
     if (gobjParent->children.size == 0) return false;
     if (SSFLLIsFull(&(gobjParent->children))) return false;
 
-    /* Past the maximum supported tree depth? */
-    if (((size_t)gobjParent->depth + 1u + _SSFGObjSubtreeHeight(gobjChild)) >=
+    /* Would the child's subtree reach past the maximum supported tree depth? */
+    if ((((size_t)gobjParent->depth + 1u) + _SSFGObjSubtreeHeight(gobjChild)) >=
         SSF_GOBJ_CONFIG_MAX_IN_DEPTH)
     {
+        /* Yes, do not insert it */
         return false;
     }
 
@@ -569,9 +574,10 @@ static bool _SSFGObjFindPath(SSFGObj_t *gobjRoot, const SSFGPath_t *path, SSFGOb
     SSF_REQUIRE(gobjOut != NULL);
     SSF_REQUIRE(*gobjOut == NULL);
 
-    /* Return if recursing too deeply or path not set */
+    /* Is the recursion too deep or is the path at its end? */
     if ((depth >= SSF_GOBJ_CONFIG_MAX_IN_DEPTH) || (path[depth].kind == SSF_GPATH_END))
     {
+        /* Yes, nothing found */
         *gobjParentOut = NULL;
         return false;
     }
@@ -598,11 +604,12 @@ static bool _SSFGObjFindPath(SSFGObj_t *gobjRoot, const SSFGPath_t *path, SSFGOb
             {
                 SSFGObj_t *tmp = (SSFGObj_t *)item;
 
-                /* Yes, is the next path entry a member name equal to this child's label? */
+                /* Yes, no match unless the child's label equals the next path key */
                 isPathMatch = false;
+                /* Does the child have a label and is the next path entry a member name? */
                 if ((tmp->labelCStr != NULL) && (path[depth].kind == SSF_GPATH_KEY))
                 {
-                    /* Maybe, compare them */
+                    /* Yes, compare them */
                     len = SSF_MIN(strlen(tmp->labelCStr), strlen(path[depth].u.key));
                     isPathMatch = (strncmp(tmp->labelCStr, path[depth].u.key, len + 1) == 0);
                 }
@@ -651,9 +658,13 @@ bool SSFGObjFindPath(SSFGObj_t *gobjRoot, const SSFGPath_t *path, SSFGObj_t **go
     SSF_REQUIRE(gobjChildOut != NULL);
     SSF_REQUIRE(*gobjChildOut == NULL);
 
-    /* Return if root is not an object or an array type */
+    /* Is the root neither an object nor an array? */
     if ((gobjRoot->dataType != SSF_OBJ_TYPE_OBJECT) &&
-        (gobjRoot->dataType != SSF_OBJ_TYPE_ARRAY)) return false;
+        (gobjRoot->dataType != SSF_OBJ_TYPE_ARRAY))
+    {
+        /* Yes, it has no path to find */
+        return false;
+    }
 
     return _SSFGObjFindPath(gobjRoot, path, gobjParentOut, gobjChildOut, 0);
 }

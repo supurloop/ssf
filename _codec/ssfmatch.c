@@ -41,8 +41,10 @@ bool SSFMatchStrI(SSFCStrIn_t aStr, SSFCStrIn_t bStr)
     SSF_REQUIRE(aStr != NULL);
     SSF_REQUIRE(bStr != NULL);
 
+    /* Are both strings still unterminated? */
     while ((*aStr != '\0') && (*bStr != '\0'))
     {
+        /* Yes, compare this char pair */
         if (SSFStrCharToLower(*aStr) != SSFStrCharToLower(*bStr)) return false;
         aStr++;
         bStr++;
@@ -100,7 +102,7 @@ static bool _SSFMatchGlobInternal(SSFCStrIn_t patternStr, SSFCStrIn_t str, bool 
     SSF_REQUIRE(patternStr != NULL);
     SSF_REQUIRE(str != NULL);
 
-    /* Only the most recent '*' is ever retried, which is sufficient (AUDIT MATCH-2) */
+    /* Only the most recent '*' is ever retried, which is sufficient */
     while (*str != '\0')
     {
         /* Is the pattern at a run of '*' wildcards? */
@@ -209,15 +211,21 @@ bool SSFMatchPath(SSFCStrIn_t patternStr, SSFCStrIn_t pathStr, SSFMatchParam_t *
     /* Every failure path reports zero parameters */
     *numParamsOut = 0;
 
+    /* Are both pattern and path still unterminated? */
     while ((*pp != '\0') && (*rp != '\0'))
     {
-        /* Placeholder? */
+        /* Yes, placeholder? */
         if (*pp == '{')
         {
             /* Yes, find the end of its name */
             nameStart = pp + 1;
             nameEnd = nameStart;
-            while ((*nameEnd != '}') && (*nameEnd != '\0')) nameEnd++;
+            /* Is the placeholder name still open? */
+            while ((*nameEnd != '}') && (*nameEnd != '\0'))
+            {
+                /* Yes, extend it */
+                nameEnd++;
+            }
 
             /* Placeholder unterminated or named '{}'? */
             if ((*nameEnd != '}') || (nameEnd == nameStart))
@@ -229,14 +237,18 @@ bool SSFMatchPath(SSFCStrIn_t patternStr, SSFCStrIn_t pathStr, SSFMatchParam_t *
             /* Does the name hold a path delimiter or '{', the mark of a mistyped pattern? */
             if (_SSFMatchPathNameHasDelim(nameStart, nameEnd))
             {
-                /* Yes, malformed pattern (AUDIT MATCH-5) */
+                /* Yes, malformed pattern */
                 return false;
             }
             /* No */
 
-            /* The value runs to the next '/', end of path, query '?' or fragment '#' */
             valStart = rp;
-            while ((*rp != '/') && (*rp != '\0') && (*rp != '?') && (*rp != '#')) rp++;
+            /* Is this char still in the value (before '/', end of path, query or fragment)? */
+            while ((*rp != '/') && (*rp != '\0') && (*rp != '?') && (*rp != '#'))
+            {
+                /* Yes, extend the value */
+                rp++;
+            }
 
             /* Placeholder bound an empty segment? */
             if (rp == valStart)
@@ -257,9 +269,9 @@ bool SSFMatchPath(SSFCStrIn_t patternStr, SSFCStrIn_t pathStr, SSFMatchParam_t *
             paramIdx++;
             pp = nameEnd + 1;
         }
-        /* No, literal chars must match */
         else
         {
+            /* No, literal chars must match */
             if (*pp != *rp) return false;
             pp++;
             rp++;

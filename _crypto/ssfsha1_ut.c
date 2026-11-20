@@ -34,9 +34,7 @@
 #include "ssfassert.h"
 #include "ssfsha1.h"
 
-/* Cross-validate SHA-1 against OpenSSL on host builds where libcrypto is linked. Same gating */
-/* pattern as ssfaesctr_ut.c. When disabled (cross builds with -DSSF_CONFIG_HAVE_OPENSSL=0)   */
-/* the FIPS 180-1 / RFC 3174 KATs above are the load-bearing correctness coverage.            */
+/* Cross-validate SHA-1 against OpenSSL when libcrypto is linked; otherwise the KATs carry it */
 #if (SSF_CONFIG_HAVE_OPENSSL == 1) && (SSF_CONFIG_SHA1_UNIT_TEST == 1)
 #define SSF_SHA1_OSSL_VERIFY 1
 #else
@@ -53,10 +51,8 @@
 #if SSF_SHA1_OSSL_VERIFY == 1
 
 /* --------------------------------------------------------------------------------------------- */
-/* OpenSSL cross-check helpers.                                                                  */
+/* Computes the one-shot SHA-1 of in with OpenSSL EVP.                                           */
 /* --------------------------------------------------------------------------------------------- */
-
-/* One-shot SHA-1 via EVP. */
 static void _OSSLSHA1(const uint8_t *in, size_t inLen, uint8_t out[SSF_SHA1_HASH_SIZE])
 {
     EVP_MD_CTX *ctx = EVP_MD_CTX_new();
@@ -71,12 +67,7 @@ static void _OSSLSHA1(const uint8_t *in, size_t inLen, uint8_t out[SSF_SHA1_HASH
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Random fuzz across length x split combinations. Each cell:                                    */
-/*   - draws a fresh random message                                                              */
-/*   - hashes it via SSFSHA1 one-shot AND via SSFSHA1Begin/Update/End with a mid-message split   */
-/*   - compares both to OpenSSL's EVP_sha1                                                       */
-/* The lengths span the 64-byte block boundary and the 55/56-byte padding-overflow boundary --  */
-/* the bug class this catches that the fixed RFC 3174 KATs would miss.                           */
+/* Checks one-shot and split incremental SHA-1 against OpenSSL across block/padding boundaries.  */
 /* --------------------------------------------------------------------------------------------- */
 static void _VerifySHA1AgainstOpenSSLRandom(void)
 {
@@ -102,13 +93,12 @@ static void _VerifySHA1AgainstOpenSSLRandom(void)
             _OSSLSHA1(msg, len, hashOSSL);
             SSF_ASSERT(memcmp(hashSSF, hashOSSL, SSF_SHA1_HASH_SIZE) == 0);
 
-            /* Incremental: feed first half then second half. Catches a bug where Update fails */
-            /* to span the 64-byte block boundary correctly when called multiple times.        */
+            /* Incremental: two Updates must span the 64-byte block boundary correctly */
             SSFSHA1Begin(&ctx);
             if (len > 0u)
             {
                 SSFSHA1Update(&ctx, msg, (uint32_t)(len / 2u));
-                SSFSHA1Update(&ctx, &msg[len / 2u], (uint32_t)(len - len / 2u));
+                SSFSHA1Update(&ctx, &msg[len / 2u], (uint32_t)(len - (len / 2u)));
             }
             SSFSHA1End(&ctx, hashSSFInc);
             SSF_ASSERT(memcmp(hashSSFInc, hashOSSL, SSF_SHA1_HASH_SIZE) == 0);
@@ -118,7 +108,7 @@ static void _VerifySHA1AgainstOpenSSLRandom(void)
 #endif /* SSF_SHA1_OSSL_VERIFY */
 
 /* --------------------------------------------------------------------------------------------- */
-/* AUDIT SHA1-2: scrub-hook callback; counts calls and any buffer that is not all zero.         */
+/* AUDIT SHA1-2: scrub-hook callback; counts calls and any buffer that is not all zero.          */
 /* --------------------------------------------------------------------------------------------- */
 static uint32_t _scrubCalls;
 static uint32_t _scrubDirty;
@@ -139,13 +129,14 @@ static void _ScrubCheck(const void *buf, size_t len)
     }
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Performs unit test on ssfsha1 external interface.                                             */
+/* --------------------------------------------------------------------------------------------- */
 void SSFSHA1UnitTest(void)
 {
     uint8_t hash[SSF_SHA1_HASH_SIZE];
 
-    /* ---- (Hardening) SSFSHA1End wipes its context (matches the SHA-2 finalizers) ---- */
-    /* The context state + last partial block are secret-derived (e.g. the HMAC-SHA1 long-key      */
-    /* path hashes the key through it); End must scrub them before returning.                       */
+    /* ---- (Hardening) SSFSHA1End wipes its secret-derived context (as SHA-2 does) ---- */
     {
         SSFSHA1Context_t ctx;
         uint8_t out[SSF_SHA1_HASH_SIZE];
@@ -155,11 +146,10 @@ void SSFSHA1UnitTest(void)
         SSFSHA1Begin(&ctx);
         SSFSHA1Update(&ctx, (const uint8_t *)"secret-key-material", 19u);
         SSFSHA1End(&ctx, out);
-        SSF_ASSERT(memcmp(&ctx, zeros, sizeof(ctx)) == 0);   /* End scrubbed the context */
+        SSF_ASSERT(memcmp(&ctx, zeros, sizeof(ctx)) == 0);
     }
 
-    /* ---- Test vector 1: "abc" (RFC 3174) ---- */
-    /* SHA1("abc") = A9993E36 4706816A BA3E2571 7850C26C 9CD0D89D */
+    /* ---- Test vector 1 (RFC 3174): SHA1("abc") = A9993E36...9CD0D89D ---- */
     {
         static const uint8_t expected[SSF_SHA1_HASH_SIZE] = {
             0xA9u, 0x99u, 0x3Eu, 0x36u, 0x47u, 0x06u, 0x81u, 0x6Au,
@@ -171,8 +161,7 @@ void SSFSHA1UnitTest(void)
         SSF_ASSERT(memcmp(hash, expected, SSF_SHA1_HASH_SIZE) == 0);
     }
 
-    /* ---- Test vector 2: "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq" ---- */
-    /* SHA1 = 84983E44 1C3BD26E BAAE4AA1 F95129E5 E54670F1 */
+    /* ---- Test vector 2 (RFC 3174): 56-byte "abcdbcde...mnopnopq" = 84983E44...E54670F1 ---- */
     {
         static const char *input =
             "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq";
@@ -186,8 +175,7 @@ void SSFSHA1UnitTest(void)
         SSF_ASSERT(memcmp(hash, expected, SSF_SHA1_HASH_SIZE) == 0);
     }
 
-    /* ---- Test vector 3: empty string ---- */
-    /* SHA1("") = DA39A3EE 5E6B4B0D 3255BFEF 95601890 AFD80709 */
+    /* ---- Test vector 3: SHA1("") = DA39A3EE 5E6B4B0D 3255BFEF 95601890 AFD80709 ---- */
     {
         static const uint8_t expected[SSF_SHA1_HASH_SIZE] = {
             0xDAu, 0x39u, 0xA3u, 0xEEu, 0x5Eu, 0x6Bu, 0x4Bu, 0x0Du,
@@ -199,8 +187,7 @@ void SSFSHA1UnitTest(void)
         SSF_ASSERT(memcmp(hash, expected, SSF_SHA1_HASH_SIZE) == 0);
     }
 
-    /* ---- Test vector 4: "a" repeated 1,000,000 times ---- */
-    /* SHA1 = 34AA973C D4C4DAA4 F61EEB2B DBAD2731 6534016F */
+    /* ---- Test vector 4: "a" x 1,000,000 = 34AA973C D4C4DAA4 F61EEB2B DBAD2731 6534016F ---- */
     {
         static const uint8_t expected[SSF_SHA1_HASH_SIZE] = {
             0x34u, 0xAAu, 0x97u, 0x3Cu, 0xD4u, 0xC4u, 0xDAu, 0xA4u,
@@ -221,9 +208,7 @@ void SSFSHA1UnitTest(void)
         SSF_ASSERT(memcmp(hash, expected, SSF_SHA1_HASH_SIZE) == 0);
     }
 
-    /* ---- Test vector 5: WebSocket accept key computation (RFC 6455 section 4.2.2) ---- */
-    /* Key: "dGhlIHNhbXBsZSBub25jZQ==" + GUID "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"       */
-    /* SHA1 = B3 7A 4F 2C C0 62 4F 16 90 F6 46 06 CF 38 59 45 B2 BE C4 EA               */
+    /* ---- Test vector 5: WebSocket accept key + GUID (RFC 6455 section 4.2.2) ---- */
     {
         static const char *wsInput =
             "dGhlIHNhbXBsZSBub25jZQ==258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
@@ -334,7 +319,8 @@ void SSFSHA1UnitTest(void)
         SSFSHA1Begin(&ctx);
         ctx.totalLen = (((uint64_t)1u) << 61) - 2u;
         SSF_ASSERT_TEST(SSFSHA1Update(&ctx, (const uint8_t *)"abc", 3u));
-        SSFSHA1Update(&ctx, (const uint8_t *)"a", 1u);       /* reaches 2^61 - 1: allowed */
+        SSFSHA1Update(&ctx, (const uint8_t *)"a", 1u); /* reaches 2^61 - 1: allowed */
+
     }
 
 #if SSF_SHA1_OSSL_VERIFY == 1

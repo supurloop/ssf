@@ -45,6 +45,8 @@ whenever the protocol you are implementing allows a choice of hash.
 - `SSFSHA1Context_t` should be treated as opaque; do not access its members directly.
 - The one-shot `SSFSHA1()` function and `SSFSHA1Update()` accept `in == NULL` only when
   `inLen == 0`. All other pointer parameters must be non-`NULL`.
+- DBC exception (timing-critical): `_SSFSHA1ProcessBlock` run per block or per arithmetic step
+  and carry no parameter asserts; their callers validate every argument.
 
 <a id="configuration"></a>
 

@@ -43,7 +43,7 @@
 /* --------------------------------------------------------------------------------------------- */
 #define SSF_PRNG_MAGIC (0x584C5845)
 
-/* AES block cipher matching the effective key size (AUDIT KEYGEN-1). */
+/* AES block cipher matching the effective key size. */
 #if SSF_PRNG_KEY_BITS == 256u
 #define SSF_PRNG_AES_BLOCK_ENCRYPT SSFAES256BlockEncrypt
 #else
@@ -60,7 +60,7 @@ void SSFPRNGInitContext(SSFPRNGContext_t *context, const uint8_t *entropy, size_
     SSF_REQUIRE(entropyLen == SSF_PRNG_ENTROPY_SIZE);
 
     memcpy(context->entropy, entropy, SSF_PRNG_ENTROPY_SIZE);
-    /* The counter starts at zero as documented (AUDIT PRNG-1) */
+    /* The counter starts at zero as documented */
     context->count = 0u;
     context->magic = SSF_PRNG_MAGIC;
 }
@@ -89,10 +89,9 @@ void SSFPRNGGetRandom(SSFPRNGContext_t *context, uint8_t *random, size_t randomS
     SSF_REQUIRE(context != NULL);
     SSF_REQUIRE(random != NULL);
     SSF_REQUIRE((randomSize > 0) && (randomSize <= SSF_PRNG_RANDOM_MAX_SIZE));
-    SSF_ASSERT(context->magic == SSF_PRNG_MAGIC);
+    SSF_REQUIRE(context->magic == SSF_PRNG_MAGIC);
 
-    /* Output block: ct = AES_key(count || zeros) (NIST SP 800-90A CTR_DRBG-style input shape). */
-    /* count is written big-endian so the stream is identical on every host (AUDIT PRNG-2).    */
+    /* Output block: ct = AES_key(BE count || zeros), identical on every host. */
     SSF_PUTU64BE(pt, context->count);
     memset(&pt[sizeof(uint64_t)], 0, SSF_AES_BLOCK_SIZE - sizeof(uint64_t));
     SSF_PRNG_AES_BLOCK_ENCRYPT(pt, sizeof(pt), ct, sizeof(ct), context->entropy,
@@ -111,8 +110,7 @@ void SSFPRNGGetRandom(SSFPRNGContext_t *context, uint8_t *random, size_t randomS
     memcpy(context->entropy, newKey, SSF_PRNG_ENTROPY_SIZE);
     context->count++;
 
-    /* Scrub stack secrets before return: pt encodes the count, ct holds output/unused keystream, */
-    /* and newKey is a copy of the freshly installed key.                                          */
+    /* Scrub stack secrets: count block, output keystream and the copy of the new key. */
     SSFCryptSecureZero(pt, sizeof(pt));
     SSFCryptSecureZero(ct, sizeof(ct));
     SSFCryptSecureZero(newKey, sizeof(newKey));

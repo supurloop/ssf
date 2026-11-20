@@ -89,6 +89,8 @@ with those standards is required and/or when a tag length shorter than 16 bytes 
 - The ciphertext output is exactly `ptLen` bytes; the tag is returned separately through the
   `tag` parameter rather than appended. Serialize them in whatever order your wire format
   requires at the call site.
+- DBC exception (timing-critical): `_SSFAESCCMXorBlock` and `_SSFAESCCMEncBlock` run per block
+  or per arithmetic step and carry no parameter asserts; their callers validate every argument.
 
 <a id="configuration"></a>
 

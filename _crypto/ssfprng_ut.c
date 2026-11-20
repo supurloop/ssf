@@ -145,11 +145,7 @@ void SSFPRNGUnitTest(void)
         SSFPRNGDeInitContext(&ctx);
     }
 
-    /* (Hardening) Backtracking resistance: GetRandom performs a CTR_DRBG-style Update that
-     * re-keys the context, destroying the AES key that produced the returned bytes. A state
-     * compromise after the call therefore cannot recover previously returned output. Observe the
-     * rotation directly -- right after init the context key equals the seed; after one draw it
-     * must differ. (The first output block stays deterministic for a given seed; covered above.) */
+    /* (Hardening) Backtracking resistance: GetRandom re-keys, so the key changes per draw. */
     {
         SSFPRNGContext_t ctx;
         uint8_t seedKey[SSF_PRNG_ENTROPY_SIZE] = {0, 1, 2, 3, 4, 5, 6, 7,
@@ -176,14 +172,7 @@ void SSFPRNGUnitTest(void)
         SSFPRNGDeInitContext(&ctx);
     }
 
-    /* ---- AUDIT PRNG-1/PRNG-2/KEYGEN-1: counter start, encoding and key size ---- */
-    /* Init/ReInit reset the counter to zero (PRNG-1), the counter enters the AES input big-  */
-    /* endian (PRNG-2), and the key is AES-256 whenever P-384 or RSA-4096 is enabled or       */
-    /* SSF_PRNG_CONFIG_KEY_BITS asks for it, else AES-128 (KEYGEN-1). Seed byte i = i. Known  */
-    /* answers computed independently with `openssl enc -aes-{128,256}-ecb -nopad`:           */
-    /*   out1 = AES(K0, 0^16)                                  (count 0, output block)       */
-    /*   K1   = AES(K0, 00*8 || 01 || 00*7) [|| AES(K0, 00*8 || 02 || 00*7) for AES-256]      */
-    /*   out2 = AES(K1, 00*7 || 01 || 00*8)                    (count 1 big-endian)          */
+    /* AUDIT PRNG-1/PRNG-2/KEYGEN-1: count from 0, BE count, AES key size (KATs: openssl enc). */
     {
 #if (SSF_EC_CONFIG_ENABLE_P384 == 1) || (SSF_RSA_CONFIG_ENABLE_4096 == 1) || \
     (SSF_PRNG_CONFIG_KEY_BITS == 256)
@@ -238,12 +227,7 @@ void SSFPRNGUnitTest(void)
         SSFPRNGDeInitContext(&ctx);
     }
 
-    /* Defense-in-depth regression: GetRandom now scrubs its internal pt and ct stack buffers
-     * before return. The scrub is not externally observable through the C API, but it must
-     * not break the deterministic-output contract -- a fresh ctx with the same entropy must
-     * still produce the same first-call output. This catches any regression that would
-     * accidentally damage the live state during the scrub (e.g., scrubbing context->entropy
-     * by mistake). */
+    /* The stack scrub in GetRandom must not disturb deterministic output for the same seed. */
     {
         SSFPRNGContext_t ctxA;
         SSFPRNGContext_t ctxB;
@@ -253,9 +237,7 @@ void SSFPRNGUnitTest(void)
         SSFPRNGInitContext(&ctxA, entropy, sizeof(entropy));
         SSFPRNGGetRandom(&ctxA, rA, sizeof(rA));
 
-        /* Run a few extra calls to exercise the scrub path multiple times before the    */
-        /* second context's first call. If the scrub were corrupting state, ctxB's first */
-        /* call would diverge from ctxA's first call.                                    */
+        /* Extra calls exercise the scrub path before ctxB's first call is compared. */
         {
             uint8_t scratch[SSF_PRNG_RANDOM_MAX_SIZE];
             SSFPRNGGetRandom(&ctxA, scratch, sizeof(scratch));

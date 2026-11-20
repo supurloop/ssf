@@ -65,9 +65,12 @@ static const char _ssfIni6[] = "name=value";
 static const char _ssfIni7[] = "name=value1\nname=value2\n";
 static const char _ssfIni8[] = " \t name\t \t=\t\tvalue1  \n   name\t\t\t=value2\r\n\r\n";
 static const char _ssfIni9[] = ";comment \r[section]\nname=value1\rname=value2";
-static const char _ssfIni10[] = ";comment \r\t [ \tsection\t ]#111\n name\t=value1\r\nname=value2\r";
-static const char _ssfIni11[] = ";comment \r\t [ \tsection1\t ]#111\n name\t=value1\r\nname=value2\r[section2]";
-static const char _ssfIni12[] = ";comment \r\t [ \tsection1\t ]#111\n name\t=value1\r\nname=value2\r[section2]\nname=\n\rname2=0";
+static const char _ssfIni10[] = ";comment \r\t [ \tsection\t ]#111\n name\t=value1\r\n"
+                                "name=value2\r";
+static const char _ssfIni11[] = ";comment \r\t [ \tsection1\t ]#111\n name\t=value1\r\n"
+                                "name=value2\r[section2]";
+static const char _ssfIni12[] = ";comment \r\t [ \tsection1\t ]#111\n name\t=value1\r\n"
+                                "name=value2\r[section2]\nname=\n\rname2=0";
 static const char _ssfIni13[] = "name=0";
 static const char _ssfIni14[] = "name=1";
 static const char _ssfIni15[] = "name= yes\n";
@@ -90,7 +93,11 @@ static const char _ssfIni31[] = "[section]\nname=1234567890\r\n";
 static const char _ssfIni32[] = "[section]\nname =-1234567890\t\r\n";
 static const char _ssfIni33[] = "[section]\n\tname =-1234567890 s\r\n";
 static const char _ssfIni34[] = "[section]\nname -1234567890\t ;\r\n";
-static const char _ssfIni35[] = "\t [\t section \" ] \t 11\nname=-1234567890\n[section2 2] \n \tname\t=\tvalue\t\n[section3]\n\rname=value3\rname2=1234567890-=!@#$%^&*()_+qwertyuiop[]\asdfghjkl;'zxcvbnm,./`~QWERTYUIOP{}|ASDFGHJKL:\"ZXCVBNM<>? \n[section2]\nname=value2a\r \r\n";
+static const char _ssfIni35[] = "\t [\t section \" ] \t 11\nname=-1234567890\n[section2 2] \n \t"
+                                "name\t=\tvalue\t\n[section3]\n\rname=value3\r"
+                                "name2=1234567890-=!@#$%^&*()_+qwertyuiop[]\a"
+                                "sdfghjkl;'zxcvbnm,./`~QWERTYUIOP{}|ASDFGHJKL:\"ZXCVBNM<>? \n"
+                                "[section2]\nname=value2a\r \r\n";
 static const char _ssfIni36[] = "name=";
 static const char _ssfIni37[] = "name=\t\t\t   \t \t\t ";
 static const char _ssfIni38[] = "\r\r\n  name\t = \t\t\t   \t \t\t \r\n\r\n\n";
@@ -100,250 +107,259 @@ static const char _ssfIni41[] = "[section]\n\r\r\n  name\t = \t\t\t   \t \t\t \r
 
 SSFINIParserUnitTest_t _ssfINIParserUT[] =
 {
-    {_ssfIni1,   NULL,          "name",   0,     true,         false,    false,    "",      false,  false, false,  0},
-    {_ssfIni1,   "section",     "name",   0,     false,        false,    false,    "",      false,  false, false,  0},
-    {_ssfIni2,   NULL,          "name",   0,     true,         false,    false,    "",      false,  false, false,  0},
-    {_ssfIni2,   "section",     "name",   0,     false,        false,    false,    "",      false,  false, false,  0},
-    {_ssfIni3,   NULL,          "name",   0,     true,         false,    false,    "",      false,  false, false,  0},
-    {_ssfIni3,   "section",     "name",   0,     false,        false,    false,    "",      false,  false, false,  0},
-    {_ssfIni4,   NULL,          "name",   0,     true,         false,    false,    "",      false,  false, false,  0},
-    {_ssfIni4,   "section",     "name",   0,     false,        false,    false,    "",      false,  false, false,  0},
-    {_ssfIni5,   NULL,          "name",   0,     true,         false,    false,    "",      false,  false, false,  0},
-    {_ssfIni5,   "section",     "name",   0,     false,        false,    false,    "",      false,  false, false,  0},
+    {_ssfIni1, NULL, "name", 0, true, false, false, "", false, false, false, 0},
+    {_ssfIni1, "section", "name", 0, false, false, false, "", false, false, false, 0},
+    {_ssfIni2, NULL, "name", 0, true, false, false, "", false, false, false, 0},
+    {_ssfIni2, "section", "name", 0, false, false, false, "", false, false, false, 0},
+    {_ssfIni3, NULL, "name", 0, true, false, false, "", false, false, false, 0},
+    {_ssfIni3, "section", "name", 0, false, false, false, "", false, false, false, 0},
+    {_ssfIni4, NULL, "name", 0, true, false, false, "", false, false, false, 0},
+    {_ssfIni4, "section", "name", 0, false, false, false, "", false, false, false, 0},
+    {_ssfIni5, NULL, "name", 0, true, false, false, "", false, false, false, 0},
+    {_ssfIni5, "section", "name", 0, false, false, false, "", false, false, false, 0},
 
-    {_ssfIni6,   NULL,          "name",   0,     true,         true,     true,     "value", false,  false, false,  0},
-    {_ssfIni6,   NULL,          "name1",  0,     true,         false,    false,    "",      false,  false, false,  0},
-    {_ssfIni6,   NULL,          "name",   1,     true,         false,    false,    "",      false,  false, false,  0},
-    {_ssfIni6,   NULL,          "name",   255,   true,         false,    false,    "",      false,  false, false,  0},
-    {_ssfIni6,   "section",     "name",   0,     false,        false,    false,    "",      false,  false, false,  0},
-    {_ssfIni6,   "section",     "name",   1,     false,        false,    false,    "",      false,  false, false,  0},
-    {_ssfIni6,   "section",     "name",   255,   false,        false,    false,    "",      false,  false, false,  0},
+    {_ssfIni6, NULL, "name", 0, true, true, true, "value", false, false, false, 0},
+    {_ssfIni6, NULL, "name1", 0, true, false, false, "", false, false, false, 0},
+    {_ssfIni6, NULL, "name", 1, true, false, false, "", false, false, false, 0},
+    {_ssfIni6, NULL, "name", 255, true, false, false, "", false, false, false, 0},
+    {_ssfIni6, "section", "name", 0, false, false, false, "", false, false, false, 0},
+    {_ssfIni6, "section", "name", 1, false, false, false, "", false, false, false, 0},
+    {_ssfIni6, "section", "name", 255, false, false, false, "", false, false, false, 0},
 
-    {_ssfIni7,   NULL,          "name",   0,     true,         true,     true,     "value1",false,  false, false,  0},
-    {_ssfIni7,   NULL,          "name1",  0,     true,         false,    false,    "",      false,  false, false,  0},
-    {_ssfIni7,   NULL,          "name",   1,     true,         true,     true,     "value2",false,  false, false,  0},
-    {_ssfIni7,   NULL,          "name",   255,   true,         false,    false,    "",      false,  false, false,  0},
-    {_ssfIni7,   "section",     "name",   0,     false,        false,    false,    "",      false,  false, false,  0},
-    {_ssfIni7,   "section",     "name",   1,     false,        false,    false,    "",      false,  false, false,  0},
-    {_ssfIni7,   "section",     "name",   255,   false,        false,    false,    "",      false,  false, false,  0},
+    {_ssfIni7, NULL, "name", 0, true, true, true, "value1", false, false, false, 0},
+    {_ssfIni7, NULL, "name1", 0, true, false, false, "", false, false, false, 0},
+    {_ssfIni7, NULL, "name", 1, true, true, true, "value2", false, false, false, 0},
+    {_ssfIni7, NULL, "name", 255, true, false, false, "", false, false, false, 0},
+    {_ssfIni7, "section", "name", 0, false, false, false, "", false, false, false, 0},
+    {_ssfIni7, "section", "name", 1, false, false, false, "", false, false, false, 0},
+    {_ssfIni7, "section", "name", 255, false, false, false, "", false, false, false, 0},
 
-    {_ssfIni8,   NULL,          "name",   0,     true,         true,     true,     "value1",false,  false, false,  0},
-    {_ssfIni8,   NULL,          "name1",  0,     true,         false,    false,    "",      false,  false, false,  0},
-    {_ssfIni8,   NULL,          "name",   1,     true,         true,     true,     "value2",false,  false, false,  0},
-    {_ssfIni8,   NULL,          "name",   255,   true,         false,    false,    "",      false,  false, false,  0},
-    {_ssfIni8,   "section",     "name",   0,     false,        false,    false,    "",      false,  false, false,  0},
-    {_ssfIni8,   "section",     "name",   1,     false,        false,    false,    "",      false,  false, false,  0},
-    {_ssfIni8,   "section",     "name",   255,   false,        false,    false,    "",      false,  false, false,  0},
+    {_ssfIni8, NULL, "name", 0, true, true, true, "value1", false, false, false, 0},
+    {_ssfIni8, NULL, "name1", 0, true, false, false, "", false, false, false, 0},
+    {_ssfIni8, NULL, "name", 1, true, true, true, "value2", false, false, false, 0},
+    {_ssfIni8, NULL, "name", 255, true, false, false, "", false, false, false, 0},
+    {_ssfIni8, "section", "name", 0, false, false, false, "", false, false, false, 0},
+    {_ssfIni8, "section", "name", 1, false, false, false, "", false, false, false, 0},
+    {_ssfIni8, "section", "name", 255, false, false, false, "", false, false, false, 0},
 
-    {_ssfIni9,   NULL,          "name",   0,     true,         false,    false,    "",      false,  false, false,  0},
-    {_ssfIni9,   NULL,          "name1",  0,     true,         false,    false,    "",      false,  false, false,  0},
-    {_ssfIni9,   NULL,          "name",   1,     true,         false,    false,    "",      false,  false, false,  0},
-    {_ssfIni9,   NULL,          "name",   255,   true,         false,    false,    "",      false,  false, false,  0},
-    {_ssfIni9,   "section",     "name",   0,     true,         true,     true,     "value1",false,  false, false,  0},
-    {_ssfIni9,   "section",     "name",   1,     true,         true,     true,     "value2",false,  false, false,  0},
-    {_ssfIni9,   "section",     "name",   2,     true,         false,    false,    "",      false,  false, false,  0},
-    {_ssfIni9,   "section",     "name",   255,   true,         false,    false,    "",      false,  false, false,  0},
+    {_ssfIni9, NULL, "name", 0, true, false, false, "", false, false, false, 0},
+    {_ssfIni9, NULL, "name1", 0, true, false, false, "", false, false, false, 0},
+    {_ssfIni9, NULL, "name", 1, true, false, false, "", false, false, false, 0},
+    {_ssfIni9, NULL, "name", 255, true, false, false, "", false, false, false, 0},
+    {_ssfIni9, "section", "name", 0, true, true, true, "value1", false, false, false, 0},
+    {_ssfIni9, "section", "name", 1, true, true, true, "value2", false, false, false, 0},
+    {_ssfIni9, "section", "name", 2, true, false, false, "", false, false, false, 0},
+    {_ssfIni9, "section", "name", 255, true, false, false, "", false, false, false, 0},
 
-    {_ssfIni10,  NULL,          "name",   0,     true,         false,    false,    "",      false,  false, false,  0},
-    {_ssfIni10,  NULL,          "name1",  0,     true,         false,    false,    "",      false,  false, false,  0},
-    {_ssfIni10,  NULL,          "name",   1,     true,         false,    false,    "",      false,  false, false,  0},
-    {_ssfIni10,  NULL,          "name",   255,   true,         false,    false,    "",      false,  false, false,  0},
-    {_ssfIni10,  "section",     "name",   0,     true,         true,     true,     "value1",false,  false, false,  0},
-    {_ssfIni10,  "section",     "name",   1,     true,         true,     true,     "value2",false,  false, false,  0},
-    {_ssfIni10,  "section",     "name",   2,     true,         false,    false,    "",      false,  false, false,  0},
-    {_ssfIni10,  "section",     "name",   255,   true,         false,    false,    "",      false,  false, false,  0},
+    {_ssfIni10, NULL, "name", 0, true, false, false, "", false, false, false, 0},
+    {_ssfIni10, NULL, "name1", 0, true, false, false, "", false, false, false, 0},
+    {_ssfIni10, NULL, "name", 1, true, false, false, "", false, false, false, 0},
+    {_ssfIni10, NULL, "name", 255, true, false, false, "", false, false, false, 0},
+    {_ssfIni10, "section", "name", 0, true, true, true, "value1", false, false, false, 0},
+    {_ssfIni10, "section", "name", 1, true, true, true, "value2", false, false, false, 0},
+    {_ssfIni10, "section", "name", 2, true, false, false, "", false, false, false, 0},
+    {_ssfIni10, "section", "name", 255, true, false, false, "", false, false, false, 0},
 
-    {_ssfIni11,  NULL,          "name",   0,     true,         false,    false,    "",      false,  false, false,  0},
-    {_ssfIni11,  NULL,          "name1",  0,     true,         false,    false,    "",      false,  false, false,  0},
-    {_ssfIni11,  NULL,          "name",   1,     true,         false,    false,    "",      false,  false, false,  0},
-    {_ssfIni11,  NULL,          "name",   255,   true,         false,    false,    "",      false,  false, false,  0},
-    {_ssfIni11,  "section1",    "name",   0,     true,         true,     true,     "value1",false,  false, false,  0},
-    {_ssfIni11,  "section1",    "name",   1,     true,         true,     true,     "value2",false,  false, false,  0},
-    {_ssfIni11,  "section1",    "name",   2,     true,         false,    false,    "",      false,  false, false,  0},
-    {_ssfIni11,  "section1",    "name",   255,   true,         false,    false,    "",      false,  false, false,  0},
-    {_ssfIni11,  "section2",    "name",   255,   true,         false,    false,    "",      false,  false, false,  0},
-    {_ssfIni11,  "section3",    "name",   0,     false,        false,    false,    "",      false,  false, false,  0},
+    {_ssfIni11, NULL, "name", 0, true, false, false, "", false, false, false, 0},
+    {_ssfIni11, NULL, "name1", 0, true, false, false, "", false, false, false, 0},
+    {_ssfIni11, NULL, "name", 1, true, false, false, "", false, false, false, 0},
+    {_ssfIni11, NULL, "name", 255, true, false, false, "", false, false, false, 0},
+    {_ssfIni11, "section1", "name", 0, true, true, true, "value1", false, false, false, 0},
+    {_ssfIni11, "section1", "name", 1, true, true, true, "value2", false, false, false, 0},
+    {_ssfIni11, "section1", "name", 2, true, false, false, "", false, false, false, 0},
+    {_ssfIni11, "section1", "name", 255, true, false, false, "", false, false, false, 0},
+    {_ssfIni11, "section2", "name", 255, true, false, false, "", false, false, false, 0},
+    {_ssfIni11, "section3", "name", 0, false, false, false, "", false, false, false, 0},
 
-    {_ssfIni12,  NULL,          "name",   0,     true,         false,    false,    "",      false,  false, false,  0},
-    {_ssfIni12,  NULL,          "name1",  0,     true,         false,    false,    "",      false,  false, false,  0},
-    {_ssfIni12,  NULL,          "name",   1,     true,         false,    false,    "",      false,  false, false,  0},
-    {_ssfIni12,  NULL,          "name",   255,   true,         false,    false,    "",      false,  false, false,  0},
-    {_ssfIni12,  "section1",    "name",   0,     true,         true,     true,     "value1",false,  false, false,  0},
-    {_ssfIni12,  "section1",    "name",   1,     true,         true,     true,     "value2",false,  false, false,  0},
-    {_ssfIni12,  "section1",    "name",   2,     true,         false,    false,    "",      false,  false, false,  0},
-    {_ssfIni12,  "section1",    "name",   255,   true,         false,    false,    "",      false,  false, false,  0},
-    {_ssfIni12,  "section2",    "name",   0,     true,         true,     true,     "",      false,  false, false,  0},
-    {_ssfIni12,  "section2",    "name",   255,   true,         false,    false,    "",      false,  false, false,  0},
-    {_ssfIni12,  "section2",    "name2",  0,     true,         true,     true,     "0",     true,   false, true,   0},
-    {_ssfIni12,  "section3",    "name",   0,     false,        false,    false,    "",      false,  false, false,  0},
+    {_ssfIni12, NULL, "name", 0, true, false, false, "", false, false, false, 0},
+    {_ssfIni12, NULL, "name1", 0, true, false, false, "", false, false, false, 0},
+    {_ssfIni12, NULL, "name", 1, true, false, false, "", false, false, false, 0},
+    {_ssfIni12, NULL, "name", 255, true, false, false, "", false, false, false, 0},
+    {_ssfIni12, "section1", "name", 0, true, true, true, "value1", false, false, false, 0},
+    {_ssfIni12, "section1", "name", 1, true, true, true, "value2", false, false, false, 0},
+    {_ssfIni12, "section1", "name", 2, true, false, false, "", false, false, false, 0},
+    {_ssfIni12, "section1", "name", 255, true, false, false, "", false, false, false, 0},
+    {_ssfIni12, "section2", "name", 0, true, true, true, "", false, false, false, 0},
+    {_ssfIni12, "section2", "name", 255, true, false, false, "", false, false, false, 0},
+    {_ssfIni12, "section2", "name2", 0, true, true, true, "0", true, false, true, 0},
+    {_ssfIni12, "section3", "name", 0, false, false, false, "", false, false, false, 0},
 
-    {_ssfIni13,  NULL,          "name",   0,     true,         true,     true,     "0",     true,   false, true,   0},
-    {_ssfIni13,  NULL,          "name1",  0,     true,         false,    false,    "",      false,  false, false,  0},
-    {_ssfIni13,  NULL,          "name",   1,     true,         false,    false,    "",      false,  false, false,  0},
-    {_ssfIni13,  NULL,          "name",   255,   true,         false,    false,    "",      false,  false, false,  0},
-    {_ssfIni13,  "section",     "name",   0,     false,        false,    false,    "",      false,  false, false,  0},
+    {_ssfIni13, NULL, "name", 0, true, true, true, "0", true, false, true, 0},
+    {_ssfIni13, NULL, "name1", 0, true, false, false, "", false, false, false, 0},
+    {_ssfIni13, NULL, "name", 1, true, false, false, "", false, false, false, 0},
+    {_ssfIni13, NULL, "name", 255, true, false, false, "", false, false, false, 0},
+    {_ssfIni13, "section", "name", 0, false, false, false, "", false, false, false, 0},
 
-    {_ssfIni14,  NULL,          "name",   0,     true,         true,     true,     "1",     true,   true,  true,   1},
-    {_ssfIni14,  NULL,          "name1",  0,     true,         false,    false,    "",      false,  false, false,  0},
-    {_ssfIni14,  NULL,          "name",   1,     true,         false,    false,    "",      false,  false, false,  0},
-    {_ssfIni14,  NULL,          "name",   255,   true,         false,    false,    "",      false,  false, false,  0},
-    {_ssfIni14,  "section",     "name",   0,     false,        false,    false,    "",      false,  false, false,  0},
+    {_ssfIni14, NULL, "name", 0, true, true, true, "1", true, true, true, 1},
+    {_ssfIni14, NULL, "name1", 0, true, false, false, "", false, false, false, 0},
+    {_ssfIni14, NULL, "name", 1, true, false, false, "", false, false, false, 0},
+    {_ssfIni14, NULL, "name", 255, true, false, false, "", false, false, false, 0},
+    {_ssfIni14, "section", "name", 0, false, false, false, "", false, false, false, 0},
 
-    { _ssfIni15,  NULL,          "name",   0,     true,         true,     true,     "yes",   true,   true,  false,  0 },
-    { _ssfIni15,  NULL,          "name1",  0,     true,         false,    false,    "",      false,  false, false,  0 },
-    { _ssfIni15,  NULL,          "name",   1,     true,         false,    false,    "",      false,  false, false,  0 },
-    { _ssfIni15,  NULL,          "name",   255,   true,         false,    false,    "",      false,  false, false,  0 },
-    { _ssfIni15,  "section",     "name",   0,     false,        false,    false,    "",      false,  false, false,  0 },
+    {_ssfIni15, NULL, "name", 0, true, true, true, "yes", true, true, false, 0},
+    {_ssfIni15, NULL, "name1", 0, true, false, false, "", false, false, false, 0},
+    {_ssfIni15, NULL, "name", 1, true, false, false, "", false, false, false, 0},
+    {_ssfIni15, NULL, "name", 255, true, false, false, "", false, false, false, 0},
+    {_ssfIni15, "section", "name", 0, false, false, false, "", false, false, false, 0},
 
-    { _ssfIni16,  NULL,          "name",   0,     true,         true,     true,    "no",     true,   false, false,  0 },
-    { _ssfIni16,  NULL,          "name1",  0,     true,         false,    false,    "",      false,  false, false,  0 },
-    { _ssfIni16,  NULL,          "name",   1,     true,         false,    false,    "",      false,  false, false,  0 },
-    { _ssfIni16,  NULL,          "name",   255,   true,         false,    false,    "",      false,  false, false,  0 },
-    { _ssfIni16,  "section",     "name",   0,     false,        false,    false,    "",      false,  false, false,  0 },
+    {_ssfIni16, NULL, "name", 0, true, true, true, "no", true, false, false, 0},
+    {_ssfIni16, NULL, "name1", 0, true, false, false, "", false, false, false, 0},
+    {_ssfIni16, NULL, "name", 1, true, false, false, "", false, false, false, 0},
+    {_ssfIni16, NULL, "name", 255, true, false, false, "", false, false, false, 0},
+    {_ssfIni16, "section", "name", 0, false, false, false, "", false, false, false, 0},
 
-    { _ssfIni17,  NULL,          "name",   0,     true,         true,     true,    "on",     true,   true,  false,  0 },
-    { _ssfIni17,  NULL,          "name1",  0,     true,         false,    false,    "",      false,  false, false,  0 },
-    { _ssfIni17,  NULL,          "name",   1,     true,         false,    false,    "",      false,  false, false,  0 },
-    { _ssfIni17,  NULL,          "name",   255,   true,         false,    false,    "",      false,  false, false,  0 },
-    { _ssfIni17,  "section",     "name",   0,     false,        false,    false,    "",      false,  false, false,  0 },
+    {_ssfIni17, NULL, "name", 0, true, true, true, "on", true, true, false, 0},
+    {_ssfIni17, NULL, "name1", 0, true, false, false, "", false, false, false, 0},
+    {_ssfIni17, NULL, "name", 1, true, false, false, "", false, false, false, 0},
+    {_ssfIni17, NULL, "name", 255, true, false, false, "", false, false, false, 0},
+    {_ssfIni17, "section", "name", 0, false, false, false, "", false, false, false, 0},
 
-    { _ssfIni18,  NULL,          "name",   0,     true,         true,     true,    "off",    true,   false, false,  0 },
-    { _ssfIni18,  NULL,          "Name",   0,     true,         false,    false,    "",      false,  false, false,  0 },
-    { _ssfIni18,  NULL,          "NAME",   0,     true,         false,    false,    "",      false,  false, false,  0 },
-    { _ssfIni18,  NULL,          "name1",  0,     true,         false,    false,    "",      false,  false, false,  0 },
-    { _ssfIni18,  NULL,          "name",   1,     true,         false,    false,    "",      false,  false, false,  0 },
-    { _ssfIni18,  NULL,          "name",   255,   true,         false,    false,    "",      false,  false, false,  0 },
-    { _ssfIni18,  "section",     "name",   0,     false,        false,    false,    "",      false,  false, false,  0 },
+    {_ssfIni18, NULL, "name", 0, true, true, true, "off", true, false, false, 0},
+    {_ssfIni18, NULL, "Name", 0, true, false, false, "", false, false, false, 0},
+    {_ssfIni18, NULL, "NAME", 0, true, false, false, "", false, false, false, 0},
+    {_ssfIni18, NULL, "name1", 0, true, false, false, "", false, false, false, 0},
+    {_ssfIni18, NULL, "name", 1, true, false, false, "", false, false, false, 0},
+    {_ssfIni18, NULL, "name", 255, true, false, false, "", false, false, false, 0},
+    {_ssfIni18, "section", "name", 0, false, false, false, "", false, false, false, 0},
 
-    { _ssfIni19,  NULL,          "name",   0,     true,         true,     true,     "true",  true,   true,  false,  0 },
-    { _ssfIni19,  NULL,          "name1",  0,     true,         false,    false,    "",      false,  false, false,  0 },
-    { _ssfIni19,  NULL,          "name",   1,     true,         false,    false,    "",      false,  false, false,  0 },
-    { _ssfIni19,  NULL,          "name",   255,   true,         false,    false,    "",      false,  false, false,  0 },
-    { _ssfIni19,  "section",     "name",   0,     false,        false,    false,    "",      false,  false, false,  0 },
+    {_ssfIni19, NULL, "name", 0, true, true, true, "true", true, true, false, 0},
+    {_ssfIni19, NULL, "name1", 0, true, false, false, "", false, false, false, 0},
+    {_ssfIni19, NULL, "name", 1, true, false, false, "", false, false, false, 0},
+    {_ssfIni19, NULL, "name", 255, true, false, false, "", false, false, false, 0},
+    {_ssfIni19, "section", "name", 0, false, false, false, "", false, false, false, 0},
 
-    { _ssfIni20,  NULL,          "name",   0,     true,         true,     true,    "false",  true,   false, false,  0 },
-    { _ssfIni20,  NULL,          "name1",  0,     true,         false,    false,    "",      false,  false, false,  0 },
-    { _ssfIni20,  NULL,          "name",   1,     true,         false,    false,    "",      false,  false, false,  0 },
-    { _ssfIni20,  NULL,          "name",   255,   true,         false,    false,    "",      false,  false, false,  0 },
-    { _ssfIni20,  "section",     "name",   0,     false,        false,    false,    "",      false,  false, false,  0 },
+    {_ssfIni20, NULL, "name", 0, true, true, true, "false", true, false, false, 0},
+    {_ssfIni20, NULL, "name1", 0, true, false, false, "", false, false, false, 0},
+    {_ssfIni20, NULL, "name", 1, true, false, false, "", false, false, false, 0},
+    {_ssfIni20, NULL, "name", 255, true, false, false, "", false, false, false, 0},
+    {_ssfIni20, "section", "name", 0, false, false, false, "", false, false, false, 0},
 
-    { _ssfIni21,  "section",     "name",   0,     true,         true,     true,     "0",     true,   false, true,   0 },
-    { _ssfIni21,  "section",     "name1",  0,     true,         false,    false,    "",      false,  false, false,  0 },
-    { _ssfIni21,  "section",     "name",   1,     true,         false,    false,    "",      false,  false, false,  0 },
-    { _ssfIni21,  "section",     "name",   255,   true,         false,    false,    "",      false,  false, false,  0 },
-    { _ssfIni21,  NULL,          "name",   0,     true,         false,    false,    "",      false,  false, false,  0 },
+    {_ssfIni21, "section", "name", 0, true, true, true, "0", true, false, true, 0},
+    {_ssfIni21, "section", "name1", 0, true, false, false, "", false, false, false, 0},
+    {_ssfIni21, "section", "name", 1, true, false, false, "", false, false, false, 0},
+    {_ssfIni21, "section", "name", 255, true, false, false, "", false, false, false, 0},
+    {_ssfIni21, NULL, "name", 0, true, false, false, "", false, false, false, 0},
 
-    { _ssfIni22,  "section",     "name",   0,     true,         true,     true,     "1",     true,   true,  true,   1 },
-    { _ssfIni22,  "section",     "name1",  0,     true,         false,    false,    "",      false,  false, false,  0 },
-    { _ssfIni22,  "section",     "name",   1,     true,         false,    false,    "",      false,  false, false,  0 },
-    { _ssfIni22,  "section",     "name",   255,   true,         false,    false,    "",      false,  false, false,  0 },
-    { _ssfIni22,  NULL,          "name",   0,     true,         false,    false,    "",      false,  false, false,  0 },
+    {_ssfIni22, "section", "name", 0, true, true, true, "1", true, true, true, 1},
+    {_ssfIni22, "section", "name1", 0, true, false, false, "", false, false, false, 0},
+    {_ssfIni22, "section", "name", 1, true, false, false, "", false, false, false, 0},
+    {_ssfIni22, "section", "name", 255, true, false, false, "", false, false, false, 0},
+    {_ssfIni22, NULL, "name", 0, true, false, false, "", false, false, false, 0},
 
-    { _ssfIni23,  "section",     "name",   0,     true,         true,     true,     "Yes",   true,   true,  false,  0 },
-    { _ssfIni23,  "section",     "name1",  0,     true,         false,    false,    "",      false,  false, false,  0 },
-    { _ssfIni23,  "section",     "name",   1,     true,         false,    false,    "",      false,  false, false,  0 },
-    { _ssfIni23,  NULL,          "name",   255,   true,         false,    false,    "",      false,  false, false,  0 },
-    { _ssfIni23,  NULL,          "name",   0,     true,         false,    false,    "",      false,  false, false,  0 },
+    {_ssfIni23, "section", "name", 0, true, true, true, "Yes", true, true, false, 0},
+    {_ssfIni23, "section", "name1", 0, true, false, false, "", false, false, false, 0},
+    {_ssfIni23, "section", "name", 1, true, false, false, "", false, false, false, 0},
+    {_ssfIni23, NULL, "name", 255, true, false, false, "", false, false, false, 0},
+    {_ssfIni23, NULL, "name", 0, true, false, false, "", false, false, false, 0},
 
-    { _ssfIni24,  "section",     "name",   0,     true,         true,     true,    "nO",     true,   false, false,  0 },
-    { _ssfIni24,  "section",     "name1",  0,     true,         false,    false,    "",      false,  false, false,  0 },
-    { _ssfIni24,  "section",     "name",   1,     true,         false,    false,    "",      false,  false, false,  0 },
-    { _ssfIni24,  "section",     "name",   255,   true,         false,    false,    "",      false,  false, false,  0 },
-    { _ssfIni24,  NULL,          "name",   0,     true,         false,    false,    "",      false,  false, false,  0 },
+    {_ssfIni24, "section", "name", 0, true, true, true, "nO", true, false, false, 0},
+    {_ssfIni24, "section", "name1", 0, true, false, false, "", false, false, false, 0},
+    {_ssfIni24, "section", "name", 1, true, false, false, "", false, false, false, 0},
+    {_ssfIni24, "section", "name", 255, true, false, false, "", false, false, false, 0},
+    {_ssfIni24, NULL, "name", 0, true, false, false, "", false, false, false, 0},
 
-    { _ssfIni25,  "section",     "name",   0,     true,         true,     true,    "ON",     true,   true,  false,  0 },
-    { _ssfIni25,  "section",     "name1",  0,     true,         false,    false,    "",      false,  false, false,  0 },
-    { _ssfIni25,  "section",     "name",   1,     true,         false,    false,    "",      false,  false, false,  0 },
-    { _ssfIni25,  "section",     "name",   255,   true,         false,    false,    "",      false,  false, false,  0 },
-    { _ssfIni25,  NULL,          "name",   0,     true,         false,    false,    "",      false,  false, false,  0 },
+    {_ssfIni25, "section", "name", 0, true, true, true, "ON", true, true, false, 0},
+    {_ssfIni25, "section", "name1", 0, true, false, false, "", false, false, false, 0},
+    {_ssfIni25, "section", "name", 1, true, false, false, "", false, false, false, 0},
+    {_ssfIni25, "section", "name", 255, true, false, false, "", false, false, false, 0},
+    {_ssfIni25, NULL, "name", 0, true, false, false, "", false, false, false, 0},
 
-    { _ssfIni26,  "section",     "name",   0,     true,         true,     true,    "Off",    true,   false, false,  0 },
-    { _ssfIni26,  "section",     "Name",   0,     true,         false,    false,    "",      false,  false, false,  0 },
-    { _ssfIni26,  "section",     "NAME",   0,     true,         false,    false,    "",      false,  false, false,  0 },
-    { _ssfIni26,  "section",     "name1",  0,     true,         false,    false,    "",      false,  false, false,  0 },
-    { _ssfIni26,  NULL,          "name",   1,     true,         false,    false,    "",      false,  false, false,  0 },
-    { _ssfIni26,  NULL,          "name",   255,   true,         false,    false,    "",      false,  false, false,  0 },
-    { _ssfIni26,  NULL,          "name",   0,     true,         false,    false,    "",      false,  false, false,  0 },
+    {_ssfIni26, "section", "name", 0, true, true, true, "Off", true, false, false, 0},
+    {_ssfIni26, "section", "Name", 0, true, false, false, "", false, false, false, 0},
+    {_ssfIni26, "section", "NAME", 0, true, false, false, "", false, false, false, 0},
+    {_ssfIni26, "section", "name1", 0, true, false, false, "", false, false, false, 0},
+    {_ssfIni26, NULL, "name", 1, true, false, false, "", false, false, false, 0},
+    {_ssfIni26, NULL, "name", 255, true, false, false, "", false, false, false, 0},
+    {_ssfIni26, NULL, "name", 0, true, false, false, "", false, false, false, 0},
 
-    { _ssfIni27,  "section",     "name",   0,     true,         true,     true,     "True",  true,   true,  false,  0 },
-    { _ssfIni27,  "section",     "name1",  0,     true,         false,    false,    "",      false,  false, false,  0 },
-    { _ssfIni27,  "section",     "name",   1,     true,         false,    false,    "",      false,  false, false,  0 },
-    { _ssfIni27,  "section",     "name",   255,   true,         false,    false,    "",      false,  false, false,  0 },
-    { _ssfIni27,  NULL,          "name",   0,     true,         false,    false,    "",      false,  false, false,  0 },
+    {_ssfIni27, "section", "name", 0, true, true, true, "True", true, true, false, 0},
+    {_ssfIni27, "section", "name1", 0, true, false, false, "", false, false, false, 0},
+    {_ssfIni27, "section", "name", 1, true, false, false, "", false, false, false, 0},
+    {_ssfIni27, "section", "name", 255, true, false, false, "", false, false, false, 0},
+    {_ssfIni27, NULL, "name", 0, true, false, false, "", false, false, false, 0},
 
-    { _ssfIni28,  "section",     "name",   0,     true,         true,     true,    "FALSE",  true,   false, false,  0 },
-    { _ssfIni28,  "section",     "name1",  0,     true,         false,    false,    "",      false,  false, false,  0 },
-    { _ssfIni28,  "section",     "name",   1,     true,         false,    false,    "",      false,  false, false,  0 },
-    { _ssfIni28,  "section",     "name",   255,   true,         false,    false,    "",      false,  false, false,  0 },
-    { _ssfIni28,  NULL,          "name",   0,     true,         false,    false,    "",      false,  false, false,  0 },
+    {_ssfIni28, "section", "name", 0, true, true, true, "FALSE", true, false, false, 0},
+    {_ssfIni28, "section", "name1", 0, true, false, false, "", false, false, false, 0},
+    {_ssfIni28, "section", "name", 1, true, false, false, "", false, false, false, 0},
+    {_ssfIni28, "section", "name", 255, true, false, false, "", false, false, false, 0},
+    {_ssfIni28, NULL, "name", 0, true, false, false, "", false, false, false, 0},
 
-    { _ssfIni29,  NULL,          "name",   0,     true,         true,     true,     "1234567890", false,  false, true,   1234567890l },
-    { _ssfIni29,  NULL,          "name1",  0,     true,         false,    false,    "",           false,  false, false,  0 },
-    { _ssfIni29,  NULL,          "name",   1,     true,         false,    false,    "",           false,  false, false,  0 },
-    { _ssfIni29,  NULL,          "name",   255,   true,         false,    false,    "",           false,  false, false,  0 },
-    { _ssfIni29,  "section",     "name",   0,     false,        false,    false,    "",           false,  false, false,  0 },
-    { _ssfIni29,  "s",           "name",   0,     false,        false,    false,    "",           false,  false, false,  0 },
+    {_ssfIni29, NULL, "name", 0, true, true, true, "1234567890", false, false, true, 1234567890l},
+    {_ssfIni29, NULL, "name1", 0, true, false, false, "", false, false, false, 0},
+    {_ssfIni29, NULL, "name", 1, true, false, false, "", false, false, false, 0},
+    {_ssfIni29, NULL, "name", 255, true, false, false, "", false, false, false, 0},
+    {_ssfIni29, "section", "name", 0, false, false, false, "", false, false, false, 0},
+    {_ssfIni29, "s", "name", 0, false, false, false, "", false, false, false, 0},
 
-    { _ssfIni30,  NULL,          "name",   0,     true,         true,     true,     "-1234567890",false,  false, true,   -1234567890l },
-    { _ssfIni30,  NULL,          "name1",  0,     true,         false,    false,    "",           false,  false, false,  0 },
-    { _ssfIni30,  NULL,          "name",   1,     true,         false,    false,    "",           false,  false, false,  0 },
-    { _ssfIni30,  NULL,          "name",   255,   true,         false,    false,    "",           false,  false, false,  0 },
-    { _ssfIni30,  "section",     "name",   0,     false,        false,    false,    "",           false,  false, false,  0 },
-    { _ssfIni30,  "s",           "name",   0,     false,        false,    false,    "",           false,  false, false,  0 },
+    {_ssfIni30, NULL, "name", 0, true, true, true, "-1234567890", false, false, true, -1234567890l},
+    {_ssfIni30, NULL, "name1", 0, true, false, false, "", false, false, false, 0},
+    {_ssfIni30, NULL, "name", 1, true, false, false, "", false, false, false, 0},
+    {_ssfIni30, NULL, "name", 255, true, false, false, "", false, false, false, 0},
+    {_ssfIni30, "section", "name", 0, false, false, false, "", false, false, false, 0},
+    {_ssfIni30, "s", "name", 0, false, false, false, "", false, false, false, 0},
 
-    { _ssfIni31,  "section",     "name",   0,     true,         true,     true,     "1234567890", false,  false, true,   1234567890l },
-    { _ssfIni31,  "section",     "name1",  0,     true,         false,    false,    "",           false,  false, false,  0 },
-    { _ssfIni31,  "section",     "name",   1,     true,         false,    false,    "",           false,  false, false,  0 },
-    { _ssfIni31,  "section",     "name",   255,   true,         false,    false,    "",           false,  false, false,  0 },
-    { _ssfIni31,  NULL,          "name",   0,     true,         false,    false,    "",           false,  false, false,  0 },
-    { _ssfIni31,  "s",           "name",   0,     false,        false,    false,    "",           false,  false, false,  0 },
+    {_ssfIni31, "section", "name", 0, true, true, true, "1234567890",
+     false, false, true, 1234567890l},
+    {_ssfIni31, "section", "name1", 0, true, false, false, "", false, false, false, 0},
+    {_ssfIni31, "section", "name", 1, true, false, false, "", false, false, false, 0},
+    {_ssfIni31, "section", "name", 255, true, false, false, "", false, false, false, 0},
+    {_ssfIni31, NULL, "name", 0, true, false, false, "", false, false, false, 0},
+    {_ssfIni31, "s", "name", 0, false, false, false, "", false, false, false, 0},
 
-    { _ssfIni32,  "section",     "name",   0,     true,         true,     true,     "-1234567890",false,  false, true,   -1234567890l },
-    { _ssfIni32,  "section",     "name1",  0,     true,         false,    false,    "",           false,  false, false,  0 },
-    { _ssfIni32,  "section",     "name",   1,     true,         false,    false,    "",           false,  false, false,  0 },
-    { _ssfIni32,  "section",     "name",   255,   true,         false,    false,    "",           false,  false, false,  0 },
-    { _ssfIni32,  NULL,          "name",   0,     true,         false,    false,    "",           false,  false, false,  0 },
-    { _ssfIni32,  "s",           "name",   0,     false,        false,    false,    "",           false,  false, false,  0 },
+    {_ssfIni32, "section", "name", 0, true, true, true, "-1234567890",
+     false, false, true, -1234567890l},
+    {_ssfIni32, "section", "name1", 0, true, false, false, "", false, false, false, 0},
+    {_ssfIni32, "section", "name", 1, true, false, false, "", false, false, false, 0},
+    {_ssfIni32, "section", "name", 255, true, false, false, "", false, false, false, 0},
+    {_ssfIni32, NULL, "name", 0, true, false, false, "", false, false, false, 0},
+    {_ssfIni32, "s", "name", 0, false, false, false, "", false, false, false, 0},
 
-    { _ssfIni33,  "section",     "name",   0,     true,         true,     true,     "-1234567890",false,  false, true,   -1234567890l },
-    { _ssfIni33,  "section",     "name1",  0,     true,         false,    false,    "",           false,  false, false,  0 },
-    { _ssfIni33,  "section",     "name",   1,     true,         false,    false,    "",           false,  false, false,  0 },
-    { _ssfIni33,  "section",     "name",   255,   true,         false,    false,    "",           false,  false, false,  0 },
-    { _ssfIni33,  NULL,          "name",   0,     true,         false,    false,    "",           false,  false, false,  0 },
-    { _ssfIni33,  "s",           "name",   0,     false,        false,    false,    "",           false,  false, false,  0 },
+    {_ssfIni33, "section", "name", 0, true, true, true, "-1234567890",
+     false, false, true, -1234567890l},
+    {_ssfIni33, "section", "name1", 0, true, false, false, "", false, false, false, 0},
+    {_ssfIni33, "section", "name", 1, true, false, false, "", false, false, false, 0},
+    {_ssfIni33, "section", "name", 255, true, false, false, "", false, false, false, 0},
+    {_ssfIni33, NULL, "name", 0, true, false, false, "", false, false, false, 0},
+    {_ssfIni33, "s", "name", 0, false, false, false, "", false, false, false, 0},
 
-    { _ssfIni34,  "section",     "name",   0,     true,         false,    false,    "",           false,  false, false,  0 },
-    { _ssfIni34,  "section",     "name1",  0,     true,         false,    false,    "",           false,  false, false,  0 },
-    { _ssfIni34,  "section",     "name",   1,     true,         false,    false,    "",           false,  false, false,  0 },
-    { _ssfIni34,  "section",     "name",   255,   true,         false,    false,    "",           false,  false, false,  0 },
-    { _ssfIni34,  NULL,          "name",   0,     true,         false,    false,    "",           false,  false, false,  0 },
-    { _ssfIni34,  "s",           "name",   0,     false,        false,    false,    "",           false,  false, false,  0 },
+    {_ssfIni34, "section", "name", 0, true, false, false, "", false, false, false, 0},
+    {_ssfIni34, "section", "name1", 0, true, false, false, "", false, false, false, 0},
+    {_ssfIni34, "section", "name", 1, true, false, false, "", false, false, false, 0},
+    {_ssfIni34, "section", "name", 255, true, false, false, "", false, false, false, 0},
+    {_ssfIni34, NULL, "name", 0, true, false, false, "", false, false, false, 0},
+    {_ssfIni34, "s", "name", 0, false, false, false, "", false, false, false, 0},
 
-    { _ssfIni35,  "section",     "name",   0,     true,         true,     true,     "-1234567890",false,  false, true,   -1234567890 },
-    { _ssfIni35,  "section",     "name",   1,     true,         false,    false,    "",           false,  false, false,  0 },
-    { _ssfIni35,  "section2",    "name",   0,     true,         true,     true,     "value",      false,  false, false,  0 },
-    { _ssfIni35,  "section2",    "name",   1,     true,         true,     true,     "value2a",    false,  false, false,  0 },
-    { _ssfIni35,  "section2",    "name",   3,     true,         false,    false,    "",           false,  false, false,  0 },
-    { _ssfIni35,  "section3",    "name",   0,     true,         true,     true,     "value3",     false,  false, false,  0 },
-    { _ssfIni35,  "section3",    "name",   1,     true,         false,    false,    "",           false,  false, false,  0 },
-    { _ssfIni35,  "section3",    "name2",  0,     true,         true,     true,     "1234567890-=!@#$%^&*()_+qwertyuiop[]\asdfghjkl;'zxcvbnm,./`~QWERTYUIOP{}|ASDFGHJKL:\"ZXCVBNM<>?", false, false, false, 0 },
-    { _ssfIni35,  "section3",    "name2",  1,     true,         false,    false,    "",           false,  false, false,  0 },
+    {_ssfIni35, "section", "name", 0, true, true, true, "-1234567890",
+     false, false, true, -1234567890},
+    {_ssfIni35, "section", "name", 1, true, false, false, "", false, false, false, 0},
+    {_ssfIni35, "section2", "name", 0, true, true, true, "value", false, false, false, 0},
+    {_ssfIni35, "section2", "name", 1, true, true, true, "value2a", false, false, false, 0},
+    {_ssfIni35, "section2", "name", 3, true, false, false, "", false, false, false, 0},
+    {_ssfIni35, "section3", "name", 0, true, true, true, "value3", false, false, false, 0},
+    {_ssfIni35, "section3", "name", 1, true, false, false, "", false, false, false, 0},
+    {_ssfIni35, "section3", "name2", 0, true, true, true,
+     "1234567890-=!@#$%^&*()_+qwertyuiop[]\asdfghjkl;'zxcvbnm,./`~QWERTYUIOP{}|ASDFGHJKL:\""
+     "ZXCVBNM<>?",
+     false, false, false, 0},
+    {_ssfIni35, "section3", "name2", 1, true, false, false, "", false, false, false, 0},
 
-    { _ssfIni36,  NULL,          "name",   0,     true,         true,     true,     "",           false,  false, false,  0 },
-    { _ssfIni36,  NULL,          "name1",  0,     true,         false,    false,    "",           false,  false, false,  0 },
-    { _ssfIni36,  NULL,          "name",   1,     true,         false,    false,    "",           false,  false, false,  0 },
-    { _ssfIni36,  NULL,          "name",   255,   true,         false,    false,    "",           false,  false, false,  0 },
-    { _ssfIni36,  "section",     "name",   0,     false,        false,    false,    "",           false,  false, false,  0 },
-    { _ssfIni36,  "s",           "name",   0,     false,        false,    false,    "",           false,  false, false,  0 },
+    {_ssfIni36, NULL, "name", 0, true, true, true, "", false, false, false, 0},
+    {_ssfIni36, NULL, "name1", 0, true, false, false, "", false, false, false, 0},
+    {_ssfIni36, NULL, "name", 1, true, false, false, "", false, false, false, 0},
+    {_ssfIni36, NULL, "name", 255, true, false, false, "", false, false, false, 0},
+    {_ssfIni36, "section", "name", 0, false, false, false, "", false, false, false, 0},
+    {_ssfIni36, "s", "name", 0, false, false, false, "", false, false, false, 0},
 
-    { _ssfIni37,  NULL,          "name",   0,     true,         true,     true,     "",           false,  false, false,  0 },
-    { _ssfIni38,  NULL,          "name",   0,     true,         true,     true,     "",           false,  false, false,  0 },
-    { _ssfIni39,  "section",     "name",   0,     true,         true,     true,     "",           false,  false, false,  0},
-    { _ssfIni40,  "section",     "name",   0,     true,         true,     true,     "",           false,  false, false,  0 },
-    { _ssfIni41,  "section",     "name",   0,     true,         true,     true,     "",           false,  false, false,  0 },
+    {_ssfIni37, NULL, "name", 0, true, true, true, "", false, false, false, 0},
+    {_ssfIni38, NULL, "name", 0, true, true, true, "", false, false, false, 0},
+    {_ssfIni39, "section", "name", 0, true, true, true, "", false, false, false, 0},
+    {_ssfIni40, "section", "name", 0, true, true, true, "", false, false, false, 0},
+    {_ssfIni41, "section", "name", 0, true, true, true, "", false, false, false, 0},
 };
 
-static char _ssfINIBigINI[] = ";text\nname=value\r\n[section]\r\nB0=0\r\nB1=1\r\nBno=no\r\nByes=yes\r\nBoff=off\r\nBon=on\r\nBF=false\r\nBT=true\r\nLI=0\nLIM=-1\nLIL=-1234567890\n";
+static char _ssfINIBigINI[] = ";text\nname=value\r\n[section]\r\nB0=0\r\nB1=1\r\nBno=no\r\n"
+                              "Byes=yes\r\nBoff=off\r\nBon=on\r\nBF=false\r\nBT=true\r\nLI=0\n"
+                              "LIM=-1\nLIL=-1234567890\n";
 
 #if SSF_CONFIG_INI_UNIT_TEST == 1
 /* --------------------------------------------------------------------------------------------- */
@@ -443,15 +459,20 @@ void SSFINIUnitTest(void)
 
     /* Test Generator */
     SSF_ASSERT_TEST(SSFINIPrintComment(NULL, 4, &iniLen, "text", SSF_INI_COMMENT_SEMI, SSF_INI_LF));
-    SSF_ASSERT_TEST(SSFINIPrintComment("ini", 0, &iniLen, "text", SSF_INI_COMMENT_SEMI, SSF_INI_LF));
+    SSF_ASSERT_TEST(SSFINIPrintComment("ini", 0, &iniLen, "text", SSF_INI_COMMENT_SEMI,
+                                       SSF_INI_LF));
     SSF_ASSERT_TEST(SSFINIPrintComment("ini", 4, NULL, "text", SSF_INI_COMMENT_SEMI, SSF_INI_LF));
     SSF_ASSERT_TEST(SSFINIPrintComment("ini", 4, &iniLen, NULL, SSF_INI_COMMENT_SEMI, SSF_INI_LF));
     SSF_ASSERT_TEST(SSFINIPrintComment("ini", 4, &iniLen, "text", SSF_INI_COMMENT_MIN, SSF_INI_LF));
     SSF_ASSERT_TEST(SSFINIPrintComment("ini", 4, &iniLen, "text", SSF_INI_COMMENT_MAX, SSF_INI_LF));
-    SSF_ASSERT_TEST(SSFINIPrintComment("ini", 4, &iniLen, "text", SSF_INI_COMMENT_MAX + 1, SSF_INI_LF));
-    SSF_ASSERT_TEST(SSFINIPrintComment("ini", 4, &iniLen, "text", SSF_INI_COMMENT_SEMI, SSF_INI_LINE_ENDING_MIN));
-    SSF_ASSERT_TEST(SSFINIPrintComment("ini", 4, &iniLen, "text", SSF_INI_COMMENT_SEMI, SSF_INI_LINE_ENDING_MAX));
-    SSF_ASSERT_TEST(SSFINIPrintComment("ini", 4, &iniLen, "text", SSF_INI_COMMENT_SEMI, SSF_INI_LINE_ENDING_MAX + 1));
+    SSF_ASSERT_TEST(SSFINIPrintComment("ini", 4, &iniLen, "text", SSF_INI_COMMENT_MAX + 1,
+                                       SSF_INI_LF));
+    SSF_ASSERT_TEST(SSFINIPrintComment("ini", 4, &iniLen, "text", SSF_INI_COMMENT_SEMI,
+                                       SSF_INI_LINE_ENDING_MIN));
+    SSF_ASSERT_TEST(SSFINIPrintComment("ini", 4, &iniLen, "text", SSF_INI_COMMENT_SEMI,
+                                       SSF_INI_LINE_ENDING_MAX));
+    SSF_ASSERT_TEST(SSFINIPrintComment("ini", 4, &iniLen, "text", SSF_INI_COMMENT_SEMI,
+                                       SSF_INI_LINE_ENDING_MAX + 1));
     SSF_ASSERT_TEST(SSFINIPrintSection(NULL, 4, &iniLen, "section", SSF_INI_LF));
     SSF_ASSERT_TEST(SSFINIPrintSection("ini", 0, &iniLen, "section", SSF_INI_LF));
     SSF_ASSERT_TEST(SSFINIPrintSection("ini", 4, NULL, "section", SSF_INI_LF));
@@ -466,21 +487,36 @@ void SSFINIUnitTest(void)
     SSF_ASSERT_TEST(SSFINIPrintNameStrValue("ini", 4, &iniLen, "", "value", SSF_INI_LF));
     SSF_ASSERT_TEST(SSFINIPrintNameStrValue("ini", 4, &iniLen, NULL, "value", SSF_INI_LF));
     SSF_ASSERT_TEST(SSFINIPrintNameStrValue("ini", 4, &iniLen, "name", NULL, SSF_INI_LF));
-    SSF_ASSERT_TEST(SSFINIPrintNameStrValue("ini", 4, &iniLen, "name", "value", SSF_INI_LINE_ENDING_MIN));
-    SSF_ASSERT_TEST(SSFINIPrintNameStrValue("ini", 4, &iniLen, "name", "value", SSF_INI_LINE_ENDING_MAX));
-    SSF_ASSERT_TEST(SSFINIPrintNameStrValue("ini", 4, &iniLen, "name", "value", SSF_INI_LINE_ENDING_MAX + 1));
-    SSF_ASSERT_TEST(SSFINIPrintNameBoolValue(NULL, 4, &iniLen, "name", true, SSF_INI_BOOL_1_0, SSF_INI_LF));
-    SSF_ASSERT_TEST(SSFINIPrintNameBoolValue("ini", 0, &iniLen, "name", true, SSF_INI_BOOL_1_0, SSF_INI_LF));
-    SSF_ASSERT_TEST(SSFINIPrintNameBoolValue("ini", 4, NULL, "name", true, SSF_INI_BOOL_1_0, SSF_INI_LF));
-    SSF_ASSERT_TEST(SSFINIPrintNameBoolValue("ini", 4, &iniLen, "", true, SSF_INI_BOOL_1_0, SSF_INI_LF));
-    SSF_ASSERT_TEST(SSFINIPrintNameBoolValue("ini", 4, &iniLen, NULL, true, SSF_INI_BOOL_1_0, SSF_INI_LF));
-    SSF_ASSERT_TEST(SSFINIPrintNameBoolValue("ini", 4, &iniLen, "name", true, SSF_INI_BOOL_MIN, SSF_INI_LF));
-    SSF_ASSERT_TEST(SSFINIPrintNameBoolValue("ini", 4, &iniLen, "name", true, SSF_INI_BOOL_MIN, SSF_INI_LF));
-    SSF_ASSERT_TEST(SSFINIPrintNameBoolValue("ini", 4, &iniLen, "name", true, SSF_INI_BOOL_MAX, SSF_INI_LF));
-    SSF_ASSERT_TEST(SSFINIPrintNameBoolValue("ini", 4, &iniLen, "name", true, SSF_INI_BOOL_MAX + 1, SSF_INI_LF));
-    SSF_ASSERT_TEST(SSFINIPrintNameBoolValue("ini", 4, &iniLen, "name", true, SSF_INI_BOOL_1_0, SSF_INI_LINE_ENDING_MIN));
-    SSF_ASSERT_TEST(SSFINIPrintNameBoolValue("ini", 4, &iniLen, "name", true, SSF_INI_BOOL_1_0, SSF_INI_LINE_ENDING_MAX));
-    SSF_ASSERT_TEST(SSFINIPrintNameBoolValue("ini", 4, &iniLen, "name", true, SSF_INI_BOOL_1_0, SSF_INI_LINE_ENDING_MAX + 1));
+    SSF_ASSERT_TEST(SSFINIPrintNameStrValue("ini", 4, &iniLen, "name", "value",
+                                            SSF_INI_LINE_ENDING_MIN));
+    SSF_ASSERT_TEST(SSFINIPrintNameStrValue("ini", 4, &iniLen, "name", "value",
+                                            SSF_INI_LINE_ENDING_MAX));
+    SSF_ASSERT_TEST(SSFINIPrintNameStrValue("ini", 4, &iniLen, "name", "value",
+                                            SSF_INI_LINE_ENDING_MAX + 1));
+    SSF_ASSERT_TEST(SSFINIPrintNameBoolValue(NULL, 4, &iniLen, "name", true, SSF_INI_BOOL_1_0,
+                                             SSF_INI_LF));
+    SSF_ASSERT_TEST(SSFINIPrintNameBoolValue("ini", 0, &iniLen, "name", true, SSF_INI_BOOL_1_0,
+                                             SSF_INI_LF));
+    SSF_ASSERT_TEST(SSFINIPrintNameBoolValue("ini", 4, NULL, "name", true, SSF_INI_BOOL_1_0,
+                                             SSF_INI_LF));
+    SSF_ASSERT_TEST(SSFINIPrintNameBoolValue("ini", 4, &iniLen, "", true, SSF_INI_BOOL_1_0,
+                                             SSF_INI_LF));
+    SSF_ASSERT_TEST(SSFINIPrintNameBoolValue("ini", 4, &iniLen, NULL, true, SSF_INI_BOOL_1_0,
+                                             SSF_INI_LF));
+    SSF_ASSERT_TEST(SSFINIPrintNameBoolValue("ini", 4, &iniLen, "name", true, SSF_INI_BOOL_MIN,
+                                             SSF_INI_LF));
+    SSF_ASSERT_TEST(SSFINIPrintNameBoolValue("ini", 4, &iniLen, "name", true, SSF_INI_BOOL_MIN,
+                                             SSF_INI_LF));
+    SSF_ASSERT_TEST(SSFINIPrintNameBoolValue("ini", 4, &iniLen, "name", true, SSF_INI_BOOL_MAX,
+                                             SSF_INI_LF));
+    SSF_ASSERT_TEST(SSFINIPrintNameBoolValue("ini", 4, &iniLen, "name", true, SSF_INI_BOOL_MAX + 1,
+                                             SSF_INI_LF));
+    SSF_ASSERT_TEST(SSFINIPrintNameBoolValue("ini", 4, &iniLen, "name", true, SSF_INI_BOOL_1_0,
+                                             SSF_INI_LINE_ENDING_MIN));
+    SSF_ASSERT_TEST(SSFINIPrintNameBoolValue("ini", 4, &iniLen, "name", true, SSF_INI_BOOL_1_0,
+                                             SSF_INI_LINE_ENDING_MAX));
+    SSF_ASSERT_TEST(SSFINIPrintNameBoolValue("ini", 4, &iniLen, "name", true, SSF_INI_BOOL_1_0,
+                                             SSF_INI_LINE_ENDING_MAX + 1));
     SSF_ASSERT_TEST(SSFINIPrintNameIntValue(NULL, 4, &iniLen, "name", 0, SSF_INI_LF));
     SSF_ASSERT_TEST(SSFINIPrintNameIntValue("ini", 0, &iniLen, "name", 0, SSF_INI_LF));
     SSF_ASSERT_TEST(SSFINIPrintNameIntValue("ini", 4, NULL, "name", 0, SSF_INI_LF));
@@ -488,26 +524,32 @@ void SSFINIUnitTest(void)
     SSF_ASSERT_TEST(SSFINIPrintNameIntValue("ini", 4, &iniLen, NULL, 0, SSF_INI_LF));
     SSF_ASSERT_TEST(SSFINIPrintNameIntValue("ini", 4, &iniLen, "name", 0, SSF_INI_LINE_ENDING_MIN));
     SSF_ASSERT_TEST(SSFINIPrintNameIntValue("ini", 4, &iniLen, "name", 0, SSF_INI_LINE_ENDING_MAX));
-    SSF_ASSERT_TEST(SSFINIPrintNameIntValue("ini", 4, &iniLen, "name", 0, SSF_INI_LINE_ENDING_MAX + 1));
+    SSF_ASSERT_TEST(SSFINIPrintNameIntValue("ini", 4, &iniLen, "name", 0,
+                                            SSF_INI_LINE_ENDING_MAX + 1));
 
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintComment(iniStr, sizeof(iniStr), &iniLen, "text", SSF_INI_COMMENT_SEMI, SSF_INI_LF));
+    SSF_ASSERT(SSFINIPrintComment(iniStr, sizeof(iniStr), &iniLen, "text", SSF_INI_COMMENT_SEMI,
+                                  SSF_INI_LF));
     SSF_ASSERT(iniLen == 6);
     SSF_ASSERT(strcmp(iniStr, ";text\n") == 0);
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintComment(iniStr, sizeof(iniStr), &iniLen, "text", SSF_INI_COMMENT_HASH, SSF_INI_CRLF));
+    SSF_ASSERT(SSFINIPrintComment(iniStr, sizeof(iniStr), &iniLen, "text", SSF_INI_COMMENT_HASH,
+                                  SSF_INI_CRLF));
     SSF_ASSERT(iniLen == 7);
     SSF_ASSERT(strcmp(iniStr, "#text\r\n") == 0);
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintComment(iniStr, sizeof(iniStr), &iniLen, "text", SSF_INI_COMMENT_NONE, SSF_INI_CRLF));
+    SSF_ASSERT(SSFINIPrintComment(iniStr, sizeof(iniStr), &iniLen, "text", SSF_INI_COMMENT_NONE,
+                                  SSF_INI_CRLF));
     SSF_ASSERT(iniLen == 6);
     SSF_ASSERT(strcmp(iniStr, "text\r\n") == 0);
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintComment(iniStr, 6, &iniLen, "text", SSF_INI_COMMENT_NONE, SSF_INI_CRLF) == false);
+    SSF_ASSERT(SSFINIPrintComment(iniStr, 6, &iniLen, "text", SSF_INI_COMMENT_NONE,
+                                  SSF_INI_CRLF) == false);
     iniLen = 0;
     SSF_ASSERT(SSFINIPrintComment(iniStr, 7, &iniLen, "text", SSF_INI_COMMENT_NONE, SSF_INI_CRLF));
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintComment(iniStr, sizeof(iniStr), &iniLen, "", SSF_INI_COMMENT_NONE, SSF_INI_LF));
+    SSF_ASSERT(SSFINIPrintComment(iniStr, sizeof(iniStr), &iniLen, "", SSF_INI_COMMENT_NONE,
+                                  SSF_INI_LF));
     SSF_ASSERT(iniLen == 1);
     SSF_ASSERT(strcmp(iniStr, "\n") == 0);
 
@@ -525,82 +567,109 @@ void SSFINIUnitTest(void)
     SSF_ASSERT(SSFINIPrintSection(iniStr, 12, &iniLen, "section", SSF_INI_CRLF));
 
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintNameStrValue(iniStr, sizeof(iniStr), &iniLen, "name", "value", SSF_INI_LF));
+    SSF_ASSERT(SSFINIPrintNameStrValue(iniStr, sizeof(iniStr), &iniLen, "name", "value",
+                                       SSF_INI_LF));
     SSF_ASSERT(iniLen == 11);
     SSF_ASSERT(strcmp(iniStr, "name=value\n") == 0);
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintNameStrValue(iniStr, sizeof(iniStr), &iniLen, "name", "value", SSF_INI_CRLF));
+    SSF_ASSERT(SSFINIPrintNameStrValue(iniStr, sizeof(iniStr), &iniLen, "name", "value",
+                                       SSF_INI_CRLF));
     SSF_ASSERT(iniLen == 12);
     SSF_ASSERT(strcmp(iniStr, "name=value\r\n") == 0);
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintNameStrValue(iniStr, 12, &iniLen, "name", "value", SSF_INI_CRLF) == false);
+    SSF_ASSERT(SSFINIPrintNameStrValue(iniStr, 12, &iniLen, "name", "value",
+                                       SSF_INI_CRLF) == false);
     iniLen = 0;
     SSF_ASSERT(SSFINIPrintNameStrValue(iniStr, 13, &iniLen, "name", "value", SSF_INI_CRLF));
 
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, sizeof(iniStr), &iniLen, "name", false, SSF_INI_BOOL_1_0, SSF_INI_LF));
+    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, sizeof(iniStr), &iniLen, "name", false,
+                                        SSF_INI_BOOL_1_0, SSF_INI_LF));
     SSF_ASSERT(iniLen == 7);
     SSF_ASSERT(strcmp(iniStr, "name=0\n") == 0);
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, 7, &iniLen, "name", false, SSF_INI_BOOL_1_0, SSF_INI_LF) == false);
+    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, 7, &iniLen, "name", false, SSF_INI_BOOL_1_0,
+                                        SSF_INI_LF) == false);
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, 8, &iniLen, "name", false, SSF_INI_BOOL_1_0, SSF_INI_LF));
+    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, 8, &iniLen, "name", false, SSF_INI_BOOL_1_0,
+                                        SSF_INI_LF));
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, sizeof(iniStr), &iniLen, "name", true, SSF_INI_BOOL_1_0, SSF_INI_CRLF));
+    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, sizeof(iniStr), &iniLen, "name", true,
+                                        SSF_INI_BOOL_1_0, SSF_INI_CRLF));
     SSF_ASSERT(iniLen == 8);
     SSF_ASSERT(strcmp(iniStr, "name=1\r\n") == 0);
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, 8, &iniLen, "name", true, SSF_INI_BOOL_1_0, SSF_INI_CRLF) == false);
+    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, 8, &iniLen, "name", true, SSF_INI_BOOL_1_0,
+                                        SSF_INI_CRLF) == false);
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, 9, &iniLen, "name", true, SSF_INI_BOOL_1_0, SSF_INI_CRLF));
+    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, 9, &iniLen, "name", true, SSF_INI_BOOL_1_0,
+                                        SSF_INI_CRLF));
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, sizeof(iniStr), &iniLen, "name", false, SSF_INI_BOOL_YES_NO, SSF_INI_LF));
+    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, sizeof(iniStr), &iniLen, "name", false,
+                                        SSF_INI_BOOL_YES_NO, SSF_INI_LF));
     SSF_ASSERT(iniLen == 8);
     SSF_ASSERT(strcmp(iniStr, "name=no\n") == 0);
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, 8, &iniLen, "name", false, SSF_INI_BOOL_YES_NO, SSF_INI_LF) == false);
+    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, 8, &iniLen, "name", false, SSF_INI_BOOL_YES_NO,
+                                        SSF_INI_LF) == false);
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, 9, &iniLen, "name", false, SSF_INI_BOOL_YES_NO, SSF_INI_LF));
+    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, 9, &iniLen, "name", false, SSF_INI_BOOL_YES_NO,
+                                        SSF_INI_LF));
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, sizeof(iniStr), &iniLen, "name", true, SSF_INI_BOOL_YES_NO, SSF_INI_CRLF));
+    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, sizeof(iniStr), &iniLen, "name", true,
+                                        SSF_INI_BOOL_YES_NO, SSF_INI_CRLF));
     SSF_ASSERT(iniLen == 10);
     SSF_ASSERT(strcmp(iniStr, "name=yes\r\n") == 0);
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, 10, &iniLen, "name", true, SSF_INI_BOOL_YES_NO, SSF_INI_CRLF) == false);
+    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, 10, &iniLen, "name", true, SSF_INI_BOOL_YES_NO,
+                                        SSF_INI_CRLF) == false);
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, 11, &iniLen, "name", true, SSF_INI_BOOL_YES_NO, SSF_INI_CRLF));
+    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, 11, &iniLen, "name", true, SSF_INI_BOOL_YES_NO,
+                                        SSF_INI_CRLF));
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, sizeof(iniStr), &iniLen, "name", false, SSF_INI_BOOL_ON_OFF, SSF_INI_LF));
+    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, sizeof(iniStr), &iniLen, "name", false,
+                                        SSF_INI_BOOL_ON_OFF, SSF_INI_LF));
     SSF_ASSERT(iniLen == 9);
     SSF_ASSERT(strcmp(iniStr, "name=off\n") == 0);
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, 9, &iniLen, "name", false, SSF_INI_BOOL_ON_OFF, SSF_INI_LF) == false);
+    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, 9, &iniLen, "name", false, SSF_INI_BOOL_ON_OFF,
+                                        SSF_INI_LF) == false);
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, 10, &iniLen, "name", false, SSF_INI_BOOL_ON_OFF, SSF_INI_LF));
+    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, 10, &iniLen, "name", false, SSF_INI_BOOL_ON_OFF,
+                                        SSF_INI_LF));
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, sizeof(iniStr), &iniLen, "name", true, SSF_INI_BOOL_ON_OFF, SSF_INI_CRLF));
+    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, sizeof(iniStr), &iniLen, "name", true,
+                                        SSF_INI_BOOL_ON_OFF, SSF_INI_CRLF));
     SSF_ASSERT(iniLen == 9);
     SSF_ASSERT(strcmp(iniStr, "name=on\r\n") == 0);
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, 9, &iniLen, "name", true, SSF_INI_BOOL_ON_OFF, SSF_INI_CRLF) == false);
+    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, 9, &iniLen, "name", true, SSF_INI_BOOL_ON_OFF,
+                                        SSF_INI_CRLF) == false);
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, 10, &iniLen, "name", true, SSF_INI_BOOL_ON_OFF, SSF_INI_CRLF));
+    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, 10, &iniLen, "name", true, SSF_INI_BOOL_ON_OFF,
+                                        SSF_INI_CRLF));
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, sizeof(iniStr), &iniLen, "name", false, SSF_INI_BOOL_TRUE_FALSE, SSF_INI_LF));
+    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, sizeof(iniStr), &iniLen, "name", false,
+                                        SSF_INI_BOOL_TRUE_FALSE, SSF_INI_LF));
     SSF_ASSERT(iniLen == 11);
     SSF_ASSERT(strcmp(iniStr, "name=false\n") == 0);
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, 11, &iniLen, "name", false, SSF_INI_BOOL_TRUE_FALSE, SSF_INI_LF) == false);
+    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, 11, &iniLen, "name", false, SSF_INI_BOOL_TRUE_FALSE,
+                                        SSF_INI_LF) == false);
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, 12, &iniLen, "name", false, SSF_INI_BOOL_TRUE_FALSE, SSF_INI_LF));
+    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, 12, &iniLen, "name", false, SSF_INI_BOOL_TRUE_FALSE,
+                                        SSF_INI_LF));
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, sizeof(iniStr), &iniLen, "name", true, SSF_INI_BOOL_TRUE_FALSE, SSF_INI_CRLF));
+    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, sizeof(iniStr), &iniLen, "name", true,
+                                        SSF_INI_BOOL_TRUE_FALSE, SSF_INI_CRLF));
     SSF_ASSERT(iniLen == 11);
     SSF_ASSERT(strcmp(iniStr, "name=true\r\n") == 0);
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, 11, &iniLen, "name", true, SSF_INI_BOOL_TRUE_FALSE, SSF_INI_CRLF) == false);
+    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, 11, &iniLen, "name", true, SSF_INI_BOOL_TRUE_FALSE,
+                                        SSF_INI_CRLF) == false);
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, 12, &iniLen, "name", true, SSF_INI_BOOL_TRUE_FALSE, SSF_INI_CRLF));
+    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, 12, &iniLen, "name", true, SSF_INI_BOOL_TRUE_FALSE,
+                                        SSF_INI_CRLF));
 
     iniLen = 0;
     SSF_ASSERT(SSFINIPrintNameIntValue(iniStr, sizeof(iniStr), &iniLen, "name", 0l, SSF_INI_LF));
@@ -627,30 +696,36 @@ void SSFINIUnitTest(void)
     iniLen = 0;
     SSF_ASSERT(SSFINIPrintNameIntValue(iniStr, 9, &iniLen, "name", -1l, SSF_INI_LF));
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintNameIntValue(iniStr, sizeof(iniStr), &iniLen, "name", 1234567890l, SSF_INI_CRLF));
+    SSF_ASSERT(SSFINIPrintNameIntValue(iniStr, sizeof(iniStr), &iniLen, "name", 1234567890l,
+                                       SSF_INI_CRLF));
     SSF_ASSERT(iniLen == 17);
     SSF_ASSERT(strcmp(iniStr, "name=1234567890\r\n") == 0);
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintNameIntValue(iniStr, 17, &iniLen, "name", 1234567890l, SSF_INI_CRLF) == false);
+    SSF_ASSERT(SSFINIPrintNameIntValue(iniStr, 17, &iniLen, "name", 1234567890l,
+                                       SSF_INI_CRLF) == false);
     iniLen = 0;
     SSF_ASSERT(SSFINIPrintNameIntValue(iniStr, 18, &iniLen, "name", 1234567890l, SSF_INI_CRLF));
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintNameIntValue(iniStr, sizeof(iniStr), &iniLen, "name", -1234567890l, SSF_INI_CRLF));
+    SSF_ASSERT(SSFINIPrintNameIntValue(iniStr, sizeof(iniStr), &iniLen, "name", -1234567890l,
+                                       SSF_INI_CRLF));
     SSF_ASSERT(iniLen == 18);
     SSF_ASSERT(strcmp(iniStr, "name=-1234567890\r\n") == 0);
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintNameIntValue(iniStr, 18, &iniLen, "name", -1234567890l, SSF_INI_CRLF) == false);
+    SSF_ASSERT(SSFINIPrintNameIntValue(iniStr, 18, &iniLen, "name", -1234567890l,
+                                       SSF_INI_CRLF) == false);
     iniLen = 0;
     SSF_ASSERT(SSFINIPrintNameIntValue(iniStr, 19, &iniLen, "name", -1234567890l, SSF_INI_CRLF));
 
     iniLen = 0;
     iniLenLast = iniLen;
-    SSF_ASSERT(SSFINIPrintComment(iniStr, sizeof(iniStr), &iniLen, "text", SSF_INI_COMMENT_SEMI, SSF_INI_LF));
+    SSF_ASSERT(SSFINIPrintComment(iniStr, sizeof(iniStr), &iniLen, "text", SSF_INI_COMMENT_SEMI,
+                                  SSF_INI_LF));
     SSF_ASSERT((iniLen - iniLenLast) == 6);
     iniLenLast = iniLen;
     SSF_ASSERT(memcmp(iniStr, _ssfINIBigINI, iniLen) == 0);
     SSF_ASSERT(iniStr[iniLen] == 0);
-    SSF_ASSERT(SSFINIPrintNameStrValue(iniStr, sizeof(iniStr), &iniLen, "name", "value", SSF_INI_CRLF));
+    SSF_ASSERT(SSFINIPrintNameStrValue(iniStr, sizeof(iniStr), &iniLen, "name", "value",
+                                       SSF_INI_CRLF));
     SSF_ASSERT((iniLen - iniLenLast) == 12);
     iniLenLast = iniLen;
     SSF_ASSERT(memcmp(iniStr, _ssfINIBigINI, iniLen) == 0);
@@ -660,42 +735,50 @@ void SSFINIUnitTest(void)
     iniLenLast = iniLen;
     SSF_ASSERT(memcmp(iniStr, _ssfINIBigINI, iniLen) == 0);
     SSF_ASSERT(iniStr[iniLen] == 0);
-    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, sizeof(iniStr), &iniLen, "B0", false, SSF_INI_BOOL_1_0, SSF_INI_CRLF));
+    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, sizeof(iniStr), &iniLen, "B0", false,
+                                        SSF_INI_BOOL_1_0, SSF_INI_CRLF));
     SSF_ASSERT((iniLen - iniLenLast) == 6);
     iniLenLast = iniLen;
     SSF_ASSERT(memcmp(iniStr, _ssfINIBigINI, iniLen) == 0);
     SSF_ASSERT(iniStr[iniLen] == 0);
-    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, sizeof(iniStr), &iniLen, "B1", true, SSF_INI_BOOL_1_0, SSF_INI_CRLF));
+    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, sizeof(iniStr), &iniLen, "B1", true,
+                                        SSF_INI_BOOL_1_0, SSF_INI_CRLF));
     SSF_ASSERT((iniLen - iniLenLast) == 6);
     iniLenLast = iniLen;
     SSF_ASSERT(memcmp(iniStr, _ssfINIBigINI, iniLen) == 0);
     SSF_ASSERT(iniStr[iniLen] == 0);
-    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, sizeof(iniStr), &iniLen, "Bno", false, SSF_INI_BOOL_YES_NO, SSF_INI_CRLF));
+    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, sizeof(iniStr), &iniLen, "Bno", false,
+                                        SSF_INI_BOOL_YES_NO, SSF_INI_CRLF));
     SSF_ASSERT((iniLen - iniLenLast) == 8);
     iniLenLast = iniLen;
     SSF_ASSERT(memcmp(iniStr, _ssfINIBigINI, iniLen) == 0);
     SSF_ASSERT(iniStr[iniLen] == 0);
-    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, sizeof(iniStr), &iniLen, "Byes", true, SSF_INI_BOOL_YES_NO, SSF_INI_CRLF));
+    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, sizeof(iniStr), &iniLen, "Byes", true,
+                                        SSF_INI_BOOL_YES_NO, SSF_INI_CRLF));
     SSF_ASSERT((iniLen - iniLenLast) == 10);
     iniLenLast = iniLen;
     SSF_ASSERT(memcmp(iniStr, _ssfINIBigINI, iniLen) == 0);
     SSF_ASSERT(iniStr[iniLen] == 0);
-    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, sizeof(iniStr), &iniLen, "Boff", false, SSF_INI_BOOL_ON_OFF, SSF_INI_CRLF));
+    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, sizeof(iniStr), &iniLen, "Boff", false,
+                                        SSF_INI_BOOL_ON_OFF, SSF_INI_CRLF));
     SSF_ASSERT((iniLen - iniLenLast) == 10);
     iniLenLast = iniLen;
     SSF_ASSERT(memcmp(iniStr, _ssfINIBigINI, iniLen) == 0);
     SSF_ASSERT(iniStr[iniLen] == 0);
-    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, sizeof(iniStr), &iniLen, "Bon", true, SSF_INI_BOOL_ON_OFF, SSF_INI_CRLF));
+    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, sizeof(iniStr), &iniLen, "Bon", true,
+                                        SSF_INI_BOOL_ON_OFF, SSF_INI_CRLF));
     SSF_ASSERT((iniLen - iniLenLast) == 8);
     iniLenLast = iniLen;
     SSF_ASSERT(memcmp(iniStr, _ssfINIBigINI, iniLen) == 0);
     SSF_ASSERT(iniStr[iniLen] == 0);
-    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, sizeof(iniStr), &iniLen, "BF", false, SSF_INI_BOOL_TRUE_FALSE, SSF_INI_CRLF));
+    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, sizeof(iniStr), &iniLen, "BF", false,
+                                        SSF_INI_BOOL_TRUE_FALSE, SSF_INI_CRLF));
     SSF_ASSERT((iniLen - iniLenLast) == 10);
     iniLenLast = iniLen;
     SSF_ASSERT(memcmp(iniStr, _ssfINIBigINI, iniLen) == 0);
     SSF_ASSERT(iniStr[iniLen] == 0);
-    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, sizeof(iniStr), &iniLen, "BT", true, SSF_INI_BOOL_TRUE_FALSE, SSF_INI_CRLF));
+    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, sizeof(iniStr), &iniLen, "BT", true,
+                                        SSF_INI_BOOL_TRUE_FALSE, SSF_INI_CRLF));
     SSF_ASSERT((iniLen - iniLenLast) == 9);
     iniLenLast = iniLen;
     SSF_ASSERT(memcmp(iniStr, _ssfINIBigINI, iniLen) == 0);
@@ -710,7 +793,8 @@ void SSFINIUnitTest(void)
     iniLenLast = iniLen;
     SSF_ASSERT(memcmp(iniStr, _ssfINIBigINI, iniLen) == 0);
     SSF_ASSERT(iniStr[iniLen] == 0);
-    SSF_ASSERT(SSFINIPrintNameIntValue(iniStr, sizeof(iniStr), &iniLen, "LIL", -1234567890l, SSF_INI_LF));
+    SSF_ASSERT(SSFINIPrintNameIntValue(iniStr, sizeof(iniStr), &iniLen, "LIL", -1234567890l,
+                                       SSF_INI_LF));
     SSF_ASSERT((iniLen - iniLenLast) == 16);
     iniLenLast = iniLen;
     SSF_ASSERT(memcmp(iniStr, _ssfINIBigINI, iniLen) == 0);
@@ -720,8 +804,7 @@ void SSFINIUnitTest(void)
     SSF_ASSERT(SSFINIGetStrValue("name=hello", NULL, "name", 0, outStr, 6, &outStrLen));
     SSF_ASSERT(outStrLen == 5);
     SSF_ASSERT(strcmp(outStr, "hello") == 0);
-    /* (Hardening) On truncation, return false, leave out as a valid empty string (not the prior   */
-    /* uninitialized contents), and report the required length in outLen. */
+    /* (Hardening) Truncation returns false, leaves out empty, reports required length in outLen */
     outStr[0] = 'X';
     outStrLen = 99;
     SSF_ASSERT(SSFINIGetStrValue("name=hello", NULL, "name", 0, outStr, 5, &outStrLen) == false);
@@ -752,12 +835,11 @@ void SSFINIUnitTest(void)
     SSF_ASSERT(outStrLen == 0);
     SSF_ASSERT(outStr[0] == 0);
 
-    /* (Hardening) An INI whose NULL terminator is beyond SSF_INI_CONFIG_MAX_IN_LEN is rejected     */
-    /* (bounded scan), so a valid pair at the start is not found; the same content terminated       */
-    /* within the max is parsed normally. */
+    /* (Hardening) INI with NULL beyond SSF_INI_CONFIG_MAX_IN_LEN is rejected; within it parses */
     {
         static char bigIni[SSF_INI_CONFIG_MAX_IN_LEN + 2];
-        memset(bigIni, '\n', sizeof(bigIni));         /* blank lines, no NULL within the max window */
+        /* Blank lines, no NULL within the max window */
+        memset(bigIni, '\n', sizeof(bigIni));
         memcpy(bigIni, "name=value\n", 11);           /* a valid pair at the very start */
         bigIni[SSF_INI_CONFIG_MAX_IN_LEN + 1] = 0;    /* NULL only just past the max probe window */
         SSF_ASSERT(SSFINIIsNameValuePresent(bigIni, NULL, "name", 0) == false);
@@ -767,7 +849,8 @@ void SSFINIUnitTest(void)
 
     /* Generator returns false when buffer is already full */
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintComment(iniStr, 1, &iniLen, "", SSF_INI_COMMENT_NONE, SSF_INI_LF) == false);
+    SSF_ASSERT(SSFINIPrintComment(iniStr, 1, &iniLen, "", SSF_INI_COMMENT_NONE,
+                                  SSF_INI_LF) == false);
     iniLen = 0;
     SSF_ASSERT(SSFINIPrintSection(iniStr, 1, &iniLen, "s", SSF_INI_LF) == false);
     iniLen = 0;
@@ -775,7 +858,8 @@ void SSFINIUnitTest(void)
     iniLen = 0;
     SSF_ASSERT(SSFINIPrintNameIntValue(iniStr, 1, &iniLen, "n", 0, SSF_INI_LF) == false);
     iniLen = 0;
-    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, 1, &iniLen, "n", true, SSF_INI_BOOL_1_0, SSF_INI_LF) == false);
+    SSF_ASSERT(SSFINIPrintNameBoolValue(iniStr, 1, &iniLen, "n", true, SSF_INI_BOOL_1_0,
+                                        SSF_INI_LF) == false);
 
     /* Round-trip: generate INI then parse it back */
     {
@@ -786,7 +870,8 @@ void SSFINIUnitTest(void)
         SSF_ASSERT(SSFINIPrintSection(rt, sizeof(rt), &rtLen, "mysect", SSF_INI_LF));
         SSF_ASSERT(SSFINIPrintNameStrValue(rt, sizeof(rt), &rtLen, "key1", "val1", SSF_INI_LF));
         SSF_ASSERT(SSFINIPrintNameIntValue(rt, sizeof(rt), &rtLen, "num", -42, SSF_INI_LF));
-        SSF_ASSERT(SSFINIPrintNameBoolValue(rt, sizeof(rt), &rtLen, "flag", true, SSF_INI_BOOL_TRUE_FALSE, SSF_INI_LF));
+        SSF_ASSERT(SSFINIPrintNameBoolValue(rt, sizeof(rt), &rtLen, "flag", true,
+                                            SSF_INI_BOOL_TRUE_FALSE, SSF_INI_LF));
 
         SSF_ASSERT(SSFINIIsSectionPresent(rt, "mysect"));
         SSF_ASSERT(SSFINIIsSectionPresent(rt, "other") == false);
@@ -1170,7 +1255,7 @@ void SSFINIUnitTest(void)
         SSF_ASSERT(SSFGObjIsMemoryBalanced());
     }
 
-    /* SSFINIGObjPrint rejects a root that is not an OBJECT type (ssfini.c:829). */
+    /* SSFINIGObjPrint rejects a root that is not an OBJECT type. */
     {
         SSFGObj_t *g = NULL;
         SSF_ASSERT(SSFGObjInit(&g, 0u) == true);
@@ -1182,11 +1267,10 @@ void SSFINIUnitTest(void)
         SSF_ASSERT(SSFGObjIsMemoryBalanced());
     }
 
-    /* SSFINIGObjCreate rejects an INI whose value exceeds                                  */
-    /* SSF_INI_GOBJ_CONFIG_MAX_STR_SIZE (ssfini.c:758). Build "name=" + 257 'x'.              */
+    /* SSFINIGObjCreate rejects a value over SSF_INI_GOBJ_CONFIG_MAX_STR_SIZE: "name=" + 257 'x' */
     {
-        SSFGObj_t *g = (SSFGObj_t *)0x1;  /* must be NULL going in -- DeInit caller handles  */
-                                          /* the failure path; we just need to confirm reject */
+        /* Reset to NULL below before the call; only the reject is checked */
+        SSFGObj_t *g = (SSFGObj_t *)0x1;
         char longIni[SSF_INI_GOBJ_CONFIG_MAX_STR_SIZE + 16];
         size_t prefix = strlen("name=");
         memcpy(longIni, "name=", prefix);
@@ -1197,16 +1281,14 @@ void SSFINIUnitTest(void)
         SSF_ASSERT(SSFGObjIsMemoryBalanced());
     }
 
-    /* SSFINIGObjCreate rejects an INI section header with empty name (ssfini.c:704). */
+    /* SSFINIGObjCreate rejects an INI section header with empty name. */
     {
         SSFGObj_t *g = NULL;
         SSF_ASSERT(SSFINIGObjCreate("[]\nname=val\n", &g, 8) == false);
         SSF_ASSERT(SSFGObjIsMemoryBalanced());
     }
 
-    /* SSFINIGObjCreate rejects an INI name with empty name (ssfini.c:742). The parser only */
-    /* sets context->name when it sees a non-WS character before '='; an "=val" line ends   */
-    /* up with sectionLen == 0 / nameLen == 0 in the section/name path. Test via "[s]\n=v". */
+    /* SSFINIGObjCreate rejects an empty name: "[s]\n=val" yields nameLen == 0 */
     {
         SSFGObj_t *g = NULL;
         SSF_ASSERT(SSFINIGObjCreate("[s]\n=val\n", &g, 8) == false);

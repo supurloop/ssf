@@ -19,6 +19,7 @@ SSF shall following the coding and documentation style:
 - Non-trivial conditional statements shall be preceeded by a question that makes clear the purpose, the true clause comment shall start with 'Yes, ...', and the false clause comment shall start with 'No, ...'.
 - Other inline comments shall be limited to 1 line with not extra end of line padding.
 - ALL functions shall have comprehensive DBC assertions to check function parameters and invariants.
+- Exception: timing-critical inner helpers (run per block, per field or point operation, or per limb loop) whose callers already validate their parameters shall not carry DBC assertions; list them in the module's .md.
 - Initialization functions shall track module level or context level that it has been initialized before use.
 - Functions that may fails shall return a bool. Functions that can't fail shall return a void. Functions that can't fail may return a single value. Functions with multiple outputs shall return void.
 - Function arguments that are C string shall end with 'Str'.

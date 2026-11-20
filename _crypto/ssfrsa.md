@@ -206,6 +206,9 @@ Setting **all three** size flags to `0` is allowed: the entire RSA module compil
 nothing (ssfrsa.c body is gated on the derived `SSF_RSA_ANY_ENABLED` macro), the public
 API headers expose no declarations, and `SSFRSAUnitTest` becomes a one-line "skipped"
 stub so a pure-ECC build can keep `ssfrsa.c` in the project without dragging RSA in.
+Two declarations stay visible in that build: the `SSFRSAHash_t` enum (ssfx509 uses it to name
+the hash of every signature scheme) and `SSFRSAUnitTest` (main.c references it under
+`SSF_CONFIG_RSA_UNIT_TEST`).
 
 <a id="api-summary"></a>
 

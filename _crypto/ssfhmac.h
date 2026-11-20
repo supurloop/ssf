@@ -60,10 +60,7 @@ typedef enum
     SSF_HMAC_HASH_MAX,
 } SSFHMACHash_t;
 
-/* Incremental HMAC context. Callers MUST zero the context before the first call to            */
-/* SSFHMACBegin (e.g. `... ctx = {0};`); SSFHMACDeInit leaves the context fully zeroed so a     */
-/* subsequent Begin on the same storage is also valid. SSFHMACEnd does not zero -- DeInit is    */
-/* required between two Begins on the same context.                                              */
+/* Incremental HMAC context; zero it before the first Begin, DeInit between Begins. */
 typedef struct SSFHMACContext
 {
     SSFHMACHash_t hash;
@@ -74,7 +71,7 @@ typedef struct SSFHMACContext
         SSFSHA2_32Context_t sha2_32;
         SSFSHA2_64Context_t sha2_64;
     } hashCtx;
-    uint32_t magic;                             /* validity marker -- 0 => uninitialised */
+    uint32_t magic; /* validity marker -- 0 => uninitialised */
 } SSFHMACContext_t;
 
 /* --------------------------------------------------------------------------------------------- */
@@ -94,7 +91,7 @@ size_t SSFHMACGetHashSize(SSFHMACHash_t hash);
 #if SSF_CONFIG_HMAC_UNIT_TEST == 1
 void SSFHMACUnitTest(void);
 
-/* Test hook: feeds data through chunking with a caller-supplied chunk max (not for production). */
+/* Test hook: feeds data through chunking with a caller-supplied chunk max. */
 void _SSFHMACTestHookUpdateChunked(SSFHMACContext_t *ctx, const uint8_t *data, size_t dataLen,
                                    uint32_t chunkMax);
 #endif /* SSF_CONFIG_HMAC_UNIT_TEST */

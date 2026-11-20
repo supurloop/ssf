@@ -43,6 +43,10 @@ printer callbacks, one per object or array nesting level.
 - After the last field in a callback, assign `*end = start` before returning `true`.
 - Each nesting level recurses into the parser; keep depth within
   [`SSF_UBJSON_CONFIG_MAX_IN_DEPTH`](#opt-max-in-depth).
+- Limitations: an array, string or object member name holds at most 255 elements or bytes (its
+  count or length must use an 8-bit type); optimized (typed) arrays are supported only for
+  integer element types; optimized objects are not supported; member names may not contain
+  `NULL` bytes.
 
 <a id="configuration"></a>
 
@@ -80,7 +84,7 @@ Options live in [`_opt/ssfubjson_opt.h`](../_opt/ssfubjson_opt.h) (aggregated in
 | `SSF_UBJSON_TYPE_TRUE` | Enum value | UBJSON `true` (`T`) |
 | `SSF_UBJSON_TYPE_FALSE` | Enum value | UBJSON `false` (`F`) |
 | `SSF_UBJSON_TYPE_NULL` | Enum value | UBJSON `null` (`Z`) |
-| <a id="type-ssfubjsonprintfn-t"></a>`SSFUBJsonPrintFn_t` | Typedef | Printer callback: `bool (*)(uint8_t *js, size_t size, size_t start, size_t *end, void *in)`; called by [`SSFUBJsonPrintObject()`](#object-array-print-macros), [`SSFUBJsonPrintArray()`](#object-array-print-macros), and [`SSFUBJsonPrintArrayOpt()`](#ssfubjsonprintarrayopt) to write contents |
+| <a id="type-ssfubjsonprintfn-t"></a>`SSFUBJsonPrintFn_t` | Typedef | Printer callback: `bool (*)(uint8_t *js, size_t jsSize, size_t start, size_t *end, void *in)`; called by [`SSFUBJsonPrintObject()`](#object-array-print-macros), [`SSFUBJsonPrintArray()`](#object-array-print-macros), and [`SSFUBJsonPrintArrayOpt()`](#ssfubjsonprintarrayopt) to write contents |
 
 <a id="functions"></a>
 
@@ -104,19 +108,19 @@ Options live in [`_opt/ssfubjson_opt.h`](../_opt/ssfubjson_opt.h) (aggregated in
 | [e.g.](#ex-gethex) | [`bool SSFUBJsonGetHex(js, jsLen, path, out, outSize, outLen, rev)`](#ssfubjsongethex) | Decode a hex-encoded binary string at a path |
 | [e.g.](#ex-getbase64) | [`bool SSFUBJsonGetBase64(js, jsLen, path, out, outSize, outLen)`](#ssfubjsongetbase64) | Decode a Base64-encoded binary string at a path |
 | [e.g.](#ex-getbytearrayptr) | [`bool SSFUBJsonGetByteArrayPtr(js, jsLen, path, out, outLen)`](#ssfubjsongetbytearrayptr) | Return a pointer to a typed byte array at a path |
-| [e.g.](#ex-printobject) | [`bool SSFUBJsonPrintObject(js, size, start, end, fn, in)`](#object-array-print-macros) | Macro: generate a UBJSON object via callback |
-| [e.g.](#ex-printarray) | [`bool SSFUBJsonPrintArray(js, size, start, end, fn, in)`](#object-array-print-macros) | Macro: generate a UBJSON array via callback |
-| [e.g.](#ex-printarrayopt) | [`bool SSFUBJsonPrintArrayOpt(js, size, start, end, fn, in, atype, alen)`](#ssfubjsonprintarrayopt) | Generate an optimized typed UBJSON array |
-| [e.g.](#ex-printlabel) | [`bool SSFUBJsonPrintLabel(js, size, start, end, label)`](#ssfubjsonprintlabel) | Write a UBJSON object key label |
-| [e.g.](#ex-printstring) | [`bool SSFUBJsonPrintString(js, size, start, end, in)`](#ssfubjsonprintstring) | Write a UBJSON string value |
-| [e.g.](#ex-printint) | [`bool SSFUBJsonPrintInt(js, size, start, end, in, opt, optType)`](#ssfubjsonprintint) | Write a UBJSON integer value |
-| [e.g.](#ex-printfloat) | [`bool SSFUBJsonPrintFloat(js, size, start, end, in)`](#ssfubjsonprintfloat-ssfubjsonprintdouble) | Write a UBJSON float32 value |
-| [e.g.](#ex-printdouble) | [`bool SSFUBJsonPrintDouble(js, size, start, end, in)`](#ssfubjsonprintfloat-ssfubjsonprintdouble) | Write a UBJSON float64 value |
-| [e.g.](#ex-printtrue) | [`bool SSFUBJsonPrintTrue(js, size, start, end)`](#booleannull-print-macros) | Macro: write UBJSON `true` |
-| [e.g.](#ex-printfalse) | [`bool SSFUBJsonPrintFalse(js, size, start, end)`](#booleannull-print-macros) | Macro: write UBJSON `false` |
-| [e.g.](#ex-printnull) | [`bool SSFUBJsonPrintNull(js, size, start, end)`](#booleannull-print-macros) | Macro: write UBJSON `null` |
-| [e.g.](#ex-printhex) | [`bool SSFUBJsonPrintHex(js, size, start, end, in, inLen, rev)`](#ssfubjsonprinthex) | Encode binary as a hex string and write as UBJSON string |
-| [e.g.](#ex-printbase64) | [`bool SSFUBJsonPrintBase64(js, size, start, end, in, inLen)`](#ssfubjsonprintbase64) | Encode binary as Base64 and write as UBJSON string |
+| [e.g.](#ex-printobject) | [`bool SSFUBJsonPrintObject(js, jsSize, start, end, fnOpt, in)`](#object-array-print-macros) | Macro: generate a UBJSON object via callback |
+| [e.g.](#ex-printarray) | [`bool SSFUBJsonPrintArray(js, jsSize, start, end, fnOpt, in)`](#object-array-print-macros) | Macro: generate a UBJSON array via callback |
+| [e.g.](#ex-printarrayopt) | [`bool SSFUBJsonPrintArrayOpt(js, jsSize, start, end, fnOpt, in, atype, alen)`](#ssfubjsonprintarrayopt) | Generate an optimized typed UBJSON array |
+| [e.g.](#ex-printlabel) | [`bool SSFUBJsonPrintLabel(js, jsSize, start, end, labelStr)`](#ssfubjsonprintlabel) | Write a UBJSON object key label |
+| [e.g.](#ex-printstring) | [`bool SSFUBJsonPrintString(js, jsSize, start, end, inStr)`](#ssfubjsonprintstring) | Write a UBJSON string value |
+| [e.g.](#ex-printint) | [`bool SSFUBJsonPrintInt(js, jsSize, start, end, in, opt, optType)`](#ssfubjsonprintint) | Write a UBJSON integer value |
+| [e.g.](#ex-printfloat) | [`bool SSFUBJsonPrintFloat(js, jsSize, start, end, in)`](#ssfubjsonprintfloat-ssfubjsonprintdouble) | Write a UBJSON float32 value |
+| [e.g.](#ex-printdouble) | [`bool SSFUBJsonPrintDouble(js, jsSize, start, end, in)`](#ssfubjsonprintfloat-ssfubjsonprintdouble) | Write a UBJSON float64 value |
+| [e.g.](#ex-printtrue) | [`bool SSFUBJsonPrintTrue(js, jsSize, start, end)`](#booleannull-print-macros) | Macro: write UBJSON `true` |
+| [e.g.](#ex-printfalse) | [`bool SSFUBJsonPrintFalse(js, jsSize, start, end)`](#booleannull-print-macros) | Macro: write UBJSON `false` |
+| [e.g.](#ex-printnull) | [`bool SSFUBJsonPrintNull(js, jsSize, start, end)`](#booleannull-print-macros) | Macro: write UBJSON `null` |
+| [e.g.](#ex-printhex) | [`bool SSFUBJsonPrintHex(js, jsSize, start, end, in, inLen, rev)`](#ssfubjsonprinthex) | Encode binary as a hex string and write as UBJSON string |
+| [e.g.](#ex-printbase64) | [`bool SSFUBJsonPrintBase64(js, jsSize, start, end, in, inLen)`](#ssfubjsonprintbase64) | Encode binary as Base64 and write as UBJSON string |
 
 <a id="function-reference"></a>
 
@@ -261,7 +265,7 @@ if (SSFUBJsonGetString(ub, sizeof(ub), path, out, sizeof(out), &outLen))
 #define SSFUBJsonGetInt64(js, jsLen, path, out)  SSFUBJsonGetInt(js, jsLen, path, out, 8, true)
 #define SSFUBJsonGetUInt64(js, jsLen, path, out) SSFUBJsonGetInt(js, jsLen, path, out, 8, false)
 
-bool SSFUBJsonGetInt(uint8_t *js, size_t jsLen, const SSFGPath_t *path, void *out, uint8_t size,
+bool SSFUBJsonGetInt(uint8_t *js, size_t jsLen, const SSFGPath_t *path, void *out, uint8_t outSize,
                      bool isSigned);
 ```
 
@@ -530,13 +534,13 @@ if (SSFUBJsonGetByteArrayPtr(ubArr, sizeof(ubArr), path, &ptr, &len))
 ### [↑](#ssfubjson--ubjson-parsergenerator) [Object / Array Print Macros](#ex-printobject)
 
 ```c
-#define SSFUBJsonPrintObject(js, size, start, end, fn, in) \
-        SSFUBJsonPrint(js, size, start, end, fn, in, "{}")
-#define SSFUBJsonPrintArray(js, size, start, end, fn, in) \
-        SSFUBJsonPrint(js, size, start, end, fn, in, "[]")
+#define SSFUBJsonPrintObject(js, jsSize, start, end, fnOpt, in) \
+        SSFUBJsonPrint(js, jsSize, start, end, fnOpt, in, "{}")
+#define SSFUBJsonPrintArray(js, jsSize, start, end, fnOpt, in) \
+        SSFUBJsonPrint(js, jsSize, start, end, fnOpt, in, "[]")
 ```
 
-Generate a UBJSON object (`{}`) or array (`[]`) by invoking the printer callback `fn`. The
+Generate a UBJSON object (`{}`) or array (`[]`) by invoking the printer callback `fnOpt`. The
 callback receives the same buffer, its allocated size, and the write offset just inside the
 opening marker. The callback must write all fields and assign `*end = start` before returning
 `true`.
@@ -544,13 +548,13 @@ opening marker. The callback must write all fields and assign `*end = start` bef
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
 | `js` | in-out | `uint8_t *` | UBJSON output buffer. Must not be `NULL`. |
-| `size` | in | `size_t` | Total allocated size of `js` in bytes. |
+| `jsSize` | in | `size_t` | Total allocated size of `js` in bytes. |
 | `start` | in | `size_t` | Write offset at which to begin the object or array marker. |
 | `end` | out | `size_t *` | Receives the write offset after the closing marker. Must not be `NULL`. |
-| `fn` | in | [`SSFUBJsonPrintFn_t`](#type-ssfubjsonprintfn-t) | Callback that writes the container contents. Must not be `NULL`. |
-| `in` | in | `void *` | Opaque context pointer passed through to `fn`. May be `NULL`. |
+| `fnOpt` | in | [`SSFUBJsonPrintFn_t`](#type-ssfubjsonprintfn-t) | Callback that writes the container contents. May be `NULL` for an empty container. |
+| `in` | in | `void *` | Opaque context pointer passed through to `fnOpt`. May be `NULL`. |
 
-**Returns:** `true` if generation succeeded and `*end` was set; `false` if the buffer is too small or `fn` returned `false`.
+**Returns:** `true` if generation succeeded and `*end` was set; `false` if the buffer is too small or `fnOpt` returned `false`.
 
 <a id="ex-printobject"></a>
 
@@ -600,26 +604,26 @@ if (SSFUBJsonPrintArray(buf, sizeof(buf), 0, &end, arrFn, NULL))
 ### [↑](#ssfubjson--ubjson-parsergenerator) [`bool SSFUBJsonPrintArrayOpt()`](#functions)
 
 ```c
-bool SSFUBJsonPrintArrayOpt(uint8_t *js, size_t size, size_t start, size_t *end,
-                            SSFUBJsonPrintFn_t fn, void *in, SSFUBJsonType_t atype, size_t alen);
+bool SSFUBJsonPrintArrayOpt(uint8_t *js, size_t jsSize, size_t start, size_t *end,
+                            SSFUBJsonPrintFn_t fnOpt, void *in, SSFUBJsonType_t atype, size_t alen);
 ```
 
 Generates a typed UBJSON array using the `[$type#count]` optimized encoding. Per-element type
-markers are omitted from the payload, so `fn` must write only the raw value bytes for each
+markers are omitted from the payload, so `fnOpt` must write only the raw value bytes for each
 element without any type prefix.
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
 | `js` | in-out | `uint8_t *` | UBJSON output buffer. Must not be `NULL`. |
-| `size` | in | `size_t` | Total allocated size of `js` in bytes. |
+| `jsSize` | in | `size_t` | Total allocated size of `js` in bytes. |
 | `start` | in | `size_t` | Write offset at which to begin the array. |
 | `end` | out | `size_t *` | Receives the write offset after the array is written. Must not be `NULL`. |
-| `fn` | in | [`SSFUBJsonPrintFn_t`](#type-ssfubjsonprintfn-t) | Callback writing raw element values (no type markers). Must not be `NULL`. |
-| `in` | in | `void *` | Opaque context pointer passed through to `fn`. May be `NULL`. |
+| `fnOpt` | in | [`SSFUBJsonPrintFn_t`](#type-ssfubjsonprintfn-t) | Callback writing raw element values (no type markers). May be `NULL` to write only the header. |
+| `in` | in | `void *` | Opaque context pointer passed through to `fnOpt`. May be `NULL`. |
 | `atype` | in | [`SSFUBJsonType_t`](#type-ssfubjsontype-t) | Element type written in the optimized array header (e.g. `SSF_UBJSON_TYPE_NUMBER_INT32`). |
-| `alen` | in | `size_t` | Number of elements `fn` will write. |
+| `alen` | in | `size_t` | Number of elements `fnOpt` will write. |
 
-**Returns:** `true` if generation succeeded; `false` if the buffer is too small or `fn` returned `false`.
+**Returns:** `true` if generation succeeded; `false` if the buffer is too small or `fnOpt` returned `false`.
 
 <a id="ex-printarrayopt"></a>
 
@@ -651,8 +655,8 @@ if (SSFUBJsonPrintArrayOpt(buf, sizeof(buf), 0, &end, optFn, NULL,
 ### [↑](#ssfubjson--ubjson-parsergenerator) [`bool SSFUBJsonPrintLabel()`](#functions)
 
 ```c
-bool SSFUBJsonPrintLabel(uint8_t *js, size_t size, size_t start, size_t *end,
-                         SSFCStrIn_t label);
+bool SSFUBJsonPrintLabel(uint8_t *js, size_t jsSize, size_t start, size_t *end,
+                         SSFCStrIn_t labelStr);
 ```
 
 Appends a UBJSON object key label at the current write offset. Must be called inside an object
@@ -661,10 +665,10 @@ printer callback immediately before the corresponding value.
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
 | `js` | in-out | `uint8_t *` | UBJSON output buffer. Must not be `NULL`. |
-| `size` | in | `size_t` | Total allocated size of `js` in bytes. |
+| `jsSize` | in | `size_t` | Total allocated size of `js` in bytes. |
 | `start` | in | `size_t` | Current write offset. |
 | `end` | out | `size_t *` | Receives the write offset after the label. Must not be `NULL`. |
-| `label` | in | `const char *` | Null-terminated key string. Must not be `NULL`. |
+| `labelStr` | in | `const char *` | Null-terminated key string. Must not be `NULL`. |
 
 **Returns:** `true` if the label was written; `false` if the buffer is too small.
 
@@ -692,7 +696,7 @@ SSFUBJsonPrintObject(buf, sizeof(buf), 0, &end, labelFn, NULL);
 ### [↑](#ssfubjson--ubjson-parsergenerator) [`bool SSFUBJsonPrintString()`](#functions)
 
 ```c
-bool SSFUBJsonPrintString(uint8_t *js, size_t size, size_t start, size_t *end, SSFCStrIn_t in);
+bool SSFUBJsonPrintString(uint8_t *js, size_t jsSize, size_t start, size_t *end, SSFCStrIn_t inStr);
 ```
 
 Appends a UBJSON string value (`S`) at the current write offset. In an object, call
@@ -701,10 +705,10 @@ Appends a UBJSON string value (`S`) at the current write offset. In an object, c
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
 | `js` | in-out | `uint8_t *` | UBJSON output buffer. Must not be `NULL`. |
-| `size` | in | `size_t` | Total allocated size of `js` in bytes. |
+| `jsSize` | in | `size_t` | Total allocated size of `js` in bytes. |
 | `start` | in | `size_t` | Current write offset. |
 | `end` | out | `size_t *` | Receives the write offset after the string. Must not be `NULL`. |
-| `in` | in | `const char *` | Null-terminated string value to encode. Must not be `NULL`. |
+| `inStr` | in | `const char *` | Null-terminated string value to encode. Must not be `NULL`. |
 
 **Returns:** `true` if the string was written; `false` if the buffer is too small.
 
@@ -732,7 +736,7 @@ SSFUBJsonPrintObject(buf, sizeof(buf), 0, &end, strFn, NULL);
 ### [↑](#ssfubjson--ubjson-parsergenerator) [`bool SSFUBJsonPrintInt()`](#functions)
 
 ```c
-bool SSFUBJsonPrintInt(uint8_t *js, size_t size, size_t start, size_t *end, int64_t in,
+bool SSFUBJsonPrintInt(uint8_t *js, size_t jsSize, size_t start, size_t *end, int64_t in,
                        bool opt, SSFUBJsonType_t optType);
 ```
 
@@ -745,7 +749,7 @@ the type.
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
 | `js` | in-out | `uint8_t *` | UBJSON output buffer. Must not be `NULL`. |
-| `size` | in | `size_t` | Total allocated size of `js` in bytes. |
+| `jsSize` | in | `size_t` | Total allocated size of `js` in bytes. |
 | `start` | in | `size_t` | Current write offset. |
 | `end` | out | `size_t *` | Receives the write offset after the integer. Must not be `NULL`. |
 | `in` | in | `int64_t` | Integer value to encode. |
@@ -779,8 +783,8 @@ SSFUBJsonPrintObject(buf, sizeof(buf), 0, &end, intFn, NULL);
 ### [↑](#ssfubjson--ubjson-parsergenerator) [`bool SSFUBJsonPrintFloat()` / `bool SSFUBJsonPrintDouble()`](#functions)
 
 ```c
-bool SSFUBJsonPrintFloat(uint8_t *js, size_t size, size_t start, size_t *end, float in);
-bool SSFUBJsonPrintDouble(uint8_t *js, size_t size, size_t start, size_t *end, double in);
+bool SSFUBJsonPrintFloat(uint8_t *js, size_t jsSize, size_t start, size_t *end, float in);
+bool SSFUBJsonPrintDouble(uint8_t *js, size_t jsSize, size_t start, size_t *end, double in);
 ```
 
 Append a 32-bit float (`d`) or 64-bit double (`D`) value in UBJSON encoding. In an object, call
@@ -789,7 +793,7 @@ Append a 32-bit float (`d`) or 64-bit double (`D`) value in UBJSON encoding. In 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
 | `js` | in-out | `uint8_t *` | UBJSON output buffer. Must not be `NULL`. |
-| `size` | in | `size_t` | Total allocated size of `js` in bytes. |
+| `jsSize` | in | `size_t` | Total allocated size of `js` in bytes. |
 | `start` | in | `size_t` | Current write offset. |
 | `end` | out | `size_t *` | Receives the write offset after the value. Must not be `NULL`. |
 | `in` | in | `float` or `double` | Floating-point value to encode. |
@@ -837,9 +841,9 @@ SSFUBJsonPrintObject(buf, sizeof(buf), 0, &end, dblFn, NULL);
 ### [↑](#ssfubjson--ubjson-parsergenerator) [Boolean / Null Print Macros](#ex-printtrue)
 
 ```c
-#define SSFUBJsonPrintTrue(js, size, start, end)  SSFUBJsonPrintChar(js, size, start, end, 'T')
-#define SSFUBJsonPrintFalse(js, size, start, end) SSFUBJsonPrintChar(js, size, start, end, 'F')
-#define SSFUBJsonPrintNull(js, size, start, end)  SSFUBJsonPrintChar(js, size, start, end, 'Z')
+#define SSFUBJsonPrintTrue(js, jsSize, start, end)  SSFUBJsonPrintChar(js, jsSize, start, end, 'T')
+#define SSFUBJsonPrintFalse(js, jsSize, start, end) SSFUBJsonPrintChar(js, jsSize, start, end, 'F')
+#define SSFUBJsonPrintNull(js, jsSize, start, end)  SSFUBJsonPrintChar(js, jsSize, start, end, 'Z')
 ```
 
 Convenience macros for writing the UBJSON `true` (`T`), `false` (`F`), and `null` (`Z`) type
@@ -848,7 +852,7 @@ markers. In an object, call [`SSFUBJsonPrintLabel()`](#ssfubjsonprintlabel) firs
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
 | `js` | in-out | `uint8_t *` | UBJSON output buffer. Must not be `NULL`. |
-| `size` | in | `size_t` | Total allocated size of `js` in bytes. |
+| `jsSize` | in | `size_t` | Total allocated size of `js` in bytes. |
 | `start` | in | `size_t` | Current write offset. |
 | `end` | out | `size_t *` | Receives the write offset after the marker. Must not be `NULL`. |
 
@@ -912,7 +916,7 @@ SSFUBJsonPrintObject(buf, sizeof(buf), 0, &end, nullFn, NULL);
 ### [↑](#ssfubjson--ubjson-parsergenerator) [`bool SSFUBJsonPrintHex()`](#functions)
 
 ```c
-bool SSFUBJsonPrintHex(uint8_t *js, size_t size, size_t start, size_t *end,
+bool SSFUBJsonPrintHex(uint8_t *js, size_t jsSize, size_t start, size_t *end,
                        uint8_t *in, size_t inLen, bool rev);
 ```
 
@@ -922,7 +926,7 @@ string value. Set `rev` to `true` to reverse byte order before encoding.
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
 | `js` | in-out | `uint8_t *` | UBJSON output buffer. Must not be `NULL`. |
-| `size` | in | `size_t` | Total allocated size of `js` in bytes. |
+| `jsSize` | in | `size_t` | Total allocated size of `js` in bytes. |
 | `start` | in | `size_t` | Current write offset. |
 | `end` | out | `size_t *` | Receives the write offset after the string. Must not be `NULL`. |
 | `in` | in | `uint8_t *` | Binary data to encode. Must not be `NULL`. |
@@ -956,7 +960,7 @@ SSFUBJsonPrintObject(buf, sizeof(buf), 0, &end, hexFn, NULL);
 ### [↑](#ssfubjson--ubjson-parsergenerator) [`bool SSFUBJsonPrintBase64()`](#functions)
 
 ```c
-bool SSFUBJsonPrintBase64(uint8_t *js, size_t size, size_t start, size_t *end,
+bool SSFUBJsonPrintBase64(uint8_t *js, size_t jsSize, size_t start, size_t *end,
                           uint8_t *in, size_t inLen);
 ```
 
@@ -965,7 +969,7 @@ Encodes the binary data at `in` as a Base64 string and appends it as a UBJSON st
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
 | `js` | in-out | `uint8_t *` | UBJSON output buffer. Must not be `NULL`. |
-| `size` | in | `size_t` | Total allocated size of `js` in bytes. |
+| `jsSize` | in | `size_t` | Total allocated size of `js` in bytes. |
 | `start` | in | `size_t` | Current write offset. |
 | `end` | out | `size_t *` | Receives the write offset after the string. Must not be `NULL`. |
 | `in` | in | `uint8_t *` | Binary data to encode. Must not be `NULL`. |

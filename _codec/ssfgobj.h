@@ -89,7 +89,7 @@ bool SSFGObjInit(SSFGObj_t **gobj, uint16_t maxChildren);
 void SSFGObjDeInit(SSFGObj_t **gobj);
 
 /* Object label accessors */
-bool SSFGObjSetLabel(SSFGObj_t *gobj, SSFCStrIn_t labelCStr);
+bool SSFGObjSetLabel(SSFGObj_t *gobj, SSFCStrIn_t labelCStrOpt);
 bool SSFGObjGetLabel(SSFGObj_t *gobj, SSFCStrOut_t labelCStrOut, size_t labelCStrOutSize);
 
 /* Object value accessors */

@@ -44,6 +44,8 @@ are provided.
   §5.1.2 encodes, so any message the standard allows hashes correctly. SHA-224 / SHA-256 are
   limited by FIPS 180-4 to fewer than 2⁶⁴ bits; an `Update` that would exceed that is an
   `SSF_REQUIRE` failure rather than a silent wrap.
+- DBC exception (timing-critical): `_SSFSHA2_32Block` and `_SSFSHA2_64Block` run per block or
+  per arithmetic step and carry no parameter asserts; their callers validate every argument.
 
 <a id="configuration"></a>
 

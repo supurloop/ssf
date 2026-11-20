@@ -40,14 +40,16 @@
 /* --------------------------------------------------------------------------------------------- */
 /* Field arithmetic: GF(2^255 - 19); add, sub, import and small multiply (rest in ssffe25519)    */
 /* --------------------------------------------------------------------------------------------- */
-/* r = a + b. Result may be up to 2p if both inputs < p. The carry-fold runs unconditionally --  */
-/* a 0-carry input degenerates to adding 0 through the limb chain, which leaves r unchanged. The */
-/* fold path used to be branch-guarded; making it branch-free closes a timing channel since the  */
-/* carry value depends on the secret-derived ladder operands.                                     */
-static void _fe_add(SSFFE25519_t *r, const SSFFE25519_t *a, const SSFFE25519_t *b)
+
+/* --------------------------------------------------------------------------------------------- */
+/* r = a + b mod p, fully reduced; the carry fold is unconditional (constant time).              */
+
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFX25519FeAdd(SSFFE25519_t *r, const SSFFE25519_t *a, const SSFFE25519_t *b)
 {
     uint64_t carry = 0;
     uint8_t i;
+
     for (i = 0; i < 8u; i++)
     {
         carry += (uint64_t)a->v[i] + (uint64_t)b->v[i];
@@ -65,12 +67,14 @@ static void _fe_add(SSFFE25519_t *r, const SSFFE25519_t *a, const SSFFE25519_t *
         }
     }
 
-    /* Fully reduce so output is in [0, p) (required for downstream _fe_mul bounds). */
+    /* Fully reduce so output is in [0, p). */
     SSFFE25519Reduce(r);
 }
 
-/* r = a - b mod p (branch-free borrow-fold; output stays in [0, 2p)). */
-static void _fe_sub(SSFFE25519_t *r, const SSFFE25519_t *a, const SSFFE25519_t *b)
+/* --------------------------------------------------------------------------------------------- */
+/* r = a - b mod p, fully reduced; the borrow fold is branch-free (constant time).               */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFX25519FeSub(SSFFE25519_t *r, const SSFFE25519_t *a, const SSFFE25519_t *b)
 {
     uint64_t borrow = 0;
     uint64_t carry = 0;
@@ -78,7 +82,7 @@ static void _fe_sub(SSFFE25519_t *r, const SSFFE25519_t *a, const SSFFE25519_t *
 
     for (i = 0; i < 8u; i++)
     {
-        uint64_t diff = (uint64_t)a->v[i] - (uint64_t)b->v[i] - borrow;
+        uint64_t diff = ((uint64_t)a->v[i] - (uint64_t)b->v[i]) - borrow;
         r->v[i] = (uint32_t)diff;
         borrow = (diff >> 63) & 1u;
     }
@@ -86,17 +90,19 @@ static void _fe_sub(SSFFE25519_t *r, const SSFFE25519_t *a, const SSFFE25519_t *
     /* Conditionally add 2p: borrow is 0 or 1, so borrow * 2 * p.v[i] is the addend. */
     for (i = 0; i < 8u; i++)
     {
-        carry += (uint64_t)r->v[i] + 2u * (uint64_t)SSF_FE25519_P.v[i] * borrow;
+        carry += (uint64_t)r->v[i] + ((2u * (uint64_t)SSF_FE25519_P.v[i]) * borrow);
         r->v[i] = (uint32_t)carry;
         carry >>= 32;
     }
 
-    /* Fully reduce. See _fe_add for rationale; same Wycheproof tcId 57 sensitivity applies. */
+    /* Fully reduce so output is in [0, p) (Wycheproof tcId 57 depends on it). */
     SSFFE25519Reduce(r);
 }
 
-/* r = a * c mod p, where c is a small uint32_t constant. */
-static void _fe_mul_small(SSFFE25519_t *r, const SSFFE25519_t *a, uint32_t c)
+/* --------------------------------------------------------------------------------------------- */
+/* r = a * c mod p, fully reduced, where c is a small uint32_t constant.                         */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFX25519FeMulSmall(SSFFE25519_t *r, const SSFFE25519_t *a, uint32_t c)
 {
     uint64_t carry = 0;
     uint8_t i;
@@ -119,21 +125,26 @@ static void _fe_mul_small(SSFFE25519_t *r, const SSFFE25519_t *a, uint32_t c)
         }
     }
 
-    /* Reduce to [0, p) (same residual-carry concern as _fe_mul). */
+    /* Reduce to [0, p). */
     SSFFE25519Reduce(r);
 }
 
-/* Import from 32 little-endian bytes. Clears bit 255 per RFC 7748 Sec. 5: callers MUST mask the*/
-/* most-significant bit of the final byte before treating the input as a u-coordinate.           */
-static void _fe_from_bytes(SSFFE25519_t *a, const uint8_t *b)
+/* --------------------------------------------------------------------------------------------- */
+/* Imports a from 32 little-endian bytes at b, clearing bit 255 as RFC 7748 Sec. 5 requires.     */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFX25519FeFromBytes(SSFFE25519_t *a, const uint8_t *b)
 {
     uint8_t i;
+
+    SSF_REQUIRE(a != NULL);
+    SSF_REQUIRE(b != NULL);
+
     for (i = 0; i < 8u; i++)
     {
         a->v[i] = ((uint32_t)b[i * 4u]) |
-                  ((uint32_t)b[i * 4u + 1u] << 8) |
-                  ((uint32_t)b[i * 4u + 2u] << 16) |
-                  ((uint32_t)b[i * 4u + 3u] << 24);
+                  ((uint32_t)b[(i * 4u) + 1u] << 8) |
+                  ((uint32_t)b[(i * 4u) + 2u] << 16) |
+                  ((uint32_t)b[(i * 4u) + 3u] << 24);
     }
     a->v[7] &= 0x7FFFFFFFu;
 }
@@ -151,7 +162,7 @@ static void _fe_from_bytes(SSFFE25519_t *a, const uint8_t *b)
 /* Zeroes SSF_X25519_CONFIG_STACK_SCRUB_SIZE bytes of stack below the caller (ladder residue).   */
 /* --------------------------------------------------------------------------------------------- */
 SSF_NOINLINE
-static void _x25519_stack_scrub(void)
+static void _SSFX25519StackScrub(void)
 {
     volatile uint8_t scratch[SSF_X25519_CONFIG_STACK_SCRUB_SIZE];
     size_t i;
@@ -160,19 +171,36 @@ static void _x25519_stack_scrub(void)
 }
 #else /* SSF_X25519_CONFIG_ENABLE_STACK_SCRUB */
 /* Stack scrub disabled by configuration; call sites compile to nothing. */
-#define _x25519_stack_scrub() do { } while (0)
+#define _SSFX25519StackScrub() do { } while (0)
 #endif /* SSF_X25519_CONFIG_ENABLE_STACK_SCRUB */
 
 /* --------------------------------------------------------------------------------------------- */
 /* X25519 scalar multiplication (RFC 7748 Sec. 5; constant-time Montgomery ladder on x-coords).  */
 /* --------------------------------------------------------------------------------------------- */
-static void _x25519_scalar_mul(uint8_t out[32], const uint8_t scalar[32], const uint8_t point[32])
+static void _SSFX25519ScalarMul(uint8_t out[32], const uint8_t scalar[32], const uint8_t point[32])
 {
     uint8_t k[32];
-    SSFFE25519_t x_1, x_2, z_2, x_3, z_3;
-    SSFFE25519_t A, AA, B, BB, E, C, D, DA, CB, t;
+    SSFFE25519_t x_1;
+    SSFFE25519_t x_2;
+    SSFFE25519_t z_2;
+    SSFFE25519_t x_3;
+    SSFFE25519_t z_3;
+    SSFFE25519_t A;
+    SSFFE25519_t AA;
+    SSFFE25519_t B;
+    SSFFE25519_t BB;
+    SSFFE25519_t E;
+    SSFFE25519_t C;
+    SSFFE25519_t D;
+    SSFFE25519_t DA;
+    SSFFE25519_t CB;
+    SSFFE25519_t t;
     int16_t i;
     uint32_t swap = 0;
+
+    SSF_REQUIRE(out != NULL);
+    SSF_REQUIRE(scalar != NULL);
+    SSF_REQUIRE(point != NULL);
 
     /* Copy and clamp the scalar */
     memcpy(k, scalar, 32);
@@ -181,7 +209,7 @@ static void _x25519_scalar_mul(uint8_t out[32], const uint8_t scalar[32], const 
     k[31] |= 64u;
 
     /* Import the u-coordinate */
-    _fe_from_bytes(&x_1, point);
+    _SSFX25519FeFromBytes(&x_1, point);
 
     /* Initialize: x_2 = 1, z_2 = 0 (point at infinity) */
     SSFFE25519SetOne(&x_2);
@@ -200,27 +228,27 @@ static void _x25519_scalar_mul(uint8_t out[32], const uint8_t scalar[32], const 
         SSFFE25519CSwap(&z_2, &z_3, swap ^ bit);
         swap = bit;
 
-        _fe_add(&A, &x_2, &z_2);
+        _SSFX25519FeAdd(&A, &x_2, &z_2);
         SSFFE25519Sqr(&AA, &A);
-        _fe_sub(&B, &x_2, &z_2);
+        _SSFX25519FeSub(&B, &x_2, &z_2);
         SSFFE25519Sqr(&BB, &B);
-        _fe_sub(&E, &AA, &BB);
-        _fe_add(&C, &x_3, &z_3);
-        _fe_sub(&D, &x_3, &z_3);
+        _SSFX25519FeSub(&E, &AA, &BB);
+        _SSFX25519FeAdd(&C, &x_3, &z_3);
+        _SSFX25519FeSub(&D, &x_3, &z_3);
         SSFFE25519Mul(&DA, &D, &A);
         SSFFE25519Mul(&CB, &C, &B);
 
-        _fe_add(&t, &DA, &CB);
+        _SSFX25519FeAdd(&t, &DA, &CB);
         SSFFE25519Sqr(&x_3, &t);
-        _fe_sub(&t, &DA, &CB);
+        _SSFX25519FeSub(&t, &DA, &CB);
         SSFFE25519Sqr(&t, &t);
         SSFFE25519Mul(&z_3, &x_1, &t);
 
         SSFFE25519Mul(&x_2, &AA, &BB);
 
         /* z_2 = E * (AA + a24 * E), where a24 = 121665 */
-        _fe_mul_small(&t, &E, 121665u);
-        _fe_add(&t, &AA, &t);
+        _SSFX25519FeMulSmall(&t, &E, 121665u);
+        _SSFX25519FeAdd(&t, &AA, &t);
         SSFFE25519Mul(&z_2, &E, &t);
     }
 
@@ -264,8 +292,8 @@ bool SSFX25519KeyGen(uint8_t privKey[32], uint8_t pubKey[32])
 
     if (!SSFPortGetEntropy(privKey, 32u)) return false;
 
-    _x25519_scalar_mul(pubKey, privKey, basepoint);
-    _x25519_stack_scrub();
+    _SSFX25519ScalarMul(pubKey, privKey, basepoint);
+    _SSFX25519StackScrub();
     return true;
 }
 
@@ -279,8 +307,8 @@ void SSFX25519PubKeyFromPrivKey(const uint8_t privKey[32], uint8_t pubKey[32])
     SSF_REQUIRE(privKey != NULL);
     SSF_REQUIRE(pubKey != NULL);
 
-    _x25519_scalar_mul(pubKey, privKey, basepoint);
-    _x25519_stack_scrub();
+    _SSFX25519ScalarMul(pubKey, privKey, basepoint);
+    _SSFX25519StackScrub();
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -296,8 +324,8 @@ bool SSFX25519ComputeSecret(const uint8_t privKey[32], const uint8_t peerPubKey[
     SSF_REQUIRE(peerPubKey != NULL);
     SSF_REQUIRE(secret != NULL);
 
-    _x25519_scalar_mul(secret, privKey, peerPubKey);
-    _x25519_stack_scrub();
+    _SSFX25519ScalarMul(secret, privKey, peerPubKey);
+    _SSFX25519StackScrub();
 
     /* Check for all-zero output (low-order point attack) */
     for (i = 0; i < 32u; i++) zero |= secret[i];

@@ -54,28 +54,28 @@ void SSFAESBlockEncrypt(const uint8_t *pt, size_t ptLen, uint8_t *ct, size_t ctS
                         const uint8_t *key, size_t keyLen, uint8_t nr, uint8_t nk);
 
 #define SSFAES128BlockEncrypt(pt, ptLen, ct, ctSize, key, keyLen) \
-    SSFAESBlockEncrypt(pt, ptLen, ct, ctSize, key, keyLen, 10, 4)
+    SSFAESBlockEncrypt((pt), (ptLen), (ct), (ctSize), (key), (keyLen), 10, 4)
 #define SSFAES192BlockEncrypt(pt, ptLen, ct, ctSize, key, keyLen) \
-    SSFAESBlockEncrypt(pt, ptLen, ct, ctSize, key, keyLen, 12, 6)
+    SSFAESBlockEncrypt((pt), (ptLen), (ct), (ctSize), (key), (keyLen), 12, 6)
 #define SSFAES256BlockEncrypt(pt, ptLen, ct, ctSize, key, keyLen) \
-    SSFAESBlockEncrypt(pt, ptLen, ct, ctSize, key, keyLen, 14, 8)
+    SSFAESBlockEncrypt((pt), (ptLen), (ct), (ctSize), (key), (keyLen), 14, 8)
 
 #define SSFAESXXXBlockEncrypt(pt, ptLen, ct, ctSize, key, keyLen) \
-    SSFAESBlockEncrypt(pt, ptLen, ct, ctSize, key, keyLen, \
+    SSFAESBlockEncrypt((pt), (ptLen), (ct), (ctSize), (key), (keyLen), \
                        (6 + (((keyLen) & 0xff) >> 2)), (((keyLen) & 0xff) >> 2))
 
 void SSFAESBlockDecrypt(const uint8_t *ct, size_t ctLen, uint8_t *pt, size_t ptSize,
                         const uint8_t *key, size_t keyLen, uint8_t nr, uint8_t nk);
 
 #define SSFAES128BlockDecrypt(ct, ctLen, pt, ptSize, key, keyLen) \
-    SSFAESBlockDecrypt(ct, ctLen, pt, ptSize, key, keyLen, 10, 4)
+    SSFAESBlockDecrypt((ct), (ctLen), (pt), (ptSize), (key), (keyLen), 10, 4)
 #define SSFAES192BlockDecrypt(ct, ctLen, pt, ptSize, key, keyLen) \
-    SSFAESBlockDecrypt(ct, ctLen, pt, ptSize, key, keyLen, 12, 6)
+    SSFAESBlockDecrypt((ct), (ctLen), (pt), (ptSize), (key), (keyLen), 12, 6)
 #define SSFAES256BlockDecrypt(ct, ctLen, pt, ptSize, key, keyLen) \
-    SSFAESBlockDecrypt(ct, ctLen, pt, ptSize, key, keyLen, 14, 8)
+    SSFAESBlockDecrypt((ct), (ctLen), (pt), (ptSize), (key), (keyLen), 14, 8)
 
 #define SSFAESXXXBlockDecrypt(ct, ctLen, pt, ptSize, key, keyLen) \
-    SSFAESBlockDecrypt(ct, ctLen, pt, ptSize, key, keyLen, \
+    SSFAESBlockDecrypt((ct), (ctLen), (pt), (ptSize), (key), (keyLen), \
                        (6 + (((keyLen) & 0xff) >> 2)), (((keyLen) & 0xff) >> 2))
 
 /* Max expanded round-key words: AES-256 -> (Nr + 1) * Nb = (14 + 1) * 4 = 60. */

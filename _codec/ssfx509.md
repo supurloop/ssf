@@ -265,7 +265,7 @@ Options live in [`_opt/ssfx509_opt.h`](../_opt/ssfx509_opt.h).
 
 | Macro | Default | Description |
 |-------|---------|-------------|
-| <a id="cfg-max-cert-size"></a>`SSF_X509_CONFIG_MAX_CERT_SIZE` | `4096` | Largest DER TBSCertificate or Certificate [`SSFX509EncodeTBS()`](#ssfx509encodetbs) / [`SSFX509EncodeCert()`](#ssfx509encodecert) will produce. Both the measuring and the writing call return `0` when the result would exceed it. No buffers are sized from it. |
+| <a id="cfg-max-cert-size"></a>`SSF_X509_CONFIG_MAX_CERT_SIZE` | `4096` | Largest DER TBSCertificate or Certificate [`SSFX509EncodeTBS()`](#ssfx509encodetbs) / [`SSFX509EncodeCert()`](#ssfx509encodecert) will produce. Both the measuring and the writing call return `false` when the result would exceed it. No buffers are sized from it. |
 | <a id="cfg-max-chain-depth"></a>`SSF_X509_CONFIG_MAX_CHAIN_DEPTH` | `8` | Maximum `chainLen` accepted by [`SSFX509VerifyChain()`](#ssfx509verifychain) (leaf plus intermediates). Sizes the on-stack array of parsed certificates. With [`ssfcms`](../_crypto/ssfcms.md) it must be at least `SSF_CMS_CONFIG_MAX_CERTS + 1`, which `ssfcms.c` enforces; when ssfcms is its only user, anything larger is unused stack (see [ssfcms chain depth sizing](../_crypto/ssfcms.md#notes)). |
 | <a id="cfg-max-extensions"></a>`SSF_X509_CONFIG_MAX_EXTENSIONS` | `16` | Number of extension records retained in `SSFX509Cert_t.exts[]`. A certificate with more extensions fails to parse, so the critical-extension and duplicate checks always see every extension. Raise it if a deployment's certificates legitimately carry more. |
 | <a id="cfg-max-name-constraints"></a>`SSF_X509_CONFIG_MAX_NAME_CONSTRAINTS` | `8` | Number of `dNSName` / `iPAddress` permitted subtrees and, separately, excluded subtrees retained per CA certificate. A certificate with more fails to parse, because dropping an exclusion would loosen the constraint. Raise it if a deployment's CAs legitimately carry more. |
@@ -307,7 +307,7 @@ The unit-test entry point is gated by `SSF_CONFIG_X509_UNIT_TEST` in `ssfport.h`
 | <a id="type-name"></a>`SSFX509Name_t` | Struct | Parsed Distinguished Name: pointer / length pairs for `cn`, `o`, `ou`, `c`, `st`, `l` (each `NULL` / `0` when absent) plus `raw` / `rawLen`, the DER of the entire Name SEQUENCE. |
 | <a id="type-ext"></a>`SSFX509Ext_t` | Struct | One raw extension: `oidRaw` / `oidRawLen` (OID body bytes), `critical`, and `value` / `valueLen` (the OCTET STRING contents). |
 | <a id="type-san"></a>`SSFX509SAN_t` | Struct | One SAN entry: `type` (GeneralName tag number) and `val` / `valLen` (the entry's content bytes; a DNS name is **not** null-terminated). |
-| <a id="type-nc"></a>`SSFX509NameConstraint_t` | Struct | One Name Constraints subtree: `type` is `SSF_X509_SAN_DNS` (`val` is a DNS suffix) or `SSF_X509_SAN_IP` (`val` is 8 bytes: IPv4 address then mask). |
+| <a id="type-nc"></a>`SSFX509NameConstraint_t` | Struct | One Name Constraints subtree: `type` is `SSF_X509_SAN_DNS` (`val` is a DNS suffix) or `SSF_X509_SAN_IP` (`val` is 8 bytes: IPv4 address then mask; IPv6-sized 16 / 32-byte values are kept as parsed and are handled as described in [Limitations](#limitations)). |
 | <a id="type-cert"></a>`SSFX509Cert_t` | Struct | Parsed certificate. `version` (`0` = v1, `2` = v3); `serial`; TBS and outer signature algorithm OIDs plus their raw parameters (`sigAlgParams`, `outerSigAlgParams`); `issuer` / `subject` names; `notBefore` / `notAfter` in Unix seconds; `pubKeyAlgOidRaw`, `pubKey` / `pubKeyLen` / `pubKeyUnusedBits`, `ecCurveOidRaw`; `exts[]` / `extsLen`; decoded flags `hasBasicConstraints`, `isCA`, `pathLenConstraint` (`-1` = absent), `hasKeyUsage`, `keyUsageBits`, `hasExtKeyUsage`, `ekuServerAuth`, `ekuClientAuth`, `ekuCodeSigning`, `ekuAnyPurpose`; `san[]` / `sanLen`; `skid`, `akid`; `hasNameConstraints` with `permittedSubtrees[]` / `excludedSubtrees[]`; `tbsRaw` / `tbsRawLen` (bytes the signature covers); `signature` / `signatureLen` / `signatureUnusedBits`. All pointers reference the source DER buffer. |
 | <a id="type-genname"></a>`SSFX509GenName_t` | Struct | Name attributes for generation as null-terminated strings: `cn`, `o`, `ou`, `c`, `st`, `l`. `NULL` omits the attribute. |
 | <a id="type-genparams"></a>`SSFX509GenParams_t` | Struct | Everything needed to build a certificate: `version` (`0` or `2`), `serial` / `serialLen` (an unsigned big-endian magnitude, written as a positive DER INTEGER), signature algorithm OID and optional parameters, `issuer` / `subject`, `notBefore` / `notAfter`, public key algorithm OID, optional EC curve OID, `pubKey` / `pubKeyLen`; extension controls `addBasicConstraints` / `isCA` / `pathLenConstraint`, `addKeyUsage` / `keyUsageBits`, `addExtKeyUsage` / `ekuServerAuth` / `ekuClientAuth` / `ekuCodeSigning`, `sanDNSNames` / `sanIPAddrs`, `skid` / `skidLen`, `akid` / `akidLen`, one optional raw extension (`addRawExt`, `rawExtOid*`, `rawExtValue*`, `rawExtCritical`), and Name Constraints (`addNameConstraints`, `ncPermittedDNS`, `ncPermittedIPs`, `ncExcludedDNS`, `ncExcludedIPs`). |
@@ -453,7 +453,7 @@ algorithm is `id-RSASSA-PSS`; the hash is carried in `sigAlgParams`, which
 
 <a id="ssfx509encodetbs"></a>
 
-### [↑](#functions-gen) [`uint32_t SSFX509EncodeTBS()`](#functions-gen)
+### [↑](#functions-gen) [`bool SSFX509EncodeTBS()`](#functions-gen)
 
 ```c
 bool SSFX509EncodeTBS(uint8_t *bufOpt, uint32_t bufOptSize, const SSFX509GenParams_t *params,
@@ -490,7 +490,7 @@ nothing is written past `bufOptSize` on `false`.
 
 <a id="ssfx509encodecert"></a>
 
-### [↑](#functions-gen) [`uint32_t SSFX509EncodeCert()`](#functions-gen)
+### [↑](#functions-gen) [`bool SSFX509EncodeCert()`](#functions-gen)
 
 ```c
 bool SSFX509EncodeCert(uint8_t *bufOpt, uint32_t bufOptSize, const SSFX509GenParams_t *params,

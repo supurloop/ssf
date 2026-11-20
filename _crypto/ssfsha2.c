@@ -37,7 +37,7 @@
 #include "ssfusexport.h"
 
 #if SSF_CONFIG_SHA2_UNIT_TEST == 1
-/* Test-only hook fired after each secret local is wiped; NULL in production (AUDIT SHA2-3). */
+/* Test-only hook fired after each secret local is wiped; NULL in production. */
 void (*_SSFSHA2ScrubTestHook)(const void *buf, size_t len) = NULL;
 #define _SSF_SHA2_SCRUB_HOOK(b) \
     do { if (_SSFSHA2ScrubTestHook != NULL) _SSFSHA2ScrubTestHook((b), sizeof(b)); } while (0)
@@ -48,7 +48,7 @@ void (*_SSFSHA2ScrubTestHook)(const void *buf, size_t len) = NULL;
 /* --------------------------------------------------------------------------------------------- */
 /* Local defines                                                                                 */
 /* --------------------------------------------------------------------------------------------- */
-#define RR(x, n, b) ((x >> n) | (x << (b - n)))
+#define RR(x, n, b) (((x) >> (n)) | ((x) << ((b) - (n))))
 #define RR32(x, n) RR(x, n, 32)
 #define RR64(x, n) RR(x, n, 64)
 
@@ -140,9 +140,17 @@ void SSFSHA2_64(const uint8_t *in, uint32_t inLen, uint8_t *out, uint32_t outSiz
     SSF_ASSERT(((hashBitSize == 512) && ((truncationBitSize == 0) || (truncationBitSize == 256) ||
                                          (truncationBitSize == 224))) ||
                ((hashBitSize == 384) && (truncationBitSize == 0)));
+    /* Is the output untruncated (SHA-512 or SHA-384)? */
     if (((hashBitSize == 512) && (truncationBitSize == 0)) || (hashBitSize == 384))
-    { SSF_ASSERT(outSize >= (uint32_t)(hashBitSize >> 3)); }
-    else SSF_ASSERT(outSize >= (uint32_t)(truncationBitSize >> 3));
+    {
+        /* Yes, out must hold the full hash */
+        SSF_ASSERT(outSize >= (uint32_t)(hashBitSize >> 3));
+    }
+    else
+    {
+        /* No, out must hold the truncated hash */
+        SSF_ASSERT(outSize >= (uint32_t)(truncationBitSize >> 3));
+    }
 
     SSFSHA2_64Begin(&context, hashBitSize, truncationBitSize);
     SSFSHA2_64Update(&context, in, inLen);
@@ -154,13 +162,25 @@ void SSFSHA2_64(const uint8_t *in, uint32_t inLen, uint8_t *out, uint32_t outSiz
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFSHA2_32Block(uint32_t *hs, const uint8_t *block)
 {
-    uint32_t a, b, c, d, e, f, g, hh;
-    uint32_t ch, temp1, maj, temp2;
-    uint32_t s0, s1;
-    uint32_t i, j;
+    uint32_t a;
+    uint32_t b;
+    uint32_t c;
+    uint32_t d;
+    uint32_t e;
+    uint32_t f;
+    uint32_t g;
+    uint32_t hh;
+    uint32_t ch;
+    uint32_t temp1;
+    uint32_t maj;
+    uint32_t temp2;
+    uint32_t s0;
+    uint32_t s1;
+    uint32_t i;
+    uint32_t j;
     uint32_t w[SSF_SHA256_BLOCK_SIZE_BYTES];
 
-    /* Big-endian word loads independent of host byte order (AUDIT SHA2-2) */
+    /* Big-endian word loads independent of host byte order */
     for (i = 0; i < 16; i++)
     {
         j = i << 2;
@@ -179,7 +199,7 @@ static void _SSFSHA2_32Block(uint32_t *hs, const uint8_t *block)
     for (i = 0; i < SSF_SHA256_BLOCK_SIZE_BYTES; i++)
     {
         s1 = (RR32(e, 6)) ^ (RR32(e, 11)) ^ (RR32(e, 25));
-        ch = (e & f) ^ (~e & g);
+        ch = (e & f) ^ ((~e) & g);
         temp1 = hh + s1 + ch + k_32[i] + w[i];
         s0 = (RR32(a, 2)) ^ (RR32(a, 13)) ^ (RR32(a, 22));
         maj = (a & b) ^ (a & c) ^ (b & c);
@@ -198,13 +218,25 @@ static void _SSFSHA2_32Block(uint32_t *hs, const uint8_t *block)
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFSHA2_64Block(uint64_t *hs, const uint8_t *block)
 {
-    uint64_t a, b, c, d, e, f, g, hh;
-    uint64_t ch, temp1, maj, temp2;
-    uint64_t s0, s1;
-    uint32_t i, j;
+    uint64_t a;
+    uint64_t b;
+    uint64_t c;
+    uint64_t d;
+    uint64_t e;
+    uint64_t f;
+    uint64_t g;
+    uint64_t hh;
+    uint64_t ch;
+    uint64_t temp1;
+    uint64_t maj;
+    uint64_t temp2;
+    uint64_t s0;
+    uint64_t s1;
+    uint32_t i;
+    uint32_t j;
     uint64_t w[SSF_SHA512_INTERNAL_SIZE_BYTES];
 
-    /* Big-endian word loads independent of host byte order (AUDIT SHA2-2) */
+    /* Big-endian word loads independent of host byte order */
     for (i = 0; i < 16; i++)
     {
         j = i << 3;
@@ -223,7 +255,7 @@ static void _SSFSHA2_64Block(uint64_t *hs, const uint8_t *block)
     for (i = 0; i < 80; i++)
     {
         s1 = (RR64(e, 14)) ^ (RR64(e, 18)) ^ (RR64(e, 41));
-        ch = (e & f) ^ (~e & g);
+        ch = (e & f) ^ ((~e) & g);
         temp1 = hh + s1 + ch + k_64[i] + w[i];
         s0 = (RR64(a, 28)) ^ (RR64(a, 34)) ^ (RR64(a, 39));
         maj = (a & b) ^ (a & c) ^ (b & c);
@@ -270,11 +302,10 @@ void SSFSHA2_32Begin(SSFSHA2_32Context_t *context, uint16_t hashBitSize)
     memset(context, 0, sizeof(SSFSHA2_32Context_t));
     context->hashBitSize = hashBitSize;
 
-    /* Row 0 is SHA-256, row 1 SHA-224 (OPTIMIZE SHA2-O2) */
+    /* Row 0 is SHA-256, row 1 SHA-224 */
     memcpy(context->h, _ssfSHA2_32IV[(hashBitSize == 256u) ? 0u : 1u], sizeof(context->h));
     context->magic = SSF_SHA2_32_CONTEXT_MAGIC;
 }
-
 
 /* --------------------------------------------------------------------------------------------- */
 /* Feeds a chunk of input data into a SHA256 or SHA224 incremental hash context.                 */
@@ -285,6 +316,7 @@ void SSFSHA2_32Update(SSFSHA2_32Context_t *context, const uint8_t *in, uint32_t 
 
     SSF_ASSERT(context != NULL);
     SSF_ASSERT(context->magic == SSF_SHA2_32_CONTEXT_MAGIC);
+    SSF_REQUIRE(context->bufLen < SSF_SHA256_BLOCK_SIZE_BYTES);
     SSF_ASSERT((in != NULL) || (inLen == 0));
 
     while (inLen > 0)
@@ -317,6 +349,7 @@ void SSFSHA2_32End(SSFSHA2_32Context_t *context, uint8_t *out, uint32_t outSize)
 
     SSF_ASSERT(context != NULL);
     SSF_ASSERT(context->magic == SSF_SHA2_32_CONTEXT_MAGIC);
+    SSF_REQUIRE(context->bufLen < SSF_SHA256_BLOCK_SIZE_BYTES);
     SSF_ASSERT(out != NULL);
     SSF_ASSERT(outSize >= (uint32_t)(context->hashBitSize >> 3));
 
@@ -342,7 +375,7 @@ void SSFSHA2_32End(SSFSHA2_32Context_t *context, uint8_t *out, uint32_t outSize)
     SSF_PUTU64BE(&pad[SSF_SHA256_BLOCK_SIZE_BYTES - 8], totalBits);
     _SSFSHA2_32Block(context->h, pad);
 
-    /* Accumulate hash into out buffer as big-endian words (AUDIT SHA2-2) */
+    /* Accumulate hash into out buffer as big-endian words */
     SSF_PUTU32BE(&out[0], context->h[0]);
     SSF_PUTU32BE(&out[4], context->h[1]);
     SSF_PUTU32BE(&out[8], context->h[2]);
@@ -369,7 +402,8 @@ void SSFSHA2_32End(SSFSHA2_32Context_t *context, uint8_t *out, uint32_t outSize)
 /* --------------------------------------------------------------------------------------------- */
 /* Begins a SHA512, SHA384, SHA512/224, or SHA512/256 incremental hash context.                  */
 /* --------------------------------------------------------------------------------------------- */
-void SSFSHA2_64Begin(SSFSHA2_64Context_t *context, uint16_t hashBitSize, uint16_t truncationBitSize)
+void SSFSHA2_64Begin(SSFSHA2_64Context_t *context, uint16_t hashBitSize,
+                     uint16_t truncationBitSize)
 {
     uint8_t row;
 
@@ -382,7 +416,7 @@ void SSFSHA2_64Begin(SSFSHA2_64Context_t *context, uint16_t hashBitSize, uint16_
     context->hashBitSize = hashBitSize;
     context->truncationBitSize = truncationBitSize;
 
-    /* Is it SHA-384? (rows: SHA-512, SHA-384, SHA-512/256, SHA-512/224; OPTIMIZE SHA2-O2) */
+    /* Is it SHA-384? (rows: SHA-512, SHA-384, SHA-512/256, SHA-512/224) */
     if (hashBitSize == 384)
     {
         /* Yes */
@@ -409,7 +443,6 @@ void SSFSHA2_64Begin(SSFSHA2_64Context_t *context, uint16_t hashBitSize, uint16_
     context->magic = SSF_SHA2_64_CONTEXT_MAGIC;
 }
 
-
 /* --------------------------------------------------------------------------------------------- */
 /* Feeds a chunk of input data into a SHA512/384/512-224/512-256 incremental hash context.       */
 /* --------------------------------------------------------------------------------------------- */
@@ -419,6 +452,7 @@ void SSFSHA2_64Update(SSFSHA2_64Context_t *context, const uint8_t *in, uint32_t 
 
     SSF_ASSERT(context != NULL);
     SSF_ASSERT(context->magic == SSF_SHA2_64_CONTEXT_MAGIC);
+    SSF_REQUIRE(context->bufLen < SSF_SHA512_BLOCK_SIZE_BYTES);
     SSF_ASSERT((in != NULL) || (inLen == 0));
 
     while (inLen > 0)
@@ -432,7 +466,7 @@ void SSFSHA2_64Update(SSFSHA2_64Context_t *context, const uint8_t *in, uint32_t 
         /* Does this chunk carry out of the low 64 bits of the 128-bit length? */
         if (context->totalBits > (UINT64_MAX - (((uint64_t)copyLen) << 3)))
         {
-            /* Yes, carry into the high word (FIPS 180-4 Sec. 5.1.2, AUDIT SHA2-1) */
+            /* Yes, carry into the high word (FIPS 180-4 Sec. 5.1.2) */
             context->totalBitsHi++;
         }
         /* No, the low word alone holds the count */
@@ -458,11 +492,20 @@ void SSFSHA2_64End(SSFSHA2_64Context_t *context, uint8_t *out, uint32_t outSize)
 
     SSF_ASSERT(context != NULL);
     SSF_ASSERT(context->magic == SSF_SHA2_64_CONTEXT_MAGIC);
+    SSF_REQUIRE(context->bufLen < SSF_SHA512_BLOCK_SIZE_BYTES);
     SSF_ASSERT(out != NULL);
+    /* Is the output untruncated (SHA-512 or SHA-384)? */
     if (((context->hashBitSize == 512) && (context->truncationBitSize == 0)) ||
         (context->hashBitSize == 384))
-    { SSF_ASSERT(outSize >= (uint32_t)(context->hashBitSize >> 3)); }
-    else SSF_ASSERT(outSize >= (uint32_t)(context->truncationBitSize >> 3));
+    {
+        /* Yes, out must hold the full hash */
+        SSF_ASSERT(outSize >= (uint32_t)(context->hashBitSize >> 3));
+    }
+    else
+    {
+        /* No, out must hold the truncated hash */
+        SSF_ASSERT(outSize >= (uint32_t)(context->truncationBitSize >> 3));
+    }
 
     totalBits = context->totalBits;
 
@@ -487,8 +530,9 @@ void SSFSHA2_64End(SSFSHA2_64Context_t *context, uint8_t *out, uint32_t outSize)
     SSF_PUTU64BE(&pad[SSF_SHA512_BLOCK_SIZE_BYTES - 8], totalBits);
     _SSFSHA2_64Block(context->h, pad);
 
-    /* Accumulate hash into out buffer as big-endian words (AUDIT SHA2-2) */
+    /* Accumulate hash into out buffer as big-endian words */
     SSF_PUTU64BE(&out[0], context->h[0]);
+
     SSF_PUTU64BE(&out[8], context->h[1]);
     SSF_PUTU64BE(&out[16], context->h[2]);
 

@@ -235,9 +235,9 @@ driving the handshake themselves will need. Grouped logically:
 
 | | Function | Description |
 |---|----------|-------------|
-| [e.g.](#ex-keyschedule) | [`void SSFTLSHkdfExpandLabel(hash, secret, secretLen, label, context, ctxLen, out, outLen)`](#ssftlshkdfexpandlabel) | RFC 8446 §7.1 `HKDF-Expand-Label` |
-| [e.g.](#ex-keyschedule) | [`void SSFTLSDeriveSecret(hash, secret, secretLen, label, transcriptHash, transcriptHashLen, out, outLen)`](#ssftlsderivesecret) | RFC 8446 §7.1 `Derive-Secret` |
-| [e.g.](#ex-keyschedule) | [`void SSFTLSDeriveTrafficKeys(hash, trafficSecret, secretLen, key, keyLen, iv, ivLen)`](#ssftlsderivetrafficKeys) | RFC 8446 §7.3 traffic-key + IV derivation |
+| [e.g.](#ex-keyschedule) | [`void SSFTLSHkdfExpandLabel(hash, secret, secretLen, labelStr, context, contextLen, out, outLen)`](#ssftlshkdfexpandlabel) | RFC 8446 §7.1 `HKDF-Expand-Label` |
+| [e.g.](#ex-keyschedule) | [`void SSFTLSDeriveSecret(hash, secret, secretLen, labelStr, transcriptHash, transcriptHashLen, out, outLen)`](#ssftlsderivesecret) | RFC 8446 §7.1 `Derive-Secret` |
+| [e.g.](#ex-keyschedule) | [`void SSFTLSDeriveTrafficKeys(hash, trafficSecret, trafficSecretLen, key, keyLen, iv, ivLen)`](#ssftlsderivetrafficKeys) | RFC 8446 §7.3 traffic-key + IV derivation |
 | [e.g.](#ex-finished) | [`void SSFTLSComputeFinished(hash, baseKey, baseKeyLen, transcriptHash, transcriptHashLen, verifyData, verifyDataLen)`](#ssftlscomputefinished) | Finished `verify_data` = `HMAC(finished_key, transcript_hash)` |
 
 **[Transcript hash](#transcript-hash)**
@@ -245,7 +245,7 @@ driving the handshake themselves will need. Grouped logically:
 | | Function | Description |
 |---|----------|-------------|
 | [e.g.](#ex-transcript) | [`void SSFTLSTranscriptInit(t, hash)`](#ssftlstranscriptinit) | Initialise a running transcript hash for the selected `SSFHMACHash_t` |
-| [e.g.](#ex-transcript) | [`void SSFTLSTranscriptUpdate(t, data, len)`](#ssftlstranscriptupdate) | Append handshake bytes |
+| [e.g.](#ex-transcript) | [`void SSFTLSTranscriptUpdate(t, data, dataLen)`](#ssftlstranscriptupdate) | Append handshake bytes |
 | [e.g.](#ex-transcript) | [`void SSFTLSTranscriptHash(t, out, outSize)`](#ssftlstranscripthash) | Snapshot the current transcript hash without consuming the context |
 
 **[Record layer](#record-layer)**
@@ -269,20 +269,20 @@ driving the handshake themselves will need. Grouped logically:
 ```c
 void SSFTLSHkdfExpandLabel(SSFHMACHash_t hash,
                            const uint8_t *secret, size_t secretLen,
-                           const char *label,
-                           const uint8_t *context, size_t ctxLen,
+                           const char *labelStr,
+                           const uint8_t *context, size_t contextLen,
                            uint8_t *out, size_t outLen);
 ```
 RFC 8446 §7.1 `HKDF-Expand-Label(Secret, Label, Context, Length)`. Prepends `"tls13 "` to
-`label`, frames `(label, context)` into the RFC-specified `HkdfLabel` structure, and
+`labelStr`, frames `(labelStr, context)` into the RFC-specified `HkdfLabel` structure, and
 runs `HKDF-Expand` internally. This is the building block for every secret derivation in
 TLS 1.3 — traffic secrets, application secrets, resumption secret, exporter secret, etc.
 all flow through this function.
 
-`context` may be `NULL` only when `ctxLen` is `0` (an empty context, as for the `"key"`,
-`"iv"` and `"finished"` labels); a `NULL` `context` with a non-zero `ctxLen` is a precondition
-violation (`SSF_REQUIRE`). `ctxLen` is at most `SSF_TLS_MAX_HASH_SIZE` (every TLS 1.3 context
-is a transcript or exporter-context hash), and `label` may be up to 249 bytes, the RFC 8446
+`context` may be `NULL` only when `contextLen` is `0` (an empty context, as for the `"key"`,
+`"iv"` and `"finished"` labels); a `NULL` `context` with a non-zero `contextLen` is a precondition
+violation (`SSF_REQUIRE`). `contextLen` is at most `SSF_TLS_MAX_HASH_SIZE` (every TLS 1.3 context
+is a transcript or exporter-context hash), and `labelStr` may be up to 249 bytes, the RFC 8446
 maximum (`"tls13 "` plus the label must fit a 255-byte field), which covers application-chosen
 exporter labels (§7.5). Both limits are `SSF_REQUIRE` preconditions. The `HkdfLabel` buffer
 costs about 300 bytes of stack during the call.
@@ -291,7 +291,7 @@ costs about 300 bytes of stack during the call.
 ```c
 void SSFTLSDeriveSecret(SSFHMACHash_t hash,
                         const uint8_t *secret, size_t secretLen,
-                        const char *label,
+                        const char *labelStr,
                         const uint8_t *transcriptHash, size_t transcriptHashLen,
                         uint8_t *out, size_t outLen);
 ```
@@ -305,7 +305,7 @@ context. Use this at every Derive-Secret site in the key schedule (e.g., derivin
 <a id="ssftlsderivetrafficKeys"></a>
 ```c
 void SSFTLSDeriveTrafficKeys(SSFHMACHash_t hash,
-                             const uint8_t *trafficSecret, size_t secretLen,
+                             const uint8_t *trafficSecret, size_t trafficSecretLen,
                              uint8_t *key, size_t keyLen,
                              uint8_t *iv, size_t ivLen);
 ```
@@ -382,13 +382,13 @@ before the first `Update`.
 
 <a id="ssftlstranscriptupdate"></a>
 ```c
-void SSFTLSTranscriptUpdate(SSFTLSTranscript_t *t, const uint8_t *data, size_t len);
+void SSFTLSTranscriptUpdate(SSFTLSTranscript_t *t, const uint8_t *data, size_t dataLen);
 ```
-Append `len` bytes of handshake-message data to the running transcript. Each full
+Append `dataLen` bytes of handshake-message data to the running transcript. Each full
 handshake message (its 4-byte header plus its body) must be fed exactly once, in
 wire-order, on both sides. Missing or mis-ordering a message produces a mismatched
 transcript hash — detected later as a Finished MAC failure, which looks cryptic unless
-you know to check the transcript ordering first. `len` must not exceed `UINT32_MAX` (the
+you know to check the transcript ordering first. `dataLen` must not exceed `UINT32_MAX` (the
 underlying SHA update length); a larger value traps.
 
 <a id="ssftlstranscripthash"></a>

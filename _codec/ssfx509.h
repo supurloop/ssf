@@ -47,7 +47,7 @@ extern "C" {
 /* Maximum parsed extensions is SSF_X509_CONFIG_MAX_EXTENSIONS.                                  */
 /* Maximum SAN entries is SSF_X509_CONFIG_MAX_SAN_ENTRIES.                                       */
 /* All pointer fields in SSFX509Cert_t point into the original DER buffer (zero-copy).           */
-/* The DER buffer must remain valid for the lifetime of the parsed structure.                     */
+/* The DER buffer must remain valid for the lifetime of the parsed structure.                    */
 /* --------------------------------------------------------------------------------------------- */
 
 /* --------------------------------------------------------------------------------------------- */
@@ -105,9 +105,7 @@ typedef struct SSFX509SAN
     uint32_t valLen;
 } SSFX509SAN_t;
 
-/* Name Constraints subtree entry (RFC 5280 Section 4.2.1.10).                                   */
-/* For SSF_X509_SAN_DNS: val is a UTF-8/ASCII DNS name suffix (e.g., "example.com").             */
-/* For SSF_X509_SAN_IP: val is 8 bytes (IPv4 addr(4) || mask(4)) or 32 bytes (IPv6).             */
+/* Name Constraints subtree entry (RFC 5280 Section 4.2.1.10); val formats are in ssfx509.md */
 typedef struct SSFX509NameConstraint
 {
     uint8_t type;             /* SSF_X509_SAN_DNS or SSF_X509_SAN_IP */
@@ -172,7 +170,7 @@ typedef struct SSFX509Cert
     const uint8_t *akid;
     uint32_t akidLen;
 
-    /* Name Constraints (RFC 5280 Section 4.2.1.10). Read from every cert.                       */
+    /* Name Constraints (RFC 5280 Section 4.2.1.10), read from every cert */
     bool hasNameConstraints;
     SSFX509NameConstraint_t permittedSubtrees[SSF_X509_CONFIG_MAX_NAME_CONSTRAINTS];
     uint8_t permittedLen;
@@ -194,13 +192,13 @@ typedef struct SSFX509Cert
 /* External interface                                                                            */
 /* --------------------------------------------------------------------------------------------- */
 
-/* Parse a DER-encoded X.509 certificate. All pointer fields in cert point into der[].           */
+/* Parse a DER-encoded X.509 certificate. All pointer fields in cert point into der[]. */
 bool SSFX509Parse(const uint8_t *der, uint32_t derLen, SSFX509Cert_t *cert);
 
-/* Validity check: returns true if notBefore <= nowUnixSec <= notAfter (RFC 5280, inclusive).  */
+/* Validity check: returns true if notBefore <= nowUnixSec <= notAfter (RFC 5280, inclusive). */
 bool SSFX509IsValid(const SSFX509Cert_t *cert, uint64_t nowUnixSec);
 
-/* OID comparison helpers. SSFX509IsECDSA is ecdsa-with-SHA256 only; see IsECDSASHA384.        */
+/* OID comparison helpers. SSFX509IsECDSA is ecdsa-with-SHA256 only; see IsECDSASHA384. */
 bool SSFX509IsECDSA(const SSFX509Cert_t *cert);
 bool SSFX509IsRSA(const SSFX509Cert_t *cert);
 bool SSFX509IsP256(const SSFX509Cert_t *cert);
@@ -260,8 +258,7 @@ typedef struct SSFX509GenParams
     const uint8_t *rawExtValue;       /* Pre-encoded OCTET STRING content */
     uint32_t rawExtValueLen;
     bool rawExtCritical;
-    /* Name Constraints (RFC 5280 Section 4.2.1.10). Extension is always emitted as critical.   */
-    /* All arrays are NULL-terminated. IPs use 8-byte format: 4-byte addr + 4-byte mask.         */
+    /* Name Constraints, always critical; NULL-terminated arrays, IPs are 4-byte addr + mask */
     bool addNameConstraints;
     const char **ncPermittedDNS;
     const uint8_t **ncPermittedIPs;
@@ -269,11 +266,11 @@ typedef struct SSFX509GenParams
     const uint8_t **ncExcludedIPs;
 } SSFX509GenParams_t;
 
-/* Encode a TBSCertificate into bufOpt, or measure it when bufOpt is NULL; *lenOut gets the size. */
+/* Encode a TBSCertificate into bufOpt, or measure it when bufOpt is NULL; *lenOut gets the size */
 bool SSFX509EncodeTBS(uint8_t *bufOpt, uint32_t bufOptSize, const SSFX509GenParams_t *params,
                       uint32_t *lenOut);
 
-/* Encode a Certificate around a precomputed signature over the TBS; NULL bufOpt measures.       */
+/* Encode a Certificate around a precomputed signature over the TBS; NULL bufOpt measures. */
 bool SSFX509EncodeCert(uint8_t *bufOpt, uint32_t bufOptSize, const SSFX509GenParams_t *params,
                        const uint8_t *signature, uint32_t signatureLen, uint32_t *lenOut);
 
@@ -293,7 +290,7 @@ bool SSFX509IsEd25519(const SSFX509Cert_t *cert);
 /* Chain verification                                                                            */
 /* --------------------------------------------------------------------------------------------- */
 
-/* What a chain is being validated for; selects the leaf checks SSFX509VerifyChainPurpose runs.   */
+/* What a chain is being validated for; selects the leaf checks SSFX509VerifyChainPurpose runs. */
 typedef enum SSFX509Purpose
 {
     SSF_X509_PURPOSE_MIN = -1,
@@ -302,33 +299,31 @@ typedef enum SSFX509Purpose
     SSF_X509_PURPOSE_MAX
 } SSFX509Purpose_t;
 
-/* Verify sig over data with keyCert's public key; sigAlg selects the scheme, digestAlgOpt the   */
-/* hash when sigAlg does not imply one (rsaEncryption) and must agree with it when it does.      */
+/* Verify sig over data with keyCert's key under sigAlg; see ssfx509.md for the digest rules. */
 bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgOidRaw,
                             uint32_t sigAlgOidRawLen, const uint8_t *sigAlgParamsOpt,
                             uint32_t sigAlgParamsLen, const uint8_t *digestAlgOidRawOpt,
                             uint32_t digestAlgOidRawLen, const uint8_t *data, uint32_t dataLen,
                             const uint8_t *sig, uint32_t sigLen);
 
-/* Verify cert's signature with issuer's public key; ECDSA, RSA PKCS#1 v1.5, RSA-PSS, Ed25519.   */
+/* Verify cert's signature with issuer's public key; ECDSA, RSA PKCS#1 v1.5, RSA-PSS, Ed25519. */
 bool SSFX509VerifyCertSignature(const SSFX509Cert_t *cert, const SSFX509Cert_t *issuer);
 
-/* Verify chainDer[0] (leaf) up to a trust anchor and match its SAN against hostnameStr.         */
+/* Verify chainDer[0] (leaf) up to a trust anchor and match its SAN against hostnameStr. */
 bool SSFX509VerifyChain(const uint8_t **chainDer, const uint32_t *chainDerLen,
                         uint8_t chainLen,
                         const uint8_t **trustDer, const uint32_t *trustDerLen,
                         uint8_t trustCount,
                         const char *hostnameStr, uint64_t nowUnixSec);
 
-/* Verify chainDer[0] up to a trust anchor for purpose; hostnameStrOpt is required for           */
-/* SSF_X509_PURPOSE_SERVER_AUTH and ignored otherwise.                                           */
+/* Verify chainDer[0] to a trust anchor for purpose; hostnameStrOpt is for SERVER_AUTH only. */
 bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDerLen,
                                uint8_t chainLen,
                                const uint8_t **trustDer, const uint32_t *trustDerLen,
                                uint8_t trustCount, SSFX509Purpose_t purpose,
                                const char *hostnameStrOpt, uint64_t nowUnixSec);
 
-/* Set trace callback for chain verification; fnOpt is a SSFTLSTraceFn_t, NULL disables.        */
+/* Set trace callback for chain verification; fnOpt is a SSFTLSTraceFn_t, NULL disables. */
 void SSFX509SetTraceCtx(void (*fnOpt)(int, int, const char *, void *), void *userCtxOpt);
 
 /* --------------------------------------------------------------------------------------------- */
@@ -337,8 +332,9 @@ void SSFX509SetTraceCtx(void (*fnOpt)(int, int, const char *, void *), void *use
 /* Match an IPv4 address string against a SAN iPAddress entry (4-byte raw). */
 bool SSFX509MatchIPAddress(const char *hostnameStr, const uint8_t *sanIP, uint32_t sanIPLen);
 
-/* Returns true if cert's AKID and issuer's SKID match or either is absent, else false.          */
-bool SSFX509CheckSKIDAKID(const SSFX509Cert_t *cert, const SSFX509Cert_t *issuer);
+/* Returns true if cert's AKID and issuer's SKID match or either is absent, else false. */
+bool SSFX509CheckSKIDAKID
+(const SSFX509Cert_t *cert, const SSFX509Cert_t *issuer);
 
 #if SSF_CONFIG_X509_UNIT_TEST == 1
 void SSFX509UnitTest(void);

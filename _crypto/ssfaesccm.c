@@ -2,7 +2,7 @@
 /* Small System Framework                                                                        */
 /*                                                                                               */
 /* ssfaesccm.c                                                                                   */
-/* Provides AES-CCM (Counter with CBC-MAC) authenticated encryption (RFC 3610, SP 800-38C).     */
+/* Provides AES-CCM (Counter with CBC-MAC) authenticated encryption (RFC 3610, SP 800-38C).      */
 /*                                                                                               */
 /* BSD-3-Clause License                                                                          */
 /* Copyright 2026 Supurloop Software LLC                                                         */
@@ -36,7 +36,7 @@
 #include "ssfusexport.h"
 
 #if SSF_CONFIG_AESCCM_UNIT_TEST == 1
-/* Test-only hook fired after each secret local is wiped; NULL in production (AUDIT CCM-3). */
+/* Test-only hook fired after each secret local is wiped; NULL in production. */
 void (*_SSFAESCCMScrubTestHook)(const void *buf, size_t len) = NULL;
 #define _SSF_AESCCM_SCRUB_HOOK(b) \
     do { if (_SSFAESCCMScrubTestHook != NULL) _SSFAESCCMScrubTestHook((b), sizeof(b)); } while (0)
@@ -50,6 +50,7 @@ void (*_SSFAESCCMScrubTestHook)(const void *buf, size_t len) = NULL;
 static void _SSFAESCCMXorBlock(uint8_t *dst, const uint8_t *src)
 {
     uint32_t i;
+
     for (i = 0; i < SSF_AESCCM_BLOCK_SIZE; i++) dst[i] ^= src[i];
 }
 
@@ -70,6 +71,11 @@ static void _SSFAESCCMFormatB0(uint8_t b0[SSF_AESCCM_BLOCK_SIZE], const uint8_t 
     uint32_t L = (uint32_t)(15u - nonceLen);
     size_t q = ptLen;
     uint32_t i;
+
+    SSF_REQUIRE(b0 != NULL);
+    SSF_REQUIRE(nonce != NULL);
+    SSF_REQUIRE((nonceLen >= 7u) && (nonceLen <= 13u));
+    SSF_REQUIRE((tagLen >= 4u) && (tagLen <= 16u));
 
     memset(b0, 0, SSF_AESCCM_BLOCK_SIZE);
 
@@ -96,8 +102,12 @@ static void _SSFAESCCMFormatCtr(uint8_t a[SSF_AESCCM_BLOCK_SIZE], const uint8_t 
                                 size_t nonceLen, uint64_t counter)
 {
     uint32_t L = (uint32_t)(15u - nonceLen);
-    uint64_t c = counter;          /* L <= 8, so 64 bits cover the whole counter field (CCM-2) */
+    uint64_t c = counter; /* L <= 8, so 64 bits cover the whole counter field */
     uint32_t i;
+
+    SSF_REQUIRE(a != NULL);
+    SSF_REQUIRE(nonce != NULL);
+    SSF_REQUIRE((nonceLen >= 7u) && (nonceLen <= 13u));
 
     memset(a, 0, SSF_AESCCM_BLOCK_SIZE);
     a[0] = (uint8_t)(L - 1u);
@@ -138,6 +148,14 @@ static void _SSFAESCCMComputeTag(const SSFAESKeySchedule_t *ks, const uint8_t *n
     size_t chunk;
     size_t aadDone;
     size_t done = 0;
+
+    SSF_REQUIRE(ks != NULL);
+    SSF_REQUIRE(nonce != NULL);
+    SSF_REQUIRE((aad != NULL) || (aadLen == 0));
+    SSF_REQUIRE(aadLen < 0xFF00u);
+    SSF_REQUIRE((data != NULL) || (dataLen == 0));
+    SSF_REQUIRE(tagLen <= SSF_AESCCM_BLOCK_SIZE);
+    SSF_REQUIRE(tagOut != NULL);
 
     /* Process B_0 */
     _SSFAESCCMFormatB0(b, nonce, nonceLen, aadLen, dataLen, tagLen);
@@ -203,10 +221,18 @@ static void _SSFAESCCMCtr(const SSFAESKeySchedule_t *ks, const uint8_t *nonce, s
 {
     uint8_t a[SSF_AESCCM_BLOCK_SIZE];
     uint8_t s[SSF_AESCCM_BLOCK_SIZE];
-    uint64_t counter = 1;          /* uint32_t wrapped after 2^32 blocks (64 GiB) (CCM-2) */
+    uint64_t counter = 1; /* 64-bit so the block counter cannot wrap at 2^32 blocks */
     size_t done = 0;
     size_t chunk;
     uint32_t j;
+
+    SSF_REQUIRE(ks != NULL);
+    SSF_REQUIRE(nonce != NULL);
+    SSF_REQUIRE((in != NULL) || (inLen == 0));
+    SSF_REQUIRE((out != NULL) || (inLen == 0));
+    SSF_REQUIRE(tagIn != NULL);
+    SSF_REQUIRE(tagOut != NULL);
+    SSF_REQUIRE(tagLen <= SSF_AESCCM_BLOCK_SIZE);
 
     /* Encrypt/decrypt the data using S_1, S_2, ... */
     while (done < inLen)
@@ -301,7 +327,12 @@ bool SSFAESCCMDecrypt(const uint8_t *ct, size_t ctLen, const uint8_t *nonce, siz
     SSF_REQUIRE(ptSize >= ctLen);
     {
         uint32_t L = (uint32_t)(15u - nonceLen);
-        if ((L < 8u) && ((uint64_t)ctLen >= ((uint64_t)1u << (8u * L)))) return false;
+        /* Is ctLen too large for the L-byte length field? */
+        if ((L < 8u) && ((uint64_t)ctLen >= ((uint64_t)1u << (8u * L))))
+        {
+            /* Yes, it cannot be encoded */
+            return false;
+        }
     }
 
     /* Expand the round keys once for the CTR and CBC-MAC passes. */
@@ -318,7 +349,7 @@ bool SSFAESCCMDecrypt(const uint8_t *ct, size_t ctLen, const uint8_t *nonce, siz
     /* Step 3: Did the tags differ? (constant-time compare) */
     if (SSFCryptCTMemEq(cbcTag, decTag, tagLen) == false)
     {
-        /* Yes, authentication failed; is there plaintext to zero (pt may be NULL, CCM-1)? */
+        /* Yes, authentication failed; is there plaintext to zero (pt may be NULL)? */
         if (ctLen > 0u)
         {
             /* Yes, never release unauthenticated plaintext */

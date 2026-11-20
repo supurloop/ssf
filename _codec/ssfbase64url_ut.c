@@ -40,8 +40,7 @@ void SSFBase64URLUnitTest(void)
     {
         char out[64];
         size_t outLen;
-        /* "Hello" in standard base64 = "SGVsbG8=" */
-        /* In base64url = "SGVsbG8" (no padding) */
+        /* "Hello" is "SGVsbG8=" in standard base64, "SGVsbG8" (no padding) in base64url */
         SSF_ASSERT(SSFBase64URLEncode((const uint8_t *)"Hello", 5, out, sizeof(out),
                    &outLen) == true);
         SSF_ASSERT(memcmp(out, "SGVsbG8", 7u) == 0);
@@ -176,7 +175,7 @@ void SSFBase64URLUnitTest(void)
     {
         uint8_t in[256];
         char    encoded[512];
-        size_t  encodedLen;
+        size_t encodedLen;
         uint8_t decoded[256];
         size_t  decodedLen;
         size_t  i;
@@ -250,8 +249,7 @@ void SSFBase64URLUnitTest(void)
         size_t outLen;
         size_t i;
 
-        /* A length of 1 mod 4 can never be valid Base64, so step down one if the option lands */
-        /* there; the point is that the guard itself is off by exactly the documented amount */
+        /* Length 1 mod 4 is never valid Base64: step down one so only the guard is exercised */
         if ((len % 4u) == 1u) len--;
         expected = ((len / 4u) * 3u) + (((len % 4u) == 0u) ? 0u : ((len % 4u) - 1u));
 
@@ -294,7 +292,8 @@ void SSFBase64URLUnitTest(void)
         outLen = 99u;
         SSF_ASSERT(SSFBase64URLDecode("AA", 2u, out, 0u, &outLen) == false);
         SSF_ASSERT(outLen == 0u);
-        SSF_ASSERT(out[0] == 0xEEu);                           /* nothing written or scrubbed */
+        /* Nothing written or scrubbed */
+        SSF_ASSERT(out[0] == 0xEEu);
         outLen = 99u;
         SSF_ASSERT(SSFBase64URLDecode("AAAA", 4u, out, 0u, &outLen) == false);
         SSF_ASSERT(outLen == 0u && out[0] == 0xEEu);
@@ -358,8 +357,9 @@ void SSFBase64URLUnitTest(void)
         SSF_ASSERT(SSFBase64URLEncode(data, sizeof(data), out, 8u, &outLen) == false);
         SSF_ASSERT(outLen == 0u);
         SSF_ASSERT(out[0] == '\0');
-        for (i = 0; i < 8u; i++) SSF_ASSERT(out[i] == '\0');  /* whole buffer scrubbed */
-        SSF_ASSERT((uint8_t)out[8] == 0xEEu);                  /* and not one byte more */
+        /* Whole buffer scrubbed and not one byte more */
+        for (i = 0; i < 8u; i++) SSF_ASSERT(out[i] == '\0');
+        SSF_ASSERT((uint8_t)out[8] == 0xEEu);
 
         /* Smallest legal buffer with non-empty input */
         memset(out, 0xEE, sizeof(out));
@@ -493,31 +493,36 @@ void SSFBase64URLUnitTest(void)
 
         memset(oversized, 'A', sizeof(oversized));
 
+        /* Bad char after good block */
         memset(out, 0xEE, sizeof(out)); outLen = 99u;
         SSF_ASSERT(SSFBase64URLDecode("AAAA!!!!", 8u, out, sizeof(out), &outLen) == false);
-        SSF_ASSERT(outLen == 0u);                              /* bad char after good block */
+        SSF_ASSERT(outLen == 0u);
         SSF_ASSERT(out[0] == 0u && out[1] == 0u && out[2] == 0u);
-        SSF_ASSERT(out[5] == 0xEEu);  /* scrub is bounded: 3 decoded + at most 2 partial bytes */
+        /* Scrub is bounded: 3 decoded + at most 2 partial bytes */
+        SSF_ASSERT(out[5] == 0xEEu);
 
+        /* '+' rejected by wrapper */
         outLen = 99u;
         SSF_ASSERT(SSFBase64URLDecode("AA+A", 4u, out, sizeof(out), &outLen) == false);
-        SSF_ASSERT(outLen == 0u);                              /* '+' rejected by wrapper */
+        SSF_ASSERT(outLen == 0u);
 
+        /* Partial padding */
         outLen = 99u;
         SSF_ASSERT(SSFBase64URLDecode("AA=", 3u, out, sizeof(out), &outLen) == false);
-        SSF_ASSERT(outLen == 0u);                              /* partial padding */
+        SSF_ASSERT(outLen == 0u);
 
+        /* Size guard */
         outLen = 99u;
         SSF_ASSERT(SSFBase64URLDecode(oversized, sizeof(oversized), out, sizeof(out), &outLen)
                    == false);
-        SSF_ASSERT(outLen == 0u);                              /* size guard */
+        SSF_ASSERT(outLen == 0u);
 
+        /* Output buffer too small */
         memset(out, 0xEE, sizeof(out)); outLen = 99u;
         SSF_ASSERT(SSFBase64URLDecode("SGVsbG8", 7u, out, 4u, &outLen) == false);
-        SSF_ASSERT(outLen == 0u);                              /* output buffer too small */
+        SSF_ASSERT(outLen == 0u);
         SSF_ASSERT(out[0] == 0u && out[1] == 0u && out[2] == 0u);
-        /* The rejected block wrote out[3] before running out of room; it is scrubbed too, and */
-        /* the scrub never runs past outSize */
+        /* Rejected block wrote out[3] before running out of room; scrubbed, not past outSize */
         SSF_ASSERT(out[3] == 0u);
         SSF_ASSERT(out[4] == 0xEEu);
 
@@ -538,28 +543,34 @@ void SSFBase64URLUnitTest(void)
         SSF_ASSERT(SSFBase64URLDecode("A!AA", 4u, out, 1u, &outLen) == false);
         SSF_ASSERT(outLen == 0u && out[0] == 0u && out[1] == 0xEEu);
 
-        /* Remaining false paths all report zero */
+        /* Remaining false paths all report zero: length 1 mod 4 */
         outLen = 99u;
         SSF_ASSERT(SSFBase64URLDecode("A", 1u, out, sizeof(out), &outLen) == false);
-        SSF_ASSERT(outLen == 0u);                              /* length 1 mod 4 */
+        SSF_ASSERT(outLen == 0u);
+        /* Length 1 mod 4, 2nd block */
         outLen = 99u;
         SSF_ASSERT(SSFBase64URLDecode("AAAAA", 5u, out, sizeof(out), &outLen) == false);
-        SSF_ASSERT(outLen == 0u);                              /* length 1 mod 4, 2nd block */
+        SSF_ASSERT(outLen == 0u);
+        /* Non-canonical */
         outLen = 99u;
         SSF_ASSERT(SSFBase64URLDecode("AP", 2u, out, sizeof(out), &outLen) == false);
-        SSF_ASSERT(outLen == 0u);                              /* non-canonical */
+        SSF_ASSERT(outLen == 0u);
+        /* Non-canonical, 2nd block */
         outLen = 99u;
         SSF_ASSERT(SSFBase64URLDecode("AAAAAP", 6u, out, sizeof(out), &outLen) == false);
-        SSF_ASSERT(outLen == 0u);                              /* non-canonical, 2nd block */
+        SSF_ASSERT(outLen == 0u);
+        /* Excess padding */
         outLen = 99u;
         SSF_ASSERT(SSFBase64URLDecode("A===", 4u, out, sizeof(out), &outLen) == false);
-        SSF_ASSERT(outLen == 0u);                              /* excess padding */
+        SSF_ASSERT(outLen == 0u);
+        /* Interior padding */
         outLen = 99u;
         SSF_ASSERT(SSFBase64URLDecode("AA=AAAA", 7u, out, sizeof(out), &outLen) == false);
-        SSF_ASSERT(outLen == 0u);                              /* interior padding */
+        SSF_ASSERT(outLen == 0u);
+        /* Whitespace */
         outLen = 99u;
         SSF_ASSERT(SSFBase64URLDecode("AAAA\n", 5u, out, sizeof(out), &outLen) == false);
-        SSF_ASSERT(outLen == 0u);                              /* whitespace */
+        SSF_ASSERT(outLen == 0u);
     }
 
     /* ---- inLen mod 4 == 1: one char cannot encode a byte, "X===" is rejected. ---- */

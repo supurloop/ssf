@@ -37,10 +37,7 @@
 #include <stdio.h>
 #endif
 
-/* Cross-check the SSFBN implementation against OpenSSL's BIGNUM. Enabled when the build is      */
-/* linking libcrypto (host macOS/Linux); disabled on cross builds via -DSSF_CONFIG_HAVE_OPENSSL=0 */
-/* (see ssfport.h). When disabled, the Wycheproof corpus and the RFC 6979 KATs are the load-     */
-/* bearing correctness coverage instead.                                                          */
+/* Cross-check against OpenSSL's BIGNUM when the build links libcrypto (SSF_CONFIG_HAVE_OPENSSL) */
 #if (SSF_CONFIG_HAVE_OPENSSL == 1) && (SSF_CONFIG_BN_UNIT_TEST == 1)
 #define SSF_BN_OSSL_VERIFY 1
 #else
@@ -98,8 +95,7 @@ static bool _EqOSSL(const SSFBN_t *a, const BIGNUM *b)
     return memcmp(bufA, bufB, outSize) == 0;
 }
 
-/* Generate a random SSFBN_t at exactly `bits` bits, mirrored into `mirror`. The top bit is set */
-/* so the value occupies the full width. */
+/* Generate a random SSFBN_t of exactly `bits` bits (top bit set), mirrored into `mirror`. */
 static void _RandSSFBN(SSFBN_t *dst, BIGNUM *mirror, int bits, uint16_t numLimbs)
 {
     SSF_ASSERT(BN_rand(mirror, bits, BN_RAND_TOP_ONE, BN_RAND_BOTTOM_ANY) == 1);
@@ -140,8 +136,7 @@ static void _VerifyAtSize(int bits, uint16_t iters, bool prime_capable)
     SSF_ASSERT(bnE != NULL); SSF_ASSERT(bnR != NULL); SSF_ASSERT(bnQ != NULL);
     SSF_ASSERT(bnTmp != NULL);
 
-    /* For ModInv coverage, build a prime modulus once per size when feasible. Generating large */
-    /* primes is slow, so callers gate this with `prime_capable` for the smaller sizes. */
+    /* Build a prime modulus once per size for ModInv coverage; slow, so gated by prime_capable */
     BIGNUM *bnPrime = NULL;
     SSFBN_DEFINE(prime, SSF_BN_MAX_LIMBS);
     if (prime_capable)
@@ -307,12 +302,10 @@ static void _VerifyAtSize(int bits, uint16_t iters, bool prime_capable)
                 SSF_ASSERT(SSFBNModInvExt(&invR, &aP, &prime) == true);
                 SSF_ASSERT(_EqOSSL(&invR, bnR));
 
-                /* Round-trip property: aP * inv mod prime == 1. Catches ModInv/ModMul errors    */
-                /* that might both happen to match OpenSSL bug-for-bug or that corrupt internal  */
-                /* state without being visible at single-op parity. ModMul requires 2*nLimbs <=  */
-                /* MAX_LIMBS, so this only runs at sizes where Mul is also testable.             */
+                /* Does ModMul's 2 * nLimbs <= MAX_LIMBS allow the aP * inv == 1 round trip? */
                 if ((uint32_t)nLimbs * 2u <= SSF_BN_MAX_LIMBS)
                 {
+                    /* Yes, check aP * inv mod prime == 1 */
                     SSFBN_DEFINE(check, SSF_BN_MAX_LIMBS);
                     check.len = nLimbs;
                     SSFBNModMul(&check, &aP, &invR, &prime);
@@ -361,9 +354,10 @@ static void _VerifyAtSize(int bits, uint16_t iters, bool prime_capable)
             SSF_ASSERT(BN_mod_exp(bnR, bnA, bnE, bnM, ctx) == 1);
             SSF_ASSERT(_EqOSSL(&rOut, bnR));
 
-            /* Constant-time path. Exercise it less aggressively at the larger sizes. */
+            /* Is this a small size, or every 8th iteration at the larger sizes? */
             if (bits <= 1024 || (i & 0x7u) == 0u)
             {
+                /* Yes, also check the constant-time path */
                 SSFBNModExp(&rOut, &a, &e, &m);
                 SSF_ASSERT(_EqOSSL(&rOut, bnR));
             }
@@ -398,8 +392,7 @@ static void _VerifyAtSize(int bits, uint16_t iters, bool prime_capable)
             shifted.len = nLimbs;
             SSFBNShiftLeft(&shifted, shiftBy);
             SSF_ASSERT(BN_lshift(bnR, bnA, (int)shiftBy) == 1);
-            /* SSFBN truncates to its working width; mask the OpenSSL result the same way.       */
-            /* BN_mask_bits errors when the BIGNUM is already shorter than the mask; skip then.  */
+            /* Mask OpenSSL to SSFBN's working width (BN_mask_bits errors if already shorter) */
             if (BN_num_bits(bnR) > (int)nLimbs * 32)
             {
                 SSF_ASSERT(BN_mask_bits(bnR, (int)nLimbs * 32) == 1);
@@ -415,13 +408,7 @@ static void _VerifyAtSize(int bits, uint16_t iters, bool prime_capable)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Corner-case verification against OpenSSL.                                                     */
-/*                                                                                                */
-/* Random testing rarely hits identity values (0, 1, m-1), aliasing patterns (r=a=b), or         */
-/* carry/borrow boundaries. This routine drives each public function through those inputs and    */
-/* compares the result against OpenSSL where the operation has a counterpart, or against a       */
-/* hand-computed expected value where it does not. All modular work uses NIST P-256 as the       */
-/* modulus so ModInv coverage is included without paying for prime generation.                   */
+/* Checks identity, aliasing and carry/borrow corner cases against OpenSSL, mod NIST P-256.      */
 /* --------------------------------------------------------------------------------------------- */
 static void _VerifyCornerCasesAgainstOpenSSL(void)
 {
@@ -505,21 +492,30 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
         SSFBNCopy(&r, &rand1); r.len = nLimbs;
         carry = SSFBNAdd(&r, &r, &rand2); (void)carry;
         SSF_ASSERT(BN_add(bnR, bnA, bnB) == 1);
-        if (BN_num_bits(bnR) > (int)nLimbs * 32) SSF_ASSERT(BN_mask_bits(bnR, (int)nLimbs * 32) == 1);
+        if (BN_num_bits(bnR) > (int)nLimbs * 32)
+        {
+            SSF_ASSERT(BN_mask_bits(bnR, (int)nLimbs * 32) == 1);
+        }
         SSF_ASSERT(_EqOSSL(&r, bnR));
 
         /* Aliasing: r = b. */
         SSFBNCopy(&r, &rand2); r.len = nLimbs;
         (void)SSFBNAdd(&r, &rand1, &r);
         SSF_ASSERT(BN_add(bnR, bnA, bnB) == 1);
-        if (BN_num_bits(bnR) > (int)nLimbs * 32) SSF_ASSERT(BN_mask_bits(bnR, (int)nLimbs * 32) == 1);
+        if (BN_num_bits(bnR) > (int)nLimbs * 32)
+        {
+            SSF_ASSERT(BN_mask_bits(bnR, (int)nLimbs * 32) == 1);
+        }
         SSF_ASSERT(_EqOSSL(&r, bnR));
 
         /* Aliasing: r = a = b (a + a). */
         SSFBNCopy(&r, &rand1); r.len = nLimbs;
         (void)SSFBNAdd(&r, &r, &r);
         SSF_ASSERT(BN_add(bnR, bnA, bnA) == 1);
-        if (BN_num_bits(bnR) > (int)nLimbs * 32) SSF_ASSERT(BN_mask_bits(bnR, (int)nLimbs * 32) == 1);
+        if (BN_num_bits(bnR) > (int)nLimbs * 32)
+        {
+            SSF_ASSERT(BN_mask_bits(bnR, (int)nLimbs * 32) == 1);
+        }
         SSF_ASSERT(_EqOSSL(&r, bnR));
     }
 
@@ -585,7 +581,10 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
         (void)SSFBNAddUint32(&r, &rand1, 0xFFFFFFFFu);
         SSF_ASSERT(BN_set_word(bnTmp, 0xFFFFFFFFu) == 1);
         SSF_ASSERT(BN_add(bnR, bnA, bnTmp) == 1);
-        if (BN_num_bits(bnR) > (int)nLimbs * 32) SSF_ASSERT(BN_mask_bits(bnR, (int)nLimbs * 32) == 1);
+        if (BN_num_bits(bnR) > (int)nLimbs * 32)
+        {
+            SSF_ASSERT(BN_mask_bits(bnR, (int)nLimbs * 32) == 1);
+        }
         SSF_ASSERT(_EqOSSL(&r, bnR));
     }
 
@@ -654,7 +653,8 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
             SSF_ASSERT(SSFBNIsZero(&r));
             /* q should equal big. */
             {
-                uint8_t bufQ[SSF_BN_MAX_BYTES], bufBig[SSF_BN_MAX_BYTES];
+                uint8_t bufQ[SSF_BN_MAX_BYTES];
+                uint8_t bufBig[SSF_BN_MAX_BYTES];
                 size_t out = (size_t)mulLimbs * 4u;
                 SSF_ASSERT(SSFBNToBytes(&q, bufQ, out));
                 SSF_ASSERT(SSFBNToBytes(&big, bufBig, out));
@@ -688,7 +688,7 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
 
         /* gcd(0, a) = a. */
         SSFBNGcd(&g, &zero, &rand1);
-        SSF_ASSERT(BN_gcd(bnR, BN_value_one(), bnA, ctx) == 1 || 1); /* OpenSSL gcd(0,a)=a */
+        SSF_ASSERT(BN_gcd(bnR, BN_value_one(), bnA, ctx) == 1 || 1);
         {
             BIGNUM *zeroBN = BN_new();
             BN_zero(zeroBN);
@@ -928,9 +928,7 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
         SSFBNModExp(&r, &rand1, &e, &m);
         SSF_ASSERT(SSFBNCmpUint32(&r, 1u) == 0);
 
-        /* Wider e (e->len > ctx->len) with high bits set: ModExp must process all of e, not    */
-        /* silently truncate to the modulus's bit width. Construct e with e->len = 2*nLimbs and */
-        /* a bit set above ctx->len*32 -- verify against OpenSSL. */
+        /* Wider e (2 * nLimbs, a bit above ctx->len * 32): ModExp must not truncate e */
         {
             SSFBN_DEFINE(eWide, SSF_BN_MAX_LIMBS);
             BIGNUM *bnEWide = BN_new();
@@ -962,7 +960,10 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
         SSFBNCopy(&r, &rand1); r.len = nLimbs;
         SSFBNShiftLeft(&r, 32u);
         SSF_ASSERT(BN_lshift(bnR, bnA, 32) == 1);
-        if (BN_num_bits(bnR) > (int)nLimbs * 32) SSF_ASSERT(BN_mask_bits(bnR, (int)nLimbs * 32) == 1);
+        if (BN_num_bits(bnR) > (int)nLimbs * 32)
+        {
+            SSF_ASSERT(BN_mask_bits(bnR, (int)nLimbs * 32) == 1);
+        }
         SSF_ASSERT(_EqOSSL(&r, bnR));
 
         /* Shift right by exactly one limb. */
@@ -1101,7 +1102,7 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
         SSF_ASSERT(SSFBNCmpUint32(&zero, 1u) < 0);
         SSF_ASSERT(SSFBNCmpUint32(&one, 0u) > 0);
         SSF_ASSERT(SSFBNCmpUint32(&one, 1u) == 0);
-        SSF_ASSERT(SSFBNCmpUint32(&allOnes, 0xFFFFFFFFu) > 0); /* allOnes > 1 limb */
+        SSF_ASSERT(SSFBNCmpUint32(&allOnes, 0xFFFFFFFFu) > 0);
         SSF_ASSERT(SSFBNCmpUint32(&big, 0xFFFFFFFFu) == 0);
     }
 
@@ -1154,8 +1155,7 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
         SSFBNCopy(&t, &mMinus1); t.len = nLimbs;
         SSF_ASSERT(SSFBNIsProbablePrime(&t, 5u, &prng) == false);
 
-        /* Small-case results: 0 and 1 are not prime; 2 and 3 are prime (handled by the      */
-        /* fast-path branches that bypass the Miller-Rabin witness sampler).                  */
+        /* Small cases (fast paths, no witness sampling): 0 and 1 are not prime; 2 and 3 are */
         SSFBNSetUint32(&t, 0u, nLimbs);
         SSF_ASSERT(SSFBNIsProbablePrime(&t, 5u, &prng) == false);
         SSFBNSetUint32(&t, 1u, nLimbs);
@@ -1166,11 +1166,10 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
         SSF_ASSERT(SSFBNIsProbablePrime(&t, 5u, &prng) == true);
         SSFBNSetUint32(&t, 4u, nLimbs);
         SSF_ASSERT(SSFBNIsProbablePrime(&t, 5u, &prng) == false);
-        SSFBNSetUint32(&t, 9u, nLimbs);  /* 3 * 3 */
+        SSFBNSetUint32(&t, 9u, nLimbs); /* 3 * 3 */
         SSF_ASSERT(SSFBNIsProbablePrime(&t, 5u, &prng) == false);
 
-        /* Small odd primes exercise the small-n / wide-storage Miller-Rabin path that the   */
-        /* sampler-mask fix unblocked.                                                        */
+        /* Small odd primes exercise the small-n / wide-storage Miller-Rabin path */
         SSFBNSetUint32(&t, 11u, nLimbs);
         SSF_ASSERT(SSFBNIsProbablePrime(&t, 5u, &prng) == true);
         SSFBNSetUint32(&t, 13u, nLimbs);
@@ -1178,18 +1177,14 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
         SSFBNSetUint32(&t, 65537u, nLimbs);
         SSF_ASSERT(SSFBNIsProbablePrime(&t, 5u, &prng) == true);
 
-        /* Carmichael number 561 = 3 * 11 * 17 -- passes Fermat test but Miller-Rabin must */
-        /* reject with a few rounds of random witnesses. */
+        /* Carmichael 561 = 3 * 11 * 17 passes Fermat; Miller-Rabin must reject it */
         SSFBNSetUint32(&t, 561u, nLimbs);
         SSF_ASSERT(SSFBNIsProbablePrime(&t, 10u, &prng) == false);
 
         SSFPRNGDeInitContext(&prng);
     }
 
-    /* === ModMulNIST coverage ======================================================== */
-    /* The header documents: "mod must be SSF_BN_NIST_P256 or SSF_BN_NIST_P384. Falls back to */
-    /* SSFBNModMul for other moduli." Existing tests only cover x*0 and x*1; verify each path  */
-    /* against ModMul / OpenSSL across non-trivial inputs.                                    */
+    /* === ModMulNIST: P-256, P-384 and fallback paths vs ModMul / OpenSSL ============= */
     {
         SSFBN_DEFINE(rNist, SSF_BN_MAX_LIMBS);
         SSFBN_DEFINE(rGen, SSF_BN_MAX_LIMBS);
@@ -1208,8 +1203,7 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
     }
 #if SSF_BN_CONFIG_MAX_BITS >= 768
     {
-        /* P-384 fast path. (Block requires SSF_BN_NIST_P384 -- only defined when the cap is at */
-        /* least 768 bits, which excludes a pure-ECC-P256-only config.)                          */
+        /* P-384 fast path (SSF_BN_NIST_P384 exists only when the cap is >= 768 bits) */
         const uint16_t n384 = 12u;
         SSFBN_DEFINE(a384, SSF_BN_MAX_LIMBS);
         SSFBN_DEFINE(b384, SSF_BN_MAX_LIMBS);
@@ -1258,18 +1252,12 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
         SSF_ASSERT(BN_mod_mul(bnR, bnA, bnB, bnTmp, ctx) == 1);
         SSF_ASSERT(_EqOSSL(&rNist, bnR));
 
-        /* Restore bnA, bnB to the rand1/rand2 values used elsewhere -- caller of this */
-        /* function does not depend on them, but be tidy. */
+        /* Restore bnA, bnB to the rand1 / rand2 values used elsewhere */
         _ToOSSL(bnA, &rand1);
         _ToOSSL(bnB, &rand2);
     }
 
-    /* === ModMulCT: cross-check against ModMul + OpenSSL ============================== */
-    /* The CT primitive must produce identical results to the data-dependent SSFBNModMul   */
-    /* across random inputs and edge cases. The invariant: ModMulCT(a, b, m) == ModMul(a,  */
-    /* b, m) whenever a < m or b < m (its precondition, AUDIT BN-1; the inputs here are    */
-    /* reduced). If the fixed-iteration mask logic is wrong, the random cross-check or the  */
-    /* (m-1)*(m-1) edge case will fail.                                                     */
+    /* === ModMulCT == ModMul + OpenSSL whenever a < m or b < m (AUDIT BN-1) =========== */
     {
         SSFBN_DEFINE(rCT, SSF_BN_MAX_LIMBS);
         SSFBN_DEFINE(rGen, SSF_BN_MAX_LIMBS);
@@ -1302,8 +1290,7 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
         SSFBNModMulCT(&rCT, &mMinus1, &mMinus1, &m);
         SSF_ASSERT(SSFBNCmpUint32(&rCT, 1u) == 0);
 
-        /* Edge: at NIST P-256 prime as modulus (the dense bit pattern of P-256 = 2^256 -      */
-        /* 2^224 + ... is a stress case for shift-and-subtract reductions). */
+        /* Edge: the dense bit pattern of the P-256 prime stresses shift-and-subtract reduction */
         if (nLimbs == 8u)
         {
             SSFBN_DEFINE(rCTNist, SSF_BN_MAX_LIMBS);
@@ -1379,7 +1366,8 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
         }
         /* bound = 2: outputs must be 0 or 1. Both should appear over many draws. */
         {
-            bool sawZero = false, sawOne = false;
+            bool sawZero = false;
+            bool sawOne = false;
             SSFBNSetUint32(&small, 2u, nLimbs);
             for (k = 0; k < 64u; k++)
             {
@@ -1423,12 +1411,7 @@ static void _VerifyCornerCasesAgainstOpenSSL(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Karatsuba boundary stress.                                                                    */
-/*                                                                                                */
-/* SSFBNMul dispatches to Karatsuba when (a->len == b->len) AND (n >= 32) AND (n is even); every  */
-/* other case falls back to schoolbook. Random-input sweeps don't reliably probe the boundary -- */
-/* this function explicitly tests lengths that bracket the threshold and exercise the dispatch   */
-/* logic on both even/odd and same/asymmetric pairings.                                          */
+/* Checks SSFBNMul at lengths bracketing the Karatsuba threshold (even/odd, same/asymmetric).    */
 /* --------------------------------------------------------------------------------------------- */
 static void _VerifyKaratsubaAtBoundary(void)
 {
@@ -1472,9 +1455,10 @@ static void _VerifyKaratsubaAtBoundary(void)
             SSF_ASSERT(r.len == (uint16_t)(aLen + bLen));
             SSF_ASSERT(_EqOSSL(&r, bnR));
 
-            /* Square parity (only when a.len matches what SSFBNSquare can handle and aLen==bLen) */
+            /* Are the operands the same size and small enough for SSFBNSquare? */
             if ((aLen == bLen) && ((uint32_t)aLen * 2u <= SSF_BN_MAX_LIMBS))
             {
+                /* Yes, check square parity */
                 SSFBN_DEFINE(sq, SSF_BN_MAX_LIMBS);
                 SSFBNSquare(&sq, &a);
                 SSF_ASSERT(BN_sqr(bnR, bnA, ctx) == 1);
@@ -1488,13 +1472,7 @@ static void _VerifyKaratsubaAtBoundary(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* NIST fast-reduction stress.                                                                   */
-/*                                                                                                */
-/* _SSFBNReduceP256 / _SSFBNReduceP384 are hand-coded magic-limb-permutation tables from NIST    */
-/* SP 800-186. Each s_i and d_i selects specific 32-bit chunks of the 16- or 24-limb input --    */
-/* easy to typo, hard to spot in code review. The trailing carry/borrow adjustment loops are     */
-/* hit infrequently with purely random inputs because random a*b rarely sits right at the prime. */
-/* This sweep injects boundary values periodically to force adjustment-loop activity.            */
+/* Stresses the P-256 / P-384 fast reductions with periodic boundary inputs against OpenSSL.     */
 /* --------------------------------------------------------------------------------------------- */
 static void _VerifyNISTReductionStress(void)
 {
@@ -1577,12 +1555,7 @@ static void _VerifyNISTReductionStress(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* ModInvExt at RSA-2048.                                                                        */
-/*                                                                                                */
-/* The existing _VerifyAtSize covers ModInv at 256, 384, 1024 (where prime gen is fast). At      */
-/* 2048 prime gen would dominate test runtime, and at 4096 SSFBNModInv's internal verification   */
-/* via SSFBNModMul trips the 2*nLimbs <= MAX_LIMBS precondition. This function fills the gap by  */
-/* generating one 2048-bit prime and running a focused ModInvExt sweep against it.               */
+/* Checks SSFBNModInvExt against OpenSSL with one 2048-bit prime (too slow in _VerifyAtSize).    */
 /* --------------------------------------------------------------------------------------------- */
 static void _VerifyModInvExtAtRSA2048(void)
 {
@@ -1658,7 +1631,8 @@ static void _SSFBNVerifyAgainstOpenSSL(void)
     SSF_UT_PRINTF("OK\n");
     for (si = 0; si < (sizeof(sizes) / sizeof(sizes[0])); si++)
     {
-        SSF_UT_PRINTF("  %-9s %4d-bit x %u iters... ", sizes[si].label, sizes[si].bits, sizes[si].iters);
+        SSF_UT_PRINTF("  %-9s %4d-bit x %u iters... ", sizes[si].label, sizes[si].bits,
+                      sizes[si].iters);
         fflush(stdout);
         _VerifyAtSize(sizes[si].bits, sizes[si].iters, sizes[si].prime_capable);
         SSF_UT_PRINTF("OK\n");
@@ -1673,7 +1647,7 @@ static void _SSFBNVerifyAgainstOpenSSL(void)
 #endif /* SSF_BN_OSSL_VERIFY */
 
 /* --------------------------------------------------------------------------------------------- */
-/* AUDIT BN-11: scrub-hook callback; counts calls and any buffer that is not all zero.         */
+/* AUDIT BN-11: scrub-hook callback; counts calls and any buffer that is not all zero.           */
 /* --------------------------------------------------------------------------------------------- */
 static uint32_t _scrubCalls;
 static uint32_t _scrubDirty;
@@ -1705,7 +1679,7 @@ static void _SSFBNUTRefR2(SSFBN_t *r2, const SSFBN_t *m)
     SSF_REQUIRE(m != NULL);
 
     SSFBNSetOne(r2, m->len);
-    for (k = 0u; k < ((uint32_t)m->len * SSF_BN_LIMB_BITS * 2u); k++)
+    for (k = 0u; k < (((uint32_t)m->len * SSF_BN_LIMB_BITS) * 2u); k++)
     {
         SSFBNModAdd(r2, r2, r2, m);
     }
@@ -1808,7 +1782,7 @@ static void _SSFBNUTCheckModAdd(const SSFBN_t *m, const SSFBN_t *a, const SSFBN_
     acc = 0u;
     for (k = 0u; k < m->len; k++)
     {
-        acc += (SSFBNDLimb_t)a->limbs[k] + (SSFBNDLimb_t)b->limbs[k];
+        acc += ((SSFBNDLimb_t)a->limbs[k] + (SSFBNDLimb_t)b->limbs[k]);
         ref.limbs[k] = (SSFBNLimb_t)acc;
         acc >>= SSF_BN_LIMB_BITS;
     }
@@ -1831,7 +1805,7 @@ static void _SSFBNUTCheckModAdd(const SSFBN_t *m, const SSFBN_t *a, const SSFBN_
         acc = 0u;
         for (k = 0u; k < m->len; k++)
         {
-            SSFBNDLimb_t d = (SSFBNDLimb_t)ref.limbs[k] - (SSFBNDLimb_t)m->limbs[k] - acc;
+            SSFBNDLimb_t d = ((SSFBNDLimb_t)ref.limbs[k] - (SSFBNDLimb_t)m->limbs[k]) - acc;
             ref.limbs[k] = (SSFBNLimb_t)d;
             acc = (d >> SSF_BN_LIMB_BITS) & 1u;
         }
@@ -1854,15 +1828,13 @@ static void _SSFBNUTCheckModAdd(const SSFBN_t *m, const SSFBN_t *a, const SSFBN_
     }
 }
 
-/* Suppress C6262 (large stack frame). This unit-test entry point intentionally allocates many */
-/* SSFBN_DEFINE locals across its sub-test blocks; the host test environment has ample stack.  */
+/* Suppress C6262 (large stack frame): the unit test entry point has many SSFBN_DEFINE locals */
 #ifdef _WIN32
 #pragma warning(push)
 #pragma warning(disable:6262)
 #endif
 /* --------------------------------------------------------------------------------------------- */
-/* Stack hygiene probes: fill, then read back, the region just below the caller's frame. A       */
-/* callee that returned without wiping a local leaves it in this region (OPTIMIZE RSA-STK).      */
+/* Stack hygiene probes: fill, then scan, the region below the caller's frame for unwiped locals */
 /* --------------------------------------------------------------------------------------------- */
 #define _SSFBN_UT_PROBE_BYTES (8u * 1024u)
 SSF_NOINLINE
@@ -1902,7 +1874,12 @@ static uint32_t _SSFBNUTScanStack(const uint8_t *n1, const uint8_t *n2, size_t l
             if (buf[i + j] != n1[j]) m1 = false;
             if (buf[i + j] != n2[j]) m2 = false;
         }
-        if (m1 || m2) found++;
+        /* Does either pattern match at offset i? */
+        if (m1 || m2)
+        {
+            /* Yes, count it */
+            found++;
+        }
     }
     buf[0] = (uint8_t)found;
     return found;
@@ -1938,12 +1915,7 @@ void SSFBNUnitTest(void)
         SSF_ASSERT(SSFBNIsEven(&a) == false);
     }
 
-    /* ---- (Hardening) SSFBNMontSquare fixed-length carry propagation ---- */
-    /* The constant-time rewrite replaced two value-dependent while(carry) loops with fixed-length */
-    /* spans. Square an operand that fills the high limbs (near 2^256, maximizing the carry ripple  */
-    /* the fix now spans unconditionally) via the Montgomery path and check it against the          */
-    /* independent schoolbook reference a^2 mod m. Guards correctness across the rewrite; the        */
-    /* constant-time property itself is verified by code review, not observable through the API.     */
+    /* ---- SSFBNMontSquare fixed-length carry spans: all-ones operand vs ModMul reference ---- */
     {
         SSFBNMONT_DEFINE(mont, SSF_BN_MAX_LIMBS);
         SSFBN_DEFINE(m, SSF_BN_MAX_LIMBS);
@@ -2075,9 +2047,7 @@ void SSFBNUnitTest(void)
         SSF_ASSERT(SSFBNToBytesLE(&a, tiny, sizeof(tiny)) == false);
     }
 
-    /* ---- ToBytes regression: outSize smaller than a->len * limb-size must not corrupt  */
-    /* the stack. Uses canary bytes around `out` and checks them afterward; this caught    */
-    /* an earlier underflow in the limb-offset computation that wrote to out[SIZE_MAX].    */
+    /* ---- ToBytes with outSize < a->len * 4 must not write outside out (canaries) ---- */
     {
         volatile uint8_t canaryLo = 0xA5u;
         uint8_t out[6];
@@ -2209,12 +2179,10 @@ void SSFBNUnitTest(void)
         SSFBNShiftRight(&a, 0u);
         SSF_ASSERT(SSFBNCmp(&a, &b) == 0);
 
-        /* Parity sweep: for 0 <= nBits <= 160, SSFBNShiftLeft(a, nBits) must equal nBits       */
-        /* applications of SSFBNShiftLeft1 starting from the same a. Same for ShiftRight.       */
+        /* Parity sweep: ShiftLeft / ShiftRight(a, n) == n Shift*1 steps, 0 <= n <= 160 */
         for (nBits = 0; nBits <= 160u; nBits++)
         {
-            /* Seed a and b with an identical pseudo-random value wide enough to exercise       */
-            /* limb-boundary crossings at 32, 64, 96, 128 bits.                                  */
+            /* Seed a and b identically, wide enough to cross limbs at 32, 64, 96, 128 bits */
             uint8_t data[20] = {
                 0x12u, 0x34u, 0x56u, 0x78u, 0x9Au, 0xBCu, 0xDEu, 0xF0u,
                 0x0Fu, 0xEDu, 0xCBu, 0xA9u, 0x87u, 0x65u, 0x43u, 0x21u,
@@ -2259,8 +2227,7 @@ void SSFBNUnitTest(void)
         SSF_ASSERT(a.limbs[0] == 0xDEADBEEFul);
         SSF_ASSERT(a.limbs[1] == 0u);
 
-        /* Sub-limb shift that crosses a limb boundary (shift 0xFFFFFFFF left by 20 yields       */
-        /* 0x000FFFFF_FFF00000: limb[0]=0xFFF00000, limb[1]=0x000FFFFF).                          */
+        /* Sub-limb shift across a limb: 0xFFFFFFFF << 20 == limbs { 0xFFF00000, 0x000FFFFF } */
         SSFBNSetUint32(&a, 0xFFFFFFFFul, 4);
         SSFBNShiftLeft(&a, 20u);
         SSF_ASSERT(a.limbs[0] == 0xFFF00000ul);
@@ -2305,7 +2272,7 @@ void SSFBNUnitTest(void)
         /* High limb parity does not affect IsOdd -- only the low bit of limb[0] matters. */
         SSFBNSetZero(&a, 4);
         a.limbs[3] = 0x80000001ul;
-        SSF_ASSERT(SSFBNIsOdd(&a) == false); /* limb[0] = 0 -> even */
+        SSF_ASSERT(SSFBNIsOdd(&a) == false);
 
         a.limbs[0] = 0xFFFFFFFEul;
         SSF_ASSERT(SSFBNIsOdd(&a) == false);
@@ -2440,15 +2407,14 @@ void SSFBNUnitTest(void)
         a.limbs[3] = 1u;
         SSF_ASSERT(SSFBNTrailingZeros(&a) == 96u);
 
-        /* Mixed value: low limb zero, limb[1] has a low set bit and other high bits -- must     */
-        /* return the position of the lowest set bit only.                                       */
+        /* Low limb zero, limb[1] with a low set bit and high bits: lowest set bit only */
         SSFBNSetZero(&a, 4);
         a.limbs[1] = 0xFF00FF10ul; /* lowest set bit is bit 4 of limb 1 -> global bit 36 */
         SSF_ASSERT(SSFBNTrailingZeros(&a) == 36u);
 
         /* After a left shift by k, tz grows by k. */
         SSFBNSetUint32(&a, 0xDEADBEEFul, 4);
-        SSF_ASSERT(SSFBNTrailingZeros(&a) == 0u); /* 0xDEADBEEF has bit 0 set */
+        SSF_ASSERT(SSFBNTrailingZeros(&a) == 0u);
         SSFBNShiftLeft(&a, 17u);
         SSF_ASSERT(SSFBNTrailingZeros(&a) == 17u);
     }
@@ -2489,10 +2455,7 @@ void SSFBNUnitTest(void)
         SSF_ASSERT(r.limbs[0] == 2u);
     }
 
-    /* ---- AUDIT BN-1: SSFBNModMulCT requires at least one operand < m ---- */
-    /* The fixed-iteration reduction is only correct when a * b < m * 2^(32 * len + 1). With   */
-    /* both operands unreduced and a modulus whose top limb is zero it used to return a      */
-    /* truncated, non-reduced value (0x44b7baeace9af989 here instead of 0x5e8879ed).         */
+    /* ---- AUDIT BN-1: ModMulCT needs an operand < m (was truncated, non-reduced result) ---- */
     {
         static const uint8_t aBytes[8] = { 0x7Fu, 0x62u, 0x00u, 0xECu, 0x78u, 0x86u, 0x9Bu, 0x5Au };
         static const uint8_t bBytes[8] = { 0xC0u, 0xFCu, 0x92u, 0x52u, 0xD0u, 0xDBu, 0x7Fu, 0xEDu };
@@ -2555,9 +2518,7 @@ void SSFBNUnitTest(void)
         SSF_ASSERT(r.limbs[0] == 4u);
     }
 
-    /* ---- AUDIT BN-3: ModInv returns false (never traps) for unusable moduli ---- */
-    /* The Fermat exponentiation goes through Montgomery, whose init requires an odd modulus, */
-    /* so an even m used to trip SSF_REQUIRE instead of returning false as documented.        */
+    /* ---- AUDIT BN-3: ModInv returns false (never traps) for unusable, e.g. even, moduli ---- */
     {
         SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
         SSFBN_DEFINE(m, SSF_BN_MAX_LIMBS);
@@ -2577,11 +2538,7 @@ void SSFBNUnitTest(void)
         SSF_ASSERT(SSFBNModInv(&r, &a, &m) == false);
     }
 
-    /* ---- AUDIT BN-10: ModInv's a * r == 1 check is constant-time (no SSFBNMod) ---- */
-    /* The Fermat exponentiation was constant-time but the check used SSFBNModMul, whose       */
-    /* SSFBNMod loop length and add-backs depend on a * r; with a = ECDSA nonce that leaks its  */
-    /* bit length. ModInv must not reach SSFBNMod, must still invert full-length and short a,  */
-    /* and must still reject a non-prime modulus where Fermat gives a wrong inverse.           */
+    /* ---- AUDIT BN-10: ModInv's a * r == 1 check is constant-time (never reaches SSFBNMod) ---- */
 #if SSF_BN_CONFIG_MAX_BITS >= 512
     {
         SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
@@ -2615,10 +2572,7 @@ void SSFBNUnitTest(void)
     }
 #endif /* SSF_BN_CONFIG_MAX_BITS >= 512 */
 
-    /* ---- AUDIT BN-11: GenPrime and IsProbablePrime wipe the candidate and MR state ---- */
-    /* GenPrime returned with the accepted prime's bytes in its local buf, and IsProbablePrime */
-    /* left n - 1, d, the witness, x and a Montgomery context of n on the stack. The scrub    */
-    /* hook must see only zeros, on the accept path and on the composite (goto) path.         */
+    /* ---- AUDIT BN-11: GenPrime / IsProbablePrime wipe candidate and MR state, every path ---- */
     {
         SSFPRNGContext_t prng;
         uint8_t seed[SSF_PRNG_ENTROPY_SIZE];
@@ -2636,14 +2590,12 @@ void SSFBNUnitTest(void)
         SSF_ASSERT(SSFBNGenPrime(&p, 256u, 5u, &prng) == true);
         SSF_ASSERT(_scrubCalls >= 8u);
 
-        /* Composite 221 = 13 * 17 leaves through the Miller-Rabin reject path: its 7 locals */
-        /* plus SSFBNMontInit's R^2 copy (OPTIMIZE BN-O1), and 5 per odd-modulus SSFBNMod   */
-        /* (its acc, c, context mod and R^2, and its own MontInit's R^2: OPTIMIZE BN-O7).   */
+        /* Composite 221 = 13 * 17: 7 MR locals + MontInit's R^2 + 5 per odd-modulus SSFBNMod */
         calls = _scrubCalls;
         _SSFBNModCallCount = 0u;
         SSFBNSetUint32(&c, 221u, 8u);
         SSF_ASSERT(SSFBNIsProbablePrime(&c, 5u, &prng) == false);
-        SSF_ASSERT(_scrubCalls == (calls + 8u + (5u * _SSFBNModCallCount)));
+        SSF_ASSERT(_scrubCalls == ((calls + 8u) + (5u * _SSFBNModCallCount)));
 
         _SSFBNScrubTestHook = NULL;
         SSF_ASSERT(_scrubDirty == 0u);
@@ -2651,9 +2603,6 @@ void SSFBNUnitTest(void)
     }
 
     /* ---- AUDIT BN-12: Karatsuba carry / borrow propagation runs a fixed iteration count ---- */
-    /* Steps 5 and 6 and the tail loop stopped as soon as the borrow or carry was zero, so the */
-    /* trip count depended on the secret operands. All-zero and all-ones operands must take   */
-    /* the same number of propagation iterations, and the all-ones product must be exact.     */
 #if ((2u * (SSF_BN_KARATSUBA_THRESHOLD + (SSF_BN_KARATSUBA_THRESHOLD & 1u))) <= SSF_BN_MAX_LIMBS)
     {
         SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
@@ -2696,9 +2645,6 @@ void SSFBNUnitTest(void)
 #endif /* Karatsuba-size operands fit */
 
     /* ---- AUDIT BN-13: full-width ToBytes / ToBytesLE export without a significance scan ---- */
-    /* Both exporters scanned down for the top non-zero limb and byte, so their run time       */
-    /* leaked the value's leading zeros (ECDH secrets, private keys). A buffer covering every  */
-    /* limb must be written without the scan; a narrower buffer still sizes the value.        */
     {
         SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
         uint8_t out[32];
@@ -2808,9 +2754,7 @@ void SSFBNUnitTest(void)
         SSF_ASSERT(SSFBNCmp(&a, &aBack) == 0);
     }
 
-    /* ====================================================================================== */
-    /* Primality-related API (hoisted from ssfrsa)                                              */
-    /* ====================================================================================== */
+    /* ==== Primality-related API (hoisted from ssfrsa) ===================================== */
 
     /* ---- SSFBNModUint32: basic reductions ---- */
     {
@@ -2820,8 +2764,7 @@ void SSFBNUnitTest(void)
         SSFBNSetUint32(&a, 123456789u, 4);
         SSF_ASSERT(SSFBNModUint32(&a, 7u) == 1u);
 
-        /* A large BN: (2^64) mod 3 == 1 since 2^64 = 4 * 2^62, and 2 mod 3 == 2, 4 mod 3 == 1  */
-        /* Build 2^64 via FromBytes: big-endian 0x00..01 0x00..00. */
+        /* 2^64 mod 3 == 1 (2^64 = 4 * 2^62); build 2^64 via big-endian FromBytes */
         {
             static const uint8_t data[9] = { 0x01u, 0,0,0,0, 0,0,0,0 };
             SSFBNFromBytes(&a, data, sizeof(data), 4);
@@ -2945,9 +2888,7 @@ void SSFBNUnitTest(void)
         SSFPRNGDeInitContext(&prng);
     }
 
-    /* ====================================================================================== */
-    /* Squaring API -- must agree bit-for-bit with the general multiply on every input.         */
-    /* ====================================================================================== */
+    /* ==== Squaring API: must agree bit-for-bit with the general multiply ================== */
 
     /* ---- SSFBNSquare: parity with SSFBNMul(a, a) across small, mid, and large operands ---- */
     {
@@ -2986,8 +2927,7 @@ void SSFBNUnitTest(void)
         SSF_ASSERT(sq.limbs[0] == 0x00000001ul);
         SSF_ASSERT(sq.limbs[1] == 0xFFFFFFFEul);
 
-        /* Parity against generic multiply for a range of multi-limb values. Build a from a      */
-        /* pseudo-random byte sequence; the test is deterministic (no PRNG dependency).          */
+        /* Parity against generic multiply for deterministic multi-limb byte patterns */
         for (k = 1; k <= 8u; k++)
         {
             uint8_t data[32];
@@ -2995,7 +2935,7 @@ void SSFBNUnitTest(void)
 
             for (i = 0; i < sizeof(data); i++)
             {
-                data[i] = (uint8_t)(0x5Au + (uint8_t)i * (uint8_t)k);
+                data[i] = (uint8_t)(0x5Au + ((uint8_t)i * (uint8_t)k));
             }
             SSFBNFromBytes(&a, data, sizeof(data), 8);
             SSFBNSquare(&sq, &a);
@@ -3019,7 +2959,7 @@ void SSFBNUnitTest(void)
 
             for (i = 0; i < sizeof(data); i++)
             {
-                data[i] = (uint8_t)(0xA5u + (uint8_t)i * (uint8_t)k);
+                data[i] = (uint8_t)(0xA5u + ((uint8_t)i * (uint8_t)k));
             }
             SSFBNFromBytes(&a, data, sizeof(data), 8);
             /* Ensure a < p256 so the modular contract holds. */
@@ -3051,7 +2991,7 @@ void SSFBNUnitTest(void)
 
         for (k = 1; k <= 4u; k++)
         {
-            SSFBNSetUint32(&a, 1000u * (uint32_t)k + (uint32_t)k, 8);
+            SSFBNSetUint32(&a, (1000u * (uint32_t)k) + (uint32_t)k, 8);
             SSFBNMontConvertIn(&aM, &a, &mont);
             SSFBNMontSquare(&sqM, &aM, &mont);
             SSFBNMontMul(&mulM, &aM, &aM, &mont);
@@ -3093,7 +3033,7 @@ void SSFBNUnitTest(void)
 
             for (i = 0; i < sizeof(data); i++)
             {
-                data[i] = (uint8_t)(0x3Cu + (uint8_t)i * 7u + (uint8_t)k * 11u);
+                data[i] = (uint8_t)((0x3Cu + ((uint8_t)i * 7u)) + ((uint8_t)k * 11u));
             }
             SSFBNFromBytes(&a, data, sizeof(data), 8);
             SSFBNMod(&a, &a, &SSF_BN_NIST_P256);
@@ -3104,9 +3044,7 @@ void SSFBNUnitTest(void)
         }
     }
 
-    /* ====================================================================================== */
-    /* Uint32 small-operand arithmetic -- parity with matched 1-limb BN operand                 */
-    /* ====================================================================================== */
+    /* ==== Uint32 small-operand arithmetic: parity with a matched 1-limb BN operand ======== */
 
     /* ---- SSFBNAddUint32: parity + carry return ---- */
     {
@@ -3236,9 +3174,7 @@ void SSFBNUnitTest(void)
         SSF_ASSERT(SSFBNIsZero(&rProd) == true);
     }
 
-    /* ====================================================================================== */
-    /* Variable-time ModExp (public-exponent-only) -- must match constant-time ModExp exactly   */
-    /* ====================================================================================== */
+    /* ==== Variable-time ModExp (public exponent only) must match constant-time ModExp ===== */
 
     /* ---- SSFBNModExpPub: parity with SSFBNModExp across typical RSA public exponents ---- */
     {
@@ -3278,7 +3214,7 @@ void SSFBNUnitTest(void)
 
             for (i = 0; i < sizeof(data); i++)
             {
-                data[i] = (uint8_t)(0x2Bu + (uint8_t)i * 11u + (uint8_t)k * 19u);
+                data[i] = (uint8_t)((0x2Bu + ((uint8_t)i * 11u)) + ((uint8_t)k * 19u));
             }
             SSFBNFromBytes(&a, data, sizeof(data), 8);
             SSFBNMod(&a, &a, &SSF_BN_NIST_P256);
@@ -3350,7 +3286,7 @@ void SSFBNUnitTest(void)
 
             for (i = 0; i < sizeof(data); i++)
             {
-                data[i] = (uint8_t)(0x71u + (uint8_t)i * 13u + (uint8_t)k * 17u);
+                data[i] = (uint8_t)((0x71u + ((uint8_t)i * 13u)) + ((uint8_t)k * 17u));
             }
             SSFBNFromBytes(&a, data, sizeof(data), 12);
             SSFBNMod(&a, &a, &SSF_BN_NIST_P384);
@@ -3374,17 +3310,13 @@ void SSFBNUnitTest(void)
 
         /* Small bit size keeps the test fast but still exercises the loop. */
         SSF_ASSERT(SSFBNGenPrime(&p, 64u, 5u, &prng) == true);
-        SSF_ASSERT(SSFBNBitLen(&p) == 64u); /* Top two bits forced set -> bit length exact. */
+        SSF_ASSERT(SSFBNBitLen(&p) == 64u);
         SSF_ASSERT(SSFBNIsProbablePrime(&p, 5u, &prng) == true);
 
         SSFPRNGDeInitContext(&prng);
     }
 
-    /* ---- AUDIT BN-2: GenPrime yields exactly bitLen bits for any bitLen in range ---- */
-    /* The top-two-bit forcing used to hit the top BYTE, so a bitLen that is not a multiple   */
-    /* of 8 produced a ceil(bitLen / 8) * 8-bit prime. bitLen < 16 could also be unsatisfiable */
-    /* (every candidate is in the small-prime table), and bitLen > MAX_BITS / 2 tripped an    */
-    /* assertion deep inside the Miller-Rabin modexp instead of the entry precondition.       */
+    /* ---- AUDIT BN-2: GenPrime yields exactly bitLen bits; bitLen range is a precondition ---- */
     {
         static const uint16_t bitLens[] = { 16u, 17u, 23u, 31u, 33u, 63u };
         SSFBN_DEFINE(p, SSF_BN_MAX_LIMBS);
@@ -3448,10 +3380,7 @@ void SSFBNUnitTest(void)
             SSF_ASSERT_TEST(SSFBNDivMod(&qr, &qr, &a8, &a8));
         }
 
-        /* MontMul / MontSquare must reject operands whose cap is smaller than the modulus's   */
-        /* working width. Without this trap the inner loop reads past the operand's allocated  */
-        /* limb storage. Construct a "narrow" operand via SSFBN_DEFINE with a small nlimbs so  */
-        /* its cap < ctx->len after MontInit at the P-256 modulus.                              */
+        /* MontMul / MontSquare must trap an operand whose cap is below ctx->len */
         {
             SSFBNMONT_DEFINE(montP256, SSF_BN_MAX_LIMBS);
             SSFBN_DEFINE(narrow, 4u); /* cap = 4, less than mont.len = 8 */
@@ -3468,10 +3397,7 @@ void SSFBNUnitTest(void)
         }
     }
 
-    /* ---- AUDIT BN-8: Mul / Square bound each operand len before summing ---- */
-    /* rLen = a->len + b->len (and 2 * a->len in Square) was truncated to uint16_t before the   */
-    /* MAX_LIMBS / cap checks, and no operand len was checked on its own, so a corrupt len     */
-    /* (65535 + 1 -> 0) passed and the loops ran far past r and a. Each must now trap.         */
+    /* ---- AUDIT BN-8: Mul / Square trap a corrupt operand len before summing (no wrap) ---- */
     {
         SSFBN_DEFINE(mA, 4u);
         SSFBN_DEFINE(mB, 4u);
@@ -3501,10 +3427,7 @@ void SSFBNUnitTest(void)
         SSF_ASSERT((mR.len == 2u) && (mR.limbs[0] == 15u) && (mR.limbs[1] == 0u));
     }
 
-    /* ---- OPTIMIZE BN-O1: MontInit builds R^2 from a few doublings plus squarings ---- */
-    /* R^2 mod m is compared bit for bit against the old 2 * 32 * len doubling loop for every  */
-    /* shape the setup distinguishes: full-width moduli (w a power of two and w = 3 * 2^s), a */
-    /* top bit inside a limb, a padded modulus (top limb zero), one limb, and m == 1.         */
+    /* ---- OPTIMIZE BN-O1: MontInit R^2 equals the 2 * 32 * len doubling loop, all shapes ---- */
     {
         SSFBNMONT_DEFINE(mont, SSF_BN_MAX_LIMBS);
         SSFBN_DEFINE(m, SSF_BN_MAX_LIMBS);
@@ -3587,10 +3510,7 @@ void SSFBNUnitTest(void)
 #endif
     }
 
-    /* ---- OPTIMIZE BN-O2 / BN-O3: MontMul fuses its shift, MontSquare carries in O(n) ---- */
-    /* Results are checked against SSFBNModMul and MontMul(a, a) at many widths and at the     */
-    /* operands with the most carries (all-ones m, a = b = m - 1); the counters pin the work:  */
-    /* 2n^2 - n MontMul inner steps (no shift pass), exactly 2n MontSquare carry steps.        */
+    /* ---- OPTIMIZE BN-O2 / BN-O3: MontMul / MontSquare exact; 2n^2 - n and 2n step counts ---- */
     {
         static const uint16_t lens[] = { 1u, 2u, 3u, 4u, 5u, 7u, 8u, 12u, 16u, 31u, 32u, 33u };
         SSFBNMONT_DEFINE(mont, SSF_BN_MAX_LIMBS);
@@ -3643,7 +3563,7 @@ void SSFBNUnitTest(void)
             SSFBNMontInit(&mont, &m);
             _SSFBNMontMulIters = 0u;
             SSFBNMontMul(&r, &a, &a, &mont);
-            SSF_ASSERT(_SSFBNMontMulIters == ((2u * (uint32_t)n * (uint32_t)n) - (uint32_t)n));
+            SSF_ASSERT(_SSFBNMontMulIters == (((2u * (uint32_t)n) * (uint32_t)n) - (uint32_t)n));
             _SSFBNMontSqrCarryIters = 0u;
             SSFBNMontSquare(&r, &a, &mont);
             SSF_ASSERT(_SSFBNMontSqrCarryIters == (2u * (uint32_t)n));
@@ -3675,10 +3595,7 @@ void SSFBNUnitTest(void)
 #endif
     }
 
-    /* ---- OPTIMIZE BN-O2 / BN-O3: exhaustive carry-extreme grid ---- */
-    /* Every 1- and 2-limb odd modulus and operand whose limbs are drawn from the values below */
-    /* (where carry and borrow bugs surface); MontMul / MontSquare checked as above, against   */
-    /* SSFBNModMul, for b = a and b = m - 1.                                                  */
+    /* ---- OPTIMIZE BN-O2 / BN-O3: exhaustive 1- and 2-limb carry-extreme grid vs ModMul ---- */
     {
         static const SSFBNLimb_t gridV[] = { 0u, 1u, 2u, 0x7FFFFFFFu, 0x80000000u, 0x80000001u,
                                              0xFFFFFFFEu, 0xFFFFFFFFu };
@@ -3702,9 +3619,13 @@ void SSFBNUnitTest(void)
                 m.limbs[0] = gridV[mc % gridN];
                 if (n == 2u) m.limbs[1] = gridV[mc / gridN];
 
-                /* Odd, top limb non-zero, and above 1 */
+                /* Is m even, top-limb zero, or 1 (not an odd modulus above 1 at full width)? */
                 if (((m.limbs[0] & 1u) == 0u) || (m.limbs[n - 1u] == 0u) ||
-                    ((n == 1u) && (m.limbs[0] == 1u))) continue;
+                    ((n == 1u) && (m.limbs[0] == 1u)))
+                {
+                    /* Yes, skip it */
+                    continue;
+                }
 
                 SSFBNCopy(&mm1, &m);
                 mm1.limbs[0] -= 1u;
@@ -3725,10 +3646,7 @@ void SSFBNUnitTest(void)
         SSF_ASSERT(checks == 1023u);
     }
 
-    /* ---- OPTIMIZE BN-O6: ModAdd without a temporary, NIST paths at curve width ---- */
-    /* ModAdd over an exhaustive 1- and 2-limb carry / borrow grid (every m, every a, b < m),  */
-    /* plus the P-256 / P-384 primes; ModMulNIST against the generic SSFBNModMul at edge and   */
-    /* pseudo-random operands for both primes.                                                 */
+    /* ---- OPTIMIZE BN-O6: ModAdd carry / borrow grid; ModMulNIST vs ModMul for both primes ---- */
     {
         static const SSFBNLimb_t gridV[] = { 0u, 1u, 2u, 0x7FFFFFFFu, 0x80000000u, 0x80000001u,
                                              0xFFFFFFFEu, 0xFFFFFFFFu };
@@ -3826,10 +3744,7 @@ void SSFBNUnitTest(void)
         }
     }
 
-    /* ---- OPTIMIZE EC-O3: curve-width CT inverse and multiply (ModInvSmall / ModMulSmall) ---- */
-    /* Inverses are checked against SSFBNModInv (the full-width Fermat path) and by a * r == 1  */
-    /* through SSFBNModMul; products against SSFBNModMul. Moduli: the P-256 / P-384 primes and */
-    /* group orders and small primes of 1-4 limbs; failures follow SSFBNModInv's contract.      */
+    /* ---- OPTIMIZE EC-O3: ModInvSmall / ModMulSmall vs ModInv / ModMul, 1-12 limb moduli ---- */
     {
         static const SSFBNLimb_t primeLimbs[][4] = {
             { 0x7FFFFFFFu, 0u, 0u, 0u },                                 /* 2^31 - 1 */
@@ -3918,7 +3833,7 @@ void SSFBNUnitTest(void)
                 SSF_ASSERT(SSFBNCmp(&ref, &r) == 0);
 
                 /* Product against the generic SSFBNModMul, also with a >= m (a < R) and in place */
-                _SSFBNUTFillBelow(&b, &m, (uint32_t)((mi * 17u) + vi + 3u));
+                _SSFBNUTFillBelow(&b, &m, (uint32_t)(((mi * 17u) + vi) + 3u));
                 SSFBNModMulSmall(&r, &a, &b, &m);
                 SSFBNModMul(&ref, &a, &b, &m);
                 SSF_ASSERT((r.len == m.len) && (SSFBNCmp(&r, &ref) == 0));
@@ -3977,9 +3892,6 @@ void SSFBNUnitTest(void)
     }
 
     /* ---- OPTIMIZE BN-O4 / BN-O5: Montgomery ModMulCT and binary-GCD ModInvExt (odd m) ---- */
-    /* ModMulCT against SSFBNModMul for odd moduli of 1-64 limbs (one operand may be >= m), an */
-    /* even modulus still on the shift-subtract path; ModInvExt by a * r == 1 and r < m, false  */
-    /* exactly when gcd(a, m) != 1 (SSFBNGcd), odd composites included; both wipe.             */
     {
         static const uint16_t lens[] = { 1u, 2u, 3u, 5u, 8u, 12u, 16u, 32u, 33u, 64u };
         SSFBN_DEFINE(m, SSF_BN_MAX_LIMBS);
@@ -4001,8 +3913,12 @@ void SSFBNUnitTest(void)
             if (n > (SSF_BN_MAX_LIMBS / 2u)) continue;
             for (seed = 1u; seed <= 6u; seed++)
             {
-                /* Seed 3 at one limb would be m == 1 (no meaningful inverse): skip it */
-                if ((seed == 3u) && (n == 1u)) continue;
+                /* Would seed 3 at one limb make m == 1 (no meaningful inverse)? */
+                if ((seed == 3u) && (n == 1u))
+                {
+                    /* Yes, skip it */
+                    continue;
+                }
 
                 /* Odd modulus: full width, all-ones, or a top limb of 1; seed 6 is composite */
                 m.len = n;
@@ -4013,7 +3929,12 @@ void SSFBNUnitTest(void)
                 if (seed == 2u) for (k = 0u; k < n; k++) m.limbs[k] = 0xFFFFFFFFu;
                 if (seed == 3u) m.limbs[n - 1u] = 1u;
                 m.limbs[0] |= 1u;
-                if ((seed != 3u) && (seed != 6u)) m.limbs[n - 1u] |= 0x80000000u;
+                /* Is this a full-width seed (not the top-limb-1 or composite seed)? */
+                if ((seed != 3u) && (seed != 6u))
+                {
+                    /* Yes, set the top bit */
+                    m.limbs[n - 1u] |= 0x80000000u;
+                }
                 if (seed == 6u)
                 {
                     /* Composite: 3 * (odd base with two bits of headroom), still n limbs */
@@ -4097,9 +4018,7 @@ void SSFBNUnitTest(void)
         SSF_ASSERT(_scrubDirty == 0u);
     }
 
-    /* ---- OPTIMIZE BN-O8: ModMulNIST recognises the NIST primes without a limb compare ---- */
-    /* It compared m against the prime limb by limb on every field multiply (about 5% of the  */
-    /* multiply). The library's own prime is now recognised by pointer; a copy still works.   */
+    /* ---- OPTIMIZE BN-O8: ModMulNIST recognises its own primes by pointer; a copy works ---- */
     {
         SSFBNLimb_t pCopyLimbs[8];
         SSFBN_t pCopy = { pCopyLimbs, 8u, 8u };
@@ -4117,8 +4036,7 @@ void SSFBNUnitTest(void)
         SSF_ASSERT(SSFBNCmp(&nr, &nref) == 0);
     }
 
-    /* ---- OPTIMIZE BN-O8: a same-width modulus one limb off a NIST prime is not one ---- */
-    /* Every limb of the comparison matters: each mutant must use the generic SSFBNModMul.    */
+    /* ---- OPTIMIZE BN-O8: a same-width modulus one limb off a NIST prime uses ModMul ---- */
     {
         const SSFBN_t *primes[2];
         SSFBNLimb_t mutLimbs[12];
@@ -4150,10 +4068,7 @@ void SSFBNUnitTest(void)
         }
     }
 
-    /* ---- OPTIMIZE EC-O4: P-256 / P-384 reductions correct in 3 passes, results exact ---- */
-    /* The correction ran 23 fixed passes sized for worst-case carries. Oracle: SSFBNMod.      */
-    /* Inputs: every all-zero / all-ones pattern of the upper limbs, with low half zero or all */
-    /* ones (they reach the extreme net carries), plus pseudo-random values of every width.    */
+    /* ---- OPTIMIZE EC-O4: P-256 / P-384 reductions exact in 3 passes (oracle SSFBNMod) ---- */
     {
         SSFBN_DEFINE(nt, 24u);
         SSFBN_DEFINE(nr, 12u);
@@ -4204,8 +4119,7 @@ void SSFBNUnitTest(void)
         }
     }
 
-    /* The second fold only runs when the first crosses 0 or 2^w (net value within about k of an */
-    /* edge, never hit at random). Inputs solved for in Python so that it does, results there.   */
+    /* Inputs (solved offline) whose first fold crosses 0 or 2^w, so the second fold runs */
     {
         static const SSFBNLimb_t _e0T[16] = {
             0x560E3EAAu, 0x83CF3687u, 0x16A35571u, 0xC09516C8u,
@@ -4265,9 +4179,6 @@ void SSFBNUnitTest(void)
     }
 
     /* ---- SQ-CT audit: SSFBNSquare's diagonal add runs a fixed a->len carry steps ---- */
-    /* Its carry propagation was a while (carry != 0) loop, so the step count, and the time,  */
-    /* depended on the operand. SSFBNModSquare runs it on Miller-Rabin's secret candidate.    */
-    /* Every operand of a width must take the same count, with the square still exact.        */
     {
         static const uint16_t sqWidths[] = { 1u, 2u, 3u, 8u, 12u, 32u };
         SSFBN_DEFINE(sa, 64u);
@@ -4307,10 +4218,7 @@ void SSFBNUnitTest(void)
         }
     }
 
-    /* ---- OPTIMIZE BN-O7: SSFBNMod reduces an odd modulus by constant-time Montgomery ---- */
-    /* RSA signing splits the blinded value with cB mod p and cB mod q, and Miller-Rabin       */
-    /* squares mod the secret candidate; shift-and-subtract branched on every step's borrow.  */
-    /* Oracle: x = q * m + rem with rem < m must reduce to rem, at every width and in place.  */
+    /* ---- OPTIMIZE BN-O7: SSFBNMod of x = q * m + rem gives rem (odd m, CT Montgomery) ---- */
     {
         static const uint16_t widths[] = { 1u, 2u, 3u, 8u, 12u, 32u, SSF_BN_MAX_MOD_LIMBS };
         SSFBN_DEFINE(om, SSF_BN_MAX_LIMBS);
@@ -4348,7 +4256,7 @@ void SSFBNUnitTest(void)
                 for (qLen = 0u; qLen <= n; qLen = (uint16_t)((qLen == 0u) ? 1u : (2u * qLen)))
                 {
                     /* rem < m, then x = q * m + rem (qLen 0: x is rem itself) */
-                    _SSFBNUTFillBelow(&orem, &om, seed * 31u + qLen);
+                    _SSFBNUTFillBelow(&orem, &om, (seed * 31u) + qLen);
                     if (qLen == 0u)
                     {
                         SSFBNCopy(&ox, &orem);
@@ -4356,7 +4264,7 @@ void SSFBNUnitTest(void)
                     else
                     {
                         oq.len = qLen;
-                        for (k = 0u; k < qLen; k++) oq.limbs[k] = 0xC2B2AE35u * (seed + k + 1u);
+                        for (k = 0u; k < qLen; k++) oq.limbs[k] = 0xC2B2AE35u * ((seed + k) + 1u);
                         SSFBNMul(&oprod, &oq, &om);
                         SSFBNSetZero(&ox, oprod.len);
                         memcpy(ox.limbs, orem.limbs, (size_t)n * sizeof(SSFBNLimb_t));
@@ -4421,8 +4329,6 @@ void SSFBNUnitTest(void)
     }
 
     /* ---- OPTIMIZE RSA-STK: MontMul / MontSquare leave no product in their freed scratch ---- */
-    /* Their t scratch ends holding the unreduced result, r or r + m. During Miller-Rabin that   */
-    /* is p - 1, whose top bytes are the secret prime's; RSA keygen left it on the stack.       */
     {
         SSFBNMONT_DEFINE(hm, 8u);
         SSFBN_DEFINE(hmod, 8u);
@@ -4468,9 +4374,7 @@ void SSFBNUnitTest(void)
         }
     }
 
-    /* ---- OPTIMIZE RSA-STK: a Montgomery modulus is at most SSF_BN_MAX_MOD_LIMBS limbs ---- */
-    /* MontMul / MontSquare / ConvertOut size their scratch for SSF_BN_MAX_MOD_LIMBS, so        */
-    /* SSFBNMontInit must refuse anything wider, even into a context with room for it.          */
+    /* ---- OPTIMIZE RSA-STK: SSFBNMontInit refuses a modulus over SSF_BN_MAX_MOD_LIMBS ---- */
     {
         SSFBNMONT_DEFINE(wideMont, SSF_BN_MAX_LIMBS);
         SSFBN_DEFINE(wideM, SSF_BN_MAX_LIMBS);
@@ -4511,11 +4415,7 @@ void SSFBNUnitTest(void)
         }
     }
 
-    /* ---- AUDIT BN-7: MontInit's R^2 loop is exact for moduli of 1024+ limbs ---- */
-    /* The doubling loop bound was (uint16_t)(len * 64), which wraps at len >= 1024 (to 0 at    */
-    /* exactly 1024, leaving rr = 1), so every Montgomery operation on such a modulus was     */
-    /* silently wrong. Only compiled when SSF_BN_CONFIG_MAX_BITS >= 32768 (e.g. a build with   */
-    /* -DSSF_BN_CONFIG_MAX_BITS=65536); no in-tree configuration is that large.               */
+    /* ---- AUDIT BN-7: MontInit's R^2 is exact for 1024+ limb moduli (MAX_BITS >= 32768) ---- */
 #if SSF_BN_MAX_LIMBS >= 1024u
     {
         static SSFBNLimb_t bigModStorage[SSF_BN_MAX_LIMBS];
@@ -4551,11 +4451,7 @@ void SSFBNUnitTest(void)
     }
 #endif /* SSF_BN_MAX_LIMBS >= 1024 */
 
-    /* ---- AUDIT BN-6: 2-limb multiply into an exactly 2n-limb result ---- */
-    /* _SSFBNKaratsubaMul's step 7 writes r[half + n + 1], one limb past a 2n-limb result when  */
-    /* n == 2. Karatsuba only sees n == 2 if SSF_BN_KARATSUBA_THRESHOLD <= 2, which ssfbn.c now */
-    /* rejects at compile time; this keeps the exact-size case covered (schoolbook at the      */
-    /* default threshold; ASan reported the overflow here with -DSSF_BN_KARATSUBA_THRESHOLD=2). */
+    /* ---- AUDIT BN-6: 2-limb multiply into an exactly 2n-limb result (Karatsuba step 7) ---- */
     {
         SSFBN_DEFINE(a2, 2u);
         SSFBN_DEFINE(b2, 2u);
@@ -4574,8 +4470,6 @@ void SSFBNUnitTest(void)
     }
 
     /* ---- AUDIT BN-5: a^0 mod m is 1 mod m (0 when m == 1) on every exponentiation path ---- */
-    /* SSFBNModExpMontPub returned a literal 1 for e == 0, so with m == 1 it disagreed with the */
-    /* constant-time SSFBNModExp, which returns R mod 1 converted out, i.e. 0.                 */
     {
         SSFBNMONT_DEFINE(montOne, SSF_BN_MAX_LIMBS);
         SSFBN_DEFINE(mOne, SSF_BN_MAX_LIMBS);
@@ -4606,10 +4500,6 @@ void SSFBNUnitTest(void)
     }
 
     /* ---- AUDIT BN-4: Montgomery operands are used at their logical len, never stale limbs ---- */
-    /* The Mont family processed ctx->len limbs of every operand, so limbs above a->len (left */
-    /* over from an earlier, longer value) were silently folded in. ConvertIn now zero-extends */
-    /* its ordinary-form input; MontMul / MontSquare / ConvertOut require Montgomery-form       */
-    /* operands at exactly ctx->len.                                                            */
     {
         SSFBNMONT_DEFINE(mont4, SSF_BN_MAX_LIMBS);
         SSFBN_DEFINE(m4, SSF_BN_MAX_LIMBS);
@@ -4668,20 +4558,16 @@ void SSFBNUnitTest(void)
 #endif
 
 #if SSF_CONFIG_BN_MICROBENCH == 1
-    /* ====================================================================================== */
-    /* Microbenchmark -- MontMul / MontSquare (CIOS-based) and raw Mul / Square (schoolbook /   */
-    /* triangular) throughput at representative operand sizes. Gated by SSF_CONFIG_BN_MICROBENCH*/
-    /* so the normal test run stays quick; flip the macro in ssfport.h to 1 before measuring    */
-    /* perf changes, then back to 0 after.                                                      */
-    /*                                                                                          */
-    /* Raw Mul/Square require 2*nLimbs <= SSF_BN_MAX_LIMBS, so n=128 is skipped for those.      */
-    /* ====================================================================================== */
+    /* ==== Microbenchmark (SSF_CONFIG_BN_MICROBENCH): Mont and raw Mul / Square throughput == */
     {
-        /* Drop bench entries whose 2*nLimbs would exceed SSF_BN_MAX_LIMBS at the configured BN  */
-        /* cap. With auto-derivation in ssfbn.h the cap tracks the largest enabled algorithm;   */
-        /* an ECC-only build (cap = 768 -> MAX_LIMBS = 24) cannot run the RSA-1024+ rows because */
-        /* the schoolbook product would overflow the SSF_REQUIRE in SSFBNSetZero / SSFBNMul.    */
-        struct { uint16_t nLimbs; uint32_t mIters; uint32_t mulIters; const char *label; } bench[] = {
+        /* Skip rows whose 2 * nLimbs exceeds SSF_BN_MAX_LIMBS at the configured cap */
+        struct
+        {
+            uint16_t nLimbs;
+            uint32_t mIters;
+            uint32_t mulIters;
+            const char *label;
+        } bench[] = {
             {   8u, 4000000u, 20000000u, "P-256 (n= 8, RSA-256-eq) " },
 #if (2u * 32u) <= SSF_BN_MAX_LIMBS
             {  32u,  400000u,  5000000u, "RSA-1024     (n=32)      " },
@@ -4703,16 +4589,15 @@ void SSFBNUnitTest(void)
             uint32_t mulIters = bench[bi].mulIters;
             uint32_t i;
 
-            /* Build a Mont context with an odd, prime-ish modulus (use P-256 / P-384 constants  */
-            /* where they fit; else synthesize an odd modulus with the high bit set and low bit  */
-            /* set so MontInit accepts it).                                                      */
+            /* Odd modulus with the top bit set: P-256 / P-384 where they fit, else synthesized */
             SSFBN_DEFINE(mod, SSF_BN_MAX_LIMBS);
             SSFBN_DEFINE(a, SSF_BN_MAX_LIMBS);
             SSFBN_DEFINE(b, SSF_BN_MAX_LIMBS);
             SSFBN_DEFINE(r, SSF_BN_MAX_LIMBS);
             SSFBN_DEFINE(rWide, SSF_BN_MAX_LIMBS); /* Width for raw Mul/Square (2n limbs). */
             SSFBNMONT_DEFINE(mont, SSF_BN_MAX_LIMBS);
-            SSFPortTick_t t0, t1;
+            SSFPortTick_t t0;
+            SSFPortTick_t t1;
 
             if (n == 8u)
             {
@@ -4726,9 +4611,7 @@ void SSFBNUnitTest(void)
                 mod.limbs[n - 1u] = 0xFFFFFF00ul | 1u;
             }
 
-            /* Fill every limb with pseudo-random non-zero data so SSFBNMul's `if (a[i]==0)` */
-            /* shortcut does not artificially speed the baseline. Use a cheap LCG-style seed   */
-            /* keyed on the limb index.                                                        */
+            /* Fill every limb with non-zero LCG data keyed on the limb index */
             SSFBNSetZero(&a, n);
             SSFBNSetZero(&b, n);
             for (i = 0; i < n; i++)
@@ -4767,9 +4650,7 @@ void SSFBNUnitTest(void)
                        (unsigned long long)(t1 - t0));
             }
 
-            /* --- ModExpMont (constant-time, dense full-Hamming exponent -- worst case for the   */
-            /* binary ladder) and ModExpMontPub (variable-time, e = 65537 = F4, the realistic     */
-            /* RSA verify exponent). a is still in plain (non-Mont) form here.                    */
+            /* --- ModExpMont (CT, dense exponent) and ModExpMontPub (e = 65537); a is plain */
             {
                 SSFBN_DEFINE(expPriv, SSF_BN_MAX_LIMBS);
                 SSFBN_DEFINE(expPub, SSF_BN_MAX_LIMBS);
@@ -4783,7 +4664,7 @@ void SSFBNUnitTest(void)
                 {
                     expPriv.limbs[i] = 0xC9F1A8B7ul ^ (i * 0x517CC1B7ul);
                 }
-                expPriv.limbs[n - 1u] |= 0x80000000ul;   /* force full bit-length */
+                expPriv.limbs[n - 1u] |= 0x80000000ul; /* force full bit-length */
                 expPriv.limbs[0] |= 1u;                  /* force odd */
                 expPriv.len = n;
 
@@ -4817,9 +4698,7 @@ void SSFBNUnitTest(void)
                        (unsigned long long)(t1 - t0));
             }
 
-            /* --- ModInv (Fermat via ModExp) vs ModInvExt (binary EEA, non-CT) at P-256 size. */
-            /* Used to validate that EEA actually beats Fermat in this codebase before routing  */
-            /* public-input ECDSA Verify ModInv calls to the EEA path.                          */
+            /* --- ModInv (Fermat) vs ModInvExt (binary EEA, non-CT) at P-256 size */
             if (n == 8u)
             {
                 SSFBN_DEFINE(rInv, SSF_BN_MAX_LIMBS);

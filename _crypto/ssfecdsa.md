@@ -121,6 +121,14 @@ Two design choices worth calling out up front:
   gain an extra `0x00` leading byte when its high bit is set. Size the output buffer to
   [`SSF_ECDSA_MAX_SIG_SIZE`](#ssf-ecdsa-max-sig-size) to always fit; the actual length is
   returned via `*sigLen`.
+- **Verify accepts only strict DER.** [`SSFECDSAVerify()`](#ssfecdsaverify) parses the
+  signature byte-by-byte (no `ssfasn1` calls) and rejects the BER-tolerant forms that create
+  signature malleability (CVE-2020-14966 / CVE-2020-13822 / CVE-2019-14859 /
+  CVE-2016-1000342 class; the Wycheproof / RFC 5480 rules): the outer `SEQUENCE` (`0x30`) must
+  use a canonical length (short form, or `0x81 XX` only when `XX ≥ 0x80`); the total length must
+  equal header plus content; exactly two short-form-length `INTEGER`s follow, each `1` to
+  `coordBytes + 1` bytes long, positive (first content byte `< 0x80`) and minimal (a leading
+  `0x00` only before a byte `≥ 0x80`); no data may trail the second `INTEGER`.
 - **ECDH output is the raw X coordinate of `d·P_peer`.** Feed it through
   [`ssfhkdf`](ssfhkdf.md) (NIST SP 800-56C extraction + expansion) to produce usable
   session keys. Do **not** use the raw ECDH bytes directly as a symmetric key — the

@@ -39,7 +39,7 @@
 /* --------------------------------------------------------------------------------------------- */
 /* Module defines.                                                                               */
 /* --------------------------------------------------------------------------------------------- */
-#define SSF_AESCTR_CONTEXT_MAGIC (0x41435452ul)     /* 'ACTR' -- set by Begin, cleared by DeInit. */
+#define SSF_AESCTR_CONTEXT_MAGIC (0x41435452ul) /* 'ACTR' -- set by Begin, cleared by DeInit. */
 
 /* Compile-time bounds checks via typedef-array idiom (size becomes -1 on failure). */
 typedef char _ssf_aesctr_sa_block_size[(SSF_AESCTR_BLOCK_SIZE == 16u) ? 1 : -1];
@@ -67,6 +67,7 @@ static void _SSFAESCTRIncCounter(uint8_t counter[SSF_AESCTR_BLOCK_SIZE])
 static void _SSFAESCTRNextKeystream(SSFAESCTRContext_t *ctx)
 {
     SSF_REQUIRE(ctx != NULL);
+    SSF_REQUIRE(ctx->magic == SSF_AESCTR_CONTEXT_MAGIC);
 
     SSFAESKSBlockEncrypt(&ctx->sched, ctx->counter, SSF_AESCTR_BLOCK_SIZE,
                          ctx->ks, SSF_AESCTR_BLOCK_SIZE);
@@ -135,7 +136,7 @@ void SSFAESCTRCrypt(SSFAESCTRContext_t *ctx, const uint8_t *in, uint8_t *out, si
 #endif
 
         ctx->ksOff += take;
-        in  += take;
+        in += take;
         out += take;
         len -= take;
     }

@@ -138,6 +138,8 @@ other big-integer libraries.
   `cap` intact — the `SSFBN_t` remains usable for subsequent operations. Use before any
   bignum that held secret material goes out of scope (private-key scalar, DH exponent, RSA
   decryption intermediate).
+- DBC exception (timing-critical): `_SSFBNModShift` and `_SSFBNModMulCTShift` run per block or
+  per arithmetic step and carry no parameter asserts; their callers validate every argument.
 
 <a id="configuration"></a>
 
@@ -149,7 +151,7 @@ you will operate on.
 
 | Macro | Default | Description |
 |-------|---------|-------------|
-| <a id="ssf-bn-config-max-bits"></a>`SSF_BN_CONFIG_MAX_BITS` | auto | Maximum big-number width in bits. **Auto-derived in `ssfbn.h`** as `2 × largest enabled operand` from [`SSF_EC_CONFIG_ENABLE_P256/P384`](ssfec.md#configuration) and [`SSF_RSA_CONFIG_ENABLE_2048/3072/4096`](ssfrsa.md#configuration). The doubling is mandatory: multiplication produces a `2N`-limb intermediate, and `SSFBNMul` / `SSFBNModMul` / `SSFBNModMulNIST` / `SSFBNModInvExt` all gate on `2N <= MAX_LIMBS`. Resulting values: `512` for P-256-only, `768` for P-256+P-384, `4096` for RSA-2048, `6144` for RSA-3072, `8192` for RSA-4096 — the maximum across all enabled algorithms wins. Override in [`_opt/ssfbn_opt.h`](../_opt/ssfbn_opt.h) only when an out-of-tree consumer needs a wider cap; the in-tree consumers self-size correctly. |
+| <a id="ssf-bn-config-max-bits"></a>`SSF_BN_CONFIG_MAX_BITS` | auto | Maximum big-number width in bits. **Auto-derived in `ssfbn.h`** as `2 × largest enabled operand` from [`SSF_EC_CONFIG_ENABLE_P256/P384`](ssfec.md#configuration) and [`SSF_RSA_CONFIG_ENABLE_2048/3072/4096`](ssfrsa.md#configuration). The doubling is mandatory: multiplication produces a `2N`-limb intermediate, and `SSFBNMul` / `SSFBNModMul` / `SSFBNModMulNIST` / `SSFBNModInvExt` all gate on `2N <= MAX_LIMBS`. Resulting values: `512` for P-256-only, `768` for P-256+P-384, `4096` for RSA-2048, `6144` for RSA-3072, `8192` for RSA-4096 — the maximum across all enabled algorithms wins; `256` when none is enabled. Override in [`_opt/ssfbn_opt.h`](../_opt/ssfbn_opt.h) only when an out-of-tree consumer needs a wider cap; the in-tree consumers self-size correctly. |
 | <a id="ssf-bn-max-mod-limbs"></a>`SSF_BN_MAX_MOD_LIMBS` | `(SSF_BN_MAX_LIMBS + 1) / 2` | Upper bound on `SSFBNMont_t::len` — the cap needed to hold a Montgomery residue (mod `m`). The `2N` derivation of `SSF_BN_CONFIG_MAX_BITS` makes `MAX_LIMBS / 2` exactly the largest possible modulus for any enabled algorithm; per-algo static asserts in `ssfbn.h` enforce this. [`SSFBNMontInit`](#montinit) rejects a wider modulus (`SSF_REQUIRE`), so every Montgomery buffer is sized at this width: [`SSFBNModExpMont`](#modexpmont)'s 16-entry window table and residue locals, the `SSFBNMontMul` / `SSFBNMontSquare` scratch, the `SSFBNModExp` / `SSFBNModExpPub` contexts, `SSFBNMontConvertOut` and `SSFBNIsProbablePrime` (OPTIMIZE RSA-STK). Sizing them at `SSF_BN_MAX_LIMBS` would double their stack without ever using the extra capacity. Override in [`_opt/ssfbn_opt.h`](../_opt/ssfbn_opt.h) only when pinning `SSF_BN_CONFIG_MAX_BITS` to a non-`2N` value (no algorithm flags enabled, or an out-of-tree modulus wider than `MAX_LIMBS / 2`). |
 
 The `SSFBN_t` struct itself is small (a pointer plus two `uint16_t` fields); the actual

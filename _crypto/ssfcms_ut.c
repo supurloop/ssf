@@ -56,10 +56,7 @@
 #define _UT_RSA_PSS_VERIFY (0u)
 #endif
 
-/* Fixtures generated with OpenSSL 3.2.4 by the gen.sh script recorded in ssfcms.md: a P-256     */
-/* root -> intermediate -> signer chain, an RSA-2048 self-signed signer, and a 24-byte content.   */
-/* Every CMS fixture is DER with definite lengths (-noindef) except the one marked Ber.          */
-/* AUDIT CMS-5: the fixtures' ECDSA keys are P-256; a P-384-only build uses the same set on P-384 */
+/* OpenSSL fixtures from gen.sh (ssfcms.md); AUDIT CMS-5: P-256 keys, P-384-only builds reuse */
 #if SSF_EC_CONFIG_ENABLE_P256 == 1
 #include "ssfcms_ut_fix.h"
 #else
@@ -142,6 +139,7 @@ static void _utTrace(int level, int category, const char *msgStr, void *ctxOpt)
     _utTraceCount++;
     if (level == (int)SSF_TLS_TRACE_ERROR) _utTraceErrors++;
     _utTraceLastLevel = level;
+    /* Is there another message character that fits the capture buffer? */
     while ((msgStr[n] != '\0') && (n < (sizeof(_utTraceLastMsg) - 1u)))
     {
         _utTraceLastMsg[n] = msgStr[n];
@@ -176,7 +174,7 @@ static bool _utContains(const char *hayStr, const char *needleStr)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true with *atOut set to the offset of the first pat in buf, else false if absent.      */
+/* Returns true with *atOut set to the offset of the first pat in buf, else false if absent.     */
 /* --------------------------------------------------------------------------------------------- */
 static bool _utFind(const uint8_t *buf, uint32_t bufLen, const uint8_t *pat, uint32_t patLen,
                     uint32_t *atOut)
@@ -318,7 +316,7 @@ typedef struct
 } _utCmsSpec_t;
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if an AlgorithmIdentifier is written to out with *wOut set, else false.           */
+/* Returns true if an AlgorithmIdentifier is written to out with *wOut set, else false.          */
 /* --------------------------------------------------------------------------------------------- */
 static bool _utEncAlgId(uint8_t *out, uint32_t outSize, const uint8_t *oid, uint32_t oidLen,
                         const uint8_t *paramsOpt, uint32_t paramsLen, uint32_t *wOut)
@@ -341,7 +339,7 @@ static bool _utEncAlgId(uint8_t *out, uint32_t outSize, const uint8_t *oid, uint
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if Attribute { type, SET { value } } is written to out with *wOut set.            */
+/* Returns true if Attribute { type, SET { value } } is written to out with *wOut set.           */
 /* --------------------------------------------------------------------------------------------- */
 static bool _utEncAttr(uint8_t *out, uint32_t outSize, const uint8_t *typeOid, uint32_t typeOidLen,
                        const uint8_t *val, uint32_t valLen, uint32_t *wOut)
@@ -533,7 +531,7 @@ static bool _utEncAttrsContent(const _utCmsSpec_t *s, const uint8_t *digest, uin
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if the spec's SignedData is built into out as a ContentInfo with *lenOut set.     */
+/* Returns true if the spec's SignedData is built into out as a ContentInfo with *lenOut set.    */
 /* --------------------------------------------------------------------------------------------- */
 static bool _utBuildCms(const _utCmsSpec_t *s, uint8_t *out, uint32_t outSize, uint32_t *lenOut)
 {
@@ -853,7 +851,7 @@ static bool _utBuildCms(const _utCmsSpec_t *s, uint8_t *out, uint32_t outSize, u
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if a certificate for a fresh key is built, self-signed or P-256 issued by a CA.   */
+/* Returns true if a certificate for a fresh key is built, self-signed or P-256 issued by a CA.  */
 /* --------------------------------------------------------------------------------------------- */
 static bool _utMakeCert(bool ed25519, bool isCA, const char *cnStr, const char *issuerCnStrOpt,
                         const uint8_t *issuerPrivOpt, uint8_t *priv, uint8_t *pub, uint8_t *out,
@@ -929,7 +927,7 @@ static bool _utMakeCert(bool ed25519, bool isCA, const char *cnStr, const char *
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if a self-signed signer certificate for a fresh key is built with *lenOut set.    */
+/* Returns true if a self-signed signer certificate for a fresh key is built with *lenOut set.   */
 /* --------------------------------------------------------------------------------------------- */
 static bool _utMakeSigner(bool ed25519, const char *cnStr, uint8_t *priv, uint8_t *pub,
                           uint8_t *out, uint32_t outSize, uint32_t *lenOut)
@@ -944,9 +942,7 @@ static bool _utMakeSigner(bool ed25519, const char *cnStr, uint8_t *priv, uint8_
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Generated firmware signatures in the production shape: a private root CA held by the unit    */
-/* test issues a signing CA (the device trust anchor), which issues a pathlen 0 master CA, which */
-/* issues the code-signing leaf; the message embeds signing CA, master and leaf, not the root.  */
+/* Production-shape firmware signatures: root -> signing CA (anchor) -> master CA -> leaf.       */
 /* --------------------------------------------------------------------------------------------- */
 #define _UT_GEN_CHAINS (100u)
 #define _UT_GEN_CERT_SIZE (1024u)
@@ -1929,7 +1925,8 @@ void SSFCMSUnitTest(void)
     /* One bit of the signing-time attribute: the digest still matches, the signature does not */
     SSF_ASSERT(SSFCMSParse(buf, n, &sd) == true);
     at = (uint32_t)(sd.signers[0].signedAttrs - buf) + 2u;
-    while ((at < n) && (buf[at] != 0x17u)) at++;    /* first UTCTime inside signedAttrs */
+    /* Is the first UTCTime inside signedAttrs still ahead? */
+    while ((at < n) && (buf[at] != 0x17u)) at++;
     SSF_ASSERT(at < n);
     buf[at + 3u] ^= 0x01u;
     SSF_ASSERT(SSFCMSParse(buf, n, &sd) == true);
@@ -2147,8 +2144,7 @@ void SSFCMSUnitTest(void)
                                   trustLen, 1u, now, &res) == true);
     SSF_ASSERT(memcmp(res.signerSubject.cn, "SSF Code Signer", 15u) == 0);
 #else
-    /* AUDIT CFG-1: the P-256 chain verifies, but the P-384 signer key is unsupported in this  */
-    /* build, so verify must return false (it used to halt in SSFECDSAVerify).                 */
+    /* AUDIT CFG-1: P-384 signer key unsupported in this build, so verify returns false */
     SSF_ASSERT(SSFCMSVerifyDigest(&sd, sha384, sizeof(sha384), SSF_CMS_DIGEST_SHA384, trust,
                                   trustLen, 1u, now, &res) == false);
 #endif
@@ -2161,10 +2157,6 @@ void SSFCMSUnitTest(void)
                            &sd) == false);
 
     /* ---- AUDIT CMS-1: the signer certificate is chained before its key is used ---- */
-    /* The signature used to be verified with the message-embedded (attacker-chosen) signer     */
-    /* key before the certificate was chained to a trust anchor. With a corrupted signature AND */
-    /* an unrelated anchor both checks fail; the chain failure must be the one reported and the */
-    /* signature must never be checked.                                                        */
     n = sizeof(_utFixEcdsaChainDetached);
     SSF_ASSERT(SSFCMSParse(_utFixEcdsaChainDetached, n, &sd) == true);
     memcpy(buf, _utFixEcdsaChainDetached, n);
@@ -2182,8 +2174,7 @@ void SSFCMSUnitTest(void)
     _UT_TRACE_ASSERT(_utTraceSawChainFail == true);
     _UT_TRACE_ASSERT(_utTraceSawSigFail == false);
 
-    /* Each check still fails on its own: good signature with an unrelated anchor, and a bad */
-    /* signature with the right anchor.                                                      */
+    /* Each check still fails alone: good signature + unrelated anchor, bad sig + right anchor */
     SSF_ASSERT(SSFCMSParse(_utFixEcdsaChainDetached, n, &sd) == true);
     SSF_ASSERT(SSFCMSVerifyDigest(&sd, sha256, sizeof(sha256), SSF_CMS_DIGEST_SHA256, trust,
                                   trustLen, 1u, now, &res) == false);
@@ -2200,9 +2191,7 @@ void SSFCMSUnitTest(void)
     _UT_TRACE_ASSERT(_utTraceSawChainFail == false);
 
     /* ---- AUDIT CMS-4: chain building follows the key identifier, not just the issuer name ---- */
-    /* Two embedded intermediates share the subject "SSF Rollover CA" (old key first, as      */
-    /* OpenSSL's DER SET ordering left them); the signer was issued by the new one, which its */
-    /* AKID names. Taking the first name match picked the old CA and failed a valid message.  */
+    /* Two intermediates named "SSF Rollover CA" (old key first); the signer's AKID names the new */
     trust[0] = _utFixRollRootDer;
     trustLen[0] = sizeof(_utFixRollRootDer);
     SSF_ASSERT(SSFCMSParse(_utFixRollBoth, sizeof(_utFixRollBoth), &sd) == true);
@@ -2348,8 +2337,7 @@ void SSFCMSUnitTest(void)
                              _utOidEcdsaSha256, sizeof(_utOidEcdsaSha256)) == true);
         SSF_ASSERT(_VERIFY256() == true);
 
-        /* Its signatureAlgorithm parameters may be absent or NULL while the SignerInfo's are */
-        /* absent; anything else must match byte for byte */
+        /* Its signatureAlgorithm params may be absent or NULL vs absent; else must match exactly */
         s.apSigParams = _utDerNull;
         s.apSigParamsLen = sizeof(_utDerNull);
         _BUILD();
@@ -2364,8 +2352,7 @@ void SSFCMSUnitTest(void)
             SSF_ASSERT(_VERIFY256() == false);
         }
 
-        /* A protection attribute naming a different digest or signature algorithm is a */
-        /* substitution and is rejected before any signature check */
+        /* A protection attribute naming another digest or signature algorithm is rejected */
         _SPEC_RESET();
         s.algProt = true;
         s.apDigestOid = _utOidSha384;
@@ -2394,8 +2381,7 @@ void SSFCMSUnitTest(void)
         _BUILD();
         SSF_ASSERT(SSFCMSParse(msg, len, &sd) == false);
 
-        /* AUDIT CMS-3: the protection's digestAlgorithm parameters must be absent or NULL, as  */
-        /* the SignerInfo's are (RFC 6211 compares the whole AlgorithmIdentifier).              */
+        /* AUDIT CMS-3: the protection's digestAlgorithm parameters must be absent or NULL */
         {
             static const uint8_t intParams[] = { 0x02u, 0x01u, 0x05u };
 
@@ -2699,8 +2685,7 @@ void SSFCMSUnitTest(void)
         SSF_ASSERT(sd.signers[0].hasAlgProtection == true);
         SSF_ASSERT(_VERIFY256() == true);
 
-        /* Exactly the configured maximum length parses; one byte more does not. The Ed25519 */
-        /* signer is used because its signature length is fixed, so the padding converges. */
+        /* Exactly the maximum length parses, one byte more does not (Ed25519: fixed sig length) */
         {
             int32_t pad = 4000;
             uint32_t k;
@@ -2745,9 +2730,7 @@ void SSFCMSUnitTest(void)
         SSF_ASSERT(sd.signers[0].messageDigestLen == 20u);
         SSF_ASSERT(_VERIFY256() == false);
 
-        /* With signed attributes the digest attribute binds the content: a supplied digest */
-        /* that matches it verifies even when the attached copy of the content was altered,  */
-        /* while verifying the attached copy itself fails */
+        /* With signedAttrs a matching supplied digest verifies even if the attached copy changed */
         _SPEC_RESET();
         s.attached = true;
         _BUILD();
@@ -2791,8 +2774,7 @@ void SSFCMSUnitTest(void)
         SSF_ASSERT(sd.certsLen == 2u);
         SSF_ASSERT(_VERIFY256() == true);
 
-        /* A signer issued by a CA: embedded it chains to the CA anchor; absent from the message */
-        /* it is found only when the trust store holds it, and anchors only through the CA */
+        /* CA-issued signer: embedded it chains to the CA anchor, absent it needs the trust store */
         SSF_ASSERT(_utMakeCert(false, true, "ec ca", NULL, NULL, caAPriv, caAPub, caACert,
                                sizeof(caACert), &caALen) == true);
         SSF_ASSERT(_utMakeCert(false, false, "issued signer", "ec ca", caAPriv, issPriv, issPub,
@@ -2811,17 +2793,18 @@ void SSFCMSUnitTest(void)
         _BUILD();
         SSF_ASSERT(SSFCMSParse(msg, len, &sd) == true);
         SSF_ASSERT(sd.certsLen == 0u);
-        SSF_ASSERT(_VERIFY256() == false);                       /* signer not found anywhere */
+        /* Signer not found anywhere */
+        SSF_ASSERT(_VERIFY256() == false);
         trust[0] = issCert;
         trustLen[0] = issLen;
-        SSF_ASSERT(_VERIFY256() == false);                       /* found, but not self-signed */
+        /* Found, but not self-signed */
+        SSF_ASSERT(_VERIFY256() == false);
         trust[1] = caACert;
         trustLen[1] = caALen;
         SSF_ASSERT(SSFCMSVerifyDigest(&sd, sha256, sizeof(sha256), SSF_CMS_DIGEST_SHA256, trust,
                                       trustLen, 2u, now, &res) == true);   /* found and anchored */
 
-        /* Longest chain CMS can build: a signer that is not self-issued and is held only as an */
-        /* anchor, over SSF_CMS_CONFIG_MAX_CERTS embedded intermediates, embedded out of order */
+        /* Longest chain: anchor-only non-self-issued signer over MAX_CERTS out-of-order CAs */
         {
             static uint8_t lcCert[SSF_CMS_CONFIG_MAX_CERTS][SSF_X509_CONFIG_MAX_CERT_SIZE];
             static uint8_t lcPriv[SSF_CMS_CONFIG_MAX_CERTS][SSF_ECDSA_MAX_PRIV_KEY_SIZE];
@@ -2873,10 +2856,12 @@ void SSFCMSUnitTest(void)
             SSF_ASSERT(SSFCMSVerifyDigest(&sd, sha256, sizeof(sha256), SSF_CMS_DIGEST_SHA256,
                                           trust, trustLen, 2u, now, &res) == true);
             SSF_ASSERT(memcmp(res.signerSubject.cn, "long chain signer", 17u) == 0);
-            SSF_ASSERT(_VERIFY256() == false);                   /* signer found, root absent */
+            /* Signer found, root absent */
+            SSF_ASSERT(_VERIFY256() == false);
             trust[0] = lcRootCert;
             trustLen[0] = lcRootLen;
-            SSF_ASSERT(_VERIFY256() == false);                   /* root present, signer absent */
+            /* Root present, signer absent */
+            SSF_ASSERT(_VERIFY256() == false);
         }
 
         /* Two anchors sharing the subject "ec ca": the one whose key signed the signer decides */
@@ -2964,7 +2949,8 @@ void SSFCMSUnitTest(void)
         SSF_ASSERT((cert.subject.cnLen == 23u) &&
                    (memcmp(cert.subject.cn, "SSF Firmware Signing CA", 23u) == 0));
         SSF_ASSERT((cert.isCA == true) && (cert.serialLen == 19u) && (cert.serial[0] == 0x33u));
-        SSF_ASSERT(cert.notAfter > 3300000000ull);              /* GeneralizedTime, 2075 */
+        /* GeneralizedTime, 2075 */
+        SSF_ASSERT(cert.notAfter > 3300000000ull);
         SSF_ASSERT(SSFX509Parse(sd.certs[1].der, sd.certs[1].derLen, &cert) == true);
         SSF_ASSERT((cert.subject.cnLen == 19u) &&
                    (memcmp(cert.subject.cn, "SSF Firmware Master", 19u) == 0));
@@ -3066,8 +3052,7 @@ void SSFCMSUnitTest(void)
                                       trustLen, 1u, now, &res) == true);
         buf[at] ^= 0xFFu;
 
-        /* Substituting the digest algorithm named inside CMSAlgorithmProtection is caught by the */
-        /* guard before the signature is even checked */
+        /* Substituting the protected digest algorithm is caught before the signature check */
         SSF_ASSERT(SSFCMSParse(buf, n, &sd) == true);
         SSF_ASSERT(_utFind(sd.signers[0].signedAttrs, sd.signers[0].signedAttrsLen, apDigestPattern,
                            sizeof(apDigestPattern), &at) == true);

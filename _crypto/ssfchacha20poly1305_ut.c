@@ -36,10 +36,7 @@
 #include "ssfassert.h"
 #include "ssfchacha20poly1305.h"
 
-/* Cross-validate ChaCha20-Poly1305 AEAD against OpenSSL on host builds where libcrypto is */
-/* linked. Same gating pattern as ssfaesctr_ut.c. When disabled (cross builds with         */
-/* -DSSF_CONFIG_HAVE_OPENSSL=0) the RFC 8439 KAT plus internal corner cases are the load-  */
-/* bearing correctness coverage.                                                             */
+/* Cross-validate against OpenSSL when libcrypto is linked, else RFC 8439 KATs cover it. */
 #if (SSF_CONFIG_HAVE_OPENSSL == 1) && (SSF_CONFIG_CCP_UNIT_TEST == 1)
 #define SSF_CCP_OSSL_VERIFY 1
 #else
@@ -120,11 +117,7 @@ static bool _OSSLCCPDecrypt(const uint8_t *ct, size_t ctLen,
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Random fuzz across (ptLen x aadLen). Each cell:                                               */
-/*   - draws fresh random key/nonce/aad/pt                                                       */
-/*   - SSF and OpenSSL encrypt; assert ct AND tag agree byte-for-byte                            */
-/*   - decrypt SSF ct via OpenSSL and OpenSSL ct via SSF; both must succeed and recover pt       */
-/*   - tamper ct[0] / aad[0] / tag[0]; both libs must reject                                     */
+/* Random fuzz across (ptLen x aadLen): SSF vs OpenSSL encrypt, cross-decrypt, tamper.           */
 /* --------------------------------------------------------------------------------------------- */
 static void _VerifyCCPAgainstOpenSSLRandom(void)
 {
@@ -226,7 +219,7 @@ static void _VerifyCCPAgainstOpenSSLRandom(void)
 #endif /* SSF_CCP_OSSL_VERIFY */
 
 /* --------------------------------------------------------------------------------------------- */
-/* RFC 7539 Section 2.8.2 AEAD test vector                                                      */
+/* RFC 7539 Section 2.8.2 AEAD test vector                                                       */
 /* --------------------------------------------------------------------------------------------- */
 void SSFChaCha20Poly1305UnitTest(void)
 {
@@ -303,9 +296,7 @@ void SSFChaCha20Poly1305UnitTest(void)
     SSF_ASSERT(ok);
     SSF_ASSERT(memcmp(dec, pt, sizeof(pt)) == 0);
 
-    /* RFC 8439 Sec. A.5 AEAD test vector. Distinct (key, nonce, AAD) from Sec. 2.8.2 with a 265-byte
-     * plaintext crossing 4 full blocks plus a partial. Bidirectional: encrypt-of-pt must
-     * produce expected ct + tag; decrypt-of-ct + tag must verify and recover pt. */
+    /* RFC 8439 Sec. A.5 AEAD vector (265-byte pt, partial block), both directions. */
     {
         static const uint8_t a5Key[] = {
             0x1Cu, 0x92u, 0x40u, 0xA5u, 0xEBu, 0x55u, 0xD3u, 0x8Au,
@@ -418,13 +409,9 @@ void SSFChaCha20Poly1305UnitTest(void)
         SSF_ASSERT(memcmp(a5Pt2, a5Pt, sizeof(a5Pt)) == 0);
     }
 
-    /* Wycheproof v1 chacha20_poly1305_test.json -- selected representative vectors. The 300-
-     * vector set is too large to embed wholesale (and the OpenSSL fuzz on host already covers
-     * the bulk of the valid-input combinatorics); these four vectors specifically pin down
-     * patterns the fuzz won't generate by chance. */
+    /* Wycheproof v1 chacha20_poly1305_test.json: four vectors the fuzz won't hit by chance. */
 
-    /* Wycheproof tcId 5 (valid): 1-byte msg, 8-byte AAD. Single-byte body exercises the
-     * partial-block keystream truncation in the AEAD wrapper. */
+    /* Wycheproof tcId 5 (valid): 1-byte msg, 8-byte AAD (partial-block keystream). */
     {
         static const uint8_t wpKey[] = {
             0x46u, 0xF0u, 0x25u, 0x49u, 0x65u, 0xF7u, 0x69u, 0xD5u,
@@ -463,8 +450,7 @@ void SSFChaCha20Poly1305UnitTest(void)
         SSF_ASSERT(memcmp(wpDec, wpMsg, sizeof(wpMsg)) == 0);
     }
 
-    /* Wycheproof tcId 4 (valid): 1-byte msg, ZERO-length AAD. Auth-only path with empty AAD
-     * pad16 -- should produce an entirely-empty padded-AAD region in the Poly1305 tag input. */
+    /* Wycheproof tcId 4 (valid): 1-byte msg, zero-length AAD (empty AAD pad16). */
     {
         static const uint8_t wpKey[] = {
             0xCCu, 0x56u, 0xB6u, 0x80u, 0x55u, 0x2Eu, 0xB7u, 0x50u,
@@ -492,9 +478,7 @@ void SSFChaCha20Poly1305UnitTest(void)
         SSF_ASSERT(memcmp(wpTag, wpExpectTag, sizeof(wpExpectTag)) == 0);
     }
 
-    /* Wycheproof tcId 72 (valid): 64-byte msg (one full block), zero-length AAD, distinct
-     * key/nonce. Multi-block-boundary case beyond what RFC Sec. 2.8.2 (114B) and Sec. A.5 (265B)
-     * exercise -- specifically tests the exactly-one-full-block boundary. */
+    /* Wycheproof tcId 72 (valid): 64-byte msg (exactly one block), zero-length AAD. */
     {
         static const uint8_t wpKey[] = {
             0x5Bu, 0x1Du, 0x10u, 0x35u, 0xC0u, 0xB1u, 0x7Eu, 0xE0u,
@@ -540,9 +524,7 @@ void SSFChaCha20Poly1305UnitTest(void)
         SSF_ASSERT(memcmp(wpTag, wpExpectTag, sizeof(wpExpectTag)) == 0);
     }
 
-    /* Wycheproof tcId 146 (invalid): empty msg, 3-byte AAD, single-bit flip in tag. Auth-only
-     * mode with a tampered tag -- Decrypt MUST return false. The original valid tag would have
-     * been f4..., the supplied tampered tag is f5... (low bit of byte 0 flipped). */
+    /* Wycheproof tcId 146 (invalid): empty msg, 3-byte AAD, tag bit flip: Decrypt false. */
     {
         static const uint8_t wpKey[] = {
             0x20u, 0x21u, 0x22u, 0x23u, 0x24u, 0x25u, 0x26u, 0x27u,
@@ -569,8 +551,7 @@ void SSFChaCha20Poly1305UnitTest(void)
                                               NULL, 0u) == false);
     }
 
-    /* Tag-buffer write boundary: oversized tag buffer must leave bytes 16..N-1 untouched.
-     * Pins down the .md guarantee "exactly 16 bytes are written". */
+    /* Tag-buffer write boundary: an oversized tag buffer keeps bytes 16..N-1 untouched. */
     {
         static const uint8_t boundaryKey[SSF_CCP_KEY_SIZE] = {0};
         static const uint8_t boundaryNonce[SSF_CCP_NONCE_SIZE] = {0};
@@ -637,11 +618,7 @@ void SSFChaCha20Poly1305UnitTest(void)
         SSF_ASSERT(!ok);
     }
 
-    /* Defense-in-depth regression: the failure-then-success sequence below confirms that a
-     * Decrypt that returns false on a wrong tag does not leave the operation in a state that
-     * breaks subsequent calls. The internal computedTag scrub on the failure path is not
-     * directly observable from C, but this round-trip pattern would catch any state-leak
-     * regression that affects the next decrypt. */
+    /* A failed Decrypt (wrong tag) must not break a following successful Decrypt. */
     {
         uint8_t scratchKey[SSF_CCP_KEY_SIZE];
         uint8_t scratchNonce[SSF_CCP_NONCE_SIZE];
@@ -684,10 +661,7 @@ void SSFChaCha20Poly1305UnitTest(void)
         SSF_ASSERT(memcmp(recovered, scratchPt, sizeof(scratchPt)) == 0);
     }
 
-    /* SSFChaCha20Poly1305Encrypt: DBC coverage. Every SSF_REQUIRE at the AEAD entry is
-     * exercised with at least one boundary or NULL-pointer violation. The 512 MiB ptLen test
-     * passes a matching ctSize so the size-bound check fires last; nothing dereferences pt or
-     * ct so the absurd length never causes any actual allocation. */
+    /* SSFChaCha20Poly1305Encrypt DBC: every SSF_REQUIRE hit with a boundary or NULL. */
     {
         static const uint8_t scratchKey[SSF_CCP_KEY_SIZE] = {0};
         static const uint8_t scratchNonce[SSF_CCP_NONCE_SIZE] = {0};
@@ -797,8 +771,7 @@ void SSFChaCha20Poly1305UnitTest(void)
                                                    scratchKey, sizeof(scratchKey),
                                                    scratchTag, sizeof(scratchTag),
                                                    NULL, sizeof(scratchCt)));
-        /* AAD NULL with authLen > 0 (already covered above; repeated here for completeness
-         * within this DBC block). */
+        /* AAD NULL with authLen > 0 (repeated here for completeness). */
         SSF_ASSERT_TEST(SSFChaCha20Poly1305Encrypt(scratchPt, sizeof(scratchPt),
                                                    scratchNonce, sizeof(scratchNonce),
                                                    NULL, 5u,
@@ -815,11 +788,7 @@ void SSFChaCha20Poly1305UnitTest(void)
                                    NULL, 0u);
     }
 
-    /* SSFChaCha20Poly1305Decrypt: DBC coverage. Mirror of the encrypt block, plus the
-     * tagLen-must-equal-16 check (decrypt rejects truncated tags rather than verifying a
-     * shorter prefix). The pt/ct NULL-with-len>0 cases assert via Poly1305Update inside
-     * tag computation since pt/ct's explicit AEAD-level check is gated on a successful
-     * tag verify which never happens on these all-zero-key inputs. */
+    /* SSFChaCha20Poly1305Decrypt DBC: mirror of encrypt plus tagLen must equal 16. */
     {
         static const uint8_t scratchKey[SSF_CCP_KEY_SIZE] = {0};
         static const uint8_t scratchNonce[SSF_CCP_NONCE_SIZE] = {0};
@@ -929,10 +898,7 @@ void SSFChaCha20Poly1305UnitTest(void)
                                                    scratchTag, sizeof(scratchTag),
                                                    scratchPt, sizeof(scratchPt)));
 
-        /* Permitted edge: ctLen == 0 with NULL ct and pt -- auth-only mode with NULL buffers
-         * and a zero-AAD construction. The all-zero tag matches the all-zero-key auth-only
-         * computation only by accident, so we don't assert on the return value. The point
-         * is that the call must not assert. */
+        /* Permitted edge: ctLen == 0 with NULL ct and pt must not assert (result unchecked). */
         (void)SSFChaCha20Poly1305Decrypt(NULL, 0u,
                                          scratchNonce, sizeof(scratchNonce),
                                          NULL, 0u,

@@ -35,9 +35,7 @@
 #include "ssfhkdf.h"
 #include "ssfhmac.h"
 
-/* Cross-validate HKDF against OpenSSL on host builds where libcrypto is linked. Same gating */
-/* pattern as ssfaesctr_ut.c. When disabled (cross builds with -DSSF_CONFIG_HAVE_OPENSSL=0)  */
-/* the RFC 5869 KATs above are the load-bearing correctness coverage.                         */
+/* Cross-validate against OpenSSL when libcrypto is linked, else RFC 5869 KATs cover it. */
 #if (SSF_CONFIG_HAVE_OPENSSL == 1) && (SSF_CONFIG_HKDF_UNIT_TEST == 1)
 #define SSF_HKDF_OSSL_VERIFY 1
 #else
@@ -118,12 +116,7 @@ static void _OSSLHKDF(const char *mode, SSFHMACHash_t h,
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Random fuzz across (hash x saltLen x ikmLen x infoLen x okmLen). Each cell drives:           */
-/*   - SSFHKDFExtract  vs OpenSSL "EXTRACT_ONLY"                                                 */
-/*   - SSFHKDFExpand   vs OpenSSL "EXPAND_ONLY" (using the SSF-derived PRK as the "key")         */
-/*   - SSFHKDF         vs OpenSSL "EXTRACT_AND_EXPAND"                                           */
-/* okmLens span the 1-, multi-block, and last-partial-block paths plus the per-hash maximum     */
-/* (255 * hashSize) edge cases via large requests.                                              */
+/* Random fuzz (hash x salt x ikm x info x okm): Extract, Expand, HKDF vs OpenSSL modes.         */
 /* --------------------------------------------------------------------------------------------- */
 static void _VerifyHKDFAgainstOpenSSLRandom(void)
 {
@@ -206,10 +199,7 @@ static void _VerifyHKDFAgainstOpenSSLRandom(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Verify SSFHKDFExpand with prkLen > hashSize against OpenSSL. The standard fuzz above only     */
-/* exercises prkLen == hashSize (the Extract output size); this covers the two HMAC long-key     */
-/* regimes from RFC 2104: zero-pad when prkLen <= blockSize, pre-hash when prkLen > blockSize.   */
-/* SHA-1/256 blockSize = 64, SHA-384/512 blockSize = 128, so prkLens 65/129/200 hit both paths.  */
+/* Expand with prkLen > hashSize vs OpenSSL: prkLen 65/129/200 hit both HMAC key regimes.        */
 /* --------------------------------------------------------------------------------------------- */
 static void _VerifyHKDFExpandLongPRK(void)
 {
@@ -383,10 +373,7 @@ void SSFHKDFUnitTest(void)
                    prk, sizeof(prk)) == true);
         SSF_ASSERT(memcmp(prk, expectedPRK, sizeof(expectedPRK)) == 0);
 
-        /* Extract with non-NULL pointer + saltLen == 0 must be equivalent to NULL salt:    */
-        /* per RFC 5869 Sec. 2.2 the function substitutes a HashLen-byte zero salt either   */
-        /* way. Existing tests only ever pair NULL with len=0, leaving the (ptr, 0) arm     */
-        /* of the salt short-circuit unexercised.                                            */
+        /* Extract with a non-NULL salt pointer and saltLen == 0 must equal the NULL salt result. */
         {
             uint8_t prkPtr0[32];
             uint8_t saltPtr = 0;
@@ -400,9 +387,7 @@ void SSFHKDFUnitTest(void)
                    okm, sizeof(okm)) == true);
         SSF_ASSERT(memcmp(okm, expectedOKM, sizeof(expectedOKM)) == 0);
 
-        /* Expand with non-NULL pointer + infoLen == 0 must be equivalent to NULL info:     */
-        /* the loop's `if (info != NULL && infoLen > 0)` skip arm is the same in both       */
-        /* cases. Existing tests only pair NULL with len=0.                                  */
+        /* Expand with a non-NULL info pointer and infoLen == 0 must equal the NULL info result. */
         {
             uint8_t okmPtr0[42];
             uint8_t infoPtr = 0;
@@ -468,8 +453,7 @@ void SSFHKDFUnitTest(void)
         uint8_t prk[20];
         uint8_t okm[42];
 
-        /* Salt absent for SHA-1 -- exercises the salt==NULL substitution branch that TC4 does */
-        /* not reach (TC3 covers it for SHA-256 only).                                         */
+        /* Salt absent for SHA-1: the zero-salt substitution branch (TC3 covers SHA-256 only). */
         SSF_ASSERT(SSFHKDFExtract(SSF_HMAC_HASH_SHA1, NULL, 0, ikm, sizeof(ikm),
                    prk, sizeof(prk)) == true);
         SSF_ASSERT(memcmp(prk, expectedPRK, sizeof(expectedPRK)) == 0);
@@ -645,9 +629,7 @@ void SSFHKDFUnitTest(void)
     _VerifyHKDFExpandLongPRK();
 #endif
 
-    /* ---- AUDIT HKDF-1: a NULL salt with saltLen > 0 is a caller bug, not "no salt" ---- */
-    /* Extract treated (NULL, saltLen > 0) as the RFC 5869 zero salt and silently ran. Both    */
-    /* Extract and the one-shot SSFHKDF must trap; (NULL, 0) still selects the zero salt.      */
+    /* AUDIT HKDF-1: (NULL, saltLen > 0) must trap in Extract and SSFHKDF; (NULL, 0) is zero salt */
     {
         static const uint8_t ikm[22] = { 0x0Bu };
         uint8_t prk[SSF_HMAC_MAX_HASH_SIZE];

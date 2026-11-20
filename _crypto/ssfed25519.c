@@ -42,11 +42,15 @@
 /* --------------------------------------------------------------------------------------------- */
 /* Field arithmetic: GF(2^255 - 19); lazy add / sub and Ed25519 extras (rest in ssffe25519)      */
 /* --------------------------------------------------------------------------------------------- */
-/* r = a + b. Result may be up to 2p if both inputs < p. */
-static void _fe_add(SSFFE25519_t *r, const SSFFE25519_t *a, const SSFFE25519_t *b)
+
+/* --------------------------------------------------------------------------------------------- */
+/* r = a + b, lazily reduced below 2^256 (up to 2p if both inputs < p).                          */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFEd25519FeAdd(SSFFE25519_t *r, const SSFFE25519_t *a, const SSFFE25519_t *b)
 {
     uint64_t carry = 0;
     uint8_t i;
+
     for (i = 0; i < 8u; i++)
     {
         carry += (uint64_t)a->v[i] + (uint64_t)b->v[i];
@@ -65,12 +69,15 @@ static void _fe_add(SSFFE25519_t *r, const SSFFE25519_t *a, const SSFFE25519_t *
     }
 }
 
-/* r = a - b mod p. Reduces inputs first, then subtracts. Adds 2p on borrow. */
-static void _fe_sub(SSFFE25519_t *r, const SSFFE25519_t *a, const SSFFE25519_t *b)
+/* --------------------------------------------------------------------------------------------- */
+/* r = a - b mod p: reduces both inputs, subtracts, then adds 2p on borrow (constant time).      */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFEd25519FeSub(SSFFE25519_t *r, const SSFFE25519_t *a, const SSFFE25519_t *b)
 {
     uint64_t borrow = 0;
     uint8_t i;
-    SSFFE25519_t ar, br;
+    SSFFE25519_t ar;
+    SSFFE25519_t br;
 
     /* Reduce inputs to [0, p) so that a - b + 2p is in [0, 2p + p) = [0, 3p) < 2^257 */
     SSFFE25519Copy(&ar, a);
@@ -81,7 +88,7 @@ static void _fe_sub(SSFFE25519_t *r, const SSFFE25519_t *a, const SSFFE25519_t *
     /* r = a - b */
     for (i = 0; i < 8u; i++)
     {
-        uint64_t diff = (uint64_t)ar.v[i] - (uint64_t)br.v[i] - borrow;
+        uint64_t diff = ((uint64_t)ar.v[i] - (uint64_t)br.v[i]) - borrow;
         r->v[i] = (uint32_t)diff;
         borrow = (diff >> 63) & 1u;
     }
@@ -92,37 +99,42 @@ static void _fe_sub(SSFFE25519_t *r, const SSFFE25519_t *a, const SSFFE25519_t *
         uint64_t carry = 0;
         for (i = 0; i < 8u; i++)
         {
-            carry += (uint64_t)r->v[i] + 2u * (uint64_t)(SSF_FE25519_P.v[i] & mask);
+            carry += (uint64_t)r->v[i] + (2u * (uint64_t)(SSF_FE25519_P.v[i] & mask));
             r->v[i] = (uint32_t)carry;
             carry >>= 32;
         }
     }
 }
 
-/* Import from 32 little-endian bytes (caller handles any pre-import bit clearing). */
-static void _fe_from_bytes(SSFFE25519_t *a, const uint8_t *b)
+/* --------------------------------------------------------------------------------------------- */
+/* Imports a from 32 little-endian bytes at b; the caller clears any bits beforehand.            */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFEd25519FeFromBytes(SSFFE25519_t *a, const uint8_t *b)
 {
     uint8_t i;
+
     for (i = 0; i < 8u; i++)
     {
         a->v[i] = ((uint32_t)b[i * 4u]) |
-                  ((uint32_t)b[i * 4u + 1u] << 8) |
-                  ((uint32_t)b[i * 4u + 2u] << 16) |
-                  ((uint32_t)b[i * 4u + 3u] << 24);
+                  ((uint32_t)b[(i * 4u) + 1u] << 8) |
+                  ((uint32_t)b[(i * 4u) + 2u] << 16) |
+                  ((uint32_t)b[(i * 4u) + 3u] << 24);
     }
 }
 
-/* r = a^((p-5)/8) mod p. Used by _ge_decode's square-root step (the candidate-x formula        */
-/*   x = u * v^3 * (u * v^7)^((p-5)/8)).                                                        */
-/* (p-5)/8 = (2^255 - 19 - 5)/8 = (2^255 - 24)/8 = 2^252 - 3. The function name (_fe_pow2523)   */
-/* records that exponent in shorthand. Addition chain mirrors _fe_inv, with five fewer trailing */
-/* squarings and a multiply-by-`a` instead of the multiply-by-`a^11` _fe_inv ends with.         */
-static void _fe_pow2523(SSFFE25519_t *r, const SSFFE25519_t *a)
+/* --------------------------------------------------------------------------------------------- */
+/* r = a^((p - 5) / 8) = a^(2^252 - 3) mod p, the exponent of the decode square-root step.       */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFEd25519FePow2523(SSFFE25519_t *r, const SSFFE25519_t *a)
 {
-    SSFFE25519_t t0, t1, t2, t3;
+    SSFFE25519_t t0;
+    SSFFE25519_t t1;
+    SSFFE25519_t t2;
+    SSFFE25519_t t3;
     uint16_t i;
 
-    /* a^2 */
+    /* a^2 (SSFFE25519Inv() chain to a^(2^250 - 1), then 2 squarings and a multiply by a) */
+
     SSFFE25519Sqr(&t0, a);
     /* a^9 = ((a^2)^2)^2 * a */
     SSFFE25519Sqr(&t1, &t0);
@@ -169,44 +181,58 @@ static void _fe_pow2523(SSFFE25519_t *r, const SSFFE25519_t *a)
     SSFFE25519Mul(r, &t1, a);
 }
 
-/* Return 1 if a is negative (odd), 0 if non-negative (even). Fully reduces first. */
-static uint8_t _fe_isneg(const SSFFE25519_t *a)
+/* --------------------------------------------------------------------------------------------- */
+/* Returns 1 if a, fully reduced, is negative (odd), else 0.                                     */
+/* --------------------------------------------------------------------------------------------- */
+static uint8_t _SSFEd25519FeIsNeg(const SSFFE25519_t *a)
 {
     SSFFE25519_t t;
+
     SSFFE25519Copy(&t, a);
     SSFFE25519Reduce(&t);
     return (uint8_t)(t.v[0] & 1u);
 }
 
-/* Return 1 if a is zero, 0 otherwise. Fully reduces first. */
-static uint8_t _fe_iszero(const SSFFE25519_t *a)
+/* --------------------------------------------------------------------------------------------- */
+/* Returns 1 if a, fully reduced, is zero, else 0 (constant time).                               */
+/* --------------------------------------------------------------------------------------------- */
+static uint8_t _SSFEd25519FeIsZero(const SSFFE25519_t *a)
 {
     SSFFE25519_t t;
     uint32_t bits;
     uint8_t i;
+
     SSFFE25519Copy(&t, a);
     SSFFE25519Reduce(&t);
     bits = 0;
     for (i = 0; i < 8u; i++) bits |= t.v[i];
-    /* (bits | -bits) has bit 31 set iff bits != 0; unsigned negate (AUDIT E-3) */
+    /* (bits | -bits) has bit 31 set iff bits != 0; the negate is unsigned to avoid overflow */
     return (uint8_t)(1u ^ (((bits | ((uint32_t)0u - bits)) >> 31) & 1u));
 }
 
-/* r = -a mod p */
-static void _fe_neg(SSFFE25519_t *r, const SSFFE25519_t *a)
+/* --------------------------------------------------------------------------------------------- */
+/* r = -a mod p.                                                                                 */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFEd25519FeNeg(SSFFE25519_t *r, const SSFFE25519_t *a)
 {
     SSFFE25519_t zero;
+
     SSFFE25519SetZero(&zero);
-    _fe_sub(r, &zero, a);
+    _SSFEd25519FeSub(r, &zero, a);
 }
 
 /* --------------------------------------------------------------------------------------------- */
 /* Edwards point in extended coords (X:Y:Z:T): x=X/Z, y=Y/Z, T=X*Y/Z; curve a = -1.              */
 /* --------------------------------------------------------------------------------------------- */
-typedef struct { SSFFE25519_t X, Y, Z, T; } _ge_t;
+typedef struct
+{
+    SSFFE25519_t X;
+    SSFFE25519_t Y;
+    SSFFE25519_t Z;
+    SSFFE25519_t T;
+} _ge_t;
 
-/* d = -121665/121666 mod p                                                                      */
-/* d = 37095705934669439343138083508754565189542113879843219016388785533085940283555         */
+/* d = -121665/121666 mod p */
 static const SSFFE25519_t _ed_d = {{ 0x135978A3u, 0x75EB4DCAu, 0x4141D8ABu, 0x00700A4Du,
                               0x7779E898u, 0x8CC74079u, 0x2B6FFE73u, 0x52036CEEu }};
 
@@ -214,17 +240,11 @@ static const SSFFE25519_t _ed_d = {{ 0x135978A3u, 0x75EB4DCAu, 0x4141D8ABu, 0x00
 static const SSFFE25519_t _ed_2d = {{ 0x26B2F159u, 0xEBD69B94u, 0x8283B156u, 0x00E0149Au,
                                0xEEF3D130u, 0x198E80F2u, 0x56DFFCE7u, 0x2406D9DCu }};
 
-/* sqrt(-1) mod p = 2^((p-1)/4) mod p                                                           */
+/* sqrt(-1) mod p = 2^((p-1)/4) mod p */
 static const SSFFE25519_t _fe_sqrtm1 = {{ 0x4A0EA0B0u, 0xC4EE1B27u, 0xAD2FE478u, 0x2F431806u,
                                    0x3DFBD7A7u, 0x2B4D0099u, 0x4FC1DF0Bu, 0x2B832480u }};
 
-/* Base point B in extended-Edwards coords (X:Y:Z:T), X=B_x, Y=B_y=4/5 mod p, Z=1, T=B_x*B_y.    */
-/* Y is the bytes 0x58 0x66x31 reinterpreted as 8 little-endian 32-bit limbs (sign bit clear).   */
-/* X and T values are derived from the curve equation -x^2 + y^2 = 1 + d*x^2*y^2 with the        */
-/* positive (even) root for x, then encoded as 8 limbs little-endian. Hardcoded here to skip the */
-/* per-call _ge_decode the previous design did at every Sign / Verify / PubKeyFromSeed entry.    */
-/* Correctness of these constants is enforced end-to-end by the RFC 8032 Sec. 7.1 test vectors and*/
-/* the OpenSSL cross-check below -- any wrong byte makes every signature deviate.                 */
+/* Base point B (X:Y:Z:T): Y = 4/5 mod p, X its even root, Z = 1, T = X * Y; RFC 8032 Sec. 5.1 */
 static const _ge_t _ed_basepoint = {
     /* X */ {{ 0x8F25D51Au, 0xC9562D60u, 0x9525A7B2u, 0x692CC760u,
                0xFDD6DC5Cu, 0xC0A4E231u, 0xCD6E53FEu, 0x216936D3u }},
@@ -247,8 +267,10 @@ static const uint8_t _ed_L[32] = {
 /* Edwards curve point operations                                                                */
 /* --------------------------------------------------------------------------------------------- */
 
-/* Set point to the identity (neutral element): (0:1:1:0) */
-static void _ge_identity(_ge_t *r)
+/* --------------------------------------------------------------------------------------------- */
+/* Sets r to the identity (neutral element) (0:1:1:0).                                           */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFEd25519GeIdentity(_ge_t *r)
 {
     SSFFE25519SetZero(&r->X);
     SSFFE25519SetOne(&r->Y);
@@ -256,80 +278,112 @@ static void _ge_identity(_ge_t *r)
     SSFFE25519SetZero(&r->T);
 }
 
-/* Point doubling in extended coordinates (a = -1 twisted Edwards).                              */
-/* From: Hisil, Wong, Carter, Dawson "Twisted Edwards Curves Revisited", 2008.                   */
-static void _ge_double(_ge_t *r, const _ge_t *p)
+/* --------------------------------------------------------------------------------------------- */
+/* r = 2p in extended coords, a = -1 (Hisil, Wong, Carter, Dawson, "Twisted Edwards...", 2008).  */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFEd25519GeDouble(_ge_t *r, const _ge_t *p)
 {
-    SSFFE25519_t A, B, C, D, E, F, G, H;
+    SSFFE25519_t A;
+    SSFFE25519_t B;
+    SSFFE25519_t C;
+    SSFFE25519_t D;
+    SSFFE25519_t E;
+    SSFFE25519_t F;
+    SSFFE25519_t G;
+    SSFFE25519_t H;
 
-    SSFFE25519Sqr(&A, &p->X);           /* A = X1^2 */
-    SSFFE25519Sqr(&B, &p->Y);           /* B = Y1^2 */
-    SSFFE25519Sqr(&C, &p->Z);           /* C = Z1^2 */
-    _fe_add(&C, &C, &C);          /* C = 2*Z1^2 */
-    _fe_neg(&D, &A);              /* D = -A (since a = -1) */
-    _fe_add(&E, &p->X, &p->Y);   /* E = (X1+Y1) */
-    SSFFE25519Sqr(&E, &E);              /* E = (X1+Y1)^2 */
-    _fe_sub(&E, &E, &A);          /* E = (X1+Y1)^2 - A */
-    _fe_sub(&E, &E, &B);          /* E = (X1+Y1)^2 - A - B */
-    _fe_add(&F, &D, &B);          /* F = D + B */
-    _fe_sub(&G, &F, &C);          /* G = F - C */
-    _fe_sub(&H, &D, &B);          /* H = D - B */
-    SSFFE25519Mul(&r->X, &E, &G);       /* X3 = E*G */
-    SSFFE25519Mul(&r->Y, &F, &H);       /* Y3 = F*H */
-    SSFFE25519Mul(&r->T, &E, &H);       /* T3 = E*H */
-    SSFFE25519Mul(&r->Z, &F, &G);       /* Z3 = F*G */
+    SSFFE25519Sqr(&A, &p->X); /* A = X1^2 */
+    SSFFE25519Sqr(&B, &p->Y); /* B = Y1^2 */
+    SSFFE25519Sqr(&C, &p->Z); /* C = Z1^2 */
+    _SSFEd25519FeAdd(&C, &C, &C); /* C = 2*Z1^2 */
+    _SSFEd25519FeNeg(&D, &A); /* D = -A (since a = -1) */
+    _SSFEd25519FeAdd(&E, &p->X, &p->Y); /* E = (X1+Y1) */
+    SSFFE25519Sqr(&E, &E); /* E = (X1+Y1)^2 */
+    _SSFEd25519FeSub(&E, &E, &A); /* E = (X1+Y1)^2 - A */
+    _SSFEd25519FeSub(&E, &E, &B); /* E = (X1+Y1)^2 - A - B */
+    _SSFEd25519FeAdd(&F, &D, &B); /* F = D + B */
+    _SSFEd25519FeSub(&G, &F, &C); /* G = F - C */
+    _SSFEd25519FeSub(&H, &D, &B); /* H = D - B */
+    SSFFE25519Mul(&r->X, &E, &G); /* X3 = E*G */
+    SSFFE25519Mul(&r->Y, &F, &H); /* Y3 = F*H */
+    SSFFE25519Mul(&r->T, &E, &H); /* T3 = E*H */
+    SSFFE25519Mul(&r->Z, &F, &G); /* Z3 = F*G */
 }
 
-/* Unified point addition in extended coordinates.                                               */
-/* p3 = p1 + p2, using the formula from the Ed25519 paper.                                      */
-static void _ge_add(_ge_t *r, const _ge_t *p1, const _ge_t *p2)
+/* --------------------------------------------------------------------------------------------- */
+/* r = p1 + p2 by the unified extended-coordinates addition of the Ed25519 paper.                */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFEd25519GeAdd(_ge_t *r, const _ge_t *p1, const _ge_t *p2)
 {
-    SSFFE25519_t A, B, C, D, E, F, G, H;
+    SSFFE25519_t A;
+    SSFFE25519_t B;
+    SSFFE25519_t C;
+    SSFFE25519_t D;
+    SSFFE25519_t E;
+    SSFFE25519_t F;
+    SSFFE25519_t G;
+    SSFFE25519_t H;
 
-    _fe_sub(&A, &p1->Y, &p1->X);  /* A = Y1-X1 */
-    _fe_sub(&H, &p2->Y, &p2->X);  /* tmp = Y2-X2 */
-    SSFFE25519Mul(&A, &A, &H);          /* A = (Y1-X1)*(Y2-X2) */
-    _fe_add(&B, &p1->Y, &p1->X);  /* B = Y1+X1 */
-    _fe_add(&H, &p2->Y, &p2->X);  /* tmp = Y2+X2 */
-    SSFFE25519Mul(&B, &B, &H);          /* B = (Y1+X1)*(Y2+X2) */
-    SSFFE25519Mul(&C, &p1->T, &p2->T);  /* C = T1*T2 */
-    SSFFE25519Mul(&C, &C, &_ed_2d);     /* C = T1*2*d*T2 */
-    SSFFE25519Mul(&D, &p1->Z, &p2->Z);  /* D = Z1*Z2 */
-    _fe_add(&D, &D, &D);          /* D = 2*Z1*Z2 */
-    _fe_sub(&E, &B, &A);          /* E = B-A */
-    _fe_sub(&F, &D, &C);          /* F = D-C */
-    _fe_add(&G, &D, &C);          /* G = D+C */
-    _fe_add(&H, &B, &A);          /* H = B+A */
-    SSFFE25519Mul(&r->X, &E, &F);       /* X3 = E*F */
-    SSFFE25519Mul(&r->Y, &G, &H);       /* Y3 = G*H */
-    SSFFE25519Mul(&r->T, &E, &H);       /* T3 = E*H */
-    SSFFE25519Mul(&r->Z, &F, &G);       /* Z3 = F*G */
+    _SSFEd25519FeSub(&A, &p1->Y, &p1->X); /* A = Y1-X1 */
+    _SSFEd25519FeSub(&H, &p2->Y, &p2->X); /* tmp = Y2-X2 */
+    SSFFE25519Mul(&A, &A, &H); /* A = (Y1-X1)*(Y2-X2) */
+    _SSFEd25519FeAdd(&B, &p1->Y, &p1->X); /* B = Y1+X1 */
+    _SSFEd25519FeAdd(&H, &p2->Y, &p2->X); /* tmp = Y2+X2 */
+    SSFFE25519Mul(&B, &B, &H); /* B = (Y1+X1)*(Y2+X2) */
+    SSFFE25519Mul(&C, &p1->T, &p2->T); /* C = T1*T2 */
+    SSFFE25519Mul(&C, &C, &_ed_2d); /* C = T1*2*d*T2 */
+    SSFFE25519Mul(&D, &p1->Z, &p2->Z); /* D = Z1*Z2 */
+    _SSFEd25519FeAdd(&D, &D, &D); /* D = 2*Z1*Z2 */
+    _SSFEd25519FeSub(&E, &B, &A); /* E = B-A */
+    _SSFEd25519FeSub(&F, &D, &C); /* F = D-C */
+    _SSFEd25519FeAdd(&G, &D, &C); /* G = D+C */
+    _SSFEd25519FeAdd(&H, &B, &A); /* H = B+A */
+    SSFFE25519Mul(&r->X, &E, &F); /* X3 = E*F */
+    SSFFE25519Mul(&r->Y, &G, &H); /* Y3 = G*H */
+    SSFFE25519Mul(&r->T, &E, &H); /* T3 = E*H */
+    SSFFE25519Mul(&r->Z, &F, &G); /* Z3 = F*G */
 }
 
-/* Encode a point to 32 bytes (Edwards compressed format).                                       */
-/* The y-coordinate is encoded in LE; the high bit of byte 31 is the sign of x.                 */
-static void _ge_encode(uint8_t out[32], const _ge_t *p)
+/* --------------------------------------------------------------------------------------------- */
+/* Encodes p to 32 bytes: y little-endian with the sign of x in the high bit of byte 31.         */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFEd25519GeEncode(uint8_t out[32], const _ge_t *p)
 {
-    SSFFE25519_t recip, x, y;
+    SSFFE25519_t recip;
+    SSFFE25519_t x;
+    SSFFE25519_t y;
+
+    SSF_REQUIRE(out != NULL);
+    SSF_REQUIRE(p != NULL);
+
     SSFFE25519Inv(&recip, &p->Z);
     SSFFE25519Mul(&x, &p->X, &recip);
     SSFFE25519Mul(&y, &p->Y, &recip);
     SSFFE25519ToBytes(out, &y);
-    out[31] ^= (uint8_t)(_fe_isneg(&x) << 7);
+    out[31] ^= (uint8_t)(_SSFEd25519FeIsNeg(&x) << 7);
 }
 
-/* Decode a 32-byte compressed point. Returns false if invalid. */
-static bool _ge_decode(_ge_t *p, const uint8_t in[32])
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if in decodes to a curve point p (RFC 8032 Sec. 5.1.3), else false.              */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFEd25519GeDecode(_ge_t *p, const uint8_t in[32])
 {
-    SSFFE25519_t u, v, v3, vxx, check;
+    SSFFE25519_t u;
+    SSFFE25519_t v;
+    SSFFE25519_t v3;
+    SSFFE25519_t vxx;
+    SSFFE25519_t check;
     uint8_t sign;
     uint8_t tmp[32];
+
+    SSF_REQUIRE(p != NULL);
+    SSF_REQUIRE(in != NULL);
 
     sign = (in[31] >> 7) & 1u;
 
     memcpy(tmp, in, 32);
     tmp[31] &= 0x7Fu; /* clear sign bit */
-    _fe_from_bytes(&p->Y, tmp);
+    _SSFEd25519FeFromBytes(&p->Y, tmp);
 
     /* Reject non-canonical y per RFC 8032 Sec. 5.1.3 (must satisfy y < p). */
     {
@@ -337,7 +391,7 @@ static bool _ge_decode(_ge_t *p, const uint8_t in[32])
         uint8_t i;
         for (i = 0; i < 8u; i++)
         {
-            uint64_t diff = (uint64_t)p->Y.v[i] - (uint64_t)SSF_FE25519_P.v[i] - borrow;
+            uint64_t diff = ((uint64_t)p->Y.v[i] - (uint64_t)SSF_FE25519_P.v[i]) - borrow;
             borrow = (diff >> 63) & 1u;
         }
         if (borrow == 0u) return false;
@@ -345,49 +399,51 @@ static bool _ge_decode(_ge_t *p, const uint8_t in[32])
 
     /* u = y^2 - 1 */
     SSFFE25519Sqr(&u, &p->Y);
-    SSFFE25519Mul(&v, &u, &_ed_d);      /* v = d*y^2 */
+    SSFFE25519Mul(&v, &u, &_ed_d); /* v = d*y^2 */
     {
         SSFFE25519_t one;
         SSFFE25519SetOne(&one);
-        _fe_sub(&u, &u, &one);    /* u = y^2 - 1 */
-        _fe_add(&v, &v, &one);    /* v = d*y^2 + 1 */
+        _SSFEd25519FeSub(&u, &u, &one); /* u = y^2 - 1 */
+        _SSFEd25519FeAdd(&v, &v, &one); /* v = d*y^2 + 1 */
     }
 
     /* Compute x = sqrt(u/v) via x = u * v^3 * (u * v^7)^((p-5)/8). */
-    SSFFE25519Sqr(&v3, &v);             /* v^2 */
-    SSFFE25519Mul(&v3, &v3, &v);        /* v^3 */
-    SSFFE25519Sqr(&p->X, &v3);          /* v^6 */
-    SSFFE25519Mul(&p->X, &p->X, &v);    /* v^7 */
-    SSFFE25519Mul(&p->X, &p->X, &u);    /* u * v^7 */
-    _fe_pow2523(&p->X, &p->X);    /* (u * v^7)^((p-5)/8) */
-    SSFFE25519Mul(&p->X, &p->X, &v3);   /* * v^3 */
-    SSFFE25519Mul(&p->X, &p->X, &u);    /* * u => candidate x */
+    SSFFE25519Sqr(&v3, &v); /* v^2 */
+    SSFFE25519Mul(&v3, &v3, &v); /* v^3 */
+    SSFFE25519Sqr(&p->X, &v3); /* v^6 */
+    SSFFE25519Mul(&p->X, &p->X, &v); /* v^7 */
+    SSFFE25519Mul(&p->X, &p->X, &u); /* u * v^7 */
+    _SSFEd25519FePow2523(&p->X, &p->X); /* (u * v^7)^((p-5)/8) */
+    SSFFE25519Mul(&p->X, &p->X, &v3); /* * v^3 */
+    SSFFE25519Mul(&p->X, &p->X, &u); /* * u => candidate x */
 
-    /* Check: v * x^2 == u ? */
     SSFFE25519Sqr(&vxx, &p->X);
     SSFFE25519Mul(&vxx, &vxx, &v);
-    _fe_sub(&check, &vxx, &u);
+    _SSFEd25519FeSub(&check, &vxx, &u);
 
-    if (!_fe_iszero(&check))
+    /* Is v * x^2 != u? */
+    if (!_SSFEd25519FeIsZero(&check))
     {
-        /* Try x * sqrt(-1) */
-        _fe_add(&check, &vxx, &u);
-        if (!_fe_iszero(&check))
+        /* Yes, x * sqrt(-1) is the root if v * x^2 == -u */
+        _SSFEd25519FeAdd(&check, &vxx, &u);
+        if (!_SSFEd25519FeIsZero(&check))
         {
             return false; /* No square root exists */
         }
         SSFFE25519Mul(&p->X, &p->X, &_fe_sqrtm1);
     }
 
-    /* Adjust sign */
-    if (_fe_isneg(&p->X) != sign)
+    /* Does the sign of x differ from the encoded sign bit? */
+    if (_SSFEd25519FeIsNeg(&p->X) != sign)
     {
-        _fe_neg(&p->X, &p->X);
+        /* Yes, negate x */
+        _SSFEd25519FeNeg(&p->X, &p->X);
     }
 
-    /* If x == 0 and sign == 1, invalid */
-    if (_fe_iszero(&p->X) && (sign != 0u))
+    /* Is x zero with the sign bit set (no such point)? */
+    if (_SSFEd25519FeIsZero(&p->X) && (sign != 0u))
     {
+        /* Yes, invalid encoding */
         return false;
     }
 
@@ -397,34 +453,30 @@ static bool _ge_decode(_ge_t *p, const uint8_t in[32])
     return true;
 }
 
-/* Low-order subgroup check: returns true if [8]p is the identity, i.e., p has order in        */
-/* {1,2,4,8}. Per Chalkias et al. "Taming the many EdDSAs" Sec. 5, signatures under low-order  */
-/* public keys can be forged for arbitrary messages by setting (R, S) so that the verify        */
-/* equation reduces to identity = identity, regardless of the message. RFC 8032 doesn't         */
-/* mandate the check, but every modern Ed25519 implementation (libsodium >=1.0.16, BoringSSL)  */
-/* enforces it; we match that posture. Three doublings is cheaper than the alternative          */
-/* hardcoded byte-blocklist and generalises to any future torsion case.                          */
-/* Identity in projective extended coords has X = 0 and Y = Z (and T = 0); checking those two   */
-/* conditions on [8]p is sufficient because the doubling formula preserves the invariant T*Z = */
-/* X*Y (and Y == Z combined with X == 0 implies that invariant trivially).                      */
-static bool _ge_is_low_order(const _ge_t *p)
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if [8]p is the identity (p has order 1, 2, 4 or 8), else false.                  */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFEd25519GeIsLowOrder(const _ge_t *p)
 {
     _ge_t t;
     SSFFE25519_t diff;
 
-    _ge_double(&t, p);     /* [2]p */
-    _ge_double(&t, &t);    /* [4]p */
-    _ge_double(&t, &t);    /* [8]p */
+    SSF_REQUIRE(p != NULL);
 
-    if (_fe_iszero(&t.X) == 0u) return false;
-    _fe_sub(&diff, &t.Y, &t.Z);
-    return (_fe_iszero(&diff) != 0u);
+    _SSFEd25519GeDouble(&t, p); /* [2]p */
+    _SSFEd25519GeDouble(&t, &t); /* [4]p */
+    _SSFEd25519GeDouble(&t, &t); /* [8]p */
+
+    /* Identity has X = 0 and Y = Z; doubling keeps T * Z = X * Y, so T needs no check */
+    if (_SSFEd25519FeIsZero(&t.X) == 0u) return false;
+    _SSFEd25519FeSub(&diff, &t.Y, &t.Z);
+    return (_SSFEd25519FeIsZero(&diff) != 0u);
 }
 
-/* Constant-time conditional swap of two group elements: if swap != 0, exchange a and b.        */
-/* Implemented as four _fe_cswap calls over the four coordinate field-elements; the underlying   */
-/* mask-XOR pattern has no secret-dependent branch or memory access.                             */
-static void _ge_cswap(_ge_t *a, _ge_t *b, uint32_t swap)
+/* --------------------------------------------------------------------------------------------- */
+/* Swaps points a and b if the low bit of swap is set, in constant time (mask-XOR per field).    */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFEd25519GeCSwap(_ge_t *a, _ge_t *b, uint32_t swap)
 {
     SSFFE25519CSwap(&a->X, &b->X, swap);
     SSFFE25519CSwap(&a->Y, &b->Y, swap);
@@ -432,63 +484,71 @@ static void _ge_cswap(_ge_t *a, _ge_t *b, uint32_t swap)
     SSFFE25519CSwap(&a->T, &b->T, swap);
 }
 
-/* Constant-time scalar multiplication: r = [scalar]p.                                           */
-/* Double-and-add-always pattern: on every bit we compute both `Q' = 2Q` and `Q' + p`, then      */
-/* constant-time-swap to keep `Q = 2Q + p` when the bit is 1 and `Q = 2Q` when it is 0. Every   */
-/* iteration does exactly one double, one add, and one cswap regardless of bit value, so the    */
-/* wall-clock runtime does not depend on the scalar bits. Roughly 2x slower than the            */
-/* variable-time double-and-add above; use for any call site where `scalar` is a secret.        */
-static void _ge_scalarmult_ct(_ge_t *r, const uint8_t scalar[32], const _ge_t *p)
+/* --------------------------------------------------------------------------------------------- */
+/* r = [scalar]p by constant-time double-and-add-always; use wherever scalar is secret.          */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFEd25519GeScalarMultCT(_ge_t *r, const uint8_t scalar[32], const _ge_t *p)
 {
     _ge_t Q;
     _ge_t QplusP;
     int16_t i;
 
-    _ge_identity(&Q);
+    SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(scalar != NULL);
+    SSF_REQUIRE(p != NULL);
+
+    _SSFEd25519GeIdentity(&Q);
     for (i = 255; i >= 0; i--)
     {
         uint32_t bit = ((uint32_t)scalar[i >> 3] >> (i & 7)) & 1u;
 
-        _ge_double(&Q, &Q);
-        _ge_add(&QplusP, &Q, p);
-        /* After the cswap:
-         *   bit == 1 -> Q holds (Q + p)  (and QplusP holds the old Q, discarded)
-         *   bit == 0 -> Q is unchanged   (and QplusP holds (Q + p), discarded)
-         * Either way the next iteration reads only Q, so the discard is harmless. */
-        _ge_cswap(&Q, &QplusP, bit);
+        _SSFEd25519GeDouble(&Q, &Q);
+        _SSFEd25519GeAdd(&QplusP, &Q, p);
+        /* Q = Q + p if bit is 1, else Q unchanged; QplusP is discarded either way */
+        _SSFEd25519GeCSwap(&Q, &QplusP, bit);
     }
     *r = Q;
 }
 
-/* Base point scalar multiplication: r = [scalar]B. Sign-path entry point -- scalar here is the  */
-/* RFC 8032 deterministic nonce, which is derived from the long-term seed and must not leak      */
-/* via timing. Routes through the constant-time variant.                                         */
-static void _ge_scalarmult_base(_ge_t *r, const uint8_t scalar[32])
+/* --------------------------------------------------------------------------------------------- */
+/* r = [scalar]B in constant time; scalar is the secret clamped key or nonce.                    */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFEd25519GeScalarMultBase(_ge_t *r, const uint8_t scalar[32])
 {
-    _ge_scalarmult_ct(r, scalar, &_ed_basepoint);
+    SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(scalar != NULL);
+
+    _SSFEd25519GeScalarMultCT(r, scalar, &_ed_basepoint);
 }
 
-/* Double scalar multiplication: r = [a]A + [b]B (Straus/interleaved). */
-static void _ge_double_scalarmult(_ge_t *r, const uint8_t a[32], const _ge_t *A,
+/* --------------------------------------------------------------------------------------------- */
+/* r = [a]A + [b]B by interleaved (Straus) double-and-add; variable time, public scalars only.   */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFEd25519GeDoubleScalarMult(_ge_t *r, const uint8_t a[32], const _ge_t *A,
                                   const uint8_t b[32])
 {
     _ge_t Q;
     int16_t i;
 
-    _ge_identity(&Q);
+    SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(a != NULL);
+    SSF_REQUIRE(A != NULL);
+    SSF_REQUIRE(b != NULL);
+
+    _SSFEd25519GeIdentity(&Q);
     for (i = 255; i >= 0; i--)
     {
         uint8_t aBit = (a[i >> 3] >> (i & 7)) & 1u;
         uint8_t bBit = (b[i >> 3] >> (i & 7)) & 1u;
 
-        _ge_double(&Q, &Q);
+        _SSFEd25519GeDouble(&Q, &Q);
         if (aBit != 0u)
         {
-            _ge_add(&Q, &Q, A);
+            _SSFEd25519GeAdd(&Q, &Q, A);
         }
         if (bBit != 0u)
         {
-            _ge_add(&Q, &Q, &_ed_basepoint);
+            _SSFEd25519GeAdd(&Q, &Q, &_ed_basepoint);
         }
     }
     *r = Q;
@@ -499,9 +559,9 @@ static void _ge_double_scalarmult(_ge_t *r, const uint8_t a[32], const _ge_t *A,
 /* --------------------------------------------------------------------------------------------- */
 
 /* --------------------------------------------------------------------------------------------- */
-/* Writes x mod L to r (32 bytes LE) and wipes x; x is 64 signed byte limbs (OPTIMIZE ED-O1).    */
+/* Writes x mod L to r (32 bytes LE) and wipes x; x is 64 signed byte limbs.                     */
 /* --------------------------------------------------------------------------------------------- */
-static void _sc_modL(uint8_t r[32], int64_t x[64])
+static void _SSFEd25519ScModL(uint8_t r[32], int64_t x[64])
 {
     int64_t carry;
     int64_t q;
@@ -517,7 +577,7 @@ static void _sc_modL(uint8_t r[32], int64_t x[64])
         carry = 0;
         for (j = (uint16_t)(i - 32u); j < (uint16_t)(i - 12u); j++)
         {
-            x[j] += carry - (16 * x[i] * (int64_t)_ed_L[j - (i - 32u)]);
+            x[j] += carry - ((16 * x[i]) * (int64_t)_ed_L[j - (i - 32u)]);
             carry = (x[j] + 128) >> 8;
             x[j] -= carry * 256;
         }
@@ -548,7 +608,9 @@ static void _sc_modL(uint8_t r[32], int64_t x[64])
 }
 
 #if SSF_CONFIG_ED25519_UNIT_TEST == 1
-/* Test-only wrapper exposing _fe_mul so a unit test can pin carry-fold edge inputs (AUDIT E-1). */
+/* --------------------------------------------------------------------------------------------- */
+/* Test-only wrapper: out = a * b mod p for 32-byte LE a and b (pins carry-fold edge inputs).    */
+/* --------------------------------------------------------------------------------------------- */
 void _SSFEd25519FeMulForTest(uint8_t out[32], const uint8_t a[32], const uint8_t b[32])
 {
     SSFFE25519_t fa;
@@ -559,13 +621,15 @@ void _SSFEd25519FeMulForTest(uint8_t out[32], const uint8_t a[32], const uint8_t
     SSF_REQUIRE(a != NULL);
     SSF_REQUIRE(b != NULL);
 
-    _fe_from_bytes(&fa, a);
-    _fe_from_bytes(&fb, b);
+    _SSFEd25519FeFromBytes(&fa, a);
+    _SSFEd25519FeFromBytes(&fb, b);
     SSFFE25519Mul(&fr, &fa, &fb);
     SSFFE25519ToBytes(out, &fr);
 }
 
-/* Test-only wrapper exposing _ge_decode and returning the affine x of the decoded point. */
+/* --------------------------------------------------------------------------------------------- */
+/* Test-only wrapper: returns true if in decodes to a point, with its affine x in xOut.          */
+/* --------------------------------------------------------------------------------------------- */
 bool _SSFEd25519GeDecodeForTest(uint8_t xOut[32], const uint8_t in[32])
 {
     _ge_t pt;
@@ -576,7 +640,7 @@ bool _SSFEd25519GeDecodeForTest(uint8_t xOut[32], const uint8_t in[32])
     SSF_REQUIRE(in != NULL);
 
     /* Did the encoding decode to a curve point? */
-    if (!_ge_decode(&pt, in))
+    if (!_SSFEd25519GeDecode(&pt, in))
     {
         /* No, report failure */
         return false;
@@ -590,9 +654,9 @@ bool _SSFEd25519GeDecodeForTest(uint8_t xOut[32], const uint8_t in[32])
 #endif /* SSF_CONFIG_ED25519_UNIT_TEST */
 
 /* --------------------------------------------------------------------------------------------- */
-/* Reduces the 64-byte LE integer in s mod L into s[0..31]; clears s[32..63] (OPTIMIZE ED-O1).   */
+/* Reduces the 64-byte LE integer in s mod L into s[0..31]; clears s[32..63].                    */
 /* --------------------------------------------------------------------------------------------- */
-static void _sc_reduce(uint8_t s[64])
+static void _SSFEd25519ScReduce(uint8_t s[64])
 {
     int64_t x[64];
     uint16_t i;
@@ -601,25 +665,29 @@ static void _sc_reduce(uint8_t s[64])
 
     for (i = 0u; i < 64u; i++) x[i] = (int64_t)s[i];
     memset(s, 0, 64u);
-    _sc_modL(s, x);
+    _SSFEd25519ScModL(s, x);
 }
 
 #if SSF_CONFIG_ED25519_UNIT_TEST == 1
-/* Test-only wrapper exposing _sc_reduce: 64-byte LE in, s mod L in the low 32 bytes. */
+/* --------------------------------------------------------------------------------------------- */
+/* Test-only wrapper: reduces 64-byte LE s mod L into its low 32 bytes.                          */
+/* --------------------------------------------------------------------------------------------- */
 void _SSFEd25519ScReduceForTest(uint8_t s[64])
 {
     SSF_REQUIRE(s != NULL);
 
-    _sc_reduce(s);
+    _SSFEd25519ScReduce(s);
 }
 #endif /* SSF_CONFIG_ED25519_UNIT_TEST */
 
 /* --------------------------------------------------------------------------------------------- */
-/* s = (a * b + c) mod L, 32-byte LE operands of any value; s may alias any (OPTIMIZE ED-O1).    */
+/* s = (a * b + c) mod L, 32-byte LE operands of any value; s may alias any.                     */
 /* --------------------------------------------------------------------------------------------- */
-/* Not inlined: its 512-byte x stays off Sign's verify-after-sign chain, the stack peak          */
+/* Not inlined so its 512-byte x stays off Sign's verify-after-sign chain (the stack peak) */
 SSF_NOINLINE
-static void _sc_muladd(uint8_t s[32], const uint8_t a[32], const uint8_t b[32], const uint8_t c[32])
+static void _SSFEd25519ScMulAdd(uint8_t s[32], const uint8_t a[32], const uint8_t b[32],
+                                const uint8_t c[32])
+
 {
     int64_t x[64];
     uint16_t i;
@@ -636,11 +704,13 @@ static void _sc_muladd(uint8_t s[32], const uint8_t a[32], const uint8_t b[32], 
     {
         for (j = 0u; j < 32u; j++) x[i + j] += (int64_t)a[i] * (int64_t)b[j];
     }
-    _sc_modL(s, x);
+    _SSFEd25519ScModL(s, x);
 }
 
 #if SSF_CONFIG_ED25519_UNIT_TEST == 1
-/* Test-only wrapper exposing _sc_muladd: s = (a * b + c) mod L, 32-byte LE operands. */
+/* --------------------------------------------------------------------------------------------- */
+/* Test-only wrapper: s = (a * b + c) mod L for 32-byte LE operands.                             */
+/* --------------------------------------------------------------------------------------------- */
 void _SSFEd25519ScMulAddForTest(uint8_t s[32], const uint8_t a[32], const uint8_t b[32],
                                 const uint8_t c[32])
 {
@@ -649,14 +719,19 @@ void _SSFEd25519ScMulAddForTest(uint8_t s[32], const uint8_t a[32], const uint8_
     SSF_REQUIRE(b != NULL);
     SSF_REQUIRE(c != NULL);
 
-    _sc_muladd(s, a, b, c);
+    _SSFEd25519ScMulAdd(s, a, b, c);
 }
 #endif /* SSF_CONFIG_ED25519_UNIT_TEST */
 
-/* Check if a 32-byte scalar is less than L. Returns true if s < L. */
-static bool _sc_is_lt_L(const uint8_t s[32])
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if the 32-byte LE scalar s is less than L, else false.                           */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFEd25519ScIsLtL(const uint8_t s[32])
 {
     int16_t i;
+
+    SSF_REQUIRE(s != NULL);
+
     /* Compare from high byte to low byte */
     for (i = 31; i >= 0; i--)
     {
@@ -679,7 +754,7 @@ static bool _sc_is_lt_L(const uint8_t s[32])
 /* Zeroes SSF_ED25519_CONFIG_STACK_SCRUB_SIZE bytes of stack below Sign (freed intermediates).   */
 /* --------------------------------------------------------------------------------------------- */
 SSF_NOINLINE
-static void _ed25519_stack_scrub(void)
+static void _SSFEd25519StackScrub(void)
 {
     volatile uint8_t scratch[SSF_ED25519_CONFIG_STACK_SCRUB_SIZE];
     size_t i;
@@ -688,14 +763,17 @@ static void _ed25519_stack_scrub(void)
 }
 #else /* SSF_ED25519_CONFIG_ENABLE_STACK_SCRUB */
 /* Stack scrub disabled by configuration; call sites compile to nothing. */
-#define _ed25519_stack_scrub() do { } while (0)
+#define _SSFEd25519StackScrub() do { } while (0)
 #endif /* SSF_ED25519_CONFIG_ENABLE_STACK_SCRUB */
 
 /* --------------------------------------------------------------------------------------------- */
 /* Feeds an arbitrary-size buffer to a SHA-512 context, looping in UINT32_MAX-sized chunks.      */
 /* --------------------------------------------------------------------------------------------- */
-static void _sha512_update_sized(SSFSHA2_64Context_t *ctx, const uint8_t *buf, size_t len)
+static void _SSFEd25519SHA512UpdateSized(SSFSHA2_64Context_t *ctx, const uint8_t *buf, size_t len)
 {
+    SSF_REQUIRE(ctx != NULL);
+    SSF_REQUIRE((buf != NULL) || (len == 0u));
+
     while (len > 0u)
     {
         uint32_t chunk = (len > (size_t)UINT32_MAX) ? UINT32_MAX : (uint32_t)len;
@@ -709,7 +787,9 @@ static void _sha512_update_sized(SSFSHA2_64Context_t *ctx, const uint8_t *buf, s
 /* Public API                                                                                    */
 /* --------------------------------------------------------------------------------------------- */
 
-/* Generate an Ed25519 key pair. */
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if an Ed25519 key pair was generated from platform entropy, else false.          */
+/* --------------------------------------------------------------------------------------------- */
 bool SSFEd25519KeyGen(uint8_t seed[SSF_ED25519_SEED_SIZE], uint8_t pubKey[SSF_ED25519_PUB_KEY_SIZE])
 {
     SSF_REQUIRE(seed != NULL);
@@ -720,7 +800,9 @@ bool SSFEd25519KeyGen(uint8_t seed[SSF_ED25519_SEED_SIZE], uint8_t pubKey[SSF_ED
     return true;
 }
 
-/* Derive public key from a 32-byte seed. */
+/* --------------------------------------------------------------------------------------------- */
+/* Derives the public key from a 32-byte seed.                                                   */
+/* --------------------------------------------------------------------------------------------- */
 void SSFEd25519PubKeyFromSeed(const uint8_t seed[SSF_ED25519_SEED_SIZE],
                               uint8_t pubKey[SSF_ED25519_PUB_KEY_SIZE])
 {
@@ -740,21 +822,26 @@ void SSFEd25519PubKeyFromSeed(const uint8_t seed[SSF_ED25519_SEED_SIZE],
     a[31] |= 64u;
 
     /* A = [a]B */
-    _ge_scalarmult_base(&A, a);
-    _ge_encode(pubKey, &A);
+    _SSFEd25519GeScalarMultBase(&A, a);
+    _SSFEd25519GeEncode(pubKey, &A);
 
     /* Zeroize sensitive data */
     SSFCryptSecureZero(h, sizeof(h));
     SSFCryptSecureZero(a, sizeof(a));
 }
 
-/* Sign a message. */
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if msg was signed into sig (verified after signing), else false.                 */
+/* --------------------------------------------------------------------------------------------- */
 bool SSFEd25519Sign(const uint8_t seed[SSF_ED25519_SEED_SIZE],
                     const uint8_t pubKey[SSF_ED25519_PUB_KEY_SIZE], const uint8_t *msg,
                     size_t msgLen, uint8_t sig[SSF_ED25519_SIG_SIZE])
 {
-    uint8_t h[64], r_hash[64], hram[64];
-    uint8_t a[32], nonce[32];
+    uint8_t h[64];
+    uint8_t r_hash[64];
+    uint8_t hram[64];
+    uint8_t a[32];
+    uint8_t nonce[32];
     _ge_t R;
     SSFSHA2_64Context_t ctx;
 
@@ -772,25 +859,25 @@ bool SSFEd25519Sign(const uint8_t seed[SSF_ED25519_SEED_SIZE],
 
     /* r = SHA-512(prefix || msg) mod L */
     SSFSHA512Begin(&ctx);
-    SSFSHA512Update(&ctx, &h[32], 32);  /* prefix = upper 32 bytes of SHA-512(seed) */
-    _sha512_update_sized(&ctx, msg, msgLen);
+    SSFSHA512Update(&ctx, &h[32], 32); /* prefix = upper 32 bytes of SHA-512(seed) */
+    _SSFEd25519SHA512UpdateSized(&ctx, msg, msgLen);
     SSFSHA512End(&ctx, r_hash, 64);
-    _sc_reduce(r_hash);
+    _SSFEd25519ScReduce(r_hash);
     memcpy(nonce, r_hash, 32);
 
     /* R = [r]B */
-    _ge_scalarmult_base(&R, nonce);
-    _ge_encode(sig, &R);  /* first 32 bytes of sig = encoded R */
+    _SSFEd25519GeScalarMultBase(&R, nonce);
+    _SSFEd25519GeEncode(sig, &R); /* first 32 bytes of sig = encoded R */
 
     /* S = (r + SHA-512(R || pubKey || msg) * a) mod L */
     SSFSHA512Begin(&ctx);
-    SSFSHA512Update(&ctx, sig, 32);     /* R */
-    SSFSHA512Update(&ctx, pubKey, 32);  /* A */
-    _sha512_update_sized(&ctx, msg, msgLen);
+    SSFSHA512Update(&ctx, sig, 32); /* R */
+    SSFSHA512Update(&ctx, pubKey, 32); /* A */
+    _SSFEd25519SHA512UpdateSized(&ctx, msg, msgLen);
     SSFSHA512End(&ctx, hram, 64);
-    _sc_reduce(hram);
+    _SSFEd25519ScReduce(hram);
 
-    _sc_muladd(&sig[32], hram, a, nonce);  /* S = h*a + r mod L */
+    _SSFEd25519ScMulAdd(&sig[32], hram, a, nonce); /* S = h*a + r mod L */
 
     /* Verify-after-sign defeats differential-fault attacks and catches seed/pubKey mismatch. */
     if (!SSFEd25519Verify(pubKey, msg, msgLen, sig))
@@ -803,7 +890,7 @@ bool SSFEd25519Sign(const uint8_t seed[SSF_ED25519_SEED_SIZE],
         SSFCryptSecureZero(hram, sizeof(hram));
         SSFCryptSecureZero(&R, sizeof(R));
         SSFCryptSecureZero(&ctx, sizeof(ctx));
-        _ed25519_stack_scrub();
+        _SSFEd25519StackScrub();
         return false;
     }
 
@@ -815,16 +902,21 @@ bool SSFEd25519Sign(const uint8_t seed[SSF_ED25519_SEED_SIZE],
     SSFCryptSecureZero(hram, sizeof(hram));
     SSFCryptSecureZero(&R, sizeof(R));
     SSFCryptSecureZero(&ctx, sizeof(ctx));
-    _ed25519_stack_scrub();
+    _SSFEd25519StackScrub();
 
     return true;
 }
 
-/* Verify a signature. Returns true if valid. */
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if sig is a valid signature of msg under pubKey, else false.                     */
+/* --------------------------------------------------------------------------------------------- */
 bool SSFEd25519Verify(const uint8_t pubKey[SSF_ED25519_PUB_KEY_SIZE], const uint8_t *msg,
                       size_t msgLen, const uint8_t sig[SSF_ED25519_SIG_SIZE])
 {
-    _ge_t A, negA, check;
+    _ge_t A;
+    _ge_t negA;
+    _ge_t check;
+
     uint8_t hram[64];
     SSFSHA2_64Context_t ctx;
     uint8_t rcheck[32];
@@ -834,32 +926,32 @@ bool SSFEd25519Verify(const uint8_t pubKey[SSF_ED25519_PUB_KEY_SIZE], const uint
     SSF_REQUIRE(sig != NULL);
 
     /* Check S < L */
-    if (!_sc_is_lt_L(&sig[32])) return false;
+    if (!_SSFEd25519ScIsLtL(&sig[32])) return false;
 
     /* Decode public key */
-    if (!_ge_decode(&A, pubKey)) return false;
+    if (!_SSFEd25519GeDecode(&A, pubKey)) return false;
 
     /* Reject low-order pubkeys ([8]A = identity -> trivial forgery for any message). */
-    if (_ge_is_low_order(&A)) return false;
+    if (_SSFEd25519GeIsLowOrder(&A)) return false;
 
     /* Negate A: -A has coordinates (-X, Y, Z, -T) */
-    _fe_neg(&negA.X, &A.X);
+    _SSFEd25519FeNeg(&negA.X, &A.X);
     SSFFE25519Copy(&negA.Y, &A.Y);
     SSFFE25519Copy(&negA.Z, &A.Z);
-    _fe_neg(&negA.T, &A.T);
+    _SSFEd25519FeNeg(&negA.T, &A.T);
 
     /* h = SHA-512(R || A || msg) mod L */
     SSFSHA512Begin(&ctx);
-    SSFSHA512Update(&ctx, sig, 32);     /* R (first 32 bytes of sig) */
-    SSFSHA512Update(&ctx, pubKey, 32);  /* A */
-    _sha512_update_sized(&ctx, msg, msgLen);
+    SSFSHA512Update(&ctx, sig, 32); /* R (first 32 bytes of sig) */
+    SSFSHA512Update(&ctx, pubKey, 32); /* A */
+    _SSFEd25519SHA512UpdateSized(&ctx, msg, msgLen);
     SSFSHA512End(&ctx, hram, 64);
-    _sc_reduce(hram);
+    _SSFEd25519ScReduce(hram);
 
     /* check = [S]B + [h](-A) = [S]B - [h]A */
-    _ge_double_scalarmult(&check, hram, &negA, &sig[32]);
+    _SSFEd25519GeDoubleScalarMult(&check, hram, &negA, &sig[32]);
 
-    _ge_encode(rcheck, &check);
+    _SSFEd25519GeEncode(rcheck, &check);
 
     /* Compare the recomputed R against the signature in constant time. */
     return SSFCryptCTMemEq(rcheck, sig, 32);

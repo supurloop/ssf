@@ -44,7 +44,7 @@
 #define SSF_AES_KS_MAGIC (0x4145534Bul)
 
 /* State is four LE-packed u32 columns: c = row0 | (row1<<8) | (row2<<16) | (row3<<24). */
-#define FGFM2(x) ((x<<1) ^ (0x1b & -(x>>7)))
+#define FGFM2(x) (((x) << 1) ^ (0x1b & (-((x) >> 7))))
 
 #define ROTR8(x)  (((x) >> 8)  | ((x) << 24))
 #define ROTR16(x) (((x) >> 16) | ((x) << 16))
@@ -53,16 +53,15 @@
 /* Packed xtime: multiply each byte of x by 2 in GF(2^8) with poly 0x1B. */
 #define XTIME32(x) ((((x) << 1) & 0xFEFEFEFEu) ^ ((((x) >> 7) & 0x01010101u) * 0x1Bu))
 
-/* Explicit shift-pack so packing matches the LE state convention on big-endian hosts too;
-   gcc/clang collapse this to a single load (+bswap on BE) at -O1+. */
+/* Explicit shift-pack keeps the LE state convention on big-endian hosts too. */
 #define ARRAY_TO_STATE(s, a) do { \
-    (s)[0] =  (uint32_t)(a)[ 0]        | ((uint32_t)(a)[ 1] <<  8) | \
+    (s)[0] = ((uint32_t)(a)[ 0])       | ((uint32_t)(a)[ 1] <<  8) | \
              ((uint32_t)(a)[ 2] << 16) | ((uint32_t)(a)[ 3] << 24); \
-    (s)[1] =  (uint32_t)(a)[ 4]        | ((uint32_t)(a)[ 5] <<  8) | \
+    (s)[1] = ((uint32_t)(a)[ 4])       | ((uint32_t)(a)[ 5] <<  8) | \
              ((uint32_t)(a)[ 6] << 16) | ((uint32_t)(a)[ 7] << 24); \
-    (s)[2] =  (uint32_t)(a)[ 8]        | ((uint32_t)(a)[ 9] <<  8) | \
+    (s)[2] = ((uint32_t)(a)[ 8])       | ((uint32_t)(a)[ 9] <<  8) | \
              ((uint32_t)(a)[10] << 16) | ((uint32_t)(a)[11] << 24); \
-    (s)[3] =  (uint32_t)(a)[12]        | ((uint32_t)(a)[13] <<  8) | \
+    (s)[3] = ((uint32_t)(a)[12])       | ((uint32_t)(a)[13] <<  8) | \
              ((uint32_t)(a)[14] << 16) | ((uint32_t)(a)[15] << 24); \
 } while (0)
 
@@ -86,7 +85,10 @@
 
 /* SubBytes + ShiftRows fused: byte at row r col c gathered from col (c+r) mod 4. */
 #define SBOX_SHIFT_ROWS(s, b) do { \
-    uint32_t _c0 = (s)[0], _c1 = (s)[1], _c2 = (s)[2], _c3 = (s)[3]; \
+    uint32_t _c0 = (s)[0]; \
+    uint32_t _c1 = (s)[1]; \
+    uint32_t _c2 = (s)[2]; \
+    uint32_t _c3 = (s)[3]; \
     (s)[0] = ((uint32_t)(b)[ _c0        & 0xFFu])        | \
              ((uint32_t)(b)[(_c1 >>  8) & 0xFFu] <<  8)  | \
              ((uint32_t)(b)[(_c2 >> 16) & 0xFFu] << 16)  | \
@@ -107,7 +109,10 @@
 
 /* InvSubBytes + InvShiftRows fused: gather from col (c-r) mod 4 (gather pattern reverses). */
 #define INV_SBOX_SHIFT_ROWS(s, b) do { \
-    uint32_t _c0 = (s)[0], _c1 = (s)[1], _c2 = (s)[2], _c3 = (s)[3]; \
+    uint32_t _c0 = (s)[0]; \
+    uint32_t _c1 = (s)[1]; \
+    uint32_t _c2 = (s)[2]; \
+    uint32_t _c3 = (s)[3]; \
     (s)[0] = ((uint32_t)(b)[ _c0        & 0xFFu])        | \
              ((uint32_t)(b)[(_c3 >>  8) & 0xFFu] <<  8)  | \
              ((uint32_t)(b)[(_c2 >> 16) & 0xFFu] << 16)  | \
@@ -133,7 +138,7 @@
 #define MIX_COL_WORD(c) do { \
     uint32_t _E = (c) ^ ROTR8(c); \
     uint32_t _T = _E ^ ROTR16(_E); \
-    (c) = (c) ^ _T ^ XTIME32(_E); \
+    (c) = ((c) ^ _T) ^ XTIME32(_E); \
 } while (0)
 
 #define MIX_COLUMNS(s) do { \
@@ -154,11 +159,10 @@
 } while (0)
 
 /* Used by key expansion: byte-wise SBOX over a u32 (no row shift). */
-#define SBOX_WORD(x) ((uint32_t)sbox[(x) & 0xFFu] \
+#define SBOX_WORD(x) (((uint32_t)sbox[(x) & 0xFFu]) \
     | ((uint32_t)sbox[((x) >> 8)  & 0xFFu] << 8) \
     | ((uint32_t)sbox[((x) >> 16) & 0xFFu] << 16) \
     | ((uint32_t)sbox[((x) >> 24) & 0xFFu] << 24))
-
 
 static const uint8_t sbox[256] =
 {
@@ -206,7 +210,8 @@ static const uint8_t inv_sbox[256] =
 static void _SSFAESKeyExpansion(uint32_t *w, size_t wSize, const uint8_t *key, size_t keyLen,
                                 uint8_t nr, uint8_t nk)
 {
-    uint32_t i, t;
+    uint32_t i;
+    uint32_t t;
     uint8_t rcon = 1;
 
     SSF_REQUIRE(w != NULL);
@@ -305,8 +310,8 @@ void SSFAESKeyScheduleInit(SSFAESKeySchedule_t *ks, const uint8_t *key, size_t k
     SSF_REQUIRE(key != NULL);
     SSF_REQUIRE((keyLen == 16u) || (keyLen == 24u) || (keyLen == 32u));
 
-    nk = (uint8_t)(keyLen >> 2);  /* 4, 6, 8 */
-    nr = (uint8_t)(6u + nk);      /* 10, 12, 14 */
+    nk = (uint8_t)(keyLen >> 2); /* 4, 6, 8 */
+    nr = (uint8_t)(6u + nk); /* 10, 12, 14 */
     wSize = (((size_t)nr) + 1u) << 2;
 
     _SSFAESKeyExpansion(ks->w, wSize, key, keyLen, nr, nk);

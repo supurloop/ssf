@@ -38,7 +38,12 @@
 /* --------------------------------------------------------------------------------------------- */
 char SSFStrCharToLower(char c)
 {
-    if (c >= 'A' && c <= 'Z') return (char)(c + ('a' - 'A'));
+    /* Is c an uppercase letter? */
+    if ((c >= 'A') && (c <= 'Z'))
+    {
+        /* Yes, convert it */
+        return (char)(c + ('a' - 'A'));
+    }
     return c;
 }
 
@@ -47,7 +52,12 @@ char SSFStrCharToLower(char c)
 /* --------------------------------------------------------------------------------------------- */
 char SSFStrCharToUpper(char c)
 {
-    if (c >= 'a' && c <= 'z') return (char)(c - ('a' - 'A'));
+    /* Is c a lowercase letter? */
+    if ((c >= 'a') && (c <= 'z'))
+    {
+        /* Yes, convert it */
+        return (char)(c - ('a' - 'A'));
+    }
     return c;
 }
 
@@ -113,8 +123,8 @@ bool SSFStrCat(SSFCStrOut_t cstrDstOut, size_t cstrDstOutSize, size_t *cstrDstOu
     /* Will src fully cat to dst? */
     if ((dstLen + srcLen) >= cstrDstOutSize) return false;
 
-    /* Perform cat, NULL terminate dst, and report the length if asked (AUDIT STR-3) */
-    memmove(&cstrDstOut[dstLen], cstrSrc, srcLen); /* src may overlap dst (AUDIT STR-7) */
+    /* Perform cat (src may overlap dst), NULL terminate dst, and report the length if asked */
+    memmove(&cstrDstOut[dstLen], cstrSrc, srcLen);
     cstrDstOut[dstLen + srcLen] = 0;
     if (cstrDstOutLenOutOpt != NULL) *cstrDstOutLenOutOpt = dstLen + srcLen;
 
@@ -138,8 +148,8 @@ bool SSFStrCpy(SSFCStrOut_t cstrDstOut, size_t cstrDstOutSize, size_t *cstrDstOu
     /* Will src fully cpy to dst? */
     if (srcLen >= cstrDstOutSize) return false;
 
-    /* Perform cpy, NULL terminate dst, and report the length if asked (AUDIT STR-3) */
-    memmove(cstrDstOut, cstrSrc, srcLen); /* src may overlap dst (AUDIT STR-7) */
+    /* Perform cpy (src may overlap dst), NULL terminate dst, and report the length if asked */
+    memmove(cstrDstOut, cstrSrc, srcLen);
     cstrDstOut[srcLen] = 0;
     if (cstrDstOutLenOutOpt != NULL) *cstrDstOutLenOutOpt = srcLen;
 
@@ -183,7 +193,7 @@ bool SSFStrToCase(SSFCStrOut_t cstrOut, size_t cstrOutSize, SSFSTRCase_t toCase)
     /* Determine length of cstrOut */
     if (SSFStrLen(cstrOut, cstrOutSize, &cstrOutLen) == false) return false;
 
-    /* One loop for both cases (OPTIMIZE STR-O2) */
+    /* Convert each char to the requested case */
     while (cstrOutLen > 0)
     {
         *cstrOut = (toCase == SSF_STR_CASE_LOWER) ? SSFStrCharToLower(*cstrOut) :
@@ -196,7 +206,7 @@ bool SSFStrToCase(SSFCStrOut_t cstrOut, size_t cstrOutSize, SSFSTRCase_t toCase)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if substring found in cstr and matchStrOptOut set to start of match, else false.                                          */
+/* Returns true if substr found in cstr and matchStrOptOut set to match start, else false.       */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFStrStr(SSFCStrIn_t cstr, size_t cstrSize, SSFCStrIn_t *matchStrOptOut, SSFCStrIn_t substr,
                size_t substrSize)
@@ -211,10 +221,10 @@ bool SSFStrStr(SSFCStrIn_t cstr, size_t cstrSize, SSFCStrIn_t *matchStrOptOut, S
     ss = substr;
     sss = substrSize;
     cstrs = NULL;
-    /* Each size is checked before its byte is read (AUDIT STR-2) */
+    /* Are cstr and substr both unfinished (each size checked before its byte is read)? */
     while ((cstrSize > 0u) && (*cstr != 0) && (sss > 1u) && (*ss != 0))
     {
-        /* Character match? */
+        /* Yes, character match? */
         if (*cstr == *ss)
         {
             /* Start of new potential match? */
@@ -227,6 +237,7 @@ bool SSFStrStr(SSFCStrIn_t cstr, size_t cstrSize, SSFCStrIn_t *matchStrOptOut, S
             /* Yes, end of substr? */
             if (*(ss + 1) == 0)
             {
+                /* Yes, report the match start */
                 if (matchStrOptOut != NULL) *matchStrOptOut = cstr - (ss - substr);
                 return true;
             }
@@ -247,7 +258,7 @@ bool SSFStrStr(SSFCStrIn_t cstr, size_t cstrSize, SSFCStrIn_t *matchStrOptOut, S
             /* Is this the last byte of cstr? */
             if (cstrSize <= 1u)
             {
-                /* Yes, no match; clear the output as every false return does (AUDIT STR-6) */
+                /* Yes, no match; clear the output as every false return does */
                 if (matchStrOptOut != NULL) *matchStrOptOut = NULL;
                 return false;
             }
@@ -263,7 +274,7 @@ bool SSFStrStr(SSFCStrIn_t cstr, size_t cstrSize, SSFCStrIn_t *matchStrOptOut, S
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true and the next token (final one included) if it fits, else false, nothing used.  */
+/* Returns true and the next token (final one included) if it fits, else false, nothing used.    */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFStrTok(SSFCStrIn_t *cstr, size_t *cstrSizeInOut, SSFCStrOut_t tokenStrOut,
                size_t tokenStrSize, size_t *tokenStrLenOutOpt, SSFCStrIn_t delims,
@@ -283,11 +294,11 @@ bool SSFStrTok(SSFCStrIn_t *cstr, size_t *cstrSizeInOut, SSFCStrOut_t tokenStrOu
     SSF_REQUIRE(tokenStrSize > 0u);
     SSF_REQUIRE(delims != NULL);
 
-    /* On false the token is empty and nothing is consumed (AUDIT STR-4/5) */
+    /* On false the token is empty and nothing is consumed */
     tokenStrOut[0] = 0;
     if (tokenStrLenOutOpt != NULL) *tokenStrLenOutOpt = 0;
 
-    /* Is there input left within the remaining size (AUDIT STR-1)? */
+    /* Is there input left within the remaining size? */
     if ((*cstrSizeInOut == 0u) || (**cstr == 0))
     {
         /* No, end of input */
@@ -296,12 +307,16 @@ bool SSFStrTok(SSFCStrIn_t *cstr, size_t *cstrSizeInOut, SSFCStrOut_t tokenStrOu
     /* Yes, scan to a delimiter, the NUL, or the end of the remaining size */
     cs = *cstr;
     remaining = *cstrSizeInOut;
+    /* Is there input left and no delimiter found yet? */
     while ((remaining > 0u) && (*cs != 0) && (!delimFound))
     {
+        /* Yes, check this char against each delimiter */
         dlms = delims;
         dlmss = delimsSize;
+        /* Are there delimiters left to check and none matched yet? */
         while ((dlmss > 0u) && (*dlms != 0) && (!delimFound))
         {
+            /* Yes, check the next one */
             delimFound = (*cs == *dlms);
             dlms++;
             dlmss--;
@@ -317,7 +332,7 @@ bool SSFStrTok(SSFCStrIn_t *cstr, size_t *cstrSizeInOut, SSFCStrOut_t tokenStrOu
     }
     tokLen = (size_t)(cs - *cstr);
 
-    /* Does the token and its terminator fit (AUDIT STR-5)? */
+    /* Does the token and its terminator fit? */
     if (tokLen >= tokenStrSize)
     {
         /* No, return false without consuming it so the caller can retry with more room */

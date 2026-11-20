@@ -111,15 +111,17 @@ static bool _SSFCMSSpanEquals(const uint8_t *a, uint32_t aLen, const uint8_t *b,
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if oid names SHA-256, SHA-384 or SHA-512 with *algOut set, else false.            */
+/* Returns true if oid names SHA-256, SHA-384 or SHA-512 with *algOut set, else false.           */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFCMSDigestAlgFromOID(const uint8_t *oid, uint32_t oidLen, SSFCMSDigestAlg_t *algOut)
 {
     SSF_REQUIRE((oid != NULL) || (oidLen == 0u));
     SSF_REQUIRE(algOut != NULL);
 
-    if (_SSFCMSSpanEquals(oid, oidLen, _oidSHA256,
-                          sizeof(_oidSHA256))) *algOut = SSF_CMS_DIGEST_SHA256;
+    if (_SSFCMSSpanEquals(oid, oidLen, _oidSHA256, sizeof(_oidSHA256)))
+    {
+        *algOut = SSF_CMS_DIGEST_SHA256;
+    }
     else if (_SSFCMSSpanEquals(oid, oidLen, _oidSHA384, sizeof(_oidSHA384)))
     {
         *algOut = SSF_CMS_DIGEST_SHA384;
@@ -148,8 +150,7 @@ static uint32_t _SSFCMSDigestLen(SSFCMSDigestAlg_t alg)
 /* Digests data with alg into out of at least _SSFCMSDigestLen(alg) bytes.                       */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFCMSDigest(SSFCMSDigestAlg_t alg, const uint8_t *data, uint32_t dataLen,
-                          uint8_t *out,
-                    uint32_t outSize)
+                          uint8_t *out, uint32_t outSize)
 {
     SSF_REQUIRE((alg > SSF_CMS_DIGEST_MIN) && (alg < SSF_CMS_DIGEST_MAX));
     SSF_REQUIRE((data != NULL) || (dataLen == 0u));
@@ -162,7 +163,7 @@ static void _SSFCMSDigest(SSFCMSDigestAlg_t alg, const uint8_t *data, uint32_t d
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if AlgorithmIdentifier parameters are absent or a DER NULL, else false.           */
+/* Returns true if AlgorithmIdentifier parameters are absent or a DER NULL, else false.          */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFCMSParamsAbsentOrNull(const uint8_t *paramsOpt, uint32_t paramsLen)
 {
@@ -176,12 +177,12 @@ static bool _SSFCMSParamsAbsentOrNull(const uint8_t *paramsOpt, uint32_t paramsL
 /* Returns true if two parameter encodings agree, treating absent and DER NULL as equal.         */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFCMSParamsEquivalent(const uint8_t *aOpt, uint32_t aLen, const uint8_t *bOpt,
-                              uint32_t bLen)
+                                    uint32_t bLen)
 {
     SSF_REQUIRE((aOpt != NULL) || (aLen == 0u));
     SSF_REQUIRE((bOpt != NULL) || (bLen == 0u));
 
-    /* Both sides carry no parameters in either spelling? */
+    /* Do both sides carry no parameters, in either spelling? */
     if ((_SSFCMSParamsAbsentOrNull(aOpt, aLen)) && (_SSFCMSParamsAbsentOrNull(bOpt, bLen)))
     {
         /* Yes, equivalent */
@@ -193,11 +194,11 @@ static bool _SSFCMSParamsEquivalent(const uint8_t *aOpt, uint32_t aLen, const ui
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if an AlgorithmIdentifier SEQUENCE { OID, params } is read at *pos, else false.   */
+/* Returns true if an AlgorithmIdentifier SEQUENCE { OID, params } is read at *pos, else false.  */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFCMSParseAlgId(SSFASN1Cursor_t *pos, const uint8_t **oidRawOut,
-                              uint32_t *oidRawLenOut,
-                        const uint8_t **paramsOut, uint32_t *paramsLenOut)
+                              uint32_t *oidRawLenOut, const uint8_t **paramsOut,
+                              uint32_t *paramsLenOut)
 {
     SSFASN1Cursor_t inner;
 
@@ -217,7 +218,7 @@ static bool _SSFCMSParseAlgId(SSFASN1Cursor_t *pos, const uint8_t **oidRawOut,
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if the CMSAlgorithmProtection value at *pos is read into si, else false.          */
+/* Returns true if the CMSAlgorithmProtection value at *pos is read into si, else false.         */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFCMSParseAlgProtection(SSFASN1Cursor_t *pos, SSFCMSSignerInfo_t *si)
 {
@@ -233,19 +234,19 @@ static bool _SSFCMSParseAlgProtection(SSFASN1Cursor_t *pos, SSFCMSSignerInfo_t *
     /* CMSAlgorithmProtection ::= SEQUENCE { digestAlgorithm, signatureAlgorithm [1] IMPLICIT } */
     if (!SSFASN1DecOpenConstructed(pos, SSF_ASN1_TAG_SEQUENCE, &inner, pos)) return false;
     if (!_SSFCMSParseAlgId(&inner, &si->apDigestAlgOidRaw, &si->apDigestAlgOidRawLen,
-                     &digestParams, &digestParamsLen)) return false;
+                           &digestParams, &digestParamsLen)) return false;
 
-    /* Digest params absent or NULL, as the SignerInfo's must be (RFC 6211, AUDIT CMS-3)? */
+    /* Are the digest params other than absent or NULL, as the SignerInfo's must be (RFC 6211)? */
     if (!_SSFCMSParamsAbsentOrNull(digestParams, digestParamsLen))
     {
-        /* No, the protected digestAlgorithm cannot match the SignerInfo's */
+        /* Yes, the protected digestAlgorithm cannot match the SignerInfo's */
         return false;
     }
 
-    /* signatureAlgorithm present? RFC 6211 Sec. 2 requires it for a SignerInfo */
+    /* Is signatureAlgorithm absent (RFC 6211 Sec. 2 requires it for a SignerInfo)? */
     if ((!SSFASN1DecPeekTag(&inner, &tag)) || (tag != _TAG_CTX1_CONSTRUCTED))
     {
-        /* No */
+        /* Yes */
         return false;
     }
     if (!SSFASN1DecOpenConstructed(&inner, _TAG_CTX1_CONSTRUCTED, &sigInner, &inner)) return false;
@@ -292,7 +293,7 @@ static bool _SSFCMSParseSignedAttrs(const SSFASN1Cursor_t *attrs, SSFCMSSignerIn
         }
         /* message-digest: exactly one OCTET STRING, at most one instance (Sec. 11.2) */
         else if (_SSFCMSSpanEquals(typeOid, typeOidLen, _oidAttrMessageDigest,
-                             sizeof(_oidAttrMessageDigest)))
+                                   sizeof(_oidAttrMessageDigest)))
         {
             if (si->messageDigest != NULL) return false;
             if (!SSFASN1DecGetOctetString(&vals, &si->messageDigest, &si->messageDigestLen,
@@ -301,7 +302,7 @@ static bool _SSFCMSParseSignedAttrs(const SSFASN1Cursor_t *attrs, SSFCMSSignerIn
         }
         /* signing-time: exactly one Time, at most one instance (Sec. 11.3) */
         else if (_SSFCMSSpanEquals(typeOid, typeOidLen, _oidAttrSigningTime,
-                             sizeof(_oidAttrSigningTime)))
+                                   sizeof(_oidAttrSigningTime)))
         {
             if (si->hasSigningTime) return false;
             if (!SSFASN1DecGetTime(&vals, &si->signingTime, &vals)) return false;
@@ -310,7 +311,7 @@ static bool _SSFCMSParseSignedAttrs(const SSFASN1Cursor_t *attrs, SSFCMSSignerIn
         }
         /* CMSAlgorithmProtection: exactly one value, at most one instance (RFC 6211) */
         else if (_SSFCMSSpanEquals(typeOid, typeOidLen, _oidAttrAlgProtection,
-                             sizeof(_oidAttrAlgProtection)))
+                                   sizeof(_oidAttrAlgProtection)))
         {
             if (si->hasAlgProtection) return false;
             if (!_SSFCMSParseAlgProtection(&vals, si)) return false;
@@ -319,17 +320,17 @@ static bool _SSFCMSParseSignedAttrs(const SSFASN1Cursor_t *attrs, SSFCMSSignerIn
         /* Anything else, such as S/MIME capabilities, is left unread */
     }
 
-    /* Both mandatory attributes present (Sec. 5.3)? */
+    /* Is either mandatory attribute missing (Sec. 5.3)? */
     if ((si->contentTypeOidRaw == NULL) || (si->messageDigest == NULL))
     {
-        /* No */
+        /* Yes */
         return false;
     }
     return true;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if one SignerInfo is read from *pos into si, else false.                          */
+/* Returns true if one SignerInfo is read from *pos into si, else false.                         */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFCMSParseSignerInfo(SSFASN1Cursor_t *pos, SSFCMSSignerInfo_t *si)
 {
@@ -351,10 +352,10 @@ static bool _SSFCMSParseSignerInfo(SSFASN1Cursor_t *pos, SSFCMSSignerInfo_t *si)
 
     if (!SSFASN1DecGetIntU64(&inner, &version, &inner)) return false;
 
-    /* Version 1 (issuerAndSerialNumber) or 3 (subjectKeyIdentifier) as Sec. 5.3 defines? */
+    /* Is the version other than 1 (issuerAndSerialNumber) or 3 (subjectKeyIdentifier, Sec. 5.3)? */
     if ((version != 1u) && (version != 3u))
     {
-        /* No */
+        /* Yes */
         return false;
     }
     si->version = (uint8_t)version;
@@ -385,10 +386,10 @@ static bool _SSFCMSParseSignerInfo(SSFASN1Cursor_t *pos, SSFCMSSignerInfo_t *si)
 
     /* digestAlgorithm with parameters absent or NULL (RFC 5754 Sec. 2) */
     if (!_SSFCMSParseAlgId(&inner, &si->digestAlgOidRaw, &si->digestAlgOidRawLen, &digestParams,
-                     &digestParamsLen)) return false;
+                           &digestParamsLen)) return false;
     if (!_SSFCMSParamsAbsentOrNull(digestParams, digestParamsLen)) return false;
 
-    /* signedAttrs [0] IMPLICIT SET OF Attribute present? */
+    /* Is signedAttrs [0] IMPLICIT SET OF Attribute present? */
     if ((SSFASN1DecPeekTag(&inner, &tag)) && (tag == _TAG_CTX0_CONSTRUCTED))
     {
         /* Yes, keep the whole TLV so the verifier can re-tag it as a SET */
@@ -401,11 +402,11 @@ static bool _SSFCMSParseSignerInfo(SSFASN1Cursor_t *pos, SSFCMSSignerInfo_t *si)
 
     /* signatureAlgorithm and signature */
     if (!_SSFCMSParseAlgId(&inner, &si->sigAlgOidRaw, &si->sigAlgOidRawLen, &si->sigAlgParams,
-                     &si->sigAlgParamsLen)) return false;
+                           &si->sigAlgParamsLen)) return false;
     if (!SSFASN1DecGetOctetString(&inner, &si->signature, &si->signatureLen, &inner)) return false;
     if (si->signatureLen == 0u) return false;
 
-    /* unsignedAttrs [1] IMPLICIT present? */
+    /* Is unsignedAttrs [1] IMPLICIT present? */
     if ((SSFASN1DecPeekTag(&inner, &tag)) && (tag == _TAG_CTX1_CONSTRUCTED))
     {
         /* Yes, the signature does not cover it, so it is skipped unread */
@@ -415,7 +416,7 @@ static bool _SSFCMSParseSignerInfo(SSFASN1Cursor_t *pos, SSFCMSSignerInfo_t *si)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if the CertificateSet at certs is read into sd, else false.                       */
+/* Returns true if the CertificateSet at certs is read into sd, else false.                      */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFCMSParseCertificates(const SSFASN1Cursor_t *certs, SSFCMSSignedData_t *sd)
 {
@@ -440,10 +441,10 @@ static bool _SSFCMSParseCertificates(const SSFASN1Cursor_t *certs, SSFCMSSignedD
             continue;
         }
 
-        /* Room to retain it? An unretained signer or issuer certificate would be invisible */
+        /* Is there no room to retain it (an unretained certificate would be invisible)? */
         if (sd->certsLen >= SSF_CMS_CONFIG_MAX_CERTS)
         {
-            /* No */
+            /* Yes */
             return false;
         }
         start = pos.buf;
@@ -456,7 +457,7 @@ static bool _SSFCMSParseCertificates(const SSFASN1Cursor_t *certs, SSFCMSSignedD
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if der holds a ContentInfo carrying SignedData parsed into *sdOut, else false.    */
+/* Returns true if der holds a ContentInfo carrying SignedData parsed into *sdOut, else false.   */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFCMSParse(const uint8_t *der, uint32_t derLen, SSFCMSSignedData_t *sdOut)
 {
@@ -479,10 +480,10 @@ bool SSFCMSParse(const uint8_t *der, uint32_t derLen, SSFCMSSignedData_t *sdOut)
 
     memset(sdOut, 0, sizeof(*sdOut));
 
-    /* Within the configured bound? */
+    /* Is the DER over the configured bound? */
     if (derLen > SSF_CMS_CONFIG_MAX_DER_LEN)
     {
-        /* No */
+        /* Yes */
         return false;
     }
     cursor.buf = der;
@@ -500,10 +501,10 @@ bool SSFCMSParse(const uint8_t *der, uint32_t derLen, SSFCMSSignedData_t *sdOut)
 
     if (!SSFASN1DecGetIntU64(&sd, &version, &sd)) return false;
 
-    /* Version 1 or 3, the values this profile accepts (Sec. 5.1)? */
+    /* Is the version other than 1 or 3, the values this profile accepts (Sec. 5.1)? */
     if ((version != 1u) && (version != 3u))
     {
-        /* No */
+        /* Yes */
         return false;
     }
     sdOut->version = (uint8_t)version;
@@ -514,8 +515,8 @@ bool SSFCMSParse(const uint8_t *der, uint32_t derLen, SSFCMSSignedData_t *sdOut)
     {
         if (sdOut->digestAlgsLen >= SSF_CMS_CONFIG_MAX_DIGEST_ALGS) return false;
         if (!_SSFCMSParseAlgId(&set, &sdOut->digestAlgOidRaw[sdOut->digestAlgsLen],
-                         &sdOut->digestAlgOidRawLen[sdOut->digestAlgsLen], &params,
-                         &paramsLen)) return false;
+                               &sdOut->digestAlgOidRawLen[sdOut->digestAlgsLen], &params,
+                               &paramsLen)) return false;
         if (!_SSFCMSParamsAbsentOrNull(params, paramsLen)) return false;
         sdOut->digestAlgsLen++;
     }
@@ -536,7 +537,7 @@ bool SSFCMSParse(const uint8_t *der, uint32_t derLen, SSFCMSSignedData_t *sdOut)
         sdOut->hasEContent = true;
     }
 
-    /* certificates [0] IMPLICIT CertificateSet present? */
+    /* Is certificates [0] IMPLICIT CertificateSet present? */
     if ((SSFASN1DecPeekTag(&sd, &tag)) && (tag == _TAG_CTX0_CONSTRUCTED))
     {
         /* Yes */
@@ -544,7 +545,7 @@ bool SSFCMSParse(const uint8_t *der, uint32_t derLen, SSFCMSSignedData_t *sdOut)
         if (!_SSFCMSParseCertificates(&set, sdOut)) return false;
     }
 
-    /* crls [1] IMPLICIT RevocationInfoChoices present? */
+    /* Is crls [1] IMPLICIT RevocationInfoChoices present? */
     if ((SSFASN1DecPeekTag(&sd, &tag)) && (tag == _TAG_CTX1_CONSTRUCTED))
     {
         /* Yes, revocation is not implemented, so it is skipped unread */
@@ -563,7 +564,7 @@ bool SSFCMSParse(const uint8_t *der, uint32_t derLen, SSFCMSSignedData_t *sdOut)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if signer signerIndex uses a supported digest algorithm, set in *algOut.          */
+/* Returns true if signer signerIndex uses a supported digest algorithm, set in *algOut.         */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFCMSGetDigestAlg(const SSFCMSSignedData_t *sd, uint8_t signerIndex,
                         SSFCMSDigestAlg_t *algOut)
@@ -573,23 +574,23 @@ bool SSFCMSGetDigestAlg(const SSFCMSSignedData_t *sd, uint8_t signerIndex,
     SSF_REQUIRE(algOut != NULL);
 
     return _SSFCMSDigestAlgFromOID(sd->signers[signerIndex].digestAlgOidRaw,
-                             sd->signers[signerIndex].digestAlgOidRawLen, algOut);
+                                   sd->signers[signerIndex].digestAlgOidRawLen, algOut);
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if cert is the one si identifies by issuer and serial or by SKID, else false.     */
+/* Returns true if cert is the one si identifies by issuer and serial or by SKID, else false.    */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFCMSCertMatchesSigner(const SSFX509Cert_t *cert, const SSFCMSSignerInfo_t *si)
 {
     SSF_REQUIRE(cert != NULL);
     SSF_REQUIRE(si != NULL);
 
-    /* Identified by issuer and serial? */
+    /* Is the signer identified by issuer and serial? */
     if (si->version == 1u)
     {
         /* Yes, both must match */
         return (_SSFCMSSpanEquals(cert->issuer.raw, cert->issuer.rawLen, si->sidIssuerRaw,
-                            si->sidIssuerRawLen)) &&
+                                  si->sidIssuerRawLen)) &&
                (_SSFCMSSpanEquals(cert->serial, cert->serialLen, si->sidSerial, si->sidSerialLen));
     }
 
@@ -598,12 +599,12 @@ static bool _SSFCMSCertMatchesSigner(const SSFX509Cert_t *cert, const SSFCMSSign
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if si's certificate is found in sd or the anchors, parsed with its DER span.      */
+/* Returns true if si's certificate is found in sd or the anchors, parsed with its DER span.     */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFCMSFindSignerCert(const SSFCMSSignedData_t *sd, const SSFCMSSignerInfo_t *si,
-                            const uint8_t **trustDer, const uint32_t *trustDerLen,
-                            uint8_t trustCount, SSFX509Cert_t *certOut, const uint8_t **derOut,
-                            uint32_t *derLenOut)
+                                  const uint8_t **trustDer, const uint32_t *trustDerLen,
+                                  uint8_t trustCount, SSFX509Cert_t *certOut,
+                                  const uint8_t **derOut, uint32_t *derLenOut)
 {
     uint8_t i;
 
@@ -640,11 +641,11 @@ static bool _SSFCMSFindSignerCert(const SSFCMSSignedData_t *sd, const SSFCMSSign
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if some trust anchor's subject is exactly issuerRaw, else false.                  */
+/* Returns true if some trust anchor's subject is exactly issuerRaw, else false.                 */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFCMSIssuerIsAnchor(const uint8_t *issuerRaw, uint32_t issuerRawLen,
-                            const uint8_t **trustDer, const uint32_t *trustDerLen,
-                            uint8_t trustCount, SSFX509Cert_t *scratch)
+                                  const uint8_t **trustDer, const uint32_t *trustDerLen,
+                                  uint8_t trustCount, SSFX509Cert_t *scratch)
 {
     uint8_t i;
 
@@ -666,13 +667,13 @@ static bool _SSFCMSIssuerIsAnchor(const uint8_t *issuerRaw, uint32_t issuerRawLe
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Orders sd's certificates into chain[] from the signer up to the first cert an anchor issued.   */
+/* Orders sd's certificates into chain[] from the signer up to the first cert an anchor issued.  */
 /* --------------------------------------------------------------------------------------------- */
 static uint8_t _SSFCMSBuildChain(const SSFCMSSignedData_t *sd, const SSFX509Cert_t *signerCert,
-                           const uint8_t *signerDer, uint32_t signerDerLen,
-                           const uint8_t **trustDer, const uint32_t *trustDerLen,
-                           uint8_t trustCount, const uint8_t **chain, uint32_t *chainLen,
-                           SSFX509Cert_t *scratch)
+                                 const uint8_t *signerDer, uint32_t signerDerLen,
+                                 const uint8_t **trustDer, const uint32_t *trustDerLen,
+                                 uint8_t trustCount, const uint8_t **chain, uint32_t *chainLen,
+                                 SSFX509Cert_t *scratch)
 {
     const uint8_t *issuerRaw;
     uint32_t issuerRawLen;
@@ -700,21 +701,21 @@ static uint8_t _SSFCMSBuildChain(const SSFCMSSignedData_t *sd, const SSFX509Cert
     childAkid = signerCert->akid;
     childAkidLen = signerCert->akidLen;
     selfIssued = _SSFCMSSpanEquals(signerCert->issuer.raw, signerCert->issuer.rawLen,
-                             signerCert->subject.raw, signerCert->subject.rawLen);
+                                   signerCert->subject.raw, signerCert->subject.rawLen);
     chain[0] = signerDer;
     chainLen[0] = signerDerLen;
 
-    /* Walk issuer links through the embedded certificates until an anchor issued the top */
+    /* Is the top neither self-issued nor issued by an anchor, with chain depth to spare? */
     while ((!selfIssued) && (n < SSF_X509_CONFIG_MAX_CHAIN_DEPTH) &&
            (!_SSFCMSIssuerIsAnchor(issuerRaw, issuerRawLen, trustDer, trustDerLen, trustCount,
                                    scratch)))
     {
-        /* Prefer the name match whose SKID equals the child's AKID (RFC 5280, AUDIT CMS-4) */
+        /* Yes, prefer the name match whose SKID equals the child's AKID (RFC 5280) */
         pick = sd->certsLen;
         firstMatch = sd->certsLen;
         for (i = 0; (i < sd->certsLen) && (pick == sd->certsLen); i++)
         {
-            /* Already in the chain? */
+            /* Is it already in the chain? */
             used = false;
             for (k = 0; k < n; k++)
             {
@@ -774,18 +775,19 @@ static uint8_t _SSFCMSBuildChain(const SSFCMSSignedData_t *sd, const SSFX509Cert
         childAkid = scratch->akid;
         childAkidLen = scratch->akidLen;
         selfIssued = _SSFCMSSpanEquals(scratch->issuer.raw, scratch->issuer.rawLen,
-                                 scratch->subject.raw, scratch->subject.rawLen);
+                                       scratch->subject.raw, scratch->subject.rawLen);
     }
     return n;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if signer idx verifies against the content digest and the trust anchors.          */
+/* Returns true if signer idx verifies against the content digest and the trust anchors.         */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFCMSVerifySigner(const SSFCMSSignedData_t *sd, uint8_t idx, const uint8_t *digestOpt,
-                          uint32_t digestLen, SSFCMSDigestAlg_t digestAlg,
-                          const uint8_t **trustDer, const uint32_t *trustDerLen,
-                          uint8_t trustCount, uint64_t nowUnixSec, SSFCMSVerifyResult_t *resultOut)
+                                uint32_t digestLen, SSFCMSDigestAlg_t digestAlg,
+                                const uint8_t **trustDer, const uint32_t *trustDerLen,
+                                uint8_t trustCount, uint64_t nowUnixSec,
+                                SSFCMSVerifyResult_t *resultOut)
 {
     const SSFCMSSignerInfo_t *si;
     SSFCMSDigestAlg_t alg;
@@ -814,10 +816,10 @@ static bool _SSFCMSVerifySigner(const SSFCMSSignedData_t *sd, uint8_t idx, const
 
     si = &sd->signers[idx];
 
-    /* Signer's digest algorithm supported and listed in SignedData.digestAlgorithms? */
+    /* Is the signer's digest algorithm unsupported? */
     if (!_SSFCMSDigestAlgFromOID(si->digestAlgOidRaw, si->digestAlgOidRawLen, &alg))
     {
-        /* No */
+        /* Yes */
         SSF_TLS_TRACE_CERT_ERROR(&_ssfcmsTraceCtx, "CMS: signer[%u] digest algorithm unsupported",
                                  idx);
         return false;
@@ -825,24 +827,25 @@ static bool _SSFCMSVerifySigner(const SSFCMSSignedData_t *sd, uint8_t idx, const
     for (i = 0; i < sd->digestAlgsLen; i++)
     {
         if (_SSFCMSSpanEquals(sd->digestAlgOidRaw[i], sd->digestAlgOidRawLen[i],
-                              si->digestAlgOidRaw,
-                        si->digestAlgOidRawLen)) listed = true;
+                              si->digestAlgOidRaw, si->digestAlgOidRawLen)) listed = true;
     }
+    /* Is it missing from SignedData.digestAlgorithms? */
     if (!listed)
     {
+        /* Yes */
         SSF_TLS_TRACE_CERT_ERROR(&_ssfcmsTraceCtx,
                                  "CMS: signer[%u] digest algorithm not in digestAlgorithms", idx);
         return false;
     }
     hashLen = _SSFCMSDigestLen(alg);
 
-    /* Content digest supplied by the caller, or computed from attached content? */
+    /* Did the caller supply the content digest? */
     if (digestOpt != NULL)
     {
-        /* Supplied, and for this signer's algorithm and length? */
+        /* Yes, is it for another algorithm or length than this signer's? */
         if ((digestAlg != alg) || (digestLen != hashLen))
         {
-            /* No */
+            /* Yes */
             SSF_TLS_TRACE_CERT_ERROR(&_ssfcmsTraceCtx,
                 "CMS: signer[%u] digest algorithm %d does not match the supplied digest", idx,
                 (int)alg);
@@ -852,60 +855,60 @@ static bool _SSFCMSVerifySigner(const SSFCMSSignedData_t *sd, uint8_t idx, const
     }
     else if (sd->hasEContent)
     {
-        /* Computed */
+        /* No, compute it from the attached content */
         _SSFCMSDigest(alg, sd->eContent, sd->eContentLen, computed, sizeof(computed));
         contentDigest = computed;
     }
     else
     {
+        /* No, and the content is detached */
         SSF_TLS_TRACE_CERT_ERROR(&_ssfcmsTraceCtx, "CMS: detached content with no digest supplied");
         return false;
     }
 
-    /* CMSAlgorithmProtection, when present, names exactly the algorithms in use (RFC 6211)? */
+    /* Does a CMSAlgorithmProtection attribute name other algorithms than in use (RFC 6211)? */
     if ((si->hasAlgProtection) &&
         ((!_SSFCMSSpanEquals(si->apDigestAlgOidRaw, si->apDigestAlgOidRawLen, si->digestAlgOidRaw,
-                       si->digestAlgOidRawLen)) ||
+                             si->digestAlgOidRawLen)) ||
          (!_SSFCMSSpanEquals(si->apSigAlgOidRaw, si->apSigAlgOidRawLen, si->sigAlgOidRaw,
-                       si->sigAlgOidRawLen)) ||
+                             si->sigAlgOidRawLen)) ||
          (!_SSFCMSParamsEquivalent(si->apSigAlgParams, si->apSigAlgParamsLen, si->sigAlgParams,
-                             si->sigAlgParamsLen))))
+                                   si->sigAlgParamsLen))))
     {
-        /* No, an algorithm was substituted after signing */
+        /* Yes, an algorithm was substituted after signing */
         SSF_TLS_TRACE_CERT_ERROR(&_ssfcmsTraceCtx,
                                  "CMS: signer[%u] CMSAlgorithmProtection disagrees with SignerInfo",
                                  idx);
         return false;
     }
 
-    /* Signed attributes present? */
+    /* Are signed attributes present? */
     if (si->signedAttrs != NULL)
     {
         /* Yes, they bind the content type and digest, and the signature covers them as a SET */
         if (!_SSFCMSSpanEquals(si->contentTypeOidRaw, si->contentTypeOidRawLen,
-                               sd->eContentTypeOidRaw,
-                         sd->eContentTypeOidRawLen))
+                               sd->eContentTypeOidRaw, sd->eContentTypeOidRawLen))
         {
             SSF_TLS_TRACE_CERT_ERROR(&_ssfcmsTraceCtx,
                                      "CMS: signer[%u] content-type attribute != eContentType", idx);
             return false;
         }
 
-        /* message-digest attribute is the content digest, compared in constant time? */
+        /* Does the message-digest attribute differ from the content digest (constant time)? */
         if ((si->messageDigestLen != hashLen) ||
             (!SSFCryptCTMemEq(si->messageDigest, contentDigest, hashLen)))
         {
-            /* No */
+            /* Yes */
             SSF_TLS_TRACE_CERT_ERROR(&_ssfcmsTraceCtx,
                                      "CMS: signer[%u] message-digest does not match the content",
                                      idx);
             return false;
         }
 
-        /* Attributes fit the re-tagging buffer? */
+        /* Are the attributes too long for the re-tagging buffer? */
         if (si->signedAttrsLen > sizeof(attrs))
         {
-            /* No */
+            /* Yes */
             SSF_TLS_TRACE_CERT_ERROR(&_ssfcmsTraceCtx,
                                      "CMS: signer[%u] signedAttrs %u bytes exceed limit %u", idx,
                                      si->signedAttrsLen, (unsigned int)sizeof(attrs));
@@ -918,17 +921,17 @@ static bool _SSFCMSVerifySigner(const SSFCMSSignedData_t *sd, uint8_t idx, const
     }
     else
     {
-        /* No, the signature covers the content itself: attached id-data? */
+        /* No, the signature covers the content itself; is it other than attached id-data? */
         if ((!_SSFCMSSpanEquals(sd->eContentTypeOidRaw, sd->eContentTypeOidRawLen, _oidData,
-                          sizeof(_oidData))) || (!sd->hasEContent))
+                                sizeof(_oidData))) || (!sd->hasEContent))
         {
-            /* No */
+            /* Yes */
             SSF_TLS_TRACE_CERT_ERROR(&_ssfcmsTraceCtx,
                 "CMS: signer[%u] has no signedAttrs and the content is not attached id-data", idx);
             return false;
         }
 
-        /* Digest supplied as well? It must be the digest of that attached content, never ignored */
+        /* Was a digest supplied as well? It must match the attached content, never be ignored */
         if (digestOpt != NULL)
         {
             /* Yes */
@@ -944,33 +947,33 @@ static bool _SSFCMSVerifySigner(const SSFCMSSignedData_t *sd, uint8_t idx, const
         coveredLen = sd->eContentLen;
     }
 
-    /* Signer certificate located? */
+    /* Is the signer certificate missing? */
     if (!_SSFCMSFindSignerCert(sd, si, trustDer, trustDerLen, trustCount, &signerCert, &signerDer,
-                         &signerDerLen))
+                               &signerDerLen))
     {
-        /* No */
+        /* Yes */
         SSF_TLS_TRACE_CERT_ERROR(&_ssfcmsTraceCtx, "CMS: signer[%u] certificate not found", idx);
         return false;
     }
 
-    /* Is the signer chain trusted, checked before its key is used (AUDIT CMS-1)? */
     chainN = _SSFCMSBuildChain(sd, &signerCert, signerDer, signerDerLen, trustDer, trustDerLen,
-                         trustCount, chain, chainLen, &scratch);
+                               trustCount, chain, chainLen, &scratch);
+    /* Is the signer chain untrusted (checked before the signer key is used)? */
     if (!SSFX509VerifyChainPurpose(chain, chainLen, chainN, trustDer, trustDerLen, trustCount,
                                    SSF_X509_PURPOSE_CODE_SIGNING, NULL, nowUnixSec))
     {
-        /* No */
+        /* Yes */
         SSF_TLS_TRACE_CERT_ERROR(&_ssfcmsTraceCtx, "CMS: signer[%u] certificate chain FAILED", idx);
         return false;
     }
 
-    /* Signature verifies with the signer's key under the declared algorithms? */
+    /* Does the signature fail with the signer's key under the declared algorithms? */
     if (!SSFX509VerifySignature(&signerCert, si->sigAlgOidRaw, si->sigAlgOidRawLen,
                                 si->sigAlgParams, si->sigAlgParamsLen, si->digestAlgOidRaw,
                                 si->digestAlgOidRawLen, covered, coveredLen, si->signature,
                                 si->signatureLen))
     {
-        /* No */
+        /* Yes */
         SSF_TLS_TRACE_CERT_ERROR(&_ssfcmsTraceCtx, "CMS: signer[%u] signature FAILED", idx);
         return false;
     }
@@ -984,7 +987,7 @@ static bool _SSFCMSVerifySigner(const SSFCMSSignedData_t *sd, uint8_t idx, const
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if some signer of sd verifies the content whose digest the caller supplies.       */
+/* Returns true if some signer of sd verifies the content whose digest the caller supplies.      */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFCMSVerifyDigest(const SSFCMSSignedData_t *sd, const uint8_t *digest, uint32_t digestLen,
                         SSFCMSDigestAlg_t digestAlg, const uint8_t **trustDer,
@@ -1006,8 +1009,7 @@ bool SSFCMSVerifyDigest(const SSFCMSSignedData_t *sd, const uint8_t *digest, uin
     for (i = 0; i < sd->signersLen; i++)
     {
         if (_SSFCMSVerifySigner(sd, i, digest, digestLen, digestAlg, trustDer, trustDerLen,
-                                trustCount,
-                          nowUnixSec, resultOut)) return true;
+                                trustCount, nowUnixSec, resultOut)) return true;
     }
     SSF_TLS_TRACE_CERT_ERROR(&_ssfcmsTraceCtx, "CMS: no signer verified (%u present)",
                              sd->signersLen);
@@ -1031,18 +1033,17 @@ bool SSFCMSVerifyAttached(const SSFCMSSignedData_t *sd, const uint8_t **trustDer
 
     memset(resultOut, 0, sizeof(*resultOut));
 
-    /* Content attached? */
+    /* Is the content detached? */
     if (!sd->hasEContent)
     {
-        /* No, nothing to digest */
+        /* Yes, nothing to digest */
         SSF_TLS_TRACE_CERT_ERROR(&_ssfcmsTraceCtx, "CMS: content is detached, supply its digest");
         return false;
     }
     for (i = 0; i < sd->signersLen; i++)
     {
         if (_SSFCMSVerifySigner(sd, i, NULL, 0u, SSF_CMS_DIGEST_SHA256, trustDer, trustDerLen,
-                                trustCount,
-                          nowUnixSec, resultOut)) return true;
+                                trustCount, nowUnixSec, resultOut)) return true;
     }
     SSF_TLS_TRACE_CERT_ERROR(&_ssfcmsTraceCtx, "CMS: no signer verified (%u present)",
                              sd->signersLen);

@@ -3,7 +3,6 @@
 /*                                                                                               */
 /* ssffe25519.c                                                                                  */
 /* GF(2^255 - 19) field arithmetic shared by ssfx25519 and ssfed25519.                           */
-/* One compiled copy where both modules carried their own (OPTIMIZE FE-O2).                      */
 /*                                                                                               */
 /* BSD-3-Clause License                                                                          */
 /* Copyright 2026 Supurloop Software LLC                                                         */
@@ -46,7 +45,8 @@ void SSFFE25519Mul(SSFFE25519_t *r, const SSFFE25519_t *a, const SSFFE25519_t *b
 {
     uint32_t t[16];
     uint64_t carry;
-    uint8_t i, j;
+    uint8_t i;
+    uint8_t j;
 
     SSF_REQUIRE(r != NULL);
     SSF_REQUIRE(a != NULL);
@@ -59,7 +59,7 @@ void SSFFE25519Mul(SSFFE25519_t *r, const SSFFE25519_t *a, const SSFFE25519_t *b
         carry = 0;
         for (j = 0; j < 8u; j++)
         {
-            uint64_t prod = (uint64_t)a->v[i] * (uint64_t)b->v[j] + (uint64_t)t[i + j] + carry;
+            uint64_t prod = ((uint64_t)a->v[i] * (uint64_t)b->v[j]) + (uint64_t)t[i + j] + carry;
             t[i + j] = (uint32_t)prod;
             carry = prod >> 32;
         }
@@ -70,7 +70,7 @@ void SSFFE25519Mul(SSFFE25519_t *r, const SSFFE25519_t *a, const SSFFE25519_t *b
     carry = 0;
     for (i = 0; i < 8u; i++)
     {
-        carry += (uint64_t)t[i] + (uint64_t)38u * (uint64_t)t[i + 8u];
+        carry += (uint64_t)t[i] + ((uint64_t)38u * (uint64_t)t[i + 8u]);
         r->v[i] = (uint32_t)carry;
         carry >>= 32;
     }
@@ -85,7 +85,7 @@ void SSFFE25519Mul(SSFFE25519_t *r, const SSFFE25519_t *a, const SSFFE25519_t *b
             c >>= 32;
         }
 
-        /* Fold the 0/1 carry-out of the fold above once more; it cannot carry again (X-1) */
+        /* Fold the 0/1 carry-out of the fold above once more; it cannot carry again */
         c *= 38u;
         for (i = 0; i < 8u; i++)
         {
@@ -147,11 +147,11 @@ void SSFFE25519Reduce(SSFFE25519_t *a)
     /* a < 2^255 now; subtract p and conditional-select if no borrow. */
     for (i = 0; i < 8u; i++)
     {
-        diff = (uint64_t)a->v[i] - (uint64_t)SSF_FE25519_P.v[i] - borrow;
+        diff = ((uint64_t)a->v[i] - (uint64_t)SSF_FE25519_P.v[i]) - borrow;
         t[i] = (uint32_t)diff;
         borrow = (diff >> 63) & 1u;
     }
-    mask = (uint32_t)(-(int32_t)(1u - borrow));   /* all-ones if a >= p, else 0 */
+    mask = (uint32_t)(-(int32_t)(1u - borrow)); /* all-ones if a >= p, else 0 */
     for (i = 0; i < 8u; i++)
     {
         a->v[i] = (a->v[i] & ~mask) | (t[i] & mask);
@@ -173,10 +173,10 @@ void SSFFE25519ToBytes(uint8_t *b, const SSFFE25519_t *a)
     SSFFE25519Reduce(&t);
     for (i = 0; i < 8u; i++)
     {
-        b[i * 4u]      = (uint8_t)(t.v[i]);
-        b[i * 4u + 1u] = (uint8_t)(t.v[i] >> 8);
-        b[i * 4u + 2u] = (uint8_t)(t.v[i] >> 16);
-        b[i * 4u + 3u] = (uint8_t)(t.v[i] >> 24);
+        b[i * 4u]        = (uint8_t)(t.v[i]);
+        b[(i * 4u) + 1u] = (uint8_t)(t.v[i] >> 8);
+        b[(i * 4u) + 2u] = (uint8_t)(t.v[i] >> 16);
+        b[(i * 4u) + 3u] = (uint8_t)(t.v[i] >> 24);
     }
 }
 
@@ -204,7 +204,11 @@ void SSFFE25519CSwap(SSFFE25519_t *a, SSFFE25519_t *b, uint32_t swap)
 /* --------------------------------------------------------------------------------------------- */
 void SSFFE25519Inv(SSFFE25519_t *r, const SSFFE25519_t *a)
 {
-    SSFFE25519_t t0, t1, t2, t3;
+    SSFFE25519_t t0;
+    SSFFE25519_t t1;
+    SSFFE25519_t t2;
+    SSFFE25519_t t3;
+
     uint16_t i;
 
     SSF_REQUIRE(r != NULL);

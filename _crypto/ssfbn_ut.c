@@ -3508,7 +3508,9 @@ void SSFBNUnitTest(void)
     {
         SSFBNMONT_DEFINE(mont, SSF_BN_MAX_LIMBS);
         SSFBN_DEFINE(m, SSF_BN_MAX_LIMBS);
+#if SSF_BN_CONFIG_MAX_BITS >= 4096
         uint16_t k;
+#endif /* SSF_BN_CONFIG_MAX_BITS >= 4096 */
 
         /* NIST field primes and the P-256 group order */
         _SSFBNUTCheckMontInitR2(&SSF_BN_NIST_P256);
@@ -3990,7 +3992,6 @@ void SSFBNUnitTest(void)
         uint16_t li;
         uint16_t k;
         uint32_t seed;
-        uint32_t slow;
         bool coprime;
 
         for (li = 0u; li < (uint16_t)(sizeof(lens) / sizeof(lens[0])); li++)
@@ -4226,6 +4227,7 @@ void SSFBNUnitTest(void)
             0x00000001u, 0x00000000u, 0x00000000u, 0xFFFFFFFEu,
             0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFDu, 0x00000001u
         };
+#if SSF_BN_CONFIG_MAX_BITS >= 768
         static const SSFBNLimb_t _e2T[24] = {
             0x7BBF97D9u, 0x84406826u, 0x00000000u, 0x2F479642u,
             0xC8379970u, 0x00000002u, 0x591CC17Au, 0x0DF33B58u,
@@ -4239,6 +4241,7 @@ void SSFBNUnitTest(void)
             0x00000003u, 0x00000000u, 0x00000000u, 0x00000000u,
             0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u
         };
+#endif /* SSF_BN_CONFIG_MAX_BITS >= 768 */
         SSFBN_DEFINE(nt, 24u);
         SSFBN_DEFINE(nr, 12u);
 

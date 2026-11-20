@@ -42,7 +42,7 @@ SUMMARY
   Severity   Count   Labels
   Critical   0
   High       8       JSON-1 (FIXED), JSON-2 (FIXED), JSON-5 (FIXED), JSON-6 (FIXED),
-                     JSON-7 (FIXED), JSON-8 (FIXED), UBJSON-2 (suspected), GOBJ-1 (suspected)
+                     JSON-7 (FIXED), JSON-8 (FIXED), UBJSON-2, GOBJ-1 (suspected)
   Medium     0
   Low        12      UBJSON-1, DEC-1, HEX-1, B64-1, JSON-3, JSON-4, RSA-13, RSA-14, CMS-5,
                      X509-21, E-5, X-3
@@ -236,19 +236,34 @@ UBJSON-1  Low  OPEN  CODE  [measured, UBSan]
              cast inside the htonll / ntohll macros.
 
 
-UBJSON-2  High  OPEN  CODE  [suspected, code-read only]  (found while briefing JSON-7)
-  Location:  ssfubjson.c:158 (memcpy of path[depth] as a size_t index), ssfubjson.c:404-405
-             (key compare of path[depth] as a string), ssfubjson.c:445 / 452 (every member of
-             an object parsed with the caller's results)
-  Problem:   ssfubjson uses the same untyped SSFCStrIn_t path as ssfjson did before JSON-7:
-             an array reads the entry as a size_t, an object as a key string, so the
-             document's shape, not the caller, decides which. The structure mirrors the
-             ssfjson parser, so the JSON-1 (path passed to unselected elements), JSON-5
-             (path continuing past a scalar), JSON-6 (selected element's result copied when
-             unset) and JSON-8 (duplicate keys) equivalents may also be present.
-  Options:   Reproduce each under ASan with UBJSON documents first; then move ssfubjson to the
-             same typed path entries as ssfjson (JSON-7) and port the JSON-1/5/6/8 fixes that
-             apply.
+UBJSON-2  High  OPEN  CODE  [measured, ASan stack-buffer-overflow]  (found while briefing
+                    JSON-7)
+  Location:  ssfubjson.c:158 (memcpy of path[depth] as a size_t index), ssfubjson.c:162-164
+             (every array element parsed with the path; selected element's locals copied out),
+             ssfubjson.c:322 (_SSFUBJsonValue writes every value's type and span into the
+             results before descending), ssfubjson.c:404-411 (key compare of path[depth] as a
+             string; members that do not match are still parsed with the path),
+             ssfubjson.c:445 / 452 (every matching member writes the results)
+  Problem:   ssfubjson has the ssfjson defects fixed by JSON-1, JSON-5, JSON-6, JSON-7 and JSON-8,
+             some in a stronger form: untyped path entries whose kind the document decides;
+             the path handed to array elements AND object members that are not on it; a
+             value's type written before the path is checked, so a lookup that misses inside a
+             container reports the container; the last duplicate key wins. Not present: JSON-2
+             (skipped members keep the real depth).
+  Failure:   Harness, hand-encoded UBJSON in exact-size heap buffers, ASan + UBSan:
+             (JSON-1) [[7],{"hex":5}] [1].hex and {"x":[1],"a":{"hex":5}} a.hex with the key in
+             a 4-byte stack buffer: stack-buffer-overflow, 8-byte read (ssfubjson.c:158).
+             (JSON-7) {"a":[1,2]} a.hex: the same over-read; {"cfg":[0..99]} cfg.a with a
+             zero-padded key "a": GetInt8 true, value 97. (JSON-5) {"a":"s"} a.b: STRING "s";
+             {"a":{"c":1}} a.b: OBJECT. (JSON-6) [{"b":1}] [0].zz: OBJECT, not ERROR. (JSON-8)
+             {"a":"1","a":"2"} a: "2"; no inverted span reaching a getter was found, because
+             the later duplicate also overwrites the type.
+  Options:   (1) Move ssfubjson to the same typed path entries as ssfjson and port the JSON-1 /
+             5 / 6 / 7 / 8 fixes: NULL path to elements and members not on the path, report a
+             value (scalar or container) only where the path ends, selected element writes the
+             results directly, first occurrence only. The path type could be shared: one type
+             in a common header for ssfjson, ssfubjson and ssfgobj (GOBJ-1). (2) A separate
+             SSFUBJsonPath_t with the same shape.
 ----------------------------------------------------------------------------------------------
 ssfgobj
 ----------------------------------------------------------------------------------------------
@@ -521,3 +536,5 @@ CHANGE LOG
               the first occurrence; ssfjson.md Notes now names the parser differential (other
               parsers use the last occurrence) and tells integrators to reject or normalise
               duplicates where a document also passes through another parser. No code change.
+  2026-11-20  UBJSON-2 confirmed (harness above, ASan + UBSan, scratchpad only): the JSON-1, 5,
+              6, 7 and 8 defects all reproduce in ssfubjson; JSON-2 does not. Was suspected.

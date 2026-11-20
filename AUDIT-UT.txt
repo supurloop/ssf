@@ -1,0 +1,202 @@
+SSF ALL-UNIT-TEST AUDIT
+=======================
+
+Date:        2026-11-19
+Branch:      x509 (HEAD e9f7652)
+Reviewer:    Claude Opus 5.5 (claude-opus-5-5), single reviewer
+Scope:       Failures that appear when every SSF_CONFIG_*_UNIT_TEST flag is enabled, the build
+             is run under ASan + UBSan, or a supported option is turned off (RSA key sizes or
+             schemes, a NIST curve). Both library code and unit tests are in scope; each item
+             says which one is at fault.
+Method:      Linux gcc 14 direct build of the test runner (no ninja / OpenSSL on this machine):
+             -fsanitize=address,undefined -g -O1, every unit test flag set to 1 in a scratch
+             copy of the tree. Each failure was compared against the same build of 71dc8ae
+             (before the 2026-11-19 BN-O8 / RSA-off commits): all items below fail there too.
+             [measured] = shown by a sanitizer or test run; [code-read] = from the cited code;
+             [suspected] = not yet demonstrated.
+
+Severity scale (same as _crypto/AUDIT.txt)
+  Critical  wrong results, memory corruption or security break in normal use
+  High      wrong result on reachable edge cases, undefined behaviour, process halt on
+            hostile input where the contract says "returns false"
+  Medium    contract/doc mismatch, missing DBC that permits corruption, portability break,
+            weakened security margin
+  Low       minor correctness nit, latent UB, doc drift
+
+Labels:      Continue the numbering in _crypto/AUDIT*.txt and _codec/AUDIT*.txt where the
+             prefix exists (RSA-13, CMS-5, X509-21, E-5, X-3); JSON, HEX, B64, UBJSON and DEC
+             are new prefixes.
+Status:      OPEN, FIXED (date), WONTFIX (reason), DOC (fixed by documentation change)
+Fault:       CODE (library), TEST (unit test only), BOTH
+Process:     Same FIX PROCESS as _crypto/AUDIT.txt, with two changes for this machine: builds
+             and red/green runs use the Linux direct gcc build (record it in the change log),
+             and every unit test is enabled for verification (Jim, 2026-11-19), compared
+             against a baseline commit since some suites below still fail.
+
+Line numbers refer to HEAD e9f7652 and will drift as fixes land.
+
+----------------------------------------------------------------------------------------------
+SUMMARY
+----------------------------------------------------------------------------------------------
+
+  Severity   Count   Labels
+  Critical   0
+  High       2       JSON-1, JSON-2 (suspected)
+  Medium     0
+  Low        11      UBJSON-1, DEC-1, HEX-1, B64-1, JSON-3, RSA-13, RSA-14, CMS-5, X509-21,
+                     E-5, X-3
+
+  By fault:  CODE   JSON-1, JSON-2, UBJSON-1, DEC-1, RSA-14 (style)
+             TEST   HEX-1, B64-1, JSON-3, RSA-13, CMS-5, X509-21, E-5, X-3
+
+  Suggested order: JSON-2 first (confirm it; if real it is a stack-exhaustion path on hostile
+  input), then JSON-1, then UBJSON-1 / DEC-1, then the test items.
+
+----------------------------------------------------------------------------------------------
+ssfjson
+----------------------------------------------------------------------------------------------
+
+JSON-1  High  OPEN  CODE  [measured, ASan global-buffer-overflow]
+  Location:  ssfjson.c:191 (_SSFJsonArray element loop), read at ssfjson.c:190
+  Problem:   While scanning an array for the requested element, _SSFJsonArray passes the
+             caller's path to every element, not only the selected one. A sibling element that
+             is itself an array then reads path[depth] as a size_t index (memcpy of 8 bytes),
+             even when that path entry is an object key string for the selected element.
+             _SSFJsonNameValue already avoids this for objects by passing a NULL path to
+             members that do not match; arrays do not. The reverse case (a sibling object
+             running strlen / strncmp on a path entry that is a size_t pointer) follows from
+             the same loop [code-read].
+  Failure:   ssfjson_ut.c:865, SSFJsonGetType(_jtsComplex[i], path) with path[2] = "hex1":
+             8-byte read from a 5-byte string literal. Any caller whose path goes through an
+             array that has array or object siblings is exposed; the caller's path is valid.
+  Options:   (1) In the array loop, pass path only for the element whose index matches
+             (NULL otherwise), as _SSFJsonNameValue does (recommended). (2) Also check the
+             path entry's kind, which the API cannot express (path entries are untyped).
+
+JSON-2  High  OPEN  CODE  [suspected, code-read only]
+  Location:  ssfjson.c:267 (_SSFJsonNameValue non-matching branch), ssfjson.c:186 / 281
+  Problem:   A non-matching member is parsed with _SSFJsonValue(..., NULL, 0, ...): depth is
+             reset to 0, so the SSF_JSON_CONFIG_MAX_IN_DEPTH check in _SSFJsonObject /
+             _SSFJsonArray restarts below every skipped key. Recursion depth on a path miss
+             may then be bounded only by SSF_JSON_CONFIG_MAX_IN_LEN, not by the depth limit.
+  Failure:   (to confirm) hostile input such as {"a":{"a":{"a":...}}} nested far past the
+             depth limit, looked up with a path that does not match, recursing until the
+             stack overflows on an MCU.
+  Options:   Confirm first with a nesting test and stack measurement. If real: pass depth
+             (not 0) on the non-matching branch so the limit counts every level.
+
+JSON-3  Low  OPEN  TEST  [measured, compile error]
+  Location:  ssfjson_ut.c:1409
+  Problem:   The JSON unit test calls SSFGObjIsMemoryBalanced(), which ssfgobj.h declares only
+             when SSF_CONFIG_GOBJ_UNIT_TEST == 1. With the JSON test on and the GObj test off
+             the runner does not compile.
+  Options:   Guard the call with SSF_CONFIG_GOBJ_UNIT_TEST, or declare the helper whenever
+             any unit test that uses it is enabled.
+
+----------------------------------------------------------------------------------------------
+ssfhex
+----------------------------------------------------------------------------------------------
+
+HEX-1  Low  OPEN  TEST  [measured, ASan global-buffer-overflow]
+  Location:  ssfhex_ut.c:105; ssfhex.c:101 (reverse branch)
+  Problem:   The test calls SSFHexBytesToBin("1234", strlen("1234") + 200, ...). ssfhex.md
+             requires inLenLim <= strlen(in). In forward order the decoder stops at the NUL and
+             returns false; in reverse order it starts at in[inLenLim - 2], 200 bytes past the
+             string.
+  Options:   (1) Fix the test to stay within the contract (recommended). (2) Optionally harden
+             the decoder: the parameter name "Lim" invites passing a buffer size, so stopping
+             at a NUL (or bounding with strnlen first) would make the reverse path safe too.
+
+----------------------------------------------------------------------------------------------
+ssfbase64
+----------------------------------------------------------------------------------------------
+
+B64-1  Low  OPEN  TEST  [measured, ASan global-buffer-overflow]
+  Location:  ssfbase64_ut.c:127 (block-vector loop); ssfbase64.c:69
+  Problem:   The test runs the internal 4-character block decoder SSFBase64Dec32To24 over
+             every _b64BlockUT vector, including { "", 0, "" }. The block decoder always reads
+             four characters; its only library caller, SSFBase64Decode, always supplies four.
+  Options:   Skip the empty vector in the block loop and keep it in the SSFBase64Decode tests
+             (recommended).
+
+----------------------------------------------------------------------------------------------
+ssfubjson
+----------------------------------------------------------------------------------------------
+
+UBJSON-1  Low  OPEN  CODE  [measured, UBSan]
+  Location:  ssfubjson.c:1123 (UBJ_TYPE_INT64 encode); htonll in ssfport.h:295
+  Problem:   htonll is applied to the signed int64_t value; the macro's left shifts of a
+             negative or large signed value are undefined behaviour ("left shift of 255 by 56
+             places cannot be represented in type 'long int'"). Works on gcc today; a compiler
+             may miscompile it.
+  Options:   Convert to uint64_t before htonll (and back) in ssfubjson (recommended), and/or
+             cast inside the htonll / ntohll macros.
+
+----------------------------------------------------------------------------------------------
+ssfdec
+----------------------------------------------------------------------------------------------
+
+DEC-1  Low  OPEN  CODE  [measured, UBSan]
+  Location:  ssfdec.c:332
+  Problem:   Parsing INT64_MIN ("-9223372036854775808"): u64 = 2^63, (int64_t)u64 is
+             implementation-defined and its negation overflows (UB). The value comes out right
+             on two's-complement gcc.
+  Options:   Compute the negative result without signed overflow, e.g.
+             *val = (int64_t)(0u - u64) on the u64 == 2^63 path, or -(int64_t)(u64 - 1) - 1.
+
+----------------------------------------------------------------------------------------------
+ssfrsa
+----------------------------------------------------------------------------------------------
+
+RSA-13  Low  OPEN  TEST  [measured, compile error]
+  Location:  ssfrsa_ut.c:1111-1120 and other sign / verify calls
+  Problem:   The RSA unit test calls both PKCS#1 v1.5 and PSS entry points unconditionally, so
+             it does not compile with SSF_RSA_CONFIG_ENABLE_PKCS1_V15 or _PSS set to 0
+             (supported options). Its PSS vectors and _SSFRSAUTBumpInt then also go unused.
+  Options:   Guard each block on the scheme it exercises, as ssfx509_ut / ssfcms_ut now do.
+
+RSA-14  Low  OPEN  CODE (style)  [measured]
+  Location:  ssfrsa.c:580 (101 columns), ssfrsa.c:592 (103 columns)
+  Problem:   Over the 100-column limit in claude.ssf.
+  Options:   Re-wrap.
+
+----------------------------------------------------------------------------------------------
+ssfcms, ssfx509
+----------------------------------------------------------------------------------------------
+
+CMS-5  Low  OPEN  TEST  [measured]
+  Location:  ssfcms_ut.c:1000 (with SSF_EC_CONFIG_ENABLE_P256 == 0)
+X509-21  Low  OPEN  TEST  [measured]
+  Location:  ssfx509_ut.c (first P-256 ECDSA use; asserts in ssfecdsa.c:571)
+  Problem:   Both suites build their fixtures and generated certificates on P-256, so with
+             P-256 disabled (a supported option) they fail instead of skipping those cases.
+  Options:   Guard the P-256 cases on SSF_EC_CONFIG_ENABLE_P256 (and add P-384 equivalents
+             where coverage would otherwise be lost).
+
+----------------------------------------------------------------------------------------------
+ssfed25519, ssfx25519
+----------------------------------------------------------------------------------------------
+
+E-5  Low  OPEN  TEST  [measured]
+  Location:  ssfed25519_ut.c:953 (Sign peak stack < 4096)
+X-3  Low  OPEN  TEST  [measured]
+  Location:  ssfx25519_ut.c:568 (ComputeSecret peak stack < 2560)
+  Problem:   The stack-usage probes fail under ASan, which enlarges frames; both pass in the
+             normal build. The ASan run reports them as failures and masks real ones.
+  Options:   Skip the bound when built with ASan (__SANITIZE_ADDRESS__ /
+             __has_feature(address_sanitizer)), keep it in normal builds.
+
+----------------------------------------------------------------------------------------------
+CHANGE LOG
+----------------------------------------------------------------------------------------------
+
+  2026-11-19  File created. Items found by enabling every unit test under ASan + UBSan and
+              by the RSA-off / P-256-off configs while fixing the ssfx509 RSA-off build
+              (056f06c). Baseline 71dc8ae fails the same suites (base64, hex, json, ubjson,
+              dec; ed25519 / x25519 under ASan; cms / x509 with P-256 off). All items OPEN.
+              History: the base64, hex and json ASan failures also occur at 6084ec7
+              (2026-04-30, the ssfjson_ut coverage pass), built under ASan with those tests
+              on: same functions, same lines. The faulting code dates from 2020 (json), 2022
+              (base64 vector) and 2024 (hex vector); normal builds hide the over-reads, these
+              tests have been off in ssfport.h since 9f545aa (2026-11-17), and ssfjson,
+              ssfhex and ssfbase64 were outside the scope of the AUDIT*.txt reviews.

@@ -517,18 +517,18 @@ if (SSFINIGObjCreate(ini, &gobj, 8))
 {
     SSFGObj_t *parent = NULL;
     SSFGObj_t *child = NULL;
-    SSFCStrIn_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1] = { NULL };
+    SSFGPath_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1] = { { SSF_GPATH_END } };
     char val[64];
 
     /* Read a global value */
-    path[0] = "global";
+    SSF_GPATH_SET_KEY(path[0], "global");
     SSFGObjFindPath(gobj, path, &parent, &child);
     SSFGObjGetString(child, val, sizeof(val));
     /* val == "42" */
 
     /* Read a value inside a section */
     memset(path, 0, sizeof(path));
-    path[0] = "section"; path[1] = "host";
+    SSF_GPATH_SET_KEY(path[0], "section"); SSF_GPATH_SET_KEY(path[1], "host");
     parent = NULL; child = NULL;
     SSFGObjFindPath(gobj, path, &parent, &child);
     SSFGObjGetString(child, val, sizeof(val));

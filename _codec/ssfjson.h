@@ -39,7 +39,7 @@ extern "C" {
 #include <stdint.h>
 #include <stdbool.h>
 #include "ssfport.h"
-#include "ssfjsonpath.h"
+#include "ssfgpath.h"
 
 /* --------------------------------------------------------------------------------------------- */
 /* Limitations                                                                                   */
@@ -94,20 +94,20 @@ typedef bool (*SSFJsonPrintFn_t)(char *js, size_t size, size_t start, size_t *en
 /* --------------------------------------------------------------------------------------------- */
 /* Parser */
 bool SSFJsonIsValid(SSFCStrIn_t js);
-SSFJsonType_t SSFJsonGetType(SSFCStrIn_t js, const SSFJsonPath_t *path);
-bool SSFJsonGetString(SSFCStrIn_t js, const SSFJsonPath_t *path, SSFCStrOut_t out, size_t outSize,
+SSFJsonType_t SSFJsonGetType(SSFCStrIn_t js, const SSFGPath_t *path);
+bool SSFJsonGetString(SSFCStrIn_t js, const SSFGPath_t *path, SSFCStrOut_t out, size_t outSize,
                       size_t *outLen);
 #if SSF_JSON_CONFIG_ENABLE_FLOAT_PARSE == 1
-bool SSFJsonGetDouble(SSFCStrIn_t js, const SSFJsonPath_t *path, double *out);
+bool SSFJsonGetDouble(SSFCStrIn_t js, const SSFGPath_t *path, double *out);
 #endif /* SSF_JSON_CONFIG_ENABLE_FLOAT_PARSE */
-bool SSFJsonGetInt(SSFCStrIn_t js, const SSFJsonPath_t *path, int64_t *out);
-bool SSFJsonGetUInt(SSFCStrIn_t js, const SSFJsonPath_t *path, uint64_t *out);
-bool SSFJsonGetHex(SSFCStrIn_t js, const SSFJsonPath_t *path, uint8_t *out, size_t outSize,
+bool SSFJsonGetInt(SSFCStrIn_t js, const SSFGPath_t *path, int64_t *out);
+bool SSFJsonGetUInt(SSFCStrIn_t js, const SSFGPath_t *path, uint64_t *out);
+bool SSFJsonGetHex(SSFCStrIn_t js, const SSFGPath_t *path, uint8_t *out, size_t outSize,
                    size_t *outLen, bool rev);
-bool SSFJsonGetBase64(SSFCStrIn_t js, const SSFJsonPath_t *path, uint8_t *out, size_t outSize,
+bool SSFJsonGetBase64(SSFCStrIn_t js, const SSFGPath_t *path, uint8_t *out, size_t outSize,
                       size_t *outLen);
 bool SSFJsonMessage(SSFCStrIn_t js, size_t *index, size_t *start, size_t *end,
-                    const SSFJsonPath_t *path, uint8_t depth, SSFJsonType_t *jt);
+                    const SSFGPath_t *path, uint8_t depth, SSFJsonType_t *jt);
 
 /* Generator */
 bool SSFJsonPrintString(SSFCStrOut_t js, size_t size, size_t start, size_t *end, SSFCStrIn_t in,

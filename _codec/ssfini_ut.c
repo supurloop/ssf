@@ -828,13 +828,13 @@ void SSFINIUnitTest(void)
         SSFGObj_t *g = NULL;
         SSFGObj_t *parent = NULL;
         SSFGObj_t *child = NULL;
-        char *path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
+        SSFGPath_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
 
         SSF_ASSERT(SSFINIGObjCreate("name=value\n", &g, 8));
         SSF_ASSERT(SSFGObjGetType(g) == SSF_OBJ_TYPE_OBJECT);
         memset(path, 0, sizeof(path));
-        path[0] = "name";
-        SSF_ASSERT(SSFGObjFindPath(g, (SSFCStrIn_t *)path, &parent, &child));
+        SSF_GPATH_SET_KEY(path[0], "name");
+        SSF_ASSERT(SSFGObjFindPath(g, path, &parent, &child));
         SSF_ASSERT(SSFGObjGetType(child) == SSF_OBJ_TYPE_STR);
         SSF_ASSERT(SSFGObjGetString(child, outStr, sizeof(outStr)));
         SSF_ASSERT(strcmp(outStr, "value") == 0);
@@ -847,29 +847,29 @@ void SSFINIUnitTest(void)
         SSFGObj_t *g = NULL;
         SSFGObj_t *parent = NULL;
         SSFGObj_t *child = NULL;
-        char *path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
+        SSFGPath_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
 
         SSF_ASSERT(SSFINIGObjCreate("[section]\nkey1=val1\nkey2=val2\n", &g, 8));
         SSF_ASSERT(SSFGObjGetType(g) == SSF_OBJ_TYPE_OBJECT);
 
         memset(path, 0, sizeof(path));
-        path[0] = "section";
+        SSF_GPATH_SET_KEY(path[0], "section");
         parent = NULL; child = NULL;
-        SSF_ASSERT(SSFGObjFindPath(g, (SSFCStrIn_t *)path, &parent, &child));
+        SSF_ASSERT(SSFGObjFindPath(g, path, &parent, &child));
         SSF_ASSERT(SSFGObjGetType(child) == SSF_OBJ_TYPE_OBJECT);
 
         memset(path, 0, sizeof(path));
-        path[0] = "section"; path[1] = "key1";
+        SSF_GPATH_SET_KEY(path[0], "section"); SSF_GPATH_SET_KEY(path[1], "key1");
         parent = NULL; child = NULL;
-        SSF_ASSERT(SSFGObjFindPath(g, (SSFCStrIn_t *)path, &parent, &child));
+        SSF_ASSERT(SSFGObjFindPath(g, path, &parent, &child));
         SSF_ASSERT(SSFGObjGetType(child) == SSF_OBJ_TYPE_STR);
         SSF_ASSERT(SSFGObjGetString(child, outStr, sizeof(outStr)));
         SSF_ASSERT(strcmp(outStr, "val1") == 0);
 
         memset(path, 0, sizeof(path));
-        path[0] = "section"; path[1] = "key2";
+        SSF_GPATH_SET_KEY(path[0], "section"); SSF_GPATH_SET_KEY(path[1], "key2");
         parent = NULL; child = NULL;
-        SSF_ASSERT(SSFGObjFindPath(g, (SSFCStrIn_t *)path, &parent, &child));
+        SSF_ASSERT(SSFGObjFindPath(g, path, &parent, &child));
         SSF_ASSERT(SSFGObjGetType(child) == SSF_OBJ_TYPE_STR);
         SSF_ASSERT(SSFGObjGetString(child, outStr, sizeof(outStr)));
         SSF_ASSERT(strcmp(outStr, "val2") == 0);
@@ -883,28 +883,28 @@ void SSFINIUnitTest(void)
         SSFGObj_t *g = NULL;
         SSFGObj_t *parent = NULL;
         SSFGObj_t *child = NULL;
-        char *path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
+        SSFGPath_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
 
         SSF_ASSERT(SSFINIGObjCreate("gkey=gval\n[s1]\nk1=v1\n[s2]\nk2=v2\n", &g, 8));
 
         memset(path, 0, sizeof(path));
-        path[0] = "gkey";
+        SSF_GPATH_SET_KEY(path[0], "gkey");
         parent = NULL; child = NULL;
-        SSF_ASSERT(SSFGObjFindPath(g, (SSFCStrIn_t *)path, &parent, &child));
+        SSF_ASSERT(SSFGObjFindPath(g, path, &parent, &child));
         SSF_ASSERT(SSFGObjGetString(child, outStr, sizeof(outStr)));
         SSF_ASSERT(strcmp(outStr, "gval") == 0);
 
         memset(path, 0, sizeof(path));
-        path[0] = "s1"; path[1] = "k1";
+        SSF_GPATH_SET_KEY(path[0], "s1"); SSF_GPATH_SET_KEY(path[1], "k1");
         parent = NULL; child = NULL;
-        SSF_ASSERT(SSFGObjFindPath(g, (SSFCStrIn_t *)path, &parent, &child));
+        SSF_ASSERT(SSFGObjFindPath(g, path, &parent, &child));
         SSF_ASSERT(SSFGObjGetString(child, outStr, sizeof(outStr)));
         SSF_ASSERT(strcmp(outStr, "v1") == 0);
 
         memset(path, 0, sizeof(path));
-        path[0] = "s2"; path[1] = "k2";
+        SSF_GPATH_SET_KEY(path[0], "s2"); SSF_GPATH_SET_KEY(path[1], "k2");
         parent = NULL; child = NULL;
-        SSF_ASSERT(SSFGObjFindPath(g, (SSFCStrIn_t *)path, &parent, &child));
+        SSF_ASSERT(SSFGObjFindPath(g, path, &parent, &child));
         SSF_ASSERT(SSFGObjGetString(child, outStr, sizeof(outStr)));
         SSF_ASSERT(strcmp(outStr, "v2") == 0);
 
@@ -917,21 +917,21 @@ void SSFINIUnitTest(void)
         SSFGObj_t *g = NULL;
         SSFGObj_t *parent = NULL;
         SSFGObj_t *child = NULL;
-        char *path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
+        SSFGPath_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
 
         SSF_ASSERT(SSFINIGObjCreate("[sect]\nk1=v1\n[sect]\nk2=v2\n", &g, 8));
 
         memset(path, 0, sizeof(path));
-        path[0] = "sect"; path[1] = "k1";
+        SSF_GPATH_SET_KEY(path[0], "sect"); SSF_GPATH_SET_KEY(path[1], "k1");
         parent = NULL; child = NULL;
-        SSF_ASSERT(SSFGObjFindPath(g, (SSFCStrIn_t *)path, &parent, &child));
+        SSF_ASSERT(SSFGObjFindPath(g, path, &parent, &child));
         SSF_ASSERT(SSFGObjGetString(child, outStr, sizeof(outStr)));
         SSF_ASSERT(strcmp(outStr, "v1") == 0);
 
         memset(path, 0, sizeof(path));
-        path[0] = "sect"; path[1] = "k2";
+        SSF_GPATH_SET_KEY(path[0], "sect"); SSF_GPATH_SET_KEY(path[1], "k2");
         parent = NULL; child = NULL;
-        SSF_ASSERT(SSFGObjFindPath(g, (SSFCStrIn_t *)path, &parent, &child));
+        SSF_ASSERT(SSFGObjFindPath(g, path, &parent, &child));
         SSF_ASSERT(SSFGObjGetString(child, outStr, sizeof(outStr)));
         SSF_ASSERT(strcmp(outStr, "v2") == 0);
 
@@ -944,13 +944,13 @@ void SSFINIUnitTest(void)
         SSFGObj_t *g = NULL;
         SSFGObj_t *parent = NULL;
         SSFGObj_t *child = NULL;
-        char *path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
+        SSFGPath_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
 
         SSF_ASSERT(SSFINIGObjCreate("name=\n", &g, 8));
         memset(path, 0, sizeof(path));
-        path[0] = "name";
+        SSF_GPATH_SET_KEY(path[0], "name");
         parent = NULL; child = NULL;
-        SSF_ASSERT(SSFGObjFindPath(g, (SSFCStrIn_t *)path, &parent, &child));
+        SSF_ASSERT(SSFGObjFindPath(g, path, &parent, &child));
         SSF_ASSERT(SSFGObjGetType(child) == SSF_OBJ_TYPE_STR);
         SSF_ASSERT(SSFGObjGetString(child, outStr, sizeof(outStr)));
         SSF_ASSERT(strcmp(outStr, "") == 0);
@@ -964,13 +964,13 @@ void SSFINIUnitTest(void)
         SSFGObj_t *g = NULL;
         SSFGObj_t *parent = NULL;
         SSFGObj_t *child = NULL;
-        char *path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
+        SSFGPath_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
 
         SSF_ASSERT(SSFINIGObjCreate(";comment\n#comment\n[sec]\n  key = val\n", &g, 8));
         memset(path, 0, sizeof(path));
-        path[0] = "sec"; path[1] = "key";
+        SSF_GPATH_SET_KEY(path[0], "sec"); SSF_GPATH_SET_KEY(path[1], "key");
         parent = NULL; child = NULL;
-        SSF_ASSERT(SSFGObjFindPath(g, (SSFCStrIn_t *)path, &parent, &child));
+        SSF_ASSERT(SSFGObjFindPath(g, path, &parent, &child));
         SSF_ASSERT(SSFGObjGetString(child, outStr, sizeof(outStr)));
         SSF_ASSERT(strcmp(outStr, "val") == 0);
 
@@ -983,13 +983,13 @@ void SSFINIUnitTest(void)
         SSFGObj_t *g = NULL;
         SSFGObj_t *parent = NULL;
         SSFGObj_t *child = NULL;
-        char *path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
+        SSFGPath_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
 
         SSF_ASSERT(SSFINIGObjCreate("[s]\r\nk=v\r\n", &g, 8));
         memset(path, 0, sizeof(path));
-        path[0] = "s"; path[1] = "k";
+        SSF_GPATH_SET_KEY(path[0], "s"); SSF_GPATH_SET_KEY(path[1], "k");
         parent = NULL; child = NULL;
-        SSF_ASSERT(SSFGObjFindPath(g, (SSFCStrIn_t *)path, &parent, &child));
+        SSF_ASSERT(SSFGObjFindPath(g, path, &parent, &child));
         SSF_ASSERT(SSFGObjGetString(child, outStr, sizeof(outStr)));
         SSF_ASSERT(strcmp(outStr, "v") == 0);
 

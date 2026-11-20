@@ -1,8 +1,8 @@
 /* --------------------------------------------------------------------------------------------- */
 /* Small System Framework                                                                        */
 /*                                                                                               */
-/* ssfjsonpath.h                                                                                 */
-/* Provides the typed lookup path shared by the JSON family parsers.                             */
+/* ssfgpath.h                                                                                    */
+/* Provides the typed lookup path shared by ssfjson, ssfubjson and ssfgobj.                      */
 /*                                                                                               */
 /* BSD-3-Clause License                                                                          */
 /* Copyright 2026 Supurloop Software LLC                                                         */
@@ -29,8 +29,8 @@
 /* NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED  */
 /* OF THE POSSIBILITY OF SUCH DAMAGE.                                                            */
 /* --------------------------------------------------------------------------------------------- */
-#ifndef SSF_JSON_PATH_H_INCLUDE
-#define SSF_JSON_PATH_H_INCLUDE
+#ifndef SSF_GPATH_H_INCLUDE
+#define SSF_GPATH_H_INCLUDE
 
 #ifdef __cplusplus
 extern "C" {
@@ -47,37 +47,37 @@ extern "C" {
 /* Kind of one lookup path entry; END (0) terminates the path, so a zeroed path is empty */
 typedef enum
 {
-    SSF_JSON_PATH_MIN = -1,
-    SSF_JSON_PATH_END,
-    SSF_JSON_PATH_KEY,
-    SSF_JSON_PATH_INDEX,
-    SSF_JSON_PATH_MAX,
-} SSFJsonPathKind_t;
+    SSF_GPATH_MIN = -1,
+    SSF_GPATH_END,
+    SSF_GPATH_KEY,
+    SSF_GPATH_INDEX,
+    SSF_GPATH_MAX,
+} SSFGPathKind_t;
 
 /* One lookup path entry: an object member name or a pointer to an array element index */
 typedef struct
 {
-    SSFJsonPathKind_t kind;
+    SSFGPathKind_t kind;
     union
     {
         SSFCStrIn_t key;
         const size_t *index;
     } u;
-} SSFJsonPath_t;
+} SSFGPath_t;
 
 /* Set entry e to member name k, index pointer i, or the path end; each argument read once */
-#define SSF_JSON_PATH_SET_KEY(e, k) \
-        do { SSFJsonPath_t *_ssfJsonPathEntry = &(e); \
-             _ssfJsonPathEntry->kind = SSF_JSON_PATH_KEY; \
-             _ssfJsonPathEntry->u.key = (k); } while (0)
-#define SSF_JSON_PATH_SET_INDEX(e, i) \
-        do { SSFJsonPath_t *_ssfJsonPathEntry = &(e); \
-             _ssfJsonPathEntry->kind = SSF_JSON_PATH_INDEX; \
-             _ssfJsonPathEntry->u.index = (i); } while (0)
-#define SSF_JSON_PATH_SET_END(e) \
-        do { SSFJsonPath_t *_ssfJsonPathEntry = &(e); \
-             _ssfJsonPathEntry->kind = SSF_JSON_PATH_END; \
-             _ssfJsonPathEntry->u.key = NULL; } while (0)
+#define SSF_GPATH_SET_KEY(e, k) \
+        do { SSFGPath_t *_ssfGPathEntry = &(e); \
+             _ssfGPathEntry->kind = SSF_GPATH_KEY; \
+             _ssfGPathEntry->u.key = (k); } while (0)
+#define SSF_GPATH_SET_INDEX(e, i) \
+        do { SSFGPath_t *_ssfGPathEntry = &(e); \
+             _ssfGPathEntry->kind = SSF_GPATH_INDEX; \
+             _ssfGPathEntry->u.index = (i); } while (0)
+#define SSF_GPATH_SET_END(e) \
+        do { SSFGPath_t *_ssfGPathEntry = &(e); \
+             _ssfGPathEntry->kind = SSF_GPATH_END; \
+             _ssfGPathEntry->u.key = NULL; } while (0)
 
 /* --------------------------------------------------------------------------------------------- */
 /* External interface                                                                            */
@@ -86,7 +86,7 @@ typedef struct
 /* Returns true if every entry up to the first END is a known kind with its pointer set; the     */
 /* path must hold maxDepth + 1 entries.                                                          */
 /* --------------------------------------------------------------------------------------------- */
-static inline bool SSFJsonPathIsValid(const SSFJsonPath_t *path, uint8_t maxDepth)
+static inline bool SSFGPathIsValid(const SSFGPath_t *path, uint8_t maxDepth)
 {
     uint8_t i;
 
@@ -95,16 +95,16 @@ static inline bool SSFJsonPathIsValid(const SSFJsonPath_t *path, uint8_t maxDept
     for (i = 0; i <= maxDepth; i++)
     {
         /* Is the entry's kind outside the enum? */
-        if ((path[i].kind <= SSF_JSON_PATH_MIN) || (path[i].kind >= SSF_JSON_PATH_MAX))
+        if ((path[i].kind <= SSF_GPATH_MIN) || (path[i].kind >= SSF_GPATH_MAX))
         {
             /* Yes */
             return false;
         }
         /* No, is it the end of the path? */
-        if (path[i].kind == SSF_JSON_PATH_END) return true;
+        if (path[i].kind == SSF_GPATH_END) return true;
         /* No, is it a key without a name or an index without a variable? */
-        if (((path[i].kind == SSF_JSON_PATH_KEY) && (path[i].u.key == NULL)) ||
-            ((path[i].kind == SSF_JSON_PATH_INDEX) && (path[i].u.index == NULL)))
+        if (((path[i].kind == SSF_GPATH_KEY) && (path[i].u.key == NULL)) ||
+            ((path[i].kind == SSF_GPATH_INDEX) && (path[i].u.index == NULL)))
         {
             /* Yes */
             return false;
@@ -118,4 +118,4 @@ static inline bool SSFJsonPathIsValid(const SSFJsonPath_t *path, uint8_t maxDept
 }
 #endif
 
-#endif /* SSF_JSON_PATH_H_INCLUDE */
+#endif /* SSF_GPATH_H_INCLUDE */

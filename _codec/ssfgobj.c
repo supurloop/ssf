@@ -553,7 +553,7 @@ bool SSFGObjRemoveChild(SSFGObj_t *gobjParent, SSFGObj_t *gobjChild)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if object/parent is found in supplied path, else false.                          */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFGObjFindPath(SSFGObj_t *gobjRoot, SSFCStrIn_t *path, SSFGObj_t **gobjParentOut,
+static bool _SSFGObjFindPath(SSFGObj_t *gobjRoot, const SSFGPath_t *path, SSFGObj_t **gobjParentOut,
                              SSFGObj_t **gobjOut, uint8_t depth)
 {
     SSFLLItem_t *item;
@@ -564,23 +564,23 @@ static bool _SSFGObjFindPath(SSFGObj_t *gobjRoot, SSFCStrIn_t *path, SSFGObj_t *
 
     SSF_REQUIRE(gobjRoot != NULL);
     SSF_REQUIRE(path != NULL);
-    SSF_REQUIRE(path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH] == NULL);
+    SSF_REQUIRE(path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH].kind == SSF_GPATH_END);
     SSF_REQUIRE(gobjParentOut != NULL);
     SSF_REQUIRE(gobjOut != NULL);
     SSF_REQUIRE(*gobjOut == NULL);
 
     /* Return if recursing too deeply or path not set */
-    if ((depth >= SSF_GOBJ_CONFIG_MAX_IN_DEPTH) || (path[depth] == NULL))
+    if ((depth >= SSF_GOBJ_CONFIG_MAX_IN_DEPTH) || (path[depth].kind == SSF_GPATH_END))
     {
         *gobjParentOut = NULL;
         return false;
     }
 
-    /* Is array type? */
-    if (gobjRoot->dataType == SSF_OBJ_TYPE_ARRAY)
+    /* Is it an array and the next path entry an array element index? */
+    if ((gobjRoot->dataType == SSF_OBJ_TYPE_ARRAY) && (path[depth].kind == SSF_GPATH_INDEX))
     {
-        /* Yes, decode array index */
-        memcpy(&pindex, path[depth], sizeof(size_t));
+        /* Yes, select that element; any other kind of entry selects none */
+        pindex = *(path[depth].u.index);
     }
 
     /* Object or array type? */
@@ -598,12 +598,13 @@ static bool _SSFGObjFindPath(SSFGObj_t *gobjRoot, SSFCStrIn_t *path, SSFGObj_t *
             {
                 SSFGObj_t *tmp = (SSFGObj_t *)item;
 
-                /* Yes, path match? */
+                /* Yes, is the next path entry a member name equal to this child's label? */
                 isPathMatch = false;
-                if (tmp->labelCStr != NULL)
+                if ((tmp->labelCStr != NULL) && (path[depth].kind == SSF_GPATH_KEY))
                 {
-                    len = SSF_MIN(strlen(tmp->labelCStr), strlen(path[depth]));
-                    isPathMatch = (strncmp(tmp->labelCStr, path[depth], len + 1) == 0);
+                    /* Maybe, compare them */
+                    len = SSF_MIN(strlen(tmp->labelCStr), strlen(path[depth].u.key));
+                    isPathMatch = (strncmp(tmp->labelCStr, path[depth].u.key, len + 1) == 0);
                 }
             }
             /* No, index match? */
@@ -613,7 +614,7 @@ static bool _SSFGObjFindPath(SSFGObj_t *gobjRoot, SSFCStrIn_t *path, SSFGObj_t *
             if (isPathMatch)
             {
                 /* Yes, more path to check? */
-                if (path[depth + 1] != NULL)
+                if (path[depth + 1].kind != SSF_GPATH_END)
                 {
                     /* Yes, recurse and look for path */
                     return _SSFGObjFindPath((SSFGObj_t *)item, path, gobjParentOut, gobjOut,
@@ -630,21 +631,7 @@ static bool _SSFGObjFindPath(SSFGObj_t *gobjRoot, SSFCStrIn_t *path, SSFGObj_t *
             item = SSF_LL_NEXT_ITEM(item);
         }
     }
-    else
-    {
-        /* No, is the label set? */
-        if (gobjRoot->labelCStr != NULL)
-        {
-            /* Yes, does it match the path? */
-            len = SSF_MIN(strlen(gobjRoot->labelCStr), strlen(path[depth]));
-            if (strncmp(gobjRoot->labelCStr, path[depth], len + 1) == 0)
-            {
-                /* Yes, return the object */
-                *gobjOut = gobjRoot;
-                return true;
-            }
-        }
-    }
+    /* No, a scalar has no children, so a path continuing past it matches nothing */
     *gobjParentOut = NULL;
     return false;
 }
@@ -652,12 +639,13 @@ static bool _SSFGObjFindPath(SSFGObj_t *gobjRoot, SSFCStrIn_t *path, SSFGObj_t *
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if object/parent is found in supplied path, else false.                          */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFGObjFindPath(SSFGObj_t *gobjRoot, SSFCStrIn_t *path, SSFGObj_t **gobjParentOut,
+bool SSFGObjFindPath(SSFGObj_t *gobjRoot, const SSFGPath_t *path, SSFGObj_t **gobjParentOut,
                      SSFGObj_t **gobjChildOut)
 {
     SSF_REQUIRE(gobjRoot != NULL);
     SSF_REQUIRE(path != NULL);
-    SSF_REQUIRE(path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH] == NULL);
+    SSF_REQUIRE(path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH].kind == SSF_GPATH_END);
+    SSF_REQUIRE(SSFGPathIsValid(path, SSF_GOBJ_CONFIG_MAX_IN_DEPTH));
     SSF_REQUIRE(gobjParentOut != NULL);
     SSF_REQUIRE(*gobjParentOut == NULL);
     SSF_REQUIRE(gobjChildOut != NULL);

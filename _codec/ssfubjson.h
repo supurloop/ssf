@@ -40,7 +40,7 @@ extern "C"
 #include <stdint.h>
 #include <stdbool.h>
 #include "ssfport.h"
-#include "ssfjsonpath.h"
+#include "ssfgpath.h"
 
 /* --------------------------------------------------------------------------------------------- */
 /* Defines                                                                                       */
@@ -72,16 +72,16 @@ typedef bool (*SSFUBJsonPrintFn_t)(uint8_t *js, size_t size, size_t start, size_
 
 /* Parser */
 bool SSFUBJsonIsValid(uint8_t *js, size_t jsLen);
-SSFUBJsonType_t SSFUBJsonGetType(uint8_t *js, size_t jsLen, const SSFJsonPath_t *path);
-bool SSFUBJsonGetString(uint8_t *js, size_t jsLen, const SSFJsonPath_t *path, SSFCStrOut_t out,
+SSFUBJsonType_t SSFUBJsonGetType(uint8_t *js, size_t jsLen, const SSFGPath_t *path);
+bool SSFUBJsonGetString(uint8_t *js, size_t jsLen, const SSFGPath_t *path, SSFCStrOut_t out,
                         size_t outSize, size_t *outLen);
-bool SSFUBJsonGetHex(uint8_t *js, size_t jsLen, const SSFJsonPath_t *path, uint8_t *out,
+bool SSFUBJsonGetHex(uint8_t *js, size_t jsLen, const SSFGPath_t *path, uint8_t *out,
                      size_t outSize, size_t *outLen, bool rev);
-bool SSFUBJsonGetBase64(uint8_t *js, size_t jsLen, const SSFJsonPath_t *path, uint8_t *out,
+bool SSFUBJsonGetBase64(uint8_t *js, size_t jsLen, const SSFGPath_t *path, uint8_t *out,
                         size_t outSize, size_t *outLen);
-bool SSFUBJsonGetFloat(uint8_t *js, size_t jsLen, const SSFJsonPath_t *path, float *out);
-bool SSFUBJsonGetDouble(uint8_t *js, size_t jsLen, const SSFJsonPath_t *path, double *out);
-bool SSFUBJsonGetByteArrayPtr(uint8_t *js, size_t jsLen, const SSFJsonPath_t *path, uint8_t **out,
+bool SSFUBJsonGetFloat(uint8_t *js, size_t jsLen, const SSFGPath_t *path, float *out);
+bool SSFUBJsonGetDouble(uint8_t *js, size_t jsLen, const SSFGPath_t *path, double *out);
+bool SSFUBJsonGetByteArrayPtr(uint8_t *js, size_t jsLen, const SSFGPath_t *path, uint8_t **out,
                               size_t *outLen);
 
 #define SSFUBJsonGetInt8(js, jsLen, path, out) SSFUBJsonGetInt(js, jsLen, path, out, 1, true)
@@ -92,7 +92,7 @@ bool SSFUBJsonGetByteArrayPtr(uint8_t *js, size_t jsLen, const SSFJsonPath_t *pa
 #define SSFUBJsonGetUInt32(js, jsLen, path, out) SSFUBJsonGetInt(js, jsLen, path, out, 4, false)
 #define SSFUBJsonGetInt64(js, jsLen, path, out) SSFUBJsonGetInt(js, jsLen, path, out, 8, true)
 #define SSFUBJsonGetUInt64(js, jsLen, path, out) SSFUBJsonGetInt(js, jsLen, path, out, 8, false)
-bool SSFUBJsonGetInt(uint8_t *js, size_t jsLen, const SSFJsonPath_t *path, void *out, uint8_t size,
+bool SSFUBJsonGetInt(uint8_t *js, size_t jsLen, const SSFGPath_t *path, void *out, uint8_t size,
                      bool isSigned);
 
 /* Generator */

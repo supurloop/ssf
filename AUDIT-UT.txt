@@ -42,7 +42,7 @@ SUMMARY
   Severity   Count   Labels
   Critical   0
   High       8       JSON-1 (FIXED), JSON-2 (FIXED), JSON-5 (FIXED), JSON-6 (FIXED),
-                     JSON-7 (FIXED), JSON-8 (FIXED), UBJSON-2 (FIXED), GOBJ-1 (suspected)
+                     JSON-7 (FIXED), JSON-8 (FIXED), UBJSON-2 (FIXED), GOBJ-1 (FIXED)
   Medium     0
   Low        12      UBJSON-1, DEC-1, HEX-1, B64-1, JSON-3, JSON-4, RSA-13, RSA-14, CMS-5,
                      X509-21, E-5, X-3
@@ -51,8 +51,7 @@ SUMMARY
                     UBJSON-2, GOBJ-1, DEC-1, RSA-14 (style)
              TEST   HEX-1, B64-1, JSON-3, RSA-13, CMS-5, X509-21, E-5, X-3
 
-  Suggested order: GOBJ-1 (confirm, then move to the shared path type), then UBJSON-1 /
-  DEC-1, then the test items.
+  Suggested order: UBJSON-1 / DEC-1, then JSON-4, then the test items.
 
 ----------------------------------------------------------------------------------------------
 ssfjson
@@ -266,14 +265,23 @@ UBJSON-2  High  FIXED (2026-11-20)  CODE  [measured, ASan; fix verified red/gree
 ssfgobj
 ----------------------------------------------------------------------------------------------
 
-GOBJ-1  High  OPEN  CODE  [suspected, code-read only]  (found while briefing JSON-7)
+GOBJ-1  High  FIXED (2026-11-20)  CODE  [measured, ASan; fix verified red/green]  (found while
+                    briefing JSON-7)
   Location:  ssfgobj.c:556-620 (_SSFGObjFindPath: memcpy of path[depth] as a size_t when the
-             node is an array, key compare when it is an object)
-  Problem:   SSFGObjFindPath takes the same untyped SSFCStrIn_t path. The tree's shape can come
-             from an untrusted document (SSFJsonGObjCreate), so the same type confusion is
-             likely: an 8-byte read of a shorter key string where the tree has an array, and
-             a key that reads as a valid index selecting an array element.
-  Options:   Reproduce under ASan; then the same typed path entries as ssfjson (JSON-7).
+             node is an array, label compare when it is an object, and a scalar node comparing
+             its own label with the next entry)
+  Problem:   SSFGObjFindPath took the untyped SSFCStrIn_t path, so the tree's shape decided how
+             each entry was read, and that shape comes from untrusted data whenever the tree was
+             built by SSFJsonGObjCreate. A scalar node reached with path left over compared its
+             own label with the next entry and returned itself. Not present: JSON-1 (only the
+             matching child is descended into), JSON-6 (no copy-out), JSON-2 (depth checked on
+             every call); duplicates already resolved to the first occurrence.
+  Failure:   Trees built from JSON, ASan + UBSan: {"a":[1,2]} a.hex with the key in a 4-byte
+             stack buffer: stack-buffer-overflow, 8-byte read (ssfgobj.c:583); {"cfg":[1000..
+             1099]} cfg.a with a zero-padded key "a": found element 97 (1097); {"a":{"":1}}
+             a[0]: the size_t 0 read as the empty label, found 1; {"a":"s"} a.a: found "s".
+  Options:   (1) Move SSFGObjFindPath to the shared typed path (ssfgpath.h) (chosen).
+             (2) Fix only the scalar self-compare (leaves the over-read).
 
 ----------------------------------------------------------------------------------------------
 ssfdec
@@ -575,3 +583,36 @@ CHANGE LOG
               message, array of 20 objects, best of 7): x86-64 about +1..+7%; emulated ARM32
               (M0+) lookups through the array -19% (14.3-14.6 -> 11.5-11.8 us), the others
               -4..-6% (skipped members no longer match against the path).
+  2026-11-20  ssfjsonpath.h renamed ssfgpath.h (Jim's choice), identifiers renamed to its prefix
+              as claude.ssf requires: SSFGPath_t, SSFGPathKind_t, SSF_GPATH_END / KEY / INDEX /
+              MIN / MAX, SSF_GPATH_SET_KEY / _INDEX / _END, SSFGPathIsValid(). New
+              _codec/ssfgpath.md (listed in _codec/README.md); ssfjson.md and ssfubjson.md point
+              to it. Earlier entries in this file keep the names in use when they were written.
+              No behaviour change: all unit tests pass, -Werror -Wshadow clean, the header
+              compiles on its own.
+  2026-11-20  GOBJ-1 FIXED (option 1, Jim's choice). SSFGObjFindPath takes const SSFGPath_t *:
+              an array node selects a child only for an INDEX entry, an object node only for a
+              KEY entry, and a scalar node reached with path left over is not found (its label
+              self-compare removed); the public entry asserts the path entries. Callers moved
+              to typed paths: ssfini.c (section lookup), _ui/ssfcli.c (command, options, and
+              positional arguments by index), and the tests in ssfgobj_ut.c, ssfini_ut.c,
+              ssfargv_ut.c, ssfcli_ut.c and ssfjson_ut.c (gpath); docs ssfgobj.md, ssfini.md and
+              ssfargv.md. New test "AUDIT GOBJ-1" in ssfgobj_ut.c (trees built node by node):
+              key at an array with a 4-byte stack key, the zero-padded key "a" on 100 elements,
+              index at an object with an empty label, a path past a scalar (next entry equal to
+              and different from its label) with the scalar itself still found, first
+              occurrence of duplicate labels, and trap tests for a NULL key, a NULL index and
+              kind MAX. Linux direct gcc build, all unit tests on.
+              RED (old API): ASan stack-buffer-overflow in the first case; soft asserts: wrong
+              results at ssfgobj_ut.c:570, :584, :600. GREEN: plain 54 / 54; pattern-init all
+              but the ed25519 / x25519 stack probes; ASan + UBSan 48 / 54 with gobj, json, ini,
+              cli and argv passing and the six baseline failures; -Werror -Wshadow clean.
+              Mutation: arrays reading any entry as an index (:570), objects comparing any
+              entry as a label (:584), the scalar self-match restored (:600) and the entry check
+              removed (crash on the NULL-key test) all fail. Code (-Os text, vs fb01441):
+              ssfgobj Cortex-M4 2419 -> 2423 B (+4), M0+ 2695 -> 2711 B (+16); ssfini +8 / +12;
+              ssfcli +28 / +28. Stack: SSFGObjFindPath frame (the recursive search is folded
+              into it) 56 -> 56 B M4, 64 -> 56 B M0+. Speed (FindPath on a 20-object tree built
+              by SSFJsonGObjCreate, best of 7): x86-64 15 / 19 -> 20 / 28 ns (the per-call
+              entry check is a large share of so small an operation); emulated ARM32 (M0+)
+              within run-to-run noise (old 208-296 ns, new 204-286 ns).

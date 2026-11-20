@@ -232,7 +232,7 @@ void SSFUBJsonUnitTest(void)
 {
     uint16_t i;
     uint16_t j;
-    SSFJsonPath_t path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH + 1];
+    SSFGPath_t path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH + 1];
     size_t aidx1;
     char outStr[128];
     size_t outStrLen;
@@ -290,18 +290,18 @@ void SSFUBJsonUnitTest(void)
         /* Array sibling and skipped member: the lookup works and never reads the key as an */
         /* index                                                                             */
         memset(path, 0, sizeof(path));
-        SSF_JSON_PATH_SET_INDEX(path[0], &i1);
-        SSF_JSON_PATH_SET_KEY(path[1], key);
+        SSF_GPATH_SET_INDEX(path[0], &i1);
+        SSF_GPATH_SET_KEY(path[1], key);
         SSF_ASSERT(SSFUBJsonGetInt8(jsSib, sizeof(jsSib), path, &i8) == true);
         SSF_ASSERT(i8 == 5);
-        SSF_JSON_PATH_SET_KEY(path[0], "a");
+        SSF_GPATH_SET_KEY(path[0], "a");
         SSF_ASSERT(SSFUBJsonGetInt8(jsSkip, sizeof(jsSkip), path, &i8) == true);
         SSF_ASSERT(i8 == 5);
 
         /* A key where the document has an array, and an index where it has an object */
         SSF_ASSERT(SSFUBJsonGetType(jsKeyArr, sizeof(jsKeyArr), path) ==
                    SSF_UBJSON_TYPE_ERROR);
-        SSF_JSON_PATH_SET_INDEX(path[1], &i0);
+        SSF_GPATH_SET_INDEX(path[1], &i0);
         SSF_ASSERT(SSFUBJsonGetType(jsIdxObj, sizeof(jsIdxObj), path) ==
                    SSF_UBJSON_TYPE_ERROR);
 
@@ -313,18 +313,18 @@ void SSFUBJsonUnitTest(void)
         for (k = 0u; k < 100u; k++) { jsCfg[q++] = 'i'; jsCfg[q++] = (uint8_t)k; }
         jsCfg[q++] = ']'; jsCfg[q++] = '}';
         memset(path, 0, sizeof(path));
-        SSF_JSON_PATH_SET_KEY(path[0], "cfg");
-        SSF_JSON_PATH_SET_KEY(path[1], keyA);
+        SSF_GPATH_SET_KEY(path[0], "cfg");
+        SSF_GPATH_SET_KEY(path[1], keyA);
         SSF_ASSERT(SSFUBJsonGetType(jsCfg, q, path) == SSF_UBJSON_TYPE_ERROR);
 
         /* A path past a scalar, past an object without the key, or into an empty object */
         memset(path, 0, sizeof(path));
-        SSF_JSON_PATH_SET_KEY(path[0], "a");
+        SSF_GPATH_SET_KEY(path[0], "a");
         SSF_ASSERT(SSFUBJsonGetType(jsStr, sizeof(jsStr), path) ==
                    SSF_UBJSON_TYPE_STRING);
         SSF_ASSERT(SSFUBJsonGetType(jsEmpty, sizeof(jsEmpty), path) ==
                    SSF_UBJSON_TYPE_OBJECT);
-        SSF_JSON_PATH_SET_KEY(path[1], "b");
+        SSF_GPATH_SET_KEY(path[1], "b");
         SSF_ASSERT(SSFUBJsonGetType(jsStr, sizeof(jsStr), path) ==
                    SSF_UBJSON_TYPE_ERROR);
         SSF_ASSERT(SSFUBJsonGetString(jsStr, sizeof(jsStr), path, sOut, sizeof(sOut),
@@ -336,18 +336,18 @@ void SSFUBJsonUnitTest(void)
 
         /* A miss inside an array element is not found */
         memset(path, 0, sizeof(path));
-        SSF_JSON_PATH_SET_INDEX(path[0], &i0);
-        SSF_JSON_PATH_SET_KEY(path[1], "zz");
+        SSF_GPATH_SET_INDEX(path[0], &i0);
+        SSF_GPATH_SET_KEY(path[1], "zz");
         SSF_ASSERT(SSFUBJsonGetType(jsElemMiss, sizeof(jsElemMiss), path) ==
                    SSF_UBJSON_TYPE_ERROR);
-        SSF_JSON_PATH_SET_KEY(path[1], "b");
+        SSF_GPATH_SET_KEY(path[1], "b");
         SSF_ASSERT(SSFUBJsonGetInt8(jsElemMiss, sizeof(jsElemMiss), path, &i8) ==
                    true);
         SSF_ASSERT(i8 == 1);
 
         /* Only the first occurrence of a duplicate key matches, wherever it is */
         memset(path, 0, sizeof(path));
-        SSF_JSON_PATH_SET_KEY(path[0], "a");
+        SSF_GPATH_SET_KEY(path[0], "a");
         SSF_ASSERT(SSFUBJsonGetString(jsDup, sizeof(jsDup), path, sOut, sizeof(sOut),
                                       &sLen) == true);
         SSF_ASSERT((sLen == 1u) && (sOut[0] == '1'));
@@ -358,11 +358,11 @@ void SSFUBJsonUnitTest(void)
 
         /* Typed entries: a key needs a name, an index a variable, and the kind must be known */
         memset(path, 0, sizeof(path));
-        SSF_JSON_PATH_SET_KEY(path[0], NULL);
+        SSF_GPATH_SET_KEY(path[0], NULL);
         SSF_ASSERT_TEST(SSFUBJsonGetType(jsStr, sizeof(jsStr), path));
-        SSF_JSON_PATH_SET_INDEX(path[0], NULL);
+        SSF_GPATH_SET_INDEX(path[0], NULL);
         SSF_ASSERT_TEST(SSFUBJsonGetType(jsSib, sizeof(jsSib), path));
-        path[0].kind = SSF_JSON_PATH_MAX;
+        path[0].kind = SSF_GPATH_MAX;
         SSF_ASSERT_TEST(SSFUBJsonGetType(jsSib, sizeof(jsSib), path));
         memset(path, 0, sizeof(path));
     }
@@ -384,45 +384,45 @@ void SSFUBJsonUnitTest(void)
     SSF_ASSERT_TEST(SSFUBJsonIsValid(NULL, 1));
     memset(path, 0, sizeof(path));
     SSF_ASSERT_TEST(SSFUBJsonGetType(NULL, 1, NULL));
-    SSF_JSON_PATH_SET_KEY(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH], "bad");
+    SSF_GPATH_SET_KEY(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH], "bad");
     SSF_ASSERT_TEST(SSFUBJsonGetType(NULL, 1, path));
-    SSF_JSON_PATH_SET_END(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH]);
+    SSF_GPATH_SET_END(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH]);
     SSF_ASSERT_TEST(SSFUBJsonGetString(NULL, 1, path, outStr, sizeof(outStr), &outStrLen));
     SSF_ASSERT_TEST(SSFUBJsonGetString((uint8_t *)"{}", 1, NULL, outStr, sizeof(outStr), &outStrLen));
-    SSF_JSON_PATH_SET_KEY(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH], "bad");
+    SSF_GPATH_SET_KEY(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH], "bad");
     SSF_ASSERT_TEST(SSFUBJsonGetString((uint8_t *)"{}", 1, path, outStr, sizeof(outStr), &outStrLen));
-    SSF_JSON_PATH_SET_END(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH]);
+    SSF_GPATH_SET_END(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH]);
     SSF_ASSERT_TEST(SSFUBJsonGetString((uint8_t *)"{}", 1, path, NULL, sizeof(outStr), &outStrLen));
     SSF_ASSERT_TEST(SSFUBJsonGetHex(NULL, 1, path, jsOut, sizeof(jsOut), &outStrLen, false));
     SSF_ASSERT_TEST(SSFUBJsonGetHex((uint8_t *)"{}", 1, NULL, jsOut, sizeof(jsOut), &outStrLen, false));
-    SSF_JSON_PATH_SET_KEY(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH], "bad");
+    SSF_GPATH_SET_KEY(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH], "bad");
     SSF_ASSERT_TEST(SSFUBJsonGetHex((uint8_t *)"{}", 1, path, jsOut, sizeof(jsOut), &outStrLen, false));
-    SSF_JSON_PATH_SET_END(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH]);
+    SSF_GPATH_SET_END(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH]);
     SSF_ASSERT_TEST(SSFUBJsonGetHex((uint8_t *)"{}", 1, path, NULL, sizeof(jsOut), &outStrLen, false));
     SSF_ASSERT_TEST(SSFUBJsonGetHex((uint8_t *)"{}", 1, path, jsOut, sizeof(jsOut), NULL, false));
     SSF_ASSERT_TEST(SSFUBJsonGetBase64(NULL, 1, path, jsOut, sizeof(jsOut), &outStrLen));
     SSF_ASSERT_TEST(SSFUBJsonGetBase64((uint8_t *)"{}", 1, NULL, jsOut, sizeof(jsOut), &outStrLen));
-    SSF_JSON_PATH_SET_KEY(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH], "bad");
+    SSF_GPATH_SET_KEY(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH], "bad");
     SSF_ASSERT_TEST(SSFUBJsonGetBase64((uint8_t *)"{}", 1, path, jsOut, sizeof(jsOut), &outStrLen));
-    SSF_JSON_PATH_SET_END(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH]);
+    SSF_GPATH_SET_END(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH]);
     SSF_ASSERT_TEST(SSFUBJsonGetBase64((uint8_t *)"{}", 1, path, NULL, sizeof(jsOut), &outStrLen));
     SSF_ASSERT_TEST(SSFUBJsonGetFloat(NULL, 1, path, &outFloat));
     SSF_ASSERT_TEST(SSFUBJsonGetFloat((uint8_t *)"{}", 1, NULL, &outFloat));
-    SSF_JSON_PATH_SET_KEY(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH], "bad");
+    SSF_GPATH_SET_KEY(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH], "bad");
     SSF_ASSERT_TEST(SSFUBJsonGetFloat((uint8_t *)"{}", 1, path, &outFloat));
-    SSF_JSON_PATH_SET_END(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH]);
+    SSF_GPATH_SET_END(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH]);
     SSF_ASSERT_TEST(SSFUBJsonGetFloat((uint8_t *)"{}", 1, path, NULL));
     SSF_ASSERT_TEST(SSFUBJsonGetDouble(NULL, 1, path, &outDouble));
     SSF_ASSERT_TEST(SSFUBJsonGetDouble((uint8_t *)"{}", 1, NULL, &outDouble));
-    SSF_JSON_PATH_SET_KEY(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH], "bad");
+    SSF_GPATH_SET_KEY(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH], "bad");
     SSF_ASSERT_TEST(SSFUBJsonGetDouble((uint8_t *)"{}", 1, path, &outDouble));
-    SSF_JSON_PATH_SET_END(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH]);
+    SSF_GPATH_SET_END(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH]);
     SSF_ASSERT_TEST(SSFUBJsonGetDouble((uint8_t *)"{}", 1, path, NULL));
     SSF_ASSERT_TEST(SSFUBJsonGetInt(NULL, 1, path, &outU8, 1, false));
     SSF_ASSERT_TEST(SSFUBJsonGetInt((uint8_t *)"{}", 1, NULL, &outU8, 1, false));
-    SSF_JSON_PATH_SET_KEY(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH], "bad");
+    SSF_GPATH_SET_KEY(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH], "bad");
     SSF_ASSERT_TEST(SSFUBJsonGetInt((uint8_t *)"{}", 1, path, &outU8, 1, false));
-    SSF_JSON_PATH_SET_END(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH]);
+    SSF_GPATH_SET_END(path[SSF_UBJSON_CONFIG_MAX_IN_DEPTH]);
     SSF_ASSERT_TEST(SSFUBJsonGetInt((uint8_t *)"{}", 1, path, NULL, 1, false));
     SSF_ASSERT_TEST(SSFUBJsonGetInt((uint8_t *)"{}", 1, path, &outU8, 0, false));
     SSF_ASSERT_TEST(SSFUBJsonGetInt((uint8_t *)"{}", 1, path, &outU8, 3, false));
@@ -464,8 +464,8 @@ void SSFUBJsonUnitTest(void)
 
     /* Parse opt integer arrays */
     memset(path, 0, sizeof(path));
-    SSF_JSON_PATH_SET_KEY(path[0], "a");
-    SSF_JSON_PATH_SET_INDEX(path[1], &aidx1);
+    SSF_GPATH_SET_KEY(path[0], "a");
+    SSF_GPATH_SET_INDEX(path[1], &aidx1);
     for (aidx1 = 0;; aidx1++)
     {
         if (SSFUBJsonGetInt8(_ubjOptArray1, _ubjOptArray1Len, path, &outI8) == false) break;
@@ -474,8 +474,8 @@ void SSFUBJsonUnitTest(void)
     SSF_ASSERT(aidx1 == 10);
 
     memset(path, 0, sizeof(path));
-    SSF_JSON_PATH_SET_KEY(path[0], "a");
-    SSF_JSON_PATH_SET_INDEX(path[1], &aidx1);
+    SSF_GPATH_SET_KEY(path[0], "a");
+    SSF_GPATH_SET_INDEX(path[1], &aidx1);
     for (aidx1 = 0;; aidx1++)
     {
         if (SSFUBJsonGetInt8(_ubjOptArray2, _ubjOptArray2Len, path, &outI8) == false) break;
@@ -483,7 +483,7 @@ void SSFUBJsonUnitTest(void)
     }
     SSF_ASSERT(aidx1 == 10);
 
-    SSF_JSON_PATH_SET_END(path[1]);
+    SSF_GPATH_SET_END(path[1]);
     SSF_ASSERT(SSFUBJsonGetByteArrayPtr(_ubjOptArray2, _ubjOptArray2Len, path, &outPtr, &outPtrLen));
     SSF_ASSERT(outPtrLen == 10);
     SSF_ASSERT(memcmp(outPtr, "\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a", outPtrLen) == 0);
@@ -494,8 +494,8 @@ void SSFUBJsonUnitTest(void)
     SSF_ASSERT(*outPtr == ']');
 
     memset(path, 0, sizeof(path));
-    SSF_JSON_PATH_SET_KEY(path[0], "a");
-    SSF_JSON_PATH_SET_INDEX(path[1], &aidx1);
+    SSF_GPATH_SET_KEY(path[0], "a");
+    SSF_GPATH_SET_INDEX(path[1], &aidx1);
     for (aidx1 = 0;; aidx1++)
     {
         if (SSFUBJsonGetInt16(_ubjOptArray3, _ubjOptArray3Len, path, &outI16) == false) break;
@@ -504,7 +504,7 @@ void SSFUBJsonUnitTest(void)
     SSF_ASSERT(aidx1 == 10);
 
     memset(path, 0, sizeof(path));
-    SSF_JSON_PATH_SET_KEY(path[0], "n");
+    SSF_GPATH_SET_KEY(path[0], "n");
 
     /* SSFUBJsonGetInt8() */
     SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01ni\x01}", 7, path, &outI8));
@@ -1087,7 +1087,7 @@ void SSFUBJsonUnitTest(void)
 
     /* Validate parser on number types */
     memset(path, 0, sizeof(path));
-    SSF_JSON_PATH_SET_KEY(path[0], "n");
+    SSF_GPATH_SET_KEY(path[0], "n");
     for (i = 0; i < UBJTS_NUM_ITEMS(_ubjtsTypeNumber, sizeof(SSFUBJSONNUM_t)); i++)
     {
         SSF_ASSERT(SSFUBJsonGetType(_ubjtsTypeNumber[i].js, _ubjtsTypeNumber[i].jsLen, path) == _ubjtsTypeNumber[i].type);
@@ -1095,7 +1095,7 @@ void SSFUBJsonUnitTest(void)
 
     /* Validate parser on string types */
     memset(path, 0, sizeof(path));
-    SSF_JSON_PATH_SET_KEY(path[0], "s");
+    SSF_GPATH_SET_KEY(path[0], "s");
     for (i = 0; i < UBJTS_NUM_ITEMS(_ubjtsTypeString, sizeof(SSFUBJSONSTR_t)); i++)
     {
         SSF_ASSERT(SSFUBJsonGetType(_ubjtsTypeString[i].js, _ubjtsTypeString[i].jsLen, path) == SSF_UBJSON_TYPE_STRING);
@@ -1103,15 +1103,15 @@ void SSFUBJsonUnitTest(void)
 
     /* Validate parser on object types */
     memset(path, 0, sizeof(path));
-    SSF_JSON_PATH_SET_KEY(path[0], "o");
+    SSF_GPATH_SET_KEY(path[0], "o");
     for (i = 0; i < UBJTS_NUM_ITEMS(_ubjtsTypeObject, sizeof(SSFUBJSONOBJ_t)); i++)
     {
         SSF_ASSERT(SSFUBJsonGetType(_ubjtsTypeObject[i].js, _ubjtsTypeObject[i].jsLen, path) == SSF_UBJSON_TYPE_OBJECT);
     }
-    SSF_JSON_PATH_SET_KEY(path[1], "o2");
+    SSF_GPATH_SET_KEY(path[1], "o2");
     SSF_ASSERT(SSFUBJsonGetType((uint8_t *)"{i\x01o{i\x02o2{}}}", 13, path) == SSF_UBJSON_TYPE_OBJECT);
 
-    SSF_JSON_PATH_SET_INDEX(path[2], &aidx1);
+    SSF_GPATH_SET_INDEX(path[2], &aidx1);
     aidx1 = 0;
     SSF_ASSERT(SSFUBJsonGetType((uint8_t *)"{i\x01o{i\x02o2[{}i\x08]}}", 17, path) == SSF_UBJSON_TYPE_OBJECT);
     aidx1 = 1;
@@ -1119,13 +1119,13 @@ void SSFUBJsonUnitTest(void)
 
     /* Validate parser on array types */
     memset(path, 0, sizeof(path));
-    SSF_JSON_PATH_SET_KEY(path[0], "a");
+    SSF_GPATH_SET_KEY(path[0], "a");
     for (i = 0; i < UBJTS_NUM_ITEMS(_ubjtsTypeArray, sizeof(SSFUBJSONARR_t)); i++)
     {
         SSF_ASSERT(SSFUBJsonGetType(_ubjtsTypeArray[i].js, _ubjtsTypeArray[i].jsLen, path) == SSF_UBJSON_TYPE_ARRAY);
     }
     SSF_ASSERT(SSFUBJsonGetType((uint8_t *)"{i\x01" "a[[]i\x03]}", 11, path) == SSF_UBJSON_TYPE_ARRAY);
-    SSF_JSON_PATH_SET_INDEX(path[1], &aidx1);
+    SSF_GPATH_SET_INDEX(path[1], &aidx1);
     aidx1 = 0;
     SSF_ASSERT(SSFUBJsonGetType((uint8_t *)"{i\x01" "a[[]i\x03]}", 11, path) == SSF_UBJSON_TYPE_ARRAY);
     aidx1 = 1;
@@ -1133,17 +1133,17 @@ void SSFUBJsonUnitTest(void)
 
     /* Validate parser on true, false, null types */
     memset(path, 0, sizeof(path));
-    SSF_JSON_PATH_SET_KEY(path[0], "t");
+    SSF_GPATH_SET_KEY(path[0], "t");
     SSF_ASSERT(SSFUBJsonGetType((uint8_t *)"{i\x01tT}", 6, path) == SSF_UBJSON_TYPE_TRUE);
-    SSF_JSON_PATH_SET_KEY(path[0], "f");
+    SSF_GPATH_SET_KEY(path[0], "f");
     SSF_ASSERT(SSFUBJsonGetType((uint8_t *)"{i\x01" "fF}", 6, path) == SSF_UBJSON_TYPE_FALSE);
-    SSF_JSON_PATH_SET_KEY(path[0], "n");
+    SSF_GPATH_SET_KEY(path[0], "n");
     SSF_ASSERT(SSFUBJsonGetType((uint8_t *)"{i\x01nZ}", 6, path) == SSF_UBJSON_TYPE_NULL);
     SSF_ASSERT(SSFUBJsonGetType((uint8_t *)"{i\x01n}", 5, path) == SSF_UBJSON_TYPE_ERROR);
 
     /* Read string types */
     memset(path, 0, sizeof(path));
-    SSF_JSON_PATH_SET_KEY(path[0], "s");
+    SSF_GPATH_SET_KEY(path[0], "s");
     memset(outStr, 0xff, sizeof(outStr));
     outStrLen = sizeof(outStr) + 1;
     SSF_ASSERT(SSFUBJsonGetString((uint8_t *)"{i\x01sSi\x05world}", 13, path, outStr, sizeof(outStr),
@@ -1172,14 +1172,14 @@ void SSFUBJsonUnitTest(void)
 
     /* Read float type */
     memset(path, 0, sizeof(path));
-    SSF_JSON_PATH_SET_KEY(path[0], "f");
+    SSF_GPATH_SET_KEY(path[0], "f");
     outFloat = -1;
     SSF_ASSERT(SSFUBJsonGetFloat((uint8_t *)"{i\x01" "fdO\x00\x00\x00}", 10, path, &outFloat));
     SSF_ASSERT((outFloat >= 2147483647.0) && (outFloat <= 2147483649.0));
 
     /* Read double type */
     memset(path, 0, sizeof(path));
-    SSF_JSON_PATH_SET_KEY(path[0], "d");
+    SSF_GPATH_SET_KEY(path[0], "d");
     outDouble = -1;
     SSF_ASSERT(SSFUBJsonGetDouble((uint8_t *)"{i\x01" "dDA\xE0\x00\x00\x1F\x9C\x08" "1}", 14, path, &outDouble));
     SSF_ASSERT((outDouble >= 2147483899.0) && (outDouble <= 2147483901.0));
@@ -1188,7 +1188,7 @@ void SSFUBJsonUnitTest(void)
 
     /* Read int types */
     memset(path, 0, sizeof(path));
-    SSF_JSON_PATH_SET_KEY(path[0], "n");
+    SSF_GPATH_SET_KEY(path[0], "n");
     outI8 = -1;
     outU8 = 255;
     outI16 = -1;
@@ -1207,7 +1207,7 @@ void SSFUBJsonUnitTest(void)
 
     memset(path, 0, sizeof(path));
     aidx1 = 0;
-    SSF_JSON_PATH_SET_INDEX(path[0], &aidx1);
+    SSF_GPATH_SET_INDEX(path[0], &aidx1);
     SSF_ASSERT(SSFUBJsonGetInt64((uint8_t*)"[U\x12]", 4, path, &outI64));
     SSF_ASSERT(outI64 == 0x12ll);
 
@@ -1521,7 +1521,7 @@ void SSFUBJsonUnitTest(void)
 
     /* ASCII Hex */
     memset(path, 0, sizeof(path));
-    SSF_JSON_PATH_SET_KEY(path[0], "h");
+    SSF_GPATH_SET_KEY(path[0], "h");
     SSF_ASSERT(SSFUBJsonGetHex((uint8_t *)"{U\x01hSU\x0c" "11AA22BB99FE}", 20, path, jsOut,
         sizeof(jsOut), &outStrLen, false));
     SSF_ASSERT(outStrLen == 6);
@@ -1543,7 +1543,7 @@ void SSFUBJsonUnitTest(void)
 
     /* Base64 */
     memset(path, 0, sizeof(path));
-    SSF_JSON_PATH_SET_KEY(path[0], "b");
+    SSF_GPATH_SET_KEY(path[0], "b");
     SSF_ASSERT(SSFUBJsonGetBase64((uint8_t *)"{U\x01" "bSU\x08" "aGVsbG8=}", 16, path, jsOut,
         sizeof(jsOut), &outStrLen));
     SSF_ASSERT(outStrLen == 5);
@@ -1564,7 +1564,7 @@ void SSFUBJsonUnitTest(void)
 
         memset(path, 0, sizeof(path));
         aidx1 = 0;
-        SSF_JSON_PATH_SET_INDEX(path[0], &aidx1);
+        SSF_GPATH_SET_INDEX(path[0], &aidx1);
         SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"[$i#U\x02\x0a\x0b", 8,
                                      path, &outVal) == true);
         SSF_ASSERT(outVal == 10);
@@ -1582,14 +1582,14 @@ void SSFUBJsonUnitTest(void)
         int8_t outVal;
 
         memset(path, 0, sizeof(path));
-        SSF_JSON_PATH_SET_KEY(path[0], "abi");
+        SSF_GPATH_SET_KEY(path[0], "abi");
         SSF_ASSERT(SSFUBJsonGetType((uint8_t *)"{i\x02" "ab" "i\x05}", 8,
                                      path) == SSF_UBJSON_TYPE_ERROR);
         SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x02" "ab" "i\x05}", 8,
                                      path, &outVal) == false);
 
         /* Verify the correct key "ab" still matches */
-        SSF_JSON_PATH_SET_KEY(path[0], "ab");
+        SSF_GPATH_SET_KEY(path[0], "ab");
         SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x02" "ab" "i\x05}", 8,
                                      path, &outVal) == true);
         SSF_ASSERT(outVal == 5);
@@ -1601,7 +1601,7 @@ void SSFUBJsonUnitTest(void)
         size_t outStrLen2;
 
         memset(path, 0, sizeof(path));
-        SSF_JSON_PATH_SET_KEY(path[0], "s");
+        SSF_GPATH_SET_KEY(path[0], "s");
         /* "world" is 5 chars, outSize=6 succeeds (5 + null) */
         SSF_ASSERT(SSFUBJsonGetString((uint8_t *)"{i\x01sSi\x05world}", 13,
                                        path, outStr2, 6, &outStrLen2));
@@ -1618,7 +1618,7 @@ void SSFUBJsonUnitTest(void)
         char outStr2[16];
 
         memset(path, 0, sizeof(path));
-        SSF_JSON_PATH_SET_KEY(path[0], "s");
+        SSF_GPATH_SET_KEY(path[0], "s");
         memset(outStr2, 0xff, sizeof(outStr2));
         SSF_ASSERT(SSFUBJsonGetString((uint8_t *)"{i\x01sSi\x05world}", 13,
                                        path, outStr2, sizeof(outStr2), NULL));
@@ -1631,7 +1631,7 @@ void SSFUBJsonUnitTest(void)
         uint8_t outU8t;
 
         memset(path, 0, sizeof(path));
-        SSF_JSON_PATH_SET_KEY(path[0], "n");
+        SSF_GPATH_SET_KEY(path[0], "n");
         /* Int8 max is 127, uint8 value 128 should fail for signed int8 */
         SSF_ASSERT(SSFUBJsonGetInt8((uint8_t *)"{i\x01nU\x80}", 7,
                                      path, &outI8t) == false);
@@ -1657,7 +1657,7 @@ void SSFUBJsonUnitTest(void)
         double outD;
 
         memset(path, 0, sizeof(path));
-        SSF_JSON_PATH_SET_KEY(path[0], "n");
+        SSF_GPATH_SET_KEY(path[0], "n");
         /* Value is int8, not float32 */
         SSF_ASSERT(SSFUBJsonGetFloat((uint8_t *)"{i\x01ni\x05}", 7,
                                       path, &outF) == false);
@@ -1665,7 +1665,7 @@ void SSFUBJsonUnitTest(void)
         SSF_ASSERT(SSFUBJsonGetDouble((uint8_t *)"{i\x01ni\x05}", 7,
                                        path, &outD) == false);
         /* Value is string, not float */
-        SSF_JSON_PATH_SET_KEY(path[0], "s");
+        SSF_GPATH_SET_KEY(path[0], "s");
         SSF_ASSERT(SSFUBJsonGetFloat((uint8_t *)"{i\x01sSi\x02hi}", 10,
                                       path, &outF) == false);
         SSF_ASSERT(SSFUBJsonGetDouble((uint8_t *)"{i\x01sSi\x02hi}", 10,
@@ -1700,18 +1700,18 @@ void SSFUBJsonUnitTest(void)
         SSF_ASSERT(SSFUBJsonIsValid(rtUbj, rtUbjLen));
 
         memset(path, 0, sizeof(path));
-        SSF_JSON_PATH_SET_KEY(path[0], "s");
+        SSF_GPATH_SET_KEY(path[0], "s");
         SSF_ASSERT(SSFUBJsonGetString(rtUbj, rtUbjLen, path, rtStr,
                                        sizeof(rtStr), &rtStrLen));
         SSF_ASSERT(rtStrLen == 5);
         SSF_ASSERT(memcmp(rtStr, "hello", 5) == 0);
 
-        SSF_JSON_PATH_SET_KEY(path[0], "n");
+        SSF_GPATH_SET_KEY(path[0], "n");
         SSF_ASSERT(SSFUBJsonGetInt8(rtUbj, rtUbjLen, path, &rtI8));
         SSF_ASSERT(rtI8 == 42);
 
         /* Non-existent key returns false */
-        SSF_JSON_PATH_SET_KEY(path[0], "x");
+        SSF_GPATH_SET_KEY(path[0], "x");
         SSF_ASSERT(SSFUBJsonGetInt8(rtUbj, rtUbjLen, path, &rtI8) == false);
     }
 
@@ -1726,7 +1726,7 @@ void SSFUBJsonUnitTest(void)
 
         memset(path, 0, sizeof(path));
         aidx1 = 0;
-        SSF_JSON_PATH_SET_INDEX(path[0], &aidx1);
+        SSF_GPATH_SET_INDEX(path[0], &aidx1);
         SSF_ASSERT(SSFUBJsonGetString((uint8_t *)"[$S#U\x01U\x02hi", 10,
                                        path, outStr2, sizeof(outStr2),
                                        &outStrLen2) == true);
@@ -1740,13 +1740,13 @@ void SSFUBJsonUnitTest(void)
     /* key length, then the value token follows. Existing tests cover the path-not-found and  */
     /* underlying-type-too-narrow cases; these add the cross-type reject arms.                */
     {
-        SSFJsonPath_t cPath[SSF_UBJSON_CONFIG_MAX_IN_DEPTH + 1] = { { SSF_JSON_PATH_END } };
+        SSFGPath_t cPath[SSF_UBJSON_CONFIG_MAX_IN_DEPTH + 1] = { { SSF_GPATH_END } };
         char shortStr[16];
         uint8_t outBuf[16];
         size_t outBufLen;
         double outDbl;
 
-        SSF_JSON_PATH_SET_KEY(cPath[0], "k");
+        SSF_GPATH_SET_KEY(cPath[0], "k");
 
         /* Object {key="k", value=uint8 0x05}: GetString rejects (type != STRING).  */
         SSF_ASSERT(SSFUBJsonGetString((uint8_t *)"{i\x01kU\x05}", 7,
@@ -1771,7 +1771,7 @@ void SSFUBJsonUnitTest(void)
     /* The well-formed shape is `[$T#NL data...` where T is INT8/UINT8 and N is INT8/UINT8.   */
     /* Each line below mutates one byte to trip a specific guard (lines 697-707).             */
     {
-        SSFJsonPath_t cPath[SSF_UBJSON_CONFIG_MAX_IN_DEPTH + 1] = { { SSF_JSON_PATH_END } };
+        SSFGPath_t cPath[SSF_UBJSON_CONFIG_MAX_IN_DEPTH + 1] = { { SSF_GPATH_END } };
 
         /* Reject: top-level value is not an array (jt != ARRAY at line 697). */
         SSF_ASSERT(SSFUBJsonGetByteArrayPtr((uint8_t *)"U\x05", 2,

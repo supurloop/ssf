@@ -684,7 +684,7 @@ bool SSFINIGObjCreate(SSFCStrIn_t ini, SSFGObj_t **gobj, uint16_t maxChildren)
     SSFGObj_t *child = NULL;
     SSFGObj_t *foundParent = NULL;
     SSFGObj_t *foundChild = NULL;
-    SSFCStrOut_t findPath[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
+    SSFGPath_t findPath[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
     char strBuf[SSF_INI_GOBJ_CONFIG_MAX_STR_SIZE + 1];
 
     SSF_REQUIRE(ini != NULL);
@@ -717,10 +717,10 @@ bool SSFINIGObjCreate(SSFCStrIn_t ini, SSFGObj_t **gobj, uint16_t maxChildren)
 
                 /* Look for existing section object in root */
                 memset(findPath, 0, sizeof(findPath));
-                findPath[0] = strBuf;
+                SSF_GPATH_SET_KEY(findPath[0], strBuf);
                 foundParent = NULL;
                 foundChild = NULL;
-                if (SSFGObjFindPath(root, (SSFCStrIn_t *)findPath, &foundParent, &foundChild) &&
+                if (SSFGObjFindPath(root, findPath, &foundParent, &foundChild) &&
                     (SSFGObjGetType(foundChild) == SSF_OBJ_TYPE_OBJECT))
                 {
                     /* Reuse existing section */

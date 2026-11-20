@@ -43,6 +43,18 @@
 #error SSF_X509_CONFIG_RSA_MIN_BITS must be >= 1024.
 #endif
 
+/* RSA signature schemes this build verifies (each also needs an RSA key size enabled) */
+#if (SSF_RSA_ANY_ENABLED == 1) && (SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1)
+#define _SSF_X509_RSA_PKCS1 (1u)
+#else
+#define _SSF_X509_RSA_PKCS1 (0u)
+#endif
+#if (SSF_RSA_ANY_ENABLED == 1) && (SSF_RSA_CONFIG_ENABLE_PSS == 1)
+#define _SSF_X509_RSA_PSS (1u)
+#else
+#define _SSF_X509_RSA_PSS (0u)
+#endif
+
 /* Module-scope trace context for chain verification (set by caller before SSFVerifyChain) */
 static SSFTLSTraceCtx_t _ssfx509TraceCtx;
 
@@ -119,10 +131,12 @@ static const uint8_t _oidSHA384[] = {
 static const uint8_t _oidSHA512[] = {
     0x60u, 0x86u, 0x48u, 0x01u, 0x65u, 0x03u, 0x04u, 0x02u, 0x03u
 };
+#if _SSF_X509_RSA_PSS == 1
 /* id-mgf1: 1.2.840.113549.1.1.8 */
 static const uint8_t _oidMGF1[] = {
     0x2Au, 0x86u, 0x48u, 0x86u, 0xF7u, 0x0Du, 0x01u, 0x01u, 0x08u
 };
+#endif /* _SSF_X509_RSA_PSS == 1 */
 
 /* Extended Key Usage OIDs (RFC 5280 Section 4.2.1.12) */
 /* id-kp-serverAuth: 1.3.6.1.5.5.7.3.1 */
@@ -184,6 +198,7 @@ static bool _SSFX509MemEqI(const uint8_t *a, const uint8_t *b, uint32_t len)
     return true;
 }
 
+#if _SSF_X509_RSA_PSS == 1
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if cursor holds exactly one SHA-2 AlgorithmIdentifier, setting *hashOut.          */
 /* --------------------------------------------------------------------------------------------- */
@@ -340,6 +355,7 @@ static bool _SSFX509ParsePSSParams(const uint8_t *params, uint32_t paramsLen, SS
     /* No */
     return true;
 }
+#endif /* _SSF_X509_RSA_PSS == 1 */
 
 /* --------------------------------------------------------------------------------------------- */
 /* Parses a Distinguished Name (SEQUENCE of SET of SEQUENCE of {OID, value}).                     */
@@ -2651,6 +2667,7 @@ static bool _SSFX509DigestAgrees(const uint8_t *digestOidOpt, uint32_t digestOid
     return _SSFX509OIDMatch(digestOidOpt, digestOidLen, expectedOid, expectedOidLen);
 }
 
+#if (_SSF_X509_RSA_PKCS1 == 1) || (_SSF_X509_RSA_PSS == 1)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if RSAPublicKey der has n of at least the minimum size and an odd e >= 3.        */
 /* --------------------------------------------------------------------------------------------- */
@@ -2709,7 +2726,9 @@ static bool _SSFX509RSAKeyPolicyOK(const uint8_t *der, uint32_t derLen)
     /* No, the key meets the policy */
     return true;
 }
+#endif /* (_SSF_X509_RSA_PKCS1 == 1) || (_SSF_X509_RSA_PSS == 1) */
 
+#if _SSF_X509_RSA_PKCS1 == 1
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if oid names SHA-256, SHA-384 or SHA-512 with *hashOut set, else false.           */
 /* --------------------------------------------------------------------------------------------- */
@@ -2727,6 +2746,7 @@ static bool _SSFX509HashFromOID(const uint8_t *oid, uint32_t oidLen, SSFRSAHash_
     else return false;
     return true;
 }
+#endif /* _SSF_X509_RSA_PKCS1 == 1 */
 
 /* --------------------------------------------------------------------------------------------- */
 /* Returns the SHA-2 OID naming hashId with *lenOut set.                                          */
@@ -2803,9 +2823,13 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
     uint32_t impliedOidLen;
     uint8_t hash[SSF_SHA2_512_BYTE_SIZE];
     size_t hashLen;
+#if _SSF_X509_RSA_PSS == 1
     uint32_t saltLen;
+#endif /* _SSF_X509_RSA_PSS == 1 */
     bool isEcdsa256;
+#if _SSF_X509_RSA_PKCS1 == 1
     bool isRsaPlain;
+#endif /* _SSF_X509_RSA_PKCS1 == 1 */
     bool ok;
 
     SSF_REQUIRE(keyCert != NULL);
@@ -2891,6 +2915,8 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
         return ok;
     }
 
+    /* Compiled out schemes fall through to the unsupported-algorithm rejection below */
+#if _SSF_X509_RSA_PKCS1 == 1
     /* RSA PKCS#1 v1.5, by a hashed-with-RSA OID or plain rsaEncryption (RFC 3370 Sec. 3.2)? */
     isRsaPlain = _SSFX509OIDMatch(sigAlgOidRaw, sigAlgOidRawLen, _oidRSA, sizeof(_oidRSA));
     if ((isRsaPlain) ||
@@ -2967,7 +2993,9 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
             keyCert->pubKeyLen, sigLen, ok ? "OK" : "FAIL");
         return ok;
     }
+#endif /* _SSF_X509_RSA_PKCS1 == 1 */
 
+#if _SSF_X509_RSA_PSS == 1
     /* RSA-PSS, whose parameters select the hash and salt length (RFC 4055)? */
     if (_SSFX509OIDMatch(sigAlgOidRaw, sigAlgOidRawLen, _oidRSAPSS, sizeof(_oidRSAPSS)))
     {
@@ -3028,6 +3056,7 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
             sigLen, ok ? "OK" : "FAIL");
         return ok;
     }
+#endif /* _SSF_X509_RSA_PSS == 1 */
 
     /* Ed25519, which signs the data itself (RFC 8410)? */
     if (_SSFX509OIDMatch(sigAlgOidRaw, sigAlgOidRawLen, _oidEd25519, sizeof(_oidEd25519)))

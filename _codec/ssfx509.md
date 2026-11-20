@@ -28,7 +28,8 @@ X.509 v3 certificate support per RFC 5280, built on [`ssfasn1`](ssfasn1.md):
 - [`ssfstr`](ssfstr.md) — bounded C-string length for every name the API receives as a string
 - [`ssfsha2`](../_crypto/ssfsha2.md) — SHA-256 / SHA-384 / SHA-512 TBS digests for signature verification
 - [`ssfecdsa`](../_crypto/ssfecdsa.md) — ECDSA signature verification over P-256 / P-384
-- [`ssfrsa`](../_crypto/ssfrsa.md) — RSA PKCS#1 v1.5 and RSA-PSS signature verification
+- [`ssfrsa`](../_crypto/ssfrsa.md) — RSA PKCS#1 v1.5 and RSA-PSS signature verification; an
+  ECC-only build may disable every RSA key size
 - [`ssfed25519`](../_crypto/ssfed25519.md) — Ed25519 signature verification
 - [`ssftls`](../_crypto/ssftls.md) — trace callback type and `SSF_TLS_TRACE_CERT_*` macros used
   to report verification diagnostics
@@ -206,7 +207,10 @@ X.509 v3 certificate support per RFC 5280, built on [`ssfasn1`](ssfasn1.md):
   the build is treated as unsupported and verification returns `false`);
   `sha256WithRSAEncryption`, `sha384WithRSAEncryption`, `sha512WithRSAEncryption`; plain
   `rsaEncryption` when a separate digest algorithm names the hash, as CMS allows (RFC 3370);
-  `id-RSASSA-PSS` with SHA-256, SHA-384, or SHA-512 parameters; and `id-Ed25519`, which when a
+  `id-RSASSA-PSS` with SHA-256, SHA-384, or SHA-512 parameters (the RSA pairings only when
+  [`ssfrsa`](../_crypto/ssfrsa.md) enables at least one key size and the scheme,
+  `SSF_RSA_CONFIG_ENABLE_PKCS1_V15` / `_PSS`; otherwise they are treated as unsupported and
+  verification returns `false`); and `id-Ed25519`, which when a
   digest algorithm is given accepts only SHA-512 (RFC 8419). A digest algorithm given alongside
   any algorithm that already implies its hash must agree with it. Any other algorithm fails
   verification. All of this is [`SSFX509VerifySignature()`](#ssfx509verifysignature);

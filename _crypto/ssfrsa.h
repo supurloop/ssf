@@ -49,7 +49,8 @@ extern "C" {
 /*                                                                                                */
 /* SSF_RSA_ANY_ENABLED is the master gate: the module compiles to nothing when no key size is    */
 /* enabled (a pure-ECC build can leave ssfrsa.c in the project without dragging RSA in). The API */
-/* declarations, sizing constants, and ssfrsa.c implementation are all conditional on it.        */
+/* declarations, sizing constants, and ssfrsa.c implementation are all conditional on it; only   */
+/* the SSFRSAHash_t enum is not, as ssfx509 uses it to name the hash of any signature.           */
 /* --------------------------------------------------------------------------------------------- */
 #if (SSF_RSA_CONFIG_ENABLE_2048 == 1) || \
     (SSF_RSA_CONFIG_ENABLE_3072 == 1) || \
@@ -58,6 +59,16 @@ extern "C" {
 #else
 #define SSF_RSA_ANY_ENABLED (0u)
 #endif
+
+/* Hash algorithm selection for RSA padding (and ssfx509's hash id for every scheme) */
+typedef enum
+{
+    SSF_RSA_HASH_MIN = -1,
+    SSF_RSA_HASH_SHA256,   /* SHA-256 (32-byte hash, for RSA-2048+) */
+    SSF_RSA_HASH_SHA384,   /* SHA-384 (48-byte hash, for RSA-3072+) */
+    SSF_RSA_HASH_SHA512,   /* SHA-512 (64-byte hash, for RSA-4096) */
+    SSF_RSA_HASH_MAX,
+} SSFRSAHash_t;
 
 #if SSF_RSA_ANY_ENABLED == 1
 
@@ -100,16 +111,6 @@ extern "C" {
 
 /* Maximum DER-encoded private key size. */
 #define SSF_RSA_MAX_PRIV_KEY_DER_SIZE (5u * SSF_RSA_MAX_KEY_BYTES + 200u)
-
-/* Hash algorithm selection for RSA padding. */
-typedef enum
-{
-    SSF_RSA_HASH_MIN = -1,
-    SSF_RSA_HASH_SHA256,   /* SHA-256 (32-byte hash, for RSA-2048+) */
-    SSF_RSA_HASH_SHA384,   /* SHA-384 (48-byte hash, for RSA-3072+) */
-    SSF_RSA_HASH_SHA512,   /* SHA-512 (64-byte hash, for RSA-4096) */
-    SSF_RSA_HASH_MAX,
-} SSFRSAHash_t;
 
 /* --------------------------------------------------------------------------------------------- */
 /* External interface: key generation                                                            */

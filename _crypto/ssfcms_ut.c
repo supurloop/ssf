@@ -36,10 +36,23 @@
 #include "ssfsha2.h"
 #include "ssfecdsa.h"
 #include "ssfed25519.h"
+#include "ssfrsa.h"
 #include "ssftls.h"
 #include "ssfport.h"
 
 #if SSF_CONFIG_CMS_UNIT_TEST == 1
+
+/* RSA schemes ssfx509 verifies in this build (as in ssfx509.c) */
+#if (SSF_RSA_ANY_ENABLED == 1) && (SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1)
+#define _UT_RSA_PKCS1_VERIFY (1u)
+#else
+#define _UT_RSA_PKCS1_VERIFY (0u)
+#endif
+#if (SSF_RSA_ANY_ENABLED == 1) && (SSF_RSA_CONFIG_ENABLE_PSS == 1)
+#define _UT_RSA_PSS_VERIFY (1u)
+#else
+#define _UT_RSA_PSS_VERIFY (0u)
+#endif
 
 /* Fixtures generated with OpenSSL 3.2.4 by the gen.sh script recorded in ssfcms.md: a P-256     */
 /* root -> intermediate -> signer chain, an RSA-2048 self-signed signer, and a 24-byte content.   */
@@ -1115,6 +1128,7 @@ void SSFCMSUnitTest(void)
     SSF_ASSERT(SSFCMSParse(buf, SSF_CMS_CONFIG_MAX_DER_LEN + 1u, &sd) == false);
     SSF_ASSERT(SSFCMSParse(buf, n, &sd) == true);
 
+    /* An RSA scheme compiled out of ssfx509 fails closed, so these then expect false */
     /* ---- RSA PKCS#1 v1.5 with rsaEncryption as the signature algorithm (RFC 3370) ---- */
     n = sizeof(_utFixRsaPkcs1Detached);
     SSF_ASSERT(SSFCMSParse(_utFixRsaPkcs1Detached, n, &sd) == true);
@@ -1127,9 +1141,11 @@ void SSFCMSUnitTest(void)
     trust[0] = _utFixRsaDer;
     trustLen[0] = sizeof(_utFixRsaDer);
     SSF_ASSERT(SSFCMSVerifyDigest(&sd, sha256, sizeof(sha256), SSF_CMS_DIGEST_SHA256, trust,
-                                  trustLen, 1u, now, &res) == true);
+                                  trustLen, 1u, now, &res) == (_UT_RSA_PKCS1_VERIFY == 1u));
+#if _UT_RSA_PKCS1_VERIFY == 1
     SSF_ASSERT(res.signerSubject.cnLen == 14u);
     SSF_ASSERT(memcmp(res.signerSubject.cn, "SSF RSA Signer", 14u) == 0);
+#endif /* _UT_RSA_PKCS1_VERIFY == 1 */
     trust[0] = _utFixRootDer;
     trustLen[0] = sizeof(_utFixRootDer);
     SSF_ASSERT(SSFCMSVerifyDigest(&sd, sha256, sizeof(sha256), SSF_CMS_DIGEST_SHA256, trust,
@@ -1142,10 +1158,12 @@ void SSFCMSUnitTest(void)
     SSF_ASSERT(_utSpanEq(si->sigAlgOidRaw, si->sigAlgOidRawLen, _utOidRsaPss,
                          sizeof(_utOidRsaPss)) == true);
     SSF_ASSERT((si->sigAlgParams != NULL) && (si->sigAlgParams[0] == 0x30u));
+    /* The signer cert is self-signed with PKCS#1 v1.5, so this needs both RSA schemes */
     trust[0] = _utFixRsaDer;
     trustLen[0] = sizeof(_utFixRsaDer);
     SSF_ASSERT(SSFCMSVerifyDigest(&sd, sha256, sizeof(sha256), SSF_CMS_DIGEST_SHA256, trust,
-                                  trustLen, 1u, now, &res) == true);
+                                  trustLen, 1u, now, &res) ==
+               ((_UT_RSA_PKCS1_VERIFY == 1u) && (_UT_RSA_PSS_VERIFY == 1u)));
 
     /* ---- Version 3 signer identified by SubjectKeyIdentifier, content attached ---- */
     n = sizeof(_utFixEcdsaSkidAttached);
@@ -1194,9 +1212,11 @@ void SSFCMSUnitTest(void)
     trust[0] = _utFixRsaDer;
     trustLen[0] = sizeof(_utFixRsaDer);
     SSF_ASSERT(SSFCMSVerifyDigest(&sd, sha256, sizeof(sha256), SSF_CMS_DIGEST_SHA256, trust,
-                                  trustLen, 1u, now, &res) == true);
+                                  trustLen, 1u, now, &res) == (_UT_RSA_PKCS1_VERIFY == 1u));
+#if _UT_RSA_PKCS1_VERIFY == 1
     SSF_ASSERT(res.signerIndex == 1u);
     SSF_ASSERT(memcmp(res.signerSubject.cn, "SSF RSA Signer", 14u) == 0);
+#endif /* _UT_RSA_PKCS1_VERIFY == 1 */
     trust[0] = _utFixOtherDer;
     trustLen[0] = sizeof(_utFixOtherDer);
     SSF_ASSERT(SSFCMSVerifyDigest(&sd, sha256, sizeof(sha256), SSF_CMS_DIGEST_SHA256, trust,
@@ -1204,8 +1224,10 @@ void SSFCMSUnitTest(void)
     trust[1] = _utFixRsaDer;
     trustLen[1] = sizeof(_utFixRsaDer);
     SSF_ASSERT(SSFCMSVerifyDigest(&sd, sha256, sizeof(sha256), SSF_CMS_DIGEST_SHA256, trust,
-                                  trustLen, 2u, now, &res) == true);
+                                  trustLen, 2u, now, &res) == (_UT_RSA_PKCS1_VERIFY == 1u));
+#if _UT_RSA_PKCS1_VERIFY == 1
     SSF_ASSERT(res.signerIndex == 1u);
+#endif /* _UT_RSA_PKCS1_VERIFY == 1 */
 
     /* ---- RSA signer issued by the P-256 intermediate: an RSA leaf on an ECDSA chain ---- */
     n = sizeof(_utFixRsaChainDetached);
@@ -1218,13 +1240,15 @@ void SSFCMSUnitTest(void)
     trust[0] = _utFixRootDer;
     trustLen[0] = sizeof(_utFixRootDer);
     SSF_ASSERT(SSFCMSVerifyDigest(&sd, sha256, sizeof(sha256), SSF_CMS_DIGEST_SHA256, trust,
-                                  trustLen, 1u, now, &res) == true);
+                                  trustLen, 1u, now, &res) == (_UT_RSA_PKCS1_VERIFY == 1u));
+#if _UT_RSA_PKCS1_VERIFY == 1
     SSF_ASSERT(res.signerSubject.cnLen == 20u);
     SSF_ASSERT(memcmp(res.signerSubject.cn, "SSF RSA Chain Signer", 20u) == 0);
+#endif /* _UT_RSA_PKCS1_VERIFY == 1 */
     trust[0] = _utFixIntDer;
     trustLen[0] = sizeof(_utFixIntDer);
     SSF_ASSERT(SSFCMSVerifyDigest(&sd, sha256, sizeof(sha256), SSF_CMS_DIGEST_SHA256, trust,
-                                  trustLen, 1u, now, &res) == true);
+                                  trustLen, 1u, now, &res) == (_UT_RSA_PKCS1_VERIFY == 1u));
     trust[0] = _utFixRsaDer;
     trustLen[0] = sizeof(_utFixRsaDer);
     SSF_ASSERT(SSFCMSVerifyDigest(&sd, sha256, sizeof(sha256), SSF_CMS_DIGEST_SHA256, trust,

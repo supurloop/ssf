@@ -49,43 +49,59 @@
 #define SSFJsonIsEsc(e) (((e) == '"') || ((e) == '\\') || ((e) == '/') || ((e) == 'b') || \
                          ((e) == 'f') || ((e) == 'n') || ((e) == 'r') || ((e) == 't') || \
                          ((e) == 'u'))
-#define SSFJsonEsc(j, b) do { j[start] = '\\'; start++; if (start >= size) return false; \
-                              j[start] = b;} while (0)
+#define SSFJsonEsc(j, b) do { (j)[start] = '\\'; start++; if (start >= jsSize) return false; \
+                              (j)[start] = (b);} while (0)
 #define SSF_JSON_COMMA(c) do { \
-    if (((c) && (*c)) && (!_SSFJsonPrintUnescChar(js, size, start, &start, ','))) return false; \
-    if (c) *c = true; } while (0);
-#define SSF_JSON_ADD_ESC(e) out[index] = e; start++; len--; index++; \
+    if (((c) && (*(c))) && (!_SSFJsonPrintUnescChar(js, jsSize, start, &start, ','))) \
+    { return false; } \
+    if (c) *(c) = true; } while (0)
+#define SSF_JSON_ADD_ESC(e) out[index] = (e); start++; len--; index++; \
                             if (outLen != NULL) (*outLen)++; \
                             continue;
 
 /* --------------------------------------------------------------------------------------------- */
 /* Local prototypes                                                                              */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFJsonValue(SSFCStrIn_t js, size_t *index, size_t *start, size_t *end,
-                          SSFCStrIn_t *path, uint8_t depth, SSFJsonType_t *jt);
-static bool _SSFJsonObject(SSFCStrIn_t js, size_t *index, size_t *start, size_t *end,
-                           SSFCStrIn_t *path, uint8_t depth, SSFJsonType_t *jt);
+static bool _SSFJsonValue(SSFCStrIn_t jsStr, size_t *index, size_t *start, size_t *end,
+                          const SSFGPath_t *pathOpt, uint8_t depth, SSFJsonType_t *jt);
+static bool _SSFJsonObject(SSFCStrIn_t jsStr, size_t *index, size_t *start, size_t *end,
+                           const SSFGPath_t *pathOpt, uint8_t depth, SSFJsonType_t *jt);
 
 /* --------------------------------------------------------------------------------------------- */
 /* Increments index past whitespace in JSON string                                               */
 /* --------------------------------------------------------------------------------------------- */
-static void _SSFJsonWhitespace(SSFCStrIn_t js, size_t *index)
+static void _SSFJsonWhitespace(SSFCStrIn_t jsStr, size_t *index)
 {
-    SSF_REQUIRE(js != NULL);
+    SSF_REQUIRE(jsStr != NULL);
     SSF_REQUIRE(index != NULL);
 
-    while ((js[*index] == ' ') || (js[*index] == '\n') || (js[*index] == '\r') ||
-           (js[*index] == '\t')) (*index)++;
+    /* Is the next character JSON whitespace? */
+    while ((jsStr[*index] == ' ') || (jsStr[*index] == '\n') || (jsStr[*index] == '\r') ||
+           (jsStr[*index] == '\t'))
+    {
+        /* Yes, skip it */
+        (*index)++;
+    }
 }
 
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true and start/end index if 1 or more digits 0-9 found in JSON string, else false.    */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFJsonNumberIsDigits(SSFCStrIn_t js, size_t *index, size_t *end)
+static bool _SSFJsonNumberIsDigits(SSFCStrIn_t jsStr, size_t *index, size_t *end)
 {
     bool foundDig = false;
-    while ((js[*index] >= '0') && (js[*index] <= '9'))
-    {(*index)++; foundDig = true; }
+
+    SSF_REQUIRE(jsStr != NULL);
+    SSF_REQUIRE(index != NULL);
+    SSF_REQUIRE(end != NULL);
+
+    /* Is the next character a decimal digit? */
+    while ((jsStr[*index] >= '0') && (jsStr[*index] <= '9'))
+    {
+        /* Yes, consume it */
+        (*index)++;
+        foundDig = true;
+    }
     if (foundDig == true) *end = *index - 1;
     return foundDig;
 }
@@ -93,26 +109,38 @@ static bool _SSFJsonNumberIsDigits(SSFCStrIn_t js, size_t *index, size_t *end)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true and start/end index if number found in JSON string, else false.                  */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFJsonNumber(SSFCStrIn_t js, size_t *index, size_t *start, size_t *end)
+static bool _SSFJsonNumber(SSFCStrIn_t jsStr, size_t *index, size_t *start, size_t *end)
 {
-    SSF_REQUIRE(js != NULL);
+    SSF_REQUIRE(jsStr != NULL);
     SSF_REQUIRE(index != NULL);
     SSF_REQUIRE(start != NULL);
     SSF_REQUIRE(end != NULL);
 
-    if ((js[*index] != '-') && !((js[*index] >= '0') && (js[*index] <= '9'))) return false;
-    *start = *index;
-    if (js[*index] == '-') (*index)++;
-    if (js[*index] != '0')
-    {if (!_SSFJsonNumberIsDigits(js, index, end)) return false; } else
-    {(*index)++; }
-    if (js[*index] == '.')
-    {(*index)++; if (!_SSFJsonNumberIsDigits(js, index, end)) return false; }
-    if ((js[*index] == 'e') || (js[*index] == 'E'))
+    /* Is the first character neither a minus sign nor a digit? */
+    if ((jsStr[*index] != '-') && !((jsStr[*index] >= '0') && (jsStr[*index] <= '9')))
     {
+        /* Yes, not a number */
+        return false;
+    }
+    *start = *index;
+    if (jsStr[*index] == '-') (*index)++;
+    if (jsStr[*index] != '0')
+    {if (!_SSFJsonNumberIsDigits(jsStr, index, end)) return false; } else
+    {(*index)++; }
+    if (jsStr[*index] == '.')
+    {(*index)++; if (!_SSFJsonNumberIsDigits(jsStr, index, end)) return false; }
+    /* Is there an exponent? */
+    if ((jsStr[*index] == 'e') || (jsStr[*index] == 'E'))
+    {
+        /* Yes, consume it and its optional sign */
         (*index)++;
-        if ((js[*index] == '-') || (js[*index] == '+')) (*index)++;
-        return _SSFJsonNumberIsDigits(js, index, end);
+        /* Does the exponent have a sign? */
+        if ((jsStr[*index] == '-') || (jsStr[*index] == '+'))
+        {
+            /* Yes, skip it */
+            (*index)++;
+        }
+        return _SSFJsonNumberIsDigits(jsStr, index, end);
     }
     *end = *index - 1;
     return true;
@@ -121,34 +149,36 @@ static bool _SSFJsonNumber(SSFCStrIn_t js, size_t *index, size_t *start, size_t 
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true and start/end index if string found, else false.                                 */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFJsonString(SSFCStrIn_t js, size_t *index, size_t *start, size_t *end)
+static bool _SSFJsonString(SSFCStrIn_t jsStr, size_t *index, size_t *start, size_t *end)
 {
-    SSF_REQUIRE(js != NULL);
+    SSF_REQUIRE(jsStr != NULL);
     SSF_REQUIRE(index != NULL);
     SSF_REQUIRE(start != NULL);
     SSF_REQUIRE(end != NULL);
 
-    _SSFJsonWhitespace(js, index);
-    if (js[*index] != '"') return false;
+    _SSFJsonWhitespace(jsStr, index);
+    if (jsStr[*index] != '"') return false;
     *start = *index;
     (*index)++;
-    while ((js[*index] != 0) && (js[*index] != '"'))
+    /* Is there string content left before the closing quote? */
+    while ((jsStr[*index] != 0) && (jsStr[*index] != '"'))
     {
-        if (js[*index] == '\\')
+        /* Yes, consume one character or escape sequence */
+        if (jsStr[*index] == '\\')
         {
             (*index)++;
-            if (!SSFJsonIsEsc(js[*index])) return false;
-            if (js[*index] != 'u')
+            if (!SSFJsonIsEsc(jsStr[*index])) return false;
+            if (jsStr[*index] != 'u')
             {(*index)++; continue; }
             (*index)++;
-            if (!SSFIsHex(js[*index])) return false;
-            if (!SSFIsHex(js[(*index) + 1])) return false;
-            if (!SSFIsHex(js[(*index) + 2])) return false;
-            if (!SSFIsHex(js[(*index) + 3])) return false;
+            if (!SSFIsHex(jsStr[*index])) return false;
+            if (!SSFIsHex(jsStr[(*index) + 1])) return false;
+            if (!SSFIsHex(jsStr[(*index) + 2])) return false;
+            if (!SSFIsHex(jsStr[(*index) + 3])) return false;
             (*index) += 4;
         } else (*index)++;
     }
-    if (js[*index] != '"') return false;
+    if (jsStr[*index] != '"') return false;
     *end = (*index);
     (*index)++;
     return true;
@@ -157,8 +187,8 @@ static bool _SSFJsonString(SSFCStrIn_t js, size_t *index, size_t *start, size_t 
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if array found, else false; If true returns type/start/end on path index match.  */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFJsonArray(SSFCStrIn_t js, size_t *index, size_t *start, size_t *end,
-                          SSFCStrIn_t *path, uint8_t depth, SSFJsonType_t *jt)
+static bool _SSFJsonArray(SSFCStrIn_t jsStr, size_t *index, size_t *start, size_t *end,
+                          const SSFGPath_t *pathOpt, uint8_t depth, SSFJsonType_t *jt)
 {
     size_t valStart;
     size_t valEnd;
@@ -166,7 +196,7 @@ static bool _SSFJsonArray(SSFCStrIn_t js, size_t *index, size_t *start, size_t *
     size_t pindex = (size_t)-1;
     SSFJsonType_t djt;
 
-    SSF_REQUIRE(js != NULL);
+    SSF_REQUIRE(jsStr != NULL);
     SSF_REQUIRE(index != NULL);
     SSF_REQUIRE(start != NULL);
     SSF_REQUIRE(end != NULL);
@@ -175,33 +205,72 @@ static bool _SSFJsonArray(SSFCStrIn_t js, size_t *index, size_t *start, size_t *
     if (depth == 0)
     {
         uint32_t i;
-        for (i = 0; (i <= SSF_JSON_CONFIG_MAX_IN_LEN) && (js[i] != 0); i++);
+        for (i = 0; (i <= SSF_JSON_CONFIG_MAX_IN_LEN) && (jsStr[i] != 0); i++);
         if (i > SSF_JSON_CONFIG_MAX_IN_LEN) return false;
         *jt = SSF_JSON_TYPE_ERROR;
         *index = 0;
     }
 
     if (depth >= SSF_JSON_CONFIG_MAX_IN_DEPTH) return false;
-    _SSFJsonWhitespace(js, index);
-    if (js[*index] != '[') return false;
-    if ((path != NULL) && (path[depth] == NULL)) *start = *index;
+    _SSFJsonWhitespace(jsStr, index);
+    if (jsStr[*index] != '[') return false;
+    /* Does the path end at this array? */
+    if ((pathOpt != NULL) && (pathOpt[depth].kind == SSF_GPATH_END))
+    {
+        /* Yes, it starts here */
+        *start = *index;
+    }
     (*index)++;
 
-    if ((path != NULL) && (path[depth] != NULL)) memcpy(&pindex, path[depth], sizeof(size_t));
-    while (_SSFJsonValue(js, index, &valStart, &valEnd, path, depth, &djt) == true)
+    /* Is the next path entry an array element index? */
+    if ((pathOpt != NULL) && (pathOpt[depth].kind == SSF_GPATH_INDEX))
     {
+        /* Yes, select that element; any other kind of entry selects none */
+        pindex = *(pathOpt[depth].u.index);
+    }
+    do
+    {
+        bool found;
+
+        /* Is this the element at the path index? */
         if (pindex == curIndex)
-        {*start = valStart; *end = valEnd; *jt = djt; }
-        _SSFJsonWhitespace(js, index);
-        if (js[*index] == ']') break;
-        if (js[*index] != ',') return false;
+        {
+            /* Yes, it follows the path and reports straight into the caller's results */
+            found = _SSFJsonValue(jsStr, index, start, end, pathOpt, depth, jt);
+        }
+        else
+        {
+            /* No, parse it only to skip it */
+            found = _SSFJsonValue(jsStr, index, &valStart, &valEnd, NULL, depth, &djt);
+        }
+        /* Is there no element here? */
+        if (!found)
+        {
+            /* Yes, valid only for an empty array; a comma must be followed by an element */
+            if (curIndex != 0) return false;
+            break;
+        }
+        _SSFJsonWhitespace(jsStr, index);
+        if (jsStr[*index] == ']') break;
+        if (jsStr[*index] != ',') return false;
         (*index)++;
         curIndex++;
+    } while (true);
+    /* Is the path index past the last element? */
+    if ((pindex != (size_t)-1) && (pindex > curIndex))
+    {
+        /* Yes, the path matches nothing */
+        *jt = SSF_JSON_TYPE_ERROR;
     }
-    if ((pindex != (size_t)-1) && (pindex > curIndex)) *jt = SSF_JSON_TYPE_ERROR;
-    if (js[*index] != ']') return false;
+    if (jsStr[*index] != ']') return false;
 
-    if ((path != NULL) && (path[depth] == NULL)) {*end = *index; *jt = SSF_JSON_TYPE_ARRAY; }
+    /* Does the path end at this array? */
+    if ((pathOpt != NULL) && (pathOpt[depth].kind == SSF_GPATH_END))
+    {
+        /* Yes, report its span and type */
+        *end = *index;
+        *jt = SSF_JSON_TYPE_ARRAY;
+    }
     (*index)++;
     return true;
 }
@@ -209,130 +278,182 @@ static bool _SSFJsonArray(SSFCStrIn_t js, size_t *index, size_t *start, size_t *
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if value found, else false; If true returns type/start/end on path match.        */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFJsonValue(SSFCStrIn_t js, size_t *index, size_t *start, size_t *end,
-                          SSFCStrIn_t *path, uint8_t depth, SSFJsonType_t *jt)
+static bool _SSFJsonValue(SSFCStrIn_t jsStr, size_t *index, size_t *start, size_t *end,
+                          const SSFGPath_t *pathOpt, uint8_t depth, SSFJsonType_t *jt)
 {
     size_t i;
+    size_t valStart;
+    size_t valEnd;
+    SSFJsonType_t valType;
 
-    SSF_REQUIRE(js != NULL);
+    SSF_REQUIRE(jsStr != NULL);
     SSF_REQUIRE(index != NULL);
     SSF_REQUIRE(start != NULL);
     SSF_REQUIRE(end != NULL);
     SSF_REQUIRE(jt != NULL);
 
-    _SSFJsonWhitespace(js, index); i = *index;
-    if (_SSFJsonString(js, &i, start, end)) {*jt = SSF_JSON_TYPE_STRING; *index = i; return true; }
-    i = *index;
-    if (_SSFJsonObject(js, &i, start, end, path, depth + 1, jt)) {*index = i; return true; }
-    i = *index;
-    if (_SSFJsonArray(js, &i, start, end, path, depth + 1, jt)) {*index = i; return true; }
-    i = *index;
-    if (_SSFJsonNumber(js, &i, start, end)) {*jt = SSF_JSON_TYPE_NUMBER; *index = i; return true; }
-    i = *index;
-    if (strncmp(&js[i], "true", 4) == 0)
-    {*jt = SSF_JSON_TYPE_TRUE; *start = i; i += 4; *end = i - 1; *index = i; return true; }
-    i = *index;
-    if (strncmp(&js[i], "false", 5) == 0)
-    {*jt = SSF_JSON_TYPE_FALSE; *start = i; i += 5; *end = i - 1; *index = i; return true; }
-    i = *index;
-    if (strncmp(&js[i], "null", 4) == 0)
-    {*jt = SSF_JSON_TYPE_NULL; *start = i; i += 4; *end = i - 1; *index = i; return true; }
-    return false;
+    _SSFJsonWhitespace(jsStr, index); i = *index;
+    if (_SSFJsonString(jsStr, &i, &valStart, &valEnd)) valType = SSF_JSON_TYPE_STRING;
+    else
+    {
+        i = *index;
+        if (_SSFJsonObject(jsStr, &i, start, end, pathOpt, depth + 1, jt))
+        { *index = i; return true; }
+        i = *index;
+        if (_SSFJsonArray(jsStr, &i, start, end, pathOpt, depth + 1, jt))
+        { *index = i; return true; }
+        i = *index;
+        if (_SSFJsonNumber(jsStr, &i, &valStart, &valEnd)) valType = SSF_JSON_TYPE_NUMBER;
+        else if (strncmp(&jsStr[i], "true", 4) == 0)
+        {valType = SSF_JSON_TYPE_TRUE; valStart = i; i += 4; valEnd = i - 1; }
+        else if (strncmp(&jsStr[i], "false", 5) == 0)
+        {valType = SSF_JSON_TYPE_FALSE; valStart = i; i += 5; valEnd = i - 1; }
+        else if (strncmp(&jsStr[i], "null", 4) == 0)
+        {valType = SSF_JSON_TYPE_NULL; valStart = i; i += 4; valEnd = i - 1; }
+        else return false;
+    }
+
+    /* Is this scalar where the path ends (or is it only being skipped)? */
+    if ((pathOpt == NULL) || (pathOpt[depth + 1].kind == SSF_GPATH_END))
+    {
+        /* Yes, report it */
+        *start = valStart;
+        *end = valEnd;
+        *jt = valType;
+    }
+    /* No, a path continuing past a scalar matches nothing */
+    *index = i;
+    return true;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if name/value found, else false; If true returns type/start/end on path match.   */
+/* Returns true if name/value found, else false; sets *keyMatched if name is the next path key.  */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFJsonNameValue(SSFCStrIn_t js, size_t *index, size_t *start, size_t *end,
-                              SSFCStrIn_t *path, uint8_t depth, SSFJsonType_t *jt)
+static bool _SSFJsonNameValue(SSFCStrIn_t jsStr, size_t *index, size_t *start, size_t *end,
+                              const SSFGPath_t *pathOpt, uint8_t depth, SSFJsonType_t *jt,
+                              bool *keyMatched)
 {
     size_t valStart;
     size_t valEnd;
     SSFJsonType_t djt;
 
-    SSF_REQUIRE(js != NULL);
+    SSF_REQUIRE(jsStr != NULL);
     SSF_REQUIRE(index != NULL);
     SSF_REQUIRE(start != NULL);
     SSF_REQUIRE(end != NULL);
     SSF_REQUIRE(jt != NULL);
+    SSF_REQUIRE(keyMatched != NULL);
 
-    if (_SSFJsonString(js, index, &valStart, &valEnd) == false) return false;
-    _SSFJsonWhitespace(js, index);
-    if (js[*index] != ':') return false;
+    *keyMatched = false;
+    if (_SSFJsonString(jsStr, index, &valStart, &valEnd) == false) return false;
+    _SSFJsonWhitespace(jsStr, index);
+    if (jsStr[*index] != ':') return false;
     (*index)++;
-    if ((path != NULL) && (path[depth] != NULL) &&
-        ((valEnd - valStart - 1) == (size_t)strlen(path[depth])) &&
-        (strncmp(path[depth], &js[valStart + 1], (valEnd - valStart - 1)) == 0))
-    {return _SSFJsonValue(js, index, start, end, path, depth, jt); }
-    else return _SSFJsonValue(js, index, &valStart, &valEnd, NULL, 0, &djt);
+    /* Is the next path entry an object member name equal to this name? */
+    if ((pathOpt != NULL) && (pathOpt[depth].kind == SSF_GPATH_KEY) &&
+        (((valEnd - valStart) - 1) == (size_t)strlen(pathOpt[depth].u.key)) &&
+        (strncmp(pathOpt[depth].u.key, &jsStr[valStart + 1], ((valEnd - valStart) - 1)) == 0))
+    {
+        /* Yes, the value follows the path and reports into the caller's results */
+        *keyMatched = true;
+        return _SSFJsonValue(jsStr, index, start, end, pathOpt, depth, jt);
+    }
+    /* No, parse the value only to skip it; its nesting counts toward the depth limit */
+    return _SSFJsonValue(jsStr, index, &valStart, &valEnd, NULL, depth, &djt);
 }
 
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if object found, else false; If true returns type/start/end on path match.       */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFJsonObject(SSFCStrIn_t js, size_t *index, size_t *start, size_t *end,
-                           SSFCStrIn_t *path, uint8_t depth, SSFJsonType_t *jt)
+static bool _SSFJsonObject(SSFCStrIn_t jsStr, size_t *index, size_t *start, size_t *end,
+                           const SSFGPath_t *pathOpt, uint8_t depth, SSFJsonType_t *jt)
 {
-    SSF_REQUIRE(js != NULL);
+    const SSFGPath_t *memberPath = pathOpt;
+    bool keyMatched;
+
+    SSF_REQUIRE(jsStr != NULL);
     SSF_REQUIRE(index != NULL);
     SSF_REQUIRE(start != NULL);
     SSF_REQUIRE(end != NULL);
     SSF_REQUIRE(jt != NULL);
-    SSF_REQUIRE((path == NULL) || (path[SSF_JSON_CONFIG_MAX_IN_DEPTH] == NULL));
+    SSF_REQUIRE((pathOpt == NULL) || (pathOpt[SSF_JSON_CONFIG_MAX_IN_DEPTH].kind == SSF_GPATH_END));
 
     if (depth == 0)
     {
         uint32_t i;
-        for (i = 0; (i <= SSF_JSON_CONFIG_MAX_IN_LEN) && (js[i] != 0); i++);
+        for (i = 0; (i <= SSF_JSON_CONFIG_MAX_IN_LEN) && (jsStr[i] != 0); i++);
         if (i > SSF_JSON_CONFIG_MAX_IN_LEN) return false;
         *jt = SSF_JSON_TYPE_ERROR;
         *index = 0;
     }
     if (depth >= SSF_JSON_CONFIG_MAX_IN_DEPTH) return false;
 
-    _SSFJsonWhitespace(js, index);
-    if (js[*index] != '{') return false;
-    if ((depth != 0) || ((depth == 0) && (path != NULL) && (path[0] == NULL))) *start = *index;
-    (*index)++;
-    _SSFJsonWhitespace(js, index);
-    if (js[*index] != '}')
+    _SSFJsonWhitespace(jsStr, index);
+    if (jsStr[*index] != '{') return false;
+    /* Is this a nested object or the top-level object the path ends at? */
+    if ((depth != 0) || ((depth == 0) && (pathOpt != NULL) && (pathOpt[0].kind == SSF_GPATH_END)))
     {
-        if (!_SSFJsonNameValue(js, index, start, end, path, depth, jt)) return false;
+        /* Yes, it starts here */
+        *start = *index;
+    }
+    (*index)++;
+    _SSFJsonWhitespace(jsStr, index);
+    if (jsStr[*index] != '}')
+    {
+        /* Only the first member whose name matches follows the path; later duplicates skip */
+        if (!_SSFJsonNameValue(jsStr, index, start, end, memberPath, depth, jt, &keyMatched))
+        { return false; }
+        if (keyMatched) memberPath = NULL;
         do
         {
-            _SSFJsonWhitespace(js, index);
-            if (js[*index] == '}') break;
-            if (js[*index] != ',') return false;
+            _SSFJsonWhitespace(jsStr, index);
+            if (jsStr[*index] == '}') break;
+            if (jsStr[*index] != ',') return false;
             (*index)++;
-            if (!_SSFJsonNameValue(js, index, start, end, path, depth, jt)) return false;
+            if (!_SSFJsonNameValue(jsStr, index, start, end, memberPath, depth, jt, &keyMatched))
+            { return false; }
+            if (keyMatched) memberPath = NULL;
         } while (true);
-        if (js[*index] != '}') return false;
+        if (jsStr[*index] != '}') return false;
     }
-    if (((path != NULL) && (path[depth] == NULL)) ||
-        ((depth == 0) && (path != NULL) && (path[0] == NULL)))
-    {*end = *index; *jt = SSF_JSON_TYPE_OBJECT; }
+    /* Does the path end at this object? */
+    if (((pathOpt != NULL) && (pathOpt[depth].kind == SSF_GPATH_END)) ||
+        ((depth == 0) && (pathOpt != NULL) && (pathOpt[0].kind == SSF_GPATH_END)))
+    {
+        /* Yes, report its span and type */
+        *end = *index;
+        *jt = SSF_JSON_TYPE_OBJECT;
+    }
     (*index)++;
     if (depth == 0)
-    {_SSFJsonWhitespace(js, index); if (js[*index] != 0) return false; }
+    {_SSFJsonWhitespace(jsStr, index); if (jsStr[*index] != 0) return false; }
     return true;
 }
 
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if object|array found, else false; If true returns type/start/end on path match. */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFJsonMessage(SSFCStrIn_t js, size_t *index, size_t *start, size_t *end, SSFCStrIn_t *path,
-                    uint8_t depth, SSFJsonType_t *jt)
+bool SSFJsonMessage(SSFCStrIn_t jsStr, size_t *index, size_t *start, size_t *end,
+                    const SSFGPath_t *pathOpt, uint8_t depth, SSFJsonType_t *jt)
 {
-    SSF_REQUIRE(js != NULL);
+    SSF_REQUIRE(jsStr != NULL);
     SSF_REQUIRE(index != NULL);
     SSF_REQUIRE(start != NULL);
     SSF_REQUIRE(end != NULL);
     SSF_REQUIRE(jt != NULL);
-    SSF_REQUIRE((path == NULL) || (path[SSF_JSON_CONFIG_MAX_IN_DEPTH] == NULL));
+    SSF_REQUIRE((pathOpt == NULL) || (pathOpt[SSF_JSON_CONFIG_MAX_IN_DEPTH].kind == SSF_GPATH_END));
+    SSF_REQUIRE((pathOpt == NULL) || SSFGPathIsValid(pathOpt, SSF_JSON_CONFIG_MAX_IN_DEPTH));
 
-    if (!_SSFJsonObject(js, index, start, end, path, depth, jt))
+    if (!_SSFJsonObject(jsStr, index, start, end, pathOpt, depth, jt))
     {
-        if (!_SSFJsonArray(js, index, start, end, path, depth, jt)) return false;
+        if (!_SSFJsonArray(jsStr, index, start, end, pathOpt, depth, jt)) return false;
+    }
+
+    /* Is this a top-level parse (which sets *jt) whose found value's span is inverted? */
+    if ((depth == 0u) && (*jt != SSF_JSON_TYPE_ERROR) && (*end < *start))
+    {
+        /* Yes, report it as not found rather than hand back an unusable span */
+        *jt = SSF_JSON_TYPE_ERROR;
     }
     return true;
 }
@@ -340,43 +461,44 @@ bool SSFJsonMessage(SSFCStrIn_t js, size_t *index, size_t *start, size_t *end, S
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if JSON string is valid, else false.                                             */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFJsonIsValid(SSFCStrIn_t js)
+bool SSFJsonIsValid(SSFCStrIn_t jsStr)
 {
     size_t start;
     size_t end;
     size_t index;
     SSFJsonType_t jt;
-    char *path[SSF_JSON_CONFIG_MAX_IN_DEPTH + 1];
+    SSFGPath_t path[SSF_JSON_CONFIG_MAX_IN_DEPTH + 1];
 
-    SSF_REQUIRE(js != NULL);
+    SSF_REQUIRE(jsStr != NULL);
 
     memset(path, 0, sizeof(path));
-    if (!SSFJsonMessage(js, &index, &start, &end, (SSFCStrIn_t *)path, 0, &jt)) return false;
+    if (!SSFJsonMessage(jsStr, &index, &start, &end, path, 0, &jt)) return false;
     return jt != SSF_JSON_TYPE_ERROR;
 }
 
 /* --------------------------------------------------------------------------------------------- */
 /* Returns SSF_JSON_TYPE_ERROR if JSON string is invalid or path not found, else valid type.     */
 /* --------------------------------------------------------------------------------------------- */
-SSFJsonType_t SSFJsonGetType(SSFCStrIn_t js, SSFCStrIn_t *path)
+SSFJsonType_t SSFJsonGetType(SSFCStrIn_t jsStr, const SSFGPath_t *path)
 {
     size_t start;
     size_t end;
     size_t index;
     SSFJsonType_t jt;
 
-    SSF_REQUIRE(js != NULL);
+    SSF_REQUIRE(jsStr != NULL);
     SSF_REQUIRE(path != NULL);
-    SSF_REQUIRE(path[SSF_JSON_CONFIG_MAX_IN_DEPTH] == NULL);
+    SSF_REQUIRE(path[SSF_JSON_CONFIG_MAX_IN_DEPTH].kind == SSF_GPATH_END);
 
-    if (!SSFJsonMessage(js, &index, &start, &end, path, 0, &jt)) jt = SSF_JSON_TYPE_ERROR;
+    if (!SSFJsonMessage(jsStr, &index, &start, &end, path, 0, &jt)) jt = SSF_JSON_TYPE_ERROR;
     return jt;
 }
 
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if found and is unescaped completely into buffer w/NULL term., else false.       */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFJsonGetString(SSFCStrIn_t js, SSFCStrIn_t *path, char *out, size_t outSize, size_t *outLen)
+bool SSFJsonGetString(SSFCStrIn_t jsStr, const SSFGPath_t *path, char *out, size_t outSize,
+                      size_t *outLen)
 {
     size_t start;
     size_t end;
@@ -384,46 +506,51 @@ bool SSFJsonGetString(SSFCStrIn_t js, SSFCStrIn_t *path, char *out, size_t outSi
     size_t len;
     SSFJsonType_t jt;
 
-    SSF_REQUIRE(js != NULL);
+    SSF_REQUIRE(jsStr != NULL);
     SSF_REQUIRE(path != NULL);
-    SSF_REQUIRE(path[SSF_JSON_CONFIG_MAX_IN_DEPTH] == NULL);
+    SSF_REQUIRE(path[SSF_JSON_CONFIG_MAX_IN_DEPTH].kind == SSF_GPATH_END);
     SSF_REQUIRE(out != NULL);
     SSF_REQUIRE(outSize > 0);
 
-    if (!SSFJsonMessage(js, &index, &start, &end, path, 0, &jt)) return false;
+    if (!SSFJsonMessage(jsStr, &index, &start, &end, path, 0, &jt)) return false;
     if (jt != SSF_JSON_TYPE_STRING) return false;
     start++; end--;
 
     index = 0;
-    len = end - start + 1;
+    len = (end - start) + 1;
     if (outLen != NULL) *outLen = 0;
 
+    /* Is there input left and room for another character and the terminator? */
     while ((len != 0) && (index < (outSize - 1)))
     {
-        if (js[start] == '\\')
+        /* Yes, unescape the next character */
+        if (jsStr[start] == '\\')
         {
             start++; len--;
             if (len == 0) return false;
-            /* Potential escape sequence */
-            if (js[start] == '"' || js[start] == '\\' || js[start] == '/')
-            { SSF_JSON_ADD_ESC(js[start]) }
-            else if (js[start] == 'n') { SSF_JSON_ADD_ESC('\x0a') }
-            else if (js[start] == 'r') { SSF_JSON_ADD_ESC('\x0d') }
-            else if (js[start] == 't') { SSF_JSON_ADD_ESC('\x09') }
-            else if (js[start] == 'f') { SSF_JSON_ADD_ESC('\x0c') }
-            else if (js[start] == 'b') { SSF_JSON_ADD_ESC('\x08') }
-            else if (js[start] != 'u') return false;
+            /* Is it an escaped quote, backslash or solidus? */
+            if ((jsStr[start] == '"') || (jsStr[start] == '\\') || (jsStr[start] == '/'))
+            {
+                /* Yes, copy it as is */
+                SSF_JSON_ADD_ESC(jsStr[start])
+            }
+            else if (jsStr[start] == 'n') { SSF_JSON_ADD_ESC('\x0a') }
+            else if (jsStr[start] == 'r') { SSF_JSON_ADD_ESC('\x0d') }
+            else if (jsStr[start] == 't') { SSF_JSON_ADD_ESC('\x09') }
+            else if (jsStr[start] == 'f') { SSF_JSON_ADD_ESC('\x0c') }
+            else if (jsStr[start] == 'b') { SSF_JSON_ADD_ESC('\x08') }
+            else if (jsStr[start] != 'u') return false;
 
             if (outLen != NULL) (*outLen)++;
             start++; len--;
             if (len < 4) return false;
             if ((index + 2) >= outSize) return false;
-            if (!SSFHexByteToBin(&js[start], (uint8_t *)&out[index])) return false;
+            if (!SSFHexByteToBin(&jsStr[start], (uint8_t *)&out[index])) return false;
             index++;
-            if (!SSFHexByteToBin(&js[start + 2], (uint8_t *)&out[index])) return false;
+            if (!SSFHexByteToBin(&jsStr[start + 2], (uint8_t *)&out[index])) return false;
             start += 3; len -= 3;
         }
-        else { out[index] = js[start]; }
+        else { out[index] = jsStr[start]; }
         if (outLen != NULL) (*outLen)++;
         start++; index++; len--;
     }
@@ -435,7 +562,7 @@ bool SSFJsonGetString(SSFCStrIn_t js, SSFCStrIn_t *path, char *out, size_t outSi
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if found and is converted to double, else false.                                 */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFJsonGetDouble(SSFCStrIn_t js, SSFCStrIn_t *path, double *out)
+bool SSFJsonGetDouble(SSFCStrIn_t jsStr, const SSFGPath_t *path, double *out)
 {
     size_t index;
     size_t start;
@@ -443,26 +570,26 @@ bool SSFJsonGetDouble(SSFCStrIn_t js, SSFCStrIn_t *path, double *out)
     SSFJsonType_t jt;
     char *endptr;
 
-    SSF_REQUIRE(js != NULL);
+    SSF_REQUIRE(jsStr != NULL);
     SSF_REQUIRE(path != NULL);
-    SSF_REQUIRE(path[SSF_JSON_CONFIG_MAX_IN_DEPTH] == NULL);
+    SSF_REQUIRE(path[SSF_JSON_CONFIG_MAX_IN_DEPTH].kind == SSF_GPATH_END);
     SSF_REQUIRE(out != NULL);
 
-    if (!SSFJsonMessage(js, &index, &start, &end, path, 0, &jt)) return false;
+    if (!SSFJsonMessage(jsStr, &index, &start, &end, path, 0, &jt)) return false;
     if (jt != SSF_JSON_TYPE_NUMBER) return false;
-    *out = strtod(&js[start], &endptr);
-    if ((endptr - 1) != &js[end]) return false;
+    *out = strtod(&jsStr[start], &endptr);
+    if ((endptr - 1) != &jsStr[end]) return false;
     return true;
 }
 
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if found and is converted to signed int, else false.                             */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFJsonGetInt(SSFCStrIn_t js, SSFCStrIn_t *path, int64_t *out)
+bool SSFJsonGetInt(SSFCStrIn_t jsStr, const SSFGPath_t *path, int64_t *out)
 {
     double dout;
 
-    if (!SSFJsonGetDouble(js, path, &dout)) return false;
+    if (!SSFJsonGetDouble(jsStr, path, &dout)) return false;
     *out = (int64_t)round(dout);
     return true;
 }
@@ -470,11 +597,11 @@ bool SSFJsonGetInt(SSFCStrIn_t js, SSFCStrIn_t *path, int64_t *out)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if found and is converted to unsigned int, else false.                           */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFJsonGetUInt(SSFCStrIn_t js, SSFCStrIn_t *path, uint64_t *out)
+bool SSFJsonGetUInt(SSFCStrIn_t jsStr, const SSFGPath_t *path, uint64_t *out)
 {
     double dout;
 
-    if (!SSFJsonGetDouble(js, path, &dout)) return false;
+    if (!SSFJsonGetDouble(jsStr, path, &dout)) return false;
     if (dout < 0) return false;
     *out = (uint64_t)round(dout);
     return true;
@@ -483,68 +610,70 @@ bool SSFJsonGetUInt(SSFCStrIn_t js, SSFCStrIn_t *path, uint64_t *out)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if found and is converted to signed int, else false.                             */
 /* --------------------------------------------------------------------------------------------- */
-bool _SSFJsonGetXLong(SSFCStrIn_t js, SSFCStrIn_t *path, int64_t *outs, uint64_t *outu)
+bool _SSFJsonGetXLong(SSFCStrIn_t jsStr, const SSFGPath_t *path, int64_t *outsOpt,
+                      uint64_t *outuOpt)
 {
     size_t index;
     size_t start;
     size_t end;
     SSFJsonType_t jt;
 
-    SSF_REQUIRE(js != NULL);
+    SSF_REQUIRE(jsStr != NULL);
     SSF_REQUIRE(path != NULL);
-    SSF_REQUIRE(path[SSF_JSON_CONFIG_MAX_IN_DEPTH] == NULL);
-    SSF_REQUIRE(((outs != NULL) && (outu == NULL)) || ((outs == NULL) && (outu != NULL)));
+    SSF_REQUIRE(path[SSF_JSON_CONFIG_MAX_IN_DEPTH].kind == SSF_GPATH_END);
+    SSF_REQUIRE(((outsOpt != NULL) && (outuOpt == NULL)) ||
+                ((outsOpt == NULL) && (outuOpt != NULL)));
 
-    if (!SSFJsonMessage(js, &index, &start, &end, path, 0, &jt)) return false;
+    if (!SSFJsonMessage(jsStr, &index, &start, &end, path, 0, &jt)) return false;
     if (jt != SSF_JSON_TYPE_NUMBER) return false;
-    if (outu != NULL) return SSFDecStrToUInt(&js[start], outu);
-    else return SSFDecStrToInt(&js[start], outs);
+    if (outuOpt != NULL) return SSFDecStrToUInt(&jsStr[start], outuOpt);
+    else return SSFDecStrToInt(&jsStr[start], outsOpt);
 }
 
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if found and is converted to signed int, else false.                             */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFJsonGetInt(SSFCStrIn_t js, SSFCStrIn_t *path, int64_t *out)
+bool SSFJsonGetInt(SSFCStrIn_t jsStr, const SSFGPath_t *path, int64_t *out)
 {
-    return _SSFJsonGetXLong(js, path, out, NULL);
+    return _SSFJsonGetXLong(jsStr, path, out, NULL);
 }
 
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if found and is converted to unsigned int, else false.                           */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFJsonGetUInt(SSFCStrIn_t js, SSFCStrIn_t *path, uint64_t *out)
+bool SSFJsonGetUInt(SSFCStrIn_t jsStr, const SSFGPath_t *path, uint64_t *out)
 {
-    return _SSFJsonGetXLong(js, path, NULL, out);
+    return _SSFJsonGetXLong(jsStr, path, NULL, out);
 }
 #endif /* SSF_JSON_CONFIG_ENABLE_FLOAT_PARSE */
 
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if found and completely converted to binary data, else false.                    */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFJsonGetHex(SSFCStrIn_t js, SSFCStrIn_t *path, uint8_t *out, size_t outSize, size_t *outLen,
-                   bool rev)
+bool SSFJsonGetHex(SSFCStrIn_t jsStr, const SSFGPath_t *path, uint8_t *out, size_t outSize,
+                   size_t *outLen, bool rev)
 {
     size_t start;
     size_t end;
     size_t index;
     SSFJsonType_t jt;
 
-    SSF_REQUIRE(js != NULL);
+    SSF_REQUIRE(jsStr != NULL);
     SSF_REQUIRE(path != NULL);
-    SSF_REQUIRE(path[SSF_JSON_CONFIG_MAX_IN_DEPTH] == NULL);
+    SSF_REQUIRE(path[SSF_JSON_CONFIG_MAX_IN_DEPTH].kind == SSF_GPATH_END);
     SSF_REQUIRE(out != NULL);
     SSF_REQUIRE(outLen != NULL);
 
-    if (!SSFJsonMessage(js, &index, &start, &end, path, 0, &jt)) return false;
+    if (!SSFJsonMessage(jsStr, &index, &start, &end, path, 0, &jt)) return false;
     if (jt != SSF_JSON_TYPE_STRING) return false;
     start++; end--;
-    return SSFHexBytesToBin(&js[start], (end - start + 1), out, outSize, outLen, rev);
+    return SSFHexBytesToBin(&jsStr[start], ((end - start) + 1), out, outSize, outLen, rev);
 }
 
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if found, entire decode successful, and outLen updated, else false.              */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFJsonGetBase64(SSFCStrIn_t js, SSFCStrIn_t *path, uint8_t *out, size_t outSize,
+bool SSFJsonGetBase64(SSFCStrIn_t jsStr, const SSFGPath_t *path, uint8_t *out, size_t outSize,
                       size_t *outLen)
 {
     size_t start;
@@ -552,104 +681,110 @@ bool SSFJsonGetBase64(SSFCStrIn_t js, SSFCStrIn_t *path, uint8_t *out, size_t ou
     size_t index;
     SSFJsonType_t jt;
 
-    SSF_REQUIRE(js != NULL);
+    SSF_REQUIRE(jsStr != NULL);
     SSF_REQUIRE(path != NULL);
-    SSF_REQUIRE(path[SSF_JSON_CONFIG_MAX_IN_DEPTH] == NULL);
+    SSF_REQUIRE(path[SSF_JSON_CONFIG_MAX_IN_DEPTH].kind == SSF_GPATH_END);
     SSF_REQUIRE(out != NULL);
     SSF_REQUIRE(outLen != NULL);
 
-    if (!SSFJsonMessage(js, &index, &start, &end, path, 0, &jt)) return false;
+    if (!SSFJsonMessage(jsStr, &index, &start, &end, path, 0, &jt)) return false;
     if (jt != SSF_JSON_TYPE_STRING) return false;
     start++; end--;
 
-    return SSFBase64Decode(&js[start], (end - start + 1), out, outSize, outLen);
+    return SSFBase64Decode(&jsStr[start], ((end - start) + 1), out, outSize, outLen);
 }
 
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if char added to js, else false.                                                 */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFJsonPrintUnescChar(SSFCStrOut_t js, size_t size, size_t start, size_t *end, const char in)
+static bool _SSFJsonPrintUnescChar(SSFCStrOut_t js, size_t jsSize, size_t start, size_t *end,
+                                   const char in)
 {
     SSF_REQUIRE(js != NULL);
     SSF_REQUIRE(end != NULL);
 
-    if (start >= size) return false;
+    if (start >= jsSize) return false;
     js[start] = in;
     *end = start + 1;
     return true;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if in string added successfully as escaped string, else false.                   */
+/* Returns true if inStr added successfully as escaped string, else false.                       */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFJsonPrintCString(SSFCStrOut_t js, size_t size, size_t start, size_t *end, SSFCStrIn_t in,
-                         bool *comma)
+bool SSFJsonPrintCString(SSFCStrOut_t js, size_t jsSize, size_t start, size_t *end,
+                         SSFCStrIn_t inStr, bool *commaOpt)
 {
     SSF_REQUIRE(js != NULL);
     SSF_REQUIRE(end != NULL);
-    SSF_REQUIRE(in != NULL);
+    SSF_REQUIRE(inStr != NULL);
 
-    SSF_JSON_COMMA(comma);
-    while (start < size)
+    SSF_JSON_COMMA(commaOpt);
+    while (start < jsSize)
     {
-        if (*in == '\\') SSFJsonEsc(js, '\\');
-        else if (*in == '\"') SSFJsonEsc(js, '\"');
-        else if (*in == '\r') SSFJsonEsc(js, 'r');
-        else if (*in == '\n') SSFJsonEsc(js, 'n');
-        else if (*in == '\t') SSFJsonEsc(js, 't');
-        else if (*in == '\b') SSFJsonEsc(js, 'b');
-        else if (*in == '\f') SSFJsonEsc(js, 'f');
-        else if (((*in > 0x1f) && (*in < 0x7f)) || (*in == 0))
-        {js[start] = *in; } /* Normal ASCII character */
+        if (*inStr == '\\') SSFJsonEsc(js, '\\');
+        else if (*inStr == '\"') SSFJsonEsc(js, '\"');
+        else if (*inStr == '\r') SSFJsonEsc(js, 'r');
+        else if (*inStr == '\n') SSFJsonEsc(js, 'n');
+        else if (*inStr == '\t') SSFJsonEsc(js, 't');
+        else if (*inStr == '\b') SSFJsonEsc(js, 'b');
+        else if (*inStr == '\f') SSFJsonEsc(js, 'f');
+        /* Is it a printable ASCII character or the terminator? */
+        else if (((*inStr > 0x1f) && (*inStr < 0x7f)) || (*inStr == 0))
+        {
+            /* Yes, copy it as is */
+            js[start] = *inStr;
+        }
         else
         {
-            if ((start + 6) >= size) return false;
+            /* No, escape it as \u00XX */
+            if ((start + 6) >= jsSize) return false;
             js[start] = '\\'; start++;
             js[start] = 'u'; start++;
             js[start] = '0'; start++;
             js[start] = '0'; start++;
-            SSF_ASSERT(SSFHexBinToByte(*in, &js[start], 2, SSF_HEX_CASE_UPPER));
+            SSF_ASSERT(SSFHexBinToByte(*inStr, &js[start], 2, SSF_HEX_CASE_UPPER));
             start++;
         }
-        if (*in == 0)
+        if (*inStr == 0)
         {*end = start; return true; }
         start++;
-        in++;
+        inStr++;
     }
     return false;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if in string added successfully as quoted escaped string, else false.            */
+/* Returns true if inStr added successfully as quoted escaped string, else false.                */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFJsonPrintString(SSFCStrOut_t js, size_t size, size_t start, size_t *end, SSFCStrIn_t in,
-                        bool *comma)
+bool SSFJsonPrintString(SSFCStrOut_t js, size_t jsSize, size_t start, size_t *end,
+                        SSFCStrIn_t inStr, bool *commaOpt)
 {
     SSF_REQUIRE(js != NULL);
     SSF_REQUIRE(end != NULL);
-    SSF_REQUIRE(in != NULL);
+    SSF_REQUIRE(inStr != NULL);
 
-    SSF_JSON_COMMA(comma);
-    if (!_SSFJsonPrintUnescChar(js, size, start, &start, '\"')) return false;
-    if (!SSFJsonPrintCString(js, size, start, &start, in, NULL)) return false;
-    if (!_SSFJsonPrintUnescChar(js, size, start, &start, '\"')) return false;
+    SSF_JSON_COMMA(commaOpt);
+    if (!_SSFJsonPrintUnescChar(js, jsSize, start, &start, '\"')) return false;
+    if (!SSFJsonPrintCString(js, jsSize, start, &start, inStr, NULL)) return false;
+    if (!_SSFJsonPrintUnescChar(js, jsSize, start, &start, '\"')) return false;
     *end = start;
     return true;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if in label element added successfully, else false.                              */
+/* Returns true if inStr label element added successfully, else false.                           */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFJsonPrintLabel(SSFCStrOut_t js, size_t size, size_t start, size_t *end, SSFCStrIn_t in,
-                       bool *comma)
+bool SSFJsonPrintLabel(SSFCStrOut_t js, size_t jsSize, size_t start, size_t *end,
+                       SSFCStrIn_t inStr, bool *commaOpt)
 {
     SSF_REQUIRE(js != NULL);
     SSF_REQUIRE(end != NULL);
-    SSF_REQUIRE(in != NULL);
+    SSF_REQUIRE(inStr != NULL);
 
-    SSF_JSON_COMMA(comma);
-    if (!SSFJsonPrintString(js, size, start, &start, in, NULL)) return false;
-    if (!_SSFJsonPrintUnescChar(js, size, start, &start, ':')) return false;
+    SSF_JSON_COMMA(commaOpt);
+    if (!SSFJsonPrintString(js, jsSize, start, &start, inStr, NULL)) return false;
+    if (!_SSFJsonPrintUnescChar(js, jsSize, start, &start, ':')) return false;
     *end = start;
     return true;
 }
@@ -657,8 +792,8 @@ bool SSFJsonPrintLabel(SSFCStrOut_t js, size_t size, size_t start, size_t *end, 
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if in data added successfully as quoted ASCII hex string, else false.            */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFJsonPrintHex(SSFCStrOut_t js, size_t size, size_t start, size_t *end, const uint8_t *in,
-                     size_t inLen, bool rev, bool *comma)
+bool SSFJsonPrintHex(SSFCStrOut_t js, size_t jsSize, size_t start, size_t *end, const uint8_t *in,
+                     size_t inLen, bool rev, bool *commaOpt)
 {
     size_t outLen;
 
@@ -666,12 +801,12 @@ bool SSFJsonPrintHex(SSFCStrOut_t js, size_t size, size_t start, size_t *end, co
     SSF_REQUIRE(end != NULL);
     SSF_REQUIRE(in != NULL);
 
-    SSF_JSON_COMMA(comma);
-    if (!_SSFJsonPrintUnescChar(js, size, start, &start, '"')) return false;
-    if (!SSFHexBinToBytes(in, inLen, &js[start], size - start, &outLen, rev, SSF_HEX_CASE_UPPER))
+    SSF_JSON_COMMA(commaOpt);
+    if (!_SSFJsonPrintUnescChar(js, jsSize, start, &start, '"')) return false;
+    if (!SSFHexBinToBytes(in, inLen, &js[start], jsSize - start, &outLen, rev, SSF_HEX_CASE_UPPER))
     {return false; }
     start += outLen;
-    if (!_SSFJsonPrintUnescChar(js, size, start, &start, '"')) return false;
+    if (!_SSFJsonPrintUnescChar(js, jsSize, start, &start, '"')) return false;
     *end = start;
     return true;
 }
@@ -679,8 +814,8 @@ bool SSFJsonPrintHex(SSFCStrOut_t js, size_t size, size_t start, size_t *end, co
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if in data added successfully as quoted Base64 string, else false.               */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFJsonPrintBase64(SSFCStrOut_t js, size_t size, size_t start, size_t *end, const uint8_t *in,
-                        size_t inLen, bool *comma)
+bool SSFJsonPrintBase64(SSFCStrOut_t js, size_t jsSize, size_t start, size_t *end,
+                        const uint8_t *in, size_t inLen, bool *commaOpt)
 {
     size_t outLen;
 
@@ -688,11 +823,11 @@ bool SSFJsonPrintBase64(SSFCStrOut_t js, size_t size, size_t start, size_t *end,
     SSF_REQUIRE(end != NULL);
     SSF_REQUIRE(in != NULL);
 
-    SSF_JSON_COMMA(comma);
-    if (!_SSFJsonPrintUnescChar(js, size, start, &start, '"')) return false;
-    if (!SSFBase64Encode(in, inLen, &js[start], size - start, &outLen)) return false;
+    SSF_JSON_COMMA(commaOpt);
+    if (!_SSFJsonPrintUnescChar(js, jsSize, start, &start, '"')) return false;
+    if (!SSFBase64Encode(in, inLen, &js[start], jsSize - start, &outLen)) return false;
     start += outLen;
-    if (!_SSFJsonPrintUnescChar(js, size, start, &start, '"')) return false;
+    if (!_SSFJsonPrintUnescChar(js, jsSize, start, &start, '"')) return false;
     *end = start;
     return true;
 }
@@ -701,22 +836,22 @@ bool SSFJsonPrintBase64(SSFCStrOut_t js, size_t size, size_t start, size_t *end,
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if in double added successfully to JSON string, else false.                      */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFJsonPrintDouble(SSFCStrOut_t js, size_t size, size_t start, size_t *end, double in,
-                        SSFJsonFltFmt_t fmt, bool *comma)
+bool SSFJsonPrintDouble(SSFCStrOut_t js, size_t jsSize, size_t start, size_t *end, double in,
+                        SSFJsonFltFmt_t fmt, bool *commaOpt)
 {
     int len = 0;
 
     SSF_REQUIRE(js != NULL);
-    SSF_REQUIRE(start <= size);
+    SSF_REQUIRE(start <= jsSize);
     SSF_REQUIRE(end != NULL);
     SSF_REQUIRE((fmt > SSF_JSON_FLT_FMT_MIN) && (fmt < SSF_JSON_FLT_FMT_MAX));
 
-    SSF_JSON_COMMA(comma);
-    if (fmt == SSF_JSON_FLT_FMT_SHORT) len = snprintf(&js[start], size - start, "%g", in);
-    else if (fmt == SSF_JSON_FLT_FMT_STD) len = snprintf(&js[start], size - start, "%f", in);
+    SSF_JSON_COMMA(commaOpt);
+    if (fmt == SSF_JSON_FLT_FMT_SHORT) len = snprintf(&js[start], jsSize - start, "%g", in);
+    else if (fmt == SSF_JSON_FLT_FMT_STD) len = snprintf(&js[start], jsSize - start, "%f", in);
     else
     {
-        size_t delta = size - start;
+        size_t delta = jsSize - start;
         char *ptr = &js[start];
 
         switch (fmt)
@@ -738,7 +873,12 @@ bool SSFJsonPrintDouble(SSFCStrOut_t js, size_t size, size_t start, size_t *end,
                 SSF_ERROR(); break;
         }
     }
-    if ((len < 0) || (((size_t)len) >= (size - start))) return false;
+    /* Did formatting fail or not fit with room for the terminator? */
+    if ((len < 0) || (((size_t)len) >= (jsSize - start)))
+    {
+        /* Yes */
+        return false;
+    }
     *end = start + (size_t)len;
     return true;
 }
@@ -747,18 +887,23 @@ bool SSFJsonPrintDouble(SSFCStrOut_t js, size_t size, size_t start, size_t *end,
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if in signed int added successfully to JSON string, else false.                  */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFJsonPrintInt(SSFCStrOut_t js, size_t size, size_t start, size_t *end, int64_t in,
-                     bool *comma)
+bool SSFJsonPrintInt(SSFCStrOut_t js, size_t jsSize, size_t start, size_t *end, int64_t in,
+                     bool *commaOpt)
 {
     size_t len;
 
     SSF_REQUIRE(js != NULL);
-    SSF_REQUIRE(start <= size);
+    SSF_REQUIRE(start <= jsSize);
     SSF_REQUIRE(end != NULL);
 
-    SSF_JSON_COMMA(comma);
-    len = SSFDecIntToStr(in, &js[start], size - start);
-    if ((len == 0) || (len >= (size - start))) return false;
+    SSF_JSON_COMMA(commaOpt);
+    len = SSFDecIntToStr(in, &js[start], jsSize - start);
+    /* Did conversion fail or not fit with room for the terminator? */
+    if ((len == 0) || (len >= (jsSize - start)))
+    {
+        /* Yes */
+        return false;
+    }
     *end = start + len;
     return true;
 }
@@ -766,18 +911,23 @@ bool SSFJsonPrintInt(SSFCStrOut_t js, size_t size, size_t start, size_t *end, in
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if in unsigned int added successfully to JSON string, else false.                */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFJsonPrintUInt(SSFCStrOut_t js, size_t size, size_t start, size_t *end, uint64_t in,
-                      bool *comma)
+bool SSFJsonPrintUInt(SSFCStrOut_t js, size_t jsSize, size_t start, size_t *end, uint64_t in,
+                      bool *commaOpt)
 {
     size_t len;
 
     SSF_REQUIRE(js != NULL);
-    SSF_REQUIRE(start <= size);
+    SSF_REQUIRE(start <= jsSize);
     SSF_REQUIRE(end != NULL);
 
-    SSF_JSON_COMMA(comma);
-    len = SSFDecUIntToStr(in, &js[start], size - start);
-    if ((len == 0) || (len >= (size - start))) return false;
+    SSF_JSON_COMMA(commaOpt);
+    len = SSFDecUIntToStr(in, &js[start], jsSize - start);
+    /* Did conversion fail or not fit with room for the terminator? */
+    if ((len == 0) || (len >= (jsSize - start)))
+    {
+        /* Yes */
+        return false;
+    }
     *end = start + len;
     return true;
 }
@@ -785,18 +935,33 @@ bool SSFJsonPrintUInt(SSFCStrOut_t js, size_t size, size_t start, size_t *end, u
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if all printing added successfully to JSON string, else false.                   */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFJsonPrint(SSFCStrOut_t js, size_t size, size_t start, size_t *end, SSFJsonPrintFn_t fn,
-                  void *in, const char *oc, bool *comma)
+bool SSFJsonPrint(SSFCStrOut_t js, size_t jsSize, size_t start, size_t *end,
+                  SSFJsonPrintFn_t fnOpt, void *in, const char *ocOpt, bool *commaOpt)
 {
     SSF_REQUIRE(js != NULL);
-    SSF_REQUIRE(start <= size);
+    SSF_REQUIRE(start <= jsSize);
     SSF_REQUIRE(end != NULL);
 
-    SSF_JSON_COMMA(comma);
-    if ((oc != NULL) && (!_SSFJsonPrintUnescChar(js, size, start, &start, oc[0]))) return false;
-    if ((fn != NULL) && (!fn(js, size, start, &start, in))) return false;
-    if ((oc != NULL) && (!_SSFJsonPrintUnescChar(js, size, start, &start, oc[1]))) return false;
-    if (!_SSFJsonPrintUnescChar(js, size, start, &start, 0)) return false;
+    SSF_JSON_COMMA(commaOpt);
+    /* Is there an opening character that does not fit? */
+    if ((ocOpt != NULL) && (!_SSFJsonPrintUnescChar(js, jsSize, start, &start, ocOpt[0])))
+    {
+        /* Yes */
+        return false;
+    }
+    /* Is there a callback that fails? */
+    if ((fnOpt != NULL) && (!fnOpt(js, jsSize, start, &start, in)))
+    {
+        /* Yes */
+        return false;
+    }
+    /* Is there a closing character that does not fit? */
+    if ((ocOpt != NULL) && (!_SSFJsonPrintUnescChar(js, jsSize, start, &start, ocOpt[1])))
+    {
+        /* Yes */
+        return false;
+    }
+    if (!_SSFJsonPrintUnescChar(js, jsSize, start, &start, 0)) return false;
     *end = start - 1;
     return true;
 }
@@ -805,13 +970,13 @@ bool SSFJsonPrint(SSFCStrOut_t js, size_t size, size_t start, size_t *end, SSFJs
 /* --------------------------------------------------------------------------------------------- */
 /* Unescapes a JSON string value (between quotes) into out buffer. Returns true on success.      */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFJsonGObjUnescStr(SSFCStrIn_t js, size_t strStart, size_t strEnd, SSFCStrOut_t out,
-                                 size_t outSize)
+static bool _SSFJsonGObjUnescStr(SSFCStrIn_t jsStr, size_t strStart, size_t strEnd,
+                                 SSFCStrOut_t out, size_t outSize)
 {
     size_t s;
     size_t o = 0;
 
-    SSF_ASSERT(js != NULL);
+    SSF_ASSERT(jsStr != NULL);
     SSF_ASSERT(out != NULL);
     SSF_ASSERT(outSize > 0);
 
@@ -821,25 +986,35 @@ static bool _SSFJsonGObjUnescStr(SSFCStrIn_t js, size_t strStart, size_t strEnd,
 
     while (s <= strEnd)
     {
-        if (js[s] == '\\')
+        if (jsStr[s] == '\\')
         {
             s++;
             if (s > strEnd) return false;
-            if (js[s] == '"' || js[s] == '\\' || js[s] == '/')
-            { if (o >= (outSize - 1)) return false; out[o++] = js[s++]; }
-            else if (js[s] == 'n') { if (o >= (outSize - 1)) return false; out[o++] = '\x0a'; s++; }
-            else if (js[s] == 'r') { if (o >= (outSize - 1)) return false; out[o++] = '\x0d'; s++; }
-            else if (js[s] == 't') { if (o >= (outSize - 1)) return false; out[o++] = '\x09'; s++; }
-            else if (js[s] == 'f') { if (o >= (outSize - 1)) return false; out[o++] = '\x0c'; s++; }
-            else if (js[s] == 'b') { if (o >= (outSize - 1)) return false; out[o++] = '\x08'; s++; }
-            else if (js[s] == 'u')
+            /* Is it an escaped quote, backslash or solidus? */
+            if ((jsStr[s] == '"') || (jsStr[s] == '\\') || (jsStr[s] == '/'))
+            {
+                /* Yes, copy it as is */
+                if (o >= (outSize - 1)) return false;
+                out[o++] = jsStr[s++];
+            }
+            else if (jsStr[s] == 'n')
+            { if (o >= (outSize - 1)) return false; out[o++] = '\x0a'; s++; }
+            else if (jsStr[s] == 'r')
+            { if (o >= (outSize - 1)) return false; out[o++] = '\x0d'; s++; }
+            else if (jsStr[s] == 't')
+            { if (o >= (outSize - 1)) return false; out[o++] = '\x09'; s++; }
+            else if (jsStr[s] == 'f')
+            { if (o >= (outSize - 1)) return false; out[o++] = '\x0c'; s++; }
+            else if (jsStr[s] == 'b')
+            { if (o >= (outSize - 1)) return false; out[o++] = '\x08'; s++; }
+            else if (jsStr[s] == 'u')
             {
                 s++;
-                if ((strEnd - s + 1) < 4) return false;
+                if (((strEnd - s) + 1) < 4) return false;
                 if ((o + 2) >= outSize) return false;
-                if (SSFHexByteToBin(&js[s], (uint8_t *)&out[o]) == false) return false;
+                if (SSFHexByteToBin(&jsStr[s], (uint8_t *)&out[o]) == false) return false;
                 o++;
-                if (SSFHexByteToBin(&js[s + 2], (uint8_t *)&out[o]) == false) return false;
+                if (SSFHexByteToBin(&jsStr[s + 2], (uint8_t *)&out[o]) == false) return false;
                 o++;
                 s += 4;
             }
@@ -848,7 +1023,7 @@ static bool _SSFJsonGObjUnescStr(SSFCStrIn_t js, size_t strStart, size_t strEnd,
         else
         {
             if (o >= (outSize - 1)) return false;
-            out[o++] = js[s++];
+            out[o++] = jsStr[s++];
         }
     }
     out[o] = 0;
@@ -856,10 +1031,10 @@ static bool _SSFJsonGObjUnescStr(SSFCStrIn_t js, size_t strStart, size_t strEnd,
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Recursively converts a JSON value at js[*index] into a gobj node. Returns true on success.    */
+/* Recursively converts a JSON value at jsStr[*index] into a gobj node; returns true on success. */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFJsonGObjValue(SSFCStrIn_t js, size_t *index, SSFGObj_t *gobj, uint16_t maxChildren,
-                              uint8_t depth)
+static bool _SSFJsonGObjValue(SSFCStrIn_t jsStr, size_t *index, SSFGObj_t *gobj,
+                              uint16_t maxChildren, uint8_t depth)
 {
     size_t start;
     size_t end;
@@ -867,33 +1042,33 @@ static bool _SSFJsonGObjValue(SSFCStrIn_t js, size_t *index, SSFGObj_t *gobj, ui
     char strBuf[SSF_JSON_GOBJ_CONFIG_MAX_STR_SIZE + 1];
     SSFGObj_t *child = NULL;
 
-    SSF_ASSERT(js != NULL);
+    SSF_ASSERT(jsStr != NULL);
     SSF_ASSERT(index != NULL);
     SSF_ASSERT(gobj != NULL);
 
     if (depth >= SSF_JSON_CONFIG_MAX_IN_DEPTH) return false;
 
-    _SSFJsonWhitespace(js, index);
+    _SSFJsonWhitespace(jsStr, index);
 
     /* Object */
-    if (js[*index] == '{')
+    if (jsStr[*index] == '{')
     {
         if (SSFGObjSetObject(gobj) == false) return false;
         (*index)++;
-        _SSFJsonWhitespace(js, index);
-        if (js[*index] != '}')
+        _SSFJsonWhitespace(jsStr, index);
+        if (jsStr[*index] != '}')
         {
             do
             {
                 /* Parse key string */
                 i = *index;
-                if (_SSFJsonString(js, &i, &start, &end) == false) return false;
+                if (_SSFJsonString(jsStr, &i, &start, &end) == false) return false;
                 *index = i;
-                if (_SSFJsonGObjUnescStr(js, start, end, strBuf, sizeof(strBuf)) == false)
+                if (_SSFJsonGObjUnescStr(jsStr, start, end, strBuf, sizeof(strBuf)) == false)
                 { return false; }
 
-                _SSFJsonWhitespace(js, index);
-                if (js[*index] != ':') return false;
+                _SSFJsonWhitespace(jsStr, index);
+                if (jsStr[*index] != ':') return false;
                 (*index)++;
 
                 /* Create child and set label */
@@ -905,12 +1080,12 @@ static bool _SSFJsonGObjValue(SSFCStrIn_t js, size_t *index, SSFGObj_t *gobj, ui
                 /* Insert the still-empty child */
                 if (SSFGObjInsertChild(gobj, child) == false)
                 { SSFGObjDeInit(&child); return false; }
-                if (_SSFJsonGObjValue(js, index, child, maxChildren, depth + 1) == false)
+                if (_SSFJsonGObjValue(jsStr, index, child, maxChildren, depth + 1) == false)
                 { return false; }
 
-                _SSFJsonWhitespace(js, index);
-                if (js[*index] == '}') break;
-                if (js[*index] != ',') return false;
+                _SSFJsonWhitespace(jsStr, index);
+                if (jsStr[*index] == '}') break;
+                if (jsStr[*index] != ',') return false;
                 (*index)++;
             } while (true);
         }
@@ -919,12 +1094,12 @@ static bool _SSFJsonGObjValue(SSFCStrIn_t js, size_t *index, SSFGObj_t *gobj, ui
     }
 
     /* Array */
-    if (js[*index] == '[')
+    if (jsStr[*index] == '[')
     {
         if (SSFGObjSetArray(gobj) == false) return false;
         (*index)++;
-        _SSFJsonWhitespace(js, index);
-        if (js[*index] != ']')
+        _SSFJsonWhitespace(jsStr, index);
+        if (jsStr[*index] != ']')
         {
             do
             {
@@ -935,12 +1110,12 @@ static bool _SSFJsonGObjValue(SSFCStrIn_t js, size_t *index, SSFGObj_t *gobj, ui
                 /* Insert the still-empty child and then populate */
                 if (SSFGObjInsertChild(gobj, child) == false)
                 { SSFGObjDeInit(&child); return false; }
-                if (_SSFJsonGObjValue(js, index, child, maxChildren, depth + 1) == false)
+                if (_SSFJsonGObjValue(jsStr, index, child, maxChildren, depth + 1) == false)
                 { return false; }
 
-                _SSFJsonWhitespace(js, index);
-                if (js[*index] == ']') break;
-                if (js[*index] != ',') return false;
+                _SSFJsonWhitespace(jsStr, index);
+                if (jsStr[*index] == ']') break;
+                if (jsStr[*index] != ',') return false;
                 (*index)++;
             } while (true);
         }
@@ -950,18 +1125,18 @@ static bool _SSFJsonGObjValue(SSFCStrIn_t js, size_t *index, SSFGObj_t *gobj, ui
 
     /* String */
     i = *index;
-    if (_SSFJsonString(js, &i, &start, &end))
+    if (_SSFJsonString(jsStr, &i, &start, &end))
     {
         *index = i;
-        if (_SSFJsonGObjUnescStr(js, start, end, strBuf, sizeof(strBuf)) == false) return false;
+        if (_SSFJsonGObjUnescStr(jsStr, start, end, strBuf, sizeof(strBuf)) == false) return false;
         return SSFGObjSetString(gobj, strBuf);
     }
 
     /* Number */
     i = *index;
-    if (_SSFJsonNumber(js, &i, &start, &end))
+    if (_SSFJsonNumber(jsStr, &i, &start, &end))
     {
-        size_t numLen = end - start + 1;
+        size_t numLen = (end - start) + 1;
         bool hasDecimal = false;
         size_t n;
         int64_t intVal;
@@ -970,14 +1145,19 @@ static bool _SSFJsonGObjValue(SSFCStrIn_t js, size_t *index, SSFGObj_t *gobj, ui
         if (numLen > (sizeof(strBuf) - 1)) return false;
 
         /* Copy number to null-terminated buffer */
-        memcpy(strBuf, &js[start], numLen);
+        memcpy(strBuf, &jsStr[start], numLen);
         strBuf[numLen] = 0;
 
         /* Check for decimal point or exponent */
         for (n = 0; n < numLen; n++)
         {
-            if (strBuf[n] == '.' || strBuf[n] == 'e' || strBuf[n] == 'E')
-            { hasDecimal = true; break; }
+            /* Is it a decimal point or an exponent? */
+            if ((strBuf[n] == '.') || (strBuf[n] == 'e') || (strBuf[n] == 'E'))
+            {
+                /* Yes, not an integer */
+                hasDecimal = true;
+                break;
+            }
         }
 
         if (hasDecimal == false)
@@ -1002,15 +1182,15 @@ static bool _SSFJsonGObjValue(SSFCStrIn_t js, size_t *index, SSFGObj_t *gobj, ui
     }
 
     /* true */
-    if (strncmp(&js[*index], "true", 4) == 0)
+    if (strncmp(&jsStr[*index], "true", 4) == 0)
     { *index += 4; return SSFGObjSetBool(gobj, true); }
 
     /* false */
-    if (strncmp(&js[*index], "false", 5) == 0)
+    if (strncmp(&jsStr[*index], "false", 5) == 0)
     { *index += 5; return SSFGObjSetBool(gobj, false); }
 
     /* null */
-    if (strncmp(&js[*index], "null", 4) == 0)
+    if (strncmp(&jsStr[*index], "null", 4) == 0)
     { *index += 4; return SSFGObjSetNull(gobj); }
 
     return false;
@@ -1019,28 +1199,28 @@ static bool _SSFJsonGObjValue(SSFCStrIn_t js, size_t *index, SSFGObj_t *gobj, ui
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if JSON string successfully converted to gobj representation, else false.        */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFJsonGObjCreate(SSFCStrIn_t js, SSFGObj_t **gobj, uint16_t maxChildren)
+bool SSFJsonGObjCreate(SSFCStrIn_t jsStr, SSFGObj_t **gobj, uint16_t maxChildren)
 {
     SSFGObj_t *root = NULL;
     size_t index;
 
-    SSF_REQUIRE(js != NULL);
+    SSF_REQUIRE(jsStr != NULL);
     SSF_REQUIRE(gobj != NULL);
 
     /* Validate JSON first */
-    if (SSFJsonIsValid(js) == false) return false;
+    if (SSFJsonIsValid(jsStr) == false) return false;
 
     /* Create root node */
     if (SSFGObjInit(&root, maxChildren) == false) return false;
 
     /* Parse recursively */
     index = 0;
-    if (_SSFJsonGObjValue(js, &index, root, maxChildren, 0) == false)
+    if (_SSFJsonGObjValue(jsStr, &index, root, maxChildren, 0) == false)
     { SSFGObjDeInit(&root); return false; }
 
     /* Verify entire input was consumed (skip trailing whitespace) */
-    _SSFJsonWhitespace(js, &index);
-    if (js[index] != '\0')
+    _SSFJsonWhitespace(jsStr, &index);
+    if (jsStr[index] != '\0')
     { SSFGObjDeInit(&root); return false; }
 
     *gobj = root;
@@ -1050,13 +1230,14 @@ bool SSFJsonGObjCreate(SSFCStrIn_t js, SSFGObj_t **gobj, uint16_t maxChildren)
 /* --------------------------------------------------------------------------------------------- */
 /* Forward declaration for recursive printing.                                                   */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFJsonGObjPrintValue(SSFGObj_t *gobj, SSFCStrOut_t js, size_t size, size_t start,
-                                   size_t *end, bool *comma);
+static bool _SSFJsonGObjPrintValue(SSFGObj_t *gobj, SSFCStrOut_t js, size_t jsSize, size_t start,
+                                   size_t *end, bool *commaOpt);
 
 /* --------------------------------------------------------------------------------------------- */
 /* Callback that prints the children of a gobj container (object or array).                      */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFJsonGObjPrintChildrenFn(char *js, size_t size, size_t start, size_t *end, void *in)
+static bool _SSFJsonGObjPrintChildrenFn(char *js, size_t jsSize, size_t start, size_t *end,
+                                        void *in)
 {
     SSFGObj_t *gobj = (SSFGObj_t *)in;
     SSFLLItem_t *item;
@@ -1066,6 +1247,7 @@ static bool _SSFJsonGObjPrintChildrenFn(char *js, size_t size, size_t start, siz
     char label[SSF_JSON_GOBJ_CONFIG_MAX_STR_SIZE + 1];
 
     SSF_ASSERT(gobj != NULL);
+    SSF_REQUIRE(end != NULL);
 
     isObject = (SSFGObjGetType(gobj) == SSF_OBJ_TYPE_OBJECT);
 
@@ -1078,13 +1260,14 @@ static bool _SSFJsonGObjPrintChildrenFn(char *js, size_t size, size_t start, siz
         {
             /* Print "label": then value */
             if (SSFGObjGetLabel(child, label, sizeof(label)) == false) return false;
-            if (SSFJsonPrintLabel(js, size, start, &start, label, &comma) == false) return false;
-            if (_SSFJsonGObjPrintValue(child, js, size, start, &start, NULL) == false) return false;
+            if (SSFJsonPrintLabel(js, jsSize, start, &start, label, &comma) == false) return false;
+            if (_SSFJsonGObjPrintValue(child, js, jsSize, start, &start, NULL) == false)
+            { return false; }
         }
         else
         {
             /* Array: print value with comma tracking */
-            if (_SSFJsonGObjPrintValue(child, js, size, start, &start, &comma) == false)
+            if (_SSFJsonGObjPrintValue(child, js, jsSize, start, &start, &comma) == false)
             { return false; }
         }
         item = SSF_LL_NEXT_ITEM(item);
@@ -1096,8 +1279,8 @@ static bool _SSFJsonGObjPrintChildrenFn(char *js, size_t size, size_t start, siz
 /* --------------------------------------------------------------------------------------------- */
 /* Prints a single gobj value into the JSON output buffer. Returns true on success.              */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFJsonGObjPrintValue(SSFGObj_t *gobj, SSFCStrOut_t js, size_t size, size_t start,
-                                   size_t *end, bool *comma)
+static bool _SSFJsonGObjPrintValue(SSFGObj_t *gobj, SSFCStrOut_t js, size_t jsSize, size_t start,
+                                   size_t *end, bool *commaOpt)
 {
     char strVal[SSF_JSON_GOBJ_CONFIG_MAX_STR_SIZE + 1];
     int64_t intVal;
@@ -1115,28 +1298,30 @@ static bool _SSFJsonGObjPrintValue(SSFGObj_t *gobj, SSFCStrOut_t js, size_t size
     {
     case SSF_OBJ_TYPE_STR:
         if (SSFGObjGetString(gobj, strVal, sizeof(strVal)) == false) return false;
-        return SSFJsonPrintString(js, size, start, end, strVal, comma);
+        return SSFJsonPrintString(js, jsSize, start, end, strVal, commaOpt);
     case SSF_OBJ_TYPE_INT:
         if (SSFGObjGetInt(gobj, &intVal) == false) return false;
-        return SSFJsonPrintInt(js, size, start, end, intVal, comma);
+        return SSFJsonPrintInt(js, jsSize, start, end, intVal, commaOpt);
     case SSF_OBJ_TYPE_UINT:
         if (SSFGObjGetUInt(gobj, &uintVal) == false) return false;
-        return SSFJsonPrintUInt(js, size, start, end, uintVal, comma);
+        return SSFJsonPrintUInt(js, jsSize, start, end, uintVal, commaOpt);
     case SSF_OBJ_TYPE_BOOL:
         if (SSFGObjGetBool(gobj, &boolVal) == false) return false;
-        if (boolVal) return SSFJsonPrintTrue(js, size, start, end, comma);
-        else return SSFJsonPrintFalse(js, size, start, end, comma);
+        if (boolVal) return SSFJsonPrintTrue(js, jsSize, start, end, commaOpt);
+        else return SSFJsonPrintFalse(js, jsSize, start, end, commaOpt);
     case SSF_OBJ_TYPE_NULL:
-        return SSFJsonPrintNull(js, size, start, end, comma);
+        return SSFJsonPrintNull(js, jsSize, start, end, commaOpt);
 #if SSF_JSON_CONFIG_ENABLE_FLOAT_GEN == 1
     case SSF_OBJ_TYPE_FLOAT:
         if (SSFGObjGetFloat(gobj, &dblVal) == false) return false;
-        return SSFJsonPrintDouble(js, size, start, end, dblVal, SSF_JSON_FLT_FMT_STD, comma);
+        return SSFJsonPrintDouble(js, jsSize, start, end, dblVal, SSF_JSON_FLT_FMT_STD, commaOpt);
 #endif /* SSF_JSON_CONFIG_ENABLE_FLOAT_GEN */
     case SSF_OBJ_TYPE_OBJECT:
-        return SSFJsonPrintObject(js, size, start, end, _SSFJsonGObjPrintChildrenFn, gobj, comma);
+        return SSFJsonPrintObject(js, jsSize, start, end, _SSFJsonGObjPrintChildrenFn, gobj,
+                                  commaOpt);
     case SSF_OBJ_TYPE_ARRAY:
-        return SSFJsonPrintArray(js, size, start, end, _SSFJsonGObjPrintChildrenFn, gobj, comma);
+        return SSFJsonPrintArray(js, jsSize, start, end, _SSFJsonGObjPrintChildrenFn, gobj,
+                                 commaOpt);
     default:
         return false;
     }

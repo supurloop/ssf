@@ -43,6 +43,9 @@
 /* --------------------------------------------------------------------------------------------- */
 #define SSF_TLS_RECORD_MAGIC (0x544C5352ul)
 
+/* RFC 8446 Sec. 7.1: "tls13 " + label fills opaque label<7..255>, so label <= 249 bytes. */
+#define SSF_TLS_HKDF_LABEL_MAX_LEN (249u)
+
 #if SSF_CONFIG_TLS_UNIT_TEST == 1
 void (*_SSFTLSFinishedKeyScrubTestHook)(void *ctx, const uint8_t *finishedKey, size_t len) = NULL;
 void *_SSFTLSFinishedKeyScrubTestHookCtx = NULL;
@@ -50,29 +53,24 @@ void *_SSFTLSFinishedKeyScrubTestHookCtx = NULL;
 
 /* --------------------------------------------------------------------------------------------- */
 /* Key schedule: HKDF-Expand-Label (RFC 8446 Section 7.1)                                        */
-/*                                                                                               */
-/* HkdfLabel = uint16(Length) || uint8(6 + len(Label)) || "tls13 " || Label ||                   */
-/*             uint8(len(Context)) || Context                                                    */
 /* --------------------------------------------------------------------------------------------- */
 void SSFTLSHkdfExpandLabel(SSFHMACHash_t hash, const uint8_t *secret, size_t secretLen,
-                           const char *label, const uint8_t *context, size_t ctxLen, uint8_t *out,
-                           size_t outLen)
+                           const char *labelStr, const uint8_t *context, size_t contextLen,
+                           uint8_t *out, size_t outLen)
 {
-    uint8_t hkdfLabel[2 + 1 + 6 + 64 + 1 + SSF_TLS_MAX_HASH_SIZE];
+    uint8_t hkdfLabel[2 + 1 + 6 + SSF_TLS_HKDF_LABEL_MAX_LEN + 1 + SSF_TLS_MAX_HASH_SIZE];
     size_t labelLen;
     size_t pos = 0;
 
     SSF_REQUIRE(secret != NULL);
-    SSF_REQUIRE(label != NULL);
+    SSF_REQUIRE(labelStr != NULL);
     SSF_REQUIRE(out != NULL);
     SSF_REQUIRE(outLen <= 255u);
-    /* hkdfLabel buffer is sized for at most SSF_TLS_MAX_HASH_SIZE bytes of context. RFC 8446 */
-    /* Sec. 7.1 permits up to 255 bytes, but real TLS 1.3 feeds transcript hashes (<= 48), so */
-    /* tightening to the buffer's slot is safe and matches actual usage.                     */
-    SSF_REQUIRE(ctxLen <= SSF_TLS_MAX_HASH_SIZE);
+    SSF_REQUIRE(contextLen <= SSF_TLS_MAX_HASH_SIZE);
+    SSF_REQUIRE((context != NULL) || (contextLen == 0u));
 
-    labelLen = strlen(label);
-    SSF_REQUIRE(labelLen <= 64u);
+    labelLen = strlen(labelStr);
+    SSF_REQUIRE(labelLen <= SSF_TLS_HKDF_LABEL_MAX_LEN);
 
     /* uint16 Length */
     hkdfLabel[pos++] = (uint8_t)((outLen >> 8) & 0xFFu);
@@ -84,16 +82,20 @@ void SSFTLSHkdfExpandLabel(SSFHMACHash_t hash, const uint8_t *secret, size_t sec
     /* "tls13 " prefix + label */
     memcpy(&hkdfLabel[pos], "tls13 ", 6);
     pos += 6;
-    memcpy(&hkdfLabel[pos], label, labelLen);
+    memcpy(&hkdfLabel[pos], labelStr, labelLen);
     pos += labelLen;
 
     /* uint8 context length + context */
-    hkdfLabel[pos++] = (uint8_t)ctxLen;
-    if ((context != NULL) && (ctxLen > 0u))
+    hkdfLabel[pos++] = (uint8_t)contextLen;
+
+    /* Is there context to append? */
+    if (contextLen > 0u)
     {
-        memcpy(&hkdfLabel[pos], context, ctxLen);
-        pos += ctxLen;
+        /* Yes, copy it after its length byte. */
+        memcpy(&hkdfLabel[pos], context, contextLen);
+        pos += contextLen;
     }
+    /* No, the zero length byte alone encodes an empty context. */
 
     SSFHKDFExpand(hash, secret, secretLen, hkdfLabel, pos, out, outLen);
 }
@@ -102,34 +104,32 @@ void SSFTLSHkdfExpandLabel(SSFHMACHash_t hash, const uint8_t *secret, size_t sec
 /* Key schedule: Derive-Secret (RFC 8446 Section 7.1)                                            */
 /* --------------------------------------------------------------------------------------------- */
 void SSFTLSDeriveSecret(SSFHMACHash_t hash, const uint8_t *secret, size_t secretLen,
-                        const char *label, const uint8_t *transcriptHash, size_t transcriptHashLen,
-                        uint8_t *out, size_t outLen)
+                        const char *labelStr, const uint8_t *transcriptHash,
+                        size_t transcriptHashLen, uint8_t *out, size_t outLen)
 {
     SSF_REQUIRE(transcriptHash != NULL);
 
-    SSFTLSHkdfExpandLabel(hash, secret, secretLen, label,
+    SSFTLSHkdfExpandLabel(hash, secret, secretLen, labelStr,
                           transcriptHash, transcriptHashLen, out, outLen);
 }
 
 /* --------------------------------------------------------------------------------------------- */
 /* Key schedule: derive traffic key and IV from traffic secret (RFC 8446 Section 7.3)            */
 /* --------------------------------------------------------------------------------------------- */
-void SSFTLSDeriveTrafficKeys(SSFHMACHash_t hash, const uint8_t *trafficSecret, size_t secretLen,
-                             uint8_t *key, size_t keyLen, uint8_t *iv, size_t ivLen)
+void SSFTLSDeriveTrafficKeys(SSFHMACHash_t hash, const uint8_t *trafficSecret,
+                             size_t trafficSecretLen, uint8_t *key, size_t keyLen, uint8_t *iv,
+                             size_t ivLen)
 {
     SSF_REQUIRE(trafficSecret != NULL);
     SSF_REQUIRE(key != NULL);
     SSF_REQUIRE(iv != NULL);
 
-    SSFTLSHkdfExpandLabel(hash, trafficSecret, secretLen, "key", NULL, 0, key, keyLen);
-    SSFTLSHkdfExpandLabel(hash, trafficSecret, secretLen, "iv", NULL, 0, iv, ivLen);
+    SSFTLSHkdfExpandLabel(hash, trafficSecret, trafficSecretLen, "key", NULL, 0, key, keyLen);
+    SSFTLSHkdfExpandLabel(hash, trafficSecret, trafficSecretLen, "iv", NULL, 0, iv, ivLen);
 }
 
 /* --------------------------------------------------------------------------------------------- */
 /* Key schedule: compute Finished verify_data (RFC 8446 Section 4.4.4)                           */
-/*                                                                                               */
-/* finished_key = HKDF-Expand-Label(BaseKey, "finished", "", Hash.length)                        */
-/* verify_data = HMAC(finished_key, Transcript-Hash(Handshake Context ...))                      */
 /* --------------------------------------------------------------------------------------------- */
 void SSFTLSComputeFinished(SSFHMACHash_t hash, const uint8_t *baseKey, size_t baseKeyLen,
                            const uint8_t *transcriptHash, size_t transcriptHashLen,
@@ -140,8 +140,7 @@ void SSFTLSComputeFinished(SSFHMACHash_t hash, const uint8_t *baseKey, size_t ba
     SSF_REQUIRE(baseKey != NULL);
     SSF_REQUIRE(transcriptHash != NULL);
     SSF_REQUIRE(verifyData != NULL);
-    /* finishedKey is sized for SSF_TLS_MAX_HASH_SIZE -- verifyDataLen above that overflows it. */
-    /* RFC 8446 Sec. 4.4.4 specifies verify_data length equals the hash output length (32 or 48). */
+    /* verify_data is the hash output length (32 or 48), which finishedKey is sized for. */
     SSF_REQUIRE(verifyDataLen <= SSF_TLS_MAX_HASH_SIZE);
 
     /* finished_key = HKDF-Expand-Label(BaseKey, "finished", "", Hash.length) */
@@ -163,7 +162,7 @@ void SSFTLSComputeFinished(SSFHMACHash_t hash, const uint8_t *baseKey, size_t ba
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Transcript hash                                                                               */
+/* Transcript hash: start a running hash of handshake messages.                                  */
 /* --------------------------------------------------------------------------------------------- */
 void SSFTLSTranscriptInit(SSFTLSTranscript_t *t, SSFHMACHash_t hash)
 {
@@ -186,18 +185,24 @@ void SSFTLSTranscriptInit(SSFTLSTranscript_t *t, SSFHMACHash_t hash)
     }
 }
 
-void SSFTLSTranscriptUpdate(SSFTLSTranscript_t *t, const uint8_t *data, size_t len)
+/* --------------------------------------------------------------------------------------------- */
+/* Transcript hash: append dataLen bytes of handshake data.                                      */
+/* --------------------------------------------------------------------------------------------- */
+void SSFTLSTranscriptUpdate(SSFTLSTranscript_t *t, const uint8_t *data, size_t dataLen)
 {
     SSF_REQUIRE(t != NULL);
-    SSF_REQUIRE((data != NULL) || (len == 0));
+    SSF_REQUIRE((data != NULL) || (dataLen == 0));
+#if SIZE_MAX > UINT32_MAX
+    SSF_REQUIRE(dataLen <= (size_t)UINT32_MAX);
+#endif
 
     switch (t->hmac)
     {
     case SSF_HMAC_HASH_SHA256:
-        SSFSHA256Update(&t->ctx.sha256, data, (uint32_t)len);
+        SSFSHA256Update(&t->ctx.sha256, data, (uint32_t)dataLen);
         break;
     case SSF_HMAC_HASH_SHA384:
-        SSFSHA384Update(&t->ctx.sha384, data, (uint32_t)len);
+        SSFSHA384Update(&t->ctx.sha384, data, (uint32_t)dataLen);
         break;
     default:
         SSF_ASSERT(false);
@@ -205,6 +210,9 @@ void SSFTLSTranscriptUpdate(SSFTLSTranscript_t *t, const uint8_t *data, size_t l
     }
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Transcript hash: write the current hash to out without finalizing the running hash.           */
+/* --------------------------------------------------------------------------------------------- */
 void SSFTLSTranscriptHash(const SSFTLSTranscript_t *t, uint8_t *out, size_t outSize)
 {
     SSF_REQUIRE(t != NULL);
@@ -235,6 +243,25 @@ void SSFTLSTranscriptHash(const SSFTLSTranscript_t *t, uint8_t *out, size_t outS
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Returns the RFC 8446 traffic key length for cipherSuite, or 0 if the suite is unsupported.    */
+/* --------------------------------------------------------------------------------------------- */
+static size_t _SSFTLSKeySizeForSuite(uint16_t cipherSuite)
+{
+    switch (cipherSuite)
+    {
+    case SSF_TLS_CS_AES_128_GCM_SHA256:
+    case SSF_TLS_CS_AES_128_CCM_SHA256:
+    case SSF_TLS_CS_AES_128_CCM_8_SHA256:
+        return 16u;
+    case SSF_TLS_CS_AES_256_GCM_SHA384:
+    case SSF_TLS_CS_CHACHA20_POLY1305_SHA256:
+        return 32u;
+    default:
+        return 0u;
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Record layer: initialize state                                                                */
 /* --------------------------------------------------------------------------------------------- */
 void SSFTLSRecordStateInit(SSFTLSRecordState_t *state, uint16_t cipherSuite, const uint8_t *key,
@@ -246,6 +273,8 @@ void SSFTLSRecordStateInit(SSFTLSRecordState_t *state, uint16_t cipherSuite, con
     SSF_REQUIRE(iv != NULL);
     SSF_REQUIRE(ivLen == SSF_TLS_IV_SIZE);
     SSF_REQUIRE(keyLen <= SSF_TLS_MAX_KEY_SIZE);
+    SSF_REQUIRE(_SSFTLSKeySizeForSuite(cipherSuite) != 0u);
+    SSF_REQUIRE(keyLen == _SSFTLSKeySizeForSuite(cipherSuite));
 
     memset(state, 0, sizeof(*state));
     memcpy(state->key, key, keyLen);
@@ -274,18 +303,20 @@ static void _SSFTLSBuildNonce(const SSFTLSRecordState_t *state, uint8_t nonce[12
 {
     uint8_t i;
 
+    SSF_REQUIRE(state != NULL);
+    SSF_REQUIRE(nonce != NULL);
+
     memcpy(nonce, state->iv, SSF_TLS_IV_SIZE);
 
     /* XOR sequence number (big-endian) into the rightmost 8 bytes of the IV */
     for (i = 0; i < 8u; i++)
     {
-        nonce[SSF_TLS_IV_SIZE - 1u - i] ^= (uint8_t)((state->seqNum >> (i * 8u)) & 0xFFu);
+        nonce[(SSF_TLS_IV_SIZE - 1u) - i] ^= (uint8_t)((state->seqNum >> (i * 8u)) & 0xFFu);
     }
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* AEAD tag size per TLS 1.3 cipher suite. Returns 0 for an unsupported suite.                   */
-/* All currently supported suites use 16-byte tags except TLS_AES_128_CCM_8_SHA256 (8 bytes).    */
+/* Returns the AEAD tag size for cipherSuite (16, or 8 for CCM_8), or 0 if unsupported.          */
 /* --------------------------------------------------------------------------------------------- */
 static size_t _SSFTLSAeadTagSize(uint16_t cipherSuite)
 {
@@ -295,17 +326,16 @@ static size_t _SSFTLSAeadTagSize(uint16_t cipherSuite)
     case SSF_TLS_CS_AES_256_GCM_SHA384:
     case SSF_TLS_CS_AES_128_CCM_SHA256:
     case SSF_TLS_CS_CHACHA20_POLY1305_SHA256:
-        return SSF_TLS_AEAD_TAG_SIZE;    /* 16 */
+        return SSF_TLS_AEAD_TAG_SIZE; /* 16 */
     case SSF_TLS_CS_AES_128_CCM_8_SHA256:
         return 8u;
     default:
-        return 0u;                        /* Unsupported */
+        return 0u; /* Unsupported */
     }
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Record layer: encrypt a plaintext into a TLS 1.3 record.                                      */
-/* RFC 8446 Section 5.2: inner content type appended before encryption.                          */
+/* If pt fits, encrypts it into a TLS 1.3 record (RFC 8446 5.2) and returns true, else false.    */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFTLSRecordEncrypt(SSFTLSRecordState_t *state, uint8_t contentType, const uint8_t *pt,
                          size_t ptLen, uint8_t *record, size_t recordSize, size_t *recordLen)
@@ -323,34 +353,50 @@ bool SSFTLSRecordEncrypt(SSFTLSRecordState_t *state, uint8_t contentType, const 
     SSF_REQUIRE(pt != NULL);
     SSF_REQUIRE(record != NULL);
     SSF_REQUIRE(recordLen != NULL);
+    SSF_REQUIRE(contentType != 0u);
+    SSF_REQUIRE((pt == &record[SSF_TLS_RECORD_HEADER_SIZE]) ||
+                ((((uintptr_t)pt) + ptLen) <= ((uintptr_t)record)) ||
+                (((uintptr_t)pt) >= (((uintptr_t)record) + recordSize)));
 
-    /* RFC 8446 Sec. 5.5: refuse to encrypt when seqNum is at the wrap boundary. The next */
-    /* increment would wrap to 0 and re-use the nonce of record 0 -- catastrophic.   */
+    /* RFC 8446 Sec. 5.5: refuse at the seqNum wrap boundary (nonce reuse otherwise). */
     if (state->seqNum == UINT64_MAX) return false;
 
-    /* Per-suite AEAD tag size (16 bytes for all suites except TLS_AES_128_CCM_8_SHA256, which
-     * uses 8). Rejecting unsupported suites up front keeps the rest of the function's sizing
-     * math straightforward. */
+    /* Per-suite AEAD tag size; an unsupported suite is rejected up front. */
     tagLen = _SSFTLSAeadTagSize(state->cipherSuite);
     if (tagLen == 0u) return false;
 
-    innerLen  = ptLen + 1u;              /* plaintext + inner content type */
+    /* Is ptLen over the RFC 8446 Sec. 5.1 limit (checked before ptLen + 1 is formed)? */
+    if (ptLen > 0x4000u)
+    {
+        /* Yes, record too large */
+        return false;
+    }
+    /* No, ptLen + 1 cannot wrap */
+
+    innerLen = ptLen + 1u; /* plaintext + inner content type */
     cipherLen = innerLen + tagLen;
-    totalLen  = SSF_TLS_RECORD_HEADER_SIZE + cipherLen;
+    totalLen = SSF_TLS_RECORD_HEADER_SIZE + cipherLen;
 
     if (recordSize < totalLen) return false;
-    if (cipherLen > 0x4000u + 256u) return false; /* RFC 8446 Sec. 5.2 record limit */
+    if (cipherLen > (0x4000u + 256u)) return false; /* RFC 8446 Sec. 5.2 record limit */
 
     /* Build record header (used as AAD). cipherLen now correctly reflects the tag size. */
     record[0] = SSF_TLS_CT_APPLICATION; /* Outer type is always application_data */
     record[1] = 0x03u;
-    record[2] = 0x03u;                   /* Legacy version 0x0303 */
+    record[2] = 0x03u; /* Legacy version 0x0303 */
     record[3] = (uint8_t)((cipherLen >> 8) & 0xFFu);
     record[4] = (uint8_t)(cipherLen & 0xFFu);
 
     /* Build inner plaintext: plaintext || content_type */
     inner = &record[SSF_TLS_RECORD_HEADER_SIZE];
-    memcpy(inner, pt, ptLen);
+
+    /* Is the plaintext somewhere other than the record body? */
+    if (pt != inner)
+    {
+        /* Yes, copy it in */
+        memcpy(inner, pt, ptLen);
+    }
+    /* No, it is already in place */
     inner[ptLen] = contentType;
 
     /* Build nonce */
@@ -415,27 +461,32 @@ bool SSFTLSRecordDecrypt(SSFTLSRecordState_t *state, const uint8_t *record, size
     SSF_REQUIRE(ptLen != NULL);
     SSF_REQUIRE(contentType != NULL);
 
-    /* RFC 8446 Sec. 5.5: refuse to decrypt when seqNum is at the wrap boundary, mirroring the */
-    /* encrypt-side guard. A peer that has wrapped must be rejected; our own seqNum must   */
-    /* not be allowed to wrap and re-accept earlier replayed records.                       */
+    /* RFC 8446 Sec. 5.5: refuse at the seqNum wrap boundary so replays cannot be re-accepted. */
     if (state->seqNum == UINT64_MAX) return false;
 
     /* Per-suite AEAD tag size -- must match what the encrypting peer emitted. */
     tagLen = _SSFTLSAeadTagSize(state->cipherSuite);
     if (tagLen == 0u) return false;
 
-    if (recordLen < SSF_TLS_RECORD_HEADER_SIZE + tagLen + 1u) return false;
+    if (recordLen < ((SSF_TLS_RECORD_HEADER_SIZE + tagLen) + 1u)) return false;
 
     /* Parse record header */
     if (record[0] != SSF_TLS_CT_APPLICATION) return false;
 
-    fragLen = ((uint16_t)record[3] << 8) | (uint16_t)record[4];
+    fragLen = ((uint16_t)record[3] << 8) | ((uint16_t)record[4]);
     if ((size_t)(SSF_TLS_RECORD_HEADER_SIZE + fragLen) != recordLen) return false;
-    if (fragLen < tagLen + 1u) return false;
+    if (fragLen < (tagLen + 1u)) return false;
     /* RFC 8446 Sec. 5.2: receivers MUST reject records whose ciphertext exceeds 2^14 + 256. */
-    if (fragLen > 0x4000u + 256u) return false;
+    if (fragLen > (0x4000u + 256u)) return false;
 
     innerLen = (size_t)fragLen - tagLen;
+    /* Is the inner plaintext over the RFC 8446 Sec. 5.4 limit of 2^14 + 1? */
+    if (innerLen > (0x4000u + 1u))
+    {
+        /* Yes, record overflow */
+        return false;
+    }
+    /* No, length acceptable */
     if (ptSize < innerLen) return false;
 
     ct = &record[SSF_TLS_RECORD_HEADER_SIZE];
@@ -482,7 +533,12 @@ bool SSFTLSRecordDecrypt(SSFTLSRecordState_t *state, const uint8_t *record, size
     /* Strip inner content type (last byte of plaintext). Skip zero-padding. */
     {
         size_t i = innerLen;
-        while (i > 0u && pt[i - 1u] == 0u) i--;
+        /* Is the last remaining byte zero padding? */
+        while ((i > 0u) && (pt[i - 1u] == 0u))
+        {
+            /* Yes, skip it */
+            i--;
+        }
         if (i == 0u) return false;
         i--;
         *contentType = pt[i];

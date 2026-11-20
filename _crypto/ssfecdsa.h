@@ -6,8 +6,8 @@
 /*                                                                                               */
 /* FIPS 186-4: Digital Signature Standard (DSS)                                                  */
 /* RFC 6979: Deterministic Usage of the DSA and ECDSA                                            */
-/* NIST SP 800-56A Rev. 3: Pair-Wise Key-Establishment Using Discrete Logarithm Cryptography    */
-/* SEC 1 v2: Elliptic Curve Cryptography                                                        */
+/* NIST SP 800-56A Rev. 3: Pair-Wise Key-Establishment Using Discrete Logarithm Cryptography     */
+/* SEC 1 v2: Elliptic Curve Cryptography                                                         */
 /*                                                                                               */
 /* BSD-3-Clause License                                                                          */
 /* Copyright 2024 Supurloop Software LLC                                                         */
@@ -77,14 +77,11 @@ bool SSFECDSAPubKeyIsValid(SSFECCurve_t curve, const uint8_t *pubKey, size_t pub
 
 /* --------------------------------------------------------------------------------------------- */
 /* External interface: ECDSA signing                                                             */
-/*                                                                                                */
-/* Disabling SSF_ECDSA_CONFIG_ENABLE_SIGN drops both the declaration here and the implementation */
-/* in ssfecdsa.c, along with the only ssfasn1 references in the module -- verify-only builds can */
-/* then omit the entire ssfasn1 module from the project.                                          */
 /* --------------------------------------------------------------------------------------------- */
 #if SSF_ECDSA_CONFIG_ENABLE_SIGN == 1
 bool SSFECDSASign(SSFECCurve_t curve, const uint8_t *privKey, size_t privKeyLen,
-                  const uint8_t *hash, size_t hashLen, uint8_t *sig, size_t sigSize, size_t *sigLen);
+                  const uint8_t *hash, size_t hashLen, uint8_t *sig, size_t sigSize,
+                  size_t *sigLen);
 #endif /* SSF_ECDSA_CONFIG_ENABLE_SIGN */
 
 /* --------------------------------------------------------------------------------------------- */
@@ -127,6 +124,12 @@ extern void (*_SSFECDSAKeyGenTestExitHook)(void *ctx,
                                            const SSFBN_t *d,
                                            const uint8_t *entropy, size_t entropyLen);
 extern void *_SSFECDSAKeyGenTestExitHookCtx;
+
+/* Test-only fault injection: Sign treats its first N attempts as r == 0. */
+extern uint8_t _SSFECDSASignTestForcedRetries;
+
+/* Test-only fault injection: 1 flips r, 2 flips d, 3 flips e before s. */
+extern uint8_t _SSFECDSASignTestFault;
 #endif /* SSF_CONFIG_ECDSA_UNIT_TEST */
 
 #ifdef __cplusplus

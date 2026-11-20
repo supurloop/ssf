@@ -33,9 +33,7 @@
 #include "ssfassert.h"
 #include "ssfaesccm.h"
 
-/* Cross-validate AES-CCM against OpenSSL on host builds where libcrypto is linked. Same gating */
-/* pattern as ssfaesctr_ut.c. When disabled (cross builds with -DSSF_CONFIG_HAVE_OPENSSL=0) the  */
-/* NIST SP 800-38C KATs above are the load-bearing correctness coverage.                         */
+/* Cross-validate against OpenSSL when libcrypto is linked, else SP 800-38C KATs cover it. */
 #if (SSF_CONFIG_HAVE_OPENSSL == 1) && (SSF_CONFIG_AESCCM_UNIT_TEST == 1)
 #define SSF_AESCCM_OSSL_VERIFY 1
 #else
@@ -68,8 +66,7 @@ static const EVP_CIPHER *_OSSLAESCCMCipher(size_t keyLen)
     }
 }
 
-/* Compute AES-CCM via OpenSSL's EVP path. CCM requires the total plaintext length to be set */
-/* before AAD is fed in (NULL-update with len = ptLen) and produces both ciphertext and tag. */
+/* Compute AES-CCM via OpenSSL EVP (pt length announced before AAD); outputs ct and tag. */
 static void _OSSLAESCCMEncrypt(const uint8_t *pt, size_t ptLen,
                                const uint8_t *nonce, size_t nonceLen,
                                const uint8_t *aad, size_t aadLen,
@@ -90,16 +87,13 @@ static void _OSSLAESCCMEncrypt(const uint8_t *pt, size_t ptLen,
     SSF_ASSERT(EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_IVLEN, (int)nonceLen, NULL) == 1);
     SSF_ASSERT(EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_TAG, (int)tagLen, NULL) == 1);
     SSF_ASSERT(EVP_EncryptInit_ex(ctx, NULL, NULL, key, nonce) == 1);
-    /* CCM requires the total plaintext length to be set up-front so B0 is formatted with the */
-    /* correct length encoding. The "only when AAD is used" wording in OpenSSL docs is        */
-    /* misleading; the data-feed update below depends on the announce having happened.        */
+    /* Announce the total pt length up-front so B0 encodes it; the data-feed update relies on it. */
     SSF_ASSERT(EVP_EncryptUpdate(ctx, NULL, &outL, NULL, (int)ptLen) == 1);
     if (aadLen > 0u)
     {
         SSF_ASSERT(EVP_EncryptUpdate(ctx, NULL, &outL, aad, (int)aadLen) == 1);
     }
-    /* Always call the data-feed update -- even at ptLen == 0 -- so the CBC-MAC tag is       */
-    /* finalized. NULL pointers would be re-interpreted as another AAD update; use a dummy.  */
+    /* Always feed data, even at ptLen 0, to finalize the tag; a dummy avoids a NULL AAD update. */
     SSF_ASSERT(EVP_EncryptUpdate(ctx, ctOut, &outL, ptIn, (int)ptLen) == 1);
     SSF_ASSERT((size_t)outL == ptLen);
     SSF_ASSERT(EVP_EncryptFinal_ex(ctx, ctOut + outL, &outL2) == 1);
@@ -108,8 +102,7 @@ static void _OSSLAESCCMEncrypt(const uint8_t *pt, size_t ptLen,
     EVP_CIPHER_CTX_free(ctx);
 }
 
-/* Decrypt + verify via OpenSSL. Returns true iff the tag verified. CCM verifies the tag inside */
-/* DecryptUpdate (not Final), so its return value is the auth result.                            */
+/* Decrypt + verify via OpenSSL; true iff the tag verified (checked in DecryptUpdate). */
 static bool _OSSLAESCCMDecrypt(const uint8_t *ct, size_t ctLen,
                                const uint8_t *nonce, size_t nonceLen,
                                const uint8_t *aad, size_t aadLen,
@@ -145,14 +138,7 @@ static bool _OSSLAESCCMDecrypt(const uint8_t *ct, size_t ctLen,
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Random fuzz across (keyLen x nonceLen x tagLen x ptLen x aadLen). Each cell:                  */
-/*   - draws fresh random key/nonce/aad/pt                                                       */
-/*   - encrypts via SSF, encrypts via OpenSSL, asserts byte-equal ct AND tag                     */
-/*   - decrypts SSF ciphertext via OpenSSL and OpenSSL ciphertext via SSF, both must succeed     */
-/*   - tampers ct[0] / aad[0] / tag[0] (when each is non-empty) and asserts BOTH SSF and OpenSSL */
-/*     reject the tampered input                                                                  */
-/* This catches divergence in CBC-MAC tag formation, CTR keystream, B0/A_i formatting, AAD       */
-/* length encoding, and partial-block padding that wouldn't surface in the fixed NIST KATs.       */
+/* Random fuzz over key/nonce/tag/pt/AAD sizes: SSF vs OpenSSL, cross-decrypt, tamper. */
 /* --------------------------------------------------------------------------------------------- */
 static void _VerifyAESCCMAgainstOpenSSLRandom(void)
 {
@@ -263,15 +249,31 @@ static void _VerifyAESCCMAgainstOpenSSLRandom(void)
 }
 #endif /* SSF_AESCCM_OSSL_VERIFY */
 
+/* --------------------------------------------------------------------------------------------- */
+/* AUDIT CCM-3: scrub-hook callback; counts calls and any buffer that is not all zero. */
+/* --------------------------------------------------------------------------------------------- */
+static uint32_t _scrubCalls;
+static uint32_t _scrubDirty;
+static void _ScrubCheck(const void *buf, size_t len)
+{
+    const uint8_t *b = (const uint8_t *)buf;
+    size_t i;
+
+    SSF_ASSERT(buf != NULL);
+    _scrubCalls++;
+    for (i = 0; i < len; i++)
+    {
+        if (b[i] != 0u)
+        {
+            _scrubDirty++;
+            break;
+        }
+    }
+}
+
 void SSFAESCCMUnitTest(void)
 {
-    /* ---- (Hardening) Reject a message too long for the L-byte length / counter field ---- */
-    /* With a 13-byte nonce, L = 15 - 13 = 2, so the payload length and the CTR counter are each  */
-    /* encoded in only 2 bytes -- the largest representable payload is 2^16 - 1 = 65535 bytes. A   */
-    /* 65536-byte message would silently truncate the B0 length field and wrap the counter field,  */
-    /* reusing keystream within one message (a catastrophic AEAD break, RFC 3610 Sec. 2.2). Encrypt */
-    /* must reject via SSF_REQUIRE; decrypt (whose ctLen is attacker-controlled) must reject with   */
-    /* false rather than halt.                                                                       */
+    /* (Hardening) L = 2: a 65536-byte payload overflows: Encrypt asserts, Decrypt returns false */
     {
         static uint8_t big[65536];
         static uint8_t out[65536];
@@ -294,11 +296,7 @@ void SSFAESCCMUnitTest(void)
                                     out, sizeof(out)) == false);
     }
 
-    /* ---- (Hardening) Reject AAD longer than the 2-byte CCM length encoding supports ---- */
-    /* RFC 3610 Sec. 2.2 encodes an AAD length < 0xFF00 in 2 bytes; larger lengths require the      */
-    /* extended 6/10-byte forms this module does not implement. An aadLen >= 0xFF00 would silently   */
-    /* truncate to its low 16 bits, breaking the injective MAC length encoding. Both entry points    */
-    /* must reject it (AAD size is a caller contract).                                                */
+    /* (Hardening) aadLen >= 0xFF00 needs the unsupported long length form; both APIs assert */
     {
         static uint8_t aadBig[0xFF00];
         static const uint8_t key[16] = { 0 };
@@ -323,12 +321,6 @@ void SSFAESCCMUnitTest(void)
     }
 
     /* ---- NIST SP 800-38C Example 1: AES-128, Nonce=7, Tag=4 ---- */
-    /* Key: 40414243 44454647 48494a4b 4c4d4e4f */
-    /* Nonce: 10111213 141516 */
-    /* AAD: 00010203 04050607 */
-    /* Plaintext: 20212223 */
-    /* Expected CT: 7162015b */
-    /* Expected Tag: 4dac255d */
     {
         static const uint8_t key[] = {
             0x40u, 0x41u, 0x42u, 0x43u, 0x44u, 0x45u, 0x46u, 0x47u,
@@ -354,12 +346,6 @@ void SSFAESCCMUnitTest(void)
     }
 
     /* ---- NIST SP 800-38C Example 2: AES-128, Nonce=8, Tag=6 ---- */
-    /* Key: 40414243 44454647 48494a4b 4c4d4e4f */
-    /* Nonce: 10111213 14151617 */
-    /* AAD: 00010203 04050607 08090a0b 0c0d0e0f */
-    /* Plaintext: 20212223 24252627 28292a2b 2c2d2e2f */
-    /* Expected CT: d2a1f0e0 51ea5f62 081a7792 073d593d */
-    /* Expected Tag: 1fc64fbf accd */
     {
         static const uint8_t key[] = {
             0x40u, 0x41u, 0x42u, 0x43u, 0x44u, 0x45u, 0x46u, 0x47u,
@@ -396,12 +382,6 @@ void SSFAESCCMUnitTest(void)
     }
 
     /* ---- NIST SP 800-38C Example 3: AES-128, Nonce=12, Tag=8 ---- */
-    /* Key: 40414243 44454647 48494a4b 4c4d4e4f */
-    /* Nonce: 10111213 14151617 18191a1b */
-    /* AAD: 00010203 04050607 08090a0b 0c0d0e0f 10111213 */
-    /* Plaintext: 20212223 24252627 28292a2b 2c2d2e2f 30313233 34353637 */
-    /* Expected CT: e3b201a9 f5b71a7a 9b1ceaec cd97e70b 6176aad9 a4428aa5 */
-    /* Expected Tag: 484392fb c1b09951 */
     {
         static const uint8_t key[] = {
             0x40u, 0x41u, 0x42u, 0x43u, 0x44u, 0x45u, 0x46u, 0x47u,
@@ -526,6 +506,47 @@ void SSFAESCCMUnitTest(void)
                    key, sizeof(key), tag, sizeof(tag), NULL, 0) == true);
     }
 
+    /* AUDIT CCM-2: counter 2^32 + 0x0102 with L = 5 must not wrap: field reads 01 00 00 01 02 */
+    {
+        static const uint8_t nonce10[10] = {
+            0x50u, 0x51u, 0x52u, 0x53u, 0x54u, 0x55u, 0x56u, 0x57u, 0x58u, 0x59u
+        };
+        static const uint8_t want[16] = {
+            0x04u, /* flags = L - 1 */
+            0x50u, 0x51u, 0x52u, 0x53u, 0x54u, 0x55u, 0x56u, 0x57u, 0x58u, 0x59u,
+            0x01u, 0x00u, 0x00u, 0x01u, 0x02u /* counter, L = 5 bytes */
+        };
+        uint8_t a[16];
+
+        _SSFAESCCMFormatCtrForTest(a, nonce10, sizeof(nonce10), ((uint64_t)1u << 32) + 0x0102u);
+        SSF_ASSERT(memcmp(a, want, sizeof(want)) == 0);
+    }
+
+    /* AUDIT CCM-1: auth-only decrypt (pt NULL, ctLen 0) with a bad tag returns false, no memset */
+    {
+        static const uint8_t key[16] = {
+            0x10u, 0x21u, 0x32u, 0x43u, 0x54u, 0x65u, 0x76u, 0x87u,
+            0x98u, 0xA9u, 0xBAu, 0xCBu, 0xDCu, 0xEDu, 0xFEu, 0x0Fu
+        };
+        static const uint8_t nonce[13] = {
+            0x01u, 0x02u, 0x03u, 0x04u, 0x05u, 0x06u, 0x07u,
+            0x08u, 0x09u, 0x0Au, 0x0Bu, 0x0Cu, 0x0Du
+        };
+        static const uint8_t aad[20] = {
+            0xA0u, 0xA1u, 0xA2u, 0xA3u, 0xA4u, 0xA5u, 0xA6u, 0xA7u, 0xA8u, 0xA9u,
+            0xAAu, 0xABu, 0xACu, 0xADu, 0xAEu, 0xAFu, 0xB0u, 0xB1u, 0xB2u, 0xB3u
+        };
+        uint8_t tag[8];
+
+        SSFAESCCMEncrypt(NULL, 0, nonce, sizeof(nonce), aad, sizeof(aad), key, sizeof(key),
+                         tag, sizeof(tag), NULL, 0);
+        SSF_ASSERT(SSFAESCCMDecrypt(NULL, 0, nonce, sizeof(nonce), aad, sizeof(aad), key,
+                                    sizeof(key), tag, sizeof(tag), NULL, 0) == true);
+        tag[3] ^= 0x01u;
+        SSF_ASSERT(SSFAESCCMDecrypt(NULL, 0, nonce, sizeof(nonce), aad, sizeof(aad), key,
+                                    sizeof(key), tag, sizeof(tag), NULL, 0) == false);
+    }
+
     /* ---- 16-byte tag (TLS 1.3 CCM) ---- */
     {
         static const uint8_t key[16] = {
@@ -551,5 +572,35 @@ void SSFAESCCMUnitTest(void)
 #if SSF_AESCCM_OSSL_VERIFY == 1
     _VerifyAESCCMAgainstOpenSSLRandom();
 #endif
+
+    /* ---- AUDIT CCM-3: secret locals are wiped before return (scrub hook sees zeros) ---- */
+    {
+        _scrubCalls = 0u;
+        _scrubDirty = 0u;
+        static const uint8_t key[16] = { 0x66u };
+        static const uint8_t nonce[13] = { 0x77u };
+        uint8_t pt[40];
+        uint8_t ct[40];
+        uint8_t out[40];
+        uint8_t tag[16];
+        uint32_t calls;
+
+        memset(pt, 0x88, sizeof(pt));
+        _SSFAESCCMScrubTestHook = _ScrubCheck;
+        SSFAESCCMEncrypt(pt, sizeof(pt), nonce, sizeof(nonce), NULL, 0, key, sizeof(key), tag,
+                         sizeof(tag), ct, sizeof(ct));
+        calls = _scrubCalls;
+        SSF_ASSERT(calls > 0u);
+        SSF_ASSERT(SSFAESCCMDecrypt(ct, sizeof(ct), nonce, sizeof(nonce), NULL, 0, key,
+                                    sizeof(key), tag, sizeof(tag), out, sizeof(out)) == true);
+        SSF_ASSERT(_scrubCalls > calls);
+        calls = _scrubCalls;
+        tag[0] ^= 1u;
+        SSF_ASSERT(SSFAESCCMDecrypt(ct, sizeof(ct), nonce, sizeof(nonce), NULL, 0, key,
+                                    sizeof(key), tag, sizeof(tag), out, sizeof(out)) == false);
+        _SSFAESCCMScrubTestHook = NULL;
+        SSF_ASSERT(_scrubCalls > calls);
+        SSF_ASSERT(_scrubDirty == 0u);
+    }
 }
 #endif /* SSF_CONFIG_AESCCM_UNIT_TEST */

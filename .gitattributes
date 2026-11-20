@@ -1,2 +1,25 @@
+# The repository stores text with LF. Working copies get the platform's native endings
+# (CRLF on Windows, LF elsewhere), except for the files pinned below.
+* text=auto
+
+# C sources stay LF on every platform
 *.c text eol=lf
 *.h text eol=lf
+
+# Run by sh, Docker, ninja, perl or python, which reject or mishandle CR
+*.sh text eol=lf
+*.env text eol=lf
+*.ninja text eol=lf
+*.in text eol=lf
+*.pl text eol=lf
+*.py text eol=lf
+Dockerfile text eol=lf
+
+# Visual Studio files stay CRLF on every platform
+*.sln text eol=crlf
+*.vcxproj text eol=crlf
+*.vcxproj.filters text eol=crlf
+*.vcxproj.user text eol=crlf
+
+# NIST CAVS response files are reference data, kept byte for byte
+*.rsp -text

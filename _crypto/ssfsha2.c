@@ -36,10 +36,19 @@
 #include "ssfcrypt.h"
 #include "ssfusexport.h"
 
+#if SSF_CONFIG_SHA2_UNIT_TEST == 1
+/* Test-only hook fired after each secret local is wiped; NULL in production. */
+void (*_SSFSHA2ScrubTestHook)(const void *buf, size_t len) = NULL;
+#define _SSF_SHA2_SCRUB_HOOK(b) \
+    do { if (_SSFSHA2ScrubTestHook != NULL) _SSFSHA2ScrubTestHook((b), sizeof(b)); } while (0)
+#else
+#define _SSF_SHA2_SCRUB_HOOK(b) do { } while (0)
+#endif /* SSF_CONFIG_SHA2_UNIT_TEST */
+
 /* --------------------------------------------------------------------------------------------- */
 /* Local defines                                                                                 */
 /* --------------------------------------------------------------------------------------------- */
-#define RR(x, n, b) ((x >> n) | (x << (b - n)))
+#define RR(x, n, b) (((x) >> (n)) | ((x) << ((b) - (n))))
 #define RR32(x, n) RR(x, n, 32)
 #define RR64(x, n) RR(x, n, 64)
 
@@ -131,9 +140,17 @@ void SSFSHA2_64(const uint8_t *in, uint32_t inLen, uint8_t *out, uint32_t outSiz
     SSF_ASSERT(((hashBitSize == 512) && ((truncationBitSize == 0) || (truncationBitSize == 256) ||
                                          (truncationBitSize == 224))) ||
                ((hashBitSize == 384) && (truncationBitSize == 0)));
+    /* Is the output untruncated (SHA-512 or SHA-384)? */
     if (((hashBitSize == 512) && (truncationBitSize == 0)) || (hashBitSize == 384))
-    { SSF_ASSERT(outSize >= (uint32_t)(hashBitSize >> 3)); }
-    else SSF_ASSERT(outSize >= (uint32_t)(truncationBitSize >> 3));
+    {
+        /* Yes, out must hold the full hash */
+        SSF_ASSERT(outSize >= (uint32_t)(hashBitSize >> 3));
+    }
+    else
+    {
+        /* No, out must hold the truncated hash */
+        SSF_ASSERT(outSize >= (uint32_t)(truncationBitSize >> 3));
+    }
 
     SSFSHA2_64Begin(&context, hashBitSize, truncationBitSize);
     SSFSHA2_64Update(&context, in, inLen);
@@ -145,17 +162,29 @@ void SSFSHA2_64(const uint8_t *in, uint32_t inLen, uint8_t *out, uint32_t outSiz
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFSHA2_32Block(uint32_t *hs, const uint8_t *block)
 {
-    uint32_t a, b, c, d, e, f, g, hh;
-    uint32_t ch, temp1, maj, temp2;
-    uint32_t s0, s1;
-    uint32_t i, j;
+    uint32_t a;
+    uint32_t b;
+    uint32_t c;
+    uint32_t d;
+    uint32_t e;
+    uint32_t f;
+    uint32_t g;
+    uint32_t hh;
+    uint32_t ch;
+    uint32_t temp1;
+    uint32_t maj;
+    uint32_t temp2;
+    uint32_t s0;
+    uint32_t s1;
+    uint32_t i;
+    uint32_t j;
     uint32_t w[SSF_SHA256_BLOCK_SIZE_BYTES];
 
+    /* Big-endian word loads independent of host byte order */
     for (i = 0; i < 16; i++)
     {
         j = i << 2;
-        memcpy(&w[i], &block[j], sizeof(uint32_t));
-        w[i] = ntohl(w[i]);
+        w[i] = SSF_GETU32BE(&block[j]);
     }
 
     for (i = 16; i < SSF_SHA256_BLOCK_SIZE_BYTES; i++)
@@ -170,7 +199,7 @@ static void _SSFSHA2_32Block(uint32_t *hs, const uint8_t *block)
     for (i = 0; i < SSF_SHA256_BLOCK_SIZE_BYTES; i++)
     {
         s1 = (RR32(e, 6)) ^ (RR32(e, 11)) ^ (RR32(e, 25));
-        ch = (e & f) ^ (~e & g);
+        ch = (e & f) ^ ((~e) & g);
         temp1 = hh + s1 + ch + k_32[i] + w[i];
         s0 = (RR32(a, 2)) ^ (RR32(a, 13)) ^ (RR32(a, 22));
         maj = (a & b) ^ (a & c) ^ (b & c);
@@ -180,6 +209,8 @@ static void _SSFSHA2_32Block(uint32_t *hs, const uint8_t *block)
     }
 
     hs[0] += a; hs[1] += b; hs[2] += c; hs[3] += d; hs[4] += e; hs[5] += f; hs[6] += g; hs[7] += hh;
+    SSFCryptSecureZero(w, sizeof(w));
+    _SSF_SHA2_SCRUB_HOOK(w);
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -187,16 +218,29 @@ static void _SSFSHA2_32Block(uint32_t *hs, const uint8_t *block)
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFSHA2_64Block(uint64_t *hs, const uint8_t *block)
 {
-    uint64_t a, b, c, d, e, f, g, hh;
-    uint64_t ch, temp1, maj, temp2;
-    uint64_t s0, s1;
-    uint32_t i, j;
+    uint64_t a;
+    uint64_t b;
+    uint64_t c;
+    uint64_t d;
+    uint64_t e;
+    uint64_t f;
+    uint64_t g;
+    uint64_t hh;
+    uint64_t ch;
+    uint64_t temp1;
+    uint64_t maj;
+    uint64_t temp2;
+    uint64_t s0;
+    uint64_t s1;
+    uint32_t i;
+    uint32_t j;
     uint64_t w[SSF_SHA512_INTERNAL_SIZE_BYTES];
 
+    /* Big-endian word loads independent of host byte order */
     for (i = 0; i < 16; i++)
     {
         j = i << 3;
-        memcpy(&w[i], &block[j], sizeof(uint64_t)); w[i] = ntohll(w[i]);
+        w[i] = SSF_GETU64BE(&block[j]);
     }
 
     for (i = 16; i < 80; i++)
@@ -211,7 +255,7 @@ static void _SSFSHA2_64Block(uint64_t *hs, const uint8_t *block)
     for (i = 0; i < 80; i++)
     {
         s1 = (RR64(e, 14)) ^ (RR64(e, 18)) ^ (RR64(e, 41));
-        ch = (e & f) ^ (~e & g);
+        ch = (e & f) ^ ((~e) & g);
         temp1 = hh + s1 + ch + k_64[i] + w[i];
         s0 = (RR64(a, 28)) ^ (RR64(a, 34)) ^ (RR64(a, 39));
         maj = (a & b) ^ (a & c) ^ (b & c);
@@ -221,7 +265,31 @@ static void _SSFSHA2_64Block(uint64_t *hs, const uint8_t *block)
     }
 
     hs[0] += a; hs[1] += b; hs[2] += c; hs[3] += d; hs[4] += e; hs[5] += f; hs[6] += g; hs[7] += hh;
+    SSFCryptSecureZero(w, sizeof(w));
+    _SSF_SHA2_SCRUB_HOOK(w);
 }
+
+/* SHA-256 and SHA-224 initial hash values (FIPS 180-4 5.3.3, 5.3.2) */
+static const uint32_t _ssfSHA2_32IV[2][8] =
+{
+    { 0x6a09e667u, 0xbb67ae85u, 0x3c6ef372u, 0xa54ff53au,
+      0x510e527fu, 0x9b05688cu, 0x1f83d9abu, 0x5be0cd19u },
+    { 0xc1059ed8u, 0x367cd507u, 0x3070dd17u, 0xf70e5939u,
+      0xffc00b31u, 0x68581511u, 0x64f98fa7u, 0xbefa4fa4u }
+};
+
+/* SHA-512, SHA-384, SHA-512/256 and SHA-512/224 initial hash values (FIPS 180-4 5.3.4-5.3.6) */
+static const uint64_t _ssfSHA2_64IV[4][8] =
+{
+    { 0x6a09e667f3bcc908ull, 0xbb67ae8584caa73bull, 0x3c6ef372fe94f82bull, 0xa54ff53a5f1d36f1ull,
+      0x510e527fade682d1ull, 0x9b05688c2b3e6c1full, 0x1f83d9abfb41bd6bull, 0x5be0cd19137e2179ull },
+    { 0xcbbb9d5dc1059ed8ull, 0x629a292a367cd507ull, 0x9159015a3070dd17ull, 0x152fecd8f70e5939ull,
+      0x67332667ffc00b31ull, 0x8eb44a8768581511ull, 0xdb0c2e0d64f98fa7ull, 0x47b5481dbefa4fa4ull },
+    { 0x22312194FC2BF72Cull, 0x9F555FA3C84C64C2ull, 0x2393B86B6F53B151ull, 0x963877195940EABDull,
+      0x96283EE2A88EFFE3ull, 0xBE5E1E2553863992ull, 0x2B0199FC2C85B8AAull, 0x0EB72DDC81C52CA2ull },
+    { 0x8C3D37C819544DA2ull, 0x73E1996689DCD4D6ull, 0x1DFAB7AE32FF9C82ull, 0x679DD514582F9FCFull,
+      0x0F6D2B697BD44DA8ull, 0x77E36F7304C48942ull, 0x3F9D85A86A1D36C8ull, 0x1112E6AD91D692A1ull }
+};
 
 /* --------------------------------------------------------------------------------------------- */
 /* Begins a SHA256 or SHA224 incremental hash context.                                           */
@@ -234,22 +302,8 @@ void SSFSHA2_32Begin(SSFSHA2_32Context_t *context, uint16_t hashBitSize)
     memset(context, 0, sizeof(SSFSHA2_32Context_t));
     context->hashBitSize = hashBitSize;
 
-    if (hashBitSize == 256)
-    {
-        /* SHA-256 */
-        context->h[0] = 0x6a09e667; context->h[1] = 0xbb67ae85;
-        context->h[2] = 0x3c6ef372; context->h[3] = 0xa54ff53a;
-        context->h[4] = 0x510e527f; context->h[5] = 0x9b05688c;
-        context->h[6] = 0x1f83d9ab; context->h[7] = 0x5be0cd19;
-    }
-    else
-    {
-        /* SHA-224 */
-        context->h[0] = 0xc1059ed8; context->h[1] = 0x367cd507;
-        context->h[2] = 0x3070dd17; context->h[3] = 0xf70e5939;
-        context->h[4] = 0xffc00b31; context->h[5] = 0x68581511;
-        context->h[6] = 0x64f98fa7; context->h[7] = 0xbefa4fa4;
-    }
+    /* Row 0 is SHA-256, row 1 SHA-224 */
+    memcpy(context->h, _ssfSHA2_32IV[(hashBitSize == 256u) ? 0u : 1u], sizeof(context->h));
     context->magic = SSF_SHA2_32_CONTEXT_MAGIC;
 }
 
@@ -262,6 +316,7 @@ void SSFSHA2_32Update(SSFSHA2_32Context_t *context, const uint8_t *in, uint32_t 
 
     SSF_ASSERT(context != NULL);
     SSF_ASSERT(context->magic == SSF_SHA2_32_CONTEXT_MAGIC);
+    SSF_REQUIRE(context->bufLen < SSF_SHA256_BLOCK_SIZE_BYTES);
     SSF_ASSERT((in != NULL) || (inLen == 0));
 
     while (inLen > 0)
@@ -271,6 +326,7 @@ void SSFSHA2_32Update(SSFSHA2_32Context_t *context, const uint8_t *in, uint32_t 
 
         memcpy(&context->buf[context->bufLen], in, copyLen);
         context->bufLen += copyLen;
+        SSF_REQUIRE(context->totalBits <= (UINT64_MAX - (((uint64_t)copyLen) << 3)));
         context->totalBits += ((uint64_t)copyLen) << 3;
         in += copyLen;
         inLen -= copyLen;
@@ -290,10 +346,10 @@ void SSFSHA2_32End(SSFSHA2_32Context_t *context, uint8_t *out, uint32_t outSize)
 {
     uint8_t pad[SSF_SHA256_BLOCK_SIZE_BYTES];
     uint64_t totalBits;
-    uint32_t tmp;
 
     SSF_ASSERT(context != NULL);
     SSF_ASSERT(context->magic == SSF_SHA2_32_CONTEXT_MAGIC);
+    SSF_REQUIRE(context->bufLen < SSF_SHA256_BLOCK_SIZE_BYTES);
     SSF_ASSERT(out != NULL);
     SSF_ASSERT(outSize >= (uint32_t)(context->hashBitSize >> 3));
 
@@ -319,19 +375,22 @@ void SSFSHA2_32End(SSFSHA2_32Context_t *context, uint8_t *out, uint32_t outSize)
     SSF_PUTU64BE(&pad[SSF_SHA256_BLOCK_SIZE_BYTES - 8], totalBits);
     _SSFSHA2_32Block(context->h, pad);
 
-    /* Accumulate hash into out buffer */
-    tmp = htonl(context->h[0]); memcpy(&out[0],  &tmp, sizeof(uint32_t));
-    tmp = htonl(context->h[1]); memcpy(&out[4],  &tmp, sizeof(uint32_t));
-    tmp = htonl(context->h[2]); memcpy(&out[8],  &tmp, sizeof(uint32_t));
-    tmp = htonl(context->h[3]); memcpy(&out[12], &tmp, sizeof(uint32_t));
-    tmp = htonl(context->h[4]); memcpy(&out[16], &tmp, sizeof(uint32_t));
-    tmp = htonl(context->h[5]); memcpy(&out[20], &tmp, sizeof(uint32_t));
-    tmp = htonl(context->h[6]); memcpy(&out[24], &tmp, sizeof(uint32_t));
+    /* Accumulate hash into out buffer as big-endian words */
+    SSF_PUTU32BE(&out[0], context->h[0]);
+    SSF_PUTU32BE(&out[4], context->h[1]);
+    SSF_PUTU32BE(&out[8], context->h[2]);
+    SSF_PUTU32BE(&out[12], context->h[3]);
+    SSF_PUTU32BE(&out[16], context->h[4]);
+    SSF_PUTU32BE(&out[20], context->h[5]);
+    SSF_PUTU32BE(&out[24], context->h[6]);
+
+    /* Is this full SHA-256 rather than SHA-224? */
     if (context->hashBitSize != 224)
     {
-        tmp = htonl(context->h[7]);
-        memcpy(&out[28], &tmp, sizeof(uint32_t));
+        /* Yes, emit the eighth word */
+        SSF_PUTU32BE(&out[28], context->h[7]);
     }
+    /* No, SHA-224 stops after seven words */
 
     /* Zeroize pad -- it holds trailing message bytes and the encoded bit length. */
     SSFCryptSecureZero(pad, sizeof(pad));
@@ -343,8 +402,11 @@ void SSFSHA2_32End(SSFSHA2_32Context_t *context, uint8_t *out, uint32_t outSize)
 /* --------------------------------------------------------------------------------------------- */
 /* Begins a SHA512, SHA384, SHA512/224, or SHA512/256 incremental hash context.                  */
 /* --------------------------------------------------------------------------------------------- */
-void SSFSHA2_64Begin(SSFSHA2_64Context_t *context, uint16_t hashBitSize, uint16_t truncationBitSize)
+void SSFSHA2_64Begin(SSFSHA2_64Context_t *context, uint16_t hashBitSize,
+                     uint16_t truncationBitSize)
 {
+    uint8_t row;
+
     SSF_ASSERT(context != NULL);
     SSF_ASSERT(((hashBitSize == 512) && ((truncationBitSize == 0) || (truncationBitSize == 256) ||
                                          (truncationBitSize == 224))) ||
@@ -354,38 +416,30 @@ void SSFSHA2_64Begin(SSFSHA2_64Context_t *context, uint16_t hashBitSize, uint16_
     context->hashBitSize = hashBitSize;
     context->truncationBitSize = truncationBitSize;
 
-    if ((hashBitSize == 512) && (truncationBitSize == 0))
+    /* Is it SHA-384? (rows: SHA-512, SHA-384, SHA-512/256, SHA-512/224) */
+    if (hashBitSize == 384)
     {
-        /* SHA-512 */
-        context->h[0] = 0x6a09e667f3bcc908; context->h[1] = 0xbb67ae8584caa73b;
-        context->h[2] = 0x3c6ef372fe94f82b; context->h[3] = 0xa54ff53a5f1d36f1;
-        context->h[4] = 0x510e527fade682d1; context->h[5] = 0x9b05688c2b3e6c1f;
-        context->h[6] = 0x1f83d9abfb41bd6b; context->h[7] = 0x5be0cd19137e2179;
+        /* Yes */
+        row = 1u;
     }
-    else if (hashBitSize == 384)
+    /* No, is it SHA-512 untruncated? */
+    else if (truncationBitSize == 0)
     {
-        /* SHA-384 */
-        context->h[0] = 0xcbbb9d5dc1059ed8; context->h[1] = 0x629a292a367cd507;
-        context->h[2] = 0x9159015a3070dd17; context->h[3] = 0x152fecd8f70e5939;
-        context->h[4] = 0x67332667ffc00b31; context->h[5] = 0x8eb44a8768581511;
-        context->h[6] = 0xdb0c2e0d64f98fa7; context->h[7] = 0x47b5481dbefa4fa4;
+        /* Yes */
+        row = 0u;
     }
+    /* No, is it SHA-512/256? */
     else if (truncationBitSize == 256)
     {
-        /* SHA-512/256 */
-        context->h[0] = 0x22312194FC2BF72C; context->h[1] = 0x9F555FA3C84C64C2;
-        context->h[2] = 0x2393B86B6F53B151; context->h[3] = 0x963877195940EABD;
-        context->h[4] = 0x96283EE2A88EFFE3; context->h[5] = 0xBE5E1E2553863992;
-        context->h[6] = 0x2B0199FC2C85B8AA; context->h[7] = 0x0EB72DDC81C52CA2;
+        /* Yes */
+        row = 2u;
     }
     else
     {
-        /* SHA-512/224 */
-        context->h[0] = 0x8C3D37C819544DA2; context->h[1] = 0x73E1996689DCD4D6;
-        context->h[2] = 0x1DFAB7AE32FF9C82; context->h[3] = 0x679DD514582F9FCF;
-        context->h[4] = 0x0F6D2B697BD44DA8; context->h[5] = 0x77E36F7304C48942;
-        context->h[6] = 0x3F9D85A86A1D36C8; context->h[7] = 0x1112E6AD91D692A1;
+        /* No, SHA-512/224 */
+        row = 3u;
     }
+    memcpy(context->h, _ssfSHA2_64IV[row], sizeof(context->h));
     context->magic = SSF_SHA2_64_CONTEXT_MAGIC;
 }
 
@@ -398,6 +452,7 @@ void SSFSHA2_64Update(SSFSHA2_64Context_t *context, const uint8_t *in, uint32_t 
 
     SSF_ASSERT(context != NULL);
     SSF_ASSERT(context->magic == SSF_SHA2_64_CONTEXT_MAGIC);
+    SSF_REQUIRE(context->bufLen < SSF_SHA512_BLOCK_SIZE_BYTES);
     SSF_ASSERT((in != NULL) || (inLen == 0));
 
     while (inLen > 0)
@@ -407,6 +462,14 @@ void SSFSHA2_64Update(SSFSHA2_64Context_t *context, const uint8_t *in, uint32_t 
 
         memcpy(&context->buf[context->bufLen], in, copyLen);
         context->bufLen += copyLen;
+
+        /* Does this chunk carry out of the low 64 bits of the 128-bit length? */
+        if (context->totalBits > (UINT64_MAX - (((uint64_t)copyLen) << 3)))
+        {
+            /* Yes, carry into the high word (FIPS 180-4 Sec. 5.1.2) */
+            context->totalBitsHi++;
+        }
+        /* No, the low word alone holds the count */
         context->totalBits += ((uint64_t)copyLen) << 3;
         in += copyLen;
         inLen -= copyLen;
@@ -426,15 +489,23 @@ void SSFSHA2_64End(SSFSHA2_64Context_t *context, uint8_t *out, uint32_t outSize)
 {
     uint8_t pad[SSF_SHA512_BLOCK_SIZE_BYTES];
     uint64_t totalBits;
-    uint64_t tmp;
 
     SSF_ASSERT(context != NULL);
     SSF_ASSERT(context->magic == SSF_SHA2_64_CONTEXT_MAGIC);
+    SSF_REQUIRE(context->bufLen < SSF_SHA512_BLOCK_SIZE_BYTES);
     SSF_ASSERT(out != NULL);
+    /* Is the output untruncated (SHA-512 or SHA-384)? */
     if (((context->hashBitSize == 512) && (context->truncationBitSize == 0)) ||
         (context->hashBitSize == 384))
-    { SSF_ASSERT(outSize >= (uint32_t)(context->hashBitSize >> 3)); }
-    else SSF_ASSERT(outSize >= (uint32_t)(context->truncationBitSize >> 3));
+    {
+        /* Yes, out must hold the full hash */
+        SSF_ASSERT(outSize >= (uint32_t)(context->hashBitSize >> 3));
+    }
+    else
+    {
+        /* No, out must hold the truncated hash */
+        SSF_ASSERT(outSize >= (uint32_t)(context->truncationBitSize >> 3));
+    }
 
     totalBits = context->totalBits;
 
@@ -454,30 +525,46 @@ void SSFSHA2_64End(SSFSHA2_64Context_t *context, uint8_t *out, uint32_t outSize)
         pad[context->bufLen] = 0x80;
     }
 
-    /* Append big-endian message bit length in last 16 bytes of pad (upper 8 bytes already zero). */
+    /* Append the 128-bit big-endian message bit length in the last 16 bytes of pad */
+    SSF_PUTU64BE(&pad[SSF_SHA512_BLOCK_SIZE_BYTES - 16], context->totalBitsHi);
     SSF_PUTU64BE(&pad[SSF_SHA512_BLOCK_SIZE_BYTES - 8], totalBits);
     _SSFSHA2_64Block(context->h, pad);
 
-    /* Accumulate hash into out buffer */
-    tmp = htonll(context->h[0]); memcpy(&out[0],  &tmp, sizeof(uint64_t));
-    tmp = htonll(context->h[1]); memcpy(&out[8],  &tmp, sizeof(uint64_t));
-    tmp = htonll(context->h[2]); memcpy(&out[16], &tmp, sizeof(uint64_t));
-    tmp = htonll(context->h[3]);
+    /* Accumulate hash into out buffer as big-endian words */
+    SSF_PUTU64BE(&out[0], context->h[0]);
+
+    SSF_PUTU64BE(&out[8], context->h[1]);
+    SSF_PUTU64BE(&out[16], context->h[2]);
+
+    /* Is this SHA-512/224? */
     if (context->truncationBitSize == 224)
     {
-        memcpy(&out[24], &tmp, 4);
+        /* Yes, only the high 32 bits of the fourth word are output */
+        SSF_PUTU32BE(&out[24], (uint32_t)(context->h[3] >> 32));
     }
-    else memcpy(&out[24], &tmp, sizeof(uint64_t));
+    else
+    {
+        /* No, the whole fourth word is output */
+        SSF_PUTU64BE(&out[24], context->h[3]);
+    }
+
+    /* Is the output longer than 256 bits (SHA-384 or SHA-512)? */
     if (context->truncationBitSize == 0)
     {
-        tmp = htonll(context->h[4]); memcpy(&out[32], &tmp, sizeof(uint64_t));
-        tmp = htonll(context->h[5]); memcpy(&out[40], &tmp, sizeof(uint64_t));
+        /* Yes, words five and six */
+        SSF_PUTU64BE(&out[32], context->h[4]);
+        SSF_PUTU64BE(&out[40], context->h[5]);
     }
+    /* No, SHA-512/224 and SHA-512/256 stop at four words */
+
+    /* Is this untruncated SHA-512? */
     if ((context->hashBitSize == 512) && (context->truncationBitSize == 0))
     {
-        tmp = htonll(context->h[6]); memcpy(&out[48], &tmp, sizeof(uint64_t));
-        tmp = htonll(context->h[7]); memcpy(&out[56], &tmp, sizeof(uint64_t));
+        /* Yes, words seven and eight */
+        SSF_PUTU64BE(&out[48], context->h[6]);
+        SSF_PUTU64BE(&out[56], context->h[7]);
     }
+    /* No, SHA-384 stops at six words */
 
     /* Zeroize pad -- it holds trailing message bytes and the encoded bit length. */
     SSFCryptSecureZero(pad, sizeof(pad));

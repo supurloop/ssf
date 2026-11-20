@@ -47,20 +47,25 @@ extern "C" {
 
 /* Per-module option files. Each is also includable directly by its module's source. */
 #include "ssfasn1_opt.h"
+#include "ssfbase64url_opt.h"
 #include "ssfbfifo_opt.h"
 #include "ssfbn_opt.h"
 #include "ssfcfg_opt.h"
 #include "ssfcli_opt.h"
+#include "ssfcms_opt.h"
 #include "ssfdtime_opt.h"
 #include "ssfec_opt.h"
 #include "ssfecdsa_opt.h"
+#include "ssfed25519_opt.h"
 #include "ssfgobj_opt.h"
 #include "ssfheap_opt.h"
 #include "ssfini_opt.h"
 #include "ssfiso8601_opt.h"
 #include "ssfjson_opt.h"
 #include "ssflptask_opt.h"
+#include "ssfmatch_opt.h"
 #include "ssfmpool_opt.h"
+#include "ssfprng_opt.h"
 #include "ssfrs_opt.h"
 #include "ssfrsa_opt.h"
 #include "ssfrtc_opt.h"
@@ -70,6 +75,7 @@ extern "C" {
 #include "ssfubjson_opt.h"
 #include "ssfvted_opt.h"
 #include "ssfx25519_opt.h"
+#include "ssfx509_opt.h"
 
 #ifdef __cplusplus
 }

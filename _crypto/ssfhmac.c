@@ -37,7 +37,7 @@
 /* --------------------------------------------------------------------------------------------- */
 /* Module defines.                                                                               */
 /* --------------------------------------------------------------------------------------------- */
-#define SSF_HMAC_CONTEXT_MAGIC (0x484D4143ul)   /* 'HMAC' -- set by Begin, cleared by DeInit. */
+#define SSF_HMAC_CONTEXT_MAGIC (0x484D4143ul) /* 'HMAC' -- set by Begin, cleared by DeInit. */
 
 /* Compile-time bounds checks via typedef-array idiom (size becomes -1 on failure). */
 typedef char _ssf_hmac_sa_block_sha1_256_fits[(64u  <= SSF_HMAC_MAX_BLOCK_SIZE)  ? 1 : -1];
@@ -99,18 +99,18 @@ static void _SSFHMACHashBegin(SSFHMACContext_t *ctx)
 /* --------------------------------------------------------------------------------------------- */
 /* Hash dispatch: feed a single chunk whose length already fits in uint32_t.                     */
 /* --------------------------------------------------------------------------------------------- */
-static void _SSFHMACHashUpdateChunk(SSFHMACContext_t *ctx, const uint8_t *data, uint32_t chunk)
+static void _SSFHMACHashUpdateChunk(SSFHMACContext_t *ctx, const uint8_t *data, uint32_t dataLen)
 {
     SSF_REQUIRE(ctx != NULL);
     SSF_REQUIRE((ctx->hash > SSF_HMAC_HASH_MIN) && (ctx->hash < SSF_HMAC_HASH_MAX));
-    SSF_REQUIRE((data != NULL) || (chunk == 0u));
+    SSF_REQUIRE((data != NULL) || (dataLen == 0u));
 
     switch (ctx->hash)
     {
-    case SSF_HMAC_HASH_SHA1:   SSFSHA1Update(&ctx->hashCtx.sha1, data, chunk);     break;
-    case SSF_HMAC_HASH_SHA256: SSFSHA256Update(&ctx->hashCtx.sha2_32, data, chunk); break;
-    case SSF_HMAC_HASH_SHA384: SSFSHA2_64Update(&ctx->hashCtx.sha2_64, data, chunk); break;
-    case SSF_HMAC_HASH_SHA512: SSFSHA512Update(&ctx->hashCtx.sha2_64, data, chunk); break;
+    case SSF_HMAC_HASH_SHA1:   SSFSHA1Update(&ctx->hashCtx.sha1, data, dataLen); break;
+    case SSF_HMAC_HASH_SHA256: SSFSHA256Update(&ctx->hashCtx.sha2_32, data, dataLen); break;
+    case SSF_HMAC_HASH_SHA384: SSFSHA2_64Update(&ctx->hashCtx.sha2_64, data, dataLen); break;
+    case SSF_HMAC_HASH_SHA512: SSFSHA512Update(&ctx->hashCtx.sha2_64, data, dataLen); break;
     default: SSF_ASSERT(false); break;
     }
 }
@@ -118,24 +118,24 @@ static void _SSFHMACHashUpdateChunk(SSFHMACContext_t *ctx, const uint8_t *data, 
 /* --------------------------------------------------------------------------------------------- */
 /* Hash dispatch: chunk a size_t-sized input into uint32_t-bounded SHA Update calls.             */
 /* --------------------------------------------------------------------------------------------- */
-static void _SSFHMACHashUpdate(SSFHMACContext_t *ctx, const uint8_t *data, size_t len)
+static void _SSFHMACHashUpdate(SSFHMACContext_t *ctx, const uint8_t *data, size_t dataLen)
 {
     SSF_REQUIRE(ctx != NULL);
     SSF_REQUIRE((ctx->hash > SSF_HMAC_HASH_MIN) && (ctx->hash < SSF_HMAC_HASH_MAX));
-    SSF_REQUIRE((data != NULL) || (len == 0u));
+    SSF_REQUIRE((data != NULL) || (dataLen == 0u));
 
 #if SIZE_MAX > UINT32_MAX
     /* On 64-bit size_t hosts, peel off UINT32_MAX-sized chunks (loop never runs on 32-bit). */
-    while (len > (size_t)UINT32_MAX)
+    while (dataLen > (size_t)UINT32_MAX)
     {
         _SSFHMACHashUpdateChunk(ctx, data, UINT32_MAX);
         data += (size_t)UINT32_MAX;
-        len  -= (size_t)UINT32_MAX;
+        dataLen -= (size_t)UINT32_MAX;
     }
 #endif
-    if (len > 0u)
+    if (dataLen > 0u)
     {
-        _SSFHMACHashUpdateChunk(ctx, data, (uint32_t)len);
+        _SSFHMACHashUpdateChunk(ctx, data, (uint32_t)dataLen);
     }
 }
 
@@ -195,12 +195,12 @@ void SSFHMACBegin(SSFHMACContext_t *ctx, SSFHMACHash_t hash, const uint8_t *key,
         memcpy(keyPrime, key, keyLen);
     }
 
-    /* Step 2: Compute iKeyPad = K' XOR 0x36 and oKeyPad = K' XOR 0x5C */
 /* Disable false positive Visual Studio Code Analysis warning */
 #ifdef _WIN32
 #pragma warning(push)
 #pragma warning(disable:6385)
 #endif
+    /* Step 2: Compute iKeyPad = K' XOR 0x36 and oKeyPad = K' XOR 0x5C */
     for (i = 0; i < blockSize; i++)
     {
         iKeyPad[i] = keyPrime[i] ^ 0x36u;

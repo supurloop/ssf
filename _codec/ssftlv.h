@@ -62,8 +62,8 @@ typedef struct SSFTLV
 void SSFTLVInit(SSFTLV_t *tlv, uint8_t *buf, uint32_t bufSize, uint32_t bufLen);
 void SSFTLVDeInit(SSFTLV_t *tlv);
 bool SSFTLVPut(SSFTLV_t *tlv, SSFTLVVar_t tag, const uint8_t *val, SSFTLVVar_t valLen);
-bool SSFTLVRead(const SSFTLV_t *tlv, SSFTLVVar_t tag, uint16_t instance, uint8_t *val,
-                uint32_t valSize, uint8_t **valPtr, SSFTLVVar_t *valLen);
+bool SSFTLVRead(const SSFTLV_t *tlv, SSFTLVVar_t tag, uint16_t instance, uint8_t *valOpt,
+                uint32_t valOptSize, uint8_t **valPtrOpt, SSFTLVVar_t *valLen);
 
 /* --------------------------------------------------------------------------------------------- */
 /* Unit test                                                                                     */

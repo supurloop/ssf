@@ -28,6 +28,13 @@ padding, and parses decimal strings back to integers.
   leading whitespace and also accept decimal-fraction and scientific-notation input
   (e.g. `"3.7e2"` → `370`); the fractional part is truncated to zero when no exponent is present.
 - `val` must not be `NULL` for both parse macros; passing `NULL` asserts.
+- `SSFDecStrToXInt(str, svalOpt, uvalOpt)`, the function behind both parse macros, requires
+  exactly one of `svalOpt` and `uvalOpt` to be non-`NULL`; it selects signed or unsigned parsing.
+- `SSFDecOctetsToStr(octets, octetsLen, sep, str, strSize)` formats `octetsLen` (`> 0`) octets as
+  a `sep`-delimited decimal string (e.g. `"192.168.0.1"`) and returns its length, or `0` if
+  `strSize` is too small. `SSFDecStrToOctets(str, sep, octets, octetsSize, numOctetsOut)` parses
+  such a string into at most `octetsSize` octets: each field must be 0-255 with no leading zeros
+  (except `"0"` itself), and an empty field or trailing separator returns `false`.
 
 <a id="configuration"></a>
 

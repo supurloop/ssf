@@ -1,0 +1,39 @@
+Claude Code Instructions
+
+SSF is an embedded toolkit.
+SSF shall use the functionality of other SSF modules before writing ad-hoc code for SSF.
+SSF shall use standard C library functions only if SSF does not have a replacement for it.
+SSF should generally prefer fixed or stack memory over dynamic memory allocations.
+SSF shall follow all applicable RFCs and best practices when applicable.
+SSF is expected to work on Big and Little Endian systems.
+SSF may run on 8, 16, 32, or 64-bit microcontrollers.
+SSF generally executes in a single threaded context, but can be used on multi-threaded systems.
+SSF SHALL NOT BLOCK.
+SSF may use the Low Priority Task Queue to offload time-consuming operations so that it does not block the operation of the stack.
+SSF modules SHALL NOT BE MODIFIED without explicit approval.
+SSF module use DBC. All input parameters shall be checked against contact as appropriate.
+
+
+SSF shall following the coding and documentation style:
+- Function header comments in a block, shall be limited to 1 line of comment.
+- Non-trivial conditional statements shall be preceeded by a question that makes clear the purpose, the true clause comment shall start with 'Yes, ...', and the false clause comment shall start with 'No, ...'.
+- Other inline comments shall be limited to 1 line with not extra end of line padding.
+- ALL functions shall have comprehensive DBC assertions to check function parameters and invariants.
+- Exception: timing-critical inner helpers (run per block, per field or point operation, or per limb loop) whose callers already validate their parameters shall not carry DBC assertions; list them in the module's .md.
+- Initialization functions shall track module level or context level that it has been initialized before use.
+- Functions that may fails shall return a bool. Functions that can't fail shall return a void. Functions that can't fail may return a single value. Functions with multiple outputs shall return void.
+- Function arguments that are C string shall end with 'Str'.
+- Function arguments that are optional shall end with 'Opt'.
+- Function argument that indicate the size of a previous argument shall end with 'Size'
+- Function arguments that the length of a previous argument shall end with 'Len'.
+- Buffers that have a variable size must pass the size along with the buffer pointer.
+- Multi-line comments that may be useful to callers of the API shall be put into the documentation file not the source code.
+- Non printable characters are not permitted in source or comments within any .c or .h file.
+- When making incremental changes to any module, they will made using a TDD (Test Driven Development) sequence.
+- No tabs, whitespace only, default 4 indent.
+- When an expression is non-trivial, (more than 1 expression to evaluate) each expression shall be enclosed in parentheses  even if not required by order of operations. This provides pedantic clarity.
+- Each variable or field declaration shall be made separately and on its own line.
+- Function names including private static functions shall include the complete module name prefix. Ex. ssfx509 functions begin with SSFX509, private ones with _SSFX509. Unit test modules may implement a more relaxed policy regarding private function naming.
+- When a function argument is a struct, DBC should be applied to the struct's fields as appropriate.
+- Assertions should not have comments, they should be self evident, anything that is not can be put into the readme.
+- Comments in non-unit test source files should indicate intent and should not indicate change history, design decisions, or specific audits reasons or resolutions.

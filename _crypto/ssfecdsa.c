@@ -6,8 +6,8 @@
 /*                                                                                               */
 /* FIPS 186-4: Digital Signature Standard (DSS)                                                  */
 /* RFC 6979: Deterministic Usage of the DSA and ECDSA                                            */
-/* NIST SP 800-56A Rev. 3: Pair-Wise Key-Establishment Using Discrete Logarithm Cryptography    */
-/* SEC 1 v2: Elliptic Curve Cryptography                                                        */
+/* NIST SP 800-56A Rev. 3: Pair-Wise Key-Establishment Using Discrete Logarithm Cryptography     */
+/* SEC 1 v2: Elliptic Curve Cryptography                                                         */
 /*                                                                                               */
 /* BSD-3-Clause License                                                                          */
 /* Copyright 2026 Supurloop Software LLC                                                         */
@@ -37,13 +37,21 @@
 #include "ssfassert.h"
 #include "ssfecdsa.h"
 #include "ssfhmac.h"
+#include "ssfsha1.h"
 #include "ssfsha2.h"
 #if SSF_ECDSA_CONFIG_ENABLE_SIGN == 1
-#include "ssfasn1.h"  /* Sign's _SSFECDSASigEncode is the only consumer; verify is byte-level. */
+#include "ssfasn1.h" /* Sign's _SSFECDSASigEncode is the only consumer; verify is byte-level. */
 #endif
 #include "ssfprng.h"
 #include "ssfcrypt.h"
 #include "ssfusexport.h"
+
+/* Maximum RFC 6979 candidates Sign tries when r or s is zero. */
+#define SSF_ECDSA_SIGN_MAX_ATTEMPTS (8u)
+
+#if (SSF_ECDSA_CONFIG_VERIFY_AFTER_SIGN != 0u) && (SSF_ECDSA_CONFIG_VERIFY_AFTER_SIGN != 1u)
+#error SSF_ECDSA_CONFIG_VERIFY_AFTER_SIGN must be 0 or 1.
+#endif
 
 #if SSF_CONFIG_ECDSA_UNIT_TEST == 1
 /* Test-only exit hooks fired AFTER zeroization, BEFORE return; NULL in production. */
@@ -64,6 +72,12 @@ void (*_SSFECDSAKeyGenTestExitHook)(void *ctx,
                                     const SSFBN_t *d,
                                     const uint8_t *entropy, size_t entropyLen) = NULL;
 void *_SSFECDSAKeyGenTestExitHookCtx = NULL;
+
+/* Test-only fault injection: Sign treats its first N attempts as r == 0. */
+uint8_t _SSFECDSASignTestForcedRetries = 0u;
+
+/* Test-only fault injection: 1 flips r, 2 flips d, 3 flips e before s. */
+uint8_t _SSFECDSASignTestFault = 0u;
 #endif /* SSF_CONFIG_ECDSA_UNIT_TEST */
 
 /* --------------------------------------------------------------------------------------------- */
@@ -71,6 +85,9 @@ void *_SSFECDSAKeyGenTestExitHookCtx = NULL;
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFECDSAScalarMulBase(SSFECPoint_t *r, const SSFBN_t *k, SSFECCurve_t curve)
 {
+    SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(k != NULL);
+
 #if SSF_EC_CONFIG_FIXED_BASE_P256 == 1
     if (curve == SSF_EC_CURVE_P256) { SSFECScalarMulBaseP256(r, k); return; }
 #endif
@@ -80,6 +97,8 @@ static void _SSFECDSAScalarMulBase(SSFECPoint_t *r, const SSFBN_t *k, SSFECCurve
     {
         const SSFECCurveParams_t *c = SSFECGetCurveParams(curve);
         SSFECPOINT_DEFINE(G, SSF_EC_MAX_LIMBS);
+
+        SSF_REQUIRE(c != NULL);
         SSFECPointFromAffine(&G, &c->gx, &c->gy, curve);
         SSFECScalarMul(r, k, &G, curve);
     }
@@ -120,13 +139,49 @@ static size_t _SSFECDSAGetHashSize(SSFECCurve_t curve)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: bits2int per RFC 6979 Sec. 2.3.2 (hash bytes to integer, no shift for matched pairs).*/
+/* Internal: RFC 6979 nonce HMAC = the digest's hash, inferred from hashLen (else the curve's).  */
+/* --------------------------------------------------------------------------------------------- */
+static SSFHMACHash_t _SSFECDSANonceHMACHash(SSFECCurve_t curve, size_t hashLen, size_t *hlen)
+{
+    SSF_REQUIRE((curve > SSF_EC_CURVE_MIN) && (curve < SSF_EC_CURVE_MAX));
+    SSF_REQUIRE((hashLen > 0u) && (hashLen <= SSF_SHA2_512_BYTE_SIZE));
+    SSF_REQUIRE(hlen != NULL);
+
+    /* RFC 6979 HMAC-DRBG uses the digest's hash, inferred from hashLen */
+    switch (hashLen)
+    {
+    case SSF_SHA1_HASH_SIZE: *hlen = SSF_SHA1_HASH_SIZE; return SSF_HMAC_HASH_SHA1;
+    case SSF_SHA2_256_BYTE_SIZE: *hlen = SSF_SHA2_256_BYTE_SIZE; return SSF_HMAC_HASH_SHA256;
+    case SSF_SHA2_384_BYTE_SIZE: *hlen = SSF_SHA2_384_BYTE_SIZE; return SSF_HMAC_HASH_SHA384;
+    case SSF_SHA2_512_BYTE_SIZE: *hlen = SSF_SHA2_512_BYTE_SIZE; return SSF_HMAC_HASH_SHA512;
+    default:
+        /* Not a SHA-1 / SHA-2 digest length: fall back to the curve's hash. */
+        *hlen = _SSFECDSAGetHashSize(curve);
+        return _SSFECDSAGetHMACHash(curve);
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: bits2int per RFC 6979 Sec. 2.3.2: the leftmost qlen bits of the hash as an integer. */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFECDSABits2Int(SSFBN_t *out, const uint8_t *hash, size_t hashLen,
                               const SSFECCurveParams_t *c)
 {
-    SSF_REQUIRE((uint32_t)c->bytes * 8u == SSFBNBitLen(&c->n));
-    SSF_ASSERT(SSFBNFromBytes(out, hash, hashLen, c->limbs));
+    size_t useLen;
+
+    SSF_REQUIRE(out != NULL);
+    SSF_REQUIRE(hash != NULL);
+    SSF_REQUIRE(c != NULL);
+    SSF_REQUIRE(((uint32_t)c->bytes * 8u) == SSFBNBitLen(&c->n));
+    useLen = hashLen;
+
+    /* Is the digest longer than the curve order? */
+    if (useLen > c->bytes)
+    {
+        /* Yes, keep its leftmost c->bytes bytes. */
+        useLen = c->bytes;
+    }
+    SSF_ASSERT(SSFBNFromBytes(out, hash, useLen, c->limbs));
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -136,6 +191,10 @@ static void _SSFECDSABits2Octets(uint8_t *out, size_t outLen, const uint8_t *has
                                  const SSFECCurveParams_t *c)
 {
     SSFBN_DEFINE(z, SSF_EC_MAX_LIMBS);
+
+    SSF_REQUIRE(out != NULL);
+    SSF_REQUIRE(hash != NULL);
+    SSF_REQUIRE(c != NULL);
 
     _SSFECDSABits2Int(&z, hash, hashLen, c);
 
@@ -149,14 +208,14 @@ static void _SSFECDSABits2Octets(uint8_t *out, size_t outLen, const uint8_t *has
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: RFC 6979 deterministic nonce generation (HMAC-DRBG; k in [1, n-1]).                 */
+/* Internal: RFC 6979 nonce generation (HMAC-DRBG); k = the (skip+1)-th candidate in [1, n-1].   */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFECDSAGenK(SSFECCurve_t curve, const uint8_t *privKey, size_t privKeyLen,
                           const uint8_t *hash, size_t hashLen, const SSFECCurveParams_t *c,
-                          SSFBN_t *k)
+                          uint8_t skip, SSFBN_t *k)
 {
-    SSFHMACHash_t hmacHash = _SSFECDSAGetHMACHash(curve);
-    size_t hlen = _SSFECDSAGetHashSize(curve);
+    size_t hlen;
+    SSFHMACHash_t hmacHash = _SSFECDSANonceHMACHash(curve, hashLen, &hlen);
     uint8_t V[SSF_HMAC_MAX_HASH_SIZE];
     uint8_t K[SSF_HMAC_MAX_HASH_SIZE];
     uint8_t h1Octets[SSF_EC_MAX_COORD_BYTES];
@@ -164,6 +223,11 @@ static bool _SSFECDSAGenK(SSFECCurve_t curve, const uint8_t *privKey, size_t pri
     uint8_t sep;
     uint8_t T[SSF_EC_MAX_COORD_BYTES];
     uint16_t attempts;
+
+    SSF_REQUIRE(privKey != NULL);
+    SSF_REQUIRE(hash != NULL);
+    SSF_REQUIRE(c != NULL);
+    SSF_REQUIRE(k != NULL);
 
     /* Step a: h1 = H(m) -- already provided by caller as hash */
 
@@ -224,15 +288,22 @@ static bool _SSFECDSAGenK(SSFECCurve_t curve, const uint8_t *privKey, size_t pri
         /* Step h.3: k = bits2int(T) */
         _SSFECDSABits2Int(k, T, c->bytes, c);
 
-        /* Check k in [1, n-1] */
+        /* Is k in [1, n-1]? */
         if (!SSFBNIsZero(k) && (SSFBNCmp(k, &c->n) < 0))
         {
-            SSFHMACDeInit(&ctx);
-            SSFCryptSecureZero(V, sizeof(V));
-            SSFCryptSecureZero(K, sizeof(K));
-            SSFCryptSecureZero(h1Octets, sizeof(h1Octets));
-            SSFCryptSecureZero(T, sizeof(T));
-            return true;
+            /* Yes. Is it the candidate the caller asked for? */
+            if (skip == 0u)
+            {
+                /* Yes, done. */
+                SSFHMACDeInit(&ctx);
+                SSFCryptSecureZero(V, sizeof(V));
+                SSFCryptSecureZero(K, sizeof(K));
+                SSFCryptSecureZero(h1Octets, sizeof(h1Octets));
+                SSFCryptSecureZero(T, sizeof(T));
+                return true;
+            }
+            /* No, Sign rejected an earlier k (r or s == 0); continue the generator */
+            skip--;
         }
 
         /* Step h.3 (retry): K = HMAC_K(V || 0x00), V = HMAC_K(V) */
@@ -259,23 +330,33 @@ static bool _SSFECDSAGenK(SSFECCurve_t curve, const uint8_t *privKey, size_t pri
 #if SSF_ECDSA_CONFIG_ENABLE_SIGN == 1
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: DER-encode an ECDSA signature (r, s) as SEQUENCE { INTEGER, INTEGER }.              */
+/* Internal: canonical DER INTEGER bytes of a BE integer in *outBuf (input or padBuf).           */
 /* --------------------------------------------------------------------------------------------- */
-/* Canonicalize a fixed-width big-endian integer for ASN.1 encoding: strip leading zero bytes,  */
-/* then prepend ONE 0x00 byte if the high bit of the first byte is set (so the value is read as */
-/* a positive INTEGER in two's complement). Writes a pointer to the canonical bytes into *outBuf */
-/* (which may point into the input or into the supplied padBuf scratch).                          */
 static void _SSFECDSACanonicalizeInt(const uint8_t *intBuf, uint32_t intLen, uint8_t *padBuf,
                                      uint32_t padBufSize, const uint8_t **outBuf, uint32_t *outLen)
 {
     const uint8_t *p = intBuf;
     uint32_t n = intLen;
-    /* intLen == 0 would dereference a zero-byte buffer at *p below; assert as a precondition. */
+
+    SSF_REQUIRE(intBuf != NULL);
     SSF_REQUIRE(intLen > 0u);
-    while (n > 1u && *p == 0u) { p++; n--; }
+    SSF_REQUIRE(padBuf != NULL);
+    SSF_REQUIRE(outBuf != NULL);
+    SSF_REQUIRE(outLen != NULL);
+
+    /* Is there a leading zero byte to strip (keeping at least one byte)? */
+    while ((n > 1u) && (*p == 0u))
+    {
+        /* Yes, skip it. */
+        p++;
+        n--;
+    }
+
+    /* Is the high bit set (would read as a negative INTEGER)? */
     if ((*p & 0x80u) != 0u)
     {
-        SSF_ASSERT(padBufSize >= n + 1u);
+        /* Yes, prepend one 0x00 sign-pad byte. */
+        SSF_ASSERT(padBufSize >= (n + 1u));
         padBuf[0] = 0u;
         memcpy(&padBuf[1], p, (size_t)n);
         *outBuf = padBuf;
@@ -283,11 +364,15 @@ static void _SSFECDSACanonicalizeInt(const uint8_t *intBuf, uint32_t intLen, uin
     }
     else
     {
+        /* No, use the stripped bytes in place. */
         *outBuf = p;
         *outLen = n;
     }
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: DER-encode an ECDSA signature (r, s) as SEQUENCE { INTEGER, INTEGER }.              */
+/* --------------------------------------------------------------------------------------------- */
 static bool _SSFECDSASigEncode(const SSFBN_t *r, const SSFBN_t *s, const SSFECCurveParams_t *c,
                                uint8_t *sig, size_t sigSize, size_t *sigLen)
 {
@@ -299,8 +384,18 @@ static bool _SSFECDSASigEncode(const SSFBN_t *r, const SSFBN_t *s, const SSFECCu
     const uint8_t *sCan;
     uint32_t rCanLen;
     uint32_t sCanLen;
-    uint32_t rEncLen, sEncLen, contentLen, seqHdrLen, totalLen;
+    uint32_t rEncLen;
+    uint32_t sEncLen;
+    uint32_t contentLen;
+    uint32_t seqHdrLen;
+    uint32_t totalLen;
     uint32_t offset;
+
+    SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(s != NULL);
+    SSF_REQUIRE(c != NULL);
+    SSF_REQUIRE(sig != NULL);
+    SSF_REQUIRE(sigLen != NULL);
 
     /* Export r, s as BE bytes and canonicalize for ASN.1 INTEGER encoding. */
     if (!SSFBNToBytes(r, rBytes, c->bytes)) return false;
@@ -345,28 +440,8 @@ static bool _SSFECDSASigEncode(const SSFBN_t *r, const SSFBN_t *s, const SSFECCu
 #endif /* SSF_ECDSA_CONFIG_ENABLE_SIGN -- end of DER-encode helpers */
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: DER-decode an ECDSA signature from SEQUENCE { INTEGER, INTEGER } to (r, s).         */
+/* Internal: strict byte-level DER parse of the signature; outputs r, s INTEGER content spans.   */
 /* --------------------------------------------------------------------------------------------- */
-/* Strict DER parse for an ECDSA signature SEQUENCE { INTEGER r, INTEGER s }. Validates the   */
-/* structure and emits the (r, s) byte offsets+lengths. Pure byte-level -- no ssfasn1 calls,  */
-/* so a verify-only build can drop the entire ssfasn1 module. The strict ruleset rejects the  */
-/* BER-tolerant forms a generic decoder would accept, which create signature malleability     */
-/* (CVE-2020-14966, CVE-2020-13822, CVE-2019-14859, CVE-2016-1000342 class) -- these are the  */
-/* same Wycheproof / RFC 5480 strictness rules.                                                */
-/*                                                                                             */
-/* Validates:                                                                                  */
-/*  - Outer SEQUENCE tag (0x30) and canonical-form length                                     */
-/*  - Total byte count exactly matches header + SEQUENCE content                              */
-/*  - Two INTEGERs back-to-back, each with short-form length                                  */
-/*  - INTEGER length in [1, coordBytes+1] (length 1 holds 0x00..0x7F; length coordBytes+1     */
-/*    holds the canonical 0x00 sign-pad followed by an MSB-set byte)                          */
-/*  - INTEGER content is canonical positive: no extra leading 0x00, and MSB of first byte     */
-/*    must be 0 (a value with MSB set requires the canonical 0x00 prefix; any encoding where  */
-/*    the first content byte is >= 0x80 is rejected since ECDSA r,s are always positive)      */
-/*  - No trailing data after the second INTEGER                                                */
-/*                                                                                             */
-/* On success: rOff/rLen and sOff/sLen point at the INTEGER content bytes inside `sig` (no    */
-/* leading 0x00 stripping yet -- the caller does that to get a canonical magnitude).           */
 static bool _SSFECDSASigParseStrictDER(const uint8_t *sig, size_t sigLen, uint16_t coordBytes,
                                        size_t *rOff, size_t *rLen, size_t *sOff, size_t *sLen)
 {
@@ -376,6 +451,12 @@ static bool _SSFECDSASigParseStrictDER(const uint8_t *sig, size_t sigLen, uint16
     size_t outOff[2];
     size_t outLen[2];
     uint16_t i;
+
+    SSF_REQUIRE(sig != NULL);
+    SSF_REQUIRE(rOff != NULL);
+    SSF_REQUIRE(rLen != NULL);
+    SSF_REQUIRE(sOff != NULL);
+    SSF_REQUIRE(sLen != NULL);
 
     /* Smallest valid sig: 30 06 02 01 rr 02 01 ss = 8 bytes (1-byte r and s). Use 8 as floor. */
     if (sigLen < 8u) return false;
@@ -393,7 +474,7 @@ static bool _SSFECDSASigParseStrictDER(const uint8_t *sig, size_t sigLen, uint16
         pos++;
         if (pos >= sigLen) return false;
         seqLen = sig[pos++];
-        if (seqLen < 0x80u) return false;  /* must use short form when < 128 */
+        if (seqLen < 0x80u) return false; /* must use short form when < 128 */
     }
     else
     {
@@ -401,24 +482,28 @@ static bool _SSFECDSASigParseStrictDER(const uint8_t *sig, size_t sigLen, uint16
     }
 
     /* Total bytes must match exactly: header (pos) + content (seqLen). */
-    if (sigLen != pos + seqLen) return false;
+    if (sigLen != (pos + seqLen)) return false;
 
     /* Two INTEGERs: r then s. Same canonical-form requirements. */
     for (i = 0u; i < 2u; i++)
     {
         if (pos >= sigLen) return false;
-        if (sig[pos++] != 0x02u) return false;             /* INTEGER tag */
+        if (sig[pos++] != 0x02u) return false; /* INTEGER tag */
         if (pos >= sigLen) return false;
-        if (sig[pos] >= 0x80u) return false;               /* INTEGER length must be short form */
+        if (sig[pos] >= 0x80u) return false; /* INTEGER length must be short form */
         intLen = sig[pos++];
         if (intLen == 0u) return false;
-        if (pos + intLen > sigLen) return false;
-        if (intLen > (size_t)coordBytes + 1u) return false; /* exceeds maximum for the curve */
+        if ((pos + intLen) > sigLen) return false;
+        if (intLen > ((size_t)coordBytes + 1u)) return false; /* exceeds maximum for the curve */
 
         if (intLen > 1u)
         {
-            /* Reject extra leading zero: 0x00 prefix only valid when the next byte's MSB is set. */
-            if (sig[pos] == 0x00u && sig[pos + 1u] < 0x80u) return false;
+            /* Is there a 0x00 prefix not followed by an MSB-set byte (non-canonical)? */
+            if ((sig[pos] == 0x00u) && (sig[pos + 1u] < 0x80u))
+            {
+                /* Yes, reject the extra leading zero. */
+                return false;
+            }
         }
         /* MSB of first content byte must be 0 (positive INTEGER without canonical 0x00 pad). */
         if (sig[pos] >= 0x80u) return false;
@@ -436,21 +521,41 @@ static bool _SSFECDSASigParseStrictDER(const uint8_t *sig, size_t sigLen, uint16
     return true;
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: DER-decode an ECDSA signature from SEQUENCE { INTEGER, INTEGER } to (r, s).         */
+/* --------------------------------------------------------------------------------------------- */
 static bool _SSFECDSASigDecode(const uint8_t *sig, size_t sigLen, const SSFECCurveParams_t *c,
                                SSFBN_t *r, SSFBN_t *s)
 {
-    size_t rOff, rLen, sOff, sLen;
+    size_t rOff;
+    size_t rLen;
+    size_t sOff;
+    size_t sLen;
+
+    SSF_REQUIRE(sig != NULL);
+    SSF_REQUIRE(c != NULL);
+    SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(s != NULL);
 
     if (!_SSFECDSASigParseStrictDER(sig, sigLen, c->bytes, &rOff, &rLen, &sOff, &sLen))
     {
         return false;
     }
 
-    /* Strip the canonical 0x00 sign-pad (positive ASN.1 INTEGER convention) so SSFBNFromBytes */
-    /* sees the raw magnitude bytes. The strict parser already validated length bounds and    */
-    /* canonical-form, so at most one 0x00 leading byte can be present.                        */
-    if (rLen > 1u && sig[rOff] == 0u) { rOff++; rLen--; }
-    if (sLen > 1u && sig[sOff] == 0u) { sOff++; sLen--; }
+    /* Does r carry the (at most one) canonical 0x00 sign-pad? */
+    if ((rLen > 1u) && (sig[rOff] == 0u))
+    {
+        /* Yes, strip it so SSFBNFromBytes sees the magnitude. */
+        rOff++;
+        rLen--;
+    }
+    /* Does s carry the (at most one) canonical 0x00 sign-pad? */
+    if ((sLen > 1u) && (sig[sOff] == 0u))
+    {
+        /* Yes, strip it so SSFBNFromBytes sees the magnitude. */
+        sOff++;
+        sLen--;
+    }
     if (!SSFBNFromBytes(r, &sig[rOff], rLen, c->limbs)) return false;
     if (!SSFBNFromBytes(s, &sig[sOff], sLen, c->limbs)) return false;
     return true;
@@ -478,7 +583,7 @@ static void _SSFECDSAReduceModN(SSFBN_t *r, const SSFBN_t *x, const SSFECCurvePa
     tmp.len = r->len;
     /* tmp = r - n. If r >= n, borrow == 0 and we commit tmp; else keep r. */
     borrow = SSFBNSub(&tmp, r, &c->n);
-    mask = (SSFBNLimb_t)(borrow - 1u);  /* all-ones if borrow == 0, else 0 */
+    mask = (SSFBNLimb_t)(borrow - 1u); /* all-ones if borrow == 0, else 0 */
     for (i = 0; i < r->len; i++)
     {
         r->limbs[i] = (tmp.limbs[i] & mask) | (r->limbs[i] & ~mask);
@@ -490,6 +595,9 @@ static void _SSFECDSAReduceModN(SSFBN_t *r, const SSFBN_t *x, const SSFECCurvePa
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFECDSAPrivKeyIsValid(const SSFBN_t *d, const SSFECCurveParams_t *c)
 {
+    SSF_REQUIRE(d != NULL);
+    SSF_REQUIRE(c != NULL);
+
     if (SSFBNIsZero(d)) return false;
     if (SSFBNCmp(d, &c->n) >= 0) return false;
     return true;
@@ -515,7 +623,7 @@ bool SSFECDSAKeyGen(SSFECCurve_t curve, uint8_t *privKey, size_t privKeySize, ui
     SSF_REQUIRE(pubKeyLen != NULL);
     SSF_REQUIRE(c != NULL);
     SSF_REQUIRE(privKeySize >= c->bytes);
-    SSF_REQUIRE(pubKeySize >= (1u + 2u * (size_t)c->bytes));
+    SSF_REQUIRE(pubKeySize >= (1u + (2u * (size_t)c->bytes)));
 
     /* Obtain platform entropy and seed PRNG */
     if (!SSFPortGetEntropy(entropy, (uint16_t)sizeof(entropy))) goto cleanup;
@@ -583,7 +691,7 @@ bool SSFECDSAPubKeyFromPrivKey(SSFECCurve_t curve, const uint8_t *privKey, size_
     SSF_REQUIRE(pubKeyLen != NULL);
     SSF_REQUIRE(c != NULL);
     SSF_REQUIRE(privKeyLen == c->bytes);
-    SSF_REQUIRE(pubKeySize >= (1u + 2u * (size_t)c->bytes));
+    SSF_REQUIRE(pubKeySize >= (1u + (2u * (size_t)c->bytes)));
 
     /* Import and validate private key */
     if (!SSFBNFromBytes(&d, privKey, privKeyLen, c->limbs)) return false;
@@ -617,6 +725,12 @@ bool SSFECDSAPubKeyIsValid(SSFECCurve_t curve, const uint8_t *pubKey, size_t pub
 }
 
 #if SSF_ECDSA_CONFIG_ENABLE_SIGN == 1
+#if SSF_ECDSA_CONFIG_VERIFY_AFTER_SIGN == 1
+static bool _SSFECDSASignSelfCheck(SSFECCurve_t curve, const SSFECCurveParams_t *c,
+                                   const uint8_t *privKey, size_t privKeyLen, const uint8_t *hash,
+                                   size_t hashLen, const SSFBN_t *r, const SSFBN_t *s);
+#endif /* SSF_ECDSA_CONFIG_VERIFY_AFTER_SIGN */
+
 /* --------------------------------------------------------------------------------------------- */
 /* Signs a message hash using ECDSA with deterministic nonce (RFC 6979 / FIPS 186-4 Sec. 6.4).   */
 /* --------------------------------------------------------------------------------------------- */
@@ -634,6 +748,8 @@ bool SSFECDSASign(SSFECCurve_t curve, const uint8_t *privKey, size_t privKeyLen,
     SSFECPOINT_DEFINE(R, SSF_EC_MAX_LIMBS);
     SSFBN_DEFINE(Rx, SSF_EC_MAX_LIMBS);
     SSFBN_DEFINE(Ry, SSF_EC_MAX_LIMBS);
+    uint8_t attempt;
+    bool found = false;
     bool ok = false;
 
     SSF_REQUIRE(privKey != NULL);
@@ -642,8 +758,7 @@ bool SSFECDSASign(SSFECCurve_t curve, const uint8_t *privKey, size_t privKeyLen,
     SSF_REQUIRE(sigLen != NULL);
     SSF_REQUIRE(c != NULL);
     SSF_REQUIRE(privKeyLen == c->bytes);
-    /* hashLen <= c->bytes (longer hashes would need bit-truncation, not implemented). */
-    SSF_REQUIRE(hashLen > 0u && hashLen <= c->bytes);
+    SSF_REQUIRE((hashLen > 0u) && (hashLen <= SSF_SHA2_512_BYTE_SIZE));
 
     /* Import private key */
     if (!SSFBNFromBytes(&d, privKey, privKeyLen, c->limbs)) goto cleanup;
@@ -653,33 +768,81 @@ bool SSFECDSASign(SSFECCurve_t curve, const uint8_t *privKey, size_t privKeyLen,
     _SSFECDSABits2Int(&e, hash, hashLen, c);
     if (SSFBNCmp(&e, &c->n) >= 0) SSFBNSub(&e, &e, &c->n);
 
-    /* Generate deterministic k per RFC 6979 */
-    if (!_SSFECDSAGenK(curve, privKey, privKeyLen, hash, hashLen, c, &k)) goto cleanup;
+    /* On r == 0 or s == 0 take the next RFC 6979 candidate k */
+    for (attempt = 0u; attempt < SSF_ECDSA_SIGN_MAX_ATTEMPTS; attempt++)
+    {
+        /* Generate deterministic k per RFC 6979 */
+        if (!_SSFECDSAGenK(curve, privKey, privKeyLen, hash, hashLen, c, attempt, &k)) goto cleanup;
 
-    /* R = k * G */
-    _SSFECDSAScalarMulBase(&R, &k, curve);
+        /* R = k * G */
+        _SSFECDSAScalarMulBase(&R, &k, curve);
 
-    /* Convert R to affine and get r = Rx mod n */
-    if (!SSFECPointToAffine(&Rx, &Ry, &R, curve)) goto cleanup;
-    _SSFECDSAReduceModN(&r, &Rx, c);
+        /* Convert R to affine and get r = Rx mod n */
+        if (!SSFECPointToAffine(&Rx, &Ry, &R, curve)) goto cleanup;
+        _SSFECDSAReduceModN(&r, &Rx, c);
 
-    if (SSFBNIsZero(&r)) goto cleanup;
+#if SSF_CONFIG_ECDSA_UNIT_TEST == 1
+        /* Is this attempt forced to fail (test-only fault injection)? */
+        if (attempt < _SSFECDSASignTestForcedRetries)
+        {
+            /* Yes, treat it as r == 0 */
+            SSFBNSetZero(&r, c->limbs);
+        }
+        /* No, keep the computed r */
+#endif /* SSF_CONFIG_ECDSA_UNIT_TEST */
 
-    /* s = k^(-1) * (e + r * d) mod n */
-    if (!SSFBNModInv(&kInv, &k, &c->n)) goto cleanup;
+        /* Is r zero? */
+        if (SSFBNIsZero(&r))
+        {
+            /* Yes, take the next k. */
+            continue;
+        }
 
-    /* CT mod-n arithmetic on secret operands (d, kInv): SSFBNModMulCT, SSFBNModAdd both CT. */
-    SSFBNModMulCT(&tmp, &r, &d, &c->n);     /* r * d mod n */
-    SSFBNModAdd(&tmp, &e, &tmp, &c->n);     /* e + r*d mod n */
-    SSFBNModMulCT(&s, &kInv, &tmp, &c->n);  /* k^(-1) * (e + r*d) mod n */
+#if SSF_CONFIG_ECDSA_UNIT_TEST == 1
+        /* Test-only fault injection into r, d or e before s is computed */
+        if (_SSFECDSASignTestFault == 1u) r.limbs[0] ^= 1u;
+        if (_SSFECDSASignTestFault == 2u) d.limbs[0] ^= 1u;
+        if (_SSFECDSASignTestFault == 3u) e.limbs[0] ^= 1u;
+#endif /* SSF_CONFIG_ECDSA_UNIT_TEST */
 
-    if (SSFBNIsZero(&s)) goto cleanup;
+        /* No, s = k^(-1) * (e + r * d) mod n, all at curve width */
+        if (!SSFBNModInvSmall(&kInv, &k, &c->n)) goto cleanup;
+
+        /* CT mod-n arithmetic on secret operands (d, kInv): ModMulSmall, ModAdd both CT. */
+        SSFBNModMulSmall(&tmp, &r, &d, &c->n); /* r * d mod n */
+        SSFBNModAdd(&tmp, &e, &tmp, &c->n); /* e + r*d mod n */
+        SSFBNModMulSmall(&s, &kInv, &tmp, &c->n); /* k^(-1) * (e + r*d) mod n */
+
+        /* Is s non-zero? */
+        if (!SSFBNIsZero(&s))
+        {
+            /* Yes, (r, s) is a valid signature. */
+            found = true;
+            break;
+        }
+        /* No, take the next k. */
+    }
+    /* Did every attempt produce r == 0 or s == 0? */
+    if (!found) goto cleanup;
+
+#if SSF_ECDSA_CONFIG_VERIFY_AFTER_SIGN == 1
+    /* Does (r, s) verify under a fresh Q = d * G and e, ruling out a fault? */
+    if (!_SSFECDSASignSelfCheck(curve, c, privKey, privKeyLen, hash, hashLen, &r, &s))
+    {
+        /* No, a fault corrupted the signature; release nothing */
+        goto cleanup;
+    }
+    /* Yes, the signature is consistent with privKey and hash */
+#endif /* SSF_ECDSA_CONFIG_VERIFY_AFTER_SIGN */
 
     /* DER-encode the signature. */
     ok = _SSFECDSASigEncode(&r, &s, c, sig, sigSize, sigLen);
 
 cleanup:
-    /* Wipe every secret-derived limb (d, k, kInv, tmp, R/Rx/Ry; e wiped for audit uniformity). */
+    /* Wipe r and s too: a faulty (r, s) next to a correct one reveals d. */
+    SSFBNZeroize(&r);
+    SSFBNZeroize(&s);
+    /* Wipe every secret-derived limb (d, k, kInv, tmp, R/Rx/Ry; e wiped for uniformity). */
     SSFBNZeroize(&d);
     SSFBNZeroize(&k);
     SSFBNZeroize(&e);
@@ -713,19 +876,39 @@ static bool _SSFECDSAVerifyInit(const SSFECCurveParams_t *c, SSFECCurve_t curve,
     SSFBN_DEFINE(e, SSF_EC_MAX_LIMBS);
     SSFBN_DEFINE(w, SSF_EC_MAX_LIMBS);
 
+    SSF_REQUIRE(c != NULL);
+    SSF_REQUIRE(pubKey != NULL);
+    SSF_REQUIRE(hash != NULL);
+    SSF_REQUIRE(sig != NULL);
+    SSF_REQUIRE(rOut != NULL);
+    SSF_REQUIRE(u1Out != NULL);
+    SSF_REQUIRE(u2Out != NULL);
+    SSF_REQUIRE(QOut != NULL);
+
     if (!SSFECPointDecode(QOut, curve, pubKey, pubKeyLen)) return false;
     if (!_SSFECDSASigDecode(sig, sigLen, c, rOut, &s)) return false;
-    if (SSFBNIsZero(rOut) || (SSFBNCmp(rOut, &c->n) >= 0)) return false;
-    if (SSFBNIsZero(&s) || (SSFBNCmp(&s, &c->n) >= 0)) return false;
+
+    /* Is r outside [1, n-1]? */
+    if (SSFBNIsZero(rOut) || (SSFBNCmp(rOut, &c->n) >= 0))
+    {
+        /* Yes, invalid signature. */
+        return false;
+    }
+    /* Is s outside [1, n-1]? */
+    if (SSFBNIsZero(&s) || (SSFBNCmp(&s, &c->n) >= 0))
+    {
+        /* Yes, invalid signature. */
+        return false;
+    }
 
     _SSFECDSABits2Int(&e, hash, hashLen, c);
     if (SSFBNCmp(&e, &c->n) >= 0) SSFBNSub(&e, &e, &c->n);
 
-    /* s is public, so non-CT SSFBNModInvExt is faster than the CT SSFBNModInv. */
-    if (!SSFBNModInvExt(&w, &s, &c->n)) return false;
+    /* Curve-width inverse and products; constant-time, though s, e and r are public */
+    if (!SSFBNModInvSmall(&w, &s, &c->n)) return false;
 
-    SSFBNModMul(u1Out, &e, &w, &c->n);
-    SSFBNModMul(u2Out, rOut, &w, &c->n);
+    SSFBNModMulSmall(u1Out, &e, &w, &c->n);
+    SSFBNModMulSmall(u2Out, rOut, &w, &c->n);
     return true;
 }
 
@@ -735,6 +918,12 @@ static bool _SSFECDSAVerifyInit(const SSFECCurveParams_t *c, SSFECCurve_t curve,
 static bool _SSFECDSAVerifyGetR(const SSFECCurveParams_t *c, SSFECCurve_t curve, const SSFBN_t *u1,
                                 const SSFBN_t *u2, const SSFECPoint_t *Q, SSFECPoint_t *Rout)
 {
+    SSF_REQUIRE(c != NULL);
+    SSF_REQUIRE(u1 != NULL);
+    SSF_REQUIRE(u2 != NULL);
+    SSF_REQUIRE(Q != NULL);
+    SSF_REQUIRE(Rout != NULL);
+
 #if (SSF_EC_CONFIG_FIXED_BASE_P256 == 1) || (SSF_EC_CONFIG_FIXED_BASE_P384 == 1)
     (void)c;
     SSFECScalarMulDualBase(Rout, u1, u2, Q, curve);
@@ -760,6 +949,9 @@ static bool _SSFECDSAVerifyCheckR(const SSFECCurveParams_t *c, SSFECCurve_t curv
     SSFBN_DEFINE(rPlusN, SSF_EC_MAX_LIMBS);
     SSFBN_DEFINE(pMinusN, SSF_EC_MAX_LIMBS);
 
+    SSF_REQUIRE(c != NULL);
+    SSF_REQUIRE(R != NULL);
+    SSF_REQUIRE(r != NULL);
     (void)curve;
 
     /* z2 = R.z^2 mod p */
@@ -780,8 +972,67 @@ static bool _SSFECDSAVerifyCheckR(const SSFECCurveParams_t *c, SSFECCurve_t curv
     return false;
 }
 
+#if (SSF_ECDSA_CONFIG_ENABLE_SIGN == 1) && (SSF_ECDSA_CONFIG_VERIFY_AFTER_SIGN == 1)
+/* --------------------------------------------------------------------------------------------- */
+/* If (r, s) verifies under freshly derived Q = d * G and e returns true, else false.            */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFECDSASignSelfCheck(SSFECCurve_t curve, const SSFECCurveParams_t *c,
+                                   const uint8_t *privKey, size_t privKeyLen, const uint8_t *hash,
+                                   size_t hashLen, const SSFBN_t *r, const SSFBN_t *s)
+{
+    SSFBN_DEFINE(dQ, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(e, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(w, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(u1, SSF_EC_MAX_LIMBS);
+    SSFBN_DEFINE(u2, SSF_EC_MAX_LIMBS);
+    SSFECPOINT_DEFINE(Q, SSF_EC_MAX_LIMBS);
+    SSFECPOINT_DEFINE(R, SSF_EC_MAX_LIMBS);
+    bool ok = false;
+
+    SSF_REQUIRE((curve > SSF_EC_CURVE_MIN) && (curve < SSF_EC_CURVE_MAX));
+    SSF_REQUIRE(c != NULL);
+    SSF_REQUIRE(privKey != NULL);
+    SSF_REQUIRE(privKeyLen == c->bytes);
+    SSF_REQUIRE(hash != NULL);
+    SSF_REQUIRE((hashLen > 0u) && (hashLen <= SSF_SHA2_512_BYTE_SIZE));
+    SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(r->limbs != NULL);
+    SSF_REQUIRE(r->len == c->limbs);
+    SSF_REQUIRE(s != NULL);
+    SSF_REQUIRE(s->limbs != NULL);
+    SSF_REQUIRE(s->len == c->limbs);
+
+    /* Q = d * G from a second import of privKey, independent of the d that signed */
+    if (!SSFBNFromBytes(&dQ, privKey, privKeyLen, c->limbs)) goto cleanup;
+    _SSFECDSAScalarMulBase(&Q, &dQ, curve);
+
+    /* e recomputed from hash, independent of the e that signed */
+    _SSFECDSABits2Int(&e, hash, hashLen, c);
+    if (SSFBNCmp(&e, &c->n) >= 0) SSFBNSub(&e, &e, &c->n);
+
+    /* Standard verify on the public (r, s): u1 = e / s, u2 = r / s, R = u1 * G + u2 * Q */
+    if (!SSFBNModInvSmall(&w, s, &c->n)) goto cleanup;
+    SSFBNModMulSmall(&u1, &e, &w, &c->n);
+    SSFBNModMulSmall(&u2, r, &w, &c->n);
+    if (!_SSFECDSAVerifyGetR(c, curve, &u1, &u2, &Q, &R)) goto cleanup;
+    ok = _SSFECDSAVerifyCheckR(c, curve, &R, r);
+
+cleanup:
+    SSFBNZeroize(&dQ);
+    SSFBNZeroize(&Q.x);
+    SSFBNZeroize(&Q.y);
+    SSFBNZeroize(&Q.z);
+    SSFBNZeroize(&R.x);
+    SSFBNZeroize(&R.y);
+    SSFBNZeroize(&R.z);
+    return ok;
+}
+#endif /* SSF_ECDSA_CONFIG_ENABLE_SIGN && SSF_ECDSA_CONFIG_VERIFY_AFTER_SIGN */
+
 #if SSF_CONFIG_ECDSA_UNIT_TEST == 1
-/* Test-only wrapper that exposes _SSFECDSAVerifyCheckR for unit tests that synthesize R.        */
+/* --------------------------------------------------------------------------------------------- */
+/* Unit test access to _SSFECDSAVerifyCheckR for tests that synthesize R.                        */
+/* --------------------------------------------------------------------------------------------- */
 bool _SSFECDSAVerifyCheckRForTest(SSFECCurve_t curve, const SSFECPoint_t *R, const SSFBN_t *r)
 {
     const SSFECCurveParams_t *c = SSFECGetCurveParams(curve);
@@ -789,7 +1040,9 @@ bool _SSFECDSAVerifyCheckRForTest(SSFECCurve_t curve, const SSFECPoint_t *R, con
     return _SSFECDSAVerifyCheckR(c, curve, R, r);
 }
 
-/* Test-only wrapper that drives _SSFECDSABits2Int with caller-supplied curve params + hashLen.   */
+/* --------------------------------------------------------------------------------------------- */
+/* Unit test access to _SSFECDSABits2Int with caller-supplied curve params and hashLen.          */
+/* --------------------------------------------------------------------------------------------- */
 void _SSFECDSABits2IntForTest(const SSFECCurveParams_t *c, const uint8_t *hash, size_t hashLen)
 {
     SSFBN_DEFINE(out, SSF_EC_MAX_LIMBS);
@@ -798,6 +1051,9 @@ void _SSFECDSABits2IntForTest(const SSFECCurveParams_t *c, const uint8_t *hash, 
 }
 #endif /* SSF_CONFIG_ECDSA_UNIT_TEST */
 
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if sig is a valid DER ECDSA signature of hash under pubKey, else false.          */
+/* --------------------------------------------------------------------------------------------- */
 bool SSFECDSAVerify(SSFECCurve_t curve, const uint8_t *pubKey, size_t pubKeyLen,
                     const uint8_t *hash, size_t hashLen, const uint8_t *sig, size_t sigLen)
 {
@@ -812,8 +1068,7 @@ bool SSFECDSAVerify(SSFECCurve_t curve, const uint8_t *pubKey, size_t pubKeyLen,
     SSF_REQUIRE(hash != NULL);
     SSF_REQUIRE(sig != NULL);
     SSF_REQUIRE(c != NULL);
-    /* See SSFECDSASign comment: any hash <= curve order length is mathematically valid. */
-    SSF_REQUIRE(hashLen > 0u && hashLen <= c->bytes);
+    SSF_REQUIRE((hashLen > 0u) && (hashLen <= SSF_SHA2_512_BYTE_SIZE));
 
     if (!_SSFECDSAVerifyInit(c, curve, pubKey, pubKeyLen, hash, hashLen, sig, sigLen,
                              &r, &u1, &u2, &Q)) return false;

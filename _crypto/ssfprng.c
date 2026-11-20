@@ -43,6 +43,13 @@
 /* --------------------------------------------------------------------------------------------- */
 #define SSF_PRNG_MAGIC (0x584C5845)
 
+/* AES block cipher matching the effective key size. */
+#if SSF_PRNG_KEY_BITS == 256u
+#define SSF_PRNG_AES_BLOCK_ENCRYPT SSFAES256BlockEncrypt
+#else
+#define SSF_PRNG_AES_BLOCK_ENCRYPT SSFAES128BlockEncrypt
+#endif
+
 /* --------------------------------------------------------------------------------------------- */
 /* Inits or reinits a PRNG context with entropy.                                                 */
 /* --------------------------------------------------------------------------------------------- */
@@ -53,8 +60,8 @@ void SSFPRNGInitContext(SSFPRNGContext_t *context, const uint8_t *entropy, size_
     SSF_REQUIRE(entropyLen == SSF_PRNG_ENTROPY_SIZE);
 
     memcpy(context->entropy, entropy, SSF_PRNG_ENTROPY_SIZE);
-    memcpy(&context->count, entropy, sizeof(uint64_t));
-    context->count = (~context->count) + 1;
+    /* The counter starts at zero as documented */
+    context->count = 0u;
     context->magic = SSF_PRNG_MAGIC;
 }
 
@@ -77,29 +84,33 @@ void SSFPRNGGetRandom(SSFPRNGContext_t *context, uint8_t *random, size_t randomS
     uint8_t pt[SSF_AES_BLOCK_SIZE];
     uint8_t ct[SSF_AES_BLOCK_SIZE];
     uint8_t newKey[SSF_PRNG_ENTROPY_SIZE];
+    uint8_t i;
 
     SSF_REQUIRE(context != NULL);
     SSF_REQUIRE(random != NULL);
     SSF_REQUIRE((randomSize > 0) && (randomSize <= SSF_PRNG_RANDOM_MAX_SIZE));
-    SSF_ASSERT(context->magic == SSF_PRNG_MAGIC);
+    SSF_REQUIRE(context->magic == SSF_PRNG_MAGIC);
 
-    /* Output block: ct = AES_key(count || zeros) (NIST SP 800-90A CTR_DRBG-style input shape). */
-    memcpy(pt, &context->count, sizeof(uint64_t));
+    /* Output block: ct = AES_key(BE count || zeros), identical on every host. */
+    SSF_PUTU64BE(pt, context->count);
     memset(&pt[sizeof(uint64_t)], 0, SSF_AES_BLOCK_SIZE - sizeof(uint64_t));
-    SSFAES128BlockEncrypt(pt, sizeof(pt), ct, sizeof(ct), context->entropy, SSF_PRNG_ENTROPY_SIZE);
+    SSF_PRNG_AES_BLOCK_ENCRYPT(pt, sizeof(pt), ct, sizeof(ct), context->entropy,
+                               SSF_PRNG_ENTROPY_SIZE);
 
     /* Copy requested number of random numbers to user buffer */
     memcpy(random, ct, randomSize);
 
-    /* Backtracking resistance (CTR_DRBG-style Update): derive a fresh key under the CURRENT key */
-    pt[sizeof(uint64_t)] = 0x01u;
-    SSFAES128BlockEncrypt(pt, sizeof(pt), newKey, sizeof(newKey), context->entropy,
-                          SSF_PRNG_ENTROPY_SIZE);
+    /* Re-key under the current key, one block per 16 key bytes, separators 0x01 / 0x02 */
+    for (i = 0; i < (uint8_t)(SSF_PRNG_ENTROPY_SIZE / SSF_AES_BLOCK_SIZE); i++)
+    {
+        pt[sizeof(uint64_t)] = (uint8_t)(0x01u + i);
+        SSF_PRNG_AES_BLOCK_ENCRYPT(pt, sizeof(pt), &newKey[(size_t)i * SSF_AES_BLOCK_SIZE],
+                                   SSF_AES_BLOCK_SIZE, context->entropy, SSF_PRNG_ENTROPY_SIZE);
+    }
     memcpy(context->entropy, newKey, SSF_PRNG_ENTROPY_SIZE);
     context->count++;
 
-    /* Scrub stack secrets before return: pt encodes the count, ct holds output/unused keystream, */
-    /* and newKey is a copy of the freshly installed key.                                          */
+    /* Scrub stack secrets: count block, output keystream and the copy of the new key. */
     SSFCryptSecureZero(pt, sizeof(pt));
     SSFCryptSecureZero(ct, sizeof(ct));
     SSFCryptSecureZero(newKey, sizeof(newKey));

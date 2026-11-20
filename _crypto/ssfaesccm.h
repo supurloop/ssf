@@ -2,7 +2,7 @@
 /* Small System Framework                                                                        */
 /*                                                                                               */
 /* ssfaesccm.h                                                                                   */
-/* Provides AES-CCM (Counter with CBC-MAC) authenticated encryption (RFC 3610, SP 800-38C).     */
+/* Provides AES-CCM (Counter with CBC-MAC) authenticated encryption (RFC 3610, SP 800-38C).      */
 /*                                                                                               */
 /* BSD-3-Clause License                                                                          */
 /* Copyright 2020 Supurloop Software LLC                                                         */
@@ -61,6 +61,13 @@ bool SSFAESCCMDecrypt(const uint8_t *ct, size_t ctLen, const uint8_t *nonce, siz
 /* --------------------------------------------------------------------------------------------- */
 #if SSF_CONFIG_AESCCM_UNIT_TEST == 1
 void SSFAESCCMUnitTest(void);
+
+/* Test wrapper around the internal counter-block formatter. */
+void _SSFAESCCMFormatCtrForTest(uint8_t a[16], const uint8_t *nonce, size_t nonceLen,
+                                uint64_t counter);
+
+/* Test-only hook fired after each secret local is wiped. */
+extern void (*_SSFAESCCMScrubTestHook)(const void *buf, size_t len);
 #endif /* SSF_CONFIG_AESCCM_UNIT_TEST */
 
 #ifdef __cplusplus

@@ -45,7 +45,8 @@ with the other SSF crypto modules for the handshake-side signature / KEM primiti
 ## [↑](#ssftls--tls-13-core-building-blocks) Dependencies
 
 - [`ssfport.h`](../ssfport.h)
-- [`ssfhmac`](ssfhmac.md) — underlying HKDF extract / expand for the key schedule
+- [`ssfhkdf`](ssfhkdf.md) — HKDF-Expand for `SSFTLSHkdfExpandLabel` / Derive-Secret
+- [`ssfhmac`](ssfhmac.md) — the Finished `verify_data` HMAC (and, through `ssfhkdf`, HKDF)
 - [`ssfsha2`](ssfsha2.md) — SHA-256 / SHA-384 for transcript hash and HKDF
 - [`ssfaesgcm`](ssfaesgcm.md) — AEAD backend for the `AES_*_GCM_*` cipher suites
 - [`ssfaesccm`](ssfaesccm.md) — AEAD backend for the `AES_*_CCM_*` cipher suites
@@ -57,9 +58,9 @@ the handshake-side crypto modules: one or more of
 [`ssfecdsa`](ssfecdsa.md) / [`ssfed25519`](ssfed25519.md) / [`ssfrsa`](ssfrsa.md) for
 CertificateVerify; [`ssfx25519`](ssfx25519.md) and / or
 [`ssfecdsa`'s ECDH](ssfecdsa.md#ecdh) for the key-share; and
-[`ssfhkdf`](ssfhkdf.md) for the master-secret extraction steps of the key schedule (the
-Derive-Secret / HKDF-Expand-Label helpers here call HMAC directly rather than going
-through the `ssfhkdf` API).
+[`ssfhkdf`](ssfhkdf.md)'s `SSFHKDFExtract` for the HKDF-Extract steps of the key schedule
+(early, handshake and master secret). The Derive-Secret / HKDF-Expand-Label helpers here
+already call `SSFHKDFExpand`; only the Finished computation calls HMAC directly.
 
 <a id="notes"></a>
 
@@ -144,11 +145,14 @@ through the `ssfhkdf` API).
   only in a stack buffer that [`SSFTLSComputeFinished`](#ssftlscomputefinished)
   `SSFCryptSecureZero`s before returning, so callers never see it and it does not linger
   on the stack.
-- **Trace callbacks are per-connection and zero-overhead when disabled.** A caller that
-  does not install a `SSFTLSTraceCtx_t` — or that installs one with `fn == NULL` — pays
-  only a single null-check per would-be trace point (the `SSF_TLS_TRACE_*` macros
-  short-circuit). Installing a trace callback formats into a 256-byte stack buffer per
-  call; keep this in mind if stack is tight.
+- **Tracing is compiled out by default.** The `SSF_TLS_TRACE_*` macros (used by
+  [`ssfx509`](../_codec/ssfx509.md) and [`ssfcms`](ssfcms.md)) expand to nothing unless
+  [`SSF_TLS_CONFIG_ENABLE_TRACE`](#configuration) is `1`. Compiled out, they cost no flash
+  (about 5 KB of messages and call setup on Cortex-M), no `snprintf` dependency, and no
+  stack. Compiled in, a caller that installs no callback — or one with `fn == NULL` — pays a
+  single null-check per trace point, and an installed callback formats into a 256-byte stack
+  buffer per call; keep this in mind if stack is tight. The x509 and CMS unit-test builds
+  turn tracing on, since they check the messages.
 - **Configuration options are forward-looking.** `SSF_TLS_CONFIG_MAX_RECORD_SIZE`,
   `SSF_TLS_CONFIG_MAX_CHAIN_DEPTH`, `SSF_TLS_CONFIG_MAX_TRUSTED_CAS`,
   `SSF_TLS_CONFIG_PSK_ENABLE`, `SSF_TLS_CONFIG_TICKET_LIFETIME_SEC`, and
@@ -188,6 +192,7 @@ for a future handshake / transport layer.
 | `SSF_TLS_CONFIG_PSK_ENABLE` | `1` | Reserved for PSK handshake support. Unused today. |
 | `SSF_TLS_CONFIG_TICKET_LIFETIME_SEC` | `3600` | Reserved for session-ticket lifetime. Unused today. |
 | `SSF_TLS_CONFIG_MAX_ALPN_LEN` | `32` | Reserved for ALPN protocol list sizing. Unused today. |
+| `SSF_TLS_CONFIG_ENABLE_TRACE` | `0` (`1` when `SSF_CONFIG_X509_UNIT_TEST` or `SSF_CONFIG_CMS_UNIT_TEST` is `1`) | `1` compiles in the trace messages that `SSFX509SetTraceCtx()` / `SSFCMSSetTraceCtx()` callbacks receive. `0` compiles them out: on Cortex-M about 3.7 KB less flash in ssfx509 and 1.4 KB in ssfcms, no `snprintf` reference (newlib-nano's formatter is about 3.8 KB, full newlib's about 26 KB, if nothing else uses it), and 240-272 B less stack in each tracing function. The `SetTraceCtx` functions remain but no message is sent. |
 
 <a id="api-summary"></a>
 
@@ -230,9 +235,9 @@ driving the handshake themselves will need. Grouped logically:
 
 | | Function | Description |
 |---|----------|-------------|
-| [e.g.](#ex-keyschedule) | [`void SSFTLSHkdfExpandLabel(hash, secret, secretLen, label, context, ctxLen, out, outLen)`](#ssftlshkdfexpandlabel) | RFC 8446 §7.1 `HKDF-Expand-Label` |
-| [e.g.](#ex-keyschedule) | [`void SSFTLSDeriveSecret(hash, secret, secretLen, label, transcriptHash, transcriptHashLen, out, outLen)`](#ssftlsderivesecret) | RFC 8446 §7.1 `Derive-Secret` |
-| [e.g.](#ex-keyschedule) | [`void SSFTLSDeriveTrafficKeys(hash, trafficSecret, secretLen, key, keyLen, iv, ivLen)`](#ssftlsderivetrafficKeys) | RFC 8446 §7.3 traffic-key + IV derivation |
+| [e.g.](#ex-keyschedule) | [`void SSFTLSHkdfExpandLabel(hash, secret, secretLen, labelStr, context, contextLen, out, outLen)`](#ssftlshkdfexpandlabel) | RFC 8446 §7.1 `HKDF-Expand-Label` |
+| [e.g.](#ex-keyschedule) | [`void SSFTLSDeriveSecret(hash, secret, secretLen, labelStr, transcriptHash, transcriptHashLen, out, outLen)`](#ssftlsderivesecret) | RFC 8446 §7.1 `Derive-Secret` |
+| [e.g.](#ex-keyschedule) | [`void SSFTLSDeriveTrafficKeys(hash, trafficSecret, trafficSecretLen, key, keyLen, iv, ivLen)`](#ssftlsderivetrafficKeys) | RFC 8446 §7.3 traffic-key + IV derivation |
 | [e.g.](#ex-finished) | [`void SSFTLSComputeFinished(hash, baseKey, baseKeyLen, transcriptHash, transcriptHashLen, verifyData, verifyDataLen)`](#ssftlscomputefinished) | Finished `verify_data` = `HMAC(finished_key, transcript_hash)` |
 
 **[Transcript hash](#transcript-hash)**
@@ -240,7 +245,7 @@ driving the handshake themselves will need. Grouped logically:
 | | Function | Description |
 |---|----------|-------------|
 | [e.g.](#ex-transcript) | [`void SSFTLSTranscriptInit(t, hash)`](#ssftlstranscriptinit) | Initialise a running transcript hash for the selected `SSFHMACHash_t` |
-| [e.g.](#ex-transcript) | [`void SSFTLSTranscriptUpdate(t, data, len)`](#ssftlstranscriptupdate) | Append handshake bytes |
+| [e.g.](#ex-transcript) | [`void SSFTLSTranscriptUpdate(t, data, dataLen)`](#ssftlstranscriptupdate) | Append handshake bytes |
 | [e.g.](#ex-transcript) | [`void SSFTLSTranscriptHash(t, out, outSize)`](#ssftlstranscripthash) | Snapshot the current transcript hash without consuming the context |
 
 **[Record layer](#record-layer)**
@@ -264,21 +269,29 @@ driving the handshake themselves will need. Grouped logically:
 ```c
 void SSFTLSHkdfExpandLabel(SSFHMACHash_t hash,
                            const uint8_t *secret, size_t secretLen,
-                           const char *label,
-                           const uint8_t *context, size_t ctxLen,
+                           const char *labelStr,
+                           const uint8_t *context, size_t contextLen,
                            uint8_t *out, size_t outLen);
 ```
 RFC 8446 §7.1 `HKDF-Expand-Label(Secret, Label, Context, Length)`. Prepends `"tls13 "` to
-`label`, frames `(label, context)` into the RFC-specified `HkdfLabel` structure, and
+`labelStr`, frames `(labelStr, context)` into the RFC-specified `HkdfLabel` structure, and
 runs `HKDF-Expand` internally. This is the building block for every secret derivation in
 TLS 1.3 — traffic secrets, application secrets, resumption secret, exporter secret, etc.
 all flow through this function.
+
+`context` may be `NULL` only when `contextLen` is `0` (an empty context, as for the `"key"`,
+`"iv"` and `"finished"` labels); a `NULL` `context` with a non-zero `contextLen` is a precondition
+violation (`SSF_REQUIRE`). `contextLen` is at most `SSF_TLS_MAX_HASH_SIZE` (every TLS 1.3 context
+is a transcript or exporter-context hash), and `labelStr` may be up to 249 bytes, the RFC 8446
+maximum (`"tls13 "` plus the label must fit a 255-byte field), which covers application-chosen
+exporter labels (§7.5). Both limits are `SSF_REQUIRE` preconditions. The `HkdfLabel` buffer
+costs about 300 bytes of stack during the call.
 
 <a id="ssftlsderivesecret"></a>
 ```c
 void SSFTLSDeriveSecret(SSFHMACHash_t hash,
                         const uint8_t *secret, size_t secretLen,
-                        const char *label,
+                        const char *labelStr,
                         const uint8_t *transcriptHash, size_t transcriptHashLen,
                         uint8_t *out, size_t outLen);
 ```
@@ -292,7 +305,7 @@ context. Use this at every Derive-Secret site in the key schedule (e.g., derivin
 <a id="ssftlsderivetrafficKeys"></a>
 ```c
 void SSFTLSDeriveTrafficKeys(SSFHMACHash_t hash,
-                             const uint8_t *trafficSecret, size_t secretLen,
+                             const uint8_t *trafficSecret, size_t trafficSecretLen,
                              uint8_t *key, size_t keyLen,
                              uint8_t *iv, size_t ivLen);
 ```
@@ -369,13 +382,14 @@ before the first `Update`.
 
 <a id="ssftlstranscriptupdate"></a>
 ```c
-void SSFTLSTranscriptUpdate(SSFTLSTranscript_t *t, const uint8_t *data, size_t len);
+void SSFTLSTranscriptUpdate(SSFTLSTranscript_t *t, const uint8_t *data, size_t dataLen);
 ```
-Append `len` bytes of handshake-message data to the running transcript. Each full
+Append `dataLen` bytes of handshake-message data to the running transcript. Each full
 handshake message (its 4-byte header plus its body) must be fed exactly once, in
 wire-order, on both sides. Missing or mis-ordering a message produces a mismatched
 transcript hash — detected later as a Finished MAC failure, which looks cryptic unless
-you know to check the transcript ordering first.
+you know to check the transcript ordering first. `dataLen` must not exceed `UINT32_MAX` (the
+underlying SHA update length); a larger value traps.
 
 <a id="ssftlstranscripthash"></a>
 ```c
@@ -426,6 +440,17 @@ and zero the sequence counter. Create one `SSFTLSRecordState_t` per direction (c
 and server→client) and re-initialise after each key update — do not reuse a state across
 a re-key.
 
+`cipherSuite` must be one of the five supported TLS 1.3 suites and `keyLen` must be that
+suite's RFC 8446 key length; both are `SSF_REQUIRE` preconditions, so a mismatch traps instead
+of silently running, for example, AES-128-GCM under `TLS_AES_256_GCM_SHA384`:
+
+| Suite | `keyLen` |
+|---|---|
+| `SSF_TLS_CS_AES_128_GCM_SHA256`, `SSF_TLS_CS_AES_128_CCM_SHA256`, `SSF_TLS_CS_AES_128_CCM_8_SHA256` | 16 |
+| `SSF_TLS_CS_AES_256_GCM_SHA384`, `SSF_TLS_CS_CHACHA20_POLY1305_SHA256` | 32 |
+
+`ivLen` is always `SSF_TLS_IV_SIZE` (12).
+
 **Init-once contract.** `SSFTLSRecordState_t` carries a `magic` field that guards against
 re-initialising a live state. The struct **must be zeroed before the first call**
 (`magic` must not already equal the active sentinel), and `SSFTLSRecordStateInit`
@@ -463,9 +488,16 @@ every suite except `TLS_AES_128_CCM_8_SHA256`, which uses 8 — see the cipher-s
 in [Notes](#notes)). `recordLen` reports the total wire-record size including header,
 ciphertext, and tag.
 
-Returns `false` if `recordSize` is too small or if the record would exceed the RFC 8446
-per-record ciphertext limit of `2^14 + 256` bytes. The sequence number is
-incremented internally on success.
+`contentType` must be non-zero (a zero byte is padding on the wire). `pt` may already sit at
+`&record[5]`, in which case it is encrypted in place without a copy; otherwise it must not
+overlap `record` at all. Either violation traps.
+
+Returns `false` if `ptLen` exceeds the RFC 8446 §5.1 plaintext limit of `2^14` (16384) bytes,
+if `recordSize` is too small, or if the record would exceed the per-record ciphertext limit
+of `2^14 + 256` bytes. Callers sending more than 16384 bytes must split the data across
+records; a conforming peer aborts the connection with `record_overflow` on a larger
+plaintext. No padding is added, so the inner plaintext is at most `2^14 + 1` bytes. The
+sequence number is incremented internally on success.
 
 <a id="ssftlsrecorddecrypt"></a>
 ```c
@@ -477,8 +509,10 @@ bool SSFTLSRecordDecrypt(SSFTLSRecordState_t *state,
 Verify the AEAD tag on `record`, decrypt the payload into `pt`, and extract the inner
 content type (writing it to `*contentType`). Returns `false` on any parsing / size /
 tag-verification failure — the caller should treat all `false` outcomes identically and
-reject the record. On success, `*ptLen` is the length of the actual payload (the inner
-content-type byte has already been stripped).
+reject the record. Size failures include a ciphertext over `2^14 + 256` bytes and an inner
+plaintext (payload, content type and padding) over `2^14 + 1` bytes (RFC 8446 §5.2 / §5.4);
+the peer should answer either with a `record_overflow` alert. On success, `*ptLen` is the
+length of the actual payload (the inner content-type byte has already been stripped).
 
 <a id="ex-record"></a>
 

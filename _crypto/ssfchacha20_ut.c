@@ -36,10 +36,7 @@
 #include "ssfassert.h"
 #include "ssfchacha20.h"
 
-/* Cross-validate ChaCha20 against OpenSSL on host builds where libcrypto is linked. Same    */
-/* gating pattern as ssfaesctr_ut.c. When disabled (cross builds with                         */
-/* -DSSF_CONFIG_HAVE_OPENSSL=0) the RFC 8439 test vectors above are the load-bearing          */
-/* correctness coverage.                                                                      */
+/* Cross-validate against OpenSSL when libcrypto is linked, else RFC 8439 vectors cover it. */
 #if (SSF_CONFIG_HAVE_OPENSSL == 1) && (SSF_CONFIG_CHACHA20_UNIT_TEST == 1)
 #define SSF_CHACHA20_OSSL_VERIFY 1
 #else
@@ -59,8 +56,7 @@
 /* OpenSSL cross-check helpers.                                                                  */
 /* --------------------------------------------------------------------------------------------- */
 
-/* Compute ChaCha20 via OpenSSL's EVP_chacha20. OpenSSL takes a 16-byte IV laid out as          */
-/* [counter (4 bytes little-endian) | nonce (12 bytes)] per RFC 8439.                            */
+/* Compute ChaCha20 via OpenSSL EVP_chacha20 (IV = 4-byte LE counter || 12-byte nonce). */
 static void _OSSLChaCha20(const uint8_t *key, const uint8_t *nonce, uint32_t counter,
                           const uint8_t *in, uint8_t *out, size_t len)
 {
@@ -84,16 +80,13 @@ static void _OSSLChaCha20(const uint8_t *key, const uint8_t *nonce, uint32_t cou
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Random fuzz across (counter x len) including the block-boundary cutoffs (64-byte) and       */
-/* the counter values that test the high-bit / wrap-adjacent paths.                              */
+/* Random fuzz across (counter x len), including 64-byte block cutoffs and high counters. */
 /* --------------------------------------------------------------------------------------------- */
 static void _VerifyChaCha20AgainstOpenSSLRandom(void)
 {
     static const size_t lens[]        = {0u, 1u, 31u, 63u, 64u, 65u, 127u, 128u, 129u,
                                           255u, 256u, 257u, 1023u, 1024u, 1025u, 4096u};
-    /* Keep counters far enough below 2^32 that 4096 bytes (64 blocks) cannot wrap. RFC 8439   */
-    /* doesn't define IETF ChaCha20 behavior past the 32-bit counter, and OpenSSL/SSF need not */
-    /* agree there.                                                                             */
+    /* Keep counters far enough below 2^32 that 4096 bytes (64 blocks) cannot wrap. */
     static const uint32_t counters[]  = {0u, 1u, 0x12345678u, 0x7FFFFFFFu, 0xFFFFFFA0u};
     uint8_t key[SSF_CHACHA20_KEY_SIZE];
     uint8_t nonce[SSF_CHACHA20_NONCE_SIZE];
@@ -122,8 +115,7 @@ static void _VerifyChaCha20AgainstOpenSSLRandom(void)
                 _OSSLChaCha20(key, nonce, counter, in, outOSSL, len);
                 if (len > 0u) SSF_ASSERT(memcmp(outSSF, outOSSL, len) == 0);
 
-                /* In-place encrypt must produce the same output: catches a bug where the impl */
-                /* reads from out[i] before writing the keystream-XOR result.                  */
+                /* In-place encrypt must produce the same output. */
                 if (len > 0u)
                 {
                     uint8_t buf[4096];
@@ -138,6 +130,28 @@ static void _VerifyChaCha20AgainstOpenSSLRandom(void)
 }
 
 #endif /* SSF_CHACHA20_OSSL_VERIFY */
+
+/* --------------------------------------------------------------------------------------------- */
+/* AUDIT CHACHA-1: scrub-hook callback; counts calls and any buffer that is not all zero.        */
+/* --------------------------------------------------------------------------------------------- */
+static uint32_t _scrubCalls;
+static uint32_t _scrubDirty;
+static void _ScrubCheck(const void *buf, size_t len)
+{
+    const uint8_t *b = (const uint8_t *)buf;
+    size_t i;
+
+    SSF_ASSERT(buf != NULL);
+    _scrubCalls++;
+    for (i = 0; i < len; i++)
+    {
+        if (b[i] != 0u)
+        {
+            _scrubDirty++;
+            break;
+        }
+    }
+}
 
 /* --------------------------------------------------------------------------------------------- */
 /* RFC 7539 Section 2.4.2 test vector                                                            */
@@ -237,10 +251,7 @@ void SSFChaCha20UnitTest(void)
         SSF_ASSERT(memcmp(big_dec, big_pt, sizeof(big_pt)) == 0);
     }
 
-    /* RFC 8439 Sec. A.1 ChaCha20 block-function vectors. Encrypt-of-zero exposes the raw 64-byte
-     * keystream block. These KATs isolate the QR macro / round routing / state init from the
-     * encryption layer -- a self-consistent-but-wrong implementation would still round-trip for
-     * arbitrary plaintexts but produce keystream values that diverge from the RFC. */
+    /* RFC 8439 Sec. A.1 block-function vectors: encrypt-of-zero exposes the raw keystream. */
 
     /* RFC 8439 Sec. A.1 TV1: key=0, counter=0, nonce=0. */
     {
@@ -264,8 +275,7 @@ void SSFChaCha20UnitTest(void)
         SSF_ASSERT(memcmp(ct, expectedKs, sizeof(expectedKs)) == 0);
     }
 
-    /* RFC 8439 Sec. A.1 TV2: key=0, counter=1, nonce=0 -- same key/nonce as TV1 with a different
-     * counter. Confirms counter is correctly mixed into state[12]. */
+    /* RFC 8439 Sec. A.1 TV2: key=0, counter=1, nonce=0 -- counter mixed into state[12]. */
     {
         static const uint8_t zeroKey[32] = {0};
         static const uint8_t zeroNonce[12] = {0};
@@ -314,8 +324,7 @@ void SSFChaCha20UnitTest(void)
         SSF_ASSERT(memcmp(ct, expectedKs, sizeof(expectedKs)) == 0);
     }
 
-    /* RFC 8439 Sec. A.1 TV4: key=00 FF 00.., counter=2, nonce=0 -- non-zero high bit in second key
-     * byte exercises the LE byte-loading at state[4]. */
+    /* RFC 8439 Sec. A.1 TV4: key=00 FF 00.., counter=2, nonce=0 -- LE key load at state[4]. */
     {
         static const uint8_t key00ff[] = {
             0x00u, 0xFFu, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u,
@@ -342,8 +351,7 @@ void SSFChaCha20UnitTest(void)
         SSF_ASSERT(memcmp(ct, expectedKs, sizeof(expectedKs)) == 0);
     }
 
-    /* RFC 8439 Sec. A.1 TV5: key=0, counter=0, nonce=00..02 -- non-zero nonce confirms it is
-     * correctly placed in state[13..15]. */
+    /* RFC 8439 Sec. A.1 TV5: key=0, counter=0, nonce=00..02 -- nonce in state[13..15]. */
     {
         static const uint8_t zeroKey[32] = {0};
         static const uint8_t nonce2[] = {
@@ -368,10 +376,7 @@ void SSFChaCha20UnitTest(void)
         SSF_ASSERT(memcmp(ct, expectedKs, sizeof(expectedKs)) == 0);
     }
 
-    /* RFC 8439 Sec. A.2 TV2: 375-byte IETF-text encryption with key=00..01, counter=1, nonce=00..02.
-     * Multi-block (5 full + 1 partial = 6 blocks); confirms counter advances correctly across
-     * blocks and partial-final-block keystream truncation works. (Sec. A.2 TV1 is redundant
-     * with Sec. A.1 TV1 above -- same key/nonce/counter on a 64-byte zero plaintext -- omitted.) */
+    /* RFC 8439 Sec. A.2 TV2: 375-byte multi-block text, partial final block (TV1 = A.1 TV1). */
     {
         static const uint8_t key1[] = {
             0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u,
@@ -488,9 +493,7 @@ void SSFChaCha20UnitTest(void)
         SSF_ASSERT(memcmp(ct, expectedCt, sizeof(expectedCt)) == 0);
     }
 
-    /* RFC 8439 Sec. A.2 TV3: 127-byte Jabberwocky excerpt with a non-zero key, an unusual high
-     * starting counter (42), and the Sec. A.1 TV5 nonce. Tests counter values that are neither 0
-     * nor 1 -- the typical (key, nonce, counter != 0/1) combination not exercised elsewhere. */
+    /* RFC 8439 Sec. A.2 TV3: 127-byte Jabberwocky excerpt, non-zero key, counter 42. */
     {
         static const uint8_t keyJ[] = {
             0x1Cu, 0x92u, 0x40u, 0xA5u, 0xEBu, 0x55u, 0xD3u, 0x8Au,
@@ -545,11 +548,7 @@ void SSFChaCha20UnitTest(void)
         SSF_ASSERT(memcmp(ct, expectedCt, sizeof(expectedCt)) == 0);
     }
 
-    /* SSFChaCha20Encrypt: DBC coverage. The contract surface is large -- key / keyLen / nonce
-     * / nonceLen / ptLen <= ctSize / ptLen < 512 MiB / pt / ct. Every SSF_REQUIRE is exercised
-     * with at least one boundary or NULL-pointer violation. The 512 MiB ptLen test passes
-     * matching ctSize so that check fires last -- nothing dereferences the pt/ct pointers so
-     * the absurd ptLen value never causes a real allocation. */
+    /* SSFChaCha20Encrypt DBC: every SSF_REQUIRE hit with a boundary or NULL violation. */
     {
         static const uint8_t scratchKey[32] = {0};
         static const uint8_t scratchNonce[12] = {0};
@@ -610,12 +609,13 @@ void SSFChaCha20UnitTest(void)
                                            scratchNonce, sizeof(scratchNonce),
                                            0u, scratchCt, sizeof(scratchPt) - 1u));
 
-        /* ptLen >= 512 MiB. ctSize matches so the size-bound assert fires; nothing derefs pt
-         * or ct, so the absurd length never causes any actual allocation or access. */
-        SSF_ASSERT_TEST(SSFChaCha20Encrypt(scratchPt, 512u * 1024u * 1024u,
+#if (SIZE_MAX > 0x1FFFFFFFu) /* AUDIT PORT-1: a 512 MiB length needs a >= 30-bit size_t. */
+        /* ptLen >= 512 MiB with matching ctSize; nothing dereferences pt or ct. */
+        SSF_ASSERT_TEST(SSFChaCha20Encrypt(scratchPt, ((uint32_t)512u * 1024u * 1024u),
                                            scratchKey, sizeof(scratchKey),
                                            scratchNonce, sizeof(scratchNonce),
-                                           0u, scratchCt, 512u * 1024u * 1024u));
+                                           0u, scratchCt, ((uint32_t)512u * 1024u * 1024u)));
+#endif /* SIZE_MAX */
 
         /* pt NULL with ptLen > 0 */
         SSF_ASSERT_TEST(SSFChaCha20Encrypt(NULL, sizeof(scratchCt),
@@ -635,22 +635,17 @@ void SSFChaCha20UnitTest(void)
                            scratchNonce, sizeof(scratchNonce),
                            0u, NULL, 0u);
 
-        /* Counter wrap forbidden. RFC 8439 leaves behavior past 2^32 blocks undefined and
-         * SSF diverges from OpenSSL there; the contract forbids any (counter, ptLen) where
-         * the last block index would exceed 2^32 - 1. Use larger pt/ct buffers since the
-         * earlier ptLen <= ctSize check would otherwise fire first. */
+        /* Counter wrap forbidden: last block index must be <= 2^32 - 1 (large buffers). */
         {
             uint8_t bigPt[129] = {0};
             uint8_t bigCt[129];
 
-            /* Just past the boundary: counter=UINT32_MAX with ptLen=65 needs 2 blocks, and
-             * the second one would be at the wrap. Must assert. */
+            /* Just past the boundary: counter=UINT32_MAX, ptLen=65 needs 2 blocks. Must assert. */
             SSF_ASSERT_TEST(SSFChaCha20Encrypt(bigPt, 65u,
                                                scratchKey, sizeof(scratchKey),
                                                scratchNonce, sizeof(scratchNonce),
                                                0xFFFFFFFFu, bigCt, sizeof(bigCt)));
-            /* Past boundary by one: counter=0xFFFFFFFE with ptLen=129 needs 3 blocks; the
-             * third one is at the wrap. Must assert. */
+            /* Past boundary by one: counter=0xFFFFFFFE, ptLen=129 needs 3 blocks. Must assert. */
             SSF_ASSERT_TEST(SSFChaCha20Encrypt(bigPt, 129u,
                                                scratchKey, sizeof(scratchKey),
                                                scratchNonce, sizeof(scratchNonce),
@@ -672,6 +667,24 @@ void SSFChaCha20UnitTest(void)
 #if SSF_CHACHA20_OSSL_VERIFY == 1
     _VerifyChaCha20AgainstOpenSSLRandom();
 #endif
+
+    /* ---- AUDIT CHACHA-1: secret locals are wiped before return (scrub hook sees zeros) ---- */
+    {
+        _scrubCalls = 0u;
+        _scrubDirty = 0u;
+        static const uint8_t wKey[32] = { 0x11u };
+        static const uint8_t wNonce[12] = { 0x22u };
+        uint8_t wPt[100];
+        uint8_t ct[100];
+
+        memset(wPt, 0x33, sizeof(wPt));
+        _SSFChaCha20ScrubTestHook = _ScrubCheck;
+        SSFChaCha20Encrypt(wPt, sizeof(wPt), wKey, sizeof(wKey), wNonce, sizeof(wNonce), 1u, ct,
+                           sizeof(ct));
+        _SSFChaCha20ScrubTestHook = NULL;
+        SSF_ASSERT(_scrubCalls == 2u);
+        SSF_ASSERT(_scrubDirty == 0u);
+    }
 }
 
 #endif /* SSF_CONFIG_CHACHA20_UNIT_TEST */

@@ -145,11 +145,7 @@ void SSFPRNGUnitTest(void)
         SSFPRNGDeInitContext(&ctx);
     }
 
-    /* (Hardening) Backtracking resistance: GetRandom performs a CTR_DRBG-style Update that
-     * re-keys the context, destroying the AES key that produced the returned bytes. A state
-     * compromise after the call therefore cannot recover previously returned output. Observe the
-     * rotation directly -- right after init the context key equals the seed; after one draw it
-     * must differ. (The first output block stays deterministic for a given seed; covered above.) */
+    /* (Hardening) Backtracking resistance: GetRandom re-keys, so the key changes per draw. */
     {
         SSFPRNGContext_t ctx;
         uint8_t seedKey[SSF_PRNG_ENTROPY_SIZE] = {0, 1, 2, 3, 4, 5, 6, 7,
@@ -176,45 +172,62 @@ void SSFPRNGUnitTest(void)
         SSFPRNGDeInitContext(&ctx);
     }
 
-    /* Verify pt = count || zeros (NIST CTR_DRBG-style input shape). Property test: the PRNG
-     * output for any (entropy, count) must equal AES-128-ECB(entropy, count_bytes || zeros).
-     * Compute both sides on the host (same memcpy semantics on either endianness) and compare.
-     * Pre-fix this would have been AES(entropy, count||count); the change makes the input
-     * shape match standard CTR_DRBG conventions. */
+    /* AUDIT PRNG-1/PRNG-2/KEYGEN-1: count from 0, BE count, AES key size (KATs: openssl enc). */
     {
-        SSFPRNGContext_t ctx;
-        uint8_t entropyKnown[SSF_PRNG_ENTROPY_SIZE] = {
-            0x00u, 0x01u, 0x02u, 0x03u, 0x04u, 0x05u, 0x06u, 0x07u,
-            0x08u, 0x09u, 0x0Au, 0x0Bu, 0x0Cu, 0x0Du, 0x0Eu, 0x0Fu
+#if (SSF_EC_CONFIG_ENABLE_P384 == 1) || (SSF_RSA_CONFIG_ENABLE_4096 == 1) || \
+    (SSF_PRNG_CONFIG_KEY_BITS == 256)
+        static const uint32_t expectBits = 256u;
+        static const uint8_t out1Known[SSF_PRNG_RANDOM_MAX_SIZE] = {
+            0xF2u, 0x90u, 0x00u, 0xB6u, 0x2Au, 0x49u, 0x9Fu, 0xD0u,
+            0xA9u, 0xF3u, 0x9Au, 0x6Au, 0xDDu, 0x2Eu, 0x77u, 0x80u
         };
+        static const uint8_t out2Known[SSF_PRNG_RANDOM_MAX_SIZE] = {
+            0x86u, 0x9Cu, 0xE1u, 0xC4u, 0xDCu, 0xB5u, 0x47u, 0x8Du,
+            0xD8u, 0x31u, 0xDBu, 0x73u, 0xC7u, 0xB2u, 0xF2u, 0x0Du
+        };
+#else
+        static const uint32_t expectBits = 128u;
+        static const uint8_t out1Known[SSF_PRNG_RANDOM_MAX_SIZE] = {
+            0xC6u, 0xA1u, 0x3Bu, 0x37u, 0x87u, 0x8Fu, 0x5Bu, 0x82u,
+            0x6Fu, 0x4Fu, 0x81u, 0x62u, 0xA1u, 0xC8u, 0xD8u, 0x79u
+        };
+        static const uint8_t out2Known[SSF_PRNG_RANDOM_MAX_SIZE] = {
+            0xB6u, 0xD3u, 0x90u, 0x3Fu, 0xA2u, 0xA8u, 0x7Au, 0x2Du,
+            0x49u, 0x75u, 0x8Cu, 0x7Fu, 0xACu, 0x67u, 0x91u, 0xF7u
+        };
+#endif
+        SSFPRNGContext_t ctx;
+        uint8_t entropyKnown[SSF_PRNG_ENTROPY_SIZE];
+        uint8_t otherSeed[SSF_PRNG_ENTROPY_SIZE];
         uint8_t knownRandom[SSF_PRNG_RANDOM_MAX_SIZE];
-        uint8_t expectedPt[SSF_AES_BLOCK_SIZE];
-        uint8_t expectedCt[SSF_AES_BLOCK_SIZE];
-        uint64_t snappedCount;
+        size_t k;
+
+        /* The seed size follows the derived key size. */
+        SSF_ASSERT(((uint32_t)SSF_PRNG_ENTROPY_SIZE * 8u) == expectBits);
+
+        for (k = 0; k < sizeof(entropyKnown); k++) entropyKnown[k] = (uint8_t)k;
+        for (k = 0; k < sizeof(otherSeed); k++) otherSeed[k] = (uint8_t)(0xF0u - k);
 
         SSFPRNGInitContext(&ctx, entropyKnown, sizeof(entropyKnown));
-        snappedCount = ctx.count;
-
-        /* Build the AES input as count || zeros (the post-fix construction). */
-        memcpy(expectedPt, &snappedCount, sizeof(uint64_t));
-        memset(&expectedPt[sizeof(uint64_t)], 0, sizeof(uint64_t));
-
-        SSFAES128BlockEncrypt(expectedPt, sizeof(expectedPt),
-                              expectedCt, sizeof(expectedCt),
-                              entropyKnown, sizeof(entropyKnown));
+        SSF_ASSERT(ctx.count == 0u);
 
         SSFPRNGGetRandom(&ctx, knownRandom, sizeof(knownRandom));
-        SSF_ASSERT(memcmp(knownRandom, expectedCt, sizeof(knownRandom)) == 0);
+        SSF_ASSERT(memcmp(knownRandom, out1Known, sizeof(knownRandom)) == 0);
+        SSFPRNGGetRandom(&ctx, knownRandom, sizeof(knownRandom));
+        SSF_ASSERT(memcmp(knownRandom, out2Known, sizeof(knownRandom)) == 0);
+        SSF_ASSERT(ctx.count == 2u);
+
+        /* ReInit on a used context resets the counter and restarts the documented stream. */
+        SSFPRNGReInitContext(&ctx, otherSeed, sizeof(otherSeed));
+        SSF_ASSERT(ctx.count == 0u);
+        SSFPRNGReInitContext(&ctx, entropyKnown, sizeof(entropyKnown));
+        SSFPRNGGetRandom(&ctx, knownRandom, sizeof(knownRandom));
+        SSF_ASSERT(memcmp(knownRandom, out1Known, sizeof(knownRandom)) == 0);
 
         SSFPRNGDeInitContext(&ctx);
     }
 
-    /* Defense-in-depth regression: GetRandom now scrubs its internal pt and ct stack buffers
-     * before return. The scrub is not externally observable through the C API, but it must
-     * not break the deterministic-output contract -- a fresh ctx with the same entropy must
-     * still produce the same first-call output. This catches any regression that would
-     * accidentally damage the live state during the scrub (e.g., scrubbing context->entropy
-     * by mistake). */
+    /* The stack scrub in GetRandom must not disturb deterministic output for the same seed. */
     {
         SSFPRNGContext_t ctxA;
         SSFPRNGContext_t ctxB;
@@ -224,9 +237,7 @@ void SSFPRNGUnitTest(void)
         SSFPRNGInitContext(&ctxA, entropy, sizeof(entropy));
         SSFPRNGGetRandom(&ctxA, rA, sizeof(rA));
 
-        /* Run a few extra calls to exercise the scrub path multiple times before the    */
-        /* second context's first call. If the scrub were corrupting state, ctxB's first */
-        /* call would diverge from ctxA's first call.                                    */
+        /* Extra calls exercise the scrub path before ctxB's first call is compared. */
         {
             uint8_t scratch[SSF_PRNG_RANDOM_MAX_SIZE];
             SSFPRNGGetRandom(&ctxA, scratch, sizeof(scratch));

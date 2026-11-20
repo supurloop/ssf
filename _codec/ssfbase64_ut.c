@@ -39,7 +39,7 @@
 
 /* Low level block encode/decode */
 uint8_t SSFBase64Dec32To24(const char *b32, uint8_t *b24out, size_t b24outSize);
-void SSFBase64Enc24To32(const uint8_t *b24, size_t b24len, char *b32out, size_t b32outSize);
+void SSFBase64Enc24To32(const uint8_t *b24in, size_t b24inLen, char *b32out, size_t b32outSize);
 
 typedef struct SSBase64UT
 {
@@ -78,10 +78,12 @@ SSBase64UT_t _b64StringUT[] = {
     { (uint8_t *)"abcde", 5, "YWJjZGU=" },
     { (uint8_t *)"abcdef", 6, "YWJjZGVm" },
     { (uint8_t *)
-        "\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10\x12\x13\x14\x15\x16\x17"
-        "\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f\xe0\xe1\xe2\xe3\xe4\xe5\xe6\xe7\xe8\xe9\xea\xeb\xec\xed"
-        "\xee\xef\xf0\xf1\xf2\xf3\xf4\xf5\xf6\xf7\xf8\xf9\xfa\xfb\xfc\xfd\xfe\xff\x00", 64,
-        "AAECAwQFBgcICQoLDA0ODxASExQVFhcYGRobHB0eH+Dh4uPk5ebn6Onq6+zt7u/w8fLz9PX29/j5+vv8/f7/AA==" },
+        "\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10\x12\x13\x14"
+        "\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f\xe0\xe1\xe2\xe3\xe4\xe5\xe6\xe7\xe8"
+        "\xe9\xea\xeb\xec\xed\xee\xef\xf0\xf1\xf2\xf3\xf4\xf5\xf6\xf7\xf8\xf9\xfa\xfb\xfc"
+        "\xfd\xfe\xff\x00", 64,
+        "AAECAwQFBgcICQoLDA0ODxASExQVFhcYGRobHB0eH+Dh4uPk5ebn6Onq6+zt7u/w8fLz9PX29/j5+vv8"
+        "/f7/AA==" },
 };
 
 /* --------------------------------------------------------------------------------------------- */
@@ -103,10 +105,12 @@ void SSFBase64UnitTest(void)
     SSF_ASSERT_TEST(SSFBase64Dec32To24(_b64BlockUT[1].encoded, NULL, sizeof(b24)));
 
     SSF_ASSERT_TEST(SSFBase64Enc24To32(NULL, _b64BlockUT[1].unencodedLen, b32, sizeof(b32)));
-    SSF_ASSERT_TEST(SSFBase64Enc24To32(_b64BlockUT[1].unencoded, _b64BlockUT[1].unencodedLen, NULL, sizeof(b32)));
+    SSF_ASSERT_TEST(SSFBase64Enc24To32(_b64BlockUT[1].unencoded, _b64BlockUT[1].unencodedLen, NULL,
+                                       sizeof(b32)));
 
     SSF_ASSERT_TEST(SSFBase64Encode(NULL, _b64BlockUT[1].unencodedLen,
-                                   _b64BlockUT[1].encoded, sizeof(_b64BlockUT[1].encoded), &outLen));
+                                    _b64BlockUT[1].encoded, sizeof(_b64BlockUT[1].encoded),
+                                    &outLen));
 
     SSF_ASSERT_TEST(SSFBase64Decode(NULL, strlen(_b64BlockUT[1].encoded),
                                    decodedBin, sizeof(decodedBin), &outLen));
@@ -119,14 +123,19 @@ void SSFBase64UnitTest(void)
     SSF_ASSERT_TEST(SSFBase64Dec32To24(_b64BlockUT[1].encoded, b24, 0));
 
     SSF_ASSERT_TEST(SSFBase64Enc24To32(_b64BlockUT[1].unencoded, 0, b32, sizeof(b32)));
-    SSF_ASSERT_TEST(SSFBase64Enc24To32(_b64BlockUT[1].unencoded, _b64BlockUT[1].unencodedLen, b32, 3));
+    SSF_ASSERT_TEST(SSFBase64Enc24To32(_b64BlockUT[1].unencoded, _b64BlockUT[1].unencodedLen, b32,
+                                       3));
 
 
     for (i = 0; i < (sizeof(_b64BlockUT) / sizeof(SSBase64UT_t)); i++)
     {
-        SSF_ASSERT(SSFBase64Dec32To24(_b64BlockUT[i].encoded, b24, sizeof(b24)) ==
+        /* AUDIT B64-1: block decoder reads 4 chars; empty vector is covered by Decode below */
+        if (_b64BlockUT[i].unencodedLen != 0)
+        {
+            SSF_ASSERT(SSFBase64Dec32To24(_b64BlockUT[i].encoded, b24, sizeof(b24)) ==
                        _b64BlockUT[i].unencodedLen);
-        SSF_ASSERT(memcmp(b24, _b64BlockUT[i].unencoded, _b64BlockUT[i].unencodedLen) == 0);
+            SSF_ASSERT(memcmp(b24, _b64BlockUT[i].unencoded, _b64BlockUT[i].unencodedLen) == 0);
+        }
         if (_b64BlockUT[i].unencodedLen == 0)
         {
             SSF_ASSERT_TEST(SSFBase64Enc24To32(_b64BlockUT[i].unencoded,
@@ -166,8 +175,7 @@ void SSFBase64UnitTest(void)
     SSF_ASSERT_TEST(SSFBase64Encode((uint8_t *)"abc", 0, encodedStr, 0, &outLen));
     SSF_ASSERT(SSFBase64Decode("abcd", 4, decodedBin, 2, &outLen) == false);
 
-    /* Verify decode succeeds with exactly-sized output buffers for padded inputs */
-    /* "YQ==" decodes to "a" (1 byte) - outSize=1 must succeed */
+    /* Exactly-sized output for padded input: "YQ==" decodes to "a" (1 byte), outSize=1 succeeds */
     SSF_ASSERT(SSFBase64Decode("YQ==", 4, decodedBigBin, 1, &outLen) == true);
     SSF_ASSERT(outLen == 1);
     SSF_ASSERT(decodedBigBin[0] == 'a');
@@ -187,8 +195,7 @@ void SSFBase64UnitTest(void)
     SSF_ASSERT(outLen == 5);
     SSF_ASSERT(memcmp(decodedBigBin, "abcde", 5) == 0);
 
-    /* Verify decode fails when outSize is too small for actual decoded data */
-    /* "YWJj" decodes to "abc" (3 bytes) - outSize=2 must fail */
+    /* Output too small: "YWJj" decodes to "abc" (3 bytes), outSize=2 must fail */
     SSF_ASSERT(SSFBase64Decode("YWJj", 4, decodedBigBin, 2, &outLen) == false);
 
     /* "YWI=" decodes to "ab" (2 bytes) - outSize=1 must fail */
@@ -202,7 +209,7 @@ void SSFBase64UnitTest(void)
     SSF_ASSERT(SSFBase64Encode((uint8_t *)"a", 1, encodedBigStr, 4, &outLen) == false);
     SSF_ASSERT(SSFBase64Encode((uint8_t *)"a", 1, encodedBigStr, 1, &outLen) == false);
     SSF_ASSERT(SSFBase64Encode((uint8_t *)"abcd", 4, encodedBigStr, 5, &outLen) == false);
-    /* Exactly-sized multi-block output buffer must succeed: 4 bytes encodes to 8 chars + null = 9 */
+    /* Exactly-sized multi-block output must succeed: 4 bytes encode to 8 chars + null = 9 */
     SSF_ASSERT(SSFBase64Encode((uint8_t *)"abcd", 4, encodedBigStr, 9, &outLen) == true);
     SSF_ASSERT(outLen == 8);
     SSF_ASSERT(memcmp(encodedBigStr, "YWJjZA==", 9) == 0);
@@ -225,18 +232,14 @@ void SSFBase64UnitTest(void)
     SSF_ASSERT(SSFBase64Dec32To24("=AAA", b24, sizeof(b24)) == 0);
     SSF_ASSERT(SSFBase64Dec32To24("A=AA", b24, sizeof(b24)) == 0);
 
-    /* RFC 4648 Sec. 3.5: non-canonical encodings MUST be rejected. When 2 base64 chars +
-     * "==" encode 1 output byte, the second char's low 4 bits MUST be zero. When 3
-     * chars + "=" encode 2 output bytes, the third char's low 2 bits MUST be zero. */
-    /* 1-byte output, non-zero b-low-4 bits. These decode to 0x00 under a loose decoder
-     * but are not a canonical encoding of anything. */
-    SSF_ASSERT(SSFBase64Dec32To24("AB==", b24, sizeof(b24)) == 0);   /* b = 0b000001 */
-    SSF_ASSERT(SSFBase64Dec32To24("AP==", b24, sizeof(b24)) == 0);   /* b = 0b001111 */
-    SSF_ASSERT(SSFBase64Dec32To24("/x==", b24, sizeof(b24)) == 0);   /* canonical is /w== */
-    /* 2-byte output, non-zero c-low-2 bits. */
-    SSF_ASSERT(SSFBase64Dec32To24("AAB=", b24, sizeof(b24)) == 0);   /* c = 0b000001 */
-    SSF_ASSERT(SSFBase64Dec32To24("AAD=", b24, sizeof(b24)) == 0);   /* c = 0b000011 */
-    SSF_ASSERT(SSFBase64Dec32To24("//9=", b24, sizeof(b24)) == 0);   /* canonical is //8= */
+    /* RFC 4648 3.5 non-canonical (low bits set), 1-byte: b=0b0001, 0b1111, "/x==" not "/w==" */
+    SSF_ASSERT(SSFBase64Dec32To24("AB==", b24, sizeof(b24)) == 0);
+    SSF_ASSERT(SSFBase64Dec32To24("AP==", b24, sizeof(b24)) == 0);
+    SSF_ASSERT(SSFBase64Dec32To24("/x==", b24, sizeof(b24)) == 0);
+    /* 2-byte output, c low 2 bits = 0b01, 0b11; "//9=" (canonical is "//8=") */
+    SSF_ASSERT(SSFBase64Dec32To24("AAB=", b24, sizeof(b24)) == 0);
+    SSF_ASSERT(SSFBase64Dec32To24("AAD=", b24, sizeof(b24)) == 0);
+    SSF_ASSERT(SSFBase64Dec32To24("//9=", b24, sizeof(b24)) == 0);
 
     /* Sanity: the canonical forms still decode successfully. */
     SSF_ASSERT(SSFBase64Dec32To24("AA==", b24, sizeof(b24)) == 1 && b24[0] == 0x00);

@@ -42,7 +42,7 @@
 /* --------------------------------------------------------------------------------------------- */
 bool SSFHexBinToByte(uint8_t in, char *out, size_t outSize, SSFHexCase_t hcase)
 {
-    #define SSF_HEX_BIN_TO_HEX(n, o, u) if (n <= 9) o = n + 0x30; else o = n + u;
+    #define SSF_HEX_BIN_TO_HEX(n, o, u) if ((n) <= 9) (o) = (n) + 0x30; else (o) = (n) + (u);
     uint8_t un;
     uint8_t ln;
     uint8_t up;
@@ -65,10 +65,11 @@ bool SSFHexBinToByte(uint8_t in, char *out, size_t outSize, SSFHexCase_t hcase)
 /* --------------------------------------------------------------------------------------------- */
 bool SSFHexByteToBin(const char *hex, uint8_t *out)
 {
+    /* Sets n to the value of hex digit i (0-9, A-F, a-f), else returns false */
     #define SSF_HEX_TO_BIN(n, i) \
-        if ((i >= '0') && (i <= '9')) n = i - 0x30; \
-        else if ((i >= 'A') && (i <= 'F')) n = i - 0x37; \
-        else if ((i >= 'a') && (i <= 'f')) n = i - 0x57; \
+        if (((i) >= '0') && ((i) <= '9')) (n) = (i) - 0x30; \
+        else if (((i) >= 'A') && ((i) <= 'F')) (n) = (i) - 0x37; \
+        else if (((i) >= 'a') && ((i) <= 'f')) (n) = (i) - 0x57; \
         else return false;
     uint8_t un;
     uint8_t ln;
@@ -85,25 +86,27 @@ bool SSFHexByteToBin(const char *hex, uint8_t *out)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if ASCII hex byte string converted successfully to binary bytes, else false.     */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFHexBytesToBin(SSFCStrIn_t in, size_t inLenLim, uint8_t *out, size_t outSize, size_t *outLen,
-                      bool rev)
+bool SSFHexBytesToBin(SSFCStrIn_t inStr, size_t inLenLim, uint8_t *out, size_t outSize,
+                      size_t *outLen, bool rev)
 {
-    SSF_REQUIRE(in != NULL);
+    SSF_REQUIRE(inStr != NULL);
     SSF_REQUIRE(out != NULL);
     SSF_REQUIRE(outLen != NULL);
 
     if (inLenLim & 0x01) return false;
     *outLen = 0;
+    /* Is there another hex char pair to decode and room for its byte? */
     while ((inLenLim >= 2) && (outSize != 0))
     {
+        /* Yes, decode it */
         if (rev)
         {
-            if (!SSFHexByteToBin(&in[inLenLim - 2], out)) return false;
+            if (!SSFHexByteToBin(&inStr[inLenLim - 2], out)) return false;
         }
         else
         {
-            if (!SSFHexByteToBin(in, out)) return false;
-            in += 2;
+            if (!SSFHexByteToBin(inStr, out)) return false;
+            inStr += 2;
         }
         inLenLim -= 2;
         outSize--;
@@ -116,26 +119,33 @@ bool SSFHexBytesToBin(SSFCStrIn_t in, size_t inLenLim, uint8_t *out, size_t outS
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if binary bytes converted successfully to ASCII hex byte string, else false.     */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFHexBinToBytes(const uint8_t *in, size_t inLen, SSFCStrOut_t out, size_t outSize,
-                      size_t *outLen, bool rev, SSFHexCase_t hcase)
+bool SSFHexBinToBytes(const uint8_t *in, size_t inLen, SSFCStrOut_t outStr, size_t outSize,
+                      size_t *outLenOpt, bool rev, SSFHexCase_t hcase)
 {
     SSF_REQUIRE(in != NULL);
-    SSF_REQUIRE(out != NULL);
+    SSF_REQUIRE(outStr != NULL);
     SSF_REQUIRE(outSize >= 1);
     SSF_REQUIRE((hcase > SSF_HEX_CASE_MIN) && (hcase < SSF_HEX_CASE_MAX));
 
-    *out = 0;
-    if (outLen != NULL) *outLen = 0;
-    if ((rev) && (inLen > 0)) in += (inLen - 1);
+    *outStr = 0;
+    if (outLenOpt != NULL) *outLenOpt = 0;
+    /* Is the input to be encoded in reverse and non-empty? */
+    if ((rev) && (inLen > 0))
+    {
+        /* Yes, start at the last input byte */
+        in += (inLen - 1);
+    }
+    /* Is there input left and room for 2 hex chars plus the terminator? */
     while ((inLen > 0) && (outSize >= 3))
     {
-        if (!SSFHexBinToByte(*in, out, outSize, hcase)) return false;
+        /* Yes, encode the next byte */
+        if (!SSFHexBinToByte(*in, outStr, outSize, hcase)) return false;
         if (rev) in--;
         else in++;
         inLen--;
-        out += 2;
+        outStr += 2;
         outSize -= 2;
-        if (outLen != NULL) *outLen += 2;
+        if (outLenOpt != NULL) *outLenOpt += 2;
     }
     return inLen == 0;
 }

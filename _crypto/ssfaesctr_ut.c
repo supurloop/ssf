@@ -34,10 +34,7 @@
 #include "ssfassert.h"
 #include "ssfaesctr.h"
 
-/* Cross-validate AES-CTR against OpenSSL on host builds where libcrypto is linked. Same gating */
-/* pattern as ssfhmac_ut.c / ssfed25519_ut.c. When disabled (cross builds with                    */
-/* -DSSF_CONFIG_HAVE_OPENSSL=0) the NIST SP 800-38A F.5 KATs above are the load-bearing           */
-/* correctness coverage.                                                                          */
+/* Cross-validate against OpenSSL when libcrypto is linked, else SP 800-38A KATs cover it. */
 #if (SSF_CONFIG_HAVE_OPENSSL == 1) && (SSF_CONFIG_AESCTR_UNIT_TEST == 1)
 #define SSF_AESCTR_OSSL_VERIFY 1
 #else
@@ -69,8 +66,7 @@ static const EVP_CIPHER *_OSSLAESCTRCipher(size_t keyLen)
     }
 }
 
-/* Compute AES-CTR via OpenSSL's EVP one-shot path. iv is the 16-byte initial counter; OpenSSL */
-/* uses the same NIST Sec. B.1 full-128-bit big-endian counter convention as SSF.              */
+/* Compute AES-CTR via OpenSSL EVP; iv is the 16-byte initial counter (same BE convention). */
 static void _OSSLAESCTR(const uint8_t *key, size_t keyLen, const uint8_t *iv,
                         const uint8_t *in, uint8_t *out, size_t len)
 {
@@ -87,10 +83,7 @@ static void _OSSLAESCTR(const uint8_t *key, size_t keyLen, const uint8_t *iv,
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Random fuzz across (keyLen x len). Each cell draws fresh random key/iv/message bytes,        */
-/* computes the ciphertext via SSFAESCTR's one-shot path, and compares to OpenSSL. Catches       */
-/* divergence in the keystream generation or counter increment that wouldn't surface in the      */
-/* fixed-IV NIST KATs.                                                                            */
+/* Random fuzz over (keyLen x len): SSFAESCTR one-shot must match OpenSSL for fresh inputs. */
 /* --------------------------------------------------------------------------------------------- */
 static void _VerifyAESCTRAgainstOpenSSLRandom(void)
 {
@@ -226,17 +219,12 @@ void SSFAESCTRUnitTest(void)
         SSF_ASSERT(memcmp(back, _nistPt, 64) == 0);
     }
 
-    /* ---- RFC 3686 Sec. 6: AES-CTR vectors covering varied nonce/IV/counter shapes ---- */
-    /* The SP 800-38A F.5 vectors above all use the same all-ones IV; RFC 3686 adds 9 vectors */
-    /* covering AES-128/192/256 with different nonce|IV|counter compositions and message     */
-    /* lengths (16, 32, 36 bytes). Together with the F.5 KATs and the counter-wrap edge      */
-    /* tests below, this is the published-vector coverage that CAVS-style validation expects */
-    /* for AES-CTR mode.                                                                      */
+    /* ---- RFC 3686 Sec. 6: 9 AES-CTR vectors with varied nonce/IV/counter and lengths ---- */
     {
         typedef struct {
             const uint8_t *key;
             uint8_t        keyLen;
-            const uint8_t *iv;       /* 16 bytes: nonce||IV||counter per RFC 3686 layout */
+            const uint8_t *iv; /* 16 bytes: nonce||IV||counter per RFC 3686 layout */
             const uint8_t *pt;
             const uint8_t *ct;
             uint16_t       len;
@@ -245,9 +233,9 @@ void SSFAESCTRUnitTest(void)
         /* Test Vector #1: AES-128, 16-byte plaintext */
         static const uint8_t k1[16] = { 0xAEu,0x68u,0x52u,0xF8u,0x12u,0x10u,0x67u,0xCCu,
                                         0x4Bu,0xF7u,0xA5u,0x76u,0x55u,0x77u,0xF3u,0x9Eu };
-        static const uint8_t i1[16] = { 0x00u,0x00u,0x00u,0x30u,  /* nonce */
-                                        0x00u,0x00u,0x00u,0x00u,0x00u,0x00u,0x00u,0x00u,  /* IV */
-                                        0x00u,0x00u,0x00u,0x01u };  /* counter */
+        static const uint8_t i1[16] = { 0x00u,0x00u,0x00u,0x30u, /* nonce */
+                                        0x00u,0x00u,0x00u,0x00u,0x00u,0x00u,0x00u,0x00u, /* IV */
+                                        0x00u,0x00u,0x00u,0x01u }; /* counter */
         static const uint8_t p1[16] = { 0x53u,0x69u,0x6Eu,0x67u,0x6Cu,0x65u,0x20u,0x62u,
                                         0x6Cu,0x6Fu,0x63u,0x6Bu,0x20u,0x6Du,0x73u,0x67u };
         static const uint8_t c1[16] = { 0xE4u,0x09u,0x5Du,0x4Fu,0xB7u,0xA7u,0xB3u,0x79u,
@@ -358,12 +346,12 @@ void SSFAESCTRUnitTest(void)
                                         0xF4u,0x8Cu,0xC0u,0xB5u,0x83u,0xD6u,0x07u,0x1Fu,
                                         0x1Eu,0xC0u,0xE6u,0xB8u };
 
-        /* Plaintexts #4, #7 share Test Vector #1's plaintext "Single block msg"; #5, #8 share #2's; #6, #9 share #3's. */
+        /* #4, #7 reuse #1's plaintext; #5, #8 reuse #2's; #6, #9 reuse #3's. */
         static const _RFC3686Vec_t vectors[] = {
             { k1, 16, i1, p1, c1, 16 },
             { k2, 16, i2, p2, c2, 32 },
             { k3, 16, i3, p3, c3, 36 },
-            { k4, 24, i4, p1, c4, 16 },  /* same plaintext as #1 */
+            { k4, 24, i4, p1, c4, 16 }, /* same plaintext as #1 */
             { k5, 24, i5, p2, c5, 32 },
             { k6, 24, i6, p3, c6, 36 },
             { k7, 32, i7, p1, c7, 16 },
@@ -404,9 +392,7 @@ void SSFAESCTRUnitTest(void)
         SSF_ASSERT(memcmp(out, inc, 64) == 0);
     }
 
-    /* Block-boundary lengths: feeding the same plaintext as a single Crypt call must produce
-       the same output as feeding it in N sub-blocks for any split. Catches keystream-buffer
-       carry-over bugs at every boundary inside and across 16-byte blocks. */
+    /* Block-boundary lengths: one Crypt call must match any two-part split (ksOff carry-over). */
     {
         static const uint8_t key[16] = {
             0x00u, 0x01u, 0x02u, 0x03u, 0x04u, 0x05u, 0x06u, 0x07u,
@@ -436,9 +422,7 @@ void SSFAESCTRUnitTest(void)
         }
     }
 
-    /* Many tiny Crypt calls summing to the full plaintext must produce the same output as one
-       call of the full length. Specifically exercises the keystream-buffer carry-over across
-       Crypt boundaries (the bug class where ksOff is mismanaged between calls). */
+    /* Many tiny Crypt calls must match one full-length call (ksOff carry-over across calls). */
     {
         static const uint8_t key[32] = {
             0x60u, 0x3Du, 0xEBu, 0x10u, 0x15u, 0xCAu, 0x71u, 0xBEu,
@@ -475,8 +459,7 @@ void SSFAESCTRUnitTest(void)
         }
     }
 
-    /* Round-trip: encrypt random-ish plaintext, decrypt with same key/iv, recover plaintext.
-       Proves CTR symmetry across all three key sizes. */
+    /* Round-trip: decrypt recovers the plaintext for all three key sizes. */
     {
         static const uint8_t iv[16] = {
             0x00u, 0x11u, 0x22u, 0x33u, 0x44u, 0x55u, 0x66u, 0x77u,
@@ -501,8 +484,7 @@ void SSFAESCTRUnitTest(void)
         }
     }
 
-    /* In-place encryption (in == out) must produce identical output to out-of-place. Catches a
-       bug where the implementation reads from out[i] before writing the XOR result. */
+    /* In-place encryption (in == out) must match out-of-place. */
     {
         static const uint8_t key[16] = {
             0x2Bu, 0x7Eu, 0x15u, 0x16u, 0x28u, 0xAEu, 0xD2u, 0xA6u,
@@ -513,14 +495,11 @@ void SSFAESCTRUnitTest(void)
 
         memcpy(buf, _nistPt, sizeof(buf));
         SSFAESCTR(key, sizeof(key), _nistIv, _nistPt, ref, sizeof(ref));
-        SSFAESCTR(key, sizeof(key), _nistIv, buf, buf, sizeof(buf));     /* in == out */
+        SSFAESCTR(key, sizeof(key), _nistIv, buf, buf, sizeof(buf)); /* in == out */
         SSF_ASSERT(memcmp(buf, ref, sizeof(buf)) == 0);
     }
 
-    /* Counter wrap inside the low-order byte: start the counter with byte 15 == 0xFF. After
-       the first keystream block, counter[15] wraps to 0x00 and counter[14] increments. Use
-       exactly one block (16 bytes) so the post-condition is unambiguous. Catches an off-by-one
-       in _SSFAESCTRIncCounter or a wrong-endianness counter increment. */
+    /* Counter wrap in the low byte: counter[15] = 0xFF wraps to 0x00 and carries into [14]. */
     {
         static const uint8_t key[16] = {0};
         static const uint8_t iv[16] = {
@@ -539,8 +518,7 @@ void SSFAESCTRUnitTest(void)
         SSFAESCTRDeInit(&ctx);
     }
 
-    /* Counter wrap that ripples through multiple bytes: counter[14..15] = 0xFF 0xFF. After one
-       block, expect {..., 0x01, 0x00, 0x00}. Verifies the carry chain in the BE increment. */
+    /* Counter carry ripples through counter[14..15] = 0xFF 0xFF to {..., 0x01, 0x00, 0x00}. */
     {
         static const uint8_t key[16] = {0};
         static const uint8_t iv[16] = {
@@ -559,10 +537,7 @@ void SSFAESCTRUnitTest(void)
         SSFAESCTRDeInit(&ctx);
     }
 
-    /* Full-counter wraparound: every byte is 0xFF. After one block, the increment ripples
-       through all 16 bytes and the entire counter rolls to all zeros (mod 2^128). The loop's
-       termination on i = -1 is the only path that exits; this case exercises it exclusively.
-       Off-by-one in the loop bound or a wrong unsigned/signed comparison would surface here. */
+    /* Full-counter wraparound: all 0xFF rolls to all zeros (loop exits only via i = -1). */
     {
         static const uint8_t key[16] = {0};
         static const uint8_t iv[16] = {
@@ -580,8 +555,7 @@ void SSFAESCTRUnitTest(void)
         SSFAESCTRDeInit(&ctx);
     }
 
-    /* Empty input is a no-op: 0-byte Crypt does not advance the counter or touch the keystream
-       buffer. */
+    /* Empty input is a no-op: 0-byte Crypt does not advance the counter or keystream buffer. */
     {
         static const uint8_t key[16] = {
             0x2Bu, 0x7Eu, 0x15u, 0x16u, 0x28u, 0xAEu, 0xD2u, 0xA6u,
@@ -591,8 +565,8 @@ void SSFAESCTRUnitTest(void)
         uint8_t out0[1] = {0};
 
         SSFAESCTRBegin(&ctx, key, sizeof(key), _nistIv);
-        SSFAESCTRCrypt(&ctx, NULL, NULL, 0u);                 /* NULL allowed when len == 0 */
-        SSFAESCTRCrypt(&ctx, out0, out0, 0u);                 /* non-NULL, len == 0 */
+        SSFAESCTRCrypt(&ctx, NULL, NULL, 0u); /* NULL allowed when len == 0 */
+        SSFAESCTRCrypt(&ctx, out0, out0, 0u); /* non-NULL, len == 0 */
         /* Counter must still equal _nistIv (no block was generated). */
         SSF_ASSERT(memcmp(ctx.counter, _nistIv, 16) == 0);
         SSFAESCTRDeInit(&ctx);
@@ -688,11 +662,7 @@ void SSFAESCTRUnitTest(void)
         for (i = 0; i < sizeof(ctx); i++) SSF_ASSERT(p[i] == 0u);
     }
 
-    /* IV-immutability: SSFAESCTR's iv parameter is const uint8_t *. The function must not
-       mutate the caller's IV buffer. Encrypt a multi-block message (so the internal counter
-       advances multiple times) and verify the caller's IV bytes are byte-identical after
-       the call. Locks in the no-mutation contract -- guards against a regression where
-       someone "optimizes" by advancing the IV in place. */
+    /* IV-immutability: a multi-block SSFAESCTR call must not modify the caller's const IV. */
     {
         static const uint8_t key[16] = {
             0x2Bu, 0x7Eu, 0x15u, 0x16u, 0x28u, 0xAEu, 0xD2u, 0xA6u,
@@ -710,8 +680,7 @@ void SSFAESCTRUnitTest(void)
         SSFAESCTR(key, sizeof(key), iv, pt, ct, sizeof(pt));
         SSF_ASSERT(memcmp(iv, ivSnapshot, sizeof(iv)) == 0);
 
-        /* Same check via the incremental API -- the caller's iv buffer must also be      */
-        /* untouched after Begin (which copies it into ctx->counter and never writes back). */
+        /* Same check via the incremental API: Begin copies iv and never writes it back. */
         {
             SSFAESCTRContext_t ctx = {0};
             SSFAESCTRBegin(&ctx, key, sizeof(key), iv);

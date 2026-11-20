@@ -2,7 +2,7 @@
 /* Small System Framework                                                                        */
 /*                                                                                               */
 /* ssftls_ut.c                                                                                   */
-/* Provides unit tests for the ssftls TLS 1.3 core module.                                      */
+/* Provides unit tests for the ssftls TLS 1.3 core module.                                       */
 /* Key schedule test vectors from RFC 8448 ("Example Handshake Traces for TLS 1.3").             */
 /*                                                                                               */
 /* BSD-3-Clause License                                                                          */
@@ -33,17 +33,16 @@
 #include "ssfassert.h"
 #include "ssftls.h"
 #include "ssfhkdf.h"
+#include "ssfaesgcm.h"
 
 #if SSF_CONFIG_TLS_UNIT_TEST == 1
 
-/* Suppress C6262 (large stack frame). This unit-test entry point intentionally allocates many */
-/* TLS record / transcript buffers across its sub-test blocks; the host test environment has   */
-/* ample stack.                                                                                 */
+/* Suppress C6262 (large stack frame): the test entry point uses many record buffers. */
 #ifdef _WIN32
 #pragma warning(push)
 #pragma warning(disable:6262)
 #endif
-/* Blinding/zeroization audit hook: sets *ctx true iff the finished_key buffer is fully zeroed. */
+/* Zeroization audit hook: sets *ctx true iff the finished_key buffer is fully zeroed. */
 static void _SSFTLSFinishedScrubHook(void *ctx, const uint8_t *finishedKey, size_t len)
 {
     bool allZero = true;
@@ -56,7 +55,7 @@ void SSFTLSUnitTest(void)
 {
     /* ---- (Hardening) RecordStateDeInit securely wipes the traffic key / IV ---- */
     {
-        SSFTLSRecordState_t st = {0};   /* zero before first Init (magic guard) */
+        SSFTLSRecordState_t st = {0}; /* zero before first Init (magic guard) */
         uint8_t key[16];
         uint8_t iv[SSF_TLS_IV_SIZE];
         uint8_t zeros[sizeof(st)];
@@ -66,12 +65,12 @@ void SSFTLSUnitTest(void)
         memset(zeros, 0, sizeof(zeros));
 
         SSFTLSRecordStateInit(&st, SSF_TLS_CS_AES_128_GCM_SHA256, key, sizeof(key), iv, sizeof(iv));
-        SSF_ASSERT(memcmp(st.key, key, sizeof(key)) == 0);   /* key is present after init */
-        SSFTLSRecordStateDeInit(&st);
-        SSF_ASSERT(memcmp(&st, zeros, sizeof(st)) == 0);      /* DeInit wiped the whole state */
+        SSF_ASSERT(memcmp(st.key, key, sizeof(key)) == 0);
+        SSFTLSRecordStateDeInit(&st); /* DeInit must wipe the whole state */
+        SSF_ASSERT(memcmp(&st, zeros, sizeof(st)) == 0);
     }
 
-    /* ---- (Hardening) record-state magic: reject re-init of an active state and use after DeInit -- */
+    /* ---- (Hardening) record-state magic: reject re-init when active and use after DeInit ---- */
     {
         SSFTLSRecordState_t st = {0};
         uint8_t key[16];
@@ -81,12 +80,47 @@ void SSFTLSUnitTest(void)
         memset(iv, 0x71, sizeof(iv));
 
         SSFTLSRecordStateInit(&st, SSF_TLS_CS_AES_128_GCM_SHA256, key, sizeof(key), iv, sizeof(iv));
-        /* Re-initializing an already-active state (no DeInit) must be rejected by the magic guard. */
+        /* Re-initializing an already-active state (no DeInit) must be rejected. */
         SSF_ASSERT_TEST(SSFTLSRecordStateInit(&st, SSF_TLS_CS_AES_128_GCM_SHA256,
                                               key, sizeof(key), iv, sizeof(iv)));
         SSFTLSRecordStateDeInit(&st);
         /* DeInit again (state now inactive) must be rejected. */
         SSF_ASSERT_TEST(SSFTLSRecordStateDeInit(&st));
+    }
+
+    /* AUDIT TLS-5: the key length must match the cipher suite (RFC 8446 App. B.4). */
+    {
+        static const uint16_t suites[5] = {
+            SSF_TLS_CS_AES_128_GCM_SHA256, SSF_TLS_CS_AES_256_GCM_SHA384,
+            SSF_TLS_CS_CHACHA20_POLY1305_SHA256, SSF_TLS_CS_AES_128_CCM_SHA256,
+            SSF_TLS_CS_AES_128_CCM_8_SHA256
+        };
+        static const uint8_t keyLens[5] = { 16u, 32u, 32u, 16u, 16u };
+        SSFTLSRecordState_t st = {0};
+        uint8_t key[32];
+        uint8_t iv[SSF_TLS_IV_SIZE];
+        uint8_t i;
+
+        memset(key, 0x3Cu, sizeof(key));
+        memset(iv, 0x5Au, sizeof(iv));
+
+        /* Mismatched lengths and an unknown suite trap instead of running the wrong cipher. */
+        SSF_ASSERT_TEST(SSFTLSRecordStateInit(&st, SSF_TLS_CS_AES_256_GCM_SHA384, key, 16u, iv,
+                                              sizeof(iv)));
+        SSF_ASSERT_TEST(SSFTLSRecordStateInit(&st, SSF_TLS_CS_AES_128_GCM_SHA256, key, 32u, iv,
+                                              sizeof(iv)));
+        SSF_ASSERT_TEST(SSFTLSRecordStateInit(&st, SSF_TLS_CS_AES_128_CCM_SHA256, key, 24u, iv,
+                                              sizeof(iv)));
+        SSF_ASSERT_TEST(SSFTLSRecordStateInit(&st, SSF_TLS_CS_CHACHA20_POLY1305_SHA256, key, 16u,
+                                              iv, sizeof(iv)));
+        SSF_ASSERT_TEST(SSFTLSRecordStateInit(&st, 0x1399u, key, 16u, iv, sizeof(iv)));
+
+        /* Every valid pairing initializes. */
+        for (i = 0u; i < 5u; i++)
+        {
+            SSFTLSRecordStateInit(&st, suites[i], key, keyLens[i], iv, sizeof(iv));
+            SSFTLSRecordStateDeInit(&st);
+        }
     }
 
     /* ---- (Hardening) ComputeFinished wipes the finished_key before returning ---- */
@@ -106,7 +140,7 @@ void SSFTLSUnitTest(void)
         _SSFTLSFinishedKeyScrubTestHook = NULL;
         _SSFTLSFinishedKeyScrubTestHookCtx = NULL;
 
-        SSF_ASSERT(sawZero == true);   /* the hook observed a zeroed finished_key */
+        SSF_ASSERT(sawZero == true);
     }
 
     /* ---- Transcript hash: SHA-256 of empty string ---- */
@@ -129,7 +163,8 @@ void SSFTLSUnitTest(void)
     /* ---- Transcript hash: snapshot preserves running state ---- */
     {
         SSFTLSTranscript_t t;
-        uint8_t hash1[32], hash2[32];
+        uint8_t hash1[32];
+        uint8_t hash2[32];
 
         SSFTLSTranscriptInit(&t, SSF_HMAC_HASH_SHA256);
         SSFTLSTranscriptUpdate(&t, (const uint8_t *)"hello", 5);
@@ -168,9 +203,7 @@ void SSFTLSUnitTest(void)
         SSF_ASSERT(memcmp(hash, hash2, SSF_SHA2_384_BYTE_SIZE) != 0);
     }
 
-    /* ---- HKDF-Expand-Label basic test ---- */
-    /* Verify the label encoding produces correct output by testing against known values. */
-    /* The TLS 1.3 key schedule starts with HKDF-Extract(0, 0) for early secret (no PSK). */
+    /* ---- HKDF-Expand-Label basic test: early secret = HKDF-Extract(0, 0) (no PSK) ---- */
     {
         uint8_t earlySecret[32];
         uint8_t zeroPSK[32];
@@ -211,7 +244,8 @@ void SSFTLSUnitTest(void)
     /* ---- Traffic key derivation roundtrip ---- */
     {
         uint8_t secret[32];
-        uint8_t key[16], iv[12];
+        uint8_t key[16];
+        uint8_t iv[12];
         uint8_t i;
 
         /* Use a known secret */
@@ -251,16 +285,7 @@ void SSFTLSUnitTest(void)
         }
     }
 
-    /* ---- RFC 8448 Sec. 3 Simple 1-RTT Handshake key-schedule KAT ---- */
-    /* Walks four steps of the published worked example with bit-exact reference values:           */
-    /*   derived       = Derive-Secret(early_secret, "derived", empty_hash)                         */
-    /*   c_hs_traffic  = Derive-Secret(handshake_secret, "c hs traffic", thash_through_ServerHello) */
-    /*   s_hs_traffic  = Derive-Secret(handshake_secret, "s hs traffic", thash_through_ServerHello) */
-    /*   (key, iv)     = DeriveTrafficKeys(c_hs_traffic) -- HKDF-Expand-Label "key" + "iv"          */
-    /* Exercises HkdfExpandLabel, DeriveSecret, and DeriveTrafficKeys against published RFC values  */
-    /* for the strongest cross-build correctness coverage. The Finished step is not pinned here     */
-    /* because the trace doesn't make its transcript-hash input explicit -- it remains exercised    */
-    /* via the existing deterministic regression test below.                                        */
+    /* ---- RFC 8448 Sec. 3 1-RTT key-schedule KAT: derived, c/s_hs_traffic, traffic key/iv ---- */
     {
         static const uint8_t earlySecret[] = {
             0x33u, 0xADu, 0x0Au, 0x1Cu, 0x60u, 0x7Eu, 0xC0u, 0x3Bu,
@@ -336,7 +361,7 @@ void SSFTLSUnitTest(void)
                            sHsTraffic, sizeof(sHsTraffic));
         SSF_ASSERT(memcmp(sHsTraffic, expectedSHsTraffic, sizeof(expectedSHsTraffic)) == 0);
 
-        /* (key, iv) = DeriveTrafficKeys(c_hs_traffic) -- HKDF-Expand-Label("key", 16) and ("iv", 12) */
+        /* (key, iv) = DeriveTrafficKeys(c_hs_traffic): Expand-Label("key", 16), ("iv", 12) */
         SSFTLSDeriveTrafficKeys(SSF_HMAC_HASH_SHA256, cHsTraffic, sizeof(cHsTraffic),
                                 clientKey, sizeof(clientKey),
                                 clientIv, sizeof(clientIv));
@@ -346,8 +371,10 @@ void SSFTLSUnitTest(void)
 
     /* ---- Record encrypt / decrypt roundtrip (AES-128-GCM) ---- */
     {
-        SSFTLSRecordState_t encState = {0}, decState = {0};
-        uint8_t key[16], iv[12];
+        SSFTLSRecordState_t encState = {0};
+        SSFTLSRecordState_t decState = {0};
+        uint8_t key[16];
+        uint8_t iv[12];
         uint8_t plaintext[] = "Hello, TLS 1.3!";
         size_t ptLen = sizeof(plaintext) - 1u;
         uint8_t record[SSF_TLS_RECORD_HEADER_SIZE + 256 + 1 + SSF_TLS_AEAD_TAG_SIZE];
@@ -396,8 +423,10 @@ void SSFTLSUnitTest(void)
 
     /* ---- Record: corrupted ciphertext fails decryption ---- */
     {
-        SSFTLSRecordState_t encState = {0}, decState = {0};
-        uint8_t key[16], iv[12];
+        SSFTLSRecordState_t encState = {0};
+        SSFTLSRecordState_t decState = {0};
+        uint8_t key[16];
+        uint8_t iv[12];
         uint8_t plaintext[] = "test";
         uint8_t record[128];
         size_t recordLen;
@@ -427,8 +456,10 @@ void SSFTLSUnitTest(void)
 
     /* ---- Record: AES-256-GCM roundtrip ---- */
     {
-        SSFTLSRecordState_t encState = {0}, decState = {0};
-        uint8_t key[32], iv[12];
+        SSFTLSRecordState_t encState = {0};
+        SSFTLSRecordState_t decState = {0};
+        uint8_t key[32];
+        uint8_t iv[12];
         uint8_t plaintext[] = "AES-256-GCM test";
         uint8_t record[128];
         size_t recordLen;
@@ -456,8 +487,10 @@ void SSFTLSUnitTest(void)
 
     /* AES-128-CCM round trip (16-byte tag). */
     {
-        SSFTLSRecordState_t encState = {0}, decState = {0};
-        uint8_t key[16], iv[12];
+        SSFTLSRecordState_t encState = {0};
+        SSFTLSRecordState_t decState = {0};
+        uint8_t key[16];
+        uint8_t iv[12];
         uint8_t plaintext[] = "AES-128-CCM test";
         uint8_t record[128];
         size_t recordLen;
@@ -485,14 +518,12 @@ void SSFTLSUnitTest(void)
         SSF_ASSERT(memcmp(decrypted, plaintext, 16) == 0);
     }
 
-    /* AES-128-CCM-8 round trip (8-byte tag). Regression test for the framing bug where
-     * the record header advertised a 16-byte tag length but only 8 tag bytes were written,
-     * leaving 8 uninitialised bytes in the wire record and breaking interop with any
-     * spec-compliant peer. cipherLen must reflect the 8-byte tag, and Decrypt must
-     * dispatch CCM_8 correctly. */
+    /* AES-128-CCM-8 round trip: the header length must reflect the 8-byte tag. */
     {
-        SSFTLSRecordState_t encState = {0}, decState = {0};
-        uint8_t key[16], iv[12];
+        SSFTLSRecordState_t encState = {0};
+        SSFTLSRecordState_t decState = {0};
+        uint8_t key[16];
+        uint8_t iv[12];
         uint8_t plaintext[] = "CCM-8 regression";
         uint8_t record[128];
         size_t recordLen;
@@ -526,8 +557,10 @@ void SSFTLSUnitTest(void)
     }
     /* ---- Record: ChaCha20-Poly1305 round-trip ---- */
     {
-        SSFTLSRecordState_t encState = {0}, decState = {0};
-        uint8_t key[32], iv[12];
+        SSFTLSRecordState_t encState = {0};
+        SSFTLSRecordState_t decState = {0};
+        uint8_t key[32];
+        uint8_t iv[12];
         uint8_t plaintext[] = "ChaCha20-Poly1305 record test";
         uint8_t record[128];
         size_t recordLen;
@@ -559,13 +592,10 @@ void SSFTLSUnitTest(void)
                    decrypted, sizeof(decrypted), &decLen, &ct) == false);
     }
 
-    /* RFC 8446 Sec. 5.5: implementations MUST close the connection when the sequence number
-     * wraps. SSF refuses encrypt / decrypt when state->seqNum is already at UINT64_MAX --
-     * the next increment would wrap to 0 and reuse the nonce of record 0, breaking the
-     * AEAD contract catastrophically. Set state.seqNum to the boundary and confirm both
-     * directions return false. */
+    /* RFC 8446 Sec. 5.5: encrypt and decrypt return false with seqNum at UINT64_MAX. */
     {
-        SSFTLSRecordState_t encState = {0}, decState = {0};
+        SSFTLSRecordState_t encState = {0};
+        SSFTLSRecordState_t decState = {0};
         uint8_t key[16] = {0};
         uint8_t iv[12] = {0};
         uint8_t pt[16] = {0};
@@ -585,8 +615,7 @@ void SSFTLSUnitTest(void)
                                        pt, sizeof(pt),
                                        record, sizeof(record), &recordLen) == false);
 
-        /* Build a real-looking record header so decrypt's framing checks pass and the seqNum
-         * guard is the actual gate. */
+        /* Build a real-looking record header so the seqNum guard is the actual gate. */
         decState.seqNum = UINT64_MAX;
         record[0] = SSF_TLS_CT_APPLICATION;
         record[1] = 0x03u;
@@ -598,10 +627,7 @@ void SSFTLSUnitTest(void)
                                        &decLen, &innerCt) == false);
     }
 
-    /* ---- Record encrypt/decrypt reject when cipher suite is unsupported ---- */
-    /* SSFTLSRecordStateInit accepts any uint16_t; a caller that wires up a bogus suite */
-    /* must not produce a wire record. _SSFTLSAeadTagSize returns 0 for the unknown     */
-    /* suite, and both encrypt and decrypt early-out on tagLen == 0.                    */
+    /* ---- Encrypt/decrypt reject an unsupported suite (state corrupted after Init) ---- */
     {
         SSFTLSRecordState_t state = {0};
         uint8_t key[16] = {0};
@@ -611,7 +637,9 @@ void SSFTLSUnitTest(void)
         size_t outLen;
         uint8_t innerCt;
 
-        SSFTLSRecordStateInit(&state, 0xFFFFu, key, sizeof(key), iv, sizeof(iv));
+        SSFTLSRecordStateInit(&state, SSF_TLS_CS_AES_128_GCM_SHA256, key, sizeof(key), iv,
+                              sizeof(iv));
+        state.cipherSuite = 0xFFFFu;
         SSF_ASSERT(SSFTLSRecordEncrypt(&state, SSF_TLS_CT_APPLICATION, pt, sizeof(pt),
                                        record, sizeof(record), &outLen) == false);
 
@@ -630,11 +658,11 @@ void SSFTLSUnitTest(void)
         uint8_t scratchSecret[32] = {0};
         uint8_t scratchCtx[100];
         uint8_t scratchOut[32];
-        char    longLabel[80];
+        char    longLabel[251];
 
         memset(scratchCtx, 0xA5u, sizeof(scratchCtx));
         memset(longLabel, 'X', sizeof(longLabel));
-        longLabel[sizeof(longLabel) - 1u] = '\0';   /* 79-char label, just past the 64-byte cap */
+        longLabel[sizeof(longLabel) - 1u] = '\0';   /* 250-char label, one past the RFC cap */
 
         /* secret NULL */
         SSF_ASSERT_TEST(SSFTLSHkdfExpandLabel(SSF_HMAC_HASH_SHA256, NULL, 32u, "key",
@@ -660,10 +688,39 @@ void SSFTLSUnitTest(void)
                                               scratchSecret, sizeof(scratchSecret), "key",
                                               scratchCtx, sizeof(scratchCtx),
                                               scratchOut, sizeof(scratchOut)));
-        /* labelLen > 64 */
+        /* labelLen > 249 (RFC 8446 Sec. 7.1: "tls13 " + label must fit opaque label<7..255>) */
         SSF_ASSERT_TEST(SSFTLSHkdfExpandLabel(SSF_HMAC_HASH_SHA256,
                                               scratchSecret, sizeof(scratchSecret), longLabel,
                                               NULL, 0u, scratchOut, sizeof(scratchOut)));
+        /* AUDIT TLS-3: context NULL with ctxLen > 0 used to build a malformed HkdfLabel */
+        SSF_ASSERT_TEST(SSFTLSHkdfExpandLabel(SSF_HMAC_HASH_SHA256,
+                                              scratchSecret, sizeof(scratchSecret), "key",
+                                              NULL, 32u, scratchOut, sizeof(scratchOut)));
+    }
+
+    /* AUDIT TLS-4: a 249-byte label (the RFC 8446 maximum) is accepted and framed correctly. */
+    {
+        static const uint8_t expected[32] = {
+            0x7Au, 0xDEu, 0x0Du, 0x02u, 0xBBu, 0xFBu, 0x19u, 0x8Eu,
+            0xCDu, 0x6Du, 0xF3u, 0x02u, 0x42u, 0x1Eu, 0x30u, 0xAEu,
+            0xF3u, 0xF3u, 0x82u, 0xA9u, 0x1Au, 0x36u, 0x58u, 0x97u,
+            0x5Bu, 0xA5u, 0xDCu, 0xA2u, 0x17u, 0x18u, 0x1Bu, 0x9Bu
+        };
+        uint8_t secret[32];
+        uint8_t ctx[32];
+        uint8_t out[32];
+        char maxLabel[250];
+        uint8_t i;
+
+        for (i = 0u; i < (uint8_t)sizeof(secret); i++) secret[i] = i;
+        memset(ctx, 0xA5u, sizeof(ctx));
+        memset(maxLabel, 'X', sizeof(maxLabel));
+        maxLabel[sizeof(maxLabel) - 1u] = '\0';
+
+        /* Expected output from an independent Python RFC 5869 / RFC 8446 model. */
+        SSFTLSHkdfExpandLabel(SSF_HMAC_HASH_SHA256, secret, sizeof(secret), maxLabel, ctx,
+                              sizeof(ctx), out, sizeof(out));
+        SSF_ASSERT(memcmp(out, expected, sizeof(expected)) == 0);
     }
 
     /* SSFTLSDeriveSecret: adds transcriptHash NULL on top of HkdfExpandLabel's contracts. */
@@ -836,9 +893,7 @@ void SSFTLSUnitTest(void)
                                             pt, sizeof(pt), &ptLen, NULL));
     }
 
-    /* SSFTLSRecordDecrypt: records claiming a fragLen above 2^14 + 256 (RFC 8446 Sec. 5.2 limit)
-     * must be rejected. Build a header with fragLen = 0x4101 (one past the limit) and check
-     * that decrypt returns false rather than proceeding to the AEAD layer. */
+    /* SSFTLSRecordDecrypt rejects fragLen 0x4101, one past the 2^14 + 256 limit. */
     {
         SSFTLSRecordState_t decState = {0};
         uint8_t key[16] = {0};
@@ -860,6 +915,145 @@ void SSFTLSUnitTest(void)
         SSF_ASSERT(SSFTLSRecordDecrypt(&decState, oversizedRecord, sizeof(oversizedRecord),
                                        scratchPt, sizeof(scratchPt),
                                        &scratchPtLen, &scratchCt) == false);
+    }
+
+    /* ---- AUDIT TLS-1/TLS-6: SSFTLSRecordEncrypt enforces TLSPlaintext.length <= 2^14 ---- */
+    {
+        static const uint16_t suites[] = { SSF_TLS_CS_AES_128_GCM_SHA256,
+                                           SSF_TLS_CS_AES_128_CCM_8_SHA256 };
+        static uint8_t bigPt[0x4000u + 1u];
+        static uint8_t bigRecord[SSF_TLS_RECORD_HEADER_SIZE + 0x4000u + 256u];
+        static uint8_t bigDec[0x4000u + 1u];
+        uint8_t key[16];
+        uint8_t iv[12];
+        size_t bigRecordLen;
+        size_t bigDecLen;
+        uint8_t bigCt;
+        size_t k;
+
+        for (k = 0; k < sizeof(bigPt); k++) bigPt[k] = (uint8_t)(k * 7u);
+        for (k = 0; k < sizeof(key); k++) key[k] = (uint8_t)(0x20u + k);
+        for (k = 0; k < sizeof(iv); k++) iv[k] = (uint8_t)(0x40u + k);
+
+        for (k = 0; k < (sizeof(suites) / sizeof(suites[0])); k++)
+        {
+            SSFTLSRecordState_t encState = {0};
+            SSFTLSRecordState_t decState = {0};
+
+            SSFTLSRecordStateInit(&encState, suites[k], key, sizeof(key), iv, sizeof(iv));
+            SSFTLSRecordStateInit(&decState, suites[k], key, sizeof(key), iv, sizeof(iv));
+
+            /* Exactly 2^14 bytes: allowed, and round-trips. */
+            SSF_ASSERT(SSFTLSRecordEncrypt(&encState, SSF_TLS_CT_APPLICATION, bigPt, 0x4000u,
+                                           bigRecord, sizeof(bigRecord), &bigRecordLen) == true);
+            SSF_ASSERT(SSFTLSRecordDecrypt(&decState, bigRecord, bigRecordLen, bigDec,
+                                           sizeof(bigDec), &bigDecLen, &bigCt) == true);
+            SSF_ASSERT(bigDecLen == 0x4000u);
+            SSF_ASSERT(bigCt == SSF_TLS_CT_APPLICATION);
+            SSF_ASSERT(memcmp(bigDec, bigPt, 0x4000u) == 0);
+
+            /* 2^14 + 1 bytes: over the TLSPlaintext limit, must be refused. */
+            SSF_ASSERT(SSFTLSRecordEncrypt(&encState, SSF_TLS_CT_APPLICATION, bigPt, 0x4001u,
+                                           bigRecord, sizeof(bigRecord), &bigRecordLen) == false);
+
+            /* SIZE_MAX: must be refused before ptLen + 1 can wrap (TLS-6). */
+            SSF_ASSERT(SSFTLSRecordEncrypt(&encState, SSF_TLS_CT_APPLICATION, bigPt, SIZE_MAX,
+                                           bigRecord, sizeof(bigRecord), &bigRecordLen) == false);
+
+            SSFTLSRecordStateDeInit(&encState);
+            SSFTLSRecordStateDeInit(&decState);
+        }
+    }
+
+    /* ---- AUDIT TLS-2: Decrypt rejects TLSInnerPlaintext > 2^14 + 1 (built via raw AEAD) ---- */
+    {
+        static uint8_t ovRecord[SSF_TLS_RECORD_HEADER_SIZE + 0x4002u + 16u];
+        static uint8_t ovInner[0x4002u];
+        static uint8_t ovDec[0x4002u];
+        SSFTLSRecordState_t decState = {0};
+        uint8_t key[16];
+        uint8_t iv[12];
+        size_t innerLen;
+        size_t fragLen;
+        size_t ovDecLen;
+        uint8_t ovCt;
+        size_t k;
+
+        for (k = 0; k < sizeof(key); k++) key[k] = (uint8_t)(0x60u + k);
+        for (k = 0; k < sizeof(iv); k++) iv[k] = (uint8_t)(0x80u + k);
+
+        /* inner = 2^14 + 1 bytes of data || content type: one byte over the inner limit. */
+        innerLen = sizeof(ovInner);
+        for (k = 0; k < (innerLen - 1u); k++) ovInner[k] = (uint8_t)(k + 3u);
+        ovInner[innerLen - 1u] = SSF_TLS_CT_APPLICATION;
+        fragLen = innerLen + 16u;
+
+        ovRecord[0] = SSF_TLS_CT_APPLICATION;
+        ovRecord[1] = 0x03u;
+        ovRecord[2] = 0x03u;
+        ovRecord[3] = (uint8_t)((fragLen >> 8) & 0xFFu);
+        ovRecord[4] = (uint8_t)(fragLen & 0xFFu);
+        SSFAESGCMEncrypt(ovInner, innerLen, iv, sizeof(iv), ovRecord, SSF_TLS_RECORD_HEADER_SIZE,
+                         key, sizeof(key), &ovRecord[SSF_TLS_RECORD_HEADER_SIZE + innerLen], 16u,
+                         &ovRecord[SSF_TLS_RECORD_HEADER_SIZE], innerLen);
+
+        SSFTLSRecordStateInit(&decState, SSF_TLS_CS_AES_128_GCM_SHA256, key, sizeof(key), iv,
+                              sizeof(iv));
+        SSF_ASSERT(SSFTLSRecordDecrypt(&decState, ovRecord, sizeof(ovRecord), ovDec,
+                                       sizeof(ovDec), &ovDecLen, &ovCt) == false);
+        SSFTLSRecordStateDeInit(&decState);
+    }
+
+    /* AUDIT TLS-8: in-place pt, partial overlap traps, content type 0 traps, length cast traps */
+    {
+        SSFTLSRecordState_t enc = { 0 };
+        SSFTLSRecordState_t dec = { 0 };
+        SSFTLSTranscript_t t;
+        uint8_t key[16];
+        uint8_t iv[SSF_TLS_IV_SIZE];
+        uint8_t record[5u + 64u + 1u + 16u];
+        uint8_t msg[64];
+        uint8_t out[80];
+        size_t recordLen;
+        size_t outLen;
+        uint8_t ct;
+
+        memset(key, 0x4E, sizeof(key));
+        memset(iv, 0x71, sizeof(iv));
+        memset(msg, 0x3C, sizeof(msg));
+        SSFTLSRecordStateInit(&enc, SSF_TLS_CS_AES_128_GCM_SHA256, key, sizeof(key), iv,
+                              sizeof(iv));
+        SSFTLSRecordStateInit(&dec, SSF_TLS_CS_AES_128_GCM_SHA256, key, sizeof(key), iv,
+                              sizeof(iv));
+
+        /* (a) In place: the plaintext is already where the record body goes. */
+        memcpy(&record[5], msg, sizeof(msg));
+        SSF_ASSERT(SSFTLSRecordEncrypt(&enc, SSF_TLS_CT_APPLICATION, &record[5], sizeof(msg),
+                                       record, sizeof(record), &recordLen) == true);
+        SSF_ASSERT(SSFTLSRecordDecrypt(&dec, record, recordLen, out, sizeof(out), &outLen,
+                                       &ct) == true);
+        SSF_ASSERT((outLen == sizeof(msg)) && (memcmp(out, msg, sizeof(msg)) == 0));
+        SSF_ASSERT(ct == SSF_TLS_CT_APPLICATION);
+
+        /* (a) Partial overlap with the record body. */
+        SSF_ASSERT_TEST(SSFTLSRecordEncrypt(&enc, SSF_TLS_CT_APPLICATION, &record[6], 16u,
+                                            record, sizeof(record), &recordLen));
+
+        /* (b) Content type 0. */
+        SSF_ASSERT_TEST(SSFTLSRecordEncrypt(&enc, 0u, msg, sizeof(msg), record, sizeof(record),
+                                            &recordLen));
+        SSFTLSRecordStateDeInit(&enc);
+        SSFTLSRecordStateDeInit(&dec);
+
+        /* (c) Length that does not fit the SHA update's uint32_t. */
+#if SIZE_MAX > UINT32_MAX
+        SSFTLSTranscriptInit(&t, SSF_HMAC_HASH_SHA256);
+        SSF_ASSERT_TEST(SSFTLSTranscriptUpdate(&t, msg, ((size_t)UINT32_MAX) + 1u));
+        SSFTLSTranscriptInit(&t, SSF_HMAC_HASH_SHA384);
+        SSF_ASSERT_TEST(SSFTLSTranscriptUpdate(&t, msg, ((size_t)UINT32_MAX) + 1u));
+#else
+        (void)t;
+#endif
     }
 }
 #ifdef _WIN32

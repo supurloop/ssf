@@ -40,6 +40,7 @@ extern "C"
 #include <stdint.h>
 #include <stdbool.h>
 #include "ssfport.h"
+#include "ssfgpath.h"
 #include "ssfll.h"
 
 /* --------------------------------------------------------------------------------------------- */
@@ -88,7 +89,7 @@ bool SSFGObjInit(SSFGObj_t **gobj, uint16_t maxChildren);
 void SSFGObjDeInit(SSFGObj_t **gobj);
 
 /* Object label accessors */
-bool SSFGObjSetLabel(SSFGObj_t *gobj, SSFCStrIn_t labelCStr);
+bool SSFGObjSetLabel(SSFGObj_t *gobj, SSFCStrIn_t labelCStrOpt);
 bool SSFGObjGetLabel(SSFGObj_t *gobj, SSFCStrOut_t labelCStrOut, size_t labelCStrOutSize);
 
 /* Object value accessors */
@@ -119,7 +120,7 @@ bool SSFGObjInsertChild(SSFGObj_t *gobjParent, SSFGObj_t *gobjChild);
 bool SSFGObjRemoveChild(SSFGObj_t *gobjParent, SSFGObj_t *gobjChild);
 
 /* Find and parse */
-bool SSFGObjFindPath(SSFGObj_t *gobjRoot, SSFCStrIn_t *path, SSFGObj_t **gobjParentOut,
+bool SSFGObjFindPath(SSFGObj_t *gobjRoot, const SSFGPath_t *path, SSFGObj_t **gobjParentOut,
                      SSFGObj_t **gobjChildOut);
 bool SSFGObjIterate(SSFGObj_t *gobj, SSFGObjIterateFn_t iterateCallback);
 

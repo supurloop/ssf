@@ -4,7 +4,7 @@
 /* ssfrsa.h                                                                                      */
 /* Provides RSA digital signature (PKCS#1 v1.5, PSS) and key generation interface.               */
 /*                                                                                               */
-/* RFC 8017: PKCS #1: RSA Cryptography Specifications Version 2.2                               */
+/* RFC 8017: PKCS #1: RSA Cryptography Specifications Version 2.2                                */
 /* FIPS 186-4: Digital Signature Standard (DSS)                                                  */
 /*                                                                                               */
 /* BSD-3-Clause License                                                                          */
@@ -45,11 +45,7 @@ extern "C" {
 #include "ssfbn.h"
 
 /* --------------------------------------------------------------------------------------------- */
-/* Module enable / compile-time validation                                                       */
-/*                                                                                                */
-/* SSF_RSA_ANY_ENABLED is the master gate: the module compiles to nothing when no key size is    */
-/* enabled (a pure-ECC build can leave ssfrsa.c in the project without dragging RSA in). The API */
-/* declarations, sizing constants, and ssfrsa.c implementation are all conditional on it.        */
+/* Module enable gate: SSF_RSA_ANY_ENABLED is 1 when at least one RSA key size is enabled.       */
 /* --------------------------------------------------------------------------------------------- */
 #if (SSF_RSA_CONFIG_ENABLE_2048 == 1) || \
     (SSF_RSA_CONFIG_ENABLE_3072 == 1) || \
@@ -58,6 +54,16 @@ extern "C" {
 #else
 #define SSF_RSA_ANY_ENABLED (0u)
 #endif
+
+/* Hash algorithm selection for RSA padding (and ssfx509's hash id for every scheme) */
+typedef enum
+{
+    SSF_RSA_HASH_MIN = -1,
+    SSF_RSA_HASH_SHA256,   /* SHA-256 (32-byte hash, for RSA-2048+) */
+    SSF_RSA_HASH_SHA384,   /* SHA-384 (48-byte hash, for RSA-3072+) */
+    SSF_RSA_HASH_SHA512,   /* SHA-512 (64-byte hash, for RSA-4096) */
+    SSF_RSA_HASH_MAX,
+} SSFRSAHash_t;
 
 #if SSF_RSA_ANY_ENABLED == 1
 
@@ -99,17 +105,7 @@ extern "C" {
 #define SSF_RSA_MAX_PUB_KEY_DER_SIZE (SSF_RSA_MAX_KEY_BYTES + 40u)
 
 /* Maximum DER-encoded private key size. */
-#define SSF_RSA_MAX_PRIV_KEY_DER_SIZE (5u * SSF_RSA_MAX_KEY_BYTES + 200u)
-
-/* Hash algorithm selection for RSA padding. */
-typedef enum
-{
-    SSF_RSA_HASH_MIN = -1,
-    SSF_RSA_HASH_SHA256,   /* SHA-256 (32-byte hash, for RSA-2048+) */
-    SSF_RSA_HASH_SHA384,   /* SHA-384 (48-byte hash, for RSA-3072+) */
-    SSF_RSA_HASH_SHA512,   /* SHA-512 (64-byte hash, for RSA-4096) */
-    SSF_RSA_HASH_MAX,
-} SSFRSAHash_t;
+#define SSF_RSA_MAX_PRIV_KEY_DER_SIZE ((5u * SSF_RSA_MAX_KEY_BYTES) + 200u)
 
 /* --------------------------------------------------------------------------------------------- */
 /* External interface: key generation                                                            */
@@ -151,17 +147,14 @@ bool SSFRSASignPSS(const uint8_t *privKeyDer, size_t privKeyDerLen, SSFRSAHash_t
                    const uint8_t *hashVal, size_t hashLen, uint8_t *sig, size_t sigSize,
                    size_t *sigLen);
 bool SSFRSAVerifyPSS(const uint8_t *pubKeyDer, size_t pubKeyDerLen, SSFRSAHash_t hash,
-                     const uint8_t *hashVal, size_t hashLen, const uint8_t *sig, size_t sigLen);
+                     const uint8_t *hashVal, size_t hashLen, size_t saltLen,
+                     const uint8_t *sig, size_t sigLen);
 #endif /* SSF_RSA_CONFIG_ENABLE_PSS */
 
 #endif /* SSF_RSA_ANY_ENABLED == 1 -- end of API gated on at-least-one-size-enabled */
 
 /* --------------------------------------------------------------------------------------------- */
-/* Unit test                                                                                     */
-/*                                                                                               */
-/* The declaration is NOT gated on SSF_RSA_ANY_ENABLED -- main.c references SSFRSAUnitTest under */
-/* SSF_CONFIG_RSA_UNIT_TEST and would fail to link if the symbol disappeared. ssfrsa_ut.c gates  */
-/* the body internally and prints a "skipped" message when no sizes are enabled.                  */
+/* Unit test (declared even when no RSA key size is enabled)                                     */
 /* --------------------------------------------------------------------------------------------- */
 #if SSF_CONFIG_RSA_UNIT_TEST == 1
 void SSFRSAUnitTest(void);
@@ -170,6 +163,9 @@ extern void (*_SSFRSASignBlindTestHook)(void *ctx, const SSFBN_t *r, const SSFBN
                                         const SSFBN_t *cIn, const SSFBN_t *cBlind,
                                         const SSFBN_t *n);
 extern void *_SSFRSASignBlindTestHookCtx;
+
+/* Test-only hook fired after each secret local is wiped. */
+extern void (*_SSFRSAScrubTestHook)(const void *buf, size_t len);
 #endif /* SSF_CONFIG_RSA_UNIT_TEST */
 
 #ifdef __cplusplus

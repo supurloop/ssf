@@ -37,17 +37,29 @@ for any unused field.
   fall back only when the protocol mandates a shorter tag.
 - `ptLen` (Encrypt) and `ctLen` (Decrypt) are capped at `512 MiB` (2²⁹) per call, mirroring
   [`ssfchacha20`](ssfchacha20.md). The cap is enforced by `SSF_REQUIRE`.
-- `SSFAESGCMDecrypt()` decrypts ciphertext into `pt` and then verifies the authentication
-  tag. On tag-verify failure it returns `false` **and** memsets `pt[0..ctLen-1]` to zero
-  before returning, so a buggy caller that forgets to check the return value cannot ship
-  unauthenticated plaintext. Still, the correct usage is to always check the return value
-  and treat the output buffer as invalid when `false` is returned.
+- `SSFAESGCMDecrypt()` verifies the authentication tag over `ct` first and decrypts into `pt`
+  only when the tag matches, so unverified plaintext is never written. On tag-verify failure it
+  returns `false` **and** memsets `pt[0..ctLen-1]` to zero before returning (when `pt == ct`
+  this also wipes the ciphertext), so a buggy caller that forgets to check the return value
+  cannot ship unauthenticated plaintext. Still, the correct usage is to always check the return
+  value and treat the output buffer as invalid when `false` is returned.
+- Both `SSFAESGCMEncrypt()` and `SSFAESGCMDecrypt()` may be called in place (`ct == pt`).
+  Partially overlapping (non-identical) input and output buffers are not supported.
 - A common embedded IV strategy is to concatenate an 8-byte device EUI-64 with a 4-byte
   big-endian frame counter that increments monotonically.
 - Each `SSFAESGCMEncrypt()` / `SSFAESGCMDecrypt()` call expands the AES key schedule once and
   reuses it for the hash subkey `H` and every GCTR keystream block, rather than re-expanding the
   key per block. The expanded schedule is securely wiped before the function returns on every
   path. This is an internal optimization with no effect on the public API, behavior, or output.
+- GHASH multiplies in GF(2¹²⁸) with a constant-time carryless multiply (no tables, no
+  secret-dependent branches). Each GHASH pass prepares `H` once (bit-reversed words and its
+  Karatsuba operand sums) and keeps the running tag in that bit-reversed form, so each block
+  reverses only its own 16 bytes; the multiply's intermediates, the prepared `H` and the tag
+  are wiped once at the end of the pass rather than after every block (OPTIMIZE GCM-O1: GHASH
+  about 1.5–1.9× faster on x86-64, ARMv7-A and Cortex-M4, about 1.1× on Cortex-M0+, whose
+  64-bit multiplies are library calls). Output is unchanged.
+- DBC exception (timing-critical): `_SSFAESGCMCarryless32Mult` run per block or per arithmetic
+  step and carry no parameter asserts; their callers validate every argument.
 
 <a id="configuration"></a>
 

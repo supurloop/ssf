@@ -46,7 +46,8 @@ void SSFStrUnitTest(void)
     char check[SSFSTR_UNIT_TEST_BUF_SIZE];
     SSFCStrIn_t matchStrOptOut;
     size_t i;
-    int32_t len;
+    size_t len;
+    size_t tokSize;
 
     /* Test SSFStrISValid() */
     SSF_ASSERT(SSFStrIsValid(NULL, 1) == false);
@@ -78,7 +79,6 @@ void SSFStrUnitTest(void)
 
     /* Test SSFStrCat() */
     SSF_ASSERT_TEST(SSFStrCat(NULL, 4, &s1Len, "src", 4));
-    SSF_ASSERT_TEST(SSFStrCat("dst", 4, NULL, "src", 4));
     SSF_ASSERT_TEST(SSFStrCat("dst", 4, &s1Len, NULL, 4));
     SSF_ASSERT(SSFStrCat("1234", 4, &s1Len, "src", 4) == false);
     SSF_ASSERT(SSFStrCat("dst", 4, &s1Len, "1234", 4) == false);
@@ -92,9 +92,54 @@ void SSFStrUnitTest(void)
     SSF_ASSERT(memcmp(dst, "1231", 5) == 0);
     SSF_ASSERT(dst[5] == 0x55);
 
+    /* AUDIT STR-7: overlapping source and destination are well defined (memmove) */
+    {
+        char ov[8];
+
+        memcpy(ov, "xabcde", 7);
+        SSF_ASSERT(SSFStrCpy(ov, sizeof(ov), &s1Len, &ov[1], sizeof(ov) - 1u));
+        SSF_ASSERT((s1Len == 5u) && (memcmp(ov, "abcde", 6) == 0));
+    }
+
+    /* AUDIT STR-2/6: SSFStrStr stays within both sizes without a NUL; false clears match */
+    {
+        static const char hay[3] = { 'a', 'b', 'c' };
+        static const char one[1] = { 'a' };
+
+        matchStrOptOut = hay;
+        SSF_ASSERT(SSFStrStr(hay, sizeof(hay), &matchStrOptOut, "cd", 3) == false);
+        SSF_ASSERT(matchStrOptOut == NULL);
+        SSF_ASSERT(SSFStrStr(hay, sizeof(hay), &matchStrOptOut, "bc", 3));
+        SSF_ASSERT(matchStrOptOut == &hay[1]);
+        SSF_ASSERT(SSFStrStr(hay, sizeof(hay), &matchStrOptOut, "abcd", 5) == false);
+        SSF_ASSERT(SSFStrStr(&hay[2], 1u, &matchStrOptOut, "c", 2));
+        SSF_ASSERT(matchStrOptOut == &hay[2]);
+        SSF_ASSERT(SSFStrStr(&hay[2], 0u, NULL, "x", 2) == false);
+        SSF_ASSERT(SSFStrStr(hay, sizeof(hay), NULL, "a", 0u) == false);
+
+        /* STR-6: a mismatch on the last byte takes the early return; it must clear the output */
+        matchStrOptOut = hay;
+        SSF_ASSERT(SSFStrStr(one, sizeof(one), &matchStrOptOut, "x", 2) == false);
+        SSF_ASSERT(matchStrOptOut == NULL);
+    }
+
+    /* AUDIT STR-3: the length output of SSFStrCpy / SSFStrCat is optional, as documented */
+    {
+        char shortDst[3];
+
+        memcpy(shortDst, "xy", 3);
+        SSF_ASSERT(SSFStrCpy(shortDst, sizeof(shortDst), NULL, "hello", 6) == false);
+        SSF_ASSERT(memcmp(shortDst, "xy", 3) == 0);
+        SSF_ASSERT(SSFStrCpy(dst, sizeof(dst), NULL, "abc", 4));
+        SSF_ASSERT(memcmp(dst, "abc", 4) == 0);
+        SSF_ASSERT(SSFStrCat(dst, sizeof(dst), NULL, "de", 3));
+        SSF_ASSERT(memcmp(dst, "abcde", 6) == 0);
+        SSF_ASSERT(SSFStrCat(shortDst, sizeof(shortDst), NULL, "z", 2) == false);
+        SSF_ASSERT(memcmp(shortDst, "xy", 3) == 0);
+    }
+
     /* Test SSFStrCpy() */
     SSF_ASSERT_TEST(SSFStrCpy(NULL, 4, &s1Len, "src", 4));
-    SSF_ASSERT_TEST(SSFStrCpy("dst", 4, NULL, "src", 4));
     SSF_ASSERT_TEST(SSFStrCpy("dst", 4, &s1Len, NULL, 4));
     SSF_ASSERT(SSFStrCpy(dst, 0, &s1Len, "src", 4) == false);
     SSF_ASSERT(SSFStrCpy(dst, sizeof(dst), &s1Len, "1234", 4) == false);
@@ -178,7 +223,12 @@ void SSFStrUnitTest(void)
     for (i = 0; i < sizeof(check); i++)
     {
         check[i] = (i + 1) & 0xff;
-        if ((check[i] >= 'A') && (check[i] <= 'Z')) check[i] += 32;
+        /* Is this an uppercase letter? */
+        if ((check[i] >= 'A') && (check[i] <= 'Z'))
+        {
+            /* Yes, expect its lowercase */
+            check[i] += 32;
+        }
     }
     SSF_ASSERT(memcmp(dst, check, sizeof(dst)) == 0);
     SSF_ASSERT(dst[sizeof(dst) - 1] == 1);
@@ -187,7 +237,12 @@ void SSFStrUnitTest(void)
     for (i = 0; i < sizeof(check); i++)
     {
         check[i] = (i + 1) & 0xff;
-        if ((check[i] >= 'a') && (check[i] <= 'z')) check[i] -= 32;
+        /* Is this a lowercase letter? */
+        if ((check[i] >= 'a') && (check[i] <= 'z'))
+        {
+            /* Yes, expect its uppercase */
+            check[i] -= 32;
+        }
     }
     SSF_ASSERT(memcmp(dst, check, sizeof(dst)) == 0);
     SSF_ASSERT(dst[sizeof(dst) - 1] == 1);
@@ -368,157 +423,135 @@ void SSFStrUnitTest(void)
         }
     }
 
-    /* Test SSFStrTok() */
+    /* Test SSFStrTok() (AUDIT STR-1/3/4/5: in/out size, final token, oversize, empty on false) */
+    #define _TOK_START(_str) do { \
+        SSF_ASSERT(SSFStrCpy(dst, sizeof(dst), &s1Len, (_str), sizeof(_str))); \
+        tok = dst; tokSize = sizeof(_str); \
+    } while (0)
+    #define _TOK_NEXT(_expect, _token, _pos) do { \
+        memset(check, 0x55, sizeof(check)); \
+        len = 99u; \
+        SSF_ASSERT(SSFStrTok(&tok, &tokSize, check, sizeof(check), &len, " ,", 3) == (_expect)); \
+        SSF_ASSERT((strlen(check) == strlen(_token)) && (strcmp(check, (_token)) == 0)); \
+        SSF_ASSERT(len == strlen(_token)); \
+        SSF_ASSERT(tok == &dst[(_pos)]); \
+        SSF_ASSERT(tokSize == (tokSizeStart - (size_t)(_pos))); \
+    } while (0)
+
+    tokSize = sizeof(dst);
     tok = NULL;
-    SSF_ASSERT_TEST(SSFStrTok(NULL, sizeof(dst), check, sizeof(check), &len, " ,", 3));
-    SSF_ASSERT_TEST(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), &len, " ,", 3));
+    SSF_ASSERT_TEST(SSFStrTok(NULL, &tokSize, check, sizeof(check), &len, " ,", 3));
+    SSF_ASSERT_TEST(SSFStrTok(&tok, &tokSize, check, sizeof(check), &len, " ,", 3));
     tok = dst;
-    SSF_ASSERT_TEST(SSFStrTok(&tok, sizeof(dst), NULL, sizeof(check), &len, " ,", 3));
-    SSF_ASSERT_TEST(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), NULL, " ,", 3));
-    SSF_ASSERT_TEST(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), &len, NULL, 3));
+    SSF_ASSERT_TEST(SSFStrTok(&tok, NULL, check, sizeof(check), &len, " ,", 3));
+    SSF_ASSERT_TEST(SSFStrTok(&tok, &tokSize, NULL, sizeof(check), &len, " ,", 3));
+    SSF_ASSERT_TEST(SSFStrTok(&tok, &tokSize, check, 0, &len, " ,", 3));
+    SSF_ASSERT_TEST(SSFStrTok(&tok, &tokSize, check, sizeof(check), &len, NULL, 3));
 
-    /* (Hardening) cstrSize is a hard cap on bytes read from *cstr: with a size smaller than the    */
-    /* distance to the next delimiter/NUL, tokenizing stops at the size bound and never reads       */
-    /* cstr[cstrSize]. */
-    tok = dst;
-    SSF_ASSERT(SSFStrCpy(dst, sizeof(dst), &s1Len, "abcdef", 7));
-    SSF_ASSERT(SSFStrTok(&tok, 3, check, sizeof(check), &len, " ,", 3) == false);
-    SSF_ASSERT(tok == &dst[3]);
-    SSF_ASSERT(len == 3);
-    SSF_ASSERT(memcmp("abc", check, 3) == 0);
+    {
+        size_t tokSizeStart;
 
-    tok = dst;
-    SSF_ASSERT(SSFStrCpy(dst, sizeof(dst), &s1Len, "", 1));
-    SSF_ASSERT(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), &len, " ,", 3) == false);
-    SSF_ASSERT(*tok == 0);
-    SSF_ASSERT(len == 0);
-    SSF_ASSERT(memcmp("", check, 1) == 0);
+        /* Source size is a shrinking hard cap: "abcdef" bounded to 3 gives "abc" then end */
+        SSF_ASSERT(SSFStrCpy(dst, sizeof(dst), &s1Len, "abcdef", 7));
+        tok = dst; tokSize = 3u; tokSizeStart = 3u;
+        _TOK_NEXT(true, "abc", 3);
+        _TOK_NEXT(false, "", 3);
 
-    tok = dst;
-    SSF_ASSERT(SSFStrCpy(dst, sizeof(dst), &s1Len, "", 1));
-    SSF_ASSERT(SSFStrTok(&tok, 0, check, sizeof(check), &len, " ,", 3) == false);
-    SSF_ASSERT(*tok == 0);
-    SSF_ASSERT(len == 0);
-    SSF_ASSERT(memcmp("", check, 1) == 0);
+        /* Empty input, and a zero source size: end of input, nothing consumed */
+        _TOK_START(""); tokSizeStart = sizeof("");
+        _TOK_NEXT(false, "", 0);
+        tok = dst; tokSize = 0u; tokSizeStart = 0u;
+        _TOK_NEXT(false, "", 0);
 
-    tok = dst;
-    SSF_ASSERT(SSFStrCpy(dst, sizeof(dst), &s1Len, "", 1));
-    SSF_ASSERT(SSFStrTok(&tok, sizeof(dst), check, 0, &len, " ,", 3) == false);
-    SSF_ASSERT(*tok == 0);
-    SSF_ASSERT(len == -1);
-    SSF_ASSERT(memcmp("", check, 1) == 0);
+        /* No delimiter: the whole string is the final token, returned with true */
+        _TOK_START("substsubstrr"); tokSizeStart = sizeof("substsubstrr");
+        _TOK_NEXT(true, "substsubstrr", 12);
+        _TOK_NEXT(false, "", 12);
 
-    tok = dst;
-    SSF_ASSERT(SSFStrCpy(dst, sizeof(dst), &s1Len, "substsubstrr", 13));
-    SSF_ASSERT(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), &len, " ,", 3) == false);
-    SSF_ASSERT(*tok == 0);
-    SSF_ASSERT(len == 12);
-    SSF_ASSERT(memcmp("substsubstrr", check, 13) == 0);
+        /* Two tokens, either delimiter; the last one has no trailing delimiter */
+        _TOK_START("subst,ubstrr"); tokSizeStart = sizeof("subst,ubstrr");
+        _TOK_NEXT(true, "subst", 6);
+        _TOK_NEXT(true, "ubstrr", 12);
+        _TOK_NEXT(false, "", 12);
+        _TOK_START("subst ubstrr"); tokSizeStart = sizeof("subst ubstrr");
+        _TOK_NEXT(true, "subst", 6);
+        _TOK_NEXT(true, "ubstrr", 12);
+        _TOK_NEXT(false, "", 12);
 
-    tok = dst;
-    SSF_ASSERT(SSFStrCpy(dst, sizeof(dst), &s1Len, "subst,ubstrr", 13));
-    SSF_ASSERT(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), &len, " ,", 3));
-    SSF_ASSERT(tok == &dst[6]);
-    SSF_ASSERT(len == 5);
-    SSF_ASSERT(memcmp("subst", check, 6) == 0);
-    SSF_ASSERT(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), &len, " ,", 3) == false);
-    SSF_ASSERT(tok == &dst[12]);
-    SSF_ASSERT(len == 6);
-    SSF_ASSERT(memcmp("ubstrr", check, 6) == 0);
+        /* A character that is not a delimiter stays in the token */
+        _TOK_START("subst!ubstrr"); tokSizeStart = sizeof("subst!ubstrr");
+        _TOK_NEXT(true, "subst!ubstrr", 12);
+        _TOK_NEXT(false, "", 12);
 
-    tok = dst;
-    SSF_ASSERT(SSFStrCpy(dst, sizeof(dst), &s1Len, "subst ubstrr", 13));
-    SSF_ASSERT(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), &len, " ,", 3));
-    SSF_ASSERT(tok == &dst[6]);
-    SSF_ASSERT(len == 5);
-    SSF_ASSERT(memcmp("subst", check, 6) == 0);
-    SSF_ASSERT(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), &len, " ,", 3) == false);
-    SSF_ASSERT(tok == &dst[12]);
-    SSF_ASSERT(*tok == 0);
-    SSF_ASSERT(len == 6);
-    SSF_ASSERT(memcmp("ubstrr", check, 7) == 0);
+        /* Leading delimiter gives an empty token; trailing one ends the last, nothing after */
+        _TOK_START(",substubstr "); tokSizeStart = sizeof(",substubstr ");
+        _TOK_NEXT(true, "", 1);
+        _TOK_NEXT(true, "substubstr", 12);
+        _TOK_NEXT(false, "", 12);
+        _TOK_START(","); tokSizeStart = sizeof(",");
+        _TOK_NEXT(true, "", 1);
+        _TOK_NEXT(false, "", 1);
+        _TOK_START(", ,"); tokSizeStart = sizeof(", ,");
+        _TOK_NEXT(true, "", 1);
+        _TOK_NEXT(true, "", 2);
+        _TOK_NEXT(true, "", 3);
+        _TOK_NEXT(false, "", 3);
+        _TOK_START("a,,b"); tokSizeStart = sizeof("a,,b");
+        _TOK_NEXT(true, "a", 2);
+        _TOK_NEXT(true, "", 3);
+        _TOK_NEXT(true, "b", 4);
+        _TOK_NEXT(false, "", 4);
 
-    tok = dst;
-    SSF_ASSERT(SSFStrCpy(dst, sizeof(dst), &s1Len, "subst!ubstrr", 13));
-    SSF_ASSERT(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), &len, " ,", 3) == false);
-    SSF_ASSERT(tok == &dst[12]);
-    SSF_ASSERT(*tok == 0);
-    SSF_ASSERT(len == 12);
-    SSF_ASSERT(memcmp("subst!ubstrr", check, 13) == 0);
+        /* Single-character tokens */
+        _TOK_START("0,1 2,3"); tokSizeStart = sizeof("0,1 2,3");
+        _TOK_NEXT(true, "0", 2);
+        _TOK_NEXT(true, "1", 4);
+        _TOK_NEXT(true, "2", 6);
+        _TOK_NEXT(true, "3", 7);
+        _TOK_NEXT(false, "", 7);
+    }
+    #undef _TOK_START
+    #undef _TOK_NEXT
 
-    tok = dst;
-    SSF_ASSERT(SSFStrCpy(dst, sizeof(dst), &s1Len, ",substubstr ", 13));
-    SSF_ASSERT(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), &len, " ,", 3));
-    SSF_ASSERT(tok == &dst[1]);
-    SSF_ASSERT(*tok == 's');
-    SSF_ASSERT(len == 0);
-    SSF_ASSERT(memcmp("", check, 0) == 0);
-    SSF_ASSERT(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), &len, " ,", 3));
-    SSF_ASSERT(tok == &dst[12]);
-    SSF_ASSERT(*tok == 0);
-    SSF_ASSERT(len == 10);
-    SSF_ASSERT(memcmp("substubstr", check, 11) == 0);
-    SSF_ASSERT(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), &len, " ,", 3) == false);
-    SSF_ASSERT(tok == &dst[12]);
-    SSF_ASSERT(*tok == 0);
-    SSF_ASSERT(len == 0);
+    /* AUDIT STR-1: a source with no NUL, bounded only by its size, is never over-read */
+    {
+        static const char raw[7] = { 'o', 'n', 'e', ',', 't', 'w', 'o' };
+        SSFCStrIn_t rp = raw;
+        size_t rs = sizeof(raw);
 
-    tok = dst;
-    SSF_ASSERT(SSFStrCpy(dst, sizeof(dst), &s1Len, ",", 2));
-    SSF_ASSERT(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), &len, " ,", 3));
-    SSF_ASSERT(tok == &dst[1]);
-    SSF_ASSERT(*tok == 0);
-    SSF_ASSERT(len == 0);
-    SSF_ASSERT(memcmp("", check, 0) == 0);
-    SSF_ASSERT(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), &len, " ,", 3) == false);
-    SSF_ASSERT(tok == &dst[1]);
-    SSF_ASSERT(*tok == 0);
-    SSF_ASSERT(len == 0);
+        SSF_ASSERT(SSFStrTok(&rp, &rs, check, sizeof(check), &len, ",", 2));
+        SSF_ASSERT((len == 3u) && (strcmp(check, "one") == 0) && (rs == 3u));
+        SSF_ASSERT(SSFStrTok(&rp, &rs, check, sizeof(check), &len, ",", 2));
+        SSF_ASSERT((len == 3u) && (strcmp(check, "two") == 0) && (rs == 0u));
+        SSF_ASSERT(rp == &raw[7]);
+        SSF_ASSERT(SSFStrTok(&rp, &rs, check, sizeof(check), &len, ",", 2) == false);
+    }
 
-    tok = dst;
-    SSF_ASSERT(SSFStrCpy(dst, sizeof(dst), &s1Len, ", ,", 4));
-    SSF_ASSERT(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), &len, " ,", 3));
-    SSF_ASSERT(tok == &dst[1]);
-    SSF_ASSERT(*tok == ' ');
-    SSF_ASSERT(len == 0);
-    SSF_ASSERT(memcmp("", check, 0) == 0);
-    SSF_ASSERT(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), &len, " ,", 3));
-    SSF_ASSERT(tok == &dst[2]);
-    SSF_ASSERT(*tok == ',');
-    SSF_ASSERT(len == 0);
-    SSF_ASSERT(memcmp("", check, 0) == 0);
-    SSF_ASSERT(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), &len, " ,", 3));
-    SSF_ASSERT(tok == &dst[3]);
-    SSF_ASSERT(*tok == 0);
-    SSF_ASSERT(len == 0);
-    SSF_ASSERT(memcmp("", check, 0) == 0);
-    SSF_ASSERT(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), &len, " ,", 3) == false);
-    SSF_ASSERT(tok == &dst[3]);
-    SSF_ASSERT(*tok == 0);
-    SSF_ASSERT(len == 0);
+    /* AUDIT STR-4: the documented example loop sees all three tokens */
+    {
+        static const char src[] = "one,two,three";
+        static const char *expect[] = { "one", "two", "three" };
+        SSFCStrIn_t pos = src;
+        size_t posSize = sizeof(src);
+        char token[16];
+        size_t n = 0;
 
+        while (SSFStrTok(&pos, &posSize, token, sizeof(token), &len, ",", sizeof(",")))
+        {
+            SSF_ASSERT(n < 3u);
+            SSF_ASSERT((strcmp(token, expect[n]) == 0) && (len == strlen(expect[n])));
+            n++;
+        }
+        SSF_ASSERT(n == 3u);
+        SSF_ASSERT((posSize == 1u) && (*pos == 0));
+    }
+
+    /* AUDIT STR-3: the token length output is optional */
     tok = dst;
-    SSF_ASSERT(SSFStrCpy(dst, sizeof(dst), &s1Len, "0,1 2,3", 8));
-    SSF_ASSERT(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), &len, " ,", 3));
-    SSF_ASSERT(tok == &dst[2]);
-    SSF_ASSERT(*tok == '1');
-    SSF_ASSERT(len == 1);
-    SSF_ASSERT(memcmp("0", check, 0) == 0);
-    SSF_ASSERT(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), &len, " ,", 3));
-    SSF_ASSERT(tok == &dst[4]);
-    SSF_ASSERT(*tok == '2');
-    SSF_ASSERT(len == 1);
-    SSF_ASSERT(memcmp("1", check, 0) == 0);
-    SSF_ASSERT(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), &len, " ,", 3));
-    SSF_ASSERT(tok == &dst[6]);
-    SSF_ASSERT(*tok == '3');
-    SSF_ASSERT(len == 1);
-    SSF_ASSERT(memcmp("2", check, 0) == 0);
-    SSF_ASSERT(SSFStrTok(&tok, sizeof(dst), check, sizeof(check), &len, " ,", 3) == false);
-    SSF_ASSERT(tok == &dst[7]);
-    SSF_ASSERT(*tok == 0);
-    SSF_ASSERT(len == 1);
-    SSF_ASSERT(memcmp("3", check, 0) == 0);
+    SSF_ASSERT(SSFStrCpy(dst, sizeof(dst), &s1Len, "ab,c", 5));
+    tokSize = 5u;
+    SSF_ASSERT(SSFStrTok(&tok, &tokSize, check, sizeof(check), NULL, ",", 2));
+    SSF_ASSERT((strcmp(check, "ab") == 0) && (tok == &dst[3]) && (tokSize == 2u));
 
     /* SSFStrCpy with empty source string */
     memset(dst, 0x55, sizeof(dst));
@@ -556,15 +589,18 @@ void SSFStrUnitTest(void)
     SSF_ASSERT(dst[0] == 0);
     SSF_ASSERT(dst[1] == 0x55);
 
-    /* SSFStrTok with token buffer too small for non-empty token */
+    /* AUDIT STR-5: oversize token returns false, not consumed, token buffer left empty */
     SSF_ASSERT(SSFStrCpy(dst, sizeof(dst), &s1Len, "hello,world", 12));
     tok = dst;
-    SSF_ASSERT(SSFStrTok(&tok, sizeof(dst), check, 3, &len, ",", 2));
-    SSF_ASSERT(len == -1);
-    SSF_ASSERT(tok == &dst[6]);
-    SSF_ASSERT(SSFStrTok(&tok, sizeof(dst), check, 6, &len, ",", 2) == false);
-    SSF_ASSERT(len == 5);
-    SSF_ASSERT(memcmp(check, "world", 6) == 0);
+    tokSize = 12u;
+    memcpy(check, "zz", 3);
+    SSF_ASSERT(SSFStrTok(&tok, &tokSize, check, 3, &len, ",", 2) == false);
+    SSF_ASSERT((len == 0u) && (check[0] == 0) && (tok == dst) && (tokSize == 12u));
+    SSF_ASSERT(SSFStrTok(&tok, &tokSize, check, 6, &len, ",", 2));
+    SSF_ASSERT((len == 5u) && (memcmp(check, "hello", 6) == 0) && (tok == &dst[6]));
+    SSF_ASSERT(SSFStrTok(&tok, &tokSize, check, 6, &len, ",", 2));
+    SSF_ASSERT((len == 5u) && (memcmp(check, "world", 6) == 0) && (tokSize == 1u));
+    SSF_ASSERT(SSFStrTok(&tok, &tokSize, check, 6, &len, ",", 2) == false);
 
     /* SSFStrStr with substr longer than cstr */
     SSF_ASSERT(SSFStrStr("ab", 3, NULL, "abcdef", 7) == false);
@@ -640,9 +676,9 @@ void SSFStrUnitTest(void)
         SSF_ASSERT(SSFStrCharToLower('_') == '_');
         SSF_ASSERT(SSFStrCharToLower('.') == '.');
 
-        /* Boundary chars adjacent to A-Z range are unchanged */
-        SSF_ASSERT(SSFStrCharToLower('@') == '@');  /* 0x40, one before 'A' */
-        SSF_ASSERT(SSFStrCharToLower('[') == '[');  /* 0x5B, one after 'Z' */
+        /* Boundary chars adjacent to A-Z are unchanged: 0x40 before 'A', 0x5B after 'Z' */
+        SSF_ASSERT(SSFStrCharToLower('@') == '@');
+        SSF_ASSERT(SSFStrCharToLower('[') == '[');
 
         /* Full 0-255 sweep: every char either converts or is unchanged */
         {
@@ -650,8 +686,10 @@ void SSFStrUnitTest(void)
             for (c = 0; c < 256; c++)
             {
                 char result = SSFStrCharToLower((char)c);
-                if (c >= 'A' && c <= 'Z')
+                /* Is c an uppercase letter? */
+                if ((c >= 'A') && (c <= 'Z'))
                 {
+                    /* Yes, it converts */
                     SSF_ASSERT(result == (char)(c + ('a' - 'A')));
                 }
                 else
@@ -720,9 +758,9 @@ void SSFStrUnitTest(void)
         SSF_ASSERT(SSFStrCharToUpper('_') == '_');
         SSF_ASSERT(SSFStrCharToUpper('.') == '.');
 
-        /* Boundary chars adjacent to a-z range are unchanged */
-        SSF_ASSERT(SSFStrCharToUpper('`') == '`');  /* 0x60, one before 'a' */
-        SSF_ASSERT(SSFStrCharToUpper('{') == '{');  /* 0x7B, one after 'z' */
+        /* Boundary chars adjacent to a-z are unchanged: 0x60 before 'a', 0x7B after 'z' */
+        SSF_ASSERT(SSFStrCharToUpper('`') == '`');
+        SSF_ASSERT(SSFStrCharToUpper('{') == '{');
 
         /* Full 0-255 sweep: every char either converts or is unchanged */
         {
@@ -730,8 +768,10 @@ void SSFStrUnitTest(void)
             for (c = 0; c < 256; c++)
             {
                 char result = SSFStrCharToUpper((char)c);
-                if (c >= 'a' && c <= 'z')
+                /* Is c a lowercase letter? */
+                if ((c >= 'a') && (c <= 'z'))
                 {
+                    /* Yes, it converts */
                     SSF_ASSERT(result == (char)(c - ('a' - 'A')));
                 }
                 else
@@ -747,32 +787,29 @@ void SSFStrUnitTest(void)
         int c;
         for (c = 0; c < 256; c++)
         {
-            /* Lower then upper of any alpha char returns the uppercase original */
-            if (c >= 'A' && c <= 'Z')
+            /* Is c uppercase (lower then upper must return the original)? */
+            if ((c >= 'A') && (c <= 'Z'))
             {
+                /* Yes */
                 SSF_ASSERT(SSFStrCharToUpper(SSFStrCharToLower((char)c)) == (char)c);
             }
-            /* Upper then lower of any alpha char returns the lowercase original */
-            if (c >= 'a' && c <= 'z')
+            /* Is c lowercase (upper then lower must return the original)? */
+            if ((c >= 'a') && (c <= 'z'))
             {
+                /* Yes */
                 SSF_ASSERT(SSFStrCharToLower(SSFStrCharToUpper((char)c)) == (char)c);
             }
-            /* Non-alpha chars survive both directions unchanged */
-            if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')))
+            /* Is c non-alpha (must survive both directions unchanged)? */
+            if (!(((c >= 'A') && (c <= 'Z')) || ((c >= 'a') && (c <= 'z'))))
             {
+                /* Yes */
                 SSF_ASSERT(SSFStrCharToLower((char)c) == (char)c);
                 SSF_ASSERT(SSFStrCharToUpper((char)c) == (char)c);
             }
         }
     }
 
-    /* SSFStrStr: post-mismatch reset path where remaining haystack is exactly 1 byte and the   */
-    /* match has not been found. Existing tests pass null-terminated haystacks so the loop      */
-    /* exits via *cstr == 0 before reaching the cstrSize <= 1 check at ssfstr.c:262. Pass an    */
-    /* unterminated 2-char buffer that mismatches throughout: after one iteration cstrSize is   */
-    /* 1, no terminator seen, and the next iter trips the explicit reject.                       */
-    /* The function early-returns at line 262 without writing matchStrOptOut, so just confirm   */
-    /* the return value -- testing matchOut here would observe stack garbage.                    */
+    /* SSFStrStr: unterminated 2-char haystack that never matches hits the cstrSize <= 1 reject */
     SSF_ASSERT(SSFStrStr("xx", 2, NULL, "abc", 4) == false);
 }
 #endif /* SSF_CONFIG_STR_UNIT_TEST */

@@ -10,18 +10,21 @@ on top of [`ssfec`](ssfec.md) and [`ssfbn`](ssfbn.md).
 Two design choices worth calling out up front:
 
 - **Signing is deterministic (RFC 6979).** The per-signature nonce `k` is derived from the
-  private key and the message hash via HMAC-SHA-based HKDF-style extraction, not from a
-  live RNG. This eliminates the classic ECDSA vulnerability — if you ever sign two
+  private key and the message hash by the RFC 6979 §3.2 HMAC-DRBG procedure, not from a
+  live RNG. As RFC 6979 specifies, the HMAC uses the digest's own hash function, inferred from
+  `hashLen` (20 → SHA-1, 32 → SHA-256, 48 → SHA-384, 64 → SHA-512; any other length falls back to the
+  curve's hash), so non-matching pairings such as P-384 with SHA-256 reproduce the RFC 6979
+  vectors and other implementations. This eliminates the classic ECDSA vulnerability — if you ever sign two
   different messages with the same `k`, an attacker who sees both signatures recovers your
   private key. Since the spec is permissive about how `k` is chosen, getting this wrong is
   extremely common in real systems (Sony PlayStation 3, Bitcoin wallets, Android key store
   bugs). Here the nonce is a deterministic function of the inputs, so no RNG quality or
   RNG-availability concerns at sign time.
-- **Hash is pinned to the curve.** P-256 signs SHA-256 hashes; P-384 signs SHA-384 hashes.
-  The caller computes the hash externally (typically via [`ssfsha2`](ssfsha2.md)) and
-  passes the bytes to [`SSFECDSASign()`](#ssfecdsasign) /
-  [`SSFECDSAVerify()`](#ssfecdsaverify). Mismatched hash length relative to the curve is a
-  call-site error.
+- **Recommended hash per curve.** P-256 pairs with SHA-256 and P-384 with SHA-384. The
+  caller computes the hash externally (typically via [`ssfsha2`](ssfsha2.md)) and passes the
+  bytes to [`SSFECDSASign()`](#ssfecdsasign) / [`SSFECDSAVerify()`](#ssfecdsaverify). Other
+  lengths from 1 to 64 bytes are accepted (a longer digest is truncated to the curve size);
+  see [Notes](#notes).
 
 [Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference)
 
@@ -45,10 +48,11 @@ Two design choices worth calling out up front:
 ## [↑](#ssfecdsa--ecdsa-signatures-and-ecdh-key-agreement) Notes
 
 - **Key-generation entropy is platform-dependent.** [`SSFECDSAKeyGen()`](#ssfecdsakeygen)
-  seeds [`SSFPRNGInitContext()`](ssfprng.md#ssfprnginitcontext) from `/dev/urandom` on
-  POSIX (macOS, Linux); on Windows it currently trips a `SSF_ASSERT(false)` and returns
-  `false`. On a bare-metal target the caller must either (a) patch the internal
-  `_SSFECDSAGetEntropy()` helper to read from a hardware RNG / TRNG or ROSC, or
+  seeds [`SSFPRNGInitContext()`](ssfprng.md#ssfprnginitcontext) from `SSFPortGetEntropy()`
+  in [`ssfport.c`](../ssfport.c), which reads `/dev/urandom` on POSIX (macOS, Linux) and
+  calls `BCryptGenRandom` on Windows, and returns `false` when no source is available. On a
+  bare-metal target the caller must either (a) implement `SSFPortGetEntropy()` to read from a
+  hardware RNG / TRNG or ROSC, or
   (b) perform key generation on a trusted build host and provision the derived
   `(privKey, pubKey)` pair into the device, using only
   [`SSFECDSAPubKeyFromPrivKey()`](#ssfecdsapubkeyfromprivkey) at runtime. **Never** use
@@ -58,6 +62,36 @@ Two design choices worth calling out up front:
   [`SSFECDSASign()`](#ssfecdsasign) consumes randomness. The signature nonce is
   `HMAC-SHA(privateKey, hash)`-derived per RFC 6979. Signatures are deterministic:
   identical inputs produce identical signatures.
+- **Fault-attack defence is optional and off by default.** Deterministic nonces make a single
+  faulty signature dangerous: a glitch, brownout or bit flip during signing yields a bad
+  `(r', s')` that, together with a correct signature of the same hash, reveals the private key
+  (differential fault attack on deterministic ECDSA). Setting
+  `SSF_ECDSA_CONFIG_VERIFY_AFTER_SIGN` to `1` makes [`SSFECDSASign()`](#ssfecdsasign) verify
+  every signature before releasing it: it re-derives the public key `Q = d·G` from a second
+  import of `privKey` and the digest integer `e` from `hash`, runs the standard verify on
+  `(r, s)`, and returns `false` without writing `sig` or `sigLen` if the check fails. This is
+  the same verify-after-sign defence [`ssfed25519`](ssfed25519.md) and [`ssfrsa`](ssfrsa.md)
+  always apply.
+
+  The option defaults to `0` because the check costs one fixed-base scalar multiplication plus
+  one verify per signature, which makes signing about 5× slower. Measured on an x86-64 host,
+  P-256 signing goes from ~0.36 ms to ~1.8 ms and P-384 from ~0.7 ms to ~3.4 ms; on an MCU the
+  absolute cost scales accordingly. With the default, a fault during signing is not detected
+  and the faulty signature is returned as if it were valid.
+
+  Turn it on when both of these apply:
+  - an attacker can get physical access to the device and inject faults (voltage or clock
+    glitching, EM or laser pulses), or the device runs where natural faults (unstable supply,
+    radiation, marginal flash) are plausible; **and**
+  - the device may sign the same hash more than once, or an attacker can obtain a second,
+    correct signature of a hash whose faulty signature was released (for example by asking
+    again after a glitched attempt).
+
+  Leaving it off is reasonable when signing happens in a controlled environment (a host or
+  HSM-adjacent service with no physical attacker), or when each hash is signed exactly once.
+  With the option off, a caller can still protect selected signatures by passing each one to
+  [`SSFECDSAVerify()`](#ssfecdsaverify) with its public key before releasing it. That is the
+  same check at a similar cost, applied only where the caller chooses.
 - **Hash-algorithm pinning per curve.** The recommended pairing is:
 
   | Curve | Recommended hash | `hashLen` |
@@ -65,12 +99,13 @@ Two design choices worth calling out up front:
   | P-256 | SHA-256 | 32 |
   | P-384 | SHA-384 | 48 |
 
-  The code enforces only `1 ≤ hashLen ≤ coordBytes` (per FIPS 186-4 §6.4 / RFC 5758 §3.2,
-  which allow any hash no larger than the curve's coordinate size — `bits2int` handles the
-  variable length). Shorter-than-recommended hashes are accepted but reduce the effective
-  security level; use the recommended pairing unless you have a concrete interop reason to
-  deviate. Hashes *longer* than `coordBytes` are rejected by a `SSF_REQUIRE` — this
-  implementation does not do the RFC 5758 truncation-from-left step. Using the wrong hash
+  The code accepts any `1 ≤ hashLen ≤ 64` (up to SHA-512). Per FIPS 186-4 §6.4, RFC 5758 §3.2
+  and RFC 6979 §2.3.2, a digest longer than `coordBytes` is truncated to its leftmost
+  `coordBytes` bytes (the curve order is byte-aligned for P-256 and P-384), so P-256 with
+  SHA-384 / SHA-512 and P-384 with SHA-512 sign and verify as other implementations do.
+  Shorter-than-recommended hashes are accepted but reduce the effective security level; use
+  the recommended pairing unless you have a concrete interop reason to deviate. A `hashLen`
+  above 64 is a `SSF_REQUIRE` failure. Using the wrong hash
   *algorithm* (different construction at the same length) produces a technically valid
   signature that commits to the wrong value — a semantic failure, not a crypto-primitive
   failure. Sign and verify must agree on the hash algorithm.
@@ -84,8 +119,16 @@ Two design choices worth calling out up front:
 - **Signature format is DER `SEQUENCE { INTEGER r, INTEGER s }`** per SEC 1 / X.690.
   Length is variable (39–72 bytes for P-256, 71–104 for P-384) because each `INTEGER` may
   gain an extra `0x00` leading byte when its high bit is set. Size the output buffer to
-  [`SSF_ECDSA_MAX_SIG_SIZE`](#ssf-ecdsa-max-sig-size); the actual length is returned via
-  `*sigLen`.
+  [`SSF_ECDSA_MAX_SIG_SIZE`](#ssf-ecdsa-max-sig-size) to always fit; the actual length is
+  returned via `*sigLen`.
+- **Verify accepts only strict DER.** [`SSFECDSAVerify()`](#ssfecdsaverify) parses the
+  signature byte-by-byte (no `ssfasn1` calls) and rejects the BER-tolerant forms that create
+  signature malleability (CVE-2020-14966 / CVE-2020-13822 / CVE-2019-14859 /
+  CVE-2016-1000342 class; the Wycheproof / RFC 5480 rules): the outer `SEQUENCE` (`0x30`) must
+  use a canonical length (short form, or `0x81 XX` only when `XX ≥ 0x80`); the total length must
+  equal header plus content; exactly two short-form-length `INTEGER`s follow, each `1` to
+  `coordBytes + 1` bytes long, positive (first content byte `< 0x80`) and minimal (a leading
+  `0x00` only before a byte `≥ 0x80`); no data may trail the second `INTEGER`.
 - **ECDH output is the raw X coordinate of `d·P_peer`.** Feed it through
   [`ssfhkdf`](ssfhkdf.md) (NIST SP 800-56C extraction + expansion) to produce usable
   session keys. Do **not** use the raw ECDH bytes directly as a symmetric key — the
@@ -98,14 +141,20 @@ Two design choices worth calling out up front:
   runs, so invalid-curve attacks are closed by construction.
 - **Signing is constant-time; verification is not.** Sign uses the constant-time
   [`SSFECScalarMul`](ssfec.md#ssfecscalarmul) path and constant-time modular inverse
-  ([`SSFBNModInv`](ssfbn.md#modinv), which is Fermat-based over the prime curve order `n`)
-  and constant-time MAC compare via [`ssfcrypt`](ssfcrypt.md). Verify uses the variable-time
-  [`SSFECScalarMulDual`](ssfec.md#ssfecscalarmuldual) — fine because everything fed into
-  verify is public.
+  ([`SSFBNModInvSmall`](ssfbn.md#modinvsmall), Fermat-based over the prime curve order `n` at
+  curve width) and products ([`SSFBNModMulSmall`](ssfbn.md#modinvsmall)),
+  and scrubs its secret intermediates with [`ssfcrypt`](ssfcrypt.md)'s
+  `SSFCryptSecureZero`. Verify is variable-time — fine because everything fed into verify is
+  public. It uses [`SSFECScalarMulDualBase`](ssfec.md#ssfecscalarmuldualbase) when a
+  fixed-base table is enabled (`SSF_EC_CONFIG_FIXED_BASE_P256` / `_P384`, the default) and
+  [`SSFECScalarMulDual`](ssfec.md#ssfecscalarmuldual) otherwise.
 - **Zero `r` or `s` in a signature is rejected.** Per FIPS 186-4 §6.4.2 the verifier
   rejects any signature where `r` or `s` is outside `[1, n-1]`; an all-zero `s` in
-  particular would permit forgeries. This module enforces those ranges both during sign
-  (loops until it produces a valid pair) and during verify (hard-rejects).
+  particular would permit forgeries. This module enforces those ranges both during sign and
+  during verify (hard-rejects). When signing yields `r == 0` or `s == 0` (probability ~2⁻²⁵⁶
+  each), it continues the RFC 6979 generator to the next candidate `k` (RFC 6979 §3.4, FIPS
+  186-4 §6.4), up to 8 candidates; the first candidate is the standard RFC 6979 `k`, so every
+  ordinary signature is unchanged.
 - **Private keys are zeroized before return from every function that touches them.**
   `SSFECDSAKeyGen`, `SSFECDSAPubKeyFromPrivKey`, `SSFECDSASign`, and
   `SSFECDHComputeSecret` all run [`SSFBNZeroize`](ssfbn.md#ssfbnzeroize) over the working
@@ -122,6 +171,7 @@ through from [`ssfec`](ssfec.md#configuration) via `SSF_EC_CONFIG_ENABLE_P256` /
 
 | Macro | Default | Description |
 |-------|---------|-------------|
+| `SSF_ECDSA_CONFIG_VERIFY_AFTER_SIGN` | `0` | When `1`, `SSFECDSASign` verifies every signature before releasing it, so a fault during signing returns `false` instead of a faulty signature that could reveal the private key. Off by default because it makes signing about 5× slower; turn it on for devices exposed to fault injection that may sign the same hash more than once (see [Notes](#notes)). Ignored when `SSF_ECDSA_CONFIG_ENABLE_SIGN` is `0`. |
 | `SSF_ECDSA_CONFIG_ENABLE_SIGN` | `1` | Compile `SSFECDSASign` and the DER-encode helper. Setting to `0` drops them — and drops the only `ssfasn1` reference in this module. The verify path was refactored so DER-input parsing is purely byte-level (no `ssfasn1` calls), so a verify-only build can omit the entire `ssfasn1` module from its project. `SSFECDSAVerify`, `SSFECDSAKeyGen`, and `SSFECDHComputeSecret` are unaffected. |
 
 The [`SSF_CRYPT_PROFILE_MIN_MEMORY`](ssfcrypt.md#configuration) profile defaults
@@ -181,8 +231,9 @@ bool SSFECDSAKeyGen(SSFECCurve_t curve,
                     uint8_t *pubKey,  size_t pubKeySize, size_t *pubKeyLen);
 ```
 Generate a fresh `(privKey, pubKey)` pair for `curve`. Draws
-[`SSF_PRNG_ENTROPY_SIZE`](ssfprng.md#ssf-prng-entropy-size) (16) bytes from the platform
-entropy source, seeds an internal [`SSFPRNGContext_t`](ssfprng.md#ssfprngcontext-t), and
+[`SSF_PRNG_ENTROPY_SIZE`](ssfprng.md#ssf-prng-entropy-size) bytes from the platform
+entropy source (32 whenever P-384 is enabled, so a P-384 key gets a 256-bit seed; see
+[`ssfprng` Configuration](ssfprng.md#configuration)), seeds an internal [`SSFPRNGContext_t`](ssfprng.md#ssfprngcontext-t), and
 rejection-samples a `d ∈ [1, n−1]` — then derives `Q = d·G` via constant-time scalar
 multiplication and encodes the result. Returns `false` if entropy is unavailable, if the
 100 rejection-sampling attempts all fail (overwhelmingly unlikely), or if the caller's
@@ -212,8 +263,8 @@ if (!SSFECDSAKeyGen(SSF_EC_CURVE_P256,
                     priv, sizeof(priv),
                     pub,  sizeof(pub), &pubLen))
 {
-    /* Platform entropy unavailable — on a target without /dev/urandom,
-       wire up a TRNG in _SSFECDSAGetEntropy(). */
+    /* Platform entropy unavailable — on a target without /dev/urandom or
+       BCryptGenRandom, implement SSFPortGetEntropy() with a TRNG. */
 }
 /* priv holds the raw 32-byte scalar; pub holds 0x04 || X(32) || Y(32). */
 ```
@@ -279,13 +330,15 @@ matching the curve, so calling twice with the same inputs yields the same signat
 | `privKey` | in | `const uint8_t *` | Raw big-endian private key. Must not be `NULL`. |
 | `privKeyLen` | in | `size_t` | Must equal `coordBytes` for the curve (32 / 48). |
 | `hash` | in | `const uint8_t *` | Message digest. Must not be `NULL`. |
-| `hashLen` | in | `size_t` | Must be in `[1, coordBytes]` — 32 for P-256, 48 for P-384. The recommended pairing is SHA-256 / P-256 and SHA-384 / P-384; longer hashes are rejected and shorter ones reduce security (see [Notes](#notes)). |
+| `hashLen` | in | `size_t` | Must be in `[1, 64]`. The recommended pairing is SHA-256 / P-256 and SHA-384 / P-384; a longer digest is truncated to its leftmost `coordBytes` bytes and a shorter one reduces security (see [Notes](#notes)). |
 | `sig` | out | `uint8_t *` | Buffer for DER signature. Must not be `NULL`. |
-| `sigSize` | in | `size_t` | Size of `sig`. Must be ≥ [`SSF_ECDSA_MAX_SIG_SIZE`](#ssf-ecdsa-max-sig-size). |
+| `sigSize` | in | `size_t` | Size of `sig`. Must hold the encoded signature; [`SSF_ECDSA_MAX_SIG_SIZE`](#ssf-ecdsa-max-sig-size) always fits. A smaller buffer that cannot hold this signature makes the call return `false`. |
 | `sigLen` | out | `size_t *` | Actual bytes written to `sig`. |
 
-**Returns:** `true` on success; `false` if the private key is invalid or the output buffer
-is too small.
+**Returns:** `true` on success; `false` if the private key is invalid, the output buffer is
+too small, (never in practice) all 8 RFC 6979 candidates gave `r == 0` or `s == 0`, or,
+with `SSF_ECDSA_CONFIG_VERIFY_AFTER_SIGN` set to `1` (default `0`), the produced signature failed its own
+verification (a fault during signing). A signature that fails that check is never written to `sig`.
 
 <a id="ex-sign"></a>
 
@@ -322,7 +375,9 @@ bool SSFECDSAVerify(SSFECCurve_t curve,
 ```
 Verify a DER-encoded ECDSA signature. Validates the public key (decode + on-curve + in
 range), parses the signature, rejects out-of-range `r` or `s`, and performs the verify
-equation via the variable-time [`SSFECScalarMulDual`](ssfec.md#ssfecscalarmuldual).
+equation with the variable-time
+[`SSFECScalarMulDualBase`](ssfec.md#ssfecscalarmuldualbase) (fixed-base tables enabled, the
+default) or [`SSFECScalarMulDual`](ssfec.md#ssfecscalarmuldual).
 
 **Returns:** `true` iff the signature is well-formed **and** verifies against the public
 key and hash. Any parse failure, out-of-range component, or verify-equation mismatch

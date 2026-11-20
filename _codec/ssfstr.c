@@ -38,7 +38,12 @@
 /* --------------------------------------------------------------------------------------------- */
 char SSFStrCharToLower(char c)
 {
-    if (c >= 'A' && c <= 'Z') return (char)(c + ('a' - 'A'));
+    /* Is c an uppercase letter? */
+    if ((c >= 'A') && (c <= 'Z'))
+    {
+        /* Yes, convert it */
+        return (char)(c + ('a' - 'A'));
+    }
     return c;
 }
 
@@ -47,7 +52,12 @@ char SSFStrCharToLower(char c)
 /* --------------------------------------------------------------------------------------------- */
 char SSFStrCharToUpper(char c)
 {
-    if (c >= 'a' && c <= 'z') return (char)(c - ('a' - 'A'));
+    /* Is c a lowercase letter? */
+    if ((c >= 'a') && (c <= 'z'))
+    {
+        /* Yes, convert it */
+        return (char)(c - ('a' - 'A'));
+    }
     return c;
 }
 
@@ -95,14 +105,13 @@ bool SSFStrLen(SSFCStrIn_t cstr, size_t cstrSize, size_t *cstrLenOut)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if src fully catted to dst with NULL terminator cstrDstOutLenOut set, else false.*/
 /* --------------------------------------------------------------------------------------------- */
-bool SSFStrCat(SSFCStrOut_t cstrDstOut, size_t cstrDstOutSize, size_t *cstrDstOutLenOut,
+bool SSFStrCat(SSFCStrOut_t cstrDstOut, size_t cstrDstOutSize, size_t *cstrDstOutLenOutOpt,
                SSFCStrIn_t cstrSrc, size_t cstrSrcSize)
 {
     size_t dstLen;
     size_t srcLen;
 
     SSF_REQUIRE(cstrDstOut != NULL);
-    SSF_REQUIRE(cstrDstOutLenOut != NULL);
     SSF_REQUIRE(cstrSrc != NULL);
 
     /* Determine length of dst */
@@ -114,10 +123,10 @@ bool SSFStrCat(SSFCStrOut_t cstrDstOut, size_t cstrDstOutSize, size_t *cstrDstOu
     /* Will src fully cat to dst? */
     if ((dstLen + srcLen) >= cstrDstOutSize) return false;
 
-    /* Perform cat, update out len, and NULL terminate dst */
-    memcpy(&cstrDstOut[dstLen], cstrSrc, srcLen);
-    *cstrDstOutLenOut = dstLen + srcLen;
-    cstrDstOut[*cstrDstOutLenOut] = 0;
+    /* Perform cat (src may overlap dst), NULL terminate dst, and report the length if asked */
+    memmove(&cstrDstOut[dstLen], cstrSrc, srcLen);
+    cstrDstOut[dstLen + srcLen] = 0;
+    if (cstrDstOutLenOutOpt != NULL) *cstrDstOutLenOutOpt = dstLen + srcLen;
 
     return true;
 }
@@ -125,13 +134,12 @@ bool SSFStrCat(SSFCStrOut_t cstrDstOut, size_t cstrDstOutSize, size_t *cstrDstOu
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if src fully copied to dst with NULL terminator cstrDstOutLenOut set, else false.*/
 /* --------------------------------------------------------------------------------------------- */
-bool SSFStrCpy(SSFCStrOut_t cstrDstOut, size_t cstrDstOutSize, size_t *cstrDstOutLenOut,
+bool SSFStrCpy(SSFCStrOut_t cstrDstOut, size_t cstrDstOutSize, size_t *cstrDstOutLenOutOpt,
                SSFCStrIn_t cstrSrc, size_t cstrSrcSize)
 {
     size_t srcLen;
 
     SSF_REQUIRE(cstrDstOut != NULL);
-    SSF_REQUIRE(cstrDstOutLenOut != NULL);
     SSF_REQUIRE(cstrSrc != NULL);
 
     /* Determine length of src */
@@ -140,10 +148,10 @@ bool SSFStrCpy(SSFCStrOut_t cstrDstOut, size_t cstrDstOutSize, size_t *cstrDstOu
     /* Will src fully cpy to dst? */
     if (srcLen >= cstrDstOutSize) return false;
 
-    /* Perform cpy, update out len, and NULL terminate dst */
-    memcpy(cstrDstOut, cstrSrc, srcLen);
-    *cstrDstOutLenOut = srcLen;
-    cstrDstOut[*cstrDstOutLenOut] = 0;
+    /* Perform cpy (src may overlap dst), NULL terminate dst, and report the length if asked */
+    memmove(cstrDstOut, cstrSrc, srcLen);
+    cstrDstOut[srcLen] = 0;
+    if (cstrDstOutLenOutOpt != NULL) *cstrDstOutLenOutOpt = srcLen;
 
     return true;
 }
@@ -185,34 +193,20 @@ bool SSFStrToCase(SSFCStrOut_t cstrOut, size_t cstrOutSize, SSFSTRCase_t toCase)
     /* Determine length of cstrOut */
     if (SSFStrLen(cstrOut, cstrOutSize, &cstrOutLen) == false) return false;
 
-    switch(toCase)
+    /* Convert each char to the requested case */
+    while (cstrOutLen > 0)
     {
-        case SSF_STR_CASE_LOWER:
-            while (cstrOutLen > 0)
-            {
-                *cstrOut = SSFStrCharToLower(*cstrOut);
-                cstrOut++;
-                cstrOutLen--;
-            }
-            break;
-        case SSF_STR_CASE_UPPER:
-            while (cstrOutLen > 0)
-            {
-                *cstrOut = SSFStrCharToUpper(*cstrOut);
-                cstrOut++;
-                cstrOutLen--;
-            }
-            break;
-        default:
-            SSF_ERROR();
-            break;
+        *cstrOut = (toCase == SSF_STR_CASE_LOWER) ? SSFStrCharToLower(*cstrOut) :
+                                                    SSFStrCharToUpper(*cstrOut);
+        cstrOut++;
+        cstrOutLen--;
     }
 
     return true;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if substring found in cstr and matchStrOptOut set to start of match, else false.                                          */
+/* Returns true if substr found in cstr and matchStrOptOut set to match start, else false.       */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFStrStr(SSFCStrIn_t cstr, size_t cstrSize, SSFCStrIn_t *matchStrOptOut, SSFCStrIn_t substr,
                size_t substrSize)
@@ -227,9 +221,10 @@ bool SSFStrStr(SSFCStrIn_t cstr, size_t cstrSize, SSFCStrIn_t *matchStrOptOut, S
     ss = substr;
     sss = substrSize;
     cstrs = NULL;
-    while ((*cstr != 0) && (cstrSize > 0) && (*ss != 0) && (sss > 1))
+    /* Are cstr and substr both unfinished (each size checked before its byte is read)? */
+    while ((cstrSize > 0u) && (*cstr != 0) && (sss > 1u) && (*ss != 0))
     {
-        /* Character match? */
+        /* Yes, character match? */
         if (*cstr == *ss)
         {
             /* Start of new potential match? */
@@ -242,6 +237,7 @@ bool SSFStrStr(SSFCStrIn_t cstr, size_t cstrSize, SSFCStrIn_t *matchStrOptOut, S
             /* Yes, end of substr? */
             if (*(ss + 1) == 0)
             {
+                /* Yes, report the match start */
                 if (matchStrOptOut != NULL) *matchStrOptOut = cstr - (ss - substr);
                 return true;
             }
@@ -259,7 +255,14 @@ bool SSFStrStr(SSFCStrIn_t cstr, size_t cstrSize, SSFCStrIn_t *matchStrOptOut, S
                 cstr = cstrs;
                 cstrs = NULL;
             }
-            if (cstrSize <= 1) return false;
+            /* Is this the last byte of cstr? */
+            if (cstrSize <= 1u)
+            {
+                /* Yes, no match; clear the output as every false return does */
+                if (matchStrOptOut != NULL) *matchStrOptOut = NULL;
+                return false;
+            }
+            /* No */
         }
 
         /* Advance */
@@ -271,60 +274,84 @@ bool SSFStrStr(SSFCStrIn_t cstr, size_t cstrSize, SSFCStrIn_t *matchStrOptOut, S
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if delim found in cstr, else false. tokenStrLen >= 0 when tokenStr is set.       */
+/* Returns true and the next token (final one included) if it fits, else false, nothing used.    */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFStrTok(SSFCStrIn_t *cstr, size_t cstrSize, SSFCStrOut_t tokenStrOut, size_t tokenStrSize,
-               int32_t *tokenStrLen, SSFCStrIn_t delims, size_t delimsSize)
+bool SSFStrTok(SSFCStrIn_t *cstr, size_t *cstrSizeInOut, SSFCStrOut_t tokenStrOut,
+               size_t tokenStrSize, size_t *tokenStrLenOutOpt, SSFCStrIn_t delims,
+               size_t delimsSize)
 {
     SSFCStrIn_t cs;
     SSFCStrIn_t dlms;
+    size_t remaining;
     size_t dlmss;
-    bool retVal = false;
+    size_t tokLen;
+    bool delimFound = false;
 
     SSF_REQUIRE(cstr != NULL);
     SSF_REQUIRE(*cstr != NULL);
+    SSF_REQUIRE(cstrSizeInOut != NULL);
     SSF_REQUIRE(tokenStrOut != NULL);
-    SSF_REQUIRE(tokenStrLen != NULL);
+    SSF_REQUIRE(tokenStrSize > 0u);
     SSF_REQUIRE(delims != NULL);
 
-    /* Iterate over cstr */
-    cs = *cstr;
-    while ((cstrSize > 0) && (*cs != 0))
+    /* On false the token is empty and nothing is consumed */
+    tokenStrOut[0] = 0;
+    if (tokenStrLenOutOpt != NULL) *tokenStrLenOutOpt = 0;
+
+    /* Is there input left within the remaining size? */
+    if ((*cstrSizeInOut == 0u) || (**cstr == 0))
     {
-        /* Iterate over delims */
+        /* No, end of input */
+        return false;
+    }
+    /* Yes, scan to a delimiter, the NUL, or the end of the remaining size */
+    cs = *cstr;
+    remaining = *cstrSizeInOut;
+    /* Is there input left and no delimiter found yet? */
+    while ((remaining > 0u) && (*cs != 0) && (!delimFound))
+    {
+        /* Yes, check this char against each delimiter */
         dlms = delims;
         dlmss = delimsSize;
-        while ((dlmss > 0) && (*dlms != 0))
+        /* Are there delimiters left to check and none matched yet? */
+        while ((dlmss > 0u) && (*dlms != 0) && (!delimFound))
         {
-            /* Delim match? */
-            if (*cs == *dlms)
-            {
-                /* Yes, return token */
-                retVal = true;
-                goto tokDone;
-            }
+            /* Yes, check the next one */
+            delimFound = (*cs == *dlms);
             dlms++;
             dlmss--;
         }
-        cs++;
-        cstrSize--;
+        /* Is this character part of the token? */
+        if (!delimFound)
+        {
+            /* Yes */
+            cs++;
+            remaining--;
+        }
+        /* No, it is the delimiter that ends the token */
     }
+    tokLen = (size_t)(cs - *cstr);
 
-tokDone:
-    /* Enough room to copy token? */
-    if ((size_t)((cs - (*cstr)) + 1) <= tokenStrSize)
+    /* Does the token and its terminator fit? */
+    if (tokLen >= tokenStrSize)
     {
-        /* Yes, copy into token buffer */
-        *tokenStrLen = (int32_t) (cs - (*cstr));
-        memcpy(tokenStrOut, *cstr, (size_t)*tokenStrLen);
-        tokenStrOut[*tokenStrLen] = 0;
+        /* No, return false without consuming it so the caller can retry with more room */
+        return false;
     }
-    /* No, tokenStr not set */
-    else *tokenStrLen = -1;
+    /* Yes */
+    memcpy(tokenStrOut, *cstr, tokLen);
+    tokenStrOut[tokLen] = 0;
+    if (tokenStrLenOutOpt != NULL) *tokenStrLenOutOpt = tokLen;
 
-    /* Set next token  */
-    if (retVal) *cstr = cs + 1;
-    else *cstr = cs;
-
-    return retVal;
+    /* Did a delimiter end the token? */
+    if (delimFound)
+    {
+        /* Yes, consume it too */
+        cs++;
+        remaining--;
+    }
+    /* No, the final token ended at the NUL or the end of the size */
+    *cstr = cs;
+    *cstrSizeInOut = remaining;
+    return true;
 }

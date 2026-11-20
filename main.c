@@ -52,6 +52,7 @@
 #include "ssfport.h"
 #include "ssfjson.h"
 #include "ssfbase64.h"
+#include "ssfbase64url.h"
 #include "ssfhex.h"
 #include "ssffcsum.h"
 #include "ssfrs.h"
@@ -61,9 +62,11 @@
 #include "ssfsha2.h"
 #include "ssfbn.h"
 #include "ssfchacha20.h"
+#include "ssfcms.h"
 #include "ssfpoly1305.h"
 #include "ssfx25519.h"
 #include "ssfed25519.h"
+#include "ssffe25519.h"
 #include "ssfaesccm.h"
 #include "ssfaesctr.h"
 #include "ssfcrypt.h"
@@ -82,6 +85,8 @@
 #include "ssfini.h"
 #include "ssfubjson.h"
 #include "ssfasn1.h"
+#include "ssfmatch.h"
+#include "ssfx509.h"
 #include "ssfdtime.h"
 #include "ssfrtc.h"
 #include "ssfiso8601.h"
@@ -126,6 +131,9 @@ SSFUnitTest_t unitTests[] =
 #if SSF_CONFIG_CHACHA20_UNIT_TEST == 1
     { "ssfchacha20", "ChaCha20 Stream Cipher", SSFChaCha20UnitTest },
 #endif /* SSF_CONFIG_CHACHA20_UNIT_TEST */
+#if SSF_CONFIG_CMS_UNIT_TEST == 1
+    { "ssfcms", "CMS SignedData Verifier", SSFCMSUnitTest },
+#endif /* SSF_CONFIG_CMS_UNIT_TEST */
 #if SSF_CONFIG_POLY1305_UNIT_TEST == 1
     { "ssfpoly1305", "Poly1305 MAC", SSFPoly1305UnitTest },
 #endif /* SSF_CONFIG_POLY1305_UNIT_TEST */
@@ -135,6 +143,9 @@ SSFUnitTest_t unitTests[] =
 #if SSF_CONFIG_ED25519_UNIT_TEST == 1
     { "ssfed25519", "Ed25519 Sign/Verify", SSFEd25519UnitTest },
 #endif /* SSF_CONFIG_ED25519_UNIT_TEST */
+#if SSF_CONFIG_FE25519_UNIT_TEST == 1
+    { "ssffe25519", "GF(2^255-19) Field Arithmetic", SSFFE25519UnitTest },
+#endif /* SSF_CONFIG_FE25519_UNIT_TEST */
 #if SSF_CONFIG_AESCCM_UNIT_TEST == 1
     { "ssfaesccm", "AES-CCM Authenticated Cipher", SSFAESCCMUnitTest },
 #endif /* SSF_CONFIG_AESCCM_UNIT_TEST */
@@ -186,6 +197,9 @@ SSFUnitTest_t unitTests[] =
 #if SSF_CONFIG_BASE64_UNIT_TEST == 1
     { "ssfbase64", "Base64 Codec", SSFBase64UnitTest },
 #endif /* SSF_CONFIG_BASE64_UNIT_TEST */
+#if SSF_CONFIG_BASE64URL_UNIT_TEST == 1
+    { "ssfbase64url", "Base64URL Codec", SSFBase64URLUnitTest },
+#endif /* SSF_CONFIG_BASE64URL_UNIT_TEST */
 #if SSF_CONFIG_DEC_UNIT_TEST == 1
     { "ssfdec", "Decimal String Codec", SSFDecUnitTest },
 #endif /* SSF_CONFIG_DEC_UNIT_TEST */
@@ -201,6 +215,9 @@ SSFUnitTest_t unitTests[] =
 #if SSF_CONFIG_JSON_UNIT_TEST == 1
     { "ssfjson", "JSON Codec", SSFJsonUnitTest },
 #endif /* SSF_CONFIG_JSON_UNIT_TEST */
+#if SSF_CONFIG_MATCH_UNIT_TEST == 1
+    { "ssfmatch", "Pattern Matching", SSFMatchUnitTest },
+#endif /* SSF_CONFIG_MATCH_UNIT_TEST */
 #if SSF_CONFIG_STR_UNIT_TEST == 1
     { "ssfstr", "Safe C Strings", SSFStrUnitTest },
 #endif /* SSF_CONFIG_STR_UNIT_TEST */
@@ -213,6 +230,9 @@ SSFUnitTest_t unitTests[] =
 #if SSF_CONFIG_ASN1_UNIT_TEST == 1
     { "ssfasn1", "ASN.1 DER Codec", SSFASN1UnitTest },
 #endif /* SSF_CONFIG_ASN1_UNIT_TEST */
+#if SSF_CONFIG_X509_UNIT_TEST == 1
+    { "ssfx509", "X.509 Certificate Codec", SSFX509UnitTest },
+#endif /* SSF_CONFIG_X509_UNIT_TEST */
 
     /* _ecc */
 #if SSF_CONFIG_RS_UNIT_TEST == 1

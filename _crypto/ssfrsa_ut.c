@@ -33,10 +33,7 @@
 #include "ssfrsa.h"
 #include "ssfsha2.h"
 
-/* Cross-check the SSFRSA implementation against OpenSSL. Same gating pattern as every other   */
-/* _ut.c file: SSF_CONFIG_HAVE_OPENSSL drives whether the libcrypto path is compiled in. The   */
-/* host ninja files default it to 1 and link -lcrypto; cross-test envs (e.g. tools/cross-test/ */
-/* targets/mipsel.env) pass -DSSF_CONFIG_HAVE_OPENSSL=0 so the headers aren't required.        */
+/* Cross-check against OpenSSL when SSF_CONFIG_HAVE_OPENSSL is 1 (host builds link -lcrypto). */
 #if (SSF_CONFIG_HAVE_OPENSSL == 1) && (SSF_CONFIG_RSA_UNIT_TEST == 1)
 #define SSF_RSA_OSSL_VERIFY 1
 #else
@@ -44,9 +41,7 @@
 #endif
 
 #if SSF_RSA_OSSL_VERIFY == 1
-/* d2i_RSAPrivateKey / d2i_RSAPublicKey are the natural decoders for our PKCS#1 RSAPrivateKey / */
-/* RSAPublicKey output. They are flagged "low-level" (deprecated) in OpenSSL 3.x but still ship */
-/* and still return a usable RSA pointer -- we silence the warning only inside this test file.  */
+/* d2i_RSA*Key are deprecated in OpenSSL 3.x but still work; silence the warning here only. */
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #include <openssl/rsa.h>
@@ -59,24 +54,15 @@
 
 #if SSF_CONFIG_RSA_UNIT_TEST == 1
 
+/* The helpers below serve the RSA tests only, which need at least one key size */
+#if SSF_RSA_ANY_ENABLED == 1
+
 /* --------------------------------------------------------------------------------------------- */
-/* Hygiene test scaffolding: stack-residue scan.                                                 */
-/*                                                                                               */
-/* The pollute / scan / target helpers all run with `noinline` so each gets its own stack frame  */
-/* allocated below their common parent. A frame size of 16 KiB exceeds the worst-case stack      */
-/* footprint of SSFRSAKeyGen and the sign paths, so a sentinel laid down by the polluter and     */
-/* then partially overwritten by a target call is fully visible to the scanner -- the scanner's  */
-/* uninitialised local sits at the same stack region the previous callee just freed.             */
-/*                                                                                               */
-/* The scan looks for an exact byte-pattern needle. We use the top bytes of `p` extracted from   */
-/* the just-emitted private-key DER: those bytes equal the top bytes of `pm1 = p - 1` (which     */
-/* differs from p only in the lowest limb), so a 16-byte scan catches a non-zeroized pm1 sitting */
-/* in `_SSFRSAKeyGenDerive`'s freed frame. Pre-hygiene-fix the scan finds 1+ hits; post-fix 0.   */
+/* Hygiene test scaffolding: noinline 16 KiB pollute/scan frames that overlay a freed frame.     */
 /* --------------------------------------------------------------------------------------------- */
 #define _SSFRSA_UT_HYGIENE_PROBE_BYTES (16u * 1024u)
 
-/* Suppress C6262 (large stack frame). The pollute/scan probe pair intentionally allocates a   */
-/* 16 KiB stack buffer to overlay the freed callee frame from the function under test.         */
+/* Suppress C6262 (large stack frame): the probe buffer intentionally overlays a freed frame. */
 #ifdef _WIN32
 #pragma warning(push)
 #pragma warning(disable:6262)
@@ -92,8 +78,7 @@ static void _SSFRSAUTPolluteStack(uint8_t v)
 #pragma warning(pop)
 #endif
 
-/* Reading uninitialized stack is the test -- silence GCC/clang's -Wuninitialized and MSVC      */
-/* /analyze's C6001 for this body.                                                              */
+/* Reading uninitialized stack is the test: silence -Wuninitialized and MSVC C6001 here. */
 #if defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wuninitialized"
@@ -111,7 +96,8 @@ static int _SSFRSAUTScanStack(const uint8_t *needle, size_t needleLen)
 {
     volatile uint8_t buf[_SSFRSA_UT_HYGIENE_PROBE_BYTES];
     int found = 0;
-    size_t i, j;
+    size_t i;
+    size_t j;
 
     /* Read residue without writing first -- buf was just allocated atop the freed callee frame. */
     for (i = 0u; (i + needleLen) <= sizeof(buf); i++)
@@ -134,49 +120,33 @@ static int _SSFRSAUTScanStack(const uint8_t *needle, size_t needleLen)
 #pragma GCC diagnostic pop
 #endif
 
-/* Locate the start of p's magnitude bytes inside an emitted PKCS#1 RSAPrivateKey for a 2048-bit */
-/* key. Layout:                                                                                  */
-/*   [0..3]   outer SEQUENCE header                                                              */
-/*   [4..6]   version (3 bytes)                                                                  */
-/*   [7..267] n INTEGER (tag + 0x82 long-form len + 0x00 sign + 256 magnitude)                   */
-/*   [268..]  e INTEGER (5 bytes for e=65537)                                                    */
-/*   [273..]  d INTEGER (variable length)                                                        */
-/*   then     p INTEGER (tag 0x02, len 0x81 LL, optional 0x00 sign, magnitude)                   */
+/* Returns a pointer to p's magnitude in an emitted 2048-bit PKCS#1 RSAPrivateKey, else NULL. */
 static const uint8_t *_SSFRSAUTLocatePMag(const uint8_t *priv, size_t privLen)
 {
     const uint8_t *cur;
-    size_t dHeader, dMag;
+    size_t dHeader;
+    size_t dMag;
 
     if (privLen < 268u) return NULL;
-    cur = priv + 273u;                          /* d INTEGER tag */
+    cur = priv + 273u; /* d INTEGER tag */
     if (cur[0] != 0x02u) return NULL;
     if (cur[1] == 0x82u)      { dHeader = 4u; dMag = ((size_t)cur[2] << 8) | cur[3]; }
     else if (cur[1] == 0x81u) { dHeader = 3u; dMag = cur[2]; }
     else                      { dHeader = 2u; dMag = cur[1]; }
-    cur += dHeader + dMag;                      /* now at p INTEGER */
+    cur += dHeader + dMag; /* now at p INTEGER */
     if (cur[0] != 0x02u) return NULL;
     if (cur[1] == 0x81u) cur += 3u;
     else                 cur += 2u;
-    if (cur[0] == 0x00u) cur++;                 /* skip strict-DER sign byte */
+    if (cur[0] == 0x00u) cur++; /* skip strict-DER sign byte */
     return cur;
 }
 
 #if SSF_RSA_OSSL_VERIFY == 1
 /* --------------------------------------------------------------------------------------------- */
-/* OpenSSL cross-check helpers and driver.                                                       */
-/*                                                                                               */
-/* Coverage:                                                                                     */
-/*   1. SSFRSAKeyGen DER must be parseable by OpenSSL (validates strict-DER compliance and the   */
-/*      n=p*q / dp / dq / qInv consistency that OpenSSL itself checks during EVP_PKEY load).     */
-/*   2. PKCS#1 v1.5: SSF-sign vs. OpenSSL-sign must produce the same byte-exact signature for    */
-/*      the same (key, hash, message) -- PKCS#1 v1.5 is deterministic.                           */
-/*   3. PKCS#1 v1.5: SSFRSAVerifyPKCS1 accepts an OpenSSL-produced signature.                    */
-/*   4. PSS: SSFRSAVerifyPSS accepts an OpenSSL-produced signature with sLen=hLen MGF1=H.        */
-/*   5. PSS: OpenSSL accepts an SSF-produced signature.                                          */
-/*   6. Above runs across hash sizes (SHA-256/384/512) appropriate to each modulus size.         */
+/* OpenSSL cross-check helpers and driver (keygen DER, PKCS#1 v1.5 and PSS interop).             */
 /* --------------------------------------------------------------------------------------------- */
 
-/* Decode an SSF-emitted PKCS#1 RSAPrivateKey DER into an EVP_PKEY suitable for OpenSSL ops.    */
+/* Decode an SSF-emitted PKCS#1 RSAPrivateKey DER into an EVP_PKEY suitable for OpenSSL ops. */
 static EVP_PKEY *_OSSLLoadPrivKey(const uint8_t *der, size_t derLen)
 {
     const uint8_t *p = der;
@@ -250,11 +220,13 @@ static bool _OSSLVerifyPSS(EVP_PKEY *pkey, const EVP_MD *md, int saltLen,
     EVP_PKEY_CTX *pctx = NULL;
     bool ok = false;
     if (ctx == NULL) return false;
-    if (EVP_DigestVerifyInit(ctx, &pctx, md, NULL, pkey) == 1 &&
-        EVP_PKEY_CTX_set_rsa_padding(pctx, RSA_PKCS1_PSS_PADDING) > 0 &&
-        EVP_PKEY_CTX_set_rsa_pss_saltlen(pctx, saltLen) > 0 &&
-        EVP_PKEY_CTX_set_rsa_mgf1_md(pctx, md) > 0)
+    /* Is the PSS verify context set up? */
+    if ((EVP_DigestVerifyInit(ctx, &pctx, md, NULL, pkey) == 1) &&
+        (EVP_PKEY_CTX_set_rsa_padding(pctx, RSA_PKCS1_PSS_PADDING) > 0) &&
+        (EVP_PKEY_CTX_set_rsa_pss_saltlen(pctx, saltLen) > 0) &&
+        (EVP_PKEY_CTX_set_rsa_mgf1_md(pctx, md) > 0))
     {
+        /* Yes, verify the signature */
         if (EVP_DigestVerify(ctx, sig, sigLen, msg, msgLen) == 1) ok = true;
     }
     EVP_MD_CTX_free(ctx);
@@ -269,11 +241,13 @@ static bool _OSSLSignPSS(EVP_PKEY *pkey, const EVP_MD *md, int saltLen,
     EVP_PKEY_CTX *pctx = NULL;
     bool ok = false;
     if (ctx == NULL) return false;
-    if (EVP_DigestSignInit(ctx, &pctx, md, NULL, pkey) == 1 &&
-        EVP_PKEY_CTX_set_rsa_padding(pctx, RSA_PKCS1_PSS_PADDING) > 0 &&
-        EVP_PKEY_CTX_set_rsa_pss_saltlen(pctx, saltLen) > 0 &&
-        EVP_PKEY_CTX_set_rsa_mgf1_md(pctx, md) > 0)
+    /* Is the PSS sign context set up? */
+    if ((EVP_DigestSignInit(ctx, &pctx, md, NULL, pkey) == 1) &&
+        (EVP_PKEY_CTX_set_rsa_padding(pctx, RSA_PKCS1_PSS_PADDING) > 0) &&
+        (EVP_PKEY_CTX_set_rsa_pss_saltlen(pctx, saltLen) > 0) &&
+        (EVP_PKEY_CTX_set_rsa_mgf1_md(pctx, md) > 0))
     {
+        /* Yes, make the signature */
         if (EVP_DigestSign(ctx, sig, sigLen, msg, msgLen) == 1) ok = true;
     }
     EVP_MD_CTX_free(ctx);
@@ -290,7 +264,8 @@ static void _SSFRSAVerifyHashAtKey(const uint8_t *priv, size_t privLen,
     uint8_t hashVal[64];
     uint8_t sigSSF[SSF_RSA_MAX_SIG_SIZE];
     uint8_t sigOSSL[SSF_RSA_MAX_SIG_SIZE];
-    size_t sigSSFLen, sigOSSLLen;
+    size_t sigSSFLen;
+    size_t sigOSSLLen;
 
     SSF_ASSERT(hLen <= sizeof(hashVal));
 
@@ -303,8 +278,7 @@ static void _SSFRSAVerifyHashAtKey(const uint8_t *priv, size_t privLen,
     default: SSF_ASSERT(false); return;
     }
 
-    /* ---- PKCS#1 v1.5 round-trip ------------------------------------------------------ */
-    /* SSF sign, OpenSSL verify. */
+    /* ---- PKCS#1 v1.5 round-trip: SSF sign, OpenSSL verify ---- */
     SSF_ASSERT(SSFRSASignPKCS1(priv, privLen, ssfHash, hashVal, hLen,
                                sigSSF, sizeof(sigSSF), &sigSSFLen) == true);
     SSF_ASSERT(_OSSLVerifyPKCS1(pkeyPub, md, msg, msgLen, sigSSF, sigSSFLen));
@@ -317,23 +291,21 @@ static void _SSFRSAVerifyHashAtKey(const uint8_t *priv, size_t privLen,
     SSF_ASSERT(SSFRSAVerifyPKCS1(pub, pubLen, ssfHash, hashVal, hLen,
                                  sigOSSL, sigOSSLLen) == true);
 
-    /* ---- PSS round-trip --------------------------------------------------------------- */
-    /* PSS is randomized, so byte match is impossible -- only cross-verify both directions. */
+    /* ---- PSS round-trip: randomized, so only cross-verify both directions ---- */
     SSF_ASSERT(SSFRSASignPSS(priv, privLen, ssfHash, hashVal, hLen,
                              sigSSF, sizeof(sigSSF), &sigSSFLen) == true);
     SSF_ASSERT(_OSSLVerifyPSS(pkeyPub, md, (int)hLen, msg, msgLen, sigSSF, sigSSFLen));
 
     sigOSSLLen = sizeof(sigOSSL);
     SSF_ASSERT(_OSSLSignPSS(pkey, md, (int)hLen, msg, msgLen, sigOSSL, &sigOSSLLen));
-    SSF_ASSERT(SSFRSAVerifyPSS(pub, pubLen, ssfHash, hashVal, hLen,
+    SSF_ASSERT(SSFRSAVerifyPSS(pub, pubLen, ssfHash, hashVal, hLen, hLen,
                                sigOSSL, sigOSSLLen) == true);
 
-    /* Tampered-signature negative: flip a byte in the OpenSSL signature; both verifiers   */
-    /* must reject. Catches accidental bypasses on either side.                             */
+    /* Tampered-signature negative: flip a byte; both verifiers must reject. */
     sigOSSL[sigOSSLLen / 2u] ^= 0x01u;
     SSF_ASSERT(_OSSLVerifyPSS(pkeyPub, md, (int)hLen, msg, msgLen,
                               sigOSSL, sigOSSLLen) == false);
-    SSF_ASSERT(SSFRSAVerifyPSS(pub, pubLen, ssfHash, hashVal, hLen,
+    SSF_ASSERT(SSFRSAVerifyPSS(pub, pubLen, ssfHash, hashVal, hLen, hLen,
                                sigOSSL, sigOSSLLen) == false);
 }
 
@@ -347,20 +319,17 @@ static void _SSFRSACrossCheckAtSize(uint16_t bits,
     static const uint8_t msg[] = "ssfrsa OpenSSL cross-check message";
     uint8_t priv[SSF_RSA_MAX_PRIV_KEY_DER_SIZE];
     uint8_t pub[SSF_RSA_MAX_PUB_KEY_DER_SIZE];
-    size_t privLen, pubLen;
+    size_t privLen;
+    size_t pubLen;
     EVP_PKEY *pkey = NULL;
     EVP_PKEY *pkeyPub = NULL;
     size_t i;
 
-    /* Generate a fresh key with SSF. The DER bytes are then handed to OpenSSL -- if OpenSSL   */
-    /* can decode the PKCS#1 RSAPrivateKey blob, our strict-DER encoding plus n=p*q / CRT       */
-    /* consistency is correct (OpenSSL re-derives and checks these on load).                    */
+    /* Generate with SSF; OpenSSL loading the DER checks strict DER and the n=p*q / CRT values. */
     SSF_ASSERT(SSFRSAKeyGen(bits, priv, sizeof(priv), &privLen,
                              pub, sizeof(pub), &pubLen) == true);
 
-    /* Both validators must accept a freshly generated key at every enabled bit length. The   */
-    /* non-2048 sizes (3072, 4096) reach _SSFRSAValidatePubFields' size-match arms only via   */
-    /* this path -- the dedicated 2048 keygen test above doesn't run at those sizes.          */
+    /* Both validators accept a fresh key at every size (the only 3072 / 4096 coverage). */
     SSF_ASSERT(SSFRSAPubKeyIsValid(pub, pubLen) == true);
     SSF_ASSERT(SSFRSAPrivKeyIsValid(priv, privLen) == true);
 
@@ -382,8 +351,7 @@ static void _SSFRSACrossCheckAtSize(uint16_t bits,
     EVP_PKEY_free(pkeyPub);
 }
 
-/* Additional cross-check using the openssl-generated foreignPriv / foreignPub fixtures        */
-/* embedded earlier in this file: PSS sign with OpenSSL on the foreign key, verify with SSF.   */
+/* PSS sign with OpenSSL on the foreign key fixtures, verify with SSF. */
 static void _SSFRSACrossCheckForeignPSS(const uint8_t *foreignPriv, size_t foreignPrivLen,
                                         const uint8_t *foreignPub,  size_t foreignPubLen)
 {
@@ -399,11 +367,12 @@ static void _SSFRSACrossCheckForeignPSS(const uint8_t *foreignPriv, size_t forei
 
     SSFSHA256(msg, sizeof(msg) - 1u, hashVal, sizeof(hashVal));
 
-    /* OpenSSL signs PSS-SHA256 with sLen=32, MGF1=SHA256 -- same profile SSF emits.           */
+    /* OpenSSL signs PSS-SHA256 with sLen=32, MGF1=SHA256 -- same profile SSF emits. */
     SSF_ASSERT(_OSSLSignPSS(pkey, EVP_sha256(), 32, msg, sizeof(msg) - 1u,
                             sigOSSL, &sigOSSLLen));
     SSF_ASSERT(SSFRSAVerifyPSS(foreignPub, foreignPubLen, SSF_RSA_HASH_SHA256,
-                               hashVal, sizeof(hashVal), sigOSSL, sigOSSLLen) == true);
+                               hashVal, sizeof(hashVal), sizeof(hashVal),
+                               sigOSSL, sigOSSLLen) == true);
 
     EVP_PKEY_free(pkey);
     EVP_PKEY_free(pkeyPub);
@@ -417,10 +386,7 @@ static const EVP_MD *_OSSLSha512(void) { return EVP_sha512(); }
 static void _SSFRSAVerifyAgainstOpenSSL(const uint8_t *foreignPriv, size_t foreignPrivLen,
                                         const uint8_t *foreignPub,  size_t foreignPubLen)
 {
-    /* Hash menus per NIST SP 800-57 Sec. 5.6.2 (security-strength matching with key size). Each */
-    /* enabled size runs end-to-end provided SSF_BN_CONFIG_MAX_BITS is at least twice the       */
-    /* largest enabled modulus (the CRT recombine and ModInvExt over lambda(n) feed a full nxn  */
-    /* product into SSFBNMul -- see ssfrsa.h compile-time gates).                                */
+    /* Hash menus per NIST SP 800-57 Sec. 5.6.2 (security strength matched to key size). */
 #if SSF_RSA_CONFIG_ENABLE_2048 == 1
     static const SSFRSAHash_t h2048[] = { SSF_RSA_HASH_SHA256 };
     static const size_t       l2048[] = { 32u };
@@ -434,7 +400,8 @@ static void _SSFRSAVerifyAgainstOpenSSL(const uint8_t *foreignPriv, size_t forei
 #endif
 
 #if SSF_RSA_CONFIG_ENABLE_4096 == 1
-    static const SSFRSAHash_t h4096[] = { SSF_RSA_HASH_SHA256, SSF_RSA_HASH_SHA384, SSF_RSA_HASH_SHA512 };
+    static const SSFRSAHash_t h4096[] = { SSF_RSA_HASH_SHA256, SSF_RSA_HASH_SHA384,
+                                          SSF_RSA_HASH_SHA512 };
     static const size_t       l4096[] = { 32u, 48u, 64u };
     static const EVP_MD *(*const m4096[])(void) = { _OSSLSha256, _OSSLSha384, _OSSLSha512 };
 #endif
@@ -461,7 +428,8 @@ static void _SSFRSAVerifyAgainstOpenSSL(const uint8_t *foreignPriv, size_t forei
 #endif
 
 #if SSF_RSA_CONFIG_ENABLE_4096 == 1
-    SSF_UT_PRINTF("  RSA-4096 keygen + PKCS1v15(byte-match) + PSS(round-trip) @ SHA-256/384/512... ");
+    SSF_UT_PRINTF("  RSA-4096 keygen + PKCS1v15(byte-match) + PSS(round-trip) @ "
+                  "SHA-256/384/512... ");
     fflush(stdout);
     _SSFRSACrossCheckAtSize(4096u, h4096, l4096, m4096, sizeof(h4096) / sizeof(h4096[0]));
     SSF_UT_PRINTF("OK\n");
@@ -470,18 +438,17 @@ static void _SSFRSAVerifyAgainstOpenSSL(const uint8_t *foreignPriv, size_t forei
     SSF_UT_PRINTF("--- end OpenSSL cross-check ---\n");
 }
 
-#pragma GCC diagnostic pop  /* -Wdeprecated-declarations restored */
+#pragma GCC diagnostic pop /* -Wdeprecated-declarations restored */
 #endif /* SSF_RSA_OSSL_VERIFY */
 
-/* Suppress C6262 (large stack frame). This unit-test entry point intentionally allocates many */
-/* RSA-sized buffers across its sub-test blocks; the host test environment has ample stack.    */
+/* Suppress C6262 (large stack frame): the test entry point holds many RSA-sized buffers. */
 #ifdef _WIN32
 #pragma warning(push)
 #pragma warning(disable:6262)
 #endif
-#if (SSF_RSA_CONFIG_ENABLE_KEYGEN == 1) && (SSF_RSA_CONFIG_ENABLE_2048 == 1)
-/* Audit captured by the RSA private-op blinding hook: confirms message + exponent blinding is    */
-/* actually engaged and self-consistent (see the blinding test in SSFRSAUnitTest).                */
+#if (SSF_RSA_CONFIG_ENABLE_KEYGEN == 1) && (SSF_RSA_CONFIG_ENABLE_2048 == 1) && \
+    (SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1)
+/* State captured by the RSA private-op blinding hook (see the blinding test below). */
 typedef struct
 {
     bool fired;
@@ -500,30 +467,226 @@ static void _SSFRSABlindHook(void *ctx, const SSFBN_t *r, const SSFBN_t *rInv,
 
     a->fired = true;
     a->rInRange = (SSFBNIsZero(r) == false) && (SSFBNCmp(r, n) < 0);
-    SSFBNModMul(&chk, r, rInv, n);                     /* r * rInv mod n must be 1 */
+    SSFBNModMul(&chk, r, rInv, n); /* r * rInv mod n must be 1 */
     a->rInvOk = (SSFBNCmpUint32(&chk, 1u) == 0);
-    a->baseBlinded = (SSFBNCmp(cBlind, cIn) != 0);     /* the base was actually blinded */
+    a->baseBlinded = (SSFBNCmp(cBlind, cIn) != 0); /* the base was actually blinded */
     a->expBlindsNZ = (SSFBNIsZero(expBlindP) == false) && (SSFBNIsZero(expBlindQ) == false);
     SSFBNZeroize(&chk);
 }
-#endif /* SSF_RSA_CONFIG_ENABLE_KEYGEN && SSF_RSA_CONFIG_ENABLE_2048 */
+#endif /* SSF_RSA_CONFIG_ENABLE_KEYGEN && SSF_RSA_CONFIG_ENABLE_2048 && PKCS1_V15 */
+
+#if (SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1) && (SSF_RSA_CONFIG_ENABLE_2048 == 1) && \
+    (SSF_RSA_CONFIG_ENABLE_PSS == 1)
+/* RSA-2048 RSAPublicKey (270 bytes) for an OpenSSL PSS SHA-256 saltLength 20 signature. */
+static const uint8_t _pssSalt20Pub[] = {
+    0x30, 0x82, 0x01, 0x0a, 0x02, 0x82, 0x01, 0x01, 0x00, 0xcd, 0x6a, 0xff,
+    0x4d, 0x7c, 0xba, 0xe3, 0x6e, 0xb0, 0xf1, 0xb0, 0x40, 0xc2, 0xfa, 0xcb,
+    0xc8, 0x5a, 0xdb, 0xe0, 0xa3, 0x35, 0xea, 0x27, 0xa9, 0xc9, 0x1d, 0x57,
+    0xed, 0x6c, 0x6d, 0x0a, 0xfa, 0xff, 0x7d, 0xe3, 0x72, 0x72, 0xeb, 0x85,
+    0xa5, 0x21, 0xa0, 0xea, 0xc1, 0x13, 0x33, 0x84, 0x23, 0xda, 0xd0, 0x9e,
+    0xb2, 0x1b, 0x46, 0x13, 0xd8, 0x84, 0x26, 0xab, 0x0d, 0x5b, 0xa4, 0x4b,
+    0x4f, 0x8d, 0xc9, 0x02, 0x51, 0x6c, 0x0b, 0xf9, 0xad, 0x46, 0x97, 0x22,
+    0x1e, 0x61, 0x14, 0x03, 0x3a, 0x3d, 0xb9, 0x54, 0x61, 0xe4, 0x8f, 0xff,
+    0x47, 0x1d, 0x84, 0x5d, 0x90, 0xe1, 0x45, 0xa9, 0x58, 0xea, 0xcf, 0xbe,
+    0x2c, 0x67, 0x91, 0x33, 0x10, 0x56, 0xa0, 0xd3, 0x89, 0x0d, 0x69, 0x95,
+    0xff, 0xe3, 0x40, 0x61, 0x6d, 0xf5, 0xd8, 0x59, 0xcb, 0x6f, 0xd6, 0xbe,
+    0xd6, 0x41, 0x35, 0xf1, 0x0e, 0x52, 0x97, 0xc4, 0x4d, 0x8f, 0xa0, 0x0c,
+    0xcd, 0xdf, 0xd8, 0x09, 0x08, 0x32, 0xdb, 0xfc, 0xfd, 0xfa, 0x52, 0x49,
+    0x70, 0xf0, 0xc3, 0xdc, 0xe5, 0xf0, 0x98, 0x95, 0x4f, 0x66, 0x64, 0xa8,
+    0x10, 0xcc, 0xb4, 0xf1, 0xae, 0x13, 0x31, 0x8e, 0x13, 0xd6, 0x15, 0xe3,
+    0x33, 0x18, 0xc4, 0xb5, 0x85, 0x1d, 0x51, 0x00, 0xe0, 0x5a, 0xc8, 0xfb,
+    0x5c, 0xf9, 0xfb, 0x6f, 0x60, 0x19, 0xa0, 0x23, 0xc7, 0x68, 0xbf, 0x7b,
+    0xe9, 0x7a, 0xdf, 0xb1, 0x6d, 0x27, 0x29, 0xa0, 0xfa, 0x4b, 0x91, 0x1f,
+    0x55, 0x90, 0xb8, 0x03, 0x1d, 0x3a, 0x62, 0xaa, 0x3d, 0xac, 0x60, 0x38,
+    0x6d, 0xa0, 0x61, 0x03, 0xc2, 0x4d, 0x17, 0x5e, 0x34, 0x45, 0xaa, 0xc1,
+    0x49, 0x21, 0x50, 0x53, 0x81, 0x8d, 0xf1, 0x94, 0x58, 0xcf, 0x2c, 0xb6,
+    0x64, 0x34, 0xd8, 0x1d, 0x79, 0x27, 0x2a, 0x90, 0x6d, 0xfd, 0xf6, 0x08,
+    0x97, 0x02, 0x03, 0x01, 0x00, 0x01
+};
+
+/* SHA-256 of the signed message */
+static const uint8_t _pssSalt20Hash[] = {
+    0x0e, 0xba, 0x02, 0xdb, 0x5d, 0x99, 0xfa, 0xe8, 0xf9, 0x73, 0xd1, 0x53,
+    0xd0, 0x26, 0xce, 0x89, 0xcf, 0x2a, 0x67, 0x00, 0xce, 0xd8, 0x36, 0x81,
+    0xb8, 0x00, 0xaf, 0x72, 0xf9, 0x79, 0xc7, 0xdc
+};
+
+/* RSASSA-PSS signature, saltLength 20, 256 bytes */
+static const uint8_t _pssSalt20Sig[] = {
+    0x87, 0xdf, 0x9e, 0x18, 0xcc, 0x8f, 0x69, 0x2f, 0x97, 0x14, 0x99, 0xb2,
+    0x28, 0xd6, 0x81, 0xe3, 0x3e, 0xce, 0xf4, 0x1c, 0x98, 0x79, 0x2a, 0xa6,
+    0x9e, 0x02, 0xd1, 0x56, 0xcd, 0x3f, 0x4e, 0x61, 0x94, 0xfb, 0x7b, 0x57,
+    0xc4, 0x2b, 0x17, 0xc8, 0xda, 0xf2, 0x9e, 0x2a, 0x83, 0xff, 0x61, 0x16,
+    0xe9, 0xfc, 0x85, 0x88, 0xc1, 0x35, 0x29, 0x83, 0x6f, 0xe0, 0xfd, 0xf8,
+    0x80, 0x5d, 0x33, 0xdf, 0xd8, 0x91, 0x70, 0xb2, 0x89, 0x62, 0x5a, 0xfb,
+    0x8e, 0x13, 0x2c, 0xb6, 0xee, 0x2a, 0x8c, 0x1a, 0xc7, 0xf3, 0x91, 0xf8,
+    0x7c, 0x92, 0x8f, 0x14, 0x6f, 0x9b, 0x6d, 0x64, 0xa8, 0xcd, 0x0c, 0x44,
+    0xba, 0x52, 0x85, 0x51, 0xb6, 0x83, 0xa3, 0x71, 0x89, 0x9a, 0x7b, 0xdb,
+    0x93, 0x12, 0xd1, 0x93, 0xbc, 0x44, 0xe3, 0x37, 0xeb, 0xde, 0xee, 0xb7,
+    0x9a, 0x43, 0x7b, 0x3c, 0x4e, 0xc3, 0x30, 0x34, 0xc3, 0xb6, 0x27, 0xd1,
+    0xa9, 0x56, 0xa3, 0xa1, 0xe3, 0x7f, 0x28, 0x1c, 0xcc, 0x86, 0x08, 0x85,
+    0x55, 0xbc, 0x83, 0x13, 0x8a, 0x18, 0x6d, 0x43, 0xbf, 0x3b, 0x0d, 0xd0,
+    0x2c, 0x3e, 0xa3, 0x1c, 0x6e, 0x07, 0x98, 0x35, 0xed, 0xa9, 0x5f, 0xba,
+    0x75, 0x23, 0xbd, 0xc9, 0x0d, 0xd8, 0xc6, 0x10, 0x1d, 0xb5, 0x44, 0x98,
+    0x20, 0xf7, 0x30, 0x13, 0x7b, 0x46, 0xee, 0x49, 0xc7, 0xc4, 0x7b, 0xcb,
+    0x2a, 0x83, 0x6e, 0x3d, 0x9b, 0xe0, 0xa3, 0x67, 0xb0, 0xef, 0x94, 0x7c,
+    0xdf, 0x98, 0x15, 0x5c, 0x6b, 0xc1, 0x29, 0x67, 0xb4, 0x79, 0x2d, 0xb9,
+    0xfc, 0xe2, 0x74, 0xdf, 0x70, 0x22, 0x7e, 0x8d, 0x71, 0xcf, 0xa4, 0xdb,
+    0xb7, 0xdc, 0xff, 0xee, 0x66, 0x78, 0x85, 0x39, 0x2c, 0xfe, 0x4c, 0x46,
+    0xef, 0x32, 0x85, 0x55, 0x6d, 0x26, 0x2b, 0xa3, 0xfc, 0xab, 0xd2, 0xef,
+    0x0e, 0x89, 0xd0, 0x7e
+};
+#endif /* PKCS1_V15 && 2048 && PSS */
+
+/* --------------------------------------------------------------------------------------------- */
+/* UT helper: emit a DER INTEGER of mag magnitude bytes (msb, 0xFF fill, lsb) at der[*pos].      */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFRSAUTPutIntTLV(uint8_t *der, uint32_t *pos, uint32_t mag, uint8_t msb,
+                               uint8_t lsb)
+{
+    uint32_t i;
+    uint32_t len = mag;
+
+    SSF_REQUIRE(der != NULL);
+    SSF_REQUIRE(pos != NULL);
+    SSF_REQUIRE(mag >= 2u);
+
+    /* Is the magnitude's top bit set? */
+    if ((msb & 0x80u) != 0u)
+    {
+        /* Yes, DER needs a leading 0x00 so the INTEGER stays positive. */
+        len++;
+    }
+    der[(*pos)++] = 0x02u;
+    der[(*pos)++] = 0x82u;
+    der[(*pos)++] = (uint8_t)(len >> 8);
+    der[(*pos)++] = (uint8_t)(len & 0xFFu);
+    if ((msb & 0x80u) != 0u) { der[(*pos)++] = 0x00u; }
+    der[(*pos)++] = msb;
+    for (i = 1u; i < (mag - 1u); i++) { der[(*pos)++] = 0xFFu; }
+    der[(*pos)++] = lsb;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* UT helper: close a hand-built SEQUENCE whose 0x30 0x82 hi lo header starts at der[0].         */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFRSAUTCloseSeq(uint8_t *der, uint32_t pos)
+{
+    uint32_t content;
+
+    SSF_REQUIRE(der != NULL);
+    SSF_REQUIRE(pos >= 4u);
+
+    content = pos - 4u;
+    der[0] = 0x30u;
+    der[1] = 0x82u;
+    der[2] = (uint8_t)(content >> 8);
+    der[3] = (uint8_t)(content & 0xFFu);
+}
+
+#if (SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1) && (SSF_RSA_CONFIG_ENABLE_2048 == 1)
+/* --------------------------------------------------------------------------------------------- */
+/* UT helper: add 1 to the last byte of INTEGER number idx in a DER SEQUENCE (AUDIT RSA-12).     */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFRSAUTBumpInt(uint8_t *der, size_t derLen, uint8_t idx)
+{
+    size_t pos;
+    size_t len;
+    uint8_t i;
+    uint8_t k;
+
+    SSF_REQUIRE(der != NULL);
+    SSF_REQUIRE(derLen > 4u);
+    SSF_REQUIRE(der[0] == 0x30u);
+
+    pos = ((der[1] & 0x80u) != 0u) ? (2u + (size_t)(der[1] & 0x7Fu)) : 2u;
+    for (i = 0; ; i++)
+    {
+        SSF_REQUIRE((pos + 2u) < derLen);
+        SSF_REQUIRE(der[pos] == 0x02u);
+        pos++;
+        /* Is the length in long form? */
+        if ((der[pos] & 0x80u) != 0u)
+        {
+            /* Yes, read the k length bytes */
+            k = (uint8_t)(der[pos] & 0x7Fu);
+            pos++;
+            len = 0u;
+            while (k > 0u) { len = (len << 8) | der[pos]; pos++; k--; }
+        }
+        else
+        {
+            /* No, the byte is the length */
+            len = der[pos];
+            pos++;
+        }
+        SSF_REQUIRE((pos + len) <= derLen);
+        /* Is this the INTEGER to bump? */
+        if (i == idx)
+        {
+            /* Yes, increment its last byte (never 0xFF, so the length is unchanged) */
+            SSF_REQUIRE(der[(pos + len) - 1u] != 0xFFu);
+            der[(pos + len) - 1u]++;
+            return;
+        }
+        pos += len;
+    }
+}
+#endif /* PKCS1_V15 && 2048 */
+
+/* --------------------------------------------------------------------------------------------- */
+/* UT helper: append INTEGER of mag (< 127) bytes msb, 0xFF.., lsb in short-form DER (RSA-11).   */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFRSAUTPutShortIntTLV(uint8_t *der, uint32_t *pos, uint32_t mag, uint8_t msb,
+                                    uint8_t lsb)
+{
+    uint32_t i;
+
+    SSF_REQUIRE(der != NULL);
+    SSF_REQUIRE(pos != NULL);
+    SSF_REQUIRE(mag >= 2u);
+    SSF_REQUIRE(mag < 127u);
+    SSF_REQUIRE((msb & 0x80u) == 0u);
+
+    der[(*pos)++] = 0x02u;
+    der[(*pos)++] = (uint8_t)mag;
+    der[(*pos)++] = msb;
+    for (i = 1u; i < (mag - 1u); i++) { der[(*pos)++] = 0xFFu; }
+    der[(*pos)++] = lsb;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* AUDIT RSA-12: scrub-hook callback; counts calls and any buffer that is not all zero.          */
+/* --------------------------------------------------------------------------------------------- */
+static uint32_t _scrubCalls;
+static uint32_t _scrubDirty;
+static void _ScrubCheck(const void *buf, size_t len)
+{
+    const uint8_t *b = (const uint8_t *)buf;
+    size_t i;
+
+    SSF_ASSERT(buf != NULL);
+    _scrubCalls++;
+    for (i = 0; i < len; i++)
+    {
+        if (b[i] != 0u)
+        {
+            _scrubDirty++;
+            break;
+        }
+    }
+}
+#endif /* SSF_RSA_ANY_ENABLED == 1 */
 
 void SSFRSAUnitTest(void)
 {
 #if SSF_RSA_ANY_ENABLED == 0
-    /* No RSA size is enabled -- the rest of the body references SSFRSAKeyGen / SSFRSASignPKCS1 / */
-    /* etc., none of which are compiled. Print a clear "skipped" line and return so main.c's     */
-    /* test runner stays linkable for pure-ECC builds.                                            */
+    /* No RSA size is enabled: print "skipped" so main.c stays linkable for pure-ECC builds. */
     SSF_UT_PRINTF("(skipped: no SSF_RSA_CONFIG_ENABLE_2048 / 3072 / 4096 enabled)\n");
     return;
 #else
 
-    /* ---- (Hardening) DER public key with an oversized modulus is rejected, not a DoS halt ---- */
-    /* The decoder derives the BN limb count directly from the attacker-controlled DER INTEGER      */
-    /* length. A modulus magnitude wider than the largest supported BN would drive SSFBNFromBytes    */
-    /* into its `numLimbs <= SSF_BN_MAX_LIMBS` SSF_REQUIRE, halting the device. SSFRSAPubKeyIsValid   */
-    /* is handed untrusted DER, so this must return false gracefully. Build SEQUENCE { INTEGER n,     */
-    /* INTEGER e=65537 } with n's magnitude one+ limb past SSF_BN_MAX_BYTES.                          */
+    /* ---- (Hardening) DER pubkey with n wider than SSF_BN_MAX_BYTES returns false ---- */
     {
         static uint8_t der[SSF_BN_MAX_BYTES + 32u];
         const uint32_t nMag = (uint32_t)SSF_BN_MAX_BYTES + 8u; /* exceeds the max BN byte width */
@@ -531,23 +694,277 @@ void SSFRSAUnitTest(void)
         uint32_t p = 0u;
         uint32_t i;
 
-        der[p++] = 0x30u;                          /* SEQUENCE */
-        der[p++] = 0x82u;                          /* 2-byte long-form length */
+        der[p++] = 0x30u; /* SEQUENCE */
+        der[p++] = 0x82u; /* 2-byte long-form length */
         der[p++] = (uint8_t)(content >> 8);
         der[p++] = (uint8_t)(content & 0xFFu);
-        der[p++] = 0x02u;                          /* INTEGER n */
+        der[p++] = 0x02u; /* INTEGER n */
         der[p++] = 0x82u;
         der[p++] = (uint8_t)(nMag >> 8);
         der[p++] = (uint8_t)(nMag & 0xFFu);
-        der[p++] = 0x7Fu;                          /* MSB: nonzero + positive (no leading-zero trim) */
+        der[p++] = 0x7Fu; /* MSB: nonzero + positive (no leading-zero trim) */
         for (i = 1u; i < nMag; i++) { der[p++] = 0xFFu; }
-        der[p++] = 0x02u;                          /* INTEGER e = 65537 */
+        der[p++] = 0x02u; /* INTEGER e = 65537 */
         der[p++] = 0x03u;
         der[p++] = 0x01u; der[p++] = 0x00u; der[p++] = 0x01u;
 
         SSF_ASSERT((size_t)p <= sizeof(der));
         SSF_ASSERT(SSFRSAPubKeyIsValid(der, (size_t)p) == false);
     }
+
+    /* ---- AUDIT RSA-12: KeyGen wipes the private-key DER scratch buffer ---- */
+#if (SSF_RSA_CONFIG_ENABLE_KEYGEN == 1) && (SSF_RSA_CONFIG_ENABLE_2048 == 1)
+    {
+        static uint8_t privDer[SSF_RSA_MAX_PRIV_KEY_DER_SIZE];
+        static uint8_t pubDer[SSF_RSA_MAX_PUB_KEY_DER_SIZE];
+        size_t privLen;
+        size_t pubLen;
+
+        _scrubCalls = 0u;
+        _scrubDirty = 0u;
+        _SSFRSAScrubTestHook = _ScrubCheck;
+        SSF_ASSERT(SSFRSAKeyGen(2048u, privDer, sizeof(privDer), &privLen, pubDer, sizeof(pubDer),
+                                &pubLen) == true);
+        _SSFRSAScrubTestHook = NULL;
+        SSF_ASSERT(_scrubCalls == 1u);
+        SSF_ASSERT(_scrubDirty == 0u);
+        SSF_ASSERT(SSFRSAPrivKeyIsValid(privDer, privLen) == true);
+    }
+#endif /* SSF_RSA_CONFIG_ENABLE_KEYGEN && SSF_RSA_CONFIG_ENABLE_2048 */
+
+    /* ---- AUDIT RSA-11: CRT primes narrower than half the modulus are refused, not trapped ---- */
+#if SSF_RSA_CONFIG_ENABLE_2048 == 1
+    {
+        static uint8_t der[4u + 3u + (3u * 260u) + (5u * 20u)];
+        static uint8_t sig[SSF_RSA_MAX_KEY_BYTES];
+        uint8_t hash[32];
+        size_t sigLen = 0u;
+        uint32_t p = 4u;
+        uint32_t i;
+
+        memset(hash, 0x5A, sizeof(hash));
+        der[p++] = 0x02u; der[p++] = 0x01u; der[p++] = 0x00u;
+        _SSFRSAUTPutIntTLV(der, &p, 256u, 0xC5u, 0x01u);
+        _SSFRSAUTPutShortIntTLV(der, &p, 3u, 0x01u, 0x01u);
+        _SSFRSAUTPutIntTLV(der, &p, 256u, 0x41u, 0x01u);
+        for (i = 0; i < 5u; i++) { _SSFRSAUTPutShortIntTLV(der, &p, 16u, 0x41u, 0x03u); }
+        _SSFRSAUTCloseSeq(der, p);
+        SSF_ASSERT((size_t)p <= sizeof(der));
+
+        SSF_ASSERT(SSFRSAPrivKeyIsValid(der, (size_t)p) == false);
+#if SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1
+        SSF_ASSERT(SSFRSASignPKCS1(der, (size_t)p, SSF_RSA_HASH_SHA256, hash, sizeof(hash),
+                                   sig, sizeof(sig), &sigLen) == false);
+#endif /* SSF_RSA_CONFIG_ENABLE_PKCS1_V15 */
+#if SSF_RSA_CONFIG_ENABLE_PSS == 1
+        SSF_ASSERT(SSFRSASignPSS(der, (size_t)p, SSF_RSA_HASH_SHA256, hash, sizeof(hash),
+                                 sig, sizeof(sig), &sigLen) == false);
+#endif /* SSF_RSA_CONFIG_ENABLE_PSS */
+    }
+#endif /* SSF_RSA_CONFIG_ENABLE_2048 */
+
+    /* ---- AUDIT RSA-6: PSS verify checks the byte dropped when bitLen(n) = 1 mod 8 ---- */
+#if (SSF_RSA_CONFIG_ENABLE_PSS == 1) && (SSF_RSA_MAX_KEY_BYTES >= 257u)
+    {
+        static const uint8_t rsa6Pub[270] = {
+            0x30u, 0x82u, 0x01u, 0x0Au, 0x02u, 0x82u, 0x01u, 0x01u, 0x01u, 0x31u, 0xEBu, 0x6Eu,
+            0x93u, 0xE4u, 0x64u, 0xC0u, 0x9Du, 0x3Bu, 0xE0u, 0x23u, 0xBCu, 0x17u, 0x58u, 0xD0u,
+            0xCAu, 0xF7u, 0x7Fu, 0x5Eu, 0xFBu, 0x24u, 0x04u, 0xD8u, 0x41u, 0x7Cu, 0xF3u, 0xD1u,
+            0x84u, 0x12u, 0x39u, 0x45u, 0x20u, 0x52u, 0x3Du, 0xAFu, 0x3Au, 0x3Eu, 0xD1u, 0xDDu,
+            0xD0u, 0x37u, 0xA2u, 0xE2u, 0x84u, 0x85u, 0x49u, 0x51u, 0x94u, 0xEAu, 0x0Eu, 0x41u,
+            0xDFu, 0xA3u, 0xE5u, 0x83u, 0x5Au, 0x14u, 0xD1u, 0xF8u, 0xA9u, 0x10u, 0x5Du, 0xB6u,
+            0x98u, 0xAAu, 0x05u, 0xD8u, 0xC0u, 0xDDu, 0x0Au, 0x0Eu, 0x5Au, 0x9Eu, 0xE9u, 0x77u,
+            0x78u, 0x8Bu, 0x12u, 0x6Au, 0xE4u, 0x36u, 0x6Bu, 0xC9u, 0x20u, 0x70u, 0x0Cu, 0x71u,
+            0x00u, 0x97u, 0x22u, 0xDCu, 0x75u, 0x7Cu, 0x3Bu, 0x93u, 0x93u, 0xB4u, 0x47u, 0xD1u,
+            0x1Cu, 0xFDu, 0x88u, 0x55u, 0x74u, 0x24u, 0xA7u, 0x8Bu, 0xEDu, 0xDCu, 0xB7u, 0xF2u,
+            0xCBu, 0xF4u, 0xE3u, 0xA7u, 0x6Au, 0x7Eu, 0x64u, 0x58u, 0x8Fu, 0x8Eu, 0x14u, 0x20u,
+            0xFEu, 0xAFu, 0x0Du, 0xA2u, 0xC7u, 0x8Bu, 0xBEu, 0x5Bu, 0xE9u, 0x45u, 0xA8u, 0xBEu,
+            0x61u, 0xABu, 0x2Fu, 0x27u, 0xB6u, 0xD0u, 0xEEu, 0xEDu, 0xE6u, 0x4Eu, 0x70u, 0x4Eu,
+            0xDCu, 0x4Eu, 0x85u, 0x76u, 0xBDu, 0xC9u, 0x53u, 0x40u, 0x28u, 0xF8u, 0x9Eu, 0x8Cu,
+            0x33u, 0x36u, 0x0Du, 0x16u, 0xA6u, 0x31u, 0x29u, 0x3Cu, 0x30u, 0xB0u, 0xDDu, 0x93u,
+            0xB4u, 0xD6u, 0xC4u, 0xB2u, 0x7Fu, 0x69u, 0x47u, 0x6Eu, 0x83u, 0x80u, 0xCFu, 0xDCu,
+            0x84u, 0xC7u, 0x50u, 0x27u, 0xD1u, 0x0Fu, 0xD2u, 0x32u, 0x1Du, 0xC2u, 0x5Au, 0xE4u,
+            0xACu, 0x29u, 0x48u, 0xC7u, 0x0Du, 0xD5u, 0x49u, 0x59u, 0x9Cu, 0x5Bu, 0x3Eu, 0x15u,
+            0xC6u, 0xC9u, 0x23u, 0x0Eu, 0xC6u, 0x80u, 0x98u, 0xEFu, 0x84u, 0x29u, 0xEFu, 0x68u,
+            0xE2u, 0x3Bu, 0xC7u, 0x3Eu, 0x00u, 0x2Eu, 0xD5u, 0x27u, 0x22u, 0x6Bu, 0xE5u, 0xAFu,
+            0xC1u, 0xD8u, 0x11u, 0xC7u, 0x79u, 0x50u, 0x39u, 0x45u, 0x08u, 0xDAu, 0xF6u, 0x0Du,
+            0xD9u, 0x4Du, 0x5Du, 0x1Du, 0x7Cu, 0x0Du, 0xACu, 0xE4u, 0x78u, 0x57u, 0xF7u, 0xB0u,
+            0xB9u, 0x02u, 0x03u, 0x01u, 0x00u, 0x01u
+        };
+        static const uint8_t rsa6Hash[32] = {
+            0xA0u, 0xA1u, 0xA2u, 0xA3u, 0xA4u, 0xA5u, 0xA6u, 0xA7u, 0xA8u, 0xA9u, 0xAAu, 0xABu,
+            0xACu, 0xADu, 0xAEu, 0xAFu, 0xB0u, 0xB1u, 0xB2u, 0xB3u, 0xB4u, 0xB5u, 0xB6u, 0xB7u,
+            0xB8u, 0xB9u, 0xBAu, 0xBBu, 0xBCu, 0xBDu, 0xBEu, 0xBFu
+        };
+        /* Vectors from a Python RSA/PSS model; OpenSSL verifies SigGood and rejects SigHigh */
+        static const uint8_t rsa6SigGood[257] = {
+            0x00u, 0xA4u, 0x8Eu, 0xA9u, 0xABu, 0x6Eu, 0xAEu, 0xF3u, 0x15u, 0x38u, 0xE4u, 0x51u,
+            0xADu, 0xB0u, 0x7Cu, 0x64u, 0xD2u, 0x4Bu, 0x68u, 0xFBu, 0xDCu, 0x09u, 0xE3u, 0x00u,
+            0x74u, 0xC8u, 0x39u, 0xF0u, 0x92u, 0x17u, 0x06u, 0xA1u, 0x2Eu, 0xD7u, 0xACu, 0x25u,
+            0xB4u, 0xEEu, 0xDDu, 0x7Eu, 0x56u, 0xB2u, 0x05u, 0x45u, 0x08u, 0xD9u, 0x73u, 0xFEu,
+            0xF9u, 0x7Du, 0x22u, 0x4Du, 0xB7u, 0x7Eu, 0xE4u, 0x4Bu, 0x30u, 0x81u, 0x43u, 0xC8u,
+            0xD8u, 0xF7u, 0x69u, 0x53u, 0xBFu, 0xF0u, 0x3Du, 0x66u, 0x34u, 0x1Cu, 0x5Cu, 0x0Bu,
+            0x32u, 0xD9u, 0xBDu, 0x7Au, 0xB1u, 0x7Du, 0x12u, 0x99u, 0xECu, 0xEDu, 0x88u, 0x8Du,
+            0x33u, 0x09u, 0x0Cu, 0x86u, 0x46u, 0xD0u, 0x09u, 0x79u, 0x3Bu, 0x12u, 0xFDu, 0x65u,
+            0x24u, 0x10u, 0x60u, 0x8Au, 0xDAu, 0x4Au, 0x9Fu, 0xB2u, 0xD2u, 0xDDu, 0x50u, 0x38u,
+            0xB4u, 0xF3u, 0xFDu, 0x09u, 0xE3u, 0xECu, 0x58u, 0xE0u, 0xFEu, 0x28u, 0x2Fu, 0xDFu,
+            0x37u, 0xB9u, 0x9Bu, 0xF8u, 0xD0u, 0xDAu, 0x40u, 0x28u, 0xC9u, 0x70u, 0xD6u, 0xB1u,
+            0x44u, 0x68u, 0x0Cu, 0xD3u, 0xB3u, 0xFFu, 0x42u, 0x79u, 0x1Fu, 0x5Au, 0xA9u, 0x5Au,
+            0x40u, 0x65u, 0xBBu, 0x9Cu, 0xB2u, 0x56u, 0x30u, 0xB2u, 0xF1u, 0x42u, 0x9Bu, 0xF7u,
+            0xDFu, 0x9Eu, 0x8Eu, 0xC1u, 0xB8u, 0xE0u, 0x13u, 0x35u, 0x42u, 0xBDu, 0xE1u, 0x43u,
+            0x54u, 0xF2u, 0x6Fu, 0x5Du, 0x49u, 0x7Cu, 0x31u, 0x49u, 0x19u, 0xFFu, 0x48u, 0x46u,
+            0xA6u, 0x2Fu, 0x33u, 0xFFu, 0xABu, 0x2Bu, 0x38u, 0xB5u, 0xF8u, 0xABu, 0x81u, 0x5Bu,
+            0x3Bu, 0xBCu, 0x5Du, 0x14u, 0xFDu, 0xAEu, 0x16u, 0xC6u, 0x5Fu, 0x48u, 0xBFu, 0xFFu,
+            0x38u, 0x78u, 0xB3u, 0x74u, 0x46u, 0xADu, 0x8Cu, 0x01u, 0x1Fu, 0xD4u, 0x51u, 0xDBu,
+            0xEDu, 0x92u, 0x5Fu, 0xC0u, 0xEEu, 0xFAu, 0x42u, 0x10u, 0x6Eu, 0x3Eu, 0xCAu, 0xD4u,
+            0x9Eu, 0x43u, 0x2Bu, 0x8Fu, 0xBAu, 0xB0u, 0x3Au, 0x4Au, 0x1Cu, 0xEAu, 0x9Eu, 0x5Eu,
+            0x40u, 0x16u, 0x15u, 0xD6u, 0xBBu, 0x88u, 0x00u, 0xBEu, 0xC5u, 0x11u, 0xCCu, 0xA1u,
+            0x0Fu, 0x88u, 0x70u, 0x5Eu, 0x40u
+        };
+        static const uint8_t rsa6SigHigh[257] = {
+            0x00u, 0x56u, 0xB5u, 0xB1u, 0x34u, 0x77u, 0x81u, 0xEEu, 0x76u, 0x51u, 0x68u, 0x99u,
+            0x3Au, 0xEDu, 0x0Cu, 0x8Bu, 0x5Fu, 0x7Eu, 0x37u, 0xC4u, 0x8Fu, 0x05u, 0xA1u, 0xF6u,
+            0xCBu, 0x99u, 0x35u, 0x1Eu, 0x52u, 0xCFu, 0xE6u, 0xC5u, 0x39u, 0x75u, 0x64u, 0x6Fu,
+            0xDFu, 0x77u, 0x69u, 0x9Cu, 0x8Bu, 0x70u, 0x6Bu, 0x1Eu, 0x6Bu, 0x40u, 0xD0u, 0x12u,
+            0x6Bu, 0xEDu, 0x3Eu, 0xD8u, 0x51u, 0xA5u, 0x75u, 0x63u, 0x28u, 0x0Cu, 0xBBu, 0x58u,
+            0x94u, 0x8Du, 0x07u, 0x67u, 0xADu, 0xCAu, 0x4Fu, 0xB9u, 0x1Bu, 0xFDu, 0x09u, 0xB7u,
+            0xC4u, 0x35u, 0x6Au, 0x4Fu, 0x86u, 0x3Du, 0x5Du, 0xDCu, 0xDAu, 0x25u, 0xF9u, 0xA1u,
+            0x03u, 0xCBu, 0xD1u, 0x00u, 0x87u, 0xFFu, 0x8Eu, 0x43u, 0x52u, 0x95u, 0xFFu, 0x5Bu,
+            0x1Cu, 0x72u, 0x7Eu, 0xF7u, 0xF4u, 0x91u, 0x29u, 0x92u, 0x95u, 0x2Du, 0x47u, 0x5Fu,
+            0x86u, 0x3Cu, 0x1Fu, 0x86u, 0x53u, 0x5Au, 0x5Cu, 0x11u, 0x19u, 0x73u, 0xBCu, 0x38u,
+            0x59u, 0x44u, 0x02u, 0x8Bu, 0xDDu, 0x7Bu, 0x5Fu, 0xAAu, 0x4Bu, 0xB4u, 0x02u, 0xDFu,
+            0x6Bu, 0x6Fu, 0xA0u, 0x5Cu, 0x58u, 0x81u, 0xB4u, 0xDCu, 0x84u, 0x4Au, 0xC6u, 0xA2u,
+            0x92u, 0xD2u, 0xB0u, 0xE8u, 0x8Bu, 0x3Du, 0x70u, 0xA9u, 0xE7u, 0x1Au, 0xF1u, 0x87u,
+            0x7Eu, 0xDDu, 0x13u, 0x47u, 0xD6u, 0xFDu, 0xC5u, 0x3Fu, 0xB9u, 0x71u, 0x60u, 0x1Du,
+            0x19u, 0x14u, 0x7Fu, 0xE6u, 0x3Du, 0x0Du, 0xFAu, 0xCBu, 0x22u, 0x04u, 0xE4u, 0x80u,
+            0x83u, 0x23u, 0xB0u, 0xCDu, 0x6Eu, 0x98u, 0x39u, 0xAEu, 0x33u, 0x45u, 0xBFu, 0x53u,
+            0x14u, 0x27u, 0x23u, 0xCAu, 0xCDu, 0xBBu, 0x55u, 0x60u, 0xD6u, 0xC1u, 0xB5u, 0x34u,
+            0xA2u, 0xD0u, 0x2Du, 0xB2u, 0x01u, 0x46u, 0x49u, 0xF2u, 0x7Bu, 0xD2u, 0x48u, 0xD9u,
+            0xB5u, 0x99u, 0xFEu, 0x51u, 0xB0u, 0x28u, 0x26u, 0xF0u, 0x93u, 0xA9u, 0x74u, 0xC7u,
+            0x03u, 0xADu, 0x13u, 0x21u, 0x36u, 0xFCu, 0xEDu, 0xEAu, 0x24u, 0x08u, 0xEDu, 0x9Bu,
+            0x41u, 0x0Eu, 0x6Fu, 0x1Bu, 0xB2u, 0x81u, 0x75u, 0x4Bu, 0x40u, 0xCDu, 0x79u, 0x21u,
+            0xD5u, 0x72u, 0x53u, 0x9Bu, 0x0Bu
+        };
+
+        SSF_ASSERT(SSFRSAVerifyPSS(rsa6Pub, sizeof(rsa6Pub), SSF_RSA_HASH_SHA256, rsa6Hash,
+                                   sizeof(rsa6Hash), 32u, rsa6SigGood,
+                                   sizeof(rsa6SigGood)) == true);
+        SSF_ASSERT(SSFRSAVerifyPSS(rsa6Pub, sizeof(rsa6Pub), SSF_RSA_HASH_SHA256, rsa6Hash,
+                                   sizeof(rsa6Hash), 32u, rsa6SigHigh,
+                                   sizeof(rsa6SigHigh)) == false);
+    }
+#endif /* SSF_RSA_CONFIG_ENABLE_PSS && SSF_RSA_MAX_KEY_BYTES >= 257 */
+
+    /* ---- (Hardening, AUDIT RSA-1/RSA-2/RSA-3/RSA-4) decoders bound every RSA integer ---- */
+#if (SSF_RSA_MAX_KEY_BYTES + 16u) <= SSF_BN_MAX_BYTES
+    {
+        static uint8_t der[SSF_RSA_MAX_KEY_BYTES + 64u];
+        static uint8_t sig[SSF_RSA_MAX_KEY_BYTES + 16u];
+        uint8_t hash[32];
+        const uint32_t nMag = (uint32_t)SSF_RSA_MAX_KEY_BYTES + 16u;
+        uint32_t p = 4u;
+
+        memset(hash, 0xA5, sizeof(hash));
+        memset(sig, 0x01, sizeof(sig));
+        sig[0] = 0x00u; /* s < n */
+
+        /* Odd modulus 16 bytes above the configured maximum; e = 65537. */
+        _SSFRSAUTPutIntTLV(der, &p, nMag, 0x7Fu, 0xFFu);
+        _SSFRSAUTPutIntTLV(der, &p, 3u, 0x01u, 0x01u);
+        _SSFRSAUTCloseSeq(der, p);
+        SSF_ASSERT((size_t)p <= sizeof(der));
+
+        SSF_ASSERT(SSFRSAPubKeyIsValid(der, (size_t)p) == false);
+#if SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1
+        SSF_ASSERT(SSFRSAVerifyPKCS1(der, (size_t)p, SSF_RSA_HASH_SHA256, hash, sizeof(hash),
+                                     sig, (size_t)nMag) == false);
+#endif /* SSF_RSA_CONFIG_ENABLE_PKCS1_V15 */
+#if SSF_RSA_CONFIG_ENABLE_PSS == 1
+        SSF_ASSERT(SSFRSAVerifyPSS(der, (size_t)p, SSF_RSA_HASH_SHA256, hash, sizeof(hash),
+                                   sizeof(hash), sig, (size_t)nMag) == false);
+#endif /* SSF_RSA_CONFIG_ENABLE_PSS */
+    }
+
+    {
+        static uint8_t der[SSF_RSA_MAX_KEY_BYTES + 64u];
+        static uint8_t sig[SSF_RSA_MAX_KEY_BYTES];
+        uint8_t hash[32];
+        const uint32_t nMag = (uint32_t)SSF_RSA_MAX_KEY_BYTES;
+        uint32_t p = 4u;
+
+        memset(hash, 0xA5, sizeof(hash));
+        memset(sig, 0x01, sizeof(sig));
+        sig[0] = 0x00u; /* s < n */
+
+        /* Even modulus of exactly the maximum size; e = 65537. */
+        _SSFRSAUTPutIntTLV(der, &p, nMag, 0xFFu, 0xFEu);
+        _SSFRSAUTPutIntTLV(der, &p, 3u, 0x01u, 0x01u);
+        _SSFRSAUTCloseSeq(der, p);
+        SSF_ASSERT((size_t)p <= sizeof(der));
+
+        SSF_ASSERT(SSFRSAPubKeyIsValid(der, (size_t)p) == false);
+#if SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1
+        SSF_ASSERT(SSFRSAVerifyPKCS1(der, (size_t)p, SSF_RSA_HASH_SHA256, hash, sizeof(hash),
+                                     sig, (size_t)nMag) == false);
+#endif /* SSF_RSA_CONFIG_ENABLE_PKCS1_V15 */
+#if SSF_RSA_CONFIG_ENABLE_PSS == 1
+        SSF_ASSERT(SSFRSAVerifyPSS(der, (size_t)p, SSF_RSA_HASH_SHA256, hash, sizeof(hash),
+                                   sizeof(hash), sig, (size_t)nMag) == false);
+#endif /* SSF_RSA_CONFIG_ENABLE_PSS */
+    }
+
+    {
+        /* Private key whose modulus is 16 bytes above the configured maximum (RSA-4). */
+        static uint8_t der[(3u * (SSF_RSA_MAX_KEY_BYTES + 32u)) + (5u * (SSF_RSA_MAX_KEY_BYTES)) +
+                           64u];
+        static uint8_t sig[SSF_RSA_MAX_KEY_BYTES + 16u];
+        uint8_t hash[32];
+        const uint32_t nMag = (uint32_t)SSF_RSA_MAX_KEY_BYTES + 16u;
+        const uint32_t hMag = nMag / 2u;
+        size_t sigLen = 0u;
+        uint32_t p = 4u;
+        uint32_t i;
+
+        memset(hash, 0xA5, sizeof(hash));
+
+        der[p++] = 0x02u; der[p++] = 0x01u; der[p++] = 0x00u; /* version 0 */
+        _SSFRSAUTPutIntTLV(der, &p, nMag, 0x7Fu, 0xFFu);     /* n (odd) */
+        _SSFRSAUTPutIntTLV(der, &p, 3u, 0x01u, 0x01u);       /* e = 65537 */
+        _SSFRSAUTPutIntTLV(der, &p, nMag, 0x01u, 0xFFu);     /* d (odd) */
+        for (i = 0; i < 5u; i++) { _SSFRSAUTPutIntTLV(der, &p, hMag, 0x7Fu, 0xFFu); }
+        _SSFRSAUTCloseSeq(der, p);
+        SSF_ASSERT((size_t)p <= sizeof(der));
+
+        SSF_ASSERT(SSFRSAPrivKeyIsValid(der, (size_t)p) == false);
+#if SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1
+        SSF_ASSERT(SSFRSASignPKCS1(der, (size_t)p, SSF_RSA_HASH_SHA256, hash, sizeof(hash),
+                                   sig, sizeof(sig), &sigLen) == false);
+#endif /* SSF_RSA_CONFIG_ENABLE_PKCS1_V15 */
+#if SSF_RSA_CONFIG_ENABLE_PSS == 1
+        SSF_ASSERT(SSFRSASignPSS(der, (size_t)p, SSF_RSA_HASH_SHA256, hash, sizeof(hash),
+                                 sig, sizeof(sig), &sigLen) == false);
+#endif /* SSF_RSA_CONFIG_ENABLE_PSS */
+    }
+#endif /* (SSF_RSA_MAX_KEY_BYTES + 16u) <= SSF_BN_MAX_BYTES */
+
+#if SSF_RSA_CONFIG_ENABLE_2048 == 1
+    {
+        /* Valid-looking 2048-bit n and e with p and q each a full 1024 bytes wide (RSA-3). */
+        static uint8_t der[(3u * 300u) + (5u * 1040u) + 64u];
+        uint32_t p = 4u;
+        uint32_t i;
+
+        der[p++] = 0x02u; der[p++] = 0x01u; der[p++] = 0x00u; /* version 0 */
+        _SSFRSAUTPutIntTLV(der, &p, 256u, 0x80u, 0xFFu);     /* n: exactly 2048 bits, odd */
+        _SSFRSAUTPutIntTLV(der, &p, 3u, 0x01u, 0x01u);       /* e = 65537 */
+        _SSFRSAUTPutIntTLV(der, &p, 256u, 0x01u, 0xFFu);     /* d (odd) */
+        for (i = 0; i < 5u; i++) { _SSFRSAUTPutIntTLV(der, &p, 1024u, 0x7Fu, 0xFFu); }
+        _SSFRSAUTCloseSeq(der, p);
+        SSF_ASSERT((size_t)p <= sizeof(der));
+
+        SSF_ASSERT(SSFRSAPrivKeyIsValid(der, (size_t)p) == false);
+    }
+#endif /* SSF_RSA_CONFIG_ENABLE_2048 */
 
     /* ---- ssfbn enhancement: GCD ---- */
     {
@@ -581,8 +998,7 @@ void SSFRSAUnitTest(void)
         SSFBN_DEFINE(r, SSF_BN_MAX_LIMBS);
         SSFBN_DEFINE(check, SSF_BN_MAX_LIMBS);
 
-        /* 3^(-1) mod 10 = 7 (since 3*7 = 21 = 1 mod 10) */
-        /* 10 is composite, so Fermat's won't work but ExtGCD will */
+        /* 3^(-1) mod 10 = 7: composite modulus, so ExtGCD rather than Fermat */
         SSFBNSetUint32(&a, 3u, 4);
         SSFBNSetUint32(&m, 10u, 4);
         SSF_ASSERT(SSFBNModInvExt(&r, &a, &m) == true);
@@ -605,13 +1021,11 @@ void SSFRSAUnitTest(void)
 
     /* ---- RSA public key validation ---- */
     {
-        /* A valid-looking but minimal public key won't validate with real RSA */
-        /* but we can test that malformed DER is rejected */
+        /* Malformed DER is rejected */
         uint8_t badDer[] = { 0x30, 0x00 }; /* empty SEQUENCE */
         SSF_ASSERT(SSFRSAPubKeyIsValid(badDer, sizeof(badDer)) == false);
 
-        /* Reject: well-formed DER but n is tiny (8-bit). bitLen(n) << 2048, the floor for any  */
-        /* supported key size. The pre-fix validator only checked odd/>1 and accepted this.     */
+        /* Reject: well-formed DER but n is tiny (8-bit), far below any supported key size. */
         {
             static const uint8_t pubTinyN[] = {
                 0x30u, 0x08u,
@@ -623,11 +1037,8 @@ void SSFRSAUnitTest(void)
     }
 
     /* ---- All key-consuming public APIs reject malformed DER on the decode boundary ---- */
-    /* PubKeyIsValid above only exercises one call site of _SSFRSAPubKeyDecode. The decode-  */
-    /* failure branch at every other call site (PrivKeyIsValid, SignPKCS1, SignPSS,         */
-    /* VerifyPKCS1, VerifyPSS) needs its own test or stays uncovered.                       */
     {
-        static const uint8_t badDer[] = { 0x30u, 0x00u };  /* empty SEQUENCE -- parser bails */
+        static const uint8_t badDer[] = { 0x30u, 0x00u }; /* empty SEQUENCE -- parser bails */
         uint8_t hash[32];
         uint8_t sig[SSF_RSA_MAX_KEY_BYTES];
         size_t sigLen;
@@ -635,28 +1046,33 @@ void SSFRSAUnitTest(void)
         SSFSHA256((const uint8_t *)"sample", 6, hash, sizeof(hash));
 
         SSF_ASSERT(SSFRSAPrivKeyIsValid(badDer, sizeof(badDer)) == false);
+#if SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1
         SSF_ASSERT(SSFRSASignPKCS1(badDer, sizeof(badDer), SSF_RSA_HASH_SHA256,
                                    hash, sizeof(hash), sig, sizeof(sig), &sigLen) == false);
+#endif /* SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1 */
+#if SSF_RSA_CONFIG_ENABLE_PSS == 1
         SSF_ASSERT(SSFRSASignPSS(badDer, sizeof(badDer), SSF_RSA_HASH_SHA256,
                                  hash, sizeof(hash), sig, sizeof(sig), &sigLen) == false);
-        /* Verify-side: provide a same-length placeholder sig; the decode must bail before    */
-        /* any sig byte is read, so the sig contents are irrelevant.                            */
+#endif /* SSF_RSA_CONFIG_ENABLE_PSS == 1 */
+        /* Verify-side: decode bails before any sig byte is read, so sig contents don't matter */
         memset(sig, 0, 256);
+#if SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1
         SSF_ASSERT(SSFRSAVerifyPKCS1(badDer, sizeof(badDer), SSF_RSA_HASH_SHA256,
                                      hash, sizeof(hash), sig, 256) == false);
+#endif /* SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1 */
+#if SSF_RSA_CONFIG_ENABLE_PSS == 1
         SSF_ASSERT(SSFRSAVerifyPSS(badDer, sizeof(badDer), SSF_RSA_HASH_SHA256,
-                                   hash, sizeof(hash), sig, 256) == false);
+                                   hash, sizeof(hash), sizeof(hash), sig, 256) == false);
+#endif /* SSF_RSA_CONFIG_ENABLE_PSS == 1 */
     }
 
     /* ---- Sign / Verify reject signature-length and buffer-size mismatches ---- */
-    /* sig too small on the sign side, sig length wrong on the verify side, and sig integer  */
-    /* >= n on the verify side. These exercise three distinct early-return arms that the      */
-    /* happy-path round-trips never hit.                                                      */
     {
         uint8_t hash[32];
         uint8_t pubKeyDer[SSF_RSA_MAX_PUB_KEY_DER_SIZE];
         uint8_t privKeyDer[SSF_RSA_MAX_PRIV_KEY_DER_SIZE];
-        size_t pubKeyDerLen, privKeyDerLen;
+        size_t pubKeyDerLen;
+        size_t privKeyDerLen;
         uint8_t sig[SSF_RSA_MAX_KEY_BYTES];
         uint8_t sigFF[256];
         size_t sigLen;
@@ -668,43 +1084,60 @@ void SSFRSAUnitTest(void)
                                 pubKeyDer,  sizeof(pubKeyDer),  &pubKeyDerLen) == true);
 
         /* SignPKCS1 / SignPSS reject when the output buffer cannot hold a keyBytes-sized sig. */
+#if SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1
         SSF_ASSERT(SSFRSASignPKCS1(privKeyDer, privKeyDerLen, SSF_RSA_HASH_SHA256,
                                    hash, sizeof(hash), tinyBuf, sizeof(tinyBuf), &sigLen) == false);
+#endif /* SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1 */
+#if SSF_RSA_CONFIG_ENABLE_PSS == 1
         SSF_ASSERT(SSFRSASignPSS(privKeyDer, privKeyDerLen, SSF_RSA_HASH_SHA256,
                                  hash, sizeof(hash), tinyBuf, sizeof(tinyBuf), &sigLen) == false);
+#endif /* SSF_RSA_CONFIG_ENABLE_PSS == 1 */
 
         /* Produce one valid sig so we can mangle its length on the verify side. */
+#if SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1
         SSF_ASSERT(SSFRSASignPKCS1(privKeyDer, privKeyDerLen, SSF_RSA_HASH_SHA256,
                                    hash, sizeof(hash), sig, sizeof(sig), &sigLen) == true);
+#else
+        SSF_ASSERT(SSFRSASignPSS(privKeyDer, privKeyDerLen, SSF_RSA_HASH_SHA256,
+                                 hash, sizeof(hash), sig, sizeof(sig), &sigLen) == true);
+#endif /* SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1 */
 
         /* VerifyPKCS1 / VerifyPSS reject when sigLen != keyBytes (256 for RSA-2048). */
+#if SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1
         SSF_ASSERT(SSFRSAVerifyPKCS1(pubKeyDer, pubKeyDerLen, SSF_RSA_HASH_SHA256,
                                      hash, sizeof(hash), sig, sigLen - 1u) == false);
+#endif /* SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1 */
+#if SSF_RSA_CONFIG_ENABLE_PSS == 1
         SSF_ASSERT(SSFRSAVerifyPSS(pubKeyDer, pubKeyDerLen, SSF_RSA_HASH_SHA256,
-                                   hash, sizeof(hash), sig, sigLen - 1u) == false);
+                                   hash, sizeof(hash), sizeof(hash), sig, sigLen - 1u) == false);
+#endif /* SSF_RSA_CONFIG_ENABLE_PSS == 1 */
 
-        /* VerifyPKCS1 with sig as integer >= n: an all-0xFF 256-byte sig is 2^2048 - 1, which */
-        /* exceeds any 2048-bit modulus, so _SSFRSAPublicOp's `m >= n` arm rejects.            */
+        /* An all-0xFF 256-byte sig exceeds any 2048-bit n, so _SSFRSAPublicOp rejects m >= n */
         memset(sigFF, 0xFFu, sizeof(sigFF));
+#if SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1
         SSF_ASSERT(SSFRSAVerifyPKCS1(pubKeyDer, pubKeyDerLen, SSF_RSA_HASH_SHA256,
                                      hash, sizeof(hash), sigFF, sizeof(sigFF)) == false);
+#else
+        SSF_ASSERT(SSFRSAVerifyPSS(pubKeyDer, pubKeyDerLen, SSF_RSA_HASH_SHA256,
+                                   hash, sizeof(hash), sizeof(hash), sigFF, sizeof(sigFF)) ==
+                   false);
+#endif /* SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1 */
     }
 
-#if (SSF_RSA_CONFIG_ENABLE_KEYGEN == 1) && (SSF_RSA_CONFIG_ENABLE_2048 == 1)
+#if (SSF_RSA_CONFIG_ENABLE_KEYGEN == 1) && (SSF_RSA_CONFIG_ENABLE_2048 == 1) && \
+    (SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1)
     /* ---- (Hardening) RSA private op applies message + exponent blinding ---- */
-    /* Blinding is unblinded away, so it is invisible in the signature; capture it via the test     */
-    /* hook to confirm it is engaged and self-consistent (r in [1, n-1], r*rInv == 1 mod n, base     */
-    /* blinded so cB != c, non-zero exponent blinds), then confirm signing stays correct AND         */
-    /* deterministic (PKCS#1 v1.5) across many fresh random blinds.                                  */
     {
         _SSFRSABlindAudit_t audit;
         uint8_t hash[32];
         uint8_t privKeyDer[SSF_RSA_MAX_PRIV_KEY_DER_SIZE];
         uint8_t pubKeyDer[SSF_RSA_MAX_PUB_KEY_DER_SIZE];
-        size_t privLen, pubLen;
+        size_t privLen;
+        size_t pubLen;
         uint8_t sig[SSF_RSA_MAX_KEY_BYTES];
         uint8_t sig2[SSF_RSA_MAX_KEY_BYTES];
-        size_t sigLen, sig2Len;
+        size_t sigLen;
+        size_t sig2Len;
         int iter;
 
         SSFSHA256((const uint8_t *)"blind-me", 8, hash, sizeof(hash));
@@ -739,12 +1172,9 @@ void SSFRSAUnitTest(void)
                                          hash, sizeof(hash), sig2, sig2Len) == true);
         }
     }
-#endif /* SSF_RSA_CONFIG_ENABLE_KEYGEN && SSF_RSA_CONFIG_ENABLE_2048 */
+#endif /* SSF_RSA_CONFIG_ENABLE_KEYGEN && SSF_RSA_CONFIG_ENABLE_2048 && PKCS1_V15 */
 
-    /* ---- FIPS 186-4 Sec. B.3.3 step 5.4: |p - q| > 2^(halfBits - 100) ---- */
-    /* Defends against Fermat-style factorization of n when p and q happen to be very    */
-    /* close. The threshold is statistically irrelevant for random primes (failure is    */
-    /* ~2^-100), but the spec mandates the explicit guard.                                */
+    /* ---- FIPS 186-4 Sec. B.3.3 step 5.4: |p - q| > 2^(halfBits - 100) (anti-Fermat) ---- */
     {
         SSFBN_DEFINE(p, SSF_BN_MAX_LIMBS);
         SSFBN_DEFINE(q, SSF_BN_MAX_LIMBS);
@@ -767,9 +1197,7 @@ void SSFRSAUnitTest(void)
         SSF_ASSERT(SSFRSAFipsPrimeDistanceOK(&q, &p, 1024u) == true);
     }
 
-    /* ---- FIPS 186-4 Sec. B.3.1: d > 2^(nlen/2) ---- */
-    /* Defends against Wiener's continued-fraction attack on small d. With random         */
-    /* primes d is overwhelmingly large, but unlucky lambda(n) values can produce a small d.*/
+    /* ---- FIPS 186-4 Sec. B.3.1: d > 2^(nlen/2) (anti-Wiener) ---- */
     {
         SSFBN_DEFINE(d, SSF_BN_MAX_LIMBS);
 
@@ -793,10 +1221,7 @@ void SSFRSAUnitTest(void)
         SSF_ASSERT(SSFRSAFipsDLowerBoundOK(&d, 1024u) == true);
     }
 
-    /* ---- gcd(e, p-1) == 1 && gcd(e, q-1) == 1 ---- */
-    /* Required for d = e^(-1) mod lambda(n) to exist. Implicitly ensured by SSFBNModInvExt*/
-    /* failure today, but FIPS prefers an explicit pre-check on (p-1, q-1) so failures    */
-    /* abort early before the lcm/divide work, and so an imported key can be validated.   */
+    /* ---- gcd(e, p-1) == 1 && gcd(e, q-1) == 1 (d = e^(-1) mod lambda(n) exists) ---- */
     {
         SSFBN_DEFINE(e, SSF_BN_MAX_LIMBS);
         SSFBN_DEFINE(pm1, SSF_BN_MAX_LIMBS);
@@ -821,17 +1246,7 @@ void SSFRSAUnitTest(void)
     }
 
 #if (SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1) && (SSF_RSA_CONFIG_ENABLE_2048 == 1)
-    /* ---- DER interop with foreign-format PKCS#1 keys ----                                       */
-    /* Real RSA-2048 PKCS#1 RSAPrivateKey/RSAPublicKey/signature triple, generated by:             */
-    /*   printf 'interop test' > msg.bin                                                           */
-    /*   openssl genrsa -traditional 2048 | openssl rsa -traditional -outform DER > priv.der       */
-    /*   openssl rsa -in priv.der -inform DER -RSAPublicKey_out -outform DER > pub.der             */
-    /*   openssl dgst -sha256 -sign priv.der -keyform DER -out sig.bin msg.bin                     */
-    /* Each INTEGER field carries its standard 0x00 sign byte when the magnitude high bit is set,  */
-    /* the form every conforming PKCS#1 producer emits. The pre-fix decoder cannot read these.     */
-    /*                                                                                              */
-    /* Block requires ENABLE_2048: the fixture is a 2048-bit key, and SSFRSAPubKeyIsValid will     */
-    /* reject 2048-bit keys when ENABLE_2048 is off.                                                */
+    /* ---- DER interop: openssl genrsa -traditional 2048 key, dgst -sha256 sig of msg ---- */
     {
         static const uint8_t foreignPriv[] = {
             0x30, 0x82, 0x04, 0xa4, 0x02, 0x01, 0x00, 0x02, 0x82, 0x01, 0x01, 0x00,
@@ -991,64 +1406,76 @@ void SSFRSAUnitTest(void)
         /* Public-key validity check on a foreign-format DER must succeed. */
         SSF_ASSERT(SSFRSAPubKeyIsValid(foreignPub, sizeof(foreignPub)) == true);
 
-        /* Verify the openssl-produced PKCS#1 v1.5 signature with our verifier and
-         * the foreign-format public key. Exercises the public-key DER decoder against
-         * a real-world layout (with the standard 0x00 sign byte on n). */
+        /* Verify the openssl PKCS#1 v1.5 signature with the foreign-format public key. */
         SSFSHA256((const uint8_t *)"interop test", 12, hashVal, sizeof(hashVal));
         SSF_ASSERT(SSFRSAVerifyPKCS1(foreignPub, sizeof(foreignPub),
                    SSF_RSA_HASH_SHA256, hashVal, sizeof(hashVal),
                    foreignSig, sizeof(foreignSig)) == true);
 
-        /* Sign with the foreign-format private key, verify with the foreign-format
-         * public key. PKCS#1 v1.5 is deterministic, so the signature must match what
-         * openssl produced byte-for-byte -- pinning both the decoder *and* the math. */
+        /* Sign with the foreign private key: deterministic, so it must match openssl's sig. */
         SSF_ASSERT(SSFRSASignPKCS1(foreignPriv, sizeof(foreignPriv),
                    SSF_RSA_HASH_SHA256, hashVal, sizeof(hashVal),
                    sig, sizeof(sig), &sigLen) == true);
         SSF_ASSERT(sigLen == sizeof(foreignSig));
         SSF_ASSERT(memcmp(sig, foreignSig, sigLen) == 0);
 
-        /* ---- Stricter SSFRSAPubKeyIsValid: small public exponent ---- */
-        /* Synthesize a 2048-bit-modulus pubkey with e=3 by patching foreignPub: drop the last  */
-        /* 5-byte e=65537 field, append a 3-byte e=3, and shrink the outer SEQUENCE length by 2.*/
+        /* ---- Stricter SSFRSAPubKeyIsValid: small public exponent (e = 3) ---- */
         {
             uint8_t pubE3[sizeof(foreignPub) - 2u];
             memcpy(pubE3, foreignPub, sizeof(foreignPub) - 5u);
-            SSF_ASSERT(pubE3[1] == 0x82u);       /* long-form 2-byte length follows */
-            SSF_ASSERT(pubE3[2] == 0x01u);       /* original length high byte */
-            SSF_ASSERT(pubE3[3] == 0x0au);       /* original length low byte (266) */
-            pubE3[3] = 0x08u;                    /* new length 264 = 266 - 2 */
-            pubE3[sizeof(foreignPub) - 5u + 0u] = 0x02u;  /* INTEGER tag */
-            pubE3[sizeof(foreignPub) - 5u + 1u] = 0x01u;  /* length 1 */
-            pubE3[sizeof(foreignPub) - 5u + 2u] = 0x03u;  /* e = 3 */
+            SSF_ASSERT(pubE3[1] == 0x82u);
+            SSF_ASSERT(pubE3[2] == 0x01u);
+            SSF_ASSERT(pubE3[3] == 0x0au);
+            pubE3[3] = 0x08u; /* new length 264 = 266 - 2 */
+            pubE3[(sizeof(foreignPub) - 5u) + 0u] = 0x02u; /* INTEGER tag */
+            pubE3[(sizeof(foreignPub) - 5u) + 1u] = 0x01u; /* length 1 */
+            pubE3[(sizeof(foreignPub) - 5u) + 2u] = 0x03u; /* e = 3 */
             SSF_ASSERT(SSFRSAPubKeyIsValid(pubE3, sizeof(pubE3)) == false);
         }
 
         /* ---- SSFRSAPrivKeyIsValid: positive case (foreign-format key) ---- */
         SSF_ASSERT(SSFRSAPrivKeyIsValid(foreignPriv, sizeof(foreignPriv)) == true);
 
-        /* ---- SSFRSAPrivKeyIsValid: tampered components must reject ---- */
-        /* Each test copies foreignPriv into a mutable buffer and flips a single byte at an     */
-        /* offset known to land inside one of the algebraic components. The DER framing is      */
-        /* untouched so decode succeeds; the consistency check then catches the breakage.       */
+        /* ---- AUDIT RSA-12: IsValid wipes private fields and checks e * dp, e * dq == 1 ---- */
         {
-            /* Flip a byte inside n's magnitude (offset 100 is well inside the 256-byte modulus */
-            /* that runs from offset 12 to 267). After tampering, n != p*q.                     */
+            uint8_t bad[sizeof(foreignPriv)];
+
+            _scrubCalls = 0u;
+            _scrubDirty = 0u;
+            _SSFRSAScrubTestHook = _ScrubCheck;
+            SSF_ASSERT(SSFRSAPrivKeyIsValid(foreignPriv, sizeof(foreignPriv)) == true);
+            SSF_ASSERT(_scrubCalls == 11u);
+            memcpy(bad, foreignPriv, sizeof(bad));
+            bad[100] ^= 0x01u;
+            SSF_ASSERT(SSFRSAPrivKeyIsValid(bad, sizeof(bad)) == false);
+            SSF_ASSERT(_scrubCalls == 22u);
+            _SSFRSAScrubTestHook = NULL;
+            SSF_ASSERT(_scrubDirty == 0u);
+
+            memcpy(bad, foreignPriv, sizeof(bad));
+            _SSFRSAUTBumpInt(bad, sizeof(bad), 3u);
+            _SSFRSAUTBumpInt(bad, sizeof(bad), 6u);
+            _SSFRSAUTBumpInt(bad, sizeof(bad), 7u);
+            SSF_ASSERT(SSFRSAPrivKeyIsValid(bad, sizeof(bad)) == false);
+        }
+
+        /* ---- SSFRSAPrivKeyIsValid: tampered components must reject ---- */
+        {
+            /* Flip a byte inside n's magnitude (offsets 12..267); afterwards n != p*q. */
             uint8_t bad[sizeof(foreignPriv)];
             memcpy(bad, foreignPriv, sizeof(bad));
             bad[100] ^= 0x01u;
             SSF_ASSERT(SSFRSAPrivKeyIsValid(bad, sizeof(bad)) == false);
         }
         {
-            /* Flip a byte inside dp (offset 805 is in dp's magnitude, which runs ~801..928).   */
-            /* After tampering, dp != d mod (p-1).                                              */
+            /* Flip a byte inside dp's magnitude (~801..928); afterwards dp != d mod (p-1). */
             uint8_t bad[sizeof(foreignPriv)];
             memcpy(bad, foreignPriv, sizeof(bad));
             bad[805] ^= 0x01u;
             SSF_ASSERT(SSFRSAPrivKeyIsValid(bad, sizeof(bad)) == false);
         }
         {
-            /* Flip the trailing byte (last byte of qInv). After tampering, qInv*q mod p != 1.  */
+            /* Flip the trailing byte (last byte of qInv). After tampering, qInv*q mod p != 1. */
             uint8_t bad[sizeof(foreignPriv)];
             memcpy(bad, foreignPriv, sizeof(bad));
             bad[sizeof(bad) - 1u] ^= 0x01u;
@@ -1056,48 +1483,133 @@ void SSFRSAUnitTest(void)
         }
 
         /* ---- Sign-time fault detection: verify-after-sign ---- */
-        /* The Boneh-DeMillo-Lipton fault attack recovers p from a single bad CRT signature.    */
-        /* As a defense-in-depth, the signer recomputes m' = sig^e mod n and rejects unless     */
-        /* m' equals the original encoded message m. A privkey with a tampered dp passes DER    */
-        /* decode but produces a faulty CRT signature; verify-after-sign must catch this.        */
         {
             uint8_t bad[sizeof(foreignPriv)];
             uint8_t hashFault[32];
             uint8_t sigFault[SSF_RSA_MAX_SIG_SIZE];
             size_t sigFaultLen;
             memcpy(bad, foreignPriv, sizeof(bad));
-            bad[805] ^= 0x01u;            /* corrupt dp */
+            bad[805] ^= 0x01u; /* corrupt dp */
             SSFSHA256((const uint8_t *)"fault test", 10, hashFault, sizeof(hashFault));
             SSF_ASSERT(SSFRSASignPKCS1(bad, sizeof(bad),
                        SSF_RSA_HASH_SHA256, hashFault, sizeof(hashFault),
                        sigFault, sizeof(sigFault), &sigFaultLen) == false);
         }
 
+#if SSF_RSA_CONFIG_ENABLE_PSS == 1
+        /* ---- PSS saltLength is caller-specified: OpenSSL vector signed with saltLength 20 ---- */
+        {
+            SSF_ASSERT(SSFRSAVerifyPSS(_pssSalt20Pub, sizeof(_pssSalt20Pub), SSF_RSA_HASH_SHA256,
+                                       _pssSalt20Hash, sizeof(_pssSalt20Hash), 20u,
+                                       _pssSalt20Sig, sizeof(_pssSalt20Sig)) == true);
+            /* The hash-length salt SSF itself emits is not this signature's salt */
+            SSF_ASSERT(SSFRSAVerifyPSS(_pssSalt20Pub, sizeof(_pssSalt20Pub), SSF_RSA_HASH_SHA256,
+                                       _pssSalt20Hash, sizeof(_pssSalt20Hash), 32u,
+                                       _pssSalt20Sig, sizeof(_pssSalt20Sig)) == false);
+            SSF_ASSERT(SSFRSAVerifyPSS(_pssSalt20Pub, sizeof(_pssSalt20Pub), SSF_RSA_HASH_SHA256,
+                                       _pssSalt20Hash, sizeof(_pssSalt20Hash), 19u,
+                                       _pssSalt20Sig, sizeof(_pssSalt20Sig)) == false);
+            SSF_ASSERT(SSFRSAVerifyPSS(_pssSalt20Pub, sizeof(_pssSalt20Pub), SSF_RSA_HASH_SHA256,
+                                       _pssSalt20Hash, sizeof(_pssSalt20Hash), 0u,
+                                       _pssSalt20Sig, sizeof(_pssSalt20Sig)) == false);
+        }
+#endif /* SSF_RSA_CONFIG_ENABLE_PSS */
+
 #if SSF_RSA_OSSL_VERIFY == 1
-        /* Comprehensive OpenSSL cross-check: PKCS#1-v1.5 (deterministic byte match), PSS in     */
-        /* both directions, multiple hash sizes per key size. The foreignPriv / foreignPub       */
-        /* arrays are passed in so the inner helper can run a PSS round-trip on them too.        */
+        /* OpenSSL cross-check (PKCS#1 v1.5 byte match, PSS both ways, all hash sizes). */
         _SSFRSAVerifyAgainstOpenSSL(foreignPriv, sizeof(foreignPriv),
                                     foreignPub,  sizeof(foreignPub));
 #endif
+
+        /* ---- AUDIT RSA-7: key decoders reject bytes after e / qInv and after the SEQUENCE ---- */
+        {
+            static uint8_t pubX[sizeof(foreignPub) + 3u];
+            static uint8_t privX[sizeof(foreignPriv) + 3u];
+            uint16_t seqLen;
+
+            /* Trailing byte after the public-key SEQUENCE. */
+            memcpy(pubX, foreignPub, sizeof(foreignPub));
+            pubX[sizeof(foreignPub)] = 0x00u;
+            SSF_ASSERT(SSFRSAPubKeyIsValid(pubX, sizeof(foreignPub) + 1u) == false);
+            SSF_ASSERT(SSFRSAVerifyPKCS1(pubX, sizeof(foreignPub) + 1u, SSF_RSA_HASH_SHA256,
+                                         hashVal, sizeof(hashVal), foreignSig,
+                                         sizeof(foreignSig)) == false);
+
+            /* Extra INTEGER inside the public-key SEQUENCE after e. */
+            seqLen = (uint16_t)(((uint16_t)foreignPub[2] << 8) | foreignPub[3]);
+            seqLen = (uint16_t)(seqLen + 3u);
+            pubX[2] = (uint8_t)(seqLen >> 8);
+            pubX[3] = (uint8_t)(seqLen & 0xFFu);
+            pubX[sizeof(foreignPub)] = 0x02u;
+            pubX[sizeof(foreignPub) + 1u] = 0x01u;
+            pubX[sizeof(foreignPub) + 2u] = 0x00u;
+            SSF_ASSERT(SSFRSAPubKeyIsValid(pubX, sizeof(pubX)) == false);
+            SSF_ASSERT(SSFRSAVerifyPKCS1(pubX, sizeof(pubX), SSF_RSA_HASH_SHA256, hashVal,
+                                         sizeof(hashVal), foreignSig,
+                                         sizeof(foreignSig)) == false);
+
+            /* Trailing byte after the private-key SEQUENCE. */
+            memcpy(privX, foreignPriv, sizeof(foreignPriv));
+            privX[sizeof(foreignPriv)] = 0x00u;
+            SSF_ASSERT(SSFRSAPrivKeyIsValid(privX, sizeof(foreignPriv) + 1u) == false);
+            SSF_ASSERT(SSFRSASignPKCS1(privX, sizeof(foreignPriv) + 1u, SSF_RSA_HASH_SHA256,
+                                       hashVal, sizeof(hashVal), sig, sizeof(sig),
+                                       &sigLen) == false);
+
+            /* Extra INTEGER inside the private-key SEQUENCE after qInv. */
+            seqLen = (uint16_t)(((uint16_t)foreignPriv[2] << 8) | foreignPriv[3]);
+            seqLen = (uint16_t)(seqLen + 3u);
+            privX[2] = (uint8_t)(seqLen >> 8);
+            privX[3] = (uint8_t)(seqLen & 0xFFu);
+            privX[sizeof(foreignPriv)] = 0x02u;
+            privX[sizeof(foreignPriv) + 1u] = 0x01u;
+            privX[sizeof(foreignPriv) + 2u] = 0x00u;
+            SSF_ASSERT(SSFRSAPrivKeyIsValid(privX, sizeof(privX)) == false);
+            SSF_ASSERT(SSFRSASignPKCS1(privX, sizeof(privX), SSF_RSA_HASH_SHA256, hashVal,
+                                       sizeof(hashVal), sig, sizeof(sig), &sigLen) == false);
+        }
+
+        /* ---- AUDIT ASN1-3: negative or padded modulus is refused, not read as magnitude ---- */
+        {
+            static uint8_t pubNeg[sizeof(foreignPub) - 1u];
+            static uint8_t pubPad[sizeof(foreignPub) + 1u];
+            const uint32_t eAt = 9u + 256u;
+
+            SSF_ASSERT((foreignPub[4] == 0x02u) && (foreignPub[5] == 0x82u));
+            SSF_ASSERT((foreignPub[6] == 0x01u) && (foreignPub[7] == 0x01u));
+            SSF_ASSERT((foreignPub[8] == 0x00u) && ((foreignPub[9] & 0x80u) != 0u));
+
+            /* foreignPub is 30 82 01 0A 02 82 01 01 00 <n> <e>; drop the 0x00 sign byte */
+            memcpy(pubNeg, foreignPub, 8u);
+            pubNeg[3] = (uint8_t)(foreignPub[3] - 1u);
+            pubNeg[7] = 0x00u;
+            memcpy(&pubNeg[8], &foreignPub[9], sizeof(foreignPub) - 9u);
+            SSF_ASSERT(SSFRSAPubKeyIsValid(pubNeg, sizeof(pubNeg)) == false);
+
+            /* Add a second 0x00 before n (padded INTEGER) */
+            memcpy(pubPad, foreignPub, 9u);
+            pubPad[3] = (uint8_t)(foreignPub[3] + 1u);
+            pubPad[7] = 0x02u;
+            pubPad[9] = 0x00u;
+            memcpy(&pubPad[10], &foreignPub[9], sizeof(foreignPub) - 9u);
+            SSF_ASSERT(SSFRSAPubKeyIsValid(pubPad, sizeof(pubPad)) == false);
+            SSF_ASSERT(SSFRSAVerifyPKCS1(pubPad, sizeof(pubPad), SSF_RSA_HASH_SHA256, hashVal,
+                                         sizeof(hashVal), foreignSig,
+                                         sizeof(foreignSig)) == false);
+            SSF_ASSERT(foreignPub[eAt] == 0x02u);
+        }
     }
 #endif /* SSF_RSA_CONFIG_ENABLE_PKCS1_V15 && SSF_RSA_CONFIG_ENABLE_2048 */
 
 #if (SSF_RSA_CONFIG_ENABLE_KEYGEN == 1) && (SSF_RSA_CONFIG_ENABLE_2048 == 1)
     /* ---- RSA-2048 key generation + PKCS#1 v1.5 sign + verify roundtrip ---- */
-    /* Gated on ENABLE_2048: this block is hard-coded to the 2048-bit canonical example         */
-    /* (sigLen == 256 etc. assertions). 3072 / 4096 keygen + sign + verify is exercised by the  */
-    /* OpenSSL cross-check above when those sizes are enabled.                                  */
     {
         uint8_t privKeyDer[SSF_RSA_MAX_PRIV_KEY_DER_SIZE];
         size_t privKeyDerLen;
         uint8_t pubKeyDer[SSF_RSA_MAX_PUB_KEY_DER_SIZE];
         size_t pubKeyDerLen;
 
-        /* Pre-fill the lower stack with a recognisable sentinel so we can later detect any       */
-        /* secret bytes left behind in keygen's frame. SSFRSAKeyGen's frame allocates atop the    */
-        /* same region the polluter just freed, so any region keygen does not write retains the  */
-        /* sentinel; any region keygen writes and fails to zeroize retains the secret.            */
+        /* Pre-fill the stack with a sentinel so secrets left in keygen's frame can be found. */
         _SSFRSAUTPolluteStack(0xCCu);
 
         /* Generate 2048-bit key pair */
@@ -1107,14 +1619,7 @@ void SSFRSAUnitTest(void)
         SSF_ASSERT(privKeyDerLen > 0u);
         SSF_ASSERT(pubKeyDerLen > 0u);
 
-        /* Hygiene: scan the just-freed keygen frame for the top 16 bytes of p. Those bytes      */
-        /* equal the top bytes of pm1 = p - 1 (only the lowest limb differs), and pm1 lives in   */
-        /* _SSFRSAKeyGenDerive's stack frame. Pre-fix the scanner finds 1+ matches; post-fix     */
-        /* Derive zeroizes its intermediates so the scanner finds 0.                              */
-        /*                                                                                       */
-        /* SSFBN stores 32-bit limbs little-endian-byte within each limb, with limb[0] = lowest. */
-        /* p's DER magnitude is big-endian, so its top 16 bytes appear in the in-memory limb     */
-        /* array as those 16 bytes byte-reversed (limbs[28..31] -> bytes byte[15]..byte[0]).      */
+        /* Hygiene: top 16 bytes of p (= top of pm1), byte-reversed as in limbs, must be gone. */
         {
             const uint8_t *pTop = _SSFRSAUTLocatePMag(privKeyDer, privKeyDerLen);
             uint8_t needle[16];
@@ -1124,16 +1629,11 @@ void SSFRSAUnitTest(void)
             SSF_ASSERT(_SSFRSAUTScanStack(needle, sizeof(needle)) == 0);
         }
 
-        /* Validate generated public and private keys (FIPS post-conditions plus n=p*q,           */
-        /* dp == d mod (p-1), dq == d mod (q-1), qInv*q == 1 mod p -- all hold by construction).  */
+        /* Validate the generated keys (FIPS post-conditions and CRT consistency). */
         SSF_ASSERT(SSFRSAPubKeyIsValid(pubKeyDer, pubKeyDerLen) == true);
         SSF_ASSERT(SSFRSAPrivKeyIsValid(privKeyDer, privKeyDerLen) == true);
 
-        /* The emitted public DER must be strict-DER compliant. RSAPublicKey is                    */
-        /*   SEQUENCE { INTEGER n, INTEGER e }                                                     */
-        /* and the keygen forces the top two bits of p and q so n always has bit 2047 set. ASN.1   */
-        /* INTEGER is signed (X.690 Sec. 8.3.2), so n's encoded body must lead with a 0x00 padding */
-        /* byte. Without that byte, strict DER parsers (OpenSSL, mbedTLS) read n as negative.      */
+        /* RSAPublicKey n must lead with a 0x00 sign byte (bit 2047 set; X.690 Sec. 8.3.2). */
         {
             /* Outer SEQUENCE: tag 0x30, long-form length (0x82, 2 length bytes). */
             SSF_ASSERT(pubKeyDer[0] == 0x30u);
@@ -1160,7 +1660,7 @@ void SSFRSAUnitTest(void)
             SSF_ASSERT(SSFRSASignPKCS1(privKeyDer, privKeyDerLen,
                        SSF_RSA_HASH_SHA256, hashVal, sizeof(hashVal),
                        sig, sizeof(sig), &sigLen) == true);
-            SSF_ASSERT(sigLen == 256u); /* 2048 bits = 256 bytes */
+            SSF_ASSERT(sigLen == 256u);
 
             /* Verify */
             SSF_ASSERT(SSFRSAVerifyPKCS1(pubKeyDer, pubKeyDerLen,
@@ -1210,13 +1710,13 @@ void SSFRSAUnitTest(void)
 
             /* Verify */
             SSF_ASSERT(SSFRSAVerifyPSS(pubKeyDer, pubKeyDerLen,
-                       SSF_RSA_HASH_SHA256, hashVal, sizeof(hashVal),
+                       SSF_RSA_HASH_SHA256, hashVal, sizeof(hashVal), sizeof(hashVal),
                        sig, sigLen) == true);
 
             /* Wrong hash fails */
             hashVal[0] ^= 0x01u;
             SSF_ASSERT(SSFRSAVerifyPSS(pubKeyDer, pubKeyDerLen,
-                       SSF_RSA_HASH_SHA256, hashVal, sizeof(hashVal),
+                       SSF_RSA_HASH_SHA256, hashVal, sizeof(hashVal), sizeof(hashVal),
                        sig, sigLen) == false);
             hashVal[0] ^= 0x01u;
 
@@ -1229,7 +1729,7 @@ void SSFRSAUnitTest(void)
                            sig2, sizeof(sig2), &sig2Len) == true);
                 /* Both should verify */
                 SSF_ASSERT(SSFRSAVerifyPSS(pubKeyDer, pubKeyDerLen,
-                           SSF_RSA_HASH_SHA256, hashVal, sizeof(hashVal),
+                           SSF_RSA_HASH_SHA256, hashVal, sizeof(hashVal), sizeof(hashVal),
                            sig2, sig2Len) == true);
                 /* But should be different (with overwhelming probability) */
                 SSF_ASSERT(memcmp(sig, sig2, sigLen) != 0);
@@ -1240,21 +1740,12 @@ void SSFRSAUnitTest(void)
 #endif /* SSF_RSA_CONFIG_ENABLE_KEYGEN && SSF_RSA_CONFIG_ENABLE_2048 */
 
     /* ---- Design-by-Contract: precondition violations must trigger SSFPortAssert ---- */
-    /* Every public ssfrsa entry point declares preconditions through SSF_REQUIRE; this block  */
-    /* drives each one with a deliberately-violating call and uses SSF_ASSERT_TEST to confirm  */
-    /* the assertion fires. Some violations were already caught at the entry point, others    */
-    /* trickled into ssfbn / ssfasn1 deep inside the call (where the assertion is correct but */
-    /* harder to attribute) or -- worst -- slipped through to a graceful `return false`. After */
-    /* the DBC pass every violation lands at the entry point of the function the caller       */
-    /* invoked, so a misuse is identified at its source.                                       */
     {
         /* Reusable valid SSFBN. Length 64 limbs (2048 bits) is a representative working width.*/
         SSFBN_DEFINE(bn, SSF_BN_MAX_LIMBS);
         SSFBNSetUint32(&bn, 5u, 64u);
 
-        /* Synthetic SSFBN_t with NULL limbs to test the per-arg limbs-pointer guard. The      */
-        /* struct itself is valid (non-NULL), so the only thing that should trip is the        */
-        /* explicit ->limbs != NULL REQUIRE.                                                    */
+        /* SSFBN_t with NULL limbs: only the explicit ->limbs != NULL REQUIRE should trip. */
         SSFBN_t bnNullLimbs;
         bnNullLimbs.limbs = NULL;
         bnNullLimbs.len = 64u;
@@ -1264,7 +1755,8 @@ void SSFRSAUnitTest(void)
         static uint8_t dbcPubBuf[SSF_RSA_MAX_PUB_KEY_DER_SIZE];
         static uint8_t dbcSigBuf[SSF_RSA_MAX_SIG_SIZE];
         uint8_t dbcHashBuf[64];
-        size_t dbcLenA, dbcLenB;
+        size_t dbcLenA;
+        size_t dbcLenB;
         memset(dbcHashBuf, 0, sizeof(dbcHashBuf));
 
         /* ---- SSFRSAFipsPrimeDistanceOK ---- */
@@ -1272,13 +1764,13 @@ void SSFRSAUnitTest(void)
         SSF_ASSERT_TEST(SSFRSAFipsPrimeDistanceOK(&bn, NULL, 1024u));
         SSF_ASSERT_TEST(SSFRSAFipsPrimeDistanceOK(&bnNullLimbs, &bn, 1024u));
         SSF_ASSERT_TEST(SSFRSAFipsPrimeDistanceOK(&bn, &bnNullLimbs, 1024u));
-        SSF_ASSERT_TEST(SSFRSAFipsPrimeDistanceOK(&bn, &bn, 100u));   /* halfBits == 100 */
-        SSF_ASSERT_TEST(SSFRSAFipsPrimeDistanceOK(&bn, &bn, 0u));     /* halfBits == 0 */
+        SSF_ASSERT_TEST(SSFRSAFipsPrimeDistanceOK(&bn, &bn, 100u));
+        SSF_ASSERT_TEST(SSFRSAFipsPrimeDistanceOK(&bn, &bn, 0u));
 
         /* ---- SSFRSAFipsDLowerBoundOK ---- */
         SSF_ASSERT_TEST(SSFRSAFipsDLowerBoundOK(NULL, 1024u));
         SSF_ASSERT_TEST(SSFRSAFipsDLowerBoundOK(&bnNullLimbs, 1024u));
-        SSF_ASSERT_TEST(SSFRSAFipsDLowerBoundOK(&bn, 0u));            /* halfBits == 0 */
+        SSF_ASSERT_TEST(SSFRSAFipsDLowerBoundOK(&bn, 0u));
 
         /* ---- SSFRSAFipsECoprimeOK ---- */
         SSF_ASSERT_TEST(SSFRSAFipsECoprimeOK(NULL, &bn, &bn));
@@ -1297,8 +1789,7 @@ void SSFRSAUnitTest(void)
         SSF_ASSERT_TEST(SSFRSAPrivKeyIsValid(dbcDerBuf, 0u));
 
 #if SSF_RSA_CONFIG_ENABLE_KEYGEN == 1
-        /* Pick the smallest enabled key size for DBC arg-validation tests so the bits check    */
-        /* doesn't fire first and mask the NULL / size precondition we're actually testing.    */
+        /* Use the smallest enabled size so the bits check does not mask the tested REQUIRE. */
 #if SSF_RSA_CONFIG_ENABLE_2048 == 1
 #define _SSFRSA_UT_DBC_BITS 2048u
 #elif SSF_RSA_CONFIG_ENABLE_3072 == 1
@@ -1384,22 +1875,110 @@ void SSFRSAUnitTest(void)
                                       dbcSigBuf, sizeof(dbcSigBuf), &dbcLenA));
 
         /* ---- SSFRSAVerifyPSS ---- */
-        SSF_ASSERT_TEST(SSFRSAVerifyPSS(NULL, 16u, SSF_RSA_HASH_SHA256, dbcHashBuf, 32u,
+        SSF_ASSERT_TEST(SSFRSAVerifyPSS(NULL, 16u, SSF_RSA_HASH_SHA256, dbcHashBuf, 32u, 32u,
                                         dbcSigBuf, 256u));
-        SSF_ASSERT_TEST(SSFRSAVerifyPSS(dbcPubBuf, 16u, SSF_RSA_HASH_SHA256, NULL, 32u,
+        SSF_ASSERT_TEST(SSFRSAVerifyPSS(dbcPubBuf, 16u, SSF_RSA_HASH_SHA256, NULL, 32u, 32u,
                                         dbcSigBuf, 256u));
-        SSF_ASSERT_TEST(SSFRSAVerifyPSS(dbcPubBuf, 16u, SSF_RSA_HASH_SHA256, dbcHashBuf, 32u,
+        SSF_ASSERT_TEST(SSFRSAVerifyPSS(dbcPubBuf, 16u, SSF_RSA_HASH_SHA256, dbcHashBuf, 32u, 32u,
                                         NULL, 256u));
-        SSF_ASSERT_TEST(SSFRSAVerifyPSS(dbcPubBuf, 0u, SSF_RSA_HASH_SHA256, dbcHashBuf, 32u,
+        SSF_ASSERT_TEST(SSFRSAVerifyPSS(dbcPubBuf, 0u, SSF_RSA_HASH_SHA256, dbcHashBuf, 32u, 32u,
                                         dbcSigBuf, 256u));
-        SSF_ASSERT_TEST(SSFRSAVerifyPSS(dbcPubBuf, 16u, SSF_RSA_HASH_MIN, dbcHashBuf, 32u,
+        SSF_ASSERT_TEST(SSFRSAVerifyPSS(dbcPubBuf, 16u, SSF_RSA_HASH_MIN, dbcHashBuf, 32u, 32u,
                                         dbcSigBuf, 256u));
-        SSF_ASSERT_TEST(SSFRSAVerifyPSS(dbcPubBuf, 16u, SSF_RSA_HASH_MAX, dbcHashBuf, 32u,
+        SSF_ASSERT_TEST(SSFRSAVerifyPSS(dbcPubBuf, 16u, SSF_RSA_HASH_MAX, dbcHashBuf, 32u, 32u,
                                         dbcSigBuf, 256u));
-        SSF_ASSERT_TEST(SSFRSAVerifyPSS(dbcPubBuf, 16u, SSF_RSA_HASH_SHA256, dbcHashBuf, 31u,
+        SSF_ASSERT_TEST(SSFRSAVerifyPSS(dbcPubBuf, 16u, SSF_RSA_HASH_SHA256, dbcHashBuf, 31u, 32u,
+                                        dbcSigBuf, 256u));
+        SSF_ASSERT_TEST(SSFRSAVerifyPSS(dbcPubBuf, 16u, SSF_RSA_HASH_SHA256, dbcHashBuf, 32u, 33u,
                                         dbcSigBuf, 256u));
 #endif /* SSF_RSA_CONFIG_ENABLE_PSS */
     }
+
+    /* ---- OPTIMIZE RSA-STK: every enabled key size runs end to end without OpenSSL ---- */
+    {
+        static const uint16_t sizes[] = {
+#if SSF_RSA_CONFIG_ENABLE_2048 == 1
+            2048u,
+#endif
+#if SSF_RSA_CONFIG_ENABLE_3072 == 1
+            3072u,
+#endif
+#if SSF_RSA_CONFIG_ENABLE_4096 == 1
+            4096u,
+#endif
+        };
+        static uint8_t privKeyDer[SSF_RSA_MAX_PRIV_KEY_DER_SIZE];
+        static uint8_t pubKeyDer[SSF_RSA_MAX_PUB_KEY_DER_SIZE];
+        uint8_t hash[32];
+        uint8_t sig[SSF_RSA_MAX_SIG_SIZE];
+        size_t privKeyDerLen;
+        size_t pubKeyDerLen;
+        size_t sigLen;
+        uint16_t si;
+
+        SSFSHA256((const uint8_t *)"every size", 10, hash, sizeof(hash));
+        for (si = 0u; si < (uint16_t)(sizeof(sizes) / sizeof(sizes[0])); si++)
+        {
+            SSF_ASSERT(SSFRSAKeyGen(sizes[si], privKeyDer, sizeof(privKeyDer), &privKeyDerLen,
+                                    pubKeyDer, sizeof(pubKeyDer), &pubKeyDerLen) == true);
+            SSF_ASSERT(SSFRSAPrivKeyIsValid(privKeyDer, privKeyDerLen) == true);
+            SSF_ASSERT(SSFRSAPubKeyIsValid(pubKeyDer, pubKeyDerLen) == true);
+#if SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1
+            SSF_ASSERT(SSFRSASignPKCS1(privKeyDer, privKeyDerLen, SSF_RSA_HASH_SHA256, hash,
+                                       sizeof(hash), sig, sizeof(sig), &sigLen) == true);
+            SSF_ASSERT(sigLen == ((size_t)sizes[si] / 8u));
+            SSF_ASSERT(SSFRSAVerifyPKCS1(pubKeyDer, pubKeyDerLen, SSF_RSA_HASH_SHA256, hash,
+                                         sizeof(hash), sig, sigLen) == true);
+            hash[0] ^= 1u;
+            SSF_ASSERT(SSFRSAVerifyPKCS1(pubKeyDer, pubKeyDerLen, SSF_RSA_HASH_SHA256, hash,
+                                         sizeof(hash), sig, sigLen) == false);
+            hash[0] ^= 1u;
+#endif /* SSF_RSA_CONFIG_ENABLE_PKCS1_V15 */
+#if SSF_RSA_CONFIG_ENABLE_PSS == 1
+            SSF_ASSERT(SSFRSASignPSS(privKeyDer, privKeyDerLen, SSF_RSA_HASH_SHA256, hash,
+                                     sizeof(hash), sig, sizeof(sig), &sigLen) == true);
+            SSF_ASSERT(SSFRSAVerifyPSS(pubKeyDer, pubKeyDerLen, SSF_RSA_HASH_SHA256, hash,
+                                       sizeof(hash), sizeof(hash), sig, sigLen) == true);
+            hash[0] ^= 1u;
+            SSF_ASSERT(SSFRSAVerifyPSS(pubKeyDer, pubKeyDerLen, SSF_RSA_HASH_SHA256, hash,
+                                       sizeof(hash), sizeof(hash), sig, sigLen) == false);
+            hash[0] ^= 1u;
+#endif /* SSF_RSA_CONFIG_ENABLE_PSS */
+        }
+    }
+
+#if (SSF_CONFIG_BN_UNIT_TEST == 1) && (SSF_RSA_CONFIG_ENABLE_2048 == 1)
+    /* ---- OPTIMIZE BN-O4 / BN-O5: RSA signing never takes the slow ModMulCT / ModInvExt ---- */
+    {
+        static uint8_t privKeyDer[SSF_RSA_MAX_PRIV_KEY_DER_SIZE];
+        static uint8_t pubKeyDer[SSF_RSA_MAX_PUB_KEY_DER_SIZE];
+        uint8_t hash[32];
+        uint8_t sig[SSF_RSA_MAX_KEY_BYTES];
+        size_t privKeyDerLen;
+        size_t pubKeyDerLen;
+        size_t sigLen;
+
+        SSFSHA256((const uint8_t *)"slow path", 9, hash, sizeof(hash));
+        SSF_ASSERT(SSFRSAKeyGen(2048u, privKeyDer, sizeof(privKeyDer), &privKeyDerLen,
+                                pubKeyDer, sizeof(pubKeyDer), &pubKeyDerLen) == true);
+        _SSFBNSlowPathCalls = 0u;
+        _SSFBNModShiftCalls = 0u;
+#if SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1
+        SSF_ASSERT(SSFRSASignPKCS1(privKeyDer, privKeyDerLen, SSF_RSA_HASH_SHA256, hash,
+                                   sizeof(hash), sig, sizeof(sig), &sigLen) == true);
+        SSF_ASSERT(SSFRSAVerifyPKCS1(pubKeyDer, pubKeyDerLen, SSF_RSA_HASH_SHA256, hash,
+                                     sizeof(hash), sig, sigLen) == true);
+#endif /* SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1 */
+#if SSF_RSA_CONFIG_ENABLE_PSS == 1
+        SSF_ASSERT(SSFRSASignPSS(privKeyDer, privKeyDerLen, SSF_RSA_HASH_SHA256, hash,
+                                 sizeof(hash), sig, sizeof(sig), &sigLen) == true);
+#endif /* SSF_RSA_CONFIG_ENABLE_PSS */
+        SSF_ASSERT(_SSFBNSlowPathCalls == 0u);
+
+        /* The CRT split cB mod p, cB mod q is constant-time Montgomery, not shift-subtract */
+        SSF_ASSERT(_SSFBNModShiftCalls == 0u);
+    }
+#endif /* SSF_CONFIG_BN_UNIT_TEST && SSF_RSA_CONFIG_ENABLE_2048 */
 #endif /* SSF_RSA_ANY_ENABLED */
 }
 #ifdef _WIN32

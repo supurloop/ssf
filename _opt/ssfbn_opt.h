@@ -39,7 +39,8 @@ extern "C" {
 /* SSFBNMul Karatsuba dispatch threshold (limbs). Operands at or above this -- same length, even */
 /* length -- go through one-level Karatsuba; below it, schoolbook. Both code paths always link; */
 /* the threshold only steers the runtime dispatch. Default is 32 (RSA-1024 boundary); the       */
-/* MAX_PERF profile lowers this to 16 so RSA-2048 multiplies enter Karatsuba sooner.            */
+/* MAX_PERF profile lowers this to 16 so RSA-2048 multiplies enter Karatsuba sooner. Must be  */
+/* >= 4: ssfbn.c rejects smaller values at compile time (the step-7 add needs n >= 4).          */
 #ifndef SSF_BN_KARATSUBA_THRESHOLD
 #define SSF_BN_KARATSUBA_THRESHOLD           (32u)
 #endif

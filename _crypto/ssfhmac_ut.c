@@ -34,10 +34,7 @@
 #include "ssfassert.h"
 #include "ssfhmac.h"
 
-/* Cross-check the SSFHMAC implementation against OpenSSL's HMAC. Enabled when the build is      */
-/* linking libcrypto (host macOS/Linux); disabled on cross builds via -DSSF_CONFIG_HAVE_OPENSSL=0 */
-/* (see ssfport.h). When disabled, the RFC 4231 / RFC 2202 KATs above are the load-bearing       */
-/* correctness coverage.                                                                          */
+/* Cross-check against OpenSSL HMAC when libcrypto is linked, else RFC 4231/2202 KATs cover it.  */
 #if (SSF_CONFIG_HAVE_OPENSSL == 1) && (SSF_CONFIG_HMAC_UNIT_TEST == 1)
 #define SSF_HMAC_OSSL_VERIFY 1
 #else
@@ -83,11 +80,7 @@ static void _OSSLHMAC(SSFHMACHash_t h, const uint8_t *key, size_t keyLen,
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Random fuzz across (hash x keyLen x msgLen). Each cell draws fresh random key/message bytes,  */
-/* computes the MAC via SSFHMAC's one-shot path AND via the incremental path with a mid-message  */
-/* split, then compares both to OpenSSL's one-call HMAC. Catches divergence in the long-key       */
-/* branch, the inner/outer pad construction, the chunked-update dispatch, and any block-boundary */
-/* state bug that survives RFC KAT coverage.                                                     */
+/* Random fuzz (hash x keyLen x msgLen): one-shot and split incremental vs OpenSSL HMAC.         */
 /* --------------------------------------------------------------------------------------------- */
 static void _VerifyHMACAgainstOpenSSLRandom(void)
 {
@@ -95,8 +88,7 @@ static void _VerifyHMACAgainstOpenSSLRandom(void)
         SSF_HMAC_HASH_SHA1, SSF_HMAC_HASH_SHA256,
         SSF_HMAC_HASH_SHA384, SSF_HMAC_HASH_SHA512
     };
-    /* keyLens span the three regimes (< block, == block, > block) for both block sizes        */
-    /* (64 for SHA-1/256, 128 for SHA-384/512).                                                  */
+    /* keyLens span < block, == block and > block for both block sizes (64 and 128). */
     static const size_t keyLens[] = {1u, 16u, 32u, 63u, 64u, 65u, 100u, 127u, 128u, 131u, 200u};
     /* msgLens span SHA's partial-block buffer transitions and a couple of multi-block cases.   */
     static const size_t msgLens[] = {0u, 1u, 7u, 31u, 63u, 64u, 65u, 127u,
@@ -105,7 +97,9 @@ static void _VerifyHMACAgainstOpenSSLRandom(void)
     uint8_t msg[1024];
     uint8_t macSSF[64];
     uint8_t macOSSL[64];
-    size_t hIdx, kIdx, mIdx;
+        size_t hIdx;
+        size_t kIdx;
+        size_t mIdx;
     int iter;
 
     for (hIdx = 0; hIdx < sizeof(hashes) / sizeof(hashes[0]); hIdx++)
@@ -153,11 +147,7 @@ static void _VerifyHMACAgainstOpenSSLRandom(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Corner-case verification against OpenSSL.                                                      */
-/*                                                                                                */
-/* Random testing rarely hits identity-style values (all-zero key, all-0xFF key, all-zero        */
-/* message) or pathological streaming patterns (one byte at a time across the SHA inner-block    */
-/* boundary). This routine drives those cases explicitly per hash variant.                        */
+/* Corner cases vs OpenSSL: all-zero/all-0xFF keys, empty message, byte-at-a-time.               */
 /* --------------------------------------------------------------------------------------------- */
 static void _VerifyHMACCornerCasesAgainstOpenSSL(void)
 {
@@ -218,8 +208,7 @@ static void _VerifyHMACCornerCasesAgainstOpenSSL(void)
             SSF_ASSERT(memcmp(macSSF, macOSSL, hashSize) == 0);
         }
 
-        /* Incremental Update with one-byte chunks across multiple SHA blocks. Stresses the     */
-        /* partial-block buffer in the underlying hash and the per-call dispatch path.          */
+        /* Incremental Update with one-byte chunks across multiple SHA blocks. */
         {
             uint8_t key[24];
             uint8_t msg[300];
@@ -246,8 +235,6 @@ void SSFHMACUnitTest(void)
     uint8_t mac[64];
 
     /* ---- RFC 4231 Test Case 1: HMAC-SHA-256 ---- */
-    /* Key:  0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b (20 bytes) */
-    /* Data: "Hi There" */
     {
         static const uint8_t key[20] = {
             0x0Bu, 0x0Bu, 0x0Bu, 0x0Bu, 0x0Bu, 0x0Bu, 0x0Bu, 0x0Bu,
@@ -267,8 +254,6 @@ void SSFHMACUnitTest(void)
     }
 
     /* ---- RFC 4231 Test Case 2: HMAC-SHA-256 ---- */
-    /* Key:  "Jefe" */
-    /* Data: "what do ya want for nothing?" */
     {
         static const uint8_t expected[32] = {
             0x5Bu, 0xDCu, 0xC1u, 0x46u, 0xBFu, 0x60u, 0x75u, 0x4Eu,
@@ -285,8 +270,6 @@ void SSFHMACUnitTest(void)
     }
 
     /* ---- RFC 4231 Test Case 3: HMAC-SHA-256 ---- */
-    /* Key:  aaaa...aa (20 bytes of 0xaa) */
-    /* Data: dddd...dd (50 bytes of 0xdd) */
     {
         uint8_t key[20];
         uint8_t data[50];
@@ -305,9 +288,6 @@ void SSFHMACUnitTest(void)
     }
 
     /* ---- RFC 2202 Test Case 1: HMAC-SHA-1 ---- */
-    /* Key:  0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b (20 bytes) */
-    /* Data: "Hi There" */
-    /* Expected: b617318655057264e28bc0b6fb378c8ef146be00 */
     {
         static const uint8_t key[20] = {
             0x0Bu, 0x0Bu, 0x0Bu, 0x0Bu, 0x0Bu, 0x0Bu, 0x0Bu, 0x0Bu,
@@ -326,9 +306,6 @@ void SSFHMACUnitTest(void)
     }
 
     /* ---- RFC 2202 Test Case 2: HMAC-SHA-1 ---- */
-    /* Key: "Jefe" */
-    /* Data: "what do ya want for nothing?" */
-    /* Expected: effcdf6ae5eb2fa2d27416d5f184df9c259a7c79 */
     {
         static const uint8_t expected[20] = {
             0xEFu, 0xFCu, 0xDFu, 0x6Au, 0xE5u, 0xEBu, 0x2Fu, 0xA2u,
@@ -344,8 +321,6 @@ void SSFHMACUnitTest(void)
     }
 
     /* ---- RFC 4231 Test Case 4: HMAC-SHA-256 with long key (131 bytes) ---- */
-    /* Key: aa repeated 131 times (key > block size, so it gets hashed) */
-    /* Data: "Test Using Larger Than Block-Size Key - Hash Key First" */
     {
         uint8_t longKey[131];
         static const uint8_t expected[32] = {
@@ -363,8 +338,6 @@ void SSFHMACUnitTest(void)
     }
 
     /* ---- HMAC-SHA-512 Test Case (RFC 4231 TC1) ---- */
-    /* Key:  0b * 20 */
-    /* Data: "Hi There" */
     {
         static const uint8_t key[20] = {
             0x0Bu, 0x0Bu, 0x0Bu, 0x0Bu, 0x0Bu, 0x0Bu, 0x0Bu, 0x0Bu,
@@ -423,8 +396,6 @@ void SSFHMACUnitTest(void)
     }
 
     /* ---- RFC 4231 Test Case 1: HMAC-SHA-384 ---- */
-    /* Key:  0x0b * 20 */
-    /* Data: "Hi There" */
     {
         static const uint8_t key[20] = {
             0x0Bu, 0x0Bu, 0x0Bu, 0x0Bu, 0x0Bu, 0x0Bu, 0x0Bu, 0x0Bu,
@@ -444,9 +415,7 @@ void SSFHMACUnitTest(void)
         SSF_ASSERT(memcmp(mac, expected, 48) == 0);
     }
 
-    /* ---- RFC 4231 Test Case 6: HMAC-SHA-384 with long key (131 bytes) ---- */
-    /* Key:  0xaa * 131 (key > block size, gets hashed first) */
-    /* Data: "Test Using Larger Than Block-Size Key - Hash Key First" */
+    /* ---- RFC 4231 Test Case 6: HMAC-SHA-384, 131-byte key (hashed first) ---- */
     {
         uint8_t longKey[131];
         static const uint8_t expected[48] = {
@@ -464,10 +433,7 @@ void SSFHMACUnitTest(void)
         SSF_ASSERT(memcmp(mac, expected, 48) == 0);
     }
 
-    /* ---- RFC 4231 Test Case 7: 131-byte key + 152-byte message ---- */
-    /* Exercises the long-key path AND multi-block message absorption together for all three
-       SHA-2 variants. Catches state-leakage bugs between the inner-key block and the message
-       blocks that wouldn't show in the shorter test cases. */
+    /* ---- RFC 4231 Test Case 7: 131-byte key + 152-byte message, all SHA-2 variants ---- */
     {
         uint8_t longKey[131];
         static const char tc7Msg[] =
@@ -533,10 +499,7 @@ void SSFHMACUnitTest(void)
     SSF_ASSERT(SSFHMACGetHashSize(SSF_HMAC_HASH_SHA384) == 48u);
     SSF_ASSERT(SSFHMACGetHashSize(SSF_HMAC_HASH_SHA512) == 64u);
 
-    /* Block-boundary message lengths under HMAC-SHA-256 (block = 64). Catches off-by-one in
-       SHA's partial-block buffer at the transitions between "fits in current block",
-       "exactly fills a block", and "spills into the next block". Compares incremental
-       Begin/Update/End to the single-call reference for each length. */
+    /* Block-boundary message lengths under HMAC-SHA-256: incremental equals one-shot. */
     {
         static const size_t lens[] = {0u, 1u, 63u, 64u, 65u, 127u, 128u, 129u, 1024u};
         static uint8_t msg[1024];
@@ -565,8 +528,7 @@ void SSFHMACUnitTest(void)
         }
     }
 
-    /* Incremental Begin / Update / End must match the one-shot SSFHMAC for every hash variant.
-       The existing Incremental test covers SHA-256 only -- this extends to SHA-1/384/512. */
+    /* Incremental Begin / Update / End must match one-shot SSFHMAC for every hash variant. */
     {
         static const SSFHMACHash_t hashes[] = {
             SSF_HMAC_HASH_SHA1,
@@ -602,9 +564,7 @@ void SSFHMACUnitTest(void)
         }
     }
 
-    /* SSFHMACUpdate calls with dataLen == 0 (both data == NULL and data != NULL forms) are
-       no-ops and must not affect the MAC. Catches a regression where a zero-length Update
-       accidentally absorbs a sentinel byte or advances a length counter. */
+    /* Zero-length Update (data NULL or not) is a no-op and must not affect the MAC. */
     {
         SSFHMACContext_t ctx = {0};
         uint8_t key[16];
@@ -620,20 +580,18 @@ void SSFHMACUnitTest(void)
                    ref, 32u) == true);
 
         SSFHMACBegin(&ctx, SSF_HMAC_HASH_SHA256, key, sizeof(key));
-        SSFHMACUpdate(&ctx, msg,        0u);   /* leading no-op, non-NULL data */
-        SSFHMACUpdate(&ctx, NULL,       0u);   /* leading no-op, NULL data */
+        SSFHMACUpdate(&ctx, msg,        0u); /* leading no-op, non-NULL data */
+        SSFHMACUpdate(&ctx, NULL,       0u); /* leading no-op, NULL data */
         SSFHMACUpdate(&ctx, &msg[0],    5u);
-        SSFHMACUpdate(&ctx, NULL,       0u);   /* mid no-op */
+        SSFHMACUpdate(&ctx, NULL,       0u); /* mid no-op */
         SSFHMACUpdate(&ctx, &msg[5],    15u);
-        SSFHMACUpdate(&ctx, msg,        0u);   /* trailing no-op */
+        SSFHMACUpdate(&ctx, msg,        0u); /* trailing no-op */
         SSFHMACEnd(&ctx, inc, 32u);
         SSFHMACDeInit(&ctx);
         SSF_ASSERT(memcmp(ref, inc, 32u) == 0);
     }
 
-    /* DeInit must zero every byte of the context. Catches a regression where SecureZero is
-       called with the wrong size or where a field accidentally lives outside the wiped
-       region. Also exercises DeInit on a Begun-but-not-Ended context. */
+    /* DeInit must zero every byte of the context, including a Begun-but-not-Ended one. */
     {
         SSFHMACContext_t ctx = {0};
         uint8_t key[16];
@@ -650,9 +608,7 @@ void SSFHMACUnitTest(void)
         for (i = 0; i < sizeof(ctx); i++) SSF_ASSERT(p[i] == 0u);
     }
 
-    /* Reuse a stack-allocated context across two different hash + key combinations, with
-       DeInit between. Documents the supported reuse pattern and catches state-leakage
-       between operations on the same ctx. */
+    /* Reuse one stack context across two hash + key combinations with DeInit between. */
     {
         SSFHMACContext_t ctx = {0};
         static const uint8_t key1[16] = {
@@ -688,9 +644,7 @@ void SSFHMACUnitTest(void)
         SSF_ASSERT(memcmp(mac2Ref, mac2Inc, 20u) == 0);
     }
 
-    /* Key whose every byte is 0 (keyLen > 0 but content is all-zero). The XOR with iPad /
-       oPad produces non-zero pad blocks, so the MAC is deterministic and non-zero. Catches
-       a regression where the implementation accidentally short-circuits on an all-zero key. */
+    /* An all-zero key (keyLen > 0) still produces a deterministic MAC. */
     {
         static const uint8_t zeroKey[32] = {0};
         bool nonZero = false;
@@ -702,10 +656,7 @@ void SSFHMACUnitTest(void)
         SSF_ASSERT(nonZero == true);
     }
 
-    /* Key length boundary sweep under HMAC-SHA-256 (block = 64, hash = 32). Covers the
-       three regimes -- keyLen < blockSize, keyLen == blockSize, keyLen > blockSize -- at the
-       boundaries (1, 32, 63, 64, 65, 100, 131). For each, one-shot must equal incremental.
-       Catches a length-dependent bug in the long-key vs short-key branch in Begin. */
+    /* Key length sweep under HMAC-SHA-256 (1..131 around block size): one-shot == incremental. */
     {
         static const size_t keyLens[] = {1u, 16u, 32u, 63u, 64u, 65u, 100u, 131u};
         uint8_t key[131];
@@ -734,11 +685,7 @@ void SSFHMACUnitTest(void)
         }
     }
 
-    /* Regression for the size_t -> uint32_t silent-truncation bug in _SSFHMACHashUpdate.
-       Production chunkMax is UINT32_MAX, which can't be exercised with a 4 GB allocation;
-       the test hook forces small chunkMax values so the chunking loop runs on practical
-       buffers. The MAC must match a single-call reference for every chunkMax -- proves no
-       off-by-one in chunk size, no missed pointer advance, no remainder mishandling. */
+    /* size_t -> uint32_t truncation regression: small chunkMax via the test hook must match. */
     {
         uint8_t data[1024];
         uint8_t key[32];
@@ -767,8 +714,7 @@ void SSFHMACUnitTest(void)
         }
     }
 
-    /* Chunked Update across all hash dispatches -- proves each underlying SHA Update is
-       reached correctly. Catches a copy-paste bug in the dispatch switch. */
+    /* Chunked Update across all hash dispatches. */
     {
         static const SSFHMACHash_t hashes[] = {
             SSF_HMAC_HASH_SHA1,
@@ -828,11 +774,7 @@ void SSFHMACUnitTest(void)
         SSFHMACDeInit(&ctx);
     }
 
-    /* M3: an uninitialized context (stack-allocated, never Begun) must trip a contract check
-       on Update / End / DeInit. Defense-in-depth -- the underlying SHA module's magic also
-       catches this via dispatch, but the HMAC-level check fires earlier (before dispatch),
-       reports the right call site, and survives a future hash variant that might lack its
-       own magic. */
+    /* M3: an uninitialized context must trip a contract check on Update / End / DeInit. */
     {
         SSFHMACContext_t ctx = {0};
         uint8_t data[4] = {0};
@@ -843,9 +785,7 @@ void SSFHMACUnitTest(void)
         SSF_ASSERT_TEST(SSFHMACDeInit(&ctx));
     }
 
-    /* M3: a context that has been DeInit'd (and thus zeroed) must trip a contract check on
-       any subsequent operation. Use-after-cleanup, including the double-DeInit defensive-
-       cleanup bug, must fail loudly. */
+    /* M3: a DeInit'd context must trip on any later operation (incl. double DeInit). */
     {
         SSFHMACContext_t ctx = {0};
         uint8_t key[16] = {0};
@@ -858,10 +798,7 @@ void SSFHMACUnitTest(void)
         SSF_ASSERT_TEST(SSFHMACDeInit(&ctx));
     }
 
-    /* Begin requires `magic == 0` on entry: the caller must zero the struct (or DeInit it)
-       before calling Begin. Stricter than the older `!= MAGIC` check -- non-zero garbage is
-       rejected too, forcing explicit zero-init rather than relying on stack residue happening
-       not to collide with the magic value. */
+    /* Begin requires magic == 0 on entry: non-zero garbage is rejected. */
     {
         SSFHMACContext_t ctx;
         uint8_t key[16] = {0};
@@ -878,9 +815,7 @@ void SSFHMACUnitTest(void)
         SSF_ASSERT_TEST(SSFHMACBegin(&ctx, SSF_HMAC_HASH_SHA256, key, sizeof(key)));
     }
 
-    /* Begin must refuse to re-init an already-initialized context -- the caller is required
-       to DeInit (or zero) the struct between Begins. Catches the common bug of forgetting
-       DeInit before reusing a stack-allocated context for a second HMAC. */
+    /* Begin must refuse to re-init an already-initialized context. */
     {
         SSFHMACContext_t ctx = {0};
         uint8_t key[16] = {0};
@@ -890,11 +825,7 @@ void SSFHMACUnitTest(void)
         SSFHMACDeInit(&ctx);
     }
 
-    /* Regression for M2: macOutSize must equal hashSize exactly. The previous >= contract
-       allowed callers to pass an oversized buffer; only the first hashSize bytes were
-       written, leaving the trailing region as uninitialized stack memory (potential leak
-       if the caller later transmitted or re-hashed the full buffer). The strict-equality
-       contract makes any size mismatch fail loudly at the assertion. */
+    /* Regression for M2: macOutSize must equal hashSize exactly. */
     {
         static const uint8_t key[16] = {0};
         uint8_t macOversize[64];
@@ -933,8 +864,7 @@ void SSFHMACUnitTest(void)
         SSF_ASSERT_TEST(SSFHMACGetHashSize((SSFHMACHash_t)-42));
     }
 
-    /* DBC: SSFHMACBegin parameter validation. NULL ctx, NULL key, out-of-range hash, and
-       zero-length key must all trip the contract. */
+    /* DBC: SSFHMACBegin rejects NULL ctx, NULL key, out-of-range hash and zero keyLen. */
     {
         SSFHMACContext_t ctx = {0};
         uint8_t key[16] = {0};
@@ -947,8 +877,7 @@ void SSFHMACUnitTest(void)
         SSF_ASSERT_TEST(SSFHMACBegin(&ctx, SSF_HMAC_HASH_SHA256, key, 0u));
     }
 
-    /* DBC: SSFHMACUpdate parameter validation. NULL ctx and NULL data with non-zero length
-       must trip; (NULL, 0) is permitted and exercised by the empty-message test above. */
+    /* DBC: SSFHMACUpdate rejects NULL ctx and NULL data with non-zero length. */
     {
         SSFHMACContext_t ctx = {0};
         uint8_t key[16] = {0};
@@ -960,8 +889,7 @@ void SSFHMACUnitTest(void)
         SSFHMACDeInit(&ctx);
     }
 
-    /* DBC: SSFHMACEnd parameter validation. NULL ctx and NULL macOut must trip;
-       macOutSize != hashSize is covered by the M2 block above. */
+    /* DBC: SSFHMACEnd rejects NULL ctx and NULL macOut (size mismatch covered by M2). */
     {
         SSFHMACContext_t ctx = {0};
         uint8_t key[16] = {0};
@@ -972,8 +900,7 @@ void SSFHMACUnitTest(void)
         SSFHMACDeInit(&ctx);
     }
 
-    /* DBC: SSFHMACDeInit parameter validation. NULL ctx must trip. Magic-mismatch is
-       covered by the M3 use-without-init / use-after-DeInit blocks. */
+    /* DBC: SSFHMACDeInit rejects NULL ctx (magic mismatch covered by M3). */
     {
         SSF_ASSERT_TEST(SSFHMACDeInit(NULL));
     }
@@ -999,10 +926,7 @@ void SSFHMACUnitTest(void)
     }
 
 #if SSF_HMAC_OSSL_VERIFY == 1
-    /* Comprehensive cross-validation against OpenSSL. Random fuzz across the full              */
-    /* (hash x keyLen x msgLen) matrix, plus explicit corner cases. Skipped on cross builds     */
-    /* (-DSSF_CONFIG_HAVE_OPENSSL=0) -- RFC 4231 / RFC 2202 KATs above remain the load-bearing  */
-    /* coverage there.                                                                           */
+    /* Comprehensive cross-validation against OpenSSL: random fuzz plus corner cases. */
     _VerifyHMACAgainstOpenSSLRandom();
     _VerifyHMACCornerCasesAgainstOpenSSL();
 #endif

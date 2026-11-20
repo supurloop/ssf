@@ -31346,25 +31346,25 @@ void SSFAESGCMUnitTest(void)
         _scrubDirty = 0u;
         static const uint8_t key[16] = { 0x66u };
         static const uint8_t iv[12] = { 0x77u };
-        uint8_t pt[40];
-        uint8_t ct[40];
+        uint8_t wPt[40];
+        uint8_t wCt[40];
         uint8_t out[40];
-        uint8_t tag[16];
+        uint8_t wTag[16];
         uint32_t calls;
 
-        memset(pt, 0x88, sizeof(pt));
+        memset(wPt, 0x88, sizeof(wPt));
         _SSFAESGCMScrubTestHook = _ScrubCheck;
-        SSFAESGCMEncrypt(pt, sizeof(pt), iv, sizeof(iv), NULL, 0, key, sizeof(key), tag,
-                         sizeof(tag), ct, sizeof(ct));
+        SSFAESGCMEncrypt(wPt, sizeof(wPt), iv, sizeof(iv), NULL, 0, key, sizeof(key), wTag,
+                         sizeof(wTag), wCt, sizeof(wCt));
         calls = _scrubCalls;
         SSF_ASSERT(calls > 0u);
-        SSF_ASSERT(SSFAESGCMDecrypt(ct, sizeof(ct), iv, sizeof(iv), NULL, 0, key, sizeof(key),
-                                    tag, sizeof(tag), out, sizeof(out)) == true);
+        SSF_ASSERT(SSFAESGCMDecrypt(wCt, sizeof(wCt), iv, sizeof(iv), NULL, 0, key, sizeof(key),
+                                    wTag, sizeof(wTag), out, sizeof(out)) == true);
         SSF_ASSERT(_scrubCalls > calls);
         calls = _scrubCalls;
-        tag[0] ^= 1u;
-        SSF_ASSERT(SSFAESGCMDecrypt(ct, sizeof(ct), iv, sizeof(iv), NULL, 0, key, sizeof(key),
-                                    tag, sizeof(tag), out, sizeof(out)) == false);
+        wTag[0] ^= 1u;
+        SSF_ASSERT(SSFAESGCMDecrypt(wCt, sizeof(wCt), iv, sizeof(iv), NULL, 0, key, sizeof(key),
+                                    wTag, sizeof(wTag), out, sizeof(out)) == false);
         _SSFAESGCMScrubTestHook = NULL;
         SSF_ASSERT(_scrubCalls > calls);
         SSF_ASSERT(_scrubDirty == 0u);
@@ -31375,7 +31375,7 @@ void SSFAESGCMUnitTest(void)
         static const uint8_t key[16] = { 0x5Au };
         static const uint8_t iv[12] = { 0xA5u };
         static uint8_t aad[64u * 16u];
-        uint8_t tag[16];
+        uint8_t hTag[16];
         uint32_t preps1;
         uint32_t wipes1;
 
@@ -31384,14 +31384,14 @@ void SSFAESGCMUnitTest(void)
         _scrubDirty = 0u;
         _SSFAESGCMScrubTestHook = _ScrubCheck;
         _SSFAESGCMHPreps = 0u;
-        SSFAESGCMEncrypt(NULL, 0, iv, sizeof(iv), aad, 16u, key, sizeof(key), tag, sizeof(tag),
+        SSFAESGCMEncrypt(NULL, 0, iv, sizeof(iv), aad, 16u, key, sizeof(key), hTag, sizeof(hTag),
                          NULL, 0);
         preps1 = _SSFAESGCMHPreps;
         wipes1 = _scrubCalls;
         _scrubCalls = 0u;
         _SSFAESGCMHPreps = 0u;
-        SSFAESGCMEncrypt(NULL, 0, iv, sizeof(iv), aad, sizeof(aad), key, sizeof(key), tag,
-                         sizeof(tag), NULL, 0);
+        SSFAESGCMEncrypt(NULL, 0, iv, sizeof(iv), aad, sizeof(aad), key, sizeof(key), hTag,
+                         sizeof(hTag), NULL, 0);
         _SSFAESGCMScrubTestHook = NULL;
         SSF_ASSERT(_SSFAESGCMHPreps == preps1);
         SSF_ASSERT(_scrubCalls == wipes1);

@@ -1087,13 +1087,13 @@ void SSFSHA2UnitTest(void)
         };
         SSFSHA2_64Context_t ctx512;
         SSFSHA2_32Context_t ctx256;
-        uint8_t out[64];
+        uint8_t limOut[64];
 
         SSFSHA512Begin(&ctx512);
         ctx512.totalBits = 0xFFFFFFFFFFFFFFF8ull;
         SSFSHA512Update(&ctx512, (const uint8_t *)"abc", 3u);
-        SSFSHA512End(&ctx512, out, sizeof(out));
-        SSF_ASSERT(memcmp(out, expected, sizeof(expected)) == 0);
+        SSFSHA512End(&ctx512, limOut, sizeof(limOut));
+        SSF_ASSERT(memcmp(limOut, expected, sizeof(expected)) == 0);
 
         /* SHA-256's own limit is < 2^64 bits: crossing it must trap, not wrap. */
         SSFSHA256Begin(&ctx256);
@@ -1110,12 +1110,12 @@ void SSFSHA2UnitTest(void)
         _scrubCalls = 0u;
         _scrubDirty = 0u;
         uint8_t msg[100];
-        uint8_t out[SSF_SHA2_512_BYTE_SIZE];
+        uint8_t wOut[SSF_SHA2_512_BYTE_SIZE];
 
         memset(msg, 0x55, sizeof(msg));
         _SSFSHA2ScrubTestHook = _ScrubCheck;
-        SSFSHA256(msg, sizeof(msg), out, sizeof(out));
-        SSFSHA512(msg, sizeof(msg), out, sizeof(out));
+        SSFSHA256(msg, sizeof(msg), wOut, sizeof(wOut));
+        SSFSHA512(msg, sizeof(msg), wOut, sizeof(wOut));
         _SSFSHA2ScrubTestHook = NULL;
         SSF_ASSERT(_scrubCalls == 3u);
         SSF_ASSERT(_scrubDirty == 0u);

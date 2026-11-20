@@ -672,14 +672,14 @@ void SSFChaCha20UnitTest(void)
     {
         _scrubCalls = 0u;
         _scrubDirty = 0u;
-        static const uint8_t key[32] = { 0x11u };
-        static const uint8_t nonce[12] = { 0x22u };
-        uint8_t pt[100];
+        static const uint8_t wKey[32] = { 0x11u };
+        static const uint8_t wNonce[12] = { 0x22u };
+        uint8_t wPt[100];
         uint8_t ct[100];
 
-        memset(pt, 0x33, sizeof(pt));
+        memset(wPt, 0x33, sizeof(wPt));
         _SSFChaCha20ScrubTestHook = _ScrubCheck;
-        SSFChaCha20Encrypt(pt, sizeof(pt), key, sizeof(key), nonce, sizeof(nonce), 1u, ct,
+        SSFChaCha20Encrypt(wPt, sizeof(wPt), wKey, sizeof(wKey), wNonce, sizeof(wNonce), 1u, ct,
                            sizeof(ct));
         _SSFChaCha20ScrubTestHook = NULL;
         SSF_ASSERT(_scrubCalls == 2u);

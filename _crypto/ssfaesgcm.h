@@ -62,6 +62,9 @@ void SSFAESGCMUnitTest(void);
 
 /* Test-only hook fired after each secret local is wiped (AUDIT GCM-3). */
 extern void (*_SSFAESGCMScrubTestHook)(const void *buf, size_t len);
+
+/* Test-only count of GHASH key (H) preparations: once per GHASH call (OPTIMIZE GCM-O1) */
+extern uint32_t _SSFAESGCMHPreps;
 #endif /* SSF_CONFIG_AESGCM_UNIT_TEST */
 
 #ifdef __cplusplus

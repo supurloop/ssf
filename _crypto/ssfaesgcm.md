@@ -51,6 +51,13 @@ for any unused field.
   reuses it for the hash subkey `H` and every GCTR keystream block, rather than re-expanding the
   key per block. The expanded schedule is securely wiped before the function returns on every
   path. This is an internal optimization with no effect on the public API, behavior, or output.
+- GHASH multiplies in GF(2¹²⁸) with a constant-time carryless multiply (no tables, no
+  secret-dependent branches). Each GHASH pass prepares `H` once (bit-reversed words and its
+  Karatsuba operand sums) and keeps the running tag in that bit-reversed form, so each block
+  reverses only its own 16 bytes; the multiply's intermediates, the prepared `H` and the tag
+  are wiped once at the end of the pass rather than after every block (OPTIMIZE GCM-O1: GHASH
+  about 1.5–1.9× faster on x86-64, ARMv7-A and Cortex-M4, about 1.1× on Cortex-M0+, whose
+  64-bit multiplies are library calls). Output is unchanged.
 
 <a id="configuration"></a>
 

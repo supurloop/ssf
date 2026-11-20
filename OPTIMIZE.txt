@@ -75,7 +75,7 @@ SUMMARY
   EC-O4    Speed         ECC 1.5-2.2x measured (NIST reduction correction)      M       DONE
   EC-O1    Speed         ECC 1-8% measured (prototype)                         S       OPEN
   HMAC-O1  Speed         none as written; key reuse ~0.3% sign, HKDF -37% 4-blk M       SKIP
-  GCM-O1   Speed         GHASH +15-20% (GCM +7-10%)                            S       OPEN
+  GCM-O1   Speed         GHASH 1.5-1.9x, GCM 16 KB 1.1-1.6x measured          S       DONE
   SHA1-O2  Speed+stack   SHA-1 1.2-2x, -256 B stack                            S       OPEN
   FE-O2    Size          -0.7 KB M4 / -0.9 KB M0+ with both enabled, measured  M       DONE
 
@@ -306,7 +306,7 @@ ssfaesgcm
 
   Measured split (16 KB, -O2): AES-CTR 75 us, GHASH 70 us, so GHASH is about half of GCM.
 
-GCM-O1  Speed  OPEN  Effort S
+GCM-O1  Speed  DONE (2026-11-19)  Effort S
   Where:     _SSFAESGCMBlockMult (H bit-reversed and loaded every block; Karatsuba operand
              sums of H recomputed every block)
   Change:    Prepare H once per message (reversed words plus the y0^y1, y2^y3, y0^y2,
@@ -1443,4 +1443,43 @@ CHANGE LOG
               Expand-Label calls are mostly single-block and re-key every call. Not worth the
               RAM. If multi-block HKDF ever matters, reuse the two pad states inside
               SSFHKDFExpand's loop only (no API change, about +100-250 B of HKDF stack).
+  2026-11-19  GCM-O1 DONE (Jim: "Commit first then implement GCM-O1"). _SSFAESGCMBlockMult
+              (H loaded and bit-reversed per block, Karatsuba sums of H rebuilt per block, the
+              tag reversed in and out per block, six SSFCryptSecureZero calls per block) is
+              replaced by _SSFAESGCMPrepH (once per GHASH call), _SSFAESGCMMulH (multiply and
+              reduce on a work struct in GHASH's frame) and _SSFAESGCMAbsorb (only the
+              incoming block is reversed: reversal is linear over XOR, so the tag stays in
+              the multiply's bit-reversed word order); GHASH wipes the work struct, prepared H,
+              tag and pad buffer once at the end (_SSF_AESGCM_SCRUB_HOOK_OBJ for the structs).
+              Same constant-time multiply and reduction; no tables, no new branches.
+              RED: ssfaesgcm_ut.c "OPTIMIZE GCM-O1": 1 and 64 blocks of AAD must cost the same
+              H preparations (test counter _SSFAESGCMHPreps) and the same wipes (scrub hook);
+              failed at ssfaesgcm_ut.c:3794 (preparations grew with blocks).
+              GREEN: all 12 suites normal, ASan + UBSan, 32-bit ARM (NIST, Wycheproof and the
+              GCM-3 scrub test included). Differential: 100000 encrypt / decrypt cases (random
+              pt 0-599 B, AAD 0-299 B, IV 12 B or 1-40 B, AES-128 / 192 / 256) give the
+              committed code's ciphertext / tag digest and all round-trip, sanitizer clean.
+              Mutation: a wrong H sum (two), swapped tag words, an unreversed data word, no
+              partial block, a dropped Karatsuba term, no final wipe all fail.
+              Speed (best of 5): GMAC 16 KB (GHASH only) x86-64 87 -> 46 us, ARMv7-A 490 -> 270,
+              Cortex-M4 build 383-403 -> 213-218, Cortex-M0+ build 1763 -> 1547; GCM encrypt
+              16 KB x86-64 131 -> 98, ARMv7-A 711 -> 455, M4 532-542 -> 401-482 (emulator
+              noise), M0+ 2120 -> 1951; 64 B packets 0-10% (key expansion and H dominate).
+              Code (ssfaesgcm, -Os): Cortex-M4 3288 -> 3071 B (-217), Cortex-M0+ 3364 -> 3223 B
+              (-141). Stack: Encrypt / Decrypt peaks 744 / 736 B (M4), 776 B (M0+) unchanged.
+              Docs: ssfaesgcm.md notes.
+  2026-11-19  GCM-O1 AUDIT (Jim: "Do an audit first"). Big-endian: the AES-GCM unit suite
+              passes on MIPS BE (qemu-mips) and the 100000-case differential gives the x86-64
+              digest (ba6aa7f3ca6fb98b). New code gcc -Wconversion -Wsign-conversion -Wshadow
+              -pedantic clean. Constant time: block count and the partial-block test depend on
+              public lengths only; same carryless multiply and reduction, no tables, no new
+              branches. Wipes: everything the old code wiped per block (x, y, res, ac128,
+              bd128, ab_cd128) is now in the work struct, wiped once per GHASH call with the
+              prepared H, tag and pad buffer; the 64-bit partial products (ac64 / bd64 /
+              ab_cd64) and _SSFAESGCMCarryless32Mult's locals were not wiped before and are
+              not now (unchanged; inline / callee frames, same as before). The pad buffer is
+              now zeroed on every call, so its final wipe is always of a defined value.
+              BLOCK_XOR stays (GCTR uses it). MSVC: the old C6385 suppression around the
+              partial-block XOR went with that code; not re-checkable here (no MSVC). No
+              findings.
 

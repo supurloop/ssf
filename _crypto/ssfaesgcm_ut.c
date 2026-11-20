@@ -3765,6 +3765,36 @@ void SSFAESGCMUnitTest(void)
         SSF_ASSERT(_scrubCalls > calls);
         SSF_ASSERT(_scrubDirty == 0u);
     }
+
+    /* ---- OPTIMIZE GCM-O1: GHASH prepares H and wipes its work once per call ---- */
+    /* H was bit-reversed and its Karatsuba sums rebuilt for every block, and six locals were */
+    /* wiped per block. 1 and 64 blocks of AAD must cost the same preparations and wipes.     */
+    {
+        static const uint8_t key[16] = { 0x5Au };
+        static const uint8_t iv[12] = { 0xA5u };
+        static uint8_t aad[64u * 16u];
+        uint8_t tag[16];
+        uint32_t preps1;
+        uint32_t wipes1;
+
+        memset(aad, 0x3C, sizeof(aad));
+        _scrubCalls = 0u;
+        _scrubDirty = 0u;
+        _SSFAESGCMScrubTestHook = _ScrubCheck;
+        _SSFAESGCMHPreps = 0u;
+        SSFAESGCMEncrypt(NULL, 0, iv, sizeof(iv), aad, 16u, key, sizeof(key), tag, sizeof(tag),
+                         NULL, 0);
+        preps1 = _SSFAESGCMHPreps;
+        wipes1 = _scrubCalls;
+        _scrubCalls = 0u;
+        _SSFAESGCMHPreps = 0u;
+        SSFAESGCMEncrypt(NULL, 0, iv, sizeof(iv), aad, sizeof(aad), key, sizeof(key), tag,
+                         sizeof(tag), NULL, 0);
+        _SSFAESGCMScrubTestHook = NULL;
+        SSF_ASSERT(_SSFAESGCMHPreps == preps1);
+        SSF_ASSERT(_scrubCalls == wipes1);
+        SSF_ASSERT(_scrubDirty == 0u);
+    }
 }
 
 #endif /* SSF_CONFIG_AESGCM_UNIT_TEST */

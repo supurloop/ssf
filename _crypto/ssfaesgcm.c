@@ -46,8 +46,16 @@
 void (*_SSFAESGCMScrubTestHook)(const void *buf, size_t len) = NULL;
 #define _SSF_AESGCM_SCRUB_HOOK(b) \
     do { if (_SSFAESGCMScrubTestHook != NULL) _SSFAESGCMScrubTestHook((b), sizeof(b)); } while (0)
+#define _SSF_AESGCM_SCRUB_HOOK_OBJ(o) \
+    do { if (_SSFAESGCMScrubTestHook != NULL) _SSFAESGCMScrubTestHook(&(o), sizeof(o)); } while (0)
+
+/* Test-only count of GHASH key (H) preparations: once per GHASH call (OPTIMIZE GCM-O1) */
+uint32_t _SSFAESGCMHPreps = 0u;
+#define _SSF_AESGCM_COUNT(c) do { (c)++; } while (0)
 #else
+#define _SSF_AESGCM_COUNT(c) do { } while (0)
 #define _SSF_AESGCM_SCRUB_HOOK(b) do { } while (0)
+#define _SSF_AESGCM_SCRUB_HOOK_OBJ(o) do { } while (0)
 #endif /* SSF_CONFIG_AESGCM_UNIT_TEST */
 
 /* Compile-time bounds checks via typedef-array idiom (size becomes -1 on failure). */
@@ -178,122 +186,128 @@ static inline uint32_t _SSFAESGCMReverseBytes(uint32_t x)
            ^ (_SSFAESGCMReverseByte((x >> 24) & 0xff) << 24));
 }
 
+/* GHASH key H, bit-reversed into the multiply's word order once per GHASH call (GCM-O1) */
+typedef struct
+{
+    uint32_t y[4];
+    uint32_t y01;
+    uint32_t y23;
+    uint32_t y02;
+    uint32_t y13;
+    uint32_t y0123;
+} _SSFAESGCMHKey_t;
+
+/* GF(2^128) multiply scratch, kept in GHASH's frame and wiped once per call (GCM-O1) */
+typedef struct
+{
+    uint32_t x[4];
+    uint32_t res[8];
+    uint32_t ac128[4];
+    uint32_t bd128[4];
+    uint32_t ab_cd128[4];
+} _SSFAESGCMWork_t;
+
 /* --------------------------------------------------------------------------------------------- */
-/* In-place GF(2^128) multiply of in by con (Karatsuba carryless multiply + GCM reduction).      */
+/* Prepares H for the multiply: words bit-reversed and Karatsuba operand sums (OPTIMIZE GCM-O1). */
 /* --------------------------------------------------------------------------------------------- */
-static void _SSFAESGCMBlockMult(uint8_t *in, size_t inSize, const uint8_t *con, size_t conLen)
+static void _SSFAESGCMPrepH(_SSFAESGCMHKey_t *hk, const uint8_t *h, size_t hLen)
+{
+    SSF_REQUIRE(hk != NULL);
+    SSF_REQUIRE(h != NULL);
+    SSF_REQUIRE(hLen == 16u);
+
+    _SSF_AESGCM_COUNT(_SSFAESGCMHPreps);
+    hk->y[3] = _SSFAESGCMReverseBytes(SSF_GETU32LE(h));
+    hk->y[2] = _SSFAESGCMReverseBytes(SSF_GETU32LE(&h[4]));
+    hk->y[1] = _SSFAESGCMReverseBytes(SSF_GETU32LE(&h[8]));
+    hk->y[0] = _SSFAESGCMReverseBytes(SSF_GETU32LE(&h[12]));
+    hk->y01 = hk->y[0] ^ hk->y[1];
+    hk->y23 = hk->y[2] ^ hk->y[3];
+    hk->y02 = hk->y[0] ^ hk->y[2];
+    hk->y13 = hk->y[1] ^ hk->y[3];
+    hk->y0123 = hk->y01 ^ hk->y23;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* w->res = w->x * H in GF(2^128), both bit-reversed (Karatsuba carryless multiply, reduce).     */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAESGCMMulH(_SSFAESGCMWork_t *w, const _SSFAESGCMHKey_t *hk)
 {
     uint32_t ac64[2];
     uint32_t bd64[2];
     uint32_t ab_cd64[2];
+    const uint32_t *x;
 
-    uint32_t ac128[4];
-    uint32_t bd128[4];
-    uint32_t ab_cd128[4];
+    SSF_REQUIRE(w != NULL);
+    SSF_REQUIRE(hk != NULL);
 
-    uint32_t x[4];
-    uint32_t y[4];
-
-    uint32_t res[8];
-
-    SSF_REQUIRE(in != NULL);
-    SSF_REQUIRE(con != NULL);
-
-    SSF_REQUIRE(inSize == 16);
-    SSF_REQUIRE(conLen == 16);
-
-    x[3] = SSF_GETU32LE(in);
-    x[2] = SSF_GETU32LE(&in[4]);
-    x[1] = SSF_GETU32LE(&in[8]);
-    x[0] = SSF_GETU32LE(&in[12]);
-
-    x[0] = _SSFAESGCMReverseBytes(x[0]);
-    x[1] = _SSFAESGCMReverseBytes(x[1]);
-    x[2] = _SSFAESGCMReverseBytes(x[2]);
-    x[3] = _SSFAESGCMReverseBytes(x[3]);
-
-    y[3] = SSF_GETU32LE(con);
-    y[2] = SSF_GETU32LE(&con[4]);
-    y[1] = SSF_GETU32LE(&con[8]);
-    y[0] = SSF_GETU32LE(&con[12]);
-
-    y[0] = _SSFAESGCMReverseBytes(y[0]);
-    y[1] = _SSFAESGCMReverseBytes(y[1]);
-    y[2] = _SSFAESGCMReverseBytes(y[2]);
-    y[3] = _SSFAESGCMReverseBytes(y[3]);
-
-    _SSFAESGCMCarryless32Mult(x[0], y[0], &ac64[1], &ac64[0]);
-    _SSFAESGCMCarryless32Mult(x[1], y[1], &bd64[1], &bd64[0]);
-    _SSFAESGCMCarryless32Mult((x[0] ^ x[1]), (y[0] ^ y[1]), &ab_cd64[1], &ab_cd64[0]);
+    x = w->x;
+    _SSFAESGCMCarryless32Mult(x[0], hk->y[0], &ac64[1], &ac64[0]);
+    _SSFAESGCMCarryless32Mult(x[1], hk->y[1], &bd64[1], &bd64[0]);
+    _SSFAESGCMCarryless32Mult((x[0] ^ x[1]), hk->y01, &ab_cd64[1], &ab_cd64[0]);
     ab_cd64[0] ^= ac64[0] ^ bd64[0];
     ab_cd64[1] ^= ac64[1] ^ bd64[1];
 
-    ac128[0] = ac64[0];
-    ac128[1] = ac64[1] ^ ab_cd64[0];
-    ac128[2] = ab_cd64[1] ^ bd64[0];
-    ac128[3] = bd64[1];
+    w->ac128[0] = ac64[0];
+    w->ac128[1] = ac64[1] ^ ab_cd64[0];
+    w->ac128[2] = ab_cd64[1] ^ bd64[0];
+    w->ac128[3] = bd64[1];
 
-    _SSFAESGCMCarryless32Mult(x[2], y[2], &ac64[1], &ac64[0]);
-    _SSFAESGCMCarryless32Mult(x[3], y[3], &bd64[1], &bd64[0]);
-    _SSFAESGCMCarryless32Mult((x[2] ^ x[3]), (y[2] ^ y[3]), &ab_cd64[1], &ab_cd64[0]);
+    _SSFAESGCMCarryless32Mult(x[2], hk->y[2], &ac64[1], &ac64[0]);
+    _SSFAESGCMCarryless32Mult(x[3], hk->y[3], &bd64[1], &bd64[0]);
+    _SSFAESGCMCarryless32Mult((x[2] ^ x[3]), hk->y23, &ab_cd64[1], &ab_cd64[0]);
     ab_cd64[0] ^= ac64[0] ^ bd64[0];
     ab_cd64[1] ^= ac64[1] ^ bd64[1];
 
-    bd128[0] = ac64[0];
-    bd128[1] = ac64[1] ^ ab_cd64[0];
-    bd128[2] = ab_cd64[1] ^ bd64[0];
-    bd128[3] = bd64[1];
+    w->bd128[0] = ac64[0];
+    w->bd128[1] = ac64[1] ^ ab_cd64[0];
+    w->bd128[2] = ab_cd64[1] ^ bd64[0];
+    w->bd128[3] = bd64[1];
 
-    _SSFAESGCMCarryless32Mult((x[0] ^ x[2]), (y[0] ^ y[2]), &ac64[1], &ac64[0]);
-    _SSFAESGCMCarryless32Mult((x[1] ^ x[3]), (y[1] ^ y[3]), &bd64[1], &bd64[0]);
-    _SSFAESGCMCarryless32Mult((x[0] ^ x[1] ^ x[2] ^ x[3]),
-                              (y[0] ^ y[1] ^ y[2] ^ y[3]), &ab_cd64[1], &ab_cd64[0]);
+    _SSFAESGCMCarryless32Mult((x[0] ^ x[2]), hk->y02, &ac64[1], &ac64[0]);
+    _SSFAESGCMCarryless32Mult((x[1] ^ x[3]), hk->y13, &bd64[1], &bd64[0]);
+    _SSFAESGCMCarryless32Mult((x[0] ^ x[1] ^ x[2] ^ x[3]), hk->y0123, &ab_cd64[1], &ab_cd64[0]);
     ab_cd64[0] ^= ac64[0] ^ bd64[0];
     ab_cd64[1] ^= ac64[1] ^ bd64[1];
 
-    ab_cd128[0] = ac64[0];
-    ab_cd128[1] = ac64[1] ^ ab_cd64[0];
-    ab_cd128[2] = ab_cd64[1] ^ bd64[0];
-    ab_cd128[3] = bd64[1];
+    w->ab_cd128[0] = ac64[0] ^ w->ac128[0] ^ w->bd128[0];
+    w->ab_cd128[1] = ac64[1] ^ ab_cd64[0] ^ w->ac128[1] ^ w->bd128[1];
+    w->ab_cd128[2] = ab_cd64[1] ^ bd64[0] ^ w->ac128[2] ^ w->bd128[2];
+    w->ab_cd128[3] = bd64[1] ^ w->ac128[3] ^ w->bd128[3];
 
-    ab_cd128[0] ^= ac128[0] ^ bd128[0];
-    ab_cd128[1] ^= ac128[1] ^ bd128[1];
-    ab_cd128[2] ^= ac128[2] ^ bd128[2];
-    ab_cd128[3] ^= ac128[3] ^ bd128[3];
+    w->res[0] = w->ac128[0];
+    w->res[1] = w->ac128[1];
+    w->res[2] = w->ac128[2] ^ w->ab_cd128[0];
+    w->res[3] = w->ac128[3] ^ w->ab_cd128[1];
+    w->res[4] = w->ab_cd128[2] ^ w->bd128[0];
+    w->res[5] = w->ab_cd128[3] ^ w->bd128[1];
+    w->res[6] = w->bd128[2];
+    w->res[7] = w->bd128[3];
 
-    res[0] = ac128[0];
-    res[1] = ac128[1];
-    res[2] = ac128[2] ^ ab_cd128[0];
-    res[3] = ac128[3] ^ ab_cd128[1];
-    res[4] = ab_cd128[2] ^ bd128[0];
-    res[5] = ab_cd128[3] ^ bd128[1];
-    res[6] = bd128[2];
-    res[7] = bd128[3];
+    _SSFAESGCMCarrylessReduce(w->res);
+}
 
-    _SSFAESGCMCarrylessReduce(res);
+/* --------------------------------------------------------------------------------------------- */
+/* acc = (acc XOR block) * H; acc is the bit-reversed accumulator in multiply word order.        */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFAESGCMAbsorb(uint32_t *acc, const uint8_t *block, const _SSFAESGCMHKey_t *hk,
+                             _SSFAESGCMWork_t *w)
+{
+    SSF_REQUIRE(acc != NULL);
+    SSF_REQUIRE(block != NULL);
+    SSF_REQUIRE(hk != NULL);
+    SSF_REQUIRE(w != NULL);
 
-    res[0] = _SSFAESGCMReverseBytes(res[0]);
-    res[1] = _SSFAESGCMReverseBytes(res[1]);
-    res[2] = _SSFAESGCMReverseBytes(res[2]);
-    res[3] = _SSFAESGCMReverseBytes(res[3]);
-
-    /* Symmetric inverse of the SSF_GETU32LE reads above (host-endian-safe). */
-    SSF_PUTU32LE(&in[0],  res[0]);
-    SSF_PUTU32LE(&in[4],  res[1]);
-    SSF_PUTU32LE(&in[8],  res[2]);
-    SSF_PUTU32LE(&in[12], res[3]);
-    SSFCryptSecureZero(x, sizeof(x));
-    _SSF_AESGCM_SCRUB_HOOK(x);
-    SSFCryptSecureZero(y, sizeof(y));
-    _SSF_AESGCM_SCRUB_HOOK(y);
-    SSFCryptSecureZero(res, sizeof(res));
-    _SSF_AESGCM_SCRUB_HOOK(res);
-    SSFCryptSecureZero(ac128, sizeof(ac128));
-    _SSF_AESGCM_SCRUB_HOOK(ac128);
-    SSFCryptSecureZero(bd128, sizeof(bd128));
-    _SSF_AESGCM_SCRUB_HOOK(bd128);
-    SSFCryptSecureZero(ab_cd128, sizeof(ab_cd128));
-    _SSF_AESGCM_SCRUB_HOOK(ab_cd128);
+    /* Bit reversal is linear over XOR, so only the incoming block needs reversing */
+    w->x[3] = acc[3] ^ _SSFAESGCMReverseBytes(SSF_GETU32LE(block));
+    w->x[2] = acc[2] ^ _SSFAESGCMReverseBytes(SSF_GETU32LE(&block[4]));
+    w->x[1] = acc[1] ^ _SSFAESGCMReverseBytes(SSF_GETU32LE(&block[8]));
+    w->x[0] = acc[0] ^ _SSFAESGCMReverseBytes(SSF_GETU32LE(&block[12]));
+    _SSFAESGCMMulH(w, hk);
+    acc[3] = w->res[0];
+    acc[2] = w->res[1];
+    acc[1] = w->res[2];
+    acc[0] = w->res[3];
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -302,10 +316,13 @@ static void _SSFAESGCMBlockMult(uint8_t *in, size_t inSize, const uint8_t *con, 
 static void _SSFAESGCMGHASH(const uint8_t *in, size_t inLen, const uint8_t *h, size_t hLen,
                             uint8_t *out, size_t outSize)
 {
-    uint8_t buf[16] = {0};
-    size_t i;
+    uint8_t buf[16];
+    _SSFAESGCMHKey_t hk;
+    _SSFAESGCMWork_t w;
+    uint32_t acc[4];
     size_t pos;
     size_t iters;
+    size_t i;
 
     /* inLen == 0 is the legitimate empty-AAD / empty-plaintext (auth-only GCM) case. */
     if (inLen == 0u) return;
@@ -317,34 +334,46 @@ static void _SSFAESGCMGHASH(const uint8_t *in, size_t inLen, const uint8_t *h, s
     SSF_REQUIRE(hLen == 16);
     SSF_REQUIRE(outSize == 16);
 
+    /* H and the accumulator enter the multiply's bit-reversed form once for the whole call */
+    _SSFAESGCMPrepH(&hk, h, hLen);
+    acc[3] = _SSFAESGCMReverseBytes(SSF_GETU32LE(out));
+    acc[2] = _SSFAESGCMReverseBytes(SSF_GETU32LE(&out[4]));
+    acc[1] = _SSFAESGCMReverseBytes(SSF_GETU32LE(&out[8]));
+    acc[0] = _SSFAESGCMReverseBytes(SSF_GETU32LE(&out[12]));
+
     pos = 0u;
     iters = inLen >> 4;
-
     for (i = 0; i < iters; i++)
     {
-        BLOCK_XOR(out, &in[pos]);
-        _SSFAESGCMBlockMult(out, outSize, h, hLen);
+        _SSFAESGCMAbsorb(acc, &in[pos], &hk, &w);
         pos += 16u;
     }
 
     /* Is there a partial trailing block? */
+    memset(buf, 0, sizeof(buf));
     if (pos < inLen)
     {
         /* Yes, zero-pad it to 16 bytes and absorb. */
         SSF_ASSERT((inLen - pos) <= sizeof(buf));
-        memset(buf, 0, sizeof(buf));
         memcpy(buf, &in[pos], inLen - pos);
-/* Disable false positive Visual Studio Code Analysis warning */
-#ifdef _WIN32
-#pragma warning(push)
-#pragma warning(disable:6385)
-#endif
-        BLOCK_XOR(out, buf);
-#ifdef _WIN32
-#pragma warning(pop)
-#endif
-        _SSFAESGCMBlockMult(out, outSize, h, hLen);
+        _SSFAESGCMAbsorb(acc, buf, &hk, &w);
     }
+
+    /* Symmetric inverse of the SSF_GETU32LE reads above (host-endian-safe). */
+    SSF_PUTU32LE(&out[0],  _SSFAESGCMReverseBytes(acc[3]));
+    SSF_PUTU32LE(&out[4],  _SSFAESGCMReverseBytes(acc[2]));
+    SSF_PUTU32LE(&out[8],  _SSFAESGCMReverseBytes(acc[1]));
+    SSF_PUTU32LE(&out[12], _SSFAESGCMReverseBytes(acc[0]));
+
+    /* Every block's intermediates, H and the accumulator are key / data derived: wipe once */
+    SSFCryptSecureZero(&w, sizeof(w));
+    _SSF_AESGCM_SCRUB_HOOK_OBJ(w);
+    SSFCryptSecureZero(&hk, sizeof(hk));
+    _SSF_AESGCM_SCRUB_HOOK_OBJ(hk);
+    SSFCryptSecureZero(acc, sizeof(acc));
+    _SSF_AESGCM_SCRUB_HOOK(acc);
+    SSFCryptSecureZero(buf, sizeof(buf));
+    _SSF_AESGCM_SCRUB_HOOK(buf);
 }
 
 /* --------------------------------------------------------------------------------------------- */

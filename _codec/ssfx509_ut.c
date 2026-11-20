@@ -822,7 +822,7 @@ static uint32_t _utAppendJunk(const uint8_t *in, uint32_t inLen, const uint8_t *
 
 void SSFX509UnitTest(void)
 {
-    SSFX509Cert_t cert;
+    static SSFX509Cert_t cert;
 
     /* ---- Parse the test certificate ---- */
     SSF_ASSERT(SSFX509Parse(_utTestCertDER, sizeof(_utTestCertDER), &cert) == true);
@@ -942,10 +942,10 @@ void SSFX509UnitTest(void)
         static const uint8_t serial[] = { 0x01u, 0x02u, 0x03u };
         static const uint8_t fakeSig[64] = { 0xAAu }; /* Dummy signature */
 
-        SSFX509GenParams_t genParams;
-        uint8_t derBuf[1024];
+        static SSFX509GenParams_t genParams;
+        static uint8_t derBuf[1024];
         uint32_t derLen;
-        SSFX509Cert_t parsed;
+        static SSFX509Cert_t parsed;
 
         memset(&genParams, 0, sizeof(genParams));
         genParams.pathLenConstraint = -1;
@@ -1038,12 +1038,12 @@ void SSFX509UnitTest(void)
     {
         /* 1a. Self-signed cert: verify signature against itself */
         {
-            uint8_t caDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
+            static uint8_t caDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
             uint32_t caDerLen;
-            uint8_t privKey[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
-            uint8_t pubKey[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+            static uint8_t privKey[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+            static uint8_t pubKey[SSF_ECDSA_MAX_PUB_KEY_SIZE];
             size_t pubKeyLen;
-            SSFX509Cert_t caCert;
+            static SSFX509Cert_t caCert;
 
             memset(privKey, 0, sizeof(privKey));
             SSF_ASSERT(_GenTestCert("selfsign.test", 1700000000ull, 2000000000ull,
@@ -1058,18 +1058,18 @@ void SSFX509UnitTest(void)
 
         /* 1b. Two certs with different keys: cross-verification fails */
         {
-            uint8_t cert1Der[SSF_X509_CONFIG_MAX_CERT_SIZE];
+            static uint8_t cert1Der[SSF_X509_CONFIG_MAX_CERT_SIZE];
             uint32_t cert1DerLen;
-            uint8_t priv1[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
-            uint8_t pub1[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+            static uint8_t priv1[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+            static uint8_t pub1[SSF_ECDSA_MAX_PUB_KEY_SIZE];
             size_t pub1Len;
-            uint8_t cert2Der[SSF_X509_CONFIG_MAX_CERT_SIZE];
+            static uint8_t cert2Der[SSF_X509_CONFIG_MAX_CERT_SIZE];
             uint32_t cert2DerLen;
-            uint8_t priv2[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
-            uint8_t pub2[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+            static uint8_t priv2[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+            static uint8_t pub2[SSF_ECDSA_MAX_PUB_KEY_SIZE];
             size_t pub2Len;
-            SSFX509Cert_t c1;
-            SSFX509Cert_t c2;
+            static SSFX509Cert_t c1;
+            static SSFX509Cert_t c2;
 
             memset(priv1, 0, sizeof(priv1));
             memset(priv2, 0, sizeof(priv2));
@@ -1091,7 +1091,7 @@ void SSFX509UnitTest(void)
 
         /* 1c. Verify existing test cert signature against itself */
         {
-            SSFX509Cert_t selfCert;
+            static SSFX509Cert_t selfCert;
             SSF_ASSERT(SSFX509Parse(_utTestCertDER, sizeof(_utTestCertDER), &selfCert) == true);
             SSF_ASSERT(SSFX509VerifyCertSignature(&selfCert, &selfCert) == true);
         }
@@ -1139,10 +1139,10 @@ void SSFX509UnitTest(void)
 
         /* 2d. Expired cert: notAfter in the past relative to nowTime */
         {
-            uint8_t caDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
+            static uint8_t caDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
             uint32_t caDerLen;
-            uint8_t privKey[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
-            uint8_t pubKey[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+            static uint8_t privKey[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+            static uint8_t pubKey[SSF_ECDSA_MAX_PUB_KEY_SIZE];
             size_t pubKeyLen;
             const uint8_t *chain[1];
             uint32_t chainLens[1];
@@ -1165,10 +1165,10 @@ void SSFX509UnitTest(void)
 
         /* 2e. Not-yet-valid cert: notBefore in the future */
         {
-            uint8_t caDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
+            static uint8_t caDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
             uint32_t caDerLen;
-            uint8_t privKey[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
-            uint8_t pubKey[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+            static uint8_t privKey[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+            static uint8_t pubKey[SSF_ECDSA_MAX_PUB_KEY_SIZE];
             size_t pubKeyLen;
             const uint8_t *chain[1];
             uint32_t chainLens[1];
@@ -1191,15 +1191,15 @@ void SSFX509UnitTest(void)
 
         /* 2f. Empty trust store: trustCount=0 is a precondition violation, see the SSF_REQUIRE */
         {
-            uint8_t caDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
+            static uint8_t caDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
             uint32_t caDerLen;
-            uint8_t caPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
-            uint8_t caPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+            static uint8_t caPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+            static uint8_t caPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
             size_t caPubLen;
-            uint8_t otherDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
+            static uint8_t otherDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
             uint32_t otherDerLen;
-            uint8_t otherPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
-            uint8_t otherPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+            static uint8_t otherPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+            static uint8_t otherPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
             size_t otherPubLen;
             const uint8_t *chain[1];
             uint32_t chainLens[1];
@@ -1228,14 +1228,14 @@ void SSFX509UnitTest(void)
 
         /* 2g. Non-CA intermediate: chain with non-CA cert as issuer */
         {
-            uint8_t midDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
+            static uint8_t midDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
             uint32_t midDerLen;
-            uint8_t midPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
-            uint8_t midPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+            static uint8_t midPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+            static uint8_t midPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
             size_t midPubLen;
-            uint8_t leafDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
+            static uint8_t leafDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
             uint32_t leafDerLen;
-            uint8_t leafPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+            static uint8_t leafPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
             size_t leafPubLen;
             const uint8_t *chain[2];
             uint32_t chainLens[2];
@@ -1267,7 +1267,7 @@ void SSFX509UnitTest(void)
     /* 3. Validity Checking (SSFX509IsValid)                                */
     /* ==================================================================== */
     {
-        SSFX509Cert_t vc;
+        static SSFX509Cert_t vc;
         SSF_ASSERT(SSFX509Parse(_utTestCertDER, sizeof(_utTestCertDER), &vc) == true);
 
         /* 3a. Time inside validity window */
@@ -1290,7 +1290,7 @@ void SSFX509UnitTest(void)
     /* 4. OID Helper Functions                                              */
     /* ==================================================================== */
     {
-        SSFX509Cert_t oc;
+        static SSFX509Cert_t oc;
         SSF_ASSERT(SSFX509Parse(_utTestCertDER, sizeof(_utTestCertDER), &oc) == true);
 
         /* 4a. Positive: ECDSA P-256 cert */
@@ -1315,7 +1315,7 @@ void SSFX509UnitTest(void)
     /* 5. Extension Parsing                                                 */
     /* ==================================================================== */
     {
-        SSFX509Cert_t ec;
+        static SSFX509Cert_t ec;
         SSF_ASSERT(SSFX509Parse(_utTestCertDER, sizeof(_utTestCertDER), &ec) == true);
 
         /* 5a. BasicConstraints */
@@ -1367,10 +1367,10 @@ void SSFX509UnitTest(void)
             };
             static const uint8_t serialV1[] = { 0x05u };
             static const uint8_t fakeSigV1[64] = { 0xBBu };
-            SSFX509GenParams_t p;
-            uint8_t buf[1024];
+            static SSFX509GenParams_t p;
+            static uint8_t buf[1024];
             uint32_t len;
-            SSFX509Cert_t v1c;
+            static SSFX509Cert_t v1c;
 
             memset(&p, 0, sizeof(p));
             p.pathLenConstraint = -1;
@@ -1414,10 +1414,10 @@ void SSFX509UnitTest(void)
             };
             static const uint8_t serialDN[] = { 0x0Au };
             static const uint8_t fakeSigDN[64] = { 0xCCu };
-            SSFX509GenParams_t p;
-            uint8_t buf[1024];
+            static SSFX509GenParams_t p;
+            static uint8_t buf[1024];
             uint32_t len;
-            SSFX509Cert_t dnc;
+            static SSFX509Cert_t dnc;
 
             memset(&p, 0, sizeof(p));
             p.pathLenConstraint = -1;
@@ -1484,12 +1484,12 @@ void SSFX509UnitTest(void)
 
         /* 6c. Generate CA cert with keyCertSign and crlSign */
         {
-            uint8_t caDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
+            static uint8_t caDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
             uint32_t caDerLen;
-            uint8_t privKey[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
-            uint8_t pubKey[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+            static uint8_t privKey[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+            static uint8_t pubKey[SSF_ECDSA_MAX_PUB_KEY_SIZE];
             size_t pubKeyLen;
-            SSFX509Cert_t caCert;
+            static SSFX509Cert_t caCert;
 
             memset(privKey, 0, sizeof(privKey));
             SSF_ASSERT(_GenTestCert("ca.gen.test", 1700000000ull, 2000000000ull,
@@ -1510,7 +1510,7 @@ void SSFX509UnitTest(void)
         {
             static const uint8_t fakePubKeySmall[65] = { 0x04u };
             static const uint8_t serialSmall[] = { 0x01u };
-            SSFX509GenParams_t p;
+            static SSFX509GenParams_t p;
 
             memset(&p, 0, sizeof(p));
             p.pathLenConstraint = -1;
@@ -1543,7 +1543,7 @@ void SSFX509UnitTest(void)
             static const uint8_t fakePubKeySmall2[65] = { 0x04u };
             static const uint8_t serialSmall2[] = { 0x01u };
             static const uint8_t fakeSigSmall[64] = { 0xDDu };
-            SSFX509GenParams_t p;
+            static SSFX509GenParams_t p;
 
             memset(&p, 0, sizeof(p));
             p.pathLenConstraint = -1;
@@ -1577,9 +1577,9 @@ void SSFX509UnitTest(void)
             static const uint8_t fakePubKey2P[65] = { 0x04u, 0xFFu };
             static const uint8_t serial2P[] = { 0x07u };
             static const uint8_t fakeSig2P[64] = { 0xEEu };
-            SSFX509GenParams_t p;
+            static SSFX509GenParams_t p;
             uint32_t needed;
-            uint8_t buf[1024];
+            static uint8_t buf[1024];
             uint32_t len;
 
             memset(&p, 0, sizeof(p));
@@ -1610,7 +1610,7 @@ void SSFX509UnitTest(void)
 
             /* Encode and verify length matches */
             {
-                uint8_t tbsBuf[512];
+                static uint8_t tbsBuf[512];
                 uint32_t tbsLen;
                 (void)SSFX509EncodeTBS(tbsBuf, sizeof(tbsBuf), &p, &tbsLen);
                 SSF_ASSERT(tbsLen == needed);
@@ -1628,7 +1628,7 @@ void SSFX509UnitTest(void)
     /* 7. Parse Error Handling                                              */
     /* ==================================================================== */
     {
-        SSFX509Cert_t pc;
+        static SSFX509Cert_t pc;
 
         /* 7a. Zero-length DER */
         SSF_ASSERT(SSFX509Parse(_utTestCertDER, 0, &pc) == false);
@@ -1711,7 +1711,7 @@ void SSFX509UnitTest(void)
 
     /* ---- EKU parsing: cert without EKU -> hasExtKeyUsage is false ---- */
     {
-        SSFX509Cert_t certNoEku;
+        static SSFX509Cert_t certNoEku;
         SSF_ASSERT(SSFX509Parse(_utTestCertDER, sizeof(_utTestCertDER), &certNoEku) == true);
         SSF_ASSERT(certNoEku.hasExtKeyUsage == false);
         SSF_ASSERT(certNoEku.ekuServerAuth == false);
@@ -1720,13 +1720,13 @@ void SSFX509UnitTest(void)
 
     /* ---- EKU: generate cert with clientAuth only -> VerifyChain rejects ---- */
     {
-        uint8_t caPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
-        uint8_t caPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        static uint8_t caPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t caPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
         size_t caPubLen;
-        uint8_t caCert[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t caCert[SSF_X509_CONFIG_MAX_CERT_SIZE];
         uint32_t caCertLen;
 
-        uint8_t leafCert[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t leafCert[SSF_X509_CONFIG_MAX_CERT_SIZE];
         uint32_t leafCertLen;
 
         const uint8_t *chain[1];
@@ -1743,15 +1743,15 @@ void SSFX509UnitTest(void)
 
         /* Generate leaf cert WITH EKU = clientAuth only (no serverAuth) */
         {
-            SSFX509GenParams_t lp;
+            static SSFX509GenParams_t lp;
             uint8_t serial[] = { 0x05u };
-            uint8_t leafPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
-            uint8_t leafPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+            static uint8_t leafPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+            static uint8_t leafPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
             size_t leafPubLen;
-            uint8_t tbsDer[512];
+            static uint8_t tbsDer[512];
             uint32_t tbsLen;
             uint8_t tbsHash[32];
-            uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
+            static uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
             size_t sigLen;
 
             SSF_ASSERT(SSFECDSAKeyGen(SSF_EC_CURVE_P256, leafPriv, sizeof(leafPriv),
@@ -1789,7 +1789,7 @@ void SSFX509UnitTest(void)
 
             /* Verify EKU was parsed correctly */
             {
-                SSFX509Cert_t parsed;
+                static SSFX509Cert_t parsed;
                 SSF_ASSERT(SSFX509Parse(leafCert, leafCertLen, &parsed) == true);
                 SSF_ASSERT(parsed.hasExtKeyUsage == true);
                 SSF_ASSERT(parsed.ekuClientAuth == true);
@@ -1817,7 +1817,7 @@ void SSFX509UnitTest(void)
 
     /* ---- Existing test cert: TBS and outer sigAlg OIDs match ---- */
     {
-        SSFX509Cert_t parsed;
+        static SSFX509Cert_t parsed;
         SSF_ASSERT(SSFX509Parse(_utTestCertDER, sizeof(_utTestCertDER), &parsed) == true);
 
         /* Both OIDs should be present */
@@ -1834,12 +1834,12 @@ void SSFX509UnitTest(void)
 
     /* ---- Generated cert: TBS and outer sigAlg OIDs match ---- */
     {
-        uint8_t priv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
-        uint8_t pub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        static uint8_t priv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t pub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
         size_t pubLen;
-        uint8_t certDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t certDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
         uint32_t certLen;
-        SSFX509Cert_t parsed;
+        static SSFX509Cert_t parsed;
 
         memset(priv, 0, sizeof(priv));
         SSF_ASSERT(_GenTestCert("sigalg-test", 1700000000ull, 2000000000ull,
@@ -1865,10 +1865,10 @@ void SSFX509UnitTest(void)
     /* ---- v1 cert in chain -> rejected ---- */
     {
         /* Generate a self-signed v1 cert with a real key pair and signature */
-        uint8_t v1Priv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
-        uint8_t v1Pub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        static uint8_t v1Priv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t v1Pub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
         size_t v1PubLen;
-        uint8_t v1Cert[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t v1Cert[SSF_X509_CONFIG_MAX_CERT_SIZE];
         uint32_t v1CertLen;
 
         const uint8_t *chain[1];
@@ -1877,12 +1877,12 @@ void SSFX509UnitTest(void)
         uint32_t trustLens[1];
 
         {
-            SSFX509GenParams_t p;
+            static SSFX509GenParams_t p;
             uint8_t serial[] = { 0x09u };
-            uint8_t tbsDer[512];
+            static uint8_t tbsDer[512];
             uint32_t tbsLen;
             uint8_t tbsHash[32];
-            uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
+            static uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
             size_t sigLen;
 
             SSF_ASSERT(SSFECDSAKeyGen(SSF_EC_CURVE_P256, v1Priv, sizeof(v1Priv),
@@ -1917,7 +1917,7 @@ void SSFX509UnitTest(void)
 
             /* Confirm it's v1 */
             {
-                SSFX509Cert_t parsed;
+                static SSFX509Cert_t parsed;
                 SSF_ASSERT(SSFX509Parse(v1Cert, v1CertLen, &parsed) == true);
                 SSF_ASSERT(parsed.version == 0u);
             }
@@ -1942,8 +1942,8 @@ void SSFX509UnitTest(void)
     /* ---- Matching SKID/AKID -> consistent ---- */
     {
         static const uint8_t keyId[] = { 0x01u, 0x02u, 0x03u, 0x04u };
-        SSFX509Cert_t certStub;
-        SSFX509Cert_t issuerStub;
+        static SSFX509Cert_t certStub;
+        static SSFX509Cert_t issuerStub;
 
         memset(&certStub, 0, sizeof(certStub));
         memset(&issuerStub, 0, sizeof(issuerStub));
@@ -1959,8 +1959,8 @@ void SSFX509UnitTest(void)
     {
         static const uint8_t akidVal[] = { 0x01u, 0x02u, 0x03u, 0x04u };
         static const uint8_t skidVal[] = { 0xAAu, 0xBBu, 0xCCu, 0xDDu };
-        SSFX509Cert_t certStub;
-        SSFX509Cert_t issuerStub;
+        static SSFX509Cert_t certStub;
+        static SSFX509Cert_t issuerStub;
 
         memset(&certStub, 0, sizeof(certStub));
         memset(&issuerStub, 0, sizeof(issuerStub));
@@ -1976,8 +1976,8 @@ void SSFX509UnitTest(void)
     {
         static const uint8_t akidVal[] = { 0x01u, 0x02u, 0x03u };
         static const uint8_t skidVal[] = { 0x01u, 0x02u, 0x03u, 0x04u };
-        SSFX509Cert_t certStub;
-        SSFX509Cert_t issuerStub;
+        static SSFX509Cert_t certStub;
+        static SSFX509Cert_t issuerStub;
 
         memset(&certStub, 0, sizeof(certStub));
         memset(&issuerStub, 0, sizeof(issuerStub));
@@ -1992,8 +1992,8 @@ void SSFX509UnitTest(void)
     /* ---- Cert has no AKID -> consistent (AKID optional) ---- */
     {
         static const uint8_t skidVal[] = { 0x01u, 0x02u, 0x03u, 0x04u };
-        SSFX509Cert_t certStub;
-        SSFX509Cert_t issuerStub;
+        static SSFX509Cert_t certStub;
+        static SSFX509Cert_t issuerStub;
 
         memset(&certStub, 0, sizeof(certStub));
         memset(&issuerStub, 0, sizeof(issuerStub));
@@ -2007,8 +2007,8 @@ void SSFX509UnitTest(void)
     /* ---- Issuer has no SKID -> consistent (SKID optional) ---- */
     {
         static const uint8_t akidVal[] = { 0x01u, 0x02u, 0x03u, 0x04u };
-        SSFX509Cert_t certStub;
-        SSFX509Cert_t issuerStub;
+        static SSFX509Cert_t certStub;
+        static SSFX509Cert_t issuerStub;
 
         memset(&certStub, 0, sizeof(certStub));
         memset(&issuerStub, 0, sizeof(issuerStub));
@@ -2021,8 +2021,8 @@ void SSFX509UnitTest(void)
 
     /* ---- Neither has SKID/AKID -> consistent ---- */
     {
-        SSFX509Cert_t certStub;
-        SSFX509Cert_t issuerStub;
+        static SSFX509Cert_t certStub;
+        static SSFX509Cert_t issuerStub;
 
         memset(&certStub, 0, sizeof(certStub));
         memset(&issuerStub, 0, sizeof(issuerStub));
@@ -2032,7 +2032,7 @@ void SSFX509UnitTest(void)
 
     /* ---- Existing test cert: self-signed AKID matches SKID ---- */
     {
-        SSFX509Cert_t parsed;
+        static SSFX509Cert_t parsed;
         SSF_ASSERT(SSFX509Parse(_utTestCertDER, sizeof(_utTestCertDER), &parsed) == true);
         SSF_ASSERT(parsed.akid != NULL);
         SSF_ASSERT(parsed.skid != NULL);
@@ -2123,21 +2123,21 @@ void SSFX509UnitTest(void)
 
     /* ---- Intermediate CA with Key Usage but NO keyCertSign -> rejected ---- */
     {
-        uint8_t rootPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
-        uint8_t rootPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        static uint8_t rootPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t rootPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
         size_t rootPubLen;
-        uint8_t rootCert[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t rootCert[SSF_X509_CONFIG_MAX_CERT_SIZE];
         uint32_t rootCertLen;
 
-        uint8_t intPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
-        uint8_t intPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        static uint8_t intPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t intPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
         size_t intPubLen;
-        uint8_t intCert[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t intCert[SSF_X509_CONFIG_MAX_CERT_SIZE];
         uint32_t intCertLen;
 
-        uint8_t leafPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        static uint8_t leafPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
         size_t leafPubLen;
-        uint8_t leafCert[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t leafCert[SSF_X509_CONFIG_MAX_CERT_SIZE];
         uint32_t leafCertLen;
 
         const uint8_t *chain[2];
@@ -2155,12 +2155,12 @@ void SSFX509UnitTest(void)
 
         /* Generate intermediate CA with KU=digitalSignature ONLY (NO keyCertSign) */
         {
-            SSFX509GenParams_t ip;
+            static SSFX509GenParams_t ip;
             uint8_t serial[] = { 0x08u };
-            uint8_t tbsDer[512];
+            static uint8_t tbsDer[512];
             uint32_t tbsLen;
             uint8_t tbsHash[32];
-            uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
+            static uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
             size_t sigLen;
 
             SSF_ASSERT(SSFECDSAKeyGen(SSF_EC_CURVE_P256, intPriv, sizeof(intPriv),
@@ -2199,7 +2199,7 @@ void SSFX509UnitTest(void)
 
             /* Verify intermediate has KU but no keyCertSign */
             {
-                SSFX509Cert_t parsed;
+                static SSFX509Cert_t parsed;
                 SSF_ASSERT(SSFX509Parse(intCert, intCertLen, &parsed) == true);
                 SSF_ASSERT(parsed.hasKeyUsage == true);
                 SSF_ASSERT((parsed.keyUsageBits & SSF_X509_KU_KEY_CERT_SIGN) == 0);
@@ -2234,10 +2234,10 @@ void SSFX509UnitTest(void)
         static const uint8_t unknownOid[] = { 0x55u, 0x1Du, 0x7Fu };
         static const uint8_t fakeValue[] = { 0x01u };
 
-        uint8_t caPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
-        uint8_t caPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        static uint8_t caPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t caPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
         size_t caPubLen;
-        uint8_t caCert[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t caCert[SSF_X509_CONFIG_MAX_CERT_SIZE];
         uint32_t caCertLen;
 
         const uint8_t *chain[1];
@@ -2247,12 +2247,12 @@ void SSFX509UnitTest(void)
 
         /* Generate self-signed cert with unknown CRITICAL extension */
         {
-            SSFX509GenParams_t p;
+            static SSFX509GenParams_t p;
             uint8_t serial[] = { 0x07u };
-            uint8_t tbsDer[512];
+            static uint8_t tbsDer[512];
             uint32_t tbsLen;
             uint8_t tbsHash[32];
-            uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
+            static uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
             size_t sigLen;
 
             memset(caPriv, 0, sizeof(caPriv));
@@ -2294,7 +2294,7 @@ void SSFX509UnitTest(void)
 
             /* Verify the extension was parsed as critical */
             {
-                SSFX509Cert_t parsed;
+                static SSFX509Cert_t parsed;
                 bool foundCritical = false;
                 uint8_t e;
                 SSF_ASSERT(SSFX509Parse(caCert, caCertLen, &parsed) == true);
@@ -2349,21 +2349,21 @@ void SSFX509UnitTest(void)
         /* The root says pathLenConstraint=0: NO subordinate CAs allowed.        */
         /* But chain[1] IS a subordinate CA -> violation.                         */
 
-        uint8_t rootPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
-        uint8_t rootPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        static uint8_t rootPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t rootPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
         size_t rootPubLen;
-        uint8_t rootCert[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t rootCert[SSF_X509_CONFIG_MAX_CERT_SIZE];
         uint32_t rootCertLen;
 
-        uint8_t intPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
-        uint8_t intPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        static uint8_t intPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t intPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
         size_t intPubLen;
-        uint8_t intCert[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t intCert[SSF_X509_CONFIG_MAX_CERT_SIZE];
         uint32_t intCertLen;
 
-        uint8_t leafPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        static uint8_t leafPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
         size_t leafPubLen;
-        uint8_t leafCert[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t leafCert[SSF_X509_CONFIG_MAX_CERT_SIZE];
         uint32_t leafCertLen;
 
         const uint8_t *chain[2];
@@ -2374,12 +2374,12 @@ void SSFX509UnitTest(void)
         /* Generate root CA with pathLenConstraint=0 */
         memset(rootPriv, 0, sizeof(rootPriv));
         {
-            SSFX509GenParams_t rp;
+            static SSFX509GenParams_t rp;
             uint8_t serial[] = { 0x01u };
-            uint8_t tbsDer[512];
+            static uint8_t tbsDer[512];
             uint32_t tbsLen;
             uint8_t tbsHash[32];
-            uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
+            static uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
             size_t sigLen;
 
             SSF_ASSERT(SSFECDSAKeyGen(SSF_EC_CURVE_P256, rootPriv, sizeof(rootPriv),
@@ -2417,12 +2417,12 @@ void SSFX509UnitTest(void)
 
         /* Generate intermediate CA signed by root */
         {
-            SSFX509GenParams_t ip;
+            static SSFX509GenParams_t ip;
             uint8_t serial[] = { 0x02u };
-            uint8_t tbsDer[512];
+            static uint8_t tbsDer[512];
             uint32_t tbsLen;
             uint8_t tbsHash[32];
-            uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
+            static uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
             size_t sigLen;
 
             SSF_ASSERT(SSFECDSAKeyGen(SSF_EC_CURVE_P256, intPriv, sizeof(intPriv),
@@ -2477,21 +2477,21 @@ void SSFX509UnitTest(void)
 
     /* ---- pathLenConstraint=1 with one subordinate CA -> chain accepted ---- */
     {
-        uint8_t rootPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
-        uint8_t rootPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        static uint8_t rootPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t rootPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
         size_t rootPubLen;
-        uint8_t rootCert[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t rootCert[SSF_X509_CONFIG_MAX_CERT_SIZE];
         uint32_t rootCertLen;
 
-        uint8_t intPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
-        uint8_t intPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        static uint8_t intPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t intPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
         size_t intPubLen;
-        uint8_t intCert[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t intCert[SSF_X509_CONFIG_MAX_CERT_SIZE];
         uint32_t intCertLen;
 
-        uint8_t leafPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        static uint8_t leafPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
         size_t leafPubLen;
-        uint8_t leafCert[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t leafCert[SSF_X509_CONFIG_MAX_CERT_SIZE];
         uint32_t leafCertLen;
 
         const uint8_t *chain[2];
@@ -2501,12 +2501,12 @@ void SSFX509UnitTest(void)
 
         /* Generate root CA with pathLenConstraint=1 (one subordinate CA allowed) */
         {
-            SSFX509GenParams_t rp;
+            static SSFX509GenParams_t rp;
             uint8_t serial[] = { 0x01u };
-            uint8_t tbsDer[512];
+            static uint8_t tbsDer[512];
             uint32_t tbsLen;
             uint8_t tbsHash[32];
-            uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
+            static uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
             size_t sigLen;
 
             SSF_ASSERT(SSFECDSAKeyGen(SSF_EC_CURVE_P256, rootPriv, sizeof(rootPriv),
@@ -2544,12 +2544,12 @@ void SSFX509UnitTest(void)
 
         /* Generate intermediate CA signed by root */
         {
-            SSFX509GenParams_t ip;
+            static SSFX509GenParams_t ip;
             uint8_t serial[] = { 0x02u };
-            uint8_t tbsDer[512];
+            static uint8_t tbsDer[512];
             uint32_t tbsLen;
             uint8_t tbsHash[32];
-            uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
+            static uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
             size_t sigLen;
 
             SSF_ASSERT(SSFECDSAKeyGen(SSF_EC_CURVE_P256, intPriv, sizeof(intPriv),
@@ -2630,8 +2630,8 @@ void SSFX509UnitTest(void)
             0xA2u, 0x03u, 0x02u, 0x01u, 0x20u
         };
 
-        uint8_t rsaPriv[SSF_RSA_MAX_PRIV_KEY_DER_SIZE];
-        uint8_t rsaPub[SSF_RSA_MAX_PUB_KEY_DER_SIZE];
+        static uint8_t rsaPriv[SSF_RSA_MAX_PRIV_KEY_DER_SIZE];
+        static uint8_t rsaPub[SSF_RSA_MAX_PUB_KEY_DER_SIZE];
         size_t rsaPrivLen;
         size_t rsaPubLen;
 
@@ -2639,12 +2639,12 @@ void SSFX509UnitTest(void)
         static const uint8_t fakeTbs[] = "This is fake TBS content for RSA-PSS testing.";
         uint8_t hash256[SSF_SHA2_256_BYTE_SIZE];
         uint8_t hash384[SSF_SHA2_384_BYTE_SIZE];
-        uint8_t sig256[SSF_RSA_MAX_SIG_SIZE];
-        uint8_t sig384[SSF_RSA_MAX_SIG_SIZE];
+        static uint8_t sig256[SSF_RSA_MAX_SIG_SIZE];
+        static uint8_t sig384[SSF_RSA_MAX_SIG_SIZE];
         size_t sig256Len;
         size_t sig384Len;
-        SSFX509Cert_t certStub;
-        SSFX509Cert_t issuerStub;
+        static SSFX509Cert_t certStub;
+        static SSFX509Cert_t issuerStub;
 
         /* Generate 2048-bit RSA key pair */
         SSF_ASSERT(SSFRSAKeyGen(2048, rsaPriv, sizeof(rsaPriv), &rsaPrivLen,
@@ -2749,11 +2749,11 @@ void SSFX509UnitTest(void)
             0x2Au, 0x86u, 0x48u, 0x86u, 0xF7u, 0x0Du, 0x01u, 0x01u, 0x01u
         };
 
-        uint8_t rsaPriv[SSF_RSA_MAX_PRIV_KEY_DER_SIZE];
-        uint8_t rsaPub[SSF_RSA_MAX_PUB_KEY_DER_SIZE];
+        static uint8_t rsaPriv[SSF_RSA_MAX_PRIV_KEY_DER_SIZE];
+        static uint8_t rsaPub[SSF_RSA_MAX_PUB_KEY_DER_SIZE];
         size_t rsaPrivLen;
         size_t rsaPubLen;
-        SSFX509GenParams_t rp;
+        static SSFX509GenParams_t rp;
         uint8_t serial[] = { 0x20u };
         /* RSASSA-PSS-params { [0] sha256, [1] mgf1-sha256, [2] 32 } matching SSFRSASignPSS */
         static const uint8_t pssParamsSalt32[] = {
@@ -2765,14 +2765,14 @@ void SSFX509UnitTest(void)
             0x86u, 0x48u, 0x01u, 0x65u, 0x03u, 0x04u, 0x02u, 0x01u, 0x05u, 0x00u,
             0xA2u, 0x03u, 0x02u, 0x01u, 0x20u
         };
-        uint8_t tbsDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t tbsDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
         uint32_t tbsLen;
         uint8_t tbsHash[SSF_SHA2_256_BYTE_SIZE];
-        uint8_t sig[SSF_RSA_MAX_SIG_SIZE];
+        static uint8_t sig[SSF_RSA_MAX_SIG_SIZE];
         size_t sigLen;
-        uint8_t certDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t certDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
         uint32_t certDerLen;
-        SSFX509Cert_t parsed;
+        static SSFX509Cert_t parsed;
 
         /* Generate 2048-bit RSA key pair */
         SSF_ASSERT(SSFRSAKeyGen(2048, rsaPriv, sizeof(rsaPriv), &rsaPrivLen,
@@ -2842,20 +2842,20 @@ void SSFX509UnitTest(void)
             0xA2u, 0x03u, 0x02u, 0x01u, 0x30u /* [2] saltLength 48 */
         };
 
-        uint8_t rsaPriv[SSF_RSA_MAX_PRIV_KEY_DER_SIZE];
-        uint8_t rsaPub[SSF_RSA_MAX_PUB_KEY_DER_SIZE];
+        static uint8_t rsaPriv[SSF_RSA_MAX_PRIV_KEY_DER_SIZE];
+        static uint8_t rsaPub[SSF_RSA_MAX_PUB_KEY_DER_SIZE];
         size_t rsaPrivLen;
         size_t rsaPubLen;
-        SSFX509GenParams_t rp;
+        static SSFX509GenParams_t rp;
         uint8_t serial[] = { 0x21u };
-        uint8_t tbsDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t tbsDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
         uint32_t tbsLen;
         uint8_t tbsHash[SSF_SHA2_384_BYTE_SIZE];
-        uint8_t sig[SSF_RSA_MAX_SIG_SIZE];
+        static uint8_t sig[SSF_RSA_MAX_SIG_SIZE];
         size_t sigLen;
-        uint8_t certDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t certDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
         uint32_t certDerLen;
-        SSFX509Cert_t parsed;
+        static SSFX509Cert_t parsed;
 
         SSF_ASSERT(SSFRSAKeyGen(2048, rsaPriv, sizeof(rsaPriv), &rsaPrivLen,
                    rsaPub, sizeof(rsaPub), &rsaPubLen) == true);
@@ -2915,20 +2915,20 @@ void SSFX509UnitTest(void)
             0x2Au, 0x86u, 0x48u, 0x86u, 0xF7u, 0x0Du, 0x01u, 0x01u, 0x01u
         };
 
-        uint8_t rsaPriv[SSF_RSA_MAX_PRIV_KEY_DER_SIZE];
-        uint8_t rsaPub[SSF_RSA_MAX_PUB_KEY_DER_SIZE];
+        static uint8_t rsaPriv[SSF_RSA_MAX_PRIV_KEY_DER_SIZE];
+        static uint8_t rsaPub[SSF_RSA_MAX_PUB_KEY_DER_SIZE];
         size_t rsaPrivLen;
         size_t rsaPubLen;
-        SSFX509GenParams_t rp;
+        static SSFX509GenParams_t rp;
         uint8_t serial[] = { 0x30u };
-        uint8_t tbsDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t tbsDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
         uint32_t tbsLen;
         uint8_t tbsHash[SSF_SHA2_512_BYTE_SIZE];
-        uint8_t sig[SSF_RSA_MAX_SIG_SIZE];
+        static uint8_t sig[SSF_RSA_MAX_SIG_SIZE];
         size_t sigLen;
-        uint8_t certDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t certDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
         uint32_t certDerLen;
-        SSFX509Cert_t parsed;
+        static SSFX509Cert_t parsed;
 
         SSF_ASSERT(SSFRSAKeyGen(2048, rsaPriv, sizeof(rsaPriv), &rsaPrivLen,
                    rsaPub, sizeof(rsaPub), &rsaPubLen) == true);
@@ -2993,20 +2993,20 @@ void SSFX509UnitTest(void)
             0xA2u, 0x03u, 0x02u, 0x01u, 0x40u /* [2] saltLength 64 */
         };
 
-        uint8_t rsaPriv[SSF_RSA_MAX_PRIV_KEY_DER_SIZE];
-        uint8_t rsaPub[SSF_RSA_MAX_PUB_KEY_DER_SIZE];
+        static uint8_t rsaPriv[SSF_RSA_MAX_PRIV_KEY_DER_SIZE];
+        static uint8_t rsaPub[SSF_RSA_MAX_PUB_KEY_DER_SIZE];
         size_t rsaPrivLen;
         size_t rsaPubLen;
-        SSFX509GenParams_t rp;
+        static SSFX509GenParams_t rp;
         uint8_t serial[] = { 0x31u };
-        uint8_t tbsDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t tbsDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
         uint32_t tbsLen;
         uint8_t tbsHash[SSF_SHA2_512_BYTE_SIZE];
-        uint8_t sig[SSF_RSA_MAX_SIG_SIZE];
+        static uint8_t sig[SSF_RSA_MAX_SIG_SIZE];
         size_t sigLen;
-        uint8_t certDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t certDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
         uint32_t certDerLen;
-        SSFX509Cert_t parsed;
+        static SSFX509Cert_t parsed;
 
         SSF_ASSERT(SSFRSAKeyGen(2048, rsaPriv, sizeof(rsaPriv), &rsaPrivLen,
                    rsaPub, sizeof(rsaPub), &rsaPubLen) == true);
@@ -3056,10 +3056,10 @@ void SSFX509UnitTest(void)
         static const uint8_t fakePubKeySAN[65] = { 0x04u, 0x01u };
         static const uint8_t serialSAN[] = { 0x20u };
         static const uint8_t fakeSigSAN[64] = { 0xBBu };
-        SSFX509GenParams_t p;
-        uint8_t derBuf[1024];
+        static SSFX509GenParams_t p;
+        static uint8_t derBuf[1024];
         uint32_t derLen;
-        SSFX509Cert_t parsed;
+        static SSFX509Cert_t parsed;
 
         memset(&p, 0, sizeof(p));
         p.pathLenConstraint = -1;
@@ -3100,10 +3100,10 @@ void SSFX509UnitTest(void)
         static const uint8_t fakePubKeyIP[65] = { 0x04u, 0x02u };
         static const uint8_t serialIP[] = { 0x21u };
         static const uint8_t fakeSigIP[64] = { 0xCCu };
-        SSFX509GenParams_t p;
-        uint8_t derBuf[1024];
+        static SSFX509GenParams_t p;
+        static uint8_t derBuf[1024];
         uint32_t derLen;
-        SSFX509Cert_t parsed;
+        static SSFX509Cert_t parsed;
 
         memset(&p, 0, sizeof(p));
         p.pathLenConstraint = -1;
@@ -3139,10 +3139,10 @@ void SSFX509UnitTest(void)
         static const uint8_t fakePubKeySKID[65] = { 0x04u, 0x03u };
         static const uint8_t serialSKID[] = { 0x22u };
         static const uint8_t fakeSigSKID[64] = { 0xDDu };
-        SSFX509GenParams_t p;
-        uint8_t derBuf[1024];
+        static SSFX509GenParams_t p;
+        static uint8_t derBuf[1024];
         uint32_t derLen;
-        SSFX509Cert_t parsed;
+        static SSFX509Cert_t parsed;
 
         memset(&p, 0, sizeof(p));
         p.pathLenConstraint = -1;
@@ -3179,10 +3179,10 @@ void SSFX509UnitTest(void)
         static const uint8_t fakePubKeyAKID[65] = { 0x04u, 0x04u };
         static const uint8_t serialAKID[] = { 0x23u };
         static const uint8_t fakeSigAKID[64] = { 0xEEu };
-        SSFX509GenParams_t p;
-        uint8_t derBuf[1024];
+        static SSFX509GenParams_t p;
+        static uint8_t derBuf[1024];
         uint32_t derLen;
-        SSFX509Cert_t parsed;
+        static SSFX509Cert_t parsed;
 
         memset(&p, 0, sizeof(p));
         p.pathLenConstraint = -1;
@@ -3216,17 +3216,17 @@ void SSFX509UnitTest(void)
     /* ---- Test: Full cert with SAN in VerifyChain (hostname matching) ---- */
     {
         static const char *sanDNSChain[] = { "test.local", NULL };
-        uint8_t privKey[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
-        uint8_t pubKey[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        static uint8_t privKey[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t pubKey[SSF_ECDSA_MAX_PUB_KEY_SIZE];
         size_t pubKeyLen;
         uint8_t serial[] = { 0x30u };
-        SSFX509GenParams_t p;
-        uint8_t tbsDer[512];
+        static SSFX509GenParams_t p;
+        static uint8_t tbsDer[512];
         uint32_t tbsLen;
         uint8_t tbsHash[32];
-        uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
+        static uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
         size_t sigLen;
-        uint8_t certDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t certDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
         uint32_t certDerLen;
 
         memset(privKey, 0, sizeof(privKey));
@@ -3294,24 +3294,24 @@ void SSFX509UnitTest(void)
         };
         static const char *caSanDNS[] = { "ca.skid.test", NULL };
         static const char *leafSanDNS[] = { "leaf.skid.test", NULL };
-        uint8_t caPrivKey[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
-        uint8_t caPubKey[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        static uint8_t caPrivKey[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t caPubKey[SSF_ECDSA_MAX_PUB_KEY_SIZE];
         size_t caPubKeyLen;
-        uint8_t leafPrivKey[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
-        uint8_t leafPubKey[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        static uint8_t leafPrivKey[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t leafPubKey[SSF_ECDSA_MAX_PUB_KEY_SIZE];
         size_t leafPubKeyLen;
         uint8_t caSerial[] = { 0x40u };
         uint8_t leafSerial[] = { 0x41u };
-        SSFX509GenParams_t cp;
-        SSFX509GenParams_t lp;
-        uint8_t tbsDer[512];
+        static SSFX509GenParams_t cp;
+        static SSFX509GenParams_t lp;
+        static uint8_t tbsDer[512];
         uint32_t tbsLen;
         uint8_t tbsHash[32];
-        uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
+        static uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
         size_t sigLen;
-        uint8_t caCertDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t caCertDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
         uint32_t caCertDerLen;
-        uint8_t leafCertDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t leafCertDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
         uint32_t leafCertDerLen;
 
         /* Generate CA key pair */
@@ -3356,7 +3356,7 @@ void SSFX509UnitTest(void)
 
         /* Verify CA has SKID */
         {
-            SSFX509Cert_t caParsed;
+            static SSFX509Cert_t caParsed;
             SSF_ASSERT(SSFX509Parse(caCertDer, caCertDerLen, &caParsed) == true);
             SSF_ASSERT(caParsed.skid != NULL);
             SSF_ASSERT(caParsed.skidLen == sizeof(keyIdVal));
@@ -3401,7 +3401,7 @@ void SSFX509UnitTest(void)
 
         /* Verify leaf has AKID */
         {
-            SSFX509Cert_t leafParsed;
+            static SSFX509Cert_t leafParsed;
             SSF_ASSERT(SSFX509Parse(leafCertDer, leafCertDerLen, &leafParsed) == true);
             SSF_ASSERT(leafParsed.akid != NULL);
             SSF_ASSERT(leafParsed.akidLen == sizeof(keyIdVal));
@@ -3414,8 +3414,8 @@ void SSFX509UnitTest(void)
             uint32_t chainDerLen_arr[1];
             const uint8_t *trustDer[1];
             uint32_t trustDerLen_arr[1];
-            SSFX509Cert_t leafParsed2;
-            SSFX509Cert_t caParsed2;
+            static SSFX509Cert_t leafParsed2;
+            static SSFX509Cert_t caParsed2;
 
             chainDer[0] = leafCertDer;
             chainDerLen_arr[0] = leafCertDerLen;
@@ -3441,13 +3441,13 @@ void SSFX509UnitTest(void)
         static const char *edSanDNS[] = { "ed25519.ssf.local", NULL };
         uint8_t edSeed[SSF_ED25519_SEED_SIZE];
         uint8_t edPubKey[SSF_ED25519_PUB_KEY_SIZE];
-        uint8_t edTbs[512];
+        static uint8_t edTbs[512];
         uint32_t edTbsLen;
         uint8_t edSig[SSF_ED25519_SIG_SIZE];
-        uint8_t edCertDer[1024];
+        static uint8_t edCertDer[1024];
         uint32_t edCertDerLen;
-        SSFX509GenParams_t ep;
-        SSFX509Cert_t edParsed;
+        static SSFX509GenParams_t ep;
+        static SSFX509Cert_t edParsed;
 
         /* Generate Ed25519 key pair (seed + derived pubKey) */
         SSF_ASSERT(SSFEd25519KeyGen(edSeed, edPubKey) == true);
@@ -3517,8 +3517,8 @@ void SSFX509UnitTest(void)
 
         /* Tamper with signature - verification must fail */
         {
-            uint8_t corruptCert[1024];
-            SSFX509Cert_t corruptParsed;
+            static uint8_t corruptCert[1024];
+            static SSFX509Cert_t corruptParsed;
             memcpy(corruptCert, edCertDer, edCertDerLen);
             /* Flip one bit in the signature (near end of cert DER) */
             corruptCert[edCertDerLen - 1u] ^= 0x01u;
@@ -3532,19 +3532,19 @@ void SSFX509UnitTest(void)
     /* Builds an ECDSA self-signed cert with SSF_X509_CONFIG_MAX_SAN_ENTRIES long DNS SANs so   */
     /* the total DER encoding exceeds the old 2048-byte ceiling.                                 */
     {
-        SSFX509GenParams_t p;
-        uint8_t privKey[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
-        uint8_t pubKey[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        static SSFX509GenParams_t p;
+        static uint8_t privKey[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t pubKey[SSF_ECDSA_MAX_PUB_KEY_SIZE];
         size_t pubKeyLen;
-        uint8_t tbsDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t tbsDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
         uint32_t tbsLen;
         uint8_t tbsHash[32];
-        uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
+        static uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
         size_t sigLen;
-        uint8_t certDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t certDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
         uint32_t certDerLen;
         uint8_t serial[] = { 0x42u };
-        SSFX509Cert_t parsed;
+        static SSFX509Cert_t parsed;
         uint32_t i;
 
         /* 12 SAN DNS names, each 240 chars long - total ~2.9 KB of SAN content alone,          */
@@ -3638,11 +3638,11 @@ void SSFX509UnitTest(void)
     /* leafs pass and non-matching leafs are rejected.                                           */
     {
         /* Helper ECDSA key material, reused across sub-tests */
-        uint8_t caPrivKey[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
-        uint8_t caPubKey[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        static uint8_t caPrivKey[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t caPubKey[SSF_ECDSA_MAX_PUB_KEY_SIZE];
         size_t caPubKeyLen;
-        uint8_t leafPrivKey[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
-        uint8_t leafPubKey[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        static uint8_t leafPrivKey[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t leafPubKey[SSF_ECDSA_MAX_PUB_KEY_SIZE];
         size_t leafPubKeyLen;
 
         memset(caPrivKey, 0, sizeof(caPrivKey));
@@ -3654,19 +3654,19 @@ void SSFX509UnitTest(void)
 
         /* Build a CA cert with permittedSubtrees={dNSName:"example.com", iPAddress:10.0.0.0/8}  */
         /* and excludedSubtrees={dNSName:"banned.example.com"}.                                  */
-        uint8_t caDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t caDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
         uint32_t caDerLen;
         {
-            SSFX509GenParams_t cp;
+            static SSFX509GenParams_t cp;
             uint8_t caSerial[] = { 0x10u };
             static const char *caPermDNS[] = { "example.com", NULL };
             static const uint8_t caPermIP1[] = { 10u, 0u, 0u, 0u, 0xFFu, 0u, 0u, 0u };
             static const uint8_t *caPermIPs[] = { caPermIP1, NULL };
             static const char *caExclDNS[] = { "banned.example.com", NULL };
-            uint8_t caTbs[512];
+            static uint8_t caTbs[512];
             uint32_t caTbsLen;
             uint8_t caTbsHash[32];
-            uint8_t caSig[SSF_ECDSA_MAX_SIG_SIZE];
+            static uint8_t caSig[SSF_ECDSA_MAX_SIG_SIZE];
             size_t caSigLen;
 
             memset(&cp, 0, sizeof(cp));
@@ -3707,7 +3707,7 @@ void SSFX509UnitTest(void)
 
         /* Verify CA parses with name constraints extracted correctly. */
         {
-            SSFX509Cert_t caParsed;
+            static SSFX509Cert_t caParsed;
             SSF_ASSERT(SSFX509Parse(caDer, caDerLen, &caParsed) == true);
             SSF_ASSERT(caParsed.hasNameConstraints == true);
             SSF_ASSERT(caParsed.permittedLen == 2u);
@@ -3724,12 +3724,12 @@ void SSFX509UnitTest(void)
 
         /* Helper to build a leaf cert signed by the CA with a given SAN set. */
         #define _NC_BUILD_LEAF(_leafCN, _sanDNS, _sanIPs, _leafDer, _leafDerLen) do { \
-            SSFX509GenParams_t lp; \
+            static SSFX509GenParams_t lp; \
             uint8_t leafSerial[] = { 0x20u }; \
-            uint8_t leafTbs[512]; \
+            static uint8_t leafTbs[512]; \
             uint32_t leafTbsLen; \
             uint8_t leafTbsHash[32]; \
-            uint8_t leafSig[SSF_ECDSA_MAX_SIG_SIZE]; \
+            static uint8_t leafSig[SSF_ECDSA_MAX_SIG_SIZE]; \
             size_t leafSigLen; \
             memset(&lp, 0, sizeof(lp)); \
             lp.pathLenConstraint = -1; \
@@ -3764,7 +3764,7 @@ void SSFX509UnitTest(void)
         /* Case 1: leaf SAN "foo.example.com" - inside permittedSubtrees -> accept. */
         {
             static const char *san[] = { "foo.example.com", NULL };
-            uint8_t leafDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
+            static uint8_t leafDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
             uint32_t leafDerLen;
             const uint8_t *chain[1]; uint32_t chainL[1];
             const uint8_t *trust[1]; uint32_t trustL[1];
@@ -3778,7 +3778,7 @@ void SSFX509UnitTest(void)
         /* Case 2: leaf SAN "evil.com" - outside permittedSubtrees -> reject. */
         {
             static const char *san[] = { "evil.com", NULL };
-            uint8_t leafDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
+            static uint8_t leafDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
             uint32_t leafDerLen;
             const uint8_t *chain[1]; uint32_t chainL[1];
             const uint8_t *trust[1]; uint32_t trustL[1];
@@ -3792,7 +3792,7 @@ void SSFX509UnitTest(void)
         /* Case 3: leaf SAN "banned.example.com" - explicitly excluded -> reject. */
         {
             static const char *san[] = { "banned.example.com", NULL };
-            uint8_t leafDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
+            static uint8_t leafDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
             uint32_t leafDerLen;
             const uint8_t *chain[1]; uint32_t chainL[1];
             const uint8_t *trust[1]; uint32_t trustL[1];
@@ -3806,7 +3806,7 @@ void SSFX509UnitTest(void)
         /* Case 4: leaf with sub-label of an excluded name -> also excluded. */
         {
             static const char *san[] = { "sub.banned.example.com", NULL };
-            uint8_t leafDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
+            static uint8_t leafDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
             uint32_t leafDerLen;
             const uint8_t *chain[1]; uint32_t chainL[1];
             const uint8_t *trust[1]; uint32_t trustL[1];
@@ -3820,7 +3820,7 @@ void SSFX509UnitTest(void)
         /* Case 5: exact match of permitted name (not a sub-label) -> accept. */
         {
             static const char *san[] = { "example.com", NULL };
-            uint8_t leafDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
+            static uint8_t leafDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
             uint32_t leafDerLen;
             const uint8_t *chain[1]; uint32_t chainL[1];
             const uint8_t *trust[1]; uint32_t trustL[1];
@@ -3834,7 +3834,7 @@ void SSFX509UnitTest(void)
         /* Case 6: non-boundary suffix - "notexample.com" must NOT match "example.com". */
         {
             static const char *san[] = { "notexample.com", NULL };
-            uint8_t leafDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
+            static uint8_t leafDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
             uint32_t leafDerLen;
             const uint8_t *chain[1]; uint32_t chainL[1];
             const uint8_t *trust[1]; uint32_t trustL[1];
@@ -3851,7 +3851,7 @@ void SSFX509UnitTest(void)
             static const uint8_t *ips[] = { ipBytes, NULL };
             /* Leaf must still have a hostname SAN to satisfy hostname match; use IP via        */
             /* iPAddress SAN and verify using the IP string as hostname.                         */
-            uint8_t leafDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
+            static uint8_t leafDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
             uint32_t leafDerLen;
             const uint8_t *chain[1]; uint32_t chainL[1];
             const uint8_t *trust[1]; uint32_t trustL[1];
@@ -3866,7 +3866,7 @@ void SSFX509UnitTest(void)
         {
             static const uint8_t ipBytes[] = { 192u, 168u, 1u, 1u };
             static const uint8_t *ips[] = { ipBytes, NULL };
-            uint8_t leafDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
+            static uint8_t leafDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
             uint32_t leafDerLen;
             const uint8_t *chain[1]; uint32_t chainL[1];
             const uint8_t *trust[1]; uint32_t trustL[1];
@@ -3883,7 +3883,7 @@ void SSFX509UnitTest(void)
             static const char *san[] = { "foo.example.com", NULL };
             static const uint8_t badIp[] = { 192u, 168u, 1u, 1u };
             static const uint8_t *ips[] = { badIp, NULL };
-            uint8_t leafDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
+            static uint8_t leafDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
             uint32_t leafDerLen;
             const uint8_t *chain[1]; uint32_t chainL[1];
             const uint8_t *trust[1]; uint32_t trustL[1];
@@ -3917,8 +3917,8 @@ void SSFX509UnitTest(void)
         /* Minimal SAN value: SEQUENCE containing one [2] IMPLICIT IA5String "x".               */
         static const uint8_t _sanVal[] = { 0x30u, 0x03u, 0x82u, 0x01u, 0x78u };
 
-        uint8_t privKey[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
-        uint8_t pubKey[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        static uint8_t privKey[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t pubKey[SSF_ECDSA_MAX_PUB_KEY_SIZE];
         size_t pubKeyLen;
         uint8_t serial[] = { 0x77u };
 
@@ -3929,15 +3929,15 @@ void SSFX509UnitTest(void)
         /* Helper macro: build a cert with a primary extension plus a raw-extension duplicate,   */
         /* then assert SSFX509Parse rejects it. Reused for BC, KU, and SAN.                      */
         #define _DUP_EXT_EXPECT_REJECT(_configure) do { \
-            SSFX509GenParams_t p; \
-            uint8_t tbsDer[512]; \
+            static SSFX509GenParams_t p; \
+            static uint8_t tbsDer[512]; \
             uint32_t tbsLen; \
             uint8_t tbsHash[32]; \
-            uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE]; \
+            static uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE]; \
             size_t sigLen; \
-            uint8_t certDer[SSF_X509_CONFIG_MAX_CERT_SIZE]; \
+            static uint8_t certDer[SSF_X509_CONFIG_MAX_CERT_SIZE]; \
             uint32_t certDerLen; \
-            SSFX509Cert_t parsed; \
+            static SSFX509Cert_t parsed; \
             memset(&p, 0, sizeof(p)); \
             p.pathLenConstraint = -1; \
             p.version = 2u; \
@@ -4012,15 +4012,15 @@ void SSFX509UnitTest(void)
         /* Positive control: cert with the SAME raw extension once (no primary BC) should parse. */
         /* This proves the rejection above is due to duplication, not the rawExt itself.         */
         {
-            SSFX509GenParams_t p;
-            uint8_t tbsDer[512];
+            static SSFX509GenParams_t p;
+            static uint8_t tbsDer[512];
             uint32_t tbsLen;
             uint8_t tbsHash[32];
-            uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
+            static uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
             size_t sigLen;
-            uint8_t certDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
+            static uint8_t certDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
             uint32_t certDerLen;
-            SSFX509Cert_t parsed;
+            static SSFX509Cert_t parsed;
 
             memset(&p, 0, sizeof(p));
             p.pathLenConstraint = -1;
@@ -4068,8 +4068,8 @@ void SSFX509UnitTest(void)
     /* Serial MUST be a non-negative integer <=20 octets. Verify the parser accepts conforming   */
     /* serials and rejects >20-octet or negative serials.                                         */
     {
-        uint8_t privKey[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
-        uint8_t pubKey[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        static uint8_t privKey[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t pubKey[SSF_ECDSA_MAX_PUB_KEY_SIZE];
         size_t pubKeyLen;
 
         memset(privKey, 0, sizeof(privKey));
@@ -4079,15 +4079,15 @@ void SSFX509UnitTest(void)
         /* Helper macro: build a cert with the given serial bytes, expect the indicated parse   */
         /* outcome (true = accept, false = reject).                                              */
         #define _SERIAL_CASE(_serial, _serialLen, _expect) do { \
-            SSFX509GenParams_t p; \
-            uint8_t tbsDer[512]; \
+            static SSFX509GenParams_t p; \
+            static uint8_t tbsDer[512]; \
             uint32_t tbsLen; \
             uint8_t tbsHash[32]; \
-            uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE]; \
+            static uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE]; \
             size_t sigLen; \
-            uint8_t certDer[SSF_X509_CONFIG_MAX_CERT_SIZE]; \
+            static uint8_t certDer[SSF_X509_CONFIG_MAX_CERT_SIZE]; \
             uint32_t certDerLen; \
-            SSFX509Cert_t parsed; \
+            static SSFX509Cert_t parsed; \
             memset(&p, 0, sizeof(p)); \
             p.pathLenConstraint = -1; \
             p.version = 2u; \
@@ -4187,8 +4187,8 @@ void SSFX509UnitTest(void)
             static const uint8_t ser3[] = { 0x02u, 0x03u, 0x01u, 0x01u, 0x02u };
             uint8_t s1[] = { 0x01u };
             uint8_t s3[] = { 0x01u, 0x01u, 0x02u };
-            SSFX509GenParams_t p;
-            SSFX509Cert_t parsed;
+            static SSFX509GenParams_t p;
+            static SSFX509Cert_t parsed;
             uint32_t certDerLen;
             uint32_t at;
 
@@ -4213,8 +4213,8 @@ void SSFX509UnitTest(void)
     /* Verify the hostname-match path in SSFX509VerifyChain handles wildcards correctly,        */
     /* including the label-count floor that rejects public-suffix wildcards like *.com.         */
     {
-        uint8_t privKey[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
-        uint8_t pubKey[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        static uint8_t privKey[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t pubKey[SSF_ECDSA_MAX_PUB_KEY_SIZE];
         size_t pubKeyLen;
         uint8_t serial[] = { 0x33u };
 
@@ -4225,13 +4225,13 @@ void SSFX509UnitTest(void)
         /* Helper: build a self-signed cert with the given wildcard SAN, then call              */
         /* SSFX509VerifyChain(hostname) and assert the expected result.                          */
         #define _WC_CASE(_sanDNSName, _hostname, _expect) do { \
-            SSFX509GenParams_t p; \
-            uint8_t tbsDer[512]; \
+            static SSFX509GenParams_t p; \
+            static uint8_t tbsDer[512]; \
             uint32_t tbsLen; \
             uint8_t tbsHash[32]; \
-            uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE]; \
+            static uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE]; \
             size_t sigLen; \
-            uint8_t certDer[SSF_X509_CONFIG_MAX_CERT_SIZE]; \
+            static uint8_t certDer[SSF_X509_CONFIG_MAX_CERT_SIZE]; \
             uint32_t certDerLen; \
             const char *sanList[] = { (_sanDNSName), NULL }; \
             const uint8_t *chain[1]; uint32_t chainL[1]; \
@@ -4321,8 +4321,8 @@ void SSFX509UnitTest(void)
     /*   - silent truncation in innerOctetBuf[32] for skidLen > 30                                */
     /* Each boundary length is encoded, parsed, and verified to round-trip intact.                */
     {
-        uint8_t privKey[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
-        uint8_t pubKey[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        static uint8_t privKey[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t pubKey[SSF_ECDSA_MAX_PUB_KEY_SIZE];
         size_t pubKeyLen;
         uint8_t serial[] = { 0x44u };
         uint32_t idx;
@@ -4343,15 +4343,15 @@ void SSFX509UnitTest(void)
         /* keyIdentifiers byte-for-byte against the input. Lengths at 20/32/48/64 cover         */
         /* SHA-1, SHA-256, SHA-384, SHA-512 keyIdentifier choices (RFC 5280 / RFC 7093).         */
         #define _KID_ROUND_TRIP(_kidLen) do { \
-            SSFX509GenParams_t p; \
-            uint8_t tbsDer[512]; \
+            static SSFX509GenParams_t p; \
+            static uint8_t tbsDer[512]; \
             uint32_t tbsLen; \
             uint8_t tbsHash[32]; \
-            uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE]; \
+            static uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE]; \
             size_t sigLen; \
-            uint8_t certDer[SSF_X509_CONFIG_MAX_CERT_SIZE]; \
+            static uint8_t certDer[SSF_X509_CONFIG_MAX_CERT_SIZE]; \
             uint32_t certDerLen; \
-            SSFX509Cert_t parsed; \
+            static SSFX509Cert_t parsed; \
             memset(&p, 0, sizeof(p)); \
             p.pathLenConstraint = -1; \
             p.version = 2u; \
@@ -4409,8 +4409,8 @@ void SSFX509UnitTest(void)
 
         /* Over-limit: 65-byte AKID/SKID. Encoder must refuse (return 0) rather than overflow.  */
         {
-            SSFX509GenParams_t p;
-            uint8_t tbsDer[512];
+            static SSFX509GenParams_t p;
+            static uint8_t tbsDer[512];
             memset(&p, 0, sizeof(p));
             p.pathLenConstraint = -1;
             p.version = 2u;
@@ -4542,7 +4542,7 @@ void SSFX509UnitTest(void)
             0x7c, 0x5e, 0x9a, 0x76, 0xe9, 0x59, 0x90, 0xc5, 0x7c, 0x83, 0x35, 0x11,
             0x65, 0x51
         };
-        SSFX509Cert_t rootCert;
+        static SSFX509Cert_t rootCert;
 
         SSF_ASSERT(SSFX509Parse(entrust2048Der, sizeof(entrust2048Der), &rootCert) == true);
         SSF_ASSERT(rootCert.subject.cn != NULL);
@@ -4620,7 +4620,7 @@ void SSFX509UnitTest(void)
             0x8f, 0x09, 0x2c, 0xa6, 0x5d, 0x7e, 0xe2, 0xf0, 0x07, 0x08, 0x68, 0x6d,
             0xd2, 0x7c, 0x69, 0x6e, 0x5f, 0xdf, 0xe5, 0x6a, 0x65
         };
-        SSFX509Cert_t rootCert;
+        static SSFX509Cert_t rootCert;
 
         SSF_ASSERT(SSFX509Parse(sslcomRootEccDer, sizeof(sslcomRootEccDer), &rootCert) == true);
         /* Confirm the cross-curve pairing this test exercises. */
@@ -4664,8 +4664,8 @@ void SSFX509UnitTest(void)
         static const char *sanPtrs[SSF_X509_CONFIG_MAX_SAN_ENTRIES + 1u];
         static const char *sanOne[2];
         uint8_t serial[] = { 0x07u };
-        SSFX509GenParams_t p;
-        SSFX509Cert_t parsed;
+        static SSFX509GenParams_t p;
+        static SSFX509Cert_t parsed;
         uint32_t i;
         uint32_t n;
 
@@ -4792,8 +4792,8 @@ void SSFX509UnitTest(void)
         };
         static const char *sanNul[] = { "ab", NULL };
         uint8_t serial[] = { 0x09u };
-        SSFX509GenParams_t p;
-        SSFX509Cert_t parsed;
+        static SSFX509GenParams_t p;
+        static SSFX509Cert_t parsed;
         const uint8_t *chain[1];
         uint32_t chainLen[1];
         uint32_t n;
@@ -4886,13 +4886,13 @@ void SSFX509UnitTest(void)
         static uint8_t leafPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
         static const char *sanX[] = { "x", NULL };
         static const uint8_t nullParams[] = { 0x05u, 0x00u };
-        uint8_t caPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
-        uint8_t leafPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t caPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t leafPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
         size_t caPubLen;
         size_t leafPubLen;
         uint8_t serial[] = { 0x0Au };
-        SSFX509GenParams_t p;
-        SSFX509Cert_t parsed;
+        static SSFX509GenParams_t p;
+        static SSFX509Cert_t parsed;
         const uint8_t *chain[2];
         uint32_t chainLen[2];
         const uint8_t *trust[1];
@@ -4994,13 +4994,13 @@ void SSFX509UnitTest(void)
         static const uint8_t ekuOid[] = { 0x55u, 0x1Du, 0x25u };
         static const uint8_t anyEkuValue[] = { 0x30u, 0x06u, 0x06u, 0x04u,
                                                 0x55u, 0x1Du, 0x25u, 0x00u };
-        uint8_t caPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
-        uint8_t leafPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t caPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t leafPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
         size_t caPubLen;
         size_t leafPubLen;
         uint8_t serial[] = { 0x0Bu };
-        SSFX509GenParams_t p;
-        SSFX509Cert_t parsed;
+        static SSFX509GenParams_t p;
+        static SSFX509Cert_t parsed;
         const uint8_t *chain[2];
         uint32_t chainLen[2];
         const uint8_t *trust[1];
@@ -5175,7 +5175,7 @@ void SSFX509UnitTest(void)
             0x7c, 0xf8, 0x0d, 0xc1, 0xa7, 0xef, 0xd7, 0x71, 0xc0, 0xa4, 0xf4, 0xc1,
             0x73, 0x72, 0xdd, 0x1a, 0x0b, 0xe5
         };
-        SSFX509Cert_t pss;
+        static SSFX509Cert_t pss;
         const uint8_t *chain[1];
         uint32_t chainLen[1];
 
@@ -5199,8 +5199,8 @@ void SSFX509UnitTest(void)
         static const char *sanMax[2];
         static const char *sanX[] = { "x", NULL };
         uint8_t serial[] = { 0x0Cu };
-        SSFX509GenParams_t p;
-        SSFX509Cert_t parsed;
+        static SSFX509GenParams_t p;
+        static SSFX509Cert_t parsed;
         const uint8_t *chain[1];
         uint32_t chainLen[1];
         uint32_t n;
@@ -5248,14 +5248,14 @@ void SSFX509UnitTest(void)
         static const char *sanEvil[] = { "evil.com", NULL };
         static const char *sanGood[] = { "good.com", NULL };
         static const char *ncExcl[] = { "evil.com", NULL };
-        uint8_t privA[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
-        uint8_t privB[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
-        uint8_t leafPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t privA[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t privB[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t leafPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
         size_t pubALen;
         size_t pubBLen;
         size_t leafPubLen;
         uint8_t serial[] = { 0x0Du };
-        SSFX509GenParams_t p;
+        static SSFX509GenParams_t p;
         const uint8_t *chain[1];
         uint32_t chainLen[1];
         const uint8_t *trust[2];
@@ -5422,13 +5422,13 @@ void SSFX509UnitTest(void)
             { ncEmptyList, sizeof(ncEmptyList) }, { ncSubtreeSet, sizeof(ncSubtreeSet) },
             { ncNameOverrun, sizeof(ncNameOverrun) }
         };
-        uint8_t caPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
-        uint8_t leafPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t caPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t leafPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
         size_t caPubLen;
         size_t leafPubLen;
         uint8_t serial[] = { 0x1Du };
-        SSFX509GenParams_t p;
-        SSFX509Cert_t parsed;
+        static SSFX509GenParams_t p;
+        static SSFX509Cert_t parsed;
         const uint8_t *chain[1];
         uint32_t chainLen[1];
         const uint8_t *trust[1];
@@ -6020,16 +6020,16 @@ void SSFX509UnitTest(void)
             0x2Au, 0x86u, 0x48u, 0xCEu, 0x3Du, 0x04u, 0x03u, 0x02u
         };
         static const char *sanGood[] = { "good.com", NULL };
-        uint8_t caPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
-        uint8_t leafPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t caPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t leafPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
         uint8_t tbsHash[SSF_SHA2_256_BYTE_SIZE];
-        uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
+        static uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
         uint8_t algId[16];
         size_t caPubLen;
         size_t leafPubLen;
         size_t sigLen;
         uint8_t serial[] = { 0x4Du };
-        SSFX509GenParams_t p;
+        static SSFX509GenParams_t p;
         const uint8_t *chain[1];
         uint32_t chainLen[1];
         const uint8_t *trust[1];
@@ -6159,12 +6159,12 @@ void SSFX509UnitTest(void)
         static const char *sanWild001[] = { "*.0.0.1", NULL };
         static const char *sanDns10001[] = { "10.0.0.1", NULL };
         static const char *sanDnsV6[] = { "::1", NULL };
-        uint8_t caPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
-        uint8_t leafPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t caPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t leafPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
         size_t caPubLen;
         size_t leafPubLen;
         uint8_t serial[] = { 0x5Du };
-        SSFX509GenParams_t p;
+        static SSFX509GenParams_t p;
         const uint8_t *chain[1];
         uint32_t chainLen[1];
         const uint8_t *trust[1];
@@ -6227,8 +6227,8 @@ void SSFX509UnitTest(void)
         static uint8_t fakeSig[64];
         static const char *sanAB[] = { "ab", "cd", NULL };
         uint8_t serial[] = { 0x0Eu };
-        SSFX509GenParams_t p;
-        SSFX509Cert_t parsed;
+        static SSFX509GenParams_t p;
+        static SSFX509Cert_t parsed;
         uint32_t n;
         uint32_t i;
 
@@ -6275,8 +6275,8 @@ void SSFX509UnitTest(void)
         const uint8_t *nullEntry[1];
         uint32_t nullEntryLen[1];
         uint8_t serial[] = { 0x10u };
-        SSFX509GenParams_t p;
-        SSFX509Cert_t c;
+        static SSFX509GenParams_t p;
+        static SSFX509Cert_t c;
         uint32_t n;
         uint32_t i;
         uint64_t now;
@@ -6372,12 +6372,12 @@ void SSFX509UnitTest(void)
         static const uint8_t bcExtPattern[] = { 0x30u, 0x0Fu, 0x06u, 0x03u, 0x55u, 0x1Du, 0x13u,
                                                 0x01u, 0x01u, 0xFFu };
         static const char *sanX[] = { "x", NULL };
-        uint8_t caPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t caPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
         size_t caPubLen;
         uint8_t serial[] = { 0x11u };
-        SSFX509GenParams_t p;
-        SSFX509Cert_t parsed;
-        SSFX509Cert_t issuer;
+        static SSFX509GenParams_t p;
+        static SSFX509Cert_t parsed;
+        static SSFX509Cert_t issuer;
         const uint8_t *chain[2];
         uint32_t chainLen[2];
         const uint8_t *trust[1];
@@ -6523,14 +6523,14 @@ void SSFX509UnitTest(void)
         static const char *sanOut[] = { "evil.com", NULL };
         static const char *sanIntName[] = { "int.example.com", NULL };
         static const char *rootExcludesInt[] = { "int.example.com", NULL };
-        uint8_t rootPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
-        uint8_t intPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
-        uint8_t leafPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t rootPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t intPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t leafPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
         size_t rootPubLen;
         size_t intPubLen;
         size_t leafPubLen;
         uint8_t serial[] = { 0x12u };
-        SSFX509GenParams_t p;
+        static SSFX509GenParams_t p;
         const uint8_t *chain[2];
         uint32_t chainLen[2];
         const uint8_t *trust[1];
@@ -6651,7 +6651,7 @@ void SSFX509UnitTest(void)
     {
         const uint8_t *chain[1];
         uint32_t chainLen[1];
-        SSFX509Cert_t c;
+        static SSFX509Cert_t c;
         uint32_t before;
         int marker = 0;
 
@@ -6707,15 +6707,15 @@ void SSFX509UnitTest(void)
         static uint8_t leafPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
         static uint8_t fakeSig[64];
         static const char *sanX[] = { "x", NULL };
-        uint8_t rootPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
-        uint8_t intPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
-        uint8_t leafPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t rootPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t intPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t leafPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
         size_t rootPubLen;
         size_t intPubLen;
         size_t leafPubLen;
         uint8_t serial[] = { 0x13u };
-        SSFX509GenParams_t p;
-        SSFX509Cert_t parsed;
+        static SSFX509GenParams_t p;
+        static SSFX509Cert_t parsed;
         const uint8_t *chain[2];
         uint32_t chainLen[2];
         const uint8_t *trust[1];
@@ -6858,13 +6858,13 @@ void SSFX509UnitTest(void)
         static const uint8_t ip10[4] = { 10u, 0u, 0u, 1u };
         static const uint8_t *sanIPs[] = { ip10, NULL };
         static const char *sanDNS[] = { "x", NULL };
-        uint8_t caPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
-        uint8_t leafPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t caPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t leafPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
         size_t caPubLen;
         size_t leafPubLen;
         uint8_t serial[] = { 0x14u };
-        SSFX509GenParams_t p;
-        SSFX509Cert_t parsed;
+        static SSFX509GenParams_t p;
+        static SSFX509Cert_t parsed;
         const uint8_t *chain[2];
         uint32_t chainLen[2];
         const uint8_t *trust[1];
@@ -6992,10 +6992,10 @@ void SSFX509UnitTest(void)
         static char cn[SSF_X509_CONFIG_MAX_CHAIN_DEPTH][4];
         static uint8_t rootPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
         static const char *sanDeep[] = { "deep.test", NULL };
-        uint8_t rootPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t rootPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
         size_t rootPubLen;
         uint8_t serial[] = { 0x15u };
-        SSFX509GenParams_t p;
+        static SSFX509GenParams_t p;
         const uint8_t *chain[SSF_X509_CONFIG_MAX_CHAIN_DEPTH + 1u];
         uint32_t chainLen[SSF_X509_CONFIG_MAX_CHAIN_DEPTH + 1u];
         const uint8_t *trust[1];
@@ -7070,13 +7070,13 @@ void SSFX509UnitTest(void)
         static char names[SSF_X509_CONFIG_MAX_SAN_ENTRIES][12];
         static const char *sans[SSF_X509_CONFIG_MAX_SAN_ENTRIES + 2u];
         static const char *excl[] = { "evil.com", NULL };
-        uint8_t caPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
-        uint8_t leafPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t caPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t leafPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
         size_t caPubLen;
         size_t leafPubLen;
         uint8_t serial[] = { 0x16u };
-        SSFX509GenParams_t p;
-        SSFX509Cert_t parsed;
+        static SSFX509GenParams_t p;
+        static SSFX509Cert_t parsed;
         const uint8_t *chain[2];
         uint32_t chainLen[2];
         const uint8_t *trust[1];
@@ -7177,9 +7177,9 @@ void SSFX509UnitTest(void)
         };
         static const char *sanX[] = { "x", NULL };
         uint8_t serial[] = { 0x17u };
-        SSFX509GenParams_t p;
-        SSFX509Cert_t parsed;
-        SSFX509Cert_t issuer;
+        static SSFX509GenParams_t p;
+        static SSFX509Cert_t parsed;
+        static SSFX509Cert_t issuer;
         const uint8_t *chain[1];
         uint32_t chainLen[1];
         uint32_t n;
@@ -7319,8 +7319,8 @@ void SSFX509UnitTest(void)
         static uint8_t fakeSig[64];
         static uint8_t fakeKey32[32];
         uint8_t serial[] = { 0x18u };
-        SSFX509GenParams_t p;
-        SSFX509Cert_t parsed;
+        static SSFX509GenParams_t p;
+        static SSFX509Cert_t parsed;
         uint32_t n;
 #if _UT_RSA_PSS_SIGN == 1
         static const uint8_t rsaPssOid[] = {
@@ -7377,12 +7377,12 @@ void SSFX509UnitTest(void)
         static uint8_t tbsDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
         static uint8_t certDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
         uint8_t tbsHash[SSF_SHA2_256_BYTE_SIZE];
-        uint8_t sig[SSF_RSA_MAX_SIG_SIZE];
+        static uint8_t sig[SSF_RSA_MAX_SIG_SIZE];
         size_t rsaPrivLen;
         size_t rsaPubLen;
         size_t sigLen;
-        SSFX509Cert_t rsaCert;
-        SSFX509Cert_t ecCert;
+        static SSFX509Cert_t rsaCert;
+        static SSFX509Cert_t ecCert;
         uint32_t tbsLen;
         uint32_t certLen;
         int marker = 0;
@@ -7423,7 +7423,7 @@ void SSFX509UnitTest(void)
             };
             static uint8_t emptyKeyDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
             uint32_t emptyKeyDerLen;
-            SSFX509Cert_t emptyKeyCert;
+            static SSFX509Cert_t emptyKeyCert;
             const uint8_t *chainDer[2];
             uint32_t chainDerLen[2];
             const uint8_t *trustDer[1];
@@ -7695,7 +7695,7 @@ void SSFX509UnitTest(void)
         static const uint8_t data[] = "signed data";
         static uint8_t fakeKey[256];
         static uint8_t fakeSig[256];
-        SSFX509Cert_t key;
+        static SSFX509Cert_t key;
         int marker = 0;
 
         memset(fakeKey, 0x5Au, sizeof(fakeKey));
@@ -7758,7 +7758,7 @@ void SSFX509UnitTest(void)
         static const uint8_t ip10[4] = { 10u, 0u, 0u, 1u };
         static const uint8_t *sanIPs[] = { ip10, NULL };
         uint8_t serial[] = { 0x19u };
-        SSFX509GenParams_t p;
+        static SSFX509GenParams_t p;
         const uint8_t *chain[1];
         uint32_t chainLen[1];
         uint32_t n;
@@ -7821,8 +7821,8 @@ void SSFX509UnitTest(void)
         static uint8_t pubKey[SSF_ECDSA_MAX_PUB_KEY_SIZE];
         static uint8_t fakeSig[64];
         uint8_t serial[] = { 0x1Au };
-        SSFX509GenParams_t p;
-        SSFX509Cert_t parsed;
+        static SSFX509GenParams_t p;
+        static SSFX509Cert_t parsed;
         uint32_t n;
 
         memset(fakeSig, 0xAAu, sizeof(fakeSig));
@@ -7887,21 +7887,21 @@ void SSFX509UnitTest(void)
         static uint8_t certDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
         static uint8_t ecPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
         static uint8_t data[64];
-        uint8_t ecPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t ecPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
         uint8_t edSeed[SSF_ED25519_SEED_SIZE];
         uint8_t edPub[SSF_ED25519_PUB_KEY_SIZE];
         uint8_t edSig[SSF_ED25519_SIG_SIZE];
         uint8_t hash[SSF_SHA2_512_BYTE_SIZE];
 #if (_UT_RSA_PKCS1_SIGN == 1) && (_UT_RSA_PSS_SIGN == 1)
-        uint8_t sig[SSF_RSA_MAX_SIG_SIZE];
+        static uint8_t sig[SSF_RSA_MAX_SIG_SIZE];
 #else
-        uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
+        static uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
 #endif /* (_UT_RSA_PKCS1_SIGN == 1) && (_UT_RSA_PSS_SIGN == 1) */
         size_t sigLen;
         size_t ecPubLen;
         uint8_t serial[] = { 0x1Bu };
-        SSFX509GenParams_t p;
-        SSFX509Cert_t c;
+        static SSFX509GenParams_t p;
+        static SSFX509Cert_t c;
         uint32_t tbsLen;
         uint32_t n;
 #if (_UT_RSA_PKCS1_SIGN == 1) && (_UT_RSA_PSS_SIGN == 1)
@@ -7982,7 +7982,7 @@ void SSFX509UnitTest(void)
             static const uint8_t ecdsaSha384Oid[] = {
                 0x2Au, 0x86u, 0x48u, 0xCEu, 0x3Du, 0x04u, 0x03u, 0x03u
             };
-            uint8_t sig384[SSF_ECDSA_MAX_SIG_SIZE];
+            static uint8_t sig384[SSF_ECDSA_MAX_SIG_SIZE];
             size_t sig384Len;
 
             SSF_ASSERT(SSFX509VerifySignature(&c, ecdsaSha384Oid, sizeof(ecdsaSha384Oid), NULL, 0u,
@@ -8069,8 +8069,9 @@ void SSFX509UnitTest(void)
         /* AUDIT X509-11: an RSA key labelled anything but rsaEncryption does not verify RSA */
         /* PKCS#1 v1.5; RSA-PSS also accepts an id-RSASSA-PSS key (RFC 4055)                  */
         {
-            SSFX509Cert_t k = c;
+            static SSFX509Cert_t k;
 
+            k = c;
             k.pubKeyAlgOidRaw = ed25519Oid;
             k.pubKeyAlgOidRawLen = sizeof(ed25519Oid);
             SSF_ASSERT(SSFX509VerifySignature(&k, rsaPssOid, sizeof(rsaPssOid), pssSalt32,
@@ -8114,8 +8115,9 @@ void SSFX509UnitTest(void)
             static const uint8_t ecPubOid[] = {
                 0x2Au, 0x86u, 0x48u, 0xCEu, 0x3Du, 0x02u, 0x01u
             };
-            SSFX509Cert_t k = c;
+            static SSFX509Cert_t k;
 
+            k = c;
             SSF_ASSERT(SSFX509VerifySignature(&c, ed25519Oid, sizeof(ed25519Oid), edNull,
                                               sizeof(edNull), NULL, 0u, data, sizeof(data),
                                               edSig, sizeof(edSig)) == false);
@@ -8156,13 +8158,13 @@ void SSFX509UnitTest(void)
         static const uint8_t ekuOid[] = { 0x55u, 0x1Du, 0x25u };
         static const uint8_t anyEkuValue[] = { 0x30u, 0x06u, 0x06u, 0x04u,
                                                 0x55u, 0x1Du, 0x25u, 0x00u };
-        uint8_t caPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
-        uint8_t leafPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t caPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t leafPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
         size_t caPubLen;
         size_t leafPubLen;
         uint8_t serial[] = { 0x1Cu };
-        SSFX509GenParams_t p;
-        SSFX509Cert_t parsed;
+        static SSFX509GenParams_t p;
+        static SSFX509Cert_t parsed;
         const uint8_t *chain[2];
         uint32_t chainLen[2];
         const uint8_t *trust[1];
@@ -8393,7 +8395,7 @@ void SSFX509UnitTest(void)
         };
         static uint8_t pubE1[4u + 4u + 257u + 3u];
         static uint8_t sigE1[256];
-        SSFX509Cert_t kc;
+        static SSFX509Cert_t kc;
         uint8_t hash[32];
         uint32_t i;
 
@@ -8485,7 +8487,7 @@ void SSFX509UnitTest(void)
         };
         const uint8_t *chain9999[1];
         uint32_t chain9999Len[1];
-        SSFX509Cert_t c9999;
+        static SSFX509Cert_t c9999;
 
         SSF_ASSERT(SSFX509Parse(cert9999, sizeof(cert9999), &c9999) == true);
         SSF_ASSERT(c9999.notAfter == SSF_ASN1_TIME_FAR_FUTURE);
@@ -8530,26 +8532,26 @@ void SSFX509UnitTest(void)
         static const uint8_t ip10[4] = { 10u, 0u, 0u, 1u };
         static const char *sanLeading[] = { "010.0.0.1", NULL };
         static const uint8_t *ipSans[] = { ip10, NULL };
-        uint8_t leafPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
-        uint8_t leafPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        static uint8_t leafPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t leafPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
         size_t leafPubLen;
         uint32_t caLen;
         const uint8_t *ch2[2];
         uint32_t ch2Len[2];
         const uint8_t *tr[1];
         uint32_t trLen[1];
-        uint8_t priv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
-        uint8_t pub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        static uint8_t priv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t pub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
         uint8_t hash[SSF_SHA2_256_BYTE_SIZE];
-        uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
+        static uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
         uint8_t serial[] = { 0x5Au };
         size_t pubLen;
         size_t sigLen;
         uint32_t tbsLen;
         uint32_t derLen;
         uint32_t i;
-        SSFX509GenParams_t p;
-        SSFX509Cert_t c;
+        static SSFX509GenParams_t p;
+        static SSFX509Cert_t c;
         const uint8_t *ch[1];
         uint32_t chLen[1];
 
@@ -8903,8 +8905,8 @@ void SSFX509UnitTest(void)
             { ncOid, sizeof(ncOid), ncMin, sizeof(ncMin), false }
         };
         uint8_t serial[] = { 0x19u };
-        SSFX509GenParams_t p;
-        SSFX509Cert_t c;
+        static SSFX509GenParams_t p;
+        static SSFX509Cert_t c;
         uint32_t genLen;
         uint32_t i;
 
@@ -8948,8 +8950,8 @@ void SSFX509UnitTest(void)
             0x06u, 0x03u, 0x55u, 0x04u, 0x06u, 0x0Cu, 0x02u, 'U', 'S'
         };
         uint8_t serial[] = { 0x20u };
-        SSFX509GenParams_t p;
-        SSFX509Cert_t c;
+        static SSFX509GenParams_t p;
+        static SSFX509Cert_t c;
         uint32_t genLen;
         uint32_t i;
         uint32_t printableHits;

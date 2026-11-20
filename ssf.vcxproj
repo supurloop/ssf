@@ -202,7 +202,9 @@
     <ClCompile Include="_crypto\ssfecdsa_ut.c" />
     <ClCompile Include="_crypto\ssfec_ut.c" />
     <ClCompile Include="_crypto\ssfed25519.c" />
+    <ClCompile Include="_crypto\ssffe25519.c" />
     <ClCompile Include="_crypto\ssfed25519_ut.c" />
+    <ClCompile Include="_crypto\ssffe25519_ut.c" />
     <ClCompile Include="_crypto\ssfhkdf.c" />
     <ClCompile Include="_crypto\ssfhkdf_ut.c" />
     <ClCompile Include="_crypto\ssfhmac.c" />
@@ -300,6 +302,7 @@
     <ClInclude Include="_crypto\ssfec_p384_comb_table_h6.h" />
     <ClInclude Include="_crypto\ssfecdsa.h" />
     <ClInclude Include="_crypto\ssfed25519.h" />
+    <ClInclude Include="_crypto\ssffe25519.h" />
     <ClInclude Include="_crypto\ssfhkdf.h" />
     <ClInclude Include="_crypto\ssfhmac.h" />
     <ClInclude Include="_crypto\ssfpoly1305.h" />

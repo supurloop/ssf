@@ -226,7 +226,13 @@
     <ClCompile Include="_crypto\ssfed25519.c">
       <Filter>_crypto</Filter>
     </ClCompile>
+    <ClCompile Include="_crypto\ssffe25519.c">
+      <Filter>_crypto</Filter>
+    </ClCompile>
     <ClCompile Include="_crypto\ssfed25519_ut.c">
+      <Filter>_crypto</Filter>
+    </ClCompile>
+    <ClCompile Include="_crypto\ssffe25519_ut.c">
       <Filter>_crypto</Filter>
     </ClCompile>
     <ClCompile Include="_crypto\ssfhkdf.c">
@@ -537,6 +543,9 @@
       <Filter>_crypto</Filter>
     </ClInclude>
     <ClInclude Include="_crypto\ssfed25519.h">
+      <Filter>_crypto</Filter>
+    </ClInclude>
+    <ClInclude Include="_crypto\ssffe25519.h">
       <Filter>_crypto</Filter>
     </ClInclude>
     <ClInclude Include="_crypto\ssfhkdf.h">

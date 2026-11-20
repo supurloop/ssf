@@ -22,8 +22,9 @@ Cryptographic interfaces.
 | ssfbn | Multi-precision big-number arithmetic (foundation for RSA, ECC, DH) | ssfbn.c, ssfbn.h | [ssfbn.md](ssfbn.md) |
 | ssfec | Elliptic curve point arithmetic (NIST P-256 / P-384) | ssfec.c, ssfec.h | [ssfec.md](ssfec.md) |
 | ssfecdsa | ECDSA signatures (RFC 6979 deterministic) + ECDH key agreement over NIST P-256 / P-384 | ssfecdsa.c, ssfecdsa.h | [ssfecdsa.md](ssfecdsa.md) |
-| ssfx25519 | X25519 key agreement (RFC 7748) — constant-time, self-contained | ssfx25519.c, ssfx25519.h | [ssfx25519.md](ssfx25519.md) |
-| ssfed25519 | Ed25519 signatures (RFC 8032 pure mode) — deterministic, self-contained | ssfed25519.c, ssfed25519.h | [ssfed25519.md](ssfed25519.md) |
+| ssfx25519 | X25519 key agreement (RFC 7748) — constant-time, no ssfbn dependency | ssfx25519.c, ssfx25519.h | [ssfx25519.md](ssfx25519.md) |
+| ssfed25519 | Ed25519 signatures (RFC 8032 pure mode) — deterministic, no ssfbn dependency | ssfed25519.c, ssfed25519.h | [ssfed25519.md](ssfed25519.md) |
+| ssffe25519 | GF(2²⁵⁵ − 19) field arithmetic shared by ssfx25519 and ssfed25519 (internal) | ssffe25519.c, ssffe25519.h | [ssffe25519.md](ssffe25519.md) |
 | ssfrsa | RSA signatures (PKCS#1 v1.5 and PSS) + key generation over 2048/3072/4096-bit keys | ssfrsa.c, ssfrsa.h | [ssfrsa.md](ssfrsa.md) |
 | ssftls | TLS 1.3 core building blocks: key schedule, transcript hash, record layer (no handshake state machine) | ssftls.c, ssftls.h | [ssftls.md](ssftls.md) |
 | ssfcms | RFC 5652 CMS SignedData verifier (zero-copy parse, detached file signatures by digest, ECDSA / RSA / Ed25519, RFC 6211 algorithm protection) | ssfcms.c, ssfcms.h | [ssfcms.md](ssfcms.md) |

@@ -69,7 +69,7 @@ SUMMARY
            (CMS-O1)
   BN-O4    Speed         ModMulCT 6.3x at 2048 bits (counted under BN-O5)      M       DONE
   ED-O3    Speed         Ed25519 verify 1.4x                                   M       OPEN
-  FE-O1    Speed         X25519 / Ed25519 +15-35%                              S-M     OPEN
+  FE-O1    Speed         measured: M0+ -7..12%, M4 ~0, A7 +7%; not adopted     S-M     DROPPED
   X509-O4  Stack         chain verify 14.5 KB -> about 4 KB (high risk)        L       OPEN
   ED-O2    Speed         Ed25519 sign 1.3x, keygen 1.6x (+1-2 KB ROM)          M       OPEN
   EC-O4    Speed         ECC 1.5-2.2x measured (NIST reduction correction)      M       DONE
@@ -77,7 +77,7 @@ SUMMARY
   HMAC-O1  Speed         every HMAC about +25%                                 M       OPEN
   GCM-O1   Speed         GHASH +15-20% (GCM +7-10%)                            S       OPEN
   SHA1-O2  Speed+stack   SHA-1 1.2-2x, -256 B stack                            S       OPEN
-  FE-O2    Size          -1.2 KB with X25519 and Ed25519 both enabled          M       OPEN
+  FE-O2    Size          -0.7 KB M4 / -0.9 KB M0+ with both enabled, measured  M       DONE
 
   The rest are smaller: STR-O1..O3, ASN1-O1..O4, SHA1-O1, SHA2-O1..O3, HMAC-O2, HMAC-O3,
   HKDF-O1, PRNG-O1, GCM-O2, CHACHA-O1, BN-O7, BN-O8, EC-O2, ED-O4 (policy option),
@@ -641,7 +641,7 @@ ED-O3  Speed  OPEN  Effort M
              same on its verify-after-sign half.
   Risk:      Variable time only on public inputs (signature, public key, message).
 
-FE-O1  Speed  OPEN  Effort S
+FE-O1  Speed  DROPPED (2026-11-19, measured)  Effort S
   Where:     _fe_sqr in both modules is _fe_mul(a, a); _fe_mul ends with a full reduction to
              [0, p) after two folds
   Change:    Dedicated squaring (36 instead of 64 limb products); keep the full reduction
@@ -652,7 +652,7 @@ FE-O1  Speed  OPEN  Effort S
   Risk:      Lazy reduction needs care: every add / sub must tolerate inputs in [0, 2p) and
              the 38-fold carries must be re-proved. The squaring change alone is low risk.
 
-FE-O2  Size  OPEN  Effort M
+FE-O2  Size  DONE (2026-11-19)  Effort M
   Where:     ssfx25519.c and ssfed25519.c each carry their own GF(2^255-19) arithmetic
              (_fe_mul, _fe_reduce, _fe_inv, add / sub / cswap / bytes: about 1.3 KB each)
   Change:    One shared internal implementation (a private header or ssffe25519.c used by
@@ -1379,4 +1379,43 @@ CHANGE LOG
               widths beyond SSF_BN_MAX_LIMBS / 2 and SSF_BN_MAX_MOD_LIMBS. The full runner
               cannot be built without RSA there (ssfx509 needs SSFRSAHash_t; pre-existing).
               Default and RSA-2048-only builds: all 9 suites pass after the change.
+  2026-11-19  FE-O2 DONE (Jim: "do FE-O2 then FE-O1", then "Do option 3": FE-O2 only). New
+              internal module ssffe25519 (.c / .h / _ut.c / .md): the field functions that were
+              identical in ssfx25519 and ssfed25519 (Mul, Sqr, Reduce, Inv, ToBytes, CSwap;
+              SetZero / SetOne / Copy as static inline) and the prime SSF_FE25519_P, with full
+              DBC. add / sub / from_bytes stay per module because their semantics differ on
+              purpose (X25519 reduces after add and masks bit 255 on import; Ed25519 keeps adds
+              lazy, so its sub reduces inputs first, and decodes the sign bit itself); so do
+              _fe_mul_small and Ed25519's pow2523 / isneg / iszero / neg. Mechanical renames
+              in both modules (_fe_t -> SSFFE25519_t, _fe_mul -> SSFFE25519Mul, ...). Wired
+              into ssfport.h (SSF_CONFIG_FE25519_UNIT_TEST), main.c, the three ninja files and
+              ssf.vcxproj / .filters (CRLF and BOM kept).
+              Tests: ssffe25519_ut.c, contracts and Python-computed vectors (Mul / Sqr of
+              2^256 - 1 and a mixed value, aliasing, Reduce of p, p +- 1, 2^255, 2^256 - 1,
+              canonical ToBytes, CSwap low-bit-only, Inv of x and 2^256 - 1, x * x^-1 = 1).
+              GREEN: all 11 suites normal and ASan + UBSan (X25519 and Ed25519 stack-limit
+              tests raised only for ASan's padded frames; the committed code fails them there
+              too). Mul's body is identical to the old _fe_mul apart from renames and DBC.
+              Code (arm-none-eabi-gcc -Os): both modules linked, Cortex-M4 6405 -> 5673 B
+              (-732), Cortex-M0+ 7129 -> 6237 B (-892); X25519 alone +113 / +115 B and Ed25519
+              alone +192 / +210 B (the shared functions are no longer inlined and now carry
+              DBC). Stack: X25519 ComputeSecret 1544, Ed25519 Sign 2560, Verify 1904,
+              PubKeyFromSeed 1472 B, unchanged. Speed: x86-64 neutral (X25519 162-166 us, sign
+              598-613, verify 300-307); emulated ARMv7-A X25519 806-821 -> 849-850 us (+3-5%,
+              squares no longer inline into their Mul), Ed25519 +3%.
+              Docs: ssffe25519.md (new), _crypto/README.md, README row and footnotes 43 / 45,
+              ssfx25519.md, ssfed25519.md.
+              Style found in passing: every comment-box line generated this session was 98
+              columns, not 99; the 24 added since 683b5f0 were padded to 99.
+  2026-11-19  FE-O1 DROPPED (measured, Jim: option 3). A dedicated square (28 cross products
+              doubled by one shift, diagonal in one fixed carry pass, reduction shared with Mul:
+              36 products instead of 64) passed a 36-product count test (red on the old Sqr), a
+              5000000-input differential against Mul(a, a), and six mutants. But the review's
+              premise (products dominate) fails on cores with a fast 32 x 32 -> 64 multiply:
+              Sqr alone 50 vs Mul 48 ns x86-64, 292 vs 242 ns ARMv7-A; field code built for
+              Cortex-M4 52 vs 51 (emulated, instruction-count proxy), for Cortex-M0+ (no
+              widening multiply, __aeabi_lmul) 139 vs 189. End to end vs the committed code:
+              Cortex-M0+ X25519 -7%, Ed25519 sign / verify -12%; Cortex-M4 0 / -5 / -4%;
+              ARMv7-A X25519 +7%; x86-64 0. Code +222 B Cortex-M4, +302 B Cortex-M0+. A
+              variant selecting it only on ARMv6-M was offered and not chosen.
 

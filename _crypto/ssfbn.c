@@ -1272,7 +1272,7 @@ void SSFBNModSub(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* r = a mod m by shift-and-subtract: any nonzero m; branches on each step's borrow.            */
+/* r = a mod m by shift-and-subtract: any nonzero m; branches on each step's borrow.             */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFBNModShift(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
 {
@@ -1326,7 +1326,7 @@ static void _SSFBNModShift(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* r = a mod m for odd m, constant-time: a in modulus-width chunks folded in Montgomery form.   */
+/* r = a mod m for odd m, constant-time: a in modulus-width chunks folded in Montgomery form.    */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFBNModMont(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
 {
@@ -1381,7 +1381,7 @@ static void _SSFBNModMont(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* r = a mod m. a->len may be up to 2 * m->len. Constant-time for odd m (OPTIMIZE BN-O7).       */
+/* r = a mod m. a->len may be up to 2 * m->len. Constant-time for odd m (OPTIMIZE BN-O7).        */
 /* --------------------------------------------------------------------------------------------- */
 void SSFBNMod(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
 {
@@ -1951,8 +1951,8 @@ bool SSFBNModInvExt(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
 
 #if SSF_BN_CONFIG_MAX_BITS >= 512
 /* --------------------------------------------------------------------------------------------- */
-/* r += c * k over n limbs, k = 2^(32n) mod p given as coefficients in {-1, 0, 1}; returns      */
-/* the signed carry out. Constant-time; c is the reduction's net carry (OPTIMIZE EC-O4).        */
+/* r += c * k over n limbs, k = 2^(32n) mod p given as coefficients in {-1, 0, 1}; returns       */
+/* the signed carry out. Constant-time; c is the reduction's net carry (OPTIMIZE EC-O4).         */
 /* --------------------------------------------------------------------------------------------- */
 static int32_t _SSFBNNistFold(SSFBNLimb_t *r, const int8_t *coef, uint16_t n, int32_t c)
 {
@@ -2193,7 +2193,7 @@ static void _SSFBNReduceP384(SSFBN_t *r, const SSFBN_t *t)
 
 #if SSF_CONFIG_BN_UNIT_TEST == 1
 /* --------------------------------------------------------------------------------------------- */
-/* Test-only: r = t mod m via the P-256 / P-384 fast reduction; m must be one of the two.       */
+/* Test-only: r = t mod m via the P-256 / P-384 fast reduction; m must be one of the two.        */
 /* --------------------------------------------------------------------------------------------- */
 void _SSFBNReduceNISTForTest(SSFBN_t *r, const SSFBN_t *t, const SSFBN_t *m)
 {
@@ -2534,7 +2534,7 @@ void SSFBNMontInit(SSFBNMont_t *ctx, const SSFBN_t *m)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Zeroes len limbs through a volatile pointer so the stores cannot be optimized away.          */
+/* Zeroes len limbs through a volatile pointer so the stores cannot be optimized away.           */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFBNWipeLimbs(SSFBNLimb_t *p, size_t len)
 {

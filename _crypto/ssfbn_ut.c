@@ -1861,7 +1861,7 @@ static void _SSFBNUTCheckModAdd(const SSFBN_t *m, const SSFBN_t *a, const SSFBN_
 #pragma warning(disable:6262)
 #endif
 /* --------------------------------------------------------------------------------------------- */
-/* Stack hygiene probes: fill, then read back, the region just below the caller's frame. A      */
+/* Stack hygiene probes: fill, then read back, the region just below the caller's frame. A       */
 /* callee that returned without wiping a local leaves it in this region (OPTIMIZE RSA-STK).      */
 /* --------------------------------------------------------------------------------------------- */
 #define _SSFBN_UT_PROBE_BYTES (8u * 1024u)

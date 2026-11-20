@@ -675,6 +675,36 @@ void SSFECUnitTest(void)
 #endif
     SSF_UT_PRINTF("--- end OpenSSL cross-check ---\n");
 #endif
+#if SSF_CONFIG_BN_UNIT_TEST == 1
+    /* ---- OPTIMIZE BN-O8: curve field ops never pay for a NIST prime limb compare ---- */
+    /* The curves' p is the library's NIST prime storage, so ModMulNIST recognises it by     */
+    /* pointer: a scalar multiply makes no full prime comparison.                            */
+    {
+        SSFBN_DEFINE(kBN, SSF_EC_MAX_LIMBS);
+        SSFECPOINT_DEFINE(R, SSF_EC_MAX_LIMBS);
+        SSFECPOINT_DEFINE(G, SSF_EC_MAX_LIMBS);
+        const SSFECCurveParams_t *c;
+
+#if SSF_EC_CONFIG_ENABLE_P256 == 1
+        c = SSFECGetCurveParams(SSF_EC_CURVE_P256);
+        SSF_ASSERT(c->p.limbs == SSF_BN_NIST_P256.limbs);
+        SSFECPointFromAffine(&G, &c->gx, &c->gy, SSF_EC_CURVE_P256);
+        SSFBNSetUint32(&kBN, 0x12345u, c->limbs);
+        _SSFBNNistPrimeCmps = 0u;
+        SSFECScalarMul(&R, &kBN, &G, SSF_EC_CURVE_P256);
+        SSF_ASSERT(_SSFBNNistPrimeCmps == 0u);
+#endif /* SSF_EC_CONFIG_ENABLE_P256 */
+#if SSF_EC_CONFIG_ENABLE_P384 == 1
+        c = SSFECGetCurveParams(SSF_EC_CURVE_P384);
+        SSF_ASSERT(c->p.limbs == SSF_BN_NIST_P384.limbs);
+        SSFECPointFromAffine(&G, &c->gx, &c->gy, SSF_EC_CURVE_P384);
+        SSFBNSetUint32(&kBN, 0x12345u, c->limbs);
+        _SSFBNNistPrimeCmps = 0u;
+        SSFECScalarMul(&R, &kBN, &G, SSF_EC_CURVE_P384);
+        SSF_ASSERT(_SSFBNNistPrimeCmps == 0u);
+#endif /* SSF_EC_CONFIG_ENABLE_P384 */
+    }
+#endif /* SSF_CONFIG_BN_UNIT_TEST */
 #if SSF_EC_CONFIG_ENABLE_P256 == 1
     /* ---- P-256: generator is on curve ---- */
     {

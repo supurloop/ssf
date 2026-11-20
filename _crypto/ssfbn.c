@@ -77,6 +77,9 @@ uint32_t _SSFBNSquareCarryIters = 0u;
 /* Test-only count of the P-256 / P-384 reductions' correction passes (OPTIMIZE EC-O4) */
 uint32_t _SSFBNNistCorrPasses = 0u;
 
+/* Test-only count of full NIST prime comparisons in SSFBNModMulNIST (OPTIMIZE BN-O8) */
+uint32_t _SSFBNNistPrimeCmps = 0u;
+
 /* Test-only count of full-width entry points (ModExpMont[Pub], ModMulCT, ModInvExt, ModMul). */
 uint32_t _SSFBNFullWidthCalls = 0u;
 
@@ -98,23 +101,25 @@ uint32_t _SSFBNModShiftCalls = 0u;
 /* product from SSFBNMul. The min cap is therefore 2 x curve operand width, not curve width.     */
 #if SSF_BN_CONFIG_MAX_BITS >= 512
 /* P-256: 2^256 - 2^224 + 2^192 + 2^96 - 1 */
-static SSFBNLimb_t _ssfBNNistP256Limbs[8] =
+/* const: the prime lives in flash, not RAM; curve code shares this storage (OPTIMIZE BN-O8) */
+const SSFBNLimb_t SSF_BN_NIST_P256_LIMBS[8] =
 {
     0xFFFFFFFFul, 0xFFFFFFFFul, 0xFFFFFFFFul, 0x00000000ul,
     0x00000000ul, 0x00000000ul, 0x00000001ul, 0xFFFFFFFFul
 };
-const SSFBN_t SSF_BN_NIST_P256 = { _ssfBNNistP256Limbs, 8, 8 };
+const SSFBN_t SSF_BN_NIST_P256 = { (SSFBNLimb_t *)SSF_BN_NIST_P256_LIMBS, 8, 8 };
 #endif /* SSF_BN_CONFIG_MAX_BITS >= 512 */
 
 #if SSF_BN_CONFIG_MAX_BITS >= 768
 /* P-384: 2^384 - 2^128 - 2^96 + 2^32 - 1 */
-static SSFBNLimb_t _ssfBNNistP384Limbs[12] =
+/* const: the prime lives in flash, not RAM; curve code shares this storage (OPTIMIZE BN-O8) */
+const SSFBNLimb_t SSF_BN_NIST_P384_LIMBS[12] =
 {
     0xFFFFFFFFul, 0x00000000ul, 0x00000000ul, 0xFFFFFFFFul,
     0xFFFFFFFEul, 0xFFFFFFFFul, 0xFFFFFFFFul, 0xFFFFFFFFul,
     0xFFFFFFFFul, 0xFFFFFFFFul, 0xFFFFFFFFul, 0xFFFFFFFFul
 };
-const SSFBN_t SSF_BN_NIST_P384 = { _ssfBNNistP384Limbs, 12, 12 };
+const SSFBN_t SSF_BN_NIST_P384 = { (SSFBNLimb_t *)SSF_BN_NIST_P384_LIMBS, 12, 12 };
 #endif /* SSF_BN_CONFIG_MAX_BITS >= 768 */
 
 /* First 256 primes for trial division during prime-candidate screening (up to 1613). */
@@ -2225,6 +2230,25 @@ void _SSFBNReduceNISTForTest(SSFBN_t *r, const SSFBN_t *t, const SSFBN_t *m)
 #endif /* SSF_CONFIG_BN_UNIT_TEST */
 
 /* --------------------------------------------------------------------------------------------- */
+/* True if the n-limb m is the NIST prime at p: by pointer, else by a counted limb compare.      */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFBNIsNistPrime(const SSFBN_t *m, const SSFBN_t *p)
+{
+    SSF_REQUIRE(m != NULL);
+    SSF_REQUIRE(p != NULL);
+
+    /* Is it the wrong width for this prime? */
+    if (m->len != p->len) return false;
+
+    /* No, is it the library's own prime storage, as every ssfec caller passes (BN-O8)? */
+    if (m->limbs == p->limbs) return true;
+
+    /* No, a caller's copy: compare the limbs */
+    _SSF_BN_COUNT(_SSFBNNistPrimeCmps);
+    return (_SSFBNRawCmp(m->limbs, p->limbs, p->len) == 0);
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* r = (a * b) mod m via NIST fast reduction for P-256/P-384, else falls back to SSFBNModMul.    */
 /* --------------------------------------------------------------------------------------------- */
 void SSFBNModMulNIST(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *m)
@@ -2250,7 +2274,7 @@ void SSFBNModMulNIST(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN
     SSF_REQUIRE(m->len <= r->cap);
 
 #if SSF_BN_CONFIG_MAX_BITS >= 512
-    if ((m->len == 8u) && (_SSFBNRawCmp(m->limbs, SSF_BN_NIST_P256.limbs, 8) == 0))
+    if (_SSFBNIsNistPrime(m, &SSF_BN_NIST_P256))
     {
         SSFBNMul(&prod, a, b);
         _SSFBNReduceP256(r, &prod);
@@ -2259,7 +2283,7 @@ void SSFBNModMulNIST(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN
 #endif /* SSF_BN_CONFIG_MAX_BITS >= 512 */
 
 #if SSF_BN_CONFIG_MAX_BITS >= 768
-    if ((m->len == 12u) && (_SSFBNRawCmp(m->limbs, SSF_BN_NIST_P384.limbs, 12) == 0))
+    if (_SSFBNIsNistPrime(m, &SSF_BN_NIST_P384))
     {
         SSFBNMul(&prod, a, b);
         _SSFBNReduceP384(r, &prod);

@@ -300,6 +300,10 @@ bool SSFBNGenPrime(SSFBN_t *p, uint16_t bitLen, uint16_t rounds, SSFPRNGContext_
 extern const SSFBN_t SSF_BN_NIST_P256;
 extern const SSFBN_t SSF_BN_NIST_P384;
 
+/* Their limbs; ssfec's curve parameters point at these so the prime is stored once (BN-O8) */
+extern const SSFBNLimb_t SSF_BN_NIST_P256_LIMBS[8];
+extern const SSFBNLimb_t SSF_BN_NIST_P384_LIMBS[12];
+
 /* --------------------------------------------------------------------------------------------- */
 /* Unit test                                                                                     */
 /* --------------------------------------------------------------------------------------------- */
@@ -328,6 +332,9 @@ extern uint32_t _SSFBNSquareCarryIters;
 
 /* Test-only count of the P-256 / P-384 reductions' correction passes (OPTIMIZE EC-O4) */
 extern uint32_t _SSFBNNistCorrPasses;
+
+/* Test-only count of full NIST prime comparisons in SSFBNModMulNIST (OPTIMIZE BN-O8) */
+extern uint32_t _SSFBNNistPrimeCmps;
 
 /* Test-only wrapper: r = t mod m through the P-256 / P-384 fast reduction (m must be one) */
 void _SSFBNReduceNISTForTest(SSFBN_t *r, const SSFBN_t *t, const SSFBN_t *m);

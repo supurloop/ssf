@@ -4096,6 +4096,59 @@ void SSFBNUnitTest(void)
         SSF_ASSERT(_scrubDirty == 0u);
     }
 
+    /* ---- OPTIMIZE BN-O8: ModMulNIST recognises the NIST primes without a limb compare ---- */
+    /* It compared m against the prime limb by limb on every field multiply (about 5% of the  */
+    /* multiply). The library's own prime is now recognised by pointer; a copy still works.   */
+    {
+        SSFBNLimb_t pCopyLimbs[8];
+        SSFBN_t pCopy = { pCopyLimbs, 8u, 8u };
+        SSFBN_DEFINE(na, 8u);
+        SSFBN_DEFINE(nr, 8u);
+        SSFBN_DEFINE(nref, 8u);
+
+        memcpy(pCopyLimbs, SSF_BN_NIST_P256.limbs, sizeof(pCopyLimbs));
+        _SSFBNUTFillBelow(&na, &SSF_BN_NIST_P256, 4242u);
+        _SSFBNNistPrimeCmps = 0u;
+        SSFBNModMulNIST(&nr, &na, &na, &SSF_BN_NIST_P256);
+        SSF_ASSERT(_SSFBNNistPrimeCmps == 0u);
+        SSFBNModMulNIST(&nref, &na, &na, &pCopy);
+        SSF_ASSERT(_SSFBNNistPrimeCmps == 1u);
+        SSF_ASSERT(SSFBNCmp(&nr, &nref) == 0);
+    }
+
+    /* ---- OPTIMIZE BN-O8: a same-width modulus one limb off a NIST prime is not one ---- */
+    /* Every limb of the comparison matters: each mutant must use the generic SSFBNModMul.    */
+    {
+        const SSFBN_t *primes[2];
+        SSFBNLimb_t mutLimbs[12];
+        SSFBN_t mut = { mutLimbs, 0u, 12u };
+        SSFBN_DEFINE(ma, 12u);
+        SSFBN_DEFINE(mr, 12u);
+        SSFBN_DEFINE(mref, 12u);
+        uint16_t np = 0u;
+        uint16_t pi;
+        uint16_t li;
+
+        primes[np++] = &SSF_BN_NIST_P256;
+#if SSF_BN_CONFIG_MAX_BITS >= 768
+        primes[np++] = &SSF_BN_NIST_P384;
+#endif /* SSF_BN_CONFIG_MAX_BITS >= 768 */
+        for (pi = 0u; pi < np; pi++)
+        {
+            for (li = 0u; li < primes[pi]->len; li++)
+            {
+                memcpy(mutLimbs, primes[pi]->limbs, primes[pi]->len * sizeof(SSFBNLimb_t));
+                mut.len = primes[pi]->len;
+                /* Flip bit 1 of limb 0 (m stays odd), else bit 0 of the limb */
+                mutLimbs[li] ^= (li == 0u) ? 2u : 1u;
+                _SSFBNUTFillBelow(&ma, &mut, 777u + li);
+                SSFBNModMulNIST(&mr, &ma, &ma, &mut);
+                SSFBNModMul(&mref, &ma, &ma, &mut);
+                SSF_ASSERT(SSFBNCmp(&mr, &mref) == 0);
+            }
+        }
+    }
+
     /* ---- OPTIMIZE EC-O4: P-256 / P-384 reductions correct in 3 passes, results exact ---- */
     /* The correction ran 23 fixed passes sized for worst-case carries. Oracle: SSFBNMod.      */
     /* Inputs: every all-zero / all-ones pattern of the upper limbs, with low half zero or all */

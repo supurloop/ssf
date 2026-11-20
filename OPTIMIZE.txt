@@ -496,12 +496,15 @@ BN-O7  Speed  DONE (2026-11-19)  Effort M
              timing reveals, but the branch pattern still depends on p. BN-O7's CT form
              would remove it. Worth confirming against AUDIT RSA-9's accepted-timing scope.
 
-BN-O8  Speed  OPEN  Effort S
+BN-O8  Speed  DONE (2026-11-19)  Effort S
   Where:     SSFBNModMulNIST (compares m against the P-256 / P-384 prime limb by limb on every
              field multiply to pick the reduction)
   Change:    Let the curve parameters carry the reduction to use (a field id) and call it
              directly from ssfec.
+             As done: no field id. ssfec's p points at ssfbn's own (now const) prime limbs,
+             and ModMulNIST matches that pointer before falling back to the full compare.
   Probable:  ECC +2-4%.
+  Measured:  Scalar multiply -5 to -9% (see the change log); flash -96 B M4, RAM -560 B.
   Risk:      None; the generic fallback remains for other moduli.
 
   Reviewed, no change worth making: Karatsuba (threshold 32 limbs, RSA only), the 4-bit
@@ -1559,4 +1562,35 @@ CHANGE LOG
               STR-O2: the converter is chosen per character inside one loop. No red possible;
               ssfstr_ut covers both cases. GREEN: all 15 suites normal and ASan + UBSan; a
               mutant swapping the case choice fails ssfstr_ut.
+  2026-11-19  BN-O8 DONE. No field id: SSF_BN_NIST_P256_LIMBS / P384_LIMBS are now exported
+              const arrays (flash, not RAM). ssfec's p points at them, and SSFBNModMulNIST
+              matches that pointer (_SSFBNIsNistPrime) before the full limb compare, which
+              stays for any other modulus. ssfec's a, b, gx, gy and n became const too.
+              RED (earlier session): with the pointer check removed, the new count asserts in
+              ssfbn_ut and ssfec_ut fail. GREEN: bn, ec, ecdsa, rsa, tls, cms and x509 suites
+              normal, plus ASan + UBSan. Mutation: accepting any same-width m survived the existing
+              tests (the gap predates BN-O8). A new test flips each limb of each prime and
+              checks ModMulNIST against SSFBNModMul; it kills that mutant and one comparing
+              only len - 1 limbs.
+              Code (-Os, text + rodata + data): ssfbn +8 B M4 / -32 B M0+, ssfec -104 / -84 B,
+              total -96 / -116 B. RAM: .data -560 B (80 bn + 480 ec), since the curve
+              constants were non-const. Stack: SSFBNModMulNIST 232 -> 224 B M4, 240 -> 232 M0+
+              (the helper is inlined); ssfec frames unchanged. Speed (SSFECScalarMul, min of
+              300 / 40): x86-64 -O2 P-256 429 -> 392-404 us, P-384 934 -> 884 us; emulated
+              ARM32 -O2 P-256 2976 -> 2769 us (-7%), P-384 7057 -> 6739 us (-4.5%).
+  2026-11-19  BN-O8 AUDIT (Jim: "Run ASan, do correctness and security audit then ask for
+              commit"). ASan + UBSan with the new test: bn, ec, ecdsa, rsa, tls, cms, x509
+              pass. Writes: no library code writes through curve or NIST limbs (no discarded-
+              const warnings; no raw, memcpy or memset target is a curve .limbs), so the
+              const casts are read-only uses. Callers: all 53 library ModMulNIST calls pass
+              &c->p, so ECC never takes the compare. Match: the width is checked before the
+              pointer, a pointer match is to const storage holding the prime, and any other m
+              gets the full compare; the new test pins every limb. Timing: the choice depends
+              only on the public modulus, as before. Config: ssfbn / ssfec / ssfecdsa / both
+              unit tests compile with -Werror for P-256 only, P-384 only and both (RSA off,
+              derived cap); ssfec.h already #errors when the cap cannot hold a curve, so the
+              shared limbs always exist when ssfec uses them. Side effect: ssfbn's primes and
+              the curve constants were writable RAM and are now read-only. No findings.
+              Pre-existing, not BN-O8: ssfbn_ut.c has unused variables k, slow and _e2R in
+              ECC-only configs (-Werror fails there; the default build is clean).
 

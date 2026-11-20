@@ -215,7 +215,7 @@ SHA1-O2  Speed + stack  SKIPPED (2026-11-19, measured)  Effort S
 ssfsha2
 ----------------------------------------------------------------------------------------------
 
-SHA2-O1  Speed + stack  OPEN  Effort S
+SHA2-O1  Speed + stack  SKIPPED (2026-11-19, measured)  Effort S
   Where:     _SSFSHA2_32Block (w[64]), _SSFSHA2_64Block (w[80] of uint64_t)
   Change:    16-word circular message schedule computed inside the round loop.
   Probable:  Stack -192 B (SHA-256) and -512 B (SHA-512); the per-block wipe shrinks the same
@@ -250,7 +250,7 @@ HMAC-O1  Speed  SKIPPED (2026-11-19, re-evaluated)  Effort M
              128-byte pad).
   Risk:      The stored state is key-derived; DeInit already wipes the whole context.
 
-HMAC-O2  Speed  OPEN  Effort M
+HMAC-O2  Speed  SKIPPED (2026-11-19, with HMAC-O1)  Effort M
   Where:     callers that MAC many messages under one key (SSFHKDFExpand loop, RFC 6979 in
              ssfecdsa)
   Change:    Keep a copy of the post-ipad state so a new message under the same key starts
@@ -271,7 +271,7 @@ HMAC-O3  Size  OPEN  Effort S
 ssfhkdf
 ----------------------------------------------------------------------------------------------
 
-HKDF-O1  Speed  OPEN  Effort S (after HMAC-O2)
+HKDF-O1  Speed  SKIPPED (2026-11-19, with HMAC-O1 / O2)  Effort S
   Where:     SSFHKDFExpand (SSFHMACBegin re-run, including the key pad compression, for every
              output block)
   Change:    Begin once; restart each T(i) from the saved post-ipad state.
@@ -315,7 +315,7 @@ GCM-O1  Speed  DONE (2026-11-19)  Effort S
              GCM overall +7-10%.
   Risk:      The prepared H is key-derived: wipe it at the end of Encrypt / Decrypt.
 
-GCM-O2  Speed  OPEN  Effort S
+GCM-O2  Speed  DONE (2026-11-19, as part of GCM-O1)  Effort S
   Where:     _SSFAESGCMBlockMult (six SSFCryptSecureZero calls, 28 words, per 16-byte block)
   Change:    Hold the multiply's temporaries in _SSFAESGCMGHASH's frame and wipe them once
              after the loop.
@@ -677,7 +677,7 @@ ssfrsa
   ModMulCT 0.6 ms, SSFBNMod 0.1 ms. Projected with BN-O4 and BN-O5: about 2.5-3 ms, against
   7.7 ms today.
 
-RSA-O1  Stack  OPEN  Effort M  (superseded by RSA-STK below, which measures and extends it)
+RSA-O1  Stack  CLOSED (2026-11-19, superseded and done by RSA-STK Phase 1)  Effort M
   Where:     SSFRSAKeyGen, SSFRSAPrivKeyIsValid, _SSFRSAPrivKeyDecode callers (10-15 locals at
              SSF_BN_MAX_LIMBS each, 1 KB apiece at the default cap, all zero-filled per call)
   Change:    Size working values at SSF_BN_MAX_MOD_LIMBS (the modulus width) where they never
@@ -1494,4 +1494,19 @@ CHANGE LOG
                 ring + O1             27.0 / 134 / 135 / 250      +101 / +89     120 / 128
                 O2 + O1               18.4 /  78 /  91 / 216      +403 / +387    120 / 128
               Every option grows code; none adopted.
+  2026-11-19  Closed (Jim: "close those entries"): GCM-O2 DONE inside GCM-O1 (the multiply's
+              temporaries live in GHASH's frame and are wiped once per call); RSA-O1 CLOSED,
+              superseded by RSA-STK Phase 1, which resized the RSA locals; HMAC-O2 and HKDF-O1
+              SKIPPED with HMAC-O1 (key-state reuse needs about +100-250 B of RAM per HMAC
+              context for a gain of about 0.3% of an ECDSA signature, or multi-block HKDF only).
+  2026-11-19  SHA2-O1 SKIPPED (measured; Jim: "Skip these"). A 16-word ring schedule saves stack
+              but at -Os costs speed and code, the opposite of the entry's "+5-10%". Executed
+              instructions per 16 KB (qemu -d exec, -Os builds; wall-clock emulation was too
+              noisy: unchanged code varied 110-121 us), Cortex-M4 / M0+:
+                today          SHA-256 957877 / 1732047, SHA-512 1657148 / 2713697, 4263 B
+                ring, both     +23% / +21%, +18% / +7%, +104 B; frames 336 -> 160, 800 -> 328 B
+                SHA-512 only   SHA-256 unchanged, SHA-512 +18% / +7%, +32 B; 800 -> 328 B
+                + split SHA-256 loop  SHA-256 +4.6% / +13%, +202 B; 336 -> 144 B
+              Digests identical in every variant. Not adopted; the SHA-512 block frame stays
+              800 B (the deepest call under Ed25519 signing).
 

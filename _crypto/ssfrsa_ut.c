@@ -483,7 +483,8 @@ static void _SSFRSAVerifyAgainstOpenSSL(const uint8_t *foreignPriv, size_t forei
 #pragma warning(push)
 #pragma warning(disable:6262)
 #endif
-#if (SSF_RSA_CONFIG_ENABLE_KEYGEN == 1) && (SSF_RSA_CONFIG_ENABLE_2048 == 1)
+#if (SSF_RSA_CONFIG_ENABLE_KEYGEN == 1) && (SSF_RSA_CONFIG_ENABLE_2048 == 1) && \
+    (SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1)
 /* Audit captured by the RSA private-op blinding hook: confirms message + exponent blinding is    */
 /* actually engaged and self-consistent (see the blinding test in SSFRSAUnitTest).                */
 typedef struct
@@ -510,8 +511,10 @@ static void _SSFRSABlindHook(void *ctx, const SSFBN_t *r, const SSFBN_t *rInv,
     a->expBlindsNZ = (SSFBNIsZero(expBlindP) == false) && (SSFBNIsZero(expBlindQ) == false);
     SSFBNZeroize(&chk);
 }
-#endif /* SSF_RSA_CONFIG_ENABLE_KEYGEN && SSF_RSA_CONFIG_ENABLE_2048 */
+#endif /* SSF_RSA_CONFIG_ENABLE_KEYGEN && SSF_RSA_CONFIG_ENABLE_2048 && PKCS1_V15 */
 
+#if (SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1) && (SSF_RSA_CONFIG_ENABLE_2048 == 1) && \
+    (SSF_RSA_CONFIG_ENABLE_PSS == 1)
 /* RSA-2048 RSAPublicKey and an OpenSSL RSASSA-PSS SHA-256 signature made with saltLength 20   */
 /* over SHA-256("SSF RSA-PSS salt length 20 vector"). SSF signs with salt == hash length, so   */
 /* this vector proves the verifier honors a caller-specified salt length.                       */
@@ -574,6 +577,7 @@ static const uint8_t _pssSalt20Sig[] = {
     0xef, 0x32, 0x85, 0x55, 0x6d, 0x26, 0x2b, 0xa3, 0xfc, 0xab, 0xd2, 0xef,
     0x0e, 0x89, 0xd0, 0x7e
 };
+#endif /* PKCS1_V15 && 2048 && PSS */
 
 /* --------------------------------------------------------------------------------------------- */
 /* UT helper: emit a DER INTEGER of mag magnitude bytes (msb, 0xFF fill, lsb) at der[*pos].      */
@@ -621,6 +625,7 @@ static void _SSFRSAUTCloseSeq(uint8_t *der, uint32_t pos)
     der[3] = (uint8_t)(content & 0xFFu);
 }
 
+#if (SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1) && (SSF_RSA_CONFIG_ENABLE_2048 == 1)
 /* --------------------------------------------------------------------------------------------- */
 /* UT helper: add 1 to the last byte of INTEGER number idx in a DER SEQUENCE (AUDIT RSA-12).     */
 /* --------------------------------------------------------------------------------------------- */
@@ -668,6 +673,7 @@ static void _SSFRSAUTBumpInt(uint8_t *der, size_t derLen, uint8_t idx)
         pos += len;
     }
 }
+#endif /* PKCS1_V15 && 2048 */
 
 /* --------------------------------------------------------------------------------------------- */
 /* UT helper: append INTEGER of mag (< 127) bytes msb, 0xFF.., lsb in short-form DER (RSA-11).   */
@@ -1108,17 +1114,25 @@ void SSFRSAUnitTest(void)
         SSFSHA256((const uint8_t *)"sample", 6, hash, sizeof(hash));
 
         SSF_ASSERT(SSFRSAPrivKeyIsValid(badDer, sizeof(badDer)) == false);
+#if SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1
         SSF_ASSERT(SSFRSASignPKCS1(badDer, sizeof(badDer), SSF_RSA_HASH_SHA256,
                                    hash, sizeof(hash), sig, sizeof(sig), &sigLen) == false);
+#endif /* SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1 */
+#if SSF_RSA_CONFIG_ENABLE_PSS == 1
         SSF_ASSERT(SSFRSASignPSS(badDer, sizeof(badDer), SSF_RSA_HASH_SHA256,
                                  hash, sizeof(hash), sig, sizeof(sig), &sigLen) == false);
+#endif /* SSF_RSA_CONFIG_ENABLE_PSS == 1 */
         /* Verify-side: provide a same-length placeholder sig; the decode must bail before    */
         /* any sig byte is read, so the sig contents are irrelevant.                            */
         memset(sig, 0, 256);
+#if SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1
         SSF_ASSERT(SSFRSAVerifyPKCS1(badDer, sizeof(badDer), SSF_RSA_HASH_SHA256,
                                      hash, sizeof(hash), sig, 256) == false);
+#endif /* SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1 */
+#if SSF_RSA_CONFIG_ENABLE_PSS == 1
         SSF_ASSERT(SSFRSAVerifyPSS(badDer, sizeof(badDer), SSF_RSA_HASH_SHA256,
                                    hash, sizeof(hash), sizeof(hash), sig, 256) == false);
+#endif /* SSF_RSA_CONFIG_ENABLE_PSS == 1 */
     }
 
     /* ---- Sign / Verify reject signature-length and buffer-size mismatches ---- */
@@ -1141,29 +1155,49 @@ void SSFRSAUnitTest(void)
                                 pubKeyDer,  sizeof(pubKeyDer),  &pubKeyDerLen) == true);
 
         /* SignPKCS1 / SignPSS reject when the output buffer cannot hold a keyBytes-sized sig. */
+#if SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1
         SSF_ASSERT(SSFRSASignPKCS1(privKeyDer, privKeyDerLen, SSF_RSA_HASH_SHA256,
                                    hash, sizeof(hash), tinyBuf, sizeof(tinyBuf), &sigLen) == false);
+#endif /* SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1 */
+#if SSF_RSA_CONFIG_ENABLE_PSS == 1
         SSF_ASSERT(SSFRSASignPSS(privKeyDer, privKeyDerLen, SSF_RSA_HASH_SHA256,
                                  hash, sizeof(hash), tinyBuf, sizeof(tinyBuf), &sigLen) == false);
+#endif /* SSF_RSA_CONFIG_ENABLE_PSS == 1 */
 
         /* Produce one valid sig so we can mangle its length on the verify side. */
+#if SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1
         SSF_ASSERT(SSFRSASignPKCS1(privKeyDer, privKeyDerLen, SSF_RSA_HASH_SHA256,
                                    hash, sizeof(hash), sig, sizeof(sig), &sigLen) == true);
+#else
+        SSF_ASSERT(SSFRSASignPSS(privKeyDer, privKeyDerLen, SSF_RSA_HASH_SHA256,
+                                 hash, sizeof(hash), sig, sizeof(sig), &sigLen) == true);
+#endif /* SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1 */
 
         /* VerifyPKCS1 / VerifyPSS reject when sigLen != keyBytes (256 for RSA-2048). */
+#if SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1
         SSF_ASSERT(SSFRSAVerifyPKCS1(pubKeyDer, pubKeyDerLen, SSF_RSA_HASH_SHA256,
                                      hash, sizeof(hash), sig, sigLen - 1u) == false);
+#endif /* SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1 */
+#if SSF_RSA_CONFIG_ENABLE_PSS == 1
         SSF_ASSERT(SSFRSAVerifyPSS(pubKeyDer, pubKeyDerLen, SSF_RSA_HASH_SHA256,
                                    hash, sizeof(hash), sizeof(hash), sig, sigLen - 1u) == false);
+#endif /* SSF_RSA_CONFIG_ENABLE_PSS == 1 */
 
-        /* VerifyPKCS1 with sig as integer >= n: an all-0xFF 256-byte sig is 2^2048 - 1, which */
+        /* Verify with sig as integer >= n: an all-0xFF 256-byte sig is 2^2048 - 1, which      */
         /* exceeds any 2048-bit modulus, so _SSFRSAPublicOp's `m >= n` arm rejects.            */
         memset(sigFF, 0xFFu, sizeof(sigFF));
+#if SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1
         SSF_ASSERT(SSFRSAVerifyPKCS1(pubKeyDer, pubKeyDerLen, SSF_RSA_HASH_SHA256,
                                      hash, sizeof(hash), sigFF, sizeof(sigFF)) == false);
+#else
+        SSF_ASSERT(SSFRSAVerifyPSS(pubKeyDer, pubKeyDerLen, SSF_RSA_HASH_SHA256,
+                                   hash, sizeof(hash), sizeof(hash), sigFF, sizeof(sigFF)) ==
+                   false);
+#endif /* SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1 */
     }
 
-#if (SSF_RSA_CONFIG_ENABLE_KEYGEN == 1) && (SSF_RSA_CONFIG_ENABLE_2048 == 1)
+#if (SSF_RSA_CONFIG_ENABLE_KEYGEN == 1) && (SSF_RSA_CONFIG_ENABLE_2048 == 1) && \
+    (SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1)
     /* ---- (Hardening) RSA private op applies message + exponent blinding ---- */
     /* Blinding is unblinded away, so it is invisible in the signature; capture it via the test     */
     /* hook to confirm it is engaged and self-consistent (r in [1, n-1], r*rInv == 1 mod n, base     */
@@ -1212,7 +1246,7 @@ void SSFRSAUnitTest(void)
                                          hash, sizeof(hash), sig2, sig2Len) == true);
         }
     }
-#endif /* SSF_RSA_CONFIG_ENABLE_KEYGEN && SSF_RSA_CONFIG_ENABLE_2048 */
+#endif /* SSF_RSA_CONFIG_ENABLE_KEYGEN && SSF_RSA_CONFIG_ENABLE_2048 && PKCS1_V15 */
 
     /* ---- FIPS 186-4 Sec. B.3.3 step 5.4: |p - q| > 2^(halfBits - 100) ---- */
     /* Defends against Fermat-style factorization of n when p and q happen to be very    */
@@ -2077,10 +2111,12 @@ void SSFRSAUnitTest(void)
                                 pubKeyDer, sizeof(pubKeyDer), &pubKeyDerLen) == true);
         _SSFBNSlowPathCalls = 0u;
         _SSFBNModShiftCalls = 0u;
+#if SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1
         SSF_ASSERT(SSFRSASignPKCS1(privKeyDer, privKeyDerLen, SSF_RSA_HASH_SHA256, hash,
                                    sizeof(hash), sig, sizeof(sig), &sigLen) == true);
         SSF_ASSERT(SSFRSAVerifyPKCS1(pubKeyDer, pubKeyDerLen, SSF_RSA_HASH_SHA256, hash,
                                      sizeof(hash), sig, sigLen) == true);
+#endif /* SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1 */
 #if SSF_RSA_CONFIG_ENABLE_PSS == 1
         SSF_ASSERT(SSFRSASignPSS(privKeyDer, privKeyDerLen, SSF_RSA_HASH_SHA256, hash,
                                  sizeof(hash), sig, sizeof(sig), &sigLen) == true);

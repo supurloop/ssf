@@ -2690,6 +2690,7 @@ void SSFX509UnitTest(void)
         certStub.sigAlgParamsLen = sizeof(pssParamsSHA256Salt32);
 
         SSF_ASSERT(SSFX509IsRSAPSSSHA256(&certStub) == true);
+        SSF_ASSERT(SSFX509IsRSAPSSSHA384(&certStub) == false);
         SSF_ASSERT(SSFX509VerifyCertSignature(&certStub, &issuerStub) == true);
 
         /* ---- RSA-PSS-SHA384: verify succeeds when PSS parameters name SHA-384 ---- */
@@ -2715,8 +2716,8 @@ void SSFX509UnitTest(void)
             certStub.sigAlgParams = pssParamsSHA384;
             certStub.sigAlgParamsLen = sizeof(pssParamsSHA384);
 
-            /* Both helpers match the same id-RSASSA-PSS OID */
-            SSF_ASSERT(SSFX509IsRSAPSSSHA256(&certStub) == true);
+            /* The helpers check the hash named by the PSS parameters, not just the OID */
+            SSF_ASSERT(SSFX509IsRSAPSSSHA256(&certStub) == false);
             SSF_ASSERT(SSFX509IsRSAPSSSHA384(&certStub) == true);
             SSF_ASSERT(SSFX509VerifyCertSignature(&certStub, &issuerStub) == true);
         }
@@ -2727,6 +2728,8 @@ void SSFX509UnitTest(void)
             certStub.signatureLen = (uint32_t)sig256Len;
             certStub.sigAlgParams = NULL;
             certStub.sigAlgParamsLen = 0;
+            SSF_ASSERT(SSFX509IsRSAPSSSHA256(&certStub) == false);
+            SSF_ASSERT(SSFX509IsRSAPSSSHA384(&certStub) == false);
             SSF_ASSERT(SSFX509VerifyCertSignature(&certStub, &issuerStub) == false);
         }
 

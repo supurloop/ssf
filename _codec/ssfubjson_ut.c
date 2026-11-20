@@ -419,9 +419,12 @@ void SSFUBJsonUnitTest(void)
         /* { i1 'k' U 0 : no close */
         uint8_t poc2[] = { 0x7Bu, 0x69u, 0x01u, 0x6Bu, 0x55u, 0x00u };
         uint8_t oneByte[1] = { 0x00u };
+        /* [ $ 0x00 i 5 : optimized type 0 is invalid; last element ends at the buffer end */
+        uint8_t poc3[] = { 0x5Bu, 0x24u, 0x00u, 0x69u, 0x05u };
 
         SSF_ASSERT(SSFUBJsonIsValid(poc1, sizeof(poc1)) == false);
         SSF_ASSERT(SSFUBJsonIsValid(poc2, sizeof(poc2)) == false);
+        SSF_ASSERT(SSFUBJsonIsValid(poc3, sizeof(poc3)) == false);
         SSF_ASSERT(SSFUBJsonIsValid(oneByte, 0) == false);
     }
 

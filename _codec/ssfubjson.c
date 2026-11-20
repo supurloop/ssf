@@ -129,6 +129,12 @@ static bool _SSFUBJsonArray(const uint8_t *js, size_t jsLen, size_t *index, size
     {
         (*index)++; if (*index >= jsLen) return false;
         t = js[*index];
+        /* Is the optimized type marker invalid (0 is reserved to mean "no type")? */
+        if (t == 0)
+        {
+            /* Yes, invalid */
+            return false;
+        }
         (*index)++; if (*index >= jsLen) return false;
     }
 
@@ -259,6 +265,7 @@ static bool _SSFUBJsonTypeField(const uint8_t *js, size_t jsLen, size_t *index, 
 
     if (override == 0)
     {
+        if (*index >= jsLen) return false;
         while (js[*index] == UBJ_TYPE_NOOP)
         { (*index)++; if (*index >= jsLen) return false; }
         t = js[*index];

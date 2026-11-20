@@ -2537,23 +2537,55 @@ bool SSFX509IsECDSASHA384(const SSFX509Cert_t *cert)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if the signature algorithm is id-RSASSA-PSS (hash not checked), else false.      */
+/* Returns true if the signature algorithm is id-RSASSA-PSS with hash, else false.               */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFX509IsRSAPSSHash(const SSFX509Cert_t *cert, SSFRSAHash_t hash)
+{
+#if _SSF_X509_RSA_PSS == 1
+    SSFRSAHash_t pssHash;
+    uint32_t saltLen;
+#endif /* _SSF_X509_RSA_PSS == 1 */
+
+    SSF_REQUIRE(cert != NULL);
+    SSF_REQUIRE((hash > SSF_RSA_HASH_MIN) && (hash < SSF_RSA_HASH_MAX));
+
+    /* Is the signature algorithm id-RSASSA-PSS? */
+    if (!_SSFX509OIDMatch(cert->sigAlgOidRaw, cert->sigAlgOidRawLen, _oidRSAPSS,
+                          sizeof(_oidRSAPSS)))
+    {
+        /* No */
+        return false;
+    }
+#if _SSF_X509_RSA_PSS == 1
+    /* Yes, do the PSS parameters parse and name this hash? */
+    if (!_SSFX509ParsePSSParams(cert->sigAlgParams, cert->sigAlgParamsLen, &pssHash, &saltLen))
+    {
+        /* No, the parameters are absent, malformed or unsupported */
+        return false;
+    }
+    return (pssHash == hash);
+#else /* _SSF_X509_RSA_PSS == 1 */
+    /* Yes, PSS is compiled out so only the OID can be checked */
+    return true;
+#endif /* _SSF_X509_RSA_PSS == 1 */
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if the signature algorithm is RSA-PSS with SHA-256, else false.                  */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFX509IsRSAPSSSHA256(const SSFX509Cert_t *cert)
 {
     SSF_REQUIRE(cert != NULL);
-    return _SSFX509OIDMatch(cert->sigAlgOidRaw, cert->sigAlgOidRawLen,
-                            _oidRSAPSS, sizeof(_oidRSAPSS));
+    return _SSFX509IsRSAPSSHash(cert, SSF_RSA_HASH_SHA256);
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if the signature algorithm is id-RSASSA-PSS (hash not checked), else false.      */
+/* Returns true if the signature algorithm is RSA-PSS with SHA-384, else false.                  */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFX509IsRSAPSSSHA384(const SSFX509Cert_t *cert)
 {
     SSF_REQUIRE(cert != NULL);
-    return _SSFX509OIDMatch(cert->sigAlgOidRaw, cert->sigAlgOidRawLen,
-                            _oidRSAPSS, sizeof(_oidRSAPSS));
+    return _SSFX509IsRSAPSSHash(cert, SSF_RSA_HASH_SHA384);
 }
 
 /* --------------------------------------------------------------------------------------------- */

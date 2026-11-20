@@ -243,7 +243,13 @@ static bool _SSFJsonArray(SSFCStrIn_t jsStr, size_t *index, size_t *start, size_
             /* No, parse it only to skip it */
             found = _SSFJsonValue(jsStr, index, &valStart, &valEnd, NULL, depth, &djt);
         }
-        if (!found) break;
+        /* Is there no element here? */
+        if (!found)
+        {
+            /* Yes, valid only for an empty array; a comma must be followed by an element */
+            if (curIndex != 0) return false;
+            break;
+        }
         _SSFJsonWhitespace(jsStr, index);
         if (jsStr[*index] == ']') break;
         if (jsStr[*index] != ',') return false;

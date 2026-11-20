@@ -189,6 +189,13 @@ const char *_jtsIsInvalid[] =
     "{\"name\":{\"name2\":1,\"name3\"}}",
     "{\"name\":{\"name2\":1,\"name3\":}}",
     "{\"name\":{\"name2\":1,\"name3\":[],}}",
+    "[1,]",
+    "[1, ]",
+    "[\"a\",]",
+    "[[],]",
+    "[1,[],]",
+    "[1,[1,3,]]",
+    "{\"a\":[1,]}",
 };
 
 const char *_jtsTypeNumber[] =

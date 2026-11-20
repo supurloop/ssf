@@ -104,9 +104,9 @@ SUMMARY
 ----------------------------------------------------------------------------------------------
 
   Severity Count   Labels
-  High     1       UBJSON-S1
-  Medium   10      TLV-S1, TLV-S2, TLV-S3, HEX-S1, JSON-S1, JSON-S2, UBJSON-S2, X509-S2, EC-S1,
-                   ECDSA-S5
+  High     1       UBJSON-S1 (FIXED)
+  Medium   10      TLV-S1, TLV-S2, TLV-S3, HEX-S1, JSON-S1 (FIXED), JSON-S2, UBJSON-S2,
+                   X509-S2 (FIXED), EC-S1, ECDSA-S5
   Low      95      ASN1-S1, ASN1-S2, ASN1-S3, ASN1-S4, TLV-S4, B64-S1, B64-S2, B64-S3, DEC-S1,
                    DEC-S2, DEC-S3, DEC-S4, HEX-S2, HEX-S3, HEX-S4, HEX-S5, INI-S1, INI-S2, INI-S3,
                    INI-S4, INI-S5, STR-S1, STR-S2, JSON-S3, JSON-S4, JSON-S5, JSON-S6, JSON-S7,
@@ -119,7 +119,7 @@ SUMMARY
                    HMAC-S1, HMAC-S2, HKDF-S1, PRNG-S1, CRYPT-S1, TLS-S1, TLS-S2, TLS-S3, USEX-S1,
                    GEN-S1, CFG-S1, DBC-S1, STYLE-S1
 
-  Total 106 findings; 2 FIXED (README only), the rest OPEN.
+  Total 106 findings; 5 FIXED, 1 DOC (DBC-S1), the rest OPEN.
 
   Worth acting on first:
     UBJSON-S1  heap over-read in SSFUBJsonIsValid on a 5-byte input (reproduced with ASan)
@@ -275,6 +275,8 @@ FINDINGS (by module, in pass order)
                    _SSFJsonValue must return false. Add "[1,]" and "{\"a\":[1,]}" to the
                    invalid-input UT table; the existing "{[1,]}" entries are invalid for
                    another reason.
+                   Status: FIXED 2026-11-20. _SSFJsonArray rejects a missing element after a
+                   comma; 7 trailing-comma cases added to _jtsIsInvalid (red at ssfjson_ut.c:801).
     JSON-S2  Medium  _codec/ssfjson.md:400,406  4  The SSFJsonMessage doc does not match the
                    code. (a) It says `end` is "exclusive", but it is inclusive: for
                    {"name":"alice"} the span is start=8, end=14, giving "\"alice\"". The example
@@ -314,6 +316,9 @@ FINDINGS (by module, in pass order)
                    fixed (functional). Fix: reject '$' with a type of 0 or any other invalid type,
                    and bounds-check *index < jsLen at the top of _SSFUBJsonTypeField's
                    override == 0 path. Add the 5-byte input as a UT.
+                   Status: FIXED 2026-11-20. _SSFUBJsonArray rejects optimized type 0 and
+                   _SSFUBJsonTypeField bounds-checks before reading; [$\0i\x05 added as a UT (red
+                   under ASan at ssfubjson.c:262).
     UBJSON-S2 Medium _codec/ssfubjson.c:1258,1262  17  SSFUBJsonPrintInt in optimized mode
                    (opt == true) checks only the upper bound: INT8 accepts in < -128 and
                    INT16/INT32 accept values below their minimum, all silently truncated. UINT8
@@ -363,6 +368,10 @@ FINDINGS (by module, in pass order)
                      helpers), but a caller could still rely on the name. Suggested fix:
                      deprecate both for one SSFX509IsRSAPSS(), or parse sigAlgParams to check
                      the hash (API change).
+                     Status: FIXED 2026-11-20 (option A). Both helpers now also parse
+                     sigAlgParams with _SSFX509ParsePSSParams and match only their own hash;
+                     with RSA-PSS compiled out they fall back to the OID check. UT updated
+                     (red at ssfx509_ut.c:2693); ssfx509.md note rewritten.
     X509-S3  Low     _codec/ssfx509.c:1268-1540  13  The private leaf encoders (_SSFX509EncWrap,
                      EncOIDRaw, EncString, EncBool, EncInt, EncUInt, EncIntU64, EncBitString,
                      EncOctetString, EncUTCTime, EncTagLen, EncConstructed, EncDN, EncAlgId*,
@@ -1213,3 +1222,7 @@ CHANGE LOG (audit file)
 ----------------------------------------------------------------------------------------------
 
 2026-11-20  Created for the claude.ssf cleanup pass over _crypto and _codec (base ebb2526).
+2026-11-20  UBJSON-S1 and JSON-S1 fixed (test first; spot-checked JSON + UBJSON unit tests,
+            plain and ASan+UBSan). Size: ssfjson +8 / +4 B, ssfubjson +132 / +12 B (M4 / M0+).
+2026-11-20  X509-S2 fixed (option A, OID fallback when RSA-PSS is off; spot-checked x509 unit
+            test plain and ASan+UBSan, PSS on and off). Size: ssfx509 +104 / +100 B (M4 / M0+).

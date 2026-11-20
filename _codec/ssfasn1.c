@@ -638,6 +638,34 @@ static bool _SSFASN1Parse2Digit(const uint8_t *p, uint32_t *valOut)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if a time after the ssfdtime range is a valid Gregorian UTC time, else false.    */
 /* --------------------------------------------------------------------------------------------- */
+/* Internal: build a unix-second count from validated Y/M/D/H/M/S via ssfdtime.                  */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFASN1YMDHMSToUnix(uint32_t year, uint32_t month, uint32_t day, uint32_t hour,
+                                 uint32_t minute, uint32_t second, uint64_t *unixSecOut)
+{
+    SSFDTimeStruct_t ts;
+    SSFPortTick_t unixSys;
+
+    SSF_REQUIRE(unixSecOut != NULL);
+
+    if (year < SSFDTIME_EPOCH_YEAR_MIN || year > SSFDTIME_EPOCH_YEAR_MAX) return false;
+    if (month < 1u || month > 12u) return false;
+    if (day < 1u) return false;
+    if (hour > 23u || minute > 59u || second > 59u) return false;
+
+    if (!SSFDTimeStructInit(&ts, (uint16_t)(year - SSFDTIME_EPOCH_YEAR_MIN),
+                            (uint8_t)(month - 1u), (uint8_t)(day - 1u),
+                            (uint8_t)hour, (uint8_t)minute, (uint8_t)second, 0u))
+    {
+        return false;
+    }
+    if (!SSFDTimeStructToUnix(&ts, &unixSys)) return false;
+
+    *unixSecOut = (uint64_t)(unixSys / SSF_TICKS_PER_SEC);
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
 static bool _SSFASN1IsValidFarFutureTime(uint32_t year, uint32_t month, uint32_t day,
                                          uint32_t hour, uint32_t minute, uint32_t second)
 {
@@ -687,8 +715,6 @@ bool SSFASN1DecGetTime(const SSFASN1Cursor_t *cursor, uint64_t *unixSecOut, SSFA
     uint32_t minute;
     uint32_t second;
     uint32_t pos;
-    SSFDTimeStruct_t ts;
-    SSFPortTick_t unixSys;
 
     SSF_REQUIRE(cursor != NULL);
     SSF_REQUIRE(unixSecOut != NULL);
@@ -744,25 +770,8 @@ bool SSFASN1DecGetTime(const SSFASN1Cursor_t *cursor, uint64_t *unixSecOut, SSFA
         *next = after; /* Advance only on success (AUDIT ASN1-7) */
         return true;
     }
-    /* No, convert it exactly through ssfdtime */
-
-    /* Year must fit in ssfdtime's supported range (1970 + [0..229]). Month must be >= 1 so    */
-    /* (month - 1) fits in the 0-indexed ssfdtime contract.                                    */
-    if (year < SSFDTIME_EPOCH_YEAR_MIN || year > SSFDTIME_EPOCH_YEAR_MAX) return false;
-    if (month < 1u || month > 12u) return false;
-    if (day < 1u) return false;
-
-    /* SSFDTimeStructInit performs strict calendar validation (leap years, days-in-month,      */
-    /* hour/min/sec ranges). Day and month translate to ssfdtime's 0-indexed convention.       */
-    if (!SSFDTimeStructInit(&ts, (uint16_t)(year - SSFDTIME_EPOCH_YEAR_MIN),
-                            (uint8_t)(month - 1u), (uint8_t)(day - 1u),
-                            (uint8_t)hour, (uint8_t)minute, (uint8_t)second, 0u))
-    {
-        return false;
-    }
-    if (!SSFDTimeStructToUnix(&ts, &unixSys)) return false;
-
-    *unixSecOut = (uint64_t)(unixSys / SSF_TICKS_PER_SEC);
+    /* No, convert it exactly through ssfdtime (strict calendar checks; OPTIMIZE ASN1-O2) */
+    if (!_SSFASN1YMDHMSToUnix(year, month, day, hour, minute, second, unixSecOut)) return false;
     *next = after; /* Advance only on success (AUDIT ASN1-7) */
     return true;
 }
@@ -788,34 +797,6 @@ static bool _SSFASN1ParseYMD(const uint8_t *p, uint32_t *year, uint32_t *month, 
     if (p[7] != (uint8_t)'-') return false;
     if (!_SSFASN1Parse2Digit(&p[8], day)) return false;
     *year = yHi * 100u + yLo;
-    return true;
-}
-
-/* --------------------------------------------------------------------------------------------- */
-/* Internal: build a unix-second count from validated Y/M/D/H/M/S via ssfdtime.                  */
-/* --------------------------------------------------------------------------------------------- */
-static bool _SSFASN1YMDHMSToUnix(uint32_t year, uint32_t month, uint32_t day, uint32_t hour,
-                                 uint32_t minute, uint32_t second, uint64_t *unixSecOut)
-{
-    SSFDTimeStruct_t ts;
-    SSFPortTick_t unixSys;
-
-    SSF_REQUIRE(unixSecOut != NULL);
-
-    if (year < SSFDTIME_EPOCH_YEAR_MIN || year > SSFDTIME_EPOCH_YEAR_MAX) return false;
-    if (month < 1u || month > 12u) return false;
-    if (day < 1u) return false;
-    if (hour > 23u || minute > 59u || second > 59u) return false;
-
-    if (!SSFDTimeStructInit(&ts, (uint16_t)(year - SSFDTIME_EPOCH_YEAR_MIN),
-                            (uint8_t)(month - 1u), (uint8_t)(day - 1u),
-                            (uint8_t)hour, (uint8_t)minute, (uint8_t)second, 0u))
-    {
-        return false;
-    }
-    if (!SSFDTimeStructToUnix(&ts, &unixSys)) return false;
-
-    *unixSecOut = (uint64_t)(unixSys / SSF_TICKS_PER_SEC);
     return true;
 }
 
@@ -1233,157 +1214,122 @@ static bool _SSFASN1UnixSecToStruct(uint64_t unixSec, SSFDTimeStruct_t *ts)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-bool SSFASN1EncUTCTime(uint8_t *buf, uint32_t bufSize, uint64_t unixSec, uint32_t *bytesWritten)
+/* Internal: writes v (0..99) as two ASCII decimal digits at dst.                                */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFASN1Put2Digits(uint8_t *dst, uint32_t v)
 {
-    /* Format: YYMMDDHHMMSSZ (13 bytes). Year range: 1970-2049 (YY in 50..99 means 1950..1999   */
-    /* per RFC 5280, but ssfdtime cannot represent pre-1970; YY in 00..49 means 2000..2049).    */
-    uint8_t timeStr[13];
+    SSF_REQUIRE(dst != NULL);
+    SSF_REQUIRE(v < 100u);
+
+    dst[0] = (uint8_t)('0' + (v / 10u));
+    dst[1] = (uint8_t)('0' + (v % 10u));
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: encodes unixSec as a time string from fmt, wrapped in tag (OPTIMIZE ASN1-O1).       */
+/* --------------------------------------------------------------------------------------------- */
+/* fmt: Y 4-digit year, y 2-digit year, M month, D day, h hour, m minute, s second, else literal */
+static bool _SSFASN1EncTimeFmt(uint8_t *buf, uint32_t bufSize, uint64_t unixSec, const char *fmt,
+                               uint32_t yearMax, uint16_t tag, uint32_t *bytesWritten)
+{
+    uint8_t timeStr[19];
     SSFDTimeStruct_t ts;
     uint32_t year;
-    uint32_t month;
-    uint32_t day;
+    uint32_t n = 0;
 
+    SSF_REQUIRE(fmt != NULL);
     SSF_REQUIRE(bytesWritten != NULL);
 
     *bytesWritten = 0;
     if (!_SSFASN1UnixSecToStruct(unixSec, &ts)) return false;
 
+    /* Is the year beyond what this form can represent? */
     year = (uint32_t)ts.year + SSFDTIME_EPOCH_YEAR_MIN;
-    if (year > 2049u) return false;
+    if (year > yearMax) return false;
 
-    month = (uint32_t)ts.month + 1u;
-    day = (uint32_t)ts.day + 1u;
+    /* No, render each field of the pattern */
+    for (; *fmt != '\0'; fmt++)
+    {
+        uint32_t v;
 
-    year %= 100u;
-    timeStr[0] = (uint8_t)('0' + year / 10u);
-    timeStr[1] = (uint8_t)('0' + year % 10u);
-    timeStr[2] = (uint8_t)('0' + month / 10u);
-    timeStr[3] = (uint8_t)('0' + month % 10u);
-    timeStr[4] = (uint8_t)('0' + day / 10u);
-    timeStr[5] = (uint8_t)('0' + day % 10u);
-    timeStr[6] = (uint8_t)('0' + ts.hour / 10u);
-    timeStr[7] = (uint8_t)('0' + ts.hour % 10u);
-    timeStr[8] = (uint8_t)('0' + ts.min / 10u);
-    timeStr[9] = (uint8_t)('0' + ts.min % 10u);
-    timeStr[10] = (uint8_t)('0' + ts.sec / 10u);
-    timeStr[11] = (uint8_t)('0' + ts.sec % 10u);
-    timeStr[12] = 'Z';
+        switch (*fmt)
+        {
+            case 'Y':
+                SSF_ASSERT((n + 4u) <= sizeof(timeStr));
+                _SSFASN1Put2Digits(&timeStr[n], year / 100u);
+                n += 2u;
+                v = year % 100u;
+                break;
+            case 'y':
+                v = year % 100u;
+                break;
+            case 'M':
+                v = (uint32_t)ts.month + 1u;
+                break;
+            case 'D':
+                v = (uint32_t)ts.day + 1u;
+                break;
+            case 'h':
+                v = ts.hour;
+                break;
+            case 'm':
+                v = ts.min;
+                break;
+            case 's':
+                v = ts.sec;
+                break;
+            default:
+                SSF_ASSERT(n < sizeof(timeStr));
+                timeStr[n] = (uint8_t)*fmt;
+                n++;
+                continue;
+        }
+        SSF_ASSERT((n + 2u) <= sizeof(timeStr));
+        _SSFASN1Put2Digits(&timeStr[n], v);
+        n += 2u;
+    }
+    return SSFASN1EncWrap(buf, bufSize, tag, timeStr, n, bytesWritten);
+}
 
-    return SSFASN1EncWrap(buf, bufSize, SSF_ASN1_TAG_UTC_TIME, timeStr, 13, bytesWritten);
+/* --------------------------------------------------------------------------------------------- */
+bool SSFASN1EncUTCTime(uint8_t *buf, uint32_t bufSize, uint64_t unixSec, uint32_t *bytesWritten)
+{
+    /* YYMMDDHHMMSSZ; YY 00..49 is 2000..2049 (RFC 5280), and ssfdtime cannot go before 1970 */
+    SSF_REQUIRE(bytesWritten != NULL);
+
+    return _SSFASN1EncTimeFmt(buf, bufSize, unixSec, "yMDhmsZ", 2049u, SSF_ASN1_TAG_UTC_TIME,
+                              bytesWritten);
 }
 
 /* --------------------------------------------------------------------------------------------- */
 bool SSFASN1EncGeneralizedTime(uint8_t *buf, uint32_t bufSize, uint64_t unixSec,
                                uint32_t *bytesWritten)
 {
-    /* Format: YYYYMMDDHHMMSSZ (15 bytes). Supported via ssfdtime: 1970-2199. */
-    uint8_t timeStr[15];
-    SSFDTimeStruct_t ts;
-    uint32_t year;
-    uint32_t month;
-    uint32_t day;
-
+    /* YYYYMMDDHHMMSSZ, 1970-2199 (the ssfdtime range) */
     SSF_REQUIRE(bytesWritten != NULL);
 
-    *bytesWritten = 0;
-    if (!_SSFASN1UnixSecToStruct(unixSec, &ts)) return false;
-
-    year = (uint32_t)ts.year + SSFDTIME_EPOCH_YEAR_MIN;
-    month = (uint32_t)ts.month + 1u;
-    day = (uint32_t)ts.day + 1u;
-
-    timeStr[0] = (uint8_t)('0' + year / 1000u);
-    timeStr[1] = (uint8_t)('0' + (year / 100u) % 10u);
-    timeStr[2] = (uint8_t)('0' + (year / 10u) % 10u);
-    timeStr[3] = (uint8_t)('0' + year % 10u);
-    timeStr[4] = (uint8_t)('0' + month / 10u);
-    timeStr[5] = (uint8_t)('0' + month % 10u);
-    timeStr[6] = (uint8_t)('0' + day / 10u);
-    timeStr[7] = (uint8_t)('0' + day % 10u);
-    timeStr[8] = (uint8_t)('0' + ts.hour / 10u);
-    timeStr[9] = (uint8_t)('0' + ts.hour % 10u);
-    timeStr[10] = (uint8_t)('0' + ts.min / 10u);
-    timeStr[11] = (uint8_t)('0' + ts.min % 10u);
-    timeStr[12] = (uint8_t)('0' + ts.sec / 10u);
-    timeStr[13] = (uint8_t)('0' + ts.sec % 10u);
-    timeStr[14] = 'Z';
-
-    return SSFASN1EncWrap(buf, bufSize, SSF_ASN1_TAG_GENERALIZED_TIME, timeStr, 15,
-                          bytesWritten);
-}
-
-/* --------------------------------------------------------------------------------------------- */
-/* Internal: format a 4-digit year + 2-digit month/day into a "YYYY-MM-DD" buffer.               */
-/* --------------------------------------------------------------------------------------------- */
-static void _SSFASN1FormatDate(uint8_t *dst, uint32_t year, uint32_t month, uint32_t day)
-{
-    SSF_REQUIRE(dst != NULL);
-
-    dst[0] = (uint8_t)('0' + year / 1000u);
-    dst[1] = (uint8_t)('0' + (year / 100u) % 10u);
-    dst[2] = (uint8_t)('0' + (year / 10u) % 10u);
-    dst[3] = (uint8_t)('0' + year % 10u);
-    dst[4] = (uint8_t)'-';
-    dst[5] = (uint8_t)('0' + month / 10u);
-    dst[6] = (uint8_t)('0' + month % 10u);
-    dst[7] = (uint8_t)'-';
-    dst[8] = (uint8_t)('0' + day / 10u);
-    dst[9] = (uint8_t)('0' + day % 10u);
+    return _SSFASN1EncTimeFmt(buf, bufSize, unixSec, "YMDhmsZ", 9999u,
+                              SSF_ASN1_TAG_GENERALIZED_TIME, bytesWritten);
 }
 
 /* --------------------------------------------------------------------------------------------- */
 bool SSFASN1EncDate(uint8_t *buf, uint32_t bufSize, uint64_t unixSec, uint32_t *bytesWritten)
 {
-    /* Format: YYYY-MM-DD (10 bytes), wrapped in multi-byte tag [UNIVERSAL 31]. */
-    uint8_t timeStr[10];
-    SSFDTimeStruct_t ts;
-    uint32_t year;
-    uint32_t month;
-    uint32_t day;
-
+    /* YYYY-MM-DD, wrapped in multi-byte tag [UNIVERSAL 31] */
     SSF_REQUIRE(bytesWritten != NULL);
 
-    *bytesWritten = 0;
-    if (!_SSFASN1UnixSecToStruct(unixSec, &ts)) return false;
-
-    year = (uint32_t)ts.year + SSFDTIME_EPOCH_YEAR_MIN;
-    month = (uint32_t)ts.month + 1u;
-    day = (uint32_t)ts.day + 1u;
-    _SSFASN1FormatDate(timeStr, year, month, day);
-
-    return SSFASN1EncWrap(buf, bufSize, SSF_ASN1_TAG_DATE, timeStr, 10, bytesWritten);
+    return _SSFASN1EncTimeFmt(buf, bufSize, unixSec, "Y-M-D", 9999u, SSF_ASN1_TAG_DATE,
+                              bytesWritten);
 }
 
 /* --------------------------------------------------------------------------------------------- */
 bool SSFASN1EncDateTime(uint8_t *buf, uint32_t bufSize, uint64_t unixSec, uint32_t *bytesWritten)
 {
-    /* Format: YYYY-MM-DDTHH:MM:SS (19 bytes), wrapped in multi-byte tag [UNIVERSAL 33]. */
-    uint8_t timeStr[19];
-    SSFDTimeStruct_t ts;
-    uint32_t year;
-    uint32_t month;
-    uint32_t day;
-
+    /* YYYY-MM-DDTHH:MM:SS, wrapped in multi-byte tag [UNIVERSAL 33] */
     SSF_REQUIRE(bytesWritten != NULL);
 
-    *bytesWritten = 0;
-    if (!_SSFASN1UnixSecToStruct(unixSec, &ts)) return false;
-
-    year = (uint32_t)ts.year + SSFDTIME_EPOCH_YEAR_MIN;
-    month = (uint32_t)ts.month + 1u;
-    day = (uint32_t)ts.day + 1u;
-    _SSFASN1FormatDate(timeStr, year, month, day);
-    timeStr[10] = (uint8_t)'T';
-    timeStr[11] = (uint8_t)('0' + ts.hour / 10u);
-    timeStr[12] = (uint8_t)('0' + ts.hour % 10u);
-    timeStr[13] = (uint8_t)':';
-    timeStr[14] = (uint8_t)('0' + ts.min / 10u);
-    timeStr[15] = (uint8_t)('0' + ts.min % 10u);
-    timeStr[16] = (uint8_t)':';
-    timeStr[17] = (uint8_t)('0' + ts.sec / 10u);
-    timeStr[18] = (uint8_t)('0' + ts.sec % 10u);
-
-    return SSFASN1EncWrap(buf, bufSize, SSF_ASN1_TAG_DATE_TIME, timeStr, 19, bytesWritten);
+    return _SSFASN1EncTimeFmt(buf, bufSize, unixSec, "Y-M-DTh:m:s", 9999u,
+                              SSF_ASN1_TAG_DATE_TIME, bytesWritten);
 }
 
 /* --------------------------------------------------------------------------------------------- */

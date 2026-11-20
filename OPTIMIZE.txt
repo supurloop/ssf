@@ -143,7 +143,7 @@ ssfmatch
 ssfasn1
 ----------------------------------------------------------------------------------------------
 
-ASN1-O1  Size  OPEN  Effort S
+ASN1-O1  Size  DONE (2026-11-19)  Effort S
   Where:     SSFASN1EncUTCTime, SSFASN1EncGeneralizedTime, SSFASN1EncDate, SSFASN1EncDateTime,
              _SSFASN1FormatDate (four inline copies of "two decimal digits" formatting)
   Change:    A static _SSFASN1Put2Digits(dst, v) helper; GeneralizedTime writes
@@ -153,7 +153,7 @@ ASN1-O1  Size  OPEN  Effort S
              (not hot).
   Risk:      Byte-identical output; ssfasn1_ut encode vectors cover every form.
 
-ASN1-O2  Size  OPEN  Effort S
+ASN1-O2  Size  DONE (2026-11-19)  Effort S
   Where:     SSFASN1DecGetTime tail (range checks + SSFDTimeStructInit + StructToUnix)
   Change:    Call the existing _SSFASN1YMDHMSToUnix, which performs the same steps (plus the
              hour / minute / second check SSFDTimeStructInit already makes).
@@ -161,7 +161,7 @@ ASN1-O2  Size  OPEN  Effort S
   Risk:      Keep the far-future branch (AUDIT ASN1-14) ahead of the call. Unit tests cover
              both paths.
 
-ASN1-O3  Size  OPEN  Effort S
+ASN1-O3  Size  SKIPPED (2026-11-19, measured: grew code)  Effort S
   Where:     SSFASN1DecGetOID (two copies of the base-128 sub-identifier loop with the
              non-minimal and 32-bit-overflow checks)
   Change:    One static decoder for a sub-identifier, used for the first and later arcs.
@@ -169,7 +169,7 @@ ASN1-O3  Size  OPEN  Effort S
   Risk:      Same rejections (leading 0x80, > 5 bytes, overflow at the 5th byte). ssfasn1_ut
              OID vectors cover them.
 
-ASN1-O4  Size  OPEN  Effort S
+ASN1-O4  Size  SKIPPED (2026-11-19, measured: grew code)  Effort S
   Where:     SSFASN1DecGetOctetString, DecGetOIDRaw, DecGetNull, DecGetBool, DecGetInt and
              DecOpenConstructed each repeat "GetTLV, compare tag, commit next"
   Change:    A static _SSFASN1DecExpect(cursor, tag, &val, &len, next) that does the common
@@ -1521,4 +1521,29 @@ CHANGE LOG
               (-304), Cortex-M0+ 4412 -> 4076 B (-336); Begin functions 876 -> 252 B (M4).
               Stack: Begin frames 32 / 88 -> 16 / 16 B (M4). Speed: one-block hashes +24 / +32
               instructions (M4, +0.6% / +0.2%), M0+ +9 / -23 (memcpy call vs immediates).
+  2026-11-19  ASN1 batch (Jim: "Commit, then do the ASN1 batch"). O1 DONE: SSFASN1EncUTCTime /
+              GeneralizedTime / Date / DateTime are one-line wrappers over _SSFASN1EncTimeFmt,
+              which renders a pattern (Y 4-digit year, y 2-digit, M D h m s 2-digit fields,
+              anything else literal: "yMDhmsZ", "YMDhmsZ", "Y-M-D", "Y-M-DTh:m:s") with
+              _SSFASN1Put2Digits and a per-form year limit (UTCTime 2049); _SSFASN1FormatDate
+              removed. O2 DONE: SSFASN1DecGetTime's exact-conversion tail calls the existing
+              _SSFASN1YMDHMSToUnix (moved above it); the far-future branch (AUDIT ASN1-14) stays
+              first and the cursor advances only on success (AUDIT ASN1-7). O3 and O4 SKIPPED:
+              both prototypes grew code (O3 shared sub-identifier decoder +36 B M4 / +40 B M0+,
+              since the helper is not inlined and needs DBC; O4 expect-tag helper +21 / +47 B
+              even without DBC: the six functions are mostly their REQUIREs).
+              No red possible (refactors); existing ssfasn1 vectors cover every form, limit and
+              size query. GREEN: all 14 suites normal, ASan + UBSan, 32-bit ARM. Differentials
+              vs the committed code (ASan): the four encoders over 400014 times (boundaries,
+              in-range, random 64-bit) with full, NULL and one-short buffers; DecGetTime over
+              500000 UTC / Generalized inputs (invalid fields, Feb 29, far future, bad digits,
+              lengths, 'Z', tags) incl. outputs and cursor: digests identical. Mutation (a
+              swapped field, UTCTime limit 2050, a dropped separator, hour / minute swapped
+              into the conversion) all fail.
+              Code (ssfasn1, -Os): Cortex-M4 5876 -> 5139 B (-737; O1 -681, O2 -56), Cortex-M0+
+              6280 -> 5559 B (-721). Stack (call graph incl. ssfdtime): encoders 128-136 ->
+              200 B M4 (152 -> 208 M0+; the 7-argument helper needs a frame under each
+              wrapper), DecGetTime 184 -> 224 M4 (240 -> 280 M0+); DecGetDateTime already
+              peaked at 224 M4 / 272 M0+, so the module's worst decode peak is unchanged on M4,
+              +8 B on M0+. Speed: not hot (one encode / decode per certificate field).
 

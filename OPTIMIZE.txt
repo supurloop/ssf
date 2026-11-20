@@ -76,7 +76,7 @@ SUMMARY
   EC-O1    Speed         ECC 1-8% measured (prototype)                         S       OPEN
   HMAC-O1  Speed         none as written; key reuse ~0.3% sign, HKDF -37% 4-blk M       SKIP
   GCM-O1   Speed         GHASH 1.5-1.9x, GCM 16 KB 1.1-1.6x measured          S       DONE
-  SHA1-O2  Speed+stack   SHA-1 1.2-2x, -256 B stack                            S       OPEN
+  SHA1-O2  Speed+stack   1.43x M4 for +374 B code; SHA-1 unused: skipped        S       SKIP
   FE-O2    Size          -0.7 KB M4 / -0.9 KB M0+ with both enabled, measured  M       DONE
 
   The rest are smaller: STR-O1..O3, ASN1-O1..O4, SHA1-O1, SHA2-O1..O3, HMAC-O2, HMAC-O3,
@@ -192,7 +192,7 @@ ssfcrypt
 ssfsha1
 ----------------------------------------------------------------------------------------------
 
-SHA1-O1  Speed  OPEN  Effort S
+SHA1-O1  Speed  SKIPPED (2026-11-19, measured)  Effort S
   Where:     SSFSHA1Update (one byte at a time into ctx->block, with a length check per byte)
   Change:    Same chunked memcpy loop SSFSHA2_32Update uses; hash whole 64-byte blocks
              straight from the input when the buffer is empty.
@@ -201,7 +201,7 @@ SHA1-O1  Speed  OPEN  Effort S
   Risk:      Keep the SHA1-MAX length REQUIRE once per call. ssfsha1_ut multi-chunk vectors
              cover split updates.
 
-SHA1-O2  Speed + stack  OPEN  Effort S
+SHA1-O2  Speed + stack  SKIPPED (2026-11-19, measured)  Effort S
   Where:     _SSFSHA1ProcessBlock (80-word schedule array; one loop with a 4-way branch per
              round)
   Change:    16-word circular schedule (w[t & 15]) and four 20-round loops, each with its own
@@ -1482,4 +1482,16 @@ CHANGE LOG
               BLOCK_XOR stays (GCTR uses it). MSVC: the old C6385 suppression around the
               partial-block XOR went with that code; not re-checkable here (no MSVC). No
               findings.
+  2026-11-19  SHA1-O1 / SHA1-O2 SKIPPED (Jim: "SHA1 is not really in use, trading code space for
+              speed doesn't make sense"). In-tree users: HMAC-SHA-1 and RFC 6979 with a 20-byte
+              digest only (not X.509, CMS or TLS). Prototypes (all pass the SHA-1 / HMAC suites,
+              identical digests), 16 KB, x86-64 -O2 / ARMv7-A / Cortex-M4 / Cortex-M0+ (M rows
+              emulated), code M4 / M0+, ProcessBlock frame M4 / M0+:
+                today                 70.8 / 223 / 180 / 330 us   897 / 945 B    368 / 376 B
+                O2 (ring, 4 loops)    42.1 / 133 / 126 / 289      +374 / +338    120 / 128
+                ring only, 1 loop     42.3 / 185 / 183 / 298      +72 / +40      120 / 128
+                O1 (chunked Update)   55.1 / 171 / 129 / 252      +26 / +46      unchanged
+                ring + O1             27.0 / 134 / 135 / 250      +101 / +89     120 / 128
+                O2 + O1               18.4 /  78 /  91 / 216      +403 / +387    120 / 128
+              Every option grows code; none adopted.
 

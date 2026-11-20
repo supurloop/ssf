@@ -37,6 +37,10 @@
 #include "ssfcrypt.h"
 #include "ssftls.h"
 
+#if SSF_X509_CONFIG_MAX_CHAIN_DEPTH < (SSF_CMS_CONFIG_MAX_CERTS + 1u)
+#error SSF_X509_CONFIG_MAX_CHAIN_DEPTH must be >= SSF_CMS_CONFIG_MAX_CERTS + 1.
+#endif
+
 /* Module-scope trace context for verification diagnostics */
 static SSFTLSTraceCtx_t _ssfcmsTraceCtx;
 

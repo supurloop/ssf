@@ -238,8 +238,8 @@ typedef struct
     const uint8_t *certDer;             /* signer certificate */
     uint32_t certDerLen;
     bool omitCert;                      /* leave the signer certificate out of the message */
-    const uint8_t *extraDer[4];         /* further certificates to embed */
-    uint32_t extraDerLen[4];
+    const uint8_t *extraDer[SSF_CMS_CONFIG_MAX_CERTS]; /* further certificates to embed */
+    uint32_t extraDerLen[SSF_CMS_CONFIG_MAX_CERTS];
     uint8_t extraCount;
     bool taggedCertChoice;              /* add a [0]-tagged CertificateChoices entry */
     bool crls;                          /* add an empty crls [1] */
@@ -2793,6 +2793,65 @@ void SSFCMSUnitTest(void)
         trustLen[1] = caALen;
         SSF_ASSERT(SSFCMSVerifyDigest(&sd, sha256, sizeof(sha256), SSF_CMS_DIGEST_SHA256, trust,
                                       trustLen, 2u, now, &res) == true);   /* found and anchored */
+
+        /* Longest chain CMS can build: a signer that is not self-issued and is held only as an */
+        /* anchor, over SSF_CMS_CONFIG_MAX_CERTS embedded intermediates, embedded out of order */
+        {
+            static uint8_t lcCert[SSF_CMS_CONFIG_MAX_CERTS][SSF_X509_CONFIG_MAX_CERT_SIZE];
+            static uint8_t lcPriv[SSF_CMS_CONFIG_MAX_CERTS][SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+            static uint8_t lcPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+            static uint8_t lcRootCert[SSF_X509_CONFIG_MAX_CERT_SIZE];
+            static uint8_t lcRootPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+            static char lcName[SSF_CMS_CONFIG_MAX_CERTS + 1u][12];
+            uint32_t lcLen[SSF_CMS_CONFIG_MAX_CERTS];
+            uint32_t lcRootLen;
+            uint8_t c;
+
+            SSF_ASSERT(SSF_CMS_CONFIG_MAX_CERTS < 26u);
+            for (c = 0; c <= SSF_CMS_CONFIG_MAX_CERTS; c++)
+            {
+                memcpy(lcName[c], "chain ca ", 9u);
+                lcName[c][9] = (char)('A' + c);
+                lcName[c][10] = '\0';
+            }
+            SSF_ASSERT(_utMakeCert(false, true, lcName[SSF_CMS_CONFIG_MAX_CERTS], NULL, NULL,
+                                   lcRootPriv, lcPub, lcRootCert, sizeof(lcRootCert),
+                                   &lcRootLen) == true);
+            for (c = SSF_CMS_CONFIG_MAX_CERTS; c > 0u; c--)
+            {
+                SSF_ASSERT(_utMakeCert(false, true, lcName[c - 1u], lcName[c],
+                                       (c == SSF_CMS_CONFIG_MAX_CERTS) ? lcRootPriv : lcPriv[c],
+                                       lcPriv[c - 1u], lcPub, lcCert[c - 1u],
+                                       sizeof(lcCert[c - 1u]), &lcLen[c - 1u]) == true);
+            }
+            SSF_ASSERT(_utMakeCert(false, false, "long chain signer", lcName[0], lcPriv[0],
+                                   issPriv, issPub, issCert, sizeof(issCert), &issLen) == true);
+            _SPEC_RESET();
+            s.priv = issPriv;
+            s.certDer = issCert;
+            s.certDerLen = issLen;
+            s.omitCert = true;
+            for (c = 0; c < SSF_CMS_CONFIG_MAX_CERTS; c++)
+            {
+                s.extraDer[c] = lcCert[SSF_CMS_CONFIG_MAX_CERTS - 1u - c];
+                s.extraDerLen[c] = lcLen[SSF_CMS_CONFIG_MAX_CERTS - 1u - c];
+            }
+            s.extraCount = SSF_CMS_CONFIG_MAX_CERTS;
+            _BUILD();
+            SSF_ASSERT(SSFCMSParse(msg, len, &sd) == true);
+            SSF_ASSERT(sd.certsLen == SSF_CMS_CONFIG_MAX_CERTS);
+            trust[0] = issCert;
+            trustLen[0] = issLen;
+            trust[1] = lcRootCert;
+            trustLen[1] = lcRootLen;
+            SSF_ASSERT(SSFCMSVerifyDigest(&sd, sha256, sizeof(sha256), SSF_CMS_DIGEST_SHA256,
+                                          trust, trustLen, 2u, now, &res) == true);
+            SSF_ASSERT(memcmp(res.signerSubject.cn, "long chain signer", 17u) == 0);
+            SSF_ASSERT(_VERIFY256() == false);                   /* signer found, root absent */
+            trust[0] = lcRootCert;
+            trustLen[0] = lcRootLen;
+            SSF_ASSERT(_VERIFY256() == false);                   /* root present, signer absent */
+        }
 
         /* Two anchors sharing the subject "ec ca": the one whose key signed the signer decides */
         SSF_ASSERT(_utMakeCert(false, true, "ec ca", NULL, NULL, caBPriv, caBPub, caBCert,

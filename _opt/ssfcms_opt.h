@@ -15,6 +15,7 @@ extern "C" {
 #define SSF_CMS_CONFIG_MAX_SIGNERS           (2u)
 
 /* Maximum embedded certificates retained; a SignedData with more fails to parse.                */
+/* SSF_X509_CONFIG_MAX_CHAIN_DEPTH must be at least this + 1 (enforced by ssfcms.c).             */
 #define SSF_CMS_CONFIG_MAX_CERTS             (4u)
 
 /* Maximum digestAlgorithms entries retained; a SignedData with more fails to parse.             */

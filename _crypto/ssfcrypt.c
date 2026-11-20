@@ -81,8 +81,10 @@ void SSFCryptSecureZero(void *p, size_t n)
     /* Does a whole aligned word remain? */
     while ((n - i) >= sizeof(uintptr_t))
     {
-        /* Yes, clear it with one volatile word store (AUDIT Batch A) */
-        *((volatile uintptr_t *)&v[i]) = 0u;
+        /* Yes, clear it with one volatile word store (AUDIT Batch A); the cast goes through */
+        /* volatile void * because the loop above guarantees &v[i] is word aligned here,     */
+        /* which -Wcast-align cannot see                                                     */
+        *((volatile uintptr_t *)(volatile void *)&v[i]) = 0u;
         i += sizeof(uintptr_t);
     }
 

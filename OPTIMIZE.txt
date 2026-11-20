@@ -74,7 +74,7 @@ SUMMARY
   ED-O2    Speed         Ed25519 sign 1.3x, keygen 1.6x (+1-2 KB ROM)          M       OPEN
   EC-O4    Speed         ECC 1.5-2.2x measured (NIST reduction correction)      M       DONE
   EC-O1    Speed         ECC 1-8% measured (prototype)                         S       OPEN
-  HMAC-O1  Speed         every HMAC about +25%                                 M       OPEN
+  HMAC-O1  Speed         none as written; key reuse ~0.3% sign, HKDF -37% 4-blk M       SKIP
   GCM-O1   Speed         GHASH +15-20% (GCM +7-10%)                            S       OPEN
   SHA1-O2  Speed+stack   SHA-1 1.2-2x, -256 B stack                            S       OPEN
   FE-O2    Size          -0.7 KB M4 / -0.9 KB M0+ with both enabled, measured  M       DONE
@@ -240,7 +240,7 @@ SHA2-O3  Speed  OPEN  Effort S
 ssfhmac
 ----------------------------------------------------------------------------------------------
 
-HMAC-O1  Speed  OPEN  Effort M
+HMAC-O1  Speed  SKIPPED (2026-11-19, re-evaluated)  Effort M
   Where:     SSFHMACBegin / SSFHMACEnd (outer pad block hashed again for every message)
   Change:    At Begin, also absorb oKeyPad into a second hash context and store that state in
              place of oKeyPad; End copies it and adds only the inner digest.
@@ -1429,4 +1429,18 @@ CHANGE LOG
               Noted, unchanged: the header includes ssfassert.h directly (redundant via
               ssfport.h, keeps it self-contained); projects that add sources by hand now need
               ssffe25519.c with ssfx25519.c / ssfed25519.c (documented).
+  2026-11-19  HMAC-O1 SKIPPED (re-evaluated; Jim: "Yes, update HMAC-O1"). The entry's premise
+              was wrong: precomputing the outer-pad state at Begin moves one compression from
+              End to Begin, so a short HMAC-SHA-256 still costs 4 (inner pad, inner final,
+              outer pad, outer final; measured x86-64 0.63 us = 4 x 0.16 us). A saving needs
+              the same key reused across MACs (2 compressions instead of 4 after the first),
+              which needs a new API, caller changes in ssfhkdf / ssfecdsa, and about +100 B
+              (SHA-256) to +250 B (SHA-384 / 512) per HMAC context and in callers' frames.
+              Reuse in tree: RFC 6979 uses each derived key for 2 MACs (saves about 4 of 26
+              compressions; RFC 6979 is about 2% of P-256 sign, 4 of 166 us x86-64, 17 of 1045
+              us emulated ARM32, so sign about 0.3% faster); HKDF-Expand reuses the PRK per
+              32-byte block (128-byte output 2.52 -> about 1.6 us, 1 block no gain); TLS 1.3's
+              Expand-Label calls are mostly single-block and re-key every call. Not worth the
+              RAM. If multi-block HKDF ever matters, reuse the two pad states inside
+              SSFHKDFExpand's loop only (no API change, about +100-250 B of HKDF stack).
 

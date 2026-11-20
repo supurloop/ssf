@@ -188,18 +188,28 @@ static bool _SSFJsonArray(SSFCStrIn_t js, size_t *index, size_t *start, size_t *
     (*index)++;
 
     if ((path != NULL) && (path[depth] != NULL)) memcpy(&pindex, path[depth], sizeof(size_t));
-    /* Only the element at the path index follows the path; the rest are parsed to skip them */
-    while (_SSFJsonValue(js, index, &valStart, &valEnd, (pindex == curIndex) ? path : NULL,
-                         depth, &djt) == true)
+    do
     {
+        bool found;
+
+        /* Is this the element at the path index? */
         if (pindex == curIndex)
-        {*start = valStart; *end = valEnd; *jt = djt; }
+        {
+            /* Yes, it follows the path and reports straight into the caller's results */
+            found = _SSFJsonValue(js, index, start, end, path, depth, jt);
+        }
+        else
+        {
+            /* No, parse it only to skip it */
+            found = _SSFJsonValue(js, index, &valStart, &valEnd, NULL, depth, &djt);
+        }
+        if (!found) break;
         _SSFJsonWhitespace(js, index);
         if (js[*index] == ']') break;
         if (js[*index] != ',') return false;
         (*index)++;
         curIndex++;
-    }
+    } while (true);
     if ((pindex != (size_t)-1) && (pindex > curIndex)) *jt = SSF_JSON_TYPE_ERROR;
     if (js[*index] != ']') return false;
 

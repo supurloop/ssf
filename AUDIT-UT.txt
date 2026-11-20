@@ -41,18 +41,17 @@ SUMMARY
 
   Severity   Count   Labels
   Critical   0
-  High       5       JSON-1 (FIXED), JSON-2 (FIXED), JSON-5, JSON-6, JSON-7
-  Medium     0
+  High       5       JSON-1 (FIXED), JSON-2 (FIXED), JSON-5, JSON-6 (FIXED), JSON-7
+  Medium     1       JSON-8
   Low        12      UBJSON-1, DEC-1, HEX-1, B64-1, JSON-3, JSON-4, RSA-13, RSA-14, CMS-5,
                      X509-21, E-5, X-3
 
-  By fault:  CODE   JSON-1, JSON-2, JSON-4, JSON-5, JSON-6, JSON-7, UBJSON-1, DEC-1,
+  By fault:  CODE   JSON-1, JSON-2, JSON-4, JSON-5, JSON-6, JSON-7, JSON-8, UBJSON-1, DEC-1,
                     RSA-14 (style)
              TEST   HEX-1, B64-1, JSON-3, RSA-13, CMS-5, X509-21, E-5, X-3
 
-  Suggested order: JSON-6 (small, uninitialised result), then JSON-7 / JSON-5 together (both
-  are a path whose shape does not match the document; JSON-7 needs an API decision), then
-  UBJSON-1 / DEC-1, then the test items.
+  Suggested order: JSON-7 / JSON-5 together (both are a path whose shape does not match the
+  document; JSON-7 needs an API decision), then UBJSON-1 / DEC-1, then the test items.
 
 ----------------------------------------------------------------------------------------------
 ssfjson
@@ -125,7 +124,8 @@ JSON-5  High  OPEN  CODE  [measured]
              NULL), otherwise treat the lookup as not found (recommended). Add tests for
              objects, arrays and every scalar type.
 
-JSON-6  High  OPEN  CODE  [measured]  (found in the JSON-1 change audit; pre-existing)
+JSON-6  High  FIXED (2026-11-20)  CODE  [measured; fix verified red/green]  (found in the
+                    JSON-1 change audit; pre-existing)
   Location:  ssfjson.c:192-196 (_SSFJsonArray: djt / valStart / valEnd copied for the selected
              element)
   Problem:   When the element at the path index does not contain the rest of the path, nothing
@@ -137,8 +137,10 @@ JSON-6  High  OPEN  CODE  [measured]  (found in the JSON-1 change audit; pre-exi
              type gets a value outside the enum. If the stale value equals a real type, the
              getters would use the stale start / end as offsets into js [code-read; not
              observed, the stale values seen were never a valid type].
-  Options:   Set djt = SSF_JSON_TYPE_ERROR before each element is parsed (and copy start / end
-             only with a real type) (recommended).
+  Options:   (1) Pass the caller's start / end / jt straight to the element at the path index,
+             as matched object members already do, and keep the locals for the other elements
+             only (chosen). (2) Set djt = SSF_JSON_TYPE_ERROR before each element and copy
+             start / end only with a real type.
 
 JSON-7  High  OPEN  CODE  [measured]  (found in the JSON-1 change audit; pre-existing)
   Location:  ssfjson.c:190 (memcpy of path[depth] as a size_t index), ssfjson.c:262-264 (key
@@ -158,6 +160,20 @@ JSON-7  High  OPEN  CODE  [measured]  (found in the JSON-1 change audit; pre-exi
              a lookup whose next entry cannot be the kind the document requires, which is not
              possible with untyped pointers. Related to JSON-5 (path longer than the
              document): both are a path whose shape does not match the document.
+
+JSON-8  Medium  OPEN  CODE  [measured]  (found in the JSON-6 change audit; pre-existing)
+  Location:  ssfjson.c:264-268 (_SSFJsonNameValue match branch); ssfjson.md (Limitations)
+  Problem:   ssfjson.md says the parser "matches only the first occurrence" of a duplicate key,
+             but every member whose key matches is parsed with the caller's results, so each
+             later duplicate overwrites the earlier one: the last occurrence wins.
+  Failure:   {"a":"1","a":"2"} with path a, and [{"a":"1","a":"2"}] with [0].a, return "2"
+             (same at 2658829, before JSON-6). Duplicate-key handling is a known source of
+             parser differentials: a gateway or validator that reads the first value and a
+             device using ssfjson that reads the last can disagree about the same document.
+  Options:   (1) Match only the first occurrence, as documented: after a member matches, parse
+             later duplicates without the path (recommended). (2) Reject documents with
+             duplicate keys (stricter; RFC 8259 leaves duplicates' meaning undefined).
+             (3) Document "last occurrence wins".
 
 ----------------------------------------------------------------------------------------------
 ssfhex
@@ -324,3 +340,34 @@ CHANGE LOG
               element type returned) and JSON-7 (path entry kind chosen by the document).
               The JSON-1 over-read now needs a document whose shape differs from the path
               (JSON-7); for a valid path it is gone.
+  2026-11-20  JSON-6 FIXED (option 1, Jim's choice). _SSFJsonArray's element loop calls
+              _SSFJsonValue with the caller's start / end / jt for the element at the path
+              index and with locals (and a NULL path) for the rest, so nothing is copied out:
+              a miss leaves the ERROR set at the top level. New test "AUDIT JSON-6" in
+              ssfjson_ut.c: [{"b":1}] [0].zz and [[{"b":1}]] [0][0].zz not found by GetType /
+              GetInt / GetString / Message; a key present only in a sibling element is not
+              found at [0] and is found at [1]. Linux direct gcc build, all unit tests on.
+              RED: built with -ftrivial-auto-var-init=pattern (locals filled with a fixed
+              non-zero pattern), ssfjson_ut.c:611; the plain build also failed, at :616
+              (Message's type). GREEN: plain 54 / 54; pattern-init all but the ed25519 /
+              x25519 stack probes (the pattern fill writes the stack they measure, as with
+              E-5 / X-3); ASan + UBSan 48 / 54 with ssfjson passing and the six baseline
+              failures. Mutation (pattern-init): the selected element parsing into the
+              locals, the inverted condition and the selected element without its path all
+              fail at :538; the previous copy-out code fails at :611. Code (-Os text, vs
+              2658829): Cortex-M4 5909 -> 5901 B (-8), M0+ 6289 -> 6261 B (-28). Stack:
+              _SSFJsonArray frame 72 -> 80 B on M4 (the caller's result pointers stay live
+              across the loop), unchanged on M0+; other frames unchanged, so the M4 worst case
+              grows by at most 8 B per nested array, 32 B at the default depth of 4. Speed
+              (same 702-byte benchmark): x86-64 and emulated ARM32 (M0+) within noise.
+  2026-11-20  Audit of the JSON-6 change (uncommitted at the time). The element at the path
+              index writes the caller's start / end / jt directly; every way it can miss
+              leaves jt as the top-level ERROR: a missing key, a miss after a partial match
+              ([{"a":{"c":"x"}}] [0].a.b; garbage at 2658829), [] [0], an index past the end,
+              and SIZE_MAX (equal to the "no index" sentinel) all give ERROR, and an array as
+              the target still reports ARRAY (harness, ASan + UBSan + pattern-init, no
+              report). A partial write of start / end on a miss comes with jt == ERROR, and
+              every getter checks jt first. A failure after the selected element has written
+              its result makes the parse return false, so the result is discarded as before.
+              The locals are now only written, never read. Found JSON-8 (duplicate keys: last
+              occurrence wins, contrary to ssfjson.md; pre-existing, unchanged by JSON-6).

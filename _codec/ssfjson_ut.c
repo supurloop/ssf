@@ -590,6 +590,48 @@ void SSFJsonUnitTest(void)
 #endif /* SSF_JSON_CONFIG_MAX_IN_DEPTH >= 3 */
     }
 
+    /* ---- AUDIT JSON-6: a lookup that misses inside an array element is not found ---- */
+    /* The element's type and span were parsed into locals and copied out even when nothing  */
+    /* inside it matched, so an uninitialised value came back as the type.                   */
+    {
+        static const char *jsMiss1 = "[{\"b\":1}]";
+        static const char *jsMiss2 = "[[{\"b\":1}]]";
+        static const char *jsSib = "[{\"b\":1},{\"zz\":\"s\"}]";
+        char strOut[4];
+        size_t strOutLen;
+        size_t i0 = 0u;
+        size_t i1 = 1u;
+        size_t msgIndex;
+        int64_t si = 0;
+        SSFJsonType_t jt;
+
+        memset((void *)path, 0, sizeof(path));
+        path[0] = (SSFCStrIn_t)&i0;
+        path[1] = "zz";
+        SSF_ASSERT(SSFJsonGetType(jsMiss1, path) == SSF_JSON_TYPE_ERROR);
+        SSF_ASSERT(SSFJsonGetInt(jsMiss1, path, &si) == false);
+        SSF_ASSERT(SSFJsonGetString(jsMiss1, path, strOut, sizeof(strOut), &strOutLen) == false);
+        jt = SSF_JSON_TYPE_MAX;
+        SSF_ASSERT(SSFJsonMessage(jsMiss1, &msgIndex, &start, &end, path, 0, &jt) == true);
+        SSF_ASSERT(jt == SSF_JSON_TYPE_ERROR);
+
+        /* Two levels of arrays */
+        path[1] = (SSFCStrIn_t)&i0;
+        path[2] = "zz";
+        SSF_ASSERT(SSFJsonGetType(jsMiss2, path) == SSF_JSON_TYPE_ERROR);
+
+        /* The key exists only in a sibling element: still not found at [0] */
+        path[1] = "zz";
+        path[2] = NULL;
+        SSF_ASSERT(SSFJsonGetType(jsSib, path) == SSF_JSON_TYPE_ERROR);
+
+        /* ...and found at [1] */
+        path[0] = (SSFCStrIn_t)&i1;
+        SSF_ASSERT(SSFJsonGetType(jsSib, path) == SSF_JSON_TYPE_STRING);
+        SSF_ASSERT(SSFJsonGetString(jsSib, path, strOut, sizeof(strOut), &strOutLen) == true);
+        SSF_ASSERT((strOutLen == 1u) && (strOut[0] == 's'));
+    }
+
     /* Parsing tests */
 
     /* Validate parser on valid JSON strings */

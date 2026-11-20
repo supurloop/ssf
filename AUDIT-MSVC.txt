@@ -1,0 +1,73 @@
+SSF MSVC DEBUG UNIT-TEST AUDIT
+==============================
+
+Date:        2026-11-19
+Branch:      x509 (HEAD 7de1cd9 plus uncommitted ssfed25519_ut.c / ssfx25519_ut.c changes)
+Reviewer:    Claude Opus 5.5 (claude-opus-5-5), single reviewer
+Scope:       Failures that appear when every SSF_CONFIG_*_UNIT_TEST flag is enabled and the
+             suite is built and run with the ssf.vcxproj Debug x64 configuration
+             (/Od /RTC1 /GS /sdl /ZI /JMC /MDd /D_DEBUG, SSF_CONFIG_HAVE_OPENSSL=0).
+Relation:    Kept separate from AUDIT-UT.txt, which another workflow is editing. Items here
+             extend AUDIT-UT.txt E-5 and X-3; that file is not changed. Labels use the MSVC
+             prefix so they cannot collide with numbering added there.
+Method:      MSBuild of ssf.sln (Debug and Release, x64 and x86). Values measured by building
+             scratchpad copies of ssfed25519_ut.c / ssfx25519_ut.c with the vcxproj Debug and
+             Release flags, printing each probe value and continuing past the assertion;
+             variants with SSF_{ED,X}25519_CONFIG_ENABLE_STACK_SCRUB 0 via an override
+             _opt directory, and an MSVC /fsanitize=address build.
+             [measured] = shown by a test run; [suspected] = not yet demonstrated.
+
+Severity, Status and Fault as in AUDIT-UT.txt.
+
+----------------------------------------------------------------------------------------------
+ssfed25519, ssfx25519
+----------------------------------------------------------------------------------------------
+
+MSVC-1  Low  FIXED (2026-11-19)  TEST  [measured]  (extends AUDIT-UT.txt E-5 / X-3)
+  Location:  ssfed25519_ut.c Sign peak stack < 4096 and scrub residue < 512 (MSVC);
+             ssfx25519_ut.c ComputeSecret scrub residue < 512 (MSVC) and peak stack < 2560
+  Problem:   Debug x64 fails ssfed25519_ut.c:953 and ssfx25519_ut.c:545 (and :568, which
+             the :545 failure hides). The bounds assume optimized frames, as E-5 / X-3 found
+             under ASan. Measured (limit, Release x64, Debug x64, Debug with scrub off):
+               ed25519 Sign peak stack        4096   2888   4960   4960
+               x25519  ComputeSecret peak     2560   1584   3360   3360
+               x25519  scrub residue (MSVC)    512     17    551    560
+               ed25519 scrub residue (MSVC)    512     36    277    278
+             In Debug the residue probe cannot tell a working scrub from a disabled one
+             (551 / 560, 277 / 278); in Release it can (x25519 17 with the scrub, 529
+             without).
+  Fix:       Each test file defines _SSF{ED,X}25519_UT_STACK_BOUNDS: 0 for MSVC _DEBUG or
+             ASan (__SANITIZE_ADDRESS__, __has_feature(address_sanitizer)), 1 otherwise. The
+             peak-stack and scrub-residue asserts are compiled only when it is 1; the probes
+             still run and the residue is printed with the peak (SSF_UT_PRINTF).
+  Verified:  Preprocessed per configuration: the bound asserts are compiled in Release
+             (2 per file) and absent in Debug and MSVC ASan (0). Release x64, Debug x64 and
+             MSVC ASan builds of both suites pass. ssf.sln Debug x64 and Release x64 build
+             with 0 errors and no warnings in these files. Full Debug x64 suite: 53 of 54
+             passed, ssfed25519 and ssfx25519 included, ssfiso8601 still running at the time
+             of writing.
+  Note:      This also settles E-5 / X-3 for ASan, which took the same option. AUDIT-UT.txt
+             still lists them as OPEN.
+
+MSVC-2  Low  OPEN  CODE  [suspected]
+  Location:  ssfed25519.c / ssfx25519.c post-call stack scrub,
+             SSF_{ED,X}25519_CONFIG_STACK_SCRUB_SIZE (default 1536)
+  Problem:   The scrub clears a fixed SCRUB_SIZE below the public call's frame, sized for
+             optimized frames (ladder chain about 1.0-1.3 KB, README footnote 44). In Debug
+             x64 the calls peak much deeper (ComputeSecret 3360 B, Sign 4960 B), so stack the
+             ladder or scalar multiply writes deeper than SCRUB_SIZE may be left unscrubbed in
+             unoptimized builds. Not demonstrated: a rough count of written-and-not-zeroed
+             bytes in the probe window was inconclusive (Debug 282 with the scrub, 552
+             without; Release 483 / 482), and the probe window is only SCRUB_SIZE, so it
+             cannot see deeper bytes. Optimized builds are not affected as far as measured.
+  Options:   (1) Document that the scrub size assumes optimized builds. (2) Raise or scale
+             SCRUB_SIZE when not optimizing. (3) Add a test that measures written-and-left
+             bytes over the full peak depth, to demonstrate or rule this out.
+
+----------------------------------------------------------------------------------------------
+CHANGE LOG
+----------------------------------------------------------------------------------------------
+
+  2026-11-19  File created. MSVC-1 FIXED (AUDIT-UT.txt E-5 / X-3 option extended to MSVC
+              Debug, Jim's choice); MSVC-2 opened (suspected). Recorded here instead of in
+              AUDIT-UT.txt at Jim's request, because that file is being edited elsewhere.

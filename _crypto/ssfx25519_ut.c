@@ -170,6 +170,19 @@ static void _VerifyX25519AgainstOpenSSL(uint16_t iters)
 #define _SSFX25519_UT_STACK_PROBE_SIZE (SSF_X25519_CONFIG_STACK_SCRUB_SIZE)
 #define _SSFX25519_UT_SENTINEL         (0xABu)
 
+/* Stack bounds assume optimized frames; unoptimized MSVC and ASan builds enlarge them (X-3) */
+#if (defined(_MSC_VER) && defined(_DEBUG)) || defined(__SANITIZE_ADDRESS__)
+#define _SSFX25519_UT_STACK_BOUNDS (0u)
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define _SSFX25519_UT_STACK_BOUNDS (0u)
+#else
+#define _SSFX25519_UT_STACK_BOUNDS (1u)
+#endif
+#else
+#define _SSFX25519_UT_STACK_BOUNDS (1u)
+#endif
+
 #if defined(_MSC_VER)
 #pragma runtime_checks("scu", off)
 #endif
@@ -541,11 +554,15 @@ void SSFX25519UnitTest(void)
         /* values, return addresses, and uninit fill -- but they happen to fall inside the  */
         /* polluter's address range and get counted. 512 is comfortably below the ~4 KiB    */
         /* unscrubbed total and still rejects a regression that disabled the scrub.          */
+        SSF_UT_PRINTF("--- ssfx25519 ComputeSecret scrub residue %u bytes ---\n",
+                      (unsigned)hitsAfter);
+#if _SSFX25519_UT_STACK_BOUNDS == 1
 #if defined(_MSC_VER)
         SSF_ASSERT(hitsAfter < 512u);
 #else
         SSF_ASSERT(hitsAfter < 64u);
 #endif
+#endif /* _SSFX25519_UT_STACK_BOUNDS */
     }
 #endif /* SSF_X25519_CONFIG_ENABLE_STACK_SCRUB */
 
@@ -565,7 +582,9 @@ void SSFX25519UnitTest(void)
         used = _SSFX25519UTStackUsed(_SSFX25519_UT_SENTINEL);
         SSF_UT_PRINTF("--- ssfx25519 ComputeSecret peak stack ~%u bytes ---\n", (unsigned)used);
         SSF_ASSERT(used > 0u);
+#if _SSFX25519_UT_STACK_BOUNDS == 1
         SSF_ASSERT(used < 2560u);
+#endif
     }
 
     /* ---- AUDIT X-1: _fe_mul dropped the carry-out of its second 38-fold. The first ladder    */

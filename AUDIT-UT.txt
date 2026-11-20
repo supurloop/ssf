@@ -44,8 +44,8 @@ SUMMARY
   High       8       JSON-1 (FIXED), JSON-2 (FIXED), JSON-5 (FIXED), JSON-6 (FIXED),
                      JSON-7 (FIXED), JSON-8 (FIXED), UBJSON-2 (FIXED), GOBJ-1 (FIXED)
   Medium     0
-  Low        13      UBJSON-1 (FIXED), DEC-1 (FIXED), DEC-2 (FIXED), JSON-4 (DOC), HEX-1, B64-1,
-                     JSON-3, RSA-13, RSA-14, CMS-5, X509-21, E-5, X-3
+  Low        13      UBJSON-1 (FIXED), DEC-1 (FIXED), DEC-2 (FIXED), JSON-4 (DOC), HEX-1 (FIXED),
+                     B64-1, JSON-3, RSA-13, RSA-14, CMS-5, X509-21, E-5, X-3
 
   By fault:  CODE   JSON-1, JSON-2, JSON-4, JSON-5, JSON-6, JSON-7, JSON-8, UBJSON-1,
                     UBJSON-2, GOBJ-1, DEC-1, RSA-14 (style)
@@ -206,15 +206,15 @@ JSON-8  High  FIXED (2026-11-20)  CODE  [measured, ASan global-buffer-overflow; 
 ssfhex
 ----------------------------------------------------------------------------------------------
 
-HEX-1  Low  OPEN  TEST  [measured, ASan global-buffer-overflow]
+HEX-1  Low  FIXED (2026-11-20)  TEST  [measured, ASan global-buffer-overflow; fix verified]
   Location:  ssfhex_ut.c:105; ssfhex.c:101 (reverse branch)
   Problem:   The test calls SSFHexBytesToBin("1234", strlen("1234") + 200, ...). ssfhex.md
              requires inLenLim <= strlen(in). In forward order the decoder stops at the NUL and
              returns false; in reverse order it starts at in[inLenLim - 2], 200 bytes past the
              string.
-  Options:   (1) Fix the test to stay within the contract (recommended). (2) Optionally harden
-             the decoder: the parameter name "Lim" invites passing a buffer size, so stopping
-             at a NUL (or bounding with strnlen first) would make the reverse path safe too.
+  Options:   (1) Fix the test to stay within the contract (chosen). (2) Optionally harden the
+             decoder: the parameter name "Lim" invites passing a buffer size, so stopping at a
+             NUL (or bounding with strnlen first) would make the reverse path safe too.
 
 ----------------------------------------------------------------------------------------------
 ssfbase64
@@ -667,3 +667,11 @@ CHANGE LOG
               to convert) and the depth case in Returns. The advice was checked: with both
               options at 5 every 4-level document converts and a 5-level one with a value does
               not.
+  2026-11-20  HEX-1 FIXED (option 1; Jim: "Do 1"). All four calls in that group passed a limit
+              past the end of their string literal (strlen + 200, + 2, and "123" with 6 and 5),
+              not only the one ASan reported first. They keep their intent (a limit past the
+              end of the hex string fails at the terminator) but the strings now sit in
+              zero-padded static buffers (208 and 8 bytes) that cover every limit, so the
+              decoder reads only inside the buffer. RED: the previous test, ASan
+              global-buffer-overflow in SSFHexByteToBin. GREEN: ssfhex passes ASan + UBSan and
+              the plain build. Test-only change; the decoder is unchanged.

@@ -102,14 +102,21 @@ void SSFHexUnitTest(void)
         SSF_ASSERT(SSFHexBytesToBin("111x", strlen("111x"), binout, sizeof(binout), &outlen,
                                     (bool)i) == false);
 
-        SSF_ASSERT(SSFHexBytesToBin("1234", strlen("1234") + 200, binout, sizeof(binout), &outlen, (bool)i) ==
-                       false);
-        SSF_ASSERT(SSFHexBytesToBin("1234", strlen("1234") + 2, binout, sizeof(binout), &outlen, (bool)i) ==
-                       false);
-        SSF_ASSERT(SSFHexBytesToBin("123", strlen("1234") + 2, binout, sizeof(binout), &outlen, (bool)i) ==
-                       false);
-        SSF_ASSERT(SSFHexBytesToBin("123", strlen("1234") + 1, binout, sizeof(binout), &outlen, (bool)i) ==
-                       false);
+        /* AUDIT HEX-1: a limit past the end of the hex string fails at the terminator; the  */
+        /* strings sit in zero-padded buffers so the limit never runs past the buffer itself */
+        {
+            static const char pad1234[208] = "1234";
+            static const char pad123[8] = "123";
+
+            SSF_ASSERT(SSFHexBytesToBin(pad1234, strlen("1234") + 200, binout, sizeof(binout),
+                                        &outlen, (bool)i) == false);
+            SSF_ASSERT(SSFHexBytesToBin(pad1234, strlen("1234") + 2, binout, sizeof(binout),
+                                        &outlen, (bool)i) == false);
+            SSF_ASSERT(SSFHexBytesToBin(pad123, strlen("1234") + 2, binout, sizeof(binout),
+                                        &outlen, (bool)i) == false);
+            SSF_ASSERT(SSFHexBytesToBin(pad123, strlen("1234") + 1, binout, sizeof(binout),
+                                        &outlen, (bool)i) == false);
+        }
         SSF_ASSERT(SSFHexBytesToBin("1234", strlen("1234"), binout, 1, &outlen, (bool)i) ==
                        false);
         SSF_ASSERT(SSFHexBytesToBin("1234", strlen("1234"), binout, 2, &outlen, (bool)i) == true);

@@ -134,6 +134,13 @@ against a caller-supplied trust store. There is no encoder: the module verifies,
   unsigned attributes. OpenSSL produced every key, certificate, signature (`openssl pkeyutl -sign
   -rawin -digest sha256` over the DER `SET` of attributes) and token; a short script assembled the
   CMS around them, and `openssl cms -verify -purpose any` confirms the result against the root.
+  The unit test also generates 100 chains of that shape at run time from a private root CA
+  whose P-256 key it holds: each run issues a fresh signing CA, a `pathlen:0` master CA and a
+  code-signing leaf with new keys, serials and validity dates from a fixed-seed
+  [`ssfprng`](ssfprng.md) generator, so every run is reproducible. Each chain is used to sign a
+  fresh image digest, and the result must verify against the signing CA alone (the anchor a
+  bootloader would hold) and against the root. It must fail for a changed digest, before the
+  leaf's `notBefore`, and under the previous chain's signing CA.
 
 <a id="configuration"></a>
 

@@ -35,6 +35,8 @@
 #include "ssfasn1.h"
 #include "ssfsha2.h"
 #include "ssfecdsa.h"
+#include "ssfsha1.h"
+#include "ssfprng.h"
 #include "ssfed25519.h"
 #include "ssfrsa.h"
 #include "ssftls.h"
@@ -921,6 +923,831 @@ static bool _utMakeSigner(bool ed25519, const char *cnStr, uint8_t *priv, uint8_
     SSF_REQUIRE(lenOut != NULL);
 
     return _utMakeCert(ed25519, false, cnStr, NULL, NULL, priv, pub, out, outSize, lenOut);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Generated firmware signatures in the production shape: a private root CA held by the unit    */
+/* test issues a signing CA (the device trust anchor), which issues a pathlen 0 master CA, which */
+/* issues the code-signing leaf; the message embeds signing CA, master and leaf, not the root.  */
+/* --------------------------------------------------------------------------------------------- */
+#define _UT_GEN_CHAINS (100u)
+#define _UT_GEN_CERT_SIZE (1024u)
+#define _UT_GEN_UTC_LIMIT (2524608000ull)
+#define _UT_GEN_DAY (86400ull)
+#define _UT_GEN_PROFILE_ROOT (0u)
+#define _UT_GEN_PROFILE_CA (1u)
+#define _UT_GEN_PROFILE_LEAF (2u)
+
+static const uint8_t _utOidNameO[] = { 0x55u, 0x04u, 0x0Au };
+static const uint8_t _utOidNameOU[] = { 0x55u, 0x04u, 0x0Bu };
+static const uint8_t _utOidNameCN[] = { 0x55u, 0x04u, 0x03u };
+static const uint8_t _utOidNameSerial[] = { 0x55u, 0x04u, 0x05u };
+static const uint8_t _utOidExtKU[] = { 0x55u, 0x1Du, 0x0Fu };
+static const uint8_t _utOidExtCP[] = { 0x55u, 0x1Du, 0x20u };
+static const uint8_t _utOidExtBC[] = { 0x55u, 0x1Du, 0x13u };
+static const uint8_t _utOidExtSKID[] = { 0x55u, 0x1Du, 0x0Eu };
+static const uint8_t _utOidExtAKID[] = { 0x55u, 0x1Du, 0x23u };
+static const uint8_t _utOidExtCRLDP[] = { 0x55u, 0x1Du, 0x1Fu };
+static const uint8_t _utOidExtAIA[] = { 0x2Bu, 0x06u, 0x01u, 0x05u, 0x05u, 0x07u, 0x01u, 0x01u };
+static const uint8_t _utOidCaIssuers[] = { 0x2Bu, 0x06u, 0x01u, 0x05u, 0x05u, 0x07u, 0x30u, 0x02u };
+static const uint8_t _utOidAnyPolicy[] = { 0x55u, 0x1Du, 0x20u, 0x00u };
+static const uint8_t _utOidTestPolicy[] = {
+    0x2Bu, 0x06u, 0x01u, 0x04u, 0x01u, 0x86u, 0x8Du, 0x1Fu, 0x01u, 0x01u };
+static const uint8_t _utOidAttrTstToken[] = {
+    0x2Au, 0x86u, 0x48u, 0x86u, 0xF7u, 0x0Du, 0x01u, 0x09u, 0x10u, 0x02u, 0x0Eu };
+static const uint8_t _utOidTstInfo[] = {
+    0x2Au, 0x86u, 0x48u, 0x86u, 0xF7u, 0x0Du, 0x01u, 0x09u, 0x10u, 0x01u, 0x04u };
+
+/* P-256 private key of the unit test's own root CA */
+static const uint8_t _utGenRootPriv[32] = {
+    0x81u, 0x07u, 0x6Du, 0xB6u, 0xE7u, 0xDEu, 0x01u, 0xECu, 0xCFu, 0xD9u, 0xB8u, 0x99u, 0xB9u,
+    0x29u, 0x0Au, 0x26u, 0x82u, 0x11u, 0x5Eu, 0xBBu, 0xE4u, 0x2Eu, 0x12u, 0x81u, 0x58u, 0x80u,
+    0x71u, 0x2Au, 0x58u, 0xA5u, 0x20u, 0xFBu };
+
+/* One AttributeTypeAndValue of a Name, in encoding order */
+typedef struct
+{
+    const uint8_t *oid;
+    uint32_t oidLen;
+    uint16_t strTag;
+    const char *valStr;
+} _utGenRdn_t;
+
+/* One generated certificate and its key */
+typedef struct
+{
+    uint8_t profile;
+    const _utGenRdn_t *subject;
+    uint8_t subjectLen;
+    int8_t pathLen;
+    const char *crlUrlStr;
+    const char *aiaUrlStr;
+    uint8_t serial[20];
+    uint8_t serialLen;
+    uint64_t notBefore;
+    uint64_t notAfter;
+    uint8_t priv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+    uint8_t pub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+    uint32_t pubLen;
+    uint8_t skid[SSF_SHA1_HASH_SIZE];
+    uint8_t der[_UT_GEN_CERT_SIZE];
+    uint32_t derLen;
+} _utGenCert_t;
+
+/* --------------------------------------------------------------------------------------------- */
+/* Fills out with outLen bytes from the deterministic generator.                                 */
+/* --------------------------------------------------------------------------------------------- */
+static void _utGenRandom(SSFPRNGContext_t *prng, uint8_t *out, uint32_t outLen)
+{
+    uint32_t n;
+
+    SSF_REQUIRE(prng != NULL);
+    SSF_REQUIRE(out != NULL);
+
+    while (outLen > 0u)
+    {
+        n = (outLen > SSF_PRNG_RANDOM_MAX_SIZE) ? SSF_PRNG_RANDOM_MAX_SIZE : outLen;
+        SSFPRNGGetRandom(prng, out, n);
+        out += n;
+        outLen -= n;
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns a value in [0, range) from the deterministic generator.                               */
+/* --------------------------------------------------------------------------------------------- */
+static uint64_t _utGenRange(SSFPRNGContext_t *prng, uint64_t range)
+{
+    uint8_t r[8];
+    uint64_t v = 0;
+    uint8_t i;
+
+    SSF_REQUIRE(prng != NULL);
+    SSF_REQUIRE(range > 0u);
+
+    _utGenRandom(prng, r, sizeof(r));
+    for (i = 0; i < sizeof(r); i++) v = (v << 8) | r[i];
+    return v % range;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Gives c a P-256 key, from privOpt or the generator, and its RFC 5280 method 1 SKID.           */
+/* --------------------------------------------------------------------------------------------- */
+static void _utGenKey(SSFPRNGContext_t *prng, const uint8_t *privOpt, _utGenCert_t *c)
+{
+    size_t pubLen = 0;
+    bool ok = false;
+    uint8_t tries;
+
+    SSF_REQUIRE(prng != NULL);
+    SSF_REQUIRE(c != NULL);
+
+    for (tries = 0; (tries < 8u) && (!ok); tries++)
+    {
+        if (privOpt != NULL) memcpy(c->priv, privOpt, 32u);
+        else _utGenRandom(prng, c->priv, 32u);
+        ok = SSFECDSAPubKeyFromPrivKey(SSF_EC_CURVE_P256, c->priv, 32u, c->pub, sizeof(c->pub),
+                                       &pubLen);
+    }
+    SSF_ASSERT(ok);
+    c->pubLen = (uint32_t)pubLen;
+    SSFSHA1(c->pub, c->pubLen, c->skid);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if the Name for rdn[0..rdnLen) is written to out with *wOut set.                 */
+/* --------------------------------------------------------------------------------------------- */
+static bool _utGenEncName(const _utGenRdn_t *rdn, uint8_t rdnLen, uint8_t *out, uint32_t outSize,
+                          uint32_t *wOut)
+{
+    uint8_t seq[256];
+    uint8_t atv[96];
+    uint8_t set[112];
+    uint32_t n = 0;
+    uint32_t m;
+    uint32_t w;
+    uint8_t i;
+
+    SSF_REQUIRE(rdn != NULL);
+    SSF_REQUIRE(out != NULL);
+    SSF_REQUIRE(wOut != NULL);
+
+    for (i = 0; i < rdnLen; i++)
+    {
+        if (!SSFASN1EncOIDRaw(atv, sizeof(atv), rdn[i].oid, rdn[i].oidLen, &w)) return false;
+        m = w;
+        if (!SSFASN1EncString(&atv[m], sizeof(atv) - m, rdn[i].strTag,
+                              (const uint8_t *)rdn[i].valStr, (uint32_t)strlen(rdn[i].valStr),
+                              &w)) return false;
+        m += w;
+        if (!SSFASN1EncWrap(set, sizeof(set), SSF_ASN1_TAG_SEQUENCE, atv, m, &w)) return false;
+        if (!SSFASN1EncWrap(&seq[n], sizeof(seq) - n, SSF_ASN1_TAG_SET, set, w, &w)) return false;
+        n += w;
+    }
+    return SSFASN1EncWrap(out, outSize, SSF_ASN1_TAG_SEQUENCE, seq, n, wOut);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if t is written as UTCTime through 2049 and GeneralizedTime after (RFC 5280).    */
+/* --------------------------------------------------------------------------------------------- */
+static bool _utGenEncTime(uint8_t *out, uint32_t outSize, uint64_t t, uint32_t *wOut)
+{
+    SSF_REQUIRE(out != NULL);
+    SSF_REQUIRE(wOut != NULL);
+
+    if (t < _UT_GEN_UTC_LIMIT) return SSFASN1EncUTCTime(out, outSize, t, wOut);
+    return SSFASN1EncGeneralizedTime(out, outSize, t, wOut);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if Extension { extnID, critical, OCTET STRING { val } } is appended at *posIo.   */
+/* --------------------------------------------------------------------------------------------- */
+static bool _utGenEncExt(uint8_t *out, uint32_t outSize, uint32_t *posIo, const uint8_t *oid,
+                         uint32_t oidLen, bool critical, const uint8_t *val, uint32_t valLen)
+{
+    uint8_t tmp[160];
+    uint32_t n;
+    uint32_t w;
+
+    SSF_REQUIRE(out != NULL);
+    SSF_REQUIRE(posIo != NULL);
+    SSF_REQUIRE(oid != NULL);
+    SSF_REQUIRE(val != NULL);
+
+    if (!SSFASN1EncOIDRaw(tmp, sizeof(tmp), oid, oidLen, &w)) return false;
+    n = w;
+    if (critical)
+    {
+        if (!SSFASN1EncBool(&tmp[n], sizeof(tmp) - n, true, &w)) return false;
+        n += w;
+    }
+    if (!SSFASN1EncOctetString(&tmp[n], sizeof(tmp) - n, val, valLen, &w)) return false;
+    n += w;
+    if (!SSFASN1EncWrap(&out[*posIo], outSize - *posIo, SSF_ASN1_TAG_SEQUENCE, tmp, n, &w))
+    {
+        return false;
+    }
+    *posIo += w;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if the profile's extensions, in production order, are written to out.            */
+/* --------------------------------------------------------------------------------------------- */
+static bool _utGenEncExts(const _utGenCert_t *c, const _utGenCert_t *issuer, uint8_t *out,
+                          uint32_t outSize, uint32_t *wOut)
+{
+    static const uint8_t kuCA[] = { 0x03u, 0x02u, 0x01u, 0x06u };
+    static const uint8_t kuLeaf[] = { 0x03u, 0x02u, 0x07u, 0x80u };
+    uint8_t bc[16];
+    uint8_t cp[32];
+    uint8_t skid[32];
+    uint8_t akid[32];
+    uint8_t crldp[128];
+    uint8_t aia[128];
+    uint8_t t1[112];
+    uint8_t t2[112];
+    uint32_t bcLen;
+    uint32_t cpLen;
+    uint32_t skidLen;
+    uint32_t akidLen = 0;
+    uint32_t crldpLen = 0;
+    uint32_t aiaLen = 0;
+    uint32_t pos = 0;
+    uint32_t n;
+    uint32_t w;
+    const uint8_t *pol;
+    uint32_t polLen;
+    bool ok = true;
+
+    SSF_REQUIRE(c != NULL);
+    SSF_REQUIRE(issuer != NULL);
+    SSF_REQUIRE(out != NULL);
+    SSF_REQUIRE(wOut != NULL);
+
+    /* basicConstraints */
+    n = 0;
+    if (c->profile != _UT_GEN_PROFILE_LEAF)
+    {
+        if (!SSFASN1EncBool(t1, sizeof(t1), true, &w)) return false;
+        n = w;
+        if (c->pathLen >= 0)
+        {
+            if (!SSFASN1EncIntU64(&t1[n], sizeof(t1) - n, (uint64_t)c->pathLen, &w)) return false;
+            n += w;
+        }
+    }
+    if (!SSFASN1EncWrap(bc, sizeof(bc), SSF_ASN1_TAG_SEQUENCE, t1, n, &bcLen)) return false;
+
+    /* certificatePolicies */
+    pol = (c->profile == _UT_GEN_PROFILE_LEAF) ? _utOidTestPolicy : _utOidAnyPolicy;
+    polLen = (c->profile == _UT_GEN_PROFILE_LEAF) ? sizeof(_utOidTestPolicy) :
+                                                     sizeof(_utOidAnyPolicy);
+    if (!SSFASN1EncOIDRaw(t1, sizeof(t1), pol, polLen, &w)) return false;
+    if (!SSFASN1EncWrap(t2, sizeof(t2), SSF_ASN1_TAG_SEQUENCE, t1, w, &w)) return false;
+    if (!SSFASN1EncWrap(cp, sizeof(cp), SSF_ASN1_TAG_SEQUENCE, t2, w, &cpLen)) return false;
+
+    /* subjectKeyIdentifier */
+    if (!SSFASN1EncOctetString(skid, sizeof(skid), c->skid, sizeof(c->skid), &skidLen))
+    {
+        return false;
+    }
+
+    /* authorityKeyIdentifier, cRLDistributionPoints and authorityInfoAccess name the issuer */
+    if (c->profile != _UT_GEN_PROFILE_ROOT)
+    {
+        if (!SSFASN1EncWrap(t1, sizeof(t1), 0x80u, issuer->skid, sizeof(issuer->skid), &w))
+        {
+            return false;
+        }
+        if (!SSFASN1EncWrap(akid, sizeof(akid), SSF_ASN1_TAG_SEQUENCE, t1, w, &akidLen))
+        {
+            return false;
+        }
+        if (!SSFASN1EncWrap(t1, sizeof(t1), 0x86u, (const uint8_t *)c->crlUrlStr,
+                            (uint32_t)strlen(c->crlUrlStr), &w)) return false;
+        if (!SSFASN1EncWrap(t2, sizeof(t2), 0xA0u, t1, w, &w)) return false;
+        if (!SSFASN1EncWrap(t1, sizeof(t1), 0xA0u, t2, w, &w)) return false;
+        if (!SSFASN1EncWrap(t2, sizeof(t2), SSF_ASN1_TAG_SEQUENCE, t1, w, &w)) return false;
+        if (!SSFASN1EncWrap(crldp, sizeof(crldp), SSF_ASN1_TAG_SEQUENCE, t2, w, &crldpLen))
+        {
+            return false;
+        }
+        if (!SSFASN1EncOIDRaw(t1, sizeof(t1), _utOidCaIssuers, sizeof(_utOidCaIssuers), &w))
+        {
+            return false;
+        }
+        n = w;
+        if (!SSFASN1EncWrap(&t1[n], sizeof(t1) - n, 0x86u, (const uint8_t *)c->aiaUrlStr,
+                            (uint32_t)strlen(c->aiaUrlStr), &w)) return false;
+        n += w;
+        if (!SSFASN1EncWrap(t2, sizeof(t2), SSF_ASN1_TAG_SEQUENCE, t1, n, &w)) return false;
+        if (!SSFASN1EncWrap(aia, sizeof(aia), SSF_ASN1_TAG_SEQUENCE, t2, w, &aiaLen))
+        {
+            return false;
+        }
+    }
+
+    if (c->profile == _UT_GEN_PROFILE_ROOT)
+    {
+        ok = ok && _utGenEncExt(out, outSize, &pos, _utOidExtKU, sizeof(_utOidExtKU), true, kuCA,
+                                sizeof(kuCA));
+        ok = ok && _utGenEncExt(out, outSize, &pos, _utOidExtBC, sizeof(_utOidExtBC), true, bc,
+                                bcLen);
+        ok = ok && _utGenEncExt(out, outSize, &pos, _utOidExtSKID, sizeof(_utOidExtSKID), false,
+                                skid, skidLen);
+    }
+    else if (c->profile == _UT_GEN_PROFILE_CA)
+    {
+        ok = ok && _utGenEncExt(out, outSize, &pos, _utOidExtKU, sizeof(_utOidExtKU), true, kuCA,
+                                sizeof(kuCA));
+        ok = ok && _utGenEncExt(out, outSize, &pos, _utOidExtCP, sizeof(_utOidExtCP), false, cp,
+                                cpLen);
+        ok = ok && _utGenEncExt(out, outSize, &pos, _utOidExtBC, sizeof(_utOidExtBC), true, bc,
+                                bcLen);
+        ok = ok && _utGenEncExt(out, outSize, &pos, _utOidExtSKID, sizeof(_utOidExtSKID), false,
+                                skid, skidLen);
+        ok = ok && _utGenEncExt(out, outSize, &pos, _utOidExtAKID, sizeof(_utOidExtAKID), false,
+                                akid, akidLen);
+        ok = ok && _utGenEncExt(out, outSize, &pos, _utOidExtCRLDP, sizeof(_utOidExtCRLDP), false,
+                                crldp, crldpLen);
+        ok = ok && _utGenEncExt(out, outSize, &pos, _utOidExtAIA, sizeof(_utOidExtAIA), false,
+                                aia, aiaLen);
+    }
+    else
+    {
+        ok = ok && _utGenEncExt(out, outSize, &pos, _utOidExtBC, sizeof(_utOidExtBC), true, bc,
+                                bcLen);
+        ok = ok && _utGenEncExt(out, outSize, &pos, _utOidExtAKID, sizeof(_utOidExtAKID), false,
+                                akid, akidLen);
+        ok = ok && _utGenEncExt(out, outSize, &pos, _utOidExtAIA, sizeof(_utOidExtAIA), false,
+                                aia, aiaLen);
+        ok = ok && _utGenEncExt(out, outSize, &pos, _utOidExtCP, sizeof(_utOidExtCP), false, cp,
+                                cpLen);
+        ok = ok && _utGenEncExt(out, outSize, &pos, _utOidExtCRLDP, sizeof(_utOidExtCRLDP), false,
+                                crldp, crldpLen);
+        ok = ok && _utGenEncExt(out, outSize, &pos, _utOidExtSKID, sizeof(_utOidExtSKID), false,
+                                skid, skidLen);
+        ok = ok && _utGenEncExt(out, outSize, &pos, _utOidExtKU, sizeof(_utOidExtKU), true,
+                                kuLeaf, sizeof(kuLeaf));
+    }
+    if (!ok) return false;
+    *wOut = pos;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if c's certificate, signed by issuer (c itself for the root), is in c->der.      */
+/* --------------------------------------------------------------------------------------------- */
+static bool _utGenEncCert(_utGenCert_t *c, const _utGenCert_t *issuer)
+{
+    static uint8_t tbs[_UT_GEN_CERT_SIZE];
+    static uint8_t body[_UT_GEN_CERT_SIZE];
+    static uint8_t exts[_UT_GEN_CERT_SIZE];
+    uint8_t tmp[160];
+    uint8_t hash[SSF_SHA2_256_BYTE_SIZE];
+    uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
+    size_t sigLen;
+    uint32_t tbsLen;
+    uint32_t pos = 0;
+    uint32_t n;
+    uint32_t w;
+
+    SSF_REQUIRE(c != NULL);
+    SSF_REQUIRE(issuer != NULL);
+    SSF_REQUIRE(c->subject != NULL);
+    SSF_REQUIRE((c->serialLen > 0u) && (c->serialLen <= sizeof(c->serial)));
+
+    c->derLen = 0;
+
+    /* version [0] v3, serialNumber, signature */
+    if (!SSFASN1EncIntU64(tmp, sizeof(tmp), 2u, &w)) return false;
+    if (!SSFASN1EncWrap(&body[pos], sizeof(body) - pos, 0xA0u, tmp, w, &w)) return false;
+    pos += w;
+    if (!SSFASN1EncInt(&body[pos], sizeof(body) - pos, c->serial, c->serialLen, &w)) return false;
+    pos += w;
+    if (!_utEncAlgId(&body[pos], sizeof(body) - pos, _utOidEcdsaSha256, sizeof(_utOidEcdsaSha256),
+                     NULL, 0u, &w)) return false;
+    pos += w;
+
+    /* issuer, validity, subject */
+    if (!_utGenEncName(issuer->subject, issuer->subjectLen, &body[pos], sizeof(body) - pos, &w))
+    {
+        return false;
+    }
+    pos += w;
+    if (!_utGenEncTime(tmp, sizeof(tmp), c->notBefore, &w)) return false;
+    n = w;
+    if (!_utGenEncTime(&tmp[n], sizeof(tmp) - n, c->notAfter, &w)) return false;
+    n += w;
+    if (!SSFASN1EncWrap(&body[pos], sizeof(body) - pos, SSF_ASN1_TAG_SEQUENCE, tmp, n, &w))
+    {
+        return false;
+    }
+    pos += w;
+    if (!_utGenEncName(c->subject, c->subjectLen, &body[pos], sizeof(body) - pos, &w))
+    {
+        return false;
+    }
+    pos += w;
+
+    /* subjectPublicKeyInfo */
+    if (!SSFASN1EncOIDRaw(tmp, sizeof(tmp), _utOidEcPubKey, sizeof(_utOidEcPubKey), &w))
+    {
+        return false;
+    }
+    n = w;
+    if (!SSFASN1EncOIDRaw(&tmp[n], sizeof(tmp) - n, _utOidP256, sizeof(_utOidP256), &w))
+    {
+        return false;
+    }
+    n += w;
+    if (!SSFASN1EncWrap(exts, sizeof(exts), SSF_ASN1_TAG_SEQUENCE, tmp, n, &w)) return false;
+    n = w;
+    if (!SSFASN1EncBitString(&exts[n], sizeof(exts) - n, c->pub, c->pubLen, 0u, &w)) return false;
+    n += w;
+    if (!SSFASN1EncWrap(&body[pos], sizeof(body) - pos, SSF_ASN1_TAG_SEQUENCE, exts, n, &w))
+    {
+        return false;
+    }
+    pos += w;
+
+    /* extensions [3] */
+    if (!_utGenEncExts(c, issuer, exts, sizeof(exts), &n)) return false;
+    if (!SSFASN1EncWrap(tbs, sizeof(tbs), SSF_ASN1_TAG_SEQUENCE, exts, n, &w)) return false;
+    if (!SSFASN1EncWrap(&body[pos], sizeof(body) - pos, 0xA3u, tbs, w, &w)) return false;
+    pos += w;
+    if (!SSFASN1EncWrap(tbs, sizeof(tbs), SSF_ASN1_TAG_SEQUENCE, body, pos, &tbsLen)) return false;
+
+    /* Certificate { tbsCertificate, signatureAlgorithm, signatureValue } */
+    SSFSHA256(tbs, tbsLen, hash, sizeof(hash));
+    if (!SSFECDSASign(SSF_EC_CURVE_P256, issuer->priv, 32u, hash, sizeof(hash), sig, sizeof(sig),
+                      &sigLen)) return false;
+    memcpy(body, tbs, tbsLen);
+    pos = tbsLen;
+    if (!_utEncAlgId(&body[pos], sizeof(body) - pos, _utOidEcdsaSha256, sizeof(_utOidEcdsaSha256),
+                     NULL, 0u, &w)) return false;
+    pos += w;
+    if (!SSFASN1EncBitString(&body[pos], sizeof(body) - pos, sig, (uint32_t)sigLen, 0u, &w))
+    {
+        return false;
+    }
+    pos += w;
+    return SSFASN1EncWrap(c->der, sizeof(c->der), SSF_ASN1_TAG_SEQUENCE, body, pos, &c->derLen);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if a detached CMS signature by leaf over digest is built into out.               */
+/* --------------------------------------------------------------------------------------------- */
+static bool _utGenBuildCms(SSFPRNGContext_t *prng, const _utGenCert_t *ca,
+                           const _utGenCert_t *master, const _utGenCert_t *leaf,
+                           const uint8_t *digest, uint64_t signingTime, uint8_t *out,
+                           uint32_t outSize, uint32_t *lenOut)
+{
+    static uint8_t attrs[512];
+    static uint8_t si[SSF_CMS_CONFIG_MAX_DER_LEN];
+    static uint8_t sd[SSF_CMS_CONFIG_MAX_DER_LEN];
+    static uint8_t a[SSF_CMS_CONFIG_MAX_DER_LEN];
+    static uint8_t b[SSF_CMS_CONFIG_MAX_DER_LEN];
+    uint8_t tmp[160];
+    uint8_t hash[SSF_SHA2_256_BYTE_SIZE];
+    uint8_t sig[SSF_ECDSA_MAX_SIG_SIZE];
+    size_t sigLen;
+    uint32_t attrsLen = 0;
+    uint32_t pos;
+    uint32_t n;
+    uint32_t w;
+
+    SSF_REQUIRE(prng != NULL);
+    SSF_REQUIRE(ca != NULL);
+    SSF_REQUIRE(master != NULL);
+    SSF_REQUIRE(leaf != NULL);
+    SSF_REQUIRE(digest != NULL);
+    SSF_REQUIRE(out != NULL);
+    SSF_REQUIRE(lenOut != NULL);
+
+    *lenOut = 0;
+
+    /* signedAttrs: content-type, signing-time, CMSAlgorithmProtection, message-digest */
+    if (!SSFASN1EncOIDRaw(tmp, sizeof(tmp), _utOidData, sizeof(_utOidData), &w)) return false;
+    if (!_utEncAttr(&attrs[attrsLen], sizeof(attrs) - attrsLen, _utOidAttrContentType,
+                    sizeof(_utOidAttrContentType), tmp, w, &w)) return false;
+    attrsLen += w;
+    if (!SSFASN1EncUTCTime(tmp, sizeof(tmp), signingTime, &w)) return false;
+    if (!_utEncAttr(&attrs[attrsLen], sizeof(attrs) - attrsLen, _utOidAttrSigningTime,
+                    sizeof(_utOidAttrSigningTime), tmp, w, &w)) return false;
+    attrsLen += w;
+    if (!_utEncAlgId(a, sizeof(a), _utOidSha256, sizeof(_utOidSha256), _utDerNull,
+                     sizeof(_utDerNull), &w)) return false;
+    n = w;
+    if (!SSFASN1EncOIDRaw(tmp, sizeof(tmp), _utOidEcdsaSha256, sizeof(_utOidEcdsaSha256), &w))
+    {
+        return false;
+    }
+    if (!SSFASN1EncWrap(&a[n], sizeof(a) - n, 0xA1u, tmp, w, &w)) return false;
+    n += w;
+    if (!SSFASN1EncWrap(tmp, sizeof(tmp), SSF_ASN1_TAG_SEQUENCE, a, n, &w)) return false;
+    if (!_utEncAttr(&attrs[attrsLen], sizeof(attrs) - attrsLen, _utOidAttrAlgProt,
+                    sizeof(_utOidAttrAlgProt), tmp, w, &w)) return false;
+    attrsLen += w;
+    if (!SSFASN1EncOctetString(tmp, sizeof(tmp), digest, SSF_SHA2_256_BYTE_SIZE, &w))
+    {
+        return false;
+    }
+    if (!_utEncAttr(&attrs[attrsLen], sizeof(attrs) - attrsLen, _utOidAttrMessageDigest,
+                    sizeof(_utOidAttrMessageDigest), tmp, w, &w)) return false;
+    attrsLen += w;
+
+    /* The signature covers the attributes as a SET (RFC 5652 Sec. 5.4) */
+    if (!SSFASN1EncWrap(a, sizeof(a), SSF_ASN1_TAG_SET, attrs, attrsLen, &w)) return false;
+    SSFSHA256(a, w, hash, sizeof(hash));
+    if (!SSFECDSASign(SSF_EC_CURVE_P256, leaf->priv, 32u, hash, sizeof(hash), sig, sizeof(sig),
+                      &sigLen)) return false;
+
+    /* SignerInfo v1 { issuerAndSerialNumber, sha256, [0] attrs, ecdsa-with-SHA256, sig, [1] } */
+    pos = 0;
+    if (!SSFASN1EncIntU64(&si[pos], sizeof(si) - pos, 1u, &w)) return false;
+    pos += w;
+    if (!_utGenEncName(master->subject, master->subjectLen, a, sizeof(a), &n)) return false;
+    if (!SSFASN1EncInt(&a[n], sizeof(a) - n, leaf->serial, leaf->serialLen, &w)) return false;
+    n += w;
+    if (!SSFASN1EncWrap(&si[pos], sizeof(si) - pos, SSF_ASN1_TAG_SEQUENCE, a, n, &w)) return false;
+    pos += w;
+    if (!_utEncAlgId(&si[pos], sizeof(si) - pos, _utOidSha256, sizeof(_utOidSha256), _utDerNull,
+                     sizeof(_utDerNull), &w)) return false;
+    pos += w;
+    if (!SSFASN1EncWrap(&si[pos], sizeof(si) - pos, 0xA0u, attrs, attrsLen, &w)) return false;
+    pos += w;
+    if (!_utEncAlgId(&si[pos], sizeof(si) - pos, _utOidEcdsaSha256, sizeof(_utOidEcdsaSha256),
+                     NULL, 0u, &w)) return false;
+    pos += w;
+    if (!SSFASN1EncOctetString(&si[pos], sizeof(si) - pos, sig, (uint32_t)sigLen, &w))
+    {
+        return false;
+    }
+    pos += w;
+
+    /* An RFC 3161-shaped timeStampToken the signature does not cover */
+    _utGenRandom(prng, b, 1200u);
+    if (!SSFASN1EncOctetString(a, sizeof(a), b, 1200u, &w)) return false;
+    if (!SSFASN1EncWrap(b, sizeof(b), 0xA0u, a, w, &w)) return false;
+    if (!SSFASN1EncOIDRaw(a, sizeof(a), _utOidTstInfo, sizeof(_utOidTstInfo), &n)) return false;
+    memcpy(&a[n], b, w);
+    n += w;
+    if (!SSFASN1EncWrap(b, sizeof(b), SSF_ASN1_TAG_SEQUENCE, a, n, &w)) return false;
+    if (!_utEncAlgId(tmp, sizeof(tmp), _utOidSha256, sizeof(_utOidSha256), NULL, 0u, &n))
+    {
+        return false;
+    }
+    {
+        uint32_t m;
+
+        if (!SSFASN1EncIntU64(a, sizeof(a), 3u, &m)) return false;
+        if (!SSFASN1EncWrap(&a[m], sizeof(a) - m, SSF_ASN1_TAG_SET, tmp, n, &n)) return false;
+        m += n;
+        memcpy(&a[m], b, w);
+        m += w;
+        if (!SSFASN1EncWrap(&a[m], sizeof(a) - m, SSF_ASN1_TAG_SET, NULL, 0u, &w)) return false;
+        m += w;
+        if (!SSFASN1EncWrap(b, sizeof(b), SSF_ASN1_TAG_SEQUENCE, a, m, &w)) return false;
+        if (!SSFASN1EncWrap(a, sizeof(a), 0xA0u, b, w, &w)) return false;
+        if (!SSFASN1EncOIDRaw(b, sizeof(b), _utOidSignedData, sizeof(_utOidSignedData), &m))
+        {
+            return false;
+        }
+        memcpy(&b[m], a, w);
+        m += w;
+        if (!SSFASN1EncWrap(a, sizeof(a), SSF_ASN1_TAG_SEQUENCE, b, m, &w)) return false;
+    }
+    if (!_utEncAttr(b, sizeof(b), _utOidAttrTstToken, sizeof(_utOidAttrTstToken), a, w, &w))
+    {
+        return false;
+    }
+    if (!SSFASN1EncWrap(&si[pos], sizeof(si) - pos, 0xA1u, b, w, &w)) return false;
+    pos += w;
+
+    /* SignedData v1 { {sha256}, {id-data}, [0] { ca, master, leaf }, { SignerInfo } } */
+    n = 0;
+    if (!SSFASN1EncIntU64(&sd[n], sizeof(sd) - n, 1u, &w)) return false;
+    n += w;
+    if (!_utEncAlgId(tmp, sizeof(tmp), _utOidSha256, sizeof(_utOidSha256), NULL, 0u, &w))
+    {
+        return false;
+    }
+    if (!SSFASN1EncWrap(&sd[n], sizeof(sd) - n, SSF_ASN1_TAG_SET, tmp, w, &w)) return false;
+    n += w;
+    if (!SSFASN1EncOIDRaw(tmp, sizeof(tmp), _utOidData, sizeof(_utOidData), &w)) return false;
+    if (!SSFASN1EncWrap(&sd[n], sizeof(sd) - n, SSF_ASN1_TAG_SEQUENCE, tmp, w, &w)) return false;
+    n += w;
+    if ((ca->derLen + master->derLen + leaf->derLen) > sizeof(a)) return false;
+    memcpy(a, ca->der, ca->derLen);
+    w = ca->derLen;
+    memcpy(&a[w], master->der, master->derLen);
+    w += master->derLen;
+    memcpy(&a[w], leaf->der, leaf->derLen);
+    w += leaf->derLen;
+    if (!SSFASN1EncWrap(&sd[n], sizeof(sd) - n, 0xA0u, a, w, &w)) return false;
+    n += w;
+    if (!SSFASN1EncWrap(a, sizeof(a), SSF_ASN1_TAG_SEQUENCE, si, pos, &w)) return false;
+    if (!SSFASN1EncWrap(&sd[n], sizeof(sd) - n, SSF_ASN1_TAG_SET, a, w, &w)) return false;
+    n += w;
+
+    /* ContentInfo { id-signedData, [0] SignedData } */
+    if (!SSFASN1EncWrap(a, sizeof(a), SSF_ASN1_TAG_SEQUENCE, sd, n, &w)) return false;
+    if (!SSFASN1EncWrap(b, sizeof(b), 0xA0u, a, w, &w)) return false;
+    if (!SSFASN1EncOIDRaw(a, sizeof(a), _utOidSignedData, sizeof(_utOidSignedData), &n))
+    {
+        return false;
+    }
+    if ((n + w) > sizeof(a)) return false;
+    memcpy(&a[n], b, w);
+    n += w;
+    return SSFASN1EncWrap(out, outSize, SSF_ASN1_TAG_SEQUENCE, a, n, lenOut);
+}
+
+/* Subject names of the generated CAs */
+static const _utGenRdn_t _utGenRootName[] = {
+    { _utOidNameO, sizeof(_utOidNameO), SSF_ASN1_TAG_PRINTABLE_STRING, "SSF Test" },
+    { _utOidNameCN, sizeof(_utOidNameCN), SSF_ASN1_TAG_PRINTABLE_STRING, "SSF Test Root CA" } };
+static const _utGenRdn_t _utGenCaName[] = {
+    { _utOidNameO, sizeof(_utOidNameO), SSF_ASN1_TAG_PRINTABLE_STRING, "SSF Test" },
+    { _utOidNameCN, sizeof(_utOidNameCN), SSF_ASN1_TAG_PRINTABLE_STRING,
+      "SSF Firmware Signing CA" } };
+static const _utGenRdn_t _utGenMasterName[] = {
+    { _utOidNameO, sizeof(_utOidNameO), SSF_ASN1_TAG_PRINTABLE_STRING, "SSF Test" },
+    { _utOidNameOU, sizeof(_utOidNameOU), SSF_ASN1_TAG_PRINTABLE_STRING, "Firmware Master" },
+    { _utOidNameCN, sizeof(_utOidNameCN), SSF_ASN1_TAG_PRINTABLE_STRING,
+      "SSF Firmware Master" } };
+
+/* --------------------------------------------------------------------------------------------- */
+/* Fills an ADCS-style 19-byte CA serial: 0x33 prefix, sequence, random middle, sequence.        */
+/* --------------------------------------------------------------------------------------------- */
+static void _utGenCaSerial(SSFPRNGContext_t *prng, uint8_t seq, _utGenCert_t *c)
+{
+    SSF_REQUIRE(prng != NULL);
+    SSF_REQUIRE(c != NULL);
+
+    memset(c->serial, 0, sizeof(c->serial));
+    c->serial[0] = 0x33u;
+    c->serial[4] = seq;
+    _utGenRandom(prng, &c->serial[5], 8u);
+    c->serial[18] = seq;
+    c->serialLen = 19u;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Generates _UT_GEN_CHAINS distinct production-shaped chains and verifies each.                 */
+/* --------------------------------------------------------------------------------------------- */
+static void _utGenChainsTest(void)
+{
+    static _utGenCert_t root;
+    static _utGenCert_t ca;
+    static _utGenCert_t master;
+    static _utGenCert_t leaf;
+    static uint8_t prevCaDer[_UT_GEN_CERT_SIZE];
+    static uint8_t msg[SSF_CMS_CONFIG_MAX_DER_LEN];
+    static uint8_t fw[256];
+    static char leafSerialStr[4];
+    _utGenRdn_t leafName[4];
+    uint8_t seed[SSF_PRNG_ENTROPY_SIZE];
+    uint8_t digest[SSF_SHA2_256_BYTE_SIZE];
+    uint8_t bad[SSF_SHA2_256_BYTE_SIZE];
+    SSFPRNGContext_t prng;
+    SSFCMSSignedData_t sd;
+    SSFCMSVerifyResult_t res;
+    SSFCMSDigestAlg_t alg;
+    SSFX509Cert_t cert;
+    const uint8_t *trust[1];
+    uint32_t trustLen[1];
+    uint32_t prevCaDerLen = 0;
+    uint32_t msgLen;
+    uint64_t signingTime;
+    uint64_t now;
+    uint32_t k;
+    uint32_t i;
+
+    for (i = 0; i < sizeof(seed); i++) seed[i] = (uint8_t)(0x5Au ^ (i * 13u));
+    SSFPRNGInitContext(&prng, seed, sizeof(seed));
+
+    /* The unit test's private root CA, self-signed, valid 2015 to 2075 */
+    memset(&root, 0, sizeof(root));
+    root.profile = _UT_GEN_PROFILE_ROOT;
+    root.subject = _utGenRootName;
+    root.subjectLen = (uint8_t)(sizeof(_utGenRootName) / sizeof(_utGenRootName[0]));
+    root.pathLen = -1;
+    _utGenCaSerial(&prng, 0x01u, &root);
+    root.notBefore = 1432028153ull;
+    root.notAfter = 3325483010ull;
+    _utGenKey(&prng, _utGenRootPriv, &root);
+    SSF_ASSERT(_utGenEncCert(&root, &root));
+    SSF_ASSERT(SSFX509Parse(root.der, root.derLen, &cert) == true);
+    SSF_ASSERT(SSFX509VerifyCertSignature(&cert, &cert) == true);
+
+    leafName[0].oid = _utOidNameCN;
+    leafName[0].oidLen = sizeof(_utOidNameCN);
+    leafName[0].strTag = SSF_ASN1_TAG_UTF8_STRING;
+    leafName[0].valStr = "SSF Firmware Signature";
+    leafName[1].oid = _utOidNameSerial;
+    leafName[1].oidLen = sizeof(_utOidNameSerial);
+    leafName[1].strTag = SSF_ASN1_TAG_PRINTABLE_STRING;
+    leafName[1].valStr = leafSerialStr;
+    leafName[2].oid = _utOidNameOU;
+    leafName[2].oidLen = sizeof(_utOidNameOU);
+    leafName[2].strTag = SSF_ASN1_TAG_UTF8_STRING;
+    leafName[2].valStr = "Firmware Signature";
+    leafName[3].oid = _utOidNameO;
+    leafName[3].oidLen = sizeof(_utOidNameO);
+    leafName[3].strTag = SSF_ASN1_TAG_UTF8_STRING;
+    leafName[3].valStr = "SSF Test";
+
+    for (k = 0; k < _UT_GEN_CHAINS; k++)
+    {
+        /* Signing CA: the device trust anchor, issued by the root */
+        memset(&ca, 0, sizeof(ca));
+        ca.profile = _UT_GEN_PROFILE_CA;
+        ca.subject = _utGenCaName;
+        ca.subjectLen = (uint8_t)(sizeof(_utGenCaName) / sizeof(_utGenCaName[0]));
+        ca.pathLen = -1;
+        ca.crlUrlStr = "http://pki.ssf.test/SSFTestRootCA.crl";
+        ca.aiaUrlStr = "http://pki.ssf.test/SSFTestRootCA.cer";
+        _utGenCaSerial(&prng, 0x03u, &ca);
+        ca.notBefore = root.notBefore + _utGenRange(&prng, 30u * _UT_GEN_DAY);
+        ca.notAfter = root.notAfter;
+        _utGenKey(&prng, NULL, &ca);
+        SSF_ASSERT(_utGenEncCert(&ca, &root));
+
+        /* Master CA, pathlen 0, issued by the signing CA */
+        memset(&master, 0, sizeof(master));
+        master.profile = _UT_GEN_PROFILE_CA;
+        master.subject = _utGenMasterName;
+        master.subjectLen = (uint8_t)(sizeof(_utGenMasterName) / sizeof(_utGenMasterName[0]));
+        master.pathLen = 0;
+        master.crlUrlStr = "http://pki.ssf.test/SSFFirmwareSigningCA.crl";
+        master.aiaUrlStr = "http://pki.ssf.test/SSFFirmwareSigningCA.cer";
+        _utGenCaSerial(&prng, 0x10u, &master);
+        master.notBefore = 1519808944ull + _utGenRange(&prng, 365u * _UT_GEN_DAY);
+        master.notAfter = root.notAfter;
+        _utGenKey(&prng, NULL, &master);
+        SSF_ASSERT(_utGenEncCert(&master, &ca));
+
+        /* Code-signing leaf with a CN-first subject and a 20-byte serial, valid 30 years */
+        memset(&leaf, 0, sizeof(leaf));
+        leafSerialStr[0] = (char)('0' + ((k + 1u) / 100u));
+        leafSerialStr[1] = (char)('0' + (((k + 1u) / 10u) % 10u));
+        leafSerialStr[2] = (char)('0' + ((k + 1u) % 10u));
+        leafSerialStr[3] = '\0';
+        leaf.profile = _UT_GEN_PROFILE_LEAF;
+        leaf.subject = leafName;
+        leaf.subjectLen = (uint8_t)(sizeof(leafName) / sizeof(leafName[0]));
+        leaf.pathLen = -1;
+        leaf.crlUrlStr = "http://pki.ssf.test/SSFFirmwareMaster.crl";
+        leaf.aiaUrlStr = "http://pki.ssf.test/SSFFirmwareMaster.cer";
+        _utGenRandom(&prng, leaf.serial, 20u);
+        leaf.serial[0] = (uint8_t)((leaf.serial[0] & 0x3Fu) | 0x40u);
+        leaf.serialLen = 20u;
+        leaf.notBefore = 1792049823ull + _utGenRange(&prng, 3u * 365u * _UT_GEN_DAY);
+        leaf.notAfter = leaf.notBefore + (10950u * _UT_GEN_DAY) - 1u;
+        _utGenKey(&prng, NULL, &leaf);
+        SSF_ASSERT(_utGenEncCert(&leaf, &master));
+
+        /* A firmware image, the digest the bootloader computes, and its signature */
+        _utGenRandom(&prng, fw, sizeof(fw));
+        SSFSHA256(fw, sizeof(fw), digest, sizeof(digest));
+        signingTime = leaf.notBefore + _utGenRange(&prng, 30u * _UT_GEN_DAY);
+        now = signingTime + _utGenRange(&prng, 365u * _UT_GEN_DAY);
+        SSF_ASSERT(_utGenBuildCms(&prng, &ca, &master, &leaf, digest, signingTime, msg,
+                                  sizeof(msg), &msgLen));
+
+        /* The message parses into the production shape */
+        SSF_ASSERT(SSFCMSParse(msg, msgLen, &sd) == true);
+        SSF_ASSERT(sd.version == 1u);
+        SSF_ASSERT(sd.hasEContent == false);
+        SSF_ASSERT(sd.certsLen == 3u);
+        SSF_ASSERT(sd.signersLen == 1u);
+        SSF_ASSERT(sd.signers[0].version == 1u);
+        SSF_ASSERT(sd.signers[0].hasAlgProtection == true);
+        SSF_ASSERT(sd.signers[0].hasSigningTime == true);
+        SSF_ASSERT(sd.signers[0].signingTime == signingTime);
+        SSF_ASSERT(_utSpanEq(sd.signers[0].sidSerial, sd.signers[0].sidSerialLen, leaf.serial,
+                             leaf.serialLen) == true);
+        SSF_ASSERT(SSFCMSGetDigestAlg(&sd, 0u, &alg) == true);
+        SSF_ASSERT(alg == SSF_CMS_DIGEST_SHA256);
+
+        /* Verifies against the signing CA, as a bootloader holding only that anchor would */
+        trust[0] = ca.der;
+        trustLen[0] = ca.derLen;
+        SSF_ASSERT(SSFCMSVerifyDigest(&sd, digest, sizeof(digest), SSF_CMS_DIGEST_SHA256, trust,
+                                      trustLen, 1u, now, &res) == true);
+        SSF_ASSERT(res.signerIndex == 0u);
+        SSF_ASSERT(res.hasSigningTime == true);
+        SSF_ASSERT(res.signingTime == signingTime);
+
+        /* Verifies against the private root as well */
+        trust[0] = root.der;
+        trustLen[0] = root.derLen;
+        SSF_ASSERT(SSFCMSVerifyDigest(&sd, digest, sizeof(digest), SSF_CMS_DIGEST_SHA256, trust,
+                                      trustLen, 1u, now, &res) == true);
+
+        /* Fails for another image, before the leaf is valid, and under another chain's anchor */
+        memcpy(bad, digest, sizeof(bad));
+        bad[k % sizeof(bad)] ^= 0x01u;
+        trust[0] = ca.der;
+        trustLen[0] = ca.derLen;
+        SSF_ASSERT(SSFCMSVerifyDigest(&sd, bad, sizeof(bad), SSF_CMS_DIGEST_SHA256, trust,
+                                      trustLen, 1u, now, &res) == false);
+        SSF_ASSERT(SSFCMSVerifyDigest(&sd, digest, sizeof(digest), SSF_CMS_DIGEST_SHA256, trust,
+                                      trustLen, 1u, leaf.notBefore - 1u, &res) == false);
+        if (prevCaDerLen > 0u)
+        {
+            trust[0] = prevCaDer;
+            trustLen[0] = prevCaDerLen;
+            SSF_ASSERT(SSFCMSVerifyDigest(&sd, digest, sizeof(digest), SSF_CMS_DIGEST_SHA256,
+                                          trust, trustLen, 1u, now, &res) == false);
+        }
+        memcpy(prevCaDer, ca.der, ca.derLen);
+        prevCaDerLen = ca.derLen;
+    }
+    SSFPRNGDeInitContext(&prng);
 }
 
 void SSFCMSUnitTest(void)
@@ -2190,5 +3017,8 @@ void SSFCMSUnitTest(void)
         SSF_ASSERT(SSFCMSVerifyDigest(&sd, fwDigest, sizeof(fwDigest), SSF_CMS_DIGEST_SHA256, trust,
                                       trustLen, 1u, now, &res) == true);
     }
+
+    /* ---- Generated production-shaped chains under the unit test's private root CA ---- */
+    _utGenChainsTest();
 }
 #endif /* SSF_CONFIG_CMS_UNIT_TEST */

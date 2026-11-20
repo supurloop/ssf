@@ -608,18 +608,17 @@ static void _ECVerifyAtCurve(SSFECCurve_t curve, uint16_t iters)
             SSF_ASSERT(EC_POINT_mul(group, osslT, bnReduce, NULL, NULL, ctx) == 1);
             SSF_ASSERT(_ECPointEqOSSL(&R, osslT, curve, group, ctx) == true);
 
+            /* The fixed-base comb does not reduce: k >= n is a caller error and traps (EC-1). */
 #if SSF_EC_CONFIG_FIXED_BASE_P256 == 1
             if (curve == SSF_EC_CURVE_P256)
             {
-                SSFECScalarMulBaseP256(&R, &kBig);
-                SSF_ASSERT(_ECPointEqOSSL(&R, osslR, curve, group, ctx) == true);
+                SSF_ASSERT_TEST(SSFECScalarMulBaseP256(&R, &kBig));
             }
 #endif
 #if SSF_EC_CONFIG_FIXED_BASE_P384 == 1
             if (curve == SSF_EC_CURVE_P384)
             {
-                SSFECScalarMulBaseP384(&R, &kBig);
-                SSF_ASSERT(_ECPointEqOSSL(&R, osslR, curve, group, ctx) == true);
+                SSF_ASSERT_TEST(SSFECScalarMulBaseP384(&R, &kBig));
             }
 #endif
         }

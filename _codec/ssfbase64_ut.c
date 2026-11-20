@@ -124,9 +124,14 @@ void SSFBase64UnitTest(void)
 
     for (i = 0; i < (sizeof(_b64BlockUT) / sizeof(SSBase64UT_t)); i++)
     {
-        SSF_ASSERT(SSFBase64Dec32To24(_b64BlockUT[i].encoded, b24, sizeof(b24)) ==
+        /* AUDIT B64-1: the block decoder always reads 4 characters, so the empty vector */
+        /* (covered by SSFBase64Decode below) skips it                                    */
+        if (_b64BlockUT[i].unencodedLen != 0)
+        {
+            SSF_ASSERT(SSFBase64Dec32To24(_b64BlockUT[i].encoded, b24, sizeof(b24)) ==
                        _b64BlockUT[i].unencodedLen);
-        SSF_ASSERT(memcmp(b24, _b64BlockUT[i].unencoded, _b64BlockUT[i].unencodedLen) == 0);
+            SSF_ASSERT(memcmp(b24, _b64BlockUT[i].unencoded, _b64BlockUT[i].unencodedLen) == 0);
+        }
         if (_b64BlockUT[i].unencodedLen == 0)
         {
             SSF_ASSERT_TEST(SSFBase64Enc24To32(_b64BlockUT[i].unencoded,

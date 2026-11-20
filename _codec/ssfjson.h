@@ -39,6 +39,7 @@ extern "C" {
 #include <stdint.h>
 #include <stdbool.h>
 #include "ssfport.h"
+#include "ssfjsonpath.h"
 
 /* --------------------------------------------------------------------------------------------- */
 /* Limitations                                                                                   */
@@ -65,40 +66,6 @@ typedef enum
     SSF_JSON_TYPE_MAX,
 } SSFJsonType_t;
 
-/* Kind of one lookup path entry; END (0) terminates the path, so a zeroed path is empty */
-typedef enum
-{
-    SSF_JSON_PATH_MIN = -1,
-    SSF_JSON_PATH_END,
-    SSF_JSON_PATH_KEY,
-    SSF_JSON_PATH_INDEX,
-    SSF_JSON_PATH_MAX,
-} SSFJsonPathKind_t;
-
-/* One lookup path entry: an object member name or a pointer to an array element index */
-typedef struct
-{
-    SSFJsonPathKind_t kind;
-    union
-    {
-        SSFCStrIn_t key;
-        const size_t *index;
-    } u;
-} SSFJsonPath_t;
-
-/* Set entry e to member name k, index pointer i, or the path end; each argument read once */
-#define SSF_JSON_PATH_SET_KEY(e, k) \
-        do { SSFJsonPath_t *_ssfJsonPathEntry = &(e); \
-             _ssfJsonPathEntry->kind = SSF_JSON_PATH_KEY; \
-             _ssfJsonPathEntry->u.key = (k); } while (0)
-#define SSF_JSON_PATH_SET_INDEX(e, i) \
-        do { SSFJsonPath_t *_ssfJsonPathEntry = &(e); \
-             _ssfJsonPathEntry->kind = SSF_JSON_PATH_INDEX; \
-             _ssfJsonPathEntry->u.index = (i); } while (0)
-#define SSF_JSON_PATH_SET_END(e) \
-        do { SSFJsonPath_t *_ssfJsonPathEntry = &(e); \
-             _ssfJsonPathEntry->kind = SSF_JSON_PATH_END; \
-             _ssfJsonPathEntry->u.key = NULL; } while (0)
 
 #if SSF_JSON_CONFIG_ENABLE_FLOAT_GEN == 1
 typedef enum

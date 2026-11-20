@@ -370,37 +370,6 @@ static bool _SSFJsonObject(SSFCStrIn_t js, size_t *index, size_t *start, size_t 
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if every path entry up to the first END is a known kind with its pointer set.    */
-/* --------------------------------------------------------------------------------------------- */
-static bool _SSFJsonPathIsValid(const SSFJsonPath_t *path)
-{
-    uint8_t i;
-
-    SSF_REQUIRE(path != NULL);
-
-    for (i = 0; i <= SSF_JSON_CONFIG_MAX_IN_DEPTH; i++)
-    {
-        /* Is the entry's kind outside the enum? */
-        if ((path[i].kind <= SSF_JSON_PATH_MIN) || (path[i].kind >= SSF_JSON_PATH_MAX))
-        {
-            /* Yes */
-            return false;
-        }
-        /* No, is it the end of the path? */
-        if (path[i].kind == SSF_JSON_PATH_END) return true;
-        /* No, is it a key without a name or an index without a variable? */
-        if (((path[i].kind == SSF_JSON_PATH_KEY) && (path[i].u.key == NULL)) ||
-            ((path[i].kind == SSF_JSON_PATH_INDEX) && (path[i].u.index == NULL)))
-        {
-            /* Yes */
-            return false;
-        }
-        /* No, a usable entry */
-    }
-    return false;
-}
-
-/* --------------------------------------------------------------------------------------------- */
 /* Returns true if object|array found, else false; If true returns type/start/end on path match. */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFJsonMessage(SSFCStrIn_t js, size_t *index, size_t *start, size_t *end,
@@ -412,7 +381,7 @@ bool SSFJsonMessage(SSFCStrIn_t js, size_t *index, size_t *start, size_t *end,
     SSF_REQUIRE(end != NULL);
     SSF_REQUIRE(jt != NULL);
     SSF_REQUIRE((path == NULL) || (path[SSF_JSON_CONFIG_MAX_IN_DEPTH].kind == SSF_JSON_PATH_END));
-    SSF_REQUIRE((path == NULL) || _SSFJsonPathIsValid(path));
+    SSF_REQUIRE((path == NULL) || SSFJsonPathIsValid(path, SSF_JSON_CONFIG_MAX_IN_DEPTH));
 
     if (!_SSFJsonObject(js, index, start, end, path, depth, jt))
     {

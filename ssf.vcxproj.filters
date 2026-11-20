@@ -338,6 +338,9 @@
     <ClInclude Include="_codec\ssfjson.h">
       <Filter>_codec</Filter>
     </ClInclude>
+    <ClInclude Include="_codec\ssfjsonpath.h">
+      <Filter>_codec</Filter>
+    </ClInclude>
     <ClInclude Include="_codec\ssfstr.h">
       <Filter>_codec</Filter>
     </ClInclude>

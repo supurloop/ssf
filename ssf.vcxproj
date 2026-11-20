@@ -277,6 +277,7 @@
     <ClInclude Include="_codec\ssfhex.h" />
     <ClInclude Include="_codec\ssfini.h" />
     <ClInclude Include="_codec\ssfjson.h" />
+    <ClInclude Include="_codec\ssfjsonpath.h" />
     <ClInclude Include="_codec\ssfmatch.h" />
     <ClInclude Include="_codec\ssfstr.h" />
     <ClInclude Include="_codec\ssftlv.h" />

@@ -188,7 +188,9 @@ static bool _SSFJsonArray(SSFCStrIn_t js, size_t *index, size_t *start, size_t *
     (*index)++;
 
     if ((path != NULL) && (path[depth] != NULL)) memcpy(&pindex, path[depth], sizeof(size_t));
-    while (_SSFJsonValue(js, index, &valStart, &valEnd, path, depth, &djt) == true)
+    /* Only the element at the path index follows the path; the rest are parsed to skip them */
+    while (_SSFJsonValue(js, index, &valStart, &valEnd, (pindex == curIndex) ? path : NULL,
+                         depth, &djt) == true)
     {
         if (pindex == curIndex)
         {*start = valStart; *end = valEnd; *jt = djt; }

@@ -515,6 +515,81 @@ void SSFJsonUnitTest(void)
 #endif /* SSF_JSON_CONFIG_MAX_IN_DEPTH >= 2 */
     }
 
+    /* ---- AUDIT JSON-1: array elements not at the path index never see the path ---- */
+    /* Every element was parsed with the caller's path, so a sibling array read the next path */
+    /* entry as a size_t index: an 8-byte read of a shorter key string (seen under ASan).     */
+    {
+        static const char *js1 = "[[7],{\"hex\":5}]";
+        static const char *js2 = "[[1,2],{\"k\":[[3],{\"m\":\"x\"}]}]";
+        char key[4];
+        char strOut[4];
+        size_t strOutLen;
+        size_t i0 = 0u;
+        size_t i1 = 1u;
+        size_t msgIndex;
+        int64_t si = 0;
+        SSFJsonType_t jt;
+
+        /* The key lives in a 4-byte buffer, as a caller's would */
+        memcpy(key, "hex", sizeof(key));
+        memset((void *)path, 0, sizeof(path));
+        path[0] = (SSFCStrIn_t)&i1;
+        path[1] = key;
+        SSF_ASSERT(SSFJsonGetInt(js1, path, &si) == true);
+        SSF_ASSERT(si == 5);
+
+        /* Through arrays with array siblings at two levels */
+        memset((void *)path, 0, sizeof(path));
+        path[0] = (SSFCStrIn_t)&i1;
+        path[1] = "k";
+        path[2] = (SSFCStrIn_t)&i1;
+        path[3] = "m";
+        SSF_ASSERT(SSFJsonGetString(js2, path, strOut, sizeof(strOut), &strOutLen) == true);
+        SSF_ASSERT((strOutLen == 1u) && (strOut[0] == 'x'));
+        path[3] = NULL;
+        SSF_ASSERT(SSFJsonGetType(js2, path) == SSF_JSON_TYPE_OBJECT);
+        path[2] = (SSFCStrIn_t)&i0;
+        SSF_ASSERT(SSFJsonGetType(js2, path) == SSF_JSON_TYPE_ARRAY);
+        path[1] = NULL;
+        path[2] = NULL;
+        SSF_ASSERT(SSFJsonGetType(js2, path) == SSF_JSON_TYPE_OBJECT);
+        path[0] = (SSFCStrIn_t)&i0;
+        SSF_ASSERT(SSFJsonGetType(js2, path) == SSF_JSON_TYPE_ARRAY);
+
+        /* An array that is itself the target still reports its own type and span */
+        path[0] = (SSFCStrIn_t)&i1;
+        path[1] = "k";
+        SSF_ASSERT(SSFJsonMessage(js2, &msgIndex, &start, &end, path, 0, &jt) == true);
+        SSF_ASSERT(jt == SSF_JSON_TYPE_ARRAY);
+        SSF_ASSERT((js2[start] == '[') && (js2[end] == ']') && (end == (strlen(js2) - 3u)));
+        SSF_ASSERT(SSFJsonGetString(js2, path, strOut, sizeof(strOut), &strOutLen) == false);
+
+#if SSF_JSON_CONFIG_MAX_IN_DEPTH >= 3u
+        /* Nesting inside an element not at the path index counts toward the limit from the */
+        /* array's own depth: {"x":[<nest>,1]} with nest one level too deep fails [x][1]      */
+        {
+            static char deep[SSF_JSON_CONFIG_MAX_IN_LEN + 1u];
+            uint32_t k;
+
+            memset((void *)path, 0, sizeof(path));
+            path[0] = "x";
+            path[1] = (SSFCStrIn_t)&i1;
+            for (k = 0u; k < 2u; k++)
+            {
+                size_t len;
+
+                memcpy(deep, "{\"x\":[", 6u);
+                SSF_ASSERT(_SSFJsonUTNest(&deep[6], sizeof(deep) - 10u,
+                                          SSF_JSON_CONFIG_MAX_IN_DEPTH - 1u - k) == true);
+                len = strlen(deep);
+                memcpy(&deep[len], ",1]}", 5u);
+                SSF_ASSERT(SSFJsonGetType(deep, path) ==
+                           ((k == 0u) ? SSF_JSON_TYPE_ERROR : SSF_JSON_TYPE_NUMBER));
+            }
+        }
+#endif /* SSF_JSON_CONFIG_MAX_IN_DEPTH >= 3 */
+    }
+
     /* Parsing tests */
 
     /* Validate parser on valid JSON strings */

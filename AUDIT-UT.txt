@@ -41,22 +41,24 @@ SUMMARY
 
   Severity   Count   Labels
   Critical   0
-  High       2       JSON-1, JSON-2 (FIXED)
+  High       5       JSON-1 (FIXED), JSON-2 (FIXED), JSON-5, JSON-6, JSON-7
   Medium     0
   Low        12      UBJSON-1, DEC-1, HEX-1, B64-1, JSON-3, JSON-4, RSA-13, RSA-14, CMS-5,
                      X509-21, E-5, X-3
 
-  By fault:  CODE   JSON-1, JSON-2, JSON-4, UBJSON-1, DEC-1, RSA-14 (style)
+  By fault:  CODE   JSON-1, JSON-2, JSON-4, JSON-5, JSON-6, JSON-7, UBJSON-1, DEC-1,
+                    RSA-14 (style)
              TEST   HEX-1, B64-1, JSON-3, RSA-13, CMS-5, X509-21, E-5, X-3
 
-  Suggested order: JSON-1 next (its fix must keep passing the real depth, see JSON-2), then
+  Suggested order: JSON-6 (small, uninitialised result), then JSON-7 / JSON-5 together (both
+  are a path whose shape does not match the document; JSON-7 needs an API decision), then
   UBJSON-1 / DEC-1, then the test items.
 
 ----------------------------------------------------------------------------------------------
 ssfjson
 ----------------------------------------------------------------------------------------------
 
-JSON-1  High  OPEN  CODE  [measured, ASan global-buffer-overflow]
+JSON-1  High  FIXED (2026-11-19)  CODE  [measured, ASan; fix verified red/green]
   Location:  ssfjson.c:191 (_SSFJsonArray element loop), read at ssfjson.c:190
   Problem:   While scanning an array for the requested element, _SSFJsonArray passes the
              caller's path to every element, not only the selected one. A sibling element that
@@ -70,8 +72,8 @@ JSON-1  High  OPEN  CODE  [measured, ASan global-buffer-overflow]
              8-byte read from a 5-byte string literal. Any caller whose path goes through an
              array that has array or object siblings is exposed; the caller's path is valid.
   Options:   (1) In the array loop, pass path only for the element whose index matches
-             (NULL otherwise), as _SSFJsonNameValue does (recommended). (2) Also check the
-             path entry's kind, which the API cannot express (path entries are untyped).
+             (NULL otherwise, depth unchanged), as _SSFJsonNameValue does (chosen). (2) Also
+             check the path entry's kind, which the API cannot express (untyped entries).
 
 JSON-2  High  FIXED (2026-11-19)  CODE  [measured; fix verified red/green]
   Location:  ssfjson.c:267 (_SSFJsonNameValue non-matching branch), ssfjson.c:186 / 281
@@ -108,6 +110,54 @@ JSON-4  Low  OPEN  CODE  [measured]
              (stricter), but a document that validates cannot always be converted.
   Options:   Align the GObj parser's count with the validator, or document that GObj
              conversion allows one level less.
+
+JSON-5  High  OPEN  CODE  [measured]
+  Location:  ssfjson.c:212-240 (_SSFJsonValue scalar cases), reached from _SSFJsonNameValue and
+             _SSFJsonArray on a path match
+  Problem:   A path that continues past a scalar still matches. When a key or index on the path
+             matches and its value is a string, number, true, false or null, _SSFJsonValue
+             reports that value's type and span without checking that the path ends there.
+  Failure:   SSFJsonGetType("{\"a\":\"s\"}", a.b) and SSFJsonGetType("[\"s\"]", [0].x) return
+             SSF_JSON_TYPE_STRING instead of SSF_JSON_TYPE_ERROR (path not found), so
+             SSFJsonGetString on a.b returns "s". A device expecting {"a":{"b":...}} accepts a
+             document of a different shape and reads the wrong field without noticing.
+  Options:   Report a scalar as the match only when the path ends at it (path[depth + 1] ==
+             NULL), otherwise treat the lookup as not found (recommended). Add tests for
+             objects, arrays and every scalar type.
+
+JSON-6  High  OPEN  CODE  [measured]  (found in the JSON-1 change audit; pre-existing)
+  Location:  ssfjson.c:192-196 (_SSFJsonArray: djt / valStart / valEnd copied for the selected
+             element)
+  Problem:   When the element at the path index does not contain the rest of the path, nothing
+             sets djt, valStart or valEnd, and the loop copies them into *jt / *start / *end
+             anyway: an indeterminate value (undefined behaviour) becomes the result.
+  Failure:   SSFJsonGetType("[{\"b\":1}]", [0].zz) returns 32764, 21887, 21849 or 21910 (gcc
+             -O0 / -O1 / -O2 / -Os) or -16843010 with pattern-initialised locals, not
+             SSF_JSON_TYPE_ERROR (0); same at HEAD before JSON-1. A caller switching on the
+             type gets a value outside the enum. If the stale value equals a real type, the
+             getters would use the stale start / end as offsets into js [code-read; not
+             observed, the stale values seen were never a valid type].
+  Options:   Set djt = SSF_JSON_TYPE_ERROR before each element is parsed (and copy start / end
+             only with a real type) (recommended).
+
+JSON-7  High  OPEN  CODE  [measured]  (found in the JSON-1 change audit; pre-existing)
+  Location:  ssfjson.c:190 (memcpy of path[depth] as a size_t index), ssfjson.c:262-264 (key
+             compare of path[depth] as a string)
+  Problem:   Path entries are untyped: an array reads its entry as a size_t index, an object
+             as a key string. The caller cannot choose which one applies, the document's shape
+             does. JSON-1's fix stops unselected elements from using the path, but a document
+             whose shape differs from the caller's path still makes the selected element read
+             a key as an index (or an index as a key).
+  Failure:   (1) SSFJsonGetInt("{\"a\":[1,2]}", a.hex) with "hex" in a 4-byte buffer: ASan
+             stack-buffer-overflow, 8-byte read. (2) Key "a" followed by zero bytes reads as
+             index 97: SSFJsonGetInt on {"cfg":[1000,...,1099]} with path cfg.a returns true and
+             1097, an array element returned for a member lookup. Same at HEAD.
+  Options:   Needs an API decision: the parser must know each entry's kind. (1) A distinct
+             index entry type the parser can recognise (e.g. a tagged index object, or a
+             parallel kind array / bitmask passed with the path). (2) Keep the API and reject
+             a lookup whose next entry cannot be the kind the document requires, which is not
+             possible with untyped pointers. Related to JSON-5 (path longer than the
+             document): both are a path whose shape does not match the document.
 
 ----------------------------------------------------------------------------------------------
 ssfhex
@@ -236,3 +286,41 @@ CHANGE LOG
               precedes the path[depth] reads), no call re-enters the depth == 0 initialisation
               (skipped values parse at depth + 1 as before), and no module outside ssfjson
               calls these functions. Found JSON-4 (GObj depth off by one, pre-existing).
+  2026-11-19  JSON-1 confirmed from a caller: SSFJsonGetInt("[[7],{\"hex\":5}]", [1].hex) with
+              the key in a 4-byte stack array is an ASan stack-buffer-overflow (8-byte read);
+              the result is still correct (5), and an 8-byte key reads in bounds. JSON-5 found
+              while checking it (harness, scratchpad).
+  2026-11-19  JSON-1 FIXED (option 1, Jim's choice). _SSFJsonArray passes the path only to the
+              element at the path index and NULL, at the same depth, to the others; an array
+              that is itself the target never matches an index, so all its elements get NULL
+              and it still records its own span and type. New test "AUDIT JSON-1" in
+              ssfjson_ut.c: SSFJsonGetInt([[7],{"hex":5}], [1].hex) with the key in a 4-byte
+              stack buffer; lookups through arrays with array siblings at two levels (string,
+              object and array results); an array as the target (type and span); and nesting
+              inside an unselected element counted from the array's own depth inside
+              {"x":[...]} (limit + 1 fails, the limit succeeds). Linux direct gcc build.
+              RED: ASan stack-buffer-overflow at ssfjson_ut.c:538 (the normal build passes, as
+              the over-read never changed a result). GREEN: normal build 54 / 54 suites; ASan
+              + UBSan 48 / 54, ssfjson now passing (it failed at baseline, ssfjson_ut.c:944),
+              the other six failures as at baseline. Mutation (normal build): path always NULL
+              and the inverted condition fail at :538; a depth reset for unselected elements
+              fails at :586 (a first version of that case sat at depth 0, where a reset is a
+              no-op, and let the mutant pass; moved one level down); the original bug fails
+              only under ASan, as expected. Code: ssfjson -Os text 5885 -> 5909 B Cortex-M4
+              (+24), 6269 -> 6289 B M0+ (+20); frames unchanged, peak stack unchanged. Speed
+              (702-byte document, array of 20 objects, best of 7): lookups through the array
+              x86-64 -O2 about -7..-9% (e.g. 1724-1760 -> 1575-1604 ns), emulated ARM32 with
+              ssfjson built for Cortex-M0+ about -11% (16.8 -> 14.8-15.2 us); lookups without
+              an array on the path and SSFJsonIsValid within noise.
+  2026-11-19  Audit of the JSON-1 change (uncommitted at the time). Elements not at the path
+              index now parse with a NULL path: every path read is guarded by path != NULL,
+              objects still record *start into the array's own locals (unused), their
+              *end / *jt writes needed a path and are skipped, and nested arrays keep
+              pindex = (size_t)-1, so they never set the parent's result; the array as the
+              target still records its own span and type; depth is passed unchanged, so the
+              JSON-2 limit holds (mutant test). Correct for every valid path; no regression in
+              the normal (54 / 54) or ASan (same six baseline failures) runs. Two
+              pre-existing defects found, both reproduced at HEAD: JSON-6 (uninitialised
+              element type returned) and JSON-7 (path entry kind chosen by the document).
+              The JSON-1 over-read now needs a document whose shape differs from the path
+              (JSON-7); for a valid path it is gone.

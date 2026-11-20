@@ -15,6 +15,8 @@ nesting depth, not message size. The generator uses a chained-callback pattern w
 ## [↑](#ssfjson--json-parsergenerator) Dependencies
 
 - [`ssfport.h`](../ssfport.h)
+- [`ssfgpath.h`](ssfgpath.md) — the typed lookup path, shared with [`ssfubjson`](ssfubjson.md) and
+  [`ssfgobj`](ssfgobj.md)
 - [`_opt/ssfjson_opt.h`](../_opt/ssfjson_opt.h) (aggregated through `ssfoptions.h`)
 - [`ssfgobj.h`](ssfgobj.h) — only when `SSF_JSON_GOBJ_ENABLE == 1`
 
@@ -23,9 +25,9 @@ nesting depth, not message size. The generator uses a chained-callback pattern w
 ## [↑](#ssfjson--json-parsergenerator) Notes
 
 - Path arrays must be fully zeroed before use (e.g., `memset(path, 0, sizeof(path))`).
-- A lookup path is an array of [`SSFJsonPath_t`](#ssfjsonpath-t) entries. Set each with
-  `SSF_JSON_PATH_SET_KEY()` (an object member name) or `SSF_JSON_PATH_SET_INDEX()` (a pointer to
-  a `size_t` array element index); an `SSF_JSON_PATH_END` entry, or a zeroed one, ends the path.
+- A lookup path is an array of [`SSFGPath_t`](ssfgpath.md#ssfgpath-t) entries. Set each with
+  `SSF_GPATH_SET_KEY()` (an object member name) or `SSF_GPATH_SET_INDEX()` (a pointer to
+  a `size_t` array element index); an `SSF_GPATH_END` entry, or a zeroed one, ends the path.
   Top-level arrays are supported; start the path with an index entry.
 - A path matches only a document of the same shape: a key entry where the document has an
   array, an index entry where it has an object, or any entry left over at a string, number,
@@ -71,7 +73,7 @@ Options live in [`_opt/ssfjson_opt.h`](../_opt/ssfjson_opt.h) (aggregated into t
 |--------|------|-------------|
 | <a id="ssfjsontype-t"></a>`SSFJsonType_t` | Enum | JSON value type returned by [`SSFJsonGetType()`](#ssfjsongettype): `SSF_JSON_TYPE_STRING`, `SSF_JSON_TYPE_NUMBER`, `SSF_JSON_TYPE_OBJECT`, `SSF_JSON_TYPE_ARRAY`, `SSF_JSON_TYPE_TRUE`, `SSF_JSON_TYPE_FALSE`, `SSF_JSON_TYPE_NULL`, `SSF_JSON_TYPE_ERROR` |
 | <a id="ssfjsonfltfmt-t"></a>`SSFJsonFltFmt_t` | Enum (requires `SSF_JSON_CONFIG_ENABLE_FLOAT_GEN == 1`) | Float format for [`SSFJsonPrintDouble()`](#ssfjsonprintdouble): `SSF_JSON_FLT_FMT_PREC_0`–`SSF_JSON_FLT_FMT_PREC_9` for fixed decimal places; `SSF_JSON_FLT_FMT_STD` for `%g`; `SSF_JSON_FLT_FMT_SHORT` for shortest representation |
-| <a id="ssfjsonpath-t"></a>`SSFJsonPath_t` | Struct | One lookup path entry: `kind` (`SSFJsonPathKind_t`: `SSF_JSON_PATH_END`, `SSF_JSON_PATH_KEY` or `SSF_JSON_PATH_INDEX`) and `u.key` (member name) or `u.index` (pointer to a `size_t` index). Set entries with `SSF_JSON_PATH_SET_KEY(e, k)`, `SSF_JSON_PATH_SET_INDEX(e, i)` and `SSF_JSON_PATH_SET_END(e)`. A path is an array of `SSF_JSON_CONFIG_MAX_IN_DEPTH + 1` entries ending in an END entry; `SSF_JSON_PATH_END` is 0, so a zeroed array is an empty path. A key entry with a `NULL` name, an index entry with a `NULL` pointer, or an unknown kind asserts. |
+| <a id="ssfgpath-t"></a>[`SSFGPath_t`](ssfgpath.md#ssfgpath-t) | Struct | One lookup path entry (key or index), declared in [`ssfgpath.h`](ssfgpath.h) and shared with [`ssfubjson`](ssfubjson.md) and [`ssfgobj`](ssfgobj.md). A path for these functions holds `SSF_JSON_CONFIG_MAX_IN_DEPTH + 1` entries. See [ssfgpath](ssfgpath.md). |
 | <a id="ssfjsonprintfn-t"></a>`SSFJsonPrintFn_t` | Typedef | `bool (*)(char *js, size_t size, size_t start, size_t *end, void *in)` — callback type passed to generator functions |
 
 <a id="functions"></a>
@@ -127,7 +129,7 @@ const char *js = "{\"name\":\"alice\",\"age\":30,\"active\":true,"
                  "\"data\":\"deadbeef\",\"b64\":\"AQID\"}";
 
 /* Path array — must be zeroed before every use */
-SSFJsonPath_t path[SSF_JSON_CONFIG_MAX_IN_DEPTH + 1];
+SSFGPath_t path[SSF_JSON_CONFIG_MAX_IN_DEPTH + 1];
 ```
 
 <a id="ex-isvalid"></a>
@@ -146,7 +148,7 @@ if (SSFJsonIsValid(js))
 ### [↑](#ssfjson--json-parsergenerator) [`SSFJsonType_t SSFJsonGetType()`](#functions)
 
 ```c
-SSFJsonType_t SSFJsonGetType(SSFCStrIn_t js, const SSFJsonPath_t *path);
+SSFJsonType_t SSFJsonGetType(SSFCStrIn_t js, const SSFGPath_t *path);
 ```
 
 Returns the [`SSFJsonType_t`](#ssfjsontype-t) of the value found at `path` within `js`.
@@ -154,7 +156,7 @@ Returns the [`SSFJsonType_t`](#ssfjsontype-t) of the value found at `path` withi
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
 | `js` | in | `const char *` | Null-terminated JSON string. Must not be `NULL`. |
-| `path` | in | [`const SSFJsonPath_t *`](#ssfjsonpath-t) | Lookup path: key and index entries ending in an `SSF_JSON_PATH_END` entry. Zero it before use. Must not be `NULL`. |
+| `path` | in | [`const SSFGPath_t *`](ssfgpath.md#ssfgpath-t) | Lookup path: key and index entries ending in an `SSF_GPATH_END` entry. Zero it before use. Must not be `NULL`. |
 
 **Returns:** [`SSFJsonType_t`](#ssfjsontype-t) identifying the JSON value type, or
 `SSF_JSON_TYPE_ERROR` if the path was not found.
@@ -165,12 +167,12 @@ Returns the [`SSFJsonType_t`](#ssfjsontype-t) of the value found at `path` withi
 SSFJsonType_t jt;
 
 memset(path, 0, sizeof(path));
-SSF_JSON_PATH_SET_KEY(path[0], "name");
+SSF_GPATH_SET_KEY(path[0], "name");
 jt = SSFJsonGetType(js, path);
 /* jt == SSF_JSON_TYPE_STRING */
 
 memset(path, 0, sizeof(path));
-SSF_JSON_PATH_SET_KEY(path[0], "age");
+SSF_GPATH_SET_KEY(path[0], "age");
 jt = SSFJsonGetType(js, path);
 /* jt == SSF_JSON_TYPE_NUMBER */
 ```
@@ -182,7 +184,7 @@ jt = SSFJsonGetType(js, path);
 ### [↑](#ssfjson--json-parsergenerator) [`bool SSFJsonGetString()`](#functions)
 
 ```c
-bool SSFJsonGetString(SSFCStrIn_t js, const SSFJsonPath_t *path, SSFCStrOut_t out, size_t outSize,
+bool SSFJsonGetString(SSFCStrIn_t js, const SSFGPath_t *path, SSFCStrOut_t out, size_t outSize,
                       size_t *outLen);
 ```
 
@@ -192,7 +194,7 @@ Finds the JSON string value at `path` and copies it unescaped (without surroundi
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
 | `js` | in | `const char *` | Null-terminated JSON string. Must not be `NULL`. |
-| `path` | in | [`const SSFJsonPath_t *`](#ssfjsonpath-t) | Lookup path ending in an `SSF_JSON_PATH_END` entry; zero it before use. Must not be `NULL`. |
+| `path` | in | [`const SSFGPath_t *`](ssfgpath.md#ssfgpath-t) | Lookup path ending in an `SSF_GPATH_END` entry; zero it before use. Must not be `NULL`. |
 | `out` | out | `char *` | Buffer receiving the unescaped string. Must not be `NULL`. |
 | `outSize` | in | `size_t` | Allocated size of `out` in bytes. |
 | `outLen` | out | `size_t *` | If not `NULL`, receives the length of the extracted string (excluding null terminator). |
@@ -206,7 +208,7 @@ char   out[32];
 size_t outLen;
 
 memset(path, 0, sizeof(path));
-SSF_JSON_PATH_SET_KEY(path[0], "name");
+SSF_GPATH_SET_KEY(path[0], "name");
 if (SSFJsonGetString(js, path, out, sizeof(out), &outLen))
 {
     /* out == "alice", outLen == 5 */
@@ -220,8 +222,8 @@ if (SSFJsonGetString(js, path, out, sizeof(out), &outLen))
 ### [↑](#ssfjson--json-parsergenerator) [`bool SSFJsonGetInt()` / `bool SSFJsonGetUInt()`](#functions)
 
 ```c
-bool SSFJsonGetInt(SSFCStrIn_t js, const SSFJsonPath_t *path, int64_t *out);
-bool SSFJsonGetUInt(SSFCStrIn_t js, const SSFJsonPath_t *path, uint64_t *out);
+bool SSFJsonGetInt(SSFCStrIn_t js, const SSFGPath_t *path, int64_t *out);
+bool SSFJsonGetUInt(SSFCStrIn_t js, const SSFGPath_t *path, uint64_t *out);
 ```
 
 Finds a JSON number value at `path` and parses it as a signed or unsigned 64-bit integer.
@@ -229,7 +231,7 @@ Finds a JSON number value at `path` and parses it as a signed or unsigned 64-bit
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
 | `js` | in | `const char *` | Null-terminated JSON string. Must not be `NULL`. |
-| `path` | in | [`const SSFJsonPath_t *`](#ssfjsonpath-t) | Lookup path ending in an `SSF_JSON_PATH_END` entry; zero it before use. Must not be `NULL`. |
+| `path` | in | [`const SSFGPath_t *`](ssfgpath.md#ssfgpath-t) | Lookup path ending in an `SSF_GPATH_END` entry; zero it before use. Must not be `NULL`. |
 | `out` | out | `int64_t *` or `uint64_t *` | Receives the parsed integer value. Must not be `NULL`. |
 
 **Returns:** `true` if the value was found and parsed successfully; `false` if not found, not a
@@ -244,7 +246,7 @@ size_t   idx;
 
 /* Signed integer at a named key */
 memset(path, 0, sizeof(path));
-SSF_JSON_PATH_SET_KEY(path[0], "age");
+SSF_GPATH_SET_KEY(path[0], "age");
 if (SSFJsonGetInt(js, path, &si))
 {
     /* si == 30 */
@@ -252,8 +254,8 @@ if (SSFJsonGetInt(js, path, &si))
 
 /* Unsigned integer — iterate array elements by index */
 memset(path, 0, sizeof(path));
-SSF_JSON_PATH_SET_KEY(path[0], "scores");
-SSF_JSON_PATH_SET_INDEX(path[1], &idx);
+SSF_GPATH_SET_KEY(path[0], "scores");
+SSF_GPATH_SET_INDEX(path[1], &idx);
 for (idx = 0;; idx++)
 {
     if (!SSFJsonGetUInt(js, path, &ui)) break;
@@ -269,7 +271,7 @@ for (idx = 0;; idx++)
 
 ```c
 /* Requires SSF_JSON_CONFIG_ENABLE_FLOAT_PARSE == 1 */
-bool SSFJsonGetDouble(SSFCStrIn_t js, const SSFJsonPath_t *path, double *out);
+bool SSFJsonGetDouble(SSFCStrIn_t js, const SSFGPath_t *path, double *out);
 ```
 
 Finds a JSON number value at `path` and parses it as a `double`. Requires
@@ -278,7 +280,7 @@ Finds a JSON number value at `path` and parses it as a `double`. Requires
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
 | `js` | in | `const char *` | Null-terminated JSON string. Must not be `NULL`. |
-| `path` | in | [`const SSFJsonPath_t *`](#ssfjsonpath-t) | Lookup path ending in an `SSF_JSON_PATH_END` entry; zero it before use. Must not be `NULL`. |
+| `path` | in | [`const SSFGPath_t *`](ssfgpath.md#ssfgpath-t) | Lookup path ending in an `SSF_GPATH_END` entry; zero it before use. Must not be `NULL`. |
 | `out` | out | `double *` | Receives the parsed floating-point value. Must not be `NULL`. |
 
 **Returns:** `true` if the value was found and parsed; `false` otherwise.
@@ -291,7 +293,7 @@ const char *jsf = "{\"pi\":3.14159}";
 double d;
 
 memset(path, 0, sizeof(path));
-SSF_JSON_PATH_SET_KEY(path[0], "pi");
+SSF_GPATH_SET_KEY(path[0], "pi");
 if (SSFJsonGetDouble(jsf, path, &d))
 {
     /* d == 3.14159 */
@@ -305,7 +307,7 @@ if (SSFJsonGetDouble(jsf, path, &d))
 ### [↑](#ssfjson--json-parsergenerator) [`bool SSFJsonGetHex()`](#functions)
 
 ```c
-bool SSFJsonGetHex(SSFCStrIn_t js, const SSFJsonPath_t *path, uint8_t *out, size_t outSize,
+bool SSFJsonGetHex(SSFCStrIn_t js, const SSFGPath_t *path, uint8_t *out, size_t outSize,
                    size_t *outLen, bool rev);
 ```
 
@@ -314,7 +316,7 @@ Finds a JSON string value at `path` and decodes it as a hexadecimal-encoded bina
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
 | `js` | in | `const char *` | Null-terminated JSON string. Must not be `NULL`. |
-| `path` | in | [`const SSFJsonPath_t *`](#ssfjsonpath-t) | Lookup path ending in an `SSF_JSON_PATH_END` entry; zero it before use. Must not be `NULL`. |
+| `path` | in | [`const SSFGPath_t *`](ssfgpath.md#ssfgpath-t) | Lookup path ending in an `SSF_GPATH_END` entry; zero it before use. Must not be `NULL`. |
 | `out` | out | `uint8_t *` | Buffer receiving the decoded binary bytes. Must not be `NULL`. |
 | `outSize` | in | `size_t` | Allocated size of `out` in bytes. |
 | `outLen` | out | `size_t *` | If not `NULL`, receives the number of bytes decoded. |
@@ -329,7 +331,7 @@ uint8_t bin[8];
 size_t  binLen;
 
 memset(path, 0, sizeof(path));
-SSF_JSON_PATH_SET_KEY(path[0], "data");
+SSF_GPATH_SET_KEY(path[0], "data");
 if (SSFJsonGetHex(js, path, bin, sizeof(bin), &binLen, false))
 {
     /* binLen == 4, bin[0..3] == {0xde, 0xad, 0xbe, 0xef} */
@@ -343,7 +345,7 @@ if (SSFJsonGetHex(js, path, bin, sizeof(bin), &binLen, false))
 ### [↑](#ssfjson--json-parsergenerator) [`bool SSFJsonGetBase64()`](#functions)
 
 ```c
-bool SSFJsonGetBase64(SSFCStrIn_t js, const SSFJsonPath_t *path, uint8_t *out, size_t outSize,
+bool SSFJsonGetBase64(SSFCStrIn_t js, const SSFGPath_t *path, uint8_t *out, size_t outSize,
                       size_t *outLen);
 ```
 
@@ -352,7 +354,7 @@ Finds a JSON string value at `path` and decodes it as a Base64-encoded binary ar
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
 | `js` | in | `const char *` | Null-terminated JSON string. Must not be `NULL`. |
-| `path` | in | [`const SSFJsonPath_t *`](#ssfjsonpath-t) | Lookup path ending in an `SSF_JSON_PATH_END` entry; zero it before use. Must not be `NULL`. |
+| `path` | in | [`const SSFGPath_t *`](ssfgpath.md#ssfgpath-t) | Lookup path ending in an `SSF_GPATH_END` entry; zero it before use. Must not be `NULL`. |
 | `out` | out | `uint8_t *` | Buffer receiving the decoded binary bytes. Must not be `NULL`. |
 | `outSize` | in | `size_t` | Allocated size of `out` in bytes. |
 | `outLen` | out | `size_t *` | If not `NULL`, receives the number of bytes decoded. |
@@ -366,7 +368,7 @@ uint8_t bin[8];
 size_t  binLen;
 
 memset(path, 0, sizeof(path));
-SSF_JSON_PATH_SET_KEY(path[0], "b64");
+SSF_GPATH_SET_KEY(path[0], "b64");
 if (SSFJsonGetBase64(js, path, bin, sizeof(bin), &binLen))
 {
     /* binLen == 3, bin[0..2] == {0x01, 0x02, 0x03} */
@@ -381,7 +383,7 @@ if (SSFJsonGetBase64(js, path, bin, sizeof(bin), &binLen))
 
 ```c
 bool SSFJsonMessage(SSFCStrIn_t js, size_t *index, size_t *start, size_t *end,
-                    const SSFJsonPath_t *path, uint8_t depth, SSFJsonType_t *jt);
+                    const SSFGPath_t *path, uint8_t depth, SSFJsonType_t *jt);
 ```
 
 Low-level SAX iterator used internally by all `SSFJsonGet*` functions. Walks `js` starting at
@@ -394,7 +396,7 @@ fine-grained control over parsing.
 | `index` | in-out | `size_t *` | Current byte offset into `js`. Initialize to `0` before the first call; updated on each call. Must not be `NULL`. |
 | `start` | out | `size_t *` | Receives the start offset of the matched value within `js`. Must not be `NULL`. |
 | `end` | out | `size_t *` | Receives the end offset (exclusive) of the matched value within `js`. Must not be `NULL`. |
-| `path` | in | [`const SSFJsonPath_t *`](#ssfjsonpath-t) | Lookup path to match, ending in an `SSF_JSON_PATH_END` entry; zero it before use. Must not be `NULL`. |
+| `path` | in | [`const SSFGPath_t *`](ssfgpath.md#ssfgpath-t) | Lookup path to match, ending in an `SSF_GPATH_END` entry; zero it before use. Must not be `NULL`. |
 | `depth` | in | `uint8_t` | Current nesting depth. Pass `0` for a top-level call. |
 | `jt` | out | [`SSFJsonType_t *`](#ssfjsontype-t) | Receives the JSON type of the matched value. Must not be `NULL`. |
 
@@ -409,7 +411,7 @@ size_t        start, end;
 SSFJsonType_t jt;
 
 memset(path, 0, sizeof(path));
-SSF_JSON_PATH_SET_KEY(path[0], "name");
+SSF_GPATH_SET_KEY(path[0], "name");
 if (SSFJsonMessage(js, &index, &start, &end, path, 0, &jt))
 {
     /* jt == SSF_JSON_TYPE_STRING */

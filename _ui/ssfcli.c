@@ -260,18 +260,18 @@ void SSFCLIProcessChar(SSFCLIContext_t *context, uint8_t inChar)
                 SSFGObj_t *gobjCmd = NULL;
                 SSFGObj_t *gobjOpts = NULL;
                 SSFGObj_t *gobjArgs = NULL;
-                char *path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
+                SSFGPath_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
 
                 /* Yes, get command, opts, and args objs */
                 memset(path, 0, sizeof(path));
-                path[0] = SSF_ARGV_CMD_CSTR;
-                SSF_ASSERT(SSFGObjFindPath(gobj, (SSFCStrIn_t *)path, &gobjParent, &gobjCmd));
+                SSF_GPATH_SET_KEY(path[0], SSF_ARGV_CMD_CSTR);
+                SSF_ASSERT(SSFGObjFindPath(gobj, path, &gobjParent, &gobjCmd));
                 gobjParent = NULL;
-                path[0] = SSF_ARGV_OPTS_CSTR;
-                SSF_ASSERT(SSFGObjFindPath(gobj, (SSFCStrIn_t *)path, &gobjParent, &gobjOpts));
+                SSF_GPATH_SET_KEY(path[0], SSF_ARGV_OPTS_CSTR);
+                SSF_ASSERT(SSFGObjFindPath(gobj, path, &gobjParent, &gobjOpts));
                 gobjParent = NULL;
-                path[0] = SSF_ARGV_ARGS_CSTR;
-                SSF_ASSERT(SSFGObjFindPath(gobj, (SSFCStrIn_t *)path, &gobjParent, &gobjArgs));
+                SSF_GPATH_SET_KEY(path[0], SSF_ARGV_ARGS_CSTR);
+                SSF_ASSERT(SSFGObjFindPath(gobj, path, &gobjParent, &gobjArgs));
 
                 /* Search command list for exactly matching command */
                 item = SSF_LL_HEAD(&context->cmds);
@@ -418,7 +418,7 @@ bool SSFCLIGObjGetOptArgStrRef(SSFCStrOut_t optStr, SSFGObj_t *gobjOpts, SSFCStr
 {
     SSFGObj_t *gobjParent = NULL;
     SSFGObj_t *gobjArg = NULL;
-    char *path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
+    SSFGPath_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
 
     SSF_REQUIRE(optStr != NULL);
     SSF_REQUIRE(gobjOpts != NULL);
@@ -426,8 +426,8 @@ bool SSFCLIGObjGetOptArgStrRef(SSFCStrOut_t optStr, SSFGObj_t *gobjOpts, SSFCStr
     SSF_REQUIRE(strLen != NULL);
 
     memset(path, 0, sizeof(path));
-    path[0] = optStr;
-    if (SSFGObjFindPath(gobjOpts, (SSFCStrIn_t *)path, &gobjParent, &gobjArg) == false) return false;
+    SSF_GPATH_SET_KEY(path[0], optStr);
+    if (SSFGObjFindPath(gobjOpts, path, &gobjParent, &gobjArg) == false) return false;
 
     SSF_ASSERT(gobjArg->dataType == SSF_OBJ_TYPE_STR);
     SSF_ASSERT(gobjArg->data != NULL);
@@ -444,14 +444,14 @@ bool SSFCLIGObjGetIsOpt(SSFCStrOut_t optStr, SSFGObj_t *gobjOpts)
 {
     SSFGObj_t *gobjParent = NULL;
     SSFGObj_t *gobjArg = NULL;
-    char *path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
+    SSFGPath_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
 
     SSF_REQUIRE(optStr != NULL);
     SSF_REQUIRE(gobjOpts != NULL);
 
     memset(path, 0, sizeof(path));
-    path[0] = optStr;
-    if (SSFGObjFindPath(gobjOpts, (SSFCStrIn_t *)path, &gobjParent, &gobjArg) == false) return false;
+    SSF_GPATH_SET_KEY(path[0], optStr);
+    if (SSFGObjFindPath(gobjOpts, path, &gobjParent, &gobjArg) == false) return false;
 
     SSF_ASSERT(gobjArg->dataType == SSF_OBJ_TYPE_STR);
     SSF_ASSERT(gobjArg->data != NULL);
@@ -467,7 +467,7 @@ bool SSFCLIGObjGetArgStrRef(size_t argIndex, SSFGObj_t *gobjArgs, SSFCStrOut_t *
 {
     SSFGObj_t *gobjParent = NULL;
     SSFGObj_t *gobjArg = NULL;
-    char *path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
+    SSFGPath_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
 
     SSF_REQUIRE(argIndex < SSF_CLI_MAX_ARGS);
     SSF_REQUIRE(gobjArgs != NULL);
@@ -475,8 +475,8 @@ bool SSFCLIGObjGetArgStrRef(size_t argIndex, SSFGObj_t *gobjArgs, SSFCStrOut_t *
     SSF_REQUIRE(strLen != NULL);
 
     memset(path, 0, sizeof(path));
-    path[0] = (char *)&argIndex;
-    if (SSFGObjFindPath(gobjArgs, (SSFCStrIn_t *)path, &gobjParent, &gobjArg) == false) return false;
+    SSF_GPATH_SET_INDEX(path[0], &argIndex);
+    if (SSFGObjFindPath(gobjArgs, path, &gobjParent, &gobjArg) == false) return false;
 
     SSF_ASSERT(gobjArg->dataType == SSF_OBJ_TYPE_STR);
     SSF_ASSERT(gobjArg->data != NULL);

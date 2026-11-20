@@ -729,14 +729,14 @@ void SSFCLIUnitTest(void)
         SSFGObj_t *gobjOpts = NULL;
         SSFGObj_t *gobjArgs = NULL;
         SSFGObj_t *gobjParent = NULL;
-        char *path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
+        SSFGPath_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
 
         memset(path, 0, sizeof(path));
-        path[0] = SSF_ARGV_OPTS_CSTR;
-        SSF_ASSERT(SSFGObjFindPath(gobj, (SSFCStrIn_t *)path, &gobjParent, &gobjOpts));
+        SSF_GPATH_SET_KEY(path[0], SSF_ARGV_OPTS_CSTR);
+        SSF_ASSERT(SSFGObjFindPath(gobj, path, &gobjParent, &gobjOpts));
         gobjParent = NULL;
-        path[0] = SSF_ARGV_ARGS_CSTR;
-        SSF_ASSERT(SSFGObjFindPath(gobj, (SSFCStrIn_t *)path, &gobjParent, &gobjArgs));
+        SSF_GPATH_SET_KEY(path[0], SSF_ARGV_ARGS_CSTR);
+        SSF_ASSERT(SSFGObjFindPath(gobj, path, &gobjParent, &gobjArgs));
 
         /* Parameter validation */
         SSF_ASSERT_TEST(SSFCLIGObjGetOptArgStrRef(NULL, gobjOpts, &strOut, &strLen));

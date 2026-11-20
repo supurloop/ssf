@@ -15,6 +15,8 @@ translate between JSON, UBJSON, and other encoding types.
 ## [↑](#ssfgobj--generic-object-beta) Dependencies
 
 - [`ssfport.h`](../ssfport.h)
+- [`ssfgpath.h`](ssfgpath.md) — the typed lookup path for [`SSFGObjFindPath()`](#ssfgobjfindpath),
+  shared with [`ssfjson`](ssfjson.md) and [`ssfubjson`](ssfubjson.md)
 - [`_opt/ssfgobj_opt.h`](../_opt/ssfgobj_opt.h) (aggregated through `ssfoptions.h`)
 - [ssfll](../\_struct/ssfll.md) — Linked list (used internally for child lists and path tracking)
 
@@ -35,8 +37,13 @@ translate between JSON, UBJSON, and other encoding types.
   `SSF_OBJ_TYPE_OBJECT` or `SSF_OBJ_TYPE_ARRAY`; returns `false` if the parent's child list is
   full.
 - Both `*gobjParentOut` and `*gobjChildOut` must be `NULL` before
-  [`SSFGObjFindPath()`](#ssfgobjfindpath), and `path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH]` must be
-  `NULL`. All three assert otherwise.
+  [`SSFGObjFindPath()`](#ssfgobjfindpath), and `path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH]` must be an
+  END entry. All three assert otherwise, as does a path entry with a `NULL` key or index pointer
+  or an unknown kind.
+- A path matches only a tree of the same shape: a key entry at an array node, an index entry at
+  an object node, or an entry left over at a scalar node means the node is not found. A tree
+  built from untrusted data (for example by `SSFJsonGObjCreate()`) cannot make a key read as an
+  index or the reverse.
 - [`SSFGObjDeInit()`](#ssfgobjdeinit) on a parent recursively frees all its children. Use
   [`SSFGObjRemoveChild()`](#ssfgobjremovechild) first if a child must outlive its parent.
 - Call [`SSFGObjGetType()`](#ssfgobjgettype) before any `SSFGObjGet*` call to avoid a
@@ -1039,24 +1046,25 @@ SSFGObjDeInit(&arr);
 ### [↑](#ssfgobj--generic-object-beta) [`bool SSFGObjFindPath()`](#functions)
 
 ```c
-bool SSFGObjFindPath(SSFGObj_t *gobjRoot, SSFCStrIn_t *path,
+bool SSFGObjFindPath(SSFGObj_t *gobjRoot, const SSFGPath_t *path,
                      SSFGObj_t **gobjParentOut, SSFGObj_t **gobjChildOut);
 ```
 
-Locates a descendant node by following a null-terminated array of label strings from
-`gobjRoot`. `gobjRoot` must be an `OBJECT` or `ARRAY` node. `path` is a `const char *` array
-where each entry names a child at the corresponding depth; the array must end with a `NULL`
-sentinel at index `SSF_GOBJ_CONFIG_MAX_IN_DEPTH`.
+Locates a descendant node by following a typed lookup path from `gobjRoot`. `gobjRoot` must be
+an `OBJECT` or `ARRAY` node. Each [`SSFGPath_t`](ssfgpath.md#ssfgpath-t) entry selects a child
+at the corresponding depth: a key entry names a child of an object node, an index entry selects
+an element of an array node. The path ends at its first END entry, and
+`path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH]` must always be an END entry.
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
 | `gobjRoot` | in | [`SSFGObj_t *`](#type-ssfgobj-t) | Root to search from. Must not be `NULL`. Must have type `SSF_OBJ_TYPE_OBJECT` or `SSF_OBJ_TYPE_ARRAY`. |
-| `path` | in | `SSFCStrIn_t *` | Array of label strings. Each entry names a child at the corresponding depth. Must be `NULL`-terminated; `path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH]` must be `NULL`. |
+| `path` | in | [`const SSFGPath_t *`](ssfgpath.md#ssfgpath-t) | `SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1` entries: key and index entries ending in an END entry; zero it before use. Must not be `NULL`. |
 | `gobjParentOut` | out | `SSFGObj_t **` | Receives the direct parent of the found node. Must not be `NULL`. `*gobjParentOut` must be `NULL` before the call. |
 | `gobjChildOut` | out | `SSFGObj_t **` | Receives the found node. Must not be `NULL`. `*gobjChildOut` must be `NULL` before the call. |
 
-**Returns:** `true` if the path was resolved; `false` if any label was not found or `gobjRoot` is
-not a container type.
+**Returns:** `true` if the path was resolved; `false` if any entry was not found or does not fit
+the tree's shape, or `gobjRoot` is not a container type.
 
 <a id="ex-findpath"></a>
 
@@ -1066,7 +1074,7 @@ SSFGObj_t *child = NULL;
 SSFGObj_t *foundParent = NULL;
 SSFGObj_t *found = NULL;
 int64_t val;
-SSFCStrIn_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
+SSFGPath_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
 
 SSFGObjInit(&root, 2u);
 SSFGObjSetObject(root);
@@ -1077,7 +1085,7 @@ SSFGObjSetInt(child, 42);
 SSFGObjInsertChild(root, child);
 
 memset(path, 0, sizeof(path));
-path[0] = "count";
+SSF_GPATH_SET_KEY(path[0], "count");
 
 if (SSFGObjFindPath(root, path, &foundParent, &found))
 {

@@ -11,6 +11,7 @@ Encoding and decoding interfaces.
 | ssfbase64url | Base64URL (RFC 4648 §5) encoder/decoder, unpadded output, strict decode | ssfbase64url.c, ssfbase64url.h | [ssfbase64url.md](ssfbase64url.md) |
 | ssfdec | Integer to decimal string | ssfdec.c, ssfdec.h | [ssfdec.md](ssfdec.md) |
 | ssfgobj | Generic object parser/generator (BETA) | ssfgobj.c, ssfgobj.h | [ssfgobj.md](ssfgobj.md) |
+| ssfgpath | Typed lookup path shared by ssfjson, ssfubjson and ssfgobj | ssfgpath.h | [ssfgpath.md](ssfgpath.md) |
 | ssfhex | Binary to hex ASCII encoder/decoder | ssfhex.c, ssfhex.h | [ssfhex.md](ssfhex.md) |
 | ssfini | INI file parser/generator | ssfini.c, ssfini.h | [ssfini.md](ssfini.md) |
 | ssfjson | JSON parser/generator | ssfjson.c, ssfjson.h | [ssfjson.md](ssfjson.md) |

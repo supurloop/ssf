@@ -3326,6 +3326,11 @@ static bool _SSFX509IsKnownExtension(const uint8_t *oidRaw, uint32_t oidRawLen)
            _SSFX509OIDMatch(oidRaw, oidRawLen, _oidNameConstraints, sizeof(_oidNameConstraints));
 }
 
+/* Stack use is by design and sized by SSF_X509_CONFIG_MAX_CHAIN_DEPTH; see ssfx509.md */
+#ifdef _WIN32
+#pragma warning(push)
+#pragma warning(disable:6262)
+#endif
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if chainDer[0] validates to a trust anchor for purpose, else false.               */
 /* --------------------------------------------------------------------------------------------- */
@@ -3640,6 +3645,9 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
     }
     return true;
 }
+#ifdef _WIN32
+#pragma warning(pop)
+#endif
 
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if chainDer[0] validates to a trust anchor and is issued for hostnameStr.        */

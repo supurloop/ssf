@@ -91,12 +91,25 @@ void SSFTLVUnitTest(void)
     SSF_ASSERT_TEST(SSFTLVInit(&tlv, NULL, sizeof(buf), 0));
     SSF_ASSERT_TEST(SSFTLVInit(&tlv, buf, sizeof(buf), sizeof(buf) + 1));
 
+    /* A completely full receive buffer can be decoded; it has no room for another put */
+    SSFTLVInit(&tlv, buf, sizeof(buf), sizeof(buf));
+    SSF_ASSERT(SSFTLVPut(&tlv, 0, (const uint8_t *)"x", 1) == false);
+    SSFTLVDeInit(&tlv);
+
     SSF_ASSERT_TEST(SSFTLVDeInit(&tlv));
     SSFTLVInit(&tlv, buf, sizeof(buf), 0);
     SSF_ASSERT_TEST(SSFTLVInit(&tlv, buf, sizeof(buf), 0));
 
     SSF_ASSERT_TEST(SSFTLVPut(NULL, 0, (const uint8_t*)"error", 5));
-    SSF_ASSERT_TEST(SSFTLVPut(&tlv, 0, NULL, 0));
+    SSF_ASSERT_TEST(SSFTLVPut(&tlv, 0, NULL, 1));
+
+    /* A zero-length value may be put with a NULL pointer */
+    SSF_ASSERT(SSFTLVPut(&tlv, 0, NULL, 0));
+    valLen = (SSFTLVVar_t)-1;
+    SSF_ASSERT(SSFTLVFind(&tlv, 0, 0, &valPtr, &valLen));
+    SSF_ASSERT(valLen == 0);
+    SSFTLVDeInit(&tlv);
+    SSFTLVInit(&tlv, buf, sizeof(buf), 0);
 
     valLen = (SSFTLVVar_t)-1;
     SSF_ASSERT_TEST(SSFTLVGet(NULL, 0, 0, val, sizeof(val), &valLen));

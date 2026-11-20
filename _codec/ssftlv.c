@@ -78,7 +78,7 @@ void SSFTLVInit(SSFTLV_t *tlv, uint8_t *buf, uint32_t bufSize, uint32_t bufLen)
     SSF_REQUIRE(tlv != NULL);
     SSF_REQUIRE(tlv->magic != _SSF_TLV_MAGIC);
     SSF_REQUIRE(buf != NULL);
-    SSF_REQUIRE(bufLen < bufSize);
+    SSF_REQUIRE(bufLen <= bufSize);
 
     tlv->buf = buf;
     tlv->bufSize = bufSize;
@@ -108,7 +108,7 @@ bool SSFTLVPut(SSFTLV_t *tlv, SSFTLVVar_t tag, const uint8_t *val, SSFTLVVar_t v
 
     SSF_REQUIRE(tlv != NULL);
     SSF_REQUIRE(tlv->magic == _SSF_TLV_MAGIC);
-    SSF_REQUIRE(val != NULL);
+    SSF_REQUIRE((val != NULL) || (valLen == 0));
 
 #if SSF_TLV_ENABLE_FIXED_MODE == 0
     SSF_REQUIRE(tag < 1073741824ul);
@@ -144,9 +144,13 @@ bool SSFTLVPut(SSFTLV_t *tlv, SSFTLVVar_t tag, const uint8_t *val, SSFTLVVar_t v
         _SSF_TLV_PUT_VAR_FIELD(tlv, valLen, lenLen);
         tlv->bufLen += lenLen;
 #endif
-        /* Add VALUE field */
-        memcpy(&tlv->buf[tlv->bufLen], val, valLen);
-        tlv->bufLen += valLen;
+        /* Is there a VALUE field to add? */
+        if (valLen > 0)
+        {
+            /* Yes, add it */
+            memcpy(&tlv->buf[tlv->bufLen], val, valLen);
+            tlv->bufLen += valLen;
+        }
 
         SSF_ENSURE(tlv->bufLen <= tlv->bufSize);
         return true;

@@ -199,8 +199,8 @@ bool SSFTLVRead(const SSFTLV_t *tlv, SSFTLVVar_t tag, uint16_t instance,
 ```
 
 Searches the TLV buffer for the `instance`-th occurrence (0-based) of `tag`. When found,
-optionally copies the value into `valOpt` and/or sets `*valPtrOpt` to point directly into the TLV
-buffer at the start of the value. [`SSFTLVGet()`](#ssftlvget) and [`SSFTLVFind()`](#ssftlvfind)
+either copies the value into `valOpt` or sets `*valPtrOpt` to point directly into the TLV buffer
+at the start of the value; pass exactly one of the two. [`SSFTLVGet()`](#ssftlvget) and [`SSFTLVFind()`](#ssftlvfind)
 are convenience macros over this function.
 
 | Parameter | Direction | Type | Description |
@@ -208,12 +208,12 @@ are convenience macros over this function.
 | `tlv` | in | [`const SSFTLV_t *`](#type-ssftlv-t) | Pointer to an initialized TLV context. Must not be `NULL`. |
 | `tag` | in | [`SSFTLVVar_t`](#type-ssftlvvar-t) | Tag identifier to search for. |
 | `instance` | in | `uint16_t` | 0-based occurrence index; `0` finds the first match, `1` the second, and so on. |
-| `valOpt` | out (opt) | `uint8_t *` | If not `NULL`, receives a copy of the found value. Pass `NULL` when only a pointer is needed. |
-| `valOptSize` | in | `uint32_t` | Allocated size of `valOpt` in bytes. Ignored when `valOpt` is `NULL`. Must be large enough to hold the found value. |
-| `valPtrOpt` | out (opt) | `uint8_t **` | If not `NULL`, receives a pointer into the TLV buffer at the start of the found value. Pass `NULL` when only a copy is needed. |
-| `valLen` | out (opt) | [`SSFTLVVar_t *`](#type-ssftlvvar-t) | If not `NULL`, receives the length of the found value in bytes. |
+| `valOpt` | out (opt) | `uint8_t *` | Receives a copy of the found value. Pass `NULL` (with `valOptSize` 0) to get a pointer through `valPtrOpt` instead. Exactly one of `valOpt` and `valPtrOpt` must be non-`NULL`. |
+| `valOptSize` | in | `uint32_t` | Allocated size of `valOpt` in bytes; must be `0` when `valOpt` is `NULL`. A value larger than this returns `false`. |
+| `valPtrOpt` | out (opt) | `uint8_t **` | Receives a pointer into the TLV buffer at the start of the found value. Must be `NULL` when `valOpt` is used. |
+| `valLen` | out | [`SSFTLVVar_t *`](#type-ssftlvvar-t) | Receives the length of the found value in bytes. Must not be `NULL`. |
 
-**Returns:** `true` if the tag/instance was found and all requested outputs were written; `false` if the tag/instance was not found or `valOptSize` is too small to hold the value.
+**Returns:** `true` if the tag/instance was found and the requested output was written; `false` if the tag/instance was not found or `valOptSize` is too small to hold the value.
 
 <a id="ex-read"></a>
 
@@ -280,7 +280,7 @@ calling `SSFTLVRead()` with `valPtr` set to `NULL`.
 | `instance` | in | `uint16_t` | 0-based occurrence index. |
 | `val` | out | `uint8_t *` | Buffer receiving a copy of the found value. Must not be `NULL`. |
 | `valSize` | in | `uint32_t` | Allocated size of `val`. Must be large enough to hold the found value. |
-| `valLen` | out (opt) | [`SSFTLVVar_t *`](#type-ssftlvvar-t) | If not `NULL`, receives the length of the found value. |
+| `valLen` | out | [`SSFTLVVar_t *`](#type-ssftlvvar-t) | Receives the length of the found value. Must not be `NULL`. |
 
 **Returns:** `true` if the tag/instance was found and copied; `false` otherwise.
 
@@ -328,7 +328,7 @@ buffer at the start of the value, avoiding a copy. Equivalent to calling `SSFTLV
 | `tag` | in | [`SSFTLVVar_t`](#type-ssftlvvar-t) | Tag identifier to search for. |
 | `instance` | in | `uint16_t` | 0-based occurrence index. |
 | `valPtr` | out | `uint8_t **` | Receives a pointer into the TLV buffer at the start of the found value. Must not be `NULL`. |
-| `valLen` | out (opt) | [`SSFTLVVar_t *`](#type-ssftlvvar-t) | If not `NULL`, receives the length of the found value. |
+| `valLen` | out | [`SSFTLVVar_t *`](#type-ssftlvvar-t) | Receives the length of the found value. Must not be `NULL`. |
 
 **Returns:** `true` if the tag/instance was found and `*valPtr` was set; `false` otherwise.
 

@@ -20,11 +20,11 @@ Two design choices worth calling out up front:
   extremely common in real systems (Sony PlayStation 3, Bitcoin wallets, Android key store
   bugs). Here the nonce is a deterministic function of the inputs, so no RNG quality or
   RNG-availability concerns at sign time.
-- **Hash is pinned to the curve.** P-256 signs SHA-256 hashes; P-384 signs SHA-384 hashes.
-  The caller computes the hash externally (typically via [`ssfsha2`](ssfsha2.md)) and
-  passes the bytes to [`SSFECDSASign()`](#ssfecdsasign) /
-  [`SSFECDSAVerify()`](#ssfecdsaverify). Mismatched hash length relative to the curve is a
-  call-site error.
+- **Recommended hash per curve.** P-256 pairs with SHA-256 and P-384 with SHA-384. The
+  caller computes the hash externally (typically via [`ssfsha2`](ssfsha2.md)) and passes the
+  bytes to [`SSFECDSASign()`](#ssfecdsasign) / [`SSFECDSAVerify()`](#ssfecdsaverify). Other
+  lengths from 1 to 64 bytes are accepted (a longer digest is truncated to the curve size);
+  see [Notes](#notes).
 
 [Dependencies](#dependencies) | [Notes](#notes) | [Configuration](#configuration) | [API Summary](#api-summary) | [Function Reference](#function-reference)
 

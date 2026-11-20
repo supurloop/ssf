@@ -105,8 +105,9 @@ SUMMARY
 
   Severity Count   Labels
   High     1       UBJSON-S1 (FIXED)
-  Medium   10      TLV-S1, TLV-S2, TLV-S3, HEX-S1, JSON-S1 (FIXED), JSON-S2, UBJSON-S2 (FIXED),
-                   X509-S2 (FIXED), EC-S1 (FIXED), ECDSA-S5
+  Medium   10      TLV-S1 (FIXED), TLV-S2 (FIXED), TLV-S3 (DOC), HEX-S1 (DOC), JSON-S1 (FIXED),
+                   JSON-S2 (DOC), UBJSON-S2 (FIXED),
+                   X509-S2 (FIXED), EC-S1 (FIXED), ECDSA-S5 (DOC)
   Low      95      ASN1-S1, ASN1-S2, ASN1-S3, ASN1-S4, TLV-S4, B64-S1, B64-S2, B64-S3, DEC-S1,
                    DEC-S2, DEC-S3, DEC-S4, HEX-S2, HEX-S3, HEX-S4, HEX-S5, INI-S1, INI-S2, INI-S3,
                    INI-S4, INI-S5, STR-S1, STR-S2, JSON-S3, JSON-S4, JSON-S5, JSON-S6, JSON-S7,
@@ -119,7 +120,7 @@ SUMMARY
                    HMAC-S1, HMAC-S2, HKDF-S1, PRNG-S1, CRYPT-S1, TLS-S1, TLS-S2, TLS-S3, USEX-S1,
                    GEN-S1, CFG-S1, DBC-S1, STYLE-S1
 
-  Total 106 findings; 7 FIXED, 1 DOC (DBC-S1), the rest OPEN.
+  Total 106 findings; 9 FIXED, 5 DOC, the rest OPEN.
 
   Worth acting on first:
     UBJSON-S1  heap over-read in SSFUBJsonIsValid on a 5-byte input (reproduced with ASan)
@@ -160,16 +161,24 @@ FINDINGS (by module, in pass order)
                    completely full receive buffer (bufLen == bufSize) asserts. Not changed
                    (relaxing an assert is a functional change). Suggest SSF_REQUIRE(bufLen <=
                    bufSize) (and a UT), or fix the doc if the strictness is intended.
+                   Status: FIXED 2026-11-20 (Jim: relax code). SSFTLVInit now requires
+                   bufLen <= bufSize, so a full receive buffer decodes. UT added (red at
+                   ssftlv.c:81).
     TLV-S2  Medium  _codec/ssftlv.c:111  rule 11  SSFTLVPut requires val != NULL always (the UT
                    asserts on SSFTLVPut(&tlv, 0, NULL, 0)), but ssftlv.md:166 says val "May be
                    NULL only when valLen is 0". Doc and contract disagree. Suggest either
                    SSF_REQUIRE((val != NULL) || (valLen == 0)) or fixing the doc.
+                   Status: FIXED 2026-11-20 (Jim: relax code). SSFTLVPut requires
+                   (val != NULL) || (valLen == 0) and skips the memcpy for an empty value. The UT
+                   trap case is now a success case; a NULL val with valLen 1 still traps.
     TLV-S3  Medium  _codec/ssftlv.c:173  rule 11  SSFTLVRead requires exactly one of
                    valOpt/valPtrOpt, valOptSize == 0 when valOpt is NULL, and valLen != NULL;
                    ssftlv.md says it copies "into valOpt and/or sets *valPtrOpt", that
                    valOptSize is "Ignored when valOpt is NULL", and that valLen is "out (opt)"
                    (md lines 214, 283, 331). Doc text left as-is; suggest aligning the doc to
                    the asserted contract.
+                   Status: DOC 2026-11-20. ssftlv.md now states exactly one of valOpt / valPtrOpt,
+                   valOptSize 0 with no copy buffer, and a required valLen (Read, Get and Find).
     TLV-S4  Low  _codec/ssftlv.c:43,60  rule 7/16  _SSF_TLV_PUT_VAR_FIELD and
                    _SSF_TLV_GET_VAR_FIELD are multi-statement macros not wrapped in
                    do { } while (0); GET_VAR_FIELD also uses "break" and the caller's local
@@ -213,6 +222,8 @@ FINDINGS (by module, in pass order)
                  argument with side effects (SSFIsHex(*p++)) misbehaves. Not changed (doc fix
                  belongs with an API decision). Suggest correcting the .md ("h may be
                  evaluated more than once") or making it an inline function.
+                 Status: DOC 2026-11-20. ssfhex.md now says h may be evaluated up to six times
+                 and must not have side effects.
     HEX-S2  Low  _codec/ssfhex.c:43  11  SSFHexBinToByte() does not check hcase (any value
                  other than SSF_HEX_CASE_UPPER yields lower case) while SSFHexBinToBytes()
                  REQUIREs SSF_HEX_CASE_MIN < hcase < SSF_HEX_CASE_MAX. Adding the REQUIRE would
@@ -284,6 +295,8 @@ FINDINGS (by module, in pass order)
                    was found" is wrong: the call returns true with *jt == SSF_JSON_TYPE_ERROR for
                    a valid message without the path. Doc not rewritten in this pass. Fix the doc
                    (inclusive end; true = message valid, check *jt).
+                   Status: DOC 2026-11-20. ssfjson.md now says end is inclusive and that true
+                   means a valid message (check *jt for SSF_JSON_TYPE_ERROR); example updated.
     JSON-S3  Low     _codec/ssfjson.c:607  9  _SSFJsonGetXLong is a private-named function with
                    external linkage (no "static"). Making it static changes linkage, so it was
                    not changed. Fix: add static.
@@ -505,6 +518,8 @@ FINDINGS (by module, in pass order)
                       hashLen (ECDSA-2/3). I did not reword the intro in a style pass.
                       Suggested fix: change it to "recommended pairing" wording that points at
                       the Notes table.
+                      Status: DOC 2026-11-20. Intro bullet reworded to "recommended hash per curve"
+                      and points at the Notes table.
 
 ### ssfrsa
     RSA-S1  Low  ssfrsa.c:_SSFRSAStackScrub  16  Every sign / keygen / IsValid exit runs an 8 KiB
@@ -1238,3 +1253,6 @@ CHANGE LOG (audit file)
             M0+); ECDSA P-256 verify +1.6%, sign +0.3% (noise level).
 2026-11-20  UBJSON-S2 fixed (spot-checked UBJSON unit test plain and ASan+UBSan). Size:
             ssfubjson +20 / +36 B (M4 / M0+), stack unchanged.
+2026-11-20  TLV-S1, TLV-S2 fixed in code (Jim chose relaxing the asserts; test first,
+            spot-checked TLV unit test plain and ASan+UBSan, variable and fixed mode).
+            TLV-S3, HEX-S1, JSON-S2, ECDSA-S5 fixed in the module .md files.

@@ -388,22 +388,23 @@ bool SSFJsonMessage(SSFCStrIn_t jsStr, size_t *index, size_t *start, size_t *end
                     const SSFGPath_t *pathOpt, uint8_t depth, SSFJsonType_t *jt);
 ```
 
-Low-level SAX iterator used internally by all `SSFJsonGet*` functions. Walks `jsStr` starting
-at `*index` and reports the next value that matches `pathOpt`. Exposed for advanced use cases
-requiring fine-grained control over parsing.
+Low-level parser used internally by all `SSFJsonGet*` functions. Parses the whole of `jsStr`
+(with `depth == 0` it starts at offset 0) and reports the value that `pathOpt` selects. Exposed
+for advanced use cases requiring fine-grained control over parsing.
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
 | `jsStr` | in | `const char *` | Null-terminated JSON string. Must not be `NULL`. |
 | `index` | in-out | `size_t *` | Current byte offset into `jsStr`. Initialize to `0` before the first call; updated on each call. Must not be `NULL`. |
 | `start` | out | `size_t *` | Receives the start offset of the matched value within `jsStr`. Must not be `NULL`. |
-| `end` | out | `size_t *` | Receives the end offset (exclusive) of the matched value within `jsStr`. Must not be `NULL`. |
+| `end` | out | `size_t *` | Receives the offset of the last character of the matched value (inclusive) within `jsStr`, so the value spans `end - start + 1` characters. Must not be `NULL`. |
 | `pathOpt` | in | [`const SSFGPath_t *`](ssfgpath.md#ssfgpath-t) | Lookup path to match, ending in an `SSF_GPATH_END` entry; zero it before use. May be `NULL` to only walk the input; `*start`, `*end` and `*jt` are then unspecified. |
 | `depth` | in | `uint8_t` | Current nesting depth. Pass `0` for a top-level call. |
 | `jt` | out | [`SSFJsonType_t *`](#ssfjsontype-t) | Receives the JSON type of the matched value. Must not be `NULL`. |
 
-**Returns:** `true` if a matching value was found and `*start`, `*end`, and `*jt` were set;
-`false` when parsing is complete or no match was found.
+**Returns:** `true` if `jsStr` is a valid JSON message, else `false`. A `true` return does not
+mean the path matched: check `*jt`. It is the matched value's type with `*start` and `*end` set,
+or `SSF_JSON_TYPE_ERROR` when the path selects nothing (`*start` and `*end` are then unspecified).
 
 <a id="ex-message"></a>
 
@@ -414,10 +415,10 @@ SSFJsonType_t jt;
 
 memset(path, 0, sizeof(path));
 SSF_GPATH_SET_KEY(path[0], "name");
-if (SSFJsonMessage(js, &index, &start, &end, path, 0, &jt))
+if (SSFJsonMessage(js, &index, &start, &end, path, 0, &jt) && (jt != SSF_JSON_TYPE_ERROR))
 {
     /* jt == SSF_JSON_TYPE_STRING */
-    /* js[start..end-1] == "\"alice\"" (with surrounding quotes) */
+    /* js[start..end] == "\"alice\"" (with surrounding quotes; end is inclusive) */
 }
 ```
 

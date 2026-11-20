@@ -222,7 +222,8 @@ if (SSFHexBinToBytes(bin, sizeof(bin), out, sizeof(out), &outLen, false, SSF_HEX
 ```
 
 Evaluates to `true` if character `h` is a valid hexadecimal digit (`0–9`, `a–f`, or `A–F`).
-`h` is evaluated exactly once.
+`h` may be evaluated up to six times, so do not pass an expression with side effects (for
+example `SSFIsHex(*p++)`); read the character into a variable first.
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|

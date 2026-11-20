@@ -2395,7 +2395,15 @@ bool SSFBNModInvSmall(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
     SSFBNMontInit(&ctx, m);
     for (i = 0u; i < 16u; i++)
     {
+/* Disable false positive Visual Studio Code Analysis warning */
+#ifdef _WIN32
+#pragma warning(push)
+#pragma warning(disable:6001)
+#endif
         table[i].limbs = tableStorage[i];
+#ifdef _WIN32
+#pragma warning(pop)
+#endif
         table[i].cap = SSF_BN_SMALL_MAX_LIMBS;
         table[i].len = m->len;
     }

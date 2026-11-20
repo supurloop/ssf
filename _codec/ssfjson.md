@@ -36,7 +36,10 @@ nesting depth, not message size. The generator uses a chained-callback pattern w
   elements that are not on the requested path, so the limit bounds the parser's stack use for
   any input.
 - The parser considers inputs with duplicate object keys valid and matches only the first
-  occurrence.
+  occurrence. Many other parsers (JavaScript's `JSON.parse`, Python's `json`) use the last
+  occurrence instead, so two components can read different values from the same document. If a
+  document passes through another parser, for example a gateway or service that validates it,
+  reject or normalise duplicate keys there, or do not rely on the two agreeing.
 - Only 8-bit ASCII-encoded strings are accepted; an embedded `\0` terminates input.
 - Generator print functions return `false` when the output buffer is too small; no partial output
   is guaranteed.

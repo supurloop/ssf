@@ -53,7 +53,6 @@ SUMMARY
 
   Suggested order: UBJSON-2 and GOBJ-1 (confirm, then port the ssfjson fixes), then
   UBJSON-1 / DEC-1, then the test items.
-  Open decision from JSON-8: whether to reject duplicate keys (see JSON-8 Follow-up).
 
 ----------------------------------------------------------------------------------------------
 ssfjson
@@ -191,8 +190,11 @@ JSON-8  High  FIXED (2026-11-20)  CODE  [measured, ASan global-buffer-overflow; 
              end < start before any getter uses it (cheap defence in depth). Chosen: 1 + 3.
   Follow-up: First-occurrence matches ssfjson.md, but JavaScript's JSON.parse and Python's
              json take the LAST occurrence, so a peer using them and a device using ssfjson
-             can still read different values from a document with duplicate keys. Only
-             option 2 closes that; it rejects documents some senders produce. OPEN decision.
+             can still read different values from a document with duplicate keys. Options:
+             (1) keep first occurrence and document the risk, (2) reject duplicates, (3) a
+             config option. DECIDED (2026-11-20, Jim): option 1; ssfjson.md now warns that
+             other parsers use the last occurrence and that a document crossing another
+             parser should have duplicates rejected or normalised there.
 
 ----------------------------------------------------------------------------------------------
 ssfhex
@@ -515,3 +517,7 @@ CHANGE LOG
               index pointing at an int, a non-string key and an entry that is not an
               SSFJsonPath_t. ssfjson.c is unchanged by the macro fix, so code size and stack
               are as recorded above.
+  2026-11-20  JSON-8 follow-up decided (Jim: option 1). Duplicate keys stay valid and match
+              the first occurrence; ssfjson.md Notes now names the parser differential (other
+              parsers use the last occurrence) and tells integrators to reject or normalise
+              duplicates where a document also passes through another parser. No code change.

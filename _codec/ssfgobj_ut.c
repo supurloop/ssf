@@ -92,14 +92,11 @@ void checkPath(SSFLL_t *path)
 /* --------------------------------------------------------------------------------------------- */
 void iterateCallback(SSFGObj_t *gobj, SSFLL_t *path)
 {
-    SSFObjType_t dataType;
-
     SSF_REQUIRE(gobj != NULL);
-
-    dataType = SSFGObjGetType(gobj);
 
     checkPath(path);
     SSF_ASSERT(_ssfgobj_utPathIndex < SSFGOBJ_UT_NUM_OBJS);
+    SSF_ASSERT(SSFGObjGetType(gobj) == _checkPathTypes[_ssfgobj_utPathIndex]);
     SSF_ASSERT(gobj->dataType == _checkPathTypes[_ssfgobj_utPathIndex]);
     _ssfgobj_utPathIndex++;
 }

@@ -417,6 +417,8 @@ static void _VerifyECDSACornerCasesAgainstOpenSSL(SSFECCurve_t curve)
 }
 #endif /* SSF_ECDSA_OSSL_VERIFY */
 
+/* The audit tests that install these hooks use P-256 vectors and need signing */
+#if (SSF_ECDSA_CONFIG_ENABLE_SIGN == 1) && (SSF_EC_CONFIG_ENABLE_P256 == 1)
 /* --------------------------------------------------------------------------------------------- */
 /* Zeroization audit hooks                                                                       */
 /* --------------------------------------------------------------------------------------------- */
@@ -514,6 +516,7 @@ static void _ECDSAUTKeyGenHook(void *ctx,
         }
     }
 }
+#endif /* (SSF_ECDSA_CONFIG_ENABLE_SIGN == 1) && (SSF_EC_CONFIG_ENABLE_P256 == 1) */
 
 void SSFECDSAUnitTest(void)
 {

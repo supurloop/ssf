@@ -306,17 +306,6 @@ static void _ge_add(_ge_t *r, const _ge_t *p1, const _ge_t *p2)
     SSFFE25519Mul(&r->Z, &F, &G);       /* Z3 = F*G */
 }
 
-/* Subtraction: p3 = p1 - p2 = p1 + (-p2). Negate X and T of p2. */
-static void _ge_sub(_ge_t *r, const _ge_t *p1, const _ge_t *p2)
-{
-    _ge_t neg;
-    _fe_neg(&neg.X, &p2->X);
-    SSFFE25519Copy(&neg.Y, &p2->Y);
-    SSFFE25519Copy(&neg.Z, &p2->Z);
-    _fe_neg(&neg.T, &p2->T);
-    _ge_add(r, p1, &neg);
-}
-
 /* Encode a point to 32 bytes (Edwards compressed format).                                       */
 /* The y-coordinate is encoded in LE; the high bit of byte 31 is the sign of x.                 */
 static void _ge_encode(uint8_t out[32], const _ge_t *p)

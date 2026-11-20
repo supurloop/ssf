@@ -145,6 +145,8 @@ static bool _SSFRSADecIntToBN(const SSFASN1Cursor_t *cursor, SSFBN_t *bn, uint16
     return SSFBNFromBytes(bn, buf, bufLen, limbs);
 }
 
+/* Sign / verify helpers: unused when neither padding scheme is enabled */
+#if (SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1) || (SSF_RSA_CONFIG_ENABLE_PSS == 1)
 /* --------------------------------------------------------------------------------------------- */
 /* Internal: hash output size for the given hash algorithm.                                      */
 /* --------------------------------------------------------------------------------------------- */
@@ -158,7 +160,9 @@ static size_t _SSFRSAGetHashSize(SSFRSAHash_t hash)
     default: SSF_ASSERT(false); return 0;
     }
 }
+#endif /* (SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1) || (SSF_RSA_CONFIG_ENABLE_PSS == 1) */
 
+#if SSF_RSA_CONFIG_ENABLE_PSS == 1
 /* --------------------------------------------------------------------------------------------- */
 /* Internal: compute hash using incremental API (for MGF1 and PSS).                              */
 /* --------------------------------------------------------------------------------------------- */
@@ -197,6 +201,7 @@ static void _SSFRSAHashBeginUpdateEnd(SSFRSAHash_t hash, const uint8_t *d1, size
     default: SSF_ASSERT(false); break;
     }
 }
+#endif /* SSF_RSA_CONFIG_ENABLE_PSS == 1 */
 
 /* --------------------------------------------------------------------------------------------- */
 /* Internal: DER-encode an RSA public key: SEQUENCE { INTEGER n, INTEGER e }.                    */
@@ -488,6 +493,7 @@ static bool _SSFRSAPrivKeyDecode(const uint8_t *der, size_t derLen, SSFBN_t *n, 
     return true;
 }
 
+#if (SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1) || (SSF_RSA_CONFIG_ENABLE_PSS == 1)
 /* --------------------------------------------------------------------------------------------- */
 /* Internal: RSA public-key operation result = m^e mod n (variable-time; all operands public).   */
 /* --------------------------------------------------------------------------------------------- */
@@ -497,6 +503,7 @@ static bool _SSFRSAPublicOp(const SSFBN_t *m, const SSFBN_t *e, const SSFBN_t *n
     SSFBNModExpPub(result, m, e, n);
     return true;
 }
+#endif /* (SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1) || (SSF_RSA_CONFIG_ENABLE_PSS == 1) */
 
 #if SSF_CONFIG_RSA_UNIT_TEST == 1
 /* Test-only hook fired after blinding is applied in the CRT private op; NULL in production. */
@@ -507,6 +514,7 @@ void (*_SSFRSASignBlindTestHook)(void *ctx, const SSFBN_t *r, const SSFBN_t *rIn
 void *_SSFRSASignBlindTestHookCtx = NULL;
 #endif /* SSF_CONFIG_RSA_UNIT_TEST */
 
+#if (SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1) || (SSF_RSA_CONFIG_ENABLE_PSS == 1)
 /* --------------------------------------------------------------------------------------------- */
 /* Internal: form a blinded CRT exponent d' = d + rBlind * (prime - 1).                          */
 /* --------------------------------------------------------------------------------------------- */
@@ -647,6 +655,7 @@ cleanup:
     _SSFRSASecureWipe(entropy, sizeof(entropy));
     return ok;
 }
+#endif /* (SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1) || (SSF_RSA_CONFIG_ENABLE_PSS == 1) */
 
 /* --------------------------------------------------------------------------------------------- */
 /* If |p - q| > 2^(halfBits - 100) returns true, else false (FIPS 186-4 Sec. B.3.3 step 5.4).    */

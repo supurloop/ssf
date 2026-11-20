@@ -2594,13 +2594,10 @@ void SSFX509UnitTest(void)
         chain[1] = intCert;    chainLens[1] = intCertLen;
         trust[0] = rootCert;   trustLens[0] = rootCertLen;
 
-        /* pathLenConstraint=1 allows 1 subordinate CA -> should pass */
-        /* NOTE: This chain goes through VerifyChain which doesn't match    */
-        /* hostnames on generated certs (no SAN). The hostname check will   */
-        /* fail. But to test pathLen specifically, we need to get past       */
-        /* hostname. For now, this demonstrates the positive case compiles. */
-        /* The hostname mismatch will cause this to fail, which is expected  */
-        /* for a different reason. Skip this positive assertion for now.    */
+        /* pathLenConstraint=1 allows 1 subordinate CA; code signing needs no SAN hostname */
+        SSF_ASSERT(SSFX509VerifyChainPurpose(chain, chainLens, 2u, trust, trustLens, 1u,
+                                             SSF_X509_PURPOSE_CODE_SIGNING, NULL,
+                                             1800000000ull) == true);
     }
 
 #if _UT_RSA_PSS_SIGN == 1

@@ -59,6 +59,9 @@
 
 #if SSF_CONFIG_RSA_UNIT_TEST == 1
 
+/* The helpers below serve the RSA tests only, which need at least one key size */
+#if SSF_RSA_ANY_ENABLED == 1
+
 /* --------------------------------------------------------------------------------------------- */
 /* Hygiene test scaffolding: stack-residue scan.                                                 */
 /*                                                                                               */
@@ -708,6 +711,7 @@ static void _ScrubCheck(const void *buf, size_t len)
         }
     }
 }
+#endif /* SSF_RSA_ANY_ENABLED == 1 */
 
 void SSFRSAUnitTest(void)
 {

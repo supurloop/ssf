@@ -859,6 +859,14 @@ The resulting tree maps JSON types to gobj types as follows:
 JSON escape sequences in strings (`\"`, `\\`, `\n`, `\t`, `\uXXXX`, etc.) are unescaped into
 the stored string value.
 
+Depth: the conversion counts every value, leaves included, while `SSFJsonIsValid()` counts
+container levels. A value can be nested inside at most `SSF_JSON_CONFIG_MAX_IN_DEPTH - 1`
+objects or arrays, and the gobj tree applies the same rule with
+[`SSF_GOBJ_CONFIG_MAX_IN_DEPTH`](ssfgobj.md#opt-gobj-max-depth). With both at their default of
+4, `{"a":{"b":{"c":1}}}` converts but `{"a":{"b":{"c":{"d":1}}}}` does not, although it is valid
+JSON. To convert documents that use the full JSON depth, set both options one higher than the
+deepest nesting you need to convert (this also raises the depth `SSFJsonIsValid()` accepts).
+
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
 | `js` | in | `const char *` | Null-terminated JSON string to parse. Must not be `NULL`. |
@@ -866,8 +874,9 @@ the stored string value.
 | `maxChildren` | in | `uint16_t` | Maximum number of children for each container node (objects and arrays). |
 
 **Returns:** `true` if the JSON was successfully converted; `false` if the JSON is invalid, on
-allocation failure, or if any object key or string value exceeds
-`SSF_JSON_GOBJ_CONFIG_MAX_STR_SIZE`.
+allocation failure, if any object key or string value exceeds
+`SSF_JSON_GOBJ_CONFIG_MAX_STR_SIZE`, or if a value is nested deeper than the conversion allows
+(see Depth above).
 
 <a id="ex-gobjcreate"></a>
 

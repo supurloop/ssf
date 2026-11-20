@@ -36,6 +36,10 @@ translate between JSON, UBJSON, and other encoding types.
 - [`SSFGObjInsertChild()`](#ssfgobjinsertchild) asserts if the parent type is not
   `SSF_OBJ_TYPE_OBJECT` or `SSF_OBJ_TYPE_ARRAY`; returns `false` if the parent's child list is
   full.
+- Tree depth counts every node, the root being 0, and [`SSFGObjInsertChild()`](#ssfgobjinsertchild)
+  refuses a child that would put any node at depth `SSF_GOBJ_CONFIG_MAX_IN_DEPTH`. With the
+  default of 4, a value can sit inside at most 3 nested objects or arrays (empty containers can
+  go one level deeper).
 - Both `*gobjParentOut` and `*gobjChildOut` must be `NULL` before
   [`SSFGObjFindPath()`](#ssfgobjfindpath), and `path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH]` must be an
   END entry. All three assert otherwise, as does a path entry with a `NULL` key or index pointer
@@ -60,7 +64,7 @@ Options live in [`_opt/ssfgobj_opt.h`](../_opt/ssfgobj_opt.h) (aggregated into t
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| <a id="opt-gobj-max-depth"></a>`SSF_GOBJ_CONFIG_MAX_IN_DEPTH` | `4` | Maximum nesting depth for object and array iteration and path traversal |
+| <a id="opt-gobj-max-depth"></a>`SSF_GOBJ_CONFIG_MAX_IN_DEPTH` | `4` | Maximum tree depth for insertion, iteration and path traversal. Depth counts every node, the root being 0, and no node may sit at this depth, so a value can be nested inside at most `SSF_GOBJ_CONFIG_MAX_IN_DEPTH - 1` objects or arrays. This differs from `SSF_JSON_CONFIG_MAX_IN_DEPTH`, which counts container levels only; see [`SSFJsonGObjCreate()`](ssfjson.md#ssfjsongobjcreate). |
 
 <a id="api-summary"></a>
 

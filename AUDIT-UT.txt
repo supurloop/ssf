@@ -44,14 +44,15 @@ SUMMARY
   High       8       JSON-1 (FIXED), JSON-2 (FIXED), JSON-5 (FIXED), JSON-6 (FIXED),
                      JSON-7 (FIXED), JSON-8 (FIXED), UBJSON-2 (FIXED), GOBJ-1 (FIXED)
   Medium     0
-  Low        13      UBJSON-1 (FIXED), DEC-1 (FIXED), DEC-2 (FIXED), HEX-1, B64-1, JSON-3,
-                     JSON-4, RSA-13, RSA-14, CMS-5, X509-21, E-5, X-3
+  Low        13      UBJSON-1 (FIXED), DEC-1 (FIXED), DEC-2 (FIXED), JSON-4 (DOC), HEX-1, B64-1,
+                     JSON-3, RSA-13, RSA-14, CMS-5, X509-21, E-5, X-3
 
   By fault:  CODE   JSON-1, JSON-2, JSON-4, JSON-5, JSON-6, JSON-7, JSON-8, UBJSON-1,
                     UBJSON-2, GOBJ-1, DEC-1, RSA-14 (style)
              TEST   HEX-1, B64-1, JSON-3, DEC-2, RSA-13, CMS-5, X509-21, E-5, X-3
 
-  Suggested order: JSON-4, then the test items.
+  Suggested order: the test items (HEX-1 and B64-1 first: they are the last non-stack ASan
+  failures), then RSA-14.
 
 ----------------------------------------------------------------------------------------------
 ssfjson
@@ -100,15 +101,21 @@ JSON-3  Low  OPEN  TEST  [measured, compile error]
   Options:   Guard the call with SSF_CONFIG_GOBJ_UNIT_TEST, or declare the helper whenever
              any unit test that uses it is enabled.
 
-JSON-4  Low  OPEN  CODE  [measured]
-  Location:  ssfjson.c:875 (_SSFJsonGObjValue depth check) vs ssfjson.c:184 / 292
-  Problem:   SSFJsonGObjCreate's own parser counts depth one level earlier than the
-             validating parser: SSFJsonIsValid accepts 4 nested levels (objects or mixed
-             objects / arrays) with SSF_JSON_CONFIG_MAX_IN_DEPTH = 4, as ssfjson.md
-             documents, but SSFJsonGObjCreate rejects them; both accept 3. Not a safety issue
-             (stricter), but a document that validates cannot always be converted.
-  Options:   Align the GObj parser's count with the validator, or document that GObj
-             conversion allows one level less.
+JSON-4  Low  DOC (2026-11-20)  CODE  [measured]
+  Location:  ssfjson.c (_SSFJsonGObjValue depth check, every value); ssfgobj.c:514
+             (SSFGObjInsertChild tree-depth cap); _opt/ssfgobj_opt.h option comment
+  Problem:   SSFJsonIsValid counts container levels (4 by default), but the GObj importer checks
+             every value, leaves included, against SSF_JSON_CONFIG_MAX_IN_DEPTH, and the GObj
+             tree caps node depth (root 0) below SSF_GOBJ_CONFIG_MAX_IN_DEPTH. A value inside
+             the 4th container is at depth 4, so a document that validates cannot be converted.
+             Empty containers convert one level deeper. Raising only the GObj option does not
+             help: the importer rejects first. The option comment said each nested container
+             is a level, which is not what the code counts.
+  Failure:   Defaults (4 / 4): {"a":{"b":{"c":1}}} and [[[1]]] convert; {"a":{"b":{"c":{"d":1}}}}
+             and [[[[1]]]] are valid but do not; [[[[]]]] converts. With both options at 5 all
+             of those convert and [[[[[1]]]]] does not. Not a safety issue (GObj is stricter).
+  Options:   (1) Make GObj count containers like ssfjson (touches the recursion bounds).
+             (2) Document the rule (chosen). (3) Importer only (no effect without 1).
 
 JSON-5  High  FIXED (2026-11-20, with JSON-7)  CODE  [measured; fix verified red/green]
   Location:  ssfjson.c:212-240 (_SSFJsonValue scalar cases), reached from _SSFJsonNameValue and
@@ -651,3 +658,12 @@ CHANGE LOG
               (-24), 5435 -> 5415 B M0+ (-20); ssfdec 2377 -> 2397 B M4 (+20), 2597 -> 2637 B
               M0+ (+40). Stack: SSFUBJsonPrintInt 32 -> 40 B M4, 40 -> 48 B M0+ (the uint64_t);
               SSFDecStrToXInt unchanged. Speed: one comparison per negative parse; not measured.
+  2026-11-20  JSON-4 DOC (option 2, Jim's choice). No code change. _opt/ssfgobj_opt.h now says
+              the depth counts every node, root 0, so values nest at most MAX - 1 deep.
+              ssfgobj.md: the option row and a new note (default 4: a value inside at most 3
+              nested containers; empty containers one deeper). ssfjson.md SSFJsonGObjCreate: a
+              Depth paragraph (the conversion counts every value, SSFJsonIsValid counts
+              containers; example pair; set both options one higher than the deepest nesting
+              to convert) and the depth case in Returns. The advice was checked: with both
+              options at 5 every 4-level document converts and a 5-level one with a value does
+              not.

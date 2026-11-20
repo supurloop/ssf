@@ -5565,7 +5565,7 @@ void SSFX509UnitTest(void)
             };
             static const uint8_t bcCAOnly[] = { 0x30u, 0x03u, 0x01u, 0x01u, 0xFFu };
             static const uint8_t bcEmpty[] = { 0x30u, 0x00u };
-            static const struct { const uint8_t *v; uint32_t len; } bad[] = {
+            static const struct { const uint8_t *v; uint32_t len; } badBc[] = {
                 { bcOctetPl, sizeof(bcOctetPl) }, { bcBigPl, sizeof(bcBigPl) },
                 { bcInnerTrail, sizeof(bcInnerTrail) }, { bcOuterTrail, sizeof(bcOuterTrail) }
             };
@@ -5576,10 +5576,10 @@ void SSFX509UnitTest(void)
             p.rawExtOid = bcOid8;
             p.rawExtOidLen = sizeof(bcOid8);
             p.rawExtCritical = true;
-            for (k = 0; k < (uint32_t)(sizeof(bad) / sizeof(bad[0])); k++)
+            for (k = 0; k < (uint32_t)(sizeof(badBc) / sizeof(badBc[0])); k++)
             {
-                p.rawExtValue = bad[k].v;
-                p.rawExtValueLen = bad[k].len;
+                p.rawExtValue = badBc[k].v;
+                p.rawExtValueLen = badBc[k].len;
                 SSF_ASSERT(SSFX509EncodeCert(caOut, sizeof(caOut), &p, fakeSig, sizeof(fakeSig),
                                              &n) == true);
                 SSF_ASSERT(SSFX509Parse(caOut, n, &parsed) == false);

@@ -79,7 +79,7 @@ void checkPath(SSFLL_t *path)
         if (pi->index >= 0)
         {
             len = strlen(pathCStr);
-            snprintf(pathCStr + len, sizeof(pathCStr) - len, "[%d]", pi->index);
+            snprintf(pathCStr + len, sizeof(pathCStr) - len, "[%ld]", (long)pi->index);
         }
         item = next;
     }

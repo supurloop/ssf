@@ -182,7 +182,7 @@ Encoding and decoding interfaces for common data formats, all with strict buffer
 
 ⁵⁸ Peak is in `SSFX509VerifyChain`, which holds `SSF_X509_CONFIG_MAX_CHAIN_DEPTH` (default 8) parsed `SSFX509Cert_t` structures (~1 KB each on 32-bit targets, ~1.6 KB on 64-bit; larger when the SAN / extension / Name Constraints limits are raised) plus one trust-anchor parse and the signature-verification chain of `ssfecdsa` / `ssfrsa` / `ssfed25519` (footnotes ⁴², ⁴⁸). Halving `SSF_X509_CONFIG_MAX_CHAIN_DEPTH` roughly halves it. `SSFX509Parse` alone peaks around ~600 B. Generation (`SSFX509EncodeTBS` / `SSFX509EncodeCert`) writes every element directly into the caller's buffer with no scratch arrays, so it peaks at well under ~2 KB regardless of `SSF_X509_CONFIG_MAX_CERT_SIZE`.
 
-⁵⁹ The only static state is the trace callback and its user pointer installed by `SSFX509SetTraceCtx` (two pointers). Parsing, generation, and verification hold all state in caller-supplied structures and on the stack, so they are safe to run concurrently as long as the trace callback is not changed while verifications are in flight.
+⁵⁹ The only static state is the trace callback, its user pointer, and an internal adapter pointer installed by `SSFX509SetTraceCtx` (three pointers). Parsing, generation, and verification hold all state in caller-supplied structures and on the stack, so they are safe to run concurrently as long as the trace callback is not changed while verifications are in flight.
 
 ¹⁷ No shared mutable state in production builds. Reentrancy depends on the platform `malloc`/`free` implementation; most production C libraries provide thread-safe allocators.
 
@@ -290,7 +290,7 @@ Cryptographic primitives for hashing, encryption, and random number generation.
 
 ⁶⁰ Peak is in the verifier: two parsed `SSFX509Cert_t` structures (~1 KB each on 32-bit targets, ~1.6 KB on 64-bit), a `SSF_CMS_CONFIG_MAX_SIGNED_ATTRS_LEN` (default 512 B) re-tagging buffer and the chain arrays, nested into `SSFX509VerifyChainPurpose`, which carries the ssfx509 chain peak (footnote ⁵⁸) and the signature primitives. `SSFCMSParse` alone peaks at a few hundred bytes. Requires ASN.1, X.509, SHA-2, crypt and whichever of ECDSA / RSA / Ed25519 the signatures use.
 
-⁶¹ The only static state is the trace callback and its user pointer installed by `SSFCMSSetTraceCtx` (two pointers). Parsing and verification hold all state in caller-supplied structures and on the stack.
+⁶¹ The only static state is the trace callback, its user pointer, and an internal adapter pointer installed by `SSFCMSSetTraceCtx` (three pointers). Parsing and verification hold all state in caller-supplied structures and on the stack.
 
 ⁵⁰ Peak is inherited from whichever AEAD backend the active cipher suite selects. All five supported suites now have comparable stack footprints in the few-hundred-byte range: AES-GCM and AES-CCM routes through the AES-backed dispatch (~450 B peak, dominated by the AES key schedule), and the ChaCha20-Poly1305 route (~400 B peak, dominated by the Poly1305 context and the ChaCha20 working state after the 2025 streaming refactor). The key-schedule and transcript-hash primitives on their own stay under ~1 KB. Overall TLS 1.3 record-layer peak is ~1 KB regardless of cipher suite.
 

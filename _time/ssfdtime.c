@@ -141,17 +141,6 @@ static void _SSFDTimeStructSetMagic(SSFDTimeStruct_t *ts)
     ts->magic = SSFFCSum16((uint8_t *)ts, sizeof(SSFDTimeStruct_t), SSF_FCSUM_INITIAL);
 }
 /* --------------------------------------------------------------------------------------------- */
-/* Clears magic number to indicate time struct not valid.                                        */
-/* --------------------------------------------------------------------------------------------- */
-static void _SSFDTimeStructClearMagic(SSFDTimeStruct_t *ts)
-{
-    SSF_REQUIRE(ts != NULL);
-
-    memset(ts, 0, sizeof(SSFDTimeStruct_t));
-    ts->magic = 1;
-}
-
-/* --------------------------------------------------------------------------------------------- */
 /* Returns true if struct magic number valid, else false.                                        */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFDTimeStructIsMagicValid(const SSFDTimeStruct_t *ts)

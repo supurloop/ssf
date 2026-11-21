@@ -44,6 +44,9 @@
 /* Module-scope trace context for verification diagnostics */
 static SSFTLSTraceCtx_t _ssfcmsTraceCtx;
 
+/* Caller trace callback that _SSFCMSTraceAdapter() forwards each message to */
+static void (*_ssfcmsTraceFn)(int, int, const char *, void *);
+
 /* --------------------------------------------------------------------------------------------- */
 /* OID constants (raw DER content bytes)                                                         */
 /* --------------------------------------------------------------------------------------------- */
@@ -89,11 +92,26 @@ static const uint8_t _derNull[] = { 0x05u, 0x00u };
 #define _TAG_CTX0_PRIMITIVE     ((uint16_t)0x80u)
 
 /* --------------------------------------------------------------------------------------------- */
+/* Delivers a trace message to the installed int-signature callback.                             */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFCMSTraceAdapter(SSFTLSTraceLevel_t level, SSFTLSTraceCategory_t category,
+                                const char *msgStr, void *userCtxOpt)
+{
+    SSF_REQUIRE(level <= SSF_TLS_TRACE_DEBUG);
+    SSF_REQUIRE(category <= SSF_TLS_TRACE_ALERT);
+    SSF_REQUIRE(msgStr != NULL);
+    SSF_REQUIRE(_ssfcmsTraceFn != NULL);
+
+    _ssfcmsTraceFn((int)level, (int)category, msgStr, userCtxOpt);
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Installs the module-wide verification trace callback; a NULL fnOpt disables tracing.          */
 /* --------------------------------------------------------------------------------------------- */
 void SSFCMSSetTraceCtx(void (*fnOpt)(int, int, const char *, void *), void *userCtxOpt)
 {
-    _ssfcmsTraceCtx.fn = (SSFTLSTraceFn_t)fnOpt;
+    _ssfcmsTraceFn = fnOpt;
+    _ssfcmsTraceCtx.fn = (fnOpt != NULL) ? _SSFCMSTraceAdapter : NULL;
     _ssfcmsTraceCtx.userCtx = userCtxOpt;
 }
 
@@ -910,8 +928,9 @@ static bool _SSFCMSVerifySigner(const SSFCMSSignedData_t *sd, uint8_t idx, const
         {
             /* Yes */
             SSF_TLS_TRACE_CERT_ERROR(&_ssfcmsTraceCtx,
-                                     "CMS: signer[%u] signedAttrs %u bytes exceed limit %u", idx,
-                                     si->signedAttrsLen, (unsigned int)sizeof(attrs));
+                                     "CMS: signer[%u] signedAttrs %lu bytes exceed limit %u", idx,
+                                     (unsigned long)si->signedAttrsLen,
+                                     (unsigned int)sizeof(attrs));
             return false;
         }
         memcpy(attrs, si->signedAttrs, si->signedAttrsLen);

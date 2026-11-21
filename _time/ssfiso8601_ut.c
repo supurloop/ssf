@@ -37,6 +37,544 @@
 #include "ssfdtime.h"
 #include "ssfiso8601.h"
 
+#if SSF_ISO8601_EXHAUSTIVE_UNIT_TEST == 1
+#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
+#ifndef _WIN32
+#include <pthread.h>
+#include <unistd.h>
+#endif /* _WIN32 */
+#endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
+#endif /* SSF_ISO8601_EXHAUSTIVE_UNIT_TEST */
+
+/* Number of fractional second widths tested, 1 to 9 digits */
+#define SSF_ISO8601_UT_NUM_FRAC_WIDTHS (9u)
+
+#if SSF_ISO8601_EXHAUSTIVE_UNIT_TEST == 0
+/* Widest fraction value count swept fully by the reduced test */
+#define SSF_ISO8601_UT_FRAC_FULL_MAX (10000000ul)
+/* Prime stride used to sample fraction widths too large to sweep fully */
+#define SSF_ISO8601_UT_FRAC_STRIDE (997ul)
+#endif /* SSF_ISO8601_EXHAUSTIVE_UNIT_TEST */
+
+/* Count of distinct fraction values for each fraction width */
+static const uint32_t _ssfISO8601UTFracLim[SSF_ISO8601_UT_NUM_FRAC_WIDTHS] =
+{
+    10ul, 100ul, 1000ul, 10000ul, 100000ul, 1000000ul, 10000000ul, 100000000ul, 1000000000ul
+};
+
+#if SSF_ISO8601_EXHAUSTIVE_UNIT_TEST == 1
+/* Upper bound on worker threads used by the exhaustive test */
+#define SSF_ISO8601_UT_MAX_THREADS (64u)
+
+typedef enum
+{
+    SSF_ISO8601_UT_WORK_MIN = -1,
+    SSF_ISO8601_UT_WORK_FRAC,
+    SSF_ISO8601_UT_WORK_SEC,
+    SSF_ISO8601_UT_WORK_MAX
+} SSFISO8601UTWork_t;
+
+typedef struct
+{
+    SSFISO8601UTWork_t work;
+    uint32_t numDigsIdx;
+    uint64_t start;
+    uint64_t end;
+} SSFISO8601UTSlice_t;
+#endif /* SSF_ISO8601_EXHAUSTIVE_UNIT_TEST */
+
+/* --------------------------------------------------------------------------------------------- */
+/* Checks that a numDigsIdx + 1 digit fraction string parses to the expected unixSys.            */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFISO8601UTFracCheck(uint32_t numDigsIdx, uint32_t frac)
+{
+    SSFPortTick_t unixSys;
+    int16_t zoneOffsetMin;
+    char isoStr[SSFISO8601_MAX_SIZE];
+
+    SSF_REQUIRE(numDigsIdx < SSF_ISO8601_UT_NUM_FRAC_WIDTHS);
+    SSF_REQUIRE(frac < _ssfISO8601UTFracLim[numDigsIdx]);
+
+    unixSys = SSFDTIME_UNIX_EPOCH_SYS_MAX + 1;
+    zoneOffsetMin = SSFISO8601_INVALID_ZONE_OFFSET + 10;
+    switch(numDigsIdx)
+    {
+        case 0:
+            snprintf(isoStr, sizeof(isoStr), "1970-01-01T00:00:00.%01luZ",
+                     (unsigned long)frac);
+        break;
+        case 1:
+            snprintf(isoStr, sizeof(isoStr), "1970-01-01T00:00:00.%02luZ",
+                     (unsigned long)frac);
+        break;
+        case 2:
+            snprintf(isoStr, sizeof(isoStr), "1970-01-01T00:00:00.%03luZ",
+                     (unsigned long)frac);
+        break;
+        case 3:
+            snprintf(isoStr, sizeof(isoStr), "1970-01-01T00:00:00.%04luZ",
+                     (unsigned long)frac);
+        break;
+        case 4:
+            snprintf(isoStr, sizeof(isoStr), "1970-01-01T00:00:00.%05luZ",
+                     (unsigned long)frac);
+        break;
+        case 5:
+            snprintf(isoStr, sizeof(isoStr), "1970-01-01T00:00:00.%06luZ",
+                     (unsigned long)frac);
+        break;
+        case 6:
+            snprintf(isoStr, sizeof(isoStr), "1970-01-01T00:00:00.%07luZ",
+                     (unsigned long)frac);
+        break;
+        case 7:
+            snprintf(isoStr, sizeof(isoStr), "1970-01-01T00:00:00.%08luZ",
+                     (unsigned long)frac);
+        break;
+        case 8:
+            snprintf(isoStr, sizeof(isoStr), "1970-01-01T00:00:00.%09luZ",
+                     (unsigned long)frac);
+        break;
+        default:
+        SSF_ERROR();
+    }
+    SSF_ASSERT(SSFISO8601ISOToUnix(isoStr, &unixSys, &zoneOffsetMin));
+
+    switch(numDigsIdx)
+    {
+        case 0:
+            SSF_ASSERT(unixSys == ((SSFPortTick_t)frac * (SSF_TICKS_PER_SEC / 10ul)));
+        break;
+        case 1:
+            SSF_ASSERT(unixSys == ((SSFPortTick_t)frac * (SSF_TICKS_PER_SEC / 100ul)));
+        break;
+        case 2:
+            SSF_ASSERT(unixSys == ((SSFPortTick_t)frac * (SSF_TICKS_PER_SEC / 1000ul)));
+        break;
+        case 3:
+#if SSF_DTIME_SYS_PREC == 3
+            SSF_ASSERT(unixSys == (frac / 10ul));
+#else
+            SSF_ASSERT(unixSys == ((SSFPortTick_t)frac * (SSF_TICKS_PER_SEC / 10000ul)));
+#endif
+        break;
+        case 4:
+#if SSF_DTIME_SYS_PREC == 3
+            SSF_ASSERT(unixSys == (frac / 100ul));
+#else
+SSF_ASSERT(unixSys == ((SSFPortTick_t)frac * (SSF_TICKS_PER_SEC / 100000ul)));
+#endif
+break;
+        case 5:
+#if SSF_DTIME_SYS_PREC == 3
+            SSF_ASSERT(unixSys == (frac / 1000ul));
+#else
+SSF_ASSERT(unixSys == ((SSFPortTick_t)frac * (SSF_TICKS_PER_SEC / 1000000ul)));
+#endif
+break;
+        case 6:
+#if SSF_DTIME_SYS_PREC == 3
+            SSF_ASSERT(unixSys == (frac / 10000ul));
+#elif SSF_DTIME_SYS_PREC == 6
+            SSF_ASSERT(unixSys == (frac / 10ul));
+#else
+SSF_ASSERT(unixSys == ((SSFPortTick_t)frac * (SSF_TICKS_PER_SEC / 10000000ul)));
+#endif
+break;
+        case 7:
+#if SSF_DTIME_SYS_PREC == 3
+            SSF_ASSERT(unixSys == (frac / 100000ul));
+#elif SSF_DTIME_SYS_PREC == 6
+            SSF_ASSERT(unixSys == (frac / 100ul));
+#else
+SSF_ASSERT(unixSys == ((SSFPortTick_t)frac * (SSF_TICKS_PER_SEC / 100000000ul)));
+#endif
+break;
+        case 8:
+#if SSF_DTIME_SYS_PREC == 3
+            SSF_ASSERT(unixSys == (frac / 1000000ul));
+#elif SSF_DTIME_SYS_PREC == 6
+            SSF_ASSERT(unixSys == (frac / 1000ul));
+#else
+SSF_ASSERT(unixSys == ((SSFPortTick_t)frac * (SSF_TICKS_PER_SEC / 1000000000ul)));
+#endif
+break;
+        default:
+        SSF_ERROR();
+    }
+    SSF_ASSERT(zoneOffsetMin == 0);
+}
+
+#if SSF_ISO8601_EXHAUSTIVE_UNIT_TEST == 1
+/* --------------------------------------------------------------------------------------------- */
+/* Checks unixSec round trips through every zone format the exhaustive test covers.              */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFISO8601UTSecCheck(uint64_t unixSec)
+{
+    SSFPortTick_t unixSys;
+    SSFPortTick_t unixSysOut;
+    int16_t zoneOffsetMin;
+    uint16_t hour;
+    uint16_t minute;
+    uint32_t i;
+    int8_t sign;
+    char isoStr[SSFISO8601_MAX_SIZE];
+
+    SSF_REQUIRE(unixSec <= SSFDTIME_UNIX_EPOCH_SEC_MAX);
+
+    unixSys = (SSFPortTick_t)unixSec * SSF_TICKS_PER_SEC;
+    SSF_ASSERT(SSFISO8601UnixToISO(unixSys, false, false, 0, SSF_ISO8601_ZONE_UTC, 0, isoStr,
+                                   sizeof(isoStr)));
+    SSF_ASSERT(SSFIsDigit(isoStr[0]));
+    SSF_ASSERT(SSFIsDigit(isoStr[1]));
+    SSF_ASSERT(SSFIsDigit(isoStr[2]));
+    SSF_ASSERT(SSFIsDigit(isoStr[3]));
+    SSF_ASSERT(isoStr[4] == '-');
+    SSF_ASSERT(SSFIsDigit(isoStr[5]));
+    SSF_ASSERT(SSFIsDigit(isoStr[6]));
+    SSF_ASSERT(isoStr[7] == '-');
+    SSF_ASSERT(SSFIsDigit(isoStr[8]));
+    SSF_ASSERT(SSFIsDigit(isoStr[9]));
+    SSF_ASSERT(isoStr[10] == 'T');
+    SSF_ASSERT(SSFIsDigit(isoStr[11]));
+    SSF_ASSERT(SSFIsDigit(isoStr[12]));
+    SSF_ASSERT(isoStr[13] == ':');
+    SSF_ASSERT(SSFIsDigit(isoStr[14]));
+    SSF_ASSERT(SSFIsDigit(isoStr[15]));
+    SSF_ASSERT(isoStr[16] == ':');
+    SSF_ASSERT(SSFIsDigit(isoStr[17]));
+    SSF_ASSERT(SSFIsDigit(isoStr[18]));
+    SSF_ASSERT(isoStr[19] == 'Z');
+    SSF_ASSERT(isoStr[20] == 0);
+    unixSysOut = SSFDTIME_UNIX_EPOCH_SYS_MAX + 1;
+    zoneOffsetMin = SSFDTIME_MIN_IN_DAY + 2;
+    SSF_ASSERT(SSFISO8601ISOToUnix(isoStr, &unixSysOut, &zoneOffsetMin));
+    SSF_ASSERT(unixSys == unixSysOut);
+    SSF_ASSERT(zoneOffsetMin == 0);
+
+    for (hour = 0; hour <= SSF_TS_HOUR_MAX; hour++)
+    {
+        if (hour == 2) hour = SSF_TS_HOUR_MAX - 1;
+        for (i = 0; i < 2; i++)
+        {
+            if (i == 0) sign = 1;
+            else sign = -1;
+            if (((sign == -1) && (unixSys < ((SSFPortTick_t)hour * SSFDTIME_MIN_IN_HOUR *
+                                             SSFDTIME_SEC_IN_MIN * SSF_TICKS_PER_SEC))) ||
+                ((sign == 1) && (SSFDTIME_UNIX_EPOCH_SYS_MAX - unixSys) < ((SSFPortTick_t)hour *
+                                 SSFDTIME_MIN_IN_HOUR * SSFDTIME_SEC_IN_MIN * SSF_TICKS_PER_SEC)))
+            {
+                /* Offset not in valid date range */
+                SSF_ASSERT(SSFISO8601UnixToISO(unixSys, false, false, 0,
+                                               SSF_ISO8601_ZONE_OFFSET_HH, hour *
+                                               SSFDTIME_MIN_IN_HOUR * sign, isoStr,
+                                               sizeof(isoStr)) == false);
+            }
+            else
+            {
+                SSF_ASSERT(SSFISO8601UnixToISO(unixSys, false, false, 0,
+                                               SSF_ISO8601_ZONE_OFFSET_HH, hour *
+                                               SSFDTIME_MIN_IN_HOUR * sign, isoStr,
+                                               sizeof(isoStr)));
+                SSF_ASSERT(SSFIsDigit(isoStr[0]));
+                SSF_ASSERT(SSFIsDigit(isoStr[1]));
+                SSF_ASSERT(SSFIsDigit(isoStr[2]));
+                SSF_ASSERT(SSFIsDigit(isoStr[3]));
+                SSF_ASSERT(isoStr[4] == '-');
+                SSF_ASSERT(SSFIsDigit(isoStr[5]));
+                SSF_ASSERT(SSFIsDigit(isoStr[6]));
+                SSF_ASSERT(isoStr[7] == '-');
+                SSF_ASSERT(SSFIsDigit(isoStr[8]));
+                SSF_ASSERT(SSFIsDigit(isoStr[9]));
+                SSF_ASSERT(isoStr[10] == 'T');
+                SSF_ASSERT(SSFIsDigit(isoStr[11]));
+                SSF_ASSERT(SSFIsDigit(isoStr[12]));
+                SSF_ASSERT(isoStr[13] == ':');
+                SSF_ASSERT(SSFIsDigit(isoStr[14]));
+                SSF_ASSERT(SSFIsDigit(isoStr[15]));
+                SSF_ASSERT(isoStr[16] == ':');
+                SSF_ASSERT(SSFIsDigit(isoStr[17]));
+                SSF_ASSERT(SSFIsDigit(isoStr[18]));
+                if ((sign == 1) || (hour == 0)) SSF_ASSERT(isoStr[19] == '+');
+                else SSF_ASSERT(isoStr[19] == '-');
+                SSF_ASSERT(SSFIsDigit(isoStr[20]));
+                SSF_ASSERT(SSFIsDigit(isoStr[21]));
+                SSF_ASSERT(isoStr[22] == 0);
+                unixSysOut = SSFDTIME_UNIX_EPOCH_SYS_MAX + 1;
+                zoneOffsetMin = SSFDTIME_MIN_IN_DAY + 2;
+                SSF_ASSERT(SSFISO8601ISOToUnix(isoStr, &unixSysOut, &zoneOffsetMin));
+                SSF_ASSERT(unixSys == unixSysOut);
+                SSF_ASSERT(zoneOffsetMin == (int16_t)((hour * SSFDTIME_MIN_IN_HOUR) * sign));
+            }
+        }
+    }
+
+    for (hour = 0; hour <= SSF_TS_HOUR_MAX; hour++)
+    {
+        if (hour == 2) hour = SSF_TS_HOUR_MAX - 1;
+        for (minute = 0; minute <= SSF_TS_MIN_MAX; minute += SSF_TS_MIN_MAX)
+        {
+            for (i = 0; i < 2; i++)
+            {
+                if (i == 0) sign = 1;
+                else sign = -1;
+                if (((sign == -1) && (unixSys < (((((SSFPortTick_t)hour * SSFDTIME_MIN_IN_HOUR) +
+                                                 minute) * SSFDTIME_SEC_IN_MIN) *
+                                                 SSF_TICKS_PER_SEC))) ||
+                    ((sign == 1) && (SSFDTIME_UNIX_EPOCH_SYS_MAX - unixSys) <
+                                    (((((SSFPortTick_t)hour * SSFDTIME_MIN_IN_HOUR) + minute) *
+                                    SSFDTIME_SEC_IN_MIN) * SSF_TICKS_PER_SEC)))
+                {
+                    /* Offset not in valid date range */
+                    SSF_ASSERT(SSFISO8601UnixToISO(unixSys, false, false, 0,
+                                                   SSF_ISO8601_ZONE_OFFSET_HHMM,
+                                                   ((hour * SSFDTIME_MIN_IN_HOUR) + minute) *
+                                                   sign, isoStr, sizeof(isoStr)) == false);
+                }
+                else
+                {
+                    SSF_ASSERT(SSFISO8601UnixToISO(unixSys, false, false, 0,
+                                                   SSF_ISO8601_ZONE_OFFSET_HHMM,
+                                                   ((hour * SSFDTIME_MIN_IN_HOUR) + minute) *
+                                                   sign, isoStr, sizeof(isoStr)));
+                    SSF_ASSERT(SSFIsDigit(isoStr[0]));
+                    SSF_ASSERT(SSFIsDigit(isoStr[1]));
+                    SSF_ASSERT(SSFIsDigit(isoStr[2]));
+                    SSF_ASSERT(SSFIsDigit(isoStr[3]));
+                    SSF_ASSERT(isoStr[4] == '-');
+                    SSF_ASSERT(SSFIsDigit(isoStr[5]));
+                    SSF_ASSERT(SSFIsDigit(isoStr[6]));
+                    SSF_ASSERT(isoStr[7] == '-');
+                    SSF_ASSERT(SSFIsDigit(isoStr[8]));
+                    SSF_ASSERT(SSFIsDigit(isoStr[9]));
+                    SSF_ASSERT(isoStr[10] == 'T');
+                    SSF_ASSERT(SSFIsDigit(isoStr[11]));
+                    SSF_ASSERT(SSFIsDigit(isoStr[12]));
+                    SSF_ASSERT(isoStr[13] == ':');
+                    SSF_ASSERT(SSFIsDigit(isoStr[14]));
+                    SSF_ASSERT(SSFIsDigit(isoStr[15]));
+                    SSF_ASSERT(isoStr[16] == ':');
+                    SSF_ASSERT(SSFIsDigit(isoStr[17]));
+                    SSF_ASSERT(SSFIsDigit(isoStr[18]));
+                    if ((sign == 1) || ((hour == 0) && (minute == 0)))
+                    { SSF_ASSERT(isoStr[19] == '+'); }
+                    else SSF_ASSERT(isoStr[19] == '-');
+                    SSF_ASSERT(SSFIsDigit(isoStr[20]));
+                    SSF_ASSERT(SSFIsDigit(isoStr[21]));
+                    SSF_ASSERT(isoStr[22] == ':');
+                    SSF_ASSERT(SSFIsDigit(isoStr[23]));
+                    SSF_ASSERT(SSFIsDigit(isoStr[24]));
+                    SSF_ASSERT(isoStr[25] == 0);
+                    unixSysOut = SSFDTIME_UNIX_EPOCH_SYS_MAX + 1;
+                    zoneOffsetMin = SSFDTIME_MIN_IN_DAY + 2;
+                    SSF_ASSERT(SSFISO8601ISOToUnix(isoStr, &unixSysOut, &zoneOffsetMin));
+                    SSF_ASSERT(unixSys == unixSysOut);
+                    SSF_ASSERT(zoneOffsetMin == (int16_t)(((hour * SSFDTIME_MIN_IN_HOUR) +
+                                                          minute) * sign));
+                }
+            }
+        }
+    }
+#if SSF_ISO8601_ALLOW_NO_ZONE_ISO_TO_UNIX == 1
+    for (hour = 0; hour <= SSF_TS_HOUR_MAX; hour++)
+    {
+        if (hour == 2) hour = SSF_TS_HOUR_MAX - 1;
+        for (minute = 0; minute <= SSF_TS_MIN_MAX; minute += SSF_TS_MIN_MAX)
+        {
+            for (i = 0; i < 2; i++)
+            {
+                if (i == 0) sign = 1;
+                else sign = -1;
+                if (((sign == -1) && (unixSys < (((((SSFPortTick_t)hour * SSFDTIME_MIN_IN_HOUR) +
+                                                minute) * SSFDTIME_SEC_IN_MIN) *
+                                                SSF_TICKS_PER_SEC))) ||
+                    ((sign == 1) && (SSFDTIME_UNIX_EPOCH_SYS_MAX - unixSys) <
+                                    (((((SSFPortTick_t)hour * SSFDTIME_MIN_IN_HOUR) + minute) *
+                                    SSFDTIME_SEC_IN_MIN) * SSF_TICKS_PER_SEC)))
+                {
+                    /* Offset not in valid date range */
+                    SSF_ASSERT(SSFISO8601UnixToISO(unixSys, false, false, 0,
+                                                   SSF_ISO8601_ZONE_OFFSET_HHMM,
+                                                   ((hour * SSFDTIME_MIN_IN_HOUR) + minute) *
+                                                   sign, isoStr, sizeof(isoStr)) == false);
+                }
+                else
+                {
+                    SSF_ASSERT(SSFISO8601UnixToISO(unixSys, false, false, 0,
+                                                   SSF_ISO8601_ZONE_LOCAL,
+                                                   ((hour * SSFDTIME_MIN_IN_HOUR) + minute) *
+                                                   sign, isoStr, sizeof(isoStr)));
+                    SSF_ASSERT(SSFIsDigit(isoStr[0]));
+                    SSF_ASSERT(SSFIsDigit(isoStr[1]));
+                    SSF_ASSERT(SSFIsDigit(isoStr[2]));
+                    SSF_ASSERT(SSFIsDigit(isoStr[3]));
+                    SSF_ASSERT(isoStr[4] == '-');
+                    SSF_ASSERT(SSFIsDigit(isoStr[5]));
+                    SSF_ASSERT(SSFIsDigit(isoStr[6]));
+                    SSF_ASSERT(isoStr[7] == '-');
+                    SSF_ASSERT(SSFIsDigit(isoStr[8]));
+                    SSF_ASSERT(SSFIsDigit(isoStr[9]));
+                    SSF_ASSERT(isoStr[10] == 'T');
+                    SSF_ASSERT(SSFIsDigit(isoStr[11]));
+                    SSF_ASSERT(SSFIsDigit(isoStr[12]));
+                    SSF_ASSERT(isoStr[13] == ':');
+                    SSF_ASSERT(SSFIsDigit(isoStr[14]));
+                    SSF_ASSERT(SSFIsDigit(isoStr[15]));
+                    SSF_ASSERT(isoStr[16] == ':');
+                    SSF_ASSERT(SSFIsDigit(isoStr[17]));
+                    SSF_ASSERT(SSFIsDigit(isoStr[18]));
+                    SSF_ASSERT(isoStr[19] == 0);
+                    unixSysOut = SSFDTIME_UNIX_EPOCH_SYS_MAX + 1;
+                    zoneOffsetMin = SSFDTIME_MIN_IN_DAY + 2;
+                    SSF_ASSERT(SSFISO8601ISOToUnix(isoStr, &unixSysOut, &zoneOffsetMin));
+                    unixSysOut -= ((((SSFPortTick_t)hour * SSFDTIME_MIN_IN_HOUR) + minute) *
+                                  SSFDTIME_SEC_IN_MIN * SSF_TICKS_PER_SEC) * sign;
+                    SSF_ASSERT(unixSys == unixSysOut);
+                    SSF_ASSERT(zoneOffsetMin == SSFISO8601_INVALID_ZONE_OFFSET);
+                }
+            }
+        }
+    }
+#endif /* SSF_ISO8601_ALLOW_NO_ZONE_ISO_TO_UNIX */
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Runs every check in the slice's [start, end) range on the calling thread.                     */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFISO8601UTRunSlice(const SSFISO8601UTSlice_t *slice)
+{
+    uint64_t n;
+
+    SSF_REQUIRE(slice != NULL);
+    SSF_REQUIRE(slice->work > SSF_ISO8601_UT_WORK_MIN);
+    SSF_REQUIRE(slice->work < SSF_ISO8601_UT_WORK_MAX);
+    SSF_REQUIRE(slice->numDigsIdx < SSF_ISO8601_UT_NUM_FRAC_WIDTHS);
+    SSF_REQUIRE(slice->start <= slice->end);
+
+    /* Is the slice a fractional second sweep? */
+    if (slice->work == SSF_ISO8601_UT_WORK_FRAC)
+    {
+        /* Yes, check each fraction value in the slice */
+        SSF_REQUIRE(slice->end <= _ssfISO8601UTFracLim[slice->numDigsIdx]);
+        for (n = slice->start; n < slice->end; n++)
+        { _SSFISO8601UTFracCheck(slice->numDigsIdx, (uint32_t)n); }
+    }
+    else
+    {
+        /* No, check each unix second in the slice */
+        SSF_REQUIRE(slice->end <= (SSFDTIME_UNIX_EPOCH_SEC_MAX + 1ull));
+        for (n = slice->start; n < slice->end; n++) { _SSFISO8601UTSecCheck(n); }
+    }
+}
+
+#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
+/* --------------------------------------------------------------------------------------------- */
+/* Thread entry point that runs the slice passed in arg.                                         */
+/* --------------------------------------------------------------------------------------------- */
+#ifdef _WIN32
+static DWORD WINAPI _SSFISO8601UTThread(LPVOID arg)
+#else /* _WIN32 */
+static void *_SSFISO8601UTThread(void *arg)
+#endif /* _WIN32 */
+{
+    SSF_REQUIRE(arg != NULL);
+
+    _SSFISO8601UTRunSlice((const SSFISO8601UTSlice_t *)arg);
+#ifdef _WIN32
+    return 0;
+#else /* _WIN32 */
+    return NULL;
+#endif /* _WIN32 */
+}
+#endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns the online CPU count clamped to [1, SSF_ISO8601_UT_MAX_THREADS].                      */
+/* --------------------------------------------------------------------------------------------- */
+static uint32_t _SSFISO8601UTThreadCount(void)
+{
+#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
+#ifdef _WIN32
+    SYSTEM_INFO sysInfo;
+    uint64_t n;
+
+    GetSystemInfo(&sysInfo);
+    n = (uint64_t)sysInfo.dwNumberOfProcessors;
+#else /* _WIN32 */
+    long cpus;
+    uint64_t n;
+
+    cpus = sysconf(_SC_NPROCESSORS_ONLN);
+    n = (cpus < 1) ? 1u : (uint64_t)cpus;
+#endif /* _WIN32 */
+    if (n < 1u) n = 1u;
+    if (n > SSF_ISO8601_UT_MAX_THREADS) n = SSF_ISO8601_UT_MAX_THREADS;
+    return (uint32_t)n;
+#else /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
+    return 1u;
+#endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Splits [start, end) into one slice per CPU, runs them concurrently, and waits for all.        */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFISO8601UTParallel(SSFISO8601UTWork_t work, uint32_t numDigsIdx, uint64_t start,
+                                  uint64_t end)
+{
+    SSFISO8601UTSlice_t slices[SSF_ISO8601_UT_MAX_THREADS];
+#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
+#ifdef _WIN32
+    HANDLE threads[SSF_ISO8601_UT_MAX_THREADS];
+#else /* _WIN32 */
+    pthread_t threads[SSF_ISO8601_UT_MAX_THREADS];
+#endif /* _WIN32 */
+#endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
+    uint32_t numSlices;
+    uint32_t k;
+    uint64_t span;
+
+    SSF_REQUIRE(work > SSF_ISO8601_UT_WORK_MIN);
+    SSF_REQUIRE(work < SSF_ISO8601_UT_WORK_MAX);
+    SSF_REQUIRE(numDigsIdx < SSF_ISO8601_UT_NUM_FRAC_WIDTHS);
+    SSF_REQUIRE(start < end);
+
+    numSlices = _SSFISO8601UTThreadCount();
+    if ((end - start) < numSlices) numSlices = (uint32_t)(end - start);
+    span = (end - start) / numSlices;
+    for (k = 0; k < numSlices; k++)
+    {
+        slices[k].work = work;
+        slices[k].numDigsIdx = numDigsIdx;
+        slices[k].start = start + (span * k);
+        slices[k].end = (k == (numSlices - 1u)) ? end : (start + (span * (k + 1u)));
+    }
+
+#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
+    for (k = 1; k < numSlices; k++)
+    {
+#ifdef _WIN32
+        threads[k] = CreateThread(NULL, 0, _SSFISO8601UTThread, &slices[k], 0, NULL);
+        SSF_ASSERT(threads[k] != NULL);
+#else /* _WIN32 */
+        SSF_ASSERT(pthread_create(&threads[k], NULL, _SSFISO8601UTThread, &slices[k]) == 0);
+#endif /* _WIN32 */
+    }
+    _SSFISO8601UTRunSlice(&slices[0]);
+    for (k = 1; k < numSlices; k++)
+    {
+#ifdef _WIN32
+        SSF_ASSERT(WaitForSingleObject(threads[k], INFINITE) == WAIT_OBJECT_0);
+        SSF_ASSERT(CloseHandle(threads[k]));
+#else /* _WIN32 */
+        SSF_ASSERT(pthread_join(threads[k], NULL) == 0);
+#endif /* _WIN32 */
+    }
+#else /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
+    for (k = 0; k < numSlices; k++) { _SSFISO8601UTRunSlice(&slices[k]); }
+#endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
+}
+#endif /* SSF_ISO8601_EXHAUSTIVE_UNIT_TEST */
+
 /* --------------------------------------------------------------------------------------------- */
 /* Unit tests the ssfiso8601 interface.                                                          */
 /* --------------------------------------------------------------------------------------------- */
@@ -52,10 +590,6 @@ void SSFISO8601UnitTest(void)
     uint32_t jmax;
     int8_t sign;
     char isoStr[SSFISO8601_MAX_SIZE] = "";
-#if SSF_ISO8601_EXHAUSTIVE_UNIT_TEST == 1
-    SSFPortTick_t unixSysMin = SSFDTIME_UNIX_EPOCH_SYS_MIN;
-    SSFPortTick_t unixSysMax = SSFDTIME_UNIX_EPOCH_SYS_MAX;
-#endif
 
     srand((unsigned int)SSFPortGetTick64());
 
@@ -143,109 +677,30 @@ void SSFISO8601UnitTest(void)
     SSF_ASSERT(zoneOffsetMin == 0);
 
     jmax = 1;
-    for (i = 0; i < 9; i++)
+    for (i = 0; i < SSF_ISO8601_UT_NUM_FRAC_WIDTHS; i++)
     {
         jmax = jmax * 10;
-        for (j = 0; j < jmax; j++)
+#if SSF_ISO8601_EXHAUSTIVE_UNIT_TEST == 1
+        _SSFISO8601UTParallel(SSF_ISO8601_UT_WORK_FRAC, i, 0, jmax);
+#else /* SSF_ISO8601_EXHAUSTIVE_UNIT_TEST */
+        /* Is this fraction width small enough to sweep every value? */
+        if (jmax <= SSF_ISO8601_UT_FRAC_FULL_MAX)
         {
-            switch(i)
-            {
-                case 0:
-                    snprintf(isoStr, sizeof(isoStr), "1970-01-01T00:00:00.%01uZ", j);
-                break;
-                case 1:
-                    snprintf(isoStr, sizeof(isoStr), "1970-01-01T00:00:00.%02uZ", j);
-                break;
-                case 2:
-                    snprintf(isoStr, sizeof(isoStr), "1970-01-01T00:00:00.%03uZ", j);
-                break;
-                case 3:
-                    snprintf(isoStr, sizeof(isoStr), "1970-01-01T00:00:00.%04uZ", j);
-                break;
-                case 4:
-                    snprintf(isoStr, sizeof(isoStr), "1970-01-01T00:00:00.%05uZ", j);
-                break;
-                case 5:
-                    snprintf(isoStr, sizeof(isoStr), "1970-01-01T00:00:00.%06uZ", j);
-                break;
-                case 6:
-                    snprintf(isoStr, sizeof(isoStr), "1970-01-01T00:00:00.%07uZ", j);
-                break;
-                case 7:
-                    snprintf(isoStr, sizeof(isoStr), "1970-01-01T00:00:00.%08uZ", j);
-                break;
-                case 8:
-                    snprintf(isoStr, sizeof(isoStr), "1970-01-01T00:00:00.%09uZ", j);
-                break;
-                default:
-                SSF_ERROR();
-            }
-            SSF_ASSERT(SSFISO8601ISOToUnix(isoStr, &unixSys, &zoneOffsetMin));
-
-            switch(i)
-            {
-                case 0:
-                    SSF_ASSERT(unixSys == ((SSFPortTick_t)j * (SSF_TICKS_PER_SEC / 10ul)));
-                break;
-                case 1:
-                    SSF_ASSERT(unixSys == ((SSFPortTick_t)j * (SSF_TICKS_PER_SEC / 100ul)));
-                break;
-                case 2:
-                    SSF_ASSERT(unixSys == ((SSFPortTick_t)j * (SSF_TICKS_PER_SEC / 1000ul)));
-                break;
-                case 3:
-#if SSF_DTIME_SYS_PREC == 3
-                    SSF_ASSERT(unixSys == (j / 10ul));
-#else
-                    SSF_ASSERT(unixSys == ((SSFPortTick_t)j * (SSF_TICKS_PER_SEC / 10000ul)));
-#endif
-                break;
-                case 4:
-#if SSF_DTIME_SYS_PREC == 3
-                    SSF_ASSERT(unixSys == (j / 100ul));
-#else
-SSF_ASSERT(unixSys == ((SSFPortTick_t)j * (SSF_TICKS_PER_SEC / 100000ul)));
-#endif
-break;
-                case 5:
-#if SSF_DTIME_SYS_PREC == 3
-                    SSF_ASSERT(unixSys == (j / 1000ul));
-#else
-SSF_ASSERT(unixSys == ((SSFPortTick_t)j * (SSF_TICKS_PER_SEC / 1000000ul)));
-#endif
-break;
-                case 6:
-#if SSF_DTIME_SYS_PREC == 3
-                    SSF_ASSERT(unixSys == (j / 10000ul));
-#elif SSF_DTIME_SYS_PREC == 6
-                    SSF_ASSERT(unixSys == (j / 10ul));
-#else
-SSF_ASSERT(unixSys == ((SSFPortTick_t)j * (SSF_TICKS_PER_SEC / 10000000ul)));
-#endif
-break;
-                case 7:
-#if SSF_DTIME_SYS_PREC == 3
-                    SSF_ASSERT(unixSys == (j / 100000ul));
-#elif SSF_DTIME_SYS_PREC == 6
-                    SSF_ASSERT(unixSys == (j / 100ul));
-#else
-SSF_ASSERT(unixSys == ((SSFPortTick_t)j * (SSF_TICKS_PER_SEC / 100000000ul)));
-#endif
-break;
-                case 8:
-#if SSF_DTIME_SYS_PREC == 3
-                    SSF_ASSERT(unixSys == (j / 1000000ul));
-#elif SSF_DTIME_SYS_PREC == 6
-                    SSF_ASSERT(unixSys == (j / 1000ul));
-#else
-SSF_ASSERT(unixSys == ((SSFPortTick_t)j * (SSF_TICKS_PER_SEC / 1000000000ul)));
-#endif
-break;
-                default:
-                SSF_ERROR();
-            }
-            SSF_ASSERT(zoneOffsetMin == 0);
+            /* Yes, check every fraction value */
+            for (j = 0; j < jmax; j++) { _SSFISO8601UTFracCheck(i, j); }
         }
+        else
+        {
+            /* No, check a strided sample plus each 10^k - 1 and 10^k boundary */
+            for (j = 0; j < jmax; j += SSF_ISO8601_UT_FRAC_STRIDE) { _SSFISO8601UTFracCheck(i, j); }
+            for (j = 1; j < jmax; j *= 10)
+            {
+                _SSFISO8601UTFracCheck(i, j - 1);
+                _SSFISO8601UTFracCheck(i, j);
+            }
+            _SSFISO8601UTFracCheck(i, jmax - 1);
+        }
+#endif /* SSF_ISO8601_EXHAUSTIVE_UNIT_TEST */
     }
 
     /* Test that SSFISO8601UnixToISO() with SSF_ISO8601_ZONE_OFFSET_HH prints minutes if needed */
@@ -1033,222 +1488,8 @@ break;
     }
 
 #if SSF_ISO8601_EXHAUSTIVE_UNIT_TEST == 1
-    for(unixSys = unixSysMin; unixSys < unixSysMax; unixSys+=SSF_TICKS_PER_SEC)
-    {
-        SSF_ASSERT(SSFISO8601UnixToISO(unixSys, false, false, 0, SSF_ISO8601_ZONE_UTC, 0, isoStr,
-                                       sizeof(isoStr)));
-        SSF_ASSERT(SSFIsDigit(isoStr[0]));
-        SSF_ASSERT(SSFIsDigit(isoStr[1]));
-        SSF_ASSERT(SSFIsDigit(isoStr[2]));
-        SSF_ASSERT(SSFIsDigit(isoStr[3]));
-        SSF_ASSERT(isoStr[4] == '-');
-        SSF_ASSERT(SSFIsDigit(isoStr[5]));
-        SSF_ASSERT(SSFIsDigit(isoStr[6]));
-        SSF_ASSERT(isoStr[7] == '-');
-        SSF_ASSERT(SSFIsDigit(isoStr[8]));
-        SSF_ASSERT(SSFIsDigit(isoStr[9]));
-        SSF_ASSERT(isoStr[10] == 'T');
-        SSF_ASSERT(SSFIsDigit(isoStr[11]));
-        SSF_ASSERT(SSFIsDigit(isoStr[12]));
-        SSF_ASSERT(isoStr[13] == ':');
-        SSF_ASSERT(SSFIsDigit(isoStr[14]));
-        SSF_ASSERT(SSFIsDigit(isoStr[15]));
-        SSF_ASSERT(isoStr[16] == ':');
-        SSF_ASSERT(SSFIsDigit(isoStr[17]));
-        SSF_ASSERT(SSFIsDigit(isoStr[18]));
-        SSF_ASSERT(isoStr[19] == 'Z');
-        SSF_ASSERT(isoStr[20] == 0);
-        unixSysOut = SSFDTIME_UNIX_EPOCH_SYS_MAX + 1;
-        zoneOffsetMin = SSFDTIME_MIN_IN_DAY + 2;
-        SSF_ASSERT(SSFISO8601ISOToUnix(isoStr, &unixSysOut, &zoneOffsetMin));
-        SSF_ASSERT(unixSys == unixSysOut);
-        SSF_ASSERT(zoneOffsetMin == 0);
-
-        for (hour = 0; hour <= SSF_TS_HOUR_MAX; hour++)
-        {
-            if (hour == 2) hour = SSF_TS_HOUR_MAX - 1;
-            for (i = 0; i < 2; i++)
-            {
-                if (i == 0) sign = 1;
-                else sign = -1;
-                if (((sign == -1) && (unixSys < ((SSFPortTick_t)hour * SSFDTIME_MIN_IN_HOUR *
-                                                 SSFDTIME_SEC_IN_MIN * SSF_TICKS_PER_SEC))) ||
-                    ((sign == 1) && (SSFDTIME_UNIX_EPOCH_SYS_MAX - unixSys) < ((SSFPortTick_t)hour *
-                                     SSFDTIME_MIN_IN_HOUR * SSFDTIME_SEC_IN_MIN * SSF_TICKS_PER_SEC)))
-                {
-                    /* Offset not in valid date range */
-                    SSF_ASSERT(SSFISO8601UnixToISO(unixSys, false, false, 0,
-                                                   SSF_ISO8601_ZONE_OFFSET_HH, hour *
-                                                   SSFDTIME_MIN_IN_HOUR * sign, isoStr,
-                                                   sizeof(isoStr)) == false);
-                }
-                else
-                {
-                    SSF_ASSERT(SSFISO8601UnixToISO(unixSys, false, false, 0,
-                                                   SSF_ISO8601_ZONE_OFFSET_HH, hour *
-                                                   SSFDTIME_MIN_IN_HOUR * sign, isoStr,
-                                                   sizeof(isoStr)));
-                    SSF_ASSERT(SSFIsDigit(isoStr[0]));
-                    SSF_ASSERT(SSFIsDigit(isoStr[1]));
-                    SSF_ASSERT(SSFIsDigit(isoStr[2]));
-                    SSF_ASSERT(SSFIsDigit(isoStr[3]));
-                    SSF_ASSERT(isoStr[4] == '-');
-                    SSF_ASSERT(SSFIsDigit(isoStr[5]));
-                    SSF_ASSERT(SSFIsDigit(isoStr[6]));
-                    SSF_ASSERT(isoStr[7] == '-');
-                    SSF_ASSERT(SSFIsDigit(isoStr[8]));
-                    SSF_ASSERT(SSFIsDigit(isoStr[9]));
-                    SSF_ASSERT(isoStr[10] == 'T');
-                    SSF_ASSERT(SSFIsDigit(isoStr[11]));
-                    SSF_ASSERT(SSFIsDigit(isoStr[12]));
-                    SSF_ASSERT(isoStr[13] == ':');
-                    SSF_ASSERT(SSFIsDigit(isoStr[14]));
-                    SSF_ASSERT(SSFIsDigit(isoStr[15]));
-                    SSF_ASSERT(isoStr[16] == ':');
-                    SSF_ASSERT(SSFIsDigit(isoStr[17]));
-                    SSF_ASSERT(SSFIsDigit(isoStr[18]));
-                    if ((sign == 1) || (hour == 0)) SSF_ASSERT(isoStr[19] == '+');
-                    else SSF_ASSERT(isoStr[19] == '-');
-                    SSF_ASSERT(SSFIsDigit(isoStr[20]));
-                    SSF_ASSERT(SSFIsDigit(isoStr[21]));
-                    SSF_ASSERT(isoStr[22] == 0);
-                    unixSysOut = SSFDTIME_UNIX_EPOCH_SYS_MAX + 1;
-                    zoneOffsetMin = SSFDTIME_MIN_IN_DAY + 2;
-                    SSF_ASSERT(SSFISO8601ISOToUnix(isoStr, &unixSysOut, &zoneOffsetMin));
-                    SSF_ASSERT(unixSys == unixSysOut);
-                    SSF_ASSERT(zoneOffsetMin == (int16_t)((hour * SSFDTIME_MIN_IN_HOUR) * sign));
-                }
-            }
-        }
-
-        for (hour = 0; hour <= SSF_TS_HOUR_MAX; hour++)
-        {
-            if (hour == 2) hour = SSF_TS_HOUR_MAX - 1;
-            for (minute = 0; minute <= SSF_TS_MIN_MAX; minute += SSF_TS_MIN_MAX)
-            {
-                for (i = 0; i < 2; i++)
-                {
-                    if (i == 0) sign = 1;
-                    else sign = -1;
-                    if (((sign == -1) && (unixSys < (((((SSFPortTick_t)hour * SSFDTIME_MIN_IN_HOUR) +
-                                                     minute) * SSFDTIME_SEC_IN_MIN) *
-                                                     SSF_TICKS_PER_SEC))) ||
-                        ((sign == 1) && (SSFDTIME_UNIX_EPOCH_SYS_MAX - unixSys) <
-                                        (((((SSFPortTick_t)hour * SSFDTIME_MIN_IN_HOUR) + minute) *
-                                        SSFDTIME_SEC_IN_MIN) * SSF_TICKS_PER_SEC)))
-                    {
-                        /* Offset not in valid date range */
-                        SSF_ASSERT(SSFISO8601UnixToISO(unixSys, false, false, 0,
-                                                       SSF_ISO8601_ZONE_OFFSET_HHMM,
-                                                       ((hour * SSFDTIME_MIN_IN_HOUR) + minute) *
-                                                       sign, isoStr, sizeof(isoStr)) == false);
-                    }
-                    else
-                    {
-                        SSF_ASSERT(SSFISO8601UnixToISO(unixSys, false, false, 0,
-                                                       SSF_ISO8601_ZONE_OFFSET_HHMM,
-                                                       ((hour * SSFDTIME_MIN_IN_HOUR) + minute) *
-                                                       sign, isoStr, sizeof(isoStr)));
-                        SSF_ASSERT(SSFIsDigit(isoStr[0]));
-                        SSF_ASSERT(SSFIsDigit(isoStr[1]));
-                        SSF_ASSERT(SSFIsDigit(isoStr[2]));
-                        SSF_ASSERT(SSFIsDigit(isoStr[3]));
-                        SSF_ASSERT(isoStr[4] == '-');
-                        SSF_ASSERT(SSFIsDigit(isoStr[5]));
-                        SSF_ASSERT(SSFIsDigit(isoStr[6]));
-                        SSF_ASSERT(isoStr[7] == '-');
-                        SSF_ASSERT(SSFIsDigit(isoStr[8]));
-                        SSF_ASSERT(SSFIsDigit(isoStr[9]));
-                        SSF_ASSERT(isoStr[10] == 'T');
-                        SSF_ASSERT(SSFIsDigit(isoStr[11]));
-                        SSF_ASSERT(SSFIsDigit(isoStr[12]));
-                        SSF_ASSERT(isoStr[13] == ':');
-                        SSF_ASSERT(SSFIsDigit(isoStr[14]));
-                        SSF_ASSERT(SSFIsDigit(isoStr[15]));
-                        SSF_ASSERT(isoStr[16] == ':');
-                        SSF_ASSERT(SSFIsDigit(isoStr[17]));
-                        SSF_ASSERT(SSFIsDigit(isoStr[18]));
-                        if ((sign == 1) || ((hour == 0) && (minute == 0)))
-                        { SSF_ASSERT(isoStr[19] == '+'); }
-                        else SSF_ASSERT(isoStr[19] == '-');
-                        SSF_ASSERT(SSFIsDigit(isoStr[20]));
-                        SSF_ASSERT(SSFIsDigit(isoStr[21]));
-                        SSF_ASSERT(isoStr[22] == ':');
-                        SSF_ASSERT(SSFIsDigit(isoStr[23]));
-                        SSF_ASSERT(SSFIsDigit(isoStr[24]));
-                        SSF_ASSERT(isoStr[25] == 0);
-                        unixSysOut = SSFDTIME_UNIX_EPOCH_SYS_MAX + 1;
-                        zoneOffsetMin = SSFDTIME_MIN_IN_DAY + 2;
-                        SSF_ASSERT(SSFISO8601ISOToUnix(isoStr, &unixSysOut, &zoneOffsetMin));
-                        SSF_ASSERT(unixSys == unixSysOut);
-                        SSF_ASSERT(zoneOffsetMin == (int16_t)(((hour * SSFDTIME_MIN_IN_HOUR) +
-                                                              minute) * sign));
-                    }
-                }
-            }
-        }
-#if SSF_ISO8601_ALLOW_NO_ZONE_ISO_TO_UNIX == 1
-        for (hour = 0; hour <= SSF_TS_HOUR_MAX; hour++)
-        {
-            if (hour == 2) hour = SSF_TS_HOUR_MAX - 1;
-            for (minute = 0; minute <= SSF_TS_MIN_MAX; minute += SSF_TS_MIN_MAX)
-            {
-                for (i = 0; i < 2; i++)
-                {
-                    if (i == 0) sign = 1;
-                    else sign = -1;
-                    if (((sign == -1) && (unixSys < (((((SSFPortTick_t)hour * SSFDTIME_MIN_IN_HOUR) +
-                                                    minute) * SSFDTIME_SEC_IN_MIN) *
-                                                    SSF_TICKS_PER_SEC))) ||
-                        ((sign == 1) && (SSFDTIME_UNIX_EPOCH_SYS_MAX - unixSys) <
-                                        (((((SSFPortTick_t)hour * SSFDTIME_MIN_IN_HOUR) + minute) *
-                                        SSFDTIME_SEC_IN_MIN) * SSF_TICKS_PER_SEC)))
-                    {
-                        /* Offset not in valid date range */
-                        SSF_ASSERT(SSFISO8601UnixToISO(unixSys, false, false, 0,
-                                                       SSF_ISO8601_ZONE_OFFSET_HHMM,
-                                                       ((hour * SSFDTIME_MIN_IN_HOUR) + minute) *
-                                                       sign, isoStr, sizeof(isoStr)) == false);
-                    }
-                    else
-                    {
-                        SSF_ASSERT(SSFISO8601UnixToISO(unixSys, false, false, 0,
-                                                       SSF_ISO8601_ZONE_LOCAL,
-                                                       ((hour * SSFDTIME_MIN_IN_HOUR) + minute) *
-                                                       sign, isoStr, sizeof(isoStr)));
-                        SSF_ASSERT(SSFIsDigit(isoStr[0]));
-                        SSF_ASSERT(SSFIsDigit(isoStr[1]));
-                        SSF_ASSERT(SSFIsDigit(isoStr[2]));
-                        SSF_ASSERT(SSFIsDigit(isoStr[3]));
-                        SSF_ASSERT(isoStr[4] == '-');
-                        SSF_ASSERT(SSFIsDigit(isoStr[5]));
-                        SSF_ASSERT(SSFIsDigit(isoStr[6]));
-                        SSF_ASSERT(isoStr[7] == '-');
-                        SSF_ASSERT(SSFIsDigit(isoStr[8]));
-                        SSF_ASSERT(SSFIsDigit(isoStr[9]));
-                        SSF_ASSERT(isoStr[10] == 'T');
-                        SSF_ASSERT(SSFIsDigit(isoStr[11]));
-                        SSF_ASSERT(SSFIsDigit(isoStr[12]));
-                        SSF_ASSERT(isoStr[13] == ':');
-                        SSF_ASSERT(SSFIsDigit(isoStr[14]));
-                        SSF_ASSERT(SSFIsDigit(isoStr[15]));
-                        SSF_ASSERT(isoStr[16] == ':');
-                        SSF_ASSERT(SSFIsDigit(isoStr[17]));
-                        SSF_ASSERT(SSFIsDigit(isoStr[18]));
-                        SSF_ASSERT(isoStr[19] == 0);
-                        unixSysOut = SSFDTIME_UNIX_EPOCH_SYS_MAX + 1;
-                        zoneOffsetMin = SSFDTIME_MIN_IN_DAY + 2;
-                        SSF_ASSERT(SSFISO8601ISOToUnix(isoStr, &unixSysOut, &zoneOffsetMin));
-                        unixSysOut -= ((((SSFPortTick_t)hour * SSFDTIME_MIN_IN_HOUR) + minute) *
-                                      SSFDTIME_SEC_IN_MIN * SSF_TICKS_PER_SEC) * sign;
-                        SSF_ASSERT(unixSys == unixSysOut);
-                        SSF_ASSERT(zoneOffsetMin == SSFISO8601_INVALID_ZONE_OFFSET);
-                    }
-                }
-            }
-        }
-#endif /* SSF_ISO8601_ALLOW_NO_ZONE_ISO_TO_UNIX */
-    }
+    _SSFISO8601UTParallel(SSF_ISO8601_UT_WORK_SEC, 0, SSFDTIME_UNIX_EPOCH_SEC_MIN,
+                          SSFDTIME_UNIX_EPOCH_SEC_MAX + 1ull);
 #endif /* SSF_ISO8601_EXHAUSTIVE_UNIT_TEST */
 
     /* Fuzz test */

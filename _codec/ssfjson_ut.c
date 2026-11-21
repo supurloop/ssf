@@ -1676,6 +1676,7 @@ void SSFJsonUnitTest(void)
 
     /* Generator tests */
     i = 0x12345678;
+    /* NOTE: fails on STM32 newlib-nano unless linked -u _printf_float (PrintDouble: %f/%g) */
     SSF_ASSERT(SSFJsonPrintObject(_jsOut, sizeof(_jsOut), 0, &end, p3fn, &i, NULL) == true);
     SSF_ASSERT(SSFJsonIsValid(_jsOut));
     SSF_ASSERT(i == 0xabcdef90);

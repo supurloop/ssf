@@ -97,6 +97,7 @@ void SSFDecUnitTest(void)
     for (j = -1000000; j < 1000000; j++)
     {
         i = j + 1;
+        /* NOTE: fails on STM32 newlib-nano: its printf lacks %lld, so str1 is "ld" */
         snprintf(str1, sizeof(str1), "%lld", (long long int)j);
         SSF_ASSERT(SSFDecStrToInt(str1, &i));
         SSF_ASSERT(i == j);

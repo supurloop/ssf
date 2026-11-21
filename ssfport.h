@@ -309,7 +309,10 @@ typedef uint64_t SSFPortTick_t;
 /* SSF_CONFIG_ENABLE_THREAD_SUPPORT allows the ssfcfg module to be safely called from multiple
    contexts. */
 /* 0, disable thread synchronization; 1, enable thread synchronization. */
+/* Defined as a fall-through default so command-line -D wins (build-arm.sh passes 0). */
+#ifndef SSF_CONFIG_ENABLE_THREAD_SUPPORT
 #define SSF_CONFIG_ENABLE_THREAD_SUPPORT (1u)
+#endif
 
 #if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
 #ifdef _WIN32

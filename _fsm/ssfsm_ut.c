@@ -122,9 +122,6 @@ void UT1TestHandler1(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t
         /* guard -- not the "already de-initialized" precondition -- is what fires, and it aborts    */
         /* before touching UT_2, leaving the rest of the test undisturbed. */
         SSF_ASSERT_TEST(SSFSMDeInitHandler(SSF_SM_UNIT_TEST_2));
-#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 0
-        SSF_ASSERT_TEST(SSFSMPutEvent(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_UT1_1));
-#endif
         break;
     case SSF_SM_EVENT_UTX_1:
         if ((data != NULL) && (dataLen == 1))
@@ -495,6 +492,67 @@ void UT4TestHandler1(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t
     }
 }
 #endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1 */
+
+/* --------------------------------------------------------------------------------------------- */
+/* Running-timer handler: on UT1_1 starts maxTimers timers, the first with heap-held data.       */
+/* --------------------------------------------------------------------------------------------- */
+static void UT1TimerHandler(SSFSMEventId_t eid, const SSFSMData_t *data,
+                            SSFSMDataLen_t dataLen, SSFVoidFn_t *superHandler)
+{
+    uint32_t ei;
+    SSFSMData_t timerData[2u * sizeof(SSFSMData_t *)];
+
+    SSF_REQUIRE((eid >= SSF_SM_EVENT_ENTRY) && (eid < SSF_SM_EVENT_MAX));
+    SSF_REQUIRE(dataLen == 0);
+    SSF_UNUSED_PTR(data);
+    SSF_REQUIRE(superHandler != NULL);
+    SSF_ASSERT((SSF_SM_EVENT_UT2_1 + SSFSM_UT_MAX_TIMERS) <= SSF_SM_EVENT_MAX);
+
+    /* Is this the event that starts the timers? */
+    if (eid == SSF_SM_EVENT_UT1_1)
+    {
+        /* Yes, data longer than a pointer is heap-allocated, so DeInit must free it too */
+        memset(timerData, 0x5a, sizeof(timerData));
+        SSFSMStartTimerData(SSF_SM_EVENT_UT2_1, 1000000u, timerData,
+                            (SSFSMDataLen_t)sizeof(timerData));
+        for (ei = 1; ei < SSFSM_UT_MAX_TIMERS; ei++)
+        { SSFSMStartTimer((SSFSMEventId_t)(SSF_SM_EVENT_UT2_1 + ei), 1000000u); }
+    }
+    /* No, ENTRY and SUPER need no action */
+}
+
+#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 0
+/* --------------------------------------------------------------------------------------------- */
+/* Event-pool capacity handler: on UT1_1 fills the pool with timers and events, then overflows.  */
+/* --------------------------------------------------------------------------------------------- */
+static void UT1CapacityHandler(SSFSMEventId_t eid, const SSFSMData_t *data,
+                               SSFSMDataLen_t dataLen, SSFVoidFn_t *superHandler)
+{
+    uint32_t ei;
+
+    SSF_REQUIRE((eid >= SSF_SM_EVENT_ENTRY) && (eid < SSF_SM_EVENT_MAX));
+    SSF_REQUIRE(dataLen == 0);
+    SSF_UNUSED_PTR(data);
+    SSF_REQUIRE(superHandler != NULL);
+    SSF_ASSERT((SSF_SM_EVENT_UT2_1 + SSFSM_UT_MAX_TIMERS) <= SSF_SM_EVENT_MAX);
+
+    /* Is this the event that starts the capacity fill? */
+    if (eid == SSF_SM_EVENT_UT1_1)
+    {
+        /* Yes, hold maxTimers event-pool slots with running timers */
+        for (ei = 0; ei < SSFSM_UT_MAX_TIMERS; ei++)
+        { SSFSMStartTimer((SSFSMEventId_t)(SSF_SM_EVENT_UT2_1 + ei), 1000000u); }
+
+        /* Queue maxEvents events; inside a handler they queue rather than dispatch */
+        for (ei = 0; ei < SSFSM_UT_MAX_EVENTS; ei++)
+        { SSFSMPutEvent(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_UTX_1); }
+
+        /* Pool is full, so one more event must assert */
+        SSF_ASSERT_TEST(SSFSMPutEvent(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_UTX_1));
+    }
+    /* No, ENTRY, SUPER and the queued events need no action */
+}
+#endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT == 0 */
 
 /* --------------------------------------------------------------------------------------------- */
 /* Performs unit test on ssfll's external interface.                                             */
@@ -879,6 +937,7 @@ void SSFSMUnitTest(void)
     /* (Hardening) The event pool is sized maxEvents + maxTimers, so pending timers cannot starve    */
     /* queued events. Queue maxEvents + maxTimers events to exercise the full event-pool capacity;   */
     /* with the old size-maxEvents pool this would exhaust and assert. DeInit drains them unprocessed. */
+#if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
     {
         uint32_t ei;
         SSFSMInitHandler(SSF_SM_UNIT_TEST_1, UT1TestHandler1);
@@ -887,6 +946,20 @@ void SSFSMUnitTest(void)
         for (ei = 0; ei < SSFSM_UT_MAX_EVENTS + SSFSM_UT_MAX_TIMERS; ei++)
         { SSFSMPutEvent(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_UT1_1); }
     }
+#else
+    /* Without threads, events posted outside a handler dispatch at once, so fill from a handler */
+    SSFSMInitHandler(SSF_SM_UNIT_TEST_1, UT1CapacityHandler);
+    SSFSMPutEvent(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_UT1_1);
+#endif
+
+    /* DeInit with timers still running must return their events to the event pool */
+    SSFSMDeInit();
+    SSFSMInit(SSFSM_UT_MAX_EVENTS, SSFSM_UT_MAX_TIMERS);
+    SSFSMInitHandler(SSF_SM_UNIT_TEST_1, UT1TimerHandler);
+    SSFSMPutEvent(SSF_SM_UNIT_TEST_1, SSF_SM_EVENT_UT1_1);
+    SSF_ASSERT(SSFSMTask(NULL) == true);
+    SSFSMDeInit();
+    SSFSMInit(SSFSM_UT_MAX_EVENTS, SSFSM_UT_MAX_TIMERS);
 
     /* End test */
     SSFSMDeInit();

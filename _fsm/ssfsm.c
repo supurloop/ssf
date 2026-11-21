@@ -291,6 +291,7 @@ void SSFSMDeInit(void)
         SSFLLGetItem(&_ssfsmTimers, &item, SSF_LL_LOC_ITEM, item);
         if ((t.event->data != NULL) && (t.event->dataLen > sizeof(SSFSMData_t *)))
         { _SSFSMFreeEventData(t.event->data); }
+        SSFMPoolFree(&_ssfsmEventPool, t.event);
         SSFMPoolFree(&_ssfsmTimerPool, item);
         item = next;
     }

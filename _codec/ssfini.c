@@ -59,8 +59,8 @@ typedef struct
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFINIFindNextLine(SSFCStrIn_t ini, SSFINIContext_t *context)
 {
-    char *eol;
-    char *eol2;
+    const char *eol;
+    const char *eol2;
 
     SSF_REQUIRE(ini != NULL);
     SSF_REQUIRE(context != NULL);

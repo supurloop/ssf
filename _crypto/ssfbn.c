@@ -3411,7 +3411,7 @@ bool SSFBNGenPrime(SSFBN_t *p, uint16_t bitLen, uint16_t rounds, SSFPRNGContext_
     SSF_REQUIRE(prng != NULL);
 
     byteLen = (size_t)(bitLen + 7u) / 8u;
-    limbs = SSF_BN_BITS_TO_LIMBS(bitLen);
+    limbs = (uint16_t)SSF_BN_BITS_TO_LIMBS(bitLen);
 
     /* topMask keeps only the low bitLen - 8 * (byteLen - 1) bits of buf[0] */
     topMask = (uint8_t)(0xFFu >> ((8u * (uint16_t)byteLen) - bitLen));

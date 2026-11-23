@@ -240,6 +240,7 @@
     <ClCompile Include="_net\ssfmqttpkt.c" />
     <ClCompile Include="_net\ssfmqttpkt_ut.c" />
     <ClCompile Include="_net\ssfnetsock.c" />
+    <ClCompile Include="_net\ssfnetsock_ut.c" />
     <ClCompile Include="_osal\ssflptask.c" />
     <ClCompile Include="_osal\ssflptask_ut.c" />
     <ClCompile Include="_storage\ssfcfg.c" />
@@ -356,6 +357,7 @@
     <ClInclude Include="_opt\ssfmatch_opt.h" />
     <ClInclude Include="_opt\ssfmpool_opt.h" />
     <ClInclude Include="_opt\ssfmqttc_opt.h" />
+    <ClInclude Include="_opt\ssfnetsock_opt.h" />
     <ClInclude Include="_opt\ssfprng_opt.h" />
     <ClInclude Include="_opt\ssfrs_opt.h" />
     <ClInclude Include="_opt\ssfrsa_opt.h" />

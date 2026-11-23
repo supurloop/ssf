@@ -44,12 +44,19 @@ extern "C" {
 /* --------------------------------------------------------------------------------------------- */
 /* Design                                                                                        */
 /* --------------------------------------------------------------------------------------------- */
-/* - Plaintext TCP, no TLS, no authentication. Intended for hosted builds (Windows, Linux, macOS) */
+/* - Plaintext TCP, no TLS, no authentication. For hosted builds (Windows, Linux, macOS)         */
 /*   and as the reference for porting the transport to an embedded IP stack.                     */
-/* - open() resolves the host with getaddrinfo(), which blocks for the duration of the lookup.    */
-/*   Everything after that is non-blocking. A literal IPv4 or IPv6 address resolves immediately.  */
+/* - No call blocks, name resolution included. A literal IPv4 or IPv6 address is parsed in       */
+/*   open(). A host name is resolved with the OS asynchronous resolver and polled by pollOpen(): */
+/*   GetAddrInfoExW with an event on Windows, DNSServiceGetAddrInfo on macOS, getaddrinfo_a on   */
+/*   glibc. Elsewhere only literal addresses are accepted and open() of a name returns false.    */
+/* - Up to SSF_NETSOCK_CONFIG_MAX_ADDRS resolved addresses are tried in order; a failed connect  */
+/*   moves on to the next.                                                                       */
+/* - close() during a lookup returns at once. A lookup the OS cannot cancel keeps its slot until */
+/*   it finishes and is reclaimed by a later call; SSF_NETSOCK_CONFIG_MAX_LOOKUPS bounds them.   */
 /* - One socket per instance. The instance must outlive the client that holds its transport.     */
-/* - On Windows, Winsock is started by the first Init() and stopped by the last DeInit().         */
+/* - On Windows, Winsock is started by the first Init() and stopped once the last instance is    */
+/*   deinitialized and no abandoned lookup remains.                                              */
 
 /* --------------------------------------------------------------------------------------------- */
 /* Defines and typedefs                                                                          */
@@ -60,9 +67,13 @@ typedef uintptr_t SSFNetSockHandle_t;          /* SOCKET without pulling winsock
 typedef int SSFNetSockHandle_t;
 #endif
 
+#define SSF_NETSOCK_ADDR_SIZE (28u)   /* Holds a sockaddr_in or sockaddr_in6 on every platform */
+#define SSF_NETSOCK_NO_LOOKUP (0xffu)
+
 typedef enum
 {
     SSF_NETSOCK_STATE_CLOSED,
+    SSF_NETSOCK_STATE_RESOLVING,
     SSF_NETSOCK_STATE_CONNECTING,
     SSF_NETSOCK_STATE_CONNECTED
 } SSFNetSockState_t;
@@ -72,6 +83,11 @@ typedef struct
     SSFNetTransport_t transport;     /* Must be first; this is what the client is handed        */
     SSFNetSockHandle_t sock;
     SSFNetSockState_t state;
+    uint16_t port;                   /* Host byte order                                         */
+    uint8_t lookup;                  /* Lookup slot while RESOLVING, else SSF_NETSOCK_NO_LOOKUP */
+    uint8_t addrCount;               /* Resolved addresses in addrs                             */
+    uint8_t addrNext;                /* Next address to try                                     */
+    uint8_t addrs[SSF_NETSOCK_CONFIG_MAX_ADDRS][SSF_NETSOCK_ADDR_SIZE];  /* sockaddr, any port */
     uint32_t magic;
 } SSFNetSock_t;
 
@@ -83,6 +99,10 @@ void SSFNetSockInit(SSFNetSock_t *s);
 
 /* Closes any open connection and releases the instance. */
 void SSFNetSockDeInit(SSFNetSock_t *s);
+
+#if SSF_CONFIG_NETSOCK_UNIT_TEST == 1
+void SSFNetSockUnitTest(void);
+#endif /* SSF_CONFIG_NETSOCK_UNIT_TEST */
 
 #ifdef __cplusplus
 }

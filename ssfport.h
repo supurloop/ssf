@@ -140,6 +140,7 @@ extern "C" {
 /* _net */
 #define SSF_CONFIG_MQTTPKT_UNIT_TEST (1u)
 #define SSF_CONFIG_MQTTC_UNIT_TEST   (1u)
+#define SSF_CONFIG_NETSOCK_UNIT_TEST (1u)
 /* 1 also runs a round trip against a public broker; needs internet access. Unreachable broker  */
 /* is reported and skipped, any other failure asserts.                                         */
 #define SSF_CONFIG_MQTTC_UNIT_TEST_BROKER (1u)
@@ -193,6 +194,7 @@ extern "C" {
     /* _net */ \
     SSF_CONFIG_MQTTPKT_UNIT_TEST == 1 || \
     SSF_CONFIG_MQTTC_UNIT_TEST == 1 || \
+    SSF_CONFIG_NETSOCK_UNIT_TEST == 1 || \
     /* _storage */ \
     SSF_CONFIG_CFG_UNIT_TEST == 1 || \
     /* _debug */ \

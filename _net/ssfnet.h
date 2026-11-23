@@ -47,8 +47,10 @@ extern "C" {
 /* - A transport is a table of five non-blocking operations plus an implementation context. A    */
 /*   client holds a pointer to it and never looks inside; an implementation embeds the table as  */
 /*   the first member of its own struct and recovers itself from the pointer.                    */
-/* - Every call returns immediately. A result of WANT_READ or WANT_WRITE means nothing was done  */
-/*   and the caller should try again after the transport becomes readable or writable.           */
+/* - Every call returns immediately, name resolution included: an implementation must resolve    */
+/*   a host name asynchronously and report progress through pollOpen(). A result of WANT_READ or */
+/*   WANT_WRITE means nothing was done and the caller should try again after the transport       */
+/*   becomes readable or writable, or after a short delay while opening.                         */
 /* - Lifecycle: open() starts a connection; pollOpen() is called until it stops returning WANT_* */
 /*   and reports SUCCESS or failure; send() and recv() are valid only after SUCCESS; close() is  */
 /*   valid any time after open() and ends the connection unconditionally. After close() the      */

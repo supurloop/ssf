@@ -221,6 +221,7 @@ Options live in [`_opt/ssfmqttc_opt.h`](../_opt/ssfmqttc_opt.h) (aggregated into
 | <a id="opt-depth"></a>`SSF_MQTTC_CONFIG_RX_PUBLISH_QUEUE_DEPTH` | `4` | Inbound PUBLISH packets held for the application. Sizes the rx pool and the PUBACK capacity. |
 | <a id="opt-retry"></a>`SSF_MQTTC_CONFIG_RX_PUBLISH_RETRY_TICKS` | 1 s | Re-offer interval for a deferred inbound PUBLISH. |
 | <a id="opt-maxticks"></a>`SSF_MQTTC_CONFIG_RX_PUBLISH_MAX_TICKS` | 30 s | A deferred inbound PUBLISH is dropped this long after its first offer. |
+| <a id="opt-openpoll"></a>`SSF_MQTTC_CONFIG_OPEN_POLL_TICKS` | 10 ms | Longest `SSFMQTTCTask()` lets the app loop sleep while the transport resolves the host and connects. |
 | <a id="opt-pingresp"></a>`SSF_MQTTC_CONFIG_PINGRESP_TIMEOUT` | 30 s | Connection is dropped if PINGRESP does not follow PINGREQ within this time. Bounds the minimum `keepAliveSec` at four times this value. |
 
 The ssfsm event and timer pools must be sized for the client: see `SSF_SM_MAX_ACTIVE_EVENTS` and
@@ -449,8 +450,10 @@ the application. Call it on every iteration of the application loop, after `SSFS
 
 `nextTimeoutOpt` follows the `SSFSMTask()` convention: the caller initializes it, typically to
 `SSF_MAX_NEXT_TIMEOUT`, and the call only ever lowers it. It is lowered to the time of the next
-inbound publish retry when one is pending, and to 0 when more transport work is immediately
-available (unsent bytes accepted by the transport, or inbound bytes still to frame).
+inbound publish retry when one is pending, to [`SSF_MQTTC_CONFIG_OPEN_POLL_TICKS`](#opt-openpoll)
+while the transport is still opening (there is no socket to wait on during name resolution), and
+to 0 when more transport work is immediately available (unsent bytes accepted by the transport, or
+inbound bytes still to frame).
 
 **Returns:** `true` when more transport work is immediately available, `false` otherwise.
 
@@ -533,5 +536,8 @@ macros are shorthand over this.
   bad filter, or a broker that downgrades a QoS keep hitting the broker until the application calls
   `SSFMQTTCStop()`. The event carries no per-filter detail. A later revision could stop the client
   itself and report the reason through the STOPPED event, or expose per-filter SUBACK results.
-- **Hosted transport blocks on name resolution.** [`ssfnetsock`](ssfnetsock.h) calls
-  `getaddrinfo()` inside `open()`. Everything after that is non-blocking.
+- **Name resolution is polled.** [`ssfnetsock`](ssfnetsock.h) resolves host names with the OS
+  asynchronous resolver (Windows 8 or later, macOS, glibc Linux) and never blocks. On other
+  platforms it accepts only literal IPv4 or IPv6 addresses. A lookup the OS cannot cancel keeps
+  running after `close()`; `SSF_NETSOCK_CONFIG_MAX_LOOKUPS` bounds how many may pile up, and once
+  all are in use the attempt fails with `TRANSPORT_ERROR` and is retried after the backoff.

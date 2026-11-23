@@ -126,6 +126,9 @@
     <ClCompile Include="_net\ssfnetsock.c">
       <Filter>_net</Filter>
     </ClCompile>
+    <ClCompile Include="_net\ssfnetsock_ut.c">
+      <Filter>_net</Filter>
+    </ClCompile>
     <ClCompile Include="_osal\ssflptask.c">
       <Filter>_osal</Filter>
     </ClCompile>
@@ -479,6 +482,9 @@
       <Filter>_opt</Filter>
     </ClInclude>
     <ClInclude Include="_opt\ssfmqttc_opt.h">
+      <Filter>_opt</Filter>
+    </ClInclude>
+    <ClInclude Include="_opt\ssfnetsock_opt.h">
       <Filter>_opt</Filter>
     </ClInclude>
     <ClInclude Include="_opt\ssfprng_opt.h">

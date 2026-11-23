@@ -66,6 +66,7 @@ extern "C" {
 #include "ssfmatch_opt.h"
 #include "ssfmpool_opt.h"
 #include "ssfmqttc_opt.h"
+#include "ssfnetsock_opt.h"
 #include "ssfprng_opt.h"
 #include "ssfrs_opt.h"
 #include "ssfrsa_opt.h"

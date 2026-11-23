@@ -51,6 +51,10 @@ extern "C" {
 /* this value; with 30 s the smallest keepAliveSec is 120.                                       */
 #define SSF_MQTTC_CONFIG_PINGRESP_TIMEOUT       (SSF_TICKS_PER_SEC * 30u)
 
+/* While the transport is opening (name lookup, then connect) SSFMQTTCTask() lowers its next     */
+/* timeout to this many ticks, since there is no socket yet for the app loop to wait on. >= 1.   */
+#define SSF_MQTTC_CONFIG_OPEN_POLL_TICKS        (SSF_TICKS_PER_SEC / 100u)
+
 #if SSF_MQTTC_CONFIG_MAX_SUBSCRIPTIONS < 1
 #error SSF_MQTTC_CONFIG_MAX_SUBSCRIPTIONS must be at least 1.
 #endif
@@ -65,6 +69,9 @@ extern "C" {
 #endif
 #if SSF_MQTTC_CONFIG_PINGRESP_TIMEOUT < 1
 #error SSF_MQTTC_CONFIG_PINGRESP_TIMEOUT must be at least 1.
+#endif
+#if SSF_MQTTC_CONFIG_OPEN_POLL_TICKS < 1
+#error SSF_MQTTC_CONFIG_OPEN_POLL_TICKS must be at least 1.
 #endif
 
 #ifdef __cplusplus

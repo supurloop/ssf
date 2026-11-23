@@ -49,6 +49,7 @@
 #include "ssfsm.h"
 #include "ssfmqttpkt.h"
 #include "ssfmqttc.h"
+#include "ssfnetsock.h"
 #include "ssfmpool.h"
 #include "ssfsll.h"
 #include "ssfport.h"
@@ -264,6 +265,9 @@ SSFUnitTest_t unitTests[] =
 #if SSF_CONFIG_MQTTPKT_UNIT_TEST == 1
     { "ssfmqttpkt", "MQTT 3.1.1 Packet Codec", SSFMQTTPktUnitTest },
 #endif /* SSF_CONFIG_MQTTPKT_UNIT_TEST */
+#if SSF_CONFIG_NETSOCK_UNIT_TEST == 1
+    { "ssfnetsock", "TCP Socket Transport", SSFNetSockUnitTest },
+#endif /* SSF_CONFIG_NETSOCK_UNIT_TEST */
 
     /* _storage */
 #if SSF_CONFIG_CFG_UNIT_TEST == 1

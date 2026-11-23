@@ -1278,6 +1278,8 @@ bool SSFMQTTCTask(SSFPortTick_t *nextTimeoutOpt)
             break;
         case SSF_NET_IO_WANT_READ:
         case SSF_NET_IO_WANT_WRITE:
+            /* No socket to wait on yet, so ask to be called again soon */
+            _SSFMQTTCNextTimeoutLower(nextTimeoutOpt, SSF_MQTTC_CONFIG_OPEN_POLL_TICKS);
             break;
         default:
             _SSFMQTTCLinkFail(SSF_MQTTC_REASON_TRANSPORT_ERROR);

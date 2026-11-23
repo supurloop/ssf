@@ -47,6 +47,8 @@
 #include "ssfbfifo.h"
 #include "ssfll.h"
 #include "ssfsm.h"
+#include "ssfmqttpkt.h"
+#include "ssfmqttc.h"
 #include "ssfmpool.h"
 #include "ssfsll.h"
 #include "ssfport.h"
@@ -234,6 +236,14 @@ SSFUnitTest_t unitTests[] =
 #if SSF_CONFIG_SM_UNIT_TEST == 1
     { "ssfsm", "Finite State Machine", SSFSMUnitTest },
 #endif /* SSF_CONFIG_SM_UNIT_TEST */
+
+    /* _net */
+#if SSF_CONFIG_MQTTC_UNIT_TEST == 1
+    { "ssfmqttc", "MQTT 3.1.1 Client", SSFMQTTCUnitTest },
+#endif /* SSF_CONFIG_MQTTC_UNIT_TEST */
+#if SSF_CONFIG_MQTTPKT_UNIT_TEST == 1
+    { "ssfmqttpkt", "MQTT 3.1.1 Packet Codec", SSFMQTTPktUnitTest },
+#endif /* SSF_CONFIG_MQTTPKT_UNIT_TEST */
 
     /* _storage */
 #if SSF_CONFIG_CFG_UNIT_TEST == 1

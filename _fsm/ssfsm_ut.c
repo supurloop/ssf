@@ -92,6 +92,8 @@ void UT3TestHandler2(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t
                      SSFVoidFn_t *superHandler);
 void UT3TestHandler3(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen,
                      SSFVoidFn_t *superHandler);
+void UT3TestHandler4(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen,
+                     SSFVoidFn_t *superHandler);
 
 /* --------------------------------------------------------------------------------------------- */
 /* State machine 1 test handler 1.                                                               */
@@ -320,6 +322,20 @@ void UT3TestHandler1Super(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMData
     case SSF_SM_EVENT_UNIT_TEST_2:
         SSFSMTran(UT3TestHandler1);
         break;
+    case SSF_SM_EVENT_UTX_1:
+        /* Reached by delegation from a child; the timer must be owned by this super state */
+        SSFSMStartTimer(SSF_SM_EVENT_UT1_1, SSF_TICKS_PER_SEC >> 2);
+        break;
+    case SSF_SM_EVENT_UT1_1:
+        SSF_ASSERT(_utTraceIndex < sizeof(_utTrace));
+        _utTrace[_utTraceIndex] = 7;
+        _utTraceIndex++;
+        break;
+    case SSF_SM_EVENT_UT1_2:
+        SSF_ASSERT(_utTraceIndex < sizeof(_utTrace));
+        _utTrace[_utTraceIndex] = 8;
+        _utTraceIndex++;
+        break;
     default:
         break;
     }
@@ -352,6 +368,44 @@ void UT3TestHandler1(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t
         break;
     case SSF_SM_EVENT_UNIT_TEST_2:
         SSFSMTran(UT3TestHandler1Super);
+        break;
+    case SSF_SM_EVENT_UTX_2:
+        /* Child-owned timer; must be cancelled when this child exits */
+        SSFSMStartTimer(SSF_SM_EVENT_UT1_2, SSF_TICKS_PER_SEC >> 2);
+        break;
+    case SSF_SM_EVENT_UT2_1:
+        SSFSMTran(UT3TestHandler4);
+        break;
+    default:
+        SSF_SM_SUPER(UT3TestHandler1Super);
+        break;
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* State machine 3 test handler 4: sibling of handler 1 under handler 1 super.                   */
+/* --------------------------------------------------------------------------------------------- */
+void UT3TestHandler4(SSFSMEventId_t eid, const SSFSMData_t *data, SSFSMDataLen_t dataLen,
+                     SSFVoidFn_t *superHandler)
+{
+    SSF_UNUSED_PTR(data);
+    SSF_UNUSED_INT(dataLen);
+    SSF_UNUSED_PTR(superHandler);
+
+    switch (eid)
+    {
+    case SSF_SM_EVENT_ENTRY:
+        SSF_ASSERT(_utTraceIndex < sizeof(_utTrace));
+        _utTrace[_utTraceIndex] = 9;
+        _utTraceIndex++;
+        break;
+    case SSF_SM_EVENT_EXIT:
+        SSF_ASSERT(_utTraceIndex < sizeof(_utTrace));
+        _utTrace[_utTraceIndex] = 10;
+        _utTraceIndex++;
+        break;
+    case SSF_SM_EVENT_UNIT_TEST_1:
+        SSFSMTran(UT3TestHandler3);
         break;
     default:
         SSF_SM_SUPER(UT3TestHandler1Super);
@@ -858,6 +912,49 @@ void SSFSMUnitTest(void)
         SSF_ASSERT(_utTrace[0] == 6);   /* Handler3 EXIT */
         SSF_ASSERT(_utTrace[1] == 2);   /* Handler1Super ENTRY */
         SSF_ASSERT(_utTrace[2] == 1);   /* Handler1 ENTRY */
+    }
+
+    /* Timer ownership. A timer started by super-state code reached through child delegation     */
+    /* belongs to the super and survives a transition between two of its children; a timer       */
+    /* started by the child is cancelled by that transition. Re-arming the super's timer from     */
+    /* another delegated event replaces it rather than duplicating it. The super's timer is       */
+    /* cancelled when the super itself is exited.                                                 */
+    {
+        /* In Handler1 (super Handler1Super). Arm super timer twice (second replaces first) and  */
+        /* a child timer, then move to sibling Handler4.                                          */
+        _utTraceIndex = 0;
+        memset(_utTrace, 0, sizeof(_utTrace));
+        SSFSMPutEvent(SSF_SM_UNIT_TEST_3, SSF_SM_EVENT_UTX_1);
+        SSFSMPutEvent(SSF_SM_UNIT_TEST_3, SSF_SM_EVENT_UTX_1);
+        SSFSMPutEvent(SSF_SM_UNIT_TEST_3, SSF_SM_EVENT_UTX_2);
+        (void)SSFSMTask(NULL);   /* Drain events; do not wait on timers */
+        SSF_ASSERT(_utTraceIndex == 0);
+        SSFSMPutEvent(SSF_SM_UNIT_TEST_3, SSF_SM_EVENT_UT2_1);
+        (void)SSFSMTask(NULL);   /* Drain events; do not wait on timers */
+        SSF_ASSERT(_utTraceIndex == 2);
+        SSF_ASSERT(_utTrace[0] == 3);   /* Handler1 EXIT; no super exit/entry */
+        SSF_ASSERT(_utTrace[1] == 9);   /* Handler4 ENTRY */
+
+        nextTimeout = SSFPortGetTick64() + (SSF_TICKS_PER_SEC >> 1);
+        while (nextTimeout > SSFPortGetTick64());
+        (void)SSFSMTask(NULL);   /* Drain events; do not wait on timers */
+        SSF_ASSERT(_utTraceIndex == 3);
+        SSF_ASSERT(_utTrace[2] == 7);   /* Super timer fired exactly once; child timer did not */
+
+        /* Re-arm the super timer from Handler4, then leave the super: timer must be cancelled. */
+        _utTraceIndex = 0;
+        memset(_utTrace, 0, sizeof(_utTrace));
+        SSFSMPutEvent(SSF_SM_UNIT_TEST_3, SSF_SM_EVENT_UTX_1);
+        SSFSMPutEvent(SSF_SM_UNIT_TEST_3, SSF_SM_EVENT_UNIT_TEST_1);
+        (void)SSFSMTask(NULL);   /* Drain events; do not wait on timers */
+        SSF_ASSERT(_utTraceIndex == 3);
+        SSF_ASSERT(_utTrace[0] == 10);  /* Handler4 EXIT */
+        SSF_ASSERT(_utTrace[1] == 4);   /* Handler1Super EXIT */
+        SSF_ASSERT(_utTrace[2] == 5);   /* Handler3 ENTRY */
+        nextTimeout = SSFPortGetTick64() + (SSF_TICKS_PER_SEC >> 1);
+        while (nextTimeout > SSFPortGetTick64());
+        (void)SSFSMTask(NULL);   /* Drain events; do not wait on timers */
+        SSF_ASSERT(_utTraceIndex == 3); /* Nothing fired */
     }
 
 #if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1

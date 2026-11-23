@@ -68,6 +68,7 @@ typedef struct
 static SSFSMState_t _SSFSMStates[SSF_SM_MAX];
 static SSFSMId_t _ssfsmActive = SSF_SM_MAX;
 static SSFSMId_t _ssfsmIsEntryExit;
+static SSFSMHandler_t _ssfsmHandler;   /* Handler whose code is executing; owns timers it starts */
 static SSFMPool_t _ssfsmEventPool;
 static SSFMPool_t _ssfsmTimerPool;
 static SSFLL_t _ssfsmEvents;
@@ -111,7 +112,7 @@ static void _SSFSMStopAllTimers(void)
         memcpy(&t, item, sizeof(t));
 
         /* Same state machine and owner? */
-        if ((t.event->smid == _ssfsmActive) && (t.owner == _SSFSMStates[_ssfsmActive].current))
+        if ((t.event->smid == _ssfsmActive) && (t.owner == _ssfsmHandler))
         {
             /* Yes, any event data? */
             if ((t.event->data) && (t.event->dataLen > sizeof(SSFSMData_t *)))
@@ -145,7 +146,7 @@ static SSFLLItem_t *_SSFSMFindTimer(SSFSMEventId_t eid)
         memcpy(&t, item, sizeof(t));
         /* Same state machine, event ID, and owner */
         if ((t.event->smid == _ssfsmActive) && (t.event->eid == eid) &&
-            (t.owner == _SSFSMStates[_ssfsmActive].current)) break;
+            (t.owner == _ssfsmHandler)) break;
         item = next;
     }
     return item;
@@ -165,13 +166,15 @@ static void _SSFSMProcessEvent(SSFSMId_t smid, SSFSMEventId_t eid, const SSFSMDa
     _ssfsmActive = smid;
     currentSuper = NULL;
     SSF_ASSERT(_SSFSMStates[_ssfsmActive].current != NULL);
+    _ssfsmHandler = _SSFSMStates[_ssfsmActive].current;
     _SSFSMStates[_ssfsmActive].current(eid, data, dataLen, (SSFVoidFn_t *)&currentSuper);
 
     /* Should super state also process event? */
     if (currentSuper != NULL)
     {
-        /* Yes, let super state process the event */
+        /* Yes, let super state process the event; timers it starts belong to the super */
         super = NULL;
+        _ssfsmHandler = currentSuper;
         currentSuper(eid, data, dataLen, (SSFVoidFn_t *)&super);
         SSF_ASSERT(super == NULL);
     }
@@ -192,7 +195,8 @@ static void _SSFSMProcessEvent(SSFSMId_t smid, SSFSMEventId_t eid, const SSFSMDa
         _SSFSMStates[_ssfsmActive].next(SSF_SM_EVENT_SUPER, NULL, 0, (SSFVoidFn_t *)&nextSuper);
         SSF_ASSERT(nextSuper != _SSFSMStates[_ssfsmActive].next);
 
-        /* Exit current state */
+        /* Exit current state; its timers go with it */
+        _ssfsmHandler = _SSFSMStates[_ssfsmActive].current;
         _SSFSMStates[_ssfsmActive].current(SSF_SM_EVENT_EXIT, NULL, 0, (SSFVoidFn_t *)&super);
         _SSFSMStopAllTimers();
 
@@ -202,8 +206,9 @@ static void _SSFSMProcessEvent(SSFSMId_t smid, SSFSMEventId_t eid, const SSFSMDa
             /* Yes, does current have a super? */
             if (currentSuper != NULL)
             {
-                /* Yes, exit current super state */
+                /* Yes, exit current super state; its timers go with it */
                 _SSFSMStates[_ssfsmActive].current = currentSuper;
+                _ssfsmHandler = currentSuper;
                 _SSFSMStates[_ssfsmActive].current(SSF_SM_EVENT_EXIT, NULL, 0, (SSFVoidFn_t *)&super);
                 _SSFSMStopAllTimers();
             }
@@ -213,6 +218,7 @@ static void _SSFSMProcessEvent(SSFSMId_t smid, SSFSMEventId_t eid, const SSFSMDa
             {
                 /* Yes, enter next super */
                 _SSFSMStates[_ssfsmActive].current = nextSuper;
+                _ssfsmHandler = nextSuper;
                 _SSFSMStates[_ssfsmActive].current(SSF_SM_EVENT_ENTRY, NULL, 0, (SSFVoidFn_t *)&super);
             }
         }
@@ -220,11 +226,13 @@ static void _SSFSMProcessEvent(SSFSMId_t smid, SSFSMEventId_t eid, const SSFSMDa
         /* Enter next state */
         _SSFSMStates[_ssfsmActive].current = _SSFSMStates[_ssfsmActive].next;
         _SSFSMStates[_ssfsmActive].next = NULL;
+        _ssfsmHandler = _SSFSMStates[_ssfsmActive].current;
         _SSFSMStates[_ssfsmActive].current(SSF_SM_EVENT_ENTRY, NULL, 0, (SSFVoidFn_t *)&super);
 
         /* End of state transition */
         _ssfsmIsEntryExit = false;
     }
+    _ssfsmHandler = NULL;
     _ssfsmActive = SSF_SM_MAX;
 }
 
@@ -359,14 +367,17 @@ void SSFSMInitHandler(SSFSMId_t smid, SSFSMHandler_t initial)
 
         /* Enter initial super */
         _SSFSMStates[smid].current = initialSuper;
+        _ssfsmHandler = initialSuper;
         _SSFSMStates[smid].current(SSF_SM_EVENT_ENTRY, NULL, 0, (SSFVoidFn_t *)&super);
     }
 
     /* Enter initial state */
     _SSFSMStates[smid].current = initial;
+    _ssfsmHandler = initial;
     _SSFSMStates[smid].current(SSF_SM_EVENT_ENTRY, NULL, 0, (SSFVoidFn_t *)&super);
 
     /* Disallow state transistions */
+    _ssfsmHandler = NULL;
     _ssfsmActive = SSF_SM_MAX;
     _ssfsmIsEntryExit = false;
 }
@@ -397,6 +408,7 @@ void SSFSMDeInitHandler(SSFSMId_t smid)
     SSF_ASSERT(currentSuper != _SSFSMStates[smid].current);
 
     /* Exit current state */
+    _ssfsmHandler = _SSFSMStates[smid].current;
     _SSFSMStates[smid].current(SSF_SM_EVENT_EXIT, NULL, 0, (SSFVoidFn_t *)&super);
     _SSFSMStopAllTimers();
 
@@ -410,10 +422,12 @@ void SSFSMDeInitHandler(SSFSMId_t smid)
 
         /* Yes, exit current super */
         _SSFSMStates[smid].current = currentSuper;
+        _ssfsmHandler = currentSuper;
         _SSFSMStates[smid].current(SSF_SM_EVENT_EXIT, NULL, 0, (SSFVoidFn_t *)&super);
         _SSFSMStopAllTimers();
     }
 
+    _ssfsmHandler = NULL;
     _ssfsmActive = SSF_SM_MAX;
     _ssfsmIsEntryExit = false;
 
@@ -500,7 +514,8 @@ void SSFSMStartTimerData(SSFSMEventId_t eid, SSFSMTimeout_t interval, const SSFS
     tp->to = interval + SSFPortGetTick64();
     tp->event->smid = _ssfsmActive;
     tp->event->eid = eid;
-    tp->owner = _SSFSMStates[_ssfsmActive].current;
+    SSF_ASSERT(_ssfsmHandler != NULL);
+    tp->owner = _ssfsmHandler;
     _SSFSMAllocEventData(tp->event, data, dataLen);
     SSF_LL_FIFO_PUSH(&_ssfsmTimers, tp);
 }

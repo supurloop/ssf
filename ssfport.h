@@ -132,6 +132,13 @@ extern "C" {
 /* _osal */
 #define SSF_CONFIG_LPTASK_UNIT_TEST  (1u)
 
+/* _net */
+#define SSF_CONFIG_MQTTPKT_UNIT_TEST (1u)
+#define SSF_CONFIG_MQTTC_UNIT_TEST   (1u)
+/* 1 also runs a round trip against a public broker; needs internet access. Unreachable broker  */
+/* is reported and skipped, any other failure asserts.                                         */
+#define SSF_CONFIG_MQTTC_UNIT_TEST_BROKER (1u)
+
 /* If any unit test is enabled then enable unit test mode */
 #if /* _codec */ \
     SSF_CONFIG_ASN1_UNIT_TEST == 1 || \
@@ -173,6 +180,9 @@ extern "C" {
     SSF_CONFIG_FCSUM_UNIT_TEST == 1 || \
     /* _fsm */ \
     SSF_CONFIG_SM_UNIT_TEST == 1 || \
+    /* _net */ \
+    SSF_CONFIG_MQTTPKT_UNIT_TEST == 1 || \
+    SSF_CONFIG_MQTTC_UNIT_TEST == 1 || \
     /* _storage */ \
     SSF_CONFIG_CFG_UNIT_TEST == 1 || \
     /* _debug */ \

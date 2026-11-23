@@ -90,11 +90,14 @@ extern pthread_mutex_t gssfsmWakeMutex;
 #endif /* WIN32 */
 #endif /* SSF_CONFIG_ENABLE_THREAD_SUPPORT */
 
-/* Maximum number of simultaneously queued events for all state machines. */
-#define SSF_SM_MAX_ACTIVE_EVENTS (3u)
+/* Maximum number of simultaneously queued events for all state machines. The ssfmqttc client   */
+/* alone can have about eight outstanding (API, pump and decoded packet events; see its design   */
+/* notes); the rest is margin for other machines sharing the pool.                               */
+#define SSF_SM_MAX_ACTIVE_EVENTS (16u)
 
-/* Maximum number of simultaneously running timers for all state machines. */
-#define SSF_SM_MAX_ACTIVE_TIMERS (3u)
+/* Maximum number of simultaneously running timers for all state machines. The ssfmqttc client  */
+/* runs up to three at once during a session; the rest is margin for other machines.             */
+#define SSF_SM_MAX_ACTIVE_TIMERS (8u)
 
 /* Defines the state machine identifers. */
 typedef enum
@@ -108,6 +111,7 @@ typedef enum
 #else /* SSF_CONFIG_SM_UNIT_TEST */
     SSF_SM_USER_1,
 #endif /* SSF_CONFIG_SM_UNIT_TEST */
+    SSF_SM_MQTTC,        /* _net/ssfmqttc MQTT client */
     SSF_SM_MAX
 } SSFSMList_t;
 
@@ -136,6 +140,24 @@ typedef enum
     SSF_SM_EVENT_ABORT_UT4,
     SSF_SM_EVENT_STATE_TIMER_UT4,
 #endif /* SSF_CONFIG_SM_UNIT_TEST */
+
+    /* _net/ssfmqttc MQTT client (SSF_SM_MQTTC) */
+    SSF_SM_EVENT_MQTTC_START,              /* API: SSFMQTTCStart()                           */
+    SSF_SM_EVENT_MQTTC_STOP,               /* API: SSFMQTTCStop()                            */
+    SSF_SM_EVENT_MQTTC_TRANSPORT_OPEN,     /* Pump: transport connected                      */
+    SSF_SM_EVENT_MQTTC_LINK_FAIL,          /* Pump: transport closed on fatal error; reason  */
+    SSF_SM_EVENT_MQTTC_RX_CONNACK,         /* Pump: decoded CONNACK; SSFMQTTCEvConnAck_t     */
+    SSF_SM_EVENT_MQTTC_RX_SUBACK,          /* Pump: decoded SUBACK; SSFMQTTCEvSubAck_t       */
+    SSF_SM_EVENT_MQTTC_RX_PUBACK,          /* Pump: decoded PUBACK; SSFMQTTCEvPubAck_t       */
+    SSF_SM_EVENT_MQTTC_RX_PINGRESP,        /* Pump: PINGRESP received                        */
+    SSF_SM_EVENT_MQTTC_TX_DRAINED,         /* Pump: tx queue emptied while STOPPING          */
+    SSF_SM_EVENT_MQTTC_TO_CONNECT,         /* Timer: transport open + CONNACK                */
+    SSF_SM_EVENT_MQTTC_TO_SUBSCRIBE,       /* Timer: SUBACK                                  */
+    SSF_SM_EVENT_MQTTC_TO_KEEPALIVE,       /* Timer: send PINGREQ                            */
+    SSF_SM_EVENT_MQTTC_TO_PINGRESP,        /* Timer: PINGRESP                                */
+    SSF_SM_EVENT_MQTTC_TO_TX_PUBLISH,      /* Timer: txPublish deadline check                */
+    SSF_SM_EVENT_MQTTC_TO_RECONNECT,       /* Timer: reconnect backoff                       */
+    SSF_SM_EVENT_MQTTC_TO_STOP,            /* Timer: STOPPING flush limit                    */
     SSF_SM_EVENT_MAX
 } SSFSMEventList_t;
 

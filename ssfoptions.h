@@ -61,6 +61,7 @@ extern "C" {
 #include "ssfjson_opt.h"
 #include "ssflptask_opt.h"
 #include "ssfmpool_opt.h"
+#include "ssfmqttc_opt.h"
 #include "ssfrs_opt.h"
 #include "ssfrsa_opt.h"
 #include "ssfrtc_opt.h"

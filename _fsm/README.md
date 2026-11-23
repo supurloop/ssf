@@ -35,8 +35,13 @@ with `SSF_SM_SUPER()` in its `default` case, and unhandled events are forwarded 
   state handler during event processing.
 - `SSF_SM_SUPER()` must appear only in the `default` case of a child state handler; parent
   (super) state handlers must not name a further parent.
-- A state transition automatically stops all running timers for that state machine before
-  delivering `SSF_SM_EVENT_EXIT` to the current state and `SSF_SM_EVENT_ENTRY` to the new state.
+- A timer is owned by the state handler whose code started it. Code in a parent (super) handler
+  owns the timers it starts even when reached through `SSF_SM_SUPER()` delegation from a child.
+  When a state exits (after its `SSF_SM_EVENT_EXIT`), every timer it owns is stopped. A transition
+  between two children of the same parent therefore cancels the exiting child's timers but leaves
+  the parent's running; the parent's timers stop only when the parent itself exits.
+  `SSFSMStopTimer()` and the implicit restart in `SSFSMStartTimer()` act only on timers owned by
+  the handler whose code makes the call.
 - `SSFSMStartTimer()` with `interval == 0` fires the event at the next `SSFSMTask()` call,
   making it useful as a deferred self-post.
 - `SSFSMTask()` returns `true` when there are still pending events to process; call it again
@@ -55,8 +60,8 @@ Options live in [`_opt/ssfsm_opt.h`](../_opt/ssfsm_opt.h) (aggregated into the b
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `SSF_SM_MAX_ACTIVE_EVENTS` | `3` | Maximum number of simultaneously queued events across all state machines; increase if events are dropped under peak load |
-| `SSF_SM_MAX_ACTIVE_TIMERS` | `3` | Maximum number of simultaneously running timers across all state machines |
+| `SSF_SM_MAX_ACTIVE_EVENTS` | `16` | Maximum number of simultaneously queued events across all state machines; increase if events are dropped under peak load |
+| `SSF_SM_MAX_ACTIVE_TIMERS` | `8` | Maximum number of simultaneously running timers across all state machines |
 
 The following enumerations are **required** in [`_opt/ssfsm_opt.h`](../_opt/ssfsm_opt.h):
 
@@ -394,8 +399,9 @@ void SSFSMTran(SSFSMHandler_t next);
 
 Requests a transition to the state handler `next`. Valid only when called from within a state
 handler during event processing. The framework delivers `SSF_SM_EVENT_EXIT` to the current
-state (and its parent if applicable), stops all running timers for the machine, then delivers
-`SSF_SM_EVENT_ENTRY` to `next` (and its parent if applicable). Must not be called from within
+state and stops that state's timers, does the same for its parent if `next` has a different
+parent, then delivers `SSF_SM_EVENT_ENTRY` to `next` (and its parent if applicable). Must not be
+called from within
 the `SSF_SM_EVENT_ENTRY` or `SSF_SM_EVENT_EXIT` event cases.
 
 | Parameter | Direction | Type | Description |

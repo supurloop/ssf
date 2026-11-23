@@ -111,6 +111,21 @@
     <ClCompile Include="_fsm\ssfsm_ut.c">
       <Filter>_fsm</Filter>
     </ClCompile>
+    <ClCompile Include="_net\ssfmqttc.c">
+      <Filter>_net</Filter>
+    </ClCompile>
+    <ClCompile Include="_net\ssfmqttc_ut.c">
+      <Filter>_net</Filter>
+    </ClCompile>
+    <ClCompile Include="_net\ssfmqttpkt.c">
+      <Filter>_net</Filter>
+    </ClCompile>
+    <ClCompile Include="_net\ssfmqttpkt_ut.c">
+      <Filter>_net</Filter>
+    </ClCompile>
+    <ClCompile Include="_net\ssfnetsock.c">
+      <Filter>_net</Filter>
+    </ClCompile>
     <ClCompile Include="_osal\ssflptask.c">
       <Filter>_osal</Filter>
     </ClCompile>
@@ -353,6 +368,18 @@
     <ClInclude Include="_fsm\ssfsm.h">
       <Filter>_fsm</Filter>
     </ClInclude>
+    <ClInclude Include="_net\ssfmqttc.h">
+      <Filter>_net</Filter>
+    </ClInclude>
+    <ClInclude Include="_net\ssfmqttpkt.h">
+      <Filter>_net</Filter>
+    </ClInclude>
+    <ClInclude Include="_net\ssfnet.h">
+      <Filter>_net</Filter>
+    </ClInclude>
+    <ClInclude Include="_net\ssfnetsock.h">
+      <Filter>_net</Filter>
+    </ClInclude>
     <ClInclude Include="_opt\ssfasn1_opt.h">
       <Filter>_opt</Filter>
     </ClInclude>
@@ -399,6 +426,9 @@
       <Filter>_opt</Filter>
     </ClInclude>
     <ClInclude Include="_opt\ssfmpool_opt.h">
+      <Filter>_opt</Filter>
+    </ClInclude>
+    <ClInclude Include="_opt\ssfmqttc_opt.h">
       <Filter>_opt</Filter>
     </ClInclude>
     <ClInclude Include="_opt\ssfrs_opt.h">
@@ -573,6 +603,9 @@
     </Filter>
     <Filter Include="_fsm">
       <UniqueIdentifier>{900e1744-fc50-44bf-ad18-eefe33e6afbc}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="_net">
+      <UniqueIdentifier>{3b7f2c1a-5d4e-4a6b-9c8d-2e1f0a9b8c7d}</UniqueIdentifier>
     </Filter>
     <Filter Include="_opt">
       <UniqueIdentifier>{17442cc4-ed4e-400a-bbbb-be652717dd92}</UniqueIdentifier>

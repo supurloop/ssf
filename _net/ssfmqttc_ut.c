@@ -33,12 +33,12 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
-#if SSF_CONFIG_MQTTC_UNIT_TEST_BROKER == 1
+/* Sleep APIs for the broker test; included unconditionally because SSF_CONFIG_MQTTC_UNIT_TEST_  */
+/* BROKER is not defined until ssfport.h below.                                                  */
 #ifdef _WIN32
 #include <windows.h>
 #else
 #include <unistd.h>
-#endif
 #endif
 #include "ssfport.h"
 #include "ssf.h"

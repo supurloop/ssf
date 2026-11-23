@@ -53,6 +53,12 @@
 #include <netinet/tcp.h>
 #endif /* _WIN32 */
 
+/* ssfport.h supplies its own byte order macros; drop the system ones so they are not redefined. */
+#undef htons
+#undef ntohs
+#undef htonl
+#undef ntohl
+
 #include "ssfport.h"
 #include "ssf.h"
 #include "ssfassert.h"

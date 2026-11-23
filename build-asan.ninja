@@ -32,7 +32,7 @@ cflags_common = -Wall -Wextra -pedantic -Wcast-align -Wno-parentheses -Wno-unuse
     -Wdisabled-optimization -fdiagnostics-show-option -Wstrict-overflow=5 -Wformat=2
 
 includes = -I. -I_time -I_codec -I_crypto -I_ecc -I_edc -I_fsm -I_debug $
-    -I_storage -I_struct -I_ui -I_osal -I_opt -I/opt/homebrew/include $
+    -I_storage -I_struct -I_ui -I_osal -I_opt -I_net -I/opt/homebrew/include $
     -I/usr/local/include
 
 san = -fsanitize=address,undefined -fno-omit-frame-pointer
@@ -185,6 +185,13 @@ build $builddir/_ui/ssfvted_ut.o: cc_obj _ui/ssfvted_ut.c
 build $builddir/_osal/ssflptask.o:    cc_obj _osal/ssflptask.c
 build $builddir/_osal/ssflptask_ut.o: cc_obj _osal/ssflptask_ut.c
 
+# _net
+build $builddir/_net/ssfmqttc.o:      cc_obj _net/ssfmqttc.c
+build $builddir/_net/ssfmqttc_ut.o:   cc_obj _net/ssfmqttc_ut.c
+build $builddir/_net/ssfmqttpkt.o:    cc_obj _net/ssfmqttpkt.c
+build $builddir/_net/ssfmqttpkt_ut.o: cc_obj _net/ssfmqttpkt_ut.c
+build $builddir/_net/ssfnetsock.o:    cc_obj _net/ssfnetsock.c
+
 # Final binary
 build ssf-asan: link $builddir/main.o $builddir/ssfport.o $
     $builddir/_codec/ssfbase64.o    $builddir/_codec/ssfbase64_ut.o $
@@ -240,6 +247,9 @@ build ssf-asan: link $builddir/main.o $builddir/ssfport.o $
     $builddir/_ui/ssfargv.o         $builddir/_ui/ssfargv_ut.o $
     $builddir/_ui/ssfcli.o          $builddir/_ui/ssfcli_ut.o $
     $builddir/_ui/ssfvted.o         $builddir/_ui/ssfvted_ut.o $
-    $builddir/_osal/ssflptask.o     $builddir/_osal/ssflptask_ut.o
+    $builddir/_osal/ssflptask.o     $builddir/_osal/ssflptask_ut.o $
+    $builddir/_net/ssfmqttc.o       $builddir/_net/ssfmqttc_ut.o $
+    $builddir/_net/ssfmqttpkt.o     $builddir/_net/ssfmqttpkt_ut.o $
+    $builddir/_net/ssfnetsock.o
 
 default ssf-asan

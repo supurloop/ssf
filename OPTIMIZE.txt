@@ -1,0 +1,1596 @@
+SSF CODE SIZE AND PERFORMANCE REVIEW
+====================================
+
+Date:        2026-11-19
+Branch:      x509 (HEAD dbd35d3)
+Reviewer:    Claude Opus 5.5 (claude-opus-5-5), single reviewer, modules read sequentially
+Scope:       _crypto (all modules, including ssfcms) and _codec ssfstr, ssfmatch, ssfasn1,
+             ssfx509. Read in dependency order: ssfstr, ssfmatch, ssfasn1, then the _crypto
+             modules from the primitives up, then ssfx509.
+Goal:        Find code-size reductions and speed-ups that do not weaken correctness or
+             security. Anything that would change constant-time behaviour, input validation,
+             DER strictness or an audited fix (AUDIT*.txt) is either excluded or flagged
+             with its constraint.
+
+Method
+  Size:   gcc 14 -Os -ffunction-sections, x86-64, per-function sizes from nm. No ARM
+          cross-compiler is installed; x86-64 -Os .text is a proxy for Thumb-2. It ranks
+          functions the same way and is typically 20-40% larger in absolute bytes.
+  Speed:  scratchpad benchmark harness (bench.c), -O2 and -Os, x86-64 desktop, median of
+          the run. MCU speed-ups are estimated from operation counts where the host figure
+          does not transfer (e.g. 64-bit host vs 32-bit limbs).
+  Each estimate is "probable": a size figure is the bytes expected to disappear from the
+  -Os build, a speed figure is the expected change in the named operation's time.
+
+ID scheme
+  <MODULE>-O<n>, e.g. BN-O1. Unique across this file and distinct from the AUDIT labels.
+
+Status:  OPEN, DONE (date), REJECTED (reason)
+Effort:  S (< 50 lines), M (50-200 lines), L (> 200 lines or a new algorithm)
+Risk:    what must hold for the change to be safe, and the tests that prove it
+
+Baseline (x86-64, gcc -Os text incl. rodata, bytes)
+  ssfx509 27263   ssfec 27044 (incl. 12288 comb tables)   ssfbn 21785   ssfed25519 15120
+  ssfrsa 14530    ssfasn1 9271   ssfcms 8433   ssfecdsa 7789   ssfsha2 4748   ssfaesgcm 4671
+  ssfaes 4185     ssfx25519 3220   ssftls 3040   ssfaesccm 2437   ssfpoly1305 2331
+  ssfhmac 1908    ssfstr 1575   ssfchacha20poly1305 1448   ssfchacha20 1339   ssfhkdf 1240
+  ssfsha1 1223    ssfmatch 1170   ssfaesctr 904   ssfprng 627   ssfcrypt 286
+  Total about 166 KB.
+
+Baseline speed (x86-64, -O2 / -Os, microseconds per operation)
+  SHA-256 16 KB        43.9 / 43.8      SHA-512 16 KB        24.3 / 28.9
+  SHA-1 16 KB          85.1 / 39.7      HMAC-SHA256 64 B      0.78 / 0.90
+  AES-128-GCM 16 KB   137.1 / 131.0     AES-256-GCM 16 KB   158.3 / 151.2
+  ChaCha20-Poly1305 16 KB  36.5 / 32.9
+  X25519 shared       171.6 / 170.9     Ed25519 sign        637.4 / 644.5
+  Ed25519 verify      323.7 / 321.8     ECDSA P-256 sign    369.8 / 364.8
+  ECDSA P-256 verify 1237.9 / 1199.3    ECDH P-256         1218.7 / 1132.9
+  ECDSA P-384 sign    792.7 / 829.7     ECDSA P-384 verify 2298.9 / 2624.1
+  RSA-2048 sign PKCS1 7710 (-O2)        RSA-2048 verify PKCS1  448.5 (-O2)
+  RSA-2048 keygen   241394 (-O2, 3-run mean; dominated by prime search variance)
+
+----------------------------------------------------------------------------------------------
+SUMMARY
+----------------------------------------------------------------------------------------------
+
+  43 items across the 25 reviewed modules (none for ssfmatch, ssfcrypt, ssfaes / aesctr /
+  aesccm, ssfpoly1305 or ssfecdsa beyond the shared bn / ec items). Ranked by probable payoff:
+
+  ID       Kind          Probable effect                                       Effort  Status
+  BN-O3    Speed         MontSquare 2.1x measured; with O1+O2 RSA verify 5.3x  S       DONE
+  BN-O1    Speed         MontInit 5.8x; RSA-2048 verify 2.7x measured          S       DONE
+  BN-O2    Speed         MontMul +20% measured (1.6x on emulated ARM32)        S       DONE
+  BN-O5    Speed         with BN-O4: RSA-2048 sign 2.0x (5.4 -> 2.7 ms)        M       DONE
+  BN-O6    Speed+size    ECC 1.23-1.46x emulated ARM32, -381 B M4               M       DONE
+  EC-O3    Stack         ECC op peaks 17.5-18.4 KB -> 5.1-7.8 KB on Cortex-M4    M       DONE
+  RSA-STK  Stack         RSA sign peak 35.9 -> 24.9 KB (Phase 1 done; 2 open)     M       P1 DONE
+  ED-O1    Size          -11.5 KB Cortex-M4 (Ed25519 scalar arithmetic), meas.  M       DONE
+  X509-O1  Size          -3.7 KB x509, -1.4 KB cms (Cortex-M4), plus printf    S       DONE
+           (CMS-O1)
+  BN-O4    Speed         ModMulCT 6.3x at 2048 bits (counted under BN-O5)      M       DONE
+  ED-O3    Speed         Ed25519 verify 1.4x                                   M       OPEN
+  FE-O1    Speed         measured: M0+ -7..12%, M4 ~0, A7 +7%; not adopted     S-M     DROPPED
+  X509-O4  Stack         chain verify 14.5 KB -> about 4 KB (high risk)        L       OPEN
+  ED-O2    Speed         Ed25519 sign 1.3x, keygen 1.6x (+1-2 KB ROM)          M       OPEN
+  EC-O4    Speed         ECC 1.5-2.2x measured (NIST reduction correction)      M       DONE
+  EC-O1    Speed         ECC 1-8% measured (prototype)                         S       OPEN
+  HMAC-O1  Speed         none as written; key reuse ~0.3% sign, HKDF -37% 4-blk M       SKIP
+  GCM-O1   Speed         GHASH 1.5-1.9x, GCM 16 KB 1.1-1.6x measured          S       DONE
+  SHA1-O2  Speed+stack   1.43x M4 for +374 B code; SHA-1 unused: skipped        S       SKIP
+  FE-O2    Size          -0.7 KB M4 / -0.9 KB M0+ with both enabled, measured  M       DONE
+
+  The rest are smaller: STR-O1..O3, ASN1-O1..O4, SHA1-O1, SHA2-O1..O3, HMAC-O2, HMAC-O3,
+  HKDF-O1, PRNG-O1, GCM-O2, CHACHA-O1, BN-O7, BN-O8, EC-O2, ED-O4 (policy option),
+  RSA-O1, TLS-O1, X509-O2, X509-O3.
+
+  Combined projections (x86-64 -O2 unless noted)
+    RSA-2048 verify   449 us -> 87 us measured (BN-O1..O3)
+    RSA-2048 sign     7.7 ms -> 5.4 ms measured (BN-O1..O3); about 2.5-3 ms with BN-O4, O5
+    ECDSA sign        P-256 370 -> 335 us, P-384 793 -> 649 us measured (BN-O1..O3); BN-O6,
+                      EC-O1 and BN-O8 add +15-20% on the host and much more on a Cortex-M
+    Ed25519           sign about 1.6x, verify about 1.6x with ED-O2, ED-O3 and FE-O1
+    Code size         about -17 KB from ED-O1, X509-O1, CMS-O1, FE-O2, SHA2-O2, ASN1-O1..O4
+                      (more if the trace switch also drops snprintf)
+
+  Security note raised during the review (not an optimization; see BN-O7): SSFBNMod branched
+  on each subtraction's borrow and ssfrsa used it on the blinded value with the secret primes
+  p and q. Fixed by BN-O7 (constant-time for odd moduli).
+
+  Suggested order: BN-O1..O3 first (prototyped, small, large measured gain, all suites
+  pass), then X509-O1 / CMS-O1 (small, large size win), then BN-O6 (largest Cortex-M win),
+  then BN-O5 / BN-O4 for RSA signing, then the Ed25519 group (ED-O1, ED-O3, FE-O1).
+
+----------------------------------------------------------------------------------------------
+ssfstr
+----------------------------------------------------------------------------------------------
+
+STR-O1  Speed  SKIPPED (2026-11-19, measured)  Effort S
+  Where:     SSFStrLen (byte loop)
+  Change:    Use memchr(cstr, 0, cstrSize) and take the length from the returned pointer.
+             Every SSFStr* function and SSFX509 / SSFMatch callers go through it.
+  Probable:  Long strings 4-16x faster with a word-wise libc memchr (glibc, newlib, picolibc
+             all have one); short strings unchanged. About -20 B.
+  Risk:      Must still return false and *cstrLenOut == cstrSize when no NUL lies within
+             cstrSize (current contract). memchr reads at most cstrSize bytes. ssfstr_ut
+             covers it.
+
+STR-O2  Size  DONE (2026-11-19)  Effort S
+  Where:     SSFStrToCase (two copies of the same loop)
+  Change:    One loop that calls SSFStrCharToLower or SSFStrCharToUpper chosen before it.
+  Probable:  About -50 B. No speed change.
+  Risk:      None beyond the existing unit tests.
+
+STR-O3  Speed  SKIPPED (2026-11-19, measured: grew code)  Effort S
+  Where:     SSFStrCmp (SSFStrLen twice, then memcmp: three passes)
+  Change:    Single pass comparing bytes and checking both terminators within their sizes.
+  Probable:  About 2x faster on equal strings; about -40 B.
+  Risk:      Must keep "false if either string is unterminated within its size", including
+             when the strings differ before the terminator check. Not timing-sensitive (no
+             caller compares secrets with it).
+
+  Reviewed, no change worth making: SSFStrCat / SSFStrCpy (memmove is already the fast path
+  and required for overlap, AUDIT STR-7), SSFStrTok, SSFStrStr (restart search is O(n*m) but
+  inputs are short and the code is already small).
+
+----------------------------------------------------------------------------------------------
+ssfmatch
+----------------------------------------------------------------------------------------------
+
+  No findings. The glob was rewritten in dbd35d3 (iterative, O(strLen * patLen), fixed stack)
+  and SSFMatchPath is a single linear pass. 1170 B total.
+
+----------------------------------------------------------------------------------------------
+ssfasn1
+----------------------------------------------------------------------------------------------
+
+ASN1-O1  Size  DONE (2026-11-19)  Effort S
+  Where:     SSFASN1EncUTCTime, SSFASN1EncGeneralizedTime, SSFASN1EncDate, SSFASN1EncDateTime,
+             _SSFASN1FormatDate (four inline copies of "two decimal digits" formatting)
+  Change:    A static _SSFASN1Put2Digits(dst, v) helper; GeneralizedTime writes
+             YYYY MM DD via the helper instead of its own 8 expressions; the four encoders
+             share one "convert unixSec, split fields" prologue.
+  Probable:  About -500 B of the 1340 B in the four encoders. Encoding speed unchanged
+             (not hot).
+  Risk:      Byte-identical output; ssfasn1_ut encode vectors cover every form.
+
+ASN1-O2  Size  DONE (2026-11-19)  Effort S
+  Where:     SSFASN1DecGetTime tail (range checks + SSFDTimeStructInit + StructToUnix)
+  Change:    Call the existing _SSFASN1YMDHMSToUnix, which performs the same steps (plus the
+             hour / minute / second check SSFDTimeStructInit already makes).
+  Probable:  About -150 B.
+  Risk:      Keep the far-future branch (AUDIT ASN1-14) ahead of the call. Unit tests cover
+             both paths.
+
+ASN1-O3  Size  SKIPPED (2026-11-19, measured: grew code)  Effort S
+  Where:     SSFASN1DecGetOID (two copies of the base-128 sub-identifier loop with the
+             non-minimal and 32-bit-overflow checks)
+  Change:    One static decoder for a sub-identifier, used for the first and later arcs.
+  Probable:  About -120 B.
+  Risk:      Same rejections (leading 0x80, > 5 bytes, overflow at the 5th byte). ssfasn1_ut
+             OID vectors cover them.
+
+ASN1-O4  Size  SKIPPED (2026-11-19, measured: grew code)  Effort S
+  Where:     SSFASN1DecGetOctetString, DecGetOIDRaw, DecGetNull, DecGetBool, DecGetInt and
+             DecOpenConstructed each repeat "GetTLV, compare tag, commit next"
+  Change:    A static _SSFASN1DecExpect(cursor, tag, &val, &len, next) that does the common
+             part; each public function keeps its own extra checks.
+  Probable:  About -150 to -250 B.
+  Risk:      Preserve "advance only on success" (AUDIT ASN1-7) in every function.
+
+  Reviewed, no change worth making: _SSFASN1ParseTL and SSFASN1DecGetTLV are already minimal
+  and every check in them is a DER rule from the AUDIT files; the encoders' two-pass
+  measure / write design is what keeps them allocation-free.
+
+----------------------------------------------------------------------------------------------
+ssfcrypt
+----------------------------------------------------------------------------------------------
+
+  No findings. SSFCryptCTMemEq and SSFCryptSecureZero (word-wise since AUDIT Batch A) are
+  minimal; both must keep their volatile accesses.
+
+----------------------------------------------------------------------------------------------
+ssfsha1
+----------------------------------------------------------------------------------------------
+
+SHA1-O1  Speed  SKIPPED (2026-11-19, measured)  Effort S
+  Where:     SSFSHA1Update (one byte at a time into ctx->block, with a length check per byte)
+  Change:    Same chunked memcpy loop SSFSHA2_32Update uses; hash whole 64-byte blocks
+             straight from the input when the buffer is empty.
+  Probable:  1.3-1.6x on long inputs (the per-byte loop costs about as much as the compression
+             on a Cortex-M). About -20 B.
+  Risk:      Keep the SHA1-MAX length REQUIRE once per call. ssfsha1_ut multi-chunk vectors
+             cover split updates.
+
+SHA1-O2  Speed + stack  SKIPPED (2026-11-19, measured)  Effort S
+  Where:     _SSFSHA1ProcessBlock (80-word schedule array; one loop with a 4-way branch per
+             round)
+  Change:    16-word circular schedule (w[t & 15]) and four 20-round loops, each with its own
+             f / K. The wipe shrinks from 320 B to 64 B per block.
+  Probable:  Stack -256 B. Speed 1.2-2x: measured -O2 is 2.1x slower than -Os here (85 vs
+             40 us per 16 KB), which points at the per-round branch defeating the compiler;
+             fixed loops remove it at every optimization level.
+  Risk:      None functional; keep the SHA1-2 scrub (now of the 16-word ring).
+
+----------------------------------------------------------------------------------------------
+ssfsha2
+----------------------------------------------------------------------------------------------
+
+SHA2-O1  Speed + stack  SKIPPED (2026-11-19, measured)  Effort S
+  Where:     _SSFSHA2_32Block (w[64]), _SSFSHA2_64Block (w[80] of uint64_t)
+  Change:    16-word circular message schedule computed inside the round loop.
+  Probable:  Stack -192 B (SHA-256) and -512 B (SHA-512); the per-block wipe shrinks the same
+             way (64 -> 16 and 160 -> 32 word stores on a 32-bit target). Speed +5-10%.
+  Risk:      Keep the SHA2-3 scrub of the (smaller) schedule. FIPS vectors in ssfsha2_ut.
+
+SHA2-O2  Size  DONE (2026-11-19)  Effort S
+  Where:     SSFSHA2_32Begin, SSFSHA2_64Begin (IVs written as 8 or 32 immediate assignments)
+  Change:    static const IV tables (2 x 8 words, 4 x 8 double-words) and one memcpy.
+  Probable:  About -400 B (SSFSHA2_64Begin is 512 B, SSFSHA2_32Begin about 170 B). No speed
+             change.
+  Risk:      None; vectors cover every variant.
+
+SHA2-O3  Speed  OPEN  Effort S
+  Where:     SSFSHA2_32Update / SSFSHA2_64Update (every byte copied into the context buffer)
+  Change:    When the buffer is empty, compress full blocks straight from the input.
+  Probable:  +2-4% on long inputs (saves one 64 / 128-byte memcpy per block).
+  Risk:      The block function reads its input with byte loads (GETU32BE), so unaligned input
+             is already safe.
+
+----------------------------------------------------------------------------------------------
+ssfhmac
+----------------------------------------------------------------------------------------------
+
+HMAC-O1  Speed  SKIPPED (2026-11-19, re-evaluated)  Effort M
+  Where:     SSFHMACBegin / SSFHMACEnd (outer pad block hashed again for every message)
+  Change:    At Begin, also absorb oKeyPad into a second hash context and store that state in
+             place of oKeyPad; End copies it and adds only the inner digest.
+  Probable:  One compression saved per HMAC: about 25% faster for short messages (4 -> 3
+             compressions), which is the common case (HKDF, HMAC-DRBG in RFC 6979 signing,
+             TLS 1.3 key schedule). Context grows by about 90 B (a SHA-512 state replaces the
+             128-byte pad).
+  Risk:      The stored state is key-derived; DeInit already wipes the whole context.
+
+HMAC-O2  Speed  SKIPPED (2026-11-19, with HMAC-O1)  Effort M
+  Where:     callers that MAC many messages under one key (SSFHKDFExpand loop, RFC 6979 in
+             ssfecdsa)
+  Change:    Keep a copy of the post-ipad state so a new message under the same key starts
+             from it (an SSFHMACReset or context-copy helper).
+  Probable:  With HMAC-O1, 2 compressions per short MAC instead of 4: about 2x for repeated
+             MACs. RFC 6979 runs at least 6 HMACs per ECDSA signature, but signing is
+             dominated by the scalar multiply, so the effect there is a few percent.
+  Risk:      New API surface; the copied state must be wiped by the caller's DeInit.
+
+HMAC-O3  Size  SKIPPED (2026-11-19, measured: no saving)  Effort S
+  Where:     _SSFHMACGetBlockSize, SSFHMACGetHashSize, and the four dispatch switches
+  Change:    Two small const tables indexed by hash; keep the switches only where they call
+             different functions.
+  Probable:  About -80 B.
+  Risk:      Keep the range REQUIRE on hash before indexing.
+
+----------------------------------------------------------------------------------------------
+ssfhkdf
+----------------------------------------------------------------------------------------------
+
+HKDF-O1  Speed  SKIPPED (2026-11-19, with HMAC-O1 / O2)  Effort S
+  Where:     SSFHKDFExpand (SSFHMACBegin re-run, including the key pad compression, for every
+             output block)
+  Change:    Begin once; restart each T(i) from the saved post-ipad state.
+  Probable:  About 2x for multi-block outputs; no change for a single block.
+  Risk:      Same as HMAC-O2.
+
+----------------------------------------------------------------------------------------------
+ssfprng
+----------------------------------------------------------------------------------------------
+
+PRNG-O1  Speed  OPEN  Effort S
+  Where:     SSFPRNGGetRandom (SSF_PRNG_AES_BLOCK_ENCRYPT expands the AES key schedule for each
+             of its 2 or 3 block encryptions)
+  Change:    SSFAESKeyScheduleInit once per call, SSFAESKSBlockEncrypt for each block, then
+             SSFAESKeyScheduleDeInit (wipes the schedule).
+  Probable:  1.5-2x faster GetRandom (key expansion costs about as much as a block).
+             Matters for keygen loops that draw many 16-byte outputs.
+  Risk:      Output stream identical; the schedule is wiped before return.
+
+----------------------------------------------------------------------------------------------
+ssfaes, ssfaesctr, ssfaesccm
+----------------------------------------------------------------------------------------------
+
+  No findings worth the risk. AES-128 runs about 73 ns per block on the host (byte S-box,
+  word MixColumns). A T-table implementation would be 2-3x faster but adds 1-4 KB of tables
+  and data-dependent loads over more memory (a larger cache-timing surface): REJECTED on
+  security grounds. CTR and CCM already expand the key once per call.
+
+----------------------------------------------------------------------------------------------
+ssfaesgcm
+----------------------------------------------------------------------------------------------
+
+  Measured split (16 KB, -O2): AES-CTR 75 us, GHASH 70 us, so GHASH is about half of GCM.
+
+GCM-O1  Speed  DONE (2026-11-19)  Effort S
+  Where:     _SSFAESGCMBlockMult (H bit-reversed and loaded every block; Karatsuba operand
+             sums of H recomputed every block)
+  Change:    Prepare H once per message (reversed words plus the y0^y1, y2^y3, y0^y2,
+             y1^y3 and four-way sums), pass the prepared form to the block multiply.
+  Probable:  GHASH +15-20% (removes 4 of the 8 ReverseBytes per block and 5 XOR groups);
+             GCM overall +7-10%.
+  Risk:      The prepared H is key-derived: wipe it at the end of Encrypt / Decrypt.
+
+GCM-O2  Speed  DONE (2026-11-19, as part of GCM-O1)  Effort S
+  Where:     _SSFAESGCMBlockMult (six SSFCryptSecureZero calls, 28 words, per 16-byte block)
+  Change:    Hold the multiply's temporaries in _SSFAESGCMGHASH's frame and wipe them once
+             after the loop.
+  Probable:  GHASH +10%.
+  Risk:      Same scrub guarantee (wiped before the function returns); the GCM-3 scrub test
+             hook must observe the new wipe.
+
+----------------------------------------------------------------------------------------------
+ssfchacha20, ssfpoly1305, ssfchacha20poly1305
+----------------------------------------------------------------------------------------------
+
+CHACHA-O1  Speed  OPEN  Effort S
+  Where:     SSFChaCha20Encrypt (keystream serialized to bytes, then XORed byte by byte; the
+             64-byte state copy wiped every block)
+  Change:    For full blocks XOR 32-bit words (GETU32LE(pt) ^ x[i] + input[i]) straight into
+             the output; wipe the working state once at the end.
+  Probable:  1.2-1.4x on a Cortex-M (16 word ops replace 64 byte ops per block); little
+             change on the host (28 us per 16 KB already).
+  Risk:      Keep the byte path for the final partial block. RFC 8439 vectors cover it.
+
+  Poly1305 (9 us per 16 KB) and the AEAD wrapper: no findings.
+
+----------------------------------------------------------------------------------------------
+ssfbn
+----------------------------------------------------------------------------------------------
+
+  BN-O1, BN-O2 and BN-O3 were prototyped together on a scratchpad copy of ssfbn.c (the
+  repository is unchanged). With all three, ssfbn, ssfrsa, ssfec, ssfecdsa, ssfx509 and
+  ssfcms unit tests pass. Measured (x86-64 -O2):
+
+    Primitive (2048-bit)      before      after          End to end          before   after
+    SSFBNMontInit             321 us      27 us          RSA-2048 verify     449 us   87 us
+    SSFBNMontMul              3.85 us     3.09 us        RSA-2048 sign      7710 us  5380 us
+    SSFBNMontSquare           5.21 us     2.43 us        ECDSA P-256 sign    370 us   335 us
+    SSFBNModInv (Fermat, 256) 54.4 us     32.5 us        ECDSA P-384 sign    793 us   649 us
+
+BN-O1  Speed  DONE (2026-11-19)  Effort S  [implemented, red/green]
+  Where:     SSFBNMontInit (R^2 mod m by 2 * len * 32 modular doublings: 4096 SSFBNModAdd
+             calls for a 2048-bit modulus, on every RSA verify, every CRT half of every RSA
+             sign, every Fermat inverse and every Miller-Rabin candidate)
+  Change:    Start at 2^(L-1) (L = bit length of m), double (w - L + 1 + j) times to reach
+             2^(w + j) mod m, where w = 32 * len = j * 2^s with j odd, then s Montgomery
+             squarings (each doubles the exponent offset): 2048-bit is 2 doublings and 11
+             squarings.
+  Probable:  MontInit 12x faster. RSA-2048 verify 2.6x on its own (449 -> 170 us measured).
+             Fermat inverses (ECDSA sign k^-1, every EC affine conversion) about 40% faster.
+             RSA keygen faster (MontInit per candidate). No size change.
+  Risk:      The doubling count depends on L, the modulus bit length, which is public for an
+             RSA modulus and fixed by the key size for its primes; every operation is still
+             the CT ModAdd / MontSquare. Bit-exact R^2 is checked by every Montgomery test in
+             ssfbn_ut, ssfrsa_ut and the EC suites.
+
+BN-O2  Speed  DONE (2026-11-19)  Effort S  [implemented, red/green]
+  Where:     SSFBNMontMul (after each row's reduction, a separate n+1-word shift loop moves
+             t down by one word: n^2 extra loads and stores)
+  Change:    Standard CIOS: the reduction loop writes t[j - 1] directly, so the shift is
+             fused and the separate loop disappears.
+  Probable:  MontMul +25% (3.85 -> 3.09 us measured at 2048 bits). Smaller code.
+  Risk:      Fixed-length loops, no data-dependent branch: constant-time behaviour unchanged.
+
+BN-O3  Speed  DONE (2026-11-19)  Effort S  [implemented, red/green]
+  Where:     SSFBNMontSquare: step 3 propagates each diagonal term's carry to the end of t
+             (sum over i of 2n - 2i iterations, about n^2), and the SOS reduction propagates
+             each row's carry to t[2n] (about n^2 / 2). Both were made fixed-length for
+             constant time (AUDIT BN-12), so they cost as much as the multiplies.
+  Change:    Step 3 as one pass with a running carry; the reduction keeps a one-word
+             deferred carry that the next row adds at t[i + n] (no later row writes there
+             first). Both remain fixed-length, so still constant-time, and become O(n).
+  Probable:  MontSquare 2.1x (5.21 -> 2.43 us measured). With BN-O1 and BN-O2: RSA-2048
+             verify 5.2x (449 -> 87 us), sign 1.43x (7.7 -> 5.4 ms).
+  Risk:      Carry correctness: the deferred carry is at most 1 and the final t[2n] bound is
+             unchanged (< 2m). Covered by every Montgomery vector; add a randomized
+             MontSquare == MontMul(a, a) cross-check to ssfbn_ut when implementing.
+
+BN-O4  Speed  DONE (2026-11-19)  Effort M  [with BN-O5; measured under BN-O5]
+  Where:     SSFBNModMulCT (fixed 32n + 1 rounds of a 2n-limb subtract, select and
+             shift-right-by-one: about 190 n^2 limb operations; 283 us at 2048 bits). RSA
+             signing calls it 3 times (blinding c * r^e, CRT recombination h * qInv, unblinding
+             m * r^-1); ECDSA signing twice at 256 bits; SSFBNModInv's final check once.
+  Change:    For odd m (every caller): r = MontMul(MontMul(a, b), R^2) with a Montgomery
+             context; keep the shift-subtract path for even m.
+  Probable:  2048-bit: 283 us -> about 35 us with the context set up (BN-O1 makes MontInit
+             cheap), about 30 us less again when the caller already has the context. RSA
+             sign -0.6 to -0.7 ms (about -12% after BN-O1..O3). ECDSA sign a few percent.
+  Risk:      MontMul requires a->len == b->len == m->len and a, b < m (the BN-10 precondition
+             ModMulCT already documents). Constant-time: MontMul is CT.
+
+BN-O5  Speed  DONE (2026-11-19)  Effort M  [with BN-O4]
+  Where:     SSFBNModInvExt (extended Euclid built on SSFBNDivMod, which is bit-serial: 2.2 ms
+             at 2048 bits, 44 us at 256 bits). RSA signing calls it once for the blinding
+             inverse r^-1 mod n: after BN-O1..O3 that is about 40% of RSA-2048 sign time.
+  Change:    Binary extended GCD for odd moduli (shifts and subtracts only, no division),
+             or obtain r^-1 without a general inverse: compute r^-1 mod p and r^-1 mod q by
+             Fermat in the CRT halves (two half-size exponentiations, CT) and recombine.
+  Probable:  Binary xgcd 4-6x faster (2.2 ms -> 0.4-0.5 ms): RSA-2048 sign about -1.8 ms
+             (5.4 -> about 3.6 ms; with BN-O4 about 3 ms, 2.5x better than today). ECDSA
+             verify about -35 us (-3%).
+  Risk:      ModInvExt is documented as variable-time; RSA uses it on the random blinding
+             factor r (AUDIT RSA-9 accepted that timing). A binary xgcd is also variable-time
+             in its inputs, so this does not change the accepted exposure. The Fermat-in-CRT
+             alternative is CT if constant-time behaviour is wanted.
+  Prototype (scratchpad; ssfbn, ssfrsa, ssfec, ssfecdsa, ssfx509, ssfcms tests pass):
+             BN-O4: SSFBNModMulCT dispatches odd m to MontMul(MontMul(a, b), R^2) and keeps
+             the shift-subtract body for even m (and keeps the AUDIT BN-1 "a < m or b < m"
+             REQUIRE). BN-O5: SSFBNModInvExt dispatches odd m with 0 < a < m to a binary
+             extended GCD (u, v, x1, x2; halving mod m; subtract the smaller) and keeps the
+             Euclid body for even m (RSA keygen's d = e^-1 mod lambda) and other inputs. Both
+             old bodies move to static helpers so the fast paths do not zero-fill their
+             buffers.
+  Measured:  2048-bit, x86-64 -O2: SSFBNModMulCT 282 -> 42 us (6.8x), SSFBNModInvExt
+             2223 -> 391 us (5.7x). RSA-2048 sign (both together): x86-64 5528-5622 ->
+             2737-2802 us (2.0x); emulated ARM32 32689 -> 16637 us (1.96x). Verify unchanged.
+             Code (arm-none-eabi-gcc -Os, ssfbn): Cortex-M4 14979 -> 15747 B (+768),
+             Cortex-M0+ 17555 -> 18309 B (+754), prototype quality (no full DBC).
+             Stack (Cortex-M4): fast-path frames ModMulCT 3144 -> 24 + 1600 B, ModInvExt
+             9352 -> 16 + 2120 B; call-graph peaks unchanged (RSA sign 36.7 KB, keygen
+             36.6 KB), because the old bodies stay reachable and the peak is elsewhere in the
+             private-key chain.
+
+BN-O6  Speed + stack  DONE (2026-11-19)  Effort M  [implemented; measured below]
+  Where:     SSFBN_DEFINE zero-fills its whole storage. Locals declared at SSF_BN_MAX_LIMBS
+             (256 limbs = 1 KB when RSA-4096 is enabled, the default, which sets the cap to
+             8192 bits) sit on the EC field-arithmetic path: SSFBNModMulNIST (prod),
+             _SSFBNReduceP256 / P384 (s, tmp), SSFBNModAdd (tmp). Every P-256 field multiply
+             clears about 3 KB and every field add 1 KB before doing about 64 multiply-adds.
+  Change:    Size the NIST-path locals for 2 x 12 limbs (they only serve P-256 / P-384);
+             rewrite SSFBNModAdd without the temporary, as SSFBNModSub already is (subtract
+             m in place, then a masked add-back).
+  Probable:  Measured on the host: P-256 sign -5%, verify / ECDH -4%, P-384 sign -10%
+             (x86 clears 1 KB in about 20 ns). On a Cortex-M the clearing is 256 word stores
+             per KB against roughly 400-600 cycles of arithmetic per field multiply, so ECC
+             in a build with RSA-4096 enabled is estimated 1.5-2.5x faster. Stack: several
+             KB less across a scalar multiply (README footnotes 40 / 42 cite the BN-cap
+             sized frames as the peak).
+  Risk:      Sizes must cover the largest NIST operand (P-384: 24-limb product); add
+             SSF_REQUIRE on caps. The ModAdd rewrite must stay constant-time (masked add,
+             no branch on the borrow). EC and ECDSA vectors cover both curves.
+  Prototype (scratchpad; ssfbn, ssfrsa, ssfec, ssfecdsa, ssfx509, ssfcms tests pass):
+             P-256 reduction s / tmp at 8 limbs, P-384 at 12, NIST product at 24, and
+             SSFBNModAdd without the temporary (in-place subtract of m, then a masked
+             add-back iff no carry and a borrow).
+  Measured:  Code (arm-none-eabi-gcc -Os, ssfbn total): Cortex-M4 14463 -> 14084 B (-379),
+             Cortex-M0+ 17171 -> 16572 B (-599), mostly SSFBNModMulNIST (the reductions are
+             inlined into it): M4 1988 -> 1636 B.
+             Stack frames (Cortex-M4): SSFBNModMulNIST 3120 -> 232 B, SSFBNModAdd 1072 -> 24
+             B. Reachable call-graph peaks (-fcallgraph-info, excluding SSFBNModMulNIST's
+             never-taken generic fallback): SSFECScalarMul 9592 -> 6704 B,
+             SSFECScalarMulDualBase 12104 -> 9216 B (-2888 each). The operation peaks do NOT
+             move: ECDSA sign 18392 B, verify 18256 B, ECDH 18016 B, keygen 17504 B. Each is
+             set by the one Fermat inverse per operation (SSFECPointToAffine -> SSFBNModInv ->
+             SSFBNModExp -> SSFBNModExpMont, a 10.4 KB window table sized for the 8192-bit
+             cap); see EC-O3. The earlier "several KB less stack" estimate was wrong for whole
+             operations.
+             Speed, x86-64 -O2 (two interleaved runs): P-256 verify 1230-1255 -> 1097-1129 us
+             (-9%), ECDH 1158-1180 -> 1046-1070 us (-9%), P-384 sign 645 -> 600-604 us (-7%),
+             P-384 verify 2223-2261 -> 2051-2110 us (-7%), P-256 sign within noise.
+             Emulated 32-bit ARM (qemu-arm, Cortex-A7 code): P-256 sign 2613 -> 2027 us
+             (1.29x), verify 9209 -> 6590 us (1.40x), ECDH 8567 -> 5973 us (1.43x), P-384
+             sign 4824 -> 4102 us (1.18x), verify 17075 -> 13580 us (1.26x). This revises the
+             1.5-2.5x Cortex-M estimate to about 1.2-1.5x. QEMU user mode runs translated
+             code on the host and models no Cortex-M timing (no wait states, no memset
+             implementation differences), so only a board measurement settles the real figure.
+
+BN-O7  Speed  DONE (2026-11-19)  Effort M
+  Where:     SSFBNMod (bit-serial shift-and-subtract; 55 us for 2048 mod 1024, 230 us for
+             4096 mod 2048), used for the RSA CRT split cB mod p, cB mod q, in key checks,
+             and by SSFBNModMul (ECDSA verify u1, u2).
+  Change:    For odd m, reduce with Montgomery: split x = xH * 2^w + xL, then
+             x mod m = MontMul(xH mod m, R^2) + xL mod m, each "mod m" a single conditional
+             subtraction because xH, xL < 2m for a full-width m.
+  Probable:  RSA sign -0.1 ms; ECDSA verify -5 us. Small, but it also removes a branch on
+             secret data (below).
+  Risk:      Needs a full-width (top bit set) m for the one-subtraction bound; keep the
+             generic path for other m.
+  Security note (not an optimization): SSFBNMod branches on each step's borrow
+             ("if (borrow != 0u) add shifted back"). ssfrsa calls it with the secret primes
+             p and q on the blinded value cB. Blinding randomizes cB, which limits what the
+             timing reveals, but the branch pattern still depends on p. BN-O7's CT form
+             would remove it. Worth confirming against AUDIT RSA-9's accepted-timing scope.
+
+BN-O8  Speed  DONE (2026-11-19)  Effort S
+  Where:     SSFBNModMulNIST (compares m against the P-256 / P-384 prime limb by limb on every
+             field multiply to pick the reduction)
+  Change:    Let the curve parameters carry the reduction to use (a field id) and call it
+             directly from ssfec.
+             As done: no field id. ssfec's p points at ssfbn's own (now const) prime limbs,
+             and ModMulNIST matches that pointer before falling back to the full compare.
+  Probable:  ECC +2-4%.
+  Measured:  Scalar multiply -5 to -9% (see the change log); flash -96 B M4, RAM -560 B.
+  Risk:      None; the generic fallback remains for other moduli.
+
+  Reviewed, no change worth making: Karatsuba (threshold 32 limbs, RSA only), the 4-bit
+  fixed-window ModExpMont with CT table scan (the 16-entry scan is about 6% of an
+  exponentiation and is what keeps the window lookup constant-time), SSFBNIsProbablePrime
+  (cost is the exponentiations BN-O1..O3 speed up).
+
+----------------------------------------------------------------------------------------------
+ssfec
+----------------------------------------------------------------------------------------------
+
+  Field arithmetic is the cost: a variable-base P-256 multiply (ECDH, the u2 * Q half of
+  verify) is about 256 doublings and 78 additions, about 3300 field multiplies and 3600
+  field adds. BN-O6 and BN-O8 are the main levers; the items below are smaller.
+
+EC-O1  Speed  OPEN  Effort S
+  Where:     _SSFECPointDouble, _SSFECPointAdd* (squares computed with SSFBNModMulNIST(x, x))
+  Change:    A squaring entry (SSFBNSquare + NIST reduction): n(n+1)/2 instead of n^2 limb
+             products.
+  Probable:  About 40% of the field multiplies in a doubling-heavy scalar multiply are
+             squares: ECC +8-12%.
+  Risk:      SSFBNSquare must stay free of operand-dependent shortcuts. It was not: its
+             diagonal carry loop was a while (carry != 0); fixed first (SQ-CT, 2026-11-19).
+  Measured (prototype, 2026-11-19): 18 square sites in ssfec (not 7). The product is only
+             15-20% of SSFBNModMulNIST; squaring trims it 25-35%, so P-256 verify / ECDH
+             gain 7-8% on emulated ARM32 and 1-4% on x86-64, P-384 1-3%, sign within noise.
+             Code +66 B Cortex-M4 (ssfbn + ssfec). The NIST reduction dominates: see EC-O4.
+
+EC-O4  Speed  DONE (2026-11-19)  Effort M  [found while measuring EC-O1]
+  Where:     _SSFBNReduceP256 / _SSFBNReduceP384: 9 / 10 fold passes, then a constant-time
+             correction that always runs 23 full passes (an add or subtract plus a masked
+             select each: 8 + 12 + 3 for P-256, 6 + 14 + 3 for P-384) sized for worst-case
+             carries, where about 4-7 are needed. Reduction and overhead are about 85% of a
+             field multiply (P-256: 193 of 227 ns x86-64, 910 of 1110 ns ARM32).
+  Change:    Fold the net signed carry (about -4..+7) in one constant-time step using the
+             prime's special form, then one or two conditional subtractions: about 15
+             pass-equivalents instead of about 55.
+  Probable:  Reduction 3-4x, field multiply about 2-2.5x, ECDSA / ECDH probably 1.5-2x (to
+             be confirmed by a prototype). Code about the same or smaller.
+  Risk:      Must stay constant-time; needs a written carry-range argument, a differential
+             against the current reductions, and boundary vectors near p, 2p and the
+             folding limits.
+
+EC-O2  Speed  OPEN  Effort S
+  Where:     SSFECPointToAffine (SSFBNModInv Fermat: MontInit plus a 256-bit exponentiation
+             per call)
+  Change:    Precompute the Montgomery constants of p and n in the curve parameters, so the
+             inverse skips MontInit (after BN-O1 this saves about 5 us per call, less than
+             before).
+  Probable:  ECDSA sign / ECDH -1-2% after BN-O1.
+  Risk:      Constant tables; check them against MontInit in the unit tests.
+
+EC-O3  Stack + speed  DONE (2026-11-19)  Effort M  (found while measuring BN-O6)
+  Where:     the curve-width modular arithmetic ssfec / ssfecdsa run through the 8192-bit-cap
+             ssfbn paths: SSFECPointToAffine and ECDSA k^-1 use SSFBNModInv (Fermat:
+             SSFBNModExp -> SSFBNModExpMont with a 16-entry table of SSF_BN_MAX_LIMBS-limb
+             values, 10.4 KB on Cortex-M4); ECDSA verify uses SSFBNModInvExt and SSFBNModMul
+             (several 1 KB locals each).
+  Change:    Curve-width versions: a Fermat inverse for p and n through SSFBNModMulNIST /
+             Montgomery at 8 or 12 limbs with a fixed addition chain or a small window, and
+             mod-n multiply / inverse with locals sized SSF_EC_MAX_LIMBS.
+  Probable:  With BN-O6, call-graph peaks (Cortex-M4) fall from about 18 KB to about 7-10 KB:
+             ECDSA sign 18392 -> about 8300 B, ECDH 18016 -> about 7250 B, keygen 17504 ->
+             about 7260 B, verify 18256 -> about 10000 B. Speed: Fermat inverses at curve
+             width, a few percent.
+  Risk:      The inverses take secret inputs (k, Z of a secret multiple): they must stay
+             constant-time, as SSFBNModInv is today. Needs new tests at both curves.
+  Prototype (scratchpad, 2026-11-19; ssfbn, ssfrsa, ssfec, ssfecdsa, ssfx509, ssfcms tests
+             pass): SSFBNModInvSmall (Fermat a^(m-2) mod m in Montgomery form at <= 12 limbs,
+             4-bit window; the exponent is public, so the table is indexed directly and the
+             operation sequence never depends on the secret base; a * r == 1 checked as
+             today) and SSFBNModMulSmall (MontMul(MontMul(a, b), R^2)), used for
+             SSFECPointToAffine's Z^-1, ECDSA sign's k^-1 and both SSFBNModMulCT calls, and
+             verify's SSFBNModInvExt and both SSFBNModMul calls.
+  Measured:  Stack, Cortex-M4 reachable call-graph peaks (excluding SSFBNModMulNIST's generic
+             fallback and SSFBNMul's Karatsuba path, neither reachable at 8 / 12 limbs):
+             ECDSA sign 18392 -> 6120 B, verify 18256 -> 7832 B, ECDH 18016 -> 5640 B, keygen
+             17504 -> 5128 B. The scalar multiplies are now the deepest chains. New frames:
+             SSFBNModInvSmall 1216 B (against SSFBNModInv 2088 B + SSFBNModExpMont 10440 B).
+             Code: SSFBNModInvSmall 480 B, SSFBNModMulSmall 168 B on Cortex-M4 (460 / 164 B on
+             M0+). In a linked Cortex-M4 image using ECDSA + ECDH but not RSA (gc-sections,
+             newlib-nano): 43972 -> 42108 B (-1864 B), because SSFBNModExpMont,
+             SSFBNModInvExt and SSFBNModMulCT are no longer linked. With RSA also linked they
+             stay, so the net is about +650 B.
+             Speed, x86-64 -O2: P-256 sign 322 -> 283-298 us (-8 to -12%), P-384 sign 600 ->
+             565 us (-6%), verify and ECDH within noise. Emulated ARM32: P-384 sign 4235 ->
+             3783 us (-11%), P-256 sign, verify and ECDH within 1-2%.
+
+  Reviewed, no change worth making: the 4-bit fixed-window CT variable-base multiply (a
+  signed 5-bit window saves about 10 additions of 334 point operations: 3%), the comb
+  tables (already configurable via SSF_EC_FIXED_BASE_COMB_H and FIXED_BASE_P256 / P384).
+
+----------------------------------------------------------------------------------------------
+ssfecdsa
+----------------------------------------------------------------------------------------------
+
+  No module-specific findings. Signing cost is the comb multiply, two Fermat inverses (k^-1,
+  affine x) and two SSFBNModMulCT calls, all covered by BN-O1, BN-O4 and EC-O2; RFC 6979's
+  HMAC calls benefit from HMAC-O1 / O2. Verify cost is the dual multiply (EC / BN items) and
+  SSFBNModInvExt (BN-O5).
+
+----------------------------------------------------------------------------------------------
+ssfed25519, ssfx25519
+----------------------------------------------------------------------------------------------
+
+  Measured: Ed25519 sign 637 us = fixed-base multiply (about 315 us) + verify-after-sign
+  (about 320 us, a deliberate fault-attack countermeasure). Verify 324 us. X25519 172 us.
+
+ED-O1  Size  DONE (2026-11-19)  Effort M
+  Where:     _sc_muladd (5531 B) and _sc_reduce (2517 B): SUPERCOP ref10's fully unrolled
+             scalar arithmetic mod L, 8 KB of the module's 15.5 KB
+  Change:    A compact loop-based reduction mod L (the TweetNaCl modL shape: 64 signed
+             limbs, two short loops) used by both reduce and muladd.
+  Probable:  About -7 KB. Speed effect negligible (scalar ops are about 1 us of a 320 us
+             operation).
+  Risk:      Must stay constant-time (TweetNaCl's modL is branch-free) and produce
+             canonical results; RFC 8032 vectors plus the existing _sc tests cover it. Keep
+             the S < L check in verify.
+
+ED-O2  Speed  OPEN  Effort M
+  Where:     _ge_scalarmult_base (generic 256-step CT double-and-add ladder over B)
+  Change:    4-bit fixed window with a constant-time table scan: 16 precomputed multiples of
+             B in ROM (16 x 4 coordinates x 32 B = 2 KB, or affine 1 KB) and 64 additions
+             instead of 256.
+  Probable:  Fixed-base multiply about 1.6x (doublings remain); Ed25519 sign about 1.3x
+             (verify-after-sign unchanged), KeyGen / PubKeyFromSeed 1.6x. Size +1-2 KB.
+  Risk:      CT table scan as ssfec already does; consider making it a config option like
+             SSF_EC_CONFIG_FIXED_BASE_P256.
+
+ED-O3  Speed  OPEN  Effort M
+  Where:     _ge_double_scalarmult (bit-by-bit Straus: 256 doublings plus about 256
+             additions)
+  Change:    Sliding windows (w = 4 for A built at run time, w = 5 for B), as ssfec's
+             variable-time wNAF already does. Verify is public data, so variable time is
+             acceptable.
+  Probable:  About 350 point operations instead of 512: verify 1.35-1.45x, and sign gains the
+             same on its verify-after-sign half.
+  Risk:      Variable time only on public inputs (signature, public key, message).
+
+FE-O1  Speed  DROPPED (2026-11-19, measured)  Effort S
+  Where:     _fe_sqr in both modules is _fe_mul(a, a); _fe_mul ends with a full reduction to
+             [0, p) after two folds
+  Change:    Dedicated squaring (36 instead of 64 limb products); keep the full reduction
+             only where a canonical value is needed (encode, compare, isneg), with the bound
+             analysis written down for the lazily reduced operands.
+  Probable:  Squaring alone: X25519 and Ed25519 +15-20% (the ladder and the inversion
+             chains are square-heavy). Lazy reduction: a further +10-15%.
+  Risk:      Lazy reduction needs care: every add / sub must tolerate inputs in [0, 2p) and
+             the 38-fold carries must be re-proved. The squaring change alone is low risk.
+
+FE-O2  Size  DONE (2026-11-19)  Effort M
+  Where:     ssfx25519.c and ssfed25519.c each carry their own GF(2^255-19) arithmetic
+             (_fe_mul, _fe_reduce, _fe_inv, add / sub / cswap / bytes: about 1.3 KB each)
+  Change:    One shared internal implementation (a private header or ssffe25519.c used by
+             both).
+  Probable:  About -1.2 KB in builds that enable both (TLS 1.3 with Ed25519 certificates).
+  Risk:      The two copies must be identical first (diff them); both modules' vectors
+             cover the result.
+
+ED-O4  Speed  OPEN  Effort S  (policy decision, not recommended as a default)
+  Where:     SSFEd25519Sign's verify-after-sign
+  Change:    A config option to skip it, default ON.
+  Probable:  Sign 2x faster when turned off.
+  Risk:      Removes the differential-fault countermeasure and the seed / public key mismatch
+             check; only for devices without a fault-injection threat model.
+
+----------------------------------------------------------------------------------------------
+ssfrsa
+----------------------------------------------------------------------------------------------
+
+  Every significant RSA cost is in ssfbn (BN-O1 to BN-O5, BN-O7). Measured profile of
+  RSA-2048 sign after BN-O1..O3: modular exponentiations about 2 ms, ModInvExt 2.2 ms,
+  ModMulCT 0.6 ms, SSFBNMod 0.1 ms. Projected with BN-O4 and BN-O5: about 2.5-3 ms, against
+  7.7 ms today.
+
+RSA-O1  Stack  CLOSED (2026-11-19, superseded and done by RSA-STK Phase 1)  Effort M
+  Where:     SSFRSAKeyGen, SSFRSAPrivKeyIsValid, _SSFRSAPrivKeyDecode callers (10-15 locals at
+             SSF_BN_MAX_LIMBS each, 1 KB apiece at the default cap, all zero-filled per call)
+  Change:    Size working values at SSF_BN_MAX_MOD_LIMBS (the modulus width) where they never
+             hold a double-width product, as _SSFRSAPrivateOpCRT already does.
+  Probable:  Several KB less stack and zero-fill per call; speed effect small next to the
+             exponentiations.
+  Risk:      Each resized local must be shown never to hold a 2n-limb product.
+
+RSA-STK  Stack  Phase 1 DONE (2026-11-19), Phase 2 OPEN  Effort M  [both measured]
+  Where:     RSA signing and key generation peak at about 36 KB of stack on Cortex-M4 in the
+             default (RSA-4096 capable) build. Deepest signing chain, measured: SSFRSASignPKCS1
+             12.0 KB (11 locals at SSF_BN_MAX_LIMBS, 1 KB each, holding at most modulus-width
+             values) > _SSFRSAPrivateOpCRT 10.1 KB (17 locals at modulus width, 9 of them
+             prime-sized) > SSFBNModExp 2.1 KB (its Montgomery context at SSF_BN_MAX_LIMBS) >
+             SSFBNModExpMont 10.4 KB (16-entry window table) > ConvertOut / MontMul 2.2 KB.
+  Phase 1:   Size every local to its real width: Montgomery contexts and scratch at
+             SSF_BN_MAX_MOD_LIMBS (the documented bound on SSFBNMont_t::len) in ModExp,
+             ModExpPub, ConvertOut, MontMul, MontSquare and IsProbablePrime; in RSA sign, PSS,
+             keygen and the CRT op, n-width values at SSF_RSA_MAX_KEY_BITS and prime-width
+             values at half that (blinded CRT exponents at half + 2). The CRT's double-width
+             recombination product is left at the cap.
+             Prototype: all 8 suites pass, normal and ASan + UBSan. Speed neutral (RSA-2048 sign
+             x86-64 2668-3030 -> 2716-2752 us, emulated ARM32 15918 -> 15512 us). Code
+             (ssfbn + ssfrsa, arm-none-eabi-gcc -Os): +70 B Cortex-M4, +100 B Cortex-M0+.
+  Phase 2:   Smaller window table in SSFBNModExpMont. SSF_BN_MODEXP_WIN_K must divide 32, so a
+             3-bit window is not an option (an earlier estimate assumed one). Choices: the
+             existing option SSF_BN_MODEXP_WIN_K = 2 (4-entry table, no code change), measured
+             +12% RSA-2048 sign time on x86-64 and +15% on emulated ARM32; or signed 4-bit
+             digits (8-entry table with constant-time negation), about today's speed, which
+             needs code and is computed here rather than measured (8 entries x 512 B fewer at
+             the default cap, x 256 B in an RSA-2048-only build).
+  Measured:  Reachable call-graph peaks on Cortex-M4 (the old Euclid / shift-subtract bodies,
+             unreachable for signing's odd moduli, excluded), RSA-2048 PKCS#1 sign / PSS sign:
+               default build, window 4:  35.9 / 36.6 KB -> Phase 1 24.9 / 25.6 KB
+               default build, window 2:  29.8 / 30.6 KB -> Phase 1 18.8 / 19.6 KB
+               RSA-2048-only, window 4:  18.4 / 18.9 KB -> Phase 1 12.9 / 13.4 KB
+               RSA-2048-only, window 2:  15.3 / 15.8 KB -> Phase 1 10.6 / 11.1 KB
+             Signed 4-bit digits (computed): Phase 1 + 8-entry table about 20.9 KB default,
+             about 10.9 KB RSA-2048-only.
+             Key generation (static peak): default 35.7 -> 26.5 KB (window 4), 29.6 -> 22.8 KB
+             (window 2); RSA-2048-only 18.2 -> 13.6 / 15.7 -> 13.3 KB. Its peak goes through the
+             Euclid inverse over the even lambda(n) (9.4 KB frame), which Phase 1 does not yet
+             resize. Verify: default 12.4 -> 10.4 KB.
+
+----------------------------------------------------------------------------------------------
+ssftls
+----------------------------------------------------------------------------------------------
+
+TLS-O1  Speed  OPEN  Effort M
+  Where:     SSFTLSRecordEncrypt / Decrypt (one-shot SSFAESGCMEncrypt / Decrypt: every record
+             re-expands the AES key and recomputes H = E_K(0))
+  Change:    A keyed AES-GCM context (schedule and H kept in the record state); requires a
+             small GCM context API.
+  Probable:  About 2 AES block-equivalents saved per record: negligible for 16 KB records,
+             10-25% for records of a few hundred bytes (typical of IoT traffic).
+  Risk:      The schedule and H are key material in the record state; its DeInit must wipe
+             them. Record state grows by up to 256 B.
+
+  SSFTLSHkdfExpandLabel / DeriveSecret gain from HKDF-O1 and HMAC-O1.
+
+----------------------------------------------------------------------------------------------
+ssfcms
+----------------------------------------------------------------------------------------------
+
+CMS-O1  Size  DONE (2026-11-19)  Effort S  (same change as X509-O1)
+  Where:     17 SSF_TLS_TRACE_CERT_* call sites
+  Change:    Compile-time trace switch (X509-O1).
+  Probable:  -1654 B measured (gcc -Os x86-64), 828 B of it format strings.
+  Risk:      None when the switch defaults to the current behaviour.
+
+  Reviewed, no change worth making: signer verification already reuses
+  SSFX509VerifySignature (no duplicated algorithm dispatch); content is hashed once per
+  signer, the second digest runs only when the caller also supplies one.
+
+----------------------------------------------------------------------------------------------
+ssfx509
+----------------------------------------------------------------------------------------------
+
+X509-O1  Size  DONE (2026-11-19)  Effort S
+  Where:     40 SSF_TLS_TRACE_CERT_ERROR / DEBUG call sites. _SSF_TLS_TRACE is gated only at
+             run time (callback pointer), so every build carries the format strings, the
+             snprintf argument setup at each site, a 256-byte buffer in the frame of each
+             tracing function, and a link-time dependency on snprintf.
+  Change:    SSF_TLS_CONFIG_ENABLE_TRACE in _opt/ssftls_opt.h; when 0, _SSF_TLS_TRACE expands
+             to nothing ((void)(tctx)).
+  Probable:  -4535 B in ssfx509 measured (2403 B of it strings), -1654 B in ssfcms; plus the
+             libc printf engine if nothing else uses snprintf (newlib-nano: several KB).
+             About -256 B stack in each tracing function.
+  Risk:      Default 1 keeps today's behaviour. Unit tests that capture trace output must run
+             with it on.
+
+X509-O2  Size  OPEN  Effort S  (only matters without --gc-sections)
+  Where:     the certificate generator (SSFX509EncodeCert, EncodeTBS and the _SSFX509Enc*
+             helpers): 7646 B of the module
+  Change:    SSF_X509_CONFIG_ENABLE_GENERATOR, default 1.
+  Probable:  -7.6 KB for builds that never generate certificates and do not link with
+             -ffunction-sections / --gc-sections (with them the linker drops it already).
+  Risk:      None; the unit tests need it on.
+
+X509-O3  Size  OPEN  Effort M
+  Where:     SSFX509VerifySignature (3171 B): OID-by-OID dispatch with an inline hash
+             selection per scheme
+  Change:    A const table {sigAlgOid, scheme, hash} looked up once; each scheme's checks
+             then run from the table entry.
+  Probable:  About -800 to -1200 B.
+  Risk:      Every AUDIT X509-11 key-type / parameter check must remain per scheme; the
+             signature-dispatch tests cover each OID.
+
+X509-O4  Stack  OPEN  Effort L
+  Where:     SSFX509VerifyChainPurpose (14.5 KB frame: SSF_X509_CONFIG_MAX_CHAIN_DEPTH parsed
+             SSFX509Cert_t structures held at once, README footnote 58)
+  Change:    Keep two parsed certificates (child, issuer) and re-parse from DER on demand;
+             Name Constraints walk the ancestors by re-parsing them.
+  Probable:  Stack 14.5 KB -> about 4 KB. Time +5-15 us per chain (zero-copy parsing is a few
+             microseconds per certificate; the signatures cost milliseconds).
+  Risk:      High: the chain logic (pathLen, Name Constraints, purpose checks) was hardened
+             in several audit items. Only worth it on RAM-constrained targets; needs the
+             full x509 and cms suites plus new depth / constraint tests.
+
+  Reviewed, no change worth making: SSFX509Parse (4 KB, one pass, every check an RFC 5280
+  rule from the AUDIT files).
+
+TRACE-1  Portability  OPEN  Effort S  (found 2026-11-19 during X509-O1)
+  Where:     ssfx509.c and ssfcms.c trace format strings (23 sites)
+  Problem:   uint32_t arguments printed with %u. On arm-none-eabi uint32_t is unsigned long,
+             so gcc -Wall reports 23 -Wformat mismatches when tracing is compiled in. Harmless
+             on 32-bit ARM (both types are 32 bits) but undefined behaviour by the letter, and
+             wrong on any LP64 target where uint32_t were unsigned long.
+  Change:    Cast the arguments to (unsigned int), or use PRIu32 from <inttypes.h>.
+  Probable:  Zero size or speed effect; -Wall-clean trace builds on Cortex-M.
+
+----------------------------------------------------------------------------------------------
+CHANGE LOG
+----------------------------------------------------------------------------------------------
+
+  2026-11-19  BN-O1 DONE. SSFBNMontInit starts at 2^(L-1), L = bit length of m, runs
+              w - L + 1 + j SSFBNModAdd doublings to 2^(w + j) mod m (w = 32 * len = j * 2^s,
+              j odd), then s SSFBNMontSquare calls. m == 1 now gives rr == 0; the old loop
+              left 1, a pre-existing edge-case error, harmless in-tree because no caller uses
+              m == 1 for Montgomery arithmetic. Padded moduli (leading zero limbs) work and just
+              take more doublings.
+              Test hook _SSFBNMontInitDoublings (ssfbn.h unit-test section).
+              ssfbn_ut.c "OPTIMIZE BN-O1" compares rr bit for bit with the old doubling loop
+              for P-256 p, P-384 p, the P-256 order, 3 limbs (w = 3 * 2^5, top bit at and
+              inside the top limb), a padded 4-limb modulus, 1-limb 3 and 0xFFFFFFFF, and
+              full-width 2048-bit and 3072-bit moduli. It also checks m == 1 gives rr 0 and
+              that 2048-bit takes 2 doublings and 3072-bit 4.
+              RED: ssfbn_ut.c:3362 (m == 1 gave rr 1) and, with that line relaxed, :3376
+              (4096 doublings instead of 2).
+              GREEN (x86-64): ssfbn, ssfrsa, ssfec, ssfecdsa, ssfx509, ssfcms, ssfbase64url,
+              ssfmatch. GREEN (32-bit ARM: arm-linux-gnueabihf-gcc -static, qemu-arm): same 8
+              suites.
+              Size (arm-none-eabi-gcc -Os): SSFBNMontInit 224 -> 348 B on Cortex-M4 (+124),
+              280 -> 376 B on Cortex-M0+ (+96). x86-64 -Os +134 B. No RAM or stack change.
+              Speed: MontInit 2048-bit 347 -> 59 us (x86-64), 3109 -> 378 us (emulated ARM32,
+              8.2x). End to end, x86-64 -O2, unloaded: RSA-2048 verify 448.5 -> 168.9 us,
+              sign 7710 -> 7097 us, ECDSA P-256 sign 369.8 -> 336.7 us, P-384 sign
+              792.7 -> 704.4 us; P-256 verify / ECDH within noise.
+              Docs: ssfbn.md (context-reuse note, SSFBNMontInit description).
+  2026-11-19  BN-O1 post-implementation audit (Jim: "comprehensive correctness and security
+              audit of BN-01 changes"). Verified: the algebra (2^(L-1) < m for odd m > 1;
+              doublings reach 2^(w + j); each MontSquare maps 2^(w + e) to 2^(w + 2e); m < R
+              since L <= w), MontSquare's preconditions at the call, index and counter bounds,
+              3001 random odd moduli of 1-128 limbs (padded, 2^(L-1)+1, 2^L-1, m == 1) and 41
+              at 255 / 256 limbs against Python pow(2, 64 * len, m) under ASan + UBSan (no
+              mismatch, no report), timing of random vs all-ones 2048-bit moduli of equal L
+              (medians 57.4 / 57.3 us), and stack on Cortex-M4 (MontInit's chain 2.1 -> 3.2 KB;
+              every caller's sibling exponentiation is deeper, 5.2-12.6 KB, so no peak moves).
+              Fixed the three Low findings:
+              (1) Comment: 2^(w + j) mod m is 2^j, not j, in Montgomery form.
+              (2) SSFBNMontSquare's in-place use is now documented in ssfbn.md and commented
+                  in the source.
+              (3) Pre-existing: MontInit's local R^2 (key-derived for a secret prime or a
+                  keygen candidate) was left on the stack, defeating BN-11's wipe of
+                  mont.rr. It is now SSFBNZeroize'd with the BN-11 scrub hook. Test "OPTIMIZE
+                  BN-O1": one scrub call, all zero (RED: ssfbn_ut.c:3370). The BN-11 test's
+                  exact count for IsProbablePrime's reject path is 7 + 1.
+              GREEN x86-64: ssfbn, ssfrsa, ssfec, ssfecdsa, ssfx509, ssfcms, ssfbase64url,
+              ssfmatch. GREEN 32-bit ARM (qemu-arm): the same 8 suites. Size with the wipe:
+              SSFBNMontInit 356 B Cortex-M4 (+132 vs HEAD), 384 B Cortex-M0+ (+104).
+  2026-11-19  BN-O2 and BN-O3 DONE (Jim: "Yes, do both"; stack deltas now reported for every
+              change).
+              BN-O2: SSFBNMontMul is standard CIOS. The reduction pass writes t[j - 1], so the
+              separate n+1-word shift loop per row is gone.
+              BN-O3: SSFBNMontSquare's diagonal add is one pass with a running carry, and each
+              reduction row defers its carry out of t[i + n] to the next row, which adds it at
+              that word. Both are fixed-length and O(n) (they were O(n^2) since AUDIT BN-12),
+              so they stay constant-time.
+              Test hooks _SSFBNMontMulIters and _SSFBNMontSqrCarryIters (ssfbn.h unit-test
+              section). ssfbn_ut.c "OPTIMIZE BN-O2 / BN-O3" checks MontMul against SSFBNModMul
+              (through R^2), MontSquare against MontMul(a, a), also in place, and MontMul(x, 1)
+              against ConvertOut, at 1, 2, 3, 4, 5, 7, 8, 12, 16, 31, 32 and 33 limbs, the
+              P-256 / P-384 primes and 2048 bits, with pseudo-random, all-ones and
+              minimal-top-limb moduli, a = b = m - 1 and a = 0. It pins 2n^2 - n MontMul inner
+              steps and 2n MontSquare carry steps.
+              RED: ssfbn_ut.c:3519 (the shift counter was non-zero). Instrumented HEAD shows
+              both new assertions fail: at n = 8, MontMul 200 steps (expected 120) and
+              MontSquare 100 carry steps (expected 16).
+              Oracle: 3000 random cases up to 256 limbs (padded and all-ones moduli, operands
+              0, m - 1, random) against Python a * b * R^-1 mod m under ASan + UBSan: no
+              mismatch, no report. Timing at 2048 bits for zero, m - 1 and random operands:
+              identical medians (MontMul 3607-3609 ns, MontSquare 2942-2943 ns).
+              GREEN x86-64 and 32-bit ARM (qemu-arm): ssfbn, ssfrsa, ssfec, ssfecdsa, ssfx509,
+              ssfcms, ssfbase64url, ssfmatch.
+              Size (arm-none-eabi-gcc -Os): Cortex-M4 MontMul 500 -> 524 B, MontSquare
+              628 -> 576 B (net -28 B); Cortex-M0+ 680 -> 700 B, 852 -> 816 B (net -16 B).
+              Stack (-fstack-usage): Cortex-M4 MontMul 1104 -> 1112 B, MontSquare 2120 -> 2128 B;
+              Cortex-M0+ 1168 -> 1184 B, 2240 -> 2240 B. The working buffers are unchanged, so
+              every chain grows by at most 8 B (M4) or 16 B (M0+).
+              Speed, 2048-bit primitives: x86-64 MontMul 3.85 -> 3.21 us, MontSquare
+              5.34 -> 2.45 us, MontInit 59 -> 27 us. Emulated ARM32: MontMul 22.2 -> 14.4 us
+              (1.6x), MontSquare 33.5 -> 11.7 us (2.9x), MontInit 378 -> 139 us.
+              End to end, x86-64 -O2, unloaded, against the BN-O1 commit: RSA-2048 verify
+              168.9 -> 84.7 us (449 -> 85 us since BN-O1, 5.3x), sign 7097 -> 5349 us (1.44x
+              since BN-O1). ECDSA P-256 sign 336.7 -> 324.6 us, P-384 sign 704.4 -> 643.0 us
+              (Fermat inverses); EC verify / ECDH unchanged (they do not use Montgomery).
+              Docs: ssfbn.md (SSFBNMontMul CIOS note; SSFBNMontSquare constant-time paragraph
+              rewritten, duplicate aliasing sentence from BN-O1 removed).
+  2026-11-19  BN-O2 / BN-O3 post-implementation audit (Jim: "do an audit on the two changes").
+              Verified by hand: MontMul's fused shift reproduces the old post-shift state, and
+              t[n] = t[n + 1] + hi cannot overflow (both <= 1). MontSquare's diagonal carry is
+              <= 1 (sums < 2^33) and its final carry is 0 (a^2 < R^2). Each deferred reduction
+              carry is owed to t[i + n + 1], exactly where the next row adds it; no row writes
+              that word first, the next row's u reads a lower word, and the last carry lands in
+              the still-zero t[2n]. Every index is in bounds and every loop length depends only
+              on n. Exhaustive carry-extreme grid (1-3 limbs over 0, 1, 2, 0x7FFFFFFF,
+              0x80000000, 0x80000001, 0xFFFFFFFE, 0xFFFFFFFF; 65535 cases): old and new outputs
+              bit-identical, MontSquare == MontMul(a, a), all equal to Python a^2 * R^-1 mod
+              m, ASan + UBSan clean.
+              Findings fixed: (1) ssfbn.md said the deferred carry is added "at that same word";
+              it is owed to t[i + n + 1] (the source comment was already right). (2) The grid
+              is now a unit test: "OPTIMIZE BN-O2 / BN-O3: exhaustive carry-extreme grid", 1-2
+              limbs, 1023 (m, a) pairs, each checked with b = a and b = m - 1. Mutation check:
+              five injected carry bugs (MontSquare deferred carry dropped, final carry dropped,
+              diagonal carry dropped; MontMul top word dropped, word-0 carry dropped) are each
+              caught by the grid on its own (run first, before any other test).
+              Open: (3) BN-O3 removed a #pragma warning(disable:6385) from the old MontSquare
+              carry loop. The new indices are in bounds, but MSVC /analyze was not run here;
+              restore the pragma if it reports C6385.
+              GREEN x86-64: ssfbn, ssfrsa, ssfec, ssfecdsa, ssfx509, ssfcms, ssfbase64url,
+              ssfmatch. Library code unchanged by this follow-up (test and docs only).
+  2026-11-19  X509-O1 / CMS-O1 DONE (Jim chose default 0, tracing off). New option
+              SSF_TLS_CONFIG_ENABLE_TRACE in _opt/ssftls_opt.h (#ifndef-guarded, so -D or a
+              project copy overrides it). Default 0, or 1 when SSF_CONFIG_X509_UNIT_TEST or
+              SSF_CONFIG_CMS_UNIT_TEST is 1, since those suites check trace messages. ssftls.h
+              defines _SSF_TLS_TRACE as the snprintf + callback block only when it is 1, and
+              otherwise as do { (void)(tctx); } while (0). SSFX509SetTraceCtx /
+              SSFCMSSetTraceCtx are unchanged (they store the callback, which is then never
+              called). Behaviour change: builds that relied on trace messages must set it to 1.
+              Tests: the 26 trace-state assertions in ssfx509_ut.c and ssfcms_ut.c (13 each)
+              use _UT_TRACE_ASSERT, which with tracing off checks that the callback never fired
+              (_utTraceCount == 0) at each of those points. RED: built with
+              -DSSF_TLS_CONFIG_ENABLE_TRACE=0 before the ssftls.h change, ssfcms_ut.c:1305
+              and ssfx509_ut.c:6640 (callback still fired).
+              GREEN x86-64 with tracing on (default test build) and forced off: ssfx509,
+              ssfcms, ssfbase64url, ssfmatch. Warnings with tracing off: none new (x86-64 0;
+              Cortex-M4 only the 2 pre-existing SetTraceCtx function-cast warnings).
+              Size (arm-none-eabi-gcc -Os, on -> off): Cortex-M4 ssfx509 16512 -> 12819 B
+              (-3693), ssfcms 5174 -> 3809 B (-1365); Cortex-M0+ 17882 -> 14113 B (-3769),
+              5782 -> 4317 B (-1465). Neither object references snprintf when off (newlib-nano
+              formatter 3781 B, full newlib 26600 B in a minimal link, saved if nothing else
+              uses it).
+              Stack (Cortex-M4, on -> off): SSFX509VerifyChainPurpose 8360 -> 8088 B (-272, the
+              module's peak), SSFX509VerifySignature 440 -> 200 (-240), _SSFCMSVerifySigner
+              2792 -> 2536, SSFCMSVerifyAttached 320 -> 64, SSFCMSVerifyDigest 328 -> 72
+              (-256 each); Cortex-M0+ the same within 8 B. Speed: no change.
+              Docs: ssftls.md (trace note, configuration row), ssfx509.md and ssfcms.md (trace
+              notes and SetTraceCtx descriptions).
+              Found while measuring, pre-existing: TRACE-1 (ssfx509 section), OPEN.
+  2026-11-19  X509-O1 / CMS-O1 post-implementation audit (Jim: "Commit and then audit"). With
+              tracing compiled out the build behaves as today's no-callback path, because the
+              old macro evaluated its arguments only inside if (fn != NULL). All 57 call sites
+              (40 ssfx509, 17 ssfcms) have side-effect-free arguments, and the context
+              argument is always &_ssfx509TraceCtx / &_ssfcmsTraceCtx. Both macro forms are a
+              single do-while statement and every use is a statement. snprintf references
+              confirm the defaults and overrides: test build on, test build with -D 0 off,
+              production (x509 / CMS unit tests 0) off, production with -D 1 on. ssftls_opt.h
+              is reached only through ssfport.h, after the unit-test flags.
+              Fixed (1), Low doc: the ssfx509.md SSFX509SetTraceCtx example now says messages
+              need SSF_TLS_CONFIG_ENABLE_TRACE 1. Noted (2), design: a callback installed in a
+              trace-off build silently receives nothing. Kept, because an assert in SetTraceCtx
+              would crash existing firmware; the change is documented in the option comment,
+              ssftls.md, ssfx509.md, ssfcms.md and commit 577aaac.
+  2026-11-19  BN-O6 DONE (Jim: "Just do BN-06 now", without EC-O3). _SSFBNReduceP256 keeps s /
+              tmp at 8 limbs, _SSFBNReduceP384 at 12, and SSFBNModMulNIST's product at 24
+              (16 when the cap is below 768 bits). SSFBNModAdd has no temporary: it subtracts m
+              in place and adds it back under a mask iff the add did not carry and the subtract
+              borrowed (the SSFBNModSub pattern, constant-time).
+              No red is possible: results are unchanged by design. Tests (ssfbn_ut.c "OPTIMIZE
+              BN-O6"): ModAdd against a limb-by-limb reference in the test over an exhaustive
+              1- and 2-limb carry / borrow grid (85344 (m, a, b) cases), each also in place
+              (r = a, r = b, r = a = b); ModAdd and ModMulNIST at P-256 and P-384 for all
+              pairs of 0, 1, p - 2, p - 1 and two pseudo-random operands, ModMulNIST against
+              the generic SSFBNModMul, also in place. Mutation check, new block run first: four
+              wrong add-back conditions (carry inverted, borrow ignored, never add back, carry
+              ignored) are all caught by it.
+              GREEN x86-64 (normal and ASan + UBSan, no report) and 32-bit ARM (qemu-arm):
+              ssfbn, ssfrsa, ssfec, ssfecdsa, ssfx509, ssfcms, ssfbase64url, ssfmatch.
+              Size (arm-none-eabi-gcc -Os, ssfbn text): Cortex-M4 14469 -> 14088 B (-381),
+              Cortex-M0+ 17177 -> 16568 B (-609); SSFBNModMulNIST M4 1988 -> 1636 B, ModAdd
+              244 -> 216 B (M0+ 280 -> 296 B).
+              Stack (Cortex-M4 frames): SSFBNModMulNIST 3120 -> 232 B, SSFBNModAdd 1072 -> 24 B.
+              Reachable call-graph peaks (SSFBNModMulNIST's generic fallback, never taken for
+              the NIST primes, excluded): SSFECScalarMul 9592 -> 6704 B, SSFECScalarMulDualBase
+              12104 -> 9216 B, SSFECScalarMulBaseP256 6896 -> 4008 B; ECDSA sign / verify /
+              ECDH / keygen unchanged (18392 / 18256 / 18016 / 17504 B, set by the full-width
+              Fermat inverse: EC-O3).
+              Speed: x86-64 -O2, two interleaved runs: P-256 verify 1217-1262 -> 1090-1097 us,
+              ECDH 1171-1181 -> 1049 us, P-384 sign 646-656 -> 592-616 us, P-384 verify
+              2243-2259 -> 2059-2093 us, P-256 sign within noise. Emulated ARM32: P-256 sign
+              2562 -> 2011 us (1.27x), verify 8795 -> 6109 us (1.44x), ECDH 8117 -> 5554 us
+              (1.46x), P-384 sign 4720 -> 3836 us (1.23x), verify 16642 -> 12852 us (1.29x).
+              Docs: ssfbn.md (NIST scratch at curve width); README footnotes 40 and 42 rewritten
+              (40 named the cap-sized ModMulNIST product as the scalar-multiply peak; 42 put the
+              verify peak on the dual scalar multiply, but the call graph shows the inverse).
+  2026-11-19  BN-O6 post-implementation audit (Jim: "Do an audit first"). SSFBNModAdd proved
+              equivalent to the old code for all inputs (same decision: keep r - m iff carry or
+              no borrow), and 200000 random 1-12-limb cases with unreduced operands hash
+              identically under old and new. The NIST buffers are indexed only to limb 7 / 11;
+              the product's capacity is enforced by SSFBNMul's REQUIRE. ASan + UBSan suites
+              clean. Python oracle: 40000 ModMulNIST / ModAdd cases at P-256 and P-384 (14322
+              with an operand within 1000 of p), no mismatch. Cortex-M4 machine code for
+              ModAdd: the only branches are the REQUIREs and the loop; the add-back condition is
+              an IT block and is applied as m * cond (MULS, fixed latency on every Cortex-M).
+              Fixed (docs only): (1) the scalar-multiply peaks in README footnote 40 and this
+              log were static call-graph figures that counted SSFBNModMulNIST's never-taken
+              generic fallback; they are now reachable peaks (M4 SSFECScalarMul 9.6 -> 6.7 KB,
+              DualBase 12.1 -> 9.2 KB, fixed-base P-256 6.9 -> 4.0 KB; x86-64 12.7 -> 7.8,
+              15.6 -> 10.7, 9.7 -> 4.8 KB). (2) README footnotes 40 and 42 say their figures are
+              Cortex-M4 and that the table values are an earlier x86-64 measurement.
+              Noted, pre-existing: the field-arithmetic scratch (prod, s, tmp) is not wiped on
+              return, as before (zero-filling on entry was never a wipe on exit).
+  2026-11-19  EC-O3 DONE (Jim: Option A, public helpers in ssfbn; verify moved to the CT inverse
+              as recommended). New in ssfbn.h: SSF_BN_SMALL_MAX_LIMBS (12, or the cap when
+              narrower), SSFBNModInvSmall (Fermat a^(m-2) mod m in Montgomery form, 4-bit
+              windows over the public exponent, direct table index; the a * r == 1 check and
+              the false returns for a = 0, even m, composite m and gcd(a, m) != 1 match
+              SSFBNModInv; r may alias a; the table, acc, aR, e and the context are wiped) and
+              SSFBNModMulSmall (MontMul(MontMul(a, b), R^2), exact for any a < R when b < m,
+              CT, r may alias a or b, intermediate wiped). ssfec's SSFECPointToAffine, ECDSA
+              sign (k^-1 and both SSFBNModMulCT) and both verify paths (SSFBNModInvExt and both
+              SSFBNModMul) use them.
+              Test hook _SSFBNFullWidthCalls counts entries to SSFBNModExpMont[Pub],
+              SSFBNModMulCT, SSFBNModInvExt and SSFBNModMul. RED: ssfecdsa_ut.c "OPTIMIZE EC-O3"
+              (keygen, sign, verify, ECDH on each curve must not enter them) failed at
+              ssfecdsa_ut.c:2179. ssfbn_ut.c "OPTIMIZE EC-O3" checks the helpers against
+              SSFBNModInv and SSFBNModMul at six small primes of 1-4 limbs (2^31-1 to 2^127-1)
+              and the P-256 / P-384 primes and orders, for a = 1, 2, m - 2, m - 1 and random
+              values, in place, an unreduced a for the product, the false cases, and the wipes
+              (7 and 2 scrub calls including SSFBNMontInit's). Mutation check: a skipped last
+              window, an off-by-one table index, a missing second multiply and a removed check
+              are each caught by that block. (A P-384 order typo of mine in a scratch check was
+              caught when both inverses rejected it; the test constant matches ssfec.c.)
+              GREEN x86-64 (normal and ASan + UBSan, no report) and 32-bit ARM (qemu-arm):
+              ssfbn, ssfrsa, ssfec, ssfecdsa, ssfx509, ssfcms, ssfbase64url, ssfmatch.
+              Stack, Cortex-M4 reachable call-graph peaks: ECDSA sign 18392 -> 6120 B, verify
+              18256 -> 7832 B, ECDH 18016 -> 5640 B, keygen 17504 -> 5128 B,
+              SSFECPointToAffine 17008 -> 4632 B. New frames: SSFBNModInvSmall 1216 B,
+              SSFBNModMulSmall 208 B.
+              Code (arm-none-eabi-gcc -Os): SSFBNModInvSmall 568 B / SSFBNModMulSmall 276 B on
+              Cortex-M4 (584 / 336 B on M0+); ssfbn + ssfec + ssfecdsa objects +841 B (M4),
+              +917 B (M0+). Linked Cortex-M4 images (gc-sections, newlib-nano): ECDSA + ECDH
+              without RSA 44260 -> 42332 B (-1928 B: the full-width ModExpMont, ModInvExt and
+              ModMulCT are no longer linked); with RSA also linked 49157 -> 49773 B (+616 B).
+              Speed, x86-64 -O2 (two interleaved runs): P-256 sign 300-339 -> 277-282 us, P-384
+              sign 588-594 -> 552 us, verify and ECDH within noise. Emulated ARM32: P-256 sign
+              1815 -> 1595 us (1.14x), P-384 sign 3800 -> 3463 us (1.10x), P-256 verify / ECDH
+              and P-384 verify 1-3% faster over two interleaved reruns.
+              Docs: ssfbn.md (new reference section, API table, constant-time table and the
+              secret-scalar note), ssfecdsa.md (signing uses the curve-width helpers), README
+              footnote 42 (the ECC peak is now the scalar multiply).
+  2026-11-19  EC-O3 post-implementation audit (Jim: "Do an audit first"). SSFBNModInvSmall's
+              operation sequence and table reads depend only on m (the table index comes from
+              the public exponent m - 2); the only branches on a are the a = 0 rejection and
+              the final check, as in SSFBNModInv. Timing on P-256 for a = 1, p - 1, 2^255 and
+              random: medians 24516-24559 ns, identical spreads. Every call site meets the
+              preconditions (Z < p, k < n, s < n checked in verify, e reduced below n, and
+              ModMulSmall's b always < n). ECDSA known-answer vectors unchanged.
+              Fixed: (1) Contract: for m == 1 SSFBNModInvSmall returned true (r = 0, and m - 2
+              underflowed) where SSFBNModInv returns false; it now returns false (test added,
+              RED at ssfbn_ut.c:3900). (2) Doc: ssfbn.md compared ModInvSmall's frame with a
+              wrong chain figure; it now gives the Cortex-M4 chains, about 4.4 KB against about
+              16.8 KB. (3) Hygiene: SSFBNModMulSmall now also wipes its Montgomery context, as
+              ModInvSmall does (scrub count 2 -> 4, RED at ssfbn_ut.c:3916).
+              GREEN x86-64 (normal and ASan + UBSan): all 8 suites. Sizes after the fixes,
+              Cortex-M4: SSFBNModInvSmall 580 B, SSFBNModMulSmall 288 B (M0+ 596 / 348 B);
+              frames unchanged (1216 / 208 B).
+  2026-11-19  BN-O4 and BN-O5 DONE (Jim: "Do both"). SSFBNModMulCT and SSFBNModInvExt are
+              dispatchers; their old bodies are the static _SSFBNModMulCTShift and
+              _SSFBNModInvExtEuclid (unchanged, still used for even m, and for ModInvExt when a
+              is 0 or not below m). Odd m goes to _SSFBNModMulCTMont (MontMul(MontMul(a, b),
+              R^2) at SSF_BN_MAX_MOD_LIMBS, CT, AUDIT BN-1's "a < m or b < m" REQUIRE kept in
+              the dispatcher, intermediate and context wiped) and to _SSFBNModInvBinary
+              (binary extended GCD with _SSFBNHalveMod; variable-time like the Euclid path; u,
+              v, x1, x2 wiped).
+              Test hook _SSFBNSlowPathCalls counts entries to the two old bodies. RED:
+              ssfrsa_ut.c "OPTIMIZE BN-O4 / BN-O5" (RSA-2048 PKCS#1 and PSS signing must not
+              enter them) failed at ssfrsa_ut.c:2027. ssfbn_ut.c "OPTIMIZE BN-O4 / BN-O5":
+              ModMulCT against SSFBNModMul for odd moduli of 1-64 limbs (full-width, all-ones,
+              top limb 1, a composite 3 * odd), also in place and with an all-ones a >= m;
+              ModInvExt true exactly when SSFBNGcd(a, m) == 1, then a * r == 1 and r < m, in
+              place; 5^-1 mod 21 = 17 and 3 mod 21 rejected; an even modulus still takes both
+              old paths (counter == 2); fast-path wipes (4 scrub calls each). A degenerate
+              m == 1 case in my first test draft was a test bug (the Euclid path, correctly,
+              has always rejected it) and is skipped.
+              Mutation check (new block run first): halving without adding m, returning x1
+              instead of x2 and a Montgomery path without the R^2 step are caught by the block;
+              a flipped u >= v comparison makes the binary GCD loop forever, so the suite
+              never completes (exit 124 under timeout) rather than failing an assertion.
+              GREEN x86-64 (normal and ASan + UBSan) and 32-bit ARM (qemu-arm): all 8 suites.
+              Code and stack: see the audit entry below (the first figures recorded here were
+              measured with the unit-test hooks compiled in and are withdrawn).
+              Speed, 2048-bit, x86-64 -O2: SSFBNModMulCT 277 -> 44 us (6.3x), SSFBNModInvExt
+              2238 -> 393 us (5.7x). RSA-2048 sign: x86-64 5317-5500 -> 2709-2781 us (2.0x);
+              emulated ARM32 28641 -> 14268 us (2.0x). Verify unchanged.
+              Docs: ssfbn.md (ModMulCT section, ModInvExt bullet and API row; the old text called
+              the Euclid path "binary extended Euclidean"), ssfrsa.md (variable-time note).
+  2026-11-19  BN-O4 / BN-O5 short audit (Jim: "short audit that includes fixes to 1 and 2").
+              (2) Fixed: _SSFBNModInvBinary asserts if it passes 2 * 32 * len + 1 times (each
+              pass after a subtraction halves at least once, and u + v has at most 64 * len
+              bits to lose). The flipped-comparison mutant that hung the suite now fails at
+              that assertion at once; correct code never nears it.
+              (1) Code size: the extra size is SSF_REQUIRE sites. Jim chose to drop only the
+              checks in the two old bodies (_SSFBNModMulCTShift, _SSFBNModInvExtEuclid) that
+              repeat, word for word, those of their only callers; each now carries a one-line
+              note that its caller validates. The three new helpers keep full DBC.
+              Measurement correction: ssfassert.h includes the repository's ssfport.h from its
+              own directory, so a "clean" -I copy does not shield a compile from the background
+              ARM build's temporary unit-test flags. The BN-O4 / BN-O5 sizes first reported
+              (committed 15916, current 17380, trimmed 15788 B) mixed hook-on and hook-off
+              objects; the "128 B smaller than committed" claim made when Jim chose the trim
+              was wrong. Re-measured with every object checked for _SSFBNScrubTestHook (absent)
+              and ssfport.h confirmed clean: Cortex-M4 ssfbn 14952 -> 16088 B before the trim
+              -> 15812 B final (+860 B); Cortex-M0+ 17528 -> 18804 -> 18424 B (+896 B). The
+              BN-O6 and EC-O3 objects were re-checked: no hooks, figures stand.
+              Stack (Cortex-M4 frames, clean): SSFBNModMulCT 3144 B -> 32 B + 1600 B
+              (_SSFBNModMulCTMont), SSFBNModInvExt 9352 B -> 16 B + 2120 B (_SSFBNModInvBinary);
+              the old bodies keep their frames, so call-graph peaks do not move.
+              Oracle: 3000 random odd moduli of 1-64 limbs (all-ones, small top limb,
+              composites 3 * odd; a = 1, m - 1, 3 and random) against Python under ASan + UBSan:
+              ModMulCT and ModInvExt match in every case (810 with gcd != 1), no report.
+              Noted, pre-existing (AUDIT BN-1): ModMulCT's "a < m or b < m" REQUIRE uses
+              SSFBNCmp, which stops at the first differing limb, so its time depends slightly on
+              the secret operand's top limbs although its comment says branch-free.
+              GREEN after the fixes: x86-64 normal and ASan + UBSan, all 8 suites, no warnings.
+  2026-11-19  RSA-STK Phase 1 DONE (Jim: "Ok, implement phase 1"). ssfbn: SSFBNMontInit now
+              REQUIREs m->len <= SSF_BN_MAX_MOD_LIMBS (the documented bound on SSFBNMont_t::len,
+              which every Montgomery buffer now relies on); MontMul / MontSquare scratch,
+              ConvertOut's one, the ModExp / ModExpPub contexts and IsProbablePrime's five
+              locals and context are sized at SSF_BN_MAX_MOD_LIMBS (IsProbablePrime REQUIREs
+              n->len within it). ssfrsa: SSF_RSA_MAX_N_LIMBS / SSF_RSA_MAX_HALF_LIMBS from
+              SSF_RSA_MAX_KEY_BITS size the sign (PKCS#1, PSS) and keygen locals (n, e, d, m, s,
+              mCheck at modulus width; p, q, dp, dq, qInv at prime width) and the CRT op's
+              (prime-sized values at prime width, blinded exponents at prime width + 2,
+              n-sized ones at modulus width). The CRT recombination product stays at the cap.
+              No functional red is possible (sizes only). RED for the enforced bound:
+              ssfbn_ut.c "OPTIMIZE RSA-STK" (MontInit at SSF_BN_MAX_MOD_LIMBS works, one limb
+              wider must assert) failed at ssfbn_ut.c:4061.
+              GREEN: all 8 suites on x86-64 (normal and ASan + UBSan), in an RSA-2048-only
+              build, and on 32-bit ARM (qemu-arm).
+              Stack (Cortex-M4 call-graph peaks, test hooks verified absent; signing excludes
+              the never-taken odd-modulus fallbacks): default build PKCS#1 sign 35.9 -> 24.9 KB,
+              PSS 36.6 -> 25.6 KB, keygen 35.7 -> 26.5 KB, verify 12.4 -> 10.4 KB; RSA-2048-only
+              18.4 -> 12.9, 18.9 -> 13.4, 18.2 -> 13.6, 6.4 -> 5.4 KB.
+              Code (ssfbn + ssfrsa, arm-none-eabi-gcc -Os): default Cortex-M4 24600 -> 24516 B
+              (-84), Cortex-M0+ 27634 -> 27600 B (-34); RSA-2048-only Cortex-M4 24222 ->
+              23812 B (-410).
+              Speed: neutral (RSA-2048 sign x86-64 2787-2839 -> 2754-2827 us; emulated ARM32
+              13881 -> 14474 us, within that emulator's run-to-run spread seen this session).
+              Docs: README footnotes 38 and 48 (sizing, measured peaks, compile-time dependence
+              on the largest enabled key), ssfbn.md (SSF_BN_MAX_MOD_LIMBS row, SSFBNMontInit,
+              SSFBNIsProbablePrime).
+  2026-11-19  RSA-STK Phase 1 AUDIT (Jim: "Do audit pass first", then "Yes" to fixes 1 and 2).
+              Review: every resized buffer checked against its largest content (MontMul /
+              MontSquare index n + 1 / 2n; n, e, d at nl <= RSA max; p, q, dp, dq, qInv at hl
+              = ceil(nl / 2), decoder-enforced; blinded exponents hl + 2 for the 2-limb random
+              multiplier); ssfbn.h's per-size static asserts already force SSF_BN_MAX_MOD_LIMBS
+              to hold the largest enabled modulus. Harness under ASan + UBSan: two keys each at
+              2048 / 3072 / 4096 generated by the new code, both validators, PKCS#1 and PSS
+              sign / verify, PKCS#1 signatures byte-identical to the committed code. Clean.
+              Fix 1 (contract): SSFBNModExp, SSFBNModExpPub, SSFBNModExpMontPub and SSFBNModInv
+              REQUIRE the modulus within SSF_BN_MAX_MOD_LIMBS at entry (new for the ModExpPub
+              pair, which had cap-sized scratch; implied before for the others via
+              SSFBNModExpMont). SSFBNGenPrime also REQUIREs bitLen <= SSF_BN_MAX_MOD_LIMBS * 32
+              (the same as MAX_BITS / 2 unless the constant is overridden). No red possible:
+              over-wide moduli already asserted deep in SSFBNMontInit; ssfbn_ut.c "Every entry
+              point that builds or takes a Montgomery context" checks each entry point asserts
+              (passed before and after, ASan clean). Docs: ssfbn.md ModExp, ModExpPub,
+              ModInv, GenPrime.
+              Fix 2 (test gap): RSA-3072 / 4096 keygen and signing ran only in the OpenSSL
+              cross-check, never in this box's builds. ssfrsa_ut.c "OPTIMIZE RSA-STK: every
+              enabled key size runs end to end without OpenSSL": keygen, both validators,
+              PKCS#1 and PSS sign / verify and changed-hash rejection at each enabled size
+              (+3 s). Mutation check: prime-width buffers one limb short fails it (assertion
+              in ssfbn.c) and passes the committed RSA tests.
+              Found while running fix 2's RSA-2048-only build (security, pre-existing): the
+              ssfrsa_ut.c keygen hygiene test (no top bytes of p left on the stack) failed in
+              2 of 12 runs. Cause: SSFBNMontMul / SSFBNMontSquare never wiped their t scratch,
+              which ends holding the unreduced result: p - 1 during Miller-Rabin and q^-1 mod p
+              from qInv's conversion out of Montgomery form. _SSFRSAStackScrub's fixed 8 KB did
+              not reach that deep. The committed code leaked too, below the test's 16 KB probe;
+              Phase 1's smaller frames moved the residue into it. A 64 KB scan for d, p, q, dp,
+              dq, qInv (x86-64 -O3): committed keygen leaves qInv every time and p or q in about
+              30% (RSA-2048 both configurations, 3072, 4096); signing left none. Elimination:
+              only wiping t removes it (wiping Mod / DivMod, Gcd, the FIPS e-coprime check,
+              ModInv's p - 2 or ModExp's context does not).
+              RED: ssfbn_ut.c "OPTIMIZE RSA-STK: MontMul / MontSquare leave no product in their
+              freed scratch" (stack scan for r and r + m) failed at ssfbn_ut.c:4140.
+              FIX: _SSFBNWipeLimbs (volatile) on t at the end of both primitives; no scrub hook,
+              which would swamp the exact scrub counts other tests check.
+              GREEN: all 8 suites normal, ASan + UBSan, 32-bit ARM; RSA-2048-only 12 of 12 runs.
+              The 64 KB scan finds none of the six secrets after keygen or signing (30 keys per
+              configuration at 2048, 8 each at 3072 and 4096).
+              Cost: speed x86-64 none measurable (MontMul n = 64 3029 -> 2992 ns, best of 7);
+              emulated ARM32 MontMul / MontSquare n = 64 +0.6% / +1.2%, n = 8 +1.2% / +5.4%,
+              n = 12 +4.1% / +4.2%; RSA-2048 sign and ECDSA within run-to-run noise. Code
+              Cortex-M4 +42 B (wipe) and +60 B (fix 1 REQUIREs) over Phase 1: ssfbn + ssfrsa
+              24602 (committed) -> 24618 B default, 24224 -> 23914 B RSA-2048-only; Cortex-M0+
+              27636 -> 27686 B. Stack: wipe inlined, no frame change; every peak as Phase 1.
+  2026-11-19  BN-O7 DONE (Jim: "Yes" to starting it). SSFBNMod is a dispatcher: an odd m of at
+              most SSF_BN_MAX_MOD_LIMBS limbs goes to _SSFBNModMont, constant-time (a = hi * R
+              + lo; acc = MontMul(ConvertIn(hi), R^2) + ConvertIn(lo) mod m; ConvertOut; each
+              chunk < R and R^2 mod m < m keep every product exact, no full-width m needed;
+              work depends on a->len and m->len only; intermediates and context wiped). Even
+              or wider m keeps shift-and-subtract (_SSFBNModShift, counted by the new test
+              counter _SSFBNModShiftCalls). SSFBNModMul / ModSquare inherit it, so the RSA CRT
+              split (cB mod p, cB mod q) and Miller-Rabin's squaring mod the secret candidate
+              no longer branch on secret data. Key checks and keygen's d mod (p - 1) keep the
+              variable-time path (even moduli).
+              RED: ssfbn_ut.c "OPTIMIZE BN-O7" (oracle x = q * m + rem at widths 1..MAX_MOD,
+              a shorter than m, in place, m = 1, m with zero top limbs, equal MontMul counts for
+              all-zero / all-ones a, no shift path for odd m) failed at its shift-count check;
+              its oracles all passed on the old algorithm first. ssfrsa_ut.c signing test (no
+              shift-path SSFBNMod) failed at ssfrsa_ut.c:2087.
+              GREEN: all 8 suites normal, ASan + UBSan, RSA-2048-only, 32-bit ARM. One existing
+              exact scrub count (IsProbablePrime composite path) now adds 5 per odd-modulus
+              SSFBNMod (its four locals plus MontInit's R^2); _scrubDirty still 0.
+              Differential: 40000 random (a, m) cases, widths 1..MAX_MOD, a up to 2 * m, full /
+              short / zero top limbs, all-ones runs: result digest identical to the committed
+              code, ASan + UBSan clean. Mutation: dropping the hi fold, the add, the convert
+              out, an off-by-one hi chunk, or sending even m to Montgomery all fail the suite;
+              a->len >= n for > n is equivalent (empty hi chunk).
+              Speed: SSFBNMod 2048 mod 1024 x86-64 55.2 -> 9.8 us (5.6x), ARM32 420 -> 57 us
+              (7.3x); 4096 mod 2048 221 -> 39 us; 512 mod 256 3.7 -> 1.1 us. RSA-2048 sign
+              x86-64 2758-2795 -> 2653-2676 us (-4%), ARM32 16.3 -> 15.7 ms; GenPrime 1024-bit
+              (fixed seed, identical primes) 56.3 -> 52.9 ms x86-64, 532 -> 504 ms ARM32;
+              verify and ECDSA unchanged (ECDSA does not call SSFBNMod).
+              Code (ssfbn, arm-none-eabi-gcc -Os): Cortex-M4 15968 -> 16365 B (+397; the
+              Montgomery path is 352 B), RSA-2048-only +389 B, Cortex-M0+ 18596 -> 19023 B
+              (+427). Stack: SSFBNMod's odd path peaks 2128 -> 4352 B on its own (default
+              build) but sits on no deepest chain: RSA sign / PSS / keygen / verify and ECDSA
+              sign / verify / ECDH peaks unchanged (ECDSA excluding SSFBNModMulNIST's generic
+              fallback, never taken for the P-256 / P-384 primes; counted unconditionally it
+              would show verify +2.1 KB).
+              Docs: ssfbn.md (timing table, SSFBNMod, ModMul, ModSquare, DivMod note),
+              ssfrsa.md (RSA-9 note: one variable-time step left; key checks).
+  2026-11-19  BN-O7 AUDIT (Jim: "Commit then correctness and security audit", then "Yes" to the
+              fixes). Review: MontInit's R^2 is fully reduced (built from ModAdd and
+              MontSquare, both < m), so every product is < 2m and one conditional subtraction
+              suffices, also for zero top limbs and m = 1; aliasing r = a and r = m safe;
+              RSA nl <= 2 * hl at every accepted size; the CRT op's only variable-time step
+              is ModInvExt (r^-1 mod n), as ssfrsa.md now says. Timing (x86-64, 2048 mod
+              1024): nine combinations of all-zero / all-ones / random a and m within 9.83 -
+              9.96 us. 64 KB secret-residue scan after keygen and sign: clean (20 keys per
+              configuration, plus RSA-4096). Findings, both fixed (docs / comments only):
+              1. The odd path's work also depends on m's bit length (SSFBNMontInit's doubling
+                 count: 9.82 -> 10.45 us from 1024 to 993 bits at 32 limbs); ssfbn.md said
+                 lengths only. Corrected in ssfbn.md (SSFBNMod; SSFBNModExp now points to the
+                 same MontInit property) and in the BN-O7 test comment. No new leak for RSA:
+                 the CRT exponentiation already built a context on p, and prime bit lengths
+                 are fixed by key generation.
+              2. _SSFBNModCallCount was still labelled "variable-time SSFBNMod calls"; now
+                 "SSFBNMod calls" (ssfbn.h, ssfbn.c).
+              Info, unchanged: keygen and key validation still reduce by the even p - 1 and
+              q - 1 on the variable-time path (once per key; documented in ssfrsa.md).
+  2026-11-19  ED-O1 DONE (Jim: "Yes"). ref10's unrolled _sc_reduce and _sc_muladd (24 x 21-bit
+              limbs) replaced by one loop-based _sc_modL (TweetNaCl modL shape: 64 signed byte
+              limbs; fold 63..32 down by 2^252 == -(L - 2^252), subtract (x >> 252) * L, one
+              final conditional subtract), shared by reduce and multiply-add. Fixed loops, no
+              data-dependent branches; negative carries use * 256, never a left shift of a
+              negative value. x (the secret nonce or h * a + r) is wiped, and reduce now
+              clears the upper 32 bytes of its buffer (the rest of the nonce hash). _sc_pack,
+              _sc_load3 / 4 and the _sc_pack test wrapper removed; _sc_muladd is SSF_NOINLINE
+              so its 512-byte x stays off Sign's deepest chain.
+              Tests: ssfed25519_ut.c "OPTIMIZE ED-O1" with Python-computed vectors (reduce of
+              0, L - 1, L, 2^252 (bit 252 kept, replacing the old _sc_pack test), 6L - 1,
+              2^512 - 1, a mixed value; muladd of all-ones, (L - 1)^3, 0, a clamped-style
+              operand, aliasing). Every vector passed on the ref10 code first. RED: the
+              upper-half clearing check failed at ssfed25519_ut.c:539 on ref10.
+              GREEN: all 9 suites normal, ASan + UBSan (with the Sign stack-limit test raised
+              for ASan's padded frames: the committed code fails it there too), 32-bit ARM.
+              Differential: 200000 reduce and 200000 muladd cases (random, all-ones,
+              all-zero, clamped b) give the same digest as ref10, every result < L, ASan clean.
+              Mutation: dropping the final subtract, the c term or the top-limb fold, a wrong
+              shift for q, or not clearing the upper half fail the suite; a shorter fold loop
+              (skips a zero byte of L) and floor instead of rounded carries are equivalent
+              (same 400000-case digest).
+              Code (ssfed25519): Cortex-M4 15791 -> 4286 B (-11505), Cortex-M0+ 18063 -> 4684 B
+              (-13379), x86-64 -Os 15208 -> 7216 B. (The -7 KB estimate used function sizes
+              from a different build; at -Os on Cortex-M the inlined ref10 multiply-add made
+              SSFEd25519Sign 7.8 KB by itself.)
+              Stack (Cortex-M4 call graph): Sign peak 2856 -> 2560 B (Sign frame 952 -> 656,
+              _sc_muladd 544 and _sc_reduce 528 are siblings of the verify-after-sign chain);
+              verify 1904 and PubKeyFromSeed 1472 unchanged.
+              Speed: neutral (x86-64 sign 598-605 -> 600-608 us, verify 300-304 -> 302 us;
+              emulated ARM32 3216 -> 3158 / 1605 -> 1579 us); signatures byte-identical.
+              Docs: README Ed25519 row (~12 -> ~7 KB) and footnotes 45 / 46.
+  2026-11-19  ED-O1 AUDIT (Jim: "Do audit first"). Exact Python model of _sc_modL over the
+              all-ones muladd, 3000 random muladd and 3000 random reduce inputs and 2^512 - 1:
+              all correct; largest intermediate 2^31.5 (int64 limit 2^63; int32 would not
+              do). The final carry is 0 or -1, not 0 or 1: subtracting (x >> 252) * L can take
+              x negative since L > 2^252, and the last pass then adds L back. The code is
+              right; two comments said otherwise and are fixed. Constant time: fixed loop
+              bounds, index-only conditionals, no secret-dependent branch. Cortex-M3 note
+              (pre-existing): long multiplies (UMULL / SMULL) on secret limbs are early-
+              terminating there; ref10 used 312 of them, the new loops 4; Cortex-M4 / M7 are
+              fixed-time. Portability: arithmetic right shift of negative int64 is
+              implementation-defined, as ref10 already relied on; no left shift of a negative
+              value; gcc -Wconversion -Wsign-conversion -pedantic clean over the new code.
+              No stray references to the removed _sc_pack / _sc_load3 / 4. Reduce's cleared
+              upper half is unused by every caller (nonce and hram are read as 32 bytes).
+  2026-11-19  SQ-CT (security, pre-existing; found while prototyping EC-O1; Jim: "Yes").
+              SSFBNSquare's diagonal add propagated carries with while (carry != 0), an
+              operand-dependent step count, so SSFBNModSquare (Miller-Rabin's squaring of
+              the secret RSA prime candidate) was not constant-time, although ssfbn.md and
+              BN-O7 said so. Now one fixed pass with a running carry (a^2 < 2^(64n) bounds
+              it). Test counter _SSFBNSquareCarryIters.
+              RED: ssfbn_ut.c "SQ-CT audit" (widths 1-32, zero / all-ones / alternating /
+              pseudo-random operands: exactly a->len carry steps, square == SSFBNMul) failed
+              at ssfbn_ut.c:4128.
+              GREEN: all 9 suites normal and ASan + UBSan. Differential: 300000 operands
+              (widths 1..MAX / 2, all-ones, alternating, top-bit, random) match the committed
+              SSFBNSquare's digest, sanitizer clean. Mutation: dropping either carry fails it.
+              Code: Cortex-M4 ssfbn 16265 -> 16234 B (-31; SSFBNSquare 364 -> 324),
+              Cortex-M0+ 18923 -> 18896 B (-27). Stack: frame unchanged (56 / 128 B). Speed:
+              neutral (n = 8..64, x86-64 and ARM32); GenPrime identical primes, 53.4 ->
+              53.2 ms. Docs: ssfbn.md SSFBNSquare.
+  2026-11-19  SQ-CT AUDIT (Jim: "Commit, then do audit"). Bounds: r[2i] + low(sq) + carry
+              <= 3 * (2^32 - 1); high(sq) <= 2^32 - 2, so r[2i + 1] + high(sq) + 1 fits; the
+              carry is 0 or 1 and the dropped final carry is 0 because a^2 < 2^(64n).
+              Sweep for the same defect: every while loop in ssfbn.c is in a function
+              documented variable-time (BitLen, TrailingZeros, shift-subtract Mod / DivMod,
+              Gcd, both ModInvExt paths) or bounded by a public length or count (MontInit's
+              w, the wipe, Random / GenPrime byte counts); ToBytes' value-dependent scan is in
+              its minimal-length path, not a constant-time entry. Every branch in the
+              constant-time list depends only on public data (modulus parity, operand
+              lengths, ModInv's a == 0 rejection, documented). No further findings.
+              SSFBNModSquare is now constant-time for odd moduli within SSF_BN_MAX_MOD_LIMBS,
+              as BN-O7 documented.
+  2026-11-19  EC-O4 DONE (Jim: "stage next fix"). _SSFBNReduceP256 / P384 keep their fold
+              passes; the correction is now two folds of the net carry and one masked
+              conditional subtraction. The folds leave the value r + c * 2^w with c = carry -
+              borrow in [-4, 6] (P-256: 6 adds, 4 subtracts) or [-3, 7] (P-384: 7, 3); 2^w mod
+              p = k is sparse (P-256 {1,0,0,-1,0,0,-1,1}, P-384 {1,-1,0,1,1,0..0}), so
+              _SSFBNNistFold adds c * k in one limb pass. |c * k| < 2^227 / 2^132 leaves a
+              carry e in {-1, 0, 1}; r + e * k then stays in [0, 2^w) (e = 1 leaves r < 2^227 /
+              2^132, e = -1 leaves r > 2^w - 2^226 / 2^132), asserted; 2^w < 2p, so one
+              subtraction finishes. _SSFBNNistFold uses only unsigned arithmetic with a bias
+              (no division, no shift of a negative value); no libgcc division helper in any
+              build (the only uldivmod in ssfbn is SSFBNModUint32, as before). P-384's e = -1
+              is unreachable (the high limbs' contribution is >= -0.9999999998 * 2^384).
+              RED: ssfbn_ut.c "OPTIMIZE EC-O4" requires 3 correction passes per reduction
+              (test counter _SSFBNNistCorrPasses, wrapper _SSFBNReduceNISTForTest); the old
+              code took 23 (failed at ssfbn_ut.c:4146). Its oracle half (SSFBNMod) over every
+              all-zero / all-ones upper-limb pattern with either low half (reaching net
+              carries -4..4 / -1..3) plus 2000 random inputs per curve passed on the old code
+              first. Three inputs solved in Python force the second fold (P-256 e = -1 and +1,
+              P-384 e = +1) with Python-computed results.
+              GREEN: all 9 suites normal, ASan + UBSan, 32-bit ARM. Differential: 3000000
+              inputs per curve (random, all-ones-heavy, all-zero-heavy, mixed patterns) give
+              the committed code's digest, every result < p, sanitizer clean. Mutation: a
+              wrong k limb (each curve), folding only the carry count, a wrong carry bias, no
+              final subtraction, no second fold (each curve, the P-384 one caught only by its
+              solved vector) all fail.
+              Speed: P-256 field multiply 225 -> 92 ns x86-64, 1105 -> 483 ns ARM32; P-384 288
+              -> 144 / 1785 -> 829 ns. End to end, x86-64: P-256 verify 1054-1096 -> 501-514 us,
+              ECDH 1020-1054 -> 464-489, sign 284-340 -> 166-210, P-384 sign 555-572 -> 376-382,
+              verify 2010-2046 -> 1144-1153; emulated ARM32: P-256 verify 5767-6316 -> 3211-
+              3238 us, ECDH 5508-5552 -> 2973-2995, sign 1614-1941 -> 1094-1106, P-384 sign
+              3500-3591 -> 2387-2395, verify 12565-12698 -> 6808-6939.
+              Code: Cortex-M4 ssfbn 16330 -> 16198 B (-132; ssfbn + ssfec + ssfecdsa 41635 ->
+              41503), Cortex-M0+ ssfbn 18896 -> 18844 B (-52). Stack: ModMulNIST frame 232 B
+              unchanged; ECDSA sign 8288, verify 10000, ECDH 7248, keygen 7256 B unchanged.
+              Docs: ssfbn.md SSFBNModMulNIST (also: the generic fallback is constant-time for
+              odd moduli since BN-O7).
+  2026-11-19  EC-O4 AUDIT (Jim: "Audit first"). Carry ranges recounted from the code (P-256:
+              6 adds, 4 subtracts; P-384: 7, 3); fold bounds re-derived (P-256 e = 1 leaves r <
+              2^227, e = -1 leaves r > 2^256 - 2^226; P-384 the same with 2^132); 2^w < 2p for
+              both primes. _SSFBNNistFold's bias arithmetic checked exhaustively at its limits
+              (1989 combinations of r, coef, c, carry: limb and carry exact, carry in {-1, 0,
+              1}). Codegen: at -Os on Cortex-M0+ / M3 / M4 the only branches are the two
+              contract checks (never taken) and the loop counter; the arithmetic is mla /
+              adds / adc / sbc; at -O2 it is inlined; no libgcc division or multiply helper.
+              P-256-only build (cap 512, RSA and P-384 off): ssfbn / ssfec / ssfecdsa compile
+              clean with -Wall -Wextra -pedantic and their suites pass under ASan + UBSan.
+              Finding (test gap, from earlier this session, fixed): the SQ-CT test squared
+              widths up to 32 limbs and the BN-O7 test used 12- and 32-limb moduli
+              unconditionally, so the bn suite asserted in a 512-bit-cap build; both now skip
+              widths beyond SSF_BN_MAX_LIMBS / 2 and SSF_BN_MAX_MOD_LIMBS. The full runner
+              cannot be built without RSA there (ssfx509 needs SSFRSAHash_t; pre-existing).
+              Default and RSA-2048-only builds: all 9 suites pass after the change.
+  2026-11-19  FE-O2 DONE (Jim: "do FE-O2 then FE-O1", then "Do option 3": FE-O2 only). New
+              internal module ssffe25519 (.c / .h / _ut.c / .md): the field functions that were
+              identical in ssfx25519 and ssfed25519 (Mul, Sqr, Reduce, Inv, ToBytes, CSwap;
+              SetZero / SetOne / Copy as static inline) and the prime SSF_FE25519_P, with full
+              DBC. add / sub / from_bytes stay per module because their semantics differ on
+              purpose (X25519 reduces after add and masks bit 255 on import; Ed25519 keeps adds
+              lazy, so its sub reduces inputs first, and decodes the sign bit itself); so do
+              _fe_mul_small and Ed25519's pow2523 / isneg / iszero / neg. Mechanical renames
+              in both modules (_fe_t -> SSFFE25519_t, _fe_mul -> SSFFE25519Mul, ...). Wired
+              into ssfport.h (SSF_CONFIG_FE25519_UNIT_TEST), main.c, the three ninja files and
+              ssf.vcxproj / .filters (CRLF and BOM kept).
+              Tests: ssffe25519_ut.c, contracts and Python-computed vectors (Mul / Sqr of
+              2^256 - 1 and a mixed value, aliasing, Reduce of p, p +- 1, 2^255, 2^256 - 1,
+              canonical ToBytes, CSwap low-bit-only, Inv of x and 2^256 - 1, x * x^-1 = 1).
+              GREEN: all 11 suites normal and ASan + UBSan (X25519 and Ed25519 stack-limit
+              tests raised only for ASan's padded frames; the committed code fails them there
+              too). Mul's body is identical to the old _fe_mul apart from renames and DBC.
+              Code (arm-none-eabi-gcc -Os): both modules linked, Cortex-M4 6405 -> 5673 B
+              (-732), Cortex-M0+ 7129 -> 6237 B (-892); X25519 alone +113 / +115 B and Ed25519
+              alone +192 / +210 B (the shared functions are no longer inlined and now carry
+              DBC). Stack: X25519 ComputeSecret 1544, Ed25519 Sign 2560, Verify 1904,
+              PubKeyFromSeed 1472 B, unchanged. Speed: x86-64 neutral (X25519 162-166 us, sign
+              598-613, verify 300-307); emulated ARMv7-A X25519 806-821 -> 849-850 us (+3-5%,
+              squares no longer inline into their Mul), Ed25519 +3%.
+              Docs: ssffe25519.md (new), _crypto/README.md, README row and footnotes 43 / 45,
+              ssfx25519.md, ssfed25519.md.
+              Style found in passing: every comment-box line generated this session was 98
+              columns, not 99; the 24 added since 683b5f0 were padded to 99.
+  2026-11-19  FE-O1 DROPPED (measured, Jim: option 3). A dedicated square (28 cross products
+              doubled by one shift, diagonal in one fixed carry pass, reduction shared with Mul:
+              36 products instead of 64) passed a 36-product count test (red on the old Sqr), a
+              5000000-input differential against Mul(a, a), and six mutants. But the review's
+              premise (products dominate) fails on cores with a fast 32 x 32 -> 64 multiply:
+              Sqr alone 50 vs Mul 48 ns x86-64, 292 vs 242 ns ARMv7-A; field code built for
+              Cortex-M4 52 vs 51 (emulated, instruction-count proxy), for Cortex-M0+ (no
+              widening multiply, __aeabi_lmul) 139 vs 189. End to end vs the committed code:
+              Cortex-M0+ X25519 -7%, Ed25519 sign / verify -12%; Cortex-M4 0 / -5 / -4%;
+              ARMv7-A X25519 +7%; x86-64 0. Code +222 B Cortex-M4, +302 B Cortex-M0+. A
+              variant selecting it only on ARMv6-M was offered and not chosen.
+  2026-11-19  FE-O2 AUDIT (Jim: "Do an audit of FE-O2", then "Yes fix #1 and commit"). The
+              nine shared functions and p are identical to both former private copies
+              (comments, renames and DBC aside); the rest of each module differs only by the
+              new #include. No name collisions; the header compiles standalone (C99) and as
+              C++; ssf.vcxproj / .filters are well-formed with entries matching ssfed25519's;
+              each ninja file has both rules and both link entries. Fixed: ssffe25519.md's
+              title used superscripts and U+2212 (the only such heading in the repo), so its
+              back-to-top anchors were unverified; it is now "Curve25519 Field Arithmetic".
+              Noted, unchanged: the header includes ssfassert.h directly (redundant via
+              ssfport.h, keeps it self-contained); projects that add sources by hand now need
+              ssffe25519.c with ssfx25519.c / ssfed25519.c (documented).
+  2026-11-19  HMAC-O1 SKIPPED (re-evaluated; Jim: "Yes, update HMAC-O1"). The entry's premise
+              was wrong: precomputing the outer-pad state at Begin moves one compression from
+              End to Begin, so a short HMAC-SHA-256 still costs 4 (inner pad, inner final,
+              outer pad, outer final; measured x86-64 0.63 us = 4 x 0.16 us). A saving needs
+              the same key reused across MACs (2 compressions instead of 4 after the first),
+              which needs a new API, caller changes in ssfhkdf / ssfecdsa, and about +100 B
+              (SHA-256) to +250 B (SHA-384 / 512) per HMAC context and in callers' frames.
+              Reuse in tree: RFC 6979 uses each derived key for 2 MACs (saves about 4 of 26
+              compressions; RFC 6979 is about 2% of P-256 sign, 4 of 166 us x86-64, 17 of 1045
+              us emulated ARM32, so sign about 0.3% faster); HKDF-Expand reuses the PRK per
+              32-byte block (128-byte output 2.52 -> about 1.6 us, 1 block no gain); TLS 1.3's
+              Expand-Label calls are mostly single-block and re-key every call. Not worth the
+              RAM. If multi-block HKDF ever matters, reuse the two pad states inside
+              SSFHKDFExpand's loop only (no API change, about +100-250 B of HKDF stack).
+  2026-11-19  GCM-O1 DONE (Jim: "Commit first then implement GCM-O1"). _SSFAESGCMBlockMult
+              (H loaded and bit-reversed per block, Karatsuba sums of H rebuilt per block, the
+              tag reversed in and out per block, six SSFCryptSecureZero calls per block) is
+              replaced by _SSFAESGCMPrepH (once per GHASH call), _SSFAESGCMMulH (multiply and
+              reduce on a work struct in GHASH's frame) and _SSFAESGCMAbsorb (only the
+              incoming block is reversed: reversal is linear over XOR, so the tag stays in
+              the multiply's bit-reversed word order); GHASH wipes the work struct, prepared H,
+              tag and pad buffer once at the end (_SSF_AESGCM_SCRUB_HOOK_OBJ for the structs).
+              Same constant-time multiply and reduction; no tables, no new branches.
+              RED: ssfaesgcm_ut.c "OPTIMIZE GCM-O1": 1 and 64 blocks of AAD must cost the same
+              H preparations (test counter _SSFAESGCMHPreps) and the same wipes (scrub hook);
+              failed at ssfaesgcm_ut.c:3794 (preparations grew with blocks).
+              GREEN: all 12 suites normal, ASan + UBSan, 32-bit ARM (NIST, Wycheproof and the
+              GCM-3 scrub test included). Differential: 100000 encrypt / decrypt cases (random
+              pt 0-599 B, AAD 0-299 B, IV 12 B or 1-40 B, AES-128 / 192 / 256) give the
+              committed code's ciphertext / tag digest and all round-trip, sanitizer clean.
+              Mutation: a wrong H sum (two), swapped tag words, an unreversed data word, no
+              partial block, a dropped Karatsuba term, no final wipe all fail.
+              Speed (best of 5): GMAC 16 KB (GHASH only) x86-64 87 -> 46 us, ARMv7-A 490 -> 270,
+              Cortex-M4 build 383-403 -> 213-218, Cortex-M0+ build 1763 -> 1547; GCM encrypt
+              16 KB x86-64 131 -> 98, ARMv7-A 711 -> 455, M4 532-542 -> 401-482 (emulator
+              noise), M0+ 2120 -> 1951; 64 B packets 0-10% (key expansion and H dominate).
+              Code (ssfaesgcm, -Os): Cortex-M4 3288 -> 3071 B (-217), Cortex-M0+ 3364 -> 3223 B
+              (-141). Stack: Encrypt / Decrypt peaks 744 / 736 B (M4), 776 B (M0+) unchanged.
+              Docs: ssfaesgcm.md notes.
+  2026-11-19  GCM-O1 AUDIT (Jim: "Do an audit first"). Big-endian: the AES-GCM unit suite
+              passes on MIPS BE (qemu-mips) and the 100000-case differential gives the x86-64
+              digest (ba6aa7f3ca6fb98b). New code gcc -Wconversion -Wsign-conversion -Wshadow
+              -pedantic clean. Constant time: block count and the partial-block test depend on
+              public lengths only; same carryless multiply and reduction, no tables, no new
+              branches. Wipes: everything the old code wiped per block (x, y, res, ac128,
+              bd128, ab_cd128) is now in the work struct, wiped once per GHASH call with the
+              prepared H, tag and pad buffer; the 64-bit partial products (ac64 / bd64 /
+              ab_cd64) and _SSFAESGCMCarryless32Mult's locals were not wiped before and are
+              not now (unchanged; inline / callee frames, same as before). The pad buffer is
+              now zeroed on every call, so its final wipe is always of a defined value.
+              BLOCK_XOR stays (GCTR uses it). MSVC: the old C6385 suppression around the
+              partial-block XOR went with that code; not re-checkable here (no MSVC). No
+              findings.
+  2026-11-19  SHA1-O1 / SHA1-O2 SKIPPED (Jim: "SHA1 is not really in use, trading code space for
+              speed doesn't make sense"). In-tree users: HMAC-SHA-1 and RFC 6979 with a 20-byte
+              digest only (not X.509, CMS or TLS). Prototypes (all pass the SHA-1 / HMAC suites,
+              identical digests), 16 KB, x86-64 -O2 / ARMv7-A / Cortex-M4 / Cortex-M0+ (M rows
+              emulated), code M4 / M0+, ProcessBlock frame M4 / M0+:
+                today                 70.8 / 223 / 180 / 330 us   897 / 945 B    368 / 376 B
+                O2 (ring, 4 loops)    42.1 / 133 / 126 / 289      +374 / +338    120 / 128
+                ring only, 1 loop     42.3 / 185 / 183 / 298      +72 / +40      120 / 128
+                O1 (chunked Update)   55.1 / 171 / 129 / 252      +26 / +46      unchanged
+                ring + O1             27.0 / 134 / 135 / 250      +101 / +89     120 / 128
+                O2 + O1               18.4 /  78 /  91 / 216      +403 / +387    120 / 128
+              Every option grows code; none adopted.
+  2026-11-19  Closed (Jim: "close those entries"): GCM-O2 DONE inside GCM-O1 (the multiply's
+              temporaries live in GHASH's frame and are wiped once per call); RSA-O1 CLOSED,
+              superseded by RSA-STK Phase 1, which resized the RSA locals; HMAC-O2 and HKDF-O1
+              SKIPPED with HMAC-O1 (key-state reuse needs about +100-250 B of RAM per HMAC
+              context for a gain of about 0.3% of an ECDSA signature, or multi-block HKDF only).
+  2026-11-19  SHA2-O1 SKIPPED (measured; Jim: "Skip these"). A 16-word ring schedule saves stack
+              but at -Os costs speed and code, the opposite of the entry's "+5-10%". Executed
+              instructions per 16 KB (qemu -d exec, -Os builds; wall-clock emulation was too
+              noisy: unchanged code varied 110-121 us), Cortex-M4 / M0+:
+                today          SHA-256 957877 / 1732047, SHA-512 1657148 / 2713697, 4263 B
+                ring, both     +23% / +21%, +18% / +7%, +104 B; frames 336 -> 160, 800 -> 328 B
+                SHA-512 only   SHA-256 unchanged, SHA-512 +18% / +7%, +32 B; 800 -> 328 B
+                + split SHA-256 loop  SHA-256 +4.6% / +13%, +202 B; 336 -> 144 B
+              Digests identical in every variant. Not adopted; the SHA-512 block frame stays
+              800 B (the deepest call under Ed25519 signing).
+  2026-11-19  SHA2-O2 DONE (Jim: "Yes, do SHA2-O2"). SSFSHA2_32Begin / SSFSHA2_64Begin wrote
+              the initial hash values as 16 / 32 immediate assignments; they now copy a row of
+              _ssfSHA2_32IV[2][8] / _ssfSHA2_64IV[4][8] (FIPS 180-4 5.3) with one memcpy, the
+              64-bit row picked by an Is / Yes / No if chain (smaller than a nested ternary).
+              No red possible (pure refactor): KAT ("", "abc") and Monte Carlo vectors for all
+              six variants run without OpenSSL. GREEN: all 13 suites normal, ASan + UBSan,
+              32-bit ARM. Mutation: swapped SHA-224 / SHA-256 rows, a wrong 384 or 512/256 row
+              index, and one changed IV constant all fail.
+              Code (ssfsha2, -Os, text includes the 320 B of tables): Cortex-M4 4180 -> 3876 B
+              (-304), Cortex-M0+ 4412 -> 4076 B (-336); Begin functions 876 -> 252 B (M4).
+              Stack: Begin frames 32 / 88 -> 16 / 16 B (M4). Speed: one-block hashes +24 / +32
+              instructions (M4, +0.6% / +0.2%), M0+ +9 / -23 (memcpy call vs immediates).
+  2026-11-19  ASN1 batch (Jim: "Commit, then do the ASN1 batch"). O1 DONE: SSFASN1EncUTCTime /
+              GeneralizedTime / Date / DateTime are one-line wrappers over _SSFASN1EncTimeFmt,
+              which renders a pattern (Y 4-digit year, y 2-digit, M D h m s 2-digit fields,
+              anything else literal: "yMDhmsZ", "YMDhmsZ", "Y-M-D", "Y-M-DTh:m:s") with
+              _SSFASN1Put2Digits and a per-form year limit (UTCTime 2049); _SSFASN1FormatDate
+              removed. O2 DONE: SSFASN1DecGetTime's exact-conversion tail calls the existing
+              _SSFASN1YMDHMSToUnix (moved above it); the far-future branch (AUDIT ASN1-14) stays
+              first and the cursor advances only on success (AUDIT ASN1-7). O3 and O4 SKIPPED:
+              both prototypes grew code (O3 shared sub-identifier decoder +36 B M4 / +40 B M0+,
+              since the helper is not inlined and needs DBC; O4 expect-tag helper +21 / +47 B
+              even without DBC: the six functions are mostly their REQUIREs).
+              No red possible (refactors); existing ssfasn1 vectors cover every form, limit and
+              size query. GREEN: all 14 suites normal, ASan + UBSan, 32-bit ARM. Differentials
+              vs the committed code (ASan): the four encoders over 400014 times (boundaries,
+              in-range, random 64-bit) with full, NULL and one-short buffers; DecGetTime over
+              500000 UTC / Generalized inputs (invalid fields, Feb 29, far future, bad digits,
+              lengths, 'Z', tags) incl. outputs and cursor: digests identical. Mutation (a
+              swapped field, UTCTime limit 2050, a dropped separator, hour / minute swapped
+              into the conversion) all fail.
+              Code (ssfasn1, -Os): Cortex-M4 5876 -> 5139 B (-737; O1 -681, O2 -56), Cortex-M0+
+              6280 -> 5559 B (-721). Stack (call graph incl. ssfdtime): encoders 128-136 ->
+              200 B M4 (152 -> 208 M0+; the 7-argument helper needs a frame under each
+              wrapper), DecGetTime 184 -> 224 M4 (240 -> 280 M0+); DecGetDateTime already
+              peaked at 224 M4 / 272 M0+, so the module's worst decode peak is unchanged on M4,
+              +8 B on M0+. Speed: not hot (one encode / decode per certificate field).
+  2026-11-19  STR / HMAC-O3 batch (Jim: "Commit, then do STR and HMAC-O3"). Prototyped each;
+              ssfstr / ssfhmac text, Cortex-M4 / M0+ -Os:
+                STR-O1 memchr in SSFStrLen      915 -> 909 / 969 -> 963 B (-6), but pulls in
+                       libc memchr (116 B on M0+ newlib) in builds where ssfasn1 / ssfini /
+                       ssfx509 do not already link it: SKIPPED
+                STR-O2 one SSFStrToCase loop     915 -> 905 / 969 -> 959 B (-10): DONE
+                STR-O3 single-pass SSFStrCmp     915 -> 937 / 969 -> 987 B (+22): SKIPPED
+                HMAC-O3 size tables (+ merged SHA-384 / 512 switch cases)
+                       1015 -> 1022 (1024) / 1055 -> 1054 (1056) B: gcc already emits the
+                       switches as lookups: SKIPPED
+              STR-O2: the converter is chosen per character inside one loop. No red possible;
+              ssfstr_ut covers both cases. GREEN: all 15 suites normal and ASan + UBSan; a
+              mutant swapping the case choice fails ssfstr_ut.
+  2026-11-19  BN-O8 DONE. No field id: SSF_BN_NIST_P256_LIMBS / P384_LIMBS are now exported
+              const arrays (flash, not RAM). ssfec's p points at them, and SSFBNModMulNIST
+              matches that pointer (_SSFBNIsNistPrime) before the full limb compare, which
+              stays for any other modulus. ssfec's a, b, gx, gy and n became const too.
+              RED (earlier session): with the pointer check removed, the new count asserts in
+              ssfbn_ut and ssfec_ut fail. GREEN: bn, ec, ecdsa, rsa, tls, cms and x509 suites
+              normal, plus ASan + UBSan. Mutation: accepting any same-width m survived the existing
+              tests (the gap predates BN-O8). A new test flips each limb of each prime and
+              checks ModMulNIST against SSFBNModMul; it kills that mutant and one comparing
+              only len - 1 limbs.
+              Code (-Os, text + rodata + data): ssfbn +8 B M4 / -32 B M0+, ssfec -104 / -84 B,
+              total -96 / -116 B. RAM: .data -560 B (80 bn + 480 ec), since the curve
+              constants were non-const. Stack: SSFBNModMulNIST 232 -> 224 B M4, 240 -> 232 M0+
+              (the helper is inlined); ssfec frames unchanged. Speed (SSFECScalarMul, min of
+              300 / 40): x86-64 -O2 P-256 429 -> 392-404 us, P-384 934 -> 884 us; emulated
+              ARM32 -O2 P-256 2976 -> 2769 us (-7%), P-384 7057 -> 6739 us (-4.5%).
+  2026-11-19  BN-O8 AUDIT (Jim: "Run ASan, do correctness and security audit then ask for
+              commit"). ASan + UBSan with the new test: bn, ec, ecdsa, rsa, tls, cms, x509
+              pass. Writes: no library code writes through curve or NIST limbs (no discarded-
+              const warnings; no raw, memcpy or memset target is a curve .limbs), so the
+              const casts are read-only uses. Callers: all 53 library ModMulNIST calls pass
+              &c->p, so ECC never takes the compare. Match: the width is checked before the
+              pointer, a pointer match is to const storage holding the prime, and any other m
+              gets the full compare; the new test pins every limb. Timing: the choice depends
+              only on the public modulus, as before. Config: ssfbn / ssfec / ssfecdsa / both
+              unit tests compile with -Werror for P-256 only, P-384 only and both (RSA off,
+              derived cap); ssfec.h already #errors when the cap cannot hold a curve, so the
+              shared limbs always exist when ssfec uses them. Side effect: ssfbn's primes and
+              the curve constants were writable RAM and are now read-only. No findings.
+              Pre-existing, not BN-O8: ssfbn_ut.c has unused variables k, slow and _e2R in
+              ECC-only configs (-Werror fails there; the default build is clean).
+

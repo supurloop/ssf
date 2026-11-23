@@ -145,7 +145,20 @@
 /*       - ssfprng fix: scrub stack secrets in GetRandom; align AES input with NIST CTR_DRBG.    */
 /*       - ssfbase64: reject non-canonical encodings per RFC 4648 section 3.5.                   */
 /*       - Other minor changes, hardening, warning fixes, and documentation improvements.        */
+/* 0.6.0 - Added ssfx509 X.509 certificate parse, generate, and chain-verification module.       */
+/*       - Added ssfcms RFC 5652 CMS SignedData verifier for detached signatures.                */
+/*       - Added ssfbase64url, ssfmatch, and ssfgpath codec modules.                             */
+/*       - Added ssffe25519 GF(2^255-19) arithmetic shared by ssfx25519 and ssfed25519.          */
+/*       - API change: ssfjson, ssfubjson, and ssfgobj lookups take typed ssfgpath paths.        */
+/*       - ssfrsa: CRT message and exponent blinding with constant-time recombination.           */
+/*       - Constant-time hardening of ssfbn, ssfec, ssfed25519, and ssfrsa arithmetic.           */
+/*       - Speed, code size, and stack optimizations in ssfbn, ssfec, ssfrsa, and ssfaesgcm.     */
+/*       - Security audit fixes across _crypto and _codec: strict DER, RFC limits, fail closed.  */
+/*       - Fixed out-of-bounds reads and signed-overflow UB in ssfjson, ssfubjson, and ssfstr.   */
+/*       - ssfsm: thread-safe de-init and event posting; timer and event pool fixes.             */
+/*       - Added tools/coverage gcov per-module coverage harness.                                */
+/*       - claude.ssf style pass over _crypto and _codec; public parameter names renamed.        */
 /* --------------------------------------------------------------------------------------------- */
-#define SSF_VERSION_STR "0.5.0"
+#define SSF_VERSION_STR "0.6.0"
 
 #endif /* SSF_VERSION_H_INCLUDE */

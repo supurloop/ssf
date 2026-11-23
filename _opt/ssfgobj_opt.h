@@ -8,7 +8,7 @@
 extern "C" {
 #endif
 
-/* Define the maximum parse depth, each nested object or array starts a new depth level. */
+/* Maximum tree depth (root is 0); every node counts, so values nest at most this deep - 1. */
 #define SSF_GOBJ_CONFIG_MAX_IN_DEPTH (4u)
 
 #ifdef __cplusplus

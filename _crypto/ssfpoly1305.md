@@ -69,6 +69,9 @@ construction that supplies its own per-message one-time key.
 - The context used by the incremental interface is ~100 bytes. The primitive has
   essentially no stack cost beyond that, so both the one-shot and the streaming path are
   safe to use on tightly-constrained targets.
+- DBC exception (timing-critical): `_SSFPoly1305MulR` and `_SSFPoly1305ProcessFullBlock` run
+  per block or per arithmetic step and carry no parameter asserts; their callers validate every
+  argument.
 
 <a id="configuration"></a>
 

@@ -38,19 +38,21 @@
 #include "ssfusexport.h"
 
 /* --------------------------------------------------------------------------------------------- */
-/* Poly1305 uses 130-bit arithmetic mod p = 2^130 - 5.                                          */
-/* We use 5 limbs of 26 bits each (Donna variant). All intermediate products fit uint64_t.       */
+/* Poly1305 arithmetic mod p = 2^130 - 5 in 5 x 26-bit limbs (Donna); products fit uint64_t.     */
 /* --------------------------------------------------------------------------------------------- */
 
 #define SSF_POLY1305_CONTEXT_MAGIC (0x504F4C59ul) /* 'POLY' -- set by Begin, cleared by End. */
 
 /* --------------------------------------------------------------------------------------------- */
 /* Internal: h = h * r mod (2^130 - 5), using 5 x 26-bit limbs and precomputed r[1..4] * 5.      */
-/* Shared between full-block (Update) and final-partial-block (End) paths.                       */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFPoly1305MulR(SSFPoly1305Context_t *ctx)
 {
-    uint64_t d0, d1, d2, d3, d4;
+    uint64_t d0;
+    uint64_t d1;
+    uint64_t d2;
+    uint64_t d3;
+    uint64_t d4;
     uint32_t c;
 
     d0 = ((uint64_t)ctx->h0 * ctx->r0) + ((uint64_t)ctx->h1 * ctx->rr3) +
@@ -80,7 +82,7 @@ static void _SSFPoly1305MulR(SSFPoly1305Context_t *ctx)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: process one complete 16-byte block (adds implicit high bit 2^128 per RFC 7539 2.5) */
+/* Internal: process one complete 16-byte block (adds the 2^128 high bit, RFC 7539 2.5).         */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFPoly1305ProcessFullBlock(SSFPoly1305Context_t *ctx, const uint8_t block[16])
 {
@@ -88,14 +90,12 @@ static void _SSFPoly1305ProcessFullBlock(SSFPoly1305Context_t *ctx, const uint8_
     ctx->h1 += (SSF_GETU32LE(&block[3])  >> 2) & 0x3FFFFFFu;
     ctx->h2 += (SSF_GETU32LE(&block[6])  >> 4) & 0x3FFFFFFu;
     ctx->h3 += (SSF_GETU32LE(&block[9])  >> 6) & 0x3FFFFFFu;
-    ctx->h4 += (SSF_GETU32LE(&block[12]) >> 8) | (1u << 24);
+    ctx->h4 += (SSF_GETU32LE(&block[12]) >> 8) | ((uint32_t)1u << 24);
     _SSFPoly1305MulR(ctx);
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Incremental API: initialize context from a 32-byte one-time key.                              */
-/* RFC 7539 Sec. 2.5: clamp the low half of the key as r, take the high half verbatim as s, and  */
-/* precompute r[1..4] * 5 for the modular reduction inner loop. Accumulator starts at zero.       */
+/* Incremental API: initialize context from a 32-byte one-time key (RFC 7539 Sec. 2.5).          */
 /* --------------------------------------------------------------------------------------------- */
 void SSFPoly1305Begin(SSFPoly1305Context_t *ctx, const uint8_t *key, size_t keyLen)
 {
@@ -132,10 +132,7 @@ void SSFPoly1305Begin(SSFPoly1305Context_t *ctx, const uint8_t *key, size_t keyL
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Incremental API: feed msgLen bytes. Drains any partial-block hold-back from a previous call   */
-/* first, then processes complete 16-byte blocks directly from msg, then stashes any trailing    */
-/* < 16-byte tail back into ctx->buf for the next Update or End. Produces bit-identical output   */
-/* to a single Mac call over the concatenation of all Update inputs.                              */
+/* Incremental API: feed msgLen bytes; blocks are processed and a < 16-byte tail is held.        */
 /* --------------------------------------------------------------------------------------------- */
 void SSFPoly1305Update(SSFPoly1305Context_t *ctx, const uint8_t *msg, size_t msgLen)
 {
@@ -145,10 +142,12 @@ void SSFPoly1305Update(SSFPoly1305Context_t *ctx, const uint8_t *msg, size_t msg
     SSF_REQUIRE(ctx != NULL);
     SSF_REQUIRE(ctx->magic == SSF_POLY1305_CONTEXT_MAGIC);
     SSF_REQUIRE((msg != NULL) || (msgLen == 0u));
+    SSF_REQUIRE(ctx->bufLen < 16u);
 
-    /* Drain the partial buffer first if it holds anything. */
+    /* Does the partial buffer hold bytes and is there input to drain into it? */
     if ((ctx->bufLen > 0u) && (msgLen > 0u))
     {
+        /* Yes, top up the partial buffer first. */
         take = (size_t)(16u - ctx->bufLen);
         if (take > msgLen) take = msgLen;
         memcpy(&ctx->buf[ctx->bufLen], msg, take);
@@ -180,13 +179,15 @@ void SSFPoly1305Update(SSFPoly1305Context_t *ctx, const uint8_t *msg, size_t msg
 
 /* --------------------------------------------------------------------------------------------- */
 /* Incremental API: finalize, emit the 16-byte tag, zeroise the context.                         */
-/* Processes any remaining partial block with the RFC 7539 0x01 high-bit marker (no 2^128 bit),  */
-/* runs the final reduction, selects h mod p, adds s, writes the LE tag, and memsets ctx to 0.   */
 /* --------------------------------------------------------------------------------------------- */
 void SSFPoly1305End(SSFPoly1305Context_t *ctx, uint8_t *tag, size_t tagSize)
 {
     uint32_t c;
-    uint32_t g0, g1, g2, g3, g4;
+    uint32_t g0;
+    uint32_t g1;
+    uint32_t g2;
+    uint32_t g3;
+    uint32_t g4;
     uint32_t mask;
     uint64_t f;
 
@@ -194,6 +195,7 @@ void SSFPoly1305End(SSFPoly1305Context_t *ctx, uint8_t *tag, size_t tagSize)
     SSF_REQUIRE(ctx->magic == SSF_POLY1305_CONTEXT_MAGIC);
     SSF_REQUIRE(tag != NULL);
     SSF_REQUIRE(tagSize >= SSF_POLY1305_TAG_SIZE);
+    SSF_REQUIRE(ctx->bufLen < 16u);
 
     /* Final partial block (if any): pad with 0x01 then zeros, then multiply by r. */
     if (ctx->bufLen > 0u)
@@ -208,7 +210,7 @@ void SSFPoly1305End(SSFPoly1305Context_t *ctx, uint8_t *tag, size_t tagSize)
         ctx->h1 += (SSF_GETU32LE(&partial[3])  >> 2) & 0x3FFFFFFu;
         ctx->h2 += (SSF_GETU32LE(&partial[6])  >> 4) & 0x3FFFFFFu;
         ctx->h3 += (SSF_GETU32LE(&partial[9])  >> 6) & 0x3FFFFFFu;
-        ctx->h4 += (SSF_GETU32LE(&partial[12]) >> 8);  /* no 2^128 bit for partial */
+        ctx->h4 += (SSF_GETU32LE(&partial[12]) >> 8); /* no 2^128 bit for partial */
         _SSFPoly1305MulR(ctx);
         ctx->bufLen = 0u;
 
@@ -228,7 +230,7 @@ void SSFPoly1305End(SSFPoly1305Context_t *ctx, uint8_t *tag, size_t tagSize)
     g1 = ctx->h1 + c; c = g1 >> 26; g1 &= 0x3FFFFFFu;
     g2 = ctx->h2 + c; c = g2 >> 26; g2 &= 0x3FFFFFFu;
     g3 = ctx->h3 + c; c = g3 >> 26; g3 &= 0x3FFFFFFu;
-    g4 = ctx->h4 + c - (1u << 26);
+    g4 = (ctx->h4 + c) - ((uint32_t)1u << 26);
 
     /* Select h if h < p, else h - p. */
     mask = (g4 >> 31) - 1u;
@@ -241,16 +243,16 @@ void SSFPoly1305End(SSFPoly1305Context_t *ctx, uint8_t *tag, size_t tagSize)
     ctx->h4 = (ctx->h4 & mask) | g4;
 
     /* Assemble h into 4 x 32-bit LE words and add s, writing the tag as 16 bytes LE. */
-    f = (uint64_t)(ctx->h0 | (ctx->h1 << 26)) + ctx->s0;
+    f = ((uint64_t)(ctx->h0 | (ctx->h1 << 26))) + ctx->s0;
     tag[0]  = (uint8_t)f;       tag[1]  = (uint8_t)(f >> 8);
     tag[2]  = (uint8_t)(f >> 16); tag[3]  = (uint8_t)(f >> 24);
-    f = (uint64_t)((ctx->h1 >> 6) | (ctx->h2 << 20)) + ctx->s1 + (f >> 32);
+    f = (((uint64_t)((ctx->h1 >> 6) | (ctx->h2 << 20))) + ctx->s1) + (f >> 32);
     tag[4]  = (uint8_t)f;       tag[5]  = (uint8_t)(f >> 8);
     tag[6]  = (uint8_t)(f >> 16); tag[7]  = (uint8_t)(f >> 24);
-    f = (uint64_t)((ctx->h2 >> 12) | (ctx->h3 << 14)) + ctx->s2 + (f >> 32);
+    f = (((uint64_t)((ctx->h2 >> 12) | (ctx->h3 << 14))) + ctx->s2) + (f >> 32);
     tag[8]  = (uint8_t)f;       tag[9]  = (uint8_t)(f >> 8);
     tag[10] = (uint8_t)(f >> 16); tag[11] = (uint8_t)(f >> 24);
-    f = (uint64_t)((ctx->h3 >> 18) | (ctx->h4 << 8)) + ctx->s3 + (f >> 32);
+    f = (((uint64_t)((ctx->h3 >> 18) | (ctx->h4 << 8))) + ctx->s3) + (f >> 32);
     tag[12] = (uint8_t)f;       tag[13] = (uint8_t)(f >> 8);
     tag[14] = (uint8_t)(f >> 16); tag[15] = (uint8_t)(f >> 24);
 
@@ -259,12 +261,18 @@ void SSFPoly1305End(SSFPoly1305Context_t *ctx, uint8_t *tag, size_t tagSize)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Computes Poly1305 MAC (RFC 7539 Sec. 2.5). One-shot convenience wrapper over Begin/Update/End.*/
+/* Computes the Poly1305 MAC (RFC 7539 Sec. 2.5) via Begin/Update/End.                           */
 /* --------------------------------------------------------------------------------------------- */
 void SSFPoly1305Mac(const uint8_t *msg, size_t msgLen, const uint8_t *key, size_t keyLen,
                     uint8_t *tag, size_t tagSize)
 {
     SSFPoly1305Context_t ctx = {0};
+
+    SSF_REQUIRE((msg != NULL) || (msgLen == 0u));
+    SSF_REQUIRE(key != NULL);
+    SSF_REQUIRE(keyLen == SSF_POLY1305_KEY_SIZE);
+    SSF_REQUIRE(tag != NULL);
+    SSF_REQUIRE(tagSize >= SSF_POLY1305_TAG_SIZE);
 
     SSFPoly1305Begin(&ctx, key, keyLen);
     SSFPoly1305Update(&ctx, msg, msgLen);
@@ -272,9 +280,7 @@ void SSFPoly1305Mac(const uint8_t *msg, size_t msgLen, const uint8_t *key, size_
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* If the computed Poly1305 tag over msg with key matches expectedTag exactly returns true,      */
-/* else false. Compare is constant-time. Bundles compute + CT-compare so callers cannot pair Mac */
-/* with a non-CT memcmp() and open a tag-recovery timing side channel.                            */
+/* Returns true if the tag over msg with key equals expectedTag (constant-time), else false.     */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFPoly1305Verify(const uint8_t *msg, size_t msgLen, const uint8_t *key, size_t keyLen,
                        const uint8_t *expectedTag)
@@ -290,8 +296,7 @@ bool SSFPoly1305Verify(const uint8_t *msg, size_t msgLen, const uint8_t *key, si
     SSFPoly1305Mac(msg, msgLen, key, keyLen, computedTag, sizeof(computedTag));
     ok = SSFCryptCTMemEq(computedTag, expectedTag, SSF_POLY1305_TAG_SIZE);
 
-    /* On a verify failure, computedTag holds the valid tag for (msg, key) -- exactly the */
-    /* secret an attacker is trying to forge. Scrub before stack residue can leak it.    */
+    /* On failure computedTag is the valid tag for (msg, key): scrub it before stack reuse. */
     SSFCryptSecureZero(computedTag, sizeof(computedTag));
     return ok;
 }

@@ -169,9 +169,6 @@ void SSFLPTaskUnitTest(void)
     _utWorkCount = 0;
     _utCompleteCount = 0;
     {
-        static volatile bool _slowDone;
-        _slowDone = false;
-
         /* Slow work function -- holds the thread busy */
         handle = SSFLPTaskQueue(
             (SSFLPTaskWorkFn_t)_SSFLPTaskTestWork, _SSFLPTaskTestComplete, NULL, NULL);

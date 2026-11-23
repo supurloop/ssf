@@ -158,7 +158,7 @@ allocation fails. On failure no allocations remain and `*gobj` is `NULL`.
 SSFGObj_t *gobj = NULL;
 SSFGObj_t *parent = NULL;
 SSFGObj_t *child  = NULL;
-SSFCStrIn_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1] = { NULL };
+SSFGPath_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1] = { { SSF_GPATH_END } };
 char val[64];
 size_t i;
 
@@ -167,7 +167,7 @@ if (SSFArgvInit("copy //verbose /dest tmp/out src.txt other.txt",
                 &gobj, 4, 4))
 {
     /* Read the command name */
-    path[0] = SSF_ARGV_CMD_STR;
+    SSF_GPATH_SET_KEY(path[0], SSF_ARGV_CMD_STR);
     parent = NULL; child = NULL;
     SSFGObjFindPath(gobj, path, &parent, &child);
     SSFGObjGetString(child, val, sizeof(val));
@@ -175,8 +175,8 @@ if (SSFArgvInit("copy //verbose /dest tmp/out src.txt other.txt",
 
     /* Read //verbose (value-less option, stored as "") */
     memset(path, 0, sizeof(path));
-    path[0] = SSF_ARGV_OPTS_STR;
-    path[1] = "verbose";
+    SSF_GPATH_SET_KEY(path[0], SSF_ARGV_OPTS_STR);
+    SSF_GPATH_SET_KEY(path[1], "verbose");
     parent = NULL; child = NULL;
     SSFGObjFindPath(gobj, path, &parent, &child);
     SSFGObjGetString(child, val, sizeof(val));
@@ -184,8 +184,8 @@ if (SSFArgvInit("copy //verbose /dest tmp/out src.txt other.txt",
 
     /* Read /dest tmp/out */
     memset(path, 0, sizeof(path));
-    path[0] = SSF_ARGV_OPTS_STR;
-    path[1] = "dest";
+    SSF_GPATH_SET_KEY(path[0], SSF_ARGV_OPTS_STR);
+    SSF_GPATH_SET_KEY(path[1], "dest");
     parent = NULL; child = NULL;
     SSFGObjFindPath(gobj, path, &parent, &child);
     SSFGObjGetString(child, val, sizeof(val));
@@ -195,8 +195,8 @@ if (SSFArgvInit("copy //verbose /dest tmp/out src.txt other.txt",
     for (i = 0; i < 2; i++)
     {
         memset(path, 0, sizeof(path));
-        path[0] = SSF_ARGV_ARGS_STR;
-        path[1] = (SSFCStrIn_t)&i;
+        SSF_GPATH_SET_KEY(path[0], SSF_ARGV_ARGS_STR);
+        SSF_GPATH_SET_INDEX(path[1], &i);
         parent = NULL; child = NULL;
         SSFGObjFindPath(gobj, path, &parent, &child);
         SSFGObjGetString(child, val, sizeof(val));

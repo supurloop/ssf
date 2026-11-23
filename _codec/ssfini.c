@@ -28,40 +28,6 @@
 /* AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING     */
 /* NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED  */
 /* OF THE POSSIBILITY OF SUCH DAMAGE.                                                            */
-/*                                                                                               */
-/* INI PARSING RULES                                                                             */
-/*                                                                                               */
-/* The INI parser is deliberately forgiving and may successfully parse INIs that are "poorly"    */
-/* written. The main limitation is the lack of support for quoted fields, which would allow      */
-/* Sections, Names, and/or Values to contain whitespace.                                         */
-/*                                                                                               */
-/* A Line is delimited by a newline ('\n'), carriage return ('\r') or a NULL terminator ('\x00').*/
-/* Line continuation using a backslash ('\') as last character in a Line is not supported.       */
-/* Escape sequences are not supported; eg. \x20\t is treated as 6 plaintext characters.          */
-/* Quotes ('"') are not supported, they are treated as simple chars in a Section, Name, or Value.*/
-/* Whitespace (WS) is space ('\x20') or tab ('\t').                                              */
-/* WS at the beginning of a Line is ignored.                                                     */
-/* Comments begin with a semi-colon (';') or hash ('#').                                         */
-/* Comments on their own line are explicitly ignored.                                            */
-/* Section declarations begin with an open bracket ('[') and end with a closing bracket (']').   */
-/* WS after the Section declaration '[' is ignored.                                              */
-/* The Section Name starts after the initial WS, and ends at the ']' or first WS encountered.    */
-/* Section Names must be at least 1 character in length.                                         */
-/* The remainder of the Section declaration after the ']' is ignored.                            */
-/* Section names are case sensitive.                                                             */
-/* Name/Value declarations have a Name, equal sign ('='), and a Value.                           */
-/* Names must be at least 1 character in length.                                                 */
-/* Names are case sensitive.                                                                     */
-/* WS following the Name ends the Name field and all characters up to = are ignored.             */
-/* The Value field starts after the =.                                                           */
-/* WS following the = is ignored.                                                                */
-/* Values may be 0 characters in length.                                                         */
-/* The Value ends at the first WS or end of line.                                                */
-/* Duplicate Section Names are permitted.                                                        */
-/* Duplicate Section/Name pairs are permitted, and referenceable with a 0-based index.           */
-/* Name/Value pairs before 1st Section declaration, referenced by using NULL for Section string. */
-/* A boolean Value is true if the case ignored string Value is "1", "yes", "true", or "on".      */
-/* A boolean Value is false if the case ignored string Value is "0", "no", "false", or "off".    */
 /* --------------------------------------------------------------------------------------------- */
 #include <stdint.h>
 #include <stdio.h>
@@ -93,34 +59,35 @@ typedef struct
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFINIFindNextLine(SSFCStrIn_t ini, SSFINIContext_t *context)
 {
-    char *eol;
-    char *eol2;
+    const char *eol;
+    const char *eol2;
 
     SSF_REQUIRE(ini != NULL);
     SSF_REQUIRE(context != NULL);
 
-    /* Is context initialized? */
+    /* Is context uninitialized? */
     if (context->line == NULL)
     {
+        /* Yes, find the end of the INI and start at its first line */
         const char *nul = (const char *)memchr(ini, '\x00',
                                                (size_t)SSF_INI_CONFIG_MAX_IN_LEN + 1u);
         if (nul == NULL) return false;
         context->iniEnd = nul;
         context->line = ini;
     }
-    /* Yes, advance to next potential line */
     else
     {
+        /* No, advance to next potential line */
         context->line += context->lineLen;
         if (context->line < context->iniEnd) context->line++;
     }
 
-    /* Can we find a line terminator? */
     eol = strchr(context->line, '\n');
     eol2 = strchr(context->line, '\r');
+    /* Is there no line terminator? */
     if ((eol == NULL) && (eol2 == NULL))
     {
-        /* No, find end of INI */
+        /* Yes, find end of INI */
         eol = strchr(context->line, '\x00');
         SSF_ASSERT(eol != NULL);
 
@@ -132,12 +99,14 @@ static bool _SSFINIFindNextLine(SSFCStrIn_t ini, SSFINIContext_t *context)
     }
     else
     {
-        /* Yes, there is another line to process, update lineLen */
+        /* No, there is another line to process; are both terminator kinds present? */
         if ((eol != NULL) && (eol2 != NULL))
         {
+            /* Yes, line ends at the nearer one */
             if (eol < eol2) context->lineLen = eol - context->line;
             else context->lineLen = eol2 - context->line;
         }
+        /* No, line ends at the one present */
         else if (eol != NULL) context->lineLen = eol - context->line;
         else context->lineLen = eol2 - context->line;
     }
@@ -155,10 +124,11 @@ static void _SSFINISkipWhiteSpace(SSFCStrIn_t *str, size_t *strLen)
     SSF_REQUIRE(*str != NULL);
     SSF_REQUIRE(strLen != NULL);
 
-    /* Advance str when more to look at and current value is WS */
     c = **str;
+    /* Is there more to look at and is the current char WS? */
     while ((*strLen > 0) && ((c == ' ') || (c == '\t')))
     {
+        /* Yes, advance past it */
         (*str)++;
         (*strLen)--;
         c = **str;
@@ -170,13 +140,20 @@ static void _SSFINISkipWhiteSpace(SSFCStrIn_t *str, size_t *strLen)
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFINIParseSection(SSFINIContext_t *context)
 {
-    char c = *(context->line);
-    const char *line = context->line;
-    const char *lineEnd = context->line + context->lineLen;
-    size_t lineLen = context->lineLen;
+    char c;
+    const char *line;
+    const char *lineEnd;
+    size_t lineLen;
     const char *section;
     const char *endOfName = NULL;
 
+    SSF_REQUIRE(context != NULL);
+    SSF_REQUIRE(context->line != NULL);
+
+    c = *(context->line);
+    line = context->line;
+    lineEnd = context->line + context->lineLen;
+    lineLen = context->lineLen;
     if (c == '[')
     {
         line++;
@@ -185,13 +162,15 @@ static bool _SSFINIParseSection(SSFINIContext_t *context)
         section = line;
         while (line <= lineEnd)
         {
+            /* Is this char WS? */
             if ((*line == ' ') || (*line == '\t'))
             {
+                /* Yes, the first WS ends the section name */
                 if (endOfName == NULL) endOfName = line;
             }
             else if (*line == ']')
             {
-                /* Found a section */
+                /* No, found a section */
                 context->section = section;
                 if (endOfName == NULL) context->sectionLen = line - section;
                 else context->sectionLen = endOfName - section;
@@ -214,21 +193,30 @@ static bool _SSFINIParseSection(SSFINIContext_t *context)
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFINIParseNameValue(SSFINIContext_t *context)
 {
-    const char *line = context->line;
-    const char *lineEnd = context->line + context->lineLen;
-    size_t lineLen = context->lineLen;
+    const char *line;
+    const char *lineEnd;
+    size_t lineLen;
     const char *name;
     const char *endOfName = NULL;
 
+    SSF_REQUIRE(context != NULL);
+    SSF_REQUIRE(context->line != NULL);
+
+    line = context->line;
+    lineEnd = context->line + context->lineLen;
+    lineLen = context->lineLen;
     name = line;
     while (line <= lineEnd)
     {
+        /* Is this char WS? */
         if ((*line == ' ') || (*line == '\t'))
         {
+            /* Yes, the first WS ends the name */
             if (endOfName == NULL) endOfName = line;
         }
         else if (*line == '=')
         {
+            /* No, found the name/value separator */
             context->name = name;
             if (endOfName == NULL) { context->nameLen = line - name; }
             else { context->nameLen = endOfName - name; }
@@ -246,8 +234,10 @@ static bool _SSFINIParseNameValue(SSFINIContext_t *context)
                 /* End of value? */
                 if ((*line == ' ') || (*line == '\t') || (*line == '\n') || (*line == '\r') ||
                     (*line == '\x00'))
-                /* Yes, found white space or end of line */
-                { return true; }
+                {
+                    /* Yes, found white space or end of line */
+                    return true;
+                }
                 context->valueLen++;
                 line++;
             }
@@ -263,6 +253,8 @@ static bool _SSFINIParseNameValue(SSFINIContext_t *context)
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFINIParseLine(SSFINIContext_t *context)
 {
+    SSF_REQUIRE(context != NULL);
+
     /* Skip all leading WS */
     _SSFINISkipWhiteSpace(&(context->line), &(context->lineLen));
 
@@ -270,9 +262,11 @@ static bool _SSFINIParseLine(SSFINIContext_t *context)
     if (context->lineLen > 0)
     {
         /* Yes, is line a comment? */
-        if (*(context->line) == ';' || *(context->line) == '#')
-        /* Yes, didn't find a section or name/value pair */
-        { return false; }
+        if ((*(context->line) == ';') || (*(context->line) == '#'))
+        {
+            /* Yes, didn't find a section or name/value pair */
+            return false;
+        }
     }
 
     /* Is line a [section]? */
@@ -323,7 +317,7 @@ bool _SSFINIIsNameValuePresent(SSFCStrIn_t ini, SSFCStrIn_t section, SSFCStrIn_t
                 if (index == 0) { return true; }
                 index--;
             }
-            /* Is match in named section? */
+            /* No, is match in named section? */
             else if ((context->section != NULL) && (section != NULL) &&
                 (context->sectionLen == sectionLen) &&
                 (memcmp(section, context->section, sectionLen) == 0) &&
@@ -365,8 +359,10 @@ bool SSFINIIsSectionPresent(SSFCStrIn_t ini, SSFCStrIn_t section)
             /* Yes, section match? */
             if ((context.section != NULL) && (context.sectionLen == sectionLen) &&
                 (memcmp(section, context.section, sectionLen) == 0))
-            /* Yes, found section */
-            { return true; }
+            {
+                /* Yes, found section */
+                return true;
+            }
         }
     }
     return false;
@@ -429,8 +425,10 @@ bool SSFINIGetBoolValue(SSFCStrIn_t ini, SSFCStrIn_t section, SSFCStrIn_t name, 
     /* Convert value to lowercase */
     memcpy(lcv, context.value, context.valueLen);
     lcv[context.valueLen] = 0;
-    while (*lcvp != 0) {
-        *lcvp = SSFStrCharToLower(*lcvp); lcvp++;
+    while (*lcvp != 0)
+    {
+        *lcvp = SSFStrCharToLower(*lcvp);
+        lcvp++;
     }
 
     /* Assume value matches a true string */
@@ -494,7 +492,7 @@ bool SSFINIPrintComment(SSFCStrOut_t ini, size_t iniSize, size_t *iniLen, SSFCSt
     SSF_REQUIRE((commentType > SSF_INI_COMMENT_MIN) && (commentType < SSF_INI_COMMENT_MAX));
     SSF_REQUIRE((lineEnding > SSF_INI_LINE_ENDING_MIN) && (lineEnding < SSF_INI_LINE_ENDING_MAX));
 
-    /* Is there any room in ini to add antything else? */
+    /* Is there any room in ini to add anything else? */
     if ((iniSize - 1) <= *iniLen) return false;
 
     /* Determine how much can still be added */
@@ -511,7 +509,7 @@ bool SSFINIPrintComment(SSFCStrOut_t ini, size_t iniSize, size_t *iniLen, SSFCSt
     if (remainingLen < newLen) return false;
 
     /* Copy comment char to ini */
-    if (commentType == SSF_INI_COMMENT_SEMI) { ini[*iniLen] = ';';  }
+    if (commentType == SSF_INI_COMMENT_SEMI) { ini[*iniLen] = ';'; }
     else if (commentType == SSF_INI_COMMENT_HASH) { ini[*iniLen] = '#'; }
     if (commentType != SSF_INI_COMMENT_NONE) *iniLen += 1;
 
@@ -555,7 +553,7 @@ bool SSFINIPrintSection(SSFCStrOut_t ini, size_t iniSize, size_t *iniLen, SSFCSt
     if (lineEnding == SSF_INI_LF) newLen += 1;
     else newLen += 2;
 
-    /* Is there room to add requested comment? */
+    /* Is there room to add requested section? */
     if (remainingLen < newLen) return false;
 
     /* Add section */
@@ -593,7 +591,7 @@ bool SSFINIPrintNameStrValue(SSFCStrOut_t ini, size_t iniSize, size_t *iniLen, S
     SSF_REQUIRE(value != NULL);
     SSF_REQUIRE((lineEnding > SSF_INI_LINE_ENDING_MIN) && (lineEnding < SSF_INI_LINE_ENDING_MAX));
 
-    /* Is there any room in ini to add antything else? */
+    /* Is there any room in ini to add anything else? */
     if ((iniSize - 1) <= *iniLen) return false;
 
     /* Determine how much can still be added */
@@ -601,7 +599,7 @@ bool SSFINIPrintNameStrValue(SSFCStrOut_t ini, size_t iniSize, size_t *iniLen, S
 
     /* Determine how much is to be added to ini */
     valueLen = strlen(value);
-    newLen += nameLen + valueLen + 1;
+    newLen += (nameLen + valueLen) + 1;
     if (lineEnding == SSF_INI_LF) newLen += 1;
     else newLen += 2;
 
@@ -684,7 +682,7 @@ bool SSFINIGObjCreate(SSFCStrIn_t ini, SSFGObj_t **gobj, uint16_t maxChildren)
     SSFGObj_t *child = NULL;
     SSFGObj_t *foundParent = NULL;
     SSFGObj_t *foundChild = NULL;
-    SSFCStrOut_t findPath[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
+    SSFGPath_t findPath[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
     char strBuf[SSF_INI_GOBJ_CONFIG_MAX_STR_SIZE + 1];
 
     SSF_REQUIRE(ini != NULL);
@@ -706,10 +704,14 @@ bool SSFINIGObjCreate(SSFCStrIn_t ini, SSFGObj_t **gobj, uint16_t maxChildren)
             /* Is this a section declaration? */
             if (context.name == NULL)
             {
-                /* Ensure section name is valid and fits in buffer */
+                /* Is the section name empty or too long for the buffer? */
                 if ((context.sectionLen == 0) ||
                     (context.sectionLen > SSF_INI_GOBJ_CONFIG_MAX_STR_SIZE))
-                { SSFGObjDeInit(&root); return false; }
+                {
+                    /* Yes, invalid */
+                    SSFGObjDeInit(&root);
+                    return false;
+                }
 
                 /* Null-terminate section name */
                 memcpy(strBuf, context.section, context.sectionLen);
@@ -717,18 +719,19 @@ bool SSFINIGObjCreate(SSFCStrIn_t ini, SSFGObj_t **gobj, uint16_t maxChildren)
 
                 /* Look for existing section object in root */
                 memset(findPath, 0, sizeof(findPath));
-                findPath[0] = strBuf;
+                SSF_GPATH_SET_KEY(findPath[0], strBuf);
                 foundParent = NULL;
                 foundChild = NULL;
-                if (SSFGObjFindPath(root, (SSFCStrIn_t *)findPath, &foundParent, &foundChild) &&
+                /* Does a section object with this name already exist in root? */
+                if (SSFGObjFindPath(root, findPath, &foundParent, &foundChild) &&
                     (SSFGObjGetType(foundChild) == SSF_OBJ_TYPE_OBJECT))
                 {
-                    /* Reuse existing section */
+                    /* Yes, reuse existing section */
                     curSection = foundChild;
                 }
                 else
                 {
-                    /* Create new section object */
+                    /* No, create new section object */
                     child = NULL;
                     if (SSFGObjInit(&child, maxChildren) == false)
                     { SSFGObjDeInit(&root); return false; }
@@ -743,11 +746,14 @@ bool SSFINIGObjCreate(SSFCStrIn_t ini, SSFGObj_t **gobj, uint16_t maxChildren)
             }
             else
             {
-                /* Name/value pair found */
-                /* Ensure name is valid and fits in buffer */
+                /* Name/value pair found; is the name empty or too long for the buffer? */
                 if ((context.nameLen == 0) ||
                     (context.nameLen > SSF_INI_GOBJ_CONFIG_MAX_STR_SIZE))
-                { SSFGObjDeInit(&root); return false; }
+                {
+                    /* Yes, invalid */
+                    SSFGObjDeInit(&root);
+                    return false;
+                }
 
                 /* Null-terminate name */
                 memcpy(strBuf, context.name, context.nameLen);
@@ -790,7 +796,7 @@ static bool _SSFINIGObjPrintChild(SSFGObj_t *child, SSFCStrOut_t ini, size_t ini
     int64_t intVal;
     bool boolVal;
 
-    SSF_ASSERT(child != NULL);
+    SSF_REQUIRE(child != NULL);
 
     /* Get the child's label as the name */
     if (SSFGObjGetLabel(child, label, sizeof(label)) == false) return false;

@@ -45,6 +45,16 @@ so callers can size their MAC buffer without hard-coding a constant.
   - Block sizes: 64 bytes for SHA-1 / SHA-256; 128 bytes for SHA-384 / SHA-512.
   - For security, the key should be at least as long as the selected hash's output size.
     Short or low-entropy keys weaken the MAC regardless of the underlying hash strength.
+- **Zero-length keys are rejected on purpose.** RFC 2104 defines HMAC for an empty key (the
+  zero-padded key is an all-zero block), but an empty key is not a secret: anyone can compute
+  that MAC. In practice a zero `keyLen` is far more often a caller bug (a length never set, a
+  key that failed to load) than an intended input, so `SSFHMACBegin()` and `SSFHMAC()` trap
+  on `keyLen == 0` instead of silently producing forgeable MACs (AUDIT2 HMAC-1). A caller
+  that needs the RFC 2104 empty-key result, for example a PBKDF2 with an empty password or an
+  interop test vector, can pass `hashSize` zero bytes as the key: because short keys are
+  zero-padded to the block size, that gives exactly the same MAC as an empty key. (For
+  HMAC-SHA-256 with an empty key and empty message the result is
+  `b613679a0814d9ec772f95d778c35fc5ff1697c493715653c6c712144292c5ad`.)
 - `SSFHMAC()` returns `bool` for consistency with the SSF API style; in practice it always
   returns `true`. All argument-validity failures are caught by `SSF_REQUIRE` design-by-contract
   asserts, not by a `false` return.

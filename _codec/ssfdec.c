@@ -64,6 +64,8 @@ static size_t _SSFDecUIntToStr(uint64_t i, char *str)
 {
     uint16_t o;
 
+    SSF_REQUIRE(str != NULL);
+
     if (i >= 10000)
     {
         size_t len;
@@ -116,11 +118,15 @@ size_t SSFDecUIntToStr(uint64_t i, SSFCStrOut_t str, size_t strSize)
 {
     char *tmp;
 
-    SSF_ASSERT(str != NULL);
+    SSF_REQUIRE(str != NULL);
 
-    /* Ensure that strSize big enough to fit i plus a NULL */
+    /* Is strSize too small to fit i plus a NULL? */
     if ((strSize <= 1) || ((strSize < (SSF_DEC_NUM_LIM + 2)) &&
-                           (i > _ssfDecStrSizeLim[strSize - 2]))) { return 0; }
+                           (i > _ssfDecStrSizeLim[strSize - 2])))
+    {
+        /* Yes, unable to convert */
+        return 0;
+    }
 
     /* Save str ptr, convert and advance str by dec str len, NULL terminate */
     tmp = str;
@@ -139,26 +145,32 @@ size_t SSFDecIntToStr(int64_t i, SSFCStrOut_t str, size_t strSize)
     char *tmp;
     uint64_t u;
 
-    SSF_ASSERT(str != NULL);
+    SSF_REQUIRE(str != NULL);
 
     if (i < 0)
     {
-        /* Ensure that strSize big enough to fit -i plus a NULL */
         u = 0u - (uint64_t)i;
+        /* Is strSize too small to fit '-', -i and a NULL? */
         if ((strSize <= 2) || ((strSize < (SSF_DEC_NUM_LIM + 3)) &&
                                (u > _ssfDecStrSizeLim[strSize - 3])))
-        { return 0; }
+        {
+            /* Yes, unable to convert */
+            return 0;
+        }
         tmp = str;
         *str++ = '-';
         strSize--;
     }
     else
     {
-        /* Ensure that strSize big enough to fit i plus a NULL */
         u = (uint64_t)i;
+        /* Is strSize too small to fit i plus a NULL? */
         if ((strSize <= 1) || ((strSize < (SSF_DEC_NUM_LIM + 2)) &&
                                (u > _ssfDecStrSizeLim[strSize - 2])))
-        { return 0; }
+        {
+            /* Yes, unable to convert */
+            return 0;
+        }
         tmp = str;
     }
 
@@ -178,8 +190,8 @@ size_t SSFDecUIntToStrPadded(uint64_t i, SSFCStrOut_t str, size_t strSize, uint8
 {
     size_t len;
 
-    SSF_ASSERT(str != NULL);
-    SSF_ASSERT(minFieldWidth >= 2);
+    SSF_REQUIRE(str != NULL);
+    SSF_REQUIRE(minFieldWidth >= 2);
 
     /* Have to fit minimum field width */
     if (minFieldWidth >= strSize) return 0;
@@ -221,8 +233,8 @@ size_t SSFDecIntToStrPadded(int64_t i, SSFCStrOut_t str, size_t strSize, uint8_t
     char *tmp = NULL;
     uint64_t u;
 
-    SSF_ASSERT(str != NULL);
-    SSF_ASSERT(minFieldWidth >= 2);
+    SSF_REQUIRE(str != NULL);
+    SSF_REQUIRE(minFieldWidth >= 2);
 
     /* Have to fit minimum field width */
     if (minFieldWidth >= strSize) return 0;
@@ -277,7 +289,8 @@ size_t SSFDecIntToStrPadded(int64_t i, SSFCStrOut_t str, size_t strSize, uint8_t
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true and val set to str's signed integer value, else false.                           */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFDecStrToInt(SSFCStrIn_t str, int64_t *val, SSFCStrIn_t *next, uint8_t *numDigits)
+static bool _SSFDecStrToInt(SSFCStrIn_t str, int64_t *val, SSFCStrIn_t *nextOpt,
+                            uint8_t *numDigitsOpt)
 {
     #define SSF_DEC_MAX_SIGNED_DIGITS (19u)
 
@@ -289,8 +302,12 @@ static bool _SSFDecStrToInt(SSFCStrIn_t str, int64_t *val, SSFCStrIn_t *next, ui
     SSF_REQUIRE(str != NULL);
     SSF_REQUIRE(val != NULL);
 
-    /* Ignore leading whitespace */
-    while ((*str != 0) && ((*str == ' ') || (*str == '\t'))) str++;
+    /* Is this a leading space or tab? */
+    while ((*str != 0) && ((*str == ' ') || (*str == '\t')))
+    {
+        /* Yes, ignore it */
+        str++;
+    }
     if (*str == 0) return false;
 
     /* Look for - sign */
@@ -301,8 +318,12 @@ static bool _SSFDecStrToInt(SSFCStrIn_t str, int64_t *val, SSFCStrIn_t *next, ui
         str++;
     }
 
-    /* Must be at least 1 digit */
-    if ((*str < '0') || (*str > '9')) return false;
+    /* Is the first char not a digit? */
+    if ((*str < '0') || (*str > '9'))
+    {
+        /* Yes, must be at least 1 digit */
+        return false;
+    }
 
     /* Process decimal digits */
     while (*str != 0)
@@ -310,11 +331,14 @@ static bool _SSFDecStrToInt(SSFCStrIn_t str, int64_t *val, SSFCStrIn_t *next, ui
         /* Valid digit? */
         if ((*str >= '0') && (*str <= '9'))
         {
-            /* Yes, overflow? */
+            /* Yes, would accumulating it overflow? */
             if ((power == (SSF_DEC_MAX_SIGNED_DIGITS - 1)) &&
                 ((u64 > 922337203685477580) ||
                  ((u64 == 922337203685477580) && (*str > final))))
+            {
+                /* Yes, out of range */
                 return false;
+            }
             if (power == SSF_DEC_MAX_SIGNED_DIGITS) return false;
 
             /* Accumulate digit and advance to next */
@@ -322,23 +346,31 @@ static bool _SSFDecStrToInt(SSFCStrIn_t str, int64_t *val, SSFCStrIn_t *next, ui
             u64 += (((uint64_t)*str) - '0');
             str++;
             power++;
-            if (numDigits != NULL) (*numDigits)++;
+            if (numDigitsOpt != NULL) (*numDigitsOpt)++;
         }
         /* No, considered the end of the number */
         else break;
     }
 
-    /* Adjust sign */
-    if (isNeg) *val = -((int64_t)u64);
+    /* Adjust sign: is the value negative? */
+    if (isNeg)
+    {
+        /* Yes, is it INT64_MIN, whose magnitude no int64_t can hold? */
+        if (u64 == ((uint64_t)INT64_MAX + 1u)) *val = INT64_MIN;
+        /* No, negate it */
+        else *val = -((int64_t)u64);
+    }
+    /* No */
     else *val = (int64_t)u64;
-    if (next != NULL) *next = str;
+    if (nextOpt != NULL) *nextOpt = str;
     return true;
 }
 
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true and val set to str's unsigned integer value, else false.                         */
 /* --------------------------------------------------------------------------------------------- */
-static bool _SSFDecStrToUInt(SSFCStrIn_t str, uint64_t* val, SSFCStrIn_t* next, uint8_t* numDigits)
+static bool _SSFDecStrToUInt(SSFCStrIn_t str, uint64_t *val, SSFCStrIn_t *nextOpt,
+                             uint8_t *numDigitsOpt)
 {
     #define SSF_DEC_MAX_UNSIGNED_DIGITS (20u)
 
@@ -348,27 +380,37 @@ static bool _SSFDecStrToUInt(SSFCStrIn_t str, uint64_t* val, SSFCStrIn_t* next, 
     SSF_REQUIRE(str != NULL);
     SSF_REQUIRE(val != NULL);
 
-    /* Ignore leading whitespace */
-    while ((*str != 0) && ((*str == ' ') || (*str == '\t'))) str++;
+    /* Is this a leading space or tab? */
+    while ((*str != 0) && ((*str == ' ') || (*str == '\t')))
+    {
+        /* Yes, ignore it */
+        str++;
+    }
     if (*str == 0)
         return false;
 
-    /* Must be at least 1 digit */
+    /* Is the first char not a digit? */
     if ((*str < '0') || (*str > '9'))
+    {
+        /* Yes, must be at least 1 digit */
         return false;
+    }
 
     /* Process decimal digits */
-    if (numDigits != NULL) *numDigits = 0;
+    if (numDigitsOpt != NULL) *numDigitsOpt = 0;
     while (*str != 0)
     {
         /* Valid digit? */
         if ((*str >= '0') && (*str <= '9'))
         {
-            /* Yes, overflow? */
+            /* Yes, would accumulating it overflow? */
             if ((power == (SSF_DEC_MAX_UNSIGNED_DIGITS - 1)) &&
                 ((u64 > 1844674407370955161) ||
                  ((u64 == 1844674407370955161) && (*str > '5'))))
+            {
+                /* Yes, out of range */
                 return false;
+            }
             if (power == SSF_DEC_MAX_UNSIGNED_DIGITS) return false;
 
             /* Accumulate digit and advance to next */
@@ -376,20 +418,20 @@ static bool _SSFDecStrToUInt(SSFCStrIn_t str, uint64_t* val, SSFCStrIn_t* next, 
             u64 += (((uint64_t)*str) - '0');
             str++;
             power++;
-            if (numDigits != NULL) (*numDigits)++;
+            if (numDigitsOpt != NULL) (*numDigitsOpt)++;
         }
         /* No, considered the end of the number */
         else break;
     }
     *val = u64;
-    if (next != NULL) *next = str;
+    if (nextOpt != NULL) *nextOpt = str;
     return true;
 }
 
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true and val set to str's signed integer value, else false.                           */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFDecStrToXInt(SSFCStrIn_t str, int64_t *sval, uint64_t *uval)
+bool SSFDecStrToXInt(SSFCStrIn_t str, int64_t *svalOpt, uint64_t *uvalOpt)
 {
     uint64_t i;
     int64_t sbase;
@@ -403,17 +445,18 @@ bool SSFDecStrToXInt(SSFCStrIn_t str, int64_t *sval, uint64_t *uval)
     uint8_t fractionDigits = 0;
 
     SSF_REQUIRE(str != NULL);
-    SSF_REQUIRE(((sval != NULL) && (uval == NULL)) ||
-                ((sval == NULL) && (uval != NULL)));
+    SSF_REQUIRE(((svalOpt != NULL) && (uvalOpt == NULL)) ||
+                ((svalOpt == NULL) && (uvalOpt != NULL)));
 
     /* Determine base */
-    if (sval != NULL)
+    if (svalOpt != NULL)
     {
         if (_SSFDecStrToInt(str, &sbase, &next, NULL) == false) return false;
         if (sbase < 0)
         {
             negBase = true;
-            base = (uint64_t)(-sbase);
+            /* Magnitude by unsigned negation, which is defined for INT64_MIN too */
+            base = (uint64_t)0u - (uint64_t)sbase;
         }
         else base = (uint64_t)sbase;
     }
@@ -431,7 +474,7 @@ bool SSFDecStrToXInt(SSFCStrIn_t str, int64_t *sval, uint64_t *uval)
     }
 
     /* Is exponent present? */
-    if (*next == 'e' || *next == 'E')
+    if ((*next == 'e') || (*next == 'E'))
     {
         /* Yes, determine exponent */
         next++;
@@ -470,7 +513,7 @@ bool SSFDecStrToXInt(SSFCStrIn_t str, int64_t *sval, uint64_t *uval)
         /* Scale fraction if necessary */
         if (exponent > 1)
         {
-            if (fractionDigits > exponent) i = ((uint64_t)fractionDigits) - exponent - 1;
+            if (fractionDigits > exponent) i = (((uint64_t)fractionDigits) - exponent) - 1;
             else i = exponent - fractionDigits;
             tmp = fraction;
             while (i)
@@ -506,56 +549,63 @@ bool SSFDecStrToXInt(SSFCStrIn_t str, int64_t *sval, uint64_t *uval)
     }
 
     /* Compute final integer value */
-    if (sval != NULL)
+    if (svalOpt != NULL)
     {
         tmp = base + fraction;
 
-        /* Check for overflow */
-        if ((tmp < base) || (tmp < fraction)) return false;
+        /* Did the sum overflow? */
+        if ((tmp < base) || (tmp < fraction))
+        {
+            /* Yes, out of range */
+            return false;
+        }
 
         /* Make negative as necessary */
         if (negBase)
         {
             /* Check for signed overflow */
             if (tmp > 9223372036854775808ull) return false;
-            if (tmp == 9223372036854775808ull) *sval = INT64_MIN;
-            else *sval = -((int64_t)tmp);
+            if (tmp == 9223372036854775808ull) *svalOpt = INT64_MIN;
+            else *svalOpt = -((int64_t)tmp);
         }
         else
         {
             /* Check for signed overflow */
             if (tmp > 9223372036854775807ull) return false;
-            *sval = (int64_t)tmp;
+            *svalOpt = (int64_t)tmp;
         }
     }
     else
     {
-        *uval = base + fraction;
+        *uvalOpt = base + fraction;
 
-        /* Check for overflow */
-        if ((*uval < base) || (*uval < fraction)) return false;
+        /* Did the sum overflow? */
+        if ((*uvalOpt < base) || (*uvalOpt < fraction))
+        {
+            /* Yes, out of range */
+            return false;
+        }
     }
 
     return true;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Formats an array of uint8_t values as a separator-delimited decimal string.                   */
-/* Returns 0 if unable to convert, else number of bytes written to str (not including NULL).      */
+/* Returns 0 if unable to format octets as sep-delimited decimal, else strlen (excl. NULL).      */
 /* --------------------------------------------------------------------------------------------- */
-size_t SSFDecOctetsToStr(const uint8_t *octets, uint8_t numOctets, char sep, SSFCStrOut_t str,
+size_t SSFDecOctetsToStr(const uint8_t *octets, uint8_t octetsLen, char sep, SSFCStrOut_t str,
                          size_t strSize)
 {
     size_t totalLen = 0;
     size_t len;
     uint8_t i;
 
-    SSF_ASSERT(octets != NULL);
-    SSF_ASSERT(numOctets > 0);
-    SSF_ASSERT(str != NULL);
-    SSF_ASSERT(strSize > 0);
+    SSF_REQUIRE(octets != NULL);
+    SSF_REQUIRE(octetsLen > 0);
+    SSF_REQUIRE(str != NULL);
+    SSF_REQUIRE(strSize > 0);
 
-    for (i = 0; i < numOctets; i++)
+    for (i = 0; i < octetsLen; i++)
     {
         /* Add separator before all octets except the first */
         if (i > 0)
@@ -574,9 +624,7 @@ size_t SSFDecOctetsToStr(const uint8_t *octets, uint8_t numOctets, char sep, SSF
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Parses a separator-delimited decimal string into an array of uint8_t values.                  */
-/* Returns true if parsed, else false.                                                           */
-/* Each field must be 0-255 with no leading zeros (except "0" itself).                           */
+/* Returns true if str parsed as sep-delimited decimal octets, else false.                       */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFDecStrToOctets(SSFCStrIn_t str, char sep, uint8_t *octets, uint8_t octetsSize,
                        uint8_t *numOctetsOut)
@@ -610,8 +658,12 @@ bool SSFDecStrToOctets(SSFCStrIn_t str, char sep, uint8_t *octets, uint8_t octet
             str++;
         }
 
-        /* Reject leading zeros (e.g., "01", "007") but allow "0" */
-        if ((digits > 1u) && (*octetStart == '0')) return false;
+        /* Does a multi-digit field have a leading zero (e.g., "01", "007")? */
+        if ((digits > 1u) && (*octetStart == '0'))
+        {
+            /* Yes, reject it; "0" itself is allowed */
+            return false;
+        }
 
         octets[count] = (uint8_t)val;
         count++;

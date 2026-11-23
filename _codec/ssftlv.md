@@ -33,6 +33,12 @@ use the `instance` parameter (0-based) to iterate over duplicates.
   value being encoded. This is transparent to the caller.
 - Fixed mode (`SSF_TLV_ENABLE_FIXED_MODE == 1`) reduces per-field overhead but limits to 256
   distinct tags and values up to 255 bytes each.
+- Wire format, fixed mode: each field is a 1-byte TAG, a 1-byte LEN, then LEN (0-255) VALUE
+  bytes; fields follow one another with no padding.
+- Wire format, variable mode: TAG and LEN are each 1-4 bytes, big-endian, using the minimum
+  number of bytes; the 2 most significant bits of the first byte hold the byte count minus 1,
+  so each value is below 2^30. When TAG and LEN are both below 64 the field is encoded exactly
+  as in fixed mode.
 
 <a id="configuration"></a>
 
@@ -64,7 +70,7 @@ Options live in [`_opt/ssftlv_opt.h`](../_opt/ssftlv_opt.h) (aggregated into the
 | [e.g.](#ex-init) | [`void SSFTLVInit(tlv, buf, bufSize, bufLen)`](#ssftlvinit) | Initialize a TLV context for encoding or decoding |
 | [e.g.](#ex-deinit) | [`void SSFTLVDeInit(tlv)`](#ssftlvdeinit) | De-initialize a TLV context |
 | [e.g.](#ex-put) | [`bool SSFTLVPut(tlv, tag, val, valLen)`](#ssftlvput) | Encode a tag/value pair into the TLV buffer |
-| [e.g.](#ex-read) | [`bool SSFTLVRead(tlv, tag, instance, val, valSize, valPtr, valLen)`](#ssftlvread) | Find a tag/instance and copy or point to its value |
+| [e.g.](#ex-read) | [`bool SSFTLVRead(tlv, tag, instance, valOpt, valOptSize, valPtrOpt, valLen)`](#ssftlvread) | Find a tag/instance and copy or point to its value |
 | [e.g.](#ex-get) | [`bool SSFTLVGet(tlv, tag, instance, val, valSize, valLen)`](#ssftlvget) | Macro: decode a value by tag into a caller-supplied buffer |
 | [e.g.](#ex-find) | [`bool SSFTLVFind(tlv, tag, instance, valPtr, valLen)`](#ssftlvfind) | Macro: locate a value by tag as a pointer into the TLV buffer |
 
@@ -189,12 +195,12 @@ if (SSFTLVPut(&tlv, TAG_ID,   &id,              1) &&
 
 ```c
 bool SSFTLVRead(const SSFTLV_t *tlv, SSFTLVVar_t tag, uint16_t instance,
-                uint8_t *val, uint32_t valSize, uint8_t **valPtr, SSFTLVVar_t *valLen);
+                uint8_t *valOpt, uint32_t valOptSize, uint8_t **valPtrOpt, SSFTLVVar_t *valLen);
 ```
 
 Searches the TLV buffer for the `instance`-th occurrence (0-based) of `tag`. When found,
-optionally copies the value into `val` and/or sets `*valPtr` to point directly into the TLV
-buffer at the start of the value. [`SSFTLVGet()`](#ssftlvget) and [`SSFTLVFind()`](#ssftlvfind)
+either copies the value into `valOpt` or sets `*valPtrOpt` to point directly into the TLV buffer
+at the start of the value; pass exactly one of the two. [`SSFTLVGet()`](#ssftlvget) and [`SSFTLVFind()`](#ssftlvfind)
 are convenience macros over this function.
 
 | Parameter | Direction | Type | Description |
@@ -202,12 +208,12 @@ are convenience macros over this function.
 | `tlv` | in | [`const SSFTLV_t *`](#type-ssftlv-t) | Pointer to an initialized TLV context. Must not be `NULL`. |
 | `tag` | in | [`SSFTLVVar_t`](#type-ssftlvvar-t) | Tag identifier to search for. |
 | `instance` | in | `uint16_t` | 0-based occurrence index; `0` finds the first match, `1` the second, and so on. |
-| `val` | out (opt) | `uint8_t *` | If not `NULL`, receives a copy of the found value. Pass `NULL` when only a pointer is needed. |
-| `valSize` | in | `uint32_t` | Allocated size of `val` in bytes. Ignored when `val` is `NULL`. Must be large enough to hold the found value. |
-| `valPtr` | out (opt) | `uint8_t **` | If not `NULL`, receives a pointer into the TLV buffer at the start of the found value. Pass `NULL` when only a copy is needed. |
-| `valLen` | out (opt) | [`SSFTLVVar_t *`](#type-ssftlvvar-t) | If not `NULL`, receives the length of the found value in bytes. |
+| `valOpt` | out (opt) | `uint8_t *` | Receives a copy of the found value. Pass `NULL` (with `valOptSize` 0) to get a pointer through `valPtrOpt` instead. Exactly one of `valOpt` and `valPtrOpt` must be non-`NULL`. |
+| `valOptSize` | in | `uint32_t` | Allocated size of `valOpt` in bytes; must be `0` when `valOpt` is `NULL`. A value larger than this returns `false`. |
+| `valPtrOpt` | out (opt) | `uint8_t **` | Receives a pointer into the TLV buffer at the start of the found value. Must be `NULL` when `valOpt` is used. |
+| `valLen` | out | [`SSFTLVVar_t *`](#type-ssftlvvar-t) | Receives the length of the found value in bytes. Must not be `NULL`. |
 
-**Returns:** `true` if the tag/instance was found and all requested outputs were written; `false` if the tag/instance was not found or `valSize` is too small to hold the value.
+**Returns:** `true` if the tag/instance was found and the requested output was written; `false` if the tag/instance was not found or `valOptSize` is too small to hold the value.
 
 <a id="ex-read"></a>
 
@@ -274,7 +280,7 @@ calling `SSFTLVRead()` with `valPtr` set to `NULL`.
 | `instance` | in | `uint16_t` | 0-based occurrence index. |
 | `val` | out | `uint8_t *` | Buffer receiving a copy of the found value. Must not be `NULL`. |
 | `valSize` | in | `uint32_t` | Allocated size of `val`. Must be large enough to hold the found value. |
-| `valLen` | out (opt) | [`SSFTLVVar_t *`](#type-ssftlvvar-t) | If not `NULL`, receives the length of the found value. |
+| `valLen` | out | [`SSFTLVVar_t *`](#type-ssftlvvar-t) | Receives the length of the found value. Must not be `NULL`. |
 
 **Returns:** `true` if the tag/instance was found and copied; `false` otherwise.
 
@@ -322,7 +328,7 @@ buffer at the start of the value, avoiding a copy. Equivalent to calling `SSFTLV
 | `tag` | in | [`SSFTLVVar_t`](#type-ssftlvvar-t) | Tag identifier to search for. |
 | `instance` | in | `uint16_t` | 0-based occurrence index. |
 | `valPtr` | out | `uint8_t **` | Receives a pointer into the TLV buffer at the start of the found value. Must not be `NULL`. |
-| `valLen` | out (opt) | [`SSFTLVVar_t *`](#type-ssftlvvar-t) | If not `NULL`, receives the length of the found value. |
+| `valLen` | out | [`SSFTLVVar_t *`](#type-ssftlvvar-t) | Receives the length of the found value. Must not be `NULL`. |
 
 **Returns:** `true` if the tag/instance was found and `*valPtr` was set; `false` otherwise.
 

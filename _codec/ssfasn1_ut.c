@@ -2,7 +2,7 @@
 /* Small System Framework                                                                        */
 /*                                                                                               */
 /* ssfasn1_ut.c                                                                                  */
-/* Provides unit tests for the ssfasn1 ASN.1 DER encode/decode module.                          */
+/* Provides unit tests for the ssfasn1 ASN.1 DER encode/decode module.                           */
 /*                                                                                               */
 /* BSD-3-Clause License                                                                          */
 /* Copyright 2020 Supurloop Software LLC                                                         */
@@ -47,7 +47,7 @@ void SSFASN1UnitTest(void)
 
         SSF_ASSERT(SSFASN1EncBool(buf, sizeof(buf), true, &len) == true);
         SSF_ASSERT(len == 3u);
-        SSF_ASSERT(buf[0] == 0x01u && buf[1] == 0x01u && buf[2] == 0xFFu);
+        SSF_ASSERT((buf[0] == 0x01u) && (buf[1] == 0x01u) && (buf[2] == 0xFFu));
 
         cursor.buf = buf; cursor.bufLen = len;
         SSF_ASSERT(SSFASN1DecGetBool(&cursor, &val, &next) == true);
@@ -80,7 +80,8 @@ void SSFASN1UnitTest(void)
         SSF_ASSERT(SSFASN1DecGetIntU64(&cursor, &val, &next) == true);
         SSF_ASSERT(val == 128);
         /* 128 requires leading zero: 02 02 00 80 */
-        SSF_ASSERT(buf[0] == 0x02u && buf[1] == 0x02u && buf[2] == 0x00u && buf[3] == 0x80u);
+        SSF_ASSERT((buf[0] == 0x02u) && (buf[1] == 0x02u) && (buf[2] == 0x00u) &&
+                   (buf[3] == 0x80u));
 
         SSF_ASSERT(SSFASN1EncIntU64(buf, sizeof(buf), 256, &len) == true);
         cursor.buf = buf; cursor.bufLen = len;
@@ -95,6 +96,410 @@ void SSFASN1UnitTest(void)
         cursor.buf = buf; cursor.bufLen = len;
         SSF_ASSERT(SSFASN1DecGetIntU64(&cursor, &val, &next) == true);
         SSF_ASSERT(val == 0xDEADBEEFCAFEull);
+    }
+
+    /* ---- AUDIT ASN1-9: encoders accept only tags they can encode as decodable DER ---- */
+    {
+        static const uint8_t ab[] = { 'a', 'b' };
+
+        SSF_ASSERT(SSFASN1EncTagLen(buf, sizeof(buf), SSF_ASN1_TAG_SEQUENCE, 0u, &len) == true);
+        SSF_ASSERT(SSFASN1EncTagLen(buf, sizeof(buf), SSF_ASN1_TAG_DATE, 0u, &len) == true);
+        SSF_ASSERT((len == 3u) && (buf[0] == 0x1Fu) && (buf[1] == 0x1Fu));
+        SSF_ASSERT_TEST(SSFASN1EncTagLen(buf, sizeof(buf), 0x001Fu, 0u, &len));
+        SSF_ASSERT_TEST(SSFASN1EncTagLen(buf, sizeof(buf), 0x801Fu, 0u, &len));
+        SSF_ASSERT_TEST(SSFASN1EncTagLen(buf, sizeof(buf), 0x0530u, 0u, &len));
+        SSF_ASSERT_TEST(SSFASN1EncTagLen(buf, sizeof(buf), 0x0000u, 0u, &len));
+        SSF_ASSERT_TEST(SSFASN1EncWrap(buf, sizeof(buf), 0x0530u, ab, sizeof(ab), &len));
+        SSF_ASSERT(SSFASN1EncString(buf, sizeof(buf), SSF_ASN1_TAG_UTF8_STRING, ab, sizeof(ab),
+                                    &len) == true);
+        SSF_ASSERT_TEST(SSFASN1EncString(buf, sizeof(buf), SSF_ASN1_TAG_OCTET_STRING, ab,
+                                         sizeof(ab), &len));
+    }
+
+    /* ---- AUDIT ASN1-10: string bodies must fit their type ---- */
+    {
+        static const uint8_t utf8Nul[] = { 0x0Cu, 0x03u, 'a', 0x00u, 'b' };
+        static const uint8_t printNul[] = { 0x13u, 0x02u, 'a', 0x00u };
+        static const uint8_t ia5Nul[] = { 0x16u, 0x02u, 0x00u, 'b' };
+        static const uint8_t t61Nul[] = { 0x14u, 0x01u, 0x00u };
+        static const uint8_t bmpOdd[] = { 0x1Eu, 0x03u, 0x00u, 'A', 0x00u };
+        static const uint8_t univBad[] = { 0x1Cu, 0x06u, 0x00u, 0x00u, 0x00u, 'A', 0x00u, 0x00u };
+        static const uint8_t utf8Ok[] = { 0x0Cu, 0x02u, 'a', 'b' };
+        static const uint8_t bmpOk[] = { 0x1Eu, 0x02u, 0x00u, 'A' };
+        static const uint8_t univOk[] = { 0x1Cu, 0x04u, 0x00u, 0x00u, 0x00u, 'A' };
+        static const struct { const uint8_t *der; uint32_t len; } bad[] = {
+            { utf8Nul, sizeof(utf8Nul) }, { printNul, sizeof(printNul) },
+            { ia5Nul, sizeof(ia5Nul) }, { t61Nul, sizeof(t61Nul) },
+            { bmpOdd, sizeof(bmpOdd) }, { univBad, sizeof(univBad) }
+        };
+        static const struct { const uint8_t *der; uint32_t len; } good[] = {
+            { utf8Ok, sizeof(utf8Ok) }, { bmpOk, sizeof(bmpOk) }, { univOk, sizeof(univOk) }
+        };
+        const uint8_t *str;
+        uint32_t strLen;
+        uint16_t strTag;
+        uint32_t i;
+
+        for (i = 0; i < (uint32_t)(sizeof(bad) / sizeof(bad[0])); i++)
+        {
+            cursor.buf = bad[i].der; cursor.bufLen = bad[i].len;
+            SSF_ASSERT(SSFASN1DecGetString(&cursor, &str, &strLen, &strTag, &next) == false);
+        }
+        for (i = 0; i < (uint32_t)(sizeof(good) / sizeof(good[0])); i++)
+        {
+            cursor.buf = good[i].der; cursor.bufLen = good[i].len;
+            SSF_ASSERT(SSFASN1DecGetString(&cursor, &str, &strLen, &strTag, &next) == true);
+            SSF_ASSERT((strLen == (good[i].len - 2u)) && (strTag == good[i].der[0]));
+        }
+    }
+
+    /* ---- AUDIT ASN1-8 / ASN1-12 / ASN1-13: encoder and decoder contract edges ---- */
+    {
+        static const uint8_t bits80[] = { 0x80u };
+        static const uint8_t bitsFF[] = { 0xFFu };
+        static const uint8_t eoc[] = { 0x00u, 0x00u, 0x05u, 0x00u };
+        static const uint8_t intOne[] = { 0x02u, 0x01u, 0x01u };
+        uint8_t wrapBuf[16];
+        SSFASN1Cursor_t inner;
+        const uint8_t *val;
+        uint32_t valLen;
+        uint16_t tag;
+
+        /* ASN1-8: EncBitString traps (DBC) on a bad unused count and on set padding bits */
+        SSF_ASSERT(SSFASN1EncBitString(buf, sizeof(buf), bits80, 1u, 7u, &len) == true);
+        SSF_ASSERT_TEST(SSFASN1EncBitString(buf, sizeof(buf), bitsFF, 1u, 7u, &len));
+        SSF_ASSERT_TEST(SSFASN1EncBitString(buf, sizeof(buf), bits80, 1u, 8u, &len));
+
+        /* ASN1-12: EncWrap may wrap content already placed in buf (in place, overlapping) */
+        memset(wrapBuf, 0, sizeof(wrapBuf));
+        memcpy(&wrapBuf[1], intOne, sizeof(intOne));
+        SSF_ASSERT(SSFASN1EncWrap(wrapBuf, sizeof(wrapBuf), SSF_ASN1_TAG_SEQUENCE, &wrapBuf[1],
+                                  sizeof(intOne), &len) == true);
+        SSF_ASSERT((len == 5u) && (wrapBuf[0] == 0x30u) && (wrapBuf[1] == 0x03u));
+        SSF_ASSERT(memcmp(&wrapBuf[2], intOne, sizeof(intOne)) == 0);
+
+        /* ASN1-13: OpenConstructed requires a constructed tag; tag 0 (EOC) is not an element */
+        cursor.buf = intOne; cursor.bufLen = sizeof(intOne);
+        SSF_ASSERT_TEST(SSFASN1DecOpenConstructed(&cursor, SSF_ASN1_TAG_INTEGER, &inner, &next));
+        cursor.buf = eoc; cursor.bufLen = sizeof(eoc);
+        SSF_ASSERT(SSFASN1DecGetTLV(&cursor, &tag, &val, &valLen, &next) == false);
+        SSF_ASSERT(SSFASN1DecPeekTag(&cursor, &tag) == false);
+        SSF_ASSERT(SSFASN1DecSkip(&cursor, &next) == false);
+    }
+
+    /* ---- AUDIT ASN1-6: EncUInt encodes a magnitude; EncInt requires minimal input ---- */
+    {
+        static const uint8_t m80[] = { 0x80u };
+        static const uint8_t m0001[] = { 0x00u, 0x00u, 0x01u };
+        static const uint8_t m00[] = { 0x00u };
+        static const uint8_t m0000[] = { 0x00u, 0x00u };
+        static const uint8_t m7F[] = { 0x7Fu };
+        static const uint8_t m0080[] = { 0x00u, 0x80u };
+        static const uint8_t mPad007F[] = { 0x00u, 0x7Fu };
+        static const uint8_t mPadFF80[] = { 0xFFu, 0x80u };
+        static const struct { const uint8_t *in; uint32_t inLen; uint8_t outLen;
+                              uint8_t out[4]; } vec[] = {
+            { m80, sizeof(m80), 4u, { 0x02u, 0x02u, 0x00u, 0x80u } },
+            { m0001, sizeof(m0001), 3u, { 0x02u, 0x01u, 0x01u, 0x00u } },
+            { m00, sizeof(m00), 3u, { 0x02u, 0x01u, 0x00u, 0x00u } },
+            { m0000, sizeof(m0000), 3u, { 0x02u, 0x01u, 0x00u, 0x00u } },
+            { m7F, sizeof(m7F), 3u, { 0x02u, 0x01u, 0x7Fu, 0x00u } }
+        };
+        const uint8_t *mag;
+        uint32_t magLen;
+        uint32_t measured;
+        uint32_t i;
+
+        for (i = 0; i < (uint32_t)(sizeof(vec) / sizeof(vec[0])); i++)
+        {
+            SSF_ASSERT(SSFASN1EncUInt(NULL, 0, vec[i].in, vec[i].inLen, &measured) == true);
+            SSF_ASSERT(measured == vec[i].outLen);
+            SSF_ASSERT(SSFASN1EncUInt(buf, sizeof(buf), vec[i].in, vec[i].inLen, &len) == true);
+            SSF_ASSERT((len == vec[i].outLen) && (memcmp(buf, vec[i].out, len) == 0));
+            cursor.buf = buf; cursor.bufLen = len;
+            SSF_ASSERT(SSFASN1DecGetUInt(&cursor, &mag, &magLen, &next) == true);
+        }
+        SSF_ASSERT(SSFASN1EncUInt(buf, 3u, m80, sizeof(m80), &len) == false);
+
+        /* EncInt writes a minimal two's-complement body as given, and traps on any other */
+        SSF_ASSERT(SSFASN1EncInt(buf, sizeof(buf), m80, sizeof(m80), &len) == true);
+        SSF_ASSERT((len == 3u) && (buf[2] == 0x80u));
+        SSF_ASSERT(SSFASN1EncInt(buf, sizeof(buf), m0080, sizeof(m0080), &len) == true);
+        SSF_ASSERT((len == 4u) && (buf[2] == 0x00u) && (buf[3] == 0x80u));
+        SSF_ASSERT_TEST(SSFASN1EncInt(buf, sizeof(buf), mPad007F, sizeof(mPad007F), &len));
+        SSF_ASSERT_TEST(SSFASN1EncInt(buf, sizeof(buf), mPadFF80, sizeof(mPadFF80), &len));
+        SSF_ASSERT_TEST(SSFASN1EncInt(NULL, 0, mPad007F, sizeof(mPad007F), &len));
+    }
+
+    /* ---- AUDIT ASN1-5: BIT STRING unused count 0..7, 0 when empty, zero padding ---- */
+    {
+        static const uint8_t bsUnused8[] = { 0x03u, 0x02u, 0x08u, 0xFFu };
+        static const uint8_t bsEmpty5[] = { 0x03u, 0x01u, 0x05u };
+        static const uint8_t bsPad7[] = { 0x03u, 0x02u, 0x07u, 0xFFu };
+        static const uint8_t bsPad1[] = { 0x03u, 0x02u, 0x01u, 0x81u };
+        static const uint8_t bsEmpty[] = { 0x03u, 0x01u, 0x00u };
+        static const uint8_t bs780[] = { 0x03u, 0x02u, 0x07u, 0x80u };
+        static const uint8_t bs0FF[] = { 0x03u, 0x02u, 0x00u, 0xFFu };
+        static const uint8_t bs1FFFE[] = { 0x03u, 0x03u, 0x01u, 0xFFu, 0xFEu };
+        static const struct { const uint8_t *der; uint32_t len; } bad[] = {
+            { bsUnused8, sizeof(bsUnused8) }, { bsEmpty5, sizeof(bsEmpty5) },
+            { bsPad7, sizeof(bsPad7) }, { bsPad1, sizeof(bsPad1) }
+        };
+        static const struct { const uint8_t *der; uint32_t len; uint8_t unused; } good[] = {
+            { bsEmpty, sizeof(bsEmpty), 0u }, { bs780, sizeof(bs780), 7u },
+            { bs0FF, sizeof(bs0FF), 0u }, { bs1FFFE, sizeof(bs1FFFE), 1u }
+        };
+        static const uint8_t sentinel[1] = { 0x00u };
+        const uint8_t *bits;
+        uint32_t bitsLen;
+        uint8_t unusedBits;
+        uint32_t i;
+
+        for (i = 0; i < (uint32_t)(sizeof(bad) / sizeof(bad[0])); i++)
+        {
+            cursor.buf = bad[i].der; cursor.bufLen = bad[i].len;
+            next.buf = sentinel; next.bufLen = 0x5A5Au;
+            SSF_ASSERT(SSFASN1DecGetBitString(&cursor, &bits, &bitsLen, &unusedBits,
+                                              &next) == false);
+            SSF_ASSERT((next.buf == sentinel) && (next.bufLen == 0x5A5Au));
+        }
+        for (i = 0; i < (uint32_t)(sizeof(good) / sizeof(good[0])); i++)
+        {
+            cursor.buf = good[i].der; cursor.bufLen = good[i].len;
+            SSF_ASSERT(SSFASN1DecGetBitString(&cursor, &bits, &bitsLen, &unusedBits,
+                                              &next) == true);
+            SSF_ASSERT((unusedBits == good[i].unused) && (bitsLen == (good[i].len - 3u)));
+        }
+    }
+
+    /* ---- AUDIT ASN1-4: BOOLEAN content must be 0x00 or 0xFF (X.690 11.1) ---- */
+    {
+        static const uint8_t b01[] = { 0x01u, 0x01u, 0x01u };
+        static const uint8_t b7F[] = { 0x01u, 0x01u, 0x7Fu };
+        static const uint8_t bFE[] = { 0x01u, 0x01u, 0xFEu };
+        static const uint8_t b00[] = { 0x01u, 0x01u, 0x00u };
+        static const uint8_t bFF[] = { 0x01u, 0x01u, 0xFFu };
+        static const uint8_t *bad[] = { b01, b7F, bFE };
+        static const uint8_t sentinel[1] = { 0x00u };
+        bool bv;
+        uint32_t i;
+
+        for (i = 0; i < (uint32_t)(sizeof(bad) / sizeof(bad[0])); i++)
+        {
+            cursor.buf = bad[i]; cursor.bufLen = 3u;
+            next.buf = sentinel; next.bufLen = 0x5A5Au;
+            SSF_ASSERT(SSFASN1DecGetBool(&cursor, &bv, &next) == false);
+            SSF_ASSERT((next.buf == sentinel) && (next.bufLen == 0x5A5Au));
+        }
+        cursor.buf = b00; cursor.bufLen = sizeof(b00);
+        SSF_ASSERT((SSFASN1DecGetBool(&cursor, &bv, &next) == true) && (bv == false));
+        cursor.buf = bFF; cursor.bufLen = sizeof(bFF);
+        SSF_ASSERT((SSFASN1DecGetBool(&cursor, &bv, &next) == true) && (bv == true));
+    }
+
+    /* ---- AUDIT ASN1-3: GetInt requires a minimal two's-complement INTEGER ---- */
+    {
+        static const uint8_t iEmpty[] = { 0x02u, 0x00u };
+        static const uint8_t iPad00[] = { 0x02u, 0x02u, 0x00u, 0x7Fu };
+        static const uint8_t iPadFF[] = { 0x02u, 0x02u, 0xFFu, 0x80u };
+        static const uint8_t iZero[] = { 0x02u, 0x01u, 0x00u };
+        static const uint8_t i7F[] = { 0x02u, 0x01u, 0x7Fu };
+        static const uint8_t i128[] = { 0x02u, 0x02u, 0x00u, 0x80u };
+        static const uint8_t iNeg128[] = { 0x02u, 0x01u, 0x80u };
+        static const uint8_t iNeg1[] = { 0x02u, 0x01u, 0xFFu };
+        static const uint8_t iNeg129[] = { 0x02u, 0x02u, 0xFFu, 0x7Fu };
+        static const struct { const uint8_t *der; uint32_t len; } bad[] = {
+            { iEmpty, sizeof(iEmpty) }, { iPad00, sizeof(iPad00) }, { iPadFF, sizeof(iPadFF) }
+        };
+        static const struct { const uint8_t *der; uint32_t len; } good[] = {
+            { iZero, sizeof(iZero) }, { i7F, sizeof(i7F) }, { i128, sizeof(i128) },
+            { iNeg128, sizeof(iNeg128) }, { iNeg1, sizeof(iNeg1) }, { iNeg129, sizeof(iNeg129) }
+        };
+        const uint8_t *iBuf;
+        uint32_t iLen;
+        uint32_t i;
+
+        for (i = 0; i < (uint32_t)(sizeof(bad) / sizeof(bad[0])); i++)
+        {
+            cursor.buf = bad[i].der; cursor.bufLen = bad[i].len;
+            SSF_ASSERT(SSFASN1DecGetInt(&cursor, &iBuf, &iLen, &next) == false);
+        }
+        for (i = 0; i < (uint32_t)(sizeof(good) / sizeof(good[0])); i++)
+        {
+            cursor.buf = good[i].der; cursor.bufLen = good[i].len;
+            SSF_ASSERT(SSFASN1DecGetInt(&cursor, &iBuf, &iLen, &next) == true);
+            SSF_ASSERT((iBuf == &good[i].der[2]) && (iLen == (good[i].len - 2u)));
+        }
+
+        /* GetUInt: the same minimal forms, negatives rejected, sign octet removed */
+        for (i = 0; i < (uint32_t)(sizeof(bad) / sizeof(bad[0])); i++)
+        {
+            cursor.buf = bad[i].der; cursor.bufLen = bad[i].len;
+            SSF_ASSERT(SSFASN1DecGetUInt(&cursor, &iBuf, &iLen, &next) == false);
+        }
+        cursor.buf = iNeg128; cursor.bufLen = sizeof(iNeg128);
+        SSF_ASSERT(SSFASN1DecGetUInt(&cursor, &iBuf, &iLen, &next) == false);
+        cursor.buf = iNeg1; cursor.bufLen = sizeof(iNeg1);
+        SSF_ASSERT(SSFASN1DecGetUInt(&cursor, &iBuf, &iLen, &next) == false);
+        cursor.buf = iNeg129; cursor.bufLen = sizeof(iNeg129);
+        SSF_ASSERT(SSFASN1DecGetUInt(&cursor, &iBuf, &iLen, &next) == false);
+        cursor.buf = iZero; cursor.bufLen = sizeof(iZero);
+        SSF_ASSERT(SSFASN1DecGetUInt(&cursor, &iBuf, &iLen, &next) == true);
+        SSF_ASSERT((iLen == 1u) && (iBuf[0] == 0x00u) && (next.bufLen == 0u));
+        cursor.buf = i7F; cursor.bufLen = sizeof(i7F);
+        SSF_ASSERT(SSFASN1DecGetUInt(&cursor, &iBuf, &iLen, &next) == true);
+        SSF_ASSERT((iLen == 1u) && (iBuf[0] == 0x7Fu));
+        cursor.buf = i128; cursor.bufLen = sizeof(i128);
+        SSF_ASSERT(SSFASN1DecGetUInt(&cursor, &iBuf, &iLen, &next) == true);
+        SSF_ASSERT((iLen == 1u) && (iBuf == &i128[3]) && (iBuf[0] == 0x80u));
+    }
+
+    /* ---- AUDIT ASN1-2: long-form lengths must be minimal (X.690 10.1) ---- */
+    {
+        static const uint8_t len81For3[] = { 0x30u, 0x81u, 0x03u, 0x02u, 0x01u, 0x05u };
+        static const uint8_t len82For3[] = { 0x30u, 0x82u, 0x00u, 0x03u, 0x02u, 0x01u, 0x05u };
+        static const uint8_t len84For3[] = {
+            0x30u, 0x84u, 0x00u, 0x00u, 0x00u, 0x03u, 0x02u, 0x01u, 0x05u
+        };
+        static uint8_t len82For128[4u + 128u];
+        static uint8_t len81For128[3u + 128u];
+        static uint8_t len82For256[4u + 256u];
+        static const struct { const uint8_t *der; uint32_t len; } bad[] = {
+            { len81For3, sizeof(len81For3) }, { len82For3, sizeof(len82For3) },
+            { len84For3, sizeof(len84For3) }, { len82For128, sizeof(len82For128) }
+        };
+        SSFASN1Cursor_t inner;
+        const uint8_t *val;
+        uint32_t valLen;
+        uint16_t tag;
+        uint32_t i;
+
+        memset(len82For128, 0, sizeof(len82For128));
+        len82For128[0] = 0x30u; len82For128[1] = 0x82u; len82For128[2] = 0x00u;
+        len82For128[3] = 0x80u;
+        memset(len81For128, 0, sizeof(len81For128));
+        len81For128[0] = 0x30u; len81For128[1] = 0x81u; len81For128[2] = 0x80u;
+        memset(len82For256, 0, sizeof(len82For256));
+        len82For256[0] = 0x30u; len82For256[1] = 0x82u; len82For256[2] = 0x01u;
+        len82For256[3] = 0x00u;
+
+        for (i = 0; i < (uint32_t)(sizeof(bad) / sizeof(bad[0])); i++)
+        {
+            cursor.buf = bad[i].der; cursor.bufLen = bad[i].len;
+            SSF_ASSERT(SSFASN1DecOpenConstructed(&cursor, SSF_ASN1_TAG_SEQUENCE, &inner,
+                                                 &next) == false);
+            SSF_ASSERT(SSFASN1DecGetTLV(&cursor, &tag, &val, &valLen, &next) == false);
+            SSF_ASSERT(SSFASN1DecSkip(&cursor, &next) == false);
+            SSF_ASSERT(SSFASN1DecPeekTag(&cursor, &tag) == false);
+        }
+
+        /* Minimal long forms still decode */
+        cursor.buf = len81For128; cursor.bufLen = sizeof(len81For128);
+        SSF_ASSERT(SSFASN1DecOpenConstructed(&cursor, SSF_ASN1_TAG_SEQUENCE, &inner,
+                                             &next) == true);
+        SSF_ASSERT((inner.bufLen == 128u) && (next.bufLen == 0u));
+        cursor.buf = len82For256; cursor.bufLen = sizeof(len82For256);
+        SSF_ASSERT(SSFASN1DecOpenConstructed(&cursor, SSF_ASN1_TAG_SEQUENCE, &inner,
+                                             &next) == true);
+        SSF_ASSERT((inner.bufLen == 256u) && (next.bufLen == 0u));
+    }
+
+    /* ---- AUDIT ASN1-7: a decoder that returns false leaves *next untouched ---- */
+    {
+        /* Each input is followed by a trailing NULL so an unwanted advance is visible */
+        static const uint8_t wrongTag[] = { 0x05u, 0x00u, 0x05u, 0x00u };
+        static const uint8_t nullForNull[] = { 0x04u, 0x00u, 0x05u, 0x00u };
+        static const uint8_t badBool[] = { 0x01u, 0x02u, 0xFFu, 0xFFu, 0x05u, 0x00u };
+        static const uint8_t negInt[] = { 0x02u, 0x01u, 0xFFu, 0x05u, 0x00u };
+        static const uint8_t bigInt[] = {
+            0x02u, 0x0Au, 0x01u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u,
+            0x05u, 0x00u
+        };
+        static const uint8_t emptyBits[] = { 0x03u, 0x00u, 0x05u, 0x00u };
+        static const uint8_t badNull[] = { 0x05u, 0x01u, 0x00u, 0x05u, 0x00u };
+        static const uint8_t badTime[] = { 0x17u, 0x01u, 0x30u, 0x05u, 0x00u };
+        static const uint8_t sentinel[1] = { 0x00u };
+        SSFASN1Cursor_t inner;
+        const uint8_t *p;
+        uint32_t plen;
+        uint8_t unused;
+        uint16_t strTag;
+        uint32_t arcs[8];
+        uint8_t arcsLen;
+        uint64_t u64;
+        bool b;
+
+        #define _ASN1_NO_ADVANCE(_der, _call) do { \
+            cursor.buf = (_der); cursor.bufLen = (uint32_t)sizeof(_der); \
+            next.buf = sentinel; next.bufLen = 0x5A5Au; \
+            SSF_ASSERT((_call) == false); \
+            SSF_ASSERT((next.buf == sentinel) && (next.bufLen == 0x5A5Au)); \
+        } while (0)
+
+        /* Wrong tag, every typed decoder */
+        _ASN1_NO_ADVANCE(wrongTag, SSFASN1DecOpenConstructed(&cursor, SSF_ASN1_TAG_SEQUENCE,
+                                                             &inner, &next));
+        _ASN1_NO_ADVANCE(wrongTag, SSFASN1DecGetBool(&cursor, &b, &next));
+        _ASN1_NO_ADVANCE(wrongTag, SSFASN1DecGetInt(&cursor, &p, &plen, &next));
+        _ASN1_NO_ADVANCE(wrongTag, SSFASN1DecGetIntU64(&cursor, &u64, &next));
+        _ASN1_NO_ADVANCE(wrongTag, SSFASN1DecGetBitString(&cursor, &p, &plen, &unused, &next));
+        _ASN1_NO_ADVANCE(wrongTag, SSFASN1DecGetOctetString(&cursor, &p, &plen, &next));
+        _ASN1_NO_ADVANCE(nullForNull, SSFASN1DecGetNull(&cursor, &next));
+        _ASN1_NO_ADVANCE(wrongTag, SSFASN1DecGetOID(&cursor, arcs, 8u, &arcsLen, &next));
+        _ASN1_NO_ADVANCE(wrongTag, SSFASN1DecGetOIDRaw(&cursor, &p, &plen, &next));
+        _ASN1_NO_ADVANCE(wrongTag, SSFASN1DecGetString(&cursor, &p, &plen, &strTag, &next));
+        _ASN1_NO_ADVANCE(wrongTag, SSFASN1DecGetTime(&cursor, &u64, &next));
+        _ASN1_NO_ADVANCE(wrongTag, SSFASN1DecGetDate(&cursor, &u64, &next));
+        _ASN1_NO_ADVANCE(wrongTag, SSFASN1DecGetDateTime(&cursor, &u64, &next));
+
+        /* Right tag, bad content */
+        _ASN1_NO_ADVANCE(badBool, SSFASN1DecGetBool(&cursor, &b, &next));
+        _ASN1_NO_ADVANCE(negInt, SSFASN1DecGetIntU64(&cursor, &u64, &next));
+        _ASN1_NO_ADVANCE(bigInt, SSFASN1DecGetIntU64(&cursor, &u64, &next));
+        _ASN1_NO_ADVANCE(emptyBits, SSFASN1DecGetBitString(&cursor, &p, &plen, &unused, &next));
+        _ASN1_NO_ADVANCE(badNull, SSFASN1DecGetNull(&cursor, &next));
+        _ASN1_NO_ADVANCE(badTime, SSFASN1DecGetTime(&cursor, &u64, &next));
+        #undef _ASN1_NO_ADVANCE
+
+        /* A successful decode still advances past exactly one element */
+        cursor.buf = wrongTag; cursor.bufLen = sizeof(wrongTag);
+        SSF_ASSERT(SSFASN1DecGetNull(&cursor, &next) == true);
+        SSF_ASSERT((next.buf == &wrongTag[2]) && (next.bufLen == 2u));
+    }
+
+    /* ---- AUDIT ASN1-1: IntU64 rejects negative, empty and non-minimal INTEGERs ---- */
+    {
+        static const uint8_t negOne[] = { 0x02u, 0x01u, 0xFFu };
+        static const uint8_t neg128[] = { 0x02u, 0x01u, 0x80u };
+        static const uint8_t empty[] = { 0x02u, 0x00u };
+        static const uint8_t padded7F[] = { 0x02u, 0x02u, 0x00u, 0x7Fu };
+        static const uint8_t padded1[] = { 0x02u, 0x03u, 0x00u, 0x00u, 0x01u };
+        static const uint8_t zero[] = { 0x02u, 0x01u, 0x00u };
+        static const uint8_t v127[] = { 0x02u, 0x01u, 0x7Fu };
+        static const uint8_t v128[] = { 0x02u, 0x02u, 0x00u, 0x80u };
+        static const uint8_t vMax[] = {
+            0x02u, 0x09u, 0x00u, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu, 0xFFu
+        };
+        static const struct { const uint8_t *der; uint32_t len; } bad[] = {
+            { negOne, sizeof(negOne) }, { neg128, sizeof(neg128) }, { empty, sizeof(empty) },
+            { padded7F, sizeof(padded7F) }, { padded1, sizeof(padded1) }
+        };
+        uint64_t val;
+        uint32_t i;
+
+        for (i = 0; i < (uint32_t)(sizeof(bad) / sizeof(bad[0])); i++)
+        {
+            cursor.buf = bad[i].der; cursor.bufLen = bad[i].len;
+            SSF_ASSERT(SSFASN1DecGetIntU64(&cursor, &val, &next) == false);
+        }
+        cursor.buf = zero; cursor.bufLen = sizeof(zero);
+        SSF_ASSERT((SSFASN1DecGetIntU64(&cursor, &val, &next) == true) && (val == 0u));
+        cursor.buf = v127; cursor.bufLen = sizeof(v127);
+        SSF_ASSERT((SSFASN1DecGetIntU64(&cursor, &val, &next) == true) && (val == 127u));
+        cursor.buf = v128; cursor.bufLen = sizeof(v128);
+        SSF_ASSERT((SSFASN1DecGetIntU64(&cursor, &val, &next) == true) && (val == 128u));
+        cursor.buf = vMax; cursor.bufLen = sizeof(vMax);
+        SSF_ASSERT((SSFASN1DecGetIntU64(&cursor, &val, &next) == true) && (val == UINT64_MAX));
     }
 
     /* ---- INTEGER: raw bytes ---- */
@@ -114,7 +519,7 @@ void SSFASN1UnitTest(void)
     {
         SSF_ASSERT(SSFASN1EncNull(buf, sizeof(buf), &len) == true);
         SSF_ASSERT(len == 2u);
-        SSF_ASSERT(buf[0] == 0x05u && buf[1] == 0x00u);
+        SSF_ASSERT((buf[0] == 0x05u) && (buf[1] == 0x00u));
 
         cursor.buf = buf; cursor.bufLen = len;
         SSF_ASSERT(SSFASN1DecGetNull(&cursor, &next) == true);
@@ -133,7 +538,7 @@ void SSFASN1UnitTest(void)
                    &next) == true);
         SSF_ASSERT(bitsLenOut == 2u);
         SSF_ASSERT(unusedBits == 1u);
-        SSF_ASSERT(bitsOut[0] == 0xFFu && bitsOut[1] == 0x80u);
+        SSF_ASSERT((bitsOut[0] == 0xFFu) && (bitsOut[1] == 0x80u));
     }
 
     /* ---- OCTET STRING encode/decode ---- */
@@ -171,7 +576,7 @@ void SSFASN1UnitTest(void)
                    &next) == true);
         /* 0x55 = 2*40+5 -> arcs 2,5; 0x04 -> arc 4; 0x03 -> arc 3 = OID 2.5.4.3 */
         SSF_ASSERT(arcsLen == 4u);
-        SSF_ASSERT(arcs[0] == 2u && arcs[1] == 5u && arcs[2] == 4u && arcs[3] == 3u);
+        SSF_ASSERT((arcs[0] == 2u) && (arcs[1] == 5u) && (arcs[2] == 4u) && (arcs[3] == 3u));
     }
 
     /* ---- OID: 1.2.840.113549.1.1.11 (sha256WithRSAEncryption) with multi-byte arcs ---- */
@@ -359,17 +764,12 @@ void SSFASN1UnitTest(void)
         cursor.buf = buf; cursor.bufLen = len;
         SSF_ASSERT(SSFASN1DecGetOctetString(&cursor, &octets, &octetsLen, &next) == true);
         SSF_ASSERT(octetsLen == 200u);
-        SSF_ASSERT(octets[0] == 0xABu && octets[199] == 0xABu);
+        SSF_ASSERT((octets[0] == 0xABu) && (octets[199] == 0xABu));
     }
 
-    /* ====================================================================================== */
-    /* Hardening regression tests                                                               */
-    /* ====================================================================================== */
+    /* ==== Hardening regression tests ==== */
 
-    /* ---- Fix #1: integer-overflow in TLV bounds check ---- */
-    /* Craft a TLV whose advertised content length plus header wraps uint32_t. A bounds check  */
-    /* using "headerLen + contentLen > bufLen" wraps and accepts the malformed TLV, causing    */
-    /* out-of-bounds reads downstream.                                                          */
+    /* ---- Fix #1: TLV whose content length plus header wraps uint32_t is rejected ---- */
     {
         uint8_t trunc[6];
         const uint8_t *val;
@@ -386,8 +786,7 @@ void SSFASN1UnitTest(void)
         SSF_ASSERT(SSFASN1DecGetTLV(&cursor, &tag, &val, &valLen, &next) == false);
     }
 
-    /* ---- Fix #2a: OID arc0=2, arc1>=40 split correctly ---- */
-    /* OID 2.100.3 encodes as 0x81 0x34 0x03 (first sub-id 180 -> arc0=2, arc1=100).            */
+    /* ---- Fix #2a: OID 2.100.3 (81 34 03, first sub-id 180) splits to arc0=2, arc1=100 ---- */
     {
         static const uint8_t oidRaw[] = { 0x81u, 0x34u, 0x03u };
         uint32_t arcs[SSF_ASN1_CONFIG_MAX_OID_ARCS];
@@ -403,8 +802,7 @@ void SSFASN1UnitTest(void)
         SSF_ASSERT(arcs[2] == 3u);
     }
 
-    /* ---- Fix #2b: OID first-byte >= 80 maps arc0=2 (not arc0=3) ---- */
-    /* Single-byte first sub-id of 0x82 = 130 -> arc0=2, arc1=50 per X.690 Sec. 8.19.4.         */
+    /* ---- Fix #2b: OID first sub-id 0x82 = 130 maps to arc0=2, arc1=50 (X.690 8.19.4) ---- */
     {
         static const uint8_t oidRaw[] = { 0x82u, 0x01u }; /* Invalid continuation -> reject */
         uint32_t arcs[SSF_ASN1_CONFIG_MAX_OID_ARCS];
@@ -582,18 +980,42 @@ void SSFASN1UnitTest(void)
         uint64_t decoded;
         cursor.buf = good; cursor.bufLen = sizeof(good);
         SSF_ASSERT(SSFASN1DecGetTime(&cursor, &decoded, &next) == true);
-        SSF_ASSERT(decoded == 7258118399ull); /* 2199-12-31T23:59:59Z */
+        /* 2199-12-31T23:59:59Z */
+        SSF_ASSERT(decoded == 7258118399ull);
     }
 
-    /* ---- Time range #4: GeneralizedTime 2200-01-01 rejected (above ssfdtime range) ---- */
+    /* ---- Time range #4, AUDIT ASN1-14: valid time after 2199 saturates, invalid refused ---- */
     {
-        static const uint8_t bad[] = {
-            SSF_ASN1_TAG_GENERALIZED_TIME, 0x0Fu,
-            '2','2','0','0','0','1','0','1','0','0','0','0','0','0','Z'
+        static const char *const goodFar[] = {
+            "99991231235959Z", "22000101000000Z", "24000229120000Z"
         };
+        static const char *const badFar[] = {
+            "23000229000000Z", "99991301000000Z", "99990001000000Z", "99991200000000Z",
+            "99991231240000Z", "99991231236000Z", "99991231235960Z", "99991231235959X"
+        };
+        uint8_t der[17];
         uint64_t decoded;
-        cursor.buf = bad; cursor.bufLen = sizeof(bad);
-        SSF_ASSERT(SSFASN1DecGetTime(&cursor, &decoded, &next) == false);
+        uint32_t i;
+
+        der[0] = (uint8_t)SSF_ASN1_TAG_GENERALIZED_TIME;
+        der[1] = 0x0Fu;
+        for (i = 0; i < (uint32_t)(sizeof(goodFar) / sizeof(goodFar[0])); i++)
+        {
+            memcpy(&der[2], goodFar[i], 15u);
+            cursor.buf = der;
+            cursor.bufLen = sizeof(der);
+            decoded = 0u;
+            SSF_ASSERT(SSFASN1DecGetTime(&cursor, &decoded, &next) == true);
+            SSF_ASSERT(decoded == SSF_ASN1_TIME_FAR_FUTURE);
+            SSF_ASSERT((next.buf == &der[sizeof(der)]) && (next.bufLen == 0u));
+        }
+        for (i = 0; i < (uint32_t)(sizeof(badFar) / sizeof(badFar[0])); i++)
+        {
+            memcpy(&der[2], badFar[i], 15u);
+            cursor.buf = der;
+            cursor.bufLen = sizeof(der);
+            SSF_ASSERT(SSFASN1DecGetTime(&cursor, &decoded, &next) == false);
+        }
     }
 
     /* ---- Time range #5: GeneralizedTime 1969 rejected ---- */
@@ -607,9 +1029,7 @@ void SSFASN1UnitTest(void)
         SSF_ASSERT(SSFASN1DecGetTime(&cursor, &decoded, &next) == false);
     }
 
-    /* ---- Time range #6: encode UTCTime for year 2050 must fail (UTCTime ambiguous) ---- */
-    /* Unix 2524608000 = 2050-01-01T00:00:00Z. UTCTime would encode YY=50 which decodes as      */
-    /* 1950 per RFC 5280, silently corrupting the value. Encoder must refuse.                   */
+    /* ---- Time range #6: UTCTime 2050-01-01 (YY=50 would decode as 1950) must fail ---- */
     {
         uint32_t r;
         SSF_ASSERT(SSFASN1EncUTCTime(buf, sizeof(buf), 2524608000ull, &r) == false);
@@ -658,9 +1078,7 @@ void SSFASN1UnitTest(void)
         SSF_ASSERT(r == 0u);
     }
 
-    /* ====================================================================================== */
-    /* Bool-return API conformance tests                                                        */
-    /* ====================================================================================== */
+    /* ==== Bool-return API conformance tests ==== */
 
     /* ---- API #1: measure mode (buf == NULL) returns true and reports required size ---- */
     {
@@ -674,7 +1092,8 @@ void SSFASN1UnitTest(void)
 
         needed = 0xDEADBEEFu;
         SSF_ASSERT(SSFASN1EncIntU64(NULL, 0, 999u, &needed) == true);
-        SSF_ASSERT(needed == 4u); /* tag(1) + len(1) + 02 E7 */
+        /* tag(1) + len(1) + 02 E7 */
+        SSF_ASSERT(needed == 4u);
     }
 
     /* ---- API #2: happy path returns true with bytesWritten == actual encoding length ---- */
@@ -682,12 +1101,12 @@ void SSFASN1UnitTest(void)
         uint32_t written = 0;
         SSF_ASSERT(SSFASN1EncNull(buf, sizeof(buf), &written) == true);
         SSF_ASSERT(written == 2u);
-        SSF_ASSERT(buf[0] == 0x05u && buf[1] == 0x00u);
+        SSF_ASSERT((buf[0] == 0x05u) && (buf[1] == 0x00u));
 
         written = 0;
         SSF_ASSERT(SSFASN1EncBool(buf, sizeof(buf), true, &written) == true);
         SSF_ASSERT(written == 3u);
-        SSF_ASSERT(buf[0] == 0x01u && buf[1] == 0x01u && buf[2] == 0xFFu);
+        SSF_ASSERT((buf[0] == 0x01u) && (buf[1] == 0x01u) && (buf[2] == 0xFFu));
     }
 
     /* ---- API #3: buffer too small returns false and sets bytesWritten = 0 ---- */
@@ -757,9 +1176,7 @@ void SSFASN1UnitTest(void)
         SSF_ASSERT(needed == written);
     }
 
-    /* ====================================================================================== */
-    /* DATE (tag 31) and DATE-TIME (tag 33) multi-byte-tag tests                               */
-    /* ====================================================================================== */
+    /* ==== DATE (tag 31) and DATE-TIME (tag 33) multi-byte-tag tests ==== */
 
     /* ---- DATE #1: round-trip 2024-06-15 (midnight-aligned Unix 1718409600) ---- */
     {
@@ -769,7 +1186,7 @@ void SSFASN1UnitTest(void)
         SSF_ASSERT(SSFASN1EncDate(buf, sizeof(buf), unixSec, &len) == true);
         /* DER: tag 0x1F 0x1F (2), length 0x0A (1), "2024-06-15" (10) = 13 bytes */
         SSF_ASSERT(len == 13u);
-        SSF_ASSERT(buf[0] == 0x1Fu && buf[1] == 0x1Fu);
+        SSF_ASSERT((buf[0] == 0x1Fu) && (buf[1] == 0x1Fu));
         SSF_ASSERT(buf[2] == 0x0Au);
         SSF_ASSERT(memcmp(&buf[3], "2024-06-15", 10) == 0);
 
@@ -787,7 +1204,8 @@ void SSFASN1UnitTest(void)
         SSF_ASSERT(SSFASN1EncDate(buf, sizeof(buf), unixSec, &len) == true);
         cursor.buf = buf; cursor.bufLen = len;
         SSF_ASSERT(SSFASN1DecGetDate(&cursor, &decoded, &next) == true);
-        SSF_ASSERT(decoded == 1718409600ull); /* Midnight of 2024-06-15 */
+        /* Midnight of 2024-06-15 */
+        SSF_ASSERT(decoded == 1718409600ull);
     }
 
     /* ---- DATE #3: leap-year Feb 29 round-trip ---- */
@@ -844,7 +1262,7 @@ void SSFASN1UnitTest(void)
         SSF_ASSERT(SSFASN1EncDateTime(buf, sizeof(buf), unixSec, &len) == true);
         /* DER: tag 0x1F 0x21, length 0x13 (19), then "2024-06-15T12:00:00" */
         SSF_ASSERT(len == 22u);
-        SSF_ASSERT(buf[0] == 0x1Fu && buf[1] == 0x21u);
+        SSF_ASSERT((buf[0] == 0x1Fu) && (buf[1] == 0x21u));
         SSF_ASSERT(buf[2] == 0x13u);
         SSF_ASSERT(memcmp(&buf[3], "2024-06-15T12:00:00", 19) == 0);
 
@@ -913,8 +1331,7 @@ void SSFASN1UnitTest(void)
         SSF_ASSERT(SSFASN1DecOpenConstructed(&cursor, SSF_ASN1_TAG_SEQUENCE, &seqInner,
                    &next) == true);
 
-        /* Walk past the DATE via generic Skip. This proves the TLV parser now handles the    */
-        /* 2-byte high-tag-number form.                                                       */
+        /* Walk past the DATE via generic Skip, proving the TLV parser takes the 2-byte tag */
         SSF_ASSERT(SSFASN1DecSkip(&seqInner, &seqInner) == true);
         SSF_ASSERT(SSFASN1DecGetBool(&seqInner, &bval, &seqInner) == true);
         SSF_ASSERT(bval == true);
@@ -935,10 +1352,7 @@ void SSFASN1UnitTest(void)
         SSF_ASSERT(decoded == 1718409600ull);
     }
 
-    /* ---- Branch sweep: every reject path in the decoder + encoder ------------------------ */
-    /* Each block below targets a specific branch in ssfasn1.c that the existing happy-path     */
-    /* and isolated-edge tests above never reach. The goal is to exercise every public-API      */
-    /* reject path with the minimum input that triggers it; comments name the source line(s).   */
+    /* ---- Branch sweep: each reject path in the decoder + encoder, minimum input each ---- */
     {
         SSFASN1Cursor_t cur;
         uint16_t tag;
@@ -998,7 +1412,7 @@ void SSFASN1UnitTest(void)
 
         /* line 89: long-form length declares more bytes than the buffer holds. */
         {
-            uint8_t der[2] = { 0x30u, 0x82u };  /* claims 2 length bytes, none present */
+            uint8_t der[2] = { 0x30u, 0x82u }; /* claims 2 length bytes, none present */
             cur.buf = der; cur.bufLen = 2u;
             SSF_ASSERT(SSFASN1DecGetTLV(&cur, &tag, &value, &valueLen, &next) == false);
         }
@@ -1015,13 +1429,15 @@ void SSFASN1UnitTest(void)
             uint8_t bad[1] = { 0x30u };
             SSFASN1Cursor_t inner;
             cur.buf = bad; cur.bufLen = 1u;
-            SSF_ASSERT(SSFASN1DecOpenConstructed(&cur, SSF_ASN1_TAG_SEQUENCE, &inner, &next) == false);
+            SSF_ASSERT(SSFASN1DecOpenConstructed(&cur, SSF_ASN1_TAG_SEQUENCE, &inner, &next) ==
+                       false);
         }
         {
             uint8_t intDer[3] = { 0x02u, 0x01u, 0x05u };
             SSFASN1Cursor_t inner;
             cur.buf = intDer; cur.bufLen = 3u;
-            SSF_ASSERT(SSFASN1DecOpenConstructed(&cur, SSF_ASN1_TAG_SEQUENCE, &inner, &next) == false);
+            SSF_ASSERT(SSFASN1DecOpenConstructed(&cur, SSF_ASN1_TAG_SEQUENCE, &inner, &next) ==
+                       false);
         }
 
         /* lines 204/205: DecGetBool TLV failure + tag/length checks. */
@@ -1033,13 +1449,13 @@ void SSFASN1UnitTest(void)
         }
         {
             bool b;
-            uint8_t wrongTag[3] = { 0x02u, 0x01u, 0x01u };  /* INTEGER instead of BOOLEAN */
+            uint8_t wrongTag[3] = { 0x02u, 0x01u, 0x01u }; /* INTEGER instead of BOOLEAN */
             cur.buf = wrongTag; cur.bufLen = 3u;
             SSF_ASSERT(SSFASN1DecGetBool(&cur, &b, &next) == false);
         }
         {
             bool b;
-            uint8_t wrongLen[4] = { 0x01u, 0x02u, 0xFFu, 0x00u };  /* BOOLEAN with len 2 */
+            uint8_t wrongLen[4] = { 0x01u, 0x02u, 0xFFu, 0x00u }; /* BOOLEAN with len 2 */
             cur.buf = wrongLen; cur.bufLen = 4u;
             SSF_ASSERT(SSFASN1DecGetBool(&cur, &b, &next) == false);
         }
@@ -1047,7 +1463,7 @@ void SSFASN1UnitTest(void)
         /* line 244: DecGetIntU64 rejects integers wider than 8 bytes after leading-zero strip. */
         {
             uint8_t big[12] = { 0x02u, 0x0Au, 0x00u, 0x80u, 0x01u, 0x02u, 0x03u, 0x04u,
-                                0x05u, 0x06u, 0x07u, 0x08u };  /* 10 content -> strip 1 -> 9 > 8 */
+                                0x05u, 0x06u, 0x07u, 0x08u }; /* 10 content -> strip 1 -> 9 > 8 */
             cur.buf = big; cur.bufLen = 12u;
             SSF_ASSERT(SSFASN1DecGetIntU64(&cur, &u64, &next) == false);
         }
@@ -1065,7 +1481,7 @@ void SSFASN1UnitTest(void)
             const uint8_t *bits;
             uint32_t bitsLen;
             uint8_t unused;
-            uint8_t wrongTag[3] = { 0x04u, 0x01u, 0x00u };  /* OCTET STRING tag */
+            uint8_t wrongTag[3] = { 0x04u, 0x01u, 0x00u }; /* OCTET STRING tag */
             cur.buf = wrongTag; cur.bufLen = 3u;
             SSF_ASSERT(SSFASN1DecGetBitString(&cur, &bits, &bitsLen, &unused, &next) == false);
         }
@@ -1073,7 +1489,7 @@ void SSFASN1UnitTest(void)
             const uint8_t *bits;
             uint32_t bitsLen;
             uint8_t unused;
-            uint8_t empty[2] = { 0x03u, 0x00u };  /* BIT STRING with valueLen 0 */
+            uint8_t empty[2] = { 0x03u, 0x00u }; /* BIT STRING with valueLen 0 */
             cur.buf = empty; cur.bufLen = 2u;
             SSF_ASSERT(SSFASN1DecGetBitString(&cur, &bits, &bitsLen, &unused, &next) == false);
         }
@@ -1146,7 +1562,7 @@ void SSFASN1UnitTest(void)
             }
             /* line 353: first sub-id continuation runs past raw end. */
             {
-                uint8_t truncFirst[3] = { 0x06u, 0x01u, 0x81u };  /* high bit set, no follow */
+                uint8_t truncFirst[3] = { 0x06u, 0x01u, 0x81u }; /* high bit set, no follow */
                 cur.buf = truncFirst; cur.bufLen = 3u;
                 SSF_ASSERT(SSFASN1DecGetOID(&cur, arcs, 16u, &arcsLen, &next) == false);
             }
@@ -1164,7 +1580,7 @@ void SSFASN1UnitTest(void)
             }
             /* line 378: non-canonical leading 0x80 on a subsequent arc. */
             {
-                uint8_t nonCanon2[4] = { 0x06u, 0x02u, 0x2Au, 0x80u };  /* OK first, then 0x80 */
+                uint8_t nonCanon2[4] = { 0x06u, 0x02u, 0x2Au, 0x80u }; /* OK first, then 0x80 */
                 cur.buf = nonCanon2; cur.bufLen = 4u;
                 SSF_ASSERT(SSFASN1DecGetOID(&cur, arcs, 16u, &arcsLen, &next) == false);
             }
@@ -1189,7 +1605,7 @@ void SSFASN1UnitTest(void)
             }
             /* line 389: OID has more arcs than oidArcsSize. Limit caller buffer to 2. */
             {
-                uint8_t threeArc[5] = { 0x06u, 0x03u, 0x2Au, 0x03u, 0x04u };  /* 1.2.3.4 */
+                uint8_t threeArc[5] = { 0x06u, 0x03u, 0x2Au, 0x03u, 0x04u }; /* 1.2.3.4 */
                 uint32_t smallBuf[2];
                 cur.buf = threeArc; cur.bufLen = 5u;
                 SSF_ASSERT(SSFASN1DecGetOID(&cur, smallBuf, 2u, &arcsLen, &next) == false);
@@ -1209,7 +1625,7 @@ void SSFASN1UnitTest(void)
             const uint8_t *str;
             uint32_t strLen;
             uint16_t strTag;
-            uint8_t notString[3] = { 0x02u, 0x01u, 0x01u };  /* INTEGER -> not in string set */
+            uint8_t notString[3] = { 0x02u, 0x01u, 0x01u }; /* INTEGER -> not in string set */
             cur.buf = notString; cur.bufLen = 3u;
             SSF_ASSERT(SSFASN1DecGetString(&cur, &str, &strLen, &strTag, &next) == false);
         }
@@ -1291,7 +1707,7 @@ void SSFASN1UnitTest(void)
             cur.buf = badSec; cur.bufLen = 17u;
             SSF_ASSERT(SSFASN1DecGetTime(&cur, &u64, &next) == false);
         }
-        /* line 501: year out of range (e.g. 1969 — below SSFDTIME_EPOCH_YEAR_MIN). */
+        /* line 501: year out of range (e.g. 1969 -- below SSFDTIME_EPOCH_YEAR_MIN). */
         {
             uint8_t oldYear[17] = {
                 0x18u, 0x0Fu, '1','9','6','9','0','1','0','1','0','0','0','0','0','0','Z'
@@ -1308,8 +1724,7 @@ void SSFASN1UnitTest(void)
             SSF_ASSERT(SSFASN1DecGetTime(&cur, &u64, &next) == false);
         }
 
-        /* lines 532/533/535/536/537: _SSFASN1ParseYMD branches via DecGetDate. Tag is 0x1F1F  */
-        /* (multi-byte). Encode TL via the encoder so the tag-length serialization is correct. */
+        /* _SSFASN1ParseYMD branches via DecGetDate, the 0x1F1F TL written by the encoder */
         {
             uint8_t der[64];
             uint32_t hdrLen;
@@ -1395,7 +1810,7 @@ void SSFASN1UnitTest(void)
         /* line 584: DecGetDate TLV fail. */
         {
             uint64_t decoded;
-            uint8_t bad[1] = { 0x1Fu };  /* multi-byte tag start, no follow-up */
+            uint8_t bad[1] = { 0x1Fu }; /* multi-byte tag start, no follow-up */
             cur.buf = bad; cur.bufLen = 1u;
             SSF_ASSERT(SSFASN1DecGetDate(&cur, &decoded, &next) == false);
         }
@@ -1439,7 +1854,8 @@ void SSFASN1UnitTest(void)
             uint32_t written;
             SSF_ASSERT(SSFASN1EncTagLen(der, sizeof(der), SSF_ASN1_TAG_OCTET_STRING, 300u,
                                         &written) == true);
-            SSF_ASSERT(written == 4u);   /* 1 tag + 1 lead (0x82) + 2 length bytes */
+            /* 1 tag + 1 lead (0x82) + 2 length bytes */
+            SSF_ASSERT(written == 4u);
             SSF_ASSERT(der[1] == 0x82u);
         }
 
@@ -1484,7 +1900,7 @@ void SSFASN1UnitTest(void)
         {
             uint8_t der[32];
             uint32_t written;
-            uint64_t huge = 0xFFFFFFFFFFFFFFFFull;  /* > SSFDTIME_UNIX_EPOCH_SEC_MAX */
+            uint64_t huge = 0xFFFFFFFFFFFFFFFFull; /* > SSFDTIME_UNIX_EPOCH_SEC_MAX */
             SSF_ASSERT(SSFASN1EncUTCTime(der, sizeof(der), huge, &written) == false);
             SSF_ASSERT(SSFASN1EncDate(der, sizeof(der), huge, &written) == false);
             SSF_ASSERT(SSFASN1EncDateTime(der, sizeof(der), huge, &written) == false);
@@ -1504,7 +1920,8 @@ void SSFASN1UnitTest(void)
             uint32_t written;
             SSF_ASSERT(SSFASN1EncWrap(der, sizeof(der), SSF_ASN1_TAG_NULL, NULL, 0u, &written)
                        == true);
-            SSF_ASSERT(written == 2u);  /* tag + 0-length */
+            /* tag + 0-length */
+            SSF_ASSERT(written == 2u);
         }
     }
 }

@@ -340,7 +340,7 @@ bool SSFISO8601ISOToUnix(SSFCStrIn_t inStr, SSFPortTick_t *unixSys, int16_t *zon
             index += 2;
         }
 
-        (*zoneOffsetMin) = (hour * SSFDTIME_MIN_IN_HOUR) + min;
+        (*zoneOffsetMin) = (int16_t)((hour * SSFDTIME_MIN_IN_HOUR) + min);
         if (isSigned) { (*zoneOffsetMin) = -(*zoneOffsetMin); }
     }
     /* ISO string in in local time, not possible to compute unixSys time */

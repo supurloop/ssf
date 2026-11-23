@@ -69,16 +69,21 @@ comparable security.
 - **Key generation is slow — orders of magnitude slower than any other SSF crypto
   operation.** Seconds on a desktop CPU, several minutes on an embedded microcontroller
   (Cortex-M4 / -M7 class). The runtime is dominated by probabilistic prime generation:
-  each candidate `p` / `q` draws fresh entropy, runs several Miller-Rabin rounds
+  each candidate `p` / `q` comes from a PRNG seeded with fresh platform entropy for that prime
+  pair, runs several Miller-Rabin rounds
   (`SSF_RSA_CONFIG_MILLER_RABIN_ROUNDS`, default 5), and may fail and retry. Do not
   generate keys inside a real-time loop or during startup on a device with a watchdog.
 - **Key-generation entropy is platform-dependent.** Keygen and PSS signing both pull
-  initial entropy from `/dev/urandom` on POSIX via the internal `_SSFRSAGetEntropy()`
-  helper; on Windows this currently `SSF_ASSERT(false)`s and returns `false`. On a
-  bare-metal target without `/dev/urandom`, patch the helper to read from a hardware TRNG
-  or provision keys off-device at manufacture and only ever use sign / verify at
-  runtime. **Never** ship `SSFRSAKeyGen` on a target without a genuine entropy source —
+  entropy from `SSFPortGetEntropy()` in [`ssfport.c`](../ssfport.c), which reads
+  `/dev/urandom` on POSIX hosts and calls `BCryptGenRandom` on Windows, and returns `false`
+  (failing keygen / signing) when no source is available. On a bare-metal target, implement
+  `SSFPortGetEntropy()` with a hardware TRNG, or provision keys off-device at manufacture and
+  only ever use sign / verify at runtime. **Never** ship `SSFRSAKeyGen` on a target without a genuine entropy source —
   predictable primes are catastrophic.
+- **Key-generation seed size.** Each prime search seeds an [`ssfprng`](ssfprng.md) context with
+  `SSF_PRNG_ENTROPY_SIZE` bytes of platform entropy. With `SSF_RSA_CONFIG_ENABLE_4096` set that
+  is 32 bytes (AES-256), so RSA-4096 keys are not capped at 128-bit seed entropy; builds limited
+  to RSA-2048 / 3072 may use 16 bytes, which matches their 112 / 128-bit strength.
 - **PKCS#1 v1.5 signatures are deterministic in value, but signing now requires entropy.**
   `SSFRSASignPKCS1` still yields the same signature for the same `(key, hash)` — the value
   is deterministic and interoperable. However, every private-key operation now draws
@@ -90,9 +95,12 @@ comparable security.
   that all verify. Both schemes therefore require entropy availability at sign time as well
   as at key-gen time — on targets where runtime entropy is scarce, prefer Ed25519 /
   deterministic-ECDSA.
-- **PSS salt length is fixed at the hash output length.** RFC 8017 §9.1.1 and TLS 1.3
-  both use this convention; interop with verifiers that expect a different salt length
-  (e.g., `sLen = 0` for some "fully-deterministic PSS" profiles) is not supported.
+- **PSS signing uses a salt as long as the hash; verification accepts `0..hashLen`.**
+  [`SSFRSASignPSS()`](#ssfrsasignpss) always emits `sLen = hashLen` (the RFC 8017 §9.1.1 and
+  TLS 1.3 convention). [`SSFRSAVerifyPSS()`](#ssfrsaverifypss) takes the signer's `saltLen`
+  and accepts any `0 <= saltLen <= hashLen`, so it interoperates with signers using shorter
+  salts (e.g. `sLen = 0` or the RFC 4055 default of 20). Signing with any other salt length
+  is not supported.
 - **Private-key operations run via CRT, constant-time and blinded.** Signing performs
   `m^d mod n` by decomposing into `m^dp mod p` and `m^dq mod q` then recombining with the
   precomputed inverse `qInv = q⁻¹ mod p`. This is ~4× faster than direct exponentiation and
@@ -108,17 +116,46 @@ comparable security.
   single faulty signature if an attacker can glitch one of the two `modexp` branches during
   sign; this is defended by the built-in verify-after-sign check (see below). The blinding
   and the fresh `r` are the reason signing now requires platform entropy on every call.
+- **One step of the private-key operation is variable-time, by design.** `r⁻¹ mod n` is
+  computed with [`SSFBNModInvExt()`](ssfbn.md#modinv) (the binary extended GCD for odd `n`),
+  whose run time depends on `r`. It does not expose the message or the CRT exponents: `r` is
+  fresh random on every call and never reused, and the exponentiations that use `dp` / `dq`
+  are constant-time and exponent-blinded. What a precise timing observer could learn is
+  information about a single call's blinding factor, which weakens base blinding for that
+  call only. This was reviewed and accepted (AUDIT2 RSA-9). The reduction of the blinded
+  input by the secret primes (`cB mod p`, `cB mod q`) was the second such step; since
+  OPTIMIZE BN-O7 [`SSFBNMod()`](ssfbn.md#ssfbnmod) reduces an odd modulus by constant-time
+  Montgomery reduction. Deployments where an attacker can take very fine-grained timing or
+  power measurements of individual signatures should treat RSA signing here as blinded but
+  not fully constant-time.
 - **Key storage format is PKCS#1 DER.** `RSAPublicKey` = `SEQUENCE { INTEGER n, INTEGER
-  e }`; `RSAPrivateKey` = `SEQUENCE { version, n, e, d, p, q, dp, dq, qInv, ... }`, all
-  unsigned big-endian. **This is not PKCS#8** (no `AlgorithmIdentifier` wrapper) and not
+  e }`; `RSAPrivateKey` = `SEQUENCE { version, n, e, d, p, q, dp, dq, qInv }` (version 0,
+  two-prime; `otherPrimeInfos` is not supported), all unsigned big-endian. Decoding is
+  strict: nothing may follow the last INTEGER inside the `SEQUENCE` or follow the `SEQUENCE`
+  itself, so pass the exact encoded length (`*pubKeyDerLen` / `*privKeyDerLen` from
+  `SSFRSAKeyGen`), not the size of a larger or zero-padded buffer. **This is not PKCS#8** (no `AlgorithmIdentifier` wrapper) and not
   PEM (no Base64, no `-----BEGIN-----` header). If your storage format is PKCS#8 or PEM,
   strip those layers at the call site before handing the bytes in.
 - **Malformed DER is rejected gracefully — untrusted input cannot abort the process.** The
-  DER key decoders bound-check the modulus / limb count and reject (return `false`) an empty
-  or oversized magnitude rather than passing it down into the big-number layer, where an
-  out-of-range width would trip a halting `SSF_REQUIRE`. As a result `SSFRSAPubKeyIsValid`,
+  DER key decoders bound every integer before it reaches the big-number layer or any
+  fixed-size buffer: a modulus that is empty, even, or wider than `SSF_RSA_MAX_KEY_BYTES`
+  (the largest build-enabled key) is rejected, and in `RSAPrivateKey` the CRT fields
+  `p / q / dp / dq / qInv` must fit half the modulus width, and `p` must be exactly half
+  the modulus width in limbs (as every generated key is). Every key INTEGER must
+  be a minimal, non-negative DER INTEGER
+  ([`SSFASN1DecGetUInt`](../_codec/ssfasn1.md#ssfasn1decgetuint)), so a negative or
+  zero-padded modulus is rejected rather than read as a magnitude. An out-of-range width
+  would otherwise overflow the `SSF_RSA_MAX_KEY_BYTES` encoded-message buffers in the verify
+  and sign paths or trip a halting `SSF_REQUIRE` in `ssfbn`. As a result `SSFRSAPubKeyIsValid`,
   `SSFRSAPrivKeyIsValid`, and the verify entry points return `false` on malformed or
   hostile key / DER input instead of aborting — safe to call on attacker-controlled bytes.
+  Note that the decoders enforce only these structural bounds; the exact-size and exponent
+  policy (bit length in the enabled set, `e >= 65537`) is applied by `SSFRSAPubKeyIsValid()`
+  and `SSFRSAPrivKeyIsValid()`, not by the verify entry points. Certificate and CMS
+  verification apply their own key-strength rule before calling them (modulus at least
+  `SSF_X509_CONFIG_RSA_MIN_BITS`, default 2048, and an odd `e >= 3`; see
+  [`ssfx509`](../_codec/ssfx509.md#ssfx509verifysignature)); direct callers of the verify
+  functions should check the key themselves.
 - **PSS verify is constant-time end-to-end.** The trailer byte, top-bit mask, MGF1 unmask,
   PS-zero scan, salt separator, and final `H == H'` comparison are all folded into a
   single-byte XOR/OR accumulator (`diff`) so the wall-clock time to reach the final
@@ -158,7 +195,7 @@ need — each compiles its entry points out of the build, reclaiming flash.
 | `SSF_RSA_CONFIG_ENABLE_KEYGEN` | `1` | Enable `SSFRSAKeyGen`. Disabling removes ~3 KB of code (Miller-Rabin, prime generation, CRT parameter setup) and drops peak stack significantly — sign/verify are much lighter than keygen. |
 | `SSF_RSA_CONFIG_ENABLE_PKCS1_V15` | `1` | Enable `SSFRSASignPKCS1` / `SSFRSAVerifyPKCS1`. |
 | `SSF_RSA_CONFIG_ENABLE_PSS` | `1` | Enable `SSFRSASignPSS` / `SSFRSAVerifyPSS`. |
-| `SSF_RSA_CONFIG_MILLER_RABIN_ROUNDS` | `5` | Number of Miller-Rabin witnesses per prime candidate in keygen. Five rounds gives a false-positive probability ≤ 2⁻¹⁰⁰ for random inputs (FIPS 186-4 §C.3 minimum is 4 for RSA-2048, 5 for RSA-3072/4096). Higher values slow keygen proportionally with marginal security gain. |
+| `SSF_RSA_CONFIG_MILLER_RABIN_ROUNDS` | `5` | Number of Miller-Rabin witnesses per prime candidate in keygen. Five rounds gives a false-positive probability ≤ 2⁻¹⁰⁰ for random inputs and meets the FIPS 186-4 Table C.3 minimum for every supported size (the required count falls as the primes grow, so RSA-2048's 1024-bit primes are the most demanding). Higher values slow keygen proportionally with marginal security gain. |
 
 Disabling unused sizes shrinks the public-key validator's accept set and lets the test
 harness drop unused size-specific test blocks. The header validates that the BN cap
@@ -169,6 +206,9 @@ Setting **all three** size flags to `0` is allowed: the entire RSA module compil
 nothing (ssfrsa.c body is gated on the derived `SSF_RSA_ANY_ENABLED` macro), the public
 API headers expose no declarations, and `SSFRSAUnitTest` becomes a one-line "skipped"
 stub so a pure-ECC build can keep `ssfrsa.c` in the project without dragging RSA in.
+Two declarations stay visible in that build: the `SSFRSAHash_t` enum (ssfx509 uses it to name
+the hash of every signature scheme) and `SSFRSAUnitTest` (main.c references it under
+`SSF_CONFIG_RSA_UNIT_TEST`).
 
 <a id="api-summary"></a>
 
@@ -217,7 +257,7 @@ stub so a pure-ECC build can keep `ssfrsa.c` in the project without dragging RSA
 | | Function | Description |
 |---|----------|-------------|
 | [e.g.](#ex-pss) | [`bool SSFRSASignPSS(privKeyDer, ..., hash, hashVal, hashLen, sig, sigSize, sigLen)`](#ssfrsasignpss) | Sign a hash with RSA-PSS (random salt, hash-length) |
-| [e.g.](#ex-pss) | [`bool SSFRSAVerifyPSS(pubKeyDer, ..., hash, hashVal, hashLen, sig, sigLen)`](#ssfrsaverifypss) | Verify an RSA-PSS signature |
+| [e.g.](#ex-pss) | [`bool SSFRSAVerifyPSS(pubKeyDer, ..., hash, hashVal, hashLen, saltLen, sig, sigLen)`](#ssfrsaverifypss) | Verify an RSA-PSS signature with the signer's salt length |
 
 <a id="function-reference"></a>
 
@@ -237,7 +277,7 @@ Gated on `SSF_RSA_CONFIG_ENABLE_KEYGEN`. Generate a fresh RSA key pair.
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
-| `bits` | in | `uint16_t` | Key size. Must be `2048`, `3072`, or `4096`. |
+| `bits` | in | `uint16_t` | Key size. Must be `2048`, `3072`, or `4096`, and that size must be enabled by its `SSF_RSA_CONFIG_ENABLE_*` flag. |
 | `privKeyDer` | out | `uint8_t *` | Buffer for PKCS#1 `RSAPrivateKey` DER. |
 | `privKeyDerSize` | in | `size_t` | Must be ≥ [`SSF_RSA_MAX_PRIV_KEY_DER_SIZE`](#ssf-rsa-max-priv-key-der-size). |
 | `privKeyDerLen` | out | `size_t *` | Bytes actually written to `privKeyDer`. |
@@ -245,9 +285,34 @@ Gated on `SSF_RSA_CONFIG_ENABLE_KEYGEN`. Generate a fresh RSA key pair.
 | `pubKeyDerSize` | in | `size_t` | Must be ≥ [`SSF_RSA_MAX_PUB_KEY_DER_SIZE`](#ssf-rsa-max-pub-key-der-size). |
 | `pubKeyDerLen` | out | `size_t *` | Bytes actually written to `pubKeyDer`. |
 
-**Returns:** `true` on success; `false` if entropy is unavailable, if `bits` is not one of
-the supported sizes, or if the caller's DER buffers are undersized. **Runtime is
-seconds-to-minutes** — see [Notes](#notes).
+**Returns:** `true` on success; `false` if entropy is unavailable or if no acceptable key pair
+is found within the bounded search (prime generation exhausts its candidate budget, or every
+one of a fixed number of prime pairs fails the FIPS 186-4 post-checks). With a working entropy
+source the latter is vanishingly rare. **Runtime is seconds-to-minutes** — see [Notes](#notes).
+
+**Preconditions (trap via `SSF_REQUIRE`, never return `false`):** all pointers non-`NULL`;
+`bits` one of the build-enabled sizes; `privKeyDerSize >= SSF_RSA_MAX_PRIV_KEY_DER_SIZE` and
+`pubKeyDerSize >= SSF_RSA_MAX_PUB_KEY_DER_SIZE`. The buffer minimums are the build-wide maxima
+(sized for the largest enabled key), **not** the size of the key being generated: in a build
+with RSA-4096 enabled, a buffer sized for a 2048-bit key traps even when `bits == 2048`.
+If `bits` comes from outside the firmware (a provisioning command, a stored configuration
+field, a certificate being renewed), validate it before calling, e.g.:
+
+```c
+static bool AppRSAKeyGenBitsOK(uint16_t bits)
+{
+#if SSF_RSA_CONFIG_ENABLE_2048 == 1
+    if (bits == 2048u) return true;
+#endif
+#if SSF_RSA_CONFIG_ENABLE_3072 == 1
+    if (bits == 3072u) return true;
+#endif
+#if SSF_RSA_CONFIG_ENABLE_4096 == 1
+    if (bits == 4096u) return true;
+#endif
+    return false;
+}
+```
 
 <a id="ex-keygen"></a>
 
@@ -262,7 +327,7 @@ if (!SSFRSAKeyGen(2048,
                   priv, sizeof(priv), &privLen,
                   pub,  sizeof(pub),  &pubLen))
 {
-    /* Entropy unavailable, or bits unsupported. */
+    /* Entropy unavailable, or the bounded key search failed. */
 }
 /* priv[0..privLen-1] is the PKCS#1 RSAPrivateKey DER;
    pub[0..pubLen-1] is the PKCS#1 RSAPublicKey DER.
@@ -284,10 +349,20 @@ return `true` here. Use this to reject mis-encoded or size-wrong keys at ingesti
 bool SSFRSAPrivKeyIsValid(const uint8_t *privKeyDer, size_t privKeyDerLen);
 ```
 Parse the DER blob and return whether it is a well-formed PKCS#1 `RSAPrivateKey` (version
-0, all eight integers `n / e / d / p / q / dp / dq / qInv` present, `n = p · q`, `e · d ≡ 1
-(mod λ(n))`, `qInv = q⁻¹ mod p`, modulus in the supported size range). Counterpart of
+0, all eight integers `n / e / d / p / q / dp / dq / qInv` present, `n = p · q`,
+`dp = d mod (p − 1)` and `dq = d mod (q − 1)`, `e · dp ≡ 1 (mod p − 1)` and
+`e · dq ≡ 1 (mod q − 1)` (together equivalent to `e · d ≡ 1 (mod λ(n))`), `qInv = q⁻¹ mod p`,
+modulus in the supported size range). Counterpart of
 [`SSFRSAPubKeyIsValid()`](#ssfrsapubkeyisvalid) for the private blob. Use this to reject
 malformed key material at ingestion time before passing it to the sign entry points.
+
+Every decoded private field and intermediate is zeroized before the function returns, on
+both the accept and the reject paths. The consistency checks are **variable-time** (they
+reduce by the even `p − 1` and `q − 1`, where `SSFBNMod` / `SSFBNModMul` run shift-and-subtract,
+whose run time depends on the key values): call it once when a key
+is loaded or imported, not in a loop whose timing an attacker can observe. Before 2026-11-19
+only `dp = d mod (p − 1)` and `dq = d mod (q − 1)` were checked, so a key with consistent but
+wrong `d`, `dp`, `dq` was accepted (signing it then failed verify-after-sign).
 
 ---
 
@@ -404,12 +479,16 @@ Non-deterministic: repeat calls produce different signatures that all verify.
 <a id="ssfrsaverifypss"></a>
 ```c
 bool SSFRSAVerifyPSS(const uint8_t *pubKeyDer, size_t pubKeyDerLen,
-                     SSFRSAHash_t hash, const uint8_t *hashVal, size_t hashLen,
+                     SSFRSAHash_t hash, const uint8_t *hashVal, size_t hashLen, size_t saltLen,
                      const uint8_t *sig, size_t sigLen);
 ```
 Verify an RSA-PSS signature. Performs `sig^e mod n`, recovers `EM`, extracts `H` and
-`salt`, recomputes `H'`, and compares. `H == H'` is constant-time; the intermediate
-padding-pattern check is currently variable-time (see [Notes](#notes)).
+`salt`, recomputes `H'`, and compares. `saltLen` is the salt length the signer used; RFC 8017 recommends the hash length,
+which is what [`SSFRSASignPSS()`](#ssfrsasignpss) emits and what X.509 certificates default to when
+their PSS parameters carry no `saltLength` (RFC 4055 declares DEFAULT 20). The verifier accepts
+`0 <= saltLen <= hashLen` and asserts on a larger value, since a salt longer than the hash has no
+security benefit and is not issued by any mainstream signer. The whole check, including the
+padding pattern and `H == H'`, is constant-time (see [Notes](#notes)).
 
 <a id="ex-pss"></a>
 
@@ -435,7 +514,7 @@ if (!SSFRSASignPSS(privDer, privLen,
 /* Verify. Same signature data will fail if any of the key / hash / message
    bytes differ between signer and verifier. */
 if (!SSFRSAVerifyPSS(pubDer, pubLen,
-                     SSF_RSA_HASH_SHA256, hash, sizeof(hash),
+                     SSF_RSA_HASH_SHA256, hash, sizeof(hash), sizeof(hash),
                      sig, sigLen))
 {
     /* Reject. */

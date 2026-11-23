@@ -40,17 +40,21 @@
 #include "ssfusexport.h"
 
 /* --------------------------------------------------------------------------------------------- */
-/* Streams the Poly1305 AEAD construction `auth || pad16 || ct || pad16 || le64(authLen) ||      */
-/* le64(ctLen)` directly into an incremental Poly1305 context -- no intermediate buffer.         */
-/* Peak stack for this function is ~sizeof(SSFPoly1305Context_t) + ~32 B of locals, independent  */
-/* of authLen and ctLen.                                                                          */
+/* Streams auth || pad16 || ct || pad16 || le64(authLen) || le64(ctLen) into Poly1305.           */
 /* --------------------------------------------------------------------------------------------- */
-static void _SSFCCPComputeTag(const uint8_t *auth, size_t authLen, const uint8_t *ct, size_t ctLen,
-                              const uint8_t *otk, uint8_t *tag, size_t tagSize)
+static void _SSFChaCha20Poly1305ComputeTag(const uint8_t *auth, size_t authLen, const uint8_t *ct,
+                                           size_t ctLen, const uint8_t *otk, uint8_t *tag,
+                                           size_t tagSize)
 {
     static const uint8_t pad16[15] = { 0 };
     SSFPoly1305Context_t ctx = {0};
     uint8_t lengths[16];
+
+    SSF_REQUIRE((auth != NULL) || (authLen == 0u));
+    SSF_REQUIRE((ct != NULL) || (ctLen == 0u));
+    SSF_REQUIRE(otk != NULL);
+    SSF_REQUIRE(tag != NULL);
+    SSF_REQUIRE(tagSize >= SSF_POLY1305_TAG_SIZE);
 
     SSFPoly1305Begin(&ctx, otk, SSF_POLY1305_KEY_SIZE);
 
@@ -88,7 +92,7 @@ void SSFChaCha20Poly1305Encrypt(const uint8_t *pt, size_t ptLen, const uint8_t *
     SSF_REQUIRE(ivLen == SSF_CCP_NONCE_SIZE);
     SSF_REQUIRE(tagSize >= SSF_CCP_TAG_SIZE);
     SSF_REQUIRE(ptLen <= ctSize);
-    SSF_REQUIRE(ptLen < (512u * 1024u * 1024u));
+    SSF_REQUIRE(ptLen < ((uint32_t)512u * 1024u * 1024u));
     SSF_REQUIRE((auth != NULL) || (authLen == 0u));
 
     /* Generate Poly1305 one-time key using counter=0 */
@@ -104,7 +108,7 @@ void SSFChaCha20Poly1305Encrypt(const uint8_t *pt, size_t ptLen, const uint8_t *
     }
 
     /* Compute Poly1305 tag over auth || pad || ct || pad || lengths */
-    _SSFCCPComputeTag(auth, authLen, ct, ptLen, otk, tag, SSF_CCP_TAG_SIZE);
+    _SSFChaCha20Poly1305ComputeTag(auth, authLen, ct, ptLen, otk, tag, SSF_CCP_TAG_SIZE);
 
     /* Zeroize one-time key */
     SSFCryptSecureZero(otk, sizeof(otk));
@@ -129,7 +133,7 @@ bool SSFChaCha20Poly1305Decrypt(const uint8_t *ct, size_t ctLen, const uint8_t *
     SSF_REQUIRE(ivLen == SSF_CCP_NONCE_SIZE);
     SSF_REQUIRE(tagLen == SSF_CCP_TAG_SIZE);
     SSF_REQUIRE(ctLen <= ptSize);
-    SSF_REQUIRE(ctLen < (512u * 1024u * 1024u));
+    SSF_REQUIRE(ctLen < ((uint32_t)512u * 1024u * 1024u));
     SSF_REQUIRE((auth != NULL) || (authLen == 0u));
 
     /* Generate Poly1305 one-time key using counter=0 */
@@ -137,7 +141,7 @@ bool SSFChaCha20Poly1305Decrypt(const uint8_t *ct, size_t ctLen, const uint8_t *
     SSFChaCha20Encrypt(zeros, sizeof(zeros), key, keyLen, iv, ivLen, 0, otk, sizeof(otk));
 
     /* Compute expected tag BEFORE decrypting */
-    _SSFCCPComputeTag(auth, authLen, ct, ctLen, otk, computedTag, sizeof(computedTag));
+    _SSFChaCha20Poly1305ComputeTag(auth, authLen, ct, ctLen, otk, computedTag, sizeof(computedTag));
 
     /* Zeroize one-time key */
     SSFCryptSecureZero(otk, sizeof(otk));
@@ -145,9 +149,7 @@ bool SSFChaCha20Poly1305Decrypt(const uint8_t *ct, size_t ctLen, const uint8_t *
     /* Verify tag in constant time to avoid leaking the position of the first differing byte. */
     if (SSFCryptCTMemEq(computedTag, tag, SSF_CCP_TAG_SIZE) == false)
     {
-        /* Scrub computedTag before stack reuse: on the failure path it holds the correct */
-        /* expected tag for (key, AAD, ct), the value an attacker submitting forged tags  */
-        /* is trying to recover.                                                          */
+        /* Scrub computedTag: on failure it holds the correct tag a forger wants to recover. */
         SSFCryptSecureZero(computedTag, sizeof(computedTag));
         return false;
     }
@@ -160,9 +162,7 @@ bool SSFChaCha20Poly1305Decrypt(const uint8_t *ct, size_t ctLen, const uint8_t *
         SSFChaCha20Encrypt(ct, ctLen, key, keyLen, iv, ivLen, 1, pt, ptSize);
     }
 
-    /* Scrub computedTag for symmetry with the failure path. On success it equals the     */
-    /* caller's supplied tag (already public), but consistent scrubbing is cheaper than   */
-    /* path-dependent reasoning.                                                          */
+    /* Scrub computedTag for symmetry with the failure path. */
     SSFCryptSecureZero(computedTag, sizeof(computedTag));
     return true;
 }

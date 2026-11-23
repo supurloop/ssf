@@ -41,6 +41,15 @@ compiler when the target buffer is never read again.
   contexts, and any other sensitive buffer that is about to leave scope. The implementation
   writes through a `volatile` pointer so the compiler cannot eliminate the clear via
   dead-store elimination, even when the buffer is never read again before going out of scope.
+- `SSFCryptSecureZero()` clears byte by byte up to the first `uintptr_t`-aligned address, then
+  one aligned `volatile uintptr_t` store per word, then the remaining tail bytes. Word stores
+  are never misaligned, so the function is safe on strict-alignment targets, and any `p` and
+  `n` are accepted. Compared with a byte loop it is several times faster on large buffers,
+  which matters because the hash, AEAD and stream-cipher modules call it per block to wipe
+  their working state (SHA message schedules, ChaCha20 working state, GHASH temporaries).
+  The word store writes through a different type than the caller's buffer; with `volatile`
+  the compiler must emit it, but a port that wants strictly portable C may replace the body
+  with its platform's `explicit_bzero` / `memset_s`.
 - These primitives are used internally wherever the framework compares a computed tag or
   signature against a caller-supplied expected value (the AEAD decryption paths in
   [`ssfaesgcm`](ssfaesgcm.md), `ssfaesccm`, and `ssfchacha20poly1305`; the signature
@@ -161,7 +170,8 @@ bool emptyEq = SSFCryptCTMemEq(expected, supplied, 0u);   /* true */
 void SSFCryptSecureZero(void *p, size_t n);
 ```
 
-Securely writes `n` zero bytes at `p`. Uses a `volatile` pointer write so the compiler cannot
+Securely writes `n` zero bytes at `p` (byte stores to a word boundary, aligned word stores,
+then tail bytes; see [Notes](#notes)). Uses `volatile` pointer writes so the compiler cannot
 eliminate the clear via dead-store elimination, even when the buffer is never read again
 before going out of scope. Use this for clearing secret keying material, intermediate
 scalars, hash contexts, and any other sensitive buffer that is about to leave scope.

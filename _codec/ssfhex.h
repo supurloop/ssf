@@ -51,8 +51,8 @@ typedef enum
     SSF_HEX_CASE_MAX,
 } SSFHexCase_t;
 
-#define SSFIsHex(h) (((h) >= 'a' && (h) <= 'f') || ((h) >= 'A' && (h) <= 'F') || \
-                     ((h) >= '0' && (h) <= '9'))
+#define SSFIsHex(h) ((((h) >= 'a') && ((h) <= 'f')) || (((h) >= 'A') && ((h) <= 'F')) || \
+                     (((h) >= '0') && ((h) <= '9')))
 
 /* --------------------------------------------------------------------------------------------- */
 /* External Interface                                                                            */
@@ -60,10 +60,10 @@ typedef enum
 bool SSFHexBinToByte(uint8_t in, char *out, size_t outSize, SSFHexCase_t hcase);
 bool SSFHexByteToBin(const char *hex, uint8_t *out);
 
-bool SSFHexBytesToBin(SSFCStrIn_t in, size_t inLenLim, uint8_t *out, size_t outSize, size_t *outLen,
-                      bool rev);
-bool SSFHexBinToBytes(const uint8_t *in, size_t inLen, SSFCStrOut_t out, size_t outSize,
-                      size_t *outLen, bool rev, SSFHexCase_t hcase);
+bool SSFHexBytesToBin(SSFCStrIn_t inStr, size_t inLenLim, uint8_t *out, size_t outSize,
+                      size_t *outLen, bool rev);
+bool SSFHexBinToBytes(const uint8_t *in, size_t inLen, SSFCStrOut_t outStr, size_t outSize,
+                      size_t *outLenOpt, bool rev, SSFHexCase_t hcase);
 
 /* --------------------------------------------------------------------------------------------- */
 /* Unit test                                                                                     */

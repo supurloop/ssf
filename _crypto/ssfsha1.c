@@ -34,9 +34,20 @@
 #include "ssfcrypt.h"
 #include "ssfusexport.h"
 
+#if SSF_CONFIG_SHA1_UNIT_TEST == 1
+/* Test-only hook fired after each secret local is wiped; NULL in production. */
+void (*_SSFSHA1ScrubTestHook)(const void *buf, size_t len) = NULL;
+#define _SSF_SHA1_SCRUB_HOOK(b) \
+    do { if (_SSFSHA1ScrubTestHook != NULL) _SSFSHA1ScrubTestHook((b), sizeof(b)); } while (0)
+#else
+#define _SSF_SHA1_SCRUB_HOOK(b) do { } while (0)
+#endif /* SSF_CONFIG_SHA1_UNIT_TEST */
+
 /* --------------------------------------------------------------------------------------------- */
 /* SHA-1 constants (RFC 3174 section 5)                                                          */
 /* --------------------------------------------------------------------------------------------- */
+#define SSF_SHA1_CONTEXT_MAGIC (0x5A1C0160ul) /* set by Begin, cleared by End's wipe */
+#define SSF_SHA1_MAX_BYTES ((((uint64_t)1u) << 61) - 1u) /* FIPS 180-4: < 2^64 bits */
 #define SSF_SHA1_K0 (0x5A827999ul)
 #define SSF_SHA1_K1 (0x6ED9EBA1ul)
 #define SSF_SHA1_K2 (0x8F1BBCDCul)
@@ -120,6 +131,8 @@ static void _SSFSHA1ProcessBlock(SSFSHA1Context_t *ctx, const uint8_t block[SSF_
     ctx->state[2] += c;
     ctx->state[3] += d;
     ctx->state[4] += e;
+    SSFCryptSecureZero(w, sizeof(w));
+    _SSF_SHA1_SCRUB_HOOK(w);
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -136,6 +149,7 @@ void SSFSHA1Begin(SSFSHA1Context_t *ctx)
     ctx->state[4] = SSF_SHA1_H4;
     ctx->totalLen = 0;
     ctx->blockLen = 0;
+    ctx->magic = SSF_SHA1_CONTEXT_MAGIC;
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -146,7 +160,10 @@ void SSFSHA1Update(SSFSHA1Context_t *ctx, const uint8_t *in, uint32_t inLen)
     uint32_t i;
 
     SSF_REQUIRE(ctx != NULL);
+    SSF_REQUIRE(ctx->magic == SSF_SHA1_CONTEXT_MAGIC);
     SSF_REQUIRE((in != NULL) || (inLen == 0));
+    SSF_REQUIRE(ctx->blockLen < SSF_SHA1_BLOCK_SIZE);
+    SSF_REQUIRE((uint64_t)inLen <= (SSF_SHA1_MAX_BYTES - ctx->totalLen));
 
     for (i = 0; i < inLen; i++)
     {
@@ -171,6 +188,8 @@ void SSFSHA1End(SSFSHA1Context_t *ctx, uint8_t out[SSF_SHA1_HASH_SIZE])
     uint32_t i;
 
     SSF_REQUIRE(ctx != NULL);
+    SSF_REQUIRE(ctx->magic == SSF_SHA1_CONTEXT_MAGIC);
+    SSF_REQUIRE(ctx->blockLen < SSF_SHA1_BLOCK_SIZE);
     SSF_REQUIRE(out != NULL);
 
     totalBits = ctx->totalLen * 8ull;

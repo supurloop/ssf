@@ -37,18 +37,28 @@
 #include "ssfcrypt.h"
 #include "ssfusexport.h"
 
+#if SSF_CONFIG_CHACHA20_UNIT_TEST == 1
+/* Test-only hook fired after each secret local is wiped; NULL in production. */
+void (*_SSFChaCha20ScrubTestHook)(const void *buf, size_t len) = NULL;
+#define _SSF_CHACHA20_SCRUB_HOOK(b) \
+    do { if (_SSFChaCha20ScrubTestHook != NULL) { _SSFChaCha20ScrubTestHook((b), sizeof(b)); } } \
+    while (0)
+#else
+#define _SSF_CHACHA20_SCRUB_HOOK(b) do { } while (0)
+#endif /* SSF_CONFIG_CHACHA20_UNIT_TEST */
+
 /* --------------------------------------------------------------------------------------------- */
 /* Module Defines                                                                                */
 /* --------------------------------------------------------------------------------------------- */
 
 /* --------------------------------------------------------------------------------------------- */
-/* ChaCha20 quarter round (RFC 7539 Section 2.1).                                               */
+/* ChaCha20 quarter round (RFC 7539 Section 2.1).                                                */
 /* --------------------------------------------------------------------------------------------- */
 #define QR(a, b, c, d) \
-    a += b; d ^= a; d = SSF_ROTL32(d, 16); \
-    c += d; b ^= c; b = SSF_ROTL32(b, 12); \
-    a += b; d ^= a; d = SSF_ROTL32(d, 8);  \
-    c += d; b ^= c; b = SSF_ROTL32(b, 7)
+    (a) += (b); (d) ^= (a); (d) = SSF_ROTL32((d), 16); \
+    (c) += (d); (b) ^= (c); (b) = SSF_ROTL32((b), 12); \
+    (a) += (b); (d) ^= (a); (d) = SSF_ROTL32((d), 8); \
+    (c) += (d); (b) ^= (c); (b) = SSF_ROTL32((b), 7)
 
 /* --------------------------------------------------------------------------------------------- */
 /* Generates one 64-byte ChaCha20 keystream block (RFC 7539 Section 2.3).                        */
@@ -58,8 +68,8 @@ static void _SSFChaCha20Block(const uint32_t *input, size_t inputLen, uint8_t *o
     uint32_t x[16];
     uint32_t i;
 
-    SSF_ASSERT(inputLen == sizeof(uint32_t) * 16u);
-    SSF_ASSERT(outSize >= SSF_CHACHA20_BLOCK_SIZE);
+    SSF_REQUIRE(inputLen == (sizeof(uint32_t) * 16u));
+    SSF_REQUIRE(outSize >= SSF_CHACHA20_BLOCK_SIZE);
 
     memcpy(x, input, sizeof(uint32_t) * 16);
 
@@ -83,6 +93,8 @@ static void _SSFChaCha20Block(const uint32_t *input, size_t inputLen, uint8_t *o
     {
         SSF_PUTU32LE(&out[i * 4], x[i] + input[i]);
     }
+    SSFCryptSecureZero(x, sizeof(x));
+    _SSF_CHACHA20_SCRUB_HOOK(x);
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -103,10 +115,8 @@ void SSFChaCha20Encrypt(const uint8_t *pt, size_t ptLen, const uint8_t *key, siz
     SSF_REQUIRE(nonce != NULL);
     SSF_REQUIRE(nonceLen == SSF_CHACHA20_NONCE_SIZE);
     SSF_REQUIRE(ptLen <= ctSize);
-    SSF_REQUIRE(ptLen < (512u * 1024u * 1024u));
-    /* Counter must not wrap past 2^32 blocks. RFC 8439 leaves wrap behavior undefined and SSF */
-    /* diverges from OpenSSL there; refuse the call rather than produce non-interoperable      */
-    /* output. Callers wanting >2^32 blocks (256 GiB) under a single (key, nonce) must split.  */
+    SSF_REQUIRE(ptLen < ((uint32_t)512u * 1024u * 1024u));
+    /* Refuse a counter that would wrap past 2^32 blocks (undefined by RFC 8439). */
     SSF_REQUIRE(((uint64_t)counter + ((ptLen + 63u) / 64u)) <= 0x100000000ull);
 
     if (ptLen == 0) return;
@@ -149,9 +159,7 @@ void SSFChaCha20Encrypt(const uint8_t *pt, size_t ptLen, const uint8_t *key, siz
         pos += remaining;
     }
 
-    /* Defense-in-depth: state[4..11] holds the key, block[] holds the most recent keystream. */
-    /* Scrub both before stack reuse. SSFCryptSecureZero uses volatile writes to defeat dead- */
-    /* store elimination at -O3.                                                              */
+    /* Scrub the key-bearing state and the last keystream block before stack reuse. */
     SSFCryptSecureZero(state, sizeof(state));
     SSFCryptSecureZero(block, sizeof(block));
 }

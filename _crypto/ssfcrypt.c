@@ -37,7 +37,7 @@
 #include "ssfusexport.h"
 
 /* --------------------------------------------------------------------------------------------- */
-/* If the first n bytes at a and b are equal, inspecting every byte, returns true, else false.  */
+/* If the first n bytes at a and b are equal, inspecting every byte, returns true, else false.   */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFCryptCTMemEq(const void *a, const void *b, size_t n)
 {
@@ -68,9 +68,30 @@ void SSFCryptSecureZero(void *p, size_t n)
     SSF_REQUIRE(p != NULL);
 
     v = (volatile uint8_t *)p;
-    for (i = 0u; i < n; i++)
+    i = 0u;
+
+    /* Is the next byte inside the buffer and short of a word boundary? */
+    while ((i < n) && ((((uintptr_t)&v[i]) & (sizeof(uintptr_t) - 1u)) != 0u))
     {
+        /* Yes, clear it as a byte */
         v[i] = 0u;
+        i++;
+    }
+
+    /* Does a whole aligned word remain? */
+    while ((n - i) >= sizeof(uintptr_t))
+    {
+        /* Yes, one volatile word store; &v[i] is aligned here (void * cast for -Wcast-align) */
+        *((volatile uintptr_t *)(volatile void *)&v[i]) = 0u;
+        i += sizeof(uintptr_t);
+    }
+
+    /* Is a tail byte left? */
+    while (i < n)
+    {
+        /* Yes, clear it as a byte */
+        v[i] = 0u;
+        i++;
     }
 }
 

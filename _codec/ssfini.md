@@ -29,6 +29,33 @@ truncating or overflowing.
 - Pass `NULL` for the `section` parameter to operate in the global (no-section) scope.
 - Generator functions require `*iniLen` to be initialized to `0` before the first call and
   updated by each successive call; the buffer is always null-terminated on success.
+- **Parsing rules.** The parser is deliberately forgiving and may successfully parse INIs that
+  are "poorly" written. The main limitation is the lack of support for quoted fields, which
+  would allow sections, names, and/or values to contain whitespace.
+  - A line is delimited by a newline (`'\n'`), carriage return (`'\r'`) or a null terminator.
+  - Line continuation using a backslash (`'\'`) as the last character of a line is not supported.
+  - Escape sequences are not supported; e.g. `\x20\t` is treated as 6 plaintext characters.
+  - Quotes (`'"'`) are not supported; they are treated as simple characters in a section, name,
+    or value.
+  - Whitespace (WS) is space (`'\x20'`) or tab (`'\t'`). WS at the beginning of a line is
+    ignored.
+  - Comments begin with a semicolon (`';'`) or hash (`'#'`). Comments on their own line are
+    ignored.
+  - Section declarations begin with `'['` and end with `']'`. WS after the `'['` is ignored. The
+    section name starts after that WS and ends at the `']'` or the first WS encountered. Section
+    names must be at least 1 character long and are case-sensitive. The remainder of the
+    declaration after the `']'` is ignored.
+  - Name/value declarations have a name, an equal sign (`'='`), and a value. Names must be at
+    least 1 character long and are case-sensitive. WS following the name ends the name field and
+    all characters up to the `'='` are ignored.
+  - The value field starts after the `'='`; WS following the `'='` is ignored. Values may be 0
+    characters long. The value ends at the first WS or end of line.
+  - Duplicate section names are permitted. Duplicate section/name pairs are permitted and are
+    referenced with a 0-based index.
+  - Name/value pairs before the first section declaration are referenced by passing `NULL` for
+    the section string.
+  - A boolean value is `true` if the case-ignored value is `"1"`, `"yes"`, `"true"`, or `"on"`,
+    and `false` if it is `"0"`, `"no"`, `"false"`, or `"off"`.
 
 <a id="configuration"></a>
 
@@ -517,18 +544,18 @@ if (SSFINIGObjCreate(ini, &gobj, 8))
 {
     SSFGObj_t *parent = NULL;
     SSFGObj_t *child = NULL;
-    SSFCStrIn_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1] = { NULL };
+    SSFGPath_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1] = { { SSF_GPATH_END } };
     char val[64];
 
     /* Read a global value */
-    path[0] = "global";
+    SSF_GPATH_SET_KEY(path[0], "global");
     SSFGObjFindPath(gobj, path, &parent, &child);
     SSFGObjGetString(child, val, sizeof(val));
     /* val == "42" */
 
     /* Read a value inside a section */
     memset(path, 0, sizeof(path));
-    path[0] = "section"; path[1] = "host";
+    SSF_GPATH_SET_KEY(path[0], "section"); SSF_GPATH_SET_KEY(path[1], "host");
     parent = NULL; child = NULL;
     SSFGObjFindPath(gobj, path, &parent, &child);
     SSFGObjGetString(child, val, sizeof(val));

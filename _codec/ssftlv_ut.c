@@ -52,7 +52,8 @@ static const SSFTLVUT_t _SSFTLVUT[] =
 {
     {0, (uint8_t *)"hello", 5, 7},
     {64, (uint8_t *)"world", 5, 7},
-    {127, (uint8_t *)"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 84, 86}
+    {127, (uint8_t *)"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                     "aaaaaaaaaaaaaaaaaaaaaaaa", 84, 86}
 };
 #else /* SSF_TLV_ENABLE_FIXED_MODE */
 static const SSFTLVUT_t _SSFTLVUT[] =
@@ -60,7 +61,8 @@ static const SSFTLVUT_t _SSFTLVUT[] =
     {0, (uint8_t *)"hello", 5, 7},
     {64, (uint8_t *)"world", 5, 8},
     {16384, (uint8_t *)"!", 1, 5},
-    {4194304, (uint8_t *)"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 71, 77}
+    {4194304, (uint8_t *)"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                         "aaaaaaaaaaa", 71, 77}
 };
 #endif /* SSF_TLV_ENABLE_FIXED_MODE */
 
@@ -72,7 +74,7 @@ void SSFTLVUnitTest(void)
     SSFTLV_t tlv;
     uint8_t buf[100];
     uint8_t val[100];
-#if SSF_TLV_ENABLE_EXTENDED_UNIT_TEST == 1 && SSF_TLV_ENABLE_FIXED_MODE == 0
+#if (SSF_TLV_ENABLE_EXTENDED_UNIT_TEST == 1) && (SSF_TLV_ENABLE_FIXED_MODE == 0)
     SSFTLV_t tlvLong;
     uint8_t *bufLong = SSF_MALLOC(sizeof(uint8_t)*4210697);
     SSF_ASSERT(bufLong != NULL);
@@ -81,19 +83,33 @@ void SSFTLVUnitTest(void)
 #endif /* SSF_TLV_ENABLE_EXTENDED_UNIT_TEST */
     SSFTLVVar_t valLen;
     uint8_t *valPtr;
-    uint32_t i, expectedBufLen;
+    uint32_t i;
+    uint32_t expectedBufLen;
 
     memset(&tlv, 0, sizeof(tlv));
     SSF_ASSERT_TEST(SSFTLVInit(NULL, buf, sizeof(buf), 0));
     SSF_ASSERT_TEST(SSFTLVInit(&tlv, NULL, sizeof(buf), 0));
     SSF_ASSERT_TEST(SSFTLVInit(&tlv, buf, sizeof(buf), sizeof(buf) + 1));
 
+    /* A completely full receive buffer can be decoded; it has no room for another put */
+    SSFTLVInit(&tlv, buf, sizeof(buf), sizeof(buf));
+    SSF_ASSERT(SSFTLVPut(&tlv, 0, (const uint8_t *)"x", 1) == false);
+    SSFTLVDeInit(&tlv);
+
     SSF_ASSERT_TEST(SSFTLVDeInit(&tlv));
     SSFTLVInit(&tlv, buf, sizeof(buf), 0);
     SSF_ASSERT_TEST(SSFTLVInit(&tlv, buf, sizeof(buf), 0));
 
     SSF_ASSERT_TEST(SSFTLVPut(NULL, 0, (const uint8_t*)"error", 5));
-    SSF_ASSERT_TEST(SSFTLVPut(&tlv, 0, NULL, 0));
+    SSF_ASSERT_TEST(SSFTLVPut(&tlv, 0, NULL, 1));
+
+    /* A zero-length value may be put with a NULL pointer */
+    SSF_ASSERT(SSFTLVPut(&tlv, 0, NULL, 0));
+    valLen = (SSFTLVVar_t)-1;
+    SSF_ASSERT(SSFTLVFind(&tlv, 0, 0, &valPtr, &valLen));
+    SSF_ASSERT(valLen == 0);
+    SSFTLVDeInit(&tlv);
+    SSFTLVInit(&tlv, buf, sizeof(buf), 0);
 
     valLen = (SSFTLVVar_t)-1;
     SSF_ASSERT_TEST(SSFTLVGet(NULL, 0, 0, val, sizeof(val), &valLen));
@@ -134,7 +150,7 @@ void SSFTLVUnitTest(void)
     tlv.bufLen = 0;
 
     expectedBufLen = 0;
-    for (i = 0; i < sizeof(_SSFTLVUT) / sizeof(SSFTLVUT_t); i++)
+    for (i = 0; i < (sizeof(_SSFTLVUT) / sizeof(SSFTLVUT_t)); i++)
     {
         SSF_ASSERT(SSFTLVPut(&tlv, _SSFTLVUT[i].tag, _SSFTLVUT[i].val, _SSFTLVUT[i].valLen));
         expectedBufLen += _SSFTLVUT[i].bufLenChange;
@@ -164,7 +180,7 @@ void SSFTLVUnitTest(void)
     SSF_ASSERT(SSFTLVPut(&tlv, 64, (const uint8_t*)"!", 1) == false);
 #endif /* SSF_TLV_ENABLE_FIXED_MODE */
 
-#if SSF_TLV_ENABLE_EXTENDED_UNIT_TEST == 1 && SSF_TLV_ENABLE_FIXED_MODE == 0
+#if (SSF_TLV_ENABLE_EXTENDED_UNIT_TEST == 1) && (SSF_TLV_ENABLE_FIXED_MODE == 0)
     SSFTLVInit(&tlvLong, bufLong, 4210697, 0);
 
     memset(valLong, 'a', 4210697);

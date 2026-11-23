@@ -51,14 +51,14 @@ static SSFGObj_t *_SSFArgvUTFindChild(SSFGObj_t *gobj, SSFCStrIn_t labelCStr)
 {
     SSFGObj_t *gobjParent = NULL;
     SSFGObj_t *gobjChild = NULL;
-    char *path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
+    SSFGPath_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
 
     SSF_REQUIRE(gobj != NULL);
     SSF_REQUIRE(labelCStr != NULL);
 
     memset(path, 0, sizeof(path));
-    path[0] = (char *)labelCStr;
-    if (SSFGObjFindPath(gobj, (SSFCStrIn_t *)path, &gobjParent, &gobjChild) == false) return NULL;
+    SSF_GPATH_SET_KEY(path[0], labelCStr);
+    if (SSFGObjFindPath(gobj, path, &gobjParent, &gobjChild) == false) return NULL;
     return gobjChild;
 }
 
@@ -90,7 +90,7 @@ static void _SSFArgvUTCheckArgs(SSFGObj_t *gobj, const char * const *expectedArg
     SSFGObj_t *gobjArg;
     SSFGObj_t *gobjParent;
     char outStr[SSF_ARGV_UT_OUT_STR_SIZE];
-    char *path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
+    SSFGPath_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
     size_t i;
 
     SSF_REQUIRE(gobj != NULL);
@@ -104,11 +104,11 @@ static void _SSFArgvUTCheckArgs(SSFGObj_t *gobj, const char * const *expectedArg
     for (i = 0; i < expectedNumArgs; i++)
     {
         memset(path, 0, sizeof(path));
-        path[0] = (char *)SSF_ARGV_ARGS_STR;
-        path[1] = (char *)&i;
+        SSF_GPATH_SET_KEY(path[0], SSF_ARGV_ARGS_STR);
+        SSF_GPATH_SET_INDEX(path[1], &i);
         gobjParent = NULL;
         gobjArg = NULL;
-        SSF_ASSERT(SSFGObjFindPath(gobj, (SSFCStrIn_t *)path, &gobjParent, &gobjArg));
+        SSF_ASSERT(SSFGObjFindPath(gobj, path, &gobjParent, &gobjArg));
         SSF_ASSERT(gobjArg != NULL);
         SSF_ASSERT(SSFGObjGetType(gobjArg) == SSF_OBJ_TYPE_STR);
         SSF_ASSERT(SSFGObjGetString(gobjArg, outStr, sizeof(outStr)));
@@ -125,7 +125,7 @@ static void _SSFArgvUTCheckOpt(SSFGObj_t *gobj, SSFCStrIn_t expectedOpt, SSFCStr
     SSFGObj_t *gobjOpt;
     SSFGObj_t *gobjParent = NULL;
     char outStr[SSF_ARGV_UT_OUT_STR_SIZE];
-    char *path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
+    SSFGPath_t path[SSF_GOBJ_CONFIG_MAX_IN_DEPTH + 1];
 
     SSF_REQUIRE(gobj != NULL);
     SSF_REQUIRE(expectedOpt != NULL);
@@ -136,10 +136,10 @@ static void _SSFArgvUTCheckOpt(SSFGObj_t *gobj, SSFCStrIn_t expectedOpt, SSFCStr
     SSF_ASSERT(SSFGObjGetType(gobjOpts) == SSF_OBJ_TYPE_OBJECT);
 
     memset(path, 0, sizeof(path));
-    path[0] = (char *)SSF_ARGV_OPTS_STR;
-    path[1] = (char *)expectedOpt;
+    SSF_GPATH_SET_KEY(path[0], SSF_ARGV_OPTS_STR);
+    SSF_GPATH_SET_KEY(path[1], expectedOpt);
     gobjOpt = NULL;
-    SSF_ASSERT(SSFGObjFindPath(gobj, (SSFCStrIn_t *)path, &gobjParent, &gobjOpt));
+    SSF_ASSERT(SSFGObjFindPath(gobj, path, &gobjParent, &gobjOpt));
     SSF_ASSERT(gobjOpt != NULL);
     SSF_ASSERT(SSFGObjGetType(gobjOpt) == SSF_OBJ_TYPE_STR);
     SSF_ASSERT(SSFGObjGetString(gobjOpt, outStr, sizeof(outStr)));

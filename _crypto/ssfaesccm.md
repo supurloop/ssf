@@ -62,7 +62,8 @@ with those standards is required and/or when a tag length shorter than 16 bytes 
   | 13 | 2 | 65 535 bytes (IEEE 802.15.4 default) |
 
   The per-L length cap is enforced so it can never silently truncate the length field (which
-  would wrap the CTR counter and reuse keystream). [`SSFAESCCMEncrypt()`](#ssfaesccmencrypt)
+  would wrap the CTR counter and reuse keystream). The CTR block counter itself is 64-bit, so it
+  covers the whole L-byte counter field and cannot wrap within any allowed length. [`SSFAESCCMEncrypt()`](#ssfaesccmencrypt)
   treats `ptLen < 2^(8·L)` as a caller contract and `SSF_REQUIRE`s it (a caller bug halts in
   debug builds). [`SSFAESCCMDecrypt()`](#ssfaesccmdecrypt) sees an attacker-controlled
   `ctLen`, so instead of asserting it returns `false` when `ctLen` exceeds the cap, rejecting
@@ -88,6 +89,8 @@ with those standards is required and/or when a tag length shorter than 16 bytes 
 - The ciphertext output is exactly `ptLen` bytes; the tag is returned separately through the
   `tag` parameter rather than appended. Serialize them in whatever order your wire format
   requires at the call site.
+- DBC exception (timing-critical): `_SSFAESCCMXorBlock` and `_SSFAESCCMEncBlock` run per block
+  or per arithmetic step and carry no parameter asserts; their callers validate every argument.
 
 <a id="configuration"></a>
 

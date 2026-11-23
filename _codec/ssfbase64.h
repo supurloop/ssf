@@ -19,7 +19,7 @@
 /* endorse or promote products derived from this software without specific prior written         */
 /* permission.                                                                                   */
 /*                                                                                               */
-/* THIS SOFTWARE IS PROVIDED BY THE C OPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS   */
+/* THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS   */
 /* OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF               */
 /* MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE    */
 /* COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL      */
@@ -43,9 +43,10 @@ extern "C" {
 /* --------------------------------------------------------------------------------------------- */
 /* External Interface                                                                            */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFBase64Encode(const uint8_t *in, size_t inLen, SSFCStrOut_t out, size_t outSize,
+bool SSFBase64Encode(const uint8_t *in, size_t inLen, SSFCStrOut_t outStr, size_t outSize,
+                     size_t *outLenOpt);
+bool SSFBase64Decode(SSFCStrIn_t inStr, size_t inLenLim, uint8_t *out, size_t outSize,
                      size_t *outLen);
-bool SSFBase64Decode(SSFCStrIn_t in, size_t inLenLim, uint8_t *out, size_t outSize, size_t *outLen);
 
 /* --------------------------------------------------------------------------------------------- */
 /* Unit test                                                                                     */

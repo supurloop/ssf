@@ -47,14 +47,12 @@ already cover.
 
   | Function | Constant time? | Use for |
   |---|---|---|
-  | [`SSFECScalarMul`](#ssfecscalarmul) | Yes (Montgomery ladder; every bit processed identically, conditional swaps via [`SSFBNCondSwap`](ssfbn.md#condswap), working points zeroized after use) | Signing (`k·G`), ECDH (`d·P_peer`), any operation where the scalar is a private key or ephemeral secret |
+  | [`SSFECScalarMul`](#ssfecscalarmul) | Yes (4-bit fixed-window scan; every window does four doublings, a full constant-time sweep of the 16-entry table via [`SSFBNCondCopy`](ssfbn.md#condswap), and one addition; no early exit; working points zeroized after use) | Signing (`k·G`), ECDH (`d·P_peer`), any operation where the scalar is a private key or ephemeral secret |
   | [`SSFECScalarMulDual`](#ssfecscalarmuldual) | **No** — Shamir's-trick double-scalar. Intentionally variable-time | ECDSA verify (both `u₁ = z·s⁻¹ mod n` and `u₂ = r·s⁻¹ mod n` are derived from public message + signature data) |
 
-  One edge-case caveat (from the header comment): `SSFECScalarMul`'s handling of the
-  identity-input corner case may leak timing for the first few scalar bits. This is not
-  exploitable for a uniformly-random scalar (the odds of the attacker learning "the top two
-  bits are zero" against the cost of generating matching candidate keys is zero-utility), but
-  it does mean an adversary choosing both scalar and base can observe a structural signal.
+  `SSFECScalarMul` has no scalar-dependent branch or early exit: the identity and doubling
+  cases inside the point addition are selected with constant-time masks, so the identity
+  input needs no special timing caveat.
   Never expose `SSFECScalarMul` as a black-box oracle where the attacker picks `k`.
 - **Jacobian vs. affine — when to convert.** Point arithmetic stays in Jacobian form for
   efficiency (avoids per-step modular inversions). You only convert back to affine when
@@ -337,11 +335,16 @@ SSFECPointAdd(&r, &P, &Q, SSF_EC_CURVE_P256);
 void SSFECScalarMul(SSFECPoint_t *r, const SSFBN_t *k, const SSFECPoint_t *p,
                     SSFECCurve_t curve);
 ```
-Constant-time scalar multiplication `r = k·P` via the Montgomery ladder. Processes every
-bit of `k` up to the curve's working width using constant-time conditional swaps
-([`SSFBNCondSwap()`](ssfbn.md#condswap)) and unconditional `Add` / `Double` calls. Working
+Constant-time scalar multiplication `r = k·P` via a 4-bit fixed-window scan. A 16-entry
+table of `0·P … 15·P` is built first; then, for every 4-bit window of `k` across the curve's
+working width, the accumulator is doubled four times, the window's table entry is selected by
+scanning all 16 entries with [`SSFBNCondCopy()`](ssfbn.md#condswap), and it is added in. The
+work is identical for every scalar. Working
 points are [`SSFBNZeroize`](ssfbn.md#ssfbnzeroize)'d before return to keep key-derived
 state out of the stack.
+
+`k->len` must not exceed the curve's limb count (8 for P-256, 12 for P-384); a wider `k`
+traps rather than being silently truncated to the curve width.
 
 `k` must be in `[1, n-1]` (non-zero and less than the curve order). The caller is
 responsible for ensuring that — e.g., by rejection-sampling from
@@ -418,7 +421,9 @@ gives ~1.5 KB for P-256 and ~2.3 KB for P-384). ~3-4× faster than running the g
 amortises across every comb window. Used internally by ECDSA signing and key generation
 when the corresponding `SSF_EC_CONFIG_FIXED_BASE_*` is enabled.
 
-`k` must be in `[1, n-1]` (same precondition as `SSFECScalarMul`). The functions are
+`k` must satisfy `0 <= k < n` with `k->len` at most the curve's limb count; this is checked by
+`SSF_REQUIRE` (the comb's no-double addition is only valid below `n`; `k = 0` gives the
+identity). The functions are
 declared only when the matching `SSF_EC_CONFIG_FIXED_BASE_*` is `1` — guard call sites
 with `#ifdef` if your code might be built with the comb tables disabled.
 
@@ -434,6 +439,8 @@ void SSFECScalarMulDualBase(SSFECPoint_t *r,
 Variable-time `r = u₁·G + u₂·Q` for ECDSA verify. Uses the curve's fixed-base comb table
 for the `[u₁]G` half and a wNAF / Shamir's-trick path for `[u₂]Q`, which gives a faster
 verify than the table-free [`SSFECScalarMulDual()`](#ssfecscalarmuldual) for the same
-inputs. Falls back to `SSFECScalarMulDual()` when the selected curve's
-`SSF_EC_CONFIG_FIXED_BASE_*` flag is `0`. Same threat-model constraint: both scalars must
-be public.
+inputs. When the selected curve's `SSF_EC_CONFIG_FIXED_BASE_*` flag is `0`, the `[u₁]G`
+half falls back to the constant-time [`SSFECScalarMul()`](#ssfecscalarmul) against `G`; the
+`[u₂]Q` half always uses the variable-time wNAF path. Same threat-model constraint: both
+scalars must be public. With a fixed-base table, `u₁` is subject to the same `0 <= u₁ < n`
+check as [`SSFECScalarMulBaseP256/P384()`](#ssfecscalarmulbase) (`u₁ = 0` is valid).

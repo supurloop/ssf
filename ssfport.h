@@ -52,14 +52,17 @@ extern "C" {
 /* _codec */
 #define SSF_CONFIG_ASN1_UNIT_TEST    (1u)
 #define SSF_CONFIG_BASE64_UNIT_TEST  (1u)
+#define SSF_CONFIG_BASE64URL_UNIT_TEST (1u)
 #define SSF_CONFIG_DEC_UNIT_TEST     (1u)
 #define SSF_CONFIG_GOBJ_UNIT_TEST    (1u)
 #define SSF_CONFIG_HEX_UNIT_TEST     (1u)
 #define SSF_CONFIG_INI_UNIT_TEST     (1u)
 #define SSF_CONFIG_JSON_UNIT_TEST    (1u)
+#define SSF_CONFIG_MATCH_UNIT_TEST   (1u)
 #define SSF_CONFIG_STR_UNIT_TEST     (1u)
 #define SSF_CONFIG_TLV_UNIT_TEST     (1u)
 #define SSF_CONFIG_UBJSON_UNIT_TEST  (1u)
+#define SSF_CONFIG_X509_UNIT_TEST    (1u)
 
 /* SSF_CONFIG_HAVE_OPENSSL -- set to 1 on host builds where libcrypto is linked at the build's   */
 /* command line (macOS/Linux native). Cross builds (e.g. mipsel under QEMU) override this to 0   */
@@ -78,6 +81,7 @@ extern "C" {
 #define SSF_CONFIG_BN_MICROBENCH     (1u)  /* 1 to run MontMul/MontSquare perf harness */
 #define SSF_CONFIG_CCP_UNIT_TEST     (1u)  /* ChaCha20-Poly1305 AEAD */
 #define SSF_CONFIG_CHACHA20_UNIT_TEST (1u)
+#define SSF_CONFIG_CMS_UNIT_TEST     (1u)
 #define SSF_CONFIG_CRYPT_UNIT_TEST   (1u)
 #define SSF_CONFIG_CRYPT_CT_TIMING_TEST (1u)  /* 1 to run SSFCryptCTMemEq wall-clock CT check */
 #define SSF_CONFIG_EC_UNIT_TEST      (1u)
@@ -85,6 +89,7 @@ extern "C" {
 #define SSF_CONFIG_ECDSA_UNIT_TEST   (1u)
 
 #define SSF_CONFIG_ED25519_UNIT_TEST (1u)
+#define SSF_CONFIG_FE25519_UNIT_TEST (1u)
 #define SSF_CONFIG_HKDF_UNIT_TEST    (1u)
 #define SSF_CONFIG_HMAC_UNIT_TEST    (1u)
 #define SSF_CONFIG_POLY1305_UNIT_TEST (1u)
@@ -143,14 +148,17 @@ extern "C" {
 #if /* _codec */ \
     SSF_CONFIG_ASN1_UNIT_TEST == 1 || \
     SSF_CONFIG_BASE64_UNIT_TEST == 1 || \
+    SSF_CONFIG_BASE64URL_UNIT_TEST == 1 || \
     SSF_CONFIG_DEC_UNIT_TEST == 1 || \
     SSF_CONFIG_GOBJ_UNIT_TEST == 1 || \
     SSF_CONFIG_HEX_UNIT_TEST == 1 || \
     SSF_CONFIG_INI_UNIT_TEST == 1 || \
     SSF_CONFIG_JSON_UNIT_TEST == 1 || \
+    SSF_CONFIG_MATCH_UNIT_TEST == 1 || \
     SSF_CONFIG_STR_UNIT_TEST == 1 || \
     SSF_CONFIG_TLV_UNIT_TEST == 1 || \
     SSF_CONFIG_UBJSON_UNIT_TEST == 1 || \
+    SSF_CONFIG_X509_UNIT_TEST == 1 || \
     /* _crypto */ \
     SSF_CONFIG_AES_UNIT_TEST == 1 || \
     SSF_CONFIG_AESCCM_UNIT_TEST == 1 || \
@@ -159,10 +167,12 @@ extern "C" {
     SSF_CONFIG_BN_UNIT_TEST == 1 || \
     SSF_CONFIG_CCP_UNIT_TEST == 1 || \
     SSF_CONFIG_CHACHA20_UNIT_TEST == 1 || \
+    SSF_CONFIG_CMS_UNIT_TEST == 1 || \
     SSF_CONFIG_CRYPT_UNIT_TEST == 1 || \
     SSF_CONFIG_EC_UNIT_TEST == 1 || \
     SSF_CONFIG_ECDSA_UNIT_TEST == 1 || \
     SSF_CONFIG_ED25519_UNIT_TEST == 1 || \
+    SSF_CONFIG_FE25519_UNIT_TEST == 1 || \
     SSF_CONFIG_HKDF_UNIT_TEST == 1 || \
     SSF_CONFIG_HMAC_UNIT_TEST == 1 || \
     SSF_CONFIG_POLY1305_UNIT_TEST == 1 || \
@@ -292,14 +302,14 @@ typedef uint64_t SSFPortTick_t;
                       (((x) & 0x000000ffu) << 24))
     #define ntohl(x) htonl(x)
 
-    #define htonll(x) ((((x) & 0xff00000000000000u) >> 56) | \
-                       (((x) & 0x00ff000000000000u) >> 40) | \
-                       (((x) & 0x0000ff0000000000u) >> 24) | \
-                       (((x) & 0x000000ff00000000u) >> 8) | \
-                       (((x) & 0x00000000ff000000u) << 8) | \
-                       (((x) & 0x0000000000ff0000u) << 24) | \
-                       (((x) & 0x000000000000ff00u) << 40) | \
-                       (((x) & 0x00000000000000ffu) << 56))
+    #define htonll(x) (((((uint64_t)(x)) & 0xff00000000000000ull) >> 56) | \
+                       ((((uint64_t)(x)) & 0x00ff000000000000ull) >> 40) | \
+                       ((((uint64_t)(x)) & 0x0000ff0000000000ull) >> 24) | \
+                       ((((uint64_t)(x)) & 0x000000ff00000000ull) >> 8) | \
+                       ((((uint64_t)(x)) & 0x00000000ff000000ull) << 8) | \
+                       ((((uint64_t)(x)) & 0x0000000000ff0000ull) << 24) | \
+                       ((((uint64_t)(x)) & 0x000000000000ff00ull) << 40) | \
+                       ((((uint64_t)(x)) & 0x00000000000000ffull) << 56))
     #define ntohll(x) htonll(x)
 #endif /* SSF_CONFIG_LITTLE_ENDIAN */
 #endif /* SSF_CONFIG_BYTE_ORDER_MACROS */
@@ -309,7 +319,10 @@ typedef uint64_t SSFPortTick_t;
 /* SSF_CONFIG_ENABLE_THREAD_SUPPORT allows the ssfcfg module to be safely called from multiple
    contexts. */
 /* 0, disable thread synchronization; 1, enable thread synchronization. */
+/* Defined as a fall-through default so command-line -D wins (build-arm.sh passes 0). */
+#ifndef SSF_CONFIG_ENABLE_THREAD_SUPPORT
 #define SSF_CONFIG_ENABLE_THREAD_SUPPORT (1u)
+#endif
 
 #if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
 #ifdef _WIN32

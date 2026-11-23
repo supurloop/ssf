@@ -47,6 +47,9 @@ process the single block, then securely wipe the schedule.
   Zero it before its first [`SSFAESKeyScheduleInit()`](#ssfaeskeyscheduleinit) (e.g. `= {0}`), and
   call [`SSFAESKeyScheduleDeInit()`](#ssfaeskeyscheduledeinit) to securely wipe it when finished.
 - This module is used internally by [`ssfaesgcm`](ssfaesgcm.md).
+- DBC exception (timing-critical): `_SSFAESEncryptRounds` and `_SSFAESDecryptRounds` run per
+  block or per arithmetic step and carry no parameter asserts; their callers validate every
+  argument.
 
 <a id="configuration"></a>
 

@@ -118,7 +118,9 @@ void SSFCfgUnitTest(void)
     SSF_ASSERT(memcmp(data1, data2, data2Len) == 0);
     SSF_ASSERT(SSFCfgWrite(data1, sizeof(data1), 0, 1) == false);
 
+    /* Zero both bytes of header dataLen so the corruption is the same on either byte order */
     _ssfCfgStorageRAM[0][0] = 0;
+    _ssfCfgStorageRAM[0][1] = 0;
     SSF_ASSERT(SSFCfgRead(data2, &data2Len, sizeof(data2), 0) == SSF_CFG_DATA_VERSION_INVALID);
 
     memset(data1, 0x01, sizeof(data1));

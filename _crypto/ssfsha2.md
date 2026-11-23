@@ -36,6 +36,16 @@ are provided.
 - The one-shot `SSFSHA2_32` / `SSFSHA2_64` (and the macro forms) require a non-`NULL` `in` even
   when `inLen` is `0` — pass any valid pointer (e.g., a pointer to a zero-length string literal).
   The incremental `Update` interface accepts `in == NULL` when `inLen == 0`.
+- Message words and the digest are read and written with SSF's shift-based big-endian helpers
+  (`SSF_GETU32BE` / `SSF_PUTU64BE` and friends from `ssf.h`), so the output is correct on big-
+  and little-endian hosts without relying on `ssfport.h` byte-order detection or
+  `SSF_CONFIG_LITTLE_ENDIAN` (verified on big-endian MIPS under QEMU).
+- Message length: SHA-384 / SHA-512 / SHA-512/t keep the full 128-bit bit count FIPS 180-4
+  §5.1.2 encodes, so any message the standard allows hashes correctly. SHA-224 / SHA-256 are
+  limited by FIPS 180-4 to fewer than 2⁶⁴ bits; an `Update` that would exceed that is an
+  `SSF_REQUIRE` failure rather than a silent wrap.
+- DBC exception (timing-critical): `_SSFSHA2_32Block` and `_SSFSHA2_64Block` run per block or
+  per arithmetic step and carry no parameter asserts; their callers validate every argument.
 
 <a id="configuration"></a>
 

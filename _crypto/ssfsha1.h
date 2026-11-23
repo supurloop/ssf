@@ -4,9 +4,7 @@
 /* ssfsha1.h                                                                                     */
 /* Provides SHA-1 (RFC 3174) hash interface. Required by the WebSocket handshake (RFC 6455).     */
 /*                                                                                               */
-/* Note: SHA-1 is cryptographically deprecated for collision resistance. It is included in SSF    */
-/* solely because RFC 6455 mandates it for the Sec-WebSocket-Accept computation. Do not use       */
-/* SHA-1 for new cryptographic purposes; use ssfsha2 (SHA-256/512) instead.                      */
+/* SHA-1 is deprecated for collision resistance; for new designs use ssfsha2 (SHA-256/512).      */
 /*                                                                                               */
 /* BSD-3-Clause License                                                                          */
 /* Copyright 2020 Supurloop Software LLC                                                         */
@@ -47,8 +45,8 @@ extern "C" {
 /* --------------------------------------------------------------------------------------------- */
 /* Defines and typedefs                                                                          */
 /* --------------------------------------------------------------------------------------------- */
-#define SSF_SHA1_HASH_SIZE  (20u)  /* 160-bit hash output */
-#define SSF_SHA1_BLOCK_SIZE (64u)  /* 512-bit block size */
+#define SSF_SHA1_HASH_SIZE (20u) /* 160-bit hash output */
+#define SSF_SHA1_BLOCK_SIZE (64u) /* 512-bit block size */
 
 /* Incremental hash context */
 typedef struct SSFSHA1Context
@@ -57,6 +55,7 @@ typedef struct SSFSHA1Context
     uint64_t totalLen;                          /* Total bytes processed */
     uint8_t block[SSF_SHA1_BLOCK_SIZE];         /* Partial block accumulator */
     uint32_t blockLen;                          /* Bytes in partial block */
+    uint32_t magic;                             /* Context validity marker */
 } SSFSHA1Context_t;
 
 /* --------------------------------------------------------------------------------------------- */
@@ -72,6 +71,10 @@ void SSFSHA1End(SSFSHA1Context_t *ctx, uint8_t out[SSF_SHA1_HASH_SIZE]);
 /* --------------------------------------------------------------------------------------------- */
 #if SSF_CONFIG_SHA1_UNIT_TEST == 1
 void SSFSHA1UnitTest(void);
+
+/* Test-only hook fired after each secret local is wiped. */
+
+extern void (*_SSFSHA1ScrubTestHook)(const void *buf, size_t len);
 #endif /* SSF_CONFIG_SHA1_UNIT_TEST */
 
 #ifdef __cplusplus

@@ -54,6 +54,12 @@ build $builddir/_codec/ssfubjson.o:    cc_obj _codec/ssfubjson.c
 build $builddir/_codec/ssfubjson_ut.o: cc_obj _codec/ssfubjson_ut.c
 build $builddir/_codec/ssfasn1.o:      cc_obj _codec/ssfasn1.c
 build $builddir/_codec/ssfasn1_ut.o:   cc_obj _codec/ssfasn1_ut.c
+build $builddir/_codec/ssfbase64url.o: cc_obj _codec/ssfbase64url.c
+build $builddir/_codec/ssfbase64url_ut.o: cc_obj _codec/ssfbase64url_ut.c
+build $builddir/_codec/ssfmatch.o:     cc_obj _codec/ssfmatch.c
+build $builddir/_codec/ssfmatch_ut.o:  cc_obj _codec/ssfmatch_ut.c
+build $builddir/_codec/ssfx509.o:      cc_obj _codec/ssfx509.c
+build $builddir/_codec/ssfx509_ut.o:   cc_obj _codec/ssfx509_ut.c
 
 # _crypto
 build $builddir/_crypto/ssfaes.o:       cc_obj _crypto/ssfaes.c
@@ -72,12 +78,16 @@ build $builddir/_crypto/ssfbn.o:      cc_obj _crypto/ssfbn.c
 build $builddir/_crypto/ssfbn_ut.o:   cc_obj _crypto/ssfbn_ut.c
 build $builddir/_crypto/ssfchacha20.o:      cc_obj _crypto/ssfchacha20.c
 build $builddir/_crypto/ssfchacha20_ut.o:   cc_obj _crypto/ssfchacha20_ut.c
+build $builddir/_crypto/ssfcms.o:           cc_obj _crypto/ssfcms.c
+build $builddir/_crypto/ssfcms_ut.o:        cc_obj _crypto/ssfcms_ut.c
 build $builddir/_crypto/ssfpoly1305.o:      cc_obj _crypto/ssfpoly1305.c
 build $builddir/_crypto/ssfpoly1305_ut.o:   cc_obj _crypto/ssfpoly1305_ut.c
 build $builddir/_crypto/ssfx25519.o:      cc_obj _crypto/ssfx25519.c
 build $builddir/_crypto/ssfx25519_ut.o:   cc_obj _crypto/ssfx25519_ut.c
 build $builddir/_crypto/ssfed25519.o:      cc_obj _crypto/ssfed25519.c
 build $builddir/_crypto/ssfed25519_ut.o:   cc_obj _crypto/ssfed25519_ut.c
+build $builddir/_crypto/ssffe25519.o:      cc_obj _crypto/ssffe25519.c
+build $builddir/_crypto/ssffe25519_ut.o:   cc_obj _crypto/ssffe25519_ut.c
 build $builddir/_crypto/ssfaesccm.o:      cc_obj _crypto/ssfaesccm.c
 build $builddir/_crypto/ssfaesccm_ut.o:   cc_obj _crypto/ssfaesccm_ut.c
 build $builddir/_crypto/ssfaesctr.o:      cc_obj _crypto/ssfaesctr.c
@@ -165,6 +175,9 @@ build ssf: link $builddir/main.o $builddir/ssfport.o $
     $builddir/_codec/ssftlv.o       $builddir/_codec/ssftlv_ut.o $
     $builddir/_codec/ssfubjson.o    $builddir/_codec/ssfubjson_ut.o $
     $builddir/_codec/ssfasn1.o     $builddir/_codec/ssfasn1_ut.o $
+    $builddir/_codec/ssfbase64url.o $builddir/_codec/ssfbase64url_ut.o $
+    $builddir/_codec/ssfmatch.o     $builddir/_codec/ssfmatch_ut.o $
+    $builddir/_codec/ssfx509.o      $builddir/_codec/ssfx509_ut.o $
     $builddir/_crypto/ssfaes.o      $builddir/_crypto/ssfaes_ut.o $
     $builddir/_crypto/ssfaesgcm.o   $builddir/_crypto/ssfaesgcm_ut.o $
     $builddir/_crypto/ssfprng.o     $builddir/_crypto/ssfprng_ut.o $
@@ -173,9 +186,11 @@ build ssf: link $builddir/main.o $builddir/ssfport.o $
     $builddir/_crypto/ssfcrypt.o    $builddir/_crypto/ssfcrypt_ut.o $
     $builddir/_crypto/ssfbn.o     $builddir/_crypto/ssfbn_ut.o $
     $builddir/_crypto/ssfchacha20.o     $builddir/_crypto/ssfchacha20_ut.o $
+    $builddir/_crypto/ssfcms.o          $builddir/_crypto/ssfcms_ut.o $
     $builddir/_crypto/ssfpoly1305.o     $builddir/_crypto/ssfpoly1305_ut.o $
     $builddir/_crypto/ssfx25519.o     $builddir/_crypto/ssfx25519_ut.o $
     $builddir/_crypto/ssfed25519.o     $builddir/_crypto/ssfed25519_ut.o $
+    $builddir/_crypto/ssffe25519.o     $builddir/_crypto/ssffe25519_ut.o $
     $builddir/_crypto/ssfaesccm.o     $builddir/_crypto/ssfaesccm_ut.o $
     $builddir/_crypto/ssfaesctr.o     $builddir/_crypto/ssfaesctr_ut.o $
     $builddir/_crypto/ssfhmac.o     $builddir/_crypto/ssfhmac_ut.o $

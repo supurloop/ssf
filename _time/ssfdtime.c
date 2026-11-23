@@ -141,17 +141,6 @@ static void _SSFDTimeStructSetMagic(SSFDTimeStruct_t *ts)
     ts->magic = SSFFCSum16((uint8_t *)ts, sizeof(SSFDTimeStruct_t), SSF_FCSUM_INITIAL);
 }
 /* --------------------------------------------------------------------------------------------- */
-/* Clears magic number to indicate time struct not valid.                                        */
-/* --------------------------------------------------------------------------------------------- */
-static void _SSFDTimeStructClearMagic(SSFDTimeStruct_t *ts)
-{
-    SSF_REQUIRE(ts != NULL);
-
-    memset(ts, 0, sizeof(SSFDTimeStruct_t));
-    ts->magic = 1;
-}
-
-/* --------------------------------------------------------------------------------------------- */
 /* Returns true if struct magic number valid, else false.                                        */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFDTimeStructIsMagicValid(const SSFDTimeStruct_t *ts)
@@ -261,10 +250,10 @@ bool SSFDTimeStructInit(SSFDTimeStruct_t *ts, uint16_t year, uint8_t month, uint
     /* Compute total days since epoch */
     unixDays = ts->yday;
     unixDays += ts->year * SSFDTIME_DAYS_IN_YEAR;
-    unixDays += ((ts->year + 1) >> 2);
+    unixDays += (uint32_t)((ts->year + 1) >> 2);
     if (ts->year > (SSFDTIME_NON_LEAP_YEAR - SSFDTIME_EPOCH_YEAR)) unixDays--;
 
-    ts->wday = (unixDays + SSFDTIME_EPOCH_DAY) % SSFDTIME_DAYS_IN_WEEK;
+    ts->wday = (uint8_t)((unixDays + SSFDTIME_EPOCH_DAY) % SSFDTIME_DAYS_IN_WEEK);
 #if SSF_DTIME_STRUCT_STRICT_CHECK == 1
     _SSFDTimeStructSetMagic(ts);
 #endif
@@ -288,18 +277,18 @@ bool SSFDTimeUnixToStruct(SSFPortTick_t unixSys, SSFDTimeStruct_t *ts, size_t ts
     if (unixSys > SSFDTIME_UNIX_EPOCH_SYS_MAX) return false;
 
     /* Record fractional seconds then normalize unix to seconds */
-    ts->fsec = unixSys % SSF_TICKS_PER_SEC;
+    ts->fsec = (uint32_t)(unixSys % SSF_TICKS_PER_SEC);
     unixSys = unixSys / SSF_TICKS_PER_SEC;
 
     /* Fail if time above limit */
     if (unixSys > SSFDTIME_UNIX_EPOCH_SYS_MAX) return false;
 
     /* Perform the easy conversions */
-    ts->sec = unixSys % SSFDTIME_SEC_IN_MIN;
-    ts->min = (unixSys / SSFDTIME_SEC_IN_MIN) % SSFDTIME_MIN_IN_HOUR;
-    ts->hour = (unixSys / SSFDTIME_SEC_IN_HOUR) % SSFDTIME_HRS_IN_DAY;
+    ts->sec = (uint8_t)(unixSys % SSFDTIME_SEC_IN_MIN);
+    ts->min = (uint8_t)((unixSys / SSFDTIME_SEC_IN_MIN) % SSFDTIME_MIN_IN_HOUR);
+    ts->hour = (uint8_t)((unixSys / SSFDTIME_SEC_IN_HOUR) % SSFDTIME_HRS_IN_DAY);
     unixDays = (uint32_t)(unixSys / SSFDTIME_SEC_IN_DAY);
-    ts->wday = (unixDays + SSFDTIME_EPOCH_DAY) % SSFDTIME_DAYS_IN_WEEK;
+    ts->wday = (uint8_t)((unixDays + SSFDTIME_EPOCH_DAY) % SSFDTIME_DAYS_IN_WEEK);
 
     /* Perform the harder conversions */
     _SSFDTimeUnixToStruct(unixDays, ts);

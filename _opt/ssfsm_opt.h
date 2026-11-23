@@ -37,6 +37,7 @@ extern "C" {
 }
 extern HANDLE gssfsmWakeSem;
 #else /* WIN32 */
+#include <pthread.h>
 #define SSF_SM_THREAD_WAKE_DECLARATION \
     bool gssfsmIsWakeSignalled; pthread_cond_t gssfsmWakeCond; pthread_mutex_t gssfsmWakeMutex
 extern bool gssfsmIsWakeSignalled;

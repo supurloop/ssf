@@ -41,11 +41,17 @@
 #error SSF_X509_CONFIG_MAX_CHAIN_DEPTH must be >= SSF_CMS_CONFIG_MAX_CERTS + 1.
 #endif
 
+#if SSF_TLS_CONFIG_ENABLE_TRACE == 1
 /* Module-scope trace context for verification diagnostics */
 static SSFTLSTraceCtx_t _ssfcmsTraceCtx;
+#define _SSF_CMS_TRACE_CTX (&_ssfcmsTraceCtx)
 
 /* Caller trace callback that _SSFCMSTraceAdapter() forwards each message to */
 static void (*_ssfcmsTraceFn)(int, int, const char *, void *);
+#else
+/* Tracing compiled out: the trace macros discard this NULL context */
+#define _SSF_CMS_TRACE_CTX ((SSFTLSTraceCtx_t *)NULL)
+#endif
 
 /* --------------------------------------------------------------------------------------------- */
 /* OID constants (raw DER content bytes)                                                         */
@@ -91,6 +97,7 @@ static const uint8_t _derNull[] = { 0x05u, 0x00u };
 #define _TAG_CTX1_CONSTRUCTED   ((uint16_t)0xA1u)
 #define _TAG_CTX0_PRIMITIVE     ((uint16_t)0x80u)
 
+#if SSF_TLS_CONFIG_ENABLE_TRACE == 1
 /* --------------------------------------------------------------------------------------------- */
 /* Delivers a trace message to the installed int-signature callback.                             */
 /* --------------------------------------------------------------------------------------------- */
@@ -114,6 +121,7 @@ void SSFCMSSetTraceCtx(void (*fnOpt)(int, int, const char *, void *), void *user
     _ssfcmsTraceCtx.fn = (fnOpt != NULL) ? _SSFCMSTraceAdapter : NULL;
     _ssfcmsTraceCtx.userCtx = userCtxOpt;
 }
+#endif /* SSF_TLS_CONFIG_ENABLE_TRACE */
 
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if two byte spans are identical, else false.                                     */
@@ -838,7 +846,7 @@ static bool _SSFCMSVerifySigner(const SSFCMSSignedData_t *sd, uint8_t idx, const
     if (!_SSFCMSDigestAlgFromOID(si->digestAlgOidRaw, si->digestAlgOidRawLen, &alg))
     {
         /* Yes */
-        SSF_TLS_TRACE_CERT_ERROR(&_ssfcmsTraceCtx, "CMS: signer[%u] digest algorithm unsupported",
+        SSF_TLS_TRACE_CERT_ERROR(_SSF_CMS_TRACE_CTX, "CMS: signer[%u] digest algorithm unsupported",
                                  idx);
         return false;
     }
@@ -851,7 +859,7 @@ static bool _SSFCMSVerifySigner(const SSFCMSSignedData_t *sd, uint8_t idx, const
     if (!listed)
     {
         /* Yes */
-        SSF_TLS_TRACE_CERT_ERROR(&_ssfcmsTraceCtx,
+        SSF_TLS_TRACE_CERT_ERROR(_SSF_CMS_TRACE_CTX,
                                  "CMS: signer[%u] digest algorithm not in digestAlgorithms", idx);
         return false;
     }
@@ -864,7 +872,7 @@ static bool _SSFCMSVerifySigner(const SSFCMSSignedData_t *sd, uint8_t idx, const
         if ((digestAlg != alg) || (digestLen != hashLen))
         {
             /* Yes */
-            SSF_TLS_TRACE_CERT_ERROR(&_ssfcmsTraceCtx,
+            SSF_TLS_TRACE_CERT_ERROR(_SSF_CMS_TRACE_CTX,
                 "CMS: signer[%u] digest algorithm %d does not match the supplied digest", idx,
                 (int)alg);
             return false;
@@ -880,7 +888,7 @@ static bool _SSFCMSVerifySigner(const SSFCMSSignedData_t *sd, uint8_t idx, const
     else
     {
         /* No, and the content is detached */
-        SSF_TLS_TRACE_CERT_ERROR(&_ssfcmsTraceCtx, "CMS: detached content with no digest supplied");
+        SSF_TLS_TRACE_CERT_ERROR(_SSF_CMS_TRACE_CTX, "CMS: detached content with no digest supplied");
         return false;
     }
 
@@ -894,7 +902,7 @@ static bool _SSFCMSVerifySigner(const SSFCMSSignedData_t *sd, uint8_t idx, const
                                    si->sigAlgParamsLen))))
     {
         /* Yes, an algorithm was substituted after signing */
-        SSF_TLS_TRACE_CERT_ERROR(&_ssfcmsTraceCtx,
+        SSF_TLS_TRACE_CERT_ERROR(_SSF_CMS_TRACE_CTX,
                                  "CMS: signer[%u] CMSAlgorithmProtection disagrees with SignerInfo",
                                  idx);
         return false;
@@ -907,7 +915,7 @@ static bool _SSFCMSVerifySigner(const SSFCMSSignedData_t *sd, uint8_t idx, const
         if (!_SSFCMSSpanEquals(si->contentTypeOidRaw, si->contentTypeOidRawLen,
                                sd->eContentTypeOidRaw, sd->eContentTypeOidRawLen))
         {
-            SSF_TLS_TRACE_CERT_ERROR(&_ssfcmsTraceCtx,
+            SSF_TLS_TRACE_CERT_ERROR(_SSF_CMS_TRACE_CTX,
                                      "CMS: signer[%u] content-type attribute != eContentType", idx);
             return false;
         }
@@ -917,7 +925,7 @@ static bool _SSFCMSVerifySigner(const SSFCMSSignedData_t *sd, uint8_t idx, const
             (!SSFCryptCTMemEq(si->messageDigest, contentDigest, hashLen)))
         {
             /* Yes */
-            SSF_TLS_TRACE_CERT_ERROR(&_ssfcmsTraceCtx,
+            SSF_TLS_TRACE_CERT_ERROR(_SSF_CMS_TRACE_CTX,
                                      "CMS: signer[%u] message-digest does not match the content",
                                      idx);
             return false;
@@ -927,7 +935,7 @@ static bool _SSFCMSVerifySigner(const SSFCMSSignedData_t *sd, uint8_t idx, const
         if (si->signedAttrsLen > sizeof(attrs))
         {
             /* Yes */
-            SSF_TLS_TRACE_CERT_ERROR(&_ssfcmsTraceCtx,
+            SSF_TLS_TRACE_CERT_ERROR(_SSF_CMS_TRACE_CTX,
                                      "CMS: signer[%u] signedAttrs %lu bytes exceed limit %u", idx,
                                      (unsigned long)si->signedAttrsLen,
                                      (unsigned int)sizeof(attrs));
@@ -945,7 +953,7 @@ static bool _SSFCMSVerifySigner(const SSFCMSSignedData_t *sd, uint8_t idx, const
                                 sizeof(_oidData))) || (!sd->hasEContent))
         {
             /* Yes */
-            SSF_TLS_TRACE_CERT_ERROR(&_ssfcmsTraceCtx,
+            SSF_TLS_TRACE_CERT_ERROR(_SSF_CMS_TRACE_CTX,
                 "CMS: signer[%u] has no signedAttrs and the content is not attached id-data", idx);
             return false;
         }
@@ -957,7 +965,7 @@ static bool _SSFCMSVerifySigner(const SSFCMSSignedData_t *sd, uint8_t idx, const
             _SSFCMSDigest(alg, sd->eContent, sd->eContentLen, computed, sizeof(computed));
             if (!SSFCryptCTMemEq(digestOpt, computed, hashLen))
             {
-                SSF_TLS_TRACE_CERT_ERROR(&_ssfcmsTraceCtx,
+                SSF_TLS_TRACE_CERT_ERROR(_SSF_CMS_TRACE_CTX,
                     "CMS: signer[%u] supplied digest does not match the attached content", idx);
                 return false;
             }
@@ -971,7 +979,7 @@ static bool _SSFCMSVerifySigner(const SSFCMSSignedData_t *sd, uint8_t idx, const
                                &signerDerLen))
     {
         /* Yes */
-        SSF_TLS_TRACE_CERT_ERROR(&_ssfcmsTraceCtx, "CMS: signer[%u] certificate not found", idx);
+        SSF_TLS_TRACE_CERT_ERROR(_SSF_CMS_TRACE_CTX, "CMS: signer[%u] certificate not found", idx);
         return false;
     }
 
@@ -982,7 +990,7 @@ static bool _SSFCMSVerifySigner(const SSFCMSSignedData_t *sd, uint8_t idx, const
                                    SSF_X509_PURPOSE_CODE_SIGNING, NULL, nowUnixSec))
     {
         /* Yes */
-        SSF_TLS_TRACE_CERT_ERROR(&_ssfcmsTraceCtx, "CMS: signer[%u] certificate chain FAILED", idx);
+        SSF_TLS_TRACE_CERT_ERROR(_SSF_CMS_TRACE_CTX, "CMS: signer[%u] certificate chain FAILED", idx);
         return false;
     }
 
@@ -993,7 +1001,7 @@ static bool _SSFCMSVerifySigner(const SSFCMSSignedData_t *sd, uint8_t idx, const
                                 si->signatureLen))
     {
         /* Yes */
-        SSF_TLS_TRACE_CERT_ERROR(&_ssfcmsTraceCtx, "CMS: signer[%u] signature FAILED", idx);
+        SSF_TLS_TRACE_CERT_ERROR(_SSF_CMS_TRACE_CTX, "CMS: signer[%u] signature FAILED", idx);
         return false;
     }
 
@@ -1001,7 +1009,7 @@ static bool _SSFCMSVerifySigner(const SSFCMSSignedData_t *sd, uint8_t idx, const
     resultOut->signerSubject = signerCert.subject;
     resultOut->hasSigningTime = si->hasSigningTime;
     resultOut->signingTime = si->signingTime;
-    SSF_TLS_TRACE_CERT_DEBUG(&_ssfcmsTraceCtx, "CMS: signer[%u] verified", idx);
+    SSF_TLS_TRACE_CERT_DEBUG(_SSF_CMS_TRACE_CTX, "CMS: signer[%u] verified", idx);
     return true;
 }
 
@@ -1030,7 +1038,7 @@ bool SSFCMSVerifyDigest(const SSFCMSSignedData_t *sd, const uint8_t *digest, uin
         if (_SSFCMSVerifySigner(sd, i, digest, digestLen, digestAlg, trustDer, trustDerLen,
                                 trustCount, nowUnixSec, resultOut)) return true;
     }
-    SSF_TLS_TRACE_CERT_ERROR(&_ssfcmsTraceCtx, "CMS: no signer verified (%u present)",
+    SSF_TLS_TRACE_CERT_ERROR(_SSF_CMS_TRACE_CTX, "CMS: no signer verified (%u present)",
                              sd->signersLen);
     return false;
 }
@@ -1056,7 +1064,7 @@ bool SSFCMSVerifyAttached(const SSFCMSSignedData_t *sd, const uint8_t **trustDer
     if (!sd->hasEContent)
     {
         /* Yes, nothing to digest */
-        SSF_TLS_TRACE_CERT_ERROR(&_ssfcmsTraceCtx, "CMS: content is detached, supply its digest");
+        SSF_TLS_TRACE_CERT_ERROR(_SSF_CMS_TRACE_CTX, "CMS: content is detached, supply its digest");
         return false;
     }
     for (i = 0; i < sd->signersLen; i++)
@@ -1064,7 +1072,7 @@ bool SSFCMSVerifyAttached(const SSFCMSSignedData_t *sd, const uint8_t **trustDer
         if (_SSFCMSVerifySigner(sd, i, NULL, 0u, SSF_CMS_DIGEST_SHA256, trustDer, trustDerLen,
                                 trustCount, nowUnixSec, resultOut)) return true;
     }
-    SSF_TLS_TRACE_CERT_ERROR(&_ssfcmsTraceCtx, "CMS: no signer verified (%u present)",
+    SSF_TLS_TRACE_CERT_ERROR(_SSF_CMS_TRACE_CTX, "CMS: no signer verified (%u present)",
                              sd->signersLen);
     return false;
 }

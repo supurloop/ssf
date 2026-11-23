@@ -192,7 +192,7 @@ for a future handshake / transport layer.
 | `SSF_TLS_CONFIG_PSK_ENABLE` | `1` | Reserved for PSK handshake support. Unused today. |
 | `SSF_TLS_CONFIG_TICKET_LIFETIME_SEC` | `3600` | Reserved for session-ticket lifetime. Unused today. |
 | `SSF_TLS_CONFIG_MAX_ALPN_LEN` | `32` | Reserved for ALPN protocol list sizing. Unused today. |
-| `SSF_TLS_CONFIG_ENABLE_TRACE` | `0` (`1` when `SSF_CONFIG_X509_UNIT_TEST` or `SSF_CONFIG_CMS_UNIT_TEST` is `1`) | `1` compiles in the trace messages that `SSFX509SetTraceCtx()` / `SSFCMSSetTraceCtx()` callbacks receive. `0` compiles them out: on Cortex-M about 3.7 KB less flash in ssfx509 and 1.4 KB in ssfcms, no `snprintf` reference (newlib-nano's formatter is about 3.8 KB, full newlib's about 26 KB, if nothing else uses it), and 240-272 B less stack in each tracing function. The `SetTraceCtx` functions remain but no message is sent. |
+| `SSF_TLS_CONFIG_ENABLE_TRACE` | `0` (`1` when `SSF_CONFIG_X509_UNIT_TEST` or `SSF_CONFIG_CMS_UNIT_TEST` is `1`) | `1` compiles in the trace messages that `SSFX509SetTraceCtx()` / `SSFCMSSetTraceCtx()` callbacks receive. `0` compiles them out: on Cortex-M about 3.7 KB less flash in ssfx509 and 1.4 KB in ssfcms, no `snprintf` reference (newlib-nano's formatter is about 3.8 KB, full newlib's about 26 KB, if nothing else uses it), and 240-272 B less stack in each tracing function. The `SetTraceCtx` functions and their static state are also compiled out; calls to them still compile but do nothing. |
 
 <a id="api-summary"></a>
 

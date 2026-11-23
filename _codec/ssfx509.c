@@ -55,12 +55,19 @@
 #define _SSF_X509_RSA_PSS (0u)
 #endif
 
+#if SSF_TLS_CONFIG_ENABLE_TRACE == 1
 /* Module-scope trace context for chain verification, installed by SSFX509SetTraceCtx() */
 static SSFTLSTraceCtx_t _ssfx509TraceCtx;
+#define _SSF_X509_TRACE_CTX (&_ssfx509TraceCtx)
 
 /* Caller trace callback that _SSFX509TraceAdapter() forwards each message to */
 static void (*_ssfx509TraceFn)(int, int, const char *, void *);
+#else
+/* Tracing compiled out: the trace macros discard this NULL context */
+#define _SSF_X509_TRACE_CTX ((SSFTLSTraceCtx_t *)NULL)
+#endif
 
+#if SSF_TLS_CONFIG_ENABLE_TRACE == 1
 /* --------------------------------------------------------------------------------------------- */
 /* Delivers a trace message to the installed int-signature callback.                             */
 /* --------------------------------------------------------------------------------------------- */
@@ -84,6 +91,7 @@ void SSFX509SetTraceCtx(void (*fnOpt)(int, int, const char *, void *), void *use
     _ssfx509TraceCtx.fn = (fnOpt != NULL) ? _SSFX509TraceAdapter : NULL;
     _ssfx509TraceCtx.userCtx = userCtxOpt;
 }
+#endif /* SSF_TLS_CONFIG_ENABLE_TRACE */
 
 /* --------------------------------------------------------------------------------------------- */
 /* OID constant tables (raw DER-encoded content bytes)                                           */
@@ -3029,7 +3037,7 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
     if ((keyCert->pubKey == NULL) || (keyCert->pubKeyLen == 0u))
     {
         /* Yes, nothing to verify with; the verifiers would trap on it */
-        SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx, "VerifySig: empty public key");
+        SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX, "VerifySig: empty public key");
         return false;
     }
     /* No, hand the key to the scheme the signature algorithm selects */
@@ -3045,7 +3053,7 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
             (sigAlgParamsLen != 0u))
         {
             /* No */
-            SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+            SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
                 "VerifySig: ECDSA needs an id-ecPublicKey key and absent parameters");
             return false;
         }
@@ -3058,7 +3066,7 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
                                   impliedOidLen))
         {
             /* No */
-            SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+            SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
                 "VerifySig: digest algorithm disagrees with ECDSA signature algorithm");
             return false;
         }
@@ -3084,7 +3092,7 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
 #endif
         {
             /* No, unknown curve or one compiled out of this build; nothing to verify with */
-            SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+            SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
                 "VerifySig: ECDSA key curve OID not recognized or not enabled (%lu bytes)",
                 (unsigned long)keyCert->ecCurveOidRawLen);
             return false;
@@ -3093,7 +3101,7 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
         /* keyCert's pubKey is the SEC 1 point; ssfecdsa truncates a long digest (RFC 5758 3.2) */
         ok = SSFECDSAVerify(curve, keyCert->pubKey, (size_t)keyCert->pubKeyLen, hash, hashLen, sig,
                             (size_t)sigLen);
-        SSF_TLS_TRACE_CERT_DEBUG(&_ssfx509TraceCtx,
+        SSF_TLS_TRACE_CERT_DEBUG(_SSF_X509_TRACE_CTX,
             "VerifySig: ECDSA curve=%d pubKeyLen=%lu sigLen=%lu -> %s", curve,
             (unsigned long)keyCert->pubKeyLen, (unsigned long)sigLen, ok ? "OK" : "FAIL");
         return ok;
@@ -3115,7 +3123,7 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
         if (!_SSFX509KeyAlgIs(keyCert, _oidRSA, sizeof(_oidRSA)))
         {
             /* No */
-            SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+            SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
                 "VerifySig: RSA PKCS#1 v1.5 needs an rsaEncryption key");
             return false;
         }
@@ -3126,7 +3134,7 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
             if (!_SSFX509HashFromOID(digestAlgOidRawOpt, digestAlgOidRawLen, &hashId))
             {
                 /* No */
-                SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+                SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
                     "VerifySig: rsaEncryption needs a SHA-2 digest algorithm (%lu bytes given)",
                     (unsigned long)digestAlgOidRawLen);
                 return false;
@@ -3156,7 +3164,7 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
                                       impliedOidLen))
             {
                 /* No */
-                SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+                SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
                     "VerifySig: digest algorithm disagrees with RSA signature algorithm");
                 return false;
             }
@@ -3167,7 +3175,7 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
         if (!_SSFX509RSAKeyPolicyOK(keyCert->pubKey, keyCert->pubKeyLen))
         {
             /* No, refuse it even if the signature would verify */
-            SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+            SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
                 "VerifySig: RSA key below policy (min %u bits, odd e >= 3)",
                 (unsigned int)SSF_X509_CONFIG_RSA_MIN_BITS);
             return false;
@@ -3175,7 +3183,7 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
         /* Yes, verify with keyCert's pubKey, the DER RSAPublicKey from the SPKI BIT STRING */
         ok = SSFRSAVerifyPKCS1(keyCert->pubKey, (size_t)keyCert->pubKeyLen, hashId, hash, hashLen,
                                sig, (size_t)sigLen);
-        SSF_TLS_TRACE_CERT_DEBUG(&_ssfx509TraceCtx,
+        SSF_TLS_TRACE_CERT_DEBUG(_SSF_X509_TRACE_CTX,
             "VerifySig: RSA-PKCS1 hash=%d pubKeyLen=%lu sigLen=%lu -> %s", hashId,
             (unsigned long)keyCert->pubKeyLen, (unsigned long)sigLen, ok ? "OK" : "FAIL");
         return ok;
@@ -3191,7 +3199,7 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
             (!_SSFX509KeyAlgIs(keyCert, _oidRSAPSS, sizeof(_oidRSAPSS))))
         {
             /* No */
-            SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+            SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
                 "VerifySig: RSA-PSS needs an rsaEncryption or id-RSASSA-PSS key");
             return false;
         }
@@ -3199,7 +3207,7 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
         if (!_SSFX509ParsePSSParams(sigAlgParamsOpt, sigAlgParamsLen, &hashId, &saltLen))
         {
             /* No, never verify under substituted defaults */
-            SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+            SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
                 "VerifySig: RSA-PSS parameters absent, malformed or unsupported");
             return false;
         }
@@ -3211,7 +3219,7 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
                                   impliedOidLen))
         {
             /* No */
-            SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+            SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
                 "VerifySig: digest algorithm disagrees with RSA-PSS parameters");
             return false;
         }
@@ -3221,7 +3229,7 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
         if (saltLen > hashLen)
         {
             /* Yes, longer than the hash is never issued and is not accepted */
-            SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+            SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
                 "VerifySig: RSA-PSS saltLength %lu exceeds hash length %u", (unsigned long)saltLen,
                 (unsigned int)hashLen);
             return false;
@@ -3230,7 +3238,7 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
         if (!_SSFX509RSAKeyPolicyOK(keyCert->pubKey, keyCert->pubKeyLen))
         {
             /* No, refuse it even if the signature would verify */
-            SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+            SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
                 "VerifySig: RSA key below policy (min %u bits, odd e >= 3)",
                 (unsigned int)SSF_X509_CONFIG_RSA_MIN_BITS);
             return false;
@@ -3238,7 +3246,7 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
         /* Yes, verify the signature */
         ok = SSFRSAVerifyPSS(keyCert->pubKey, (size_t)keyCert->pubKeyLen, hashId, hash, hashLen,
                              (size_t)saltLen, sig, (size_t)sigLen);
-        SSF_TLS_TRACE_CERT_DEBUG(&_ssfx509TraceCtx,
+        SSF_TLS_TRACE_CERT_DEBUG(_SSF_X509_TRACE_CTX,
             "VerifySig: RSA-PSS hash=%d pubKeyLen=%lu sigLen=%lu -> %s", hashId,
             (unsigned long)keyCert->pubKeyLen, (unsigned long)sigLen, ok ? "OK" : "FAIL");
         return ok;
@@ -3253,7 +3261,7 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
             (sigAlgParamsLen != 0u))
         {
             /* No */
-            SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+            SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
                 "VerifySig: Ed25519 needs an id-Ed25519 key and absent parameters");
             return false;
         }
@@ -3262,7 +3270,7 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
                                   sizeof(_oidSHA512)))
         {
             /* No */
-            SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+            SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
                 "VerifySig: Ed25519 requires the SHA-512 digest algorithm");
             return false;
         }
@@ -3271,19 +3279,19 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
         if ((keyCert->pubKeyLen != SSF_ED25519_PUB_KEY_SIZE) || (sigLen != SSF_ED25519_SIG_SIZE))
         {
             /* No, malformed */
-            SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+            SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
                 "VerifySig: Ed25519 bad key/sig size (pubKey=%lu sig=%lu)",
                 (unsigned long)keyCert->pubKeyLen, (unsigned long)sigLen);
             return false;
         }
         ok = SSFEd25519Verify(keyCert->pubKey, data, dataLen, sig);
-        SSF_TLS_TRACE_CERT_DEBUG(&_ssfx509TraceCtx,
+        SSF_TLS_TRACE_CERT_DEBUG(_SSF_X509_TRACE_CTX,
             "VerifySig: Ed25519 pubKeyLen=%lu sigLen=%lu -> %s",
             (unsigned long)keyCert->pubKeyLen, (unsigned long)sigLen, ok ? "OK" : "FAIL");
         return ok;
     }
 
-    SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx, "VerifySig: unsupported sigAlg OID (%lu bytes)",
+    SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX, "VerifySig: unsupported sigAlg OID (%lu bytes)",
                              (unsigned long)sigAlgOidRawLen);
     return false;
 }
@@ -3591,7 +3599,7 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
         if (!SSFX509Parse(chainDer[i], chainDerLen[i], &certs[i]))
         {
             /* No, malformed */
-            SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx, "Chain: parse cert[%u] failed (%lu bytes)",
+            SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX, "Chain: parse cert[%u] failed (%lu bytes)",
                                      i, (unsigned long)chainDerLen[i]);
             return false;
         }
@@ -3600,7 +3608,7 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
         if (certs[i].version != 2u)
         {
             /* No, v1 and v2 certificates cannot carry the extensions this path relies on */
-            SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx, "Chain: cert[%u] is v%u (must be v3)", i,
+            SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX, "Chain: cert[%u] is v%u (must be v3)", i,
                                      certs[i].version + 1u);
             return false;
         }
@@ -3611,7 +3619,7 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
                     certs[i].sigAlgOidRawLen) != 0))
         {
             /* No, the unsigned outer copy disagrees with the signed one */
-            SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+            SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
                 "Chain: cert[%u] TBS sigAlg OID (%lu bytes) != outer sigAlg OID (%lu bytes)", i,
                 (unsigned long)certs[i].sigAlgOidRawLen,
                 (unsigned long)certs[i].outerSigAlgOidRawLen);
@@ -3625,7 +3633,7 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
                      certs[i].sigAlgParamsLen) != 0)))
         {
             /* No */
-            SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+            SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
                 "Chain: cert[%u] TBS sigAlg params (%lu bytes) != outer params (%lu bytes)", i,
                 (unsigned long)certs[i].sigAlgParamsLen,
                 (unsigned long)certs[i].outerSigAlgParamsLen);
@@ -3636,7 +3644,7 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
         if (!SSFX509IsValid(&certs[i], nowUnixSec))
         {
             /* No */
-            SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+            SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
                 "Chain: cert[%u] not valid at time %llu (notBefore=%llu notAfter=%llu)", i,
                 (unsigned long long)nowUnixSec, (unsigned long long)certs[i].notBefore,
                 (unsigned long long)certs[i].notAfter);
@@ -3652,7 +3660,7 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
         if (!_SSFX509NameEquals(&certs[i].issuer, &certs[i + 1u].subject))
         {
             /* No, the chain is not linked by name even if the key happens to verify */
-            SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+            SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
                 "Chain: cert[%u] issuer name does not match cert[%u] subject name", i, i + 1u);
             return false;
         }
@@ -3661,7 +3669,7 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
         if (!SSFX509VerifyCertSignature(&certs[i], &certs[i + 1u]))
         {
             /* No */
-            SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+            SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
                 "Chain: cert[%u] signature by cert[%u] FAILED", i, i + 1u);
             return false;
         }
@@ -3670,7 +3678,7 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
         if (!SSFX509CheckSKIDAKID(&certs[i], &certs[i + 1u]))
         {
             /* No */
-            SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+            SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
                 "Chain: cert[%u] AKID (%lu bytes) does not match cert[%u] SKID (%lu bytes)", i,
                 (unsigned long)certs[i].akidLen, i + 1u, (unsigned long)certs[i + 1u].skidLen);
             return false;
@@ -3693,7 +3701,7 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
     if (!trusted)
     {
         /* No */
-        SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+        SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
             "Chain: no trust anchor found for issuer of cert[%u] (%u CAs checked)", chainLen - 1u,
             trustCount);
         return false;
@@ -3706,7 +3714,7 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
         if ((!certs[i].hasBasicConstraints) || (!certs[i].isCA))
         {
             /* No */
-            SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+            SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
                 "Chain: cert[%u] not a CA (hasBC=%d isCA=%d)",
                 i, certs[i].hasBasicConstraints, certs[i].isCA);
             return false;
@@ -3716,7 +3724,7 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
         if ((certs[i].hasKeyUsage) && ((certs[i].keyUsageBits & SSF_X509_KU_KEY_CERT_SIGN) == 0u))
         {
             /* No */
-            SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+            SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
                 "Chain: cert[%u] is CA but Key Usage lacks keyCertSign (KU=0x%04X)", i,
                 certs[i].keyUsageBits);
             return false;
@@ -3726,7 +3734,7 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
         if ((certs[i].pathLenConstraint >= 0) && ((int8_t)(i - 1u) > certs[i].pathLenConstraint))
         {
             /* No */
-            SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+            SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
                 "Chain: cert[%u] pathLenConstraint=%d but %u subordinate CAs present", i,
                 certs[i].pathLenConstraint, i - 1u);
             return false;
@@ -3749,7 +3757,7 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
     if ((anchor.pathLenConstraint >= 0) && ((int8_t)numSubCAs > anchor.pathLenConstraint))
     {
         /* No */
-        SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+        SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
             "Chain: trust anchor pathLenConstraint=%d but %u subordinate CAs in chain",
             anchor.pathLenConstraint, numSubCAs);
         return false;
@@ -3762,7 +3770,7 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
         if (!_SSFX509NCValidateCert(&certs[i], &anchor))
         {
             /* No */
-            SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+            SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
                 "Chain: cert[%u] SAN violates nameConstraints of trust anchor", i);
             return false;
         }
@@ -3774,7 +3782,7 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
          ((purpose == SSF_X509_PURPOSE_CODE_SIGNING) && (!certs[0].ekuCodeSigning))))
     {
         /* No */
-        SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+        SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
             "Chain: leaf EKU lacks the purpose %d (serverAuth=%d clientAuth=%d codeSigning=%d)",
             purpose, certs[0].ekuServerAuth, certs[0].ekuClientAuth, certs[0].ekuCodeSigning);
         return false;
@@ -3786,7 +3794,7 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
           (SSF_X509_KU_DIGITAL_SIGNATURE | SSF_X509_KU_NON_REPUDIATION)) == 0u))
     {
         /* No */
-        SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+        SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
             "Chain: leaf Key Usage lacks digitalSignature and nonRepudiation (KU=0x%04X)",
             certs[0].keyUsageBits);
         return false;
@@ -3801,7 +3809,7 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
             if (!_SSFX509NCValidateCert(&certs[j], &certs[i]))
             {
                 /* Yes */
-                SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+                SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
                     "Chain: cert[%u] SAN violates nameConstraints of cert[%u]", j, i);
                 return false;
             }
@@ -3816,7 +3824,7 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
             if (!certs[i].exts[e].critical) continue;
             if (_SSFX509IsKnownExtension(certs[i].exts[e].oidRaw,
                                          certs[i].exts[e].oidRawLen)) continue;
-            SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+            SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
                 "Chain: cert[%u] has unrecognized critical extension (OID %lu bytes)", i,
                 (unsigned long)certs[i].exts[e].oidRawLen);
             return false;
@@ -3865,7 +3873,7 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
         if (!matched)
         {
             /* No */
-            SSF_TLS_TRACE_CERT_ERROR(&_ssfx509TraceCtx,
+            SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
                 "Chain: hostname '%s' not matched in SAN (sanLen=%u)", hostnameStrOpt,
                 certs[0].sanLen);
             return false;

@@ -136,7 +136,12 @@ bool SSFCMSVerifyDigest(const SSFCMSSignedData_t *sd, const uint8_t *digest, uin
 bool SSFCMSVerifyAttached(const SSFCMSSignedData_t *sd, const uint8_t **trustDer,
                           const uint32_t *trustDerLen, uint8_t trustCount, uint64_t nowUnixSec,
                           SSFCMSVerifyResult_t *resultOut);
+#if SSF_TLS_CONFIG_ENABLE_TRACE == 1
 void SSFCMSSetTraceCtx(void (*fnOpt)(int, int, const char *, void *), void *userCtxOpt);
+#else
+/* Tracing compiled out: calls still compile but do nothing */
+#define SSFCMSSetTraceCtx(fnOpt, userCtxOpt) do { (void)(fnOpt); (void)(userCtxOpt); } while (0)
+#endif
 
 /* --------------------------------------------------------------------------------------------- */
 /* Unit test                                                                                     */

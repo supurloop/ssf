@@ -324,7 +324,12 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
                                const char *hostnameStrOpt, uint64_t nowUnixSec);
 
 /* Set trace callback for chain verification; fnOpt is a SSFTLSTraceFn_t, NULL disables. */
+#if SSF_TLS_CONFIG_ENABLE_TRACE == 1
 void SSFX509SetTraceCtx(void (*fnOpt)(int, int, const char *, void *), void *userCtxOpt);
+#else
+/* Tracing compiled out: calls still compile but do nothing */
+#define SSFX509SetTraceCtx(fnOpt, userCtxOpt) do { (void)(fnOpt); (void)(userCtxOpt); } while (0)
+#endif
 
 /* --------------------------------------------------------------------------------------------- */
 /* Unit test                                                                                     */

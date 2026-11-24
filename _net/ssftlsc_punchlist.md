@@ -293,8 +293,9 @@ is rejected.
       arrays, no copy). Stack peak 26,904 -> 23,768 (EC), 31,944 -> 28,808 (RSA); session +24 B.
       Unit: kept / seen counts. Wire, before all `unknown_ca`: leaf + 4 int + root (6) verifies;
       leaf + 5 int + root (7, root dropped) verifies; leaf + 6 int (7) fails `unknown_ca` with
-      the truncation trace. `README.md` footnote 58 still says default 8 and its ssfx509 stack
-      figure predates the change (outside the approved files).
+      the truncation trace. `README.md` updated afterwards (3B item R): footnote 58
+      default 6, X.509 stack ~14 -> ~12 KB, CMS ~18 -> ~16 KB (the verifier frame measured
+      -1,776 B on Cortex-M4 -Os at depth 6 vs 8).
 - [ ] Out-of-order or extraneous certificates: RFC 8446 4.4.2 says receivers SHOULD handle
       "potentially extraneous certificates and arbitrary orderings" (leaf first). `ssfx509`
       requires cert[i] to be issued by cert[i + 1], so such chains fail. Needs path building in

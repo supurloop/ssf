@@ -157,7 +157,7 @@ Encoding and decoding interfaces for common data formats, all with strict buffer
 | Module | Description | Flash | Static RAM | Peak Stack | Heap | Reentrant |
 |--------|-------------|-------|------------|------------|------|-----------|
 | [ASN.1 DER](_codec/ssfasn1.md) | ASN.1 DER encoder/decoder (zero-copy decode + measure-then-write encode; X.509 / PKCS#1 / SEC 1 wire formats) | ~3.5 KB | — | ~160 B⁵² | — | Yes |
-| [X.509](_codec/ssfx509.md) | X.509 v3 certificate parser (zero-copy), generator, and RFC 5280 chain verifier (ECDSA / RSA / Ed25519, name constraints, hostname matching) | ~11 KB | ~8 B⁵⁹ | ~14 KB⁵⁸ | — | Yes⁵⁹ |
+| [X.509](_codec/ssfx509.md) | X.509 v3 certificate parser (zero-copy), generator, and RFC 5280 chain verifier (ECDSA / RSA / Ed25519, name constraints, hostname matching) | ~11 KB | ~8 B⁵⁹ | ~12 KB⁵⁸ | — | Yes⁵⁹ |
 | [Base64](_codec/ssfbase64.md) | Base64 encoder/decoder | ~700 B | — | ~64 B | — | Yes |
 | [Base64URL](_codec/ssfbase64url.md) | RFC 4648 §5 URL-safe Base64 encoder/decoder (unpadded output, strict decode; JWT convention) | ~300 B | — | ~1.1 KB⁵⁶ | — | Yes |
 | [Hex ASCII](_codec/ssfhex.md) | Binary-to-hex ASCII encoder/decoder | ~600 B | — | ~64 B | — | Yes |
@@ -180,7 +180,7 @@ Encoding and decoding interfaces for common data formats, all with strict buffer
 
 ⁵⁷ All functions are iterative, including `SSFMatchGlob` / `SSFMatchGlobI`, which retry only the most recent `*`, so stack is a small fixed frame regardless of pattern or input length and peaks under ~100 B.
 
-⁵⁸ Peak is in `SSFX509VerifyChain`, which holds `SSF_X509_CONFIG_MAX_CHAIN_DEPTH` (default 8) parsed `SSFX509Cert_t` structures (~1 KB each on 32-bit targets, ~1.6 KB on 64-bit; larger when the SAN / extension / Name Constraints limits are raised) plus one trust-anchor parse and the signature-verification chain of `ssfecdsa` / `ssfrsa` / `ssfed25519` (footnotes ⁴², ⁴⁸). Halving `SSF_X509_CONFIG_MAX_CHAIN_DEPTH` roughly halves it. `SSFX509Parse` alone peaks around ~600 B. Generation (`SSFX509EncodeTBS` / `SSFX509EncodeCert`) writes every element directly into the caller's buffer with no scratch arrays, so it peaks at well under ~2 KB regardless of `SSF_X509_CONFIG_MAX_CERT_SIZE`.
+⁵⁸ Peak is in `SSFX509VerifyChain`, which holds `SSF_X509_CONFIG_MAX_CHAIN_DEPTH` (default 6; also the TLS client's chain limit) parsed `SSFX509Cert_t` structures (~1 KB each on 32-bit targets, ~1.6 KB on 64-bit; larger when the SAN / extension / Name Constraints limits are raised) plus one trust-anchor parse and the signature-verification chain of `ssfecdsa` / `ssfrsa` / `ssfed25519` (footnotes ⁴², ⁴⁸). Halving `SSF_X509_CONFIG_MAX_CHAIN_DEPTH` roughly halves it. `SSFX509Parse` alone peaks around ~600 B. Generation (`SSFX509EncodeTBS` / `SSFX509EncodeCert`) writes every element directly into the caller's buffer with no scratch arrays, so it peaks at well under ~2 KB regardless of `SSF_X509_CONFIG_MAX_CERT_SIZE`.
 
 ⁵⁹ The only static state is the trace callback, its user pointer, and an internal adapter pointer installed by `SSFX509SetTraceCtx` (three pointers, compiled out when `SSF_TLS_CONFIG_ENABLE_TRACE` is `0`). Parsing, generation, and verification hold all state in caller-supplied structures and on the stack, so they are safe to run concurrently as long as the trace callback is not changed while verifications are in flight.
 
@@ -234,7 +234,7 @@ Cryptographic primitives for hashing, encryption, and random number generation.
 | [X25519](_crypto/ssfx25519.md) | X25519 key agreement over Curve25519 (RFC 7748) — constant-time, no ssfbn dependency | ~4 KB⁴³ | — | ~1.6 KB⁴⁴ | — | Yes |
 | [Ed25519](_crypto/ssfed25519.md) | Ed25519 signatures (RFC 8032 pure mode) — deterministic; uses SHA-512 from ssfsha2 | ~7 KB⁴⁵ | — | ~3.3 KB⁴⁶ | — | Yes |
 | [RSA](_crypto/ssfrsa.md) | RSA-2048/3072/4096 signatures (PKCS#1 v1.5 and PSS) + key generation; PKCS#1 DER key format | ~15 KB⁴⁷ | — | ~12 KB⁴⁸ | — | Yes |
-| [CMS](_crypto/ssfcms.md) | RFC 5652 CMS SignedData verifier (zero-copy parse; detached file signatures verified by digest; ECDSA / RSA / Ed25519; RFC 6211 algorithm protection) | ~6 KB | ~8 B⁶¹ | ~18 KB⁶⁰ | — | Yes⁶¹ |
+| [CMS](_crypto/ssfcms.md) | RFC 5652 CMS SignedData verifier (zero-copy parse; detached file signatures verified by digest; ECDSA / RSA / Ed25519; RFC 6211 algorithm protection) | ~6 KB | ~8 B⁶¹ | ~16 KB⁶⁰ | — | Yes⁶¹ |
 | [TLS 1.3](_crypto/ssftls.md) | TLS 1.3 core building blocks (key schedule, transcript hash, record layer); not a full TLS stack | ~2.5 KB⁴⁹ | — | ~1 KB⁵⁰ | — | Yes |
 | [PRNG](_crypto/ssfprng.md) | Cryptographically capable pseudo-random number generator | ~500 B | — | ~96 B | — | Yes |
 

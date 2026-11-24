@@ -824,7 +824,31 @@ is rejected.
       should generate its certificates rather than keep these.
 - [x] `ssftls.md` still says `SSF_TLS_CONFIG_MAX_CHAIN_DEPTH` is not referenced; ssftlsc uses
       it. Outside the TLS client.
-- [ ] Negative tests for every step 2 check.
+- [x] Negative tests for every step 2 check.
+      Done, TDD (test code only). Already deterministic before: plaintext after encryption,
+      the ServerHello and EncryptedExtensions parsers, Certificate bounds, CertificateVerify
+      trailing bytes, the empty trust store, close() mid-handshake, the close drain
+      (ssfnetsock). New, `_SSFTLSCUTServerFlightNegative()` on the RFC 8448 3 replay: the test
+      knows the server's handshake key, changes the flight's plaintext and re-encrypts it.
+      Finished bit (decrypt_error) and length (decode_error); CertificateVerify signature bit
+      with a Finished recomputed to agree, so only the signature check can catch it
+      (decrypt_error); PKCS#1 and ECDSA schemes with the RSA certificate (illegal_parameter);
+      certificate DER that does not parse (bad_certificate); an empty certificate list
+      (decode_error, 4.4.2.4); an unoffered EncryptedExtensions extension
+      (unsupported_extension); CertificateVerify before Certificate and a message after the
+      Finished (unexpected_message); a ciphertext bit (bad_record_mac). Each checks the alert
+      the client actually sends, decrypted with the trace's client handshake key, and that the
+      session's secrets, keys and buffers are wiped at the failure, before close(). The
+      control run checks, through `_SSFTLSCScrubTestHook`, that every named stack and session
+      secret is reported wiped (zero) on the success path; after close() nothing remains.
+      Mutation: 12 failure-site mutants (Finished compare / length / alert, CV signature /
+      scheme / alert, empty Certificate, leaf parse, key change ending its record, wipe on
+      failure, master secret wipe, bad-record alert), all killed; 9 of them passed the
+      committed suite. The first CV-signature case was caught only by the Finished (the
+      changed CV changed the transcript); fixed with the recomputed Finished. Compile-time
+      switch (script, not a unit test: the unit test needs the opt-in): with
+      SSF_TLSC_CONFIG_ALLOW_UNAUTHENTICATED 0, SSFTLSCSetUnauthenticated() does not compile
+      and open() with no trust anchors refuses.
 - [ ] Mutual TLS against a real endpoint: only local `s_server` / `gnutls-serv` so far.
       test.mosquitto.org port 8884 requires a client certificate (one it issues), a cheap
       real-world check alongside the interop item above. Found reviewing step 4.

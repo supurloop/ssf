@@ -3512,6 +3512,306 @@ static void _SSFTLSCUTRfc8448ClientAuth(void)
     _UTR8Close(s, _utR8s6ClientAlertRecord, _utR8s6ServerAlertRecord);
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Negative tests on the server flight (step 2 checks), built on the RFC 8448 3 replay: the test */
+/* knows the server's handshake key, so it changes the flight's plaintext, re-encrypts it and   */
+/* feeds it. Each case: the alert the client sends (decrypted with the trace's client handshake */
+/* key), no application keys, and every secret and buffer of the session wiped.                 */
+/* --------------------------------------------------------------------------------------------- */
+/* RFC 8448 3: the server's protected flight as plaintext: EncryptedExtensions (40), Certificate */
+/* (445), CertificateVerify (136), Finished (36) */
+static const uint8_t _utR8FlightPayload[657] = {
+    0x08, 0x00, 0x00, 0x24, 0x00, 0x22, 0x00, 0x0a, 0x00, 0x14, 0x00, 0x12,
+    0x00, 0x1d, 0x00, 0x17, 0x00, 0x18, 0x00, 0x19, 0x01, 0x00, 0x01, 0x01,
+    0x01, 0x02, 0x01, 0x03, 0x01, 0x04, 0x00, 0x1c, 0x00, 0x02, 0x40, 0x01,
+    0x00, 0x00, 0x00, 0x00, 0x0b, 0x00, 0x01, 0xb9, 0x00, 0x00, 0x01, 0xb5,
+    0x00, 0x01, 0xb0, 0x30, 0x82, 0x01, 0xac, 0x30, 0x82, 0x01, 0x15, 0xa0,
+    0x03, 0x02, 0x01, 0x02, 0x02, 0x01, 0x02, 0x30, 0x0d, 0x06, 0x09, 0x2a,
+    0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0b, 0x05, 0x00, 0x30, 0x0e,
+    0x31, 0x0c, 0x30, 0x0a, 0x06, 0x03, 0x55, 0x04, 0x03, 0x13, 0x03, 0x72,
+    0x73, 0x61, 0x30, 0x1e, 0x17, 0x0d, 0x31, 0x36, 0x30, 0x37, 0x33, 0x30,
+    0x30, 0x31, 0x32, 0x33, 0x35, 0x39, 0x5a, 0x17, 0x0d, 0x32, 0x36, 0x30,
+    0x37, 0x33, 0x30, 0x30, 0x31, 0x32, 0x33, 0x35, 0x39, 0x5a, 0x30, 0x0e,
+    0x31, 0x0c, 0x30, 0x0a, 0x06, 0x03, 0x55, 0x04, 0x03, 0x13, 0x03, 0x72,
+    0x73, 0x61, 0x30, 0x81, 0x9f, 0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48,
+    0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01, 0x05, 0x00, 0x03, 0x81, 0x8d, 0x00,
+    0x30, 0x81, 0x89, 0x02, 0x81, 0x81, 0x00, 0xb4, 0xbb, 0x49, 0x8f, 0x82,
+    0x79, 0x30, 0x3d, 0x98, 0x08, 0x36, 0x39, 0x9b, 0x36, 0xc6, 0x98, 0x8c,
+    0x0c, 0x68, 0xde, 0x55, 0xe1, 0xbd, 0xb8, 0x26, 0xd3, 0x90, 0x1a, 0x24,
+    0x61, 0xea, 0xfd, 0x2d, 0xe4, 0x9a, 0x91, 0xd0, 0x15, 0xab, 0xbc, 0x9a,
+    0x95, 0x13, 0x7a, 0xce, 0x6c, 0x1a, 0xf1, 0x9e, 0xaa, 0x6a, 0xf9, 0x8c,
+    0x7c, 0xed, 0x43, 0x12, 0x09, 0x98, 0xe1, 0x87, 0xa8, 0x0e, 0xe0, 0xcc,
+    0xb0, 0x52, 0x4b, 0x1b, 0x01, 0x8c, 0x3e, 0x0b, 0x63, 0x26, 0x4d, 0x44,
+    0x9a, 0x6d, 0x38, 0xe2, 0x2a, 0x5f, 0xda, 0x43, 0x08, 0x46, 0x74, 0x80,
+    0x30, 0x53, 0x0e, 0xf0, 0x46, 0x1c, 0x8c, 0xa9, 0xd9, 0xef, 0xbf, 0xae,
+    0x8e, 0xa6, 0xd1, 0xd0, 0x3e, 0x2b, 0xd1, 0x93, 0xef, 0xf0, 0xab, 0x9a,
+    0x80, 0x02, 0xc4, 0x74, 0x28, 0xa6, 0xd3, 0x5a, 0x8d, 0x88, 0xd7, 0x9f,
+    0x7f, 0x1e, 0x3f, 0x02, 0x03, 0x01, 0x00, 0x01, 0xa3, 0x1a, 0x30, 0x18,
+    0x30, 0x09, 0x06, 0x03, 0x55, 0x1d, 0x13, 0x04, 0x02, 0x30, 0x00, 0x30,
+    0x0b, 0x06, 0x03, 0x55, 0x1d, 0x0f, 0x04, 0x04, 0x03, 0x02, 0x05, 0xa0,
+    0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01,
+    0x0b, 0x05, 0x00, 0x03, 0x81, 0x81, 0x00, 0x85, 0xaa, 0xd2, 0xa0, 0xe5,
+    0xb9, 0x27, 0x6b, 0x90, 0x8c, 0x65, 0xf7, 0x3a, 0x72, 0x67, 0x17, 0x06,
+    0x18, 0xa5, 0x4c, 0x5f, 0x8a, 0x7b, 0x33, 0x7d, 0x2d, 0xf7, 0xa5, 0x94,
+    0x36, 0x54, 0x17, 0xf2, 0xea, 0xe8, 0xf8, 0xa5, 0x8c, 0x8f, 0x81, 0x72,
+    0xf9, 0x31, 0x9c, 0xf3, 0x6b, 0x7f, 0xd6, 0xc5, 0x5b, 0x80, 0xf2, 0x1a,
+    0x03, 0x01, 0x51, 0x56, 0x72, 0x60, 0x96, 0xfd, 0x33, 0x5e, 0x5e, 0x67,
+    0xf2, 0xdb, 0xf1, 0x02, 0x70, 0x2e, 0x60, 0x8c, 0xca, 0xe6, 0xbe, 0xc1,
+    0xfc, 0x63, 0xa4, 0x2a, 0x99, 0xbe, 0x5c, 0x3e, 0xb7, 0x10, 0x7c, 0x3c,
+    0x54, 0xe9, 0xb9, 0xeb, 0x2b, 0xd5, 0x20, 0x3b, 0x1c, 0x3b, 0x84, 0xe0,
+    0xa8, 0xb2, 0xf7, 0x59, 0x40, 0x9b, 0xa3, 0xea, 0xc9, 0xd9, 0x1d, 0x40,
+    0x2d, 0xcc, 0x0c, 0xc8, 0xf8, 0x96, 0x12, 0x29, 0xac, 0x91, 0x87, 0xb4,
+    0x2b, 0x4d, 0xe1, 0x00, 0x00, 0x0f, 0x00, 0x00, 0x84, 0x08, 0x04, 0x00,
+    0x80, 0x5a, 0x74, 0x7c, 0x5d, 0x88, 0xfa, 0x9b, 0xd2, 0xe5, 0x5a, 0xb0,
+    0x85, 0xa6, 0x10, 0x15, 0xb7, 0x21, 0x1f, 0x82, 0x4c, 0xd4, 0x84, 0x14,
+    0x5a, 0xb3, 0xff, 0x52, 0xf1, 0xfd, 0xa8, 0x47, 0x7b, 0x0b, 0x7a, 0xbc,
+    0x90, 0xdb, 0x78, 0xe2, 0xd3, 0x3a, 0x5c, 0x14, 0x1a, 0x07, 0x86, 0x53,
+    0xfa, 0x6b, 0xef, 0x78, 0x0c, 0x5e, 0xa2, 0x48, 0xee, 0xaa, 0xa7, 0x85,
+    0xc4, 0xf3, 0x94, 0xca, 0xb6, 0xd3, 0x0b, 0xbe, 0x8d, 0x48, 0x59, 0xee,
+    0x51, 0x1f, 0x60, 0x29, 0x57, 0xb1, 0x54, 0x11, 0xac, 0x02, 0x76, 0x71,
+    0x45, 0x9e, 0x46, 0x44, 0x5c, 0x9e, 0xa5, 0x8c, 0x18, 0x1e, 0x81, 0x8e,
+    0x95, 0xb8, 0xc3, 0xfb, 0x0b, 0xf3, 0x27, 0x84, 0x09, 0xd3, 0xbe, 0x15,
+    0x2a, 0x3d, 0xa5, 0x04, 0x3e, 0x06, 0x3d, 0xda, 0x65, 0xcd, 0xf5, 0xae,
+    0xa2, 0x0d, 0x53, 0xdf, 0xac, 0xd4, 0x2f, 0x74, 0xf3, 0x14, 0x00, 0x00,
+    0x20, 0x9b, 0x9b, 0x14, 0x1d, 0x90, 0x63, 0x37, 0xfb, 0xd2, 0xcb, 0xdc,
+    0xe7, 0x1d, 0xf4, 0xde, 0xda, 0x4a, 0xb4, 0x2c, 0x30, 0x95, 0x72, 0xcb,
+    0x7f, 0xff, 0xee, 0x54, 0x54, 0xb7, 0x8f, 0x07, 0x18
+};
+#define SSF_TLSC_UT_R8_EE_LEN (40u)
+#define SSF_TLSC_UT_R8_CERT_LEN (445u)
+#define SSF_TLSC_UT_R8_CV_LEN (136u)
+
+/* Offsets of the flight's messages */
+#define SSF_TLSC_UT_R8_CERT_AT (SSF_TLSC_UT_R8_EE_LEN)
+#define SSF_TLSC_UT_R8_CV_AT (SSF_TLSC_UT_R8_CERT_AT + SSF_TLSC_UT_R8_CERT_LEN)
+#define SSF_TLSC_UT_R8_FIN_AT (SSF_TLSC_UT_R8_CV_AT + SSF_TLSC_UT_R8_CV_LEN)
+
+/* Scrub hook: counts the wipes reported by name and checks each buffer is zero when reported. */
+#define SSF_TLSC_UT_MAX_SCRUBS (64u)
+static const char *_utScrubWhat[SSF_TLSC_UT_MAX_SCRUBS];
+static uint8_t _utScrubCount;
+static void _UTScrubRecord(void *ctx, const char *what, const void *buf, size_t len)
+{
+    size_t i;
+
+    (void)ctx;
+    for (i = 0; i < len; i++) SSF_ASSERT(((const uint8_t *)buf)[i] == 0u);
+    if (_utScrubCount < SSF_TLSC_UT_MAX_SCRUBS) _utScrubWhat[_utScrubCount++] = what;
+}
+static bool _UTScrubbed(const char *what)
+{
+    uint8_t i;
+
+    for (i = 0; i < _utScrubCount; i++) { if (strcmp(_utScrubWhat[i], what) == 0) return true; }
+    return false;
+}
+
+/* True if buf[0..len) is all zero. */
+static bool _UTZero(const void *buf, size_t len)
+{
+    size_t i;
+
+    for (i = 0; i < len; i++) { if (((const uint8_t *)buf)[i] != 0u) return false; }
+    return true;
+}
+
+/* Every secret, key and plaintext buffer of a session is zero (after a failure or a close). */
+static void _UTSessionWiped(const SSFTLSCSession_t *s)
+{
+    SSF_ASSERT(_UTZero(s->ephemeralPrivKey, sizeof(s->ephemeralPrivKey)));
+    SSF_ASSERT(_UTZero(s->savedHandshakeSecret, sizeof(s->savedHandshakeSecret)));
+    SSF_ASSERT(_UTZero(s->clientHsTrafficSecret, sizeof(s->clientHsTrafficSecret)));
+    SSF_ASSERT(_UTZero(s->serverHsTrafficSecret, sizeof(s->serverHsTrafficSecret)));
+    SSF_ASSERT(_UTZero(s->clientAppTrafficSecret, sizeof(s->clientAppTrafficSecret)));
+    SSF_ASSERT(_UTZero(s->serverAppTrafficSecret, sizeof(s->serverAppTrafficSecret)));
+    SSF_ASSERT(_UTZero(s->hsBuf, sizeof(s->hsBuf)));
+    SSF_ASSERT(_UTZero(s->recvBuf, sizeof(s->recvBuf)));
+    SSF_ASSERT(!s->sendStateInited && !s->recvStateInited);
+}
+
+/* Replays RFC 8448 3 with the server flight flight[0..len) (corruptRecord: also flip a byte of */
+/* its ciphertext); returns the alert the client sent, 0 if the handshake completed.           */
+static uint8_t _UTR8FlightAlert(const uint8_t *flight, size_t len, bool corruptRecord)
+{
+    SSFTLSCSession_t *s = &_utSession2;
+    SSFNetIOResult_t r = SSF_NET_IO_WANT_READ;
+    SSFTLSRecordState_t st;
+    uint8_t pt[16];
+    size_t n;
+    size_t off = 0;
+    size_t at;
+    uint8_t ct;
+    uint8_t alert;
+    uint16_t k;
+
+    _UTR8Start(s, _utR8ClientHello, sizeof(_utR8ClientHello), _utR8ClientPriv, NULL, 0u, NULL);
+    _UTQueueRecord(_utR8ShRecord, sizeof(_utR8ShRecord));
+    memset(&st, 0, sizeof(st));
+    _UTStateFrom(&st, _utR8SHsTraffic);
+    SSF_ASSERT(SSFTLSRecordEncrypt(&st, SSF_TLS_CT_HANDSHAKE, flight, len,
+                                   &_utFakeIn[_utFakeInLen], sizeof(_utFakeIn) - _utFakeInLen, &n));
+    SSFTLSRecordStateDeInit(&st);
+    if (corruptRecord) _utFakeIn[_utFakeInLen + 5u + 10u] ^= 0x01u;
+    _utFakeInLen += n;
+    for (k = 0; (k < 60u) && ((r == SSF_NET_IO_WANT_READ) || (r == SSF_NET_IO_WANT_WRITE)); k++)
+    {
+        r = s->transport.pollOpen(&s->transport);
+    }
+    if (r == SSF_NET_IO_SUCCESS)
+    {
+        s->transport.close(&s->transport);
+        SSFTLSCDeInit(s);
+        return 0u;
+    }
+    SSF_ASSERT(r == SSF_NET_IO_ERROR);
+    /* The failure wiped the session at once, before close() */
+    _UTSessionWiped(s);
+    /* After ClientHello (and the CCS): one alert, protected with the client handshake key */
+    (void)_UTR8NextOut(&off);
+    at = _UTR8NextOut(&off);
+    SSF_ASSERT(off == _utFakeOutLen);
+    memset(&st, 0, sizeof(st));
+    _UTStateFrom(&st, _utR8CHsTraffic);
+    SSF_ASSERT(SSFTLSRecordDecrypt(&st, &_utFakeOut[at], _UTOutRecordLen(at), pt, sizeof(pt), &n,
+                                   &ct));
+    SSFTLSRecordStateDeInit(&st);
+    SSF_ASSERT((ct == SSF_TLS_CT_ALERT) && (n == 2u) && (pt[0] == 2u));
+    alert = pt[1];
+    s->transport.close(&s->transport);
+    SSFTLSCDeInit(s);
+    return alert;
+}
+
+/* Recomputes the server Finished at f[finAt..] (verify_data) over the trace's ClientHello and */
+/* ServerHello and f[0..finAt), so a change before it is caught by its own check, not the     */
+/* Finished's.                                                                                 */
+static void _UTR8FixFinished(uint8_t *f, size_t finAt)
+{
+    static uint8_t th[1024];
+    size_t n = 0;
+    uint8_t h[32];
+
+    memcpy(&th[n], _utR8ClientHello, sizeof(_utR8ClientHello)); n += sizeof(_utR8ClientHello);
+    memcpy(&th[n], &_utR8ShRecord[5], sizeof(_utR8ShRecord) - 5u); n += sizeof(_utR8ShRecord) - 5u;
+    SSF_ASSERT((n + finAt) <= sizeof(th));
+    memcpy(&th[n], f, finAt); n += finAt;
+    SSFSHA256(th, (uint32_t)n, h, sizeof(h));
+    SSFTLSComputeFinished(SSF_HMAC_HASH_SHA256, _utR8SHsTraffic, 32u, h, 32u, &f[finAt + 4u], 32u);
+}
+
+static void _SSFTLSCUTServerFlightNegative(void)
+{
+    static uint8_t f[sizeof(_utR8FlightPayload) + 16u];
+    const size_t L = sizeof(_utR8FlightPayload);
+    const size_t cv = SSF_TLSC_UT_R8_CV_AT;
+    const size_t fin = SSF_TLSC_UT_R8_FIN_AT;
+    const size_t cert = SSF_TLSC_UT_R8_CERT_AT;
+
+    /* ---- Control: the flight unchanged completes, with the trace's secrets wiped as used ---- */
+    _utScrubCount = 0;
+    _SSFTLSCScrubTestHook = _UTScrubRecord;
+    SSF_ASSERT(_UTR8FlightAlert(_utR8FlightPayload, L, false) == 0u);
+    _SSFTLSCScrubTestHook = NULL;
+    SSF_ASSERT(_UTScrubbed("ephemeralPrivKey") && _UTScrubbed("sharedSecret") &&
+               _UTScrubbed("ecdhSecret") && _UTScrubbed("earlySecret") &&
+               _UTScrubbed("derivedSecret") && _UTScrubbed("handshakeSecret") &&
+               _UTScrubbed("masterSecret") && _UTScrubbed("savedHandshakeSecret") &&
+               _UTScrubbed("clientHsTrafficSecret") && _UTScrubbed("serverHsTrafficSecret") &&
+               _UTScrubbed("key") && _UTScrubbed("iv"));
+
+    /* ---- Finished: one bit of verify_data; one byte too long ---- */
+    memcpy(f, _utR8FlightPayload, L); f[fin + 4u + 7u] ^= 0x01u;
+    SSF_ASSERT(_UTR8FlightAlert(f, L, false) == SSF_TLS_ALERT_DECRYPT_ERROR);
+    memcpy(f, _utR8FlightPayload, L); f[fin + 3u] = 0x21u; f[L] = 0x00u;
+    SSF_ASSERT(_UTR8FlightAlert(f, L + 1u, false) == SSF_TLS_ALERT_DECODE_ERROR);
+
+    /* ---- CertificateVerify: one bit of the signature; PKCS#1 (never in TLS 1.3); ECDSA ---- */
+    /* ---- with the RSA certificate                                                       ---- */
+    memcpy(f, _utR8FlightPayload, L);
+    _UTR8FixFinished(f, fin);                                     /* Unchanged: still valid */
+    SSF_ASSERT(memcmp(f, _utR8FlightPayload, L) == 0);
+    f[cv + 8u + 20u] ^= 0x01u;
+    _UTR8FixFinished(f, fin);                  /* A Finished that agrees: only the signature is bad */
+    SSF_ASSERT(_UTR8FlightAlert(f, L, false) == SSF_TLS_ALERT_DECRYPT_ERROR);
+    memcpy(f, _utR8FlightPayload, L); f[cv + 4u] = 0x04u; f[cv + 5u] = 0x01u;
+    SSF_ASSERT(_UTR8FlightAlert(f, L, false) == SSF_TLS_ALERT_ILLEGAL_PARAMETER);
+    memcpy(f, _utR8FlightPayload, L); f[cv + 4u] = 0x04u; f[cv + 5u] = 0x03u;
+    SSF_ASSERT(_UTR8FlightAlert(f, L, false) == SSF_TLS_ALERT_ILLEGAL_PARAMETER);
+
+    /* ---- Certificate: DER that does not parse; an empty list (RFC 8446 4.4.2.4) ---- */
+    memcpy(f, _utR8FlightPayload, L); f[cert + 11u] = 0x31u;      /* Not a SEQUENCE */
+    SSF_ASSERT(_UTR8FlightAlert(f, L, false) == SSF_TLS_ALERT_BAD_CERTIFICATE);
+    {
+        static const uint8_t empty[] = { SSF_TLS_HS_CERTIFICATE, 0x00, 0x00, 0x04,
+                                         0x00, 0x00, 0x00, 0x00 };
+        size_t n = 0;
+
+        memcpy(&f[n], _utR8FlightPayload, cert); n += cert;
+        memcpy(&f[n], empty, sizeof(empty)); n += sizeof(empty);
+        memcpy(&f[n], &_utR8FlightPayload[cv], L - cv); n += L - cv;
+        SSF_ASSERT(_UTR8FlightAlert(f, n, false) == SSF_TLS_ALERT_DECODE_ERROR);
+    }
+
+    /* ---- EncryptedExtensions with an extension the client did not offer ---- */
+    {
+        size_t n = 0;
+
+        f[n++] = SSF_TLS_HS_ENCRYPTED_EXTENSIONS; f[n++] = 0x00;
+        f[n++] = _utR8FlightPayload[2]; f[n++] = (uint8_t)(_utR8FlightPayload[3] + 4u);
+        f[n++] = _utR8FlightPayload[4]; f[n++] = (uint8_t)(_utR8FlightPayload[5] + 4u);
+        f[n++] = 0xfa; f[n++] = 0xfa; f[n++] = 0x00; f[n++] = 0x00;
+        memcpy(&f[n], &_utR8FlightPayload[6], L - 6u); n += L - 6u;
+        SSF_ASSERT(_UTR8FlightAlert(f, n, false) == SSF_TLS_ALERT_UNSUPPORTED_EXT);
+    }
+
+    /* ---- Order: CertificateVerify before Certificate; a message after the Finished (keys ---- */
+    /* ---- change at the Finished, which must end its record: RFC 8446 5.1)                ---- */
+    {
+        size_t n = 0;
+
+        memcpy(&f[n], _utR8FlightPayload, cert); n += cert;
+        memcpy(&f[n], &_utR8FlightPayload[cv], SSF_TLSC_UT_R8_CV_LEN); n += SSF_TLSC_UT_R8_CV_LEN;
+        memcpy(&f[n], &_utR8FlightPayload[cert], SSF_TLSC_UT_R8_CERT_LEN);
+        n += SSF_TLSC_UT_R8_CERT_LEN;
+        memcpy(&f[n], &_utR8FlightPayload[fin], L - fin); n += L - fin;
+        SSF_ASSERT(_UTR8FlightAlert(f, n, false) == SSF_TLS_ALERT_UNEXPECTED_MSG);
+    }
+    memcpy(f, _utR8FlightPayload, L);
+    f[L] = 0x04u; f[L + 1u] = 0x00u; f[L + 2u] = 0x00u; f[L + 3u] = 0x00u;
+    SSF_ASSERT(_UTR8FlightAlert(f, L + 4u, false) == SSF_TLS_ALERT_UNEXPECTED_MSG);
+
+    /* ---- The record itself: one bit of the ciphertext ---- */
+    SSF_ASSERT(_UTR8FlightAlert(_utR8FlightPayload, L, true) == SSF_TLS_ALERT_BAD_RECORD_MAC);
+
+    /* ---- After a completed handshake and close(), nothing of the session remains ---- */
+    {
+        SSFTLSCSession_t *s = &_utSession2;
+        SSFNetIOResult_t r = SSF_NET_IO_WANT_READ;
+        SSFTLSRecordState_t st;
+        uint16_t k;
+
+        _UTR8Start(s, _utR8ClientHello, sizeof(_utR8ClientHello), _utR8ClientPriv, NULL, 0u,
+                   NULL);
+        _UTQueueRecord(_utR8ShRecord, sizeof(_utR8ShRecord));
+        _UTQueueRecord(_utR8FlightRecord, sizeof(_utR8FlightRecord));
+        for (k = 0; (k < 60u) && ((r == SSF_NET_IO_WANT_READ) || (r == SSF_NET_IO_WANT_WRITE)); k++)
+        {
+            r = s->transport.pollOpen(&s->transport);
+        }
+        SSF_ASSERT(r == SSF_NET_IO_SUCCESS);
+        /* Handshake secrets are gone already; the application ones stay for KeyUpdate */
+        SSF_ASSERT(_UTZero(s->clientHsTrafficSecret, sizeof(s->clientHsTrafficSecret)));
+        SSF_ASSERT(_UTZero(s->serverHsTrafficSecret, sizeof(s->serverHsTrafficSecret)));
+        SSF_ASSERT(_UTZero(s->savedHandshakeSecret, sizeof(s->savedHandshakeSecret)));
+        SSF_ASSERT(_UTZero(s->ephemeralPrivKey, sizeof(s->ephemeralPrivKey)));
+        SSF_ASSERT(!_UTZero(s->clientAppTrafficSecret, sizeof(s->clientAppTrafficSecret)));
+        (void)st;
+        s->transport.close(&s->transport);
+        _UTSessionWiped(s);
+        SSFTLSCDeInit(s);
+    }
+}
+
 /* A session mid-handshake: handshake keys active (generation 0 test keys), waiting for        */
 /* EncryptedExtensions, not yet connected: where an on-path party would inject plaintext.      */
 static void _UTMidHandshakeSession(SSFTLSCSession_t *s)
@@ -4675,6 +4975,7 @@ void SSFTLSCUnitTest(void)
     _SSFTLSCUTRfc8448Compat();
     _SSFTLSCUTRfc8448Hrr();
     _SSFTLSCUTRfc8448ClientAuth();
+    _SSFTLSCUTServerFlightNegative();
     _SSFTLSCUTClientChain();
     _SSFTLSCUTAlpn();
     _SSFTLSCUTTrustFromPEM();

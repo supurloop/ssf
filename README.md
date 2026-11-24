@@ -234,7 +234,7 @@ Cryptographic primitives for hashing, encryption, and random number generation.
 | [X25519](_crypto/ssfx25519.md) | X25519 key agreement over Curve25519 (RFC 7748) — constant-time, no ssfbn dependency | ~4 KB⁴³ | — | ~1.6 KB⁴⁴ | — | Yes |
 | [Ed25519](_crypto/ssfed25519.md) | Ed25519 signatures (RFC 8032 pure mode) — deterministic; uses SHA-512 from ssfsha2 | ~7 KB⁴⁵ | — | ~3.3 KB⁴⁶ | — | Yes |
 | [RSA](_crypto/ssfrsa.md) | RSA-2048/3072/4096 signatures (PKCS#1 v1.5 and PSS) + key generation; PKCS#1 DER key format | ~15 KB⁴⁷ | — | ~12 KB⁴⁸ | — | Yes |
-| [CMS](_crypto/ssfcms.md) | RFC 5652 CMS SignedData verifier (zero-copy parse; detached file signatures verified by digest; ECDSA / RSA / Ed25519; RFC 6211 algorithm protection) | ~6 KB | ~8 B⁶¹ | ~16 KB⁶⁰ | — | Yes⁶¹ |
+| [CMS](_crypto/ssfcms.md) | RFC 5652 CMS SignedData verifier (zero-copy parse; detached file signatures verified by digest; ECDSA / RSA / Ed25519; RFC 6211 algorithm protection) | ~6 KB | ~8 B⁶¹ | ~15 KB⁶⁰ | — | Yes⁶¹ |
 | [TLS 1.3](_crypto/ssftls.md) | TLS 1.3 core building blocks (key schedule, transcript hash, record layer); not a full TLS stack | ~2.5 KB⁴⁹ | — | ~1 KB⁵⁰ | — | Yes |
 | [PRNG](_crypto/ssfprng.md) | Cryptographically capable pseudo-random number generator | ~500 B | — | ~96 B | — | Yes |
 
@@ -288,7 +288,7 @@ Cryptographic primitives for hashing, encryption, and random number generation.
 
 ⁴⁹ Requires HMAC, SHA-2, and one or more AEAD backends (AES-GCM / AES-CCM / ChaCha20-Poly1305); figure is for the TLS 1.3 primitives themselves — HKDF-Expand-Label, Derive-Secret, traffic-key derivation, transcript hash wrappers, and record-layer nonce construction + AEAD dispatch. No handshake state machine, certificate validation, or transport I/O is included.
 
-⁶⁰ Peak is in the verifier: two parsed `SSFX509Cert_t` structures (~1 KB each on 32-bit targets, ~1.6 KB on 64-bit), a `SSF_CMS_CONFIG_MAX_SIGNED_ATTRS_LEN` (default 512 B) re-tagging buffer and the chain arrays, nested into `SSFX509VerifyChainPurpose`, which carries the ssfx509 chain peak (footnote ⁵⁸) and the signature primitives. `SSFCMSParse` alone peaks at a few hundred bytes. Requires ASN.1, X.509, SHA-2, crypt and whichever of ECDSA / RSA / Ed25519 the signatures use.
+⁶⁰ Peak is in the verifier: one parsed `SSFX509Cert_t` structure (the signer; ~1 KB on 32-bit targets, ~1.6 KB on 64-bit), a `SSF_CMS_CONFIG_MAX_SIGNED_ATTRS_LEN` (default 512 B) re-tagging buffer and the chain arrays, nested into `SSFX509VerifyChainPurpose`, which carries the ssfx509 chain peak (footnote ⁵⁸) and the signature primitives. `SSFCMSParse` alone peaks at a few hundred bytes. Requires ASN.1, X.509, SHA-2, crypt and whichever of ECDSA / RSA / Ed25519 the signatures use.
 
 ⁶¹ The only static state is the trace callback, its user pointer, and an internal adapter pointer installed by `SSFCMSSetTraceCtx` (three pointers, compiled out when `SSF_TLS_CONFIG_ENABLE_TRACE` is `0`). Parsing and verification hold all state in caller-supplied structures and on the stack.
 

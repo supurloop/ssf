@@ -327,9 +327,15 @@ is rejected.
       UNKNOWN_CA; two tests that made a non-CA the trust anchor now put it under a real root to
       keep NOT_CA coverage). Wire, all failing before: long chain, unrelated extra, out of order
       now verify. Cortex-M4 -Os: ssfx509 text -241 B, verifier frame +8 B.
-- [ ] `ssfcms` builds its own signer chain (`_SSFCMSBuildChain`) before calling the verifier,
+- [x] `ssfcms` builds its own signer chain (`_SSFCMSBuildChain`) before calling the verifier,
       which now builds paths itself; dropping it may save code. Measure first. Outside the TLS
-      client.
+      client. Done (3B item Q, approved): ssfcms passes
+      the signer then every other embedded certificate to the verifier; `_SSFCMSBuildChain`,
+      `_SSFCMSIssuerIsAnchor` and the 1.5 KB scratch certificate removed. Cortex-M4 -Os: ssfcms
+      text 5,184 -> 4,864 B, `_SSFCMSVerifySigner` frame 2,776 -> 1,864 B. The rollover fixture
+      without key ids now verifies (the verifier chooses by signature; the old builder took the
+      first name match and failed). `ssfcms.md` and the README CMS stack figure (~16 -> ~15 KB,
+      footnote 60) updated.
 - [x] Long single steps: P-384/RSA chain verification can take a long time inline on small
       targets; consider splitting verification per certificate across `pollOpen()` calls. Closed (3B item I) by
       documenting the current design, per the user; not measured on a target. `ssftlsc.h`

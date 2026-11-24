@@ -667,146 +667,6 @@ static bool _SSFCMSFindSignerCert(const SSFCMSSignedData_t *sd, const SSFCMSSign
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if some trust anchor's subject is exactly issuerRaw, else false.                 */
-/* --------------------------------------------------------------------------------------------- */
-static bool _SSFCMSIssuerIsAnchor(const uint8_t *issuerRaw, uint32_t issuerRawLen,
-                                  const uint8_t **trustDer, const uint32_t *trustDerLen,
-                                  uint8_t trustCount, SSFX509Cert_t *scratch)
-{
-    uint8_t i;
-
-    SSF_REQUIRE(issuerRaw != NULL);
-    SSF_REQUIRE(trustDer != NULL);
-    SSF_REQUIRE(trustDerLen != NULL);
-    SSF_REQUIRE(scratch != NULL);
-
-    for (i = 0; i < trustCount; i++)
-    {
-        if (!SSFX509Parse(trustDer[i], trustDerLen[i], scratch)) continue;
-        if (_SSFCMSSpanEquals(scratch->subject.raw, scratch->subject.rawLen, issuerRaw,
-                              issuerRawLen))
-        {
-            return true;
-        }
-    }
-    return false;
-}
-
-/* --------------------------------------------------------------------------------------------- */
-/* Orders sd's certificates into chain[] from the signer up to the first cert an anchor issued.  */
-/* --------------------------------------------------------------------------------------------- */
-static uint8_t _SSFCMSBuildChain(const SSFCMSSignedData_t *sd, const SSFX509Cert_t *signerCert,
-                                 const uint8_t *signerDer, uint32_t signerDerLen,
-                                 const uint8_t **trustDer, const uint32_t *trustDerLen,
-                                 uint8_t trustCount, const uint8_t **chain, uint32_t *chainLen,
-                                 SSFX509Cert_t *scratch)
-{
-    const uint8_t *issuerRaw;
-    uint32_t issuerRawLen;
-    const uint8_t *childAkid;
-    uint32_t childAkidLen;
-    bool selfIssued;
-    uint8_t n = 1;
-    uint8_t i;
-    uint8_t k;
-    uint8_t pick;
-    uint8_t firstMatch;
-    bool used;
-
-    SSF_REQUIRE(sd != NULL);
-    SSF_REQUIRE(signerCert != NULL);
-    SSF_REQUIRE(signerDer != NULL);
-    SSF_REQUIRE(trustDer != NULL);
-    SSF_REQUIRE(trustDerLen != NULL);
-    SSF_REQUIRE(chain != NULL);
-    SSF_REQUIRE(chainLen != NULL);
-    SSF_REQUIRE(scratch != NULL);
-
-    issuerRaw = signerCert->issuer.raw;
-    issuerRawLen = signerCert->issuer.rawLen;
-    childAkid = signerCert->akid;
-    childAkidLen = signerCert->akidLen;
-    selfIssued = _SSFCMSSpanEquals(signerCert->issuer.raw, signerCert->issuer.rawLen,
-                                   signerCert->subject.raw, signerCert->subject.rawLen);
-    chain[0] = signerDer;
-    chainLen[0] = signerDerLen;
-
-    /* Is the top neither self-issued nor issued by an anchor, with chain depth to spare? */
-    while ((!selfIssued) && (n < SSF_X509_CONFIG_MAX_CHAIN_DEPTH) &&
-           (!_SSFCMSIssuerIsAnchor(issuerRaw, issuerRawLen, trustDer, trustDerLen, trustCount,
-                                   scratch)))
-    {
-        /* Yes, prefer the name match whose SKID equals the child's AKID (RFC 5280) */
-        pick = sd->certsLen;
-        firstMatch = sd->certsLen;
-        for (i = 0; (i < sd->certsLen) && (pick == sd->certsLen); i++)
-        {
-            /* Is it already in the chain? */
-            used = false;
-            for (k = 0; k < n; k++)
-            {
-                if (chain[k] == sd->certs[i].der) used = true;
-            }
-            if (used) continue;
-            if (!SSFX509Parse(sd->certs[i].der, sd->certs[i].derLen, scratch)) continue;
-
-            /* Is this certificate's subject the issuer sought? */
-            if (!_SSFCMSSpanEquals(scratch->subject.raw, scratch->subject.rawLen, issuerRaw,
-                                   issuerRawLen))
-            {
-                /* No, not a candidate */
-                continue;
-            }
-            /* Yes, is it the first such candidate? */
-            if (firstMatch == sd->certsLen)
-            {
-                /* Yes, remember it as the fallback */
-                firstMatch = i;
-            }
-            /* No, a fallback is already recorded */
-
-            /* Does its SKID match the child's AKID? */
-            if ((childAkid != NULL) && (scratch->skid != NULL) &&
-                (_SSFCMSSpanEquals(scratch->skid, scratch->skidLen, childAkid, childAkidLen)))
-            {
-                /* Yes, this is the issuing key */
-                pick = i;
-            }
-            /* No, keep looking for a key identifier match */
-        }
-
-        /* Was a key identifier match found? */
-        if (pick == sd->certsLen)
-        {
-            /* No, fall back to the first name match (none at all ends the chain) */
-            pick = firstMatch;
-        }
-        /* Yes, use the key identifier match */
-
-        /* Is there no candidate at all? */
-        if (pick == sd->certsLen)
-        {
-            /* Yes, the chain ends here */
-            break;
-        }
-        /* No, a candidate was chosen */
-
-        /* Append the chosen certificate and continue from its issuer */
-        if (!SSFX509Parse(sd->certs[pick].der, sd->certs[pick].derLen, scratch)) break;
-        chain[n] = sd->certs[pick].der;
-        chainLen[n] = sd->certs[pick].derLen;
-        n++;
-        issuerRaw = scratch->issuer.raw;
-        issuerRawLen = scratch->issuer.rawLen;
-        childAkid = scratch->akid;
-        childAkidLen = scratch->akidLen;
-        selfIssued = _SSFCMSSpanEquals(scratch->issuer.raw, scratch->issuer.rawLen,
-                                       scratch->subject.raw, scratch->subject.rawLen);
-    }
-    return n;
-}
-
-/* --------------------------------------------------------------------------------------------- */
 /* Returns true if signer idx verifies against the content digest and the trust anchors.         */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFCMSVerifySigner(const SSFCMSSignedData_t *sd, uint8_t idx, const uint8_t *digestOpt,
@@ -823,7 +683,6 @@ static bool _SSFCMSVerifySigner(const SSFCMSSignedData_t *sd, uint8_t idx, const
     const uint8_t *covered;
     uint32_t coveredLen;
     SSFX509Cert_t signerCert;
-    SSFX509Cert_t scratch;
     const uint8_t *signerDer;
     uint32_t signerDerLen;
     const uint8_t *chain[SSF_X509_CONFIG_MAX_CHAIN_DEPTH];
@@ -984,8 +843,19 @@ static bool _SSFCMSVerifySigner(const SSFCMSSignedData_t *sd, uint8_t idx, const
         return false;
     }
 
-    chainN = _SSFCMSBuildChain(sd, &signerCert, signerDer, signerDerLen, trustDer, trustDerLen,
-                               trustCount, chain, chainLen, &scratch);
+    /* The signer first, then every other embedded certificate in any order: the verifier builds */
+    /* the path (ssfx509), choosing each issuer by name, key identifier and signature. At most   */
+    /* SSF_CMS_CONFIG_MAX_CERTS + 1 entries, which the chain depth #error above guarantees fit.  */
+    chain[0] = signerDer;
+    chainLen[0] = signerDerLen;
+    chainN = 1u;
+    for (i = 0; i < sd->certsLen; i++)
+    {
+        if (sd->certs[i].der == signerDer) continue;
+        chain[chainN] = sd->certs[i].der;
+        chainLen[chainN] = sd->certs[i].derLen;
+        chainN++;
+    }
     /* Is the signer chain untrusted (checked before the signer key is used)? */
     if (!SSFX509VerifyChainPurpose(chain, chainLen, chainN, trustDer, trustDerLen, trustCount,
                                    SSF_X509_PURPOSE_CODE_SIGNING, NULL, nowUnixSec, &verifyErr))

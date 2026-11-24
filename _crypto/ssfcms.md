@@ -89,11 +89,13 @@ against a caller-supplied trust store. There is no encoder: the module verifies,
   content digest in constant time, then the attributes re-tagged from `[0] IMPLICIT` to `SET`
   (§5.4) are what the signature covers; without signed attributes the content itself is covered,
   so it must be attached `id-data`; the signer certificate is located by issuer and serial or by
-  SKID among the embedded certificates and then the trust anchors; the embedded certificates are
-  ordered into a chain by issuer-to-subject links up to the first one a trust anchor issued (when
-  several embedded certificates share the issuer name, as across a CA key rollover, the one whose
-  Subject Key Identifier equals the child's Authority Key Identifier is taken, else the first), and
-  that chain passes `SSFX509VerifyChainPurpose()` for `SSF_X509_PURPOSE_CODE_SIGNING` at
+  SKID among the embedded certificates and then the trust anchors; the signer certificate and the
+  other embedded certificates, in any order, go to `SSFX509VerifyChainPurpose()`, which builds
+  the path from the signer up to the first certificate a trust anchor issued (when several
+  embedded certificates share the issuer name, as across a CA key rollover, it takes the one
+  whose key identifier agrees and whose key verifies the signature; see **Chain layout and path
+  building** in [`ssfx509`](../_codec/ssfx509.md#notes)), and that path passes it for
+  `SSF_X509_PURPOSE_CODE_SIGNING` at
   `nowUnixSec`: validity, CA constraints, path length, Key Usage `digitalSignature` or
   `nonRepudiation` on the signer when Key Usage is present, EKU `codeSigning` or
   `anyExtendedKeyUsage` when EKU is present, Name Constraints and no unknown critical extension;
@@ -116,11 +118,11 @@ against a caller-supplied trust store. There is no encoder: the module verifies,
   `SSF_CMS_CONFIG_MAX_SIGNED_ATTRS_LEN` bytes and the chain arrays, on top of whatever
   `SSFX509VerifyChainPurpose()` uses (see the `ssfx509` footnotes in the [SSF
   README](../README.md#crypto)).
-- **Chain depth sizing.** The longest chain the verifier can assemble is
-  `SSF_CMS_CONFIG_MAX_CERTS + 1` certificates. That happens when the signer certificate is held
-  only as a trust anchor and is not self-issued, so it is followed by every embedded certificate.
+- **Chain depth sizing.** The verifier is given the signer certificate plus every other
+  embedded certificate, so at most `SSF_CMS_CONFIG_MAX_CERTS + 1` certificates. That happens when
+  the signer certificate is held only as a trust anchor, so all embedded certificates follow it.
   [`SSF_X509_CONFIG_MAX_CHAIN_DEPTH`](../_codec/ssfx509.md#cfg-max-chain-depth) must be at
-  least that, or a valid chain would be cut short and fail to anchor; `ssfcms.c` enforces this
+  least that, or the verifier's limit would be exceeded; `ssfcms.c` enforces this
   with `#error`. `SSFX509VerifyChainPurpose()` reserves stack for
   `SSF_X509_CONFIG_MAX_CHAIN_DEPTH` parsed certificates whatever the actual chain length, so
   in a build where ssfcms is the only user of the chain verifier, a depth above

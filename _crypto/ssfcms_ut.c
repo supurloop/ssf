@@ -2204,10 +2204,11 @@ void SSFCMSUnitTest(void)
     SSF_ASSERT(SSFCMSVerifyDigest(&sd, sha256, sizeof(sha256), SSF_CMS_DIGEST_SHA256, trust,
                                   trustLen, 1u, now, &res) == false);
 
-    /* Without key identifiers the builder falls back to the first name match (old CA). */
+    /* Without key identifiers the issuer is still found: the verifier's path building tries   */
+    /* each same-name intermediate and keeps the one whose key verifies (the new CA).          */
     SSF_ASSERT(SSFCMSParse(_utFixRollBothNoKid, sizeof(_utFixRollBothNoKid), &sd) == true);
     SSF_ASSERT(SSFCMSVerifyDigest(&sd, sha256, sizeof(sha256), SSF_CMS_DIGEST_SHA256, trust,
-                                  trustLen, 1u, now, &res) == false);
+                                  trustLen, 1u, now, &res) == true);
     trust[0] = _utFixRootDer;
     trustLen[0] = sizeof(_utFixRootDer);
 

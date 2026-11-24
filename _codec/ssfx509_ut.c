@@ -1234,7 +1234,7 @@ void SSFX509UnitTest(void)
 
             chain[0] = caDer; chainLens[0] = caDerLen;
             trust[0] = caDer; trustLens[0] = caDerLen;
-            /* nowTime=1775000000 > notAfter=1770000000 */
+            /* nowTime=1780000000 > notAfter=1770000000 */
             SSF_ASSERT(SSFX509VerifyChain(chain, chainLens, 1,
                        trust, trustLens, 1, "expired.test", nowTime, &_utVErr) == false);
             _UT_VERR(ERR_EXPIRED, 0u);
@@ -1261,7 +1261,7 @@ void SSFX509UnitTest(void)
 
             chain[0] = caDer; chainLens[0] = caDerLen;
             trust[0] = caDer; trustLens[0] = caDerLen;
-            /* nowTime=1775000000 < notBefore=1800000000 */
+            /* nowTime=1780000000 < notBefore=1800000000 */
             SSF_ASSERT(SSFX509VerifyChain(chain, chainLens, 1,
                        trust, trustLens, 1, "future.test", nowTime, &_utVErr) == false);
             _UT_VERR(ERR_NOT_YET_VALID, 0u);
@@ -2174,11 +2174,12 @@ void SSFX509UnitTest(void)
         const uint8_t *trust[1] = { _utTestCertDER };
         uint32_t trustLens[1] = { sizeof(_utTestCertDER) };
 
-        /* IP hostname against DNS-only SANs -> must fail */
+        /* IP hostname against DNS-only SANs -> must fail at host matching, at a time inside  */
+        /* the certificate's validity (notBefore 1775422718)                                 */
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLens, 1u,
                    trust, trustLens, 1u,
-                   "192.168.1.1", 1775000000ull, &_utVErr) == false);
-        _UT_VERR(ERR_NOT_YET_VALID, 0u);
+                   "192.168.1.1", 1780000000ull, &_utVErr) == false);
+        _UT_VERR(ERR_HOSTNAME, 0u);
     }
 
     /* ---- 8K. Key Usage keyCertSign Validation (RFC 5280 Section 6.1.4(h)) ---- */
@@ -7191,14 +7192,18 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 2u, trust, trustLen, 1u, "evil.com",
                                       1800000000ull, &_utVErr) == false); _UT_VERR(ERR_PARSE, 0u);
 
-        /* The excluded name first: retained, so the constraint rejects every hostname */
-        sans[SSF_X509_CONFIG_MAX_SAN_ENTRIES] = names[0];
+        /* Within capacity with the excluded name first: the leaf parses, and the anchor's      */
+        /* constraint rejects it whatever hostname is asked                                     */
         sans[0] = "evil.com";
+        sans[SSF_X509_CONFIG_MAX_SAN_ENTRIES] = NULL;            /* Exactly MAX_SAN_ENTRIES */
         leafLen = _utSignCert(&p, caPriv, leafOut, sizeof(leafOut));
         SSF_ASSERT(leafLen != 0u);
+        SSF_ASSERT(SSFX509Parse(leafOut, leafLen, &parsed) == true);
+        SSF_ASSERT(parsed.sanLen == SSF_X509_CONFIG_MAX_SAN_ENTRIES);
         chainLen[0] = leafLen;
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 2u, trust, trustLen, 1u, names[1],
-                                      1800000000ull, &_utVErr) == false); _UT_VERR(ERR_PARSE, 0u);
+                                      1800000000ull, &_utVErr) == false);
+        _UT_VERR(ERR_NAME_CONSTRAINTS, 0u);
     }
 
     /* ---- Parser branches: AKID, unique IDs, critical FALSE, BC, KU, unused bits, sigAlg ---- */

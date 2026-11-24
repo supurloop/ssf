@@ -178,12 +178,17 @@ is rejected.
       code -> alert table test. Wire (`s_server` received): expired 45, not yet valid 45,
       untrusted CA 48, clientAuth-only EKU 46, unknown critical extension 43, issued by a
       non-CA 46, wrong host 42 (all 42 before).
-- [ ] `ssfx509_ut` cases that pass for a reason other than the one they describe (found while
+- [x] `ssfx509_ut` cases that pass for a reason other than the one they describe (found while
       deriving D's expected codes): the "192.168.1.1" IP host case uses time 1775000000,
       before `_utTestCertDER`'s notBefore (1775422718), so it fails NOT_YET_VALID and never
       reaches host matching; the name-constraint "excluded name retained" case still has
       MAX_SAN_ENTRIES + 1 SANs and fails at PARSE. Comments in the expired / not-yet-valid
-      cases state 1775000000 where the code uses 1780000000. Outside the TLS client.
+      cases state 1775000000 where the code uses 1780000000. Outside the TLS client. Fixed (3B item N, approved): the IP host case
+      now verifies at 1780000000 (inside the validity) and expects `ERR_HOSTNAME`; the
+      constraint case uses exactly MAX_SAN_ENTRIES SANs with `evil.com` first, asserts the leaf
+      parses, and expects `ERR_NAME_CONSTRAINTS`; the two comments read 1780000000. Mutation
+      check: letting IPv4 hosts skip host matching is now caught first by the fixed IP case
+      (before the fix it got past it to a later test).
 - [ ] Stack secrets inside the crypto modules ssftlsc calls (`ssfhkdf`, `ssfhmac`,
       `ssfx25519`, `ssfecdsa`, `ssfaesgcm`, ...) are outside this audit; review each module's
       own zeroization. Found during 2.7. Moved from step 2 to a later batch.

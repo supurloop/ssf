@@ -337,10 +337,16 @@ is rejected.
       `SSF_TICKS_PER_SEC` (was a literal 1000, wrong on ports with another tick rate). On the
       wire with the RTC at its boot value: alert 80 and the distinct trace (was alert 42,
       "chain verification failed"). Exhaustive run pending.
-- [ ] `ssfrtc`: `SSFRTCGetUnixNow()` asserts if `SSFRTCInit()` was never called and there is no
+- [x] `ssfrtc`: `SSFRTCGetUnixNow()` asserts if `SSFRTCInit()` was never called and there is no
       "is initialized" query, so ssftlsc cannot fail gracefully in that case (documented as a
       precondition in `ssftlsc.h`). The simulated RTC (`SSF_RTC_ENABLE_SIM`, the default)
-      starts at 0 and reports that as a valid time. Outside the TLS client.
+      starts at 0 and reports that as a valid time. Outside the TLS client. Resolved (3B item L) as
+      by design, per the user: using ssfrtc before `SSFRTCInit()` (or after `SSFRTCDeInit()`)
+      is a programming error and asserts, and there is no "is initialized" query; implementation
+      and tests assume `SSFRTCInit()` was called. `ssfrtc.md` corrected to match the code (it
+      claimed `false` after DeInit) and now documents initialized vs time valid and that 0 / any
+      in-range read counts as valid; ssftlsc's own floor covers the 1970 case. `ssftlsc.h`
+      precondition reworded. No code change.
 - [x] A record still partly written when `close()` runs is dropped (`close_notify`, or the tail
       of application data). Found during step 1. Fixed with option B (approved, outside the
       client): `ssfnet.h` gains a sixth operation, `shutdown()`: deliver every byte `send()`

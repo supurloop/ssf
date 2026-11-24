@@ -24,6 +24,18 @@ and resets the tick baseline.
 ## [↑](#ssfrtc--unix-time-rtc-interface) Notes
 
 - Call `SSFRTCInit()` once at startup before any call to `SSFRTCGetUnixNow()` or `SSFRTCSet()`.
+  Calling either before `SSFRTCInit()`, or after `SSFRTCDeInit()`, is a programming error and
+  asserts, as do `SSFRTCInit()` twice without `SSFRTCDeInit()` and `SSFRTCDeInit()` when not
+  initialized. There is deliberately no "is initialized" query.
+- **Initialized is not the same as time valid.** `SSFRTCInit()` initializes the interface even
+  when its RTC read fails or returns an out-of-range value; it then returns `false`, and
+  `SSFRTCGetUnixNow()` returns `false` (no assert) until a successful `SSFRTCSet()`. A failed
+  `SSFRTCSet()` also leaves the time not valid.
+- **A valid read is not a plausible time.** Any value from `0` to `SSFDTIME_UNIX_EPOCH_SEC_MAX`
+  is accepted: the simulated RTC starts at `0`, so after `SSFRTCInit()` it reports
+  1970-01-01 as a valid time until `SSFRTCSet()`, and a hardware RTC that lost power typically
+  does the same. A caller that needs a trusted time applies its own floor; the TLS client
+  refuses times before `SSF_TLSC_CONFIG_MIN_TRUSTED_UNIX_SEC`.
 - `SSFRTCGetUnixNow()` returns time in system ticks (`SSFPortTick_t`); divide by
   `SSF_TICKS_PER_SEC` to obtain whole seconds.
 - When [`SSF_RTC_ENABLE_SIM`](#opt-sim) is `0`, implement the `SSF_RTC_WRITE(unixSec)` and
@@ -75,7 +87,7 @@ RTC when [`SSF_RTC_ENABLE_SIM`](#opt-sim) is `1`) and records the corresponding 
 value. After a successful call, `SSFRTCGetUnixNow()` derives the current time from the elapsed
 tick count without re-reading hardware.
 
-**Returns:** `true` if the RTC was read successfully and the interface is initialized; `false` if the hardware RTC read failed.
+**Returns:** `true` if the RTC was read and its value is in range, so the time is valid; `false` if the read failed or the value is out of range. Either way the interface is initialized and `SSFRTCDeInit()` must precede another `SSFRTCInit()` (a second call asserts).
 
 <a id="ex-init"></a>
 
@@ -98,8 +110,9 @@ if (SSFRTCInit())
 void SSFRTCDeInit(void);
 ```
 
-De-initializes the RTC interface, clearing its initialized state. After this call,
-`SSFRTCGetUnixNow()` and `SSFRTCSet()` will return `false` until `SSFRTCInit()` is called again.
+De-initializes the RTC interface, clearing its initialized state. Asserts if the interface is
+not initialized. After this call `SSFRTCGetUnixNow()` and `SSFRTCSet()` must not be called (they
+assert) until `SSFRTCInit()` is called again.
 
 **Returns:** Nothing.
 
@@ -111,7 +124,7 @@ De-initializes the RTC interface, clearing its initialized state. After this cal
 SSFRTCInit();
 /* ... use RTC ... */
 SSFRTCDeInit();
-/* SSFRTCGetUnixNow() now returns false until SSFRTCInit() is called again */
+/* SSFRTCGetUnixNow() and SSFRTCSet() now assert until SSFRTCInit() is called again */
 ```
 
 ---
@@ -132,7 +145,7 @@ updated time.
 |-----------|-----------|------|-------------|
 | `unixSec` | in | `uint64_t` | New Unix time in whole seconds since the Unix epoch (`1970-01-01T00:00:00Z`). Valid range: `0`–`7258118399` (covers up to `2199-12-31T23:59:59Z`). |
 
-**Returns:** `true` if the hardware RTC write succeeded and internal tracking was updated; `false` if the RTC write failed or `unixSec` is out of range.
+**Returns:** `true` if the hardware RTC write succeeded and internal tracking was updated; `false` if the RTC write failed or `unixSec` is out of range, after which the time is not valid until a later successful call. Asserts if the interface is not initialized.
 
 <a id="ex-set"></a>
 
@@ -169,7 +182,7 @@ elapsed system ticks since that read. Does not access the hardware RTC. Divide `
 |-----------|-----------|------|-------------|
 | `unixSys` | out | `SSFPortTick_t *` | Receives the current Unix time in system ticks. Divide by `SSF_TICKS_PER_SEC` for whole seconds. Must not be `NULL`. |
 
-**Returns:** `true` if the interface is initialized and `*unixSys` was set; `false` if `SSFRTCInit()` has not been called successfully.
+**Returns:** `true` if the time is valid; `false` if it is not (the `SSFRTCInit()` read failed or was out of range, or the last `SSFRTCSet()` failed, and no `SSFRTCSet()` has succeeded since). `*unixSys` is written either way and is meaningful only on `true`. Asserts if the interface is not initialized: never before `SSFRTCInit()` or after `SSFRTCDeInit()`.
 
 <a id="ex-getunixnow"></a>
 

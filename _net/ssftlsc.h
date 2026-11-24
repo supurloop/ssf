@@ -60,10 +60,11 @@ extern "C" {
 /* - Chain limit: SSF_X509_CONFIG_MAX_CHAIN_DEPTH, the verifier's own. Certificates a server     */
 /*   sends past it are dropped; if verification then fails, the trace says the chain was cut.   */
 /* - The handshake has no timer of its own; the caller bounds it (ssfmqttc's connectTimeout).    */
-/* - Certificate validity needs the time: ssfrtc must be initialized (SSFRTCGetUnixNow asserts  */
-/*   otherwise) and hold a real time (SSFRTCSet()). A clock before                               */
-/*   SSF_TLSC_CONFIG_MIN_TRUSTED_UNIX_SEC, or unreadable, fails the handshake rather than        */
-/*   checking certificates against it.                                                           */
+/* - Certificate validity needs the time. SSFRTCInit() must have been called before a          */
+/*   handshake with trust anchors; using ssfrtc uninitialized is a programming error and         */
+/*   asserts (ssfrtc.md). A time that is not valid, or before                                    */
+/*   SSF_TLSC_CONFIG_MIN_TRUSTED_UNIX_SEC (the simulated RTC reads 1970 until SSFRTCSet()),     */
+/*   fails the handshake with internal_error rather than checking certificates against it.      */
 /* - Known gaps are tracked in ssftlsc_punchlist.md; this module is not yet production ready.    */
 
 /* --------------------------------------------------------------------------------------------- */

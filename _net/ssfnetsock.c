@@ -201,6 +201,7 @@ static SSFNetIOResult_t _SSFNetSockPollOpen(SSFNetTransport_t *t);
 static SSFNetIOResult_t _SSFNetSockSend(SSFNetTransport_t *t, const uint8_t *buf, size_t len,
                               size_t *sentOut);
 static SSFNetIOResult_t _SSFNetSockRecv(SSFNetTransport_t *t, uint8_t *buf, size_t size, size_t *gotOut);
+static SSFNetIOResult_t _SSFNetSockShutdown(SSFNetTransport_t *t);
 static void _SSFNetSockClose(SSFNetTransport_t *t);
 
 /* --------------------------------------------------------------------------------------------- */
@@ -980,6 +981,20 @@ static SSFNetIOResult_t _SSFNetSockSend(SSFNetTransport_t *t, const uint8_t *buf
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Returns SUCCESS when connected, else ERROR. Bytes send() accepted are already in the kernel,  */
+/* which delivers them after close() (close() drains unread input so it ends with FIN, not RST). */
+/* --------------------------------------------------------------------------------------------- */
+static SSFNetIOResult_t _SSFNetSockShutdown(SSFNetTransport_t *t)
+{
+    SSFNetSock_t *s;
+
+    SSF_REQUIRE(t != NULL);
+    s = _SSFNetSockSelf(t);
+
+    return (s->state == SSF_NETSOCK_STATE_CONNECTED) ? SSF_NET_IO_SUCCESS : SSF_NET_IO_ERROR;
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Returns SUCCESS with bytes received, WANT_READ if none, CLOSED at end of stream, else ERROR.  */
 /* --------------------------------------------------------------------------------------------- */
 static SSFNetIOResult_t _SSFNetSockRecv(SSFNetTransport_t *t, uint8_t *buf, size_t size, size_t *gotOut)
@@ -1037,6 +1052,7 @@ void SSFNetSockInit(SSFNetSock_t *s)
     s->transport.pollOpen = _SSFNetSockPollOpen;
     s->transport.send = _SSFNetSockSend;
     s->transport.recv = _SSFNetSockRecv;
+    s->transport.shutdown = _SSFNetSockShutdown;
     s->transport.close = _SSFNetSockClose;
     s->sock = SSF_NETSOCK_INVALID;
     s->state = SSF_NETSOCK_STATE_CLOSED;

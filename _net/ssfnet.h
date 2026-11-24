@@ -44,7 +44,7 @@ extern "C" {
 /* --------------------------------------------------------------------------------------------- */
 /* Design                                                                                        */
 /* --------------------------------------------------------------------------------------------- */
-/* - A transport is a table of five non-blocking operations plus an implementation context. A    */
+/* - A transport is a table of six non-blocking operations plus an implementation context. A    */
 /*   client holds a pointer to it and never looks inside; an implementation embeds the table as  */
 /*   the first member of its own struct and recovers itself from the pointer.                    */
 /* - Every call returns immediately, name resolution included: an implementation must resolve    */
@@ -55,6 +55,10 @@ extern "C" {
 /*   and reports SUCCESS or failure; send() and recv() are valid only after SUCCESS; close() is  */
 /*   valid any time after open() and ends the connection unconditionally. After close() the      */
 /*   transport may be opened again.                                                              */
+/* - Graceful end: bytes send() accepted may still be buffered inside the transport (TLS holds a */
+/*   partly written record). close() never waits, so it may drop them. A caller that needs them  */
+/*   delivered calls shutdown() until it stops returning WANT_WRITE, then close(). shutdown() is */
+/*   valid only after pollOpen() SUCCESS; send() is not valid after it, recv() still is.         */
 /* - CLOSED is an orderly end by the peer or a reset; ERROR is anything else. Callers treat both */
 /*   as fatal for the connection.                                                                */
 /* - All calls come from one thread.                                                             */
@@ -94,7 +98,13 @@ typedef SSFNetIOResult_t (*SSFNetSendFn_t)(SSFNetTransport_t *t, const uint8_t *
 typedef SSFNetIOResult_t (*SSFNetRecvFn_t)(SSFNetTransport_t *t, uint8_t *buf, size_t size,
                                            size_t *gotOut);
 
-/* Ends the connection or attempt and releases its resources. */
+/* Finishes sending: delivers every byte send() accepted and ends this side of the stream (for   */
+/* TLS, close_notify). SUCCESS when done; WANT_WRITE while bytes remain (retry when writable);   */
+/* CLOSED or ERROR if they cannot be delivered. A transport whose accepted bytes are already     */
+/* committed (a socket) returns SUCCESS at once. Repeating it after SUCCESS returns SUCCESS.      */
+typedef SSFNetIOResult_t (*SSFNetShutdownFn_t)(SSFNetTransport_t *t);
+
+/* Ends the connection or attempt and releases its resources. Never waits; see shutdown().       */
 typedef void (*SSFNetCloseFn_t)(SSFNetTransport_t *t);
 
 struct SSFNetTransport
@@ -103,6 +113,7 @@ struct SSFNetTransport
     SSFNetPollOpenFn_t pollOpen;
     SSFNetSendFn_t send;
     SSFNetRecvFn_t recv;
+    SSFNetShutdownFn_t shutdown;
     SSFNetCloseFn_t close;
 };
 

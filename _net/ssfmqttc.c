@@ -100,7 +100,9 @@ typedef enum
 {
     SSF_MQTTC_LINK_CLOSED,
     SSF_MQTTC_LINK_OPENING,
-    SSF_MQTTC_LINK_OPEN
+    SSF_MQTTC_LINK_OPEN,
+    SSF_MQTTC_LINK_SHUTTING_DOWN,     /* STOPPING: DISCONNECT accepted, shutdown() delivering it  */
+    SSF_MQTTC_LINK_SHUT_DOWN          /* shutdown() done; TX_DRAINED posted, close() follows      */
 } SSFMQTTCLink_t;
 
 /* Event payloads posted by the pump. Each must fit in sizeof(void *) or ssfsm heap-allocates.  */
@@ -1114,7 +1116,7 @@ static void _SSFMQTTCStateStopping(SSFSMEventId_t eid, const SSFSMData_t *data, 
         break;
 
     case SSF_SM_EVENT_MQTTC_TX_DRAINED:
-        _SSFMQTTCConnectionTeardown(false);             /* The queued DISCONNECT has been sent */
+        _SSFMQTTCConnectionTeardown(false);   /* DISCONNECT delivered (send(), then shutdown()) */
         SSFSMTran(_SSFMQTTCStateStopped);
         break;
 
@@ -1142,6 +1144,7 @@ void SSFMQTTCInit(SSFNetTransport_t *transport, uint32_t txBlocks, uint32_t txBl
     SSF_REQUIRE(transport->pollOpen != NULL);
     SSF_REQUIRE(transport->send != NULL);
     SSF_REQUIRE(transport->recv != NULL);
+    SSF_REQUIRE(transport->shutdown != NULL);
     SSF_REQUIRE(transport->close != NULL);
     SSF_REQUIRE(txBlocks >= 1);
     SSF_REQUIRE(txBlockSize >= SSF_MQTTC_MIN_BLOCK_SIZE);
@@ -1257,6 +1260,29 @@ void SSFMQTTCStop(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Advances shutdown() while STOPPING: posts TX_DRAINED once every accepted byte, DISCONNECT     */
+/* included, is delivered; a failure is LINK_FAIL. WANT_* waits, bounded by the stop timer.      */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTCShutdownPoll(void)
+{
+    SSFNetIOResult_t r;
+
+    SSF_REQUIRE(_mqttc.link == SSF_MQTTC_LINK_SHUTTING_DOWN);
+
+    r = _mqttc.transport->shutdown(_mqttc.transport);
+    if (r == SSF_NET_IO_SUCCESS)
+    {
+        _mqttc.link = SSF_MQTTC_LINK_SHUT_DOWN;
+        SSFSMPutEvent(SSF_SM_MQTTC, SSF_SM_EVENT_MQTTC_TX_DRAINED);
+    }
+    else if ((r != SSF_NET_IO_WANT_WRITE) && (r != SSF_NET_IO_WANT_READ))
+    {
+        _SSFMQTTCLinkFail((r == SSF_NET_IO_CLOSED) ? SSF_MQTTC_REASON_PEER_CLOSED :
+                                                 SSF_MQTTC_REASON_TRANSPORT_ERROR);
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Returns true if more transport work is immediately available, else false.                     */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFMQTTCTask(SSFPortTick_t *nextTimeoutOpt)
@@ -1266,6 +1292,9 @@ bool SSFMQTTCTask(SSFPortTick_t *nextTimeoutOpt)
 
     SSF_REQUIRE(_mqttc.magic == SSF_MQTTC_INIT_MAGIC);
     t = _mqttc.transport;
+
+    /* Graceful end, resumed: deliver the accepted DISCONNECT before close() */
+    if (_mqttc.link == SSF_MQTTC_LINK_SHUTTING_DOWN) { _SSFMQTTCShutdownPoll(); goto done; }
 
     /* Transport opening */
     if (_mqttc.link == SSF_MQTTC_LINK_OPENING)
@@ -1322,9 +1351,15 @@ bool SSFMQTTCTask(SSFPortTick_t *nextTimeoutOpt)
         }
         else _SSFMQTTCTxBlockFree(b);
         /* The one list change the state machine must act on: STOPPING ends when the flush is   */
-        /* complete. The queue empties exactly once in that state, so this posts at most once.   */
+        /* complete. The queue empties exactly once in that state; the DISCONNECT that ends it   */
+        /* may still be buffered in the transport (TLS), so shutdown() delivers it and then      */
+        /* posts TX_DRAINED, at most once.                                                       */
         if (SSFLLIsEmpty(&_mqttc.txQueue) && (_mqttc.state == SSF_MQTTC_STATE_STOPPING))
-        { SSFSMPutEvent(SSF_SM_MQTTC, SSF_SM_EVENT_MQTTC_TX_DRAINED); }
+        {
+            _mqttc.link = SSF_MQTTC_LINK_SHUTTING_DOWN;
+            _SSFMQTTCShutdownPoll();
+            goto done;
+        }
     }
 
     /* Receive */

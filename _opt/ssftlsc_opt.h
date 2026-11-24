@@ -20,6 +20,34 @@ extern "C" {
 #endif
 #endif
 
+/* Largest record plaintext received, in bytes. RFC 8446 5.1 lets a peer send up to 2^14 (16384) */
+/* unless a smaller limit is negotiated, so keep 16384 unless every server is known to send less. */
+/* Sizes the session's receive buffers (about 2 x this). 64..16384.                             */
+#ifndef SSF_TLSC_CONFIG_MAX_RECV_RECORD
+#define SSF_TLSC_CONFIG_MAX_RECV_RECORD (16384u)
+#endif
+
+/* Largest record plaintext sent, in bytes. A sender may always use smaller records. Sizes the  */
+/* session's send buffer. 64..16384.                                                            */
+#ifndef SSF_TLSC_CONFIG_MAX_SEND_RECORD
+#define SSF_TLSC_CONFIG_MAX_SEND_RECORD (8192u)
+#endif
+
+#if (SSF_TLSC_CONFIG_MAX_RECV_RECORD < 64u) || (SSF_TLSC_CONFIG_MAX_RECV_RECORD > 16384u)
+#error SSF_TLSC_CONFIG_MAX_RECV_RECORD must be 64..16384.
+#endif
+#if (SSF_TLSC_CONFIG_MAX_SEND_RECORD < 64u) || (SSF_TLSC_CONFIG_MAX_SEND_RECORD > 16384u)
+#error SSF_TLSC_CONFIG_MAX_SEND_RECORD must be 64..16384.
+#endif
+
+/* Earliest Unix time (seconds) trusted for checking certificate validity. An RTC reading before */
+/* this, such as a device that booted at 0 (1970), or a failed read, means no trusted time: the */
+/* handshake fails with its own error instead of checking certificates against a wrong clock.  */
+/* Default 2025-01-01T00:00:00Z.                                                                */
+#ifndef SSF_TLSC_CONFIG_MIN_TRUSTED_UNIX_SEC
+#define SSF_TLSC_CONFIG_MIN_TRUSTED_UNIX_SEC (1735689600ull)
+#endif
+
 #ifdef __cplusplus
 }
 #endif

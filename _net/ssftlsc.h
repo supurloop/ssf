@@ -48,12 +48,18 @@ extern "C" {
 /* - TLS 1.3 client (RFC 8446) over any byte-stream SSFNetTransport_t, normally ssfnetsock.      */
 /*   The session is itself an SSFNetTransport_t: pass &session->transport to a client such as    */
 /*   ssfmqttc. open() opens the inner transport; pollOpen() drives the inner open and then the   */
-/*   handshake; send()/recv() carry application data; close() ends both.                         */
+/*   handshake; send()/recv() carry application data; shutdown() writes out a partly written     */
+/*   record and close_notify; close() ends both and never waits, so bytes send() accepted can be */
+/*   lost without a shutdown() first.                                                            */
 /* - No I/O blocks and no threads are used. Public-key work (ECDH, chain and CertificateVerify   */
 /*   checks) runs inline, one step per pollOpen() call, with WANT_READ returned in between; each */
 /*   step occupies the caller for the duration of that computation.                              */
 /* - Client mode, full handshake only (no PSK resumption or 0-RTT). One connection per session.  */
 /* - The handshake has no timer of its own; the caller bounds it (ssfmqttc's connectTimeout).    */
+/* - Certificate validity needs the time: ssfrtc must be initialized (SSFRTCGetUnixNow asserts  */
+/*   otherwise) and hold a real time (SSFRTCSet()). A clock before                               */
+/*   SSF_TLSC_CONFIG_MIN_TRUSTED_UNIX_SEC, or unreadable, fails the handshake rather than        */
+/*   checking certificates against it.                                                           */
 /* - Known gaps are tracked in ssftlsc_punchlist.md; this module is not yet production ready.    */
 
 /* --------------------------------------------------------------------------------------------- */
@@ -104,6 +110,7 @@ typedef struct SSFTLSCCryptoWork
     uint8_t chainLen;
     const char *hostname;
     uint64_t nowUnixSec;
+    bool nowValid;                   /* nowUnixSec came from a set RTC                          */
     bool chainVerifyOk;
 
     /* Phase 6b: CertificateVerify signature verification */
@@ -120,15 +127,24 @@ typedef struct SSFTLSCCryptoWork
     bool sigVerifyOk;
 } SSFTLSCCryptoWork_t;
 
+/* Public key type of the server's end-entity certificate, for matching CertificateVerify */
+typedef enum
+{
+    SSF_TLSC_LEAF_KEY_UNKNOWN,
+    SSF_TLSC_LEAF_KEY_P256,          /* id-ecPublicKey, secp256r1                               */
+    SSF_TLSC_LEAF_KEY_P384,          /* id-ecPublicKey, secp384r1                               */
+    SSF_TLSC_LEAF_KEY_RSA,           /* rsaEncryption                                           */
+    SSF_TLSC_LEAF_KEY_ED25519
+} SSFTLSCLeafKey_t;
+
 /* Partial I/O tracking for resumable record send/receive */
 typedef struct SSFTLSCIOCtx
 {
-    uint8_t hdr[5];
-    size_t hdrPos;
+    size_t hdrPos;                   /* Header bytes received into recvBuf[0..4]                */
     uint16_t fragLen;
     size_t fragPos;
     bool hdrComplete;
-    uint8_t sendRecordBuf[SSF_TLS_RECORD_HEADER_SIZE + SSF_TLS_CONFIG_MAX_RECORD_SIZE + 1u +
+    uint8_t sendRecordBuf[SSF_TLS_RECORD_HEADER_SIZE + SSF_TLSC_CONFIG_MAX_SEND_RECORD + 1u +
                           SSF_TLS_AEAD_TAG_SIZE];
     size_t sendTotal;
     size_t sendPos;
@@ -147,6 +163,7 @@ typedef struct SSFTLSCSession
     bool ioFailed;                   /* Inner transport failed: no alert can be delivered      */
     bool peerAlerted;                /* Peer sent a fatal alert: none is sent back (RFC 8446 6) */
     bool peerCloseNotify;            /* Peer sent close_notify: answered with close_notify     */
+    bool closeNotifySent;            /* shutdown() encrypted close_notify: no more data sent   */
     bool clientHelloSent;            /* The peer has seen this handshake begin                 */
     uint8_t pendingAlert;            /* Fatal alert for the first failure; 0 = none recorded   */
 
@@ -188,9 +205,14 @@ typedef struct SSFTLSCSession
     uint8_t savedHandshakeSecret[SSF_TLS_MAX_HASH_SIZE];
 
     /* HelloRetryRequest bookkeeping for validating the second ServerHello (RFC 8446 4.1.4)     */
+    SSFTLSCLeafKey_t leafKeyType;    /* Key type of the server's end-entity certificate         */
     bool hrrDone;
     uint16_t hrrGroup;               /* Group the HRR selected; the only share in ClientHello2  */
     uint16_t hrrSuite;               /* Cipher suite the HRR selected; ServerHello must match   */
+
+    /* record_size_limit (RFC 8449) from EncryptedExtensions: the largest TLSInnerPlaintext the  */
+    /* server accepts, 64..2^14+1; 0 when not negotiated.                                        */
+    uint16_t peerRecordLimit;
 
     /* Saved ClientHello for transcript re-init when server selects SHA-384 suite */
     uint8_t clientHelloMsg[768];
@@ -198,12 +220,13 @@ typedef struct SSFTLSCSession
 
     /* Handshake message reassembly buffer (servers may bundle multiple HS msgs in one record). */
     /* After the handshake it holds the decrypted application record being returned by recv(). */
-    uint8_t hsBuf[SSF_TLS_CONFIG_MAX_RECORD_SIZE];
+    /* Holds a record's whole TLSInnerPlaintext: content, content type, any zero padding.      */
+    uint8_t hsBuf[SSF_TLSC_CONFIG_MAX_RECV_RECORD + 1u];
     size_t hsBufLen;   /* total bytes in hsBuf */
     size_t hsBufPos;   /* current parse position */
 
-    /* Record buffer */
-    uint8_t recvBuf[SSF_TLS_CONFIG_MAX_RECORD_SIZE + SSF_TLS_AEAD_TAG_SIZE +
+    /* Record buffer: header at [0..4], fragment after it, so records decrypt in place */
+    uint8_t recvBuf[SSF_TLSC_CONFIG_MAX_RECV_RECORD + SSF_TLS_AEAD_TAG_SIZE +
                     SSF_TLS_RECORD_HEADER_SIZE + 1u];
 
     /* Partial I/O context for resumable record send/receive */
@@ -264,8 +287,13 @@ bool _SSFTLSCParseCertificateForTest(const uint8_t *body, size_t bodyLen,
                                      const uint8_t **ders, uint32_t *lens, uint8_t *countOut);
 extern void (*_SSFTLSCScrubTestHook)(void *ctx, const char *what, const void *buf, size_t len);
 extern void *_SSFTLSCScrubTestHookCtx;
+bool _SSFTLSCIsIPLiteralForTest(const char *host);
+bool _SSFTLSCSchemeMatchesKeyForTest(uint16_t scheme, SSFTLSCLeafKey_t key);
+bool _SSFTLSCSaveLeafKeyForTest(SSFTLSCSession_t *session, const uint8_t *der, uint32_t derLen);
 bool _SSFTLSCParseEncryptedExtensionsForTest(const uint8_t *body, size_t bodyLen,
                                              uint8_t *alertOut);
+bool _SSFTLSCParseEncryptedExtensionsRslForTest(const uint8_t *body, size_t bodyLen,
+                                                uint8_t *alertOut, uint16_t *recordLimitOut);
 bool _SSFTLSCParseCertificateVerifyForTest(const uint8_t *body, size_t bodyLen,
                                            uint16_t *schemeOut, uint16_t *sigLenOut);
 #endif /* SSF_CONFIG_TLSC_UNIT_TEST */

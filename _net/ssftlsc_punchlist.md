@@ -150,7 +150,9 @@ is rejected.
       before closing. ssfnetsock unit test: close with unread data gives the peer the last byte
       and an orderly EOF (was ECONNRESET, 5/5). Alert delivery when aborting at ServerHello:
       10/10 for three cases and 20/20 for a fourth. Data still in flight at close() can still
-      cause an RST. Exhaustive run pending.
+      cause an RST. Exhaustive run pending. Residual race measured later through the proxy
+      (`ks_missing`, server flight forwarded in separate writes): alert delivered 36/40 at the
+      step 2 commit and 39/40 after step 3 item 3 -- same race, not a regression.
 - [x] `close()` during the handshake sends nothing; RFC 8446 6.1 expects `user_canceled` then
       `close_notify`. Found during 2.8. Once the ClientHello is out, close() mid-handshake sends
       both at warning level, protected when handshake send keys exist. Unit test reads the exact
@@ -165,30 +167,159 @@ is rejected.
 - [ ] Stack secrets inside the crypto modules ssftlsc calls (`ssfhkdf`, `ssfhmac`,
       `ssfx25519`, `ssfecdsa`, `ssfaesgcm`, ...) are outside this audit; review each module's
       own zeroization. Found during 2.7. Moved from step 2 to a later batch.
-- [ ] Build ClientHello in one function (currently three copies, already diverged).
-- [ ] Cipher suites: support AES-128-CCM in ServerHello or stop offering it. Prefer
+- [x] Build ClientHello in one function (currently three copies, already diverged).
+      `_BuildClientHello()` is the only builder (bounded writer into `clientHelloMsg`);
+      ClientHello2 is built in place with ClientHello1's random and session id, the one share
+      the HRR selected, and the cookie. The divergence it fixes, found by the new test:
+      ClientHello2 used a NEW random (RFC 8446 4.1.2 requires the same ClientHello; OpenSSL does
+      not check), and a cookie too large to echo was silently dropped (ClientHello2 sent without
+      it); now the handshake aborts with `internal_error`. Unit tests (fake server sends a crafted
+      HRR): ClientHello2 equals ClientHello1 field by field except `key_share` (one P-256 share)
+      and the cookie (byte-exact echo); oversized cookie aborts with the alert. The 1 KB HRR stack
+      buffer is gone (`_TlscHandleSendCH` frame 1744 -> 832 bytes). Spot-checked against
+      `s_server`: all handshake types, HRR, and an HRR from `-stateless` (same random on the wire;
+      OpenSSL sent no cookie there, so cookie echo is unit-tested only). Exhaustive run pending.
+- [x] Cipher suites: support AES-128-CCM in ServerHello or stop offering it. Prefer
       ChaCha20-Poly1305 (constant time; `ssfaes` is not).
-- [ ] Reassemble handshake messages that span records.
-- [ ] Records up to 2^14 + 256 bytes, or negotiate `record_size_limit` (RFC 8449).
-- [ ] Decrypt in place in `recvBuf`; drop the 8 KB stack copy in `_RecvRecordOnce`.
-- [ ] Remove 8 KB `buf` from every handler stack frame.
+      - [x] AES-128-CCM supported: `_ParseServerHello` maps 0x1304 to SHA-256 / 16-byte key (was
+        an `internal_error` abort for a suite the client offers); the record layer already
+        handled CCM. Unit test: a HelloRetryRequest selecting each offered suite gets
+        ClientHello2 (CCM failed before). `s_server` with CCM only: handshake + data direct,
+        after HRR, with RSA-PSS, and under ASan (all aborted with alert 80 before). CCM_8, not
+        offered, is still rejected (`illegal_parameter`). Exhaustive run pending.
+      - [x] Preference order: ChaCha20-Poly1305, AES-128-GCM, AES-256-GCM, AES-128-CCM (in
+        `_BuildClientHello`). Unit test checks the ClientHello order; a default `s_server` now
+        negotiates ChaCha20 (was AES-256-GCM); servers forcing a suite, and `-serverpref`, still
+        get theirs. Exhaustive run pending.
+      - [ ] `ssftls.md` says ChaCha20-Poly1305 is "the CPU-constant-time option", but
+        `ssfpoly1305` is not constant-time (its use in TLS, a MAC over public ciphertext with a
+        per-record key, is what its docs call acceptable). Outside the TLS client; needs approval.
+- [x] CertificateVerify used the transcript hash length, not the signature scheme's, when
+      passing the signed-content hash to the verifier: ECDSA P-384 and RSA-PSS-SHA384 signatures
+      failed under every SHA-256 suite (ChaCha20, AES-128-GCM). Exposed by the ChaCha20-first
+      order. Now carries `sigHashLen`. Signature scheme x suite matrix against `s_server`
+      (5 schemes x 3 suites): 4 failed before, 15/15 after; P-384 + ChaCha20 clean under ASan.
+      Exhaustive run pending.
+- [x] Reassemble handshake messages that span records. `_RecvHandshakeOnce` reassembles in
+      place in `hsBuf` (unread bytes moved to the front, the next record decrypted after them;
+      `ssfbfifo` was considered but only copies in/out, so messages could not be parsed in
+      place). ServerHello / HRR now use the same path. RFC 8446 5.1 rules: no record may be
+      interleaved in a fragmented message (`unexpected_message`); ServerHello, HRR and the
+      server Finished must end their record (bytes after Finished were silently discarded
+      before); a message larger than the buffer, or a record that no longer fits, is this
+      build's limit (`internal_error`, was `decode_error` / `bad_record_mac`). Unit tests (fake
+      server): HRR with a split header and in 1-byte records gets ClientHello2; CCS mid-message
+      and bytes after the HRR give `unexpected_message`; an oversized message gives
+      `internal_error` (5/5 were wrong before). Wire: `s_server -max_send_frag 512` with EC,
+      P-384 and RSA chains, and 1024 with RSA, now connect (were alert 80); proxy re-splitting
+      the ServerHello / HRR into 7- and 1-byte records connects. Exhaustive run pending.
+- [x] Records up to 2^14 + 256 bytes, or negotiate `record_size_limit` (RFC 8449).
+      - [x] Step 1, full-size receive: new `SSF_TLSC_CONFIG_MAX_RECV_RECORD` (default 16384,
+        RFC 8446 5.1) sizes `recvBuf` / `hsBuf`; `SSF_TLSC_CONFIG_MAX_SEND_RECORD` (default 8192)
+        sizes `sendRecordBuf` and outgoing records. Plaintext records over 2^14 are always
+        `record_overflow`; a legal record larger than a reduced build's buffer is
+        `internal_error`. `SSF_TLS_CONFIG_MAX_RECORD_SIZE` removed from `_opt/ssftls_opt.h` and
+        `ssftls.md` (approved; the client was its only user). Session 26,944 -> 43,336 bytes;
+        stack unchanged. Unit test: a 16,385-byte plaintext record gets `record_overflow` (was
+        `internal_error`, then accepted until the check was made unconditional). Wire, all
+        previously alert 80: OpenSSL 12 KB and 20 KB echoes (a full 16,384-byte record), padded
+        records, a 10 KB certificate chain in one record; GnuTLS 3.8.13 10 KB chain and 12 KB
+        echo. Exhaustive run pending.
+      - [x] Step 2, `record_size_limit` (RFC 8449): always offered in the ClientHello as
+        `SSF_TLSC_CONFIG_MAX_RECV_RECORD + 1` (identical in ClientHello2). EncryptedExtensions
+        accepts it: not 2 bytes is `decode_error`, below 64 or duplicated is `illegal_parameter`,
+        above 2^14+1 is capped (the RFC's "MAY abort" not taken). Outgoing records are capped at
+        the server's limit minus the content type byte. Once negotiated, a protected record over
+        the advertised limit is `record_overflow`; not negotiated, a legal record larger than a
+        reduced build's buffer stays `internal_error`. Unit: 8 EncryptedExtensions cases, the
+        ClientHello value. Wire: `gnutls-serv --recordsize 1024` advertises 1025 and all 14
+        client records stay within it (largest exactly 1025); a 4 KB-receive build gets a 12 KB
+        echo from GnuTLS in records that fit (was alert 80); an oversized record injected by a
+        proxy is `record_overflow` (GnuTLS, negotiated) / `internal_error` (OpenSSL 4.0, which
+        does not implement RFC 8449). Exhaustive run pending.
+- [x] Decrypt in place in `recvBuf`; drop the 8 KB stack copy in `_RecvRecordOnce`.
+- [x] Remove 8 KB `buf` from every handler stack frame. Done together: the record header and
+      fragment are read contiguously into `recvBuf` and decrypted in place;
+      `_RecvHandshakeOnce` returns the message in place in `hsBuf` (the Certificate /
+      CertificateVerify pointer remapping is gone). Gate (`-fstack-usage`, per function): five
+      frames of 8.5-10 KB before, largest now 1.95 KB. Whole-handshake stack high-water: EC
+      paths 35.0 KB -> 28.3 KB, RSA 40.1 KB -> 33.4 KB; the remaining depth is in the called
+      modules (next item). Spot-checked: all handshake types, 2-cert chain, ASan, injection and
+      ServerHello cases, zeroization. Exhaustive run pending.
+- [ ] Stack depth now set by called modules: `SSFX509VerifyChainPurpose` has a 14.5 KB frame
+      (sets the 28 KB EC peak); RSA adds `SSFRSAVerifyPSS` 6 KB and `SSFBNModExpMont` 10.6 KB
+      (33 KB peak). Review in `ssfx509` / `ssfrsa` / `ssfbn`. Found during step 3 item 5.
+- [x] Remaining ssftlsc locals: the leaf `SSFX509Cert_t` (1.5 KB) in the Certificate handler
+      (the 1 KB HRR ClientHello buffer went with the single ClientHello builder). At -O1
+      gcc inlines the handlers into `_SSFTLSCDrive` and their locals add up to a 2.4 KB frame;
+      keep handlers out of line or move the leaf certificate off the stack. Found during step 3
+      item 5. Fixed: the leaf parse moved into `_SaveLeafKey()`, marked
+      `SSF_NOINLINE` (`ssfport.h`), so the parsed certificate exists only during that call and
+      no longer sits under chain verification. `_SSFTLSCDrive` 2,400 / 2,384 / 2,400 -> 992 /
+      976 / 976 bytes at -O1 / -O2 / -Os (new gate: Drive with inlining, limit 1024). Runtime
+      peak 28,312 -> 26,904 bytes (EC), RSA-PSS 31,944. No RAM cost. Unit: P-256 leaf saved
+      (65-byte key, P256), RSA-8192 leaf refused (key over the 768-byte space), truncated and
+      damaged DER refused. Compilers other than GCC/Clang/MSVC get an empty `SSF_NOINLINE` and
+      may inline it again. Exhaustive run pending.
 - [ ] Chains longer than `SSF_TLS_CONFIG_MAX_CHAIN_DEPTH` keep only the first entries; an
       intermediate past the limit is lost and verification fails. Document, or raise the default.
 - [ ] Long single steps: P-384/RSA chain verification can take a long time inline on small
       targets; consider splitting verification per certificate across `pollOpen()` calls.
-- [ ] Do not send SNI for a literal IP address (RFC 6066).
-- [ ] Check the CertificateVerify scheme against the leaf key type and curve explicitly
+- [x] Do not send SNI for a literal IP address (RFC 6066). `_IsIPLiteral()` (strict dotted-quad
+      IPv4; any ':' with hex/'.' and optional `%zone` is IPv6, since DNS names never contain ':')
+      gates `server_name` in `_BuildClientHello`. Unit tests: 14 literal/name cases, and a
+      ClientHello to 127.0.0.1 has no `server_name`. On the wire: no SNI to 127.0.0.1 (was
+      `server_name: '127.0.0.1'`); an IP-SAN certificate verifies. Exhaustive run pending.
+- [ ] IPv6 literal hosts: `ssfx509` documents hostname / IPv4 SAN matching only, so a server
+      reached by IPv6 literal likely cannot be verified. Not tested. Outside the TLS client.
+- [x] Check the CertificateVerify scheme against the leaf key type and curve explicitly
       (`illegal_parameter`); today a mismatch is caught only as a failed verification. Found
-      during 2.4.
+      during 2.4. The leaf key type is recorded when the Certificate is parsed (RSA, P-256,
+      P-384, Ed25519); `_SchemeMatchesKey()` requires the scheme to fit it (ECDSA schemes fix the
+      curve). Unit test: 5 schemes x 5 key types, exactly 5 pairs match (20 mismatches were
+      accepted before). Signature matrix against `s_server` still 15/15. Exhaustive run pending.
+- [ ] `SSFX509IsEd25519()` tests the certificate's signature algorithm, unlike its siblings
+      `SSFX509IsRSA/IsP256/IsP384`, which test the key; ssftlsc compares the Ed25519 key OID
+      itself. Naming trap in `ssfx509`, outside the TLS client.
 - [x] P-384 HRR uses the wrong private key offset. Moot: 2.5 rejects an HRR for a group that
       already has a key share, so only P-256 can be selected by an HRR.
-- [ ] RTC unavailable: distinct error rather than verifying at time 0.
-- [ ] A record still partly written when `close()` runs is dropped (`close_notify`, or the tail
-      of application data). Found during step 1.
+- [x] RTC unavailable: distinct error rather than verifying at time 0. No trusted time (RTC
+      read fails, or reads before new `SSF_TLSC_CONFIG_MIN_TRUSTED_UNIX_SEC`, default
+      2025-01-01) fails VERIFY_CHAIN with its own trace and `internal_error`, instead of
+      `bad_certificate` from checking at time 0. The RTC reading is now divided by
+      `SSF_TICKS_PER_SEC` (was a literal 1000, wrong on ports with another tick rate). On the
+      wire with the RTC at its boot value: alert 80 and the distinct trace (was alert 42,
+      "chain verification failed"). Exhaustive run pending.
+- [ ] `ssfrtc`: `SSFRTCGetUnixNow()` asserts if `SSFRTCInit()` was never called and there is no
+      "is initialized" query, so ssftlsc cannot fail gracefully in that case (documented as a
+      precondition in `ssftlsc.h`). The simulated RTC (`SSF_RTC_ENABLE_SIM`, the default)
+      starts at 0 and reports that as a valid time. Outside the TLS client.
+- [x] A record still partly written when `close()` runs is dropped (`close_notify`, or the tail
+      of application data). Found during step 1. Fixed with option B (approved, outside the
+      client): `ssfnet.h` gains a sixth operation, `shutdown()`: deliver every byte `send()`
+      accepted and end this side of the stream; `close()` stays unconditional and never waits.
+      `ssfnetsock` returns SUCCESS at once (accepted bytes are in the kernel). `ssftlsc` writes
+      out the partly written record, then `close_notify`, then calls the inner `shutdown()`;
+      `send()` is ERROR afterwards, `close()` sends no second `close_notify`, and a later failure
+      sends no alert. `ssfmqttc` STOPPING polls `shutdown()` once DISCONNECT is accepted and
+      closes on SUCCESS; `txPublishTimeout` still bounds the stop, and a `shutdown()` failure
+      closes at once. Init of `ssfmqttc` and `ssftlsc` requires the operation. Failure paths
+      (keep-alive, protocol errors) still close at once. Unit: `ssfnetsock` (SUCCESS, repeat,
+      not connected), `ssfmqttc` (ordering after a byte-at-a-time DISCONNECT, WANT_WRITE x3,
+      never completes -> stop limit, ERROR, NULL operation), `ssftlsc` (not connected, NULL inner
+      operation). Wire, inner transport throttled to 1000 bytes per call with every other call
+      refused: 20 KB via `close()` alone arrives as 16,384 bytes and no `close_notify` (unchanged,
+      by design); via `shutdown()` all 20,000 and `close_notify` (5/5). End to end, ssfmqttc over
+      TLS to a Python TLS broker, 4 x 5000-byte QoS 0 publishes then `Stop()`: `close_notify`
+      now arrives (3/3; before, never). Exhaustive run pending.
 
 ## Step 4 — Features
 
-- [ ] CertificateRequest and client authentication (mutual TLS: AWS IoT, Azure).
+- [ ] CertificateRequest and client authentication (mutual TLS: AWS IoT, Azure). Note
+      `gnutls-serv` sends an (optional) CertificateRequest by default and the client aborts with
+      `unexpected_message`; even without a client certificate, RFC 8446 4.4.2 lets the client
+      answer with an empty Certificate. Interop with GnuTLS currently needs
+      `--disable-client-cert`.
 - [ ] Private key loading: PKCS#8 / SEC 1 / PEM.
 - [ ] KeyUpdate: install new receive keys, answer `update_requested`; send-side KeyUpdate before
       the AEAD record limit.
@@ -201,7 +332,10 @@ is rejected.
 - [ ] RFC 8448 handshake traces as deterministic vectors (needs injectable random and keys).
 - [ ] Deterministic parser unit tests like `_SSFTLSCParseCertificateForTest` for the ServerHello
       parser (2.5 is covered only through `mitm.py` today).
-- [ ] Interop with `openssl s_server` over loopback; test.mosquitto.org:8883 with its CA.
+- [ ] Interop with `openssl s_server` over loopback; test.mosquitto.org:8883 with its CA. Add
+      `gnutls-serv` (installed, 3.8.13) as a second independent server in the regression set.
+- [ ] `ssftls.md` still says `SSF_TLS_CONFIG_MAX_CHAIN_DEPTH` is not referenced; ssftlsc uses
+      it. Outside the TLS client.
 - [ ] Negative tests for every step 2 check.
 - [ ] Bring the loopback `openssl s_server` interop harness into the repo (spot checks for step 2
       currently run from a scratch driver, which sets the unit-test hooks).

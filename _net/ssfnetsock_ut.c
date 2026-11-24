@@ -228,6 +228,11 @@ static void _SSFNetSockUTEcho(SSFNetSock_t *s, const SSFNetSockUTListener_t *l)
     SSF_ASSERT(got == sizeof(buf));
     SSF_ASSERT(memcmp(buf, ping, sizeof(ping)) == 0);
 
+    /* shutdown(): accepted bytes are already in the kernel, so SUCCESS at once, and again on   */
+    /* repeat; recv() stays valid (the CLOSED below is read after it).                          */
+    SSF_ASSERT(s->transport.shutdown(&s->transport) == SSF_NET_IO_SUCCESS);
+    SSF_ASSERT(s->transport.shutdown(&s->transport) == SSF_NET_IO_SUCCESS);
+
     /* Peer close is reported as CLOSED */
     (void)SSF_NETSOCK_UT_CLOSE(peer);
     end = SSFPortGetTick64() + SSF_NETSOCK_UT_WAIT_TICKS;
@@ -256,6 +261,7 @@ void SSFNetSockUnitTest(void)
     SSF_ASSERT(s->state == SSF_NETSOCK_STATE_CLOSED);
     SSF_ASSERT(s->lookup == SSF_NETSOCK_NO_LOOKUP);
     SSF_ASSERT(t->pollOpen(t) == SSF_NET_IO_ERROR);           /* Not opened */
+    SSF_ASSERT(t->shutdown(t) == SSF_NET_IO_ERROR);           /* Not connected */
     SSF_ASSERT_TEST(SSFNetSockInit(s));                        /* Already initialized */
     _SSFNetSockUTListen(&l);
 

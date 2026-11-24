@@ -91,7 +91,12 @@ typedef struct
     SSFNetIOResult_t sendResult;      /* SUCCESS accepts bytes; anything else is returned      */
     size_t sendChunk;                 /* Max bytes accepted per send(); 0 => unlimited         */
     SSFNetIOResult_t recvEmptyResult; /* Returned when no injected bytes remain                */
+    uint32_t shutdownWants;           /* shutdown() returns WANT_WRITE this many times first   */
+    SSFNetIOResult_t shutdownResult;  /* Then this                                             */
     /* Observation */
+    uint32_t shutdownCount;           /* shutdown() calls on the current connection            */
+    bool isShutdown;                  /* shutdown() returned SUCCESS; send() is now invalid    */
+    bool wasShutdownAtClose;          /* isShutdown when close() last ran                      */
     bool isOpening;
     bool isOpen;
     uint32_t openCount;
@@ -168,6 +173,7 @@ static SSFNetIOResult_t _SSFMQTTCUTMockSend(SSFNetTransport_t *t, const uint8_t 
     SSF_REQUIRE(len > 0);
     SSF_REQUIRE(sentOut != NULL);
     SSF_REQUIRE(m->isOpen);
+    SSF_ASSERT(m->isShutdown == false);           /* ssfnet.h: send() is not valid after it */
 
     *sentOut = 0;
     if (m->sendResult != SSF_NET_IO_SUCCESS) return m->sendResult;
@@ -204,6 +210,22 @@ static SSFNetIOResult_t _SSFMQTTCUTMockRecv(SSFNetTransport_t *t, uint8_t *buf, 
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Returns WANT_WRITE shutdownWants times, then the scripted shutdown result.                    */
+/* --------------------------------------------------------------------------------------------- */
+static SSFNetIOResult_t _SSFMQTTCUTMockShutdown(SSFNetTransport_t *t)
+{
+    SSFMQTTCUTMock_t *m = (SSFMQTTCUTMock_t *)t;
+
+    SSF_REQUIRE(t == &_utMock.transport);
+    SSF_ASSERT(m->isOpen);                        /* Only after pollOpen() SUCCESS */
+
+    m->shutdownCount++;
+    if (m->shutdownWants > 0) { m->shutdownWants--; return SSF_NET_IO_WANT_WRITE; }
+    if (m->shutdownResult == SSF_NET_IO_SUCCESS) m->isShutdown = true;
+    return m->shutdownResult;
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Closes the mock and counts the close.                                                         */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFMQTTCUTMockClose(SSFNetTransport_t *t)
@@ -214,6 +236,8 @@ static void _SSFMQTTCUTMockClose(SSFNetTransport_t *t)
     SSF_REQUIRE(m->isOpen || m->isOpening);
 
     m->closeCount++;
+    m->wasShutdownAtClose = m->isShutdown;
+    m->isShutdown = false;
     m->isOpen = false;
     m->isOpening = false;
 }
@@ -228,7 +252,9 @@ static void _SSFMQTTCUTMockReset(void)
     _utMock.transport.pollOpen = _SSFMQTTCUTMockPollOpen;
     _utMock.transport.send = _SSFMQTTCUTMockSend;
     _utMock.transport.recv = _SSFMQTTCUTMockRecv;
+    _utMock.transport.shutdown = _SSFMQTTCUTMockShutdown;
     _utMock.transport.close = _SSFMQTTCUTMockClose;
+    _utMock.shutdownResult = SSF_NET_IO_SUCCESS;
     _utMock.openResult = true;
     _utMock.pollResult = SSF_NET_IO_SUCCESS;
     _utMock.sendResult = SSF_NET_IO_SUCCESS;
@@ -525,6 +551,16 @@ static void _SSFMQTTCUTConstruction(void)
                                  SSF_MQTTC_UT_TX_BLOCK_SIZE, SSF_MQTTC_UT_RX_BLOCK_SIZE,
                                  _SSFMQTTCUTRxPublish, &_utRxPublishCtx, NULL, &_utEventCtx));
 
+    {
+        SSFNetTransport_t noShutdown = _utSock.transport;
+
+        noShutdown.shutdown = NULL;
+        SSF_ASSERT_TEST(SSFMQTTCInit(&noShutdown, SSF_MQTTC_UT_TX_BLOCKS,
+                                     SSF_MQTTC_UT_TX_BLOCK_SIZE, SSF_MQTTC_UT_RX_BLOCK_SIZE,
+                                     _SSFMQTTCUTRxPublish, &_utRxPublishCtx, _SSFMQTTCUTEvent,
+                                     &_utEventCtx));
+    }
+
     /* Nothing may be used before Init */
     SSF_ASSERT_TEST(SSFMQTTCGetState());
     SSF_ASSERT_TEST(SSFMQTTCStop());
@@ -624,6 +660,8 @@ static void _SSFMQTTCUTScenarioHappyPath(void)
     _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(_utPktDisconnect));
     SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_STOPPED);
     SSF_ASSERT(_utMock.closeCount == 1);
+    SSF_ASSERT(_utMock.shutdownCount == 1);         /* DISCONNECT delivered before close() */
+    SSF_ASSERT(_utMock.wasShutdownAtClose);
     _SSFMQTTCUTExpectEvents(stopped, 1);
     SSF_ASSERT_TEST(SSFMQTTCStop());                                      /* Twice */
     _SSFMQTTCUTEnd();
@@ -1194,6 +1232,75 @@ static void _SSFMQTTCUTScenarioStopPaths(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Tests that Stop delivers DISCONNECT through shutdown() before close(), and its limits.        */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTCUTScenarioGracefulClose(void)
+{
+    static const SSFMQTTCUTEventRec_t stopped[] = { { SSF_MQTTC_EVENT_STOPPED, SSF_MQTTC_REASON_NONE } };
+    SSFMQTTCOpts_t opts;
+    uint32_t i;
+
+    /* shutdown() is not started until DISCONNECT is fully accepted, then polled until SUCCESS */
+    _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
+    _SSFMQTTCUTOptsInit(&opts);
+    _SSFMQTTCUTGoReady(&opts);
+    _utMock.sendChunk = 1;                          /* DISCONNECT goes out a byte per call */
+    _utMock.shutdownWants = 3;
+    SSFMQTTCStop();
+    (void)SSFSMTask(NULL);                          /* Enter STOPPING: DISCONNECT queued */
+    (void)SSFMQTTCTask(NULL);                       /* First byte only */
+    SSF_ASSERT(_utMock.txLen == 1);
+    SSF_ASSERT(_utMock.shutdownCount == 0);
+    for (i = 0; (i < 8u) && (_utMock.closeCount == 0); i++)
+    {
+        (void)SSFSMTask(NULL);
+        (void)SSFMQTTCTask(NULL);
+        if (_utMock.shutdownCount > 0) SSF_ASSERT(_utMock.txLen == 2);   /* Whole packet first */
+    }
+    _SSFMQTTCUTPump();
+    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(_utPktDisconnect));
+    SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_STOPPED);
+    SSF_ASSERT(_utMock.shutdownCount == 4);         /* 3 x WANT_WRITE, then SUCCESS, no more */
+    SSF_ASSERT(_utMock.closeCount == 1);
+    SSF_ASSERT(_utMock.wasShutdownAtClose);
+    _SSFMQTTCUTExpectEvents(stopped, 1);
+    _SSFMQTTCUTEnd();
+
+    /* While shutdown() reports WANT_WRITE the client stays STOPPING and does not close */
+    _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
+    _SSFMQTTCUTOptsInit(&opts);
+    _SSFMQTTCUTGoReady(&opts);
+    _utMock.shutdownWants = 0xffffffffu;
+    SSFMQTTCStop();
+    _SSFMQTTCUTPump();
+    SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_STOPPING);
+    SSF_ASSERT(_utMock.closeCount == 0);
+    SSF_ASSERT(_utMock.shutdownCount > 0);
+    /* ... until the stop limit (txPublishTimeout) closes it anyway, without a second DISCONNECT */
+    _SSFMQTTCUTPumpFor(SSF_MQTTC_UT_SHORT_TICKS + SSF_MQTTC_UT_SLACK_TICKS);
+    SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_STOPPED);
+    SSF_ASSERT(_utMock.closeCount == 1);
+    SSF_ASSERT(_utMock.wasShutdownAtClose == false);
+    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(_utPktDisconnect));
+    _SSFMQTTCUTExpectEvents(stopped, 1);
+    _SSFMQTTCUTEnd();
+
+    /* A shutdown() failure ends the stop at once: close, STOPPED, nothing re-sent */
+    _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
+    _SSFMQTTCUTOptsInit(&opts);
+    _SSFMQTTCUTGoReady(&opts);
+    _utMock.shutdownResult = SSF_NET_IO_ERROR;
+    SSFMQTTCStop();
+    _SSFMQTTCUTPump();
+    SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_STOPPED);
+    SSF_ASSERT(_utMock.shutdownCount == 1);
+    SSF_ASSERT(_utMock.closeCount == 1);
+    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(_utPktDisconnect));
+    _SSFMQTTCUTExpectEvents(stopped, 1);
+    _SSFMQTTCUTEnd();
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Layer 3: round trip against a public broker over the real socket transport                    */
 /* --------------------------------------------------------------------------------------------- */
 #if SSF_CONFIG_MQTTC_UNIT_TEST_BROKER == 1
@@ -1353,6 +1460,7 @@ void SSFMQTTCUnitTest(void)
     _SSFMQTTCUTScenarioConnectFailures();
     _SSFMQTTCUTScenarioSessionTimeouts();
     _SSFMQTTCUTScenarioStopPaths();
+    _SSFMQTTCUTScenarioGracefulClose();
 #if SSF_CONFIG_MQTTC_UNIT_TEST_BROKER == 1
     _SSFMQTTCUTBrokerEcho();
 #endif

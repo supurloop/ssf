@@ -84,7 +84,7 @@ Init ──► STOPPED ──Start()──► CONNECTING ──CONNACK──► 
 | `SSF_MQTTC_STATE_SUBSCRIBING` | CONNACK accepted, SUBSCRIBE sent, awaiting SUBACK. Skipped when no subscriptions are configured. |
 | `SSF_MQTTC_STATE_CONNECTED` | Session up and every subscription granted. The only state in which `TxPublish()` succeeds. |
 | `SSF_MQTTC_STATE_RECONNECT_WAIT` | Attempt failed or connection lost; waiting out the backoff. |
-| `SSF_MQTTC_STATE_STOPPING` | `Stop()` called with a session up; flushing the tx queue, then DISCONNECT and close. |
+| `SSF_MQTTC_STATE_STOPPING` | `Stop()` called with a session up; flushing the tx queue, then DISCONNECT, the transport's `shutdown()`, and close. |
 
 **Events** are reported through `SSFMQTTCEventFn_t`. Per connection the sequence is CONNECTED,
 READY, then eventually DISCONNECTED or STOPPED. A failed attempt yields CONNECT_FAILED. The
@@ -296,7 +296,7 @@ Builds the three packet pools (see [Buffers](#buffers)), installs the callbacks,
 client with ssfsm, which must already be initialized. The transport must outlive the client. The
 client is STOPPED on return and no event is reported for that initial state.
 
-Asserts if already initialized, if the transport or any of its five operations is NULL, if
+Asserts if already initialized, if the transport or any of its six operations is NULL, if
 `txBlocks` is 0, if either block size is below 4, if `rxPublishFn` is NULL, or if an event
 context is given without an event callback.
 
@@ -408,7 +408,10 @@ void SSFMQTTCStop(void);
 
 Stops the client. Valid exactly once per `Start()`, in any state before STOPPED is reported. No
 further connection attempts are made. If a session is up the client flushes the tx queue, sends
-DISCONNECT and closes the transport; otherwise it aborts the attempt or backoff immediately.
+DISCONNECT, calls the transport's `shutdown()` until the DISCONNECT is delivered (over TLS, until
+the last record and `close_notify` are written), then closes the transport. `txPublishTimeout`
+bounds the whole stop; past it the transport is closed anyway. Otherwise it aborts the attempt or
+backoff immediately.
 
 Completion is asynchronous: STOPPED is reported from `SSFSMTask()`, never from inside `Stop()`.
 Pending publish callbacks fire `false`. Queued inbound publishes are discarded without further

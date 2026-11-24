@@ -92,6 +92,9 @@ extern "C" {
 /*   certificate sends certificate_required (or rejects the chain) after the client Finished, */
 /*   so pollOpen() has already reported success; the first recv() fails, and for              */
 /*   certificate_required the trace says the server requires a client certificate.            */
+/* - Trust anchors are DER certificates in caller memory (SSFTLSCTrustStore_t). From PEM, a     */
+/*   single certificate or a CA bundle, SSFTLSCTrustFromPEM() builds the store; it fails closed */
+/*   on anything that is not a certificate.                                                     */
 /* - ALPN (RFC 7301) is optional: SSFTLSCSetALPN() with the protocols to offer, SSFTLSCGetALPN() */
 /*   for the server's choice after the handshake.                                              */
 /* - IPv4 only (ssfnet.h): open() refuses an IPv6 literal host whatever the inner transport.     */
@@ -116,6 +119,18 @@ typedef struct SSFTLSCTrustStore
     const uint32_t *caDerLen;
     uint8_t count;
 } SSFTLSCTrustStore_t;
+
+/* SSFTLSCTrustFromPEM() results. */
+typedef enum
+{
+    SSF_TLSC_TRUST_OK,
+    SSF_TLSC_TRUST_ERR_PEM,     /* A malformed PEM block (BEGIN / END lines, Base64)            */
+    SSF_TLSC_TRUST_ERR_LABEL,   /* A block that is not a CERTIFICATE                            */
+    SSF_TLSC_TRUST_ERR_CERT,    /* A CERTIFICATE that is not exactly one X.509 certificate      */
+    SSF_TLSC_TRUST_ERR_COUNT,   /* More certificates than maxCount (255 when measuring)         */
+    SSF_TLSC_TRUST_ERR_SIZE,    /* The certificates do not fit poolSize bytes                   */
+    SSF_TLSC_TRUST_ERR_EMPTY,   /* No certificate in the input                                  */
+} SSFTLSCTrustResult_t;
 
 /* TLS client handshake states, advanced by pollOpen() */
 typedef enum
@@ -336,6 +351,28 @@ typedef struct SSFTLSCSession
 /* has opted in (only possible when SSF_TLSC_CONFIG_ALLOW_UNAUTHENTICATED is 1).                */
 void SSFTLSCInit(SSFTLSCSession_t *session, SSFNetTransport_t *inner,
                  const SSFTLSCTrustStore_t *trustStoreOpt);
+
+/* Builds a trust store from PEM text: one certificate or a bundle of them (RFC 7468), with     */
+/* text allowed between blocks if it holds no "-----BEGIN" / "-----END" marker. Each            */
+/* certificate is decoded as DER into poolOpt (one after another; it must not overlap pem,      */
+/* which asserts), ders[i] / lens[i] are set for each (both arrays hold maxCount entries), and  */
+/* *storeOpt is { ders, lens, count }, ready for SSFTLSCInit(); pool and arrays must stay valid */
+/* while the session uses it.                                                                    */
+/* It fails closed: every block must be a CERTIFICATE that parses as exactly one X.509          */
+/* certificate, so a stray key, a malformed block (a damaged BEGIN line included: its END     */
+/* line is then a stray marker), one more certificate than maxCount, or a pool too small,     */
+/* rejects the whole input. *poolUsedOut gets the pool bytes used and *countOut */
+/* the certificates loaded. On an error the store is { NULL, NULL, 0 }, *poolUsedOut is 0 and   */
+/* *countOut is the 0-based index of the certificate block at fault.                            */
+/* Measuring: with poolOpt NULL (ders, lens and storeOpt are then ignored and may be NULL) the */
+/* pool size and count needed are reported; this checks the PEM and labels but cannot parse    */
+/* the certificates. Anchors are not checked for the CA flag or validity here; the chain       */
+/* verifier does that on every handshake. On a host, read the file into a buffer first, e.g.   */
+/* fread() of a CA bundle.                                                                       */
+SSFTLSCTrustResult_t SSFTLSCTrustFromPEM(const char *pem, size_t pemLen, uint8_t *poolOpt,
+                                         size_t poolSize, const uint8_t **ders, uint32_t *lens,
+                                         uint8_t maxCount, SSFTLSCTrustStore_t *storeOpt,
+                                         size_t *poolUsedOut, uint8_t *countOut);
 
 /* Closes any connection, wipes the session and releases it.                                    */
 void SSFTLSCDeInit(SSFTLSCSession_t *session);

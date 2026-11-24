@@ -600,8 +600,33 @@ is rejected.
       (255-byte host, `SSF_TLSC_CH1_MAX_NO_ALPN`, checked exactly by a unit test) must fit the
       768-byte `SSF_TLSC_CH_SIZE` buffer; the unit test passes at 219. (5) Send-record item
       below updated. (7) `ssftlsc.h`: the names must stay unchanged, not only valid.
-- [ ] Trust store loading: CA bundles (multiple certificates per file), no silent truncation,
-      no filesystem requirement in the core (`ssftls_certs.c` is POSIX-only).
+- [x] Trust store loading: CA bundles (multiple certificates per file), no silent truncation,
+      no filesystem requirement in the core (`ssftls_certs.c` is POSIX-only). TDD.
+      `SSFTLSCTrustFromPEM()`: a certificate or bundle in memory (text between blocks allowed,
+      RFC 7468), DER into the caller's pool and arrays, the store ready for `SSFTLSCInit()`.
+      Fails closed with a distinct result (malformed PEM, non-CERTIFICATE label, not exactly
+      one X.509 certificate, over `maxCount` / 255, pool too small, no certificate): the store
+      is then empty and the count says which block. NULL pool measures (pool size and count;
+      PEM and labels checked, certificates not parsed). `ssftls_certs.c` / `.h` deleted
+      (approved; never built). Unit tests: one, a CRLF bundle with text, exact / short pool,
+      maxCount, five wrong labels, bad Base64, no END, trailing byte, non-X.509 DER, empty,
+      255 / 256 certificates. Mutation: 20 mutants, all killed but an equivalent one (pem
+      NULL, also required by ssfpem). Fedora's TLS and email bundles (118 / 87 certificates)
+      load identical to OpenSSL's DER, every certificate parsing; its object-signing bundle
+      (301) is ERR_COUNT. Wire (`s_server`): bundle of system roots + test CA, CA first or
+      last, EC and RSA leaves connect; system roots alone fail with unknown_ca. Cortex-M4
+      -Os: text +234 B (tracing off); stack 1,392 B deepest (SSFX509Parse's certificate).
+      Audit (fuzz: 200k mutated bundles, exact-size buffers, ASan / UBSan, invariants:
+      measure = load, contiguous pool, empty store on error; no failures). Fixed, TDD: (1) a
+      block whose BEGIN line was damaged (4 dashes, indent, lower case, no space, missing) was
+      text to ssfpem and silently dropped, the load succeeding (1,832 of the 200k): each block
+      must now hold exactly one "-----BEGIN" and one "-----END" counting the text before it,
+      and the text after the last none, else ERR_PEM (fuzz rerun: 0 drops; both lines damaged
+      is still undetectable). (2) The pool overlapping the PEM text asserts (ssfpem's rule). (3)
+      `ssftlsc.h`: ders / lens hold maxCount entries; between-block text holds no markers.
+      Not changed: a corrupted but parseable root loads and fails at verification; checking
+      self-signatures at load would cost a signature per root. Text +152 B for the fixes
+      (+386 B in all); stack unchanged (deepest path still through SSFX509Parse).
 
 - [ ] ServerHello: extensions the client offers but that are not specified for ServerHello
       (`server_name`, `supported_groups`, `signature_algorithms`, `psk_key_exchange_modes`,

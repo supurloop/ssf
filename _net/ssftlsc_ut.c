@@ -70,6 +70,7 @@
 #include "ssfed25519.h"
 #include "ssfrsa.h"
 #include "ssfsha2.h"
+#include "ssfbase64.h"
 #include "ssftlsc_ut_client.h"
 
 #if SSF_CONFIG_TLSC_UNIT_TEST == 1
@@ -2328,6 +2329,326 @@ static void _SSFTLSCUTAlpn(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Trust store loading: SSFTLSCTrustFromPEM() over PEM bundles built from the DER fixtures.      */
+/* --------------------------------------------------------------------------------------------- */
+/* Appends text to buf. */
+static void _UTPemText(char *buf, size_t size, size_t *len, const char *text)
+{
+    size_t n = strlen(text);
+
+    SSF_ASSERT((*len + n) < size);
+    memcpy(&buf[*len], text, n);
+    *len += n;
+    buf[*len] = 0;
+}
+
+/* Appends a PEM block: label, der in 64-column Base64 lines, each line ended with eol. */
+static void _UTPemAdd(char *buf, size_t size, size_t *len, const char *label, const uint8_t *der,
+                      size_t derLen, const char *eol)
+{
+    static char b64[4096];
+    char line[80];
+    size_t b64Len;
+    size_t i;
+
+    SSF_ASSERT(SSFBase64Encode(der, derLen, b64, sizeof(b64), &b64Len));
+    _UTPemText(buf, size, len, "-----BEGIN ");
+    _UTPemText(buf, size, len, label);
+    _UTPemText(buf, size, len, "-----");
+    _UTPemText(buf, size, len, eol);
+    for (i = 0; i < b64Len; i += 64u)
+    {
+        size_t k = ((b64Len - i) < 64u) ? (b64Len - i) : 64u;
+
+        memcpy(line, &b64[i], k); line[k] = 0;
+        _UTPemText(buf, size, len, line);
+        _UTPemText(buf, size, len, eol);
+    }
+    _UTPemText(buf, size, len, "-----END ");
+    _UTPemText(buf, size, len, label);
+    _UTPemText(buf, size, len, "-----");
+    _UTPemText(buf, size, len, eol);
+}
+
+/* Loads pem into the test's pool and arrays; checks the result, *countOut and *poolUsedOut, and */
+/* that a failure leaves an empty store.                                                        */
+static uint8_t _utTrustPool[4096];
+static const uint8_t *_utTrustDers[4];
+static uint32_t _utTrustLens[4];
+static SSFTLSCTrustStore_t _utTrustStore;
+static void _UTTrust(const char *pem, size_t pemLen, size_t poolSize, uint8_t maxCount,
+                     SSFTLSCTrustResult_t want, uint8_t wantCount, size_t wantUsed)
+{
+    size_t used = 0xffffu;
+    uint8_t count = 0xffu;
+    SSFTLSCTrustResult_t r;
+
+    _utTrustStore.caDer = (const uint8_t **)(uintptr_t)1u;       /* Stale contents: replaced */
+    _utTrustStore.caDerLen = (const uint32_t *)(uintptr_t)1u;
+    _utTrustStore.count = 99u;
+    r = SSFTLSCTrustFromPEM(pem, pemLen, _utTrustPool, poolSize, _utTrustDers, _utTrustLens,
+                            maxCount, &_utTrustStore, &used, &count);
+    SSF_ASSERT(r == want);
+    SSF_ASSERT(count == wantCount);
+    if (r == SSF_TLSC_TRUST_OK)
+    {
+        SSF_ASSERT(used == wantUsed);
+        SSF_ASSERT((_utTrustStore.caDer == _utTrustDers) &&
+                   (_utTrustStore.caDerLen == _utTrustLens) &&
+                   (_utTrustStore.count == wantCount));
+    }
+    else
+    {
+        SSF_ASSERT(used == 0u);
+        SSF_ASSERT((_utTrustStore.caDer == NULL) && (_utTrustStore.caDerLen == NULL) &&
+                   (_utTrustStore.count == 0u));
+    }
+}
+
+/* Builds pem: the P-256 certificate, then the Ed25519 one with its BEGIN line replaced by      */
+/* beginLine (NULL: no BEGIN line at all). Returns the length.                                  */
+static size_t _UTPemDamagedBegin(char *pem, size_t size, const char *beginLine)
+{
+    static char tmp[2048];
+    size_t len = 0;
+    size_t tmpLen = 0;
+    const char *body;
+
+    _UTPemAdd(pem, size, &len, "CERTIFICATE", _utClientP256Cert, sizeof(_utClientP256Cert), "\n");
+    _UTPemAdd(tmp, sizeof(tmp), &tmpLen, "CERTIFICATE", _utClientEd25519Cert,
+              sizeof(_utClientEd25519Cert), "\n");
+    body = strchr(tmp, '\n') + 1;                               /* After the BEGIN line */
+    if (beginLine != NULL) _UTPemText(pem, size, &len, beginLine);
+    _UTPemText(pem, size, &len, body);
+    return len;
+}
+
+static void _SSFTLSCUTTrustFromPEM(void)
+{
+    static char pem[8192];
+    static char big[160000];
+    static uint8_t bad[sizeof(_utClientP256Cert) + 1u];
+    static const uint8_t junk[] = { 0x30, 0x03, 0x02, 0x01, 0x05 };
+    const size_t l1 = sizeof(_utClientP256Cert);
+    const size_t l2 = sizeof(_utClientEd25519Cert);
+    const size_t l3 = sizeof(_utClientRSA2048Cert);
+    size_t len;
+    size_t used;
+    size_t i;
+    uint8_t count;
+    char *p;
+
+    /* ---- One certificate ---- */
+    len = 0;
+    _UTPemAdd(pem, sizeof(pem), &len, "CERTIFICATE", _utClientP256Cert, l1, "\n");
+    _UTTrust(pem, len, sizeof(_utTrustPool), 4u, SSF_TLSC_TRUST_OK, 1u, l1);
+    SSF_ASSERT((_utTrustDers[0] == _utTrustPool) && (_utTrustLens[0] == l1));
+    SSF_ASSERT(memcmp(_utTrustDers[0], _utClientP256Cert, l1) == 0);
+
+    /* ---- A bundle: CRLF, text before, between and after the blocks (RFC 7468 5.2) ---- */
+    len = 0;
+    _UTPemText(pem, sizeof(pem), &len, "# Bundle\r\nIssuer: test\r\n");
+    _UTPemAdd(pem, sizeof(pem), &len, "CERTIFICATE", _utClientP256Cert, l1, "\r\n");
+    _UTPemText(pem, sizeof(pem), &len, "\r\n# Second\r\n");
+    _UTPemAdd(pem, sizeof(pem), &len, "CERTIFICATE", _utClientEd25519Cert, l2, "\r\n");
+    _UTPemAdd(pem, sizeof(pem), &len, "CERTIFICATE", _utClientRSA2048Cert, l3, "\r\n");
+    _UTPemText(pem, sizeof(pem), &len, "trailing text\r\n");
+    _UTTrust(pem, len, sizeof(_utTrustPool), 4u, SSF_TLSC_TRUST_OK, 3u, l1 + l2 + l3);
+    SSF_ASSERT((_utTrustLens[0] == l1) && (_utTrustLens[1] == l2) && (_utTrustLens[2] == l3));
+    SSF_ASSERT(memcmp(_utTrustDers[0], _utClientP256Cert, l1) == 0);
+    SSF_ASSERT(memcmp(_utTrustDers[1], _utClientEd25519Cert, l2) == 0);
+    SSF_ASSERT(memcmp(_utTrustDers[2], _utClientRSA2048Cert, l3) == 0);
+    SSF_ASSERT((_utTrustDers[1] == &_utTrustPool[l1]) &&
+               (_utTrustDers[2] == &_utTrustPool[l1 + l2]));
+    /* The store is one Init() accepts */
+    SSFTLSCInit(&_utSession2, &_utSock.transport, &_utTrustStore);
+    SSF_ASSERT(_utSession2.trust.count == 3u);
+    SSFTLSCDeInit(&_utSession2);
+
+    /* ---- Measuring: no pool or arrays; sizes reported ---- */
+    used = 0; count = 0;
+    SSF_ASSERT(SSFTLSCTrustFromPEM(pem, len, NULL, 0u, NULL, NULL, 0u, NULL, &used, &count) ==
+               SSF_TLSC_TRUST_OK);
+    SSF_ASSERT((used == (l1 + l2 + l3)) && (count == 3u));
+
+    /* ---- Pool exactly full, then one byte short: the third block does not fit ---- */
+    _UTTrust(pem, len, l1 + l2 + l3, 4u, SSF_TLSC_TRUST_OK, 3u, l1 + l2 + l3);
+    _UTTrust(pem, len, l1 + l2 + l3 - 1u, 4u, SSF_TLSC_TRUST_ERR_SIZE, 2u, 0u);
+    /* ---- More certificates than maxCount: the failing one's index ---- */
+    _UTTrust(pem, len, sizeof(_utTrustPool), 2u, SSF_TLSC_TRUST_ERR_COUNT, 2u, 0u);
+    _UTTrust(pem, len, sizeof(_utTrustPool), 0u, SSF_TLSC_TRUST_ERR_COUNT, 0u, 0u);
+    _UTTrust(pem, len, sizeof(_utTrustPool), 3u, SSF_TLSC_TRUST_OK, 3u, l1 + l2 + l3);
+
+    /* ---- Any block other than CERTIFICATE rejects the bundle ---- */
+    {
+        static const char *const labels[] = { "PRIVATE KEY", "TRUSTED CERTIFICATE",
+                                              "X509 CERTIFICATE", "CERTIFICATE REQUEST",
+                                              "certificate" };
+        size_t k;
+
+        for (k = 0; k < (sizeof(labels) / sizeof(labels[0])); k++)
+        {
+            len = 0;
+            _UTPemAdd(pem, sizeof(pem), &len, "CERTIFICATE", _utClientP256Cert, l1, "\n");
+            _UTPemAdd(pem, sizeof(pem), &len, labels[k], _utClientEd25519Cert, l2, "\n");
+            _UTTrust(pem, len, sizeof(_utTrustPool), 4u, SSF_TLSC_TRUST_ERR_LABEL, 1u, 0u);
+            /* Measuring checks labels too */
+            SSF_ASSERT(SSFTLSCTrustFromPEM(pem, len, NULL, 0u, NULL, NULL, 0u, NULL, &used,
+                                           &count) == SSF_TLSC_TRUST_ERR_LABEL);
+            SSF_ASSERT((used == 0u) && (count == 1u));
+        }
+    }
+
+    /* ---- Malformed PEM: bad Base64, a BEGIN with no END ---- */
+    len = 0;
+    _UTPemAdd(pem, sizeof(pem), &len, "CERTIFICATE", _utClientP256Cert, l1, "\n");
+    _UTPemAdd(pem, sizeof(pem), &len, "CERTIFICATE", _utClientEd25519Cert, l2, "\n");
+    p = strstr(&pem[1], "-----BEGIN");
+    SSF_ASSERT(p != NULL);
+    p[40] = '!';
+    _UTTrust(pem, len, sizeof(_utTrustPool), 4u, SSF_TLSC_TRUST_ERR_PEM, 1u, 0u);
+    len = 0;
+    _UTPemAdd(pem, sizeof(pem), &len, "CERTIFICATE", _utClientP256Cert, l1, "\n");
+    _UTPemText(pem, sizeof(pem), &len, "-----BEGIN CERTIFICATE-----\nMIIB\n");
+    _UTTrust(pem, len, sizeof(_utTrustPool), 4u, SSF_TLSC_TRUST_ERR_PEM, 1u, 0u);
+
+    /* ---- A damaged BEGIN line makes ssfpem read the block as text: its END line, left in   */
+    /* ---- the text between blocks, rejects the bundle rather than dropping the certificate */
+    {
+        static const char *const begins[] = { "----BEGIN CERTIFICATE-----\n",
+                                              " -----BEGIN CERTIFICATE-----\n",
+                                              "-----begin CERTIFICATE-----\n",
+                                              "-----BEGINCERTIFICATE-----\n",
+                                              "BEGIN CERTIFICATE\n", NULL };
+        size_t k;
+
+        for (k = 0; k < (sizeof(begins) / sizeof(begins[0])); k++)
+        {
+            len = _UTPemDamagedBegin(pem, sizeof(pem), begins[k]);
+            _UTTrust(pem, len, sizeof(_utTrustPool), 4u, SSF_TLSC_TRUST_ERR_PEM, 1u, 0u);
+            SSF_ASSERT(SSFTLSCTrustFromPEM(pem, len, NULL, 0u, NULL, NULL, 0u, NULL, &used,
+                                           &count) == SSF_TLSC_TRUST_ERR_PEM);
+            SSF_ASSERT((used == 0u) && (count == 1u));
+        }
+        /* A stray marker in text before, between or after the blocks */
+        {
+            static const char *const strays[] = { "-----BEGIN", "-----END", "x------END x" };
+            size_t w;
+
+            for (k = 0; k < (sizeof(strays) / sizeof(strays[0])); k++)
+            {
+                for (w = 0; w < 3u; w++)
+                {
+                    len = 0;
+                    if (w == 0u) { _UTPemText(pem, sizeof(pem), &len, strays[k]); }
+                    _UTPemText(pem, sizeof(pem), &len, "\n");
+                    _UTPemAdd(pem, sizeof(pem), &len, "CERTIFICATE", _utClientP256Cert, l1, "\n");
+                    if (w == 1u) { _UTPemText(pem, sizeof(pem), &len, strays[k]); }
+                    _UTPemText(pem, sizeof(pem), &len, "\n");
+                    _UTPemAdd(pem, sizeof(pem), &len, "CERTIFICATE", _utClientEd25519Cert, l2,
+                              "\n");
+                    if (w == 2u) { _UTPemText(pem, sizeof(pem), &len, strays[k]); }
+                    _UTTrust(pem, len, sizeof(_utTrustPool), 4u, SSF_TLSC_TRUST_ERR_PEM,
+                             (uint8_t)((w == 2u) ? 2u : w), 0u);
+                }
+            }
+        }
+        /* Dashes that are not a marker are text */
+        len = 0;
+        _UTPemText(pem, sizeof(pem), &len, "---- END ----\n------\n-----BEGINS here\n");
+        _UTPemAdd(pem, sizeof(pem), &len, "CERTIFICATE", _utClientP256Cert, l1, "\n");
+        _UTTrust(pem, len, sizeof(_utTrustPool), 4u, SSF_TLSC_TRUST_ERR_PEM, 0u, 0u);
+        len = 0;
+        _UTPemText(pem, sizeof(pem), &len, "---- END ----\n------\n- ---BEGIN here\n");
+        _UTPemAdd(pem, sizeof(pem), &len, "CERTIFICATE", _utClientP256Cert, l1, "\n");
+        _UTTrust(pem, len, sizeof(_utTrustPool), 4u, SSF_TLSC_TRUST_OK, 1u, l1);
+    }
+
+    /* ---- A CERTIFICATE that is not one X.509 certificate: trailing byte, other DER ---- */
+    memcpy(bad, _utClientP256Cert, l1);
+    bad[l1] = 0;
+    len = 0;
+    _UTPemAdd(pem, sizeof(pem), &len, "CERTIFICATE", bad, sizeof(bad), "\n");
+    _UTTrust(pem, len, sizeof(_utTrustPool), 4u, SSF_TLSC_TRUST_ERR_CERT, 0u, 0u);
+    len = 0;
+    _UTPemAdd(pem, sizeof(pem), &len, "CERTIFICATE", _utClientP256Cert, l1, "\n");
+    _UTPemAdd(pem, sizeof(pem), &len, "CERTIFICATE", junk, sizeof(junk), "\n");
+    _UTTrust(pem, len, sizeof(_utTrustPool), 4u, SSF_TLSC_TRUST_ERR_CERT, 1u, 0u);
+    /* Measuring has no DER to parse: it checks the PEM and labels only */
+    SSF_ASSERT(SSFTLSCTrustFromPEM(pem, len, NULL, 0u, NULL, NULL, 0u, NULL, &used, &count) ==
+               SSF_TLSC_TRUST_OK);
+    SSF_ASSERT((used == (l1 + sizeof(junk))) && (count == 2u));
+
+    /* ---- No certificate at all: fails closed ---- */
+    _UTTrust(pem, 0u, sizeof(_utTrustPool), 4u, SSF_TLSC_TRUST_ERR_EMPTY, 0u, 0u);
+    len = 0;
+    _UTPemText(pem, sizeof(pem), &len, "# nothing here\n");
+    _UTTrust(pem, len, sizeof(_utTrustPool), 4u, SSF_TLSC_TRUST_ERR_EMPTY, 0u, 0u);
+    SSF_ASSERT(SSFTLSCTrustFromPEM(pem, len, NULL, 0u, NULL, NULL, 0u, NULL, &used, &count) ==
+               SSF_TLSC_TRUST_ERR_EMPTY);
+    SSF_ASSERT((used == 0u) && (count == 0u));
+
+    /* ---- 255 certificates is the most a store holds; 256 is ERR_COUNT, measuring included -- */
+    len = 0;
+    for (i = 0; i < 256u; i++)
+    {
+        _UTPemAdd(big, sizeof(big), &len, "CERTIFICATE", _utClientEd25519Cert, l2, "\n");
+        if (i == 254u)
+        {
+            SSF_ASSERT(SSFTLSCTrustFromPEM(big, len, NULL, 0u, NULL, NULL, 0u, NULL, &used,
+                                           &count) == SSF_TLSC_TRUST_OK);
+            SSF_ASSERT((count == 255u) && (used == (255u * l2)));
+        }
+    }
+    SSF_ASSERT(SSFTLSCTrustFromPEM(big, len, NULL, 0u, NULL, NULL, 0u, NULL, &used, &count) ==
+               SSF_TLSC_TRUST_ERR_COUNT);
+    SSF_ASSERT((used == 0u) && (count == 255u));
+
+    /* ---- The pool may sit right after or before the PEM text, but not overlap it ---- */
+    {
+        static char area[4096];
+        size_t pemAt;
+
+        len = 0;
+        _UTPemAdd(area, sizeof(area), &len, "CERTIFICATE", _utClientP256Cert, l1, "\n");
+        SSF_ASSERT((len + l1) < sizeof(area));
+        SSF_ASSERT(SSFTLSCTrustFromPEM(area, len, (uint8_t *)&area[len], sizeof(area) - len,
+                                       _utTrustDers, _utTrustLens, 4u, &_utTrustStore, &used,
+                                       &count) == SSF_TLSC_TRUST_OK);
+        SSF_ASSERT(memcmp(_utTrustDers[0], _utClientP256Cert, l1) == 0);
+        pemAt = sizeof(area) - len;                                /* PEM at the end */
+        len = 0;
+        _UTPemAdd(pem, sizeof(pem), &len, "CERTIFICATE", _utClientP256Cert, l1, "\n");
+        memmove(&area[pemAt], pem, len);
+        SSF_ASSERT(SSFTLSCTrustFromPEM(&area[pemAt], len, (uint8_t *)area, pemAt, _utTrustDers,
+                                       _utTrustLens, 4u, &_utTrustStore, &used, &count) ==
+                   SSF_TLSC_TRUST_OK);
+        SSF_ASSERT(memcmp(_utTrustDers[0], _utClientP256Cert, l1) == 0);
+        /* Overlapping: in place, pool starting inside the text, pool ending inside it */
+        SSF_ASSERT_TEST(SSFTLSCTrustFromPEM(&area[pemAt], len, (uint8_t *)&area[pemAt], len,
+                                            _utTrustDers, _utTrustLens, 4u, &_utTrustStore,
+                                            &used, &count));
+        SSF_ASSERT_TEST(SSFTLSCTrustFromPEM(&area[pemAt], len, (uint8_t *)&area[pemAt + 1u],
+                                            len - 1u, _utTrustDers, _utTrustLens, 4u,
+                                            &_utTrustStore, &used, &count));
+        SSF_ASSERT_TEST(SSFTLSCTrustFromPEM(&area[pemAt], len, (uint8_t *)&area[pemAt - 8u],
+                                            9u, _utTrustDers, _utTrustLens, 4u,
+                                            &_utTrustStore, &used, &count));
+    }
+
+    /* ---- Programming errors ---- */
+    SSF_ASSERT_TEST(SSFTLSCTrustFromPEM(NULL, 0u, NULL, 0u, NULL, NULL, 0u, NULL, &used, &count));
+    SSF_ASSERT_TEST(SSFTLSCTrustFromPEM(pem, len, NULL, 0u, NULL, NULL, 0u, NULL, NULL, &count));
+    SSF_ASSERT_TEST(SSFTLSCTrustFromPEM(pem, len, NULL, 0u, NULL, NULL, 0u, NULL, &used, NULL));
+    SSF_ASSERT_TEST(SSFTLSCTrustFromPEM(pem, len, _utTrustPool, sizeof(_utTrustPool), NULL,
+                                        _utTrustLens, 4u, &_utTrustStore, &used, &count));
+    SSF_ASSERT_TEST(SSFTLSCTrustFromPEM(pem, len, _utTrustPool, sizeof(_utTrustPool),
+                                        _utTrustDers, NULL, 4u, &_utTrustStore, &used, &count));
+    SSF_ASSERT_TEST(SSFTLSCTrustFromPEM(pem, len, _utTrustPool, sizeof(_utTrustPool),
+                                        _utTrustDers, _utTrustLens, 4u, NULL, &used, &count));
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Item 6 on the wire: a ClientHello to a literal IP address carries no server_name.            */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFTLSCUTNoSniForIP(SSFTLSCUTFd_t l, uint16_t port)
@@ -2419,6 +2740,7 @@ void SSFTLSCUnitTest(void)
     _SSFTLSCUTClientCert();
     _SSFTLSCUTClientChain();
     _SSFTLSCUTAlpn();
+    _SSFTLSCUTTrustFromPEM();
 
     /* ---- Explicit opt-in to an unauthenticated connection, and back out ---- */
     SSFTLSCSetUnauthenticated(&_utSession, true);

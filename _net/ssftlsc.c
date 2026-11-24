@@ -45,6 +45,7 @@
 #include "ssfrtc.h"
 #include "ssfcrypt.h"
 #include "ssfnet.h"
+#include "ssfpem.h"
 
 /* Max SNI hostname length (RFC 1035 DNS FQDN is 255 characters). Used to
    bound reads from caller-supplied hostname pointers via SSFStrLen. */
@@ -3696,6 +3697,110 @@ bool SSFTLSCSetClientCert(SSFTLSCSession_t *session, const uint8_t *const *chain
     session->clientKey = key;
     session->clientChainCount = chainCount;
     return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: true if der[0..len) is exactly one X.509 certificate. Out of line: the parsed       */
+/* certificate (about 1 KB) lives only during this call.                                         */
+/* --------------------------------------------------------------------------------------------- */
+static SSF_NOINLINE bool _IsOneCert(const uint8_t *der, size_t len)
+{
+    SSFX509Cert_t cert;
+
+    return (len <= 0xFFFFFFFFu) && SSFX509Parse(der, (uint32_t)len, &cert);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: counts "-----BEGIN" and "-----END" markers in p[0..len). Base64 holds no '-', so a  */
+/* PEM block has exactly two; text between blocks has none.                                      */
+/* --------------------------------------------------------------------------------------------- */
+static size_t _PemMarkers(const char *p, size_t len)
+{
+    size_t n = 0;
+    size_t i;
+
+    for (i = 0; (i + 8u) <= len; i++)
+    {
+        if ((memcmp(&p[i], "-----END", 8u) == 0) ||
+            (((i + 10u) <= len) && (memcmp(&p[i], "-----BEGIN", 10u) == 0)))
+        {
+            n++;
+        }
+    }
+    return n;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Builds a trust store from a PEM certificate or bundle; see ssftlsc.h.                         */
+/* --------------------------------------------------------------------------------------------- */
+SSFTLSCTrustResult_t SSFTLSCTrustFromPEM(const char *pem, size_t pemLen, uint8_t *poolOpt,
+                                         size_t poolSize, const uint8_t **ders, uint32_t *lens,
+                                         uint8_t maxCount, SSFTLSCTrustStore_t *storeOpt,
+                                         size_t *poolUsedOut, uint8_t *countOut)
+{
+    SSFTLSCTrustResult_t r = SSF_TLSC_TRUST_OK;
+    uint8_t limit = (uint8_t)((poolOpt == NULL) ? 255u : maxCount);  /* count is a uint8_t */
+    size_t pos = 0;
+    size_t used = 0;
+    uint8_t count = 0;
+
+    SSF_REQUIRE(pem != NULL);
+    SSF_REQUIRE(poolUsedOut != NULL);
+    SSF_REQUIRE(countOut != NULL);
+    SSF_REQUIRE((poolOpt == NULL) || ((ders != NULL) && (lens != NULL) && (storeOpt != NULL)));
+    /* ssfpem decodes into poolOpt while reading pem: the two must not overlap */
+    SSF_REQUIRE((poolOpt == NULL) || ((uintptr_t)&poolOpt[poolSize] <= (uintptr_t)pem) ||
+                ((uintptr_t)&pem[pemLen] <= (uintptr_t)poolOpt));
+
+    for (;;)
+    {
+        const char *label;
+        size_t labelLen;
+        size_t derLen;
+        size_t start = pos;
+        SSFPEMResult_t pr;
+
+        /* Measuring decodes nowhere: ssfpem ignores derSize without a buffer */
+        pr = SSFPEMDecodeNext(pem, pemLen, &pos, &label, &labelLen,
+                              (poolOpt != NULL) ? &poolOpt[used] : NULL,
+                              (poolOpt != NULL) ? (poolSize - used) : 0u, &derLen);
+        /* A block with a damaged BEGIN line is text to ssfpem; its markers left in the text   */
+        /* before the next block, or after the last, reject the input instead of dropping it.  */
+        if (pr == SSF_PEM_END)
+        {
+            if (_PemMarkers(&pem[start], pemLen - start) != 0u) r = SSF_TLSC_TRUST_ERR_PEM;
+            break;
+        }
+        if (pr == SSF_PEM_ERR_SIZE) { r = SSF_TLSC_TRUST_ERR_SIZE; break; }
+        if ((pr != SSF_PEM_BLOCK) || (_PemMarkers(&pem[start], pos - start) != 2u))
+        {
+            r = SSF_TLSC_TRUST_ERR_PEM;
+            break;
+        }
+        if (!SSFPEMLabelIs(label, labelLen, "CERTIFICATE")) { r = SSF_TLSC_TRUST_ERR_LABEL; break; }
+        if (count == limit) { r = SSF_TLSC_TRUST_ERR_COUNT; break; }
+        if (poolOpt != NULL)
+        {
+            if (!_IsOneCert(&poolOpt[used], derLen)) { r = SSF_TLSC_TRUST_ERR_CERT; break; }
+            ders[count] = &poolOpt[used];
+            lens[count] = (uint32_t)derLen;
+        }
+        used += derLen;
+        count++;
+    }
+    if ((r == SSF_TLSC_TRUST_OK) && (count == 0u)) r = SSF_TLSC_TRUST_ERR_EMPTY;
+
+    /* Fail closed: an error leaves an empty store; count is then the block at fault */
+    if (r != SSF_TLSC_TRUST_OK) used = 0;
+    *poolUsedOut = used;
+    *countOut = count;
+    if (poolOpt != NULL)
+    {
+        storeOpt->caDer = (r == SSF_TLSC_TRUST_OK) ? ders : NULL;
+        storeOpt->caDerLen = (r == SSF_TLSC_TRUST_OK) ? lens : NULL;
+        storeOpt->count = (uint8_t)((r == SSF_TLSC_TRUST_OK) ? count : 0u);
+    }
+    return r;
 }
 
 /* --------------------------------------------------------------------------------------------- */

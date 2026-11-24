@@ -1180,6 +1180,43 @@ static void _SSFTLSCUTSaveLeafKey(void)
     memset(&_utSession2, 0, sizeof(_utSession2));
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Item D: each chain verification failure gets its RFC 8446 6.2 alert.                          */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFTLSCUTChainAlert(void)
+{
+    static const struct { SSFX509VerifyCode_t code; uint8_t alert; } map[] =
+    {
+        { SSF_X509_VERIFY_ERR_PARSE,            42u },  /* bad_certificate */
+        { SSF_X509_VERIFY_ERR_SIG_ALG_MISMATCH, 42u },
+        { SSF_X509_VERIFY_ERR_ISSUER_MISMATCH,  42u },
+        { SSF_X509_VERIFY_ERR_SIGNATURE,        42u },
+        { SSF_X509_VERIFY_ERR_KEY_ID_MISMATCH,  42u },
+        { SSF_X509_VERIFY_ERR_HOSTNAME,         42u },  /* As OpenSSL and GnuTLS send */
+        { SSF_X509_VERIFY_ERR_VERSION,          43u },  /* unsupported_certificate */
+        { SSF_X509_VERIFY_ERR_CRITICAL_EXT,     43u },
+        { SSF_X509_VERIFY_ERR_NOT_YET_VALID,    45u },  /* certificate_expired */
+        { SSF_X509_VERIFY_ERR_EXPIRED,          45u },
+        { SSF_X509_VERIFY_ERR_NOT_CA,           46u },  /* certificate_unknown */
+        { SSF_X509_VERIFY_ERR_CA_KEY_USAGE,     46u },
+        { SSF_X509_VERIFY_ERR_PATH_LEN,         46u },
+        { SSF_X509_VERIFY_ERR_NAME_CONSTRAINTS, 46u },
+        { SSF_X509_VERIFY_ERR_EKU,              46u },
+        { SSF_X509_VERIFY_ERR_LEAF_KEY_USAGE,   46u },
+        { SSF_X509_VERIFY_ERR_UNKNOWN_CA,       48u },  /* unknown_ca */
+    };
+    size_t i;
+
+    /* Every failure code is listed once */
+    SSF_ASSERT((sizeof(map) / sizeof(map[0])) == (size_t)(SSF_X509_VERIFY_MAX - 1));
+    for (i = 0; i < (sizeof(map) / sizeof(map[0])); i++)
+    {
+        SSF_ASSERT(_SSFTLSCChainAlertForTest(map[i].code) == map[i].alert);
+    }
+    /* A code that is not a failure is a caller error, not an alert */
+    SSF_ASSERT_TEST(_SSFTLSCChainAlertForTest(SSF_X509_VERIFY_OK));
+}
+
 static void _SSFTLSCUTSchemeMatchesKey(void)
 {
     static const struct { uint16_t scheme; SSFTLSCLeafKey_t key; } ok[] = {
@@ -1253,6 +1290,7 @@ void SSFTLSCUnitTest(void)
     _SSFTLSCUTIPLiteral();
     _SSFTLSCUTSchemeMatchesKey();
     _SSFTLSCUTSaveLeafKey();
+    _SSFTLSCUTChainAlert();
 
     /* ---- Init: the session is a transport over ssfnetsock ---- */
     SSFNetSockInit(&_utSock);                 /* Also starts Winsock for the listener below */

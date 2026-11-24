@@ -612,7 +612,9 @@ static SSFTLSCLeafKey_t _LeafKeyType(const SSFX509Cert_t *cert)
 #if SSF_CONFIG_TLSC_UNIT_TEST == 1
 bool _SSFTLSCIsIPLiteralForTest(const char *host) { return _IsIPLiteral(host); }
 static bool _SaveLeafKey(SSFTLSCSession_t *session, const uint8_t *der, uint32_t derLen);
+static uint8_t _ChainAlert(SSFX509VerifyCode_t code);
 
+uint8_t _SSFTLSCChainAlertForTest(SSFX509VerifyCode_t code) { return _ChainAlert(code); }
 bool _SSFTLSCSaveLeafKeyForTest(SSFTLSCSession_t *session, const uint8_t *der, uint32_t derLen)
 {
     return _SaveLeafKey(session, der, derLen);
@@ -1156,6 +1158,36 @@ static void _TLSCDeriveHSKeysWork(void *ctx)
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Internal: the RFC 8446 6.2 alert for a failed chain verification. A host name the certificate */
+/* does not name is bad_certificate, as OpenSSL and GnuTLS clients send.                         */
+/* --------------------------------------------------------------------------------------------- */
+static uint8_t _ChainAlert(SSFX509VerifyCode_t code)
+{
+    SSF_REQUIRE((code > SSF_X509_VERIFY_OK) && (code < SSF_X509_VERIFY_MAX));
+
+    switch (code)
+    {
+    case SSF_X509_VERIFY_ERR_VERSION:
+    case SSF_X509_VERIFY_ERR_CRITICAL_EXT:
+        return SSF_TLS_ALERT_UNSUPPORTED_CERTIFICATE;  /* "a certificate of an unsupported type" */
+    case SSF_X509_VERIFY_ERR_NOT_YET_VALID:
+    case SSF_X509_VERIFY_ERR_EXPIRED:
+        return SSF_TLS_ALERT_CERTIFICATE_EXPIRED;      /* "expired or is not currently valid" */
+    case SSF_X509_VERIFY_ERR_UNKNOWN_CA:
+        return SSF_TLS_ALERT_UNKNOWN_CA;               /* "CA certificate could not be located" */
+    case SSF_X509_VERIFY_ERR_NOT_CA:
+    case SSF_X509_VERIFY_ERR_CA_KEY_USAGE:
+    case SSF_X509_VERIFY_ERR_PATH_LEN:
+    case SSF_X509_VERIFY_ERR_NAME_CONSTRAINTS:
+    case SSF_X509_VERIFY_ERR_EKU:
+    case SSF_X509_VERIFY_ERR_LEAF_KEY_USAGE:
+        return SSF_TLS_ALERT_CERTIFICATE_UNKNOWN;      /* Valid, but CA or usage rules refuse it */
+    default:
+        return SSF_TLS_ALERT_BAD_CERTIFICATE;          /* Corrupt, does not verify, wrong host */
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Crypto step: verify certificate chain.                                                        */
 /* --------------------------------------------------------------------------------------------- */
 static void _TLSCVerifyChainWork(void *ctx)
@@ -1165,7 +1197,7 @@ static void _TLSCVerifyChainWork(void *ctx)
                                            w->session->trust.caDer,
                                            w->session->trust.caDerLen,
                                            w->session->trust.count,
-                                           w->hostname, w->nowUnixSec);
+                                           w->hostname, w->nowUnixSec, &w->chainVerifyErr);
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -2356,8 +2388,11 @@ static SSFNetIOResult_t _SSFTLSCDrive(SSFTLSCSession_t *s)
                 _TLSCVerifyChainWork(&s->cryptoWork);
                 if (!s->cryptoWork.chainVerifyOk)
                 {
-                    SSF_TLS_TRACE_CERT_ERROR(&s->trace, "Certificate chain verification failed");
-                    _SSF_TLSC_ALERT(s, SSF_TLS_ALERT_BAD_CERTIFICATE);
+                    SSF_TLS_TRACE_CERT_ERROR(&s->trace, "Certificate chain verification failed: "
+                                             "code %d, cert[%u]",
+                                             (int)s->cryptoWork.chainVerifyErr.code,
+                                             s->cryptoWork.chainVerifyErr.certIdx);
+                    _SSF_TLSC_ALERT(s, _ChainAlert(s->cryptoWork.chainVerifyErr.code));
                     return _SSFTLSCFail(s);
                 }
             }

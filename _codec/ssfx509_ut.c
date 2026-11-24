@@ -577,6 +577,14 @@ static uint32_t _utSignCert(const SSFX509GenParams_t *p, const uint8_t *privKey,
     return certLen;
 }
 
+/* Chain verification detail: each verify call's result is checked, then poisoned so a call that */
+/* failed to write it cannot pass on a stale value.                                               */
+static SSFX509VerifyErr_t _utVErr;
+#define _UT_VERR(_c, _i) do { \
+    SSF_ASSERT(_utVErr.code == SSF_X509_VERIFY_##_c); \
+    SSF_ASSERT(_utVErr.certIdx == (uint8_t)(_i)); \
+    _utVErr.code = SSF_X509_VERIFY_MAX; _utVErr.certIdx = 0xffu; } while (0)
+
 /* Receives lengths from encoder calls whose failure is the point of the test */
 static uint32_t _utScratchLen;
 
@@ -1182,10 +1190,12 @@ void SSFX509UnitTest(void)
             trust[0] = _utTestCertDER; trustLens[0] = sizeof(_utTestCertDER);
             /* "test.ssf.local" is a SAN in the test cert */
             SSF_ASSERT(SSFX509VerifyChain(chain, chainLens, 1,
-                       trust, trustLens, 1, "test.ssf.local", nowTime) == true);
+                       trust, trustLens, 1, "test.ssf.local", nowTime, &_utVErr) == true);
+            _UT_VERR(OK, 0u);
             /* "localhost" is also a SAN */
             SSF_ASSERT(SSFX509VerifyChain(chain, chainLens, 1,
-                       trust, trustLens, 1, "localhost", nowTime) == true);
+                       trust, trustLens, 1, "localhost", nowTime, &_utVErr) == true);
+            _UT_VERR(OK, 0u);
         }
 
         /* 2b. Hostname mismatch: valid self-signed chain but wrong hostname */
@@ -1199,7 +1209,8 @@ void SSFX509UnitTest(void)
             trust[0] = _utTestCertDER; trustLens[0] = sizeof(_utTestCertDER);
             /* "wrong.test" is NOT a SAN */
             SSF_ASSERT(SSFX509VerifyChain(chain, chainLens, 1,
-                       trust, trustLens, 1, "wrong.test", nowTime) == false);
+                       trust, trustLens, 1, "wrong.test", nowTime, &_utVErr) == false);
+            _UT_VERR(ERR_HOSTNAME, 0u);
         }
 
         /* 2d. Expired cert: notAfter in the past relative to nowTime */
@@ -1225,7 +1236,8 @@ void SSFX509UnitTest(void)
             trust[0] = caDer; trustLens[0] = caDerLen;
             /* nowTime=1775000000 > notAfter=1770000000 */
             SSF_ASSERT(SSFX509VerifyChain(chain, chainLens, 1,
-                       trust, trustLens, 1, "expired.test", nowTime) == false);
+                       trust, trustLens, 1, "expired.test", nowTime, &_utVErr) == false);
+            _UT_VERR(ERR_EXPIRED, 0u);
         }
 
         /* 2e. Not-yet-valid cert: notBefore in the future */
@@ -1251,7 +1263,8 @@ void SSFX509UnitTest(void)
             trust[0] = caDer; trustLens[0] = caDerLen;
             /* nowTime=1775000000 < notBefore=1800000000 */
             SSF_ASSERT(SSFX509VerifyChain(chain, chainLens, 1,
-                       trust, trustLens, 1, "future.test", nowTime) == false);
+                       trust, trustLens, 1, "future.test", nowTime, &_utVErr) == false);
+            _UT_VERR(ERR_NOT_YET_VALID, 0u);
         }
 
         /* 2f. Empty trust store: trustCount=0 is a precondition violation, see the SSF_REQUIRE */
@@ -1288,7 +1301,8 @@ void SSFX509UnitTest(void)
             trust[0] = otherDer; trustLens[0] = otherDerLen;
             /* Chain cert issued by "real.test", trust only has "other.test" */
             SSF_ASSERT(SSFX509VerifyChain(chain, chainLens, 1,
-                       trust, trustLens, 1, "real.test", nowTime) == false);
+                       trust, trustLens, 1, "real.test", nowTime, &_utVErr) == false);
+            _UT_VERR(ERR_UNKNOWN_CA, 0u);
         }
 
         /* 2g. Non-CA intermediate: chain with non-CA cert as issuer */
@@ -1324,7 +1338,8 @@ void SSFX509UnitTest(void)
             trust[0] = midDer;  trustLens[0] = midDerLen;
             /* mid.test is NOT a CA, so chain verification should fail */
             SSF_ASSERT(SSFX509VerifyChain(chain, chainLens, 2,
-                       trust, trustLens, 1, "leaf2.test", nowTime) == false);
+                       trust, trustLens, 1, "leaf2.test", nowTime, &_utVErr) == false);
+            _UT_VERR(ERR_NOT_CA, 1u);
         }
     }
 
@@ -1731,35 +1746,43 @@ void SSFX509UnitTest(void)
 
         /* 8a. Exact match: "test.ssf.local" */
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLens, 1,
-                   trust, trustLens, 1, "test.ssf.local", validTime) == true);
+                   trust, trustLens, 1, "test.ssf.local", validTime, &_utVErr) == true);
+        _UT_VERR(OK, 0u);
 
         /* 8b. Exact match: "localhost" */
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLens, 1,
-                   trust, trustLens, 1, "localhost", validTime) == true);
+                   trust, trustLens, 1, "localhost", validTime, &_utVErr) == true);
+        _UT_VERR(OK, 0u);
 
         /* 8c. Hostname mismatch: "other.local" */
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLens, 1,
-                   trust, trustLens, 1, "other.local", validTime) == false);
+                   trust, trustLens, 1, "other.local", validTime, &_utVErr) == false);
+        _UT_VERR(ERR_HOSTNAME, 0u);
 
         /* 8d. Case-insensitive: "TEST.SSF.LOCAL" */
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLens, 1,
-                   trust, trustLens, 1, "TEST.SSF.LOCAL", validTime) == true);
+                   trust, trustLens, 1, "TEST.SSF.LOCAL", validTime, &_utVErr) == true);
+        _UT_VERR(OK, 0u);
 
         /* 8e. Case-insensitive: "LOCALHOST" */
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLens, 1,
-                   trust, trustLens, 1, "LOCALHOST", validTime) == true);
+                   trust, trustLens, 1, "LOCALHOST", validTime, &_utVErr) == true);
+        _UT_VERR(OK, 0u);
 
         /* 8f. Partial match should fail: "test.ssf" */
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLens, 1,
-                   trust, trustLens, 1, "test.ssf", validTime) == false);
+                   trust, trustLens, 1, "test.ssf", validTime, &_utVErr) == false);
+        _UT_VERR(ERR_HOSTNAME, 0u);
 
         /* 8g. Substring should fail: "ssf.local" */
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLens, 1,
-                   trust, trustLens, 1, "ssf.local", validTime) == false);
+                   trust, trustLens, 1, "ssf.local", validTime, &_utVErr) == false);
+        _UT_VERR(ERR_HOSTNAME, 0u);
 
         /* 8h. Extra dot should fail: "test.ssf.local." */
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLens, 1,
-                   trust, trustLens, 1, "test.ssf.local.", validTime) == false);
+                   trust, trustLens, 1, "test.ssf.local.", validTime, &_utVErr) == false);
+        _UT_VERR(ERR_HOSTNAME, 0u);
     }
 
     /* ---- 8E. Extended Key Usage (EKU) Validation (RFC 5280 Section 4.2.1.12) ---- */
@@ -1858,7 +1881,7 @@ void SSFX509UnitTest(void)
 
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLens, 1u,
                    trust, trustLens, 1u,
-                   "eku-leaf", 1800000000ull) == false);
+                   "eku-leaf", 1800000000ull, &_utVErr) == false); _UT_VERR(ERR_EKU, 0u);
     }
 
     /* ---- EKU: a cert without EKU is not restricted (_utTestCertDER, covered in section 8) ---- */
@@ -1976,7 +1999,7 @@ void SSFX509UnitTest(void)
 
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLens, 1u,
                    trust, trustLens, 1u,
-                   "v1-test", 1800000000ull) == false);
+                   "v1-test", 1800000000ull, &_utVErr) == false); _UT_VERR(ERR_VERSION, 0u);
     }
 
     /* ---- v3 cert (existing test cert) still accepted, covered by section 8 ---- */
@@ -2154,7 +2177,8 @@ void SSFX509UnitTest(void)
         /* IP hostname against DNS-only SANs -> must fail */
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLens, 1u,
                    trust, trustLens, 1u,
-                   "192.168.1.1", 1775000000ull) == false);
+                   "192.168.1.1", 1775000000ull, &_utVErr) == false);
+        _UT_VERR(ERR_NOT_YET_VALID, 0u);
     }
 
     /* ---- 8K. Key Usage keyCertSign Validation (RFC 5280 Section 6.1.4(h)) ---- */
@@ -2258,7 +2282,7 @@ void SSFX509UnitTest(void)
         /* RFC 5280 6.1.4(h): intermediate whose Key Usage lacks keyCertSign is rejected */
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLens, 2u,
                    trust, trustLens, 1u,
-                   "ku-leaf", 1800000000ull) == false);
+                   "ku-leaf", 1800000000ull, &_utVErr) == false); _UT_VERR(ERR_CA_KEY_USAGE, 1u);
     }
 
     /* ---- 8X. Unknown Critical Extension Rejection (RFC 5280 Section 4.2) ---- */
@@ -2354,7 +2378,8 @@ void SSFX509UnitTest(void)
 
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLens, 1u,
                    trust, trustLens, 1u,
-                   "crit-ext-test", 1800000000ull) == false);
+                   "crit-ext-test", 1800000000ull, &_utVErr) == false);
+        _UT_VERR(ERR_CRITICAL_EXT, 0u);
     }
 
     /* ---- Recognized extensions only (_utTestCertDER) still pass, covered by section 8 ---- */
@@ -2489,7 +2514,7 @@ void SSFX509UnitTest(void)
         /* Root pathLenConstraint 0 forbids the subordinate intermediate CA: rejected */
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLens, 2u,
                    trust, trustLens, 1u,
-                   "leaf-plc", 1800000000ull) == false);
+                   "leaf-plc", 1800000000ull, &_utVErr) == false); _UT_VERR(ERR_PATH_LEN, 2u);
     }
 
     /* ---- pathLenConstraint=1 with one subordinate CA -> chain accepted ---- */
@@ -2614,7 +2639,7 @@ void SSFX509UnitTest(void)
         /* pathLenConstraint=1 allows 1 subordinate CA; code signing needs no SAN hostname */
         SSF_ASSERT(SSFX509VerifyChainPurpose(chain, chainLens, 2u, trust, trustLens, 1u,
                                              SSF_X509_PURPOSE_CODE_SIGNING, NULL,
-                                             1800000000ull) == true);
+                                             1800000000ull, &_utVErr) == true); _UT_VERR(OK, 0u);
     }
 
 #if _UT_RSA_PSS_SIGN == 1
@@ -3280,12 +3305,14 @@ void SSFX509UnitTest(void)
             /* Hostname "test.local" should match SAN */
             SSF_ASSERT(SSFX509VerifyChain(chainDer, chainDerLen_arr, 1u,
                                            trustDer, trustDerLen_arr, 1u,
-                                           "test.local", 1800000000ull) == true);
+                                           "test.local", 1800000000ull, &_utVErr) == true);
+            _UT_VERR(OK, 0u);
 
             /* Wrong hostname should fail */
             SSF_ASSERT(SSFX509VerifyChain(chainDer, chainDerLen_arr, 1u,
                                            trustDer, trustDerLen_arr, 1u,
-                                           "wrong.local", 1800000000ull) == false);
+                                           "wrong.local", 1800000000ull, &_utVErr) == false);
+            _UT_VERR(ERR_HOSTNAME, 0u);
         }
     }
 
@@ -3426,7 +3453,8 @@ void SSFX509UnitTest(void)
 
             SSF_ASSERT(SSFX509VerifyChain(chainDer, chainDerLen_arr, 1u,
                                            trustDer, trustDerLen_arr, 1u,
-                                           "leaf.skid.test", 1800000000ull) == true);
+                                           "leaf.skid.test", 1800000000ull, &_utVErr) == true);
+            _UT_VERR(OK, 0u);
 
             /* Verify SKID/AKID cross-check passes */
             SSF_ASSERT(SSFX509Parse(leafCertDer, leafCertDerLen, &leafParsed2) == true);
@@ -3514,7 +3542,8 @@ void SSFX509UnitTest(void)
 
             SSF_ASSERT(SSFX509VerifyChain(chainDer, chainDerLen_arr, 1u,
                                            trustDer, trustDerLen_arr, 1u,
-                                           "ed25519.ssf.local", 1800000000ull) == true);
+                                           "ed25519.ssf.local", 1800000000ull, &_utVErr) == true);
+            _UT_VERR(OK, 0u);
         }
 
         /* Tamper with signature - verification must fail */
@@ -3624,7 +3653,8 @@ void SSFX509UnitTest(void)
 
             SSF_ASSERT(SSFX509VerifyChain(chainDer, chainDerLen_arr, 1u,
                                            trustDer, trustDerLen_arr, 1u,
-                                           sanBuf[0], 1800000000ull) == true);
+                                           sanBuf[0], 1800000000ull, &_utVErr) == true);
+            _UT_VERR(OK, 0u);
         }
     }
 
@@ -3764,7 +3794,8 @@ void SSFX509UnitTest(void)
             chain[0] = leafDer; chainL[0] = leafDerLen;
             trust[0] = caDer; trustL[0] = caDerLen;
             SSF_ASSERT(SSFX509VerifyChain(chain, chainL, 1u, trust, trustL, 1u,
-                                           "foo.example.com", 1800000000ull) == true);
+                                           "foo.example.com", 1800000000ull, &_utVErr) == true);
+            _UT_VERR(OK, 0u);
         }
 
         /* Case 2: leaf SAN "evil.com" - outside permittedSubtrees -> reject. */
@@ -3778,7 +3809,8 @@ void SSFX509UnitTest(void)
             chain[0] = leafDer; chainL[0] = leafDerLen;
             trust[0] = caDer; trustL[0] = caDerLen;
             SSF_ASSERT(SSFX509VerifyChain(chain, chainL, 1u, trust, trustL, 1u,
-                                           "evil.com", 1800000000ull) == false);
+                                           "evil.com", 1800000000ull, &_utVErr) == false);
+            _UT_VERR(ERR_NAME_CONSTRAINTS, 0u);
         }
 
         /* Case 3: leaf SAN "banned.example.com" - explicitly excluded -> reject. */
@@ -3792,7 +3824,8 @@ void SSFX509UnitTest(void)
             chain[0] = leafDer; chainL[0] = leafDerLen;
             trust[0] = caDer; trustL[0] = caDerLen;
             SSF_ASSERT(SSFX509VerifyChain(chain, chainL, 1u, trust, trustL, 1u,
-                                           "banned.example.com", 1800000000ull) == false);
+                                           "banned.example.com", 1800000000ull, &_utVErr) == false);
+            _UT_VERR(ERR_NAME_CONSTRAINTS, 0u);
         }
 
         /* Case 4: leaf with sub-label of an excluded name -> also excluded. */
@@ -3806,7 +3839,9 @@ void SSFX509UnitTest(void)
             chain[0] = leafDer; chainL[0] = leafDerLen;
             trust[0] = caDer; trustL[0] = caDerLen;
             SSF_ASSERT(SSFX509VerifyChain(chain, chainL, 1u, trust, trustL, 1u,
-                                           "sub.banned.example.com", 1800000000ull) == false);
+                                           "sub.banned.example.com", 1800000000ull,
+                                               &_utVErr) == false);
+            _UT_VERR(ERR_NAME_CONSTRAINTS, 0u);
         }
 
         /* Case 5: exact match of permitted name (not a sub-label) -> accept. */
@@ -3820,7 +3855,8 @@ void SSFX509UnitTest(void)
             chain[0] = leafDer; chainL[0] = leafDerLen;
             trust[0] = caDer; trustL[0] = caDerLen;
             SSF_ASSERT(SSFX509VerifyChain(chain, chainL, 1u, trust, trustL, 1u,
-                                           "example.com", 1800000000ull) == true);
+                                           "example.com", 1800000000ull, &_utVErr) == true);
+            _UT_VERR(OK, 0u);
         }
 
         /* Case 6: non-boundary suffix - "notexample.com" must NOT match "example.com". */
@@ -3834,7 +3870,8 @@ void SSFX509UnitTest(void)
             chain[0] = leafDer; chainL[0] = leafDerLen;
             trust[0] = caDer; trustL[0] = caDerLen;
             SSF_ASSERT(SSFX509VerifyChain(chain, chainL, 1u, trust, trustL, 1u,
-                                           "notexample.com", 1800000000ull) == false);
+                                           "notexample.com", 1800000000ull, &_utVErr) == false);
+            _UT_VERR(ERR_NAME_CONSTRAINTS, 0u);
         }
 
         /* Case 7: iPAddress SAN inside permitted 10.0.0.0/8 -> accept. */
@@ -3850,7 +3887,8 @@ void SSFX509UnitTest(void)
             chain[0] = leafDer; chainL[0] = leafDerLen;
             trust[0] = caDer; trustL[0] = caDerLen;
             SSF_ASSERT(SSFX509VerifyChain(chain, chainL, 1u, trust, trustL, 1u,
-                                           "10.5.6.7", 1800000000ull) == true);
+                                           "10.5.6.7", 1800000000ull, &_utVErr) == true);
+            _UT_VERR(OK, 0u);
         }
 
         /* Case 8: iPAddress SAN outside permitted 10.0.0.0/8 -> reject. */
@@ -3865,7 +3903,8 @@ void SSFX509UnitTest(void)
             chain[0] = leafDer; chainL[0] = leafDerLen;
             trust[0] = caDer; trustL[0] = caDerLen;
             SSF_ASSERT(SSFX509VerifyChain(chain, chainL, 1u, trust, trustL, 1u,
-                                           "192.168.1.1", 1800000000ull) == false);
+                                           "192.168.1.1", 1800000000ull, &_utVErr) == false);
+            _UT_VERR(ERR_NAME_CONSTRAINTS, 0u);
         }
 
         /* Case 9: mixed SANs, DNS permitted but IP not -> reject (every SAN must pass) */
@@ -3881,7 +3920,8 @@ void SSFX509UnitTest(void)
             chain[0] = leafDer; chainL[0] = leafDerLen;
             trust[0] = caDer; trustL[0] = caDerLen;
             SSF_ASSERT(SSFX509VerifyChain(chain, chainL, 1u, trust, trustL, 1u,
-                                           "foo.example.com", 1800000000ull) == false);
+                                           "foo.example.com", 1800000000ull, &_utVErr) == false);
+            _UT_VERR(ERR_NAME_CONSTRAINTS, 0u);
         }
 
         #undef _NC_BUILD_LEAF
@@ -4195,7 +4235,7 @@ void SSFX509UnitTest(void)
                                    pubKey, sizeof(pubKey), &pubKeyLen) == true);
 
         /* Helper: self-signed cert with wildcard SAN, VerifyChain(hostname) as expected */
-        #define _WC_CASE(_sanDNSName, _hostname, _expect) do { \
+        #define _WC_CASE(_sanDNSName, _hostname, _expect, _code, _idx) do { \
             static SSFX509GenParams_t p; \
             static uint8_t tbsDer[512]; \
             uint32_t tbsLen; \
@@ -4236,44 +4276,45 @@ void SSFX509UnitTest(void)
             chain[0] = certDer; chainL[0] = certDerLen; \
             trust[0] = certDer; trustL[0] = certDerLen; \
             SSF_ASSERT(SSFX509VerifyChain(chain, chainL, 1u, trust, trustL, 1u, \
-                                           (_hostname), 1800000000ull) == (_expect)); \
+                                           (_hostname), 1800000000ull, &_utVErr) == (_expect)); \
+            _UT_VERR(_code, _idx); \
         } while (0)
 
         /* Positive: standard third-level wildcard. */
-        _WC_CASE("*.example.com", "foo.example.com", true);
+        _WC_CASE("*.example.com", "foo.example.com", true, OK, 0u);
 
         /* Positive: case-insensitive match. */
-        _WC_CASE("*.example.com", "FOO.ExAmPlE.com", true);
+        _WC_CASE("*.example.com", "FOO.ExAmPlE.com", true, OK, 0u);
 
         /* Negative: wildcard does not match the apex (RFC 6125 label-count rule 2). */
-        _WC_CASE("*.example.com", "example.com", false);
+        _WC_CASE("*.example.com", "example.com", false, ERR_HOSTNAME, 0u);
 
         /* Negative: wildcard matches exactly one label, not two. */
-        _WC_CASE("*.example.com", "a.b.example.com", false);
+        _WC_CASE("*.example.com", "a.b.example.com", false, ERR_HOSTNAME, 0u);
 
         /* Negative: different domain entirely. */
-        _WC_CASE("*.example.com", "example.org", false);
+        _WC_CASE("*.example.com", "example.org", false, ERR_HOSTNAME, 0u);
 
         /* Negative: suffix overlap without label boundary. */
-        _WC_CASE("*.example.com", "fooexample.com", false);
+        _WC_CASE("*.example.com", "fooexample.com", false, ERR_HOSTNAME, 0u);
 
         /* Negative: label-count floor - *.com must NOT match foo.com (BR Sec. 3.2.2.6). */
-        _WC_CASE("*.com", "foo.com", false);
+        _WC_CASE("*.com", "foo.com", false, ERR_HOSTNAME, 0u);
 
         /* Negative: label-count floor - *.net must NOT match anything.net. */
-        _WC_CASE("*.net", "example.net", false);
+        _WC_CASE("*.net", "example.net", false, ERR_HOSTNAME, 0u);
 
         /* Negative: label-count floor - *.org must NOT match bar.org. */
-        _WC_CASE("*.org", "bar.org", false);
+        _WC_CASE("*.org", "bar.org", false, ERR_HOSTNAME, 0u);
 
         /* Positive: 4th-level wildcard - base "sub.example.com" has a dot, allowed. */
-        _WC_CASE("*.sub.example.com", "foo.sub.example.com", true);
+        _WC_CASE("*.sub.example.com", "foo.sub.example.com", true, OK, 0u);
 
         /* Negative: partial-label wildcard; the leftmost label must be exactly "*" */
-        _WC_CASE("foo*.example.com", "foobar.example.com", false);
+        _WC_CASE("foo*.example.com", "foobar.example.com", false, ERR_HOSTNAME, 0u);
 
         /* Negative: wildcard not in leftmost position - "foo.*.example.com" is invalid.        */
-        _WC_CASE("foo.*.example.com", "foo.bar.example.com", false);
+        _WC_CASE("foo.*.example.com", "foo.bar.example.com", false, ERR_HOSTNAME, 0u);
 
         /* Known limitation: "*.co.uk" matches "foo.co.uk" (no Public Suffix List) */
 
@@ -4752,7 +4793,7 @@ void SSFX509UnitTest(void)
         chain[0] = _utTestCertDER;
         chainLen[0] = sizeof(_utTestCertDER);
         SSF_ASSERT_TEST(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, "",
-                                           1800000000ull));
+                                           1800000000ull, &_utVErr));
 
         /* Empty and NUL-containing dNSName entries are dropped at parse */
         _utGenBaseParams(&p, serial, pubKey, 65u);
@@ -4792,9 +4833,10 @@ void SSFX509UnitTest(void)
         chain[0] = out;
         chainLen[0] = n;
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, "www.example.com",
-                                      1800000000ull) == true);
+                                      1800000000ull, &_utVErr) == true); _UT_VERR(OK, 0u);
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, ".example.com",
-                                      1800000000ull) == false);
+                                      1800000000ull, &_utVErr) == false);
+        _UT_VERR(ERR_HOSTNAME, 0u);
 
         /* More extensions than SSF_X509_CONFIG_MAX_EXTENSIONS fails to parse, the cap parses */
         n = _utBuildCertExts(SSF_X509_CONFIG_MAX_EXTENSIONS, -1, false, out, sizeof(out));
@@ -4877,7 +4919,8 @@ void SSFX509UnitTest(void)
         chain[0] = leafOut;
         chainLen[0] = leafLen;
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 2u, trust, trustLen, 1u, "x",
-                                      1800000000ull) == false);
+                                      1800000000ull, &_utVErr) == false);
+        _UT_VERR(ERR_ISSUER_MISMATCH, 0u);
 
         /* Same leaf with the correct issuer name verifies */
         p.issuer.cn = "ca";
@@ -4885,7 +4928,7 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(leafLen != 0u);
         chainLen[0] = leafLen;
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 2u, trust, trustLen, 1u, "x",
-                                      1800000000ull) == true);
+                                      1800000000ull, &_utVErr) == true); _UT_VERR(OK, 0u);
 
         /* RFC 5280 4.1.1.2: outer params equal TBS copy (ECDSA NULL rejected, X509-11) */
         _utGenBaseParams(&p, serial, leafPub, (uint32_t)leafPubLen);
@@ -4897,7 +4940,8 @@ void SSFX509UnitTest(void)
         chain[0] = leafOut;
         chainLen[0] = leafLen;
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, "x",
-                                      1800000000ull) == false);
+                                      1800000000ull, &_utVErr) == false);
+        _UT_VERR(ERR_UNKNOWN_CA, 0u);
         last = 0;
         for (i = 0; (i + oidLen + 3u) < leafLen; i++)
         {
@@ -4914,7 +4958,8 @@ void SSFX509UnitTest(void)
         leafOut[last] = 0x04u;
         SSF_ASSERT(SSFX509Parse(leafOut, leafLen, &parsed) == true);
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, "x",
-                                      1800000000ull) == false);
+                                      1800000000ull, &_utVErr) == false);
+        _UT_VERR(ERR_SIG_ALG_MISMATCH, 0u);
     }
 
     /* ---- Key Usage low octet, anyExtendedKeyUsage, leading-dot constraint, non-string DN ---- */
@@ -4984,7 +5029,7 @@ void SSFX509UnitTest(void)
         chain[0] = leafOut;
         chainLen[0] = leafLen;
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, "example.com",
-                                      1800000000ull) == true);
+                                      1800000000ull, &_utVErr) == true); _UT_VERR(OK, 0u);
 
         /* A leading-dot dNSName constraint permits proper subdomains only */
         SSF_ASSERT(SSFECDSAKeyGen(_UT_CURVE, caPriv, sizeof(caPriv), caPub, sizeof(caPub),
@@ -5013,13 +5058,14 @@ void SSFX509UnitTest(void)
         chain[0] = leafOut;
         chainLen[0] = leafLen;
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 2u, trust, trustLen, 1u, "a.example.com",
-                                      1800000000ull) == true);
+                                      1800000000ull, &_utVErr) == true); _UT_VERR(OK, 0u);
         p.sanDNSNames = sanApex;
         leafLen = _utSignCert(&p, caPriv, leafOut, sizeof(leafOut));
         SSF_ASSERT(leafLen != 0u);
         chainLen[0] = leafLen;
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 2u, trust, trustLen, 1u, "example.com",
-                                      1800000000ull) == false);
+                                      1800000000ull, &_utVErr) == false);
+        _UT_VERR(ERR_NAME_CONSTRAINTS, 0u);
 
         /* A DN attribute with a non-string value is skipped and the rest of the name parses */
         n = _utBuildCertExts(0u, -1, true, out, sizeof(out));
@@ -5120,7 +5166,8 @@ void SSFX509UnitTest(void)
         chain[0] = pss20Der;
         chainLen[0] = sizeof(pss20Der);
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, "pss20.test",
-                                      1800000000ull) == (_UT_RSA_PSS_VERIFY == 1u));
+                                      1800000000ull, &_utVErr) == (_UT_RSA_PSS_VERIFY == 1u));
+        if (_UT_RSA_PSS_VERIFY == 1u) { _UT_VERR(OK, 0u); } else { _UT_VERR(ERR_UNKNOWN_CA, 0u); }
     }
 
     /* ---- Bounded string lengths: 253-octet dNSName accepted, longer hostnames never match ---- */
@@ -5163,9 +5210,10 @@ void SSFX509UnitTest(void)
         chain[0] = out;
         chainLen[0] = n;
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, host300,
-                                      1800000000ull) == false);
+                                      1800000000ull, &_utVErr) == false);
+        _UT_VERR(ERR_HOSTNAME, 0u);
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, "x",
-                                      1800000000ull) == true);
+                                      1800000000ull, &_utVErr) == true); _UT_VERR(OK, 0u);
     }
 
     /* ---- Anchor constraints come from the anchor that signed, not the first one by name ---- */
@@ -5240,7 +5288,8 @@ void SSFX509UnitTest(void)
         trust[0] = caB;
         trustLen[0] = bLen;
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, trust, trustLen, 1u, "evil.com",
-                                      1800000000ull) == false);
+                                      1800000000ull, &_utVErr) == false);
+        _UT_VERR(ERR_NAME_CONSTRAINTS, 0u);
 
         /* A listed before B: B still signs, so B's exclusion still applies */
         trust[0] = caA;
@@ -5248,7 +5297,8 @@ void SSFX509UnitTest(void)
         trust[1] = caB;
         trustLen[1] = bLen;
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, trust, trustLen, 2u, "evil.com",
-                                      1800000000ull) == false);
+                                      1800000000ull, &_utVErr) == false);
+        _UT_VERR(ERR_NAME_CONSTRAINTS, 0u);
 
         /* B listed before A: same answer */
         trust[0] = caB;
@@ -5256,7 +5306,8 @@ void SSFX509UnitTest(void)
         trust[1] = caA;
         trustLen[1] = aLen;
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, trust, trustLen, 2u, "evil.com",
-                                      1800000000ull) == false);
+                                      1800000000ull, &_utVErr) == false);
+        _UT_VERR(ERR_NAME_CONSTRAINTS, 0u);
 
         /* A leaf for a name B permits is accepted with either ordering */
         p.sanDNSNames = sanGood;
@@ -5264,13 +5315,13 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(leafLen != 0u);
         chainLen[0] = leafLen;
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, trust, trustLen, 2u, "good.com",
-                                      1800000000ull) == true);
+                                      1800000000ull, &_utVErr) == true); _UT_VERR(OK, 0u);
         trust[0] = caA;
         trustLen[0] = aLen;
         trust[1] = caB;
         trustLen[1] = bLen;
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, trust, trustLen, 2u, "good.com",
-                                      1800000000ull) == true);
+                                      1800000000ull, &_utVErr) == true); _UT_VERR(OK, 0u);
 
         /* Mirror image: only the non-signing twin excludes the name, so the leaf is accepted */
         leafLen = _utSignCert(&p, privA, leafOut, sizeof(leafOut));
@@ -5285,7 +5336,7 @@ void SSFX509UnitTest(void)
         trust[1] = caA;
         trustLen[1] = aLen;
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, trust, trustLen, 2u, "evil.com",
-                                      1800000000ull) == true);
+                                      1800000000ull, &_utVErr) == true); _UT_VERR(OK, 0u);
     }
 
     /* ---- AUDIT X509-3: Name Constraints that cannot be held in full fail the parse ---- */
@@ -5433,13 +5484,14 @@ void SSFX509UnitTest(void)
         chain[0] = leafOut;
         chainLen[0] = leafLen;
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, trust, trustLen, 1u, "evil.com",
-                                      1800000000ull) == false);
+                                      1800000000ull, &_utVErr) == false);
+        _UT_VERR(ERR_NAME_CONSTRAINTS, 0u);
         p.sanDNSNames = sanGood;
         leafLen = _utSignCert(&p, caPriv, leafOut, sizeof(leafOut));
         SSF_ASSERT(leafLen != 0u);
         chainLen[0] = leafLen;
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, trust, trustLen, 1u, "good.com",
-                                      1800000000ull) == true);
+                                      1800000000ull, &_utVErr) == true); _UT_VERR(OK, 0u);
 
         /* AUDIT ASN1-1: a pathLenConstraint that is not a valid unsigned INTEGER fails */
         {
@@ -5713,9 +5765,11 @@ void SSFX509UnitTest(void)
                 trust[0] = caOut;
                 trustLen[0] = caLen;
                 SSF_ASSERT(SSFX509VerifyChain(chain10, chainLen10, 1u, trust, trustLen, 1u,
-                                              "good.com", 1800000000ull) == true);
+                                              "good.com", 1800000000ull, &_utVErr) == true);
+                _UT_VERR(OK, 0u);
                 SSF_ASSERT(SSFX509VerifyChain(chain10, chainLen10, 2u, trust, trustLen, 1u,
-                                              "good.com", 1800000000ull) == true);
+                                              "good.com", 1800000000ull, &_utVErr) == true);
+                _UT_VERR(OK, 0u);
             }
         }
 
@@ -5989,13 +6043,14 @@ void SSFX509UnitTest(void)
             p.addKeyUsage = true; p.keyUsageBits = SSF_X509_KU_DIGITAL_SIGNATURE; \
             p.addExtKeyUsage = true; p.ekuCodeSigning = true; \
         } while (0)
-        #define _X5094_VERIFY(_expect) do { \
+        #define _X5094_VERIFY(_expect, _code, _idx) do { \
             leafLen = _utSignCert(&p, caPriv, leafOut, sizeof(leafOut)); \
             SSF_ASSERT(leafLen != 0u); \
             chain[0] = leafOut; chainLen[0] = leafLen; \
             SSF_ASSERT(SSFX509VerifyChainPurpose(chain, chainLen, 1u, trust, trustLen, 1u, \
                                                  SSF_X509_PURPOSE_CODE_SIGNING, NULL, \
-                                                 1800000000ull) == (_expect)); \
+                                                 1800000000ull, &_utVErr) == (_expect)); \
+            _UT_VERR(_code, _idx); \
         } while (0)
 
         /* directoryName constraint: a leaf with a subject is rejected; with none, accepted */
@@ -6003,23 +6058,23 @@ void SSFX509UnitTest(void)
         _X5094_LEAF_BASE();
         p.subject.o = "Evil";
         p.subject.cn = "evil";
-        _X5094_VERIFY(false);
+        _X5094_VERIFY(false, ERR_NAME_CONSTRAINTS, 0u);
         _X5094_LEAF_BASE();
         p.subject.o = "Good";
-        _X5094_VERIFY(false);
+        _X5094_VERIFY(false, ERR_NAME_CONSTRAINTS, 0u);
         _X5094_LEAF_BASE();
         p.sanDNSNames = sanGood;
-        _X5094_VERIFY(true);
+        _X5094_VERIFY(true, OK, 0u);
 
         /* rfc822Name constraint: an email SAN rejects; DNS-only and no subject is accepted */
         _X5094_ANCHOR(ncEmailGood);
         _X5094_LEAF_BASE();
         p.addRawExt = true; p.rawExtOid = sanOid; p.rawExtOidLen = sizeof(sanOid);
         p.rawExtValue = sanEmail; p.rawExtValueLen = sizeof(sanEmail);
-        _X5094_VERIFY(false);
+        _X5094_VERIFY(false, ERR_NAME_CONSTRAINTS, 0u);
         _X5094_LEAF_BASE();
         p.sanDNSNames = sanGood;
-        _X5094_VERIFY(true);
+        _X5094_VERIFY(true, OK, 0u);
 
         /* rfc822Name constraint, emailAddress RDN swapped in for an equal-length CN: rejected */
         _X5094_LEAF_BASE();
@@ -6047,19 +6102,20 @@ void SSFX509UnitTest(void)
         chainLen[0] = leafLen;
         SSF_ASSERT(SSFX509VerifyChainPurpose(chain, chainLen, 1u, trust, trustLen, 1u,
                                              SSF_X509_PURPOSE_CODE_SIGNING, NULL,
-                                             1800000000ull) == false);
+                                             1800000000ull, &_utVErr) == false);
+        _UT_VERR(ERR_NAME_CONSTRAINTS, 0u);
         /* Control: the unpatched CN leaf carries no email instance, so it is accepted */
-        _X5094_VERIFY(true);
+        _X5094_VERIFY(true, OK, 0u);
 
         /* URI constraint: a URI SAN rejects; DNS-only is accepted */
         _X5094_ANCHOR(ncUriGood);
         _X5094_LEAF_BASE();
         p.addRawExt = true; p.rawExtOid = sanOid; p.rawExtOidLen = sizeof(sanOid);
         p.rawExtValue = sanUri; p.rawExtValueLen = sizeof(sanUri);
-        _X5094_VERIFY(false);
+        _X5094_VERIFY(false, ERR_NAME_CONSTRAINTS, 0u);
         _X5094_LEAF_BASE();
         p.sanDNSNames = sanGood;
-        _X5094_VERIFY(true);
+        _X5094_VERIFY(true, OK, 0u);
         #undef _X5094_ANCHOR
         #undef _X5094_LEAF_BASE
         #undef _X5094_VERIFY
@@ -6112,7 +6168,7 @@ void SSFX509UnitTest(void)
         trust[0] = caOut;
         trustLen[0] = caLen;
 
-        #define _X5095_CASE(_dns, _ips, _host, _expect) do { \
+        #define _X5095_CASE(_dns, _ips, _host, _expect, _code, _idx) do { \
             _utGenBaseParams(&p, serial, leafPub, (uint32_t)leafPubLen); \
             p.issuer.cn = "ca"; \
             p.subject.cn = "leaf"; \
@@ -6123,18 +6179,19 @@ void SSFX509UnitTest(void)
             chain[0] = leafOut; \
             chainLen[0] = leafLen; \
             SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, trust, trustLen, 1u, (_host), \
-                                          1800000000ull) == (_expect)); \
+                                          1800000000ull, &_utVErr) == (_expect)); \
+            _UT_VERR(_code, _idx); \
         } while (0)
 
         /* dNSName "8.8.8.8" escapes the IP constraint and must not match host 8.8.8.8 */
-        _X5095_CASE(sanDns8888, NULL, "8.8.8.8", false);
+        _X5095_CASE(sanDns8888, NULL, "8.8.8.8", false, ERR_HOSTNAME, 0u);
         /* A proper iPAddress SAN inside the permitted range still matches */
-        _X5095_CASE(NULL, sanIP10123, "10.1.2.3", true);
+        _X5095_CASE(NULL, sanIP10123, "10.1.2.3", true, OK, 0u);
         /* Wildcard and exact dNSNames that look like IPv4 never match an IP literal */
-        _X5095_CASE(sanWild001, NULL, "10.0.0.1", false);
-        _X5095_CASE(sanDns10001, NULL, "10.0.0.1", false);
+        _X5095_CASE(sanWild001, NULL, "10.0.0.1", false, ERR_HOSTNAME, 0u);
+        _X5095_CASE(sanDns10001, NULL, "10.0.0.1", false, ERR_HOSTNAME, 0u);
         /* A hostname with ':' is an (unsupported) IPv6 literal, never a DNS name */
-        _X5095_CASE(sanDnsV6, NULL, "::1", false);
+        _X5095_CASE(sanDnsV6, NULL, "::1", false, ERR_HOSTNAME, 0u);
         #undef _X5095_CASE
     }
 
@@ -6247,19 +6304,28 @@ void SSFX509UnitTest(void)
         SSF_ASSERT_TEST(SSFX509EncodeCert(out, sizeof(out), &p, fakeSig, sizeof(fakeSig), NULL));
 
         /* Chain verification */
-        SSF_ASSERT_TEST(SSFX509VerifyChain(NULL, chainLen, 1u, chain, chainLen, 1u, "x", now));
-        SSF_ASSERT_TEST(SSFX509VerifyChain(chain, NULL, 1u, chain, chainLen, 1u, "x", now));
-        SSF_ASSERT_TEST(SSFX509VerifyChain(chain, chainLen, 0u, chain, chainLen, 1u, "x", now));
+        SSF_ASSERT_TEST(SSFX509VerifyChain(NULL, chainLen, 1u, chain, chainLen, 1u, "x", now,
+                                           &_utVErr));
+        SSF_ASSERT_TEST(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, "x", now,
+                                           NULL));
+        SSF_ASSERT_TEST(SSFX509VerifyChain(chain, NULL, 1u, chain, chainLen, 1u, "x", now,
+                                           &_utVErr));
+        SSF_ASSERT_TEST(SSFX509VerifyChain(chain, chainLen, 0u, chain, chainLen, 1u, "x", now,
+                                           &_utVErr));
         SSF_ASSERT_TEST(SSFX509VerifyChain(chain, chainLen, SSF_X509_CONFIG_MAX_CHAIN_DEPTH + 1u,
-                                           chain, chainLen, 1u, "x", now));
-        SSF_ASSERT_TEST(SSFX509VerifyChain(chain, chainLen, 1u, NULL, chainLen, 1u, "x", now));
-        SSF_ASSERT_TEST(SSFX509VerifyChain(chain, chainLen, 1u, chain, NULL, 1u, "x", now));
-        SSF_ASSERT_TEST(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 0u, "x", now));
-        SSF_ASSERT_TEST(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, NULL, now));
+                                           chain, chainLen, 1u, "x", now, &_utVErr));
+        SSF_ASSERT_TEST(SSFX509VerifyChain(chain, chainLen, 1u, NULL, chainLen, 1u, "x", now,
+                                           &_utVErr));
+        SSF_ASSERT_TEST(SSFX509VerifyChain(chain, chainLen, 1u, chain, NULL, 1u, "x", now,
+                                           &_utVErr));
+        SSF_ASSERT_TEST(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 0u, "x", now,
+                                           &_utVErr));
+        SSF_ASSERT_TEST(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, NULL, now,
+                                           &_utVErr));
         SSF_ASSERT_TEST(SSFX509VerifyChain(nullEntry, nullEntryLen, 1u, chain, chainLen, 1u, "x",
-                                           now));
+                                           now, &_utVErr));
         SSF_ASSERT_TEST(SSFX509VerifyChain(chain, chainLen, 1u, nullEntry, nullEntryLen, 1u,
-                                           "test.ssf.local", now));
+                                           "test.ssf.local", now, &_utVErr));
     }
 
     /* ---- Malformed ext bodies, DN, SPKI, ext header: fail closed or fail the parse ---- */
@@ -6389,7 +6455,7 @@ void SSFX509UnitTest(void)
         trust[0] = caOut;
         trustLen[0] = caLen;
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 2u, trust, trustLen, 1u, "x",
-                                      1800000000ull) == false);
+                                      1800000000ull, &_utVErr) == false); _UT_VERR(ERR_NOT_CA, 1u);
 
         /* DN: a SET whose length overruns, or that is not a SET, fails the parse */
         _utGenBaseParams(&p, serial, pubKey, 65u);
@@ -6490,7 +6556,7 @@ void SSFX509UnitTest(void)
         chain[0] = leafOut;
         chainLen[0] = leafLen;
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 2u, trust, trustLen, 1u, "a.example.com",
-                                      1800000000ull) == true);
+                                      1800000000ull, &_utVErr) == true); _UT_VERR(OK, 0u);
 
         /* Leaf outside it is rejected even though the anchor imposes nothing */
         p.sanDNSNames = sanOut;
@@ -6498,7 +6564,8 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(leafLen != 0u);
         chainLen[0] = leafLen;
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 2u, trust, trustLen, 1u, "evil.com",
-                                      1800000000ull) == false);
+                                      1800000000ull, &_utVErr) == false);
+        _UT_VERR(ERR_NAME_CONSTRAINTS, 0u);
 
         /* The anchor's exclusion reaches the leaf through the intermediate */
         SSF_ASSERT(_utMakeCA("root", serial, rootPriv, rootPub, &rootPubLen, rootOut,
@@ -6533,7 +6600,8 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(leafLen != 0u);
         chainLen[0] = leafLen;
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 2u, trust, trustLen, 1u, "a.example.com",
-                                      1800000000ull) == false);
+                                      1800000000ull, &_utVErr) == false);
+        _UT_VERR(ERR_NAME_CONSTRAINTS, 0u);
 
         /* The anchor's exclusion also applies to the intermediate's own SAN */
         _utGenBaseParams(&p, serial, rootPub, (uint32_t)rootPubLen);
@@ -6560,7 +6628,8 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(intLen != 0u);
         chainLen[1] = intLen;
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 2u, trust, trustLen, 1u, "a.example.com",
-                                      1800000000ull) == false);
+                                      1800000000ull, &_utVErr) == false);
+        _UT_VERR(ERR_NAME_CONSTRAINTS, 1u);
     }
 
     /* ---- Trace callback: failures report an ERROR with the reason, NULL disables tracing ---- */
@@ -6582,7 +6651,8 @@ void SSFX509UnitTest(void)
 
         /* A hostname mismatch reports one ERROR in the CERT category naming the hostname */
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, "nope.test",
-                                      c.notBefore + 1u) == false);
+                                      c.notBefore + 1u, &_utVErr) == false);
+        _UT_VERR(ERR_HOSTNAME, 0u);
         _UT_TRACE_ASSERT(_utTraceErrors == 1u);
         _UT_TRACE_ASSERT(_utTraceLastLevel == (int)SSF_TLS_TRACE_ERROR);
         _UT_TRACE_ASSERT(_utTraceLastCategory == (int)SSF_TLS_TRACE_CERT);
@@ -6591,14 +6661,15 @@ void SSFX509UnitTest(void)
 
         /* An expired chain reports the validity failure */
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, "test.ssf.local",
-                                      c.notAfter + 1u) == false);
+                                      c.notAfter + 1u, &_utVErr) == false);
+        _UT_VERR(ERR_EXPIRED, 0u);
         _UT_TRACE_ASSERT(_utTraceErrors == 2u);
         _UT_TRACE_ASSERT(_utContains(_utTraceLastMsg, "not valid") == true);
 
         /* A successful verification emits DEBUG traces and no ERROR */
         before = _utTraceCount;
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, "test.ssf.local",
-                                      c.notBefore + 1u) == true);
+                                      c.notBefore + 1u, &_utVErr) == true); _UT_VERR(OK, 0u);
         _UT_TRACE_ASSERT(_utTraceCount > before);
         _UT_TRACE_ASSERT(_utTraceErrors == 2u);
         _UT_TRACE_ASSERT(_utTraceLastLevel == (int)SSF_TLS_TRACE_DEBUG);
@@ -6607,7 +6678,8 @@ void SSFX509UnitTest(void)
         SSFX509SetTraceCtx(NULL, NULL);
         before = _utTraceCount;
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, "nope.test",
-                                      c.notBefore + 1u) == false);
+                                      c.notBefore + 1u, &_utVErr) == false);
+        _UT_VERR(ERR_HOSTNAME, 0u);
         _UT_TRACE_ASSERT(_utTraceCount == before);
     }
 
@@ -6674,7 +6746,9 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(intLen != 0u);
         chain[1] = intOut;
         chainLen[1] = intLen;
-        SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 2u, trust, trustLen, 1u, "x", now) == false);
+        SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 2u, trust, trustLen, 1u, "x", now,
+                                      &_utVErr) == false);
+        _UT_VERR(ERR_EXPIRED, 1u);
 
         /* Intermediate not yet valid at now */
         p.notAfter = 2000000000ull;
@@ -6682,14 +6756,18 @@ void SSFX509UnitTest(void)
         intLen = _utSignCert(&p, rootPriv, intOut, sizeof(intOut));
         SSF_ASSERT(intLen != 0u);
         chainLen[1] = intLen;
-        SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 2u, trust, trustLen, 1u, "x", now) == false);
+        SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 2u, trust, trustLen, 1u, "x", now,
+                                      &_utVErr) == false);
+        _UT_VERR(ERR_NOT_YET_VALID, 1u);
 
         /* The same intermediate inside its window verifies */
         p.notBefore = 1700000000ull;
         intLen = _utSignCert(&p, rootPriv, intOut, sizeof(intOut));
         SSF_ASSERT(intLen != 0u);
         chainLen[1] = intLen;
-        SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 2u, trust, trustLen, 1u, "x", now) == true);
+        SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 2u, trust, trustLen, 1u, "x", now,
+                                      &_utVErr) == true);
+        _UT_VERR(OK, 0u);
 
         /* An expired trust anchor is skipped, so nothing anchors the chain */
         _utGenBaseParams(&p, serial, rootPub, (uint32_t)rootPubLen);
@@ -6703,9 +6781,12 @@ void SSFX509UnitTest(void)
         rootLen = _utSignCert(&p, rootPriv, rootOut, sizeof(rootOut));
         SSF_ASSERT(rootLen != 0u);
         trustLen[0] = rootLen;
-        SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 2u, trust, trustLen, 1u, "x", now) == false);
-        SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 2u, trust, trustLen, 1u, "x", now - 2u)
-                   == true);
+        SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 2u, trust, trustLen, 1u, "x", now,
+                                      &_utVErr) == false);
+        _UT_VERR(ERR_UNKNOWN_CA, 1u);
+        SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 2u, trust, trustLen, 1u, "x", now - 2u,
+                                      &_utVErr)
+                   == true); _UT_VERR(OK, 0u);
 
         /* notBefore after notAfter parses but is valid at no time */
         _utGenBaseParams(&p, serial, leafPub, (uint32_t)leafPubLen);
@@ -6802,9 +6883,11 @@ void SSFX509UnitTest(void)
         chain[0] = out;
         chainLen[0] = n;
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, "32.1.13.184",
-                                      1800000000ull) == false);
+                                      1800000000ull, &_utVErr) == false);
+        _UT_VERR(ERR_HOSTNAME, 0u);
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, "2001:db8::1",
-                                      1800000000ull) == false);
+                                      1800000000ull, &_utVErr) == false);
+        _UT_VERR(ERR_HOSTNAME, 0u);
 
         /* A zero-length iPAddress is harmless and a following IPv4 entry still matches */
         p.rawExtValue = sanZeroThenV4;
@@ -6816,9 +6899,10 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(parsed.san[1].valLen == 4u);
         chainLen[0] = n;
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, "10.0.0.1",
-                                      1800000000ull) == true);
+                                      1800000000ull, &_utVErr) == true); _UT_VERR(OK, 0u);
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, "0.0.0.0",
-                                      1800000000ull) == false);
+                                      1800000000ull, &_utVErr) == false);
+        _UT_VERR(ERR_HOSTNAME, 0u);
 
         /* An IPv6-only permitted subtree rejects IPv4 iPAddress SANs, dNSName SANs stay free */
         SSF_ASSERT(SSFECDSAKeyGen(_UT_CURVE, caPriv, sizeof(caPriv), caPub, sizeof(caPub),
@@ -6857,14 +6941,15 @@ void SSFX509UnitTest(void)
         chain[0] = out;
         chainLen[0] = n;
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 2u, trust, trustLen, 1u, "10.0.0.1",
-                                      1800000000ull) == false);
+                                      1800000000ull, &_utVErr) == false);
+        _UT_VERR(ERR_NAME_CONSTRAINTS, 0u);
         p.sanIPAddrs = NULL;
         p.sanDNSNames = sanDNS;
         n = _utSignCert(&p, caPriv, out, sizeof(out));
         SSF_ASSERT(n != 0u);
         chainLen[0] = n;
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 2u, trust, trustLen, 1u, "x",
-                                      1800000000ull) == true);
+                                      1800000000ull, &_utVErr) == true); _UT_VERR(OK, 0u);
 
         /* An excluded IPv6 subtree never matches an IPv4 SAN, so it is accepted */
         _utGenBaseParams(&p, serial, caPub, (uint32_t)caPubLen);
@@ -6892,7 +6977,7 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(n != 0u);
         chainLen[0] = n;
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 2u, trust, trustLen, 1u, "10.0.0.1",
-                                      1800000000ull) == true);
+                                      1800000000ull, &_utVErr) == true); _UT_VERR(OK, 0u);
     }
 
     /* ---- Chain depth: the configured maximum verifies, one more is a precondition ---- */
@@ -6960,17 +7045,20 @@ void SSFX509UnitTest(void)
             chainLen[idx] = len;
         }
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, SSF_X509_CONFIG_MAX_CHAIN_DEPTH, trust,
-                                      trustLen, 1u, "deep.test", 1800000000ull) == true);
+                                      trustLen, 1u, "deep.test", 1800000000ull, &_utVErr) == true);
+        _UT_VERR(OK, 0u);
 
         /* One certificate more than the configured depth is a contract violation */
         chain[SSF_X509_CONFIG_MAX_CHAIN_DEPTH] = rootOut;
         chainLen[SSF_X509_CONFIG_MAX_CHAIN_DEPTH] = rootLen;
         SSF_ASSERT_TEST(SSFX509VerifyChain(chain, chainLen, SSF_X509_CONFIG_MAX_CHAIN_DEPTH + 1u,
-                                           trust, trustLen, 1u, "deep.test", 1800000000ull));
+                                           trust, trustLen, 1u, "deep.test", 1800000000ull,
+                                               &_utVErr));
 
         /* Dropping the top intermediate breaks the link to the root */
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, SSF_X509_CONFIG_MAX_CHAIN_DEPTH - 1u, trust,
-                                      trustLen, 1u, "deep.test", 1800000000ull) == false);
+                                      trustLen, 1u, "deep.test", 1800000000ull, &_utVErr) == false);
+        _UT_VERR(ERR_UNKNOWN_CA, SSF_X509_CONFIG_MAX_CHAIN_DEPTH - 2u);
     }
 
     /* ---- SAN cap: more than SSF_X509_CONFIG_MAX_SAN_ENTRIES SANs fails to parse (X509-16) ---- */
@@ -7048,9 +7136,9 @@ void SSFX509UnitTest(void)
         chain[0] = leafOut;
         chainLen[0] = leafLen;
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 2u, trust, trustLen, 1u, names[0],
-                                      1800000000ull) == false);
+                                      1800000000ull, &_utVErr) == false); _UT_VERR(ERR_PARSE, 0u);
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 2u, trust, trustLen, 1u, "evil.com",
-                                      1800000000ull) == false);
+                                      1800000000ull, &_utVErr) == false); _UT_VERR(ERR_PARSE, 0u);
 
         /* The excluded name first: retained, so the constraint rejects every hostname */
         sans[SSF_X509_CONFIG_MAX_SAN_ENTRIES] = names[0];
@@ -7059,7 +7147,7 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(leafLen != 0u);
         chainLen[0] = leafLen;
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 2u, trust, trustLen, 1u, names[1],
-                                      1800000000ull) == false);
+                                      1800000000ull, &_utVErr) == false); _UT_VERR(ERR_PARSE, 0u);
     }
 
     /* ---- Parser branches: AKID, unique IDs, critical FALSE, BC, KU, unused bits, sigAlg ---- */
@@ -7217,7 +7305,8 @@ void SSFX509UnitTest(void)
         chain[0] = out;
         chainLen[0] = n;
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, "x",
-                                      1800000000ull) == false);
+                                      1800000000ull, &_utVErr) == false);
+        _UT_VERR(ERR_UNKNOWN_CA, 0u);
     }
 
     /* ---- Key and algorithm mismatches, and RSA-PSS parameter edges ---- */
@@ -7370,7 +7459,8 @@ void SSFX509UnitTest(void)
             trustDerLen[0] = sizeof(_utTestCertDER);
             SSF_ASSERT(SSFX509VerifyChainPurpose(chainDer, chainDerLen, 2u, trustDer,
                                                  trustDerLen, 1u, SSF_X509_PURPOSE_CODE_SIGNING,
-                                                 NULL, 1800000000ull) == false);
+                                                 NULL, 1800000000ull, &_utVErr) == false);
+            _UT_VERR(ERR_SIGNATURE, 0u);
         }
 
         /* An ECDSA-signed cert cannot be verified with an RSA issuer: no curve to use */
@@ -7681,27 +7771,27 @@ void SSFX509UnitTest(void)
         chain[0] = out;
         chainLen[0] = n;
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, "foo.example.com",
-                                      now) == true);
+                                      now, &_utVErr) == true); _UT_VERR(OK, 0u);
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, "bar.example.net",
-                                      now) == true);
+                                      now, &_utVErr) == true); _UT_VERR(OK, 0u);
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, "BAR.example.NET",
-                                      now) == true);
+                                      now, &_utVErr) == true); _UT_VERR(OK, 0u);
 
         /* A trailing dot is not stripped, so the absolute form does not match */
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, "foo.example.com.",
-                                      now) == false);
+                                      now, &_utVErr) == false); _UT_VERR(ERR_HOSTNAME, 0u);
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, "bar.example.net.",
-                                      now) == false);
+                                      now, &_utVErr) == false); _UT_VERR(ERR_HOSTNAME, 0u);
 
         /* Leading-zero IPv4 literals match nothing (AUDIT X509-17); only the canonical form does */
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, "10.0.0.1",
-                                      now) == true);
+                                      now, &_utVErr) == true); _UT_VERR(OK, 0u);
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, "010.0.0.1",
-                                      now) == false);
+                                      now, &_utVErr) == false); _UT_VERR(ERR_HOSTNAME, 0u);
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, "10.0.0.01",
-                                      now) == false);
+                                      now, &_utVErr) == false); _UT_VERR(ERR_HOSTNAME, 0u);
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, "10.0.0.10",
-                                      now) == false);
+                                      now, &_utVErr) == false); _UT_VERR(ERR_HOSTNAME, 0u);
 
         /* An IPv4 literal never matches a dNSName, and a name never matches an iPAddress */
         _utGenBaseParams(&p, serial, pubKey, 65u);
@@ -7710,16 +7800,16 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(n != 0u);
         chainLen[0] = n;
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, "10.0.0.1",
-                                      now) == false);
+                                      now, &_utVErr) == false); _UT_VERR(ERR_HOSTNAME, 0u);
         _utGenBaseParams(&p, serial, pubKey, 65u);
         p.sanIPAddrs = sanIPs;
         n = _utSelfSign(&p, pubKey, sizeof(pubKey), out, sizeof(out));
         SSF_ASSERT(n != 0u);
         chainLen[0] = n;
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, "foo.example.com",
-                                      now) == false);
+                                      now, &_utVErr) == false); _UT_VERR(ERR_HOSTNAME, 0u);
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, "10.0.0.1",
-                                      now) == true);
+                                      now, &_utVErr) == true); _UT_VERR(OK, 0u);
     }
 
     /* ---- Generation edges: v2 silently carries no extensions, countryName must be 2 chars ---- */
@@ -8101,23 +8191,30 @@ void SSFX509UnitTest(void)
         p.keyUsageBits = SSF_X509_KU_DIGITAL_SIGNATURE;
         _LEAF();
         SSF_ASSERT(SSFX509VerifyChainPurpose(chain, chainLen, 2u, trust, trustLen, 1u,
-                                             SSF_X509_PURPOSE_CODE_SIGNING, NULL, now) == true);
+                                             SSF_X509_PURPOSE_CODE_SIGNING, NULL, now,
+                                                 &_utVErr) == true);
+        _UT_VERR(OK, 0u);
         SSF_ASSERT(SSFX509VerifyChainPurpose(chain, chainLen, 2u, trust, trustLen, 1u,
                                              SSF_X509_PURPOSE_CODE_SIGNING, "ignored",
-                                             now) == true);
+                                             now, &_utVErr) == true); _UT_VERR(OK, 0u);
         SSF_ASSERT(SSFX509VerifyChainPurpose(chain, chainLen, 2u, trust, trustLen, 1u,
-                                             SSF_X509_PURPOSE_SERVER_AUTH, "signer", now) == false);
+                                             SSF_X509_PURPOSE_SERVER_AUTH, "signer", now,
+                                                 &_utVErr) == false);
+        _UT_VERR(ERR_HOSTNAME, 0u);
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 2u, trust, trustLen, 1u, "signer",
-                                      now) == false);
+                                      now, &_utVErr) == false); _UT_VERR(ERR_HOSTNAME, 0u);
 
         /* Everything else about the chain is still enforced: expiry and a bad issuer name */
         SSF_ASSERT(SSFX509VerifyChainPurpose(chain, chainLen, 2u, trust, trustLen, 1u,
                                              SSF_X509_PURPOSE_CODE_SIGNING, NULL,
-                                             2000000001ull) == false);
+                                             2000000001ull, &_utVErr) == false);
+        _UT_VERR(ERR_EXPIRED, 0u);
         p.issuer.cn = "other";
         _LEAF();
         SSF_ASSERT(SSFX509VerifyChainPurpose(chain, chainLen, 2u, trust, trustLen, 1u,
-                                             SSF_X509_PURPOSE_CODE_SIGNING, NULL, now) == false);
+                                             SSF_X509_PURPOSE_CODE_SIGNING, NULL, now,
+                                                 &_utVErr) == false);
+        _UT_VERR(ERR_ISSUER_MISMATCH, 0u);
         p.issuer.cn = "ca";
 
         /* EKU codeSigning is parsed, generated, and honored */
@@ -8128,19 +8225,25 @@ void SSFX509UnitTest(void)
         SSF_ASSERT((parsed.hasExtKeyUsage == true) && (parsed.ekuCodeSigning == true));
         SSF_ASSERT((parsed.ekuServerAuth == false) && (parsed.ekuClientAuth == false));
         SSF_ASSERT(SSFX509VerifyChainPurpose(chain, chainLen, 2u, trust, trustLen, 1u,
-                                             SSF_X509_PURPOSE_CODE_SIGNING, NULL, now) == true);
+                                             SSF_X509_PURPOSE_CODE_SIGNING, NULL, now,
+                                                 &_utVErr) == true);
+        _UT_VERR(OK, 0u);
 
         /* An EKU without codeSigning rejects the signer; anyExtendedKeyUsage satisfies it */
         p.ekuCodeSigning = false;
         p.ekuClientAuth = true;
         _LEAF();
         SSF_ASSERT(SSFX509VerifyChainPurpose(chain, chainLen, 2u, trust, trustLen, 1u,
-                                             SSF_X509_PURPOSE_CODE_SIGNING, NULL, now) == false);
+                                             SSF_X509_PURPOSE_CODE_SIGNING, NULL, now,
+                                                 &_utVErr) == false);
+        _UT_VERR(ERR_EKU, 0u);
         p.ekuClientAuth = false;
         p.ekuServerAuth = true;
         _LEAF();
         SSF_ASSERT(SSFX509VerifyChainPurpose(chain, chainLen, 2u, trust, trustLen, 1u,
-                                             SSF_X509_PURPOSE_CODE_SIGNING, NULL, now) == false);
+                                             SSF_X509_PURPOSE_CODE_SIGNING, NULL, now,
+                                                 &_utVErr) == false);
+        _UT_VERR(ERR_EKU, 0u);
         p.addExtKeyUsage = false;
         p.ekuServerAuth = false;
         p.addRawExt = true;
@@ -8150,22 +8253,30 @@ void SSFX509UnitTest(void)
         p.rawExtValueLen = sizeof(anyEkuValue);
         _LEAF();
         SSF_ASSERT(SSFX509VerifyChainPurpose(chain, chainLen, 2u, trust, trustLen, 1u,
-                                             SSF_X509_PURPOSE_CODE_SIGNING, NULL, now) == true);
+                                             SSF_X509_PURPOSE_CODE_SIGNING, NULL, now,
+                                                 &_utVErr) == true);
+        _UT_VERR(OK, 0u);
         p.addRawExt = false;
 
         /* Key Usage, when present, must include digitalSignature or nonRepudiation */
         p.keyUsageBits = SSF_X509_KU_KEY_ENCIPHERMENT;
         _LEAF();
         SSF_ASSERT(SSFX509VerifyChainPurpose(chain, chainLen, 2u, trust, trustLen, 1u,
-                                             SSF_X509_PURPOSE_CODE_SIGNING, NULL, now) == false);
+                                             SSF_X509_PURPOSE_CODE_SIGNING, NULL, now,
+                                                 &_utVErr) == false);
+        _UT_VERR(ERR_LEAF_KEY_USAGE, 0u);
         p.keyUsageBits = SSF_X509_KU_NON_REPUDIATION;
         _LEAF();
         SSF_ASSERT(SSFX509VerifyChainPurpose(chain, chainLen, 2u, trust, trustLen, 1u,
-                                             SSF_X509_PURPOSE_CODE_SIGNING, NULL, now) == true);
+                                             SSF_X509_PURPOSE_CODE_SIGNING, NULL, now,
+                                                 &_utVErr) == true);
+        _UT_VERR(OK, 0u);
         p.addKeyUsage = false;
         _LEAF();
         SSF_ASSERT(SSFX509VerifyChainPurpose(chain, chainLen, 2u, trust, trustLen, 1u,
-                                             SSF_X509_PURPOSE_CODE_SIGNING, NULL, now) == true);
+                                             SSF_X509_PURPOSE_CODE_SIGNING, NULL, now,
+                                                 &_utVErr) == true);
+        _UT_VERR(OK, 0u);
         #undef _LEAF
 
         /* The server-auth purpose is exactly the legacy entry point */
@@ -8174,27 +8285,30 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(SSFX509Parse(_utTestCertDER, sizeof(_utTestCertDER), &parsed) == true);
         SSF_ASSERT(SSFX509VerifyChainPurpose(self, selfLen, 1u, self, selfLen, 1u,
                                              SSF_X509_PURPOSE_SERVER_AUTH, "test.ssf.local",
-                                             parsed.notBefore + 1u) == true);
+                                             parsed.notBefore + 1u, &_utVErr) == true);
+        _UT_VERR(OK, 0u);
         SSF_ASSERT(SSFX509VerifyChainPurpose(self, selfLen, 1u, self, selfLen, 1u,
                                              SSF_X509_PURPOSE_SERVER_AUTH, "nope.test",
-                                             parsed.notBefore + 1u) == false);
+                                             parsed.notBefore + 1u, &_utVErr) == false);
+        _UT_VERR(ERR_HOSTNAME, 0u);
         SSF_ASSERT(SSFX509VerifyChainPurpose(self, selfLen, 1u, self, selfLen, 1u,
                                              SSF_X509_PURPOSE_CODE_SIGNING, NULL,
-                                             parsed.notBefore + 1u) == true);
+                                             parsed.notBefore + 1u, &_utVErr) == true);
+        _UT_VERR(OK, 0u);
 
         /* Preconditions: server auth needs a hostname, the purpose must be in range */
         SSF_ASSERT_TEST(SSFX509VerifyChainPurpose(self, selfLen, 1u, self, selfLen, 1u,
                                                   SSF_X509_PURPOSE_SERVER_AUTH, NULL,
-                                                  parsed.notBefore + 1u));
+                                                  parsed.notBefore + 1u, &_utVErr));
         SSF_ASSERT_TEST(SSFX509VerifyChainPurpose(self, selfLen, 1u, self, selfLen, 1u,
                                                   SSF_X509_PURPOSE_SERVER_AUTH, "",
-                                                  parsed.notBefore + 1u));
+                                                  parsed.notBefore + 1u, &_utVErr));
         SSF_ASSERT_TEST(SSFX509VerifyChainPurpose(self, selfLen, 1u, self, selfLen, 1u,
                                                   SSF_X509_PURPOSE_MIN, NULL,
-                                                  parsed.notBefore + 1u));
+                                                  parsed.notBefore + 1u, &_utVErr));
         SSF_ASSERT_TEST(SSFX509VerifyChainPurpose(self, selfLen, 1u, self, selfLen, 1u,
                                                   SSF_X509_PURPOSE_MAX, NULL,
-                                                  parsed.notBefore + 1u));
+                                                  parsed.notBefore + 1u, &_utVErr));
     }
 
     /* ---- AUDIT RSA-10: RSA-1024, e = 1 and even e keys are refused, 2048-bit e = 3 passes ---- */
@@ -8387,7 +8501,7 @@ void SSFX509UnitTest(void)
         chain9999Len[0] = sizeof(cert9999);
         SSF_ASSERT(SSFX509VerifyChainPurpose(chain9999, chain9999Len, 1u, chain9999, chain9999Len,
                                              1u, SSF_X509_PURPOSE_CODE_SIGNING, NULL,
-                                             1795000000ull) == true);
+                                             1795000000ull, &_utVErr) == true); _UT_VERR(OK, 0u);
     }
 #endif /* SSF_EC_CONFIG_ENABLE_P256 */
 
@@ -8478,9 +8592,10 @@ void SSFX509UnitTest(void)
         ch[0] = der;
         chLen[0] = derLen;
         SSF_ASSERT(SSFX509VerifyChain(ch, chLen, 1u, ch, chLen, 1u, "10.0.0.1",
-                                      1800000000ull) == true);
+                                      1800000000ull, &_utVErr) == true); _UT_VERR(OK, 0u);
         SSF_ASSERT(SSFX509VerifyChain(ch, chLen, 1u, ch, chLen, 1u, "010.0.0.1",
-                                      1800000000ull) == false);
+                                      1800000000ull, &_utVErr) == false);
+        _UT_VERR(ERR_HOSTNAME, 0u);
 
         /* X509-18: a CA excluding 2001:db8::/32 rejects an IPv6 SAN leaf, not an IPv4 one. */
         SSF_ASSERT(SSFECDSAKeyGen(SSF_EC_CURVE_P256, leafPriv, sizeof(leafPriv), leafPub,
@@ -8521,7 +8636,8 @@ void SSFX509UnitTest(void)
         ch2Len[0] = derLen;
         SSF_ASSERT(SSFX509VerifyChainPurpose(ch2, ch2Len, 2u, tr, trLen, 1u,
                                              SSF_X509_PURPOSE_CODE_SIGNING, NULL,
-                                             1800000000ull) == false);
+                                             1800000000ull, &_utVErr) == false);
+        _UT_VERR(ERR_NAME_CONSTRAINTS, 0u);
 
         _utGenBaseParams(&p, serial, leafPub, (uint32_t)leafPubLen);
         p.issuer.cn = "ca";
@@ -8532,7 +8648,7 @@ void SSFX509UnitTest(void)
         ch2Len[0] = derLen;
         SSF_ASSERT(SSFX509VerifyChainPurpose(ch2, ch2Len, 2u, tr, trLen, 1u,
                                              SSF_X509_PURPOSE_CODE_SIGNING, NULL,
-                                             1800000000ull) == true);
+                                             1800000000ull, &_utVErr) == true); _UT_VERR(OK, 0u);
     }
 #endif /* SSF_EC_CONFIG_ENABLE_P256 */
 

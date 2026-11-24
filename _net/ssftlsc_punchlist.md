@@ -161,9 +161,29 @@ is rejected.
 
 ## Step 3 — Correctness and interop
 
-- [ ] Certificate failures all map to `bad_certificate`; RFC 8446 6.2 has `unknown_ca`,
+- [x] Certificate failures all map to `bad_certificate`; RFC 8446 6.2 has `unknown_ca`,
       `certificate_expired`, `unsupported_certificate`, which need the failure reason from
-      `SSFX509VerifyChain`. Found during 2.8. Moved from step 2 to a later batch.
+      `SSFX509VerifyChain`. Found during 2.8. Moved from step 2 to a later batch. Fixed (3B item D,
+      approved, outside the client): `SSFX509VerifyChain()` / `SSFX509VerifyChainPurpose()`
+      take a required `SSFX509VerifyErr_t *errOut` = { code, certIdx } naming the first check
+      that failed (17 codes, one per failure point; `certIdx` is the rejected chain index,
+      `chainLen` for the anchor's own pathLen). `ssfcms` passes a local and traces it;
+      `ssfx509.md` documents the codes. ssftlsc maps: corrupt / signature / issuer / key-id /
+      host name -> `bad_certificate` (host name as OpenSSL and GnuTLS clients send), version /
+      critical extension -> `unsupported_certificate`, not yet valid / expired ->
+      `certificate_expired`, CA and usage rules -> `certificate_unknown`, no anchor ->
+      `unknown_ca`. Alerts 43/45/48 added to `ssftls.h` (46 was already there). Unit:
+      all 139 `ssfx509_ut` verify calls check code and index (88 failure expectations derived
+      independently of the implementation, all matched first run), NULL `errOut` asserts, a
+      code -> alert table test. Wire (`s_server` received): expired 45, not yet valid 45,
+      untrusted CA 48, clientAuth-only EKU 46, unknown critical extension 43, issued by a
+      non-CA 46, wrong host 42 (all 42 before).
+- [ ] `ssfx509_ut` cases that pass for a reason other than the one they describe (found while
+      deriving D's expected codes): the "192.168.1.1" IP host case uses time 1775000000,
+      before `_utTestCertDER`'s notBefore (1775422718), so it fails NOT_YET_VALID and never
+      reaches host matching; the name-constraint "excluded name retained" case still has
+      MAX_SAN_ENTRIES + 1 SANs and fails at PARSE. Comments in the expired / not-yet-valid
+      cases state 1775000000 where the code uses 1780000000. Outside the TLS client.
 - [ ] Stack secrets inside the crypto modules ssftlsc calls (`ssfhkdf`, `ssfhmac`,
       `ssfx25519`, `ssfecdsa`, `ssfaesgcm`, ...) are outside this audit; review each module's
       own zeroization. Found during 2.7. Moved from step 2 to a later batch.

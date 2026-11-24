@@ -829,6 +829,7 @@ static bool _SSFCMSVerifySigner(const SSFCMSSignedData_t *sd, uint8_t idx, const
     const uint8_t *chain[SSF_X509_CONFIG_MAX_CHAIN_DEPTH];
     uint32_t chainLen[SSF_X509_CONFIG_MAX_CHAIN_DEPTH];
     uint8_t chainN;
+    SSFX509VerifyErr_t verifyErr;
     uint32_t hashLen;
     uint8_t i;
     bool listed = false;
@@ -987,10 +988,12 @@ static bool _SSFCMSVerifySigner(const SSFCMSSignedData_t *sd, uint8_t idx, const
                                trustCount, chain, chainLen, &scratch);
     /* Is the signer chain untrusted (checked before the signer key is used)? */
     if (!SSFX509VerifyChainPurpose(chain, chainLen, chainN, trustDer, trustDerLen, trustCount,
-                                   SSF_X509_PURPOSE_CODE_SIGNING, NULL, nowUnixSec))
+                                   SSF_X509_PURPOSE_CODE_SIGNING, NULL, nowUnixSec, &verifyErr))
     {
         /* Yes */
-        SSF_TLS_TRACE_CERT_ERROR(_SSF_CMS_TRACE_CTX, "CMS: signer[%u] certificate chain FAILED", idx);
+        SSF_TLS_TRACE_CERT_ERROR(_SSF_CMS_TRACE_CTX,
+                                 "CMS: signer[%u] certificate chain FAILED (code %d, cert[%u])",
+                                 idx, (int)verifyErr.code, verifyErr.certIdx);
         return false;
     }
 

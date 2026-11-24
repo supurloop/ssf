@@ -41,6 +41,7 @@ extern "C" {
 #include "ssfport.h"
 #include "ssftls.h"
 #include "ssfnet.h"
+#include "ssfx509.h"
 
 /* --------------------------------------------------------------------------------------------- */
 /* Design                                                                                        */
@@ -112,6 +113,7 @@ typedef struct SSFTLSCCryptoWork
     uint64_t nowUnixSec;
     bool nowValid;                   /* nowUnixSec came from a set RTC                          */
     bool chainVerifyOk;
+    SSFX509VerifyErr_t chainVerifyErr;    /* Why chain verification failed */
 
     /* Phase 6b: CertificateVerify signature verification */
     uint16_t sigScheme;
@@ -290,6 +292,7 @@ extern void *_SSFTLSCScrubTestHookCtx;
 bool _SSFTLSCIsIPLiteralForTest(const char *host);
 bool _SSFTLSCSchemeMatchesKeyForTest(uint16_t scheme, SSFTLSCLeafKey_t key);
 bool _SSFTLSCSaveLeafKeyForTest(SSFTLSCSession_t *session, const uint8_t *der, uint32_t derLen);
+uint8_t _SSFTLSCChainAlertForTest(SSFX509VerifyCode_t code);
 bool _SSFTLSCParseEncryptedExtensionsForTest(const uint8_t *body, size_t bodyLen,
                                              uint8_t *alertOut);
 bool _SSFTLSCParseEncryptedExtensionsRslForTest(const uint8_t *body, size_t bodyLen,

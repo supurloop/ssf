@@ -3556,6 +3556,11 @@ static bool _SSFX509IsKnownExtension(const uint8_t *oidRaw, uint32_t oidRawLen)
            _SSFX509OIDMatch(oidRaw, oidRawLen, _oidNameConstraints, sizeof(_oidNameConstraints));
 }
 
+/* Records why chain verification failed: the check's code and the chain index it rejected. */
+#define _SSF_X509_VERIFY_FAIL(errOut, failCode, failIdx) do { \
+    (errOut)->code = (failCode); \
+    (errOut)->certIdx = (uint8_t)(failIdx); } while (0)
+
 /* Stack use is sized by SSF_X509_CONFIG_MAX_CHAIN_DEPTH; see ssfx509.md */
 #ifdef _WIN32
 #pragma warning(push)
@@ -3568,7 +3573,8 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
                                uint8_t chainLen,
                                const uint8_t **trustDer, const uint32_t *trustDerLen,
                                uint8_t trustCount, SSFX509Purpose_t purpose,
-                               const char *hostnameStrOpt, uint64_t nowUnixSec)
+                               const char *hostnameStrOpt, uint64_t nowUnixSec,
+                               SSFX509VerifyErr_t *errOut)
 {
     SSFX509Cert_t certs[SSF_X509_CONFIG_MAX_CHAIN_DEPTH];
     SSFX509Cert_t anchor;
@@ -3590,6 +3596,10 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
     SSF_REQUIRE((purpose > SSF_X509_PURPOSE_MIN) && (purpose < SSF_X509_PURPOSE_MAX));
     SSF_REQUIRE((purpose != SSF_X509_PURPOSE_SERVER_AUTH) ||
                 ((hostnameStrOpt != NULL) && (hostnameStrOpt[0] != '\0')));
+    SSF_REQUIRE(errOut != NULL);
+
+    errOut->code = SSF_X509_VERIFY_OK;
+    errOut->certIdx = 0;
 
     for (i = 0; i < chainLen; i++)
     {
@@ -3601,6 +3611,7 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
             /* No, malformed */
             SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX, "Chain: parse cert[%u] failed (%lu bytes)",
                                      i, (unsigned long)chainDerLen[i]);
+            _SSF_X509_VERIFY_FAIL(errOut, SSF_X509_VERIFY_ERR_PARSE, i);
             return false;
         }
 
@@ -3610,6 +3621,7 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
             /* No, v1 and v2 certificates cannot carry the extensions this path relies on */
             SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX, "Chain: cert[%u] is v%u (must be v3)", i,
                                      certs[i].version + 1u);
+            _SSF_X509_VERIFY_FAIL(errOut, SSF_X509_VERIFY_ERR_VERSION, i);
             return false;
         }
 
@@ -3623,6 +3635,7 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
                 "Chain: cert[%u] TBS sigAlg OID (%lu bytes) != outer sigAlg OID (%lu bytes)", i,
                 (unsigned long)certs[i].sigAlgOidRawLen,
                 (unsigned long)certs[i].outerSigAlgOidRawLen);
+            _SSF_X509_VERIFY_FAIL(errOut, SSF_X509_VERIFY_ERR_SIG_ALG_MISMATCH, i);
             return false;
         }
 
@@ -3637,6 +3650,7 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
                 "Chain: cert[%u] TBS sigAlg params (%lu bytes) != outer params (%lu bytes)", i,
                 (unsigned long)certs[i].sigAlgParamsLen,
                 (unsigned long)certs[i].outerSigAlgParamsLen);
+            _SSF_X509_VERIFY_FAIL(errOut, SSF_X509_VERIFY_ERR_SIG_ALG_MISMATCH, i);
             return false;
         }
 
@@ -3648,6 +3662,9 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
                 "Chain: cert[%u] not valid at time %llu (notBefore=%llu notAfter=%llu)", i,
                 (unsigned long long)nowUnixSec, (unsigned long long)certs[i].notBefore,
                 (unsigned long long)certs[i].notAfter);
+            _SSF_X509_VERIFY_FAIL(errOut, (nowUnixSec < certs[i].notBefore) ?
+                                  SSF_X509_VERIFY_ERR_NOT_YET_VALID : SSF_X509_VERIFY_ERR_EXPIRED,
+                                  i);
             return false;
         }
     }
@@ -3662,6 +3679,7 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
             /* No, the chain is not linked by name even if the key happens to verify */
             SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
                 "Chain: cert[%u] issuer name does not match cert[%u] subject name", i, i + 1u);
+            _SSF_X509_VERIFY_FAIL(errOut, SSF_X509_VERIFY_ERR_ISSUER_MISMATCH, i);
             return false;
         }
 
@@ -3671,6 +3689,7 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
             /* No */
             SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
                 "Chain: cert[%u] signature by cert[%u] FAILED", i, i + 1u);
+            _SSF_X509_VERIFY_FAIL(errOut, SSF_X509_VERIFY_ERR_SIGNATURE, i);
             return false;
         }
 
@@ -3681,6 +3700,7 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
             SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
                 "Chain: cert[%u] AKID (%lu bytes) does not match cert[%u] SKID (%lu bytes)", i,
                 (unsigned long)certs[i].akidLen, i + 1u, (unsigned long)certs[i + 1u].skidLen);
+            _SSF_X509_VERIFY_FAIL(errOut, SSF_X509_VERIFY_ERR_KEY_ID_MISMATCH, i);
             return false;
         }
     }
@@ -3704,6 +3724,7 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
         SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
             "Chain: no trust anchor found for issuer of cert[%u] (%u CAs checked)", chainLen - 1u,
             trustCount);
+        _SSF_X509_VERIFY_FAIL(errOut, SSF_X509_VERIFY_ERR_UNKNOWN_CA, (uint8_t)(chainLen - 1u));
         return false;
     }
 
@@ -3717,6 +3738,7 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
             SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
                 "Chain: cert[%u] not a CA (hasBC=%d isCA=%d)",
                 i, certs[i].hasBasicConstraints, certs[i].isCA);
+            _SSF_X509_VERIFY_FAIL(errOut, SSF_X509_VERIFY_ERR_NOT_CA, i);
             return false;
         }
 
@@ -3727,6 +3749,7 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
             SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
                 "Chain: cert[%u] is CA but Key Usage lacks keyCertSign (KU=0x%04X)", i,
                 certs[i].keyUsageBits);
+            _SSF_X509_VERIFY_FAIL(errOut, SSF_X509_VERIFY_ERR_CA_KEY_USAGE, i);
             return false;
         }
 
@@ -3737,6 +3760,7 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
             SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
                 "Chain: cert[%u] pathLenConstraint=%d but %u subordinate CAs present", i,
                 certs[i].pathLenConstraint, i - 1u);
+            _SSF_X509_VERIFY_FAIL(errOut, SSF_X509_VERIFY_ERR_PATH_LEN, i);
             return false;
         }
     }
@@ -3760,6 +3784,7 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
         SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
             "Chain: trust anchor pathLenConstraint=%d but %u subordinate CAs in chain",
             anchor.pathLenConstraint, numSubCAs);
+        _SSF_X509_VERIFY_FAIL(errOut, SSF_X509_VERIFY_ERR_PATH_LEN, chainLen);
         return false;
     }
 
@@ -3772,6 +3797,7 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
             /* No */
             SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
                 "Chain: cert[%u] SAN violates nameConstraints of trust anchor", i);
+            _SSF_X509_VERIFY_FAIL(errOut, SSF_X509_VERIFY_ERR_NAME_CONSTRAINTS, i);
             return false;
         }
     }
@@ -3785,6 +3811,7 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
         SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
             "Chain: leaf EKU lacks the purpose %d (serverAuth=%d clientAuth=%d codeSigning=%d)",
             purpose, certs[0].ekuServerAuth, certs[0].ekuClientAuth, certs[0].ekuCodeSigning);
+        _SSF_X509_VERIFY_FAIL(errOut, SSF_X509_VERIFY_ERR_EKU, 0u);
         return false;
     }
 
@@ -3797,6 +3824,7 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
         SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
             "Chain: leaf Key Usage lacks digitalSignature and nonRepudiation (KU=0x%04X)",
             certs[0].keyUsageBits);
+        _SSF_X509_VERIFY_FAIL(errOut, SSF_X509_VERIFY_ERR_LEAF_KEY_USAGE, 0u);
         return false;
     }
 
@@ -3811,6 +3839,7 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
                 /* Yes */
                 SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
                     "Chain: cert[%u] SAN violates nameConstraints of cert[%u]", j, i);
+                _SSF_X509_VERIFY_FAIL(errOut, SSF_X509_VERIFY_ERR_NAME_CONSTRAINTS, j);
                 return false;
             }
         }
@@ -3827,6 +3856,7 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
             SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
                 "Chain: cert[%u] has unrecognized critical extension (OID %lu bytes)", i,
                 (unsigned long)certs[i].exts[e].oidRawLen);
+            _SSF_X509_VERIFY_FAIL(errOut, SSF_X509_VERIFY_ERR_CRITICAL_EXT, i);
             return false;
         }
     }
@@ -3876,6 +3906,7 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
             SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
                 "Chain: hostname '%s' not matched in SAN (sanLen=%u)", hostnameStrOpt,
                 certs[0].sanLen);
+            _SSF_X509_VERIFY_FAIL(errOut, SSF_X509_VERIFY_ERR_HOSTNAME, 0u);
             return false;
         }
     }
@@ -3890,12 +3921,13 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
 /* --------------------------------------------------------------------------------------------- */
 bool SSFX509VerifyChain(const uint8_t **chainDer, const uint32_t *chainDerLen, uint8_t chainLen,
                         const uint8_t **trustDer, const uint32_t *trustDerLen, uint8_t trustCount,
-                        const char *hostnameStr, uint64_t nowUnixSec)
+                        const char *hostnameStr, uint64_t nowUnixSec,
+                        SSFX509VerifyErr_t *errOut)
 {
     SSF_REQUIRE(hostnameStr != NULL);
     SSF_REQUIRE(hostnameStr[0] != '\0');
 
     return SSFX509VerifyChainPurpose(chainDer, chainDerLen, chainLen, trustDer, trustDerLen,
                                      trustCount, SSF_X509_PURPOSE_SERVER_AUTH, hostnameStr,
-                                     nowUnixSec);
+                                     nowUnixSec, errOut);
 }

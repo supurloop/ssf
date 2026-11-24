@@ -350,8 +350,8 @@ The unit-test entry point is gated by `SSF_CONFIG_X509_UNIT_TEST` in `ssfport.h`
 |---|----------|-------------|
 | | [`bool SSFX509VerifySignature(keyCert, sigAlgOidRaw, sigAlgOidRawLen, sigAlgParamsOpt, sigAlgParamsLen, digestAlgOidRawOpt, digestAlgOidRawLen, data, dataLen, sig, sigLen)`](#ssfx509verifysignature) | Verify a signature over arbitrary bytes with a certificate's key |
 | [e.g.](#ex-verify-sig) | [`bool SSFX509VerifyCertSignature(cert, issuer)`](#ssfx509verifycertsignature) | Verify `cert`'s signature with `issuer`'s public key |
-| [e.g.](#ex-verify-chain) | [`bool SSFX509VerifyChain(chainDer, chainDerLen, chainLen, trustDer, trustDerLen, trustCount, hostnameStr, nowUnixSec)`](#ssfx509verifychain) | Full RFC 5280 path validation plus hostname match |
-| | [`bool SSFX509VerifyChainPurpose(chainDer, chainDerLen, chainLen, trustDer, trustDerLen, trustCount, purpose, hostnameStrOpt, nowUnixSec)`](#ssfx509verifychainpurpose) | Path validation for TLS server authentication or code signing |
+| [e.g.](#ex-verify-chain) | [`bool SSFX509VerifyChain(chainDer, chainDerLen, chainLen, trustDer, trustDerLen, trustCount, hostnameStr, nowUnixSec, errOut)`](#ssfx509verifychain) | Full RFC 5280 path validation plus hostname match |
+| | [`bool SSFX509VerifyChainPurpose(chainDer, chainDerLen, chainLen, trustDer, trustDerLen, trustCount, purpose, hostnameStrOpt, nowUnixSec, errOut)`](#ssfx509verifychainpurpose) | Path validation for TLS server authentication or code signing |
 | [e.g.](#ex-trace) | [`void SSFX509SetTraceCtx(fnOpt, userCtxOpt)`](#ssfx509settracectx) | Install the diagnostic trace callback |
 | | [`bool SSFX509MatchIPAddress(hostnameStr, sanIP, sanIPLen)`](#ssfx509matchipaddress) | Match a dotted-decimal IPv4 string against an `iPAddress` SAN |
 | | [`bool SSFX509CheckSKIDAKID(cert, issuer)`](#ssfx509checkskidakid) | AKID / SKID consistency between a cert and its issuer |
@@ -657,7 +657,8 @@ bool SSFX509VerifyChain(const uint8_t **chainDer, const uint32_t *chainDerLen,
                         uint8_t chainLen,
                         const uint8_t **trustDer, const uint32_t *trustDerLen,
                         uint8_t trustCount,
-                        const char *hostnameStr, uint64_t nowUnixSec);
+                        const char *hostnameStr, uint64_t nowUnixSec,
+                        SSFX509VerifyErr_t *errOut);
 ```
 
 Validates a certificate chain against a trust store and checks the leaf against `hostnameStr`. The
@@ -674,9 +675,38 @@ certificate is parsed internally from DER; the caller never needs to parse first
 | `trustCount` | in | `uint8_t` | Number of trust anchors; must be at least `1`. |
 | `hostnameStr` | in | `const char *` | Null-terminated DNS name or dotted-decimal IPv4 address the leaf must be issued for. Must not be `NULL` or empty. |
 | `nowUnixSec` | in | `uint64_t` | Current time in Unix seconds used for every validity check. |
+| `errOut` | out | `SSFX509VerifyErr_t *` | Receives why verification failed: `code` and `certIdx` (below). `{ SSF_X509_VERIFY_OK, 0 }` on success. Must not be `NULL`. |
 
-**Returns:** `true` if every check passes; `false` at the first failure. The reason is reported
-through the trace callback when one is installed.
+**Returns:** `true` if every check passes; `false` at the first failure, which `errOut` names.
+The trace callback, when tracing is compiled in and a callback is installed, also describes it.
+
+<a id="verify-errors"></a>
+
+**Verification errors.** `errOut->code` is the first check that rejected the chain, in
+**Verification order**, and `errOut->certIdx` is the `chainDer` index of the certificate it
+rejected (`0` is the leaf). It is available in every build, including those with tracing
+compiled out.
+
+| `code` (`SSF_X509_VERIFY_`…) | `certIdx` | Meaning |
+|------------------------------|-----------|---------|
+| `OK` | `0` | The chain verified. |
+| `ERR_PARSE` | the certificate | It does not parse. |
+| `ERR_VERSION` | the certificate | It is not v3. |
+| `ERR_SIG_ALG_MISMATCH` | the certificate | Its TBS and outer signature algorithm (OID or parameters) differ. |
+| `ERR_NOT_YET_VALID` | the certificate | `nowUnixSec` is before its notBefore. |
+| `ERR_EXPIRED` | the certificate | `nowUnixSec` is after its notAfter. |
+| `ERR_ISSUER_MISMATCH` | the child | Its issuer is not the next certificate's subject. |
+| `ERR_SIGNATURE` | the child | Its signature does not verify with the next certificate's key. |
+| `ERR_KEY_ID_MISMATCH` | the child | Its AKID does not match the next certificate's SKID. |
+| `ERR_UNKNOWN_CA` | `chainLen - 1` | No trust anchor names, is valid for, key-links to and signs the last certificate. |
+| `ERR_NOT_CA` | the intermediate | It lacks Basic Constraints with cA TRUE. |
+| `ERR_CA_KEY_USAGE` | the intermediate | Its Key Usage lacks keyCertSign. |
+| `ERR_PATH_LEN` | the CA, or `chainLen` | A pathLenConstraint is exceeded; `chainLen` means the trust anchor's own. |
+| `ERR_NAME_CONSTRAINTS` | the violating certificate | Its names violate the Name Constraints of the anchor or of an intermediate. |
+| `ERR_EKU` | `0` | The leaf's Extended Key Usage lacks the purpose. |
+| `ERR_LEAF_KEY_USAGE` | `0` | Code signing: the leaf's Key Usage has neither digitalSignature nor nonRepudiation. |
+| `ERR_CRITICAL_EXT` | the certificate | It has a critical extension this verifier does not recognize. |
+| `ERR_HOSTNAME` | `0` | Server authentication: the leaf's SANs do not name `hostnameStr`. |
 
 <a id="ex-verify-chain"></a>
 
@@ -686,9 +716,16 @@ uint32_t chainLen[2]      = { leafDerLen, intermediateDerLen };
 const uint8_t *trust[1]   = { rootDer };
 uint32_t trustLen[1]      = { rootDerLen };
 
-if (SSFX509VerifyChain(chain, chainLen, 2u, trust, trustLen, 1u, "api.example.com", nowUnixSec))
+SSFX509VerifyErr_t err;
+
+if (SSFX509VerifyChain(chain, chainLen, 2u, trust, trustLen, 1u, "api.example.com", nowUnixSec,
+                       &err))
 {
     /* leaf is trusted for api.example.com at nowUnixSec */
+}
+else if (err.code == SSF_X509_VERIFY_ERR_EXPIRED)
+{
+    /* chain[err.certIdx] has expired: 0 is the leaf, 1 the intermediate */
 }
 ```
 
@@ -703,7 +740,8 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
                                uint8_t chainLen,
                                const uint8_t **trustDer, const uint32_t *trustDerLen,
                                uint8_t trustCount, SSFX509Purpose_t purpose,
-                               const char *hostnameStrOpt, uint64_t nowUnixSec);
+                               const char *hostnameStrOpt, uint64_t nowUnixSec,
+                               SSFX509VerifyErr_t *errOut);
 ```
 
 The chain verifier with the leaf checks chosen by `purpose`. Every step listed under
@@ -735,8 +773,8 @@ sign firmware). The anchor's own Basic Constraints and Key Usage are not checked
 
 The remaining parameters are those of [`SSFX509VerifyChain()`](#ssfx509verifychain).
 
-**Returns:** `true` if every check passes; `false` at the first failure, reported through the
-trace callback when one is installed.
+**Returns:** `true` if every check passes; `false` at the first failure, which `errOut` names
+(see [Verification errors](#verify-errors)).
 
 ---
 

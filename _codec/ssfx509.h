@@ -198,10 +198,21 @@ bool SSFX509Parse(const uint8_t *der, uint32_t derLen, SSFX509Cert_t *cert);
 /* Validity check: returns true if notBefore <= nowUnixSec <= notAfter (RFC 5280, inclusive). */
 bool SSFX509IsValid(const SSFX509Cert_t *cert, uint64_t nowUnixSec);
 
-/* OID comparison helpers. SSFX509IsECDSA is ecdsa-with-SHA256 only; see IsECDSASHA384. */
-bool SSFX509IsECDSA(const SSFX509Cert_t *cert);
-bool SSFX509IsRSA(const SSFX509Cert_t *cert);
-bool SSFX509IsP256(const SSFX509Cert_t *cert);
+/* OID comparison helpers. IsKey* test the subject public key (what the certificate certifies);  */
+/* IsSig* test the algorithm its issuer signed it with. They differ whenever a CA of one key type */
+/* issues a certificate for another (an Ed25519 server key under an ECDSA CA).                   */
+bool SSFX509IsKeyRSA(const SSFX509Cert_t *cert);       /* Public key algorithm rsaEncryption     */
+bool SSFX509IsKeyP256(const SSFX509Cert_t *cert);      /* EC public key on secp256r1             */
+bool SSFX509IsKeyP384(const SSFX509Cert_t *cert);      /* EC public key on secp384r1             */
+bool SSFX509IsKeyEd25519(const SSFX509Cert_t *cert);   /* Public key algorithm id-Ed25519        */
+bool SSFX509IsSigECDSASHA256(const SSFX509Cert_t *cert);    /* ecdsa-with-SHA256             */
+bool SSFX509IsSigECDSASHA384(const SSFX509Cert_t *cert);    /* ecdsa-with-SHA384             */
+bool SSFX509IsSigRSAPSSSHA256(const SSFX509Cert_t *cert);   /* RSASSA-PSS, params SHA-256    */
+bool SSFX509IsSigRSAPSSSHA384(const SSFX509Cert_t *cert);   /* RSASSA-PSS, params SHA-384    */
+bool SSFX509IsSigRSAPKCS1SHA256(const SSFX509Cert_t *cert); /* sha256WithRSAEncryption       */
+bool SSFX509IsSigRSAPKCS1SHA384(const SSFX509Cert_t *cert); /* sha384WithRSAEncryption       */
+bool SSFX509IsSigRSAPKCS1SHA512(const SSFX509Cert_t *cert); /* sha512WithRSAEncryption       */
+bool SSFX509IsSigEd25519(const SSFX509Cert_t *cert);        /* id-Ed25519                    */
 
 /* --------------------------------------------------------------------------------------------- */
 /* Certificate generation                                                                        */
@@ -273,18 +284,6 @@ bool SSFX509EncodeTBS(uint8_t *bufOpt, uint32_t bufOptSize, const SSFX509GenPara
 /* Encode a Certificate around a precomputed signature over the TBS; NULL bufOpt measures. */
 bool SSFX509EncodeCert(uint8_t *bufOpt, uint32_t bufOptSize, const SSFX509GenParams_t *params,
                        const uint8_t *signature, uint32_t signatureLen, uint32_t *lenOut);
-
-/* --------------------------------------------------------------------------------------------- */
-/* Additional OID comparison helpers                                                             */
-/* --------------------------------------------------------------------------------------------- */
-bool SSFX509IsP384(const SSFX509Cert_t *cert);
-bool SSFX509IsECDSASHA384(const SSFX509Cert_t *cert);
-bool SSFX509IsRSAPSSSHA256(const SSFX509Cert_t *cert);
-bool SSFX509IsRSAPSSSHA384(const SSFX509Cert_t *cert);
-bool SSFX509IsRSAPKCS1SHA256(const SSFX509Cert_t *cert);
-bool SSFX509IsRSAPKCS1SHA384(const SSFX509Cert_t *cert);
-bool SSFX509IsRSAPKCS1SHA512(const SSFX509Cert_t *cert);
-bool SSFX509IsEd25519(const SSFX509Cert_t *cert);
 
 /* --------------------------------------------------------------------------------------------- */
 /* Chain verification                                                                            */

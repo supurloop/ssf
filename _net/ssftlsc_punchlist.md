@@ -325,9 +325,18 @@ is rejected.
       P-384, Ed25519); `_SchemeMatchesKey()` requires the scheme to fit it (ECDSA schemes fix the
       curve). Unit test: 5 schemes x 5 key types, exactly 5 pairs match (20 mismatches were
       accepted before). Signature matrix against `s_server` still 15/15. Exhaustive run pending.
-- [ ] `SSFX509IsEd25519()` tests the certificate's signature algorithm, unlike its siblings
+- [x] `SSFX509IsEd25519()` tests the certificate's signature algorithm, unlike its siblings
       `SSFX509IsRSA/IsP256/IsP384`, which test the key; ssftlsc compares the Ed25519 key OID
-      itself. Naming trap in `ssfx509`, outside the TLS client.
+      itself. Naming trap in `ssfx509`, outside the TLS client. Fixed (3B item K, approved,
+      breaking): the helpers are renamed by what they test. Key: `SSFX509IsKeyRSA`,
+      `IsKeyP256`, `IsKeyP384` and new `IsKeyEd25519`. Signature algorithm:
+      `SSFX509IsSigECDSASHA256` (was `IsECDSA`, a second trap: SHA-256 only),
+      `IsSigECDSASHA384`, `IsSigRSAPSSSHA256/384`, `IsSigRSAPKCS1SHA256/384/512`,
+      `IsSigEd25519`. `ssfx509.h` groups and comments them; `ssfx509.md` table, listing and
+      prose updated. ssftlsc `_LeafKeyType()` uses `IsKeyEd25519` and drops its own OID
+      compare. Unit: an Ed25519 key under an ECDSA signature gives IsKeyEd25519 true,
+      IsSigEd25519 false; self-signed Ed25519 both true; Ed25519 signature over an EC key
+      IsKeyEd25519 false. Cortex-M4 -Os: ssftlsc -118 B, ssfx509 +40 B (the new function).
 - [x] P-384 HRR uses the wrong private key offset. Moot: 2.5 rejects an HRR for a group that
       already has a key share, so only P-256 can be selected by an HRR.
 - [x] RTC unavailable: distinct error rather than verifying at time 0. No trusted time (RTC

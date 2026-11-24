@@ -321,17 +321,18 @@ The unit-test entry point is gated by `SSF_CONFIG_X509_UNIT_TEST` in `ssfport.h`
 |---|----------|-------------|
 | [e.g.](#ex-parse) | [`bool SSFX509Parse(der, derLen, cert)`](#ssfx509parse) | Zero-copy parse of a DER certificate |
 | [e.g.](#ex-parse) | [`bool SSFX509IsValid(cert, nowUnixSec)`](#ssfx509isvalid) | `notBefore <= now <= notAfter` |
-| | [`bool SSFX509IsECDSA(cert)`](#ssfx509is-helpers) | Signature algorithm is `ecdsa-with-SHA256` |
-| | [`bool SSFX509IsECDSASHA384(cert)`](#ssfx509is-helpers) | Signature algorithm is `ecdsa-with-SHA384` |
-| | [`bool SSFX509IsRSA(cert)`](#ssfx509is-helpers) | Public key algorithm is `rsaEncryption` |
-| | [`bool SSFX509IsP256(cert)`](#ssfx509is-helpers) | EC public key curve is P-256 |
-| | [`bool SSFX509IsP384(cert)`](#ssfx509is-helpers) | EC public key curve is P-384 |
-| | [`bool SSFX509IsRSAPSSSHA256(cert)`](#ssfx509is-helpers) | Signature algorithm is `id-RSASSA-PSS` with SHA-256 parameters (see note) |
-| | [`bool SSFX509IsRSAPSSSHA384(cert)`](#ssfx509is-helpers) | Signature algorithm is `id-RSASSA-PSS` with SHA-384 parameters (see note) |
-| | [`bool SSFX509IsRSAPKCS1SHA256(cert)`](#ssfx509is-helpers) | Signature algorithm is `sha256WithRSAEncryption` |
-| | [`bool SSFX509IsRSAPKCS1SHA384(cert)`](#ssfx509is-helpers) | Signature algorithm is `sha384WithRSAEncryption` |
-| | [`bool SSFX509IsRSAPKCS1SHA512(cert)`](#ssfx509is-helpers) | Signature algorithm is `sha512WithRSAEncryption` |
-| | [`bool SSFX509IsEd25519(cert)`](#ssfx509is-helpers) | Signature algorithm is `id-Ed25519` |
+| | [`bool SSFX509IsKeyRSA(cert)`](#ssfx509is-helpers) | Public key algorithm is `rsaEncryption` |
+| | [`bool SSFX509IsKeyP256(cert)`](#ssfx509is-helpers) | EC public key curve is P-256 |
+| | [`bool SSFX509IsKeyP384(cert)`](#ssfx509is-helpers) | EC public key curve is P-384 |
+| | [`bool SSFX509IsKeyEd25519(cert)`](#ssfx509is-helpers) | Public key algorithm is `id-Ed25519` |
+| | [`bool SSFX509IsSigECDSASHA256(cert)`](#ssfx509is-helpers) | Signature algorithm is `ecdsa-with-SHA256` |
+| | [`bool SSFX509IsSigECDSASHA384(cert)`](#ssfx509is-helpers) | Signature algorithm is `ecdsa-with-SHA384` |
+| | [`bool SSFX509IsSigRSAPSSSHA256(cert)`](#ssfx509is-helpers) | Signature algorithm is `id-RSASSA-PSS` with SHA-256 parameters (see note) |
+| | [`bool SSFX509IsSigRSAPSSSHA384(cert)`](#ssfx509is-helpers) | Signature algorithm is `id-RSASSA-PSS` with SHA-384 parameters (see note) |
+| | [`bool SSFX509IsSigRSAPKCS1SHA256(cert)`](#ssfx509is-helpers) | Signature algorithm is `sha256WithRSAEncryption` |
+| | [`bool SSFX509IsSigRSAPKCS1SHA384(cert)`](#ssfx509is-helpers) | Signature algorithm is `sha384WithRSAEncryption` |
+| | [`bool SSFX509IsSigRSAPKCS1SHA512(cert)`](#ssfx509is-helpers) | Signature algorithm is `sha512WithRSAEncryption` |
+| | [`bool SSFX509IsSigEd25519(cert)`](#ssfx509is-helpers) | Signature algorithm is `id-Ed25519` |
 
 <a id="functions-gen"></a>
 
@@ -427,25 +428,32 @@ inclusive per RFC 5280 §4.1.2.5.
 ### [↑](#functions-parse) OID helpers [`SSFX509Is*()`](#functions-parse)
 
 ```c
-bool SSFX509IsECDSA(const SSFX509Cert_t *cert);           /* sigAlg == ecdsa-with-SHA256        */
-bool SSFX509IsECDSASHA384(const SSFX509Cert_t *cert);     /* sigAlg == ecdsa-with-SHA384        */
-bool SSFX509IsRSA(const SSFX509Cert_t *cert);             /* pubKeyAlg == rsaEncryption         */
-bool SSFX509IsP256(const SSFX509Cert_t *cert);            /* ecCurveOid == secp256r1            */
-bool SSFX509IsP384(const SSFX509Cert_t *cert);            /* ecCurveOid == secp384r1            */
-bool SSFX509IsRSAPSSSHA256(const SSFX509Cert_t *cert);    /* id-RSASSA-PSS, params name SHA-256 */
-bool SSFX509IsRSAPSSSHA384(const SSFX509Cert_t *cert);    /* id-RSASSA-PSS, params name SHA-384 */
-bool SSFX509IsRSAPKCS1SHA256(const SSFX509Cert_t *cert);  /* sigAlg == sha256WithRSAEncryption  */
-bool SSFX509IsRSAPKCS1SHA384(const SSFX509Cert_t *cert);  /* sigAlg == sha384WithRSAEncryption  */
-bool SSFX509IsRSAPKCS1SHA512(const SSFX509Cert_t *cert);  /* sigAlg == sha512WithRSAEncryption  */
-bool SSFX509IsEd25519(const SSFX509Cert_t *cert);         /* sigAlg == id-Ed25519               */
+/* Subject public key: what the certificate certifies */
+bool SSFX509IsKeyRSA(const SSFX509Cert_t *cert);             /* pubKeyAlg == rsaEncryption         */
+bool SSFX509IsKeyP256(const SSFX509Cert_t *cert);            /* ecCurveOid == secp256r1            */
+bool SSFX509IsKeyP384(const SSFX509Cert_t *cert);            /* ecCurveOid == secp384r1            */
+bool SSFX509IsKeyEd25519(const SSFX509Cert_t *cert);         /* pubKeyAlg == id-Ed25519            */
+
+/* Signature algorithm: how the issuer signed it */
+bool SSFX509IsSigECDSASHA256(const SSFX509Cert_t *cert);     /* sigAlg == ecdsa-with-SHA256        */
+bool SSFX509IsSigECDSASHA384(const SSFX509Cert_t *cert);     /* sigAlg == ecdsa-with-SHA384        */
+bool SSFX509IsSigRSAPSSSHA256(const SSFX509Cert_t *cert);    /* id-RSASSA-PSS, params name SHA-256 */
+bool SSFX509IsSigRSAPSSSHA384(const SSFX509Cert_t *cert);    /* id-RSASSA-PSS, params name SHA-384 */
+bool SSFX509IsSigRSAPKCS1SHA256(const SSFX509Cert_t *cert);  /* sigAlg == sha256WithRSAEncryption  */
+bool SSFX509IsSigRSAPKCS1SHA384(const SSFX509Cert_t *cert);  /* sigAlg == sha384WithRSAEncryption  */
+bool SSFX509IsSigRSAPKCS1SHA512(const SSFX509Cert_t *cert);  /* sigAlg == sha512WithRSAEncryption  */
+bool SSFX509IsSigEd25519(const SSFX509Cert_t *cert);         /* sigAlg == id-Ed25519               */
 ```
 
-Byte-compare one OID field of a parsed certificate against a well-known OID. `IsRSA` tests the
-public key algorithm; `IsP256` / `IsP384` test the EC curve parameter of the public key; all
-others test the TBS signature algorithm. `cert` must not be `NULL`.
+Byte-compare one OID field of a parsed certificate against a well-known OID. `IsKey*` test the
+subject public key (`IsKeyRSA` and `IsKeyEd25519` its algorithm, `IsKeyP256` / `IsKeyP384` its EC
+curve parameter); `IsSig*` test the TBS signature algorithm, the one the issuer signed with. The
+two differ whenever a CA of one key type issues a certificate for another, such as an Ed25519
+server key under an ECDSA CA: `IsKeyEd25519` true, `IsSigEd25519` false. `cert` must not be
+`NULL`.
 
 **Note:** for RSA-PSS the hash is not in the OID but in `sigAlgParams`.
-`SSFX509IsRSAPSSSHA256()` and `SSFX509IsRSAPSSSHA384()` return `true` only when the signature
+`SSFX509IsSigRSAPSSSHA256()` and `SSFX509IsSigRSAPSSSHA384()` return `true` only when the signature
 algorithm is `id-RSASSA-PSS` and its RSASSA-PSS-params parse with the same rules
 [`SSFX509VerifyCertSignature()`](#ssfx509verifycertsignature) uses and name that hash; absent,
 malformed or unsupported parameters return `false` from both. When RSA-PSS is compiled out

@@ -1183,7 +1183,7 @@ bool SSFX509IsValid(const SSFX509Cert_t *cert, uint64_t nowUnixSec)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if the signature algorithm is ecdsa-with-SHA256, else false.                     */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFX509IsECDSA(const SSFX509Cert_t *cert)
+bool SSFX509IsSigECDSASHA256(const SSFX509Cert_t *cert)
 {
     SSF_REQUIRE(cert != NULL);
     return _SSFX509OIDMatch(cert->sigAlgOidRaw, cert->sigAlgOidRawLen,
@@ -1193,7 +1193,7 @@ bool SSFX509IsECDSA(const SSFX509Cert_t *cert)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if the public key algorithm is rsaEncryption, else false.                        */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFX509IsRSA(const SSFX509Cert_t *cert)
+bool SSFX509IsKeyRSA(const SSFX509Cert_t *cert)
 {
     SSF_REQUIRE(cert != NULL);
     return _SSFX509OIDMatch(cert->pubKeyAlgOidRaw, cert->pubKeyAlgOidRawLen,
@@ -1203,7 +1203,7 @@ bool SSFX509IsRSA(const SSFX509Cert_t *cert)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if the EC public key is on P-256, else false.                                    */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFX509IsP256(const SSFX509Cert_t *cert)
+bool SSFX509IsKeyP256(const SSFX509Cert_t *cert)
 {
     SSF_REQUIRE(cert != NULL);
     return _SSFX509OIDMatch(cert->ecCurveOidRaw, cert->ecCurveOidRawLen,
@@ -2545,7 +2545,7 @@ bool SSFX509EncodeCert(uint8_t *bufOpt, uint32_t bufOptSize, const SSFX509GenPar
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if the EC public key is on P-384, else false.                                    */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFX509IsP384(const SSFX509Cert_t *cert)
+bool SSFX509IsKeyP384(const SSFX509Cert_t *cert)
 {
     SSF_REQUIRE(cert != NULL);
     return _SSFX509OIDMatch(cert->ecCurveOidRaw, cert->ecCurveOidRawLen,
@@ -2555,7 +2555,7 @@ bool SSFX509IsP384(const SSFX509Cert_t *cert)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if the signature algorithm is ecdsa-with-SHA384, else false.                     */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFX509IsECDSASHA384(const SSFX509Cert_t *cert)
+bool SSFX509IsSigECDSASHA384(const SSFX509Cert_t *cert)
 {
     SSF_REQUIRE(cert != NULL);
     return _SSFX509OIDMatch(cert->sigAlgOidRaw, cert->sigAlgOidRawLen,
@@ -2599,7 +2599,7 @@ static bool _SSFX509IsRSAPSSHash(const SSFX509Cert_t *cert, SSFRSAHash_t hash)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if the signature algorithm is RSA-PSS with SHA-256, else false.                  */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFX509IsRSAPSSSHA256(const SSFX509Cert_t *cert)
+bool SSFX509IsSigRSAPSSSHA256(const SSFX509Cert_t *cert)
 {
     SSF_REQUIRE(cert != NULL);
     return _SSFX509IsRSAPSSHash(cert, SSF_RSA_HASH_SHA256);
@@ -2608,7 +2608,7 @@ bool SSFX509IsRSAPSSSHA256(const SSFX509Cert_t *cert)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if the signature algorithm is RSA-PSS with SHA-384, else false.                  */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFX509IsRSAPSSSHA384(const SSFX509Cert_t *cert)
+bool SSFX509IsSigRSAPSSSHA384(const SSFX509Cert_t *cert)
 {
     SSF_REQUIRE(cert != NULL);
     return _SSFX509IsRSAPSSHash(cert, SSF_RSA_HASH_SHA384);
@@ -2617,7 +2617,7 @@ bool SSFX509IsRSAPSSSHA384(const SSFX509Cert_t *cert)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if the signature algorithm is sha256WithRSAEncryption, else false.               */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFX509IsRSAPKCS1SHA256(const SSFX509Cert_t *cert)
+bool SSFX509IsSigRSAPKCS1SHA256(const SSFX509Cert_t *cert)
 {
     SSF_REQUIRE(cert != NULL);
     return _SSFX509OIDMatch(cert->sigAlgOidRaw, cert->sigAlgOidRawLen,
@@ -2627,7 +2627,7 @@ bool SSFX509IsRSAPKCS1SHA256(const SSFX509Cert_t *cert)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if the signature algorithm is sha384WithRSAEncryption, else false.               */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFX509IsRSAPKCS1SHA384(const SSFX509Cert_t *cert)
+bool SSFX509IsSigRSAPKCS1SHA384(const SSFX509Cert_t *cert)
 {
     SSF_REQUIRE(cert != NULL);
     return _SSFX509OIDMatch(cert->sigAlgOidRaw, cert->sigAlgOidRawLen,
@@ -2637,7 +2637,7 @@ bool SSFX509IsRSAPKCS1SHA384(const SSFX509Cert_t *cert)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if the signature algorithm is sha512WithRSAEncryption, else false.               */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFX509IsRSAPKCS1SHA512(const SSFX509Cert_t *cert)
+bool SSFX509IsSigRSAPKCS1SHA512(const SSFX509Cert_t *cert)
 {
     SSF_REQUIRE(cert != NULL);
     return _SSFX509OIDMatch(cert->sigAlgOidRaw, cert->sigAlgOidRawLen,
@@ -2645,9 +2645,19 @@ bool SSFX509IsRSAPKCS1SHA512(const SSFX509Cert_t *cert)
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Returns true if the subject public key algorithm is id-Ed25519 (RFC 8410), else false.        */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFX509IsKeyEd25519(const SSFX509Cert_t *cert)
+{
+    SSF_REQUIRE(cert != NULL);
+    return _SSFX509OIDMatch(cert->pubKeyAlgOidRaw, cert->pubKeyAlgOidRawLen,
+                            _oidEd25519, sizeof(_oidEd25519));
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Returns true if the signature algorithm is id-Ed25519 (RFC 8410), else false.                 */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFX509IsEd25519(const SSFX509Cert_t *cert)
+bool SSFX509IsSigEd25519(const SSFX509Cert_t *cert)
 {
     SSF_REQUIRE(cert != NULL);
     return _SSFX509OIDMatch(cert->sigAlgOidRaw, cert->sigAlgOidRawLen,
@@ -3074,7 +3084,7 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
 
 #if SSF_EC_CONFIG_ENABLE_P256 == 1
         /* Is the key on P-256? */
-        if (SSFX509IsP256(keyCert))
+        if (SSFX509IsKeyP256(keyCert))
         {
             /* Yes, P-256 */
             curve = SSF_EC_CURVE_P256;
@@ -3083,7 +3093,7 @@ bool SSFX509VerifySignature(const SSFX509Cert_t *keyCert, const uint8_t *sigAlgO
 #endif
 #if SSF_EC_CONFIG_ENABLE_P384 == 1
         /* Is the key on P-384? */
-        if (SSFX509IsP384(keyCert))
+        if (SSFX509IsKeyP384(keyCert))
         {
             /* Yes, P-384 */
             curve = SSF_EC_CURVE_P384;

@@ -599,19 +599,14 @@ static bool _SchemeMatchesKey(uint16_t scheme, SSFTLSCLeafKey_t key)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: returns the key type of a parsed certificate. SSFX509IsEd25519() tests the         */
-/* certificate's signature algorithm, so the Ed25519 key OID (1.3.101.112) is compared here.    */
+/* Internal: returns the key type of a parsed certificate (its subject public key).              */
 /* --------------------------------------------------------------------------------------------- */
 static SSFTLSCLeafKey_t _LeafKeyType(const SSFX509Cert_t *cert)
 {
-    static const uint8_t oidEd25519[] = { 0x2Bu, 0x65u, 0x70u };
-
-    if (SSFX509IsRSA(cert)) return SSF_TLSC_LEAF_KEY_RSA;
-    if (SSFX509IsP256(cert)) return SSF_TLSC_LEAF_KEY_P256;
-    if (SSFX509IsP384(cert)) return SSF_TLSC_LEAF_KEY_P384;
-    if ((cert->pubKeyAlgOidRawLen == sizeof(oidEd25519)) &&
-        (memcmp(cert->pubKeyAlgOidRaw, oidEd25519, sizeof(oidEd25519)) == 0))
-    { return SSF_TLSC_LEAF_KEY_ED25519; }
+    if (SSFX509IsKeyRSA(cert)) return SSF_TLSC_LEAF_KEY_RSA;
+    if (SSFX509IsKeyP256(cert)) return SSF_TLSC_LEAF_KEY_P256;
+    if (SSFX509IsKeyP384(cert)) return SSF_TLSC_LEAF_KEY_P384;
+    if (SSFX509IsKeyEd25519(cert)) return SSF_TLSC_LEAF_KEY_ED25519;
     return SSF_TLSC_LEAF_KEY_UNKNOWN;
 }
 

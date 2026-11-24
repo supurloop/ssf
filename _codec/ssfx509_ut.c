@@ -909,8 +909,8 @@ void SSFX509UnitTest(void)
     SSF_ASSERT(cert.serialLen > 0);
 
     /* ---- Signature algorithm: ECDSA with SHA-256 ---- */
-    SSF_ASSERT(SSFX509IsECDSA(&cert) == true);
-    SSF_ASSERT(SSFX509IsRSA(&cert) == false);
+    SSF_ASSERT(SSFX509IsSigECDSASHA256(&cert) == true);
+    SSF_ASSERT(SSFX509IsKeyRSA(&cert) == false);
 
     /* ---- Subject DN ---- */
     SSF_ASSERT(cert.subject.cn != NULL);
@@ -943,9 +943,9 @@ void SSFX509UnitTest(void)
 
     /* ---- Public key: EC on the build's test curve ---- */
 #if SSF_EC_CONFIG_ENABLE_P256 == 1
-    SSF_ASSERT(SSFX509IsP256(&cert) == true);
+    SSF_ASSERT(SSFX509IsKeyP256(&cert) == true);
 #else
-    SSF_ASSERT(SSFX509IsP384(&cert) == true);
+    SSF_ASSERT(SSFX509IsKeyP384(&cert) == true);
 #endif /* SSF_EC_CONFIG_ENABLE_P256 */
     SSF_ASSERT(cert.pubKey != NULL);
     /* Uncompressed point: 04 || X || Y */
@@ -1089,12 +1089,12 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(parsed.notAfter == 1750000000ull);
 
         /* Public key */
-        SSF_ASSERT(SSFX509IsP256(&parsed) == true);
+        SSF_ASSERT(SSFX509IsKeyP256(&parsed) == true);
         SSF_ASSERT(parsed.pubKeyLen == 65u);
         SSF_ASSERT(memcmp(parsed.pubKey, fakePubKey, 65) == 0);
 
         /* Algorithm */
-        SSF_ASSERT(SSFX509IsECDSA(&parsed) == true);
+        SSF_ASSERT(SSFX509IsSigECDSASHA256(&parsed) == true);
 
         /* Extensions */
         SSF_ASSERT(parsed.hasBasicConstraints == true);
@@ -1370,29 +1370,29 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(SSFX509Parse(_utTestCertDER, sizeof(_utTestCertDER), &oc) == true);
 
         /* 4a. Positive: ECDSA cert on the build's test curve */
-        SSF_ASSERT(SSFX509IsECDSA(&oc) == true);
+        SSF_ASSERT(SSFX509IsSigECDSASHA256(&oc) == true);
 #if SSF_EC_CONFIG_ENABLE_P256 == 1
-        SSF_ASSERT(SSFX509IsP256(&oc) == true);
+        SSF_ASSERT(SSFX509IsKeyP256(&oc) == true);
 #else
-        SSF_ASSERT(SSFX509IsP384(&oc) == true);
+        SSF_ASSERT(SSFX509IsKeyP384(&oc) == true);
 #endif /* SSF_EC_CONFIG_ENABLE_P256 */
 
         /* 4b. Negative: not RSA, not the other curve */
-        SSF_ASSERT(SSFX509IsRSA(&oc) == false);
+        SSF_ASSERT(SSFX509IsKeyRSA(&oc) == false);
 #if SSF_EC_CONFIG_ENABLE_P256 == 1
-        SSF_ASSERT(SSFX509IsP384(&oc) == false);
+        SSF_ASSERT(SSFX509IsKeyP384(&oc) == false);
 #else
-        SSF_ASSERT(SSFX509IsP256(&oc) == false);
+        SSF_ASSERT(SSFX509IsKeyP256(&oc) == false);
 #endif /* SSF_EC_CONFIG_ENABLE_P256 */
 
         /* 4c. Negative: RSA-related OID helpers */
-        SSF_ASSERT(SSFX509IsRSAPKCS1SHA256(&oc) == false);
-        SSF_ASSERT(SSFX509IsRSAPKCS1SHA384(&oc) == false);
-        SSF_ASSERT(SSFX509IsRSAPSSSHA256(&oc) == false);
-        SSF_ASSERT(SSFX509IsRSAPSSSHA384(&oc) == false);
+        SSF_ASSERT(SSFX509IsSigRSAPKCS1SHA256(&oc) == false);
+        SSF_ASSERT(SSFX509IsSigRSAPKCS1SHA384(&oc) == false);
+        SSF_ASSERT(SSFX509IsSigRSAPSSSHA256(&oc) == false);
+        SSF_ASSERT(SSFX509IsSigRSAPSSSHA384(&oc) == false);
 
         /* 4d. Negative: not ECDSA-SHA384 */
-        SSF_ASSERT(SSFX509IsECDSASHA384(&oc) == false);
+        SSF_ASSERT(SSFX509IsSigECDSASHA384(&oc) == false);
     }
 
     /* ---- 5. Extension Parsing ---- */
@@ -2714,8 +2714,8 @@ void SSFX509UnitTest(void)
         certStub.sigAlgParams = pssParamsSHA256Salt32;
         certStub.sigAlgParamsLen = sizeof(pssParamsSHA256Salt32);
 
-        SSF_ASSERT(SSFX509IsRSAPSSSHA256(&certStub) == true);
-        SSF_ASSERT(SSFX509IsRSAPSSSHA384(&certStub) == false);
+        SSF_ASSERT(SSFX509IsSigRSAPSSSHA256(&certStub) == true);
+        SSF_ASSERT(SSFX509IsSigRSAPSSSHA384(&certStub) == false);
         SSF_ASSERT(SSFX509VerifyCertSignature(&certStub, &issuerStub) == true);
 
         /* ---- RSA-PSS-SHA384: verify succeeds when PSS parameters name SHA-384 ---- */
@@ -2742,8 +2742,8 @@ void SSFX509UnitTest(void)
             certStub.sigAlgParamsLen = sizeof(pssParamsSHA384);
 
             /* The helpers check the hash named by the PSS parameters, not just the OID */
-            SSF_ASSERT(SSFX509IsRSAPSSSHA256(&certStub) == false);
-            SSF_ASSERT(SSFX509IsRSAPSSSHA384(&certStub) == true);
+            SSF_ASSERT(SSFX509IsSigRSAPSSSHA256(&certStub) == false);
+            SSF_ASSERT(SSFX509IsSigRSAPSSSHA384(&certStub) == true);
             SSF_ASSERT(SSFX509VerifyCertSignature(&certStub, &issuerStub) == true);
         }
 
@@ -2753,8 +2753,8 @@ void SSFX509UnitTest(void)
             certStub.signatureLen = (uint32_t)sig256Len;
             certStub.sigAlgParams = NULL;
             certStub.sigAlgParamsLen = 0;
-            SSF_ASSERT(SSFX509IsRSAPSSSHA256(&certStub) == false);
-            SSF_ASSERT(SSFX509IsRSAPSSSHA384(&certStub) == false);
+            SSF_ASSERT(SSFX509IsSigRSAPSSSHA256(&certStub) == false);
+            SSF_ASSERT(SSFX509IsSigRSAPSSSHA384(&certStub) == false);
             SSF_ASSERT(SSFX509VerifyCertSignature(&certStub, &issuerStub) == false);
         }
 
@@ -2989,9 +2989,9 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(certDerLen > 0u);
 
         SSF_ASSERT(SSFX509Parse(certDer, certDerLen, &parsed) == true);
-        SSF_ASSERT(SSFX509IsRSAPKCS1SHA512(&parsed) == true);
-        SSF_ASSERT(SSFX509IsRSAPKCS1SHA256(&parsed) == false);
-        SSF_ASSERT(SSFX509IsRSAPKCS1SHA384(&parsed) == false);
+        SSF_ASSERT(SSFX509IsSigRSAPKCS1SHA512(&parsed) == true);
+        SSF_ASSERT(SSFX509IsSigRSAPKCS1SHA256(&parsed) == false);
+        SSF_ASSERT(SSFX509IsSigRSAPKCS1SHA384(&parsed) == false);
         SSF_ASSERT(SSFX509VerifyCertSignature(&parsed, &parsed) == true);
     }
 #endif /* _UT_RSA_PKCS1_SIGN == 1 */
@@ -3514,12 +3514,40 @@ void SSFX509UnitTest(void)
 
         /* Parse back and verify algorithm identification */
         SSF_ASSERT(SSFX509Parse(edCertDer, edCertDerLen, &edParsed) == true);
-        SSF_ASSERT(SSFX509IsEd25519(&edParsed) == true);
-        SSF_ASSERT(SSFX509IsECDSA(&edParsed) == false);
-        SSF_ASSERT(SSFX509IsRSA(&edParsed) == false);
+        SSF_ASSERT(SSFX509IsSigEd25519(&edParsed) == true);
+        SSF_ASSERT(SSFX509IsSigECDSASHA256(&edParsed) == false);
+        SSF_ASSERT(SSFX509IsKeyRSA(&edParsed) == false);
         SSF_ASSERT(edParsed.pubKeyLen == SSF_ED25519_PUB_KEY_SIZE);
         SSF_ASSERT(edParsed.signatureLen == SSF_ED25519_SIG_SIZE);
         SSF_ASSERT(edParsed.ecCurveOidRaw == NULL);
+
+        /* Key and signature are separate questions: IsKey* test the subject public key, IsSig*  */
+        /* the algorithm the issuer signed with. Self-signed Ed25519: both Ed25519.              */
+        SSF_ASSERT(SSFX509IsKeyEd25519(&edParsed) == true);
+        SSF_ASSERT(SSFX509IsSigEd25519(&edParsed) == true);
+        SSF_ASSERT(SSFX509IsKeyP256(&edParsed) == false);
+        SSF_ASSERT(SSFX509IsSigECDSASHA256(&edParsed) == false);
+        SSF_ASSERT_TEST(SSFX509IsKeyEd25519(NULL));
+
+        /* An Ed25519 key issued by an ECDSA CA (the common server case): the key is Ed25519,  */
+        /* the signature is not. Parsing does not check the signature, so a placeholder serves. */
+        {
+            static uint8_t mixedDer[1024];
+            static SSFX509Cert_t mixed;
+            uint32_t mixedLen = 0;
+
+            ep.sigAlgOidRaw = _utSigAlgOid;
+            ep.sigAlgOidRawLen = sizeof(_utSigAlgOid);
+            (void)SSFX509EncodeCert(mixedDer, sizeof(mixedDer), &ep, edSig, SSF_ED25519_SIG_SIZE,
+                                    &mixedLen);
+            ep.sigAlgOidRaw = edOid;
+            ep.sigAlgOidRawLen = sizeof(edOid);
+            SSF_ASSERT(mixedLen > 0u);
+            SSF_ASSERT(SSFX509Parse(mixedDer, mixedLen, &mixed) == true);
+            SSF_ASSERT(SSFX509IsKeyEd25519(&mixed) == true);
+            SSF_ASSERT(SSFX509IsSigEd25519(&mixed) == false);
+            SSF_ASSERT(SSFX509IsSigECDSASHA256(&mixed) == true);
+        }
 
         /* Verify signature using our Ed25519 module directly against the parsed TBS */
         SSF_ASSERT(SSFEd25519Verify(edParsed.pubKey, edParsed.tbsRaw, edParsed.tbsRawLen,
@@ -4606,8 +4634,8 @@ void SSFX509UnitTest(void)
 
         SSF_ASSERT(SSFX509Parse(sslcomRootEccDer, sizeof(sslcomRootEccDer), &rootCert) == true);
         /* Confirm the cross-curve pairing: ecdsa-with-SHA256 sigAlg, P-384 key */
-        SSF_ASSERT(SSFX509IsECDSA(&rootCert) == true);
-        SSF_ASSERT(SSFX509IsP384(&rootCert) == true);
+        SSF_ASSERT(SSFX509IsSigECDSASHA256(&rootCert) == true);
+        SSF_ASSERT(SSFX509IsKeyP384(&rootCert) == true);
 
         /* Self-signed root: the curve comes from cert.ecCurveOidRaw (P-384), not the sigAlg OID */
 #if SSF_EC_CONFIG_ENABLE_P384 == 1
@@ -4682,7 +4710,7 @@ void SSFX509UnitTest(void)
         p.sigAlgOidRaw = rsaSha256Oid;
         p.sigAlgOidRawLen = sizeof(rsaSha256Oid);
         _utGenCheckConsistent(&p, fakeSig, 512u, out, sizeof(out), &parsed);
-        SSF_ASSERT(SSFX509IsRSA(&parsed) == true);
+        SSF_ASSERT(SSFX509IsKeyRSA(&parsed) == true);
 
         /* Every DN attribute at its RFC 5280 Appendix A upper bound */
         _utGenBaseParams(&p, serial, bigKey, 65u);
@@ -5160,7 +5188,7 @@ void SSFX509UnitTest(void)
         uint32_t chainLen[1];
 
         SSF_ASSERT(SSFX509Parse(pss20Der, sizeof(pss20Der), &pss) == true);
-        SSF_ASSERT(SSFX509IsRSAPSSSHA256(&pss) == true);
+        SSF_ASSERT(SSFX509IsSigRSAPSSSHA256(&pss) == true);
         /* With RSA-PSS compiled out the signature fails closed */
         SSF_ASSERT(SSFX509VerifyCertSignature(&pss, &pss) == (_UT_RSA_PSS_VERIFY == 1u));
         chain[0] = pss20Der;
@@ -6273,17 +6301,17 @@ void SSFX509UnitTest(void)
         SSF_ASSERT_TEST(SSFX509Parse(NULL, sizeof(_utTestCertDER), &c));
         SSF_ASSERT_TEST(SSFX509Parse(_utTestCertDER, sizeof(_utTestCertDER), NULL));
         SSF_ASSERT_TEST(SSFX509IsValid(NULL, now));
-        SSF_ASSERT_TEST(SSFX509IsECDSA(NULL));
-        SSF_ASSERT_TEST(SSFX509IsECDSASHA384(NULL));
-        SSF_ASSERT_TEST(SSFX509IsRSA(NULL));
-        SSF_ASSERT_TEST(SSFX509IsP256(NULL));
-        SSF_ASSERT_TEST(SSFX509IsP384(NULL));
-        SSF_ASSERT_TEST(SSFX509IsRSAPSSSHA256(NULL));
-        SSF_ASSERT_TEST(SSFX509IsRSAPSSSHA384(NULL));
-        SSF_ASSERT_TEST(SSFX509IsRSAPKCS1SHA256(NULL));
-        SSF_ASSERT_TEST(SSFX509IsRSAPKCS1SHA384(NULL));
-        SSF_ASSERT_TEST(SSFX509IsRSAPKCS1SHA512(NULL));
-        SSF_ASSERT_TEST(SSFX509IsEd25519(NULL));
+        SSF_ASSERT_TEST(SSFX509IsSigECDSASHA256(NULL));
+        SSF_ASSERT_TEST(SSFX509IsSigECDSASHA384(NULL));
+        SSF_ASSERT_TEST(SSFX509IsKeyRSA(NULL));
+        SSF_ASSERT_TEST(SSFX509IsKeyP256(NULL));
+        SSF_ASSERT_TEST(SSFX509IsKeyP384(NULL));
+        SSF_ASSERT_TEST(SSFX509IsSigRSAPSSSHA256(NULL));
+        SSF_ASSERT_TEST(SSFX509IsSigRSAPSSSHA384(NULL));
+        SSF_ASSERT_TEST(SSFX509IsSigRSAPKCS1SHA256(NULL));
+        SSF_ASSERT_TEST(SSFX509IsSigRSAPKCS1SHA384(NULL));
+        SSF_ASSERT_TEST(SSFX509IsSigRSAPKCS1SHA512(NULL));
+        SSF_ASSERT_TEST(SSFX509IsSigEd25519(NULL));
 
         /* Verification helpers */
         SSF_ASSERT_TEST(SSFX509VerifyCertSignature(NULL, &c));
@@ -7318,12 +7346,13 @@ void SSFX509UnitTest(void)
         n = _utSelfSign(&p, pubKey, sizeof(pubKey), out, sizeof(out));
         SSF_ASSERT(n != 0u);
         SSF_ASSERT(SSFX509Parse(out, n, &parsed) == true);
-        SSF_ASSERT((SSFX509IsECDSA(&parsed) == false) && (SSFX509IsECDSASHA384(&parsed) == false));
-        SSF_ASSERT((SSFX509IsRSAPKCS1SHA256(&parsed) == false) &&
-                   (SSFX509IsRSAPKCS1SHA384(&parsed) == false));
-        SSF_ASSERT((SSFX509IsRSAPKCS1SHA512(&parsed) == false) &&
-                   (SSFX509IsRSAPSSSHA256(&parsed) == false));
-        SSF_ASSERT(SSFX509IsEd25519(&parsed) == false);
+        SSF_ASSERT((SSFX509IsSigECDSASHA256(&parsed) == false) &&
+                   (SSFX509IsSigECDSASHA384(&parsed) == false));
+        SSF_ASSERT((SSFX509IsSigRSAPKCS1SHA256(&parsed) == false) &&
+                   (SSFX509IsSigRSAPKCS1SHA384(&parsed) == false));
+        SSF_ASSERT((SSFX509IsSigRSAPKCS1SHA512(&parsed) == false) &&
+                   (SSFX509IsSigRSAPSSSHA256(&parsed) == false));
+        SSF_ASSERT(SSFX509IsSigEd25519(&parsed) == false);
         SSF_ASSERT(SSFX509VerifyCertSignature(&parsed, &parsed) == false);
         chain[0] = out;
         chainLen[0] = n;
@@ -7434,7 +7463,7 @@ void SSFX509UnitTest(void)
 
         /* Baseline: a correct PSS cert verifies against itself */
         _PSS_CERT(pssSalt32);
-        SSF_ASSERT(SSFX509IsRSA(&rsaCert) == true);
+        SSF_ASSERT(SSFX509IsKeyRSA(&rsaCert) == true);
         SSF_ASSERT(SSFX509VerifyCertSignature(&rsaCert, &rsaCert) == true);
 
         /* AUDIT X509-2: an issuer whose RSA key BIT STRING is empty fails, never traps */
@@ -7690,7 +7719,8 @@ void SSFX509UnitTest(void)
         (void)SSFX509EncodeCert(out, sizeof(out), &p, fakeSig, sizeof(fakeSig), &n);
         SSF_ASSERT(n != 0u);
         SSF_ASSERT(SSFX509Parse(out, n, &parsed) == true);
-        SSF_ASSERT(SSFX509IsEd25519(&parsed) == true);
+        SSF_ASSERT(SSFX509IsSigEd25519(&parsed) == true);
+        SSF_ASSERT(SSFX509IsKeyEd25519(&parsed) == false);       /* Signed Ed25519, EC key */
         SSF_ASSERT(parsed.pubKeyLen == 65u);
         SSF_ASSERT(SSFX509VerifyCertSignature(&parsed, &parsed) == false);
         _utGenBaseParams(&p, serial, fakeKey32, 32u);

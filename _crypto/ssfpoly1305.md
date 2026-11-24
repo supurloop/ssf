@@ -46,11 +46,16 @@ construction that supplies its own per-message one-time key.
   left untouched.
 - The message may be any length. `msg` may be `NULL` when `msgLen` is `0`; the tag over an
   empty message is `s` itself.
-- The implementation uses 32-bit "Donna" limb arithmetic (5 × 26-bit limbs for the 130-bit
-  accumulator) and is not constant-time. For pure MAC computation over attacker-visible
-  messages this is acceptable — the secret (`r`, `s`) is mixed only into the final output —
-  but do not use this module in constructions where the attacker can observe timing of the
-  MAC computation on secret message bytes.
+- **Constant-time apart from the multiplier.** The implementation uses 32-bit "Donna" limb
+  arithmetic (5 × 26-bit limbs for the 130-bit accumulator). Control flow depends only on the
+  message length, the final reduction modulo 2^130 − 5 is selected with masks rather than a
+  branch, and there are no table lookups, so timing does not depend on the key (`r`, `s`) or
+  the message bytes, provided each 32 × 32 → 64-bit multiply takes the same time for every
+  operand. That holds on Cortex-M4 / M7 (`UMULL` / `UMLAL`) and on common 64-bit hosts. It does
+  not hold on cores whose long multiply finishes early for small operands, such as the
+  Cortex-M3, where the per-block multiply by `r` can leak timing. Cores without a long multiply
+  (Cortex-M0 / M0+) call the compiler runtime's 64-bit multiply (`__aeabi_lmul`), whose timing
+  depends on the toolchain library. `SSFPoly1305Verify()` compares tags in constant time.
 - **Zero the context before the first `Begin`.** `SSFPoly1305Context_t` carries a magic-number
   validity marker that must be zero on entry to [`SSFPoly1305Begin()`](#ssfpoly1305begin) — use
   `SSFPoly1305Context_t ctx = {0};` (or equivalent) at declaration. `SSFPoly1305End()` wipes

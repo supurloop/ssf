@@ -211,9 +211,16 @@ is rejected.
         `_BuildClientHello`). Unit test checks the ClientHello order; a default `s_server` now
         negotiates ChaCha20 (was AES-256-GCM); servers forcing a suite, and `-serverpref`, still
         get theirs. Exhaustive run pending.
-      - [ ] `ssftls.md` says ChaCha20-Poly1305 is "the CPU-constant-time option", but
+      - [x] `ssftls.md` says ChaCha20-Poly1305 is "the CPU-constant-time option", but
         `ssfpoly1305` is not constant-time (its use in TLS, a MAC over public ciphertext with a
-        per-record key, is what its docs call acceptable). Outside the TLS client; needs approval.
+        per-record key, is what its docs call acceptable). Outside the TLS client; needs approval. Fixed (3B item M, approved):
+        reading `ssfpoly1305.c` (MulR, block, Update, End, Verify) and its Cortex-M4 / M0 -Os
+        code shows no secret-dependent branches (End's six branches are five SSF_REQUIRE asserts
+        and the public partial-length test; the final reduction is masked) and no tables: it is
+        constant-time given a constant-latency 32x32->64 multiply (UMULL/UMLAL on M4; not the
+        early-terminating Cortex-M3; M0 calls __aeabi_lmul). `ssfpoly1305.md` said "not
+        constant-time" with reasoning that did not match the code (r is used in every block);
+        both docs now state the multiplier condition.
 - [x] CertificateVerify used the transcript hash length, not the signature scheme's, when
       passing the signed-content hash to the verifier: ECDSA P-384 and RSA-PSS-SHA384 signatures
       failed under every SHA-256 suite (ChaCha20, AES-128-GCM). Exposed by the ChaCha20-first

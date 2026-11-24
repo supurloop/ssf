@@ -80,7 +80,11 @@ already call `SSFHKDFExpand`; only the Finished computation calls HMAC directly.
   `TLS_AES_128_GCM_SHA256` is the RFC 8446 MTI (mandatory-to-implement). The two CCM
   suites are the IoT-oriented options (fewer transistors / less firmware on
   resource-constrained devices that already have an AES-CCM engine for 802.15.4).
-  ChaCha20-Poly1305 is the CPU-constant-time option.
+  ChaCha20-Poly1305 is the timing-hardened option: `ssfchacha20` uses only add, XOR and
+  rotate, and `ssfpoly1305` has no secret-dependent branches or tables, so it is constant-time
+  on cores with a constant-latency 32 × 32 → 64-bit multiply (not the early-terminating
+  Cortex-M3; see [`ssfpoly1305`](ssfpoly1305.md)). AES-GCM and AES-CCM inherit `ssfaes`'s S-box
+  table lookups, which are not timing-hardened.
 - **Hash pairing to cipher suite is baked in.** All SHA256 suites run the key schedule
   and transcript hash over SHA-256; the SHA384 suite runs them over SHA-384. Callers
   select `SSF_HMAC_HASH_SHA256` or `SSF_HMAC_HASH_SHA384` based on the cipher suite and

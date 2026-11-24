@@ -42,6 +42,7 @@ extern "C" {
 #include "ssftls.h"
 #include "ssfnet.h"
 #include "ssfx509.h"
+#include "ssfpkey.h"
 
 /* --------------------------------------------------------------------------------------------- */
 /* Design                                                                                        */
@@ -69,13 +70,22 @@ extern "C" {
 /*   of parsed certificates in SSFX509VerifyChainPurpose over an RSA signature check. Largest   */
 /*   enabled RSA size 3072: 16.3 KB; 2048: 14.9 KB (an ECDSA check is then the deepest). Not    */
 /*   included: the inner transport's functions, the trace callback, libc and the port layer.    */
-/*   Key exchange and the other steps need less. Each chain entry adds about 1.1 KB.            */
+/*   Key exchange and the other steps need less. Each chain entry adds about 1.1 KB. With an    */
+/*   RSA client key the client CertificateVerify signature sets the peak instead: about 28.3 KB */
+/*   at the default RSA-4096 cap (RSA-PSS signing); P-256 / P-384 / Ed25519 signing stays       */
+/*   below 18.9 KB.                                                                             */
 /* - Client mode, full handshake only (no PSK resumption or 0-RTT). One connection per session.  */
-/* - No client certificate. A server CertificateRequest is checked and answered with an empty   */
-/*   Certificate before the client Finished (RFC 8446 4.4.2): a server that only asks carries  */
-/*   on. One that requires a certificate sends certificate_required after the client Finished, */
-/*   so pollOpen() has already reported success; the first recv() then fails and the trace     */
-/*   says the server requires a client certificate.                                            */
+/* - Client certificate (mutual TLS) is optional: SSFTLSCSetClientCert() with a chain and its   */
+/*   ssfpkey key. When a server sends a CertificateRequest, the client signs with the first    */
+/*   scheme in the server's signature_algorithms its key can make (P-256 / P-384 ECDSA,        */
+/*   Ed25519, RSA-PSS rsae SHA-256 / SHA-384) and sends Certificate, CertificateVerify and     */
+/*   Finished; the Certificate is streamed from the caller's memory record by record, so any   */
+/*   chain fits any record size. The signature is a fourth inline crypto step (SIGN_CV). With  */
+/*   no certificate set, or no scheme the server accepts, the client answers with an empty    */
+/*   Certificate (RFC 8446 4.4.2): a server that only asks carries on. One that requires a     */
+/*   certificate sends certificate_required (or rejects the chain) after the client Finished, */
+/*   so pollOpen() has already reported success; the first recv() fails, and for              */
+/*   certificate_required the trace says the server requires a client certificate.            */
 /* - IPv4 only (ssfnet.h): open() refuses an IPv6 literal host whatever the inner transport.     */
 /* - Chain limit: SSF_X509_CONFIG_MAX_CHAIN_DEPTH, the verifier's own. Certificates a server     */
 /*   sends past it are dropped; if verification then fails, the trace says the chain was cut.   */
@@ -110,7 +120,10 @@ typedef enum
     SSF_TLSC_HS_VERIFY_CHAIN,        /* Crypto step: certificate chain verification             */
     SSF_TLSC_HS_RECV_CV,
     SSF_TLSC_HS_VERIFY_SIG,          /* Crypto step: CertificateVerify signature                */
-    SSF_TLSC_HS_RECV_FIN_SEND_FIN,
+    SSF_TLSC_HS_RECV_FIN_SEND_FIN,   /* Without client authentication, also sends the Finished  */
+    SSF_TLSC_HS_SEND_CLIENT_CERT,    /* Client authentication: the Certificate, record by record */
+    SSF_TLSC_HS_SIGN_CV,             /* Crypto step: the client CertificateVerify signature      */
+    SSF_TLSC_HS_SEND_CV_FIN,         /* Client authentication: CertificateVerify + Finished      */
     SSF_TLSC_HS_COMPLETE,
     SSF_TLSC_HS_ERROR,
 } SSFTLSCHandshakeState_t;
@@ -225,6 +238,13 @@ typedef struct SSFTLSCSession
     SSFTLSCTrustStore_t trust;
     bool allowUnauthenticated;       /* Opt-in: connect with no trust anchors (test use only)  */
 
+    /* Client certificate (SSFTLSCSetClientCert): pointers into the caller's memory, kept       */
+    /* across connections. clientChainCount 0 = none.                                           */
+    const uint8_t *const *clientChainDer;
+    const uint32_t *clientChainLens;
+    const SSFPKey_t *clientKey;
+    uint8_t clientChainCount;
+
     /* Ephemeral key (stored separately from recvBuf to avoid corruption) */
     uint8_t ephemeralPrivKey[48];
 
@@ -241,9 +261,12 @@ typedef struct SSFTLSCSession
     /* server accepts, 64..2^14+1; 0 when not negotiated.                                        */
     uint16_t peerRecordLimit;
 
-    /* The server sent a CertificateRequest: the client answers with an empty Certificate       */
-    /* (RFC 8446 4.4.2) before its Finished.                                                   */
+    /* The server sent a CertificateRequest. clientScheme is the signature scheme chosen for the */
+    /* client CertificateVerify, or 0: no certificate configured or none the server accepts, so */
+    /* the client answers with an empty Certificate (RFC 8446 4.4.2) before its Finished.      */
     bool certRequested;
+    uint16_t clientScheme;
+    uint32_t certSendOff;            /* Bytes of the client flight message sent so far          */
 
     /* Saved ClientHello for transcript re-init when server selects SHA-384 suite */
     uint8_t clientHelloMsg[768];
@@ -303,6 +326,24 @@ void SSFTLSCSetUnauthenticated(SSFTLSCSession_t *session, bool allow);
     } while (0)
 #endif
 
+/* Sets the client certificate presented when a server asks for one (mutual TLS): chainDer[0]  */
+/* is the end-entity certificate, then any intermediates, each chainLens[i] bytes of DER; key  */
+/* is its private key (ssfpkey). Nothing is copied: the arrays, certificates and key must stay */
+/* valid while the session can connect. Returns false, leaving no certificate set, if the chain */
+/* is malformed, the leaf does not parse, or its public key is not key's. Pass NULL, NULL, 0,   */
+/* NULL to clear. Call while the session is not open.                                          */
+/* key must come from SSFPKeyDecodeDER() / SSFPKeyDecodePEM(), which validate it and fill every */
+/* field consistently. Only the type and public key are compared here; a hand-built SSFPKey_t   */
+/* whose other fields disagree (e.g. a scalar length that is not the curve's) is a programming  */
+/* error and asserts when the CertificateVerify is signed.                                      */
+/* When a server asks for a certificate, the chain is sent only if every certificate in it is   */
+/* signed with a scheme the server lists (signature_algorithms_cert, else signature_algorithms; */
+/* RFC 8446 4.4.2.3), a self-signed last certificate excepted; otherwise an empty Certificate. */
+/* A leaf the server is likely to refuse (expired, Key Usage without digitalSignature, EKU     */
+/* without clientAuth) is traced as a warning and still sent: the server decides.              */
+bool SSFTLSCSetClientCert(SSFTLSCSession_t *session, const uint8_t *const *chainDer,
+                          const uint32_t *chainLens, uint8_t chainCount, const SSFPKey_t *key);
+
 /* Sets an optional per-connection trace callback. NULL traceFn disables tracing.               */
 void SSFTLSCSetTrace(SSFTLSCSession_t *session, SSFTLSTraceFn_t traceFn, void *traceCtx);
 
@@ -333,6 +374,17 @@ bool _SSFTLSCParseCertificateVerifyForTest(const uint8_t *body, size_t bodyLen,
                                            uint16_t *schemeOut, uint16_t *sigLenOut);
 bool _SSFTLSCParseCertificateRequestForTest(const uint8_t *body, size_t bodyLen,
                                             uint8_t *alertOut);
+bool _SSFTLSCChooseClientSchemeForTest(const uint8_t *body, size_t bodyLen, SSFPKeyType_t keyType,
+                                       uint16_t *schemeOut, uint8_t *alertOut);
+bool _SSFTLSCChooseClientSchemeChainForTest(SSFTLSCSession_t *session, const uint8_t *body,
+                                            size_t bodyLen, bool nowValid, uint64_t nowUnixSec,
+                                            uint16_t *schemeOut, uint8_t *alertOut);
+size_t _SSFTLSCClientCertMsgLenForTest(const SSFTLSCSession_t *session);
+void _SSFTLSCClientCertMsgCopyForTest(const SSFTLSCSession_t *session, size_t off, uint8_t *dst,
+                                      size_t n);
+bool _SSFTLSCSignClientCVForTest(SSFTLSCSession_t *session, uint16_t scheme,
+                                 const uint8_t *transcriptHash, size_t hashLen, uint8_t *msgOut,
+                                 size_t msgSize, size_t *msgLenOut);
 #endif /* SSF_CONFIG_TLSC_UNIT_TEST */
 
 #ifdef __cplusplus

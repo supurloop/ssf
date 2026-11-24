@@ -445,6 +445,9 @@
     <ClInclude Include="_net\ssftlsc.h">
       <Filter>_net</Filter>
     </ClInclude>
+    <ClInclude Include="_net\ssftlsc_ut_client.h">
+      <Filter>_net</Filter>
+    </ClInclude>
     <ClInclude Include="_opt\ssfasn1_opt.h">
       <Filter>_opt</Filter>
     </ClInclude>

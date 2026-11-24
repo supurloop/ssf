@@ -65,6 +65,12 @@
 #include "ssfnet.h"
 #include "ssfnetsock.h"
 #include "ssftlsc.h"
+#include "ssfpkey.h"
+#include "ssfecdsa.h"
+#include "ssfed25519.h"
+#include "ssfrsa.h"
+#include "ssfsha2.h"
+#include "ssftlsc_ut_client.h"
 
 #if SSF_CONFIG_TLSC_UNIT_TEST == 1
 
@@ -1299,6 +1305,431 @@ static void _SSFTLSCUTSaveLeafKey(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Client certificate (mutual TLS, RFC 8446 4.4.2 / 4.4.3): setting it, choosing the signature  */
+/* scheme from a CertificateRequest, the streamed Certificate message and the CertificateVerify  */
+/* signature. The handshake itself is exercised against real servers (wire tests).             */
+/* --------------------------------------------------------------------------------------------- */
+
+/* Finds needle in hay; returns its offset or SIZE_MAX. */
+static size_t _SSFTLSCUTFind(const uint8_t *hay, size_t hayLen, const uint8_t *needle, size_t n)
+{
+    size_t i;
+    for (i = 0; (i + n) <= hayLen; i++) { if (memcmp(&hay[i], needle, n) == 0) return i; }
+    return (size_t)-1;
+}
+
+/* Sets a one-certificate chain. */
+static bool _SSFTLSCUTSetOne(SSFTLSCSession_t *s, const uint8_t *cert, size_t certLen,
+                             const SSFPKey_t *key)
+{
+    static const uint8_t *chain[1];
+    static uint32_t lens[1];
+    chain[0] = cert;
+    lens[0] = (uint32_t)certLen;
+    return SSFTLSCSetClientCert(s, chain, lens, 1u, key);
+}
+
+/* Checks a CertificateVerify message signed by key over the client context and hash. */
+static void _SSFTLSCUTCheckClientCV(const uint8_t *msg, size_t msgLen, uint16_t scheme,
+                                    const uint8_t *th, size_t thLen, const uint8_t *leaf,
+                                    size_t leafLen, const SSFPKey_t *key)
+{
+    uint8_t content[64 + 34 + 48];
+    uint8_t h[48];
+    size_t contentLen = 64u + 34u + thLen;
+    const uint8_t *sig;
+    size_t sigLen;
+    int pass;
+
+    SSF_ASSERT(msgLen >= 8u);
+    SSF_ASSERT((msg[0] == 15u) && ((((size_t)msg[1] << 16) | ((size_t)msg[2] << 8) | msg[3]) ==
+                                   (msgLen - 4u)));
+    SSF_ASSERT((((uint16_t)msg[4] << 8) | msg[5]) == scheme);
+    sigLen = ((size_t)msg[6] << 8) | msg[7];
+    SSF_ASSERT((8u + sigLen) == msgLen);
+    sig = &msg[8];
+
+    /* The signature verifies over the client context string, and not over the server one */
+    for (pass = 0; pass < 2; pass++)
+    {
+        bool ok;
+        memset(content, 0x20, 64);
+        memcpy(&content[64], (pass == 0) ? "TLS 1.3, client CertificateVerify" :
+                                           "TLS 1.3, server CertificateVerify", 33);
+        content[97] = 0;
+        memcpy(&content[98], th, thLen);
+        if (scheme == SSF_TLS_SIG_ED25519)
+        {
+            ok = (sigLen == SSF_ED25519_SIG_SIZE) &&
+                 SSFEd25519Verify(key->pub, content, contentLen, sig);
+        }
+        else if ((scheme == SSF_TLS_SIG_ECDSA_SECP256R1_SHA256) ||
+                 (scheme == SSF_TLS_SIG_ECDSA_SECP384R1_SHA384))
+        {
+            bool p256 = (scheme == SSF_TLS_SIG_ECDSA_SECP256R1_SHA256);
+            if (p256) SSFSHA256(content, contentLen, h, sizeof(h));
+            else SSFSHA384(content, contentLen, h, sizeof(h));
+            ok = SSFECDSAVerify(p256 ? SSF_EC_CURVE_P256 : SSF_EC_CURVE_P384, key->pub,
+                                key->pubLen, h, p256 ? 32u : 48u, sig, sigLen);
+        }
+        else
+        {
+            static SSFX509Cert_t c;
+            bool s256 = (scheme == SSF_TLS_SIG_RSA_PSS_RSAE_SHA256);
+            SSF_ASSERT(SSFX509Parse(leaf, (uint32_t)leafLen, &c));
+            if (s256) SSFSHA256(content, contentLen, h, sizeof(h));
+            else SSFSHA384(content, contentLen, h, sizeof(h));
+            ok = SSFRSAVerifyPSS(c.pubKey, c.pubKeyLen,
+                                 s256 ? SSF_RSA_HASH_SHA256 : SSF_RSA_HASH_SHA384, h,
+                                 s256 ? 32u : 48u, s256 ? 32u : 48u, sig, sigLen);
+        }
+        SSF_ASSERT(ok == (pass == 0));
+    }
+}
+
+/* Trace capture for the client certificate warnings */
+static char _utWarn[1024];
+static void _SSFTLSCUTWarnTrace(SSFTLSTraceLevel_t level, SSFTLSTraceCategory_t cat,
+                                const char *msg, void *ctx)
+{
+    (void)cat; (void)ctx;
+    if ((level <= SSF_TLS_TRACE_WARN) && ((strlen(_utWarn) + strlen(msg) + 2u) < sizeof(_utWarn)))
+    {
+        strcat(_utWarn, msg);
+        strcat(_utWarn, "|");
+    }
+}
+
+/* Chooses the scheme for body with the session's certificate; returns it (0 = empty cert). */
+static uint16_t _SSFTLSCUTChoose(SSFTLSCSession_t *s, const uint8_t *body, size_t len,
+                                 bool nowValid, uint64_t now)
+{
+    uint16_t scheme = 0xffffu;
+    uint8_t alert = 0xffu;
+    _utWarn[0] = 0;
+    SSF_ASSERT(_SSFTLSCChooseClientSchemeChainForTest(s, body, len, nowValid, now, &scheme,
+                                                      &alert));
+    SSF_ASSERT(alert == 0u);
+    return scheme;
+}
+
+/* The certificate chain's own signatures must be ones the server accepts (RFC 8446 4.4.2.3),  */
+/* from signature_algorithms_cert, else signature_algorithms; a self-signed last certificate is */
+/* exempt (4.4.2.2). The leaf's validity, Key Usage and EKU are traced, never enforced.         */
+static void _SSFTLSCUTClientChain(void)
+{
+    static SSFPKey_t kP256, kEd, kRsa, kNoKU, kNoEKU, kExp;
+    static const uint8_t *ch[2];
+    static uint32_t ln[2];
+    static const uint8_t junk[10] = { 0x30, 0x08, 0x02, 0x01, 0x00, 0x02, 0x01, 0x00, 0x05, 0x00 };
+    /* signature_algorithms lists, and with signature_algorithms_cert */
+    static const uint8_t cr0403[] = { 0x00, 0x00, 0x08, 0x00, 0x0d, 0x00, 0x04,
+                                      0x00, 0x02, 0x04, 0x03 };
+    static const uint8_t cr0807[] = { 0x00, 0x00, 0x08, 0x00, 0x0d, 0x00, 0x04,
+                                      0x00, 0x02, 0x08, 0x07 };
+    static const uint8_t cr0807c0403[] = { 0x00, 0x00, 0x10, 0x00, 0x0d, 0x00, 0x04,
+                                           0x00, 0x02, 0x08, 0x07,
+                                           0x00, 0x32, 0x00, 0x04, 0x00, 0x02, 0x04, 0x03 };
+    static const uint8_t cr0403c0807[] = { 0x00, 0x00, 0x10, 0x00, 0x0d, 0x00, 0x04,
+                                           0x00, 0x02, 0x04, 0x03,
+                                           0x00, 0x32, 0x00, 0x04, 0x00, 0x02, 0x08, 0x07 };
+    static const uint8_t cr0804[] = { 0x00, 0x00, 0x08, 0x00, 0x0d, 0x00, 0x04,
+                                      0x00, 0x02, 0x08, 0x04 };
+    static const uint8_t cr0804o0403[] = { 0x00, 0x00, 0x0a, 0x00, 0x0d, 0x00, 0x06,
+                                           0x00, 0x04, 0x08, 0x04, 0x04, 0x03 };
+    static const uint8_t cr0403o0401[] = { 0x00, 0x00, 0x0a, 0x00, 0x0d, 0x00, 0x06,
+                                           0x00, 0x04, 0x04, 0x03, 0x04, 0x01 };
+    static const uint8_t crCertOdd[] = { 0x00, 0x00, 0x11, 0x00, 0x0d, 0x00, 0x04,
+                                         0x00, 0x02, 0x04, 0x03,
+                                         0x00, 0x32, 0x00, 0x05, 0x00, 0x03, 0x04, 0x03, 0x08 };
+    SSFTLSCSession_t *s = &_utSession2;
+    uint16_t scheme;
+    uint8_t alert;
+
+    SSF_ASSERT(SSFPKeyDecodeDER(_utClientP256Key, sizeof(_utClientP256Key), &kP256));
+    SSF_ASSERT(SSFPKeyDecodeDER(_utClientEd25519Key, sizeof(_utClientEd25519Key), &kEd));
+    SSF_ASSERT(SSFPKeyDecodeDER(_utClientRSA2048Key, sizeof(_utClientRSA2048Key), &kRsa));
+    SSF_ASSERT(SSFPKeyDecodeDER(_utClientNoKUKey, sizeof(_utClientNoKUKey), &kNoKU));
+    SSF_ASSERT(SSFPKeyDecodeDER(_utClientNoEKUKey, sizeof(_utClientNoEKUKey), &kNoEKU));
+    SSF_ASSERT(SSFPKeyDecodeDER(_utClientExpiredKey, sizeof(_utClientExpiredKey), &kExp));
+    SSFTLSCInit(s, &_utSock.transport, NULL);
+    SSFTLSCSetTrace(s, _SSFTLSCUTWarnTrace, NULL);
+
+    /* All the fixture leaves are signed ecdsa-with-SHA256 (ecdsa_secp256r1_sha256) */
+    SSF_ASSERT(_SSFTLSCUTSetOne(s, _utClientP256Cert, sizeof(_utClientP256Cert), &kP256));
+    SSF_ASSERT(_SSFTLSCUTChoose(s, cr0403, sizeof(cr0403), false, 0) ==
+               SSF_TLS_SIG_ECDSA_SECP256R1_SHA256);
+    SSF_ASSERT(_utWarn[0] == 0);                                     /* A good leaf: silent */
+    SSF_ASSERT(_SSFTLSCUTChoose(s, cr0403c0807, sizeof(cr0403c0807), false, 0) == 0u);
+    SSF_ASSERT(_SSFTLSCUTSetOne(s, _utClientEd25519Cert, sizeof(_utClientEd25519Cert), &kEd));
+    SSF_ASSERT(_SSFTLSCUTChoose(s, cr0807, sizeof(cr0807), false, 0) == 0u);   /* chain no */
+    SSF_ASSERT(strstr(_utWarn, "server does not accept") != NULL);
+    SSF_ASSERT(_SSFTLSCUTChoose(s, cr0807c0403, sizeof(cr0807c0403), false, 0) ==
+               SSF_TLS_SIG_ED25519);                         /* certificate list governs */
+    SSF_ASSERT(_SSFTLSCUTSetOne(s, _utClientRSA2048Cert, sizeof(_utClientRSA2048Cert), &kRsa));
+    SSF_ASSERT(_SSFTLSCUTChoose(s, cr0804, sizeof(cr0804), false, 0) == 0u);
+    SSF_ASSERT(_SSFTLSCUTChoose(s, cr0804o0403, sizeof(cr0804o0403), false, 0) ==
+               SSF_TLS_SIG_RSA_PSS_RSAE_SHA256);
+
+    /* Chains: an intermediate is checked; a self-signed root is exempt, other RSA is not */
+    ch[0] = _utClientP256Cert;
+    ln[0] = (uint32_t)sizeof(_utClientP256Cert);
+#define SSF_TLSC_UT_CHAIN2(second, body, want) do { \
+    ch[1] = (second); ln[1] = (uint32_t)sizeof(second); \
+    SSF_ASSERT(SSFTLSCSetClientCert(s, ch, ln, 2u, &kP256)); \
+    SSF_ASSERT(_SSFTLSCUTChoose(s, (body), sizeof(body), false, 0) == (want)); } while (0)
+    SSF_TLSC_UT_CHAIN2(_utClientIntCert, cr0403, SSF_TLS_SIG_ECDSA_SECP256R1_SHA256);
+    SSF_TLSC_UT_CHAIN2(_utClientRsaRootCert, cr0403, SSF_TLS_SIG_ECDSA_SECP256R1_SHA256);
+    SSF_TLSC_UT_CHAIN2(_utClientRsaSignedCert, cr0403, 0u);
+    SSF_TLSC_UT_CHAIN2(_utClientRsaSignedCert, cr0403o0401, SSF_TLS_SIG_ECDSA_SECP256R1_SHA256);
+    SSF_TLSC_UT_CHAIN2(junk, cr0403, 0u);                     /* An intermediate that is no cert */
+#undef SSF_TLSC_UT_CHAIN2
+
+    /* A malformed signature_algorithms_cert is refused */
+    scheme = 0xffffu;
+    SSF_ASSERT(_SSFTLSCChooseClientSchemeChainForTest(s, crCertOdd, sizeof(crCertOdd), false, 0,
+                                                      &scheme, &alert) == false);
+    SSF_ASSERT((scheme == 0u) && (alert == SSF_TLS_ALERT_DECODE_ERROR));
+    {
+        /* An empty signature_algorithms_cert list (SignatureSchemeList<2..2^16-2>) */
+        static const uint8_t crCertEmpty[] = { 0x00, 0x00, 0x0e, 0x00, 0x0d, 0x00, 0x04,
+                                               0x00, 0x02, 0x04, 0x03,
+                                               0x00, 0x32, 0x00, 0x02, 0x00, 0x00 };
+        scheme = 0xffffu;
+        SSF_ASSERT(_SSFTLSCChooseClientSchemeChainForTest(s, crCertEmpty, sizeof(crCertEmpty),
+                                                          false, 0, &scheme, &alert) == false);
+        SSF_ASSERT((scheme == 0u) && (alert == SSF_TLS_ALERT_DECODE_ERROR));
+    }
+
+    /* Leaf warnings: traced, the certificate is still sent */
+    SSF_ASSERT(_SSFTLSCUTSetOne(s, _utClientNoKUCert, sizeof(_utClientNoKUCert), &kNoKU));
+    SSF_ASSERT(_SSFTLSCUTChoose(s, cr0403, sizeof(cr0403), false, 0) != 0u);
+    SSF_ASSERT((strstr(_utWarn, "digitalSignature") != NULL) &&
+               (strstr(_utWarn, "clientAuth") == NULL));
+    SSF_ASSERT(_SSFTLSCUTSetOne(s, _utClientNoEKUCert, sizeof(_utClientNoEKUCert), &kNoEKU));
+    SSF_ASSERT(_SSFTLSCUTChoose(s, cr0403, sizeof(cr0403), false, 0) != 0u);
+    SSF_ASSERT((strstr(_utWarn, "clientAuth") != NULL) &&
+               (strstr(_utWarn, "digitalSignature") == NULL));
+    SSF_ASSERT(_SSFTLSCUTSetOne(s, _utClientExpiredCert, sizeof(_utClientExpiredCert), &kExp));
+    SSF_ASSERT(_SSFTLSCUTChoose(s, cr0403, sizeof(cr0403), true, 1780000000ull) != 0u);
+    SSF_ASSERT(strstr(_utWarn, "not valid at") != NULL);
+    SSF_ASSERT(_SSFTLSCUTChoose(s, cr0403, sizeof(cr0403), true, 1609000000ull) != 0u);
+    SSF_ASSERT(_utWarn[0] == 0);                                  /* 2020-12-26: valid */
+    SSF_ASSERT(_SSFTLSCUTChoose(s, cr0403, sizeof(cr0403), false, 1780000000ull) != 0u);
+    SSF_ASSERT(_utWarn[0] == 0);                                  /* No trusted time */
+
+    SSFTLSCDeInit(s);
+    SSFPKeyWipe(&kP256);
+    SSFPKeyWipe(&kEd);
+    SSFPKeyWipe(&kRsa);
+    SSFPKeyWipe(&kNoKU);
+    SSFPKeyWipe(&kNoEKU);
+    SSFPKeyWipe(&kExp);
+}
+
+static void _SSFTLSCUTClientCert(void)
+{
+    static SSFPKey_t kP256, kP384, kEd, kRsa, kNone;
+    static uint8_t bad[sizeof(_utClientRSA2048Cert)];
+    static uint8_t msg[1024];
+    static uint8_t want[1024];
+    static const uint8_t *chain2[2];
+    static uint32_t lens2[2];
+    SSFTLSCSession_t *s = &_utSession2;
+    uint8_t th[48];
+    size_t i;
+    size_t len;
+    size_t off;
+    uint16_t scheme;
+    uint8_t alert;
+
+    SSF_ASSERT(SSFPKeyDecodeDER(_utClientP256Key, sizeof(_utClientP256Key), &kP256));
+    SSF_ASSERT(SSFPKeyDecodeDER(_utClientP384Key, sizeof(_utClientP384Key), &kP384));
+    SSF_ASSERT(SSFPKeyDecodeDER(_utClientEd25519Key, sizeof(_utClientEd25519Key), &kEd));
+    SSF_ASSERT(SSFPKeyDecodeDER(_utClientRSA2048Key, sizeof(_utClientRSA2048Key), &kRsa));
+    memset(&kNone, 0, sizeof(kNone));
+    SSFTLSCInit(s, &_utSock.transport, NULL);
+
+    /* ---- SSFTLSCSetClientCert: matching certificate and key, each key type ---- */
+    SSF_ASSERT(s->clientChainCount == 0u);
+    SSF_ASSERT(_SSFTLSCUTSetOne(s, _utClientP256Cert, sizeof(_utClientP256Cert), &kP256));
+    SSF_ASSERT((s->clientChainCount == 1u) && (s->clientKey == &kP256));
+    SSF_ASSERT(_SSFTLSCUTSetOne(s, _utClientP384Cert, sizeof(_utClientP384Cert), &kP384));
+    SSF_ASSERT(_SSFTLSCUTSetOne(s, _utClientEd25519Cert, sizeof(_utClientEd25519Cert), &kEd));
+    SSF_ASSERT(_SSFTLSCUTSetOne(s, _utClientRSA2048Cert, sizeof(_utClientRSA2048Cert), &kRsa));
+    chain2[0] = _utClientP256Cert;
+    lens2[0] = (uint32_t)sizeof(_utClientP256Cert);
+    chain2[1] = _utClientIntCert;
+    lens2[1] = (uint32_t)sizeof(_utClientIntCert);
+    SSF_ASSERT(SSFTLSCSetClientCert(s, chain2, lens2, 2u, &kP256));
+    SSF_ASSERT(s->clientChainCount == 2u);
+    SSF_ASSERT(SSFTLSCSetClientCert(s, NULL, NULL, 0u, NULL));                /* Clear */
+    SSF_ASSERT((s->clientChainCount == 0u) && (s->clientKey == NULL));
+
+    /* ---- Refused, leaving no certificate set ---- */
+#define SSF_TLSC_UT_CC_BAD(expr) do { \
+    SSF_ASSERT(_SSFTLSCUTSetOne(s, _utClientP256Cert, sizeof(_utClientP256Cert), &kP256)); \
+    SSF_ASSERT((expr) == false); \
+    SSF_ASSERT((s->clientChainCount == 0u) && (s->clientKey == NULL)); } while (0)
+    /* Another device's certificate, and certificates of another key type */
+    SSF_TLSC_UT_CC_BAD(_SSFTLSCUTSetOne(s, _utClientOtherCert, sizeof(_utClientOtherCert),
+                                        &kP256));
+    SSF_TLSC_UT_CC_BAD(_SSFTLSCUTSetOne(s, _utClientEd25519Cert, sizeof(_utClientEd25519Cert),
+                                        &kP256));
+    SSF_TLSC_UT_CC_BAD(_SSFTLSCUTSetOne(s, _utClientP256Cert, sizeof(_utClientP256Cert), &kRsa));
+    SSF_TLSC_UT_CC_BAD(_SSFTLSCUTSetOne(s, _utClientRSA2048Cert, sizeof(_utClientRSA2048Cert),
+                                        &kP384));
+    SSF_TLSC_UT_CC_BAD(_SSFTLSCUTSetOne(s, _utClientP384Cert, sizeof(_utClientP384Cert),
+                                        &kP256));
+    /* The leaf's public key one byte off: EC point, RSA modulus */
+    memcpy(bad, _utClientP256Cert, sizeof(_utClientP256Cert));
+    off = _SSFTLSCUTFind(bad, sizeof(_utClientP256Cert), kP256.pub, kP256.pubLen);
+    SSF_ASSERT(off != (size_t)-1);
+    bad[off + kP256.pubLen - 1u] ^= 0x01u;
+    SSF_TLSC_UT_CC_BAD(_SSFTLSCUTSetOne(s, bad, sizeof(_utClientP256Cert), &kP256));
+    memcpy(bad, _utClientRSA2048Cert, sizeof(_utClientRSA2048Cert));
+    off = _SSFTLSCUTFind(bad, sizeof(bad), &kRsa.rsaDer[20], 32u);    /* Inside the modulus */
+    SSF_ASSERT(off != (size_t)-1);
+    bad[off + 16u] ^= 0x01u;
+    SSF_TLSC_UT_CC_BAD(_SSFTLSCUTSetOne(s, bad, sizeof(bad), &kRsa));
+    /* Not a certificate, an empty entry, no key, a key that is no key, no chain */
+    SSF_TLSC_UT_CC_BAD(_SSFTLSCUTSetOne(s, _utClientP256Cert, sizeof(_utClientP256Cert) - 1u,
+                                        &kP256));
+    SSF_TLSC_UT_CC_BAD(_SSFTLSCUTSetOne(s, _utClientP256Cert, 0u, &kP256));
+    SSF_TLSC_UT_CC_BAD(_SSFTLSCUTSetOne(s, _utClientP256Cert, sizeof(_utClientP256Cert), NULL));
+    SSF_TLSC_UT_CC_BAD(_SSFTLSCUTSetOne(s, _utClientP256Cert, sizeof(_utClientP256Cert), &kNone));
+    SSF_TLSC_UT_CC_BAD(SSFTLSCSetClientCert(s, chain2, lens2, 0u, &kP256));
+    SSF_TLSC_UT_CC_BAD(SSFTLSCSetClientCert(s, NULL, lens2, 1u, &kP256));
+    lens2[1] = 0u;                                          /* Empty intermediate entry */
+    SSF_TLSC_UT_CC_BAD(SSFTLSCSetClientCert(s, chain2, lens2, 2u, &kP256));
+    lens2[1] = 0x01000000u;                                 /* Over the 24-bit field */
+    SSF_TLSC_UT_CC_BAD(SSFTLSCSetClientCert(s, chain2, lens2, 2u, &kP256));
+    lens2[1] = (uint32_t)sizeof(_utClientIntCert);
+#undef SSF_TLSC_UT_CC_BAD
+
+    /* ---- Scheme choice: the server's first listed scheme the key can sign ---- */
+    {
+#define SSF_TLSC_UT_CS(body, key, wantScheme) do { \
+    scheme = 0xffffu; alert = 0xffu; \
+    SSF_ASSERT(_SSFTLSCChooseClientSchemeForTest((body), sizeof(body), (key), &scheme, &alert)); \
+    SSF_ASSERT((scheme == (wantScheme)) && (alert == 0u)); } while (0)
+        static const uint8_t crEcdsa256[] = { 0x00, 0x00, 0x08, 0x00, 0x0d, 0x00, 0x04,
+                                              0x00, 0x02, 0x04, 0x03 };
+        static const uint8_t crEdThen256[] = { 0x00, 0x00, 0x0a, 0x00, 0x0d, 0x00, 0x06,
+                                               0x00, 0x04, 0x08, 0x07, 0x04, 0x03 };
+        static const uint8_t crPss384First[] = { 0x00, 0x00, 0x0c, 0x00, 0x0d, 0x00, 0x08,
+                                                 0x00, 0x06, 0x05, 0x03, 0x08, 0x05, 0x08, 0x04 };
+        static const uint8_t crRsaUnusable[] = { 0x00, 0x00, 0x0c, 0x00, 0x0d, 0x00, 0x08,
+                                                 0x00, 0x06, 0x04, 0x01, 0x05, 0x01, 0x08, 0x09 };
+        static const uint8_t crBad[] = { 0x00, 0x00, 0x00 };
+
+        SSF_TLSC_UT_CS(crEcdsa256, SSF_PKEY_TYPE_P256, SSF_TLS_SIG_ECDSA_SECP256R1_SHA256);
+        SSF_TLSC_UT_CS(crEcdsa256, SSF_PKEY_TYPE_P384, 0u);           /* P-384 key: no match */
+        SSF_TLSC_UT_CS(crEcdsa256, SSF_PKEY_TYPE_ED25519, 0u);
+        SSF_TLSC_UT_CS(crEcdsa256, SSF_PKEY_TYPE_RSA, 0u);
+        SSF_TLSC_UT_CS(crEcdsa256, SSF_PKEY_TYPE_NONE, 0u);           /* No certificate */
+        SSF_TLSC_UT_CS(crEdThen256, SSF_PKEY_TYPE_ED25519, SSF_TLS_SIG_ED25519);
+        SSF_TLSC_UT_CS(crEdThen256, SSF_PKEY_TYPE_P256, SSF_TLS_SIG_ECDSA_SECP256R1_SHA256);
+        SSF_TLSC_UT_CS(crPss384First, SSF_PKEY_TYPE_P384, SSF_TLS_SIG_ECDSA_SECP384R1_SHA384);
+        SSF_TLSC_UT_CS(crPss384First, SSF_PKEY_TYPE_RSA, SSF_TLS_SIG_RSA_PSS_RSAE_SHA384);
+        SSF_TLSC_UT_CS(crPss384First, SSF_PKEY_TYPE_P256, 0u);
+        /* PKCS#1 never signs a handshake, rsa_pss_pss needs a PSS-OID key (4.2.3) */
+        SSF_TLSC_UT_CS(crRsaUnusable, SSF_PKEY_TYPE_RSA, 0u);
+        /* A request refused after signature_algorithms chose a scheme reports no scheme */
+        {
+            static const uint8_t crLateBad[] = { 0x00, 0x00, 0x0c, 0x00, 0x0d, 0x00, 0x04,
+                                                 0x00, 0x02, 0x04, 0x03, 0x00, 0x33, 0x00, 0x00 };
+            static const uint8_t crLateDup[] = { 0x00, 0x00, 0x10, 0x00, 0x0d, 0x00, 0x04,
+                                                 0x00, 0x02, 0x04, 0x03,
+                                                 0x00, 0x0d, 0x00, 0x04, 0x00, 0x02, 0x04, 0x03 };
+            scheme = 0xffffu;
+            SSF_ASSERT(_SSFTLSCChooseClientSchemeForTest(crLateBad, sizeof(crLateBad),
+                                                         SSF_PKEY_TYPE_P256, &scheme,
+                                                         &alert) == false);
+            SSF_ASSERT((scheme == 0u) && (alert == SSF_TLS_ALERT_ILLEGAL_PARAMETER));
+            scheme = 0xffffu;
+            SSF_ASSERT(_SSFTLSCChooseClientSchemeForTest(crLateDup, sizeof(crLateDup),
+                                                         SSF_PKEY_TYPE_P256, &scheme,
+                                                         &alert) == false);
+            SSF_ASSERT((scheme == 0u) && (alert == SSF_TLS_ALERT_ILLEGAL_PARAMETER));
+        }
+        /* A malformed request is still refused with its alert */
+        SSF_ASSERT(_SSFTLSCChooseClientSchemeForTest(crBad, sizeof(crBad), SSF_PKEY_TYPE_P256,
+                                                     &scheme, &alert) == false);
+        SSF_ASSERT(alert == SSF_TLS_ALERT_DECODE_ERROR);
+#undef SSF_TLSC_UT_CS
+    }
+
+    /* ---- The client Certificate message, streamed in pieces ---- */
+    SSF_ASSERT(SSFTLSCSetClientCert(s, chain2, lens2, 2u, &kP256));
+    len = 0;
+    want[len++] = 11u;                                                     /* certificate */
+    {
+        size_t body = 1u + 3u + (3u + sizeof(_utClientP256Cert) + 2u) +
+                      (3u + sizeof(_utClientIntCert) + 2u);
+        size_t list = body - 4u;
+        want[len++] = (uint8_t)(body >> 16); want[len++] = (uint8_t)(body >> 8);
+        want[len++] = (uint8_t)body;
+        want[len++] = 0u;                                                  /* empty context */
+        want[len++] = (uint8_t)(list >> 16); want[len++] = (uint8_t)(list >> 8);
+        want[len++] = (uint8_t)list;
+    }
+    want[len++] = 0u; want[len++] = (uint8_t)(sizeof(_utClientP256Cert) >> 8);
+    want[len++] = (uint8_t)sizeof(_utClientP256Cert);
+    memcpy(&want[len], _utClientP256Cert, sizeof(_utClientP256Cert));
+    len += sizeof(_utClientP256Cert);
+    want[len++] = 0u; want[len++] = 0u;                                    /* no extensions */
+    want[len++] = 0u; want[len++] = (uint8_t)(sizeof(_utClientIntCert) >> 8);
+    want[len++] = (uint8_t)sizeof(_utClientIntCert);
+    memcpy(&want[len], _utClientIntCert, sizeof(_utClientIntCert));
+    len += sizeof(_utClientIntCert);
+    want[len++] = 0u; want[len++] = 0u;
+    SSF_ASSERT(_SSFTLSCClientCertMsgLenForTest(s) == len);
+    {
+        static const size_t steps[] = { 1u, 3u, 7u, 64u, 437u, 1024u };
+        size_t k;
+        for (k = 0; k < (sizeof(steps) / sizeof(steps[0])); k++)
+        {
+            memset(msg, 0xAA, sizeof(msg));
+            for (off = 0; off < len; off += i)
+            {
+                i = ((len - off) < steps[k]) ? (len - off) : steps[k];
+                _SSFTLSCClientCertMsgCopyForTest(s, off, &msg[off], i);
+            }
+            SSF_ASSERT(memcmp(msg, want, len) == 0);
+        }
+    }
+
+    /* ---- CertificateVerify: signed over the client context, verifiable by the leaf key ---- */
+    for (i = 0; i < sizeof(th); i++) th[i] = (uint8_t)(0xA0u + i);
+#define SSF_TLSC_UT_CV_SIGN(cert, key, scheme, thLen) do { \
+    SSF_ASSERT(_SSFTLSCUTSetOne(s, (cert), sizeof(cert), (key))); \
+    SSF_ASSERT(_SSFTLSCSignClientCVForTest(s, (scheme), th, (thLen), msg, sizeof(msg), &len)); \
+    _SSFTLSCUTCheckClientCV(msg, len, (scheme), th, (thLen), (cert), sizeof(cert), (key)); \
+    } while (0)
+    SSF_TLSC_UT_CV_SIGN(_utClientP256Cert, &kP256, SSF_TLS_SIG_ECDSA_SECP256R1_SHA256, 32u);
+    SSF_TLSC_UT_CV_SIGN(_utClientP256Cert, &kP256, SSF_TLS_SIG_ECDSA_SECP256R1_SHA256, 48u);
+    SSF_TLSC_UT_CV_SIGN(_utClientP384Cert, &kP384, SSF_TLS_SIG_ECDSA_SECP384R1_SHA384, 32u);
+    SSF_TLSC_UT_CV_SIGN(_utClientEd25519Cert, &kEd, SSF_TLS_SIG_ED25519, 32u);
+    SSF_TLSC_UT_CV_SIGN(_utClientEd25519Cert, &kEd, SSF_TLS_SIG_ED25519, 48u);
+    SSF_TLSC_UT_CV_SIGN(_utClientRSA2048Cert, &kRsa, SSF_TLS_SIG_RSA_PSS_RSAE_SHA256, 32u);
+    SSF_TLSC_UT_CV_SIGN(_utClientRSA2048Cert, &kRsa, SSF_TLS_SIG_RSA_PSS_RSAE_SHA384, 48u);
+#undef SSF_TLSC_UT_CV_SIGN
+    /* A scheme the key cannot make, and an output too small, are refused */
+    SSF_ASSERT(_SSFTLSCUTSetOne(s, _utClientP256Cert, sizeof(_utClientP256Cert), &kP256));
+    SSF_ASSERT(_SSFTLSCSignClientCVForTest(s, SSF_TLS_SIG_ED25519, th, 32u, msg, sizeof(msg),
+                                           &len) == false);
+    SSF_ASSERT(_SSFTLSCSignClientCVForTest(s, SSF_TLS_SIG_ECDSA_SECP256R1_SHA256, th, 32u, msg,
+                                           16u, &len) == false);
+
+    SSFTLSCDeInit(s);
+    SSFPKeyWipe(&kP256);
+    SSFPKeyWipe(&kP384);
+    SSFPKeyWipe(&kEd);
+    SSFPKeyWipe(&kRsa);
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Item D: each chain verification failure gets its RFC 8446 6.2 alert.                          */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFTLSCUTChainAlert(void)
@@ -1451,6 +1882,8 @@ void SSFTLSCUnitTest(void)
         SSF_ASSERT(_SSFTLSCUTConnectArrives(l) == false);
         SSFTLSCDeInit(&_utSession2);
     }
+    _SSFTLSCUTClientCert();
+    _SSFTLSCUTClientChain();
 
     /* ---- Explicit opt-in to an unauthenticated connection, and back out ---- */
     SSFTLSCSetUnauthenticated(&_utSession, true);

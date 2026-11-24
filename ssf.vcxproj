@@ -346,6 +346,7 @@
     <ClInclude Include="_net\ssfnet.h" />
     <ClInclude Include="_net\ssfnetsock.h" />
     <ClInclude Include="_net\ssftlsc.h" />
+    <ClInclude Include="_net\ssftlsc_ut_client.h" />
     <ClInclude Include="_opt\ssfasn1_opt.h" />
     <ClInclude Include="_opt\ssfbase64url_opt.h" />
     <ClInclude Include="_opt\ssfbfifo_opt.h" />

@@ -461,7 +461,57 @@ is rejected.
         ASan / UBSan clean. Cortex-M4 -Os: ssftlsc text +501 B, one session flag. Not
         covered by a test: a second CertificateRequest (no server sends one; it falls through
         to `unexpected_message`). `ssftls.md` alert list completed.
-  - [ ] 1b: client certificate and CertificateVerify (uses `ssfpkey`).
+  - [x] 1b: client certificate and CertificateVerify (uses `ssfpkey`). Done (approved:
+        stream the Certificate, check leaf against key, empty Certificate when no scheme fits).
+        `SSFTLSCSetClientCert(session, chainDer, chainLens, count, key)`: idle only, pointers
+        kept (no copy, kept across connections); refused, leaving nothing set, for a malformed
+        chain (empty or over-24-bit entry, list over 2^24) or a leaf whose type / public key is
+        not the key's (EC point, Ed25519 key, RSA modulus and exponent compared).
+        CertificateRequest now also picks the scheme: the server's first listed scheme the key
+        can make (PKCS#1 and rsa_pss_pss never). After the server Finished, new states
+        SEND_CLIENT_CERT (Certificate generated from the caller's DER into hsBuf, record by
+        record, added to the transcript as cut), SIGN_CV (crypto step: content with "TLS 1.3,
+        client CertificateVerify", scheme hash, ECDSA RFC 6979 / Ed25519 / RSA-PSS salt =
+        hash), SEND_CV_FIN (CertificateVerify + Finished from clientHelloMsg, also streamed).
+        Client Finished and the switch to application send keys factored out
+        (`_BuildClientFinished`, `_EnterAppSendKeys`) and shared with the no-certificate path.
+        Unit: key match / refusals, scheme choice, streamed message byte-exact for six piece
+        sizes, CertificateVerify verified with the leaf key over the client context and not the
+        server one (all key types, both hashes). Wire, all `certificate_required` before:
+        `s_server -Verify` and `gnutls-serv --require-client-cert --verify-client-cert` accept
+        P-256, P-384, Ed25519, RSA-2048, RSA-4096 and leaf + intermediate; a server list
+        without the key's scheme gets an empty Certificate (`certificate_required`); a server
+        trusting another CA answers `unknown_ca`. Same with a 512-byte send build (Certificate
+        and CertificateVerify + Finished over several records; RSA-4096 failed before the CV
+        was streamed too). 14 mutants: 13 killed, one equivalent (the leaf/key type check is
+        implied by the key comparison). ASan / UBSan clean. Cortex-M4 -Os: ssftlsc text
+        +2,433 B; session +24 B (Cortex-M4); pollOpen stack peak with an RSA client key ~28.3 KB (RSA-PSS
+        signing), unchanged for EC / Ed25519 keys.
+        Audit (correctness and security), then fixed TDD: (1) a CertificateRequest refused
+        after signature_algorithms left the chosen scheme set (contract said 0); the scheme is
+        now chosen into a local and stored only on success (differential fuzz: 2,439 of 200k
+        refused requests left one before, 0 after). (2) RFC 8446 4.4.2.3: the chain's own
+        signatures must be ones the server lists (signature_algorithms_cert, now validated,
+        else signature_algorithms); a self-signed last certificate is exempt (4.4.2.2); if not,
+        an empty Certificate with a warning trace. ECDSA certificate signatures count as the
+        hash's ECDSA scheme (the issuer's curve is not known), RSA-PSS as rsae or pss. (3)
+        `ssftlsc.h`: the key must come from ssfpkey; a hand-built inconsistent key asserts. (4)
+        Warning traces, never enforced, for a leaf the server is likely to refuse: Key Usage
+        without digitalSignature, EKU without clientAuth, and not valid now (only with trust
+        anchors, where the RTC is required, and the trusted-time floor). (5) Stale comments
+        updated. Verified: the client certificate is sent only after the server is
+        authenticated; parser differential (200k mutated requests vs an RFC model, ASan) 0
+        mismatches; GnuTLS record_size_limit 512 / 1024 honored with RSA-4096 and a chain;
+        no live secrets after client-auth handshakes. 13 more mutants killed (one survivor
+        first, closed by an empty-list vector). Wire: an Ed25519 client whose leaf is
+        ECDSA-signed now sends an empty Certificate when the server lists only ed25519, and
+        its certificate when ECDSA+SHA256 is also listed; expired / no-clientAuth leaves warn
+        and are refused by the server (45 / 43), no-digitalSignature warns and is accepted.
+        Cortex-M4 -Os: ssftlsc text +3,671 B over the last commit (+1,238 B for the audit).
+- [ ] `SSF_TLSC_CONFIG_MAX_SEND_RECORD` accepts 64..16384, but the plaintext ClientHello
+      (a few hundred bytes) is sent as one record and is not fragmented, so a build below
+      about 512 cannot connect at all (found during 1b: 64 and 256 fail before ServerHello,
+      with or without client authentication). Raise the minimum, or fragment the ClientHello.
 - [x] Private key loading: PKCS#8 / SEC 1 / PEM. Done (approved: two new codec modules).
       `ssfpem` (RFC 7468): one block per call, multi-block buffers, strict Base64 via
       `SSFBase64Decode`, whitespace anywhere, NULL output to check/measure, all output zeroed on

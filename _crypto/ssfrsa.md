@@ -62,13 +62,14 @@ comparable security.
   roughly with the cube of the key size, verify time (e = 65537) with its square. The largest
   enabled size sets the stack for every key size, so enable only the sizes your peers use.
   Measured stack on the signature-verify path (`SSFRSAVerifyPSS` → `SSFBNModExpPub` →
-  `SSFBNModExpMontPub`, sum of the three frames; Cortex-M4, `-Os`):
+  `SSFBNModExpMontPub` → `SSFBNMontConvertOut` → `SSFBNMontMul`; deepest call-graph path,
+  Cortex-M4, `-Os`):
 
   | Largest enabled size | Verify path stack |
   |---|---|
-  | 4096 (default) | ~9.7 KB |
-  | 3072 | ~7.4 KB |
-  | 2048 | ~5.1 KB |
+  | 4096 (default) | ~10.9 KB |
+  | 3072 | ~8.3 KB |
+  | 2048 | ~5.7 KB |
 
   Most public CA chains are RSA-2048 or RSA-4096, so a TLS client that must reach
   arbitrary servers keeps 4096 on; a device that talks only to its own infrastructure can

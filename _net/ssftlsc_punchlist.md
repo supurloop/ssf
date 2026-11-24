@@ -278,7 +278,7 @@ is rejected.
       paths 35.0 KB -> 28.3 KB, RSA 40.1 KB -> 33.4 KB; the remaining depth is in the called
       modules (next item). Spot-checked: all handshake types, 2-cert chain, ASan, injection and
       ServerHello cases, zeroization. Exhaustive run pending.
-- [ ] Stack depth now set by called modules: `SSFX509VerifyChainPurpose` has a 14.5 KB frame
+- [x] Stack depth now set by called modules: `SSFX509VerifyChainPurpose` has a 14.5 KB frame
       (sets the 28 KB EC peak); RSA adds `SSFRSAVerifyPSS` 6 KB and `SSFBNModExpMont` 10.6 KB
       (33 KB peak). Review in `ssfx509` / `ssfrsa` / `ssfbn`. Found during step 3 item 5.
       Re-measured (3B item G; Cortex-M4 -Os, depth 6): those figures were x86 -O1 at depth 8.
@@ -287,10 +287,19 @@ is rejected.
       (7.4 KB at 3072, 5.1 KB at 2048). RSA documented (approved): 4096 is the deliberate
       ceiling, larger keys are not practical on SSF targets, and the largest enabled size sets
       the stack (`ssfrsa.md` key-size note with the table; `ssftlsc.h` design note). Also fixed
-      the `SSFBN_CONFIG_MAX_BITS` typo in `ssfrsa.md`. Still open: a target-like
-      whole-handshake peak to replace the x86 23.8 / 28.8 KB figures, and whether the verifier's
-      certificate array moves to caller RAM (option B; also what a resumable verify, item I,
-      would need).
+      the `SSFBN_CONFIG_MAX_BITS` typo in `ssfrsa.md`. Closed (3B item G): whole-handshake peak
+      from a static call graph (`arm-none-eabi-gcc -Os -fstack-usage -fcallgraph-info=su`,
+      deepest path from `_SSFTLSCPollOpen`, the non-NIST fallback `SSFBNModMulNIST` ->
+      `SSFBNModMul` pruned as unreachable): 18.9 KB at the RSA-4096 maximum (RSA signature in the
+      chain), 16.3 KB at 3072, 14.9 KB at 2048 (ECDSA in the chain). Method checked against the
+      README's call-graph figures (ECDSA verify 7.9 vs 7.8 KB, RSA verify 10.9 vs 10.4 KB). The
+      RSA verify path is 10.9 / 8.3 / 5.7 KB (the earlier 9.7 / 7.4 / 5.1 KB omitted two leaf
+      frames); `ssfrsa.md` corrected. `ssftlsc.h` gains a stack design note (excludes the inner
+      transport, trace callback, libc and port layer). Moving the verifier's certificate array
+      to caller RAM (option B) is not planned: it trades about 6.6 KB of stack for the same RAM;
+      revisit with a resumable chain verify (item I). `README.md` (approved): X.509 stack ~12 -> ~18 KB
+      (13.9 KB RSA-2048-only), CMS ~15 -> ~20 KB (16.1 KB); footnote 58's "halving the depth
+      roughly halves it" replaced by about 1.1 KB per chain entry.
 - [x] Remaining ssftlsc locals: the leaf `SSFX509Cert_t` (1.5 KB) in the Certificate handler
       (the 1 KB HRR ClientHello buffer went with the single ClientHello builder). At -O1
       gcc inlines the handlers into `_SSFTLSCDrive` and their locals add up to a 2.4 KB frame;

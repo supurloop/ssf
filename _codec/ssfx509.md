@@ -158,31 +158,41 @@ X.509 v3 certificate support per RFC 5280, built on [`ssfasn1`](ssfasn1.md):
   `id-Ed25519` key; ECDSA and Ed25519 algorithm parameters must be absent (RFC 5758 §3.2,
   RFC 8410 §3), so a NULL there fails verification.
 - **Trust anchors.** An anchor's own Basic Constraints and Key Usage are not checked (RFC 5280
-  leaves anchor constraints to policy), so put only CA certificates in the trust store. A chain
-  whose last certificate is the anchor itself, as many TLS servers send it, is handled: that copy
-  is not counted as a subordinate CA against the anchor's `pathLenConstraint`.
-- **Chain layout.** For [`SSFX509VerifyChain()`](#ssfx509verifychain), `chainDer[0]` is the leaf
-  and each `chainDer[i]` must be signed by `chainDer[i + 1]`. The last chain certificate must be
-  signed by one of the trust anchors; the anchors themselves are never part of the chain array.
-  A self-signed leaf is verified by passing it as a one-element chain **and** as a trust anchor.
+  leaves anchor constraints to policy), so put only CA certificates in the trust store. A copy of
+  an anchor sent in the chain, as many TLS servers send the root, is never on the path (the path
+  ends at the certificate the anchor issued), so it is neither checked nor counted against the
+  anchor's `pathLenConstraint`.
+- **Chain layout and path building.** `chainDer[0]` is the leaf; the other entries are candidate
+  issuers in any order, and extraneous ones are allowed (RFC 8446 §4.4.2): a cross-signed copy of
+  the root, an unrelated CA, a duplicate, or one that does not parse. The verifier builds the
+  path from the leaf. At each step, if a trust anchor issued the current certificate the path is
+  complete; otherwise it takes the first unused certificate whose subject is the current
+  issuer, whose SKID agrees with the current AKID when both are present, that passes its own
+  checks (v3, matching signature algorithms, validity), and whose key verifies the signature.
+  Each certificate is used at most once, so a loop ends. There is no backtracking past a
+  completed step: a step that has more than one valid issuer takes the first, and a chain that
+  only some other choice could complete fails. Certificates not on the path are never checked,
+  so an expired or constrained extra certificate does no harm. A self-signed leaf is verified by
+  passing it as a one-element chain **and** as a trust anchor.
 - **Verification order.** The verifier runs these checks in this order and stops at the first
-  failure: (1) parse every chain cert; all are v3; the TBS and outer signature algorithm
-  identifiers agree, parameters included (§4.1.1.2); every cert is within its validity window at
-  `nowUnixSec`. (2) Each `cert[i]` names `cert[i + 1]`'s subject as its issuer (§6.1.3 (a)(4)),
-  is signed by `cert[i + 1]`, and their AKID / SKID agree when both are present. (3) The last
-  cert's issuer matches a trust anchor's subject, that anchor is valid at `nowUnixSec`, its SKID
-  agrees with the cert's AKID when both are present, and its key verifies the signature (the
-  anchor that verifies is the one whose path length and Name Constraints are enforced below;
-  other anchors that merely share its subject name, as during a root key rollover, play no part).
-  (4) Every intermediate asserts `cA = TRUE` in Basic Constraints, includes `keyCertSign` if Key
-  Usage is present, and is within its own path length; the chain is within the anchor's path
-  length (§6.1.4 (h), (k)). (5) The anchor's Name Constraints are satisfied by every chain cert
-  (§6.1.4 (g)). (6) If the leaf has Extended Key Usage it includes the purpose's key purpose
-  (`serverAuth` or `codeSigning`) or `anyExtendedKeyUsage`; for code signing, a leaf Key Usage,
-  when present, includes `digitalSignature` or `nonRepudiation`. (7) The Name Constraints of every
-  intermediate are satisfied by its subordinates. (8) No cert carries a critical extension
-  outside the recognized set (Basic Constraints, Key Usage, SAN, SKID, AKID, EKU, Name
-  Constraints). (9) For server authentication, the hostname matches a `dNSName` or `iPAddress`
+  failure: (1) the leaf parses, is v3, its TBS and outer signature algorithm identifiers agree,
+  parameters included (§4.1.1.2), and it is within its validity window at `nowUnixSec`. (2) The
+  path is built (see **Chain layout and path building**): each added issuer passes the same
+  checks, names the current certificate's issuer as its subject (§6.1.3 (a)(4)), agrees on AKID /
+  SKID, and verifies its signature. A trust anchor completes the path when its subject matches
+  the current issuer, it is valid at `nowUnixSec`, its SKID agrees with the AKID when both are
+  present, and its key verifies the signature (that anchor's path length and Name Constraints are
+  enforced below; other anchors that merely share its subject name, as during a root key
+  rollover, play no part). (3) Every intermediate on the path asserts `cA = TRUE` in Basic
+  Constraints, includes `keyCertSign` if Key Usage is present, and is within its own path length;
+  the path is within the anchor's path length (§6.1.4 (h), (k)). (4) The anchor's Name
+  Constraints are satisfied by every path cert (§6.1.4 (g)). (5) If the leaf has Extended Key
+  Usage it includes the purpose's key purpose (`serverAuth` or `codeSigning`) or
+  `anyExtendedKeyUsage`; for code signing, a leaf Key Usage,
+  when present, includes `digitalSignature` or `nonRepudiation`. (6) The Name Constraints of every
+  intermediate on the path are satisfied by its subordinates. (7) No path cert carries a critical
+  extension outside the recognized set (Basic Constraints, Key Usage, SAN, SKID, AKID, EKU, Name
+  Constraints). (8) For server authentication, the hostname matches a `dNSName` or `iPAddress`
   SAN of the leaf.
 - **Hostname matching** (RFC 6125 §6.4.3) is case-insensitive and exact against each `dNSName`. A
   single leading `*.` wildcard label is honored only when the hostname's leftmost label is
@@ -675,7 +685,7 @@ certificate is parsed internally from DER; the caller never needs to parse first
 
 | Parameter | Direction | Type | Description |
 |-----------|-----------|------|-------------|
-| `chainDer` | in | `const uint8_t **` | Array of DER certificates, `chainDer[0]` = leaf, each signed by the next. No entry may be `NULL`. |
+| `chainDer` | in | `const uint8_t **` | Array of DER certificates, `chainDer[0]` = leaf, the others candidate issuers in any order (see **Chain layout and path building**). No entry may be `NULL`. |
 | `chainDerLen` | in | `const uint32_t *` | Length of each `chainDer[i]`. |
 | `chainLen` | in | `uint8_t` | Number of chain certificates, `1` to `SSF_X509_CONFIG_MAX_CHAIN_DEPTH`. |
 | `trustDer` | in | `const uint8_t **` | Array of DER trust-anchor (CA) certificates. No entry may be `NULL`. |
@@ -692,7 +702,10 @@ The trace callback, when tracing is compiled in and a callback is installed, als
 
 **Verification errors.** `errOut->code` is the first check that rejected the chain, in
 **Verification order**, and `errOut->certIdx` is the `chainDer` index of the certificate it
-rejected (`0` is the leaf). It is available in every build, including those with tracing
+rejected (`0` is the leaf). When a path step finds no issuer, the code is the most specific
+reason among the certificates sent under the issuer's name: a candidate's own check
+(`ERR_NOT_YET_VALID`, `ERR_EXPIRED`, `ERR_VERSION` or `ERR_SIG_ALG_MISMATCH`, naming that
+candidate), else `ERR_SIGNATURE`, else `ERR_KEY_ID_MISMATCH`, else `ERR_UNKNOWN_CA`. It is available in every build, including those with tracing
 compiled out.
 
 | `code` (`SSF_X509_VERIFY_`…) | `certIdx` | Meaning |
@@ -703,10 +716,9 @@ compiled out.
 | `ERR_SIG_ALG_MISMATCH` | the certificate | Its TBS and outer signature algorithm (OID or parameters) differ. |
 | `ERR_NOT_YET_VALID` | the certificate | `nowUnixSec` is before its notBefore. |
 | `ERR_EXPIRED` | the certificate | `nowUnixSec` is after its notAfter. |
-| `ERR_ISSUER_MISMATCH` | the child | Its issuer is not the next certificate's subject. |
-| `ERR_SIGNATURE` | the child | Its signature does not verify with the next certificate's key. |
-| `ERR_KEY_ID_MISMATCH` | the child | Its AKID does not match the next certificate's SKID. |
-| `ERR_UNKNOWN_CA` | `chainLen - 1` | No trust anchor names, is valid for, key-links to and signs the last certificate. |
+| `ERR_SIGNATURE` | the certificate whose issuer was sought | Certificates were sent under its issuer's name with agreeing key identifiers, but no key verifies its signature. |
+| `ERR_KEY_ID_MISMATCH` | the certificate whose issuer was sought | Certificates were sent under its issuer's name, but none has an SKID matching its AKID. |
+| `ERR_UNKNOWN_CA` | the top of the path | No trust anchor issued it, and no certificate sent names its issuer. |
 | `ERR_NOT_CA` | the intermediate | It lacks Basic Constraints with cA TRUE. |
 | `ERR_CA_KEY_USAGE` | the intermediate | Its Key Usage lacks keyCertSign. |
 | `ERR_PATH_LEN` | the CA, or `chainLen` | A pathLenConstraint is exceeded; `chainLen` means the trust anchor's own. |

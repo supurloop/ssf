@@ -1336,10 +1336,40 @@ void SSFX509UnitTest(void)
             chain[0] = leafDer; chainLens[0] = leafDerLen;
             chain[1] = midDer;  chainLens[1] = midDerLen;
             trust[0] = midDer;  trustLens[0] = midDerLen;
-            /* mid.test is NOT a CA, so chain verification should fail */
+            /* A trust anchor's own Basic Constraints are not checked (ssfx509.md): mid.test as */
+            /* the anchor issues the leaf and its copy sent after it is not on the path, so all */
+            /* CA checks pass and only the last check, the host name, fails (no SAN here).      */
             SSF_ASSERT(SSFX509VerifyChain(chain, chainLens, 2,
                        trust, trustLens, 1, "leaf2.test", nowTime, &_utVErr) == false);
-            _UT_VERR(ERR_NOT_CA, 1u);
+            _UT_VERR(ERR_HOSTNAME, 0u);
+
+            /* On the path below a real root, mid.test is NOT a CA: verification fails */
+            {
+                static uint8_t rootDer[SSF_X509_CONFIG_MAX_CERT_SIZE];
+                static uint8_t mid2Der[SSF_X509_CONFIG_MAX_CERT_SIZE];
+                static uint8_t rootPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+                static uint8_t rootPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+                static const uint8_t ser[] = { 0x31u };
+                static SSFX509GenParams_t mp;
+                size_t rootPubLen;
+                uint32_t rootDerLen;
+                uint32_t mid2Len;
+
+                SSF_ASSERT(_utMakeCA("root.test", ser, rootPriv, rootPub, &rootPubLen, rootDer,
+                                     sizeof(rootDer), &rootDerLen) == true);
+                _utGenBaseParams(&mp, ser, midPub, (uint32_t)midPubLen);
+                mp.issuer.cn = "root.test";
+                mp.subject.cn = "mid.test";
+                mp.addBasicConstraints = true;
+                mp.isCA = false;
+                mid2Len = _utSignCert(&mp, rootPriv, mid2Der, sizeof(mid2Der));
+                SSF_ASSERT(mid2Len != 0u);
+                chain[1] = mid2Der; chainLens[1] = mid2Len;
+                trust[0] = rootDer; trustLens[0] = rootDerLen;
+                SSF_ASSERT(SSFX509VerifyChain(chain, chainLens, 2,
+                           trust, trustLens, 1, "leaf2.test", nowTime, &_utVErr) == false);
+                _UT_VERR(ERR_NOT_CA, 1u);
+            }
         }
     }
 
@@ -4949,7 +4979,7 @@ void SSFX509UnitTest(void)
         chainLen[0] = leafLen;
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 2u, trust, trustLen, 1u, "x",
                                       1800000000ull, &_utVErr) == false);
-        _UT_VERR(ERR_ISSUER_MISMATCH, 0u);
+        _UT_VERR(ERR_UNKNOWN_CA, 0u);       /* No sent cert or anchor issued it */
 
         /* Same leaf with the correct issuer name verifies */
         p.issuer.cn = "ca";
@@ -6361,6 +6391,11 @@ void SSFX509UnitTest(void)
     {
         static uint8_t out[SSF_X509_CONFIG_MAX_CERT_SIZE];
         static uint8_t caOut[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t bcRootOut[SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint8_t bcRootPriv[SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t bcRootPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        size_t bcRootPubLen;
+        uint32_t bcRootLen;
         static uint8_t pubKey[SSF_ECDSA_MAX_PUB_KEY_SIZE];
         static uint8_t caPub[SSF_ECDSA_MAX_PUB_KEY_SIZE];
         static uint8_t fakeSig[64];
@@ -6457,11 +6492,14 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(n != 0u);
         SSF_ASSERT(SSFX509Parse(out, n, &parsed) == false);
 
-        /* A CA whose Basic Constraints body is malformed cannot issue: the chain is rejected */
+        /* A CA whose Basic Constraints body is malformed cannot issue: on the path below a root */
+        /* (a trust anchor's own Basic Constraints are not checked), the chain is rejected        */
+        SSF_ASSERT(_utMakeCA("root", serial, bcRootPriv, bcRootPub, &bcRootPubLen, bcRootOut,
+                             sizeof(bcRootOut), &bcRootLen) == true);
         SSF_ASSERT(SSFECDSAKeyGen(_UT_CURVE, caPriv, sizeof(caPriv), caPub, sizeof(caPub),
                                   &caPubLen) == true);
         _utGenBaseParams(&p, serial, caPub, (uint32_t)caPubLen);
-        p.issuer.cn = "ca";
+        p.issuer.cn = "root";
         p.subject.cn = "ca";
         p.addRawExt = true;
         p.rawExtOid = bcOid;
@@ -6469,7 +6507,7 @@ void SSFX509UnitTest(void)
         p.rawExtValue = notSeq;
         p.rawExtValueLen = sizeof(notSeq);
         p.rawExtCritical = true;
-        caLen = _utSignCert(&p, caPriv, caOut, sizeof(caOut));
+        caLen = _utSignCert(&p, bcRootPriv, caOut, sizeof(caOut));
         SSF_ASSERT(caLen != 0u);
         _utGenBaseParams(&p, serial, pubKey, 65u);
         p.issuer.cn = "ca";
@@ -6481,8 +6519,8 @@ void SSFX509UnitTest(void)
         chainLen[0] = n;
         chain[1] = caOut;
         chainLen[1] = caLen;
-        trust[0] = caOut;
-        trustLen[0] = caLen;
+        trust[0] = bcRootOut;
+        trustLen[0] = bcRootLen;
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 2u, trust, trustLen, 1u, "x",
                                       1800000000ull, &_utVErr) == false); _UT_VERR(ERR_NOT_CA, 1u);
 
@@ -7111,6 +7149,105 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, SSF_X509_CONFIG_MAX_CHAIN_DEPTH - 1u, trust,
                                       trustLen, 1u, "deep.test", 1800000000ull, &_utVErr) == false);
         _UT_VERR(ERR_UNKNOWN_CA, SSF_X509_CONFIG_MAX_CHAIN_DEPTH - 2u);
+    }
+
+    /* ---- Path building (RFC 8446 4.4.2): extraneous certificates and any order after the  ---- */
+    /* ---- leaf; the path ends at the first certificate a trust anchor issued              ---- */
+    {
+        enum { R_ROOT, R_OLD, R_OTHER, R_INT1, R_INT2, R_INT2W, R_LEAF, R_CROSS, R_CROSSX, R_JUNK,
+               R_LA, R_LB, R_LEAFL, R_INT2S, R_INT2WS, R_LEAFK, R_N };
+        static uint8_t der[R_N][SSF_X509_CONFIG_MAX_CERT_SIZE];
+        static uint32_t len[R_N];
+        static uint8_t priv[R_N][SSF_ECDSA_MAX_PRIV_KEY_SIZE];
+        static uint8_t pub[R_N][SSF_ECDSA_MAX_PUB_KEY_SIZE];
+        static size_t pubLen[R_N];
+        static const char *san[] = { "path.test", NULL };
+        static const uint8_t junkOid[] = { 0x2Bu, 0x06u, 0x01u, 0x04u, 0x01u, 0x83u, 0xB2u, 0x03u };
+        static const uint8_t junkVal[] = { 0x05u, 0x00u };
+        static const uint8_t idA[] = { 0xAAu };
+        static const uint8_t idB[] = { 0xBBu };
+        static SSFX509GenParams_t p;
+        uint8_t serial[] = { 0x16u };
+        const uint8_t *trust[1];
+        uint32_t trustLen[1];
+        uint32_t k;
+
+        /* Self-signed CAs: root is the only trust anchor */
+        SSF_ASSERT(_utMakeCA("root", serial, priv[R_ROOT], pub[R_ROOT], &pubLen[R_ROOT],
+                             der[R_ROOT], sizeof(der[R_ROOT]), &len[R_ROOT]));
+        SSF_ASSERT(_utMakeCA("old", serial, priv[R_OLD], pub[R_OLD], &pubLen[R_OLD],
+                             der[R_OLD], sizeof(der[R_OLD]), &len[R_OLD]));
+        SSF_ASSERT(_utMakeCA("other", serial, priv[R_OTHER], pub[R_OTHER], &pubLen[R_OTHER],
+                             der[R_OTHER], sizeof(der[R_OTHER]), &len[R_OTHER]));
+        trust[0] = der[R_ROOT];
+        trustLen[0] = len[R_ROOT];
+        for (k = R_INT1; k < R_N; k++)
+        {
+            SSF_ASSERT(SSFECDSAKeyGen(_UT_CURVE, priv[k], SSF_ECDSA_MAX_PRIV_KEY_SIZE, pub[k],
+                                      SSF_ECDSA_MAX_PUB_KEY_SIZE, &pubLen[k]));
+        }
+
+        /* Issues cert k (subject subj, CA unless it carries a SAN) with key keyIdx's key */
+        #define _UT_PATH_CERT(k, subj, iss, signer, keyIdx, isLeaf) do { \
+            _utGenBaseParams(&p, serial, pub[keyIdx], (uint32_t)pubLen[keyIdx]); \
+            p.subject.cn = (subj); p.issuer.cn = (iss); \
+            if (isLeaf) { p.sanDNSNames = san; } \
+            else { p.addBasicConstraints = true; p.isCA = true; p.addKeyUsage = true; \
+                   p.keyUsageBits = SSF_X509_KU_KEY_CERT_SIGN; } \
+            _utPathTweak(&p, (k)); \
+            len[k] = _utSignCert(&p, priv[signer], der[k], sizeof(der[k])); \
+            SSF_ASSERT(len[k] != 0u); } while (0)
+        #define _utPathTweak(pp, k) do { \
+            if ((k) == R_CROSSX) (pp)->notAfter = 1750000000ull; \
+            if ((k) == R_JUNK) { (pp)->addRawExt = true; (pp)->rawExtOid = junkOid; \
+                (pp)->rawExtOidLen = sizeof(junkOid); (pp)->rawExtValue = junkVal; \
+                (pp)->rawExtValueLen = sizeof(junkVal); (pp)->rawExtCritical = true; } \
+            if ((k) == R_INT2S) { (pp)->skid = idA; (pp)->skidLen = 1u; } \
+            if ((k) == R_INT2WS) { (pp)->skid = idB; (pp)->skidLen = 1u; } \
+            if ((k) == R_LEAFK) { (pp)->akid = idA; (pp)->akidLen = 1u; } } while (0)
+
+        _UT_PATH_CERT(R_INT1, "int1", "root", R_ROOT, R_INT1, false);
+        _UT_PATH_CERT(R_INT2, "int2", "int1", R_INT1, R_INT2, false);
+        _UT_PATH_CERT(R_INT2W, "int2", "int1", R_INT1, R_INT2W, false);  /* Same name, other key */
+        _UT_PATH_CERT(R_LEAF, "leaf", "int2", R_INT2, R_LEAF, true);
+        _UT_PATH_CERT(R_CROSS, "root", "old", R_OLD, R_ROOT, false);     /* Root key, cross-sign */
+        _UT_PATH_CERT(R_CROSSX, "root", "old", R_OLD, R_ROOT, false);    /* ... and expired */
+        _UT_PATH_CERT(R_JUNK, "junk", "other", R_OTHER, R_JUNK, false);  /* Unknown critical ext */
+        _UT_PATH_CERT(R_LA, "la", "lb", R_LB, R_LA, false);              /* la and lb issue each */
+        _UT_PATH_CERT(R_LB, "lb", "la", R_LA, R_LB, false);              /* other: a loop        */
+        _UT_PATH_CERT(R_LEAFL, "leaf", "la", R_LA, R_LEAFL, true);
+        _UT_PATH_CERT(R_INT2S, "int2", "int1", R_INT1, R_INT2, false);   /* SKID AA */
+        _UT_PATH_CERT(R_INT2WS, "int2", "int1", R_INT1, R_INT2W, false); /* SKID BB, other key */
+        _UT_PATH_CERT(R_LEAFK, "leaf", "int2", R_INT2, R_LEAFK, true);   /* AKID AA */
+        #undef _UT_PATH_CERT
+        #undef _utPathTweak
+
+        /* Verifies the chain of the listed certificates and checks the reported result */
+        #define _UT_PATH(_ok, _c, _i, ...) do { \
+            static const uint8_t _ids[] = { __VA_ARGS__ }; \
+            const uint8_t *_ch[sizeof(_ids)]; uint32_t _cl[sizeof(_ids)]; uint32_t _j; \
+            for (_j = 0; _j < sizeof(_ids); _j++) \
+            { _ch[_j] = der[_ids[_j]]; _cl[_j] = len[_ids[_j]]; } \
+            SSF_ASSERT(SSFX509VerifyChain(_ch, _cl, (uint8_t)sizeof(_ids), trust, trustLen, 1u, \
+                                          "path.test", 1800000000ull, &_utVErr) == (_ok)); \
+            _UT_VERR(_c, _i); } while (0)
+
+        _UT_PATH(true, OK, 0u, R_LEAF, R_INT2, R_INT1);                     /* In order */
+        _UT_PATH(true, OK, 0u, R_LEAF, R_INT2, R_INT1, R_ROOT);             /* Root sent */
+        _UT_PATH(true, OK, 0u, R_LEAF, R_INT2, R_INT1, R_CROSS);            /* "Long chain" */
+        _UT_PATH(true, OK, 0u, R_LEAF, R_INT2, R_INT1, R_CROSSX);           /* ... expired extra */
+        _UT_PATH(true, OK, 0u, R_LEAF, R_INT2, R_INT1, R_OTHER);            /* Unrelated extra */
+        _UT_PATH(true, OK, 0u, R_LEAF, R_INT2, R_INT1, R_JUNK);             /* Unused crit. ext */
+        _UT_PATH(true, OK, 0u, R_LEAF, R_INT1, R_INT2);                     /* Out of order */
+        _UT_PATH(true, OK, 0u, R_LEAF, R_INT1, R_OTHER, R_INT2);
+        _UT_PATH(true, OK, 0u, R_LEAF, R_INT2, R_INT2, R_INT1);             /* Duplicate */
+        _UT_PATH(true, OK, 0u, R_LEAF, R_INT2W, R_INT2, R_INT1);            /* Same-name decoy */
+        _UT_PATH(true, OK, 0u, R_LEAFK, R_INT2WS, R_INT2S, R_INT1);         /* Key ids pick int2 */
+        _UT_PATH(false, ERR_UNKNOWN_CA, 1u, R_LEAF, R_INT2);                /* int1 missing */
+        _UT_PATH(false, ERR_UNKNOWN_CA, 2u, R_LEAFL, R_LA, R_LB);           /* A loop ends */
+        _UT_PATH(false, ERR_SIGNATURE, 0u, R_LEAF, R_INT2W, R_INT1);        /* Only the decoy */
+        _UT_PATH(false, ERR_KEY_ID_MISMATCH, 0u, R_LEAFK, R_INT2WS, R_INT1); /* Key id rules out */
+        #undef _UT_PATH
     }
 
     /* ---- SAN cap: more than SSF_X509_CONFIG_MAX_SAN_ENTRIES SANs fails to parse (X509-16) ---- */
@@ -8262,7 +8399,7 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 2u, trust, trustLen, 1u, "signer",
                                       now, &_utVErr) == false); _UT_VERR(ERR_HOSTNAME, 0u);
 
-        /* Everything else about the chain is still enforced: expiry and a bad issuer name */
+        /* Everything else about the chain is still enforced: expiry and an unknown issuer name */
         SSF_ASSERT(SSFX509VerifyChainPurpose(chain, chainLen, 2u, trust, trustLen, 1u,
                                              SSF_X509_PURPOSE_CODE_SIGNING, NULL,
                                              2000000001ull, &_utVErr) == false);
@@ -8272,7 +8409,7 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(SSFX509VerifyChainPurpose(chain, chainLen, 2u, trust, trustLen, 1u,
                                              SSF_X509_PURPOSE_CODE_SIGNING, NULL, now,
                                                  &_utVErr) == false);
-        _UT_VERR(ERR_ISSUER_MISMATCH, 0u);
+        _UT_VERR(ERR_UNKNOWN_CA, 0u);       /* No sent cert or anchor issued it */
         p.issuer.cn = "ca";
 
         /* EKU codeSigning is parsed, generated, and honored */

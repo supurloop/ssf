@@ -3571,6 +3571,92 @@ static bool _SSFX509IsKnownExtension(const uint8_t *oidRaw, uint32_t oidRawLen)
     (errOut)->code = (failCode); \
     (errOut)->certIdx = (uint8_t)(failIdx); } while (0)
 
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: the checks every certificate on a path must pass on its own (RFC 5280 6.1.1 (c),    */
+/* 4.1.1.2, 4.1.2.3, 6.1.3 (a)(2)). Returns true, else false with *errOut naming chainDer[idx].  */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFX509PathCertCheck(const SSFX509Cert_t *cert, uint8_t idx, uint64_t nowUnixSec,
+                                  SSFX509VerifyErr_t *errOut)
+{
+    SSF_REQUIRE(cert != NULL);
+    SSF_REQUIRE(errOut != NULL);
+
+    /* Is it v3, as RFC 5280 Sec. 6.1.1 (c) requires of every chain certificate? */
+    if (cert->version != 2u)
+    {
+        /* No, v1 and v2 certificates cannot carry the extensions this path relies on */
+        SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX, "Chain: cert[%u] is v%u (must be v3)", idx,
+                                 cert->version + 1u);
+        _SSF_X509_VERIFY_FAIL(errOut, SSF_X509_VERIFY_ERR_VERSION, idx);
+        return false;
+    }
+
+    /* Does the TBS signature algorithm OID equal the outer one (Sec. 4.1.2.3)? */
+    if ((cert->sigAlgOidRawLen != cert->outerSigAlgOidRawLen) ||
+        (memcmp(cert->sigAlgOidRaw, cert->outerSigAlgOidRaw, cert->sigAlgOidRawLen) != 0))
+    {
+        /* No, the unsigned outer copy disagrees with the signed one */
+        SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
+            "Chain: cert[%u] TBS sigAlg OID (%lu bytes) != outer sigAlg OID (%lu bytes)", idx,
+            (unsigned long)cert->sigAlgOidRawLen, (unsigned long)cert->outerSigAlgOidRawLen);
+        _SSF_X509_VERIFY_FAIL(errOut, SSF_X509_VERIFY_ERR_SIG_ALG_MISMATCH, idx);
+        return false;
+    }
+
+    /* Are the signature algorithm parameters identical as well (Sec. 4.1.1.2)? */
+    if ((cert->sigAlgParamsLen != cert->outerSigAlgParamsLen) ||
+        ((cert->sigAlgParamsLen > 0u) &&
+         (memcmp(cert->sigAlgParams, cert->outerSigAlgParams, cert->sigAlgParamsLen) != 0)))
+    {
+        /* No */
+        SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
+            "Chain: cert[%u] TBS sigAlg params (%lu bytes) != outer params (%lu bytes)", idx,
+            (unsigned long)cert->sigAlgParamsLen, (unsigned long)cert->outerSigAlgParamsLen);
+        _SSF_X509_VERIFY_FAIL(errOut, SSF_X509_VERIFY_ERR_SIG_ALG_MISMATCH, idx);
+        return false;
+    }
+
+    /* Is it within its validity period at nowUnixSec? */
+    if (!SSFX509IsValid(cert, nowUnixSec))
+    {
+        /* No */
+        SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
+            "Chain: cert[%u] not valid at time %llu (notBefore=%llu notAfter=%llu)", idx,
+            (unsigned long long)nowUnixSec, (unsigned long long)cert->notBefore,
+            (unsigned long long)cert->notAfter);
+        _SSF_X509_VERIFY_FAIL(errOut, (nowUnixSec < cert->notBefore) ?
+                              SSF_X509_VERIFY_ERR_NOT_YET_VALID : SSF_X509_VERIFY_ERR_EXPIRED,
+                              idx);
+        return false;
+    }
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: returns true if a trust anchor names, is valid for, key-links to and signs cert,   */
+/* with that anchor parsed into *anchor, else false.                                             */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFX509FindAnchor(const SSFX509Cert_t *cert, const uint8_t **trustDer,
+                               const uint32_t *trustDerLen, uint8_t trustCount,
+                               uint64_t nowUnixSec, SSFX509Cert_t *anchor)
+{
+    uint8_t j;
+
+    SSF_REQUIRE(cert != NULL);
+    SSF_REQUIRE(anchor != NULL);
+
+    for (j = 0; j < trustCount; j++)
+    {
+        SSF_REQUIRE(trustDer[j] != NULL);
+        if (!SSFX509Parse(trustDer[j], trustDerLen[j], anchor)) continue;
+        if (!_SSFX509NameEquals(&cert->issuer, &anchor->subject)) continue;
+        if (!SSFX509IsValid(anchor, nowUnixSec)) continue;
+        if (!SSFX509CheckSKIDAKID(cert, anchor)) continue;
+        if (SSFX509VerifyCertSignature(cert, anchor)) return true;
+    }
+    return false;
+}
+
 /* Stack use is sized by SSF_X509_CONFIG_MAX_CHAIN_DEPTH; see ssfx509.md */
 #ifdef _WIN32
 #pragma warning(push)
@@ -3588,8 +3674,10 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
 {
     SSFX509Cert_t certs[SSF_X509_CONFIG_MAX_CHAIN_DEPTH];
     SSFX509Cert_t anchor;
-    const SSFX509Cert_t *last;
-    bool trusted = false;
+    bool isParsed[SSF_X509_CONFIG_MAX_CHAIN_DEPTH];
+    bool onPath[SSF_X509_CONFIG_MAX_CHAIN_DEPTH];
+    uint8_t path[SSF_X509_CONFIG_MAX_CHAIN_DEPTH];
+    uint8_t pathLen;
     bool matched = false;
     uint8_t numSubCAs;
     uint8_t i;
@@ -3611,183 +3699,145 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
     errOut->code = SSF_X509_VERIFY_OK;
     errOut->certIdx = 0;
 
+    /* Parse what was sent. Only chainDer[0] is required to be usable: the others are candidate */
+    /* issuers, and one that does not parse is simply never on the path.                        */
     for (i = 0; i < chainLen; i++)
     {
         SSF_REQUIRE(chainDer[i] != NULL);
-
-        /* Does the chain certificate parse? */
-        if (!SSFX509Parse(chainDer[i], chainDerLen[i], &certs[i]))
-        {
-            /* No, malformed */
-            SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX, "Chain: parse cert[%u] failed (%lu bytes)",
-                                     i, (unsigned long)chainDerLen[i]);
-            _SSF_X509_VERIFY_FAIL(errOut, SSF_X509_VERIFY_ERR_PARSE, i);
-            return false;
-        }
-
-        /* Is it v3, as RFC 5280 Sec. 6.1.1 (c) requires of every chain certificate? */
-        if (certs[i].version != 2u)
-        {
-            /* No, v1 and v2 certificates cannot carry the extensions this path relies on */
-            SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX, "Chain: cert[%u] is v%u (must be v3)", i,
-                                     certs[i].version + 1u);
-            _SSF_X509_VERIFY_FAIL(errOut, SSF_X509_VERIFY_ERR_VERSION, i);
-            return false;
-        }
-
-        /* Does the TBS signature algorithm OID equal the outer one (Sec. 4.1.2.3)? */
-        if ((certs[i].sigAlgOidRawLen != certs[i].outerSigAlgOidRawLen) ||
-            (memcmp(certs[i].sigAlgOidRaw, certs[i].outerSigAlgOidRaw,
-                    certs[i].sigAlgOidRawLen) != 0))
-        {
-            /* No, the unsigned outer copy disagrees with the signed one */
-            SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
-                "Chain: cert[%u] TBS sigAlg OID (%lu bytes) != outer sigAlg OID (%lu bytes)", i,
-                (unsigned long)certs[i].sigAlgOidRawLen,
-                (unsigned long)certs[i].outerSigAlgOidRawLen);
-            _SSF_X509_VERIFY_FAIL(errOut, SSF_X509_VERIFY_ERR_SIG_ALG_MISMATCH, i);
-            return false;
-        }
-
-        /* Are the signature algorithm parameters identical as well (Sec. 4.1.1.2)? */
-        if ((certs[i].sigAlgParamsLen != certs[i].outerSigAlgParamsLen) ||
-            ((certs[i].sigAlgParamsLen > 0u) &&
-             (memcmp(certs[i].sigAlgParams, certs[i].outerSigAlgParams,
-                     certs[i].sigAlgParamsLen) != 0)))
-        {
-            /* No */
-            SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
-                "Chain: cert[%u] TBS sigAlg params (%lu bytes) != outer params (%lu bytes)", i,
-                (unsigned long)certs[i].sigAlgParamsLen,
-                (unsigned long)certs[i].outerSigAlgParamsLen);
-            _SSF_X509_VERIFY_FAIL(errOut, SSF_X509_VERIFY_ERR_SIG_ALG_MISMATCH, i);
-            return false;
-        }
-
-        /* Is it within its validity period at nowUnixSec? */
-        if (!SSFX509IsValid(&certs[i], nowUnixSec))
-        {
-            /* No */
-            SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
-                "Chain: cert[%u] not valid at time %llu (notBefore=%llu notAfter=%llu)", i,
-                (unsigned long long)nowUnixSec, (unsigned long long)certs[i].notBefore,
-                (unsigned long long)certs[i].notAfter);
-            _SSF_X509_VERIFY_FAIL(errOut, (nowUnixSec < certs[i].notBefore) ?
-                                  SSF_X509_VERIFY_ERR_NOT_YET_VALID : SSF_X509_VERIFY_ERR_EXPIRED,
-                                  i);
-            return false;
-        }
-    }
-    last = &certs[chainLen - 1u];
-
-    /* Each cert[i] is named for, signed by, and key-linked to cert[i + 1] */
-    for (i = 0; i < (uint8_t)(chainLen - 1u); i++)
-    {
-        /* Is the issuer name of cert[i] the subject name of cert[i + 1] (Sec. 6.1.3 (a)(4))? */
-        if (!_SSFX509NameEquals(&certs[i].issuer, &certs[i + 1u].subject))
-        {
-            /* No, the chain is not linked by name even if the key happens to verify */
-            SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
-                "Chain: cert[%u] issuer name does not match cert[%u] subject name", i, i + 1u);
-            _SSF_X509_VERIFY_FAIL(errOut, SSF_X509_VERIFY_ERR_ISSUER_MISMATCH, i);
-            return false;
-        }
-
-        /* Does the signature of cert[i] verify with the key of cert[i + 1]? */
-        if (!SSFX509VerifyCertSignature(&certs[i], &certs[i + 1u]))
-        {
-            /* No */
-            SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
-                "Chain: cert[%u] signature by cert[%u] FAILED", i, i + 1u);
-            _SSF_X509_VERIFY_FAIL(errOut, SSF_X509_VERIFY_ERR_SIGNATURE, i);
-            return false;
-        }
-
-        /* Does cert[i]'s AKID agree with cert[i + 1]'s SKID when both are present (4.2.1.1)? */
-        if (!SSFX509CheckSKIDAKID(&certs[i], &certs[i + 1u]))
-        {
-            /* No */
-            SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
-                "Chain: cert[%u] AKID (%lu bytes) does not match cert[%u] SKID (%lu bytes)", i,
-                (unsigned long)certs[i].akidLen, i + 1u, (unsigned long)certs[i + 1u].skidLen);
-            _SSF_X509_VERIFY_FAIL(errOut, SSF_X509_VERIFY_ERR_KEY_ID_MISMATCH, i);
-            return false;
-        }
+        isParsed[i] = SSFX509Parse(chainDer[i], chainDerLen[i], &certs[i]);
+        onPath[i] = false;
     }
 
-    /* Some trust anchor names, is valid for, key-links to, and signs the last chain cert */
-    memset(&anchor, 0, sizeof(anchor));
-    for (j = 0; (j < trustCount) && (!trusted); j++)
+    /* Does the leaf parse? */
+    if (!isParsed[0])
     {
-        SSF_REQUIRE(trustDer[j] != NULL);
-        if (!SSFX509Parse(trustDer[j], trustDerLen[j], &anchor)) continue;
-        if (!_SSFX509NameEquals(&last->issuer, &anchor.subject)) continue;
-        if (!SSFX509IsValid(&anchor, nowUnixSec)) continue;
-        if (!SSFX509CheckSKIDAKID(last, &anchor)) continue;
-        trusted = SSFX509VerifyCertSignature(last, &anchor);
-    }
-
-    /* Is the chain anchored? */
-    if (!trusted)
-    {
-        /* No */
-        SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
-            "Chain: no trust anchor found for issuer of cert[%u] (%u CAs checked)", chainLen - 1u,
-            trustCount);
-        _SSF_X509_VERIFY_FAIL(errOut, SSF_X509_VERIFY_ERR_UNKNOWN_CA, (uint8_t)(chainLen - 1u));
+        /* No, malformed */
+        SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX, "Chain: parse cert[0] failed (%lu bytes)",
+                                 (unsigned long)chainDerLen[0]);
+        _SSF_X509_VERIFY_FAIL(errOut, SSF_X509_VERIFY_ERR_PARSE, 0u);
         return false;
+    }
+    if (!_SSFX509PathCertCheck(&certs[0], 0u, nowUnixSec, errOut)) return false;
+
+    /* Build the path from the leaf (RFC 8446 4.4.2: other certificates may be extraneous and in */
+    /* any order). It ends at the first certificate a trust anchor issued, so a copy of the root */
+    /* or a cross-signed root after it is never used. Each step takes the first unused          */
+    /* certificate named as the issuer whose key identifier agrees, that passes its own checks */
+    /* and whose key verifies the signature; there is no backtracking past a completed step.   */
+    path[0] = 0u;
+    onPath[0] = true;
+    pathLen = 1u;
+    for (;;)
+    {
+        uint8_t cur = path[pathLen - 1u];
+        uint8_t next = SSF_X509_CONFIG_MAX_CHAIN_DEPTH;
+        uint8_t rank = 0u;              /* 0 none named it, 1 key id, 2 signature, 3 own checks */
+        SSFX509VerifyErr_t best;
+
+        /* Did a trust anchor issue cur? */
+        if (_SSFX509FindAnchor(&certs[cur], trustDer, trustDerLen, trustCount, nowUnixSec,
+                               &anchor))
+        {
+            /* Yes, the path is complete */
+            break;
+        }
+
+        /* No, look for its issuer among the certificates sent and not yet on the path */
+        best.code = SSF_X509_VERIFY_ERR_UNKNOWN_CA;
+        best.certIdx = cur;
+        for (j = 1u; (j < chainLen) && (next == SSF_X509_CONFIG_MAX_CHAIN_DEPTH); j++)
+        {
+            SSFX509VerifyErr_t err;
+
+            if ((!isParsed[j]) || onPath[j]) continue;
+            if (!_SSFX509NameEquals(&certs[cur].issuer, &certs[j].subject)) continue;
+            if (!SSFX509CheckSKIDAKID(&certs[cur], &certs[j]))
+            {
+                if (rank < 1u)
+                {
+                    rank = 1u;
+                    best.code = SSF_X509_VERIFY_ERR_KEY_ID_MISMATCH;
+                    best.certIdx = cur;
+                }
+                continue;
+            }
+            if (!_SSFX509PathCertCheck(&certs[j], j, nowUnixSec, &err))
+            {
+                if (rank < 3u) { rank = 3u; best = err; }
+                continue;
+            }
+            if (!SSFX509VerifyCertSignature(&certs[cur], &certs[j]))
+            {
+                if (rank < 2u)
+                {
+                    rank = 2u;
+                    best.code = SSF_X509_VERIFY_ERR_SIGNATURE;
+                    best.certIdx = cur;
+                }
+                continue;
+            }
+            next = j;
+        }
+
+        /* Was an issuer found? */
+        if (next == SSF_X509_CONFIG_MAX_CHAIN_DEPTH)
+        {
+            /* No */
+            SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
+                "Chain: no trust anchor or usable issuer for cert[%u] (code %d, cert[%u])", cur,
+                (int)best.code, best.certIdx);
+            _SSF_X509_VERIFY_FAIL(errOut, best.code, best.certIdx);
+            return false;
+        }
+        path[pathLen] = next;
+        onPath[next] = true;
+        pathLen++;
     }
 
     /* Every intermediate is a CA allowed to sign, within its path length (Sec. 6.1.4 (h), (k)) */
-    for (i = 1; i < chainLen; i++)
+    for (i = 1; i < pathLen; i++)
     {
+        const SSFX509Cert_t *ca = &certs[path[i]];
+
         /* Are Basic Constraints present with cA TRUE? */
-        if ((!certs[i].hasBasicConstraints) || (!certs[i].isCA))
+        if ((!ca->hasBasicConstraints) || (!ca->isCA))
         {
             /* No */
             SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
                 "Chain: cert[%u] not a CA (hasBC=%d isCA=%d)",
-                i, certs[i].hasBasicConstraints, certs[i].isCA);
-            _SSF_X509_VERIFY_FAIL(errOut, SSF_X509_VERIFY_ERR_NOT_CA, i);
+                path[i], ca->hasBasicConstraints, ca->isCA);
+            _SSF_X509_VERIFY_FAIL(errOut, SSF_X509_VERIFY_ERR_NOT_CA, path[i]);
             return false;
         }
 
         /* Does Key Usage, when present, include keyCertSign? */
-        if ((certs[i].hasKeyUsage) && ((certs[i].keyUsageBits & SSF_X509_KU_KEY_CERT_SIGN) == 0u))
+        if ((ca->hasKeyUsage) && ((ca->keyUsageBits & SSF_X509_KU_KEY_CERT_SIGN) == 0u))
         {
             /* No */
             SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
-                "Chain: cert[%u] is CA but Key Usage lacks keyCertSign (KU=0x%04X)", i,
-                certs[i].keyUsageBits);
-            _SSF_X509_VERIFY_FAIL(errOut, SSF_X509_VERIFY_ERR_CA_KEY_USAGE, i);
+                "Chain: cert[%u] is CA but Key Usage lacks keyCertSign (KU=0x%04X)", path[i],
+                ca->keyUsageBits);
+            _SSF_X509_VERIFY_FAIL(errOut, SSF_X509_VERIFY_ERR_CA_KEY_USAGE, path[i]);
             return false;
         }
 
-        /* Is the subordinate CA count below cert[i], (i - 1), within its pathLenConstraint? */
-        if ((certs[i].pathLenConstraint >= 0) && ((int8_t)(i - 1u) > certs[i].pathLenConstraint))
+        /* Is the subordinate CA count below it, (i - 1), within its pathLenConstraint? */
+        if ((ca->pathLenConstraint >= 0) && ((int8_t)(i - 1u) > ca->pathLenConstraint))
         {
             /* No */
             SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
-                "Chain: cert[%u] pathLenConstraint=%d but %u subordinate CAs present", i,
-                certs[i].pathLenConstraint, i - 1u);
-            _SSF_X509_VERIFY_FAIL(errOut, SSF_X509_VERIFY_ERR_PATH_LEN, i);
+                "Chain: cert[%u] pathLenConstraint=%d but %u subordinate CAs present", path[i],
+                ca->pathLenConstraint, i - 1u);
+            _SSF_X509_VERIFY_FAIL(errOut, SSF_X509_VERIFY_ERR_PATH_LEN, path[i]);
             return false;
         }
     }
 
-    /* anchor is the one whose key verified the last chain cert; only its constraints apply */
-    numSubCAs = (chainLen >= 2u) ? (uint8_t)(chainLen - 1u) : 0u;
+    /* anchor issued the top of the path; only its constraints apply. Every path certificate */
+    /* after the leaf is a subordinate CA (the anchor itself is never on the path).          */
+    numSubCAs = (uint8_t)(pathLen - 1u);
 
-    /* Is the last chain cert the anchor itself, as servers that send the root do? */
-    if ((numSubCAs > 0u) && (chainDerLen[chainLen - 1u] == trustDerLen[j - 1u]) &&
-        (memcmp(chainDer[chainLen - 1u], trustDer[j - 1u], trustDerLen[j - 1u]) == 0))
-    {
-        /* Yes, it is not a subordinate of itself */
-        numSubCAs--;
-    }
-    /* No */
-
-    /* Are the chain's subordinate CAs within the anchor's pathLenConstraint (Sec. 6.1.4 (k))? */
+    /* Are the path's subordinate CAs within the anchor's pathLenConstraint (Sec. 6.1.4 (k))? */
     if ((anchor.pathLenConstraint >= 0) && ((int8_t)numSubCAs > anchor.pathLenConstraint))
     {
         /* No */
@@ -3798,16 +3848,16 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
         return false;
     }
 
-    /* Every chain cert's SANs must satisfy the anchor's Name Constraints (Sec. 6.1.4 (g)) */
-    for (i = 0; (anchor.hasNameConstraints) && (i < chainLen); i++)
+    /* Every path cert's SANs must satisfy the anchor's Name Constraints (Sec. 6.1.4 (g)) */
+    for (i = 0; (anchor.hasNameConstraints) && (i < pathLen); i++)
     {
-        /* Does cert[i] satisfy them? */
-        if (!_SSFX509NCValidateCert(&certs[i], &anchor))
+        /* Does it satisfy them? */
+        if (!_SSFX509NCValidateCert(&certs[path[i]], &anchor))
         {
             /* No */
             SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
-                "Chain: cert[%u] SAN violates nameConstraints of trust anchor", i);
-            _SSF_X509_VERIFY_FAIL(errOut, SSF_X509_VERIFY_ERR_NAME_CONSTRAINTS, i);
+                "Chain: cert[%u] SAN violates nameConstraints of trust anchor", path[i]);
+            _SSF_X509_VERIFY_FAIL(errOut, SSF_X509_VERIFY_ERR_NAME_CONSTRAINTS, path[i]);
             return false;
         }
     }
@@ -3839,34 +3889,35 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
     }
 
     /* Every subordinate of a constrained intermediate satisfies its Name Constraints (6.1.4 (g)) */
-    for (i = 1; i < chainLen; i++)
+    for (i = 1; i < pathLen; i++)
     {
-        for (j = 0; (certs[i].hasNameConstraints) && (j < i); j++)
+        for (j = 0; (certs[path[i]].hasNameConstraints) && (j < i); j++)
         {
-            /* Does cert[j] violate them? */
-            if (!_SSFX509NCValidateCert(&certs[j], &certs[i]))
+            /* Does the subordinate violate them? */
+            if (!_SSFX509NCValidateCert(&certs[path[j]], &certs[path[i]]))
             {
                 /* Yes */
                 SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
-                    "Chain: cert[%u] SAN violates nameConstraints of cert[%u]", j, i);
-                _SSF_X509_VERIFY_FAIL(errOut, SSF_X509_VERIFY_ERR_NAME_CONSTRAINTS, j);
+                    "Chain: cert[%u] SAN violates nameConstraints of cert[%u]", path[j], path[i]);
+                _SSF_X509_VERIFY_FAIL(errOut, SSF_X509_VERIFY_ERR_NAME_CONSTRAINTS, path[j]);
                 return false;
             }
         }
     }
 
-    /* No chain cert carries a critical extension this verifier does not understand (Sec. 4.2) */
-    for (i = 0; i < chainLen; i++)
+    /* No path cert carries a critical extension this verifier does not understand (Sec. 4.2) */
+    for (i = 0; i < pathLen; i++)
     {
-        for (e = 0; e < certs[i].extsLen; e++)
+        const SSFX509Cert_t *c = &certs[path[i]];
+
+        for (e = 0; e < c->extsLen; e++)
         {
-            if (!certs[i].exts[e].critical) continue;
-            if (_SSFX509IsKnownExtension(certs[i].exts[e].oidRaw,
-                                         certs[i].exts[e].oidRawLen)) continue;
+            if (!c->exts[e].critical) continue;
+            if (_SSFX509IsKnownExtension(c->exts[e].oidRaw, c->exts[e].oidRawLen)) continue;
             SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
-                "Chain: cert[%u] has unrecognized critical extension (OID %lu bytes)", i,
-                (unsigned long)certs[i].exts[e].oidRawLen);
-            _SSF_X509_VERIFY_FAIL(errOut, SSF_X509_VERIFY_ERR_CRITICAL_EXT, i);
+                "Chain: cert[%u] has unrecognized critical extension (OID %lu bytes)", path[i],
+                (unsigned long)c->exts[e].oidRawLen);
+            _SSF_X509_VERIFY_FAIL(errOut, SSF_X509_VERIFY_ERR_CRITICAL_EXT, path[i]);
             return false;
         }
     }

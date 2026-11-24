@@ -1200,7 +1200,6 @@ static void _SSFTLSCUTChainAlert(void)
     {
         { SSF_X509_VERIFY_ERR_PARSE,            42u },  /* bad_certificate */
         { SSF_X509_VERIFY_ERR_SIG_ALG_MISMATCH, 42u },
-        { SSF_X509_VERIFY_ERR_ISSUER_MISMATCH,  42u },
         { SSF_X509_VERIFY_ERR_SIGNATURE,        42u },
         { SSF_X509_VERIFY_ERR_KEY_ID_MISMATCH,  42u },
         { SSF_X509_VERIFY_ERR_HOSTNAME,         42u },  /* As OpenSSL and GnuTLS send */

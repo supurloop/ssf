@@ -308,10 +308,9 @@ typedef enum SSFX509VerifyCode
     SSF_X509_VERIFY_ERR_SIG_ALG_MISMATCH,   /* certIdx TBS and outer signature algorithm differ */
     SSF_X509_VERIFY_ERR_NOT_YET_VALID,      /* certIdx notBefore is after nowUnixSec           */
     SSF_X509_VERIFY_ERR_EXPIRED,            /* certIdx notAfter is before nowUnixSec           */
-    SSF_X509_VERIFY_ERR_ISSUER_MISMATCH,    /* certIdx issuer is not certIdx + 1's subject     */
-    SSF_X509_VERIFY_ERR_SIGNATURE,          /* certIdx signature fails with certIdx + 1's key  */
-    SSF_X509_VERIFY_ERR_KEY_ID_MISMATCH,    /* certIdx AKID is not certIdx + 1's SKID          */
-    SSF_X509_VERIFY_ERR_UNKNOWN_CA,         /* No trust anchor issued certIdx (the last cert)  */
+    SSF_X509_VERIFY_ERR_SIGNATURE,          /* certIdx's named issuers' keys do not verify it  */
+    SSF_X509_VERIFY_ERR_KEY_ID_MISMATCH,    /* certIdx's named issuers' SKIDs differ from AKID */
+    SSF_X509_VERIFY_ERR_UNKNOWN_CA,         /* No anchor or certificate sent issued certIdx    */
     SSF_X509_VERIFY_ERR_NOT_CA,             /* Intermediate certIdx lacks basicConstraints cA  */
     SSF_X509_VERIFY_ERR_CA_KEY_USAGE,       /* Intermediate certIdx Key Usage lacks keyCertSign */
     SSF_X509_VERIFY_ERR_PATH_LEN,           /* pathLenConstraint of certIdx (chainLen: anchor) */

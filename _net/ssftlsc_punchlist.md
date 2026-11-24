@@ -308,10 +308,28 @@ is rejected.
       the truncation trace. `README.md` updated afterwards (3B item R): footnote 58
       default 6, X.509 stack ~14 -> ~12 KB, CMS ~18 -> ~16 KB (the verifier frame measured
       -1,776 B on Cortex-M4 -Os at depth 6 vs 8).
-- [ ] Out-of-order or extraneous certificates: RFC 8446 4.4.2 says receivers SHOULD handle
+- [x] Out-of-order or extraneous certificates: RFC 8446 4.4.2 says receivers SHOULD handle
       "potentially extraneous certificates and arbitrary orderings" (leaf first). `ssfx509`
       requires cert[i] to be issued by cert[i + 1], so such chains fail. Needs path building in
-      `ssfx509`. Outside the TLS client.
+      `ssfx509`. Outside the TLS client. Fixed (3B item P, approved, both parts):
+      `SSFX509VerifyChainPurpose` builds the path from the leaf. A step ends the path when a
+      trust anchor issued the current certificate; otherwise it takes the first unused
+      certificate sent that names the issuer, agrees on key ids, passes its own checks (v3,
+      signature algorithms, validity) and verifies the signature; no backtracking past a
+      completed step. Only path certificates are checked, so extra ones (cross-signed root,
+      unrelated CA, duplicate, unparseable, expired) do no harm; a sent copy of an anchor is never
+      on the path. `ERR_ISSUER_MISMATCH` removed (a name mismatch only means "not this one");
+      a failed step reports the most specific reason (candidate's own check, SIGNATURE,
+      KEY_ID_MISMATCH, else UNKNOWN_CA on the top of the path). `ssfx509.md` describes it.
+      Unit: 15 path cases (long chain, expired extra, unrelated extra, unused critical extension,
+      out of order, duplicate, same-name decoy, key-id choice, missing issuer, a loop, decoy
+      only, key id only); four old expectations changed as predicted (two ISSUER_MISMATCH ->
+      UNKNOWN_CA; two tests that made a non-CA the trust anchor now put it under a real root to
+      keep NOT_CA coverage). Wire, all failing before: long chain, unrelated extra, out of order
+      now verify. Cortex-M4 -Os: ssfx509 text -241 B, verifier frame +8 B.
+- [ ] `ssfcms` builds its own signer chain (`_SSFCMSBuildChain`) before calling the verifier,
+      which now builds paths itself; dropping it may save code. Measure first. Outside the TLS
+      client.
 - [x] Long single steps: P-384/RSA chain verification can take a long time inline on small
       targets; consider splitting verification per certificate across `pollOpen()` calls. Closed (3B item I) by
       documenting the current design, per the user; not measured on a target. `ssftlsc.h`

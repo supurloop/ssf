@@ -445,7 +445,34 @@ is rejected.
       `unexpected_message`; even without a client certificate, RFC 8446 4.4.2 lets the client
       answer with an empty Certificate. Interop with GnuTLS currently needs
       `--disable-client-cert`.
-- [ ] Private key loading: PKCS#8 / SEC 1 / PEM.
+- [x] Private key loading: PKCS#8 / SEC 1 / PEM. Done (approved: two new codec modules).
+      `ssfpem` (RFC 7468): one block per call, multi-block buffers, strict Base64 via
+      `SSFBase64Decode`, whitespace anywhere, NULL output to check/measure, all output zeroed on
+      failure; meant for trust store loading (item 5) too. `ssfpkey`: PKCS#8 v1/v2 (RSA, P-256,
+      P-384, Ed25519), SEC 1, PKCS#1, in PEM (label decides the format) or DER (structure
+      decides); validated (EC scalar in [1, n-1], short scalar left-padded, curve agreement,
+      `SSFRSAPrivKeyIsValid`, exact framing) and a public key in the file must match the
+      derived one; encrypted PKCS#8 refused; exactly one key block, other blocks checked and
+      skipped; key and DER buffer wiped on failure. Unit tests from OpenSSL 4.0 fixtures
+      (each key also signs and verifies against OpenSSL's public key) plus built negative
+      cases; 26 mutants all killed (3 survivors first, each closed by a new test); ASan clean.
+      Cortex-M4 -Os: ssfpem 742 B, ssfpkey 1,694 B; stack ~7.2 KB EC, ~19.1 KB RSA (key
+      validation, below RSA signing), ~1.5 KB Ed25519. Docs: `ssfpem.md`, `ssfpkey.md`, README
+      rows. Using the key for client authentication is item 1b.
+      Audit (correctness and security): line-by-line review plus 1.6M-input ASan/UBSan
+      mutation fuzz with exact-size buffers (no faults; wipe-on-failure and key-consistency
+      invariants held) and an OpenSSL differential (every accepted key accepted by OpenSSL
+      with the same private value; every OpenSSL-only accept was key material OpenSSL does
+      not check, or a SEC 1 version other than 1). Fixed, TDD: (1) the last Base64 group was
+      left in `SSFPEMDecodeNext`'s stack scratch on success; scratch now wiped at a single
+      exit, checked by a unit-test hook on every return. (2) `SSF_PKEY_TYPE_NONE` = 0, so a
+      wiped or failed key is not an RSA key. (3) BEGIN / END lines must start a line (as
+      OpenSSL requires); PEM disagreements with OpenSSL 507 -> 8, all the documented lax
+      whitespace. (4) docs: output buffers must not overlap the input. (5) docs: refused
+      forms some tools write (RSA-PSS OID keys, compressed EC public key, RSA PKCS#8 without
+      NULL parameters). 30 mutants all killed. Not fixed here (belongs to F): secret-derived
+      temporaries left on the stack by the EC / Ed25519 public-key derivations and the RSA
+      validator's callees; `SSFECDSAPubKeyFromPrivKey` does not wipe `d` when it rejects it.
 - [ ] KeyUpdate: install new receive keys, answer `update_requested`; send-side KeyUpdate before
       the AEAD record limit.
 - [ ] ALPN (e.g. `x-amzn-mqtt-ca` for AWS IoT on 443).

@@ -16,6 +16,8 @@ Encoding and decoding interfaces.
 | ssfini | INI file parser/generator | ssfini.c, ssfini.h | [ssfini.md](ssfini.md) |
 | ssfjson | JSON parser/generator | ssfjson.c, ssfjson.h | [ssfjson.md](ssfjson.md) |
 | ssfmatch | Pattern matching: case-insensitive compare, glob, URI path templates | ssfmatch.c, ssfmatch.h | [ssfmatch.md](ssfmatch.md) |
+| ssfpem | PEM (RFC 7468) block decoder | ssfpem.c, ssfpem.h | [ssfpem.md](ssfpem.md) |
+| ssfpkey | Private key decoder: PKCS#8, SEC 1, PKCS#1 in PEM or DER | ssfpkey.c, ssfpkey.h | [ssfpkey.md](ssfpkey.md) |
 | ssfstr | Safe C string interface | ssfstr.c, ssfstr.h | [ssfstr.md](ssfstr.md) |
 | ssftlv | TLV encoder/decoder | ssftlv.c, ssftlv.h | [ssftlv.md](ssftlv.md) |
 | ssfubjson | UBJSON (Universal Binary JSON) parser/generator | ssfubjson.c, ssfubjson.h | [ssfubjson.md](ssfubjson.md) |

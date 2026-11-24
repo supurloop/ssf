@@ -63,6 +63,8 @@ extern "C" {
 #define SSF_CONFIG_TLV_UNIT_TEST     (1u)
 #define SSF_CONFIG_UBJSON_UNIT_TEST  (1u)
 #define SSF_CONFIG_X509_UNIT_TEST    (1u)
+#define SSF_CONFIG_PEM_UNIT_TEST     (1u)
+#define SSF_CONFIG_PKEY_UNIT_TEST    (1u)
 
 /* SSF_CONFIG_HAVE_OPENSSL -- set to 1 on host builds where libcrypto is linked at the build's   */
 /* command line (macOS/Linux native). Cross builds (e.g. mipsel under QEMU) override this to 0   */
@@ -161,6 +163,8 @@ extern "C" {
     SSF_CONFIG_TLV_UNIT_TEST == 1 || \
     SSF_CONFIG_UBJSON_UNIT_TEST == 1 || \
     SSF_CONFIG_X509_UNIT_TEST == 1 || \
+    SSF_CONFIG_PEM_UNIT_TEST == 1 || \
+    SSF_CONFIG_PKEY_UNIT_TEST == 1 || \
     /* _crypto */ \
     SSF_CONFIG_AES_UNIT_TEST == 1 || \
     SSF_CONFIG_AESCCM_UNIT_TEST == 1 || \

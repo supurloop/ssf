@@ -65,6 +65,10 @@ build $builddir/_codec/ssfmatch.o:     cc_obj _codec/ssfmatch.c
 build $builddir/_codec/ssfmatch_ut.o:  cc_obj _codec/ssfmatch_ut.c
 build $builddir/_codec/ssfx509.o:      cc_obj _codec/ssfx509.c
 build $builddir/_codec/ssfx509_ut.o:   cc_obj _codec/ssfx509_ut.c
+build $builddir/_codec/ssfpem.o:       cc_obj _codec/ssfpem.c
+build $builddir/_codec/ssfpem_ut.o:    cc_obj _codec/ssfpem_ut.c
+build $builddir/_codec/ssfpkey.o:      cc_obj _codec/ssfpkey.c
+build $builddir/_codec/ssfpkey_ut.o:   cc_obj _codec/ssfpkey_ut.c
 
 # _crypto
 build $builddir/_crypto/ssfaes.o:       cc_obj _crypto/ssfaes.c
@@ -193,6 +197,8 @@ build @OUTBIN@: link $builddir/main.o $builddir/ssfport.o $
     $builddir/_codec/ssfbase64url.o $builddir/_codec/ssfbase64url_ut.o $
     $builddir/_codec/ssfmatch.o     $builddir/_codec/ssfmatch_ut.o $
     $builddir/_codec/ssfx509.o      $builddir/_codec/ssfx509_ut.o $
+    $builddir/_codec/ssfpem.o       $builddir/_codec/ssfpem_ut.o $
+    $builddir/_codec/ssfpkey.o      $builddir/_codec/ssfpkey_ut.o $
     $builddir/_crypto/ssfaes.o      $builddir/_crypto/ssfaes_ut.o $
     $builddir/_crypto/ssfaesgcm.o   $builddir/_crypto/ssfaesgcm_ut.o $
     $builddir/_crypto/ssfprng.o     $builddir/_crypto/ssfprng_ut.o $

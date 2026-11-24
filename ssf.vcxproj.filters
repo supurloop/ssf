@@ -333,6 +333,18 @@
     <ClCompile Include="_codec\ssfx509_ut.c">
       <Filter>_codec</Filter>
     </ClCompile>
+    <ClCompile Include="_codec\ssfpem.c">
+      <Filter>_codec</Filter>
+    </ClCompile>
+    <ClCompile Include="_codec\ssfpem_ut.c">
+      <Filter>_codec</Filter>
+    </ClCompile>
+    <ClCompile Include="_codec\ssfpkey.c">
+      <Filter>_codec</Filter>
+    </ClCompile>
+    <ClCompile Include="_codec\ssfpkey_ut.c">
+      <Filter>_codec</Filter>
+    </ClCompile>
     <ClCompile Include="_ui\ssfcli.c">
       <Filter>_ui</Filter>
     </ClCompile>
@@ -669,6 +681,15 @@
       <Filter>_codec</Filter>
     </ClInclude>
     <ClInclude Include="_codec\ssfx509.h">
+      <Filter>_codec</Filter>
+    </ClInclude>
+    <ClInclude Include="_codec\ssfpem.h">
+      <Filter>_codec</Filter>
+    </ClInclude>
+    <ClInclude Include="_codec\ssfpkey.h">
+      <Filter>_codec</Filter>
+    </ClInclude>
+    <ClInclude Include="_codec\ssfpkey_ut_fix.h">
       <Filter>_codec</Filter>
     </ClInclude>
     <ClInclude Include="_ui\ssfcli.h">

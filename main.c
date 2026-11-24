@@ -91,6 +91,8 @@
 #include "ssfasn1.h"
 #include "ssfmatch.h"
 #include "ssfx509.h"
+#include "ssfpem.h"
+#include "ssfpkey.h"
 #include "ssfdtime.h"
 #include "ssfrtc.h"
 #include "ssfiso8601.h"
@@ -237,6 +239,12 @@ SSFUnitTest_t unitTests[] =
 #if SSF_CONFIG_X509_UNIT_TEST == 1
     { "ssfx509", "X.509 Certificate Codec", SSFX509UnitTest },
 #endif /* SSF_CONFIG_X509_UNIT_TEST */
+#if SSF_CONFIG_PEM_UNIT_TEST == 1
+    { "ssfpem", "PEM Codec", SSFPEMUnitTest },
+#endif /* SSF_CONFIG_PEM_UNIT_TEST */
+#if SSF_CONFIG_PKEY_UNIT_TEST == 1
+    { "ssfpkey", "Private Key Codec", SSFPKeyUnitTest },
+#endif /* SSF_CONFIG_PKEY_UNIT_TEST */
 
     /* _ecc */
 #if SSF_CONFIG_RS_UNIT_TEST == 1

@@ -179,6 +179,10 @@
     <ClCompile Include="_codec\ssfubjson_ut.c" />
     <ClCompile Include="_codec\ssfx509.c" />
     <ClCompile Include="_codec\ssfx509_ut.c" />
+    <ClCompile Include="_codec\ssfpem.c" />
+    <ClCompile Include="_codec\ssfpem_ut.c" />
+    <ClCompile Include="_codec\ssfpkey.c" />
+    <ClCompile Include="_codec\ssfpkey_ut.c" />
     <ClCompile Include="_crypto\ssfaes.c" />
     <ClCompile Include="_crypto\ssfaesccm.c" />
     <ClCompile Include="_crypto\ssfaesccm_ut.c" />
@@ -291,6 +295,9 @@
     <ClInclude Include="_codec\ssftlv.h" />
     <ClInclude Include="_codec\ssfubjson.h" />
     <ClInclude Include="_codec\ssfx509.h" />
+    <ClInclude Include="_codec\ssfpem.h" />
+    <ClInclude Include="_codec\ssfpkey.h" />
+    <ClInclude Include="_codec\ssfpkey_ut_fix.h" />
     <ClInclude Include="_crypto\cavs_aes_kat.h" />
     <ClInclude Include="_crypto\ssfaes.h" />
     <ClInclude Include="_crypto\ssfaesccm.h" />

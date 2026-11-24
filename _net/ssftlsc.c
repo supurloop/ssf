@@ -74,6 +74,11 @@
 #error SSF_TLS_CONFIG_MAX_CHAIN_DEPTH is removed; ssftlsc uses SSF_X509_CONFIG_MAX_CHAIN_DEPTH.
 #endif
 
+/* The largest ClientHello1 (255-byte host name, full ALPN list) must fit clientHelloMsg */
+#if (SSF_TLSC_CH1_MAX_NO_ALPN + 6u + SSF_TLS_CONFIG_MAX_ALPN_LEN) > SSF_TLSC_CH_SIZE
+#error SSF_TLS_CONFIG_MAX_ALPN_LEN must be at most 219: a larger ALPN list may not fit the ClientHello.
+#endif
+
 /* Secret scrubbing. _SSF_TLSC_SCRUB wipes a secret at the end of its life; unit-test builds     */
 /* then report the buffer to _SSFTLSCScrubTestHook so a test can confirm the wipe happened.      */
 #if SSF_CONFIG_TLSC_UNIT_TEST == 1
@@ -450,6 +455,11 @@ static SSFTLSIOResult_t _RecvRecordOnce(SSFTLSCSession_t *s, uint8_t *pt, size_t
                 SSF_TLS_TRACE_HS_ERROR(&s->trace, "Server requires a client certificate "
                                        "(certificate_required); none is configured");
             }
+            if (pt[1] == SSF_TLS_ALERT_NO_APPLICATION_PROTOCOL)
+            {
+                SSF_TLS_TRACE_HS_ERROR(&s->trace, "Server requires an ALPN protocol the client "
+                                       "did not offer (no_application_protocol)");
+            }
             /* close_notify is answered with close_notify; any other alert ends the connection */
             /* without a reply (RFC 8446 6.1, 6.2).                                             */
             if (pt[1] == SSF_TLS_ALERT_CLOSE_NOTIFY)
@@ -680,6 +690,18 @@ static void _W16(SSFTLSCWriter_t *w, uint16_t v)
     _WBytes(w, b, sizeof(b));
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: returns the length of an ALPN protocol name, 1..255, or 0 if NULL, empty or longer   */
+/* (RFC 7301 3.1: ProtocolName<1..2^8-1>).                                                       */
+/* --------------------------------------------------------------------------------------------- */
+static size_t _AlpnLen(const char *name)
+{
+    size_t len;
+
+    if ((name == NULL) || !SSFStrLen(name, 256u, &len)) return 0;
+    return len;
+}
+
 /* One key share for _BuildClientHello(). */
 typedef struct
 {
@@ -785,6 +807,24 @@ static bool _BuildClientHello(SSFTLSCSession_t *s, const uint8_t random[32], con
         _W8(&w, 0);
         _W16(&w, (uint16_t)hostLen);
         _WBytes(&w, s->host, hostLen);
+    }
+
+    /* application_layer_protocol_negotiation (RFC 7301 3.1), when set. Identical in            */
+    /* ClientHello2. SSFTLSCSetALPN() bounded the list by SSF_TLS_CONFIG_MAX_ALPN_LEN.          */
+    if (s->alpnCount != 0u)
+    {
+        size_t listLen = 0;
+
+        for (i = 0; i < s->alpnCount; i++) listLen += 1u + _AlpnLen(s->alpnProtos[i]);
+        _W16(&w, SSF_TLS_EXT_ALPN);
+        _W16(&w, (uint16_t)(2u + listLen)); _W16(&w, (uint16_t)listLen);
+        for (i = 0; i < s->alpnCount; i++)
+        {
+            size_t n = _AlpnLen(s->alpnProtos[i]);
+
+            _W8(&w, (uint8_t)n);
+            _WBytes(&w, s->alpnProtos[i], n);
+        }
     }
 
     if ((w.ok == false) || ((w.pos - extLenPos - 2u) > 0xffffu)) return false;
@@ -1611,20 +1651,24 @@ static SSFTLSIOResult_t _TlscHandleSendCH(SSFTLSCSession_t *session)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: validates an EncryptedExtensions body (RFC 8446 4.3.1, 4.2). Returns true, else     */
-/* false with the alert to send.                                                                 */
+/* Internal: validates an EncryptedExtensions body (RFC 8446 4.3.1, 4.2). alpn / alpnCount are  */
+/* the names the ClientHello offered (none when 0); *alpnChosenOut gets 1 + the index of the    */
+/* server's choice, or 0. Returns true, else false with the alert to send.                      */
 /* --------------------------------------------------------------------------------------------- */
 static bool _ParseEncryptedExtensions(const uint8_t *body, size_t bodyLen, uint8_t *alertOut,
-                                      uint16_t *recordLimitOut)
+                                      uint16_t *recordLimitOut, const char *const *alpn,
+                                      uint8_t alpnCount, uint8_t *alpnChosenOut)
 {
     size_t pos = 2;
     size_t end;
     bool hasSni = false;
     bool hasGroups = false;
     bool hasRecordLimit = false;
+    uint8_t chosen = 0;
 
     *alertOut = SSF_TLS_ALERT_DECODE_ERROR;
     *recordLimitOut = 0;
+    *alpnChosenOut = 0;
 
     /* The message is exactly extensions<0..2^16-1> (4.3.1). */
     if (bodyLen < 2u) return false;
@@ -1675,6 +1719,26 @@ static bool _ParseEncryptedExtensions(const uint8_t *body, size_t bodyLen, uint8
             *recordLimitOut = (limit > SSF_TLSC_RSL_MAX) ? (uint16_t)SSF_TLSC_RSL_MAX : limit;
             break;
         }
+        case SSF_TLS_EXT_ALPN:
+        {
+            uint8_t i;
+
+            /* RFC 7301 3.1: only if offered; a ProtocolNameList of exactly one non-empty name, */
+            /* one the client offered.                                                         */
+            if (alpnCount == 0u) { *alertOut = SSF_TLS_ALERT_UNSUPPORTED_EXT; return false; }
+            if (chosen != 0u) { *alertOut = SSF_TLS_ALERT_ILLEGAL_PARAMETER; return false; }
+            if ((eLen < 4u) || (_Get16(&body[pos]) != (uint16_t)(eLen - 2u)) ||
+                ((size_t)body[pos + 2u] != (size_t)(eLen - 3u)))
+            { return false; }
+            for (i = 0; i < alpnCount; i++)
+            {
+                if ((_AlpnLen(alpn[i]) == (size_t)(eLen - 3u)) &&
+                    (memcmp(alpn[i], &body[pos + 3u], (size_t)(eLen - 3u)) == 0))
+                { chosen = (uint8_t)(i + 1u); }
+            }
+            if (chosen == 0u) { *alertOut = SSF_TLS_ALERT_ILLEGAL_PARAMETER; return false; }
+            break;
+        }
         case SSF_TLS_EXT_SUPPORTED_VERSIONS:
         case SSF_TLS_EXT_KEY_SHARE:
         case SSF_TLS_EXT_SIGNATURE_ALGS:
@@ -1691,6 +1755,7 @@ static bool _ParseEncryptedExtensions(const uint8_t *body, size_t bodyLen, uint8
         pos += eLen;
     }
 
+    *alpnChosenOut = chosen;
     *alertOut = 0;
     return true;
 }
@@ -1701,13 +1766,26 @@ bool _SSFTLSCParseEncryptedExtensionsForTest(const uint8_t *body, size_t bodyLen
 {
     uint16_t limit;
 
-    return _ParseEncryptedExtensions(body, bodyLen, alertOut, &limit);
+    uint8_t chosen;
+
+    return _ParseEncryptedExtensions(body, bodyLen, alertOut, &limit, NULL, 0u, &chosen);
+}
+
+bool _SSFTLSCParseEncryptedExtensionsAlpnForTest(SSFTLSCSession_t *session, const uint8_t *body,
+                                                 size_t bodyLen, uint8_t *alertOut)
+{
+    uint16_t limit;
+
+    return _ParseEncryptedExtensions(body, bodyLen, alertOut, &limit, session->alpnProtos,
+                                     session->alpnCount, &session->alpnChosen);
 }
 
 bool _SSFTLSCParseEncryptedExtensionsRslForTest(const uint8_t *body, size_t bodyLen,
                                                 uint8_t *alertOut, uint16_t *recordLimitOut)
 {
-    return _ParseEncryptedExtensions(body, bodyLen, alertOut, recordLimitOut);
+    uint8_t chosen;
+
+    return _ParseEncryptedExtensions(body, bodyLen, alertOut, recordLimitOut, NULL, 0u, &chosen);
 }
 #endif /* SSF_CONFIG_TLSC_UNIT_TEST */
 
@@ -1803,6 +1881,7 @@ static bool _ParseCertificateRequest(const uint8_t *body, size_t bodyLen, SSFPKe
         case SSF_TLS_EXT_SUPPORTED_VERSIONS:
         case SSF_TLS_EXT_PSK_KEY_EXCHANGE:
         case SSF_TLS_EXT_KEY_SHARE:
+        case SSF_TLS_EXT_ALPN:
             /* Recognized, but not specified for CertificateRequest: illegal_parameter (4.2) */
             *alertOut = SSF_TLS_ALERT_ILLEGAL_PARAMETER;
             return false;
@@ -2326,7 +2405,8 @@ static SSFTLSIOResult_t _TlscHandleRecvEECert(SSFTLSCSession_t *session)
             uint8_t alert;
 
             if (!_ParseEncryptedExtensions(&buf[4], bodyLen, &alert,
-                                           &session->peerRecordLimit))
+                                           &session->peerRecordLimit, session->alpnProtos,
+                                           session->alpnCount, &session->alpnChosen))
             {
                 SSF_TLS_TRACE_HS_ERROR(&session->trace, "EncryptedExtensions rejected");
                 _SSF_TLSC_ALERT(session, alert);
@@ -2336,6 +2416,13 @@ static SSFTLSIOResult_t _TlscHandleRecvEECert(SSFTLSCSession_t *session)
             {
                 SSF_TLS_TRACE_HS_DEBUG(&session->trace, "record_size_limit: server accepts %u",
                                        session->peerRecordLimit);
+            }
+            if (session->alpnCount != 0u)
+            {
+                SSF_TLS_TRACE_HS_DEBUG(&session->trace, "ALPN: %s",
+                                       (session->alpnChosen != 0u) ?
+                                       session->alpnProtos[session->alpnChosen - 1u] :
+                                       "server chose none");
             }
         }
         session->helperStep = 2;
@@ -2824,7 +2911,8 @@ static SSFTLSCSession_t *_SSFTLSCSelf(SSFNetTransport_t *t)
 
 /* --------------------------------------------------------------------------------------------- */
 /* Wipes all per-connection state, keys included, and returns the session to IDLE. The transport */
-/* table, inner transport, trust store, trace callback and magic are kept.                       */
+/* table, inner transport, trust store, trace callback, client certificate, ALPN list and magic  */
+/* are kept.                                                                                     */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFTLSCReset(SSFTLSCSession_t *s)
 {
@@ -2837,6 +2925,8 @@ static void _SSFTLSCReset(SSFTLSCSession_t *s)
     const uint32_t *clientChainLens = s->clientChainLens;
     const SSFPKey_t *clientKey = s->clientKey;
     uint8_t clientChainCount = s->clientChainCount;
+    const char *const *alpnProtos = s->alpnProtos;
+    uint8_t alpnCount = s->alpnCount;
     uint32_t magic = s->magic;
 
     if (s->sendStateInited) SSFTLSRecordStateDeInit(&s->sendState);
@@ -2852,6 +2942,8 @@ static void _SSFTLSCReset(SSFTLSCSession_t *s)
     s->clientChainLens = clientChainLens;
     s->clientKey = clientKey;
     s->clientChainCount = clientChainCount;
+    s->alpnProtos = alpnProtos;
+    s->alpnCount = alpnCount;
     s->magic = magic;
     s->hsState = SSF_TLSC_HS_IDLE;
 }
@@ -3604,6 +3696,50 @@ bool SSFTLSCSetClientCert(SSFTLSCSession_t *session, const uint8_t *const *chain
     session->clientKey = key;
     session->clientChainCount = chainCount;
     return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Sets, or clears, the ALPN protocol list; see ssftlsc.h.                                       */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFTLSCSetALPN(SSFTLSCSession_t *session, const char *const *protos, uint8_t count)
+{
+    size_t total = 0;
+    uint8_t i;
+
+    SSF_REQUIRE(session != NULL);
+    SSF_REQUIRE(session->magic == SSF_TLSC_MAGIC);
+    SSF_REQUIRE(session->hsState == SSF_TLSC_HS_IDLE);
+
+    session->alpnProtos = NULL;
+    session->alpnCount = 0;
+    session->alpnChosen = 0;
+    if ((protos == NULL) && (count == 0u)) return true;                 /* Cleared */
+    if ((protos == NULL) || (count == 0u)) return false;
+
+    /* ProtocolName<1..2^8-1> (RFC 7301 3.1), the list within SSF_TLS_CONFIG_MAX_ALPN_LEN */
+    for (i = 0; i < count; i++)
+    {
+        size_t n = _AlpnLen(protos[i]);
+
+        if (n == 0u) return false;
+        total += 1u + n;
+        if (total > SSF_TLS_CONFIG_MAX_ALPN_LEN) return false;
+    }
+    session->alpnProtos = protos;
+    session->alpnCount = count;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns the protocol the server chose with ALPN, or NULL; see ssftlsc.h.                      */
+/* --------------------------------------------------------------------------------------------- */
+const char *SSFTLSCGetALPN(const SSFTLSCSession_t *session)
+{
+    SSF_REQUIRE(session != NULL);
+    SSF_REQUIRE(session->magic == SSF_TLSC_MAGIC);
+    /* EncryptedExtensions precedes server authentication: report nothing until it is done */
+    if ((session->hsState != SSF_TLSC_HS_COMPLETE) || (session->alpnChosen == 0u)) return NULL;
+    return session->alpnProtos[session->alpnChosen - 1u];
 }
 
 /* --------------------------------------------------------------------------------------------- */

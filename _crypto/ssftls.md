@@ -157,11 +157,12 @@ already call `SSFHKDFExpand`; only the Finished computation calls HMAC directly.
   single null-check per trace point, and an installed callback formats into a 256-byte stack
   buffer per call; keep this in mind if stack is tight. The x509 and CMS unit-test builds
   turn tracing on, since they check the messages.
-- **Configuration options are forward-looking.** `SSF_TLS_CONFIG_MAX_TRUSTED_CAS`,
-  `SSF_TLS_CONFIG_PSK_ENABLE`, `SSF_TLS_CONFIG_TICKET_LIFETIME_SEC`, and
-  `SSF_TLS_CONFIG_MAX_ALPN_LEN` are declared in [`_opt/ssftls_opt.h`](../_opt/ssftls_opt.h)
-  but not currently referenced by the implementation — they are placeholders for a
-  future handshake / chain / PSK layer and have no effect on compiled behavior today.
+- **Configuration options are mostly forward-looking.** `SSF_TLS_CONFIG_MAX_TRUSTED_CAS`,
+  `SSF_TLS_CONFIG_PSK_ENABLE` and `SSF_TLS_CONFIG_TICKET_LIFETIME_SEC` are declared in
+  [`_opt/ssftls_opt.h`](../_opt/ssftls_opt.h) but not currently referenced by the
+  implementation — they are placeholders for a future chain / PSK layer and have no effect on
+  compiled behavior today. `SSF_TLS_CONFIG_MAX_ALPN_LEN` bounds the ALPN list of the TLS
+  client ([`ssftlsc`](../_net/ssftlsc.h)'s `SSFTLSCSetALPN()`).
 - **The only "state" in this module is `SSFTLSRecordState_t` and `SSFTLSTranscript_t`.**
   There is no session object, no connection handle — each primitive takes and returns
   its inputs explicitly. Callers are responsible for lifetime management and for wiping
@@ -183,16 +184,17 @@ already call `SSFHKDFExpand`; only the Finished computation calls HMAC directly.
 
 ## [↑](#ssftls--tls-13-core-building-blocks) Configuration
 
-Options live in [`_opt/ssftls_opt.h`](../_opt/ssftls_opt.h). None of the options currently
-affect compiled behaviour of the public API (see the last note above); they are reserved
-for a future handshake / transport layer.
+Options live in [`_opt/ssftls_opt.h`](../_opt/ssftls_opt.h). Apart from
+`SSF_TLS_CONFIG_MAX_ALPN_LEN` (used by the TLS client) and `SSF_TLS_CONFIG_ENABLE_TRACE`, none
+of them currently affect compiled behaviour (see the last note above); they are reserved for a
+future handshake / transport layer.
 
 | Macro | Default | Description |
 |-------|---------|-------------|
 | `SSF_TLS_CONFIG_MAX_TRUSTED_CAS` | `8` | Reserved for trust-store capacity. Unused today. |
 | `SSF_TLS_CONFIG_PSK_ENABLE` | `1` | Reserved for PSK handshake support. Unused today. |
 | `SSF_TLS_CONFIG_TICKET_LIFETIME_SEC` | `3600` | Reserved for session-ticket lifetime. Unused today. |
-| `SSF_TLS_CONFIG_MAX_ALPN_LEN` | `32` | Reserved for ALPN protocol list sizing. Unused today. |
+| `SSF_TLS_CONFIG_MAX_ALPN_LEN` | `32` | Largest ALPN list `SSFTLSCSetALPN()` accepts: the protocol names, each plus one length byte. At most `219`, so the largest ClientHello fits the TLS client's 768-byte buffer; a larger value is a compile error in `ssftlsc.c`. |
 | `SSF_TLS_CONFIG_ENABLE_TRACE` | `0` (`1` when `SSF_CONFIG_X509_UNIT_TEST` or `SSF_CONFIG_CMS_UNIT_TEST` is `1`) | `1` compiles in the trace messages that `SSFX509SetTraceCtx()` / `SSFCMSSetTraceCtx()` callbacks receive. `0` compiles them out: on Cortex-M about 3.7 KB less flash in ssfx509 and 1.4 KB in ssfcms, no `snprintf` reference (newlib-nano's formatter is about 3.8 KB, full newlib's about 26 KB, if nothing else uses it), and 240-272 B less stack in each tracing function. The `SetTraceCtx` functions and their static state are also compiled out; calls to them still compile but do nothing. |
 
 <a id="api-summary"></a>
@@ -214,7 +216,7 @@ driving the handshake themselves will need. Grouped logically:
 | Named groups | `SSF_TLS_GROUP_SECP256R1`, `_SECP384R1`, `_X25519` |
 | Signature schemes | `SSF_TLS_SIG_ECDSA_SECP256R1_SHA256`, `_ECDSA_SECP384R1_SHA384`, `_RSA_PSS_RSAE_SHA256`, `_RSA_PSS_RSAE_SHA384`, `_RSA_PKCS1_SHA256`, `_RSA_PKCS1_SHA384`, `_ED25519` |
 | Extension types | `SSF_TLS_EXT_SERVER_NAME`, `_SUPPORTED_GROUPS`, `_SIGNATURE_ALGS`, `_SUPPORTED_VERSIONS`, `_ALPN`, `_PSK_KEY_EXCHANGE`, `_PRE_SHARED_KEY`, `_KEY_SHARE` |
-| Alert codes | `SSF_TLS_ALERT_CLOSE_NOTIFY` (`0`), `_UNEXPECTED_MSG` (`10`), `_BAD_RECORD_MAC` (`20`), `_RECORD_OVERFLOW` (`22`), `_HANDSHAKE_FAILURE` (`40`), `_BAD_CERTIFICATE` (`42`), `_UNSUPPORTED_CERTIFICATE` (`43`), `_CERTIFICATE_EXPIRED` (`45`), `_CERTIFICATE_UNKNOWN` (`46`), `_ILLEGAL_PARAMETER` (`47`), `_UNKNOWN_CA` (`48`), `_DECODE_ERROR` (`50`), `_DECRYPT_ERROR` (`51`), `_PROTOCOL_VERSION` (`70`), `_INTERNAL_ERROR` (`80`), `_USER_CANCELED` (`90`), `_MISSING_EXTENSION` (`109`), `_UNSUPPORTED_EXT` (`110`), `_CERTIFICATE_REQUIRED` (`116`) |
+| Alert codes | `SSF_TLS_ALERT_CLOSE_NOTIFY` (`0`), `_UNEXPECTED_MSG` (`10`), `_BAD_RECORD_MAC` (`20`), `_RECORD_OVERFLOW` (`22`), `_HANDSHAKE_FAILURE` (`40`), `_BAD_CERTIFICATE` (`42`), `_UNSUPPORTED_CERTIFICATE` (`43`), `_CERTIFICATE_EXPIRED` (`45`), `_CERTIFICATE_UNKNOWN` (`46`), `_ILLEGAL_PARAMETER` (`47`), `_UNKNOWN_CA` (`48`), `_DECODE_ERROR` (`50`), `_DECRYPT_ERROR` (`51`), `_PROTOCOL_VERSION` (`70`), `_INTERNAL_ERROR` (`80`), `_USER_CANCELED` (`90`), `_MISSING_EXTENSION` (`109`), `_UNSUPPORTED_EXT` (`110`), `_CERTIFICATE_REQUIRED` (`116`), `_NO_APPLICATION_PROTOCOL` (`120`) |
 | CertificateVerify | `SSF_TLS_CV_SIGN_CONTENT_MAX_SIZE` (`146`) — max bytes of signed-content buffer (64 filler + 33 context + 1 separator + up-to-48 transcript hash) |
 
 ### Types

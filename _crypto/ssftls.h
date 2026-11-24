@@ -203,6 +203,7 @@ typedef struct SSFTLSTraceCtx
 #define SSF_TLS_ALERT_MISSING_EXTENSION   ((uint8_t)109u)
 #define SSF_TLS_ALERT_UNSUPPORTED_EXT     ((uint8_t)110u)
 #define SSF_TLS_ALERT_CERTIFICATE_REQUIRED ((uint8_t)116u)
+#define SSF_TLS_ALERT_NO_APPLICATION_PROTOCOL ((uint8_t)120u)
 #define SSF_TLS_ALERT_USER_CANCELED       ((uint8_t)90u)
 
 /* --------------------------------------------------------------------------------------------- */

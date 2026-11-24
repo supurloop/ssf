@@ -512,6 +512,8 @@ is rejected.
       (a few hundred bytes) is sent as one record and is not fragmented, so a build below
       about 512 cannot connect at all (found during 1b: 64 and 256 fail before ServerHello,
       with or without client authentication). Raise the minimum, or fragment the ClientHello.
+      ALPN adds up to 6 + `SSF_TLS_CONFIG_MAX_ALPN_LEN` bytes (38 at the default 32, 225 at
+      the maximum 219); the largest ClientHello is `SSF_TLSC_CH1_MAX_NO_ALPN` (543) plus that.
 - [x] Private key loading: PKCS#8 / SEC 1 / PEM. Done (approved: two new codec modules).
       `ssfpem` (RFC 7468): one block per call, multi-block buffers, strict Base64 via
       `SSFBase64Decode`, whitespace anywhere, NULL output to check/measure, all output zeroed on
@@ -573,9 +575,40 @@ is rejected.
       under its next key and the client's KeyUpdate + data under its next key, and the record
       limit; the flow mutants (the recv() call site of (2), and the six that only the wire test
       caught before) are now killed by the unit test. Text +965 B over the last commit.
-- [ ] ALPN (e.g. `x-amzn-mqtt-ca` for AWS IoT on 443).
+- [x] ALPN (e.g. `x-amzn-mqtt-ca` for AWS IoT on 443). RFC 7301, TDD.
+      `SSFTLSCSetALPN()` keeps pointers to the caller's names (1..255 bytes each, the list
+      within `SSF_TLS_CONFIG_MAX_ALPN_LEN`, now used; kept across connections like the client
+      certificate); the ClientHello offers them (ClientHello2 identical). EncryptedExtensions:
+      exactly one non-empty name, one that was offered (`decode_error` for framing,
+      `illegal_parameter` for a name not offered or a second ALPN, `unsupported_extension`
+      when none was offered); `SSFTLSCGetALPN()` returns the caller's string, or NULL when the
+      server chose none (the caller decides). Alert 120 `no_application_protocol` added to
+      `ssftls.h` (approved) and traced. Unit tests: Set validation, 17 EE answers, the
+      ClientHello bytes and ClientHello2 after an HRR on the wire, none offered when unset.
+      Mutation: 22 mutants; all killed (one, the EE call site, only by the wire test) except
+      the 255-byte name cap, equivalent at the default list limit of 32. Wire: `s_server
+      -alpn` (match, server preference, no overlap -> alert 120, no ALPN, HRR) and
+      `gnutls-serv --alpn` (match, `--alpn-fatal` -> 120, non-fatal mismatch -> none).
+      Text +442 B with tracing off (unit-test hooks excluded).
+      Audit (fuzz: 200k EncryptedExtensions bodies vs an RFC model under ASan / UBSan, no
+      mismatch). Fixed, TDD: (1) `SSFTLSCGetALPN()` returns NULL until the handshake is
+      complete: the choice arrives before the server is authenticated and stayed set after a
+      failed handshake. (2) ALPN in a CertificateRequest is `illegal_parameter` (RFC 8446 4.2,
+      as for the other offered extensions). (3) The alert 120 trace is worded for both cases
+      ("Server requires an ALPN protocol the client did not offer"). (4)
+      `SSF_TLS_CONFIG_MAX_ALPN_LEN` above 219 is a compile error: the largest ClientHello1
+      (255-byte host, `SSF_TLSC_CH1_MAX_NO_ALPN`, checked exactly by a unit test) must fit the
+      768-byte `SSF_TLSC_CH_SIZE` buffer; the unit test passes at 219. (5) Send-record item
+      below updated. (7) `ssftlsc.h`: the names must stay unchanged, not only valid.
 - [ ] Trust store loading: CA bundles (multiple certificates per file), no silent truncation,
       no filesystem requirement in the core (`ssftls_certs.c` is POSIX-only).
+
+- [ ] ServerHello: extensions the client offers but that are not specified for ServerHello
+      (`server_name`, `supported_groups`, `signature_algorithms`, `psk_key_exchange_modes`,
+      `record_size_limit`, ALPN) are rejected with `unsupported_extension`; RFC 8446 4.2 asks
+      for `illegal_parameter` for a recognized extension in the wrong message, as
+      EncryptedExtensions and CertificateRequest already do. Fatal either way; only the alert
+      code differs. Found during the ALPN audit.
 
 ## Step 5 — Tests and cleanup
 

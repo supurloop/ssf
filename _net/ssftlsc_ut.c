@@ -495,6 +495,10 @@ static const uint8_t _utCrVersions[]  = { 0x00, 0x00, 0x0e, 0x00, 0x2b, 0x00, 0x
                                           0x00, 0x0d, 0x00, 0x04, 0x00, 0x02, 0x04, 0x03 };
 static const uint8_t _utCrPskModes[]  = { 0x00, 0x00, 0x0d, 0x00, 0x2d, 0x00, 0x01, 0x01,
                                           0x00, 0x0d, 0x00, 0x04, 0x00, 0x02, 0x04, 0x03 };
+/* ALPN is offered but not specified for CertificateRequest */
+static const uint8_t _utCrAlpn[]      = { 0x00, 0x00, 0x13, 0x00, 0x10, 0x00, 0x07, 0x00, 0x05,
+                                          0x04, 'm', 'q', 't', 't',
+                                          0x00, 0x0d, 0x00, 0x04, 0x00, 0x02, 0x04, 0x03 };
 static const uint8_t _utCrRsl[]       = { 0x00, 0x00, 0x0e, 0x00, 0x1c, 0x00, 0x02, 0x40, 0x00,
                                           0x00, 0x0d, 0x00, 0x04, 0x00, 0x02, 0x04, 0x03 };
 /* Framing: list longer / shorter than the message, extension past the list, truncated */
@@ -533,6 +537,7 @@ static void _SSFTLSCUTParseCertificateRequest(void)
     SSF_TLSC_UT_CR(_utCrVersions, SSF_TLS_ALERT_ILLEGAL_PARAMETER);
     SSF_TLSC_UT_CR(_utCrPskModes, SSF_TLS_ALERT_ILLEGAL_PARAMETER);
     SSF_TLSC_UT_CR(_utCrRsl, SSF_TLS_ALERT_ILLEGAL_PARAMETER);
+    SSF_TLSC_UT_CR(_utCrAlpn, SSF_TLS_ALERT_ILLEGAL_PARAMETER);
     SSF_TLSC_UT_CR(_utCrListOver, SSF_TLS_ALERT_DECODE_ERROR);
     SSF_TLSC_UT_CR(_utCrTrailing, SSF_TLS_ALERT_DECODE_ERROR);
     SSF_TLSC_UT_CR(_utCrExtOver, SSF_TLS_ALERT_DECODE_ERROR);
@@ -785,8 +790,11 @@ static void _SSFTLSCUTClientHelloRetry(SSFTLSCUTFd_t l, uint16_t port)
     uint8_t j;
     int ks;
     int ck;
+    static const char *const alpnBoth[] = { "x-amzn-mqtt-ca", "mqtt" };
 
     /* ---- Small cookie: ClientHello2 must match ClientHello1 field for field ---- */
+    /* ALPN is set, so ClientHello2 must carry it unchanged too. */
+    SSF_ASSERT(SSFTLSCSetALPN(&_utSession, alpnBoth, 2u));
     peer = _SSFTLSCUTSendHrr(l, port, ch1Rec, sizeof(ch1Rec), &ch1,
                              SSF_TLS_CS_AES_128_GCM_SHA256, 16u, hrrRec, sizeof(hrrRec), &hrrLen);
     /* Suite preference: ChaCha20-Poly1305 first (ssfchacha20 is constant-time, ssfaes is not), */
@@ -807,6 +815,17 @@ static void _SSFTLSCUTClientHelloRetry(SSFTLSCUTFd_t l, uint16_t port)
         SSF_ASSERT(ch1.extLen[rsl] == 2u);
         v = (uint16_t)(((uint16_t)ch1.extData[rsl][0] << 8) | ch1.extData[rsl][1]);
         SSF_ASSERT(v == (uint16_t)(SSF_TLSC_CONFIG_MAX_RECV_RECORD + 1u));
+    }
+    /* ALPN (RFC 7301 3.1): ProtocolNameList of the configured names, in order */
+    {
+        static const uint8_t wantAlpn[] = { 0x00, 0x14, 0x0e, 'x', '-', 'a', 'm', 'z', 'n', '-',
+                                            'm', 'q', 't', 't', '-', 'c', 'a',
+                                            0x04, 'm', 'q', 't', 't' };
+        int alpn = _SSFTLSCUTFindExt(&ch1, SSF_TLS_EXT_ALPN);
+
+        SSF_ASSERT(alpn >= 0);
+        SSF_ASSERT(ch1.extLen[alpn] == sizeof(wantAlpn));
+        SSF_ASSERT(memcmp(ch1.extData[alpn], wantAlpn, sizeof(wantAlpn)) == 0);
     }
     {
         SSFPortTick_t end = SSFPortGetTick64() + SSF_TLSC_UT_WAIT_TICKS;  /* Client reads HRR, */
@@ -850,6 +869,7 @@ static void _SSFTLSCUTClientHelloRetry(SSFTLSCUTFd_t l, uint16_t port)
     SSF_ASSERT(ch2.extCount == (ch1.extCount + 1u));
     t->close(t);
     (void)SSF_TLSC_UT_CLOSE(peer);
+    SSF_ASSERT(SSFTLSCSetALPN(&_utSession, NULL, 0u));
 
     /* ---- Cookie too large to echo: the client must abort with internal_error, ---- */
     /* ---- never send ClientHello2 without the cookie                           ---- */
@@ -2110,6 +2130,204 @@ static void _SSFTLSCUTSchemeMatchesKey(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* ALPN (RFC 7301): SSFTLSCSetALPN() validation, the EncryptedExtensions answer and              */
+/* SSFTLSCGetALPN(). The ClientHello side is checked on the wire in _SSFTLSCUTClientHelloRetry. */
+/* --------------------------------------------------------------------------------------------- */
+#define SSF_TLSC_UT_EE_ALPN(s, body, wantAlert, wantProto) do { \
+    uint8_t _a = 0xffu; \
+    bool _ok = _SSFTLSCParseEncryptedExtensionsAlpnForTest((s), (body), sizeof(body), &_a); \
+    SSF_ASSERT(_ok == ((wantAlert) == 0u)); \
+    SSF_ASSERT(_a == (wantAlert)); \
+    SSF_ASSERT(SSFTLSCGetALPN(s) == NULL);    /* Not before the handshake completes */ \
+    (s)->hsState = SSF_TLSC_HS_COMPLETE; \
+    SSF_ASSERT(SSFTLSCGetALPN(s) == (_ok ? (wantProto) : NULL)); \
+    (s)->hsState = SSF_TLSC_HS_IDLE; } while (0)
+
+/* ALPN answers, each in an EncryptedExtensions body */
+static const uint8_t _utEeAlpnAws[]   = { 0x00, 0x15, 0x00, 0x10, 0x00, 0x11, 0x00, 0x0f, 0x0e,
+                                          'x', '-', 'a', 'm', 'z', 'n', '-', 'm', 'q', 't', 't',
+                                          '-', 'c', 'a' };
+static const uint8_t _utEeAlpnMqtt[]  = { 0x00, 0x0f, 0x00, 0x00, 0x00, 0x00,     /* SNI ack too */
+                                          0x00, 0x10, 0x00, 0x07, 0x00, 0x05, 0x04,
+                                          'm', 'q', 't', 't' };
+/* Not one the client offered: a prefix, a longer name, a different one */
+static const uint8_t _utEeAlpnPrefix[] = { 0x00, 0x0a, 0x00, 0x10, 0x00, 0x06, 0x00, 0x04, 0x03,
+                                           'm', 'q', 't' };
+static const uint8_t _utEeAlpnLonger[] = { 0x00, 0x0c, 0x00, 0x10, 0x00, 0x08, 0x00, 0x06, 0x05,
+                                           'm', 'q', 't', 't', 's' };
+static const uint8_t _utEeAlpnSameLen[] = { 0x00, 0x0b, 0x00, 0x10, 0x00, 0x07, 0x00, 0x05, 0x04,
+                                            'm', 'q', 't', 'z' };
+static const uint8_t _utEeAlpnH2[]    = { 0x00, 0x09, 0x00, 0x10, 0x00, 0x05, 0x00, 0x03, 0x02,
+                                          'h', '2' };
+static const uint8_t _utEeAlpnDup[]   = { 0x00, 0x16, 0x00, 0x10, 0x00, 0x07, 0x00, 0x05, 0x04,
+                                          'm', 'q', 't', 't',
+                                          0x00, 0x10, 0x00, 0x07, 0x00, 0x05, 0x04,
+                                          'm', 'q', 't', 't' };
+/* Framing: not exactly one non-empty ProtocolName filling the extension */
+static const uint8_t _utEeAlpnTwo[]   = { 0x00, 0x0e, 0x00, 0x10, 0x00, 0x0a, 0x00, 0x08,
+                                          0x04, 'm', 'q', 't', 't', 0x02, 'h', '2' };
+static const uint8_t _utEeAlpnEmptyName[] = { 0x00, 0x07, 0x00, 0x10, 0x00, 0x03, 0x00, 0x01,
+                                              0x00 };
+static const uint8_t _utEeAlpnEmptyList[] = { 0x00, 0x06, 0x00, 0x10, 0x00, 0x02, 0x00, 0x00 };
+static const uint8_t _utEeAlpnNoList[] = { 0x00, 0x04, 0x00, 0x10, 0x00, 0x00 };
+static const uint8_t _utEeAlpnListLen[] = { 0x00, 0x0b, 0x00, 0x10, 0x00, 0x07, 0x00, 0x06,
+                                            0x04, 'm', 'q', 't', 't' };
+static const uint8_t _utEeAlpnNameLen[] = { 0x00, 0x0b, 0x00, 0x10, 0x00, 0x07, 0x00, 0x05,
+                                            0x05, 'm', 'q', 't', 't' };
+static const uint8_t _utEeAlpnShortNm[] = { 0x00, 0x0b, 0x00, 0x10, 0x00, 0x07, 0x00, 0x05,
+                                            0x03, 'm', 'q', 't', 't' };
+
+static void _SSFTLSCUTAlpn(void)
+{
+    static const char *const both[] = { "x-amzn-mqtt-ca", "mqtt" };
+    static const char *const one[] = { "mqtt" };
+    static const char *const withNull[] = { "mqtt", NULL };
+    static const char *const withEmpty[] = { "mqtt", "" };
+    /* 255 bytes is the longest ProtocolName; 256 is too long */
+    static char n255[256];
+    static char n256[257];
+    static const char *list255[1];
+    static const char *list256[1];
+    /* Names filling SSF_TLS_CONFIG_MAX_ALPN_LEN exactly (each name plus its length byte), */
+    /* and one byte over                                                                   */
+    static char fill[SSF_TLS_CONFIG_MAX_ALPN_LEN];
+    static char over[SSF_TLS_CONFIG_MAX_ALPN_LEN + 1u];
+    static const char *listFill[1];
+    static const char *listOver[1];
+    SSFTLSCSession_t *s = &_utSession2;
+
+    memset(n255, 'a', 255); n255[255] = 0;
+    memset(n256, 'a', 256); n256[256] = 0;
+    list255[0] = n255;
+    list256[0] = n256;
+    memset(fill, 'f', sizeof(fill) - 1u); fill[sizeof(fill) - 1u] = 0;
+    memset(over, 'o', sizeof(over) - 1u); over[sizeof(over) - 1u] = 0;
+    listFill[0] = fill;
+    listOver[0] = over;
+    SSFTLSCInit(s, &_utSock.transport, NULL);
+
+    /* ---- SSFTLSCSetALPN validation; a rejected list leaves none set ---- */
+    SSF_ASSERT((s->alpnCount == 0u) && (SSFTLSCGetALPN(s) == NULL));
+    SSF_ASSERT(SSFTLSCSetALPN(s, both, 2u));
+    SSF_ASSERT((s->alpnProtos == both) && (s->alpnCount == 2u));
+    SSF_ASSERT(SSFTLSCSetALPN(s, NULL, 0u));                          /* Cleared */
+    SSF_ASSERT((s->alpnProtos == NULL) && (s->alpnCount == 0u));
+    SSF_ASSERT(SSFTLSCSetALPN(s, one, 1u));
+    SSF_ASSERT(SSFTLSCSetALPN(s, both, 0u) == false);                 /* Mismatched clear */
+    SSF_ASSERT(s->alpnCount == 0u);
+    SSF_ASSERT(SSFTLSCSetALPN(s, one, 1u));
+    SSF_ASSERT(SSFTLSCSetALPN(s, NULL, 1u) == false);
+    SSF_ASSERT(s->alpnCount == 0u);
+    SSF_ASSERT(SSFTLSCSetALPN(s, withNull, 2u) == false);
+    SSF_ASSERT(SSFTLSCSetALPN(s, withEmpty, 2u) == false);
+    SSF_ASSERT(SSFTLSCSetALPN(s, list256, 1u) == false);
+    SSF_ASSERT(s->alpnCount == 0u);
+    SSF_ASSERT(SSFTLSCSetALPN(s, listOver, 1u) == false);
+    SSF_ASSERT(SSFTLSCSetALPN(s, listFill, 1u));
+#if SSF_TLS_CONFIG_MAX_ALPN_LEN >= 256u
+    SSF_ASSERT(SSFTLSCSetALPN(s, list255, 1u));
+#else
+    SSF_ASSERT(SSFTLSCSetALPN(s, list255, 1u) == false);
+#endif
+
+    /* ---- EncryptedExtensions: exactly one offered name; GetALPN returns the caller's string -- */
+    SSF_ASSERT(SSFTLSCSetALPN(s, both, 2u));
+    SSF_TLSC_UT_EE_ALPN(s, _utEeAlpnAws, 0u, both[0]);
+    SSF_TLSC_UT_EE_ALPN(s, _utEeAlpnMqtt, 0u, both[1]);
+    SSF_TLSC_UT_EE_ALPN(s, _utEeEmpty, 0u, NULL);                    /* Server chose none */
+    SSF_TLSC_UT_EE_ALPN(s, _utEeAlpnPrefix, SSF_TLS_ALERT_ILLEGAL_PARAMETER, NULL);
+    SSF_TLSC_UT_EE_ALPN(s, _utEeAlpnLonger, SSF_TLS_ALERT_ILLEGAL_PARAMETER, NULL);
+    SSF_TLSC_UT_EE_ALPN(s, _utEeAlpnH2, SSF_TLS_ALERT_ILLEGAL_PARAMETER, NULL);
+    SSF_TLSC_UT_EE_ALPN(s, _utEeAlpnSameLen, SSF_TLS_ALERT_ILLEGAL_PARAMETER, NULL);
+    SSF_TLSC_UT_EE_ALPN(s, _utEeAlpnDup, SSF_TLS_ALERT_ILLEGAL_PARAMETER, NULL);
+    SSF_TLSC_UT_EE_ALPN(s, _utEeAlpnTwo, SSF_TLS_ALERT_DECODE_ERROR, NULL);
+    SSF_TLSC_UT_EE_ALPN(s, _utEeAlpnEmptyName, SSF_TLS_ALERT_DECODE_ERROR, NULL);
+    SSF_TLSC_UT_EE_ALPN(s, _utEeAlpnEmptyList, SSF_TLS_ALERT_DECODE_ERROR, NULL);
+    SSF_TLSC_UT_EE_ALPN(s, _utEeAlpnNoList, SSF_TLS_ALERT_DECODE_ERROR, NULL);
+    SSF_TLSC_UT_EE_ALPN(s, _utEeAlpnListLen, SSF_TLS_ALERT_DECODE_ERROR, NULL);
+    SSF_TLSC_UT_EE_ALPN(s, _utEeAlpnNameLen, SSF_TLS_ALERT_DECODE_ERROR, NULL);
+    SSF_TLSC_UT_EE_ALPN(s, _utEeAlpnShortNm, SSF_TLS_ALERT_DECODE_ERROR, NULL);
+    /* A failed parse leaves no choice behind */
+    SSF_TLSC_UT_EE_ALPN(s, _utEeAlpnMqtt, 0u, both[1]);
+    SSF_TLSC_UT_EE_ALPN(s, _utEeAlpnH2, SSF_TLS_ALERT_ILLEGAL_PARAMETER, NULL);
+    /* A choice made, then the handshake fails: none reported */
+    SSF_TLSC_UT_EE_ALPN(s, _utEeAlpnMqtt, 0u, both[1]);
+    s->hsState = SSF_TLSC_HS_ERROR;
+    SSF_ASSERT(SSFTLSCGetALPN(s) == NULL);
+    s->hsState = SSF_TLSC_HS_IDLE;
+    /* Only the second name offered */
+    SSF_ASSERT(SSFTLSCSetALPN(s, one, 1u));
+    SSF_TLSC_UT_EE_ALPN(s, _utEeAlpnMqtt, 0u, one[0]);
+    SSF_TLSC_UT_EE_ALPN(s, _utEeAlpnAws, SSF_TLS_ALERT_ILLEGAL_PARAMETER, NULL);
+    /* Setting a new list forgets the last connection's choice */
+    SSF_TLSC_UT_EE_ALPN(s, _utEeAlpnMqtt, 0u, one[0]);
+    SSF_ASSERT(SSFTLSCSetALPN(s, both, 2u));
+    SSF_ASSERT(SSFTLSCGetALPN(s) == NULL);
+    /* None offered: an ALPN answer is unsupported_extension */
+    SSF_ASSERT(SSFTLSCSetALPN(s, NULL, 0u));
+    SSF_TLSC_UT_EE_ALPN(s, _utEeAlpnMqtt, SSF_TLS_ALERT_UNSUPPORTED_EXT, NULL);
+    SSF_TLSC_UT_EE_ALPN(s, _utEeSniAck, 0u, NULL);
+
+    /* ---- The list survives a connection reset; the choice does not ---- */
+    SSF_ASSERT(SSFTLSCSetALPN(s, both, 2u));
+    SSF_TLSC_UT_EE_ALPN(s, _utEeAlpnMqtt, 0u, both[1]);
+    s->transport.close(&s->transport);
+    SSF_ASSERT((s->alpnProtos == both) && (s->alpnCount == 2u));
+    SSF_ASSERT(s->alpnChosen == 0u);
+
+    /* ---- Called while open: a programming error ---- */
+    s->hsState = SSF_TLSC_HS_COMPLETE;
+    SSF_ASSERT_TEST(SSFTLSCSetALPN(s, one, 1u));
+    s->hsState = SSF_TLSC_HS_IDLE;
+    SSFTLSCDeInit(s);
+
+    /* ---- The largest ClientHello1: a 255-byte host name and a full ALPN list. Its size is   */
+    /* ---- the one the SSF_TLS_CONFIG_MAX_ALPN_LEN compile-time check is built on.           */
+    {
+        static char host[SSF_TLSC_MAX_HOST_SIZE];
+        SSFNetIOResult_t r = SSF_NET_IO_WANT_READ;
+        uint8_t k;
+
+        memset(host, 'h', sizeof(host) - 1u); host[sizeof(host) - 1u] = 0;
+        SSFTLSCInit(s, &_utFake, NULL);
+        SSFTLSCSetUnauthenticated(s, true);
+        SSF_ASSERT(SSFTLSCSetALPN(s, listFill, 1u));
+        _utFakeInLen = _utFakeInPos = _utFakeOutLen = 0;
+        SSF_ASSERT(s->transport.open(&s->transport, host, sizeof(host), 443u));
+        for (k = 0; (k < 20u) && (_utFakeOutLen == 0u) && (r != SSF_NET_IO_ERROR); k++)
+        { r = s->transport.pollOpen(&s->transport); }
+        SSF_ASSERT(_utFakeOutLen > 0u);
+        SSF_ASSERT(sizeof(s->clientHelloMsg) == SSF_TLSC_CH_SIZE);
+        SSF_ASSERT(s->clientHelloLen ==
+                   (SSF_TLSC_CH1_MAX_NO_ALPN + 6u + SSF_TLS_CONFIG_MAX_ALPN_LEN));
+        s->transport.close(&s->transport);
+        SSFTLSCDeInit(s);
+    }
+
+    /* ---- no_application_protocol is traced; the text holds whether or not ALPN was offered */
+    {
+        static const uint8_t alert[] = { 2u, SSF_TLS_ALERT_NO_APPLICATION_PROTOCOL };
+        uint8_t buf[16];
+        size_t n;
+
+        _UTAppSession(s);
+        SSFTLSCSetTrace(s, _SSFTLSCUTWarnTrace, NULL);
+        _utWarn[0] = 0;
+        _UTSrvRecord(SSF_TLS_CT_ALERT, alert, sizeof(alert));
+        SSF_ASSERT(s->transport.recv(&s->transport, buf, sizeof(buf), &n) == SSF_NET_IO_ERROR);
+        SSF_ASSERT(strstr(_utWarn, "Server requires an ALPN protocol the client did not offer "
+                                   "(no_application_protocol)") != NULL);
+        SSFTLSCDeInit(s);
+        SSFTLSRecordStateDeInit(&_utSrvSend);
+        SSFTLSRecordStateDeInit(&_utSrvRecv);
+    }
+    SSFTLSCInit(s, &_utSock.transport, NULL);
+    s->hsState = SSF_TLSC_HS_IDLE;
+    SSFTLSCDeInit(s);
+    SSF_ASSERT_TEST(SSFTLSCGetALPN(s));
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Item 6 on the wire: a ClientHello to a literal IP address carries no server_name.            */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFTLSCUTNoSniForIP(SSFTLSCUTFd_t l, uint16_t port)
@@ -2126,6 +2344,7 @@ static void _SSFTLSCUTNoSniForIP(SSFTLSCUTFd_t l, uint16_t port)
     n = _SSFTLSCUTRecvRecord(peer, chRec, sizeof(chRec));
     _SSFTLSCUTParseClientHello(chRec, n, &ch);
     SSF_ASSERT(_SSFTLSCUTFindExt(&ch, SSF_TLS_EXT_SERVER_NAME) < 0);
+    SSF_ASSERT(_SSFTLSCUTFindExt(&ch, SSF_TLS_EXT_ALPN) < 0);        /* None set: not offered */
     SSF_ASSERT(_SSFTLSCUTFindExt(&ch, SSF_TLS_EXT_KEY_SHARE) >= 0);   /* Otherwise intact */
     t->close(t);
     (void)SSF_TLSC_UT_CLOSE(peer);
@@ -2199,6 +2418,7 @@ void SSFTLSCUnitTest(void)
     }
     _SSFTLSCUTClientCert();
     _SSFTLSCUTClientChain();
+    _SSFTLSCUTAlpn();
 
     /* ---- Explicit opt-in to an unauthenticated connection, and back out ---- */
     SSFTLSCSetUnauthenticated(&_utSession, true);

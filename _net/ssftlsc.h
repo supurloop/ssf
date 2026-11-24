@@ -92,6 +92,8 @@ extern "C" {
 /*   certificate sends certificate_required (or rejects the chain) after the client Finished, */
 /*   so pollOpen() has already reported success; the first recv() fails, and for              */
 /*   certificate_required the trace says the server requires a client certificate.            */
+/* - ALPN (RFC 7301) is optional: SSFTLSCSetALPN() with the protocols to offer, SSFTLSCGetALPN() */
+/*   for the server's choice after the handshake.                                              */
 /* - IPv4 only (ssfnet.h): open() refuses an IPv6 literal host whatever the inner transport.     */
 /* - Chain limit: SSF_X509_CONFIG_MAX_CHAIN_DEPTH, the verifier's own. Certificates a server     */
 /*   sends past it are dropped; if verification then fails, the trace says the chain was cut.   */
@@ -198,6 +200,10 @@ typedef struct SSFTLSCIOCtx
 } SSFTLSCIOCtx_t;
 
 #define SSF_TLSC_MAX_HOST_SIZE (256u)   /* Host name passed to open(), including the NUL       */
+#define SSF_TLSC_CH_SIZE (768u)         /* ClientHello buffer                                  */
+/* The largest ClientHello1 without ALPN: a 255-byte host name in server_name. ALPN adds 6     */
+/* bytes plus the list, so SSF_TLS_CONFIG_MAX_ALPN_LEN may be at most CH_SIZE - 6 - this.     */
+#define SSF_TLSC_CH1_MAX_NO_ALPN (543u)
 
 /* TLS client session. */
 typedef struct SSFTLSCSession
@@ -251,6 +257,12 @@ typedef struct SSFTLSCSession
     const SSFPKey_t *clientKey;
     uint8_t clientChainCount;
 
+    /* ALPN (SSFTLSCSetALPN): the caller's protocol names, kept across connections; alpnCount 0 */
+    /* = not offered. alpnChosen is 1 + the index of the server's choice, 0 for none.          */
+    const char *const *alpnProtos;
+    uint8_t alpnCount;
+    uint8_t alpnChosen;
+
     /* Ephemeral key (stored separately from recvBuf to avoid corruption) */
     uint8_t ephemeralPrivKey[48];
 
@@ -284,7 +296,7 @@ typedef struct SSFTLSCSession
     uint32_t sendRecordsOnKey;       /* Records sent under the current client application key  */
 
     /* Saved ClientHello for transcript re-init when server selects SHA-384 suite */
-    uint8_t clientHelloMsg[768];
+    uint8_t clientHelloMsg[SSF_TLSC_CH_SIZE];
     size_t clientHelloLen;
 
     /* Handshake message reassembly buffer (servers may bundle multiple HS msgs in one record). */
@@ -359,6 +371,24 @@ void SSFTLSCSetUnauthenticated(SSFTLSCSession_t *session, bool allow);
 bool SSFTLSCSetClientCert(SSFTLSCSession_t *session, const uint8_t *const *chainDer,
                           const uint32_t *chainLens, uint8_t chainCount, const SSFPKey_t *key);
 
+/* Sets the protocols offered with ALPN (RFC 7301), in preference order: e.g. "x-amzn-mqtt-ca"  */
+/* for AWS IoT MQTT on port 443. Nothing is copied: the array and strings must stay valid and   */
+/* unchanged while the session can connect. Each name is a NUL-terminated string of 1..255     */
+/* bytes; the names, each plus one length byte, must total at most SSF_TLS_CONFIG_MAX_ALPN_LEN  */
+/* (default 32, at most 219). Returns false, leaving none set, otherwise. Pass NULL, 0 to      */
+/* clear. Call while the session is not open.                                                   */
+/* The server's answer must be exactly one of the offered names (else illegal_parameter). A     */
+/* server may also answer with none: the handshake still succeeds, and SSFTLSCGetALPN() says   */
+/* so; whether to carry on is the caller's decision. A server that requires ALPN and supports  */
+/* none of the names ends the handshake with no_application_protocol.                          */
+bool SSFTLSCSetALPN(SSFTLSCSession_t *session, const char *const *protos, uint8_t count);
+
+/* Returns the protocol the server chose (the caller's own string from SSFTLSCSetALPN()), or    */
+/* NULL if it chose none or the handshake is not complete: the choice arrives before the server */
+/* is authenticated, so it is reported only once pollOpen() has succeeded. Cleared when the    */
+/* connection closes and when SSFTLSCSetALPN() is called.                                       */
+const char *SSFTLSCGetALPN(const SSFTLSCSession_t *session);
+
 /* Sets an optional per-connection trace callback. NULL traceFn disables tracing.               */
 void SSFTLSCSetTrace(SSFTLSCSession_t *session, SSFTLSTraceFn_t traceFn, void *traceCtx);
 
@@ -383,6 +413,8 @@ bool _SSFTLSCSaveLeafKeyForTest(SSFTLSCSession_t *session, const uint8_t *der, u
 uint8_t _SSFTLSCChainAlertForTest(SSFX509VerifyCode_t code);
 bool _SSFTLSCParseEncryptedExtensionsForTest(const uint8_t *body, size_t bodyLen,
                                              uint8_t *alertOut);
+bool _SSFTLSCParseEncryptedExtensionsAlpnForTest(SSFTLSCSession_t *session, const uint8_t *body,
+                                                 size_t bodyLen, uint8_t *alertOut);
 bool _SSFTLSCParseEncryptedExtensionsRslForTest(const uint8_t *body, size_t bodyLen,
                                                 uint8_t *alertOut, uint16_t *recordLimitOut);
 bool _SSFTLSCParseCertificateVerifyForTest(const uint8_t *body, size_t bodyLen,

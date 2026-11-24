@@ -302,6 +302,20 @@ static SSFTLSIOResult_t _RecvRecordOnce(SSFTLSCSession_t *s, uint8_t *pt, size_t
                 io->hdrPos = 0; io->hdrComplete = false; io->fragPos = 0; io->fragLen = 0;
                 _SSF_TLSC_ALERT(s, SSF_TLS_ALERT_UNEXPECTED_MSG); return SSF_TLS_IO_ERROR;
             }
+            /* The type for the moment, before the size, so a record of the wrong type is      */
+            /* unexpected_message whatever its length (RFC 8446 5, 5.2): change_cipher_spec only */
+            /* during the handshake and of one byte; before keys handshake and alert only;    */
+            /* once keys are active application_data outside only (a plaintext handshake or   */
+            /* alert record was not sent by the peer: an injected message or forged close).  */
+            if ((s->recvBuf[0] == SSF_TLS_CT_CHANGE_CIPHER) ?
+                (s->connected || (io->fragLen != 1u)) :
+                (s->recvEncrypted != (s->recvBuf[0] == SSF_TLS_CT_APPLICATION)))
+            {
+                SSF_TLS_TRACE_REC_ERROR(&s->trace, "RecvRecord: record type %u unexpected here",
+                                        s->recvBuf[0]);
+                io->hdrPos = 0; io->hdrComplete = false; io->fragPos = 0; io->fragLen = 0;
+                _SSF_TLSC_ALERT(s, SSF_TLS_ALERT_UNEXPECTED_MSG); return SSF_TLS_IO_ERROR;
+            }
             if (io->fragLen > SSF_TLSC_CONFIG_MAX_RECV_RECORD + 1u + SSF_TLS_AEAD_TAG_SIZE)
             {
                 SSF_TLS_TRACE_REC_ERROR(&s->trace, "RecvRecord: fragment too large (%u)",
@@ -349,12 +363,11 @@ static SSFTLSIOResult_t _RecvRecordOnce(SSFTLSCSession_t *s, uint8_t *pt, size_t
         io->hdrPos = 0; io->hdrComplete = false; io->fragPos = 0;
 
         /* RFC 8446 5: a plaintext change_cipher_spec of the single byte 0x01 may arrive after   */
-        /* ClientHello and before the peer's Finished, and is dropped by the caller. Any other   */
-        /* value, length or time is unexpected_message.                                          */
+        /* ClientHello and before the peer's Finished, and is dropped by the caller. Its time   */
+        /* and length were judged at the header; any other value is unexpected_message.         */
         if (hdr_ct == SSF_TLS_CT_CHANGE_CIPHER)
         {
-            if (s->connected || (fragLen != 1u) ||
-                (s->recvBuf[SSF_TLS_RECORD_HEADER_SIZE] != 0x01u))
+            if (s->recvBuf[SSF_TLS_RECORD_HEADER_SIZE] != 0x01u)
             {
                 SSF_TLS_TRACE_REC_ERROR(&s->trace, "RecvRecord: unexpected change_cipher_spec");
                 _SSF_TLSC_ALERT(s, SSF_TLS_ALERT_UNEXPECTED_MSG); return SSF_TLS_IO_ERROR;
@@ -368,17 +381,7 @@ static SSFTLSIOResult_t _RecvRecordOnce(SSFTLSCSession_t *s, uint8_t *pt, size_t
         {
             bool ok;
 
-            /* RFC 8446 5.2: once keys are active every record is protected, with outer type    */
-            /* application_data. A plaintext handshake or alert record here was not sent by the  */
-            /* peer and is unexpected_message; trusting it would let an on-path party inject    */
-            /* handshake messages or a forged close_notify (truncation).                        */
-            if (hdr_ct != SSF_TLS_CT_APPLICATION)
-            {
-                SSF_TLS_TRACE_REC_ERROR(&s->trace,
-                                        "RecvRecord: plaintext record type %u after encryption",
-                                        hdr_ct);
-                _SSF_TLSC_ALERT(s, SSF_TLS_ALERT_UNEXPECTED_MSG); return SSF_TLS_IO_ERROR;
-            }
+            /* Outer type application_data: judged at the header (RFC 8446 5.2) */
             /* The plaintext must fit the space offered (during reassembly, what is left of     */
             /* hsBuf); a shortfall is this build's limit, not a bad record.                     */
             if (((size_t)fragLen > SSF_TLS_AEAD_TAG_SIZE) &&
@@ -411,14 +414,7 @@ static SSFTLSIOResult_t _RecvRecordOnce(SSFTLSCSession_t *s, uint8_t *pt, size_t
         }
         else
         {
-            /* Before keys: only handshake and alert records. application_data has no keys to   */
-            /* decrypt with; anything else is an unknown type.                                   */
-            if ((hdr_ct != SSF_TLS_CT_HANDSHAKE) && (hdr_ct != SSF_TLS_CT_ALERT))
-            {
-                SSF_TLS_TRACE_REC_ERROR(&s->trace, "RecvRecord: unexpected plaintext type %u",
-                                        hdr_ct);
-                _SSF_TLSC_ALERT(s, SSF_TLS_ALERT_UNEXPECTED_MSG); return SSF_TLS_IO_ERROR;
-            }
+            /* Before keys: handshake or alert, judged at the header */
             /* TLSPlaintext.length MUST NOT exceed 2^14 (RFC 8446 5.1), whatever space is free */
             if (fragLen > 16384u)
             {

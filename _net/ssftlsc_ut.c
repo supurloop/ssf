@@ -2399,8 +2399,9 @@ static void _SSFTLSCUTAlpn(void)
 /* every receive size; within 2^14 but over this build's buffer, internal_error. Over the fake  */
 /* transport: the ClientHello goes out, then a plaintext handshake record of len bytes arrives. */
 /* --------------------------------------------------------------------------------------------- */
-/* Returns the alert the client sends for a plaintext handshake record of len bytes. */
-static uint8_t _UTPlainRecordAlert(size_t len)
+/* Returns the alert the client sends, mid-handshake (no keys yet), for a record of type ct and */
+/* len zero bytes (a handshake record starts like a ServerHello).                               */
+static uint8_t _UTPreKeyRecordAlert(uint8_t ct, size_t len)
 {
     SSFTLSCSession_t *s = &_utSession2;
     SSFNetTransport_t *t = &s->transport;
@@ -2416,9 +2417,9 @@ static uint8_t _UTPlainRecordAlert(size_t len)
     for (k = 0; (k < 20u) && (_utFakeOutLen == 0u); k++) (void)t->pollOpen(t);
     SSF_ASSERT(_utFakeOutLen > 0u);                            /* ClientHello sent */
     memset(_utFakeIn, 0, 5u + len);
-    _utFakeIn[0] = SSF_TLS_CT_HANDSHAKE; _utFakeIn[1] = 0x03; _utFakeIn[2] = 0x03;
+    _utFakeIn[0] = ct; _utFakeIn[1] = 0x03; _utFakeIn[2] = 0x03;
     _utFakeIn[3] = (uint8_t)(len >> 8); _utFakeIn[4] = (uint8_t)len;
-    _utFakeIn[5] = SSF_TLS_HS_SERVER_HELLO;
+    if (ct == SSF_TLS_CT_HANDSHAKE) _utFakeIn[5] = SSF_TLS_HS_SERVER_HELLO;
     _utFakeInLen = 5u + len;
     for (k = 0; (k < 100u) && ((r == SSF_NET_IO_WANT_READ) || (r == SSF_NET_IO_WANT_WRITE)); k++)
     {
@@ -2433,6 +2434,160 @@ static uint8_t _UTPlainRecordAlert(size_t len)
     t->close(t);
     SSFTLSCDeInit(s);
     return alert;
+}
+
+/* Returns the alert the client sends for a plaintext handshake record of len bytes. */
+static uint8_t _UTPlainRecordAlert(size_t len)
+{
+    return _UTPreKeyRecordAlert(SSF_TLS_CT_HANDSHAKE, len);
+}
+
+/* Returns the alert recv() sets on a connected session for a record of type ct, len bytes. */
+static uint8_t _UTAppRecordAlert(uint8_t ct, size_t len)
+{
+    SSFTLSCSession_t *s = &_utSession2;
+    uint8_t buf[16];
+    size_t n;
+    uint8_t alert;
+
+    SSF_ASSERT((5u + len) <= sizeof(_utFakeIn));
+    _UTAppSession(s);
+    memset(_utFakeIn, 0, 5u + len);
+    _utFakeIn[0] = ct; _utFakeIn[1] = 0x03; _utFakeIn[2] = 0x03;
+    _utFakeIn[3] = (uint8_t)(len >> 8); _utFakeIn[4] = (uint8_t)len;
+    if ((ct == SSF_TLS_CT_CHANGE_CIPHER) && (len > 0u)) _utFakeIn[5] = 0x01u;
+    _utFakeInLen = 5u + len;
+    SSF_ASSERT(s->transport.recv(&s->transport, buf, sizeof(buf), &n) == SSF_NET_IO_ERROR);
+    alert = s->pendingAlert;
+    SSFTLSCDeInit(s);
+    SSFTLSRecordStateDeInit(&_utSrvSend);
+    SSFTLSRecordStateDeInit(&_utSrvRecv);
+    return alert;
+}
+
+/* A record whose type is wrong for the moment is unexpected_message whatever its length: the  */
+/* type is judged at the header, before the size, so it is never blamed on this build's buffer */
+/* (internal_error) or answered as an overflow.                                                 */
+static void _SSFTLSCUTRecordTypeFirst(void)
+{
+    size_t lens[4];
+    uint8_t nLens = 3u;
+    uint8_t i;
+
+    lens[0] = 2u;
+    lens[1] = 100u;
+    lens[2] = 16384u + 2u + SSF_TLS_AEAD_TAG_SIZE;                 /* Over every maximum */
+    if ((SSF_TLSC_CONFIG_MAX_RECV_RECORD + 2u + SSF_TLS_AEAD_TAG_SIZE) <
+        (16384u + 2u + SSF_TLS_AEAD_TAG_SIZE))
+    {
+        lens[nLens++] = SSF_TLSC_CONFIG_MAX_RECV_RECORD + 2u + SSF_TLS_AEAD_TAG_SIZE;
+    }
+    for (i = 0; i < nLens; i++)
+    {
+        /* No keys yet: application_data cannot be decrypted; change_cipher_spec is 1 byte */
+        SSF_ASSERT(_UTPreKeyRecordAlert(SSF_TLS_CT_APPLICATION, lens[i]) ==
+                   SSF_TLS_ALERT_UNEXPECTED_MSG);
+        SSF_ASSERT(_UTPreKeyRecordAlert(SSF_TLS_CT_CHANGE_CIPHER, lens[i]) ==
+                   SSF_TLS_ALERT_UNEXPECTED_MSG);
+        /* Keys active: every record is protected; after the handshake no change_cipher_spec */
+        SSF_ASSERT(_UTAppRecordAlert(SSF_TLS_CT_HANDSHAKE, lens[i]) ==
+                   SSF_TLS_ALERT_UNEXPECTED_MSG);
+        SSF_ASSERT(_UTAppRecordAlert(SSF_TLS_CT_ALERT, lens[i]) == SSF_TLS_ALERT_UNEXPECTED_MSG);
+        SSF_ASSERT(_UTAppRecordAlert(SSF_TLS_CT_CHANGE_CIPHER, lens[i]) ==
+                   SSF_TLS_ALERT_UNEXPECTED_MSG);
+    }
+    SSF_ASSERT(_UTAppRecordAlert(SSF_TLS_CT_CHANGE_CIPHER, 1u) == SSF_TLS_ALERT_UNEXPECTED_MSG);
+    /* A one-byte change_cipher_spec during the handshake must be 0x01 */
+    SSF_ASSERT(_UTPreKeyRecordAlert(SSF_TLS_CT_CHANGE_CIPHER, 1u) ==
+               SSF_TLS_ALERT_UNEXPECTED_MSG);
+}
+
+/* A session mid-handshake: handshake keys active (generation 0 test keys), waiting for        */
+/* EncryptedExtensions, not yet connected: where an on-path party would inject plaintext.      */
+static void _UTMidHandshakeSession(SSFTLSCSession_t *s)
+{
+    _UTAppSession(s);
+    s->connected = false;
+    s->hsState = SSF_TLSC_HS_RECV_EE_CERT;
+    s->helperStep = 0;
+    SSFTLSTranscriptInit(&s->transcript, SSF_HMAC_HASH_SHA256);
+}
+
+/* Polls once the queued records are in; returns the pollOpen() result. */
+static SSFNetIOResult_t _UTMidPoll(SSFTLSCSession_t *s)
+{
+    SSFNetIOResult_t r = SSF_NET_IO_WANT_READ;
+    uint8_t k;
+
+    for (k = 0; (k < 8u) && ((r == SSF_NET_IO_WANT_READ) || (r == SSF_NET_IO_WANT_WRITE)) &&
+                (_utFakeInPos < _utFakeInLen); k++)
+    {
+        r = s->transport.pollOpen(&s->transport);
+    }
+    return r;
+}
+
+/* Queues a plaintext record of type ct. */
+static void _UTPlainRecord(uint8_t ct, const uint8_t *data, size_t len)
+{
+    SSF_ASSERT((_utFakeInLen + 5u + len) <= sizeof(_utFakeIn));
+    _utFakeIn[_utFakeInLen++] = ct;
+    _utFakeIn[_utFakeInLen++] = 0x03; _utFakeIn[_utFakeInLen++] = 0x03;
+    _utFakeIn[_utFakeInLen++] = (uint8_t)(len >> 8); _utFakeIn[_utFakeInLen++] = (uint8_t)len;
+    memcpy(&_utFakeIn[_utFakeInLen], data, len);
+    _utFakeInLen += len;
+}
+
+/* Between the ServerHello and the server Finished: keys are active, the handshake still runs. */
+/* A plaintext handshake or alert record is unexpected_message (it would be an injected       */
+/* message or a forged alert); the compatibility change_cipher_spec, one byte 0x01, is dropped */
+/* and the handshake goes on; any other change_cipher_spec is unexpected_message.             */
+static void _SSFTLSCUTMidHandshakeRecords(void)
+{
+    static const uint8_t ee[] = { SSF_TLS_HS_ENCRYPTED_EXTENSIONS, 0x00, 0x00, 0x02, 0x00, 0x00 };
+    static const uint8_t closeNotify[] = { 0x01, 0x00 };
+    static const uint8_t ccs1[] = { 0x01 };
+    static const uint8_t ccs2[] = { 0x01, 0x01 };
+    static const uint8_t ccsBad[] = { 0x02 };
+    SSFTLSCSession_t *s = &_utSession2;
+    uint8_t k;
+
+    /* ---- Injected plaintext: an EncryptedExtensions, a close_notify ---- */
+    for (k = 0; k < 2u; k++)
+    {
+        _UTMidHandshakeSession(s);
+        if (k == 0u) _UTPlainRecord(SSF_TLS_CT_HANDSHAKE, ee, sizeof(ee));
+        else _UTPlainRecord(SSF_TLS_CT_ALERT, closeNotify, sizeof(closeNotify));
+        SSF_ASSERT(_UTMidPoll(s) == SSF_NET_IO_ERROR);
+        SSF_ASSERT(s->pendingAlert == SSF_TLS_ALERT_UNEXPECTED_MSG);
+        SSFTLSCDeInit(s);
+        SSFTLSRecordStateDeInit(&_utSrvSend);
+        SSFTLSRecordStateDeInit(&_utSrvRecv);
+    }
+
+    /* ---- The compatibility change_cipher_spec, then the real (protected) EE: accepted ---- */
+    _UTMidHandshakeSession(s);
+    _UTPlainRecord(SSF_TLS_CT_CHANGE_CIPHER, ccs1, sizeof(ccs1));
+    _UTSrvRecord(SSF_TLS_CT_HANDSHAKE, ee, sizeof(ee));
+    SSF_ASSERT(_UTMidPoll(s) == SSF_NET_IO_WANT_READ);
+    SSF_ASSERT((s->pendingAlert == 0u) && (s->hsState == SSF_TLSC_HS_RECV_EE_CERT) &&
+               (s->helperStep == 2u));                            /* Now waiting for Certificate */
+    SSFTLSCDeInit(s);
+    SSFTLSRecordStateDeInit(&_utSrvSend);
+    SSFTLSRecordStateDeInit(&_utSrvRecv);
+
+    /* ---- A change_cipher_spec of two bytes, or of another value ---- */
+    for (k = 0; k < 2u; k++)
+    {
+        _UTMidHandshakeSession(s);
+        if (k == 0u) _UTPlainRecord(SSF_TLS_CT_CHANGE_CIPHER, ccs2, sizeof(ccs2));
+        else _UTPlainRecord(SSF_TLS_CT_CHANGE_CIPHER, ccsBad, sizeof(ccsBad));
+        SSF_ASSERT(_UTMidPoll(s) == SSF_NET_IO_ERROR);
+        SSF_ASSERT(s->pendingAlert == SSF_TLS_ALERT_UNEXPECTED_MSG);
+        SSFTLSCDeInit(s);
+        SSFTLSRecordStateDeInit(&_utSrvSend);
+        SSFTLSRecordStateDeInit(&_utSrvRecv);
+    }
 }
 
 static void _SSFTLSCUTPlainOverflow(void)
@@ -3228,6 +3383,8 @@ void SSFTLSCUnitTest(void)
     _SSFTLSCUTServerHelloExts();
     _SSFTLSCUTServerHelloVersion();
     _SSFTLSCUTPlainOverflow();
+    _SSFTLSCUTRecordTypeFirst();
+    _SSFTLSCUTMidHandshakeRecords();
     _SSFTLSCUTClientChain();
     _SSFTLSCUTAlpn();
     _SSFTLSCUTTrustFromPEM();

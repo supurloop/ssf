@@ -552,10 +552,33 @@ is rejected.
       16366, 16367, 16383 and 16384 (run alone, ASan). Mutation: 6 mutants, all killed (5
       only by the small builds, where the branch is reachable). Text unchanged at the default
       receive size (+10 B at 2048).
-- [ ] Before keys, a record labelled application_data that is over this build's buffer gets
+- [x] Before keys, a record labelled application_data that is over this build's buffer gets
       internal_error from the header check, where the same record at a normal size gets
       unexpected_message (no keys to decrypt it). Fatal either way; only a broken server sends
       one; alert code only. Found during the plaintext record_overflow audit.
+      Done, TDD, more generally: the record type is now judged for the moment at the header,
+      before the size, so a record of the wrong type is unexpected_message whatever its
+      length (it was record_overflow over the maximum, or internal_error over a small
+      build's buffer): change_cipher_spec only during the handshake and of one byte;
+      before keys handshake / alert; once keys are active application_data outside. The
+      post-read checks this replaces are gone (the 0x01 byte check stays). Bad records are
+      also refused without reading them. `_SSFTLSCUTRecordTypeFirst()`: application_data and
+      change_cipher_spec before keys, plaintext handshake / alert / change_cipher_spec after,
+      at 2, 100, 2^14 + 18 bytes and just over a small build's buffer; a one-byte CCS that is
+      not 0x01. Red at every size (the 2^14 + 18 cases), green alone at receive 64 .. 16384
+      and in the full unit test (ASan clean). Mutation: 8 mutants; 6 killed, one equivalent
+      (CCS after the handshake: recv() refuses it too), one a no-op mutant. Wire: ALPN,
+      mutual TLS, trust store and KeyUpdate sets unchanged. Text +6 B.
+      Audit: the window between ServerHello and the server Finished (keys active, not yet
+      connected), where an on-path party would inject plaintext, had no test; the rule does
+      not depend on `connected` (except for change_cipher_spec), but nothing would catch a
+      change that made it so. Fixed, TDD: `_SSFTLSCUTMidHandshakeRecords()` puts a session
+      over the fake transport mid-handshake (waiting for EncryptedExtensions): a plaintext
+      EncryptedExtensions or close_notify is unexpected_message; the compatibility
+      change_cipher_spec (one byte 0x01) is dropped and the protected EE that follows is
+      processed; a two-byte or non-0x01 change_cipher_spec is unexpected_message. Red shown by
+      mutation: the rule keyed on `connected`, or plaintext after keys refused only once
+      connected, both pass the committed suite and fail the new test. Test code only.
       Size figures corrected: earlier ones compared against a HEAD copy compiled from a long
       scratch path, whose assertion __FILE__ strings added about 92 B to the old size. Measured
       again with every version compiled from the same relative path: whole .text (string

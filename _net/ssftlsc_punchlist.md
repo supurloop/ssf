@@ -281,6 +281,16 @@ is rejected.
 - [ ] Stack depth now set by called modules: `SSFX509VerifyChainPurpose` has a 14.5 KB frame
       (sets the 28 KB EC peak); RSA adds `SSFRSAVerifyPSS` 6 KB and `SSFBNModExpMont` 10.6 KB
       (33 KB peak). Review in `ssfx509` / `ssfrsa` / `ssfbn`. Found during step 3 item 5.
+      Re-measured (3B item G; Cortex-M4 -Os, depth 6): those figures were x86 -O1 at depth 8.
+      Verifier frame 6.6 KB (the 6 parsed certificates). `SSFBNModExpMont` (10.4 KB) is
+      private-key only; verify uses `SSFBNModExpMontPub`: verify path 9.7 KB at the 4096 maximum
+      (7.4 KB at 3072, 5.1 KB at 2048). RSA documented (approved): 4096 is the deliberate
+      ceiling, larger keys are not practical on SSF targets, and the largest enabled size sets
+      the stack (`ssfrsa.md` key-size note with the table; `ssftlsc.h` design note). Also fixed
+      the `SSFBN_CONFIG_MAX_BITS` typo in `ssfrsa.md`. Still open: a target-like
+      whole-handshake peak to replace the x86 23.8 / 28.8 KB figures, and whether the verifier's
+      certificate array moves to caller RAM (option B; also what a resumable verify, item I,
+      would need).
 - [x] Remaining ssftlsc locals: the leaf `SSFX509Cert_t` (1.5 KB) in the Certificate handler
       (the 1 KB HRR ClientHello buffer went with the single ClientHello builder). At -O1
       gcc inlines the handlers into `_SSFTLSCDrive` and their locals add up to a 2.4 KB frame;

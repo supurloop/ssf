@@ -54,7 +54,25 @@ comparable security.
   NIST floor for moderate-assurance signatures and interoperable TLS; 3072 is recommended
   for new systems targeting a 10-year lifetime; 4096 is reasonable for long-term or
   high-assurance contexts. Keys below 2048 are not supported (the keygen validates and
-  `SSFBN_CONFIG_MAX_BITS` gates the upper bound).
+  `SSF_BN_CONFIG_MAX_BITS` gates the upper bound).
+- **4096 bits is the deliberate ceiling.** Larger keys (6144, 8192) are not supported and are
+  refused like any other unsupported size. They are rare in practice, and their stack, RAM
+  and time costs are not practical for the embedded systems SSF targets: every operation's
+  buffers and number temporaries are sized to the largest enabled key; private-key time grows
+  roughly with the cube of the key size, verify time (e = 65537) with its square. The largest
+  enabled size sets the stack for every key size, so enable only the sizes your peers use.
+  Measured stack on the signature-verify path (`SSFRSAVerifyPSS` → `SSFBNModExpPub` →
+  `SSFBNModExpMontPub`, sum of the three frames; Cortex-M4, `-Os`):
+
+  | Largest enabled size | Verify path stack |
+  |---|---|
+  | 4096 (default) | ~9.7 KB |
+  | 3072 | ~7.4 KB |
+  | 2048 | ~5.1 KB |
+
+  Most public CA chains are RSA-2048 or RSA-4096, so a TLS client that must reach
+  arbitrary servers keeps 4096 on; a device that talks only to its own infrastructure can
+  turn off the sizes that infrastructure does not use.
 - **Hash-to-key-size pairing per NIST SP 800-57 §5.6.2:**
 
   | Key size | Recommended hash(es) |

@@ -61,6 +61,9 @@ extern "C" {
 /*   trust anchor's in one call, so its time grows with the chain length and is set by the      */
 /*   slowest algorithms involved (P-384 and RSA-3072/4096 well above P-256, Ed25519 and         */
 /*   RSA-2048). Size a single-threaded application's latency budget for that call.             */
+/* - RSA keys are 2048 to 4096 bits (ssfrsa.md): a server or CA key larger than 4096 bits fails */
+/*   the handshake. The largest size enabled in ssfrsa_opt.h sets the RSA verify stack (about   */
+/*   9.7 KB at 4096, 5.1 KB at 2048 on Cortex-M4 -Os), whatever key size the server uses.       */
 /* - Client mode, full handshake only (no PSK resumption or 0-RTT). One connection per session.  */
 /* - IPv4 only (ssfnet.h): open() refuses an IPv6 literal host whatever the inner transport.     */
 /* - Chain limit: SSF_X509_CONFIG_MAX_CHAIN_DEPTH, the verifier's own. Certificates a server     */

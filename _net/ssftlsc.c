@@ -1112,19 +1112,17 @@ void _SSFTLSCInjectClientHello2ForTest(const uint8_t *ch2Opt, size_t ch2Len,
 /* Builds a ClientHello1 into session (random 32 x 0x11, session id 32 x 0x22, x25519 and        */
 /* secp384r1 shares), then parses body as a ServerHello, or a HelloRetryRequest if isHrr.       */
 /* *alertOut is the alert the client would send, 0 when the message is accepted.               */
-bool _SSFTLSCParseServerHelloForTest(SSFTLSCSession_t *session, const uint8_t *body,
-                                     size_t bodyLen, bool isHrr, uint8_t *alertOut)
+bool _SSFTLSCParseServerHelloExForTest(SSFTLSCSession_t *session, const uint8_t *body,
+                                       size_t bodyLen, bool isHrr, uint16_t hrrGroup,
+                                       uint16_t hrrSuite, uint8_t *alertOut, uint16_t *groupOut,
+                                       uint8_t *pubOut, size_t *pubLenOut,
+                                       const uint8_t **cookieOut, uint16_t *cookieLenOut)
 {
     static uint8_t p384Pub[97];
     uint8_t random[32];
     uint8_t sid[32];
     uint8_t x25519Pub[32];
     SSFTLSCKeyShare_t shares[2];
-    uint8_t pub[97];
-    size_t pubLen;
-    uint16_t group;
-    const uint8_t *cookie;
-    uint16_t cookieLen;
     bool ok;
 
     memset(random, 0x11, sizeof(random));
@@ -1135,12 +1133,28 @@ bool _SSFTLSCParseServerHelloForTest(SSFTLSCSession_t *session, const uint8_t *b
     shares[1].group = SSF_TLS_GROUP_SECP384R1; shares[1].pub = p384Pub; shares[1].len = 97u;
     SSF_REQUIRE(_BuildClientHello(session, random, sid, (uint8_t)sizeof(sid), shares, 2u, NULL,
                                   0u));
-    session->hrrDone = false;
+    /* hrrGroup != 0: parse as the ServerHello that follows a HelloRetryRequest for it */
+    session->hrrDone = (hrrGroup != 0u);
+    session->hrrGroup = hrrGroup;
+    session->hrrSuite = hrrSuite;
     session->pendingAlert = 0;
-    ok = _ParseServerHello(session, body, bodyLen, isHrr, pub, &pubLen, &group, &cookie,
-                           &cookieLen);
+    ok = _ParseServerHello(session, body, bodyLen, isHrr, pubOut, pubLenOut, groupOut, cookieOut,
+                           cookieLenOut);
     *alertOut = ok ? 0u : session->pendingAlert;
     return ok;
+}
+
+bool _SSFTLSCParseServerHelloForTest(SSFTLSCSession_t *session, const uint8_t *body,
+                                     size_t bodyLen, bool isHrr, uint8_t *alertOut)
+{
+    uint8_t pub[97];
+    size_t pubLen;
+    uint16_t group;
+    const uint8_t *cookie;
+    uint16_t cookieLen;
+
+    return _SSFTLSCParseServerHelloExForTest(session, body, bodyLen, isHrr, 0u, 0u, alertOut,
+                                             &group, pub, &pubLen, &cookie, &cookieLen);
 }
 #endif /* SSF_CONFIG_TLSC_UNIT_TEST */
 

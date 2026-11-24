@@ -36,6 +36,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #ifdef _WIN32
@@ -3719,6 +3720,281 @@ static const uint8_t _utShDupVer[]   = { 0x00, 0x2b, 0x00, 0x02, 0x03, 0x04 };
 static const uint8_t _utShDupCookie[] = { 0x00, 0x2c, 0x00, 0x03, 0x00, 0x01, 0xaa,
                                           0x00, 0x2c, 0x00, 0x03, 0x00, 0x01, 0xbb };
 
+/* --------------------------------------------------------------------------------------------- */
+/* ServerHello / HelloRetryRequest parser, every check (RFC 8446 4.1.3, 4.1.4, 4.2.1, 4.2.8,     */
+/* 4.2.2): against the hook's ClientHello1 (session id 32 x 0x22, x25519 and secp384r1 shares),  */
+/* or after a HelloRetryRequest that chose secp256r1 and TLS_AES_128_GCM_SHA256.                */
+/* --------------------------------------------------------------------------------------------- */
+/* Builds a body: session id sidLen x sidByte, suite, compression, then the extension block     */
+/* ext[0..extLen) (its length field included only when withExts).                               */
+static size_t _UTShRaw(uint8_t *out, uint8_t sidLen, uint8_t sidByte, uint16_t suite,
+                       uint8_t comp, bool withExts, const uint8_t *ext, size_t extLen)
+{
+    size_t p = 0;
+
+    out[p++] = 0x03; out[p++] = 0x03;
+    memset(&out[p], 0x5a, 32u); p += 32u;
+    out[p++] = sidLen; memset(&out[p], sidByte, sidLen); p += sidLen;
+    out[p++] = (uint8_t)(suite >> 8); out[p++] = (uint8_t)suite;
+    out[p++] = comp;
+    if (withExts)
+    {
+        out[p++] = (uint8_t)(extLen >> 8); out[p++] = (uint8_t)extLen;
+        if (extLen > 0u) { memcpy(&out[p], ext, extLen); p += extLen; }
+    }
+    return p;
+}
+
+/* Appends an extension of type, its data (len bytes of fill, or data) to ext / *extLen. */
+static void _UTExt(uint8_t *ext, size_t *extLen, uint16_t type, const uint8_t *data, size_t len)
+{
+    ext[(*extLen)++] = (uint8_t)(type >> 8); ext[(*extLen)++] = (uint8_t)type;
+    ext[(*extLen)++] = (uint8_t)(len >> 8); ext[(*extLen)++] = (uint8_t)len;
+    if (len > 0u) { memcpy(&ext[*extLen], data, len); *extLen += len; }
+}
+
+/* supported_versions TLS 1.3, then a ServerHello key_share for group with a kLen-byte key */
+/* (its length field kLenField), or an HRR key_share of group alone when kLen is 0.        */
+static size_t _UTShExts(uint8_t *ext, uint16_t group, uint16_t kLen, uint16_t kLenField)
+{
+    static const uint8_t v13[] = { 0x03, 0x04 };
+    uint8_t ks[4 + 97];
+    size_t n = 0;
+
+    _UTExt(ext, &n, SSF_TLS_EXT_SUPPORTED_VERSIONS, v13, sizeof(v13));
+    ks[0] = (uint8_t)(group >> 8); ks[1] = (uint8_t)group;
+    if (kLen == 0u) { _UTExt(ext, &n, SSF_TLS_EXT_KEY_SHARE, ks, 2u); return n; }
+    ks[2] = (uint8_t)(kLenField >> 8); ks[3] = (uint8_t)kLenField;
+    memset(&ks[4], 0x09, kLen);
+    if (group != SSF_TLS_GROUP_X25519) ks[4] = 0x04u;                  /* Uncompressed point */
+    _UTExt(ext, &n, SSF_TLS_EXT_KEY_SHARE, ks, 4u + kLen);
+    return n;
+}
+
+typedef struct
+{
+    uint8_t alert;
+    uint16_t group;
+    uint8_t pub[97];
+    size_t pubLen;
+    const uint8_t *cookie;
+    size_t cookieOff;                /* cookie's offset in the body (it points into the copy) */
+    uint16_t cookieLen;
+} SSFTLSCUTShOut_t;
+
+/* Parses body (afterHrr: as the ServerHello after an HRR for secp256r1 / AES-128-GCM) from a */
+/* heap copy of exactly len bytes, so a read past the message is an ASan report.              */
+static bool _UTSh(const uint8_t *body, size_t len, bool isHrr, bool afterHrr,
+                  SSFTLSCUTShOut_t *o)
+{
+    uint8_t *copy = (uint8_t *)malloc((len > 0u) ? len : 1u);
+    bool ok;
+
+    SSF_ASSERT(copy != NULL);
+    if (len > 0u) memcpy(copy, body, len);
+    memset(o, 0xa5, sizeof(*o));
+    ok = _SSFTLSCParseServerHelloExForTest(&_utSession2, copy, len, isHrr,
+                                           afterHrr ? SSF_TLS_GROUP_SECP256R1 : 0u,
+                                           afterHrr ? SSF_TLS_CS_AES_128_GCM_SHA256 : 0u,
+                                           &o->alert, &o->group, o->pub, &o->pubLen,
+                                           &o->cookie, &o->cookieLen);
+    o->cookieOff = (ok && (o->cookie != NULL)) ? (size_t)(o->cookie - copy) : 0u;
+    free(copy);
+    return ok;
+}
+
+#define SSF_TLSC_UT_SHR(body, len, isHrr, afterHrr, want) do { \
+    SSFTLSCUTShOut_t _o; \
+    SSF_ASSERT(!_UTSh((body), (len), (isHrr), (afterHrr), &_o)); \
+    SSF_ASSERT(_o.alert == (want)); } while (0)
+
+static void _SSFTLSCUTServerHelloChecks(void)
+{
+    static const uint16_t suites[] = { SSF_TLS_CS_AES_128_GCM_SHA256, SSF_TLS_CS_AES_256_GCM_SHA384,
+                                       SSF_TLS_CS_CHACHA20_POLY1305_SHA256,
+                                       SSF_TLS_CS_AES_128_CCM_SHA256 };
+    static const uint8_t wantHashLen[] = { 32u, 48u, 32u, 32u };
+    static const uint8_t wantKeyLen[] = { 16u, 32u, 32u, 16u };
+    static const uint8_t cookie[] = { 0x00, 0x03, 0xc1, 0xc2, 0xc3 };
+    static uint8_t ext[512];
+    static uint8_t sh[640];
+    SSFTLSCSession_t *s = &_utSession2;
+    SSFTLSCUTShOut_t o;
+    size_t e;
+    size_t n;
+    uint8_t i;
+
+    SSFTLSCInit(s, &_utSock.transport, NULL);
+
+    /* ---- Accepted ServerHellos: key, group, and each suite's hash and key length ---- */
+    for (i = 0; i < 4u; i++)
+    {
+        e = _UTShExts(ext, SSF_TLS_GROUP_X25519, 32u, 32u);
+        n = _UTShRaw(sh, 32u, 0x22, suites[i], 0u, true, ext, e);
+        SSF_ASSERT(_UTSh(sh, n, false, false, &o) && (o.alert == 0u));
+        SSF_ASSERT((o.group == SSF_TLS_GROUP_X25519) && (o.pubLen == 32u) && (o.pub[1] == 0x09u));
+        SSF_ASSERT((s->cipherSuite == suites[i]) && (s->hashLen == wantHashLen[i]) &&
+                   (s->keyLen == wantKeyLen[i]));
+        SSF_ASSERT(s->hash == ((i == 1u) ? SSF_HMAC_HASH_SHA384 : SSF_HMAC_HASH_SHA256));
+    }
+    e = _UTShExts(ext, SSF_TLS_GROUP_SECP384R1, 97u, 97u);
+    n = _UTShRaw(sh, 32u, 0x22, SSF_TLS_CS_AES_256_GCM_SHA384, 0u, true, ext, e);
+    SSF_ASSERT(_UTSh(sh, n, false, false, &o) && (o.group == SSF_TLS_GROUP_SECP384R1) &&
+               (o.pubLen == 97u) && (o.pub[0] == 0x04u));
+    /* Extension order does not matter: key_share first */
+    {
+        static uint8_t rev[128];
+        size_t r = 0;
+        static const uint8_t v13[] = { 0x03, 0x04 };
+
+        e = _UTShExts(ext, SSF_TLS_GROUP_X25519, 32u, 32u);
+        memcpy(rev, &ext[6], e - 6u); r = e - 6u;                     /* key_share */
+        _UTExt(rev, &r, SSF_TLS_EXT_SUPPORTED_VERSIONS, v13, sizeof(v13));
+        n = _UTShRaw(sh, 32u, 0x22, SSF_TLS_CS_AES_128_GCM_SHA256, 0u, true, rev, r);
+        SSF_ASSERT(_UTSh(sh, n, false, false, &o) && (o.group == SSF_TLS_GROUP_X25519));
+    }
+
+    /* ---- Framing: decode_error ---- */
+    e = _UTShExts(ext, SSF_TLS_GROUP_X25519, 32u, 32u);
+    n = _UTShRaw(sh, 32u, 0x22, SSF_TLS_CS_AES_128_GCM_SHA256, 0u, true, ext, e);
+    SSF_TLSC_UT_SHR(sh, 34u, false, false, SSF_TLS_ALERT_DECODE_ERROR);       /* Too short */
+    SSF_TLSC_UT_SHR(sh, 34u + 1u + 32u + 1u, false, false, SSF_TLS_ALERT_DECODE_ERROR);
+    n = _UTShRaw(sh, 33u, 0x22, SSF_TLS_CS_AES_128_GCM_SHA256, 0u, true, ext, e);
+    SSF_TLSC_UT_SHR(sh, n, false, false, SSF_TLS_ALERT_DECODE_ERROR);         /* sid over 32 */
+    n = _UTShRaw(sh, 32u, 0x22, SSF_TLS_CS_AES_128_GCM_SHA256, 0u, true, ext, e);
+    SSF_TLSC_UT_SHR(sh, 34u + 1u + 20u, false, false, SSF_TLS_ALERT_DECODE_ERROR); /* Into sid */
+    SSF_TLSC_UT_SHR(sh, n - 1u, false, false, SSF_TLS_ALERT_DECODE_ERROR);     /* Block short */
+    sh[n] = 0u;
+    SSF_TLSC_UT_SHR(sh, n + 1u, false, false, SSF_TLS_ALERT_DECODE_ERROR);     /* Trailing */
+    {
+        size_t k = 6u + 2u;                                           /* key_share length */
+        e = _UTShExts(ext, SSF_TLS_GROUP_X25519, 32u, 32u);
+        ext[k] = 0x00; ext[k + 1u] = 0x60;                            /* Past the block */
+        n = _UTShRaw(sh, 32u, 0x22, SSF_TLS_CS_AES_128_GCM_SHA256, 0u, true, ext, e);
+        SSF_TLSC_UT_SHR(sh, n, false, false, SSF_TLS_ALERT_DECODE_ERROR);
+        e = _UTShExts(ext, SSF_TLS_GROUP_X25519, 32u, 32u);
+        ext[e++] = 0xfa; ext[e++] = 0xfa; ext[e++] = 0x00;            /* Half a header */
+        n = _UTShRaw(sh, 32u, 0x22, SSF_TLS_CS_AES_128_GCM_SHA256, 0u, true, ext, e);
+        SSF_TLSC_UT_SHR(sh, n, false, false, SSF_TLS_ALERT_DECODE_ERROR);
+        /* The last extension's data cut off by the end of the message (block length counts */
+        /* only what is there): supported_versions, then a key_share key                     */
+        e = _UTShExts(ext, SSF_TLS_GROUP_X25519, 32u, 32u);
+        memmove(ext, &ext[6], e - 6u); e -= 6u;                       /* key_share first */
+        ext[e++] = 0x00; ext[e++] = 0x2b; ext[e++] = 0x00; ext[e++] = 0x02;
+        n = _UTShRaw(sh, 32u, 0x22, SSF_TLS_CS_AES_128_GCM_SHA256, 0u, true, ext, e);
+        SSF_TLSC_UT_SHR(sh, n, false, false, SSF_TLS_ALERT_DECODE_ERROR);
+        e = _UTShExts(ext, SSF_TLS_GROUP_X25519, 32u, 32u) - 20u;     /* 20 key bytes missing */
+        n = _UTShRaw(sh, 32u, 0x22, SSF_TLS_CS_AES_128_GCM_SHA256, 0u, true, ext, e);
+        SSF_TLSC_UT_SHR(sh, n, false, false, SSF_TLS_ALERT_DECODE_ERROR);
+    }
+
+    /* ---- Session id, cipher suite, compression: illegal_parameter ---- */
+    e = _UTShExts(ext, SSF_TLS_GROUP_X25519, 32u, 32u);
+    n = _UTShRaw(sh, 31u, 0x22, SSF_TLS_CS_AES_128_GCM_SHA256, 0u, true, ext, e);
+    SSF_TLSC_UT_SHR(sh, n, false, false, SSF_TLS_ALERT_ILLEGAL_PARAMETER);    /* Echo length */
+    n = _UTShRaw(sh, 0u, 0x22, SSF_TLS_CS_AES_128_GCM_SHA256, 0u, true, ext, e);
+    SSF_TLSC_UT_SHR(sh, n, false, false, SSF_TLS_ALERT_ILLEGAL_PARAMETER);
+    n = _UTShRaw(sh, 32u, 0x23, SSF_TLS_CS_AES_128_GCM_SHA256, 0u, true, ext, e);
+    SSF_TLSC_UT_SHR(sh, n, false, false, SSF_TLS_ALERT_ILLEGAL_PARAMETER);    /* Echo bytes */
+    n = _UTShRaw(sh, 32u, 0x22, 0x1305u, 0u, true, ext, e);                  /* CCM_8: not offered */
+    SSF_TLSC_UT_SHR(sh, n, false, false, SSF_TLS_ALERT_ILLEGAL_PARAMETER);
+    n = _UTShRaw(sh, 32u, 0x22, 0xc02fu, 0u, true, ext, e);                  /* A TLS 1.2 suite */
+    SSF_TLSC_UT_SHR(sh, n, false, false, SSF_TLS_ALERT_ILLEGAL_PARAMETER);
+    n = _UTShRaw(sh, 32u, 0x22, SSF_TLS_CS_AES_128_GCM_SHA256, 1u, true, ext, e);
+    SSF_TLSC_UT_SHR(sh, n, false, false, SSF_TLS_ALERT_ILLEGAL_PARAMETER);    /* Compression */
+
+    /* ---- key_share in a ServerHello ---- */
+    {
+        static const uint8_t v13[] = { 0x03, 0x04 };
+
+        e = 0;
+        _UTExt(ext, &e, SSF_TLS_EXT_SUPPORTED_VERSIONS, v13, sizeof(v13));
+        n = _UTShRaw(sh, 32u, 0x22, SSF_TLS_CS_AES_128_GCM_SHA256, 0u, true, ext, e);
+        SSF_TLSC_UT_SHR(sh, n, false, false, SSF_TLS_ALERT_MISSING_EXTENSION); /* None */
+        e = _UTShExts(ext, SSF_TLS_GROUP_X25519, 32u, 32u);
+        memcpy(&ext[e], &ext[6], 4u + 36u); e += 4u + 36u;             /* A second key_share */
+        n = _UTShRaw(sh, 32u, 0x22, SSF_TLS_CS_AES_128_GCM_SHA256, 0u, true, ext, e);
+        SSF_TLSC_UT_SHR(sh, n, false, false, SSF_TLS_ALERT_ILLEGAL_PARAMETER);
+    }
+    e = _UTShExts(ext, SSF_TLS_GROUP_X25519, 0u, 0u);                     /* Group only */
+    n = _UTShRaw(sh, 32u, 0x22, SSF_TLS_CS_AES_128_GCM_SHA256, 0u, true, ext, e);
+    SSF_TLSC_UT_SHR(sh, n, false, false, SSF_TLS_ALERT_DECODE_ERROR);
+    /* key_share of 0 or 1 bytes, last in the message: ServerHello and HelloRetryRequest */
+    for (i = 0; i < 4u; i++)
+    {
+        static const uint8_t v13[] = { 0x03, 0x04 };
+        static const uint8_t g[] = { 0x00 };
+
+        e = 0;
+        _UTExt(ext, &e, SSF_TLS_EXT_SUPPORTED_VERSIONS, v13, sizeof(v13));
+        _UTExt(ext, &e, SSF_TLS_EXT_KEY_SHARE, g, (size_t)(i & 1u));
+        n = _UTShRaw(sh, 32u, 0x22, SSF_TLS_CS_AES_128_GCM_SHA256, 0u, true, ext, e);
+        SSF_TLSC_UT_SHR(sh, n, (i >= 2u), false, SSF_TLS_ALERT_DECODE_ERROR);
+    }
+    e = _UTShExts(ext, SSF_TLS_GROUP_X25519, 32u, 31u);                   /* Length field off */
+    n = _UTShRaw(sh, 32u, 0x22, SSF_TLS_CS_AES_128_GCM_SHA256, 0u, true, ext, e);
+    SSF_TLSC_UT_SHR(sh, n, false, false, SSF_TLS_ALERT_DECODE_ERROR);
+    e = _UTShExts(ext, SSF_TLS_GROUP_X25519, 31u, 31u);                   /* Wrong size */
+    n = _UTShRaw(sh, 32u, 0x22, SSF_TLS_CS_AES_128_GCM_SHA256, 0u, true, ext, e);
+    SSF_TLSC_UT_SHR(sh, n, false, false, SSF_TLS_ALERT_ILLEGAL_PARAMETER);
+    e = _UTShExts(ext, SSF_TLS_GROUP_SECP384R1, 65u, 65u);
+    n = _UTShRaw(sh, 32u, 0x22, SSF_TLS_CS_AES_128_GCM_SHA256, 0u, true, ext, e);
+    SSF_TLSC_UT_SHR(sh, n, false, false, SSF_TLS_ALERT_ILLEGAL_PARAMETER);
+    e = _UTShExts(ext, SSF_TLS_GROUP_SECP256R1, 65u, 65u);                /* No share sent */
+    n = _UTShRaw(sh, 32u, 0x22, SSF_TLS_CS_AES_128_GCM_SHA256, 0u, true, ext, e);
+    SSF_TLSC_UT_SHR(sh, n, false, false, SSF_TLS_ALERT_ILLEGAL_PARAMETER);
+    e = _UTShExts(ext, 0x001eu, 56u, 56u);                                /* x448: not offered */
+    n = _UTShRaw(sh, 32u, 0x22, SSF_TLS_CS_AES_128_GCM_SHA256, 0u, true, ext, e);
+    SSF_TLSC_UT_SHR(sh, n, false, false, SSF_TLS_ALERT_ILLEGAL_PARAMETER);
+
+    /* ---- HelloRetryRequest: selected_group, cookie ---- */
+    e = _UTShExts(ext, SSF_TLS_GROUP_SECP256R1, 0u, 0u);
+    n = _UTShRaw(sh, 32u, 0x22, SSF_TLS_CS_AES_128_GCM_SHA256, 0u, true, ext, e);
+    SSF_ASSERT(_UTSh(sh, n, true, false, &o) && (o.group == SSF_TLS_GROUP_SECP256R1) &&
+               (o.cookie == NULL) && (o.cookieLen == 0u));
+    e = _UTShExts(ext, SSF_TLS_GROUP_SECP256R1, 0u, 0u);
+    _UTExt(ext, &e, 44u, cookie, sizeof(cookie));
+    n = _UTShRaw(sh, 32u, 0x22, SSF_TLS_CS_AES_128_GCM_SHA256, 0u, true, ext, e);
+    SSF_ASSERT(_UTSh(sh, n, true, false, &o) && (o.cookieLen == sizeof(cookie)) &&
+               (o.cookieOff == (n - sizeof(cookie))));                /* Whole extension_data */
+    e = _UTShExts(ext, SSF_TLS_GROUP_X25519, 0u, 0u);                     /* Share already sent */
+    n = _UTShRaw(sh, 32u, 0x22, SSF_TLS_CS_AES_128_GCM_SHA256, 0u, true, ext, e);
+    SSF_TLSC_UT_SHR(sh, n, true, false, SSF_TLS_ALERT_ILLEGAL_PARAMETER);
+    e = _UTShExts(ext, 0x001eu, 0u, 0u);                                  /* Not supported */
+    n = _UTShRaw(sh, 32u, 0x22, SSF_TLS_CS_AES_128_GCM_SHA256, 0u, true, ext, e);
+    SSF_TLSC_UT_SHR(sh, n, true, false, SSF_TLS_ALERT_ILLEGAL_PARAMETER);
+    e = _UTShExts(ext, SSF_TLS_GROUP_SECP256R1, 65u, 65u);                /* A share, not a group */
+    n = _UTShRaw(sh, 32u, 0x22, SSF_TLS_CS_AES_128_GCM_SHA256, 0u, true, ext, e);
+    SSF_TLSC_UT_SHR(sh, n, true, false, SSF_TLS_ALERT_DECODE_ERROR);
+    {
+        static const uint8_t ckEmpty[] = { 0x00, 0x00 };
+        static const uint8_t ckShort[] = { 0x00 };
+        static const uint8_t ckLen[] = { 0x00, 0x04, 0xc1, 0xc2, 0xc3 };
+        const uint8_t *bad[3] = { ckEmpty, ckShort, ckLen };
+        const size_t badLen[3] = { sizeof(ckEmpty), sizeof(ckShort), sizeof(ckLen) };
+
+        for (i = 0; i < 3u; i++)
+        {
+            e = _UTShExts(ext, SSF_TLS_GROUP_SECP256R1, 0u, 0u);
+            _UTExt(ext, &e, 44u, bad[i], badLen[i]);
+            n = _UTShRaw(sh, 32u, 0x22, SSF_TLS_CS_AES_128_GCM_SHA256, 0u, true, ext, e);
+            SSF_TLSC_UT_SHR(sh, n, true, false, SSF_TLS_ALERT_DECODE_ERROR);
+        }
+    }
+
+    /* ---- The ServerHello after a HelloRetryRequest (secp256r1, AES-128-GCM) ---- */
+    e = _UTShExts(ext, SSF_TLS_GROUP_SECP256R1, 65u, 65u);
+    n = _UTShRaw(sh, 32u, 0x22, SSF_TLS_CS_AES_128_GCM_SHA256, 0u, true, ext, e);
+    SSF_ASSERT(_UTSh(sh, n, false, true, &o) && (o.group == SSF_TLS_GROUP_SECP256R1) &&
+               (o.pubLen == 65u));
+    n = _UTShRaw(sh, 32u, 0x22, SSF_TLS_CS_AES_256_GCM_SHA384, 0u, true, ext, e);
+    SSF_TLSC_UT_SHR(sh, n, false, true, SSF_TLS_ALERT_ILLEGAL_PARAMETER);     /* Suite changed */
+    e = _UTShExts(ext, SSF_TLS_GROUP_X25519, 32u, 32u);                   /* Not the HRR's group */
+    n = _UTShRaw(sh, 32u, 0x22, SSF_TLS_CS_AES_128_GCM_SHA256, 0u, true, ext, e);
+    SSF_TLSC_UT_SHR(sh, n, false, true, SSF_TLS_ALERT_ILLEGAL_PARAMETER);
+    SSFTLSCDeInit(s);
+}
+
 /* Builds a TLS 1.2 ServerHello body, as a server unaware of supported_versions sends: its own */
 /* session id of sidLen bytes, TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256, then the extension block */
 /* ext[0..extLen) if withExts (a TLS 1.2 ServerHello may have none). Returns the length.       */
@@ -4391,6 +4667,7 @@ void SSFTLSCUnitTest(void)
     _SSFTLSCUTSendFlight();
     _SSFTLSCUTServerHelloExts();
     _SSFTLSCUTServerHelloVersion();
+    _SSFTLSCUTServerHelloChecks();
     _SSFTLSCUTPlainOverflow();
     _SSFTLSCUTRecordTypeFirst();
     _SSFTLSCUTMidHandshakeRecords();

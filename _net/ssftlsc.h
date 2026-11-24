@@ -458,6 +458,11 @@ void _SSFTLSCInjectClientHelloForTest(const uint8_t *chOpt, size_t chLen,
                                       const uint8_t *x25519PrivOpt);
 void _SSFTLSCInjectClientHello2ForTest(const uint8_t *ch2Opt, size_t ch2Len,
                                        const uint8_t *ecPrivOpt);
+bool _SSFTLSCParseServerHelloExForTest(SSFTLSCSession_t *session, const uint8_t *body,
+                                       size_t bodyLen, bool isHrr, uint16_t hrrGroup,
+                                       uint16_t hrrSuite, uint8_t *alertOut, uint16_t *groupOut,
+                                       uint8_t *pubOut, size_t *pubLenOut,
+                                       const uint8_t **cookieOut, uint16_t *cookieLenOut);
 bool _SSFTLSCParseServerHelloForTest(SSFTLSCSession_t *session, const uint8_t *body,
                                      size_t bodyLen, bool isHrr, uint8_t *alertOut);
 SSFTLSIOResult_t _SSFTLSCSendHandshakeForTest(SSFTLSCSession_t *session, const uint8_t *msg,

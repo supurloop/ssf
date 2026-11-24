@@ -773,10 +773,31 @@ is rejected.
       Mutation: message_hash type and length and the HRR left out of the transcript pass the
       committed suite and are killed only by 5; client CV context and Finished transcript
       mutants killed (also by the 1b tests). Shipped code unchanged.
-- [ ] Deterministic parser unit tests like `_SSFTLSCParseCertificateForTest` for the ServerHello
+- [x] Deterministic parser unit tests like `_SSFTLSCParseCertificateForTest` for the ServerHello
       parser (2.5 is covered only through `mitm.py` today). Started: the hook
       `_SSFTLSCParseServerHelloForTest()` exists and the extension cases are covered; the
       session id, cipher suite, compression, key share and length checks remain.
+      Done, TDD (test code only): `_SSFTLSCParseServerHelloExForTest()` also parses as the
+      ServerHello after an HRR (its group and suite) and returns the group, key and cookie;
+      `_SSFTLSCUTServerHelloChecks()` covers the rest: accepted ServerHellos (x25519 and
+      P-384 keys; each suite's hash and key length, SHA-384 for AES-256-GCM; extension order),
+      framing (too short, session id over 32 or cut off, extension block short / long /
+      trailing, half a header, an extension or key cut off by the end), session id echo,
+      suite not offered (CCM_8, a TLS 1.2 suite), compression, key_share (missing, duplicate,
+      0 / 1 / 2 bytes, length field, wrong size, group without a share, x448), HRR
+      (selected_group, cookie returned in place, x25519 again, unsupported group, a share
+      instead of a group, three bad cookies), after an HRR (the suite and the group must be
+      the HRR's). Bodies are parsed from exact-size heap copies. Mutation: every one of the
+      27 rejections removed, and its alert changed: 54 mutants, all killed (six only by ASan:
+      dropping a length check reads past the message; that is what the exact-size copies
+      are for). Differential fuzz against an independent Python model of 4.1.3 / 4.1.4 /
+      4.2 (check order and which alert wins included): 2 x 200k ServerHello / HRR /
+      after-HRR bodies under ASan / UBSan, no mismatch, no report.
+- [ ] A HelloRetryRequest without key_share is missing_extension. RFC 8446 4.1.4 allows a
+      cookie-only HRR (same shares, cookie added); only one that would change nothing must
+      be illegal_parameter. Supporting it needs a ClientHello2 path that keeps the shares.
+      Stateless / DoS-protecting servers send them; common MQTT brokers do not. Found
+      writing the ServerHello model.
 - [ ] Interop with `openssl s_server` over loopback; test.mosquitto.org:8883 with its CA. Add
       `gnutls-serv` (installed, 3.8.13) as a second independent server in the regression set.
 - [x] `ssftls.md` still says `SSF_TLS_CONFIG_MAX_CHAIN_DEPTH` is not referenced; ssftlsc uses

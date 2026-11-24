@@ -849,9 +849,20 @@ is rejected.
       switch (script, not a unit test: the unit test needs the opt-in): with
       SSF_TLSC_CONFIG_ALLOW_UNAUTHENTICATED 0, SSFTLSCSetUnauthenticated() does not compile
       and open() with no trust anchors refuses.
-- [ ] Mutual TLS against a real endpoint: only local `s_server` / `gnutls-serv` so far.
+- [x] Mutual TLS against a real endpoint: only local `s_server` / `gnutls-serv` so far.
       test.mosquitto.org port 8884 requires a client certificate (one it issues), a cheap
       real-world check alongside the interop item above. Found reviewing step 4.
+      Done, TDD (scripts, part of the interop set's --public run). Client certificates
+      issued by test.mosquitto.org/ssl for locally generated P-256 and RSA-2048 keys (CSR
+      subject placeholders only: C=XX, O=SSF Test, CN=ssf-tlsc-interop-*; valid until
+      2027-02-22, then reissue). Key loaded with SSFPKeyDecodePEM(), chain with
+      SSFTLSCSetClientCert(). The server's CertificateRequest lists ML-DSA schemes first; the
+      client skips them and chooses ecdsa_secp256r1_sha256 (P-256) / rsa_pss_rsae_sha256
+      (RSA). Both connect and get an MQTT CONNACK; no certificate gets certificate_required
+      (116) and a certificate from another CA unknown_ca (48), both at the first read after
+      the handshake. The server is not authenticated in this run (test opt-in): port 8884
+      serves the same X.509 v1 certificate as 8883 (see that item). Red: the expected rows
+      failed until the certificates were issued.
 - [ ] External signing for the client key: `SSFTLSCSetClientCert()` takes an `SSFPKey_t`
       with the private key in RAM; devices that keep it in a secure element (e.g. ATECC608,
       common with AWS IoT) need a signing callback in its place. Design decision. Found

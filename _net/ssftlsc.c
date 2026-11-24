@@ -220,6 +220,8 @@ static SSFTLSIOResult_t _SendPlainRecordOnce(SSFTLSCSession_t *s, uint8_t ct,
     /* First call for this record: frame header + data in send buffer. */
     if (!io->sendPending)
     {
+        /* Cannot fire: the largest plaintext record is the ClientHello, at most SSF_TLSC_CH_SIZE, */
+        /* and SSF_TLSC_CONFIG_MAX_SEND_RECORD is at least that (ssftlsc.h).                   */
         if ((size_t)5u + len > sizeof(io->sendRecordBuf)) return SSF_TLS_IO_ERROR;
         io->sendRecordBuf[0] = ct;
         io->sendRecordBuf[1] = 0x03u; io->sendRecordBuf[2] = 0x03u;
@@ -3210,6 +3212,14 @@ static size_t _SendRecordMax(const SSFTLSCSession_t *s)
     { max = (size_t)s->peerRecordLimit - 1u; }
     return max;
 }
+
+#if SSF_CONFIG_TLSC_UNIT_TEST == 1
+SSFTLSIOResult_t _SSFTLSCSendHandshakeForTest(SSFTLSCSession_t *session, const uint8_t *msg,
+                                              size_t total)
+{
+    return _SendHandshakeOnce(session, msg, total);
+}
+#endif /* SSF_CONFIG_TLSC_UNIT_TEST */
 
 static bool _SSFTLSCOpen(SSFNetTransport_t *t, SSFCStrIn_t host, size_t hostSize, uint16_t port)
 {

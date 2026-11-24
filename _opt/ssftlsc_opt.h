@@ -28,7 +28,7 @@ extern "C" {
 #endif
 
 /* Largest record plaintext sent, in bytes. A sender may always use smaller records. Sizes the  */
-/* session's send buffer. 64..16384.                                                            */
+/* session's send buffer. 768..16384: the ClientHello (up to 768 bytes) is one record.         */
 #ifndef SSF_TLSC_CONFIG_MAX_SEND_RECORD
 #define SSF_TLSC_CONFIG_MAX_SEND_RECORD (8192u)
 #endif
@@ -36,8 +36,8 @@ extern "C" {
 #if (SSF_TLSC_CONFIG_MAX_RECV_RECORD < 64u) || (SSF_TLSC_CONFIG_MAX_RECV_RECORD > 16384u)
 #error SSF_TLSC_CONFIG_MAX_RECV_RECORD must be 64..16384.
 #endif
-#if (SSF_TLSC_CONFIG_MAX_SEND_RECORD < 64u) || (SSF_TLSC_CONFIG_MAX_SEND_RECORD > 16384u)
-#error SSF_TLSC_CONFIG_MAX_SEND_RECORD must be 64..16384.
+#if (SSF_TLSC_CONFIG_MAX_SEND_RECORD < 768u) || (SSF_TLSC_CONFIG_MAX_SEND_RECORD > 16384u)
+#error SSF_TLSC_CONFIG_MAX_SEND_RECORD must be 768..16384.
 #endif
 
 /* Records the client sends under one application traffic key before it updates the key with a */

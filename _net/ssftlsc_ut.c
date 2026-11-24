@@ -892,6 +892,58 @@ static void _SSFTLSCUTClientHelloRetry(SSFTLSCUTFd_t l, uint16_t port)
     t->close(t);
     (void)SSF_TLSC_UT_CLOSE(peer);
 
+    /* ---- A cookie making ClientHello2 exactly SSF_TLSC_CH_SIZE bytes: sent in one record, ---- */
+    /* ---- which every allowed SSF_TLSC_CONFIG_MAX_SEND_RECORD holds; one byte more aborts   ---- */
+    {
+        uint8_t k;
+
+        for (k = 0; k < 2u; k++)
+        {
+            SSFPortTick_t end;
+            SSFNetIOResult_t r = SSF_NET_IO_WANT_READ;
+            size_t ch1Len;
+            size_t cookieLen;
+
+            peer = _SSFTLSCUTRunToClientHello(l, port, ch1Rec, sizeof(ch1Rec), &ch1);
+            /* ClientHello2 = ClientHello1 - x25519 (4 + 32) - secp384r1 (4 + 97) shares        */
+            /* + secp256r1 (4 + 65) + cookie extension (4 + 2 + cookieLen)                       */
+            ch1Len = ((size_t)ch1Rec[3] << 8) | ch1Rec[4];
+            cookieLen = SSF_TLSC_CH_SIZE + 62u - ch1Len + k;
+            hrrLen = _SSFTLSCUTBuildHrr(hrrRec, sizeof(hrrRec), &ch1, SSF_TLS_CS_AES_128_GCM_SHA256,
+                                        cookieLen);
+            if ((hrrLen - 5u) > SSF_TLSC_CONFIG_MAX_RECV_RECORD)
+            {
+                /* A receive size this small cannot take a HelloRetryRequest with such a cookie */
+                t->close(t);
+                (void)SSF_TLSC_UT_CLOSE(peer);
+                continue;
+            }
+            SSF_ASSERT(send(peer, (const char *)hrrRec, (int)hrrLen, 0) == (int)hrrLen);
+            end = SSFPortGetTick64() + SSF_TLSC_UT_WAIT_TICKS;
+            n = 0;
+            while ((n == 0u) && (r != SSF_NET_IO_ERROR) && (SSFPortGetTick64() < end))
+            {
+                r = t->pollOpen(t);
+                if (_SSFTLSCUTReadable(peer)) n = _SSFTLSCUTRecvRecord(peer, ch2Rec, sizeof(ch2Rec));
+            }
+            if (n == 0u) n = _SSFTLSCUTRecvRecord(peer, ch2Rec, sizeof(ch2Rec));
+            if (k == 0u)
+            {
+                SSF_ASSERT(n == (5u + SSF_TLSC_CH_SIZE));                 /* One whole record */
+                _SSFTLSCUTParseClientHello(ch2Rec, n, &ch2);
+                ck = _SSFTLSCUTFindExt(&ch2, 44u);
+                SSF_ASSERT((ck >= 0) && (ch2.extLen[ck] == (2u + cookieLen)));
+            }
+            else
+            {
+                SSF_ASSERT((n == 7u) && (ch2Rec[0] == SSF_TLS_CT_ALERT) &&
+                           (ch2Rec[6] == SSF_TLS_ALERT_INTERNAL_ERROR));
+            }
+            t->close(t);
+            (void)SSF_TLSC_UT_CLOSE(peer);
+        }
+    }
+
     /* ---- Every suite the ClientHello offers is accepted when a HelloRetryRequest ---- */
     /* ---- selects it: the client answers with ClientHello2, not an alert          ---- */
     {
@@ -1545,15 +1597,25 @@ static void _SSFTLSCUTPostHandshake(void)
 static uint8_t _utFakeIn[2048];
 static size_t _utFakeInLen;
 static size_t _utFakeInPos;
-static uint8_t _utFakeOut[2048];
+static uint8_t _utFakeOut[4096];
 static size_t _utFakeOutLen;
 static bool _UTFakeOpen(SSFNetTransport_t *t, SSFCStrIn_t h, size_t hs, uint16_t p)
 { (void)t; (void)h; (void)hs; (void)p; return true; }
 static SSFNetIOResult_t _UTFakePollOpen(SSFNetTransport_t *t)
 { (void)t; return SSF_NET_IO_SUCCESS; }
+/* When set, send() takes at most this many bytes, and every other call wants to write again */
+static size_t _utFakeSendCap;
+static bool _utFakeSendStall;
 static SSFNetIOResult_t _UTFakeSend(SSFNetTransport_t *t, const uint8_t *b, size_t n, size_t *sent)
 {
     (void)t;
+    *sent = 0;
+    if (_utFakeSendCap != 0u)
+    {
+        _utFakeSendStall = !_utFakeSendStall;
+        if (_utFakeSendStall) return SSF_NET_IO_WANT_WRITE;
+        if (n > _utFakeSendCap) n = _utFakeSendCap;
+    }
     SSF_ASSERT((_utFakeOutLen + n) <= sizeof(_utFakeOut));
     memcpy(&_utFakeOut[_utFakeOutLen], b, n);
     _utFakeOutLen += n;
@@ -2298,6 +2360,10 @@ static void _SSFTLSCUTAlpn(void)
         for (k = 0; (k < 20u) && (_utFakeOutLen == 0u) && (r != SSF_NET_IO_ERROR); k++)
         { r = s->transport.pollOpen(&s->transport); }
         SSF_ASSERT(_utFakeOutLen > 0u);
+        /* One plaintext record holds it: header, then the whole message */
+        SSF_ASSERT((_utFakeOut[0] == SSF_TLS_CT_HANDSHAKE) &&
+                   ((((size_t)_utFakeOut[3] << 8) | _utFakeOut[4]) == s->clientHelloLen) &&
+                   (_utFakeOutLen >= (5u + s->clientHelloLen)));
         SSF_ASSERT(sizeof(s->clientHelloMsg) == SSF_TLSC_CH_SIZE);
         SSF_ASSERT(s->clientHelloLen ==
                    (SSF_TLSC_CH1_MAX_NO_ALPN + 6u + SSF_TLS_CONFIG_MAX_ALPN_LEN));
@@ -2326,6 +2392,117 @@ static void _SSFTLSCUTAlpn(void)
     s->hsState = SSF_TLSC_HS_IDLE;
     SSFTLSCDeInit(s);
     SSF_ASSERT_TEST(SSFTLSCGetALPN(s));
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Client flight split into records (_SendHandshakeOnce): every protected record within the     */
+/* server's record_size_limit, the pieces joining up to the message, across short writes.       */
+/* --------------------------------------------------------------------------------------------- */
+/* The most content one record of the client flight carries: the server's record_size_limit    */
+/* less the content type byte (RFC 8449 4), the build's send size, and hsBuf, which stages it.  */
+static size_t _UTFlightCap(const SSFTLSCSession_t *s)
+{
+    size_t cap = SSF_TLSC_CONFIG_MAX_SEND_RECORD;
+
+    if ((s->peerRecordLimit != 0u) && ((size_t)(s->peerRecordLimit - 1u) < cap))
+    { cap = (size_t)(s->peerRecordLimit - 1u); }
+    if (sizeof(s->hsBuf) < cap) cap = sizeof(s->hsBuf);
+    return cap;
+}
+
+/* Sends msg (NULL: the client Certificate) until done, the fake transport writing short.       */
+/* Returns the number of records; their contents, joined, go to joined / *joinedLen.           */
+static size_t _UTSendFlight(SSFTLSCSession_t *s, const uint8_t *msg, size_t total,
+                            uint8_t *joined, size_t joinedSize, size_t *joinedLen)
+{
+    static uint8_t pt[SSF_TLSC_CONFIG_MAX_SEND_RECORD + 1u];
+    size_t off = 0;
+    size_t records = 0;
+    size_t n;
+    uint16_t tries;
+    SSFTLSIOResult_t r = SSF_TLS_IO_WANT_WRITE;
+
+    _utFakeOutLen = 0;
+    s->certSendOff = 0;
+    for (tries = 0; (tries < 2000u) && (r == SSF_TLS_IO_WANT_WRITE); tries++)
+    {
+        r = _SSFTLSCSendHandshakeForTest(s, msg, total);
+    }
+    SSF_ASSERT(r == SSF_TLS_IO_SUCCESS);
+    *joinedLen = 0;
+    while (off < _utFakeOutLen)
+    {
+        SSF_ASSERT(_UTCliRecord(&off, pt, sizeof(pt), &n) == SSF_TLS_CT_HANDSHAKE);
+        SSF_ASSERT(n <= _UTFlightCap(s));
+        SSF_ASSERT((*joinedLen + n) <= joinedSize);
+        memcpy(&joined[*joinedLen], pt, n);
+        *joinedLen += n;
+        records++;
+    }
+    return records;
+}
+
+static void _SSFTLSCUTSendFlight(void)
+{
+    static SSFPKey_t key;
+    static uint8_t msg[520];                        /* An RSA-4096 CertificateVerify's size */
+    static uint8_t joined[2048];
+    static uint8_t want[2048];
+    SSFTLSCSession_t *s = &_utSession2;
+    const size_t certLen = sizeof(_utClientP256Cert);
+    uint8_t th[32];
+    uint8_t wantTh[32];
+    size_t len;
+    size_t i;
+
+    for (i = 0; i < sizeof(msg); i++) msg[i] = (uint8_t)(i * 7u + 1u);
+    SSF_ASSERT(SSFPKeyDecodeDER(_utClientP256Key, sizeof(_utClientP256Key), &key));
+
+    /* ---- The RFC 8449 minimum, 64: 63 content bytes a record, 9 records for 520 bytes ---- */
+    _UTAppSession(s);
+    s->peerRecordLimit = 64u;
+    _utFakeSendCap = 7u;
+    SSF_ASSERT(_UTFlightCap(s) == 63u);
+    SSF_ASSERT(_UTSendFlight(s, msg, sizeof(msg), joined, sizeof(joined), &len) == 9u);
+    SSF_ASSERT((len == sizeof(msg)) && (memcmp(joined, msg, sizeof(msg)) == 0));
+    /* ---- A limit of 512 (GnuTLS's smallest): 511 + 9 ---- */
+    s->peerRecordLimit = 512u;
+    SSF_ASSERT(_UTSendFlight(s, msg, sizeof(msg), joined, sizeof(joined), &len) ==
+               ((sizeof(msg) + _UTFlightCap(s) - 1u) / _UTFlightCap(s)));
+    SSF_ASSERT((len == sizeof(msg)) && (memcmp(joined, msg, sizeof(msg)) == 0));
+    /* ---- No limit from the server: the build's send size, or hsBuf if smaller ---- */
+    s->peerRecordLimit = 0u;
+    _utFakeSendCap = 0u;
+    SSF_ASSERT(_UTSendFlight(s, msg, sizeof(msg), joined, sizeof(joined), &len) ==
+               ((sizeof(msg) + _UTFlightCap(s) - 1u) / _UTFlightCap(s)));
+    SSF_ASSERT((len == sizeof(msg)) && (memcmp(joined, msg, sizeof(msg)) == 0));
+
+    /* ---- The client Certificate, streamed from the caller's chain into records and the    */
+    /* ---- transcript: Certificate { context 0, list { cert, no extensions } }              */
+    s->hsState = SSF_TLSC_HS_IDLE;
+    SSF_ASSERT(_SSFTLSCUTSetOne(s, _utClientP256Cert, certLen, &key));
+    s->hsState = SSF_TLSC_HS_COMPLETE;
+    want[0] = SSF_TLS_HS_CERTIFICATE;
+    want[1] = 0u; want[2] = (uint8_t)((certLen + 9u) >> 8); want[3] = (uint8_t)(certLen + 9u);
+    want[4] = 0u;
+    want[5] = 0u; want[6] = (uint8_t)((certLen + 5u) >> 8); want[7] = (uint8_t)(certLen + 5u);
+    want[8] = 0u; want[9] = (uint8_t)(certLen >> 8); want[10] = (uint8_t)certLen;
+    memcpy(&want[11], _utClientP256Cert, certLen);
+    want[11u + certLen] = 0u; want[12u + certLen] = 0u;
+    s->peerRecordLimit = 64u;
+    _utFakeSendCap = 5u;
+    SSFTLSTranscriptInit(&s->transcript, SSF_HMAC_HASH_SHA256);
+    SSF_ASSERT(_UTSendFlight(s, NULL, certLen + 13u, joined, sizeof(joined), &len) ==
+               ((certLen + 13u + 62u) / 63u));
+    SSF_ASSERT((len == (certLen + 13u)) && (memcmp(joined, want, len) == 0));
+    SSFTLSTranscriptHash(&s->transcript, th, sizeof(th));
+    SSFSHA256(want, (uint32_t)len, wantTh, sizeof(wantTh));
+    SSF_ASSERT(memcmp(th, wantTh, sizeof(th)) == 0);          /* Each byte hashed exactly once */
+    _utFakeSendCap = 0u;
+    _utFakeSendStall = false;
+    SSFTLSCDeInit(s);
+    SSFTLSRecordStateDeInit(&_utSrvSend);
+    SSFTLSRecordStateDeInit(&_utSrvRecv);
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -2738,6 +2915,7 @@ void SSFTLSCUnitTest(void)
         SSFTLSCDeInit(&_utSession2);
     }
     _SSFTLSCUTClientCert();
+    _SSFTLSCUTSendFlight();
     _SSFTLSCUTClientChain();
     _SSFTLSCUTAlpn();
     _SSFTLSCUTTrustFromPEM();

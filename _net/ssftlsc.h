@@ -219,6 +219,10 @@ typedef struct SSFTLSCIOCtx
 /* The largest ClientHello1 without ALPN: a 255-byte host name in server_name. ALPN adds 6     */
 /* bytes plus the list, so SSF_TLS_CONFIG_MAX_ALPN_LEN may be at most CH_SIZE - 6 - this.     */
 #define SSF_TLSC_CH1_MAX_NO_ALPN (543u)
+/* The ClientHello goes out as one plaintext record, so a record must hold the largest one     */
+#if SSF_TLSC_CONFIG_MAX_SEND_RECORD < SSF_TLSC_CH_SIZE
+#error SSF_TLSC_CONFIG_MAX_SEND_RECORD must be at least SSF_TLSC_CH_SIZE (768) to send the ClientHello.
+#endif
 
 /* TLS client session. */
 typedef struct SSFTLSCSession
@@ -450,6 +454,8 @@ bool _SSFTLSCSaveLeafKeyForTest(SSFTLSCSession_t *session, const uint8_t *der, u
 uint8_t _SSFTLSCChainAlertForTest(SSFX509VerifyCode_t code);
 bool _SSFTLSCParseEncryptedExtensionsForTest(const uint8_t *body, size_t bodyLen,
                                              uint8_t *alertOut);
+SSFTLSIOResult_t _SSFTLSCSendHandshakeForTest(SSFTLSCSession_t *session, const uint8_t *msg,
+                                              size_t total);
 bool _SSFTLSCParseEncryptedExtensionsAlpnForTest(SSFTLSCSession_t *session, const uint8_t *body,
                                                  size_t bodyLen, uint8_t *alertOut);
 bool _SSFTLSCParseEncryptedExtensionsRslForTest(const uint8_t *body, size_t bodyLen,

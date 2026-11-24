@@ -483,7 +483,10 @@ is rejected.
         without the key's scheme gets an empty Certificate (`certificate_required`); a server
         trusting another CA answers `unknown_ca`. Same with a 512-byte send build (Certificate
         and CertificateVerify + Finished over several records; RSA-4096 failed before the CV
-        was streamed too). 14 mutants: 13 killed, one equivalent (the leaf/key type check is
+        was streamed too). That build is no longer allowed (send minimum 768, below); the same
+        splitting now comes from the server's record_size_limit: `gnutls-serv
+        --recordsize=512` with RSA-4096 (520-byte CV over 511-byte records), RSA-2048, P-256
+        and a two-certificate chain all connect, and `_SSFTLSCUTSendFlight()` covers it. 14 mutants: 13 killed, one equivalent (the leaf/key type check is
         implied by the key comparison). ASan / UBSan clean. Cortex-M4 -Os: ssftlsc text
         +2,433 B; session +24 B (Cortex-M4); pollOpen stack peak with an RSA client key ~28.3 KB (RSA-PSS
         signing), unchanged for EC / Ed25519 keys.
@@ -508,12 +511,36 @@ is rejected.
         its certificate when ECDSA+SHA256 is also listed; expired / no-clientAuth leaves warn
         and are refused by the server (45 / 43), no-digitalSignature warns and is accepted.
         Cortex-M4 -Os: ssftlsc text +3,671 B over the last commit (+1,238 B for the audit).
-- [ ] `SSF_TLSC_CONFIG_MAX_SEND_RECORD` accepts 64..16384, but the plaintext ClientHello
+- [x] `SSF_TLSC_CONFIG_MAX_SEND_RECORD` accepts 64..16384, but the plaintext ClientHello
       (a few hundred bytes) is sent as one record and is not fragmented, so a build below
       about 512 cannot connect at all (found during 1b: 64 and 256 fail before ServerHello,
       with or without client authentication). Raise the minimum, or fragment the ClientHello.
       ALPN adds up to 6 + `SSF_TLS_CONFIG_MAX_ALPN_LEN` bytes (38 at the default 32, 225 at
       the maximum 219); the largest ClientHello is `SSF_TLSC_CH1_MAX_NO_ALPN` (543) plus that.
+      Done, TDD: the minimum is now `SSF_TLSC_CH_SIZE` (768), the most any ClientHello can be
+      (ClientHello2 with a cookie included), so it always fits one record; no fragmentation,
+      no code. `ssftlsc_opt.h` range check 768..16384 and a tie to `SSF_TLSC_CH_SIZE` in
+      `ssftlsc.h`; 64 / 512 / 767 / 16385 are compile errors, 768 builds. The plaintext
+      record size check is now unreachable (commented). Unit tests: a cookie making
+      ClientHello2 exactly 768 bytes goes out as one record, one byte more is internal_error;
+      the largest ClientHello1 is one record. Red at 512 (the unit test built at 512 failed),
+      green at 768, and at 768 with `SSF_TLS_CONFIG_MAX_ALPN_LEN` 219 (ClientHello1 = 768).
+      Wire at 768: the ALPN set (HRR included) and the trust store set unchanged. RAM: a
+      build that wanted a send buffer under 768 bytes gives up at most about 700 B.
+      Audit: the client flight's record splitting (`_SendHandshakeOnce`) had no unit test and
+      its wire check (a 512-byte send build) is no longer buildable. Fixed, TDD: new
+      `_SSFTLSCUTSendFlight()` over the fake transport, which now can write short (at most
+      5-7 bytes a call, WANT_WRITE every other call): a 520-byte message at record_size_limit
+      64 (9 records of at most 63), 512 (511 + 9) and none, and the client Certificate
+      streamed from the chain at 64, each record within the limit and hsBuf, the pieces
+      joining to the message and the transcript hashing each byte once. Mutation: 8 mutants,
+      all killed (the hsBuf cap only in a receive-512 / send-768 build, where it matters).
+      Wire: the 1b set at 768 and `gnutls-serv --recordsize=512` (above) pass.
+- [ ] A plaintext record of 2^14 + 1 .. 2^14 + 17 bytes gets internal_error instead of
+      record_overflow (RFC 8446 5.1) when SSF_TLSC_CONFIG_MAX_RECV_RECORD is below 16384: the
+      build-size check runs before the plaintext 2^14 check. Fatal either way; alert code only.
+      Found running the unit test at receive 512 (which also trips other tests that assume a
+      16 KB receive size). Found during the send-limit audit.
 - [x] Private key loading: PKCS#8 / SEC 1 / PEM. Done (approved: two new codec modules).
       `ssfpem` (RFC 7468): one block per call, multi-block buffers, strict Base64 via
       `SSFBase64Decode`, whitespace anywhere, NULL output to check/measure, all output zeroed on

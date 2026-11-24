@@ -1594,7 +1594,7 @@ static void _SSFTLSCUTPostHandshake(void)
 /* record layer with known application secrets. Covers KeyUpdate in both directions and the    */
 /* interleaving rule end to end.                                                                 */
 /* --------------------------------------------------------------------------------------------- */
-static uint8_t _utFakeIn[2048];
+static uint8_t _utFakeIn[16512];      /* Room for a 2^14 + 18 byte record */
 static size_t _utFakeInLen;
 static size_t _utFakeInPos;
 static uint8_t _utFakeOut[4096];
@@ -2395,6 +2395,108 @@ static void _SSFTLSCUTAlpn(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Plaintext record length (RFC 8446 5.1): over 2^14 bytes is the server's record_overflow at   */
+/* every receive size; within 2^14 but over this build's buffer, internal_error. Over the fake  */
+/* transport: the ClientHello goes out, then a plaintext handshake record of len bytes arrives. */
+/* --------------------------------------------------------------------------------------------- */
+/* Returns the alert the client sends for a plaintext handshake record of len bytes. */
+static uint8_t _UTPlainRecordAlert(size_t len)
+{
+    SSFTLSCSession_t *s = &_utSession2;
+    SSFNetTransport_t *t = &s->transport;
+    SSFNetIOResult_t r = SSF_NET_IO_WANT_READ;
+    uint16_t k;
+    uint8_t alert;
+
+    SSF_ASSERT((5u + len) <= sizeof(_utFakeIn));
+    SSFTLSCInit(s, &_utFake, NULL);
+    SSFTLSCSetUnauthenticated(s, true);
+    _utFakeInLen = _utFakeInPos = _utFakeOutLen = 0;
+    SSF_ASSERT(t->open(t, "localhost", sizeof("localhost"), 443u));
+    for (k = 0; (k < 20u) && (_utFakeOutLen == 0u); k++) (void)t->pollOpen(t);
+    SSF_ASSERT(_utFakeOutLen > 0u);                            /* ClientHello sent */
+    memset(_utFakeIn, 0, 5u + len);
+    _utFakeIn[0] = SSF_TLS_CT_HANDSHAKE; _utFakeIn[1] = 0x03; _utFakeIn[2] = 0x03;
+    _utFakeIn[3] = (uint8_t)(len >> 8); _utFakeIn[4] = (uint8_t)len;
+    _utFakeIn[5] = SSF_TLS_HS_SERVER_HELLO;
+    _utFakeInLen = 5u + len;
+    for (k = 0; (k < 100u) && ((r == SSF_NET_IO_WANT_READ) || (r == SSF_NET_IO_WANT_WRITE)); k++)
+    {
+        _utFakeOutLen = 0;
+        r = t->pollOpen(t);
+    }
+    SSF_ASSERT(r == SSF_NET_IO_ERROR);
+    /* The fatal alert, in plaintext: no keys yet */
+    SSF_ASSERT((_utFakeOutLen == 7u) && (_utFakeOut[0] == SSF_TLS_CT_ALERT) &&
+               (_utFakeOut[5] == 2u));
+    alert = _utFakeOut[6];
+    t->close(t);
+    SSFTLSCDeInit(s);
+    return alert;
+}
+
+static void _SSFTLSCUTPlainOverflow(void)
+{
+    /* Over 2^14: the server's error, whatever this build's receive size */
+    SSF_ASSERT(_UTPlainRecordAlert(16385u) == SSF_TLS_ALERT_RECORD_OVERFLOW);
+    SSF_ASSERT(_UTPlainRecordAlert(16384u + 1u + SSF_TLS_AEAD_TAG_SIZE) ==
+               SSF_TLS_ALERT_RECORD_OVERFLOW);
+    SSF_ASSERT(_UTPlainRecordAlert(16384u + 2u + SSF_TLS_AEAD_TAG_SIZE) ==
+               SSF_TLS_ALERT_RECORD_OVERFLOW);
+    /* Up to 2^14 is legal. Within hsBuf (receive size + 1) it is parsed, here refused as a */
+    /* ServerHello; beyond hsBuf, or beyond the record buffer (receive size + 17, caught at */
+    /* the header), it is this build's limit: internal_error.                                */
+    {
+        size_t fits = SSF_TLSC_CONFIG_MAX_RECV_RECORD + 1u;
+        uint8_t a;
+
+        if (fits > 16384u) fits = 16384u;
+        a = _UTPlainRecordAlert(fits);
+        SSF_ASSERT((a != SSF_TLS_ALERT_RECORD_OVERFLOW) && (a != SSF_TLS_ALERT_INTERNAL_ERROR));
+    }
+#if (SSF_TLSC_CONFIG_MAX_RECV_RECORD + 2u) <= 16384u
+    SSF_ASSERT(_UTPlainRecordAlert(SSF_TLSC_CONFIG_MAX_RECV_RECORD + 2u) ==
+               SSF_TLS_ALERT_INTERNAL_ERROR);
+    SSF_ASSERT(_UTPlainRecordAlert(16384u) == SSF_TLS_ALERT_INTERNAL_ERROR);
+#endif
+#if (SSF_TLSC_CONFIG_MAX_RECV_RECORD + 1u + SSF_TLS_AEAD_TAG_SIZE + 1u) <= 16384u
+    SSF_ASSERT(_UTPlainRecordAlert(SSF_TLSC_CONFIG_MAX_RECV_RECORD + 1u +
+                                   SSF_TLS_AEAD_TAG_SIZE + 1u) == SSF_TLS_ALERT_INTERNAL_ERROR);
+#endif
+
+    /* Protected records (application_data outside), judged at the header: over 2^14 + 1 +   */
+    /* the tag is record_overflow; over this build's buffer but within it, record_overflow   */
+    /* only once the server accepted our record_size_limit (RFC 8449 4), else internal_error. */
+    {
+        SSFTLSCSession_t *s = &_utSession2;
+        uint8_t buf[16];
+        size_t n;
+        uint8_t k;
+
+        for (k = 0; k < 4u; k++)
+        {
+            size_t len = (k < 2u) ? (16384u + 2u + SSF_TLS_AEAD_TAG_SIZE) :
+                                    (SSF_TLSC_CONFIG_MAX_RECV_RECORD + 2u + SSF_TLS_AEAD_TAG_SIZE);
+            uint8_t want = SSF_TLS_ALERT_RECORD_OVERFLOW;
+
+            /* Over this build's buffer yet within the RFC maximum: small receive builds only */
+            if ((k >= 2u) && (len > (16384u + 1u + SSF_TLS_AEAD_TAG_SIZE))) continue;
+            if (k == 2u) want = SSF_TLS_ALERT_INTERNAL_ERROR;
+            _UTAppSession(s);
+            s->peerRecordLimit = ((k & 1u) != 0u) ? 1024u : 0u;
+            _utFakeIn[0] = SSF_TLS_CT_APPLICATION; _utFakeIn[1] = 0x03; _utFakeIn[2] = 0x03;
+            _utFakeIn[3] = (uint8_t)(len >> 8); _utFakeIn[4] = (uint8_t)len;
+            _utFakeInLen = 5u;
+            SSF_ASSERT(s->transport.recv(&s->transport, buf, sizeof(buf), &n) == SSF_NET_IO_ERROR);
+            SSF_ASSERT(s->pendingAlert == want);
+            SSFTLSCDeInit(s);
+            SSFTLSRecordStateDeInit(&_utSrvSend);
+            SSFTLSRecordStateDeInit(&_utSrvRecv);
+        }
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* ServerHello / HelloRetryRequest extensions (RFC 8446 4.2) against a ClientHello1 the hook     */
 /* builds: session id 32 x 0x22, shares x25519 and secp384r1.                                    */
 /* --------------------------------------------------------------------------------------------- */
@@ -3125,6 +3227,7 @@ void SSFTLSCUnitTest(void)
     _SSFTLSCUTSendFlight();
     _SSFTLSCUTServerHelloExts();
     _SSFTLSCUTServerHelloVersion();
+    _SSFTLSCUTPlainOverflow();
     _SSFTLSCUTClientChain();
     _SSFTLSCUTAlpn();
     _SSFTLSCUTTrustFromPEM();

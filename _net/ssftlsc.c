@@ -290,9 +290,10 @@ static SSFTLSIOResult_t _RecvRecordOnce(SSFTLSCSession_t *s, uint8_t *pt, size_t
                                     "RecvRecord: ct=%u ver=0x%04x fragLen=%u",
                                     s->recvBuf[0], _Get16(&s->recvBuf[1]), io->fragLen);
             /* Judge the header before reading the fragment: an unknown content type is        */
-            /* unexpected_message (RFC 8446 5); a length over 2^14 + 256 is record_overflow     */
-            /* (5.2). A legal length over this build's buffer is this client's limit, reported  */
-            /* as internal_error (punch list: record size).                                      */
+            /* unexpected_message (RFC 8446 5); a length over the RFC maximum is record_overflow */
+            /* (5.1, 5.2: 2^14 for a plaintext record, 2^14 + 1 + the 16-byte tag of every      */
+            /* suite offered for a protected one, whose TLSInnerPlaintext is at most 2^14 + 1). */
+            /* A legal length over this build's buffer is this client's limit: internal_error. */
             if ((s->recvBuf[0] < SSF_TLS_CT_CHANGE_CIPHER) ||
                 (s->recvBuf[0] > SSF_TLS_CT_APPLICATION))
             {
@@ -305,12 +306,13 @@ static SSFTLSIOResult_t _RecvRecordOnce(SSFTLSCSession_t *s, uint8_t *pt, size_t
             {
                 SSF_TLS_TRACE_REC_ERROR(&s->trace, "RecvRecord: fragment too large (%u)",
                                         io->fragLen);
-                /* Over the RFC maximum, or (protected, once the server accepted our             */
-                /* record_size_limit) over the limit advertised: the peer's record_overflow     */
-                /* (RFC 8449 4). Otherwise a legal record larger than this build's buffer.      */
+                /* Over the RFC maximum (2^14 for a plaintext record, 5.1), or (protected, once */
+                /* the server accepted our record_size_limit) over the limit advertised: the    */
+                /* peer's record_overflow (RFC 8449 4). Otherwise a legal record larger than    */
+                /* this build's buffer. Protected records always say application_data outside.  */
                 _SSF_TLSC_ALERT(s, ((io->fragLen > SSF_TLSC_RFC_MAX_CIPHERTEXT) ||
-                                    ((s->peerRecordLimit != 0u) &&
-                                     (s->recvBuf[0] == SSF_TLS_CT_APPLICATION))) ?
+                                    ((s->recvBuf[0] != SSF_TLS_CT_APPLICATION) ?
+                                     (io->fragLen > 16384u) : (s->peerRecordLimit != 0u))) ?
                                    SSF_TLS_ALERT_RECORD_OVERFLOW : SSF_TLS_ALERT_INTERNAL_ERROR);
                 io->hdrPos = 0; io->hdrComplete = false; io->fragPos = 0; io->fragLen = 0;
                 return SSF_TLS_IO_ERROR;

@@ -536,11 +536,33 @@ is rejected.
       joining to the message and the transcript hashing each byte once. Mutation: 8 mutants,
       all killed (the hsBuf cap only in a receive-512 / send-768 build, where it matters).
       Wire: the 1b set at 768 and `gnutls-serv --recordsize=512` (above) pass.
-- [ ] A plaintext record of 2^14 + 1 .. 2^14 + 17 bytes gets internal_error instead of
+- [x] A plaintext record of 2^14 + 1 .. 2^14 + 17 bytes gets internal_error instead of
       record_overflow (RFC 8446 5.1) when SSF_TLSC_CONFIG_MAX_RECV_RECORD is below 16384: the
       build-size check runs before the plaintext 2^14 check. Fatal either way; alert code only.
       Found running the unit test at receive 512 (which also trips other tests that assume a
       16 KB receive size). Found during the send-limit audit.
+      Done, TDD: the header-time check now also answers record_overflow for a plaintext
+      record (outer type not application_data) over 2^14; protected records unchanged
+      (record_overflow over 2^14 + 17, or over our record_size_limit once accepted, else
+      internal_error). `_SSFTLSCUTPlainOverflow()` drives the handshake over the fake
+      transport (its input now 16.5 KB): plaintext 2^14 + 1, + 17 and + 18 are record_overflow;
+      2^14 and below parse if they fit hsBuf, else internal_error, beyond hsBuf and beyond the
+      record buffer both checked; protected records at the header with and without an
+      accepted limit. Red at receive 64 .. 16383 against the old code, green at 64, 512, 4096,
+      16366, 16367, 16383 and 16384 (run alone, ASan). Mutation: 6 mutants, all killed (5
+      only by the small builds, where the branch is reachable). Text unchanged at the default
+      receive size (+10 B at 2048).
+- [ ] Before keys, a record labelled application_data that is over this build's buffer gets
+      internal_error from the header check, where the same record at a normal size gets
+      unexpected_message (no keys to decrypt it). Fatal either way; only a broken server sends
+      one; alert code only. Found during the plaintext record_overflow audit.
+      Size figures corrected: earlier ones compared against a HEAD copy compiled from a long
+      scratch path, whose assertion __FILE__ strings added about 92 B to the old size. Measured
+      again with every version compiled from the same relative path: whole .text (string
+      constants included), tracing off, less the *ForTest hook functions. ALPN commit f8b84a4
+      +554 B (reported +442), trust store commit b14cfc5 +478 B (reported +386; 32 B of it
+      the PEM label and marker strings), the send minimum a6deffb 0 and ServerHello 70c1cb3
+      +100 B as reported, this change 0.
 - [x] Private key loading: PKCS#8 / SEC 1 / PEM. Done (approved: two new codec modules).
       `ssfpem` (RFC 7468): one block per call, multi-block buffers, strict Base64 via
       `SSFBase64Decode`, whitespace anywhere, NULL output to check/measure, all output zeroed on
@@ -616,7 +638,8 @@ is rejected.
       the 255-byte name cap, equivalent at the default list limit of 32. Wire: `s_server
       -alpn` (match, server preference, no overlap -> alert 120, no ALPN, HRR) and
       `gnutls-serv --alpn` (match, `--alpn-fatal` -> 120, non-fatal mismatch -> none).
-      Text +442 B with tracing off (unit-test hooks excluded).
+      Text +554 B for the commit, tracing off, unit-test hooks excluded (first reported as
+      +442 B; corrected, see the plaintext record_overflow item).
       Audit (fuzz: 200k EncryptedExtensions bodies vs an RFC model under ASan / UBSan, no
       mismatch). Fixed, TDD: (1) `SSFTLSCGetALPN()` returns NULL until the handshake is
       complete: the choice arrives before the server is authenticated and stayed set after a
@@ -642,7 +665,7 @@ is rejected.
       load identical to OpenSSL's DER, every certificate parsing; its object-signing bundle
       (301) is ERR_COUNT. Wire (`s_server`): bundle of system roots + test CA, CA first or
       last, EC and RSA leaves connect; system roots alone fail with unknown_ca. Cortex-M4
-      -Os: text +234 B (tracing off); stack 1,392 B deepest (SSFX509Parse's certificate).
+      -Os: stack 1,392 B deepest (SSFX509Parse's certificate); text: see the audit below.
       Audit (fuzz: 200k mutated bundles, exact-size buffers, ASan / UBSan, invariants:
       measure = load, contiguous pool, empty store on error; no failures). Fixed, TDD: (1) a
       block whose BEGIN line was damaged (4 dashes, indent, lower case, no space, missing) was
@@ -653,7 +676,8 @@ is rejected.
       `ssftlsc.h`: ders / lens hold maxCount entries; between-block text holds no markers.
       Not changed: a corrupted but parseable root loads and fails at verification; checking
       self-signatures at load would cost a signature per root. Text +152 B for the fixes
-      (+386 B in all); stack unchanged (deepest path still through SSFX509Parse).
+      (+478 B for the commit, first reported as +386 B; corrected, see the plaintext
+      record_overflow item); stack unchanged (deepest path still through SSFX509Parse).
 
 - [x] ServerHello: extensions the client offers but that are not specified for ServerHello
       (`server_name`, `supported_groups`, `signature_algorithms`, `psk_key_exchange_modes`,

@@ -440,7 +440,7 @@ is rejected.
 
 ## Step 4 — Features
 
-- [ ] CertificateRequest and client authentication (mutual TLS: AWS IoT, Azure). Note
+- [x] CertificateRequest and client authentication (mutual TLS: AWS IoT, Azure). Note
       `gnutls-serv` sends an (optional) CertificateRequest by default and the client aborts with
       `unexpected_message`; even without a client certificate, RFC 8446 4.4.2 lets the client
       answer with an empty Certificate. Interop with GnuTLS currently needs
@@ -736,6 +736,24 @@ is rejected.
 ## Step 5 — Tests and cleanup
 
 - [ ] RFC 8448 handshake traces as deterministic vectors (needs injectable random and keys).
+      Section 3 (Simple 1-RTT) done, TDD: `_SSFTLSCUTRfc8448Simple()` replays it over the fake
+      transport. Test hook `_SSFTLSCInjectClientHelloForTest()` (unit-test builds only) puts
+      the RFC's ClientHello and x25519 key in place of fresh randomness and
+      `_BuildClientHello()`; unauthenticated mode skips the chain (the RFC's certificate is
+      RSA-1024 and names no host) but its CertificateVerify is verified. Checked: the
+      ClientHello sent, handshake and application traffic secrets, the client Finished
+      record, the NewSessionTicket skipped, the server's application data decrypted, the
+      client's application data and close_notify records byte for byte, the server's
+      close_notify. Vectors (~1.9 KB, in `ssftlsc_ut.c` to keep the vcxproj unchanged)
+      extracted from the RFC text by script and checked twice before use: a pure-Python
+      model (x25519, HKDF, AES-128-GCM, self-tested against RFC 7748 / FIPS 197 / SP 800-38D)
+      and pyca/cryptography, which also verifies the RSA-PSS CertificateVerify. Red with the
+      hook stubbed. Mutation: 5 key schedule mutants (hs labels swapped, ap labels, master
+      derivation, client Finished key), all killed; two checked against the committed suite
+      passed it, so only the wire tests caught them before. Shipped code unchanged.
+      Remaining: section 7 (ChaCha20-Poly1305, compatibility mode), section 5 (HRR: both
+      ClientHellos injected), section 6 in part (client CertificateVerify is randomized
+      RSA-PSS); section 4 (PSK / 0-RTT) does not apply.
 - [ ] Deterministic parser unit tests like `_SSFTLSCParseCertificateForTest` for the ServerHello
       parser (2.5 is covered only through `mitm.py` today). Started: the hook
       `_SSFTLSCParseServerHelloForTest()` exists and the extension cases are covered; the
@@ -745,6 +763,13 @@ is rejected.
 - [x] `ssftls.md` still says `SSF_TLS_CONFIG_MAX_CHAIN_DEPTH` is not referenced; ssftlsc uses
       it. Outside the TLS client.
 - [ ] Negative tests for every step 2 check.
+- [ ] Mutual TLS against a real endpoint: only local `s_server` / `gnutls-serv` so far.
+      test.mosquitto.org port 8884 requires a client certificate (one it issues), a cheap
+      real-world check alongside the interop item above. Found reviewing step 4.
+- [ ] External signing for the client key: `SSFTLSCSetClientCert()` takes an `SSFPKey_t`
+      with the private key in RAM; devices that keep it in a secure element (e.g. ATECC608,
+      common with AWS IoT) need a signing callback in its place. Design decision. Found
+      reviewing step 4.
 - [ ] Bring the loopback `openssl s_server` interop harness into the repo (spot checks for step 2
       currently run from a scratch driver, which sets the unit-test hooks).
 - [ ] The leaf public key is parked in `clientHelloMsg` between handshake steps; give it its own

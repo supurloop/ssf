@@ -99,6 +99,11 @@ void *_SSFTLSCScrubTestHookCtx = NULL;
     } while (0)
 
 #if SSF_CONFIG_TLSC_UNIT_TEST == 1
+/* Test hook state for _SSFTLSCInjectClientHelloForTest() */
+static const uint8_t *_utInjectCH;
+static size_t _utInjectCHLen;
+static const uint8_t *_utInjectX25519;
+
 /* Test hook: flips a bit of the received server Finished verify_data, as a peer whose Finished */
 /* is wrong would send. Records are AEAD protected, so no on-path party can produce this.       */
 bool _ssfTLSCUTCorruptServerFinished;
@@ -1076,6 +1081,18 @@ static bool _ParseServerHello(SSFTLSCSession_t *s, const uint8_t *body, size_t b
 #undef _SSF_TLSC_SH_REJECT
 
 #if SSF_CONFIG_TLSC_UNIT_TEST == 1
+/* Replays a fixed trace (RFC 8448): the next ClientHello1 is chOpt[0..chLen) and the x25519   */
+/* private key x25519PrivOpt, in place of fresh randomness and _BuildClientHello(). NULL clears. */
+void _SSFTLSCInjectClientHelloForTest(const uint8_t *chOpt, size_t chLen,
+                                      const uint8_t *x25519PrivOpt)
+{
+    SSF_REQUIRE(chLen <= SSF_TLSC_CH_SIZE);
+    SSF_REQUIRE((chOpt == NULL) == (x25519PrivOpt == NULL));
+    _utInjectCH = chOpt;
+    _utInjectCHLen = chLen;
+    _utInjectX25519 = x25519PrivOpt;
+}
+
 /* Builds a ClientHello1 into session (random 32 x 0x11, session id 32 x 0x22, x25519 and        */
 /* secp384r1 shares), then parses body as a ServerHello, or a HelloRetryRequest if isHrr.       */
 /* *alertOut is the alert the client would send, 0 when the message is accepted.               */
@@ -1491,6 +1508,14 @@ static SSFTLSIOResult_t _TlscHandleSendCH(SSFTLSCSession_t *session)
                 SSF_TLS_TRACE_HS_ERROR(&session->trace, "ClientHello does not fit clientHelloMsg");
                 return SSF_TLS_IO_ERROR;
             }
+#if SSF_CONFIG_TLSC_UNIT_TEST == 1
+            if (_utInjectCH != NULL)                   /* A fixed trace's ClientHello and key */
+            {
+                memcpy(session->clientHelloMsg, _utInjectCH, _utInjectCHLen);
+                session->clientHelloLen = _utInjectCHLen;
+                memcpy(session->ephemeralPrivKey, _utInjectX25519, 32u);
+            }
+#endif
             SSFTLSTranscriptUpdate(&session->transcript, session->clientHelloMsg,
                                    session->clientHelloLen);
             session->helperStep = 2;

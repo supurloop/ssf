@@ -655,18 +655,44 @@ is rejected.
       self-signatures at load would cost a signature per root. Text +152 B for the fixes
       (+386 B in all); stack unchanged (deepest path still through SSFX509Parse).
 
-- [ ] ServerHello: extensions the client offers but that are not specified for ServerHello
+- [x] ServerHello: extensions the client offers but that are not specified for ServerHello
       (`server_name`, `supported_groups`, `signature_algorithms`, `psk_key_exchange_modes`,
       `record_size_limit`, ALPN) are rejected with `unsupported_extension`; RFC 8446 4.2 asks
       for `illegal_parameter` for a recognized extension in the wrong message, as
       EncryptedExtensions and CertificateRequest already do. Fatal either way; only the alert
       code differs. Found during the ALPN audit.
+      Done, TDD: `_ParseServerHello()` answers `server_name`, `supported_groups`,
+      `signature_algorithms`, ALPN, `psk_key_exchange_modes`, `record_size_limit`, and a
+      cookie outside a HelloRetryRequest, with `illegal_parameter`; `pre_shared_key` and the
+      rest stay `unsupported_extension`. A fixed list (extensions this client implements),
+      not "sent in this ClientHello": 4.2's recognized-but-not-allowed rule holds either way.
+      New test hook `_SSFTLSCParseServerHelloForTest()` builds a real ClientHello1 (fixed
+      random, session id and shares) and parses a body against it; `_SSFTLSCUTServerHelloExts()`
+      checks 25 ServerHello / HRR cases (red: 7 recognized types got unsupported_extension).
+      Mutation: 11 mutants, all killed. Wire: the ALPN set (HRR included) unchanged. Text +48 B.
+      Audit: a server unaware of supported_versions answers TLS 1.2 (older OpenSSL / mbedTLS
+      brokers); the client reported it as "session id echo mismatch" or "cipher suite"
+      (illegal_parameter), and the "missing supported_versions" -> protocol_version check
+      at the end of the parser was unreachable. Fixed, TDD: `_ShHasVersions()` walks only
+      the framing first; no extension block, or a well-formed one without
+      supported_versions, is protocol_version with the trace "the server negotiated TLS 1.2
+      or earlier; TLS 1.3 is required", before the session id, suite and extension checks.
+      Malformed framing still reaches the full parse (decode_error); supported_versions
+      present but not TLS 1.3 stays illegal_parameter; the dead end-of-parser check is
+      removed. `_SSFTLSCUTServerHelloVersion()`: TLS 1.2 ServerHellos with session ids of
+      0 / 16 / 32 bytes, typical, empty and absent extension blocks; TLS 1.3-shaped ones
+      without supported_versions (ServerHello and HRR); four framing errors. Mutation: 9
+      mutants killed (one equivalent bounds check removed, its precondition documented).
+      Wire: a scripted legacy TLS 1.2 server gets protocol_version with that trace; the
+      ALPN set unchanged. Text +52 B (+100 B with the extension fix above).
 
 ## Step 5 — Tests and cleanup
 
 - [ ] RFC 8448 handshake traces as deterministic vectors (needs injectable random and keys).
 - [ ] Deterministic parser unit tests like `_SSFTLSCParseCertificateForTest` for the ServerHello
-      parser (2.5 is covered only through `mitm.py` today).
+      parser (2.5 is covered only through `mitm.py` today). Started: the hook
+      `_SSFTLSCParseServerHelloForTest()` exists and the extension cases are covered; the
+      session id, cipher suite, compression, key share and length checks remain.
 - [ ] Interop with `openssl s_server` over loopback; test.mosquitto.org:8883 with its CA. Add
       `gnutls-serv` (installed, 3.8.13) as a second independent server in the regression set.
 - [x] `ssftls.md` still says `SSF_TLS_CONFIG_MAX_CHAIN_DEPTH` is not referenced; ssftlsc uses

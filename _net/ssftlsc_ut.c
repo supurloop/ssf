@@ -2395,6 +2395,213 @@ static void _SSFTLSCUTAlpn(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* ServerHello / HelloRetryRequest extensions (RFC 8446 4.2) against a ClientHello1 the hook     */
+/* builds: session id 32 x 0x22, shares x25519 and secp384r1.                                    */
+/* --------------------------------------------------------------------------------------------- */
+/* Builds a ServerHello body (TLS_AES_128_GCM_SHA256) with supported_versions, key_share (an     */
+/* x25519 share, or secp256r1 selected for an HRR) and then extra[0..extraLen). Returns length. */
+static size_t _UTShBody(uint8_t *out, bool isHrr, const uint8_t *extra, size_t extraLen)
+{
+    size_t p = 0;
+    size_t extStart;
+
+    out[p++] = 0x03; out[p++] = 0x03;
+    memset(&out[p], isHrr ? 0xcfu : 0x5au, 32u); p += 32u;             /* random: not checked here */
+    out[p++] = 32u; memset(&out[p], 0x22, 32u); p += 32u;               /* session id echo */
+    out[p++] = 0x13; out[p++] = 0x01;                                    /* cipher_suite */
+    out[p++] = 0x00;                                                     /* compression */
+    extStart = p; p += 2u;
+    out[p++] = 0x00; out[p++] = 0x2b; out[p++] = 0x00; out[p++] = 0x02;  /* supported_versions */
+    out[p++] = 0x03; out[p++] = 0x04;
+    out[p++] = 0x00; out[p++] = 0x33;                                    /* key_share */
+    if (isHrr) { out[p++] = 0x00; out[p++] = 0x02; out[p++] = 0x00; out[p++] = 0x17; }
+    else
+    {
+        out[p++] = 0x00; out[p++] = 0x24; out[p++] = 0x00; out[p++] = 0x1d;
+        out[p++] = 0x00; out[p++] = 0x20; memset(&out[p], 0x09, 32u); p += 32u;
+    }
+    memcpy(&out[p], extra, extraLen); p += extraLen;
+    out[extStart] = (uint8_t)((p - extStart - 2u) >> 8);
+    out[extStart + 1u] = (uint8_t)(p - extStart - 2u);
+    return p;
+}
+
+#define SSF_TLSC_UT_SH(isHrr, extra, wantAlert) do { \
+    uint8_t _a = 0xffu; size_t _n = _UTShBody(sh, (isHrr), (extra), sizeof(extra)); \
+    bool _ok = _SSFTLSCParseServerHelloForTest(&_utSession2, sh, _n, (isHrr), &_a); \
+    SSF_ASSERT(_ok == ((wantAlert) == 0u)); \
+    SSF_ASSERT(_a == (wantAlert)); } while (0)
+
+/* Extensions the client recognizes (it sends them), none specified for ServerHello: */
+/* illegal_parameter (4.2)                                                          */
+static const uint8_t _utShSni[]      = { 0x00, 0x00, 0x00, 0x00 };
+static const uint8_t _utShGroups[]   = { 0x00, 0x0a, 0x00, 0x04, 0x00, 0x02, 0x00, 0x1d };
+static const uint8_t _utShSigAlgs[]  = { 0x00, 0x0d, 0x00, 0x04, 0x00, 0x02, 0x04, 0x03 };
+static const uint8_t _utShPskModes[] = { 0x00, 0x2d, 0x00, 0x02, 0x01, 0x01 };
+static const uint8_t _utShRsl[]      = { 0x00, 0x1c, 0x00, 0x02, 0x40, 0x00 };
+static const uint8_t _utShAlpn[]     = { 0x00, 0x10, 0x00, 0x07, 0x00, 0x05, 0x04,
+                                         'm', 'q', 't', 't' };
+static const uint8_t _utShCookie[]   = { 0x00, 0x2c, 0x00, 0x03, 0x00, 0x01, 0xaa };
+/* Not sent by the client: unsupported_extension (4.2) */
+static const uint8_t _utShPsk[]      = { 0x00, 0x29, 0x00, 0x02, 0x00, 0x00 };
+static const uint8_t _utShEarly[]    = { 0x00, 0x2a, 0x00, 0x00 };
+static const uint8_t _utShStatus[]   = { 0x00, 0x05, 0x00, 0x00 };
+static const uint8_t _utShUnknown[]  = { 0xfa, 0xfa, 0x00, 0x00 };
+static const uint8_t _utShNone[]     = { 0x00 };                 /* sizeof 1: trimmed below */
+/* Duplicates of the allowed ones: illegal_parameter */
+static const uint8_t _utShDupVer[]   = { 0x00, 0x2b, 0x00, 0x02, 0x03, 0x04 };
+static const uint8_t _utShDupCookie[] = { 0x00, 0x2c, 0x00, 0x03, 0x00, 0x01, 0xaa,
+                                          0x00, 0x2c, 0x00, 0x03, 0x00, 0x01, 0xbb };
+
+/* Builds a TLS 1.2 ServerHello body, as a server unaware of supported_versions sends: its own */
+/* session id of sidLen bytes, TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256, then the extension block */
+/* ext[0..extLen) if withExts (a TLS 1.2 ServerHello may have none). Returns the length.       */
+static size_t _UTSh12Body(uint8_t *out, uint8_t sidLen, bool withExts, const uint8_t *ext,
+                          size_t extLen)
+{
+    size_t p = 0;
+
+    out[p++] = 0x03; out[p++] = 0x03;
+    memset(&out[p], 0x44, 32u); p += 32u;
+    out[p++] = sidLen; memset(&out[p], 0x77, sidLen); p += sidLen;
+    out[p++] = 0xc0; out[p++] = 0x2f;
+    out[p++] = 0x00;
+    if (withExts)
+    {
+        out[p++] = (uint8_t)(extLen >> 8); out[p++] = (uint8_t)extLen;
+        if (extLen > 0u) { memcpy(&out[p], ext, extLen); p += extLen; }
+    }
+    return p;
+}
+
+/* A ServerHello that did not negotiate TLS 1.3 is protocol_version, whatever else is in it:   */
+/* checked before the session id echo, cipher suite and extensions, which a TLS 1.2 server    */
+/* fills its own way.                                                                          */
+static void _SSFTLSCUTServerHelloVersion(void)
+{
+    /* renegotiation_info, extended_master_secret, SNI acknowledgement, ec_point_formats */
+    static const uint8_t ext12[] = { 0xff, 0x01, 0x00, 0x01, 0x00, 0x00, 0x17, 0x00, 0x00,
+                                     0x00, 0x00, 0x00, 0x00, 0x00, 0x0b, 0x00, 0x02, 0x01,
+                                     0x00 };
+    /* key_share only: shaped like TLS 1.3 but without supported_versions */
+    static const uint8_t ksOnly[] = { 0x00, 0x33, 0x00, 0x24, 0x00, 0x1d, 0x00, 0x20,
+                                      0x09, 0x09, 0x09, 0x09, 0x09, 0x09, 0x09, 0x09,
+                                      0x09, 0x09, 0x09, 0x09, 0x09, 0x09, 0x09, 0x09,
+                                      0x09, 0x09, 0x09, 0x09, 0x09, 0x09, 0x09, 0x09,
+                                      0x09, 0x09, 0x09, 0x09, 0x09, 0x09, 0x09, 0x09 };
+    static uint8_t sh[256];
+    uint8_t a = 0xffu;
+    size_t n;
+    uint8_t sidLen;
+
+    SSFTLSCInit(&_utSession2, &_utSock.transport, NULL);
+    for (sidLen = 0; sidLen <= 32u; sidLen = (uint8_t)(sidLen + 16u))
+    {
+        /* Typical TLS 1.2 extensions, none at all, an empty block */
+        n = _UTSh12Body(sh, sidLen, true, ext12, sizeof(ext12));
+        SSF_ASSERT(!_SSFTLSCParseServerHelloForTest(&_utSession2, sh, n, false, &a));
+        SSF_ASSERT(a == SSF_TLS_ALERT_PROTOCOL_VERSION);
+        n = _UTSh12Body(sh, sidLen, false, NULL, 0u);
+        SSF_ASSERT(!_SSFTLSCParseServerHelloForTest(&_utSession2, sh, n, false, &a));
+        SSF_ASSERT(a == SSF_TLS_ALERT_PROTOCOL_VERSION);
+        n = _UTSh12Body(sh, sidLen, true, NULL, 0u);
+        SSF_ASSERT(!_SSFTLSCParseServerHelloForTest(&_utSession2, sh, n, false, &a));
+        SSF_ASSERT(a == SSF_TLS_ALERT_PROTOCOL_VERSION);
+    }
+    /* TLS 1.3 shaped, supported_versions missing: ServerHello and HRR */
+    {
+        static uint8_t body[256];
+        size_t p = 0;
+
+        body[p++] = 0x03; body[p++] = 0x03; memset(&body[p], 0x5a, 32u); p += 32u;
+        body[p++] = 32u; memset(&body[p], 0x22, 32u); p += 32u;
+        body[p++] = 0x13; body[p++] = 0x01; body[p++] = 0x00;
+        body[p++] = 0x00; body[p++] = (uint8_t)sizeof(ksOnly);
+        memcpy(&body[p], ksOnly, sizeof(ksOnly)); p += sizeof(ksOnly);
+        SSF_ASSERT(!_SSFTLSCParseServerHelloForTest(&_utSession2, body, p, false, &a));
+        SSF_ASSERT(a == SSF_TLS_ALERT_PROTOCOL_VERSION);
+        SSF_ASSERT(!_SSFTLSCParseServerHelloForTest(&_utSession2, body, p, true, &a));
+        SSF_ASSERT(a == SSF_TLS_ALERT_PROTOCOL_VERSION);
+        /* Framing errors stay decode_error: stray bytes after the last extension, an        */
+        /* extension running past the block, a block length past the body, a body ending   */
+        /* inside the cipher suite                                                           */
+        body[p] = 0x00; body[p + 1u] = 0x00;
+        body[p - sizeof(ksOnly) - 1u] = (uint8_t)(sizeof(ksOnly) + 2u);
+        SSF_ASSERT(!_SSFTLSCParseServerHelloForTest(&_utSession2, body, p + 2u, false, &a));
+        SSF_ASSERT(a == SSF_TLS_ALERT_DECODE_ERROR);
+        body[p - sizeof(ksOnly) - 1u] = (uint8_t)sizeof(ksOnly);
+        body[p - sizeof(ksOnly) + 3u] = 0x30;                     /* key_share length 0x0030 */
+        SSF_ASSERT(!_SSFTLSCParseServerHelloForTest(&_utSession2, body, p, false, &a));
+        SSF_ASSERT(a == SSF_TLS_ALERT_DECODE_ERROR);
+        body[p - sizeof(ksOnly) + 3u] = 0x24;
+        body[p - sizeof(ksOnly) - 1u] = (uint8_t)(sizeof(ksOnly) + 1u);
+        SSF_ASSERT(!_SSFTLSCParseServerHelloForTest(&_utSession2, body, p, false, &a));
+        SSF_ASSERT(a == SSF_TLS_ALERT_DECODE_ERROR);
+        SSF_ASSERT(!_SSFTLSCParseServerHelloForTest(&_utSession2, body, 2u + 32u + 1u + 32u + 1u,
+                                                    false, &a));
+        SSF_ASSERT(a == SSF_TLS_ALERT_DECODE_ERROR);
+    }
+    /* supported_versions present but not TLS 1.3 stays illegal_parameter (4.2.1) */
+    {
+        static const uint8_t v12[] = { 0x00, 0x2b, 0x00, 0x02, 0x03, 0x03 };
+
+        n = _UTSh12Body(sh, 32u, true, v12, sizeof(v12));
+        memset(&sh[35], 0x22, 32u);                               /* Echo the session id */
+        sh[67] = 0x13; sh[68] = 0x01;                             /* A TLS 1.3 suite */
+        SSF_ASSERT(!_SSFTLSCParseServerHelloForTest(&_utSession2, sh, n, false, &a));
+        SSF_ASSERT(a == SSF_TLS_ALERT_ILLEGAL_PARAMETER);
+    }
+    SSFTLSCDeInit(&_utSession2);
+}
+
+static void _SSFTLSCUTServerHelloExts(void)
+{
+    static uint8_t sh[256];
+    uint8_t a = 0xffu;
+    size_t n;
+
+    SSFTLSCInit(&_utSession2, &_utSock.transport, NULL);
+
+    /* ---- The harness: a plain ServerHello and HRR are accepted; a wrong echo is not ---- */
+    n = _UTShBody(sh, false, _utShNone, 0u);
+    SSF_ASSERT(_SSFTLSCParseServerHelloForTest(&_utSession2, sh, n, false, &a) && (a == 0u));
+    n = _UTShBody(sh, true, _utShNone, 0u);
+    SSF_ASSERT(_SSFTLSCParseServerHelloForTest(&_utSession2, sh, n, true, &a) && (a == 0u));
+    n = _UTShBody(sh, false, _utShNone, 0u);
+    sh[35] ^= 0x01u;                                              /* First session id byte */
+    SSF_ASSERT(!_SSFTLSCParseServerHelloForTest(&_utSession2, sh, n, false, &a));
+    SSF_ASSERT(a == SSF_TLS_ALERT_ILLEGAL_PARAMETER);
+
+    /* ---- ServerHello ---- */
+    SSF_TLSC_UT_SH(false, _utShSni, SSF_TLS_ALERT_ILLEGAL_PARAMETER);
+    SSF_TLSC_UT_SH(false, _utShGroups, SSF_TLS_ALERT_ILLEGAL_PARAMETER);
+    SSF_TLSC_UT_SH(false, _utShSigAlgs, SSF_TLS_ALERT_ILLEGAL_PARAMETER);
+    SSF_TLSC_UT_SH(false, _utShPskModes, SSF_TLS_ALERT_ILLEGAL_PARAMETER);
+    SSF_TLSC_UT_SH(false, _utShRsl, SSF_TLS_ALERT_ILLEGAL_PARAMETER);
+    SSF_TLSC_UT_SH(false, _utShAlpn, SSF_TLS_ALERT_ILLEGAL_PARAMETER);
+    SSF_TLSC_UT_SH(false, _utShCookie, SSF_TLS_ALERT_ILLEGAL_PARAMETER);   /* HRR only */
+    SSF_TLSC_UT_SH(false, _utShPsk, SSF_TLS_ALERT_UNSUPPORTED_EXT);
+    SSF_TLSC_UT_SH(false, _utShEarly, SSF_TLS_ALERT_UNSUPPORTED_EXT);
+    SSF_TLSC_UT_SH(false, _utShStatus, SSF_TLS_ALERT_UNSUPPORTED_EXT);
+    SSF_TLSC_UT_SH(false, _utShUnknown, SSF_TLS_ALERT_UNSUPPORTED_EXT);
+    SSF_TLSC_UT_SH(false, _utShDupVer, SSF_TLS_ALERT_ILLEGAL_PARAMETER);
+
+    /* ---- HelloRetryRequest: cookie allowed (once); the rest as for ServerHello ---- */
+    SSF_TLSC_UT_SH(true, _utShCookie, 0u);
+    SSF_TLSC_UT_SH(true, _utShDupCookie, SSF_TLS_ALERT_ILLEGAL_PARAMETER);
+    SSF_TLSC_UT_SH(true, _utShSni, SSF_TLS_ALERT_ILLEGAL_PARAMETER);
+    SSF_TLSC_UT_SH(true, _utShGroups, SSF_TLS_ALERT_ILLEGAL_PARAMETER);
+    SSF_TLSC_UT_SH(true, _utShSigAlgs, SSF_TLS_ALERT_ILLEGAL_PARAMETER);
+    SSF_TLSC_UT_SH(true, _utShPskModes, SSF_TLS_ALERT_ILLEGAL_PARAMETER);
+    SSF_TLSC_UT_SH(true, _utShRsl, SSF_TLS_ALERT_ILLEGAL_PARAMETER);
+    SSF_TLSC_UT_SH(true, _utShAlpn, SSF_TLS_ALERT_ILLEGAL_PARAMETER);
+    SSF_TLSC_UT_SH(true, _utShPsk, SSF_TLS_ALERT_UNSUPPORTED_EXT);
+    SSF_TLSC_UT_SH(true, _utShEarly, SSF_TLS_ALERT_UNSUPPORTED_EXT);
+    SSF_TLSC_UT_SH(true, _utShUnknown, SSF_TLS_ALERT_UNSUPPORTED_EXT);
+    SSFTLSCDeInit(&_utSession2);
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Client flight split into records (_SendHandshakeOnce): every protected record within the     */
 /* server's record_size_limit, the pieces joining up to the message, across short writes.       */
 /* --------------------------------------------------------------------------------------------- */
@@ -2916,6 +3123,8 @@ void SSFTLSCUnitTest(void)
     }
     _SSFTLSCUTClientCert();
     _SSFTLSCUTSendFlight();
+    _SSFTLSCUTServerHelloExts();
+    _SSFTLSCUTServerHelloVersion();
     _SSFTLSCUTClientChain();
     _SSFTLSCUTAlpn();
     _SSFTLSCUTTrustFromPEM();

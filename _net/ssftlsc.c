@@ -867,6 +867,31 @@ static bool _GroupSupported(uint16_t group)
            (group == SSF_TLS_GROUP_SECP384R1);
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: false if a ServerHello body did not negotiate TLS 1.3: its extension block is       */
+/* absent (a TLS 1.2 ServerHello may have none) or well formed without supported_versions        */
+/* (4.2.1). Walks only the framing, so it runs before the checks a TLS 1.2 server fails its own */
+/* way (session id echo, cipher suite, extensions). True otherwise, malformed framing included: */
+/* the full parse then reports decode_error. bodyLen is at least 35 (the caller checks).         */
+/* --------------------------------------------------------------------------------------------- */
+static bool _ShHasVersions(const uint8_t *body, size_t bodyLen)
+{
+    size_t pos = 2u + 32u;
+    size_t extEnd;
+
+    pos += 1u + (size_t)body[pos] + 2u + 1u;          /* session id, cipher suite, compression */
+    if (pos == bodyLen) return false;                 /* No extension block */
+    if ((pos + 2u) > bodyLen) return true;
+    extEnd = pos + 2u + (size_t)_Get16(&body[pos]);
+    if (extEnd != bodyLen) return true;
+    for (pos += 2u; pos < extEnd; pos += 4u + (size_t)_Get16(&body[pos + 2u]))
+    {
+        if ((extEnd - pos) < 4u) return true;
+        if (_Get16(&body[pos]) == SSF_TLS_EXT_SUPPORTED_VERSIONS) return true;
+    }
+    return (pos != extEnd);                           /* Overrun: malformed */
+}
+
 #define _SSF_TLSC_SH_REJECT(s, what, alert) do { \
     SSF_TLS_TRACE_HS_ERROR(&(s)->trace, "ServerHello rejected: %s%s", (what), \
                            isHrr ? " (HelloRetryRequest)" : ""); \
@@ -902,6 +927,14 @@ static bool _ParseServerHello(SSFTLSCSession_t *s, const uint8_t *body, size_t b
     /* legacy_version (ignored when supported_versions is present, 4.2.1) + random */
     if (bodyLen < 2u + 32u + 1u) _SSF_TLSC_SH_REJECT(s, "too short", SSF_TLS_ALERT_DECODE_ERROR);
     pos = 2u + 32u;
+
+    /* A server that does not know supported_versions answers with TLS 1.2 or earlier: say so */
+    /* rather than fail on its fresh session id or TLS 1.2 cipher suite.                      */
+    if (!_ShHasVersions(body, bodyLen))
+    {
+        _SSF_TLSC_SH_REJECT(s, "the server negotiated TLS 1.2 or earlier; TLS 1.3 is required",
+                            SSF_TLS_ALERT_PROTOCOL_VERSION);
+    }
 
     /* legacy_session_id_echo MUST equal the ClientHello legacy_session_id (4.1.3) */
     sidLen = body[pos++];
@@ -1018,6 +1051,15 @@ static bool _ParseServerHello(SSFTLSCSession_t *s, const uint8_t *body, size_t b
             if (cookieOut != NULL) *cookieOut = &body[pos];   /* Whole extension_data */
             if (cookieLenOut != NULL) *cookieLenOut = eLen;
         }
+        else if ((eType == SSF_TLS_EXT_SERVER_NAME) || (eType == SSF_TLS_EXT_SUPPORTED_GROUPS) ||
+                 (eType == SSF_TLS_EXT_SIGNATURE_ALGS) || (eType == SSF_TLS_EXT_ALPN) ||
+                 (eType == SSF_TLS_EXT_PSK_KEY_EXCHANGE) ||
+                 (eType == SSF_TLSC_EXT_RECORD_SIZE_LIMIT) || (eType == 44u))
+        {
+            /* Recognized (the client sends these), but not specified for this message, cookie  */
+            /* outside a HelloRetryRequest included: illegal_parameter (4.2).                   */
+            _SSF_TLSC_SH_REJECT(s, "extension not allowed here", SSF_TLS_ALERT_ILLEGAL_PARAMETER);
+        }
         else
         {
             /* Anything else, pre_shared_key included (no PSK is offered), was not requested */
@@ -1027,14 +1069,49 @@ static bool _ParseServerHello(SSFTLSCSession_t *s, const uint8_t *body, size_t b
         pos += eLen;
     }
 
-    if (!hasVersions)
-    { _SSF_TLSC_SH_REJECT(s, "missing supported_versions", SSF_TLS_ALERT_PROTOCOL_VERSION); }
+    /* supported_versions is present (_ShHasVersions() above) and was checked when found */
     if (!hasKeyShare)                          /* No PSK-only mode */
     { _SSF_TLSC_SH_REJECT(s, "missing key_share", SSF_TLS_ALERT_MISSING_EXTENSION); }
     return true;
 }
 
 #undef _SSF_TLSC_SH_REJECT
+
+#if SSF_CONFIG_TLSC_UNIT_TEST == 1
+/* Builds a ClientHello1 into session (random 32 x 0x11, session id 32 x 0x22, x25519 and        */
+/* secp384r1 shares), then parses body as a ServerHello, or a HelloRetryRequest if isHrr.       */
+/* *alertOut is the alert the client would send, 0 when the message is accepted.               */
+bool _SSFTLSCParseServerHelloForTest(SSFTLSCSession_t *session, const uint8_t *body,
+                                     size_t bodyLen, bool isHrr, uint8_t *alertOut)
+{
+    static uint8_t p384Pub[97];
+    uint8_t random[32];
+    uint8_t sid[32];
+    uint8_t x25519Pub[32];
+    SSFTLSCKeyShare_t shares[2];
+    uint8_t pub[97];
+    size_t pubLen;
+    uint16_t group;
+    const uint8_t *cookie;
+    uint16_t cookieLen;
+    bool ok;
+
+    memset(random, 0x11, sizeof(random));
+    memset(sid, 0x22, sizeof(sid));
+    memset(x25519Pub, 0x33, sizeof(x25519Pub));
+    p384Pub[0] = 0x04u;
+    shares[0].group = SSF_TLS_GROUP_X25519; shares[0].pub = x25519Pub; shares[0].len = 32u;
+    shares[1].group = SSF_TLS_GROUP_SECP384R1; shares[1].pub = p384Pub; shares[1].len = 97u;
+    SSF_REQUIRE(_BuildClientHello(session, random, sid, (uint8_t)sizeof(sid), shares, 2u, NULL,
+                                  0u));
+    session->hrrDone = false;
+    session->pendingAlert = 0;
+    ok = _ParseServerHello(session, body, bodyLen, isHrr, pub, &pubLen, &group, &cookie,
+                           &cookieLen);
+    *alertOut = ok ? 0u : session->pendingAlert;
+    return ok;
+}
+#endif /* SSF_CONFIG_TLSC_UNIT_TEST */
 
 /* --------------------------------------------------------------------------------------------- */
 /* Internal: complete the key exchange and derive handshake traffic keys.                        */

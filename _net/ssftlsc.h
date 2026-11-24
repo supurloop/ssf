@@ -454,6 +454,8 @@ bool _SSFTLSCSaveLeafKeyForTest(SSFTLSCSession_t *session, const uint8_t *der, u
 uint8_t _SSFTLSCChainAlertForTest(SSFX509VerifyCode_t code);
 bool _SSFTLSCParseEncryptedExtensionsForTest(const uint8_t *body, size_t bodyLen,
                                              uint8_t *alertOut);
+bool _SSFTLSCParseServerHelloForTest(SSFTLSCSession_t *session, const uint8_t *body,
+                                     size_t bodyLen, bool isHrr, uint8_t *alertOut);
 SSFTLSIOResult_t _SSFTLSCSendHandshakeForTest(SSFTLSCSession_t *session, const uint8_t *msg,
                                               size_t total);
 bool _SSFTLSCParseEncryptedExtensionsAlpnForTest(SSFTLSCSession_t *session, const uint8_t *body,

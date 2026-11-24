@@ -798,8 +798,30 @@ is rejected.
       be illegal_parameter. Supporting it needs a ClientHello2 path that keeps the shares.
       Stateless / DoS-protecting servers send them; common MQTT brokers do not. Found
       writing the ServerHello model.
-- [ ] Interop with `openssl s_server` over loopback; test.mosquitto.org:8883 with its CA. Add
+- [x] Interop with `openssl s_server` over loopback; test.mosquitto.org:8883 with its CA. Add
       `gnutls-serv` (installed, 3.8.13) as a second independent server in the regression set.
+      Done as a scripted regression set (scratch for now; into the repo with the harness item
+      below), each row with its expected outcome; not part of the unit tests (needs the
+      servers and, for --public, the internet). Matrix: {s_server, gnutls-serv} x 4 suites x
+      3 groups (x25519, P-384, P-256 through a real HRR) x 5 server keys (P-256, P-384,
+      RSA-2048, RSA-4096, Ed25519): 120 / 120, suite and group as forced, data echoed;
+      AES-128-CCM negotiated on the wire for the first time. Red check: a client with a
+      wrong CCM key length fails exactly the 30 CCM rows. Features, checked automatically:
+      ALPN 10, mutual TLS 13, trust store 5, KeyUpdate 5, server records of at most 512 bytes
+      (RSA-4096 chain across records), gnutls record_size_limit 512 with an RSA-4096 client:
+      35 / 35. Public: test.mosquitto.org:8886 (Let's Encrypt, 3-certificate chain against
+      the 118 system roots loaded with SSFTLSCTrustFromPEM()): TLS 1.3 ChaCha20-Poly1305 /
+      x25519 and MQTT CONNACK accepted (ChaCha20's first real-world coverage).
+      test.mosquitto.org:8883 fails, see the X.509 v1 item. Whole set about 1 minute.
+- [ ] test.mosquitto.org:8883 serves an X.509 v1 certificate (no extensions, no
+      subjectAltName; the host name only in CN). OpenSSL accepts it; ssfx509 requires v3 and
+      matches host names by subjectAltName only, so the client refuses it
+      (SSF_X509_VERIFY_ERR_VERSION, alert 43). By design, but self-made broker certificates
+      are often v1 (older `openssl x509 -req` without an extension file, as in many
+      Mosquitto guides). Options: keep (document), or an opt-in to accept a v1 leaf with a CN
+      host name match. Outside the TLS client (ssfx509). Found during the interop set.
+- [ ] The interop test CAs (`ssf-test-ca`, `ssf-test-rsa-ca`) expire 2026-12-23: the harness
+      should generate its certificates rather than keep these.
 - [x] `ssftls.md` still says `SSF_TLS_CONFIG_MAX_CHAIN_DEPTH` is not referenced; ssftlsc uses
       it. Outside the TLS client.
 - [ ] Negative tests for every step 2 check.

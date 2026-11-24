@@ -52,9 +52,15 @@ extern "C" {
 /*   handshake; send()/recv() carry application data; shutdown() writes out a partly written     */
 /*   record and close_notify; close() ends both and never waits, so bytes send() accepted can be */
 /*   lost without a shutdown() first.                                                            */
-/* - No I/O blocks and no threads are used. Public-key work (ECDH, chain and CertificateVerify   */
-/*   checks) runs inline, one step per pollOpen() call, with WANT_READ returned in between; each */
-/*   step occupies the caller for the duration of that computation.                              */
+/* - No I/O blocks and no threads are used. Public-key work runs inline in pollOpen(), in three  */
+/*   steps: key exchange (X25519 or P-256 ECDH), certificate chain verification, and the         */
+/*   CertificateVerify signature. A call runs at most one step, then returns WANT_READ; the call */
+/*   that completes the triggering message (ServerHello, Certificate, CertificateVerify) also    */
+/*   runs its step. Each step occupies the caller for the whole computation: there is no finer  */
+/*   split. Chain verification is the longest: it checks every signature in the chain plus the   */
+/*   trust anchor's in one call, so its time grows with the chain length and is set by the      */
+/*   slowest algorithms involved (P-384 and RSA-3072/4096 well above P-256, Ed25519 and         */
+/*   RSA-2048). Size a single-threaded application's latency budget for that call.             */
 /* - Client mode, full handshake only (no PSK resumption or 0-RTT). One connection per session.  */
 /* - IPv4 only (ssfnet.h): open() refuses an IPv6 literal host whatever the inner transport.     */
 /* - Chain limit: SSF_X509_CONFIG_MAX_CHAIN_DEPTH, the verifier's own. Certificates a server     */

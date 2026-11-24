@@ -2318,8 +2318,10 @@ static SSFNetIOResult_t _SSFTLSCFail(SSFTLSCSession_t *s)
 
 /* --------------------------------------------------------------------------------------------- */
 /* Advances the handshake. Returns SUCCESS once complete, WANT_READ/WANT_WRITE while in progress, */
-/* else CLOSED or ERROR. A crypto step always ends the call with WANT_READ so that no single call */
-/* does both network I/O and a public-key operation.                                             */
+/* else CLOSED or ERROR. A receive state that completes its message continues into its crypto   */
+/* step in the same call (ServerHello -> key exchange, Certificate -> chain verification,        */
+/* CertificateVerify -> its signature); the crypto step then ends the call with WANT_READ, so a  */
+/* call runs at most one public-key step.                                                        */
 /* --------------------------------------------------------------------------------------------- */
 static SSFNetIOResult_t _SSFTLSCDrive(SSFTLSCSession_t *s)
 {

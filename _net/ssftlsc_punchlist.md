@@ -299,8 +299,15 @@ is rejected.
       "potentially extraneous certificates and arbitrary orderings" (leaf first). `ssfx509`
       requires cert[i] to be issued by cert[i + 1], so such chains fail. Needs path building in
       `ssfx509`. Outside the TLS client.
-- [ ] Long single steps: P-384/RSA chain verification can take a long time inline on small
-      targets; consider splitting verification per certificate across `pollOpen()` calls.
+- [x] Long single steps: P-384/RSA chain verification can take a long time inline on small
+      targets; consider splitting verification per certificate across `pollOpen()` calls. Closed (3B item I) by
+      documenting the current design, per the user; not measured on a target. `ssftlsc.h`
+      describes the three inline steps, at most one per call, the whole chain (every signature
+      plus the anchor's) in one call, and what makes it long. `_SSFTLSCDrive`'s comment
+      corrected: it claimed no call does both I/O and a public-key step, but the call that
+      completes ServerHello / Certificate / CertificateVerify runs its step too. Splitting per
+      signature would need a resumable `ssfx509` chain API (parsed chain in session RAM rather
+      than on the stack; see G) and is not planned.
 - [x] Do not send SNI for a literal IP address (RFC 6066). `_IsIPLiteral()` (strict dotted-quad
       IPv4; any ':' with hex/'.' and optional `%zone` is IPv6, since DNS names never contain ':')
       gates `server_name` in `_BuildClientHello`. Unit tests: 14 literal/name cases, and a

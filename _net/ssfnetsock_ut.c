@@ -277,6 +277,43 @@ void SSFNetSockUnitTest(void)
     SSF_ASSERT(t->pollOpen(t) == SSF_NET_IO_SUCCESS);          /* Stays connected */
     _SSFNetSockUTEcho(s, &l);
 
+    /* Closing with received data still unread must end with FIN, not RST: the peer has to be   */
+    /* able to read the client's last bytes (a TLS alert sent just before close()). An RST makes */
+    /* the peer's stack drop them unread.                                                        */
+    {
+        static const uint8_t flight[64] = { 0 };
+        SSFNetSockUTFd_t peer;
+        uint8_t b[4];
+        size_t sent = 0;
+        int n;
+        SSFPortTick_t end;
+
+        SSF_ASSERT(t->open(t, "127.0.0.1", sizeof("127.0.0.1"), l.port));
+        SSF_ASSERT(_SSFNetSockUTPollOpen(s, SSF_NETSOCK_UT_WAIT_TICKS) == SSF_NET_IO_SUCCESS);
+        peer = _SSFNetSockUTAccept(&l);
+        SSF_ASSERT(send(peer, (const char *)flight, (int)sizeof(flight), 0) == (int)sizeof(flight));
+        end = SSFPortGetTick64() + SSF_NETSOCK_UT_WAIT_TICKS;  /* Flight reaches the client */
+        while (SSFPortGetTick64() < end)
+        {
+            fd_set rfds;
+            struct timeval tv = { 0, 0 };
+
+            FD_ZERO(&rfds);
+            FD_SET(s->sock, &rfds);
+            if (select((int)s->sock + 1, &rfds, NULL, NULL, &tv) > 0) break;
+        }
+        SSF_ASSERT(t->send(t, (const uint8_t *)"X", 1, &sent) == SSF_NET_IO_SUCCESS);
+        t->close(t);                                           /* Flight still unread */
+        end = SSFPortGetTick64() + (SSF_TICKS_PER_SEC / 5u);   /* FIN or RST reaches the peer */
+        while (SSFPortGetTick64() < end) { }
+        n = recv(peer, (char *)b, (int)sizeof(b), 0);
+        SSF_ASSERT(n == 1);
+        SSF_ASSERT(b[0] == 'X');
+        n = recv(peer, (char *)b, (int)sizeof(b), 0);
+        SSF_ASSERT(n == 0);                                    /* Orderly EOF, not ECONNRESET */
+        (void)SSF_NETSOCK_UT_CLOSE(peer);
+    }
+
     /* Literal IPv6 address, where IPv6 loopback exists */
     if (l.v6 != SSF_NETSOCK_UT_INVALID)
     {

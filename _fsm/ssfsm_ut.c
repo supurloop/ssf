@@ -630,6 +630,13 @@ void SSFSMUnitTest(void)
     SSFSMInit(SSFSM_UT_MAX_EVENTS, SSFSM_UT_MAX_TIMERS);
 
 #if SSF_CONFIG_ENABLE_THREAD_SUPPORT == 1
+    /* KNOWN FLAKY UNDER LOAD -- already investigated, do not re-investigate. This asserts a 1 s */
+    /* timed wait returns within +/-10%. When the full suite runs tests in parallel (one process */
+    /* per core, e.g. 24) the OS can deschedule this thread past 1.1 s and the assert at the     */
+    /* line below fires; it was seen in 3 of 4 full runs on a loaded Linux host (2026-11-23).   */
+    /* Run alone, the test passed 5/5. The wait itself is not faulty. If this fails in a full    */
+    /* run, re-run ssfsm on its own before suspecting a regression. Fix options when wanted:     */
+    /* widen the upper bound, or skip this timing check when tests run in parallel.              */
     start = SSFPortGetTick64();
     SSF_SM_THREAD_WAKE_WAIT(SSF_TICKS_PER_SEC);
     delta = SSFPortGetTick64() - start;

@@ -50,6 +50,7 @@
 #include "ssfmqttpkt.h"
 #include "ssfmqttc.h"
 #include "ssfnetsock.h"
+#include "ssftlsc.h"
 #include "ssfmpool.h"
 #include "ssfsll.h"
 #include "ssfport.h"
@@ -268,6 +269,9 @@ SSFUnitTest_t unitTests[] =
 #if SSF_CONFIG_NETSOCK_UNIT_TEST == 1
     { "ssfnetsock", "TCP Socket Transport", SSFNetSockUnitTest },
 #endif /* SSF_CONFIG_NETSOCK_UNIT_TEST */
+#if SSF_CONFIG_TLSC_UNIT_TEST == 1
+    { "ssftlsc", "TLS 1.3 Client Transport", SSFTLSCUnitTest },
+#endif /* SSF_CONFIG_TLSC_UNIT_TEST */
 
     /* _storage */
 #if SSF_CONFIG_CFG_UNIT_TEST == 1

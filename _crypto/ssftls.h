@@ -194,6 +194,12 @@ typedef struct SSFTLSTraceCtx
 #define SSF_TLS_ALERT_DECODE_ERROR        ((uint8_t)50u)
 #define SSF_TLS_ALERT_DECRYPT_ERROR       ((uint8_t)51u)
 #define SSF_TLS_ALERT_INTERNAL_ERROR      ((uint8_t)80u)
+#define SSF_TLS_ALERT_RECORD_OVERFLOW     ((uint8_t)22u)
+#define SSF_TLS_ALERT_ILLEGAL_PARAMETER   ((uint8_t)47u)
+#define SSF_TLS_ALERT_PROTOCOL_VERSION    ((uint8_t)70u)
+#define SSF_TLS_ALERT_MISSING_EXTENSION   ((uint8_t)109u)
+#define SSF_TLS_ALERT_UNSUPPORTED_EXT     ((uint8_t)110u)
+#define SSF_TLS_ALERT_USER_CANCELED       ((uint8_t)90u)
 
 /* --------------------------------------------------------------------------------------------- */
 /* TLS transport I/O result (supports non-blocking operation)                                    */

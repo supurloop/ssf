@@ -786,6 +786,23 @@ static void _SSFNetSockRelease(SSFNetSock_t *s)
 
     if (s->lookup != SSF_NETSOCK_NO_LOOKUP) _SSFNetSockLookupAbandon(s->lookup);
     s->lookup = SSF_NETSOCK_NO_LOOKUP;
+
+    /* Discard whatever has already arrived so the close is an orderly FIN, not an RST that can  */
+    /* make the peer drop the last bytes sent. Non-blocking and bounded: data still in flight     */
+    /* can yet cause an RST, which is no worse than before.                                       */
+    if ((s->state == SSF_NETSOCK_STATE_CONNECTED) && (s->sock != SSF_NETSOCK_INVALID))
+    {
+        uint8_t drain[256];
+        size_t drained = 0;
+
+        while (drained < SSF_NETSOCK_CONFIG_CLOSE_DRAIN_MAX)
+        {
+            long rc = (long)recv(SSF_NETSOCK_FD(s->sock), (char *)drain,
+                                 (SSFNetSockIOLen_t)sizeof(drain), 0);
+            if (rc <= 0) break;                /* Empty (would block), end of stream, or error */
+            drained += (size_t)rc;
+        }
+    }
     if (s->sock != SSF_NETSOCK_INVALID) (void)SSF_NETSOCK_CLOSE(s->sock);
     s->sock = SSF_NETSOCK_INVALID;
     s->state = SSF_NETSOCK_STATE_CLOSED;

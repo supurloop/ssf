@@ -1341,6 +1341,12 @@ void SSFTLSCUnitTest(void)
     SSF_ASSERT(_SSFTLSCUTConnectArrives(l) == false);
     SSFTLSCSetUnauthenticated(&_utSession, true);              /* For the transport tests below */
 
+    /* ---- IPv4 only (ssfnet.h): an IPv6 literal is refused before any connection is made ---- */
+    SSF_ASSERT(t->open(t, "::1", sizeof("::1"), port) == false);
+    SSF_ASSERT(t->open(t, "fe80::1%eth0", sizeof("fe80::1%eth0"), port) == false);
+    SSF_ASSERT(SSFTLSCGetHandshakeState(&_utSession) == SSF_TLSC_HS_IDLE);
+    SSF_ASSERT(_SSFTLSCUTConnectArrives(l) == false);
+
     /* ---- Refused TCP connect ends in ERROR or CLOSED, and the session reopens ---- */
     deadPort = 0;
     {

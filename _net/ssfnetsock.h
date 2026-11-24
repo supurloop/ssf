@@ -46,8 +46,11 @@ extern "C" {
 /* --------------------------------------------------------------------------------------------- */
 /* - Plaintext TCP, no TLS, no authentication. For hosted builds (Windows, Linux, macOS)         */
 /*   and as the reference for porting the transport to an embedded IP stack.                     */
-/* - No call blocks, name resolution included. A literal IPv4 or IPv6 address is parsed in       */
-/*   open(). A host name is resolved with the OS asynchronous resolver and polled by pollOpen(): */
+/* - IPv4 only (ssfnet.h). A literal IPv4 address is parsed in open(); an IPv6 literal is       */
+/*   refused. A host name is resolved to IPv4 addresses only, so a dual-stack host never         */
+/*   connects over IPv6.                                                                         */
+/* - No call blocks, name resolution included. A host name is resolved with the OS asynchronous  */
+/*   resolver and polled by pollOpen():                                                          */
 /*   GetAddrInfoExW with an event on Windows, DNSServiceGetAddrInfo on macOS, getaddrinfo_a on   */
 /*   glibc. Elsewhere only literal addresses are accepted and open() of a name returns false.    */
 /* - Up to SSF_NETSOCK_CONFIG_MAX_ADDRS resolved addresses are tried in order; a failed connect  */
@@ -67,7 +70,7 @@ typedef uintptr_t SSFNetSockHandle_t;          /* SOCKET without pulling winsock
 typedef int SSFNetSockHandle_t;
 #endif
 
-#define SSF_NETSOCK_ADDR_SIZE (28u)   /* Holds a sockaddr_in or sockaddr_in6 on every platform */
+#define SSF_NETSOCK_ADDR_SIZE (4u)    /* An IPv4 address, network byte order (IPv4 only)       */
 #define SSF_NETSOCK_NO_LOOKUP (0xffu)
 
 typedef enum
@@ -87,7 +90,7 @@ typedef struct
     uint8_t lookup;                  /* Lookup slot while RESOLVING, else SSF_NETSOCK_NO_LOOKUP */
     uint8_t addrCount;               /* Resolved addresses in addrs                             */
     uint8_t addrNext;                /* Next address to try                                     */
-    uint8_t addrs[SSF_NETSOCK_CONFIG_MAX_ADDRS][SSF_NETSOCK_ADDR_SIZE];  /* sockaddr, any port */
+    uint8_t addrs[SSF_NETSOCK_CONFIG_MAX_ADDRS][SSF_NETSOCK_ADDR_SIZE];  /* IPv4 addresses     */
     uint32_t magic;
 } SSFNetSock_t;
 

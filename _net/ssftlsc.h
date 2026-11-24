@@ -56,6 +56,7 @@ extern "C" {
 /*   checks) runs inline, one step per pollOpen() call, with WANT_READ returned in between; each */
 /*   step occupies the caller for the duration of that computation.                              */
 /* - Client mode, full handshake only (no PSK resumption or 0-RTT). One connection per session.  */
+/* - IPv4 only (ssfnet.h): open() refuses an IPv6 literal host whatever the inner transport.     */
 /* - The handshake has no timer of its own; the caller bounds it (ssfmqttc's connectTimeout).    */
 /* - Certificate validity needs the time: ssfrtc must be initialized (SSFRTCGetUnixNow asserts  */
 /*   otherwise) and hold a real time (SSFRTCSet()). A clock before                               */

@@ -136,10 +136,8 @@ typedef size_t SSFNetSockIOLen_t;
 #define SSF_NETSOCK_INIT_MAGIC       (0x4e534f43ul)   /* 'NSOC' */
 #define SSF_NETSOCK_DNSSD_MAX_READS  (8u)             /* Replies handled per pollOpen()        */
 
-/* SSF_NETSOCK_ADDR_SIZE in the header must hold either address family.                          */
-typedef char _SSFNetSockAddrSizeCheck_t[((sizeof(struct sockaddr_in) <= SSF_NETSOCK_ADDR_SIZE) &&
-                                         (sizeof(struct sockaddr_in6) <= SSF_NETSOCK_ADDR_SIZE)) ?
-                                        1 : -1];
+/* SSF_NETSOCK_ADDR_SIZE in the header is exactly an IPv4 address (struct in_addr).            */
+typedef char _SSFNetSockAddrSizeCheck_t[(sizeof(struct in_addr) == SSF_NETSOCK_ADDR_SIZE) ? 1 : -1];
 
 typedef enum
 {
@@ -171,7 +169,7 @@ typedef struct
     DNSServiceRef ref;
     bool isDone;                     /* At least one address and no reply pending               */
     bool isFailed;
-    uint8_t negatives;               /* NoSuchRecord replies; two mean neither family exists    */
+    uint8_t negatives;               /* NoSuchRecord replies; one means no IPv4 address exists  */
     uint8_t addrCount;
     uint8_t addrs[SSF_NETSOCK_CONFIG_MAX_ADDRS][SSF_NETSOCK_ADDR_SIZE];
 #elif defined(SSF_NETSOCK_RESOLVER_GAIA)
@@ -218,94 +216,72 @@ static SSFNetSock_t *_SSFNetSockSelf(SSFNetTransport_t *t)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns the sockaddr length for an IPv4 or IPv6 family, else 0.                               */
-/* --------------------------------------------------------------------------------------------- */
-static size_t _SSFNetSockAddrLen(int family)
-{
-    if (family == AF_INET) return sizeof(struct sockaddr_in);
-    if (family == AF_INET6) return sizeof(struct sockaddr_in6);
-    return 0;
-}
-
-/* --------------------------------------------------------------------------------------------- */
-/* Appends sa to the instance's address list. Other families and addresses past capacity are     */
+/* Appends a 4-byte IPv4 address (network byte order) to the address list; past capacity it is   */
 /* ignored.                                                                                      */
 /* --------------------------------------------------------------------------------------------- */
-static void _SSFNetSockAddAddr(SSFNetSock_t *s, const void *sa, size_t saLen)
+static void _SSFNetSockAddIPv4(SSFNetSock_t *s, const uint8_t *ip)
 {
-    struct sockaddr_storage ss;
-    size_t n;
-    size_t len;
-
     SSF_REQUIRE(s != NULL);
+    SSF_REQUIRE(ip != NULL);
 
-    if ((sa == NULL) || (s->addrCount >= SSF_NETSOCK_CONFIG_MAX_ADDRS)) return;
-    n = (saLen < sizeof(ss)) ? saLen : sizeof(ss);
-    memset(&ss, 0, sizeof(ss));
-    memcpy(&ss, sa, n);                        /* Copy first; sa may not be aligned */
-    len = _SSFNetSockAddrLen(ss.ss_family);
-    if ((len == 0) || (n < len)) return;
-    memset(s->addrs[s->addrCount], 0, SSF_NETSOCK_ADDR_SIZE);
-    memcpy(s->addrs[s->addrCount], &ss, len);
+    if (s->addrCount >= SSF_NETSOCK_CONFIG_MAX_ADDRS) return;
+    memcpy(s->addrs[s->addrCount], ip, SSF_NETSOCK_ADDR_SIZE);
     s->addrCount++;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if host is a literal IPv4 or IPv6 address, now in the address list, else false.  */
+/* Appends the address of sa if it is IPv4. SSF is IPv4 only (ssfnet.h): any other family is    */
+/* ignored, so it is never connected to.                                                         */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFNetSockAddAddr(SSFNetSock_t *s, const void *sa, size_t saLen)
+{
+    struct sockaddr_in sin;
+
+    SSF_REQUIRE(s != NULL);
+
+    if ((sa == NULL) || (saLen < sizeof(sin))) return;
+    memcpy(&sin, sa, sizeof(sin));             /* Copy first; sa may not be aligned */
+    if (sin.sin_family != AF_INET) return;
+    _SSFNetSockAddIPv4(s, (const uint8_t *)&sin.sin_addr);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if host is a literal IPv4 address, now in the address list, else false.          */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFNetSockParseLiteral(SSFNetSock_t *s, SSFCStrIn_t host)
 {
-    struct sockaddr_in sin;
-    struct sockaddr_in6 sin6;
+    struct in_addr in;
 
     SSF_REQUIRE(s != NULL);
     SSF_REQUIRE(host != NULL);
 
-    memset(&sin, 0, sizeof(sin));
-    if (inet_pton(AF_INET, host, &sin.sin_addr) == 1)
-    {
-        sin.sin_family = AF_INET;
-#ifdef __APPLE__
-        sin.sin_len = (uint8_t)sizeof(sin);
-#endif
-        _SSFNetSockAddAddr(s, &sin, sizeof(sin));
-        return true;
-    }
-    memset(&sin6, 0, sizeof(sin6));
-    if (inet_pton(AF_INET6, host, &sin6.sin6_addr) == 1)
-    {
-        sin6.sin6_family = AF_INET6;
-#ifdef __APPLE__
-        sin6.sin6_len = (uint8_t)sizeof(sin6);
-#endif
-        _SSFNetSockAddAddr(s, &sin6, sizeof(sin6));
-        return true;
-    }
-    return false;
+    if (inet_pton(AF_INET, host, &in) != 1) return false;
+    _SSFNetSockAddIPv4(s, (const uint8_t *)&in);
+    return true;
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns the length of address idx copied to ss with the instance's port filled in.            */
+/* Returns the length of the sockaddr_in for address idx, written to sin with the port filled in. */
 /* --------------------------------------------------------------------------------------------- */
 static SSFNetSockLen_t _SSFNetSockAddrPrepare(const SSFNetSock_t *s, uint8_t idx,
-                                              struct sockaddr_storage *ss)
+                                              struct sockaddr_in *sin)
 {
     uint8_t *portBytes;
-    size_t len;
 
     SSF_REQUIRE(s != NULL);
     SSF_REQUIRE(idx < s->addrCount);
-    SSF_REQUIRE(ss != NULL);
+    SSF_REQUIRE(sin != NULL);
 
-    memset(ss, 0, sizeof(*ss));
-    memcpy(ss, s->addrs[idx], SSF_NETSOCK_ADDR_SIZE);
-    len = _SSFNetSockAddrLen(ss->ss_family);
-    SSF_ASSERT(len != 0);                      /* Only IPv4 and IPv6 are ever stored */
-    if (ss->ss_family == AF_INET) portBytes = (uint8_t *)&((struct sockaddr_in *)ss)->sin_port;
-    else portBytes = (uint8_t *)&((struct sockaddr_in6 *)ss)->sin6_port;
+    memset(sin, 0, sizeof(*sin));
+    sin->sin_family = AF_INET;
+#ifdef __APPLE__
+    sin->sin_len = (uint8_t)sizeof(*sin);
+#endif
+    memcpy(&sin->sin_addr, s->addrs[idx], SSF_NETSOCK_ADDR_SIZE);
+    portBytes = (uint8_t *)&sin->sin_port;
     portBytes[0] = (uint8_t)(s->port >> 8);    /* Network byte order */
     portBytes[1] = (uint8_t)(s->port & 0xffu);
-    return (SSFNetSockLen_t)len;
+    return (SSFNetSockLen_t)sizeof(*sin);
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -393,7 +369,7 @@ static bool _SSFNetSockLookupStart(SSFNetSockLookup_t *l, SSFCStrIn_t host, size
     l->ov.hEvent = CreateEventW(NULL, TRUE, FALSE, NULL);   /* Manual reset: required with no  */
     if (l->ov.hEvent == NULL) return false;                 /* completion routine              */
 
-    l->hints.ai_family = AF_UNSPEC;
+    l->hints.ai_family = AF_INET;              /* IPv4 only (ssfnet.h) */
     l->hints.ai_socktype = SOCK_STREAM;
     l->hints.ai_protocol = IPPROTO_TCP;
     rc = GetAddrInfoExW(l->host, NULL, NS_DNS, NULL, &l->hints, &l->result, NULL, &l->ov, NULL,
@@ -480,27 +456,23 @@ static void DNSSD_API _SSFNetSockDNSSDReply(DNSServiceRef ref, DNSServiceFlags f
     if (err == kDNSServiceErr_NoError)
     {
         if (((flags & kDNSServiceFlagsAdd) != 0) && (address != NULL) &&
-            (l->addrCount < SSF_NETSOCK_CONFIG_MAX_ADDRS))
+            (address->sa_family == AF_INET) && (l->addrCount < SSF_NETSOCK_CONFIG_MAX_ADDRS))
         {
-            size_t len = _SSFNetSockAddrLen(address->sa_family);
+            struct sockaddr_in sin;
 
-            if (len != 0)
-            {
-                memset(l->addrs[l->addrCount], 0, SSF_NETSOCK_ADDR_SIZE);
-                memcpy(l->addrs[l->addrCount], address, len);
-                l->addrCount++;
-            }
+            memcpy(&sin, address, sizeof(sin));
+            memcpy(l->addrs[l->addrCount], &sin.sin_addr, SSF_NETSOCK_ADDR_SIZE);
+            l->addrCount++;
         }
     }
-    /* Other parameters are undefined on an error, so a negative answer cannot be tied to a     */
-    /* family; one per family is expected, one each for IPv4 and IPv6.                          */
-    else if (err == kDNSServiceErr_NoSuchRecord) { if (l->negatives < 2u) l->negatives++; }
+    /* Only IPv4 is asked for, so one negative answer means there is no address. */
+    else if (err == kDNSServiceErr_NoSuchRecord) { l->negatives = 1u; }
     else l->isFailed = true;
 
     if ((flags & kDNSServiceFlagsMoreComing) == 0)
     {
         if (l->addrCount > 0) l->isDone = true;
-        else if (l->negatives >= 2u) l->isFailed = true;
+        else if (l->negatives >= 1u) l->isFailed = true;
     }
 }
 
@@ -530,7 +502,7 @@ static bool _SSFNetSockLookupStart(SSFNetSockLookup_t *l, SSFCStrIn_t host, size
     l->negatives = 0;
     l->addrCount = 0;
     if (DNSServiceGetAddrInfo(&l->ref, kDNSServiceFlagsReturnIntermediates, 0,
-                              kDNSServiceProtocol_IPv4 | kDNSServiceProtocol_IPv6, host,
+                              kDNSServiceProtocol_IPv4, host,      /* IPv4 only (ssfnet.h) */
                               _SSFNetSockDNSSDReply, l) != kDNSServiceErr_NoError)
     {
         l->ref = NULL;
@@ -575,7 +547,7 @@ static SSFNetSockLookupResult_t _SSFNetSockLookupPoll(SSFNetSockLookup_t *l, SSF
     if (l->isFailed) { _SSFNetSockLookupFree(l); return SSF_NETSOCK_LOOKUP_FAILED; }
     if (l->isDone == false) return SSF_NETSOCK_LOOKUP_PENDING;
     for (i = 0; i < l->addrCount; i++)
-    { _SSFNetSockAddAddr(s, l->addrs[i], SSF_NETSOCK_ADDR_SIZE); }
+    { _SSFNetSockAddIPv4(s, l->addrs[i]); }
     _SSFNetSockLookupFree(l);
     return SSF_NETSOCK_LOOKUP_DONE;
 }
@@ -625,7 +597,7 @@ static bool _SSFNetSockLookupStart(SSFNetSockLookup_t *l, SSFCStrIn_t host, size
     memset(&l->cb, 0, sizeof(l->cb));
     memset(&l->hints, 0, sizeof(l->hints));
     memcpy(l->host, host, hostLen + 1);        /* The resolver thread reads it until done */
-    l->hints.ai_family = AF_UNSPEC;
+    l->hints.ai_family = AF_INET;              /* IPv4 only (ssfnet.h) */
     l->hints.ai_socktype = SOCK_STREAM;
     l->hints.ai_protocol = IPPROTO_TCP;
     l->cb.ar_name = l->host;
@@ -822,18 +794,18 @@ static SSFNetIOResult_t _SSFNetSockConnectNext(SSFNetSock_t *s)
 
     while (s->addrNext < s->addrCount)
     {
-        struct sockaddr_storage ss;
+        struct sockaddr_in sin;
         SSFNetSockLen_t len;
         SSFNetSockHandle_t sock;
         int rc;
 
-        len = _SSFNetSockAddrPrepare(s, s->addrNext, &ss);
+        len = _SSFNetSockAddrPrepare(s, s->addrNext, &sin);
         s->addrNext++;
-        sock = (SSFNetSockHandle_t)socket(ss.ss_family, SOCK_STREAM, IPPROTO_TCP);
+        sock = (SSFNetSockHandle_t)socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
         if (sock == SSF_NETSOCK_INVALID) continue;
         if (_SSFNetSockSetNonBlocking(sock) == false) { (void)SSF_NETSOCK_CLOSE(sock); continue; }
 
-        rc = connect(SSF_NETSOCK_FD(sock), (struct sockaddr *)&ss, len);
+        rc = connect(SSF_NETSOCK_FD(sock), (struct sockaddr *)&sin, len);
         if (rc == 0)
         {
             s->sock = sock;
@@ -874,6 +846,9 @@ static bool _SSFNetSockOpen(SSFNetTransport_t *t, SSFCStrIn_t host, size_t hostS
     if ((SSFStrLen(host, hostSize, &hostLen) == false) || (hostLen == 0)) return false;
     if (hostLen >= SSF_NETSOCK_CONFIG_MAX_HOST_SIZE) return false;
     if (port == 0) return false;
+    /* IPv4 only (ssfnet.h): a ':' is never in a DNS name or IPv4 address, so it is an IPv6     */
+    /* literal (or garbage), refused before any lookup or connect is started.                   */
+    if (memchr(host, ':', hostLen) != NULL) return false;
 
     s->port = port;
     s->addrCount = 0;

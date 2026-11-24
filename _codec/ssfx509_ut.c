@@ -6837,6 +6837,13 @@ void SSFX509UnitTest(void)
             0x20u, 0x01u, 0x0Du, 0xB8u, 0x00u, 0x00u, 0x00u, 0x00u,
             0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x01u
         };
+        /* SubjectAltName { [2] "dual.test", [7] 2001:db8::1 } */
+        static const uint8_t sanDnsV6[] = {
+            0x30u, 0x1Du, 0x82u, 0x09u, 'd', 'u', 'a', 'l', '.', 't', 'e', 's', 't',
+            0x87u, 0x10u,
+            0x20u, 0x01u, 0x0Du, 0xB8u, 0x00u, 0x00u, 0x00u, 0x00u,
+            0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x00u, 0x01u
+        };
         static const uint8_t sanZeroThenV4[] = {
             0x30u, 0x08u, 0x87u, 0x00u, 0x87u, 0x04u, 0x0Au, 0x00u, 0x00u, 0x01u
         };
@@ -6885,6 +6892,22 @@ void SSFX509UnitTest(void)
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, "32.1.13.184",
                                       1800000000ull, &_utVErr) == false);
         _UT_VERR(ERR_HOSTNAME, 0u);
+        SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, "2001:db8::1",
+                                      1800000000ull, &_utVErr) == false);
+        _UT_VERR(ERR_HOSTNAME, 0u);
+
+        /* SSF is IPv4 only, but a certificate may also list an IPv6 address: it parses and    */
+        /* still verifies by its DNS name; the IPv6 address itself never matches.              */
+        p.rawExtValue = sanDnsV6;
+        p.rawExtValueLen = sizeof(sanDnsV6);
+        n = _utSelfSign(&p, pubKey, sizeof(pubKey), out, sizeof(out));
+        SSF_ASSERT(n != 0u);
+        SSF_ASSERT(SSFX509Parse(out, n, &parsed) == true);
+        SSF_ASSERT((parsed.sanLen == 2u) && (parsed.san[1].valLen == 16u));
+        chainLen[0] = n;
+        SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, "dual.test",
+                                      1800000000ull, &_utVErr) == true);
+        _UT_VERR(OK, 0u);
         SSF_ASSERT(SSFX509VerifyChain(chain, chainLen, 1u, chain, chainLen, 1u, "2001:db8::1",
                                       1800000000ull, &_utVErr) == false);
         _UT_VERR(ERR_HOSTNAME, 0u);

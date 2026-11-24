@@ -2466,6 +2466,13 @@ static bool _SSFTLSCOpen(SSFNetTransport_t *t, SSFCStrIn_t host, size_t hostSize
     if ((SSFStrLen(host, hostSize, &hostLen) == false) || (hostLen == 0)) return false;
     if (hostLen >= SSF_TLSC_MAX_HOST_SIZE) return false;
     if (port == 0) return false;
+    /* IPv4 only (ssfnet.h), whatever the inner transport: an IPv6 literal could never be       */
+    /* verified (ssfx509 matches IPv4 iPAddress SANs only), so refuse it before connecting.      */
+    if (memchr(host, ':', hostLen) != NULL)
+    {
+        SSF_TLS_TRACE_HS_ERROR(&s->trace, "IPv6 host '%s' refused: SSF is IPv4 only", host);
+        return false;
+    }
 
     /* Fail closed: without trust anchors the server cannot be authenticated, so do not connect */
     /* at all (a ClientHello would already disclose the host name) unless the caller opted in.  */

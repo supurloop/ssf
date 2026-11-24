@@ -539,8 +539,11 @@ macros are shorthand over this.
   bad filter, or a broker that downgrades a QoS keep hitting the broker until the application calls
   `SSFMQTTCStop()`. The event carries no per-filter detail. A later revision could stop the client
   itself and report the reason through the STOPPED event, or expose per-filter SUBACK results.
+- **IPv4 only.** SSF is not designed for an IPv6 stack ([`ssfnet.h`](ssfnet.h)): `host` is a
+  DNS name or a dotted IPv4 address, names resolve to IPv4 addresses only, and an IPv6 literal
+  fails every attempt with `TRANSPORT_ERROR`. A broker with no IPv4 address cannot be reached.
 - **Name resolution is polled.** [`ssfnetsock`](ssfnetsock.h) resolves host names with the OS
   asynchronous resolver (Windows 8 or later, macOS, glibc Linux) and never blocks. On other
-  platforms it accepts only literal IPv4 or IPv6 addresses. A lookup the OS cannot cancel keeps
+  platforms it accepts only literal IPv4 addresses. A lookup the OS cannot cancel keeps
   running after `close()`; `SSF_NETSOCK_CONFIG_MAX_LOOKUPS` bounds how many may pile up, and once
   all are in use the attempt fails with `TRANSPORT_ERROR` and is retried after the backoff.

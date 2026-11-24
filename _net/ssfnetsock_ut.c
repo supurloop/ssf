@@ -320,13 +320,31 @@ void SSFNetSockUnitTest(void)
         (void)SSF_NETSOCK_UT_CLOSE(peer);
     }
 
-    /* Literal IPv6 address, where IPv6 loopback exists */
-    if (l.v6 != SSF_NETSOCK_UT_INVALID)
+    /* IPv4 only (ssfnet.h): an IPv6 literal is refused at open(), with nothing started */
+    SSF_ASSERT(t->open(t, "::1", sizeof("::1"), l.port) == false);
+    SSF_ASSERT(t->open(t, "2001:db8::1", sizeof("2001:db8::1"), l.port) == false);
+    SSF_ASSERT(t->open(t, "::ffff:127.0.0.1", sizeof("::ffff:127.0.0.1"), l.port) == false);
+    SSF_ASSERT(s->state == SSF_NETSOCK_STATE_CLOSED);
+    SSF_ASSERT(s->lookup == SSF_NETSOCK_NO_LOOKUP);
+
+    /* ... and a host name never connects over IPv6: with only [::1] listening, "localhost"   */
+    /* (which also resolves to ::1 where IPv6 loopback exists) must fail, not reach it.        */
     {
-        SSF_ASSERT(t->open(t, "::1", sizeof("::1"), l.port));
-        SSF_ASSERT(s->state != SSF_NETSOCK_STATE_RESOLVING);
-        SSF_ASSERT(_SSFNetSockUTPollOpen(s, SSF_NETSOCK_UT_WAIT_TICKS) == SSF_NET_IO_SUCCESS);
-        _SSFNetSockUTEcho(s, &l);
+        SSFNetSockUTListener_t v6only;
+        SSFNetIOResult_t r;
+
+        _SSFNetSockUTListen(&v6only);
+        if (v6only.v6 != SSF_NETSOCK_UT_INVALID)
+        {
+            (void)SSF_NETSOCK_UT_CLOSE(v6only.v4);         /* Leave only [::1]:port */
+            v6only.v4 = SSF_NETSOCK_UT_INVALID;
+            SSF_ASSERT(_SSFNetSockUTOpenRetry(s, "localhost", v6only.port));
+            r = _SSFNetSockUTPollOpen(s, SSF_NETSOCK_UT_WAIT_TICKS);
+            SSF_ASSERT((r == SSF_NET_IO_ERROR) || (r == SSF_NET_IO_CLOSED));
+            SSF_ASSERT(s->state == SSF_NETSOCK_STATE_CLOSED);
+            (void)SSF_NETSOCK_UT_CLOSE(v6only.v6);
+        }
+        else { (void)SSF_NETSOCK_UT_CLOSE(v6only.v4); }
     }
 
     /* Refused connect to a port nobody listens on */

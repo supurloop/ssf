@@ -59,6 +59,9 @@ extern "C" {
 /*   partly written record). close() never waits, so it may drop them. A caller that needs them  */
 /*   delivered calls shutdown() until it stops returning WANT_WRITE, then close(). shutdown() is */
 /*   valid only after pollOpen() SUCCESS; send() is not valid after it, recv() still is.         */
+/* - IPv4 only. SSF is not designed for an IPv6 stack: a host is a DNS name or a dotted IPv4    */
+/*   address, a name is resolved to IPv4 addresses only, and open() returns false for an IPv6    */
+/*   literal (any host containing ':'). A host with no IPv4 address fails to open.               */
 /* - CLOSED is an orderly end by the peer or a reset; ERROR is anything else. Callers treat both */
 /*   as fatal for the connection.                                                                */
 /* - All calls come from one thread.                                                             */
@@ -79,8 +82,9 @@ typedef enum
 
 typedef struct SSFNetTransport SSFNetTransport_t;
 
-/* Begins connecting to host:port. host is NUL terminated within hostSize. Returns false if the  */
-/* attempt could not be started (bad host, no resources); true once it is in progress or done.  */
+/* Begins connecting to host:port over IPv4. host is NUL terminated within hostSize. Returns    */
+/* false if the attempt could not be started (bad or IPv6 host, no resources); true once it is   */
+/* in progress or done.                                                                          */
 typedef bool (*SSFNetOpenFn_t)(SSFNetTransport_t *t, SSFCStrIn_t host, size_t hostSize,
                                uint16_t port);
 

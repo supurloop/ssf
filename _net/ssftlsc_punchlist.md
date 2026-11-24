@@ -290,8 +290,19 @@ is rejected.
       gates `server_name` in `_BuildClientHello`. Unit tests: 14 literal/name cases, and a
       ClientHello to 127.0.0.1 has no `server_name`. On the wire: no SNI to 127.0.0.1 (was
       `server_name: '127.0.0.1'`); an IP-SAN certificate verifies. Exhaustive run pending.
-- [ ] IPv6 literal hosts: `ssfx509` documents hostname / IPv4 SAN matching only, so a server
-      reached by IPv6 literal likely cannot be verified. Not tested. Outside the TLS client.
+- [x] IPv6 literal hosts: `ssfx509` documents hostname / IPv4 SAN matching only, so a server
+      reached by IPv6 literal likely cannot be verified. Not tested. Outside the TLS client. Resolved (3B item J,
+      approved) by the opposite: SSF is IPv4 only, enforced at every layer. `ssfnet.h` states
+      it in the transport contract. `ssfnetsock` resolves IPv4 only on all three resolvers
+      (`AF_INET`, `kDNSServiceProtocol_IPv4`), refuses a host containing ':' in `open()`, and
+      stores 4-byte IPv4 addresses (`SSF_NETSOCK_ADDR_SIZE` 28 -> 4). `ssftlsc` `open()` refuses
+      an IPv6 literal itself, before connecting or sending a ClientHello. `ssfx509` unchanged:
+      it already fails closed for an IPv6 host; a certificate with DNS and IPv6 SANs verifies by
+      its DNS name (unit test added). Docs: `ssfnet.h`, `ssfnetsock.h`, `ssfmqttc.md`,
+      `ssftlsc.h`. Unit: IPv6 literals refused (ssfnetsock, ssftlsc); with only `[::1]`
+      listening, `localhost` (which resolves to ::1 and 127.0.0.1 here) fails, where the
+      previous ssfnetsock connected over IPv6. Wire: `s_server` on `[::1]` only is never
+      reached. The DNS-SD (macOS) and Windows resolver edits are not compiled or run here.
 - [x] Check the CertificateVerify scheme against the leaf key type and curve explicitly
       (`illegal_parameter`); today a mismatch is caught only as a failed verification. Found
       during 2.4. The leaf key type is recorded when the Certificate is parsed (RSA, P-256,

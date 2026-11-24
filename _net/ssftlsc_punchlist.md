@@ -96,7 +96,7 @@ is rejected.
       the record length.) Certificate parsing moved to `_ParseCertificate()` with RFC 8446 4.4.2
       rules: empty request context, list fills the message exactly, non-empty list and
       `cert_data`, extensions within the entry and none unsolicited, every entry validated
-      even past `SSF_TLS_CONFIG_MAX_CHAIN_DEPTH`. Permanent unit tests through
+      even past the chain limit (now the x509 depth). Permanent unit tests through
       `_SSFTLSCParseCertificateForTest()` (14 cases; before the fix 5 were wrongly accepted and
       one read past the message under ASan). Two-certificate chain from `s_server` verified.
       Exhaustive run pending.
@@ -281,8 +281,24 @@ is rejected.
       (65-byte key, P256), RSA-8192 leaf refused (key over the 768-byte space), truncated and
       damaged DER refused. Compilers other than GCC/Clang/MSVC get an empty `SSF_NOINLINE` and
       may inline it again. Exhaustive run pending.
-- [ ] Chains longer than `SSF_TLS_CONFIG_MAX_CHAIN_DEPTH` keep only the first entries; an
+- [x] Chains longer than `SSF_TLS_CONFIG_MAX_CHAIN_DEPTH` keep only the first entries; an
       intermediate past the limit is lost and verification fails. Document, or raise the default.
+      Fixed (3B item H, approved): `SSF_TLS_CONFIG_MAX_CHAIN_DEPTH` removed (`ssftls_opt.h`,
+      `ssftls.md`; a build still defining it gets an `#error`); the client's chain limit is the
+      verifier's `SSF_X509_CONFIG_MAX_CHAIN_DEPTH`, so no relationship needs enforcing, and its
+      default is 8 -> 6 (`ssfx509_opt.h`, `ssfx509.md`; ssfcms still needs >= 5). Extra
+      certificates are still kept-first-N (harmless trailing roots verify); `_ParseCertificate`
+      reports how many were sent, and a failure on a cut chain traces "Certificate chain
+      truncated: N of M certs kept". The chain is parsed straight into `cryptoWork` (no local
+      arrays, no copy). Stack peak 26,904 -> 23,768 (EC), 31,944 -> 28,808 (RSA); session +24 B.
+      Unit: kept / seen counts. Wire, before all `unknown_ca`: leaf + 4 int + root (6) verifies;
+      leaf + 5 int + root (7, root dropped) verifies; leaf + 6 int (7) fails `unknown_ca` with
+      the truncation trace. `README.md` footnote 58 still says default 8 and its ssfx509 stack
+      figure predates the change (outside the approved files).
+- [ ] Out-of-order or extraneous certificates: RFC 8446 4.4.2 says receivers SHOULD handle
+      "potentially extraneous certificates and arbitrary orderings" (leaf first). `ssfx509`
+      requires cert[i] to be issued by cert[i + 1], so such chains fail. Needs path building in
+      `ssfx509`. Outside the TLS client.
 - [ ] Long single steps: P-384/RSA chain verification can take a long time inline on small
       targets; consider splitting verification per certificate across `pollOpen()` calls.
 - [x] Do not send SNI for a literal IP address (RFC 6066). `_IsIPLiteral()` (strict dotted-quad
@@ -365,7 +381,7 @@ is rejected.
       parser (2.5 is covered only through `mitm.py` today).
 - [ ] Interop with `openssl s_server` over loopback; test.mosquitto.org:8883 with its CA. Add
       `gnutls-serv` (installed, 3.8.13) as a second independent server in the regression set.
-- [ ] `ssftls.md` still says `SSF_TLS_CONFIG_MAX_CHAIN_DEPTH` is not referenced; ssftlsc uses
+- [x] `ssftls.md` still says `SSF_TLS_CONFIG_MAX_CHAIN_DEPTH` is not referenced; ssftlsc uses
       it. Outside the TLS client.
 - [ ] Negative tests for every step 2 check.
 - [ ] Bring the loopback `openssl s_server` interop harness into the repo (spot checks for step 2

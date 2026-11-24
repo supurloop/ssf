@@ -9,7 +9,6 @@ extern "C" {
 #endif
 
 /* ssftls capacities */
-#define SSF_TLS_CONFIG_MAX_CHAIN_DEPTH       (4u)
 #define SSF_TLS_CONFIG_MAX_TRUSTED_CAS       (8u)
 #define SSF_TLS_CONFIG_PSK_ENABLE            (1u)
 #define SSF_TLS_CONFIG_TICKET_LIFETIME_SEC   (3600u)

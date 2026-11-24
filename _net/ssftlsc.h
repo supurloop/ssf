@@ -57,6 +57,8 @@ extern "C" {
 /*   step occupies the caller for the duration of that computation.                              */
 /* - Client mode, full handshake only (no PSK resumption or 0-RTT). One connection per session.  */
 /* - IPv4 only (ssfnet.h): open() refuses an IPv6 literal host whatever the inner transport.     */
+/* - Chain limit: SSF_X509_CONFIG_MAX_CHAIN_DEPTH, the verifier's own. Certificates a server     */
+/*   sends past it are dropped; if verification then fails, the trace says the chain was cut.   */
 /* - The handshake has no timer of its own; the caller bounds it (ssfmqttc's connectTimeout).    */
 /* - Certificate validity needs the time: ssfrtc must be initialized (SSFRTCGetUnixNow asserts  */
 /*   otherwise) and hold a real time (SSFRTCSet()). A clock before                               */
@@ -107,9 +109,10 @@ typedef struct SSFTLSCCryptoWork
     bool keyExchangeOk;
 
     /* Phase 5b: cert chain verification */
-    const uint8_t *chainDerPtrs[SSF_TLS_CONFIG_MAX_CHAIN_DEPTH];
-    uint32_t chainDerLens[SSF_TLS_CONFIG_MAX_CHAIN_DEPTH];
-    uint8_t chainLen;
+    const uint8_t *chainDerPtrs[SSF_X509_CONFIG_MAX_CHAIN_DEPTH];
+    uint32_t chainDerLens[SSF_X509_CONFIG_MAX_CHAIN_DEPTH];
+    uint8_t chainLen;                /* Certificates kept (at most the x509 chain depth)        */
+    uint8_t chainSeen;               /* Certificates the server sent (saturates at 255)         */
     const char *hostname;
     uint64_t nowUnixSec;
     bool nowValid;                   /* nowUnixSec came from a set RTC                          */
@@ -288,6 +291,9 @@ SSFTLSCHandshakeState_t SSFTLSCGetHandshakeState(const SSFTLSCSession_t *session
 void SSFTLSCUnitTest(void);
 bool _SSFTLSCParseCertificateForTest(const uint8_t *body, size_t bodyLen,
                                      const uint8_t **ders, uint32_t *lens, uint8_t *countOut);
+bool _SSFTLSCParseCertificateSeenForTest(const uint8_t *body, size_t bodyLen,
+                                         const uint8_t **ders, uint32_t *lens, uint8_t *countOut,
+                                         uint8_t *seenOut);
 extern void (*_SSFTLSCScrubTestHook)(void *ctx, const char *what, const void *buf, size_t len);
 extern void *_SSFTLSCScrubTestHookCtx;
 bool _SSFTLSCIsIPLiteralForTest(const char *host);

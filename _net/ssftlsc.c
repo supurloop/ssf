@@ -60,6 +60,12 @@
 #define SSF_TLSC_RSL_MIN (64u)
 #define SSF_TLSC_RSL_MAX (16384u + 1u)
 
+/* The chain limit is the verifier's, SSF_X509_CONFIG_MAX_CHAIN_DEPTH; the separate TLS option is */
+/* gone, so a build still setting it is told rather than silently given a different limit.     */
+#ifdef SSF_TLS_CONFIG_MAX_CHAIN_DEPTH
+#error SSF_TLS_CONFIG_MAX_CHAIN_DEPTH is removed; ssftlsc uses SSF_X509_CONFIG_MAX_CHAIN_DEPTH.
+#endif
+
 /* Secret scrubbing. _SSF_TLSC_SCRUB wipes a secret at the end of its life; unit-test builds     */
 /* then report the buffer to _SSFTLSCScrubTestHook so a test can confirm the wipe happened.      */
 #if SSF_CONFIG_TLSC_UNIT_TEST == 1
@@ -1686,17 +1692,20 @@ bool _SSFTLSCParseEncryptedExtensionsRslForTest(const uint8_t *body, size_t body
 
 /* --------------------------------------------------------------------------------------------- */
 /* Internal: parses a server Certificate message body (RFC 8446 4.4.2). Returns true with up to */
-/* SSF_TLS_CONFIG_MAX_CHAIN_DEPTH certificate pointers (into body) and lengths, else false.      */
+/* SSF_X509_CONFIG_MAX_CHAIN_DEPTH certificate pointers (into body) and lengths, and the number  */
+/* of entries sent (saturating at 255), else false.                                             */
 /* --------------------------------------------------------------------------------------------- */
 static bool _ParseCertificate(const uint8_t *body, size_t bodyLen,
                               const uint8_t **chainDerPtrs, uint32_t *chainDerLens,
-                              uint8_t *chainLenOut, uint8_t *alertOut)
+                              uint8_t *chainLenOut, uint8_t *seenOut, uint8_t *alertOut)
 {
     size_t pos;
     size_t listEnd;
     uint8_t count = 0;
+    uint8_t seen = 0;
 
     *chainLenOut = 0;
+    *seenOut = 0;
     *alertOut = SSF_TLS_ALERT_DECODE_ERROR;   /* Framing errors unless refined below */
 
     /* certificate_request_context<0..2^8-1> is empty for server authentication (4.4.2). */
@@ -1710,8 +1719,8 @@ static bool _ParseCertificate(const uint8_t *body, size_t bodyLen,
     pos += 3;
     if ((listEnd != bodyLen) || (pos == listEnd)) return false;
 
-    /* Every entry is validated; the first SSF_TLS_CONFIG_MAX_CHAIN_DEPTH are kept. pos never */
-    /* passes listEnd, so the differences below cannot wrap.                                  */
+    /* Every entry is validated; the first SSF_X509_CONFIG_MAX_CHAIN_DEPTH are kept. pos never */
+    /* passes listEnd, so the differences below cannot wrap.                                   */
     while (pos < listEnd)
     {
         uint32_t certLen;
@@ -1722,12 +1731,13 @@ static bool _ParseCertificate(const uint8_t *body, size_t bodyLen,
         certLen = _Get24(&body[pos]);
         pos += 3;
         if ((certLen == 0u) || (certLen > (listEnd - pos))) return false;
-        if (count < SSF_TLS_CONFIG_MAX_CHAIN_DEPTH)
+        if (count < SSF_X509_CONFIG_MAX_CHAIN_DEPTH)
         {
             chainDerPtrs[count] = &body[pos];
             chainDerLens[count] = certLen;
             count++;
         }
+        if (seen < 0xffu) seen++;
         pos += certLen;
 
         /* extensions<0..2^16-1>: each must answer one the ClientHello sent (4.4.2). None of  */
@@ -1741,6 +1751,7 @@ static bool _ParseCertificate(const uint8_t *body, size_t bodyLen,
     }
 
     *chainLenOut = count;
+    *seenOut = seen;
     *alertOut = 0;
     return true;
 }
@@ -1750,7 +1761,16 @@ bool _SSFTLSCParseCertificateForTest(const uint8_t *body, size_t bodyLen,
                                      const uint8_t **ders, uint32_t *lens, uint8_t *countOut)
 {
     uint8_t alert;
-    return _ParseCertificate(body, bodyLen, ders, lens, countOut, &alert);
+    uint8_t seen;
+    return _ParseCertificate(body, bodyLen, ders, lens, countOut, &seen, &alert);
+}
+
+bool _SSFTLSCParseCertificateSeenForTest(const uint8_t *body, size_t bodyLen,
+                                         const uint8_t **ders, uint32_t *lens, uint8_t *countOut,
+                                         uint8_t *seenOut)
+{
+    uint8_t alert;
+    return _ParseCertificate(body, bodyLen, ders, lens, countOut, seenOut, &alert);
 }
 #endif /* SSF_CONFIG_TLSC_UNIT_TEST */
 
@@ -1836,22 +1856,21 @@ static SSFTLSIOResult_t _TlscHandleRecvEECert(SSFTLSCSession_t *session)
 
         /* Parse chain + save leaf + dispatch verify. All synchronous — no further I/O. */
         {
-            const uint8_t *chainDerPtrs[SSF_TLS_CONFIG_MAX_CHAIN_DEPTH];
-            uint32_t chainDerLens[SSF_TLS_CONFIG_MAX_CHAIN_DEPTH];
-            uint8_t chainLen = 0;
-
+            SSFTLSCCryptoWork_t *w = &session->cryptoWork;
             uint8_t alert;
 
-            if (!_ParseCertificate(&buf[4], bodyLen, chainDerPtrs, chainDerLens, &chainLen,
-                                   &alert))
+            /* Parsed straight into the crypto step's chain: no copy, no chain array on the stack */
+            if (!_ParseCertificate(&buf[4], bodyLen, w->chainDerPtrs, w->chainDerLens,
+                                   &w->chainLen, &w->chainSeen, &alert))
             {
                 SSF_TLS_TRACE_CERT_ERROR(&session->trace, "Certificate message malformed");
                 _SSF_TLSC_ALERT(session, alert);
                 return SSF_TLS_IO_ERROR;
             }
-            SSF_TLS_TRACE_CERT_INFO(&session->trace, "Certificate chain: %u cert(s)", chainLen);
+            SSF_TLS_TRACE_CERT_INFO(&session->trace, "Certificate chain: %u of %u cert(s) kept",
+                                    w->chainLen, w->chainSeen);
 
-            if (!_SaveLeafKey(session, chainDerPtrs[0], chainDerLens[0]))
+            if (!_SaveLeafKey(session, w->chainDerPtrs[0], w->chainDerLens[0]))
             {
                 _SSF_TLSC_ALERT(session, SSF_TLS_ALERT_BAD_CERTIFICATE);
                 return SSF_TLS_IO_ERROR;
@@ -1860,7 +1879,6 @@ static SSFTLSIOResult_t _TlscHandleRecvEECert(SSFTLSCSession_t *session)
             if (session->trust.count > 0)
             {
                 uint64_t now;
-                uint8_t ci;
                 SSFPortTick_t unixSys = 0;
                 bool nowValid;
 
@@ -1873,12 +1891,6 @@ static SSFTLSIOResult_t _TlscHandleRecvEECert(SSFTLSCSession_t *session)
 
 
                 session->cryptoWork.session = session;
-                for (ci = 0; ci < chainLen; ci++)
-                {
-                    session->cryptoWork.chainDerPtrs[ci] = chainDerPtrs[ci];
-                    session->cryptoWork.chainDerLens[ci] = chainDerLens[ci];
-                }
-                session->cryptoWork.chainLen = chainLen;
                 session->cryptoWork.hostname = session->hsHostname;
                 session->cryptoWork.nowUnixSec = now;
                 session->cryptoWork.nowValid = nowValid;
@@ -2392,6 +2404,12 @@ static SSFNetIOResult_t _SSFTLSCDrive(SSFTLSCSession_t *s)
                                              "code %d, cert[%u]",
                                              (int)s->cryptoWork.chainVerifyErr.code,
                                              s->cryptoWork.chainVerifyErr.certIdx);
+                    if (s->cryptoWork.chainSeen > s->cryptoWork.chainLen)
+                    {
+                        SSF_TLS_TRACE_CERT_ERROR(&s->trace, "Certificate chain truncated: %u of %u "
+                                                 "certs kept (SSF_X509_CONFIG_MAX_CHAIN_DEPTH)",
+                                                 s->cryptoWork.chainLen, s->cryptoWork.chainSeen);
+                    }
                     _SSF_TLSC_ALERT(s, _ChainAlert(s->cryptoWork.chainVerifyErr.code));
                     return _SSFTLSCFail(s);
                 }

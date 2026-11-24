@@ -207,14 +207,14 @@ static SSFNetIOResult_t _SSFTLSCUTPoll(SSFTLSCUTFd_t l, SSFTLSCUTFd_t *peerOut,
 /* Each array is exactly the message size, so AddressSanitizer catches any read past its end.    */
 /* --------------------------------------------------------------------------------------------- */
 #define SSF_TLSC_UT_CERT_OK(body, count) do { \
-    const uint8_t *_d[SSF_TLS_CONFIG_MAX_CHAIN_DEPTH]; \
-    uint32_t _l[SSF_TLS_CONFIG_MAX_CHAIN_DEPTH]; \
+    const uint8_t *_d[SSF_X509_CONFIG_MAX_CHAIN_DEPTH]; \
+    uint32_t _l[SSF_X509_CONFIG_MAX_CHAIN_DEPTH]; \
     uint8_t _n = 0xffu; \
     SSF_ASSERT(_SSFTLSCParseCertificateForTest((body), sizeof(body), _d, _l, &_n)); \
     SSF_ASSERT(_n == (count)); } while (0)
 #define SSF_TLSC_UT_CERT_BAD(body) do { \
-    const uint8_t *_d[SSF_TLS_CONFIG_MAX_CHAIN_DEPTH]; \
-    uint32_t _l[SSF_TLS_CONFIG_MAX_CHAIN_DEPTH]; \
+    const uint8_t *_d[SSF_X509_CONFIG_MAX_CHAIN_DEPTH]; \
+    uint32_t _l[SSF_X509_CONFIG_MAX_CHAIN_DEPTH]; \
     uint8_t _n = 0xffu; \
     SSF_ASSERT(_SSFTLSCParseCertificateForTest((body), sizeof(body), _d, _l, &_n) == false); \
     SSF_ASSERT(_n == 0u); } while (0)
@@ -278,10 +278,10 @@ static size_t _SSFTLSCUTCertN(uint8_t *buf, size_t bufSize, uint32_t n, uint16_t
 
 static void _SSFTLSCUTParseCertificate(void)
 {
-    const uint8_t *d[SSF_TLS_CONFIG_MAX_CHAIN_DEPTH];
-    uint32_t l[SSF_TLS_CONFIG_MAX_CHAIN_DEPTH];
+    const uint8_t *d[SSF_X509_CONFIG_MAX_CHAIN_DEPTH];
+    uint32_t l[SSF_X509_CONFIG_MAX_CHAIN_DEPTH];
     uint8_t n;
-    uint8_t many[4u + ((SSF_TLS_CONFIG_MAX_CHAIN_DEPTH + 1u) * 6u)];
+    uint8_t many[4u + ((SSF_X509_CONFIG_MAX_CHAIN_DEPTH + 1u) * 6u)];
     size_t manyLen;
 
     /* Well formed */
@@ -303,13 +303,24 @@ static void _SSFTLSCUTParseCertificate(void)
     SSF_TLSC_UT_CERT_BAD(_utCertEmptyList);
     SSF_TLSC_UT_CERT_BAD(_utCertShort);
 
-    /* More certificates than SSF_TLS_CONFIG_MAX_CHAIN_DEPTH: the first ones are kept, but every */
-    /* entry is still validated                                                                  */
-    manyLen = _SSFTLSCUTCertN(many, sizeof(many), SSF_TLS_CONFIG_MAX_CHAIN_DEPTH + 1u, 0u);
+    /* More certificates than SSF_X509_CONFIG_MAX_CHAIN_DEPTH (the verifier's limit, the only    */
+    /* chain limit): the first ones are kept, every entry is still validated, and the number    */
+    /* seen is reported so a failure caused by the truncation can say so.                      */
+    manyLen = _SSFTLSCUTCertN(many, sizeof(many), SSF_X509_CONFIG_MAX_CHAIN_DEPTH + 1u, 0u);
     SSF_ASSERT(_SSFTLSCParseCertificateForTest(many, manyLen, d, l, &n));
-    SSF_ASSERT(n == SSF_TLS_CONFIG_MAX_CHAIN_DEPTH);
+    SSF_ASSERT(n == SSF_X509_CONFIG_MAX_CHAIN_DEPTH);
     SSF_ASSERT((d[0] == &many[7]) && (l[0] == 1u));
-    manyLen = _SSFTLSCUTCertN(many, sizeof(many), SSF_TLS_CONFIG_MAX_CHAIN_DEPTH + 1u, 1u);
+    {
+        uint8_t seen = 0;
+
+        SSF_ASSERT(_SSFTLSCParseCertificateSeenForTest(many, manyLen, d, l, &n, &seen));
+        SSF_ASSERT((n == SSF_X509_CONFIG_MAX_CHAIN_DEPTH) &&
+                   (seen == (uint8_t)(SSF_X509_CONFIG_MAX_CHAIN_DEPTH + 1u)));
+        SSF_ASSERT(_SSFTLSCParseCertificateSeenForTest(_utCertTwo, sizeof(_utCertTwo), d, l, &n,
+                                                       &seen));
+        SSF_ASSERT((n == 2u) && (seen == 2u));
+    }
+    manyLen = _SSFTLSCUTCertN(many, sizeof(many), SSF_X509_CONFIG_MAX_CHAIN_DEPTH + 1u, 1u);
     SSF_ASSERT(_SSFTLSCParseCertificateForTest(many, manyLen, d, l, &n) == false);
 }
 

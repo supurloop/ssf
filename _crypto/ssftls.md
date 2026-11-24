@@ -153,8 +153,7 @@ already call `SSFHKDFExpand`; only the Finished computation calls HMAC directly.
   single null-check per trace point, and an installed callback formats into a 256-byte stack
   buffer per call; keep this in mind if stack is tight. The x509 and CMS unit-test builds
   turn tracing on, since they check the messages.
-- **Configuration options are forward-looking.**
-  `SSF_TLS_CONFIG_MAX_CHAIN_DEPTH`, `SSF_TLS_CONFIG_MAX_TRUSTED_CAS`,
+- **Configuration options are forward-looking.** `SSF_TLS_CONFIG_MAX_TRUSTED_CAS`,
   `SSF_TLS_CONFIG_PSK_ENABLE`, `SSF_TLS_CONFIG_TICKET_LIFETIME_SEC`, and
   `SSF_TLS_CONFIG_MAX_ALPN_LEN` are declared in [`_opt/ssftls_opt.h`](../_opt/ssftls_opt.h)
   but not currently referenced by the implementation — they are placeholders for a
@@ -186,7 +185,6 @@ for a future handshake / transport layer.
 
 | Macro | Default | Description |
 |-------|---------|-------------|
-| `SSF_TLS_CONFIG_MAX_CHAIN_DEPTH` | `4` | Reserved for certificate chain validation. Unused today. |
 | `SSF_TLS_CONFIG_MAX_TRUSTED_CAS` | `8` | Reserved for trust-store capacity. Unused today. |
 | `SSF_TLS_CONFIG_PSK_ENABLE` | `1` | Reserved for PSK handshake support. Unused today. |
 | `SSF_TLS_CONFIG_TICKET_LIFETIME_SEC` | `3600` | Reserved for session-ticket lifetime. Unused today. |

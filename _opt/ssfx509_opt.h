@@ -12,10 +12,13 @@ extern "C" {
 /* encoder; also sizes the on-stack scratch buffers used during parsing and encoding.             */
 #define SSF_X509_CONFIG_MAX_CERT_SIZE        (4096u)
 
-/* Maximum number of certificates in a chain passed to SSFX509VerifyChain (leaf + intermediates). */
-/* Sizes an on-stack array of parsed certificates. With ssfcms it must be at least               */
-/* SSF_CMS_CONFIG_MAX_CERTS + 1; when ssfcms is its only user, more than that is unused stack.   */
-#define SSF_X509_CONFIG_MAX_CHAIN_DEPTH      (8u)
+/* Maximum number of certificates in a chain passed to SSFX509VerifyChain (leaf + intermediates, */
+/* + any root sent). Sizes an on-stack array of parsed certificates (about 1.5 KB each). It is    */
+/* also the TLS client's chain limit: ssftlsc keeps this many from a server's Certificate        */
+/* message and drops the rest (traced if verification then fails). 6 covers leaf, two            */
+/* intermediates, a cross-signed root and the root. With ssfcms it must be at least              */
+/* SSF_CMS_CONFIG_MAX_CERTS + 1.                                                                 */
+#define SSF_X509_CONFIG_MAX_CHAIN_DEPTH      (6u)
 
 /* Maximum number of extensions retained in SSFX509Cert_t.exts; extras are skipped.              */
 #define SSF_X509_CONFIG_MAX_EXTENSIONS       (16u)

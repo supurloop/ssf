@@ -735,7 +735,7 @@ is rejected.
 
 ## Step 5 — Tests and cleanup
 
-- [ ] RFC 8448 handshake traces as deterministic vectors (needs injectable random and keys).
+- [x] RFC 8448 handshake traces as deterministic vectors (needs injectable random and keys).
       Section 3 (Simple 1-RTT) done, TDD: `_SSFTLSCUTRfc8448Simple()` replays it over the fake
       transport. Test hook `_SSFTLSCInjectClientHelloForTest()` (unit-test builds only) puts
       the RFC's ClientHello and x25519 key in place of fresh randomness and
@@ -751,9 +751,28 @@ is rejected.
       hook stubbed. Mutation: 5 key schedule mutants (hs labels swapped, ap labels, master
       derivation, client Finished key), all killed; two checked against the committed suite
       passed it, so only the wire tests caught them before. Shipped code unchanged.
-      Remaining: section 7 (ChaCha20-Poly1305, compatibility mode), section 5 (HRR: both
-      ClientHellos injected), section 6 in part (client CertificateVerify is randomized
-      RSA-PSS); section 4 (PSK / 0-RTT) does not apply.
+      Sections 5, 6 and 7 done, TDD (section 4, PSK / 0-RTT, does not apply). Vectors
+      (~4.8 KB) checked with pyca/cryptography first (P-256 ECDH, the message_hash
+      transcript, both CertificateVerify signatures of 6).
+      7 (Compatibility Mode; AES-128-GCM, not ChaCha20 as first noted here: RFC 8448 has no
+      ChaCha20-Poly1305 trace, so ChaCha20 stays covered by interop only): 32-byte session
+      id, the server's change_cipher_spec after its ServerHello accepted; secrets, client
+      Finished and close_notify records match.
+      5 (HelloRetryRequest): new hook `_SSFTLSCInjectClientHello2ForTest()` (unit-test
+      builds only) injects ClientHello2 and its P-256 key; ClientHello1 offers x25519 only,
+      the HRR selects secp256r1 with a 76-byte cookie; secrets, ClientHello2 sent, client
+      Finished and close_notify records match. Red with the hook stubbed.
+      6 (Client Authentication): the RFC does not publish the certificates' private keys,
+      so the client cannot reproduce the trace's CertificateVerify / Finished (the approved
+      ssfport entropy hook for the PSS salt was therefore not added; nothing outside the
+      client changed). The client answers with its own RSA-2048 certificate: the
+      CertificateRequest, the server's ECDSA P-256 CertificateVerify, the handshake and
+      application secrets and the client's close_notify record match the trace; its
+      Certificate, rsa_pss_rsae_sha256 CertificateVerify (verified) and Finished
+      (recomputed) are checked against the transcript they extend.
+      Mutation: message_hash type and length and the HRR left out of the transcript pass the
+      committed suite and are killed only by 5; client CV context and Finished transcript
+      mutants killed (also by the 1b tests). Shipped code unchanged.
 - [ ] Deterministic parser unit tests like `_SSFTLSCParseCertificateForTest` for the ServerHello
       parser (2.5 is covered only through `mitm.py` today). Started: the hook
       `_SSFTLSCParseServerHelloForTest()` exists and the extension cases are covered; the

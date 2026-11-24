@@ -456,6 +456,8 @@ bool _SSFTLSCParseEncryptedExtensionsForTest(const uint8_t *body, size_t bodyLen
                                              uint8_t *alertOut);
 void _SSFTLSCInjectClientHelloForTest(const uint8_t *chOpt, size_t chLen,
                                       const uint8_t *x25519PrivOpt);
+void _SSFTLSCInjectClientHello2ForTest(const uint8_t *ch2Opt, size_t ch2Len,
+                                       const uint8_t *ecPrivOpt);
 bool _SSFTLSCParseServerHelloForTest(SSFTLSCSession_t *session, const uint8_t *body,
                                      size_t bodyLen, bool isHrr, uint8_t *alertOut);
 SSFTLSIOResult_t _SSFTLSCSendHandshakeForTest(SSFTLSCSession_t *session, const uint8_t *msg,

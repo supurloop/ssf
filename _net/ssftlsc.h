@@ -71,6 +71,11 @@ extern "C" {
 /*   included: the inner transport's functions, the trace callback, libc and the port layer.    */
 /*   Key exchange and the other steps need less. Each chain entry adds about 1.1 KB.            */
 /* - Client mode, full handshake only (no PSK resumption or 0-RTT). One connection per session.  */
+/* - No client certificate. A server CertificateRequest is checked and answered with an empty   */
+/*   Certificate before the client Finished (RFC 8446 4.4.2): a server that only asks carries  */
+/*   on. One that requires a certificate sends certificate_required after the client Finished, */
+/*   so pollOpen() has already reported success; the first recv() then fails and the trace     */
+/*   says the server requires a client certificate.                                            */
 /* - IPv4 only (ssfnet.h): open() refuses an IPv6 literal host whatever the inner transport.     */
 /* - Chain limit: SSF_X509_CONFIG_MAX_CHAIN_DEPTH, the verifier's own. Certificates a server     */
 /*   sends past it are dropped; if verification then fails, the trace says the chain was cut.   */
@@ -236,6 +241,10 @@ typedef struct SSFTLSCSession
     /* server accepts, 64..2^14+1; 0 when not negotiated.                                        */
     uint16_t peerRecordLimit;
 
+    /* The server sent a CertificateRequest: the client answers with an empty Certificate       */
+    /* (RFC 8446 4.4.2) before its Finished.                                                   */
+    bool certRequested;
+
     /* Saved ClientHello for transcript re-init when server selects SHA-384 suite */
     uint8_t clientHelloMsg[768];
     size_t clientHelloLen;
@@ -322,6 +331,8 @@ bool _SSFTLSCParseEncryptedExtensionsRslForTest(const uint8_t *body, size_t body
                                                 uint8_t *alertOut, uint16_t *recordLimitOut);
 bool _SSFTLSCParseCertificateVerifyForTest(const uint8_t *body, size_t bodyLen,
                                            uint16_t *schemeOut, uint16_t *sigLenOut);
+bool _SSFTLSCParseCertificateRequestForTest(const uint8_t *body, size_t bodyLen,
+                                            uint8_t *alertOut);
 #endif /* SSF_CONFIG_TLSC_UNIT_TEST */
 
 #ifdef __cplusplus

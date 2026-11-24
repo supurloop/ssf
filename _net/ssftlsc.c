@@ -58,6 +58,8 @@
 /* content type and padding), 64..2^14+1 in TLS 1.3.                                             */
 #define SSF_TLSC_EXT_RECORD_SIZE_LIMIT (28u)
 #define SSF_TLSC_RSL_MIN (64u)
+/* An empty Certificate message: type, uint24 length 4, empty request context, empty list */
+#define SSF_TLSC_EMPTY_CERT_LEN (8u)
 #define SSF_TLSC_RSL_MAX (16384u + 1u)
 
 /* The chain limit is the verifier's, SSF_X509_CONFIG_MAX_CHAIN_DEPTH; the separate TLS option is */
@@ -437,6 +439,11 @@ static SSFTLSIOResult_t _RecvRecordOnce(SSFTLSCSession_t *s, uint8_t *pt, size_t
                 _SSF_TLSC_ALERT(s, SSF_TLS_ALERT_DECODE_ERROR); return SSF_TLS_IO_ERROR;
             }
             SSF_TLS_TRACE_ALERT(&s->trace, "RecvRecord: ALERT level=%u desc=%u", pt[0], pt[1]);
+            if (pt[1] == SSF_TLS_ALERT_CERTIFICATE_REQUIRED)
+            {
+                SSF_TLS_TRACE_HS_ERROR(&s->trace, "Server requires a client certificate "
+                                       "(certificate_required); none is configured");
+            }
             /* close_notify is answered with close_notify; any other alert ends the connection */
             /* without a reply (RFC 8446 6.1, 6.2).                                             */
             if (pt[1] == SSF_TLS_ALERT_CLOSE_NOTIFY)
@@ -1686,6 +1693,89 @@ bool _SSFTLSCParseEncryptedExtensionsRslForTest(const uint8_t *body, size_t body
 #endif /* SSF_CONFIG_TLSC_UNIT_TEST */
 
 /* --------------------------------------------------------------------------------------------- */
+/* Internal: validates a CertificateRequest body (RFC 8446 4.3.2). The client has no certificate */
+/* to choose with it (it answers with an empty Certificate), so nothing is kept: only the form  */
+/* is checked. Returns true, or false with the alert to send.                                    */
+/* --------------------------------------------------------------------------------------------- */
+static bool _ParseCertificateRequest(const uint8_t *body, size_t bodyLen, uint8_t *alertOut)
+{
+    size_t pos;
+    size_t start;
+    size_t end;
+    size_t ctxLen;
+    bool hasSigAlgs = false;
+
+    *alertOut = SSF_TLS_ALERT_DECODE_ERROR;
+
+    /* certificate_request_context<0..2^8-1>, then extensions<2..2^16-1> filling the message */
+    if (bodyLen < 1u) return false;
+    ctxLen = body[0];
+    if ((bodyLen - 1u) < (ctxLen + 2u)) return false;
+    start = 1u + ctxLen + 2u;
+    end = start + (size_t)_Get16(&body[1u + ctxLen]);
+    if ((end != bodyLen) || ((end - start) < 2u)) return false;
+    /* The context is for post-handshake authentication, which the client never offers */
+    if (ctxLen != 0u) { *alertOut = SSF_TLS_ALERT_ILLEGAL_PARAMETER; return false; }
+
+    /* pos never passes end, so the differences below cannot wrap. */
+    for (pos = start; pos < end; )
+    {
+        uint16_t eType;
+        uint16_t eLen;
+        size_t prev;
+
+        if ((end - pos) < 4u) return false;
+        eType = _Get16(&body[pos]);
+        eLen = _Get16(&body[pos + 2u]);
+        if (eLen > (end - pos - 4u)) return false;
+
+        /* No extension type twice in one block (4.2), recognized or not */
+        for (prev = start; prev < pos; prev += 4u + (size_t)_Get16(&body[prev + 2u]))
+        {
+            if (_Get16(&body[prev]) == eType)
+            { *alertOut = SSF_TLS_ALERT_ILLEGAL_PARAMETER; return false; }
+        }
+
+        switch (eType)
+        {
+        case SSF_TLS_EXT_SIGNATURE_ALGS:
+            /* SignatureSchemeList<2..2^16-2> filling the extension (4.2.3) */
+            if ((eLen < 4u) || (_Get16(&body[pos + 4u]) != (uint16_t)(eLen - 2u)) ||
+                ((eLen & 1u) != 0u)) return false;
+            hasSigAlgs = true;
+            break;
+        case SSF_TLS_EXT_SERVER_NAME:
+        case SSF_TLS_EXT_SUPPORTED_GROUPS:
+        case SSF_TLSC_EXT_RECORD_SIZE_LIMIT:
+        case SSF_TLS_EXT_SUPPORTED_VERSIONS:
+        case SSF_TLS_EXT_PSK_KEY_EXCHANGE:
+        case SSF_TLS_EXT_KEY_SHARE:
+            /* Recognized, but not specified for CertificateRequest: illegal_parameter (4.2) */
+            *alertOut = SSF_TLS_ALERT_ILLEGAL_PARAMETER;
+            return false;
+        default:
+            /* certificate_authorities, oid_filters, signature_algorithms_cert, status_request, */
+            /* SCT and anything unrecognized: ignored (4.3.2)                                  */
+            break;
+        }
+        pos += 4u + (size_t)eLen;
+    }
+
+    /* signature_algorithms MUST be present (4.3.2); a missing one is missing_extension (9.2) */
+    if (!hasSigAlgs) { *alertOut = SSF_TLS_ALERT_MISSING_EXTENSION; return false; }
+    *alertOut = 0;
+    return true;
+}
+
+#if SSF_CONFIG_TLSC_UNIT_TEST == 1
+bool _SSFTLSCParseCertificateRequestForTest(const uint8_t *body, size_t bodyLen,
+                                            uint8_t *alertOut)
+{
+    return _ParseCertificateRequest(body, bodyLen, alertOut);
+}
+#endif /* SSF_CONFIG_TLSC_UNIT_TEST */
+
+/* --------------------------------------------------------------------------------------------- */
 /* Internal: parses a server Certificate message body (RFC 8446 4.4.2). Returns true with up to */
 /* SSF_X509_CONFIG_MAX_CHAIN_DEPTH certificate pointers (into body) and lengths, and the number  */
 /* of entries sent (saturating at 255), else false.                                             */
@@ -1841,9 +1931,28 @@ static SSFTLSIOResult_t _TlscHandleRecvEECert(SSFTLSCSession_t *session)
         session->helperStep = 2;
         /* fall through */
     case 2:
-        /* === Receive Certificate + parse + dispatch chain verify === */
-        r = _RecvHandshakeOnce(session, &buf, &bodyLen, &hsType, true);
-        if (r != SSF_TLS_IO_SUCCESS) return r;
+        /* === Receive [CertificateRequest] Certificate + parse + dispatch chain verify === */
+        for (;;)
+        {
+            uint8_t alert;
+
+            r = _RecvHandshakeOnce(session, &buf, &bodyLen, &hsType, true);
+            if (r != SSF_TLS_IO_SUCCESS) return r;
+            /* A CertificateRequest may sit between EncryptedExtensions and Certificate, once   */
+            /* (RFC 8446 4.3.2). It is answered after the server Finished with an empty         */
+            /* Certificate (4.4.2); a second one falls through to unexpected_message.          */
+            if ((hsType != SSF_TLS_HS_CERTIFICATE_REQUEST) || session->certRequested) break;
+            if (!_ParseCertificateRequest(&buf[4], bodyLen, &alert))
+            {
+                SSF_TLS_TRACE_HS_ERROR(&session->trace, "CertificateRequest rejected");
+                _SSF_TLSC_ALERT(session, alert);
+                return SSF_TLS_IO_ERROR;
+            }
+            session->certRequested = true;
+            SSF_TLS_TRACE_HS_INFO(&session->trace,
+                                  "CertificateRequest received: no client certificate, "
+                                  "answering with an empty Certificate");
+        }
         if (hsType != SSF_TLS_HS_CERTIFICATE)
         { SSF_TLS_TRACE_HS_ERROR(&session->trace, "Expected Certificate, got type=%u", hsType);
           _SSF_TLSC_ALERT(session, SSF_TLS_ALERT_UNEXPECTED_MSG); return SSF_TLS_IO_ERROR; }
@@ -2084,7 +2193,9 @@ static SSFTLSIOResult_t _TlscHandleRecvFinSendFin(SSFTLSCSession_t *session)
     size_t bodyLen;
     uint8_t hsType;
     uint8_t handshakeSecret[SSF_TLS_MAX_HASH_SIZE];
-    uint8_t finishedMsg[4 + SSF_TLS_MAX_HASH_SIZE];
+    /* [empty Certificate] Finished: the client's last flight, sent as one record */
+    uint8_t finishedMsg[SSF_TLSC_EMPTY_CERT_LEN + 4 + SSF_TLS_MAX_HASH_SIZE];
+    size_t certLen;
     uint8_t finTranscriptHash[SSF_TLS_MAX_HASH_SIZE];
     uint8_t expectedVerifyData[SSF_TLS_MAX_HASH_SIZE];
     bool isFinishedOk;
@@ -2149,13 +2260,25 @@ static SSFTLSIOResult_t _TlscHandleRecvFinSendFin(SSFTLSCSession_t *session)
             uint8_t verifyData[SSF_TLS_MAX_HASH_SIZE];
             uint8_t thash[SSF_TLS_MAX_HASH_SIZE];
 
+            /* Asked for a certificate: an empty Certificate (empty request context, empty     */
+            /* certificate_list) precedes Finished, and Finished covers it (RFC 8446 4.4.2,    */
+            /* 4.4.4). The application secrets above end at the server Finished, as required. */
+            certLen = session->certRequested ? SSF_TLSC_EMPTY_CERT_LEN : 0u;
+            if (certLen != 0u)
+            {
+                memset(finishedMsg, 0, SSF_TLSC_EMPTY_CERT_LEN);
+                finishedMsg[0] = SSF_TLS_HS_CERTIFICATE;
+                _Put24(&finishedMsg[1], SSF_TLSC_EMPTY_CERT_LEN - 4u);
+                SSFTLSTranscriptUpdate(&session->transcript, finishedMsg, SSF_TLSC_EMPTY_CERT_LEN);
+            }
+
             SSFTLSTranscriptHash(&session->transcript, thash, sizeof(thash));
             SSFTLSComputeFinished(session->hash, session->clientHsTrafficSecret, session->hashLen,
                                   thash, session->hashLen, verifyData, session->hashLen);
 
-            finishedMsg[0] = SSF_TLS_HS_FINISHED;
-            _Put24(&finishedMsg[1], session->hashLen);
-            memcpy(&finishedMsg[4], verifyData, session->hashLen);
+            finishedMsg[certLen] = SSF_TLS_HS_FINISHED;
+            _Put24(&finishedMsg[certLen + 1u], session->hashLen);
+            memcpy(&finishedMsg[certLen + 4u], verifyData, session->hashLen);
             _SSF_TLSC_SCRUB(verifyData);
         }
         session->helperStep = 2;
@@ -2167,8 +2290,9 @@ static SSFTLSIOResult_t _TlscHandleRecvFinSendFin(SSFTLSCSession_t *session)
         /* On resume (WANT_WRITE), the same-call local finishedMsg value is ignored by         */
         /* _SendEncRecordOnce (because sendPending==true) — the encrypted bytes in             */
         /* io->sendRecordBuf are what keep flowing.                                             */
+        certLen = session->certRequested ? SSF_TLSC_EMPTY_CERT_LEN : 0u;
         r = _SendEncRecordOnce(session, SSF_TLS_CT_HANDSHAKE,
-                               finishedMsg, 4u + session->hashLen);
+                               finishedMsg, certLen + 4u + session->hashLen);
         _SSF_TLSC_SCRUB(finishedMsg);             /* Now encrypted in ioCtx.sendRecordBuf */
         if (r != SSF_TLS_IO_SUCCESS) return r;
 

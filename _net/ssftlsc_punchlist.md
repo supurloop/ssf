@@ -445,6 +445,23 @@ is rejected.
       `unexpected_message`; even without a client certificate, RFC 8446 4.4.2 lets the client
       answer with an empty Certificate. Interop with GnuTLS currently needs
       `--disable-client-cert`.
+  - [x] 1a: empty Certificate. `_ParseCertificateRequest()` (RFC 8446 4.3.2, 4.2): empty
+        context, extensions filling the message (at least 2 bytes), `signature_algorithms`
+        present and well formed (else `missing_extension` / `decode_error`), no duplicate type
+        recognized or not, extensions the client sends but CertificateRequest may not carry
+        refused with `illegal_parameter`, the rest ignored. Accepted once, between EE and
+        Certificate; the empty Certificate (8 bytes) goes into the transcript and the same
+        record as the client Finished. `SSF_TLS_ALERT_CERTIFICATE_REQUIRED` (116) added to
+        `ssftls.h` (approved); receiving it traces "Server requires a client certificate". 27
+        unit vectors (checked against an independent model of 4.3.2). Wire, all
+        `unexpected_message` before: `s_server -verify 1` and `gnutls-serv` defaults connect
+        and echo (server verified the Finished over the Certificate), also with HRR, SHA-384
+        and an RSA leaf; `-Verify 1` / `--require-client-cert` report `certificate_required`
+        on the first recv. 11 mutants killed (one survivor first, closed by a new vector);
+        ASan / UBSan clean. Cortex-M4 -Os: ssftlsc text +501 B, one session flag. Not
+        covered by a test: a second CertificateRequest (no server sends one; it falls through
+        to `unexpected_message`). `ssftls.md` alert list completed.
+  - [ ] 1b: client certificate and CertificateVerify (uses `ssfpkey`).
 - [x] Private key loading: PKCS#8 / SEC 1 / PEM. Done (approved: two new codec modules).
       `ssfpem` (RFC 7468): one block per call, multi-block buffers, strict Base64 via
       `SSFBase64Decode`, whitespace anywhere, NULL output to check/measure, all output zeroed on

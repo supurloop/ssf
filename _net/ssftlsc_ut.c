@@ -430,6 +430,113 @@ static void _SSFTLSCUTParseEncryptedExtensions(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* CertificateRequest validation (RFC 8446 4.3.2, 4.2). Exactly sized bodies; alert checked.     */
+/* --------------------------------------------------------------------------------------------- */
+#define SSF_TLSC_UT_CR(body, wantAlert) do { \
+    uint8_t _a = 0xffu; \
+    bool _ok = _SSFTLSCParseCertificateRequestForTest((body), sizeof(body), &_a); \
+    SSF_ASSERT(_ok == ((wantAlert) == 0u)); \
+    SSF_ASSERT(_a == (wantAlert)); } while (0)
+
+/* Empty context, signature_algorithms { ecdsa_secp256r1_sha256 } */
+static const uint8_t _utCrMin[]       = { 0x00, 0x00, 0x08, 0x00, 0x0d, 0x00, 0x04,
+                                          0x00, 0x02, 0x04, 0x03 };
+/* As OpenSSL sends: signature_algorithms with several schemes, then certificate_authorities */
+static const uint8_t _utCrWithCas[]   = { 0x00, 0x00, 0x14, 0x00, 0x0d, 0x00, 0x06,
+                                          0x00, 0x04, 0x04, 0x03, 0x08, 0x04,
+                                          0x00, 0x2f, 0x00, 0x06, 0x00, 0x04, 0x30, 0x02,
+                                          0x31, 0x00 };
+/* Allowed in CertificateRequest and ignored: status_request, SCT, oid_filters, sig_algs_cert */
+static const uint8_t _utCrAllowed[]   = { 0x00, 0x00, 0x1e, 0x00, 0x05, 0x00, 0x00,
+                                          0x00, 0x12, 0x00, 0x00,
+                                          0x00, 0x30, 0x00, 0x02, 0x00, 0x00,
+                                          0x00, 0x32, 0x00, 0x04, 0x00, 0x02, 0x04, 0x03,
+                                          0x00, 0x0d, 0x00, 0x04, 0x00, 0x02, 0x08, 0x07 };
+/* Unrecognized extension before signature_algorithms: ignored (4.3.2) */
+static const uint8_t _utCrUnknown[]   = { 0x00, 0x00, 0x0d, 0xfa, 0xfa, 0x00, 0x01, 0x00,
+                                          0x00, 0x0d, 0x00, 0x04, 0x00, 0x02, 0x04, 0x03 };
+/* Non-empty context: only for post-handshake authentication, never offered */
+static const uint8_t _utCrContext[]   = { 0x01, 0xaa, 0x00, 0x08, 0x00, 0x0d, 0x00, 0x04,
+                                          0x00, 0x02, 0x04, 0x03 };
+/* signature_algorithms missing */
+static const uint8_t _utCrNoSigAlgs[] = { 0x00, 0x00, 0x06, 0x00, 0x2f, 0x00, 0x02, 0x00, 0x00 };
+static const uint8_t _utCrOnlyUnk[]   = { 0x00, 0x00, 0x04, 0xfa, 0xfa, 0x00, 0x00 };
+/* Extension list below its 2-byte minimum */
+static const uint8_t _utCrNoExts[]    = { 0x00, 0x00, 0x00 };
+/* Bad signature_algorithms bodies: empty list, odd list, list length mismatch */
+static const uint8_t _utCrSigEmpty[]  = { 0x00, 0x00, 0x06, 0x00, 0x0d, 0x00, 0x02, 0x00, 0x00 };
+static const uint8_t _utCrSigOdd[]    = { 0x00, 0x00, 0x09, 0x00, 0x0d, 0x00, 0x05,
+                                          0x00, 0x03, 0x04, 0x03, 0x08 };
+static const uint8_t _utCrSigMis[]    = { 0x00, 0x00, 0x08, 0x00, 0x0d, 0x00, 0x04,
+                                          0x00, 0x04, 0x04, 0x03 };
+static const uint8_t _utCrSigShort[]  = { 0x00, 0x00, 0x05, 0x00, 0x0d, 0x00, 0x01, 0x00 };
+/* Duplicates: signature_algorithms twice, an unknown extension twice */
+static const uint8_t _utCrDupSig[]    = { 0x00, 0x00, 0x10, 0x00, 0x0d, 0x00, 0x04,
+                                          0x00, 0x02, 0x04, 0x03,
+                                          0x00, 0x0d, 0x00, 0x04, 0x00, 0x02, 0x08, 0x04 };
+static const uint8_t _utCrDupUnk[]    = { 0x00, 0x00, 0x10, 0xfa, 0xfa, 0x00, 0x00,
+                                          0xfa, 0xfa, 0x00, 0x00,
+                                          0x00, 0x0d, 0x00, 0x04, 0x00, 0x02, 0x04, 0x03 };
+/* Extensions the client sends that are not allowed in CertificateRequest */
+static const uint8_t _utCrKeyShare[]  = { 0x00, 0x00, 0x0c, 0x00, 0x33, 0x00, 0x00,
+                                          0x00, 0x0d, 0x00, 0x04, 0x00, 0x02, 0x04, 0x03 };
+static const uint8_t _utCrSni[]       = { 0x00, 0x00, 0x0c, 0x00, 0x00, 0x00, 0x00,
+                                          0x00, 0x0d, 0x00, 0x04, 0x00, 0x02, 0x04, 0x03 };
+static const uint8_t _utCrGroups[]    = { 0x00, 0x00, 0x10, 0x00, 0x0a, 0x00, 0x04, 0x00, 0x02,
+                                          0x00, 0x1d,
+                                          0x00, 0x0d, 0x00, 0x04, 0x00, 0x02, 0x04, 0x03 };
+static const uint8_t _utCrVersions[]  = { 0x00, 0x00, 0x0e, 0x00, 0x2b, 0x00, 0x02, 0x03, 0x04,
+                                          0x00, 0x0d, 0x00, 0x04, 0x00, 0x02, 0x04, 0x03 };
+static const uint8_t _utCrPskModes[]  = { 0x00, 0x00, 0x0d, 0x00, 0x2d, 0x00, 0x01, 0x01,
+                                          0x00, 0x0d, 0x00, 0x04, 0x00, 0x02, 0x04, 0x03 };
+static const uint8_t _utCrRsl[]       = { 0x00, 0x00, 0x0e, 0x00, 0x1c, 0x00, 0x02, 0x40, 0x00,
+                                          0x00, 0x0d, 0x00, 0x04, 0x00, 0x02, 0x04, 0x03 };
+/* Framing: list longer / shorter than the message, extension past the list, truncated */
+static const uint8_t _utCrListOver[]  = { 0x00, 0x00, 0x09, 0x00, 0x0d, 0x00, 0x04,
+                                          0x00, 0x02, 0x04, 0x03 };
+static const uint8_t _utCrTrailing[]  = { 0x00, 0x00, 0x08, 0x00, 0x0d, 0x00, 0x04,
+                                          0x00, 0x02, 0x04, 0x03, 0x00 };
+static const uint8_t _utCrExtOver[]   = { 0x00, 0x00, 0x08, 0x00, 0x0d, 0x00, 0x05,
+                                          0x00, 0x02, 0x04, 0x03 };
+/* An ignored extension claiming more bytes than the message holds */
+static const uint8_t _utCrUnkOver[]   = { 0x00, 0x00, 0x0c, 0x00, 0x0d, 0x00, 0x04,
+                                          0x00, 0x02, 0x04, 0x03, 0xfa, 0xfa, 0x00, 0x02 };
+static const uint8_t _utCrCtxOver[]   = { 0x05, 0x00 };
+static const uint8_t _utCrShort[]     = { 0x00, 0x00 };
+static const uint8_t _utCrHdrShort[]  = { 0x00, 0x00, 0x03, 0x00, 0x0d, 0x00 };
+
+static void _SSFTLSCUTParseCertificateRequest(void)
+{
+    SSF_TLSC_UT_CR(_utCrMin, 0u);
+    SSF_TLSC_UT_CR(_utCrWithCas, 0u);
+    SSF_TLSC_UT_CR(_utCrAllowed, 0u);
+    SSF_TLSC_UT_CR(_utCrUnknown, 0u);
+    SSF_TLSC_UT_CR(_utCrContext, SSF_TLS_ALERT_ILLEGAL_PARAMETER);
+    SSF_TLSC_UT_CR(_utCrNoSigAlgs, SSF_TLS_ALERT_MISSING_EXTENSION);
+    SSF_TLSC_UT_CR(_utCrOnlyUnk, SSF_TLS_ALERT_MISSING_EXTENSION);
+    SSF_TLSC_UT_CR(_utCrNoExts, SSF_TLS_ALERT_DECODE_ERROR);
+    SSF_TLSC_UT_CR(_utCrSigEmpty, SSF_TLS_ALERT_DECODE_ERROR);
+    SSF_TLSC_UT_CR(_utCrSigOdd, SSF_TLS_ALERT_DECODE_ERROR);
+    SSF_TLSC_UT_CR(_utCrSigMis, SSF_TLS_ALERT_DECODE_ERROR);
+    SSF_TLSC_UT_CR(_utCrSigShort, SSF_TLS_ALERT_DECODE_ERROR);
+    SSF_TLSC_UT_CR(_utCrDupSig, SSF_TLS_ALERT_ILLEGAL_PARAMETER);
+    SSF_TLSC_UT_CR(_utCrDupUnk, SSF_TLS_ALERT_ILLEGAL_PARAMETER);
+    SSF_TLSC_UT_CR(_utCrKeyShare, SSF_TLS_ALERT_ILLEGAL_PARAMETER);
+    SSF_TLSC_UT_CR(_utCrSni, SSF_TLS_ALERT_ILLEGAL_PARAMETER);
+    SSF_TLSC_UT_CR(_utCrGroups, SSF_TLS_ALERT_ILLEGAL_PARAMETER);
+    SSF_TLSC_UT_CR(_utCrVersions, SSF_TLS_ALERT_ILLEGAL_PARAMETER);
+    SSF_TLSC_UT_CR(_utCrPskModes, SSF_TLS_ALERT_ILLEGAL_PARAMETER);
+    SSF_TLSC_UT_CR(_utCrRsl, SSF_TLS_ALERT_ILLEGAL_PARAMETER);
+    SSF_TLSC_UT_CR(_utCrListOver, SSF_TLS_ALERT_DECODE_ERROR);
+    SSF_TLSC_UT_CR(_utCrTrailing, SSF_TLS_ALERT_DECODE_ERROR);
+    SSF_TLSC_UT_CR(_utCrExtOver, SSF_TLS_ALERT_DECODE_ERROR);
+    SSF_TLSC_UT_CR(_utCrUnkOver, SSF_TLS_ALERT_DECODE_ERROR);
+    SSF_TLSC_UT_CR(_utCrCtxOver, SSF_TLS_ALERT_DECODE_ERROR);
+    SSF_TLSC_UT_CR(_utCrShort, SSF_TLS_ALERT_DECODE_ERROR);
+    SSF_TLSC_UT_CR(_utCrHdrShort, SSF_TLS_ALERT_DECODE_ERROR);
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* CertificateVerify parsing (RFC 8446 4.4.3, 4.2.3). Exactly sized bodies, as above.            */
 /* --------------------------------------------------------------------------------------------- */
 #define SSF_TLSC_UT_CV(body, ok, wantScheme, wantLen) do { \
@@ -1297,6 +1404,7 @@ void SSFTLSCUnitTest(void)
     _SSFTLSCUTParseCertificate();
     _SSFTLSCUTParseCertificateVerify();
     _SSFTLSCUTParseEncryptedExtensions();
+    _SSFTLSCUTParseCertificateRequest();
     _SSFTLSCUTIPLiteral();
     _SSFTLSCUTSchemeMatchesKey();
     _SSFTLSCUTSaveLeafKey();

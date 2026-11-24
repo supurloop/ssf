@@ -75,6 +75,12 @@ extern "C" {
 /*   at the default RSA-4096 cap (RSA-PSS signing); P-256 / P-384 / Ed25519 signing stays       */
 /*   below 18.9 KB.                                                                             */
 /* - Client mode, full handshake only (no PSK resumption or 0-RTT). One connection per session.  */
+/* - After the handshake, recv() parses handshake records: NewSessionTicket is checked only for  */
+/*   its minimum length and skipped, its contents unparsed (no resumption, so no ticket is used); */
+/*   KeyUpdate (RFC 8446 4.6.3) moves receiving to the server's next key, and when the server   */
+/*   asks, the client's own KeyUpdate goes out at the start of the next send(), before any data. */
+/*   The client also updates its key every SSF_TLSC_CONFIG_KEY_UPDATE_RECORDS records (default */
+/*   2^24, under the AES-GCM limit of 5.5). Anything else is unexpected_message.               */
 /* - Client certificate (mutual TLS) is optional: SSFTLSCSetClientCert() with a chain and its   */
 /*   ssfpkey key. When a server sends a CertificateRequest, the client signs with the first    */
 /*   scheme in the server's signature_algorithms its key can make (P-256 / P-384 ECDSA,        */
@@ -268,6 +274,15 @@ typedef struct SSFTLSCSession
     uint16_t clientScheme;
     uint32_t certSendOff;            /* Bytes of the client flight message sent so far          */
 
+    /* Post-handshake handshake messages (RFC 8446 4.6), parsed as they arrive, record by record: */
+    /* the header so far, the message type and the body bytes still to come.                   */
+    uint8_t phHdr[4];
+    uint8_t phHdrLen;
+    uint8_t phType;
+    uint32_t phRemain;
+    bool keyUpdateOwed;              /* Server asked for a KeyUpdate: sent before the next data */
+    uint32_t sendRecordsOnKey;       /* Records sent under the current client application key  */
+
     /* Saved ClientHello for transcript re-init when server selects SHA-384 suite */
     uint8_t clientHelloMsg[768];
     size_t clientHelloLen;
@@ -376,6 +391,10 @@ bool _SSFTLSCParseCertificateRequestForTest(const uint8_t *body, size_t bodyLen,
                                             uint8_t *alertOut);
 bool _SSFTLSCChooseClientSchemeForTest(const uint8_t *body, size_t bodyLen, SSFPKeyType_t keyType,
                                        uint16_t *schemeOut, uint8_t *alertOut);
+bool _SSFTLSCPostHandshakeFeedForTest(SSFTLSCSession_t *session, const uint8_t *rec, size_t len,
+                                      uint8_t *alertOut, uint8_t *keyUpdateOut);
+void _SSFTLSCNextTrafficSecretForTest(const SSFTLSCSession_t *session, uint8_t *secret);
+bool _SSFTLSCRecordTypeAllowedForTest(const SSFTLSCSession_t *session, uint8_t contentType);
 bool _SSFTLSCChooseClientSchemeChainForTest(SSFTLSCSession_t *session, const uint8_t *body,
                                             size_t bodyLen, bool nowValid, uint64_t nowUnixSec,
                                             uint16_t *schemeOut, uint8_t *alertOut);

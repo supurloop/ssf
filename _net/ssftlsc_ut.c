@@ -1387,6 +1387,319 @@ static void _SSFTLSCUTCheckClientCV(const uint8_t *msg, size_t msgLen, uint16_t 
     }
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Post-handshake messages (RFC 8446 4.6): NewSessionTicket skipped, KeyUpdate recognized and    */
+/* checked (4.6.3, 5.1), anything else unexpected_message; messages may span records.            */
+/* --------------------------------------------------------------------------------------------- */
+#define SSF_TLSC_UT_NOKU (0xffu)
+
+/* Feeds one record's plaintext; checks the result, alert and KeyUpdate request. */
+static void _SSFTLSCUTPh(SSFTLSCSession_t *s, const uint8_t *rec, size_t len, bool wantOk,
+                         uint8_t wantAlert, uint8_t wantKu)
+{
+    uint8_t alert = 0xeeu;
+    uint8_t ku = 0xeeu;
+    SSF_ASSERT(_SSFTLSCPostHandshakeFeedForTest(s, rec, len, &alert, &ku) == wantOk);
+    SSF_ASSERT(alert == wantAlert);
+    if (wantOk) { SSF_ASSERT(ku == wantKu); }
+}
+
+static void _SSFTLSCUTPostHandshake(void)
+{
+    /* NewSessionTicket: lifetime, age_add, nonce<0..255>, ticket<1..>, extensions<0..> */
+    static const uint8_t nst[] = { 0x04, 0x00, 0x00, 0x10,
+                                   0x00, 0x00, 0x1c, 0x20, 0x01, 0x02, 0x03, 0x04,
+                                   0x01, 0xaa, 0x00, 0x02, 0xbb, 0xcc, 0x00, 0x00 };
+    static const uint8_t ku0[] = { 0x18, 0x00, 0x00, 0x01, 0x00 };
+    static const uint8_t ku1[] = { 0x18, 0x00, 0x00, 0x01, 0x01 };
+    static const uint8_t kuBadVal[] = { 0x18, 0x00, 0x00, 0x01, 0x02 };
+    static const uint8_t kuBadLen[] = { 0x18, 0x00, 0x00, 0x02, 0x00, 0x00 };
+    static const uint8_t kuThenMore[] = { 0x18, 0x00, 0x00, 0x01, 0x00, 0x04 };
+    static const uint8_t certReq[] = { 0x0d, 0x00, 0x00, 0x02, 0x00, 0x00 };
+    static const uint8_t finished[] = { 0x14, 0x00, 0x00, 0x01, 0x00 };
+    static const uint8_t unknownType[] = { 0x63, 0x00, 0x00, 0x01, 0x00 };
+    static const uint8_t nstShort[] = { 0x04, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00 };
+    /* The smallest ticket: 4 + 4 + nonce<0> 1 + ticket<1> 2 + 1 + extensions<0> 2 = 14 bytes */
+    static const uint8_t nstMin[] = { 0x04, 0x00, 0x00, 0x0e, 0x00, 0x00, 0x00, 0x3c,
+                                      0x01, 0x02, 0x03, 0x04, 0x00, 0x00, 0x01, 0xaa, 0x00, 0x00 };
+    /* 13 bytes: the ticket field empty */
+    static const uint8_t nst13[] = { 0x04, 0x00, 0x00, 0x0d, 0x00, 0x00, 0x00, 0x3c,
+                                     0x01, 0x02, 0x03, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00 };
+    static uint8_t both[sizeof(nst) + sizeof(ku0)];
+    SSFTLSCSession_t *s = &_utSession2;
+    size_t i;
+
+#define SSF_TLSC_UT_PH_RESET() memset(s, 0, sizeof(*s))
+    /* A ticket, whole and then one byte per record */
+    SSF_TLSC_UT_PH_RESET();
+    _SSFTLSCUTPh(s, nst, sizeof(nst), true, 0u, SSF_TLSC_UT_NOKU);
+    for (i = 0; i < sizeof(nst); i++) _SSFTLSCUTPh(s, &nst[i], 1u, true, 0u, SSF_TLSC_UT_NOKU);
+    SSF_ASSERT((s->phHdrLen == 0u) && (s->phRemain == 0u));        /* Between messages */
+    /* KeyUpdate, each request value; after a ticket in the same record */
+    _SSFTLSCUTPh(s, ku0, sizeof(ku0), true, 0u, 0u);
+    _SSFTLSCUTPh(s, ku1, sizeof(ku1), true, 0u, 1u);
+    memcpy(both, nst, sizeof(nst));
+    memcpy(&both[sizeof(nst)], ku1, sizeof(ku1));
+    _SSFTLSCUTPh(s, both, sizeof(both), true, 0u, 1u);
+    /* A KeyUpdate whose header ends one record and body is the next */
+    _SSFTLSCUTPh(s, ku1, 4u, true, 0u, SSF_TLSC_UT_NOKU);
+    _SSFTLSCUTPh(s, &ku1[4], 1u, true, 0u, 1u);
+    _SSFTLSCUTPh(s, ku0, 2u, true, 0u, SSF_TLSC_UT_NOKU);
+    _SSFTLSCUTPh(s, &ku0[2], 3u, true, 0u, 0u);
+    /* Refused */
+    SSF_TLSC_UT_PH_RESET();
+    _SSFTLSCUTPh(s, kuBadVal, sizeof(kuBadVal), false, SSF_TLS_ALERT_ILLEGAL_PARAMETER, 0u);
+    SSF_TLSC_UT_PH_RESET();
+    _SSFTLSCUTPh(s, kuBadLen, sizeof(kuBadLen), false, SSF_TLS_ALERT_DECODE_ERROR, 0u);
+    SSF_TLSC_UT_PH_RESET();                 /* A key change must end its record (5.1) */
+    _SSFTLSCUTPh(s, kuThenMore, sizeof(kuThenMore), false, SSF_TLS_ALERT_UNEXPECTED_MSG, 0u);
+    SSF_TLSC_UT_PH_RESET();                 /* post_handshake_auth was never offered */
+    _SSFTLSCUTPh(s, certReq, sizeof(certReq), false, SSF_TLS_ALERT_UNEXPECTED_MSG, 0u);
+    SSF_TLSC_UT_PH_RESET();
+    _SSFTLSCUTPh(s, finished, sizeof(finished), false, SSF_TLS_ALERT_UNEXPECTED_MSG, 0u);
+    SSF_TLSC_UT_PH_RESET();
+    _SSFTLSCUTPh(s, unknownType, sizeof(unknownType), false, SSF_TLS_ALERT_UNEXPECTED_MSG, 0u);
+    SSF_TLSC_UT_PH_RESET();
+    _SSFTLSCUTPh(s, nstShort, sizeof(nstShort), false, SSF_TLS_ALERT_DECODE_ERROR, 0u);
+    SSF_TLSC_UT_PH_RESET();
+    _SSFTLSCUTPh(s, nstMin, sizeof(nstMin), true, 0u, SSF_TLSC_UT_NOKU);
+    _SSFTLSCUTPh(s, nst13, sizeof(nst13), false, SSF_TLS_ALERT_DECODE_ERROR, 0u);
+    /* Records of another type may not come between the pieces of a handshake message (5.1) */
+    SSF_TLSC_UT_PH_RESET();
+    SSF_ASSERT(_SSFTLSCRecordTypeAllowedForTest(s, SSF_TLS_CT_APPLICATION));
+    _SSFTLSCUTPh(s, nst, 2u, true, 0u, SSF_TLSC_UT_NOKU);              /* Inside the header */
+    SSF_ASSERT(!_SSFTLSCRecordTypeAllowedForTest(s, SSF_TLS_CT_APPLICATION));
+    SSF_ASSERT(_SSFTLSCRecordTypeAllowedForTest(s, SSF_TLS_CT_HANDSHAKE));
+    _SSFTLSCUTPh(s, &nst[2], 8u, true, 0u, SSF_TLSC_UT_NOKU);          /* Inside the body */
+    SSF_ASSERT(!_SSFTLSCRecordTypeAllowedForTest(s, SSF_TLS_CT_APPLICATION));
+    _SSFTLSCUTPh(s, &nst[10], sizeof(nst) - 10u, true, 0u, SSF_TLSC_UT_NOKU);
+    SSF_ASSERT(_SSFTLSCRecordTypeAllowedForTest(s, SSF_TLS_CT_APPLICATION));   /* Complete */
+    _SSFTLSCUTPh(s, ku1, 4u, true, 0u, SSF_TLSC_UT_NOKU);               /* KeyUpdate header */
+    SSF_ASSERT(!_SSFTLSCRecordTypeAllowedForTest(s, SSF_TLS_CT_APPLICATION));
+    _SSFTLSCUTPh(s, &ku1[4], 1u, true, 0u, 1u);
+    SSF_ASSERT(_SSFTLSCRecordTypeAllowedForTest(s, SSF_TLS_CT_APPLICATION));
+    SSF_TLSC_UT_PH_RESET();                 /* A refused type is refused from its header alone */
+    _SSFTLSCUTPh(s, certReq, 4u, false, SSF_TLS_ALERT_UNEXPECTED_MSG, 0u);
+#undef SSF_TLSC_UT_PH_RESET
+
+    /* "traffic upd" (RFC 8446 7.2): expected values computed independently (Python hmac) */
+    {
+        static const uint8_t n1[32] = {
+            0x2c, 0xec, 0xd0, 0xa1, 0x75, 0x06, 0xef, 0x5f, 0xa7, 0x3e, 0xdc, 0x06, 0x2d, 0x6e,
+            0x7b, 0x53, 0x97, 0xcf, 0x07, 0x4e, 0xc1, 0xb4, 0xd8, 0xf9, 0x9a, 0x12, 0x07, 0x72,
+            0x93, 0x2f, 0x0b, 0x45 };
+        static const uint8_t n2[32] = {
+            0x2d, 0x3f, 0xb1, 0xfe, 0x26, 0x7c, 0x2e, 0x01, 0x26, 0x35, 0x1c, 0xc1, 0x69, 0xaf,
+            0xb7, 0xca, 0x25, 0xc0, 0xd8, 0x86, 0x71, 0x67, 0xc5, 0x5c, 0x55, 0x33, 0xe3, 0x71,
+            0x55, 0x58, 0xa6, 0xb9 };
+        static const uint8_t m1[48] = {
+            0x40, 0x13, 0x31, 0xb6, 0x3e, 0x9d, 0x59, 0xf2, 0x02, 0xe8, 0xf0, 0x41, 0x04, 0x2d,
+            0x95, 0x16, 0xf4, 0xcd, 0x7f, 0xa2, 0xe2, 0xee, 0x14, 0x63, 0x1d, 0x3b, 0x49, 0xfc,
+            0x34, 0x0d, 0x7a, 0xf3, 0x7f, 0xc2, 0xc0, 0xc9, 0xf2, 0x52, 0xd8, 0x03, 0x6f, 0x81,
+            0xec, 0x5b, 0x85, 0xcb, 0xe5, 0xdb };
+        uint8_t secret[48];
+
+        memset(s, 0, sizeof(*s));
+        s->hash = SSF_HMAC_HASH_SHA256;
+        s->hashLen = 32u;
+        for (i = 0; i < 32u; i++) secret[i] = (uint8_t)i;
+        _SSFTLSCNextTrafficSecretForTest(s, secret);
+        SSF_ASSERT(memcmp(secret, n1, 32u) == 0);
+        _SSFTLSCNextTrafficSecretForTest(s, secret);              /* Generation 2 */
+        SSF_ASSERT(memcmp(secret, n2, 32u) == 0);
+        s->hash = SSF_HMAC_HASH_SHA384;
+        s->hashLen = 48u;
+        for (i = 0; i < 48u; i++) secret[i] = (uint8_t)i;
+        _SSFTLSCNextTrafficSecretForTest(s, secret);
+        SSF_ASSERT(memcmp(secret, m1, 48u) == 0);
+        memset(s, 0, sizeof(*s));
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* recv() / send() after the handshake, over a fake inner transport: the test plays the server's */
+/* record layer with known application secrets. Covers KeyUpdate in both directions and the    */
+/* interleaving rule end to end.                                                                 */
+/* --------------------------------------------------------------------------------------------- */
+static uint8_t _utFakeIn[2048];
+static size_t _utFakeInLen;
+static size_t _utFakeInPos;
+static uint8_t _utFakeOut[2048];
+static size_t _utFakeOutLen;
+static bool _UTFakeOpen(SSFNetTransport_t *t, SSFCStrIn_t h, size_t hs, uint16_t p)
+{ (void)t; (void)h; (void)hs; (void)p; return true; }
+static SSFNetIOResult_t _UTFakePollOpen(SSFNetTransport_t *t)
+{ (void)t; return SSF_NET_IO_SUCCESS; }
+static SSFNetIOResult_t _UTFakeSend(SSFNetTransport_t *t, const uint8_t *b, size_t n, size_t *sent)
+{
+    (void)t;
+    SSF_ASSERT((_utFakeOutLen + n) <= sizeof(_utFakeOut));
+    memcpy(&_utFakeOut[_utFakeOutLen], b, n);
+    _utFakeOutLen += n;
+    *sent = n;
+    return SSF_NET_IO_SUCCESS;
+}
+static SSFNetIOResult_t _UTFakeRecv(SSFNetTransport_t *t, uint8_t *b, size_t n, size_t *got)
+{
+    (void)t;
+    *got = 0;
+    if (_utFakeInPos >= _utFakeInLen) return SSF_NET_IO_WANT_READ;
+    if (n > (_utFakeInLen - _utFakeInPos)) n = _utFakeInLen - _utFakeInPos;
+    memcpy(b, &_utFakeIn[_utFakeInPos], n);
+    _utFakeInPos += n;
+    *got = n;
+    return SSF_NET_IO_SUCCESS;
+}
+static SSFNetIOResult_t _UTFakeShutdown(SSFNetTransport_t *t)
+{ (void)t; return SSF_NET_IO_SUCCESS; }
+static void _UTFakeClose(SSFNetTransport_t *t) { (void)t; }
+static SSFNetTransport_t _utFake = { _UTFakeOpen, _UTFakePollOpen, _UTFakeSend, _UTFakeRecv,
+                                     _UTFakeShutdown, _UTFakeClose };
+
+/* The test's view of the server: its send state (the client's receive key), the client's     */
+/* send state, and the two secrets, one generation at a time.                                    */
+static SSFTLSRecordState_t _utSrvSend;
+static SSFTLSRecordState_t _utSrvRecv;
+static uint8_t _utSrvSecret[32];
+static uint8_t _utCliSecret[32];
+
+static void _UTStateFrom(SSFTLSRecordState_t *st, const uint8_t *secret)
+{
+    uint8_t key[16], iv[SSF_TLS_IV_SIZE];
+    SSFTLSDeriveTrafficKeys(SSF_HMAC_HASH_SHA256, secret, 32u, key, sizeof(key), iv, sizeof(iv));
+    SSFTLSRecordStateInit(st, SSF_TLS_CS_AES_128_GCM_SHA256, key, sizeof(key), iv, sizeof(iv));
+}
+
+/* A connected session (TLS_AES_128_GCM_SHA256) over the fake transport, generation 0 keys. */
+static void _UTAppSession(SSFTLSCSession_t *s)
+{
+    uint8_t key[16], iv[SSF_TLS_IV_SIZE];
+
+    memset(_utSrvSecret, 0x11, sizeof(_utSrvSecret));
+    memset(_utCliSecret, 0x22, sizeof(_utCliSecret));
+    SSFTLSCInit(s, &_utFake, NULL);
+    s->cipherSuite = SSF_TLS_CS_AES_128_GCM_SHA256;
+    s->hash = SSF_HMAC_HASH_SHA256;
+    s->hashLen = 32u;
+    s->keyLen = 16u;
+    memcpy(s->serverAppTrafficSecret, _utSrvSecret, 32u);
+    memcpy(s->clientAppTrafficSecret, _utCliSecret, 32u);
+    SSFTLSDeriveTrafficKeys(s->hash, _utSrvSecret, 32u, key, sizeof(key), iv, sizeof(iv));
+    SSFTLSRecordStateInit(&s->recvState, s->cipherSuite, key, sizeof(key), iv, sizeof(iv));
+    SSFTLSDeriveTrafficKeys(s->hash, _utCliSecret, 32u, key, sizeof(key), iv, sizeof(iv));
+    SSFTLSRecordStateInit(&s->sendState, s->cipherSuite, key, sizeof(key), iv, sizeof(iv));
+    s->recvStateInited = s->sendStateInited = true;
+    s->recvEncrypted = s->sendEncrypted = true;
+    s->connected = true;
+    s->innerOpen = true;
+    s->hsState = SSF_TLSC_HS_COMPLETE;
+    memset(&_utSrvSend, 0, sizeof(_utSrvSend));          /* Test keys only: start them fresh */
+    memset(&_utSrvRecv, 0, sizeof(_utSrvRecv));
+    _UTStateFrom(&_utSrvSend, _utSrvSecret);
+    _UTStateFrom(&_utSrvRecv, _utCliSecret);
+    _utFakeInLen = _utFakeInPos = _utFakeOutLen = 0;
+}
+
+/* Queues one server record. */
+static void _UTSrvRecord(uint8_t ct, const uint8_t *pt, size_t len)
+{
+    size_t n;
+    SSF_ASSERT(SSFTLSRecordEncrypt(&_utSrvSend, ct, pt, len, &_utFakeIn[_utFakeInLen],
+                                   sizeof(_utFakeIn) - _utFakeInLen, &n));
+    _utFakeInLen += n;
+}
+
+/* Decrypts the next client record at *off; returns its type and plaintext. */
+static uint8_t _UTCliRecord(size_t *off, uint8_t *pt, size_t ptSize, size_t *ptLen)
+{
+    uint8_t ct = 0;
+    size_t recLen;
+    SSF_ASSERT((*off + 5u) <= _utFakeOutLen);
+    recLen = 5u + (((size_t)_utFakeOut[*off + 3u] << 8) | _utFakeOut[*off + 4u]);
+    SSF_ASSERT(SSFTLSRecordDecrypt(&_utSrvRecv, &_utFakeOut[*off], recLen, pt, ptSize, ptLen,
+                                   &ct));
+    *off += recLen;
+    return ct;
+}
+
+static void _SSFTLSCUTAppData(void)
+{
+    static const uint8_t nst[] = { 0x04, 0x00, 0x00, 0x10,
+                                   0x00, 0x00, 0x1c, 0x20, 0x01, 0x02, 0x03, 0x04,
+                                   0x01, 0xaa, 0x00, 0x02, 0xbb, 0xcc, 0x00, 0x00 };
+    static const uint8_t ku1[] = { 0x18, 0x00, 0x00, 0x01, 0x01 };
+    static const uint8_t ku0[] = { 0x18, 0x00, 0x00, 0x01, 0x00 };
+    SSFTLSCSession_t *s = &_utSession2;
+    SSFNetTransport_t *t = &s->transport;
+    uint8_t buf[64];
+    size_t n;
+    size_t off;
+    uint8_t ct;
+
+    /* A ticket, then data: fine */
+    _UTAppSession(s);
+    _UTSrvRecord(SSF_TLS_CT_HANDSHAKE, nst, sizeof(nst));
+    _UTSrvRecord(SSF_TLS_CT_APPLICATION, (const uint8_t *)"abc", 3u);
+    SSF_ASSERT((t->recv(t, buf, sizeof(buf), &n) == SSF_NET_IO_SUCCESS) && (n == 3u) &&
+               (memcmp(buf, "abc", 3u) == 0));
+    SSFTLSCDeInit(s);
+
+    /* Application data between the pieces of a split ticket: unexpected_message (5.1) */
+    _UTAppSession(s);
+    _UTSrvRecord(SSF_TLS_CT_HANDSHAKE, nst, 6u);
+    _UTSrvRecord(SSF_TLS_CT_APPLICATION, (const uint8_t *)"abc", 3u);
+    SSF_ASSERT(t->recv(t, buf, sizeof(buf), &n) == SSF_NET_IO_ERROR);
+    SSF_ASSERT(s->pendingAlert == SSF_TLS_ALERT_UNEXPECTED_MSG);
+    SSFTLSCDeInit(s);
+
+    /* Server KeyUpdate (requested): data after it is under the server's next key; the client's */
+    /* next send() is its own KeyUpdate under the old key, then the data under the next one.    */
+    _UTAppSession(s);
+    _UTSrvRecord(SSF_TLS_CT_HANDSHAKE, ku1, sizeof(ku1));
+    SSFTLSRecordStateDeInit(&_utSrvSend);
+    _SSFTLSCNextTrafficSecretForTest(s, _utSrvSecret);
+    _UTStateFrom(&_utSrvSend, _utSrvSecret);
+    _UTSrvRecord(SSF_TLS_CT_APPLICATION, (const uint8_t *)"abc", 3u);
+    SSF_ASSERT((t->recv(t, buf, sizeof(buf), &n) == SSF_NET_IO_SUCCESS) && (n == 3u) &&
+               (memcmp(buf, "abc", 3u) == 0));
+    SSF_ASSERT(s->keyUpdateOwed);
+    SSF_ASSERT((t->send(t, (const uint8_t *)"xyz", 3u, &n) == SSF_NET_IO_SUCCESS) && (n == 3u));
+    off = 0;
+    ct = _UTCliRecord(&off, buf, sizeof(buf), &n);
+    SSF_ASSERT((ct == SSF_TLS_CT_HANDSHAKE) && (n == sizeof(ku0)) &&
+               (memcmp(buf, ku0, sizeof(ku0)) == 0));                /* update_not_requested */
+    SSFTLSRecordStateDeInit(&_utSrvRecv);
+    _SSFTLSCNextTrafficSecretForTest(s, _utCliSecret);
+    _UTStateFrom(&_utSrvRecv, _utCliSecret);
+    ct = _UTCliRecord(&off, buf, sizeof(buf), &n);
+    SSF_ASSERT((ct == SSF_TLS_CT_APPLICATION) && (n == 3u) && (memcmp(buf, "xyz", 3u) == 0));
+    SSF_ASSERT(off == _utFakeOutLen);
+    SSF_ASSERT(!s->keyUpdateOwed);
+    /* No further KeyUpdate on the next send */
+    _utFakeOutLen = 0;
+    SSF_ASSERT(t->send(t, (const uint8_t *)"q", 1u, &n) == SSF_NET_IO_SUCCESS);
+    off = 0;
+    SSF_ASSERT(_UTCliRecord(&off, buf, sizeof(buf), &n) == SSF_TLS_CT_APPLICATION);
+    SSF_ASSERT(off == _utFakeOutLen);
+    SSFTLSCDeInit(s);
+
+    /* The record limit: once reached, the next send() updates the client key first */
+    _UTAppSession(s);
+    s->sendRecordsOnKey = SSF_TLSC_CONFIG_KEY_UPDATE_RECORDS;
+    SSF_ASSERT(t->send(t, (const uint8_t *)"xyz", 3u, &n) == SSF_NET_IO_SUCCESS);
+    off = 0;
+    SSF_ASSERT(_UTCliRecord(&off, buf, sizeof(buf), &n) == SSF_TLS_CT_HANDSHAKE);
+    SSF_ASSERT((n == sizeof(ku0)) && (memcmp(buf, ku0, sizeof(ku0)) == 0));
+    SSFTLSRecordStateDeInit(&_utSrvRecv);
+    _SSFTLSCNextTrafficSecretForTest(s, _utCliSecret);
+    _UTStateFrom(&_utSrvRecv, _utCliSecret);
+    SSF_ASSERT(_UTCliRecord(&off, buf, sizeof(buf), &n) == SSF_TLS_CT_APPLICATION);
+    SSF_ASSERT(s->sendRecordsOnKey == 1u);
+    SSFTLSCDeInit(s);
+    SSFTLSRecordStateDeInit(&_utSrvSend);
+    SSFTLSRecordStateDeInit(&_utSrvRecv);
+}
+
 /* Trace capture for the client certificate warnings */
 static char _utWarn[1024];
 static void _SSFTLSCUTWarnTrace(SSFTLSTraceLevel_t level, SSFTLSTraceCategory_t cat,
@@ -1836,6 +2149,8 @@ void SSFTLSCUnitTest(void)
     _SSFTLSCUTParseCertificateVerify();
     _SSFTLSCUTParseEncryptedExtensions();
     _SSFTLSCUTParseCertificateRequest();
+    _SSFTLSCUTPostHandshake();
+    _SSFTLSCUTAppData();
     _SSFTLSCUTIPLiteral();
     _SSFTLSCUTSchemeMatchesKey();
     _SSFTLSCUTSaveLeafKey();

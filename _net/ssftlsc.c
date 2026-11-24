@@ -3178,6 +3178,132 @@ static SSFNetIOResult_t _SSFTLSCPollOpen(SSFNetTransport_t *t)
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Internal: post-handshake handshake messages (RFC 8446 4.6). Feeds one record's plaintext to a */
+/* parser that keeps its place across records, so a message may span them. NewSessionTicket is  */
+/* skipped (no resumption); KeyUpdate is checked (4.6.3) and must end its record, as any key    */
+/* change must (5.1); anything else, post-handshake CertificateRequest included (never offered), */
+/* is unexpected_message. Returns false with the alert, else *kuOut is the KeyUpdate request   */
+/* (0 / 1) that ended the record, or 0xFF for none.                                             */
+/* --------------------------------------------------------------------------------------------- */
+/* NewSessionTicket body minimum: lifetime 4, age_add 4, nonce<0..255> 1, ticket<1..2^16-1>    */
+/* 2 + 1, extensions<0..2^16-2> 2. The ticket is not used (no resumption), so not parsed further. */
+#define SSF_TLSC_NST_MIN_BODY (14u)
+#define SSF_TLSC_NO_KEY_UPDATE (0xFFu)
+
+static bool _PostHandshakeFeed(SSFTLSCSession_t *s, const uint8_t *rec, size_t len,
+                               uint8_t *alertOut, uint8_t *kuOut)
+{
+    size_t i = 0;
+
+    *alertOut = 0;
+    *kuOut = SSF_TLSC_NO_KEY_UPDATE;
+    while (i < len)
+    {
+        size_t n;
+
+        if (s->phHdrLen < sizeof(s->phHdr))
+        {
+            s->phHdr[s->phHdrLen++] = rec[i++];
+            if (s->phHdrLen < sizeof(s->phHdr)) continue;
+            s->phType = s->phHdr[0];
+            s->phRemain = ((uint32_t)s->phHdr[1] << 16) | ((uint32_t)s->phHdr[2] << 8) |
+                          (uint32_t)s->phHdr[3];
+            if (s->phType == SSF_TLS_HS_NEW_SESSION_TICKET)
+            {
+                if (s->phRemain < SSF_TLSC_NST_MIN_BODY)
+                { *alertOut = SSF_TLS_ALERT_DECODE_ERROR; return false; }
+            }
+            else if (s->phType == SSF_TLS_HS_KEY_UPDATE)
+            {
+                if (s->phRemain != 1u) { *alertOut = SSF_TLS_ALERT_DECODE_ERROR; return false; }
+            }
+            else { *alertOut = SSF_TLS_ALERT_UNEXPECTED_MSG; return false; }
+            continue;
+        }
+
+        /* Body bytes. A KeyUpdate's one byte is its request, and the record must end with it. */
+        if (s->phType == SSF_TLS_HS_KEY_UPDATE)
+        {
+            if (rec[i] > 1u) { *alertOut = SSF_TLS_ALERT_ILLEGAL_PARAMETER; return false; }
+            if ((i + 1u) != len) { *alertOut = SSF_TLS_ALERT_UNEXPECTED_MSG; return false; }
+            *kuOut = rec[i];
+        }
+        n = len - i;
+        if (n > s->phRemain) n = s->phRemain;
+        i += n;
+        s->phRemain -= (uint32_t)n;
+        if (s->phRemain == 0u) s->phHdrLen = 0;                    /* Message done */
+    }
+    return true;
+}
+
+/* Internal: true unless a handshake message is part-way through and the record is not a        */
+/* handshake record: no other record may come between its pieces (RFC 8446 5.1).               */
+static bool _RecordTypeAllowed(const SSFTLSCSession_t *s, uint8_t contentType)
+{
+    return (contentType == SSF_TLS_CT_HANDSHAKE) || (s->phHdrLen == 0u);
+}
+
+/* Internal: secret = HKDF-Expand-Label(secret, "traffic upd", "", Hash.length) (RFC 8446 7.2). */
+static void _NextTrafficSecret(const SSFTLSCSession_t *s, uint8_t *secret)
+{
+    uint8_t next[SSF_TLS_MAX_HASH_SIZE];
+
+    SSFTLSHkdfExpandLabel(s->hash, secret, s->hashLen, "traffic upd", NULL, 0, next, s->hashLen);
+    memcpy(secret, next, s->hashLen);
+    _SSF_TLSC_SCRUB(next);
+}
+
+/* Internal: moves secret to its next generation and installs the keys derived from it in state; */
+/* the previous secret and keys are gone.                                                         */
+static void _UpdateTrafficKeys(SSFTLSCSession_t *s, uint8_t *secret, SSFTLSRecordState_t *state,
+                               bool *inited)
+{
+    uint8_t key[SSF_TLS_MAX_KEY_SIZE], iv[SSF_TLS_IV_SIZE];
+
+    _NextTrafficSecret(s, secret);
+    SSFTLSDeriveTrafficKeys(s->hash, secret, s->hashLen, key, s->keyLen, iv, SSF_TLS_IV_SIZE);
+    _RecordStateSet(s, state, inited, key, iv);
+    _SSF_TLSC_SCRUB(key);
+    _SSF_TLSC_SCRUB(iv);
+}
+
+/* Internal: sends a KeyUpdate (update_not_requested) under the current client key, then moves  */
+/* sending to the next key. Call with nothing pending. Once encrypted the record is the old    */
+/* key's last, so the switch happens even if it is still being written (WANT_WRITE).           */
+static SSFTLSIOResult_t _SendKeyUpdate(SSFTLSCSession_t *s)
+{
+    static const uint8_t ku[5] = { SSF_TLS_HS_KEY_UPDATE, 0u, 0u, 1u, 0u };
+    SSFTLSIOResult_t r = _SendEncRecordOnce(s, SSF_TLS_CT_HANDSHAKE, ku, sizeof(ku));
+
+    if (r == SSF_TLS_IO_ERROR) return r;
+    _UpdateTrafficKeys(s, s->clientAppTrafficSecret, &s->sendState, &s->sendStateInited);
+    SSF_TLS_TRACE_CRYPTO_INFO(&s->trace, "KeyUpdate sent (%s); client key updated",
+                              s->keyUpdateOwed ? "requested by the server" : "record limit");
+    s->keyUpdateOwed = false;
+    s->sendRecordsOnKey = 0;
+    return r;
+}
+
+#if SSF_CONFIG_TLSC_UNIT_TEST == 1
+bool _SSFTLSCPostHandshakeFeedForTest(SSFTLSCSession_t *session, const uint8_t *rec, size_t len,
+                                      uint8_t *alertOut, uint8_t *keyUpdateOut)
+{
+    return _PostHandshakeFeed(session, rec, len, alertOut, keyUpdateOut);
+}
+
+void _SSFTLSCNextTrafficSecretForTest(const SSFTLSCSession_t *session, uint8_t *secret)
+{
+    _NextTrafficSecret(session, secret);
+}
+
+bool _SSFTLSCRecordTypeAllowedForTest(const SSFTLSCSession_t *session, uint8_t contentType)
+{
+    return _RecordTypeAllowed(session, contentType);
+}
+#endif /* SSF_CONFIG_TLSC_UNIT_TEST */
+
+/* --------------------------------------------------------------------------------------------- */
 /* Returns SUCCESS with up to one record's worth of bytes accepted, WANT_WRITE if the previous    */
 /* record is still being written, else CLOSED or ERROR. Accepted bytes are encrypted at once and  */
 /* written as far as the inner transport allows; the remainder goes out on later calls.          */
@@ -3202,10 +3328,21 @@ static SSFNetIOResult_t _SSFTLSCSend(SSFNetTransport_t *t, const uint8_t *buf, s
     if (r == SSF_TLS_IO_WANT_WRITE) return SSF_NET_IO_WANT_WRITE;
     if (r != SSF_TLS_IO_SUCCESS) return _SSFTLSCFail(s);
 
+    /* A KeyUpdate goes first when the server asked for one (it must precede the next          */
+    /* application data, RFC 8446 4.6.3) or the current key has carried its share of records    */
+    /* (5.5). Its record may still be pending: the data follows on the next call.               */
+    if (s->keyUpdateOwed || (s->sendRecordsOnKey >= SSF_TLSC_CONFIG_KEY_UPDATE_RECORDS))
+    {
+        r = _SendKeyUpdate(s);
+        if (r == SSF_TLS_IO_ERROR) return _SSFTLSCFail(s);
+        if (r == SSF_TLS_IO_WANT_WRITE) return SSF_NET_IO_WANT_WRITE;
+    }
+
     chunk = _SendRecordMax(s);
     if (len < chunk) chunk = len;
     r = _SendEncRecordOnce(s, SSF_TLS_CT_APPLICATION, buf, chunk);
     if (r == SSF_TLS_IO_ERROR) return _SSFTLSCFail(s);
+    s->sendRecordsOnKey++;
     *sentOut = chunk;                          /* Encrypted; any unsent tail stays pending */
     return SSF_NET_IO_SUCCESS;
 }
@@ -3243,6 +3380,13 @@ static SSFNetIOResult_t _SSFTLSCRecv(SSFNetTransport_t *t, uint8_t *buf, size_t 
 
         if (ct == SSF_TLS_CT_APPLICATION)
         {
+            if (!_RecordTypeAllowed(s, ct))
+            {
+                SSF_TLS_TRACE_HS_ERROR(&s->trace, "Application data inside a split "
+                                       "post-handshake message");
+                _SSF_TLSC_ALERT(s, SSF_TLS_ALERT_UNEXPECTED_MSG);
+                return _SSFTLSCFail(s);
+            }
             s->hsBufLen = ptLen;               /* An empty record yields nothing; read on */
             s->hsBufPos = 0;
         }
@@ -3252,8 +3396,31 @@ static SSFNetIOResult_t _SSFTLSCRecv(SSFNetTransport_t *t, uint8_t *buf, size_t 
             { s->peerClosed = true; }
             return _SSFTLSCFail(s);
         }
-        else if (ct != SSF_TLS_CT_HANDSHAKE)   /* Post-handshake messages dropped: punch list */
-        { _SSF_TLSC_ALERT(s, SSF_TLS_ALERT_UNEXPECTED_MSG); return _SSFTLSCFail(s); }
+        else if (ct == SSF_TLS_CT_HANDSHAKE)
+        {
+            uint8_t alert;
+            uint8_t ku;
+
+            if (!_PostHandshakeFeed(s, s->hsBuf, ptLen, &alert, &ku))
+            {
+                SSF_TLS_TRACE_HS_ERROR(&s->trace, "Post-handshake message rejected");
+                _SSF_TLSC_ALERT(s, alert);
+                return _SSFTLSCFail(s);
+            }
+            if (ku != SSF_TLSC_NO_KEY_UPDATE)
+            {
+                /* The server's next records use its next key (RFC 8446 4.6.3) */
+                _UpdateTrafficKeys(s, s->serverAppTrafficSecret, &s->recvState,
+                                   &s->recvStateInited);
+                if (ku == 1u) s->keyUpdateOwed = true;   /* One reply answers any number */
+                SSF_TLS_TRACE_CRYPTO_INFO(&s->trace, "KeyUpdate received (%s); server key "
+                                          "updated", (ku == 1u) ? "update requested" :
+                                          "update not requested");
+            }
+            s->hsBufLen = 0;                   /* Nothing for the application */
+            s->hsBufPos = 0;
+        }
+        else { _SSF_TLSC_ALERT(s, SSF_TLS_ALERT_UNEXPECTED_MSG); return _SSFTLSCFail(s); }
     }
     if (s->hsBufPos >= s->hsBufLen) return SSF_NET_IO_WANT_READ;
 

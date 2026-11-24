@@ -540,8 +540,39 @@ is rejected.
       NULL parameters). 30 mutants all killed. Not fixed here (belongs to F): secret-derived
       temporaries left on the stack by the EC / Ed25519 public-key derivations and the RSA
       validator's callees; `SSFECDSAPubKeyFromPrivKey` does not wipe `d` when it rejects it.
-- [ ] KeyUpdate: install new receive keys, answer `update_requested`; send-side KeyUpdate before
-      the AEAD record limit.
+- [x] KeyUpdate: install new receive keys, answer `update_requested`; send-side KeyUpdate before
+      the AEAD record limit. Done (approved: owed reply at the next send(), config threshold
+      only, no new API). recv() no longer drops handshake records: `_PostHandshakeFeed()` parses
+      them across records (header, type, remaining body); NewSessionTicket checked for its
+      minimum length and skipped; KeyUpdate must be one byte, 0 or 1, and end its record (RFC
+      8446 4.6.3, 5.1), else decode_error / illegal_parameter / unexpected_message; any other
+      type (post-handshake CertificateRequest never offered) unexpected_message. A KeyUpdate
+      moves the server application secret on ("traffic upd", 7.2) and installs the new
+      receive keys; update_requested sets a flag, answered by one KeyUpdate at the start of the
+      next send() (before the data, as 4.6.3 requires), after which the client key moves on.
+      send() also rekeys after `SSF_TLSC_CONFIG_KEY_UPDATE_RECORDS` records (new option,
+      default 2^24, below AES-GCM's 2^24.5; 1..2^24). Unit: parser cases (tickets split byte by
+      byte, ticket + KeyUpdate, header and body in different records, each refusal) and the
+      "traffic upd" step against values computed independently (SHA-256 two generations,
+      SHA-384). Wire, all `bad_record_mac` (server side) / no client KeyUpdate before:
+      `s_server` k / K / k k k with data in both directions after each; client rekeying every
+      3 records against `s_server -rev` (6 KeyUpdates seen by the server, 20/20 echoes) and
+      `gnutls-serv`. OpenSSL's and GnuTLS's post-handshake NewSessionTickets now go through
+      the parser. 13 mutants killed (one survivor first, closed by a case with two sends
+      between requests). ASan / UBSan clean. Cortex-M4 -Os: ssftlsc text +854 B, session
+      +16 B.
+      Audit (correctness and security): verified old secrets and keys are gone after each
+      update, one reply answers any number of requests (no amplification), the KeyUpdate is
+      the old key's last record and data never precedes it; parser differential (100k streams
+      split at random points vs an RFC model, ASan) found only the ticket minimum. Fixed, TDD:
+      (1) NewSessionTicket minimum body 13 -> 14 (an empty ticket was accepted). (2) RFC 8446
+      5.1: application data between the pieces of a split handshake message is now
+      unexpected_message (`_RecordTypeAllowed()`). (3) `ssftlsc.h` notes that tickets are only
+      length-checked. New unit test drives recv() / send() over a fake inner transport with
+      known secrets: ticket then data, data inside a split ticket, server KeyUpdate then data
+      under its next key and the client's KeyUpdate + data under its next key, and the record
+      limit; the flow mutants (the recv() call site of (2), and the six that only the wire test
+      caught before) are now killed by the unit test. Text +965 B over the last commit.
 - [ ] ALPN (e.g. `x-amzn-mqtt-ca` for AWS IoT on 443).
 - [ ] Trust store loading: CA bundles (multiple certificates per file), no silent truncation,
       no filesystem requirement in the core (`ssftls_certs.c` is POSIX-only).

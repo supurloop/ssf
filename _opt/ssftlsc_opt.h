@@ -40,6 +40,17 @@ extern "C" {
 #error SSF_TLSC_CONFIG_MAX_SEND_RECORD must be 64..16384.
 #endif
 
+/* Records the client sends under one application traffic key before it updates the key with a */
+/* KeyUpdate (RFC 8446 4.6.3, 5.5). AES-GCM must not exceed 2^24.5 full-size records per key;   */
+/* the default 2^24 stays below that for every suite (ChaCha20-Poly1305's limit is far higher, */
+/* so updating early there costs one small record). 1..2^24.                                   */
+#ifndef SSF_TLSC_CONFIG_KEY_UPDATE_RECORDS
+#define SSF_TLSC_CONFIG_KEY_UPDATE_RECORDS (16777216ul)
+#endif
+#if (SSF_TLSC_CONFIG_KEY_UPDATE_RECORDS < 1u) || (SSF_TLSC_CONFIG_KEY_UPDATE_RECORDS > 16777216ul)
+#error SSF_TLSC_CONFIG_KEY_UPDATE_RECORDS must be 1..2^24.
+#endif
+
 /* Earliest Unix time (seconds) trusted for checking certificate validity. An RTC reading before */
 /* this, such as a device that booted at 0 (1970), or a failed read, means no trusted time: the */
 /* handshake fails with its own error instead of checking certificates against a wrong clock.  */

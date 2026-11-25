@@ -886,8 +886,18 @@ is rejected.
       30 CCM rows. The driver links no unit-test objects (no libcrypto needed). Not ported:
       the mitm proxy and step 2 spot-check drivers, replaced by the deterministic negative
       tests.
-- [ ] The leaf public key is parked in `clientHelloMsg` between handshake steps; give it its own
+- [x] The leaf public key is parked in `clientHelloMsg` between handshake steps; give it its own
       field.
+      Done, TDD (no RAM or code change: shipped text +0 B, session 43,264 B both). The buffer
+      is now `hsScratch`, a union whose members name its three phases (clientHello,
+      leafPubKey, clientFlight), with `hsScratchLen`; the session comment says which states
+      own it. Compile-time checks for the client's own limits: the largest supported server
+      RSA key (SSF_RSA_MAX_PUB_KEY_DER_SIZE) and the largest client flight (an RSA
+      CertificateVerify at SSF_RSA_MAX_KEY_BITS plus a SHA-384 Finished, 572 bytes at
+      RSA-4096) must fit. Red: a 560-byte scratch with a 1-byte ALPN cap compiled; now an
+      #error (572 builds, 571 does not). The run-time check on the server's key stays (the
+      key comes from the network). A separate field was not used: about 550 B more RAM. Unit
+      tests (both builds) and the interop set (156 / 156) unchanged.
 - [ ] SSF conventions: `_SSFTLSC*` static names, 99-column comment boxes, copyright year,
       remove "Phase / M3" milestone comments; documentation `ssftlsc.md`; update `ssftls.md`
       ("no X.509 in SSF" is out of date).

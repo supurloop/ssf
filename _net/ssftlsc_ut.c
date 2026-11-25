@@ -1359,14 +1359,14 @@ static void _SSFTLSCUTSaveLeafKey(void)
     SSF_ASSERT(_SSFTLSCSaveLeafKeyForTest(&_utSession2, _utLeafP256Der,
                                           (uint32_t)sizeof(_utLeafP256Der)));
     SSF_ASSERT(_utSession2.leafKeyType == SSF_TLSC_LEAF_KEY_P256);
-    SSF_ASSERT(_utSession2.clientHelloLen == 65u);
-    SSF_ASSERT(_utSession2.clientHelloMsg[0] == 0x04u);
+    SSF_ASSERT(_utSession2.hsScratchLen == 65u);
+    SSF_ASSERT(_utSession2.hsScratch.leafPubKey[0] == 0x04u);
 
-    /* A key larger than clientHelloMsg is refused, not truncated */
+    /* A key larger than hsScratch.leafPubKey is refused, not truncated */
     memset(&_utSession2, 0, sizeof(_utSession2));
     SSF_ASSERT(_SSFTLSCSaveLeafKeyForTest(&_utSession2, _utLeafRsa8192Der,
                                           (uint32_t)sizeof(_utLeafRsa8192Der)) == false);
-    SSF_ASSERT(_utSession2.clientHelloLen == 0u);
+    SSF_ASSERT(_utSession2.hsScratchLen == 0u);
 
     /* Not a certificate: truncated, and with its outer tag damaged */
     SSF_ASSERT(_SSFTLSCSaveLeafKeyForTest(&_utSession2, _utLeafP256Der,
@@ -1374,7 +1374,7 @@ static void _SSFTLSCUTSaveLeafKey(void)
     memcpy(bad, _utLeafP256Der, sizeof(bad));
     bad[0] = 0x31u;
     SSF_ASSERT(_SSFTLSCSaveLeafKeyForTest(&_utSession2, bad, (uint32_t)sizeof(bad)) == false);
-    SSF_ASSERT(_utSession2.clientHelloLen == 0u);
+    SSF_ASSERT(_utSession2.hsScratchLen == 0u);
     memset(&_utSession2, 0, sizeof(_utSession2));
 }
 
@@ -2363,10 +2363,10 @@ static void _SSFTLSCUTAlpn(void)
         SSF_ASSERT(_utFakeOutLen > 0u);
         /* One plaintext record holds it: header, then the whole message */
         SSF_ASSERT((_utFakeOut[0] == SSF_TLS_CT_HANDSHAKE) &&
-                   ((((size_t)_utFakeOut[3] << 8) | _utFakeOut[4]) == s->clientHelloLen) &&
-                   (_utFakeOutLen >= (5u + s->clientHelloLen)));
-        SSF_ASSERT(sizeof(s->clientHelloMsg) == SSF_TLSC_CH_SIZE);
-        SSF_ASSERT(s->clientHelloLen ==
+                   ((((size_t)_utFakeOut[3] << 8) | _utFakeOut[4]) == s->hsScratchLen) &&
+                   (_utFakeOutLen >= (5u + s->hsScratchLen)));
+        SSF_ASSERT(sizeof(s->hsScratch.clientHello) == SSF_TLSC_CH_SIZE);
+        SSF_ASSERT(s->hsScratchLen ==
                    (SSF_TLSC_CH1_MAX_NO_ALPN + 6u + SSF_TLS_CONFIG_MAX_ALPN_LEN));
         s->transport.close(&s->transport);
         SSFTLSCDeInit(s);

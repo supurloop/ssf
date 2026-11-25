@@ -215,9 +215,10 @@ typedef struct SSFTLSCIOCtx
 } SSFTLSCIOCtx_t;
 
 #define SSF_TLSC_MAX_HOST_SIZE (256u)   /* Host name passed to open(), including the NUL       */
-#define SSF_TLSC_CH_SIZE (768u)         /* ClientHello buffer                                  */
+#define SSF_TLSC_CH_SIZE (768u)         /* Handshake scratch: ClientHello, server key, flight */
 /* The largest ClientHello1 without ALPN: a 255-byte host name in server_name. ALPN adds 6     */
-/* bytes plus the list, so SSF_TLS_CONFIG_MAX_ALPN_LEN may be at most CH_SIZE - 6 - this.     */
+/* bytes plus the list, so SSF_TLS_CONFIG_MAX_ALPN_LEN may be at most CH_SIZE - 6 - this. The   */
+/* session's handshake scratch (hsScratch) is this size too.                                   */
 #define SSF_TLSC_CH1_MAX_NO_ALPN (543u)
 /* The ClientHello goes out as one plaintext record, so a record must hold the largest one     */
 #if SSF_TLSC_CONFIG_MAX_SEND_RECORD < SSF_TLSC_CH_SIZE
@@ -314,9 +315,21 @@ typedef struct SSFTLSCSession
     bool keyUpdateOwed;              /* Server asked for a KeyUpdate: sent before the next data */
     uint32_t sendRecordsOnKey;       /* Records sent under the current client application key  */
 
-    /* Saved ClientHello for transcript re-init when server selects SHA-384 suite */
-    uint8_t clientHelloMsg[SSF_TLSC_CH_SIZE];
-    size_t clientHelloLen;
+    /* Handshake scratch: one buffer, owned by one phase at a time (no two overlap), its length  */
+    /* in hsScratchLen. The members name the phases; all are the whole buffer.                  */
+    /*   clientHello   ClientHello1, then ClientHello2: SEND_CH until the ServerHello is        */
+    /*                 processed (the SHA-384 transcript restart, ClientHello2 after an HRR)    */
+    /*   leafPubKey    the server certificate's public key: its Certificate (RECV_EE_CERT)      */
+    /*                 until the CertificateVerify check (VERIFY_SIG)                            */
+    /*   clientFlight  the client CertificateVerify and Finished: SIGN_CV until SEND_CV_FIN     */
+    /*                 has sent them; then wiped                                                 */
+    union
+    {
+        uint8_t clientHello[SSF_TLSC_CH_SIZE];
+        uint8_t leafPubKey[SSF_TLSC_CH_SIZE];
+        uint8_t clientFlight[SSF_TLSC_CH_SIZE];
+    } hsScratch;
+    size_t hsScratchLen;
 
     /* Handshake message reassembly buffer (servers may bundle multiple HS msgs in one record). */
     /* After the handshake it holds the decrypted application record being returned by recv(). */

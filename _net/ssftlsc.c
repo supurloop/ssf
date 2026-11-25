@@ -75,7 +75,16 @@
 #error SSF_TLS_CONFIG_MAX_CHAIN_DEPTH is removed; ssftlsc uses SSF_X509_CONFIG_MAX_CHAIN_DEPTH.
 #endif
 
-/* The largest ClientHello1 (255-byte host name, full ALPN list) must fit clientHelloMsg */
+/* The handshake scratch must hold each phase's largest content: the largest ClientHello1      */
+/* (255-byte host name, full ALPN list), the largest supported server key (RSA public key DER   */
+/* at SSF_RSA_MAX_KEY_BITS; EC and Ed25519 keys are smaller), and the largest client flight    */
+/* (an RSA signature at SSF_RSA_MAX_KEY_BITS in a CertificateVerify, then a SHA-384 Finished). */
+#if SSF_RSA_MAX_PUB_KEY_DER_SIZE > SSF_TLSC_CH_SIZE
+#error SSF_TLSC_CH_SIZE is too small for the largest supported server RSA key.
+#endif
+#if (8u + SSF_RSA_MAX_SIG_SIZE + 4u + SSF_TLS_MAX_HASH_SIZE) > SSF_TLSC_CH_SIZE
+#error SSF_TLSC_CH_SIZE is too small for an RSA CertificateVerify and Finished (mutual TLS).
+#endif
 #if (SSF_TLSC_CH1_MAX_NO_ALPN + 6u + SSF_TLS_CONFIG_MAX_ALPN_LEN) > SSF_TLSC_CH_SIZE
 #error SSF_TLS_CONFIG_MAX_ALPN_LEN must be at most 219: a larger ALPN list may not fit the ClientHello.
 #endif
@@ -720,7 +729,7 @@ typedef struct
 } SSFTLSCKeyShare_t;
 
 /* --------------------------------------------------------------------------------------------- */
-/* Internal: builds the ClientHello into s->clientHelloMsg; the only builder, so ClientHello1 and */
+/* Internal: builds the ClientHello into s->hsScratch.clientHello; the only builder, so ClientHello1 and */
 /* ClientHello2 cannot drift apart. ClientHello2 passes ClientHello1's random and session id, the */
 /* one share the HelloRetryRequest asked for, and its cookie extension_data, which is all RFC     */
 /* 8446 4.1.2 lets change. Returns false if the message does not fit.                            */
@@ -740,8 +749,8 @@ static bool _BuildClientHello(SSFTLSCSession_t *s, const uint8_t random[32], con
     for (i = 0; i < shareCount; i++) ksLen += 4u + shares[i].len;
     (void)SSFStrLen(s->host, sizeof(s->host), &hostLen);     /* Validated by open() */
 
-    w.buf = s->clientHelloMsg;
-    w.cap = sizeof(s->clientHelloMsg);
+    w.buf = s->hsScratch.clientHello;
+    w.cap = sizeof(s->hsScratch.clientHello);
     w.pos = 0;
     w.ok = true;
 
@@ -839,7 +848,7 @@ static bool _BuildClientHello(SSFTLSCSession_t *s, const uint8_t random[32], con
     if ((w.ok == false) || ((w.pos - extLenPos - 2u) > 0xffffu)) return false;
     _Put16(&w.buf[extLenPos], (uint16_t)(w.pos - extLenPos - 2u));
     _Put24(&w.buf[1], (uint32_t)(w.pos - 4u));
-    s->clientHelloLen = w.pos;
+    s->hsScratchLen = w.pos;
     return true;
 }
 
@@ -944,8 +953,8 @@ static bool _ParseServerHello(SSFTLSCSession_t *s, const uint8_t *body, size_t b
 
     /* legacy_session_id_echo MUST equal the ClientHello legacy_session_id (4.1.3) */
     sidLen = body[pos++];
-    chSidLen = s->clientHelloMsg[38];
-    chSid = &s->clientHelloMsg[39];
+    chSidLen = s->hsScratch.clientHello[38];
+    chSid = &s->hsScratch.clientHello[39];
     if ((sidLen > 32u) || (pos + sidLen > bodyLen))
     { _SSF_TLSC_SH_REJECT(s, "session id length", SSF_TLS_ALERT_DECODE_ERROR); }
     if ((sidLen != chSidLen) || (memcmp(&body[pos], chSid, sidLen) != 0))
@@ -1458,11 +1467,11 @@ static const uint8_t _TlscHrrSentinel[32] = {
 
 /* Resumable state machine. Substates:                                                           */
 /*   0: entry — wait for the inner transport to connect + transcript init, advance to 1         */
-/*   1: build ClientHello into session->clientHelloMsg + transcript update (non-idempotent)      */
+/*   1: build ClientHello into session->hsScratch.clientHello + transcript update (non-idempotent)      */
 /*   2: send ClientHello record                                                                   */
 /*   3: send CCS record (middlebox compat)                                                        */
 /*   4: recv ServerHello + HRR detect; non-HRR → parse + SHA-384 reinit + stash into cryptoWork  */
-/*      → case 20. HRR → parse HRR + synthetic transcript reinit + build CH2 into clientHelloMsg */
+/*      → case 20. HRR → parse HRR + synthetic transcript reinit + build CH2 into hsScratch.clientHello */
 /*      + transcript update → case 10.                                                            */
 /*   10: (HRR) send CH2 record                                                                    */
 /*   11: (HRR) recv second ServerHello + reject double-HRR + parse + stash → case 20             */
@@ -1535,25 +1544,25 @@ static SSFTLSIOResult_t _TlscHandleSendCH(SSFTLSCSession_t *session)
             if (!_BuildClientHello(session, random, sid, (uint8_t)sizeof(sid), shares, 2u,
                                    NULL, 0u))
             {
-                SSF_TLS_TRACE_HS_ERROR(&session->trace, "ClientHello does not fit clientHelloMsg");
+                SSF_TLS_TRACE_HS_ERROR(&session->trace, "ClientHello does not fit hsScratch.clientHello");
                 return SSF_TLS_IO_ERROR;
             }
 #if SSF_CONFIG_TLSC_UNIT_TEST == 1
             if (_utInjectCH != NULL)                   /* A fixed trace's ClientHello and key */
             {
-                memcpy(session->clientHelloMsg, _utInjectCH, _utInjectCHLen);
-                session->clientHelloLen = _utInjectCHLen;
+                memcpy(session->hsScratch.clientHello, _utInjectCH, _utInjectCHLen);
+                session->hsScratchLen = _utInjectCHLen;
                 memcpy(session->ephemeralPrivKey, _utInjectX25519, 32u);
             }
 #endif
-            SSFTLSTranscriptUpdate(&session->transcript, session->clientHelloMsg,
-                                   session->clientHelloLen);
+            SSFTLSTranscriptUpdate(&session->transcript, session->hsScratch.clientHello,
+                                   session->hsScratchLen);
             session->helperStep = 2;
         }
         /* fall through */
         case 2:
             r = _SendPlainRecordOnce(session, SSF_TLS_CT_HANDSHAKE,
-                                     session->clientHelloMsg, session->clientHelloLen);
+                                     session->hsScratch.clientHello, session->hsScratchLen);
             if (r != SSF_TLS_IO_SUCCESS) return r;
             session->clientHelloSent = true;
             session->helperStep = 3;
@@ -1618,8 +1627,8 @@ static SSFTLSIOResult_t _TlscHandleSendCH(SSFTLSCSession_t *session)
                     {
                         SSFTLSTranscript_t tmpT;
                         SSFTLSTranscriptInit(&tmpT, hrrHash);
-                        SSFTLSTranscriptUpdate(&tmpT, session->clientHelloMsg,
-                                               session->clientHelloLen);
+                        SSFTLSTranscriptUpdate(&tmpT, session->hsScratch.clientHello,
+                                               session->hsScratchLen);
                         SSFTLSTranscriptHash(&tmpT, ch1Hash, sizeof(ch1Hash));
                     }
                     else
@@ -1650,7 +1659,7 @@ static SSFTLSIOResult_t _TlscHandleSendCH(SSFTLSCSession_t *session)
                     const SSFECCurveParams_t *cp = SSFECGetCurveParams(curve);
                     uint8_t random[32];
                     uint8_t sid[32];
-                    uint8_t sidLen = session->clientHelloMsg[38];
+                    uint8_t sidLen = session->hsScratch.clientHello[38];
                     SSFTLSCKeyShare_t share;
 
                     if (!SSFECDSAKeyGen(curve, ecPriv, sizeof(ecPriv),
@@ -1661,9 +1670,9 @@ static SSFTLSIOResult_t _TlscHandleSendCH(SSFTLSCSession_t *session)
                     memcpy(session->ephemeralPrivKey, ecPriv, cp->bytes);
                     _SSF_TLSC_SCRUB(ecPriv);
 
-                    /* clientHelloMsg is rebuilt in place, so take ClientHello1's values first. */
-                    memcpy(random, &session->clientHelloMsg[6], sizeof(random));
-                    memcpy(sid, &session->clientHelloMsg[39], sidLen);
+                    /* hsScratch.clientHello is rebuilt in place, so take ClientHello1's values first. */
+                    memcpy(random, &session->hsScratch.clientHello[6], sizeof(random));
+                    memcpy(sid, &session->hsScratch.clientHello[39], sidLen);
                     share.group = hrrGroup;
                     share.pub = ecPub;
                     share.len = (uint16_t)ecPubLen;
@@ -1680,13 +1689,13 @@ static SSFTLSIOResult_t _TlscHandleSendCH(SSFTLSCSession_t *session)
 #if SSF_CONFIG_TLSC_UNIT_TEST == 1
                     if (_utInjectCH2 != NULL)              /* A fixed trace's ClientHello2, key */
                     {
-                        memcpy(session->clientHelloMsg, _utInjectCH2, _utInjectCH2Len);
-                        session->clientHelloLen = _utInjectCH2Len;
+                        memcpy(session->hsScratch.clientHello, _utInjectCH2, _utInjectCH2Len);
+                        session->hsScratchLen = _utInjectCH2Len;
                         memcpy(session->ephemeralPrivKey, _utInjectEC, cp->bytes);
                     }
 #endif
-                    SSFTLSTranscriptUpdate(&session->transcript, session->clientHelloMsg,
-                                           session->clientHelloLen);
+                    SSFTLSTranscriptUpdate(&session->transcript, session->hsScratch.clientHello,
+                                           session->hsScratchLen);
 
                     SSF_TLS_TRACE_HS_INFO(&session->trace,
                                           "HRR: ClientHello2 built with group 0x%04x", hrrGroup);
@@ -1716,14 +1725,14 @@ static SSFTLSIOResult_t _TlscHandleSendCH(SSFTLSCSession_t *session)
             {
                 SSF_TLS_TRACE_CRYPTO_INFO(&session->trace,
                                           "Re-initializing transcript for SHA-384 (CH=%zu SH=%zu)",
-                                          session->clientHelloLen, ptLen);
-                if (session->clientHelloLen == 0)
+                                          session->hsScratchLen, ptLen);
+                if (session->hsScratchLen == 0)
                 { SSF_TLS_TRACE_HS_ERROR(&session->trace,
                                          "ERROR: ClientHello was not saved (too large for buffer)");
                   return SSF_TLS_IO_ERROR; }
                 SSFTLSTranscriptInit(&session->transcript, SSF_HMAC_HASH_SHA384);
                 SSFTLSTranscriptUpdate(&session->transcript,
-                                       session->clientHelloMsg, session->clientHelloLen);
+                                       session->hsScratch.clientHello, session->hsScratchLen);
                 SSFTLSTranscriptUpdate(&session->transcript, buf, ptLen);
             }
 
@@ -1736,9 +1745,9 @@ static SSFTLSIOResult_t _TlscHandleSendCH(SSFTLSCSession_t *session)
             continue;
         }
         case 10:
-            /* HRR: send CH2 from session->clientHelloMsg (built in case 4 HRR branch). */
+            /* HRR: send CH2 from session->hsScratch.clientHello (built in case 4 HRR branch). */
             r = _SendPlainRecordOnce(session, SSF_TLS_CT_HANDSHAKE,
-                                     session->clientHelloMsg, session->clientHelloLen);
+                                     session->hsScratch.clientHello, session->hsScratchLen);
             if (r != SSF_TLS_IO_SUCCESS) return r;
             session->helperStep = 11;
             /* fall through */
@@ -2507,13 +2516,14 @@ static bool _SaveLeafKey(SSFTLSCSession_t *session, const uint8_t *der, uint32_t
         SSF_TLS_TRACE_CERT_ERROR(&session->trace, "Failed to parse leaf certificate");
         return false;
     }
-    if (leaf.pubKeyLen > sizeof(session->clientHelloMsg))
+    /* The key is the server's: one larger than any supported (RSA-8192, say) is refused here */
+    if (leaf.pubKeyLen > sizeof(session->hsScratch.leafPubKey))
     {
         SSF_TLS_TRACE_CERT_ERROR(&session->trace, "Leaf public key too large");
         return false;
     }
-    memcpy(session->clientHelloMsg, leaf.pubKey, leaf.pubKeyLen);
-    session->clientHelloLen = leaf.pubKeyLen;
+    memcpy(session->hsScratch.leafPubKey, leaf.pubKey, leaf.pubKeyLen);
+    session->hsScratchLen = leaf.pubKeyLen;
     session->leafKeyType = _LeafKeyType(&leaf);
     return true;
 }
@@ -2763,8 +2773,8 @@ static SSFTLSIOResult_t _TlscHandleRecvCV(SSFTLSCSession_t *session)
             uint8_t signContent[64 + 33 + 1 + SSF_TLS_MAX_HASH_SIZE];
             size_t signContentLen = 64u + 33u + 1u + session->hashLen;
             uint8_t contentHash[SSF_TLS_MAX_HASH_SIZE];
-            const uint8_t *leafPubKey = session->clientHelloMsg;
-            size_t leafPubKeyLen = session->clientHelloLen;
+            const uint8_t *leafPubKey = session->hsScratch.leafPubKey;
+            size_t leafPubKeyLen = session->hsScratchLen;
             bool isEd25519;
             size_t sigHashLen = 0;
 
@@ -2891,8 +2901,8 @@ static void _EnterAppSendKeys(SSFTLSCSession_t *s)
 /* --------------------------------------------------------------------------------------------- */
 /* Internal: the SIGN_CV crypto step. Signs the CertificateVerify over the transcript through   */
 /* the client Certificate, then appends the client Finished, which covers it. Both are built in */
-/* clientHelloMsg, free by now (the server's leaf key it held is used), and SEND_CV_FIN streams */
-/* them in as many records as the send limit takes.                                            */
+/* hsScratch.clientFlight, free by now (the server's key it held is used), and SEND_CV_FIN      */
+/* streams them in as many records as the send limit takes.                                    */
 /* --------------------------------------------------------------------------------------------- */
 static SSF_NOINLINE bool _TlscSignClientCV(SSFTLSCSession_t *s)
 {
@@ -2900,14 +2910,14 @@ static SSF_NOINLINE bool _TlscSignClientCV(SSFTLSCSession_t *s)
     size_t cvLen;
 
     SSFTLSTranscriptHash(&s->transcript, thash, sizeof(thash));
-    if (!_SignClientCV(s, s->clientScheme, thash, s->hashLen, s->clientHelloMsg,
-                       sizeof(s->clientHelloMsg) - (4u + SSF_TLS_MAX_HASH_SIZE), &cvLen))
+    if (!_SignClientCV(s, s->clientScheme, thash, s->hashLen, s->hsScratch.clientFlight,
+                       sizeof(s->hsScratch.clientFlight) - (4u + SSF_TLS_MAX_HASH_SIZE), &cvLen))
     {
         SSF_TLS_TRACE_CRYPTO_ERROR(&s->trace, "Client CertificateVerify signing failed");
         return false;
     }
-    SSFTLSTranscriptUpdate(&s->transcript, s->clientHelloMsg, cvLen);
-    s->clientHelloLen = cvLen + _BuildClientFinished(s, &s->clientHelloMsg[cvLen]);
+    SSFTLSTranscriptUpdate(&s->transcript, s->hsScratch.clientFlight, cvLen);
+    s->hsScratchLen = cvLen + _BuildClientFinished(s, &s->hsScratch.clientFlight[cvLen]);
     SSF_TLS_TRACE_CRYPTO_INFO(&s->trace, "Client CertificateVerify signed (scheme 0x%04x)",
                               s->clientScheme);
     return true;
@@ -3317,10 +3327,11 @@ static SSFNetIOResult_t _SSFTLSCDrive(SSFTLSCSession_t *s)
             return SSF_NET_IO_WANT_WRITE;      /* The signature was this call's step */
 
         case SSF_TLSC_HS_SEND_CV_FIN:
-            r = _SendHandshakeOnce(s, s->clientHelloMsg, s->clientHelloLen);
+            r = _SendHandshakeOnce(s, s->hsScratch.clientFlight, s->hsScratchLen);
             if (r == SSF_TLS_IO_WANT_WRITE) return SSF_NET_IO_WANT_WRITE;
             /* The Finished is encrypted in sendRecordBuf now, or the connection is failing */
-            _SSF_TLSC_SCRUB_N("clientFlight", s->clientHelloMsg, sizeof(s->clientHelloMsg));
+            _SSF_TLSC_SCRUB_N("clientFlight", s->hsScratch.clientFlight,
+                              sizeof(s->hsScratch.clientFlight));
             if (r != SSF_TLS_IO_SUCCESS) return _SSFTLSCFail(s);
             _EnterAppSendKeys(s);
             s->hsBufLen = 0;                   /* hsBuf now holds application data */

@@ -64,11 +64,11 @@ extern "C" {
 /*   RSA-2048). Size a single-threaded application's latency budget for that call.             */
 /* - RSA keys are 2048 to 4096 bits (ssfrsa.md): a server or CA key larger than 4096 bits fails */
 /*   the handshake. The largest size enabled in ssfrsa_opt.h sets the RSA verify stack (about   */
-/*   10.9 KB at 4096, 5.7 KB at 2048 on Cortex-M4 -Os), whatever key size the server uses.      */
-/* - Stack: pollOpen() needs about 14.4 KB below its caller's frame (Cortex-M4, gcc -Os, static */
+/*   8.8 KB at 4096, 4.7 KB at 2048 on Cortex-M4 -Os), whatever key size the server uses.       */
+/* - Stack: pollOpen() needs about 12.4 KB below its caller's frame (Cortex-M4, gcc -Os, static */
 /*   call graph, SSF_X509_CONFIG_MAX_CHAIN_DEPTH 6). The peak is chain verification: the 2.1 KB */
 /*   SSFX509VerifyChainPurpose frame (two parsed certificates) over an RSA signature check.     */
-/*   Largest enabled RSA size 3072: 11.9 KB; 2048: 10.4 KB (an ECDSA check is then the          */
+/*   Largest enabled RSA size 3072: 11.0 KB; 2048: 10.4 KB (an ECDSA check is then the          */
 /*   deepest). Not included: the inner transport's functions, the trace callback, libc and the  */
 /*   port layer. Key exchange and the other steps need less. Each chain entry adds 2 bytes.     */
 /*   With an RSA client key the client CertificateVerify signature sets the peak instead: about */

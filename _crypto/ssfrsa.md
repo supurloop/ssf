@@ -68,9 +68,9 @@ comparable security.
 
   | Largest enabled size | Verify path stack |
   |---|---|
-  | 4096 (default) | ~10.9 KB |
-  | 3072 | ~8.3 KB |
-  | 2048 | ~5.7 KB |
+  | 4096 (default) | ~8.8 KB |
+  | 3072 | ~6.8 KB |
+  | 2048 | ~4.7 KB |
 
   Most public CA chains are RSA-2048 or RSA-4096, so a TLS client that must reach
   arbitrary servers keeps 4096 on; a device that talks only to its own infrastructure can

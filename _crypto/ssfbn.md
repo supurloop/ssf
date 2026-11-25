@@ -920,7 +920,10 @@ void SSFBNModExpMontPub(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SS
 ```
 Variable-time `r = aᵉ mod m` via left-to-right binary square-and-multiply; like
 `SSFBNModExp`, `e == 0` gives `1 mod m` (`0` when `m == 1`). Every iteration
-squares; the multiply step runs only when the current bit of `e` is `1`. Typical 2–3×
+squares; the multiply step runs only when the current bit of `e` is `1`. The top bit of `e`
+is always `1`, so the running value starts at `a` (in Montgomery form) and an `L`-bit
+exponent costs `L − 1` squares; the two working residues are modulus-width (OPTIMIZE BN-02).
+Typical 2–3×
 faster than `SSFBNModExp` for low-Hamming-weight exponents (e.g., RSA's `e = 65537 =
 0x10001` has only two set bits out of 17). As with `SSFBNModExp`, `m->len` (or
 `ctx->len`) must not exceed [`SSF_BN_MAX_MOD_LIMBS`](#ssf-bn-max-mod-limbs).

@@ -371,7 +371,24 @@ BN-02  STACK / CODE / PERF  SSFBNModExpMontPub frame 3,128 -> 1,072 B; RSA verif
   Change   : size them SSF_BN_MAX_MOD_LIMBS; result = aM (the top bit of e is 1); drop
              one; loop from eBits-2.
   Risk     : low; public-exponent path only (verify, blinding r^e).
-  Status   : OPEN
+  Correction (2026-11-25): BN-02 alone, measured on 700e43f, is -2,056 B on RSA verify, not
+             -2,088; chain and CMS verify gain less where an ECDSA check is the deeper branch.
+  Status   : DONE (2026-11-25): as specified (result = SSFBNCopy of aM). Contract,
+             preconditions and leakage (only e's bit length and weight) unchanged. Measured
+             (M4 -Os): frame 3,128 -> 1,072 B (4096), 2,360 -> 816 (3072), 1,592 -> 560
+             (2048); RSA verify PKCS#1 10,576 -> 8,520 B (3072: 8,016 -> 6,472; 2048: 5,456
+             -> 4,424), PSS 10,856 -> 8,800. Unit tests on: chain verify 13,448 -> 11,392
+             (3072: 10,888 -> 9,968; 2048 unchanged, ECDSA deeper), CMS verify 15,640 ->
+             13,584, TLS client chain verification 14,432 -> 12,376 (3072: 11,872 -> 10,952).
+             Unit tests off, ECDSA verify becomes the chain's deepest branch: chain 12,944 ->
+             12,072 at 4096, 0 at 3072 / 2048. RSA sign, keygen and the TLS client's RSA
+             signing peak: 0. ssfbn code -36 B. Host (-O2): RSA-2048 verify 81.5 -> 72.1 us
+             (-11.5%), RSA-4096 369 -> ~325 us (-12%); e = 3 -19%. Tests: a width sweep up to
+             SSF_BN_MAX_MOD_LIMBS (the old parity tests stop at P-256) against SSFBNModExp,
+             bases 0 / 1 / m-1 / random, e = 1, 2, 3, 65537, a top limb of 1 and n limbs,
+             m = 1; passes on HEAD (a behaviour guard). Mutants under ASan, block run first: 6
+             of 7 killed by it (loop start, skipped bit 0, no copy, Mont(1) start, result or aM
+             one limb short); the 7th (no e = 0 branch) by the existing edge tests.
 
 BN-03  STACK  k=3 windows: ModExpMont 9,400 -> 5,240 B (2,680 B with BN-01); +5%
        exponentiation time (host; k=2 costs +18%)                                        M

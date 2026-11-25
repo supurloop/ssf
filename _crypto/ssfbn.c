@@ -3068,8 +3068,8 @@ void SSFBNModExpPub(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBN_
 /* --------------------------------------------------------------------------------------------- */
 void SSFBNModExpMontPub(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBNMont_t *ctx)
 {
-    SSFBN_DEFINE(result, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(aM, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(result, SSF_BN_MAX_MOD_LIMBS); /* residues: at ctx->len, never above it */
+    SSFBN_DEFINE(aM, SSF_BN_MAX_MOD_LIMBS);
     uint32_t eBits;
     int32_t i;
 
@@ -3107,15 +3107,12 @@ void SSFBNModExpMontPub(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SS
     /* Convert a to Montgomery form once; every subsequent MontMul keeps result in Mont form. */
     SSFBNMontConvertIn(&aM, a, ctx);
 
-    /* Initialize result = Montgomery(1) = R mod m. */
-    {
-        SSFBN_DEFINE(one, SSF_BN_MAX_LIMBS);
-        SSFBNSetOne(&one, ctx->len);
-        SSFBNMontConvertIn(&result, &one, ctx);
-    }
+    /* The top bit of e is set: starting from Mont(1) would square it and multiply by aM, */
+    /* giving aM, so start there and process the remaining bits. */
+    SSFBNCopy(&result, &aM);
 
     /* Left-to-right binary square-and-multiply; leaks Hamming weight of e (public-only). */
-    for (i = (int32_t)(eBits - 1u); i >= 0; i--)
+    for (i = (int32_t)eBits - 2; i >= 0; i--)
     {
         SSFBNMontSquare(&result, &result, ctx);
         /* Is bit i of e set? */

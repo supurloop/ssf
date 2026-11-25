@@ -4554,6 +4554,103 @@ void SSFBNUnitTest(void)
         SSF_ASSERT((r.len == n) && SSFBNIsOne(&r));
     }
 
+    /* ---- BN-02: SSFBNModExpPub / ModExpMontPub equal SSFBNModExp up to the widest modulus ---- */
+    {
+        SSFBN_DEFINE(m, SSF_BN_MAX_MOD_LIMBS);
+        SSFBN_DEFINE(a, SSF_BN_MAX_MOD_LIMBS);
+        SSFBN_DEFINE(e, SSF_BN_MAX_MOD_LIMBS);
+        SSFBN_DEFINE(rPub, SSF_BN_MAX_MOD_LIMBS); /* exactly modulus width: no spare capacity */
+        SSFBN_DEFINE(rRef, SSF_BN_MAX_MOD_LIMBS);
+        SSFBNMONT_DEFINE(ctx, SSF_BN_MAX_MOD_LIMBS);
+        static const uint16_t widths[] = { 1u, 2u, 3u, 7u, SSF_BN_HALF_MOD_LIMBS,
+                                           SSF_BN_HALF_MOD_LIMBS + 1u, SSF_BN_MAX_MOD_LIMBS - 1u,
+                                           SSF_BN_MAX_MOD_LIMBS };
+        uint32_t x = 0x2545F491u;
+        uint16_t w;
+        uint16_t n;
+        uint16_t k;
+        uint16_t eLen;
+        uint8_t base;
+        uint8_t ex;
+
+        for (w = 0u; w < (uint16_t)(sizeof(widths) / sizeof(widths[0])); w++)
+        {
+            n = widths[w];
+            if ((n < 1u) || (n > SSF_BN_MAX_MOD_LIMBS)) continue;
+            SSFBNSetZero(&m, n);
+            for (k = 0u; k < n; k++)
+            {
+                x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+                m.limbs[k] = x;
+            }
+            m.limbs[0] |= 1u;
+            m.limbs[n - 1u] |= 0x80000000u;
+            SSFBNMontInit(&ctx, &m);
+
+            /* Bases: 0, 1, m - 1 and random below m */
+            for (base = 0u; base < 4u; base++)
+            {
+                if (base == 0u) SSFBNSetZero(&a, n);
+                else if (base == 1u) SSFBNSetOne(&a, n);
+                else if (base == 2u) { SSFBNCopy(&a, &m); a.limbs[0] -= 1u; }
+                else
+                {
+                    for (k = 0u; k < n; k++)
+                    {
+                        x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+                        a.limbs[k] = x;
+                    }
+                    a.len = n;
+                    a.limbs[n - 1u] &= 0x7FFFFFFFu;
+                }
+
+                /* Exponents: 1, 2, 3, 65537 (a 1 bit, then the first square and multiply), */
+                /* 2^32 + random (a multi-limb exponent whose top limb is 1), random n limbs */
+                for (ex = 0u; ex < 6u; ex++)
+                {
+                    eLen = (ex == 4u) ? 2u : ((ex == 5u) ? n : 1u);
+                    SSFBNSetZero(&e, eLen);
+                    if (ex < 4u)
+                    {
+                        static const uint32_t small[] = { 1u, 2u, 3u, 65537u };
+                        e.limbs[0] = small[ex];
+                    }
+                    else
+                    {
+                        for (k = 0u; k < eLen; k++)
+                        {
+                            x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+                            e.limbs[k] = x;
+                        }
+                        if (ex == 4u) e.limbs[1] = 1u;
+                    }
+
+                    SSFBNModExp(&rRef, &a, &e, &m);
+                    SSFBNModExpPub(&rPub, &a, &e, &m);
+                    SSF_ASSERT((rPub.len == n) && (SSFBNCmp(&rPub, &rRef) == 0));
+                    SSFBNSetZero(&rPub, 1u);
+                    SSFBNModExpMontPub(&rPub, &a, &e, &ctx);
+                    SSF_ASSERT((rPub.len == n) && (SSFBNCmp(&rPub, &rRef) == 0));
+                }
+            }
+        }
+
+        /* e = 1 returns a itself; a below m at full width */
+        SSFBNSetUint32(&e, 1u, 1u);
+        SSFBNModExpMontPub(&rPub, &a, &e, &ctx);
+        SSF_ASSERT(SSFBNCmp(&rPub, &a) == 0);
+
+        /* m = 1: everything is 0, for e = 0 and e >= 1 */
+        SSFBNSetUint32(&m, 1u, 1u);
+        SSFBNSetUint32(&a, 5u, 1u);
+        SSFBNSetUint32(&e, 3u, 1u);
+        SSFBNModExpPub(&rPub, &a, &e, &m);
+        SSF_ASSERT((rPub.len == 1u) && SSFBNIsZero(&rPub));
+        SSFBNSetZero(&e, 1u);
+        SSFBNModExpPub(&rPub, &a, &e, &m);
+        SSF_ASSERT((rPub.len == 1u) && SSFBNIsZero(&rPub));
+    }
+
     /* ---- AUDIT BN-7: MontInit's R^2 is exact for 1024+ limb moduli (MAX_BITS >= 32768) ---- */
 #if SSF_BN_MAX_LIMBS >= 1024u
     {

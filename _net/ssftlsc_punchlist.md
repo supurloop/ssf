@@ -916,6 +916,18 @@ is rejected.
       #error (572 builds, 571 does not). The run-time check on the server's key stays (the
       key comes from the network). A separate field was not used: about 550 B more RAM. Unit
       tests (both builds) and the interop set (156 / 156) unchanged.
+- [x] The unit test passed only at the default receive size; smaller SSF_TLSC_CONFIG_MAX_RECV_RECORD
+      builds tripped size assumptions (found running it at 512). Done, TDD (test code and option
+      documentation only): tests that need records or messages larger than a build can take
+      skip themselves, judged as the client does (SSF_TLSC_UT_RECORD_FITS for protected records,
+      SSF_TLSC_UT_PLAIN_FITS for plaintext records and handshake messages): the RFC 8448 replays
+      and the flight negative tests below 657, the socket HRR test below 109, the HRR cases of
+      the fragmented-handshake test below 91. Red at 64 and 512, then green at 64 .. 16383
+      (19 sizes plus every guard boundary, ASan clean). The option's comment in ssftlsc_opt.h
+      now says what the receive size must hold: the server's largest handshake message (its
+      Certificate chain, 4,106 bytes for test.mosquitto.org's Let's Encrypt chain), its
+      plaintext ServerHello / HRR, and its records unless it honors record_size_limit (an
+      OpenSSL s_server sent a 1.1 KB record to a 1024-byte build); too small is internal_error.
 - [ ] SSF conventions: `_SSFTLSC*` static names, 99-column comment boxes, copyright year,
       remove "Phase / M3" milestone comments; documentation `ssftlsc.md`; update `ssftls.md`
       ("no X.509 in SSF" is out of date).

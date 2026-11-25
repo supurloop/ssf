@@ -22,7 +22,17 @@ extern "C" {
 
 /* Largest record plaintext received, in bytes. RFC 8446 5.1 lets a peer send up to 2^14 (16384) */
 /* unless a smaller limit is negotiated, so keep 16384 unless every server is known to send less. */
-/* Sizes the session's receive buffers (about 2 x this). 64..16384.                             */
+/* Largest record plaintext received, in bytes; advertised to the server as record_size_limit  */
+/* (RFC 8449). Sizes the session's receive buffers (about 2 x this). 64..16384. It must hold:   */
+/* - the server's largest handshake message whole, however it splits it into records: usually */
+/*   its Certificate, i.e. its certificate chain (a few hundred bytes for one EC certificate,  */
+/*   2-5 KB with a public CA; test.mosquitto.org's Let's Encrypt chain is 4,106 bytes);        */
+/* - its plaintext ServerHello / HelloRetryRequest (90-200 bytes; record_size_limit does not   */
+/*   apply to them);                                                                           */
+/* - every record it sends, unless it honors record_size_limit (GnuTLS does; OpenSSL s_server  */
+/*   was seen sending larger records).                                                         */
+/* Too small, the handshake fails with internal_error and a trace ("fragment too large",       */
+/* "do not fit"). Keep the default unless the server and its certificate chain are known.     */
 #ifndef SSF_TLSC_CONFIG_MAX_RECV_RECORD
 #define SSF_TLSC_CONFIG_MAX_RECV_RECORD (16384u)
 #endif

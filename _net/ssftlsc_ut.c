@@ -98,6 +98,17 @@ typedef int SSFTLSCUTFd_t;
 #endif
 #define SSF_TLSC_UT_WAIT_TICKS       (SSF_TICKS_PER_SEC * 5u)
 
+/* True if a protected record of len bytes (header included) fits this build's receive buffer, */
+/* which takes a TLSInnerPlaintext of SSF_TLSC_CONFIG_MAX_RECV_RECORD + 1 plus the tag. Tests   */
+/* that need larger records or messages skip themselves in smaller receive builds.             */
+#define SSF_TLSC_UT_RECORD_FITS(len) \
+    (((size_t)(len) - 5u) <= ((size_t)SSF_TLSC_CONFIG_MAX_RECV_RECORD + 1u + SSF_TLS_AEAD_TAG_SIZE))
+
+/* True if len bytes fit this build's reassembly buffer (hsBuf, SSF_TLSC_CONFIG_MAX_RECV_RECORD */
+/* + 1): what a plaintext record's content (before keys) and any handshake message, however   */
+/* split into records, must fit.                                                               */
+#define SSF_TLSC_UT_PLAIN_FITS(len) ((size_t)(len) <= ((size_t)SSF_TLSC_CONFIG_MAX_RECV_RECORD + 1u))
+
 static SSFNetSock_t _utSock;
 static SSFTLSCSession_t _utSession;
 static SSFTLSCSession_t _utSession2;
@@ -794,6 +805,10 @@ static void _SSFTLSCUTClientHelloRetry(SSFTLSCUTFd_t l, uint16_t port)
     int ck;
     static const char *const alpnBoth[] = { "x-amzn-mqtt-ca", "mqtt" };
 
+    /* The HelloRetryRequests below are plaintext records of at least 4 + 2 + 32 + 1 + 32 (session */
+    /* id) + 2 + 1 + 2 + 6 (supported_versions) + 6 (key_share) + 6 + 16 (cookie) = 110 bytes   */
+    if (!SSF_TLSC_UT_PLAIN_FITS(110u)) return;
+
     /* ---- Small cookie: ClientHello2 must match ClientHello1 field for field ---- */
     /* ALPN is set, so ClientHello2 must carry it unchanged too. */
     SSF_ASSERT(SSFTLSCSetALPN(&_utSession, alpnBoth, 2u));
@@ -1041,71 +1056,77 @@ static void _SSFTLSCUTFragmentedHandshake(SSFTLSCUTFd_t l, uint16_t port)
     size_t hrrLen;
     size_t n;
 
-    /* ---- Header split across records, then the rest: ClientHello2 follows ---- */
+    /* The first four cases send a HelloRetryRequest without a cookie, a message of 4 + 2 + 32 */
+    /* + 1 + 32 + 2 + 1 + 2 + 6 + 6 = 88 bytes, which must fit hsBuf whole however split; the  */
+    /* fourth adds an empty Certificate header to its record: 92 bytes of plaintext            */
+    if (SSF_TLSC_UT_PLAIN_FITS(92u))
     {
-        static const size_t frag[] = { 2u, 65535u };
+        /* ---- Header split across records, then the rest: ClientHello2 follows ---- */
+        {
+            static const size_t frag[] = { 2u, 65535u };
 
-        peer = _SSFTLSCUTRunToClientHello(l, port, ch1Rec, sizeof(ch1Rec), &ch1);
-        hrrLen = _SSFTLSCUTBuildHrr(hrrRec, sizeof(hrrRec), &ch1,
-                                    SSF_TLS_CS_AES_128_GCM_SHA256, 0u);
-        _SSFTLSCUTSendFragments(peer, &hrrRec[5], hrrLen - 5u, frag, 2u, false);
-        n = _SSFTLSCUTPollForRecord(peer, rec, sizeof(rec), &r);
-        SSF_ASSERT((n > 9u) && (rec[0] == SSF_TLS_CT_HANDSHAKE) &&
-                   (rec[5] == SSF_TLS_HS_CLIENT_HELLO));
-        t->close(t);
-        (void)SSF_TLSC_UT_CLOSE(peer);
-    }
+            peer = _SSFTLSCUTRunToClientHello(l, port, ch1Rec, sizeof(ch1Rec), &ch1);
+            hrrLen = _SSFTLSCUTBuildHrr(hrrRec, sizeof(hrrRec), &ch1,
+                                        SSF_TLS_CS_AES_128_GCM_SHA256, 0u);
+            _SSFTLSCUTSendFragments(peer, &hrrRec[5], hrrLen - 5u, frag, 2u, false);
+            n = _SSFTLSCUTPollForRecord(peer, rec, sizeof(rec), &r);
+            SSF_ASSERT((n > 9u) && (rec[0] == SSF_TLS_CT_HANDSHAKE) &&
+                       (rec[5] == SSF_TLS_HS_CLIENT_HELLO));
+            t->close(t);
+            (void)SSF_TLSC_UT_CLOSE(peer);
+        }
 
-    /* ---- One byte per record: ClientHello2 follows ---- */
-    {
-        static const size_t frag[] = { 1u };
+        /* ---- One byte per record: ClientHello2 follows ---- */
+        {
+            static const size_t frag[] = { 1u };
 
-        peer = _SSFTLSCUTRunToClientHello(l, port, ch1Rec, sizeof(ch1Rec), &ch1);
-        hrrLen = _SSFTLSCUTBuildHrr(hrrRec, sizeof(hrrRec), &ch1,
-                                    SSF_TLS_CS_AES_128_GCM_SHA256, 0u);
-        _SSFTLSCUTSendFragments(peer, &hrrRec[5], hrrLen - 5u, frag, 1u, false);
-        n = _SSFTLSCUTPollForRecord(peer, rec, sizeof(rec), &r);
-        SSF_ASSERT((n > 9u) && (rec[0] == SSF_TLS_CT_HANDSHAKE) &&
-                   (rec[5] == SSF_TLS_HS_CLIENT_HELLO));
-        t->close(t);
-        (void)SSF_TLSC_UT_CLOSE(peer);
-    }
+            peer = _SSFTLSCUTRunToClientHello(l, port, ch1Rec, sizeof(ch1Rec), &ch1);
+            hrrLen = _SSFTLSCUTBuildHrr(hrrRec, sizeof(hrrRec), &ch1,
+                                        SSF_TLS_CS_AES_128_GCM_SHA256, 0u);
+            _SSFTLSCUTSendFragments(peer, &hrrRec[5], hrrLen - 5u, frag, 1u, false);
+            n = _SSFTLSCUTPollForRecord(peer, rec, sizeof(rec), &r);
+            SSF_ASSERT((n > 9u) && (rec[0] == SSF_TLS_CT_HANDSHAKE) &&
+                       (rec[5] == SSF_TLS_HS_CLIENT_HELLO));
+            t->close(t);
+            (void)SSF_TLSC_UT_CLOSE(peer);
+        }
 
-    /* ---- A ChangeCipherSpec between fragments: unexpected_message ---- */
-    {
-        static const size_t frag[] = { 10u, 65535u };
+        /* ---- A ChangeCipherSpec between fragments: unexpected_message ---- */
+        {
+            static const size_t frag[] = { 10u, 65535u };
 
-        peer = _SSFTLSCUTRunToClientHello(l, port, ch1Rec, sizeof(ch1Rec), &ch1);
-        hrrLen = _SSFTLSCUTBuildHrr(hrrRec, sizeof(hrrRec), &ch1,
-                                    SSF_TLS_CS_AES_128_GCM_SHA256, 0u);
-        _SSFTLSCUTSendFragments(peer, &hrrRec[5], hrrLen - 5u, frag, 2u, true);
-        n = _SSFTLSCUTPollForRecord(peer, rec, sizeof(rec), &r);
-        SSF_ASSERT(r == SSF_NET_IO_ERROR);
-        SSF_ASSERT((n == 7u) && (rec[0] == SSF_TLS_CT_ALERT) &&
-                   (rec[6] == SSF_TLS_ALERT_UNEXPECTED_MSG));
-        t->close(t);
-        (void)SSF_TLSC_UT_CLOSE(peer);
-    }
+            peer = _SSFTLSCUTRunToClientHello(l, port, ch1Rec, sizeof(ch1Rec), &ch1);
+            hrrLen = _SSFTLSCUTBuildHrr(hrrRec, sizeof(hrrRec), &ch1,
+                                        SSF_TLS_CS_AES_128_GCM_SHA256, 0u);
+            _SSFTLSCUTSendFragments(peer, &hrrRec[5], hrrLen - 5u, frag, 2u, true);
+            n = _SSFTLSCUTPollForRecord(peer, rec, sizeof(rec), &r);
+            SSF_ASSERT(r == SSF_NET_IO_ERROR);
+            SSF_ASSERT((n == 7u) && (rec[0] == SSF_TLS_CT_ALERT) &&
+                       (rec[6] == SSF_TLS_ALERT_UNEXPECTED_MSG));
+            t->close(t);
+            (void)SSF_TLSC_UT_CLOSE(peer);
+        }
 
-    /* ---- More handshake bytes after the HRR in its record (the next message would ---- */
-    /* ---- span a key change, RFC 8446 5.1): unexpected_message                       ---- */
-    {
-        static const size_t frag[] = { 65535u };
-        static uint8_t msgs[1200];
+        /* ---- More handshake bytes after the HRR in its record (the next message would ---- */
+        /* ---- span a key change, RFC 8446 5.1): unexpected_message                       ---- */
+        {
+            static const size_t frag[] = { 65535u };
+            static uint8_t msgs[1200];
 
-        peer = _SSFTLSCUTRunToClientHello(l, port, ch1Rec, sizeof(ch1Rec), &ch1);
-        hrrLen = _SSFTLSCUTBuildHrr(hrrRec, sizeof(hrrRec), &ch1,
-                                    SSF_TLS_CS_AES_128_GCM_SHA256, 0u);
-        memcpy(msgs, &hrrRec[5], hrrLen - 5u);
-        msgs[hrrLen - 5u] = 0x0b; msgs[hrrLen - 4u] = 0x00;         /* An empty Certificate */
-        msgs[hrrLen - 3u] = 0x00; msgs[hrrLen - 2u] = 0x00;
-        _SSFTLSCUTSendFragments(peer, msgs, hrrLen - 1u, frag, 1u, false);
-        n = _SSFTLSCUTPollForRecord(peer, rec, sizeof(rec), &r);
-        SSF_ASSERT(r == SSF_NET_IO_ERROR);
-        SSF_ASSERT((n == 7u) && (rec[0] == SSF_TLS_CT_ALERT) &&
-                   (rec[6] == SSF_TLS_ALERT_UNEXPECTED_MSG));
-        t->close(t);
-        (void)SSF_TLSC_UT_CLOSE(peer);
+            peer = _SSFTLSCUTRunToClientHello(l, port, ch1Rec, sizeof(ch1Rec), &ch1);
+            hrrLen = _SSFTLSCUTBuildHrr(hrrRec, sizeof(hrrRec), &ch1,
+                                        SSF_TLS_CS_AES_128_GCM_SHA256, 0u);
+            memcpy(msgs, &hrrRec[5], hrrLen - 5u);
+            msgs[hrrLen - 5u] = 0x0b; msgs[hrrLen - 4u] = 0x00;         /* An empty Certificate */
+            msgs[hrrLen - 3u] = 0x00; msgs[hrrLen - 2u] = 0x00;
+            _SSFTLSCUTSendFragments(peer, msgs, hrrLen - 1u, frag, 1u, false);
+            n = _SSFTLSCUTPollForRecord(peer, rec, sizeof(rec), &r);
+            SSF_ASSERT(r == SSF_NET_IO_ERROR);
+            SSF_ASSERT((n == 7u) && (rec[0] == SSF_TLS_CT_ALERT) &&
+                       (rec[6] == SSF_TLS_ALERT_UNEXPECTED_MSG));
+            t->close(t);
+            (void)SSF_TLSC_UT_CLOSE(peer);
+        }
     }
 
     /* ---- A message longer than this build can hold: internal_error, from its header ---- */
@@ -2726,6 +2747,8 @@ static void _SSFTLSCUTRfc8448Simple(void)
     uint16_t k;
     bool hsChecked = false;
 
+    if (!SSF_TLSC_UT_RECORD_FITS(sizeof(_utR8FlightRecord))) return;  /* The trace's flight */
+
     SSFTLSCInit(s, &_utFake, NULL);
     SSFTLSCSetUnauthenticated(s, true);
     _SSFTLSCInjectClientHelloForTest(_utR8ClientHello, sizeof(_utR8ClientHello), _utR8ClientPriv);
@@ -3381,6 +3404,8 @@ static void _SSFTLSCUTRfc8448Compat(void)
     size_t off = 0;
     size_t at;
 
+    if (!SSF_TLSC_UT_RECORD_FITS(sizeof(_utR8s7FlightRecord))) return;  /* The trace's flight */
+
     _UTR8Start(s, _utR8s7ClientHello, sizeof(_utR8s7ClientHello), _utR8s7ClientPriv, NULL, 0u,
                NULL);
     _UTQueueRecord(_utR8s7ShRecord, sizeof(_utR8s7ShRecord));
@@ -3403,6 +3428,8 @@ static void _SSFTLSCUTRfc8448Hrr(void)
     SSFTLSCSession_t *s = &_utSession2;
     size_t off = 0;
     size_t at;
+
+    if (!SSF_TLSC_UT_RECORD_FITS(sizeof(_utR8s5FlightRecord))) return;  /* The trace's flight */
 
     _UTR8Start(s, _utR8s5ClientHello, sizeof(_utR8s5ClientHello), _utR8s5ClientPriv,
                _utR8s5ClientHello2, sizeof(_utR8s5ClientHello2), _utR8s5P256Priv);
@@ -3446,6 +3473,8 @@ static void _SSFTLSCUTRfc8448ClientAuth(void)
     uint16_t sigLen;
     static const char ctx[] = "TLS 1.3, client CertificateVerify";
     static uint8_t content[64 + sizeof(ctx) + 32];
+
+    if (!SSF_TLSC_UT_RECORD_FITS(sizeof(_utR8s6FlightRecord))) return;  /* The trace's flight */
 
     SSF_ASSERT(SSFPKeyDecodeDER(_utClientRSA2048Key, sizeof(_utClientRSA2048Key), &key));
     _UTR8Start(s, _utR8s6ClientHello, sizeof(_utR8s6ClientHello), _utR8s6ClientPriv, NULL, 0u,
@@ -3706,6 +3735,9 @@ static void _SSFTLSCUTServerFlightNegative(void)
     const size_t cv = SSF_TLSC_UT_R8_CV_AT;
     const size_t fin = SSF_TLSC_UT_R8_FIN_AT;
     const size_t cert = SSF_TLSC_UT_R8_CERT_AT;
+
+    /* The trace's flight, re-encrypted, a few bytes longer in some cases */
+    if (!SSF_TLSC_UT_RECORD_FITS(sizeof(_utR8FlightRecord) + 16u)) return;
 
     /* ---- Control: the flight unchanged completes, with the trace's secrets wiped as used ---- */
     _utScrubCount = 0;

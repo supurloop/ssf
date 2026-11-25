@@ -95,6 +95,12 @@ extern "C" {
 /* - Trust anchors are DER certificates in caller memory (SSFTLSCTrustStore_t). From PEM, a     */
 /*   single certificate or a CA bundle, SSFTLSCTrustFromPEM() builds the store; it fails closed */
 /*   on anything that is not a certificate.                                                     */
+/* - The server's certificate must be X.509 v3 with a subjectAltName for the host name (or IP  */
+/*   address) connected to; the Common Name is never used (RFC 9525). Public CAs always issue   */
+/*   such certificates. A self-made broker certificate often lacks them (older `openssl x509   */
+/*   -req` without an extension file gives v1): issue it with e.g.                             */
+/*   -addext "subjectAltName=DNS:broker.example" (req) or an -extfile line (x509). The trace   */
+/*   says which rule a refused certificate broke.                                               */
 /* - ALPN (RFC 7301) is optional: SSFTLSCSetALPN() with the protocols to offer, SSFTLSCGetALPN() */
 /*   for the server's choice after the handshake.                                              */
 /* - IPv4 only (ssfnet.h): open() refuses an IPv6 literal host whatever the inner transport.     */

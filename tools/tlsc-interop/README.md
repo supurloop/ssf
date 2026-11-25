@@ -15,7 +15,7 @@ Linux, `gcc`, `ninja`, `python3`, `openssl` (1.1.1 or later) and `gnutls-serv` (
 ## Running
 
 ```
-tools/tlsc-interop/run.sh               # local rows, about 30 s
+tools/tlsc-interop/run.sh               # local rows (158), about 30 s
 tools/tlsc-interop/run.sh --public      # also test.mosquitto.org
 tools/tlsc-interop/run.sh --self-test   # a client with AES-128-CCM broken must fail exactly the CCM rows
 tools/tlsc-interop/run.sh --asan        # drivers built against the ASan / UBSan objects
@@ -34,6 +34,7 @@ certificates (`gen-certs.sh`, valid 30 days, in a temporary directory) and runs 
 | alpn | 10 | server choices, no overlap (`no_application_protocol`), none offered, after an HRR |
 | mtls | 14 | client certificates of every key type, a chain with an intermediate, schemes the server refuses (empty Certificate, `certificate_required`), another CA (`unknown_ca`) |
 | trust | 5 | trust anchors loaded from the system CA bundle and the test CAs with `SSFTLSCTrustFromPEM()` |
+| cert | 2 | server certificates refused by policy, with the trace's explanation: X.509 v1, v3 without subjectAltName |
 | keyupdate | 5 | server KeyUpdates (requested or not), the client rekeying every 3 records |
 | record size | 2 | server records of at most 512 bytes; a 512-byte `record_size_limit` splitting an RSA-4096 client flight |
 | public | 6 | test.mosquitto.org: 8886 (Let's Encrypt, system roots) with MQTT CONNACK; 8883 (refused: its certificate is X.509 v1); 8884 mutual TLS |

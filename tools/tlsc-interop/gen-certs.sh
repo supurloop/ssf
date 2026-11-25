@@ -6,6 +6,7 @@
 #   Client side : cca (P-256 CA); clientAuth leaves p256, p384, ed (Ed25519, ECDSA-signed),
 #                 rsa2k, rsa4k; cint (intermediate CA) and p256int, with p256chain.pem
 #                 (leaf then intermediate).
+#   Refused      : v1leaf (X.509 v1), nosanleaf (v3, no subjectAltName).
 set -e
 D=$1; mkdir -p "$D"; cd "$D"
 cat > ca.ext <<X
@@ -67,4 +68,11 @@ leaf rsa4k rsa4k ssf-interop-client-rsa4k cca cli.ext
 leaf cint p256 ssf-interop-client-int cca int.ext
 leaf p256int p256 ssf-interop-client-p256int cint cli.ext
 cat p256int.pem cint.pem > p256chain.pem; cp p256int.key p256chain.key
+# Server certificates the client must refuse: X.509 v1 (no extensions), and v3 without a
+# subjectAltName (the host only in the Common Name)
+key v1leaf p256
+openssl req -x509 -x509v1 -key v1leaf.key -subj "/CN=localhost" -CA ca.pem -CAkey ca.key -days 30 \
+    -sha256 -out v1leaf.pem 2>/dev/null
+sed '/^subjectAltName/d' srv.ext > nosan.ext
+leaf nosanleaf p256 localhost ca nosan.ext
 rm -f *.csr *.srl

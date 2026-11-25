@@ -161,6 +161,16 @@ if SYSTEM:
     trust_row('system roots + test CAs, RSA leaf', 'rsaleaf', [SYSTEM, C('ca.pem'), C('rsaca.pem')], dict(tls=1, echo=23))
     trust_row('system roots only, RSA leaf', 'rsaleaf', [SYSTEM], dict(tls=0, verify=8, sent=48))
 
+# ---- Server certificates refused by policy, with the trace saying why ----
+def cert_row(name, leaf, want):
+    def run():
+        p = free_port(); s = server('openssl', p, C(leaf + '.pem'), C(leaf + '.key'))
+        try: return driver(LOCAL + ['--port', str(p), '--ca', C('ca.pem')])
+        finally: s.kill()
+    ROWS.append(('cert ' + name, run, want))
+cert_row('X.509 v1 server certificate', 'v1leaf', dict(tls=0, verify=2, sent=43, hint='v1'))
+cert_row('v3 without subjectAltName', 'nosanleaf', dict(tls=0, verify=16, sent=42, hint='san'))
+
 # ---- KeyUpdate ----
 def ku_server_row(name, script, want):
     """s_server sends lines and k / K commands typed on its stdin; the client acks each line."""
@@ -209,7 +219,7 @@ if PUBLIC:
     if SYSTEM:
         ROWS.append(('public 8886 Let\'s Encrypt, system roots, MQTT', pub(8886, ['--ca', SYSTEM]), dict(tls=1, mqtt=1)))
     ROWS.append(('public 8883 X.509 v1 server certificate refused (punch list)', pub(8883, ['--ca', MCA]),
-                 dict(tls=0, verify=2, sent=43)))
+                 dict(tls=0, verify=2, sent=43, hint='v1')))
     for k, sch in (('p256', '0x0403'), ('rsa2k', '0x0804')):
         ROWS.append(('public 8884 mutual TLS, %s client (server unauthenticated: v1 certificate)' % k,
                      pub(8884, ['--unauth', '--cert', os.path.join(CACHE, k + '.crt'), '--key', os.path.join(CACHE, k + '.key')]),

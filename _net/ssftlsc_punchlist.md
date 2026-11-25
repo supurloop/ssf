@@ -819,13 +819,23 @@ is rejected.
       the 118 system roots loaded with SSFTLSCTrustFromPEM()): TLS 1.3 ChaCha20-Poly1305 /
       x25519 and MQTT CONNACK accepted (ChaCha20's first real-world coverage).
       test.mosquitto.org:8883 fails, see the X.509 v1 item. Whole set about 1 minute.
-- [ ] test.mosquitto.org:8883 serves an X.509 v1 certificate (no extensions, no
+- [x] test.mosquitto.org:8883 serves an X.509 v1 certificate (no extensions, no
       subjectAltName; the host name only in CN). OpenSSL accepts it; ssfx509 requires v3 and
       matches host names by subjectAltName only, so the client refuses it
       (SSF_X509_VERIFY_ERR_VERSION, alert 43). By design, but self-made broker certificates
       are often v1 (older `openssl x509 -req` without an extension file, as in many
       Mosquitto guides). Options: keep (document), or an opt-in to accept a v1 leaf with a CN
       host name match. Outside the TLS client (ssfx509). Found during the interop set.
+      Decided: keep the policy (v3 required, host matched by subjectAltName only), make the
+      failure obvious. Done, TDD: the chain-failure trace now explains the two refusals a
+      self-made broker certificate most often meets: "an X.509 v1 or v2 certificate: v3 with a
+      subjectAltName for the host is required" (code 2) and "no subjectAltName names the host;
+      the Common Name is not used" (code 16). ssftlsc.h states the requirement and the
+      broker-side fix (-addext / -extfile subjectAltName). Interop: gen-certs.sh makes a v1
+      leaf (`req -x509 -x509v1`; OpenSSL 4's `x509 -req` makes v3) and a v3 leaf without
+      subjectAltName; new rows expect verify=2 / alert 43 and verify=16 / alert 42 with the
+      explanation (red until the trace said it); the public 8883 row expects it too.
+      158 local + 6 public pass. Shipped text +0 B (the text exists only with tracing on).
 - [x] The interop test CAs (`ssf-test-ca`, `ssf-test-rsa-ca`) expire 2026-12-23: the harness
       should generate its certificates rather than keep these. Done with the harness:
       `gen-certs.sh` generates them per run.

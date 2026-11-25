@@ -3260,10 +3260,21 @@ static SSFNetIOResult_t _SSFTLSCDrive(SSFTLSCSession_t *s)
                 _TLSCVerifyChainWork(&s->cryptoWork);
                 if (!s->cryptoWork.chainVerifyOk)
                 {
+                    /* The two refusals a self-made broker certificate most often meets get */
+                    /* an explanation: ssfx509 requires v3, and matches the host by          */
+                    /* subjectAltName only.                                                  */
                     SSF_TLS_TRACE_CERT_ERROR(&s->trace, "Certificate chain verification failed: "
-                                             "code %d, cert[%u]",
+                                             "code %d, cert[%u]%s",
                                              (int)s->cryptoWork.chainVerifyErr.code,
-                                             s->cryptoWork.chainVerifyErr.certIdx);
+                                             s->cryptoWork.chainVerifyErr.certIdx,
+                                             (s->cryptoWork.chainVerifyErr.code ==
+                                              SSF_X509_VERIFY_ERR_VERSION) ?
+                                             " (an X.509 v1 or v2 certificate: v3 with a "
+                                             "subjectAltName for the host is required)" :
+                                             (s->cryptoWork.chainVerifyErr.code ==
+                                              SSF_X509_VERIFY_ERR_HOSTNAME) ?
+                                             " (no subjectAltName names the host; the Common "
+                                             "Name is not used)" : "");
                     if (s->cryptoWork.chainSeen > s->cryptoWork.chainLen)
                     {
                         SSF_TLS_TRACE_CERT_ERROR(&s->trace, "Certificate chain truncated: %u of %u "

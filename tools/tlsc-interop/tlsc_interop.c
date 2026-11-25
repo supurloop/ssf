@@ -18,7 +18,8 @@
 /*   --mqtt        send an MQTT 3.1.1 CONNECT, expect CONNACK 20 02 00 00                        */
 /*                                                                                               */
 /* Result fields: tls suite group hrr alpn scheme chain trust echo lines replies mqtt sent rcvd */
-/* verify emptycert kusent kurcvd (alerts: fatal descriptions; verify: chain error code).       */
+/* verify emptycert kusent kurcvd hint (alerts: fatal descriptions; verify: chain error code;  */
+/* hint: the client's explanation of a refused certificate, v1 / san / -).                       */
 /*                                                                                               */
 /* BSD-3-Clause License                                                                          */
 /* Copyright 2026 Supurloop Software LLC                                                         */
@@ -61,6 +62,7 @@ static SSFTLSCSession_t _tls;
 /* What the client's trace reported */
 static int _innerOpenFailed;
 static unsigned _group, _hrr, _sent, _rcvd, _verify, _emptyCert, _kuSent, _kuRcvd;
+static const char *_hint = "-";
 
 static void _Trace(SSFTLSTraceLevel_t lv, SSFTLSTraceCategory_t c, const char *m, void *u)
 {
@@ -75,6 +77,8 @@ static void _Trace(SSFTLSTraceLevel_t lv, SSFTLSTraceCategory_t c, const char *m
     if (sscanf(m, "RecvRecord: ALERT level=2 desc=%u", &a) == 1) _rcvd = a;
     if (sscanf(m, "Certificate chain verification failed: code %u", &a) == 1) _verify = a;
     if (strstr(m, "empty Certificate") != NULL) _emptyCert = 1;
+    if (strstr(m, "X.509 v1") != NULL) _hint = "v1";                 /* The trace's explanation */
+    if (strstr(m, "no subjectAltName names the host") != NULL) _hint = "san";
     if (strncmp(m, "KeyUpdate sent", 14) == 0) _kuSent++;
     if (strncmp(m, "KeyUpdate received", 18) == 0) _kuRcvd++;
     if ((getenv("TLSC_INTEROP_TRACE") != NULL) && (lv <= SSF_TLS_TRACE_WARN)) printf("  trace: %s\n", m);
@@ -295,10 +299,10 @@ int main(int argc, char **argv)
 
     chosen = (r == SSF_NET_IO_SUCCESS) ? SSFTLSCGetALPN(&_tls) : NULL;
     printf("result tls=%d suite=0x%04x group=0x%04x hrr=%u alpn=%s scheme=0x%04x chain=%u trust=%u echo=%zu "
-           "lines=%d replies=%d mqtt=%d sent=%u rcvd=%u verify=%u emptycert=%u kusent=%u kurcvd=%u\n",
+           "lines=%d replies=%d mqtt=%d sent=%u rcvd=%u verify=%u emptycert=%u kusent=%u kurcvd=%u hint=%s\n",
            r == SSF_NET_IO_SUCCESS, (r == SSF_NET_IO_SUCCESS) ? _tls.cipherSuite : 0u, _group, _hrr,
            (chosen != NULL) ? chosen : "-", _tls.clientScheme, chainCount, trustCount, echo, lines, replies,
-           mqtt, _sent, _rcvd, _verify, _emptyCert, _kuSent, _kuRcvd);
+           mqtt, _sent, _rcvd, _verify, _emptyCert, _kuSent, _kuRcvd, _hint);
     if (r == SSF_NET_IO_SUCCESS) (void)t->shutdown(t);
     t->close(t);
     SSFTLSCDeInit(&_tls);

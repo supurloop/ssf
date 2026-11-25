@@ -928,6 +928,18 @@ is rejected.
       Certificate chain, 4,106 bytes for test.mosquitto.org's Let's Encrypt chain), its
       plaintext ServerHello / HRR, and its records unless it honors record_size_limit (an
       OpenSSL s_server sent a 1.1 KB record to a 1024-byte build); too small is internal_error.
+- [ ] Potential RAM saving (optional; only matters in small builds: hsScratch is ~1.8% of the
+      default 43,264 B session, ~11% of a receive 2048 / send 768 one). The 768-byte handshake
+      scratch (hsScratch) is idle after the handshake, but sharing it with another buffer does
+      not work: each of its phases overlaps the send buffer or the receive buffers (and would
+      reintroduce the hidden phase ordering item 8 made explicit). The safe lever is sizing it
+      to the build: 768 covers a 255-byte host, the ALPN cap, RSA-4096 and cookie room at once.
+      A new SSF_TLSC_CONFIG_MAX_HOST_LEN (also shrinking the 256-byte host[] buffer) and a
+      size derived from it, SSF_TLS_CONFIG_MAX_ALPN_LEN, SSF_RSA_MAX_KEY_BITS and a cookie
+      reserve, with item 8's compile-time checks applied to it: about 450 B back for a build
+      with hosts of at most 64 bytes, RSA at most 2048 and about 256 bytes of cookie room. Cost:
+      a smaller cookie allowance (a larger cookie gets internal_error, as now when one does not
+      fit) and tests that assume 768. Noted 2026-11-24; not scheduled.
 - [ ] SSF conventions: `_SSFTLSC*` static names, 99-column comment boxes, copyright year,
       remove "Phase / M3" milestone comments; documentation `ssftlsc.md`; update `ssftls.md`
       ("no X.509 in SSF" is out of date).

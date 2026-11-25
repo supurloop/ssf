@@ -3329,6 +3329,43 @@ uint32_t SSFBNModUint32(const SSFBN_t *a, uint32_t d)
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Returns a mod d for d < 2^16 with 32-bit remainders only: two 16-bit steps per limb, so the   */
+/* running value stays below 2^32. SSFBNGenPrime's trial division uses it on 32-bit targets,     */
+/* where the 64-bit remainder of SSFBNModUint32 is a libgcc routine (OPTIMIZE BN-13).            */
+/* --------------------------------------------------------------------------------------------- */
+static uint32_t _SSFBNModUint16(const SSFBN_t *a, uint32_t d)
+{
+    uint32_t r = 0u;
+    uint16_t i;
+
+    SSF_REQUIRE((d != 0u) && (d <= 0xFFFFu));
+
+    for (i = a->len; i > 0u; i--)
+    {
+        r = ((r << 16) | (a->limbs[i - 1u] >> 16)) % d;
+        r = ((r << 16) | (a->limbs[i - 1u] & 0xFFFFu)) % d;
+    }
+    return r;
+}
+
+/* Trial division: hosts with a native 64-bit divide keep SSFBNModUint32 (one divide per limb). */
+#if UINTPTR_MAX > 0xFFFFFFFFu
+#define _SSF_BN_TRIAL_MOD(a, d) SSFBNModUint32((a), (d))
+#else
+#define _SSF_BN_TRIAL_MOD(a, d) _SSFBNModUint16((a), (d))
+#endif
+
+#if SSF_CONFIG_BN_UNIT_TEST == 1
+/* --------------------------------------------------------------------------------------------- */
+/* Test-only entry to _SSFBNModUint16, which hosts do not reach through SSFBNGenPrime.            */
+/* --------------------------------------------------------------------------------------------- */
+uint32_t _SSFBNModUint16Test(const SSFBN_t *a, uint32_t d)
+{
+    return _SSFBNModUint16(a, d);
+}
+#endif /* SSF_CONFIG_BN_UNIT_TEST */
+
+/* --------------------------------------------------------------------------------------------- */
 /* Fills numLimbs of a with random bytes from prng; sets a->len = numLimbs.                      */
 /* --------------------------------------------------------------------------------------------- */
 void SSFBNRandom(SSFBN_t *a, uint16_t numLimbs, SSFPRNGContext_t *prng)
@@ -3603,7 +3640,7 @@ bool SSFBNGenPrime(SSFBN_t *p, uint16_t bitLen, uint16_t rounds, SSFPRNGContext_
         for (i = 0; i < SSF_BN_NUM_SMALL_PRIMES; i++)
         {
             /* Does this small prime divide p? */
-            if (SSFBNModUint32(p, _ssfBNSmallPrimes[i]) == 0u)
+            if (_SSF_BN_TRIAL_MOD(p, _ssfBNSmallPrimes[i]) == 0u)
             {
                 /* Yes, reject (if p equals the small prime it's prime but way too small). */
                 trialPass = false;

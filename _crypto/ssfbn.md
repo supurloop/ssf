@@ -130,8 +130,9 @@ other big-integer libraries.
   [`SSFBNIsProbablePrime()`](#ssfbnisprobableprime) is a Miller-Rabin test (fast paths
   for `n ≤ 3` and even `n`); [`SSFBNGenPrime()`](#ssfbngenprime) draws random
   candidates with the top two bits forced (so `p · q` reaches the full `2 · bitLen`
-  width) and the low bit forced (odd), screens against a 256-entry small-prime table via
-  [`SSFBNModUint32()`](#ssfbnmoduint32), then confirms with Miller-Rabin. Both are
+  width) and the low bit forced (odd), screens against a 255-entry small-prime table (with
+  32-bit divides only on 32-bit targets, see [`SSFBNModUint32()`](#ssfbnmoduint32)), then
+  confirms with Miller-Rabin. Both are
   variable-time and require an [`ssfprng`](ssfprng.md) context. Used by
   [`ssfrsa`](ssfrsa.md) key generation.
 - **`SSFBNZeroize` clears limb storage but preserves the descriptor.** It writes through a
@@ -1010,9 +1011,13 @@ require an [`ssfprng`](ssfprng.md) context and are variable-time.
 uint32_t SSFBNModUint32(const SSFBN_t *a, uint32_t d);
 ```
 Returns `a mod d` for a 32-bit divisor `d`. Implemented as a single MSB-to-LSB pass over
-the limbs using 64-bit modular arithmetic. Used by `SSFBNGenPrime` to trial-divide
-candidates against a 256-entry small-prime table (up to 1613) before invoking the
-relatively expensive Miller-Rabin test. `d` must be nonzero (asserted).
+the limbs using 64-bit modular arithmetic. `d` must be nonzero (asserted). On 64-bit hosts
+`SSFBNGenPrime` uses it to trial-divide candidates against its 255-entry small-prime table
+(up to 1613) before the relatively expensive Miller-Rabin test. On 32-bit targets, where a
+64-bit remainder is a library routine (`__aeabi_uldivmod` / `__udivmoddi4` on Cortex-M, about
+800 B), it uses an internal remainder in two 16-bit steps per limb instead, which needs only
+32-bit divides (a hardware `udiv` on Cortex-M3/M4), so keygen builds do not link that routine
+(OPTIMIZE BN-13: -860 B linked on Cortex-M4, -552 B on M0+).
 
 <a id="ssfbnrandom"></a>
 ```c
@@ -1058,7 +1063,7 @@ bool SSFBNGenPrime(SSFBN_t *p, uint16_t bitLen, uint16_t rounds, SSFPRNGContext_
 Generate a random prime of exactly `bitLen` bits (any `bitLen` in range, not just multiples
 of 8). Bits `bitLen − 1` and `bitLen − 2` are forced high and any higher bits cleared (so the
 product of two such primes has the full `2 · bitLen` bit length), the low bit is forced to
-make the candidate odd, the candidate is trial-divided against the 256-entry small-prime
+make the candidate odd, the candidate is trial-divided against the 255-entry small-prime
 table, and survivors go through `rounds` Miller-Rabin rounds. Returns `false` if no prime
 is found within an internal attempt cap (50000). Each candidate is drawn straight into `p`'s
 limbs with [`SSFBNRandom()`](#ssfbnrandom) and shaped there, so no stack copy of a candidate exists

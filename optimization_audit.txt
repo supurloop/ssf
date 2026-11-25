@@ -650,7 +650,24 @@ BN-13  CODE / PERF  -860 B linked keygen code (libgcc __aeabi_uldivmod / __udivm
   What     : uint64 % d per limb for 255 primes < 2^16 per candidate.
   Change   : a static _SSFBNModUint16 (two 16-bit steps per limb with 32-bit %).
   Risk     : low; keygen only.
-  Status   : OPEN
+  Correction (2026-11-25): on a 64-bit host the helper is 2.1-2.3x slower per trial division
+             than the native 64-bit %, and seeded prime generation 1-4% slower, so it is chosen
+             per target: UINTPTR_MAX > 2^32 - 1 keeps SSFBNModUint32.
+  Status   : DONE (2026-11-25): as corrected, with a test-only _SSFBNModUint16Test so host
+             tests reach the helper. Measured (-Os, --gc-sections, tests off, 4096 cap, on
+             f8e5223): keygen + sign 27,888 -> 27,028 B (-860) on Cortex-M4, 31,364 -> 30,812
+             (-552) on M0+ (which links the 32-bit divide anyway); sign-only and verify-only
+             unchanged; __udivmoddi4 (800 B) and __aeabi_uldivmod no longer linked. On M4 the
+             helper inlines into SSFBNGenPrime as two udiv + mls per limb. Stack unchanged.
+             Host: seeded SSFBNGenPrime (same candidates) within noise, primes identical. M4
+             speed not measured (no emulator); the estimate above stands. Tests: the helper
+             against SSFBNModUint32 for every d 1 .. 65535 on zero, one-limb, all-ones and
+             random operands up to SSF_BN_MAX_LIMBS (2,621,400 remainders in the prototype
+             sweep), d = 0 and 65536 assert (did not build on HEAD). Mutants under ASan: 3 of
+             4 killed (one 32-bit step, halves swapped, the precondition widened); the 4th
+             (targets' choice swapped) behaves identically on the host and is caught by the M4
+             link check (__udivmoddi4 linked again, 27,888 B). ssfbn.md's "256-entry" table
+             corrected to 255.
 
 BN-14  CODE / PERF  -484 B linked keygen code; Miller-Rabin squares ~16 -> 2 Montgomery
        operation equivalents (~1% of keygen)                                         M (E perf)

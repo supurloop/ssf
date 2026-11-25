@@ -353,7 +353,7 @@ Time management interfaces covering raw tick time, calendar conversion, and ISO 
 | Module | Description | Flash | Static RAM | Peak Stack | Heap | Reentrant |
 |--------|-------------|-------|------------|------------|------|-----------|
 | [RTC](_time/ssfrtc.md) | Unix time real-time clock interface | ~900 B | ~20 B⁸ | ~48 B | — | Yes¹⁸ |
-| [Date/Time](_time/ssfdtime.md) | Unix time to calendar date/time struct conversion | ~1.8 KB | — | ~96 B | — | Yes |
+| [Date/Time](_time/ssfdtime.md) | Unix time to calendar date/time struct conversion | ~1.6 KB | — | ~96 B | — | Yes |
 | [ISO 8601](_time/ssfiso8601.md) | ISO 8601 date/time string formatting and parsing with timezone support | ~1.8 KB | — | ~120 B | — | Yes |
 
 #### [User Interface](_ui/README.md)

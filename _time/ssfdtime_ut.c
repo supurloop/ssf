@@ -495,4 +495,54 @@ void SSFDTimeUnitTest(void)
         SSF_ASSERT(unixSys == unixSysOut);
     }
 #endif /* SSF_DTIME_EXHAUSTIVE_UNIT_TEST */
+
+    /* ---- DTIME-01/02: every supported day against an independent days-to-civil ---- */
+    {
+        uint32_t day;
+        uint32_t lastDay = (uint32_t)(SSFDTIME_UNIX_EPOCH_SYS_MAX / SSF_TICKS_PER_SEC / 86400ull);
+        static const struct { uint16_t y; uint8_t m; uint8_t d; uint16_t yday; } edges[] = {
+            { 1970u, 0u, 0u, 0u }, { 1972u, 1u, 28u, 59u }, { 1972u, 2u, 0u, 60u },
+            { 1973u, 2u, 0u, 59u }, { 2000u, 1u, 28u, 59u }, { 2099u, 11u, 30u, 364u },
+            { 2100u, 1u, 27u, 58u }, { 2100u, 2u, 0u, 59u }, { 2104u, 1u, 28u, 59u },
+            { 2199u, 0u, 0u, 0u }, { 2199u, 11u, 30u, 364u } };
+
+        for (day = 0u; day <= lastDay; day++)
+        {
+            /* Hinnant's days_from_civil inverse over the proleptic Gregorian calendar */
+            uint32_t z = day + 719468u;
+            uint32_t era = z / 146097u;
+            uint32_t doe = z - (era * 146097u);
+            uint32_t yoe = (doe - (doe / 1460u) + (doe / 36524u) - (doe / 146096u)) / 365u;
+            uint32_t doy = doe - ((365u * yoe) + (yoe / 4u) - (yoe / 100u));
+            uint32_t mp = ((5u * doy) + 2u) / 153u;
+            uint32_t d = doy - (((153u * mp) + 2u) / 5u);
+            uint32_t m = (mp < 10u) ? (mp + 2u) : (mp - 10u);
+            uint32_t y = yoe + (era * 400u) + ((m <= 1u) ? 1u : 0u);
+
+            unixSys = (SSFPortTick_t)day * 86400ull * SSF_TICKS_PER_SEC;
+            SSF_ASSERT(SSFDTimeUnixToStruct(unixSys + SSF_TICKS_PER_SEC - 1u, &ts, sizeof(ts)));
+            SSF_ASSERT((ts.year + SSFDTIME_EPOCH_YEAR) == y);
+            SSF_ASSERT(ts.month == m);
+            SSF_ASSERT(ts.day == d);
+            SSF_ASSERT(ts.wday == ((day + 4u) % 7u));
+            SSF_ASSERT(SSFDTimeStructInit(&tsi, ts.year, ts.month, ts.day, 0u, 0u, 0u, 0u));
+            SSF_ASSERT((tsi.yday == ts.yday) && (tsi.wday == ts.wday));
+            SSF_ASSERT(SSFDTimeStructToUnix(&tsi, &unixSysOut));
+            SSF_ASSERT(unixSysOut == unixSys);
+        }
+
+        /* Named edges: leap days, 1 March around them, 2100 (not leap), the last day */
+        for (lc = 0u; lc < (uint16_t)(sizeof(edges) / sizeof(edges[0])); lc++)
+        {
+            SSF_ASSERT(SSFDTimeStructInit(&tsi, (uint16_t)(edges[lc].y - SSFDTIME_EPOCH_YEAR),
+                                          edges[lc].m, edges[lc].d, 23u, 59u, 59u, 0u));
+            SSF_ASSERT(tsi.yday == edges[lc].yday);
+            SSF_ASSERT(SSFDTimeStructToUnix(&tsi, &unixSysOut));
+            SSF_ASSERT(SSFDTimeUnixToStruct(unixSysOut, &ts, sizeof(ts)));
+            SSF_ASSERT((ts.year == tsi.year) && (ts.month == edges[lc].m) &&
+                       (ts.day == edges[lc].d) && (ts.yday == edges[lc].yday));
+        }
+        SSF_ASSERT(SSFDTimeStructInit(&tsi, (uint16_t)(2100u - SSFDTIME_EPOCH_YEAR), 1u, 28u,
+                                      0u, 0u, 0u, 0u) == false); /* no 29 February 2100 */
+    }
 }

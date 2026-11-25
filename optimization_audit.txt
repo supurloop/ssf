@@ -800,14 +800,35 @@ DTIME-01  CODE  -932 B (2,065 -> 1,133)                                         
   Change   : compute d = 365*y + ((y+1)>>2) - (y > 130) (the formula SSFDTimeStructInit
              already uses), then i = unixDays/366 and 1-2 steps forward.
   Risk     : low; speed about the same.
-  Status   : OPEN
+  Status   : DONE (2026-11-25, with DTIME-02): as specified, the formula in one helper
+             (_SSFDTimeDaysBeforeYear) that SSFDTimeStructInit now shares (which also clears
+             its -Wconversion warning). unixDays / 366 is computed as (unixDays * 45839) >> 24:
+             the year or the one before for every supported day (exhaustive; largest product
+             3,850,705,195 < 2^32), so one step corrects it and no divide is left (Cortex-M0+
+             has none in hardware). Measured with DTIME-02 below.
 
 DTIME-02  CODE  -100 B more (1,133 -> 1,033)                                              M V
   Location : _time/ssfdtime.c:58-63 (SSFDTIME_MONTH_DAY), 192-211
   Change   : a 12-step loop over _daysInMonth (+1 for February in a leap year) instead of
              the macro unrolled 11 times.
   Risk     : low.
-  Status   : OPEN
+  Correction (2026-11-25): the loop was measured and not taken: about 13 M4 cycles per month
+             passed against about 5 unrolled, and 25-70% slower on the host.
+  Status   : DONE (2026-11-25): no search instead. January and February directly; from 1 March
+             month = (5d + 2) / 153 and its first day (153m + 2) / 5, both as exact
+             multiply-shifts over their whole ranges (x 857 >> 17, x 13108 >> 16). With
+             DTIME-01 (M4 -Os, on 84d92d0): ssfdtime 2,171 -> 1,153 B (-1,018, -47%), M0+
+             2,295 -> 1,281 (-1,014); x86-64 2,731 -> 1,556 (the README's old ~1.8 KB was
+             stale). The year / month step: no divide on M4 or M0+ (HEAD: one library
+             divide on M0+), 109 -> 62 M4 instructions, straight-line; frame 16 -> 24 B. Host:
+             3.3 -> 2.7 ns per day conversion. Output identical for all 84,006 supported days
+             (digest), matching Hinnant's days-to-civil, with exact round trips. Tests: that
+             sweep and named edges (leap days, 1 March, 2100, 2199-12-31) in ssfdtime_ut.c,
+             passing on HEAD (a behaviour guard). Mutants under ASan: 7 of 9 killed (either
+             reciprocal off by one, an overshooting year constant (46000), no year step, no
+             leap day, no 2100 rule, Jan/Feb split at 30); 2 equivalent survivors (while vs if;
+             the range precondition behind the caller's check). A year constant of 45900 is
+             also equivalent: it never overshoots on any supported day.
 
 DTIME-03  PERF / CODE  64-bit divides in SSFDTimeUnixToStruct 6 -> 2 (~0.5-1 k cycles
           per call on M4, E); -8 B code (1,025)                                         M (E perf) V

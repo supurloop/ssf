@@ -8,3 +8,4 @@ build-asan-linux/
 build-cov/
 ssf
 ssf-*
+tools/tlsc-interop/.cache/

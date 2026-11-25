@@ -820,8 +820,9 @@ is rejected.
       are often v1 (older `openssl x509 -req` without an extension file, as in many
       Mosquitto guides). Options: keep (document), or an opt-in to accept a v1 leaf with a CN
       host name match. Outside the TLS client (ssfx509). Found during the interop set.
-- [ ] The interop test CAs (`ssf-test-ca`, `ssf-test-rsa-ca`) expire 2026-12-23: the harness
-      should generate its certificates rather than keep these.
+- [x] The interop test CAs (`ssf-test-ca`, `ssf-test-rsa-ca`) expire 2026-12-23: the harness
+      should generate its certificates rather than keep these. Done with the harness:
+      `gen-certs.sh` generates them per run.
 - [x] `ssftls.md` still says `SSF_TLS_CONFIG_MAX_CHAIN_DEPTH` is not referenced; ssftlsc uses
       it. Outside the TLS client.
 - [x] Negative tests for every step 2 check.
@@ -862,13 +863,29 @@ is rejected.
       (116) and a certificate from another CA unknown_ca (48), both at the first read after
       the handshake. The server is not authenticated in this run (test opt-in): port 8884
       serves the same X.509 v1 certificate as 8883 (see that item). Red: the expected rows
-      failed until the certificates were issued.
+      failed until the certificates were issued. Now part of `tools/tlsc-interop/run.sh
+      --public`, which requests and caches the certificates itself.
 - [ ] External signing for the client key: `SSFTLSCSetClientCert()` takes an `SSFPKey_t`
       with the private key in RAM; devices that keep it in a secure element (e.g. ATECC608,
       common with AWS IoT) need a signing callback in its place. Design decision. Found
-      reviewing step 4.
-- [ ] Bring the loopback `openssl s_server` interop harness into the repo (spot checks for step 2
+      reviewing step 4. Skipped for now (2026-11-24): the first target system has no secure
+      element. Design notes if revisited: callback given the scheme, the signed content and
+      its digest; accept raw r||s for ECDSA and DER-encode in the client; blocking first.
+- [x] Bring the loopback `openssl s_server` interop harness into the repo (spot checks for step 2
       currently run from a scratch driver, which sets the unit-test hooks).
+      Done, TDD (approved: new directory `tools/tlsc-interop/` and a `.gitignore` line):
+      `run.sh` (builds, generates certificates, runs; `--public`, `--self-test`, `--asan`,
+      `--only`), `tlsc_interop.c` (one driver replacing the seven scratch ones; trust anchors
+      and client chains loaded from PEM with SSFTLSCTrustFromPEM(), keys with
+      SSFPKeyDecodePEM()), `interop.py` (every row with its expected outcome; servers found
+      listening from /proc/net/tcp, free ports chosen per row), `gen-certs.sh` (every CA and
+      leaf fresh per run, 30 days), `public-certs.sh` (Mosquitto CA, and its 8884 client
+      certificates requested on demand into the git-ignored `.cache/`, renewed within 7 days
+      of expiry), `README.md`. Rows written first (red with no driver); 156 / 156 local in
+      about 30 s, 6 / 6 public; self-test: a client with AES-128-CCM broken fails exactly the
+      30 CCM rows. The driver links no unit-test objects (no libcrypto needed). Not ported:
+      the mitm proxy and step 2 spot-check drivers, replaced by the deterministic negative
+      tests.
 - [ ] The leaf public key is parked in `clientHelloMsg` between handshake steps; give it its own
       field.
 - [ ] SSF conventions: `_SSFTLSC*` static names, 99-column comment boxes, copyright year,

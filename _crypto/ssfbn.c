@@ -2860,16 +2860,14 @@ void SSFBNMontConvertOut(SSFBN_t *a, const SSFBN_t *aR, const SSFBNMont_t *ctx)
 
 /* --------------------------------------------------------------------------------------------- */
 /* Internal: r = a^e mod ctx->mod; constant-time fixed-window (k=4) over caller storage of       */
-/* (SSF_BN_MODEXP_TBL_N + 4) zeroed residues of cap limbs each, all wiped before return.         */
+/* (SSF_BN_MODEXP_TBL_N + 2) zeroed residues of cap limbs each, all wiped before return.         */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFBNModExpMontCore(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e,
                                  const SSFBNMont_t *ctx, SSFBNLimb_t *store, uint16_t cap)
 {
     SSFBN_t table[SSF_BN_MODEXP_TBL_N];
-    SSFBN_t aM;
     SSFBN_t result;
     SSFBN_t picked;
-    SSFBN_t one;
     uint32_t nWindows;
     uint32_t winIdx;
     uint32_t w;
@@ -2900,29 +2898,21 @@ static void _SSFBNModExpMontCore(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e,
         table[w].len = 0u;
         table[w].cap = cap;
     }
-    aM.limbs = &store[(size_t)SSF_BN_MODEXP_TBL_N * cap];
-    aM.len = 0u;
-    aM.cap = cap;
-    result.limbs = &store[(size_t)(SSF_BN_MODEXP_TBL_N + 1u) * cap];
+    result.limbs = &store[(size_t)SSF_BN_MODEXP_TBL_N * cap];
     result.len = 0u;
     result.cap = cap;
-    picked.limbs = &store[(size_t)(SSF_BN_MODEXP_TBL_N + 2u) * cap];
+    picked.limbs = &store[(size_t)(SSF_BN_MODEXP_TBL_N + 1u) * cap];
     picked.len = 0u;
     picked.cap = cap;
-    one.limbs = &store[(size_t)(SSF_BN_MODEXP_TBL_N + 3u) * cap];
-    one.len = 0u;
-    one.cap = cap;
 
-    /* Convert a to Montgomery form. */
-    SSFBNMontConvertIn(&aM, a, ctx);
-
-    /* table[0] = Mont(1) for zero-windows; table[i] = aM^i for i=1..15. */
-    SSFBNSetOne(&one, ctx->len);
-    SSFBNMontConvertIn(&table[0], &one, ctx);
-    SSFBNCopy(&table[1], &aM);
+    /* table[1] = Mont(a); table[0] = Mont(1) for zero-windows, converted in place */
+    /* (ConvertIn allows aR == a); table[i] = Mont(a)^i for i = 2..15.            */
+    SSFBNMontConvertIn(&table[1], a, ctx);
+    SSFBNSetOne(&table[0], ctx->len);
+    SSFBNMontConvertIn(&table[0], &table[0], ctx);
     for (w = 2u; w < SSF_BN_MODEXP_TBL_N; w++)
     {
-        SSFBNMontMul(&table[w], &table[w - 1u], &aM, ctx);
+        SSFBNMontMul(&table[w], &table[w - 1u], &table[1], ctx);
     }
 
     /* Init result = Mont(1); seed picked with table[0] so its len matches for CondCopy. */
@@ -2965,10 +2955,8 @@ static void _SSFBNModExpMontCore(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e,
     SSFBNMontConvertOut(r, &result, ctx);
 
     /* Zeroize secret material. */
-    SSFBNZeroize(&aM);
     SSFBNZeroize(&result);
     SSFBNZeroize(&picked);
-    SSFBNZeroize(&one);
     for (w = 0u; w < SSF_BN_MODEXP_TBL_N; w++)
     {
         SSFBNZeroize(&table[w]);
@@ -3004,7 +2992,7 @@ void SSFBNModExp(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBN_t *
 void SSFBNModExpMont(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBNMont_t *ctx)
 {
     /* Residues only -- never the 2N raw-mul intermediate. See ssfbn.md "MAX_MOD_LIMBS". */
-    SSFBNLimb_t store[(SSF_BN_MODEXP_TBL_N + 4u) * SSF_BN_MAX_MOD_LIMBS] = {0u};
+    SSFBNLimb_t store[(SSF_BN_MODEXP_TBL_N + 2u) * SSF_BN_MAX_MOD_LIMBS] = {0u};
 
     SSF_REQUIRE(ctx != NULL);
     SSF_REQUIRE(ctx->len <= SSF_BN_MAX_MOD_LIMBS);
@@ -3019,7 +3007,7 @@ void SSFBNModExpMont(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBN
 void SSFBNModExpHalf(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBN_t *m)
 {
     SSFBNMONT_DEFINE(mont, SSF_BN_HALF_MOD_LIMBS);
-    SSFBNLimb_t store[(SSF_BN_MODEXP_TBL_N + 4u) * SSF_BN_HALF_MOD_LIMBS] = {0u};
+    SSFBNLimb_t store[(SSF_BN_MODEXP_TBL_N + 2u) * SSF_BN_HALF_MOD_LIMBS] = {0u};
 
     SSF_REQUIRE(r != NULL);
     SSF_REQUIRE(r->limbs != NULL);

@@ -407,7 +407,25 @@ BN-04  STACK / CODE  ModExpMont frame -1,040 B (10,440 -> 9,400); -56 B code    
              storage, (SSF_BN_MODEXP_TBL_N + 4) of them. BN-01's mutation run confirmed `one`
              can share `picked`'s slot (an equivalent mutant), so BN-04 on top of BN-01 also
              removes BN-01's +32 B on the keygen peak; re-measure before taking it.
-  Status   : OPEN
+  Status   : DONE (2026-11-25): as specified; the shared core's storage is TBL_N + 2
+             residues (table, result, picked). Mont(a) is ConvertIn'd straight into table[1],
+             and table[0] = ConvertIn(SetOne) in place. Constant-time structure, wiping and
+             public contracts unchanged; one fewer copy of the secret base's residue.
+             Measured (M4 -Os, unit tests on and off give the same deltas): ModExpMont frame
+             10,272 -> 9,248 B (4096), 7,712 -> 6,944 (3072), 5,152 -> 4,640 (2048);
+             ModExpHalf 5,696 -> 5,184, 4,288 -> 3,904, 2,880 -> 2,624. Keygen peak
+             27,112 -> 26,072 (3072: 20,512 -> 19,728; 2048-only: 13,920 -> 13,632, where the
+             8 KB _SSFRSAStackScrub is now the peak); SSFBNModInv -1,040 / -784 / -528. RSA
+             sign stack actually used (Euclid excluded) -512 / -384 / -160, as is the TLS
+             client's RSA-signing peak; the static sign worst case (the Euclid branch) does not
+             move. ssfbn code -60 B. Host (-O2): ModExp and RSA sign within noise; ModExp
+             results and RSA signatures bit-identical. Tests: ModExp / ModExpMont against
+             ModExpPub at widths up to SSF_BN_MAX_MOD_LIMBS, exponents of n and n + 2 limbs,
+             in place (r == a, r == e), base 0, exponent 0, m = 1; passes on HEAD (a
+             behaviour guard). Mutants under ASan: all 9 killed (table[0] unconverted, square
+             or table[0] in the table build, picked on result's or table[1]'s slot, either
+             store one residue short, table or picked wipe dropped; the wipe mutants by the
+             BN-01 scrub test).
 
 BN-05  STACK  _SSFBNModInvExtEuclid 9,344 -> 5,248 B (keygen)                          M
   Location : _crypto/ssfbn.c:1721-1727, 1760, 1825

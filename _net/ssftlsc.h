@@ -72,7 +72,7 @@ extern "C" {
 /*   deepest). Not included: the inner transport's functions, the trace callback, libc and the  */
 /*   port layer. Key exchange and the other steps need less. Each chain entry adds 2 bytes.     */
 /*   With an RSA client key the client CertificateVerify signature sets the peak instead: about */
-/*   23.6 KB at the default RSA-4096 cap (RSA-PSS signing); P-256 / P-384 / Ed25519 signing     */
+/*   23.1 KB at the default RSA-4096 cap (RSA-PSS signing); P-256 / P-384 / Ed25519 signing     */
 /*   stays below 10.4 KB.                                                                       */
 /* - Client mode, full handshake only (no PSK resumption or 0-RTT). One connection per session.  */
 /* - After the handshake, recv() parses handshake records: NewSessionTicket is checked only for  */

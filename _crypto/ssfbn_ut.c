@@ -4554,6 +4554,89 @@ void SSFBNUnitTest(void)
         SSF_ASSERT((r.len == n) && SSFBNIsOne(&r));
     }
 
+    /* ---- BN-04: SSFBNModExp / ModExpMont equal ModExpPub up to the widest modulus, in place ---- */
+    {
+        SSFBN_DEFINE(m, SSF_BN_MAX_MOD_LIMBS);
+        SSFBN_DEFINE(a, SSF_BN_MAX_MOD_LIMBS);
+        SSFBN_DEFINE(e, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(rCT, SSF_BN_MAX_MOD_LIMBS); /* exactly modulus width: no spare capacity */
+        SSFBN_DEFINE(rRef, SSF_BN_MAX_MOD_LIMBS);
+        SSFBN_DEFINE(x, SSF_BN_MAX_LIMBS);
+        SSFBNMONT_DEFINE(ctx, SSF_BN_MAX_MOD_LIMBS);
+        static const uint16_t widths[] = { 1u, 2u, 3u, 7u, SSF_BN_HALF_MOD_LIMBS,
+                                           SSF_BN_HALF_MOD_LIMBS + 1u, SSF_BN_MAX_MOD_LIMBS - 1u,
+                                           SSF_BN_MAX_MOD_LIMBS };
+        uint32_t s = 0x6C8E9CF5u;
+        uint16_t w;
+        uint16_t n;
+        uint16_t k;
+        uint16_t eLen;
+        uint8_t pass;
+
+        for (w = 0u; w < (uint16_t)(sizeof(widths) / sizeof(widths[0])); w++)
+        {
+            n = widths[w];
+            if ((n < 1u) || (n > SSF_BN_MAX_MOD_LIMBS)) continue;
+            SSFBNSetZero(&m, n);
+            SSFBNSetZero(&a, n);
+            for (k = 0u; k < n; k++)
+            {
+                s ^= s << 13; s ^= s >> 17; s ^= s << 5;
+                m.limbs[k] = s;
+                s ^= s << 13; s ^= s >> 17; s ^= s << 5;
+                a.limbs[k] = s;
+            }
+            m.limbs[0] |= 1u;
+            m.limbs[n - 1u] |= 0x80000000u;
+            a.limbs[n - 1u] &= 0x7FFFFFFFu;
+            SSFBNMontInit(&ctx, &m);
+
+            /* Exponents of n limbs, and 2 limbs longer than the modulus */
+            for (pass = 0u; pass < 2u; pass++)
+            {
+                eLen = (pass == 0u) ? n : (uint16_t)(n + 2u);
+                SSFBNSetZero(&e, eLen);
+                for (k = 0u; k < eLen; k++)
+                {
+                    s ^= s << 13; s ^= s >> 17; s ^= s << 5;
+                    e.limbs[k] = s;
+                }
+                SSFBNModExpPub(&rRef, &a, &e, &m);
+                SSFBNModExp(&rCT, &a, &e, &m);
+                SSF_ASSERT((rCT.len == n) && (SSFBNCmp(&rCT, &rRef) == 0));
+                SSFBNSetZero(&rCT, 1u);
+                SSFBNModExpMont(&rCT, &a, &e, &ctx);
+                SSF_ASSERT((rCT.len == n) && (SSFBNCmp(&rCT, &rRef) == 0));
+            }
+
+            /* In place: r == a, then r == e */
+            SSFBNCopy(&x, &a);
+            SSFBNModExpMont(&x, &x, &e, &ctx);
+            SSF_ASSERT((x.len == n) && (SSFBNCmp(&x, &rRef) == 0));
+            SSFBNCopy(&x, &e);
+            SSFBNModExpMont(&x, &a, &x, &ctx);
+            SSF_ASSERT((x.len == n) && (SSFBNCmp(&x, &rRef) == 0));
+
+            /* Base 0 gives 0; exponent 0 gives 1 (table[0] alone) */
+            SSFBNSetZero(&x, n);
+            SSFBNModExpMont(&rCT, &x, &e, &ctx);
+            SSF_ASSERT((rCT.len == n) && SSFBNIsZero(&rCT));
+            SSFBNSetZero(&x, 1u);
+            SSFBNModExpMont(&rCT, &a, &x, &ctx);
+            SSF_ASSERT((rCT.len == n) && SSFBNIsOne(&rCT));
+        }
+
+        /* m = 1: everything is 0, for e = 0 and e >= 1 */
+        SSFBNSetUint32(&m, 1u, 1u);
+        SSFBNSetUint32(&a, 5u, 1u);
+        SSFBNSetUint32(&e, 3u, 1u);
+        SSFBNModExp(&rCT, &a, &e, &m);
+        SSF_ASSERT((rCT.len == 1u) && SSFBNIsZero(&rCT));
+        SSFBNSetZero(&e, 1u);
+        SSFBNModExp(&rCT, &a, &e, &m);
+        SSF_ASSERT((rCT.len == 1u) && SSFBNIsZero(&rCT));
+    }
+
     /* ---- BN-02: SSFBNModExpPub / ModExpMontPub equal SSFBNModExp up to the widest modulus ---- */
     {
         SSFBN_DEFINE(m, SSF_BN_MAX_MOD_LIMBS);

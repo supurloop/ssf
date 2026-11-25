@@ -877,9 +877,11 @@ void SSFBNModExpHalf(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBN
 [`SSF_BN_MAX_MOD_LIMBS`](#ssf-bn-max-mod-limbs) (enforced by `SSF_REQUIRE`). Uses a
 **constant-time fixed-window** algorithm with window width `k = 4`:
 
-1. Convert `a` into Montgomery form (`aM`).
-2. Build a 16-entry table of Montgomery powers — `table[0] = Mont(1)`, `table[1] = aM`,
-   `table[i] = table[i-1] · aM` for `i = 2..15`.
+1. Convert `a` into Montgomery form, straight into `table[1]`.
+2. Build the rest of the 16-entry table of Montgomery powers — `table[0] = Mont(1)`
+   (converted in place), `table[i] = table[i-1] · table[1]` for `i = 2..15`. Besides the
+   table, the only working values are the running result and the scan's `picked` entry
+   (OPTIMIZE BN-04).
 3. For each 4-bit window of `e` from MSB to LSB: square the running result four times,
    decode the window value `w`, fetch `table[w]` via a constant-time scan that walks all
    16 entries with `SSFBNCondCopy`, and multiply.

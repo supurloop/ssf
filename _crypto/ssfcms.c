@@ -667,6 +667,82 @@ static bool _SSFCMSFindSignerCert(const SSFCMSSignedData_t *sd, const SSFCMSSign
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Returns true if the signer certificate is found, with its DER in derOut / derLenOut. The      */
+/* parsed certificate lives only in this frame, not across chain verification (OPTIMIZE CMS-01). */
+/* --------------------------------------------------------------------------------------------- */
+SSF_NOINLINE
+static bool _SSFCMSFindSignerDer(const SSFCMSSignedData_t *sd, const SSFCMSSignerInfo_t *si,
+                                 const uint8_t **trustDer, const uint32_t *trustDerLen,
+                                 uint8_t trustCount, const uint8_t **derOut, uint32_t *derLenOut)
+{
+    SSFX509Cert_t cert;
+
+    return _SSFCMSFindSignerCert(sd, si, trustDer, trustDerLen, trustCount, &cert, derOut,
+                                 derLenOut);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if signer idx's signature verifies with the key of the chain-verified signer     */
+/* certificate signerDer, filling resultOut, else false. Parses signerDer again (fails closed)   */
+/* and re-tags the signed attributes; both live only in this frame (OPTIMIZE CMS-01).            */
+/* --------------------------------------------------------------------------------------------- */
+SSF_NOINLINE
+static bool _SSFCMSVerifySignerSig(const SSFCMSSignedData_t *sd, uint8_t idx,
+                                   const uint8_t *signerDer, uint32_t signerDerLen,
+                                   SSFCMSVerifyResult_t *resultOut)
+{
+    const SSFCMSSignerInfo_t *si = &sd->signers[idx];
+    SSFX509Cert_t signerCert;
+    uint8_t attrs[SSF_CMS_CONFIG_MAX_SIGNED_ATTRS_LEN];
+    const uint8_t *covered;
+    uint32_t coveredLen;
+
+    /* Does the chain-verified signer certificate fail to parse again? */
+    if (!SSFX509Parse(signerDer, signerDerLen, &signerCert))
+    {
+        /* Yes, fail closed */
+        SSF_TLS_TRACE_CERT_ERROR(_SSF_CMS_TRACE_CTX, "CMS: signer[%u] certificate re-parse failed",
+                                 idx);
+        return false;
+    }
+
+    /* Are signed attributes present? */
+    if (si->signedAttrs != NULL)
+    {
+        /* Yes, the signature covers them re-tagged as a SET (length checked by the caller) */
+        SSF_ASSERT(si->signedAttrsLen <= sizeof(attrs));
+        memcpy(attrs, si->signedAttrs, si->signedAttrsLen);
+        attrs[0] = (uint8_t)SSF_ASN1_TAG_SET;
+        covered = attrs;
+        coveredLen = si->signedAttrsLen;
+    }
+    else
+    {
+        /* No, the signature covers the attached content itself (checked by the caller) */
+        covered = sd->eContent;
+        coveredLen = sd->eContentLen;
+    }
+
+    /* Does the signature fail with the signer's key under the declared algorithms? */
+    if (!SSFX509VerifySignature(&signerCert, si->sigAlgOidRaw, si->sigAlgOidRawLen,
+                                si->sigAlgParams, si->sigAlgParamsLen, si->digestAlgOidRaw,
+                                si->digestAlgOidRawLen, covered, coveredLen, si->signature,
+                                si->signatureLen))
+    {
+        /* Yes */
+        SSF_TLS_TRACE_CERT_ERROR(_SSF_CMS_TRACE_CTX, "CMS: signer[%u] signature FAILED", idx);
+        return false;
+    }
+
+    resultOut->signerIndex = idx;
+    resultOut->signerSubject = signerCert.subject;
+    resultOut->hasSigningTime = si->hasSigningTime;
+    resultOut->signingTime = si->signingTime;
+    SSF_TLS_TRACE_CERT_DEBUG(_SSF_CMS_TRACE_CTX, "CMS: signer[%u] verified", idx);
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Returns true if signer idx verifies against the content digest and the trust anchors.         */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFCMSVerifySigner(const SSFCMSSignedData_t *sd, uint8_t idx, const uint8_t *digestOpt,
@@ -678,11 +754,7 @@ static bool _SSFCMSVerifySigner(const SSFCMSSignedData_t *sd, uint8_t idx, const
     const SSFCMSSignerInfo_t *si;
     SSFCMSDigestAlg_t alg;
     uint8_t computed[SSF_SHA2_512_BYTE_SIZE];
-    uint8_t attrs[SSF_CMS_CONFIG_MAX_SIGNED_ATTRS_LEN];
     const uint8_t *contentDigest;
-    const uint8_t *covered;
-    uint32_t coveredLen;
-    SSFX509Cert_t signerCert;
     const uint8_t *signerDer;
     uint32_t signerDerLen;
     const uint8_t *chain[SSF_X509_CONFIG_MAX_CHAIN_DEPTH];
@@ -792,19 +864,15 @@ static bool _SSFCMSVerifySigner(const SSFCMSSignedData_t *sd, uint8_t idx, const
         }
 
         /* Are the attributes too long for the re-tagging buffer? */
-        if (si->signedAttrsLen > sizeof(attrs))
+        if (si->signedAttrsLen > (uint32_t)SSF_CMS_CONFIG_MAX_SIGNED_ATTRS_LEN)
         {
             /* Yes */
             SSF_TLS_TRACE_CERT_ERROR(_SSF_CMS_TRACE_CTX,
                                      "CMS: signer[%u] signedAttrs %lu bytes exceed limit %u", idx,
                                      (unsigned long)si->signedAttrsLen,
-                                     (unsigned int)sizeof(attrs));
+                                     (unsigned int)SSF_CMS_CONFIG_MAX_SIGNED_ATTRS_LEN);
             return false;
         }
-        memcpy(attrs, si->signedAttrs, si->signedAttrsLen);
-        attrs[0] = (uint8_t)SSF_ASN1_TAG_SET;
-        covered = attrs;
-        coveredLen = si->signedAttrsLen;
     }
     else
     {
@@ -830,13 +898,11 @@ static bool _SSFCMSVerifySigner(const SSFCMSSignedData_t *sd, uint8_t idx, const
                 return false;
             }
         }
-        covered = sd->eContent;
-        coveredLen = sd->eContentLen;
     }
 
     /* Is the signer certificate missing? */
-    if (!_SSFCMSFindSignerCert(sd, si, trustDer, trustDerLen, trustCount, &signerCert, &signerDer,
-                               &signerDerLen))
+    if (!_SSFCMSFindSignerDer(sd, si, trustDer, trustDerLen, trustCount, &signerDer,
+                              &signerDerLen))
     {
         /* Yes */
         SSF_TLS_TRACE_CERT_ERROR(_SSF_CMS_TRACE_CTX, "CMS: signer[%u] certificate not found", idx);
@@ -867,23 +933,8 @@ static bool _SSFCMSVerifySigner(const SSFCMSSignedData_t *sd, uint8_t idx, const
         return false;
     }
 
-    /* Does the signature fail with the signer's key under the declared algorithms? */
-    if (!SSFX509VerifySignature(&signerCert, si->sigAlgOidRaw, si->sigAlgOidRawLen,
-                                si->sigAlgParams, si->sigAlgParamsLen, si->digestAlgOidRaw,
-                                si->digestAlgOidRawLen, covered, coveredLen, si->signature,
-                                si->signatureLen))
-    {
-        /* Yes */
-        SSF_TLS_TRACE_CERT_ERROR(_SSF_CMS_TRACE_CTX, "CMS: signer[%u] signature FAILED", idx);
-        return false;
-    }
-
-    resultOut->signerIndex = idx;
-    resultOut->signerSubject = signerCert.subject;
-    resultOut->hasSigningTime = si->hasSigningTime;
-    resultOut->signingTime = si->signingTime;
-    SSF_TLS_TRACE_CERT_DEBUG(_SSF_CMS_TRACE_CTX, "CMS: signer[%u] verified", idx);
-    return true;
+    /* Does the signature fail with the chain-verified signer's key? */
+    return _SSFCMSVerifySignerSig(sd, idx, signerDer, signerDerLen, resultOut);
 }
 
 /* --------------------------------------------------------------------------------------------- */

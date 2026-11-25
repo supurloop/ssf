@@ -114,10 +114,12 @@ against a caller-supplied trust store. There is no encoder: the module verifies,
   category `SSF_TLS_TRACE_CERT`. Messages begin with `CMS:`, and are compiled in only when
   [`SSF_TLS_CONFIG_ENABLE_TRACE`](ssftls.md#configuration) is `1` (default `0`). The callback
   pointer is the module's only static state, and it is compiled out along with the messages.
-- **Stack usage.** The verifier holds two parsed `SSFX509Cert_t` structures, a re-tagging buffer of
-  `SSF_CMS_CONFIG_MAX_SIGNED_ATTRS_LEN` bytes and the chain arrays, on top of whatever
+- **Stack usage.** Only the chain arrays and a few working values sit on top of whatever
   `SSFX509VerifyChainPurpose()` uses (see the `ssfx509` footnotes in the [SSF
-  README](../README.md#crypto)).
+  README](../README.md#crypto)). The parsed signer certificate (`SSFX509Cert_t`) and the
+  re-tagging buffer of `SSF_CMS_CONFIG_MAX_SIGNED_ATTRS_LEN` bytes live in helper frames that
+  run before and after chain verification, not during it; the signature step parses the
+  chain-verified signer certificate again and fails closed if that fails.
 - **Chain depth sizing.** The verifier is given the signer certificate plus every other
   embedded certificate, so at most `SSF_CMS_CONFIG_MAX_CERTS + 1` certificates. That happens when
   the signer certificate is held only as a trust anchor, so all embedded certificates follow it.

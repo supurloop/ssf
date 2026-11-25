@@ -2483,6 +2483,57 @@ void SSFCMSUnitTest(void)
         SSF_ASSERT(SSFCMSParse(msg, len, &sd) == true);
         SSF_ASSERT(_VERIFY256() == true);
 
+        /* CMS-01: signed attributes of exactly the re-tagging limit verify, one byte more do not */
+        {
+            int32_t pad = (int32_t)SSF_CMS_CONFIG_MAX_SIGNED_ATTRS_LEN - 200;
+            uint32_t k;
+
+            _SPEC_RESET();
+            for (k = 0; k < 8u; k++)
+            {
+                s.padAttrLen = (uint32_t)pad;
+                _BUILD();
+                SSF_ASSERT(SSFCMSParse(msg, len, &sd) == true);
+                if (sd.signers[0].signedAttrsLen == SSF_CMS_CONFIG_MAX_SIGNED_ATTRS_LEN) break;
+                pad += ((int32_t)SSF_CMS_CONFIG_MAX_SIGNED_ATTRS_LEN -
+                        (int32_t)sd.signers[0].signedAttrsLen);
+            }
+            SSF_ASSERT(sd.signers[0].signedAttrsLen == SSF_CMS_CONFIG_MAX_SIGNED_ATTRS_LEN);
+            SSF_ASSERT(_VERIFY256() == true);
+            s.padAttrLen = (uint32_t)pad + 1u;
+            _BUILD();
+            SSF_ASSERT(SSFCMSParse(msg, len, &sd) == true);
+            SSF_ASSERT(sd.signers[0].signedAttrsLen == (SSF_CMS_CONFIG_MAX_SIGNED_ATTRS_LEN + 1u));
+            SSF_ASSERT(_VERIFY256() == false);
+        }
+
+        /* CMS-01: the result's subject views the embedded signer certificate's own DER */
+        _SPEC_RESET();
+        _BUILD();
+        SSF_ASSERT(SSFCMSParse(msg, len, &sd) == true);
+        memset(&res, 0xA5, sizeof(res));
+        SSF_ASSERT(_VERIFY256() == true);
+        SSF_ASSERT((res.signerIndex == 0u) && (res.signerSubject.raw != NULL));
+        SSF_ASSERT((res.signerSubject.raw > sd.certs[0].der) &&
+                   ((res.signerSubject.raw + res.signerSubject.rawLen) <=
+                    (sd.certs[0].der + sd.certs[0].derLen)));
+
+        /* CMS-01: a signature that fails after the chain verifies leaves resultOut zeroed */
+        {
+            uint32_t k;
+            bool zero = true;
+
+            msg[(uint32_t)(sd.signers[0].signature - msg) + (sd.signers[0].signatureLen / 2u)] ^=
+                0x01u;
+            memset(&res, 0xA5, sizeof(res));
+            SSF_ASSERT(_VERIFY256() == false);
+            for (k = 0; k < sizeof(res); k++)
+            {
+                if (((const uint8_t *)&res)[k] != 0u) zero = false;
+            }
+            SSF_ASSERT(zero == true);
+        }
+
         /* Attribute rules of RFC 5652 Sec. 5.3 and 11: both mandatory, neither duplicated */
         _SPEC_RESET();
         s.omitContentType = true;
@@ -2589,7 +2640,11 @@ void SSFCMSUnitTest(void)
         _BUILD();
         SSF_ASSERT(SSFCMSParse(msg, len, &sd) == true);
         SSF_ASSERT(sd.certsLen == 0u);
+        memset(&res, 0xA5, sizeof(res));
         SSF_ASSERT(_VERIFY256() == true);
+        /* CMS-01: the subject then views the trust anchor's DER */
+        SSF_ASSERT((res.signerSubject.raw > trust[0]) &&
+                   ((res.signerSubject.raw + res.signerSubject.rawLen) <= (trust[0] + trustLen[0])));
         trust[0] = edCert;
         trustLen[0] = edCertLen;
         SSF_ASSERT(_VERIFY256() == false);

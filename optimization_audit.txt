@@ -675,7 +675,25 @@ CMS-01  STACK  peak through chain verification 8,016 -> 6,624 B (-1,392 B), on t
              (re-parse the chain-verified DER, copy and re-tag the attrs,
              SSFX509VerifySignature, fill the result). A failed re-parse fails closed.
   Risk     : medium-low; check order and fail-closed behaviour kept.
-  Status   : OPEN
+  Status   : DONE (2026-11-25): as specified. _SSFCMSFindSignerDer and
+             _SSFCMSVerifySignerSig are SSF_NOINLINE; the signedAttrs length limit stays at
+             its place in the pre-checks (same trace), and the copy behind it now has an
+             SSF_ASSERT. API, check order, traces and the resultOut contract (written only on
+             success, zeroed on false) unchanged. Measured (M4 -Os, on HEAD b609025, unit tests
+             on and off): _SSFCMSVerifySigner frame 1,608 -> 216 B (tests on 1,864 -> 472);
+             SSFCMSVerifyAttached / VerifyDigest -1,392 B at every cap (tests off 4096: 13,752
+             -> 12,360; 3072: 13,240 -> 11,848; 2048: 12,728 -> 11,336). The signature branch
+             grows 64 B (328 tests on) and stays ~470 B below the chain branch. Correction:
+             code +136 B (3,432 -> 3,568; +172 tests on), not +113. Host (-O2, OpenSSL-made
+             RSA-2048 / P-256 messages): parse + verify within noise; the extra SSFX509Parse
+             is 0.34 us. Tests: signedAttrs of exactly the limit verify and one byte more do
+             not; the result's subject views the signer DER (embedded, or trust anchor only);
+             a failed signature after a good chain leaves resultOut all zero (no test covered
+             this before); all pass on HEAD. Mutants under ASan: 9 of 10 killed (re-parse of
+             another DER, no re-tag, eContent covered instead, >= or no length check, result
+             filled before the signature check, signature skipped or verified before the
+             chain, subject not filled); the survivor ignores the re-parse result, which
+             cannot fail on unchanged DER (the fail-closed path is defensive).
 
 CMS-02  CODE  -64 B (3,408 -> 3,344)                                                      M
   Location : _crypto/ssfcms.c:60-90, 142-161

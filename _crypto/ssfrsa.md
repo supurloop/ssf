@@ -27,7 +27,8 @@ comparable security.
   PSS salt generation, and the per-operation blinding applied to every private-key
   operation (`/dev/urandom` on POSIX; see [Notes](#notes)).
 - [`ssfbn`](ssfbn.md) — big-number arithmetic including the constant-time
-  [`SSFBNModExp`](ssfbn.md#modexp) Montgomery ladder used for every RSA private operation.
+  [`SSFBNModExpHalf`](ssfbn.md#modexp) fixed-window exponentiation used, at prime width, for
+  every RSA private operation.
 - [`ssfasn1`](../_codec/ssfasn1.h) — DER encode / decode for PKCS#1 `RSAPublicKey` and
   `RSAPrivateKey`.
 - [`ssfsha2`](ssfsha2.md) — SHA-256 / SHA-384 / SHA-512 inside PKCS#1 v1.5 DigestInfo

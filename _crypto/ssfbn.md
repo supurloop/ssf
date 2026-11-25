@@ -68,7 +68,7 @@ other big-integer libraries.
 
   | Status | Functions |
   |---|---|
-  | **Constant-time** (safe on secrets) | [`SSFBNCmp`](#ssfbncmp), [`SSFBNModExp`/`SSFBNModExpMont`](#modexp), [`SSFBNMontMul`](#montmul), [`SSFBNMontSquare`](#montsquare), [`SSFBNMontConvertIn`/`Out`](#montconv), [`SSFBNCondSwap`](#condswap), [`SSFBNCondCopy`](#condswap), [`SSFBNAdd`](#ssfbnadd), [`SSFBNSub`](#ssfbnsub), [`SSFBNModAdd`](#modaddsub), [`SSFBNModSub`](#modaddsub), [`SSFBNModMulCT`](#ssfbnmodmulct), [`SSFBNMul`](#ssfbnmul), [`SSFBNSquare`](#ssfbnsquare), [`SSFBNIsEven`/`SSFBNIsOdd`](#predicates), [`SSFBNIsZero`/`IsOne`](#predicates) (the returned bool is itself one bit; branching on it reveals that bit) |
+  | **Constant-time** (safe on secrets) | [`SSFBNCmp`](#ssfbncmp), [`SSFBNModExp`/`SSFBNModExpMont`/`SSFBNModExpHalf`](#modexp), [`SSFBNMontMul`](#montmul), [`SSFBNMontSquare`](#montsquare), [`SSFBNMontConvertIn`/`Out`](#montconv), [`SSFBNCondSwap`](#condswap), [`SSFBNCondCopy`](#condswap), [`SSFBNAdd`](#ssfbnadd), [`SSFBNSub`](#ssfbnsub), [`SSFBNModAdd`](#modaddsub), [`SSFBNModSub`](#modaddsub), [`SSFBNModMulCT`](#ssfbnmodmulct), [`SSFBNMul`](#ssfbnmul), [`SSFBNSquare`](#ssfbnsquare), [`SSFBNIsEven`/`SSFBNIsOdd`](#predicates), [`SSFBNIsZero`/`IsOne`](#predicates) (the returned bool is itself one bit; branching on it reveals that bit) |
   | **Constant-time when `m` is odd and at most [`SSF_BN_MAX_MOD_LIMBS`](#ssf-bn-max-mod-limbs) limbs** (variable-time otherwise; parity and length are public) | [`SSFBNMod`](#ssfbnmod), [`SSFBNModMul`](#ssfbnmodmul), [`SSFBNModSquare`](#ssfbnmodsquare) |
   | **Variable-time** (do not use on secrets) | [`SSFBNDivMod`](#ssfbndivmod), [`SSFBNGcd`](#ssfbngcd), [`SSFBNModInvExt`](#modinv), [`SSFBNModMulNIST`](#modmulnist) (constant-time only for the P-256 / P-384 primes), [`SSFBNModExpPub`/`SSFBNModExpMontPub`](#modexppub), [`SSFBNBitLen`](#bitlen), [`SSFBNTrailingZeros`](#trailingzeros), [`SSFBNShiftLeft1`/`Right1`](#shift), [`SSFBNShiftLeft`/`Right`](#shift-multi), [`SSFBNIsProbablePrime`](#ssfbnisprobableprime), [`SSFBNGenPrime`](#ssfbngenprime) |
   | **Constant-time only when `m` is prime** | [`SSFBNModInvSmall`](#modinvsmall) — the same Fermat inverse at curve width (at most `SSF_BN_SMALL_MAX_LIMBS` limbs), with the same `a · r ≡ 1` check. [`SSFBNModInv`](#modinv) — uses Fermat's little theorem (`a^(m-2) mod m`), which is constant-time but yields the correct answer only for prime `m`. After computing it, the function verifies `a · r ≡ 1 (mod m)` with the constant-time [`SSFBNModMulCT`](#ssfbnmodmulct) and returns `false` if it does not hold, so non-prime moduli are rejected (even when an inverse exists). |
@@ -175,6 +175,7 @@ The `ssfrsa` and `ssfbn` modules sanity-check against this macro at compile time
 | `SSF_BN_BITS_TO_LIMBS(bits)` | Macro | Number of limbs needed to represent `bits` bits (rounded up). |
 | <a id="ssf-bn-max-limbs"></a>`SSF_BN_MAX_LIMBS` | Constant | `SSF_BN_BITS_TO_LIMBS(SSF_BN_CONFIG_MAX_BITS)` — the maximum limb count any `SSFBN_t` may hold. |
 | <a id="ssf-bn-max-mod-limbs"></a>`SSF_BN_MAX_MOD_LIMBS` | Constant | Upper bound on `SSFBNMont_t::len` — the cap needed to hold a Montgomery residue mod `m`. See [Configuration](#configuration). |
+| <a id="ssf-bn-half-mod-limbs"></a>`SSF_BN_HALF_MOD_LIMBS` | Constant | `(SSF_BN_MAX_MOD_LIMBS + 1) / 2` — the widest modulus [`SSFBNModExpHalf`](#modexp) accepts: an RSA CRT prime. |
 | `SSF_BN_MAX_BYTES` | Constant | `(SSF_BN_CONFIG_MAX_BITS + 7) / 8` — the maximum byte width for [serialization](#serialization). |
 | `SSF_BN_KARATSUBA_THRESHOLD` | Constant | `32` — limb count at or above which `SSFBNMul` dispatches to Karatsuba (same-size, even-length operands only); schoolbook is used below. Must be `>= 4` (a smaller value is a compile-time `#error`: the Karatsuba step-7 add overruns the result for `n < 4`). |
 | `SSFBNLimb_t` | Typedef | `uint32_t` — the single-limb integer type. |
@@ -274,6 +275,7 @@ The `ssfrsa` and `ssfbn` modules sanity-check against this macro at compile time
 |---|----------|-------------|
 | [e.g.](#ex-modexp) | [`void SSFBNModExp(r, a, e, m)`](#modexp) | `r = aᵉ mod m`; constant-time fixed-window (k=4) |
 | [e.g.](#ex-modexp) | [`void SSFBNModExpMont(r, a, e, ctx)`](#modexp) | Same, using a precomputed `SSFBNMont_t` |
+| | [`void SSFBNModExpHalf(r, a, e, m)`](#modexp) | Same as `SSFBNModExp` for `m` of at most `SSF_BN_HALF_MOD_LIMBS` limbs, on half the stack |
 | | [`void SSFBNModExpPub(r, a, e, m)`](#modexppub) | Variable-time `r = aᵉ mod m`; **public exponents only** |
 | | [`void SSFBNModExpMontPub(r, a, e, ctx)`](#modexppub) | Variable-time, with precomputed `SSFBNMont_t` |
 
@@ -868,6 +870,7 @@ SSFBNMontConvertOut(&result, &accMont, &ctx);   /* result = base^(2^16) mod m */
 ```c
 void SSFBNModExp    (SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBN_t *m);
 void SSFBNModExpMont(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBNMont_t *ctx);
+void SSFBNModExpHalf(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBN_t *m);
 ```
 
 `r = aᵉ mod m`. `m->len` (or `ctx->len`) must not exceed
@@ -897,6 +900,14 @@ DH key exchange, and `SSFBNModInv` (via Fermat) rely on for side-channel resista
 - [`SSFBNModExpMont`](#modexp) takes a caller-owned `ctx`, skipping the init / teardown.
   Use when multiple exponentiations share a modulus (RSA signing with repeated messages,
   DH key refresh, the Miller-Rabin witness rounds).
+- [`SSFBNModExpHalf`](#modexp) is `SSFBNModExp` for a modulus of at most
+  [`SSF_BN_HALF_MOD_LIMBS`](#ssf-bn-half-mod-limbs) limbs (`SSF_REQUIRE`), with its table,
+  working values and context sized at that width: about half the stack (5.9 KB instead of
+  11.6 KB on Cortex-M4 -Os at the RSA-4096 cap, counting the shared core). It runs the same
+  algorithm and gives the same result, and also wipes its context, which holds `m`. RSA's CRT
+  private operation uses it for both prime-width exponentiations (OPTIMIZE BN-01). The
+  exponent may be longer than the modulus (RSA's blinded CRT exponents are two limbs longer).
+- All three share one implementation and wipe the table and working values before returning.
 
 `a` should satisfy `a < m`. `e` is processed window-by-window up to the fixed window
 count; `e == 0` produces `1 mod m` (so `0` when `m == 1`) because every window is zero and

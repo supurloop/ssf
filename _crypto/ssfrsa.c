@@ -55,6 +55,10 @@ void (*_SSFRSAScrubTestHook)(const void *buf, size_t len) = NULL;
 #define SSF_RSA_MAX_N_LIMBS        SSF_BN_BITS_TO_LIMBS(SSF_RSA_MAX_KEY_BITS)
 #define SSF_RSA_MAX_HALF_LIMBS     ((SSF_RSA_MAX_N_LIMBS + 1u) / 2u)
 
+/* The CRT primes fit SSFBNModExpHalf */
+typedef char _ssf_rsa_sa_half_fits_modexp_half[
+    ((SSF_RSA_MAX_HALF_LIMBS) <= (SSF_BN_HALF_MOD_LIMBS)) ? 1 : -1];
+
 /* --------------------------------------------------------------------------------------------- */
 /* PKCS#1 v1.5 DigestInfo DER prefixes, without the hash bytes (RFC 8017 Section 9.2, Note 1).   */
 /* --------------------------------------------------------------------------------------------- */
@@ -667,8 +671,8 @@ static bool _SSFRSAPrivateOpCRT(const SSFBN_t *c, uint16_t nLimbs, const SSFBN_t
     _SSFRSABlindExp(&dqb, dq, &eb2, &qm1, hl);
 
     /* m1 = cp^dpb mod p, m2 = cq^dqb mod q (== cB^dp mod p, cB^dq mod q by Fermat). */
-    SSFBNModExp(&m1, &cp, &dpb, p);
-    SSFBNModExp(&m2, &cq, &dqb, q);
+    SSFBNModExpHalf(&m1, &cp, &dpb, p);
+    SSFBNModExpHalf(&m2, &cq, &dqb, q);
 
     /* h = qInv * (m1 - m2) mod p, constant-time on the secret CRT intermediates. */
     SSFBNModSub(&h, &m1, &m2, p);

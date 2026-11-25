@@ -104,10 +104,11 @@ SAFE-05  ssfrsa: the 8 KB stack scrub does not reach the deepest freed frames   
              underlying ssfbn primitives". It is a fixed 8,192 B, but the stack used below
              the scrubbing function is larger at every RSA cap (M4 -Os call graph, unit tests
              off; signing with the Euclid / shift-subtract paths it never takes excluded):
-                 cap    keygen      sign (PKCS#1 and PSS)
-                 4096   16,384 B    20,944 B
-                 3072   12,416 B    15,888 B
-                 2048    8,448 B    10,832 B
+                 cap    keygen      sign (PKCS#1 and PSS)   sign after BN-01
+                 4096   16,384 B    20,944 B                16,160 B
+                 3072   12,416 B    15,888 B                12,256 B
+                 2048    8,448 B    10,832 B                 8,352 B
+             (keygen is 32 B deeper after BN-01: 16,416 / 12,448 / 8,480 B)
              Below the first 8 KB, freed ssfbn frames keep secret-derived words: Montgomery
              scratch of the CRT exponentiations, and in keygen the Miller-Rabin and inverse
              frames over p, q, lambda and d (extended Euclid does not wipe old_s / cur_s /
@@ -123,6 +124,22 @@ SAFE-05  ssfrsa: the 8 KB stack scrub does not reach the deepest freed frames   
              does for the fast paths; (3) both. Each needs a timing and stack cost measurement.
   Found    : 2026-11-25, while measuring BN-05 (BN-05 brought Euclid's own frame, 9,344 ->
              5,248 B at 4096, inside the scrub; its callees still reach past it).
+  Status   : OPEN
+
+SAFE-06  ssfrsa: a private key with an even p or q asserts in signing                [V]
+  Location : _crypto/ssfrsa.c:453-544 (_SSFRSAPrivKeyDecode); reached from SSFRSASignPKCS1 /
+             SSFRSASignPSS -> _SSFRSAPrivateOpCRT -> SSFBNModExpHalf (SSFBNModExp before
+             BN-01) -> SSFBNMontInit
+  Issue    : the decoder checks that n is odd and that p, q are exactly half its width, but
+             not that p and q are odd (SSFRSAPrivKeyIsValid does, but signing does not call
+             it). SSFBNMontInit requires an odd modulus (SSF_REQUIRE), so a malformed key DER
+             with an even prime stops in an assertion instead of the sign call returning
+             false. Reproduced on HEAD 1ba831b (before BN-01) with an
+             OpenSSL RSA-2048 key whose p had its low bit cleared: "SSF Assertion:
+             _crypto/ssfbn.c:2506". BN-01 does not change it.
+  Fix      : reject an even p or q in _SSFRSAPrivKeyDecode, next to the even-n check, plus
+             a unit test per sign function; IsValid's own check then becomes redundant.
+  Found    : 2026-11-25, BN-01 correctness and security audit.
   Status   : OPEN
 
 =====================================================================================
@@ -318,7 +335,32 @@ BN-01  STACK  SSFBNModExpMont 10,440 -> 4,792 B at RSA-4096 (sign chain 12,624 -
              16,768 (3072), 13,984 -> 11,512 (2048); keygen +32 B; code +236 B; host time
              unchanged within noise, results bit-identical to HEAD; BN / RSA / ECDSA unit
              tests pass.
-  Status   : OPEN (defer until BN-05 or BN-07; then take the non-narrowing design)
+  Status   : DONE (2026-11-25): the non-narrowing design, plus SSFBNModExpHalf wiping its
+             context (it holds the prime). SSFBNModExp / ModExpMont keep their signatures,
+             contracts and full-width storage over a shared constant-time core
+             (_SSFBNModExpMontCore, caller storage of TBL_N + 4 residues); SSFBNModExpHalf
+             takes moduli up to SSF_BN_HALF_MOD_LIMBS; the RSA CRT calls it, with a
+             compile-time check that SSF_RSA_MAX_HALF_LIMBS fits. Measured (M4 -Os, unit
+             tests off; on gives the same deltas): RSA sign stack actually used (PSS) 26,768
+             -> 21,984 B at 4096, 20,368 -> 16,736 at 3072, 13,968 -> 11,488 at 2048 (PKCS#1
+             the same deltas); static sign peak 26,768 -> 24,752 / 20,368 -> 18,856 / 13,968
+             -> 12,968 (Euclid's branch, never run when signing, is now the deepest); TLS
+             client pollOpen with an RSA key 27,496 -> 25,480 at 4096; keygen +32 B (the core's
+             call frame under the public ModExpMont; BN-04 would remove it); code +244 B at
+             every cap. Host: RSA-2048 / 4096 signing time unchanged
+             within noise, signatures byte-identical to HEAD and verified by OpenSSL.
+             Tests (red first: the API did not exist): ModExpHalf equals ModExp at every
+             width 1..SSF_BN_HALF_MOD_LIMBS with exponents of 1, n and n + 3 limbs; base 0 / 1,
+             exponent 0, m = 1; the four wipe reports, all zero; the precondition one limb
+             wider. BN / RSA / ECDSA unit tests pass, ASan / UBSan clean; X.509, CMS and TLS
+             client tests pass against it. Mutants (ASan): full-width cap on half storage,
+             each wipe, exponent length ignored, short table stride and swapped CRT primes are
+             killed; `one` sharing `picked`'s slot (equivalent, see BN-04), the redundant
+             width precondition (MontInit's cap check still fires) and the CRT calling
+             ModExp again (same result; only the stack differs) survive. Audit: untrusted
+             keys cannot reach the new precondition (the decoder fixes p, q at exactly half
+             n's width, bounded by SSF_RSA_MAX_KEY_BYTES); found SAFE-06 (pre-existing).
+             Docs: ssfbn.md, ssfrsa.md, README footnotes 38 / 48, ssftlsc.h.
 
 BN-02  STACK / CODE / PERF  SSFBNModExpMontPub frame 3,128 -> 1,072 B; RSA verify chain
        5,344 -> 3,256 B (-2,088 with BN-06); -39 B code; e=65537 10% faster (host)       M V
@@ -344,6 +386,10 @@ BN-04  STACK / CODE  ModExpMont frame -1,040 B (10,440 -> 9,400); -56 B code    
   Change   : ConvertIn straight into table[1] and multiply by it; table[0] =
              ConvertIn(SetOne()) in place (ConvertIn allows aliasing).
   Risk     : low; constant-time and the wiping of table / result unchanged.
+  Note     : (2026-11-25, after BN-01) the residues now live in the shared core's caller
+             storage, (SSF_BN_MODEXP_TBL_N + 4) of them. BN-01's mutation run confirmed `one`
+             can share `picked`'s slot (an equivalent mutant), so BN-04 on top of BN-01 also
+             removes BN-01's +32 B on the keygen peak; re-measure before taking it.
   Status   : OPEN
 
 BN-05  STACK  _SSFBNModInvExtEuclid 9,344 -> 5,248 B (keygen)                          M

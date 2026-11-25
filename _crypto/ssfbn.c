@@ -2859,39 +2859,17 @@ void SSFBNMontConvertOut(SSFBN_t *a, const SSFBN_t *aR, const SSFBNMont_t *ctx)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* r = a^e mod m. Constant-time fixed-window via SSFBNModExpMont.                                */
+/* Internal: r = a^e mod ctx->mod; constant-time fixed-window (k=4) over caller storage of       */
+/* (SSF_BN_MODEXP_TBL_N + 4) zeroed residues of cap limbs each, all wiped before return.         */
 /* --------------------------------------------------------------------------------------------- */
-void SSFBNModExp(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBN_t *m)
+static void _SSFBNModExpMontCore(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e,
+                                 const SSFBNMont_t *ctx, SSFBNLimb_t *store, uint16_t cap)
 {
-    SSFBNMONT_DEFINE(mont, SSF_BN_MAX_MOD_LIMBS); /* a modulus is at most this wide */
-
-    SSF_REQUIRE(r != NULL);
-    SSF_REQUIRE(r->limbs != NULL);
-    SSF_REQUIRE(a != NULL);
-    SSF_REQUIRE(a->limbs != NULL);
-    SSF_REQUIRE(e != NULL);
-    SSF_REQUIRE(e->limbs != NULL);
-    SSF_REQUIRE(m != NULL);
-    SSF_REQUIRE(m->limbs != NULL);
-    SSF_REQUIRE(m->len >= 1u);
-    SSF_REQUIRE(m->len <= r->cap);
-    SSF_REQUIRE(m->len <= SSF_BN_MAX_MOD_LIMBS);
-
-    SSFBNMontInit(&mont, m);
-    SSFBNModExpMont(r, a, e, &mont);
-}
-
-/* --------------------------------------------------------------------------------------------- */
-/* r = a^e mod m using precomputed Montgomery context; constant-time fixed-window (k=4).         */
-/* --------------------------------------------------------------------------------------------- */
-void SSFBNModExpMont(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBNMont_t *ctx)
-{
-    /* Residues only -- never the 2N raw-mul intermediate. See ssfbn.md "MAX_MOD_LIMBS". */
-    SSFBN_DEFINE(aM,     SSF_BN_MAX_MOD_LIMBS);
-    SSFBN_DEFINE(result, SSF_BN_MAX_MOD_LIMBS);
-    SSFBN_DEFINE(picked, SSF_BN_MAX_MOD_LIMBS);
-    SSFBNLimb_t tableStorage[SSF_BN_MODEXP_TBL_N][SSF_BN_MAX_MOD_LIMBS] = {0};
     SSFBN_t table[SSF_BN_MODEXP_TBL_N];
+    SSFBN_t aM;
+    SSFBN_t result;
+    SSFBN_t picked;
+    SSFBN_t one;
     uint32_t nWindows;
     uint32_t winIdx;
     uint32_t w;
@@ -2912,25 +2890,35 @@ void SSFBNModExpMont(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBN
     SSF_REQUIRE(ctx->mod.limbs != NULL);
     SSF_REQUIRE(ctx->len >= 1u);
     SSF_REQUIRE(ctx->len <= r->cap);
-    SSF_REQUIRE(ctx->len <= SSF_BN_MAX_MOD_LIMBS);
+    SSF_REQUIRE(store != NULL);
+    SSF_REQUIRE(ctx->len <= cap);
 
-    /* Wire up table descriptors over their stack-resident backing storage. */
+    /* Wire up the table and working descriptors over the caller's storage. */
     for (w = 0u; w < SSF_BN_MODEXP_TBL_N; w++)
     {
-        table[w].limbs = tableStorage[w];
+        table[w].limbs = &store[(size_t)w * cap];
         table[w].len = 0u;
-        table[w].cap = SSF_BN_MAX_MOD_LIMBS;
+        table[w].cap = cap;
     }
+    aM.limbs = &store[(size_t)SSF_BN_MODEXP_TBL_N * cap];
+    aM.len = 0u;
+    aM.cap = cap;
+    result.limbs = &store[(size_t)(SSF_BN_MODEXP_TBL_N + 1u) * cap];
+    result.len = 0u;
+    result.cap = cap;
+    picked.limbs = &store[(size_t)(SSF_BN_MODEXP_TBL_N + 2u) * cap];
+    picked.len = 0u;
+    picked.cap = cap;
+    one.limbs = &store[(size_t)(SSF_BN_MODEXP_TBL_N + 3u) * cap];
+    one.len = 0u;
+    one.cap = cap;
 
     /* Convert a to Montgomery form. */
     SSFBNMontConvertIn(&aM, a, ctx);
 
     /* table[0] = Mont(1) for zero-windows; table[i] = aM^i for i=1..15. */
-    {
-        SSFBN_DEFINE(one, SSF_BN_MAX_MOD_LIMBS);
-        SSFBNSetOne(&one, ctx->len);
-        SSFBNMontConvertIn(&table[0], &one, ctx);
-    }
+    SSFBNSetOne(&one, ctx->len);
+    SSFBNMontConvertIn(&table[0], &one, ctx);
     SSFBNCopy(&table[1], &aM);
     for (w = 2u; w < SSF_BN_MODEXP_TBL_N; w++)
     {
@@ -2980,10 +2968,76 @@ void SSFBNModExpMont(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBN
     SSFBNZeroize(&aM);
     SSFBNZeroize(&result);
     SSFBNZeroize(&picked);
+    SSFBNZeroize(&one);
     for (w = 0u; w < SSF_BN_MODEXP_TBL_N; w++)
     {
         SSFBNZeroize(&table[w]);
     }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* r = a^e mod m. Constant-time fixed-window via SSFBNModExpMont.                                */
+/* --------------------------------------------------------------------------------------------- */
+void SSFBNModExp(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBN_t *m)
+{
+    SSFBNMONT_DEFINE(mont, SSF_BN_MAX_MOD_LIMBS); /* a modulus is at most this wide */
+
+    SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(r->limbs != NULL);
+    SSF_REQUIRE(a != NULL);
+    SSF_REQUIRE(a->limbs != NULL);
+    SSF_REQUIRE(e != NULL);
+    SSF_REQUIRE(e->limbs != NULL);
+    SSF_REQUIRE(m != NULL);
+    SSF_REQUIRE(m->limbs != NULL);
+    SSF_REQUIRE(m->len >= 1u);
+    SSF_REQUIRE(m->len <= r->cap);
+    SSF_REQUIRE(m->len <= SSF_BN_MAX_MOD_LIMBS);
+
+    SSFBNMontInit(&mont, m);
+    SSFBNModExpMont(r, a, e, &mont);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* r = a^e mod m using precomputed Montgomery context; constant-time fixed-window (k=4).         */
+/* --------------------------------------------------------------------------------------------- */
+void SSFBNModExpMont(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBNMont_t *ctx)
+{
+    /* Residues only -- never the 2N raw-mul intermediate. See ssfbn.md "MAX_MOD_LIMBS". */
+    SSFBNLimb_t store[(SSF_BN_MODEXP_TBL_N + 4u) * SSF_BN_MAX_MOD_LIMBS] = {0u};
+
+    SSF_REQUIRE(ctx != NULL);
+    SSF_REQUIRE(ctx->len <= SSF_BN_MAX_MOD_LIMBS);
+
+    _SSFBNModExpMontCore(r, a, e, ctx, store, SSF_BN_MAX_MOD_LIMBS);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* r = a^e mod m for m of at most SSF_BN_HALF_MOD_LIMBS limbs (an RSA CRT prime); constant-time  */
+/* fixed-window (k=4), the same algorithm as SSFBNModExp on half-width storage.                  */
+/* --------------------------------------------------------------------------------------------- */
+void SSFBNModExpHalf(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBN_t *m)
+{
+    SSFBNMONT_DEFINE(mont, SSF_BN_HALF_MOD_LIMBS);
+    SSFBNLimb_t store[(SSF_BN_MODEXP_TBL_N + 4u) * SSF_BN_HALF_MOD_LIMBS] = {0u};
+
+    SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(r->limbs != NULL);
+    SSF_REQUIRE(m != NULL);
+    SSF_REQUIRE(m->limbs != NULL);
+    SSF_REQUIRE(m->len >= 1u);
+    SSF_REQUIRE(m->len <= r->cap);
+    SSF_REQUIRE(m->len <= SSF_BN_HALF_MOD_LIMBS);
+
+    SSFBNMontInit(&mont, m);
+    _SSFBNModExpMontCore(r, a, e, &mont, store, SSF_BN_HALF_MOD_LIMBS);
+    _SSF_BN_SCRUB_HOOK(store, sizeof(store));
+
+    /* The context holds m (an RSA prime) and R^2 mod m: wipe them too */
+    SSFBNZeroize(&mont.mod);
+    _SSF_BN_SCRUB_HOOK(mont.mod.limbs, (size_t)mont.mod.cap * sizeof(SSFBNLimb_t));
+    SSFBNZeroize(&mont.rr);
+    _SSF_BN_SCRUB_HOOK(mont.rr.limbs, (size_t)mont.rr.cap * sizeof(SSFBNLimb_t));
 }
 
 /* --------------------------------------------------------------------------------------------- */

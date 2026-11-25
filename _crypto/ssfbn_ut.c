@@ -4420,6 +4420,97 @@ void SSFBNUnitTest(void)
         }
     }
 
+    /* ---- BN-01: SSFBNModExpHalf equals SSFBNModExp on every modulus it accepts, and wipes ---- */
+    {
+        SSFBN_DEFINE(m, SSF_BN_MAX_MOD_LIMBS);
+        SSFBN_DEFINE(a, SSF_BN_MAX_MOD_LIMBS);
+        SSFBN_DEFINE(e, SSF_BN_MAX_MOD_LIMBS);
+        SSFBN_DEFINE(rHalf, SSF_BN_MAX_MOD_LIMBS);
+        SSFBN_DEFINE(rRef, SSF_BN_MAX_MOD_LIMBS);
+        uint32_t x = 0x9E3779B9u;
+        uint16_t n;
+        uint16_t eLen;
+        uint16_t k;
+        uint8_t pass;
+
+        for (n = 1u; n <= SSF_BN_HALF_MOD_LIMBS; n++)
+        {
+            for (pass = 0u; pass < 3u; pass++)
+            {
+                /* Exponents of 1 limb, n limbs and n + 3 limbs (the CRT's blinded exponents) */
+                eLen = (pass == 0u) ? 1u : ((pass == 1u) ? n : (uint16_t)(n + 3u));
+                SSFBNSetZero(&m, n);
+                SSFBNSetZero(&a, n);
+                SSFBNSetZero(&e, eLen);
+                for (k = 0u; k < n; k++)
+                {
+                    x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+                    m.limbs[k] = x;
+                    x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+                    a.limbs[k] = x;
+                }
+                for (k = 0u; k < eLen; k++)
+                {
+                    x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+                    e.limbs[k] = x;
+                }
+                m.limbs[0] |= 1u;
+                m.limbs[n - 1u] |= 0x80000000u;
+                a.limbs[n - 1u] &= 0x7FFFFFFFu;
+
+                SSFBNModExp(&rRef, &a, &e, &m);
+                SSFBNModExpHalf(&rHalf, &a, &e, &m);
+                SSF_ASSERT((rHalf.len == rRef.len) && (SSFBNCmp(&rHalf, &rRef) == 0));
+            }
+        }
+
+        /* Edge values at the widest modulus: base 0, base 1, exponent 0 */
+        n = SSF_BN_HALF_MOD_LIMBS;
+        SSFBNSetZero(&a, n);
+        SSFBNSetUint32(&e, 5u, 1u);
+        SSFBNModExpHalf(&rHalf, &a, &e, &m);
+        SSF_ASSERT((rHalf.len == n) && SSFBNIsZero(&rHalf));
+        SSFBNSetUint32(&a, 1u, n);
+        SSFBNModExpHalf(&rHalf, &a, &e, &m);
+        SSF_ASSERT((rHalf.len == n) && SSFBNIsOne(&rHalf));
+        a.limbs[0] = 7u;
+        SSFBNSetZero(&e, 1u);
+        SSFBNModExpHalf(&rHalf, &a, &e, &m);
+        SSF_ASSERT((rHalf.len == n) && SSFBNIsOne(&rHalf));
+
+        /* m = 1: everything is 0 */
+        SSFBNSetUint32(&m, 1u, 1u);
+        SSFBNSetZero(&a, 1u);
+        SSFBNSetUint32(&e, 3u, 1u);
+        SSFBNModExpHalf(&rHalf, &a, &e, &m);
+        SSFBNModExp(&rRef, &a, &e, &m);
+        SSF_ASSERT((rHalf.len == 1u) && (SSFBNCmp(&rHalf, &rRef) == 0) && SSFBNIsZero(&rHalf));
+
+        /* The window table, residues and the context holding m (an RSA prime) are wiped: the */
+        /* storage, ctx.mod, ctx.rr, plus SSFBNMontInit's own R^2 copy                        */
+        n = SSF_BN_HALF_MOD_LIMBS;
+        SSFBNSetZero(&m, n);
+        for (k = 0u; k < n; k++) m.limbs[k] = 0xA5A5A5A5u ^ k;
+        m.limbs[0] |= 1u;
+        SSFBNSetUint32(&a, 0x12345u, n);
+        SSFBNSetUint32(&e, 0x10001u, 1u);
+        _scrubCalls = 0u;
+        _scrubDirty = 0u;
+        _SSFBNScrubTestHook = _ScrubCheck;
+        SSFBNModExpHalf(&rHalf, &a, &e, &m);
+        _SSFBNScrubTestHook = NULL;
+        SSF_ASSERT(_scrubCalls == 4u);
+        SSF_ASSERT(_scrubDirty == 0u);
+
+        /* One limb wider than SSF_BN_HALF_MOD_LIMBS is a precondition violation */
+        n = (uint16_t)(SSF_BN_HALF_MOD_LIMBS + 1u);
+        SSFBNSetZero(&m, n);
+        for (k = 0u; k < n; k++) m.limbs[k] = 0xFFFFFFFFu;
+        SSFBNSetUint32(&a, 2u, n);
+        SSFBNSetUint32(&e, 3u, 1u);
+        SSF_ASSERT_TEST(SSFBNModExpHalf(&rHalf, &a, &e, &m));
+    }
+
     /* ---- BN-05: extended Euclid at the widest modulus it accepts (RSA keygen's lambda) ---- */
     {
         SSFBN_DEFINE(m, SSF_BN_MAX_MOD_LIMBS);

@@ -85,6 +85,9 @@ typedef uint64_t SSFBNDLimb_t;
 #define SSF_BN_SMALL_MAX_LIMBS     (SSF_BN_MAX_LIMBS)
 #endif
 
+/* Largest modulus SSFBNModExpHalf accepts: half of SSF_BN_MAX_MOD_LIMBS, an RSA CRT prime.     */
+#define SSF_BN_HALF_MOD_LIMBS      (((SSF_BN_MAX_MOD_LIMBS) + 1u) / 2u)
+
 /* --------------------------------------------------------------------------------------------- */
 /* Compile-time checks that an SSF_BN_CONFIG_MAX_BITS override fits every enabled algorithm.     */
 /* --------------------------------------------------------------------------------------------- */
@@ -254,6 +257,7 @@ void SSFBNMontConvertOut(SSFBN_t *a, const SSFBN_t *aR, const SSFBNMont_t *ctx);
 /* --------------------------------------------------------------------------------------------- */
 void SSFBNModExp(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBN_t *m);
 void SSFBNModExpMont(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBNMont_t *ctx);
+void SSFBNModExpHalf(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBN_t *m);
 void SSFBNModExpPub(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBN_t *m);
 void SSFBNModExpMontPub(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e, const SSFBNMont_t *ctx);
 

@@ -1573,6 +1573,40 @@ void SSFBNModMulCT(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* r = (a * b) mod m for odd m, constant-time: SSFBNModMulCT without its even-modulus path, so    */
+/* callers whose moduli are always odd do not link the shift-and-subtract (OPTIMIZE BN-15).      */
+/* --------------------------------------------------------------------------------------------- */
+void SSFBNModMulCTOdd(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *m)
+{
+    uint8_t aLtM;
+    uint8_t bLtM;
+
+    SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(r->limbs != NULL);
+    SSF_REQUIRE(a != NULL);
+    SSF_REQUIRE(a->limbs != NULL);
+    SSF_REQUIRE(b != NULL);
+    SSF_REQUIRE(b->limbs != NULL);
+    SSF_REQUIRE(m != NULL);
+    SSF_REQUIRE(m->limbs != NULL);
+    SSF_REQUIRE(a->len == m->len);
+    SSF_REQUIRE(b->len == m->len);
+    SSF_REQUIRE(m->len >= 1u);
+    SSF_REQUIRE((m->limbs[0] & 1u) != 0u);
+    SSF_REQUIRE((uint16_t)(2u * m->len) <= SSF_BN_MAX_LIMBS);
+    SSF_REQUIRE(m->len <= r->cap);
+
+    _SSF_BN_COUNT(_SSFBNFullWidthCalls);
+
+    /* Exact only if a < m or b < m; compares combined branch-free */
+    aLtM = (uint8_t)(SSFBNCmp(a, m) < 0);
+    bLtM = (uint8_t)(SSFBNCmp(b, m) < 0);
+    SSF_REQUIRE((aLtM | bLtM) != 0u);
+
+    _SSFBNModMulCTMont(r, a, b, m);
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* r = (a * a) mod m.                                                                            */
 /* --------------------------------------------------------------------------------------------- */
 void SSFBNModSquare(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
@@ -2421,8 +2455,8 @@ bool SSFBNModInv(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
     (void)SSFBNSubUint32(&t, m, 2u);
     SSFBNModExp(r, a, &t, m);
 
-    /* Verify a * r mod m == 1 in constant time (r < m meets ModMulCT's precondition) */
-    SSFBNModMulCT(&t, a, r, m);
+    /* Verify a * r mod m == 1 in constant time (m is odd here; r < m meets the precondition) */
+    SSFBNModMulCTOdd(&t, a, r, m);
     ok = SSFBNIsOne(&t);
 
     /* t held m - 2, secret when m is (RSA keygen's qInv mod p) */

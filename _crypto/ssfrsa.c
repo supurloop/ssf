@@ -654,7 +654,7 @@ static bool _SSFRSAPrivateOpCRT(const SSFBN_t *c, uint16_t nLimbs, const SSFBN_t
 
     /* cB = c * r^e mod n (blinded input; e is the public exponent). */
     SSFBNModExpPub(&rE, &r, e, n);
-    SSFBNModMulCT(&cB, c, &rE, n);
+    SSFBNModMulCTOdd(&cB, c, &rE, n);
 
     /* cp = cB mod p, cq = cB mod q */
     SSFBNMod(&cp, &cB, p);
@@ -676,7 +676,7 @@ static bool _SSFRSAPrivateOpCRT(const SSFBN_t *c, uint16_t nLimbs, const SSFBN_t
 
     /* h = qInv * (m1 - m2) mod p, constant-time on the secret CRT intermediates. */
     SSFBNModSub(&h, &m1, &m2, p);
-    SSFBNModMulCT(&h, qInv, &h, p);
+    SSFBNModMulCTOdd(&h, qInv, &h, p);
 
     /* Recombine: mB = (h * q) + m2 in full n-width (still the blinded value c^d * r mod n). */
     SSFBNSetZero(&m2Full, nLimbs);
@@ -691,7 +691,7 @@ static bool _SSFRSAPrivateOpCRT(const SSFBN_t *c, uint16_t nLimbs, const SSFBN_t
     SSFBNAdd(&mB, &mB, &m2Full);
 
     /* Unblind: result = mB * r^-1 mod n = c^d mod n. */
-    SSFBNModMulCT(result, &mB, &rInv, n);
+    SSFBNModMulCTOdd(result, &mB, &rInv, n);
 
 #if SSF_CONFIG_RSA_UNIT_TEST == 1
     if (_SSFRSASignBlindTestHook != NULL)

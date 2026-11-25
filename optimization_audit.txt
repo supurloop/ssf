@@ -665,7 +665,25 @@ BN-15  CODE / STACK  -268 B linked sign code; the 3,144 B _SSFBNModMulCTShift fr
   What     : the even-modulus shift-and-subtract path is never used (n, p, q are odd).
   Change   : behind an option.
   Risk     : low; the even-modulus test needs the option on.
-  Status   : OPEN
+  Correction (2026-11-25): no option or narrowing is needed. SSFBNModMulCT keeps its contract
+             and even path; a new SSFBNModMulCTOdd (its Montgomery path, m odd required)
+             serves RSA's three calls and SSFBNModInv's check.
+  Status   : DONE (2026-11-25): as corrected. Measured (M4 -Os, on f62443c): linked with
+             --gc-sections, tests off, 4096 cap: sign-only 20,312 -> 20,020 B (-292), keygen
+             + sign 28,180 -> 27,888 (-292), verify-only unchanged; _SSFBNModMulCTShift no
+             longer linked. ssfbn object +216 B. Stack: default (CUSTOM) peaks unchanged;
+             SSF_CRYPT_PROFILE_MIN_MEMORY (k = 3, BN-03), where the shift branch was the sign
+             peak: PSS 19,472 -> 18,504 (-968) at 4096, 14,864 -> 14,152 (-712) at 3072, 0 at
+             2048. Host: sign within noise, signatures identical. Behaviour difference only for
+             a key with an even p or q (SAFE-06): signing now asserts in the blinding
+             multiply's odd-modulus precondition rather than later in SSFBNMontInit. Tests:
+             SSFBNModMulCTOdd against SSFBNModMulCT and SSFBNModMul up to SSF_BN_MAX_MOD_LIMBS,
+             the full-width counter, SSF_ASSERT_TEST for an even modulus and for a, b >= m,
+             SSFBNModMulCT still taking an even modulus (did not build on HEAD); 6,000-product
+             differential. Mutants under ASan: 2 of 5 killed by tests (the a < m or b < m
+             check, the counter); the odd check is layered (the Montgomery helper repeats it);
+             an RSA call or SSFBNModInv back on SSFBNModMulCT behave identically and are caught
+             by the link check (the shift path linked again).
 
 BN-16  CODE  -241 B rodata in keygen builds                                             M
   Location : _crypto/ssfbn.c:122

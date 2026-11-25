@@ -4730,6 +4730,76 @@ void SSFBNUnitTest(void)
         SSF_ASSERT_TEST(SSFBNGenPrime(&narrow, 33u, 5u, &prng));
     }
 
+    /* ---- BN-15: SSFBNModMulCTOdd equals SSFBNModMulCT / ModMul on odd moduli; odd only ---- */
+    {
+        SSFBN_DEFINE(m, SSF_BN_MAX_MOD_LIMBS);
+        SSFBN_DEFINE(a, SSF_BN_MAX_MOD_LIMBS);
+        SSFBN_DEFINE(b, SSF_BN_MAX_MOD_LIMBS);
+        SSFBN_DEFINE(rOdd, SSF_BN_MAX_MOD_LIMBS);
+        SSFBN_DEFINE(rCT, SSF_BN_MAX_MOD_LIMBS);
+        SSFBN_DEFINE(rGen, SSF_BN_MAX_MOD_LIMBS);
+        static const uint16_t widths[] = { 1u, 2u, 3u, 8u, SSF_BN_HALF_MOD_LIMBS,
+                                           SSF_BN_MAX_MOD_LIMBS };
+        uint32_t x = 0x94D049BBu;
+        uint32_t calls;
+        uint16_t w;
+        uint16_t n;
+        uint16_t k;
+        uint8_t pass;
+
+        for (w = 0u; w < (uint16_t)(sizeof(widths) / sizeof(widths[0])); w++)
+        {
+            n = widths[w];
+            for (pass = 0u; pass < 4u; pass++)
+            {
+                SSFBNSetZero(&m, n);
+                SSFBNSetZero(&a, n);
+                SSFBNSetZero(&b, n);
+                for (k = 0u; k < n; k++)
+                {
+                    x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+                    m.limbs[k] = x;
+                    x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+                    a.limbs[k] = x;
+                    x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+                    b.limbs[k] = x;
+                }
+                m.limbs[0] |= 1u;
+                m.limbs[n - 1u] |= 0x80000000u;
+                a.limbs[n - 1u] &= 0x7FFFFFFFu;            /* a < m; b may be >= m */
+                if (pass == 1u) { SSFBNCopy(&a, &m); a.limbs[0] -= 1u; SSFBNCopy(&b, &a); }
+                if (pass == 2u) SSFBNSetZero(&b, n);
+                if (pass == 3u) SSFBNSetOne(&a, n);
+
+                calls = _SSFBNFullWidthCalls;
+                SSFBNModMulCTOdd(&rOdd, &a, &b, &m);
+                SSF_ASSERT(_SSFBNFullWidthCalls == (calls + 1u));
+                SSFBNModMulCT(&rCT, &a, &b, &m);
+                SSFBNModMul(&rGen, &a, &b, &m);
+                SSF_ASSERT((rOdd.len == n) && (SSFBNCmp(&rOdd, &rCT) == 0) &&
+                           (SSFBNCmp(&rOdd, &rGen) == 0));
+            }
+        }
+
+        /* An even modulus, and a, b both >= m, violate the preconditions */
+        n = 2u;
+        SSFBNSetUint32(&m, 1000u, n);
+        SSFBNSetUint32(&a, 7u, n);
+        SSFBNSetUint32(&b, 9u, n);
+        SSF_ASSERT_TEST(SSFBNModMulCTOdd(&rOdd, &a, &b, &m));
+        SSFBNSetUint32(&m, 1001u, n);
+        SSFBNSetUint32(&a, 1001u, n);
+        SSFBNSetUint32(&b, 2000u, n);
+        SSF_ASSERT_TEST(SSFBNModMulCTOdd(&rOdd, &a, &b, &m));
+
+        /* SSFBNModMulCT still takes an even modulus (its shift-and-subtract path) */
+        SSFBNSetUint32(&m, 1000u, n);
+        SSFBNSetUint32(&a, 999u, n);
+        SSFBNSetUint32(&b, 998u, n);
+        SSFBNModMulCT(&rCT, &a, &b, &m);
+        SSF_ASSERT((rCT.len == n) && (rCT.limbs[0] == 2u) && (rCT.limbs[1] == 0u));
+    }
+
     /* ---- BN-12: SSFBNGcd under many swaps, full width, shared twos, r aliasing a or b ---- */
     {
         static SSFBNLimb_t gaL[SSF_BN_MAX_LIMBS];

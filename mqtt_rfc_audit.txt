@@ -5,7 +5,8 @@ Scope      : _net/ssfmqttc.c, _net/ssfmqttpkt.c/.h, _opt/ssfmqttc_opt.h, _net/ss
              the MQTT Version 3.1.1 OASIS Standard (plus ISO/IEC 20922, which has the same text).
              MQTT is not an IETF RFC; "the spec" below means MQTT 3.1.1. Section numbers are
              from that document. Code at commit a8ce46f (branch mqtt).
-Status     : review only. Nothing here has been implemented; every item is OPEN.
+Status     : MQTT-IOP-01 and MQTT-FEAT-07 are FIXED (commit 0bc61a9); every other item is
+             OPEN.
 
 Lists
   Part A  Interoperability problems, most likely to happen with real brokers first.
@@ -48,7 +49,7 @@ MQTT-IOP-01  An oversized inbound packet or long topic drops the connection, and
                report RX_PUBLISH_DROPPED with a new reason (e.g. RX_PUBLISH_TOO_LARGE). Do the
                same for a topic that is too long. Keep RX_OVERFLOW only for non-PUBLISH
                packets.
-  Status     : FIXED (minimal scope, uncommitted). An oversized PUBLISH is consumed as it arrives
+  Status     : FIXED (minimal scope, commit 0bc61a9). An oversized PUBLISH is consumed as it arrives
                and dropped with RX_PUBLISH_TOO_LARGE; a topic that is too long is dropped with
                RX_PUBLISH_TOPIC_TOO_LONG; QoS 1 is acknowledged best-effort (the IOP-04 gap
                remains); malformed packets still fail with PROTOCOL, including an embedded NUL
@@ -285,6 +286,7 @@ MQTT-FEAT-07  Skip oversized inbound PUBLISH instead of dropping the connection
   Why        : The feature side of IOP-01. Also lets small devices subscribe to broad filters
                safely.
   Effort     : Medium (skip state in the framer).
+  Status     : FIXED with MQTT-IOP-01 (commit 0bc61a9).
 
 MQTT-FEAT-08  MQTT 5.0
   Likelihood : MED

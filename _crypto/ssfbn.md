@@ -732,7 +732,10 @@ bool SSFBNModInvOdd(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m);
   fails and the function returns `false`, so it is safe to call on any modulus, but it is only
   *useful* (yields a result) when `m` is prime. Use this on secret `a`
   whenever `m` is a curve order, a field prime, or a Diffie-Hellman group order. `m->len`
-  must not exceed [`SSF_BN_MAX_MOD_LIMBS`](#ssf-bn-max-mod-limbs).
+  must not exceed [`SSF_BN_MAX_MOD_LIMBS`](#ssf-bn-max-mod-limbs). Its one working value
+  (`m − 2`, then the check product) is held at that width and wiped before it returns from
+  either outcome of the check, since `m` can be secret (RSA keygen's `q⁻¹ mod p`; OPTIMIZE
+  BN-10: a 544 B frame at the RSA-4096 cap instead of 2,088 B).
 - [`SSFBNModInvExt`](#modinv) works for any coprime `a` and `m`. For odd `m` and
   `0 < a < m` it runs the binary extended GCD (halvings and subtractions only; OPTIMIZE BN-O5,
   about 6× faster at 2048 bits); for even `m` or an unreduced `a` it runs extended Euclid.

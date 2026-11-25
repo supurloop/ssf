@@ -124,6 +124,11 @@ SAFE-05  ssfrsa: the 8 KB stack scrub does not reach the deepest freed frames   
              does for the fast paths; (3) both. Each needs a timing and stack cost measurement.
   Found    : 2026-11-25, while measuring BN-05 (BN-05 brought Euclid's own frame, 9,344 ->
              5,248 B at 4096, inside the scrub; its callees still reach past it).
+  Note     : (2026-11-25, BN-10) for option (2): SSFBNModInv now wipes its working value
+             (p - 2 in keygen's qInv); BN-07 removed keygen's Euclid. Still unwiped in keygen:
+             SSFBNModExp's Montgomery context (p and R^2 mod p, for qInv) and
+             SSFBNIsProbablePrime's context and working values (the candidate prime).
+             SSFBNModExpHalf already wipes its context (BN-01).
   Status   : OPEN
 
 SAFE-06  ssfrsa: a private key with an even p or q asserts in signing                [V]
@@ -553,7 +558,20 @@ BN-10  STACK  SSFBNModInv 2,088 -> 544 B                                        
   Location : _crypto/ssfbn.c:2300, 2327
   Change   : exp sized MAX_MOD_LIMBS, reused for the check.
   Risk     : low.
-  Status   : OPEN
+  Correction (2026-11-25): no peak moves. Keygen is its only in-tree caller (qInv mod p), and
+             that branch sits below the Miller-Rabin peak (and the 2048-only scrub peak).
+  Status   : DONE (2026-11-25): as specified, plus a wipe of the merged value on both
+             outcomes of the check (it holds p - 2; scrub hook for the tests). Measured (M4
+             -Os, on 8d4b1d3): frame 2,088 -> 544 B (4096), 1,576 -> 416 (3072), 1,064 -> 288
+             (2048); keygen qInv branch 24,464 -> 22,920 (3072: 18,496 -> 17,336); keygen,
+             sign, verify, EC and TLS peaks unchanged. ssfbn code -12 B (tests off; +24 B on,
+             the hook); without the wipe it would be -36 B. Host: within noise (2048-bit prime
+             6.6-6.8 ms on both). Tests: P-256 / P-384 / m - 1 against SSFBNModInvExt and
+             a * r == 1, composite moduli at curve width and at SSF_BN_MAX_MOD_LIMBS return
+             false, exactly one extra clean wipe on every full path, none on the early
+             refusals (failed on HEAD). Mutants under ASan: all 6 killed (no wipe, hook without
+             zeroize, wipe only on success, t one limb short, check before the product, m - 1
+             as the exponent).
 
 BN-11  STACK  SSFBNGenPrime 1,088 -> 56 B (keygen)                                      M V
   Location : _crypto/ssfbn.c:3400-3425

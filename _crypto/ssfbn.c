@@ -2389,7 +2389,8 @@ void SSFBNModMulNISTPrime(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const 
 /* --------------------------------------------------------------------------------------------- */
 bool SSFBNModInv(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
 {
-    SSFBN_DEFINE(exp, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(t, SSF_BN_MAX_MOD_LIMBS); /* m - 2, then a * r mod m: both below m */
+    bool ok;
 
     SSF_REQUIRE(r != NULL);
     SSF_REQUIRE(r->limbs != NULL);
@@ -2412,17 +2413,17 @@ bool SSFBNModInv(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
     }
     /* No, odd modulus; the a * r == 1 check below rejects non-prime / non-coprime cases. */
 
-    (void)SSFBNSubUint32(&exp, m, 2u);
-    SSFBNModExp(r, a, &exp, m);
+    (void)SSFBNSubUint32(&t, m, 2u);
+    SSFBNModExp(r, a, &t, m);
 
     /* Verify a * r mod m == 1 in constant time (r < m meets ModMulCT's precondition) */
-    {
-        SSFBN_DEFINE(check, SSF_BN_MAX_LIMBS);
-        SSFBNModMulCT(&check, a, r, m);
-        if (SSFBNIsOne(&check) == false) return false;
-    }
+    SSFBNModMulCT(&t, a, r, m);
+    ok = SSFBNIsOne(&t);
 
-    return true;
+    /* t held m - 2, secret when m is (RSA keygen's qInv mod p) */
+    SSFBNZeroize(&t);
+    _SSF_BN_SCRUB_HOOK(t.limbs, (size_t)t.cap * sizeof(SSFBNLimb_t));
+    return ok;
 }
 
 /* --------------------------------------------------------------------------------------------- */

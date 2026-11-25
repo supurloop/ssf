@@ -4637,6 +4637,87 @@ void SSFBNUnitTest(void)
         SSF_ASSERT((r.len == n) && SSFBNIsOne(&r));
     }
 
+    /* ---- BN-10: SSFBNModInv at modulus width; wipes its working value on every full path ---- */
+    {
+        SSFBN_DEFINE(m, SSF_BN_MAX_MOD_LIMBS);
+        SSFBN_DEFINE(a, SSF_BN_MAX_MOD_LIMBS);
+        SSFBN_DEFINE(r, SSF_BN_MAX_MOD_LIMBS);
+        SSFBN_DEFINE(rExt, SSF_BN_MAX_MOD_LIMBS);
+        SSFBN_DEFINE(e, SSF_BN_MAX_MOD_LIMBS);
+        SSFBN_DEFINE(check, SSF_BN_MAX_MOD_LIMBS);
+        uint32_t base;
+        uint16_t n;
+        uint16_t k;
+        uint8_t pass;
+
+        for (pass = 0u; pass < 5u; pass++)
+        {
+            /* Primes: P-256, P-384 when built; composite odd moduli: 2^(32n) - 1 at curve width */
+            /* (pass 3) and at SSF_BN_MAX_MOD_LIMBS (pass 4, the widest the precondition takes) */
+#if SSF_BN_CONFIG_MAX_BITS >= 768
+            SSFBNCopy(&m, (pass == 1u) ? &SSF_BN_NIST_P384 : &SSF_BN_NIST_P256);
+#elif SSF_BN_CONFIG_MAX_BITS >= 512
+            SSFBNCopy(&m, &SSF_BN_NIST_P256);
+#else
+            SSFBNSetUint32(&m, 0xFFFFFFFBu, 1u); /* 2^32 - 5, prime */
+#endif
+            if (pass == 4u) m.len = SSF_BN_MAX_MOD_LIMBS;
+            n = m.len;
+            if (pass >= 3u)
+            {
+                for (k = 0u; k < n; k++) m.limbs[k] = 0xFFFFFFFFu; /* 2^(32n) - 1: divisible by 3 */
+            }
+            SSFBNSetZero(&a, n);
+            for (k = 0u; k < n; k++) a.limbs[k] = 0x6A09E667u ^ ((uint32_t)k * 0x9E3779B9u);
+            if (pass == 2u) { SSFBNCopy(&a, &m); a.limbs[0] -= 1u; }  /* m - 1 */
+            if (SSFBNCmp(&a, &m) >= 0) a.limbs[n - 1u] >>= 1;
+
+            /* The same exponentiation and check, by hand: their own wipes are the baseline */
+            _scrubCalls = 0u;
+            _scrubDirty = 0u;
+            _SSFBNScrubTestHook = _ScrubCheck;
+            (void)SSFBNSubUint32(&e, &m, 2u);
+            SSFBNModExp(&r, &a, &e, &m);
+            SSFBNModMulCT(&check, &a, &r, &m);
+            base = _scrubCalls;
+
+            /* SSFBNModInv makes exactly one more wipe, of its working value, and all are clean */
+            _scrubCalls = 0u;
+            _scrubDirty = 0u;
+            if (pass < 3u)
+            {
+                SSF_ASSERT(SSFBNModInv(&r, &a, &m) == true);
+            }
+            else
+            {
+                SSF_ASSERT(SSFBNModInv(&r, &a, &m) == false);
+            }
+            _SSFBNScrubTestHook = NULL;
+            SSF_ASSERT(_scrubCalls == (base + 1u));
+            SSF_ASSERT(_scrubDirty == 0u);
+
+            /* The inverse itself: equal to SSFBNModInvExt's, and a * r == 1 mod m */
+            if (pass < 3u)
+            {
+                SSF_ASSERT(SSFBNModInvExt(&rExt, &a, &m) == true);
+                SSF_ASSERT((r.len == n) && (SSFBNCmp(&r, &rExt) == 0));
+                SSFBNModMulCT(&check, &a, &r, &m);
+                SSF_ASSERT(SSFBNIsOne(&check));
+            }
+        }
+
+        /* Early refusals touch nothing to wipe: a = 0, and an even modulus */
+        _scrubCalls = 0u;
+        _SSFBNScrubTestHook = _ScrubCheck;
+        SSFBNSetZero(&a, n);
+        SSF_ASSERT(SSFBNModInv(&r, &a, &m) == false);
+        SSFBNSetUint32(&a, 3u, n);
+        m.limbs[0] &= ~1u;
+        SSF_ASSERT(SSFBNModInv(&r, &a, &m) == false);
+        _SSFBNScrubTestHook = NULL;
+        SSF_ASSERT(_scrubCalls == 0u);
+    }
+
     /* ---- BN-07: SSFBNModInvOdd equals SSFBNModInvExt on odd moduli; its preconditions ---- */
     {
         SSFBN_DEFINE(m, SSF_BN_MAX_MOD_LIMBS);

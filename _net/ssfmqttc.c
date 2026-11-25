@@ -147,6 +147,7 @@ typedef struct
 
     /* Per connection */
     uint16_t subscribePacketId;
+    bool isPingPending;               /* PINGREQ queued or sent, PINGRESP not yet received     */
 
     /* Pump owned */
     SSFMQTTCLink_t link;              /* Transport state; closed by the pump on fatal error    */
@@ -360,8 +361,9 @@ static void _SSFMQTTCTxEnqueueSimple(SSFMQTTPktType_t type)
     SSFMQTTCTxBlock_t *b;
 
     SSF_REQUIRE((type == SSF_MQTT_PKT_PINGREQ) || (type == SSF_MQTT_PKT_DISCONNECT));
-    /* At most one of each is ever queued: PINGREQ by _SSFMQTTCIsTxQueued() in the keep-alive   */
-    /* handler, DISCONNECT by STOPPING being entered once. The reserve holds exactly those two.  */
+    /* At most one of each is ever queued: PINGREQ by isPingPending, which only a PINGRESP after */
+    /* the PINGREQ was sent clears, DISCONNECT by STOPPING being entered once. The reserve holds */
+    /* exactly those two.                                                                        */
     SSF_ASSERT(_SSFMQTTCIsTxQueued(type) == false);
     b = _SSFMQTTCCtlAlloc(type, true);
     SSF_ASSERT(b != NULL);
@@ -1084,6 +1086,7 @@ static void _SSFMQTTCSuperStateSession(SSFSMEventId_t eid, const SSFSMData_t *da
     {
     case SSF_SM_EVENT_ENTRY:
         _mqttc.state = SSF_MQTTC_STATE_SUBSCRIBING;   /* Substate ENTRY follows and may change it */
+        _mqttc.isPingPending = false;
         SSFSMStartTimer(SSF_SM_EVENT_MQTTC_TO_KEEPALIVE, _SSFMQTTCKeepAliveTicks());
         _SSFMQTTCReport(SSF_MQTTC_EVENT_CONNECTED, SSF_MQTTC_REASON_NONE);
         break;
@@ -1100,7 +1103,14 @@ static void _SSFMQTTCSuperStateSession(SSFSMEventId_t eid, const SSFSMData_t *da
     }
 
     case SSF_SM_EVENT_MQTTC_RX_PINGRESP:
-        SSFSMStopTimer(SSF_SM_EVENT_MQTTC_TO_PINGRESP);
+        /* Only an answer to a PINGREQ already sent counts. One arriving while ours is unsent  */
+        /* (or with none pending) is ignored, so a stalled send still times out and the ping   */
+        /* stays pending, which keeps a second PINGREQ out of the queue.                       */
+        if (_mqttc.isPingPending && (_SSFMQTTCIsTxQueued(SSF_MQTT_PKT_PINGREQ) == false))
+        {
+            _mqttc.isPingPending = false;
+            SSFSMStopTimer(SSF_SM_EVENT_MQTTC_TO_PINGRESP);
+        }
         break;
 
     case SSF_SM_EVENT_MQTTC_RX_CONNACK:          /* CONNACK twice */
@@ -1109,11 +1119,14 @@ static void _SSFMQTTCSuperStateSession(SSFSMEventId_t eid, const SSFSMData_t *da
         break;
 
     case SSF_SM_EVENT_MQTTC_TO_KEEPALIVE:
-        /* A PINGREQ still waiting for the transport has its PINGRESP timer running; it will    */
-        /* fail the connection or be answered. Queue another only when none is waiting.         */
-        if (_SSFMQTTCIsTxQueued(SSF_MQTT_PKT_PINGREQ) == false)
+        /* An unanswered PINGREQ, queued or already sent, has its PINGRESP timer running; it    */
+        /* will fail the connection or be answered. Queue another only when none is pending:    */
+        /* restarting that timer would cancel its deadline, and when this interval and the      */
+        /* timeout fall due on the same tick (the default 120 s / 30 s) it would never fire.    */
+        if (_mqttc.isPingPending == false)
         {
             _SSFMQTTCTxEnqueueSimple(SSF_MQTT_PKT_PINGREQ);
+            _mqttc.isPingPending = true;
             SSFSMStartTimer(SSF_SM_EVENT_MQTTC_TO_PINGRESP, SSF_MQTTC_CONFIG_PINGRESP_TIMEOUT);
         }
         SSFSMStartTimer(SSF_SM_EVENT_MQTTC_TO_KEEPALIVE, _SSFMQTTCKeepAliveTicks());

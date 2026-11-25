@@ -48,8 +48,16 @@ extern "C" {
 
 /* Connection is dropped (SSF_MQTTC_REASON_KEEPALIVE) if PINGRESP does not arrive within this    */
 /* many ticks of PINGREQ. >= 1. PINGREQ is sent every keepAliveSec / 4, which must be at least   */
-/* this value; with 30 s the smallest keepAliveSec is 120.                                       */
+/* this value; with 30 s the smallest keepAliveSec is 120. The ssfmqttc unit test build uses     */
+/* 250 ms so that keep-alive can be tested with keepAliveSec 1 (the same interval-to-timeout     */
+/* ratio as 120 s with 30 s). Override with -D.                                                  */
+#ifndef SSF_MQTTC_CONFIG_PINGRESP_TIMEOUT
+#if SSF_CONFIG_MQTTC_UNIT_TEST == 1
+#define SSF_MQTTC_CONFIG_PINGRESP_TIMEOUT       (SSF_TICKS_PER_SEC / 4u)
+#else
 #define SSF_MQTTC_CONFIG_PINGRESP_TIMEOUT       (SSF_TICKS_PER_SEC * 30u)
+#endif
+#endif
 
 /* While the transport is opening (name lookup, then connect) SSFMQTTCTask() lowers its next     */
 /* timeout to this many ticks, since there is no socket yet for the app loop to wait on. >= 1.   */

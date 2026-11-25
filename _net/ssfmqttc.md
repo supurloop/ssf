@@ -60,7 +60,13 @@ the application run in `SSFMQTTCTask()`. Both are driven from one application lo
 - **Strings.** Every string the application supplies is NUL terminated and strictly shorter than
   its `SSF_MQTTC_CONFIG_MAX_*_SIZE` constant. Strings are validated with a bounded length scan
   against the constant, so no size argument accompanies them. An inbound PUBLISH whose topic is
-  not shorter than the topic constant ends the connection with `RX_OVERFLOW`.
+  not shorter than the topic constant is dropped and reported with `RX_PUBLISH_TOPIC_TOO_LONG`.
+- **Oversized inbound PUBLISH.** MQTT 3.1.1 gives the client no way to tell the broker its size
+  limits. An inbound PUBLISH larger than `rxBlockSize` is consumed as it arrives, without being
+  stored, and dropped with `RX_PUBLISH_TOO_LARGE`; the connection and subscriptions are
+  unaffected. Its fixed header gives its length, so the stream stays in sync. It is still checked
+  for malformed fields (`PROTOCOL`). Over a slow link a very large one delays every packet behind
+  it, PINGRESP included.
 - **Packet ids** start at 1 and continue across reconnects. Clean session makes a reset unnecessary.
 
 <a id="lifecycle"></a>
@@ -97,7 +103,7 @@ READY, then eventually DISCONNECTED or STOPPED. A failed attempt yields CONNECT_
 | `CONNECT_FAILED` | An attempt ended before READY. Reported at the point of failure; the client then enters RECONNECT_WAIT. | valid |
 | `DISCONNECTED` | A READY connection was lost. Reported at the point of failure; the client then enters RECONNECT_WAIT. | valid |
 | `STOPPED` | `Stop()` complete. The client is in STOPPED. | NONE |
-| `RX_PUBLISH_DROPPED` | An inbound PUBLISH was discarded. The connection is unaffected. | `RX_PUBLISH_TIMEOUT` or `RX_PUBLISH_QUEUE_FULL` |
+| `RX_PUBLISH_DROPPED` | An inbound PUBLISH was discarded; a QoS 1 one is still acknowledged. The connection is unaffected. | `RX_PUBLISH_TIMEOUT`, `RX_PUBLISH_QUEUE_FULL`, `RX_PUBLISH_TOO_LARGE` or `RX_PUBLISH_TOPIC_TOO_LONG` |
 
 Inside a `CONNECT_FAILED` or `DISCONNECTED` callback, `SSFMQTTCGetState()` returns the state the
 connection failed in, not RECONNECT_WAIT.
@@ -116,9 +122,11 @@ connection failed in, not RECONNECT_WAIT.
 | `KEEPALIVE` | No PINGRESP within [`SSF_MQTTC_CONFIG_PINGRESP_TIMEOUT`](#opt-pingresp). |
 | `TX_PUBLISH_TIMEOUT` | A publish did not complete within `txPublishTimeout`. |
 | `PROTOCOL` | Malformed packet, QoS 2, or a packet type not valid at that point. |
-| `RX_OVERFLOW` | Inbound packet larger than `rxBlockSize`, or topic not shorter than the topic constant. |
+| `RX_OVERFLOW` | Inbound packet other than PUBLISH larger than `rxBlockSize`. |
 | `RX_PUBLISH_TIMEOUT` | The application deferred an inbound PUBLISH past [`SSF_MQTTC_CONFIG_RX_PUBLISH_MAX_TICKS`](#opt-maxticks). |
 | `RX_PUBLISH_QUEUE_FULL` | An inbound PUBLISH arrived with no free rx block. |
+| `RX_PUBLISH_TOO_LARGE` | An inbound PUBLISH was larger than `rxBlockSize`. |
+| `RX_PUBLISH_TOPIC_TOO_LONG` | An inbound PUBLISH topic was not shorter than the topic constant. |
 
 <a id="buffers"></a>
 
@@ -140,9 +148,11 @@ direction cannot block the other, and application traffic cannot block the proto
 - tx blocks in use at any moment are those queued for the transport plus QoS 1 PUBLISH and
   SUBSCRIBE awaiting acknowledgement, so `txBlocks` bounds the application's outstanding publishes.
   `txBlocks` must be at least 1.
-- `rxBlockSize` must hold the largest inbound packet including the fixed header. One rx block is
-  permanently the framing buffer so the transport can always be read; the rest hold inbound
-  PUBLISH packets awaiting the application. A PUBLISH arriving with no free rx block is dropped.
+- `rxBlockSize` must hold the largest inbound packet the application wants, including the fixed
+  header. A PUBLISH that does not fit is dropped (`RX_PUBLISH_TOO_LARGE`); any other packet that
+  does not fit ends the connection (`RX_OVERFLOW`). One rx block is permanently the framing buffer
+  so the transport can always be read; the rest hold inbound PUBLISH packets awaiting the
+  application. A PUBLISH arriving with no free rx block is dropped.
 - Both block sizes must be at least 4.
 
 <a id="callbacks"></a>

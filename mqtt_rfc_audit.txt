@@ -1,0 +1,352 @@
+SSF MQTT CLIENT SPECIFICATION COMPLIANCE AUDIT: ssfmqttc / ssfmqttpkt
+=====================================================================
+Audit date : 2026-11-25
+Scope      : _net/ssfmqttc.c, _net/ssfmqttpkt.c/.h, _opt/ssfmqttc_opt.h, _net/ssfmqttc.md, against
+             the MQTT Version 3.1.1 OASIS Standard (plus ISO/IEC 20922, which has the same text).
+             MQTT is not an IETF RFC; "the spec" below means MQTT 3.1.1. Section numbers are
+             from that document. Code at commit a8ce46f (branch mqtt).
+Status     : review only. Nothing here has been implemented; every item is OPEN.
+
+Lists
+  Part A  Interoperability problems, most likely to happen with real brokers first.
+          IDs MQTT-IOP-nn.
+  Part B  Missing features, the ones most likely to be needed first. IDs MQTT-FEAT-nn.
+  Part C  Things checked and found compliant (for reference).
+
+Ratings
+  Probability (Part A) : HIGH = expect it in normal deployments; MED = needs a common broker
+                         setting or network condition; LOW = needs an unusual broker, app error
+                         or timing; VERY LOW = needs a broker that is itself non-compliant.
+  Likelihood  (Part B) : HIGH = needed by most IoT/cloud deployments; MED = common in some
+                         deployments; LOW = niche.
+
+
+PART A: INTEROPERABILITY PROBLEMS (most probable first)
+=======================================================
+
+MQTT-IOP-01  An oversized inbound packet or long topic drops the connection, and a retained one
+             causes a reconnect loop
+  Probability: HIGH
+  Spec       : 3.3.2.1 / 1.5.3 (topics up to 65535 bytes); 3.3.1.3 (retained delivery on
+               subscribe); 3.1.1 has no way to tell the broker the client's maximum packet size.
+  Code       : ssfmqttc.c _SSFMQTTCRxFrameProcess() (pktLen > rxBlockSize -> RX_OVERFLOW),
+               _SSFMQTTCRxPublishQueue() (topicLen >= SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE ->
+               RX_OVERFLOW).
+  Problem    : Any inbound PUBLISH larger than rxBlockSize, or with a topic of 128 bytes or
+               more (the default), ends the whole connection. The broker cannot know the
+               client's limit, so it is not at fault. The problem gets worse because SUBSCRIBE
+               is sent on every reconnect: if the large message is retained on a subscribed
+               filter, the broker sends it again after every SUBACK, so the client cycles
+               CONNECT -> SUBSCRIBE -> overflow -> backoff and never stays READY. Long topics
+               are common in practice: AWS IoT named-shadow topics
+               ($aws/things/<thing>/shadow/name/<shadow>/update/accepted) can exceed 128 bytes,
+               and so can Sparkplug B and Home Assistant discovery topics. Any '#' subscription
+               will eventually see a large message.
+  Suggestion : The fixed header gives the full length, so the stream does not need to be
+               dropped. Read the topic length and packet id from the first bytes in the
+               framing block, discard the rest as it arrives, PUBACK it if it is QoS 1, and
+               report RX_PUBLISH_DROPPED with a new reason (e.g. RX_PUBLISH_TOO_LARGE). Do the
+               same for a topic that is too long. Keep RX_OVERFLOW only for non-PUBLISH
+               packets.
+  Status     : FIXED (minimal scope, uncommitted). An oversized PUBLISH is consumed as it arrives
+               and dropped with RX_PUBLISH_TOO_LARGE; a topic that is too long is dropped with
+               RX_PUBLISH_TOPIC_TOO_LONG; QoS 1 is acknowledged best-effort (the IOP-04 gap
+               remains); malformed packets still fail with PROTOCOL, including an embedded NUL
+               in a skipped topic; a PUBLISH dropped before CONNACK is not acknowledged, so no
+               PUBACK can precede CONNECT. Not done: guaranteed PUBACK
+               (IOP-04), no PUBACK after DISCONNECT (IOP-06), minimum rxBlockSize 5 for 5-byte
+               fixed headers.
+
+MQTT-IOP-02  A lower QoS granted in SUBACK is treated as fatal, so the client never reaches
+             READY
+  Probability: MED
+  Spec       : 3.8.4 ("The Server might grant a lower maximum QoS than the subscriber
+               requested"), 3.9.3 (return codes 0x00/0x01/0x02/0x80 are all valid).
+  Code       : ssfmqttc.c _SSFMQTTCRxControlPost() SUBACK case (codes[i] != requested ->
+               isRefused), _SSFMQTTCSessionRxSubAck() -> SUBSCRIBE_REFUSED.
+  Problem    : Granting a lower QoS is normal, compliant broker behaviour. Mosquitto
+               (max_qos), EMQX (max_qos_allowed), HiveMQ (maximum-qos) and several managed
+               services cap QoS by configuration or per topic. Against such a broker a QoS 1
+               subscription gets 0x00 back, the attempt fails, and the client retries at the
+               backoff rate forever with no per-filter detail (already noted in ssfmqttc.md,
+               Known Trade-offs). One 0x80 for a single filter (e.g. ACL denial of one topic)
+               likewise takes down every other subscription.
+  Suggestion : Treat a granted QoS lower than requested as success, and report the granted
+               value per filter (event or query API). Make "all or nothing" an option, not the
+               only behaviour. Report a 0x80 per filter rather than failing the session, or
+               fail the session only when the app asks for that.
+
+MQTT-IOP-03  Keep-alive race: at the minimum (and documented example) configuration, a missing
+             PINGRESP may never be detected
+  Probability: MED (whenever a NAT or cellular path goes half-open, which is common)
+  Spec       : 3.1.2.10 ("If a Client does not receive a PINGRESP ... within a reasonable
+               amount of time after it has sent a PINGREQ, it SHOULD close the Network
+               Connection").
+  Code       : ssfmqttc.c _SSFMQTTCSuperStateSession() TO_KEEPALIVE case; _fsm/ssfsm.c
+               SSFSMStartTimerData() (restarting a timer first stops it) and SSFSMTask() (scans
+               timers from the head; SSF_LL_FIFO_PUSH inserts at the head, so the newest timer
+               is checked first).
+  Problem    : The TO_KEEPALIVE handler starts TO_PINGRESP and then TO_KEEPALIVE, usually
+               within the same tick. With keepAliveSec = 4 x PINGRESP_TIMEOUT (120 s at the
+               defaults, which is both the smallest value allowed and the value in the docs
+               example), the two timers then have the same deadline. When both have expired,
+               SSFSMTask() finds TO_KEEPALIVE first (it is newer, so nearer the head). The
+               PINGREQ has already been sent, so _SSFMQTTCIsTxQueued() is false: the handler
+               queues another PINGREQ and calls SSFSMStartTimer(TO_PINGRESP), which removes the
+               expired TO_PINGRESP before it can fire. This repeats every interval, so
+               KEEPALIVE is never reported. A dead path is then found only when TCP
+               retransmissions give up (often 15+ minutes on Linux). Until then the device
+               reports READY but receives nothing. Larger keepAliveSec values are also exposed
+               if the app loop is a tick or more late. ssfmqttc_ut.c states that keep-alive is
+               not tested.
+  Suggestion : Do not re-arm TO_PINGRESP while a PINGREQ is outstanding. Track "PINGREQ sent,
+               PINGRESP pending" and skip the new ping, or treat a still-pending PINGRESP at
+               keep-alive time as a failure. Add a unit test with a build-time-shortened
+               PINGRESP_TIMEOUT.
+
+MQTT-IOP-04  A dropped inbound QoS 1 PUBLISH may never be acknowledged, which leaks a slot in
+             the broker's in-flight window
+  Probability: LOW-MED (a burst of inbound messages while writes are blocked)
+  Spec       : 4.3.2 (a QoS 1 receiver MUST respond with a PUBACK containing the Packet
+               Identifier of the incoming PUBLISH).
+  Code       : ssfmqttc.c _SSFMQTTCRxPublishQueue() queue-full path and
+               _SSFMQTTCRxPublishService() timeout path: "(void)_SSFMQTTCTxEnqueuePubAck(...)".
+  Problem    : The ctl pool has RX_PUBLISH_QUEUE_DEPTH non-reserved blocks. If PUBACKs for
+               already-consumed messages are still queued behind a blocked transport
+               (WANT_WRITE, TLS backpressure) and a further QoS 1 PUBLISH is dropped, the
+               allocation fails and the result is ignored, so that packet id is never
+               acknowledged. Brokers limit unacknowledged QoS 1 messages per client (Mosquitto
+               max_inflight_messages defaults to 20; others are similar). Each leaked id lowers
+               the limit until reconnect, and inbound QoS 1 delivery can stop entirely while
+               the connection still looks healthy.
+  Suggestion : Size the ctl pool so a PUBACK can always be allocated for every QoS 1 packet
+               that can be unacknowledged at once (queued + in framing + pending acks). Or
+               keep a small "PUBACK owed" list of packet ids, sent when blocks free up. As a
+               last resort, fail the link rather than silently skip a PUBACK.
+
+MQTT-IOP-05  Outbound strings are not checked for UTF-8, wildcards in topic names, filter
+             syntax or client id rules
+  Probability: LOW (needs an app or configuration error, but then fails badly)
+  Spec       : 1.5.3 (MQTT-1.5.3-1: ill-formed UTF-8 or U+D800..U+DFFF -> the receiver
+               closes the connection), 3.3.2.1 (no wildcards in a PUBLISH Topic Name),
+               4.7.1 (wildcard placement), 3.1.3.1 (servers MUST accept 1..23 characters of
+               [0-9a-zA-Z]; others MAY be rejected).
+  Code       : ssfmqttpkt.h design notes; SSFMQTTPktIsValidTopic() / SSFMQTTPktIsValidFilter()
+               check only length and NUL termination.
+  Problem    : A PUBLISH whose topic contains '+' or '#', or invalid UTF-8, makes a compliant
+               broker drop the connection. That fails every in-flight publish and causes a
+               reconnect, and the same TxPublish() call fails the same way again. A bad filter
+               (e.g. "a/#/b") gets 0x80 or a disconnect on every attempt, which together with
+               IOP-02 means the client never reaches READY. A client id that is too long or
+               uses unusual characters gets CONNACK 0x02, which is retried forever.
+  Suggestion : TxPublish() should return false for wildcards in a topic (cheap; no RX side
+               effect). SSFMQTTCStart() should check wildcard placement in filters. UTF-8
+               checking should be optional at build time (SSF has no UTF-8 validator yet).
+               Consider stopping retries on CONNACK 0x02 (see the documented trade-off).
+
+MQTT-IOP-06  PUBACK can be sent after DISCONNECT during Stop()
+  Probability: LOW
+  Spec       : 3.14.4 (after sending DISCONNECT the Client MUST close the Network Connection
+               and MUST NOT send any more Control Packets).
+  Code       : ssfmqttc.c _SSFMQTTCStateStopping() ENTRY appends DISCONNECT; SSFMQTTCTask()
+               keeps receiving while the link is OPEN, and _SSFMQTTCRxPublishQueue()'s
+               queue-full path can then append a PUBACK after it.
+  Problem    : If a QoS 1 PUBLISH arrives while STOPPING and the rx queue is full, a PUBACK is
+               queued behind DISCONNECT and sent after it. Most brokers have already closed or
+               ignore it, but it is a MUST NOT.
+  Suggestion : In STOPPING, discard inbound PUBLISH without acknowledging it (clean session
+               makes this harmless), or do not enqueue anything once DISCONNECT is queued.
+
+MQTT-IOP-07  Inbound PUBACK ordering is not preserved when a packet is dropped because the
+             queue is full
+  Probability: LOW (brokers in practice accept PUBACKs in any order)
+  Spec       : 4.6 (MQTT-4.6.0-2: PUBACKs MUST be sent in the order the corresponding PUBLISH
+               packets were received).
+  Code       : ssfmqttc.c _SSFMQTTCRxPublishQueue() acknowledges a dropped packet at once,
+               while earlier queued QoS 1 packets are acknowledged only after the app consumes
+               them.
+  Suggestion : Fixed by the "PUBACK owed" approach in IOP-04 if acks are released in arrival
+               order, or by giving each rx entry an ack-ready flag and releasing acks from
+               the head.
+
+MQTT-IOP-08  Keep-alive policy: minimum 120 s, keepAliveSec = 0 not allowed, PINGREQ at
+             keepAlive/4 even when traffic is flowing
+  Probability: LOW (as an interop failure; see FEAT-06 for the deployment cost)
+  Spec       : 3.1.2.10 (any value 0..65535; 0 disables keep-alive; PINGREQ is needed only
+               when no other control packet has been sent within the interval).
+  Code       : SSFMQTTCStart() assertion; SSF_MQTTC_KEEPALIVE_DIV.
+  Problem    : Compliant, but a broker or policy that requires a short keep-alive (e.g. < 120 s
+               for fast offline detection, often used with a Will) cannot be met without
+               recompiling PINGRESP_TIMEOUT. Some managed brokers clamp keep-alive to a maximum
+               (AWS IoT Core 1200 s), which is fine here.
+  Suggestion : Decouple the PINGRESP timeout from the keep-alive (e.g. min(PINGRESP_TIMEOUT,
+               keepAlive/2)), allow 0, and send PINGREQ only when the link has been idle.
+
+MQTT-IOP-09  Packets the broker should never send are accepted rather than rejected
+  Probability: VERY LOW (only matters against a non-compliant broker)
+  Spec       : 3.2.0 (the first packet from the Server MUST be CONNACK), 2.2.2 (reserved flag
+               bits MUST be as specified, otherwise the receiver MUST close), 3.13 (PINGRESP
+               remaining length 0), 3.3.2.1 (no wildcards in a received Topic Name), 1.5.3
+               (received UTF-8 MUST be valid).
+  Code       : _SSFMQTTCRxControlPost() PINGRESP case posts without checking flags or
+               remaining length; _SSFMQTTCRxPublishQueue() queues a PUBLISH received in
+               CONNECTING (it is delivered later once SUBSCRIBING); inbound topics are checked
+               only for length and NUL.
+  Suggestion : Check that PINGRESP is exactly 0xD0 0x00. Treat PUBLISH before CONNACK as
+               PROTOCOL. Optionally reject wildcards and bad UTF-8 in inbound topics.
+               Low value, but cheap.
+
+MQTT-IOP-10  A packet identifier is not checked against in-flight ids before it is reused
+  Probability: VERY LOW
+  Spec       : 2.3.1 (a new packet MUST use a currently unused Packet Identifier).
+  Code       : _SSFMQTTCNextPacketId() increments globally across QoS 1 PUBLISH and SUBSCRIBE.
+  Problem    : A collision needs 65535 ids to be issued while one QoS 1 PUBLISH is still
+               unacknowledged. txPublishTimeout makes this practically impossible, but nothing
+               guarantees it.
+  Suggestion : Skip ids still present in txInflight (a list of at most txBlocks entries).
+
+MQTT-IOP-11  A QoS 2 PUBLISH from the broker ends the connection
+  Probability: VERY LOW
+  Spec       : 3.8.4 (delivered QoS = min(published QoS, granted QoS)); the client never
+               requests QoS 2, so a compliant broker never sends one.
+  Code       : _SSFMQTTCRxPublishQueue() (qos >= QOS_2 -> PROTOCOL).
+  Note       : This is a correct response to a broker violation. It is listed only so that a
+               field report of PROTOCOL disconnects can be traced to a broker bug. See FEAT-09.
+
+
+PART B: MISSING FEATURES (most likely to be needed first)
+=========================================================
+
+MQTT-FEAT-01  RETAIN on outbound PUBLISH
+  Likelihood : HIGH
+  Spec       : 3.3.1.3.
+  Why        : Device status and "last known value" topics, Home Assistant MQTT discovery and
+               availability, and Sparkplug B birth certificates all depend on retained
+               messages. Today the client always sends RETAIN=0 (ssfmqttpkt.c
+               SSFMQTTPktEncodePublish), so a dashboard or new subscriber sees nothing until
+               the next publish. Also needed: publishing an empty retained message to clear
+               one.
+  Effort     : Small. Add a flag to TxPublish() and the encoder; inbound retain is already
+               reported.
+
+MQTT-FEAT-02  Last Will and Testament
+  Likelihood : HIGH
+  Spec       : 3.1.2.5-3.1.2.7, 3.1.3.2-3.1.3.3.
+  Why        : The standard way for other parties to learn that a device went offline
+               ("online"/"offline" availability topics, Sparkplug NDEATH, fleet monitoring).
+               Usually combined with FEAT-01 (will retain) and a shorter keep-alive (IOP-08).
+  Effort     : Small. Will topic, payload, QoS and retain in SSFMQTTCOpts_t, encoded in
+               CONNECT. Note that a normal DISCONNECT suppresses the will, so Stop() keeps its
+               current meaning (graceful, no will), and failure teardown should probably skip
+               DISCONNECT so the will fires (_SSFMQTTCFail() currently sends DISCONNECT when
+               a session is up, which suppresses it).
+
+MQTT-FEAT-03  Persistent sessions (CleanSession = 0)
+  Likelihood : MED-HIGH
+  Spec       : 3.1.2.4, 3.2.2.2 (Session Present), 4.4 (retransmission with DUP on
+               reconnect), 4.1 (session state).
+  Why        : With a clean session, QoS 1 messages sent to the device while it is offline are
+               lost, and the device has to re-subscribe on every connect. Command and control
+               (cloud-to-device) usually relies on the broker queueing for offline clients
+               (AWS IoT persistent sessions, Mosquitto queued messages).
+  Effort     : Large. Accept Session Present=1, keep unacknowledged QoS 1 PUBLISHes across
+               reconnects and resend them with DUP=1 in their original order, keep packet ids
+               consistent, and optionally skip SUBSCRIBE when the session is present. The
+               txPublish completion contract and txPublishTimeout teardown would need to be
+               reworked.
+
+MQTT-FEAT-04  Report per-filter SUBACK results and accept partial grants
+  Likelihood : MED-HIGH
+  Spec       : 3.9.3.
+  Why        : This is the feature side of IOP-02: apps need to know which filters were
+               granted and at which QoS, and to carry on with the ones that were.
+  Effort     : Small to medium.
+
+MQTT-FEAT-05  SUBSCRIBE and UNSUBSCRIBE at run time
+  Likelihood : MED
+  Spec       : 3.8, 3.10, 3.11.
+  Why        : Subscriptions that depend on run-time state (per-job topics, OTA channels,
+               request/response reply topics) currently require Stop() + Start(), which drops
+               the session and every in-flight publish. UNSUBACK is currently a protocol error.
+  Effort     : Medium. A second in-flight SUBSCRIBE/UNSUBSCRIBE and new callbacks; the
+               configured set must still be re-sent on reconnect.
+
+MQTT-FEAT-06  Flexible keep-alive (short intervals, 0 = off, ping only when idle)
+  Likelihood : MED
+  Spec       : 3.1.2.10.
+  Why        : On cellular or battery devices, one PINGREQ every keepAlive/4 regardless of
+               traffic costs data and radio wake-ups. Fast offline detection with a Will needs
+               keep-alive below 120 s. See IOP-08; fixing IOP-03 at the same time is natural.
+  Effort     : Small.
+
+MQTT-FEAT-07  Skip oversized inbound PUBLISH instead of dropping the connection
+  Likelihood : MED
+  Spec       : See IOP-01.
+  Why        : The feature side of IOP-01. Also lets small devices subscribe to broad filters
+               safely.
+  Effort     : Medium (skip state in the framer).
+
+MQTT-FEAT-08  MQTT 5.0
+  Likelihood : MED
+  Spec       : OASIS MQTT Version 5.0.
+  Why        : Reason codes on every acknowledgement, Maximum Packet Size (the protocol-level
+               fix for IOP-01), Receive Maximum, Session Expiry, Topic Alias, user properties
+               and request/response correlation. Major brokers and clouds all still accept
+               3.1.1, so this is about features, not compatibility.
+  Effort     : Large (properties in every packet type, new CONNACK/DISCONNECT semantics).
+
+MQTT-FEAT-09  QoS 2
+  Likelihood : LOW-MED
+  Spec       : 4.3.3, 3.5-3.7 (PUBREC/PUBREL/PUBCOMP).
+  Why        : Occasionally required by industrial or billing systems that cannot tolerate
+               duplicates. Several cloud brokers (AWS IoT Core, Azure IoT Hub) do not support
+               QoS 2 at all, so demand is limited.
+  Effort     : Medium (both directions need state that must persist with FEAT-03 to be
+               meaningful).
+
+MQTT-FEAT-10  MQTT over WebSockets
+  Likelihood : LOW-MED
+  Spec       : MQTT 3.1.1 section 6 (WebSocket subprotocol "mqtt", binary frames), RFC 6455.
+  Why        : Getting through corporate proxies or firewalls that allow only HTTPS on 443.
+               AWS IoT already accepts raw MQTT on 443 via ALPN "x-amzn-mqtt-ca", which
+               ssftlsc supports (SSFTLSCSetALPN), so the need is mostly other brokers behind
+               HTTP proxies.
+  Effort     : Medium, as an ssfnet transport layered on TLS; no ssfmqttc change.
+
+MQTT-FEAT-11  Zero-length client identifier (server-assigned)
+  Likelihood : LOW
+  Spec       : 3.1.3.1 (a Server MAY allow zero bytes with CleanSession=1).
+  Why        : Convenience for throwaway or test clients; production devices need a stable id.
+  Effort     : Trivial (relax the Start() assertion; the encoder already handles it).
+
+MQTT-FEAT-12  MQTT 3.1 (protocol name "MQIsdp", level 3)
+  Likelihood : LOW
+  Spec       : Pre-OASIS IBM specification.
+  Why        : Only very old brokers or gateways (old RSMB, legacy appliances). CONNACK 0x01
+               is already reported as CONNACK_PROTOCOL_VERSION, so the app can tell when this
+               happens.
+  Effort     : Small (different CONNECT header, 23-character client id limit).
+
+
+PART C: CHECKED AND FOUND COMPLIANT
+===================================
+  - Remaining Length: 1-4 byte decode and encode; a 5th continuation byte -> malformed
+    (2.2.3).
+  - Reserved packet types 0 and 15 rejected; CONNACK, SUBACK and PUBACK fixed-header flags
+    required to be 0 (2.2.2).
+  - SUBSCRIBE sent with fixed-header flags 0x02 (3.8.1).
+  - CONNECT: protocol name "MQTT", level 4, Clean Session set, password only with user name
+    (3.1.2.9), reserved flag bit 0 clear.
+  - CONNACK: remaining length 2, reserved acknowledge flags rejected, Session Present=1 with a
+    clean session treated as a protocol error (3.2.2.2), all return codes 1-5 mapped.
+  - PUBLISH decode: QoS 3 rejected (3.3.1.2), DUP=1 at QoS 0 rejected (3.3.1.1), zero-length
+    topic rejected (4.7.3), embedded U+0000 rejected (1.5.3), packet id 0 rejected (2.3.1).
+  - Outbound PUBLISH: DUP=0 (correct, since nothing is ever retransmitted), non-zero packet id
+    for QoS 1.
+  - SUBACK: packet id and return-code count matched against the request.
+  - Only the CONNACK -> SUBSCRIBE -> PUBLISH ordering is used; nothing is sent before CONNACK.
+  - DISCONNECT is sent only on a packet boundary (a partially sent packet is never cut by
+    it).
+
+Out of scope: TLS and transport (ssftlsc, ssfnetsock). ssftlsc supports SNI and ALPN; IPv4 only
+is a documented trade-off in ssfmqttc.md.

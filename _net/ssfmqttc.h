@@ -101,10 +101,13 @@ typedef enum
     SSF_MQTTC_REASON_KEEPALIVE,          /* No PINGRESP within SSF_MQTTC_CONFIG_PINGRESP_TIMEOUT */
     SSF_MQTTC_REASON_TX_PUBLISH_TIMEOUT, /* A txPublish did not complete within txPublishTimeout */
     SSF_MQTTC_REASON_PROTOCOL,           /* Malformed packet, QoS 2, unexpected packet           */
-    SSF_MQTTC_REASON_RX_OVERFLOW,        /* Inbound packet larger than rxBlockSize, or topic     */
-                                         /* length >= SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE            */
+    SSF_MQTTC_REASON_RX_OVERFLOW,        /* Inbound packet other than PUBLISH larger than        */
+                                         /* rxBlockSize                                          */
     SSF_MQTTC_REASON_RX_PUBLISH_TIMEOUT, /* App deferred an rxPublish past RX_PUBLISH_MAX_TICKS  */
     SSF_MQTTC_REASON_RX_PUBLISH_QUEUE_FULL, /* rxPublish queue full                              */
+    SSF_MQTTC_REASON_RX_PUBLISH_TOO_LARGE,  /* Inbound PUBLISH larger than rxBlockSize           */
+    SSF_MQTTC_REASON_RX_PUBLISH_TOPIC_TOO_LONG, /* Inbound PUBLISH topic length >=               */
+                                         /* SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE                      */
     SSF_MQTTC_REASON_MAX
 } SSFMQTTCReason_t;
 
@@ -122,8 +125,10 @@ typedef enum
                                      /* RECONNECT_WAIT and will try again.                      */
     SSF_MQTTC_EVENT_STOPPED,         /* SSFMQTTCStop() complete; client is in STOPPED           */
     SSF_MQTTC_EVENT_RX_PUBLISH_DROPPED, /* An rxPublish was discarded; reason is                 */
-                                     /* RX_PUBLISH_TIMEOUT or RX_PUBLISH_QUEUE_FULL. Connection */
-                                     /* is unaffected.                                          */
+                                     /* RX_PUBLISH_TIMEOUT, RX_PUBLISH_QUEUE_FULL,              */
+                                     /* RX_PUBLISH_TOO_LARGE or RX_PUBLISH_TOPIC_TOO_LONG. A    */
+                                     /* QoS 1 packet is still acknowledged. Connection is       */
+                                     /* unaffected.                                             */
     SSF_MQTTC_EVENT_MAX
 } SSFMQTTCEvent_t;
 

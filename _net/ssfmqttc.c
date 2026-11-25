@@ -93,6 +93,19 @@ typedef struct
     SSFPortTick_t lastOffer;          /* Tick of the most recent deferred offer                */
 } SSFMQTTCRxBlock_t;
 
+/* Inbound PUBLISH larger than the rx block, consumed as it arrives and dropped. Only the fields */
+/* needed to validate and acknowledge it are captured. left == 0 => not skipping.                */
+typedef struct
+{
+    size_t left;                      /* Packet bytes still to consume                         */
+    size_t pos;                       /* Packet offset of the next byte to consume             */
+    size_t tlOff;                     /* Offset of the topic length (fixed header length)        */
+    uint16_t topicLen;
+    uint16_t packetId;                /* QoS 1 only                                            */
+    SSFMQTTCQoS_t qos;
+    bool isTopicNul;                  /* Topic holds U+0000: malformed (MQTT-1.5.3-2)          */
+} SSFMQTTCRxSkip_t;
+
 #define SSF_MQTTC_TX_DATA(b) (((uint8_t *)(b)) + sizeof(SSFMQTTCTxBlock_t))
 #define SSF_MQTTC_RX_DATA(b) (((uint8_t *)(b)) + sizeof(SSFMQTTCRxBlock_t))
 
@@ -138,6 +151,7 @@ typedef struct
     /* Pump owned */
     SSFMQTTCLink_t link;              /* Transport state; closed by the pump on fatal error    */
     size_t rxLen;                     /* Bytes in rxFrame                                      */
+    SSFMQTTCRxSkip_t rxSkip;          /* Oversized inbound PUBLISH being dropped               */
 
     /* Queues of SSFMQTTCTxBlock_t (tx*) and SSFMQTTCRxBlock_t (rxQueue) */
     SSFLL_t txQueue;                  /* Waiting for the transport                             */
@@ -477,6 +491,7 @@ static bool _SSFMQTTCTxInflightRemove(SSFMQTTPktType_t type, uint16_t packetId,
 static void _SSFMQTTCRxFrameReset(void)
 {
     _mqttc.rxLen = 0;
+    memset(&_mqttc.rxSkip, 0, sizeof(_mqttc.rxSkip));
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -489,6 +504,21 @@ static void _SSFMQTTCRxFrameConsume(size_t pktLen)
     SSF_REQUIRE(pktLen <= _mqttc.rxLen);
     _mqttc.rxLen -= pktLen;
     if (_mqttc.rxLen > 0) memmove(frame, frame + pktLen, _mqttc.rxLen);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Drops an inbound PUBLISH: acknowledges QoS 1 if a control block is free so the broker window  */
+/* moves on, then reports the drop. Before CONNACK nothing is acknowledged: a PUBLISH there is a */
+/* broker error, and a PUBACK could otherwise reach the wire ahead of CONNECT.                   */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTCRxPublishDrop(SSFMQTTCQoS_t qos, uint16_t packetId, SSFMQTTCReason_t reason)
+{
+    SSF_REQUIRE((qos == SSF_MQTTC_QOS_0) || (qos == SSF_MQTTC_QOS_1));
+    SSF_REQUIRE((qos == SSF_MQTTC_QOS_0) || (packetId != 0));
+
+    if ((qos == SSF_MQTTC_QOS_1) && _SSFMQTTCIsSessionUp())
+    { (void)_SSFMQTTCTxEnqueuePubAck(packetId); }
+    _SSFMQTTCReport(SSF_MQTTC_EVENT_RX_PUBLISH_DROPPED, reason);
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -506,15 +536,16 @@ static bool _SSFMQTTCRxPublishQueue(const uint8_t *pkt, size_t pktLen)
     if ((SSFMQTTPktDecodePublish(pkt, pktLen, &pub) == false) || (pub.qos >= SSF_MQTTC_QOS_2))
     { _SSFMQTTCLinkFail(SSF_MQTTC_REASON_PROTOCOL); return false; }
     if (pub.topicLen >= SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE)
-    { _SSFMQTTCLinkFail(SSF_MQTTC_REASON_RX_OVERFLOW); return false; }
+    {
+        _SSFMQTTCRxPublishDrop(pub.qos, pub.packetId, SSF_MQTTC_REASON_RX_PUBLISH_TOPIC_TOO_LONG);
+        return true;
+    }
 
     /* The rx pool holds exactly the framing block plus the queue depth, so an empty pool is   */
     /* the queue-full condition.                                                                */
     if ((b = _SSFMQTTCRxBlockAlloc()) == NULL)
     {
-        /* Drop. Acknowledge QoS 1 if a control block is free so the broker window moves on.   */
-        if (pub.qos == SSF_MQTTC_QOS_1) (void)_SSFMQTTCTxEnqueuePubAck(pub.packetId);
-        _SSFMQTTCReport(SSF_MQTTC_EVENT_RX_PUBLISH_DROPPED, SSF_MQTTC_REASON_RX_PUBLISH_QUEUE_FULL);
+        _SSFMQTTCRxPublishDrop(pub.qos, pub.packetId, SSF_MQTTC_REASON_RX_PUBLISH_QUEUE_FULL);
         return true;
     }
 
@@ -594,6 +625,111 @@ static bool _SSFMQTTCRxControlPost(const uint8_t *pkt, size_t pktLen)
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Returns true if a skip of the oversized PUBLISH at the start of the framing buffer began,     */
+/* else false if its fixed header flags are malformed or QoS 2 and the link failed.              */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFMQTTCRxSkipStart(const uint8_t *frame, size_t pktLen)
+{
+    SSFMQTTCRxSkip_t *s = &_mqttc.rxSkip;
+    uint8_t qosBits;
+    size_t hdrLen = 2;
+
+    SSF_REQUIRE(frame != NULL);
+    SSF_REQUIRE(pktLen > _mqttc.rxBlockSize);
+    SSF_REQUIRE(SSF_MQTT_PKT_TYPE(frame[0]) == SSF_MQTT_PKT_PUBLISH);
+
+    /* The same flag rules as SSFMQTTPktDecodePublish(), which cannot see this packet whole */
+    qosBits = (uint8_t)((frame[0] & 0x06u) >> 1);
+    if ((qosBits >= (uint8_t)SSF_MQTTC_QOS_2) ||
+        ((qosBits == (uint8_t)SSF_MQTTC_QOS_0) && ((frame[0] & 0x08u) != 0)))
+    { _SSFMQTTCLinkFail(SSF_MQTTC_REASON_PROTOCOL); return false; }
+
+    /* SSFMQTTPktFrame() returned a length, so the whole fixed header is in the buffer and its */
+    /* length bytes end at the first one without the continuation bit.                         */
+    while ((frame[hdrLen - 1] & 0x80u) != 0) hdrLen++;
+    SSF_ASSERT(hdrLen <= SSF_MQTT_PKT_MAX_FIXED_HDR_LEN);
+
+    memset(s, 0, sizeof(*s));
+    s->left = pktLen;
+    s->tlOff = hdrLen;
+    s->qos = (SSFMQTTCQoS_t)qosBits;
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Captures the bytes of the big endian 16-bit field at packet offset at that lie in the n bytes */
+/* at p, which start at packet offset _mqttc.rxSkip.pos.                                         */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTCRxSkipTakeU16(const uint8_t *p, size_t n, size_t at, uint16_t *v)
+{
+    size_t pos = _mqttc.rxSkip.pos;
+
+    SSF_REQUIRE(p != NULL);
+    SSF_REQUIRE(v != NULL);
+
+    if ((at >= pos) && ((at - pos) < n))
+    { *v = (uint16_t)((*v & 0x00FFu) | ((uint16_t)p[at - pos] << 8)); }
+    if (((at + 1) >= pos) && ((at + 1 - pos) < n))
+    { *v = (uint16_t)((*v & 0xFF00u) | p[at + 1 - pos]); }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if the skipped PUBLISH was well formed and has been dropped, else false if it    */
+/* was malformed and the link failed.                                                            */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFMQTTCRxSkipFinish(void)
+{
+    SSFMQTTCRxSkip_t *s = &_mqttc.rxSkip;
+    size_t need;
+
+    SSF_REQUIRE(s->left == 0);
+
+    /* pos is now the packet length. Checks match SSFMQTTPktDecodePublish() (neither checks     */
+    /* UTF-8).                                                                                  */
+    need = s->tlOff + 2u + s->topicLen + ((s->qos == SSF_MQTTC_QOS_1) ? 2u : 0u);
+    if ((s->topicLen == 0) || (need > s->pos) || s->isTopicNul ||
+        ((s->qos == SSF_MQTTC_QOS_1) && (s->packetId == 0)))
+    { _SSFMQTTCLinkFail(SSF_MQTTC_REASON_PROTOCOL); return false; }
+
+    _SSFMQTTCRxPublishDrop(s->qos, s->packetId, SSF_MQTTC_REASON_RX_PUBLISH_TOO_LARGE);
+    memset(s, 0, sizeof(*s));
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if the skip consumed what the framing buffer holds of it, else false if the      */
+/* skipped packet was malformed and the link failed.                                             */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFMQTTCRxSkipConsume(void)
+{
+    SSFMQTTCRxSkip_t *s = &_mqttc.rxSkip;
+    const uint8_t *frame = SSF_MQTTC_RX_DATA(_mqttc.rxFrame);
+    size_t n;
+
+    SSF_REQUIRE(s->left > 0);
+
+    n = (_mqttc.rxLen < s->left) ? _mqttc.rxLen : s->left;
+    _SSFMQTTCRxSkipTakeU16(frame, n, s->tlOff, &s->topicLen);
+    /* Topic and packet id offsets are final once both topic length bytes have been seen */
+    if ((s->pos + n) >= (s->tlOff + 2u))
+    {
+        size_t lo = s->tlOff + 2u;              /* Topic bytes within this chunk: [lo, hi) */
+        size_t hi = lo + s->topicLen;
+
+        if (lo < s->pos) lo = s->pos;
+        if (hi > (s->pos + n)) hi = s->pos + n;
+        if ((lo < hi) && (memchr(&frame[lo - s->pos], 0, hi - lo) != NULL)) s->isTopicNul = true;
+        if (s->qos == SSF_MQTTC_QOS_1)
+        { _SSFMQTTCRxSkipTakeU16(frame, n, s->tlOff + 2u + s->topicLen, &s->packetId); }
+    }
+    s->pos += n;
+    s->left -= n;
+    _SSFMQTTCRxFrameConsume(n);
+    if (s->left == 0) return _SSFMQTTCRxSkipFinish();
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Returns true if every complete inbound packet was dispatched, else false if the link failed.  */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFMQTTCRxFrameProcess(void)
@@ -605,11 +741,25 @@ static bool _SSFMQTTCRxFrameProcess(void)
 
     while (_mqttc.rxLen > 0)
     {
+        /* An oversized PUBLISH is consumed before anything after it is framed */
+        if (_mqttc.rxSkip.left > 0)
+        {
+            if (_SSFMQTTCRxSkipConsume() == false) return false;
+            continue;
+        }
+
         fr = SSFMQTTPktFrame(frame, _mqttc.rxLen, &pktLen);
         if (fr == SSF_MQTT_PKT_FRAME_MALFORMED)
         { _SSFMQTTCLinkFail(SSF_MQTTC_REASON_PROTOCOL); return false; }
         if ((pktLen != 0) && (pktLen > _mqttc.rxBlockSize))
-        { _SSFMQTTCLinkFail(SSF_MQTTC_REASON_RX_OVERFLOW); return false; }
+        {
+            /* A PUBLISH that cannot fit is dropped as it arrives; the fixed header gives its   */
+            /* length, so the stream stays in sync. Any other packet that cannot fit is fatal.  */
+            if (SSF_MQTT_PKT_TYPE(frame[0]) != SSF_MQTT_PKT_PUBLISH)
+            { _SSFMQTTCLinkFail(SSF_MQTTC_REASON_RX_OVERFLOW); return false; }
+            if (_SSFMQTTCRxSkipStart(frame, pktLen) == false) return false;
+            continue;
+        }
         if (fr == SSF_MQTT_PKT_FRAME_INCOMPLETE) return true;
 
         if (SSF_MQTT_PKT_TYPE(frame[0]) == SSF_MQTT_PKT_PUBLISH) ok = _SSFMQTTCRxPublishQueue(frame, pktLen);

@@ -91,6 +91,7 @@ typedef struct
     SSFNetIOResult_t sendResult;      /* SUCCESS accepts bytes; anything else is returned      */
     size_t sendChunk;                 /* Max bytes accepted per send(); 0 => unlimited         */
     SSFNetIOResult_t recvEmptyResult; /* Returned when no injected bytes remain                */
+    size_t recvChunk;                 /* Max bytes returned per recv(); 0 => unlimited         */
     uint32_t shutdownWants;           /* shutdown() returns WANT_WRITE this many times first   */
     SSFNetIOResult_t shutdownResult;  /* Then this                                             */
     /* Observation */
@@ -108,6 +109,8 @@ typedef struct
     uint8_t rx[SSF_MQTTC_UT_MOCK_BUF_SIZE];
     size_t rxLen;
     size_t rxPos;
+    size_t rxPadPos;                  /* rx offset at which rxPadLeft filler bytes are served  */
+    size_t rxPadLeft;                 /* Filler bytes still to serve; models huge packets      */
 } SSFMQTTCUTMock_t;
 
 static SSFMQTTCUTMock_t _utMock;
@@ -201,6 +204,16 @@ static SSFNetIOResult_t _SSFMQTTCUTMockRecv(SSFNetTransport_t *t, uint8_t *buf, 
     SSF_REQUIRE(m->isOpen);
 
     *gotOut = 0;
+    if ((m->recvChunk > 0) && (size > m->recvChunk)) size = m->recvChunk;
+    if ((m->rxPadLeft > 0) && (m->rxPos == m->rxPadPos))
+    {
+        avail = (m->rxPadLeft < size) ? m->rxPadLeft : size;
+        memset(buf, 'p', avail);
+        m->rxPadLeft -= avail;
+        *gotOut = avail;
+        return SSF_NET_IO_SUCCESS;
+    }
+    if ((m->rxPadLeft > 0) && (avail > (m->rxPadPos - m->rxPos))) avail = m->rxPadPos - m->rxPos;
     if (avail == 0) return m->recvEmptyResult;
     if (avail > size) avail = size;
     memcpy(buf, &m->rx[m->rxPos], avail);
@@ -272,6 +285,18 @@ static void _SSFMQTTCUTInject(const uint8_t *bytes, size_t len)
 
     memcpy(&_utMock.rx[_utMock.rxLen], bytes, len);
     _utMock.rxLen += len;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Queues n filler bytes after the bytes injected so far, without storing them.                  */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTCUTInjectPad(size_t n)
+{
+    SSF_REQUIRE(n > 0);
+    SSF_ASSERT(_utMock.rxPadLeft == 0);             /* One filler segment at a time */
+
+    _utMock.rxPadPos = _utMock.rxLen;
+    _utMock.rxPadLeft = n;
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -440,17 +465,24 @@ static void _SSFMQTTCUTOptsInit(SSFMQTTCOpts_t *opts)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Creates a fresh state machine, mock and STOPPED client.                                       */
+/* Creates a fresh state machine, mock and STOPPED client with the given rx block size.          */
 /* --------------------------------------------------------------------------------------------- */
-static void _SSFMQTTCUTBegin(uint32_t txBlocks)
+static void _SSFMQTTCUTBeginRx(uint32_t txBlocks, uint32_t rxBlockSize)
 {
     SSFSMInit(SSF_SM_MAX_ACTIVE_EVENTS, SSF_SM_MAX_ACTIVE_TIMERS);
     _SSFMQTTCUTMockReset();
     _SSFMQTTCUTRecordReset();
-    SSFMQTTCInit(&_utMock.transport, txBlocks, SSF_MQTTC_UT_TX_BLOCK_SIZE,
-                 SSF_MQTTC_UT_RX_BLOCK_SIZE, _SSFMQTTCUTRxPublish, &_utRxPublishCtx,
-                 _SSFMQTTCUTEvent, &_utEventCtx);
+    SSFMQTTCInit(&_utMock.transport, txBlocks, SSF_MQTTC_UT_TX_BLOCK_SIZE, rxBlockSize,
+                 _SSFMQTTCUTRxPublish, &_utRxPublishCtx, _SSFMQTTCUTEvent, &_utEventCtx);
     SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_STOPPED);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Creates a fresh state machine, mock and STOPPED client with the default rx block size.        */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTCUTBegin(uint32_t txBlocks)
+{
+    _SSFMQTTCUTBeginRx(txBlocks, SSF_MQTTC_UT_RX_BLOCK_SIZE);
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -1043,7 +1075,7 @@ static void _SSFMQTTCUTScenarioProtocolErrors(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Tests that an inbound packet larger than the rx block ends the connection.                    */
+/* Tests that an inbound packet other than PUBLISH larger than the rx block ends the connection. */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFMQTTCUTScenarioRxOverflow(void)
 {
@@ -1052,15 +1084,369 @@ static void _SSFMQTTCUTScenarioRxOverflow(void)
     uint8_t pkt[4];
     SSFMQTTCOpts_t opts;
 
-    /* Remaining length larger than the rx block, known from the fixed header alone */
+    /* SUBACK whose remaining length exceeds the rx block, known from the fixed header alone */
     _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
     _SSFMQTTCUTOptsInit(&opts);
     _SSFMQTTCUTGoReady(&opts);
-    pkt[0] = 0x30; pkt[1] = 0x80; pkt[2] = 0x02; pkt[3] = 0x00;   /* 256 bytes remaining */
+    pkt[0] = 0x90; pkt[1] = 0x80; pkt[2] = 0x02; pkt[3] = 0x00;   /* 256 bytes remaining */
     _SSFMQTTCUTInject(pkt, 3);
     _SSFMQTTCUTPump();
     SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_RECONNECT_WAIT);
     _SSFMQTTCUTExpectEvents(expected, 1);
+    _SSFMQTTCUTEnd();
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns the bytes written to buf for a PUBLISH with first byte b0, a topic of topicLen 'x'    */
+/* bytes, packetId when b0 has QoS bits, and a payload of payloadLen bytes of which only the     */
+/* first payloadWritten ('y') are written. *hdrLenOut is the fixed header length.                */
+/* --------------------------------------------------------------------------------------------- */
+static size_t _SSFMQTTCUTBuildPublish(uint8_t *buf, size_t size, uint8_t b0, size_t topicLen,
+                                      uint16_t packetId, size_t payloadLen,
+                                      size_t payloadWritten, size_t *hdrLenOut)
+{
+    size_t remaining = 2 + topicLen + payloadLen + (((b0 & 0x06u) != 0) ? 2u : 0u);
+    size_t v = remaining;
+    size_t n = 0;
+
+    SSF_REQUIRE(buf != NULL);
+    SSF_REQUIRE(payloadWritten <= payloadLen);
+    SSF_REQUIRE(hdrLenOut != NULL);
+    SSF_ASSERT((5 + 2 + topicLen + 2 + payloadWritten) <= size);
+
+    buf[n++] = b0;
+    do
+    {
+        uint8_t b = (uint8_t)(v & 0x7Fu);
+        v >>= 7;
+        if (v > 0) b |= 0x80u;
+        buf[n++] = b;
+    } while (v > 0);
+    *hdrLenOut = n;
+    buf[n++] = (uint8_t)(topicLen >> 8);
+    buf[n++] = (uint8_t)(topicLen & 0xFFu);
+    memset(&buf[n], 'x', topicLen);
+    n += topicLen;
+    if ((b0 & 0x06u) != 0)
+    {
+        buf[n++] = (uint8_t)(packetId >> 8);
+        buf[n++] = (uint8_t)(packetId & 0xFFu);
+    }
+    memset(&buf[n], 'y', payloadWritten);
+    n += payloadWritten;
+    return n;
+}
+
+static const uint8_t _utPktRxSmall0[] = { 0x30, 0x03, 0x00, 0x01, 'u' };    /* QoS 0, topic "u" */
+static const uint8_t _utPktRxSmall1[] = { 0x32, 0x05, 0x00, 0x01, 'v', 0x00, 0x07 }; /* QoS 1, 7 */
+static const uint8_t _utPktRxSmall1Ack[] = { 0x40, 0x02, 0x00, 0x07 };
+
+/* --------------------------------------------------------------------------------------------- */
+/* Tests that a PUBLISH larger than the rx block is dropped and the stream stays in sync.        */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTCUTScenarioRxTooLarge(void)
+{
+    static const SSFMQTTCUTEventRec_t dropped[] =
+    { { SSF_MQTTC_EVENT_RX_PUBLISH_DROPPED, SSF_MQTTC_REASON_RX_PUBLISH_TOO_LARGE } };
+    static const uint8_t ackBig[] = { 0x40, 0x02, 0x12, 0x34, 0x40, 0x02, 0x00, 0x07 };
+    static const size_t chunks[] = { 0, 1, 2, 3, 5, 64, 127, 128, 129 };
+    uint8_t pkt[512];
+    size_t len;
+    size_t hdrLen;
+    uint32_t i;
+    SSFMQTTCOpts_t opts;
+
+    /* QoS 0, 3-byte fixed header, followed in the same read by a packet that fits */
+    _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
+    _SSFMQTTCUTOptsInit(&opts);
+    _SSFMQTTCUTGoReady(&opts);
+    len = _SSFMQTTCUTBuildPublish(pkt, sizeof(pkt), 0x30, 1, 0, 200, 200, &hdrLen);
+    SSF_ASSERT(hdrLen == 3);
+    _SSFMQTTCUTInject(pkt, len);
+    _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(_utPktRxSmall0));
+    _SSFMQTTCUTPump();
+    SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_CONNECTED);
+    SSF_ASSERT(_utRxPublishCount == 1);
+    SSF_ASSERT(strcmp(_utRxTopic, "u") == 0);
+    _SSFMQTTCUTExpectEvents(dropped, 1);
+    _SSFMQTTCUTExpectTx(NULL, 0);
+    _SSFMQTTCUTEnd();
+
+    /* QoS 1 whose topic alone is longer than the rx block, so its packet id lies beyond the  */
+    /* block; acknowledged, then the next packet is delivered and acknowledged. Every read     */
+    /* size, so the topic length and packet id bytes split across reads in every way.          */
+    for (i = 0; i < (sizeof(chunks) / sizeof(chunks[0])); i++)
+    {
+        _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
+        _SSFMQTTCUTOptsInit(&opts);
+        _SSFMQTTCUTGoReady(&opts);
+        _utMock.recvChunk = chunks[i];
+        len = _SSFMQTTCUTBuildPublish(pkt, sizeof(pkt), 0x32, 200, 0x1234, 5, 5, &hdrLen);
+        _SSFMQTTCUTInject(pkt, len);
+        _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(_utPktRxSmall1));
+        _SSFMQTTCUTPump();
+        SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_CONNECTED);
+        SSF_ASSERT(_utRxPublishCount == 1);
+        SSF_ASSERT(strcmp(_utRxTopic, "v") == 0);
+        _SSFMQTTCUTExpectEvents(dropped, 1);
+        _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(ackBig));
+        _SSFMQTTCUTEnd();
+    }
+
+    /* Retained, DUP, 5-byte fixed header (over 2 MB), the bulk served as filler */
+    _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
+    _SSFMQTTCUTOptsInit(&opts);
+    _SSFMQTTCUTGoReady(&opts);
+    len = _SSFMQTTCUTBuildPublish(pkt, sizeof(pkt), 0x3B, 1, 0x1234, 2100000ul, 0, &hdrLen);
+    SSF_ASSERT(hdrLen == 5);
+    _SSFMQTTCUTInject(pkt, len);
+    _SSFMQTTCUTInjectPad(2100000ul);
+    _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(_utPktRxSmall1));
+    _SSFMQTTCUTPump();
+    SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_CONNECTED);
+    SSF_ASSERT(_utMock.rxPadLeft == 0);
+    SSF_ASSERT(_utRxPublishCount == 1);
+    SSF_ASSERT(strcmp(_utRxTopic, "v") == 0);
+    _SSFMQTTCUTExpectEvents(dropped, 1);
+    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(ackBig));
+    _SSFMQTTCUTEnd();
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Tests that a PUBLISH that fits but whose topic is too long is dropped and acknowledged.       */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTCUTScenarioRxTopicTooLong(void)
+{
+    static const SSFMQTTCUTEventRec_t dropped[] =
+    { { SSF_MQTTC_EVENT_RX_PUBLISH_DROPPED, SSF_MQTTC_REASON_RX_PUBLISH_TOPIC_TOO_LONG } };
+    static const uint8_t ack[] = { 0x40, 0x02, 0x0A, 0x0B, 0x40, 0x02, 0x00, 0x07 };
+    uint8_t pkt[512];
+    size_t len;
+    size_t hdrLen;
+    SSFMQTTCOpts_t opts;
+
+    _SSFMQTTCUTBeginRx(SSF_MQTTC_UT_TX_BLOCKS, 512);
+    _SSFMQTTCUTOptsInit(&opts);
+    _SSFMQTTCUTGoReady(&opts);
+
+    /* Longest allowed topic is delivered */
+    len = _SSFMQTTCUTBuildPublish(pkt, sizeof(pkt), 0x30, SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE - 1, 0,
+                                  1, 1, &hdrLen);
+    _SSFMQTTCUTInject(pkt, len);
+    _SSFMQTTCUTPump();
+    SSF_ASSERT(_utRxPublishCount == 1);
+    SSF_ASSERT(_utRx.topicLen == (SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE - 1));
+    SSF_ASSERT(_utEventCount == 0);
+
+    /* One byte longer is dropped, acknowledged, and the next packet still arrives */
+    len = _SSFMQTTCUTBuildPublish(pkt, sizeof(pkt), 0x32, SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE, 0x0A0B,
+                                  1, 1, &hdrLen);
+    _SSFMQTTCUTInject(pkt, len);
+    _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(_utPktRxSmall1));
+    _SSFMQTTCUTPump();
+    SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_CONNECTED);
+    SSF_ASSERT(_utRxPublishCount == 2);
+    SSF_ASSERT(strcmp(_utRxTopic, "v") == 0);
+    _SSFMQTTCUTExpectEvents(dropped, 1);
+    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(ack));
+    _SSFMQTTCUTEnd();
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Tests that a malformed PUBLISH larger than the rx block still ends the connection.            */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTCUTScenarioRxTooLargeMalformed(void)
+{
+    static const SSFMQTTCUTEventRec_t protocol[] =
+    { { SSF_MQTTC_EVENT_DISCONNECTED, SSF_MQTTC_REASON_PROTOCOL } };
+    static const size_t chunks[] = { 0, 1, 129 };   /* Fields seen whole, byte by byte, split */
+    uint8_t pkt[512];
+    size_t len = 0;
+    size_t hdrLen;
+    uint32_t i;
+    SSFMQTTCOpts_t opts;
+
+    for (i = 0; i < (12u * (sizeof(chunks) / sizeof(chunks[0]))); i++)
+    {
+        _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
+        _SSFMQTTCUTOptsInit(&opts);
+        _SSFMQTTCUTGoReady(&opts);
+        _utMock.recvChunk = chunks[i / 12u];
+        switch (i % 12u)
+        {
+        case 0:     /* Zero-length topic */
+            len = _SSFMQTTCUTBuildPublish(pkt, sizeof(pkt), 0x30, 0, 0, 200, 200, &hdrLen);
+            break;
+        case 1:     /* Packet id 0 */
+            len = _SSFMQTTCUTBuildPublish(pkt, sizeof(pkt), 0x32, 1, 0, 200, 200, &hdrLen);
+            break;
+        case 2:     /* QoS 1 but the packet ends right after the topic: no room for the id */
+            len = _SSFMQTTCUTBuildPublish(pkt, sizeof(pkt), 0x30, 199, 0, 0, 0, &hdrLen);
+            pkt[0] = 0x32;
+            break;
+        case 3:     /* Topic length runs past the end of the packet */
+            len = _SSFMQTTCUTBuildPublish(pkt, sizeof(pkt), 0x30, 1, 0, 200, 200, &hdrLen);
+            pkt[hdrLen] = 0xFF; pkt[hdrLen + 1] = 0xFF;
+            break;
+        case 4:     /* QoS 3 */
+            len = _SSFMQTTCUTBuildPublish(pkt, sizeof(pkt), 0x36, 1, 1, 200, 200, &hdrLen);
+            break;
+        case 5:     /* DUP at QoS 0 */
+            len = _SSFMQTTCUTBuildPublish(pkt, sizeof(pkt), 0x38, 1, 0, 200, 200, &hdrLen);
+            break;
+        case 6:     /* QoS 1, one byte short of a packet id */
+            len = _SSFMQTTCUTBuildPublish(pkt, sizeof(pkt), 0x30, 200, 0, 1, 1, &hdrLen);
+            pkt[0] = 0x32;
+            break;
+        case 7:     /* QoS 0, topic length one byte longer than the packet */
+            len = _SSFMQTTCUTBuildPublish(pkt, sizeof(pkt), 0x30, 1, 0, 200, 200, &hdrLen);
+            pkt[hdrLen] = 0x00; pkt[hdrLen + 1] = 202;
+            break;
+        case 8:     /* Embedded NUL in the topic, within the first block */
+            len = _SSFMQTTCUTBuildPublish(pkt, sizeof(pkt), 0x32, 3, 0x1234, 200, 200, &hdrLen);
+            pkt[hdrLen + 2 + 1] = 0;
+            break;
+        case 9:     /* Embedded NUL in the topic, beyond the first block */
+            len = _SSFMQTTCUTBuildPublish(pkt, sizeof(pkt), 0x32, 200, 0x1234, 5, 5, &hdrLen);
+            pkt[hdrLen + 2 + 150] = 0;
+            break;
+        case 10:    /* Embedded NUL as the last topic byte */
+            len = _SSFMQTTCUTBuildPublish(pkt, sizeof(pkt), 0x32, 200, 0x1234, 5, 5, &hdrLen);
+            pkt[hdrLen + 2 + 199] = 0;
+            break;
+        default:    /* QoS 2 is not supported */
+            len = _SSFMQTTCUTBuildPublish(pkt, sizeof(pkt), 0x34, 1, 1, 200, 200, &hdrLen);
+            break;
+        }
+        _SSFMQTTCUTInject(pkt, len);
+        _SSFMQTTCUTPump();
+        SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_RECONNECT_WAIT);
+        SSF_ASSERT(_utRxPublishCount == 0);
+        _SSFMQTTCUTExpectEvents(protocol, 1);        /* Never reported as a drop first */
+        _utMock.txLen = 0;
+        _SSFMQTTCUTEnd();
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Tests that a retained oversized PUBLISH between SUBACK and READY no longer blocks READY.      */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTCUTScenarioRxTooLargeRetained(void)
+{
+    static const SSFMQTTCUTEventRec_t expected[] =
+    {
+        { SSF_MQTTC_EVENT_CONNECTED, SSF_MQTTC_REASON_NONE },
+        { SSF_MQTTC_EVENT_RX_PUBLISH_DROPPED, SSF_MQTTC_REASON_RX_PUBLISH_TOO_LARGE },
+        { SSF_MQTTC_EVENT_READY, SSF_MQTTC_REASON_NONE },
+    };
+    static const uint8_t ack[] = { 0x40, 0x02, 0x00, 0x2A };
+    uint8_t pkt[512];
+    size_t len;
+    size_t hdrLen;
+    SSFMQTTCOpts_t opts;
+
+    _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
+    _SSFMQTTCUTOptsInit(&opts);
+    SSFMQTTCStart(&opts);
+    _SSFMQTTCUTPump();
+    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(_utPktConnect));
+    _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(_utPktConnAckOk));
+    _SSFMQTTCUTPump();
+    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(_utPktSubscribe1));
+    len = _SSFMQTTCUTBuildPublish(pkt, sizeof(pkt), 0x33, 3, 0x002A, 300, 300, &hdrLen);
+    _SSFMQTTCUTInject(pkt, len);
+    _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(_utPktSubAckOk1));
+    _SSFMQTTCUTPump();
+    SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_CONNECTED);
+    _SSFMQTTCUTExpectEvents(expected, 3);
+    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(ack));
+    _SSFMQTTCUTEnd();
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Tests that a PUBLISH dropped before CONNACK is not acknowledged, so nothing precedes CONNECT. */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTCUTScenarioRxDropBeforeConnAck(void)
+{
+    static const SSFMQTTCUTEventRec_t tooLarge[] =
+    { { SSF_MQTTC_EVENT_RX_PUBLISH_DROPPED, SSF_MQTTC_REASON_RX_PUBLISH_TOO_LARGE } };
+    static const SSFMQTTCUTEventRec_t tooLong[] =
+    { { SSF_MQTTC_EVENT_RX_PUBLISH_DROPPED, SSF_MQTTC_REASON_RX_PUBLISH_TOPIC_TOO_LONG } };
+    uint8_t pkt[512];
+    size_t len;
+    size_t hdrLen;
+    SSFMQTTCOpts_t opts;
+
+    /* Oversized QoS 1, sent by the broker as soon as the transport opens */
+    _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
+    _SSFMQTTCUTOptsInit(&opts);
+    len = _SSFMQTTCUTBuildPublish(pkt, sizeof(pkt), 0x32, 3, 0x1234, 200, 200, &hdrLen);
+    _SSFMQTTCUTInject(pkt, len);
+    SSFMQTTCStart(&opts);
+    _SSFMQTTCUTPump();
+    SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_CONNECTING);
+    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(_utPktConnect));
+    _SSFMQTTCUTExpectEvents(tooLarge, 1);
+    _SSFMQTTCUTEnd();
+
+    /* QoS 1 that fits but whose topic is too long */
+    _SSFMQTTCUTBeginRx(SSF_MQTTC_UT_TX_BLOCKS, 512);
+    _SSFMQTTCUTOptsInit(&opts);
+    len = _SSFMQTTCUTBuildPublish(pkt, sizeof(pkt), 0x32, SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE, 0x1234,
+                                  1, 1, &hdrLen);
+    _SSFMQTTCUTInject(pkt, len);
+    SSFMQTTCStart(&opts);
+    _SSFMQTTCUTPump();
+    SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_CONNECTING);
+    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(_utPktConnect));
+    _SSFMQTTCUTExpectEvents(tooLong, 1);
+    _SSFMQTTCUTEnd();
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Tests that a connection lost in the middle of a dropped PUBLISH leaves no state behind.       */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTCUTScenarioRxTooLargeLinkLoss(void)
+{
+    static const SSFMQTTCUTEventRec_t closed[] =
+    { { SSF_MQTTC_EVENT_DISCONNECTED, SSF_MQTTC_REASON_PEER_CLOSED } };
+    static const SSFMQTTCUTEventRec_t ready[] =
+    {
+        { SSF_MQTTC_EVENT_CONNECTED, SSF_MQTTC_REASON_NONE },
+        { SSF_MQTTC_EVENT_READY, SSF_MQTTC_REASON_NONE },
+    };
+    static const uint8_t subAck2[] = { 0x90, 0x03, 0x00, 0x02, 0x01 };
+    uint8_t pkt[512];
+    size_t len;
+    size_t hdrLen;
+    SSFMQTTCOpts_t opts;
+
+    _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
+    _SSFMQTTCUTOptsInit(&opts);
+    _SSFMQTTCUTGoReady(&opts);
+    len = _SSFMQTTCUTBuildPublish(pkt, sizeof(pkt), 0x32, 200, 0x1234, 5, 5, &hdrLen);
+    _SSFMQTTCUTInject(pkt, 150);                    /* Partway through the topic */
+    _SSFMQTTCUTPump();
+    SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_CONNECTED);
+    SSF_ASSERT(_utEventCount == 0);
+    _utMock.recvEmptyResult = SSF_NET_IO_CLOSED;
+    _SSFMQTTCUTPump();
+    SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_RECONNECT_WAIT);
+    _SSFMQTTCUTExpectEvents(closed, 1);
+
+    /* The new connection frames from its first byte */
+    _utMock.recvEmptyResult = SSF_NET_IO_WANT_READ;
+    _SSFMQTTCUTPumpFor(SSF_MQTTC_UT_BACKOFF_TICKS + SSF_MQTTC_UT_SLACK_TICKS);
+    SSF_ASSERT(_utMock.openCount == 2);
+    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(_utPktConnect));
+    _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(_utPktConnAckOk));
+    _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(subAck2));
+    _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(_utPktRxSmall0));
+    _SSFMQTTCUTPump();
+    SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_CONNECTED);
+    SSF_ASSERT(_utRxPublishCount == 1);
+    SSF_ASSERT(strcmp(_utRxTopic, "u") == 0);
+    _SSFMQTTCUTExpectEvents(ready, 2);
     _SSFMQTTCUTEnd();
 }
 
@@ -1456,6 +1842,12 @@ void SSFMQTTCUnitTest(void)
     _SSFMQTTCUTScenarioSubAckRefused();
     _SSFMQTTCUTScenarioProtocolErrors();
     _SSFMQTTCUTScenarioRxOverflow();
+    _SSFMQTTCUTScenarioRxTooLarge();
+    _SSFMQTTCUTScenarioRxTopicTooLong();
+    _SSFMQTTCUTScenarioRxTooLargeMalformed();
+    _SSFMQTTCUTScenarioRxTooLargeRetained();
+    _SSFMQTTCUTScenarioRxTooLargeLinkLoss();
+    _SSFMQTTCUTScenarioRxDropBeforeConnAck();
     _SSFMQTTCUTScenarioPeerClosed();
     _SSFMQTTCUTScenarioConnectFailures();
     _SSFMQTTCUTScenarioSessionTimeouts();

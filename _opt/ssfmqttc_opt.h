@@ -14,8 +14,8 @@ extern "C" {
 /* String limits. Sizes include the NUL terminator; app strings must be strictly shorter.        */
 /* MQTT 3.1.1 caps every string field at 65535 bytes.                                            */
 
-/* Topic names and topic filters. 2..65536. Also bounds inbound PUBLISH topics; a longer one     */
-/* ends the connection with SSF_MQTTC_REASON_RX_OVERFLOW.                                        */
+/* Topic names and topic filters. 2..65536. Also bounds inbound PUBLISH topics; a longer one is  */
+/* dropped with SSF_MQTTC_REASON_RX_PUBLISH_TOPIC_TOO_LONG.                                      */
 #define SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE         (128u)
 
 /* Broker host name or address. 2..256 (DNS name limit + NUL).                                   */

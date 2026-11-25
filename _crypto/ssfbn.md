@@ -68,7 +68,7 @@ other big-integer libraries.
 
   | Status | Functions |
   |---|---|
-  | **Constant-time** (safe on secrets) | [`SSFBNCmp`](#ssfbncmp), [`SSFBNModExp`/`SSFBNModExpMont`/`SSFBNModExpHalf`](#modexp), [`SSFBNMontMul`](#montmul), [`SSFBNMontSquare`](#montsquare), [`SSFBNMontConvertIn`/`Out`](#montconv), [`SSFBNCondSwap`](#condswap), [`SSFBNCondCopy`](#condswap), [`SSFBNAdd`](#ssfbnadd), [`SSFBNSub`](#ssfbnsub), [`SSFBNModAdd`](#modaddsub), [`SSFBNModSub`](#modaddsub), [`SSFBNModMulCT`](#ssfbnmodmulct), [`SSFBNModMulNISTPrime`](#modmulnist), [`SSFBNMul`](#ssfbnmul), [`SSFBNSquare`](#ssfbnsquare), [`SSFBNIsEven`/`SSFBNIsOdd`](#predicates), [`SSFBNIsZero`/`IsOne`](#predicates) (the returned bool is itself one bit; branching on it reveals that bit) |
+  | **Constant-time** (safe on secrets) | [`SSFBNCmp`](#ssfbncmp), [`SSFBNModExp`/`SSFBNModExpMont`/`SSFBNModExpHalf`](#modexp), [`SSFBNMontMul`](#montmul), [`SSFBNMontSquare`](#montsquare), [`SSFBNMontConvertIn`/`Out`](#montconv), [`SSFBNCondSwap`](#condswap), [`SSFBNCondCopy`](#condswap), [`SSFBNAdd`](#ssfbnadd), [`SSFBNSub`](#ssfbnsub), [`SSFBNModAdd`](#modaddsub), [`SSFBNModSub`](#modaddsub), [`SSFBNModMulCT`/`SSFBNModMulCTOdd`](#ssfbnmodmulct), [`SSFBNModMulNISTPrime`](#modmulnist), [`SSFBNMul`](#ssfbnmul), [`SSFBNSquare`](#ssfbnsquare), [`SSFBNIsEven`/`SSFBNIsOdd`](#predicates), [`SSFBNIsZero`/`IsOne`](#predicates) (the returned bool is itself one bit; branching on it reveals that bit) |
   | **Constant-time when `m` is odd and at most [`SSF_BN_MAX_MOD_LIMBS`](#ssf-bn-max-mod-limbs) limbs** (variable-time otherwise; parity and length are public) | [`SSFBNMod`](#ssfbnmod), [`SSFBNModMul`](#ssfbnmodmul), [`SSFBNModSquare`](#ssfbnmodsquare) |
   | **Variable-time** (do not use on secrets) | [`SSFBNDivMod`](#ssfbndivmod), [`SSFBNGcd`](#ssfbngcd), [`SSFBNModInvExt`/`SSFBNModInvOdd`](#modinv), [`SSFBNModMulNIST`](#modmulnist) (constant-time only for the P-256 / P-384 primes), [`SSFBNModExpPub`/`SSFBNModExpMontPub`](#modexppub), [`SSFBNBitLen`](#bitlen), [`SSFBNTrailingZeros`](#trailingzeros), [`SSFBNShiftLeft1`/`Right1`](#shift), [`SSFBNShiftLeft`/`Right`](#shift-multi), [`SSFBNIsProbablePrime`](#ssfbnisprobableprime), [`SSFBNGenPrime`](#ssfbngenprime) |
   | **Constant-time only when `m` is prime** | [`SSFBNModInvSmall`](#modinvsmall) — the same Fermat inverse at curve width (at most `SSF_BN_SMALL_MAX_LIMBS` limbs), with the same `a · r ≡ 1` check. [`SSFBNModInv`](#modinv) — uses Fermat's little theorem (`a^(m-2) mod m`), which is constant-time but yields the correct answer only for prime `m`. After computing it, the function verifies `a · r ≡ 1 (mod m)` with the constant-time [`SSFBNModMulCT`](#ssfbnmodmulct) and returns `false` if it does not hold, so non-prime moduli are rejected (even when an inverse exists). |
@@ -253,6 +253,7 @@ The `ssfrsa` and `ssfbn` modules sanity-check against this macro at compile time
 | | [`void SSFBNModSub(r, a, b, m)`](#modaddsub) | `r = (a − b) mod m`; requires `a, b < m` |
 | [e.g.](#ex-modmul) | [`void SSFBNModMul(r, a, b, m)`](#ssfbnmodmul) | `r = (a × b) mod m`; general-purpose |
 | | [`void SSFBNModMulCT(r, a, b, m)`](#ssfbnmodmulct) | `r = (a × b) mod m`, constant-time; for secret `a` or `b`; requires `a < m` or `b < m` |
+| | [`void SSFBNModMulCTOdd(r, a, b, m)`](#ssfbnmodmulct) | The same for odd `m` only (no even-modulus path to link) |
 | | [`void SSFBNModSquare(r, a, m)`](#ssfbnmodsquare) | `r = (a²) mod m`; `Square` then `Mod` (variable-time) |
 | | [`void SSFBNModMulNIST(r, a, b, m)`](#modmulnist) | `r = (a × b) mod m` using NIST fast reduction for P-256 / P-384 |
 | | [`void SSFBNModMulNISTPrime(r, a, b, m)`](#modmulnist) | The same for `m` the P-256 or P-384 prime only (no generic fallback); constant-time |
@@ -646,20 +647,26 @@ modulus (the RSA / DH case) — go through the Montgomery path
 
 <a id="ssfbnmodmulct"></a>
 ```c
-void SSFBNModMulCT(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *m);
+void SSFBNModMulCT   (SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *m);
+void SSFBNModMulCTOdd(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *m);
 ```
 `r = (a × b) mod m`. Same result as [`SSFBNModMul`](#ssfbnmodmul) **provided at least one of
 `a` or `b` is `< m`** (enforced by `SSF_REQUIRE`). **Constant-time** — use this when `a` or `b`
 are secret (e.g., RSA's blinding and CRT recombination). The algorithm depends only on the
 parity of `m`, which is public:
 
-- **Odd `m`** (every in-tree caller: RSA's `n`, `p`, `q` and the prime moduli of
-  [`SSFBNModInv`](#modinv)'s check): `MontMul(MontMul(a, b), R²)` through a Montgomery context
-  built for the call, exact because `a × b < m × R` when one operand is `< m` (OPTIMIZE BN-O4,
-  about 7× faster than the fallback at 2048 bits). Its intermediate and context are wiped.
+- **Odd `m`**: `MontMul(MontMul(a, b), R²)` through a Montgomery context built for the call,
+  exact because `a × b < m × R` when one operand is `< m` (OPTIMIZE BN-O4, about 7× faster than
+  the fallback at 2048 bits). Its intermediate and context are wiped.
 - **Even `m`**: schoolbook multiply (already CT) followed by a fixed-iteration
   shift-and-subtract reduction with branchless mask-conditional commits; the iteration count
   and per-iteration work depend only on the limb count of `m`.
+
+`SSFBNModMulCTOdd` is the odd-modulus path alone: the same preconditions plus `m` odd
+(`SSF_REQUIRE`). Every in-tree caller uses it (RSA's blinding, CRT recombination and unblinding
+over `n` / `p`, and [`SSFBNModInv`](#modinv)'s check), so with `--gc-sections` the
+shift-and-subtract path and its 3 KB frame (at the RSA-4096 cap) are linked only for an
+application that calls `SSFBNModMulCT` (OPTIMIZE BN-15).
 
 <a id="ssfbnmodsquare"></a>
 ```c
@@ -723,7 +730,7 @@ bool SSFBNModInvOdd(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m);
 
 - [`SSFBNModInv`](#modinv) computes `a^(m-2) mod m` via the constant-time
   [`SSFBNModExp`](#modexp), then verifies the result satisfies `a · r ≡ 1 (mod m)` with the
-  constant-time [`SSFBNModMulCT`](#ssfbnmodmulct) (`r < m` meets its precondition) and
+  constant-time [`SSFBNModMulCTOdd`](#ssfbnmodmulct) (`r < m` meets its precondition) and
   returns `false` if not. **Constant-time on the success path** for prime `m`: neither step
   depends on the value of `a` (before 2026-11-19 the check used the variable-time
   `SSFBNModMul`, whose run time tracked the bit length of `a · r`). An even `m`

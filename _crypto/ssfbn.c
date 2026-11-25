@@ -48,6 +48,9 @@
 #error "SSF_BN_KARATSUBA_THRESHOLD must be >= 4 (Karatsuba step 7 overruns r for n < 4)"
 #endif
 #define SSF_BN_MODEXP_TBL_N        ((uint32_t)1u << SSF_BN_MODEXP_WIN_K)
+#if (SSF_BN_MODEXP_WIN_K < 1u) || (SSF_BN_MODEXP_WIN_K > 8u)
+#error SSF_BN_MODEXP_WIN_K must be 1 to 8 (a 2^k-entry table on the stack)
+#endif
 #define SSF_BN_NUM_SMALL_PRIMES    (sizeof(_ssfBNSmallPrimes) / sizeof(_ssfBNSmallPrimes[0]))
 
 #if SSF_CONFIG_BN_UNIT_TEST == 1
@@ -3008,10 +3011,13 @@ static void _SSFBNModExpMontCore(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *e,
     SSFBNCopy(&result, &table[0]);
     SSFBNCopy(&picked, &table[0]);
 
-    /* nWindows fixed at max(e->len, ctx->len)*32/k so timing/loop count is e-independent. */
+    /* nWindows = ceil(max(e->len, ctx->len) * 32 / k): fixed by public lengths, so the loop */
+    /* count is e-independent; for k not dividing 32 the top window reads bits past e->len,  */
+    /* which SSFBNGetBit returns as 0 (SAFE-03).                                              */
     {
         uint16_t expLen = (e->len > ctx->len) ? e->len : ctx->len;
-        nWindows = ((uint32_t)expLen * SSF_BN_LIMB_BITS) / SSF_BN_MODEXP_WIN_K;
+        nWindows = (((uint32_t)expLen * SSF_BN_LIMB_BITS) + (SSF_BN_MODEXP_WIN_K - 1u)) /
+                   SSF_BN_MODEXP_WIN_K;
     }
     for (winIdx = 0u; winIdx < nWindows; winIdx++)
     {

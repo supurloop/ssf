@@ -45,15 +45,15 @@ extern "C" {
 #define SSF_BN_KARATSUBA_THRESHOLD           (32u)
 #endif
 
-/* SSFBNModExp fixed-window size in bits. The constant-time Montgomery exponentiation          */
-/* precomputes a 2^k entry table of Montgomery powers, then squares-and-multiplies through the  */
-/* exponent in k-bit windows.                                                                    */
-/*                                                                                              */
-/* Currently WIN_K must DIVIDE SSF_BN_LIMB_BITS (32): valid values are 1, 2, 4, 8, 16, 32.      */
-/* The windowing computes nWindows = expLen * 32 / WIN_K; non-divisor values silently truncate  */
-/* the iteration count and corrupt results (visible downstream through SSFBNModInv -> Fermat -> */
-/* SSFECPointToAffine). The default 4 (16-entry table) is the practical sweet spot. Larger k    */
-/* means fewer MontMuls per bit at the cost of a 2x-larger stack-resident table per call.       */
+/* SSFBNModExp fixed-window size in bits, 1 to 8 (ssfbn.c rejects others). The constant-time     */
+/* Montgomery exponentiation precomputes a 2^k-entry table of Montgomery powers, then squares    */
+/* and multiplies through the exponent in k-bit windows; any k works (the top window may be      */
+/* partial, SAFE-03). Each step of k halves or doubles the stack-resident table. Measured, RSA   */
+/* at the 4096 cap (Cortex-M4 -Os stack; host -O2 time, RSA-2048 / 4096 sign):                   */
+/*   k = 3: keygen peak -4.2 KB, sign peak -1.1 KB, sign +5% (SSF_CRYPT_PROFILE_MIN_MEMORY)      */
+/*   k = 4: the default (CUSTOM)                                                                 */
+/*   k = 5: keygen peak +8.3 KB, sign peak +4.2 KB, sign 0 to -3% (SSF_CRYPT_PROFILE_MAX_PERF)   */
+/*   k = 2: keygen peak -6.2 KB, sign peak -1.1 KB, sign +16 to +19%                             */
 #ifndef SSF_BN_MODEXP_WIN_K
 #define SSF_BN_MODEXP_WIN_K                  (4u)
 #endif

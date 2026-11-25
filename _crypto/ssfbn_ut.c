@@ -4950,6 +4950,65 @@ void SSFBNUnitTest(void)
         SSF_ASSERT_TEST(SSFBNModInvOdd(&rOdd, &a, &m));
     }
 
+    /* ---- SAFE-03 / BN-03: any window size; a partial top window (k not dividing 32) ---- */
+    {
+        SSFBN_DEFINE(m, SSF_BN_MAX_MOD_LIMBS);
+        SSFBN_DEFINE(a, SSF_BN_MAX_MOD_LIMBS);
+        SSFBN_DEFINE(e, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(rCT, SSF_BN_MAX_MOD_LIMBS);
+        SSFBN_DEFINE(rRef, SSF_BN_MAX_MOD_LIMBS);
+        static const uint16_t mLens[] = { 1u, 2u, 3u, 5u, 8u, 13u };
+        static const uint16_t eLens[] = { 1u, 2u, 3u, 4u, 5u, 7u, 16u };
+        uint32_t x = 0x7FEB352Du;
+        uint16_t i;
+        uint16_t j;
+        uint16_t k;
+        uint16_t n;
+        uint16_t el;
+        uint8_t top;
+
+        for (i = 0u; i < (uint16_t)(sizeof(mLens) / sizeof(mLens[0])); i++)
+        {
+            n = mLens[i];
+            if (n > SSF_BN_MAX_MOD_LIMBS) continue;
+            SSFBNSetZero(&m, n);
+            SSFBNSetZero(&a, n);
+            for (k = 0u; k < n; k++)
+            {
+                x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+                m.limbs[k] = x;
+                x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+                a.limbs[k] = x;
+            }
+            m.limbs[0] |= 1u;
+            m.limbs[n - 1u] |= 0x80000000u;
+            a.limbs[n - 1u] &= 0x7FFFFFFFu;
+
+            /* Exponents shorter than, as long as and longer than m; the top limb's top bit set, */
+            /* clear, or the limb just 1, so the leading window carries the exponent's top bits   */
+            for (j = 0u; j < (uint16_t)(sizeof(eLens) / sizeof(eLens[0])); j++)
+            {
+                el = eLens[j];
+                if (el > SSF_BN_MAX_LIMBS) continue;
+                for (top = 0u; top < 3u; top++)
+                {
+                    SSFBNSetZero(&e, el);
+                    for (k = 0u; k < el; k++)
+                    {
+                        x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+                        e.limbs[k] = x;
+                    }
+                    if (top == 0u) e.limbs[el - 1u] |= 0x80000000u;
+                    if (top == 1u) e.limbs[el - 1u] &= 0x3FFFFFFFu;
+                    if (top == 2u) e.limbs[el - 1u] = 1u;
+                    SSFBNModExpPub(&rRef, &a, &e, &m);
+                    SSFBNModExp(&rCT, &a, &e, &m);
+                    SSF_ASSERT((rCT.len == n) && (SSFBNCmp(&rCT, &rRef) == 0));
+                }
+            }
+        }
+    }
+
     /* ---- BN-04: ModExp / ModExpMont equal ModExpPub up to the widest modulus, in place ---- */
     {
         SSFBN_DEFINE(m, SSF_BN_MAX_MOD_LIMBS);

@@ -87,7 +87,16 @@ SAFE-03  ssfbn: a window size that does not divide 32 silently gives wrong resul
   Fix      : nWindows = (bits + k - 1) / k (loop count still exponent-independent;
              SSFBNGetBit returns 0 past e->len), which also makes k=3 a valid stack choice
              (BN-03); or at least an #error for non-divisors.
-  Status   : OPEN
+  Status   : DONE (2026-11-25): the rounding fix, plus an #error outside k = 1 to 8. At the
+             default k = 4 the count and the code are unchanged (ssfbn.o identical in size,
+             same peaks). BN, RSA and ECDSA tests pass under ASan at every k from 1 to 8; HEAD
+             at k = 3 fails (ssfbn_ut.c:2582). ModExp digest and RSA signatures identical at
+             k = 2, 3, 4, 5. Test: ModExp against ModExpPub with exponents of 1 to 16 limbs
+             (shorter than, equal to and longer than the modulus) and their top bits set,
+             clear or a lone 1, so a k not dividing 32 has a partial top window; it fails on
+             HEAD built at k = 3. Mutants (built at k = 3): 3 of 4 killed (round down, round
+             short, the modulus length only); the 4th (one extra window) is equivalent, an
+             all-zero window that squares Mont(1).
 
 SAFE-04  ssfx509: SSF_X509_CONFIG_MAX_CHAIN_DEPTH cannot be overridden with -D
   Location : _opt/ssfx509_opt.h:21 (no #ifndef guard)
@@ -404,7 +413,16 @@ BN-03  STACK  k=3 windows: ModExpMont 9,400 -> 5,240 B (2,680 B with BN-01); +5%
   Location : _crypto/ssfbn.c:2945; _opt/ssfbn_opt.h:57
   Change   : needs SAFE-03's rounding fix; then k=3 (8-entry table) is a valid choice.
   Risk     : low once SAFE-03 is fixed; loop count stays exponent-independent.
-  Status   : OPEN
+  Correction (2026-11-25): the default stays 4. ssfcrypt_opt.h already documented a 3-bit
+             window for SSF_CRYPT_PROFILE_MIN_MEMORY and 5 bits for MAX_PERF, never applied
+             because of SAFE-03; its "RSA private ops ~25% slower" was measured at +5%.
+  Status   : DONE (2026-11-25): as the profiles' settings (#ifndef, so -D still overrides;
+             CUSTOM unchanged). Measured (M4 -Os, on a8ce46f): MIN_MEMORY k = 3 keygen peak
+             25,048 -> 20,888 B (-4,160) and RSA sign 20,616 -> 19,472 (-1,144; the
+             ModMulCTShift branch is then deepest) at 4096, -2,696 / -888 at 3072, 0 at 2048;
+             MAX_PERF k = 5 +8,328 / +4,232 at 4096. Host -O2 sign: k = 3 +5% (RSA-2048
+             2.46 -> 2.59 ms, RSA-4096 16.6 -> 17.4), k = 5 0 to -3%, k = 2 +16-19%. ssfbn
+             code +8 B (k = 3), +20 B (k = 5). The profile comments now give these figures.
 
 BN-04  STACK / CODE  ModExpMont frame -1,040 B (10,440 -> 9,400); -56 B code            M V
   Location : _crypto/ssfbn.c:2888, 2919, 2927-2932

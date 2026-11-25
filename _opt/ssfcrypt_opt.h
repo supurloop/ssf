@@ -8,8 +8,9 @@
 /*   SSF_CRYPT_PROFILE_MIN_MEMORY                                                                 */
 /*     Smallest flash + RAM. Drops the fixed-base Lim-Lee comb tables (~12 KB rodata at the      */
 /*     default COMB_H) and shrinks the ModExp window table (3-bit window, 8 entries instead of   */
-/*     16). Cost: [k]G is ~3-4x slower (Montgomery ladder fallback); RSA private ops are ~25 %  */
-/*     slower. Suited to verify-only signers on cortex-M0/M3-class targets.                      */
+/*     16: RSA keygen peak -4.2 KB and sign peak -1.1 KB at the RSA-4096 cap). Cost: [k]G is     */
+/*     ~3-4x slower (Montgomery ladder fallback); RSA private ops ~5 % slower (host measured).   */
+/*     Suited to verify-only signers on cortex-M0/M3-class targets.                              */
 /*                                                                                               */
 /*   SSF_CRYPT_PROFILE_CUSTOM (default)                                                           */
 /*     Today's defaults. Intended for networked 32-bit MCUs in the ~512 KB-RAM range. Both       */
@@ -19,10 +20,10 @@
 /*                                                                                               */
 /*   SSF_CRYPT_PROFILE_MAX_PERF                                                                   */
 /*     Maximum throughput. Lowers the Karatsuba dispatch threshold so RSA-2048+ multiplies       */
-/*     enter Karatsuba sooner; widens the ModExp window to 5 bits (32-entry table) so RSA        */
-/*     private ops run roughly 1/2 as many MontMuls per exponent bit. Cost: ModExp's stack-      */
-/*     resident table doubles. Suited to host / server builds where RAM and flash are not the    */
-/*     constraint.                                                                                */
+/*     enter Karatsuba sooner; widens the ModExp window to 5 bits (32-entry table), a few        */
+/*     percent faster RSA private ops (0 to -3 % sign, host measured). Cost: ModExp's stack-     */
+/*     resident table doubles (RSA keygen peak +8.3 KB, sign +4.2 KB at the RSA-4096 cap).       */
+/*     Suited to host / server builds where RAM and flash are not the constraint.                */
 /*                                                                                               */
 /* The compiler's dead-code elimination handles the rest: unreferenced KeyGen / PSS / RSA-3072+ */
 /* / unused curve code paths get stripped at link without per-profile flag gating, so the        */
@@ -72,6 +73,11 @@ extern "C" {
 #define SSF_ECDSA_CONFIG_ENABLE_SIGN         (0u)
 #endif
 
+/* 3-bit ModExp window: an 8-entry table instead of 16 (OPTIMIZE BN-03).                         */
+#ifndef SSF_BN_MODEXP_WIN_K
+#define SSF_BN_MODEXP_WIN_K                  (3u)
+#endif
+
 #elif SSF_CRYPT_CONFIG_PROFILE == SSF_CRYPT_PROFILE_MAX_PERF
 
 /* Karatsuba dispatch sooner -- wins for RSA-2048+ multiplies. */
@@ -79,14 +85,15 @@ extern "C" {
 #define SSF_BN_KARATSUBA_THRESHOLD           (16u)
 #endif
 
+/* 5-bit ModExp window: a 32-entry table instead of 16 (OPTIMIZE BN-03).                         */
+#ifndef SSF_BN_MODEXP_WIN_K
+#define SSF_BN_MODEXP_WIN_K                  (5u)
+#endif
+
 #endif /* CUSTOM picks no profile-set defaults -- per-module opts pick their own. */
 
-/* SSF_BN_MODEXP_WIN_K is intentionally NOT profile-controlled: the windowed Montgomery        */
-/* exponentiation in SSFBNModExpMont assumes the window size cleanly divides SSF_BN_LIMB_BITS  */
-/* (32) when computing nWindows = expLen * 32 / WIN_K. Setting WIN_K to a non-divisor (3, 5,   */
-/* 6, 7) silently truncates the iteration count and corrupts results -- most visibly through   */
-/* SSFBNModInv (Fermat) and downstream SSFECPointToAffine. Keep WIN_K = 4 until ModExp is      */
-/* generalised to handle a partial top window.                                                  */
+/* SSF_BN_MODEXP_WIN_K is profile-controlled since SAFE-03 / BN-03: the windowed Montgomery      */
+/* exponentiation rounds its window count up, so a k that does not divide 32 (3, 5) is valid.    */
 
 #ifdef __cplusplus
 }

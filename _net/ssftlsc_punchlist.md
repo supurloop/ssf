@@ -437,6 +437,14 @@ is rejected.
       by design); via `shutdown()` all 20,000 and `close_notify` (5/5). End to end, ssfmqttc over
       TLS to a Python TLS broker, 4 x 5000-byte QoS 0 publishes then `Stop()`: `close_notify`
       now arrives (3/3; before, never). Exhaustive run pending.
+- [ ] `SSF_CRYPT_PROFILE_MIN_MEMORY` builds fail to compile `ssftlsc.c`: the profile defaults
+      `SSF_ECDSA_CONFIG_ENABLE_SIGN` to 0, and the client calls `SSFECDSASign()` to sign its
+      CertificateVerify (`ssftlsc.c:2213`, an implicit-declaration error). Found 2026-11-25
+      while measuring OPTIMIZE BN-03 (the profile's 3-bit ModExp window); HEAD fails the same
+      way. Options, none chosen: guard the client's ECDSA signing (and the client-certificate
+      paths that need it) on `SSF_ECDSA_CONFIG_ENABLE_SIGN`, refusing an ECDSA client key when
+      it is off; or an `#error` in `ssftlsc.c` naming the setting to override. Either way a
+      MIN_MEMORY build should compile (a server-authenticated-only client needs no signing).
 
 ## Step 4 — Features
 

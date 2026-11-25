@@ -68,7 +68,7 @@ other big-integer libraries.
 
   | Status | Functions |
   |---|---|
-  | **Constant-time** (safe on secrets) | [`SSFBNCmp`](#ssfbncmp), [`SSFBNModExp`/`SSFBNModExpMont`/`SSFBNModExpHalf`](#modexp), [`SSFBNMontMul`](#montmul), [`SSFBNMontSquare`](#montsquare), [`SSFBNMontConvertIn`/`Out`](#montconv), [`SSFBNCondSwap`](#condswap), [`SSFBNCondCopy`](#condswap), [`SSFBNAdd`](#ssfbnadd), [`SSFBNSub`](#ssfbnsub), [`SSFBNModAdd`](#modaddsub), [`SSFBNModSub`](#modaddsub), [`SSFBNModMulCT`](#ssfbnmodmulct), [`SSFBNMul`](#ssfbnmul), [`SSFBNSquare`](#ssfbnsquare), [`SSFBNIsEven`/`SSFBNIsOdd`](#predicates), [`SSFBNIsZero`/`IsOne`](#predicates) (the returned bool is itself one bit; branching on it reveals that bit) |
+  | **Constant-time** (safe on secrets) | [`SSFBNCmp`](#ssfbncmp), [`SSFBNModExp`/`SSFBNModExpMont`/`SSFBNModExpHalf`](#modexp), [`SSFBNMontMul`](#montmul), [`SSFBNMontSquare`](#montsquare), [`SSFBNMontConvertIn`/`Out`](#montconv), [`SSFBNCondSwap`](#condswap), [`SSFBNCondCopy`](#condswap), [`SSFBNAdd`](#ssfbnadd), [`SSFBNSub`](#ssfbnsub), [`SSFBNModAdd`](#modaddsub), [`SSFBNModSub`](#modaddsub), [`SSFBNModMulCT`](#ssfbnmodmulct), [`SSFBNModMulNISTPrime`](#modmulnist), [`SSFBNMul`](#ssfbnmul), [`SSFBNSquare`](#ssfbnsquare), [`SSFBNIsEven`/`SSFBNIsOdd`](#predicates), [`SSFBNIsZero`/`IsOne`](#predicates) (the returned bool is itself one bit; branching on it reveals that bit) |
   | **Constant-time when `m` is odd and at most [`SSF_BN_MAX_MOD_LIMBS`](#ssf-bn-max-mod-limbs) limbs** (variable-time otherwise; parity and length are public) | [`SSFBNMod`](#ssfbnmod), [`SSFBNModMul`](#ssfbnmodmul), [`SSFBNModSquare`](#ssfbnmodsquare) |
   | **Variable-time** (do not use on secrets) | [`SSFBNDivMod`](#ssfbndivmod), [`SSFBNGcd`](#ssfbngcd), [`SSFBNModInvExt`/`SSFBNModInvOdd`](#modinv), [`SSFBNModMulNIST`](#modmulnist) (constant-time only for the P-256 / P-384 primes), [`SSFBNModExpPub`/`SSFBNModExpMontPub`](#modexppub), [`SSFBNBitLen`](#bitlen), [`SSFBNTrailingZeros`](#trailingzeros), [`SSFBNShiftLeft1`/`Right1`](#shift), [`SSFBNShiftLeft`/`Right`](#shift-multi), [`SSFBNIsProbablePrime`](#ssfbnisprobableprime), [`SSFBNGenPrime`](#ssfbngenprime) |
   | **Constant-time only when `m` is prime** | [`SSFBNModInvSmall`](#modinvsmall) — the same Fermat inverse at curve width (at most `SSF_BN_SMALL_MAX_LIMBS` limbs), with the same `a · r ≡ 1` check. [`SSFBNModInv`](#modinv) — uses Fermat's little theorem (`a^(m-2) mod m`), which is constant-time but yields the correct answer only for prime `m`. After computing it, the function verifies `a · r ≡ 1 (mod m)` with the constant-time [`SSFBNModMulCT`](#ssfbnmodmulct) and returns `false` if it does not hold, so non-prime moduli are rejected (even when an inverse exists). |
@@ -123,7 +123,9 @@ other big-integer libraries.
   [`SSF_BN_NIST_P384`](#nist-constants)). Replaces the general Barrett-style reduction with
   a few add/sub steps using the sparse structure of those primes. Constant-time for those two
   primes (fixed-count, mask-committed correction); falls back to the variable-time general
-  `SSFBNModMul` if the modulus is neither.
+  `SSFBNModMul` if the modulus is neither. [`SSFBNModMulNISTPrime()`](#modmulnist) is the
+  same reduction without the fallback (a NIST prime is required), which ssfec and ssfecdsa
+  use so they do not link `SSFBNModMul`.
 - **Primality testing and random-prime generation are first-class.**
   [`SSFBNIsProbablePrime()`](#ssfbnisprobableprime) is a Miller-Rabin test (fast paths
   for `n ≤ 3` and even `n`); [`SSFBNGenPrime()`](#ssfbngenprime) draws random
@@ -253,6 +255,7 @@ The `ssfrsa` and `ssfbn` modules sanity-check against this macro at compile time
 | | [`void SSFBNModMulCT(r, a, b, m)`](#ssfbnmodmulct) | `r = (a × b) mod m`, constant-time; for secret `a` or `b`; requires `a < m` or `b < m` |
 | | [`void SSFBNModSquare(r, a, m)`](#ssfbnmodsquare) | `r = (a²) mod m`; `Square` then `Mod` (variable-time) |
 | | [`void SSFBNModMulNIST(r, a, b, m)`](#modmulnist) | `r = (a × b) mod m` using NIST fast reduction for P-256 / P-384 |
+| | [`void SSFBNModMulNISTPrime(r, a, b, m)`](#modmulnist) | The same for `m` the P-256 or P-384 prime only (no generic fallback); constant-time |
 | | [`bool SSFBNModInv(r, a, m)`](#modinv) | `r = a⁻¹ mod m` via Fermat's little theorem (prime `m`) |
 | | [`bool SSFBNModInvSmall(r, a, m)`](#modinvsmall) | `r = a⁻¹ mod m`, Fermat at curve width (prime `m` of at most `SSF_BN_SMALL_MAX_LIMBS` limbs); constant-time |
 | | [`void SSFBNModMulSmall(r, a, b, m)`](#modinvsmall) | `r = (a × b) mod m` at curve width (odd `m`, `b < m`); constant-time |
@@ -684,7 +687,8 @@ SSFBNModMul(&r, &a, &b, &m);  /* r = (a * b) mod m, in r->len = m->len limbs */
 
 <a id="modmulnist"></a>
 ```c
-void SSFBNModMulNIST(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *m);
+void SSFBNModMulNIST     (SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *m);
+void SSFBNModMulNISTPrime(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *m);
 ```
 Specialised modular multiplication for the NIST P-256 and P-384 primes (passed as
 [`SSF_BN_NIST_P256`](#nist-constants) or [`SSF_BN_NIST_P384`](#nist-constants)). Uses the
@@ -701,6 +705,13 @@ for an odd modulus of at most `SSF_BN_MAX_MOD_LIMBS` limbs and variable-time oth
 paths keep their product and reduction scratch at curve width
 (24 limbs at most), so their stack does not grow with `SSF_BN_CONFIG_MAX_BITS`; the generic
 fallback's does.
+
+`SSFBNModMulNISTPrime` is `SSFBNModMulNIST` without the fallback: the same preconditions, the
+same single recognition of the prime, and an `SSF_REQUIRE` that `m` is the P-256 or P-384
+prime. ssfec and ssfecdsa call it for every field multiply, so an EC build with
+`--gc-sections` does not link `SSFBNModMul` and its Barrett / Montgomery chain (about 1 KB
+on Cortex-M4), and a static call graph of the EC operations no longer reaches that chain
+(OPTIMIZE BN-08). Both entry points tail-call one shared reduction, so neither adds a frame.
 
 <a id="modinv"></a>
 ```c

@@ -955,10 +955,10 @@ static bool _SSFECDSAVerifyCheckR(const SSFECCurveParams_t *c, SSFECCurve_t curv
     (void)curve;
 
     /* z2 = R.z^2 mod p */
-    SSFBNModMulNIST(&z2, &R->z, &R->z, &c->p);
+    SSFBNModMulNISTPrime(&z2, &R->z, &R->z, &c->p);
 
     /* Case A: t = r * z2 mod p; accept if t == R.x */
-    SSFBNModMulNIST(&t, r, &z2, &c->p);
+    SSFBNModMulNISTPrime(&t, r, &z2, &c->p);
     if (SSFBNCmp(&t, &R->x) == 0) return true;
 
     /* Case B: only if r < p - n (wraparound; r + n is then < p without further reduction). */
@@ -966,7 +966,7 @@ static bool _SSFECDSAVerifyCheckR(const SSFECCurveParams_t *c, SSFECCurve_t curv
     if (SSFBNCmp(r, &pMinusN) < 0)
     {
         (void)SSFBNAdd(&rPlusN, r, &c->n);
-        SSFBNModMulNIST(&t, &rPlusN, &z2, &c->p);
+        SSFBNModMulNISTPrime(&t, &rPlusN, &z2, &c->p);
         if (SSFBNCmp(&t, &R->x) == 0) return true;
     }
     return false;

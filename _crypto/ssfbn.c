@@ -2275,16 +2275,61 @@ static bool _SSFBNIsNistPrime(const SSFBN_t *m, const SSFBN_t *p)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* r = (a * b) mod m via NIST fast reduction for P-256/P-384, else falls back to SSFBNModMul.    */
+/* Returns &SSF_BN_NIST_P256 or &SSF_BN_NIST_P384 if m is that prime, else NULL (one compare).   */
 /* --------------------------------------------------------------------------------------------- */
-void SSFBNModMulNIST(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *m)
+static const SSFBN_t *_SSFBNNistPrimeOf(const SSFBN_t *m)
 {
+#if SSF_BN_CONFIG_MAX_BITS >= 512
+    if (_SSFBNIsNistPrime(m, &SSF_BN_NIST_P256)) return &SSF_BN_NIST_P256;
+#endif /* SSF_BN_CONFIG_MAX_BITS >= 512 */
+#if SSF_BN_CONFIG_MAX_BITS >= 768
+    if (_SSFBNIsNistPrime(m, &SSF_BN_NIST_P384)) return &SSF_BN_NIST_P384;
+#endif /* SSF_BN_CONFIG_MAX_BITS >= 768 */
+    (void)m;
+    return NULL;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* r = (a * b) mod p for p, the NIST prime m equals (from _SSFBNNistPrimeOf), by fast reduction; */
+/* the caller has checked the operands against m.                                                */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFBNModMulNISTFast(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b,
+                                 const SSFBN_t *p)
+{
+#if SSF_BN_CONFIG_MAX_BITS >= 512
     /* Product of two curve-width operands: 2 x 12 limbs for P-384, 2 x 8 for P-256 */
 #if SSF_BN_CONFIG_MAX_BITS >= 768
     SSFBN_DEFINE(prod, 24u);
 #else
     SSFBN_DEFINE(prod, 16u);
 #endif
+
+    /* The public callers checked r, a, b and m; p has m's length */
+    SSFBNMul(&prod, a, b);
+#if SSF_BN_CONFIG_MAX_BITS >= 768
+    if (p == &SSF_BN_NIST_P384)
+    {
+        _SSFBNReduceP384(r, &prod);
+        return;
+    }
+#endif /* SSF_BN_CONFIG_MAX_BITS >= 768 */
+    _SSFBNReduceP256(r, &prod);
+#else
+    /* No NIST prime is built at this cap, so _SSFBNNistPrimeOf never returns one */
+    (void)r;
+    (void)a;
+    (void)b;
+    (void)p;
+    SSF_ERROR();
+#endif /* SSF_BN_CONFIG_MAX_BITS >= 512 */
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* r = (a * b) mod m via NIST fast reduction for P-256/P-384, else falls back to SSFBNModMul.    */
+/* --------------------------------------------------------------------------------------------- */
+void SSFBNModMulNIST(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *m)
+{
+    const SSFBN_t *p;
 
     SSF_REQUIRE(r != NULL);
     SSF_REQUIRE(r->limbs != NULL);
@@ -2299,26 +2344,44 @@ void SSFBNModMulNIST(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN
     SSF_REQUIRE(m->len >= 1u);
     SSF_REQUIRE(m->len <= r->cap);
 
-#if SSF_BN_CONFIG_MAX_BITS >= 512
-    if (_SSFBNIsNistPrime(m, &SSF_BN_NIST_P256))
+    p = _SSFBNNistPrimeOf(m);
+    /* Is m one of the NIST primes? */
+    if (p != NULL)
     {
-        SSFBNMul(&prod, a, b);
-        _SSFBNReduceP256(r, &prod);
-        return;
+        /* Yes */
+        _SSFBNModMulNISTFast(r, a, b, p);
     }
-#endif /* SSF_BN_CONFIG_MAX_BITS >= 512 */
-
-#if SSF_BN_CONFIG_MAX_BITS >= 768
-    if (_SSFBNIsNistPrime(m, &SSF_BN_NIST_P384))
+    else
     {
-        SSFBNMul(&prod, a, b);
-        _SSFBNReduceP384(r, &prod);
-        return;
+        /* No, fall back to generic */
+        SSFBNModMul(r, a, b, m);
     }
-#endif /* SSF_BN_CONFIG_MAX_BITS >= 768 */
+}
 
-    /* Fallback to generic */
-    SSFBNModMul(r, a, b, m);
+/* --------------------------------------------------------------------------------------------- */
+/* r = (a * b) mod m for m the P-256 or P-384 prime only (SSF_REQUIRE): SSFBNModMulNIST without  */
+/* its generic fallback, so ssfec does not link SSFBNModMul (OPTIMIZE BN-08).                    */
+/* --------------------------------------------------------------------------------------------- */
+void SSFBNModMulNISTPrime(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b, const SSFBN_t *m)
+{
+    const SSFBN_t *p;
+
+    SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(r->limbs != NULL);
+    SSF_REQUIRE(a != NULL);
+    SSF_REQUIRE(a->limbs != NULL);
+    SSF_REQUIRE(b != NULL);
+    SSF_REQUIRE(b->limbs != NULL);
+    SSF_REQUIRE(m != NULL);
+    SSF_REQUIRE(m->limbs != NULL);
+    SSF_REQUIRE(a->len == m->len);
+    SSF_REQUIRE(b->len == m->len);
+    SSF_REQUIRE(m->len >= 1u);
+    SSF_REQUIRE(m->len <= r->cap);
+
+    p = _SSFBNNistPrimeOf(m);
+    SSF_REQUIRE(p != NULL);
+    _SSFBNModMulNISTFast(r, a, b, p);
 }
 
 /* --------------------------------------------------------------------------------------------- */

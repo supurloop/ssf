@@ -66,7 +66,7 @@ already cover.
   header also compile-time asserts that
   [`SSF_BN_CONFIG_MAX_BITS`](ssfbn.md#ssf-bn-config-max-bits) is large enough for each
   enabled curve (`≥ 512` for P-256, `≥ 768` for P-384). The minimum is twice the curve
-  operand width because [`SSFBNModMulNIST()`](ssfbn.md#modmulnist) routes through
+  operand width because [`SSFBNModMulNISTPrime()`](ssfbn.md#modmulnist) routes through
   [`SSFBNMul()`](ssfbn.md#mul), whose `2N`-limb intermediate product is gated by
   `SSF_BN_MAX_LIMBS`.
 - **For ECC-only builds, drop the BN width.** Stack usage inside scalar multiplication

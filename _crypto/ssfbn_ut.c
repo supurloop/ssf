@@ -4036,6 +4036,89 @@ void SSFBNUnitTest(void)
         SSF_ASSERT(SSFBNCmp(&nr, &nref) == 0);
     }
 
+    /* ---- BN-08: SSFBNModMulNISTPrime equals ModMulNIST / ModMul; NIST primes only ---- */
+#if SSF_BN_CONFIG_MAX_BITS >= 512
+    {
+        const SSFBN_t *primes[2];
+        SSFBNLimb_t copyLimbs[12];
+        SSFBN_t pCopy = { copyLimbs, 0u, 12u };
+        SSFBN_DEFINE(pa, 12u);
+        SSFBN_DEFINE(pb, 12u);
+        SSFBN_DEFINE(rPrime, 12u);
+        SSFBN_DEFINE(rNist, 12u);
+        SSFBN_DEFINE(rGen, SSF_BN_MAX_LIMBS);
+        uint32_t x = 0xC2B2AE35u;
+        uint16_t np = 1u;
+        uint16_t c;
+        uint16_t it;
+        uint16_t k;
+        uint16_t len;
+
+        primes[0] = &SSF_BN_NIST_P256;
+        primes[1] = &SSF_BN_NIST_P256;
+#if SSF_BN_CONFIG_MAX_BITS >= 768
+        primes[1] = &SSF_BN_NIST_P384;
+        np = 2u;
+#endif /* SSF_BN_CONFIG_MAX_BITS >= 768 */
+
+        for (c = 0u; c < np; c++)
+        {
+            const SSFBN_t *p = primes[c];
+
+            len = p->len;
+            memcpy(copyLimbs, p->limbs, (size_t)len * sizeof(SSFBNLimb_t));
+            pCopy.len = len;
+            for (it = 0u; it < 64u; it++)
+            {
+                for (k = 0u; k < len; k++)
+                {
+                    x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+                    pa.limbs[k] = x;
+                    x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+                    pb.limbs[k] = x;
+                }
+                pa.len = len;
+                pb.len = len;
+                if (it == 0u) { SSFBNCopy(&pa, p); pa.limbs[0] -= 1u; SSFBNCopy(&pb, &pa); }
+                if (it == 1u) SSFBNSetZero(&pa, len);
+                if (it == 2u) SSFBNSetOne(&pb, len);
+                if (SSFBNCmp(&pa, p) >= 0) pa.limbs[len - 1u] >>= 1;
+                if (SSFBNCmp(&pb, p) >= 0) pb.limbs[len - 1u] >>= 1;
+
+                /* The library's prime: no limb compare; a caller's copy: exactly one */
+                _SSFBNNistPrimeCmps = 0u;
+                SSFBNModMulNISTPrime(&rPrime, &pa, &pb, p);
+                SSF_ASSERT(_SSFBNNistPrimeCmps == 0u);
+                SSFBNModMulNIST(&rNist, &pa, &pb, p);
+                SSFBNModMul(&rGen, &pa, &pb, p);
+                SSF_ASSERT((rPrime.len == len) && (SSFBNCmp(&rPrime, &rNist) == 0) &&
+                           (SSFBNCmp(&rPrime, &rGen) == 0));
+                SSFBNSetZero(&rPrime, 1u);
+                _SSFBNNistPrimeCmps = 0u;
+                SSFBNModMulNISTPrime(&rPrime, &pa, &pb, &pCopy);
+                SSF_ASSERT(_SSFBNNistPrimeCmps == 1u);
+                SSF_ASSERT((rPrime.len == len) && (SSFBNCmp(&rPrime, &rGen) == 0));
+            }
+        }
+
+        /* Any other modulus violates the precondition: one limb off P-256, a random odd one */
+        len = SSF_BN_NIST_P256.len;
+        memcpy(copyLimbs, SSF_BN_NIST_P256.limbs, (size_t)len * sizeof(SSFBNLimb_t));
+        copyLimbs[0] ^= 2u;
+        pCopy.len = len;
+        SSFBNSetUint32(&pa, 3u, len);
+        SSFBNSetUint32(&pb, 5u, len);
+        SSF_ASSERT_TEST(SSFBNModMulNISTPrime(&rPrime, &pa, &pb, &pCopy));
+        for (k = 0u; k < len; k++) copyLimbs[k] = 0x9E3779B9u * (uint32_t)(k + 7u);
+        copyLimbs[0] |= 1u;
+        SSF_ASSERT_TEST(SSFBNModMulNISTPrime(&rPrime, &pa, &pb, &pCopy));
+        /* SSFBNModMulNIST still takes it, through the generic fallback */
+        SSFBNModMulNIST(&rNist, &pa, &pb, &pCopy);
+        SSFBNModMul(&rGen, &pa, &pb, &pCopy);
+        SSF_ASSERT(SSFBNCmp(&rNist, &rGen) == 0);
+    }
+#endif /* SSF_BN_CONFIG_MAX_BITS >= 512 */
+
     /* ---- OPTIMIZE BN-O8: a same-width modulus one limb off a NIST prime uses ModMul ---- */
     {
         const SSFBN_t *primes[2];
@@ -4624,7 +4707,7 @@ void SSFBNUnitTest(void)
         SSF_ASSERT_TEST(SSFBNModInvOdd(&rOdd, &a, &m));
     }
 
-    /* ---- BN-04: SSFBNModExp / ModExpMont equal ModExpPub up to the widest modulus, in place ---- */
+    /* ---- BN-04: ModExp / ModExpMont equal ModExpPub up to the widest modulus, in place ---- */
     {
         SSFBN_DEFINE(m, SSF_BN_MAX_MOD_LIMBS);
         SSFBN_DEFINE(a, SSF_BN_MAX_MOD_LIMBS);

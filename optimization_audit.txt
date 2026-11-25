@@ -520,7 +520,27 @@ BN-08  CODE  -1,120 B linked in the EC set at the RSA cap (-972 B in an EC-only 
              ModMont...), but every ssfec / ssfecdsa caller passes &c->p.
   Change   : put the fallback behind an option (default off), SSF_REQUIRE otherwise.
   Risk     : low; API narrowing; the BN fallback test needs the option on.
-  Status   : OPEN
+  Correction (2026-11-25): no narrowing is needed. SSFBNModMulNIST keeps its fallback; a new
+             SSFBNModMulNISTPrime (NIST primes only, SSF_REQUIRE) serves ssfec / ssfecdsa.
+  Status   : DONE (2026-11-25): as corrected. Both entry points run HEAD's checks, recognise
+             the prime once (_SSFBNNistPrimeOf; BN-O8's one-compare count kept) and tail-call
+             one shared reduction (_SSFBNModMulNISTFast, frame 224 B as HEAD's ModMulNIST);
+             the 57 ssfec / ssfecdsa calls use the new one. Measured (M4 -Os, on d8f83bc):
+             EC set (ECDSA keygen / sign / verify, ECDH) linked with --gc-sections, tests
+             off: 42,388 -> 41,360 B (-1,028) at the 4096 cap, -1,012 at 3072 / 2048,
+             41,732 -> 40,860 (-872) EC-only; SSFBNModMul no longer linked. ssfbn object
+             +248 B. Runtime stack unchanged (the wrapper's 16 B frame is popped before the
+             tail call); the call-graph analyzer, which does not model tail calls, shows
+             +16 B on EC paths. The analyzer here prunes ModMulNIST -> ModMul by hand; a plain
+             call graph put EC peaks ~3.2 KB higher at 4096 (ECDSA verify 13,176 B) and now
+             matches the reachable 10,000 B with no prune. Host: ECDSA / ECDH P-256 / P-384
+             within noise. Tests: ModMulNISTPrime against ModMulNIST and ModMul on both
+             primes, the library prime (0 compares) and a copy (1), SSF_ASSERT_TEST for a
+             non-NIST modulus, the fallback still served by ModMulNIST (did not build on HEAD);
+             200,000-product differential. Mutants under ASan: 5 of 6 killed (P-384 reduced as
+             P-256, prime check dropped, fallback dropped, P-384 recognised as P-256, compare
+             twice); the 6th (ssfec back on ModMulNIST) behaves identically and is caught by
+             the link check (SSFBNModMul linked again, 42,652 B).
 
 BN-09  STACK / CODE  SSFBNMontInit 1,080 -> 32 B; -76 B code                            M V
   Location : _crypto/ssfbn.c:2493, 2523-2556

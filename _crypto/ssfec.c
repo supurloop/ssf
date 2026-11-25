@@ -174,29 +174,29 @@ static void _SSFECPointDouble(SSFECPoint_t *r, const SSFECPoint_t *p, const SSFE
     /* No identity early-exit: formulas produce Z3 = 0 when Z1 = 0, preserving the identity. */
 
     /* delta = Z1^2 */
-    SSFBNModMulNIST(&delta, &p->z, &p->z, &c->p);
+    SSFBNModMulNISTPrime(&delta, &p->z, &p->z, &c->p);
 
     /* gamma = Y1^2 */
-    SSFBNModMulNIST(&gamma, &p->y, &p->y, &c->p);
+    SSFBNModMulNISTPrime(&gamma, &p->y, &p->y, &c->p);
 
     /* beta = X1 * gamma = X1 * Y1^2 */
-    SSFBNModMulNIST(&beta, &p->x, &gamma, &c->p);
+    SSFBNModMulNISTPrime(&beta, &p->x, &gamma, &c->p);
 
     /* alpha = 3 * (X1 - delta) * (X1 + delta)  [a = -3 optimization] */
     SSFBNModSub(&tmp, &p->x, &delta, &c->p);
     SSFBNModAdd(&alpha, &p->x, &delta, &c->p);
-    SSFBNModMulNIST(&alpha, &tmp, &alpha, &c->p);
+    SSFBNModMulNISTPrime(&alpha, &tmp, &alpha, &c->p);
     SSFBNModAdd(&tmp, &alpha, &alpha, &c->p);
     SSFBNModAdd(&alpha, &tmp, &alpha, &c->p);
 
     /* Z3 = (Y1 + Z1)^2 - gamma - delta (must compute before overwriting r->x or r->y). */
     SSFBNModAdd(&tmp, &p->y, &p->z, &c->p);
-    SSFBNModMulNIST(&r->z, &tmp, &tmp, &c->p);
+    SSFBNModMulNISTPrime(&r->z, &tmp, &tmp, &c->p);
     SSFBNModSub(&r->z, &r->z, &gamma, &c->p);
     SSFBNModSub(&r->z, &r->z, &delta, &c->p);
 
     /* X3 = alpha^2 - 8 * beta */
-    SSFBNModMulNIST(&r->x, &alpha, &alpha, &c->p);
+    SSFBNModMulNISTPrime(&r->x, &alpha, &alpha, &c->p);
     SSFBNModAdd(&tmp, &beta, &beta, &c->p);
     SSFBNModAdd(&tmp, &tmp, &tmp, &c->p); /* 4 * beta */
     SSFBNModAdd(&delta, &tmp, &tmp, &c->p); /* 8 * beta (reuse delta) */
@@ -204,8 +204,8 @@ static void _SSFECPointDouble(SSFECPoint_t *r, const SSFECPoint_t *p, const SSFE
 
     /* Y3 = alpha * (4 * beta - X3) - 8 * gamma^2 */
     SSFBNModSub(&tmp, &tmp, &r->x, &c->p); /* 4*beta - X3 (tmp was 4*beta) */
-    SSFBNModMulNIST(&tmp, &alpha, &tmp, &c->p);
-    SSFBNModMulNIST(&gamma, &gamma, &gamma, &c->p); /* gamma^2 = Y1^4 */
+    SSFBNModMulNISTPrime(&tmp, &alpha, &tmp, &c->p);
+    SSFBNModMulNISTPrime(&gamma, &gamma, &gamma, &c->p); /* gamma^2 = Y1^4 */
     SSFBNModAdd(&gamma, &gamma, &gamma, &c->p); /* 2 * Y1^4 */
     SSFBNModAdd(&gamma, &gamma, &gamma, &c->p); /* 4 * Y1^4 */
     SSFBNModAdd(&gamma, &gamma, &gamma, &c->p); /* 8 * Y1^4 */
@@ -272,20 +272,20 @@ static void _SSFECPointAddFull(SSFECPoint_t *r, const SSFECPoint_t *p, const SSF
     SSFBNSetZero(&zeroPt.z, c->limbs);
 
     /* z1_sq = Z1^2, z2_sq = Z2^2 */
-    SSFBNModMulNIST(&t1, &P.z, &P.z, &c->p); /* t1 = Z1^2 */
-    SSFBNModMulNIST(&t2, &Q.z, &Q.z, &c->p); /* t2 = Z2^2 */
+    SSFBNModMulNISTPrime(&t1, &P.z, &P.z, &c->p); /* t1 = Z1^2 */
+    SSFBNModMulNISTPrime(&t2, &Q.z, &Q.z, &c->p); /* t2 = Z2^2 */
 
     /* z1_cu = Z1 * Z1^2, z2_cu = Z2 * Z2^2 */
-    SSFBNModMulNIST(&t3, &P.z, &t1, &c->p); /* t3 = Z1^3 */
-    SSFBNModMulNIST(&t4, &Q.z, &t2, &c->p); /* t4 = Z2^3 */
+    SSFBNModMulNISTPrime(&t3, &P.z, &t1, &c->p); /* t3 = Z1^3 */
+    SSFBNModMulNISTPrime(&t4, &Q.z, &t2, &c->p); /* t4 = Z2^3 */
 
     /* U1 = X1 * Z2^2, U2 = X2 * Z1^2 */
-    SSFBNModMulNIST(&t5, &P.x, &t2, &c->p); /* t5 = U1 = X1*Z2^2 */
-    SSFBNModMulNIST(&t2, &Q.x, &t1, &c->p); /* t2 = U2 = X2*Z1^2 (reuse t2) */
+    SSFBNModMulNISTPrime(&t5, &P.x, &t2, &c->p); /* t5 = U1 = X1*Z2^2 */
+    SSFBNModMulNISTPrime(&t2, &Q.x, &t1, &c->p); /* t2 = U2 = X2*Z1^2 (reuse t2) */
 
     /* S1 = Y1 * Z2^3, S2 = Y2 * Z1^3 */
-    SSFBNModMulNIST(&t1, &P.y, &t4, &c->p); /* t1 = S1 = Y1*Z2^3 (reuse t1) */
-    SSFBNModMulNIST(&t4, &Q.y, &t3, &c->p); /* t4 = S2 = Y2*Z1^3 (reuse t4) */
+    SSFBNModMulNISTPrime(&t1, &P.y, &t4, &c->p); /* t1 = S1 = Y1*Z2^3 (reuse t1) */
+    SSFBNModMulNISTPrime(&t4, &Q.y, &t3, &c->p); /* t4 = S2 = Y2*Z1^3 (reuse t4) */
 
     /* H = U2 - U1, R = S2 - S1 */
     SSFBNModSub(&t3, &t2, &t5, &c->p); /* t3 = H = U2 - U1 (reuse t3) */
@@ -298,26 +298,26 @@ static void _SSFECPointAddFull(SSFECPoint_t *r, const SSFECPoint_t *p, const SSF
     rz  = (SSFBNLimb_t)SSFBNIsZero(&t2); /* R == 0 */
 
     /* t4 = H^2 */
-    SSFBNModMulNIST(&t4, &t3, &t3, &c->p);
+    SSFBNModMulNISTPrime(&t4, &t3, &t3, &c->p);
     /* t6 = H^3 */
-    SSFBNModMulNIST(&t6, &t3, &t4, &c->p);
+    SSFBNModMulNISTPrime(&t6, &t3, &t4, &c->p);
     /* U1H2 = U1 * H^2 */
-    SSFBNModMulNIST(&t5, &t5, &t4, &c->p);
+    SSFBNModMulNISTPrime(&t5, &t5, &t4, &c->p);
 
     /* Z3 = Z1 * Z2 * H */
-    SSFBNModMulNIST(&r->z, &P.z, &Q.z, &c->p);
-    SSFBNModMulNIST(&r->z, &r->z, &t3, &c->p);
+    SSFBNModMulNISTPrime(&r->z, &P.z, &Q.z, &c->p);
+    SSFBNModMulNISTPrime(&r->z, &r->z, &t3, &c->p);
 
     /* X3 = R^2 - H^3 - 2 * U1H2 */
-    SSFBNModMulNIST(&r->x, &t2, &t2, &c->p);
+    SSFBNModMulNISTPrime(&r->x, &t2, &t2, &c->p);
     SSFBNModSub(&r->x, &r->x, &t6, &c->p);
     SSFBNModAdd(&t4, &t5, &t5, &c->p);
     SSFBNModSub(&r->x, &r->x, &t4, &c->p);
 
     /* Y3 = R * (U1H2 - X3) - S1 * H^3 */
     SSFBNModSub(&t5, &t5, &r->x, &c->p);
-    SSFBNModMulNIST(&t5, &t2, &t5, &c->p);
-    SSFBNModMulNIST(&t1, &t1, &t6, &c->p);
+    SSFBNModMulNISTPrime(&t5, &t2, &t5, &c->p);
+    SSFBNModMulNISTPrime(&t1, &t1, &t6, &c->p);
     SSFBNModSub(&r->y, &t5, &t1, &c->p);
 
     /* CT cascade: default = general add; later overrides win (z1z is highest priority). */
@@ -401,10 +401,10 @@ static void _SSFECPointAddMixed(SSFECPoint_t *r, const SSFECPoint_t *p, const SS
     SSFBNSetZero(&zeroPt.z, c->limbs);
 
     /* General mixed-coordinate add (assume Z2 = 1; U1 = X1, S1 = Y1). */
-    SSFBNModMulNIST(&t1, &P.z, &P.z, &c->p); /* t1 = Z1^2 */
-    SSFBNModMulNIST(&t3, &P.z, &t1, &c->p); /* t3 = Z1^3 */
-    SSFBNModMulNIST(&t2, &Q.x, &t1, &c->p); /* t2 = U2 = X2 * Z1^2 */
-    SSFBNModMulNIST(&t4, &Q.y, &t3, &c->p); /* t4 = S2 = Y2 * Z1^3 */
+    SSFBNModMulNISTPrime(&t1, &P.z, &P.z, &c->p); /* t1 = Z1^2 */
+    SSFBNModMulNISTPrime(&t3, &P.z, &t1, &c->p); /* t3 = Z1^3 */
+    SSFBNModMulNISTPrime(&t2, &Q.x, &t1, &c->p); /* t2 = U2 = X2 * Z1^2 */
+    SSFBNModMulNISTPrime(&t4, &Q.y, &t3, &c->p); /* t4 = S2 = Y2 * Z1^3 */
     SSFBNModSub(&t3, &t2, &P.x, &c->p); /* t3 = H = U2 - X1 (U1 = X1) */
     SSFBNModSub(&t2, &t4, &P.y, &c->p); /* t2 = R = S2 - Y1 (S1 = Y1) */
 
@@ -414,23 +414,23 @@ static void _SSFECPointAddMixed(SSFECPoint_t *r, const SSFECPoint_t *p, const SS
     hz  = (SSFBNLimb_t)SSFBNIsZero(&t3);
     rz  = (SSFBNLimb_t)SSFBNIsZero(&t2);
 
-    SSFBNModMulNIST(&t4, &t3, &t3, &c->p); /* t4 = H^2 */
-    SSFBNModMulNIST(&t6, &t3, &t4, &c->p); /* t6 = H^3 */
-    SSFBNModMulNIST(&t5, &P.x, &t4, &c->p); /* t5 = U1*H^2 = X1*H^2 */
+    SSFBNModMulNISTPrime(&t4, &t3, &t3, &c->p); /* t4 = H^2 */
+    SSFBNModMulNISTPrime(&t6, &t3, &t4, &c->p); /* t6 = H^3 */
+    SSFBNModMulNISTPrime(&t5, &P.x, &t4, &c->p); /* t5 = U1*H^2 = X1*H^2 */
 
     /* Z3 = Z1 * H (skipping the Z1*Z2 step from the full add). */
-    SSFBNModMulNIST(&r->z, &P.z, &t3, &c->p);
+    SSFBNModMulNISTPrime(&r->z, &P.z, &t3, &c->p);
 
     /* X3 = R^2 - H^3 - 2 * U1*H^2 */
-    SSFBNModMulNIST(&r->x, &t2, &t2, &c->p);
+    SSFBNModMulNISTPrime(&r->x, &t2, &t2, &c->p);
     SSFBNModSub(&r->x, &r->x, &t6, &c->p);
     SSFBNModAdd(&t4, &t5, &t5, &c->p);
     SSFBNModSub(&r->x, &r->x, &t4, &c->p);
 
     /* Y3 = R * (U1*H^2 - X3) - S1 * H^3 = R * (X1*H^2 - X3) - Y1 * H^3 */
     SSFBNModSub(&t5, &t5, &r->x, &c->p);
-    SSFBNModMulNIST(&t5, &t2, &t5, &c->p);
-    SSFBNModMulNIST(&t1, &P.y, &t6, &c->p); /* t1 = Y1 * H^3 (reuse t1) */
+    SSFBNModMulNISTPrime(&t5, &t2, &t5, &c->p);
+    SSFBNModMulNISTPrime(&t1, &P.y, &t6, &c->p); /* t1 = Y1 * H^3 (reuse t1) */
     SSFBNModSub(&r->y, &t5, &t1, &c->p);
 
     /* CT cascade -- same priority order as the full add. */
@@ -523,10 +523,10 @@ static void _SSFECPointAddMixedNoDouble(SSFECPoint_t *r, const SSFECPoint_t *p,
     SSFBNSetZero(&zeroPt.z, c->limbs);
 
     /* General mixed-coordinate add (assume Z2 = 1) -- same formulas as _SSFECPointAddMixed. */
-    SSFBNModMulNIST(&t1, &P.z, &P.z, &c->p);
-    SSFBNModMulNIST(&t3, &P.z, &t1, &c->p);
-    SSFBNModMulNIST(&t2, &Q.x, &t1, &c->p);
-    SSFBNModMulNIST(&t4, &Q.y, &t3, &c->p);
+    SSFBNModMulNISTPrime(&t1, &P.z, &P.z, &c->p);
+    SSFBNModMulNISTPrime(&t3, &P.z, &t1, &c->p);
+    SSFBNModMulNISTPrime(&t2, &Q.x, &t1, &c->p);
+    SSFBNModMulNISTPrime(&t4, &Q.y, &t3, &c->p);
     SSFBNModSub(&t3, &t2, &P.x, &c->p);
     SSFBNModSub(&t2, &t4, &P.y, &c->p);
 
@@ -535,20 +535,20 @@ static void _SSFECPointAddMixedNoDouble(SSFECPoint_t *r, const SSFECPoint_t *p,
     hz  = (SSFBNLimb_t)SSFBNIsZero(&t3);
     rz  = (SSFBNLimb_t)SSFBNIsZero(&t2);
 
-    SSFBNModMulNIST(&t4, &t3, &t3, &c->p);
-    SSFBNModMulNIST(&t6, &t3, &t4, &c->p);
-    SSFBNModMulNIST(&t5, &P.x, &t4, &c->p);
+    SSFBNModMulNISTPrime(&t4, &t3, &t3, &c->p);
+    SSFBNModMulNISTPrime(&t6, &t3, &t4, &c->p);
+    SSFBNModMulNISTPrime(&t5, &P.x, &t4, &c->p);
 
-    SSFBNModMulNIST(&r->z, &P.z, &t3, &c->p);
+    SSFBNModMulNISTPrime(&r->z, &P.z, &t3, &c->p);
 
-    SSFBNModMulNIST(&r->x, &t2, &t2, &c->p);
+    SSFBNModMulNISTPrime(&r->x, &t2, &t2, &c->p);
     SSFBNModSub(&r->x, &r->x, &t6, &c->p);
     SSFBNModAdd(&t4, &t5, &t5, &c->p);
     SSFBNModSub(&r->x, &r->x, &t4, &c->p);
 
     SSFBNModSub(&t5, &t5, &r->x, &c->p);
-    SSFBNModMulNIST(&t5, &t2, &t5, &c->p);
-    SSFBNModMulNIST(&t1, &P.y, &t6, &c->p);
+    SSFBNModMulNISTPrime(&t5, &t2, &t5, &c->p);
+    SSFBNModMulNISTPrime(&t1, &P.y, &t6, &c->p);
     SSFBNModSub(&r->y, &t5, &t1, &c->p);
 
     /* CT cascade: three overrides only (caller guarantees P != Q so no doubling case). */
@@ -674,12 +674,12 @@ bool SSFECPointToAffine(SSFBN_t *x, SSFBN_t *y, const SSFECPoint_t *pt, SSFECCur
     if (!SSFBNModInvSmall(&zInv, &pt->z, &c->p)) return false;
 
     /* zInv2 = Z^(-2), zInv3 = Z^(-3) */
-    SSFBNModMulNIST(&zInv2, &zInv, &zInv, &c->p);
-    SSFBNModMulNIST(&zInv3, &zInv2, &zInv, &c->p);
+    SSFBNModMulNISTPrime(&zInv2, &zInv, &zInv, &c->p);
+    SSFBNModMulNISTPrime(&zInv3, &zInv2, &zInv, &c->p);
 
     /* x = X * Z^(-2), y = Y * Z^(-3) */
-    SSFBNModMulNIST(x, &pt->x, &zInv2, &c->p);
-    SSFBNModMulNIST(y, &pt->y, &zInv3, &c->p);
+    SSFBNModMulNISTPrime(x, &pt->x, &zInv2, &c->p);
+    SSFBNModMulNISTPrime(y, &pt->y, &zInv3, &c->p);
 
     return true;
 }
@@ -716,12 +716,12 @@ bool SSFECPointOnCurve(const SSFECPoint_t *pt, SSFECCurve_t curve)
     }
 
     /* lhs = y^2 mod p */
-    SSFBNModMulNIST(&lhs, &ay, &ay, &c->p);
+    SSFBNModMulNISTPrime(&lhs, &ay, &ay, &c->p);
 
     /* rhs = x^3 + a*x + b mod p */
-    SSFBNModMulNIST(&rhs, &ax, &ax, &c->p); /* x^2 */
-    SSFBNModMulNIST(&rhs, &rhs, &ax, &c->p); /* x^3 */
-    SSFBNModMulNIST(&tmp, &c->a, &ax, &c->p); /* a*x */
+    SSFBNModMulNISTPrime(&rhs, &ax, &ax, &c->p); /* x^2 */
+    SSFBNModMulNISTPrime(&rhs, &rhs, &ax, &c->p); /* x^3 */
+    SSFBNModMulNISTPrime(&tmp, &c->a, &ax, &c->p); /* a*x */
     SSFBNModAdd(&rhs, &rhs, &tmp, &c->p); /* x^3 + a*x */
     SSFBNModAdd(&rhs, &rhs, &c->b, &c->p); /* x^3 + a*x + b */
 

@@ -1891,6 +1891,27 @@ static uint32_t _SSFBNUTScanStack(const uint8_t *n1, const uint8_t *n2, size_t l
 #pragma GCC diagnostic pop
 #endif
 
+/* --------------------------------------------------------------------------------------------- */
+/* BN-12 test helper: f = F(n), the n-th Fibonacci number, at len limbs (about 0.7n bits).        */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFBNUTFib(SSFBN_t *f, uint32_t n, uint16_t len)
+{
+    static SSFBNLimb_t aL[SSF_BN_MAX_LIMBS];
+    static SSFBNLimb_t bL[SSF_BN_MAX_LIMBS];
+    SSFBN_t fa = { aL, 0u, SSF_BN_MAX_LIMBS };
+    SSFBN_t fb = { bL, 0u, SSF_BN_MAX_LIMBS };
+    uint32_t i;
+
+    SSFBNSetZero(&fa, len);
+    SSFBNSetOne(&fb, len);
+    for (i = 0u; i < n; i++)
+    {
+        (void)SSFBNAdd(&fa, &fa, &fb); /* (F(i), F(i + 1)) -> (F(i + 1), F(i + 2)) */
+        SSFBNCondSwap(&fa, &fb, 1u);
+    }
+    SSFBNCopy(f, &fa);
+}
+
 void SSFBNUnitTest(void)
 {
     /* ---- SetZero, SetUint32, IsZero, IsOne ---- */
@@ -2586,16 +2607,17 @@ void SSFBNUnitTest(void)
         _scrubDirty = 0u;
         _SSFBNScrubTestHook = _ScrubCheck;
 
-        /* Accept path: 7 locals from the final IsProbablePrime plus GenPrime's buf. */
+        /* Accept path: 7 locals from the final IsProbablePrime (GenPrime draws into p, BN-11) */
         SSF_ASSERT(SSFBNGenPrime(&p, 256u, 5u, &prng) == true);
-        SSF_ASSERT(_scrubCalls >= 8u);
+        SSF_ASSERT(_scrubCalls >= 7u);
 
-        /* Composite 221 = 13 * 17: 7 MR locals + MontInit's R^2 + 5 per odd-modulus SSFBNMod */
+        /* Composite 221 = 13 * 17: 7 MR locals + 4 per odd-modulus SSFBNMod (acc, c, its     */
+        /* context's mod and rr; SSFBNMontInit keeps no R^2 copy of its own, BN-09)            */
         calls = _scrubCalls;
         _SSFBNModCallCount = 0u;
         SSFBNSetUint32(&c, 221u, 8u);
         SSF_ASSERT(SSFBNIsProbablePrime(&c, 5u, &prng) == false);
-        SSF_ASSERT(_scrubCalls == ((calls + 8u) + (5u * _SSFBNModCallCount)));
+        SSF_ASSERT(_scrubCalls == ((calls + 7u) + (4u * _SSFBNModCallCount)));
 
         _SSFBNScrubTestHook = NULL;
         SSF_ASSERT(_scrubDirty == 0u);
@@ -3470,14 +3492,29 @@ void SSFBNUnitTest(void)
         SSFBNMontInit(&mont, &m);
         SSF_ASSERT((mont.rr.len == 1u) && (mont.rr.limbs[0] == 0u));
 
-        /* The local R^2 copy, key-derived for a secret prime, is wiped before return */
+        /* BN-09: R^2 is built in ctx->rr itself, so no key-derived local copy exists to wipe */
         _scrubCalls = 0u;
         _scrubDirty = 0u;
         _SSFBNScrubTestHook = _ScrubCheck;
         SSFBNMontInit(&mont, &SSF_BN_NIST_P256);
         _SSFBNScrubTestHook = NULL;
-        SSF_ASSERT(_scrubCalls == 1u);
-        SSF_ASSERT(_scrubDirty == 0u);
+        SSF_ASSERT(_scrubCalls == 0u);
+        _SSFBNUTCheckMontInitR2(&SSF_BN_NIST_P256);
+
+        /* BN-09: m may alias ctx->rr (only ctx->mod is read once rr is being built) */
+        {
+            SSFBNMONT_DEFINE(ref, SSF_BN_MAX_MOD_LIMBS);
+
+            SSFBNMontInit(&ref, &SSF_BN_NIST_P256);
+            SSFBNCopy(&mont.rr, &SSF_BN_NIST_P256);
+            SSFBNMontInit(&mont, &mont.rr);
+            SSF_ASSERT((mont.len == ref.len) && (mont.mp == ref.mp));
+            SSF_ASSERT(SSFBNCmp(&mont.mod, &ref.mod) == 0);
+            SSF_ASSERT(SSFBNCmp(&mont.rr, &ref.rr) == 0);
+            SSFBNCopy(&mont.mod, &SSF_BN_NIST_P256);
+            SSFBNMontInit(&mont, &mont.mod);
+            SSF_ASSERT(SSFBNCmp(&mont.rr, &ref.rr) == 0);
+        }
         _SSFBNUTCheckMontInitR2(&SSF_BN_NIST_P256);
 
 #if SSF_BN_CONFIG_MAX_BITS >= 4096
@@ -3880,13 +3917,13 @@ void SSFBNUnitTest(void)
         _scrubCalls = 0u;
         _scrubDirty = 0u;
         _SSFBNScrubTestHook = _ScrubCheck;
-        /* ModInvSmall: table, acc, aR, e, ctx.mod, ctx.rr, plus SSFBNMontInit's own R^2 copy */
+        /* ModInvSmall: table, acc, aR, e, ctx.mod, ctx.rr (MontInit keeps no copy, BN-09) */
         SSF_ASSERT(SSFBNModInvSmall(&r, &a, &m) == true);
-        SSF_ASSERT(_scrubCalls == 7u);
-        /* ModMulSmall: t, ctx.mod, ctx.rr, plus SSFBNMontInit's R^2 copy */
+        SSF_ASSERT(_scrubCalls == 6u);
+        /* ModMulSmall: t, ctx.mod, ctx.rr */
         _scrubCalls = 0u;
         SSFBNModMulSmall(&r, &a, &b, &m);
-        SSF_ASSERT(_scrubCalls == 4u);
+        SSF_ASSERT(_scrubCalls == 3u);
         _SSFBNScrubTestHook = NULL;
         SSF_ASSERT(_scrubDirty == 0u);
     }
@@ -4007,9 +4044,9 @@ void SSFBNUnitTest(void)
         _scrubCalls = 0u;
         _scrubDirty = 0u;
         _SSFBNScrubTestHook = _ScrubCheck;
-        /* ModMulCT: t, ctx.mod, ctx.rr, plus SSFBNMontInit's R^2 copy */
+        /* ModMulCT: t, ctx.mod, ctx.rr (MontInit keeps no copy, BN-09) */
         SSFBNModMulCT(&r, &a, &b, &m);
-        SSF_ASSERT(_scrubCalls == 4u);
+        SSF_ASSERT(_scrubCalls == 3u);
         /* ModInvExt: u, v, x1, x2 */
         _scrubCalls = 0u;
         SSF_ASSERT(SSFBNModInvExt(&r, &a, &m) == true);
@@ -4570,7 +4607,7 @@ void SSFBNUnitTest(void)
         SSF_ASSERT((rHalf.len == 1u) && (SSFBNCmp(&rHalf, &rRef) == 0) && SSFBNIsZero(&rHalf));
 
         /* The window table, residues and the context holding m (an RSA prime) are wiped: the */
-        /* storage, ctx.mod, ctx.rr, plus SSFBNMontInit's own R^2 copy                        */
+        /* storage, ctx.mod and ctx.rr (SSFBNMontInit keeps no R^2 copy of its own, BN-09)    */
         n = SSF_BN_HALF_MOD_LIMBS;
         SSFBNSetZero(&m, n);
         for (k = 0u; k < n; k++) m.limbs[k] = 0xA5A5A5A5u ^ k;
@@ -4582,7 +4619,7 @@ void SSFBNUnitTest(void)
         _SSFBNScrubTestHook = _ScrubCheck;
         SSFBNModExpHalf(&rHalf, &a, &e, &m);
         _SSFBNScrubTestHook = NULL;
-        SSF_ASSERT(_scrubCalls == 4u);
+        SSF_ASSERT(_scrubCalls == 3u);
         SSF_ASSERT(_scrubDirty == 0u);
 
         /* One limb wider than SSF_BN_HALF_MOD_LIMBS is a precondition violation */
@@ -4635,6 +4672,131 @@ void SSFBNUnitTest(void)
         SSF_ASSERT((a.len == n) && (SSFBNCmp(&a, &m) > 0));
         SSF_ASSERT(SSFBNModInvExt(&r, &a, &m) == true);
         SSF_ASSERT((r.len == n) && SSFBNIsOne(&r));
+    }
+
+    /* ---- BN-11 (optimization audit): GenPrime draws into p; bit shape and primality ---- */
+    {
+        static const uint16_t bitLens[] = { 16u, 17u, 31u, 32u, 33u, 63u, 100u, 255u, 256u, 257u };
+        SSFPRNGContext_t prng;
+        uint8_t seed[SSF_PRNG_ENTROPY_SIZE];
+        SSFBN_DEFINE(p, SSF_BN_MAX_MOD_LIMBS);
+        SSFBN_DEFINE(e, SSF_BN_MAX_MOD_LIMBS);
+        SSFBN_DEFINE(f, SSF_BN_MAX_MOD_LIMBS);
+        SSFBN_DEFINE(two, SSF_BN_MAX_MOD_LIMBS);
+        SSFBNLimb_t narrowLimbs[1];
+        SSFBN_t narrow = { narrowLimbs, 0u, 1u };
+        uint16_t w;
+        uint16_t lim;
+        uint8_t k;
+
+        memset(seed, 0x3C, sizeof(seed));
+        SSFPRNGInitContext(&prng, seed, sizeof(seed));
+        for (w = 0u; w < (uint16_t)(sizeof(bitLens) / sizeof(bitLens[0])); w++)
+        {
+            if (bitLens[w] > (SSF_BN_MAX_MOD_LIMBS * SSF_BN_LIMB_BITS)) continue;
+            lim = (uint16_t)SSF_BN_BITS_TO_LIMBS(bitLens[w]);
+            for (k = 0u; k < 3u; k++)
+            {
+                SSF_ASSERT(SSFBNGenPrime(&p, bitLens[w], 5u, &prng) == true);
+
+                /* Exactly bitLens[w] bits, the top two set, odd, at lim limbs */
+                SSF_ASSERT((p.len == lim) && (SSFBNBitLen(&p) == bitLens[w]));
+                SSF_ASSERT(SSFBNGetBit(&p, (uint32_t)bitLens[w] - 2u) == 1u);
+                SSF_ASSERT(SSFBNIsOdd(&p));
+
+                /* Fermat base 2: 2^(p - 1) == 1 mod p */
+                SSFBNSetUint32(&two, 2u, lim);
+                (void)SSFBNSubUint32(&e, &p, 1u);
+                SSFBNModExp(&f, &two, &e, &p);
+                SSF_ASSERT(SSFBNIsOne(&f));
+#if SSF_BN_OSSL_VERIFY == 1
+                {
+                    uint8_t buf[SSF_BN_MAX_MOD_LIMBS * 4u];
+                    BIGNUM *bp = BN_new();
+                    BN_CTX *bctx = BN_CTX_new();
+
+                    SSF_ASSERT((bp != NULL) && (bctx != NULL));
+                    SSF_ASSERT(SSFBNToBytes(&p, buf, (size_t)lim * 4u));
+                    SSF_ASSERT(BN_bin2bn(buf, (int)lim * 4, bp) != NULL);
+                    SSF_ASSERT(BN_check_prime(bp, bctx, NULL) == 1);
+                    BN_CTX_free(bctx);
+                    BN_free(bp);
+                }
+#endif /* SSF_BN_OSSL_VERIFY */
+            }
+        }
+
+        /* p must hold the candidate: a one-limb p for 33 bits violates the precondition */
+        SSF_ASSERT_TEST(SSFBNGenPrime(&narrow, 33u, 5u, &prng));
+    }
+
+    /* ---- BN-12: SSFBNGcd under many swaps, full width, shared twos, r aliasing a or b ---- */
+    {
+        static SSFBNLimb_t gaL[SSF_BN_MAX_LIMBS];
+        static SSFBNLimb_t gbL[SSF_BN_MAX_LIMBS];
+        static SSFBNLimb_t ggL[SSF_BN_MAX_LIMBS];
+        static SSFBNLimb_t gwL[SSF_BN_MAX_LIMBS];
+        SSFBN_t ga = { gaL, 0u, SSF_BN_MAX_LIMBS };
+        SSFBN_t gb = { gbL, 0u, SSF_BN_MAX_LIMBS };
+        SSFBN_t gg = { ggL, 0u, SSF_BN_MAX_LIMBS };
+        SSFBN_t gw = { gwL, 0u, SSF_BN_MAX_LIMBS };
+        static const uint32_t fm[] = { 2u, 7u, 60u, 300u, 1000u, 1200u, 1999u };
+        static const uint32_t fn[] = { 1u, 5u, 45u, 299u, 750u, 900u, 1998u };
+        static const uint32_t fg[] = { 1u, 1u, 15u, 1u, 250u, 300u, 1u };     /* gcd(m, n) */
+        uint16_t len;
+        uint16_t k;
+        uint32_t t;
+
+        /* gcd(F(m), F(n)) = F(gcd(m, n)); consecutive indices swap at almost every step */
+        for (k = 0u; k < (uint16_t)(sizeof(fm) / sizeof(fm[0])); k++)
+        {
+            len = (uint16_t)(((fm[k] * 7u) / 320u) + 2u);
+            if (len > SSF_BN_MAX_LIMBS) continue;
+            _SSFBNUTFib(&ga, fm[k], len);
+            _SSFBNUTFib(&gb, fn[k], len);
+            _SSFBNUTFib(&gw, fg[k], len);
+            SSFBNGcd(&gg, &ga, &gb);
+            SSF_ASSERT(SSFBNCmp(&gg, &gw) == 0);
+            SSFBNGcd(&gg, &gb, &ga);
+            SSF_ASSERT(SSFBNCmp(&gg, &gw) == 0);
+
+            /* A shared 2^5: the result carries it back */
+            if (len < SSF_BN_MAX_LIMBS)
+            {
+                ga.len = (uint16_t)(len + 1u);
+                gb.len = ga.len;
+                ga.limbs[len] = 0u;
+                gb.limbs[len] = 0u;
+                SSFBNShiftLeft(&ga, 5u);
+                SSFBNShiftLeft(&gb, 5u);
+                SSFBNGcd(&gg, &ga, &gb);
+                gw.limbs[len] = 0u;
+                gw.len = ga.len;
+                SSFBNShiftLeft(&gw, 5u);
+                SSF_ASSERT(SSFBNCmp(&gg, &gw) == 0);
+            }
+
+            /* r aliasing a, then b */
+            _SSFBNUTFib(&ga, fm[k], len);
+            _SSFBNUTFib(&gb, fn[k], len);
+            _SSFBNUTFib(&gw, fg[k], len);
+            SSFBNCopy(&gg, &ga);
+            SSFBNGcd(&gg, &gg, &gb);
+            SSF_ASSERT(SSFBNCmp(&gg, &gw) == 0);
+            SSFBNCopy(&gg, &gb);
+            SSFBNGcd(&gg, &ga, &gg);
+            SSF_ASSERT(SSFBNCmp(&gg, &gw) == 0);
+        }
+
+        /* Full width: gcd(2^(32L) - 1, 2^(16L) - 1) = 2^(16L) - 1 for L = SSF_BN_MAX_LIMBS */
+        len = SSF_BN_MAX_LIMBS;
+        SSFBNSetZero(&ga, len);
+        SSFBNSetZero(&gb, len);
+        for (t = 0u; t < len; t++) ga.limbs[t] = 0xFFFFFFFFu;
+        for (t = 0u; t < (uint32_t)(len / 2u); t++) gb.limbs[t] = 0xFFFFFFFFu;
+        if ((len & 1u) != 0u) gb.limbs[len / 2u] = 0xFFFFu;
+        SSFBNGcd(&gg, &ga, &gb);
+        SSF_ASSERT(SSFBNCmp(&gg, &gb) == 0);
     }
 
     /* ---- BN-10: SSFBNModInv at modulus width; wipes its working value on every full path ---- */

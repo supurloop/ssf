@@ -1596,9 +1596,10 @@ void SSFBNModSquare(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
 /* --------------------------------------------------------------------------------------------- */
 void SSFBNGcd(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b)
 {
-    SSFBN_DEFINE(u, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(v, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(tmp, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(ub, SSF_BN_MAX_LIMBS);
+    SSFBN_DEFINE(vb, SSF_BN_MAX_LIMBS);
+    SSFBN_t *u = &ub;
+    SSFBN_t *v = &vb;
     uint32_t shift = 0;
 
     SSF_REQUIRE(r != NULL);
@@ -1614,37 +1615,38 @@ void SSFBNGcd(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b)
     if (SSFBNIsZero(a)) { SSFBNCopy(r, b); return; }
     if (SSFBNIsZero(b)) { SSFBNCopy(r, a); return; }
 
-    SSFBNCopy(&u, a);
-    SSFBNCopy(&v, b);
+    SSFBNCopy(u, a);
+    SSFBNCopy(v, b);
 
     /* Strip common 2-factors via min(tz(u), tz(v)); leaves at least one of u, v odd. */
     {
-        uint32_t tzU = SSFBNTrailingZeros(&u);
-        uint32_t tzV = SSFBNTrailingZeros(&v);
+        uint32_t tzU = SSFBNTrailingZeros(u);
+        uint32_t tzV = SSFBNTrailingZeros(v);
         shift = (tzU < tzV) ? tzU : tzV;
-        SSFBNShiftRight(&u, shift);
-        SSFBNShiftRight(&v, shift);
+        SSFBNShiftRight(u, shift);
+        SSFBNShiftRight(v, shift);
     }
 
     /* Strip any remaining factors of 2 from u so u is odd going into the main loop. */
-    SSFBNShiftRight(&u, SSFBNTrailingZeros(&u));
+    SSFBNShiftRight(u, SSFBNTrailingZeros(u));
 
-    while (SSFBNIsZero(&v) == false)
+    while (SSFBNIsZero(v) == false)
     {
         /* Reduce v to its odd part in one shot. */
-        SSFBNShiftRight(&v, SSFBNTrailingZeros(&v));
+        SSFBNShiftRight(v, SSFBNTrailingZeros(v));
 
-        if (SSFBNCmp(&u, &v) > 0)
+        if (SSFBNCmp(u, v) > 0)
         {
-            SSFBNCopy(&tmp, &u);
-            SSFBNCopy(&u, &v);
-            SSFBNCopy(&v, &tmp);
+            /* Swap the roles, not the limbs */
+            SSFBN_t *t = u;
+            u = v;
+            v = t;
         }
-        SSFBNSub(&v, &v, &u);
+        SSFBNSub(v, v, u);
     }
 
     /* Restore common factors of 2 */
-    SSFBNCopy(r, &u);
+    SSFBNCopy(r, u);
     SSFBNShiftLeft(r, shift);
 }
 
@@ -2583,7 +2585,7 @@ void SSFBNMontInit(SSFBNMont_t *ctx, const SSFBN_t *m)
     uint32_t bitLen;
     uint32_t j;
     uint32_t s;
-    SSFBN_DEFINE(r2, SSF_BN_MAX_LIMBS);
+    SSFBN_t *r2 = &ctx->rr; /* built in place: MontSquare reads ctx->mod and mp, not rr */
 
     SSF_REQUIRE(ctx != NULL);
     SSF_REQUIRE(ctx->mod.limbs != NULL);
@@ -2602,7 +2604,7 @@ void SSFBNMontInit(SSFBNMont_t *ctx, const SSFBN_t *m)
     /* mp = -m^(-1) mod 2^32 via Newton iteration; 5 iters reach 32-bit accuracy. */
     {
         SSFBNLimb_t x = 1;
-        SSFBNLimb_t m0 = m->limbs[0];
+        SSFBNLimb_t m0 = ctx->mod.limbs[0];
 
         for (i = 0; i < 5; i++)
         {
@@ -2612,15 +2614,16 @@ void SSFBNMontInit(SSFBNMont_t *ctx, const SSFBN_t *m)
     }
 
     /* R^2 mod m for R = 2^w, w = 32 * len = j * 2^s (j odd); w can exceed 16 bits */
-    w = (uint32_t)m->len * SSF_BN_LIMB_BITS;
-    bitLen = SSFBNBitLen(m);
-    SSFBNSetZero(&r2, m->len);
+    w = (uint32_t)ctx->len * SSF_BN_LIMB_BITS;
+    bitLen = SSFBNBitLen(&ctx->mod);
+    /* From here only ctx->mod is read, so m may alias ctx->rr */
+    SSFBNSetZero(r2, ctx->len);
 
     /* Is m == 1, where R^2 mod m is 0? */
     if (bitLen > 1u)
     {
         /* No, start at 2^(bitLen - 1), the largest power of two below m */
-        r2.limbs[(bitLen - 1u) / SSF_BN_LIMB_BITS] =
+        r2->limbs[(bitLen - 1u) / SSF_BN_LIMB_BITS] =
             (SSFBNLimb_t)((SSFBNLimb_t)1u << ((bitLen - 1u) % SSF_BN_LIMB_BITS));
 
         /* Split w into its odd part j and power-of-two exponent s */
@@ -2635,22 +2638,17 @@ void SSFBNMontInit(SSFBNMont_t *ctx, const SSFBN_t *m)
         /* Double to 2^(w + j) mod m, which is 2^j in Montgomery form */
         for (k = 0u; k < (((w - bitLen) + 1u) + j); k++)
         {
-            SSFBNModAdd(&r2, &r2, &r2, m);
+            SSFBNModAdd(r2, r2, r2, &ctx->mod);
             _SSF_BN_COUNT(_SSFBNMontInitDoublings);
         }
 
         /* Each Montgomery square doubles the offset: 2^(w + j) to 2^(w + j * 2^s) = 2^(2w) */
         for (k = 0u; k < s; k++)
         {
-            SSFBNMontSquare(&r2, &r2, ctx);
+            SSFBNMontSquare(r2, r2, ctx);
         }
     }
     /* Yes, r2 stays 0 */
-    SSFBNCopy(&ctx->rr, &r2);
-
-    /* r2 is key-derived when m is a secret prime; ctx->rr holds the only copy kept */
-    SSFBNZeroize(&r2);
-    _SSF_BN_SCRUB_HOOK(r2.limbs, (size_t)r2.cap * sizeof(SSFBNLimb_t));
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -3527,10 +3525,7 @@ cleanup:
 /* --------------------------------------------------------------------------------------------- */
 bool SSFBNGenPrime(SSFBN_t *p, uint16_t bitLen, uint16_t rounds, SSFPRNGContext_t *prng)
 {
-    size_t byteLen;
     uint16_t limbs;
-    uint8_t buf[SSF_BN_MAX_BYTES];
-    uint8_t topMask;
     uint16_t topBit;
     uint16_t nextBit;
     uint32_t attempts;
@@ -3542,11 +3537,8 @@ bool SSFBNGenPrime(SSFBN_t *p, uint16_t bitLen, uint16_t rounds, SSFPRNGContext_
     SSF_REQUIRE(bitLen <= (SSF_BN_MAX_MOD_LIMBS * SSF_BN_LIMB_BITS));
     SSF_REQUIRE(prng != NULL);
 
-    byteLen = (size_t)(bitLen + 7u) / 8u;
     limbs = (uint16_t)SSF_BN_BITS_TO_LIMBS(bitLen);
-
-    /* topMask keeps only the low bitLen - 8 * (byteLen - 1) bits of buf[0] */
-    topMask = (uint8_t)(0xFFu >> ((8u * (uint16_t)byteLen) - bitLen));
+    SSF_REQUIRE(limbs <= p->cap);
     topBit = (uint16_t)(bitLen - 1u);
     nextBit = (uint16_t)(bitLen - 2u);
 
@@ -3554,25 +3546,17 @@ bool SSFBNGenPrime(SSFBN_t *p, uint16_t bitLen, uint16_t rounds, SSFPRNGContext_
     {
         uint16_t i;
         bool trialPass;
-        size_t generated = 0;
 
-        /* Draw byteLen random bytes via the PRNG. */
-        while (generated < byteLen)
+        /* Draw the candidate straight into p, keep bitLen bits, force the top two and the low */
+        SSFBNRandom(p, limbs, prng);
+        if ((bitLen % SSF_BN_LIMB_BITS) != 0u)
         {
-            size_t chunk = byteLen - generated;
-            if (chunk > SSF_PRNG_RANDOM_MAX_SIZE) chunk = SSF_PRNG_RANDOM_MAX_SIZE;
-            SSFPRNGGetRandom(prng, &buf[generated], chunk);
-            generated += chunk;
+            p->limbs[limbs - 1u] &=
+                (SSFBNLimb_t)(((SSFBNLimb_t)1u << (bitLen % SSF_BN_LIMB_BITS)) - 1u);
         }
-
-        /* Clear bits above bitLen - 1 and force bits bitLen - 1 and bitLen - 2 */
-        buf[0] &= topMask;
-        buf[(byteLen - 1u) - (size_t)(topBit / 8u)] |= (uint8_t)(1u << (topBit % 8u));
-        buf[(byteLen - 1u) - (size_t)(nextBit / 8u)] |= (uint8_t)(1u << (nextBit % 8u));
-        /* Force the low bit so the candidate is odd. */
-        buf[byteLen - 1u] |= 0x01u;
-
-        SSFBNFromBytes(p, buf, byteLen, limbs);
+        p->limbs[topBit / SSF_BN_LIMB_BITS] |= (SSFBNLimb_t)1u << (topBit % SSF_BN_LIMB_BITS);
+        p->limbs[nextBit / SSF_BN_LIMB_BITS] |= (SSFBNLimb_t)1u << (nextBit % SSF_BN_LIMB_BITS);
+        p->limbs[0] |= 1u;
 
         /* Trial-divide against the small-prime table. */
         trialPass = true;
@@ -3596,16 +3580,14 @@ bool SSFBNGenPrime(SSFBN_t *p, uint16_t bitLen, uint16_t rounds, SSFPRNGContext_
         /* Yes, is the candidate a probable prime by Miller-Rabin? */
         if (SSFBNIsProbablePrime(p, rounds, prng))
         {
-            /* Yes, wipe the candidate bytes and accept */
-            SSFCryptSecureZero(buf, sizeof(buf));
-            _SSF_BN_SCRUB_HOOK(buf, sizeof(buf));
+            /* Yes, accept */
             return true;
         }
         /* No, draw another candidate */
     }
 
-    SSFCryptSecureZero(buf, sizeof(buf));
-    _SSF_BN_SCRUB_HOOK(buf, sizeof(buf));
+    /* No prime found: wipe the last candidate */
+    SSFBNZeroize(p);
     return false;
 }
 

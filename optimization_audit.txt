@@ -126,9 +126,13 @@ SAFE-05  ssfrsa: the 8 KB stack scrub does not reach the deepest freed frames   
              5,248 B at 4096, inside the scrub; its callees still reach past it).
   Note     : (2026-11-25, BN-10) for option (2): SSFBNModInv now wipes its working value
              (p - 2 in keygen's qInv); BN-07 removed keygen's Euclid. Still unwiped in keygen:
-             SSFBNModExp's Montgomery context (p and R^2 mod p, for qInv) and
-             SSFBNIsProbablePrime's context and working values (the candidate prime).
-             SSFBNModExpHalf already wipes its context (BN-01).
+             SSFBNModExp's Montgomery context (p and R^2 mod p, for qInv), and SSFBNGcd's two
+             working values (p - 1 and q - 1 for lambda, and in the FIPS e-coprime check).
+             SSFBNIsProbablePrime already wipes its five working values and its context, and
+             SSFBNModExpHalf its context (BN-01); SSFBNMontInit no longer keeps a stack copy of
+             R^2 (BN-09) nor SSFBNGenPrime of its candidates (BN-11). (Corrected the same day:
+             this note first listed SSFBNIsProbablePrime as unwiped, from reading only part of
+             the function, and missed SSFBNGcd.)
   Status   : OPEN
 
 SAFE-06  ssfrsa: a private key with an even p or q asserts in signing                [V]
@@ -552,7 +556,18 @@ BN-09  STACK / CODE  SSFBNMontInit 1,080 -> 32 B; -76 B code                    
   What     : R^2 is built in a 2N local, copied into ctx->rr, then wiped.
   Change   : build it in place in ctx->rr (MontSquare does not read rr).
   Risk     : low (one secret copy fewer); scrub-count expectations drop by 1 per init.
-  Status   : OPEN
+  Status   : DONE (2026-11-25): as specified, and once m is copied into ctx->mod only that
+             copy is read, so m may alias ctx->rr (as written above, m would be read after
+             rr is zeroed). Measured (M4 -Os, on d3961b8): frame 1,072 -> 32 B (4096), 816 ->
+             32 (3072), 560 -> 32 (2048); RSA sign peak (PSS / PKCS#1) 21,472 -> 20,616
+             (-856) at 4096, -600 at 3072, 0 at 2048; TLS client RSA signing the same; keygen,
+             verify, EC unchanged. ssfbn code -76 B. Host: signatures identical, sign time
+             within noise. R^2 mod m (key-derived for a secret prime) no longer has a stack
+             copy at all. Tests: MontInit makes no scrub call and its R^2 is checked; m
+             aliasing ctx->rr / ctx->mod; six scrub-count expectations drop by the removed
+             copy (failed on HEAD). Mutants under ASan: 4 of 5 killed (m read in the
+             doubling, rr not zeroed, one square short, wrong mp); the 5th (bit length read
+             from m) is equivalent, as it is read before rr is zeroed.
 
 BN-10  STACK  SSFBNModInv 2,088 -> 544 B                                                M
   Location : _crypto/ssfbn.c:2300, 2327
@@ -579,13 +594,37 @@ BN-11  STACK  SSFBNGenPrime 1,088 -> 56 B (keygen)                              
   Change   : SSFBNRandom straight into p; mask the top limb, set the top two and low bits;
              zeroize p on failure.
   Risk     : low; changes which candidate a fixed PRNG seed gives (tests pass).
-  Status   : OPEN
+  Status   : DONE (2026-11-25): as specified. The same byte count per candidate is drawn for
+             RSA's prime sizes (multiples of 32 bits); the limbs <= p->cap precondition is the
+             one SSFBNFromBytes already enforced. Measured (M4 -Os, with BN-09): frame 1,088
+             -> 56 B (4096), 832 -> 56 (3072), 576 -> 56 (2048); keygen peak 26,080 -> 25,048
+             (-1,032) at 4096, -776 at 3072, 0 at 2048 (the stack scrub sets it); sign, verify,
+             EC unchanged. ssfbn code -32 B. No stack copy of any candidate remains (HEAD's
+             buffer was wiped on return, but held every candidate meanwhile). Tests: 30 primes
+             over 10 bit lengths (16 .. 257, odd ones included): exact length, top two bits,
+             odd, Fermat base 2 and OpenSSL BN_check_prime; a too-narrow p asserts; the
+             accept-path scrub count drops the buffer. Pure refactor, so these pass on HEAD.
+             Mutants under ASan: 4 of 7 killed (no top-limb mask, a mask one bit wide, no
+             top bit, no second bit); 3 equivalent (no forced odd: 2 is trial-divided, so only
+             speed changes; no capacity check: SSFBNRandom makes it; no wipe on the 50,000-
+             attempt failure path, unreachable in a test).
 
 BN-12  STACK / CODE  SSFBNGcd 3,120 -> 2,088 B; -31 B code                               M
   Location : _crypto/ssfbn.c:1601 (and the swap in the main loop)
   Change   : swap SSFBN_t pointers instead of three full-width copies through tmp.
   Risk     : low; keygen; variable-time behaviour unchanged.
-  Status   : OPEN
+  Correction (2026-11-25): no peak moves; SSFBNGcd (keygen's lambda and FIPS check) sits well
+             below the keygen peak at every cap.
+  Status   : DONE (2026-11-25): as specified. Measured (M4 -Os): frame 3,120 -> 2,088 B
+             (4096), 2,352 -> 1,576 (3072), 1,584 -> 1,064 (2048); ssfbn code -32 B. Host:
+             results identical over 400 keygen-shaped pairs, 1024-bit gcd 55-69 us vs 69-70.
+             One copy fewer of p - 1 / q - 1; the two working values are still not wiped
+             (SAFE-05 note). Tests: gcd(F(m), F(n)) = F(gcd(m, n)) on Fibonacci pairs up to
+             F(1999) (a swap at almost every step), with a shared 2^5, both argument orders,
+             r aliasing a and b, and gcd(2^(32L) - 1, 2^(16L) - 1) at L = SSF_BN_MAX_LIMBS.
+             Pure refactor, so these pass on HEAD. Mutants under ASan: 4 of 5 killed (no
+             swap, which never terminates; half a swap; v as the result; twos not restored);
+             the 5th (swapping on equal) is equivalent, since v - u is 0 either way.
 
 BN-13  CODE / PERF  -860 B linked keygen code (libgcc __aeabi_uldivmod / __udivmoddi4);
        trial division ~5x faster on M4, ~5-10% of RSA keygen                         M (E perf)

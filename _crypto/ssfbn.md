@@ -785,7 +785,9 @@ Both require `a->len` (and `b->len`) to equal `m->len`, and `m->len <= r->cap`.
 void SSFBNGcd(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b);
 ```
 Binary-GCD (Stein's algorithm) producing `r = gcd(a, b)`. Variable-time. `a` and `b` must
-have the same `len`.
+have the same `len`; `r` may alias either. The two working copies trade roles by pointer when
+they swap, rather than through a third full-width copy (OPTIMIZE BN-12). They are not wiped:
+in RSA key generation they hold `p − 1` and `q − 1` (see SAFE-05 in the optimization audit).
 
 ---
 
@@ -813,7 +815,11 @@ the bit length of `m`: `w - L + 1 + j` modular doublings reach `2^(w+j) mod m`, 
 offset up to `2^(2w)`. A full-width 2048-bit modulus takes 2 doublings and 11 squarings. The
 doubling count depends only on `L` and `len`, which are public for RSA moduli and fixed by the
 key size for their primes. Every step is constant-time. `m` may carry leading zero limbs (it
-then takes more doublings), and `m == 1` gives `rr == 0`.
+then takes more doublings), and `m == 1` gives `rr == 0`. `R²` is built in `ctx->rr` itself
+(Montgomery squaring reads `mod` and `mp`, never `rr`), so no key-derived copy is left on the
+stack and the frame is a few dozen bytes (OPTIMIZE BN-09; before, a 2N-limb local, about 1 KB
+at the RSA-4096 cap). After copying `m` into `ctx->mod` only that copy is read, so `m` may be
+`&ctx->rr` or `&ctx->mod`.
 
 <a id="montmul"></a>
 ```c
@@ -1047,8 +1053,10 @@ of 8). Bits `bitLen − 1` and `bitLen − 2` are forced high and any higher bit
 product of two such primes has the full `2 · bitLen` bit length), the low bit is forced to
 make the candidate odd, the candidate is trial-divided against the 256-entry small-prime
 table, and survivors go through `rounds` Miller-Rabin rounds. Returns `false` if no prime
-is found within an internal attempt cap (50000). The local buffer that held the candidate
-bytes is zeroized on both the success and the failure return; the prime itself is only in `p`.
+is found within an internal attempt cap (50000). Each candidate is drawn straight into `p`'s
+limbs with [`SSFBNRandom()`](#ssfbnrandom) and shaped there, so no stack copy of a candidate exists
+(OPTIMIZE BN-11: a 56 B frame instead of 1 KB at the RSA-4096 cap); on the failure return `p`
+is zeroized. `p` must hold `⌈bitLen / 32⌉` limbs (`SSF_REQUIRE`).
 
 `bitLen` must be `≥ 16`, `≤ SSF_BN_CONFIG_MAX_BITS / 2` and `≤ SSF_BN_MAX_MOD_LIMBS × 32`
 (enforced by `SSF_REQUIRE`; the two upper bounds match unless `SSF_BN_MAX_MOD_LIMBS` is

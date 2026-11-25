@@ -445,7 +445,17 @@ BN-06  STACK / CODE  SSFBNMontConvertOut chain 1,136 -> 592 B; -40 B code       
   What     : a 512 B "one" local exists only for MontMul(aR, 1).
   Change   : a static _SSFBNMontMulCore(r, al, b, ctx) where al == NULL means 1.
   Risk     : low; the branch depends only on the pointer and the loop index (public).
-  Status   : OPEN
+  Correction (2026-11-25): 1,136 -> 592 B is the ConvertOut + MontMul frames, not a peak
+             saving. Every ConvertOut caller also calls SSFBNMontSquare (1,104 B frame at
+             4096), which becomes the deepest branch.
+  Status   : REJECTED (2026-11-25): measured on 92f0e8f (after BN-02), not worth changing
+             the hottest primitive. Prototype as specified (_SSFBNMontMulCore, ai = i == 0
+             for al == NULL; MontMul wrapper 16 B + core 584 B = the old 600 B frame).
+             M4 -Os: RSA verify and keygen -32 B at every cap; chain / CMS / TLS client 0
+             (unit tests on, 4096: -24); sign and ECDSA 0. ssfbn code -14 B (4096) / -10
+             (3072, 2048) with unit tests off, -24 / -20 on. Host -O2: verify and sign within
+             noise; output bit-identical. The verify path is now near its floor (ModExpPub's
+             context + MontSquare's 2n+1-limb product); going lower needs a different squaring.
 
 BN-07  CODE / STACK  -1,388 B linked code in sign-capable (non-keygen) builds; removes the
        9.3 KB Euclid frame from the sign path's static worst case                       M

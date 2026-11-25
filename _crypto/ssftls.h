@@ -287,9 +287,12 @@ void SSFTLSRecordStateDeInit(SSFTLSRecordState_t *state);
 bool SSFTLSRecordEncrypt(SSFTLSRecordState_t *state, uint8_t contentType, const uint8_t *pt,
                          size_t ptLen, uint8_t *record, size_t recordSize, size_t *recordLen);
 
-/* Decrypt a TLS record. Validates AEAD tag and extracts inner content type. */
-bool SSFTLSRecordDecrypt(SSFTLSRecordState_t *state, const uint8_t *record, size_t recordLen,
-                         uint8_t *pt, size_t ptSize, size_t *ptLen, uint8_t *contentType);
+/* Decrypt a TLS record given as its 5-byte header and its fragment (they need not be          */
+/* adjacent). Validates the AEAD tag and extracts the inner content type. pt may be frag        */
+/* (decrypt in place); otherwise it must not overlap frag. It never overlaps hdr.               */
+bool SSFTLSRecordDecrypt(SSFTLSRecordState_t *state, const uint8_t *hdr, const uint8_t *frag,
+                         size_t fragLen, uint8_t *pt, size_t ptSize, size_t *ptLen,
+                         uint8_t *contentType);
 
 /* --------------------------------------------------------------------------------------------- */
 /* Unit test                                                                                     */

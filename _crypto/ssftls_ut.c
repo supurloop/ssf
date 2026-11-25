@@ -404,7 +404,7 @@ void SSFTLSUnitTest(void)
         SSF_ASSERT(record[0] == SSF_TLS_CT_APPLICATION);
 
         /* Decrypt */
-        SSF_ASSERT(SSFTLSRecordDecrypt(&decState, record, recordLen,
+        SSF_ASSERT(SSFTLSRecordDecrypt(&decState, record, &record[5], recordLen - 5u,
                    decrypted, sizeof(decrypted), &decLen, &ct) == true);
 
         /* Verify */
@@ -415,7 +415,7 @@ void SSFTLSUnitTest(void)
         /* Second record with incremented sequence number */
         SSF_ASSERT(SSFTLSRecordEncrypt(&encState, SSF_TLS_CT_HANDSHAKE,
                    plaintext, ptLen, record, sizeof(record), &recordLen) == true);
-        SSF_ASSERT(SSFTLSRecordDecrypt(&decState, record, recordLen,
+        SSF_ASSERT(SSFTLSRecordDecrypt(&decState, record, &record[5], recordLen - 5u,
                    decrypted, sizeof(decrypted), &decLen, &ct) == true);
         SSF_ASSERT(ct == SSF_TLS_CT_HANDSHAKE);
         SSF_ASSERT(memcmp(decrypted, plaintext, ptLen) == 0);
@@ -450,7 +450,7 @@ void SSFTLSUnitTest(void)
         record[SSF_TLS_RECORD_HEADER_SIZE] ^= 0x01u;
 
         /* Decryption should fail due to tag mismatch */
-        SSF_ASSERT(SSFTLSRecordDecrypt(&decState, record, recordLen,
+        SSF_ASSERT(SSFTLSRecordDecrypt(&decState, record, &record[5], recordLen - 5u,
                    decrypted, sizeof(decrypted), &decLen, &ct) == false);
     }
 
@@ -478,7 +478,7 @@ void SSFTLSUnitTest(void)
 
         SSF_ASSERT(SSFTLSRecordEncrypt(&encState, SSF_TLS_CT_APPLICATION,
                    plaintext, 16, record, sizeof(record), &recordLen) == true);
-        SSF_ASSERT(SSFTLSRecordDecrypt(&decState, record, recordLen,
+        SSF_ASSERT(SSFTLSRecordDecrypt(&decState, record, &record[5], recordLen - 5u,
                    decrypted, sizeof(decrypted), &decLen, &ct) == true);
         SSF_ASSERT(decLen == 16u);
         SSF_ASSERT(ct == SSF_TLS_CT_APPLICATION);
@@ -511,7 +511,7 @@ void SSFTLSUnitTest(void)
                    plaintext, 16, record, sizeof(record), &recordLen) == true);
         /* 5 header + 17 inner + 16 tag = 38 bytes on the wire. */
         SSF_ASSERT(recordLen == 38u);
-        SSF_ASSERT(SSFTLSRecordDecrypt(&decState, record, recordLen,
+        SSF_ASSERT(SSFTLSRecordDecrypt(&decState, record, &record[5], recordLen - 5u,
                    decrypted, sizeof(decrypted), &decLen, &ct) == true);
         SSF_ASSERT(decLen == 16u);
         SSF_ASSERT(ct == SSF_TLS_CT_APPLICATION);
@@ -549,7 +549,7 @@ void SSFTLSUnitTest(void)
         hdrCipherLen = ((uint16_t)record[3] << 8) | (uint16_t)record[4];
         SSF_ASSERT(hdrCipherLen == 25u);
 
-        SSF_ASSERT(SSFTLSRecordDecrypt(&decState, record, recordLen,
+        SSF_ASSERT(SSFTLSRecordDecrypt(&decState, record, &record[5], recordLen - 5u,
                    decrypted, sizeof(decrypted), &decLen, &ct) == true);
         SSF_ASSERT(decLen == 16u);
         SSF_ASSERT(ct == SSF_TLS_CT_APPLICATION);
@@ -580,7 +580,7 @@ void SSFTLSUnitTest(void)
         SSF_ASSERT(SSFTLSRecordEncrypt(&encState, SSF_TLS_CT_APPLICATION,
                    plaintext, sizeof(plaintext) - 1u, record, sizeof(record), &recordLen) == true);
         SSF_ASSERT(record[0] == SSF_TLS_CT_APPLICATION);
-        SSF_ASSERT(SSFTLSRecordDecrypt(&decState, record, recordLen,
+        SSF_ASSERT(SSFTLSRecordDecrypt(&decState, record, &record[5], recordLen - 5u,
                    decrypted, sizeof(decrypted), &decLen, &ct) == true);
         SSF_ASSERT(decLen == sizeof(plaintext) - 1u);
         SSF_ASSERT(ct == SSF_TLS_CT_APPLICATION);
@@ -588,7 +588,7 @@ void SSFTLSUnitTest(void)
 
         /* Tampered ct must reject under ChaCha20-Poly1305 just as under AES-*. */
         record[SSF_TLS_RECORD_HEADER_SIZE] ^= 0x01u;
-        SSF_ASSERT(SSFTLSRecordDecrypt(&decState, record, recordLen,
+        SSF_ASSERT(SSFTLSRecordDecrypt(&decState, record, &record[5], recordLen - 5u,
                    decrypted, sizeof(decrypted), &decLen, &ct) == false);
     }
 
@@ -622,7 +622,7 @@ void SSFTLSUnitTest(void)
         record[2] = 0x03u;
         record[3] = 0x00u;
         record[4] = 0x21u;   /* fragLen = 33 = innerLen(17) + tagLen(16) */
-        SSF_ASSERT(SSFTLSRecordDecrypt(&decState, record, 5u + 0x21u,
+        SSF_ASSERT(SSFTLSRecordDecrypt(&decState, record, &record[5], 0x21u,
                                        decBuf, sizeof(decBuf),
                                        &decLen, &innerCt) == false);
     }
@@ -649,7 +649,7 @@ void SSFTLSUnitTest(void)
         record[2] = 0x03u;
         record[3] = 0x00u;
         record[4] = 0x21u;
-        SSF_ASSERT(SSFTLSRecordDecrypt(&state, record, 5u + 0x21u,
+        SSF_ASSERT(SSFTLSRecordDecrypt(&state, record, &record[5], 0x21u,
                                        pt, sizeof(pt), &outLen, &innerCt) == false);
     }
 
@@ -877,20 +877,120 @@ void SSFTLSUnitTest(void)
                               key, sizeof(key), iv, sizeof(iv));
 
         /* state NULL */
-        SSF_ASSERT_TEST(SSFTLSRecordDecrypt(NULL, record, sizeof(record),
+        SSF_ASSERT_TEST(SSFTLSRecordDecrypt(NULL, record, &record[5], sizeof(record) - 5u,
                                             pt, sizeof(pt), &ptLen, &ct));
-        /* record NULL */
-        SSF_ASSERT_TEST(SSFTLSRecordDecrypt(&state, NULL, sizeof(record),
+        /* hdr NULL */
+        SSF_ASSERT_TEST(SSFTLSRecordDecrypt(&state, NULL, &record[5], sizeof(record) - 5u,
+                                            pt, sizeof(pt), &ptLen, &ct));
+        /* frag NULL */
+        SSF_ASSERT_TEST(SSFTLSRecordDecrypt(&state, record, NULL, sizeof(record) - 5u,
                                             pt, sizeof(pt), &ptLen, &ct));
         /* pt NULL */
-        SSF_ASSERT_TEST(SSFTLSRecordDecrypt(&state, record, sizeof(record),
+        SSF_ASSERT_TEST(SSFTLSRecordDecrypt(&state, record, &record[5], sizeof(record) - 5u,
                                             NULL, sizeof(pt), &ptLen, &ct));
         /* ptLen NULL */
-        SSF_ASSERT_TEST(SSFTLSRecordDecrypt(&state, record, sizeof(record),
+        SSF_ASSERT_TEST(SSFTLSRecordDecrypt(&state, record, &record[5], sizeof(record) - 5u,
                                             pt, sizeof(pt), NULL, &ct));
         /* contentType NULL */
-        SSF_ASSERT_TEST(SSFTLSRecordDecrypt(&state, record, sizeof(record),
+        SSF_ASSERT_TEST(SSFTLSRecordDecrypt(&state, record, &record[5], sizeof(record) - 5u,
                                             pt, sizeof(pt), &ptLen, NULL));
+        /* pt overlapping the fragment without being it */
+        SSF_ASSERT_TEST(SSFTLSRecordDecrypt(&state, record, &record[5], sizeof(record) - 5u,
+                                            &record[6], sizeof(record) - 6u, &ptLen, &ct));
+        /* pt overlapping the header */
+        SSF_ASSERT_TEST(SSFTLSRecordDecrypt(&state, &pt[4], &record[5], sizeof(record) - 5u,
+                                            pt, sizeof(pt), &ptLen, &ct));
+        SSFTLSRecordStateDeInit(&state);
+    }
+
+    /* SSFTLSRecordDecrypt with the header apart from the fragment, decrypting in place, for   */
+    /* every suite: a good record gives the plaintext; a bad tag fails and leaves no plaintext  */
+    /* behind (the fragment is still ciphertext, or zeroed); a header whose length is not the  */
+    /* fragment's fails.                                                                        */
+    {
+        static const uint16_t suites[] = { SSF_TLS_CS_AES_128_GCM_SHA256,
+                                           SSF_TLS_CS_AES_256_GCM_SHA384,
+                                           SSF_TLS_CS_CHACHA20_POLY1305_SHA256,
+                                           SSF_TLS_CS_AES_128_CCM_SHA256,
+                                           SSF_TLS_CS_AES_128_CCM_8_SHA256 };
+        static const size_t keyLens[] = { 16u, 32u, 32u, 16u, 16u };
+        uint8_t i;
+
+        for (i = 0; i < (sizeof(suites) / sizeof(suites[0])); i++)
+        {
+            SSFTLSRecordState_t enc = { 0 };
+            SSFTLSRecordState_t dec = { 0 };
+            uint8_t key[32];
+            uint8_t iv[SSF_TLS_IV_SIZE];
+            uint8_t msg[40];
+            uint8_t record[5u + 40u + 1u + 16u];
+            uint8_t hdr[5];
+            uint8_t frag[40u + 1u + 16u];
+            size_t recordLen;
+            size_t fragLen;
+            size_t outLen;
+            size_t j;
+            bool zero;
+            uint8_t ct;
+
+            memset(key, 0x5A + i, sizeof(key));
+            memset(iv, 0x3B + i, sizeof(iv));
+            for (j = 0; j < sizeof(msg); j++) msg[j] = (uint8_t)(j + 1u);
+            SSFTLSRecordStateInit(&enc, suites[i], key, keyLens[i], iv, sizeof(iv));
+            SSFTLSRecordStateInit(&dec, suites[i], key, keyLens[i], iv, sizeof(iv));
+
+            /* Good record, header and fragment apart, plaintext over the fragment */
+            SSF_ASSERT(SSFTLSRecordEncrypt(&enc, SSF_TLS_CT_HANDSHAKE, msg, sizeof(msg), record,
+                                           sizeof(record), &recordLen));
+            fragLen = recordLen - 5u;
+            memcpy(hdr, record, 5u);
+            memcpy(frag, &record[5], fragLen);
+            SSF_ASSERT(SSFTLSRecordDecrypt(&dec, hdr, frag, fragLen, frag, sizeof(frag), &outLen,
+                                           &ct));
+            SSF_ASSERT((outLen == sizeof(msg)) && (memcmp(frag, msg, sizeof(msg)) == 0) &&
+                       (ct == SSF_TLS_CT_HANDSHAKE));
+
+            /* Bad tag: refused; the fragment holds no plaintext */
+            SSF_ASSERT(SSFTLSRecordEncrypt(&enc, SSF_TLS_CT_HANDSHAKE, msg, sizeof(msg), record,
+                                           sizeof(record), &recordLen));
+            record[recordLen - 1u] ^= 0x01u;
+            memcpy(hdr, record, 5u);
+            memcpy(frag, &record[5], fragLen);
+            SSF_ASSERT(!SSFTLSRecordDecrypt(&dec, hdr, frag, fragLen, frag, sizeof(frag),
+                                            &outLen, &ct));
+            zero = true;
+            for (j = 0; j < sizeof(msg); j++) zero = zero && (frag[j] == 0u);
+            SSF_ASSERT(zero || (memcmp(frag, &record[5], fragLen) == 0));
+            SSF_ASSERT(memcmp(frag, msg, sizeof(msg)) != 0);
+
+            /* A bad ciphertext byte (the body, not the tag), same record: refused, no        */
+            /* plaintext either. AES-CCM decrypts before it can check: its wipe matters here.  */
+            record[recordLen - 1u] ^= 0x01u;                            /* The tag good again */
+            memcpy(frag, &record[5], fragLen);
+            frag[7] ^= 0x01u;
+            SSF_ASSERT(!SSFTLSRecordDecrypt(&dec, hdr, frag, fragLen, frag, sizeof(frag),
+                                            &outLen, &ct));
+            zero = true;
+            for (j = 0; j < sizeof(msg); j++) zero = zero && (frag[j] == 0u);
+            SSF_ASSERT(zero || ((memcmp(frag, &record[5], 7u) == 0) &&
+                                (frag[7] == (uint8_t)(record[5u + 7u] ^ 0x01u)) &&
+                                (memcmp(&frag[8], &record[5u + 8u], fragLen - 8u) == 0)));
+
+            /* The header's length must be the fragment's (the record is otherwise good) */
+            memcpy(hdr, record, 5u);
+            memcpy(frag, &record[5], fragLen);
+            SSF_ASSERT(!SSFTLSRecordDecrypt(&dec, hdr, frag, fragLen - 1u, frag, sizeof(frag),
+                                            &outLen, &ct));
+            hdr[4]++;
+            SSF_ASSERT(!SSFTLSRecordDecrypt(&dec, hdr, frag, fragLen, frag, sizeof(frag),
+                                            &outLen, &ct));
+            hdr[4]--;
+            SSF_ASSERT(SSFTLSRecordDecrypt(&dec, hdr, frag, fragLen, frag, sizeof(frag), &outLen,
+                                           &ct));
+            SSF_ASSERT((outLen == sizeof(msg)) && (memcmp(frag, msg, sizeof(msg)) == 0));
+            SSFTLSRecordStateDeInit(&enc);
+            SSFTLSRecordStateDeInit(&dec);
+        }
     }
 
     /* SSFTLSRecordDecrypt rejects fragLen 0x4101, one past the 2^14 + 256 limit. */
@@ -912,8 +1012,8 @@ void SSFTLSUnitTest(void)
         oversizedRecord[3] = 0x41u;        /* fragLen = 0x4101 = 16641, just over the limit */
         oversizedRecord[4] = 0x01u;
 
-        SSF_ASSERT(SSFTLSRecordDecrypt(&decState, oversizedRecord, sizeof(oversizedRecord),
-                                       scratchPt, sizeof(scratchPt),
+        SSF_ASSERT(SSFTLSRecordDecrypt(&decState, oversizedRecord, &oversizedRecord[5],
+                                       sizeof(oversizedRecord) - 5u, scratchPt, sizeof(scratchPt),
                                        &scratchPtLen, &scratchCt) == false);
     }
 
@@ -946,8 +1046,8 @@ void SSFTLSUnitTest(void)
             /* Exactly 2^14 bytes: allowed, and round-trips. */
             SSF_ASSERT(SSFTLSRecordEncrypt(&encState, SSF_TLS_CT_APPLICATION, bigPt, 0x4000u,
                                            bigRecord, sizeof(bigRecord), &bigRecordLen) == true);
-            SSF_ASSERT(SSFTLSRecordDecrypt(&decState, bigRecord, bigRecordLen, bigDec,
-                                           sizeof(bigDec), &bigDecLen, &bigCt) == true);
+            SSF_ASSERT(SSFTLSRecordDecrypt(&decState, bigRecord, &bigRecord[5], bigRecordLen - 5u,
+                                           bigDec, sizeof(bigDec), &bigDecLen, &bigCt) == true);
             SSF_ASSERT(bigDecLen == 0x4000u);
             SSF_ASSERT(bigCt == SSF_TLS_CT_APPLICATION);
             SSF_ASSERT(memcmp(bigDec, bigPt, 0x4000u) == 0);
@@ -999,8 +1099,8 @@ void SSFTLSUnitTest(void)
 
         SSFTLSRecordStateInit(&decState, SSF_TLS_CS_AES_128_GCM_SHA256, key, sizeof(key), iv,
                               sizeof(iv));
-        SSF_ASSERT(SSFTLSRecordDecrypt(&decState, ovRecord, sizeof(ovRecord), ovDec,
-                                       sizeof(ovDec), &ovDecLen, &ovCt) == false);
+        SSF_ASSERT(SSFTLSRecordDecrypt(&decState, ovRecord, &ovRecord[5], sizeof(ovRecord) - 5u,
+                                       ovDec, sizeof(ovDec), &ovDecLen, &ovCt) == false);
         SSFTLSRecordStateDeInit(&decState);
     }
 
@@ -1030,8 +1130,8 @@ void SSFTLSUnitTest(void)
         memcpy(&record[5], msg, sizeof(msg));
         SSF_ASSERT(SSFTLSRecordEncrypt(&enc, SSF_TLS_CT_APPLICATION, &record[5], sizeof(msg),
                                        record, sizeof(record), &recordLen) == true);
-        SSF_ASSERT(SSFTLSRecordDecrypt(&dec, record, recordLen, out, sizeof(out), &outLen,
-                                       &ct) == true);
+        SSF_ASSERT(SSFTLSRecordDecrypt(&dec, record, &record[5], recordLen - 5u, out, sizeof(out),
+                                       &outLen, &ct) == true);
         SSF_ASSERT((outLen == sizeof(msg)) && (memcmp(out, msg, sizeof(msg)) == 0));
         SSF_ASSERT(ct == SSF_TLS_CT_APPLICATION);
 

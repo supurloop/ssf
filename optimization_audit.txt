@@ -1,0 +1,848 @@
+SSF OPTIMIZATION AUDIT: CODE SPACE, RAM AND PERFORMANCE
+=======================================================
+Audit date : 2026-11-24
+Scope      : the production modules changed in the 48 hours to commit da0a07e (branch mqtt):
+             ssftlsc, ssfx509, ssfbn, ssfmqttc, ssfmqttpkt, ssfnetsock, ssfcms, ssfpem,
+             ssfpkey, ssfsm, ssfdtime, ssfiso8601 (with their headers and _opt files).
+             Unit tests, tools and docs are out of scope; ssftls_certs.c was deleted.
+Status     : audit only. Nothing here has been implemented; every item is OPEN.
+
+HOW TO READ THIS FILE
+---------------------
+Labels      <MODULE>-<nn>, numbered within the module from largest potential to smallest.
+            SAFE-<nn> are correctness / safety issues found during the audit (not savings);
+            they come first.
+            Labels are permanent: when an item is done or rejected, change its Status line
+            rather than renumbering.
+Categories  CODE (flash: text + rodata), STACK (a function's frame or a call chain's peak),
+            STATIC (bss / data), STRUCT (a context or session struct the application
+            allocates), HEAP, PERF (time or power).
+Estimates   M = measured (a modified copy compiled with the flags below); E = estimated.
+            V = also re-checked by the main session (independent rebuild or test run).
+            Deltas are per item against the module baseline and are not always additive.
+Status      OPEN | DONE <commit> | REJECTED <reason>.
+
+Measurement
+  Cortex-M4: arm-none-eabi-gcc -mcpu=cortex-m4 -mthumb -Os -ffunction-sections
+  -fdata-sections, SSF_TLS_CONFIG_ENABLE_TRACE=0, unit tests off,
+  SSF_CONFIG_ENABLE_THREAD_SUPPORT=0. Stack from -fstack-usage. ssfnetsock uses POSIX
+  sockets, so it is measured with host gcc -Os (x86-64; relative only).
+
+  Note: the first measurement pass silently left unit tests on, because ssfassert.h and
+  ssfoptions.h include ssfport.h by quoted include. That inflated ssftlsc (16,074 B),
+  ssfbn (17,650 B) and ssfpem (739 B). The baselines below are the corrected ones (with
+  ssfassert.h and ssfoptions.h shadowed too). Any future measurement must shadow all three.
+
+  Prototypes: the auditors' modified copies are in the session scratch area
+  (OPT/<group>/); a reboot may clear them. Each item is described fully enough here to
+  redo without them.
+
+BASELINES AND POTENTIAL BY MODULE (largest potential first)
+------------------------------------------------------------
+Module      Code (B)  Static  Main potential
+ssftlsc       13,611     0    STRUCT -16.7 KB/session (43,264 -> ~26,560); CODE -685
+ssfbn         16,056     0    STACK verify -2,088, sign -1,040 (-5,648 with option); CODE linked -1.2..-2.2 KB
+ssfx509       13,175     0    STACK -4,448 (chain verify 6,336 -> 1,888); CODE -233; STRUCT -24..-359/cert
+ssfcms         3,408     0    STACK -1,392 (peak 8,016 -> 6,624, on top of X509-01); CODE -117
+ssfdtime       2,065     0    CODE -1,040 (-50%)
+ssfmqttc       5,239   304    HEAP -420 (E); CODE -332 (+ -120..-199 linked); STATIC -16..-92
+ssfiso8601     1,717     0    CODE -345 (-20%); STACK -40
+ssfsm          2,724   142    CODE -317; STACK -32 x 3 frames; STATIC -12
+ssfnetsock     2,315*  736*   STACK -272 / -240; STATIC -96 (-384 by config); CODE -129  (*host)
+ssfmqttpkt     2,050     0    CODE -77 (+ encoders unlinked via MQTTC-03)
+ssfpkey        1,653     0    STRUCT -16/key (E); PERF one Base64 pass per load
+ssfpem           719     0    PERF ~3.4x Base64 decode (+94 B); see SAFE-02
+shared ASN.1     --      --   CODE -140..-200 across ssfcms / ssfpkey / ssfx509 (E)
+
+=====================================================================================
+SAFETY / CORRECTNESS ISSUES FOUND DURING THE AUDIT (not savings; fix independently)
+=====================================================================================
+
+SAFE-01  ssfnetsock: fd_set overflow for a descriptor >= FD_SETSIZE                [V]
+  Location : _net/ssfnetsock.c:537 (lookup path), :907-908 (pollOpen)
+  Issue    : FD_SET(fd, ...) on a stack fd_set with no FD_SETSIZE bound anywhere. On a
+             glibc host a process with >= 1024 open descriptors writes past the fd_set
+             (or aborts under _FORTIFY_SOURCE). Embedded stacks (lwIP) use small fds.
+  Fix      : use poll() on POSIX (also NETSOCK-01), or check fd < FD_SETSIZE and fail.
+  Status   : OPEN
+
+SAFE-02  ssfbase64 (used by ssfpem / ssfpkey): data-dependent timing over key text    [V]
+  Location : _codec/ssfbase64.c:46-57 (_SSFBase64GetEncoding), called per quad from
+             _codec/ssfpem.c:166
+  Issue    : each Base64 character is decoded by a linear search of the 65-character
+             alphabet, so decode time depends on the character: a known side channel for
+             PEM private keys. ssfbase64 was not changed in the window; it is listed
+             because ssfpem / ssfpkey route private keys through it.
+  Fix      : branch-free range decode (A-Z, a-z, 0-9, +, /, = by masks). Measured: +94 B
+             code, 3.4x faster on the host (~150 -> ~40 cycles/char on M4, E); checked
+             against the old table for all 256 byte values. Also PEM-01.
+  Status   : OPEN
+
+SAFE-03  ssfbn: a window size that does not divide 32 silently gives wrong results     [V]
+  Location : _opt/ssfbn_opt.h:52-59 (SSF_BN_MODEXP_WIN_K), _crypto/ssfbn.c:2945
+  Issue    : nWindows = bits / k truncates for k not dividing 32. The option's comment
+             warns of this, but nothing enforces it: -DSSF_BN_MODEXP_WIN_K=3 builds an
+             RSA / EC library that computes wrong answers (the BN unit test fails at
+             ssfbn_ut.c:2561 with k=3, M).
+  Fix      : nWindows = (bits + k - 1) / k (loop count still exponent-independent;
+             SSFBNGetBit returns 0 past e->len), which also makes k=3 a valid stack choice
+             (BN-03); or at least an #error for non-divisors.
+  Status   : OPEN
+
+SAFE-04  ssfx509: SSF_X509_CONFIG_MAX_CHAIN_DEPTH cannot be overridden with -D
+  Location : _opt/ssfx509_opt.h:21 (no #ifndef guard)
+  Issue    : config hygiene, not a bug: the option cannot be set from the build line,
+             unlike the other SSF options.
+  Fix      : wrap it in #ifndef.
+  Status   : OPEN
+
+=====================================================================================
+ssftlsc  (TLS 1.3 client)          baseline: code 13,611 B; sizeof(SSFTLSCSession_t) 43,264 B
+=====================================================================================
+The auditor's cumulative prototype ("H": TLSC-01..07) passes the full SSFTLSCUnitTest
+(with 3 test adjustments: a buffer name, a removed recvBuf check, two scrub names for
+removed buffers), and was re-checked by the main session: all 158 local interop rows
+(tools/tlsc-interop) pass, the matrix with its group check relaxed (see TLSC-01's note).
+
+TLSC-01  STRUCT  -16,384 B per session (43,264 -> 26,824 with H)                  M V
+  Location : _net/ssftlsc.h:343-349; _net/ssftlsc.c:282-492, 540, 3645
+  What     : recvBuf (16,406 B, ciphertext) and hsBuf (16,385 B, plaintext) are two
+             full-size copies of each record; all three AEADs decrypt exactly in place
+             (GCM / CCM authenticate before writing).
+  Change   : read the 5-byte header into ioCtx.hdr[5] and the fragment straight to
+             &hsBuf[hsBufLen]; decrypt in place there (the AAD header placed in 5 bytes of
+             headroom just before the fragment and restored, or a separate-header decrypt
+             in ssftls); plaintext records need no memcpy. hsBuf +16 B for the tag; the
+             message cap stays MAX_RECV+1. Saves about MAX_RECV_RECORD+1 at any receive size.
+  Risk     : medium. Header checks, alerts, constant-time AEAD and wiping are unchanged
+             (one buffer to wipe instead of two). Invariant: a record may be part-received
+             only while hsBufPos == 0, so compaction never strands fragment bytes.
+             Prototype H also dropped the "ServerHello: suite / group" trace when it merged
+             the two ServerHello paths (TLSC-03): keep that trace.
+  Status   : DONE (2026-11-24): design 1B (SSFTLSRecordDecrypt takes the header
+             and fragment apart), separate plaintext / protected fit checks at the header,
+             an assert that the fragment's destination never moves mid-record. Measured
+             (M4, unit tests off): session 43,264 -> 26,888 B (-16,376 B); ssftlsc code
+             +10 B (13,615 B; the audit's fixes: a distinct trace for a plaintext record
+             over 2^14, and protected handshake messages capped one byte lower, refused at
+             their header); ssftls code +40 B (the pt / frag / hdr overlap rules).
+
+TLSC-02  STRUCT  -264 B per session (26,824 -> 26,560 on top of H)                M
+  Location : _net/ssftlsc.h:164-197, 256-259, 293-296
+  What     : fields whose lifetimes never overlap have separate storage: the three
+             cryptoWork phases (key share; chain pointers, time, error; CV content and
+             signature); serverHsTrafficSecret vs serverAppTrafficSecret (the app secret
+             exists only after the server Finished verifies); ephemeralPrivKey vs
+             savedHandshakeSecret.
+  Change   : unions; wipe ephemeralPrivKey straight after ECDH, before saving the
+             handshake secret.
+  Risk     : medium. Every secret is still overwritten or zeroed at end of life; the
+             scrub-hook unit tests need the new names. Code not prototyped.
+  Status   : OPEN
+
+TLSC-03  CODE  -185 B                                                              M
+  Location : _net/ssftlsc.c:757-811 (_BuildClientHello)
+  What     : ~45 _W8 / _W16 calls emit constant bytes (suites, supported_versions,
+             groups, signature_algorithms, psk_key_exchange_modes, record_size_limit).
+  Change   : three static const byte templates (63 B rodata), one _WBytes each; the
+             bytes sent are identical (the RFC 8448 replays and ClientHello tests check).
+  Risk     : low.
+  Status   : OPEN
+
+TLSC-04  CODE  -176 B                                                              M
+  Location : _net/ssftlsc.c:1753-1797 (case 11) vs 1584-1752 (case 4)
+  What     : the second-ServerHello path repeats receive, type check, record end, HRR
+             sentinel, parse and stash.
+  Change   : after sending ClientHello2, return to case 4; there, the HRR sentinel with
+             hrrDone set is "double HRR". Keep the "ServerHello after HRR" trace.
+  Risk     : low.
+  Status   : OPEN
+
+TLSC-05  CODE / STACK  -116 B code; _SSFTLSCReset frame 96 -> 8 B                  M
+  Location : _net/ssftlsc.c:3074-3106; _net/ssftlsc.h:235-365
+  What     : Reset saves 12 config fields to the stack, zeroes 43 KB, restores them.
+  Change   : place the fields kept across connections (inner, magic, trace, trust,
+             client chain / key, ALPN, the opt-in flag) right after transport; de-init the
+             record states and wipe from the first per-connection field to the end.
+  Risk     : low; the wipe covers the same bytes.
+  Status   : OPEN
+
+TLSC-06  CODE / STRUCT  -96 B code, -64 B struct                                   M
+  Location : _net/ssftlsc.h:166-196, 358-359; _net/ssftlsc.c:1360-1454, 1746, 1791,
+             2676-2683, 2840, 2856, 3214-3302, 3430
+  What     : cryptoWork keeps plumbing from an old asynchronous design: void* work
+             functions, a session back-pointer, hostname (always = host), leafPubKey / Len
+             (always = hsScratch / hsScratchLen), three result flags, hsHostname, and
+             hsPort (never read); serverPubKey[133] is sized for P-521 (largest share 97).
+  Change   : static bool f(session) steps; delete those fields; serverPubKey[97].
+  Risk     : low.
+  Status   : OPEN
+
+TLSC-07  CODE / STACK / PERF  -76 B code; _TlscHandleSendCH frame -128 B; one SHA pass M
+  Location : _net/ssftlsc.c:1510, 1564, 1632-1643, 1721-1743
+  What     : ClientHello1 is hashed with SHA-256 at build time and re-hashed when the
+             suite is SHA-384; the HRR path keeps a temporary transcript context (232 B)
+             on the stack.
+  Change   : start the transcript only once the ServerHello is parsed (CH + SH with the
+             negotiated hash); for HRR, hash ClientHello1 one-shot.
+  Risk     : low; the ClientHello stays in hsScratch meanwhile.
+  Status   : OPEN
+
+TLSC-08  CODE / STACK / PERF  -52 B code; key-exchange frames 376+720 -> 304 B;
+         _TlscHandleRecvFinSendFin 688 -> 424 B; ~10 SHA compressions per handshake     M (E perf)
+  Location : _net/ssftlsc.c:1183-1251, 1299-1311, 2944, 2995-3000
+  What     : Hash(""), the early secret Extract(0,0) and Derive-Secret(early,"derived")
+             are public constants recomputed every handshake (with two 48 B zero buffers
+             and a transcript context); the ECDH secret goes through ecdhSecret then
+             sharedSecret; savedHandshakeSecret is copied before _DeriveAppKeys.
+  Change   : const tables for the SHA-256 / SHA-384 empty hashes and "derived" secrets
+             (the SHA-256 values match RFC 8448); ECDH straight into sharedSecret; pass
+             savedHandshakeSecret directly.
+  Risk     : low; nothing secret is precomputed, every remaining secret is still wiped.
+  Status   : OPEN
+
+TLSC-09  CODE (trace on only)  -1,516 B with SSF_TLS_CONFIG_ENABLE_TRACE=1           M
+  Location : _crypto/ssftls.h:80-87 (_SSF_TLS_TRACE); 122 sites in ssftlsc.c
+  What     : each trace site inlines a null test, a 256 B buffer, snprintf and the call.
+             Frames shrink too (_ClientChainAcceptable 1,184 -> 936, _SaveLeafKey 1,168 ->
+             912; _SSFTLSCDrive's 968 leaves the top frames).
+  Change   : one out-of-line SSFTLSTraceF(ctx, level, cat, fmt, ...) using vsnprintf; it
+             helps every ssftls trace user.
+  Risk     : low. Zero effect with tracing off.
+  Status   : OPEN
+
+TLSC-10  PERF  one transcript snapshot per WANT_READ poll while waiting for the
+         CertificateVerify and the server Finished (232 B copy + 1-2 compressions,
+         ~3-15 kcycles each; hundreds per handshake with fast polling on a slow link)   E (+8 B code M)
+  Location : _net/ssftlsc.c:2764, 2964
+  Change   : let _RecvHandshakeOnce take an optional output and hash once the message is
+             complete, before it is added; the CV hash can go straight into
+             cryptoWork.contentHash.
+  Risk     : low.
+  Status   : OPEN
+
+TLSC-11  PERF  mutual TLS: per CertificateVerify / Finished record, a memcpy plus a
+         secure-zero of the whole send-record size (8 KB by default) for ~0.6 KB of data  E
+  Location : _net/ssftlsc.c:2140, 2152
+  Change   : pass &msg[off] straight to _SendEncRecordOnce; the staging copy and its wipe
+             go (the flight is already in hsScratch, wiped at line 3350).
+  Risk     : low.
+  Status   : OPEN
+
+TLSC-12  PERF  mutual TLS: the fixed client chain is re-parsed every handshake, and the
+         server leaf is parsed by both _SaveLeafKey and the chain verifier                 E
+  Location : _net/ssftlsc.c:2310-2349, 2516-2535
+  Change   : compute the chain's signature-scheme needs (a small bitmask) once in
+             SSFTLSCSetClientCert; dropping the leaf re-parse needs ssfx509 to return the
+             leaf key (cross-module).
+  Risk     : medium; the validity warning still needs the current time.
+             Note: the ~900 B SSFX509Cert_t frames (_ClientCertMatchesKey,
+             _ClientChainAcceptable, _SaveLeafKey, _IsOneCert) are never live together, so
+             merging them saves nothing. None of the ssftlsc items lowers the global
+             pollOpen stack peak, which is inside ssfx509 / ssfrsa / ssfbn.
+  Status   : OPEN
+
+TLSC-13  STRUCT  hsScratch sized to the build (punch list item, 2026-11-24): ~450 B in a
+         build with hosts <= 64 B, RSA <= 2048 and ~256 B of cookie room                    E
+  Location : _net/ssftlsc.h (hsScratch, host[]); _net/ssftlsc_punchlist.md
+  Change   : SSF_TLSC_CONFIG_MAX_HOST_LEN and a derived scratch size; see the punch list.
+  Status   : OPEN (not scheduled)
+
+ssftlsc measured total (trace off): code 13,611 -> 12,926 B (-685 B, -5.0%); session
+43,264 -> 26,560 B (-16.7 KB, -38%).
+
+=====================================================================================
+ssfbn  (big-number arithmetic)     baseline: code 16,056 B (object); bss 0
+=====================================================================================
+All changes passed the repo's BN, RSA, EC and ECDSA unit tests on the host (against
+OpenSSL) in the auditor's cumulative copy (only white-box _scrubCalls counts relaxed).
+Linked deltas from --gc-sections links for verify / sign / EC / keygen symbol sets. The
+main session re-measured the frames of SSFBNModExpMontPub, ModExpMont, MontInit,
+GenPrime and the removal of _SSFBNModInvExtEuclid on the cumulative copy (V).
+
+BN-01  STACK  SSFBNModExpMont 10,440 -> 4,792 B at RSA-4096 (sign chain 12,624 ->
+       ~6,976 B) with an option to size it for the half-width moduli in use              M
+  Location : _crypto/ssfbn.c:2864, 2888-2891
+  What     : the table and working values are sized for a full-width modulus, but every
+             in-tree secret ModExp uses a half-width one (RSA CRT p and q; ModInv qInv mod
+             p; IsProbablePrime on half-size candidates). This frame is on the TLS
+             client's RSA client-certificate signing path (ssftlsc.c:2210).
+  Change   : option SSF_BN_MODEXP_MAX_LIMBS (default SSF_BN_MAX_MOD_LIMBS) for
+             ModExpMont, ModExp and ModInv; RSA builds set SSF_RSA_MAX_HALF_LIMBS.
+             ModExp's own mont drops ~540 B more if sized the same way (E).
+  Risk     : medium; constant-time unchanged; full-width SSFBNModExp unit tests need the
+             default or gating. Combines with BN-03 / BN-04.
+  Status   : OPEN
+
+BN-02  STACK / CODE / PERF  SSFBNModExpMontPub frame 3,128 -> 1,072 B; RSA verify chain
+       5,344 -> 3,256 B (-2,088 with BN-06); -39 B code; e=65537 10% faster (host)       M V
+  Location : _crypto/ssfbn.c:3015-3016, 3053-3061
+  What     : result, aM and one are sized SSF_BN_MAX_LIMBS (2N, 1 KB each) but only hold
+             residues; the loop starts from Mont(1), wasting a square, a multiply and a
+             ConvertIn.
+  Change   : size them SSF_BN_MAX_MOD_LIMBS; result = aM (the top bit of e is 1); drop
+             one; loop from eBits-2.
+  Risk     : low; public-exponent path only (verify, blinding r^e).
+  Status   : OPEN
+
+BN-03  STACK  k=3 windows: ModExpMont 9,400 -> 5,240 B (2,680 B with BN-01); +5%
+       exponentiation time (host; k=2 costs +18%)                                        M
+  Location : _crypto/ssfbn.c:2945; _opt/ssfbn_opt.h:57
+  Change   : needs SAFE-03's rounding fix; then k=3 (8-entry table) is a valid choice.
+  Risk     : low once SAFE-03 is fixed; loop count stays exponent-independent.
+  Status   : OPEN
+
+BN-04  STACK / CODE  ModExpMont frame -1,040 B (10,440 -> 9,400); -56 B code            M V
+  Location : _crypto/ssfbn.c:2888, 2919, 2927-2932
+  What     : aM is an exact copy of table[1]; one exists only to build table[0].
+  Change   : ConvertIn straight into table[1] and multiply by it; table[0] =
+             ConvertIn(SetOne()) in place (ConvertIn allows aliasing).
+  Risk     : low; constant-time and the wiping of table / result unchanged.
+  Status   : OPEN
+
+BN-05  STACK  _SSFBNModInvExtEuclid 9,344 -> 5,248 B (keygen)                          M
+  Location : _crypto/ssfbn.c:1721-1727, 1760, 1825
+  What     : 9 of 10 bignums are 2N wide; only prod (quotient x cur_s) needs it.
+  Change   : size the rest SSF_BN_MAX_MOD_LIMBS; SSF_REQUIRE(m->len <= MAX_MOD_LIMBS).
+  Risk     : low; keygen only (already variable-time over the secret lambda, unchanged).
+             Superseded by BN-07 if that is taken.
+  Status   : OPEN
+
+BN-06  STACK / CODE  SSFBNMontConvertOut chain 1,136 -> 592 B; -40 B code               M
+  Location : _crypto/ssfbn.c:2842-2858; MontMul :2578
+  What     : a 512 B "one" local exists only for MontMul(aR, 1).
+  Change   : a static _SSFBNMontMulCore(r, al, b, ctx) where al == NULL means 1.
+  Risk     : low; the branch depends only on the pointer and the loop index (public).
+  Status   : OPEN
+
+BN-07  CODE / STACK  -1,388 B linked code in sign-capable (non-keygen) builds; removes the
+       9.3 KB Euclid frame from the sign path's static worst case                       M
+  Location : _crypto/ssfbn.c:1951; _crypto/ssfrsa.c:647, 1061
+  What     : blinding always takes the binary path (n odd, r < n), but ModInvExt still
+             references Euclid, which only keygen's 65537^-1 mod lambda needs.
+  Change   : make ModInvExt odd-only; in keygen compute d with the fixed small e:
+             k = (-lambda^-1) mod e (32-bit), d = (1 + k*lambda) / e (MulUint32,
+             AddUint32, a ~40 B exact divide by uint32); Euclid (696 B) can then go; net
+             keygen saving ~-500 B (E).
+  Risk     : medium; public API change for even m; better for side channels than Euclid
+             on the secret lambda; keygen vectors unaffected (d is unique).
+  Status   : OPEN
+
+BN-08  CODE  -1,120 B linked in the EC set at the RSA cap (-972 B in an EC-only build)   M
+  Location : _crypto/ssfbn.c:2290-2291
+  What     : ModMulNIST falls back to the generic ModMul (pulling in Mod, ModShift,
+             ModMont...), but every ssfec / ssfecdsa caller passes &c->p.
+  Change   : put the fallback behind an option (default off), SSF_REQUIRE otherwise.
+  Risk     : low; API narrowing; the BN fallback test needs the option on.
+  Status   : OPEN
+
+BN-09  STACK / CODE  SSFBNMontInit 1,080 -> 32 B; -76 B code                            M V
+  Location : _crypto/ssfbn.c:2493, 2523-2556
+  What     : R^2 is built in a 2N local, copied into ctx->rr, then wiped.
+  Change   : build it in place in ctx->rr (MontSquare does not read rr).
+  Risk     : low (one secret copy fewer); scrub-count expectations drop by 1 per init.
+  Status   : OPEN
+
+BN-10  STACK  SSFBNModInv 2,088 -> 544 B                                                M
+  Location : _crypto/ssfbn.c:2300, 2327
+  Change   : exp sized MAX_MOD_LIMBS, reused for the check.
+  Risk     : low.
+  Status   : OPEN
+
+BN-11  STACK  SSFBNGenPrime 1,088 -> 56 B (keygen)                                      M V
+  Location : _crypto/ssfbn.c:3400-3425
+  What     : buf[SSF_BN_MAX_BYTES] is 1 KB, twice the largest prime produced.
+  Change   : SSFBNRandom straight into p; mask the top limb, set the top two and low bits;
+             zeroize p on failure.
+  Risk     : low; changes which candidate a fixed PRNG seed gives (tests pass).
+  Status   : OPEN
+
+BN-12  STACK / CODE  SSFBNGcd 3,120 -> 2,088 B; -31 B code                               M
+  Location : _crypto/ssfbn.c:1601 (and the swap in the main loop)
+  Change   : swap SSFBN_t pointers instead of three full-width copies through tmp.
+  Risk     : low; keygen; variable-time behaviour unchanged.
+  Status   : OPEN
+
+BN-13  CODE / PERF  -860 B linked keygen code (libgcc __aeabi_uldivmod / __udivmoddi4);
+       trial division ~5x faster on M4, ~5-10% of RSA keygen                         M (E perf)
+  Location : _crypto/ssfbn.c:3145-3158, 3439
+  What     : uint64 % d per limb for 255 primes < 2^16 per candidate.
+  Change   : a static _SSFBNModUint16 (two 16-bit steps per limb with 32-bit %).
+  Risk     : low; keygen only.
+  Status   : OPEN
+
+BN-14  CODE / PERF  -484 B linked keygen code; Miller-Rabin squares ~16 -> 2 Montgomery
+       operation equivalents (~1% of keygen)                                         M (E perf)
+  Location : _crypto/ssfbn.c:3347
+  Change   : ConvertIn(x) once; per round MontSquare then ConvertOut into a; compare a.
+  Risk     : low; constant-time Montgomery operations.
+  Status   : OPEN
+
+BN-15  CODE / STACK  -268 B linked sign code; the 3,144 B _SSFBNModMulCTShift frame
+       and the Karatsuba chain leave ModMulCT's static worst case                       M
+  Location : _crypto/ssfbn.c:1451-1497, 1568
+  What     : the even-modulus shift-and-subtract path is never used (n, p, q are odd).
+  Change   : behind an option.
+  Risk     : low; the even-modulus test needs the option on.
+  Status   : OPEN
+
+BN-16  CODE  -241 B rodata in keygen builds                                             M
+  Location : _crypto/ssfbn.c:122
+  What     : a uint16 table of 255 primes, including 2 (never a divisor of an odd candidate).
+  Change   : a uint8 table of half-gaps from 3 with a running sum.
+  Risk     : low.
+  Status   : OPEN
+
+BN-17  CODE  0 B with --gc-sections (556 B in the object)                                M
+  Location : _crypto/ssfbn.c:393, 431, 1089, 3079 (FromBytesLE, ToBytesLE, MulUint32,
+             CondSwap: no callers in SSF)
+  Change   : none while --gc-sections is used (BN-07 would reuse MulUint32).
+  Status   : OPEN (informational)
+
+ssfbn measured total: object 16,056 -> 14,601 B (-1,455 B). Linked: verify -206 B,
+sign -1,878 B, EC -1,236 B, keygen -2,179 B. Stack: verify peak -2,088 B; sign ModExp
+chain -1,040 B (-5,648 B with BN-01, -4,160 B more with BN-03); keygen Euclid -4,096,
+GenPrime -1,032, ModInv -1,544, Gcd -1,032, MontInit -1,048 B. Not worth it: merging
+ModMulSmall and _SSFBNModMulCTMont (-40 / +36 B).
+
+=====================================================================================
+ssfx509  (certificate parser and chain verifier)     baseline: code 13,175 B; bss 0
+=====================================================================================
+sizeof(SSFX509Cert_t) = 888 B (V): header 212 B (two 60 B Names), exts 320, san 96,
+two Name Constraints arrays 96 each, ~48 B of small fields (23 B padding).
+
+X509-01  STACK  SSFX509VerifyChainPurpose frame 6,336 -> 1,888 B; +65 B code          M V
+  Location : _codec/ssfx509.c:3668-3975; _SSFX509FindAnchor 3639-3659
+  What     : certs[MAX_CHAIN_DEPTH] plus anchor keeps 7 parsed certificates (6,216 B)
+             live; every step needs only two at once (current + issuer / anchor, CA +
+             subordinate, anchor + path certificate). The old frame grows ~888 B per unit
+             of MAX_CHAIN_DEPTH; the new one is fixed.
+  Change   : SSFX509Cert_t slot[2] with pointer swaps; parse candidates lazily in the
+             issuer loop (replaces isParsed[]); FindAnchor returns the anchor index; re-parse
+             from DER for the post-path checks (CA checks, anchor pathLen and Name
+             Constraints, leaf EKU / KU, intermediate Name Constraints, critical
+             extensions, hostname); a failed re-parse fails closed with ERR_PARSE. Check
+             order, rank logic and errOut codes unchanged. ~1% slower for a 3-certificate
+             chain (extra parses, M on host). Also: tidy the _WIN32 pragma pair, fix the
+             stale "about 1.5 KB each" option comment (it is 888 B), update ssfx509.md.
+  Tested   : ssfx509 and ssfcms unit tests (auditor); SSFTLSCUnitTest with the prototype,
+             ASan / UBSan clean (main session, V).
+  Risk     : medium effort, low risk; every check still runs; the DER already must outlive
+             the parse. Lowers the TLS client's pollOpen peak and CMS's (CMS-01).
+  Status   : OPEN
+
+X509-02  STRUCT  up to -335 B per certificate (888 -> ~553)                              E
+  Location : _codec/ssfx509.h:71-114, 128-131; ssfx509.c:535, 439-451
+  What     : fields nothing in SSF reads (only the unit tests and possibly applications;
+             documented in ssfx509.md:318/322): SSFX509Ext_t value / valueLen (-128 B),
+             the Name cn/o/ou/c/st/l pointers (-96 B), uint16 valLen in SAN and Name
+             Constraints entries (-96 B), outer sigAlg fields (-15 B, a parse-time bool).
+  Change   : options such as SSF_X509_CONFIG_KEEP_DN_ATTRS / _EXT_VALUES (default on;
+             also removes the DN dispatch code); narrow the lengths (MAX_CERT_SIZE is 4096);
+             store outerSigAlgMatches at parse time.
+  Risk     : medium; public API and unit tests change; every check keeps its data.
+             The saving multiplies by every live SSFX509Cert_t (2 in the verifier after
+             X509-01, the TLS client's frames, CMS's signer).
+  Status   : OPEN
+
+X509-03  CODE  -176 B                                                                     M
+  Location : _codec/ssfx509.c:439-451 (DN), 540-796 (extension dispatch), 3555-3567
+  What     : 13 + 7 _SSFX509OIDMatch calls against 3-byte OIDs that differ only in the
+             last byte (2.5.4.x, 2.5.29.x).
+  Change   : _SSFX509OIDArc3(oid, len, p1) returning oid[2] for len 3 with prefix
+             0x55, p1 (else 0); dispatch on the arc; IsKnownExtension as a switch. Exactly
+             equivalent.
+  Risk     : low.
+  Status   : OPEN
+
+X509-04  CODE  -50 B (PKCS#1 and PSS both enabled)                                        M
+  Location : _codec/ssfx509.c:228-275 (_SSFX509PSSHashAlgId) and 2931-2953
+             (_SSFX509HashFromOID)
+  Change   : one SHA-256/384/512 OID match, shared.
+  Risk     : low.
+  Status   : OPEN
+
+X509-05  STRUCT / CODE  -24 B per certificate (888 -> 864); -14 B code (-72 B on top of
+         X509-01)                                                                         M
+  Location : _codec/ssfx509.h:117-189
+  What     : uint8 / bool / uint16 fields scattered between pointers (23 B padding).
+  Change   : put the 3 uint16 and 13 uint8 / bool fields first, then notBefore / notAfter,
+             then the pointer / length pairs (at the end they grew code 88 B: offsets past
+             31 lose Thumb-16 ldrb / strb). Source compatible; ABI change only.
+  Risk     : low.
+  Status   : OPEN
+
+X509-06  PERF  ~30x cheaper rejection of each non-matching trust anchor (0.015 vs
+         0.40-0.53 us per anchor, host); today trustCount x pathLen full parses; +156 B code M
+  Location : _codec/ssfx509.c:3639-3659; candidate loop ~3755
+  Change   : _SSFX509PeekSubject (skip to the subject TLV) and memcmp against issuer.raw
+             before SSFX509Parse; the matching anchor is still fully and strictly parsed.
+  Risk     : low. Worth it for trust stores of ~10+ anchors (e.g. the 118 system roots);
+             otherwise optional.
+  Status   : OPEN
+
+X509-07  CODE  5,184 B of the object is the encoder (SSFX509EncodeTBS / EncodeCert),
+         never called by the TLS client or CMS                                            M
+  Location : _codec/ssfx509.c ~1490-2530 (_SSFX509Enc*, _SSFX509RequireGenParams)
+  Change   : already dropped by --gc-sections; add SSF_X509_CONFIG_ENABLE_ENCODE (default
+             1) for toolchains without section GC; confirm with a map file.
+  Risk     : low.
+  Status   : OPEN (informational with --gc-sections)
+
+Tried and dropped: sharing a helper across the 12 IsKey* / IsSig* wrappers (+4 B, M).
+ssfx509 measured total: stack -4,496 B (6,336 -> 1,840 with X509-05), code -233 B
+(13,175 -> 12,942), struct -24 B per certificate; X509-06 separately +156 B.
+
+=====================================================================================
+ssfcms  (CMS / PKCS#7 signed data)     baseline: code 3,408 B; bss 0
+=====================================================================================
+CMS-01  STACK  peak through chain verification 8,016 -> 6,624 B (-1,392 B), on top of
+        whatever X509-01 saves; +113 B code                                               M
+  Location : _crypto/ssfcms.c:672-887 (_SSFCMSVerifySigner)
+  What     : signerCert (SSFX509Cert_t, 888 B) and attrs[512] stay live while
+             SSFX509VerifyChainPurpose runs.
+  Change   : a noinline _FindSignerDer (parse into a local, return only the DER span);
+             verify the chain from the slim outer frame; then a noinline _VerifySignerSig
+             (re-parse the chain-verified DER, copy and re-tag the attrs,
+             SSFX509VerifySignature, fill the result). A failed re-parse fails closed.
+  Risk     : medium-low; check order and fail-closed behaviour kept.
+  Status   : OPEN
+
+CMS-02  CODE  -64 B (3,408 -> 3,344)                                                      M
+  Location : _crypto/ssfcms.c:60-90, 142-161
+  What     : nine 9-byte OIDs sharing three 8-byte prefixes (PKCS#7, PKCS#9, NIST hash).
+  Change   : store the prefixes, match with _Oid9(oid, len, pfx, last); DigestAlgFromOID
+             becomes one prefix compare plus oid[8] in 1..3. Exact-length match kept.
+  Risk     : low.
+  Status   : OPEN
+
+CMS-03  CODE  -55 B (with CMS-02: -117 B, 3,291)                                          M
+  Location : _crypto/ssfcms.c:645-665 (_SSFCMSFindSignerCert)
+  What     : two identical parse-and-match loops (embedded certificates, trust anchors).
+  Change   : one loop over certsLen + trustCount choosing the DER source by index.
+  Risk     : low.
+  Status   : OPEN
+
+CMS-04  STACK  -64 B frame (1,608 -> 1,544), -1 B code: fallback if CMS-01 is not taken  M
+  Location : _crypto/ssfcms.c:680-681
+  Change   : union computed[64] (dead once attrs is written) with attrs[512].
+  Risk     : low.
+  Status   : OPEN
+
+CMS-05  STRUCT  SSFCMSSignedData_t 344 -> 312 B, SignerInfo 128 -> 120, VerifyResult
+        80 -> 72 (a sid union saves ~8 B more per signer, E)                               M
+  Location : _crypto/ssfcms.h
+  Change   : uint64 signingTime first, bool / uint8 grouped last; union sidIssuer / serial
+             with sidSkid (v1 and v3 are exclusive).
+  Risk     : low; ABI only.
+  Status   : OPEN
+
+=====================================================================================
+ssfdtime  (date / time)     baseline: code 2,065 B; bss 0
+=====================================================================================
+All three checked by brute force on the host against the original (every day
+0..84,007; 5.4 M random times): identical results.
+
+DTIME-01  CODE  -932 B (2,065 -> 1,133)                                                   M V
+  Location : _time/ssfdtime.c:96-120, 167-190
+  What     : _unixDaysToYear[231] is a 924 B uint32 table used only for the year search.
+  Change   : compute d = 365*y + ((y+1)>>2) - (y > 130) (the formula SSFDTimeStructInit
+             already uses), then i = unixDays/366 and 1-2 steps forward.
+  Risk     : low; speed about the same.
+  Status   : OPEN
+
+DTIME-02  CODE  -100 B more (1,133 -> 1,033)                                              M V
+  Location : _time/ssfdtime.c:58-63 (SSFDTIME_MONTH_DAY), 192-211
+  Change   : a 12-step loop over _daysInMonth (+1 for February in a leap year) instead of
+             the macro unrolled 11 times.
+  Risk     : low.
+  Status   : OPEN
+
+DTIME-03  PERF / CODE  64-bit divides in SSFDTimeUnixToStruct 6 -> 2 (~0.5-1 k cycles
+          per call on M4, E); -8 B code (1,025)                                         M (E perf) V
+  Location : _time/ssfdtime.c:281-285
+  Change   : one 64-bit divide for unixDays; sec / min / hour from the second of day with
+             32-bit arithmetic.
+  Risk     : low.
+  Status   : OPEN
+
+=====================================================================================
+ssfmqttc  (MQTT client)     baseline: code 5,239 B; bss 304 B (default config:
+RX_PUBLISH_QUEUE_DEPTH 4: control pool 6 blocks, rx pool 5)
+=====================================================================================
+MQTTC-01  HEAP / STATIC  ~-420 B heap, -32 B bss (default config)                         E
+  Location : _net/ssfmqttc.c:50-55, 280-289, 344-386, 1165-1166
+  What     : PINGREQ, DISCONNECT and PUBACK (2-4 byte packets) each take a 68 B pool block
+             (packet, 48 B publish header with deadline / txFn / ctx, pool link, guard).
+  Change   : a FIFO ring of uint16 PUBACK ids (queue depth), pingPending /
+             disconnectPending flags and a 4 B staging buffer for a partly sent control
+             packet; send pending control packets between whole tx packets; DISCONNECT
+             only once the tx queue is empty. Smaller step: a separate 24 B header for
+             control blocks: -144 B heap (E).
+  Risk     : medium-high; PUBACK order is kept; reserve logic and control-pool exhaustion
+             tests need rework.
+  Status   : OPEN
+
+MQTTC-02  CODE  -262 B (5,239 -> 4,977)                                                   M V
+  Location : _net/ssfmqttc.c:764-766, 790-792, 929-931, 999-1001, 1037-1039, 1074-1076,
+             1104-1106
+  What     : the 7 static state handlers repeat 3 SSF_REQUIREs each (eid range,
+             data / dataLen, superHandler) for values only ssfsm supplies.
+  Change   : drop them, or check once in the ssfsm dispatcher. No received data passes
+             through them.
+  Risk     : low; departs from the "require every parameter" style (owner's call).
+  Status   : OPEN
+
+MQTTC-03  CODE  -144 B linked (-24 B ssfmqttc, -120 B SSFMQTTPktEncodePingReq /
+          EncodeDisconnect unlinked); -199 B with PUBACK inline too                       M
+  Location : _net/ssfmqttc.c:354-356, 368, 633-637
+  What     : the constant packets C0 00, E0 00 and 40 02 id id go through the generic
+             encoder; _SSFMQTTCTransportClose re-encodes DISCONNECT on the stack each time.
+  Change   : write the bytes directly (a static const {0xE0, 0x00} for the best-effort
+             DISCONNECT).
+  Risk     : low; weakens "only ssfmqttpkt encodes" (the bytes are fixed by MQTT 3.1.1).
+  Status   : OPEN
+
+MQTTC-04  STATIC  -76 B bss                                                               E
+  Location : _net/ssfmqttc.c:129, 1244
+  What     : Start() copies the whole 80 B SSFMQTTCOpts_t, though every pointer in it must
+             already stay valid until STOPPED.
+  Change   : keep a const pointer; document that opts must stay valid.
+  Risk     : medium; API contract change (a stack-local opts would break).
+  Status   : OPEN
+
+MQTTC-05  HEAP  SSFMQTTCRxBlock_t 48 -> 40 B: -40 B for 5 rx blocks; +16 B code           M
+  Location : _net/ssfmqttc.c:85-93, 705-708, 733
+  Change   : lastOffer as a uint32 offset from firstOffer (always < RX_PUBLISH_MAX_TICKS);
+             group qos / retain / dup. Add a compile-time check RX_PUBLISH_MAX_TICKS <=
+             UINT32_MAX.
+  Risk     : low.
+  Status   : OPEN
+
+MQTTC-06  CODE  -34 B                                                                     M
+  Location : _net/ssfmqttc.c:828-839
+  Change   : the CONNACK return-code switch becomes arithmetic on contiguous reason values
+             (with a static assert on the enum order).
+  Risk     : low.
+  Status   : OPEN
+
+MQTTC-07  STATIC / STRUCT  -16 B bss (304 -> 288), -6 B code; app SSFMQTTCOpts_t
+          80 -> 72 B                                                                      M
+  Location : _net/ssfmqttc.c:129-148; _net/ssfmqttc.h:158-179
+  Change   : reorder fields to remove padding.
+  Risk     : low; public struct layout (ABI) change.
+  Status   : OPEN
+
+MQTTC-08  HEAP  SSFMQTTCTxBlock_t 48 -> 40 B: -8 B per tx / control block; -6 B code      M
+  Location : _net/ssfmqttc.c:75, 399, 424, 1420
+  What     : isTxPublish always equals (type == PUBLISH); the bool adds 7 B of padding.
+  Change   : remove it, test the type.
+  Risk     : low.
+  Status   : OPEN
+
+MQTTC-09  PERF  received-buffer memmove O(packets x bytes) -> O(bytes) (e.g. 50 PUBACKs in
+          one recv: ~5 KB moved -> <= 200 B); +6 B code                              M (E perf)
+  Location : _net/ssfmqttc.c:485-492, 599-621
+  Change   : walk the packets with a local offset, compact once at the end.
+  Risk     : low; bounds checks unchanged.
+  Status   : OPEN
+
+MQTTC-10  PERF  ~3 fewer passes over the topic per publish                                E
+  Location : _net/ssfmqttc.c:1408-1416; _net/ssfmqttpkt.c:406, 410
+  Change   : pass the known topic length into the encoder.
+  Risk     : low-medium (API).
+  Status   : OPEN
+
+ssfmqttc measured total: -332 B code (MQTTC-02, 03, 06, 07, 08), -16 B bss; heap -8 B per
+tx / control block and -40 B for the rx blocks.
+
+=====================================================================================
+ssfiso8601  (ISO 8601)     baseline: code 1,717 B; bss 0
+=====================================================================================
+ISO-01  CODE / STACK / PERF  -272 B code (1,644 -> 1,372 after ISO-03); ISOToUnix stack
+        96 -> 88 B                                                                         M
+  Location : _time/ssfiso8601.c:203-264, 312-336
+  What     : each 2-digit field is checked as digits, then re-parsed with the general int64
+             parser SSFDecStrToInt (8 calls).
+  Change   : _Get2(p, max, &v): two digit checks, 10*a+b, <= max; year as two Get2.
+             Separator checks stay explicit. 2 M round-trips and 6 M mutated strings matched
+             the original exactly.
+  Risk     : low.
+  Status   : OPEN
+
+ISO-02  PERF / CODE  -44 B; ~11 uint64 decimal conversions per format removed (~1-2 k
+        cycles, E)                                                                        M
+  Location : _time/ssfiso8601.c:110-120, 146-160
+  Change   : _Put2(p, v) for year (as two), month, day, hour, min, sec, zone; keep the
+             library calls for fractional and pseudo-seconds. Byte-identical on 2 M cases.
+  Risk     : low.
+  Status   : OPEN
+
+ISO-03  STACK / CODE  -32 B stack (128 -> 96), -29 B code                                 M
+  Location : _time/ssfiso8601.c:194
+  What     : const uint32_t _fsecScale[8] is a non-static local, copied onto the stack each
+             call.
+  Change   : static const.
+  Risk     : trivial.
+  Status   : OPEN
+
+=====================================================================================
+ssfsm  (state machine framework)     baseline: code 2,724 B; bss 142 B
+=====================================================================================
+SM-01  PERF / CODE / STACK  -149 B code; SSFSMTask 96 -> 64 B, StopAllTimers 64 -> 32,
+       StopTimer 64 -> 24; one timer-list pass fewer per SSFSMTask call                    M
+  Location : _fsm/ssfsm.c:111, 133, 535-546, 579-605
+  What     : every list step memcpy's a whole 32 B SSFSMTimer_t "for alignment", and
+             SSFSMTask walks the timer list a third time to find the next timeout.
+  Change   : access fields through the item pointer (only the uint64 "to" via an inlined
+             8-byte memcpy, since pool blocks are word-aligned); track the minimum timeout
+             of unexpired timers during the expiry scan. Ordering semantics unchanged.
+  Risk     : low; existing ssfsm unit tests cover it.
+  Status   : OPEN
+
+SM-02  CODE / STATIC  -121 B code, -12 B bss (142 -> 130)                                 M
+  Location : _fsm/ssfsm.c:77-78, 88-95, 252-256, 328-330
+  What     : two uint64 counters (_ssfsmMallocs, _ssfsmFrees) only for bookkeeping checks;
+             64-bit arithmetic is long on M4.
+  Change   : one uint32 outstanding count with equivalent asserts.
+  Risk     : low; nothing outside ssfsm.c uses them.
+  Status   : OPEN
+
+SM-03  CODE  -24 B                                                                        M
+  Location : _fsm/ssfsm.c:158-232
+  Change   : cache &_SSFSMStates[smid] (smid cannot change during processing; nested events
+             are queued).
+  Risk     : low.
+  Status   : OPEN
+
+ssfsm measured total (SM-01..03): 2,724 -> 2,407 B (-317 B), -12 B bss. The remaining bss
+is config-sized (two 32 B pools, two 20 B lists, 8 B per state machine).
+
+=====================================================================================
+ssfnetsock  (socket transport)     baseline (x86-64 host): code 2,315 B; bss 736 B
+=====================================================================================
+NETSOCK-01  STACK / CODE  _SSFNetSockPollOpen 336 -> 64 B (-272 B); -129 B code (host)  M
+  Location : _net/ssfnetsock.c:877-879, 905-917
+  What     : select() with two fd_sets (2 x 128 B on glibc) per connect poll; the exception
+             set is unneeded on POSIX (a failed connect is writable with SO_ERROR set).
+  Change   : poll() with POLLOUT on one fd, then getsockopt(SO_ERROR); keep select() for
+             Winsock. Also fixes SAFE-01 here.
+  Risk     : low. Smaller saving on lwIP (smaller fd_set).
+  Status   : OPEN
+
+NETSOCK-02  STACK / PERF  _SSFNetSockRelease 304 -> 64 B (-240 B); close drain from up to
+            256 recv() calls to ~1-2                                                  M (E perf)
+  Location : _net/ssfnetsock.c:766-778
+  Change   : on Linux recv(fd, buf, DRAIN_MAX - drained, MSG_TRUNC) (the kernel discards
+             without copying); elsewhere a 32-64 B buffer.
+  Risk     : low; guard with #ifdef __linux__; still ends in FIN, not RST.
+  Status   : OPEN
+
+NETSOCK-03  STATIC  -384 B bss on glibc (2 x 192), -768 B on Windows (WCHAR), with
+            SSF_NETSOCK_CONFIG_MAX_HOST_SIZE 64                                            E
+  Location : _opt/ssfnetsock_opt.h (MAX_HOST_SIZE 256); _net/ssfnetsock.c:167, 178
+  What     : each lookup slot copies the host into a 256 B buffer, but ssfmqttc never
+             passes more than SSF_MQTTC_CONFIG_MAX_HOST_SIZE (64).
+  Change   : config only: size it to the application's largest host, or a compile-time
+             check that it is at least SSF_MQTTC_CONFIG_MAX_HOST_SIZE.
+  Risk     : low; config dependent.
+  Status   : OPEN
+
+NETSOCK-04  STATIC  -96 B bss (736 -> 640, host)                                          M
+  Location : _net/ssfnetsock.c:177, 598-602, 605
+  What     : each glibc lookup slot holds and refills an identical 48 B addrinfo hints.
+  Change   : one static const struct addrinfo.
+  Risk     : low.
+  Status   : OPEN
+
+NETSOCK-05  PERF  Nagle delays of up to ~40-200 ms on PUBACK / PINGREQ after unacknowledged
+            data                                                                           E
+  Location : _net/ssfnetsock.c:804-808 (netinet/tcp.h included, TCP_NODELAY never set)
+  Change   : setsockopt(IPPROTO_TCP, TCP_NODELAY, 1) after socket(); on Linux,
+             socket(SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC) saves two fcntl calls and
+             stops the fd leaking across exec.
+  Risk     : low; usual for MQTT clients.
+  Status   : OPEN
+
+NETSOCK-06  PERF (power)  ~100 wakeups per second during resolve and connect, for up to
+            connectTimeout                                                                  E
+  Location : _opt/ssfmqttc_opt.h (OPEN_POLL_TICKS = TICKS_PER_SEC / 100);
+             _net/ssfmqttc.c:1308-1312; _net/ssfnetsock.c:874-913
+  Change   : raise OPEN_POLL_TICKS (config; costs connect latency); longer term an optional
+             wait handle from the transport.
+  Risk     : low (config) / medium (interface).
+  Status   : OPEN
+
+=====================================================================================
+ssfmqttpkt  (MQTT packets)     baseline: code 2,050 B; bss 0
+=====================================================================================
+MQPKT-01  CODE  -77 B (2,050 -> 1,973)                                                    M V
+  Location : _net/ssfmqttpkt.c:92-94, 107, 119, 130-131, 143-144, 185, 208-209, 232-234,
+             267-270, 287, 307
+  What     : 23 SSF_REQUIREs in static helpers whose arguments are always &w, a local, or
+             already checked by the public caller.
+  Change   : remove them; keep the semantic ones (string terminated and length; remaining
+             length in range). No check on received input is removed.
+  Risk     : low.
+  Status   : OPEN
+
+MQPKT-02  PERF  the PUBLISH payload copied once instead of twice; +105 B code (draft)     M
+  Location : _net/ssfmqttpkt.c:202-219, 408-413
+  What     : the writer puts the body at offset 0, then _SSFMQTTPktWriterFinish memmoves it
+             up by the header length.
+  Change   : for PUBLISH the remaining length is known up front: write the fixed header
+             first. Only worth it if throughput matters.
+  Risk     : low-medium; keep the overflow assert.
+  Status   : OPEN
+  (The encoder savings for this module come from MQTTC-03.)
+
+=====================================================================================
+ssfpem  (PEM)     baseline: code 719 B; bss 0
+=====================================================================================
+PEM-01  PERF  ~3.4x faster Base64 decode (host); +94 B code                               M
+  See SAFE-02 (the same change, made for its timing behaviour).
+  Status   : OPEN
+
+PEM-02  CODE / PERF  one call layer per quad (small)                                      E
+  Location : _codec/ssfpem.c:166-169
+  Change   : make SSFBase64Dec32To24 public and call it directly (keep the tri scratch and
+             its wipes).
+  Risk     : low.
+  Status   : OPEN
+
+=====================================================================================
+ssfpkey  (private keys)     baseline: code 1,653 B; bss 0
+=====================================================================================
+PKEY-01  PERF  one full Base64 decode of the key block saved per load (RSA-2048 ~1,700
+         chars, ~250 k cycles today, ~70 k after SAFE-02)                                   E
+  Location : _codec/ssfpkey.c:321-344
+  What     : SSFPKeyDecodePEM decodes every block with a NULL output to validate, then the
+             key block again into derBuf.
+  Change   : a label filter or "label first" option in SSFPEMDecodeNext, so the key block is
+             decoded straight into derBuf; keep "exactly one key block" and the wipes.
+  Risk     : medium (PEM API).
+  Status   : OPEN
+
+PKEY-02  STRUCT  SSFPKey_t 168 -> ~152 B                                                  E
+  Location : _codec/ssfpkey.h:64-73
+  Change   : union the RSA DER span with priv / pub (never used together); privLen and
+             pubLen as uint8_t (never above 97). SSFPKeyWipe still clears the whole struct.
+  Risk     : low-medium (public struct).
+  Status   : OPEN
+
+=====================================================================================
+SHARED  (across modules)
+=====================================================================================
+SHARED-01  CODE  ~-140..-200 B across ssfcms, ssfpkey and ssfx509                          E
+  Location : ssfcms.c:129 (_SSFCMSSpanEquals), ssfx509.c:192 (_SSFX509OIDMatch),
+             ssfpkey.c:64 (_SSFPKeyOidIs); duplicated OID constants (SHA-256/384/512,
+             rsaEncryption, P-256, ecPublicKey, P-384, Ed25519: ~59 B not merged by ld);
+             AlgorithmIdentifier parsing in ssfcms.c:225 and inline in ssfx509.c:241, 980,
+             1027, 1136.
+  Change   : SSFASN1OIDEq and SSFASN1DecGetAlgId in ssfasn1, plus one shared OID table.
+  Risk     : medium; touches three modules; strictness unchanged.
+  Status   : OPEN
+
+SHARED-02  CODE (trace on)  see TLSC-09: an out-of-line SSFTLSTraceF benefits every ssftls
+           trace user (ssftlsc, ssfx509, ssfcms).
+  Status   : OPEN

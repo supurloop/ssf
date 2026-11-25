@@ -23,7 +23,7 @@ extern "C" {
 /* Largest record plaintext received, in bytes. RFC 8446 5.1 lets a peer send up to 2^14 (16384) */
 /* unless a smaller limit is negotiated, so keep 16384 unless every server is known to send less. */
 /* Largest record plaintext received, in bytes; advertised to the server as record_size_limit  */
-/* (RFC 8449). Sizes the session's receive buffers (about 2 x this). 64..16384. It must hold:   */
+/* (RFC 8449). Sizes the session's receive buffer (this + 17 bytes). 64..16384. It must hold: */
 /* - the server's largest handshake message whole, however it splits it into records: usually */
 /*   its Certificate, i.e. its certificate chain (a few hundred bytes for one EC certificate,  */
 /*   2-5 KB with a public CA; test.mosquitto.org's Let's Encrypt chain is 4,106 bytes);        */

@@ -444,11 +444,11 @@ bool SSFTLSRecordEncrypt(SSFTLSRecordState_t *state, uint8_t contentType, const 
 /* --------------------------------------------------------------------------------------------- */
 /* Record layer: decrypt a TLS 1.3 record.                                                       */
 /* --------------------------------------------------------------------------------------------- */
-bool SSFTLSRecordDecrypt(SSFTLSRecordState_t *state, const uint8_t *record, size_t recordLen,
-                         uint8_t *pt, size_t ptSize, size_t *ptLen, uint8_t *contentType)
+bool SSFTLSRecordDecrypt(SSFTLSRecordState_t *state, const uint8_t *hdr, const uint8_t *frag,
+                         size_t fragLen, uint8_t *pt, size_t ptSize, size_t *ptLen,
+                         uint8_t *contentType)
 {
     size_t tagLen;
-    uint16_t fragLen;
     size_t innerLen;
     uint8_t nonce[SSF_TLS_IV_SIZE];
     const uint8_t *ct;
@@ -456,10 +456,16 @@ bool SSFTLSRecordDecrypt(SSFTLSRecordState_t *state, const uint8_t *record, size
 
     SSF_REQUIRE(state != NULL);
     SSF_REQUIRE(state->magic == SSF_TLS_RECORD_MAGIC);
-    SSF_REQUIRE(record != NULL);
+    SSF_REQUIRE(hdr != NULL);
+    SSF_REQUIRE(frag != NULL);
     SSF_REQUIRE(pt != NULL);
     SSF_REQUIRE(ptLen != NULL);
     SSF_REQUIRE(contentType != NULL);
+    /* In place, or apart from the fragment; never over the header (the AEAD additional data) */
+    SSF_REQUIRE((pt == frag) || ((((uintptr_t)pt) + ptSize) <= ((uintptr_t)frag)) ||
+                (((uintptr_t)pt) >= (((uintptr_t)frag) + fragLen)));
+    SSF_REQUIRE(((((uintptr_t)pt) + ptSize) <= ((uintptr_t)hdr)) ||
+                (((uintptr_t)pt) >= (((uintptr_t)hdr) + SSF_TLS_RECORD_HEADER_SIZE)));
 
     /* RFC 8446 Sec. 5.5: refuse at the seqNum wrap boundary so replays cannot be re-accepted. */
     if (state->seqNum == UINT64_MAX) return false;
@@ -468,18 +474,14 @@ bool SSFTLSRecordDecrypt(SSFTLSRecordState_t *state, const uint8_t *record, size
     tagLen = _SSFTLSAeadTagSize(state->cipherSuite);
     if (tagLen == 0u) return false;
 
-    if (recordLen < ((SSF_TLS_RECORD_HEADER_SIZE + tagLen) + 1u)) return false;
-
-    /* Parse record header */
-    if (record[0] != SSF_TLS_CT_APPLICATION) return false;
-
-    fragLen = ((uint16_t)record[3] << 8) | ((uint16_t)record[4]);
-    if ((size_t)(SSF_TLS_RECORD_HEADER_SIZE + fragLen) != recordLen) return false;
+    /* Parse record header: the type, and a length that is the fragment's */
+    if (hdr[0] != SSF_TLS_CT_APPLICATION) return false;
+    if ((((size_t)hdr[3] << 8) | (size_t)hdr[4]) != fragLen) return false;
     if (fragLen < (tagLen + 1u)) return false;
     /* RFC 8446 Sec. 5.2: receivers MUST reject records whose ciphertext exceeds 2^14 + 256. */
     if (fragLen > (0x4000u + 256u)) return false;
 
-    innerLen = (size_t)fragLen - tagLen;
+    innerLen = fragLen - tagLen;
     /* Is the inner plaintext over the RFC 8446 Sec. 5.4 limit of 2^14 + 1? */
     if (innerLen > (0x4000u + 1u))
     {
@@ -489,7 +491,7 @@ bool SSFTLSRecordDecrypt(SSFTLSRecordState_t *state, const uint8_t *record, size
     /* No, length acceptable */
     if (ptSize < innerLen) return false;
 
-    ct = &record[SSF_TLS_RECORD_HEADER_SIZE];
+    ct = frag;
     tag = &ct[innerLen];
 
     /* Build nonce */
@@ -504,20 +506,20 @@ bool SSFTLSRecordDecrypt(SSFTLSRecordState_t *state, const uint8_t *record, size
         case SSF_TLS_CS_AES_128_GCM_SHA256:
         case SSF_TLS_CS_AES_256_GCM_SHA384:
             ok = SSFAESGCMDecrypt(ct, innerLen, nonce, SSF_TLS_IV_SIZE,
-                                  record, SSF_TLS_RECORD_HEADER_SIZE,
+                                  hdr, SSF_TLS_RECORD_HEADER_SIZE,
                                   state->key, state->keyLen,
                                   tag, tagLen, pt, innerLen);
             break;
         case SSF_TLS_CS_AES_128_CCM_SHA256:
         case SSF_TLS_CS_AES_128_CCM_8_SHA256:
             ok = SSFAESCCMDecrypt(ct, innerLen, nonce, SSF_TLS_IV_SIZE,
-                                  record, SSF_TLS_RECORD_HEADER_SIZE,
+                                  hdr, SSF_TLS_RECORD_HEADER_SIZE,
                                   state->key, state->keyLen,
                                   tag, tagLen, pt, innerLen);
             break;
         case SSF_TLS_CS_CHACHA20_POLY1305_SHA256:
             ok = SSFChaCha20Poly1305Decrypt(ct, innerLen, nonce, SSF_TLS_IV_SIZE,
-                                             record, SSF_TLS_RECORD_HEADER_SIZE,
+                                             hdr, SSF_TLS_RECORD_HEADER_SIZE,
                                              state->key, state->keyLen,
                                              tag, tagLen, pt, innerLen);
             break;

@@ -275,8 +275,10 @@ static SSFTLSIOResult_t _SendEncRecordOnce(SSFTLSCSession_t *s, uint8_t ct,
     return _SendPending(s);
 }
 
-/* Receive one record into session->recvBuf (header at [0..4], fragment after it, so encrypted   */
-/* records decrypt in place) — resumable across partial reads.                                   */
+/* Receive one record: the header into ioCtx.hdr, the fragment straight to pt, where a protected */
+/* record is decrypted in place. pt has ptSize bytes of room for plaintext and, behind them,     */
+/* SSF_TLS_AEAD_TAG_SIZE more for a tag. Resumable across partial reads: a resumed call must    */
+/* pass the same pt.                                                                             */
 /* Partial state lives in io->hdrPos/hdrComplete/fragLen/fragPos; on SUCCESS or ERROR the        */
 /* state resets so the next call starts a fresh record.                                           */
 static SSFTLSIOResult_t _RecvRecordOnce(SSFTLSCSession_t *s, uint8_t *pt, size_t ptSize,
@@ -288,7 +290,7 @@ static SSFTLSIOResult_t _RecvRecordOnce(SSFTLSCSession_t *s, uint8_t *pt, size_t
     while (!io->hdrComplete)
     {
         size_t recvd = 0;
-        SSFTLSIOResult_t r = _InnerRecvOnce(s, &s->recvBuf[io->hdrPos],
+        SSFTLSIOResult_t r = _InnerRecvOnce(s, &io->hdr[io->hdrPos],
                                           (size_t)SSF_TLS_RECORD_HEADER_SIZE - io->hdrPos,
                                           &recvd);
         io->hdrPos += recvd;
@@ -301,21 +303,21 @@ static SSFTLSIOResult_t _RecvRecordOnce(SSFTLSCSession_t *s, uint8_t *pt, size_t
         if (io->hdrPos >= SSF_TLS_RECORD_HEADER_SIZE)
         {
             io->hdrComplete = true;
-            io->fragLen = _Get16(&s->recvBuf[3]);
+            io->fragLen = _Get16(&io->hdr[3]);
             io->fragPos = 0;
             SSF_TLS_TRACE_REC_DEBUG(&s->trace,
                                     "RecvRecord: ct=%u ver=0x%04x fragLen=%u",
-                                    s->recvBuf[0], _Get16(&s->recvBuf[1]), io->fragLen);
+                                    io->hdr[0], _Get16(&io->hdr[1]), io->fragLen);
             /* Judge the header before reading the fragment: an unknown content type is        */
             /* unexpected_message (RFC 8446 5); a length over the RFC maximum is record_overflow */
             /* (5.1, 5.2: 2^14 for a plaintext record, 2^14 + 1 + the 16-byte tag of every      */
             /* suite offered for a protected one, whose TLSInnerPlaintext is at most 2^14 + 1). */
             /* A legal length over this build's buffer is this client's limit: internal_error. */
-            if ((s->recvBuf[0] < SSF_TLS_CT_CHANGE_CIPHER) ||
-                (s->recvBuf[0] > SSF_TLS_CT_APPLICATION))
+            if ((io->hdr[0] < SSF_TLS_CT_CHANGE_CIPHER) ||
+                (io->hdr[0] > SSF_TLS_CT_APPLICATION))
             {
                 SSF_TLS_TRACE_REC_ERROR(&s->trace, "RecvRecord: unknown record type %u",
-                                        s->recvBuf[0]);
+                                        io->hdr[0]);
                 io->hdrPos = 0; io->hdrComplete = false; io->fragPos = 0; io->fragLen = 0;
                 _SSF_TLSC_ALERT(s, SSF_TLS_ALERT_UNEXPECTED_MSG); return SSF_TLS_IO_ERROR;
             }
@@ -324,12 +326,12 @@ static SSFTLSIOResult_t _RecvRecordOnce(SSFTLSCSession_t *s, uint8_t *pt, size_t
             /* during the handshake and of one byte; before keys handshake and alert only;    */
             /* once keys are active application_data outside only (a plaintext handshake or   */
             /* alert record was not sent by the peer: an injected message or forged close).  */
-            if ((s->recvBuf[0] == SSF_TLS_CT_CHANGE_CIPHER) ?
+            if ((io->hdr[0] == SSF_TLS_CT_CHANGE_CIPHER) ?
                 (s->connected || (io->fragLen != 1u)) :
-                (s->recvEncrypted != (s->recvBuf[0] == SSF_TLS_CT_APPLICATION)))
+                (s->recvEncrypted != (io->hdr[0] == SSF_TLS_CT_APPLICATION)))
             {
                 SSF_TLS_TRACE_REC_ERROR(&s->trace, "RecvRecord: record type %u unexpected here",
-                                        s->recvBuf[0]);
+                                        io->hdr[0]);
                 io->hdrPos = 0; io->hdrComplete = false; io->fragPos = 0; io->fragLen = 0;
                 _SSF_TLSC_ALERT(s, SSF_TLS_ALERT_UNEXPECTED_MSG); return SSF_TLS_IO_ERROR;
             }
@@ -342,25 +344,62 @@ static SSFTLSIOResult_t _RecvRecordOnce(SSFTLSCSession_t *s, uint8_t *pt, size_t
                 /* peer's record_overflow (RFC 8449 4). Otherwise a legal record larger than    */
                 /* this build's buffer. Protected records always say application_data outside.  */
                 _SSF_TLSC_ALERT(s, ((io->fragLen > SSF_TLSC_RFC_MAX_CIPHERTEXT) ||
-                                    ((s->recvBuf[0] != SSF_TLS_CT_APPLICATION) ?
+                                    ((io->hdr[0] != SSF_TLS_CT_APPLICATION) ?
                                      (io->fragLen > 16384u) : (s->peerRecordLimit != 0u))) ?
                                    SSF_TLS_ALERT_RECORD_OVERFLOW : SSF_TLS_ALERT_INTERNAL_ERROR);
                 io->hdrPos = 0; io->hdrComplete = false; io->fragPos = 0; io->fragLen = 0;
                 return SSF_TLS_IO_ERROR;
             }
+            /* The fragment is read straight to pt, so it must fit before a byte is read. A    */
+            /* plaintext record over 2^14 is the peer's error (RFC 8446 5.1). A plaintext       */
+            /* record, or a protected one's plaintext, beyond the room offered (during          */
+            /* reassembly, what is left of hsBuf) is this build's limit; a protected record's  */
+            /* tag goes in the room behind. (A one-byte change_cipher_spec always fits: hsBuf   */
+            /* never fills with a message still incomplete.)                                    */
+            {
+                uint8_t alert = 0;
+
+                if (s->recvEncrypted)
+                {
+                    if (((size_t)io->fragLen > SSF_TLS_AEAD_TAG_SIZE) &&
+                        (((size_t)io->fragLen - SSF_TLS_AEAD_TAG_SIZE) > ptSize))
+                    { alert = SSF_TLS_ALERT_INTERNAL_ERROR; }
+                }
+                else if (io->fragLen > 16384u)
+                {
+                    /* The peer's error, not this build's limit */
+                    SSF_TLS_TRACE_REC_ERROR(&s->trace, "RecvRecord: plaintext record of %u "
+                                            "bytes", io->fragLen);
+                    alert = SSF_TLS_ALERT_RECORD_OVERFLOW;
+                }
+                else if ((size_t)io->fragLen > ptSize) { alert = SSF_TLS_ALERT_INTERNAL_ERROR; }
+                else { /* Fits */ }
+                if (alert == SSF_TLS_ALERT_INTERNAL_ERROR)
+                {
+                    SSF_TLS_TRACE_REC_ERROR(&s->trace, "RecvRecord: %u bytes do not fit (%zu "
+                                            "free)", io->fragLen, ptSize);
+                }
+                if (alert != 0u)
+                {
+                    io->hdrPos = 0; io->hdrComplete = false; io->fragPos = 0; io->fragLen = 0;
+                    _SSF_TLSC_ALERT(s, alert); return SSF_TLS_IO_ERROR;
+                }
+            }
+            io->fragDst = pt;
             break;
         }
         /* Partial header — resume next call. */
         return SSF_TLS_IO_WANT_READ;
     }
 
-    /* Read fragment bytes into recvBuf (resumable). */
+    /* Read fragment bytes straight to pt (resumable). Nothing may move pt while a fragment is  */
+    /* part read: reassembly compacts hsBuf only between records.                                */
+    SSF_ASSERT(pt == io->fragDst);
     while (io->fragPos < io->fragLen)
     {
         size_t recvd = 0;
-        SSFTLSIOResult_t r = _InnerRecvOnce(s,
-                                            &s->recvBuf[SSF_TLS_RECORD_HEADER_SIZE + io->fragPos],
-                                            io->fragLen - io->fragPos, &recvd);
+        SSFTLSIOResult_t r = _InnerRecvOnce(s, &pt[io->fragPos], io->fragLen - io->fragPos,
+                                            &recvd);
         io->fragPos += recvd;
         if (r == SSF_TLS_IO_ERROR)
         {
@@ -372,10 +411,10 @@ static SSFTLSIOResult_t _RecvRecordOnce(SSFTLSCSession_t *s, uint8_t *pt, size_t
         return SSF_TLS_IO_WANT_READ;
     }
 
-    /* Record complete — dispatch. Reset the receive state; the header stays in recvBuf[0..4]  */
-    /* as the AEAD additional data until the next record overwrites it.                        */
+    /* Record complete — dispatch. Reset the receive state; the header stays in ioCtx.hdr as  */
+    /* the AEAD additional data until the next record overwrites it.                           */
     {
-        uint8_t hdr_ct = s->recvBuf[0];
+        uint8_t hdr_ct = io->hdr[0];
         uint16_t fragLen = io->fragLen;
         io->hdrPos = 0; io->hdrComplete = false; io->fragPos = 0;
 
@@ -384,7 +423,7 @@ static SSFTLSIOResult_t _RecvRecordOnce(SSFTLSCSession_t *s, uint8_t *pt, size_t
         /* and length were judged at the header; any other value is unexpected_message.         */
         if (hdr_ct == SSF_TLS_CT_CHANGE_CIPHER)
         {
-            if (s->recvBuf[SSF_TLS_RECORD_HEADER_SIZE] != 0x01u)
+            if (pt[0] != 0x01u)
             {
                 SSF_TLS_TRACE_REC_ERROR(&s->trace, "RecvRecord: unexpected change_cipher_spec");
                 _SSF_TLSC_ALERT(s, SSF_TLS_ALERT_UNEXPECTED_MSG); return SSF_TLS_IO_ERROR;
@@ -398,21 +437,10 @@ static SSFTLSIOResult_t _RecvRecordOnce(SSFTLSCSession_t *s, uint8_t *pt, size_t
         {
             bool ok;
 
-            /* Outer type application_data: judged at the header (RFC 8446 5.2) */
-            /* The plaintext must fit the space offered (during reassembly, what is left of     */
-            /* hsBuf); a shortfall is this build's limit, not a bad record.                     */
-            if (((size_t)fragLen > SSF_TLS_AEAD_TAG_SIZE) &&
-                (((size_t)fragLen - SSF_TLS_AEAD_TAG_SIZE) > ptSize))
-            {
-                SSF_TLS_TRACE_REC_ERROR(&s->trace, "RecvRecord: %u bytes do not fit (%zu free)",
-                                        fragLen, ptSize);
-                _SSF_TLSC_ALERT(s, SSF_TLS_ALERT_INTERNAL_ERROR);
-                return SSF_TLS_IO_ERROR;
-            }
-            /* Header and fragment are contiguous in recvBuf: decrypt the record in place. */
-            ok = SSFTLSRecordDecrypt(&s->recvState, s->recvBuf,
-                                     SSF_TLS_RECORD_HEADER_SIZE + (size_t)fragLen,
-                                     pt, ptSize, ptLen, contentType);
+            /* Outer type application_data and size: judged at the header (RFC 8446 5.2). The */
+            /* fragment is at pt: decrypt it in place.                                          */
+            ok = SSFTLSRecordDecrypt(&s->recvState, io->hdr, pt, (size_t)fragLen, pt, ptSize,
+                                     ptLen, contentType);
             if (!ok)
             {
                 SSF_TLS_TRACE_REC_ERROR(&s->trace, "RecordDecrypt failed (fragLen=%u seq=%llu)",
@@ -431,24 +459,8 @@ static SSFTLSIOResult_t _RecvRecordOnce(SSFTLSCSession_t *s, uint8_t *pt, size_t
         }
         else
         {
-            /* Before keys: handshake or alert, judged at the header */
-            /* TLSPlaintext.length MUST NOT exceed 2^14 (RFC 8446 5.1), whatever space is free */
-            if (fragLen > 16384u)
-            {
-                SSF_TLS_TRACE_REC_ERROR(&s->trace, "RecvRecord: plaintext record of %u bytes",
-                                        fragLen);
-                _SSF_TLSC_ALERT(s, SSF_TLS_ALERT_RECORD_OVERFLOW);
-                return SSF_TLS_IO_ERROR;
-            }
-            if (fragLen > ptSize)
-            {
-                /* Within 2^14 but not within the space offered: this build's limit. */
-                SSF_TLS_TRACE_REC_ERROR(&s->trace, "RecvRecord: %u bytes do not fit (%zu free)",
-                                        fragLen, ptSize);
-                _SSF_TLSC_ALERT(s, SSF_TLS_ALERT_INTERNAL_ERROR);
-                return SSF_TLS_IO_ERROR;
-            }
-            memcpy(pt, &s->recvBuf[SSF_TLS_RECORD_HEADER_SIZE], fragLen);
+            /* Before keys: handshake or alert, type and size judged at the header; the        */
+            /* plaintext is already at pt                                                       */
             *contentType = hdr_ct;
             *ptLen = fragLen;
         }
@@ -510,12 +522,15 @@ static SSFTLSIOResult_t _RecvHandshakeOnce(SSFTLSCSession_t *s, const uint8_t **
         if (avail >= 4u)
         {
             size_t msgLen = (size_t)_Get24(&s->hsBuf[s->hsBufPos + 1u]);
+            /* hsBuf holds a record's plaintext; a protected record's also holds its inner   */
+            /* content type, so a protected message can be at most one byte less             */
+            size_t msgMax = SSF_TLSC_HSBUF_SIZE - (s->recvEncrypted ? 1u : 0u);
 
-            if ((4u + msgLen) > sizeof(s->hsBuf))
+            if ((4u + msgLen) > msgMax)
             {
                 SSF_TLS_TRACE_HS_ERROR(&s->trace, "Handshake message of %lu bytes exceeds the "
                                        "%lu-byte buffer", (unsigned long)(4u + msgLen),
-                                       (unsigned long)sizeof(s->hsBuf));
+                                       (unsigned long)msgMax);
                 _SSF_TLSC_ALERT(s, SSF_TLS_ALERT_INTERNAL_ERROR);     /* This build's limit */
                 return SSF_TLS_IO_ERROR;
             }
@@ -537,7 +552,7 @@ static SSFTLSIOResult_t _RecvHandshakeOnce(SSFTLSCSession_t *s, const uint8_t **
             s->hsBufPos = 0;
             s->hsBufLen = avail;
         }
-        r = _RecvRecordOnce(s, &s->hsBuf[s->hsBufLen], sizeof(s->hsBuf) - s->hsBufLen, &ptLen,
+        r = _RecvRecordOnce(s, &s->hsBuf[s->hsBufLen], SSF_TLSC_HSBUF_SIZE - s->hsBufLen, &ptLen,
                             &ct);
         if (r != SSF_TLS_IO_SUCCESS) return r;
 
@@ -2127,7 +2142,7 @@ static SSFTLSIOResult_t _SendHandshakeOnce(SSFTLSCSession_t *s, const uint8_t *m
     size_t chunk = _SendRecordMax(s);
     SSFTLSIOResult_t r;
 
-    if (chunk > sizeof(s->hsBuf)) chunk = sizeof(s->hsBuf);
+    if (chunk > SSF_TLSC_HSBUF_SIZE) chunk = SSF_TLSC_HSBUF_SIZE;
     for (;;)
     {
         size_t n = 0;
@@ -3129,7 +3144,6 @@ static void _SSFTLSCWipeKeys(SSFTLSCSession_t *s)
     _SSF_TLSC_SCRUB_N("serverAppTrafficSecret", s->serverAppTrafficSecret,
                       sizeof(s->serverAppTrafficSecret));
     _SSF_TLSC_SCRUB_N("hsBuf", s->hsBuf, sizeof(s->hsBuf));
-    _SSF_TLSC_SCRUB_N("recvBuf", s->recvBuf, sizeof(s->recvBuf));
     _SSF_TLSC_SCRUB_N("ioCtx", &s->ioCtx, sizeof(s->ioCtx));
     _SSF_TLSC_SCRUB_N("cryptoWork", &s->cryptoWork, sizeof(s->cryptoWork));
     s->hsBufLen = 0;
@@ -3642,7 +3656,7 @@ static SSFNetIOResult_t _SSFTLSCRecv(SSFNetTransport_t *t, uint8_t *buf, size_t 
     {
         uint8_t ct = 0;
         size_t ptLen = 0;
-        SSFTLSIOResult_t r = _RecvRecordOnce(s, s->hsBuf, sizeof(s->hsBuf), &ptLen, &ct);
+        SSFTLSIOResult_t r = _RecvRecordOnce(s, s->hsBuf, SSF_TLSC_HSBUF_SIZE, &ptLen, &ct);
 
         if (r == SSF_TLS_IO_WANT_READ) return SSF_NET_IO_WANT_READ;
         if (r != SSF_TLS_IO_SUCCESS) return _SSFTLSCFail(s);

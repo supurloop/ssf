@@ -258,7 +258,7 @@ driving the handshake themselves will need. Grouped logically:
 | [e.g.](#ex-record) | [`void SSFTLSRecordStateInit(state, cipherSuite, key, keyLen, iv, ivLen)`](#ssftlsrecordstateinit) | Install traffic keys for one direction (init-once; struct must be zeroed / de-inited first) |
 | [e.g.](#ex-record) | [`void SSFTLSRecordStateDeInit(state)`](#ssftlsrecordstatedeinit) | Securely wipe the traffic key + IV from an active state (call on close or before re-key) |
 | [e.g.](#ex-record) | [`bool SSFTLSRecordEncrypt(state, contentType, pt, ptLen, record, recordSize, recordLen)`](#ssftlsrecordencrypt) | Build one TLS 1.3 record: header + AEAD ciphertext + tag |
-| [e.g.](#ex-record) | [`bool SSFTLSRecordDecrypt(state, record, recordLen, pt, ptSize, ptLen, contentType)`](#ssftlsrecorddecrypt) | Verify + decrypt one record; returns the inner content type |
+| [e.g.](#ex-record) | [`bool SSFTLSRecordDecrypt(state, hdr, frag, fragLen, pt, ptSize, ptLen, contentType)`](#ssftlsrecorddecrypt) | Verify + decrypt one record (header and fragment apart, or in place); returns the inner content type |
 
 <a id="function-reference"></a>
 
@@ -505,14 +505,22 @@ sequence number is incremented internally on success.
 <a id="ssftlsrecorddecrypt"></a>
 ```c
 bool SSFTLSRecordDecrypt(SSFTLSRecordState_t *state,
-                         const uint8_t *record, size_t recordLen,
+                         const uint8_t *hdr, const uint8_t *frag, size_t fragLen,
                          uint8_t *pt, size_t ptSize, size_t *ptLen,
                          uint8_t *contentType);
 ```
-Verify the AEAD tag on `record`, decrypt the payload into `pt`, and extract the inner
-content type (writing it to `*contentType`). Returns `false` on any parsing / size /
-tag-verification failure — the caller should treat all `false` outcomes identically and
-reject the record. Size failures include a ciphertext over `2^14 + 256` bytes and an inner
+Verify the AEAD tag on one record, given as its 5-byte header `hdr` and its `fragLen`-byte
+fragment `frag`, decrypt the payload into `pt`, and extract the inner content type (writing
+it to `*contentType`). The header and fragment need not be adjacent: a receiver can read the
+header into a small buffer and the fragment straight to where its plaintext is wanted. The
+header's length field must equal `fragLen`. `pt` may be `frag` itself, in which case the
+record is decrypted in place without a copy; otherwise it must not overlap `frag`, and it
+must never overlap `hdr` (the AEAD additional data). Either violation traps. `ptSize` is the
+room for the inner plaintext; a tag behind it in place needs no room of its own. Every suite
+leaves no unauthenticated plaintext behind on failure (AES-GCM and ChaCha20-Poly1305 verify
+the tag before decrypting; AES-CCM zeroes what it decrypted). Returns `false` on any parsing /
+size / tag-verification failure — the caller should treat all `false` outcomes identically
+and reject the record. Size failures include a ciphertext over `2^14 + 256` bytes and an inner
 plaintext (payload, content type and padding) over `2^14 + 1` bytes (RFC 8446 §5.2 / §5.4);
 the peer should answer either with a `record_overflow` alert. On success, `*ptLen` is the
 length of the actual payload (the inner content-type byte has already been stripped).
@@ -554,7 +562,7 @@ uint8_t pt[256];
 size_t  ptLen;
 uint8_t innerCt;
 if (!SSFTLSRecordDecrypt(&rxState,
-                         record, recordLen,
+                         record, &record[5], recordLen - 5,
                          pt, sizeof(pt), &ptLen,
                          &innerCt))
 {

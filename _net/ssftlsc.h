@@ -209,9 +209,11 @@ typedef enum
 /* Partial I/O tracking for resumable record send/receive */
 typedef struct SSFTLSCIOCtx
 {
-    size_t hdrPos;                   /* Header bytes received into recvBuf[0..4]                */
+    uint8_t hdr[SSF_TLS_RECORD_HEADER_SIZE]; /* The record header being received / judged     */
+    size_t hdrPos;                   /* Header bytes received into hdr                          */
     uint16_t fragLen;
     size_t fragPos;
+    uint8_t *fragDst;                /* Where the fragment is being received (in hsBuf)         */
     bool hdrComplete;
     uint8_t sendRecordBuf[SSF_TLS_RECORD_HEADER_SIZE + SSF_TLSC_CONFIG_MAX_SEND_RECORD + 1u +
                           SSF_TLS_AEAD_TAG_SIZE];
@@ -221,6 +223,9 @@ typedef struct SSFTLSCIOCtx
 } SSFTLSCIOCtx_t;
 
 #define SSF_TLSC_MAX_HOST_SIZE (256u)   /* Host name passed to open(), including the NUL       */
+/* hsBuf's data room: a record's whole TLSInnerPlaintext (content, content type, padding).    */
+/* hsBuf holds SSF_TLS_AEAD_TAG_SIZE bytes more: a protected record's tag lands there.        */
+#define SSF_TLSC_HSBUF_SIZE (SSF_TLSC_CONFIG_MAX_RECV_RECORD + 1u)
 #define SSF_TLSC_CH_SIZE (768u)         /* Handshake scratch: ClientHello, server key, flight */
 /* The largest ClientHello1 without ALPN: a 255-byte host name in server_name. ALPN adds 6     */
 /* bytes plus the list, so SSF_TLS_CONFIG_MAX_ALPN_LEN may be at most CH_SIZE - 6 - this. The   */
@@ -289,10 +294,10 @@ typedef struct SSFTLSCSession
     uint8_t alpnCount;
     uint8_t alpnChosen;
 
-    /* Ephemeral key (stored separately from recvBuf to avoid corruption) */
+    /* Ephemeral key */
     uint8_t ephemeralPrivKey[48];
 
-    /* Handshake secret (stored separately from recvBuf to avoid corruption) */
+    /* Handshake secret */
     uint8_t savedHandshakeSecret[SSF_TLS_MAX_HASH_SIZE];
 
     /* HelloRetryRequest bookkeeping for validating the second ServerHello (RFC 8446 4.1.4)     */
@@ -337,16 +342,13 @@ typedef struct SSFTLSCSession
     } hsScratch;
     size_t hsScratchLen;
 
-    /* Handshake message reassembly buffer (servers may bundle multiple HS msgs in one record). */
-    /* After the handshake it holds the decrypted application record being returned by recv(). */
-    /* Holds a record's whole TLSInnerPlaintext: content, content type, any zero padding.      */
-    uint8_t hsBuf[SSF_TLSC_CONFIG_MAX_RECV_RECORD + 1u];
+    /* The one receive buffer. Each record's fragment is read straight to its end and decrypted */
+    /* there in place, so it also reassembles handshake messages (servers may bundle several   */
+    /* in a record, or split one across records); after the handshake it holds the application */
+    /* record being returned by recv(). SSF_TLSC_HSBUF_SIZE bytes of plaintext, plus the tag.   */
+    uint8_t hsBuf[SSF_TLSC_HSBUF_SIZE + SSF_TLS_AEAD_TAG_SIZE];
     size_t hsBufLen;   /* total bytes in hsBuf */
     size_t hsBufPos;   /* current parse position */
-
-    /* Record buffer: header at [0..4], fragment after it, so records decrypt in place */
-    uint8_t recvBuf[SSF_TLSC_CONFIG_MAX_RECV_RECORD + SSF_TLS_AEAD_TAG_SIZE +
-                    SSF_TLS_RECORD_HEADER_SIZE + 1u];
 
     /* Partial I/O context for resumable record send/receive */
     SSFTLSCIOCtx_t ioCtx;

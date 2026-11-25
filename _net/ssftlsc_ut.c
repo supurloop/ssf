@@ -1138,9 +1138,9 @@ static void _SSFTLSCUTFragmentedHandshake(SSFTLSCUTFd_t l, uint16_t port)
         memset(big, 0, sizeof(big));
         /* A ServerHello whose body alone is as large as hsBuf: header + body cannot fit.   */
         big[0] = SSF_TLS_HS_SERVER_HELLO;
-        big[1] = (uint8_t)(sizeof(_utSession.hsBuf) >> 16);
-        big[2] = (uint8_t)(sizeof(_utSession.hsBuf) >> 8);
-        big[3] = (uint8_t)sizeof(_utSession.hsBuf);
+        big[1] = (uint8_t)(SSF_TLSC_HSBUF_SIZE >> 16);
+        big[2] = (uint8_t)(SSF_TLSC_HSBUF_SIZE >> 8);
+        big[3] = (uint8_t)SSF_TLSC_HSBUF_SIZE;
         _SSFTLSCUTSendFragments(peer, big, sizeof(big), frag, 1u, false);
         n = _SSFTLSCUTPollForRecord(peer, rec, sizeof(rec), &r);
         SSF_ASSERT(r == SSF_NET_IO_ERROR);
@@ -1616,7 +1616,7 @@ static void _SSFTLSCUTPostHandshake(void)
 /* record layer with known application secrets. Covers KeyUpdate in both directions and the    */
 /* interleaving rule end to end.                                                                 */
 /* --------------------------------------------------------------------------------------------- */
-static uint8_t _utFakeIn[16512];      /* Room for a 2^14 + 18 byte record */
+static uint8_t _utFakeIn[16640];      /* Room for a ServerHello and a 2^14 + 18 byte record */
 static size_t _utFakeInLen;
 static size_t _utFakeInPos;
 static uint8_t _utFakeOut[4096];
@@ -1644,11 +1644,20 @@ static SSFNetIOResult_t _UTFakeSend(SSFNetTransport_t *t, const uint8_t *b, size
     *sent = n;
     return SSF_NET_IO_SUCCESS;
 }
+/* When set, recv() gives at most this many bytes, and every other call has nothing to read */
+static size_t _utFakeRecvCap;
+static bool _utFakeRecvStall;
 static SSFNetIOResult_t _UTFakeRecv(SSFNetTransport_t *t, uint8_t *b, size_t n, size_t *got)
 {
     (void)t;
     *got = 0;
     if (_utFakeInPos >= _utFakeInLen) return SSF_NET_IO_WANT_READ;
+    if (_utFakeRecvCap != 0u)
+    {
+        _utFakeRecvStall = !_utFakeRecvStall;
+        if (_utFakeRecvStall) return SSF_NET_IO_WANT_READ;
+        if (n > _utFakeRecvCap) n = _utFakeRecvCap;
+    }
     if (n > (_utFakeInLen - _utFakeInPos)) n = _utFakeInLen - _utFakeInPos;
     memcpy(b, &_utFakeIn[_utFakeInPos], n);
     _utFakeInPos += n;
@@ -1721,8 +1730,8 @@ static uint8_t _UTCliRecord(size_t *off, uint8_t *pt, size_t ptSize, size_t *ptL
     size_t recLen;
     SSF_ASSERT((*off + 5u) <= _utFakeOutLen);
     recLen = 5u + (((size_t)_utFakeOut[*off + 3u] << 8) | _utFakeOut[*off + 4u]);
-    SSF_ASSERT(SSFTLSRecordDecrypt(&_utSrvRecv, &_utFakeOut[*off], recLen, pt, ptSize, ptLen,
-                                   &ct));
+    SSF_ASSERT(SSFTLSRecordDecrypt(&_utSrvRecv, &_utFakeOut[*off], &_utFakeOut[*off + 5u],
+                                   recLen - 5u, pt, ptSize, ptLen, &ct));
     *off += recLen;
     return ct;
 }
@@ -2423,6 +2432,7 @@ static void _SSFTLSCUTAlpn(void)
 /* --------------------------------------------------------------------------------------------- */
 /* Returns the alert the client sends, mid-handshake (no keys yet), for a record of type ct and */
 /* len zero bytes (a handshake record starts like a ServerHello).                               */
+static bool _utPreKeyTrace;                /* Capture the session's trace into _utWarn */
 static uint8_t _UTPreKeyRecordAlert(uint8_t ct, size_t len)
 {
     SSFTLSCSession_t *s = &_utSession2;
@@ -2433,6 +2443,7 @@ static uint8_t _UTPreKeyRecordAlert(uint8_t ct, size_t len)
 
     SSF_ASSERT((5u + len) <= sizeof(_utFakeIn));
     SSFTLSCInit(s, &_utFake, NULL);
+    if (_utPreKeyTrace) SSFTLSCSetTrace(s, _SSFTLSCUTWarnTrace, NULL);
     SSFTLSCSetUnauthenticated(s, true);
     _utFakeInLen = _utFakeInPos = _utFakeOutLen = 0;
     SSF_ASSERT(t->open(t, "localhost", sizeof("localhost"), 443u));
@@ -3494,8 +3505,9 @@ static void _SSFTLSCUTRfc8448ClientAuth(void)
     while (off < _utFakeOutLen)
     {
         at = _UTR8NextOut(&off);
-        SSF_ASSERT(SSFTLSRecordDecrypt(&cliHs, &_utFakeOut[at], _UTOutRecordLen(at),
-                                       &flight[flightLen], sizeof(flight) - flightLen, &n, &ct));
+        SSF_ASSERT(SSFTLSRecordDecrypt(&cliHs, &_utFakeOut[at], &_utFakeOut[at + 5u],
+                                       _UTOutRecordLen(at) - 5u, &flight[flightLen],
+                                       sizeof(flight) - flightLen, &n, &ct));
         SSF_ASSERT(ct == SSF_TLS_CT_HANDSHAKE);
         flightLen += n;
     }
@@ -3654,13 +3666,16 @@ static void _UTSessionWiped(const SSFTLSCSession_t *s)
     SSF_ASSERT(_UTZero(s->clientAppTrafficSecret, sizeof(s->clientAppTrafficSecret)));
     SSF_ASSERT(_UTZero(s->serverAppTrafficSecret, sizeof(s->serverAppTrafficSecret)));
     SSF_ASSERT(_UTZero(s->hsBuf, sizeof(s->hsBuf)));
-    SSF_ASSERT(_UTZero(s->recvBuf, sizeof(s->recvBuf)));
     SSF_ASSERT(!s->sendStateInited && !s->recvStateInited);
 }
 
-/* Replays RFC 8448 3 with the server flight flight[0..len) (corruptRecord: also flip a byte of */
-/* its ciphertext); returns the alert the client sent, 0 if the handshake completed.           */
-static uint8_t _UTR8FlightAlert(const uint8_t *flight, size_t len, bool corruptRecord)
+/* Replays RFC 8448 3 with the server flight flight[0..len), sent as one record per piece:    */
+/* cuts[0..nCuts) are the offsets where a new record starts (none: one record). corrupt flips */
+/* a byte of record number corrupt's ciphertext body, not its tag (0xFF: none). recvCap != 0  */
+/* delivers at most that many bytes per read, with a stall between reads. Returns the alert    */
+/* the client sent, 0 if the handshake completed.                                              */
+static uint8_t _UTR8FlightAlertEx(const uint8_t *flight, size_t len, const size_t *cuts,
+                                  uint8_t nCuts, uint8_t corrupt, size_t recvCap)
 {
     SSFTLSCSession_t *s = &_utSession2;
     SSFNetIOResult_t r = SSF_NET_IO_WANT_READ;
@@ -3671,21 +3686,37 @@ static uint8_t _UTR8FlightAlert(const uint8_t *flight, size_t len, bool corruptR
     size_t at;
     uint8_t ct;
     uint8_t alert;
-    uint16_t k;
+    uint8_t i;
+    uint32_t k;
 
     _UTR8Start(s, _utR8ClientHello, sizeof(_utR8ClientHello), _utR8ClientPriv, NULL, 0u, NULL);
     _UTQueueRecord(_utR8ShRecord, sizeof(_utR8ShRecord));
     memset(&st, 0, sizeof(st));
     _UTStateFrom(&st, _utR8SHsTraffic);
-    SSF_ASSERT(SSFTLSRecordEncrypt(&st, SSF_TLS_CT_HANDSHAKE, flight, len,
-                                   &_utFakeIn[_utFakeInLen], sizeof(_utFakeIn) - _utFakeInLen, &n));
+    for (i = 0; i <= nCuts; i++)
+    {
+        size_t from = (i == 0u) ? 0u : cuts[i - 1u];
+        size_t to = (i == nCuts) ? len : cuts[i];
+
+        SSF_ASSERT(from < to);
+        SSF_ASSERT(SSFTLSRecordEncrypt(&st, SSF_TLS_CT_HANDSHAKE, &flight[from], to - from,
+                                       &_utFakeIn[_utFakeInLen], sizeof(_utFakeIn) - _utFakeInLen,
+                                       &n));
+        if (i == corrupt)                     /* A ciphertext byte: byte 10, or 0 if shorter */
+        {
+            _utFakeIn[_utFakeInLen + 5u + (((n - 5u) > (10u + 16u)) ? 10u : 0u)] ^= 0x01u;
+        }
+        _utFakeInLen += n;
+    }
     SSFTLSRecordStateDeInit(&st);
-    if (corruptRecord) _utFakeIn[_utFakeInLen + 5u + 10u] ^= 0x01u;
-    _utFakeInLen += n;
-    for (k = 0; (k < 60u) && ((r == SSF_NET_IO_WANT_READ) || (r == SSF_NET_IO_WANT_WRITE)); k++)
+    _utFakeRecvCap = recvCap;
+    _utFakeRecvStall = false;
+    for (k = 0; (k < 200000u) && ((r == SSF_NET_IO_WANT_READ) || (r == SSF_NET_IO_WANT_WRITE));
+         k++)
     {
         r = s->transport.pollOpen(&s->transport);
     }
+    _utFakeRecvCap = 0;
     if (r == SSF_NET_IO_SUCCESS)
     {
         s->transport.close(&s->transport);
@@ -3701,14 +3732,21 @@ static uint8_t _UTR8FlightAlert(const uint8_t *flight, size_t len, bool corruptR
     SSF_ASSERT(off == _utFakeOutLen);
     memset(&st, 0, sizeof(st));
     _UTStateFrom(&st, _utR8CHsTraffic);
-    SSF_ASSERT(SSFTLSRecordDecrypt(&st, &_utFakeOut[at], _UTOutRecordLen(at), pt, sizeof(pt), &n,
-                                   &ct));
+    SSF_ASSERT(SSFTLSRecordDecrypt(&st, &_utFakeOut[at], &_utFakeOut[at + 5u],
+                                   _UTOutRecordLen(at) - 5u, pt, sizeof(pt), &n, &ct));
     SSFTLSRecordStateDeInit(&st);
     SSF_ASSERT((ct == SSF_TLS_CT_ALERT) && (n == 2u) && (pt[0] == 2u));
     alert = pt[1];
     s->transport.close(&s->transport);
     SSFTLSCDeInit(s);
     return alert;
+}
+
+/* Replays RFC 8448 3 with the server flight flight[0..len) as one record (corruptRecord: also */
+/* flip a byte of its ciphertext); returns the alert the client sent, 0 if it completed.       */
+static uint8_t _UTR8FlightAlert(const uint8_t *flight, size_t len, bool corruptRecord)
+{
+    return _UTR8FlightAlertEx(flight, len, NULL, 0u, corruptRecord ? 0u : 0xFFu, 0u);
 }
 
 /* Recomputes the server Finished at f[finAt..] (verify_data) over the trace's ClientHello and */
@@ -3726,6 +3764,160 @@ static void _UTR8FixFinished(uint8_t *f, size_t finAt)
     memcpy(&th[n], f, finAt); n += finAt;
     SSFSHA256(th, (uint32_t)n, h, sizeof(h));
     SSFTLSComputeFinished(SSF_HMAC_HASH_SHA256, _utR8SHsTraffic, 32u, h, 32u, &f[finAt + 4u], 32u);
+}
+
+/* Before keys, with 4 bytes of a ServerHello buffered (a header declaring a message that just */
+/* fills hsBuf), a plaintext handshake record of n bytes: returns the alert the client sent.   */
+static uint8_t _UTPreKeySplitAlert(size_t n)
+{
+    SSFTLSCSession_t *s = &_utSession2;
+    SSFNetTransport_t *t = &s->transport;
+    SSFNetIOResult_t r = SSF_NET_IO_WANT_READ;
+    const size_t msgLen = SSF_TLSC_HSBUF_SIZE - 4u;
+    uint16_t k;
+    uint8_t alert;
+
+    SSF_ASSERT((9u + 5u + n) <= sizeof(_utFakeIn));
+    SSFTLSCInit(s, &_utFake, NULL);
+    SSFTLSCSetUnauthenticated(s, true);
+    _utFakeInLen = _utFakeInPos = _utFakeOutLen = 0;
+    SSF_ASSERT(t->open(t, "localhost", sizeof("localhost"), 443u));
+    for (k = 0; (k < 20u) && (_utFakeOutLen == 0u); k++) (void)t->pollOpen(t);
+    SSF_ASSERT(_utFakeOutLen > 0u);                            /* ClientHello sent */
+    memset(_utFakeIn, 0, 9u + 5u + n);
+    _utFakeIn[0] = SSF_TLS_CT_HANDSHAKE; _utFakeIn[1] = 0x03; _utFakeIn[2] = 0x03;
+    _utFakeIn[3] = 0x00; _utFakeIn[4] = 0x04;
+    _utFakeIn[5] = SSF_TLS_HS_SERVER_HELLO; _utFakeIn[6] = (uint8_t)(msgLen >> 16);
+    _utFakeIn[7] = (uint8_t)(msgLen >> 8); _utFakeIn[8] = (uint8_t)msgLen;
+    _utFakeIn[9] = SSF_TLS_CT_HANDSHAKE; _utFakeIn[10] = 0x03; _utFakeIn[11] = 0x03;
+    _utFakeIn[12] = (uint8_t)(n >> 8); _utFakeIn[13] = (uint8_t)n;
+    _utFakeInLen = 9u + 5u + n;
+    for (k = 0; (k < 100u) && ((r == SSF_NET_IO_WANT_READ) || (r == SSF_NET_IO_WANT_WRITE)); k++)
+    {
+        _utFakeOutLen = 0;
+        r = t->pollOpen(t);
+    }
+    SSF_ASSERT(r == SSF_NET_IO_ERROR);
+    SSF_ASSERT((_utFakeOutLen == 7u) && (_utFakeOut[0] == SSF_TLS_CT_ALERT) &&
+               (_utFakeOut[5] == 2u));
+    alert = _utFakeOut[6];
+    t->close(t);
+    SSFTLSCDeInit(s);
+    return alert;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* One receive buffer: a record's fragment is read straight into hsBuf and decrypted there, so  */
+/* the session holds no second record-sized buffer. Records may split messages anywhere and    */
+/* arrive a byte at a time; a fragment never overwrites the bytes buffered before it.          */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFTLSCUTOneRecvBuffer(void)
+{
+    const size_t L = sizeof(_utR8FlightPayload);
+
+    /* Beyond hsBuf, the send record and the handshake scratch, nothing record-sized */
+#if SSF_TLSC_CONFIG_MAX_RECV_RECORD >= 2048u
+    SSF_ASSERT((sizeof(SSFTLSCSession_t) - sizeof(_utSession.hsBuf) -
+                sizeof(_utSession.ioCtx.sendRecordBuf) - sizeof(_utSession.hsScratch)) <
+               SSF_TLSC_CONFIG_MAX_RECV_RECORD);
+#endif
+
+    if (SSF_TLSC_UT_RECORD_FITS(sizeof(_utR8FlightRecord)))
+    {
+        /* The flight cut inside EncryptedExtensions' header, inside the certificate and just   */
+        /* before the Finished: earlier pieces of each message wait in hsBuf while the next     */
+        /* record lands after them                                                              */
+        const size_t cuts[3] = { 3u, SSF_TLSC_UT_R8_CERT_AT + 100u, SSF_TLSC_UT_R8_FIN_AT };
+
+        SSF_ASSERT(_UTR8FlightAlertEx(_utR8FlightPayload, L, cuts, 3u, 0xFFu, 0u) == 0u);
+        /* The same, a byte per read with a stall between reads */
+        SSF_ASSERT(_UTR8FlightAlertEx(_utR8FlightPayload, L, cuts, 3u, 0xFFu, 1u) == 0u);
+        /* A bad ciphertext byte in a later piece: bad_record_mac, also a byte at a time */
+        SSF_ASSERT(_UTR8FlightAlertEx(_utR8FlightPayload, L, cuts, 3u, 1u, 0u) ==
+                   SSF_TLS_ALERT_BAD_RECORD_MAC);
+        SSF_ASSERT(_UTR8FlightAlertEx(_utR8FlightPayload, L, cuts, 3u, 2u, 1u) ==
+                   SSF_TLS_ALERT_BAD_RECORD_MAC);
+    }
+
+    /* Reassembly with 4 bytes buffered: a record that fills the rest of hsBuf is taken (and    */
+    /* then judged as a message), one byte more is this build's limit, before keys and once   */
+    /* they are active. A protected record's tag needs no room of its own.                    */
+    {
+        static uint8_t f[SSF_TLSC_HSBUF_SIZE + 1u];
+        const size_t room = SSF_TLSC_HSBUF_SIZE - 4u;
+        const size_t cut[1] = { 4u };
+        uint8_t a;
+
+        a = _UTPreKeySplitAlert(room);
+        SSF_ASSERT((a != SSF_TLS_ALERT_INTERNAL_ERROR) && (a != SSF_TLS_ALERT_RECORD_OVERFLOW));
+        SSF_ASSERT(_UTPreKeySplitAlert(room + 1u) == SSF_TLS_ALERT_INTERNAL_ERROR);
+        if ((room + 16u) <= 16384u)                       /* Else over 2^14: record_overflow */
+        {
+            SSF_ASSERT(_UTPreKeySplitAlert(room + 16u) == SSF_TLS_ALERT_INTERNAL_ERROR);
+        }
+
+        /* Protected (once the trace's ServerHello fits): the record's plaintext also holds   */
+        /* its inner content type, so the piece that fills the room is room - 1 bytes, and the */
+        /* message one byte shorter                                                            */
+        if (SSF_TLSC_UT_PLAIN_FITS(sizeof(_utR8ShRecord) - 5u))
+        {
+            memset(f, 0, sizeof(f));
+            f[0] = SSF_TLS_HS_ENCRYPTED_EXTENSIONS; f[1] = (uint8_t)((room - 1u) >> 16);
+            f[2] = (uint8_t)((room - 1u) >> 8); f[3] = (uint8_t)(room - 1u);
+            a = _UTR8FlightAlertEx(f, 4u + (room - 1u), cut, 1u, 0xFFu, 0u);
+            SSF_ASSERT((a != 0u) && (a != SSF_TLS_ALERT_INTERNAL_ERROR) &&
+                       (a != SSF_TLS_ALERT_BAD_RECORD_MAC));
+            SSF_ASSERT(_UTR8FlightAlertEx(f, 4u + room, cut, 1u, 0xFFu, 0u) ==
+                       SSF_TLS_ALERT_INTERNAL_ERROR);
+
+            /* So a protected message of SSF_TLSC_HSBUF_SIZE bytes can never be received: it  */
+            /* is refused at its header, without waiting for the rest                          */
+            f[1] = (uint8_t)(room >> 16); f[2] = (uint8_t)(room >> 8); f[3] = (uint8_t)room;
+            SSF_ASSERT(_UTR8FlightAlertEx(f, 4u, NULL, 0u, 0xFFu, 0u) ==
+                       SSF_TLS_ALERT_INTERNAL_ERROR);
+        }
+    }
+
+    /* A plaintext record over 2^14 is the server's error, and traced as such, not as a record */
+    /* this build's buffer cannot hold (where the header check does not catch it first)       */
+#if (SSF_TLS_CONFIG_ENABLE_TRACE == 1) && \
+    ((SSF_TLSC_CONFIG_MAX_RECV_RECORD + 1u + SSF_TLS_AEAD_TAG_SIZE) >= 16385u)
+    _utWarn[0] = 0;
+    _utPreKeyTrace = true;
+    SSF_ASSERT(_UTPlainRecordAlert(16385u) == SSF_TLS_ALERT_RECORD_OVERFLOW);
+    _utPreKeyTrace = false;
+    SSF_ASSERT(strstr(_utWarn, "plaintext record of 16385 bytes") != NULL);
+    SSF_ASSERT(strstr(_utWarn, "do not fit") == NULL);
+#endif
+
+    /* A protected record whose plaintext exactly fills hsBuf is received; one byte more is    */
+    /* this build's limit (internal_error), where it is still within the RFC's 2^14 + 1         */
+    {
+        SSFTLSCSession_t *s = &_utSession2;
+        static uint8_t big[SSF_TLSC_CONFIG_MAX_RECV_RECORD + 1u];
+        uint8_t buf[16];
+        size_t n;
+        size_t i;
+
+        for (i = 0; i < sizeof(big); i++) big[i] = (uint8_t)(i * 7u);
+        _UTAppSession(s);
+        _UTSrvRecord(SSF_TLS_CT_APPLICATION, big, SSF_TLSC_CONFIG_MAX_RECV_RECORD);
+        SSF_ASSERT((s->transport.recv(&s->transport, buf, sizeof(buf), &n) ==
+                    SSF_NET_IO_SUCCESS) && (n == sizeof(buf)) &&
+                   (memcmp(buf, big, sizeof(buf)) == 0));
+        SSFTLSCDeInit(s);
+        SSFTLSRecordStateDeInit(&_utSrvSend);
+        SSFTLSRecordStateDeInit(&_utSrvRecv);
+#if SSF_TLSC_CONFIG_MAX_RECV_RECORD < 16384u
+        _UTAppSession(s);
+        _UTSrvRecord(SSF_TLS_CT_APPLICATION, big, SSF_TLSC_CONFIG_MAX_RECV_RECORD + 1u);
+        SSF_ASSERT(s->transport.recv(&s->transport, buf, sizeof(buf), &n) == SSF_NET_IO_ERROR);
+        SSF_ASSERT(s->pendingAlert == SSF_TLS_ALERT_INTERNAL_ERROR);
+        SSFTLSCDeInit(s);
+        SSFTLSRecordStateDeInit(&_utSrvSend);
+        SSFTLSRecordStateDeInit(&_utSrvRecv);
+#endif
+    }
 }
 
 static void _SSFTLSCUTServerFlightNegative(void)
@@ -4501,7 +4693,7 @@ static size_t _UTFlightCap(const SSFTLSCSession_t *s)
 
     if ((s->peerRecordLimit != 0u) && ((size_t)(s->peerRecordLimit - 1u) < cap))
     { cap = (size_t)(s->peerRecordLimit - 1u); }
-    if (sizeof(s->hsBuf) < cap) cap = sizeof(s->hsBuf);
+    if (SSF_TLSC_HSBUF_SIZE < cap) cap = SSF_TLSC_HSBUF_SIZE;
     return cap;
 }
 
@@ -5022,6 +5214,7 @@ void SSFTLSCUnitTest(void)
     _SSFTLSCUTRfc8448Hrr();
     _SSFTLSCUTRfc8448ClientAuth();
     _SSFTLSCUTServerFlightNegative();
+    _SSFTLSCUTOneRecvBuffer();
     _SSFTLSCUTClientChain();
     _SSFTLSCUTAlpn();
     _SSFTLSCUTTrustFromPEM();

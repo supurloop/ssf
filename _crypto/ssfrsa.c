@@ -648,7 +648,7 @@ static bool _SSFRSAPrivateOpCRT(const SSFBN_t *c, uint16_t nLimbs, const SSFBN_t
     {
         if (!SSFBNRandomBelow(&r, n, &prng)) continue;
         if (SSFBNIsZero(&r)) continue;
-        if (SSFBNModInvExt(&rInv, &r, n)) break; /* Fails only if r is not coprime to n */
+        if (SSFBNModInvOdd(&rInv, &r, n)) break; /* Fails only if r is not coprime to n */
     }
     if (attempts >= 16u) goto cleanup;
 
@@ -1014,6 +1014,83 @@ cleanup:
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Returns x mod 65537 in constant time (2^16 == -1 mod 65537).                                  */
+/* --------------------------------------------------------------------------------------------- */
+static uint32_t _SSFRSAMod65537(uint32_t x)
+{
+    uint32_t r = ((x & 0xFFFFu) + 65537u) - (x >> 16); /* in [2, 2^17 + 1] */
+    uint32_t ge;
+
+    /* Subtract 65537 once if r >= 65537; never more is needed (r < 2 * 65537) */
+    ge = 1u ^ ((r - 65537u) >> 31);
+    r -= 65537u & (0u - ge);
+    return r;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns a * b mod 65537 in constant time for a, b < 65537.                                    */
+/* --------------------------------------------------------------------------------------------- */
+static uint32_t _SSFRSAMulMod65537(uint32_t a, uint32_t b)
+{
+    uint64_t p = (uint64_t)a * (uint64_t)b;          /* <= 2^32: 2^32 == 1 mod 65537 */
+    uint32_t r = _SSFRSAMod65537((uint32_t)p) + (uint32_t)(p >> 32);
+
+    return _SSFRSAMod65537(r);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* d = 65537^(-1) mod lambda without a general inverse (OPTIMIZE BN-07): with k = -lambda^(-1)  */
+/* mod 65537, 1 + k * lambda is divisible by 65537 and d = (1 + k * lambda) / 65537 < lambda.    */
+/* Constant time in lambda. Requires gcd(65537, lambda) == 1; t: nLimbs + 1 limbs of scratch,  */
+/* left holding 1 + k * lambda for the caller to wipe.                                           */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFRSAInvE65537(SSFBN_t *d, const SSFBN_t *lambda, SSFBN_t *t, uint16_t nLimbs)
+{
+    uint32_t s = 0u;
+    uint32_t inv = 1u;
+    uint32_t k;
+    uint32_t c = 0u;
+    uint16_t i;
+
+    SSF_REQUIRE(lambda->len == nLimbs);
+    SSF_REQUIRE(t->cap > nLimbs);
+    SSF_REQUIRE(d->cap >= nLimbs);
+
+    /* lambda mod 65537: 2^32 == 1, so it is the sum of the limbs mod 65537 */
+    for (i = 0u; i < nLimbs; i++) s = _SSFRSAMod65537(s + _SSFRSAMod65537(lambda->limbs[i]));
+    SSF_REQUIRE(s != 0u);
+
+    /* inv = s^(65537 - 2) = s^0xFFFF mod 65537 (Fermat; 65537 is prime): 16 fixed steps */
+    for (i = 0u; i < 16u; i++) inv = _SSFRSAMulMod65537(_SSFRSAMulMod65537(inv, inv), s);
+    k = 65537u - inv;
+
+    /* t = 1 + k * lambda (nLimbs + 1 limbs) */
+    SSFBNMulUint32(t, lambda, k);
+    (void)SSFBNAddUint32(t, t, 1u);
+
+    /* d = t / 65537, exact: low limb first, q = (t_i - c) * 65537^(-1) mod 2^32 (0xFFFF0001) */
+    for (i = 0u; i < nLimbs; i++)
+    {
+        uint64_t x = (uint64_t)t->limbs[i] - (uint64_t)c;
+        uint32_t q = (uint32_t)x * 0xFFFF0001u;
+
+        d->limbs[i] = q;
+        c = (uint32_t)(((uint64_t)q * 65537u) >> 32) + (uint32_t)((x >> 63) & 1u);
+    }
+    d->len = nLimbs;
+}
+
+#if SSF_CONFIG_RSA_UNIT_TEST == 1
+/* --------------------------------------------------------------------------------------------- */
+/* Test-only entry to _SSFRSAInvE65537 (crafted lambdas reach its rare carry cases).             */
+/* --------------------------------------------------------------------------------------------- */
+void _SSFRSAInvE65537Test(SSFBN_t *d, const SSFBN_t *lambda, SSFBN_t *t, uint16_t nLimbs)
+{
+    _SSFRSAInvE65537(d, lambda, t, nLimbs);
+}
+#endif /* SSF_CONFIG_RSA_UNIT_TEST */
+
+/* --------------------------------------------------------------------------------------------- */
 /* KeyGen stage 2: given p, q, derive d (private exponent) and dp, dq, qInv (CRT parameters).    */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFRSAKeyGenDerive(uint16_t nLimbs, const SSFBN_t *p, const SSFBN_t *q, SSFBN_t *d,
@@ -1061,8 +1138,8 @@ static bool _SSFRSAKeyGenDerive(uint16_t nLimbs, const SSFBN_t *p, const SSFBN_t
     lambda.len = nLimbs;
     memcpy(lambda.limbs, prod.limbs, (size_t)nLimbs * sizeof(SSFBNLimb_t));
 
-    /* d = 65537^(-1) mod lambda. */
-    if (!SSFBNModInvExt(d, &eFull, &lambda)) goto cleanup;
+    /* d = 65537^(-1) mod lambda; e _|_ lambda by the FIPS check above */
+    _SSFRSAInvE65537(d, &lambda, &prod, nLimbs);
 
     /* CRT parameters. */
     SSFBNMod(dp, d, &pm1);

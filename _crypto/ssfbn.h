@@ -242,6 +242,7 @@ void SSFBNMod(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m);
 void SSFBNDivMod(SSFBN_t *q, SSFBN_t *rem, const SSFBN_t *a, const SSFBN_t *b);
 void SSFBNGcd(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *b);
 bool SSFBNModInvExt(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m);
+bool SSFBNModInvOdd(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m);
 
 /* --------------------------------------------------------------------------------------------- */
 /* Montgomery multiplication                                                                     */

@@ -4554,6 +4554,76 @@ void SSFBNUnitTest(void)
         SSF_ASSERT((r.len == n) && SSFBNIsOne(&r));
     }
 
+    /* ---- BN-07: SSFBNModInvOdd equals SSFBNModInvExt on odd moduli; its preconditions ---- */
+    {
+        SSFBN_DEFINE(m, SSF_BN_MAX_MOD_LIMBS);
+        SSFBN_DEFINE(a, SSF_BN_MAX_MOD_LIMBS);
+        SSFBN_DEFINE(rOdd, SSF_BN_MAX_MOD_LIMBS);
+        SSFBN_DEFINE(rExt, SSF_BN_MAX_MOD_LIMBS);
+        SSFBN_DEFINE(check, SSF_BN_MAX_MOD_LIMBS);
+        static const uint16_t widths[] = { 1u, 2u, 3u, 7u, SSF_BN_HALF_MOD_LIMBS,
+                                           SSF_BN_MAX_MOD_LIMBS };
+        uint32_t s = 0x1B873593u;
+        uint16_t w;
+        uint16_t n;
+        uint16_t k;
+        uint8_t pass;
+        bool ok;
+
+        for (w = 0u; w < (uint16_t)(sizeof(widths) / sizeof(widths[0])); w++)
+        {
+            n = widths[w];
+            for (pass = 0u; pass < 4u; pass++)
+            {
+                SSFBNSetZero(&m, n);
+                SSFBNSetZero(&a, n);
+                for (k = 0u; k < n; k++)
+                {
+                    s ^= s << 13; s ^= s >> 17; s ^= s << 5;
+                    m.limbs[k] = s;
+                    s ^= s << 13; s ^= s >> 17; s ^= s << 5;
+                    a.limbs[k] = s;
+                }
+                m.limbs[0] |= 1u;
+                m.limbs[n - 1u] |= 0x80000000u;
+                a.limbs[n - 1u] &= 0x7FFFFFFFu;
+                if (pass == 1u) SSFBNSetOne(&a, n);
+                if (pass == 2u) { SSFBNCopy(&a, &m); a.limbs[0] -= 1u; }
+
+                /* Same answer as SSFBNModInvExt (1 and m - 1 always invert); a * r == 1 mod m */
+                ok = SSFBNModInvOdd(&rOdd, &a, &m);
+                SSF_ASSERT(SSFBNModInvExt(&rExt, &a, &m) == ok);
+                SSF_ASSERT(((pass != 1u) && (pass != 2u)) || ok);
+                if (ok)
+                {
+                    SSF_ASSERT((rOdd.len == n) && (SSFBNCmp(&rOdd, &rExt) == 0));
+                    SSFBNModMul(&check, &a, &rOdd, &m);
+                    SSF_ASSERT(SSFBNIsOne(&check));
+                }
+            }
+
+            /* a = 0 and a sharing a factor with m are not invertible */
+            SSFBNSetZero(&a, n);
+            SSF_ASSERT(SSFBNModInvOdd(&rOdd, &a, &m) == false);
+            /* m = 2^(32n) - 1 (odd, divisible by 3) and a = 3 share the factor 3 */
+            SSFBNSetZero(&check, n);
+            for (k = 0u; k < n; k++) check.limbs[k] = 0xFFFFFFFFu;
+            SSFBNSetUint32(&a, 3u, n);
+            SSF_ASSERT(SSFBNModInvOdd(&rOdd, &a, &check) == false);
+        }
+
+        /* Preconditions: m odd, a < m */
+        n = 2u;
+        SSFBNSetUint32(&m, 10u, n);
+        SSFBNSetUint32(&a, 3u, n);
+        SSF_ASSERT_TEST(SSFBNModInvOdd(&rOdd, &a, &m));
+        SSFBNSetUint32(&m, 11u, n);
+        SSFBNSetUint32(&a, 11u, n);
+        SSF_ASSERT_TEST(SSFBNModInvOdd(&rOdd, &a, &m));
+        SSFBNSetUint32(&a, 12u, n);
+        SSF_ASSERT_TEST(SSFBNModInvOdd(&rOdd, &a, &m));
+    }
+
     /* ---- BN-04: SSFBNModExp / ModExpMont equal ModExpPub up to the widest modulus, in place ---- */
     {
         SSFBN_DEFINE(m, SSF_BN_MAX_MOD_LIMBS);

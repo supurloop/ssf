@@ -165,6 +165,32 @@ static EVP_PKEY *_OSSLLoadPrivKey(const uint8_t *der, size_t derLen)
     return pkey;
 }
 
+/* BN-07: d of an SSF-generated key is exactly 65537^(-1) mod lambda(n) = lcm(p - 1, q - 1), */
+/* computed independently with OpenSSL's BN (loading the key does not check d is minimal).   */
+static void _OSSLCheckDIsInvModLambda(const uint8_t *der, size_t derLen)
+{
+    const uint8_t *p = der;
+    RSA *rsa = d2i_RSAPrivateKey(NULL, &p, (long)derLen);
+    const BIGNUM *n = NULL, *e = NULL, *d = NULL, *bp = NULL, *bq = NULL;
+    BN_CTX *ctx = BN_CTX_new();
+    BIGNUM *pm1 = BN_new(), *qm1 = BN_new(), *g = BN_new(), *lam = BN_new(), *want = BN_new();
+
+    SSF_ASSERT((rsa != NULL) && (ctx != NULL) && (pm1 != NULL) && (qm1 != NULL) && (g != NULL) &&
+               (lam != NULL) && (want != NULL));
+    RSA_get0_key(rsa, &n, &e, &d);
+    RSA_get0_factors(rsa, &bp, &bq);
+    SSF_ASSERT(BN_is_word(e, 65537u) == 1);
+    SSF_ASSERT((BN_sub(pm1, bp, BN_value_one()) == 1) && (BN_sub(qm1, bq, BN_value_one()) == 1));
+    SSF_ASSERT(BN_gcd(g, pm1, qm1, ctx) == 1);
+    SSF_ASSERT(BN_mul(lam, pm1, qm1, ctx) == 1);
+    SSF_ASSERT(BN_div(lam, NULL, lam, g, ctx) == 1);
+    SSF_ASSERT(BN_mod_inverse(want, e, lam, ctx) != NULL);
+    SSF_ASSERT(BN_cmp(d, want) == 0);
+    BN_free(want); BN_free(lam); BN_free(g); BN_free(qm1); BN_free(pm1);
+    BN_CTX_free(ctx);
+    RSA_free(rsa);
+}
+
 static EVP_PKEY *_OSSLLoadPubKey(const uint8_t *der, size_t derLen)
 {
     const uint8_t *p = der;
@@ -338,6 +364,7 @@ static void _SSFRSACrossCheckAtSize(uint16_t bits,
     pkeyPub = _OSSLLoadPubKey(pub, pubLen);
     SSF_ASSERT(pkeyPub != NULL);
     SSF_ASSERT((uint16_t)EVP_PKEY_bits(pkey) == bits);
+    _OSSLCheckDIsInvModLambda(priv, privLen);
     SSF_ASSERT((uint16_t)EVP_PKEY_bits(pkeyPub) == bits);
 
     for (i = 0; i < nHashes; i++)
@@ -711,6 +738,74 @@ void SSFRSAUnitTest(void)
         SSF_ASSERT((size_t)p <= sizeof(der));
         SSF_ASSERT(SSFRSAPubKeyIsValid(der, (size_t)p) == false);
     }
+
+    /* ---- BN-07: keygen's d = 65537^(-1) mod lambda equals SSFBNModInvExt, rare carries too ---- */
+#if SSF_RSA_CONFIG_ENABLE_KEYGEN == 1
+    {
+        SSFBN_DEFINE(lam, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(e, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(dRef, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(d, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(t, SSF_BN_MAX_LIMBS);
+        uint32_t x = 0x85EBCA6Bu;
+        uint32_t r;
+        uint32_t it;
+        uint16_t n;
+        uint16_t k;
+
+        for (it = 0u; it < 600u; it++)
+        {
+            /* Widths 2..8 and the largest modulus; shapes: random, tiny top limb (the exact  */
+            /* division then borrows often), and lambda == -1 mod 65537 (Fermat meets 2^32)  */
+            n = (uint16_t)((it < 540u) ? (2u + (it % 7u)) : SSF_BN_MAX_MOD_LIMBS);
+            for (k = 0u; k < n; k++)
+            {
+                x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+                lam.limbs[k] = x;
+            }
+            lam.len = n;
+            lam.limbs[0] &= ~1u;
+            if ((it % 3u) == 1u) lam.limbs[n - 1u] = 1u + (x & 3u);
+            if (lam.limbs[n - 1u] == 0u) lam.limbs[n - 1u] = 1u;
+            r = SSFBNModUint32(&lam, 65537u);
+            if ((it % 3u) == 2u)
+            {
+                /* Raise lambda to the next value == 65536 mod 65537, keeping it even */
+                (void)SSFBNAddUint32(&lam, &lam, (65536u + 65537u - r) % 65537u);
+                if ((lam.limbs[0] & 1u) != 0u) (void)SSFBNAddUint32(&lam, &lam, 65537u);
+                SSF_ASSERT(SSFBNModUint32(&lam, 65537u) == 65536u);
+            }
+            if (SSFBNModUint32(&lam, 65537u) == 0u) continue; /* keygen's FIPS check excludes it */
+            SSFBNSetUint32(&e, 65537u, n);
+            SSF_ASSERT(SSFBNModInvExt(&dRef, &e, &lam) == true);
+            _SSFRSAInvE65537Test(&d, &lam, &t, n);
+            SSF_ASSERT((d.len == n) && (SSFBNCmp(&d, &dRef) == 0));
+        }
+
+        /* lambda = d * 65537 - 1 for d whose exact division by 65537 borrows below the top limb */
+        /* (about 1 in 50,000 random lambdas); lambda == -1 mod 65537, so k = 1                 */
+        {
+            static const uint32_t borrowLam[4][5] = {
+                { 0x96CD407Au, 0x00003DB8u, 0x19CF53C1u, 0xF2797383u, 0x24F48292u },
+                { 0x050F28C0u, 0x00009804u, 0x0A6A4EB5u, 0u, 0u },
+                { 0x9AFFB9E1u, 0x000058E8u, 0x8CA7389Fu, 0x69F3B6C7u, 0x5B50EABAu },
+                { 0xFB3001B9u, 0x8D16EEC8u, 0x2E370F5Eu, 0x0000B59Du, 0x66666766u } };
+            static const uint16_t borrowLen[4] = { 5u, 3u, 5u, 5u };
+
+            for (it = 0u; it < 4u; it++)
+            {
+                n = borrowLen[it];
+                for (k = 0u; k < n; k++) lam.limbs[k] = borrowLam[it][k];
+                lam.len = n;
+                SSF_ASSERT(SSFBNModUint32(&lam, 65537u) == 65536u);
+                SSFBNSetUint32(&e, 65537u, n);
+                SSF_ASSERT(SSFBNModInvExt(&dRef, &e, &lam) == true);
+                _SSFRSAInvE65537Test(&d, &lam, &t, n);
+                SSF_ASSERT((d.len == n) && (SSFBNCmp(&d, &dRef) == 0));
+            }
+        }
+    }
+#endif /* SSF_RSA_CONFIG_ENABLE_KEYGEN */
 
     /* ---- AUDIT RSA-12: KeyGen wipes the private-key DER scratch buffer ---- */
 #if (SSF_RSA_CONFIG_ENABLE_KEYGEN == 1) && (SSF_RSA_CONFIG_ENABLE_2048 == 1)

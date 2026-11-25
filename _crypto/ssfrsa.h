@@ -166,6 +166,11 @@ extern void *_SSFRSASignBlindTestHookCtx;
 
 /* Test-only hook fired after each secret local is wiped. */
 extern void (*_SSFRSAScrubTestHook)(const void *buf, size_t len);
+
+#if SSF_RSA_CONFIG_ENABLE_KEYGEN == 1
+/* Test-only: keygen's d = 65537^(-1) mod lambda (t: nLimbs + 1 limbs of scratch). */
+void _SSFRSAInvE65537Test(SSFBN_t *d, const SSFBN_t *lambda, SSFBN_t *t, uint16_t nLimbs);
+#endif /* SSF_RSA_CONFIG_ENABLE_KEYGEN */
 #endif /* SSF_CONFIG_RSA_UNIT_TEST */
 
 #ifdef __cplusplus

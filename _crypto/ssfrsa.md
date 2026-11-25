@@ -137,7 +137,7 @@ comparable security.
   sign; this is defended by the built-in verify-after-sign check (see below). The blinding
   and the fresh `r` are the reason signing now requires platform entropy on every call.
 - **One step of the private-key operation is variable-time, by design.** `r⁻¹ mod n` is
-  computed with [`SSFBNModInvExt()`](ssfbn.md#modinv) (the binary extended GCD for odd `n`),
+  computed with [`SSFBNModInvOdd()`](ssfbn.md#modinv) (the binary extended GCD for odd `n`),
   whose run time depends on `r`. It does not expose the message or the CRT exponents: `r` is
   fresh random on every call and never reused, and the exponentiations that use `dp` / `dq`
   are constant-time and exponent-blinded. What a precise timing observer could learn is
@@ -148,6 +148,12 @@ comparable security.
   Montgomery reduction. Deployments where an attacker can take very fine-grained timing or
   power measurements of individual signatures should treat RSA signing here as blinded but
   not fully constant-time.
+- **Key generation derives `d` in constant time.** With the fixed `e = 65537` (prime, and
+  coprime to `λ(n)` by the FIPS check), `d = (1 + k · λ(n)) / 65537` for
+  `k = −λ(n)⁻¹ mod 65537`: a sum of limbs for `λ(n) mod 65537` (`2³² ≡ 1`), a fixed
+  16-step Fermat inverse mod 65537 and an exact division, none of whose timing depends on
+  `λ(n)`. It yields the same `d` (the unique inverse below `λ(n)`) as the variable-time
+  extended Euclid used before OPTIMIZE BN-07.
 - **Key storage format is PKCS#1 DER.** `RSAPublicKey` = `SEQUENCE { INTEGER n, INTEGER
   e }`; `RSAPrivateKey` = `SEQUENCE { version, n, e, d, p, q, dp, dq, qInv }` (version 0,
   two-prime; `otherPrimeInfos` is not supported), all unsigned big-endian. Decoding is
@@ -193,7 +199,7 @@ comparable security.
   zeroes its CRT intermediates (`cp`, `cq`, `m1`, `m2`, `h`, expanded full-width copies
   and the `h*q` product) before returning. A `noinline` stack-scrub helper at the end of
   each entry point overwrites the freed frames left by the underlying `ssfbn` primitives
-  (`SSFBNGcd`, `SSFBNDivMod`, `SSFBNModInv`, `SSFBNModInvExt`) which `ssfrsa` cannot
+  (`SSFBNGcd`, `SSFBNDivMod`, `SSFBNModInv`, `SSFBNModInvOdd`) which `ssfrsa` cannot
   reach into directly.
 - **Keys are not parsed lazily on every call.** Each sign / verify / key-validate entry
   point re-parses the DER blob on entry. If you're signing many messages under the same

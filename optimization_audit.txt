@@ -486,7 +486,33 @@ BN-07  CODE / STACK  -1,388 B linked code in sign-capable (non-keygen) builds; r
              keygen saving ~-500 B (E).
   Risk     : medium; public API change for even m; better for side channels than Euclid
              on the secret lambda; keygen vectors unaffected (d is unique).
-  Status   : OPEN
+  Correction (2026-11-25): no API change is needed. SSFBNModInvExt keeps its contract; a new
+             SSFBNModInvOdd (its binary path, odd m and a < m required) serves the blinding
+             inverse, and keygen derives d without it, so nothing in RSA references Euclid.
+  Status   : DONE (2026-11-25): as corrected. Keygen: _SSFRSAInvE65537 (lambda mod 65537 as
+             a sum of limbs since 2^32 == 1; a 16-step Fermat inverse; exact division by
+             65537 via 0xFFFF0001), constant time in lambda (M4: no data-dependent branch;
+             the borrow is IT-predicated) where Euclid was variable-time over it.
+             Measured (M4 -Os, on 434e4af): linked with --gc-sections, tests off, 4096 cap,
+             sign-only 21,868 -> 20,380 B (-1,488), keygen + sign 28,864 -> 28,324 (-540),
+             verify-only unchanged; Euclid absent from both RSA links. Objects: ssfbn +172 B,
+             ssfrsa +194 B. Stack: the sign static worst case now equals the stack actually
+             used, PSS 24,752 -> 21,472 (-3,280; 3072 -2,504; 2048 -1,640), PKCS#1 the same,
+             TLS client RSA signing 25,480 -> 22,200; keygen +8 B tests off, 0 on. Host: d in
+             0.29 / 0.41 / 0.51 us at 2048 / 3072 / 4096-bit lambda (Euclid 313 / 701 /
+             1,199 us), equal across lambda classes; RSA sign unchanged, signatures identical.
+             Correctness: the 65537 reduction and product exhaustive; 20,000 lambdas of 1..128
+             limbs against SSFBNModInvExt; 22 generated keys (2048 / 3072 / 4096) pass
+             openssl rsa -check with d == 65537^-1 mod lcm(p - 1, q - 1) exactly. Tests:
+             SSFBNModInvOdd against SSFBNModInvExt up to SSF_BN_MAX_MOD_LIMBS, false for 0 and
+             a shared factor, SSF_ASSERT_TEST for even m and a >= m (did not build on HEAD);
+             each generated key's d checked against OpenSSL's BN_mod_inverse mod lambda; the
+             derivation (test-only _SSFRSAInvE65537Test) against SSFBNModInvExt on random,
+             small-top-limb and lambda == -1 mod 65537 shapes plus four fixed lambdas whose
+             exact division borrows below the top limb (about 1 in 50,000 random lambdas; the
+             keygen tests alone missed that mutant). Mutants under ASan: 10 of 11 killed; the
+             11th (blinding back on SSFBNModInvExt) behaves identically and is caught by the
+             link check, which then finds Euclid again (sign-only 21,868 B).
 
 BN-08  CODE  -1,120 B linked in the EC set at the RSA cap (-972 B in an EC-only build)   M
   Location : _crypto/ssfbn.c:2290-2291

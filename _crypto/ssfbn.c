@@ -1953,6 +1953,33 @@ bool SSFBNModInvExt(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
     return _SSFBNModInvExtEuclid(r, a, m);
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* If gcd(a, m) == 1 writes r = a^(-1) mod m and returns true, else false. Odd m, a < m only:    */
+/* the binary path of SSFBNModInvExt without its Euclid fallback, so callers that never need an  */
+/* even modulus do not link it (OPTIMIZE BN-07). Variable-time (see ssfbn.md).                   */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFBNModInvOdd(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
+{
+    SSF_REQUIRE(r != NULL);
+    SSF_REQUIRE(r->limbs != NULL);
+    SSF_REQUIRE(a != NULL);
+    SSF_REQUIRE(a->limbs != NULL);
+    SSF_REQUIRE(m != NULL);
+    SSF_REQUIRE(m->limbs != NULL);
+    SSF_REQUIRE(a->len == m->len);
+    SSF_REQUIRE(m->len >= 1u);
+    SSF_REQUIRE(m->len <= r->cap);
+    SSF_REQUIRE(m->len <= SSF_BN_MAX_MOD_LIMBS);
+    SSF_REQUIRE((m->limbs[0] & 1u) != 0u);
+    SSF_REQUIRE(SSFBNCmp(a, m) < 0);
+
+    _SSF_BN_COUNT(_SSFBNFullWidthCalls);
+
+    /* Is a zero (never invertible)? */
+    if (SSFBNIsZero(a)) return false;
+    return _SSFBNModInvBinary(r, a, m);
+}
+
 #if SSF_BN_CONFIG_MAX_BITS >= 512
 /* --------------------------------------------------------------------------------------------- */
 /* Adds c * k (coefficients in {-1, 0, 1}) to n limbs of r in constant time; returns the carry.  */

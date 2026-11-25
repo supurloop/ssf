@@ -4730,6 +4730,39 @@ void SSFBNUnitTest(void)
         SSF_ASSERT_TEST(SSFBNGenPrime(&narrow, 33u, 5u, &prng));
     }
 
+    /* ---- BN-13: 32-bit targets' trial-division remainder, every d < 2^16 ---- */
+    {
+        static SSFBNLimb_t tdL[SSF_BN_MAX_LIMBS];
+        SSFBN_t td = { tdL, 0u, SSF_BN_MAX_LIMBS };
+        uint32_t x = 0xD1B54A32u;
+        uint32_t d;
+        uint16_t k;
+        uint8_t shape;
+
+        for (shape = 0u; shape < 6u; shape++)
+        {
+            /* zero, one limb, all-ones full width, random of 2 / 33 / full limbs */
+            td.len = (shape == 0u) ? 1u : ((shape == 1u) ? 1u : ((shape == 3u) ? 2u :
+                     ((shape == 4u) ? 33u : SSF_BN_MAX_LIMBS)));
+            if (td.len > SSF_BN_MAX_LIMBS) td.len = SSF_BN_MAX_LIMBS;
+            for (k = 0u; k < td.len; k++)
+            {
+                x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+                td.limbs[k] = (shape == 2u) ? 0xFFFFFFFFu : x;
+            }
+            if (shape == 0u) td.limbs[0] = 0u;
+            for (d = 1u; d <= 0xFFFFu; d += ((shape >= 4u) ? 7u : 1u))
+            {
+                SSF_ASSERT(_SSFBNModUint16Test(&td, d) == SSFBNModUint32(&td, d));
+            }
+            SSF_ASSERT(_SSFBNModUint16Test(&td, 0xFFFFu) == SSFBNModUint32(&td, 0xFFFFu));
+        }
+
+        /* d must be 1 .. 65535 */
+        SSF_ASSERT_TEST(_SSFBNModUint16Test(&td, 0u));
+        SSF_ASSERT_TEST(_SSFBNModUint16Test(&td, 0x10000u));
+    }
+
     /* ---- BN-15: SSFBNModMulCTOdd equals SSFBNModMulCT / ModMul on odd moduli; odd only ---- */
     {
         SSFBN_DEFINE(m, SSF_BN_MAX_MOD_LIMBS);

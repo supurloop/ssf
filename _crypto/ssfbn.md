@@ -724,6 +724,10 @@ bool SSFBNModInvExt(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m);
   runs extended Euclid. **Variable-time** in both paths — do not use on long-term secrets.
   RSA signing uses it for the per-signature blinding inverse `r⁻¹ mod n` of a fresh random
   `r`, the timing exposure accepted in AUDIT RSA-9; the binary path's intermediates are wiped.
+  `m->len` must not exceed [`SSF_BN_MAX_MOD_LIMBS`](#ssf-bn-max-mod-limbs) (`SSF_REQUIRE`;
+  a wider modulus never worked, because the final `a · r` check needs `2 · m->len` limbs).
+  Extended Euclid holds its values at that width and only its quotient product at
+  `SSF_BN_MAX_LIMBS` (OPTIMIZE BN-05: 5.2 KB instead of 9.3 KB of stack at the RSA-4096 cap).
 
 <a id="modinvsmall"></a>
 ```c

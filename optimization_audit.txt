@@ -96,6 +96,35 @@ SAFE-04  ssfx509: SSF_X509_CONFIG_MAX_CHAIN_DEPTH cannot be overridden with -D
   Fix      : wrap it in #ifndef.
   Status   : OPEN
 
+SAFE-05  ssfrsa: the 8 KB stack scrub does not reach the deepest freed frames      [V]
+  Location : _crypto/ssfrsa.c:93 (_SSFRSAStackScrub, volatile uint8_t scratch[8192]);
+             called at the end of SSFRSASignPKCS1, SSFRSASignPSS, SSFRSAKeyGen and
+             _SSFRSAKeyGenDerive
+  Issue    : ssfrsa.md promises that the scrub "overwrites the freed frames left by the
+             underlying ssfbn primitives". It is a fixed 8,192 B, but the stack used below
+             the scrubbing function is larger at every RSA cap (M4 -Os call graph, unit tests
+             off; signing with the Euclid / shift-subtract paths it never takes excluded):
+                 cap    keygen      sign (PKCS#1 and PSS)
+                 4096   16,384 B    20,944 B
+                 3072   12,416 B    15,888 B
+                 2048    8,448 B    10,832 B
+             Below the first 8 KB, freed ssfbn frames keep secret-derived words: Montgomery
+             scratch of the CRT exponentiations, and in keygen the Miller-Rabin and inverse
+             frames over p, q, lambda and d (extended Euclid does not wipe old_s / cur_s /
+             tmp_s). Values the code zeroizes itself (CRT intermediates, the ModExp window
+             table, the binary inverse's u / v / x1 / x2) are not affected. Defence in depth:
+             it matters only where freed stack can be read later (a dump, a fault handler, a
+             task reusing the stack). Frame positions are from the static call graph; inlining
+             and call overhead move them by a few dozen bytes.
+  Fix      : options, not yet chosen: (1) size the scrub per configuration from the measured
+             depth below each caller (it does not raise the peak while it stays within the
+             deepest path); (2) wipe in the ssfbn primitives that hold secret-derived scratch
+             (MontMul / MontSquare / ConvertOut, Euclid), as the BN-11 scrub hook already
+             does for the fast paths; (3) both. Each needs a timing and stack cost measurement.
+  Found    : 2026-11-25, while measuring BN-05 (BN-05 brought Euclid's own frame, 9,344 ->
+             5,248 B at 4096, inside the scrub; its callees still reach past it).
+  Status   : OPEN
+
 =====================================================================================
 ssftlsc  (TLS 1.3 client)          baseline: code 13,611 B; sizeof(SSFTLSCSession_t) 43,264 B
 =====================================================================================
@@ -272,7 +301,24 @@ BN-01  STACK  SSFBNModExpMont 10,440 -> 4,792 B at RSA-4096 (sign chain 12,624 -
              ModExp's own mont drops ~540 B more if sized the same way (E).
   Risk     : medium; constant-time unchanged; full-width SSFBNModExp unit tests need the
              default or gating. Combines with BN-03 / BN-04.
-  Status   : OPEN
+  Re-measured (2026-11-25, M4 call graph, RSA caps 4096 / 3072 / 2048): the figures above
+             are the ModExp branch, not the signing peak. The sign peak runs through the
+             blinding inverse (_SSFRSAPrivateOpCRT -> SSFBNModInvExt -> _SSFBNModInvExtEuclid,
+             28,904 B at 4096) above the ModExp branch (26,784 B), so BN-01 alone saves 0 B on
+             the RSA sign and TLS client pollOpen peaks at every cap. It pays only after BN-05
+             / BN-07 lower the inverse branch (E at 4096: BN-05 alone 28.9 -> 26.8 KB; BN-05 +
+             BN-01 24.8 KB).
+             The change as written narrows the public SSFBNModExp / ModExpMont to half width
+             in RSA builds (a full-width modulus would fail SSF_REQUIRE), against the
+             SSF_BN_MAX_MOD_LIMBS design in ssfbn.md: keygen 27,120 -> 25,496 B, -4 B code.
+             Preferred non-narrowing design (prototyped): public functions unchanged over a
+             shared constant-time core taking caller storage; new SSFBNModExpHalf (the
+             SSFBNModInvSmall precedent) used only by the RSA CRT, with a compile-time check
+             that the CRT primes fit. ModExp branch 26,784 -> 22,016 B (4096), 20,384 ->
+             16,768 (3072), 13,984 -> 11,512 (2048); keygen +32 B; code +236 B; host time
+             unchanged within noise, results bit-identical to HEAD; BN / RSA / ECDSA unit
+             tests pass.
+  Status   : OPEN (defer until BN-05 or BN-07; then take the non-narrowing design)
 
 BN-02  STACK / CODE / PERF  SSFBNModExpMontPub frame 3,128 -> 1,072 B; RSA verify chain
        5,344 -> 3,256 B (-2,088 with BN-06); -39 B code; e=65537 10% faster (host)       M V
@@ -306,7 +352,30 @@ BN-05  STACK  _SSFBNModInvExtEuclid 9,344 -> 5,248 B (keygen)                   
   Change   : size the rest SSF_BN_MAX_MOD_LIMBS; SSF_REQUIRE(m->len <= MAX_MOD_LIMBS).
   Risk     : low; keygen only (already variable-time over the secret lambda, unchanged).
              Superseded by BN-07 if that is taken.
-  Status   : OPEN
+  Correction (2026-11-25): not keygen only. _SSFRSAPrivateOpCRT calls SSFBNModInvExt for the
+             blinding inverse r^-1 mod n on every RSA private operation, and that branch sets
+             the RSA sign peak at every cap (28,904 B at 4096) and so the TLS client's pollOpen
+             peak with an RSA client key. The added SSF_REQUIRE also narrows the public
+             SSFBNModInvExt; review both before taking it.
+  Status   : DONE (2026-11-25): as specified; the precondition is on the public
+             SSFBNModInvExt (and Euclid), documented in ssfbn.md, and the binary-path dispatch
+             no longer repeats it. HEAD already failed on a wider modulus (an internal
+             SSF_ENSURE, then the final ModMul's precondition); only a wide m with a == 0
+             mod m now fails the precondition instead of returning false. Measured (M4 -Os,
+             unit tests on / off): Euclid frame 9,344 -> 5,248 B (4096), 7,032 -> 3,960
+             (3072), 4,736 -> 2,680 (2048); static RSA sign peak (PSS) 28,904 -> 26,784,
+             21,984 -> 20,384, 15,080 -> 13,984; TLS client pollOpen with an RSA key 30,472
+             -> 28,352 at 4096 (29,576 -> 27,496 tests off). The stack signing actually uses
+             (Euclid never runs for an odd n) and the keygen peak (Miller-Rabin ModExpMont)
+             are unchanged. Code -12 / -28 / -68 B. Host: inverses bit-identical to HEAD;
+             same time at 4096-bit lambda, ~3% faster at 2048. Tests: the wide-modulus
+             precondition (red on HEAD for a == 0), Euclid at exactly SSF_BN_MAX_MOD_LIMBS
+             (65537^-1, (m - 1)^-1, unreduced m + 1); BN / RSA / ECDSA unit tests pass, ASan /
+             UBSan clean; mutants: narrowing prod, cur_r or old_s and dropping both
+             preconditions are killed (either precondition alone covers the other; skipping
+             the initial reduction is an equivalent mutant). README footnote 48 re-measured
+             (its figures predated recent changes, and keygen's peak is Miller-Rabin, not
+             Euclid). Found SAFE-05.
 
 BN-06  STACK / CODE  SSFBNMontConvertOut chain 1,136 -> 592 B; -40 B code               M
   Location : _crypto/ssfbn.c:2842-2858; MontMul :2578

@@ -4412,7 +4412,55 @@ void SSFBNUnitTest(void)
             for (k = 0u; k < wideM.len; k++) wideMont.mod.limbs[k] = 0xFFFFFFFFu;
             SSF_ASSERT_TEST(SSFBNModExpMontPub(&wideR, &wideA, &wideE, &wideMont));
             SSF_ASSERT_TEST(SSFBNModExpMont(&wideR, &wideA, &wideE, &wideMont));
+
+            /* ModInvExt states it too (BN-05), even for a = 0, which needs no arithmetic */
+            SSF_ASSERT_TEST(SSFBNModInvExt(&wideR, &wideA, &wideM));
+            SSFBNSetZero(&wideA, wideM.len);
+            SSF_ASSERT_TEST(SSFBNModInvExt(&wideR, &wideA, &wideM));
         }
+    }
+
+    /* ---- BN-05: extended Euclid at the widest modulus it accepts (RSA keygen's lambda) ---- */
+    {
+        SSFBN_DEFINE(m, SSF_BN_MAX_MOD_LIMBS);
+        SSFBN_DEFINE(a, SSF_BN_MAX_MOD_LIMBS);
+        SSFBN_DEFINE(r, SSF_BN_MAX_MOD_LIMBS);
+        SSFBN_DEFINE(check, SSF_BN_MAX_MOD_LIMBS);
+        uint16_t n = SSF_BN_MAX_MOD_LIMBS;
+        uint32_t x = 0x2545F491u;
+        uint16_t k;
+
+        /* An even m of exactly SSF_BN_MAX_MOD_LIMBS limbs, top bit set, so Euclid runs */
+        SSFBNSetZero(&m, n);
+        for (k = 0u; k < n; k++)
+        {
+            x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+            m.limbs[k] = x;
+        }
+        m.limbs[0] &= ~(SSFBNLimb_t)1u;
+        m.limbs[n - 1u] |= 0x80000000u;
+        m.limbs[n - 1u] &= 0xFFFFFFFEu;   /* m + 1 below stays n limbs */
+
+        /* 65537^-1 mod m, as keygen computes d; m is coprime to the prime 65537 */
+        SSF_ASSERT(SSFBNCmpUint32(&m, 65537u) > 0);
+        SSFBNSetUint32(&a, 65537u, n);
+        _SSFBNSlowPathCalls = 0u;
+        SSF_ASSERT(SSFBNModInvExt(&r, &a, &m) == true);
+        SSF_ASSERT(_SSFBNSlowPathCalls == 1u);
+        SSF_ASSERT((r.len == n) && (SSFBNCmp(&r, &m) < 0));
+        SSFBNModMul(&check, &a, &r, &m);
+        SSF_ASSERT(SSFBNIsOne(&check));
+
+        /* (m - 1)^-1 = m - 1: every limb of a and of the result is in use */
+        (void)SSFBNSubUint32(&a, &m, 1u);
+        SSF_ASSERT(SSFBNModInvExt(&r, &a, &m) == true);
+        SSF_ASSERT(SSFBNCmp(&r, &a) == 0);
+
+        /* An unreduced a = m + 1 is reduced first: its inverse is 1 */
+        (void)SSFBNAddUint32(&a, &m, 1u);
+        SSF_ASSERT((a.len == n) && (SSFBNCmp(&a, &m) > 0));
+        SSF_ASSERT(SSFBNModInvExt(&r, &a, &m) == true);
+        SSF_ASSERT((r.len == n) && SSFBNIsOne(&r));
     }
 
     /* ---- AUDIT BN-7: MontInit's R^2 is exact for 1024+ limb moduli (MAX_BITS >= 32768) ---- */

@@ -1718,14 +1718,15 @@ void SSFBNDivMod(SSFBN_t *q, SSFBN_t *rem, const SSFBN_t *a, const SSFBN_t *b)
 static bool _SSFBNModInvExtEuclid(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
 {
     /* Track only s (m's coefficient is implicit); signs tracked separately (SSFBN_t unsigned). */
-    SSFBN_DEFINE(old_r, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(cur_r, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(old_s, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(cur_s, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(quotient, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(tmp_r, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(tmp_s, SSF_BN_MAX_LIMBS);
-    SSFBN_DEFINE(prod, SSF_BN_MAX_LIMBS);
+    /* Every value is reduced below m, so only the product needs 2N limbs (BN-05). */
+    SSFBN_DEFINE(old_r, SSF_BN_MAX_MOD_LIMBS);
+    SSFBN_DEFINE(cur_r, SSF_BN_MAX_MOD_LIMBS);
+    SSFBN_DEFINE(old_s, SSF_BN_MAX_MOD_LIMBS);
+    SSFBN_DEFINE(cur_s, SSF_BN_MAX_MOD_LIMBS);
+    SSFBN_DEFINE(quotient, SSF_BN_MAX_MOD_LIMBS);
+    SSFBN_DEFINE(tmp_r, SSF_BN_MAX_MOD_LIMBS);
+    SSFBN_DEFINE(tmp_s, SSF_BN_MAX_MOD_LIMBS);
+    SSFBN_DEFINE(prod, SSF_BN_MAX_LIMBS);       /* quotient * cur_s: the only 2N-wide local */
     bool old_s_neg = false;
     bool cur_s_neg = false;
     uint16_t len;
@@ -1733,6 +1734,7 @@ static bool _SSFBNModInvExtEuclid(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m
     SSF_REQUIRE(r != NULL);
     SSF_REQUIRE(a != NULL);
     SSF_REQUIRE(m != NULL);
+    SSF_REQUIRE(m->len <= SSF_BN_MAX_MOD_LIMBS);
 
     _SSF_BN_COUNT(_SSFBNSlowPathCalls);
 
@@ -1761,7 +1763,7 @@ static bool _SSFBNModInvExtEuclid(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m
 
         /* tmp_s = old_s - quotient * cur_s with sign tracking; reduce mod m to bound product. */
         {
-            SSFBN_DEFINE(qxs, SSF_BN_MAX_LIMBS);
+            SSFBN_DEFINE(qxs, SSF_BN_MAX_MOD_LIMBS);
             SSF_ENSURE((uint16_t)(quotient.len + cur_s.len) <= SSF_BN_MAX_LIMBS);
             SSFBNMul(&prod, &quotient, &cur_s);
             SSFBNMod(&qxs, &prod, m);
@@ -1817,7 +1819,7 @@ static bool _SSFBNModInvExtEuclid(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m
 
     /* Verify a * r mod m == 1; catches a non-coprime case where the algorithm produced garbage. */
     {
-        SSFBN_DEFINE(check, SSF_BN_MAX_LIMBS);
+        SSFBN_DEFINE(check, SSF_BN_MAX_MOD_LIMBS);
         SSFBNModMul(&check, a, r, m);
         if (SSFBNIsOne(&check) == false) return false;
     }
@@ -1937,12 +1939,12 @@ bool SSFBNModInvExt(SSFBN_t *r, const SSFBN_t *a, const SSFBN_t *m)
     SSF_REQUIRE(a->len == m->len);
     SSF_REQUIRE(m->len >= 1u);
     SSF_REQUIRE(m->len <= r->cap);
+    SSF_REQUIRE(m->len <= SSF_BN_MAX_MOD_LIMBS);
 
     _SSF_BN_COUNT(_SSFBNFullWidthCalls);
 
     /* Is m odd with 0 < a < m, the RSA blinding inverse's case (n is odd, r < n)? */
-    if (((m->limbs[0] & 1u) != 0u) && (m->len <= SSF_BN_MAX_MOD_LIMBS) && (!SSFBNIsZero(a)) &&
-        (SSFBNCmp(a, m) < 0))
+    if (((m->limbs[0] & 1u) != 0u) && (!SSFBNIsZero(a)) && (SSFBNCmp(a, m) < 0))
     {
         /* Yes, use the faster binary extended GCD */
         return _SSFBNModInvBinary(r, a, m);

@@ -7155,13 +7155,17 @@ void SSFX509UnitTest(void)
     /* ---- leaf; the path ends at the first certificate a trust anchor issued              ---- */
     {
         enum { R_ROOT, R_OLD, R_OTHER, R_INT1, R_INT2, R_INT2W, R_LEAF, R_CROSS, R_CROSSX, R_JUNK,
-               R_LA, R_LB, R_LEAFL, R_INT2S, R_INT2WS, R_LEAFK, R_N };
+               R_LA, R_LB, R_LEAFL, R_INT2S, R_INT2WS, R_LEAFK, R_INT2N, R_INT2KU, R_INT1P0,
+               R_INT1NC, R_INT2J, R_LEAFE, R_LEAFKU, R_BAD, R_INT1NC2, R_INT2SAN, R_N };
         static uint8_t der[R_N][SSF_X509_CONFIG_MAX_CERT_SIZE];
         static uint32_t len[R_N];
         static uint8_t priv[R_N][SSF_ECDSA_MAX_PRIV_KEY_SIZE];
         static uint8_t pub[R_N][SSF_ECDSA_MAX_PUB_KEY_SIZE];
         static size_t pubLen[R_N];
         static const char *san[] = { "path.test", NULL };
+        static const char *ncExcl[] = { "path.test", NULL };
+        static const char *ncExcl2[] = { "bad.test", NULL };
+        static const char *sanBad[] = { "bad.test", NULL };
         static const uint8_t junkOid[] = { 0x2Bu, 0x06u, 0x01u, 0x04u, 0x01u, 0x83u, 0xB2u, 0x03u };
         static const uint8_t junkVal[] = { 0x05u, 0x00u };
         static const uint8_t idA[] = { 0xAAu };
@@ -7204,7 +7208,21 @@ void SSFX509UnitTest(void)
                 (pp)->rawExtValueLen = sizeof(junkVal); (pp)->rawExtCritical = true; } \
             if ((k) == R_INT2S) { (pp)->skid = idA; (pp)->skidLen = 1u; } \
             if ((k) == R_INT2WS) { (pp)->skid = idB; (pp)->skidLen = 1u; } \
-            if ((k) == R_LEAFK) { (pp)->akid = idA; (pp)->akidLen = 1u; } } while (0)
+            if ((k) == R_LEAFK) { (pp)->akid = idA; (pp)->akidLen = 1u; } \
+            if ((k) == R_INT2N) (pp)->isCA = false; \
+            if ((k) == R_INT2KU) (pp)->keyUsageBits = SSF_X509_KU_DIGITAL_SIGNATURE; \
+            if ((k) == R_INT1P0) (pp)->pathLenConstraint = 0; \
+            if ((k) == R_INT1NC) { (pp)->addNameConstraints = true; \
+                (pp)->ncExcludedDNS = ncExcl; } \
+            if ((k) == R_INT2J) { (pp)->addRawExt = true; (pp)->rawExtOid = junkOid; \
+                (pp)->rawExtOidLen = sizeof(junkOid); (pp)->rawExtValue = junkVal; \
+                (pp)->rawExtValueLen = sizeof(junkVal); (pp)->rawExtCritical = true; } \
+            if ((k) == R_LEAFE) { (pp)->addExtKeyUsage = true; (pp)->ekuClientAuth = true; } \
+            if ((k) == R_LEAFKU) { (pp)->addKeyUsage = true; \
+                (pp)->keyUsageBits = SSF_X509_KU_KEY_AGREEMENT; } \
+            if ((k) == R_INT1NC2) { (pp)->addNameConstraints = true; \
+                (pp)->ncExcludedDNS = ncExcl2; } \
+            if ((k) == R_INT2SAN) (pp)->sanDNSNames = sanBad; } while (0)
 
         _UT_PATH_CERT(R_INT1, "int1", "root", R_ROOT, R_INT1, false);
         _UT_PATH_CERT(R_INT2, "int2", "int1", R_INT1, R_INT2, false);
@@ -7219,6 +7237,17 @@ void SSFX509UnitTest(void)
         _UT_PATH_CERT(R_INT2S, "int2", "int1", R_INT1, R_INT2, false);   /* SKID AA */
         _UT_PATH_CERT(R_INT2WS, "int2", "int1", R_INT1, R_INT2W, false); /* SKID BB, other key */
         _UT_PATH_CERT(R_LEAFK, "leaf", "int2", R_INT2, R_LEAFK, true);   /* AKID AA */
+        _UT_PATH_CERT(R_INT2N, "int2", "int1", R_INT1, R_INT2, false);   /* cA FALSE */
+        _UT_PATH_CERT(R_INT2KU, "int2", "int1", R_INT1, R_INT2, false);  /* No keyCertSign */
+        _UT_PATH_CERT(R_INT1P0, "int1", "root", R_ROOT, R_INT1, false);  /* pathLen 0 */
+        _UT_PATH_CERT(R_INT1NC, "int1", "root", R_ROOT, R_INT1, false);  /* Excludes path.test */
+        _UT_PATH_CERT(R_INT2J, "int2", "int1", R_INT1, R_INT2, false);   /* Unknown critical ext */
+        _UT_PATH_CERT(R_LEAFE, "leaf", "int2", R_INT2, R_LEAFE, true);   /* EKU clientAuth only */
+        _UT_PATH_CERT(R_LEAFKU, "leaf", "int2", R_INT2, R_LEAFKU, true); /* KU keyAgreement */
+        _UT_PATH_CERT(R_INT1NC2, "int1", "root", R_ROOT, R_INT1, false); /* Excludes bad.test */
+        _UT_PATH_CERT(R_INT2SAN, "int2", "int1", R_INT1, R_INT2, false); /* SAN bad.test */
+        memcpy(der[R_BAD], der[R_INT2], len[R_INT2]);                    /* Truncated: no parse */
+        len[R_BAD] = len[R_INT2] - 1u;
         #undef _UT_PATH_CERT
         #undef _utPathTweak
 
@@ -7247,6 +7276,36 @@ void SSFX509UnitTest(void)
         _UT_PATH(false, ERR_UNKNOWN_CA, 2u, R_LEAFL, R_LA, R_LB);           /* A loop ends */
         _UT_PATH(false, ERR_SIGNATURE, 0u, R_LEAF, R_INT2W, R_INT1);        /* Only the decoy */
         _UT_PATH(false, ERR_KEY_ID_MISMATCH, 0u, R_LEAFK, R_INT2WS, R_INT1); /* Key id rules out */
+        _UT_PATH(true, OK, 0u, R_LEAF, R_BAD, R_INT2, R_INT1);              /* Unparsable extra */
+
+        /* Checks after the path is built name the right certificate when the chain is sent out */
+        /* of order behind an unused one, so its chain index is not its place on the path        */
+        _UT_PATH(false, ERR_NOT_CA, 3u, R_LEAF, R_OTHER, R_INT1, R_INT2N);
+        _UT_PATH(false, ERR_CA_KEY_USAGE, 3u, R_LEAF, R_OTHER, R_INT1, R_INT2KU);
+        _UT_PATH(false, ERR_PATH_LEN, 1u, R_LEAF, R_INT1P0, R_OTHER, R_INT2);
+        _UT_PATH(false, ERR_NAME_CONSTRAINTS, 0u, R_LEAF, R_INT1NC, R_OTHER, R_INT2);
+        _UT_PATH(true, OK, 0u, R_LEAF, R_INT1NC2, R_OTHER, R_INT2);         /* NC control */
+        _UT_PATH(true, OK, 0u, R_LEAF, R_INT1, R_OTHER, R_INT2SAN);         /* SAN control */
+        _UT_PATH(false, ERR_NAME_CONSTRAINTS, 3u, R_LEAF, R_INT1NC2, R_OTHER, R_INT2SAN);
+        _UT_PATH(false, ERR_CRITICAL_EXT, 3u, R_LEAF, R_OTHER, R_INT1, R_INT2J);
+        _UT_PATH(false, ERR_EKU, 0u, R_LEAFE, R_OTHER, R_INT1, R_INT2);
+        _UT_PATH(true, OK, 0u, R_LEAFKU, R_OTHER, R_INT1, R_INT2);          /* KU: server auth */
+
+        /* The same chains for code signing: the leaf's Key Usage now counts, and no hostname */
+        #define _UT_PATH_CS(_ok, _c, _i, ...) do { \
+            static const uint8_t _ids[] = { __VA_ARGS__ }; \
+            const uint8_t *_ch[sizeof(_ids)]; uint32_t _cl[sizeof(_ids)]; uint32_t _j; \
+            for (_j = 0; _j < sizeof(_ids); _j++) \
+            { _ch[_j] = der[_ids[_j]]; _cl[_j] = len[_ids[_j]]; } \
+            SSF_ASSERT(SSFX509VerifyChainPurpose(_ch, _cl, (uint8_t)sizeof(_ids), trust, \
+                                                 trustLen, 1u, SSF_X509_PURPOSE_CODE_SIGNING, \
+                                                 NULL, 1800000000ull, &_utVErr) == (_ok)); \
+            _UT_VERR(_c, _i); } while (0)
+        _UT_PATH_CS(true, OK, 0u, R_LEAF, R_OTHER, R_INT1, R_INT2);
+        _UT_PATH_CS(false, ERR_LEAF_KEY_USAGE, 0u, R_LEAFKU, R_OTHER, R_INT1, R_INT2);
+        _UT_PATH_CS(false, ERR_EKU, 0u, R_LEAFE, R_OTHER, R_INT1, R_INT2);
+        _UT_PATH_CS(false, ERR_NAME_CONSTRAINTS, 0u, R_LEAF, R_INT1NC, R_OTHER, R_INT2);
+        #undef _UT_PATH_CS
         #undef _UT_PATH
     }
 

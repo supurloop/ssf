@@ -429,7 +429,16 @@ X509-01  STACK  SSFX509VerifyChainPurpose frame 6,336 -> 1,888 B; +65 B code    
              ASan / UBSan clean (main session, V).
   Risk     : medium effort, low risk; every check still runs; the DER already must outlive
              the parse. Lowers the TLS client's pollOpen peak and CMS's (CMS-01).
-  Status   : OPEN
+  Status   : DONE (2026-11-25): as specified, except _SSFX509FindAnchor still parses the
+             anchor into the free slot (no index needed). Measured (M4 -Os): frame 6,336 ->
+             1,888 B, code 13,172 -> 13,217 B (+45). Call-graph peaks (M4 hard-float build):
+             SSFX509VerifyChain 17,936 -> 13,480 B (RSA-2048-only 13,944 -> 9,488); CMS verify
+             20,096 -> 15,640 B (16,104 -> 11,648); TLS client chain verification 18,888 ->
+             14,432 B (3072: 16,328 -> 11,872; 2048: 14,896 -> 10,440). Tests: guard tests on
+             out-of-order chains for every post-path check, an unparsable extra certificate,
+             code-signing purpose; 17 of 18 mutants killed (survivor: the unreachable
+             re-parse failure). ssfx509 / ssfcms / ssftlsc unit tests pass, ASan / UBSan
+             clean. README, ssfcms.md, ssftlsc.h figures updated.
 
 X509-02  STRUCT  up to -335 B per certificate (888 -> ~553)                              E
   Location : _codec/ssfx509.h:71-114, 128-131; ssfx509.c:535, 439-451

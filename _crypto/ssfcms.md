@@ -123,10 +123,8 @@ against a caller-supplied trust store. There is no encoder: the module verifies,
   the signer certificate is held only as a trust anchor, so all embedded certificates follow it.
   [`SSF_X509_CONFIG_MAX_CHAIN_DEPTH`](../_codec/ssfx509.md#cfg-max-chain-depth) must be at
   least that, or the verifier's limit would be exceeded; `ssfcms.c` enforces this
-  with `#error`. `SSFX509VerifyChainPurpose()` reserves stack for
-  `SSF_X509_CONFIG_MAX_CHAIN_DEPTH` parsed certificates whatever the actual chain length, so
-  in a build where ssfcms is the only user of the chain verifier, a depth above
-  `SSF_CMS_CONFIG_MAX_CERTS + 1` is stack that can never be used. For example, a firmware
+  with `#error`. A larger depth costs only 2 bytes of stack per certificate, because
+  `SSFX509VerifyChainPurpose()` parses at most two certificates at a time. For example, a firmware
   signature that embeds three certificates needs `SSF_CMS_CONFIG_MAX_CERTS` `3` and
   `SSF_X509_CONFIG_MAX_CHAIN_DEPTH` `4`. The depth is not capped, because
   [`SSFX509VerifyChain()`](../_codec/ssfx509.md#ssfx509verifychain) is also called directly

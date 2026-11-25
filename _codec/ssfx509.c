@@ -3657,13 +3657,29 @@ static bool _SSFX509FindAnchor(const SSFX509Cert_t *cert, const uint8_t **trustD
     return false;
 }
 
-/* Stack use is sized by SSF_X509_CONFIG_MAX_CHAIN_DEPTH; see ssfx509.md */
-#ifdef _WIN32
-#pragma warning(push)
-#pragma warning(disable:6262)
-#endif
+/* --------------------------------------------------------------------------------------------- */
+/* Internal: returns true with chainDer[idx], a certificate on the path, parsed again into *cert, */
+/* else false with ERR_PARSE for idx: it parsed when the path was built, so this fails closed.  */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFX509ParsePathCert(const uint8_t **chainDer, const uint32_t *chainDerLen,
+                                  uint8_t idx, SSFX509Cert_t *cert, SSFX509VerifyErr_t *errOut)
+{
+    /* Does it parse? */
+    if (!SSFX509Parse(chainDer[idx], chainDerLen[idx], cert))
+    {
+        /* No */
+        SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX, "Chain: re-parse cert[%u] failed", idx);
+        _SSF_X509_VERIFY_FAIL(errOut, SSF_X509_VERIFY_ERR_PARSE, idx);
+        return false;
+    }
+    return true;
+}
+
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if chainDer[0] validates to a trust anchor for purpose, else false.              */
+/* Only two certificates are parsed at a time, so the stack used does not grow with the chain:  */
+/* *subj is the one being checked and *iss the one that issued or constrains it. Path          */
+/* certificates are parsed again from chainDer for each check after the path is built.         */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDerLen,
                                uint8_t chainLen,
@@ -3672,9 +3688,9 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
                                const char *hostnameStrOpt, uint64_t nowUnixSec,
                                SSFX509VerifyErr_t *errOut)
 {
-    SSFX509Cert_t certs[SSF_X509_CONFIG_MAX_CHAIN_DEPTH];
-    SSFX509Cert_t anchor;
-    bool isParsed[SSF_X509_CONFIG_MAX_CHAIN_DEPTH];
+    SSFX509Cert_t slot[2];
+    SSFX509Cert_t *subj = &slot[0];
+    SSFX509Cert_t *iss = &slot[1];
     bool onPath[SSF_X509_CONFIG_MAX_CHAIN_DEPTH];
     uint8_t path[SSF_X509_CONFIG_MAX_CHAIN_DEPTH];
     uint8_t pathLen;
@@ -3699,17 +3715,15 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
     errOut->code = SSF_X509_VERIFY_OK;
     errOut->certIdx = 0;
 
-    /* Parse what was sent. Only chainDer[0] is required to be usable: the others are candidate */
-    /* issuers, and one that does not parse is simply never on the path.                        */
     for (i = 0; i < chainLen; i++)
     {
         SSF_REQUIRE(chainDer[i] != NULL);
-        isParsed[i] = SSFX509Parse(chainDer[i], chainDerLen[i], &certs[i]);
         onPath[i] = false;
     }
 
-    /* Does the leaf parse? */
-    if (!isParsed[0])
+    /* Does the leaf parse? Only it must: the others are candidate issuers, and one that does not */
+    /* parse is simply never on the path.                                                         */
+    if (!SSFX509Parse(chainDer[0], chainDerLen[0], subj))
     {
         /* No, malformed */
         SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX, "Chain: parse cert[0] failed (%lu bytes)",
@@ -3717,13 +3731,14 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
         _SSF_X509_VERIFY_FAIL(errOut, SSF_X509_VERIFY_ERR_PARSE, 0u);
         return false;
     }
-    if (!_SSFX509PathCertCheck(&certs[0], 0u, nowUnixSec, errOut)) return false;
+    if (!_SSFX509PathCertCheck(subj, 0u, nowUnixSec, errOut)) return false;
 
     /* Build the path from the leaf (RFC 8446 4.4.2: other certificates may be extraneous and in */
     /* any order). It ends at the first certificate a trust anchor issued, so a copy of the root */
     /* or a cross-signed root after it is never used. Each step takes the first unused          */
     /* certificate named as the issuer whose key identifier agrees, that passes its own checks */
     /* and whose key verifies the signature; there is no backtracking past a completed step.   */
+    /* *subj holds the top of the path, cur; each anchor or candidate is parsed into *iss.      */
     path[0] = 0u;
     onPath[0] = true;
     pathLen = 1u;
@@ -3735,10 +3750,9 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
         SSFX509VerifyErr_t best;
 
         /* Did a trust anchor issue cur? */
-        if (_SSFX509FindAnchor(&certs[cur], trustDer, trustDerLen, trustCount, nowUnixSec,
-                               &anchor))
+        if (_SSFX509FindAnchor(subj, trustDer, trustDerLen, trustCount, nowUnixSec, iss))
         {
-            /* Yes, the path is complete */
+            /* Yes, the path is complete, and *iss holds the anchor from here on */
             break;
         }
 
@@ -3749,9 +3763,10 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
         {
             SSFX509VerifyErr_t err;
 
-            if ((!isParsed[j]) || onPath[j]) continue;
-            if (!_SSFX509NameEquals(&certs[cur].issuer, &certs[j].subject)) continue;
-            if (!SSFX509CheckSKIDAKID(&certs[cur], &certs[j]))
+            if (onPath[j]) continue;
+            if (!SSFX509Parse(chainDer[j], chainDerLen[j], iss)) continue;
+            if (!_SSFX509NameEquals(&subj->issuer, &iss->subject)) continue;
+            if (!SSFX509CheckSKIDAKID(subj, iss))
             {
                 if (rank < 1u)
                 {
@@ -3761,12 +3776,12 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
                 }
                 continue;
             }
-            if (!_SSFX509PathCertCheck(&certs[j], j, nowUnixSec, &err))
+            if (!_SSFX509PathCertCheck(iss, j, nowUnixSec, &err))
             {
                 if (rank < 3u) { rank = 3u; best = err; }
                 continue;
             }
-            if (!SSFX509VerifyCertSignature(&certs[cur], &certs[j]))
+            if (!SSFX509VerifyCertSignature(subj, iss))
             {
                 if (rank < 2u)
                 {
@@ -3792,12 +3807,22 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
         path[pathLen] = next;
         onPath[next] = true;
         pathLen++;
+
+        /* The issuer found is the new top of the path */
+        {
+            SSFX509Cert_t *t = subj;
+
+            subj = iss;
+            iss = t;
+        }
     }
 
     /* Every intermediate is a CA allowed to sign, within its path length (Sec. 6.1.4 (h), (k)) */
     for (i = 1; i < pathLen; i++)
     {
-        const SSFX509Cert_t *ca = &certs[path[i]];
+        const SSFX509Cert_t *ca = subj;
+
+        if (!_SSFX509ParsePathCert(chainDer, chainDerLen, path[i], subj, errOut)) return false;
 
         /* Are Basic Constraints present with cA TRUE? */
         if ((!ca->hasBasicConstraints) || (!ca->isCA))
@@ -3838,21 +3863,23 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
     numSubCAs = (uint8_t)(pathLen - 1u);
 
     /* Are the path's subordinate CAs within the anchor's pathLenConstraint (Sec. 6.1.4 (k))? */
-    if ((anchor.pathLenConstraint >= 0) && ((int8_t)numSubCAs > anchor.pathLenConstraint))
+    if ((iss->pathLenConstraint >= 0) && ((int8_t)numSubCAs > iss->pathLenConstraint))
     {
         /* No */
         SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
             "Chain: trust anchor pathLenConstraint=%d but %u subordinate CAs in chain",
-            anchor.pathLenConstraint, numSubCAs);
+            iss->pathLenConstraint, numSubCAs);
         _SSF_X509_VERIFY_FAIL(errOut, SSF_X509_VERIFY_ERR_PATH_LEN, chainLen);
         return false;
     }
 
     /* Every path cert's SANs must satisfy the anchor's Name Constraints (Sec. 6.1.4 (g)) */
-    for (i = 0; (anchor.hasNameConstraints) && (i < pathLen); i++)
+    for (i = 0; (iss->hasNameConstraints) && (i < pathLen); i++)
     {
+        if (!_SSFX509ParsePathCert(chainDer, chainDerLen, path[i], subj, errOut)) return false;
+
         /* Does it satisfy them? */
-        if (!_SSFX509NCValidateCert(&certs[path[i]], &anchor))
+        if (!_SSFX509NCValidateCert(subj, iss))
         {
             /* No */
             SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
@@ -3862,28 +3889,31 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
         }
     }
 
+    /* The anchor is not needed after this: *subj takes the leaf for the leaf checks */
+    if (!_SSFX509ParsePathCert(chainDer, chainDerLen, 0u, subj, errOut)) return false;
+
     /* Does leaf EKU, when present, include the purpose or anyExtendedKeyUsage (Sec. 4.2.1.12)? */
-    if ((certs[0].hasExtKeyUsage) && (!certs[0].ekuAnyPurpose) &&
-        (((purpose == SSF_X509_PURPOSE_SERVER_AUTH) && (!certs[0].ekuServerAuth)) ||
-         ((purpose == SSF_X509_PURPOSE_CODE_SIGNING) && (!certs[0].ekuCodeSigning))))
+    if ((subj->hasExtKeyUsage) && (!subj->ekuAnyPurpose) &&
+        (((purpose == SSF_X509_PURPOSE_SERVER_AUTH) && (!subj->ekuServerAuth)) ||
+         ((purpose == SSF_X509_PURPOSE_CODE_SIGNING) && (!subj->ekuCodeSigning))))
     {
         /* No */
         SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
             "Chain: leaf EKU lacks the purpose %d (serverAuth=%d clientAuth=%d codeSigning=%d)",
-            purpose, certs[0].ekuServerAuth, certs[0].ekuClientAuth, certs[0].ekuCodeSigning);
+            purpose, subj->ekuServerAuth, subj->ekuClientAuth, subj->ekuCodeSigning);
         _SSF_X509_VERIFY_FAIL(errOut, SSF_X509_VERIFY_ERR_EKU, 0u);
         return false;
     }
 
     /* Code signing: does leaf KU, when present, include digitalSignature or nonRepudiation? */
-    if ((purpose == SSF_X509_PURPOSE_CODE_SIGNING) && (certs[0].hasKeyUsage) &&
-        ((certs[0].keyUsageBits &
+    if ((purpose == SSF_X509_PURPOSE_CODE_SIGNING) && (subj->hasKeyUsage) &&
+        ((subj->keyUsageBits &
           (SSF_X509_KU_DIGITAL_SIGNATURE | SSF_X509_KU_NON_REPUDIATION)) == 0u))
     {
         /* No */
         SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
             "Chain: leaf Key Usage lacks digitalSignature and nonRepudiation (KU=0x%04X)",
-            certs[0].keyUsageBits);
+            subj->keyUsageBits);
         _SSF_X509_VERIFY_FAIL(errOut, SSF_X509_VERIFY_ERR_LEAF_KEY_USAGE, 0u);
         return false;
     }
@@ -3891,10 +3921,13 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
     /* Every subordinate of a constrained intermediate satisfies its Name Constraints (6.1.4 (g)) */
     for (i = 1; i < pathLen; i++)
     {
-        for (j = 0; (certs[path[i]].hasNameConstraints) && (j < i); j++)
+        if (!_SSFX509ParsePathCert(chainDer, chainDerLen, path[i], iss, errOut)) return false;
+        for (j = 0; (iss->hasNameConstraints) && (j < i); j++)
         {
+            if (!_SSFX509ParsePathCert(chainDer, chainDerLen, path[j], subj, errOut)) return false;
+
             /* Does the subordinate violate them? */
-            if (!_SSFX509NCValidateCert(&certs[path[j]], &certs[path[i]]))
+            if (!_SSFX509NCValidateCert(subj, iss))
             {
                 /* Yes */
                 SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
@@ -3908,8 +3941,9 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
     /* No path cert carries a critical extension this verifier does not understand (Sec. 4.2) */
     for (i = 0; i < pathLen; i++)
     {
-        const SSFX509Cert_t *c = &certs[path[i]];
+        const SSFX509Cert_t *c = subj;
 
+        if (!_SSFX509ParsePathCert(chainDer, chainDerLen, path[i], subj, errOut)) return false;
         for (e = 0; e < c->extsLen; e++)
         {
             if (!c->exts[e].critical) continue;
@@ -3931,6 +3965,9 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
         bool hostIsIPv6;
         bool hostIsNumeric;
 
+        /* *subj holds the last path certificate checked above: parse the leaf again */
+        if (!_SSFX509ParsePathCert(chainDer, chainDerLen, 0u, subj, errOut)) return false;
+
         /* The reference identity type picks the one SAN type it may match (RFC 9525 6.3) */
         hostIsIPv4 = _SSFX509ParseIPv4(hostnameStrOpt, hostIP);
         /* A ':' (IPv6, unsupported) or an over-long hostname matches nothing */
@@ -3939,22 +3976,22 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
         /* A non-canonical numeric host ("010.0.0.1") matches nothing */
         hostIsNumeric = _SSFX509IsNumericHost(hostnameStrOpt);
 
-        for (i = 0; (i < certs[0].sanLen) && (!matched); i++)
+        for (i = 0; (i < subj->sanLen) && (!matched); i++)
         {
             /* Is the hostname a DNS name and this SAN a dNSName? */
             if ((!hostIsIPv4) && (!hostIsIPv6) && (!hostIsNumeric) &&
-                (certs[0].san[i].type == SSF_X509_SAN_DNS))
+                (subj->san[i].type == SSF_X509_SAN_DNS))
             {
                 /* Yes */
-                matched = _SSFX509HostnameMatch(hostnameStrOpt, certs[0].san[i].val,
-                                                certs[0].san[i].valLen);
+                matched = _SSFX509HostnameMatch(hostnameStrOpt, subj->san[i].val,
+                                                subj->san[i].valLen);
             }
             /* No, is the hostname an IPv4 literal and this SAN an iPAddress? */
-            else if ((hostIsIPv4) && (certs[0].san[i].type == SSF_X509_SAN_IP))
+            else if ((hostIsIPv4) && (subj->san[i].type == SSF_X509_SAN_IP))
             {
                 /* Yes */
-                matched = _SSFX509IPAddressMatch(hostnameStrOpt, certs[0].san[i].val,
-                                                 certs[0].san[i].valLen);
+                matched = _SSFX509IPAddressMatch(hostnameStrOpt, subj->san[i].val,
+                                                 subj->san[i].valLen);
             }
             /* No, the types differ, or an IPv6 literal, which is not supported, never matches */
         }
@@ -3966,16 +4003,13 @@ bool SSFX509VerifyChainPurpose(const uint8_t **chainDer, const uint32_t *chainDe
             /* No */
             SSF_TLS_TRACE_CERT_ERROR(_SSF_X509_TRACE_CTX,
                 "Chain: hostname '%s' not matched in SAN (sanLen=%u)", hostnameStrOpt,
-                certs[0].sanLen);
+                subj->sanLen);
             _SSF_X509_VERIFY_FAIL(errOut, SSF_X509_VERIFY_ERR_HOSTNAME, 0u);
             return false;
         }
     }
     return true;
 }
-#ifdef _WIN32
-#pragma warning(pop)
-#endif
 
 /* --------------------------------------------------------------------------------------------- */
 /* Returns true if chainDer[0] validates to a trust anchor and is issued for hostnameStr.        */

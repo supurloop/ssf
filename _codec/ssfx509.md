@@ -262,8 +262,10 @@ X.509 v3 certificate support per RFC 5280, built on [`ssfasn1`](ssfasn1.md):
   This callback pointer is the module's only static state; set it before concurrent use rather
   than while verifications are in flight.
 - **Stack usage is dominated by the chain verifier.** [`SSFX509VerifyChain()`](#ssfx509verifychain)
-  holds `SSF_X509_CONFIG_MAX_CHAIN_DEPTH` parsed certificates plus one trust-anchor parse on the
-  stack. Generation uses no scratch buffers: each nesting level of the encoder adds well under
+  holds two parsed certificates on the stack, whatever the chain depth: the one being checked and
+  the one that issued or constrains it. Each certificate on the path is parsed again from its DER
+  for the checks made after the path is built, which costs about 1% in time for a 3-certificate
+  chain. Generation uses no scratch buffers: each nesting level of the encoder adds well under
   200 bytes, and the output goes straight into the caller's buffer. Reduce the chain depth or the
   SAN / extension / Name Constraints limits in [`_opt/ssfx509_opt.h`](../_opt/ssfx509_opt.h) to
   fit smaller stacks; see the module's footnotes in the [SSF README](../README.md#codecs).
@@ -277,7 +279,7 @@ Options live in [`_opt/ssfx509_opt.h`](../_opt/ssfx509_opt.h).
 | Macro | Default | Description |
 |-------|---------|-------------|
 | <a id="cfg-max-cert-size"></a>`SSF_X509_CONFIG_MAX_CERT_SIZE` | `4096` | Largest DER TBSCertificate or Certificate [`SSFX509EncodeTBS()`](#ssfx509encodetbs) / [`SSFX509EncodeCert()`](#ssfx509encodecert) will produce. Both the measuring and the writing call return `false` when the result would exceed it. No buffers are sized from it. |
-| <a id="cfg-max-chain-depth"></a>`SSF_X509_CONFIG_MAX_CHAIN_DEPTH` | `6` | Maximum `chainLen` accepted by [`SSFX509VerifyChain()`](#ssfx509verifychain) (leaf plus intermediates, plus any root sent). Also the [`ssftlsc`](../_net/ssftlsc.h) chain limit: a server's certificates past it are dropped, and a resulting verification failure is traced as a truncation. Sizes the on-stack array of parsed certificates. With [`ssfcms`](../_crypto/ssfcms.md) it must be at least `SSF_CMS_CONFIG_MAX_CERTS + 1`, which `ssfcms.c` enforces; when ssfcms is its only user, anything larger is unused stack (see [ssfcms chain depth sizing](../_crypto/ssfcms.md#notes)). |
+| <a id="cfg-max-chain-depth"></a>`SSF_X509_CONFIG_MAX_CHAIN_DEPTH` | `6` | Maximum `chainLen` accepted by [`SSFX509VerifyChain()`](#ssfx509verifychain) (leaf plus intermediates, plus any root sent). Also the [`ssftlsc`](../_net/ssftlsc.h) chain limit: a server's certificates past it are dropped, and a resulting verification failure is traced as a truncation. Costs 2 bytes of stack per certificate; the verifier parses at most two at a time. With [`ssfcms`](../_crypto/ssfcms.md) it must be at least `SSF_CMS_CONFIG_MAX_CERTS + 1`, which `ssfcms.c` enforces. |
 | <a id="cfg-max-extensions"></a>`SSF_X509_CONFIG_MAX_EXTENSIONS` | `16` | Number of extension records retained in `SSFX509Cert_t.exts[]`. A certificate with more extensions fails to parse, so the critical-extension and duplicate checks always see every extension. Raise it if a deployment's certificates legitimately carry more. |
 | <a id="cfg-max-name-constraints"></a>`SSF_X509_CONFIG_MAX_NAME_CONSTRAINTS` | `8` | Number of `dNSName` / `iPAddress` permitted subtrees and, separately, excluded subtrees retained per CA certificate. A certificate with more fails to parse, because dropping an exclusion would loosen the constraint. Raise it if a deployment's CAs legitimately carry more. |
 | <a id="cfg-max-san-entries"></a>`SSF_X509_CONFIG_MAX_SAN_ENTRIES` | `8` | Number of Subject Alternative Name entries retained in `SSFX509Cert_t.san[]`. A certificate with more fails to parse, because a dropped SAN would escape the Name Constraints check. Raise it if a deployment's certificates legitimately carry more. |

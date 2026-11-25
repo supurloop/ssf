@@ -797,7 +797,13 @@ is rejected.
       cookie-only HRR (same shares, cookie added); only one that would change nothing must
       be illegal_parameter. Supporting it needs a ClientHello2 path that keeps the shares.
       Stateless / DoS-protecting servers send them; common MQTT brokers do not. Found
-      writing the ServerHello model.
+      writing the ServerHello model. Neither installed server sends one (`openssl s_server
+      -stateless` answered with a plain ServerHello). Alert fix done, TDD: an HRR with neither
+      key_share nor cookie (it would change nothing) is now illegal_parameter (4.1.4); a
+      cookie-only HRR stays missing_extension until supported. Unit test rows for both; 3
+      mutants of the condition killed; ServerHello differential fuzz (model updated) 200k, no
+      mismatch. Full cookie-only support (ClientHello2 keeping both shares plus the cookie;
+      the final ServerHello then free to use either) remains open, about 120-200 B.
 - [x] Interop with `openssl s_server` over loopback; test.mosquitto.org:8883 with its CA. Add
       `gnutls-serv` (installed, 3.8.13) as a second independent server in the regression set.
       Done as a scripted regression set (scratch for now; into the repo with the harness item

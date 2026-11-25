@@ -1085,8 +1085,14 @@ static bool _ParseServerHello(SSFTLSCSession_t *s, const uint8_t *body, size_t b
     }
 
     /* supported_versions is present (_ShHasVersions() above) and was checked when found */
-    if (!hasKeyShare)                          /* No PSK-only mode */
-    { _SSF_TLSC_SH_REJECT(s, "missing key_share", SSF_TLS_ALERT_MISSING_EXTENSION); }
+    /* A HelloRetryRequest that would change nothing in the ClientHello is illegal_parameter */
+    /* (4.1.4). A cookie-only one is legal but not supported (ClientHello2 always carries a  */
+    /* new share): missing_extension, as for a ServerHello without key_share (no PSK mode).  */
+    if (!hasKeyShare)
+    {
+        _SSF_TLSC_SH_REJECT(s, "missing key_share", (isHrr && !hasCookie) ?
+                            SSF_TLS_ALERT_ILLEGAL_PARAMETER : SSF_TLS_ALERT_MISSING_EXTENSION);
+    }
     return true;
 }
 

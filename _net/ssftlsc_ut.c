@@ -4282,6 +4282,20 @@ static void _SSFTLSCUTServerHelloChecks(void)
         }
     }
 
+    /* ---- A HelloRetryRequest that would change nothing (no key_share, no cookie) is       ---- */
+    /* ---- illegal_parameter (4.1.4); a cookie-only one is not supported (missing_extension) ---- */
+    {
+        static const uint8_t v13[] = { 0x03, 0x04 };
+
+        e = 0;
+        _UTExt(ext, &e, SSF_TLS_EXT_SUPPORTED_VERSIONS, v13, sizeof(v13));
+        n = _UTShRaw(sh, 32u, 0x22, SSF_TLS_CS_AES_128_GCM_SHA256, 0u, true, ext, e);
+        SSF_TLSC_UT_SHR(sh, n, true, false, SSF_TLS_ALERT_ILLEGAL_PARAMETER);
+        _UTExt(ext, &e, 44u, cookie, sizeof(cookie));
+        n = _UTShRaw(sh, 32u, 0x22, SSF_TLS_CS_AES_128_GCM_SHA256, 0u, true, ext, e);
+        SSF_TLSC_UT_SHR(sh, n, true, false, SSF_TLS_ALERT_MISSING_EXTENSION);
+    }
+
     /* ---- The ServerHello after a HelloRetryRequest (secp256r1, AES-128-GCM) ---- */
     e = _UTShExts(ext, SSF_TLS_GROUP_SECP256R1, 65u, 65u);
     n = _UTShRaw(sh, 32u, 0x22, SSF_TLS_CS_AES_128_GCM_SHA256, 0u, true, ext, e);

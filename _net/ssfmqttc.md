@@ -36,6 +36,14 @@ the application run in `SSFMQTTCTask()`. Both are driven from one application lo
 - **One connection.** The client is a singleton. All calls come from the thread that runs
   `SSFSMTask()` and `SSFMQTTCTask()`.
 - **Clean session only.** Every CONNECT requests a clean session.
+- **Printable ASCII strings.** Topic names, filters, the client id and the user name may hold
+  only printable ASCII (0x20 to 0x7E). This is a limitation of this client, not an MQTT rule:
+  MQTT allows any UTF-8, but the client has no UTF-8 validator, and a broker closes the
+  connection on ill-formed UTF-8 (1.5.3). Restricting to ASCII means it can never send that, nor
+  a control character. Non-ASCII text (for example `café`) is refused. Topic names may not hold
+  the wildcards `+` or `#` (3.3.2.1), and filters must place them correctly (4.7.1). A bad topic
+  makes `TxPublish()` return `false`; a bad Start string asserts. The password is binary and
+  unrestricted, and inbound topics are accepted as the broker sends them.
 - **Last Will.** An optional will (`willOpt`) rides on every CONNECT. The broker publishes it
   when the connection ends without DISCONNECT. A connection the client ends because of an error
   is closed without DISCONNECT, so the will fires whatever the cause; only `SSFMQTTCStop()`
@@ -292,17 +300,17 @@ copy the password; the application may zeroize it after STOPPED.
 |-------|------------|
 | `host` | Required. Shorter than `MAX_HOST_SIZE`. |
 | `port` | Non-zero. |
-| `clientId` | Required. At least one character, shorter than `MAX_CLIENT_ID_SIZE`. Chosen by the application; the client never generates one. |
-| `usernameOpt` | NULL for none. Shorter than `MAX_USERNAME_SIZE`. |
+| `clientId` | Required. At least one character, shorter than `MAX_CLIENT_ID_SIZE`, printable ASCII. Chosen by the application; the client never generates one. Brokers must accept 1 to 23 characters of `0-9`, `a-z` and `A-Z` (3.1.3.1) and may refuse anything else (longer, or other characters) with `CONNACK_CLIENT_ID`, which is retried at the backoff rate. Stay within that set for a client id every broker accepts. |
+| `usernameOpt` | NULL for none. Shorter than `MAX_USERNAME_SIZE`, printable ASCII. |
 | `passwordOpt`, `passwordLen` | NULL and 0 for none. Requires `usernameOpt`. `passwordLen` at most `MAX_PASSWORD_LEN`. |
-| `subsOpt`, `subCount` | Array of `SSFMQTTCSub_t` (filter and QoS 0 or 1). NULL and 0 for none. `subCount` at most `MAX_SUBSCRIPTIONS`; each filter shorter than `MAX_TOPIC_SIZE`. Wildcard placement is not checked; the broker refuses a bad filter. |
+| `subsOpt`, `subCount` | Array of `SSFMQTTCSub_t` (filter and QoS 0 or 1). NULL and 0 for none. `subCount` at most `MAX_SUBSCRIPTIONS`; each filter shorter than `MAX_TOPIC_SIZE`, printable ASCII, with `#` only as the whole last level and `+` only as a whole level (4.7.1). |
 | `keepAliveSec` | Advertised to the broker. Must be at least four times `PINGRESP_TIMEOUT` in seconds. |
 | `connectTimeout` | Ticks, greater than 0. Transport open through CONNACK accepted. |
 | `subscribeTimeout` | Ticks, greater than 0. SUBSCRIBE sent through SUBACK received. |
 | `txPublishTimeout` | Ticks, greater than 0. Publish call through completion. On expiry the connection is dropped with `TX_PUBLISH_TIMEOUT` and every pending publish callback fires `false`. |
 | `reconnectMinWait` | Ticks, greater than 0. First backoff; doubles per consecutive failure. |
 | `reconnectMaxWait` | Ticks, at least `reconnectMinWait`. Backoff cap. |
-| `willOpt` | `SSFMQTTCWill_t` (`topic`, `payloadOpt`, `payloadLen`, `qos`, `retain`), or NULL for none. `topic` is a valid topic name shorter than `MAX_TOPIC_SIZE` with no `+` or `#`; `qos` is 0 or 1; `payloadOpt` may be NULL only with `payloadLen` 0. The whole CONNECT must fit `txBlockSize`. A broker whose ACL does not allow the will topic may refuse every CONNECT (`CONNACK_NOT_AUTHORIZED`) or drop the will silently. The will is sent in every CONNECT, so it is as exposed on the wire as the credentials; use TLS if it matters. |
+| `willOpt` | `SSFMQTTCWill_t` (`topic`, `payloadOpt`, `payloadLen`, `qos`, `retain`), or NULL for none. `topic` is a topic name shorter than `MAX_TOPIC_SIZE`, printable ASCII, with no `+` or `#`; `qos` is 0 or 1; `payloadOpt` may be NULL only with `payloadLen` 0. The whole CONNECT must fit `txBlockSize`. A broker whose ACL does not allow the will topic may refuse every CONNECT (`CONNACK_NOT_AUTHORIZED`) or drop the will silently. The will is sent in every CONNECT, so it is as exposed on the wire as the credentials; use TLS if it matters. |
 
 <a id="api-summary"></a>
 
@@ -590,9 +598,10 @@ first argument; the tx block is held until then.
 Asserts if not initialized, `topic` is NULL, `payload` is NULL with a non-zero length, `qos` is
 not 0 or 1, or a context is given without a callback.
 
-**Returns:** `false` if not READY, if `topic` is not a valid topic shorter than the topic
-constant, if the encoded packet would not fit a tx block, or if no tx block is free. Retry later.
-`true` if queued.
+**Returns:** `false` if not READY; if `topic` is empty, not shorter than the topic constant,
+holds `+` or `#`, or holds a character outside printable ASCII (sending it would make the
+broker disconnect); if the encoded packet would not fit a tx block; or if no tx block is free.
+Retry later, except for a bad topic, which never succeeds. `true` if queued.
 
 **Retain:** with `retain` true the broker stores the message and gives it to every later
 subscriber of the topic, replacing any message it stored before. An empty payload with `retain`
@@ -721,6 +730,9 @@ static void OnEvent(void *ctx, SSFMQTTCEvent_t event, SSFMQTTCReason_t reason)
 - **PUBACK order is not arrival order in every case.** PUBACKs for dropped packets can go out
   ahead of those for earlier packets still waiting in the queue (MQTT-IOP-07); an owed PUBACK
   always precedes those of later deliveries.
+- **ASCII only.** Topic names, filters, client ids and user names with non-ASCII UTF-8 (accented
+  letters, other scripts, emoji) cannot be sent, although MQTT allows them. Inbound topics are
+  not limited, so a wildcard subscription still receives them.
 - **IPv4 only.** SSF is not designed for an IPv6 stack ([`ssfnet.h`](ssfnet.h)): `host` is a
   DNS name or a dotted IPv4 address, names resolve to IPv4 addresses only, and an IPv6 literal
   fails every attempt with `TRANSPORT_ERROR`. A broker with no IPv4 address cannot be reached.

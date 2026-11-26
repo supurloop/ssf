@@ -309,6 +309,25 @@ static void _SSFMQTTPktUTEncodeConnect(void)
                                                SSF_MQTT_PKT_MAX_STRING_LEN));   /* 3-byte length */
     }
 
+    /* Client id and username: printable ASCII only (the password is binary) */
+    SSF_ASSERT_TEST(SSFMQTTPktEncodeConnect(_utBuf, sizeof(_utBuf), &_utLen, "a\tb", 4, NULL, 0,
+                                            NULL, 0, NULL, 0, 60));
+    SSF_ASSERT_TEST(SSFMQTTPktEncodeConnect(_utBuf, sizeof(_utBuf), &_utLen, id, sizeof(id), NULL,
+                                            0, "\x80", 2, NULL, 0, 60));
+    SSF_ASSERT_TEST(SSFMQTTPktConnectLen("\x7f", 2, NULL, 0, NULL, 0, NULL, 0));
+    SSF_ASSERT_TEST(SSFMQTTPktConnectLen(id, sizeof(id), NULL, 0, "u\x01", 3, NULL, 0));
+    {
+        static const uint8_t binPass[] = { 0x00, 0x80, 0xFF };
+        SSFMQTTPktEncodeConnect(_utBuf, sizeof(_utBuf), &_utLen, " ~", 3, NULL, 0, user,
+                                sizeof(user), binPass, sizeof(binPass), 60);
+        SSF_ASSERT(_utLen == SSFMQTTPktConnectLen(" ~", 3, NULL, 0, user, sizeof(user), binPass,
+                                                  sizeof(binPass)));
+    }
+    /* A will topic follows the topic name rules */
+    bad = will1R; bad.topic = "w/+";
+    SSF_ASSERT_TEST(SSFMQTTPktEncodeConnect(_utBuf, sizeof(_utBuf), &_utLen, id, sizeof(id), &bad,
+                                            sizeof(willTopic) + 1, NULL, 0, NULL, 0, 60));
+
     /* ConnectLen requires what the encoder requires */
     SSF_ASSERT_TEST(SSFMQTTPktConnectLen(NULL, sizeof(id), NULL, 0, NULL, 0, NULL, 0));
     SSF_ASSERT_TEST(SSFMQTTPktConnectLen(id, sizeof(id), NULL, 0, NULL, 0, pass, sizeof(pass)));
@@ -359,6 +378,11 @@ static void _SSFMQTTPktUTEncodePublish(void)
     SSF_ASSERT_TEST(SSFMQTTPktEncodePublish(_utBuf, sizeof(_utBuf), &_utLen, topic,
                                             sizeof(topic) - 1, payload, sizeof(payload),
                                             SSF_MQTTC_QOS_0, false, 0));
+    /* A wildcard or non-printable character in the topic name */
+    SSF_ASSERT_TEST(SSFMQTTPktEncodePublish(_utBuf, sizeof(_utBuf), &_utLen, "a/+", 4, payload,
+                                            sizeof(payload), SSF_MQTTC_QOS_0, false, 0));
+    SSF_ASSERT_TEST(SSFMQTTPktEncodePublish(_utBuf, sizeof(_utBuf), &_utLen, "a\n", 3, payload,
+                                            sizeof(payload), SSF_MQTTC_QOS_0, false, 0));
     /* Does not fit by one byte */
     SSF_ASSERT_TEST(SSFMQTTPktEncodePublish(_utBuf, sizeof(qos0) - 1, &_utLen, topic,
                                             sizeof(topic), payload, sizeof(payload),
@@ -482,6 +506,7 @@ static void _SSFMQTTPktUTEncodeSubscribe(void)
     static const SSFMQTTPktSub_t badQos[1] = { { "a", SSF_MQTTC_QOS_2 } };
     static const SSFMQTTPktSub_t emptyFilter[1] = { { "", SSF_MQTTC_QOS_0 } };
     static const SSFMQTTPktSub_t longFilter[1] = { { "abcdef", SSF_MQTTC_QOS_0 } };
+    static const SSFMQTTPktSub_t badPlace[1] = { { "#/a", SSF_MQTTC_QOS_0 } };
     static const uint8_t two[] = { 0x82, 0x0C, 0x00, 0x01, 0x00, 0x03, 'a', '/', '#', 0x01, 0x00,
                                    0x01, 'b', 0x00 };
     static const uint8_t one[] = { 0x82, 0x08, 0xBE, 0xEF, 0x00, 0x03, 'a', '/', '#', 0x01 };
@@ -498,6 +523,8 @@ static void _SSFMQTTPktUTEncodeSubscribe(void)
                                               filterSize));
     SSF_ASSERT_TEST(SSFMQTTPktEncodeSubscribe(_utBuf, sizeof(_utBuf), &_utLen, 1, subs, 0,
                                               filterSize));
+    SSF_ASSERT_TEST(SSFMQTTPktEncodeSubscribe(_utBuf, sizeof(_utBuf), &_utLen, 1, badPlace, 1,
+                                              filterSize));             /* '#' not last */
     SSF_ASSERT_TEST(SSFMQTTPktEncodeSubscribe(_utBuf, sizeof(_utBuf), &_utLen, 1, subs, 2, 0));
     SSF_ASSERT_TEST(SSFMQTTPktEncodeSubscribe(_utBuf, sizeof(_utBuf), &_utLen, 1, badQos, 1,
                                               filterSize));
@@ -698,7 +725,8 @@ static void _SSFMQTTPktUTDecodePublish(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Tests topic and filter validation at the length limits and for missing termination.           */
+/* Tests topic and filter validation: length limits, termination, printable ASCII only, no       */
+/* wildcard in a topic name, and wildcard placement in a filter.                                 */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFMQTTPktUTValidTopic(void)
 {
@@ -717,6 +745,44 @@ static void _SSFMQTTPktUTValidTopic(void)
     SSF_ASSERT(SSFMQTTPktIsValidFilter("+/b", 4));
     SSF_ASSERT(SSFMQTTPktIsValidFilter("", 4) == false);
     SSF_ASSERT(SSFMQTTPktIsValidFilter("a/#", 3) == false);
+    SSF_ASSERT_TEST((void)SSFMQTTPktIsValidFilter(NULL, 1));
+    SSF_ASSERT_TEST((void)SSFMQTTPktIsValidFilter("a", 0));
+
+    /* Printable ASCII only, 0x20..0x7E: space and every punctuation mark, nothing else */
+    SSF_ASSERT(SSFMQTTPktIsValidTopic(" ", 2));
+    SSF_ASSERT(SSFMQTTPktIsValidTopic("~", 2));
+    SSF_ASSERT(SSFMQTTPktIsValidTopic("$aws/things/a b/!\"'()*,-.:;<=>?@[]^_`{|}", 64));
+    SSF_ASSERT(SSFMQTTPktIsValidTopic("a\x1f" "b", 4) == false);
+    SSF_ASSERT(SSFMQTTPktIsValidTopic("a\x7f", 3) == false);
+    SSF_ASSERT(SSFMQTTPktIsValidTopic("a\tb", 4) == false);
+    SSF_ASSERT(SSFMQTTPktIsValidTopic("caf\xc3\xa9", 6) == false);             /* UTF-8 e-acute */
+    SSF_ASSERT(SSFMQTTPktIsValidTopic("\x80", 2) == false);
+    SSF_ASSERT(SSFMQTTPktIsValidTopic("\xff", 2) == false);
+    SSF_ASSERT(SSFMQTTPktIsValidFilter("a\x01/#", 5) == false);
+    SSF_ASSERT(SSFMQTTPktIsValidFilter("\xc3\xa9/+", 5) == false);
+
+    /* A topic name holds no wildcard (3.3.2.1) */
+    SSF_ASSERT(SSFMQTTPktIsValidTopic("a/+", 4) == false);
+    SSF_ASSERT(SSFMQTTPktIsValidTopic("#", 2) == false);
+    SSF_ASSERT(SSFMQTTPktIsValidTopic("a+b", 4) == false);
+    SSF_ASSERT(SSFMQTTPktIsValidTopic("a/b#", 5) == false);
+
+    /* Filter wildcard placement (4.7.1): '#' alone in the last level, '+' alone in a level */
+    {
+        static const char *good[] =
+        { "#", "+", "/", "a", "a/#", "/#", "+/+", "a/+/b", "+/#", "a//b", "a/+/#", "/+", "+/" };
+        static const char *bad[] =
+        {
+            "a#", "#/", "#/a", "a/#/b", "a/b#", "##", "a+", "+a", "a/+b", "a/b+/c", "++", "#+",
+            "+#"
+        };
+        size_t i;
+
+        for (i = 0; i < (sizeof(good) / sizeof(good[0])); i++)
+        { SSF_ASSERT(SSFMQTTPktIsValidFilter(good[i], 16)); }
+        for (i = 0; i < (sizeof(bad) / sizeof(bad[0])); i++)
+        { SSF_ASSERT(SSFMQTTPktIsValidFilter(bad[i], 16) == false); }
+    }
 
     /* Longest legal topic, then one byte more */
     memset(big, 'a', sizeof(big));

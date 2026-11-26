@@ -301,6 +301,24 @@ static bool _SSFMQTTPktIsTopicLenOk(size_t len)
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Returns true if the len chars of str are all printable ASCII (0x20..0x7E), else false. The    */
+/* client sends only these, so it never sends ill-formed UTF-8 (1.5.3) or a control character.   */
+/* --------------------------------------------------------------------------------------------- */
+static bool _SSFMQTTPktIsPrintable(SSFCStrIn_t str, size_t len)
+{
+    size_t i;
+
+    SSF_REQUIRE(str != NULL);
+
+    for (i = 0; i < len; i++)
+    {
+        uint8_t c = (uint8_t)str[i];                 /* Same result for signed or unsigned char */
+        if ((c < 0x20u) || (c > 0x7Eu)) return false;
+    }
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Returns true if an inbound topic has a legal length and no embedded NUL, else false.          */
 /* --------------------------------------------------------------------------------------------- */
 static bool _SSFMQTTPktIsInboundTopicOk(const uint8_t *t, size_t len)
@@ -342,11 +360,17 @@ SSFMQTTPktFrame_t SSFMQTTPktFrame(const uint8_t *buf, size_t len, size_t *pktLen
 /* --------------------------------------------------------------------------------------------- */
 /* Asserts unless the CONNECT arguments are encodable (shared by the encoder and ConnectLen).    */
 /* --------------------------------------------------------------------------------------------- */
-static void _SSFMQTTPktConnectRequire(SSFCStrIn_t clientId, const SSFMQTTPktWill_t *willOpt,
-                                      size_t willTopicSize, const uint8_t *passwordOpt,
-                                      SSFCStrIn_t usernameOpt, size_t passwordLen)
+static void _SSFMQTTPktConnectRequire(SSFCStrIn_t clientId, size_t clientIdSize,
+                                      const SSFMQTTPktWill_t *willOpt, size_t willTopicSize,
+                                      SSFCStrIn_t usernameOpt, size_t usernameSize,
+                                      const uint8_t *passwordOpt, size_t passwordLen)
 {
     SSF_REQUIRE(clientId != NULL);
+    /* Client id and user name: printable ASCII (the password is binary) */
+    SSF_REQUIRE(_SSFMQTTPktIsPrintable(clientId, _SSFMQTTPktFieldLen(clientId, clientIdSize)));
+    SSF_REQUIRE((usernameOpt == NULL) ||
+                _SSFMQTTPktIsPrintable(usernameOpt, _SSFMQTTPktFieldLen(usernameOpt,
+                                                                        usernameSize)));
     SSF_REQUIRE((passwordOpt == NULL) || (usernameOpt != NULL));
     SSF_REQUIRE((passwordOpt != NULL) || (passwordLen == 0));
     SSF_REQUIRE(passwordLen <= SSF_MQTT_PKT_MAX_STRING_LEN);
@@ -374,8 +398,8 @@ void SSFMQTTPktEncodeConnect(uint8_t *buf, size_t size, size_t *lenOut, SSFCStrI
     SSF_REQUIRE(buf != NULL);
     SSF_REQUIRE(size > 0);
     SSF_REQUIRE(lenOut != NULL);
-    _SSFMQTTPktConnectRequire(clientId, willOpt, willTopicSize, passwordOpt, usernameOpt,
-                              passwordLen);
+    _SSFMQTTPktConnectRequire(clientId, clientIdSize, willOpt, willTopicSize, usernameOpt,
+                              usernameSize, passwordOpt, passwordLen);
 
     if (willOpt != NULL)
     {
@@ -414,8 +438,8 @@ size_t SSFMQTTPktConnectLen(SSFCStrIn_t clientId, size_t clientIdSize,
 {
     size_t remaining;
 
-    _SSFMQTTPktConnectRequire(clientId, willOpt, willTopicSize, passwordOpt, usernameOpt,
-                              passwordLen);
+    _SSFMQTTPktConnectRequire(clientId, clientIdSize, willOpt, willTopicSize, usernameOpt,
+                              usernameSize, passwordOpt, passwordLen);
 
     /* Protocol name field, level, flags, keep-alive; then the client id field */
     remaining = (2u + (sizeof(SSF_MQTT_PROTOCOL_NAME) - 1u) + 1u + 1u + 2u) +
@@ -700,10 +724,42 @@ bool SSFMQTTPktDecodePublish(const uint8_t *pkt, size_t pktLen, SSFMQTTPktPublis
 bool SSFMQTTPktIsValidTopic(SSFCStrIn_t topic, size_t topicSize)
 {
     size_t len;
+    size_t i;
 
     SSF_REQUIRE(topic != NULL);
     SSF_REQUIRE(topicSize > 0);
 
     if (SSFStrLen(topic, topicSize, &len) == false) return false;
-    return _SSFMQTTPktIsTopicLenOk(len);
+    if ((_SSFMQTTPktIsTopicLenOk(len) == false) || (_SSFMQTTPktIsPrintable(topic, len) == false))
+    { return false; }
+    for (i = 0; i < len; i++)
+    { if ((topic[i] == '+') || (topic[i] == '#')) return false; }   /* No wildcard (3.3.2.1) */
+    return true;
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns true if filter is a valid topic filter: as a topic name, but '#' may be the whole     */
+/* last level and '+' a whole level (4.7.1).                                                    */
+/* --------------------------------------------------------------------------------------------- */
+bool SSFMQTTPktIsValidFilter(SSFCStrIn_t filter, size_t filterSize)
+{
+    size_t len;
+    size_t i;
+    bool isLevelStart = true;
+
+    SSF_REQUIRE(filter != NULL);
+    SSF_REQUIRE(filterSize > 0);
+
+    if (SSFStrLen(filter, filterSize, &len) == false) return false;
+    if ((_SSFMQTTPktIsTopicLenOk(len) == false) || (_SSFMQTTPktIsPrintable(filter, len) == false))
+    { return false; }
+    for (i = 0; i < len; i++)
+    {
+        if ((filter[i] == '#') && ((isLevelStart == false) || ((i + 1u) != len))) return false;
+        if ((filter[i] == '+') && ((isLevelStart == false) ||
+                                   (((i + 1u) < len) && (filter[i + 1u] != '/'))))
+        { return false; }
+        isLevelStart = (filter[i] == '/');
+    }
+    return true;
 }

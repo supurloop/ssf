@@ -53,9 +53,10 @@ extern "C" {
 /*   false if it is malformed for its type. They do not judge whether the packet is expected.   */
 /* - Strings supplied by the app are NUL terminated and validated with a bounded scan against   */
 /*   the given size (which includes the NUL), so a string must be strictly shorter than size.   */
-/* - UTF-8 well-formedness of strings is not checked, and neither is wildcard placement in       */
-/*   topics and filters. Both are developer errors the broker reports on first use, as a SUBACK  */
-/*   failure code or a disconnect, which the client already surfaces to the app.                 */
+/* - Outbound strings (topic names, filters, client id, user name) are limited to printable     */
+/*   ASCII, 0x20..0x7E, so ill-formed UTF-8 (1.5.3) and control characters are never sent.       */
+/*   Non-ASCII UTF-8 is refused too: a limitation, not a protocol rule. Topic names may not     */
+/*   hold '+' or '#'; filters must place them per 4.7.1. Inbound topics are not restricted.      */
 
 /* --------------------------------------------------------------------------------------------- */
 /* Defines and typedefs                                                                          */
@@ -178,10 +179,11 @@ bool SSFMQTTPktDecodeSubAck(const uint8_t *pkt, size_t pktLen, uint16_t *packetI
 bool SSFMQTTPktDecodePubAck(const uint8_t *pkt, size_t pktLen, uint16_t *packetIdOut);
 bool SSFMQTTPktDecodePublish(const uint8_t *pkt, size_t pktLen, SSFMQTTPktPublish_t *pubOut);
 
-/* Validation: encodable, meaning NUL terminated within size and 1..65535 bytes. Wildcard syntax */
-/* is not checked (see the design notes), so a filter is validated exactly like a topic name.    */
+/* Validation of outbound strings: NUL terminated within size, 1..65535 bytes, printable ASCII.  */
+/* A topic name holds no wildcard; a filter has '#' only as the whole last level and '+' only as */
+/* a whole level.                                                                                */
 bool SSFMQTTPktIsValidTopic(SSFCStrIn_t topic, size_t topicSize);
-#define SSFMQTTPktIsValidFilter(filter, filterSize) SSFMQTTPktIsValidTopic((filter), (filterSize))
+bool SSFMQTTPktIsValidFilter(SSFCStrIn_t filter, size_t filterSize);
 
 #if SSF_CONFIG_MQTTPKT_UNIT_TEST == 1
 void SSFMQTTPktUnitTest(void);

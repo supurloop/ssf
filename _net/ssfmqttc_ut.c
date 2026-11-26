@@ -682,6 +682,26 @@ static void _SSFMQTTCUTConstruction(void)
         bad = opts; bad.reconnectMinWait = 0;             SSF_ASSERT_TEST(SSFMQTTCStart(&bad));
         bad = opts; bad.reconnectMaxWait = opts.reconnectMinWait - 1;
                                                           SSF_ASSERT_TEST(SSFMQTTCStart(&bad));
+        /* Strings are printable ASCII; filters need valid wildcard placement */
+        bad = opts; bad.clientId = "dev\x01";             SSF_ASSERT_TEST(SSFMQTTCStart(&bad));
+        bad = opts; bad.clientId = "d\xc3\xa9v";          SSF_ASSERT_TEST(SSFMQTTCStart(&bad));
+        bad = opts; bad.usernameOpt = "u\x7f";            SSF_ASSERT_TEST(SSFMQTTCStart(&bad));
+        {
+            static const SSFMQTTCSub_t badSubs[][1] =
+            {
+                { { "a/#/b", SSF_MQTTC_QOS_0 } }, { { "a+", SSF_MQTTC_QOS_0 } },
+                { { "#/", SSF_MQTTC_QOS_0 } }, { { "a\tb", SSF_MQTTC_QOS_0 } },
+            };
+            static const SSFMQTTCWill_t badWill = { "w\x1f", NULL, 0, SSF_MQTTC_QOS_0, false };
+            volatile uint32_t i;                          /* Survives SSF_ASSERT_TEST's longjmp */
+
+            for (i = 0; i < (sizeof(badSubs) / sizeof(badSubs[0])); i++)
+            {
+                bad = opts; bad.subsOpt = badSubs[i]; bad.subCount = 1;
+                SSF_ASSERT_TEST(SSFMQTTCStart(&bad));
+            }
+            bad = opts; bad.willOpt = &badWill;            SSF_ASSERT_TEST(SSFMQTTCStart(&bad));
+        }
     }
 
     /* Idle pump: nothing to do while STOPPED */
@@ -813,6 +833,22 @@ static void _SSFMQTTCUTScenarioTxPublish(void)
     /* Refusals that are not app errors */
     SSF_ASSERT(SSFMQTTCTxPublish("", (const uint8_t *)"hi", 2, SSF_MQTTC_QOS_0, false, NULL,
                                  NULL) == false);
+    {
+        /* A wildcard, or a character outside printable ASCII, would make the broker disconnect */
+        static const char *badTopics[] =
+        { "a/+", "#", "a/b#", "+", "a\tb", "caf\xc3\xa9", "\x7f" };
+        uint32_t i;
+
+        for (i = 0; i < (sizeof(badTopics) / sizeof(badTopics[0])); i++)
+        {
+            SSF_ASSERT(SSFMQTTCTxPublish(badTopics[i], (const uint8_t *)"hi", 2, SSF_MQTTC_QOS_1,
+                                         false, _SSFMQTTCUTTxDone, NULL) == false);
+        }
+        SSF_ASSERT(_utTxDoneCount == 0);              /* Refused: no completion */
+        _SSFMQTTCUTPump();
+        _SSFMQTTCUTExpectTx(NULL, 0);
+        SSF_ASSERT(SSFMQTTCIsReady());
+    }
     {
         uint8_t big[SSF_MQTTC_UT_TX_BLOCK_SIZE];
         memset(big, 'x', sizeof(big));

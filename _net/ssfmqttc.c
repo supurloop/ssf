@@ -1653,19 +1653,13 @@ void SSFMQTTCStart(const SSFMQTTCOpts_t *opts)
     SSF_REQUIRE(opts->reconnectMinWait > 0);
     SSF_REQUIRE(opts->reconnectMaxWait >= opts->reconnectMinWait);
     /* Every attempt sends this CONNECT; one too large for a tx block is a configuration error.  */
-    /* ConnectLen() also asserts on a will the encoder would refuse (topic, QoS, payload).       */
+    /* ConnectLen() also asserts on anything the encoder would refuse: a client id or user name  */
+    /* outside printable ASCII, or a bad will (topic name rules, QoS, payload).                  */
     SSF_REQUIRE(SSFMQTTPktConnectLen(opts->clientId, SSF_MQTTC_CONFIG_MAX_CLIENT_ID_SIZE,
                                      opts->willOpt, SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE,
                                      opts->usernameOpt, SSF_MQTTC_CONFIG_MAX_USERNAME_SIZE,
                                      opts->passwordOpt, opts->passwordLen) <=
                 _mqttc.txBlockSize);
-    if (opts->willOpt != NULL)
-    {
-        /* A topic name may not hold a wildcard (4.7.1); the broker would end every attempt */
-        (void)SSFStrLen(opts->willOpt->topic, SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE, &len); /* Valid */
-        for (i = 0; i < len; i++)
-        { SSF_REQUIRE((opts->willOpt->topic[i] != '+') && (opts->willOpt->topic[i] != '#')); }
-    }
 
     memcpy(&_mqttc.opts, opts, sizeof(_mqttc.opts));
 

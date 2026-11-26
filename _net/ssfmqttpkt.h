@@ -126,6 +126,16 @@ typedef struct
     SSFMQTTCQoS_t qos;               /* 0 or 1                                                  */
 } SSFMQTTPktSub_t;
 
+/* Last Will, sent in CONNECT; the broker publishes it if the connection ends without DISCONNECT */
+typedef struct
+{
+    SSFCStrIn_t topic;               /* Topic name, NUL terminated, app owned                   */
+    const uint8_t *payloadOpt;       /* Binary, app owned; NULL only when payloadLen == 0       */
+    uint16_t payloadLen;
+    SSFMQTTCQoS_t qos;               /* 0 or 1                                                  */
+    bool retain;
+} SSFMQTTPktWill_t;
+
 /* --------------------------------------------------------------------------------------------- */
 /* External interface                                                                            */
 /* --------------------------------------------------------------------------------------------- */
@@ -136,12 +146,13 @@ SSFMQTTPktFrame_t SSFMQTTPktFrame(const uint8_t *buf, size_t len, size_t *pktLen
 
 /* Encoders. Each asserts if the packet does not fit or an argument is not encodable. */
 void SSFMQTTPktEncodeConnect(uint8_t *buf, size_t size, size_t *lenOut, SSFCStrIn_t clientId,
-                             size_t clientIdSize, SSFCStrIn_t usernameOpt, size_t usernameSize,
+                             size_t clientIdSize, const SSFMQTTPktWill_t *willOpt,
+                             size_t willTopicSize, SSFCStrIn_t usernameOpt, size_t usernameSize,
                              const uint8_t *passwordOpt, size_t passwordLen,
                              uint16_t keepAliveSec);
 void SSFMQTTPktEncodePublish(uint8_t *buf, size_t size, size_t *lenOut, SSFCStrIn_t topic,
                              size_t topicSize, const uint8_t *payload, size_t payloadLen,
-                             SSFMQTTCQoS_t qos, uint16_t packetId);
+                             SSFMQTTCQoS_t qos, bool retain, uint16_t packetId);
 void SSFMQTTPktEncodeSubscribe(uint8_t *buf, size_t size, size_t *lenOut, uint16_t packetId,
                                const SSFMQTTPktSub_t *subs, uint32_t count, size_t filterSize);
 void SSFMQTTPktEncodePubAck(uint8_t *buf, size_t size, size_t *lenOut, uint16_t packetId);
@@ -151,6 +162,13 @@ void SSFMQTTPktEncodeDisconnect(uint8_t *buf, size_t size, size_t *lenOut);
 /* Encoded length of a PUBLISH with a valid topic of topicLen bytes, so a caller can refuse one  */
 /* that will not fit its buffer before encoding. Returns 0 if it would exceed the protocol max. */
 size_t SSFMQTTPktPublishLen(size_t topicLen, size_t payloadLen, SSFMQTTCQoS_t qos);
+
+/* Encoded length of the CONNECT that SSFMQTTPktEncodeConnect() would produce for the same       */
+/* arguments, so a caller can check it fits a buffer. Asserts where the encoder would.           */
+size_t SSFMQTTPktConnectLen(SSFCStrIn_t clientId, size_t clientIdSize,
+                            const SSFMQTTPktWill_t *willOpt, size_t willTopicSize,
+                            SSFCStrIn_t usernameOpt, size_t usernameSize,
+                            const uint8_t *passwordOpt, size_t passwordLen);
 
 /* Decoders. pkt/pktLen delimit exactly one complete packet of the named type. */
 bool SSFMQTTPktDecodeConnAck(const uint8_t *pkt, size_t pktLen, bool *sessionPresentOut,

@@ -198,13 +198,15 @@ static SSFNetIOResult_t _SSFMQTTCUTMockRecv(SSFNetTransport_t *t, uint8_t *buf, 
                                             size_t *gotOut)
 {
     SSFMQTTCUTMock_t *m = (SSFMQTTCUTMock_t *)t;
-    size_t avail = m->rxLen - m->rxPos;
+    size_t avail;
 
     SSF_REQUIRE(t == &_utMock.transport);
     SSF_REQUIRE(buf != NULL);
     SSF_REQUIRE(size > 0);
     SSF_REQUIRE(gotOut != NULL);
     SSF_REQUIRE(m->isOpen);
+
+    avail = m->rxLen - m->rxPos;
 
     m->recvCount++;
     *gotOut = 0;
@@ -643,7 +645,7 @@ static void _SSFMQTTCUTConstruction(void)
     /* Stop and TxPublish are not valid when not started */
     SSF_ASSERT_TEST(SSFMQTTCStop());
     SSF_ASSERT(SSFMQTTCTxPublish("ssf/ut/0001/status", (const uint8_t *)"x", 1,
-                                 SSF_MQTTC_QOS_0, NULL, NULL) == false);
+                                 SSF_MQTTC_QOS_0, false, NULL, NULL) == false);
 
     /* Options for a public broker, validated by Start() but the client is never started */
     memset(&opts, 0, sizeof(opts));
@@ -787,6 +789,10 @@ static void _SSFMQTTCUTScenarioTxPublish(void)
     static const uint8_t pub0[] = { 0x30, 0x07, 0x00, 0x03, 'a', '/', 'b', 'h', 'i' };
     static const uint8_t pub1[] = { 0x32, 0x09, 0x00, 0x03, 'a', '/', 'b', 0x00, 0x02, 'h', 'i' };
     static const uint8_t pubAck2[] = { 0x40, 0x02, 0x00, 0x02 };
+    static const uint8_t pub0R[] = { 0x31, 0x07, 0x00, 0x03, 'a', '/', 'b', 'h', 'i' };
+    static const uint8_t pub1R[] = { 0x33, 0x09, 0x00, 0x03, 'a', '/', 'b', 0x00, 0x03, 'h', 'i' };
+    static const uint8_t pubAck3[] = { 0x40, 0x02, 0x00, 0x03 };
+    static const uint8_t clearR[] = { 0x31, 0x05, 0x00, 0x03, 'a', '/', 'b' };
     static uint8_t ctx0;
     static uint8_t ctx1;
     SSFMQTTCOpts_t opts;
@@ -796,21 +802,26 @@ static void _SSFMQTTCUTScenarioTxPublish(void)
     _SSFMQTTCUTGoReady(&opts);
 
     /* Argument requires */
-    SSF_ASSERT_TEST(SSFMQTTCTxPublish(NULL, (const uint8_t *)"hi", 2, SSF_MQTTC_QOS_0, NULL, NULL));
-    SSF_ASSERT_TEST(SSFMQTTCTxPublish("a/b", NULL, 2, SSF_MQTTC_QOS_0, NULL, NULL));
-    SSF_ASSERT_TEST(SSFMQTTCTxPublish("a/b", (const uint8_t *)"hi", 2, SSF_MQTTC_QOS_2, NULL, NULL));
-    SSF_ASSERT_TEST(SSFMQTTCTxPublish("a/b", (const uint8_t *)"hi", 2, SSF_MQTTC_QOS_0, NULL, &ctx0));
+    SSF_ASSERT_TEST(SSFMQTTCTxPublish(NULL, (const uint8_t *)"hi", 2, SSF_MQTTC_QOS_0, false,
+                                      NULL, NULL));
+    SSF_ASSERT_TEST(SSFMQTTCTxPublish("a/b", NULL, 2, SSF_MQTTC_QOS_0, false, NULL, NULL));
+    SSF_ASSERT_TEST(SSFMQTTCTxPublish("a/b", (const uint8_t *)"hi", 2, SSF_MQTTC_QOS_2, false,
+                                      NULL, NULL));
+    SSF_ASSERT_TEST(SSFMQTTCTxPublish("a/b", (const uint8_t *)"hi", 2, SSF_MQTTC_QOS_0, false,
+                                      NULL, &ctx0));
 
     /* Refusals that are not app errors */
-    SSF_ASSERT(SSFMQTTCTxPublish("", (const uint8_t *)"hi", 2, SSF_MQTTC_QOS_0, NULL, NULL) == false);
+    SSF_ASSERT(SSFMQTTCTxPublish("", (const uint8_t *)"hi", 2, SSF_MQTTC_QOS_0, false, NULL,
+                                 NULL) == false);
     {
         uint8_t big[SSF_MQTTC_UT_TX_BLOCK_SIZE];
         memset(big, 'x', sizeof(big));
-        SSF_ASSERT(SSFMQTTCTxPublish("a/b", big, sizeof(big), SSF_MQTTC_QOS_0, NULL, NULL) == false);
+        SSF_ASSERT(SSFMQTTCTxPublish("a/b", big, sizeof(big), SSF_MQTTC_QOS_0, false, NULL,
+                                     NULL) == false);
     }
 
     /* QoS 0 completes when sent, from the pump, with its context */
-    SSF_ASSERT(SSFMQTTCTxPublish("a/b", (const uint8_t *)"hi", 2, SSF_MQTTC_QOS_0,
+    SSF_ASSERT(SSFMQTTCTxPublish("a/b", (const uint8_t *)"hi", 2, SSF_MQTTC_QOS_0, false,
                                  _SSFMQTTCUTTxDone, &ctx0));
     SSF_ASSERT(_utTxDoneCount == 0);
     _SSFMQTTCUTPump();
@@ -820,7 +831,7 @@ static void _SSFMQTTCUTScenarioTxPublish(void)
     SSF_ASSERT(_utTxDoneLastCtx == &ctx0);
 
     /* QoS 1 takes packet id 2 (SUBSCRIBE took 1) and completes on PUBACK */
-    SSF_ASSERT(SSFMQTTCTxPublish("a/b", (const uint8_t *)"hi", 2, SSF_MQTTC_QOS_1,
+    SSF_ASSERT(SSFMQTTCTxPublish("a/b", (const uint8_t *)"hi", 2, SSF_MQTTC_QOS_1, false,
                                  _SSFMQTTCUTTxDone, &ctx1));
     _SSFMQTTCUTPump();
     _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(pub1));
@@ -830,6 +841,32 @@ static void _SSFMQTTCUTScenarioTxPublish(void)
     SSF_ASSERT(_utTxDoneCount == 2);
     SSF_ASSERT(_utTxDoneTrueCount == 2);
     SSF_ASSERT(_utTxDoneLastCtx == &ctx1);
+
+    /* RETAIN at QoS 0 sets bit 0 and completes when sent */
+    SSF_ASSERT(SSFMQTTCTxPublish("a/b", (const uint8_t *)"hi", 2, SSF_MQTTC_QOS_0, true,
+                                 _SSFMQTTCUTTxDone, &ctx0));
+    _SSFMQTTCUTPump();
+    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(pub0R));
+    SSF_ASSERT(_utTxDoneCount == 3);
+    SSF_ASSERT(_utTxDoneTrueCount == 3);
+    SSF_ASSERT(_utTxDoneLastCtx == &ctx0);
+
+    /* RETAIN at QoS 1 sets bit 0 and still completes on PUBACK */
+    SSF_ASSERT(SSFMQTTCTxPublish("a/b", (const uint8_t *)"hi", 2, SSF_MQTTC_QOS_1, true,
+                                 _SSFMQTTCUTTxDone, &ctx1));
+    _SSFMQTTCUTPump();
+    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(pub1R));
+    SSF_ASSERT(_utTxDoneCount == 3);
+    _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(pubAck3));
+    _SSFMQTTCUTPump();
+    SSF_ASSERT(_utTxDoneCount == 4);
+    SSF_ASSERT(_utTxDoneTrueCount == 4);
+    SSF_ASSERT(_utTxDoneLastCtx == &ctx1);
+
+    /* An empty retained payload, the message that clears a retained topic */
+    SSF_ASSERT(SSFMQTTCTxPublish("a/b", NULL, 0, SSF_MQTTC_QOS_0, true, NULL, NULL));
+    _SSFMQTTCUTPump();
+    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(clearR));
 
     /* A PUBACK for an unknown id is ignored */
     _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(pubAck2));
@@ -851,9 +888,12 @@ static void _SSFMQTTCUTScenarioTxPoolFull(void)
     _SSFMQTTCUTGoReady(&opts);
 
     _utMock.sendResult = SSF_NET_IO_WANT_WRITE;
-    SSF_ASSERT(SSFMQTTCTxPublish("a/b", (const uint8_t *)"1", 1, SSF_MQTTC_QOS_0, _SSFMQTTCUTTxDone, NULL));
-    SSF_ASSERT(SSFMQTTCTxPublish("a/b", (const uint8_t *)"2", 1, SSF_MQTTC_QOS_0, _SSFMQTTCUTTxDone, NULL));
-    SSF_ASSERT(SSFMQTTCTxPublish("a/b", (const uint8_t *)"3", 1, SSF_MQTTC_QOS_0, _SSFMQTTCUTTxDone, NULL) == false);
+    SSF_ASSERT(SSFMQTTCTxPublish("a/b", (const uint8_t *)"1", 1, SSF_MQTTC_QOS_0, false,
+                                 _SSFMQTTCUTTxDone, NULL));
+    SSF_ASSERT(SSFMQTTCTxPublish("a/b", (const uint8_t *)"2", 1, SSF_MQTTC_QOS_0, false,
+                                 _SSFMQTTCUTTxDone, NULL));
+    SSF_ASSERT(SSFMQTTCTxPublish("a/b", (const uint8_t *)"3", 1, SSF_MQTTC_QOS_0, false,
+                                 _SSFMQTTCUTTxDone, NULL) == false);
     _SSFMQTTCUTPump();
     SSF_ASSERT(_utMock.txLen == 0);
     SSF_ASSERT(_utTxDoneCount == 0);
@@ -863,7 +903,8 @@ static void _SSFMQTTCUTScenarioTxPoolFull(void)
     SSF_ASSERT(_utMock.txLen == 2 * 8);             /* Two 8-byte QoS 0 publishes */
     SSF_ASSERT(_utTxDoneCount == 2);
     SSF_ASSERT(_utTxDoneTrueCount == 2);
-    SSF_ASSERT(SSFMQTTCTxPublish("a/b", (const uint8_t *)"3", 1, SSF_MQTTC_QOS_0, NULL, NULL));
+    SSF_ASSERT(SSFMQTTCTxPublish("a/b", (const uint8_t *)"3", 1, SSF_MQTTC_QOS_0, false, NULL,
+                                 NULL));
     _SSFMQTTCUTEnd();
 }
 
@@ -1112,7 +1153,7 @@ static void _SSFMQTTCUTScenarioSubAckRefused(void)
                                      subAcks[i], sizeof(subAckFirst));
         }
         SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_RECONNECT_WAIT);
-        _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(_utPktDisconnect));   /* Session was up */
+        _SSFMQTTCUTExpectTx(NULL, 0);           /* No DISCONNECT on failure: the will fires */
         _SSFMQTTCUTExpectEvents(expected, 2);
         _SSFMQTTCUTEnd();
     }
@@ -1269,7 +1310,7 @@ static void _SSFMQTTCUTScenarioSubAckMismatch(void)
         _SSFMQTTCUTSubAckAttempt(_utOneSub, 1, SSF_MQTTC_UT_ARRAY(_utPktSubscribe1),
                                  (i == 0) ? wrongIdFail : wrongIdDown, sizeof(wrongIdFail));
         SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_RECONNECT_WAIT);
-        _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(_utPktDisconnect));
+        _SSFMQTTCUTExpectTx(NULL, 0);               /* No DISCONNECT on failure */
         _SSFMQTTCUTExpectEvents(failed, 2);
         _SSFMQTTCUTEnd();
     }
@@ -1278,13 +1319,13 @@ static void _SSFMQTTCUTScenarioSubAckMismatch(void)
     _SSFMQTTCUTSubAckAttempt(_utTwoSubs, 2, SSF_MQTTC_UT_ARRAY(_utPktSubscribe2Subs),
                              SSF_MQTTC_UT_ARRAY(tooFew));
     SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_RECONNECT_WAIT);
-    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(_utPktDisconnect));
+    _SSFMQTTCUTExpectTx(NULL, 0);                   /* No DISCONNECT on failure */
     _SSFMQTTCUTExpectEvents(failed, 2);
     _SSFMQTTCUTEnd();
     _SSFMQTTCUTSubAckAttempt(_utTwoSubs, 2, SSF_MQTTC_UT_ARRAY(_utPktSubscribe2Subs),
                              SSF_MQTTC_UT_ARRAY(tooMany));
     SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_RECONNECT_WAIT);
-    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(_utPktDisconnect));
+    _SSFMQTTCUTExpectTx(NULL, 0);                   /* No DISCONNECT on failure */
     _SSFMQTTCUTExpectEvents(failed, 2);
     _SSFMQTTCUTEnd();
 
@@ -1339,7 +1380,7 @@ static void _SSFMQTTCUTScenarioSubAckQoSExceeded(void)
                                      subAcks[i], sizeof(subAck0To1));
         }
         SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_RECONNECT_WAIT);
-        _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(_utPktDisconnect));   /* Session was up */
+        _SSFMQTTCUTExpectTx(NULL, 0);           /* No DISCONNECT on failure: the will fires */
         _SSFMQTTCUTExpectEvents(expected, 2);
         _SSFMQTTCUTEnd();
     }
@@ -1375,7 +1416,7 @@ static void _SSFMQTTCUTScenarioProtocolErrors(void)
         SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_RECONNECT_WAIT);
         SSF_ASSERT(_utMock.closeCount == 1);
         _SSFMQTTCUTExpectEvents(expected, 1);
-        _utMock.txLen = 0;                          /* DISCONNECT only when the pump found the link open */
+        _SSFMQTTCUTExpectTx(NULL, 0);               /* No DISCONNECT on failure: the will fires */
         _SSFMQTTCUTEnd();
     }
 }
@@ -1943,7 +1984,7 @@ static void _SSFMQTTCUTScenarioKeepAliveTimeout(void)
     _SSFMQTTCUTPumpUntilState(SSF_MQTTC_STATE_RECONNECT_WAIT,
                               SSF_MQTTC_CONFIG_PINGRESP_TIMEOUT + SSF_MQTTC_UT_LOAD_TICKS);
     _SSFMQTTCUTExpectEvents(keepAlive, 1);
-    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(_utPktDisconnect));   /* Never a second PINGREQ */
+    _SSFMQTTCUTExpectTx(NULL, 0);    /* Never a second PINGREQ; no DISCONNECT on failure */
 
     /* The next connection starts with no ping pending, so it pings again */
     _SSFMQTTCUTPumpUntilState(SSF_MQTTC_STATE_CONNECTING,
@@ -2583,7 +2624,8 @@ static void _SSFMQTTCUTScenarioRxHoldLifetime(void)
     }
     _SSFMQTTCUTPump();
     _utMock.sendResult = SSF_NET_IO_ERROR;
-    SSF_ASSERT(SSFMQTTCTxPublish("t", (const uint8_t *)"x", 1, SSF_MQTTC_QOS_0, NULL, NULL));
+    SSF_ASSERT(SSFMQTTCTxPublish("t", (const uint8_t *)"x", 1, SSF_MQTTC_QOS_0, false, NULL,
+                                 NULL));
     _SSFMQTTCUTPump();                              /* The write fails: link down */
     SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_RECONNECT_WAIT);
     _utMock.sendResult = SSF_NET_IO_SUCCESS;
@@ -2915,6 +2957,141 @@ static void _SSFMQTTCUTScenarioConnectFailures(void)
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* After a backoff: expects CONNECT, accepts it, and grants the SUBSCRIBE (whatever its id).     */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTCUTWillReconnect(const uint8_t *connect, size_t connectLen)
+{
+    uint8_t subAck[] = { 0x90, 0x03, 0x00, 0x00, 0x01 };
+
+    _SSFMQTTCUTPump();
+    _SSFMQTTCUTExpectTx(connect, connectLen);
+    _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(_utPktConnAckOk));
+    _SSFMQTTCUTPump();
+    SSF_ASSERT(_utMock.txLen == sizeof(_utPktSubscribe1));
+    subAck[2] = _utMock.tx[2];                      /* SUBSCRIBE packet id */
+    subAck[3] = _utMock.tx[3];
+    _utMock.txLen = 0;
+    _SSFMQTTCUTInject(subAck, sizeof(subAck));
+    _SSFMQTTCUTPumpUntilState(SSF_MQTTC_STATE_CONNECTED, SSF_MQTTC_UT_LOAD_TICKS);
+    _utEventCount = 0;                              /* CONNECTED, READY */
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Tests the Last Will: CONNECT carries it on every attempt, a failure closes without DISCONNECT */
+/* so the broker publishes it, Stop() still sends DISCONNECT, and Start() rejects a bad will.    */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTCUTScenarioWill(void)
+{
+    static const uint8_t willMsg[] = { 'o', 'f', 'f' };
+    static const SSFMQTTCWill_t will = { "d/s", willMsg, sizeof(willMsg), SSF_MQTTC_QOS_1, true };
+    /* Flags 0x02 | 0x04 | (1 << 3) | 0x20 = 0x2E; will topic and message after the client id */
+    static const uint8_t connectWill[] =
+    {
+        0x10, 0x18, 0x00, 0x04, 'M', 'Q', 'T', 'T', 0x04, 0x2E, 0x00, 0x78, 0x00, 0x02, 'u', 't',
+        0x00, 0x03, 'd', '/', 's', 0x00, 0x03, 'o', 'f', 'f'
+    };
+    static const uint8_t reserved[] = { 0xF0, 0x00 };
+    static const SSFMQTTCUTEventRec_t lost[] =
+    { { SSF_MQTTC_EVENT_DISCONNECTED, SSF_MQTTC_REASON_PROTOCOL } };
+    static uint8_t bigMsg[SSF_MQTTC_UT_TX_BLOCK_SIZE];
+    SSFMQTTCWill_t bad;
+    SSFMQTTCOpts_t opts;
+    uint32_t i;
+
+    /* Start() rejects a will that cannot be sent */
+    _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
+    _SSFMQTTCUTOptsInit(&opts);
+    opts.willOpt = &bad;
+    {
+        static const char *badTopics[] = { "a/+", "#", "a/b#", "+/x", "" };
+        for (i = 0; i < (sizeof(badTopics) / sizeof(badTopics[0])); i++)
+        {
+            bad = will; bad.topic = badTopics[i];
+            SSF_ASSERT_TEST(SSFMQTTCStart(&opts));
+        }
+    }
+    bad = will; bad.topic = NULL;
+    SSF_ASSERT_TEST(SSFMQTTCStart(&opts));
+    bad = will; bad.qos = SSF_MQTTC_QOS_2;
+    SSF_ASSERT_TEST(SSFMQTTCStart(&opts));
+    bad = will; bad.payloadOpt = NULL;
+    SSF_ASSERT_TEST(SSFMQTTCStart(&opts));
+    /* The CONNECT, will included, must fit a tx block */
+    bad = will; bad.payloadOpt = bigMsg; bad.payloadLen = sizeof(bigMsg);
+    SSF_ASSERT_TEST(SSFMQTTCStart(&opts));
+    bad = will; bad.payloadOpt = bigMsg;
+    bad.payloadLen = (uint16_t)(SSF_MQTTC_UT_TX_BLOCK_SIZE - (sizeof(connectWill) - 3u) + 1u);
+    SSF_ASSERT_TEST(SSFMQTTCStart(&opts));             /* One byte too large */
+    bad.payloadLen--;                                  /* Exactly fills a block */
+    SSFMQTTCStart(&opts);
+    _SSFMQTTCUTPump();
+    SSF_ASSERT(_utMock.txLen == SSF_MQTTC_UT_TX_BLOCK_SIZE);
+    _utMock.txLen = 0;
+    _SSFMQTTCUTEnd();
+    /* An empty message with a NULL pointer is valid */
+    _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
+    _SSFMQTTCUTOptsInit(&opts);
+    bad = will; bad.payloadOpt = NULL; bad.payloadLen = 0; bad.qos = SSF_MQTTC_QOS_0;
+    bad.retain = false;
+    opts.willOpt = &bad;
+    SSFMQTTCStart(&opts);
+    _SSFMQTTCUTPump();
+    {
+        static const uint8_t connectEmpty[] =
+        {
+            0x10, 0x15, 0x00, 0x04, 'M', 'Q', 'T', 'T', 0x04, 0x06, 0x00, 0x78, 0x00, 0x02, 'u',
+            't', 0x00, 0x03, 'd', '/', 's', 0x00, 0x00
+        };
+        _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(connectEmpty));
+    }
+    _SSFMQTTCUTEnd();
+
+    /* The will rides on CONNECT; a failure closes without DISCONNECT */
+    _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
+    _SSFMQTTCUTOptsInit(&opts);
+    opts.willOpt = &will;
+    SSFMQTTCStart(&opts);
+    _SSFMQTTCUTPump();
+    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(connectWill));
+    _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(_utPktConnAckOk));
+    _SSFMQTTCUTPump();
+    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(_utPktSubscribe1));
+    _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(_utPktSubAckOk1));
+    _SSFMQTTCUTPump();
+    SSF_ASSERT(SSFMQTTCIsReady());
+    _utEventCount = 0;
+    _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(reserved));
+    _SSFMQTTCUTPump();
+    SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_RECONNECT_WAIT);
+    SSF_ASSERT(_utMock.closeCount == 1);
+    _SSFMQTTCUTExpectTx(NULL, 0);
+    _SSFMQTTCUTExpectEvents(lost, 1);
+
+    /* The next attempt carries the will again */
+    _SSFMQTTCUTPumpUntilState(SSF_MQTTC_STATE_CONNECTING,
+                              SSF_MQTTC_UT_BACKOFF_TICKS + SSF_MQTTC_UT_LOAD_TICKS);
+    _SSFMQTTCUTWillReconnect(connectWill, sizeof(connectWill));
+
+    /* A publish timeout is a failure too: no DISCONNECT behind the PUBLISH */
+    SSF_ASSERT(SSFMQTTCTxPublish("a/b", (const uint8_t *)"x", 1, SSF_MQTTC_QOS_1, false, NULL,
+                                 NULL));
+    _SSFMQTTCUTPumpFor(SSF_MQTTC_UT_SHORT_TICKS + SSF_MQTTC_UT_SLACK_TICKS);
+    SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_RECONNECT_WAIT);
+    SSF_ASSERT(_utMock.txLen == 10u);               /* The QoS 1 PUBLISH alone */
+    SSF_ASSERT(_utMock.tx[0] == 0x32);
+    _utMock.txLen = 0;
+
+    /* Stop() from READY still sends DISCONNECT, so an orderly stop never fires the will */
+    _SSFMQTTCUTPumpUntilState(SSF_MQTTC_STATE_CONNECTING,
+                              SSF_MQTTC_UT_BACKOFF_TICKS * 2u + SSF_MQTTC_UT_LOAD_TICKS);
+    _SSFMQTTCUTWillReconnect(connectWill, sizeof(connectWill));
+    SSFMQTTCStop();
+    _SSFMQTTCUTPumpUntilState(SSF_MQTTC_STATE_STOPPED, SSF_MQTTC_UT_LOAD_TICKS);
+    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(_utPktDisconnect));
+    _SSFMQTTCUTEnd();
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Tests the SUBACK timeout and the txPublish deadline.                                          */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFMQTTCUTScenarioSessionTimeouts(void)
@@ -2926,6 +3103,7 @@ static void _SSFMQTTCUTScenarioSessionTimeouts(void)
     };
     static const SSFMQTTCUTEventRec_t pubTimeout[] =
     { { SSF_MQTTC_EVENT_DISCONNECTED, SSF_MQTTC_REASON_TX_PUBLISH_TIMEOUT } };
+    static const uint8_t pubX[] = { 0x32, 0x08, 0x00, 0x03, 'a', '/', 'b', 0x00, 0x02, 'x' };
     SSFMQTTCOpts_t opts;
 
     _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
@@ -2935,18 +3113,24 @@ static void _SSFMQTTCUTScenarioSessionTimeouts(void)
     _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(_utPktConnAckOk));
     _SSFMQTTCUTPumpFor(SSF_MQTTC_UT_SHORT_TICKS + SSF_MQTTC_UT_SLACK_TICKS);
     SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_RECONNECT_WAIT);
+    /* CONNECT and SUBSCRIBE only: no DISCONNECT on failure */
+    SSF_ASSERT(_utMock.txLen == (sizeof(_utPktConnect) + sizeof(_utPktSubscribe1)));
+    SSF_ASSERT(memcmp(&_utMock.tx[sizeof(_utPktConnect)], _utPktSubscribe1,
+                      sizeof(_utPktSubscribe1)) == 0);
+    _utMock.txLen = 0;
     _SSFMQTTCUTExpectEvents(subTimeout, 2);
     _SSFMQTTCUTEnd();
 
     _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
     _SSFMQTTCUTOptsInit(&opts);
     _SSFMQTTCUTGoReady(&opts);
-    SSF_ASSERT(SSFMQTTCTxPublish("a/b", (const uint8_t *)"x", 1, SSF_MQTTC_QOS_1,
+    SSF_ASSERT(SSFMQTTCTxPublish("a/b", (const uint8_t *)"x", 1, SSF_MQTTC_QOS_1, false,
                                  _SSFMQTTCUTTxDone, NULL));
     _SSFMQTTCUTPumpFor(SSF_MQTTC_UT_SHORT_TICKS + SSF_MQTTC_UT_SLACK_TICKS);
     SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_RECONNECT_WAIT);
     SSF_ASSERT(_utTxDoneCount == 1);
     SSF_ASSERT(_utTxDoneTrueCount == 0);            /* Completed false by the teardown */
+    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(pubX));  /* The PUBLISH only: no DISCONNECT */
     _SSFMQTTCUTExpectEvents(pubTimeout, 1);
     _SSFMQTTCUTEnd();
 }
@@ -2963,7 +3147,7 @@ static void _SSFMQTTCUTScenarioStopPaths(void)
     _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
     _SSFMQTTCUTOptsInit(&opts);
     _SSFMQTTCUTGoReady(&opts);
-    SSF_ASSERT(SSFMQTTCTxPublish("a/b", (const uint8_t *)"x", 1, SSF_MQTTC_QOS_1,
+    SSF_ASSERT(SSFMQTTCTxPublish("a/b", (const uint8_t *)"x", 1, SSF_MQTTC_QOS_1, false,
                                  _SSFMQTTCUTTxDone, NULL));
     _SSFMQTTCUTPump();
     _utMock.txLen = 0;
@@ -2974,7 +3158,8 @@ static void _SSFMQTTCUTScenarioStopPaths(void)
     SSF_ASSERT(_utTxDoneCount == 1);
     SSF_ASSERT(_utTxDoneTrueCount == 0);
     _SSFMQTTCUTExpectEvents(stopped, 1);
-    SSF_ASSERT(SSFMQTTCTxPublish("a/b", (const uint8_t *)"x", 1, SSF_MQTTC_QOS_0, NULL, NULL) == false);
+    SSF_ASSERT(SSFMQTTCTxPublish("a/b", (const uint8_t *)"x", 1, SSF_MQTTC_QOS_0, false, NULL,
+                                 NULL) == false);
     _SSFMQTTCUTEnd();
 
     /* Stop while CONNECTING: no DISCONNECT, just close and STOPPED */
@@ -3011,7 +3196,7 @@ static void _SSFMQTTCUTScenarioStopPaths(void)
     _SSFMQTTCUTOptsInit(&opts);
     _SSFMQTTCUTGoReady(&opts);
     _utMock.sendResult = SSF_NET_IO_WANT_WRITE;
-    SSF_ASSERT(SSFMQTTCTxPublish("a/b", (const uint8_t *)"x", 1, SSF_MQTTC_QOS_0,
+    SSF_ASSERT(SSFMQTTCTxPublish("a/b", (const uint8_t *)"x", 1, SSF_MQTTC_QOS_0, false,
                                  _SSFMQTTCUTTxDone, NULL));
     SSFMQTTCStop();
     _SSFMQTTCUTPump();
@@ -3140,6 +3325,7 @@ static bool _SSFMQTTCUTBrokerEchoOver(SSFNetTransport_t *transport, uint16_t por
     static char clientId[32];
     static char topic[64];
     static char payload[48];
+    static char retained[48];
     static const SSFMQTTCSub_t subs[1] = { { topic, SSF_MQTTC_QOS_1 } };
     SSFMQTTCOpts_t opts;
     SSFPortTick_t end;
@@ -3148,6 +3334,8 @@ static bool _SSFMQTTCUTBrokerEchoOver(SSFNetTransport_t *transport, uint16_t por
     (void)snprintf(clientId, sizeof(clientId), "ssf-ut-%08lx", (unsigned long)(now & 0xFFFFFFFFul));
     (void)snprintf(topic, sizeof(topic), "ssf/ut/%s/echo", clientId);
     (void)snprintf(payload, sizeof(payload), "echo %lu", (unsigned long)(now & 0xFFFFFFFFul));
+    (void)snprintf(retained, sizeof(retained), "retained %lu",
+                   (unsigned long)(now & 0xFFFFFFFFul));
 
     SSFSMInit(SSF_SM_MAX_ACTIVE_EVENTS, SSF_SM_MAX_ACTIVE_TIMERS);
     _SSFMQTTCUTRecordReset();
@@ -3204,7 +3392,7 @@ static bool _SSFMQTTCUTBrokerEchoOver(SSFNetTransport_t *transport, uint16_t por
 
     /* Publish to the subscribed topic and wait for the completion and the echo */
     SSF_ASSERT(SSFMQTTCTxPublish(topic, (const uint8_t *)payload, strlen(payload),
-                                 SSF_MQTTC_QOS_1, _SSFMQTTCUTTxDone, &_utTxDoneCount));
+                                 SSF_MQTTC_QOS_1, false, _SSFMQTTCUTTxDone, &_utTxDoneCount));
     end = SSFPortGetTick64() + SSF_MQTTC_UT_BROKER_STEP_TICKS;
     while (((_utTxDoneCount == 0) || (_utRxPublishCount == 0)) && (_utEventCount == 0) &&
            (SSFPortGetTick64() < end))
@@ -3222,6 +3410,58 @@ static bool _SSFMQTTCUTBrokerEchoOver(SSFNetTransport_t *transport, uint16_t por
     SSF_ASSERT(_utRx.retain == false);
     SSF_ASSERT(_utRx.offerCount == 1);
 
+    /* A retained publish reaches the live subscriber with RETAIN 0 (3.3.1.3) */
+    _SSFMQTTCUTRecordReset();
+    SSF_ASSERT(SSFMQTTCTxPublish(topic, (const uint8_t *)retained, strlen(retained),
+                                 SSF_MQTTC_QOS_1, true, _SSFMQTTCUTTxDone, &_utTxDoneCount));
+    end = SSFPortGetTick64() + SSF_MQTTC_UT_BROKER_STEP_TICKS;
+    while (((_utTxDoneCount == 0) || (_utRxPublishCount == 0)) && (_utEventCount == 0) &&
+           (SSFPortGetTick64() < end))
+    { _SSFMQTTCUTBrokerStep(); }
+    SSF_ASSERT(_utEventCount == 0);
+    SSF_ASSERT(_utTxDoneTrueCount == 1);
+    SSF_ASSERT(_utRxPublishCount == 1);
+    SSF_ASSERT(_utRx.payloadLen == strlen(retained));
+    SSF_ASSERT(memcmp(_utRxPayload, retained, strlen(retained)) == 0);
+    SSF_ASSERT(_utRx.retain == false);
+
+    /* A new session gets the stored message with RETAIN 1 */
+    SSFMQTTCStop();
+    end = SSFPortGetTick64() + SSF_MQTTC_UT_BROKER_STEP_TICKS;
+    while ((SSFMQTTCGetState() != SSF_MQTTC_STATE_STOPPED) && (SSFPortGetTick64() < end))
+    { _SSFMQTTCUTBrokerStep(); }
+    SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_STOPPED);
+    _SSFMQTTCUTRecordReset();
+    SSFMQTTCStart(&opts);
+    end = SSFPortGetTick64() + SSF_MQTTC_UT_BROKER_STEP_TICKS;
+    while (((SSFMQTTCIsReady() == false) || (_utRxPublishCount == 0)) &&
+           (_utEventCount <= 2) && (SSFPortGetTick64() < end))
+    { _SSFMQTTCUTBrokerStep(); }
+    SSF_ASSERT(SSFMQTTCIsReady());
+    SSF_ASSERT(_utEventCount == 2);
+    SSF_ASSERT(_utEvents[0].event == SSF_MQTTC_EVENT_CONNECTED);
+    SSF_ASSERT(_utEvents[1].event == SSF_MQTTC_EVENT_READY);
+    SSF_ASSERT(_utRxPublishCount == 1);
+    SSF_ASSERT(strcmp(_utRxTopic, topic) == 0);
+    SSF_ASSERT(_utRx.payloadLen == strlen(retained));
+    SSF_ASSERT(memcmp(_utRxPayload, retained, strlen(retained)) == 0);
+    SSF_ASSERT(_utRx.retain == true);
+
+    /* An empty retained publish clears it; the live subscriber still sees it, with RETAIN 0 */
+    _SSFMQTTCUTRecordReset();
+    SSF_ASSERT(SSFMQTTCTxPublish(topic, NULL, 0, SSF_MQTTC_QOS_1, true, _SSFMQTTCUTTxDone,
+                                 &_utTxDoneCount));
+    end = SSFPortGetTick64() + SSF_MQTTC_UT_BROKER_STEP_TICKS;
+    while (((_utTxDoneCount == 0) || (_utRxPublishCount == 0)) && (_utEventCount == 0) &&
+           (SSFPortGetTick64() < end))
+    { _SSFMQTTCUTBrokerStep(); }
+    SSF_ASSERT(_utEventCount == 0);
+    SSF_ASSERT(_utTxDoneTrueCount == 1);
+    SSF_ASSERT(_utRxPublishCount == 1);
+    SSF_ASSERT(_utRx.payloadLen == 0);
+    SSF_ASSERT(_utRx.retain == false);
+    _utEventCount = 0;
+
     /* Orderly stop */
     SSFMQTTCStop();
     end = SSFPortGetTick64() + SSF_MQTTC_UT_BROKER_STEP_TICKS;
@@ -3237,6 +3477,119 @@ static bool _SSFMQTTCUTBrokerEchoOver(SSFNetTransport_t *transport, uint16_t por
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Tests the Last Will against the broker: ssfmqttc subscribes to a unique will topic, then a    */
+/* second raw connection CONNECTs with that will (encoded by ssfmqttpkt) and closes without      */
+/* DISCONNECT. The broker must publish the will to ssfmqttc. The will is not retained.           */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTCUTBrokerWill(void)
+{
+    static char clientId[32];
+    static char rawId[32];
+    static char topic[64];
+    static const uint8_t willMsg[] = { 'g', 'o', 'n', 'e' };
+    static const SSFMQTTCSub_t subs[1] = { { topic, SSF_MQTTC_QOS_1 } };
+    static SSFNetSock_t raw;
+    SSFNetTransport_t *t = &raw.transport;
+    SSFMQTTPktWill_t will;
+    SSFMQTTCOpts_t opts;
+    uint8_t pkt[96];
+    size_t len;
+    size_t pos;
+    size_t n;
+    SSFNetIOResult_t r;
+    SSFPortTick_t end;
+    SSFPortTick_t now = SSFPortGetTick64();
+
+    (void)snprintf(clientId, sizeof(clientId), "ssf-ut-%08lx", (unsigned long)(now & 0xFFFFFFFFul));
+    (void)snprintf(rawId, sizeof(rawId), "ssf-ut-%08lx-w", (unsigned long)(now & 0xFFFFFFFFul));
+    (void)snprintf(topic, sizeof(topic), "ssf/ut/%s/will", clientId);
+
+    /* ssfmqttc subscribes to the will topic */
+    SSFNetSockInit(&_utSock);
+    SSFSMInit(SSF_SM_MAX_ACTIVE_EVENTS, SSF_SM_MAX_ACTIVE_TIMERS);
+    _SSFMQTTCUTRecordReset();
+    SSFMQTTCInit(&_utSock.transport, SSF_MQTTC_UT_TX_BLOCKS, SSF_MQTTC_UT_TX_BLOCK_SIZE,
+                 SSF_MQTTC_UT_RX_BLOCK_SIZE, _SSFMQTTCUTRxPublish, &_utRxPublishCtx,
+                 _SSFMQTTCUTEvent, &_utEventCtx);
+    memset(&opts, 0, sizeof(opts));
+    opts.host = SSF_MQTTC_UT_BROKER_HOST;
+    opts.port = SSF_MQTTC_UT_BROKER_PORT;
+    opts.clientId = clientId;
+    opts.subsOpt = subs;
+    opts.subCount = 1;
+    opts.keepAliveSec = 120;
+    opts.connectTimeout = SSF_TICKS_PER_SEC * 10;
+    opts.subscribeTimeout = SSF_TICKS_PER_SEC * 10;
+    opts.txPublishTimeout = SSF_TICKS_PER_SEC * 10;
+    opts.reconnectMinWait = SSF_TICKS_PER_SEC * 5;
+    opts.reconnectMaxWait = SSF_TICKS_PER_SEC * 5;
+    SSFMQTTCStart(&opts);
+    end = SSFPortGetTick64() + SSF_MQTTC_UT_BROKER_STEP_TICKS;
+    while ((SSFMQTTCIsReady() == false) && (SSFPortGetTick64() < end)) _SSFMQTTCUTBrokerStep();
+    SSF_ASSERT(SSFMQTTCIsReady());                  /* The TCP leg just reached the broker */
+    _SSFMQTTCUTRecordReset();
+
+    /* The raw connection registers a will in CONNECT and waits for CONNACK accepted */
+    SSFNetSockInit(&raw);
+    SSF_ASSERT(t->open(t, SSF_MQTTC_UT_BROKER_HOST,
+                                  sizeof(SSF_MQTTC_UT_BROKER_HOST), SSF_MQTTC_UT_BROKER_PORT));
+    end = SSFPortGetTick64() + SSF_MQTTC_UT_BROKER_STEP_TICKS;
+    do
+    {
+        r = t->pollOpen(t);
+        _SSFMQTTCUTBrokerStep();
+    } while (((r == SSF_NET_IO_WANT_READ) || (r == SSF_NET_IO_WANT_WRITE)) &&
+             (SSFPortGetTick64() < end));
+    SSF_ASSERT(r == SSF_NET_IO_SUCCESS);
+    will.topic = topic;
+    will.payloadOpt = willMsg;
+    will.payloadLen = sizeof(willMsg);
+    will.qos = SSF_MQTTC_QOS_1;
+    will.retain = false;
+    SSFMQTTPktEncodeConnect(pkt, sizeof(pkt), &len, rawId, sizeof(rawId), &will, sizeof(topic),
+                            NULL, 0, NULL, 0, 60);
+    for (pos = 0; (pos < len) && (SSFPortGetTick64() < end); pos += n)
+    {
+        n = 0;
+        r = t->send(t, &pkt[pos], len - pos, &n);
+        SSF_ASSERT((r == SSF_NET_IO_SUCCESS) || (r == SSF_NET_IO_WANT_WRITE));
+        _SSFMQTTCUTBrokerStep();
+    }
+    SSF_ASSERT(pos == len);
+    for (pos = 0; (pos < 4u) && (SSFPortGetTick64() < end); pos += n)
+    {
+        n = 0;
+        r = t->recv(t, &pkt[pos], 4u - pos, &n);
+        SSF_ASSERT((r == SSF_NET_IO_SUCCESS) || (r == SSF_NET_IO_WANT_READ));
+        _SSFMQTTCUTBrokerStep();
+    }
+    SSF_ASSERT(pos == 4u);
+    SSF_ASSERT((pkt[0] == 0x20) && (pkt[1] == 0x02) && (pkt[3] == 0x00));   /* Accepted */
+
+    /* Abnormal end: no DISCONNECT, so the broker publishes the will */
+    t->close(t);
+    SSFNetSockDeInit(&raw);
+    end = SSFPortGetTick64() + SSF_MQTTC_UT_BROKER_STEP_TICKS;
+    while ((_utRxPublishCount == 0) && (_utEventCount == 0) && (SSFPortGetTick64() < end))
+    { _SSFMQTTCUTBrokerStep(); }
+    SSF_ASSERT(_utEventCount == 0);
+    SSF_ASSERT(_utRxPublishCount == 1);
+    SSF_ASSERT(strcmp(_utRxTopic, topic) == 0);
+    SSF_ASSERT(_utRx.payloadLen == sizeof(willMsg));
+    SSF_ASSERT(memcmp(_utRxPayload, willMsg, sizeof(willMsg)) == 0);
+    SSF_ASSERT(_utRx.retain == false);
+
+    SSFMQTTCStop();
+    end = SSFPortGetTick64() + SSF_MQTTC_UT_BROKER_STEP_TICKS;
+    while ((SSFMQTTCGetState() != SSF_MQTTC_STATE_STOPPED) && (SSFPortGetTick64() < end))
+    { _SSFMQTTCUTBrokerStep(); }
+    SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_STOPPED);
+    SSFMQTTCDeInit();
+    SSFSMDeInit();
+    SSFNetSockDeInit(&_utSock);
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Tests the broker round trip over plain TCP, then over WebSocket on the same TCP transport.    */
 /* A WebSocket handshake failure looks like TRANSPORT_ERROR, so once TCP has reached the broker  */
 /* the WebSocket leg may not be skipped.                                                         */
@@ -3249,6 +3602,7 @@ static void _SSFMQTTCUTBrokerEcho(void)
     isReached = _SSFMQTTCUTBrokerEchoOver(&_utSock.transport, SSF_MQTTC_UT_BROKER_PORT, "tcp",
                                           false);
     SSFNetSockDeInit(&_utSock);
+    if (isReached) _SSFMQTTCUTBrokerWill();
 
     SSFNetSockInit(&_utSock);
     SSFNetWSInit(&_utBrokerWS, &_utSock.transport, SSF_MQTTC_UT_BROKER_WS_PATH, NULL, 0);
@@ -3299,6 +3653,7 @@ void SSFMQTTCUnitTest(void)
     _SSFMQTTCUTScenarioPeerClosed();
     _SSFMQTTCUTScenarioConnectFailures();
     _SSFMQTTCUTScenarioSessionTimeouts();
+    _SSFMQTTCUTScenarioWill();
     _SSFMQTTCUTScenarioStopPaths();
     _SSFMQTTCUTScenarioGracefulClose();
 #if SSF_CONFIG_MQTTC_UNIT_TEST_BROKER == 1

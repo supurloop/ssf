@@ -229,16 +229,6 @@ static void _SSFMQTTCLinkFail(SSFMQTTCReason_t reason)
 }
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns true if CONNACK has been accepted on the current transport, else false.               */
-/* --------------------------------------------------------------------------------------------- */
-static bool _SSFMQTTCIsSessionUp(void)
-{
-    return (_mqttc.state == SSF_MQTTC_STATE_SUBSCRIBING) ||
-           (_mqttc.state == SSF_MQTTC_STATE_CONNECTED) ||
-           (_mqttc.state == SSF_MQTTC_STATE_STOPPING);
-}
-
-/* --------------------------------------------------------------------------------------------- */
 /* Returns true if an inbound QoS 1 PUBLISH may be acknowledged or held: after CONNACK and       */
 /* before DISCONNECT is queued (STOPPING), after which nothing may be sent (MQTT-3.14.4-1).      */
 /* --------------------------------------------------------------------------------------------- */
@@ -932,7 +922,8 @@ static void _SSFMQTTCFail(SSFMQTTCReason_t reason)
 
     SSF_REQUIRE((reason > SSF_MQTTC_REASON_MIN) && (reason < SSF_MQTTC_REASON_MAX));
 
-    _SSFMQTTCConnectionTeardown(_SSFMQTTCIsSessionUp());
+    /* No DISCONNECT: the connection did not end by choice, so the broker must publish the will */
+    _SSFMQTTCConnectionTeardown(false);
     _SSFMQTTCReport(event, reason);
     SSFSMTran(_SSFMQTTCStateReconnectWait);
 }
@@ -1086,9 +1077,10 @@ static void _SSFMQTTCStateConnecting(SSFSMEventId_t eid, const SSFSMData_t *data
         SSFMQTTCTxBlock_t *b = _SSFMQTTCTxBlockAlloc(SSF_MQTT_PKT_CONNECT);
 
         SSF_ASSERT(b != NULL);  /* Nothing else holds tx blocks before CONNACK */
-        /* Asserts if CONNECT is larger than txBlockSize: a configuration error */
+        /* Fits: checked by Start() */
         SSFMQTTPktEncodeConnect(SSF_MQTTC_TX_DATA(b), _mqttc.txBlockSize, &b->len,
                                 _mqttc.opts.clientId, SSF_MQTTC_CONFIG_MAX_CLIENT_ID_SIZE,
+                                _mqttc.opts.willOpt, SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE,
                                 _mqttc.opts.usernameOpt, SSF_MQTTC_CONFIG_MAX_USERNAME_SIZE,
                                 _mqttc.opts.passwordOpt, _mqttc.opts.passwordLen,
                                 _mqttc.opts.keepAliveSec);
@@ -1553,6 +1545,20 @@ void SSFMQTTCStart(const SSFMQTTCOpts_t *opts)
     SSF_REQUIRE(opts->txPublishTimeout > 0);
     SSF_REQUIRE(opts->reconnectMinWait > 0);
     SSF_REQUIRE(opts->reconnectMaxWait >= opts->reconnectMinWait);
+    /* Every attempt sends this CONNECT; one too large for a tx block is a configuration error.  */
+    /* ConnectLen() also asserts on a will the encoder would refuse (topic, QoS, payload).       */
+    SSF_REQUIRE(SSFMQTTPktConnectLen(opts->clientId, SSF_MQTTC_CONFIG_MAX_CLIENT_ID_SIZE,
+                                     opts->willOpt, SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE,
+                                     opts->usernameOpt, SSF_MQTTC_CONFIG_MAX_USERNAME_SIZE,
+                                     opts->passwordOpt, opts->passwordLen) <=
+                _mqttc.txBlockSize);
+    if (opts->willOpt != NULL)
+    {
+        /* A topic name may not hold a wildcard (4.7.1); the broker would end every attempt */
+        (void)SSFStrLen(opts->willOpt->topic, SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE, &len); /* Valid */
+        for (i = 0; i < len; i++)
+        { SSF_REQUIRE((opts->willOpt->topic[i] != '+') && (opts->willOpt->topic[i] != '#')); }
+    }
 
     memcpy(&_mqttc.opts, opts, sizeof(_mqttc.opts));
 
@@ -1719,7 +1725,7 @@ done:
 /* Returns true if the PUBLISH was queued, else false.                                           */
 /* --------------------------------------------------------------------------------------------- */
 bool SSFMQTTCTxPublish(SSFCStrIn_t topic, const uint8_t *payload, size_t payloadLen,
-                       SSFMQTTCQoS_t qos, SSFMQTTCTxPublishFn_t txPublishFnOpt,
+                       SSFMQTTCQoS_t qos, bool retain, SSFMQTTCTxPublishFn_t txPublishFnOpt,
                        void *txPublishFnCtxOpt)
 {
     SSFMQTTCTxBlock_t *b;
@@ -1741,7 +1747,7 @@ bool SSFMQTTCTxPublish(SSFCStrIn_t topic, const uint8_t *payload, size_t payload
 
     b->packetId = (qos == SSF_MQTTC_QOS_1) ? _SSFMQTTCNextPacketId() : 0;
     SSFMQTTPktEncodePublish(SSF_MQTTC_TX_DATA(b), _mqttc.txBlockSize, &b->len, topic,
-                            SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE, payload, payloadLen, qos,
+                            SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE, payload, payloadLen, qos, retain,
                             b->packetId);
 
     b->qos = qos;

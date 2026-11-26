@@ -46,6 +46,9 @@
 
 /* CONNECT flags */
 #define SSF_MQTT_CONNECT_FLAG_CLEAN      (0x02u)
+#define SSF_MQTT_CONNECT_FLAG_WILL       (0x04u)
+#define SSF_MQTT_CONNECT_WILL_QOS_SHIFT  (3u)
+#define SSF_MQTT_CONNECT_FLAG_WILL_RETAIN (0x20u)
 #define SSF_MQTT_CONNECT_FLAG_PASSWORD   (0x40u)
 #define SSF_MQTT_CONNECT_FLAG_USERNAME   (0x80u)
 
@@ -337,10 +340,31 @@ SSFMQTTPktFrame_t SSFMQTTPktFrame(const uint8_t *buf, size_t len, size_t *pktLen
 /* --------------------------------------------------------------------------------------------- */
 
 /* --------------------------------------------------------------------------------------------- */
+/* Asserts unless the CONNECT arguments are encodable (shared by the encoder and ConnectLen).    */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTPktConnectRequire(SSFCStrIn_t clientId, const SSFMQTTPktWill_t *willOpt,
+                                      size_t willTopicSize, const uint8_t *passwordOpt,
+                                      SSFCStrIn_t usernameOpt, size_t passwordLen)
+{
+    SSF_REQUIRE(clientId != NULL);
+    SSF_REQUIRE((passwordOpt == NULL) || (usernameOpt != NULL));
+    SSF_REQUIRE((passwordOpt != NULL) || (passwordLen == 0));
+    SSF_REQUIRE(passwordLen <= SSF_MQTT_PKT_MAX_STRING_LEN);
+    if (willOpt != NULL)
+    {
+        SSF_REQUIRE(willOpt->topic != NULL);
+        SSF_REQUIRE(SSFMQTTPktIsValidTopic(willOpt->topic, willTopicSize));
+        SSF_REQUIRE((willOpt->qos == SSF_MQTTC_QOS_0) || (willOpt->qos == SSF_MQTTC_QOS_1));
+        SSF_REQUIRE((willOpt->payloadOpt != NULL) || (willOpt->payloadLen == 0));
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Encodes a CONNECT packet.                                                                     */
 /* --------------------------------------------------------------------------------------------- */
 void SSFMQTTPktEncodeConnect(uint8_t *buf, size_t size, size_t *lenOut, SSFCStrIn_t clientId,
-                             size_t clientIdSize, SSFCStrIn_t usernameOpt, size_t usernameSize,
+                             size_t clientIdSize, const SSFMQTTPktWill_t *willOpt,
+                             size_t willTopicSize, SSFCStrIn_t usernameOpt, size_t usernameSize,
                              const uint8_t *passwordOpt, size_t passwordLen,
                              uint16_t keepAliveSec)
 {
@@ -350,11 +374,15 @@ void SSFMQTTPktEncodeConnect(uint8_t *buf, size_t size, size_t *lenOut, SSFCStrI
     SSF_REQUIRE(buf != NULL);
     SSF_REQUIRE(size > 0);
     SSF_REQUIRE(lenOut != NULL);
-    SSF_REQUIRE(clientId != NULL);
-    SSF_REQUIRE((passwordOpt == NULL) || (usernameOpt != NULL));
-    SSF_REQUIRE((passwordOpt != NULL) || (passwordLen == 0));
-    SSF_REQUIRE(passwordLen <= SSF_MQTT_PKT_MAX_STRING_LEN);
+    _SSFMQTTPktConnectRequire(clientId, willOpt, willTopicSize, passwordOpt, usernameOpt,
+                              passwordLen);
 
+    if (willOpt != NULL)
+    {
+        flags |= SSF_MQTT_CONNECT_FLAG_WILL;
+        flags |= (uint8_t)((uint8_t)willOpt->qos << SSF_MQTT_CONNECT_WILL_QOS_SHIFT);
+        if (willOpt->retain) flags |= SSF_MQTT_CONNECT_FLAG_WILL_RETAIN;
+    }
     if (usernameOpt != NULL) flags |= SSF_MQTT_CONNECT_FLAG_USERNAME;
     if (passwordOpt != NULL) flags |= SSF_MQTT_CONNECT_FLAG_PASSWORD;
 
@@ -364,10 +392,43 @@ void SSFMQTTPktEncodeConnect(uint8_t *buf, size_t size, size_t *lenOut, SSFCStrI
     _SSFMQTTPktPutU8(&w, flags);
     _SSFMQTTPktPutU16(&w, keepAliveSec);
     _SSFMQTTPktPutField(&w, (const uint8_t *)clientId, _SSFMQTTPktFieldLen(clientId, clientIdSize));
+    if (willOpt != NULL)            /* Will topic and message follow the client id (3.1.3) */
+    {
+        _SSFMQTTPktPutField(&w, (const uint8_t *)willOpt->topic,
+                            _SSFMQTTPktFieldLen(willOpt->topic, willTopicSize));
+        _SSFMQTTPktPutField(&w, willOpt->payloadOpt, willOpt->payloadLen);
+    }
     if (usernameOpt != NULL)
     { _SSFMQTTPktPutField(&w, (const uint8_t *)usernameOpt, _SSFMQTTPktFieldLen(usernameOpt, usernameSize)); }
     if (passwordOpt != NULL) _SSFMQTTPktPutField(&w, passwordOpt, passwordLen);
     _SSFMQTTPktWriterFinish(&w, SSF_MQTT_PKT_CONNECT, 0, lenOut);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns the encoded CONNECT length for the same arguments as SSFMQTTPktEncodeConnect().       */
+/* --------------------------------------------------------------------------------------------- */
+size_t SSFMQTTPktConnectLen(SSFCStrIn_t clientId, size_t clientIdSize,
+                            const SSFMQTTPktWill_t *willOpt, size_t willTopicSize,
+                            SSFCStrIn_t usernameOpt, size_t usernameSize,
+                            const uint8_t *passwordOpt, size_t passwordLen)
+{
+    size_t remaining;
+
+    _SSFMQTTPktConnectRequire(clientId, willOpt, willTopicSize, passwordOpt, usernameOpt,
+                              passwordLen);
+
+    /* Protocol name field, level, flags, keep-alive; then the client id field */
+    remaining = (2u + (sizeof(SSF_MQTT_PROTOCOL_NAME) - 1u) + 1u + 1u + 2u) +
+                (2u + _SSFMQTTPktFieldLen(clientId, clientIdSize));
+    if (willOpt != NULL)
+    {
+        remaining += 2u + _SSFMQTTPktFieldLen(willOpt->topic, willTopicSize);
+        remaining += 2u + (size_t)willOpt->payloadLen;
+    }
+    if (usernameOpt != NULL) remaining += 2u + _SSFMQTTPktFieldLen(usernameOpt, usernameSize);
+    if (passwordOpt != NULL) remaining += 2u + passwordLen;
+    /* At most 10 + 5 * (2 + 65535) bytes, well under the 4-byte remaining length limit */
+    return _SSFMQTTPktFixedHeaderLen(remaining) + remaining;
 }
 
 /* --------------------------------------------------------------------------------------------- */
@@ -391,7 +452,7 @@ size_t SSFMQTTPktPublishLen(size_t topicLen, size_t payloadLen, SSFMQTTCQoS_t qo
 /* --------------------------------------------------------------------------------------------- */
 void SSFMQTTPktEncodePublish(uint8_t *buf, size_t size, size_t *lenOut, SSFCStrIn_t topic,
                              size_t topicSize, const uint8_t *payload, size_t payloadLen,
-                             SSFMQTTCQoS_t qos, uint16_t packetId)
+                             SSFMQTTCQoS_t qos, bool retain, uint16_t packetId)
 {
     SSFMQTTPktWriter_t w;
     uint8_t flags;
@@ -405,7 +466,8 @@ void SSFMQTTPktEncodePublish(uint8_t *buf, size_t size, size_t *lenOut, SSFCStrI
     SSF_REQUIRE((qos == SSF_MQTTC_QOS_0) || (packetId != 0));
     SSF_REQUIRE(SSFMQTTPktIsValidTopic(topic, topicSize));
 
-    flags = (uint8_t)((uint8_t)qos << SSF_MQTT_PUBLISH_QOS_SHIFT);   /* No DUP, no RETAIN */
+    flags = (uint8_t)((uint8_t)qos << SSF_MQTT_PUBLISH_QOS_SHIFT);   /* Never DUP: no resend */
+    if (retain) flags |= SSF_MQTT_PUBLISH_FLAG_RETAIN;
     _SSFMQTTPktWriterInit(&w, buf, size);
     _SSFMQTTPktPutField(&w, (const uint8_t *)topic, _SSFMQTTPktFieldLen(topic, topicSize));
     if (qos != SSF_MQTTC_QOS_0) _SSFMQTTPktPutU16(&w, packetId);

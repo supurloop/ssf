@@ -35,8 +35,15 @@ the application run in `SSFMQTTCTask()`. Both are driven from one application lo
 
 - **One connection.** The client is a singleton. All calls come from the thread that runs
   `SSFSMTask()` and `SSFMQTTCTask()`.
-- **Clean session only.** Every CONNECT requests a clean session. There is no Last Will, and
-  published messages are never retained.
+- **Clean session only.** Every CONNECT requests a clean session.
+- **Last Will.** An optional will (`willOpt`) rides on every CONNECT. The broker publishes it
+  when the connection ends without DISCONNECT. A connection the client ends because of an error
+  is closed without DISCONNECT, so the will fires whatever the cause; only `SSFMQTTCStop()`
+  sends DISCONNECT, so an orderly stop never fires it. MQTT 3.1.1 DISCONNECT carries no reason,
+  so the broker learns nothing more from one. See [the online/offline example](#ex-will).
+- **Retained publish.** `TxPublish()` can set RETAIN; the broker then keeps the message as the
+  topic's last known value and gives it to each new subscriber. An empty retained payload
+  clears it. A broker without retained-message support does not store it.
 - **QoS 0 and 1.** A QoS 2 PUBLISH from the broker is a protocol error (no subscription allows
   it) and ends the connection with `RX_PUBLISH_QOS2`, without acknowledgement or delivery.
 - **Self-healing.** Once started the client works continuously to reach and hold READY. Every
@@ -161,9 +168,10 @@ direction cannot block the other, and application traffic cannot block the proto
 | rx | Inbound framing buffer plus queued inbound PUBLISH | [`SSF_MQTTC_CONFIG_RX_PUBLISH_QUEUE_DEPTH`](#opt-depth) + 1 | `rxBlockSize` (app) |
 | ctl | PINGREQ, DISCONNECT, PUBACK | internal | internal |
 
-- `txBlockSize` must hold the largest of CONNECT, SUBSCRIBE and any PUBLISH the application sends,
-  including the fixed header. CONNECT and SUBSCRIBE that do not fit assert at connect time; a
-  PUBLISH that does not fit makes `TxPublish()` return `false`.
+- `txBlockSize` must hold the largest of CONNECT (will included), SUBSCRIBE and any PUBLISH the
+  application sends, including the fixed header. A CONNECT that does not fit asserts in
+  `SSFMQTTCStart()`; a SUBSCRIBE that does not fit asserts at connect time; a PUBLISH that does
+  not fit makes `TxPublish()` return `false`.
 - tx blocks in use at any moment are those queued for the transport plus QoS 1 PUBLISH and
   SUBSCRIBE awaiting acknowledgement, so `txBlocks` bounds the application's outstanding publishes.
   `txBlocks` must be at least 1.
@@ -284,6 +292,7 @@ copy the password; the application may zeroize it after STOPPED.
 | `txPublishTimeout` | Ticks, greater than 0. Publish call through completion. On expiry the connection is dropped with `TX_PUBLISH_TIMEOUT` and every pending publish callback fires `false`. |
 | `reconnectMinWait` | Ticks, greater than 0. First backoff; doubles per consecutive failure. |
 | `reconnectMaxWait` | Ticks, at least `reconnectMinWait`. Backoff cap. |
+| `willOpt` | `SSFMQTTCWill_t` (`topic`, `payloadOpt`, `payloadLen`, `qos`, `retain`), or NULL for none. `topic` is a valid topic name shorter than `MAX_TOPIC_SIZE` with no `+` or `#`; `qos` is 0 or 1; `payloadOpt` may be NULL only with `payloadLen` 0. The whole CONNECT must fit `txBlockSize`. A broker whose ACL does not allow the will topic may refuse every CONNECT (`CONNACK_NOT_AUTHORIZED`) or drop the will silently. The will is sent in every CONNECT, so it is as exposed on the wire as the credentials; use TLS if it matters. |
 
 <a id="api-summary"></a>
 
@@ -300,7 +309,7 @@ copy the password; the application may zeroize it after STOPPED.
 | [e.g.](#ex-start) | [`void SSFMQTTCStart(opts)`](#ssfmqttcstart) | Begin connecting and hold the connection until stopped. |
 | [e.g.](#ex-stop) | [`void SSFMQTTCStop()`](#ssfmqttcstop) | Flush, disconnect, close; STOPPED is reported asynchronously. |
 | [e.g.](#ex-task) | [`bool SSFMQTTCTask(nextTimeoutOpt)`](#ssfmqttctask) | Pump transport I/O and deliver inbound publishes. Call every loop iteration. |
-| [e.g.](#ex-publish) | [`bool SSFMQTTCTxPublish(...)`](#ssfmqttctxpublish) | Queue a QoS 0 or 1 publish; completion reported by callback. |
+| [e.g.](#ex-publish) | [`bool SSFMQTTCTxPublish(...)`](#ssfmqttctxpublish) | Queue a QoS 0 or 1 publish, optionally retained; completion reported by callback. |
 | | [`SSFMQTTCState_t SSFMQTTCGetState()`](#ssfmqttcgetstate) | Current client state. |
 
 ### Macros
@@ -390,11 +399,12 @@ Starts the client. From here it works continuously to reach and hold READY. An a
 the transport open or CONNACK exceeds `connectTimeout`, CONNACK is refused, SUBACK exceeds
 `subscribeTimeout`, or SUBACK refuses any filter or grants a higher QoS than requested. A lower
 grant is accepted and reported with READY. On any failure or lost connection
-the client sends DISCONNECT if a session exists, closes the transport, reports `CONNECT_FAILED` or
-`DISCONNECTED`, waits out the backoff in RECONNECT_WAIT, and tries again.
+the client closes the transport without DISCONNECT (so the broker publishes the will, if one is
+set), reports `CONNECT_FAILED` or `DISCONNECTED`, waits out the backoff in RECONNECT_WAIT, and
+tries again.
 
-Asserts unless STOPPED and not already started, and if any option violates its
-[constraint](#start-options-ssfmqttcopts_t).
+Asserts unless STOPPED and not already started, if any option violates its
+[constraint](#start-options-ssfmqttcopts_t), or if the CONNECT would not fit `txBlockSize`.
 
 **Returns:** Nothing.
 
@@ -428,6 +438,46 @@ static const SSFMQTTCOpts_t opts =
 };
 
 SSFMQTTCStart(&opts);
+```
+
+<a id="ex-will"></a>
+
+**Example (online/offline and the last disconnect reason):** a retained will says `offline` if
+the device drops; a retained `online` on every READY replaces it; an orderly stop publishes
+`offline` itself, since DISCONNECT cancels the will. The reason for the last lost connection is
+published after the next READY, because a 3.1.1 will cannot carry it.
+
+```c
+static const SSFMQTTCWill_t will =
+{ "devices/0001/status", (const uint8_t *)"offline", 7, SSF_MQTTC_QOS_1, true };
+static SSFMQTTCReason_t lastReason = SSF_MQTTC_REASON_NONE;
+
+static void OnEvent(void *ctx, SSFMQTTCEvent_t event, SSFMQTTCReason_t reason)
+{
+    char msg[16];
+
+    if ((event == SSF_MQTTC_EVENT_DISCONNECTED) || (event == SSF_MQTTC_EVENT_CONNECT_FAILED))
+    { lastReason = reason; }
+    else if (event == SSF_MQTTC_EVENT_READY)
+    {
+        (void)SSFMQTTCTxPublish("devices/0001/status", (const uint8_t *)"online", 6,
+                                SSF_MQTTC_QOS_1, true, NULL, NULL);
+        if (lastReason != SSF_MQTTC_REASON_NONE)
+        {
+            int n = snprintf(msg, sizeof(msg), "%d", (int)lastReason);
+            (void)SSFMQTTCTxPublish("devices/0001/last_disconnect", (const uint8_t *)msg,
+                                    (size_t)n, SSF_MQTTC_QOS_1, true, NULL, NULL);
+            lastReason = SSF_MQTTC_REASON_NONE;
+        }
+    }
+}
+
+/* opts.willOpt = &will; ... SSFMQTTCStart(&opts); */
+
+/* Orderly shutdown: say offline first, since Stop()'s DISCONNECT cancels the will */
+(void)SSFMQTTCTxPublish("devices/0001/status", (const uint8_t *)"offline", 7, SSF_MQTTC_QOS_1,
+                        true, NULL, NULL);
+SSFMQTTCStop();     /* Stop() flushes the queue before DISCONNECT */
 ```
 
 ---
@@ -517,7 +567,7 @@ for (;;)
 
 ```c
 bool SSFMQTTCTxPublish(SSFCStrIn_t topic, const uint8_t *payload, size_t payloadLen,
-                       SSFMQTTCQoS_t qos, SSFMQTTCTxPublishFn_t txPublishFnOpt,
+                       SSFMQTTCQoS_t qos, bool retain, SSFMQTTCTxPublishFn_t txPublishFnOpt,
                        void *txPublishFnCtxOpt);
 ```
 
@@ -531,6 +581,13 @@ not 0 or 1, or a context is given without a callback.
 **Returns:** `false` if not READY, if `topic` is not a valid topic shorter than the topic
 constant, if the encoded packet would not fit a tx block, or if no tx block is free. Retry later.
 `true` if queued.
+
+**Retain:** with `retain` true the broker stores the message and gives it to every later
+subscriber of the topic, replacing any message it stored before. An empty payload with `retain`
+true clears the stored message instead. It works the same at QoS 0 and 1, and completion means
+the same as without it. Use QoS 1 when the stored value matters, a clear included: a lost QoS 0
+PUBLISH leaves the old message stored. A retained message stays on the broker, readable by any
+client allowed to subscribe to the topic, until it is replaced or cleared.
 
 <a id="ex-publish"></a>
 
@@ -546,8 +603,12 @@ if (SSFMQTTCIsReady())
 {
     const char *msg = "21.5";
     if (SSFMQTTCTxPublish("sensors/0001/temperature", (const uint8_t *)msg, strlen(msg),
-                          SSF_MQTTC_QOS_1, OnPublished, (void *)(uintptr_t)42) == false)
+                          SSF_MQTTC_QOS_1, false, OnPublished, (void *)(uintptr_t)42) == false)
     { /* no tx block free or packet too large; try again later */ }
+
+    /* Retained: a dashboard that subscribes later still sees the device's state */
+    (void)SSFMQTTCTxPublish("devices/0001/state", (const uint8_t *)"on", 2, SSF_MQTTC_QOS_1,
+                            true, NULL, NULL);
 }
 ```
 
@@ -584,6 +645,11 @@ macros are shorthand over this.
   their timeouts. While reads are held, a broker that closes the connection is noticed only once
   reading resumes or a write fails. A broker whose socket to the client stays full applies its
   own slow-consumer policy (queue limits, dropping, or disconnecting).
+- **The will is slow and fires on every failure.** The broker publishes it only after 1.5 ×
+  `keepAliveSec` of silence (at least 180 s with the smallest keep-alive allowed today) unless the
+  TCP connection is seen to close. It fires on any failure the client detects too, so a failure
+  followed by a quick reconnect shows `offline` then `online`. A reconnect with the same client
+  id before the broker noticed the old connection was lost also makes the broker publish it.
 - **PUBACK order is not arrival order in every case.** PUBACKs for dropped packets can go out
   ahead of those for earlier packets still waiting in the queue (MQTT-IOP-07); an owed PUBACK
   always precedes those of later deliveries.

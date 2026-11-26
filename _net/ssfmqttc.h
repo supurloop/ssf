@@ -168,6 +168,7 @@ typedef bool (*SSFMQTTCRxPublishFn_t)(void *ctx, const SSFMQTTCRxPublish_t *rxPu
 
 /* Pointed-to memory is app owned and must stay valid from Start() until the STOPPED event. */
 typedef SSFMQTTPktSub_t SSFMQTTCSub_t;   /* Topic filter + requested QoS (0 or 1) */
+typedef SSFMQTTPktWill_t SSFMQTTCWill_t; /* Last Will: topic, message, QoS (0 or 1), retain */
 
 typedef struct
 {
@@ -190,6 +191,8 @@ typedef struct
                                      /* pending txPublish callback fires false                 */
     SSFPortTick_t reconnectMinWait;  /* > 0. First backoff; doubles per consecutive failure    */
     SSFPortTick_t reconnectMaxWait;  /* >= reconnectMinWait. Backoff cap; no jitter is added   */
+    const SSFMQTTCWill_t *willOpt;   /* Last Will, app owned; NULL => none. Topic valid, no '+'  */
+                                     /* or '#', < SSF_MQTTC_CONFIG_MAX_TOPIC_SIZE; QoS 0 or 1   */
 } SSFMQTTCOpts_t;
 
 /* --------------------------------------------------------------------------------------------- */
@@ -214,9 +217,10 @@ void SSFMQTTCStop(void);
 bool SSFMQTTCTask(SSFPortTick_t *nextTimeoutOpt);
 
 /* Queues a PUBLISH; valid only when SSFMQTTCIsReady(). Returns false if not READY, the topic is */
-/* invalid, the packet does not fit a tx block, or no tx block is free.                          */
+/* invalid, the packet does not fit a tx block, or no tx block is free. retain asks the broker   */
+/* to store it for later subscribers; with an empty payload it clears the stored message.        */
 bool SSFMQTTCTxPublish(SSFCStrIn_t topic, const uint8_t *payload, size_t payloadLen,
-                       SSFMQTTCQoS_t qos, SSFMQTTCTxPublishFn_t txPublishFnOpt,
+                       SSFMQTTCQoS_t qos, bool retain, SSFMQTTCTxPublishFn_t txPublishFnOpt,
                        void *txPublishFnCtxOpt);
 
 SSFMQTTCState_t SSFMQTTCGetState(void);

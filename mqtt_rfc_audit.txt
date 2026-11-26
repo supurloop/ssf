@@ -6,8 +6,8 @@ Scope      : _net/ssfmqttc.c, _net/ssfmqttpkt.c/.h, _opt/ssfmqttc_opt.h, _net/ss
              MQTT is not an IETF RFC; "the spec" below means MQTT 3.1.1. Section numbers are
              from that document. Code at commit a8ce46f (branch mqtt).
 Status     : MQTT-IOP-01 and MQTT-FEAT-07 are FIXED (commit 0bc61a9); MQTT-IOP-03 is FIXED;
-             MQTT-IOP-02 is PARTLY FIXED (lower grants); MQTT-IOP-04, MQTT-IOP-06, MQTT-IOP-11
-             and MQTT-FEAT-10 are FIXED; every other item is OPEN.
+             MQTT-IOP-02 is PARTLY FIXED (lower grants); MQTT-IOP-04, MQTT-IOP-06, MQTT-IOP-11,
+             MQTT-FEAT-01, MQTT-FEAT-02 and MQTT-FEAT-10 are FIXED; every other item is OPEN.
 
 Lists
   Part A  Interoperability problems, most likely to happen with real brokers first.
@@ -170,6 +170,8 @@ MQTT-IOP-05  Outbound strings are not checked for UTF-8, wildcards in topic name
                effect). SSFMQTTCStart() should check wildcard placement in filters. UTF-8
                checking should be optional at build time (SSF has no UTF-8 validator yet).
                Consider stopping retries on CONNACK 0x02 (see the documented trade-off).
+  Status     : OPEN. Since MQTT-FEAT-02, SSFMQTTCStart() rejects '+' and '#' in the will topic
+               (a bad will topic would fail every CONNECT); the rest is unchanged.
 
 MQTT-IOP-06  PUBACK can be sent after DISCONNECT during Stop()
   Probability: LOW
@@ -257,14 +259,20 @@ PART B: MISSING FEATURES (most likely to be needed first)
 MQTT-FEAT-01  RETAIN on outbound PUBLISH
   Likelihood : HIGH
   Spec       : 3.3.1.3.
-  Why        : Device status and "last known value" topics, Home Assistant MQTT discovery and
-               availability, and Sparkplug B birth certificates all depend on retained
-               messages. Today the client always sends RETAIN=0 (ssfmqttpkt.c
-               SSFMQTTPktEncodePublish), so a dashboard or new subscriber sees nothing until
-               the next publish. Also needed: publishing an empty retained message to clear
-               one.
+  Why        : Device status and "last known value" topics, and Home Assistant MQTT discovery
+               and availability, depend on retained messages. Today the client always sends
+               RETAIN=0 (ssfmqttpkt.c SSFMQTTPktEncodePublish), so a dashboard or new
+               subscriber sees nothing until the next publish. Also needed: publishing an empty
+               retained message to clear one. (Correction: Sparkplug B birth certificates are
+               sent with RETAIN=0; the retained STATE message is published by the host
+               application, not by an edge node.)
   Effort     : Small. Add a flag to TxPublish() and the encoder; inbound retain is already
                reported.
+  Status     : FIXED. SSFMQTTCTxPublish() and SSFMQTTPktEncodePublish() take a new bool retain
+               (an API change; every caller must pass it) that sets bit 0 of the PUBLISH fixed
+               header. An empty retained payload clears the stored message. The broker test
+               checks a live subscriber gets RETAIN 0, a new session gets the stored message
+               with RETAIN 1, and then clears it.
 
 MQTT-FEAT-02  Last Will and Testament
   Likelihood : HIGH
@@ -277,6 +285,16 @@ MQTT-FEAT-02  Last Will and Testament
                current meaning (graceful, no will), and failure teardown should probably skip
                DISCONNECT so the will fires (_SSFMQTTCFail() currently sends DISCONNECT when
                a session is up, which suppresses it).
+  Status     : FIXED. SSFMQTTCOpts_t.willOpt (SSFMQTTCWill_t: topic, payload, QoS 0/1, retain;
+               NULL => none) is encoded into every CONNECT by SSFMQTTPktEncodeConnect() (new
+               will argument; flags 0x04, QoS << 3, 0x20; fields after the client id).
+               Failure teardown no longer sends DISCONNECT, so the will fires on every failure
+               the client detects; Stop() still sends DISCONNECT, so an orderly stop does not.
+               SSFMQTTCStart() rejects a will topic with '+' or '#', and any CONNECT larger
+               than txBlockSize (new SSFMQTTPktConnectLen()). The broker test registers a will
+               on a raw second connection, closes it without DISCONNECT, and checks the client
+               receives it. A 3.1.1 DISCONNECT carries no reason, so none is lost by this; a
+               reason-carrying failure message is MQTT-FEAT-13.
 
 MQTT-FEAT-03  Persistent sessions (CleanSession = 0)
   Likelihood : MED-HIGH
@@ -373,6 +391,27 @@ MQTT-FEAT-12  MQTT 3.1 (protocol name "MQIsdp", level 3)
                happens.
   Effort     : Small (different CONNECT header, 23-character client id limit).
 
+MQTT-FEAT-13  Failure message: an app-built QoS 0 PUBLISH sent when the client detects a failure
+  Likelihood : LOW-MED
+  Spec       : None (client policy). Sent only after an accepted CONNACK, as the client sends
+               nothing before it (Part C); QoS 0 only.
+  Why        : The one way to tell anyone why a device can never reach READY (for example a
+               SUBSCRIBE refused by an ACL on every attempt), where a report published after
+               the next READY never happens. Only reachable when the link still works:
+               SUBSCRIBE_REFUSED / _QOS_EXCEEDED / _TIMEOUT, PROTOCOL, RX_PUBLISH_QOS2;
+               rarely KEEPALIVE; never TRANSPORT_ERROR, PEER_CLOSED, CONNACK_* or a stalled
+               tx (TX_PUBLISH_TIMEOUT).
+  Proposed   : opts.failMsgOpt { topic, fn(ctx, reason, buf, size, &len), fnCtx, retain };
+               NULL => off. Encoded into a dedicated static buffer (a full tx pool is often
+               part of the failure); sent only on a packet boundary; then a bounded drain
+               (send, shutdown, wait up to N ticks, close), because close() with unread rx
+               data can reset the connection and discard it. With MQTT-FEAT-02 D2a (no
+               DISCONNECT on failure) the broker delivers this message and then the Will.
+  Open       : E1 payload by callback with reason (recommended) or fixed; E2 bounded drain
+               (recommended) or send-and-close; report whether it was sent (event or flag).
+  Effort     : Medium (new teardown phase in the state machine, callback during teardown).
+  Status     : OPEN. Deferred; do after MQTT-FEAT-02.
+
 
 PART C: CHECKED AND FOUND COMPLIANT
 ===================================
@@ -382,7 +421,9 @@ PART C: CHECKED AND FOUND COMPLIANT
     required to be 0 (2.2.2).
   - SUBSCRIBE sent with fixed-header flags 0x02 (3.8.1).
   - CONNECT: protocol name "MQTT", level 4, Clean Session set, password only with user name
-    (3.1.2.9), reserved flag bit 0 clear.
+    (3.1.2.9), reserved flag bit 0 clear. Will QoS and Will Retain are 0 when there is no will
+    (3.1.2-13, 3.1.2-15); payload order client id, will topic, will message, user name,
+    password (3.1.3).
   - CONNACK: remaining length 2, reserved acknowledge flags rejected, Session Present=1 with a
     clean session treated as a protocol error (3.2.2.2), all return codes 1-5 mapped.
   - PUBLISH decode: QoS 3 rejected (3.3.1.2), DUP=1 at QoS 0 rejected (3.3.1.1), zero-length
@@ -392,7 +433,7 @@ PART C: CHECKED AND FOUND COMPLIANT
   - SUBACK: packet id and return-code count matched against the request.
   - Only the CONNACK -> SUBSCRIBE -> PUBLISH ordering is used; nothing is sent before CONNACK.
   - DISCONNECT is sent only on a packet boundary (a partially sent packet is never cut by
-    it).
+    it), and only by Stop(): a failure closes without it, so the will is published (3.1.2.5).
 
 Out of scope: TLS and transport (ssftlsc, ssfnetsock). ssftlsc supports SNI and ALPN; IPv4 only
 is a documented trade-off in ssfmqttc.md.

@@ -234,6 +234,7 @@ static void _UTCheckEd25519(const SSFPKey_t *key)
 
 static void _UTCheckRSA(const SSFPKey_t *key)
 {
+#if SSF_RSA_CONFIG_ENABLE_2048 == 1                  /* The RSA fixture is an RSA-2048 key */
     uint8_t hash[SSF_SHA2_256_BYTE_SIZE];
     static uint8_t sig[SSF_RSA_MAX_SIG_SIZE];
     size_t sigLen;
@@ -248,11 +249,18 @@ static void _UTCheckRSA(const SSFPKey_t *key)
     SSF_ASSERT(SSFRSAVerifyPSS(_pkRSAPubDer, sizeof(_pkRSAPubDer), SSF_RSA_HASH_SHA256, hash,
                                sizeof(hash), sizeof(hash), sig, sigLen));
 #endif /* SSF_RSA_CONFIG_ENABLE_PSS */
+#else
+    (void)key;
+#endif /* SSF_RSA_CONFIG_ENABLE_2048 */
 }
 
 /* Curve availability: a key for a curve compiled out must be refused, not decoded */
 #define _UT_P256 (SSF_EC_CONFIG_ENABLE_P256 == 1)
 #define _UT_P384 (SSF_EC_CONFIG_ENABLE_P384 == 1)
+#define _UT_RSA (SSF_RSA_CONFIG_ENABLE_2048 == 1)   /* The RSA fixture is RSA-2048 */
+#define _UT_RSA_GOOD(_decode) do { \
+    if (_UT_RSA) { SSF_ASSERT(_decode); _UTCheckRSA(&key); } \
+    else { SSF_ASSERT(!(_decode)); } } while (0)
 #define _UT_EC_GOOD(_built, _decode, ...) do { \
     if (_built) { SSF_ASSERT(_decode); _UTCheckEC(&key, __VA_ARGS__); } \
     else { SSF_ASSERT(!(_decode)); } } while (0)
@@ -271,11 +279,10 @@ void SSFPKeyUnitTest(void)
     size_t n;
 
     /* ======== Good keys, PEM (every format OpenSSL writes) ======== */
-    SSF_ASSERT(SSFPKeyDecodePEM(_pkRSAPKCS1Pem, strlen(_pkRSAPKCS1Pem), buf, sizeof(buf), &key));
-    _UTCheckRSA(&key);
-    SSF_ASSERT(SSFPKeyDecodePEM(_pkRSAPKCS8Pem, strlen(_pkRSAPKCS8Pem), buf, sizeof(buf), &key));
-    _UTCheckRSA(&key);
-    SSF_ASSERT((key.rsaDer >= buf) && (key.rsaDer < (buf + sizeof(buf)))); /* points into buf */
+    _UT_RSA_GOOD(_UT_PEM(_pkRSAPKCS1Pem));
+    _UT_RSA_GOOD(_UT_PEM(_pkRSAPKCS8Pem));
+    SSF_ASSERT((!_UT_RSA) ||
+               ((key.rsaDer >= buf) && (key.rsaDer < (buf + sizeof(buf))))); /* points into buf */
 
     _UT_EC_GOOD(_UT_P256, _UT_PEM(_pkP256SEC1Pem), _UT_K256);
     _UT_EC_GOOD(_UT_P256, _UT_PEM(_pkP256SEC1NoPubPem), _UT_K256); /* pub derived */
@@ -288,9 +295,8 @@ void SSFPKeyUnitTest(void)
     _UTCheckEd25519(&key);
 
     /* ======== Good keys, DER ======== */
-    SSF_ASSERT(SSFPKeyDecodeDER(_pkRSAPKCS1Der, sizeof(_pkRSAPKCS1Der), &key));
-    _UTCheckRSA(&key);
-    SSF_ASSERT(key.rsaDer == _pkRSAPKCS1Der);                              /* zero copy */
+    _UT_RSA_GOOD(_UT_DER(_pkRSAPKCS1Der));
+    SSF_ASSERT((!_UT_RSA) || (key.rsaDer == _pkRSAPKCS1Der));             /* zero copy */
     _UT_EC_GOOD(_UT_P256, _UT_DER(_pkP256SEC1Der), _UT_K256);
     _UT_EC_GOOD(_UT_P256, _UT_DER(_pkP256PKCS8Der), _UT_K256);
     _UT_EC_GOOD(_UT_P384, _UT_DER(_pkP384SEC1Der), _UT_K384);
@@ -442,8 +448,7 @@ void SSFPKeyUnitTest(void)
     /* ======== PKCS#8 RSA wrapper ======== */
     _UTPKCS8(&d, 0u, _utOidRSA, sizeof(_utOidRSA), 0x05u, NULL, 0, _pkRSAPKCS1Der,
              sizeof(_pkRSAPKCS1Der), NULL, 0);
-    SSF_ASSERT(SSFPKeyDecodeDER(d.b, d.len, &key));                     /* control */
-    _UTCheckRSA(&key);
+    _UT_RSA_GOOD(SSFPKeyDecodeDER(d.b, d.len, &key));                   /* control */
     _UTPKCS8(&d, 0u, _utOidRSA, sizeof(_utOidRSA), 0u, NULL, 0, _pkRSAPKCS1Der,
              sizeof(_pkRSAPKCS1Der), NULL, 0);
     _UTRefuseDER(d.b, d.len);                                           /* params must be NULL */
@@ -455,7 +460,7 @@ void SSFPKeyUnitTest(void)
         _UTRefuseDER(d.b, d.len);
         _UTPKCS8(&d, 1u, _utOidRSA, sizeof(_utOidRSA), 0x05u, NULL, 0, _pkRSAPKCS1Der,
                  sizeof(_pkRSAPKCS1Der), NULL, 0);
-        SSF_ASSERT(SSFPKeyDecodeDER(d.b, d.len, &key));                 /* v2 without it is fine */
+        SSF_ASSERT(SSFPKeyDecodeDER(d.b, d.len, &key) == _UT_RSA);     /* v2 without it is fine */
     }
     _UTPKCS8(&d, 0u, _utOidRSA, sizeof(_utOidRSA), 0x05u, NULL, 0, _pkP256SEC1Der,
              sizeof(_pkP256SEC1Der), NULL, 0);

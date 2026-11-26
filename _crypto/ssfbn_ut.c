@@ -4089,7 +4089,7 @@ void SSFBNUnitTest(void)
         uint16_t c;
         uint16_t it;
         uint16_t k;
-        uint16_t len;
+        volatile uint16_t len;     /* Read after SSF_ASSERT_TEST's setjmp (-Wclobbered) */
 
         primes[0] = &SSF_BN_NIST_P256;
         primes[1] = &SSF_BN_NIST_P256;

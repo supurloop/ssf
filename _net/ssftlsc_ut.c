@@ -88,11 +88,16 @@
 /* Fixture needs. In a build without one, the sub-tests that need it are skipped:          */
 /* the RFC 8448 traces authenticate the server with RSA-PSS, and the client-certificate    */
 /* tests sign with P-256 / P-384 client keys.                                              */
-#define _UT_TLSC_TRACES ((SSF_RSA_CONFIG_ENABLE_PSS == 1) && (SSF_EC_CONFIG_ENABLE_P256 == 1) && \
+#define _UT_TLSC_HAS_PSS ((SSF_RSA_ANY_ENABLED == 1) && (SSF_RSA_CONFIG_ENABLE_PSS == 1))
+#define _UT_TLSC_HAS_PKCS1 ((SSF_RSA_ANY_ENABLED == 1) && (SSF_RSA_CONFIG_ENABLE_PKCS1_V15 == 1))
+/* The RSA fixtures (trace server, client key) are RSA-2048 */
+#define _UT_TLSC_RSA_CLIENT (_UT_TLSC_HAS_PSS && (SSF_RSA_CONFIG_ENABLE_2048 == 1))
+#define _UT_TLSC_TRACES (_UT_TLSC_RSA_CLIENT && (SSF_EC_CONFIG_ENABLE_P256 == 1) && \
                          (SSF_EC_CONFIG_ENABLE_P384 == 1))  /* Fixed ClientHellos offer both */
 #define _UT_TLSC_P256_CLIENT ((SSF_EC_CONFIG_ENABLE_P256 == 1) && \
                               (SSF_ECDSA_CONFIG_ENABLE_SIGN == 1))
-#define _UT_TLSC_EC_CLIENT (_UT_TLSC_P256_CLIENT && (SSF_EC_CONFIG_ENABLE_P384 == 1))
+#define _UT_TLSC_EC_CLIENT (_UT_TLSC_P256_CLIENT && (SSF_EC_CONFIG_ENABLE_P384 == 1) && \
+                            (SSF_RSA_CONFIG_ENABLE_2048 == 1))   /* Also loads the RSA key */
 /* ServerHello / HRR harnesses select secp256r1 and secp384r1 groups */
 #define _UT_TLSC_EC_GROUPS ((SSF_EC_CONFIG_ENABLE_P256 == 1) && (SSF_EC_CONFIG_ENABLE_P384 == 1))
 
@@ -1482,7 +1487,7 @@ static void _SSFTLSCUTCheckClientCV(const uint8_t *msg, size_t msgLen, uint16_t 
             ok = SSFECDSAVerify(p256 ? SSF_EC_CURVE_P256 : SSF_EC_CURVE_P384, key->pub,
                                 key->pubLen, h, p256 ? 32u : 48u, sig, sigLen);
         }
-#if SSF_RSA_CONFIG_ENABLE_PSS == 1
+#if _UT_TLSC_HAS_PSS
         else
         {
             static SSFX509Cert_t c;
@@ -1496,7 +1501,7 @@ static void _SSFTLSCUTCheckClientCV(const uint8_t *msg, size_t msgLen, uint16_t 
         }
 #else
         else { ok = false; }                    /* The client never signs PSS in this build */
-#endif /* SSF_RSA_CONFIG_ENABLE_PSS */
+#endif /* _UT_TLSC_HAS_PSS */
         SSF_ASSERT(ok == (pass == 0));
     }
 }
@@ -2078,7 +2083,7 @@ static void _SSFTLSCUTClientCert(void)
         SSF_TLSC_UT_CS(crEdThen256, SSF_PKEY_TYPE_P256, SSF_TLS_SIG_ECDSA_SECP256R1_SHA256);
         SSF_TLSC_UT_CS(crPss384First, SSF_PKEY_TYPE_P384, SSF_TLS_SIG_ECDSA_SECP384R1_SHA384);
         SSF_TLSC_UT_CS(crPss384First, SSF_PKEY_TYPE_RSA,                /* Needs RSA-PSS */
-                       (_UT_TLSC_NO(SSF_RSA_CONFIG_ENABLE_PSS) == 0u) ?
+                       (_UT_TLSC_NO(_UT_TLSC_HAS_PSS) == 0u) ?
                        SSF_TLS_SIG_RSA_PSS_RSAE_SHA384 : 0u);
         SSF_TLSC_UT_CS(crPss384First, SSF_PKEY_TYPE_P256, 0u);
         /* PKCS#1 never signs a handshake, rsa_pss_pss needs a PSS-OID key (4.2.3) */
@@ -2160,10 +2165,10 @@ static void _SSFTLSCUTClientCert(void)
     SSF_TLSC_UT_CV_SIGN(_utClientP384Cert, &kP384, SSF_TLS_SIG_ECDSA_SECP384R1_SHA384, 32u);
     SSF_TLSC_UT_CV_SIGN(_utClientEd25519Cert, &kEd, SSF_TLS_SIG_ED25519, 32u);
     SSF_TLSC_UT_CV_SIGN(_utClientEd25519Cert, &kEd, SSF_TLS_SIG_ED25519, 48u);
-#if SSF_RSA_CONFIG_ENABLE_PSS == 1
+#if _UT_TLSC_HAS_PSS
     SSF_TLSC_UT_CV_SIGN(_utClientRSA2048Cert, &kRsa, SSF_TLS_SIG_RSA_PSS_RSAE_SHA256, 32u);
     SSF_TLSC_UT_CV_SIGN(_utClientRSA2048Cert, &kRsa, SSF_TLS_SIG_RSA_PSS_RSAE_SHA384, 48u);
-#endif /* SSF_RSA_CONFIG_ENABLE_PSS */
+#endif /* _UT_TLSC_HAS_PSS */
 #undef SSF_TLSC_UT_CV_SIGN
     /* A scheme the key cannot make, and an output too small, are refused */
     SSF_ASSERT(_SSFTLSCUTSetOne(s, _utClientP256Cert, sizeof(_utClientP256Cert), &kP256));
@@ -2225,7 +2230,7 @@ static void _SSFTLSCUTSchemeMatchesKey(void)
 #if SSF_EC_CONFIG_ENABLE_P384 == 1
         { SSF_TLS_SIG_ECDSA_SECP384R1_SHA384, SSF_TLSC_LEAF_KEY_P384 },
 #endif
-#if SSF_RSA_CONFIG_ENABLE_PSS == 1
+#if _UT_TLSC_HAS_PSS
         { SSF_TLS_SIG_RSA_PSS_RSAE_SHA256, SSF_TLSC_LEAF_KEY_RSA },
         { SSF_TLS_SIG_RSA_PSS_RSAE_SHA384, SSF_TLSC_LEAF_KEY_RSA },
 #endif
@@ -2434,8 +2439,8 @@ static void _SSFTLSCUTAlpn(void)
                            _UT_TLSC_NO(SSF_EC_CONFIG_ENABLE_P384))) -
                     (2u * (_UT_TLSC_NO(SSF_EC_CONFIG_ENABLE_P256) +
                            _UT_TLSC_NO(SSF_EC_CONFIG_ENABLE_P384) +
-                           (2u * _UT_TLSC_NO(SSF_RSA_CONFIG_ENABLE_PSS)) +
-                           (2u * _UT_TLSC_NO(SSF_RSA_CONFIG_ENABLE_PKCS1_V15)))) -
+                           (2u * _UT_TLSC_NO(_UT_TLSC_HAS_PSS)) +
+                           (2u * _UT_TLSC_NO(_UT_TLSC_HAS_PKCS1)))) -
                     (101u * _UT_TLSC_NO(SSF_EC_CONFIG_ENABLE_P384))));
         s->transport.close(&s->transport);
         SSFTLSCDeInit(s);
@@ -3592,7 +3597,7 @@ static void _SSFTLSCUTRfc8448ClientAuth(void)
     /* The application keys match the trace, so its close_notify records do too */
     _UTR8Close(s, _utR8s6ClientAlertRecord, _utR8s6ServerAlertRecord);
 }
-#endif /* SSF_RSA_CONFIG_ENABLE_PSS */
+#endif /* _UT_TLSC_HAS_PSS */
 
 /* --------------------------------------------------------------------------------------------- */
 /* Negative tests on the server flight (step 2 checks), built on the RFC 8448 3 replay: the test */
@@ -5266,11 +5271,11 @@ void SSFTLSCUnitTest(void)
     _SSFTLSCUTServerFlightNegative();
     _SSFTLSCUTOneRecvBuffer();
 #endif /* _UT_TLSC_TRACES */
-#if _UT_TLSC_P256_CLIENT && (SSF_RSA_CONFIG_ENABLE_PSS == 1)
+#if _UT_TLSC_P256_CLIENT && _UT_TLSC_RSA_CLIENT
     _SSFTLSCUTClientChain();                           /* Also chooses RSA-PSS for an RSA key */
 #endif
     _SSFTLSCUTAlpn();
-#if _UT_TLSC_P256_CLIENT
+#if _UT_TLSC_P256_CLIENT && (SSF_RSA_CONFIG_ENABLE_2048 == 1)
     _SSFTLSCUTTrustFromPEM();
 #endif
 

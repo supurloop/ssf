@@ -45,10 +45,11 @@ the application run in `SSFMQTTCTask()`. Both are driven from one application lo
   requested QoS; anything less fails the attempt. No UNSUBSCRIBE is ever sent, since a clean
   session discards server-side state. To change the set: Stop, edit the table, Start.
 - **Keep-alive.** CONNECT advertises `keepAliveSec`, but PINGREQ is sent four times per interval
-  so the broker's 1.5× deadline is never approached. The ping interval must be at least
-  [`SSF_MQTTC_CONFIG_PINGRESP_TIMEOUT`](#opt-pingresp), which guarantees a missed PINGRESP is
-  detected before the next ping is due. With the default 30 s timeout the smallest `keepAliveSec`
-  is 120. `SSFMQTTCStart()` asserts this.
+  so the broker's 1.5× deadline is never approached. A missed PINGRESP ends the connection
+  within [`SSF_MQTTC_CONFIG_PINGRESP_TIMEOUT`](#opt-pingresp) of its PINGREQ being queued; no
+  further PINGREQ is sent while one is unanswered. The ping interval must be at least that
+  timeout. With the default 30 s timeout the smallest `keepAliveSec` is 120. `SSFMQTTCStart()`
+  asserts this.
 - **Two tasks, one thread.** The state machine owns state transitions and timers. The task pump
   owns transport I/O, rxPublish delivery (offer, retry, timeout drop, PUBACK), QoS 0 publish
   completion, and drop reports. Application callbacks may therefore fire from either
@@ -232,7 +233,7 @@ Options live in [`_opt/ssfmqttc_opt.h`](../_opt/ssfmqttc_opt.h) (aggregated into
 | <a id="opt-retry"></a>`SSF_MQTTC_CONFIG_RX_PUBLISH_RETRY_TICKS` | 1 s | Re-offer interval for a deferred inbound PUBLISH. |
 | <a id="opt-maxticks"></a>`SSF_MQTTC_CONFIG_RX_PUBLISH_MAX_TICKS` | 30 s | A deferred inbound PUBLISH is dropped this long after its first offer. |
 | <a id="opt-openpoll"></a>`SSF_MQTTC_CONFIG_OPEN_POLL_TICKS` | 10 ms | Longest `SSFMQTTCTask()` lets the app loop sleep while the transport resolves the host and connects. |
-| <a id="opt-pingresp"></a>`SSF_MQTTC_CONFIG_PINGRESP_TIMEOUT` | 30 s | Connection is dropped if PINGRESP does not follow PINGREQ within this time. Bounds the minimum `keepAliveSec` at four times this value. |
+| <a id="opt-pingresp"></a>`SSF_MQTTC_CONFIG_PINGRESP_TIMEOUT` | 30 s (250 ms in the ssfmqttc unit test build) | Connection is dropped if PINGRESP does not follow PINGREQ within this time. Bounds the minimum `keepAliveSec` at four times this value. Override with `-D`. |
 
 The ssfsm event and timer pools must be sized for the client: see `SSF_SM_MAX_ACTIVE_EVENTS` and
 `SSF_SM_MAX_ACTIVE_TIMERS` in [`_opt/ssfsm_opt.h`](../_opt/ssfsm_opt.h). The client alone can

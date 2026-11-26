@@ -59,8 +59,8 @@
 /* mock transport: the test injects the bytes a broker would send, captures the bytes the client */
 /* sends and compares them to hand-encoded packets, and dials transport results on demand. All   */
 /* timeouts in the mock scenarios are a few ticks so timer paths run in milliseconds. Keep-alive  */
-/* is not exercised: its interval is bounded below by SSF_MQTTC_CONFIG_PINGRESP_TIMEOUT, which    */
-/* is a compile-time value measured in tens of seconds.                                          */
+/* uses keepAliveSec 1, which the unit test build's 250 ms SSF_MQTTC_CONFIG_PINGRESP_TIMEOUT     */
+/* allows; other scenarios use 120 and end long before their first ping.                         */
 
 /* --------------------------------------------------------------------------------------------- */
 /* Defines                                                                                       */
@@ -76,6 +76,7 @@
 #define SSF_MQTTC_UT_SHORT_TICKS     (50u)              /* Timeouts the scenarios wait out */
 #define SSF_MQTTC_UT_BACKOFF_TICKS   (200u)            /* Longer than any waited-out timeout */
 #define SSF_MQTTC_UT_SLACK_TICKS     (30u)
+#define SSF_MQTTC_UT_LOAD_TICKS      (500u)            /* Wait bound slack on a loaded host */
 
 #define SSF_MQTTC_UT_ARRAY(a) (a), sizeof(a)
 
@@ -441,12 +442,30 @@ static void _SSFMQTTCUTPumpFor(SSFPortTick_t ticks)
 }
 
 /* --------------------------------------------------------------------------------------------- */
+/* Pumps until the client is in state, asserting if that takes more than ticks.                  */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTCUTPumpUntilState(SSFMQTTCState_t state, SSFPortTick_t ticks)
+{
+    SSFPortTick_t end = SSFPortGetTick64() + ticks;
+
+    for (;;)
+    {
+        bool isLate = (SSFPortGetTick64() > end);  /* Sampled before the tasks run */
+
+        (void)SSFSMTask(NULL);
+        (void)SSFMQTTCTask(NULL);
+        if (SSFMQTTCGetState() == state) break;
+        SSF_ASSERT(isLate == false);
+    }
+}
+
+/* --------------------------------------------------------------------------------------------- */
 /* Scenario scaffolding                                                                          */
 /* --------------------------------------------------------------------------------------------- */
 static const SSFMQTTCSub_t _utOneSub[] = { { "a/b", SSF_MQTTC_QOS_1 } };
 
 /* --------------------------------------------------------------------------------------------- */
-/* Fills opts for the mock: short timeouts, client id "ut", minimum keep-alive.                  */
+/* Fills opts for the mock: short timeouts, client id "ut", keep-alive 120.                      */
 /* --------------------------------------------------------------------------------------------- */
 static void _SSFMQTTCUTOptsInit(SSFMQTTCOpts_t *opts)
 {
@@ -456,7 +475,7 @@ static void _SSFMQTTCUTOptsInit(SSFMQTTCOpts_t *opts)
     opts->clientId = "ut";
     opts->subsOpt = _utOneSub;
     opts->subCount = 1;
-    opts->keepAliveSec = (uint16_t)((SSF_MQTTC_CONFIG_PINGRESP_TIMEOUT * 4u) / SSF_TICKS_PER_SEC);
+    opts->keepAliveSec = 120;                      /* As in _utPktConnect; no ping in a scenario */
     opts->connectTimeout = SSF_MQTTC_UT_SHORT_TICKS;
     opts->subscribeTimeout = SSF_MQTTC_UT_SHORT_TICKS;
     opts->txPublishTimeout = SSF_MQTTC_UT_SHORT_TICKS;
@@ -645,7 +664,7 @@ static void _SSFMQTTCUTConstruction(void)
         bad = opts; bad.subsOpt = NULL;                   SSF_ASSERT_TEST(SSFMQTTCStart(&bad));
         bad = opts; bad.subCount = SSF_MQTTC_CONFIG_MAX_SUBSCRIPTIONS + 1;
                                                           SSF_ASSERT_TEST(SSFMQTTCStart(&bad));
-        bad = opts; bad.keepAliveSec = 1;                 SSF_ASSERT_TEST(SSFMQTTCStart(&bad));
+        bad = opts; bad.keepAliveSec = 0;                 SSF_ASSERT_TEST(SSFMQTTCStart(&bad));
         bad = opts; bad.connectTimeout = 0;               SSF_ASSERT_TEST(SSFMQTTCStart(&bad));
         bad = opts; bad.subscribeTimeout = 0;             SSF_ASSERT_TEST(SSFMQTTCStart(&bad));
         bad = opts; bad.txPublishTimeout = 0;             SSF_ASSERT_TEST(SSFMQTTCStart(&bad));
@@ -1423,6 +1442,8 @@ static void _SSFMQTTCUTScenarioRxTooLargeLinkLoss(void)
 
     _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
     _SSFMQTTCUTOptsInit(&opts);
+    opts.connectTimeout = SSF_TICKS_PER_SEC * 5u;   /* The reconnect must not race a loaded host */
+    opts.subscribeTimeout = SSF_TICKS_PER_SEC * 5u;
     _SSFMQTTCUTGoReady(&opts);
     len = _SSFMQTTCUTBuildPublish(pkt, sizeof(pkt), 0x32, 200, 0x1234, 5, 5, &hdrLen);
     _SSFMQTTCUTInject(pkt, 150);                    /* Partway through the topic */
@@ -1436,17 +1457,171 @@ static void _SSFMQTTCUTScenarioRxTooLargeLinkLoss(void)
 
     /* The new connection frames from its first byte */
     _utMock.recvEmptyResult = SSF_NET_IO_WANT_READ;
-    _SSFMQTTCUTPumpFor(SSF_MQTTC_UT_BACKOFF_TICKS + SSF_MQTTC_UT_SLACK_TICKS);
+    _SSFMQTTCUTPumpUntilState(SSF_MQTTC_STATE_CONNECTING,
+                              SSF_MQTTC_UT_BACKOFF_TICKS + SSF_MQTTC_UT_LOAD_TICKS);
+    _SSFMQTTCUTPump();                              /* Transport open, CONNECT sent */
     SSF_ASSERT(_utMock.openCount == 2);
     _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(_utPktConnect));
     _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(_utPktConnAckOk));
     _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(subAck2));
     _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(_utPktRxSmall0));
-    _SSFMQTTCUTPump();
-    SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_CONNECTED);
+    _SSFMQTTCUTPumpUntilState(SSF_MQTTC_STATE_CONNECTED, SSF_MQTTC_UT_LOAD_TICKS);
     SSF_ASSERT(_utRxPublishCount == 1);
     SSF_ASSERT(strcmp(_utRxTopic, "u") == 0);
     _SSFMQTTCUTExpectEvents(ready, 2);
+    _SSFMQTTCUTEnd();
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Drives the client to READY with keepAliveSec (1 => ping every 250 ms; PINGRESP timeout is     */
+/* 250 ms). Connect and subscribe timeouts are long so a loaded host cannot trip them.           */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTCUTGoReadyKeepAlive(uint16_t keepAliveSec)
+{
+    static uint8_t connect[sizeof(_utPktConnect)];
+    static const SSFMQTTCUTEventRec_t ready[] =
+    {
+        { SSF_MQTTC_EVENT_CONNECTED, SSF_MQTTC_REASON_NONE },
+        { SSF_MQTTC_EVENT_READY, SSF_MQTTC_REASON_NONE },
+    };
+    static SSFMQTTCOpts_t opts;                     /* Must outlive the run */
+
+    SSF_REQUIRE((keepAliveSec > 0) && (keepAliveSec < 256));
+    SSF_ASSERT((SSF_TICKS_PER_SEC / 4u) == SSF_MQTTC_CONFIG_PINGRESP_TIMEOUT);
+    memcpy(connect, _utPktConnect, sizeof(connect));
+    connect[10] = 0x00;
+    connect[11] = (uint8_t)keepAliveSec;            /* Keep alive MSB, LSB */
+    _SSFMQTTCUTOptsInit(&opts);
+    opts.keepAliveSec = keepAliveSec;
+    opts.connectTimeout = SSF_TICKS_PER_SEC * 5u;
+    opts.subscribeTimeout = SSF_TICKS_PER_SEC * 5u;
+    SSFMQTTCStart(&opts);
+    _SSFMQTTCUTPump();
+    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(connect));
+    _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(_utPktConnAckOk));
+    _SSFMQTTCUTPump();
+    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(_utPktSubscribe1));
+    _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(_utPktSubAckOk1));
+    _SSFMQTTCUTPump();
+    SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_CONNECTED);
+    _SSFMQTTCUTExpectEvents(ready, 2);
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Returns the tick by which the client had sent at least len bytes, pumping for at most ticks;  */
+/* asserts if it had not by then.                                                                */
+/* --------------------------------------------------------------------------------------------- */
+static SSFPortTick_t _SSFMQTTCUTPumpUntilTx(size_t len, SSFPortTick_t ticks)
+{
+    SSFPortTick_t end = SSFPortGetTick64() + ticks;
+
+    for (;;)
+    {
+        bool isLate = (SSFPortGetTick64() > end);  /* Sampled before the tasks run */
+
+        (void)SSFSMTask(NULL);
+        (void)SSFMQTTCTask(NULL);
+        if (_utMock.txLen >= len) break;
+        SSF_ASSERT(isLate == false);
+    }
+    return SSFPortGetTick64();
+}
+
+
+/* --------------------------------------------------------------------------------------------- */
+/* Tests that an unanswered PINGREQ ends the connection within the PINGRESP timeout, also when   */
+/* the next keep-alive interval falls due on the same tick as that timeout.                      */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTCUTScenarioKeepAliveTimeout(void)
+{
+    static const uint8_t pingReq[] = { 0xC0, 0x00 };
+    static const SSFMQTTCUTEventRec_t keepAlive[] =
+    { { SSF_MQTTC_EVENT_DISCONNECTED, SSF_MQTTC_REASON_KEEPALIVE } };
+    static const uint8_t subAck2[] = { 0x90, 0x03, 0x00, 0x02, 0x01 };
+    static const uint8_t subscribe2[] = { 0x82, 0x08, 0x00, 0x02, 0x00, 0x03, 'a', '/', 'b', 0x01 };
+
+    _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
+    _SSFMQTTCUTGoReadyKeepAlive(1);
+
+    (void)_SSFMQTTCUTPumpUntilTx(sizeof(pingReq),
+                                 SSF_MQTTC_CONFIG_PINGRESP_TIMEOUT + SSF_MQTTC_UT_LOAD_TICKS);
+    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(pingReq));
+
+    /* No PINGRESP. Before the fix the failure never came: each interval restarted the timeout. */
+    _SSFMQTTCUTPumpUntilState(SSF_MQTTC_STATE_RECONNECT_WAIT,
+                              SSF_MQTTC_CONFIG_PINGRESP_TIMEOUT + SSF_MQTTC_UT_LOAD_TICKS);
+    _SSFMQTTCUTExpectEvents(keepAlive, 1);
+    _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(_utPktDisconnect));   /* Never a second PINGREQ */
+
+    /* The next connection starts with no ping pending, so it pings again */
+    _SSFMQTTCUTPumpUntilState(SSF_MQTTC_STATE_CONNECTING,
+                              SSF_MQTTC_UT_BACKOFF_TICKS + SSF_MQTTC_UT_LOAD_TICKS);
+    _SSFMQTTCUTPump();                              /* Transport open, CONNECT sent */
+    _utMock.txLen = 0;                              /* CONNECT, checked by the first connection */
+    _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(_utPktConnAckOk));
+    _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(subAck2));
+    _SSFMQTTCUTPumpUntilState(SSF_MQTTC_STATE_CONNECTED, SSF_MQTTC_UT_LOAD_TICKS);
+    _utEventCount = 0;                              /* CONNECTED, READY */
+    (void)_SSFMQTTCUTPumpUntilTx(sizeof(subscribe2) + sizeof(pingReq),
+                                 SSF_MQTTC_CONFIG_PINGRESP_TIMEOUT + SSF_MQTTC_UT_LOAD_TICKS);
+    SSF_ASSERT(_utMock.txLen == (sizeof(subscribe2) + sizeof(pingReq)));
+    SSF_ASSERT(memcmp(_utMock.tx, subscribe2, sizeof(subscribe2)) == 0);
+    SSF_ASSERT(memcmp(&_utMock.tx[sizeof(subscribe2)], pingReq, sizeof(pingReq)) == 0);
+    _utMock.txLen = 0;
+    _SSFMQTTCUTEnd();
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Tests that answered pings keep the connection up and each interval sends one PINGREQ. A       */
+/* 500 ms interval leaves time to check that no second PINGREQ follows an answer.                */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTCUTScenarioKeepAliveAnswered(void)
+{
+    static const uint8_t pingReq[] = { 0xC0, 0x00 };
+    static const uint8_t pingResp[] = { 0xD0, 0x00 };
+    uint32_t i;
+
+    _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
+    _SSFMQTTCUTGoReadyKeepAlive(2);
+
+    for (i = 0; i < 3; i++)
+    {
+        (void)_SSFMQTTCUTPumpUntilTx(sizeof(pingReq),
+                                     (2u * SSF_MQTTC_CONFIG_PINGRESP_TIMEOUT) +
+                                     SSF_MQTTC_UT_LOAD_TICKS);
+        _SSFMQTTCUTExpectTx(SSF_MQTTC_UT_ARRAY(pingReq));
+        _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(pingResp));
+        _SSFMQTTCUTPump();
+        SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_CONNECTED);
+        _SSFMQTTCUTExpectTx(NULL, 0);
+        SSF_ASSERT(_utEventCount == 0);
+    }
+    _SSFMQTTCUTEnd();
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Tests that a PINGRESP arriving while our PINGREQ is still unsent is ignored: no second        */
+/* PINGREQ is queued, and the stalled connection still ends with KEEPALIVE.                      */
+/* --------------------------------------------------------------------------------------------- */
+static void _SSFMQTTCUTScenarioKeepAliveUnsolicitedPingResp(void)
+{
+    static const uint8_t pingResp[] = { 0xD0, 0x00 };
+    static const SSFMQTTCUTEventRec_t keepAlive[] =
+    { { SSF_MQTTC_EVENT_DISCONNECTED, SSF_MQTTC_REASON_KEEPALIVE } };
+
+    _SSFMQTTCUTBegin(SSF_MQTTC_UT_TX_BLOCKS);
+    _SSFMQTTCUTGoReadyKeepAlive(1);
+    _utMock.sendResult = SSF_NET_IO_WANT_WRITE;     /* Broker stops reading: PINGREQ stays queued */
+
+    /* First ping queued at one interval; answer it before it could have been sent */
+    _SSFMQTTCUTPumpFor(SSF_MQTTC_CONFIG_PINGRESP_TIMEOUT + SSF_MQTTC_UT_SLACK_TICKS);
+    _SSFMQTTCUTInject(SSF_MQTTC_UT_ARRAY(pingResp));
+
+    /* Past the next interval and the timeout of the unsent ping */
+    _SSFMQTTCUTPumpUntilState(SSF_MQTTC_STATE_RECONNECT_WAIT,
+                              (2u * SSF_MQTTC_CONFIG_PINGRESP_TIMEOUT) + SSF_MQTTC_UT_LOAD_TICKS);
+    _SSFMQTTCUTExpectEvents(keepAlive, 1);
+    _SSFMQTTCUTExpectTx(NULL, 0);                   /* Nothing ever accepted by the transport */
     _SSFMQTTCUTEnd();
 }
 
@@ -1848,6 +2023,9 @@ void SSFMQTTCUnitTest(void)
     _SSFMQTTCUTScenarioRxTooLargeRetained();
     _SSFMQTTCUTScenarioRxTooLargeLinkLoss();
     _SSFMQTTCUTScenarioRxDropBeforeConnAck();
+    _SSFMQTTCUTScenarioKeepAliveTimeout();
+    _SSFMQTTCUTScenarioKeepAliveAnswered();
+    _SSFMQTTCUTScenarioKeepAliveUnsolicitedPingResp();
     _SSFMQTTCUTScenarioPeerClosed();
     _SSFMQTTCUTScenarioConnectFailures();
     _SSFMQTTCUTScenarioSessionTimeouts();

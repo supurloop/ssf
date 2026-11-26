@@ -29,6 +29,7 @@
 /* NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED  */
 /* OF THE POSSIBILITY OF SUCH DAMAGE.                                                            */
 /* --------------------------------------------------------------------------------------------- */
+#include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
@@ -92,6 +93,14 @@ typedef struct
     SSFPortTick_t firstOffer;         /* Tick of first offer to the app; 0 => not yet offered  */
     SSFPortTick_t lastOffer;          /* Tick of the most recent deferred offer                */
 } SSFMQTTCRxBlock_t;
+
+/* A queued SSFLLItem_t is the first member of its block, and SSFMPool blocks are               */
+/* SSF_MPOOL_ALIGN aligned, so an item converts back to its block (via void *, which            */
+/* -Wcast-align accepts).                                                                        */
+#define _SSFMQTTCTxBlockOf(itm) ((SSFMQTTCTxBlock_t *)(void *)(itm))
+#define _SSFMQTTCRxBlockOf(itm) ((SSFMQTTCRxBlock_t *)(void *)(itm))
+typedef char _SSFMQTTCTxItemFirst_t[(offsetof(SSFMQTTCTxBlock_t, item) == 0u) ? 1 : -1];
+typedef char _SSFMQTTCRxItemFirst_t[(offsetof(SSFMQTTCRxBlock_t, item) == 0u) ? 1 : -1];
 
 /* Inbound PUBLISH larger than the rx block, consumed as it arrives and dropped. Only the fields */
 /* needed to validate and acknowledge it are captured. left == 0 => not skipping.                */
@@ -365,7 +374,7 @@ static bool _SSFMQTTCIsTxQueued(SSFMQTTPktType_t type)
     SSFLLItem_t *item;
 
     for (item = SSF_LL_HEAD(&_mqttc.txQueue); item != NULL; item = SSF_LL_NEXT_ITEM(item))
-    { if (((SSFMQTTCTxBlock_t *)item)->type == type) return true; }
+    { if (_SSFMQTTCTxBlockOf(item)->type == type) return true; }
     return false;
 }
 
@@ -452,7 +461,7 @@ static bool _SSFMQTTCTxPublishMinDeadline(SSFPortTick_t *minOut)
     {
         for (item = SSF_LL_HEAD(lists[i]); item != NULL; item = SSF_LL_NEXT_ITEM(item))
         {
-            b = (SSFMQTTCTxBlock_t *)item;
+            b = _SSFMQTTCTxBlockOf(item);
             if (b->isTxPublish == false) continue;
             if ((found == false) || (b->deadline < *minOut)) { *minOut = b->deadline; found = true; }
         }
@@ -486,7 +495,7 @@ static bool _SSFMQTTCTxInflightRemove(SSFMQTTPktType_t type, uint16_t packetId,
 
     for (item = SSF_LL_HEAD(&_mqttc.txInflight); item != NULL; item = SSF_LL_NEXT_ITEM(item))
     {
-        SSFMQTTCTxBlock_t *b = (SSFMQTTCTxBlock_t *)item;
+        SSFMQTTCTxBlock_t *b = _SSFMQTTCTxBlockOf(item);
         if ((b->type == type) && (b->packetId == packetId))
         {
             SSF_LL_GET(&_mqttc.txInflight, &b, b);
@@ -896,7 +905,7 @@ static void _SSFMQTTCTransportClose(bool sendDisconnect)
 {
     if ((_mqttc.link == SSF_MQTTC_LINK_OPEN) && sendDisconnect)
     {
-        SSFMQTTCTxBlock_t *head = (SSFMQTTCTxBlock_t *)SSF_LL_TAIL(&_mqttc.txQueue);
+        SSFMQTTCTxBlock_t *head = _SSFMQTTCTxBlockOf(SSF_LL_TAIL(&_mqttc.txQueue));
         if ((head == NULL) || (head->sent == 0))
         {
             uint8_t pkt[SSF_MQTTC_DISCONNECT_SIZE];
@@ -959,7 +968,7 @@ static void _SSFMQTTCRxPublishService(SSFPortTick_t *nextTimeoutOpt)
     if ((_mqttc.state != SSF_MQTTC_STATE_SUBSCRIBING) &&
         (_mqttc.state != SSF_MQTTC_STATE_CONNECTED)) return;
 
-    while ((b = (SSFMQTTCRxBlock_t *)SSF_LL_TAIL(&_mqttc.rxQueue)) != NULL)
+    while ((b = _SSFMQTTCRxBlockOf(SSF_LL_TAIL(&_mqttc.rxQueue))) != NULL)
     {
         now = SSFPortGetTick64();
         if (b->firstOffer != 0)
@@ -1740,7 +1749,7 @@ bool SSFMQTTCTask(SSFPortTick_t *nextTimeoutOpt)
     /* Send */
     for (;;)
     {
-        SSFMQTTCTxBlock_t *b = (SSFMQTTCTxBlock_t *)SSF_LL_TAIL(&_mqttc.txQueue);
+        SSFMQTTCTxBlock_t *b = _SSFMQTTCTxBlockOf(SSF_LL_TAIL(&_mqttc.txQueue));
         size_t sent = 0;
         SSFNetIOResult_t r;
 

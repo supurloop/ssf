@@ -29,6 +29,7 @@
 /* NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED  */
 /* OF THE POSSIBILITY OF SUCH DAMAGE.                                                            */
 /* --------------------------------------------------------------------------------------------- */
+#include <stddef.h>
 #include <stdio.h>
 #include "ssfassert.h"
 #include "ssftlsc.h"
@@ -133,7 +134,6 @@ bool _ssfTLSCUTCorruptServerFinished;
 /* --------------------------------------------------------------------------------------------- */
 /* Internal: binary encoding helpers (big-endian)                                                */
 /* --------------------------------------------------------------------------------------------- */
-static size_t _Put8(uint8_t *buf, uint8_t v) { buf[0] = v; return 1; }
 static size_t _Put16(uint8_t *buf, uint16_t v)
 { buf[0] = (uint8_t)(v >> 8); buf[1] = (uint8_t)v; return 2; }
 static size_t _Put24(uint8_t *buf, uint32_t v)
@@ -3152,14 +3152,17 @@ static SSFTLSIOResult_t _TlscHandleRecvFinSendFin(SSFTLSCSession_t *session)
 #define SSF_TLSC_RECV_MAX_RECORDS    (4u)   /* Non-application records consumed per recv() call */
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns the session that owns transport t.                                                    */
+/* Returns the session that owns transport t. t is the session's first member, so it converts    */
+/* back to the session (via void *, which -Wcast-align accepts).                                 */
 /* --------------------------------------------------------------------------------------------- */
+typedef char _SSFTLSCTransportFirst_t[(offsetof(SSFTLSCSession_t, transport) == 0u) ? 1 : -1];
+
 static SSFTLSCSession_t *_SSFTLSCSelf(SSFNetTransport_t *t)
 {
     SSFTLSCSession_t *s;
 
     SSF_REQUIRE(t != NULL);
-    s = (SSFTLSCSession_t *)t;
+    s = (SSFTLSCSession_t *)(void *)t;
     SSF_REQUIRE(s->magic == SSF_TLSC_MAGIC);
     return s;
 }

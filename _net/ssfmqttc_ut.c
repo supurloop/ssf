@@ -1577,7 +1577,6 @@ static size_t _SSFMQTTCUTBuildPublish(uint8_t *buf, size_t size, uint8_t b0, siz
 
 static const uint8_t _utPktRxSmall0[] = { 0x30, 0x03, 0x00, 0x01, 'u' };    /* QoS 0, topic "u" */
 static const uint8_t _utPktRxSmall1[] = { 0x32, 0x05, 0x00, 0x01, 'v', 0x00, 0x07 }; /* QoS 1, 7 */
-static const uint8_t _utPktRxSmall1Ack[] = { 0x40, 0x02, 0x00, 0x07 };
 
 /* --------------------------------------------------------------------------------------------- */
 /* Tests that a PUBLISH larger than the rx block is dropped and the stream stays in sync.        */
@@ -1970,6 +1969,7 @@ static void _SSFMQTTCUTScenarioRxTooLargeLinkLoss(void)
     opts.subscribeTimeout = SSF_TICKS_PER_SEC * 5u;
     _SSFMQTTCUTGoReady(&opts);
     len = _SSFMQTTCUTBuildPublish(pkt, sizeof(pkt), 0x32, 200, 0x1234, 5, 5, &hdrLen);
+    SSF_ASSERT((len > 150u) && ((hdrLen + 2u) < 150u) && (150u < (hdrLen + 2u + 200u)));
     _SSFMQTTCUTInject(pkt, 150);                    /* Partway through the topic */
     _SSFMQTTCUTPump();
     SSF_ASSERT(SSFMQTTCGetState() == SSF_MQTTC_STATE_CONNECTED);

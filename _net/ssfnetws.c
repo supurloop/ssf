@@ -29,6 +29,7 @@
 /* NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED  */
 /* OF THE POSSIBILITY OF SUCH DAMAGE.                                                            */
 /* --------------------------------------------------------------------------------------------- */
+#include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
@@ -72,11 +73,14 @@
 #define SSF_NETWS_OP_IS_CONTROL(op)  (((op) & 0x8u) != 0)
 
 /* --------------------------------------------------------------------------------------------- */
-/* Returns the session that owns transport t.                                                    */
+/* Returns the session that owns transport t. t is the session's first member, so it converts    */
+/* back to the session (via void *, which -Wcast-align accepts).                                 */
 /* --------------------------------------------------------------------------------------------- */
+typedef char _SSFNetWSTransportFirst_t[(offsetof(SSFNetWSSession_t, transport) == 0u) ? 1 : -1];
+
 static SSFNetWSSession_t *_SSFNetWSSelf(SSFNetTransport_t *t)
 {
-    SSFNetWSSession_t *ws = (SSFNetWSSession_t *)t;
+    SSFNetWSSession_t *ws = (SSFNetWSSession_t *)(void *)t;
 
     SSF_REQUIRE(ws != NULL);
     SSF_REQUIRE(ws->magic == SSF_NETWS_MAGIC);
